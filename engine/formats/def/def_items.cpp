@@ -143,167 +143,208 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
             current.id = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "sid", 3)) {
-            consume_value_str(trimmed, tlen, 3, current.sid, sizeof(current.sid));
+		} else if (lower_match_key(lower, ll, "pcvehicle_spawnlist", 19)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 19, &vl);
+			Token tok[128];
+			const int n = tokenize(v, vl, tok, 128);
+			current.vehicle_spawn_mask = 0;
+			for (int i = 0; i < n; ++i) {
+				const int id = parse_int_n(tok[i].s, tok[i].len);
+				int slot = 0;
+				while (slot < out->vehicle_spawn_id_count && out->vehicle_spawn_ids[slot] != id)
+					++slot;
+				if (slot == out->vehicle_spawn_id_count && slot < 32)
+					out->vehicle_spawn_ids[out->vehicle_spawn_id_count++] = id;
+				if (slot < 32)
+					current.vehicle_spawn_mask |= uint32_t(1) << slot;
+			}
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "sid", 3)) {
+			consume_value_str(trimmed, tlen, 3, current.sid, sizeof(current.sid));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "type", 4)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+			current.type = item_type_from_string(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "type", 4)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
-            current.type = item_type_from_string(v, vl);
+		} else if (lower_match_key(lower, ll, "graphic", 7)) {
+			consume_value_str(trimmed, tlen, 7, current.graphic, sizeof(current.graphic));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "anim_def", 8)) {
+			consume_value_str(trimmed, tlen, 8, current.anim_def, sizeof(current.anim_def));
+			parsed = 1;
+		} else if (lower_starts_with(lower, ll, "husk ", 5)) {
+			consume_value_str(trimmed, tlen, 5, current.husk, sizeof(current.husk));
+			parsed = 1;
+		} else if (lower_starts_with(lower, ll, "hp ", 3)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 3, &vl);
+			current.hp = signed_i16_value(parse_int_n(v, vl)); /* healthMax i16 @+0x17C */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "graphic", 7)) {
-            consume_value_str(trimmed, tlen, 7, current.graphic, sizeof(current.graphic));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "anim_def", 8)) {
-            consume_value_str(trimmed, tlen, 8, current.anim_def, sizeof(current.anim_def));
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "husk ", 5)) {
-            consume_value_str(trimmed, tlen, 5, current.husk, sizeof(current.husk));
-            parsed = 1;
-        } else if (lower_starts_with(lower, ll, "hp ", 3)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
-            current.hp = signed_i16_value(parse_int_n(v, vl)); /* healthMax i16 @+0x17C */
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "sound_profilefemale", 19)) {
-            /* The female-variant profile [orig: ItemDef_ParseProperty
-               "sound_profileFemale" @ 0x49fb76 -> def+0x26C]. */
-            consume_value_str(trimmed, tlen, 19, current.sound_profile_female,
+		} else if (lower_match_key(lower, ll, "sound_profilefemale", 19)) {
+			/* The female-variant profile [orig: ItemDef_ParseProperty
+			   "sound_profileFemale" @ 0x49fb76 -> def+0x26C]. */
+			consume_value_str(trimmed, tlen, 19, current.sound_profile_female,
                               sizeof(current.sound_profile_female));
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "sound_profile", 13)) {
-            /* "sound_profile" retargets the female slot too while it still
-               tracks the primary (both seed to the "default" profile at alloc;
-               an explicit sound_profileFemale detaches it). The original
-               compares the two resolved profile POINTERS and rewrites +0x26C
-               only when equal [orig: @ 0x49fb0f-0x49fb64 (the +0x26C==+0x268
-               gate); alloc seed @ 0x49e3f5-0x49e408]; the name compare is the
-               same rule over our unresolved names. */
-            if (strcmp(current.sound_profile_female, current.sound_profile) == 0) {
+		} else if (lower_match_key(lower, ll, "sound_profile", 13)) {
+			/* "sound_profile" retargets the female slot too while it still
+			   tracks the primary (both seed to the "default" profile at alloc;
+			   an explicit sound_profileFemale detaches it). The original
+			   compares the two resolved profile POINTERS and rewrites +0x26C
+			   only when equal [orig: @ 0x49fb0f-0x49fb64 (the +0x26C==+0x268
+			   gate); alloc seed @ 0x49e3f5-0x49e408]; the name compare is the
+			   same rule over our unresolved names. */
+			if (strcmp(current.sound_profile_female, current.sound_profile) == 0) {
                 consume_value_str(trimmed, tlen, 13, current.sound_profile_female,
                                   sizeof(current.sound_profile_female));
             }
             consume_value_str(trimmed, tlen, 13, current.sound_profile, sizeof(current.sound_profile));
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "default_aip", 11)) {
-            /* Authoring the profile also RAISES AIData: retail ORs 0x100000 in
-               the same arm, so an item carrying default_aip is an AI item
-               whether or not its attrib line lists AIData.
-               [orig: ItemDef_ParseProperty @0x49eb00 -- the strcpy into
-                itemDef+0x8B8 followed by `attrib |= 0x100000`] */
-            consume_value_str(trimmed, tlen, 11, current.default_aip,
+		} else if (lower_match_key(lower, ll, "default_aip", 11)) {
+			/* Authoring the profile also RAISES AIData: retail ORs 0x100000 in
+			   the same arm, so an item carrying default_aip is an AI item
+			   whether or not its attrib line lists AIData.
+			   [orig: ItemDef_ParseProperty @0x49eb00 -- the strcpy into
+				itemDef+0x8B8 followed by `attrib |= 0x100000`] */
+			consume_value_str(trimmed, tlen, 11, current.default_aip,
                               sizeof(current.default_aip));
             current.attrib |= DEF_ITEM_ATTRIB_AIDATA;
             parsed = 1;
         /* [orig: ItemDef_ParseProperty @ 0x49eb00 -- "soundloop_" prefix @ 0x49fec4,
            nightshot/duskshot/dawnshot @ 0x49fdee; the 7-slot range matches the
            engine's Soundloop_1..7 sound-type table @ 0x7d0788] */
-        } else if (lower_starts_with(lower, ll, "soundloop_", 10) && ll > 10) {
-            char idx_char = lower[10];
-            if (idx_char >= '1' && idx_char <= '7') {
+		} else if (lower_starts_with(lower, ll, "soundloop_", 10) && ll > 10) {
+			char idx_char = lower[10];
+			if (idx_char >= '1' && idx_char <= '7') {
                 int idx = idx_char - '1';
                 consume_value_str(trimmed, tlen, 11, current.soundloops[idx], sizeof(current.soundloops[idx]));
                 parsed = 1;
             }
-        } else if (lower_match_key(lower, ll, "nightshot", 9)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            /* Extract first token only */
+		} else if (lower_match_key(lower, ll, "nightshot", 9)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+			/* Extract first token only */
             size_t end = 0;
             while (end < vl && !isspace((unsigned char)v[end])) ++end;
             safe_copy(current.nightshot, sizeof(current.nightshot), v, end);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "dawnshot", 8)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-            size_t end = 0;
+		} else if (lower_match_key(lower, ll, "dawnshot", 8)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+			size_t end = 0;
             while (end < vl && !isspace((unsigned char)v[end])) ++end;
             safe_copy(current.dawnshot, sizeof(current.dawnshot), v, end);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "duskshot", 8)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-            size_t end = 0;
+		} else if (lower_match_key(lower, ll, "duskshot", 8)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+			size_t end = 0;
             while (end < vl && !isspace((unsigned char)v[end])) ++end;
             safe_copy(current.duskshot, sizeof(current.duskshot), v, end);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "dayshot", 7)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
-            size_t end = 0;
+		} else if (lower_match_key(lower, ll, "dayshot", 7)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+			size_t end = 0;
             while (end < vl && !isspace((unsigned char)v[end])) ++end;
             safe_copy(current.dayshot, sizeof(current.dayshot), v, end);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "ai_function", 11)) {
-            consume_value_str(trimmed, tlen, 11, current.ai_function, sizeof(current.ai_function));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "move_function", 13)) {
-            consume_value_str(trimmed, tlen, 13, current.move_function, sizeof(current.move_function));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "render_function", 15)) {
-            consume_value_str(trimmed, tlen, 15, current.render_function, sizeof(current.render_function));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "disk_function", 13)) {
-            consume_value_str(trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
-            parsed = 1;
+		} else if (lower_match_key(lower, ll, "ai_function", 11)) {
+			consume_value_str(trimmed, tlen, 11, current.ai_function, sizeof(current.ai_function));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "move_function", 13)) {
+			consume_value_str(
+					trimmed, tlen, 13, current.move_function, sizeof(current.move_function));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "render_function", 15)) {
+			consume_value_str(
+					trimmed, tlen, 15, current.render_function, sizeof(current.render_function));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "disk_function", 13)) {
+			consume_value_str(
+					trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
+			parsed = 1;
         /* [orig: ItemDef_ParseProperty @ 0x4A1823, def+0x56B / +0x58B] */
-        } else if (lower_match_key(lower, ll, "ammo_closeattack", 16)) {
-            consume_value_str(trimmed, tlen, 16, current.ammo_closeattack, sizeof(current.ammo_closeattack));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "ammo_marker3", 12)) {
-            consume_value_str(trimmed, tlen, 12, current.ammo_marker3, sizeof(current.ammo_marker3));
-            parsed = 1;
+		} else if (lower_match_key(lower, ll, "ammo_closeattack", 16)) {
+			consume_value_str(
+					trimmed, tlen, 16, current.ammo_closeattack, sizeof(current.ammo_closeattack));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "ammo_marker3", 12)) {
+			consume_value_str(
+					trimmed, tlen, 12, current.ammo_marker3, sizeof(current.ammo_marker3));
+			parsed = 1;
         /* The closeattack launch USERPOINT name (the AI muzzle; see def.h)
            [orig: ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB] */
-        } else if (lower_match_key(lower, ll, "launchups_closeattack", 21)) {
-            consume_value_str(trimmed, tlen, 21, current.launchups_closeattack, sizeof(current.launchups_closeattack));
-            parsed = 1;
+		} else if (lower_match_key(lower, ll, "launchups_closeattack", 21)) {
+			consume_value_str(trimmed, tlen, 21, current.launchups_closeattack,
+					sizeof(current.launchups_closeattack));
+			parsed = 1;
         /* The twelve weapon userpoint names (def.h weapon_userpoints; the vehicle/eweap
            fire/flash/casing anchors) [orig: ItemDef_ParseProperty @ 0x4a0ff2..0x4a1301] */
-        } else if (lower_match_key(lower, ll, "weaplbup2", 9)) {
-            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[6], sizeof(current.weapon_userpoints[6]));
+		} else if (lower_match_key(lower, ll, "weaplbup2", 9)) {
+			consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[6],
+					sizeof(current.weapon_userpoints[6]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaplmup2", 9)) {
+			consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[7],
+					sizeof(current.weapon_userpoints[7]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaplcup2", 9)) {
+			consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[8],
+					sizeof(current.weapon_userpoints[8]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaprbup2", 9)) {
+			consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[9],
+					sizeof(current.weapon_userpoints[9]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaprmup2", 9)) {
+			consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[10],
+					sizeof(current.weapon_userpoints[10]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaprcup2", 9)) {
+			consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[11],
+					sizeof(current.weapon_userpoints[11]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaplbup", 8)) {
+			consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[0],
+					sizeof(current.weapon_userpoints[0]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaplmup", 8)) {
+			consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[1],
+					sizeof(current.weapon_userpoints[1]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaplcup", 8)) {
+			consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[2],
+					sizeof(current.weapon_userpoints[2]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaprbup", 8)) {
+			consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[3],
+					sizeof(current.weapon_userpoints[3]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaprmup", 8)) {
+			consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[4],
+					sizeof(current.weapon_userpoints[4]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "weaprcup", 8)) {
+			consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[5],
+					sizeof(current.weapon_userpoints[5]));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "primary_weapon", 14)) {
+			/* The ewep emplacement's mounted weapon.def entry (the gun entity's slot-0
+			   weapon; the attach label's text source) [orig: -> def+0x54B primaryWeapon,
+			   docs/world/itemdef-re.md +0x54b] */
+			consume_value_str(trimmed, tlen, 14, current.primary_weapon, sizeof(current.primary_weapon));
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaplmup2", 9)) {
-            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[7], sizeof(current.weapon_userpoints[7]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaplcup2", 9)) {
-            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[8], sizeof(current.weapon_userpoints[8]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaprbup2", 9)) {
-            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[9], sizeof(current.weapon_userpoints[9]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaprmup2", 9)) {
-            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[10], sizeof(current.weapon_userpoints[10]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaprcup2", 9)) {
-            consume_value_str(trimmed, tlen, 9, current.weapon_userpoints[11], sizeof(current.weapon_userpoints[11]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaplbup", 8)) {
-            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[0], sizeof(current.weapon_userpoints[0]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaplmup", 8)) {
-            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[1], sizeof(current.weapon_userpoints[1]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaplcup", 8)) {
-            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[2], sizeof(current.weapon_userpoints[2]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaprbup", 8)) {
-            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[3], sizeof(current.weapon_userpoints[3]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaprmup", 8)) {
-            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[4], sizeof(current.weapon_userpoints[4]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "weaprcup", 8)) {
-            consume_value_str(trimmed, tlen, 8, current.weapon_userpoints[5], sizeof(current.weapon_userpoints[5]));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "primary_weapon", 14)) {
-            /* The ewep emplacement's mounted weapon.def entry (the gun entity's slot-0
-               weapon; the attach label's text source) [orig: -> def+0x54B primaryWeapon,
-               docs/world/itemdef-re.md +0x54b] */
-            consume_value_str(trimmed, tlen, 14, current.primary_weapon, sizeof(current.primary_weapon));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "addeweapg", 9) ||
-                   lower_match_key(lower, ll, "addeweapc", 9) ||
-                   lower_match_key(lower, ll, "addeweap", 8)) {
-            /* Authored child-emplacement attachment:
-                 <userpoint> <item-def id> [down up right left]
-               Packed JOX has three deliberately distinct key spellings. Retain
-               the variant instead of folding G/C into the ordinary record. */
-            const int kind =
+		} else if (lower_match_key(lower, ll, "addeweapg", 9) ||
+				lower_match_key(lower, ll, "addeweapc", 9) ||
+				lower_match_key(lower, ll, "addeweap", 8)) {
+			/* Authored child-emplacement attachment:
+				 <userpoint> <item-def id> [down up right left]
+			   Packed JOX has three deliberately distinct key spellings. Retain
+			   the variant instead of folding G/C into the ordinary record. */
+			const int kind =
                     lower_match_key(lower, ll, "addeweapg", 9)
                             ? DEF_ITEM_EMPLACEMENT_ADDEWEAP_G
                     : lower_match_key(lower, ll, "addeweapc", 9)
@@ -351,32 +392,36 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 else if (kind == DEF_ITEM_EMPLACEMENT_ADDEWEAP_C)
                     current.emplacement_c_slot = stored_slot;
             }
-        } else if (lower_match_key(lower, ll, "phrase_set", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            /* Plain signed atol -> target itemDef+0x86C. Presence cannot be
+		} else if (lower_match_key(lower, ll, "phrase_set", 10)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+			/* Plain signed atol -> target itemDef+0x86C. Presence cannot be
                represented by the zero-initialized value because config 0 is real.
                [orig: @ 0x49F9DB..0x49FA0A] */
             current.phrase_set = parse_int_n(v, vl);
             current.phrase_set_valid = 1;
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "light_transfer", 14)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
-            /* atoi, clamp 0..100, then percent -> float at ItemDef+0x218.
+		} else if (lower_match_key(lower, ll, "light_transfer", 14)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+			/* atoi, clamp 0..100, then percent -> float at ItemDef+0x218.
                [orig: @0x4A1A12..0x4A1A50; scale 0.01f @0x7C56A8] */
             int transfer = parse_int_n(v, vl);
             if (transfer < 0) transfer = 0;
             if (transfer > 100) transfer = 100;
             current.light_transfer = static_cast<float>(transfer) * 0.01f;
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "clipsize", 8)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-            /* plain atol -> def+0x894, the entity+0x35C magazine reseed source
+		} else if (lower_match_key(lower, ll, "clipsize", 8)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+			/* plain atol -> def+0x894, the entity+0x35C magazine reseed source
                [orig: @ 0x49fa2e-0x49fa48; Entity_ResetToSpawnState @ 0x4b97a9] */
             current.clipsize = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "deathtime", 9)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            /* seconds -> ticks at parse: 62*v, an explicit 0 -> 496, +62 grace; the
+		} else if (lower_match_key(lower, ll, "deathtime", 9)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+			/* seconds -> ticks at parse: 62*v, an explicit 0 -> 496, +62 grace; the
                corpse timer's seed (entity+0x148 at the death edge @ 0x4b9c97)
                [orig: ItemDef_ParseProperty @ 0x49fa6c-0x49faa0 -> def+0x890] */
             int dt = parse_int_n(v, vl) * 62;
@@ -386,160 +431,194 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         /* Vehicle physics-property block, scaled at parse exactly like the original loader
            [orig: ItemDef_ParsePhysicsProperty @0x49d870]. turn_rate2 is matched before
            turn_rate only for clarity — lower_match_key requires a separator after the key. */
-        } else if (lower_match_key(lower, ll, "climb_speed", 11)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
-            current.climb_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: 293*atol @0x49db4a] */
+		} else if (lower_match_key(lower, ll, "climb_speed", 11)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+			current.climb_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: 293*atol @0x49db4a] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "turnroll", 8)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-            current.turn_roll = parse_int_n(v, vl); /* raw [orig: @0x49dd2a]; air roll-rate cap = token*192426 at use */
+		} else if (lower_match_key(lower, ll, "turnroll", 8)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+			current.turn_roll = parse_int_n(v, vl); /* raw [orig: @0x49dd2a]; air roll-rate cap = token*192426 at use */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "speedpitch", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.speed_pitch = parse_int_n(v, vl); /* raw [orig: @0x49dd66]; air pitch-rate cap = token*192426 at use */
+		} else if (lower_match_key(lower, ll, "speedpitch", 10)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+			current.speed_pitch = parse_int_n(v, vl); /* raw [orig: @0x49dd66]; air pitch-rate cap = token*192426 at use */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "turn_rate2", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.turn_rate2 = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d8dc] */
+		} else if (lower_match_key(lower, ll, "turn_rate2", 10)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+			current.turn_rate2 = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d8dc] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "turn_rate", 9)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            current.turn_rate = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d89a] */
+		} else if (lower_match_key(lower, ll, "turn_rate", 9)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+			current.turn_rate = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d89a] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "torque", 6)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
-            current.torque = parse_int_n(v, vl); /* raw shift count [orig: @0x49dcca] */
+		} else if (lower_match_key(lower, ll, "torque", 6)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+			current.torque = parse_int_n(v, vl); /* raw shift count [orig: @0x49dcca] */
             parsed = 1;
         /* The platform-solve tuning block — raw atol like the original parser
            [orig: mass @0x49dc76, lean @0x49ddde, lean_velocity @0x49de1a,
             pitch @0x49de56, pitch_velocity @0x49de92, bob @0x49dece,
             flip @0x49df82]. lean_velocity/pitch_velocity must match before
            their prefixes. */
-        } else if (lower_match_key(lower, ll, "lean_velocity", 13)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
-            current.lean_velocity = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "lean_velocity", 13)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+			current.lean_velocity = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "pitch_velocity", 14)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
-            current.pitch_velocity = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "pitch_velocity", 14)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+			current.pitch_velocity = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "mass", 4)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
-            current.mass = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "mass", 4)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+			current.mass = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "weathervane", 11)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
-            current.weathervane = parse_int_n(v, vl); /* raw [orig: @0x49d8f2] */
+		} else if (lower_match_key(lower, ll, "weathervane", 11)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+			current.weathervane = parse_int_n(v, vl); /* raw [orig: @0x49d8f2] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "minai", 5)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
-            current.min_ai = parse_int_n(v, vl); /* raw [orig: @0x49d95e] */
+		} else if (lower_match_key(lower, ll, "minai", 5)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+			current.min_ai = parse_int_n(v, vl); /* raw [orig: @0x49d95e] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "lean", 4)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
-            current.lean = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "lean", 4)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+			current.lean = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "pitch", 5)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
-            current.pitch = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "pitch", 5)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+			current.pitch = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "bob", 3)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
-            current.bob = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "bob", 3)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 3, &vl);
+			current.bob = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "flip", 4)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
-            current.flip = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "flip", 4)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+			current.flip = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "hand_brake", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.hand_brake = parse_int_n(v, vl); /* raw +0x944 [orig: key @0x7c7d60] */
+		} else if (lower_match_key(lower, ll, "hand_brake", 10)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+			current.hand_brake = parse_int_n(v, vl); /* raw +0x944 [orig: key @0x7c7d60] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "tire_slip", 9)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            current.tire_slip = parse_int_n(v, vl); /* raw +0x940 [orig: key @0x7c7d6c] */
+		} else if (lower_match_key(lower, ll, "tire_slip", 9)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+			current.tire_slip = parse_int_n(v, vl); /* raw +0x940 [orig: key @0x7c7d6c] */
             parsed = 1;
         /* The suspension spring block — raw atol [orig: spring_comp @0x49dbd4,
            spring @0x49db5c, shock @0x49dc10, top_heavy @0x49db98 — the last is
            parsed for PARITY only: retail never reads +0x918 outside the parser,
            the allocator and the debug item editor]. spring_comp must match
            before its prefix `spring`. */
-        } else if (lower_match_key(lower, ll, "spring_comp", 11)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
-            current.spring_comp = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "spring_comp", 11)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+			current.spring_comp = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "spring", 6)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
-            current.spring = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "spring", 6)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+			current.spring = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "shock", 5)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
-            current.shock = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "shock", 5)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+			current.shock = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "top_heavy", 9)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            current.top_heavy = parse_int_n(v, vl);
+		} else if (lower_match_key(lower, ll, "top_heavy", 9)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+			current.top_heavy = parse_int_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "max_slope", 9)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            current.max_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d91e] */
+		} else if (lower_match_key(lower, ll, "max_slope", 9)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+			current.max_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d91e] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "slip_slope", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.slip_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d960] */
+		} else if (lower_match_key(lower, ll, "slip_slope", 10)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+			current.slip_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d960] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "player_speed", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.player_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: @0x49d9a2] */
+		} else if (lower_match_key(lower, ll, "player_speed", 12)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+			current.player_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: @0x49d9a2] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "water_speed", 11)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
-            current.water_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: @0x49d9e4] */
+		} else if (lower_match_key(lower, ll, "water_speed", 11)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+			current.water_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: @0x49d9e4] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "acceleration", 12)) {
-            /* token*4; a still-unset deceleration defaults to 2*acceleration (8*token) at
-               THIS parse site, mirroring the original's ordering semantics [orig: @0x49da32,
-               decel default @0x49da4b]. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+		} else if (lower_match_key(lower, ll, "acceleration", 12)) {
+			/* token*4; a still-unset deceleration defaults to 2*acceleration (8*token) at
+			   THIS parse site, mirroring the original's ordering semantics [orig: @0x49da32,
+			   decel default @0x49da4b]. */
+			size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
             int a4 = parse_int_n(v, vl) * 4;
             current.acceleration = a4;
             if (current.deceleration == 0) current.deceleration = a4 * 2;
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "deceleration", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.deceleration = parse_int_n(v, vl) * 4; /* [orig: @0x49da84] */
+		} else if (lower_match_key(lower, ll, "deceleration", 12)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+			current.deceleration = parse_int_n(v, vl) * 4; /* [orig: @0x49da84] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "slip_speed", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.slip_speed = parse_int_n(v, vl) * 4; /* [orig: @0x49dafd] */
+		} else if (lower_match_key(lower, ll, "slip_speed", 10)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+			current.slip_speed = parse_int_n(v, vl) * 4; /* [orig: @0x49dafd] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "physics", 7)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
-            current.physics = parse_int_n(v, vl); /* raw selector [orig: @0x49dac8] */
+		} else if (lower_match_key(lower, ll, "physics", 7)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+			current.physics = parse_int_n(v, vl); /* raw selector [orig: @0x49dac8] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "criticalhp", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.critical_hp = parse_int_n(v, vl); /* i16 raw at +0x180 */
+		} else if (lower_match_key(lower, ll, "criticalhp", 10)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+			current.critical_hp = parse_int_n(v, vl); /* i16 raw at +0x180 */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "criticaldrain", 13)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
-            current.critical_drain = parse_int_n(v, vl); /* i16 raw at +0x182 */
+		} else if (lower_match_key(lower, ll, "criticaldrain", 13)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+			current.critical_drain = parse_int_n(v, vl); /* i16 raw at +0x182 */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "noncriticalregen", 16)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
-            current.non_critical_regen = parse_int_n(v, vl); /* i16 raw at +0x184 */
+		} else if (lower_match_key(lower, ll, "noncriticalregen", 16)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+			current.non_critical_regen = parse_int_n(v, vl); /* i16 raw at +0x184 */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "radarsig", 8)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-            current.radar_sig = parse_int_n(v, vl) & 0xFFFF; /* u16 at +0x178 */
+		} else if (lower_match_key(lower, ll, "radarsig", 8)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+			current.radar_sig = parse_int_n(v, vl) & 0xFFFF; /* u16 at +0x178 */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "heatsig", 7)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
-            current.heat_sig = parse_int_n(v, vl) & 0xFFFF; /* u16 at +0x17A */
+		} else if (lower_match_key(lower, ll, "heatsig", 7)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+			current.heat_sig = parse_int_n(v, vl) & 0xFFFF; /* u16 at +0x17A */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "damage_reduc_pp", 15)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 15, &vl);
-            Token tok[2];
+		} else if (lower_match_key(lower, ll, "damage_reduc_pp", 15)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 15, &vl);
+			Token tok[2];
             const int count = split_values(v, vl, tok, 2);
             if (count >= 1) {
                 current.damage_reduc_pp = parse_float_n(tok[0].s, tok[0].len);
@@ -548,13 +627,13 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             if (count >= 2)
                 current.damage_reduc_max = parse_float_n(tok[1].s, tok[1].len);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "armor", 5)) {
-            /* 'armor A [B]': +0x190 impact = A then overwritten by B;
-               +0x192 blast = A. The historical armor_kz API name is an alias
-               for blast armor, not a separate parsed field. Both retail words
-               are signed i16 (-1 is the 0xFFFF invulnerable value).
-               [orig: @ 0x4a00e7-0x4a0147] */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+		} else if (lower_match_key(lower, ll, "armor", 5)) {
+			/* 'armor A [B]': +0x190 impact = A then overwritten by B;
+			   +0x192 blast = A. The historical armor_kz API name is an alias
+			   for blast armor, not a separate parsed field. Both retail words
+			   are signed i16 (-1 is the 0xFFFF invulnerable value).
+			   [orig: @ 0x4a00e7-0x4a0147] */
+			size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
             Token tok[2];
             const int count = split_values(v, vl, tok, 2);
             if (count >= 1) {
@@ -567,23 +646,24 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 current.armor_impact =
                     signed_i16_value(parse_int_n(tok[1].s, tok[1].len));
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "unit_type", 9)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-            current.unit_type = parse_int_n(v, vl); /* minimap icon class [orig: @0x50FA70]
+		} else if (lower_match_key(lower, ll, "unit_type", 9)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+			current.unit_type = parse_int_n(v, vl); /* minimap icon class [orig: @0x50FA70]
                                                        + the death-dispatch row key
                                                        [orig: Entity_DispatchDeathCallback
                                                        @0x493f23 vs table @0x815410] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "shadow", 6)) {
-            /* 'shadow <name> <w> <l> <ox> <oy>' — the authored ground-shadow
-               blob decal: name -> +0xA0 (a 16-byte slot; retail copies
-               unguarded, we truncate), four atof floats ->
-               +0x11C/+0x120/+0x124/+0x128 (width/length world units, planar
-               offset x/y). Absent trailing tokens read as atof("") = 0 in
-               retail; zero-init matches. [orig: ItemDef_ParseProperty
-               @ 0x49f3a5..0x49f44c; consumer
-               RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0] */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+		} else if (lower_match_key(lower, ll, "shadow", 6)) {
+			/* 'shadow <name> <w> <l> <ox> <oy>' — the authored ground-shadow
+			   blob decal: name -> +0xA0 (a 16-byte slot; retail copies
+			   unguarded, we truncate), four atof floats ->
+			   +0x11C/+0x120/+0x124/+0x128 (width/length world units, planar
+			   offset x/y). Absent trailing tokens read as atof("") = 0 in
+			   retail; zero-init matches. [orig: ItemDef_ParseProperty
+			   @ 0x49f3a5..0x49f44c; consumer
+			   RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0] */
+			size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
             Token tok[5];
             const int count = split_values(v, vl, tok, 5);
             if (count >= 1)
@@ -599,58 +679,61 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 current.shadow_offset_y = (float)parse_float_n(tok[4].s, tok[4].len);
             parsed = 1;
         /* --- the destruction/husk block [orig: ItemDef_ParseProperty @ 0x49eb00] --- */
-        } else if (lower_match_key(lower, ll, "huskfinal", 9)) {
-            consume_value_str(trimmed, tlen, 9, current.huskfinal, sizeof(current.huskfinal));
-            parsed = 1;
-        } else if (lower_match_key(lower, ll, "sounddeath", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            size_t end = 0;
+		} else if (lower_match_key(lower, ll, "huskfinal", 9)) {
+			consume_value_str(trimmed, tlen, 9, current.huskfinal, sizeof(current.huskfinal));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "sounddeath", 10)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+			size_t end = 0;
             while (end < vl && !isspace((unsigned char)v[end])) ++end;
             safe_copy(current.sounddeath, sizeof(current.sounddeath), v, end);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "kz", 2)) {
-            /* Death-blast radius in units, plain float -> def+0x198. */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 2, &vl);
+		} else if (lower_match_key(lower, ll, "kz", 2)) {
+			/* Death-blast radius in units, plain float -> def+0x198. */
+			size_t vl; const char *v = consume_value_span(trimmed, tlen, 2, &vl);
             current.kz = (float)parse_float_n(v, vl);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "husk_swap_at_sec", 16)) {
-            /* seconds*62 ticks; an authored 0 stores 1.0. [orig: @ 0x49f1ce-0x49f228] */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+		} else if (lower_match_key(lower, ll, "husk_swap_at_sec", 16)) {
+			/* seconds*62 ticks; an authored 0 stores 1.0. [orig: @ 0x49f1ce-0x49f228] */
+			size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
             float sec = (float)(parse_float_n(v, vl) * 62.0);
             current.husk_swap_at_sec = (sec == 0.0f) ? 1.0f : sec;
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "husk_swap_at", 12)) {
-            /* Dual-unit: while +0x1A0 is still 0 the value is a PERCENT (atol*0.01),
-               else seconds*62 — the witnessed parse-order dependence.
-               [orig: @ 0x49f242-0x49f2c2] */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+		} else if (lower_match_key(lower, ll, "husk_swap_at", 12)) {
+			/* Dual-unit: while +0x1A0 is still 0 the value is a PERCENT (atol*0.01),
+			   else seconds*62 — the witnessed parse-order dependence.
+			   [orig: @ 0x49f242-0x49f2c2] */
+			size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
             if (current.husk_swap_at_sec == 0.0f)
                 current.husk_swap_at = (float)(parse_int_n(v, vl) * 0.01);
             else
                 current.husk_swap_at = (float)(parse_float_n(v, vl) * 62.0);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "scale", 5)) {
-            /* Signed Q16.16, truncating toward zero after the multiply. Retail
-               temporarily selects x87 RC=truncate before fistp to def+0x1B8.
-               [orig: ItemDef_ParseProperty @ 0x49f6e0..0x49f73d;
-                multiplier dbl_7C3CC0 = 65536.0] */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+		} else if (lower_match_key(lower, ll, "scale", 5)) {
+			/* Signed Q16.16, truncating toward zero after the multiply. Retail
+			   temporarily selects x87 RC=truncate before fistp to def+0x1B8.
+			   [orig: ItemDef_ParseProperty @ 0x49f6e0..0x49f73d;
+				multiplier dbl_7C3CC0 = 65536.0] */
+			size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
             current.scale_q16 = (int)(parse_float_n(v, vl) * 65536.0);
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "debris_scale", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.debris_scale = (float)parse_float_n(v, vl); /* -> def+0x1BC */
+		} else if (lower_match_key(lower, ll, "debris_scale", 12)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+			current.debris_scale = (float)parse_float_n(v, vl); /* -> def+0x1BC */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "husk_sub_parts", 14)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
-            current.husk_sub_parts = parse_int_n(v, vl); /* -> +0x100 count byte */
+		} else if (lower_match_key(lower, ll, "husk_sub_parts", 14)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+			current.husk_sub_parts = parse_int_n(v, vl); /* -> +0x100 count byte */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "husk_sub_part_types", 19)) {
-            /* Each value 'NN_NAME': split at the FIRST '_', slot = NN-1 (0..15), the
-               remainder (internal underscores kept) resolved case-insensitively against
-               the engine debris-type table names; at most 16 values processed.
-               [orig: @ 0x49f314-0x49f396; DeathPieceType_FindByName @ 0x57b310] */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
+		} else if (lower_match_key(lower, ll, "husk_sub_part_types", 19)) {
+			/* Each value 'NN_NAME': split at the FIRST '_', slot = NN-1 (0..15), the
+			   remainder (internal underscores kept) resolved case-insensitively against
+			   the engine debris-type table names; at most 16 values processed.
+			   [orig: @ 0x49f314-0x49f396; DeathPieceType_FindByName @ 0x57b310] */
+			size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
             Token tok[MAX_TOKENS];
             int ntok = split_values(v, vl, tok, MAX_TOKENS);
             int processed = 0;
@@ -669,11 +752,11 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                         (unsigned char)death_piece_type_index(nm, nl);
             }
             parsed = 1;
-        } else if (lower_starts_with(lower, ll, "attrib:", 7)) {
-            /* Space-separated capability tokens -> ItemDefAttrib/Attrib2 bits. Unknown tokens
-               (exp1, pilotonly, forceasset, neutral, ...) are not in the witnessed map and stay
-               unmapped. [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md] */
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+		} else if (lower_starts_with(lower, ll, "attrib:", 7)) {
+			/* Space-separated capability tokens -> ItemDefAttrib/Attrib2 bits. Unknown tokens
+			   (exp1, pilotonly, forceasset, neutral, ...) are not in the witnessed map and stay
+			   unmapped. [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md] */
+			size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
             Token tok[MAX_TOKENS];
             int ntok = split_values(v, vl, tok, MAX_TOKENS);
             for (int ti = 0; ti < ntok; ++ti) {
@@ -689,78 +772,90 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
            (lower_match_key requires a separator after the key, so the shared
            'particlefx' prefix cannot shadow the longer keys). All names are
            copied verbatim as strings [orig: ItemDef_ParseProperty @ 0x49eb00]. */
-        } else if (lower_match_key(lower, ll, "particlefx", 10)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            parse_item_particle_slot(v, vl, &current.particlefx, 0); /* +0x278/+0x298 [orig: @ 0x4a13ad] */
+		} else if (lower_match_key(lower, ll, "particlefx", 10)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+			parse_item_particle_slot(v, vl, &current.particlefx, 0); /* +0x278/+0x298 [orig: @ 0x4a13ad] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particlefxs", 11)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
-            parse_item_particle_slot(v, vl, &current.particlefxs, 1); /* +0x2AE/+0x2EE, 2nd +0x2CE [orig: @ 0x4a140b] */
+		} else if (lower_match_key(lower, ll, "particlefxs", 11)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+			parse_item_particle_slot(v, vl, &current.particlefxs, 1); /* +0x2AE/+0x2EE, 2nd +0x2CE [orig: @ 0x4a140b] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particlefxw1", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            parse_item_particle_slot(v, vl, &current.particlefxw1, 1); /* +0x304/+0x344, 2nd +0x324 [orig: @ 0x4a148b] */
+		} else if (lower_match_key(lower, ll, "particlefxw1", 12)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+			parse_item_particle_slot(v, vl, &current.particlefxw1, 1); /* +0x304/+0x344, 2nd +0x324 [orig: @ 0x4a148b] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particlefxw2", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            parse_item_particle_slot(v, vl, &current.particlefxw2, 1); /* +0x35A/+0x39A, 2nd +0x37A [orig: @ 0x4a150b] */
+		} else if (lower_match_key(lower, ll, "particlefxw2", 12)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+			parse_item_particle_slot(v, vl, &current.particlefxw2, 1); /* +0x35A/+0x39A, 2nd +0x37A [orig: @ 0x4a150b] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particlefxw3", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            parse_item_particle_slot(v, vl, &current.particlefxw3, 0); /* +0x3AE/+0x3CE, NO secondary [orig: @ 0x4a158b] */
+		} else if (lower_match_key(lower, ll, "particlefxw3", 12)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+			parse_item_particle_slot(v, vl, &current.particlefxw3, 0); /* +0x3AE/+0x3CE, NO secondary [orig: @ 0x4a158b] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particlefxw4", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            parse_item_particle_slot(v, vl, &current.particlefxw4, 0); /* +0x3E2/+0x402, NO secondary [orig: @ 0x4a15eb] */
+		} else if (lower_match_key(lower, ll, "particlefxw4", 12)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+			parse_item_particle_slot(v, vl, &current.particlefxw4, 0); /* +0x3E2/+0x402, NO secondary [orig: @ 0x4a15eb] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particledeath", 13)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
-            Token tok[1];
+		} else if (lower_match_key(lower, ll, "particledeath", 13)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+			Token tok[1];
             if (tokenize(v, vl, tok, 1) >= 1)
                 safe_copy(current.particledeath, sizeof(current.particledeath), tok[0].s,
                           tok[0].len); /* +0x416 [orig: @ 0x4a164b] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particleh2odeath", 16)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
-            Token tok[1];
+		} else if (lower_match_key(lower, ll, "particleh2odeath", 16)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+			Token tok[1];
             if (tokenize(v, vl, tok, 1) >= 1)
                 safe_copy(current.particleh2odeath, sizeof(current.particleh2odeath), tok[0].s,
                           tok[0].len); /* +0x44A [orig: @ 0x4a168e] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particlefire", 12)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            Token tok[1];
+		} else if (lower_match_key(lower, ll, "particlefire", 12)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+			Token tok[1];
             if (tokenize(v, vl, tok, 1) >= 1)
                 safe_copy(current.particlefire, sizeof(current.particlefire), tok[0].s,
                           tok[0].len); /* +0x47E [orig: @ 0x4a16d0] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particleother", 13)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
-            Token tok[1];
+		} else if (lower_match_key(lower, ll, "particleother", 13)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+			Token tok[1];
             if (tokenize(v, vl, tok, 1) >= 1)
                 safe_copy(current.particleother, sizeof(current.particleother), tok[0].s,
                           tok[0].len); /* +0x4B2 [orig: @ 0x4a1713] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particlefinale", 14)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
-            Token tok[1];
+		} else if (lower_match_key(lower, ll, "particlefinale", 14)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+			Token tok[1];
             if (tokenize(v, vl, tok, 1) >= 1)
                 safe_copy(current.particlefinale, sizeof(current.particlefinale), tok[0].s,
                           tok[0].len); /* +0x4E4 [orig: @ 0x4a175b] */
             parsed = 1;
-        } else if (lower_match_key(lower, ll, "particlespawn", 13)) {
-            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
-            Token tok[1];
+		} else if (lower_match_key(lower, ll, "particlespawn", 13)) {
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+			Token tok[1];
             if (tokenize(v, vl, tok, 1) >= 1)
                 safe_copy(current.particlespawn, sizeof(current.particlespawn), tok[0].s,
                           tok[0].len); /* +0x506 [orig: @ 0x4a179d] */
             parsed = 1;
-        }
+		}
 
-        if (!parsed) {
-            DA_PUSH_RAW(current.raw_lines, current.raw_lines_count, raw_cap, line, line_len);
-        }
-    }
+		if (!parsed) {
+			DA_PUSH_RAW(current.raw_lines, current.raw_lines_count, raw_cap, line, line_len);
+		}
+	}
 
     return 0;
 }

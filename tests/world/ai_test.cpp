@@ -73,15 +73,15 @@ void test_vehicle_death_rows() {
         CHECK(e.brain.f[AiBrain::kPendState] == 23);
 
         // Enter 23: team cleared (a wreck goes teamless), moveStep 62, corpse timer 0.
-        w.registry.get(h)->corpse_timer = 500;
-        sys.row(23).enter(ctx);
-        CHECK(e.brain.f[AiBrain::kStep] == 62);
+		w.registry.get(h)->veh.stuck_ticks = 500;
+		sys.row(23).enter(ctx);
+		CHECK(e.brain.f[AiBrain::kStep] == 62);
         CHECK(e.team == 0);
         CHECK(w.registry.get(h)->team == 0);
-        CHECK(w.registry.get(h)->corpse_timer == 0);       // wrecks never expire
+		CHECK(w.registry.get(h)->veh.stuck_ticks == 0); // respawn timer reset
 
-        // The dead row swallows everything: no pending change from any event.
-        e.brain.f[AiBrain::kPendState] = 0;
+		// The dead row swallows everything: no pending change from any event.
+		e.brain.f[AiBrain::kPendState] = 0;
         AiEventEntry late{}; late.f[0] = 3;
         AiThinkCtx ctx_late{&sys, &e, &w, &late};
         sys.row(23).event(ctx_late);
@@ -515,7 +515,8 @@ static void test_sm_turret_fire() {
         e->profile.fire_interval_a = 1;
         e->profile.fire_a.ammo_index = 1;
         e->profile.fire_a.cone_bam = 0x7FFFFFFF; // limit 63/256 turns
-        e->profile.approach_cap = 0;             // no chase cap leg
+		e->profile.approach_cap = 1000 << 16;
+		e->profile.radar_fov_bam = 0x7FFFFFFF;
     };
 
     // Mobile leg: solve + fire. Origin = pos + 2.0u Z (the empty-bone-list
@@ -1478,6 +1479,246 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     CHECK(w->out.sound_emitters.empty());
 }
 
+// Exercise the distinct aircraft combat legs through the dispatch table. The
+// pose provider makes muzzle selection and full pitch/roll observable without
+// relying on a proprietary model fixture.
+static void test_aircraft_combat_states() {
+	auto owned = std::make_unique<World>();
+	World &w = *owned;
+	AiSystem &sys = w.ai;
+	w.registry.configure_pool(0, 8);
+	w.registry.configure_pool(1, 8);
+	std::vector<uint16_t> heights(64 * 64, 0);
+	std::vector<int> sectors(256, 1);
+	opennova::terrain::TerrainHeightField terrain;
+	terrain.heightmap = heights.data();
+	terrain.dim = 64;
+	terrain.layout.sector_grid = sectors.data();
+	w.tables.terrain = &terrain;
+	w.tables.ammo.entries.resize(2);
+	w.tables.ammo.entries[1].valid = true;
+	w.tables.ammo.entries[1].velocity = 620;
+	w.tables.ammo.entries[1].max_age_ticks = 100;
+	Entity hull;
+	hull.health = 500;
+	hull.alive = true;
+	hull.position = { 0, 0, 10 };
+	hull.team = 1;
+	const EntityHandle sh = w.registry.spawn(1, hull);
+	Entity victim;
+	victim.health = 100;
+	victim.alive = true;
+	victim.position = { 100, 0, 10 };
+	victim.team = 2;
+	const EntityHandle th = w.registry.spawn(0, victim);
+	AiEntity &ai = *sys.at(sys.attach(sh));
+	sys.is_authority = true;
+	auto &b = ai.brain;
+	ai.health = 500;
+	ai.pos[2] = 10 << 16;
+	ai.team = 1;
+	ai.profile.type = 1;
+	ai.profile.field220 = 6000;
+	ai.profile.patrol_climb = 3000;
+	ai.profile.field216 = 20 << 16;
+	ai.profile.patrol_altitude = 12 << 16;
+	ai.profile.min_agl = 5 << 16;
+	ai.profile.min_chase = 20 << 16;
+	ai.profile.max_chase = 60 << 16;
+	ai.profile.approach_cap = 1000 << 16;
+	ai.profile.radar_fov_bam = INT32_MAX;
+	ai.profile.fov_secondary = 0x7f;
+	ai.profile.fire_a.ammo_index = 1;
+	ai.profile.fire_a.cone_bam = INT32_MAX;
+	ai.profile.fire_b = ai.profile.fire_a;
+	ai.profile.fire_interval_a = ai.profile.fire_interval_b = 1;
+	b.f[AiBrain::kSpeedA] = 2000;
+	b.f[AiBrain::kSpeedB] = 1000;
+	b.f[AiBrain::kFallback] = 7;
+	b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState] = 8;
+	AiThinkCtx ctx{ &sys, &ai, &w, nullptr };
+	sys.row(8).enter(ctx);
+	CHECK(ai.aircraft_controller == 0x10000 && b.f[45] == 1 && b.f[AiBrain::kStep] == 1);
+	sys.ai_set_target(w, ai, th);
+	b.f[AiBrain::kAmmoA] = 4;
+	b.f[AiBrain::kAccuracy] = 4;
+	ai.profile.flags100 = 0x40; // locked burst
+	b.f[AiBrain::kTickAccum] = 15;
+	const uint32_t random_before = sys.prng_a;
+	sys.row(8).tick(ctx);
+	CHECK(w.out.rounds.count == 1);
+	CHECK(b.f[AiBrain::kAmmoA] == 3 && b.f[AiBrain::kLastWeapon] == 1);
+	CHECK(b.f[AiBrain::kBurstWindow] == 1 && sys.prng_a == random_before);
+	CHECK((b.bytes()[AiBrain::kBoneFlagByte] & 0x40) != 0);
+	// A moving, rolling hull continues the saved six-component burst without
+	// solving again or consuming scatter randomness.
+	ai.pos[0] = 4 << 16;
+	ai.pos[2] = 15 << 16;
+	ai.heading = 12345;
+	ai.pitch = 23456;
+	ai.roll = 34567;
+	const int32_t saved_z = b.f[AiBrain::kSavedDeltaA + 2];
+	sys.row(8).tick(ctx);
+	CHECK(w.out.rounds.count == 2 && b.f[AiBrain::kAmmoA] == 2);
+	if (w.out.rounds.count == 2) {
+		CHECK(w.out.rounds.records[1].origin_z == ai.pos[2] + saved_z);
+		CHECK(w.out.rounds.records[1].dir_yaw == ai.heading + b.f[AiBrain::kSavedDeltaA + 3]);
+		CHECK(w.out.rounds.records[1].dir_pitch == ai.pitch + b.f[AiBrain::kSavedDeltaA + 4]);
+	}
+	CHECK(sys.prng_a == random_before);
+	// Secondary processed fire omits the primary fire bit and perfect-aim
+	// scatter; the secondary continuation site still draws its two values.
+	ai.pos[0] = 0;
+	ai.pos[2] = 10 << 16;
+	ai.heading = ai.pitch = ai.roll = 0;
+	ai.profile.flags100 = 0;
+	b.f[AiBrain::kBurstWindow] = 0;
+	b.f[AiBrain::kAmmoA] = 0;
+	b.f[AiBrain::kAmmoB] = 3;
+	b.f[AiBrain::kTickAccum] = 15;
+	sys.row(8).tick(ctx);
+	CHECK(w.out.rounds.count == 3 && b.f[AiBrain::kLastWeapon] == 2);
+	CHECK((b.bytes()[AiBrain::kBoneFlagByte] & 0x40) == 0 && sys.prng_a == random_before);
+	sys.row(8).tick(ctx);
+	CHECK(w.out.rounds.count == 4 && b.f[AiBrain::kAmmoB] == 1 && sys.prng_a != random_before);
+	// Stationary weapons are commanded separately from the AI movement mode.
+	ai.profile.flags100 = 0x80;
+	b.bytes()[AiBrain::kGuardFireByte] = 0;
+	b.f[AiBrain::kCombatTimer] = 620;
+	b.f[AiBrain::kTickAccum] = 0;
+	sys.row(8).tick(ctx);
+	CHECK(b.f[AiBrain::kPendState] == 7 && w.out.rounds.count == 4);
+	// Damage source selects the directional evasion controller and survives
+	// the full event dispatch as a handle, rather than a damage quantity.
+	ai.profile.flags100 = 0;
+	ai.profile.flags96 = 0;
+	sys.ai_set_target(w, ai, EntityHandle{});
+	AiEventEntry damage{};
+	damage.f[0] = 1;
+	damage.f[1] = sys.index_of(ai) << 16;
+	damage.f[3] = th.packed + 1;
+	ctx.event = &damage;
+	sys.row(8).event(ctx);
+	ctx.event = nullptr;
+	CHECK(b.f[AiBrain::kDamageInfo] == th.packed + 1 && b.f[AiBrain::kPendState] == 10);
+	sys.apply_transition(ai, w);
+	CHECK(b.f[AiBrain::kCurState] == 10 && ai.aircraft_controller == 1);
+	CHECK(b.f[AiBrain::kTargetSlot] == th.packed + 1 && b.f[AiBrain::kWorkHeading] == 1073741760);
+	ai.aircraft_phase = 180;
+	sys.row(10).tick(ctx);
+	CHECK(ai.aircraft_phase == 196 && b.f[AiBrain::kWorkHeading] == 0);
+	ai.aircraft_phase = 372;
+	sys.row(10).tick(ctx);
+	CHECK(ai.aircraft_controller == 3 && ai.aircraft_result == 0 && b.f[AiBrain::kPendState] == 8);
+	ai.profile.subtype = 2;
+	b.f[45] = 0;
+	sys.row(8).enter(ctx);
+	CHECK(ai.aircraft_controller == 0x10005 && b.f[45] == -1);
+	b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState] = 10;
+	sys.row(10).enter(ctx);
+	CHECK(b.f[AiBrain::kPendState] == 8);
+	CHECK(sys.unported_calls == 0);
+}
+
+static void test_vehicle_weapon_pose_and_target_cleanup() {
+	struct Pose : IPoseProvider {
+		int point = 0, pivots = 0, poses = 0;
+		bool resolve_userpoint_rigid(World &, EntityHandle, int index, int32_t out[3]) override {
+			point = index;
+			out[0] = index << 16;
+			out[1] = 0;
+			out[2] = 10 << 16;
+			return true;
+		}
+		bool resolve_userpoint_pivot(World &, EntityHandle, int index, int32_t out[3]) override {
+			point = index;
+			++pivots;
+			out[0] = out[1] = 0;
+			out[2] = 10 << 16;
+			return true;
+		}
+		bool resolve_userpoint_transform(
+				World &, EntityHandle, int index, int32_t out[6]) override {
+			point = index;
+			++poses;
+			out[0] = 8 << 16;
+			out[1] = 9 << 16;
+			out[2] = 10 << 16;
+			out[3] = out[4] = out[5] = 0;
+			return true;
+		}
+	} pose;
+	auto owned = std::make_unique<World>();
+	World &w = *owned;
+	auto &sys = w.ai;
+	w.registry.configure_pool(0, 4);
+	w.registry.configure_pool(1, 4);
+	w.pose_provider = &pose;
+	Entity hull;
+	hull.health = 500;
+	hull.alive = true;
+	hull.position = { 0, 0, 10 };
+	const EntityHandle sh = w.registry.spawn(1, hull);
+	Entity target;
+	target.health = 100;
+	target.alive = true;
+	target.position = { 100, 0, 10 };
+	const EntityHandle th = w.registry.spawn(0, target);
+	sys.attach(sh);
+	sys.attach(th);
+	AiEntity &ai = *sys.for_handle(sh);
+	auto &b = ai.brain;
+	ai.pos[2] = 10 << 16;
+	ai.pitch = 0x10000000;
+	ai.roll = 0x20000000;
+	ai.profile.fire_a.flags = 0x10;
+	b.f[AiBrain::kBoneCountA] = 3;
+	b.f[56] = 2;
+	b.f[57] = 3;
+	b.f[58] = 4;
+	b.f[AiBrain::kAmmoA] = 5;
+	int32_t out[6];
+	CHECK(sys.solve_weapon_fire_transform(w, ai, nullptr, ai.profile.fire_a, 0, false, out));
+	CHECK(pose.point == 4 && out[0] == (4 << 16) && out[2] == (10 << 16));
+	CHECK(out[4] == ai.pitch - 536870880 && out[5] == ai.roll);
+	CHECK(b.bytes()[AiBrain::kBoneFlagByte] == 0x82 && pose.poses == 0);
+	ai.profile.fire_a.flags = 0x11;
+	b.f[AiBrain::kAmmoA] = -1;
+	CHECK(sys.solve_weapon_fire_transform(w, ai, nullptr, ai.profile.fire_a, 0, false, out));
+	CHECK(pose.point == 2 && pose.pivots == 1 && pose.poses == 1 && out[0] == (8 << 16));
+	CHECK(b.f[AiBrain::kBoneRoundRobin] == -2);
+	CHECK(sys.solve_weapon_fire_transform(w, ai, nullptr, ai.profile.fire_a, 0, false, out));
+	CHECK(pose.point == 4 && b.f[AiBrain::kBoneRoundRobin] == -3);
+	// Aim straight up from a pitched hull. A yaw-only solver rejects this as
+	// outside the narrow cone; the full local-frame solve is aligned.
+	b.f[AiBrain::kBoneCountA] = 0;
+	ai.profile.fire_a.flags = 0;
+	ai.profile.fire_a.cone_bam = 0;
+	ai.profile.radar_fov_bam = INT32_MAX;
+	ai.profile.approach_cap = 1000 << 16;
+	ai.pitch = 0x40000000;
+	ai.roll = 0;
+	w.registry.get(th)->position = { 0, 0, 100 };
+	CHECK(sys.solve_weapon_fire_transform(
+			w, ai, w.registry.get(th), ai.profile.fire_a, 0, true, out));
+	CHECK(std::abs(int64_t(out[4]) - 0x40000000) < 8192);
+	// Death cleanup clears priority/damage pointers and the dying brain's
+	// target, while retaining the original cross-brain SetAITarget quirk.
+	AiEntity &other = *sys.for_handle(th);
+	sys.ai_set_target(w, ai, th);
+	sys.ai_set_target(w, other, sh);
+	other.brain.f[AiBrain::kPriorityTarget] = sh.packed + 1;
+	other.brain.f[AiBrain::kDamageInfo] = sh.packed + 1;
+	sys.clear_vehicle_target_references(w, ai);
+	CHECK(b.f[AiBrain::kTargetSlot] == 0 && w.registry.get(th)->ai_target_refcount == 0);
+	CHECK(other.brain.f[AiBrain::kTargetSlot] == sh.packed + 1);
+	CHECK(other.brain.f[AiBrain::kPriorityTarget] == 0 && other.brain.f[AiBrain::kDamageInfo] == 0);
+	// Re-selecting an unchanged target does not modify a zero reference count.
+	w.registry.get(sh)->ai_target_refcount = 0;
+	sys.ai_set_target(w, other, sh);
+	CHECK(w.registry.get(sh)->ai_target_refcount == 0);
+}
+
 int main() {
     // ---- struct layout (byte-exact strides) ----
     CHECK(sizeof(AiBrain) == 812);
@@ -1743,10 +1984,10 @@ int main() {
         ctx.world = &w;
         ctx.is_authority = true;
         sys.tick(w, ctx);
-        CHECK(sys.unported_calls >= 1); // the HELO tick routed through the stub
-    }
+		CHECK(sys.unported_calls == 0); // landing safely handles an absent entity
+	}
 
-    // ---- body-anim slot selection from movement (update_body_anim_slot) ----
+	// ---- body-anim slot selection from movement (update_body_anim_slot) ----
     {
         // body_anim_adm_key maps slots to the AI .adm key namespace.
         CHECK(streq(body_anim_adm_key(kBodyAnimIdle), "anim_idle"));
@@ -2117,9 +2358,9 @@ int main() {
         int before = sys.unported_calls;
         AiThinkCtx ctx{&sys, &e, &w, nullptr};
         sys.row(kAiGroundFollowWp).tick(ctx);
-        CHECK(sys.unported_calls == before + 1);         // compute-fire-positions stub (P2)
-        CHECK(e.brain.f[AiBrain::kFireTimer] == 50 - 64); // -= kStep
-    }
+		CHECK(sys.unported_calls == before); // the countermeasure path is implemented
+		CHECK(e.brain.f[AiBrain::kFireTimer] == 50 - 64); // -= kStep
+	}
 
     // ======================= P2: GROUND combat + targeting =======================
 
@@ -2638,9 +2879,9 @@ int main() {
         e.brain.f[AiBrain::kWorkHeading] = 0; e.arrival_prox = 1; e.heading = 1000; // not arrived
         int before = sys.unported_calls;
         sys.row(kAiGroundEvade).tick(ctx);
-        CHECK(sys.unported_calls == before + 1);          // compute-fire-positions stub
-        CHECK(e.brain.f[AiBrain::kFireTimer] == 50 - 64); // -= step
-    }
+		CHECK(sys.unported_calls == before); // the countermeasure path is implemented
+		CHECK(e.brain.f[AiBrain::kFireTimer] == 50 - 64); // -= step
+	}
 
     // ---- combat event handler (states 16/17/18 event): damage/death/destroy transitions ----
     {
@@ -2857,7 +3098,10 @@ int main() {
     test_joiner_evaluates_vehicle_idle_without_integrating_motor();
     test_lethal_hit_blends_into_death_animation_without_position_jump();
     test_sm_turret_fire();
+	test_aircraft_combat_states();
+	test_vehicle_weapon_pose_and_target_cleanup();
 
-    if (failures == 0) std::printf("ai: all tests passed\n");
-    return failures ? 1 : 0;
+	if (failures == 0)
+		std::printf("ai: all tests passed\n");
+	return failures ? 1 : 0;
 }

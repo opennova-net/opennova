@@ -7,6 +7,7 @@
 // dispatch table itself, which is why AiSystem::row is defined here.
 
 #include <runtime/world/angle.h>
+#include <runtime/world/ground_conform.h>
 #include <algorithm>
 #include <cmath>
 
@@ -173,10 +174,10 @@ void h_ground_followwp_tick(AiThinkCtx &ctx) {
     if ((e.profile.flags96 & 0x10) != 0) { // can-fire
         if (b.f[AiBrain::kFireTimer] <= 0)
             b.f[AiBrain::kFireTimer] = 0;
-        else
-            ++ctx.sys->unported_calls; // [orig: AIEntity_ReleaseFlareCountermeasures @0x455ef0] -> flare countermeasures (unported)
-    }
-    int32_t ft = b.f[AiBrain::kFireTimer];
+		else if (Entity *vehicle = ctx.world->registry.get(e.handle))
+			ctx.world->vehicles.release_flares(*vehicle);
+	}
+	int32_t ft = b.f[AiBrain::kFireTimer];
     if (ft <= 0)
         b.f[AiBrain::kFireTimer] = 0;
     else
@@ -203,10 +204,10 @@ void h_patrol_tick(AiThinkCtx &ctx) {
     if ((e.profile.flags96 & 0x10) != 0) { // can-fire
         if (b.f[AiBrain::kFireTimer] <= 0)
             b.f[AiBrain::kFireTimer] = 0;
-        else
-            ++ctx.sys->unported_calls; // [orig: AIEntity_ReleaseFlareCountermeasures @0x455ef0] -> flare countermeasures (unported)
-    }
-    int32_t ft = b.f[AiBrain::kFireTimer];
+		else if (Entity *vehicle = ctx.world->registry.get(e.handle))
+			ctx.world->vehicles.release_flares(*vehicle);
+	}
+	int32_t ft = b.f[AiBrain::kFireTimer];
     if (ft <= 0)
         b.f[AiBrain::kFireTimer] = 0;
     else
@@ -423,9 +424,10 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
         b.f[AiBrain::kTickAccum] = 0;
         processed = true;
         if ((e.profile.flags96 & 0x10) != 0 && b.f[AiBrain::kFireTimer] > 0)
-            ++ctx.sys->unported_calls; // the flare dispenser [orig: 0x455ef0; §16.5 item 5]
-        b.f[AiBrain::kFireTimer] = std::max(0, b.f[AiBrain::kFireTimer] - 16);
-        b.f[AiBrain::kFireDelay] = std::max(0, b.f[AiBrain::kFireDelay] - 16);
+			if (Entity *vehicle = ctx.world->registry.get(e.handle))
+				ctx.world->vehicles.release_flares(*vehicle);
+		b.f[AiBrain::kFireTimer] = std::max(0, b.f[AiBrain::kFireTimer] - 16);
+		b.f[AiBrain::kFireDelay] = std::max(0, b.f[AiBrain::kFireDelay] - 16);
         b.f[AiBrain::kRetargetTimer] += 16; // the §16.3 retarget cadence incrementer
     }
 
@@ -451,9 +453,10 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
             b.set_pend(b.f[AiBrain::kFallback]); // [orig: pending = fallback past 620]
         if (processed) {
             ctx.sys->ai_set_target(world, e, EntityHandle{}); // [orig: SetAITarget(0)/tick]
-            if ((e.profile.flags100 & 1) != 0) ++ctx.sys->unported_calls; // AI_UpdateMovementTarget
-        }
-        return;
+			if ((e.profile.flags100 & 1) != 0)
+				ctx.sys->update_waypoint_movement(e, world);
+		}
+		return;
     }
 
     if (tent == nullptr) { // no target: sweep-search + acquire [orig: the brain[38]==0 leg]
@@ -643,9 +646,34 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
                 entity_update_death_transforms(*ctx.world, *ent, /*silent=*/false);
         }
     }
-    ++ctx.sys->unported_calls; // the def+1352 kill-mounted-children loop (def byte unparsed)
-    death_alert_block(ctx, e);
-    b.f[AiBrain::kStep] = 16;  // [orig: ai_data[7] = 16 @0x467c02]
+	// The def+0x548 count builds this authored child list at promotion. Clear
+	// health before its phase-1 death callback, including client-side rows.
+	// [orig: AI_TransitionToDeath_GroundVehicle @0x467B6E..0x467BBB]
+	if (ctx.world != nullptr) {
+		World &world = *ctx.world;
+		const Entity *parent = world.registry.get(e.handle);
+		if (parent != nullptr) {
+			std::vector<EntityHandle> children;
+			world.registry.for_each_in_pool(1, [&](const Entity &child) {
+				if (child.emplacement_parent == e.handle &&
+						child.emplacement_parent_spawn_id == parent->registry_spawn_id &&
+						child.health > 0)
+					children.push_back(child.handle);
+			});
+			for (EntityHandle handle : children) {
+				Entity *child = world.registry.get(handle);
+				if (child == nullptr)
+					continue;
+				child->health = 0;
+				child->last_attacker = {};
+				if (AiEntity *brain = world.ai.for_handle(handle))
+					brain->health = 0;
+				destruction_notify_item_damage(world, *child, 1);
+			}
+		}
+	}
+	death_alert_block(ctx, e);
+	b.f[AiBrain::kStep] = 16;  // [orig: ai_data[7] = 16 @0x467c02]
     if (death_speed(e) < 1057) // [orig: @0x467c51 — stopped -> destroy now]
         queue_destroy_event(ctx, e);
 }
@@ -657,9 +685,13 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
 void h_vehicle_dying_tick(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
-    ++ctx.sys->unported_calls; // [orig: Entity_ProcessFallingDeathPhysics @0x461d30]
-    const bool stopped = death_speed(e) < 1057;
-    const bool still =
+	if (ctx.world != nullptr) {
+		if (Entity *vehicle = ctx.world->registry.get(e.handle))
+			entity_process_falling_death(*ctx.world, *vehicle, ctx.world->tables.terrain,
+					float(from_fixed(ctx.world->env.water_z)));
+	}
+	const bool stopped = death_speed(e) < 1057;
+	const bool still =
         std::abs(e.pos[0] - e.net_saved_live_pose[0]) < 1024 &&
         std::abs(e.pos[1] - e.net_saved_live_pose[1]) < 1024 &&
         std::abs(e.pos[2] - e.net_saved_live_pose[2]) < 1024;
@@ -694,31 +726,296 @@ void h_enter_vehicle_dead(AiThinkCtx &ctx) {
         if (Entity *ent = ctx.world->registry.get(e.handle)) {
             if ((ent->engine_flags & kEntityFlagHusk) == 0) // [orig: the Flags&4 gate]
                 entity_update_death_transforms(*ctx.world, *ent, /*silent=*/false);
-            ent->corpse_timer = 0; // [orig: entity+328 = 0 @0x467e22 — wrecks never expire]
-            ent->team = 0;         // [orig: entity+354 = 0 @0x467e2c — a wreck goes teamless
-                                   //  and drops out of ordinary target scans]
-            if (ent->death_tick == 0) // [orig: +0x1AC first write wins @0x467e4a]
+			ent->veh.stuck_ticks = 0; // [orig: moveTimer +0x148 = 0 @0x467E22]
+			ent->team = 0; // [orig: entity+354 = 0 @0x467e2c — a wreck goes teamless
+						   //  and drops out of ordinary target scans]
+			if (ent->death_tick == 0) // [orig: +0x1AC first write wins @0x467e4a]
                 ent->death_tick = ctx.world->logic_tick;
         }
-        if (b.f[AiBrain::kTargetSlot] != 0)
-            ctx.sys->ai_set_target(*ctx.world, e, EntityHandle{}); // [orig: @0x467e86]
+		ctx.sys->clear_vehicle_target_references(*ctx.world, e);
+		if (b.f[AiBrain::kTargetSlot] != 0)
+			ctx.sys->ai_set_target(*ctx.world, e, EntityHandle{}); // [orig: @0x467e86]
     }
     e.team = 0; // the motor-side copy the candidate scan reads
     b.f[AiBrain::kStep] = 62; // [orig: ai_data[7] = 62 @0x467e8e]
 }
 
-// [orig: AI_TickState_VehicleDead @0x467ea0 (ex kong 'Entity_ProcessMountedInfantryFrame')]
-// state-23 tick: keep settling; the itemDef attrib&0x40 authority RESPAWN watcher
-// (cooldown countdown -> teleport to the spawn pose / bury + Entity_RespawnVehicle) is
-// a visible stub — mission vehicles without the attrib settle forever, the witnessed
-// default.
+// [orig: AI_TickState_VehicleDead @0x467EA0]
 void h_vehicle_dead_tick(AiThinkCtx &ctx) {
-    ++ctx.sys->unported_calls; // [orig: Entity_ProcessFallingDeathPhysics + the respawn leg]
+	if (ctx.world != nullptr) {
+		if (Entity *vehicle = ctx.world->registry.get(ctx.self->handle))
+			ctx.world->vehicles.tick_dead(*vehicle, *ctx.self);
+	}
 }
 
 // [orig: AI_HandleEvent_ConsumeAll @0x458080] state-23 event: swallow everything —
 // dead entities ignore commands, damage, and further death events.
 void h_vehicle_dead_event(AiThinkCtx &) {}
+
+// Ground clearance for the aircraft death states: lift 1, search down 48,
+// then the intact/dead model's authored height offset.
+// [orig: @0x4668DA..0x46693C; @0x45791F..0x457972]
+int32_t aircraft_death_ground(World &world, Entity &entity) {
+	const int32_t pos[3] = { to_fixed(entity.position.x), to_fixed(entity.position.y),
+		to_fixed(entity.position.z) };
+	int32_t ground = INT32_MIN;
+	if (world.ai.collision != nullptr)
+		ground = world.ai.collision->raycast_ground(
+				world, entity.handle, pos, 0, 0, 0x10000, 0x300000, &entity.ground_target);
+	else if (world.tables.terrain != nullptr)
+		ground = calc_average_ground_height(*world.tables.terrain, pos, 0, GroundClearance{});
+	if (entity.primary_occupant.valid())
+		ground = std::max(ground, world.env.water_z);
+	int32_t offset = entity.veh.air_probe_z_off;
+	if (entity.health <= 0 || ((entity.flags | entity.engine_flags) & kEntityFlagDead) != 0)
+		if (const auto *t = world.tables.item_death_traits.get(entity.item_id))
+			if (t->husk_model_loaded)
+				offset = to_fixed(std::abs(t->husk_rest_min_z));
+	return ground == INT32_MIN ? ground : io::bam_add(ground, offset);
+}
+
+// [orig: AI_InitDeathState @0x457690; AI_InitGroundHeight @0x4577D0]
+void h_enter_aircraft_land(AiThinkCtx &ctx) {
+	auto &ai = *ctx.self;
+	auto &b = ai.brain;
+	ai.slot.bytes()[AiSlot::kAlertByte] = 0;
+	b.f[AiBrain::kPrevAlert] = b.f[AiBrain::kAlert] = 0;
+	b.f[AiBrain::kStep] = 8;
+	Entity *entity = ctx.world != nullptr ? ctx.world->registry.get(ai.handle) : nullptr;
+	if (entity == nullptr)
+		return;
+	const int32_t ground = aircraft_death_ground(*ctx.world, *entity);
+	b.f[138] = ai.profile.patrol_climb >> 1;
+	b.f[AiBrain::kWorkPosX] = to_fixed(entity->position.x);
+	b.f[AiBrain::kWorkPosY] = to_fixed(entity->position.y);
+	b.f[AiBrain::kWorkPosZ] = ground;
+	b.f[AiBrain::kWorkHeading] = entity->veh.yaw_seeded ? entity->veh.yaw_bam : ai.heading;
+	b.f[AiBrain::kWorkPitch] = b.f[AiBrain::kWorkRoll] = 0;
+	b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kTargetRef] = 0;
+	if (io::bam_sub(ground, 16384) > to_fixed(entity->position.z))
+		queue_destroy_event(ctx, ai);
+}
+void h_aircraft_land_tick(AiThinkCtx &ctx) {
+	if (ctx.world == nullptr)
+		return;
+	auto &ai = *ctx.self;
+	auto &b = ai.brain;
+	Entity *entity = ctx.world->registry.get(ai.handle);
+	if (entity == nullptr)
+		return;
+	const int32_t ground = aircraft_death_ground(*ctx.world, *entity);
+	const int32_t z = to_fixed(entity->position.z);
+	b.f[AiBrain::kWorkPosZ] = ground;
+	b.f[AiBrain::kOutSpeed] = 0;
+	if (ground < z)
+		b.f[138] = io::bam_sub(z, ground) >= 327680 ? ai.profile.patrol_climb >> 1 : 2114;
+	else {
+		entity->position.z = float(from_fixed(ground));
+		ai.pos[2] = ground;
+		b.f[138] = 0;
+		b.set_pend(14);
+	}
+}
+
+// [orig: AI_HandleEvent_VehicleGeneric @0x465EF0; damage siblings
+// @0x466770/@0x4663D0/@0x4662A0/@0x466810]
+void h_aircraft_event(AiThinkCtx &ctx) {
+	if (ctx.event == nullptr || ctx.sys->ai_handle_command(*ctx.self, *ctx.event))
+		return;
+	auto &ai = *ctx.self;
+	auto &b = ai.brain;
+	if (ctx.event->type() == 1) {
+		b.f[AiBrain::kDamageInfo] = ctx.event->f[3];
+		if (b.f[AiBrain::kCurState] != 6 && b.f[AiBrain::kCurState] != 13 &&
+				b.f[AiBrain::kPendState] != 13 && (ai.profile.flags96 & 2) == 0)
+			b.set_pend(10);
+	} else if (ctx.event->type() == 3)
+		b.set_pend(13);
+	else if (ctx.event->type() == 4)
+		b.set_pend(15);
+}
+void queue_aircraft_death(AiThinkCtx &ctx) {
+	if (ctx.world == nullptr)
+		return;
+	Entity *entity = ctx.world->registry.get(ctx.self->handle);
+	if (entity == nullptr)
+		return;
+	AiEventEntry event{};
+	event.f[0] = aircraft_death_ground(*ctx.world, *entity) <= to_fixed(entity->position.z) ? 3 : 4;
+	event.f[1] = ctx.sys->index_of(*ctx.self) << 16;
+	ctx.sys->events.queue(event);
+}
+void aircraft_flare_timer(AiThinkCtx &ctx) {
+	auto &ai = *ctx.self;
+	auto &b = ai.brain;
+	if ((ai.profile.flags96 & 0x10) != 0 && b.f[AiBrain::kFireTimer] > 0 && ctx.world != nullptr)
+		if (Entity *entity = ctx.world->registry.get(ai.handle))
+			ctx.world->vehicles.release_flares(*entity);
+	b.f[AiBrain::kFireTimer] = b.f[AiBrain::kFireTimer] <= 0
+			? 0
+			: io::bam_sub(b.f[AiBrain::kFireTimer], b.f[AiBrain::kStep]);
+}
+// [orig: AI_HandleEvent_VehicleWithDamageC @0x466460; formation thunk @0x466800]
+void h_aircraft_followwp_tick(AiThinkCtx &ctx) {
+	if (ctx.world == nullptr)
+		return;
+	auto &ai = *ctx.self;
+	const Entity *entity = ctx.world->registry.get(ai.handle);
+	if ((entity != nullptr ? entity->health : ai.health) <= 0) {
+		queue_aircraft_death(ctx);
+		return;
+	}
+	AiTarget target{};
+	const bool acquired =
+			(ai.profile.flags100 & 2) == 0 && ctx.sys->acquire_target(*ctx.world, ai, target);
+	aircraft_flare_timer(ctx);
+	if (acquired)
+		ctx.sys->engage_target(*ctx.world, ai, target, true);
+	else
+		ctx.sys->update_aircraft_waypoint_movement(ai, *ctx.world);
+}
+
+void h_enter_aircraft_combat(AiThinkCtx &ctx) {
+	if (ctx.world != nullptr)
+		ctx.sys->enter_aircraft_combat(*ctx.self, *ctx.world);
+}
+void h_enter_aircraft_evade(AiThinkCtx &ctx) {
+	if (ctx.world != nullptr)
+		ctx.sys->enter_aircraft_evade(*ctx.self, *ctx.world);
+}
+void h_aircraft_evade_tick(AiThinkCtx &ctx) {
+	if (ctx.world != nullptr)
+		ctx.sys->aircraft_evade_tick(*ctx.self, *ctx.world);
+}
+void h_aircraft_combat_tick(AiThinkCtx &ctx) {
+	if (ctx.world == nullptr)
+		return;
+	const Entity *entity = ctx.world->registry.get(ctx.self->handle);
+	if ((entity != nullptr ? entity->health : ctx.self->health) <= 0)
+		queue_aircraft_death(ctx);
+	else
+		ctx.sys->aircraft_combat_tick(*ctx.self, *ctx.world);
+}
+
+// [orig: AI_TransitionToDeath_Vehicle @0x4668A0]
+void h_enter_aircraft_dying(AiThinkCtx &ctx) {
+	auto &ai = *ctx.self;
+	if (ctx.world != nullptr) {
+		World &world = *ctx.world;
+		if (Entity *entity = world.registry.get(ai.handle)) {
+			world.out.scars.clear_entity(entity->handle);
+			const int cannon_index = world.tables.ammo.index_of("20mm");
+			const bool cannon = cannon_index >= 0 && ai.slot.f[24] == cannon_index;
+			if (!cannon && ((entity->flags | entity->engine_flags) & kEntityFlagHusk) == 0 &&
+					aircraft_death_ground(world, *entity) < to_fixed(entity->position.z))
+				entity_init_aircraft_death(world, *entity, true);
+		}
+	}
+	death_alert_block(ctx, ai);
+	ai.brain.f[AiBrain::kStep] = 16;
+	int32_t ground = INT32_MIN;
+	Entity *entity = ctx.world != nullptr ? ctx.world->registry.get(ai.handle) : nullptr;
+	if (entity != nullptr)
+		ground = aircraft_death_ground(*ctx.world, *entity);
+	ai.brain.f[138] = 1336;
+	if (entity != nullptr && ground > to_fixed(entity->position.z))
+		queue_destroy_event(ctx, ai);
+}
+
+// [orig: AI_CheckLethalDamage @0x457910]
+void h_aircraft_dying_tick(AiThinkCtx &ctx) {
+	if (ctx.world == nullptr)
+		return;
+	auto &ai = *ctx.self;
+	Entity *entity = ctx.world->registry.get(ai.handle);
+	if (entity == nullptr)
+		return;
+	const int32_t pos[3] = { to_fixed(entity->position.x), to_fixed(entity->position.y),
+		to_fixed(entity->position.z) };
+	const bool still = entity->saved_live_valid && entity->saved_live_pos[0] == pos[0] &&
+			entity->saved_live_pos[1] == pos[1] && entity->saved_live_pos[2] == pos[2];
+	if (aircraft_death_ground(*ctx.world, *entity) >= pos[2] || still) {
+		entity->veh.slide_z = 0;
+		queue_destroy_event(ctx, ai);
+	} else {
+		auto &b = ai.brain;
+		b.f[138] = io::bam_add(b.f[138], 1336);
+		b.f[AiBrain::kWorkPosZ] = -1000;
+		b.f[AiBrain::kWorkPitch] = b.f[AiBrain::kWorkRoll] = 0;
+		b.f[AiBrain::kWorkHeading] = io::bam_add(entity->veh.yaw_bam, INT32_MAX);
+		b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedB];
+	}
+}
+
+// [orig: Entity_ProcessVehicleDestruction @0x466A80]
+void h_enter_aircraft_dead(AiThinkCtx &ctx) {
+	auto &ai = *ctx.self;
+	if (ctx.world != nullptr) {
+		World &world = *ctx.world;
+		if (Entity *entity = world.registry.get(ai.handle)) {
+			entity->veh.stuck_ticks = 0;
+			entity->team = 0;
+			if (((entity->flags | entity->engine_flags) & kEntityFlagHusk) == 0) {
+				if (entity->ref_num != 0)
+					world.vehicles.cleanup_destroyed_ref_group(*entity);
+				const int32_t ground = aircraft_death_ground(world, *entity);
+				entity_init_aircraft_death(world, *entity,
+						ground == INT32_MIN ||
+								io::bam_sub(ground, 0x4000) <= to_fixed(entity->position.z));
+			}
+			entity->flags |= 6;
+			entity->engine_flags |= 6;
+			entity->alive = false;
+			if (!entity->death_tick)
+				entity->death_tick = world.logic_tick;
+		}
+		ctx.sys->clear_vehicle_target_references(world, ai);
+		if (ai.brain.f[AiBrain::kTargetSlot] != 0) {
+			if ((ai.profile.flags100 & 8) == 0) {
+				const EntityHandle target{ uint16_t(ai.brain.f[AiBrain::kTargetSlot] - 1) };
+				if (Entity *other = world.registry.get(target))
+					other->ai_target_refcount = int16_t(uint16_t(other->ai_target_refcount) - 1u);
+			}
+			ctx.sys->ai_set_target(world, ai, EntityHandle{});
+		}
+	}
+	death_alert_block(ctx, ai);
+	ai.team = 0;
+	ai.brain.f[AiBrain::kStep] = 62;
+}
+
+// [orig: AI_CheckAliveOrDead @0x4580C0; AI_QueueDeathSoundEvent @0x457AA0]
+void h_pretty_tick(AiThinkCtx &ctx) {
+	auto &ai = *ctx.self;
+	const Entity *entity = ctx.world != nullptr ? ctx.world->registry.get(ai.handle) : nullptr;
+	const int32_t health = entity != nullptr ? entity->health : ai.health;
+	const bool boat = ai.brain.f[AiBrain::kCurState] == 22 && ai.profile.subtype == 1;
+	if (health > 0) {
+		if (boat && entity != nullptr) {
+			int32_t pose[6];
+			carrier_pose_fixed(*entity, pose, pose[3], pose[4], pose[5]);
+			std::copy_n(pose, 6, &ai.brain.f[AiBrain::kWorkPosX]);
+			ai.brain.f[AiBrain::kWorkPosZ] = ctx.world->env.water_z;
+		}
+		return;
+	}
+	AiEventEntry event{};
+	event.f[0] = boat ? 3 : 5;
+	event.f[1] = ctx.sys->index_of(ai) << 16;
+	ctx.sys->events.queue(event);
+}
+
+// [orig: AI_HandleEvent_HelicopterDestroyOnly @0x468040;
+// AI_HandleEvent_VehicleDestroyOnly @0x466BE0]
+void h_pretty_event(AiThinkCtx &ctx) {
+	if (ctx.event == nullptr || ctx.sys->ai_handle_command(*ctx.self, *ctx.event))
+		return;
+	const bool ground = ctx.self->brain.f[AiBrain::kCurState] == 22;
+	if (ground && ctx.event->type() == 3)
+		ctx.self->brain.set_pend(21);
+	if (ctx.event->type() == 5)
+		ctx.self->brain.set_pend(ground ? 23 : 15);
+}
 
 // The 24-state dispatch table, mirroring off_815238/3C/40/44 @0x815238.
 // Columns: {enter, tick, exit, event}. U = not-yet-ported (visible stub), _ = noop.
@@ -735,33 +1032,38 @@ constexpr AiHandler U = h_not_yet_ported;
 constexpr AiHandler _ = h_noop;
 
 const StateRow kTable[kAiStateCount] = {
-    /* 0  */ {_, _, _, _},
-    /* 1  */ {_, _, _, _},
-    /* 2  */ {_, _, _, _},
-    /* 3  */ {_, _, _, _},
-    /* 4  */ {_, _, _, _},
-    /* 5  */ {_, _, _, _},
-    /* 6  HELO_LAND        */ {U, U, _, U},
-    /* 7  HELO_FOLLOWWP    */ {U, U, _, U},
-    /* 8  HELO_COMBAT      */ {U, U, h_clear_target_and_bone_flag, U},
-    /* 9                   */ {_, _, _, _},
-    /* 10 HELO_EVADE       */ {U, U, h_clear_target_ref, U},
-    /* 11 HELO_FORMATION   */ {h_reset_to_idle, U, _, U},
-    /* 12                  */ {_, _, _, _},
-    /* 13 (transition)     */ {U, U, _, h_handle_alert_event},
-    /* 14 HELO_PRETTY      */ {h_reset_to_patrol, U, _, U},
-    /* 15 HELO_DEAD        */ {U, U, _, U},
-    /* 16 GROUND_FOLLOWWP  */ {h_set_state_idle, h_ground_followwp_tick, _, h_combat_event},
-    /* 17 GROUND_COMBAT    */ {h_enter_ground_combat, h_ground_combat_tick, h_clear_bone_flag,
-                               h_combat_event},
-    /* 18 GROUND_EVADE     */ {h_enter_ground_evade, h_patrol_tick, _, h_combat_event},
-    /* 19 GROUND_FORMATION */ {h_full_reset_to_idle, U, _, U},
-    /* 20 GROUND_RETURNTOBASE */ {_, _, _, _},
-    /* 21 GROUND_DYING     */ {h_enter_vehicle_dying, h_vehicle_dying_tick, _,
-                               h_vehicle_dying_event},
-    /* 22 GROUND_PRETTY    */ {h_full_reset_to_patrol, U, _, U},
-    /* 23 GROUND_DEAD      */ {h_enter_vehicle_dead, h_vehicle_dead_tick, _,
-                               h_vehicle_dead_event},
+	/* 0  */ { _, _, _, _ },
+	/* 1  */ { _, _, _, _ },
+	/* 2  */ { _, _, _, _ },
+	/* 3  */ { _, _, _, _ },
+	/* 4  */ { _, _, _, _ },
+	/* 5  */ { _, _, _, _ },
+	/* 6  HELO_LAND        */ { h_enter_aircraft_land, h_aircraft_land_tick, _, h_aircraft_event },
+	/* 7  HELO_FOLLOWWP    */ { h_set_state_idle, h_aircraft_followwp_tick, _, h_aircraft_event },
+	/* 8  HELO_COMBAT      */
+	{ h_enter_aircraft_combat, h_aircraft_combat_tick, h_clear_target_and_bone_flag,
+			h_aircraft_event },
+	/* 9                   */ { _, _, _, _ },
+	/* 10 HELO_EVADE       */
+	{ h_enter_aircraft_evade, h_aircraft_evade_tick, h_clear_target_ref, h_aircraft_event },
+	/* 11 HELO_FORMATION   */ { h_reset_to_idle, h_aircraft_followwp_tick, _, h_aircraft_event },
+	/* 12                  */ { _, _, _, _ },
+	/* 13 HELO_DYING       */
+	{ h_enter_aircraft_dying, h_aircraft_dying_tick, _, h_handle_alert_event },
+	/* 14 HELO_PRETTY      */ { h_reset_to_patrol, h_pretty_tick, _, h_pretty_event },
+	/* 15 HELO_DEAD        */
+	{ h_enter_aircraft_dead, h_vehicle_dead_tick, _, h_vehicle_dead_event },
+	/* 16 GROUND_FOLLOWWP  */ { h_set_state_idle, h_ground_followwp_tick, _, h_combat_event },
+	/* 17 GROUND_COMBAT    */
+	{ h_enter_ground_combat, h_ground_combat_tick, h_clear_bone_flag, h_combat_event },
+	/* 18 GROUND_EVADE     */ { h_enter_ground_evade, h_patrol_tick, _, h_combat_event },
+	/* 19 GROUND_FORMATION */ { h_full_reset_to_idle, h_ground_followwp_tick, _, h_combat_event },
+	/* 20 GROUND_RETURNTOBASE */ { _, _, _, _ },
+	/* 21 GROUND_DYING     */
+	{ h_enter_vehicle_dying, h_vehicle_dying_tick, _, h_vehicle_dying_event },
+	/* 22 GROUND_PRETTY    */ { h_full_reset_to_patrol, h_pretty_tick, _, h_pretty_event },
+	/* 23 GROUND_DEAD      */
+	{ h_enter_vehicle_dead, h_vehicle_dead_tick, _, h_vehicle_dead_event },
 };
 
 const StateRow kDefaultRow = {h_noop, h_noop, h_noop, h_noop};

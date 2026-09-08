@@ -118,12 +118,14 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     s.position.x = e.get_x();
     s.position.y = e.get_y();
     s.position.z = e.get_z();
-    s.yaw = e.yaw;
-    s.pitch = e.pitch;
+	s.spawn_position = s.position;
+	s.yaw = e.yaw;
+	s.pitch = e.pitch;
     s.roll = e.roll;
     s.team = e.team;
-    s.group_id = e.group_id;
-    s.waypoint_id = e.waypoint_id;
+	s.vehicle_spawn_team = static_cast<int8_t>(e.team_budget);
+	s.group_id = e.group_id;
+	s.waypoint_id = e.waypoint_id;
     s.wp_number = e.wp_number;
     s.alert_state = e.alert_state;
     s.ai_flags = e.bmsi_attributes;
@@ -187,11 +189,11 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
 // @0x460200 (geometry copy from entity+4.., initial state 0, idle move-step); the profile/speed
 // mapping is from the mission AI fields (tracked deviation: the real items.def AIProfile_LoadOrFind
 // @0x45fd80 + the state-0 -> 16 transition are unmodeled).
-void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, const AiSystem &ai,
-                EntityKind kind) {
-    AiBrain &b = ae.brain;
+void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, AiSystem &ai,
+		EntityKind kind) {
+	AiBrain &b = ae.brain;
 
-    // Geometry (entity+4/+8/+12 = x/y/z, all 16.16; entity+16 heading = BAM). The engine heading is
+	// Geometry (entity+4/+8/+12 = x/y/z, all 16.16; entity+16 heading = BAM). The engine heading is
     // (90 - yaw) degrees, NOT yaw [orig: Entity_SpawnFromBMSRecord @0x40e9f0 entity+4 =
     // ((90 - yaw)<<16/360)<<16]. The waypoint mover writes the same engine frame (atan2(dY,dX) bearing
     // into kWorkHeading), so storing the seed in the engine frame keeps a unit's facing consistent
@@ -239,42 +241,82 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
                                     std::numeric_limits<int16_t>::min(),
                                     std::numeric_limits<int16_t>::max()));
 
-    // Per-node mover speed: brain[49]=kSpeedA (states != 16), brain[50]=kSpeedB (state 16).
-    // The .aip profile seeds them when the embedder supplied the entity's profile
-    // speeds; the parse scale is x65536/225 exactly like the PATROLSPEED command
-    // [orig: Entity_InitVehicleAIFromDef brain[49] = profile+0xC4 (combat_speed),
-    //  brain[50] = profile+0xC0 (patrol_speed) @0x4688C7/@0x4688D3; the .aip parse
-    //  x1000 x 1/225000 x 65536 @0x45E6E8..0x45E6FD]. Unresolved profiles keep the
-    //  default_speed stand-in (the rest of the profile parse remains D-AI-11 h).
-    b.f[AiBrain::kSpeedA] = opts.default_speed;
+	// Per-node mover speed: brain[49]=kSpeedA (states != 16), brain[50]=kSpeedB (state 16).
+	// The .aip profile seeds them when the embedder supplied the entity's profile
+	// speeds; the parse scale is x65536/225 exactly like the PATROLSPEED command
+	// [orig: Entity_InitVehicleAIFromDef brain[49] = profile+0xC4 (combat_speed),
+	//  brain[50] = profile+0xC0 (patrol_speed) @0x4688C7/@0x4688D3; the .aip parse
+	//  x1000 x 1/225000 x 65536 @0x45E6E8..0x45E6FD]. Unresolved profiles keep the
+	//  default_speed for embedders that do not supply profiles.
+	b.f[AiBrain::kSpeedA] = opts.default_speed;
     b.f[AiBrain::kSpeedB] = opts.default_speed;
     // The profile name retail's AI init would load: the ai_textfile, else (a
     // placed vehicle item) the def's default_aip or "helo1" — the same
     // resolution the boot resolver used to load the rows, so a nameless
     // Blackhawk finds its helo1 row here [orig: Entity_InitHelicopterAIFromDef
     // @0x4683C0 / Entity_InitVehicleAIFromDef @0x4686C0 name arms].
-    const std::string want =
+	int profile_initial_state = -1;
+	const std::string want =
             ai_profile_name_for(e, kind == EntityKind::Item, opts.ai_profile_defaults);
     if (!want.empty()) {
         for (const PromoteOptions::AiProfileRow &ps : opts.ai_profiles) {
             if (ps.profile != want) continue;
-            if (ps.data.combat_speed >= 0)
+			if (ps.data.type == 1 || ps.data.type == 2)
+				profile_initial_state = ps.data.default_state;
+			if (ps.data.combat_speed >= 0)
                 b.f[AiBrain::kSpeedA] = static_cast<int32_t>(
                         (static_cast<int64_t>(ps.data.combat_speed) << 16) / 225);
             if (ps.data.patrol_speed >= 0)
                 b.f[AiBrain::kSpeedB] = static_cast<int32_t>(
                         (static_cast<int64_t>(ps.data.patrol_speed) << 16) / 225);
-            // The §16.2 class walk data: the four class-priority words and the
-            // derived +40..+52 walk order. The parse is already type-gated like
-            // retail's, so the words carry exactly what AIProfile_ParseProperty
-            // wrote; the sort loads its keys only for HELO/GROUND profiles
-            // [orig: AIProfile_ParseProperty @0x45de70 +80..+92;
-            // AIProfile_LoadOrFind @0x45fd80 qsort (CompareFunction @0x455d90,
-            // ascending, insertion-stable at 4 entries) stored REVERSED
-            // @0x45fed9-0x45ff04].
-            ae.profile.type = ps.data.type;
-            ae.profile.class_priority[0] = ps.data.priority_air;
-            ae.profile.class_priority[1] = ps.data.priority_ground;
+			if (ps.data.has_ground_combat_speed)
+				b.f[AiBrain::kSpeedA] = ps.data.ground_combat_speed;
+			if (ps.data.has_ground_patrol_speed)
+				b.f[AiBrain::kSpeedB] = ps.data.ground_patrol_speed;
+			b.f[AiBrain::kDriveSkill] = ps.data.drive_skill;
+			b.f[AiBrain::kPrevAlert] = ps.data.alert;
+			// The §16.2 class walk data: the four class-priority words and the
+			// derived +40..+52 walk order. The parse is already type-gated like
+			// retail's, so the words carry exactly what AIProfile_ParseProperty
+			// wrote; the sort loads its keys only for HELO/GROUND profiles
+			// [orig: AIProfile_ParseProperty @0x45de70 +80..+92;
+			// AIProfile_LoadOrFind @0x45fd80 qsort (CompareFunction @0x455d90,
+			// ascending, insertion-stable at 4 entries) stored REVERSED
+			// @0x45fed9-0x45ff04].
+			ae.profile.type = ps.data.type;
+			ae.profile.subtype = ps.data.subtype;
+			// The parsed profile is the runtime profile: retain its flight and
+			// targeting fields on both families. [orig: @0x45DE70; @0x460200]
+			ae.profile.flags96 = static_cast<uint8_t>(ps.data.evade_flags);
+			ae.profile.field104 = std::max(0, ps.data.react_ticks);
+			ae.profile.view_fov_bam = ps.data.view_fov_bam;
+			ae.profile.radar_fov_bam = ps.data.radar_fov_bam;
+			ae.profile.view_dist = ps.data.view_dist;
+			ae.profile.fov_primary = uint8_t(uint32_t(ps.data.radar_fov_bam) >> 24);
+			ae.profile.fov_secondary = uint8_t(uint32_t(ps.data.view_fov_bam) >> 24);
+			ae.profile.range_primary = static_cast<int16_t>(ps.data.radar_dist >> 16);
+			ae.profile.range_secondary = static_cast<int16_t>(ps.data.view_dist >> 16);
+			ae.profile.approach_cap = ps.data.radar_dist;
+			ae.profile.min_chase = ps.data.min_chase;
+			ae.profile.max_chase = ps.data.max_chase;
+			if (ps.data.type == 1) {
+				if (ps.data.helo_combat_speed >= 0)
+					b.f[AiBrain::kSpeedA] = ps.data.helo_combat_speed;
+				if (ps.data.helo_patrol_speed >= 0)
+					b.f[AiBrain::kSpeedB] = ps.data.helo_patrol_speed;
+				ae.profile.patrol_altitude = ps.data.helo_patrol_altitude;
+				ae.profile.patrol_climb = std::max(0, ps.data.helo_patrol_climb);
+				ae.profile.field216 = ps.data.helo_combat_altitude;
+				ae.profile.field220 = std::max(0, ps.data.helo_combat_climb);
+				ae.profile.min_agl = ps.data.min_agl;
+				ae.profile.min_speed = std::max(0, ps.data.min_speed);
+				ae.profile.flight_flags = ps.data.hunt_flags;
+				b.f[AiBrain::kUseWaypointZones] = ps.data.use_waypoint_z;
+				if (kind == EntityKind::Item)
+					b.f[51] = (uint16_t(ai.prng_step_a()) % 20) << 16;
+			}
+			ae.profile.class_priority[0] = ps.data.priority_air;
+			ae.profile.class_priority[1] = ps.data.priority_ground;
             ae.profile.class_priority[2] = ps.data.priority_organics;
             ae.profile.class_priority[3] = ps.data.priority_decorations;
             {
@@ -296,20 +338,26 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
             // table at the item-traits sweep [orig: AIProfile_ParseProperty
             // @0x45de70 GROUND block; AIEntity_ProcessWeaponFire field map
             // §17.6].
-            if (ps.data.type == 2) {
-                const auto seed_block = [](world::AiProfile::WeaponFire &dst,
-                                           const aip::WeaponBlock &src) {
+			if (ps.data.type == 1 || ps.data.type == 2) {
+				const auto seed_block = [](world::AiProfile::WeaponFire &dst,
+												const aip::WeaponBlock &src) {
                     dst.ammo_cap = src.ammo;
                     dst.cone_bam = src.cone_bam;
                     dst.flags = src.flags;
                     dst.facing_bam = src.facing_bam;
                     dst.pitch_bam = src.pitch_bam;
                     dst.ammo_name = src.weapon;
-                };
-                seed_block(ae.profile.fire_a, ps.data.primary);
+				};
+				seed_block(ae.profile.fire_a, ps.data.primary);
                 seed_block(ae.profile.fire_b, ps.data.secondary);
-                ae.profile.fire_interval_a = ps.data.primary.rate_ticks;
-                ae.profile.fire_interval_b = ps.data.secondary.rate_ticks;
+				b.f[AiBrain::kElevationBias] = ps.data.primary.pitch_bam;
+				const aip::WeaponBlock *turret = (ps.data.primary.flags & 1) != 0 ? &ps.data.primary
+						: (ps.data.secondary.flags & 1) != 0 ? &ps.data.secondary
+															 : nullptr;
+				if (turret != nullptr)
+					b.f[AiBrain::kActiveYaw] = b.f[AiBrain::kStagingBlock + 3] = turret->facing_bam;
+				ae.profile.fire_interval_a = ps.data.primary.rate_ticks;
+				ae.profile.fire_interval_b = ps.data.secondary.rate_ticks;
                 b.f[AiBrain::kAmmoA] = ps.data.primary.ammo;
                 b.f[AiBrain::kAmmoB] = ps.data.secondary.ammo;
                 // COMBAT_FLAGS is the witnessed flags100 source (ATEAM/
@@ -323,9 +371,9 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
                     ae.profile.accuracy = ps.data.aim_skill;
                     b.f[AiBrain::kAccuracy] = ps.data.aim_skill;
                 }
-            }
-            break;
-        }
+			}
+			break;
+		}
     }
 
     // Waypoint route -> GROUND_FOLLOWWP (channel = the entity's waypoint_id).
@@ -345,19 +393,21 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
         }
     }
 
-    // A drivable VEHICLE brain (kind Item, attached through the control-seat gate below)
-    // starts in GROUND_FOLLOWWP whether or not a route is authored — the shipped ground
-    // .aip profiles all author `default_state GROUND_FOLLOWWP` and the profile parse is
-    // unported (D-AI-11); without the state the SM mover never feeds the AI-driver leg.
-    // [orig: AIProfile_LoadOrFind @0x45fd80 -> the default_state field; d_5ton.aip etc.]
-    if (kind == EntityKind::Item) {
-        b.f[AiBrain::kCurState] = 16;
-        b.f[AiBrain::kPendState] = 16;
-        // (The former flags100 |= 2 no-acquire stand-in is gone: the class walk now
-        // gates on the profile's priority words, and the shipped drivable-transport
-        // profiles author them zero (d_5ton/d_buggy/G_Jeep priority_* 0) — the same
-        // no-scan outcome, now via the witnessed path.)
-    }
+	// The resolved profile supplies the initial state, including state zero.
+	// Model-less fixture worlds retain the family fallback when no profile was
+	// supplied. [orig: Entity_InitVehicleAI @0x460200 copies profile[6] into
+	// cur_state, pend_state and fallback; Entity_InitHelicopterAI @0x461F00]
+	if (kind == EntityKind::Item) {
+		const int state = profile_initial_state >= 0 ? profile_initial_state
+													 : (ae.profile.type == 1 ? 7 : 16);
+		b.f[AiBrain::kCurState] = state;
+		b.f[AiBrain::kPendState] = state;
+		b.f[AiBrain::kFallback] = state;
+		// (The former flags100 |= 2 no-acquire stand-in is gone: the class walk now
+		// gates on the profile's priority words, and the shipped drivable-transport
+		// profiles author them zero (d_5ton/d_buggy/G_Jeep priority_* 0) — the same
+		// no-scan outcome, now via the witnessed path.)
+	}
 }
 
 // Seed the infantry motor + AiSlot for an organic (entity class org1). Field map grounded in
@@ -559,24 +609,24 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         world.registry.register_area(std::string(), b, at.is_active(), at.id);
     }
 
-    // Spawn actors + AI brains (organics are AI-driven; vehicles get brains in the vehicle
-    // phase). The net id every trigger/action references is AUTHORED in the record —
-    // [orig: Entity_SpawnFromBMSRecord @0x40e9f0 copies record dword @+8 to entity+124;
-    // EntityPool_FindByNetId @0x4f0a20 matches its low 16 bits over pools 0..3] — so the
-    // seed copies e.id verbatim (no load-time assignment). Spawn order mirrors the file
-    // order in Mission_LoadBMSFile @0x40f4e0: items -> buildings -> markers -> organics.
-    // Command 123/124/125 boarders spawn ON FOOT and walk in through the infantry
-    // think's board leg (infantry_board.cpp), exactly like retail — spawn stores
-    // only the order (slot+148/+152 via init_infantry).
-    // [orig: Entity_SpawnFromBMSRecord @0x40e9f0 stores the order; the walk/attach
-    //  is Entity_UpdateInfantryAI @0x4b9910]
-    // A pool-1 item gets an AI brain when its type authors a CONTROL seat (ctrlx/drvrx
-    // userpoints = a drivable vehicle) — the stand-in for the def AIData attrib gate
-    // until the item-def AI classes are plumbed to promote (D-AI-11). A pure-gunner
-    // emplacement remains brainless itself; its attached organic owns and pumps the
-    // parent's embedded weapon slot. [orig: every AIData item gets the 812-byte component
-    // at spawn; Entity_SpawnFromBMSRecord @0x40e9f0; UseGun swap @0x546c42]
-    auto item_is_drivable = [&](int32_t type_id) {
+	// Spawn actors + AI brains (organics are AI-driven; vehicles get brains in the vehicle
+	// phase). The net id every trigger/action references is AUTHORED in the record —
+	// [orig: Entity_SpawnFromBMSRecord @0x40e9f0 copies record dword @+8 to entity+124;
+	// EntityPool_FindByNetId @0x4f0a20 matches its low 16 bits over pools 0..3] — so the
+	// seed copies e.id verbatim (no load-time assignment). Spawn order mirrors the file
+	// order in Mission_LoadBMSFile @0x40f4e0: items -> buildings -> markers -> organics.
+	// Command 123/124/125 boarders spawn ON FOOT and walk in through the infantry
+	// think's board leg (infantry_board.cpp), exactly like retail — spawn stores
+	// only the order (slot+148/+152 via init_infantry).
+	// [orig: Entity_SpawnFromBMSRecord @0x40e9f0 stores the order; the walk/attach
+	//  is Entity_UpdateInfantryAI @0x4b9910]
+	// A pool-1 item gets an AI brain when its type authors a CONTROL seat (ctrlx/drvrx
+	// userpoints = a drivable vehicle) — the stand-in for the def AIData attrib gate
+	// when no model/profile metadata is supplied by the embedder. A pure-gunner
+	// emplacement remains brainless itself; its attached organic owns and pumps the
+	// parent's embedded weapon slot. [orig: every AIData item gets the 812-byte component
+	// at spawn; Entity_SpawnFromBMSRecord @0x40e9f0; UseGun swap @0x546c42]
+	auto item_is_drivable = [&](int32_t type_id) {
         for (const ItemSeatSpec &spec : opts.item_seat_specs) {
             if (spec.type_id != type_id) continue;
             for (const Seat &s : spec.seats) {

@@ -133,6 +133,13 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
 **Original-bug / garbage class** (basis:
 [ADR 0003](0003-no-raw-passthrough-create-from-scratch.md)).
 
+- **D-VEH-2** — water-ring removal clears the vacated tail of the compacted
+  128-slot bank. Retail leaves the last active row duplicated when a full
+  bank expires, so the same-index expiry loop can fail to terminate.
+  Clearing the tail preserves all surviving rings and bounds retirement;
+  the saturation regression covers all 128 slots. Accepted as the bounded
+  implementation of the existing lifetime contract (PR #640, 2026-09-07).
+
 - **D-RORD-6** — the two original sort-key quirks (opaque key bits 15+ carry residual
   stack garbage; the transparent key lags one strip within a render object) are not
   reproduced — reproducing either manufactures garbage. (Ratified at REN-3; entry

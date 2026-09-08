@@ -1,39 +1,32 @@
-# Vehicle client-side movers & contact solves — reverse-engineering record
+# Vehicle motors, state and presentation — reverse-engineering record
 
-The client-executed subsets of the per-family vehicle movers (the D-NET-196
-prediction legs), the boat platform solve, the shared suspension solvers, the
-cbik (bike) mover, and the aircraft contact solve. Implementing code:
-`engine/runtime/world/vehicle_motor.cpp` (the family `*_client_tick` movers +
-`watercraft_platform_solve`), `engine/runtime/replication/client_replica_pipeline.cpp` (the
-per-class row chases), with the joiner wiring in
-`godot/src/simulation/simulation_net.cpp`. Binary: retail
-`Jointops.exe`, imagebase `0x400000`, IDB `Jointops.exe.kong.i64` — every
-address below is absolute in that image. The between-update mover architecture
-(stage-only reads, the class table, the chase templates) is
-[`../net/novaworld-net-re.md`](../net/novaworld-net-re.md) §5.38e; divergences
-are tracked in the ledger's **D-NET-196** row (and D-NET-161 for the family
-deferrals) — this record hosts the witnesses, the ledger owns the catalog.
+Authority simulation and client prediction for ground, tank, bike, boat,
+amphibious and aircraft families, including selector-zero motors, mounted
+animation, HUD state, sound, trails, rotor wash and wreck lifecycle.
+The implementation lives in engine/runtime/world/vehicle_*.cpp, the shared
+carrier/collision/AI/destruction modules, and the Godot presentation adapters.
+Binary: retail Jointops.exe, imagebase 0x400000, IDB Jointops.exe.kong.i64.
+Every address below is absolute in that image. The wire/chase architecture
+is [net-re section 5.38e](../net/novaworld-net-re.md).
+
+Sections 1 through 10 retain the dated instruction-level research and the boundaries
+of the earlier client-only ports. Their historical deferred/unported labels
+are superseded by sections 11 through 36 and the current table below. D-NET-161,
+D-SND-17 and D-ITEM-15 are FIXED by PR #640. D-NET-196 retains its separate
+organic body-conform and authority-smoothing scope. D-VEH-2 records the
+bounded water-ring retirement correction.
 
 ## Verdicts
 
 | Component | Verdict | Evidence |
-|---|---|---|
-| Family health cadence, ground submersion, rotor timing, turret slew and track phases | MATCHING (read-only grill; regression-pinned port, 2026-09-07) | Section 11; `vehicle_motor`, `vehicle_part_anim`, `vehicle_mount` |
-| Renderer-selected suspension/track/turret controls | MATCHING for the modeled channels; tank six-probe suspension and helo gear remain unported | Section 11; `netsim_present_rows`, `simassets_item_traits`, GUT `mission_present_pass_test.gd` |
-| Mounted panel texture admission | MATCHING (read-only grill) | Section 11; `hud_frame_compiler` |
-| Watercraft mover client subset (`@ 0x48D480`) | MATCHING — ported (`watercraft_client_tick`) | §1 spec; `watercraft_client_motor` ctest (glide/coast/steer + the witnessed −167/−8350 vertical legs) |
-| Watercraft mover AUTHORITY half (`@ 0x48D480`, gate `@ 0x48DF8C`) | MATCHING — ported (`tick_watercraft_motor` + `AiSystem::watercraft_ai_drive`; shared `watercraft_motor_core`) | §1.12 spec (witnessed 2026-08-06); `watercraft_client_motor` ctest authority legs; `00trg_defense_probe.gd` (host boats drive their event routes) |
-| Aircraft mover client subset (`@ 0x490310`; cpln thunk `@ 0x45D6F0`) | MATCHING — ported (`aircraft_client_tick`) | §2 spec; air glide + altitude-hold + abandoned-hover ctest legs |
-| Aircraft mover AUTHORITY half (`@ 0x490310`: the AI flight block, the health machine, the rotor gate, the drains) | MATCHING — ported 2026-09-01 (`AiSystem::chel_ai_drive` + the authority legs of `aircraft_client_tick`) | §1.13 spec; `vehicle_mount` (`test_helo_ai_flight`, `test_helo_authority_health`) |
-| Boat platform solve (`@ 0x481870`) | MATCHING — ported, client subset (`watercraft_platform_solve`) | §3 spec + §4 solver interiors; settle/level/roll-stability/gravity bench legs |
-| Shared suspension solvers (`@ 0x46C8E0` / `@ 0x46B140`) | witnessed — the Z/fit paths ported inside the platform, air, and ground solves; the bike's `+0x2FC` / `+0x460` fall arm is ported, while the force-based wreck-tumble machinery remains unported | §4 / §9 |
-| cbik mover client subset (`@ 0x483FE0`) | MATCHING — the four family deltas ported into the shared ground core | §5 spec; the bike bench leg (gravity 250 / vZ cap / airborne yaw vs Ground) |
-| Aircraft contact solve (`@ 0x47EF10`, defined 2026-07-31) | MATCHING — ported, client subset (`aircraft_contact_solve`, 2026-08-01) | §6 spec; landing/ramp-conform/water-hysteresis/sleep bench legs in `watercraft_client_motor` |
-| Ground/tracked contact solve (`@ 0x47C1C0`) | MATCHING — ported, client subset (`ground_contact_solve`, 2026-08-05) | §7 spec; the wheel-clearance rest + drop-landing bench legs in `watercraft_client_motor` |
-| Wheeled (ctan) contact solve (`@ 0x475DE0`) | MATCHING — ported, client subset (`wheeled_contact_solve`, 2026-08-06) | §8 spec; the tank rest/drop bench legs |
-| Light (cbik) contact solve (`@ 0x479600`) + 2-corner chassis fit (`@ 0x468A50`) | MATCHING — ported, client subset (`light_contact_solve`, 2026-08-06), including the contacted-wreck fall arm; the lean smoother `@ 0x45B2C0` is a named FPU deferral | §9 spec; the bike rest/drop/wreck-fall bench legs |
-| Tank (ctan) mover deltas (`@ 0x488AB0`) | MATCHING — the witnessed family deltas ported into the shared ground core (2026-08-06) | §10 spec; the tank family-delta bench leg |
-| Aircraft local-driver input map (`@ 0x490310` occupant block) | MATCHING — ported (`stage_air_vehicle_input` + the both-command blend, 2026-08-06); analog collective = named deferral | §10.4; the air local-pilot gate bench leg |
+| --- | --- | --- |
+| Full and selector-zero motors; amphibious dispatch | Ported for authority and prediction | Sections 11, 16, 26, 30 through 31; vehicle_motor, aircraft_client_motor, watercraft_client_motor |
+| Model contacts, springs, traction, chassis and carrier motion | Ported | Sections 12 through 15, 19 through 20, 22 through 23, 27; collision, vehicle_suspension, vehicle_mount |
+| Occupancy, AI, death and respawn state | Ported | Sections 17 through 18, 24 through 27; ai, destruction, vehicle_mount, mission_mount |
+| Wheel/track/turret/gear and mounted-body animation; HUD state | Ported through renderer-owned channels and existing HUD snapshot | Sections 11, 14, 21; vehicle_part_anim, netsim_present_rows, simulation and attachment GUT suites |
+| Ground/boat/aircraft sound and contact edges | Ported | Sections 11 through 13, 29, 32 through 33; vehicle_motor, ambient_mixer, mission_audio |
+| Wreck bone banks, W1 through W4 trails, rotor wash, foliage sway and water rings | Ported | Sections 28 through 29, 32; destruction, vehicle_part_anim, vehicle_trail_present_pass, shader_resource_contract |
+| Full water-ring bank expiry | PERMANENT bounded-pool correction | D-VEH-2; saturated 128-slot retirement regression; ADR 0022 |
 
 ---
 
@@ -53,7 +46,7 @@ integration. The per-record chase (interp) is already ported; it is recapped onl
 for ordering and for the stale-speed decay it owns. **2026-08-06: the AUTHORITY
 half (the gated MoveOrder merge/capsize and the INPUT block's player/AI/parked
 legs) is witnessed in §1.12 and ported — this record now covers the full
-function minus the cited deferrals.**
+function; the subsequent closure work is recorded in sections 11 through 36.**
 
 Conventions: positions/velocities are 16.16 fixed (1.0 = 0x10000 world unit); angles are
 32-bit BAM; `>>` is the x86 `sar` (arithmetic); `(a*b + 0x8000) >> 16` denotes the exact
@@ -3839,12 +3832,10 @@ cadence/authority, submersion, sound transitions, rotor timing, wrapped track
 math, turret commit boundaries and snapshot transport. GUT covers channel
 updates and ground-to-tank-to-helo ownership changes.
 
-D-NET-161 and D-SND-17 remain open. Tank TIRE00..13 needs its distinct six-probe
-state (+0x2D4..+0x2E8); publishing the ground six-tire layout would be wrong.
-Helo gear +0x470, downwash/bone-trail effects, contact-driven skid/high-rev
-sound, dedicated aircraft loop families, and remaining force/contact/death
-state tails are explicit follow-ups. IDB instruction annotations record the
-phase, track, rotor-call and turret-commit witnesses; no names changed.
+The subsequent sections complete the tank's fourteen tire channels, helo
+gear, contact sound, all movement-loop families, rotor wash and the force,
+contact and death-state machinery. Renderer ownership is retained: simulation
+exports the selected control state, and presentation composes it with PANM.
 
 ## IDB changes made during these sessions
 
@@ -3884,14 +3875,768 @@ renamed `Entity_UpdatePlayerInfantryMovement` → `Entity_UpdateLightVehiclePhys
 (the cbik mover) — both historic misnomers; witness comments on the two solves
 (§8/§9 contract summaries + port cross-references). Saved.
 
-## Open items
+## Current coverage
 
-D-NET-161 and D-NET-196 retain vehicle-vs-vehicle contact, contact-direction
-and tire slip, remaining crash-request/force-based wreck transitions, the
-bike lean smoother, analog collective, pilot burn-yaw follow, spawn-parent
-anchor lift, and vehicle deck-carrier/contact integration. Family contact
-solves, authority boat platform motion, spring sinks/oscillators, track
-phases and mover turret slew are already ported. Animation and sound
-residuals are listed in section 11; D-SND-17 remains open. The
-`Math_FixedPointMatrixToEulerAngles` interior (`@ 0x613310`) and
-`Transform_ComparePartial` scope (section 6.15) remain research items.
+The vehicle work in this record is implemented through section 34. Native
+regressions pin authority/prediction gates and the fixed-point transitions;
+GUT exercises snapshot transport, renderer ownership and retail attachments.
+These checks establish the covered branches, not an exhaustive retail LAN
+or pixel-by-pixel comparison. D-NET-196 remains open for organic body-conform
+presentation and its authority smoothing arm, outside the vehicle consumers.
+
+## Section 12: model probe contacts and impact response (2026-09-07)
+
+`engine/runtime/world/collision_vehicle.cpp` replaces the single raised hull
+sphere with the family solvers' actual wheel and spine arrays. The common fold
+is in `vehicle_contact.cpp`; ground, tank, bike, aircraft and boat callers retain
+their own probe counts, radii, second-pass depth buffers and torque decay.
+
+| Component | Verdict | Evidence |
+| --- | --- | --- |
+| Model contact probes and graded lateral forces | MATCHING | `collision`: deck support, 0/1/2/3 slope grades, stale-candidate prefilter and mounted-child exclusion |
+| Shared severe-impact health and momentum | MATCHING | `vehicle_motor`: exact authority damage, client health preservation, mass-weighted velocity/position transfer and sustained-contact edge |
+| Family integration | MATCHING for the shared contact fold | `vehicle_mount` wall drive; `aircraft_client_motor`, `watercraft_client_motor` |
+
+The witness is retail `Jointops.exe`, imagebase `0x400000`,
+`Jointops.exe.kong.i64`, confirmed before the research. The model half of
+[orig: Entity_CheckCollisionState @ 0x462A30], sites
+`@ 0x462DFB..0x4632CC`, matches the boat twin
+[orig: Entity_ComputeCollisionForces @ 0x462150], sites
+`@ 0x462561..0x462A24`:
+
+- The source's existing proximity slice supplies candidates. A candidate whose
+  ground-link chain reaches the source within three hops is excluded. A heavy
+  source wakes a much lighter/smaller player-control candidate with Flags 0x40
+  and its type-1 contact timestamp; otherwise every probe queries the posed
+  model through the existing bone-contact SAT implementation.
+- The query mask is 8, or 24 when the source's ItemDefAttrib2 low byte has bit 7.
+  Callback-only targets do not supply physical forces. Contact flag 0x800 feeds
+  the source's auxiliary 0x40 flag. Indoors skips terrain and preserves models.
+- Vertical force is always retained. The radial planar dot gate controls the
+  lateral response. Absolute force verticality selects full, half or quarter
+  lateral force at severity 3, 2 or 1; climbable contacts retain vertical
+  support at severity 0. The same signed, low-dword ricochet corrections adjust
+  vertical support. Severity 3 retains the last hit entity and wall-probe flag.
+- Source mass and radius gates use strict comparisons. The optional pushable
+  branch reads a present brain with commanded speed zero, not an AI disable
+  byte: the decompiler's padded field name hid the actual `brain+0x220` read.
+
+[orig: Entity_ProcessTrackedVehiclePhysics @ 0x47C1C0], sites
+`@ 0x47CD00..0x47CF55`, and the bike/air siblings apply authority-only damage
+when the immunity flag is clear. Unit type 3 requires impact and saved-pose
+movement both above 29300, then dies. Other ground/bike/air hulls lose truncated
+absolute post-torque speed times mass times the retail float multiplier
+(0.000025, halved for mass at most 3). The boat instead loses 100 HP above the
+same impact/movement thresholds
+[orig: Entity_ProcessPlatformPhysics @ 0x481870], sites
+`@ 0x482336..0x482402`. The tank has no shared severity-three health branch;
+its other impact tests belong to its family solve. Reaching zero clears the
+last attacker.
+
+The scrape edge requires impact above 2344 and clear brain sound bit 0x10.
+Its SSAudio3 lookup and mass-weighted momentum exchange share that edge; the
+exchange also runs on clients. The contacted vehicle gains three quarters of
+`relative_velocity * our_mass / total_mass` in velocity and one quarter in
+position. Severity 0/1 clears the edge; severity 2 preserves it. The second
+force pass scales planar separation and the caller's saved depths by the other
+vehicle's mass share. Boat retains its seventh unscaled depth. The terrain-only
+quarter-speed cut now requires no hit entity, as the original does.
+
+The ground movement-sound call's final argument is `entity+0x3D4 > 30`, an
+airborne streak, rather than immediate model-contact severity
+[orig: Entity_UpdateVehiclePhysics @ 0x48AF00], sites
+`@ 0x48D181..0x48D1C7`. The caller now supplies that state. The tests' old
+center-sphere assumptions were replaced with explicit probe fixtures; the wall
+route includes model bounds, a valid road terrain layout and saved-pose stamps.
+
+
+## Section 13: traction, wheel slip and movement effects (2026-09-07)
+
+`engine/runtime/world/vehicle_traction.cpp` implements the contact-direction
+state consumed by the ground, tank and bike movers. All findings below are
+anchored to retail Jointops.exe; the class table identifies the families even
+where an older curated function name describes another family.
+
+| Component | Verdict | Evidence |
+| --- | --- | --- |
+| Ground/bike handbrake slip and grip recovery | MATCHING (behavioral proof) | `vehicle_motor`: held direction, inclusive timer boundary, one-degree recovery and wheel carry reset |
+| Tank pivot and track phase ordering | MATCHING (behavioral proof) | `vehicle_motor`: retained direction and previous-tick yaw-rate integration |
+| Skid sound, rev edge and rigid masked particles | MATCHING (behavioral proof) | `vehicle_motor`: rising edge, airborne suppression, strict rev threshold, transformed points, range cadence and snow alternate |
+
+[orig: Entity_UpdateVehiclePhysics @ 0x48AF00] and
+[orig: Entity_UpdateLightVehiclePhysics @ 0x483FE0] retain the Q16 contact
+vector through a handbrake skid. Ground captures it with both rear pads in
+contact; bike needs its rear wheel. Uphill Z clamps to zero before normalization.
+Releasing the brake starts a hold of five times the authored `tireslip` ticks,
+including the final boundary tick. Afterwards an opposing direction decelerates;
+an aligned direction either clears or turns by one degree using the original
+raw cross-product axis. Capturing, holding and releasing are distinct operations.
+The wheel phase advances before contact and uses the occupant input gate (the
+bike inhibits it on LeanRight). The large negative slip carry locks at the
+retail constant and decays after grip recovery.
+
+[orig: Entity_UpdateTankVehiclePhysics @ 0x488AB0] uses the steering angle for
+its four-degree pivot gate. A pivot can retain a previous contact direction;
+slow realignment turns by five degrees. Track animation integrates the previous
+stored yaw rate before the current velocity/yaw block replaces it. Ground, tank
+and bike retain the solved-contact and airborne-streak fields through their
+contact tails. Tank and bike bias an existing direction downhill after descent
+[orig: @ 0x47951E; @ 0x47C0EB].
+
+The movement sound pass uses the solved direction and airborne streak. Slot 25
+starts on a new skid edge; slot 33 requires an occupant, an airborne streak above
+30 and a rev counter above 124. The counter increments after the check. Missing
+slot 25 falls back to `TIRE_SKID`; slots 26/36 fall back to `IMP_DEBMED_LAND`
+(the global name table at `@ 0x82F590`). These sounds use the existing distance
+delay queue. The contact scrape edge and shared impact response are in section 12.
+
+[orig: Entity_SpawnBoneEffectsAtMask @ 0x458750] resolves the first sixteen
+matching authored `particlefxs` userpoints, transforms their rigid position and
+Q16 direction, and emits a transient effect for the next source tick. Camera XY
+range is 600 units on every fourth tick, 300 on intervening ticks. Surface type 3
+selects `particlefxs_snow` when authored. Entity `+0x44C` suppresses the emitter.
+The native effect queue crosses a typed Simulation drain to the Godot particle
+presenter; no physics or effect selection is implemented in the shell.
+
+## Section 14: tank springs and renderer channels (2026-09-07)
+
+The tank uses six compression channels. Before its probe solve it snapshots two
+middle channels as the averages of wheel 0/3 and wheel 1/2
+[orig: Entity_ProcessWheeledVehiclePhysics @ 0x475DE0,
+@ 0x476432..0x476473]. Belly probes follow the relevant compression too.
+The collision function's optional output is positive terrain separation, written
+before the terrain broad phase and replaced by the second contact pass. A gap
+larger than the stored impulse arms half that gap while amplitude is below 500
+[orig: @ 0x478643..0x478706]. A grounded penetrating wheel consumes this impulse
+as mass times gap, caps its energy at 65536, and adds 1.25 times that energy to
+the impact sink.
+
+[orig: Suspension_CompressWheelLinear @ 0x45CEB0] drains the linear spring
+energy by half the low-dword spring/step product. The tank caps each step at
+1023. Grounded release uses
+[orig: Suspension_OscillateWheel @ 0x45D240] with the slow float phase step
+0.08722222596406937; airborne wheels do not run free oscillation. The common
+tail releases compression into the latest positive terrain gap
+[orig: @ 0x4790A1..0x4792FE]. `vehicle_suspension` exercises these numerical
+boundaries; `vehicle_motor` covers the integrated family path.
+
+[orig: HUD_CacheEntityDebugStats @ 0x449C10] is the tank renderer cache despite
+its curated name. It publishes fourteen tire words from the six channels:
+repeated front/back values, pairwise means and two triplet means. Both triplets
+multiply the retail float 0.33; the x87 stack retains the constant across the
+first conversion, which Hex-Rays obscures. Nonnegative clamping follows each
+mean. `vehicle_part_anim` pins all fourteen values and negative inputs. The
+present-row schema, native appliers and wire memoization table carry all fourteen
+channels under tank-specific ownership.
+
+The helicopter's gear word is unsigned `entity+0x470`
+[orig: HUD_CacheEntityDisplayInfo_Helicopter @ 0x48F1A0,
+load @ 0x48F1C8]. Its mover approaches 65535 by 1598 per tick when terrain
+clearance is at least five units, otherwise approaches zero by the same step
+[orig: @ 0x492676..0x492743]. `aircraft_client_motor` exercises the threshold
+and both clamps; renderer ownership and projection are in `vehicle_part_anim`.
+
+IDB checkpoint: entry comments were appended at `@ 0x462A30`, `@ 0x48AF00`,
+`@ 0x483FE0`, `@ 0x488AB0`, `@ 0x458750`, `@ 0x475DE0`, `@ 0x449C10` and
+`@ 0x48F1A0`, with implementation cross-links. Existing names and types were
+preserved and the database was saved.
+
+
+## 15. Moving supports and matrix extraction
+
+Witness: `Entity_UpdateVehiclePhysics @0x48AF00`, bike `@0x483FE0`, tank
+`@0x488AB0`, boat `@0x48D480`, aircraft `@0x490310`, and
+`Math_FixedPointMatrixToEulerAngles @0x613310`.
+
+Ground, bike and tank refresh `groundEntity` on the global entity-update
+counter modulo eight (`@0x48AFB9`, `@0x484099`, `@0x488B69`). Boat and aircraft
+use `(current_tick + 36*DcbId) & 7`. The zero-radius aircraft ground sample
+subtracts brain[11] before the ray and adds the live/dead ground offset after
+it. Brain[11] originates in the absolute CMDL lower Z bound in
+`Entity_InitHelicopterAIFromDef @0x4683C0`.
+
+A valid support carries the hull through the complete saved-to-current parent
+pose before network interpolation. This is the same Q22 inverse-old/forward-new
+rotation and biased point transform used by the throwable follower, without
+the infantry capsule offset or radius detach rule. `carrier_motion.cpp` owns
+that shared transform; `vehicle_contact.cpp` owns refresh and vehicle publication.
+The native mover test covers deck acquisition, translation and rotation, then
+release on the next failed ground ray.
+
+Matrix-to-Euler extraction removes yaw, then pitch, using individually shifted
+signed Q22 products before each `atan2`. It negates matrix elements 4 and 6;
+yaw uses the negative `683565275.5764316` scale. Subsequent sine/cosine calls
+use `1.4629627251502471e-9` radians per BAM, which is 30.5 ppm above the
+mathematical inverse. Thus compound rotations do not round-trip exactly.
+The shared `collision_matrix_to_euler` now retains these individual truncations
+and signed-zero quadrant selection. Platform plane fits and bike fall axes
+consume it, including yaw publication for crashed hulls.
+
+## 16. Aircraft controls and countermeasures
+
+Witness: `Entity_UpdateAircraftPhysics @0x490310`,
+`HUD_CacheEntityDisplayInfo`'s helicopter caller `@0x48F1A0`,
+`AIEntity_ReleaseFlareCountermeasures @0x455EF0`,
+`Entity_InitVehicleAI @0x460200`, and `Weapon_FireProcess @0x53F5B0`.
+
+The collective keeps brain[548] (climb above ground) distinct from brain[524]
+(absolute altitude). Strictly below twice the bound radius, keyboard/analog
+collective changes climb; at or above that boundary it changes absolute
+altitude and derives climb. The following reconciliation uses an inclusive
+boundary. The absolute ceiling is `0x1000000`; negative climb floors to zero.
+Zero climb then parks altitude at ground minus `0x4000`, clears both cyclic
+commands, and holds hull heading. Keyboard `0x40/0x80` takes precedence over
+the signed fourth analog byte shifted by seven. That byte is local input;
+retail's C2S 0x0C carries only the three cyclic/pedal bytes.
+
+Analog pedals subtract `(192426*analogZ)>>1` from pilot yaw unless freelook
+is held (`@0x491083..0x49108C`). Critical-burning aircraft separately subtract
+2886390 from pilot yaw every airborne tick above one unit of target clearance;
+the authority hull spiral still runs only on its health cadence. Pilot pitch
+feeds the +0x45C relative-view servo: `(error+4)>>3`, steps beyond +/-1924260
+become +/-3848520, occupied result clamps to [-298261600,0]. The unoccupied
+arm adds its own signed value without that clamp. The helicopter renderer
+reads +0x45E signed for its brainless GUNPITCH fallback (`@0x48F1D5`); brain
+gun registers override it. Dead hulls finish carrier/interpolation and received
+command mirroring, then skip live controls, attitude integration and gear.
+
+Flare input scans weapon/seat-list slots 1 through 9, reading each associated
+seat occupant's MoveOrder bit 0x20. The pilot entry is excluded. The 64-phase
+boundary clears brain+0x318 bit 2; nonzero climb plus a pressed seat fires once
+and sets it. AI fire-timer callers use the same dispenser directly.
+
+The dispenser requires a brain and chooses GROUND_FLARE for profile type 2,
+FLARE otherwise. Model initialization retains the first 16 case-insensitive
+FLARE-prefix userpoints (across the whole point table). With no points, fire
+uses the hull pose. With points, position and direction use the full scaled
+placement matrix; a zero local direction Z becomes 24576 before rotation.
+Yaw is atan2(Y,X); pitch uses atan2(Z,truncated capped horizontal length).
+The temporary equipped-ammo byte does not escape the call.
+
+`vehicle_countermeasures.cpp` joins these inputs to `RoundSim::fire_source`.
+Launch presentation belongs to the vehicle; the primary occupant owns the
+round. A remote client presents only. Authority/offline fire uses the existing
+round ring and spawn path; a local joiner queues the ammo-indexed C2S fire
+through the same sequence/pose encoder as the player weapon. The minefield
+source-fire caller shares this mechanism.
+
+
+## 17. Wreck callback dispatch and shared falling physics
+
+`Entity_UpdatePool1Slot @0x4B8DD0` independently invokes the think/death
+callback at +0x1C8 when its age permits (`@0x4B8E2A..0x4B8E3C`), then the
+installed update callback at +0x1C4 (`@0x4B8E41..0x4B8E53`). Consequently a
+vehicle dying/dead AI tick can explicitly call generic falling physics as
+well as running its installed death-motion callback that frame. Frame-based
+deduplication would change that behavior. Once death installs an update
+callback, the live family mover no longer runs.
+
+`destruction_motion.cpp` ports `Entity_ProcessFallingDeathPhysics @0x461D30`
+as the shared movement operation. It stamps the full saved pose before
+checking StaticDeath. Otherwise gravity is -334 even when every velocity
+was initially zero; fully submerged hulls halve planar velocity and use
+vertical -4096. The ground ray includes model supports. The upright rest
+line subtracts the absolute husk section-0 minimum Z; an inverted hull adds
+the absolute maximum Z. A step at or below that line retains the previous
+full pose and clears only vertical velocity. It neither snaps to ground nor
+emits the specialized falling callback's landing blast. The dying state
+uses this operation before its stopped/still test.
+
+
+## 18. Vehicle spawn anchors and wreck respawn
+
+`Game_StartMission @0x525F80..0x526071` grounds player-control vehicles,
+executes their update once, then records the resulting six-word pose, support
+and team. Attached spawn positions use the support-local transform from
+`Entity_TransformWorldToParent @0x43BB50`; respawn resolves it with the live
+support via `Entity_TransformParentToWorld @0x43BD00`. These helpers rotate
+position through yaw/pitch/roll, but only subtract/add the parent's yaw from
+the stored angles. A missing or dead support blocks respawn. The stuck check
+uses the same live anchor instead of a fixed mission-world position.
+
+`AI_TickVehicleDead @0x467EA0` advances the wreck timer and calls falling
+physics before authority-only removal/respawn decisions. A player-controlled
+wreck is removed when flag 0x1000 is set or vehicle respawn is disabled. After
+15 ticks, a nonzero cooldown decrements; a transition from one to zero restores
+one and returns, while other values continue. The overlay-wait arm moves the
+wreck by 5000 units in X/Y and buries it 1000 below terrain. Otherwise the saved
+pose/team and waypoint registers are restored before `Entity_Respawn @0x45FF40`.
+The implemented reset restores health, clears seats and death state, resets
+motion/springs/chassis and controls, sets flags to preserved 0x400 plus 0x22000,
+sets vertical speed to -501, and resamples the ground.
+
+`vehicle_lifecycle.cpp` owns these transitions. `destruction` tests cover the
+15/16-tick boundary, cooldown one/two, team/health/suspension restoration,
+moving/rotating supports, dead-support rejection and client/authority removal.
+
+## 19. Resting contacts and orientation recovery
+
+The five contact solvers test all three angular rates. Ground, tank and
+helicopter also require zero wheel energy and free-fall sinks; bike retains
+its separate occupied/crash gates. Boat rest additionally requires a saved
+pose with identical X/Y and Z difference below 500. Rest undoes this tick's
+vertical step and halves vertical speed. Collision wake flag 0x40 expires only
+after more than 200 logic ticks, after the resting early exit.
+
+The parked bit 0x10 is authority-owned. `Entity_BuildOrientationFromVectors
+@0x458DF0` rebuilds an inverted resting attitude and disables movement effects;
+`Entity_RebuildOrientationMatrixFromAxes @0x4632E0` rebuilds upright and clears
+retained chassis rotation. Both normalize the forward axis and derive side/up
+from the requested vertical axis, then use the shared retail Euler extractor.
+The names alone do not describe which direction they choose. The common
+resting logic is in `vehicle_contact.cpp`.
+
+## 20. Retained chassis forces
+
+`Entity_ComputeChassisOrientation @0x463940` consumes four five-word force
+records. Nonzero rates normalize their direction, displace the corresponding
+corner, fit the resulting frame, and append the old-to-new rotational delta
+to the retained matrix. All force records clear after consumption.
+`Entity_ClearSuspensionState @0x4592B0` resets that matrix, quaternion, blend
+clock and active flags without clearing the independent wheel springs/sinks.
+
+`Entity_ApplyBoneAttachmentTransform @0x45A750` applies the retained matrix
+before advancing its timed identity blend. The matrix product sums all three
+products before one Q22 rounding bias (`@0x613940`). Quaternion conversion and
+slerp preserve the retail axis swizzle, 0.01 linear threshold, and unnormalized
+interpolated quaternion (`@0x615C70`, `@0x615E20`, `@0x615A70`).
+
+`Entity_ProcessWheeledVehicleSuspension @0x46B140` distinguishes a newly armed
+crash, continued fall, wreck, inverted slow/fast recovery and an ordinary
+four-corner fit. Its slow inverted arm reads all seven contact slots, including
+spine 4 and 6, with unequal 8000/800 forces. Fast recovery also applies planar
+velocity-directed forces. `vehicle_chassis.cpp` implements this state machine
+for ground and aircraft contacts. The motor, aircraft, suspension and
+destruction regression groups pass with this integration.
+
+## 21. Mounted driver body animation
+
+`Entity_UpdateInfantryPlayerBody @0x4B40E0` and `Entity_UpdateInfantryAI
+@0x4B9910` both derive sit_N from the seat name. State 100 (sit_24) changes to
+110 below hull roll -71582784, 109 above +71582784, then 108 for negative
+speed, then 107 for absolute speed below 200. These are ordered assignments
+with strict boundaries and no clip-presence gate. It is hull roll, not steering
+input. The shared mounted-state resolver implements the same rule for both
+body paths; other seat states are unaffected.
+
+
+## 22. Bike and planing-boat lean
+
+The lean error is the side axis's Z component (Q22 matrix element 9 shifted
+by six), not the up axis's Y component. The public motor tests cover both
+signs. A sleeping bike does not run the lean servo; a newly contacted hull
+carrying flag 0x40 does.
+
+Bike `Vehicle_UpdateTurretRotation @0x45AEA0` runs only when not crashed,
+not settled and not airborne. Above speed 4096 it enables the lean override;
+steer magnitude above two degrees applies authored lean velocity unless the
+signed slope exceeds the authored lean limit. Otherwise error above 256
+drives roll back toward zero. The high-speed deadband retains the old roll
+rate; the low-speed deadband clears it. The +45C previous steering angle,
++468 steering delta, +464 envelope origin and +470 interval retain their
+separate update gates. The caller supplies turnRate=0 and scaleFactor=1.
+
+Boat `Entity_SmoothHeadingToTarget @0x45B2C0` is a hull-lean routine despite
+its curated name. It runs for planing, afloat boats above speed 8192. It uses
+a two-degree steering deadband, slope deadband 160, authored lean limit,
+and retained acceleration/deceleration interval. The interval stores only
+16 bits; its progress clamps at one. The negative and positive arms retain
+their different wrap/reversal gates and signed clamps. The small-steer
+corrections are -2386239/+2386092 BAM. Outside the active planing branch,
+the caller uses deadband 240, clears the lean override, and resets the
+interval. Normal platform fits postmultiply the retained pitch/roll lean
+and chassis transform; the settled/airborne branch runs the shared
+suspension state machine. Crashed boats also adopt fitted yaw.
+
+## 23. Crash effects, contact recovery and visual restoration
+
+The live damage smoke (+1CC) and fire (+400) are independent emitter slots.
+The motor health bands use Effect_smkSigB and the family-specific
+vehicleFireSmall/Med/Large effects; critical health plays slot 34 every
+32 staggered ticks. Tank smoke changes to large fire below criticalHp/8.
+Contact settling starts smoke and stops movement effects. The authority
+drains five health while above the critical-drain threshold; the original
+family-specific fire thresholds and parked-bit rules remain separate.
+
+Ground and tank contact tails recover their orientation after the parked
+bit clears. Ground requires an inverted up axis; tank accepts a crashed
+up axis below 8192 or a settled hull. Aircraft clear each contacted sink
+and use the opposite contact-diagonal indexing, then perform their own
+crashed/settled recovery. The tank suspension wrapper also retains its
+tilt-dependent slow-recovery force and 8000/8000 spine-pair forces.
+
+Respawn releases damage/wreck effects and publishes an intact-model
+restoration event. The presentation pass restores original child visibility
+or the static instance, clears the terrain shadow replacement, retires the
+husk, and releases owned emitter bindings. The destruction presentation
+test exercises this through real model/effect/anchor objects: 17 tests,
+174 assertions pass. Destroying a ground vehicle also kills its authored
+child emplacements, guarded by the parent's registry generation.
+
+## 24. Live death entry and aircraft death states
+
+All live movers check zero health before the regeneration/burn cadence.
+Unless already flagged dead or in the corresponding dying/dead state,
+ground/bike/tank/boat request state 21; aircraft request state 13. A missing
+current state defaults to 22 or 14 respectively. These requests were absent
+from the motor core even though the ground death handlers existed.
+
+The original aircraft dispatch rows are:
+
+| State | Enter | Tick | Event |
+|---|---|---|---|
+| 13 | AI_TransitionToDeath_Vehicle @0x4668A0 | AI_CheckLethalDamage @0x457910 | AI_HandleAlertEvent @0x457A30 |
+| 14 | AI_ResetToPatrol @0x457A70 | AI_QueueDeathSoundEvent @0x457AA0 | AI_HandleEvent_VehicleDestroyOnly @0x466BE0 |
+| 15 | Entity_ProcessVehicleDestruction @0x466A80 | Entity_UpdateVehicleAIMovement @0x461200 | consume all @0x457A60 |
+| 22 | AI_FullResetToPatrol @0x458090 | AI_CheckAliveOrDead @0x4580C0 | AI_HandleEvent_HelicopterDestroyOnly @0x468040 |
+
+Aircraft death probes lift one unit and search down 48, then add the
+intact/husk height offset and clamp to water with an occupant. State 13
+starts the immediate death initializer above ground except for the 20mm
+ammo case, sets climb command 1336, and queues event 4 when below the
+threshold. Its tick queues that event at/below the threshold or when
+stationary; otherwise climb command increases by 1336 and the work heading
+turns by INT32_MAX. State 15 resets the respawn timer, clears the team and
+target, and installs death state. Its tick leaves movement to the separate
+death callback and begins respawn checks strictly after 30 ticks, compared
+with 15 for ground.
+
+`Entity_InitDeathState @0x48F7C0` queues the authority's kz_MItemBlast,
+clears scars, spawns pieces and death sounds/effects, optionally installs
+piece physics, sets dead/husk flags and seeds the two hull spin rates.
+The immediate grounded impact uses Effect_HeloGroundHit/EXPLO_HELO_LAND;
+water uses Effect_MedSplash/EXPLO_HELO_WATER. It also releases the live
+vehicle fire slot.
+
+The idle state-22 subtype test reads AI profile +20: BOAT is one. The AIP
+parser accepts STD=0, GROUND BOAT=1/TRAIN=3, and HELO PLANE=2. An alive
+idle boat copies its pose into the work transform and sets work Z to water.
+A dead boat queues event 3; other dead idle ground rows and state 14 queue
+event 5.
+
+### Respawn marker research
+
+The authoritative selection entry is `assign_overlay_spawn_points
+@0x529E60`; 0x52A110 is an interior address. Server_TickUpdate calls it
+every 32 logic ticks. Game_StartMission resets its five lists, registers
+pool-1 type-1 vehicles by their saved spawn team, then invokes
+`build_spawn_marker_budget_list @0x529B40`. That builder requires numbered
+ChangeTeam+SpawnPoint zones at both ends of the chain, collects pool-3
+attrib2-bit-4 markers, and associates each with the nearest same-number
+zone in pools 1/2. Marker priority is its zone number when the minimum zone
+belongs to team one, or maximum-minus-marker-number when it belongs to team
+two. The selector's occupancy, group-mask and saved-pose writes are a
+distinct producer of the overlay-wait bit consumed by section 18.
+
+IDB comments for this continuation are attached to the lean, aircraft
+death/idle and respawn-marker entries above. The IDB carries the current function comments and corrected rotor-loop signature.
+
+## 25. Respawn-marker assignment
+
+The selector lives in `vehicle_spawn_markers.cpp`. Its five team lists use
+the complete registry spawn identity. Each numbered ChangeTeam/SpawnPoint
+zone supplies marker priority; the selector respects secure-team ownership,
+nearby occupancy, the saved group mask, and the vehicle's saved spawn team.
+A successful assignment writes the complete six-word spawn pose and clears
+the overlay wait. There is no retry against a lower-priority occupied choice.
+The shared lifecycle restores that pose, team, health, children, controls and
+effect ownership. [orig: assign_overlay_spawn_points @ 0x529E60;
+build_spawn_marker_budget_list @ 0x529B40]
+
+The parked/player input fold writes the current state only. The pending
+state remains available to the state callback: zero-health requests cannot
+be overwritten by the same tick's idle stamp. `vehicle_mount` exercises
+occupied and unoccupied ground/boat death through the real AI tick.
+
+## 26. Aircraft AI combat and flight controls
+
+`ai_aircraft.cpp` implements the aircraft combat and evade states, formation
+offsets, flight phases, terrain clearance, target selection and the primary/
+secondary weapon requests. The control modes 0/1/2/3 and 10000/10005 retain
+their separate heading, altitude and speed budgets. The AI profile parser
+carries the authored fixed-point values to these consumers; it does not
+rescale them again in the motor.
+
+Weapon cones and muzzle cycling use the posed model and the first sixteen
+authored user points. Mounted emplacements retain their own relative aim
+frame. Flares use the authored countermeasure weapon scan and authority/
+prediction role gates. `ai`, `vehicle_mount` and
+`aircraft_client_motor` pin the live decisions and movement.
+The witness map in `ai_aircraft.cpp` records each original state callback.
+[orig: AI_EnterState_AircraftCombat @ 0x466330;
+AI_TransitionToDeath_Infantry @ 0x465F60;
+AI_UpdateHelicopterCombatMovement @ 0x461080;
+AI_UpdateAircraftCombat @ 0x471710]
+
+## 27. Recoil, impact, landing and crew death
+
+`vehicle_impulse.cpp` carries mounted-weapon Action values from DEF parsing
+to the chassis. A gunner's mounted tank receives the authored recoil at its
+posed bounds. Heavy projectile hits use incoming projectile velocity,
+the signed wrapped weight threshold and the original two-stage force
+assignment. The contact solver preserves that impulse across its first
+solve. [orig: Entity_InitVehicleSuspensionGeometry @ 0x474580;
+Entity_SetupInfantryForcePoints @ 0x475220]
+
+The bike's head-on test considers wall normals, normalizes the complete
+velocity, and uses the -57070 dot threshold. Its severity bands preserve
+the original hull damage and crew-kill distinctions. The routine formerly
+named Entity_ResetOccupantAnimSlots kills the nine occupant slots by setting
+death animation, health and attacker; it does not detach them.
+[orig: Entity_ProcessLightVehiclePhysics @ 0x479600;
+Entity_ResetOccupantAnimSlots @ 0x463B20]
+
+Landing and crush damage consume the spring depths before contact-state
+updates. Aircraft also retain the parked tail's opposite-corner force pair.
+The chassis, contact direction, flip request and recovery state are shared
+by live movement and wreck settling. `vehicle_suspension`,
+`watercraft_client_motor` and `vehicle_motor` exercise these paths.
+
+## 28. Wreck banks and shared movement trails
+
+`death_effects.cpp` owns four retained slots for each Dead/water, Fire and
+Other bank. Masks use the original x86 shift behavior; extra matching
+user points spawn transient effects after the first four retained handles.
+The loaded husk supplies the points. Only the Dead bank falls back to the
+origin when no point matches. Full placement rotation and scale position
+the effects. Fire slots roll before the water test, steam and retire on
+submersion, and restart when they emerge. Respawn releases every bank.
+[orig: Entity_InitDeathSounds @ 0x4939B0;
+Entity_UpdateDeadWreckEffects @ 0x493140;
+Entity_SpawnMaskedEffectBank @ 0x5F7620]
+
+The W1/W2/W3/W4 movement effects share a sixteen-point bank, implemented
+in `vehicle_trails.cpp`. The first allocation owns an overlapping point's
+definition; later lanes update its controls. Zero intensity releases a
+masked slot. A retained slot whose control becomes zero is distinct from a
+missing point. Camera admission, the quarter-rate/even-tick family cadence,
+wet/dry release edges, full placement transforms and the wrapped magnitude
+calculation are preserved. The Godot VehicleTrailPresenter follows these
+sampled points and retires groups by registry lifetime.
+[orig: Entity_UpdateBoneTrailEffects @ 0x4589C0]
+
+Proof: `destruction`, `watercraft_client_motor`, GUT
+`destruction_present_pass_test.gd` and
+`vehicle_trail_present_pass_test.gd`.
+
+## 29. Rotor sound, downwash, foliage and surface rings
+
+The historical name `update_vehicle_effect_emissions @ 0x528F20` is misleading:
+the function registers helicopter sound loops. Slot 7 uses lane 21, slot 6
+lane 11, and slot 5 lane 1. Medium and cruise fade/pitch curves use the twelve
+SndProf words; the lateral loop uses climb intensity and rotor pitch. The
+medium scratch value is reused by a degenerate cruise interval. The float
+reciprocal and ftol chop preserve the one-unit endpoint loss; negative lateral
+volume wraps through the unsigned word. Empty helicopters refresh these loops
+while their rotors spin down. [orig: update_vehicle_effect_emissions @ 0x528F20;
+interpolate_value_in_range @ 0x527EA0;
+Entity_UpdateHeloRotorSpin @ 0x48FA70]
+
+`rotor_wash.cpp` owns the bounded focal-wind pool. Rotor-axis rays select
+the authored RwDust/Grass/Snow/Sand/Water particle family. Stationary dry
+wash starts without dust; movement establishes the intensity that later
+decays. Particle focal-wind and repulsion flags read the same field at the
+original phase/index cadence. The shared C random stream also supplies the
+occlusion wind sampler. [orig: terrain_overlay_alloc @ 0x5CAF40;
+sub_5CB020 @ 0x5CB020; WeatherParticle_UpdateAllEmitters @ 0x5CB220;
+WindZone_ApplyVortexForce @ 0x5CB8A0;
+Terrain_CalcSectorRepulsionForce @ 0x5CBF50;
+Terrain_FindNearestAmbientSoundZone @ 0x5CBCD0]
+
+Sway renderers stay individually placed. Their five position-seeded waves
+bend the second part about its authored pivot and add the radial wind offset.
+The device composes that delta with a clean part pose each frame, preserving
+PANM and avoiding accumulated transforms. [orig: find_nearest_force_zone
+@ 0x5CB5B0; BoneCallback_Sway_World @ 0x4E2B10]
+
+Every eighth tick above a nonzero water plane, downwash can allocate a
+two-unit-grid surface ring. The 128-slot bank fades in over twelve ticks,
+fades out through tick 31 and retires at 32. The portable renderer compiles
+nine radial rows and nineteen angular columns, the camera-distance height
+bias and both UV sets. The device uses the authored wake5/wakegrad textures.
+[orig: sub_6108E0 @ 0x6108E0; sub_56BD20 @ 0x56BD20;
+CWeatherSlot_Init @ 0x5DDD80; sub_5DDE10 @ 0x5DDE10;
+create_water_surface_mesh @ 0x5DDEF0;
+render_water_surface_decal @ 0x5DE0F0]
+
+`vehicle_part_anim` pins rotor sounds, focal forces, lifetime ownership,
+material selection, foliage waves and ring geometry. Device coverage lives
+in `vehicle_trail_present_pass_test.gd`.
+
+The render callbacks are sub_5DE0F0 @0x5DE0F0 (ring geometry) and
+sub_5DDC90 @0x5DDC90 (material and texture-stage setup). The Godot shader
+implements that two-texture, unshaded draw through the compiled mesh.
+
+## 30. Amphibious mover selection
+
+The catv dispatcher reads the previous tick's afloat flag. An afloat vehicle
+runs the water mover, including its input, sound and trail branches; a beached
+vehicle returns to the ground mover. The platform draft uses half the pad
+radius for catv instead of the boat's 0.9-unit adjustment. Authority and
+prediction use the same dispatch. `watercraft_client_motor` pins both role
+paths and the absence of ground drowning while afloat.
+[orig: Entity_DispatchPhysics_catv @ 0x48F010;
+Entity_ProcessPlatformPhysics @ 0x481870]
+
+## 31. Selector-zero craft motors and suspension
+
+The installed item audit finds two drivable selector-zero craft: the LCAC
+(catv) and Indonesian landing craft (cbot). Zero selects a different motor.
+The class thunks route to Entity_ProcessInfantryPhysics @0x46E100 on land
+and Entity_ProcessAirVehiclePhysics @0x46FA00 on water; the curated IDB names
+are misleading. Both use Entity_ProcessVehicleSuspension @0x463C60.
+The direct helicopter and plane callbacks ignore this selector.
+
+vehicle_simple_motor.cpp preserves the two cores: ground cos-squared
+slope speed, unclamped opposite-sign reversal, the duplicated-X slip-length
+test, wheel phase, ground attitude impulses and gravity -167; boat
+horizontal thrust, signed longitudinal speed, 1/32 keel damping, three
+authored water waves, size-dependent bob attenuation and post-contact lean.
+Ground capsizing drains 20 HP per authority tick; the boat drains 200.
+The simple ground health leg emits its warning without the physical
+ground mover's smoke/fire bank. Boat damage effects use the water-clamped
+emitter position. Both retain input reconciliation, carrier follow, staged
+turret commit, light/direction sound edges and their separate trail cadences.
+
+The slip-length duplicate is confirmed in instructions 46F399..46F3B5:
+EAX is stored in both x87 input locals. Water wave constants are read
+directly from 7C6950 and 7C6F20..58. The 1.6 multiplier applies to the sum
+of both roll waves. A reverse boat does not enter the positive-only lean arm.
+
+vehicle_simple_contact.cpp preserves the crossed four-pad order plus
+three upper probes, the second pass's old-depth-plus-half-old/new sum,
+mass sharing, strongest-probe yaw impulse, half-radius water hysteresis,
+four shock/spring slots and independent roll/pitch lift fits. The pitch
+fit's lesser-front arm multiplies front depth itself, rather than the
+front/back difference. Its sleep window is -500 < slide < 0 and has no
+occupant or spring-energy gate. The contact yaw impulse uses the negative
+atan constant at 7C57B8.
+
+Native regressions cover selector admission, numeric acceleration and
+buoyancy, the X-only slip edge, authority/client agreement, amphibian wet
+dispatch, sleep/contact wake and the water-supported spring bank. The
+existing client-dispatch control now expects selector-zero ground motion.
+
+## 32. Local water-entry effects
+
+All vehicle contact families now publish the local emitter as well as the
+positioned sound event. Resource-table rows 849188/849298 bind
+Effect_sboatwake and Effect_SmlSplash; the vehicle's airborne flag
+selects the latter. The emitter uses the lowest pad at the water plane
+with direction (0, 0, -0.5). The corresponding sound names are BODYWATER1
+and SURFACE_WTR. The transition gate prevents repeated entry effects while
+the hull remains submerged.
+
+Witnesses: Entity_ProcessVehicleSuspension @0x463C60,
+Entity_ProcessTrackedVehiclePhysics @0x47C1C0,
+Entity_ProcessPlatformPhysics @0x481870, and
+Server_SendOverlayActionToAlive @0x50A1B0. The portable
+vehicle_water_entry producer feeds the existing vehicle effect presenter
+and the network water-crossing queue.
+
+## 33. Falling-wreck impact support and sound
+
+Entity_UpdateFallingDeathPhysics @0x493F70 queries terrain and posed model
+support through Entity_RaycastGroundHeightAndObject before advancing the
+wreck. The final hull bounds offset that height according to its up vector.
+Landing on another entity suppresses the terrain scorch; the routed callback
+still commits its integrated pose after the ground-death transition.
+
+Water crossing uses sound-profile slot 39 (+156) at the old entity pose when
+available, otherwise IMP_DEBLRG_WATER at the crossing point. Landing uses
+slot 35 (+140), otherwise IMP_VCL_DROP. The fixed-height fallback remains for
+embedders without a collision world. The destruction regression verifies the
+authored water-sound override separately from the positioned splash effect.
+
+## 34. Definition replacement and derived vehicle traits
+
+MissionKernel invalidates the derived vehicle table when its item definitions
+are installed, then refreshes model-derived probes and trail anchors from the
+retained model cache after resolution. This keeps selector, motor tuning,
+sound and effects consistent with the current table, including editor
+revisions. Admitting selector-zero rows exposed the old insert-only cache:
+a subsequent full-physics table could leave a craft on the earlier simple
+motor. The real-UDP coop_two_sim regression catches that stale setting while
+also checking the authoritative pose and mounted prediction order.
+
+## Divergence catalog
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-VEH-2 | Clear the vacated tail when compacting the water-ring bank | `sub_5DDDB0 @ 0x5DDDB0` shifts the suffix without clearing its last slot; `sub_5DDE10 @ 0x5DDE10` revisits the removed index | PERMANENT ([ADR 0022](../adr/0022-divergence-burn-down.md#permanent-register)), PR #640: a completely full bank otherwise duplicates the final active row indefinitely during expiry. The saturation regression fills all 128 slots and proves retirement terminates. Normal non-full ring behavior is unchanged. |
+
+## 35. Ground and boat pedal view turn
+
+The non-keyboard input arm chooses the larger-magnitude Y/Z steering axis,
+subtracts its scaled BAM delta from the steering target, and, while freelook
+is clear, applies the same delta to the driver and the local look alias
+(`Entity_UpdateVehiclePhysics @0x48B7AA..0x48B7D9`; boat
+`Entity_UpdateWatercraftPhysics @0x48E08D..0x48E0BC`). The earlier freelook
+merge tests the signed sum of all three axes, so opposing axes can cancel
+without eliminating this view turn. Ground, boat and aircraft share the
+full-precision driver-view write; the subsequent target reset reads the
+updated heading. Ground yaw-rate updates also retain the crash/settle gates
+(`@0x48BA17..0x48BA60`), whose bytes are now modeled.
+
+## 36. Boarding, USE scans and authored AI state
+
+PR #640 completes the mount-chain pass against `Entity_FindNearestSeatOrArmory
+@ 0x435D50`, `Vehicle_HasEnemyOccupant @ 0x4359F0`,
+`Entity_ToggleVehicleMount @ 0x436950`, `Entity_CanEnterVehicle @ 0x435480`
+and `Entity_UpdateInfantryAI @ 0x4B9910`.
+
+USE scores from the live three-axis eye offset and casts from Position to
+seat + 12288 Z. Its sixth LOS argument admits every collision type; sound
+queries retain the building filter. Carried EWeap occupancy is checked at
+the root vehicle, and a non-PlayerControl EWeap ray uses its vehicle parent
+as the endpoint. Own-hull occlusion follows the collision query; visible
+seats on the same carrier remain eligible. Label rays retain their separate
+sector-query endpoint exclusions.
+
+The writable WAC `seatbelt` value at `0xC6EADC` blocks mounted local-player
+USE in both local and joiner request paths. Forced script detach and numbered
+seat commands preserve their separate paths. `event_runtime_bms` compiles a
+mixed-case assignment, reads it back, verifies the lock and forced detach,
+then releases it through WAC.
+
+Board admission preserves the spawn-anchor and rider-on-deck arms, then the
+not-airborne / stationary check: X and Y may differ from saved live pose by
+at most **16 raw Q16 counts**, not 16 world units. A dead target leaves a
+walker at spawn waiting; a walker more than eight units from spawn inherits
+the target's attacker and dies. The 64-tick command-125 upgrade compares seat
+types and selects through carried children.
+
+On target resolution, the E1 through E8 claim scan assigns the lowest unused entry
+index. PlayerControl targets approach the live selected seat. Other entry
+targets use UseGun or the authored E/G/S/H sequence, with the original radii,
+heading alignment, one-eighth entry chase and hull detour. The collision
+resolver's signed push and facing gates (`@ 0x4B377A..0x4B37BB`) widen the
+boarding radius to bound + one unit; terrain-gradient pressure retains its
+separate latch producer. This replaces the earlier stalled-walk heuristic.
+`vehicle_mount`, `collision`, `mission_promote`, `defense_00trg` and
+`mission_ai_path_conformance` exercise these paths. The buggy regression
+waits for its selected gun's equip action to permit USE, then checks
+hull-based exit and the gun following its driven carrier.
+
+Promotion consumes the parsed profile's initial state, including zero,
+for current, pending and fallback state (`Entity_InitVehicleAI @ 0x460200`).
+The native profile regression selects HELO_LAND to distinguish this from
+the old unconditional HELO_FOLLOWWP seed. Missing-profile fixture worlds
+retain the existing family fallback.
+
+### 37. Retained contact geometry across shell asset binding
+
+The windowed 02TR soak caught the selector-zero LCAC falling through the map:
+rebinding the same items table for ADM/collision had cleared its motor traits.
+Trait invalidation now belongs to the explicit definition sweep, which restores
+model-derived probes afterward; read-side source binding preserves them. Boot
+also arms the retained collision sweep through the same kernel entry. The
+`watercraft_02tr` regression repeats the shell binding order with authored Zodiac,
+LCAC and Mark V hulls, then checks ten seconds of idle support without terrain.
+The simple suspension's dispatcher-enabled water support also accepts a plane
+at zero, matching `Entity_ProcessVehicleSuspension @0x463C60`'s event gate.
+The runtime drive probe records water height and horizontal travel, and rejects
+large unsupported vertical movement for ground/water families.
+
+The corrected windowed LCAC run travels 47.14 horizontal units, turns and brakes;
+its height remains near the authored 13.5-unit water plane and rising shore.

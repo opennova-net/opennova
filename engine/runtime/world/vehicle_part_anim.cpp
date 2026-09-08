@@ -21,10 +21,10 @@ namespace {
 // its family stands in (vehicle_part_anim.h).
 RotorMachine machine_for(World &world, const Entity &veh, const VehicleTraits &traits) {
 	const RotorMachine called = vehicle_family_uses_direct_air_mover(traits.family)
-			? RotorMachine::Helo : RotorMachine::Ground;
+			? RotorMachine::Helo
+			: RotorMachine::Ground;
 	if (const AiEntity *ai = world.ai.for_handle(veh.handle))
-		return rotor_machine_for_profile(ai->profile.type) == called
-				? called : RotorMachine::None;
+		return rotor_machine_for_profile(ai->profile.type) == called ? called : RotorMachine::None;
 	return called;
 }
 
@@ -35,19 +35,18 @@ RotorMachine machine_for(World &world, const Entity &veh, const VehicleTraits &t
 // [orig: cveh @0x48D0E3..0x48D15D; cbik @0x48669A..0x486711;
 // ctan @0x48AA23..0x48AA9E; aircraft @0x492694..0x492703]
 void VehicleSystem::slew_turret(Entity &veh, int32_t step) {
-    AiEntity *ai = world_.ai.for_handle(veh.handle);
-    if (ai == nullptr) return;
-    AiBrain &b = ai->brain;
-    const int32_t delta = io::bam_sub(b.f[AiBrain::kStagingBlock + 3],
-                                     b.f[AiBrain::kActiveYaw]);
-    if (io::bam_abs(delta) < 0x2108421u) {
-        for (int i = 0; i < 6; ++i)
-            b.f[AiBrain::kActiveBlock + i] = b.f[AiBrain::kStagingBlock + i];
-    } else {
-        b.f[AiBrain::kActiveYaw] = delta > 0
-                ? io::bam_add(b.f[AiBrain::kActiveYaw], step)
-                : io::bam_sub(b.f[AiBrain::kActiveYaw], step);
-    }
+	AiEntity *ai = world_.ai.for_handle(veh.handle);
+	if (ai == nullptr)
+		return;
+	AiBrain &b = ai->brain;
+	const int32_t delta = io::bam_sub(b.f[AiBrain::kStagingBlock + 3], b.f[AiBrain::kActiveYaw]);
+	if (io::bam_abs(delta) < 0x2108421u) {
+		for (int i = 0; i < 6; ++i)
+			b.f[AiBrain::kActiveBlock + i] = b.f[AiBrain::kStagingBlock + i];
+	} else {
+		b.f[AiBrain::kActiveYaw] = delta > 0 ? io::bam_add(b.f[AiBrain::kActiveYaw], step)
+											 : io::bam_sub(b.f[AiBrain::kActiveYaw], step);
+	}
 }
 
 void VehicleSystem::part_anim_tick(Entity &veh, const VehicleTraits &traits) {
@@ -80,16 +79,16 @@ void VehicleSystem::part_anim_tick(Entity &veh, const VehicleTraits &traits) {
 			play_rotor_start_sound(veh, traits);
 		rotor_seed_rate(m.part_spin, traits.player_control, occupied, rolled);
 		rotor_tick(m.part_spin, occupied, rotor_decay_for(machine));
+		if (machine == RotorMachine::Helo) {
+			world.rotor_wash.update(veh, traits);
+			update_rotor_sound(veh, traits);
+		}
 	}
 
-	// The wheel phase: |slip| + (speed << 13) [orig: @0x48C4C5..0x48C4D0]; the
-	// slip register (+0x46C) rides the D-NET-161 level-frame re-derive and is
-	// 0 here.
-	if (vehicle_family_uses_direct_air_mover(traits.family)) return;
+	// Boat phase is command-driven; ground/bike wheelspin runs before contacts
+	// in vehicle_wheel_traction_tick [orig: @0x48C4C5..0x48C4D0].
 	if (traits.family == VehicleFamily::Watercraft)
 		m.wheel_phase = watercraft_wheel_phase_step(m.wheel_phase, m.cmd_speed);
-	else
-		m.wheel_phase = wheel_phase_step(m.wheel_phase, m.speed, /*slip_abs=*/0);
 }
 
 } // namespace opennova::world

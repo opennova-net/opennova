@@ -121,10 +121,17 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 static_cast<int>(e->item_id) + mission::kItemIdOffset;
         const DefItemDef *def = find_item(by_id, def_id);
         e->has_item_def = def != nullptr;
-        e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
-        e->light_transfer = def != nullptr ? def->light_transfer : 0.0f;
-        e->uniform_scale_q16 = def != nullptr ? def->scale_q16 : 0;
-        // Both ItemDefAttrib words and the per-entity facts derived from them
+		e->vehicle_spawn_ids.clear();
+		if (def != nullptr) {
+			for (int group = 0; group < items.vehicle_spawn_id_count; ++group)
+				if ((def->vehicle_spawn_mask & (uint32_t(1) << group)) != 0)
+					e->vehicle_spawn_ids.push_back(items.vehicle_spawn_ids[group]);
+		}
+		e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
+		e->render_sway = def != nullptr && fourcc_prefix(def->render_function) == "sway";
+		e->light_transfer = def != nullptr ? def->light_transfer : 0.0f;
+		e->uniform_scale_q16 = def != nullptr ? def->scale_q16 : 0;
+		// Both ItemDefAttrib words and the per-entity facts derived from them
         // (AI-capable, the AS zone gates, LeaveCorpse) go through the ONE
         // stamp a runtime override also uses (world/entity.h stamp_item_attrib).
         // [orig: def+84 gates in ZoneSlotChain_BuildFromMission @0x4a2de0 /
@@ -199,9 +206,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             for (int s = 0; s < 16; ++s)
                 t.husk_sub_part_types[s] = def->husk_sub_part_types[s];
             t.debris_scale = def->debris_scale;
-            t.sound_death = def->sounddeath;
-            t.particledeath = def->particledeath;
-            t.particleh2odeath = def->particleh2odeath;
+			t.sound_profile = def->sound_profile;
+			t.sound_death = def->sounddeath;
+			t.particledeath = def->particledeath;
+			t.particleh2odeath = def->particleh2odeath;
             t.particlefire = def->particlefire;
             t.particleother = def->particleother;
             t.particlefinale = def->particlefinale;
@@ -220,14 +228,16 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 def != nullptr) {
             const std::string fam = fourcc_prefix(def->move_function);
             const bool direct_air_mover = fam == "chel" || fam == "cpln";
-            if (def->physics != 0 || direct_air_mover) {
-                world::VehicleTraits vt;
-                vt.physics = def->physics;
-                vt.player_speed = def->player_speed;
+			if (def->physics != 0 || direct_air_mover || fam == "cveh" || fam == "ctan" ||
+					fam == "cbik" || fam == "cbot" || fam == "catv" || fam == "ctrn") {
+				world::VehicleTraits vt;
+				vt.physics = def->physics;
+				vt.player_speed = def->player_speed;
                 vt.acceleration = def->acceleration;
-                vt.deceleration = def->deceleration;
-                vt.turn_rate = def->turn_rate;
-                vt.turn_rate2 = def->turn_rate2;
+				vt.slip_speed = def->slip_speed;
+				vt.deceleration = def->deceleration;
+				vt.turn_rate = def->turn_rate;
+				vt.turn_rate2 = def->turn_rate2;
                 vt.unit_type = def->unit_type;
                 vt.torque = def->torque;
                 vt.water_speed = def->water_speed;
@@ -248,26 +258,32 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.bob = def->bob;
                 vt.flip = def->flip;
                 vt.hand_brake = def->hand_brake;
-                vt.min_ai = def->min_ai;
-                vt.critical_hp = def->critical_hp;
-                vt.critical_drain = def->critical_drain;
+				vt.tire_slip = def->tire_slip;
+				vt.min_ai = def->min_ai;
+				vt.critical_hp = def->critical_hp;
+				vt.critical_drain = def->critical_drain;
                 vt.non_critical_regen = def->non_critical_regen;
                 vt.spring = def->spring;
                 vt.spring_comp = def->spring_comp;
                 vt.shock = def->shock;
-                // The two afloat boat lanes stay paired with their authored
-                // model anchors. Their live speed controls are sampled by the
-                // shared watercraft mover; W1/W2 and particlefxs remain on
-                // their separate, currently unrouted transient/ground paths.
-                vt.wake_w3.effect = def->particlefxw3.effect;
-                vt.wake_w3.userpoint = def->particlefxw3.userpoint;
-                vt.wake_w4.effect = def->particlefxw4.effect;
-                vt.wake_w4.userpoint = def->particlefxw4.userpoint;
-                // def->top_heavy is parsed for parity but dead in retail —
-                // no consumer, so the traits do not carry it.
-                vt.player_control =
-                        (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
-                // The per-frame physics mover is selected exclusively by the
+				// The two afloat boat lanes stay paired with their authored
+				// model anchors. Their live speed controls are sampled by the
+				// shared watercraft mover; W1/W2 and particlefxs feed their
+				// corresponding ground, transition and skid paths.
+				vt.skid_effect = def->particlefxs.effect;
+				vt.skid_snow_effect = def->particlefxs.secondary_effect;
+				vt.skid_userpoint = def->particlefxs.userpoint;
+				const def::DefItemParticleFx *trail_defs[4] = { &def->particlefxw1,
+					&def->particlefxw2, &def->particlefxw3, &def->particlefxw4 };
+				for (int i = 0; i < 4; ++i) {
+					vt.trails[i].effect = trail_defs[i]->effect;
+					vt.trails[i].secondary_effect = trail_defs[i]->secondary_effect;
+					vt.trails[i].userpoint = trail_defs[i]->userpoint;
+				}
+				// def->top_heavy is parsed for parity but dead in retail —
+				// no consumer, so the traits do not carry it.
+				vt.player_control = (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
+				// The per-frame physics mover is selected exclusively by the
                 // move_function callback resolved into itemDef+0x158. ai_function
                 // selects the event/brain callback and may deliberately differ: the
                 // shipped Dune Buggy is ai_function chel + move_function cveh and
@@ -297,24 +313,24 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                     // the cveh/ctrn dispatchers' push 0 @0x48efce/@0x48f06e].
                     vt.amphibian = fam == "catv";
                 }
-                const std::string render = fourcc_prefix(def->render_function);
-                vt.render_family = render == "cveh" ? world::VehicleRenderFamily::Ground
-                        : render == "tank" ? world::VehicleRenderFamily::Tank
-                        : render == "chel" ? world::VehicleRenderFamily::Helicopter
-                        : render == "cpln" ? world::VehicleRenderFamily::Plane
-                        : world::VehicleRenderFamily::None;
-                // Vehicle audio belongs to the vehicle ItemDef, not to the
-                // mounted NPC's AiProfile. Resolve the profile name and the
-                // item-level soundloop overrides once at this portable boundary.
-                // [orig: ItemDef_ResolveAllResources @0x49e5f0/@0x49e7f0]
-                vt.sound_profile = def->sound_profile;
-                for (size_t i = 0; i < vt.sound_loops.size(); ++i)
+				const std::string render = fourcc_prefix(def->render_function);
+				vt.render_family = render == "cveh" ? world::VehicleRenderFamily::Ground
+						: render == "tank"			? world::VehicleRenderFamily::Tank
+						: render == "chel"			? world::VehicleRenderFamily::Helicopter
+						: render == "cpln"			? world::VehicleRenderFamily::Plane
+													: world::VehicleRenderFamily::None;
+				// Vehicle audio belongs to the vehicle ItemDef, not to the
+				// mounted NPC's AiProfile. Resolve the profile name and the
+				// item-level soundloop overrides once at this portable boundary.
+				// [orig: ItemDef_ResolveAllResources @0x49e5f0/@0x49e7f0]
+				vt.sound_profile = def->sound_profile;
+				for (size_t i = 0; i < vt.sound_loops.size(); ++i)
                     vt.sound_loops[i] = def->soundloops[i];
                 world.vehicles.traits.set(e->item_id, vt);
-            }
-        }
-    }
-    // Throwable class bindings: every items.def entry whose ai_function /
+			}
+		}
+	}
+	// Throwable class bindings: every items.def entry whose ai_function /
     // move_function names a throwable class (nade/schl/clym/vmne/lndm) lands a
     // row keyed by type id (id - 100000, the ammo TrcrID space), with the def
     // hp/armor the placed device spawns at. [orig: EntityDef_InitAllCallbacks

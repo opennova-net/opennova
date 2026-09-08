@@ -22,6 +22,18 @@ namespace opennova::world {
 
 namespace {
 
+// Authored impact slots use the entity pose; the water fallback uses the
+// crossing point. [orig: Entity_UpdateFallingDeathPhysics @0x4940B2..0x494100;
+// ground impact @0x49417E..0x4941B5]
+void wreck_impact_sound(World &world, const Entity &e, const ItemDeathTraits *traits, int slot,
+		const char *fallback, Vec3 fallback_pos) {
+	const auto *profile = world.tables.sound_profiles.find(
+			traits && !traits->sound_profile.empty() ? traits->sound_profile.c_str() : "default");
+	const std::string sound = profile ? profile->set_names[size_t(slot)] : std::string{};
+	world.out.destruction.sounds.push_back(
+			{ sound.empty() ? fallback : sound, sound.empty() ? fallback_pos : e.position });
+}
+
 constexpr double kBamPerRadian = 683565275.5764316; // 2^32 / 2pi
 
 // The environment water plane (env.water_z, 16.16 — the #265 sound-profile
@@ -221,25 +233,6 @@ void queue_named_landing_blast(World &world, const Entity &entity,
     blast.pos = entity.position;
     blast.radius_override = radius;
     world.explosions.queue_explosion(world, blast);
-}
-
-// One collapsed origin-anchored pass for Entity_UpdateDeadWreckEffects
-// @0x493140. The caller chooses its retail callback site; keeping that site
-// explicit matters for unitType 3 because its angle PRNG draw precedes this
-// fire roll, and its equal-pitch transition does not call the function.
-void update_dead_wreck_effects(World &world, Entity &entity,
-                               const ItemDeathTraits *traits,
-                               float water_height, DestructionEvents &events) {
-    if (traits == nullptr || traits->particlefire.empty()) return;
-    if (world.destruction_rng.next16() >= kFireCrackleThreshold) return;
-    if (entity.position.z <
-            (water_height <= -1.0e8f ? 0.0f : water_height))
-        return;
-    events.effects.push_back(DestructionEffectEvent{
-            kFireCrackleEffect, entity.position, Vec3{0.0f, 0.0f, 1.0f}});
-    world.out.fire_sounds.play_with_distance_delay(
-            kFireCrackleSound, entity.position, entity.bms_id);
-    ++events.crackles;
 }
 
 float vec_len(const Vec3 &v) {
@@ -699,33 +692,13 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
     if (!silent && traits != nullptr && !traits->sound_death.empty())
         ev.sounds.push_back(DestructionSoundEvent{traits->sound_death, target.position});
     if (silent || traits == nullptr) return;
-    // Fully submerged -> the water death family, else particledeath; both are
-    // bone-attached 4-slot banks on the husk (the present pass owns the bones)
-    // [orig: the boundRadius + Z < water gate @ 0x493a88].
-    const bool submerged =
-            target.position.z + target.bound_radius < world_water_z(world);
-    const std::string &family =
-            submerged ? traits->particleh2odeath : traits->particledeath;
-    if (!family.empty())
-        ev.effects.push_back(DestructionEffectEvent{
-                family, target.position, Vec3{}, target.net_id, target.bms_id, 1,
-                target.handle.packed, target.spawn_origin});
-    // The fire + other families [orig: the +0x47A / +0x4AE banks @ 0x493b6c/
-    // @ 0x493bba]; the present pass runs the per-tick wreck-fire behavior
-    // (random crackle, underwater steam-out) on these.
-    if (!traits->particlefire.empty())
-        ev.effects.push_back(DestructionEffectEvent{traits->particlefire,
-                target.position, Vec3{}, target.net_id, target.bms_id, 2,
-                target.handle.packed, target.spawn_origin});
-    if (!traits->particleother.empty())
-        ev.effects.push_back(DestructionEffectEvent{traits->particleother,
-                target.position, Vec3{}, target.net_id, target.bms_id, 3,
-                target.handle.packed, target.spawn_origin});
-    // The kz blasts: one kz_OrganicBlast r=5.0 per husk KZ user point, else one
-    // at the entity with r = kz ?: bound radius [orig:
-    // Entity_QueueKzBlastAtUserPoints(g_ammo_kz_OrganicBlast, ..., "KZ", 1, ...)
-    // @ 0x493b57; the fallback radius legs @ 0x4ead12-0x4ead68].
-    const int kz_ammo = world.tables.ammo.index_of(kAmmoKzOrganicBlast);
+	const bool submerged = target.position.z + target.bound_radius < world_water_z(world);
+	spawn_death_effect_banks(target, *traits, submerged, ev);
+	// The kz blasts: one kz_OrganicBlast r=5.0 per husk KZ user point, else one
+	// at the entity with r = kz ?: bound radius [orig:
+	// Entity_QueueKzBlastAtUserPoints(g_ammo_kz_OrganicBlast, ..., "KZ", 1, ...)
+	// @ 0x493b57; the fallback radius legs @ 0x4ead12-0x4ead68].
+	const int kz_ammo = world.tables.ammo.index_of(kAmmoKzOrganicBlast);
     if (kz_ammo >= 0) {
         ExplosionEntry blast;
         blast.type = ammo_kz::kStandard; // kz_OrganicBlast kztype (word +44)
@@ -935,6 +908,61 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
     return mask;
 }
 
+// [orig: Entity_InitDeathState @0x48F7C0]
+void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
+	stamp_saved_live_pose(target);
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
+	if (world.rules.logic_authority) {
+		const float radius = traits != nullptr && traits->kz != 0.0f
+				? traits->kz
+				: float(to_fixed(target.bound_radius) / 65536);
+		queue_named_landing_blast(world, target, kAmmoKzMItemBlast, radius);
+	}
+	world.out.scars.clear_entity(target.handle);
+	const bool was_husked = ((target.flags | target.engine_flags) & kEntityFlagHusk) != 0;
+	const uint32_t mask = spawn_death_pieces(world, target);
+	emit_death_sounds_and_effects(world, target, false);
+	if (simulate)
+		target.death_motion = DeathMotionMode::PiecePhysics;
+	else {
+		const bool water = to_fixed(target.position.z) <= world.env.water_z;
+		Vec3 pos = target.position;
+		if (water)
+			pos.z = float(from_fixed(world.env.water_z));
+		world.out.destruction.effects.push_back(DestructionEffectEvent{
+				water ? "Effect_MedSplash" : "Effect_HeloGroundHit", pos, Vec3{} });
+		world.out.destruction.sounds.push_back(DestructionSoundEvent{
+				water ? "EXPLO_HELO_WATER" : "EXPLO_HELO_LAND", target.position });
+	}
+	target.flags |= kEntityFlagDead | kEntityFlagHusk;
+	target.engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+	target.alive = false;
+	DeathPieceType spin{};
+	spin.spin_min = 0.45f;
+	spin.spin_max = 0.65f;
+	target.veh.air_roll_rate = int32_t(double(spin_rate_roll(world, spin)) * 11930465.0);
+	spin.spin_min = 0.15f;
+	spin.spin_max = 0.35f;
+	target.veh.air_pitch_rate = -int32_t(double(spin_rate_roll(world, spin)) * 11930465.0);
+	if (target.veh.damage_fire_active) {
+		DestructionEffectEvent release;
+		release.family = 5;
+		release.release = true;
+		release.attach_net_id = target.net_id;
+		release.attach_bms_id = target.bms_id;
+		release.attach_spawn_origin = target.spawn_origin;
+		release.attach_wire_handle = target.handle.packed;
+		world.out.destruction.effects.push_back(std::move(release));
+		target.veh.damage_fire_active = false;
+	}
+	if (!was_husked) {
+		world.out.destruction.husk_swaps.push_back(
+				HuskSwapEvent{ target.net_id, target.handle.packed, target.bms_id,
+						target.spawn_origin, target.item_id, mask, target.position });
+		++world.out.destruction.items_destroyed;
+	}
+}
+
 void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     // [orig: Entity_UpdateDeathTransforms @ 0x494660 — pose snapshot (the AI
     // rows already snapshot net_saved_live_pose), then the unitType dispatch,
@@ -1057,7 +1085,8 @@ static void transition_to_ground_death(Entity &e, const ItemDeathTraits *traits,
     if (traits != nullptr && !traits->particlefinale.empty())
         events.effects.push_back(DestructionEffectEvent{
                 traits->particlefinale, e.position, Vec3{0.0f, 0.0f, 1.0f}});
-    stamp_saved_live_pose(e);
+	release_death_effect_bank(e, 2, events);
+	stamp_saved_live_pose(e);
 }
 
 void destruction_tick_dead_items(World &world,
@@ -1088,13 +1117,17 @@ void destruction_tick_dead_items(World &world,
                 update_dead_wreck_effects(
                         world, *e, traits, water_height, events);
             if (e->death_motion == DeathMotionMode::None) continue;
+			if (e->death_motion == DeathMotionMode::Generic) {
+				entity_process_falling_death(world, *e, terrain, water_height);
+				continue;
+			}
 
-            // The post-contact callback installed by DeathPiece_PhysicsUpdate
-            // [orig: DeathPiece_SettlePitch @0x48F0B0]. The forward slope target is kept
-            // in the same +0xA8 register that previously held pitch rate.
-            // It moves at most two degrees per tick, snaps inside four, and
-            // performs the ground-death transition on the following tick.
-            if (e->death_motion == DeathMotionMode::PiecePitchSettle) {
+			// The post-contact callback installed by DeathPiece_PhysicsUpdate
+			// [orig: DeathPiece_SettlePitch @0x48F0B0]. The forward slope target is kept
+			// in the same +0xA8 register that previously held pitch rate.
+			// It moves at most two degrees per tick, snaps inside four, and
+			// performs the ground-death transition on the following tick.
+			if (e->death_motion == DeathMotionMode::PiecePitchSettle) {
                 seed_piece_physics_angles(*e);
                 Entity::VehicleMotorState &motion = e->veh;
                 const int32_t delta = io::bam_sub(
@@ -1268,10 +1301,20 @@ void destruction_tick_dead_items(World &world,
                 e->veh.slide_z = -4096;
             }
             float ground = -1.0e9f;
-            if (terrain != nullptr && terrain->valid())
-                ground = terrain::height_field_height_world_bilinear(
-                        *terrain, e->position.x, -e->position.y);
-            // The wreck rests with section 0's lowest extent on the ground
+			e->ground_target = {};
+			// The routed wreck queries posed models as well as terrain.
+			// [orig: Entity_UpdateFallingDeathPhysics @0x493FF1..0x494001]
+			if (world.ai.collision != nullptr) {
+				const int32_t pos[3] = { to_fixed(e->position.x), to_fixed(e->position.y),
+					to_fixed(e->position.z) };
+				const int32_t height = world.ai.collision->raycast_ground(
+						world, e->handle, pos, 0, 0, 0x10000, 0x200000, &e->ground_target);
+				if (height != INT32_MIN)
+					ground = float(from_fixed(height));
+			} else if (terrain != nullptr && terrain->valid())
+				ground = terrain::height_field_height_world_bilinear(
+						*terrain, e->position.x, -e->position.y);
+			// The wreck rests with section 0's lowest extent on the ground
             // [orig: ground -= |sec0 z min| @ 0x461e23-0x461e4b; the inverted
             // += |z max| leg is unreachable here — sim wrecks stay upright].
             // Ground is terrain-only; retail raycasts objects too (mask
@@ -1286,22 +1329,21 @@ void destruction_tick_dead_items(World &world,
                 e->position.x = new_x;
                 e->position.y = new_y;
             }
-            // No per-tick horizontal damp: the falling legs keep velocity until
-            // water or ground [orig: 0x461d30/0x493f70 — the 0.97 damp belongs
-            // to the separate static-death branch above @ 0x4942f7].
-            // The water-crossing splash [orig: @ 0x49409f-0x494100 — the def
-            // water-impact sound slot (+156) is unported, the fallback plays;
-            // dword_2C25C64 resolves to Effect_MedSplash].
-            if (routed_falling && new_z + e->bound_radius < water_height &&
-                old_top > water_height) {
-                events.effects.push_back(DestructionEffectEvent{
+			// No per-tick horizontal damp: the falling legs keep velocity until
+			// water or ground [orig: 0x461d30/0x493f70 — the 0.97 damp belongs
+			// to the separate static-death branch above @ 0x4942f7].
+			// The water-crossing splash [orig: @ 0x49409f-0x494100 — the def
+			// water-impact sound slot (+156), with the fallback when empty;
+			// dword_2C25C64 resolves to Effect_MedSplash].
+			if (routed_falling && new_z + e->bound_radius < water_height &&
+					old_top > water_height) {
+				events.effects.push_back(DestructionEffectEvent{
                         "Effect_MedSplash", Vec3{new_x, new_y, water_height},
                         Vec3{0.0f, 0.0f, 1.0f}});
-                world.out.destruction.sounds.push_back(DestructionSoundEvent{
-                        "IMP_DEBLRG_WATER",
-                        Vec3{new_x, new_y, water_height}});
-            }
-            if (new_z <= ground) {
+				wreck_impact_sound(world, *e, traits, 39, "IMP_DEBLRG_WATER",
+						Vec3{ new_x, new_y, water_height });
+			}
+			if (new_z <= ground) {
                 // Ground contact [orig: Entity_TransitionToGroundDeath
                 // @ 0x493080 + the landing legs @ 0x494113-0x494209]. The
                 // generic leg restores the pre-move pose and clears vertical
@@ -1312,41 +1354,38 @@ void destruction_tick_dead_items(World &world,
                     e->death_motion = DeathMotionMode::Generic;
                     // [orig: Entity_UpdateFallingDeathPhysics call @ 0x494113]
                     transition_to_ground_death(*e, traits, events);
-                    // A routed wreck marks bare terrain before its landing
-                    // sound and authority blast. Retail suppresses this call
-                    // when the ground trace returned another entity; this
-                    // portable pass currently has only a terrain height field,
-                    // so every reachable routed contact is the null-entity leg.
-                    // The router reads the entity's pre-tail x/y, not the
-                    // integrated pose committed at @0x49421C.
-                    // [orig: ground-entity test @0x49414E; scorch 7 call
-                    // @0x49416B..0x494179]
-                    world.out.terrain_scorches.emit_standard(
-                            to_fixed(e->position.x), to_fixed(e->position.y),
-                            7, world.logic_tick);
-                } else {
-                    e->position = old_position;
+					// A routed wreck marks bare terrain before its landing
+					// sound and authority blast. Retail suppresses this call
+					// when the ground trace returned another entity.
+					// The router reads the entity's pre-tail x/y, not the
+					// integrated pose committed at @0x49421C.
+					// [orig: ground-entity test @0x49414E; scorch 7 call
+					// @0x49416B..0x494179]
+					if (!e->ground_target.valid())
+						world.out.terrain_scorches.emit_standard(to_fixed(e->position.x),
+								to_fixed(e->position.y), 7, world.logic_tick);
+				} else {
+					e->position = old_position;
                     e->veh.slide_z = 0;
-                }
-                // The landing clunk + kz blast ride the unitType-routed falling
-                // leg only [orig: 0x493f70 — the sound @ 0x4941af (the def
-                // landing slot +140 unported, the fallback plays —
-                // world-wac-ai-re.md D-ITEM-10) and the authority kz
-                // @ 0x4941be, r = def kz ?: boundRadius]; generic items
-                // (0x461d30) land silently.
-                if (routed_falling) {
-                    world.out.destruction.sounds.push_back(
-                            DestructionSoundEvent{"IMP_VCL_DROP", e->position});
-                    if (world.rules.logic_authority) {
-                        const float radius =
+				}
+				// The landing clunk + kz blast ride the unitType-routed falling
+				// leg only [orig: 0x493f70 — the sound @ 0x4941af (the def
+				// landing slot +140, with the fallback when empty —
+				// world-wac-ai-re.md D-ITEM-10) and the authority kz
+				// @ 0x4941be, r = def kz ?: boundRadius]; generic items
+				// (0x461d30) land silently.
+				if (routed_falling) {
+					wreck_impact_sound(world, *e, traits, 35, "IMP_VCL_DROP", e->position);
+					if (world.rules.logic_authority) {
+						const float radius =
                                 (traits != nullptr && traits->kz > 0.0f)
                                 ? traits->kz
                                 : (e->bound_radius > 0.0f ? e->bound_radius
                                                           : 1.0f);
                         queue_named_landing_blast(
                                 world, *e, kAmmoKzOrganicBlast, radius);
-                    }
-                }
+					}
+				}
             } else if (!routed_falling) {
                 e->position.z = new_z;
             }

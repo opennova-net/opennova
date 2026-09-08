@@ -51,69 +51,92 @@ int32_t cos22_of_bam(int32_t bam) {
 } // namespace
 
 void VehicleSystem::tick_health(Entity &veh, const VehicleTraits &traits) {
-    // All five movers build the same stagger key with LEA x9 then LEA x4.
-    // The decompiler's current_tick[9 * DcbId] is byte-scaled pointer math.
-    // [orig: Entity_UpdateVehiclePhysics @0x48AF00, sites @0x48AF24..0x48AF2D;
-    // Entity_UpdateAircraftPhysics @0x490310, sites @0x490334..0x490340]
-    if (!world_.ai.is_authority || veh.health <= 0 ||
-        ((world_.logic_tick + 36u * static_cast<uint32_t>(veh.net_id)) & 63u) != 0)
-        return;
-    if (veh.health > traits.critical_hp) {
-        // Strict inequality: a hull at max - regen does not regenerate.
-        // [orig: @0x48B015..0x48B03F, @0x48D57C..0x48D5A6;
-        // aircraft health read/store @0x4903F9..0x49042D]
-        if (traits.non_critical_regen != 0 &&
-            veh.health < veh.health_max - traits.non_critical_regen)
-            veh.health += traits.non_critical_regen;
-    } else {
-        // The critical band burns to zero; clients only render this state.
-        // [orig: @0x48B06C..0x48B083, @0x48D5FF..0x48D616;
-        // aircraft critical-band entry @0x490434]
-        veh.health = veh.health > traits.critical_drain
-                ? veh.health - traits.critical_drain : 0;
-    }
+	// All five movers build the same stagger key with LEA x9 then LEA x4.
+	// The decompiler's current_tick[9 * DcbId] is byte-scaled pointer math.
+	// [orig: Entity_UpdateVehiclePhysics @0x48AF00, sites @0x48AF24..0x48AF2D;
+	// Entity_UpdateAircraftPhysics @0x490310, sites @0x490334..0x490340]
+	// The live callback requests its death state before the health cadence.
+	// [orig: ground @0x48AFD9..0x48AFF6; aircraft @0x490384..0x4903A1;
+	// boat @0x48D53D..0x48D55A]
+	if (AiEntity *ai = world_.ai.for_handle(veh.handle)) {
+		auto &b = ai->brain;
+		const bool air = vehicle_family_uses_direct_air_mover(traits.family);
+		if (b.f[AiBrain::kCurState] == 0)
+			b.f[AiBrain::kCurState] = air ? 14 : 22;
+		if (((veh.flags | veh.engine_flags) & kEntityFlagDead) == 0 && veh.health <= 0 &&
+				b.f[AiBrain::kCurState] != (air ? 13 : 21) &&
+				b.f[AiBrain::kCurState] != (air ? 15 : 23))
+			b.set_pend(air ? 13 : 21);
+	}
+	const bool critical = veh.health > 0 && veh.health <= traits.critical_hp;
+	if (world_.ai.is_authority && veh.health > 0 &&
+			((world_.logic_tick + 36u * uint32_t(veh.net_id)) & 63u) == 0) {
+		if (veh.health > traits.critical_hp) {
+			// Strict inequality: a hull at max - regen does not regenerate.
+			// [orig: @0x48B015..0x48B03F, @0x48D57C..0x48D5A6;
+			// aircraft health read/store @0x4903F9..0x49042D]
+			if (traits.non_critical_regen != 0 &&
+					veh.health < veh.health_max - traits.non_critical_regen)
+				veh.health += traits.non_critical_regen;
+		} else {
+			// The critical band burns to zero; clients only render this state.
+			// [orig: @0x48B06C..0x48B083, @0x48D5FF..0x48D616;
+			// aircraft critical-band entry @0x490434]
+			veh.health =
+					veh.health > traits.critical_drain ? veh.health - traits.critical_drain : 0;
+		}
+	}
+	detail::vehicle_health_effects(world_, veh, traits, critical);
 }
 
-VehicleCtrlRegisters vehicle_ctrl_registers(
-        const Entity::VehicleMotorState &state, VehicleRenderFamily render_family,
-        const AiEntity *ai) {
-    VehicleCtrlRegisters out;
-    // Each render callback owns a different subset of the shared register bank.
-    // Tank suspension needs the separate six-probe projection and stays unowned
-    // until that state is modeled; its independent tracks are available here.
-    // [orig: @0x4929B0 (cveh), @0x449C10 (tank), @0x48F1A0 (chel), @0x48F140 (cpln)]
-    switch (render_family) {
-    case VehicleRenderFamily::Ground:
-        out.mask = VC_STEERING | VC_SPEED | VC_ROTORS | VC_WHEELS | VC_TIRES; break;
-    case VehicleRenderFamily::Tank:
-        out.mask = VC_STEERING | VC_SPEED | VC_ROTORS | VC_WHEELS | VC_TRACKS; break;
-    case VehicleRenderFamily::Helicopter: out.mask = VC_ROTORS; break;
-    case VehicleRenderFamily::Plane: out.mask = VC_STEERING | VC_ROTORS | VC_WHEELS; break;
-    case VehicleRenderFamily::None: break;
-    }
-    if (ai != nullptr && render_family != VehicleRenderFamily::None) {
-        // MOVSX of the active BAM high words, unlike unsigned wheel/rotor phases.
-        // [orig: HUD_CacheEntityDisplayInfo @0x4A3D90; tank tail @0x449ECF..0x449EE2]
-        out.gun_yaw = io::bam_sar(ai->brain.f[AiBrain::kActiveYaw], 16);
-        out.gun_pitch = io::bam_sar(ai->brain.f[AiBrain::kActivePitch], 16);
-        if (render_family == VehicleRenderFamily::Tank || ai->profile.type == 2)
-            out.mask |= VC_VEHICLE_GUN;
-        if (render_family == VehicleRenderFamily::Helicopter ||
-            (render_family != VehicleRenderFamily::Tank && ai->profile.type == 1))
-            out.mask |= VC_HELO_GUN;
-    }
-    for (size_t i = 0; i < out.tracks.size(); ++i)
-        out.tracks[i] = static_cast<int32_t>(static_cast<uint32_t>(state.track_phase[i]) >> 16);
+VehicleCtrlRegisters vehicle_ctrl_registers(const Entity::VehicleMotorState &state,
+		VehicleRenderFamily render_family, const AiEntity *ai) {
+	VehicleCtrlRegisters out;
+	// Each render callback owns a different subset of the shared register bank.
+	// Tank projects fourteen tires from its four wheels and two middle channels.
+	// [orig: @0x4929B0 (cveh), @0x449C10 (tank), @0x48F1A0 (chel), @0x48F140 (cpln)]
+	switch (render_family) {
+		case VehicleRenderFamily::Ground:
+			out.mask = VC_STEERING | VC_SPEED | VC_ROTORS | VC_WHEELS | VC_TIRES;
+			break;
+		case VehicleRenderFamily::Tank:
+			out.mask = VC_STEERING | VC_SPEED | VC_ROTORS | VC_WHEELS | VC_TRACKS | VC_TANK_TIRES;
+			break;
+		case VehicleRenderFamily::Helicopter:
+			out.mask = VC_ROTORS | VC_HELO_GEAR;
+			break;
+		case VehicleRenderFamily::Plane:
+			out.mask = VC_STEERING | VC_ROTORS | VC_WHEELS;
+			break;
+		case VehicleRenderFamily::None:
+			break;
+	}
+	if (render_family == VehicleRenderFamily::Helicopter) {
+		out.mask |= VC_HELO_GUN;
+		out.gun_pitch = io::bam_sar(state.view_tilt_bam, 16); // [orig: @0x48F1D5]
+	}
+	if (ai != nullptr && render_family != VehicleRenderFamily::None) {
+		// MOVSX of the active BAM high words, unlike unsigned wheel/rotor phases.
+		// [orig: HUD_CacheEntityDisplayInfo @0x4A3D90; tank tail @0x449ECF..0x449EE2]
+		out.gun_yaw = io::bam_sar(ai->brain.f[AiBrain::kActiveYaw], 16);
+		out.gun_pitch = io::bam_sar(ai->brain.f[AiBrain::kActivePitch], 16);
+		if (render_family == VehicleRenderFamily::Tank || ai->profile.type == 2)
+			out.mask |= VC_VEHICLE_GUN;
+		if (render_family == VehicleRenderFamily::Helicopter ||
+				(render_family != VehicleRenderFamily::Tank && ai->profile.type == 1))
+			out.mask |= VC_HELO_GUN;
+	}
+	for (size_t i = 0; i < out.tracks.size(); ++i)
+		out.tracks[i] = static_cast<int32_t>(static_cast<uint32_t>(state.track_phase[i]) >> 16);
 
-    // entity+0x2B6 is the high word of the vehicle wheel/steer dword. MOVZX
-    // makes a negative wheel deflection a 0..0xFFFF cyclic phase; the following
-    // retail 0x10000 cap is unreachable for a zero-extended word.
-    // [orig: Entity_CacheVehicleHUDStats @0x4929B0;
-    //  MOVZX/store @0x4929C0..0x4929D7]
-    out.steering = static_cast<int32_t>(
-            static_cast<uint32_t>(state.steer_state) >> 16);
+	// entity+0x2B6 is the high word of the vehicle wheel/steer dword. MOVZX
+	// makes a negative wheel deflection a 0..0xFFFF cyclic phase; the following
+	// retail 0x10000 cap is unreachable for a zero-extended word.
+	// [orig: Entity_CacheVehicleHUDStats @0x4929B0;
+	//  MOVZX/store @0x4929C0..0x4929D7]
+	out.steering = static_cast<int32_t>(static_cast<uint32_t>(state.steer_state) >> 16);
 
-    // Reproduce CDQ/XOR/SUB as unsigned two's-complement arithmetic before the
+	// Reproduce CDQ/XOR/SUB as unsigned two's-complement arithmetic before the
     // unsigned 0x10000 cap. In particular INT_MIN becomes 0x80000000 (it does
     // not invoke C++ signed-abs UB) and therefore publishes 0x10000.
     // [orig: Entity_CacheVehicleHUDStats @0x4929DC..0x4929F1]
@@ -134,22 +157,37 @@ VehicleCtrlRegisters vehicle_ctrl_registers(
     out.tail_rotor = out.rotor;
     out.wheels = static_cast<int32_t>(
             static_cast<uint32_t>(state.wheel_phase) >> 16);
-    const auto tire = [](int32_t value) { return std::clamp(value, 0, 0x10000); };
-    out.tires = {tire(state.wheel_comp[0]), tire(state.wheel_comp[1]),
-        tire(io::bam_sar(io::bam_add(state.wheel_comp[0], state.wheel_comp[2]), 1)),
-        tire(io::bam_sar(io::bam_add(state.wheel_comp[1], state.wheel_comp[3]), 1)),
-        tire(state.wheel_comp[3]), tire(state.wheel_comp[2])};
-    return out;
+	const auto tire = [](int32_t value) { return std::clamp(value, 0, 0x10000); };
+	out.gear = state.gear_phase; // MOVZX LOW word [orig: @0x48F1C8]
+	if (render_family == VehicleRenderFamily::Tank) {
+		const auto &c = state.wheel_comp;
+		const auto mean = [&](int a, int b) {
+			return tire(io::bam_sar(io::bam_add(c[a], c[b]), 1));
+		};
+		// The x87 stack retains the 0.33 constant, not the first mean.
+		// [orig: HUD_CacheEntityDebugStats @0x449C10, @0x449D25..0x449D33 /
+		// @0x449E25..0x449E3F; flt_7C59B4 = 0.33000001311302185]
+		const auto third = [&](int a, int b, int d) {
+			const int32_t sum = io::bam_add(io::bam_add(c[a], c[b]), c[d]);
+			return tire(int32_t(double(sum) * double(0.33f)));
+		};
+		out.tires = { tire(c[0]), tire(c[0]), mean(0, 4), third(0, 3, 4), mean(3, 4), tire(c[3]),
+			tire(c[3]), tire(c[1]), tire(c[1]), mean(1, 5), third(1, 2, 5), mean(2, 5), tire(c[2]),
+			tire(c[2]) };
+	} else {
+		out.tires = { tire(state.wheel_comp[0]), tire(state.wheel_comp[1]),
+			tire(io::bam_sar(io::bam_add(state.wheel_comp[0], state.wheel_comp[2]), 1)),
+			tire(io::bam_sar(io::bam_add(state.wheel_comp[1], state.wheel_comp[3]), 1)),
+			tire(state.wheel_comp[3]), tire(state.wheel_comp[2]) };
+	}
+	return out;
 }
 
-uint32_t watercraft_wake_magnitude_q16(int32_t signed_speed) noexcept {
-    const int64_t product = int64_t{0xFFFF} * static_cast<int64_t>(signed_speed);
-    // Spell x86's signed SAR as floor division so the result is portable C++
-    // for negative inputs (ordinary signed division truncates toward zero).
-    const int64_t scaled = product >= 0
-            ? product / 0x8000
-            : -((-product + 0x7FFF) / 0x8000);
-    return static_cast<uint32_t>(scaled < 0 ? -scaled : scaled);
+uint32_t vehicle_trail_magnitude_q16(int32_t signed_speed) noexcept {
+	// [orig: Entity_UpdateBoneTrailEffects @0x458C26 IMUL, @0x458C2C SAR]
+	const int32_t product = int32_t(uint32_t(signed_speed) * 0xFFFFu);
+	const int32_t scaled = product >> 15;
+	return uint32_t(io::bam_abs(scaled));
 }
 
 // The controlling occupant: the Controller/Driver seat's occupant, stale-validated
@@ -188,15 +226,30 @@ Entity *VehicleSystem::resolve_controller(Entity &veh) {
     return controller;
 }
 
+// The pilot's view can turn independently of hull steering. Keep both native
+// aliases so LocalPlayer's post-tick reconciliation retains the turn.
+int32_t turn_pilot_view(World &world, Entity &pilot, int32_t delta) {
+	AiEntity *body = world.ai.for_handle(pilot.handle);
+	const int32_t yaw = io::bam_add(
+			body != nullptr ? body->heading : bam_heading_from_mission_yaw_deg(pilot.yaw), delta);
+	pilot.yaw = static_cast<int16_t>(
+			std::lround(normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(yaw))));
+	if (body != nullptr) {
+		body->heading = yaw;
+		body->inf.target_heading = io::bam_add(body->inf.target_heading, delta);
+	}
+	return yaw;
+}
+
 // Entity_UpdateVehiclePhysics's shared player-input block. The authority stages
 // a remote driver's replicated fields through it; the controlling client stages
 // its current local fields instead of replaying delayed compact drive registers.
-static void stage_player_vehicle_input(Entity &veh, Entity &occ,
-                                       const VehicleTraits &traits) {
-    Entity::VehicleMotorState &m = veh.veh;
-    uint32_t move_order = static_cast<uint32_t>(occ.net_move_input) |
-                          (static_cast<uint32_t>(occ.net_stance_bits) << 8);
-    int dir = static_cast<int>(move_order & 7u);
+void stage_player_vehicle_input(
+		World &world, Entity &veh, Entity &occ, const VehicleTraits &traits) {
+	Entity::VehicleMotorState &m = veh.veh;
+	uint32_t move_order = static_cast<uint32_t>(occ.net_move_input) |
+			(static_cast<uint32_t>(occ.net_stance_bits) << 8);
+	int dir = static_cast<int>(move_order & 7u);
     bool moving = ((move_order >> 3) & 1u) != 0;
     const int32_t analog_sum = static_cast<int32_t>(occ.net_analog_x) +
                                static_cast<int32_t>(occ.net_analog_y) +
@@ -211,10 +264,10 @@ static void stage_player_vehicle_input(Entity &veh, Entity &occ,
         move_order |= Entity::kMoveOrderFreeLook;
         occ.net_move_input |= static_cast<uint8_t>(Entity::kMoveOrderFreeLook);
     }
-    const int32_t driver_yaw_bam =
-            bam_heading_from_mission_yaw_deg(static_cast<double>(occ.yaw));
 
-    // Family split at the command source: the boat player leg reads itemDef
+	int32_t driver_yaw_bam = bam_heading_from_mission_yaw_deg(occ.yaw);
+
+	// Family split at the command source: the boat player leg reads itemDef
     // waterSpeed (+0x8EC) at EVERY command site — retail cbot defs author no
     // player_speed, so the ground field would command 0 — and consumes MoveOrder
     // bits 6/7 as motion overrides instead of the ground lean flags: bit6 forces
@@ -246,11 +299,16 @@ static void stage_player_vehicle_input(Entity &veh, Entity &occ,
         m.steer_target_bam -= steer_delta;
         m.cmd_speed =
                 -(cmd_base * static_cast<int32_t>(occ.net_analog_x)) >> 7;
-        // The driver's own analog-yaw write remains D-NET-161; the host cannot
-        // mutate a remote peer's wire-owned yaw, and local look owns the client row.
-    }
+		// The same pedal turn updates the driver's view unless freelook is
+		// latched. The signed three-axis sum above can cancel to zero while
+		// the dominant steering axis remains nonzero.
+		// [orig: Entity_UpdateVehiclePhysics @0x48B7AA..0x48B7D9;
+		// Entity_UpdateWatercraftPhysics @0x48E08D..0x48E0BC]
+		if ((move_order & Entity::kMoveOrderFreeLook) == 0)
+			driver_yaw_bam = turn_pilot_view(world, occ, io::bam_sub(0, steer_delta));
+	}
 
-    if ((move_order & Entity::kMoveOrderCrouch) != 0) m.cmd_speed >>= 1;
+	if ((move_order & Entity::kMoveOrderCrouch) != 0) m.cmd_speed >>= 1;
     if ((move_order & Entity::kMoveOrderProne) != 0) m.cmd_speed >>= 2;
     if ((move_order & 0x20u) != 0) veh.flags |= 0x80u;
     else veh.flags &= ~0x80u;
@@ -264,11 +322,9 @@ static void stage_player_vehicle_input(Entity &veh, Entity &occ,
     }
 
     if (analog_sum == 0) {
-        m.steer_target_bam =
-                (move_order & Entity::kMoveOrderFreeLook) != 0
-                        ? m.yaw_bam
-                        : driver_yaw_bam;
-    }
+		m.steer_target_bam =
+				(move_order & Entity::kMoveOrderFreeLook) != 0 ? m.yaw_bam : driver_yaw_bam;
+	}
 
     // The key-steer ramp cap is a family delta: the boat's own input block
     // caps [137] at 0x1FFFFFE0 (45deg) [orig: @0x48E13A]; the ground/bike
@@ -353,12 +409,23 @@ static Entity *resolve_local_vehicle_controller(World &world, Entity &veh,
 // vehicle_motor_detail.h and defined in vehicle_contact_solve.cpp.
 
 void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd) {
-    World &world = world_;
-    if (traits.physics == 0) return; // no vehicle physics selected [orig: @0x48efc7]
+	// [orig: Entity_DispatchPhysics_catv @ 0x48F010]
+	if (traits.amphibian && (veh.flags & 0x8000u) != 0) {
+		VehicleTraits afloat = traits;
+		afloat.family = VehicleFamily::Watercraft;
+		tick_watercraft_motor(veh, afloat, ai_cmd);
+		return;
+	}
+	World &world = world_;
+	// Selector zero dispatches to the simple motor. [orig: @0x48EFC7]
+	if (traits.physics == 0) {
+		tick_simple_motor(veh, traits, ai_cmd, false);
+		return;
+	}
 
-    Entity::VehicleMotorState &m = veh.veh;
-    if (!m.yaw_seeded) {
-        m.yaw_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+	Entity::VehicleMotorState &m = veh.veh;
+	if (!m.yaw_seeded) {
+		m.yaw_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
         // Seed the live BAM attitude mirror from the row's authored pose: one
         // entity Pitch/Roll in the original — the same storage the contact
         // solve conforms every grounded tick [orig: entity->Pitch/Roll writes
@@ -367,43 +434,45 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
         m.air_pitch_bam = static_cast<int32_t>(veh.pitch) * 11930464;
         m.air_roll_bam = static_cast<int32_t>(veh.roll) * 11930464;
         m.yaw_seeded = true;
-    }
+	}
 
-    // The per-family contact solve owns Z, attitude, the contact byte and
-    // the airborne/in-water flags for rows with resolved model boxes on a
-    // terrain-backed world; every other row (boxless lib-embedder rows,
-    // terrain-less unit worlds) keeps the 5-tap terrain-clamp stand-in below. Retail keys the same split on
-    // graphicModel presence [orig: the @0x47C49F bail]. The family routing is
-    // the class table's [orig: @0x82ABC0]: cveh/ctrn/catv -> the tracked
-    // solve @0x47C1C0; ctan -> the wheeled solve @0x475DE0 (call @0x48a9ef);
-    // cbik -> the light solve @0x479600 (call @0x486672).
-    enum class ContactSolveKind : uint8_t { None, Tracked, Wheeled, Light };
-    ContactSolveKind solve_kind = ContactSolveKind::None;
-    if (world.tables.terrain != nullptr) {
-        if (traits.family == VehicleFamily::Ground &&
-            ground_contact_solve_active(traits))
-            solve_kind = ContactSolveKind::Tracked;
-        else if (traits.family == VehicleFamily::Tank &&
+	if (!m.net_predicted) {
+		vehicle_refresh_ground_link(world, veh, traits);
+		vehicle_follow_carrier(world, veh);
+	}
+
+	// The per-family contact solve owns Z, attitude, the contact byte and
+	// the airborne/in-water flags for rows with resolved model boxes on a
+	// terrain-backed world; every other row (boxless lib-embedder rows,
+	// terrain-less unit worlds) keeps the 5-tap terrain-clamp stand-in below. Retail keys the same
+	// split on graphicModel presence [orig: the @0x47C49F bail]. The family routing is the class
+	// table's [orig: @0x82ABC0]: cveh/ctrn/catv -> the tracked solve @0x47C1C0; ctan -> the wheeled
+	// solve @0x475DE0 (call @0x48a9ef); cbik -> the light solve @0x479600 (call @0x486672).
+	enum class ContactSolveKind : uint8_t { None, Tracked, Wheeled, Light };
+	ContactSolveKind solve_kind = ContactSolveKind::None;
+	{
+		if (traits.family == VehicleFamily::Ground && ground_contact_solve_active(traits))
+			solve_kind = ContactSolveKind::Tracked;
+		else if (traits.family == VehicleFamily::Tank &&
                  ground_contact_solve_active(traits))
             solve_kind = ContactSolveKind::Wheeled;
         else if (traits.family == VehicleFamily::Bike &&
                  light_contact_solve_active(traits))
             solve_kind = ContactSolveKind::Light;
-    }
-    const bool wheeled_solve = solve_kind != ContactSolveKind::None;
+	}
+	const bool wheeled_solve = solve_kind != ContactSolveKind::None;
 
-    // Wreck gate: a dead vehicle stops driving (the mode-21 wreck state; its settle
-    // physics is deferred with the state machine) [orig: @0x48af61 `!(Flags & 2) &&
-    // Health <= 0 -> mode 21`; the drive block also rejects on Flags bit 1 via the
-    // 0x10000002 mask below].
-    tick_health(veh, traits);
-    const bool wrecked = veh.health <= 0;
+	// Zero health requests wreck state 21. The drive block also rejects Flags bit 1; wreck motion
+	// runs through the installed state callback.
+	// Witness sites: [orig: @0x48af61]
+	tick_health(veh, traits);
+	const bool wrecked = veh.health <= 0;
 
-    // ------------------------------------------------------------------ input block
-    // [orig: Entity_UpdateVehiclePhysics @0x48af00, the `attrib & 0x40` occupant block
-    // @0x48b949-0x48c034. The authority always runs it; the driver's own client runs
-    // it as prediction — we ARE the authority host.]
-    Entity *occ = traits.player_control ? world.vehicles.resolve_controller(veh) : nullptr;
+	// ------------------------------------------------------------------ input block
+	// [orig: Entity_UpdateVehiclePhysics @0x48af00, the `attrib & 0x40` occupant block
+	// @0x48b949-0x48c034. The authority always runs it; the driver's own client runs
+	// it as prediction — we ARE the authority host.]
+	Entity *occ = traits.player_control ? world.vehicles.resolve_controller(veh) : nullptr;
     // A DEAD controller counts as none. The infantry death edge now detaches first;
     // this remains the same-frame safety gate when motor/system ordering varies.
     // [orig: infantry death detach @0x4b9c57..0x4b9c60]
@@ -415,27 +484,26 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 
     if (traits.player_control) {
         if (occ == nullptr || wrecked || (veh.flags & kEntityFlagDead) != 0) {
-            // No controller (or dead/locked vehicle): steer holds the current heading,
-            // commanded speed decays to zero through the decel clamps below.
-            // [orig: @0x48c002-0x48c02d — `+528 = entity->Yaw; [136] = 0; [137] = 0;
-            //  Flags &= ~0x80; state = 22`; AI_CheckVehicleStuckState unported]
-            m.steer_target_bam = m.yaw_bam;
-            m.cmd_speed = 0;
-            m.steer_ramp_bam = 0;
+			// Without a live controller, steer holds the current heading and command speed decays
+			// through the family deceleration clamps. Parked/stuck state is handled by vehicle
+			// lifecycle.
+			// Witness sites: [orig: @0x48c002]
+			m.steer_target_bam = m.yaw_bam;
+			m.cmd_speed = 0;
+			m.steer_ramp_bam = 0;
             veh.flags &= ~0x80u;
         } else if (player_occupant) {
-            stage_player_vehicle_input(veh, *occ, traits);
-        }
-        else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
-            // An AI controller drives: consume the brain-computed command block
+			stage_player_vehicle_input(world_, veh, *occ, traits);
+		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
+			// An AI controller drives: consume the brain-computed command block
             // (AiSystem::vehicle_ai_drive — the witnessed leg's steer/speed outputs).
             // [orig: the AI-driver leg @0x48bc12-0x48c034 writes aiComp[132]/[136];
             //  the ramp/dir state is the player path's only]
             m.steer_target_bam = ai_cmd->steer_target_bam;
             m.cmd_speed = ai_cmd->cmd_speed;
             m.steer_ramp_bam = 0;
-        }
-        // A live NON-player controller with no drive command holds the previous
+		}
+		// A live NON-player controller with no drive command holds the previous
         // steer/speed targets.
         // Occupied: the driverless stuck count rests [orig: `moveTimer = 0` at
         // the occupied entry split, the boat twin @0x48DFA8..0x48DFCD].
@@ -462,16 +530,18 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
         const int32_t turn_rate = traits.turn_rate;
         int32_t min_rate = io::bam_sar(turn_rate, 2);
         if (traits.turn_rate2 != 0) min_rate = traits.turn_rate2;
-        int32_t f = 0x10000;
-        if (traits.player_speed != 0) {
-            f = 0x10000 - static_cast<int32_t>((static_cast<int64_t>(m.speed) * 0x10000) /
-                                               traits.player_speed);
-            if (f < 0) f = 0;
-        }
-        const int32_t eff = io::bam_add(min_rate, static_cast<int32_t>(
-                (static_cast<int64_t>(io::bam_sub(turn_rate, min_rate)) * f +
-                        0x8000) >> 16));
-        // Proportional step: 1/64 of the heading error, clamped to the effective rate
+		int32_t f = traits.family == VehicleFamily::Tank ? 0 : 0x10000;
+		if (traits.player_speed != 0) {
+			f = 0x10000 -
+					static_cast<int32_t>(
+							(static_cast<int64_t>(m.speed) * 0x10000) / traits.player_speed);
+			if (f < 0) f = 0;
+		}
+		const int32_t eff = io::bam_add(min_rate,
+				static_cast<int32_t>(
+						(static_cast<int64_t>(io::bam_sub(turn_rate, min_rate)) * f + 0x8000) >>
+						16));
+		// Proportional step: 1/64 of the heading error, clamped to the effective rate
         // [orig: @0x48b9e9 `v106 = (target - Yaw + 32) >> 6` + the +-clamp].
         int32_t delta = io::bam_sar(io::bam_add(
                 io::bam_sub(m.steer_target_bam, m.yaw_bam), 32), 6);
@@ -484,18 +554,21 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
                 io::bam_sub(4, bam_shl_wrap(delta, 5)), m.steer_state);
         m.steer_state = io::bam_add(
                 m.steer_state, io::bam_sar(steer_error, 3));
-        // Yaw rate = -speed * (wheel >> 2) >> 16, applied while grounded
-        // [orig: @0x48ba33 modelPtr0 write; the aim/AI lock bytes are unmodeled].
-        if ((veh.flags & kEntityFlagInAir) == 0 || m.plat_afloat) {
-            const int32_t neg_speed = io::bam_sub(0, m.speed);
-            m.wheel_rate_bam = static_cast<int32_t>(
-                    (static_cast<int64_t>(neg_speed) *
-                             io::bam_sar(m.steer_state, 2) + 0x8000) >> 16);
-        }
-    }
+		// Yaw rate = -speed * (wheel >> 2) >> 16, applied while grounded
+		// Crashed or settling ground hulls retain the previous yaw rate.
+		// [orig: @0x48BA33, +0x2EC/+0x2F0 gates @0x48BA17..0x48BA60]
+		if (traits.family != VehicleFamily::Tank &&
+				(traits.family == VehicleFamily::Bike || (m.crashed == 0 && m.settle_2f0 == 0)) &&
+				(veh.flags & kEntityFlagInAir) == 0) {
+			const int32_t neg_speed = io::bam_sub(0, m.speed);
+			m.wheel_rate_bam = static_cast<int32_t>(
+					(static_cast<int64_t>(neg_speed) * io::bam_sar(m.steer_state, 2) + 0x8000) >>
+					16);
+		}
+	}
 
-    // ------------------------------------------------------------- speed pipeline
-    int32_t target_speed;
+	// ------------------------------------------------------------- speed pipeline
+	int32_t target_speed;
     {
         // Airborne: the command opposes the current motion (a coast brake)
         // [orig: @0x48ba64-0x48ba8a, gated `BYTE2(aiRef0) == 0 && !(Flags & 0x2000)`].
@@ -503,24 +576,23 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
         // +25/tick jump-latch ramp is input-side; the flip simply does not
         // exist there) [orig: cbik speed servo @0x4853ac..0x4853eb].
         int32_t cmd = m.cmd_speed;
-if (traits.family != VehicleFamily::Bike &&
-            traits.family != VehicleFamily::Tank &&
-            !m.grounded && (veh.flags & kEntityFlagInAir) == 0) {
-            if (m.speed < 0) {
-                if (cmd < 0) cmd = -cmd;
-            } else if (cmd > 0) {
-                cmd = -cmd;
-            }
-        }
-        // Slope factor: cos^2(pitch) in 22-bit fixed [orig: @0x48ba47 — off_849934
-        // cos-table sample squared >> 22]. Retail reads the live entity Pitch the
-        // contact solve conforms; boxless stand-in rows keep the degree-quantized
-        // row pitch (their attitude never advances past the authored pose).
-        const int32_t pitch_bam = wheeled_solve
-                ? m.air_pitch_bam
-                : static_cast<int32_t>(
-                          static_cast<int64_t>(veh.pitch) * 11930464);
-        const int32_t c = cos22_of_bam(pitch_bam);
+		if (traits.family != VehicleFamily::Bike && traits.family != VehicleFamily::Tank &&
+				!m.grounded && (veh.flags & kEntityFlagInAir) == 0) {
+			if (m.speed < 0) {
+				if (cmd < 0)
+					cmd = -cmd;
+			} else if (cmd > 0) {
+				cmd = -cmd;
+			}
+		}
+		// Slope factor: cos^2(pitch) in 22-bit fixed [orig: @0x48ba47 — off_849934
+		// cos-table sample squared >> 22]. Retail reads the live entity Pitch the
+		// contact solve conforms; boxless stand-in rows keep the degree-quantized
+		// row pitch (their attitude never advances past the authored pose).
+		const int32_t pitch_bam = wheeled_solve
+				? m.air_pitch_bam
+				: static_cast<int32_t>(static_cast<int64_t>(veh.pitch) * 11930464);
+		const int32_t c = cos22_of_bam(pitch_bam);
         const int32_t c2 = static_cast<int32_t>((static_cast<int64_t>(c) * c) >> 22);
         target_speed = static_cast<int32_t>((static_cast<int64_t>(c2) * cmd) >> 22);
 
@@ -528,210 +600,156 @@ if (traits.family != VehicleFamily::Bike &&
         // `rawAccel = (target - speed + 16) >> 5` + the branch tree @0x48bac0-0x48bbe0].
         const int32_t raw_accel = (target_speed - m.speed + 16) >> 5;
         m.speed_accel = raw_accel;
-        if (traits.family == VehicleFamily::Tank) {
-            // The tank servo's clamp tree [orig: Entity_UpdateTankVehiclePhysics
-            // chase @0x489d79..0x489d84, clamps @0x489d89..0x489e79]: a
-            // direction REVERSAL (and the standing
-            // start) clamps at ±2·deceleration — where the ground core keeps
-            // the raw 1/32 chase — and same-direction drive clamps to
-            // ±acceleration (target != 0) or ±deceleration (target == 0). The
-            // slope anti-creep legs ride the deferred contact-direction store
-            // (D-NET-161): with the store empty, retail takes exactly these
-            // plain caps [orig: the |dir|==0 arm @0x489C3A..0x489C6C].
-            const bool reversal = (target_speed >= 0 && m.speed < 0) ||
-                                  (target_speed <= 0 && m.speed > 0);
-            if (reversal) {
-                const int32_t d2 = 2 * traits.deceleration;
-                if (m.speed_accel > d2) m.speed_accel = d2;
+		m.skid_effects_requested = false;
+		if (detail::vehicle_traction_acceleration(world, veh, traits, target_speed)) {
+			// The retained contact frame owns the skid acceleration.
+		} else if (traits.family == VehicleFamily::Tank) {
+			// The tank servo's clamp tree [orig: Entity_UpdateTankVehiclePhysics
+			// chase @0x489d79..0x489d84, clamps @0x489d89..0x489e79]: a
+			// direction REVERSAL (and the standing
+			// start) clamps at ±2·deceleration — where the ground core keeps
+			// the raw 1/32 chase — and same-direction drive clamps to
+			// ±acceleration (target != 0) or ±deceleration (target == 0). The
+			// steering/skid caps precede these plain caps
+			// [orig: the |dir|==0 arm @0x489C3A..0x489C6C].
+			const bool reversal = (target_speed > 0 && m.speed <= 0) ||
+					(target_speed < 0 && m.speed >= 0) || (target_speed == 0 && m.speed == 0);
+			if (reversal) {
+				const int32_t d2 = 2 * traits.deceleration;
+				if (m.speed_accel > d2) m.speed_accel = d2;
                 if (m.speed_accel < -d2) m.speed_accel = -d2;
-            } else if (target_speed != 0) {
-                if (m.speed_accel > traits.acceleration) m.speed_accel = traits.acceleration;
-                if (m.speed_accel < -traits.acceleration) m.speed_accel = -traits.acceleration;
-            } else {
-                if (m.speed_accel > traits.deceleration) m.speed_accel = traits.deceleration;
-                if (m.speed_accel < -traits.deceleration) m.speed_accel = -traits.deceleration;
-            }
-        } else if (!m.grounded && traits.family != VehicleFamily::Bike) {
-            // Wheels off the ground: coast clamp at half deceleration
-            // [orig: @0x48bacf `±deceleration >> 1`]. The cbik mover has no
-            // airborne clamp — it skips speed INTEGRATION off-contact instead
-            // (below) [orig: the contact gate @0x485501..0x485534].
-            const int32_t d2 = traits.deceleration >> 1;
-            if (m.speed_accel > d2) m.speed_accel = d2;
+			} else if (target_speed != 0) {
+				if (m.speed_accel > traits.acceleration)
+					m.speed_accel = traits.acceleration;
+				if (m.speed_accel < -traits.acceleration) m.speed_accel = -traits.acceleration;
+			} else {
+				if (m.speed_accel > traits.deceleration)
+					m.speed_accel = traits.deceleration;
+				if (m.speed_accel < -traits.deceleration) m.speed_accel = -traits.deceleration;
+			}
+		} else if ((!m.grounded || m.settle_2f0 != 0) && traits.family != VehicleFamily::Bike) {
+			// Wheels off the ground: coast clamp at half deceleration
+			// [orig: @0x48bacf `±deceleration >> 1`]. The cbik mover has no
+			// airborne clamp — it skips speed INTEGRATION off-contact instead
+			// (below) [orig: the contact gate @0x485501..0x485534].
+			const int32_t d2 = traits.deceleration >> 1;
+			if (m.speed_accel > d2) m.speed_accel = d2;
             if (m.speed_accel < -d2) m.speed_accel = -d2;
-        } else {
-            // The skid/tire-slip leg is deferred (D-NET-161); the straight-drive clamp
-            // tree is ported verbatim [orig: @0x48bb46-0x48bbe0]:
-            //   same-direction drive clamps to ±acceleration; a zero target clamps to
-            //   ±deceleration; a direction REVERSAL keeps the raw 1/32 chase unclamped.
-            const bool reversal = (target_speed > 0 && m.speed <= 0) ||
-                                  (target_speed < 0 && m.speed >= 0) ||
-                                  (target_speed == 0 && m.speed == 0);
-            if (!reversal) {
-                if (target_speed != 0) {
+		} else {
+			// The straight-drive clamp tree [orig: @0x48bb46-0x48bbe0]:
+			//   same-direction drive clamps to ±acceleration; a zero target clamps to
+			//   ±deceleration; a direction REVERSAL keeps the raw 1/32 chase unclamped.
+			const bool reversal = (target_speed > 0 && m.speed <= 0) ||
+					(target_speed < 0 && m.speed >= 0) || (target_speed == 0 && m.speed == 0);
+			if (!reversal) {
+				if (target_speed != 0) {
                     if (m.speed_accel > traits.acceleration) m.speed_accel = traits.acceleration;
                     if (m.speed_accel < -traits.acceleration) m.speed_accel = -traits.acceleration;
-                } else {
-                    if (m.speed_accel > traits.deceleration) m.speed_accel = traits.deceleration;
-                    if (m.speed_accel < -traits.deceleration) m.speed_accel = -traits.deceleration;
-                }
-            }
-        }
-        // The cbik AND ctan movers integrate speed only in CONTACT [orig: the
-        // `!crashed && !(Flags & 0x2000) && BYTE2(aiRef0)` gates
-        // @0x485501..0x485534 (cbik) / @0x489f34..0x489f56 with the <48
-        // stop snap (ctan)]; the
-        // ground core integrates unconditionally [orig: @0x48c302..0x48c32a].
-        if ((traits.family != VehicleFamily::Bike &&
-             traits.family != VehicleFamily::Tank) || m.grounded) {
-            m.speed += m.speed_accel; // [orig: @0x48bbe6 `currentSpeed += speedAccel`]
-            if (target_speed == 0 && std::abs(m.speed) < 48) m.speed = 0; // [orig: @0x48bbf7]
-            if (m.speed_accel == 0) m.speed = target_speed;               // [orig: @0x48bc0d]
-        }
-    }
+				} else if (const Entity *parent = world.registry.get(veh.mount_target);
+						parent == nullptr || (parent->flags & 0x100u) != 0) {
+					// NPC-mounted zero-command coast retains the raw servo.
+					// [orig: cveh @0x48C428..0x48C43F, parent +0x16C]
+					if (m.speed_accel > traits.deceleration)
+						m.speed_accel = traits.deceleration;
+					if (m.speed_accel < -traits.deceleration)
+						m.speed_accel = -traits.deceleration;
+				}
+			}
+		}
+		// The cbik AND ctan movers integrate speed only in CONTACT [orig: the
+		// `!crashed && !(Flags & 0x2000) && BYTE2(aiRef0)` gates
+		// @0x485501..0x485534 (cbik) / @0x489f34..0x489f56 with the <48
+		// stop snap (ctan)]; the
+		// ground core integrates unconditionally [orig: @0x48c302..0x48c32a].
+		if ((traits.family != VehicleFamily::Bike && traits.family != VehicleFamily::Tank) ||
+				(m.grounded && m.crashed == 0 && (veh.flags & kEntityFlagInAir) == 0)) {
+			m.speed += m.speed_accel; // [orig: @0x48bbe6 `currentSpeed += speedAccel`]
+			if (target_speed == 0 && std::abs(m.speed) < 48)
+				m.speed = 0; // [orig: @0x48bbf7]
+			if (m.speed_accel == 0) m.speed = target_speed;               // [orig: @0x48bc0d]
+		}
+	}
 
-    if (traits.family == VehicleFamily::Tank)
-        track_phase_tick(m.track_phase, m.speed, m.wheel_rate_bam);
+	if (traits.family == VehicleFamily::Tank)
+		track_phase_tick(m.track_phase, m.speed, m.wheel_rate_bam);
+	else
+		detail::vehicle_wheel_traction_tick(world, veh, traits, target_speed);
 
-    bool collided = false;
-
-    // ------------------------------------------- velocity, gravity, integration
-    {
-        // Direction from the live heading; velocity only re-derives while grounded —
-        // airborne keeps the last (ballistic) velocity [orig: the @0x48ec74 gate
-        // `!(Flags & 0x2000) && (BYTE2(aiRef0) || autopilot)` around the
-        // velocity-from-heading rewrite @0x48ed3b-0x48ed6b].
-        if (m.grounded) {
-            if (traits.family == VehicleFamily::Tank) {
-                // The tank drives along its FULL basis forward row — the
-                // conformed pitch tilts the velocity, and slideDecay is
-                // REPLACED by the vertical component (the crashed-gated skip
-                // rides the deferred wreck machine) [orig: the normalized
-                // row-0 products + `slideDecay = speed*fwd.z` in the contact
-                // velocity-build stores @0x48a5ac..0x48a8b4; the low-speed
-                // contact-direction realign (the ±5°/tick cross-product
-                // rotate toward forward, BuildYXZ ±59652323) rides the
-                // deferred D-NET-161 store — with the store empty retail
-                // takes exactly this velocity = speed * fwd arm].
-                const VehicleEulerBasis tb = vehicle_euler_basis(
-                        m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-                const int32_t fwd_q16[3] = {
-                    static_cast<int32_t>(tb.fwd[0] * 65536.0),
-                    static_cast<int32_t>(tb.fwd[1] * 65536.0),
-                    static_cast<int32_t>(tb.fwd[2] * 65536.0)};
-                m.vel_x = detail::q16_mul_rhu(m.speed, fwd_q16[0]);
-                m.vel_y = detail::q16_mul_rhu(m.speed, fwd_q16[1]);
-                m.slide_z = detail::q16_mul_rhu(m.speed, fwd_q16[2]);
-            } else {
-                // The GROUND core's own grounded build is the SAME full-basis
-                // form: dir rows from the euler matrix, and slideDecay REPLACED
-                // by speed*fwd.z while the crash latch is clear. The former
-                // yaw-only leg with slide_z = 0 was the D-NET-161 stand-in; it
-                // left LEVEL velocity at every contact loss, so a crest sent the
-                // hull sailing horizontally while the road dropped -- 27% of the
-                // 00TRg convoy's drive read airborne and the witnessed coast
-                // brake ate the route pace (AI-PARITY-CONCEPT 6.12g/h; the
-                // 13-pin's root). Retail's frozen ballistic velocity follows the
-                // slope and re-contacts at once.
-                // [orig: Entity_UpdateVehiclePhysics @0x48AF00 grounded build,
-                //  kong 116425-116490 -- Math_BuildFixedPointMatrixFromEuler-
-                //  Angles rows 0/2, velocity = speed*row products @116804-116831,
-                //  slideDecay = v139 (= speed*fwd.z) @116470 gated on the
-                //  aimHeading crash byte == 0]
-                const VehicleEulerBasis gb = vehicle_euler_basis(
-                        m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-                const int32_t gfwd[3] = {
-                    static_cast<int32_t>(gb.fwd[0] * 65536.0),
-                    static_cast<int32_t>(gb.fwd[1] * 65536.0),
-                    static_cast<int32_t>(gb.fwd[2] * 65536.0)};
-                m.vel_x = detail::q16_mul_rhu(m.speed, gfwd[0]);
-                m.vel_y = detail::q16_mul_rhu(m.speed, gfwd[1]);
-                if (m.crashed == 0) // [orig: the aimHeading-byte gate @116468]
-                    m.slide_z = detail::q16_mul_rhu(m.speed, gfwd[2]);
-            }
-        }
-        if (traits.family == VehicleFamily::Bike) {
-            // Bike-only vertical up-cap; the airborne input latch that can lift
-            // it is input-side, so the client-run form caps unconditionally
-            // [orig: vZ = min(vZ, 0x4000) @0x48659b..0x48659d].
-            if (m.slide_z > 0x4000) m.slide_z = 0x4000;
+	// ------------------------------------------- velocity, gravity, integration
+	{
+		// Full chassis basis or retained skid frame, with the family recovery
+		// tree and airborne velocity hold. The original straight-drive sites
+		// remain @0x48ec74 / @0x48ed3b..0x48ed6b, ctan @0x48a5ac..0x48a8b4,
+		// and Entity_UpdateVehiclePhysics @0x48AF00 (kong @116468 / @116470,
+		// @116425..@116490 and @116804..@116831).
+		detail::vehicle_traction_velocity(world, veh, traits, target_speed);
+		detail::vehicle_emit_skid_effects(world, veh, traits);
+		detail::vehicle_sample_trails(world, veh, traits, target_speed);
+		if (traits.family == VehicleFamily::Bike) {
+			// Bike-only vertical up-cap; the airborne input latch that can lift
+			// it is input-side, so the client-run form caps unconditionally
+			// [orig: vZ = min(vZ, 0x4000) @0x48659b..0x48659d].
+			if (m.slide_z > 0x4000) m.slide_z = 0x4000;
             m.slide_z -= kGravityStepBike; // [orig: @0x4865a6 `slideDecay -= 250`]
             // The bike's "has been driven" byte: a leaning bike (Flags 0x20)
             // above 0x1000 speed marks itself driven; the light solve's crash
             // test over the spine probes reads it (vehicle_suspension.h)
             // [orig: Entity_UpdateLightVehiclePhysics @0x48524c].
             if ((veh.flags & 0x20u) != 0 && m.speed > 0x1000) m.has_been_driven = 1;
-        } else if (traits.family == VehicleFamily::Tank) {
-            // The tank shares the 250 step with the bike — no up-cap
-            // [orig: `slideDecay += -250` @0x48a82c in
-            // Entity_UpdateTankVehiclePhysics].
-            m.slide_z -= kGravityStepBike;
-        } else {
-            m.slide_z -= kGravityStep; // [orig: @0x48d69b `slideDecay -= 324`]
-        }
-        // Submerged drag: while the solve-owned in-water flag is up, planar and
-        // vertical velocity shed 1/4 per tick [orig: `test Flags,0x8000` then
-        // `v -= (v+2)>>2` on all three @0x48d013..0x48d052; identical in the
-        // bike mover @0x4865bb..0x4865ed]. The two-HP drown drain
-        // (health word +0x11E) is authority-gated — ported below;
-        // the attacker clear remains unmodeled [orig: @0x48d05a..0x48d083].
-        if ((veh.flags & 0x8000u) != 0) {
-            m.vel_x -= (m.vel_x + 2) >> 2;
-            m.vel_y -= (m.vel_y + 2) >> 2;
+		} else if (traits.family == VehicleFamily::Tank) {
+			// The tank shares the 250 step with the bike — no up-cap
+			// [orig: `slideDecay += -250` @0x48a82c in
+			// Entity_UpdateTankVehiclePhysics].
+			m.slide_z -= kGravityStepBike;
+		} else {
+			m.slide_z -= kGravityStep; // [orig: @0x48d69b `slideDecay -= 324`]
+		}
+		// Submerged drag: while the solve-owned in-water flag is up, planar and
+		// vertical velocity shed 1/4 per tick [orig: `test Flags,0x8000` then
+		// `v -= (v+2)>>2` on all three @0x48d013..0x48d052; identical in the
+		// bike mover @0x4865bb..0x4865ed]. The two-HP drown drain
+		// (health word +0x11E) is authority-gated — ported below;
+		// the zero-health edge clears the attacker [orig: @0x48d05a..0x48d083].
+		if ((veh.flags & 0x8000u) != 0) {
+			m.vel_x -= (m.vel_x + 2) >> 2;
+			m.vel_y -= (m.vel_y + 2) >> 2;
             m.slide_z -= (m.slide_z + 2) >> 2;
-            // All ground families lose two health per submerged authority tick.
-            // Boats use capsize damage; their afloat flag is normal operation.
-            // [orig: cveh @0x48D05A..0x48D083; cbik @0x4865F3..0x48661C;
-            // ctan @0x48A87B..0x48A8A4]
-            if (world.ai.is_authority && veh.health > 0)
-                veh.health = std::max(0, veh.health - 2);
-        }
+			// All ground families lose two health per submerged authority tick.
+			// Boats use capsize damage; their afloat flag is normal operation.
+			// [orig: cveh @0x48D05A..0x48D083; cbik @0x4865F3..0x48661C;
+			// ctan @0x48A87B..0x48A8A4]
+			if (world.ai.is_authority && veh.health > 0) {
+				veh.health = std::max(0, veh.health - 2);
+				if (veh.health == 0)
+					veh.last_attacker = {};
+			}
+		}
 
-        const int32_t prev[3] = {to_fixed(veh.position.x), to_fixed(veh.position.y),
-                                 to_fixed(veh.position.z)};
-        int32_t px = prev[0] + m.vel_x;
+		const int32_t prev[3] = { to_fixed(veh.position.x), to_fixed(veh.position.y),
+			to_fixed(veh.position.z) };
+		int32_t px = prev[0] + m.vel_x;
         int32_t py = prev[1] + m.vel_y;
         int32_t pz = prev[2] + m.slide_z;
 
-        // Hull-vs-world contact [orig: Entity_CheckCollisionState @0x462a30 from the
-        // vehicle physics @0x47cb8c/0x47d213]: wall-like pushes move the hull out and
-        // the collision severity decays speed through the def torque shifts
-        // [orig: @0x47cc13-0x47ccc1 — sev 1/3: speed -= speed >> (torque+2),
-        //  sev 2: speed -= speed >> (torque+1); `sar cl` masks the count mod 32].
-        // Our stand-in reports severity 0/3 only (collision.h; D-NET-161).
-        if (world.ai.collision != nullptr) {
-            const int32_t moved[3] = {px, py, pz};
-            int32_t push[2];
-            const int32_t sev =
-                    world.ai.collision->resolve_vehicle_hull(world, veh.handle, moved,
-                                                              prev, push);
-            collided = sev != 0;
-            if (sev == 3) {
-                px += push[0];
-                py += push[1];
-                m.speed -= m.speed >> ((traits.torque + 2) & 31);
-            }
-        }
-
-        // Ground contact at the witnessed call sites — after Position +=
-        // velocity, before the yaw apply [orig: the tracked call @0x48d0b1;
-        // the wheeled call @0x48a9ef; the light call @0x486672]. Each family
-        // solve rests the hull at wheel height above terrain (pads at
-        // box_z_lo + r) and conforms attitude from per-corner lifts; rows
-        // outside their activity predicates keep the 5-tap bilinear
-        // terrain-clamp stand-in (a tracked divergence, D-NET-161).
-        if (solve_kind == ContactSolveKind::Tracked) {
-            ground_contact_solve(world, veh, traits, m, prev[0], prev[1],
-                                 px, py, pz);
-        } else if (solve_kind == ContactSolveKind::Wheeled) {
-            wheeled_contact_solve(world, veh, traits, m, prev[0], prev[1],
-                                  px, py, pz);
-        } else if (solve_kind == ContactSolveKind::Light) {
-            light_contact_solve(world, veh, traits, m, prev[0], prev[1],
-                                px, py, pz);
-        } else if (world.tables.terrain != nullptr) {
-            const int32_t pos3[3] = {px, py, pz};
-            const GroundClearance clearance{};
+		// Entity_CheckCollisionState @0x462A30 runs over the authored wheel
+		// and spine probes inside each family solve (@0x47CB8C/@0x47D213).
+		// Torque severity decay is applied there once [orig: @0x47CC13..0x47CCC1].
+		// Ground contact at the witnessed call sites — after Position +=
+		// velocity, before the yaw apply [orig: the tracked call @0x48d0b1;
+		// the wheeled call @0x48a9ef; the light call @0x486672]. Each family
+		// solve rests the hull at wheel height above terrain (pads at
+		// box_z_lo + r) and conforms attitude from per-corner lifts; rows
+		// outside their activity predicates keep the 5-tap bilinear
+		// terrain clamp for an embedder that supplies no authored model probes.
+		if (solve_kind == ContactSolveKind::Tracked) {
+			ground_contact_solve(world, veh, traits, m, prev[0], prev[1], px, py, pz);
+		} else if (solve_kind == ContactSolveKind::Wheeled) {
+			wheeled_contact_solve(world, veh, traits, m, prev[0], prev[1], px, py, pz);
+		} else if (solve_kind == ContactSolveKind::Light) {
+			light_contact_solve(world, veh, traits, m, prev[0], prev[1], px, py, pz);
+		} else if (world.tables.terrain != nullptr) {
+			const int32_t pos3[3] = { px, py, pz };
+			const GroundClearance clearance{};
             const int32_t ground =
                     calc_average_ground_height(*world.tables.terrain, pos3, 0, clearance);
             if (ground != INT32_MIN) {
@@ -745,17 +763,17 @@ if (traits.family != VehicleFamily::Bike &&
                     m.grounded = (pz - ground) <= 0x8000; // 0.5 u suspension margin
                 }
             }
-        } else {
-            m.grounded = true; // no terrain wired (unit worlds): drive on a flat plane
-            if (m.slide_z < 0) m.slide_z = 0;
+		} else {
+			m.grounded = true; // no terrain wired (unit worlds): drive on a flat plane
+			if (m.slide_z < 0) m.slide_z = 0;
             pz = to_fixed(veh.position.z);
-        }
+		}
 
-        // Grounded steering applies the wheel yaw rate [orig: @0x48ef60
-        // `Yaw += modelPtr0`, gated on ground contact]. The cbik mover ALWAYS
-        // applies it, quartered while the airborne/swimming flag is up
-        // [orig: @0x486681..0x486697 `Yaw += modelPtr0 >> 2` under Flags 0x2000].
-        if (traits.family == VehicleFamily::Bike) {
+		// Grounded steering applies the wheel yaw rate [orig: @0x48ef60
+		// `Yaw += modelPtr0`, gated on ground contact]. The cbik mover ALWAYS
+		// applies it, quartered while the airborne/swimming flag is up
+		// [orig: @0x486681..0x486697 `Yaw += modelPtr0 >> 2` under Flags 0x2000].
+		if (traits.family == VehicleFamily::Bike) {
             // The original's Flags 0x2000 is the suspension solver's current
             // off-contact result. Our portable contact result is m.grounded;
             // veh.flags is not maintained by this stand-in and can be stale.
@@ -763,42 +781,38 @@ if (traits.family != VehicleFamily::Bike &&
                     ? m.wheel_rate_bam
                     : io::bam_sar(m.wheel_rate_bam, 2);
             m.yaw_bam = io::bam_add(m.yaw_bam, yaw_step);
-        } else if (traits.family == VehicleFamily::Tank) {
-            // The tank applies yaw unless PARKED (the +0x2F0 park byte —
-            // deferred latch machine, never set for live rows), quartered
-            // while airborne — the bike shape keyed on the solve-owned flag
-            // [orig: @0x48a9f7..0x48aa1d `if (!parkedByte) Yaw += (Flags &
-            // 0x2000) ? modelPtr0 >> 2 : modelPtr0`]. When the solve is
-            // inactive (boxless/terrain-less stand-in rows) the airborne flag
-            // is stale — key on m.grounded exactly like the bike arm.
-            const int32_t yaw_step =
-                    (wheeled_solve ? (veh.flags & kEntityFlagInAir) != 0
-                                   : !m.grounded)
-                            ? io::bam_sar(m.wheel_rate_bam, 2)
-                            : m.wheel_rate_bam;
-            m.yaw_bam = io::bam_add(m.yaw_bam, yaw_step);
-        } else if (m.grounded) {
-            m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
-        }
+		} else if (traits.family == VehicleFamily::Tank && m.settle_2f0 == 0) {
+			// Tank yaw is gated by the parked latch and quartered in the crashed arm.
+			// Witness sites: [orig: @0x48a9f7, @0x48aa1d]
+			const int32_t yaw_step =
+					(wheeled_solve ? (veh.flags & kEntityFlagInAir) != 0 : !m.grounded)
+					? io::bam_sar(m.wheel_rate_bam, 2)
+					: m.wheel_rate_bam;
+			m.yaw_bam = io::bam_add(m.yaw_bam, yaw_step);
+		} else if (traits.family == VehicleFamily::Ground && m.grounded &&
+				(veh.flags & kEntityFlagInAir) == 0 && m.crashed == 0 && m.settle_2f0 == 0) {
+			m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
+		}
 
-        veh.position.x = static_cast<float>(from_fixed(px));
-        veh.position.y = static_cast<float>(from_fixed(py));
-        veh.position.z = static_cast<float>(from_fixed(pz));
+		veh.position.x = static_cast<float>(from_fixed(px));
+		veh.position.y = static_cast<float>(from_fixed(py));
+		veh.position.z = static_cast<float>(from_fixed(pz));
         veh.yaw = static_cast<int16_t>(std::lround(
                 normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(m.yaw_bam))));
-    }
+	}
 
-    slew_turret(veh, 0x2108421);
+	slew_turret(veh, 0x2108421);
 
-    // Publish the final motor state into the generic, host-owned persistent
-    // emitter seam. The claimant gate lives in the sound consumer because the
-    // motor still needs to settle an unoccupied PlayerControl vehicle.
-    // [orig: Entity_ProcessMovementSoundEffects call @0x48d181..0x48d25c]
-    world.vehicles.update_ground_sound(veh, traits, wrecked, collided);
-    update_engine_sound(veh, traits);
-    // The part-animation accumulators, at the mover's tail [orig: the
-    // Entity_UpdatePartSpinAccumulator call @0x48AE3D in this mover].
-    world.vehicles.part_anim_tick(veh, traits);
+	// Publish the final motor state into the generic, host-owned persistent
+	// emitter seam. The claimant gate lives in the sound consumer because the
+	// motor still needs to settle an unoccupied PlayerControl vehicle.
+	// [orig: Entity_ProcessMovementSoundEffects call @0x48d181..0x48d25c]
+	world.vehicles.update_ground_sound(veh, traits, wrecked, m.plat_airborne_ticks > 30);
+	world.vehicles.update_traction_sound(veh, traits);
+	update_engine_sound(veh, traits);
+	// The part-animation accumulators, at the mover's tail [orig: the
+	// Entity_UpdatePartSpinAccumulator call @0x48AE3D in this mover].
+	world.vehicles.part_anim_tick(veh, traits);
 }
 
 namespace {
@@ -880,10 +894,10 @@ VehicleEulerBasisQ16 vehicle_euler_basis_q16(int32_t yaw_bam,
 // physics [orig: @0x48DB6B..0x48DDD4 (watercraft instance); same constants in
 // every family]. Steps the registry position/heading and owns the stale-record
 // command coast-down.
-static void vehicle_client_chase(Entity &veh) {
-    Entity::VehicleMotorState &m = veh.veh;
-    int32_t px = to_fixed(veh.position.x);
-    int32_t py = to_fixed(veh.position.y);
+void vehicle_client_chase(Entity &veh) {
+	Entity::VehicleMotorState &m = veh.veh;
+	int32_t px = to_fixed(veh.position.x);
+	int32_t py = to_fixed(veh.position.y);
     int32_t pz = to_fixed(veh.position.z);
     if (m.net_interp_progress == 0) {
         const int64_t dx = int64_t(m.net_smooth_target[0]) - px;
@@ -958,34 +972,22 @@ static void vehicle_client_chase(Entity &veh) {
     veh.position.z = static_cast<float>(from_fixed(pz));
 }
 
-// The boat platform solve — the client-executed subset of
-// Entity_ProcessPlatformPhysics [orig: @0x481870, sole caller
-// Entity_UpdateWatercraftPhysics @0x48ECE7 — every tick, after integration,
-// before the yaw apply; runs on clients for remote boats]. Port scope
-// (vehicle-client-movers-re.md §3 + vehicle-client-movers-re.md §4, 2026-07-31): the
-// 7-probe terrain solve, severity speed sheds, position push, the water leg
-// (afloat/draft/heave bob), lever corners + bow-lift/porpoise machine, and
-// the grounded/buoyant/settled solve select with the shared 4-normal plane
-// fit. Cited deferrals: authority collision damage/sound + the Flags 0x10
-// latch upkeep [orig: @0x482336..0x48244D / @0x483494..0x4834C6],
-// entity-entity collision + momentum exchange (no proximity list yet)
-// [orig: @0x462561.. / @0x482459..], the planing roll-lean machine
-// [orig: @0x45AEA0], splash/smoke FX + sounds, and the wreck-tumble path
-// [orig: Entity_ClearSuspensionState @0x4592B0 chain]. Euler extraction uses
-// the standard atan2 decomposition of the fitted rows — the
-// Math_FixedPointMatrixToEulerAngles interior [orig: @0x613310] is a tracked
-// pending witness.
+// Boat platform contact, buoyancy, planing and wreck state. The four pads and three spine probes
+// run after integration and before yaw, for authority and prediction. Its second-pass depth buffer
+// is also consumed by the grounded branch. See vehicle-client-movers-re.md sections 3 and 12-32.
+// Witness sites: [orig: @0x481870, @0x48ECE7, @0x482336, @0x48244D, @0x483494, @0x4834C6,
+// @0x462561, @0x482459, @0x45AEA0, @0x4592B0, @0x613310]
 namespace detail {
 
 // One bilinear terrain probe force (struct + [orig] cites in
 // vehicle_motor_detail.h — shared with the contact solves in
 // vehicle_contact_solve.cpp).
-int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z,
-                           int32_t r, int32_t soft, int32_t hard,
-                           PlatProbeForce &out) {
-    if (world.tables.terrain == nullptr) return 0;
-    const GroundClearance clearance{};
-    auto sample = [&](int32_t sx, int32_t sy) {
+int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z, int32_t r,
+		int32_t soft, int32_t hard, PlatProbeForce &out, bool wheel_probe) {
+	if (world.tables.terrain == nullptr)
+		return 0;
+	const GroundClearance clearance{};
+	auto sample = [&](int32_t sx, int32_t sy) {
         const int32_t p3[3] = {sx, sy, Z};
         return calc_average_ground_height(*world.tables.terrain, p3, 0, clearance);
     };
@@ -995,29 +997,37 @@ int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z,
     // Height over the 4-sample average [orig: @0x4622A3]; clear by > r skips
     // [orig: @0x4622D2].
     const int32_t rel = Z - (h_yp >> 2) - (h_ym >> 2) - (h_xp >> 2) - (h_xm >> 2);
-    if (h_xm + r < Z && h_xp + r < Z && h_ym + r < Z && h_yp + r < Z) return 0;
-    const int64_t gx = h_xp - h_xm, gy = h_yp - h_ym, gz = -2 * int64_t(r);
-    const double dn = std::sqrt(double(gx) * gx + double(gy) * gy + double(gz) * gz);
-    const int32_t norm = dn >= 2147418112.0 ? INT32_MAX : int32_t(dn);
-    if (norm == 0) return 0;
-    int64_t fx = gx * r / norm, fy = gy * r / norm;
-    int64_t pen = rel + gz * r / norm; // = rel - 2r^2/norm [orig: @0x462360]
-    if (pen >= 0) {
-        // Grazing case [orig: @0x4623AF..0x462424].
-        const int64_t ax = gx ? gz * pen / gx : 0;
+
+	const int64_t gx = h_xp - h_xm, gy = h_yp - h_ym, gz = -2 * int64_t(r);
+	const double dn = std::sqrt(double(gx) * gx + double(gy) * gy + double(gz) * gz);
+	const int32_t norm = dn >= 2147418112.0 ? 2147418112 : int32_t(dn);
+	if (norm == 0)
+		return 0;
+	int64_t fx = gx * r / norm, fy = gy * r / norm;
+	int64_t pen = rel + gz * r / norm; // = rel - 2r^2/norm [orig: @0x462360]
+	// Optional gap array is written before the broad phase, and clipped to
+	// zero for a penetrating point [orig: Entity_CheckCollisionState @0x462A30,
+	// @0x462BFB..0x462C5B]. Tank springs consume the latest pass's gaps.
+	out.terrain_gap = std::max(0, int32_t(pen));
+	if (!wheel_probe && h_xm + r < Z && h_xp + r < Z && h_ym + r < Z && h_yp + r < Z)
+		return 0;
+	if (pen >= 0) {
+		// Grazing case [orig: @0x4623AF..0x462424].
+		const int64_t ax = gx ? gz * pen / gx : 0;
         const int64_t ay = gy ? gz * pen / gy : 0;
         bool hit = false;
         if (std::llabs(ax) < std::llabs(fx)) { fx += ax; hit = true; }
         if (std::llabs(ay) < std::llabs(fy)) { fy += ay; hit = true; }
         if (!hit) return 0;
         pen = 0;
-    }
-    const double dm = std::sqrt(double(fx) * fx + double(fy) * fy +
-                                double(pen - rel) * double(pen - rel));
-    const int32_t mag = dm >= 2147418112.0 ? INT32_MAX : int32_t(dm);
-    if (mag == 0) return 0;
-    const int32_t cosr = int32_t((int64_t(rel - pen) << 22) / mag); // [orig: @0x4624A7]
-    out.fz -= int32_t(pen); // push-up [orig: @0x4624AD]
+	}
+	const double dm =
+			std::sqrt(double(fx) * fx + double(fy) * fy + double(pen - rel) * double(pen - rel));
+	const int32_t mag = dm >= 2147418112.0 ? 2147418112 : int32_t(dm);
+	if (mag == 0)
+		return 0;
+	const int32_t cosr = int32_t((int64_t(rel - pen) << 22) / mag); // [orig: @0x4624A7]
+	out.fz -= int32_t(pen); // push-up [orig: @0x4624AD]
     int32_t sev = 0;
     if (cosr < soft) {
         out.fx -= int32_t(fx); out.fy -= int32_t(fy); sev = 3;
@@ -1045,16 +1055,15 @@ namespace detail {
 // [orig: fit 0x46C92B../0x46D4C7../0x46D6D8../0x46D8E8 (orientation solver)
 //  and 0x46B332../0x46BC76../0x46BE7C../0x46C091 (wheeled solver);
 //  aggregation 0x46DC1F..0x46DC69 / 0x46C3B1..0x46C3FB]
-void plat_fit_corners(const int32_t c[4][3], PlatFit &out) {
-    auto edge = [&c](int i, int j, int32_t u[3]) {
-        const int64_t d[3] = {int64_t(c[i][0]) - c[j][0],
-                              int64_t(c[i][1]) - c[j][1],
-                              int64_t(c[i][2]) - c[j][2]};
-        q16_normalize(d, u);
-    };
-    // Edge sets, verbatim pairing (set 1 == set 2, real shipped duplication —
-    // a fourth distinct corner normal is never computed):
-    int32_t a[3], b[3], e3[3], f4[3];
+void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matrix) {
+	auto edge = [&c](int i, int j, int32_t u[3]) {
+		const int64_t d[3] = { int64_t(c[i][0]) - c[j][0], int64_t(c[i][1]) - c[j][1],
+			int64_t(c[i][2]) - c[j][2] };
+		q16_normalize(d, u);
+	};
+	// Edge sets, verbatim pairing (set 1 == set 2, real shipped duplication —
+	// a fourth distinct corner normal is never computed):
+	int32_t a[3], b[3], e3[3], f4[3];
     edge(0, 3, a);  // c0 - c3
     edge(3, 2, b);  // c3 - c2
     edge(1, 2, e3); // c1 - c2
@@ -1082,26 +1091,22 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out) {
     q16_normalize(up_s, up);
     q16_normalize(fwd_s, fwd);
     q16_normalize(side_s, side);
-    out.fwd_z = double(fwd[2]) / 65536.0;
-    const double fxy = std::sqrt(double(fwd[0]) * double(fwd[0]) +
-                                 double(fwd[1]) * double(fwd[1]));
-    out.pitch_bam = bam_of_atan2(double(fwd[2]), fxy);
-    // Roll sign: the extraction must be the exact inverse of the pose builder
-    // or any heel flip-flops sign at 62 Hz (the review-confirmed defect). The
-    // builder is now the retail-witnessed Q22 collision_matrix_from_euler
-    // basis, whose side row pairs with the UN-negated atan2 — pinned
-    // end-to-end by run_platform_basis_preserves_roll_sign. Plain atan2
-    // handles up[2] <= 0 as the obtuse (capsized) roll; the exact
-    // Math_FixedPointMatrixToEulerAngles interior [orig: @0x613310] remains
-    // the pending witness for the substitute pair as a whole.
-    out.roll_bam = bam_of_atan2(double(side[2]), double(up[2]));
-    // Z = the plain corner average in the ORIENTATION solver [orig: solvedPos.Z
-    // @0x46E099..0x46E0B3, `*0.25` via flt_7C333C]; the wheeled solver's
-    // leg-C variant averages only the corners with z > 0 (blockers §3) —
-    // positive_z_avg below.
-    out.z_avg = static_cast<int32_t>(
-            double(int64_t(c[0][2]) + c[1][2] + c[2][2] + c[3][2]) * 0.25);
-    int64_t psum = 0;
+	if (matrix != nullptr) {
+		*matrix = {};
+		for (int axis = 0; axis < 3; ++axis) {
+			matrix->m[4 * axis] = bam_shl_wrap(fwd[axis], 6);
+			matrix->m[4 * axis + 1] = bam_shl_wrap(side[axis], 6);
+			matrix->m[4 * axis + 2] = bam_shl_wrap(up[axis], 6);
+		}
+	}
+	out.fwd_z = double(fwd[2]) / 65536.0;
+	vehicle_axes_to_euler(fwd, side, up, out.yaw_bam, out.pitch_bam, out.roll_bam);
+	// Z = the plain corner average in the ORIENTATION solver [orig: solvedPos.Z
+	// @0x46E099..0x46E0B3, `*0.25` via flt_7C333C]; the wheeled solver's
+	// leg-C variant averages only the corners with z > 0 (blockers §3) —
+	// positive_z_avg below.
+	out.z_avg = static_cast<int32_t>(double(int64_t(c[0][2]) + c[1][2] + c[2][2] + c[3][2]) * 0.25);
+	int64_t psum = 0;
     int pn = 0;
     for (int k = 0; k < 4; ++k)
         if (c[k][2] > 0) { psum += c[k][2]; ++pn; }
@@ -1126,16 +1131,27 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     int32_t py = to_fixed(veh.position.y);
     int32_t pz = to_fixed(veh.position.z);
 
-    // The mover integrates Position.Z += slideDecay (with the witnessed
-    // gravity forms) BEFORE this call — see the §6/§7 tail of
-    // watercraft_client_tick [orig: @0x48EBB5..0x48ECC6]. Deferrals carried at
-    // this entry: the §2 sleep early-out (Z-unwind + slideDecay halving
-    // convergence at rest [orig: @0x4818B9..0x481A5C]) and the amphibian
-    // draft form (updateCallback == 0x48F010 → avg - q/2 [orig: @0x482B6E] —
-    // catv rides the Ground family in our dispatch).
-    // The every-call tuning clamps [orig: @0x481ACC..0x481BA3]:
-    const int32_t t_pitch = std::clamp(traits.pitch_lift, 0, 10);
-    const int32_t t_pitch_vel = std::clamp(traits.pitch_lift_vel, 0, 10);
+	// [orig: Entity_ProcessPlatformPhysics @0x4818B9..0x481A5C]
+	if (m.vel_x == 0 && m.vel_y == 0 && m.speed == 0 && m.wheel_rate_bam == 0 &&
+			m.air_pitch_rate == 0 && m.air_roll_rate == 0 &&
+			((veh.flags | veh.engine_flags) & (kEntityFlagInAir | 0x40u)) == 0 &&
+			m.slide_z > -500 && m.slide_z < 0 && veh.saved_live_valid &&
+			px == veh.saved_live_pos[0] && py == veh.saved_live_pos[1] &&
+			io::bam_abs(io::bam_sub(pz, veh.saved_live_pos[2])) < 500 &&
+			std::all_of(
+					std::begin(m.plat_acc), std::end(m.plat_acc),
+					[](int32_t value) { return value == 0; })) {
+		pz = io::bam_sub(pz, m.slide_z);
+		m.slide_z >>= 1;
+		vehicle_rest_state(world, veh, VehicleFamily::Watercraft);
+		veh.position.z = float(from_fixed(pz));
+		return;
+	}
+	vehicle_expire_contact_wake(world, veh);
+
+	// The every-call tuning clamps [orig: @0x481ACC..0x481BA3]:
+	const int32_t t_pitch = std::clamp(traits.pitch_lift, 0, 10);
+	const int32_t t_pitch_vel = std::clamp(traits.pitch_lift_vel, 0, 10);
     const int32_t t_bob = std::clamp(traits.bob, 0, 10);
 
     // ---- §3 probe geometry. Probe springs +0x2D4.. are provably zero for
@@ -1169,11 +1185,10 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     // World transform: the pose matrix from {Pos, Yaw, Pitch, Roll} — the
     // boat's live attitude rides air_pitch_bam/air_roll_bam (the shared
     // attitude fields the sim mirrors to the row).
-    const VehicleEulerBasis basis = vehicle_euler_basis(
-            m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-    const double *fwdv = basis.fwd;
-    const double *sidev = basis.side;
-    const double *upv = basis.up;
+	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	const double *fwdv = basis.fwd;
+	const double *sidev = basis.side;
+	const double *upv = basis.up;
     int32_t probes[7][3];
     place_probes(basis, probes_model, px, py, pz, probes);
 
@@ -1181,55 +1196,55 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     const int32_t soft = cos22_of_bam_x87(traits.max_slope);
     const int32_t hard = cos22_of_bam_x87(traits.slip_slope);
     PlatProbeForce forces[7];
-    const int32_t sev = plat_probe_pass(world, probes, radii, soft, hard, forces);
-    if (sev == 1) {
-        m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4821E7]
-    } else if (sev == 2) {
-        m.speed -= m.speed >> ((traits.torque + 1) & 31); // [orig: @0x4822A4]
-    } else if (sev == 3) {
-        m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4822C9]
-        // Authority damage/kill + collision sound + momentum exchange + the
-        // dead yaw-kick = cited deferrals (spec §6; the yaw-kick is witnessed
-        // DEAD code). The 0.25 cut is gated on the STRONGEST planar force
-        // probe sitting > 0x8000 from Position in the plane, and fires only
-        // with no hit entity (always true here -- entity-entity collision is a
-        // deferral) [orig: the scan @0x482546..0x4825DD; the distance gate
-        // @0x4825E3..0x48262D; the cut @0x4826EB] (strongest_probe_beyond_hull).
-        if (strongest_probe_beyond_hull(forces, probes, 7, px, py))
-            m.speed = int32_t(m.speed * 0.25); // [orig: flt_7C333C @0x4826EB]
-    }
+	EntityHandle hit_entity;
+	const int32_t sev =
+			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
+	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
+	if (sev == 1) {
+		m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4821E7]
+	} else if (sev == 2) {
+		m.speed -= m.speed >> ((traits.torque + 1) & 31); // [orig: @0x4822A4]
+	} else if (sev == 3) {
+		m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4822C9]
+		// The shared contact fold applies authority damage, sound and momentum. The quarter-speed
+		// cut requires a terrain-only hit beyond the hull. The original yaw-kick arm is
+		// unreachable.
+		// Witness sites: [orig: @0x482546, @0x4825DD, @0x4825E3, @0x48262D, @0x4826EB]
+		if (!hit_entity.valid() && strongest_probe_beyond_hull(forces, probes, 7, px, py))
+			m.speed = int32_t(m.speed * 0.25); // [orig: flt_7C333C @0x4826EB]
+	}
 
-    // ---- §7 position push + second pass (severity >= 1 only). zc[] mirrors
-    // the SHARED force buffer the grounded leg reads [orig: §10-A
-    // @0x483D5C..0x483F04]: pass 1 fills it; the sev>=1 second pass re-zeroes
-    // and refills it; when §7 is skipped (sev 0, climbable contact) it still
-    // holds the PASS-1 forces -- the saved zf[] carries the averaged values.
-    int32_t zf[7], zc[7];
+	// ---- §7 position push + second pass (severity >= 1 only). zc[] mirrors
+	// the SHARED force buffer the grounded leg reads [orig: §10-A
+	// @0x483D5C..0x483F04]: pass 1 fills it; the sev>=1 second pass re-zeroes
+	// and refills it; when §7 is skipped (sev 0, climbable contact) it still
+	// holds the PASS-1 forces -- the saved zf[] carries the averaged values.
+	int32_t zf[7], zc[7];
     for (int i = 0; i < 7; ++i) { zf[i] = forces[i].fz; zc[i] = forces[i].fz; }
     if (sev >= 1) {
         int64_t dX = 0, dY = 0;
         for (int i = 0; i < 7; ++i) { dX += forces[i].fx; dY += forces[i].fy; }
         for (int i = 0; i < 7; ++i) { probes[i][0] += int32_t(dX); probes[i][1] += int32_t(dY); }
         PlatProbeForce forces2[7];
-        int32_t sev2 = 0;
-        for (int i = 0; i < 7; ++i)
-            sev2 = std::max(sev2, plat_terrain_probe(world, probes[i][0], probes[i][1],
-                                                     probes[i][2], radii[i], soft, hard,
-                                                     forces2[i]));
-        for (int i = 0; i < 7; ++i) zc[i] = forces2[i].fz;
-        if (sev2 != 0) {
-            int64_t dX2 = 0, dY2 = 0;
+		const int32_t sev2 =
+				plat_probe_pass(world, veh, probes, radii, soft, hard, forces2, px, py, pz);
+		for (int i = 0; i < 7; ++i)
+			zc[i] = forces2[i].fz;
+		if (sev2 != 0) {
+			int64_t dX2 = 0, dY2 = 0;
             for (int i = 0; i < 7; ++i) { dX2 += forces2[i].fx; dY2 += forces2[i].fy; }
             for (int i = 0; i < 7; ++i) zf[i] = (forces2[i].fz + zf[i]) >> 1;
             dX = (dX2 + dX) >> 1;
             dY = (dY2 + dY) >> 1;
-        }
-        px += int32_t(dX);
-        py += int32_t(dY); // Z-sum always 0 [orig: @0x482A86..0x482A8C]
-    }
+		}
+		int32_t dx = int32_t(dX), dy = int32_t(dY);
+		vehicle_contact_mass_share(world, veh, hit_entity, dx, dy, zf, 6);
+		px += dx;
+		py += dy; // Z-sum always 0 [orig: @0x482A86..0x482A8C]
+	}
 
-    // ---- §5 bob/lift parameters.
-    const double F = double(q);
+	// ---- §5 bob/lift parameters.
+	const double F = double(q);
     const int32_t amp = std::min(int32_t(F * 0.0625), 352);
     int32_t floatH, liftHi, liftLo, planeSpd, pitchThr;
     if (traits.mass <= 1) { // LIGHT boat [orig: @0x482105]
@@ -1261,35 +1276,35 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     }
     const int32_t avg = (cz_k[0] + cz_k[1] + cz_k[2] + cz_k[3]) >> 2;
     int32_t draft = avg;
-    if (m.plat_afloat) draft = int32_t(double(avg) - 0.9 * F); // boat form [orig: flt_7C459C]
-    // W == 0 = a no-water world (our env sentinel; retail worlds always carry
-    // a plane -- scope note). Amphibian draft = deferral (entry note).
-    if (W == 0 || draft + v210 >= W) {
-        m.plat_afloat = false; // [orig: @0x482DB7; emitter release deferred]
-    } else {
-        // Entry edge: the hull was above the plane and is now under it. Retail
-        // spawns the splash emitter and fans the positioned effect ONCE here,
-        // gated on the same latch, placing it at the water plane rather than at
-        // the hull's own Z. The local emitter stays a deferral; the network fan
-        // is recorded for the host to drain.
-        // [orig: @0x482BB9..0x482C9D — the `(Flags & 0x8000) == 0` gate,
-        //  `dest[6] = Env_WaterHeightFixed`, then
-        //  Server_SendOverlayActionToAlive @0x50a1b0]
-        if (!m.plat_afloat) {
-            world.out.water_crossings.add(
-                    to_fixed(veh.position.x), to_fixed(veh.position.y), W,
-                    /*airborne=*/(veh.flags & kEntityFlagInAir) != 0);
-        }
-        m.plat_afloat = true; // [orig: @0x482CA5]
-    }
-    veh.flags = m.plat_afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
+	// [orig: Entity_ProcessPlatformPhysics @ 0x481870, callback test @ 0x482B6E]
+	if (m.plat_afloat)
+		draft = traits.amphibian ? avg - (q >> 1) : int32_t(double(avg) - 0.9 * F);
+	// Zero water height is the embedder no-water sentinel. Amphibians and boats retain their
+	// separate draft hysteresis.
+	if (W == 0 || draft + v210 >= W) {
+		m.plat_afloat = false; // [orig: @0x482DB7]
+	} else {
+		// The first submerged pad emits the local splash/wake and queues the positioned sound at
+		// the water plane. Flags 0x8000 latches this edge.
+		// Witness sites: [orig: @0x482BB9, @0x482C9D, @0x50a1b0]
+		m.plat_afloat = true; // [orig: @0x482CA5]
+	}
+	const bool trail_was_water = (veh.flags & 0x8000u) != 0;
+	veh.flags = m.plat_afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
+	detail::vehicle_trail_water_transition(veh, traits, trail_was_water);
+	int water_pad = 0;
+	for (int k = 1; k < 4; ++k)
+		if (cz_k[k] < cz_k[water_pad])
+			water_pad = k;
+	detail::vehicle_water_entry(
+			world, veh, probes[water_pad][0], probes[water_pad][1], trail_was_water);
 
-    // ---- §9 lever corners around the CURRENT pose + machines. Built through
-    // the same Q22 rotate as the probes — the witnessed corner products are
-    // round-half-up 16.16 through the pose matrix [orig: @0x482E31..0x48346D],
-    // not double-precision basis-row sums.
-    int32_t c[4][3];
-    {
+	// ---- §9 lever corners around the CURRENT pose + machines. Built through
+	// the same Q22 rotate as the probes — the witnessed corner products are
+	// round-half-up 16.16 through the pose matrix [orig: @0x482E31..0x48346D],
+	// not double-precision basis-row sums.
+	int32_t c[4][3];
+	{
         const int32_t hb2 = hb >> 1, hl2 = hl >> 1;
         const int32_t corner_model[4][3] = {
             {+hl2, -hb2, 0}, // c0: (-hb/2)*right + (+hl/2)*fwd
@@ -1305,14 +1320,25 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
             c[k][2] = pz + rotated[2];
         }
     }
-    // Capsize latch (client form; the authority Flags 0x10 upkeep AND the
-    // flip-handling CLEAR legs [orig: the righting calls @0x4835DA..0x48367D]
-    // = cited deferrals riding the wreck-tumble path).
-    if ((veh.flags & kEntityFlagInAir) == 0 && upv[2] < 0.0 && !m.plat_capsized)
-        m.plat_capsized = true; // [orig: @0x483474..0x48348B]
-    // Accumulator ramp [orig: @0x483680..0x4836E6].
-    for (int k = 0; k < 4; ++k)
-        if (zf[k] <= 0 && sub_k[k] <= floatH) m.plat_acc[k] += 250;
+	vehicle_crash_state(world, veh, traits, nullptr, int32_t(upv[2] * 65536.0));
+	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	// Righting can replace the attitude after the first lever-corner build.
+	{
+		const int32_t hx = hl >> 1, hy = hb >> 1;
+		const int32_t local[4][3] = { { hx, -hy, 0 }, { hx, hy, 0 }, { -hx, -hy, 0 },
+			{ -hx, hy, 0 } };
+		for (int k = 0; k < 4; ++k) {
+			int32_t rotated[3];
+			basis.q22.rotate_point(local[k], rotated);
+			c[k][0] = io::bam_add(px, rotated[0]);
+			c[k][1] = io::bam_add(py, rotated[1]);
+			c[k][2] = io::bam_add(pz, rotated[2]);
+		}
+	}
+
+	// Accumulator ramp [orig: @0x483680..0x4836E6].
+	for (int k = 0; k < 4; ++k)
+		if (zf[k] <= 0 && sub_k[k] <= floatH) m.plat_acc[k] += 250;
     // Bow lift / planing / porpoise [orig: @0x4836EC..0x483891]. The command
     // register is brain[136] (brain+0x220) — the COMMANDED speed. On a remote
     // boat the mirror makes it equal the received register, but the local
@@ -1343,19 +1369,32 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
             m.plat_planing = false;
         }
     }
-    // Post-machine adjustments [orig: @0x483893..0x48398C]. The planing
-    // roll-lean machine @0x45AEA0 and the +0x2EF override path = deferrals.
-    if (m.plat_planing) {
-        if (m.plat_afloat && m.speed > 0x2000)
-            m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
-    } else if (!m.plat_at_rest) {
-        for (int k = 0; k < 4; ++k) c[k][2] -= 500;
-        m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
-    }
+	// Post-machine adjustments [orig: @0x483893..0x48398C].
+	if (m.plat_planing) {
+		if (m.plat_afloat && m.speed > 0x2000) {
+			vehicle_boat_lean(veh, traits, basis.q22.m[9] >> 6);
+			m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
+		} else {
+			const int32_t error = basis.q22.m[9] >> 6;
+			m.byte_2ef = 0;
+			m.air_roll_rate = io::bam_abs(error) > 240 ? (error < 0 ? -2386239 : 2386092) : 0;
+			m.part_spin.angle = 0;
+			m.gear_phase = 0;
+		}
+	} else {
+		if (!m.plat_at_rest) {
+			for (int k = 0; k < 4; ++k)
+				c[k][2] -= 500;
+			m.byte_2ef = 0;
+			m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
+		}
+		m.part_spin.angle = 0;
+		m.gear_phase = 0;
+	}
 
-    // ---- §10 solve select.
-    bool any_ground = false;
-    for (int k = 0; k < 4; ++k) any_ground |= zf[k] > 0;
+	// ---- §10 solve select.
+	bool any_ground = false;
+	for (int k = 0; k < 4; ++k) any_ground |= zf[k] > 0;
     PlatFit fit;
     if (any_ground) {
         // A. Grounded: airborne cleared HERE and only here.
@@ -1377,10 +1416,10 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
             c[k][2] += lift;
         }
         m.slide_z = 0; // [orig: @0x483F25]
-        plat_fit_corners(c, fit);
-        pz = fit.z_avg;
-        m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
-    } else {
+		vehicle_boat_suspension_fit(world, veh, traits, c, fit, px, py, pz);
+		pz = fit.z_avg;
+		m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
+	} else {
         // At-rest bob arm [orig: @0x4839C5..0x483A29].
         int32_t floatH_eff = floatH;
         if (m.speed < 100 && m.plat_afloat &&
@@ -1413,10 +1452,10 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
                 }
                 c[k][2] += lift;
             }
-            plat_fit_corners(c, fit);
-            pz = fit.z_avg;
-        } else {
-            // C. Settled / airborne.
+			vehicle_boat_suspension_fit(world, veh, traits, c, fit, px, py, pz);
+			pz = fit.z_avg;
+		} else {
+			// C. Settled / airborne.
             if (m.plat_afloat) {
                 int lowest = 0, second = 1;
                 for (int k = 1; k < 4; ++k)
@@ -1438,22 +1477,23 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
             // The wheeled solver's settled/airborne fit: same 4-normal fit;
             // Z = the average of the ABOVE-ground corners, rise-clamped
             // +0x2000/tick (blockers §3).
-            plat_fit_corners(c, fit);
-            if (m.plat_afloat) {
-                // The wheeled solver's settled-fit Z: the average of the
-                // ABOVE-ZERO corners only, rise-clamped +0x2000/tick
-                // (blockers §3).
-                int32_t new_z = fit.positive_z_avg;
+			vehicle_suspension_fit(world, veh, c, nullptr, fit, px, py, pz);
+			if (m.plat_afloat) {
+				// The wheeled solver's settled-fit Z: the average of the
+				// ABOVE-ZERO corners only, rise-clamped +0x2000/tick
+				// (blockers §3).
+				int32_t new_z = fit.positive_z_avg;
                 if (new_z > pz + 0x2000) new_z = pz + 0x2000;
                 pz = new_z;
-            }
-        }
-    }
-    // Attitude out: pitch/roll always; yaw-from-fit rides byte+0x2EC (never
-    // set for live boats — deferral with the wreck path).
-    m.air_pitch_bam = fit.pitch_bam;
-    m.air_roll_bam = fit.roll_bam;
-    // Airborne tick counter [orig: @0x483FAF/0x483FC8].
+			}
+		}
+	}
+	// [orig: @0x4839EF..0x483FA9] crashed hulls also adopt solved yaw.
+	if (m.crashed)
+		m.yaw_bam = fit.yaw_bam;
+	m.air_pitch_bam = fit.pitch_bam;
+	m.air_roll_bam = fit.roll_bam;
+	// Airborne tick counter [orig: @0x483FAF/0x483FC8].
     m.plat_airborne_ticks =
             (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
 
@@ -1510,8 +1550,9 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
     m.plat_afloat = world.env.water_z != 0 &&
             afloat_draft + v210 < world.env.water_z;
     m.plat_solve_valid = true;
-    veh.flags = m.plat_afloat ? (veh.flags | 0x8000u)
-                              : (veh.flags & ~0x8000u);
+	const bool trail_was_water = (veh.flags & 0x8000u) != 0;
+	veh.flags = m.plat_afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
+	detail::vehicle_trail_water_transition(veh, traits, trail_was_water);
 }
 
 // The npruntime headless host boots World without the shell's model-box
@@ -1520,10 +1561,10 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
 // geometry and the solver cannot produce an afloat latch. This water-plane
 // stand-in covers exactly that path; resolved hulls always consume the
 // prior platform solve.
-void watercraft_refresh_fallback_afloat(World &world, Entity &veh) {
-    Entity::VehicleMotorState &m = veh.veh;
-    bool afloat = false;
-    if (world.env.water_z != 0) {
+void watercraft_refresh_fallback_afloat(World &world, Entity &veh, const VehicleTraits &traits) {
+	Entity::VehicleMotorState &m = veh.veh;
+	bool afloat = false;
+	if (world.env.water_z != 0) {
         if (world.tables.terrain == nullptr) {
             afloat = true;
         } else {
@@ -1537,7 +1578,9 @@ void watercraft_refresh_fallback_afloat(World &world, Entity &veh) {
         }
     }
     m.plat_afloat = afloat;
-    veh.flags = afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
+	const bool trail_was_water = (veh.flags & 0x8000u) != 0;
+	veh.flags = afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
+	detail::vehicle_trail_water_transition(veh, traits, trail_was_water);
 }
 
 } // namespace
@@ -1545,30 +1588,24 @@ void watercraft_refresh_fallback_afloat(World &world, Entity &veh) {
 static void watercraft_motor_core(World &world, Entity &veh,
                                   const VehicleTraits &traits);
 
-// [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the client-executed subset for a
-// remote boat; disasm-verified spec 2026-07-31 (net-re §5.38e). Block cites inline.
-// Deliberate stand-in (both this and the air mover): the client-run
-// deck-carrier follow (groundEntity tick-delta + parent-rotation re-seat
-// @0x48D6DA..0x48DACD / @0x4905BC..0x49095B) is replaced by the embedding
-// sim freezing carried rows to the row-level seat-follow — the D-NET-196
-// client-subset facet (divergence-ledger permanent register; the INFANTRY
-// deck-ride twins ARE ported: client_replica_pipeline row_deck_ride).]
+// Live full-precision pose shared by all carrier-delta readers.
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480, carrier @0x48D6DA..0x48DACD;
+// Entity_UpdateAircraftPhysics @0x490310, carrier @0x4905BC..0x49095B]
 void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
                         int32_t &pitch, int32_t &roll) {
     pos[0] = to_fixed(e.position.x);
     pos[1] = to_fixed(e.position.y);
     pos[2] = to_fixed(e.position.z);
-    if (e.veh.net_predicted && e.veh.yaw_seeded) {
-        yaw = e.veh.yaw_bam;
-        pitch = e.veh.air_pitch_bam;
-        roll = e.veh.air_roll_bam;
-    } else {
-        yaw = bam_heading_from_mission_yaw_deg(e.yaw);
-        pitch = static_cast<int32_t>(
-            std::llround(static_cast<double>(e.pitch) / kDegreesPerBam));
-        roll = static_cast<int32_t>(
+	if (e.veh.yaw_seeded) {
+		yaw = e.veh.yaw_bam;
+		pitch = e.veh.air_pitch_bam;
+		roll = e.veh.air_roll_bam;
+	} else {
+		yaw = bam_heading_from_mission_yaw_deg(e.yaw);
+		pitch = static_cast<int32_t>(std::llround(static_cast<double>(e.pitch) / kDegreesPerBam));
+		roll = static_cast<int32_t>(
             std::llround(static_cast<double>(e.roll) / kDegreesPerBam));
-    }
+	}
 }
 
 void stamp_saved_live_pose(Entity &e) {
@@ -1578,48 +1615,49 @@ void stamp_saved_live_pose(Entity &e) {
 }
 
 void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &traits) {
-    World &world = world_;
-    Entity::VehicleMotorState &m = veh.veh;
-    if (!m.net_predicted) return;
-    update_engine_sound(veh, traits);
-    if (!m.yaw_seeded) {
-        m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
-        m.yaw_seeded = true;
-    }
+	if (traits.physics == 0) {
+		tick_simple_motor(veh, traits, nullptr, true);
+		return;
+	}
+	World &world = world_;
+	Entity::VehicleMotorState &m = veh.veh;
+	if (!m.net_predicted) return;
+	update_engine_sound(veh, traits);
+	if (!m.yaw_seeded) {
+		m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
+		m.yaw_seeded = true;
+	}
 
-    // ---- 1. Per-record chase (the §5.38e vehicle template) on the world pose.
-    vehicle_client_chase(veh);
-    if (!watercraft_has_platform_geometry(traits)) {
-        watercraft_refresh_fallback_afloat(world, veh);
-    } else if (!m.plat_solve_valid) {
-        // An exact-handle wire-materialized joiner hull has no earlier local frame, but the mover
-        // consumes the PREVIOUS platform solve's afloat/attitude state. Seed
-        // that state before its first thrust/drag pass instead of treating a
-        // resolved floating hull as landed for one frame.
-        watercraft_seed_platform_latch(world, veh, traits);
-    }
+	vehicle_refresh_ground_link(world, veh, traits);
+	vehicle_follow_carrier(world, veh);
 
-    // ---- 2. Register mirror: the non-driver machine adopts the received
-    // speed/steer as its own drive command, every tick
-    // [orig: brain[136]=[177], brain[132]=[179] @0x48DDD4..0x48DDF4].
-    // Deferred witnessed gate: retail mirrors only when occupantEntity !=
-    // g_local_player_entity — the local driver's machine runs the input leg
-    // instead ([136] = ([136]+[177])>>1 averaging) [orig: @0x48DDD4/@0x490C9E].
-    // The joiner resolves the local controlling occupant below; other rows
-    // remain remote-occupied and take the verbatim register mirror.
-    if (Entity *local_driver =
-                resolve_local_vehicle_controller(world, veh, traits)) {
-        stage_player_vehicle_input(veh, *local_driver, traits);
-        // Retail reconciles only longitudinal command on the controlling
-        // client; its steer target stays owned by current local LOOK/input.
-        m.cmd_speed = io::bam_sar(
+	// ---- 1. Per-record chase (the §5.38e vehicle template) on the world pose.
+	vehicle_client_chase(veh);
+	if (!watercraft_has_platform_geometry(traits)) {
+		watercraft_refresh_fallback_afloat(world, veh, traits);
+	} else if (!m.plat_solve_valid) {
+		// An exact-handle wire-materialized joiner hull has no earlier local frame, but the mover
+		// consumes the PREVIOUS platform solve's afloat/attitude state. Seed
+		// that state before its first thrust/drag pass instead of treating a
+		// resolved floating hull as landed for one frame.
+		watercraft_seed_platform_latch(world, veh, traits);
+	}
+
+	// Remote prediction mirrors the received command registers; local-driver reconciliation
+	// retains the authored steering input.
+	// Witness sites: [orig: @0x48DDD4, @0x48DDF4, @0x490C9E]
+	if (Entity *local_driver = resolve_local_vehicle_controller(world, veh, traits)) {
+		stage_player_vehicle_input(world_, veh, *local_driver, traits);
+		// Retail reconciles only longitudinal command on the controlling
+		// client; its steer target stays owned by current local LOOK/input.
+		m.cmd_speed = io::bam_sar(
                 io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
-    } else {
-        m.cmd_speed = m.net_recv_speed;
-        m.steer_target_bam = m.net_recv_steer_bam;
-    }
+	} else {
+		m.cmd_speed = m.net_recv_speed;
+		m.steer_target_bam = m.net_recv_steer_bam;
+	}
 
-    watercraft_motor_core(world, veh, traits);
+	watercraft_motor_core(world, veh, traits);
 }
 
 // Blocks 12..19 of the cbot mover — the steer integrator through the yaw apply.
@@ -1835,96 +1873,73 @@ static void watercraft_motor_core(World &world, Entity &veh,
     m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
-    // The afloat wake handles are updated by BOTH authority and client runs of
-    // this shared core, every even logic tick. W3 receives command speed and
-    // W4 receives current signed motion; both use the same scaled integer
-    // magnitude. Capture after the platform solve and yaw apply, because the
-    // userpoint update consumes this exact vehicle frame. [orig:
-    // Entity_UpdateWatercraftPhysics @0x48D480 wake calls; the W3/W4 argument
-    // setup immediately after the platform/yaw tail]
-    if ((world.logic_tick & 1u) == 0u &&
-            (!traits.wake_w3.effect.empty() || !traits.wake_w4.effect.empty())) {
-        VehicleWakeState &wake = m.wake;
-        wake.valid = true;
-        wake.afloat = m.plat_afloat;
-        wake.source_tick = world.logic_tick;
-        wake.position = veh.position;
-        wake.pitch_deg = veh.pitch;
-        wake.yaw_deg = veh.yaw;
-        wake.roll_deg = veh.roll;
-        wake.water_z = world.env.water_z;
-        wake.command_magnitude_q16 = wake.afloat
-                ? watercraft_wake_magnitude_q16(m.cmd_speed)
-                : 0u;
-        wake.motion_magnitude_q16 = wake.afloat
-                ? watercraft_wake_magnitude_q16(m.speed)
-                : 0u;
-    }
-    // The wheel phase — the watercraft mover's inline form, run by every
-    // machine that executes the core [orig: `+0x2B8 += +0x220 << 13`
-    //  @0x48E9F0..0x48E9F9 inside Entity_UpdateWatercraftPhysics; the mover
-    //  calls no rotor machine]. The ONE call per tick: the authority tick
-    // below runs this core and adds nothing.
-    world.vehicles.part_anim_tick(veh, traits);
+	detail::vehicle_sample_trails(world, veh, traits, m.cmd_speed);
+	// The wheel phase — the watercraft mover's inline form, run by every
+	// machine that executes the core [orig: `+0x2B8 += +0x220 << 13`
+	//  @0x48E9F0..0x48E9F9 inside Entity_UpdateWatercraftPhysics; the mover
+	//  calls no rotor machine]. The ONE call per tick: the authority tick
+	// below runs this core and adds nothing.
+	world.vehicles.part_anim_tick(veh, traits);
 }
 
-// The AUTHORITY watercraft tick — the host-side cbot mover (the D-NET-161
-// watercraft deferral, witnessed 2026-08-06): occupant/AI/parked input staging
-// through the gate `attrib & 0x40 && (is_authority || occupant == local)`
-// [orig: @0x48DF7F..0x48DFA2], then the shared core. Deferrals that stay with
-// D-NET-161: the every-8th-tick groundEntity carrier refresh @0x48D51F and the
-// deck-carrier follow @0x48D6DA..0x48DACD, the fire-FX/regen-drain leg (step 3),
-// the MoveOrder analog bit-0x10 merge @0x48DE04..0x48DE7B (it mutates the
-// occupant's own MoveOrder word, which our input model rebuilds from the wire
-// every tick), the submerged-driver head-under-water input cut
-// @0x48DFD3..0x48DFDF, and the wake-anim lerp @0x48ECF5.
-// [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the authority path]
+// Authority watercraft entry: stage occupant, AI or parked commands, advance the shared boat
+// motor, then apply the authority capsize drain.
+// Witness sites: [orig: @0x48DF7F, @0x48DFA2, @0x48D51F, @0x48D6DA, @0x48DACD, @0x48DE04,
+// @0x48DE7B, @0x48DFD3, @0x48DFDF, @0x48ECF5, @0x48D480]
 void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd) {
     World &world = world_;
-    if (traits.physics == 0) return; // selector-gated like the ground rows
-    Entity::VehicleMotorState &m = veh.veh;
-    if (!m.yaw_seeded) {
-        m.yaw_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+	if (traits.physics == 0) {
+		tick_simple_motor(veh, traits, ai_cmd, false);
+		return;
+	}
+	Entity::VehicleMotorState &m = veh.veh;
+	if (!m.yaw_seeded) {
+		m.yaw_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
         m.air_pitch_bam = static_cast<int32_t>(veh.pitch) * 11930464;
         m.air_roll_bam = static_cast<int32_t>(veh.roll) * 11930464;
         m.yaw_seeded = true;
-    }
-    // The platform solve owns Z/attitude/afloat from the first tick; an authored
-    // hull starts with no prior solve frame, so seed the latch exactly like the
-    // client path does before its first thrust pass.
-    if (!watercraft_has_platform_geometry(traits)) {
-        watercraft_refresh_fallback_afloat(world, veh);
-    } else if (!m.plat_solve_valid) {
-        watercraft_seed_platform_latch(world, veh, traits);
-    }
+	}
+	vehicle_refresh_ground_link(world, veh, traits);
+	vehicle_follow_carrier(world, veh);
+	// The platform solve owns Z/attitude/afloat from the first tick; an authored
+	// hull starts with no prior solve frame, so seed the latch exactly like the
+	// client path does before its first thrust pass.
+	if (!watercraft_has_platform_geometry(traits)) {
+		watercraft_refresh_fallback_afloat(world, veh, traits);
+	} else if (!m.plat_solve_valid) {
+		watercraft_seed_platform_latch(world, veh, traits);
+	}
 
-    tick_health(veh, traits);
-    update_engine_sound(veh, traits);
+	tick_health(veh, traits);
+	update_engine_sound(veh, traits);
 
-    // A DEAD hull skips everything to the matrix-build tail — no input, no
-    // integration [orig: `test Flags, 2 -> jnz 0x48EF4B` @0x48DDFA]. Retail has
-    // ONE flags word; our death chain latches the dead bit on engine_flags
-    // (destruction.cpp), so read the established combined view.
-    if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) return;
+	// A DEAD hull skips everything to the matrix-build tail — no input, no
+	// integration [orig: `test Flags, 2 -> jnz 0x48EF4B` @0x48DDFA]. Retail has
+	// ONE flags word; our death chain latches the dead bit on engine_flags
+	// (destruction.cpp), so read the established combined view.
+	if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0)
+		return;
 
-    // Capsize damage, authority-only: past ~100 deg of roll OR pitch the hull
-    // drains 200 health per tick to zero [orig: @0x48DE84..0x48DECD —
-    // |Roll|/|Pitch| > 0x471C7180, Health -= 200, floor 0; the overlayFlags
-    // zero at the kill edge is an unmodeled slot].
-    if (world.ai.is_authority && veh.health > 0 &&
-        (io::bam_abs(m.air_roll_bam) > 0x471C7180 ||
-         io::bam_abs(m.air_pitch_bam) > 0x471C7180)) {
-        veh.health -= 200;
-        if (veh.health < 0) veh.health = 0;
-    }
+	// Capsize damage, authority-only: past ~100 deg of roll OR pitch the hull
+	// drains 200 health per tick to zero [orig: @0x48DE84..0x48DECD —
+	// |Roll|/|Pitch| > 0x471C7180, Health -= 200, floor 0 and clear attacker].
+	if (world.ai.is_authority && veh.health > 0 &&
+			(io::bam_abs(m.air_roll_bam) > 0x471C7180 ||
+					io::bam_abs(m.air_pitch_bam) > 0x471C7180)) {
+		veh.health -= 200;
+		if (veh.health <= 0) {
+			veh.health = 0;
+			veh.last_attacker = {};
+		}
+	}
 
-    // Sound-lane classification only. The boat ENTRY split is occupant-NULL or
-    // the dead flag — the witness records no health term (a 0-hp hull that never
-    // took the kill edge, e.g. the capsize drain floor, keeps driving); the
-    // ground family's mode-21 health check is its own witness and stays there.
-    const bool wrecked = veh.health <= 0;
+	// Sound-lane classification only. The boat ENTRY split is occupant-NULL or
+	// the dead flag — the witness records no health term (a 0-hp hull that never
+	// took the kill edge, e.g. the capsize drain floor, keeps driving); the
+	// ground family's mode-21 health check is its own witness and stays there.
+	const bool wrecked = veh.health <= 0;
 
-    // ------------------------------------------------------------------ input block
+	// ------------------------------------------------------------------ input block
     // [orig: the gate @0x48DF7F..0x48DFA2; occupant resolve + class split
     // @0x48DFA8..0x48DFCD — no attrib 0x40 means the whole block is skipped and
     // the core runs on the persisted registers]
@@ -1948,16 +1963,16 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
             // the water plane routes to the AI leg instead [orig: the
             // submerged-driver cut @0x48DFD3..0x48DFDF].
             m.stuck_ticks = 0; // [orig: `moveTimer = 0` at the entry split @0x48DFA8..0x48DFCD]
-            stage_player_vehicle_input(veh, *occ, traits);
-        } else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
-            // The AI-driver leg's outputs (AiSystem::watercraft_ai_drive)
+			stage_player_vehicle_input(world_, veh, *occ, traits);
+		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
+			// The AI-driver leg's outputs (AiSystem::watercraft_ai_drive)
             // [orig: @0x48E247..0x48E756 writes aiComp[132]/[136]].
             m.stuck_ticks = 0;
             m.steer_target_bam = ai_cmd->steer_target_bam;
             m.cmd_speed = ai_cmd->cmd_speed;
             m.steer_ramp_bam = 0;
-        }
-        // A live non-player controller with no drive command holds the previous
+		}
+		// A live non-player controller with no drive command holds the previous
         // targets.
     }
 
@@ -1970,31 +1985,41 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
     // per mover pass); a second call here would double the wheel phase.
 }
 
-// The GROUND-family prediction leg (net-re §5.38e B-facet): run the shared
-// chase, stage local-driver input or remote mirrored registers, then drive
-// tick_vehicle_motor's core with its input block bypassed
-// (player_control=false leaves the registers untouched and skips the occupant
-// resolve; the handbrake/aim-lock/tire-slip legs inherit their existing
-// D-NET-161 deferrals).
+// Ground-family prediction runs the shared chase, stages local-driver input or remote commands,
+// and advances the same motor/contact state with authority health writes disabled.
 void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits) {
-    World &world = world_;
-    Entity::VehicleMotorState &m = veh.veh;
-    if (!m.net_predicted) return;
+	if (traits.physics == 0) {
+		tick_simple_motor(veh, traits, nullptr, true);
+		return;
+	}
+	// [orig: Entity_DispatchPhysics_catv @ 0x48F010]
+	if (traits.amphibian && (veh.flags & 0x8000u) != 0) {
+		VehicleTraits afloat = traits;
+		afloat.family = VehicleFamily::Watercraft;
+		watercraft_client_tick(veh, afloat);
+		update_ground_sound(veh, afloat, veh.health <= 0, false);
+		return;
+	}
+	World &world = world_;
+	Entity::VehicleMotorState &m = veh.veh;
+	if (!m.net_predicted) return;
     if (!m.yaw_seeded) {
         m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
         m.yaw_seeded = true;
     }
-    vehicle_client_chase(veh);
-    // Register mirror / local-driver gate (see the watercraft mirror note).
-    if (Entity *local_driver =
+	vehicle_refresh_ground_link(world, veh, traits);
+	vehicle_follow_carrier(world, veh);
+	vehicle_client_chase(veh);
+	// Register mirror / local-driver gate (see the watercraft mirror note).
+	if (Entity *local_driver =
                 resolve_local_vehicle_controller(world, veh, traits)) {
-        stage_player_vehicle_input(veh, *local_driver, traits);
-        // The controlling client halves its staged command against the
-        // received register every tick — the same longitudinal-only
-        // reconciliation as the boat; steer stays owned by current local
-        // LOOK/input [orig: ground @0x48bbef; bike @0x484dad —
-        // [136] = ([136] + [177]) >> 1].
-        m.cmd_speed = io::bam_sar(
+		stage_player_vehicle_input(world_, veh, *local_driver, traits);
+		// The controlling client halves its staged command against the
+		// received register every tick — the same longitudinal-only
+		// reconciliation as the boat; steer stays owned by current local
+		// LOOK/input [orig: ground @0x48bbef; bike @0x484dad —
+		// [136] = ([136] + [177]) >> 1].
+		m.cmd_speed = io::bam_sar(
                 io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
     } else {
         m.cmd_speed = m.net_recv_speed;

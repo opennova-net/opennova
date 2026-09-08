@@ -48,11 +48,14 @@ struct CtrlNames {
 	String helo_rotor = String("HELO_ROTOR");
 	String helo_tailrotor = String("HELO_TAILROTOR");
 	String vehicle_wheels = String("VEHICLE_WHEELS");
-	String vehicle_tires[6] = {String("VEHICLE_TIRE00"), String("VEHICLE_TIRE01"),
-		String("VEHICLE_TIRE02"), String("VEHICLE_TIRE03"),
-		String("VEHICLE_TIRE04"), String("VEHICLE_TIRE05")};
-	String vehicle_tracks[4] = {String("VEHICLE_WHEELS00"), String("VEHICLE_WHEELS01"),
-		String("VEHICLE_WHEELS02"), String("VEHICLE_WHEELS03")};
+	String vehicle_tires[14] = { String("VEHICLE_TIRE00"), String("VEHICLE_TIRE01"),
+		String("VEHICLE_TIRE02"), String("VEHICLE_TIRE03"), String("VEHICLE_TIRE04"),
+		String("VEHICLE_TIRE05"), String("VEHICLE_TIRE06"), String("VEHICLE_TIRE07"),
+		String("VEHICLE_TIRE08"), String("VEHICLE_TIRE09"), String("VEHICLE_TIRE10"),
+		String("VEHICLE_TIRE11"), String("VEHICLE_TIRE12"), String("VEHICLE_TIRE13") };
+	String helo_gear = String("HELO_GEAR");
+	String vehicle_tracks[4] = { String("VEHICLE_WHEELS00"), String("VEHICLE_WHEELS01"),
+		String("VEHICLE_WHEELS02"), String("VEHICLE_WHEELS03") };
 	String vehicle_gun_yaw = String("VEHICLE_GUNYAW");
 	String vehicle_gun_pitch = String("VEHICLE_GUNPITCH");
 	String helo_gun_yaw = String("HELO_GUNYAW");
@@ -193,8 +196,8 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::present_destruction_drained);
 	ClassDB::bind_method(D_METHOD("present_throwable_visuals", "visuals"),
 			&EntityPresenter::present_throwable_visuals);
-	ClassDB::bind_method(D_METHOD("present_vehicle_wake_visuals", "visuals"),
-			&EntityPresenter::present_vehicle_wake_visuals);
+	ClassDB::bind_method(D_METHOD("present_vehicle_trail_visuals", "visuals"),
+			&EntityPresenter::present_vehicle_trail_visuals);
 	ClassDB::bind_method(D_METHOD("present_scar_draw_list", "draw_list"),
 			&EntityPresenter::present_scar_draw_list);
 	BIND_ENUM_CONSTANT(PASS_PROFILE_FIRE_US);
@@ -268,7 +271,7 @@ EntityPresenter::EntityPresenter() :
 		fire_(std::make_unique<FirePresenter>(this)) {
 	destruction_.instantiate();
 	throwable_.instantiate();
-	vehicle_wake_.instantiate();
+	vehicle_trail_.instantiate();
 	ScarPresenter *scars_node = memnew(ScarPresenter);
 	scars_node->set_name("Scars");
 	add_child(scars_node);
@@ -320,7 +323,7 @@ void EntityPresenter::setup_passes(Node3D *p_container, const Ref<ItemDatabase> 
 	destruction_->setup(this, s, p_container, index_, placer_, p_item_db, anchors, p_audio,
 			p_fx, p_lights);
 	throwable_->setup(s, p_container, placer_, p_item_db, p_fx, anchors);
-	vehicle_wake_->setup(s, this, index_, p_fx, anchors);
+	vehicle_trail_->setup(s, p_fx, anchors);
 	environment_id_ = p_environment != nullptr ? p_environment->get_instance_id() : ObjectID();
 	if (ScarPresenter *scars_node = scars()) {
 		scars_node->set_resource_root(p_resource_root);
@@ -372,7 +375,7 @@ PackedInt64Array EntityPresenter::profile_present_passes() {
 }
 
 void EntityPresenter::sync_fixed_tick_effects() {
-	vehicle_wake_->sync_fixed_tick_effects();
+	vehicle_trail_->sync_fixed_tick_effects();
 	throwable_->sync_fixed_tick_effects();
 }
 
@@ -462,10 +465,10 @@ void EntityPresenter::present_throwable_visuals(const TypedArray<ThrowableVisual
 			unwrap_rows<opennova::world::ThrowableVisualRow, ThrowableVisualRow>(p_visuals));
 }
 
-void EntityPresenter::present_vehicle_wake_visuals(
-		const TypedArray<VehicleWakeVisualRow> &p_visuals) {
-	vehicle_wake_->sync_visuals(
-			unwrap_rows<opennova::world::VehicleWakeVisualRow, VehicleWakeVisualRow>(p_visuals));
+void EntityPresenter::present_vehicle_trail_visuals(
+		const TypedArray<VehicleTrailVisualRow> &p_visuals) {
+	vehicle_trail_->sync_visuals(
+			unwrap_rows<opennova::world::VehicleTrailVisualRow, VehicleTrailVisualRow>(p_visuals));
 }
 
 void EntityPresenter::present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list) {
@@ -697,13 +700,30 @@ void emplaced_clear_typed(ObjectModel *model) {
 	clear_owned_ctrl(model, n.owner_emplaced, n.eweap_gunpitch);
 }
 
+void focal_sway_apply_typed(ObjectModel *model, const float *p, int base) {
+	using namespace opennova::world;
+	const bool active = p[base + PF_FOCAL_SWAY_VALID] != 0;
+	const float *m = p + base + PF_FOCAL_SWAY_BASIS_0;
+	Basis basis;
+	if (active) {
+		basis.set_column(0, Vector3(m[0], m[3], m[6]));
+		basis.set_column(1, Vector3(m[1], m[4], m[7]));
+		basis.set_column(2, Vector3(m[2], m[5], m[8]));
+	}
+	model->set_focal_sway(active, basis,
+			active ? Vector3(p[base + PF_FOCAL_SWAY_X], p[base + PF_FOCAL_SWAY_Y],
+							 p[base + PF_FOCAL_SWAY_Z])
+				   : Vector3());
+}
+
 int vehicle_motion_apply_typed(ObjectModel *model,
 		const PackedFloat32Array &snap, int base) {
 	using namespace opennova::world;
 	const CtrlNames &n = names();
 	const float *p = snap.ptr();
 	const int mask = field_i(p, base, Simulation::PF_VEHICLE_MOTION_VALID) == 1
-			? field_i(p, base, Simulation::PF_VEHICLE_CTRL_MASK) : 0;
+			? field_i(p, base, Simulation::PF_VEHICLE_CTRL_MASK)
+			: 0;
 	int writes = 0;
 	const auto apply = [&](const String &name, int flag, int field) {
 		if ((mask & flag) != 0) {
@@ -718,8 +738,10 @@ int vehicle_motion_apply_typed(ObjectModel *model,
 	apply(n.helo_rotor, VC_ROTORS, Simulation::PF_VEHICLE_ROTOR);
 	apply(n.helo_tailrotor, VC_ROTORS, Simulation::PF_VEHICLE_TAIL_ROTOR);
 	apply(n.vehicle_wheels, VC_WHEELS, Simulation::PF_VEHICLE_WHEELS);
-	for (int i = 0; i < 6; ++i)
-		apply(n.vehicle_tires[i], VC_TIRES, Simulation::PF_VEHICLE_TIRE00 + i);
+	apply(n.helo_gear, VC_HELO_GEAR, Simulation::PF_VEHICLE_GEAR);
+	for (int i = 0; i < 14; ++i)
+		apply(n.vehicle_tires[i], i < 6 ? VC_TIRES | VC_TANK_TIRES : VC_TANK_TIRES,
+				Simulation::PF_VEHICLE_TIRE00 + i);
 	for (int i = 0; i < 4; ++i)
 		apply(n.vehicle_tracks[i], VC_TRACKS, Simulation::PF_VEHICLE_TRACK_LEFT + (i & 1));
 	apply(n.vehicle_gun_yaw, VC_VEHICLE_GUN, Simulation::PF_VEHICLE_GUN_YAW);
@@ -736,6 +758,7 @@ void vehicle_motion_clear_typed(ObjectModel *model) {
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_rotor);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_tailrotor);
 	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_wheels);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.helo_gear);
 	for (const String &tire : n.vehicle_tires)
 		clear_owned_ctrl(model, n.owner_vehicle_motion, tire);
 	for (const String &track : n.vehicle_tracks)
@@ -815,6 +838,7 @@ int EntityPresenter::wire_controls_apply(ObjectModel *model,
 	int writes = 0;
 	writes += emplaced_apply_typed(model, snap, base, true);
 	writes += vehicle_motion_apply_typed(model, snap, base);
+	focal_sway_apply_typed(model, snap.ptr(), base);
 	writes += zone_team_apply_typed(model, snap, base);
 	writes += world_heat_apply_typed(model, snap, base);
 	return writes;
@@ -1108,6 +1132,8 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 				++p_profile->submitted_rows;
 			}
 		}
+		if (submitted)
+			focal_sway_apply_typed(model, p, base);
 		// Aim overlay with the capability lookups hoisted into the row plan and
 		// the no-overlay clear gated to the valid->invalid edge (the node-side
 		// setters no-op on repeats; these gates skip the dispatch itself).

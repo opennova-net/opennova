@@ -14,6 +14,7 @@
 #include <runtime/world/world.h>
 
 #include <cstdio>
+#include <cmath>
 
 using namespace opennova::world;
 
@@ -352,109 +353,326 @@ void test_watercraft_runs_no_rotor_machine() {
 			"one authority tick advances the phase by one step");
 }
 
-
 void test_suspension_registers_and_rotor_threshold_tick() {
-    Entity::VehicleMotorState state;
-    state.wheel_comp[0] = -100;
-    state.wheel_comp[1] = 0x2000;
-    state.wheel_comp[2] = 0x20000;
-    state.wheel_comp[3] = 0x6000;
-    const auto regs = vehicle_ctrl_registers(state);
-    CHECK((regs.tires == std::array<int32_t,6>{0,0x2000,65486,0x4000,0x6000,0x10000}),
-          "tires clamp after the midpoint average, rear order is right then left");
-    CHECK(wheel_phase_step(INT32_MAX, -1, 1) == 2147475456,
-          "reverse wheel accumulation wraps without signed-shift UB");
-    RotorState rotor;
-    rotor.angle = INT32_MAX;
-    rotor.speed = 1;
-    rotor_tick(rotor, true);
-    CHECK(rotor.angle == INT32_MIN, "rotor angle wraps at the signed boundary");
+	Entity::VehicleMotorState state;
+	state.wheel_comp[0] = -100;
+	state.wheel_comp[1] = 0x2000;
+	state.wheel_comp[2] = 0x20000;
+	state.wheel_comp[3] = 0x6000;
+	const auto regs = vehicle_ctrl_registers(state);
+	CHECK((regs.tires == std::array<int32_t, 14>{ 0, 0x2000, 65486, 0x4000, 0x6000, 0x10000 }),
+			"tires clamp after the midpoint average, rear order is right then left");
+	CHECK(wheel_phase_step(INT32_MAX, -1, 1) == 2147475456,
+			"reverse wheel accumulation wraps without signed-shift UB");
+	RotorState rotor;
+	rotor.angle = INT32_MAX;
+	rotor.speed = 1;
+	rotor_tick(rotor, true);
+	CHECK(rotor.angle == INT32_MIN, "rotor angle wraps at the signed boundary");
 
-    Rig r;
-    VehicleTraits t = buggy_traits(true);
-    t.family = VehicleFamily::Helicopter;
-    t.climb_speed = 1000;
-    r.mount();
-    r.veh().veh.part_spin.speed = kRotorSpeedMax - kRotorRateFull;
-    r.veh().veh.part_spin.rate = kRotorRateFull;
-    r.veh().veh.ground_cache = 0;
-    r.veh().veh.net_alt_target = 65536;
-    r.veh().veh.net_climb = 65536;
-    r.veh().veh.ai_drive = true;
-    r.veh().veh.wheel_phase = 123;
-    r.w.vehicles.aircraft_client_tick(r.veh(), t);
-    CHECK(r.veh().veh.part_spin.speed == kRotorSpeedMax, "rotor reaches full speed");
-    CHECK(r.veh().veh.net_engine_on, "collective opens on the threshold tick");
-    CHECK(r.veh().veh.wheel_phase == 123, "the air mover has no ground wheel phase");
+	Rig r;
+	VehicleTraits t = buggy_traits(true);
+	t.family = VehicleFamily::Helicopter;
+	t.climb_speed = 1000;
+	r.mount();
+	r.veh().veh.part_spin.speed = kRotorSpeedMax - kRotorRateFull;
+	r.veh().veh.part_spin.rate = kRotorRateFull;
+	r.veh().veh.ground_cache = 0;
+	r.veh().veh.net_alt_target = 65536;
+	r.veh().veh.net_climb = 65536;
+	r.veh().veh.ai_drive = true;
+	r.veh().veh.wheel_phase = 123;
+	r.w.vehicles.aircraft_client_tick(r.veh(), t);
+	CHECK(r.veh().veh.part_spin.speed == kRotorSpeedMax, "rotor reaches full speed");
+	CHECK(r.veh().veh.net_engine_on, "collective opens on the threshold tick");
+	CHECK(r.veh().veh.wheel_phase == 123, "the air mover has no ground wheel phase");
 }
 
 void test_tracks_and_turret_motor_commit() {
-    {
-        Rig r;
-        auto t = buggy_traits(true);
-        t.family = VehicleFamily::Helicopter;
-        AiEntity &ai = *r.w.ai.at(r.w.ai.attach(r.veh_h));
-        ai.profile.type = 2;
-        r.veh().veh.part_spin.speed = 123;
-        r.veh().veh.part_spin.rate = 456;
-        r.w.vehicles.part_anim_tick(r.veh(), t);
-        CHECK(r.veh().veh.part_spin.speed == 123 && r.veh().veh.part_spin.angle == 0,
-              "air mover does not call the ground rotor machine for a ground profile");
-        t.family = VehicleFamily::Ground;
-        ai.profile.type = 1;
-        r.w.vehicles.part_anim_tick(r.veh(), t);
-        CHECK(r.veh().veh.part_spin.speed == 123,
-              "ground mover does not call the helo rotor machine for a helo profile");
-    }
-    int32_t phases[2] = {};
-    track_phase_tick(phases, 0, 8192);
-    CHECK(phases[0] == -65536 && phases[1] == 65536,
-          "stationary steering counter-rotates the two tracks");
-    track_phase_tick(phases, -2, 0);
-    CHECK(phases[0] == -131072 && phases[1] == 0,
-          "reverse drive advances both tracks backwards");
-    for (VehicleFamily family : {VehicleFamily::Ground, VehicleFamily::Bike, VehicleFamily::Tank}) {
-        Rig r;
-        auto t = buggy_traits(true);
-        t.family = family;
-        AiEntity &ai = *r.w.ai.at(r.w.ai.attach(r.veh_h));
-        ai.profile.type = 2;
-        for (int i = 0; i < 6; ++i) ai.brain.f[AiBrain::kStagingBlock+i] = 10+i;
-        ai.brain.f[AiBrain::kStagingBlock+3] = 0x2108421;
-        ai.brain.f[AiBrain::kActivePitch] = 99;
-        r.w.vehicles.tick_motor(r.veh(), t);
-        CHECK(ai.brain.f[AiBrain::kActiveYaw] == 0x2108421,
-              "the exact threshold slews yaw by one ground step");
-        CHECK(ai.brain.f[AiBrain::kActivePitch] == 99,
-              "pitch does not commit on the equality boundary");
-        r.w.vehicles.tick_motor(r.veh(), t);
-        for (int i = 0; i < 6; ++i)
-            CHECK(ai.brain.f[AiBrain::kActiveBlock+i] == ai.brain.f[AiBrain::kStagingBlock+i],
-                  "alignment commits the entire staged transform");
-        ai.brain.f[AiBrain::kActiveYaw] = INT32_MAX;
-        ai.brain.f[AiBrain::kStagingBlock+3] = INT32_MIN + 10;
-        r.w.vehicles.tick_motor(r.veh(), t);
-        CHECK(ai.brain.f[AiBrain::kActiveYaw] == INT32_MIN + 10,
-              "yaw alignment uses the wrapped shortest delta");
-        ai.brain.f[AiBrain::kActivePitch] = -65536;
-        r.veh().veh.track_phase[0] = -65536;
-        r.veh().veh.track_phase[1] = 0x23450000;
-        const auto tank = vehicle_ctrl_registers(r.veh().veh, VehicleRenderFamily::Tank, &ai);
-        CHECK(tank.tracks[0] == 65535 && tank.tracks[1] == 0x2345,
-              "tank track phase words are unsigned");
-        CHECK(tank.gun_yaw == -32768 && tank.gun_pitch == -1,
-              "turret yaw and pitch words are signed");
-        CHECK((tank.mask & VC_TRACKS) && !(tank.mask & VC_TIRES) && (tank.mask & VC_VEHICLE_GUN),
-              "tank render selects track and turret ownership");
-        ai.profile.type = 1;
-        const auto helo = vehicle_ctrl_registers(r.veh().veh, VehicleRenderFamily::Helicopter, &ai);
-        CHECK(helo.mask == (VC_ROTORS | VC_HELO_GUN), "helo owns its rotor and gun channels");
-    }
+	{
+		Rig r;
+		auto t = buggy_traits(true);
+		t.family = VehicleFamily::Helicopter;
+		AiEntity &ai = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+		ai.profile.type = 2;
+		r.veh().veh.part_spin.speed = 123;
+		r.veh().veh.part_spin.rate = 456;
+		r.w.vehicles.part_anim_tick(r.veh(), t);
+		CHECK(r.veh().veh.part_spin.speed == 123 && r.veh().veh.part_spin.angle == 0,
+				"air mover does not call the ground rotor machine for a ground profile");
+		t.family = VehicleFamily::Ground;
+		ai.profile.type = 1;
+		r.w.vehicles.part_anim_tick(r.veh(), t);
+		CHECK(r.veh().veh.part_spin.speed == 123,
+				"ground mover does not call the helo rotor machine for a helo profile");
+	}
+	int32_t phases[2] = {};
+	track_phase_tick(phases, 0, 8192);
+	CHECK(phases[0] == -65536 && phases[1] == 65536,
+			"stationary steering counter-rotates the two tracks");
+	track_phase_tick(phases, -2, 0);
+	CHECK(phases[0] == -131072 && phases[1] == 0, "reverse drive advances both tracks backwards");
+	for (VehicleFamily family :
+			{ VehicleFamily::Ground, VehicleFamily::Bike, VehicleFamily::Tank }) {
+		Rig r;
+		auto t = buggy_traits(true);
+		t.family = family;
+		AiEntity &ai = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+		ai.profile.type = 2;
+		for (int i = 0; i < 6; ++i)
+			ai.brain.f[AiBrain::kStagingBlock + i] = 10 + i;
+		ai.brain.f[AiBrain::kStagingBlock + 3] = 0x2108421;
+		ai.brain.f[AiBrain::kActivePitch] = 99;
+		r.w.vehicles.tick_motor(r.veh(), t);
+		CHECK(ai.brain.f[AiBrain::kActiveYaw] == 0x2108421,
+				"the exact threshold slews yaw by one ground step");
+		CHECK(ai.brain.f[AiBrain::kActivePitch] == 99,
+				"pitch does not commit on the equality boundary");
+		r.w.vehicles.tick_motor(r.veh(), t);
+		for (int i = 0; i < 6; ++i)
+			CHECK(ai.brain.f[AiBrain::kActiveBlock + i] == ai.brain.f[AiBrain::kStagingBlock + i],
+					"alignment commits the entire staged transform");
+		ai.brain.f[AiBrain::kActiveYaw] = INT32_MAX;
+		ai.brain.f[AiBrain::kStagingBlock + 3] = INT32_MIN + 10;
+		r.w.vehicles.tick_motor(r.veh(), t);
+		CHECK(ai.brain.f[AiBrain::kActiveYaw] == INT32_MIN + 10,
+				"yaw alignment uses the wrapped shortest delta");
+		ai.brain.f[AiBrain::kActivePitch] = -65536;
+		r.veh().veh.track_phase[0] = -65536;
+		r.veh().veh.track_phase[1] = 0x23450000;
+		const auto tank = vehicle_ctrl_registers(r.veh().veh, VehicleRenderFamily::Tank, &ai);
+		CHECK(tank.tracks[0] == 65535 && tank.tracks[1] == 0x2345,
+				"tank track phase words are unsigned");
+		CHECK(tank.gun_yaw == -32768 && tank.gun_pitch == -1,
+				"turret yaw and pitch words are signed");
+		CHECK((tank.mask & VC_TRACKS) && !(tank.mask & VC_TIRES) && (tank.mask & VC_VEHICLE_GUN),
+				"tank render selects track and turret ownership");
+		ai.profile.type = 1;
+		const auto helo = vehicle_ctrl_registers(r.veh().veh, VehicleRenderFamily::Helicopter, &ai);
+		CHECK(helo.mask == (VC_ROTORS | VC_HELO_GUN | VC_HELO_GEAR),
+				"helo owns its rotor and gun channels");
+	}
+}
+
+void test_tank_fourteen_tire_projection() {
+	Entity::VehicleMotorState m;
+	const int32_t compression[6] = { 1000, 2000, 4000, 8000, 4500, 3000 };
+	for (int i = 0; i < 6; ++i)
+		m.wheel_comp[i] = compression[i];
+	const auto controls = vehicle_ctrl_registers(m, VehicleRenderFamily::Tank);
+	const int32_t expected[14] = { 1000, 1000, 2750, 4455, 6250, 8000, 8000, 2000, 2000, 2500, 2970,
+		3500, 4000, 4000 };
+	CHECK((controls.mask & VC_TANK_TIRES) != 0, "tank owns all fourteen tires");
+	for (int i = 0; i < 14; ++i)
+		CHECK(controls.tires[i] == expected[i], "tank tire projection");
+	m.wheel_comp[0] = -2000;
+	m.wheel_comp[4] = 1000;
+	const auto negative = vehicle_ctrl_registers(m, VehicleRenderFamily::Tank);
+	CHECK(negative.tires[2] == 0, "mean is computed before its nonnegative clamp");
+	m.gear_phase = 65000;
+	const auto helo = vehicle_ctrl_registers(m, VehicleRenderFamily::Helicopter);
+	CHECK(helo.gear == 65000, "gear uses the unsigned low word");
+}
+
+void test_rotor_wash_particles_and_lifetime() {
+	World world;
+	world.registry.configure_pool(1, 4);
+	Entity seed;
+	seed.kind = EntityKind::Item;
+	seed.position = { 0, 0, 6 };
+	seed.yaw = 90;
+	seed.health = seed.health_max = 1000;
+	const auto h = world.registry.spawn(1, seed);
+	Entity &helo = *world.registry.get(h);
+	VehicleTraits traits;
+	traits.family = VehicleFamily::Helicopter;
+	traits.player_speed = 20000;
+	traits.player_control = true;
+	helo.veh.part_spin.speed = kRotorSpeedMax;
+	helo.veh.vel_x = 1000;
+	world.out.fire_sounds.set_listener({ 0, 0, 6 });
+	world.vehicles.part_anim_tick(helo, traits);
+	CHECK(world.rotor_wash.active_count() == 1, "rotor motor allocates one focal-wind slot");
+	const auto slot = helo.veh.rotor_wash_handle;
+	world.vehicles.part_anim_tick(helo, traits);
+	CHECK(helo.veh.rotor_wash_handle == slot && world.rotor_wash.active_count() == 1,
+			"rotor updates reuse their slot");
+	namespace p = opennova::particle;
+	p::ParticleDef def;
+	def.flags = p::particle_flag::FocalWind;
+	def.move = p::move_flag::Normal;
+	def.emit_burst = 0;
+	def.emit_rate = 0;
+	p::Emitter emitter;
+	p::emitter_init(emitter, &def, {}, 1);
+	p::Particle sample;
+	sample.position = { 1, 3, 0 };
+	sample.age = sample.lifetime = 10;
+	sample.curve_phase = 14;
+	sample.phase_rate = 62.5f;
+	emitter.particles.push_back(sample);
+	p::emitter_advance(emitter, 0.016f, &world.rotor_wash);
+	CHECK(emitter.particles[0].force_zone == slot,
+			"focal particle reacquires its zone at phase/index cadence");
+	CHECK(emitter.particles[0].velocity.y < 0 && emitter.particles[0].velocity.x > 0,
+			"inner rotor wash pulls down and pushes radially outward");
+	p::Particle annulus = sample;
+	annulus.position = { 13, 3, 0 };
+	annulus.force_zone = slot;
+	world.rotor_wash.apply(annulus, 0, false);
+	CHECK(annulus.velocity.y > 0 && annulus.velocity.x < 0,
+			"outer annulus adds lift and inward drag");
+	int32_t magnitude = 0, direction[3];
+	const int32_t position[3] = { 65536, 0, 2 * 65536 };
+	CHECK(world.rotor_wash.sample_sway(position, magnitude, direction) && magnitude > 0,
+			"foliage samples the same rotor field");
+	Entity tree;
+	tree.render_sway = true;
+	tree.position = { 1, 0, 0 };
+	const auto sway = world.rotor_wash.sway_pose(tree);
+	CHECK(sway.active && sway.offset.x > 0,
+			"Sway renderer gets the radial bend and shared wave pose");
+	world.logic_tick += 3;
+	const auto next_sway = world.rotor_wash.sway_pose(tree);
+	CHECK(next_sway.active && next_sway.basis[0] != sway.basis[0],
+			"foliage rotation follows the position-seeded clock");
+	tree.render_sway = false;
+	CHECK(!world.rotor_wash.sway_pose(tree).active,
+			"ordinary renderers do not inherit tree deformation");
+	world.env.water_z = -100 * 65536;
+	bool dust = false;
+	for (int i = 0; i < 12; ++i) {
+		++world.logic_tick;
+		world.rotor_wash.tick();
+	}
+	for (const auto &event : world.out.vehicle_effects)
+		dust |= event.effect == "Effect_RwDust" && event.force_zone == slot;
+	CHECK(dust, "ground-directed rays emit the authored dust effect with its force-zone binding");
+	world.out.vehicle_effects.clear();
+	world.env.water_z = 0;
+	for (int i = 0; i < 12; ++i) {
+		++world.logic_tick;
+		world.rotor_wash.tick();
+	}
+	CHECK(!world.out.vehicle_effects.empty() &&
+					world.out.vehicle_effects[0].effect == "Effect_RwWater",
+			"water chooses the authored rotor-wash effect");
+	world.env.water_z = 65536;
+	for (int i = 0; i < 9; ++i) {
+		++world.logic_tick;
+		world.rotor_wash.tick();
+	}
+	bool ring = false;
+	for (const auto &row : world.rotor_wash.water_wakes().rows())
+		ring |= row.active;
+	CHECK(ring, "downwash over a nonzero water plane produces the surface-ring bank");
+	world.vehicles.respawn(helo);
+	CHECK(helo.veh.rotor_wash_handle == 0 && world.rotor_wash.active_count() == 0,
+			"respawn releases the vehicle's wind slot");
+	annulus.velocity = {};
+	world.rotor_wash.apply(annulus, 0, false);
+	CHECK(annulus.velocity.y == 0, "detached particles cannot use a retired wind slot");
+}
+
+void test_helicopter_sound_curves_and_decay() {
+	World world;
+	world.registry.configure_pool(1, 2);
+	Entity seed;
+	seed.health = seed.health_max = 1000;
+	const auto handle = world.registry.spawn(1, seed);
+	Entity &helo = *world.registry.get(handle);
+	VehicleTraits traits;
+	traits.family = VehicleFamily::Helicopter;
+	traits.player_control = true;
+	traits.climb_speed = 65536;
+	const char profile[] = "begin Rotor\n"
+						   "Soundloop_5 Lateral\nSoundloop_6 Medium\nSoundloop_7 Cruise\n"
+						   "medloopfadeinstart 0\nmedloopfadeinend 50\n"
+						   "medloopfadeoutstart 75\nmedloopfadeoutend 100\n"
+						   "medlooppitchstart 0\nmedlooppitchend 100\n"
+						   "medlooppitchstartp 50\nmedlooppitchendp 100\n"
+						   "crsloopfadeinstart 50\ncrsloopfadeinend 100\n"
+						   "crslooppitchstartp 60\ncrslooppitchendp 120\nend\n";
+	CHECK(world.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1,
+			"rotor sound profile parses its authored curves");
+	traits.sound_loops[6] = "ItemCruise";
+	helo.veh.part_spin.speed = kRotorSpeedMax;
+	world.vehicles.update_rotor_sound(helo, traits);
+	const auto full = world.out.sound_emitters.drain();
+	CHECK(full.size() == 3, "three rotor lanes are registered together");
+	if (full.size() == 3) {
+		CHECK(full[0].lane == 21 && full[0].set_name == "ItemCruise" &&
+						full[0].pitch_q16 == 78600 && full[0].volume_q8_8 == 65279,
+				"cruise uses the item override and its upper authored pitch");
+		CHECK(full[1].lane == 11 && full[1].volume_q8_8 == 0,
+				"medium fades out at full rotor speed");
+		CHECK(full[2].lane == 1 && full[2].pitch_q16 == 65536 && full[2].volume_q8_8 == 63240,
+				"zero climb preserves the original negative-to-unsigned lateral volume");
+	}
+	helo.veh.part_spin.speed =
+			static_cast<int32_t>((int64_t(32750) * kRotorSpeedMax + 65535) / 65536);
+	world.vehicles.update_rotor_sound(helo, traits);
+	const auto edge = world.out.sound_emitters.drain();
+	CHECK(edge.size() == 3 && edge[1].volume_q8_8 == 65278,
+			"the medium fade-in endpoint retains the reciprocal/ftol one-unit loss");
+	CHECK(edge.size() == 3 && edge[0].volume_q8_8 == 0,
+			"cruise starts at zero at the medium fade-in endpoint");
+	helo.veh.part_spin.speed = kRotorSpeedMax;
+	world.vehicles.part_anim_tick(helo, traits);
+	CHECK(!world.out.sound_emitters.empty() && helo.veh.part_spin.speed < kRotorSpeedMax,
+			"unoccupied helicopters refresh running loops while spinning down");
+	world.out.sound_emitters.clear();
+	helo.veh.part_spin.speed = 0;
+	world.vehicles.part_anim_tick(helo, traits);
+	CHECK(world.out.sound_emitters.empty(), "stopped rotors leave their old lanes to expire");
+	helo.veh.part_spin.speed = kRotorSpeedMax;
+	helo.engine_flags |= 2;
+	world.vehicles.update_rotor_sound(helo, traits);
+	CHECK(world.out.sound_emitters.empty(), "dead helicopters never refresh sound lanes");
+}
+
+void test_water_wake_ring_lifetime_and_geometry() {
+	namespace r = opennova::renderer;
+	r::WaterWakePool pool;
+	pool.add(3 * 65536, -65536, 0.75f);
+	CHECK(pool.rows()[0].x == 2 * 65536 && pool.rows()[0].y == -2 * 65536,
+			"surface rings align down to the two-unit grid on both signs");
+	for (int i = 0; i < 12; ++i)
+		pool.tick();
+	CHECK(pool.rows()[0].age == 12 && std::abs(pool.rows()[0].alpha - 0.75f) < 0.00001f,
+			"water rings reach their authored opacity at tick twelve");
+	r::WaterWakeFrame frame;
+	const int32_t camera[3] = { 2 * 65536, -2 * 65536, 65536 };
+	r::compile_water_wakes(pool, 65536, 64, camera, frame);
+	CHECK(frame.vertices.size() == 171 && frame.indices.size() == 864,
+			"water rings use nineteen angular columns and nine radial rows");
+	CHECK(std::abs(frame.vertices.front().z - 2.25f) < 0.00001f &&
+					std::abs(frame.vertices.front().y - 1.03125f) < 0.00001f &&
+					frame.vertices.front().u == 0.125f && frame.vertices.front().v == -0.75f,
+			"ring geometry carries the water depth bias and animated first UV");
+	CHECK(std::abs(frame.vertices[8 * 19].z - 22.25f) < 0.00001f && frame.vertices[8 * 19].v2 == 1,
+			"outer ring reaches the authored twenty-unit gradient edge");
+	for (int i = 0; i < 20; ++i)
+		pool.tick();
+	CHECK(!pool.rows()[0].active, "surface rings expire and compact at tick thirty-two");
+	r::compile_water_wakes(pool, 65536, 84, camera, frame);
+	CHECK(frame.vertices.empty(), "expired rings leave no draw geometry");
+	for (int i = 0; i < 129; ++i)
+		pool.add(i * 65536, 0, 1);
+	CHECK(pool.rows()[127].x == 126 * 65536, "ring pool drops allocation after its 128 slots fill");
+	for (int i = 0; i < 32; ++i)
+		pool.tick();
+	CHECK(!pool.rows()[0].active && !pool.rows()[127].active,
+			"a full ring bank clears its vacated tail and terminates compaction");
 }
 
 int main() {
-    test_tracks_and_turret_motor_commit();
-    test_suspension_registers_and_rotor_threshold_tick();
+	test_water_wake_ring_lifetime_and_geometry();
+	test_helicopter_sound_curves_and_decay();
+	test_rotor_wash_particles_and_lifetime();
+	test_tank_fourteen_tire_projection();
+	test_tracks_and_turret_motor_commit();
+	test_suspension_registers_and_rotor_threshold_tick();
 
 	test_watercraft_runs_no_rotor_machine();
 	test_player_control_rotor_symmetry();

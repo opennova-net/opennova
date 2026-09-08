@@ -15,11 +15,15 @@ opennova::world::Vec3 mission_from_godot(const Vector3 &v) {
 
 // --- DestructionEffectEvent -------------------------------------------------
 
-Ref<DestructionEffectEvent> DestructionEffectEvent::make(const String &p_effect, const Vector3 &p_pos,
-		int p_family, const Vector3 &p_dir, int p_attach_net_id, int p_attach_bms_id,
-		int p_attach_wire_handle, int64_t p_attach_spawn_origin) {
+Ref<DestructionEffectEvent> DestructionEffectEvent::make(const String &p_effect,
+		const Vector3 &p_pos, int p_family, const Vector3 &p_dir, int p_attach_net_id,
+		int p_attach_bms_id, int p_attach_wire_handle, int64_t p_attach_spawn_origin,
+		bool p_release, int p_bank_slot, const Vector3 &p_local_pos) {
 	opennova::world::DestructionEffectEvent v;
 	v.effect = p_effect.utf8().get_data();
+	v.release = p_release;
+	v.bank_slot = static_cast<uint8_t>(p_bank_slot);
+	v.attach_local_pos = { p_local_pos.z, -p_local_pos.x, p_local_pos.y };
 	v.pos = mission_from_godot(p_pos);
 	v.dir = mission_from_godot(p_dir);
 	v.family = static_cast<uint8_t>(p_family);
@@ -40,14 +44,18 @@ Vector3 DestructionEffectEvent::get_dir() const { return mission_to_godot(value_
 void DestructionEffectEvent::_bind_methods() {
 	ClassDB::bind_static_method("DestructionEffectEvent",
 			D_METHOD("make", "effect", "pos", "family", "dir", "attach_net_id", "attach_bms_id",
-					"attach_wire_handle", "attach_spawn_origin"),
+					"attach_wire_handle", "attach_spawn_origin", "release", "bank_slot",
+					"local_pos"),
 			&DestructionEffectEvent::make, DEFVAL(0), DEFVAL(Vector3()), DEFVAL(0), DEFVAL(0),
 			DEFVAL(static_cast<int>(opennova::world::EntityHandle::kInvalid)),
-			DEFVAL(static_cast<int64_t>(opennova::world::kSpawnOriginNone)));
+			DEFVAL(static_cast<int64_t>(opennova::world::kSpawnOriginNone)), DEFVAL(false),
+			DEFVAL(0), DEFVAL(Vector3()));
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::STRING, effect)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::VECTOR3, pos)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::VECTOR3, dir)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, family)
+	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, bank_slot)
+	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::BOOL, release)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, attach_net_id)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, attach_bms_id)
 	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, attach_wire_handle)
@@ -57,8 +65,9 @@ void DestructionEffectEvent::_bind_methods() {
 // --- HuskSwapEvent ----------------------------------------------------------
 
 Ref<HuskSwapEvent> HuskSwapEvent::make(int p_bms_id, int p_item_id, int64_t p_spawn_origin,
-		int p_wire_handle) {
+		int p_wire_handle, bool p_restore_intact) {
 	opennova::world::HuskSwapEvent v;
+	v.restore_intact = p_restore_intact;
 	v.bms_id = p_bms_id;
 	v.item_id = p_item_id;
 	v.spawn_origin = static_cast<uint32_t>(p_spawn_origin);
@@ -73,9 +82,10 @@ Vector3 HuskSwapEvent::get_pos() const { return mission_to_godot(value_.pos); }
 
 void HuskSwapEvent::_bind_methods() {
 	ClassDB::bind_static_method("HuskSwapEvent",
-			D_METHOD("make", "bms_id", "item_id", "spawn_origin", "wire_handle"), &HuskSwapEvent::make,
-			DEFVAL(static_cast<int64_t>(opennova::world::kSpawnOriginNone)),
-			DEFVAL(static_cast<int>(opennova::world::EntityHandle::kInvalid)));
+			D_METHOD("make", "bms_id", "item_id", "spawn_origin", "wire_handle", "restore_intact"),
+			&HuskSwapEvent::make, DEFVAL(static_cast<int64_t>(opennova::world::kSpawnOriginNone)),
+			DEFVAL(static_cast<int>(opennova::world::EntityHandle::kInvalid)), DEFVAL(false));
+	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::BOOL, restore_intact)
 	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::INT, net_id)
 	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::INT, wire_handle)
 	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::INT, bms_id)

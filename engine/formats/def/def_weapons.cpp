@@ -499,26 +499,32 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 to_lower_buf(vlow, v, vll);
                 ca.delayend = (vll == 4 && memcmp(vlow, "auto", 4) == 0) ? -1 : parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_starts_with(lower, ll, "soundsetend", 11)) {
-                consume_value_str(trimmed, tlen, 11, ca.soundsetend, sizeof(ca.soundsetend));
-                parsed = 1;
-            } else if (lower_starts_with(lower, ll, "soundset", 8) &&
-                       (ll == 8 || isspace((unsigned char)lower[8]))) {
-                consume_value_str(trimmed, tlen, 8, ca.soundset, sizeof(ca.soundset));
-                parsed = 1;
-            } else if (lower_starts_with(lower, ll, "particleuserpoint", 17)) {
-                consume_value_str(trimmed, tlen, 17, ca.particleuserpoint, sizeof(ca.particleuserpoint));
-                parsed = 1;
-            } else if (lower_starts_with(lower, ll, "particle", 8) &&
-                       (ll == 8 || isspace((unsigned char)lower[8]))) {
-                consume_value_str(trimmed, tlen, 8, ca.particle, sizeof(ca.particle));
-                parsed = 1;
-            }
+			} else if (lower_match_key(lower, ll, "action_value", 12)) {
+				size_t vl;
+				const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+				ca.action_value = parse_int_n(v, vl);
+				parsed = 1;
+			} else if (lower_starts_with(lower, ll, "soundsetend", 11)) {
+				consume_value_str(trimmed, tlen, 11, ca.soundsetend, sizeof(ca.soundsetend));
+				parsed = 1;
+			} else if (lower_starts_with(lower, ll, "soundset", 8) &&
+					(ll == 8 || isspace((unsigned char)lower[8]))) {
+				consume_value_str(trimmed, tlen, 8, ca.soundset, sizeof(ca.soundset));
+				parsed = 1;
+			} else if (lower_starts_with(lower, ll, "particleuserpoint", 17)) {
+				consume_value_str(
+						trimmed, tlen, 17, ca.particleuserpoint, sizeof(ca.particleuserpoint));
+				parsed = 1;
+			} else if (lower_starts_with(lower, ll, "particle", 8) &&
+					(ll == 8 || isspace((unsigned char)lower[8]))) {
+				consume_value_str(trimmed, tlen, 8, ca.particle, sizeof(ca.particle));
+				parsed = 1;
+			}
 
-            if (!parsed) {
-                DA_PUSH_RAW(ca.raw_lines, ca.raw_lines_count, ca_raw_cap, line, line_len);
-            }
-        }
+			if (!parsed) {
+				DA_PUSH_RAW(ca.raw_lines, ca.raw_lines_count, ca_raw_cap, line, line_len);
+			}
+		}
     }
 
     return 0;

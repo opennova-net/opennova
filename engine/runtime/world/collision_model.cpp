@@ -183,38 +183,36 @@ void CollisionMatrix::transform_point(const int32_t in[3], int32_t out[3]) const
     out[2] = r[2] + m[11];
 }
 
-// [orig: Math_FixedPointMatrixToEulerAngles @ 0x613310]
-void collision_matrix_to_euler(const CollisionMatrix &mat, int32_t out[3]) {
-    constexpr double kBamPerRadian = 683565275.5764316; // 2^31 / pi (dbl_7C19D8)
-    // dbl_7C3608's exact bytes (a8 e4 90 98 2d 22 19 3e): retail's "pi / 2^31" sits
-    // 30.5 ppm ABOVE the true quotient (1.4629180792671596e-9) and is NOT the
-    // reciprocal of kBamPerRadian; keep the binary's value, not the math.
-    constexpr double kRadPerBam = 1.4629627251502471e-9; // dbl_7C3608 verbatim
-    constexpr double kQ22 = io::kQ22One;
-    const int32_t *m = mat.m;
-    const auto trunc32 = [](double v) { return static_cast<int32_t>(v); }; // ftol: toward zero
-    const auto shr22 = [](int64_t v) { return static_cast<int32_t>(v >> 22); };
-    // yaw = atan2(M4, M0) (computed as atan2(-M4, M0) * -(2^31/pi) @ 0x61332c..0x61335d)
-    const int32_t yaw = trunc32(std::atan2(static_cast<double>(m[4]),
-                                           static_cast<double>(m[0])) * kBamPerRadian);
-    const int64_t sy = trunc32(std::sin(yaw * kRadPerBam) * kQ22);
-    const int64_t cy = trunc32(std::cos(yaw * kRadPerBam) * kQ22);
-    // @ 0x61339a..0x613400
-    const int64_t a = shr22(-static_cast<int64_t>(m[6]) * cy + static_cast<int64_t>(m[2]) * sy);
-    const int64_t b = shr22(static_cast<int64_t>(m[2]) * cy + static_cast<int64_t>(m[6]) * sy);
-    const int64_t c = shr22(static_cast<int64_t>(m[0]) * cy + static_cast<int64_t>(m[4]) * sy);
-    // pitch = atan2(M8, C) @ 0x6133fa..0x613421
-    const int32_t pitch = trunc32(std::atan2(static_cast<double>(m[8]),
-                                             static_cast<double>(c)) * kBamPerRadian);
-    const int64_t sp = trunc32(std::sin(pitch * kRadPerBam) * kQ22);
-    const int64_t cp = trunc32(std::cos(pitch * kRadPerBam) * kQ22);
-    // D = (M10*cp - B*sp) >> 22; roll = atan2(A, D) @ 0x61344a..0x61347b
-    const int64_t d = shr22(static_cast<int64_t>(m[10]) * cp - b * sp);
-    const int32_t roll = trunc32(std::atan2(static_cast<double>(a),
-                                            static_cast<double>(d)) * kBamPerRadian);
-    out[0] = yaw;
-    out[1] = pitch;
-    out[2] = roll;
+// Yaw extraction retains the original paired atan terms. [orig: @0x61332C..0x61335D]
+// [orig: Math_FixedPointMatrixToEulerAngles @0x613310]
+void collision_matrix_to_euler(const CollisionMatrix &matrix, int32_t out[3]) {
+	constexpr double angle_scale = 683565275.5764316; // dbl_7C19D8
+	constexpr double radians = 1.4629627251502471e-9; // dbl_7C3608
+	const auto chop = [](double value) {
+		return static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(value)));
+	};
+	const auto product = [](int32_t a, int32_t b) {
+		return static_cast<int32_t>((int64_t(a) * b) >> 22);
+	};
+	const int32_t *m = matrix.m;
+	const int32_t neg_y = io::bam_sub(0, m[4]);
+	const int32_t neg_up_y = io::bam_sub(0, m[6]);
+	// Negative scale is deliberate, including signed-zero quadrant behavior.
+	// [orig: dbl_7C57B8 = -683565275.5764316 @0x613352]
+	const int32_t yaw = chop(std::atan2(double(neg_y), double(m[0])) * -angle_scale);
+	const int32_t sy = chop(std::sin(double(yaw) * radians) * 4194304.0);
+	const int32_t cy = chop(std::cos(double(yaw) * radians) * 4194304.0);
+	const int32_t roll_y = io::bam_add(product(cy, neg_up_y), product(sy, m[2]));
+	const int32_t up_x = io::bam_sub(product(cy, m[2]), product(sy, neg_up_y));
+	const int32_t forward_x = io::bam_sub(product(cy, m[0]), product(sy, neg_y));
+	const int32_t pitch = chop(std::atan2(double(m[8]), double(forward_x)) * angle_scale);
+	const int32_t sp = chop(std::sin(double(pitch) * radians) * 4194304.0);
+	const int32_t cp = chop(std::cos(double(pitch) * radians) * 4194304.0);
+	const int32_t up_z = io::bam_sub(product(cp, m[10]), product(sp, up_x));
+	const int32_t roll = chop(std::atan2(double(roll_y), double(up_z)) * angle_scale);
+	out[0] = yaw;
+	out[1] = pitch;
+	out[2] = roll;
 }
 
 // [orig: Math_TransformPointFixedPoint22 @ 0x412e90 — rotate only.]
@@ -258,19 +256,22 @@ CollisionMatrix entity_placement_matrix(const Entity &e) {
     const int32_t heading = e.veh.yaw_seeded
             ? e.veh.yaw_bam
             : bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
-    CollisionMatrix m = collision_matrix_from_euler(
-            heading, bam_from_degrees_wrapped(static_cast<double>(e.pitch)),
-            bam_from_degrees_wrapped(static_cast<double>(e.roll)), position);
-    if (e.uniform_scale_q16 != 0) {
-        // Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210:
+	CollisionMatrix m = collision_matrix_from_euler(heading,
+			e.veh.yaw_seeded ? e.veh.air_pitch_bam
+							 : bam_from_degrees_wrapped(static_cast<double>(e.pitch)),
+			e.veh.yaw_seeded ? e.veh.air_roll_bam
+							 : bam_from_degrees_wrapped(static_cast<double>(e.roll)),
+			position);
+	if (e.uniform_scale_q16 != 0) {
+		// Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210:
         // the scale rides the rotation diagonal.
         constexpr int rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
         for (int index : rotation_indices) {
             m.m[index] = static_cast<int32_t>(
                     (static_cast<int64_t>(m.m[index]) * e.uniform_scale_q16) >> 16);
         }
-    }
-    return m;
+	}
+	return m;
 }
 
 bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,

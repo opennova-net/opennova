@@ -10,6 +10,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -55,10 +56,26 @@ inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, c
         return anim_state::kEmplaced;
     }
 
-    // The original derives this from the mounted seat bone name: sitexNN/ctrlxNN/drvrxNN
-    // becomes anim_sit + NN. The dynamic sit_24 driver lean states need vehicle control fields
-    // that are not modeled in this port yet, so this resolver intentionally stops at base sit_N.
-    return anim_state::kSit + std::clamp<int>(seat.pose_index, 0, 30);
+	// Seat names select sit_N; sit_24 then follows hull roll and signed speed.
+	// The assignments are ordered: reverse overrides lean, rest overrides both.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0;
+	// Entity_UpdateInfantryAI @0x4B9910]
+	int state = anim_state::kSit + std::clamp<int>(seat.pose_index, 0, 30);
+	if (state == 100) {
+		const int32_t roll = target.veh.yaw_seeded ? target.veh.air_roll_bam
+												   : int32_t(int64_t(target.roll) * 11930464);
+		if (roll < -71582784)
+			state = 110;
+		if (roll > 71582784)
+			state = 109;
+		const int32_t speed = target.veh.speed;
+		if (speed < 0)
+			state = 108;
+		const int32_t magnitude = speed < 0 ? int32_t(0u - uint32_t(speed)) : speed;
+		if (magnitude < 200)
+			state = 107;
+	}
+	return state;
 }
 
 // radians -> 32-bit binary angle. [orig: dbl_7C19D8 = 0x41C45F306DC9C883.]

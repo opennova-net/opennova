@@ -47,34 +47,14 @@
 //   5. post-contact  — all pads back in contact → sinks reset
 //   6. tail          — crash_request = 0; the amplitude/energy tail
 //
-// NAMED RESIDUALS (not ported; no D-row — they are the remaining D-NET-196
-// crash/flip/park/wreck machinery the record already lists as deferred):
-//   - the arming IMPULSE: `sink_k × pick` dumped as −Z force slots (+0x368+0x14k)
-//     through Entity_ClearSuspensionForces → Vehicle_ComputeAveragedOrientation —
-//     a chassis TILT folded into the chassis matrix + the +0x534 quaternion
-//     [orig: @0x46b22e..0x46b30b, @0x463a3b..0x463a64]; our conform re-derives
-//     the attitude from the pad fit every tick and carries no chassis matrix;
-//   - Entity_ClearSuspensionState @0x4592B0's reset of that chassis matrix /
-//     quaternion (+0x4F4, +0x534..+0x540, +0x4EC/+0x4F0, +0x4E8, +0x3DC) — it
-//     never touches the sinks, compressions or oscillators, and the tank calls it
-//     every tick (@0x47606e); nothing of ours corresponds, so it is a no-op seam;
-//   - crash RECOVERY: the post-quad tail unlatch (tank @0x479437, tracked
-//     @0x47ee3b..0x47ee49: `crashed = 0, byte_2ef = 0, settle_2f0 = 0`), gated
-//     on the tracked side by `!(Flags & 0x10) && up.z < 0` @0x47ed67..0x47ed73
-//     — an inverted hull WITHOUT the replicated bit — and preceded by
-//     Entity_RebuildOrientationMatrixFromAxes @0x47ed82 + the bounding quad
-//     @0x47ee2f (the righting leg, not ported); its client twin at the tail
-//     @0x47eea0..0x47eebc; and the authority's Flags-0x10 upkeep
-//     @0x47c3a0..0x47c3c6;
-//   - the tank's own spring pair (Suspension_CompressWheelLinear @0x45CEB0 /
-//     Suspension_OscillateWheel @0x45D240) — the tank gets the crash tests, the
-//     +250 sink growth and the arming only;
-//   - the bike crash tests that read unwalked locals: @0x47b14c (var_8 / var_29C),
-//     @0x47b6a7 (var_274), @0x47b6d1 / @0x47b6fb (var_280); only @0x47b375 is live.
-//     The bike's spring loop (@0x47b431 / @0x47bad0) is run with the tracked
-//     loop's shape — its own loop was not walked;
-//   - the +0x3DE clears outside arming (@0x4859e0, @0x47b63f) and the
-//     `+0x60 > 0` override freeze (never set here).
+// Crash impulses, chassis reset, recovery, the tank spring pair and bike
+// wheelie/ejection gates are implemented in vehicle_chassis.cpp,
+// vehicle_suspension.cpp and vehicle_contact_solve.cpp.
+// Witness sites: [orig: @0x45FF40, @0x45ffeb, @0x46001e, @0x478998, @0x47e47b, @0x468b3b,
+// @0x4795da, @0x47c0b6, @0x47eeee, @0x46b22e, @0x46b30b, @0x463a3b, @0x463a64, @0x4592B0,
+// @0x47606e, @0x479437, @0x47ee3b, @0x47ee49, @0x47ed67, @0x47ed73, @0x47ed82, @0x47ee2f,
+// @0x47eea0, @0x47eebc, @0x47c3a0, @0x47c3c6, @0x45CEB0, @0x45D240, @0x47b14c, @0x47b6a7,
+// @0x47b6d1, @0x47b6fb, @0x47b375, @0x47b431, @0x47bad0, @0x4859e0, @0x47b63f]
 
 #include <cstdint>
 

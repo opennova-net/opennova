@@ -47,7 +47,16 @@ constexpr std::uint32_t LitColor     = 0x80;  // graphic+472 ∈ {Bump=3, Bumpad
 constexpr std::uint32_t Distort      = 0x100; // graphic+472 == Distort=7
 } // namespace particle_runtime_flag
 
+struct Particle;
+// Borrowed for one simulation advance; an absent field leaves ordinary effects unchanged.
+class ParticleForceField {
+public:
+	virtual ~ParticleForceField() = default;
+	virtual void apply(Particle &particle, std::size_t index, bool repulsion) const = 0;
+};
+
 struct Particle {
+	std::uint16_t force_zone = 0;
 	Vec3 position{};
 	Vec3 velocity{};
 	float age = 0.0f;          // remaining seconds; <=0 means expired
@@ -93,6 +102,7 @@ struct Particle {
 };
 
 struct Emitter {
+	std::uint16_t force_zone = 0;
 	const ParticleDef *def = nullptr;
 	Vec3 position{};
 	Vec3 prev_position{};
@@ -209,7 +219,7 @@ void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t se
 
 // Advance the simulation by `dt` seconds. Spawns new particles per emission
 // schedule, integrates physics, ages particles, removes expired ones.
-void emitter_advance(Emitter &e, float dt);
+void emitter_advance(Emitter &e, float dt, const ParticleForceField *forces = nullptr);
 
 // Spawn one particle immediately (bypasses the emission schedule). Returns
 // false if the particle pool is at max_particles and no slot can be reclaimed.

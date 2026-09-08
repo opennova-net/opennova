@@ -24,6 +24,7 @@
 #include "particle/particle_file.h"
 
 namespace godot {
+class Simulation;
 
 class Camera3D;
 class ParticleRenderer;
@@ -191,6 +192,7 @@ public:
 	bool has_no_owner_bindings() const;
 	// The only simulation clock. Callers feed fixed mission ticks (1 / 62.5 s).
 	void advance_fixed_tick(double p_delta);
+	void advance_simulation_tick(double p_delta, Simulation *simulation);
 	// Explicit GameWorld device leg. Attachment poses and the
 	// immutable draw list are refreshed once at the pipeline's chosen point;
 	// particles never advance on render delta.

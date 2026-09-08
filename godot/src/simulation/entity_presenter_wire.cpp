@@ -57,7 +57,7 @@ inline int32_t wfield_i(const float *p, int base, int field) {
 // over 876 mostly-static rows). Mirrors WireRow::kCtrlCacheCount (the struct
 // is class-private); the static_assert in present_one_wire_row pins the
 // mirror.
-constexpr int kCtrlLegFieldCount = 32;
+constexpr int kCtrlLegFieldCount = 41;
 
 constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_EMPLACED_CONTROLS_VALID,
@@ -95,6 +95,15 @@ constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
 	Simulation::PF_VEHICLE_TIRE03,
 	Simulation::PF_VEHICLE_TIRE04,
 	Simulation::PF_VEHICLE_TIRE05,
+	Simulation::PF_VEHICLE_TIRE06,
+	Simulation::PF_VEHICLE_TIRE07,
+	Simulation::PF_VEHICLE_TIRE08,
+	Simulation::PF_VEHICLE_TIRE09,
+	Simulation::PF_VEHICLE_TIRE10,
+	Simulation::PF_VEHICLE_TIRE11,
+	Simulation::PF_VEHICLE_TIRE12,
+	Simulation::PF_VEHICLE_TIRE13,
+	Simulation::PF_VEHICLE_GEAR,
 };
 
 // Compare-and-refresh one leg's input cache. Returns true when every field is
@@ -269,7 +278,7 @@ void EntityPresenter::reset_wire_runtime_state() {
 	// stop the move groups), scars (every scar mesh goes).
 	destruction_->reset_runtime_state();
 	throwable_->reset_runtime_state();
-	vehicle_wake_->reset_runtime_state();
+	vehicle_trail_->reset_runtime_state();
 	if (ScarPresenter *scars_node = scars()) {
 		scars_node->reset_runtime_state();
 	}

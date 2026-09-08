@@ -97,6 +97,7 @@ struct WeaponFsmActionRow {
     char soundsetend[128] = {};
     char particle[128] = {};
     char particleuserpoint[128] = {};
+	int32_t action_value = 0; // ActionDef+52, mounted tank recoil
 };
 
 // A baked runtime action slot. [orig: ActionDef pool entry — delayStart/+0x24,
@@ -116,6 +117,7 @@ struct WeaponFsmAction {
                                       // events.action_finished seam)
     char particle[128] = {};          // effect spawned at the model user point
     char particle_userpoint[128] = {};
+	int32_t action_value = 0;
 };
 
 // The per-weapon def slice the FSM consumes. Flag bits are the witnessed WeaponDef+8

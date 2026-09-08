@@ -6,13 +6,9 @@
 
 namespace opennova::aip {
 
-// The .aip AI-profile text format — PARTIAL PORT, and honest about it: the
-// GROUND-type property set below is witnessed in full plus the two shared
-// speed keys; the HELO-type key set remains unported and ORGANIC profiles
-// parse nothing beyond `type` in retail itself ([orig: AIProfile_ParseProperty
-// @ 0x45de70 — the type gate at +16 returns for type 3 before any key
-// dispatch]). Newly witnessed fields land HERE, not in a runtime resolver
-// (ADR 0030). -1 / 0 sentinels mark absent fields per-member below.
+// Vehicle AI profile properties. Parsing preserves the original type gate:
+// HELO and GROUND accept their respective fields; ORGANIC accepts only type.
+// [orig: AIProfile_ParseProperty @0x45DE70]
 
 // One weapon block — profile+120 (primary) / +152 (secondary). The SM
 // fire pump hands the block to the fire-transform solver, which reads
@@ -50,8 +46,22 @@ inline constexpr uint32_t kWeaponPitchLockedMinus45 = 0x10;
 
 struct Profile {
     int32_t type = 0;            // +16: HELO 1 / GROUND 2 / ORGANIC 3 [orig: "type"]
-    int32_t aim_skill = -1;      // +28: atol clamped 0..4 [orig: "aim_skill"]
-    int32_t view_fov_bam = 0;    // +64: deg->BAM32 [orig: "view_fov"]
+	int32_t subtype = 0; // +20: STD 0 / BOAT 1 / PLANE 2 / TRAIN 3
+	int32_t default_state = 0; // +24, literal AIState_LookupByName value
+	int32_t drive_skill = 0; // +32, drive_skill / flight_skill, clamped 0..4
+	int32_t alert = 0; // +36, GREEN/YELLOW/RED
+	int32_t rank = 0; // +60
+	int32_t check_six_rate = 0; // +108, atof * 655.36
+	int32_t target_eval_rate = 0; // +112, atof * 655.36
+	int32_t radio_distance = 0; // HELO +240 / GROUND +208
+	int32_t radio_delay = 0; // HELO +244 / GROUND +212
+	int32_t hunt_limit = 0; // HELO +196, seconds *62.5
+	int32_t ground_patrol_speed = 0; // parsed fractional speed, 16.16 u/tick
+	int32_t ground_combat_speed = 0;
+	bool has_ground_patrol_speed = false;
+	bool has_ground_combat_speed = false;
+	int32_t aim_skill = -1; // +28: atol clamped 0..4 [orig: "aim_skill"]
+	int32_t view_fov_bam = 0;    // +64: deg->BAM32 [orig: "view_fov"]
     int32_t view_dist = 0;       // +68: atol << 16 [orig: "view_dist"]
     int32_t radar_fov_bam = 0;   // +72: deg->BAM32 [orig: "radar_fov"]
     int32_t radar_dist = 0;      // +76: atol << 16 [orig: "radar_dist"]
@@ -63,44 +73,39 @@ struct Profile {
     uint32_t combat_flags = 0;   // +100 [orig: "COMBAT_FLAGS" token loop]
     int32_t react_ticks = -1;    // +104: atof * 62.5, chop [orig: "react_time"]
     int32_t tether_dist = 0;     // +116: atol << 16 [orig: "tether_dist"]
-    int32_t min_chase = 0;       // +188: atof * 65536, chop [orig: "min_chase_dist"]
-    int32_t max_chase = 0;       // +184: atof * 65536, chop [orig: "max_chase_dist"]
-    WeaponBlock primary;         // +120..+151 (+148 weap byte)
-    WeaponBlock secondary;       // +152..+183 (+180 weap byte)
+	int32_t min_chase = 0; // +184: atof * 65536, chop [orig: "min_chase_dist"]
+	int32_t max_chase = 0; // +188: atof * 65536, chop [orig: "max_chase_dist"]
+	WeaponBlock primary; // +120..+151 (+148 weap byte)
+	WeaponBlock secondary;       // +152..+183 (+180 weap byte)
     // Raw authored speed values (the brain seed applies the x65536/225 scale,
     // matching the pre-extension ProfileSpeeds contract).
     int32_t patrol_speed = -1;   // +192 [orig: "patrol_speed"]
     int32_t combat_speed = -1;   // +196 [orig: "combat_speed"]
 
-    // --- the HELO (type 1) flight set [orig: the type-1 branch of
-    // AIProfile_ParseProperty @0x45f684..0x45f9eb — profile offsets +200..+236
-    // (+56 for use_waypoint_z)]. Unlike the GROUND speed pair above, these
-    // hold retail's PARSED values: a speed is km/h -> 16.16 units per tick
-    // (atof * 1000.0 * 4.444444444444444e-06 * 65536.0, i.e. x65536/225), a
-    // climb is atof * 0.016 * 65536.0, an altitude is atol << 16, min_agl is
-    // atof * 65536, and turn_rate/accel_time carry their integer formulas. No
-    // engine consumer reads them yet (the authority-side helicopter mover is
-    // unported) — they are parsed so the flight-drive port finds the def
-    // layer already faithful. ---
-    int32_t helo_patrol_speed = -1;    // +200 [orig: "patrol_speed" (HELO branch) km/h -> 16.16 u/tick]
-    int32_t helo_patrol_altitude = 0;  // +204 [orig: "patrol_altitude" atol << 16]
+	// --- the HELO (type 1) flight set [orig: the type-1 branch of
+	// AIProfile_ParseProperty @0x45f684..0x45f9eb — profile offsets +200..+236
+	// (+56 for use_waypoint_z)]. Unlike the GROUND speed pair above, these
+	// hold retail's PARSED values: a speed is km/h -> 16.16 units per tick
+	// (atof * 1000.0 * 4.444444444444444e-06 * 65536.0, i.e. x65536/225), a
+	// climb is atof * 0.016 * 65536.0, an altitude is atol << 16, min_agl is
+	// atof * 65536, and turn_rate/accel_time carry their integer formulas. No
+	// These parsed fields seed the aircraft navigation and combat brain.
+	int32_t helo_patrol_speed =
+			-1; // +200 [orig: "patrol_speed" (HELO branch) km/h -> 16.16 u/tick]
+	int32_t helo_patrol_altitude = 0;  // +204 [orig: "patrol_altitude" atol << 16]
     int32_t helo_patrol_climb = -1;    // +208 [orig: "patrol_climb" atof * 0.016 * 65536]
     int32_t helo_combat_speed = -1;    // +212 [orig: "combat_speed" (HELO branch) km/h -> 16.16 u/tick]
     int32_t helo_combat_altitude = 0;  // +216 [orig: "combat_altitude" atol << 16]
     int32_t helo_combat_climb = -1;    // +220 [orig: "combat_climb" atof * 0.016 * 65536]
     int32_t turn_rate_bam_tick = 0;    // +224 [orig: "turn_rate" = 11930464 * deg / 62]
     int32_t accel_ticks = 0;           // +228 [orig: "accel_time" = 62 * seconds]
-    int32_t use_waypoint_z = 0;        // +56  [orig: "use_waypoint_z" atol]
-    int32_t min_agl = 0;               // +232 [orig: "min_agl" atof -> 16.16]
+	uint32_t hunt_flags = 0; // +192, MAINTAIN_SPEED bit1 [orig: @0x45DE70]
+	int32_t use_waypoint_z = 0; // +56  [orig: "use_waypoint_z" atol]
+	int32_t min_agl = 0;               // +232 [orig: "min_agl" atof -> 16.16]
     int32_t min_speed = -1;            // +236 [orig: "min_speed" km/h -> 16.16 u/tick]
 };
 
-// Parse the witnessed keys from .aip text: line-oriented, whitespace
-// tokenized, keys compared case-insensitively. The property dispatch is
-// TYPE-GATED exactly like retail: a `type` line switches the active set,
-// GROUND (2) accepts the set above, ORGANIC (3) accepts nothing, and the
-// HELO (1) set is unported (its keys are ignored — a tracked gap, not a
-// design choice). [orig: AIProfile_ParseProperty @ 0x45de70]
+// Line-oriented, whitespace-tokenized, case-insensitive property parser.
 Profile parse_profile(const uint8_t *text, size_t size);
 
 }  // namespace opennova::aip

@@ -13,6 +13,12 @@
 
 namespace opennova::mission {
 
+// A Sway item owns a per-instance second-bone pose and cannot be baked into
+// the shared static mesh batch. [orig: BoneCallback_Sway_World @0x4E2B10]
+inline bool uses_sway_renderer(std::string_view tag) {
+	return tag.size() >= 4 && strutil::iequals(tag.substr(0, 4), "sway");
+}
+
 // items.def type ids consumed by placement (itemdef-re.md +0x5c).
 inline constexpr int kItemTypeVehicle = 1;
 inline constexpr int kItemTypePerson = 3;

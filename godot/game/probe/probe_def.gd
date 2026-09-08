@@ -408,6 +408,16 @@ static func _build_definitions() -> Array[ProbeDef]:
 				RUNTIME + "mission_audio_probe.gd", {
 					"missions": { "type": "array", "items": { "type": "string" }, "default": [] },
 				}, [], false, false, 300_000),
+		ProbeDef.make("vehicle_drive",
+				"Seat the local player in a vehicle, drive, steer and brake through the "
+				+ "presenter's movement seam; verify native displacement and capture the HUD. "
+				+ "Use ascend_ms for aircraft; leaves the player seated at the final position.",
+				RUNTIME + "vehicle_drive_probe.gd", {
+					"vehicle_ssn": { "type": "integer", "minimum": 1 },
+					"ascend_ms": { "type": "integer", "minimum": 0, "maximum": 15000, "default": 0 },
+					"forward_ms": { "type": "integer", "minimum": 1000, "maximum": 15000, "default": 6000 },
+					"turn_ms": { "type": "integer", "minimum": 1000, "maximum": 10000, "default": 3000 },
+				}, ["vehicle_ssn"], true, true, 120_000),
 		ProbeDef.make("fp_impact",
 				"The impact-position probe on the loaded mission: equip `weapon` when given, "
 				+ "walk forward, aim down, fire a burst through the real input path, then "

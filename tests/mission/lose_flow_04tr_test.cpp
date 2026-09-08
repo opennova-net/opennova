@@ -97,6 +97,14 @@ int main() {
 	};
 	int seconds = 0;
 	const auto tick = [&]() {
+		// This test owns the player-kill -> WAC outcome chain. Keep NPC
+		// movement and hitboxes live, but prevent another shooter from
+		// killing the selected victim (or player) before the player's round.
+		for (int i = 0; i < rig.world.ai.count(); ++i) {
+			w::AiEntity *npc = rig.world.ai.at(i);
+			if (npc != nullptr && npc->handle != rig.world.cached.local_player)
+				npc->profile.ammo_primary = -1;
+		}
 		rig.tick();
 		keep_effects();
 	};

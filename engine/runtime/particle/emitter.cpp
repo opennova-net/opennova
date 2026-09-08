@@ -216,7 +216,8 @@ void apply_emission_shape(Emitter &e, const ParticleDef &def, Particle &p) noexc
 	}
 }
 
-void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, float dt) noexcept {
+void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, float dt,
+		const ParticleForceField *forces, std::size_t index) noexcept {
 	// CParticleEmitter_UpdateParticles @ 0x5e6980. Two physics dispatches:
 	//   move & 1 (NORMAL):    pos += vel*dt; vel.y += gravity_slot*dt; vel -= drag*dt*vel
 	//   move & 2 (GRAVITATE): same translation, then a constant-magnitude
@@ -278,6 +279,19 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 	p.velocity.y -= p.velocity.y * drag_coef;
 	p.velocity.z -= p.velocity.z * drag_coef;
 
+	// Curve phase advances 0 -> 256 across the lifetime, unclamped — for
+	// NEVERAGE particles it keeps running and the renderer's `% 256` wraps the
+	// curves cyclically [orig: UpdateParticles @ 0x5e6980 — `+0x30 += +0x34 *
+	// dt`; BuildBillboardQuads @ 0x5e6d60 indexes `(int)phase % 256`]. The
+	// prior port misread this pair as a draw-size "spawn-pop ramp".
+	p.curve_phase += p.phase_rate * dt;
+
+	// The JO focal-wind branch runs after translation, drag and phase advance,
+	// before orbit/kill planes. Only velocity is copied back from fixed point.
+	// [orig: CParticleEmitter_UpdateAllParticles @0x5F3BE0]
+	if (forces && (def.flags & (particle_flag::FocalWind | particle_flag::FocalWindForceAging)))
+		forces->apply(p, index, (def.flags & particle_flag::FocalWindForceAging) != 0);
+
 	// ORBIT modifier (move & 4 — engine bit 2 per the 0x848800 reorder, see
 	// particle.h::move_flag). When set, after the ballistic / spring step, the
 	// engine rotates the relative position vector and velocity around
@@ -305,13 +319,6 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 		};
 		p.velocity = vec3_rotate_around_axis(p.velocity, axis, angle);
 	}
-
-	// Curve phase advances 0 -> 256 across the lifetime, unclamped — for
-	// NEVERAGE particles it keeps running and the renderer's `% 256` wraps the
-	// curves cyclically [orig: UpdateParticles @ 0x5e6980 — `+0x30 += +0x34 *
-	// dt`; BuildBillboardQuads @ 0x5e6d60 indexes `(int)phase % 256`]. The
-	// prior port misread this pair as a draw-size "spawn-pop ramp".
-	p.curve_phase += p.phase_rate * dt;
 
 	// Euler angles accumulate at their per-particle rates. Roll drives the
 	// billboard spin; yaw/pitch only render for YAWANDPITCH defs
@@ -423,6 +430,7 @@ bool emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	p.color_slot = static_cast<std::uint8_t>(pick_color_slot(e));
 	p.color = color_for_slot(def, p.graphic_layer, p.color_slot);
 	p.serial = e.next_serial++;
+	p.force_zone = e.force_zone;
 	apply_emission_shape(e, def, p);
 	// Velocity: EVERY shape gets direction-in-spread-cone around the emitter
 	// forward, scaled by `speed + speed_adj * rand_signed`
@@ -580,7 +588,7 @@ bool emitter_spawn_one(Emitter &e) {
 	return emit_one_internal(e, *e.def);
 }
 
-void emitter_advance(Emitter &e, float dt) {
+void emitter_advance(Emitter &e, float dt, const ParticleForceField *forces) {
 	if (!e.active || e.def == nullptr || !std::isfinite(dt) || dt <= 0.0f) {
 		return;
 	}
@@ -599,7 +607,7 @@ void emitter_advance(Emitter &e, float dt) {
 		if (e.emit_delay_remaining > 0.0f) {
 			// Still in the warm-up: integrate existing particles only.
 			for (Particle &p : e.particles) {
-				integrate_particle(p, def, e, dt);
+				integrate_particle(p, def, e, dt, forces, std::size_t(&p - e.particles.data()));
 			}
 			return;
 		}
@@ -705,7 +713,7 @@ void emitter_advance(Emitter &e, float dt) {
 
 	// Physics integration + aging.
 	for (Particle &p : e.particles) {
-		integrate_particle(p, def, e, dt);
+		integrate_particle(p, def, e, dt, forces, std::size_t(&p - e.particles.data()));
 	}
 
 	// Emitter is "done" when finite duration is exhausted AND no live particles

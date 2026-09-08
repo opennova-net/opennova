@@ -108,8 +108,8 @@ static void pose_emplacement_attachments(World &world) {
 
 // Precipitation_Reset precedes mission entities and consumes the shared B stream.
 // [orig: Game_StartMission @ 0x524360, seed @ 0x52460B / reset @ 0x5249D4]
-World::World() : commands(*this), vehicles(*this), zones(*this) {
-    weather.precipitation.reset(&io::rotating_prng_callback, &prng16_b_state);
+World::World() : commands(*this), vehicles(*this), rotor_wash(*this), zones(*this) {
+	weather.precipitation.reset(&io::rotating_prng_callback, &prng16_b_state);
 }
 
 uint16_t World::next_prng16() noexcept {
@@ -125,6 +125,10 @@ uint16_t World::next_prng16() noexcept {
 // [orig: PRNG_Next16_B @ 0x6130F0]
 uint16_t World::next_prng16_b() noexcept {
     return io::rotating_prng_next16(prng16_b_state);
+}
+
+uint16_t World::next_prng16_c() noexcept {
+	return io::rotating_prng_next16(prng16_c_state);
 }
 
 void World::add_system(ISystem *sys) {
@@ -177,9 +181,12 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
     if (phase != TickPhase::PreRound) {
         for (ISystem *s : systems_) {
-            // The AI system's own phases lap onto the SIM_AI_* rows inside its
-            // tick; every other registered system is an authored script.
-            const devtools::ProfileScope system_scope(
+			// After WAC, before entity updates. [orig: Server_TickUpdate @0x51D8D2]
+			if (s == &ai && is_authority && gameplay && (logic_tick & 31u) == 0)
+				vehicles.tick_spawn_markers();
+			// The AI system's own phases lap onto the SIM_AI_* rows inside its
+			// tick; every other registered system is an authored script.
+			const devtools::ProfileScope system_scope(
                     profile, s == &ai ? devtools::Slot::SIM_WORLD_AI
                                      : devtools::Slot::SIM_WORLD_SCRIPTS);
             s->tick(*this, ctx);
@@ -295,8 +302,10 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
             recount_group_live();
         }
     }
-    ++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
-    // Audio-less/headless hosts never drain presentation. Retire their bounded
+	if (gameplay)
+		rotor_wash.tick();
+	++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
+	// Audio-less/headless hosts never drain presentation. Retire their bounded
     // latest-intent rows on the same logic clock so old entity lifetimes cannot
     // occupy mailbox admission indefinitely.
     out.sound_emitters.prune(logic_tick);
@@ -381,8 +390,9 @@ World::Snapshot World::snapshot() const {
     s.preround_delay_seconds = preround_delay_seconds;
     s.prng16_state = prng16_state;
     s.prng16_b_state = prng16_b_state;
-    s.cease_fire = rules.cease_fire;
-    s.crt_rand_state = crt_rand.state;
+	s.prng16_c_state = prng16_c_state;
+	s.cease_fire = rules.cease_fire;
+	s.crt_rand_state = crt_rand.state;
     s.local_player = cached.local_player;
     return s;
 }
@@ -401,8 +411,11 @@ void World::restore(const Snapshot &s) {
     preround_delay_seconds = s.preround_delay_seconds;
     prng16_state = s.prng16_state;
     prng16_b_state = s.prng16_b_state;
-    rules.cease_fire = s.cease_fire;
-    minefields.remote_actors.clear();
+	prng16_c_state = s.prng16_c_state;
+	rotor_wash.clear();
+	registry.for_each([&](const Entity &e) { registry.get(e.handle)->veh.rotor_wash_handle = 0; });
+	rules.cease_fire = s.cease_fire;
+	minefields.remote_actors.clear();
     crt_rand.state = s.crt_rand_state;
     // Reset per-tick health/proximity counters, then restore only the stable
     // ownership identity captured with the registry. A post-snapshot player may
@@ -412,11 +425,13 @@ void World::restore(const Snapshot &s) {
     cached = CachedFrameState{};
     cached.local_player = s.local_player;
     out.effects.clear();
-    out.slot_sounds.clear();
-    out.sound_emitters.clear();
+	out.vehicle_effects.clear();
+	out.slot_sounds.clear();
+	out.sound_emitters.clear();
     out.fire_sounds.clear();
-    round_sim.reset();
-    explosions.reset();
+	out.source_fires.clear();
+	round_sim.reset();
+	explosions.reset();
     throwables.reset();
     death_pieces.reset();
     destruction_rng.reset();

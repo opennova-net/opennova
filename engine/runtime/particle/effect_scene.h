@@ -148,6 +148,7 @@ struct EffectSpawnRequest {
 	// this local pose with the owner's world pose.
 	EffectPose owner_relative_pose;
 	std::uint32_t initial_age_ticks = 0;
+	std::uint16_t force_zone = 0;
 	std::uint64_t source_tick = 0;
 	std::uint64_t source_order = 0;
 
@@ -194,6 +195,7 @@ struct EffectOwnerPoseUpdate {
 
 struct EffectAdvanceRequest {
 	float delta_seconds = 0.0f;
+	const ParticleForceField *forces = nullptr;
 };
 
 struct EffectBounds {

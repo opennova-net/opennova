@@ -278,13 +278,17 @@ void AiSystem::apply_engage_relations(World &world, const Entity &self, const En
 void AiSystem::ai_set_target(World &world, AiEntity &e, EntityHandle target) {
     AiBrain &b = e.brain;
     const int32_t old_packed = b.f[AiBrain::kTargetSlot];
-    if (old_packed != 0) {
-        const EntityHandle old{static_cast<uint16_t>(old_packed - 1)};
+	if (old_packed == (target.valid() ? int32_t(target.packed) + 1 : 0))
+		return;
+	if (old_packed != 0) {
+		const EntityHandle old{static_cast<uint16_t>(old_packed - 1)};
         if (Entity *oe = world.registry.get(old)) {
-            if (oe->ai_target_refcount > 0) --oe->ai_target_refcount; // dec, clamp >= 0
-        }
-    }
-    if (target.valid()) {
+			oe->ai_target_refcount = int16_t(uint16_t(oe->ai_target_refcount) - 1u);
+			if (oe->ai_target_refcount < 0)
+				oe->ai_target_refcount = 0;
+		}
+	}
+	if (target.valid()) {
         if (Entity *ne = world.registry.get(target)) {
             ++ne->ai_target_refcount;
             ne->ai_target = -1; // scripts read the victim side via relations; id mirror below
@@ -299,6 +303,30 @@ void AiSystem::ai_set_target(World &world, AiEntity &e, EntityHandle target) {
         e.slot.f[3] = 0;
         if (Entity *se = world.registry.get(e.handle)) se->ai_target = -1;
     }
+}
+
+// [orig: Entity_ClearAllReferences @0x465670]
+void AiSystem::clear_vehicle_target_references(World &world, AiEntity &vehicle) {
+	const int32_t packed = int32_t(vehicle.handle.packed) + 1;
+	for (int pool = 0; pool < 2; ++pool)
+		world.registry.for_each_in_pool(pool, [&](const Entity &entity) {
+			AiEntity *other = for_handle(entity.handle);
+			if (other == nullptr)
+				return;
+			if (other->inf.active) {
+				if (other->slot.f[3] == packed)
+					other->slot.f[3] = 0;
+				return;
+			}
+			// Both assembly sites pass the destroyed entity to SetAITarget,
+			// preserving this retail quirk rather than clearing the other brain.
+			if (other->brain.f[AiBrain::kTargetSlot] == packed)
+				ai_set_target(world, vehicle, EntityHandle{});
+			if (other->brain.f[AiBrain::kPriorityTarget] == packed)
+				other->brain.f[AiBrain::kPriorityTarget] = 0;
+			if (other->brain.f[AiBrain::kDamageInfo] == packed)
+				other->brain.f[AiBrain::kDamageInfo] = 0;
+		});
 }
 
 // The fire/aim/LOS origin (the header carries the witness): the launch
@@ -321,6 +349,8 @@ void AiSystem::weapon_fire_origin(const Entity &e, int32_t out[3]) {
 
 // The live-pose seam shared by both World& forms: the world's native muzzle
 // provider resolves against the current simulation pose first.
+// Weapon aim keeps the defer-LOS flag, rotated offset and full-frame angle extraction.
+// [orig: @0x456BD5, @0x456C59, @0x456CE5, @0x456CFA]
 static bool provider_muzzle_origin(World &world, EntityHandle h, int32_t out[3]) {
     return world.pose_provider != nullptr &&
            world.pose_provider->resolve_muzzle_pose(world, h, out);
@@ -513,6 +543,72 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
 // stay with the acquire-time gates (D-AI-1's ctx model); and the per-type turret
 // CTRL diagnostic globals (dword_83FE88/dword_83FEE0 pairs @0x456E33/0x456F9C)
 // are unported — their consumer is the D-3DI-2 bus.
+// The fire validator's full local-frame metrics, shared by the aircraft
+// movement visibility check and its weapon solver. [orig: sub_53AFC0 @0x53AFC0;
+// Entity_ValidateWeaponTarget @0x53A400; compute_relative_position_metrics @0x545710]
+bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &target,
+		const int32_t pose[6], int32_t aim_offset, bool skip_los, int32_t metrics[6]) {
+	if (target.handle == e.handle ||
+			(target.health <= 0 && int32_t(world.logic_tick - target.death_tick) > 16))
+		return false;
+	if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0 &&
+			world.match.outcome().ended)
+		return false;
+	int32_t aim[3];
+	weapon_aim_origin(world, target, aim);
+	if (aim_offset != 0) {
+		const int32_t zero[3] = {};
+		const CollisionMatrix yaw = collision_matrix_from_euler(e.heading, 0, 0, zero);
+		const int32_t offset[3] = { aim_offset, 0, 0 };
+		int32_t rotated[3];
+		yaw.rotate_point(offset, rotated);
+		for (int axis = 0; axis < 3; ++axis)
+			aim[axis] = io::bam_add(aim[axis], rotated[axis]);
+	}
+	CollisionMatrix frame = collision_matrix_from_euler(pose[3], pose[4], pose[5], pose), inverse;
+	frame.invert_into(inverse);
+	const int32_t delta[3] = { io::bam_sub(aim[0], pose[0]), io::bam_sub(aim[1], pose[1]),
+		io::bam_sub(aim[2], pose[2]) };
+	int32_t local[3];
+	inverse.rotate_point(delta, local);
+	const auto sq = [](int32_t x) {
+		const int64_t v = x >> 8;
+		return int32_t((v * v + 0x8000) >> 16);
+	};
+	const int32_t xy = io::bam_add(sq(local[0]), sq(local[1]));
+	const auto root = [](int32_t x) {
+		if (x < 0)
+			return int32_t(0); // x87 invalid conversion <<16 yields zero
+		return int32_t(uint32_t(int32_t(std::sqrt(double(x)))) << 16);
+	};
+	std::fill_n(metrics, 6, 0);
+	metrics[0] = root(xy);
+	metrics[2] = root(io::bam_add(xy, sq(local[2])));
+	metrics[3] = bearing_bam(local[1], local[0]);
+	metrics[4] = bearing_bam(local[2], metrics[0]);
+	const uint32_t yaw = uint32_t(metrics[3] < 0 ? io::bam_sub(0, metrics[3]) : metrics[3]);
+	const uint32_t pitch = uint32_t(metrics[4] < 0 ? io::bam_sub(0, metrics[4]) : metrics[4]);
+	const uint32_t arc = std::max(yaw, pitch) + ((5u * std::min(yaw, pitch)) >> 4);
+	const auto &p = e.profile;
+	// Context flags 111: heat and radar arms, with their separate FOV/range
+	// and signature caps. The cone-only range arm requires bit16, absent here.
+	const bool heat = arc <= uint32_t(p.view_fov_bam) && metrics[2] <= p.view_dist &&
+			metrics[2] < int32_t(uint32_t(target.heat_sig) << 16);
+	const bool radar = arc <= uint32_t(p.radar_fov_bam) && metrics[2] <= p.approach_cap &&
+			(target.radar_sig == 0 || metrics[2] < int32_t(uint32_t(target.radar_sig) << 16));
+	if (!heat && !radar)
+		return false;
+	if (skip_los)
+		return true;
+	int32_t start[3];
+	const Entity *self = world.registry.get(e.handle);
+	if (self == nullptr || self->look_userpoint_byte == 0 || world.pose_provider == nullptr ||
+			!world.pose_provider->resolve_userpoint_rigid(
+					world, e.handle, self->look_userpoint_byte, start))
+		weapon_aim_origin(world, e, start);
+	return line_of_sight_clear(world, start, aim, e.handle, target.handle);
+}
+
 bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Entity *target,
                                            const AiProfile::WeaponFire &wb, int32_t aim_offset,
                                            bool skip_los, int32_t out[6]) {
@@ -529,14 +625,44 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
     // the def yaw bias [orig: @0x456B1C out[3] += weaponDef+0x14].
     out[0] = e.pos[0];
     out[1] = e.pos[1];
-    out[2] = e.pos[2] + 0x20000;
-    out[3] = e.heading + wb.facing_bam;
-    out[4] = 0; // AiEntity carries no pitch/roll — retail seeds the live values
-    out[5] = 0;
+	out[2] = io::bam_add(e.pos[2], 0x20000);
+	out[3] = io::bam_add(e.heading, wb.facing_bam);
+	out[4] = e.pitch;
+	out[5] = e.roll;
+	const bool secondary = &wb == &e.profile.fire_b;
+	const int count_index = secondary ? AiBrain::kBoneCountB : AiBrain::kBoneCountA;
+	const int count = std::clamp(b.f[count_index], 0, 16);
+	int userpoint = 0;
+	if (count > 0) {
+		const int seed = b.f[secondary ? AiBrain::kAmmoB : AiBrain::kAmmoA];
+		uint32_t selection;
+		if (seed > 0)
+			selection = uint32_t(seed) % uint32_t(count);
+		else {
+			if (b.f[AiBrain::kBoneRoundRobin] == 0)
+				b.f[AiBrain::kBoneRoundRobin] = -1;
+			selection = uint32_t(b.f[AiBrain::kBoneRoundRobin]) % uint32_t(count);
+			b.f[AiBrain::kBoneRoundRobin] = io::bam_sub(b.f[AiBrain::kBoneRoundRobin], 1);
+		}
+		b.bytes()[AiBrain::kBoneFlagByte] = uint8_t(selection) | 0x80;
+		userpoint = b.f[count_index + 1 + selection];
+		if (world.pose_provider != nullptr) {
+			if ((flags & 1) == 0 ||
+					!world.pose_provider->resolve_userpoint_pivot(world, e.handle, userpoint, out))
+				world.pose_provider->resolve_userpoint_rigid(world, e.handle, userpoint, out);
+		}
+	}
+	const auto refine_muzzle = [&]() {
+		if (userpoint != 0 && world.pose_provider != nullptr) {
+			int32_t posed[6];
+			if (world.pose_provider->resolve_userpoint_transform(world, e.handle, userpoint, posed))
+				std::copy_n(posed, 3, out);
+		}
+	};
 
-    // The WEAPON_PITCHLOCKED legs fire at a fixed/commanded elevation with no
-    // target solve, no cone gate, and no slew [orig: @0x45705D].
-    if ((flags & 0x10u) != 0 || (flags & 0x8u) != 0) {
+	// The WEAPON_PITCHLOCKED legs fire at a fixed/commanded elevation with no
+	// target solve, no cone gate, and no slew [orig: @0x45705D].
+	if ((flags & 0x10u) != 0 || (flags & 0x8u) != 0) {
         if ((flags & 0x10u) != 0)
             out[4] += static_cast<int32_t>(0xE0000020u); // -45 deg-ish [orig: @0x457061]
         else
@@ -551,55 +677,36 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
             for (int i = 0; i < 6; ++i)
                 b.f[AiBrain::kActiveBlock + i] = b.f[AiBrain::kStagingBlock + i];
         }
-        return true;
-    }
+		if ((flags & 1) != 0)
+			refine_muzzle();
+		return true;
+	}
 
-    // The aim solve. Target aim point = the target's fire origin [orig:
-    // Entity_ValidateWeaponTarget @0x53a400 runs Entity_ComputeWeaponFireOrigin
-    // on the TARGET; our entities carry no muzzle bones, so the raw position
-    // stands in — the same D-AI-6 seam as the LOS endpoints], plus the caller's
-    // aim offset rotated by the shooter yaw [orig: Math_RotateOffsetByEulerFixedPoint (ex sub_6158F0) @0x456C59 —
-    // R_yaw(entity+0x10) * (distance, 0, 0) added to the target position and
-    // restored after the solve].
     if (target == nullptr) return false;
-    int32_t aim[3] = {static_cast<int32_t>(target->position.x * io::kFp16One),
-                      static_cast<int32_t>(target->position.y * io::kFp16One),
-                      static_cast<int32_t>(target->position.z * io::kFp16One)};
-    if (aim_offset != 0) {
-        const double theta = static_cast<double>(e.heading) / kBamPerRadian;
-        aim[0] += static_cast<int32_t>(std::cos(theta) * static_cast<double>(aim_offset));
-        aim[1] += static_cast<int32_t>(std::sin(theta) * static_cast<double>(aim_offset));
-    }
+	int32_t metrics[6];
+	if (!weapon_target_metrics(world, e, *target, out, aim_offset, skip_los, metrics))
+		return false;
+	const int32_t hdist = metrics[0], rel_yaw = metrics[3], rel_pitch = metrics[4];
 
-    // Relative yaw/pitch in the biased shooter frame + the witnessed integer
-    // horizontal-distance recipe [orig: compute_relative_position_metrics
-    // @0x545710 — sq(v) = ((v>>8)*(v>>8)+0x8000)>>16, hdist = sqrt<<16, pitch =
-    // atan2(z, hdist)*2^31/pi, yaw = atan2(y, x)*2^31/pi]. With the yaw-only
-    // frame the relative yaw is the world bearing minus the frame yaw.
-    const int32_t rx = aim[0] - out[0];
-    const int32_t ry = aim[1] - out[1];
-    const int32_t rz = aim[2] - out[2];
-    const int64_t sqx = ((static_cast<int64_t>(rx >> 8) * (rx >> 8)) + 0x8000) >> 16;
-    const int64_t sqy = ((static_cast<int64_t>(ry >> 8) * (ry >> 8)) + 0x8000) >> 16;
-    const int32_t hdist = static_cast<int32_t>(
-                                  std::sqrt(static_cast<double>(sqx + sqy)))
-                          << 16;
-    const int32_t rel_yaw = bearing_bam(ry, rx) - out[3];
-    const int32_t rel_pitch = static_cast<int32_t>(
-            std::atan2(static_cast<double>(rz), static_cast<double>(hdist)) * kBamPerRadian);
+	// Compose the solved relative yaw/pitch into the ORIGINAL vehicle frame,
+	// before the authored facing bias, then extract the full Euler pose.
+	const int32_t zero[3] = {};
+	const CollisionMatrix base = collision_matrix_from_euler(e.heading, e.pitch, e.roll, zero);
+	const CollisionMatrix relative = collision_matrix_from_euler(rel_yaw, rel_pitch, 0, zero);
+	CollisionMatrix composed;
+	for (int row = 0; row < 3; ++row)
+		for (int col = 0; col < 3; ++col) {
+			uint64_t dot = 0x200000;
+			for (int k = 0; k < 3; ++k)
+				dot += uint64_t(int64_t(base.m[row * 4 + k]) * relative.m[k * 4 + col]);
+			composed.m[row * 4 + col] = int32_t(dot >> 22);
+		}
+	collision_matrix_to_euler(composed, out + 3);
 
-    // LOS unless the caller defers it [orig: the ctx 0x8000 defer-LOS bit from
-    // arg 7 @0x456BD5; Entity_ValidateWeaponTarget's Physics_RaycastTerrainAndSectors
-    // leg @0x53a400 tail]. Endpoints are the solver's own out/aim pair exactly
-    // (the pre-2026-08-13 hidden +0.9 both-ends lift is gone with the
-    // exact-endpoint LOS; the SM source/target stand-ins stay D-AI-2's).
-    if (!skip_los && !line_of_sight_clear(world, out, aim, e.handle, target->handle))
-        return false;
-
-    // The cone gate: |relative angle| in 1/256-turn units vs the def cone with a
-    // floor of 1 [orig: @0x456D17..0x456D6B — HIBYTE fold, limit =
-    // (weaponDef+8 | 0x2000000) >> 25].
-    const int32_t limit = (wb.cone_bam | 0x2000000) >> 25;
+	// The cone gate: |relative angle| in 1/256-turn units vs the def cone with a
+	// floor of 1 [orig: @0x456D17..0x456D6B — HIBYTE fold, limit =
+	// (weaponDef+8 | 0x2000000) >> 25].
+	const int32_t limit = (wb.cone_bam | 0x2000000) >> 25;
     uint32_t yaw_mag = static_cast<uint32_t>(rel_yaw) >> 24;
     if (yaw_mag >= 0x80u) yaw_mag = 256u - yaw_mag;
     if (yaw_mag > static_cast<uint32_t>(limit)) return false;
@@ -607,26 +714,13 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
     if (pitch_mag >= 0x80u) pitch_mag = 256u - pitch_mag;
     if (pitch_mag > static_cast<uint32_t>(limit)) return false;
 
-    // Compose back to world angles [orig: Math_BuildFixedPointRotationMatrixYXZ
-    // multiplies R(relYaw, relPitch) INTO the entity frame matrix @0x456CE5,
-    // then Math_FixedPointMatrixToEulerAngles re-extracts @0x456CFA — for a
-    // yaw-only level frame that is heading + relYaw / relPitch exactly. The
-    // authored facing bias cancels out of the final yaw by that composition
-    // (frame built pre-bias, relative solved post-bias).]
-    out[3] = e.heading + rel_yaw;
-    out[4] = rel_pitch;
-    out[5] = 0;
-
     if ((flags & 0x1u) == 0) return true; // no turret tracking [orig: @0x456D71 -> ret 1]
 
     // WEAPON_TURRET staging [orig: @0x456D7B]: {hdist, ?, dist, yaw, pitch, ?},
     // staged yaw mirrored minus the def bias [orig: @0x456DB7 -1 - yaw - def+0x14].
-    const int64_t sqz = ((static_cast<int64_t>(rz >> 8) * (rz >> 8)) + 0x8000) >> 16;
-    const int32_t dist = static_cast<int32_t>(
-                                 std::sqrt(static_cast<double>(sqx + sqy + sqz)))
-                         << 16;
-    b.f[AiBrain::kStagingBlock + 0] = hdist;
-    b.f[AiBrain::kStagingBlock + 1] = 0;
+	const int32_t dist = metrics[2];
+	b.f[AiBrain::kStagingBlock + 0] = hdist;
+	b.f[AiBrain::kStagingBlock + 1] = 0;
     b.f[AiBrain::kStagingBlock + 2] = dist;
     b.f[AiBrain::kStagingBlock + 3] = -1 - rel_yaw - wb.facing_bam;
     b.f[AiBrain::kStagingBlock + 4] = rel_pitch;
@@ -639,8 +733,9 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
 
     if ((flags & 0x2u) == 0 && (flags & 0x4u) == 0) {
         snap_active(); // instant turret [orig: @0x456DDC]
-        return true;
-    }
+		refine_muzzle();
+		return true;
+	}
 
     // WEAPON_SLOW / WEAPON_FAST slew toward the staged yaw. Aligned when the
     // remaining delta is under one step's threshold; otherwise advance the
@@ -655,8 +750,9 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
             b.f[AiBrain::kStep] * (fast ? 0x318C631 : 0x18C6318);
     if (iabs32(delta) < threshold) {
         snap_active();
-        return true;
-    }
+		refine_muzzle();
+		return true;
+	}
     const int32_t slew = fast ? 0x4210842 : 0x2108421;
     b.f[AiBrain::kActiveYaw] = active + (delta > 0 ? slew : -slew);
     return false;
@@ -667,9 +763,9 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
 // has_controller branch guards the jitter by base-delay and uses the inline LCG; the
 // other branch always jitters via PRNG_Next16), pending = 17, then the targeted quad.
 // The rel_ops trace keeps the recorded shape the tests pin; the APPLY is D-AI-3.
-void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t) {
-    AiBrain &b = e.brain;
-    const int32_t self_rm = static_cast<int32_t>(static_cast<int16_t>(e.relmat_id)); // movsx entity+284
+void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t, bool aircraft) {
+	AiBrain &b = e.brain;
+	const int32_t self_rm = static_cast<int32_t>(static_cast<int16_t>(e.relmat_id)); // movsx entity+284
     const int32_t tgt_rm = static_cast<int32_t>(static_cast<int16_t>(t.relmat_id));  // movsx target+284
 
     // [orig: 0x4677b3..0x4677e2] the sees quad before the controller branch.
@@ -687,18 +783,19 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t) {
     ai_set_target(world, e, t.handle);
     b.f[AiBrain::kCombatTimer] = 0;        // [orig: ai_comp[40] = 0]
     b.f[AiBrain::kFireDelay] = e.profile.field104; // [orig: ai_comp[41] = *(profile+104)]
-    if (t.has_controller) {
-        // [orig: branch A — jitter only if base_delay != 0; inline LCG on dword_31BFBB8]
-        if (e.profile.field104 != 0)
+	// Both aircraft branches use the guarded A-stream jitter. [orig: @0x466460]
+	if (aircraft || t.has_controller) {
+		// [orig: branch A — jitter only if base_delay != 0; inline LCG on dword_31BFBB8]
+		if (e.profile.field104 != 0)
             b.f[AiBrain::kFireDelay] += static_cast<int32_t>(static_cast<uint16_t>(prng_step_a()) % 62);
-    } else {
-        // [orig: branch B — always jitter; PRNG_Next16 on dword_31BFBB0]
-        b.f[AiBrain::kFireDelay] += static_cast<int32_t>(world.next_prng16() % 62);
-    }
-    b.set_pend(kAiGroundCombat); // [orig: ai_comp[5] = 17]
+	} else {
+		// [orig: branch B — always jitter; PRNG_Next16 on dword_31BFBB0]
+		b.f[AiBrain::kFireDelay] += static_cast<int32_t>(world.next_prng16() % 62);
+	}
+	b.set_pend(aircraft ? kAiHeloCombat : kAiGroundCombat); // [orig: @0x466460 / @0x467730]
 
-    // [orig: 0x467883..0x4678b2] the targeted quad after pending = 17.
-    rel_ops.push_back({kRelAllied, self_rm, tgt_rm});
+	// [orig: 0x467883..0x4678b2] the targeted quad after pending = 17.
+	rel_ops.push_back({kRelAllied, self_rm, tgt_rm});
     rel_ops.push_back({kRel452B30, e.net_id, tgt_rm});
     rel_ops.push_back({kRelDamaged, self_rm, t.net_id});
     rel_ops.push_back({kRelSpotted, e.net_id, t.net_id});

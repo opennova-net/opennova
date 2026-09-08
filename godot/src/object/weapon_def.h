@@ -83,6 +83,8 @@ public:
 	WEAPON_ACTION_TEXT(particle)
 	WEAPON_ACTION_TEXT(particleuserpoint)
 #undef WEAPON_ACTION_TEXT
+	int get_action_value() const { return value_.action_value; }
+	void set_action_value(int p_value) { value_.action_value = p_value; }
 	int get_delaystart() const { return value_.delaystart; }
 	void set_delaystart(int p_value) { value_.delaystart = p_value; }
 	int get_delayend() const { return value_.delayend; }

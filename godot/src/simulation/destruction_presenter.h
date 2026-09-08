@@ -115,9 +115,9 @@ public:
 	// batched-static wreck resolving the authoritative present pose while it
 	// settles (the event pose as its identity fallback), and a piece riding
 	// the last presented slot position.
-	Variant resolve_wreck_node_anchor(int64_t p_node_id);
+	Variant resolve_wreck_node_anchor(int64_t p_node_id, const Vector3 &p_local);
 	Variant resolve_wreck_pinned_anchor(bool p_dynamic_identity, int p_bms_id,
-			int64_t p_spawn_origin, const Transform3D &p_fixed);
+			int64_t p_spawn_origin, const Transform3D &p_fixed, const Vector3 &p_local);
 	Variant resolve_piece_anchor(int p_slot);
 
 protected:
@@ -157,6 +157,7 @@ private:
 	EffectWorld *fx() const;
 	EffectLightDirector *lights() const;
 	Node3D *resolve_entity_node(int p_bms_id, int64_t p_spawn_origin, int p_wire_handle) const;
+	void restore_intact(const String &p_key);
 	void apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk);
 	static bool node_has_static_shadow_caster(Node *p_root);
 	static void set_husk_static_shadow(ObjectModel *p_model, bool p_enabled);
@@ -181,6 +182,7 @@ private:
 	ObjectID lights_id_;               // the death-flash light route (or null)
 	HashMap<String, ObjectID> husked_;          // canonical mission identity -> husk node (invalid = null)
 	HashMap<String, HuskRestore> husk_restore_; // canonical mission identity -> original state
+	HashMap<String, int64_t> attached_groups_;
 	HashMap<String, WreckFire> burning_;        // canonical wreck owner key -> WreckFire
 	HashSet<String> wreck_anchor_keys_;         // registered wreck owner keys
 	HashMap<int, Vector3> piece_pos_;           // piece slot -> Vector3 (anchor resolver source)

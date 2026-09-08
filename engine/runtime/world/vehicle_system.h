@@ -40,31 +40,41 @@ public:
     // the AI event queue: the authority motors, then a joiner's prediction and
     // sound legs. Marks the SIM_AI_*VEHICLE* profile rows on the caller's lap.
     void tick_motors(bool is_authority, devtools::ProfileLap &lap);
+	void initialize_mission_vehicles();
+	void build_spawn_markers();
+	void tick_spawn_markers();
+	void capture_spawn_pose(Entity &vehicle);
+	bool resolve_spawn_pose(const Entity &vehicle, int32_t pose[6]) const;
+	void respawn(Entity &vehicle);
+	void tick_dead(Entity &vehicle, AiEntity &brain);
+	void release_flares(Entity &vehicle);
+	void tick_flare_input(Entity &vehicle);
+	void cleanup_destroyed_ref_group(Entity &vehicle);
 
-    // Validate + apply one C2S 0x26 attach request: `player` mounts `vehicle` at model-bone
-    // `bone` (1-based, the wire byte — the occupancy/echo key). Returns true iff attached.
-    // Ported validation order [orig: Entity_ProcessVehicleAttach @0x435AA0]:
-    //   1. resolve both handles; reject a missing entity or either side dead
-    //      (Flags & 2 / health <= 0) [orig: @0x435b01];
-    //   2. seat classification: the vehicle seat whose bone_index matches the wire bone
-    //      [orig: Entity_GetBoneSlotType @0x434ED0 classifies the MODEL USRP row name —
-    //      48-byte rows, name +32, 1-based index; sitex 1 / ctrlx 2 / drvrx 5 / UseGun 3].
-    //      Production seat specs preserve that exact enumeration; unknown rows reject;
-    //   3. enemy-occupant gate: reject when a LIVE ENEMY already occupies the vehicle
-    //      [orig: Vehicle_HasEnemyOccupant @0x4359F0 — scans pool 0, skips dead/self/
-    //      same-team; same-team occupants never block multi-seat co-boarding];
-    //      (the weapon-busy gate on EquippedSlot->currentAction [orig: @0x435b29] is
-    //      unmodeled — no weapon action state server-side; tracked in D-NET-157)
-    //   4. seat occupancy: an occupied matching seat / an already-taken wire bone rejects
-    //      [orig: @0x435ba9 mountHandles[idx] != 0xFFFF];
-    //   5. an already-mounted requester detaches first [orig: @0x435bce];
-    //   6. writes: seat occupant + mount_target/mount_bone/mount_type/mount_seat, then
-    //      stance bits clear [orig: MoveOrder &= ~0x300 @0x435c42 + input latches
-    //      @0x435c54]. Generic vehicle slots clear 0xA000 and set Flags 0x40
-    //      [orig: Entity_AttachToVehicleSlot @0x494752]; UseGun clears 0xA000 without
-    //      setting 0x40 and binds the parent weapon slot
-    //      [orig: Entity_AttachToUseGunSlot @0x546c42-0x546c7c].
-    bool process_attach(EntityHandle player, EntityHandle vehicle, uint8_t bone);
+	// Validate + apply one C2S 0x26 attach request: `player` mounts `vehicle` at model-bone
+	// `bone` (1-based, the wire byte — the occupancy/echo key). Returns true iff attached.
+	// Ported validation order [orig: Entity_ProcessVehicleAttach @0x435AA0]:
+	//   1. resolve both handles; reject a missing entity or either side dead
+	//      (Flags & 2 / health <= 0) [orig: @0x435b01];
+	//   2. seat classification: the vehicle seat whose bone_index matches the wire bone
+	//      [orig: Entity_GetBoneSlotType @0x434ED0 classifies the MODEL USRP row name —
+	//      48-byte rows, name +32, 1-based index; sitex 1 / ctrlx 2 / drvrx 5 / UseGun 3].
+	//      Production seat specs preserve that exact enumeration; unknown rows reject;
+	//   3. enemy-occupant gate: reject when a LIVE ENEMY already occupies the vehicle
+	//      [orig: Vehicle_HasEnemyOccupant @0x4359F0 — scans pool 0, skips dead/self/
+	//      same-team; same-team occupants never block multi-seat co-boarding];
+	//      (the weapon-busy gate on EquippedSlot->currentAction [orig: @0x435b29] is
+	//      unmodeled — no weapon action state server-side; tracked in D-NET-157)
+	//   4. seat occupancy: an occupied matching seat / an already-taken wire bone rejects
+	//      [orig: @0x435ba9 mountHandles[idx] != 0xFFFF];
+	//   5. an already-mounted requester detaches first [orig: @0x435bce];
+	//   6. writes: seat occupant + mount_target/mount_bone/mount_type/mount_seat, then
+	//      stance bits clear [orig: MoveOrder &= ~0x300 @0x435c42 + input latches
+	//      @0x435c54]. Generic vehicle slots clear 0xA000 and set Flags 0x40
+	//      [orig: Entity_AttachToVehicleSlot @0x494752]; UseGun clears 0xA000 without
+	//      setting 0x40 and binds the parent weapon slot
+	//      [orig: Entity_AttachToUseGunSlot @0x546c42-0x546c7c].
+	bool process_attach(EntityHandle player, EntityHandle vehicle, uint8_t bone);
     // Apply an authority-confirmed relation on a client. Replaces the previous
     // seat occupant and repairs a lost Controller/Driver/Gunner claim even when
     // the carrier and bone are unchanged; bone 0 / no carrier detaches.
@@ -195,24 +205,12 @@ public:
     // [orig: Entity_UpdateVehiclePhysics @0x48af00 — the authority drive core;
     // block-level cites inline]
     void tick_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd = nullptr);
-    // The JOINER-side watercraft mover (net-re §5.38e, D-NET-196): the client-executed
-    // subset of the cbot family function — per-record chase plus local-driver input
-    // or remote register mirroring, steer/thrust/drag/keel prediction, contact drags,
-    // and X/Y/yaw integration [orig: Entity_UpdateWatercraftPhysics @0x48D480].
-    // The local driver reconciles longitudinal command with the received register
-    // while retaining local steer. Z, pitch/roll, and the
-    // afloat/airborne latches come from the platform solve below. Consumes the staged
-    // VehicleMotorState net_* cluster; the sim runs it once per world tick on a
-    // non-authority world for staged pool-1 Watercraft entities.
-    // The boat platform solve — buoyancy, hull attitude, and the airborne/afloat
-    // flags, run every tick after integration exactly where the retail caller sits
-    // [orig: Entity_ProcessPlatformPhysics @0x481870, called @0x48ECE7; client
-    // subset — the authority damage/latch legs, entity-entity collision, the
-    // planing lean machine @0x45AEA0, and the wreck-tumble path are cited
-    // deferrals]. Writes veh.veh.air_pitch_bam/air_roll_bam (the shared attitude
-    // fields the sim mirrors to the presented row) and position Z.
-    void watercraft_platform_solve(Entity &veh, const VehicleTraits &traits);
-    void watercraft_client_tick(Entity &veh, const VehicleTraits &traits);
+	// Watercraft prediction runs the received-register chase, local-driver reconciliation and the
+	// full motor/platform solve. The shared state includes speed, steer, heave, pitch, roll,
+	// planing, water/air flags and wreck latches; authority-only damage remains gated.
+	// Witness sites: [orig: @0x48D480, @0x481870, @0x48ECE7, @0x45AEA0]
+	void watercraft_platform_solve(Entity &veh, const VehicleTraits &traits);
+	void watercraft_client_tick(Entity &veh, const VehicleTraits &traits);
     // One AUTHORITY tick of the watercraft motor (the host-side cbot mover): the
     // occupant/AI/parked input staging behind the witnessed gate, capsize damage,
     // then the same steer/thrust/drag/contact/integration core the client subset
@@ -224,13 +222,11 @@ public:
     // remote registers driving tick_vehicle_motor's core with the input block bypassed;
     // the Bike family selects its witnessed gravity/contact/yaw deltas in that core.
     void ground_client_tick(Entity &veh, const VehicleTraits &traits);
-    // The AIR-family prediction leg (CHel + cpln — one mover, the plane callback is
-    // a thunk): the client subset of Entity_UpdateAircraftPhysics @0x490310 —
-    // three-register mirror, tilt-command attitude model, altitude-hold servo on the
-    // record-seeded target Z (no gravity constant), airborne aero / grounded sheds,
-    // and the terrain-clamp stand-in for the unported 0x47EF10 contact solve.
-    void aircraft_client_tick(Entity &veh, const VehicleTraits &traits);
-    // 1. The tracked / tank crash tests [orig: tracked @0x47d745..0x47d7a8 +
+	// Aircraft prediction shares the CHel/cpln motor, input/remote register staging, attitude and
+	// altitude servo, aero response and full aircraft contact solve.
+	// Witness sites: [orig: @0x490310]
+	void aircraft_client_tick(Entity &veh, const VehicleTraits &traits);
+	// 1. The tracked / tank crash tests [orig: tracked @0x47d745..0x47d7a8 +
     //  the client window @0x47e793..0x47e7ee; tank @0x477760..0x4777bf +
     //  @0x478b6c..0x478bd6]: (a) |up.z| under the flip bound (the ABSOLUTE
     //  value: `cdq; xor; sub` @0x47d722..0x47d726 / @0x477748..0x477753 — an
@@ -254,47 +250,68 @@ public:
     // 3b. The AIRBORNE spring loop [orig: @0x47E283..0x47E344], gated on
     //  settle_2f0 == 0: energy > 0 → compress by the full 4095 step, else amp != 0
     //  → free decay; then the catch-up under !crashed && !crash_request.
-    void suspension_airborne_loop(Entity &veh, const VehicleTraits &traits, int wheels, int32_t growth, int32_t corner_adj[4]);
-    // 4. Arming — the seed all three families share [orig:
+	void suspension_tank_loop(Entity &veh, const VehicleTraits &traits, bool on_ground,
+			int32_t depth[4], const bool contact[4], int32_t corner_adj[4]);
+	void suspension_airborne_loop(Entity &veh, const VehicleTraits &traits, int wheels,
+			int32_t growth, int32_t corner_adj[4]);
+	// 4. Arming — the seed all three families share [orig:
     //  Entity_ProcessWheeledVehicleSuspension @0x46b1a6..0x46b213; the tank twin
     //  @0x469933..0x46999e; the bike twin @0x468b00..0x468b3b which also EJECTS
     //  every occupant]. Returns true when the latch set this tick.
-    bool suspension_arm(Entity &veh, bool eject_occupants);
-    // Refresh the active idle/forward/reverse emitter lanes from the vehicle's final
-    // motor state for this physics tick. PlayerControl vehicles key engine-running
-    // state on primary_occupant, identically for NPC and player claimants. A hull
-    // collision clears both motion lanes and forces a full idle refresh; wreck/all-zero
-    // clears motion without refreshing idle.
-    void update_ground_sound(Entity &vehicle, const VehicleTraits &traits, bool wrecked, bool collided);
+	bool suspension_arm(Entity &veh, bool eject_occupants, const int32_t corners[4][3] = nullptr,
+			const bool *contacts = nullptr);
+	// Refresh the active idle/forward/reverse emitter lanes from the vehicle's final
+	// motor state for this physics tick. PlayerControl vehicles key engine-running
+	// state on primary_occupant, identically for NPC and player claimants. A hull
+	// collision clears both motion lanes and forces a full idle refresh; wreck/all-zero
+	// clears motion without refreshing idle.
+	void update_ground_sound(Entity &vehicle, const VehicleTraits &traits, bool wrecked, bool collided);
     // Claimant-only detach/stale-claim leg: clear the motion lanes and fire the
     // authored engine-stop one-shot when strictly above the mission water plane. The
     // idle lane is not refreshed and expires from its 30-tick keep-alive, matching
     // the original zero-argument movement-sound call.
-    void stop_ground_sound(Entity &vehicle, int32_t water_clearance_q16 = 0);
-    void update_engine_sound(Entity &vehicle, const VehicleTraits &traits);
-    void play_rotor_start_sound(Entity &vehicle, const VehicleTraits &traits);
-    // ---------------------------------------------------------------------------
-    // Ground calls at the tail; aircraft calls at the head before its lift gate.
-    // The called rotor machine must match the brain's profile type (a brainless row — a lib embedder's
-    // loose vehicle, a unit rig — has no profile, and its family stands in: the
-    // Helicopter/Plane movers are where retail calls the HELO twin from), runs it
-    // (seeding the rate from the shared PRNG when a non-player-control item needs
-    // a roll — the seed path is the ONLY PRNG consumer here, and it draws exactly
-    // once per unoccupied tick for such an item). Ground advances wheel phase
-    // from speed; aircraft has no wheel-phase write. A WATERCRAFT runs no rotor machine at
-    // all — its mover Entity_UpdateWatercraftPhysics @0x48D480 calls neither
-    // @0x4928B0 nor @0x48FA70 — only the wheel phase.
-    // `occupied` is the engine-running latch, Entity::primary_occupant (the +0x170
-    // occupantEntity read @0x4928E8); `player_control` is the item's attrib 0x40.
-    void part_anim_tick(Entity &veh, const VehicleTraits &traits);
-    // Shared mover-head health cadence [orig: cveh @0x48AFFD, cbik @0x4840DD,
-    // ctan @0x488BAD, cbot @0x48D561, CHel/cpln @0x4903F4].
-    void tick_health(Entity &veh, const VehicleTraits &traits);
-    void slew_turret(Entity &veh, int32_t step);
+	void stop_ground_sound(Entity &vehicle, int32_t water_clearance_q16 = 0);
+	void update_traction_sound(Entity &vehicle, const VehicleTraits &traits);
+	void update_engine_sound(Entity &vehicle, const VehicleTraits &traits);
+	void play_contact_sound(Entity &vehicle, const VehicleTraits &traits, int slot);
+	void update_rotor_sound(Entity &vehicle, const VehicleTraits &traits);
+	void play_rotor_start_sound(Entity &vehicle, const VehicleTraits &traits);
+	// ---------------------------------------------------------------------------
+	// Ground calls at the tail; aircraft calls at the head before its lift gate.
+	// The called rotor machine must match the brain's profile type (a brainless row — a lib
+	// embedder's loose vehicle, a unit rig — has no profile, and its family stands in: the
+	// Helicopter/Plane movers are where retail calls the HELO twin from), runs it
+	// (seeding the rate from the shared PRNG when a non-player-control item needs
+	// a roll — the seed path is the ONLY PRNG consumer here, and it draws exactly
+	// once per unoccupied tick for such an item). Ground advances wheel phase
+	// from speed; aircraft has no wheel-phase write. A WATERCRAFT runs no rotor machine at
+	// all — its mover Entity_UpdateWatercraftPhysics @0x48D480 calls neither
+	// @0x4928B0 nor @0x48FA70 — only the wheel phase.
+	// `occupied` is the engine-running latch, Entity::primary_occupant (the +0x170
+	// occupantEntity read @0x4928E8); `player_control` is the item's attrib 0x40.
+	void part_anim_tick(Entity &veh, const VehicleTraits &traits);
+	// Shared mover-head health cadence [orig: cveh @0x48AFFD, cbik @0x4840DD,
+	// ctan @0x488BAD, cbot @0x48D561, CHel/cpln @0x4903F4].
+	void tick_health(Entity &veh, const VehicleTraits &traits);
+	void tick_simple_motor(
+			Entity &, const VehicleTraits &, const VehicleDriveCmd *, bool prediction);
+	void slew_turret(Entity &veh, int32_t step);
+	// ActionDef+52 rocks the tank carrying an occupied emplacement.
+	// [orig: WeaponAction_Fire @0x542B10; ActionSlot_ExecuteAction @0x4020A0]
+	void weapon_recoil(const Entity &shooter, int32_t amplitude, int32_t yaw, int32_t pitch);
+	void projectile_impact(
+			Entity &target, int32_t weight, const int32_t normal[3], const int32_t hit[3]);
 
 private:
     World &world_;
-    std::vector<EntityHandle> pass_handles_; // per-tick scratch for the motor pass (reused, no realloc)
+	struct SpawnMarker {
+		EntityHandle marker, zone;
+	};
+	std::vector<SpawnMarker> spawn_markers_;
+	std::vector<EntityHandle> spawn_groups_[5];
+	bool spawn_markers_enabled_ = false;
+	std::vector<EntityHandle>
+			pass_handles_; // per-tick scratch for the motor pass (reused, no realloc)
 };
 
 } // namespace opennova::world

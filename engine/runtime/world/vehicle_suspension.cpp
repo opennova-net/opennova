@@ -1,3 +1,4 @@
+#include "vehicle_motor_detail.h"
 #include <runtime/world/vehicle_system.h>
 // The ground-vehicle suspension spring leg: crash tests, sink growth, the
 // spring-energy loop, the crash latch and the tick tail.
@@ -20,6 +21,7 @@
 #include <cmath>
 #include <cstdlib>
 
+// Bike crash seeding clears the has-been-driven latch. [orig: @0x468BB1]
 namespace opennova::world {
 
 namespace {
@@ -87,6 +89,8 @@ void vehicle_suspension_respawn(Entity::VehicleMotorState &m) {
 	// [orig: Entity_RespawnVehicle @0x45FF40 — +0x2F0 @0x45ffeb, +0x2EC
 	//  @0x45fff1, +0x2EE @0x45fff7, +0x2F2 @0x45fffd, +0x2FC @0x46000c, +0x2F8
 	//  @0x460012, +0x2ED @0x460018, +0x2F1 = 1 @0x46001e]
+	m.trails = {};
+	m.movement_effects_disabled = false; // +0x44C reset @0x460003
 	m.settle_2f0 = 0;
 	m.crashed = 0;
 	m.landing_2ee = 0;
@@ -258,8 +262,65 @@ void VehicleSystem::suspension_airborne_loop(Entity &veh, const VehicleTraits &t
 	}
 }
 
-bool VehicleSystem::suspension_arm(Entity &veh, bool eject_occupants) {
-    World &world = world_;
+// The tank has a 1023-step linear spring and the slow oscillator. Its
+// landing impulse comes from the oscillator's +0x10 channel, not the wheel
+// sink, and it has no ground-family quadratic settling term.
+// [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0, step @0x47690A,
+// airborne @0x4787EC..0x47888D, grounded @0x478D34..0x478F57]
+void VehicleSystem::suspension_tank_loop(Entity &veh, const VehicleTraits &traits, bool on_ground,
+		int32_t depth[4], const bool contact[4], int32_t corner_adj[4]) {
+	auto &m = veh.veh;
+	constexpr int32_t step_cap = 65535 >> 6;
+	const int32_t travel = conform_travel_from_def(traits.spring_comp);
+	int32_t loose_shock = 0;
+	int32_t &shock = shock_field(world_, veh, traits, loose_shock);
+	for (int k = 0; k < 4; ++k) {
+		if (on_ground && traits.spring == 0)
+			continue;
+		if (on_ground && !contact[k] && m.crash_request == 0 && m.crashed == 0)
+			catch_up(m, k, 250, true, contact, corner_adj);
+		ConformOscillator osc = load_osc(m.wheel_osc[k]);
+		int32_t delta = 0;
+		if (on_ground) {
+			depth[k] = std::max(0, depth[k]);
+			if (m.wheel_osc[k].impulse > 0 && depth[k] != 0) {
+				osc.energy = io::bam_add(osc.energy, wrap_mul(traits.mass, m.wheel_osc[k].impulse));
+				if (osc.energy > 65536)
+					osc.energy = 65536;
+				m.wheel_osc[k].impulse = 0;
+				m.spring_energy = io::bam_add(m.spring_energy, int32_t(double(osc.energy) * 1.25));
+			}
+		}
+		if (osc.energy > 0) {
+			int32_t step = step_cap;
+			if (on_ground) {
+				step = osc.energy / wrap_mul(2, traits.spring);
+				if (step < 0) {
+					step = step_cap;
+					osc.energy = 0x1000000;
+				} else if (step == 0)
+					osc.energy = 0;
+				step = std::min(step, step_cap);
+			}
+			delta = conform_spring_compress_linear(
+					osc, m.wheel_comp[k], m.spring_energy, step, travel, traits.spring);
+		} else if (on_ground && osc.amplitude != 0 && m.plat_acc[0] < 2000 &&
+				m.plat_acc[1] < 2000 && m.plat_acc[2] < 2000 && m.plat_acc[3] < 2000) {
+			// [orig: Suspension_OscillateWheel @0x45D240, flt_7C6A14]
+			delta = conform_spring_oscillate(osc, m.wheel_comp[k], m.spring_energy, shock,
+					traits.spring, m.slide_z, 0.08722222596406937f);
+		}
+		if (on_ground)
+			depth[k] = io::bam_sub(depth[k], delta);
+		store_osc(m.wheel_osc[k], osc);
+		if (!on_ground && m.crash_request == 0 && m.crashed == 0)
+			catch_up(m, k, 250, false, contact, corner_adj);
+	}
+}
+
+bool VehicleSystem::suspension_arm(
+		Entity &veh, bool eject_occupants, const int32_t corners[4][3], const bool *contacts) {
+	World &world = world_;
 	Entity::VehicleMotorState &m = veh.veh;
 	// The gate: a crash request pending and not yet crashed
 	// [orig: `cmp [+2EDh],0; jz` @0x46b1a6 then `cmp [+2ECh],0; jnz` @0x46b1b9].
@@ -276,8 +337,21 @@ bool VehicleSystem::suspension_arm(Entity &veh, bool eject_occupants) {
 	}
 	m.crashed = 1;     // [orig: @0x46b1f9]
 	m.landing_2ee = 0; // [orig: @0x46b20d]
-	// Entity_ClearSuspensionState @0x46b213: the chassis matrix / quaternion
-	// reset — nothing of ours corresponds (the header's residual list).
+	if (!eject_occupants)
+		detail::vehicle_clear_chassis(m); // [orig: @0x46B213]
+	if (corners != nullptr) {
+		const bool airborne = (veh.flags & kEntityFlagInAir) != 0;
+		for (int k = 0; k < 4; ++k) {
+			if (airborne || (contacts != nullptr && !contacts[k])) {
+				auto &force = m.chassis_forces[k];
+				force.direction[0] = force.direction[1] = 0;
+				force.direction[2] = -65536;
+				force.rate = airborne ? m.plat_acc[k]
+									  : int32_t(double(m.plat_acc[k]) * m.susp_rate_pick);
+			}
+		}
+		detail::vehicle_clear_chassis_forces(veh, corners, 0); // [orig: @0x46B314]
+	}
 	if (eject_occupants) {
 		// The bike twin ejects every rider at its latch
 		// [orig: Entity_EjectAllOccupants @0x468b3b].
@@ -286,7 +360,6 @@ bool VehicleSystem::suspension_arm(Entity &veh, bool eject_occupants) {
 			const EntityHandle occ = s.occupant;
 			(void)world.vehicles.detach(occ);
 		}
-		m.has_been_driven = 0; // [orig: the bike seed's +0x3DE clear @0x468bb1]
 	}
 	return true;
 }

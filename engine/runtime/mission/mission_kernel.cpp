@@ -52,6 +52,7 @@ int32_t bam_from_radians(double radians) {
 } // namespace
 
 MissionKernel::MissionKernel() : local(world) {
+	occlusion.bind_focal_wind_random(&world.prng16_c_state);
 	// The kernel pumps the local player's slot itself (run_local_player_post_tick
 	// with the live trigger/reload/scope inputs), so the world's global local.weapon
 	// pump must skip L's borrowed UseGun parent slot or one slot advances twice
@@ -143,8 +144,13 @@ void MissionKernel::set_asset_index(const ResourceIndex *asset_index_ptr) {
 }
 
 void MissionKernel::resolve_item_traits(simassets::ItemWireClassFn wire_class) {
+	// Rebuild on an explicit definition sweep, including in-place edits.
+	// Rebinding the retained source for animation/collision is not a sweep.
+	world.vehicles.traits.clear();
 	item_wire_class_ = std::move(wire_class);
 	resweep_item_traits();
+	// Restore model-derived probes/trail anchors from the retained model cache.
+	refresh_collision_instances();
 }
 
 void MissionKernel::resweep_item_traits() {
@@ -600,10 +606,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		// collision resolver @0x4b2bd0 + the query set; §15] over the sim's
 		// own .3di source (ADR 0028).
 		step("collision");
-		wire_collision();
-		const simassets::CollisionResolveDeps deps{collision, occlusion, collision_pose, models};
-		collision_attached = simassets::resolve_collision_instances(world,
-				*items_table(), collision_state, deps);
+		collision_attached = resolve_collision_instances();
 		// Mission-start portal init over the occlusion models just attached.
 		step("occlusion");
 		occlusion_init_mission();
@@ -631,6 +634,10 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		error = wac_blocked_error;
 		return false;
 	}
+	// Retail grounds parked PlayerControl hulls, runs their first callback,
+	// then captures the support-relative respawn pose. [orig: @0x525F80..0x526071]
+	world.vehicles.initialize_mission_vehicles();
+	world.vehicles.build_spawn_markers();
 	// WacScript_InitAndLoad executes the freshly loaded bytecode once before
 	// the world ticks.
 	if (wac_loaded) wac.execute_initial(world);

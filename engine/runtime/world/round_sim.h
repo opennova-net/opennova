@@ -64,6 +64,8 @@ struct TerrainHeightField;
 
 namespace opennova::world {
 
+struct FixedVec3;
+
 class CollisionWorld;
 
 class World;
@@ -485,10 +487,14 @@ public:
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
     void present_fire(World &world, const RoundSpawnParams &params);
-    int spawn(World &world, const RoundSpawnParams &params,
-              RoundConsequenceMode mode = RoundConsequenceMode::Authoritative);
+	// Ammo-indexed source fire, including launch presentation and role routing.
+	// [orig: Weapon_FireProcess @0x53F5B0]
+	void fire_source(World &world, Entity &source, FixedVec3 position, int32_t yaw, int32_t pitch,
+			uint8_t ammo_index);
+	int spawn(World &world, const RoundSpawnParams &params,
+			RoundConsequenceMode mode = RoundConsequenceMode::Authoritative);
 
-    // The pellet fan for claymore-flag ammo [orig: Weapon_SpawnProjectileBurst
+	// The pellet fan for claymore-flag ammo [orig: Weapon_SpawnProjectileBurst
     // @ 0x4EB900]. Returns the first pellet slot or -1.
     int spawn_burst(World &world, const RoundSpawnParams &params,
                     const AmmoTableEntry &ammo, RoundConsequenceMode mode,

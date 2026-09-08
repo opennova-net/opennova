@@ -422,11 +422,37 @@ static int test_retail_particlefx_rows(void) {
     return rc;
 }
 
+static int test_vehicle_spawn_lists() {
+	std::string source = "begin First\n id 1\n pcvehicle_spawnlist 100042 100043 100042\nend\n"
+						 "begin Second\n id 2\n PCVEHICLE_SPAWNLIST 100043\nend\n"
+						 "begin Capacity\n id 3\n pcvehicle_spawnlist";
+	for (int id = 0; id < 40; ++id)
+		source += " " + std::to_string(200000 + id);
+	source += "\nend\nbegin Replace\n id 4\n pcvehicle_spawnlist 100042\n"
+			  " pcvehicle_spawnlist 100043\nend\n";
+	DefItemsFile file{};
+	if (def_parse_items_memory(
+				reinterpret_cast<const uint8_t *>(source.data()), source.size(), &file) != 0 ||
+			file.count != 4)
+		return 1;
+	const bool ok = file.vehicle_spawn_id_count == 32 && file.vehicle_spawn_ids[0] == 100042 &&
+			file.vehicle_spawn_ids[1] == 100043 && file.entries[0].vehicle_spawn_mask == 3 &&
+			file.entries[1].vehicle_spawn_mask == 2 &&
+			file.entries[2].vehicle_spawn_mask == 0xFFFFFFFCu &&
+			file.entries[3].vehicle_spawn_mask == 2;
+	def_free_items(&file);
+	if (!ok)
+		fprintf(stderr, "FAIL: vehicle spawn lists/cap/replacement\n");
+	return ok ? 0 : 1;
+}
+
 int main(void) {
-    if (test_item_def_allocator_defaults() != 0) {
-        return 1;
-    }
-    if (test_light_transfer() != 0) {
+	if (test_vehicle_spawn_lists() != 0)
+		return 1;
+	if (test_item_def_allocator_defaults() != 0) {
+		return 1;
+	}
+	if (test_light_transfer() != 0) {
         return 1;
     }
     if (test_weathervane_minai_default_aip() != 0) {

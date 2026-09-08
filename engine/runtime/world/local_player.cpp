@@ -356,6 +356,8 @@ void LocalPlayer::apply_player_input_pre_tick() {
 	if (p == nullptr) return;
 	w::local_player_view_refresh(&world, view);
 	w::apply_player_body_input(*p, w::pack_player_body_input(input));
+	if (w::Entity *entity = world.registry.get(p->handle))
+		entity->analog_throttle = input.analog_throttle;
 	const bool scope_promoted = weapon.active && view.scope_engaged &&
 			!w::player_view_scope_ease_active(view);
 	p->inf.aimed_shot_available = false;

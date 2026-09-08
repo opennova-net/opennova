@@ -500,6 +500,45 @@ void ObjectModel::stamp_entity_lighting_instances() {
 	apply_to(skeleton_, entity);
 }
 
+void ObjectModel::set_focal_sway(bool active, const Basis &basis, const Vector3 &world_offset) {
+	if (!active && !focal_sway_active_)
+		return;
+	focal_sway_active_ = active;
+	focal_sway_basis_ = active ? basis : Basis();
+	focal_sway_offset_ = active ? world_offset : Vector3();
+	apply_focal_sway();
+	wake_runtime_frame();
+}
+
+void ObjectModel::apply_focal_sway() {
+	const Vector3 offset = get_global_transform().basis.inverse().xform(focal_sway_offset_);
+	if (skeleton_ && skeleton_->get_bone_count() > 1) {
+		const Transform3D rest = skeleton_->get_bone_rest(1);
+		Transform3D pose(rest.basis * focal_sway_basis_, rest.origin + offset);
+		skeleton_->set_bone_pose(1, pose);
+	} else {
+		// Reapply the clean cached PANM pose before composing the wind delta.
+		// This prevents repeated fixed/render updates from accumulating a bend.
+		panm_applied_revision_ = 0;
+		apply_robj_transforms();
+		if (focal_sway_active_) {
+			Node3D **node = robj_nodes_.getptr(1);
+			const Transform3D *rest = robj_rest_transforms_.getptr(1);
+			if (node && *node && rest) {
+				// Rigid parts carry the mesh's (-x,y,z) conversion. The original
+				// translates by -pivot, rotates, then adds pivot and wind offset.
+				const Basis flip(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1));
+				const Basis bend = flip * focal_sway_basis_ * flip;
+				const Transform3D deformation(
+						bend, rest->origin - bend.xform(rest->origin) + offset);
+				(*node)->set_transform(deformation * (*node)->get_transform());
+			}
+		}
+	}
+	bounds_dirty_ = true;
+	point_light_draw_parts_dirty_ = true;
+}
+
 Dictionary ObjectModel::get_render_part_nodes() const {
 	Dictionary result;
 	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
@@ -1247,9 +1286,9 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 }
 
 bool ObjectModel::needs_runtime_frame_work() const {
-	if (bounds_dirty_ || has_live_panm_ || !dynamic_material_slots_.is_empty() ||
-			(render_order_dirty_ && !alpha_strip_draws_.is_empty()) ||
-			!part_anims_.is_empty()) {
+	if (focal_sway_active_ || bounds_dirty_ || has_live_panm_ ||
+			!dynamic_material_slots_.is_empty() ||
+			(render_order_dirty_ && !alpha_strip_draws_.is_empty()) || !part_anims_.is_empty()) {
 		return true;
 	}
 	if (skeleton_ == nullptr || skeletal_.is_null() || anim_key_.is_empty()) {
@@ -1379,6 +1418,10 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	bool robj_changed = false;
 	if (has_live_panm_ || bounds_dirty_) {
 		robj_changed = apply_robj_transforms();
+	}
+	if (focal_sway_active_) {
+		apply_focal_sway();
+		robj_changed = true;
 	}
 	if (p_profile != nullptr) {
 		p_profile->panm_us +=
@@ -1711,6 +1754,8 @@ void ObjectModel::apply_point_light_selection(int p_count,
 }
 
 void ObjectModel::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_focal_sway", "active", "basis", "world_offset"),
+			&ObjectModel::set_focal_sway);
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("advance_awake_frame", "delta"),
 			&ObjectModel::advance_awake_frame);

@@ -47,6 +47,15 @@ struct GlassPointTrait {
     Vec3 local_dir;
 };
 
+struct DeathEffectPoint {
+	Vec3 local_pos;
+	Vec3 local_dir;
+};
+struct DeathEffectBank {
+	uint16_t mask = 0;
+	std::vector<DeathEffectPoint> points; // first-16 mask, full walk with x86 shift wrapping
+};
+
 struct ItemDeathTraits {
     bool static_death = false;  // attrib2 & 0x100; generic death motion freezes
     int32_t unit_type = 0;      // def+0x196 — the death-dispatch row key
@@ -90,12 +99,16 @@ struct ItemDeathTraits {
     // the reachable clamp target (unauthored slots read 0 = WHEEL).
     uint8_t husk_sub_part_types[17] = {};
     float debris_scale = 0.0f;  // def+0x1BC (0 -> pieces render at 1.0)
-    std::string sound_death;    // def soundDeath name ('sounddeath')
-    std::string particledeath;      // +0x416 name — the Dead-bone family (above water)
+	std::string sound_profile; // SndProf.def impact slots for falling wrecks
+	std::string sound_death; // def soundDeath name ('sounddeath')
+	std::string particledeath;      // +0x416 name — the Dead-bone family (above water)
     std::string particleh2odeath;   // +0x44A name — the submerged family
     std::string particlefire;       // +0x47E name — the Fire-bone family
-    std::string particleother;      // +0x4B2 name — the Other-bone family
-    // +0x4E4 name — the ground-impact effect the settle transition plays once
+	// Final husk preferred, then the first husk. Dead is shared by water/air.
+	// [orig: resolve_item_materials_and_spawn_bone_trails @0x522EE0]
+	std::array<DeathEffectBank, 3> effect_banks;
+	std::string particleother; // +0x4B2 name — the Other-bone family
+	// +0x4E4 name — the ground-impact effect the settle transition plays once
     // at the entity position (interned to the +0x4E2 handle at mission start)
     // [orig: Entity_TransitionToGroundDeath @ 0x493080 read @ 0x493088].
     std::string particlefinale;
@@ -203,7 +216,17 @@ struct DestructionEffectEvent {
                                                           // runtime-only owners
     uint32_t attach_spawn_origin = 0; // distinguishes authored zero-BMS origins
                                       // from the synthetic promotion sentinel
+	bool release = false; // stop the attached family without spawning a replacement
+	uint8_t bank_slot = 0;
+	Vec3 attach_local_pos; // model-local mission axes; presentation composes the live pose
 };
+
+struct DestructionEvents;
+void spawn_death_effect_banks(
+		Entity &entity, const ItemDeathTraits &traits, bool underwater, DestructionEvents &events);
+void update_dead_wreck_effects(World &world, Entity &entity, const ItemDeathTraits *traits,
+		float water_height, DestructionEvents &events);
+void release_death_effect_bank(Entity &entity, uint8_t family, DestructionEvents &events);
 
 struct DestructionSoundEvent {
     std::string sound;         // sound/set name ('' = none)
@@ -224,6 +247,7 @@ struct HuskSwapEvent {
     uint32_t spawned_piece_mask = 0; // sections that left as pieces [entity+0x138]
     Vec3 pos;                        // the wreck position (batched statics resolve
                                      // no node — the present pass grafts here)
+	bool restore_intact = false; // respawn reinstalls the intact render model
 };
 
 // The death explosion flash for the presenter's light pool
@@ -412,11 +436,19 @@ void process_destructible_death(World &world, Entity &target);
 // [orig: Entity_UpdateDeathTransforms @ 0x494660 -> Entity_DispatchDeathCallback
 // @ 0x493ef0 (table @ 0x815410) -> Entity_InitDeathSounds @ 0x4939b0]
 void entity_update_death_transforms(World &world, Entity &target, bool silent);
+// Aircraft's immediate death initializer: blast, pieces, sounds, optional
+// piece physics, random hull spin. [orig: Entity_InitDeathState @0x48F7C0]
+void entity_init_aircraft_death(World &world, Entity &target, bool simulate);
 
 // Death pieces for one entity [orig: Entity_SpawnDeathPieces @ 0x493400]:
 // per husk section 1..N roll the debris-type row, spawn into the pool, record
 // the spawned-section mask on the entity. Returns the mask.
 uint32_t spawn_death_pieces(World &world, Entity &target);
+
+// Shared generic falling callback, also called explicitly by vehicle states 21/23.
+// [orig: Entity_ProcessFallingDeathPhysics @0x461D30]
+void entity_process_falling_death(World &world, Entity &entity,
+		const terrain::TerrainHeightField *terrain, float water_height);
 
 // Per-tick settle for entities with an installed death-motion callback [orig:
 // Entity_UpdateStaticDeathPhysics @ 0x494230 (buildings) /

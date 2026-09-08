@@ -414,9 +414,10 @@ bool OcclusionWorld::sphere_in_view(const OcclusionFrameCamera &cam,
 // state = rol4(state + rol11(state)); return low16 ^ 1; state ^= 1.]
 uint16_t OcclusionWorld::latch_rand16() {
     auto rol = [](uint32_t v, int n) { return (v << n) | (v >> (32 - n)); };
-    const uint32_t rotated = rol(latch_rng_ + rol(latch_rng_, 11), 4);
-    latch_rng_ = rotated ^ 1u;
-    return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
+	uint32_t &state = shared_latch_rng_ ? *shared_latch_rng_ : latch_rng_;
+	const uint32_t rotated = rol(state + rol(state, 11), 4);
+	state = rotated ^ 1u;
+	return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
 }
 
 // [orig: terrain_occlusion_check_three_rays @ 0x610ed0 — TRUE = some ray clear

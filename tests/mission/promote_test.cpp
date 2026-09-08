@@ -21,6 +21,18 @@ static int failures = 0;
         if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
     } while (0)
 
+static void stamp_fixture_carrier_defs(World &world) {
+	// Seat-only fixtures omit items.def; supply the metadata real promotion loads.
+	world.registry.for_each([&](const Entity &v) {
+		if (!v.seats.empty() && !v.has_item_def) {
+			Entity &def = *world.registry.get(v.handle);
+			def.has_item_def = true;
+			def.item_type = 1;
+			def.item_attrib |= kItemAttribPlayerControl;
+		}
+	});
+}
+
 static bms::Entity organic(int32_t x, int32_t y, int32_t z, uint8_t team, uint8_t wp_id,
                            int32_t wp_num) {
     bms::Entity e{};
@@ -481,15 +493,60 @@ static void test_nameless_vehicle_takes_the_retail_default_profile() {
     mission::PromoteOptions::AiProfileRow helo1;
     helo1.profile = "helo1";
     helo1.data.type = 1;
-    opts.ai_profiles.push_back(helo1);
-    World world;
+	helo1.data.default_state = kAiHeloLand;
+	helo1.data.helo_patrol_speed = 3000;
+	helo1.data.helo_combat_speed = 5000;
+	helo1.data.helo_patrol_climb = 4000;
+	helo1.data.helo_combat_climb = 6000;
+	helo1.data.helo_patrol_altitude = 20 << 16;
+	helo1.data.helo_combat_altitude = 40 << 16;
+	helo1.data.min_agl = 10 << 16;
+	helo1.data.min_speed = 700;
+	helo1.data.min_chase = 30 << 16;
+	helo1.data.max_chase = 80 << 16;
+	helo1.data.radar_dist = 500 << 16;
+	helo1.data.view_dist = 300 << 16;
+	helo1.data.radar_fov_bam = 0x40000000;
+	helo1.data.view_fov_bam = 0x20000000;
+	helo1.data.evade_flags = 0x10;
+	helo1.data.combat_flags = 0x40;
+	helo1.data.use_waypoint_z = 1;
+	helo1.data.hunt_flags = 1;
+	helo1.data.drive_skill = 3;
+	helo1.data.primary.weapon = "50cal";
+	helo1.data.primary.ammo = 60;
+	helo1.data.primary.flags = 1;
+	helo1.data.primary.facing_bam = 12345;
+	helo1.data.primary.pitch_bam = 67890;
+	helo1.data.aim_skill = 4;
+	opts.ai_profiles.push_back(helo1);
+	World world;
     AiSystem &ai = world.ai;
     ai.is_authority = true;
     const mission::PromoteResult r = mission::promote_mission(m, world, opts);
     CHECK(r.brains == 1);
     CHECK(ai.count() == 1);
     CHECK(ai.at(0) != nullptr && ai.at(0)->profile.type == 1);
-    if (failures) std::exit(1);
+	const AiEntity &air = *ai.at(0);
+	CHECK(air.brain.cur_state() == kAiHeloLand);
+	CHECK(air.brain.f[AiBrain::kSpeedA] == 5000 && air.brain.f[AiBrain::kSpeedB] == 3000);
+	CHECK(air.profile.patrol_altitude == (20 << 16) && air.profile.field216 == (40 << 16));
+	CHECK(air.profile.patrol_climb == 4000 && air.profile.field220 == 6000);
+	CHECK(air.profile.min_agl == (10 << 16) && air.profile.min_speed == 700);
+	CHECK(air.profile.min_chase == (30 << 16) && air.profile.max_chase == (80 << 16));
+	CHECK(air.profile.range_primary == 500 && air.profile.range_secondary == 300);
+	CHECK(air.profile.fov_primary == 0x40 && air.profile.fov_secondary == 0x20);
+	CHECK(air.profile.view_fov_bam == 0x20000000 && air.profile.radar_fov_bam == 0x40000000);
+	CHECK(air.profile.flags96 == 0x10 && air.profile.flags100 == 0x40);
+	CHECK(air.profile.flight_flags == 1 && air.brain.f[AiBrain::kUseWaypointZones] == 1);
+	CHECK(air.brain.f[AiBrain::kDriveSkill] == 3 && air.brain.f[AiBrain::kAccuracy] == 4);
+	CHECK(air.brain.f[AiBrain::kAmmoA] == 60 && air.profile.fire_a.ammo_name == "50cal");
+	CHECK(air.brain.f[AiBrain::kActiveYaw] == 12345 &&
+			air.brain.f[AiBrain::kStagingBlock + 3] == 12345);
+	CHECK(air.brain.f[AiBrain::kElevationBias] == 67890);
+	CHECK(air.brain.f[51] >= 0 && air.brain.f[51] < (20 << 16));
+	if (failures)
+		std::exit(1);
 }
 
 int main() {
@@ -794,8 +851,9 @@ int main() {
         World cw;
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
+		stamp_fixture_carrier_defs(cw);
 
-        const EntityHandle vh = cw.registry.find_by_net_id(11);
+		const EntityHandle vh = cw.registry.find_by_net_id(11);
         const EntityHandle oh = cw.registry.find_by_net_id(1);
         Entity *veh = cw.registry.get(vh);
         Entity *occ = cw.registry.get(oh);
@@ -833,8 +891,9 @@ int main() {
         World cw;
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
+		stamp_fixture_carrier_defs(cw);
 
-        Entity *veh = cw.registry.get(cw.registry.find_by_net_id(11));
+		Entity *veh = cw.registry.get(cw.registry.find_by_net_id(11));
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(veh != nullptr);
         CHECK(occ != nullptr);
@@ -871,8 +930,9 @@ int main() {
         World cw;
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
+		stamp_fixture_carrier_defs(cw);
 
-        Entity *veh = cw.registry.get(cw.registry.find_by_net_id(11));
+		Entity *veh = cw.registry.get(cw.registry.find_by_net_id(11));
         Entity *o0 = cw.registry.get(cw.registry.find_by_net_id(1));
         Entity *o1 = cw.registry.get(cw.registry.find_by_net_id(2));
         CHECK(veh != nullptr);
@@ -912,7 +972,8 @@ int main() {
         World cw;
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
-        run_ai(cai, cw, 46);
+		stamp_fixture_carrier_defs(cw);
+		run_ai(cai, cw, 46);
 
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(occ != nullptr);
@@ -946,7 +1007,8 @@ int main() {
         World cw;
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
-        run_ai(cai, cw, 46);
+		stamp_fixture_carrier_defs(cw);
+		run_ai(cai, cw, 46);
 
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(occ != nullptr);
@@ -978,7 +1040,8 @@ int main() {
         World cw;
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
-        run_ai(cai, cw, 46); // driver seat point 1u away: inside the 2u arrival ring
+		stamp_fixture_carrier_defs(cw);
+		run_ai(cai, cw, 46); // driver seat point 1u away: inside the 2u arrival ring
 
         Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(occ != nullptr);
@@ -1077,7 +1140,8 @@ int main() {
         World cw;
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
-        Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
+		stamp_fixture_carrier_defs(cw);
+		Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(occ != nullptr && !occ->mounted); // spawns ON FOOT — no load-time shortcut
 
         TestSource src(0x4000); // 0.25u/tick forward
@@ -1124,7 +1188,8 @@ int main() {
         World cw;
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
-        Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
+		stamp_fixture_carrier_defs(cw);
+		Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
         CHECK(occ != nullptr && !occ->mounted);
 
         TestSource walk_src(0x4000);
@@ -1139,7 +1204,11 @@ int main() {
             // the 2u seat ring (seat at x=32 -> cut past x=29).
             if (!cut && cai.at(0)->pos[0] > (29 << 16)) {
                 cai.root_motion = &hull_src;
-                cut = true;
+				// Inject the collision resolver's witnessed facing-push latch;
+				// zero root motion alone no longer impersonates a hull contact.
+				cai.at(0)->inf.board_blocked = true;
+				cw.registry.get(cw.registry.find_by_net_id(11))->bound_radius = 3.0f;
+				cut = true;
             }
             c.logic_tick = static_cast<uint32_t>(t);
             cai.tick(cw, c);

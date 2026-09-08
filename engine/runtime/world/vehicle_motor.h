@@ -1,39 +1,10 @@
-// The host-authoritative ground-vehicle motor — the drive response behind a mounted
-// ctrl/drvr player (the retail-join v33 "can't drive" gap).
-//
-// WITNESS (net-re §5.13 drive-authority chain, 2026-07-04): vehicles have NO wire
-// uplink — the client's per-frame C2S 0x0C serializes exactly ONE entity,
-// g_local_player_entity [orig: Client_ProcessNetworkFrame @0x42c180 call @0x42c482],
-// and the vehicle serialize callback rejects the extended modes 3/4 with -1
-// [orig: Entity_SerializeVehicleState @0x460560 mode switch @0x460578/0x460580;
-// golden ASH_I5A: 344/344 C2S 0x0C bodies carry the player handle]. Drive is therefore
-// HOST-SIDE: the vehicle motor consumes the CONTROLLING occupant's replicated input
-// (MoveOrder / heading / analog axes — all landed by the 0x0C apply) when
-// `itemDef->attrib & 0x40` (PlayerControl) and this machine is the authority (the
-// driver's own client runs the same block as local prediction)
-// [orig: Entity_UpdateVehiclePhysics @0x48af00 gate @0x48b0ff:
-//  `(occupant->Flags & 0x100) && (occupant == g_local_player_entity || is_authority)`].
-//
-// This port is the AUTHORITY drive core for the ground family (items.def `physics`
-// selector non-zero routes here [orig: Entity_DispatchPhysics_cveh @0x48efc0]):
-// input mapping, steering chase, speed pipeline, velocity integration, gravity,
-// submerged drag, and the per-family contact + suspension solves
-// (tracked @0x47C1C0 for cveh/ctrn/catv, wheeled @0x475DE0 for ctan/Tank,
-// light @0x479600 for cbik/Bike — client subsets: pad probes at wheel height,
-// per-corner lifts, the 4-normal/axle attitude fits, the positive-corner or
-// mean-wheel rest Z; vehicle-client-movers-re.md §7-§9; boxless/terrain-less
-// rows keep the bilinear terrain-clamp stand-in). The air family's authority
-// half (the CHel/cpln AI flight block, health machine, rotor gate and drains)
-// lives in vehicle_motor_air.cpp + AiSystem::chel_ai_drive (2026-09-01).
-// Tracked deferrals (D-NET-161): the skid/tire-slip model (`tireSlip`/
-// `slip_speed`; the ASH buggy authors slip_speed 0), the pool-1
-// vehicle-vs-vehicle collision loop, the wreck-state tails, the
-// solve's contact-direction store feeding a slope-following velocity
-// re-derive (@0x47E65D../@0x48cf97.. — the ground mover uses the full basis; the
-// tank keeps its full-basis drive with the same store deferred), specialized
-// vehicle sound families beyond the ground idle/drive/reverse pass in
-// vehicle_sound.cpp, and the vehicle AI state machine's non-drive states
-// [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0].
+// Vehicle motors for authority and prediction. The controlling occupant supplies replicated input;
+// the wire carries no separate client vehicle uplink. Full and selector-zero ground/water paths
+// share their original dispatch, while aircraft uses vehicle_motor_air.cpp. Contact, traction,
+// chassis, lifecycle, sound and trails are implemented in their named sibling modules. See
+// docs/world/vehicle-client-movers-re.md sections 11-32.
+// Witness sites: [orig: @0x42c180, @0x42c482, @0x460560, @0x460578, @0x48af00, @0x48b0ff,
+// @0x48efc0, @0x47C1C0, @0x475DE0, @0x479600, @0x47E65D, @0x48cf97, @0x4583c0]
 #pragma once
 
 #include <array>
@@ -91,9 +62,26 @@ constexpr bool vehicle_family_uses_direct_air_mover(VehicleFamily family) {
 // One of the two cbot-only, afloat wake slots retained from items.def. Unlike
 // the general item particle slot, these are speed-controlled persistent groups
 // and deliberately stay in the portable vehicle traits.
-struct VehicleWakeEffect {
-    std::string effect;
-    std::string userpoint;
+struct VehicleTrailDefinition {
+	std::string effect;
+	std::string secondary_effect;
+	std::string userpoint;
+	uint16_t mask = 0;
+};
+
+// Rigid model userpoints selected by the authored particlefxs mask.
+// [orig: ItemDef_GetBoneMaskByName @0x49EA40; Entity_SpawnBoneEffectsAtMask @0x458750]
+struct VehicleEffectPoint {
+	int32_t position[3] = {};
+	int32_t direction[3] = {};
+};
+
+struct VehicleEffectEvent {
+	std::string effect;
+	Vec3 position;
+	Vec3 direction;
+	uint32_t source_tick = 0;
+	uint16_t force_zone = 0;
 };
 
 // Selected independently of the mover by items.def render_function.
@@ -101,16 +89,25 @@ struct VehicleWakeEffect {
 enum class VehicleRenderFamily : uint8_t { None, Ground, Tank, Helicopter, Plane };
 
 enum VehicleControlMask : uint16_t {
-    VC_STEERING = 1, VC_SPEED = 2, VC_ROTORS = 4, VC_WHEELS = 8,
-    VC_TIRES = 16, VC_TRACKS = 32, VC_VEHICLE_GUN = 64, VC_HELO_GUN = 128,
+	VC_STEERING = 1,
+	VC_SPEED = 2,
+	VC_ROTORS = 4,
+	VC_WHEELS = 8,
+	VC_TIRES = 16,
+	VC_TRACKS = 32,
+	VC_VEHICLE_GUN = 64,
+	VC_HELO_GUN = 128,
+	VC_HELO_GEAR = 256,
+	VC_TANK_TIRES = 512,
 };
 
 struct VehicleTraits {
-    VehicleRenderFamily render_family = VehicleRenderFamily::Ground;
-    int32_t physics = 0;       // itemDef+0x8DC ground-dispatch selector; direct air ignores it
-    int32_t player_speed = 0;  // itemDef+0x8E8
-    int32_t acceleration = 0;  // itemDef+0x8E0
-    int32_t deceleration = 0;  // itemDef+0x8E4
+	VehicleRenderFamily render_family = VehicleRenderFamily::Ground;
+	int32_t physics = 0; // itemDef+0x8DC ground-dispatch selector; direct air ignores it
+	int32_t player_speed = 0;  // itemDef+0x8E8
+	int32_t slip_speed = 0; // +0x8F0, simple mover lateral-slip threshold
+	int32_t acceleration = 0; // itemDef+0x8E0
+	int32_t deceleration = 0;  // itemDef+0x8E4
     int32_t turn_rate = 0;     // itemDef+0x924
     int32_t turn_rate2 = 0;    // itemDef+0x928 (low-speed minimum rate override)
     int32_t torque = 0;        // itemDef+0x91C raw — the collision speed-decay shift count
@@ -140,19 +137,20 @@ struct VehicleTraits {
     int32_t pitch_lift_vel = 0;// itemDef+0x938 ("pitch_velocity") — lift amount scale
     int32_t bob = 0;           // itemDef+0x93C — porpoise exit fold
     int32_t flip = 0;          // itemDef+0x948 — ground movers' tip threshold (*0.01)
-    int32_t hand_brake = 0;    // itemDef+0x944 raw — arms the byte-973 stop latch
-                               // [orig: @0x48c03a `occupant && Flags & 8 && handBrake`]
-    // The AI crew clamp pair [orig: minAI +0x8D8 @0x48bc51, criticalHp +0x180
+	int32_t tire_slip = 5; // itemDef+0x940: five ticks per recovery unit
+	int32_t hand_brake = 0; // itemDef+0x944 raw — arms the byte-973 stop latch
+							// [orig: @0x48c03a `occupant && Flags & 8 && handBrake`]
+	// The AI crew clamp pair [orig: minAI +0x8D8 @0x48bc51, criticalHp +0x180
     // @0x48bc7d]: an undercrewed AI hull that has left its spawn anchor bleeds
     // to criticalHp (AiSystem::apply_min_ai_crew_clamp).
     int32_t min_ai = 0;        // itemDef+0x8D8 raw — the crew count threshold
     int32_t critical_hp = 0;   // itemDef+0x180 i16 raw — the clamp ceiling
-    // The family movers' authority health machine [orig: the every-64th-tick
-    // block of Entity_UpdateAircraftPhysics @0x4903F4..0x4904A7]: above
-    // criticalHp the hull regens nonCriticalRegen up to healthMax - regen; at or
-    // below it the hull burns criticalDrain per 64 ticks.
-    int32_t critical_drain = 0;     // itemDef+0x182 i16 raw
-    int32_t non_critical_regen = 0; // itemDef+0x184 i16 raw
+	// The family movers' authority health machine [orig: the every-64th-tick
+	// block of Entity_UpdateAircraftPhysics @0x4903F4..0x4904A7]: above
+	// criticalHp the hull regens nonCriticalRegen up to healthMax - regen; at or
+	// below it the hull burns criticalDrain per 64 ticks.
+	int32_t critical_drain = 0; // itemDef+0x182 i16 raw
+	int32_t non_critical_regen = 0; // itemDef+0x184 i16 raw
     // The suspension spring block (world/vehicle_suspension.cpp; raw tokens)
     // [orig: spring +0x8FC, spring_comp +0x900, shock +0x904 —
     //  ItemDef_ParsePhysicsProperty @0x49db5c/@0x49dbd4/@0x49dc10]. The def's
@@ -164,16 +162,20 @@ struct VehicleTraits {
     int32_t shock = 0;         // the landing damp (11 - shock)/11; the oscillator
                                // clamps THIS field to [0,10] in place, as retail
                                // clamps the def's (@0x45D18F..0x45D1A2)
-    VehicleWakeEffect wake_w3; // particlefxw3: commanded-speed wake
-    VehicleWakeEffect wake_w4; // particlefxw4: current-motion wake
-    // Platform probe geometry from the model bound boxes (16.16 model space;
-    // modelData [0x28..0x3C] + the [0x40..0x4C] footprint). Provenance
-    // witnessed 2026-08-12: box Z = the CMDL header bbox Z pair, box X/Y =
-    // the lower-half type-1 BVOL fold, footprint = the bottom-eighth fold
-    // with the q+0x2000 clamps [orig: Threedi_BuildCollisionModelFromChunks
-    // @ 0x5b3bf0 tail @ 0x5b4455..0x5b45db]; filled from
-    // threedi_3di3_collision_probe_boxes at collision resolve:
-    int32_t box_z_lo = 0, box_z_hi = 0; // keel/deck Z pair
+	std::string skid_effect, skid_snow_effect, skid_userpoint;
+	std::vector<VehicleEffectPoint> skid_points;
+	std::vector<VehicleEffectPoint> flare_points; // first 16 FLARE-prefix model points
+	VehicleTrailDefinition trails[4];
+	VehicleEffectPoint trail_points[16];
+	uint8_t trail_point_count = 0;
+	// Platform probe geometry from the model bound boxes (16.16 model space;
+	// modelData [0x28..0x3C] + the [0x40..0x4C] footprint). Provenance
+	// witnessed 2026-08-12: box Z = the CMDL header bbox Z pair, box X/Y =
+	// the lower-half type-1 BVOL fold, footprint = the bottom-eighth fold
+	// with the q+0x2000 clamps [orig: Threedi_BuildCollisionModelFromChunks
+	// @ 0x5b3bf0 tail @ 0x5b4455..0x5b45db]; filled from
+	// threedi_3di3_collision_probe_boxes at collision resolve:
+	int32_t box_z_lo = 0, box_z_hi = 0; // keel/deck Z pair
     int32_t box_x_lo = 0, box_x_hi = 0; // length pair
     int32_t box_y_lo = 0, box_y_hi = 0; // beam pair
     int32_t foot_x_lo = 0, foot_x_hi = 0; // footprint length pair
@@ -223,11 +225,11 @@ struct VehicleDriveCmd {
 // owner gives rendering and native tests one implementation of the original
 // word selection, wrapping absolute value, and saturation rules.
 struct VehicleCtrlRegisters {
-    uint16_t mask = 0;
-    std::array<int32_t, 2> tracks{};
-    int32_t gun_yaw = 0, gun_pitch = 0;
-    int32_t steering = 0;
-    int32_t speed = 0;
+	uint16_t mask = 0;
+	std::array<int32_t, 2> tracks{};
+	int32_t gun_yaw = 0, gun_pitch = 0;
+	int32_t steering = 0;
+	int32_t speed = 0;
     // The part-animation words: the rotor angle accumulator's high word for
     // HELO_ROTOR and HELO_TAILROTOR, the wheel phase's for VEHICLE_WHEELS
     // [orig: Entity_CacheVehicleHUDStats @0x4929B0 — +0x466 @0x492ACA..
@@ -237,22 +239,20 @@ struct VehicleCtrlRegisters {
     int32_t rotor = 0;
     int32_t tail_rotor = 0;
     int32_t wheels = 0;
-    // VEHICLE_TIRE00..05: front L/R, midpoint L/R, rear R/L.
-    // [orig: Entity_CacheVehicleHUDStats @0x4929F6..0x492AC5]
-    std::array<int32_t, 6> tires{};
+	int32_t gear = 0;
+	// VEHICLE_TIRE00..05: front L/R, midpoint L/R, rear R/L.
+	// [orig: Entity_CacheVehicleHUDStats @0x4929F6..0x492AC5]
+	std::array<int32_t, 14> tires{};
 };
 
-VehicleCtrlRegisters vehicle_ctrl_registers(
-        const Entity::VehicleMotorState &state,
-        VehicleRenderFamily render_family = VehicleRenderFamily::Ground,
-        const AiEntity *ai = nullptr);
+VehicleCtrlRegisters vehicle_ctrl_registers(const Entity::VehicleMotorState &state,
+		VehicleRenderFamily render_family = VehicleRenderFamily::Ground,
+		const AiEntity *ai = nullptr);
 
 // abs((0xFFFF * signed_speed) >> 15), kept as Q16 control magnitude. The
 // arithmetic shift occurs before absolute value, including its one-unit
 // forward/reverse asymmetry.
-uint32_t watercraft_wake_magnitude_q16(int32_t signed_speed) noexcept;
-
-
+uint32_t vehicle_trail_magnitude_q16(int32_t signed_speed) noexcept;
 
 // The carrier pose in the deck-ride's units (16.16 position / BAM32
 // attitude): predicted vehicles serve the exact motor registers, everything

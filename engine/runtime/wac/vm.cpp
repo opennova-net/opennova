@@ -103,7 +103,9 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 case Builtin::LoseVar: return w.match.outcome().winner_team == 2 ? 1 : 0;
                 case Builtin::AccuracySpread: return w.script.wac_values.accuracy_spread;
                 case Builtin::Fallmps: return w.script.wac_values.fallmps;               // [orig: 0xC6EAE4]
-                case Builtin::Night: return w.weather.is_night_phase() ? 1 : 0;   // Env_IsNightPhase [orig: @0x26c645c]
+				case Builtin::Seatbelt:
+					return w.script.wac_values.seatbelt;
+				case Builtin::Night: return w.weather.is_night_phase() ? 1 : 0;   // Env_IsNightPhase [orig: @0x26c645c]
             }
             return 0;
         }
@@ -125,7 +127,9 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) const {
                 w.script.wac_values.accuracy_spread = v;
             else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Fallmps)
                 w.script.wac_values.fallmps = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Wind)
+			else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Seatbelt)
+				w.script.wac_values.seatbelt = v;
+			else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Wind)
                 w.commands.set_wind_scale(v); // Env_WindScale [orig: the `wind` row @0x82EEF0]
             break;
         default: break; // pool values are not lvalues

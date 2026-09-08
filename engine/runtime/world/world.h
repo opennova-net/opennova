@@ -25,6 +25,7 @@
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/system.h>
 #include <runtime/world/vehicle_system.h>
+#include <runtime/world/rotor_wash.h>
 #include <runtime/world/zone_system.h>
 #include <runtime/world/trigger_relations.h>
 #include <runtime/world/round_ring.h>
@@ -200,6 +201,10 @@ struct WacNamedValues {
     // (-vel_z)>>4 (a WAC can write it; no shipped script does).
     static constexpr int32_t kDefaultFallmps = 13;
     int32_t fallmps = kDefaultFallmps;
+	// USE cannot change the mounted local player's seat while this is nonzero.
+	// Forced script detaches still apply. [orig: wac_var_seatbelt @0xC6EADC;
+	// WacScript_FreeAll @0x4F637B; Entity_ToggleVehicleMount @0x43698B]
+	int32_t seatbelt = 0;
 };
 
 // End-of-round outcome state. `ended` is the double-run latch every round-end
@@ -486,10 +491,12 @@ struct SessionRules {
     // [orig: g_destroy_buildings gate in Entity_ApplyWeaponDamage
     // @0x4E682E..0x4E6860]
     bool destroy_buildings = false;
-    // An embedder may own the local player's borrowed UseGun slot so
-    // it can supply trigger/reload/scope input and drain presentation events.
-    // Standalone World users keep the default global mounted-slot pump.
-    bool external_local_mounted_weapon_pump = false;
+	// [orig: dword_24D1E38, initially -1; AI_TickState_VehicleDead @0x467EE9]
+	bool vehicle_respawns = true;
+	// An embedder may own the local player's borrowed UseGun slot so
+	// it can supply trigger/reload/scope input and drain presentation events.
+	// Standalone World users keep the default global mounted-slot pump.
+	bool external_local_mounted_weapon_pump = false;
     // MP-rules bit: the AI class-0 player leg skips the LOCAL player when set
     // [orig: dword_24C1930 & 0x800 read @0x467155]. The net wire into it is a
     // tracked D-AI-1 residual; defaults clear (SP).
@@ -516,14 +523,16 @@ struct WorldOutbox {
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
     // netsim emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
     RoundRing rounds;
-    // Water-surface crossings recorded this tick; the host fan drains them
-    // into S2C 0x34 and clears. Presentation only - nothing in the sim reads it.
-    WaterCrossQueue water_crossings;
+	std::vector<RoundSpawnParams> source_fires; // local source fire awaiting C2S emission
+	// Water-surface crossings recorded this tick; the host fan drains them
+	// into S2C 0x34 and clears. Presentation only - nothing in the sim reads it.
+	WaterCrossQueue water_crossings;
     // The destruction presentation events (world/destruction.h) the host drains.
     DestructionEvents destruction;
-    // The WAC/BMS/sim effect log the presentation drains ("text", "dialog", the
-    // WAC fx command names, ...).
-    EffectLog effects;
+	std::vector<VehicleEffectEvent> vehicle_effects; // fixed-tick movement particles
+	// The WAC/BMS/sim effect log the presentation drains ("text", "dialog", the
+	// WAC fx command names, ...).
+	EffectLog effects;
     // The impact-scar rings (world-wac-ai-re §24.9): 128 per-entity rings + the
     // terrain ring, written by the round stop and cleared on death. Presentation
     // state — the shell compiles it into quads each frame; it is NOT part of the
@@ -583,8 +592,9 @@ public:
     // zone_system.h); the AI tick runs the vehicle motors, the host tick the
     // zone capture transaction.
     VehicleSystem vehicles;
-    ZoneSystem zones;
-    // Game_StartMission seeds the one process-global PRNG_Next16 stream after
+	RotorWashSystem rotor_wash;
+	ZoneSystem zones;
+	// Game_StartMission seeds the one process-global PRNG_Next16 stream after
     // writing it twice; 0x1A10101A is the final retail dword_31BFBB0 value
     // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter PRNG_SetSeed (ex sub_613130) in
     // Game_StartMission @ 0x524360]. AI recoil/engagement, throwable bounce
@@ -596,14 +606,16 @@ public:
     static constexpr uint32_t kMissionPrng16BSeed = 0x5ADEADA5u;
     uint32_t prng16_b_state = kMissionPrng16BSeed;
     uint16_t next_prng16_b() noexcept;
-    // The simulation's owner of the CRT rand() recurrence retail draws from
-    // (the far-marker spawn scores @0x50CEA2, the 0x100 death-family roll
-    // @0x51718A, ...). Retail seeds the process stream from the clock once at
-    // host start and never at mission start; the host seeds this owner from
-    // its session seed in create_session, so a session's draw sequence is
-    // reproducible where retail's is not (D-NET-115). Snapshotted with
-    // prng16_state. [orig: CRT rand @0x76B00A; srand @0x51C1AA]
-    io::CrtRand crt_rand;
+	uint32_t prng16_c_state = 0; // PRNG_Next16_C @0x6131B0, BSS boot state
+	uint16_t next_prng16_c() noexcept;
+	// The simulation's owner of the CRT rand() recurrence retail draws from
+	// (the far-marker spawn scores @0x50CEA2, the 0x100 death-family roll
+	// @0x51718A, ...). Retail seeds the process stream from the clock once at
+	// host start and never at mission start; the host seeds this owner from
+	// its session seed in create_session, so a session's draw sequence is
+	// reproducible where retail's is not (D-NET-115). Snapshotted with
+	// prng16_state. [orig: CRT rand @0x76B00A; srand @0x51C1AA]
+	io::CrtRand crt_rand;
     CollisionWorld *collision = nullptr; // non-owning authoritative spatial-query seam;
                                          // the host owns the mission CollisionWorld.
     // The one tick-profile collector (ADR 0043 d5): non-owning, the kernel's.
@@ -741,8 +753,9 @@ public:
         uint32_t preround_delay_seconds = 0;
         uint32_t prng16_state = kMissionPrng16Seed;
         uint32_t prng16_b_state = kMissionPrng16BSeed;
-        bool cease_fire = false;
-        uint32_t crt_rand_state = 1;
+		uint32_t prng16_c_state = 0;
+		bool cease_fire = false;
+		uint32_t crt_rand_state = 1;
         EntityHandle local_player;
     };
     Snapshot snapshot() const;

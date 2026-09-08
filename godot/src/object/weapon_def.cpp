@@ -119,6 +119,7 @@ void WeaponActionRow::_bind_methods() {
 	WEAPON_ACTION_PROP(Variant::STRING, name);
 	WEAPON_ACTION_PROP(Variant::STRING, anim);
 	WEAPON_ACTION_PROP(Variant::STRING, function);
+	WEAPON_ACTION_PROP(Variant::INT, action_value);
 	WEAPON_ACTION_PROP(Variant::INT, delaystart);
 	WEAPON_ACTION_PROP(Variant::INT, delayend);
 	WEAPON_ACTION_PROP(Variant::STRING, soundset);

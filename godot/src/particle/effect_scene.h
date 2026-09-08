@@ -126,6 +126,8 @@ public:
 	// or serializing one into a throwaway Dictionary. The renderer lazily builds
 	// one retained snapshot after a fixed-tick catch-up batch.
 	void advance_in_place(double p_delta_seconds);
+	void advance_with_forces(
+			double p_delta_seconds, const opennova::particle::ParticleForceField *forces);
 
 	// Native renderer adapters use the same immutable frame without a
 	// Dictionary round trip. This is intentionally not bound to Godot.

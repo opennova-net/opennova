@@ -1,85 +1,190 @@
-// The reserved-command legs of the infantry navigation think — slot+148 values
-// 123..127 are ORDERS, not path ids: 123/124/125 "Goto SSN and board" (seat
-// filter per command), 126 goto-group hold, 127 follow the local player. Split
-// from infantry.cpp by leg per the size ratchet (precedent: infantry_ladder.cpp).
-//
-// [orig: Entity_UpdateInfantryAI @0x4b9910 — the command dispatch on aiComp+148
-//  inside the 16-tick think; board target resolve = pool 0..3 scans by entity
-//  net id (+124) against aiComp+152, cached in aiComp+144; walk to the seat
-//  approach point; arrival -> Entity_FindBestSeatSlot @0x4351f0 ->
-//  Entity_RequestVehicleAttach @0x4364a0.]
-//
-// This port retires the D-INF-2 early-return. Deliberate residuals, ledgered on
-// D-INF-2: the E1..E8 entry-point claim/stagger (boneWalkSlot), the 64-tick
-// mounted seat re-upgrade, the 11000/12000/12001 scripted escort offsets, the
-// can't-enter fallbacks (incl. the far-from-spawn self-kill @0x4b9910), and
-// Entity_CanEnterVehicle's INTERNAL gates (@0x435480 — the Flags&2/itemDef/model
-// preamble, the groundEntity path, Entity_IsBoneInProximity, and the Flags&0x2000
-// + 16-unit savedLivePose arm) — the modeled equivalents are cited inline where
-// each stands in. NO LONGER A RESIDUAL: the itemDef attrib 0x40 (PlayerControl)
-// gate that guards the Entity_CanEnterVehicle consult is ported at the ARRIVED
-// branch below.
-
+// Reserved infantry commands and the authored carrier entry walk.
+// [orig: Entity_UpdateInfantryAI @0x4B9910, Entity_FindBestSeatSlot @0x4351F0,
+// Entity_GetBoneTransformAndOrientation @0x4B0C50, Entity_CanEnterVehicle @0x435480]
 #include <base/io/bam.h>
+#include <base/io/strutil.h>
+#include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
-#include <runtime/world/entity.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/vehicle_mount.h>
+#include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 
 namespace opennova::world {
-
 namespace {
-
-constexpr double kBamPerRadianBoard = opennova::io::kBamPerRadian;
-
-// atan2 -> engine BAM (same formula as infantry.cpp's file-local bearing_to).
 int32_t board_bearing_to(int32_t dx, int32_t dy) {
-    return static_cast<int32_t>(std::atan2(static_cast<double>(dy),
-                                           static_cast<double>(dx)) *
-                                kBamPerRadianBoard);
+	return static_cast<int32_t>(std::atan2(double(dy), double(dx)) * io::kBamPerRadian);
 }
-
 int32_t board_to_fixed(float v) { return static_cast<int32_t>(v * 65536.0f); }
-
-// 3D separation with the witnessed 1.0u vertical slack — every command leg
-// measures distance this way. [orig: dz = max(0, |dz| - 0x10000) before the
-// fsqrt, @0x4b9910 the 127 leg and the board leg alike]
 int32_t board_dist(const int32_t pos[3], const int32_t tgt[3]) {
-    const double dx = static_cast<double>(tgt[0]) - pos[0];
-    const double dy = static_cast<double>(tgt[1]) - pos[1];
-    int32_t dzi = tgt[2] - pos[2];
-    dzi = (dzi < 0 ? -dzi : dzi) - 0x10000;
-    if (dzi < 0) dzi = 0;
-    const double dz = static_cast<double>(dzi);
-    return static_cast<int32_t>(std::sqrt(dx * dx + dy * dy + dz * dz));
+	const double dx = double(tgt[0]) - pos[0], dy = double(tgt[1]) - pos[1];
+	const double dz = std::max(0.0, std::abs(double(tgt[2]) - pos[2]) - 65536.0);
+	return static_cast<int32_t>(std::min(2147483647.0, std::sqrt(dx * dx + dy * dy + dz * dz)));
 }
-
-// The chosen seat's world position through the carrier's FULL orientation
-// frame — the same provider-less frame pose_mounted_occupant uses. This is the
-// modeled seat APPROACH point.
-// [orig: the seat-point builder Entity_GetBoneWorldPosition_0 @0x434df0 feeding rayEnd, frame per
-//  Entity_GetBoneTransformAndOrientation @0x4b0c50]
-void seat_world_position(const Entity &vehicle, const Seat &seat, int32_t out[3]) {
-    const Vec3 p = entity_local_point_world(vehicle, seat.seat_local);
-    out[0] = board_to_fixed(p.x);
-    out[1] = board_to_fixed(p.y);
-    out[2] = board_to_fixed(p.z);
-}
-
-// [orig: Entity_FindBestSeatSlot @0x4351f0 — the aiComp+148 admit term:
-//  (cmd != 124 || type != ctrl) && (cmd != 123 || type == sitex)]
 SeatSelectionMode seat_mode_for_command(int32_t command) {
-    switch (command) {
-        case 123: return SeatSelectionMode::PassengerOnly;
-        case 124: return SeatSelectionMode::RejectController;
-        default: return SeatSelectionMode::Any;
-    }
+	if (command == 123)
+		return SeatSelectionMode::PassengerOnly;
+	if (command == 124)
+		return SeatSelectionMode::RejectController;
+	return SeatSelectionMode::Any;
 }
-
+// [orig: Entity_GetBoneWorldPosition_0 @0x434DF0]
+void seat_world_position(World &world, const Entity &carrier, const Seat &seat, int32_t out[3]) {
+	MountedPose pose;
+	const Vec3 p = world.pose_provider &&
+					world.pose_provider->resolve_mounted_pose(world, carrier, seat, pose)
+			? pose.position
+			: entity_local_point_world(carrier, seat.seat_local);
+	out[0] = board_to_fixed(p.x);
+	out[1] = board_to_fixed(p.y);
+	out[2] = board_to_fixed(p.z);
+}
+bool named_point(World &world, const Entity &carrier, const char *name, int32_t out[6]) {
+	if (world.pose_provider &&
+			world.pose_provider->resolve_named_transform(world, carrier.handle, name, out))
+		return true;
+	for (const Seat &seat : carrier.seats) {
+		if (!strutil::iequals(seat.source_name, name))
+			continue;
+		seat_world_position(world, carrier, seat, out);
+		out[3] = out[4] = out[5] = 0;
+		return true;
+	}
+	return false;
+}
+// Claim the lowest unclaimed E1..En when resolving a new command target.
+// The current command's 123/124 terms are intentional in the retail predicate.
+// [orig: Entity_UpdateInfantryAI @0x4BB0BB..0x4BB269]
+void claim_entry(AiEntity &e, World &world, const Entity &target, int32_t command) {
+	int count = 0, point[6] = {};
+	for (int i = 8; i > 0; --i) {
+		const char name[] = { 'E', char('0' + i), 0 };
+		if (named_point(world, target, name, point)) {
+			count = i;
+			break;
+		}
+	}
+	bool claimed[32] = {};
+	world.registry.for_each_in_pool(0, [&](const Entity &other) {
+		if (other.handle == e.handle || !other.alive || other.health <= 0 ||
+				(other.flags & kEntityFlagDead) != 0)
+			return;
+		const AiEntity *brain = world.ai.for_handle(other.handle);
+		if (brain == nullptr)
+			return;
+		if ((brain->slot.f[38] == e.slot.f[38] &&
+					(brain->slot.f[37] == 125 || command == 124 || command == 123)) ||
+				other.ground_target == target.handle) {
+			if (brain->inf.board_entry_slot < 32)
+				claimed[brain->inf.board_entry_slot] = true;
+		}
+	});
+	e.inf.board_entry_slot = 1;
+	for (int i = count; i > 0; --i)
+		if (!claimed[i])
+			e.inf.board_entry_slot = static_cast<uint8_t>(i);
+}
+// Authored E/G/S/H points for non-PlayerControl targets. UseGun bypasses the
+// staged walk. Radii are the original Q16 constants, including 57344/102400.
+// [orig: Entity_UpdateInfantryAI @0x4BB373..0x4BB849]
+void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, int32_t goal[3],
+		int32_t &radius) {
+	auto &inf = e.inf;
+	int32_t point[6] = {};
+	const auto copy = [&] { std::copy_n(point, 3, goal); };
+	if (named_point(world, target, "UseGun", point)) {
+		copy();
+		radius = target.primary_weapon_owner.valid() ? 0x30000 : 0x10000;
+		return;
+	}
+	char name[] = { 'E', char('0' + inf.board_entry_slot), 0 };
+	const auto get = [&](char prefix) {
+		name[0] = prefix;
+		return named_point(world, target, name, point);
+	};
+	const int stage = inf.board_entry_stage;
+	if (stage > 6) {
+		std::copy_n(e.pos, 3, goal);
+		radius = 0x10000;
+		--inf.board_entry_stage;
+	} else if (stage > 4) {
+		if (get('H')) {
+			copy();
+			radius = 0x10000;
+			inf.board_entry_stage = 6;
+		}
+	} else if (stage > 1) {
+		if (get('G')) {
+			copy();
+			radius = 0x10000;
+			inf.board_entry_stage = 4;
+			if (stage == 2)
+				inf.board_anim = anim_state::kStop;
+		} else if (get('S')) {
+			const int32_t sx = point[0], sy = point[1], sz = point[2], yaw = point[3];
+			inf.board_anim = anim_state::kStop;
+			if (stage == 2 || stage == 3) {
+				copy();
+				radius = 102400;
+				if (stage == 2) {
+					inf.board_entry_stage = 3;
+					if (get('E')) {
+						e.pos[0] += (point[0] - e.pos[0]) >> 3;
+						e.pos[1] += (point[1] - e.pos[1]) >> 3;
+					}
+				}
+			} else {
+				std::copy_n(e.pos, 3, goal);
+				radius = 90112;
+				inf.board_entry_stage = 3;
+				inf.target_heading = yaw;
+				e.heading = yaw;
+				const int32_t diff =
+						static_cast<int32_t>(uint32_t(yaw) - uint32_t(inf.body_heading));
+				if (std::abs(int64_t(diff)) < 1073741760) {
+					self.flags |= kEntityFlagMounted;
+					inf.board_anim = anim_state::kGuard;
+				}
+				if (std::abs(int64_t(diff)) < 0x2D82D80) {
+					e.pos[0] = sx;
+					e.pos[1] = sy;
+					e.pos[2] = std::max(e.pos[2], sz);
+				}
+			}
+		}
+	} else if (get('E')) {
+		copy();
+		radius = 57344;
+		inf.board_entry_stage = 1;
+		inf.board_anim = anim_state::kStop;
+		const double dx = target.position.x * 65536.0 - e.pos[0];
+		const double dy = target.position.y * 65536.0 - e.pos[1];
+		const int32_t bound = board_to_fixed(target.bound_radius) + 0x10000;
+		if (std::hypot(dx, dy) < bound && world.collision &&
+				!world.collision->entity_los_clear(
+						world, self.handle, self.handle, e.pos, goal, 0x4000, true)) {
+			// Walk around the near side of the target's bound when the E point
+			// is hidden by its hull. [orig: @0x4BB4A2..0x4BB591]
+			const int32_t yaw =
+					board_bearing_to(-static_cast<int32_t>(dx), -static_cast<int32_t>(dy));
+			const double angle = yaw / io::kBamPerRadian;
+			const int64_t c = static_cast<int32_t>(std::cos(angle) * 4194304.0);
+			const int64_t sn = static_cast<int32_t>(std::sin(angle) * 4194304.0);
+			goal[0] = board_to_fixed(target.position.x) + int32_t((bound * c) >> 22) +
+					int32_t(((bound >> 1) * sn) >> 22);
+			goal[1] = board_to_fixed(target.position.y) + int32_t((bound * sn) >> 22) -
+					int32_t(((bound >> 1) * c) >> 22);
+			goal[2] = board_to_fixed(target.position.z);
+			radius = 0;
+		}
+	}
+	self.position = { e.pos[0] / 65536.0f, e.pos[1] / 65536.0f, e.pos[2] / 65536.0f };
+}
 } // namespace
 
 void AiSystem::infantry_command_think(AiEntity &e, World &world) {
@@ -128,162 +233,84 @@ void AiSystem::infantry_command_think(AiEntity &e, World &world) {
 }
 
 void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) {
-    InfantryState &inf = e.inf;
-    AiSlot &slot = e.slot;
-
-    // Resolve the board target by SSN — slot+152 carries the authored wp_number.
-    // Retail caches the raw entity pointer in aiComp+144 and rescans pools 0..3
-    // by net id (+124) when the cache goes stale; our registry find performs the
-    // same scan and the cache keeps the handle (+1 so 0 stays "none").
-    // [orig: the board-leg pool scans @0x4bee93..0x4beec6 (authority gate
-    //  @0x4bee93, cmd 123/124/125 @0x4beea5..0x4beeaf, aiComp[38] vs entity+0x7C
-    //  @0x4beeba); stale test aiComp[36]->+124 != aiComp[38]]
-    const uint16_t target_ssn = static_cast<uint16_t>(slot.f[38] & 0xFFFF);
-    const EntityHandle th = world.registry.find_by_net_id(target_ssn);
-    Entity *target = world.registry.get(th);
-    if (target == nullptr) {
-        // Unresolved target: stand and retry next think. (The witnessed
-        // dead-target fallbacks — hold at spawn / the >8u-from-spawn self-kill —
-        // are D-INF-2 residuals.) [orig: @0x4b9910 the CanEnterVehicle==0 legs]
-        slot.f[36] = 0;
-        inf.board_blocked = false;
-        inf.board_progress_valid = false;
-        return;
-    }
-    slot.f[36] = static_cast<int32_t>(th.packed) + 1;
-
-    const Entity *self = world.registry.get(e.handle);
-    if (self == nullptr) return;
-    if (self->mounted) {
-        // Seated. The 64-tick better-seat re-upgrade stays a D-INF-2 residual.
-        // [orig: the (tickKey & 0x3F) == 0 upgrade block @0x4ba9d8..0x4baa41 —
-        //  mounted (+0x16C) @0x4ba9e1, Entity_FindBestSeatSlot @0x4ba9fb,
-        //  Entity_GetBoneSlotType != +0x168 @0x4baa1d, Entity_RequestVehicleAttach
-        //  @0x4baa2c when the best slot differs]
-        return;
-    }
-
-    // Walk goal: the filtered best seat's approach point when one resolves (the
-    // modeled at Entity_GetBoneWorldPosition_0 @0x434df0), else the target origin. Arrive at 2.0u for a seat
-    // point [orig: 0x20000 @0x4bb32e]; the no-seat fallback stands off at 4.0u —
-    // a stand-in for retail's bound-radius + 1.0u (entity+0 is unmodeled here).
-    // [orig: the ring pick @0x4bb325..0x4bb34a: +0x369 clear -> 0x20000, set ->
-    //  target->+0 (bound radius) + 0x10000]
-    int32_t goal[3];
-    int32_t radius = 0x20000;
-    const int seat_idx =
-            world.commands.find_best_seat(*target, e.handle,
-                                          seat_mode_for_command(command));
-    if (seat_idx >= 0 &&
-        seat_idx < static_cast<int>(target->seats.size())) {
-        seat_world_position(*target, target->seats[seat_idx], goal);
-    } else {
-        goal[0] = board_to_fixed(target->position.x);
-        goal[1] = board_to_fixed(target->position.y);
-        goal[2] = board_to_fixed(target->position.z);
-        radius = 0x40000;
-    }
-
-    // The blocked latch: retail arms pad_368[1] from the collision
-    // push-response (the hull pressing back against the walker) and, while
-    // latched, widens the arrival ring from the 2.0u seat ring to the target's
-    // bound radius + 1.0u — pressed against the fuselage counts as arrived, so
-    // interior seat points (helo cabins, boat wells) stay boardable. Our motor
-    // has no push signal; the latch arms when an ORDERED board walk makes under
-    // half a walk-step of progress across a think, and the widened ring is 4.0u
-    // (the bound radius is unmodeled — a D-INF-2 stand-in).
-    // [orig: pad_368[1] set @0x4b9910 push block (displacement >= 768);
-    //  ring pick `pad_368[1] ? *target + 0x10000 : 0x20000` in the board leg]
-    if (inf.board_progress_valid) { // a walk was ordered last think
-        const int32_t pdx = e.pos[0] - inf.board_progress_pos[0];
-        const int32_t pdy = e.pos[1] - inf.board_progress_pos[1];
-        const int64_t moved2 = static_cast<int64_t>(pdx) * pdx +
-                               static_cast<int64_t>(pdy) * pdy;
-        constexpr int64_t kStallStep = 0x8000; // half a 16-tick walk stride
-        if (moved2 < kStallStep * kStallStep) inf.board_blocked = true;
-    }
-    inf.board_progress_valid = false;
-    if (inf.board_blocked) radius = std::max(radius, 0x40000);
-
-    const int32_t dist = board_dist(e.pos, goal);
-    if (dist > radius) {
-        inf.move_mode = 3;
-        inf.target_dist = dist;
-        inf.arrival_radius = radius;
-        inf.move_target[0] = goal[0];
-        inf.move_target[1] = goal[1];
-        inf.move_target[2] = goal[2];
-        // The board walk is a final approach — retail raises the one-shot flag
-        // so the shared gait select takes the slow-in ramp.
-        // [orig: waypointLooping = 1 on the board walk @0x4b9910 (the common
-        //  move tail @0x4bbe11 every command leg jumps to)]
-        inf.at_final_oneshot = true;
-        inf.target_heading = board_bearing_to(goal[0] - e.pos[0], goal[1] - e.pos[1]);
-        inf.board_progress_pos[0] = e.pos[0];
-        inf.board_progress_pos[1] = e.pos[1];
-        inf.board_progress_valid = true;
-        return;
-    }
-    inf.board_blocked = false;
-
-    // ARRIVED -> board. A full or filtered-out vehicle leaves the soldier
-    // standing at the goal (no seat -> no attach). The modeled admit gate is
-    // "the target owns seats"; the per-command seat filter reruns inside
-    // mount_boarding_command. [orig: the arrived gate @0x4bbda6..0x4bbe07 —
-    //  !parentEntity (+0x16C) @0x4bbda6, radius < 0x640000 @0x4bbdaf, itemDef
-    //  attrib & 0x60 @0x4bbdc4 -> Entity_FindBestSeatSlot @0x4351f0 (call
-    //  @0x4bbdd4) -> Entity_RequestVehicleAttach @0x4364a0 (call @0x4bbdf2)]
-    // THE PLAYERCONTROL ADMIT GATE. Retail only reaches its board/attach path
-    // when the TARGET's itemDef carries attrib bit 0x40 (items.def PlayerControl):
-    //
-    //     type = v158->itemDef->type;
-    //     if (type != ItemType_Vehicle && type != ItemType_Powerup) goto the move tail;
-    //     if ((v158->itemDef->attrib & 0x40) != 0) {
-    //         CanEnterVehicle = Entity_CanEnterVehicle(entity, v158);
-    //         ...
-    //     }
-    //     the move tail @0x4bbe11: walk toward the target (moveMode 3)
-    //
-    // so a target WITHOUT the bit is still walked to and simply never boarded.
-    // [orig: Entity_UpdateInfantryAI @0x4b9910 — the attrib test guarding the
-    //  Entity_CanEnterVehicle @0x435480 consult, and the fall-through to the
-    //  move tail @0x4bbe11.]
-    //
-    // The type test is NOT reproduced because it cannot discriminate here: the
-    // engine stores powerup and object as the SAME value 6
-    // [orig: ItemDef_ParseProperty @0x49eb00, mirrored in def.h DefItemType], so
-    // every object-type target passes it. The attrib bit is the operative gate.
-    //
-    // This replaces the previous stand-in admit gate ("the target owns seats"),
-    // which boarded anything with a seat. 00TRg orders three soldiers onto 1902
-    // "50cal on 180 tripod" emplacements (attrib EWeap 0x20, no PlayerControl)
-    // standing at their own spawns; without this gate they mount an emplacement
-    // retail never lets them mount, and are pinned there for the whole mission.
-    //
-    // STILL A RESIDUAL: Entity_CanEnterVehicle's own internal gates (the Flags&2 /
-    // itemDef / model preamble, the groundEntity path, Entity_IsBoneInProximity,
-    // and the Flags&0x2000 + 16-unit savedLivePose arm) remain unported — only
-    // the attrib gate that guards the CALL is ported here.
-    // RETRACTED 2026-08-22: this branch previously required
-    // `target->item_attrib & kItemAttribPlayerControl` before mounting. The
-    // attrib 0x40 test IS witnessed, but it guards the Entity_CanEnterVehicle
-    // CONSULT, not the attach itself:
-    //
-    //     if ((v158->itemDef->attrib & 0x40) != 0) { CanEnterVehicle = ...; }
-    //     the move tail @0x4bbe11: walk toward the target
-    //
-    // Gating the MOUNT on it was an over-application of the witness, and the wire
-    // refutes it: retail emplaces SEVEN AI at ~100% of their rows, and three of
-    // them are handles 42/43/51 -- exactly the soldiers 00TRg orders onto the
-    // 1902 tripods (attrib EWeap, no PlayerControl). Retail mans those tripods;
-    // the gate stopped us doing so. [orig: Entity_UpdateInfantryAI @0x4b9910.]
-    //
-    // The attach path retail takes for a non-PlayerControl target is NOT yet
-    // witnessed (the LABEL_363 leg is unread), so no replacement gate is invented
-    // here: the admit condition returns to "the target owns a seat we selected".
-    if (seat_idx >= 0 && !target->seats.empty())
-        world.commands.mount_boarding_command(self->net_id, target_ssn,
-                                              static_cast<uint8_t>(command));
+	auto &inf = e.inf;
+	auto &slot = e.slot;
+	// Cached board target and command dispatch [orig: @0x4BEE93..0x4BEEC6,
+	// @0x4BEEA5..0x4BEEAF, @0x4BEEBA].
+	const uint16_t ssn = static_cast<uint16_t>(slot.f[38]);
+	const auto th = world.registry.find_by_net_id(ssn);
+	Entity *target = world.registry.get(th);
+	Entity *self = world.registry.get(e.handle);
+	if (target == nullptr || self == nullptr) {
+		slot.f[36] = 0;
+		inf.board_blocked = false;
+		return;
+	}
+	if (slot.f[36] != int32_t(th.packed) + 1)
+		claim_entry(e, world, *target, command);
+	slot.f[36] = int32_t(th.packed) + 1;
+	if (self->mounted || !target->has_item_def)
+		return;
+	const bool pc = (target->item_attrib & kItemAttribPlayerControl) != 0;
+	const bool entry_type = target->item_type == 1 || target->item_type == 6;
+	if (entry_type && pc && !vehicle_can_enter(world, self, *target)) {
+		if ((target->flags & kEntityFlagDead) != 0 || !target->alive || target->health <= 0) {
+			const double dx = board_to_fixed(self->spawn_position.x) - int64_t(e.pos[0]);
+			const double dy = board_to_fixed(self->spawn_position.y) - int64_t(e.pos[1]);
+			const double dz = (board_to_fixed(self->spawn_position.z) - int64_t(e.pos[2])) >> 1;
+			if (std::trunc(std::sqrt(dx * dx + dy * dy + dz * dz)) > 0x80000) {
+				self->health = e.health = 0;
+				self->last_attacker = target->last_attacker;
+			}
+		}
+		return;
+	}
+	int32_t goal[3] = { board_to_fixed(target->position.x), board_to_fixed(target->position.y),
+		board_to_fixed(target->position.z) };
+	// Arrival radius [orig: @0x4BB325..0x4BB34A, 2-unit arm @0x4BB32E].
+	int32_t radius = board_to_fixed(target->bound_radius) + 0x10000;
+	if (entry_type && pc) {
+		VehicleSeatSelection best;
+		if (find_best_vehicle_seat(world, th, e.handle, best, seat_mode_for_command(command))) {
+			const Entity *carrier = world.registry.get(best.vehicle);
+			if (carrier)
+				seat_world_position(world, *carrier, carrier->seats[best.seat_index], goal);
+		}
+		// The latch is armed by the terrain-gradient shove, not a stalled walk.
+		// Recover the exact integer neighbour differences from the shared normal
+		// kernel. [orig: Terrain_GetHeightGradient @0x606330; @0x4BA85B]
+		if (world.tables.terrain && ((self->flags | self->engine_flags) & 0x90A000u) == 0) {
+			const auto n = terrain::height_field_surface_normal_world(
+					*world.tables.terrain, e.pos[0] / 65536.0f, -e.pos[1] / 65536.0f);
+			const double gx = std::round(-256.0 * n.x / n.up), gy = std::round(-256.0 * n.z / n.up);
+			if (std::trunc(std::hypot(gx, gy)) >= 768)
+				inf.board_blocked = true;
+		}
+		if (!inf.board_blocked)
+			radius = 0x20000;
+	} else if (entry_type) {
+		entry_goal(e, world, *self, *target, goal, radius);
+	}
+	const int32_t dist = board_dist(e.pos, goal);
+	// Attach gate and calls [orig: @0x4BBDA6..0x4BBE07; @0x4BBDAF,
+	// @0x4BBDC4, @0x4BBDD4, @0x4BBDF2]; common move tail @0x4BBE11.
+	if (dist < radius) {
+		if (inf.board_entry_stage)
+			++inf.board_entry_stage;
+		inf.board_blocked = false;
+		if (radius < 0x640000 &&
+				(target->item_attrib & (kItemAttribPlayerControl | kItemAttribEweap)) != 0)
+			world.commands.mount_boarding_command(self->net_id, ssn, static_cast<uint8_t>(command));
+		if (!self->mounted)
+			self->flags &= ~kEntityFlagMounted;
+		return;
+	}
+	inf.move_mode = 3;
+	inf.target_dist = dist;
+	inf.arrival_radius = radius;
+	std::copy_n(goal, 3, inf.move_target);
+	inf.at_final_oneshot = true;
+	inf.target_heading = board_bearing_to(goal[0] - e.pos[0], goal[1] - e.pos[1]);
 }
 
 } // namespace opennova::world

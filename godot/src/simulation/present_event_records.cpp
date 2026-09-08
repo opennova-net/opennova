@@ -65,87 +65,50 @@ void ThrowableVisualRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(ThrowableVisualRow, Variant::BOOL, move_effect_live)
 }
 
-// --- VehicleWakeVisualRow --------------------------------------------------
+// --- VehicleTrailVisualRow --------------------------------------------------
 
-Ref<VehicleWakeVisualRow> VehicleWakeVisualRow::make(int p_handle_packed,
-		int64_t p_registry_spawn_id, const Vector3 &p_pos, const Vector3 &p_rotation_deg,
-		float p_water_height, bool p_afloat, const String &p_w3_effect,
-		const String &p_w3_userpoint, float p_w3_magnitude, const String &p_w4_effect,
-		const String &p_w4_userpoint, float p_w4_magnitude, int p_bms_id,
-		int p_origin_kind, int p_origin_index, int p_item_id, int p_source_tick) {
-	opennova::world::VehicleWakeVisualRow v;
-	v.handle_packed = p_handle_packed;
-	v.registry_spawn_id = static_cast<uint64_t>(p_registry_spawn_id);
-	v.item_id = p_item_id;
-	v.bms_id = p_bms_id;
-	v.spawn_origin = p_origin_kind == opennova::world::kSpawnOriginKindNone
-			? opennova::world::kSpawnOriginNone
-			: opennova::world::spawn_origin_pack(
-					static_cast<uint32_t>(p_origin_kind), static_cast<uint32_t>(p_origin_index));
-	v.source_tick = static_cast<uint32_t>(p_source_tick);
-	v.pos = mission_from_godot(p_pos);
-	v.pitch_deg = p_rotation_deg.x;
-	v.yaw_deg = p_rotation_deg.y;
-	v.roll_deg = p_rotation_deg.z;
-	v.water_z = static_cast<int32_t>(std::llround(double(p_water_height) * 65536.0));
-	v.afloat = p_afloat;
-	v.w3_effect = p_w3_effect.utf8().get_data();
-	v.w3_userpoint = p_w3_userpoint.utf8().get_data();
-	v.w3_magnitude_q16 = static_cast<uint32_t>(
-			std::llround(double(p_w3_magnitude) * 65536.0));
-	v.w4_effect = p_w4_effect.utf8().get_data();
-	v.w4_userpoint = p_w4_userpoint.utf8().get_data();
-	v.w4_magnitude_q16 = static_cast<uint32_t>(
-			std::llround(double(p_w4_magnitude) * 65536.0));
-	Ref<VehicleWakeVisualRow> out;
+Ref<VehicleTrailVisualRow> VehicleTrailVisualRow::make(int p_handle, int64_t p_generation,
+		int p_point, const String &p_effect, const Vector3 &p_pos, const Vector3 &p_dir,
+		float p_magnitude, int p_tick) {
+	opennova::world::VehicleTrailVisualRow v;
+	v.handle_packed = p_handle;
+	v.registry_spawn_id = uint64_t(p_generation);
+	v.point = uint8_t(p_point);
+	v.effect = p_effect.utf8().get_data();
+	v.pos = { p_pos.x, -p_pos.z, p_pos.y };
+	v.dir = { p_dir.x, -p_dir.z, p_dir.y };
+	v.magnitude_q16 = uint32_t(std::llround(double(p_magnitude) * 65536.0));
+	v.source_tick = uint32_t(p_tick);
+	Ref<VehicleTrailVisualRow> out;
 	out.instantiate();
 	out->assign(v);
 	return out;
 }
-
-Vector3 VehicleWakeVisualRow::get_pos() const { return mission_to_godot(value_.pos); }
-Vector3 VehicleWakeVisualRow::get_rotation_deg() const {
-	return Vector3(value_.pitch_deg, value_.yaw_deg, value_.roll_deg);
+Vector3 VehicleTrailVisualRow::get_pos() const {
+	return mission_to_godot(value_.pos);
 }
-float VehicleWakeVisualRow::get_water_height() const {
-	return static_cast<float>(value_.water_z) / 65536.0f;
+Vector3 VehicleTrailVisualRow::get_dir() const {
+	return mission_to_godot(value_.dir);
 }
-String VehicleWakeVisualRow::get_w3_effect() const { return gd(value_.w3_effect); }
-String VehicleWakeVisualRow::get_w3_userpoint() const { return gd(value_.w3_userpoint); }
-float VehicleWakeVisualRow::get_w3_magnitude() const {
-	return static_cast<float>(value_.w3_magnitude_q16) / 65536.0f;
+String VehicleTrailVisualRow::get_effect() const {
+	return gd(value_.effect);
 }
-String VehicleWakeVisualRow::get_w4_effect() const { return gd(value_.w4_effect); }
-String VehicleWakeVisualRow::get_w4_userpoint() const { return gd(value_.w4_userpoint); }
-float VehicleWakeVisualRow::get_w4_magnitude() const {
-	return static_cast<float>(value_.w4_magnitude_q16) / 65536.0f;
+float VehicleTrailVisualRow::get_magnitude() const {
+	return float(value_.magnitude_q16) / 65536.0f;
 }
-
-void VehicleWakeVisualRow::_bind_methods() {
-	ClassDB::bind_static_method("VehicleWakeVisualRow",
-			D_METHOD("make", "handle_packed", "registry_spawn_id", "pos", "rotation_deg",
-					"water_height", "afloat", "w3_effect", "w3_userpoint", "w3_magnitude",
-					"w4_effect", "w4_userpoint", "w4_magnitude", "bms_id", "origin_kind",
-					"origin_index", "item_id", "source_tick"),
-			&VehicleWakeVisualRow::make, DEFVAL(true), DEFVAL(String()), DEFVAL(String()),
-			DEFVAL(0.0f), DEFVAL(String()), DEFVAL(String()), DEFVAL(0.0f), DEFVAL(0),
-			DEFVAL(255), DEFVAL(0xFFFFFF), DEFVAL(0), DEFVAL(0));
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::INT, handle_packed)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::INT, registry_spawn_id)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::INT, item_id)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::INT, bms_id)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::INT, spawn_origin)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::INT, source_tick)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::VECTOR3, pos)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::VECTOR3, rotation_deg)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::FLOAT, water_height)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::BOOL, afloat)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::STRING, w3_effect)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::STRING, w3_userpoint)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::FLOAT, w3_magnitude)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::STRING, w4_effect)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::STRING, w4_userpoint)
-	OPENNOVA_RECORD_READ_ONLY(VehicleWakeVisualRow, Variant::FLOAT, w4_magnitude)
+void VehicleTrailVisualRow::_bind_methods() {
+	ClassDB::bind_static_method("VehicleTrailVisualRow",
+			D_METHOD("make", "handle", "generation", "point", "effect", "pos", "dir", "magnitude",
+					"tick"),
+			&VehicleTrailVisualRow::make, DEFVAL(0));
+	OPENNOVA_RECORD_READ_ONLY(VehicleTrailVisualRow, Variant::INT, handle_packed)
+	OPENNOVA_RECORD_READ_ONLY(VehicleTrailVisualRow, Variant::INT, registry_spawn_id)
+	OPENNOVA_RECORD_READ_ONLY(VehicleTrailVisualRow, Variant::INT, point)
+	OPENNOVA_RECORD_READ_ONLY(VehicleTrailVisualRow, Variant::INT, source_tick)
+	OPENNOVA_RECORD_READ_ONLY(VehicleTrailVisualRow, Variant::VECTOR3, pos)
+	OPENNOVA_RECORD_READ_ONLY(VehicleTrailVisualRow, Variant::VECTOR3, dir)
+	OPENNOVA_RECORD_READ_ONLY(VehicleTrailVisualRow, Variant::STRING, effect)
+	OPENNOVA_RECORD_READ_ONLY(VehicleTrailVisualRow, Variant::FLOAT, magnitude)
 }
 
 // --- FirePresentationEvent --------------------------------------------------

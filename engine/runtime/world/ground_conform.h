@@ -111,7 +111,10 @@ int32_t conform_spring_compress(ConformOscillator &osc, int32_t &compression,
 // reads; `shock` is the def's field (+0x904), clamped to [0, 10] IN PLACE here
 // exactly as retail writes the clamp back into the item def
 // @0x45D18F..0x45D1A2 — pass the def's field, never a copy.
-int32_t conform_spring_oscillate(ConformOscillator &osc, int32_t &compression,
-		int32_t &impact, int32_t &shock, int32_t spring, int32_t entity_a0);
+int32_t conform_spring_compress_linear(ConformOscillator &osc, int32_t &compression,
+		int32_t &impact, int32_t step, int32_t travel, int32_t spring);
+
+int32_t conform_spring_oscillate(ConformOscillator &osc, int32_t &compression, int32_t &impact,
+		int32_t &shock, int32_t spring, int32_t entity_a0, float phase_step = kOscPhaseStep);
 
 } // namespace opennova::world

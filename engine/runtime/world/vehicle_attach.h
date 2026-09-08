@@ -109,7 +109,10 @@ bool find_best_vehicle_seat(
         SeatSelectionMode mode = SeatSelectionMode::Any,
         const VehicleOccupancySource *source = nullptr);
 
-
+// Admit a rider at the carrier's spawn anchor, on its deck, or while its
+// saved planar pose differs by at most 16 fixed-point counts and it is grounded.
+// [orig: Entity_CanEnterVehicle @0x435480]
+bool vehicle_can_enter(const World &, const Entity *rider, const Entity &carrier);
 
 // The USE-ITEM mount toggle's weapon-busy gate [orig: Entity_ToggleVehicleMount
 // @0x436958-0x436977 — no EquippedSlot passes; currentAction < 2

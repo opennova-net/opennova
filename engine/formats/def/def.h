@@ -196,8 +196,9 @@ typedef struct DefWeaponAction {
     char soundsetend[128];
     char particle[128];
     char particleuserpoint[128];
-    char (*raw_lines)[512];
-    size_t raw_lines_count;
+	int action_value; /* ActionDef+52: mounted tank recoil amplitude [orig: @0x40270F] */
+	char (*raw_lines)[512];
+	size_t raw_lines_count;
 } DefWeaponAction;
 
 /* DefWeaponDef.flags bits — the weapon.def `flags <name>` OR-mask (dword 1 of the
@@ -800,11 +801,16 @@ typedef struct DefItemDef {
     float shadow_length;
     float shadow_offset_x;
     float shadow_offset_y;
+	/* 'pcvehicle_spawnlist' -> def+2772. Slots are shared across the file,
+	   allocated in first-use order, capped at 32. [orig: @0x4A0253; @0x49DFC0] */
+	uint32_t vehicle_spawn_mask;
 } DefItemDef;
 
 typedef struct DefItemsFile {
     DefItemDef *entries;
     size_t count;
+	int vehicle_spawn_ids[32];
+	int vehicle_spawn_id_count;
 } DefItemsFile;
 
 /* ========================================================================= */

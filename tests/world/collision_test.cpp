@@ -689,7 +689,10 @@ void test_resolver_wall_pushout() {
         CHECK(!clear_rig.cw.resolver_applied_push);
     }
 
-    // Step into the wall: prev pos (12.8) was outside the +X plane -> it separates.
+	// A walker facing into this +X wall latches the boarding arrival ring.
+	auto &brain = *rig.world.ai.at(rig.world.ai.attach(rig.soldier));
+	brain.inf.target_heading = brain.inf.body_heading = INT32_MIN;
+	// Step into the wall: prev pos (12.8) was outside the +X plane -> it separates.
     pos[0] = fx(11.6);
     Entity *s = rig.world.registry.get(rig.soldier);
     s->position.x = 11.6f;
@@ -701,6 +704,7 @@ void test_resolver_wall_pushout() {
     CHECK(health == 100);   // solid volumes never hurt
     // The wall separation moved the entity: the applied-push latch stores 1.
     CHECK(rig.cw.resolver_applied_push);
+	CHECK(brain.inf.board_blocked); // [orig: facing-push gate @0x4B37BB]
 }
 
 // ---------------------------------------------------------------------------
@@ -2643,6 +2647,25 @@ void test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices
     CHECK(provider.calls_for(rig.building) >= 2);
 }
 
+// One explicitly placed test probe; production supplies each family's complete
+// wheel/hull array. These tests isolate candidate admission and child exclusion.
+int32_t resolve_test_vehicle_probe(CollisionWorld &collision, World &world, EntityHandle handle,
+		const int32_t pos[3], const int32_t previous[3], int32_t push[2]) {
+	Entity &vehicle = *world.registry.get(handle);
+	for (int i = 0; i < 3; ++i)
+		vehicle.saved_live_pos[i] = previous[i];
+	vehicle.saved_live_valid = true;
+	const int32_t probes[1][3] = { { pos[0], pos[1], pos[2] + fx(1.5) } };
+	const int32_t radii[1] = { fx(1.5) };
+	VehicleProbeForce forces[1];
+	EntityHandle hit;
+	const int32_t severity = collision.resolve_vehicle_probes(
+			world, vehicle, pos, probes, radii, 1, 3000000, 4000000, forces, hit);
+	push[0] = forces[0].fx;
+	push[1] = forces[0].fy;
+	return severity;
+}
+
 void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     World world;
     world.registry.configure_pool(1, 4);
@@ -2689,14 +2712,66 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     const int32_t moved[3] = {fx(13.0), fx(10.0), 0};
     const int32_t previous[3] = {fx(14.0), fx(10.0), 0};
     int32_t push[2] = {};
-    const int32_t severity =
-            collision.resolve_vehicle_hull(world, vehicle, moved, previous, push);
-    CHECK(severity == 3);
-    CHECK(push[0] > 0);
+	const int32_t severity =
+			resolve_test_vehicle_probe(collision, world, vehicle, moved, previous, push);
+	CHECK(severity == 3);
+	CHECK(push[0] > 0);
     CHECK(push[1] == 0);
     CHECK(provider.calls_for(wall) == 1);
     CHECK(provider.calls_for(stale) == 0);
     CHECK(provider.build_handles.size() == 1);
+}
+
+// Probe support works on model decks and all three lateral severity bands.
+// A terrain-only solve or the old horizontal-only sphere loses this support.
+void test_vehicle_probes_support_model_decks_and_grade_slopes() {
+	World world;
+	world.registry.configure_pool(1, 4);
+	world.registry.configure_pool(2, 4);
+	CollisionWorld collision;
+	Entity hull;
+	hull.kind = EntityKind::Item;
+	hull.item_id = 900;
+	hull.has_item_def = true;
+	hull.item_type = 1;
+	hull.bound_radius = 3.0f;
+	hull.position = { 10.0f, 10.0f, 2.0f };
+	EntityHandle vehicle = world.registry.spawn(1, hull);
+	VehicleTraits traits;
+	traits.physics = 1;
+	world.vehicles.traits.set(900, traits);
+	Entity deck;
+	deck.kind = EntityKind::Building;
+	deck.position = { 10.0f, 10.0f, 0.0f };
+	deck.yaw = 90;
+	EntityHandle platform = world.registry.spawn(2, deck);
+	collision.assign_entity(platform, collision.add_model(box_model(1, 0, 4.0, 4.0, 1.0)));
+	for (int i = 0; i < 17; ++i)
+		collision.build_tick_tables(world);
+	Entity &source = *world.registry.get(vehicle);
+	const int32_t radii[1] = { fx(0.5) };
+	const int slopes[4] = { 0, 40, 45, 60 };
+	const int expected[4] = { 0, 1, 2, 3 };
+	for (int test = 0; test < 4; ++test) {
+		world.registry.get(platform)->pitch = int16_t(slopes[test]);
+		const double radians = slopes[test] * 3.14159265358979323846 / 180.0;
+		const int32_t probes[1][3] = { { fx(10.0 - 1.25 * std::sin(radians)), fx(10.0),
+				fx(1.25 * std::cos(radians)) } };
+		const int32_t hull_pos[3] = { probes[0][0], probes[0][1], probes[0][2] };
+		source.saved_live_valid = true;
+		source.saved_live_pos[0] = fx(10.0 - 2.0 * std::sin(radians));
+		source.saved_live_pos[1] = fx(10.0);
+		source.saved_live_pos[2] = fx(2.0 * std::cos(radians));
+		VehicleProbeForce force[1];
+		EntityHandle hit;
+		const int severity = collision.resolve_vehicle_probes(world, source, hull_pos, probes,
+				radii, 1, 2696059, 3435719, force, hit); // cos(50), cos(35), Q22
+		CHECK(severity == expected[test]);
+		CHECK(force[0].fz > 0);
+		CHECK((force[0].fx != 0) == (test != 0));
+		CHECK(hit.valid() == (severity == 3));
+		CHECK(force[0].wall_contact == (severity == 3));
+	}
 }
 
 // The mounted-child skip [orig: Entity_CheckCollisionState @0x462a30 proximity
@@ -2759,10 +2834,10 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
     const int32_t moved[3] = {fx(13.0), fx(10.0), 0};
     const int32_t previous[3] = {fx(14.0), fx(10.0), 0};
     int32_t push[2] = {};
-    const int32_t severity =
-            collision.resolve_vehicle_hull(world, hull, moved, previous, push);
-    CHECK(severity == 0);
-    CHECK(push[0] == 0);
+	const int32_t severity =
+			resolve_test_vehicle_probe(collision, world, hull, moved, previous, push);
+	CHECK(severity == 0);
+	CHECK(push[0] == 0);
     CHECK(push[1] == 0);
 
     // Negative control: an unrelated emplacement (another hull's child) in the
@@ -2775,10 +2850,10 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
     for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
     CHECK(collision.candidate_count(hull) == 3);
     int32_t push2[2] = {};
-    const int32_t severity2 =
-            collision.resolve_vehicle_hull(world, hull, moved, previous, push2);
-    CHECK(severity2 == 3);
-    CHECK(push2[0] != 0 || push2[1] != 0);
+	const int32_t severity2 =
+			resolve_test_vehicle_probe(collision, world, hull, moved, previous, push2);
+	CHECK(severity2 == 3);
+	CHECK(push2[0] != 0 || push2[1] != 0);
 }
 
 struct DemandPersonProvider final : IPoseProvider {
@@ -5341,9 +5416,33 @@ void test_cached_los_excludes_the_endpoint_carrier() {
     CHECK(!sys.line_of_sight_clear_cached(world, b, a, target_h, walker_h));
 }
 
+void test_fixed_matrix_euler_round_trip() {
+	// Compound yaw/pitch and obtuse rolls exercise all three sequential
+	// integer projections, including the inverted-hull quadrant. The retail
+	// radians multiplier is 30.5 ppm above the mathematical inverse; allow
+	// one BAM high-word of roll drift through these compound rotations.
+	for (double yaw : { -170.0, -35.0, 0.0, 61.0, 170.0 }) {
+		for (double pitch : { -61.0, 0.0, 38.0 }) {
+			for (double roll : { -130.0, -22.0, 0.0, 34.0, 135.0 }) {
+				const int32_t y = bam_from_degrees_wrapped(yaw);
+				const int32_t p = bam_from_degrees_wrapped(pitch);
+				const int32_t r = bam_from_degrees_wrapped(roll);
+				const int32_t origin[3] = {};
+				const CollisionMatrix matrix = collision_matrix_from_euler(y, p, r, origin);
+				int32_t got[3];
+				collision_matrix_to_euler(matrix, got);
+				CHECK(std::abs(int64_t(got[0]) - y) < 8192);
+				CHECK(std::abs(int64_t(got[1]) - p) < 8192);
+				CHECK(std::abs(int64_t(got[2]) - r) < 65536);
+			}
+		}
+	}
+}
+
 int main() {
-    test_matrix_roundtrip();
-    test_retail_render_pose_matrix_roundtrip_and_order();
+	test_fixed_matrix_euler_round_trip();
+	test_matrix_roundtrip();
+	test_retail_render_pose_matrix_roundtrip_and_order();
     test_blink_query_and_refresh();
     test_negative_static_slot_candidates_and_blink();
     test_iris_candidate_blink_is_not_global_building_walk();
@@ -5393,8 +5492,9 @@ int main() {
     test_person_section_raycast_uses_posed_bone_matrix();
     test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices();
     test_vehicle_hull_prefilters_stale_candidates_before_section_matrices();
-    test_vehicle_hull_skips_mounted_child_ground_chain();
-    test_f3_debug_prefilters_before_building_section_matrices();
+	test_vehicle_probes_support_model_decks_and_grade_slopes();
+	test_vehicle_hull_skips_mounted_child_ground_chain();
+	test_f3_debug_prefilters_before_building_section_matrices();
     test_iris_static_rays_prefilter_before_section_matrices();
     test_sound_los_prefilters_candidates_before_section_matrices();
     test_sound_occlusion_flagged_planes_ignore_thin_ray_shrink();

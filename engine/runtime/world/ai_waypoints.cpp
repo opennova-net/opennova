@@ -13,6 +13,7 @@
 #include "ai_detail.h"
 
 #include <runtime/world/world.h>
+#include <runtime/world/vehicle_attach.h>
 #include <base/io/fixed.h>
 #include <base/io/bam.h>
 
@@ -286,19 +287,20 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
     return cmd_speed;
 }
 
-// See ai.h. [orig: Entity_IsBoneInProximity @0x434F90 — parent @0x434f98
-// (dead parent -> 0 @0x434fa6; Entity_TransformLocalToWorld @0x434fc3), the
-// halved Z @0x43501e, the x87 length and the 0x80000 compare @0x435051]. Our
-// rows carry no spawn parent (a hull authored on a deck is the D-NET-196
-// deck-carried vehicle residual), so the anchor is spawn_position verbatim.
-bool vehicle_at_spawn_anchor(const Entity &veh) {
-    const int32_t dx = to_fixed(veh.spawn_position.x) - to_fixed(veh.position.x);
-    const int32_t dy = to_fixed(veh.spawn_position.y) - to_fixed(veh.position.y);
-    const int32_t dz = (to_fixed(veh.spawn_position.z) - to_fixed(veh.position.z)) >> 1;
-    const double d = std::sqrt(static_cast<double>(dx) * dx +
-                               static_cast<double>(dy) * dy +
-                               static_cast<double>(dz) * dz);
-    const int32_t di = d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
+// Spawn-parent lookup, dead-parent refusal, full-pose lift and weighted proximity.
+// [orig: @0x434F98, @0x434FA6, @0x434FC3, @0x43501E, @0x435051]
+// See ai.h. [orig: Entity_IsBoneInProximity @0x434F90]
+bool vehicle_at_spawn_anchor(const World &world, const Entity &veh) {
+	int32_t pose[6] = { to_fixed(veh.spawn_position.x), to_fixed(veh.spawn_position.y),
+		to_fixed(veh.spawn_position.z), 0, 0, 0 };
+	if (veh.veh.spawn_pose_valid && !world.vehicles.resolve_spawn_pose(veh, pose))
+		return false;
+	const int32_t dx = io::bam_sub(pose[0], to_fixed(veh.position.x));
+	const int32_t dy = io::bam_sub(pose[1], to_fixed(veh.position.y));
+	const int32_t dz = io::bam_sub(pose[2], to_fixed(veh.position.z)) >> 1;
+	const double d = std::sqrt(static_cast<double>(dx) * dx + static_cast<double>(dy) * dy +
+			static_cast<double>(dz) * dz);
+	const int32_t di = d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
     return di <= 0x80000;
 }
 
@@ -332,6 +334,8 @@ bool watercraft_driver_submerged(const World &world, const Entity &occ) {
     return to_fixed(occ.position.z) + occ.eye_offset_z <= world.env.water_z;
 }
 
+// Stuck escalation uses the live spawn-parent anchor and rejects dead parents.
+// [orig: @0x4653BE, @0x4653D4]
 // See ai.h. [orig: AI_CheckVehicleStuckState @0x465290]
 void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
     // [orig: `entity[74] != 1` @0x4652a3 — the think cooldown at +0x128]
@@ -368,15 +372,17 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
         });
     }
     if (m.stuck_ticks <= 3410) return;                 // [orig: @0x4653a6]
-    // The spawn anchor [orig: +0x24C, lifted through a live spawn parent
-    // @0x4653d4 — a DEAD parent returns @0x4653be; no parent model here].
-    const int32_t sx = px - to_fixed(veh.spawn_position.x);
-    const int32_t sy = py - to_fixed(veh.spawn_position.y);
-    const int32_t sz = pz - to_fixed(veh.spawn_position.z);
-    const double d = std::sqrt(static_cast<double>(sx) * sx +
-                               static_cast<double>(sy) * sy +
-                               static_cast<double>(sz) * sz);
-    const int32_t di = d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
+	// [orig: AI_CheckVehicleStuckState @0x4653AC..0x46542D]
+	int32_t pose[6] = { to_fixed(veh.spawn_position.x), to_fixed(veh.spawn_position.y),
+		to_fixed(veh.spawn_position.z), 0, 0, 0 };
+	if (m.spawn_pose_valid && !world.vehicles.resolve_spawn_pose(veh, pose))
+		return;
+	const int32_t sx = io::bam_sub(px, pose[0]);
+	const int32_t sy = io::bam_sub(py, pose[1]);
+	const int32_t sz = io::bam_sub(pz, pose[2]);
+	const double d = std::sqrt(static_cast<double>(sx) * sx + static_cast<double>(sy) * sy +
+			static_cast<double>(sz) * sz);
+	const int32_t di = d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
     if (di <= 0xC0000) return;                          // [orig: @0x465470]
     if (m.stuck_ticks <= 3720) {
         m.slide_z += 1024;                              // [orig: @0x465492 slideDecay += 0x400]
@@ -392,9 +398,11 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
 void AiSystem::apply_min_ai_crew_clamp(World &world, Entity &veh,
                                        const VehicleTraits &traits) {
     if (traits.min_ai <= 1) return;
-    if (vehicle_at_spawn_anchor(veh)) return;
-    if (count_mounted_entities(world, veh) >= traits.min_ai) return;
-    if (veh.health > traits.critical_hp)
+	if (vehicle_at_spawn_anchor(world, veh))
+		return;
+	if (count_mounted_entities(world, veh) >= traits.min_ai)
+		return;
+	if (veh.health > traits.critical_hp)
         veh.health = static_cast<int32_t>(static_cast<int16_t>(traits.critical_hp));
 }
 
@@ -408,23 +416,21 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
 
     const bool wrecked = veh.health <= 0 || !veh.alive;
     if (controller == nullptr || wrecked || (veh.flags & kEntityFlagDead) != 0) {
-        // Parked/no driver: the motor's no-controller branch holds heading + zeroes the
-        // command; the brain drops into the player-mode/parked state and the
-        // stuck escalation counts. [orig: @0x48c002-0x48c02d — aiComp[132] = Yaw,
-        // [136] = 0, [137] = 0, AI_CheckVehicleStuckState @0x48c01e, Flags &= ~0x80,
-        // state = 22]
-        // The pend mirror is ours: the original has ONE state field; without it the
-        // SM's transition pass reverts the stamp to the pending 16 next tick.
-        b.f[AiBrain::kCurState] = 22;
-        b.f[AiBrain::kPendState] = 22;
-        check_vehicle_stuck(world, veh);
+		// Parked/no driver: the motor's no-controller branch holds heading + zeroes the
+		// command; the brain drops into the player-mode/parked state and the
+		// stuck escalation counts. [orig: @0x48c002-0x48c02d — aiComp[132] = Yaw,
+		// [136] = 0, [137] = 0, AI_CheckVehicleStuckState @0x48c01e, Flags &= ~0x80,
+		// state = 22]
+		// Only the current state is stamped. Pending death/command transitions
+		// remain owned by the state callback at entity+0x1C8.
+		b.f[AiBrain::kCurState] = 22;
+		check_vehicle_stuck(world, veh);
         return; // out.ai_drive stays false
     }
 
     // An AI controller sits in the ctrl/drvr seat — the autopilot leg.
     if (b.f[AiBrain::kCurState] == 22) { // [orig: @0x48bc16]
         b.f[AiBrain::kCurState] = 16;
-        b.f[AiBrain::kPendState] = 16;
     }
 
     const int32_t heading = veh.veh.yaw_seeded
@@ -510,7 +516,6 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
         // Flags &= ~0x80, state = 22]. The pend mirror is ours — one state field
         // in the original (see vehicle_ai_drive).
         b.f[AiBrain::kCurState] = 22;
-        b.f[AiBrain::kPendState] = 22;
         check_vehicle_stuck(world, veh);
         return; // out.ai_drive stays false
     }
@@ -518,7 +523,6 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     // The 22 -> 16 hand-back at the AI-leg head [orig: @0x48E247..0x48E24D].
     if (b.f[AiBrain::kCurState] == 22) {
         b.f[AiBrain::kCurState] = 16;
-        b.f[AiBrain::kPendState] = 16;
     }
 
     const int32_t heading = veh.veh.yaw_seeded
@@ -631,15 +635,12 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
 //  @0x48E75B; gates `entity[7] != 0`, `(Flags & 3) == 0`, aiComp non-null,
 //  aiComp[37] == 125, aiComp[38] == entity->DcbId, and `!entity[90]` (unmounted)]
 bool AiSystem::vehicle_waits_for_boarders(World &world, const Entity &veh) {
-    // Seats full -> nobody can still be coming, so nothing holds it.
-    // [orig: the enclosing `if (Entity_CanEnterVehicle(nullptr, entity))`]
-    bool has_free_seat = false;
-    for (const Seat &s : veh.seats) {
-        if (!s.occupant.valid()) { has_free_seat = true; break; }
-    }
-    if (!has_free_seat) return false;
+	// The whole admission predicate gates the hold, including the stable
+	// saved-pose/deck/spawn arms. [orig: Entity_CanEnterVehicle @0x435480]
+	if (!vehicle_can_enter(world, nullptr, veh))
+		return false;
 
-    bool waiting = false;
+	bool waiting = false;
     world.registry.for_each([&](const Entity &e) {
         if (waiting) return;
         if (e.handle.pool() != 0) return;      // [orig: the pool-0 walk]
@@ -658,7 +659,6 @@ bool AiSystem::vehicle_waits_for_boarders(World &world, const Entity &veh) {
 
 void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller,
                              const VehicleTraits &traits) {
-    (void)traits;
     AiEntity *ve = for_handle(veh.handle);
     if (ve == nullptr) return;
     AiBrain &b = ve->brain;
@@ -668,10 +668,14 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         m.yaw_seeded = true;
     }
     m.ai_drive = true;
-    const int32_t ground =
-            m.ground_cache != INT32_MIN ? m.ground_cache : ve->pos[2];
+	// These are the same storage as the brain's work/command words in retail.
+	// Carry them across our decision/physics split in both directions.
+	m.net_alt_target = b.f[AiBrain::kWorkPosZ];
+	m.steer_target_bam = b.f[AiBrain::kWorkHeading];
+	m.net_climb = b.f[137];
+	const int32_t ground = m.ground_cache != INT32_MIN ? m.ground_cache : ve->pos[2];
 
-    const bool wrecked = veh.health <= 0 || !veh.alive ||
+	const bool wrecked = veh.health <= 0 || !veh.alive ||
                          (veh.flags & kEntityFlagDead) != 0;
     const bool crewed =
             controller != nullptr && controller->alive && controller->health > 0;
@@ -680,10 +684,12 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         // pinned below ground (collective off), AI_CheckVehicleStuckState
         // @0x491c5e, state 14, engine flag cleared; our shared parked stamp is
         // 22 like the ground movers' player/parked leg]
-        b.f[AiBrain::kCurState] = 22;
-        b.f[AiBrain::kPendState] = 22;
-        m.cmd_speed = 0;
-        m.cmd_lateral_speed = 0;
+		if (!wrecked) {
+			b.f[AiBrain::kCurState] = 14;
+			b.f[AiBrain::kPendState] = 14;
+		}
+		m.cmd_speed = 0;
+		m.cmd_lateral_speed = 0;
         m.steer_target_bam = m.yaw_bam;
         m.net_alt_target = ground - 0x4000;
         m.net_climb = 0;
@@ -695,12 +701,12 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     // Crewed: the stuck count rests [orig: the AI-leg head `entity+0x148 = 0`],
     // parked -> FOLLOWWP [orig: `if (brain[16] == 14) brain[16] = 7`].
     m.stuck_ticks = 0;
-    if (b.f[AiBrain::kCurState] == 22) {
-        b.f[AiBrain::kCurState] = 16;
-        b.f[AiBrain::kPendState] = 16;
-    }
-    m.net_engine_on = true;
-    // The minAI crew clamp [orig: @0x4915b2..0x4915e2 — the air twin, gated
+	if (b.f[AiBrain::kCurState] == 14) {
+		b.f[AiBrain::kCurState] = 7;
+		b.f[AiBrain::kPendState] = 7;
+	}
+	m.net_engine_on = true;
+	// The minAI crew clamp [orig: @0x4915b2..0x4915e2 — the air twin, gated
     // `itemDef+0x8D8 > 1`, Entity_IsBoneInProximity @0x4915c2,
     // Entity_CountMountedEntities @0x4915d2, criticalHp @0x4915e2].
     apply_min_ai_crew_clamp(world, veh, traits);
@@ -738,9 +744,9 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     //  guard @0x491671]
     const NavEntry *node = nav.entry(b.f[AiBrain::kWpResolved]);
     if (b.f[AiBrain::kWpChannel] == 0 && b.f[AiBrain::kWpNode] == 0) node = nullptr;
-    if (node != nullptr && b.f[AiBrain::kCurState] == 16) {
-        // ---- The flight block [orig: @0x491672..0x491998].
-        const int32_t px = ve->pos[0], py = ve->pos[1], pz = ve->pos[2];
+	if (node != nullptr && b.f[AiBrain::kCurState] == 7) {
+		// ---- The flight block [orig: @0x491672..0x491998].
+		const int32_t px = ve->pos[0], py = ve->pos[1], pz = ve->pos[2];
         // The node's Z, floored 0x4000 under the hull's own average ground
         // [orig: @0x491672..0x491684].
         int32_t tz = node->f[3];
@@ -752,15 +758,16 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         // planar speed; zero lengths become 1 [orig: @0x491694..0x4916dd].
         const double fdx = static_cast<double>(dx), fdy = static_cast<double>(dy);
         const double dd = std::sqrt(fdx * fdx + fdy * fdy);
-        int32_t dist = dd >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(dd);
-        const int32_t bearing = static_cast<int32_t>(
-                std::llround(std::atan2(fdy, fdx) * 683565275.5764316));
-        const double fvx = static_cast<double>(m.vel_x);
-        const double fvy = static_cast<double>(m.vel_y);
+		int32_t dist = dd >= 2147418112.0 ? 2147418112 : static_cast<int32_t>(dd);
+		const int32_t bearing = static_cast<int32_t>(
+				static_cast<int64_t>(std::atan2(fdy, fdx) * 683565275.5764316));
+		const double fvx = static_cast<double>(m.vel_x);
+		const double fvy = static_cast<double>(m.vel_y);
         const double sd = std::sqrt(fvx * fvx + fvy * fvy);
-        int32_t speed = sd >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(sd);
-        if (speed == 0) speed = 1;
-        if (dist == 0) dist = 1;
+		int32_t speed = sd >= 2147418112.0 ? 2147418112 : static_cast<int32_t>(sd);
+		if (speed == 0)
+			speed = 1;
+		if (dist == 0) dist = 1;
         // The climb-per-tick the node's slope asks for at the current speed,
         // folded into the altitude target and the vertical velocity
         // [orig: @0x49175c..0x491796 — v104 = speed * dz / dist (64-bit);
@@ -838,12 +845,12 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         const int32_t ac = iabs32(c22);
         m.cmd_speed = static_cast<int32_t>((static_cast<int64_t>(m.cmd_speed) * ac) >> 22);
         m.cmd_speed = static_cast<int32_t>((static_cast<int64_t>(m.cmd_speed) * ac) >> 22);
-    }
+	}
 
-    // The pool-1 separation damp on the forward command [orig: @0x4919fc..0x491b67
-    // — the same footprint ellipse, dead-ahead cone and id/frame factor as the
-    // ground brake @0x48bd8f, the air walk gating on `entity+0x1C == 1`].
-    m.cmd_speed = vehicle_avoid_brake(world, veh, m.yaw_bam, m.cmd_speed);
+	// The pool-1 separation damp on the forward command [orig: @0x4919fc..0x491b67
+	// — the same footprint ellipse, dead-ahead cone and id/frame factor as the
+	// ground brake @0x48bd8f, the air walk gating on `entity+0x1C == 1`].
+	m.cmd_speed = vehicle_avoid_brake(world, veh, m.yaw_bam, m.cmd_speed);
 
     // WAIT FOR BOARDERS. A vehicle whose seats are not yet full HOLDS while any
     // live, unmounted body is still walking over to board it: heading pinned to
@@ -861,8 +868,9 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         m.steer_target_bam = m.yaw_bam;
         m.cmd_speed = 0;
         m.cmd_lateral_speed = 0;
-        m.net_climb = 0;          // [orig: [548] = 0 @0x491c4e]
-        m.net_engine_on = false; // the wire's Flags 0x80 [orig: `Flags &= ~0x80u`]
+		m.net_alt_target = io::bam_sub(ground, 0x2000);
+		m.net_climb = 0; // [orig: [548] = 0 @0x491c4e]
+		m.net_engine_on = false; // the wire's Flags 0x80 [orig: `Flags &= ~0x80u`]
     }
 }
 

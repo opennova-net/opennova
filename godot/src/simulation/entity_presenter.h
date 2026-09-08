@@ -33,7 +33,7 @@
 #include "simulation/present_event_records.h"
 #include "simulation/present_stats.h"
 #include "simulation/throwable_presenter.h"
-#include "simulation/vehicle_wake_presenter.h"
+#include "simulation/vehicle_trail_presenter.h"
 
 namespace godot {
 
@@ -282,7 +282,7 @@ public:
 	void present_destruction_drained(const Ref<DestructionDrain> &p_events,
 			const TypedArray<DeathPieceRow> &p_pieces);
 	void present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals);
-	void present_vehicle_wake_visuals(const TypedArray<VehicleWakeVisualRow> &p_visuals);
+	void present_vehicle_trail_visuals(const TypedArray<VehicleTrailVisualRow> &p_visuals);
 	void present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list);
 
 	// --- Statics shared by both walks and their consumers --------------------
@@ -421,7 +421,7 @@ private:
 		// construction (rows rebuild with invalid caches). The CTRL field list
 		// lives beside its leg in entity_presenter_wire.cpp; the aim cache is
 		// the same contiguous payload the placed walk compares.
-		static constexpr int kCtrlCacheCount = 32;
+		static constexpr int kCtrlCacheCount = 41;
 		float ctrl_cache[kCtrlCacheCount];
 		std::array<float, kAimPayloadFloats> aim_cache = {};
 		bool ctrl_cache_valid = false;
@@ -601,7 +601,7 @@ private:
 	std::unique_ptr<FirePresenter> fire_;
 	Ref<DestructionPresenter> destruction_;
 	Ref<ThrowablePresenter> throwable_;
-	Ref<VehicleWakePresenter> vehicle_wake_;
+	Ref<VehicleTrailPresenter> vehicle_trail_;
 	ObjectID scars_id_;
 	ObjectID environment_id_;
 	Vector3 listener_position_ = Vector3(INFINITY, INFINITY, INFINITY);

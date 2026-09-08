@@ -40,7 +40,8 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 	const HudVehiclePanelState &vp = state.vehicle_panel;
 	// The interface texture gates the entire retail panel, including seats.
 	// [orig: HUD_DrawVehicleHealthBars @0x5A5038]
-	if (!vp.shown || !vp.silhouette_valid) return;
+	if (!vp.shown || !vp.silhouette_valid)
+		return;
 
 	// The base rides the stance, so the whole panel moves with the stance icon.
 	int base_x = 0;

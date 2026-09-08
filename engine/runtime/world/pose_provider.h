@@ -49,6 +49,11 @@ public:
 			World &, EntityHandle, int /*userpoint_index*/, int32_t /*out*/[6]) {
 		return false;
 	}
+	// Named model point through the live part pose, used by AI entry walks.
+	// [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50]
+	virtual bool resolve_named_transform(World &, EntityHandle, const char *, int32_t[6]) {
+		return false;
+	}
 	// A userpoint (1-based table index) through the entity placement matrix
 	// ALONE, no part pose: the aim/LOS origin's TARGET point (16.16 world).
 	// [orig: Entity_ComputeWeaponFireOrigin @0x43b5f6 Math_FixedPointTransformPoint22
@@ -57,6 +62,11 @@ public:
 			World &, EntityHandle, int /*userpoint_index*/, int32_t /*out*/[3]) {
 		return false;
 	}
+
+	// The unposed COBJ pivot of a userpoint's part, through placement only.
+	// The turret solve aims from this pivot before resolving its live muzzle.
+	// [orig: Entity_ComputeWeaponFireTransform_0 @0x456980]
+	virtual bool resolve_userpoint_pivot(World &, EntityHandle, int, int32_t[3]) { return false; }
 
 	// --- collision sections --------------------------------------------------
 	// An embedder may learn about dynamic entities after its mission-start

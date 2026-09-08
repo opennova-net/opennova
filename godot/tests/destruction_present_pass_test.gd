@@ -697,6 +697,37 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 	presenter.teardown()
 
 
+func test_wreck_bank_points_follow_rotation_and_release_independently() -> void:
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var node := ObjectModel.new()
+	container.add_child(node)
+	node.position = Vector3(4, 5, 6)
+	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
+			_item_db, anchors, fx, {0x1004: node})
+	var effects: Array = []
+	for slot in [0, 1]:
+		effects.append(DestructionEffectEvent.make('Effect_Family2', Vector3.ZERO,
+				2, Vector3.UP, 0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE, false,
+				slot, Vector3(2 * slot - 1, 0, 0)))
+	presenter.present_destruction_drained(DestructionDrain.make([], effects), [])
+	node.rotate_y(PI / 2)
+	node.position += Vector3(3, 0, 0)
+	fx.advance_fixed_tick(0.0)
+	for slot in [0, 1]:
+		var key := 'wreck:wire:4100:2' + (':1' if slot else '')
+		assert_almost_eq(_emitter_position(_live_owned_row(fx, key)),
+				node.global_transform * Vector3(2 * slot - 1, 0, 0), POSITION_EPS)
+	var release := DestructionEffectEvent.make('', Vector3.ZERO, 2, Vector3.ZERO,
+			0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE, true, 1)
+	presenter.present_destruction_drained(DestructionDrain.make([], [release]), [])
+	assert_false(anchors.has_effect_anchor('wreck:wire:4100:2:1'))
+	assert_true(anchors.has_effect_anchor('wreck:wire:4100:2'))
+	presenter.teardown()
+
+
 func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	# The REAL pose chain: an authored building boots into a real Simulation
 	# (through MissionRoot, the production owner), and the node-less batched
@@ -800,4 +831,32 @@ func test_resolved_debris_and_glass_effects_present_verbatim() -> void:
 		assert_eq(glass.name, 'Effect_BldGlassExp')
 		assert_almost_eq(_emitter_position(glass), Vector3(1, 2, 3), POSITION_EPS)
 		assert_almost_eq(_emitter_forward(glass), Vector3.UP, POSITION_EPS)
+	presenter.teardown()
+
+
+func test_vehicle_respawn_restores_intact_model_and_releases_damage_effects() -> void:
+	var anchors := ItemEffectDirector.new()
+	var fx := _make_fx(anchors)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var intact := ObjectModel.new()
+	container.add_child(intact)
+	var visual := Node3D.new()
+	intact.add_child(visual)
+	var presenter := _make_presenter(null, container, _index_of([_entry(intact, 41)]),
+			_husk_placer(), _item_db, anchors, fx)
+	var start := DestructionEffectEvent.make('Effect_Family1', Vector3.ZERO, 4,
+			Vector3.ZERO, 91, 41)
+	presenter.present_destruction_drained(DestructionDrain.make(
+			[HuskSwapEvent.make(41, BUGGY_ITEM_ID)], [start]), [])
+	assert_false(visual.visible)
+	var key := 'wreck:91:4'
+	assert_true(fx.has_owner_binding(key))
+	var stop := DestructionEffectEvent.make('', Vector3.ZERO, 4, Vector3.ZERO,
+			91, 41, 65535, 0, true)
+	var restored := HuskSwapEvent.make(41, BUGGY_ITEM_ID, 4294967295, 65535, true)
+	presenter.present_destruction_drained(DestructionDrain.make([restored], [stop]), [])
+	assert_true(visual.visible, 'respawn restores the intact visual')
+	assert_false(anchors.has_effect_anchor(key))
+	assert_false(fx.has_owner_binding(key))
 	presenter.teardown()

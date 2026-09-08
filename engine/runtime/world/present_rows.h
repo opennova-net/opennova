@@ -14,22 +14,23 @@
 namespace opennova::world {
 
 enum PresentField : int {
-	PF_KIND = 0,   // mission ItemType (3 = Organic), -1 if none
-	PF_INDEX,      // index within its kind's list
-	PF_BMS_ID,     // file entity id; the shell maps this to a placed node (primary key)
-	PF_NET_ID,     // runtime SSN (WAC/BMS addressing)
-	PF_POS_X,      // present-space position (mission (x,y,z) 16.16 -> (x, z, -y) units)
+	PF_KIND = 0, // mission ItemType (3 = Organic), -1 if none
+	PF_INDEX, // index within its kind's list
+	PF_BMS_ID, // file entity id; the shell maps this to a placed node (primary key)
+	PF_NET_ID, // runtime SSN (WAC/BMS addressing)
+	PF_POS_X, // present-space position (mission (x,y,z) 16.16 -> (x, z, -y) units)
 	PF_POS_Y,
 	PF_POS_Z,
-	PF_PITCH_DEG,  // mission-space rotation, degrees (live Entity, decoded/predicted
-	               // client vehicle, or the client attachment pose)
+	PF_PITCH_DEG, // mission-space rotation, degrees (live Entity, decoded/predicted
+				  // client vehicle, or the client attachment pose)
 	PF_YAW_DEG,
-	PF_ROLL_DEG,   // same pose source as PF_PITCH_DEG
-	PF_PHASE1,     // channel 1 signed dword low16, exact as numeric float
-	PF_ACTIVE1,    // 0 unpublished; otherwise high16+1 (FastRope may suppress)
-	PF_PHASE2,     // channel 2 signed dword low16
-	PF_ACTIVE2,    // 0 unpublished; otherwise high16+1
-	PF_BODY_ANIM_SLOT, // Entity.body_anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
+	PF_ROLL_DEG, // same pose source as PF_PITCH_DEG
+	PF_PHASE1, // channel 1 signed dword low16, exact as numeric float
+	PF_ACTIVE1, // 0 unpublished; otherwise high16+1 (FastRope may suppress)
+	PF_PHASE2, // channel 2 signed dword low16
+	PF_ACTIVE2, // 0 unpublished; otherwise high16+1
+	PF_BODY_ANIM_SLOT, // Entity.body_anim_slot (main-body .bad/.adm clip; consumed only by the
+					   // deferred seam)
 	PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
 	PF_ANIM_PHASE_TICKS, // body-clip phase in IDA half-frame ticks; -1 when the compact omits it
 	// The authoritative outgoing PRIMARY channel and exact float32 target
@@ -38,7 +39,8 @@ enum PresentField : int {
 	PF_ANIM_SOURCE_STATE,
 	PF_ANIM_SOURCE_PHASE_TICKS,
 	PF_ANIM_BLEND_WEIGHT,
-	PF_ANIM_REMOTE_REQUEST, // 1 = compact request needs receive-side arbitration; 0 = authoritative current state
+	PF_ANIM_REMOTE_REQUEST, // 1 = compact request needs receive-side arbitration; 0 = authoritative
+							// current state
 	// A transition state observed and then OVERWRITTEN within one decode fold
 	// (several 0x0A datagrams can apply between present drains). Since
 	// D-NET-209 the per-record receive arbitration [orig: @0x4c1153] runs
@@ -68,14 +70,15 @@ enum PresentField : int {
 	PF_WPN_BLEND_WEIGHT,
 	PF_WPN_VARIANT,
 	PF_WPN_SOURCE_VARIANT,
-	PF_HIDDEN,     // 1 when the entity is hidden
+	PF_HIDDEN, // 1 when the entity is hidden
 	// Local render-only verdict: skip this placed entity's own world model.
 	// Does not mutate Entity.hidden, collision, simulation, or attached actors.
 	PF_LOCAL_VIEW_SUPPRESSED,
-	PF_ALIVE,      // 1 when alive
+	PF_ALIVE, // 1 when alive
 	PF_RESPAWN_REVISION, // decoded organic dead->alive epoch; resets remote body state
-	PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
-	PF_WIRE_HANDLE,// (pool<<12)|slot wire handle; zero is a valid pool-0 identity
+	PF_TYPE_ID, // items.def runtime type id from the wire (0 = none); keys the joiner's wire
+				// avatars
+	PF_WIRE_HANDLE, // (pool<<12)|slot wire handle; zero is a valid pool-0 identity
 	// The packed character id (entity+0x15C: nationality|division|combo|side) the
 	// 0x0C spawn echoes for a player; 0 when not a player. Keys the composed
 	// head/body the joiner presents for that row.
@@ -99,8 +102,7 @@ enum PresentField : int {
 	PF_AIM_CLASS_STRIDE = 3,
 	// Semantic emplaced-weapon PANM registers. These are deliberately not
 	// PF_PHASE1/2: PLAYPARTANIM publishes those on VEHICLE_SPECIAL1/2.
-	PF_EMPLACED_CONTROLS_VALID =
-			PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE,
+	PF_EMPLACED_CONTROLS_VALID = PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE,
 	PF_EWEAP_GUNYAW,
 	PF_EWEAP_GUNPITCH,
 	// Vehicle render controls projected from authoritative motor/brain state.
@@ -133,6 +135,15 @@ enum PresentField : int {
 	PF_VEHICLE_TIRE03,
 	PF_VEHICLE_TIRE04,
 	PF_VEHICLE_TIRE05,
+	PF_VEHICLE_TIRE06,
+	PF_VEHICLE_TIRE07,
+	PF_VEHICLE_TIRE08,
+	PF_VEHICLE_TIRE09,
+	PF_VEHICLE_TIRE10,
+	PF_VEHICLE_TIRE11,
+	PF_VEHICLE_TIRE12,
+	PF_VEHICLE_TIRE13,
+	PF_VEHICLE_GEAR,
 	// Retail CTRL writers around a rendered world model. TEX_TEAM is written
 	// for every sector-model submission and again by the generic callback for
 	// numbered zones. TEAMSWING is owned by that zone callback. LFP is a
@@ -190,6 +201,21 @@ enum PresentField : int {
 	// to bit0=prone, bit1=crouched for MATCHTERRAIN presentation. This tail
 	// field is zero-filled for non-organics and unsupported compact rows.
 	PF_STANCE_BITS,
+
+	// Focal-wind second-bone deformation supplied by the Sway renderer.
+	PF_FOCAL_SWAY_VALID,
+	PF_FOCAL_SWAY_BASIS_0,
+	PF_FOCAL_SWAY_BASIS_1,
+	PF_FOCAL_SWAY_BASIS_2,
+	PF_FOCAL_SWAY_BASIS_3,
+	PF_FOCAL_SWAY_BASIS_4,
+	PF_FOCAL_SWAY_BASIS_5,
+	PF_FOCAL_SWAY_BASIS_6,
+	PF_FOCAL_SWAY_BASIS_7,
+	PF_FOCAL_SWAY_BASIS_8,
+	PF_FOCAL_SWAY_X,
+	PF_FOCAL_SWAY_Y,
+	PF_FOCAL_SWAY_Z,
 	PF_STRIDE
 };
 

@@ -224,8 +224,8 @@ func test_provenance_contract_covers_every_shader_resource_once() -> void:
 	var provenance: Dictionary = _load_json(PROVENANCE_PATH)
 	var sources := _shader_sources()
 	assert_eq(int(provenance["schema"]), 2)
-	assert_eq(sources.size(), 194, "the runtime inventory must stay closed")
-	assert_eq(int(provenance["resource_count"]), 194)
+	assert_eq(sources.size(), 195, "the runtime inventory must stay closed")
+	assert_eq(int(provenance["resource_count"]), 195)
 	var ids := {}
 	for contract in provenance["contracts"]:
 		ids[contract["id"]] = true

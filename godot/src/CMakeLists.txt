@@ -172,7 +172,8 @@ add_library(${TARGET_NAME} SHARED
     simulation/fire_presenter.cpp
     simulation/destruction_presenter.cpp
     simulation/throwable_presenter.cpp
-    simulation/vehicle_wake_presenter.cpp
+    simulation/vehicle_trail_presenter.cpp
+    simulation/vehicle_water_wake_presenter.cpp
     simulation/present_stats.cpp
     simulation/entity_card.cpp
     simulation/entity_row.cpp
