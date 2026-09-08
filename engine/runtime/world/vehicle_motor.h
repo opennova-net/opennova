@@ -77,16 +77,34 @@ struct VehicleEffectPoint {
 };
 
 struct VehicleEffectEvent {
+	// Spawn: one transient effect at `position` along `direction`.
+	// The three zone-group kinds carry the helicopter focal-wind pool's one
+	// persistent surface-effect group per zone (`force_zone` names the zone):
+	// Ensure creates it at the hit, Trigger re-spawns its children at a later
+	// hit, Release retires it before the surface effect changes.
+	// [orig: WeatherParticle_UpdateAllEmitters @0x5CB100, slot words +3/+4
+	//  @0x5CB407..0x5CB49B; sub_5F6C10 @0x5F6C10]
+	enum class Kind : uint8_t { Spawn, EnsureZoneGroup, TriggerZoneGroup, ReleaseZoneGroup };
 	std::string effect;
 	Vec3 position;
 	Vec3 direction;
 	uint32_t source_tick = 0;
 	uint16_t force_zone = 0;
+	Kind kind = Kind::Spawn;
 };
 
 // Selected independently of the mover by items.def render_function.
 // [orig: renderer callback rows @0x82CFD0..0x82D00F]
 enum class VehicleRenderFamily : uint8_t { None, Ground, Tank, Helicopter, Plane };
+
+// The brain-machine class, selected by items.def ai_function through the class
+// event-callback table (fn1 of each 24-byte row): CHel and cpln rows run the
+// air-class machine, cveh/cbot/ctrn rows the vehicle-class one. Unset = the
+// ai_function names no vehicle class (the tick then falls back to the mover
+// family). [orig: g_EntityClassEventCallbackTable @0x813000, rows @0x8132a0
+// CHel / @0x813378 cveh / @0x813390 cbot / @0x8133a8 cpln / @0x8133c0 ctrn;
+// EntityDef_InitAllCallbacks @0x4a5aae -> Entity_LookupRenderCallbacks @0x407dc0]
+enum class VehicleBrainClass : uint8_t { Unset, Air, Ground };
 
 enum VehicleControlMask : uint16_t {
 	VC_STEERING = 1,
@@ -103,6 +121,7 @@ enum VehicleControlMask : uint16_t {
 
 struct VehicleTraits {
 	VehicleRenderFamily render_family = VehicleRenderFamily::Ground;
+	VehicleBrainClass brain_class = VehicleBrainClass::Unset; // ai_function class (see enum)
 	int32_t physics = 0; // itemDef+0x8DC ground-dispatch selector; direct air ignores it
 	int32_t player_speed = 0;  // itemDef+0x8E8
 	int32_t slip_speed = 0; // +0x8F0, simple mover lateral-slip threshold

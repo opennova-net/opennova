@@ -4,6 +4,7 @@
 #include "entity.h"
 #include <runtime/particle/emitter.h>
 #include <array>
+#include <string>
 #include <runtime/renderer/water_wake_frame.h>
 
 namespace opennova::world {
@@ -26,6 +27,10 @@ public:
 	void tick();
 	void clear();
 	void apply(particle::Particle &particle, std::size_t index, bool repulsion) const override;
+	// The spawn-time search a zoneless particle runs (render frame in, the
+	// nearest containing zone's handle out). [orig: Terrain_FindNearestAmbientSoundZone
+	// @0x5CBCD0 from CParticleEmitter_SpawnNewParticle @0x5F37D8]
+	uint16_t zone_at(const particle::Vec3 &position) const override;
 	bool sample_sway(const int32_t position[3], int32_t &magnitude, int32_t direction[3]) const;
 	std::size_t active_count() const;
 	const renderer::WaterWakePool &water_wakes() const { return water_wakes_; }
@@ -39,6 +44,12 @@ private:
 		int32_t inner = 786432, outer = 983040, radius = 2949120, extent = 1966080;
 		int32_t intensity = 0, motion = 65536, dust = 0;
 		uint32_t tick = 0;
+		// The slot's surface-effect group: word +4 is the effect the group was
+		// created for, word +3 whether an instance was created (the device owns
+		// the instance itself). [orig: terrain_overlay_alloc @0x5CAF40 memsets
+		// both; WeatherParticle_UpdateAllEmitters @0x5CB407..0x5CB46E]
+		std::string surface_effect;
+		bool effect_group = false;
 	};
 	World &world_;
 	renderer::WaterWakePool water_wakes_;

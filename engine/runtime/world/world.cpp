@@ -54,6 +54,7 @@ static void pose_emplacement_attachments(World &world) {
             });
             for (EntityHandle occupant : occupants)
                 world.vehicles.detach(occupant);
+            world.ai.release(orphan); // a brained child frees its brain with the row
             world.registry.despawn(orphan);
         }
     }

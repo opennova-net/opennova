@@ -1177,7 +1177,8 @@ int GameWorld::warm_effect_world_catalog() {
 	if (runtime != nullptr) {
 		runtime->warm_present_pipelines(warm_pos);
 	}
-	effect_world->advance_simulation_tick(Simulation::tick_dt(), get_sim().ptr());
+	effect_world->advance_simulation_tick(Simulation::tick_dt(),
+				get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
 	effect_world->render_now();
 	// Pipeline compiles need real draws. Skip the forced frames inside the
 	// editor embedder (re-entrant editor drawing); the texture warm above still
@@ -1190,7 +1191,8 @@ int GameWorld::warm_effect_world_catalog() {
 		set_visible(true);
 		RenderingServer *rs = RenderingServer::get_singleton();
 		rs->force_draw(true);
-		effect_world->advance_simulation_tick(Simulation::tick_dt(), get_sim().ptr());
+		effect_world->advance_simulation_tick(Simulation::tick_dt(),
+				get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
 		effect_world->render_now();
 		rs->force_draw(true);
 		// The reset below cancels any unserviced compositor warm request. Drain

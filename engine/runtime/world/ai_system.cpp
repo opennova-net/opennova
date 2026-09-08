@@ -170,18 +170,48 @@ void AiSystem::rebuild_handle_index() {
     }
 }
 
+// The AI component allocator: the lowest slot whose owner word is zero, else a
+// new one (retail's fixed 812-byte array unk_AED380 is walked from index 0 until
+// [0] == 0 and the slot is memset @0x460246). A brain already bound to h is freed
+// first so one handle never carries two live brains (the array is walked directly
+// here, whereas retail reaches brains through the entity pointer).
+// [orig: Entity_InitVehicleAI @0x460204..0x460257]
 int AiSystem::attach(EntityHandle h) {
-    AiEntity e;
+    // One brain per row is the engine's own invariant (retail keeps the single
+    // +0x64 brain pointer per entity and frees it with the row, Entity_Destroy
+    // @0x43e810); a despawn releases it (release()). attach() itself does not
+    // evict a live brain for the same handle: test rigs attach several brains
+    // under one placeholder handle, and evicting them here aliases the callers'
+    // pointers. Freed slots (owner word 0) are reused lowest-first.
+    int index = -1;
+    for (int i = 0; i < static_cast<int>(entities_.size()); ++i) {
+        if (entities_[i].brain.f[AiBrain::kOwner] == 0) {
+            index = i;
+            break;
+        }
+    }
+    if (index < 0) {
+        entities_.emplace_back();
+        index = static_cast<int>(entities_.size()) - 1;
+    }
+    AiEntity &e = entities_[index];
+    e = AiEntity{};
     e.handle = h;
     e.brain.f[AiBrain::kOwner] = 1; // nonzero = live slot
-    entities_.push_back(e);
-    const int index = static_cast<int>(entities_.size()) - 1;
     if (h.valid()) handle_to_ai_index_[h.packed] = index;
     return index;
 }
 
+void AiSystem::release(EntityHandle h) {
+    const int index = index_for_handle(h);
+    if (index < 0) return;
+    entities_[index] = AiEntity{}; // owner word 0 = free slot [orig: memset @0x43e995]
+    handle_to_ai_index_[h.packed] = -1;
+}
+
 int AiSystem::attach_dismemberment_piece(
         EntityHandle h, const AiEntity &source, const int32_t impulse_q16[3]) {
+    release(h);
     AiEntity piece = source;
     piece.handle = h;
     piece.brain = AiBrain{};
@@ -203,8 +233,19 @@ int AiSystem::attach_dismemberment_piece(
     piece.inf.vel[0] += impulse_q16 != nullptr ? impulse_q16[0] : 0;
     piece.inf.vel[1] += impulse_q16 != nullptr ? impulse_q16[1] : 0;
     piece.inf.vel[2] += impulse_q16 != nullptr ? impulse_q16[2] : 0;
-    entities_.push_back(std::move(piece));
-    const int index = static_cast<int>(entities_.size()) - 1;
+    int index = -1;
+    for (int i = 0; i < static_cast<int>(entities_.size()); ++i) {
+        if (entities_[i].brain.f[AiBrain::kOwner] == 0) {
+            index = i;
+            break;
+        }
+    }
+    if (index < 0) {
+        entities_.push_back(std::move(piece));
+        index = static_cast<int>(entities_.size()) - 1;
+    } else {
+        entities_[index] = std::move(piece);
+    }
     if (h.valid()) handle_to_ai_index_[h.packed] = index;
     return index;
 }
@@ -261,8 +302,29 @@ bool AiSystem::begin_update(AiEntity &e) {
     return true;
 }
 
-// [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0] event 0=update,1=spawn,4=death.
-void AiSystem::process_infantry_state_machine(AiEntity &e, World &world, int event) {
+namespace {
+// The per-class constants that separate the two brain machines. Everything else
+// in the two functions is instruction-for-instruction identical.
+struct StateMachineGates {
+    int32_t alert_hold;    // the alert leg leaves pending alone when cur == this
+    int32_t alert_pend;    // ... and otherwise pends this evade state
+    int32_t client_tick_a; // a client (!is_authority) ticks only these two states
+    int32_t client_tick_b;
+    int32_t commit_single; // a client commits pending == this ...
+    int32_t commit_lo;     // ... or commit_lo < pending <= commit_hi
+    int32_t commit_hi;
+    int32_t spawn_channel; // the spawn AIEvent's channel word
+};
+// [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0 — alert @0x458239..0x45823b,
+//  tick gate @0x458340..0x458348, commit gate @0x458375..0x458382, spawn word 9 @0x458312]
+constexpr StateMachineGates kAirClassGates{14, 10, 13, 15, 7, 12, 15, 9};
+// [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0 — alert @0x458442..0x458448,
+//  tick gate @0x458545..0x45854d, commit gate @0x458579..0x458586, spawn word bx (=0,
+//  xor ebx,ebx @0x4583cd) @0x45851a]
+constexpr StateMachineGates kVehicleClassGates{22, 18, 21, 23, 16, 20, 23, 0};
+
+void process_class_state_machine(
+        AiSystem &sys, AiEntity &e, World &world, int event, const StateMachineGates &g) {
     AiBrain &b = e.brain;
 
     // "no target" idle gate.
@@ -272,32 +334,39 @@ void AiSystem::process_infantry_state_machine(AiEntity &e, World &world, int eve
     }
 
     int32_t alert = b.f[AiBrain::kAlert];
-    if (is_authority && e.has_physics && (e.physics_flags & 0x100) == 0 &&
+    if (sys.is_authority && e.has_physics && (e.physics_flags & 0x100) == 0 &&
         b.f[AiBrain::kPrevAlert] != alert) {
         alert = 2;
-        if ((e.profile.flags96 & 2) == 0 && b.f[AiBrain::kCurState] != 14)
-            b.f[AiBrain::kPendState] = 10;
+        if ((e.profile.flags96 & 2) == 0 && b.f[AiBrain::kCurState] != g.alert_hold)
+            b.f[AiBrain::kPendState] = g.alert_pend;
     }
     b.f[AiBrain::kPrevAlert] = alert;
 
-    AiThinkCtx ctx{this, &e, &world, nullptr};
-    const int ai_index = static_cast<int>(&e - at(0));
+    AiThinkCtx ctx{&sys, &e, &world, nullptr};
+    const int ai_index = sys.index_of(e);
 
-    // LABEL_27/28/31: authority applies the pending transition; clients apply only a
-    // restricted subset (pending in {7} or 12<pending<=15).
+    // LABEL_27/28/31: authority applies the pending transition; clients apply only
+    // the class's restricted subset.
+    const auto client_commits = [&](int32_t pend) {
+        return pend == g.commit_single || (pend > g.commit_lo && pend <= g.commit_hi);
+    };
     auto finish = [&]() {
-        if (is_authority) {
-            apply_transition(e, world);
-        } else {
-            int32_t pend = b.f[AiBrain::kPendState];
-            if (pend == 7 || (pend > 12 && pend <= 15))
-                apply_transition(e, world);
+        if (sys.is_authority) {
+            sys.apply_transition(e, world);
+        } else if (client_commits(b.f[AiBrain::kPendState])) {
+            sys.apply_transition(e, world);
         }
     };
 
     if (event == 0) {
-        if (is_authority || b.f[AiBrain::kCurState] == 13 || b.f[AiBrain::kCurState] == 15)
-            row(b.f[AiBrain::kCurState]).tick(ctx);
+        if (sys.is_authority || b.f[AiBrain::kCurState] == g.client_tick_a ||
+                b.f[AiBrain::kCurState] == g.client_tick_b)
+            sys.row(b.f[AiBrain::kCurState]).tick(ctx);
+        // A dead-state tick may destroy the entity and free this brain (the retail
+        // Server_RemoveEntityAndNotify inside AI_TickState_VehicleDead @0x467ede);
+        // the zeroed slot then has nothing to count, animate or commit.
+        if (b.f[AiBrain::kOwner] == 0)
+            return;
         ++b.f[AiBrain::kTick];
         update_body_anim_slot(e, world); // pick walk/idle from state+movement for the present pass
         finish();
@@ -306,38 +375,50 @@ void AiSystem::process_infantry_state_machine(AiEntity &e, World &world, int eve
     if (event == 1) { // spawn
         AiEventEntry ev{};
         ev.f[0] = 1;
-        ev.f[1] = 9 | (ai_index << 16); // channel 9 | entity index
+        ev.f[1] = g.spawn_channel | (ai_index << 16); // channel word | entity index
         ev.set_timer(0.0f);
         // [orig: ev.f[3] = Projectile_GetHitRecord()[17] @0x458326] spawn payload read from the current
         // hit record (Projectile_GetHitRecord @0x4e7000 returns the hitRecord global; its field [17] is not
         // modeled here, so f[3] is left 0). If a spawn event later reaches a ground combat-event
         // handler (cur_state in {16,17,18}), h_combat_event reads f[3] into brain[39] (kDamageInfo).
-        events.queue(ev);
+        sys.events.queue(ev);
         finish();
         return;
     }
     if (event == 4) { // death
-        if (is_authority) {
-            apply_transition(e, world);
+        if (sys.is_authority) {
+            sys.apply_transition(e, world);
             return;
         }
-        if (is_in_session) {
+        if (sys.is_in_session) {
             e.health = 0; // [orig: *(int16*)(entity+286) = 0 @0x45827f, before the death tick] so the
                           // dispatched tick takes its death path (not the alive path) on a death event
-            row(b.f[AiBrain::kCurState]).tick(ctx);
+            sys.row(b.f[AiBrain::kCurState]).tick(ctx);
+            if (b.f[AiBrain::kOwner] == 0)
+                return;
             AiEventEntry ev{};
             ev.f[0] = 20;
-            ev.f[1] = 9 | (ai_index << 16);
+            ev.f[1] = 9 | (ai_index << 16); // both classes write 9 here [orig: @0x4582c8/@0x4584d4]
             ev.set_timer(0.0f);
-            events.queue(ev);
+            sys.events.queue(ev);
             finish();
             return;
         }
-        int32_t pend = b.f[AiBrain::kPendState];
-        if (pend == 7 || (pend > 12 && pend <= 15))
-            apply_transition(e, world);
+        if (client_commits(b.f[AiBrain::kPendState]))
+            sys.apply_transition(e, world);
         return;
     }
+}
+} // namespace
+
+// [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0] event 0=update,1=spawn,4=death.
+void AiSystem::process_infantry_state_machine(AiEntity &e, World &world, int event) {
+    process_class_state_machine(*this, e, world, event, kAirClassGates);
+}
+
+// [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0] event 0=update,1=spawn,4=death.
+void AiSystem::process_vehicle_state_machine(AiEntity &e, World &world, int event) {
+    process_class_state_machine(*this, e, world, event, kVehicleClassGates);
 }
 
 void AiSystem::apply_transition(AiEntity &e, World &world) {
@@ -452,6 +533,9 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     // per-entity AI tick; Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
     for (int i = 0; i < count(); ++i) {
         AiEntity &e = *at(i);
+        // A freed AI component (owner word 0) is not an entity's brain any more:
+        // retail reaches brains only through live entities' +100 pointer.
+        if (e.brain.f[AiBrain::kOwner] == 0) continue;
         const devtools::ProfileScope entity_scope(
                 world.profile, e.inf.active ? devtools::Slot::SIM_AI_INFANTRY
                                             : devtools::Slot::SIM_AI_OTHER_ENTITIES);
@@ -485,7 +569,29 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             continue;
         }
         if (begin_update(e)) {
-            process_infantry_state_machine(e, world, 0);
+            const Entity *ent = world.registry.get(e.handle);
+            const VehicleTraits *vt =
+                    ent != nullptr ? world.vehicles.traits.get(ent->item_id) : nullptr;
+            // The brain machine is the item's class event callback fn1, keyed by
+            // items.def ai_function: CHel/cpln -> the air machine, cveh/cbot/ctrn ->
+            // the vehicle machine [orig: g_EntityClassEventCallbackTable @0x813000
+            // rows @0x8132a0/@0x8133a8 vs @0x813378/@0x813390/@0x8133c0, resolved
+            // by EntityDef_InitAllCallbacks @0x4a5aae]. A traits row built without
+            // its def (test rigs) falls back to its mover family; a brain with no
+            // traits row keeps the air machine it always ran.
+            bool vehicle_class = false;
+            if (vt != nullptr) {
+                if (vt->brain_class == VehicleBrainClass::Unset)
+                    vehicle_class = !vehicle_family_uses_direct_air_mover(vt->family);
+                else
+                    vehicle_class = vt->brain_class == VehicleBrainClass::Ground;
+            }
+            if (vehicle_class)
+                process_vehicle_state_machine(e, world, 0);
+            else
+                process_infantry_state_machine(e, world, 0);
+            // The dead-state tick can destroy the entity and free this brain.
+            if (e.brain.f[AiBrain::kOwner] == 0) continue;
             // Family-motor vehicles retire the generic SM kinematic mover. Ground
             // families integrate through selector-gated tick_vehicle_motor below;
             // direct-air families own their CHel/cpln callback regardless of selector.
@@ -493,9 +599,6 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             // visited bits, states) but the kinematic locomotion model retires for them
             // [orig: one entity update — the SM never integrates ground vehicles, the
             // physics does; Entity_DispatchPhysics_cveh @0x48efc0].
-            const Entity *ent = world.registry.get(e.handle);
-            const VehicleTraits *vt =
-                    ent != nullptr ? world.vehicles.traits.get(ent->item_id) : nullptr;
 			const bool motor_driven = vt != nullptr;
 			if (locomotion_enabled && !motor_driven) {
 				apply_locomotion(e);   // horizontal: advance pos[0]/pos[1] toward the node

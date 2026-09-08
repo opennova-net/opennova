@@ -151,12 +151,28 @@ void vehicle_traction_velocity(
 		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed) {
 	auto &m = vehicle.veh;
 	const bool tank = traits.family == VehicleFamily::Tank;
+	const bool bike = traits.family == VehicleFamily::Bike;
+	// The basis builds before every gate in all three movers [orig: cveh
+	// @0x48C55E..0x48C582; ctan @0x489FB3..0x489FD7; cbik @0x485891..0x4858B5].
+	const auto basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	const int32_t forward[3] = { basis.q22.m[0] >> 6, basis.q22.m[4] >> 6, basis.q22.m[8] >> 6 };
+	const int32_t up[3] = { basis.q22.m[2] >> 6, basis.q22.m[6] >> 6, basis.q22.m[10] >> 6 };
+	// Flags 0x2000 (airborne) holds every register in all three movers
+	// [orig: @0x48CE02..0x48CE04 / @0x4861F6..0x4861F8 / @0x48A684..0x48A686].
 	if ((vehicle.flags & kEntityFlagInAir) != 0)
 		return;
-	if (!m.grounded && m.handbrake_latched == 0) {
+	// Off contact. The ground/bike movers reach this arm on `+0x2F2 == 0 &&
+	// +0x3CD == 0` (no handbrake); the tank on `+0x2F2 == 0` alone [orig: cveh
+	// @0x48C587..0x48C5A6; cbik @0x4858CC..0x4858EB; ctan @0x489FEE..0x48A005].
+	if (!m.grounded && (tank || m.handbrake_latched == 0)) {
+		// Before the first solve nothing moves [orig: `cmp +0x3CE, 0; jz`
+		// @0x48CE17 / @0x48620B / @0x48A699].
 		if (!m.contact_solved_once)
 			return;
-		if (!tank) {
+		// The GROUND mover alone refreshes or clears the slip stamp off contact
+		// [orig: @0x48CE24..0x48CE61]; the cbik arm @0x4861F6..0x48621F and the
+		// ctan arm @0x48A684..0x48A6AD carry no +0x3F8 handling.
+		if (!tank && !bike) {
 			if (m.slip_started_tick != 0 &&
 					int32_t(world.logic_tick - m.slip_started_tick) <=
 							bam_mul_wrap(5, traits.tire_slip))
@@ -164,14 +180,56 @@ void vehicle_traction_velocity(
 			else
 				clear_direction(m);
 		}
-		if (m.crashed == 0)
+		if (m.crashed == 0) {
+			// Not crashed: the ground mover drives forward*speed into X/Y, and
+			// into Z only while the nose points down [orig: `jz loc_48CF97`
+			// @0x48CE6E; the store @0x48CF97..0x48D003 with `cmp var_110, 0;
+			// jge` @0x48CFD9]; the tank holds every register [orig: `jz
+			// loc_48A828` @0x48A6AD]. The bike's arm @0x4863DA..0x48657E drives
+			// a stored launch vector (+0x3E0..+0x3E8 under +0x3DE) this state
+			// does not carry, so it holds here.
+			if (!tank && !bike)
+				velocity_from_direction(m, forward, m.speed, forward[2] < 0);
 			return;
-		const int64_t motion[3] = { m.vel_x, m.vel_y, m.slide_z };
-		int32_t dir[3];
-		q16_normalize(motion, dir);
-		const int32_t stop = bam_shl_wrap(traits.deceleration, 1);
-		m.speed = m.speed > 0 ? io::bam_sub(m.speed, stop) : io::bam_add(m.speed, stop);
-		velocity_from_direction(m, dir, m.speed, true);
+		}
+		// Crashed: each family's own arm.
+		if (tank) {
+			// 3-D normalize, then -/+ 2*deceleration, then all three components
+			// [orig: Entity_UpdateTankVehiclePhysics @0x488AB0 (site
+			//  @0x48A6B3..0x48A7D3: `add ecx, ecx; sub eax, ecx` @0x48A752 /
+			//  `lea edx, [eax+ecx*2]` @0x48A75E)].
+			const int64_t motion[3] = { m.vel_x, m.vel_y, m.slide_z };
+			int32_t dir[3];
+			q16_normalize(motion, dir);
+			const int32_t stop = bam_shl_wrap(traits.deceleration, 1);
+			m.speed = m.speed > 0 ? io::bam_sub(m.speed, stop) : io::bam_add(m.speed, stop);
+			velocity_from_direction(m, dir, m.speed, true);
+		} else if (bike) {
+			// +/-0x6000 speed clamp, 3-D normalize, -/+ 1*deceleration, all
+			// three components [orig: Entity_UpdateLightVehiclePhysics @0x483FE0
+			//  (site @0x486225..0x486379: the clamp @0x486232..0x48624F, `sub
+			//  eax, [ecx+8E4h]` @0x4862EE / `add ecx, eax` @0x486305)].
+			if (io::bam_abs(m.speed) > 0x6000)
+				m.speed = m.speed < 0 ? -0x6000 : 0x6000;
+			const int64_t motion[3] = { m.vel_x, m.vel_y, m.slide_z };
+			int32_t dir[3];
+			q16_normalize(motion, dir);
+			m.speed = m.speed > 0 ? io::bam_sub(m.speed, traits.deceleration)
+								  : io::bam_add(m.speed, traits.deceleration);
+			velocity_from_direction(m, dir, m.speed, true);
+		} else {
+			// Planar normalize of X/Y only, NO speed step, Z untouched [orig:
+			// Entity_UpdateVehiclePhysics @0x48AF00 (site @0x48CE74..0x48CF46:
+			//  `fild vel_y; fild vel_x` and the 65536/len products with the
+			//  third ftol of a zero; the +0x98/+0x9C stores @0x48CF0E/@0x48CF46)].
+			const int64_t motion[3] = { m.vel_x, m.vel_y, 0 };
+			int32_t dir[3];
+			q16_normalize(motion, dir);
+			velocity_from_direction(m, dir, m.speed, false);
+		}
+		// The shared tail [orig: cveh @0x48CF41..0x48CF95; cbik @0x486386..
+		// 0x4863D5; ctan @0x48A7E0..0x48A81F]: a live crash keeps skidding, a
+		// slow one halves X/Y/speed, zeroes the three rates and settles.
 		if (io::bam_abs(m.speed) >= 4096)
 			m.skid_effects_requested = true;
 		else {
@@ -183,9 +241,6 @@ void vehicle_traction_velocity(
 		}
 		return;
 	}
-	const auto basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-	const int32_t forward[3] = { basis.q22.m[0] >> 6, basis.q22.m[4] >> 6, basis.q22.m[8] >> 6 };
-	const int32_t up[3] = { basis.q22.m[2] >> 6, basis.q22.m[6] >> 6, basis.q22.m[10] >> 6 };
 	if (tank) {
 		if (target_speed == 0 && sharp_steering(m)) {
 			if (!vehicle_has_contact_direction(m)) {

@@ -56,6 +56,10 @@ void VehicleTrailPresenter::sync_fixed_tick_effects() {
 		for (const auto &effect : effects) {
 			const Vector3 pos(effect.position.x, effect.position.z, -effect.position.y);
 			const Vector3 dir(effect.direction.x, effect.direction.z, -effect.direction.y);
+			if (effect.kind != opennova::world::VehicleEffectEvent::Kind::Spawn) {
+				apply_zone_group_event(effect_world, effect, pos, dir);
+				continue;
+			}
 			Ref<EffectSpawnOptions> options;
 			options.instantiate();
 			options->set_source_tick(effect.source_tick);
@@ -68,6 +72,60 @@ void VehicleTrailPresenter::sync_fixed_tick_effects() {
 	simulation->fill_vehicle_trail_visual_rows(rows);
 	sync_visuals(rows);
 	sync_water_wakes();
+}
+
+// The zone's surface-effect group, executed as the sim orders it. Release
+// stops the group (retail: sub_5F6C70 -> sub_5E5ED0 notifies each child dead)
+// and drops the record; Ensure creates the group at the hit with the zone-less
+// spawn (its scheduled particles search their zone); Trigger re-spawns every
+// child at the hit with the zone as the spawn window. A group the scene has
+// already reaped answers the trigger with false and keeps its record: retail's
+// slot holds the freed instance pointer until the surface effect changes. The
+// witness (WeatherParticle_UpdateAllEmitters, CEffectWorld_SpawnEmitterAtPosition
+// with dest{type 4, id, hit}, sub_5F6C10 -> CEffectWorld_SpawnAllActiveChildren
+// with direction (0, 1, 0)) is cited at the sim's producer (world/rotor_wash.cpp)
+// and the portable scene's trigger (particle/effect_scene.h).
+void VehicleTrailPresenter::apply_zone_group_event(EffectWorld *p_fx,
+		const opennova::world::VehicleEffectEvent &p_event, const Vector3 &p_position,
+		const Vector3 &p_direction) {
+	using Kind = opennova::world::VehicleEffectEvent::Kind;
+	const int zone = p_event.force_zone;
+	ZoneGroup *group = zone_groups_.getptr(zone);
+	switch (p_event.kind) {
+		case Kind::ReleaseZoneGroup:
+			if (group != nullptr) {
+				if (group->group_id != 0) {
+					p_fx->stop_group(group->group_id);
+				}
+				zone_groups_.erase(zone);
+			}
+			break;
+		case Kind::EnsureZoneGroup: {
+			if (group != nullptr && group->group_id != 0) {
+				p_fx->stop_group(group->group_id);
+			}
+			Ref<EffectSpawnOptions> options;
+			options.instantiate();
+			options->set_source_tick(p_event.source_tick);
+			const Ref<EffectSpawnReceipt> receipt =
+					p_fx->spawn_effect_request(String::utf8(p_event.effect.c_str()),
+							EffectWorld::forward_pose(p_position, p_direction), options);
+			ZoneGroup created;
+			created.effect = String::utf8(p_event.effect.c_str());
+			created.group_id = receipt.is_valid() && receipt->get_spawned()
+					? receipt->get_group_id()
+					: 0;
+			zone_groups_.insert(zone, created);
+			break;
+		}
+		case Kind::TriggerZoneGroup:
+			if (group != nullptr && group->group_id != 0) {
+				p_fx->trigger_group_children(group->group_id, p_position, p_direction, zone);
+			}
+			break;
+		case Kind::Spawn:
+			break;
+	}
 }
 
 void VehicleTrailPresenter::sync_visuals(
@@ -175,6 +233,14 @@ void VehicleTrailPresenter::reset_runtime_state() {
 		retire_group(key);
 	}
 	transforms_.clear();
+	if (EffectWorld *effect_world = fx()) {
+		for (const KeyValue<int, ZoneGroup> &kv : zone_groups_) {
+			if (kv.value.group_id != 0) {
+				effect_world->stop_group(kv.value.group_id);
+			}
+		}
+	}
+	zone_groups_.clear();
 }
 
 void VehicleTrailPresenter::teardown() {

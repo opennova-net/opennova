@@ -5,7 +5,8 @@
 
 namespace opennova::renderer {
 
-// [orig: sub_56BD20 @ 0x56BD20; WaterWake_Init @ 0x5DDD80]
+// [orig: sub_56BD20 @ 0x56BD20; IDB: CWeatherSlot_Init @ 0x5DDD80 (misnomer,
+//  the surface-ring row init)]
 void WaterWakePool::add(int32_t x, int32_t y, float opacity) {
 	for (auto &row : rows_) {
 		if (row.active)
@@ -16,7 +17,8 @@ void WaterWakePool::add(int32_t x, int32_t y, float opacity) {
 	}
 }
 
-// [orig: WaterWake_Tick @ 0x5DDE10; WaterWake_Remove @ 0x5DDDB0]
+// [orig: sub_5DDE10 @ 0x5DDE10 (the per-tick fade); sub_5DDDB0 @ 0x5DDDB0 (the
+//  row removal)]
 void WaterWakePool::tick() {
 	for (int i = 0; i < 128; ++i) {
 		auto &row = rows_[i];
@@ -44,6 +46,10 @@ void WaterWakePool::tick() {
 void compile_water_wakes(const WaterWakePool &pool, int32_t water_height, uint32_t tick,
 		const int32_t camera[3], WaterWakeFrame &out) {
 	out.clear();
+	// Retail scrolls the first UV by (dword_24C1948 & 0x1FF) / 512 and
+	// (dword_24C1948 & 0x3FF) * -0.01171875 on every render frame
+	// [orig: render_water_surface_decal @ 0x5DE277..0x5DE2AD]; `tick` is the
+	// logic tick standing in for that render-frame counter (see the header).
 	const float scroll_u = float(tick & 511u) * 0.001953125f;
 	const float scroll_v = float(tick & 1023u) * -0.01171875f;
 	for (const auto &wake : pool.rows()) {

@@ -105,6 +105,12 @@ func test_points_follow_sampled_pose_and_tune_without_respawn() -> void:
 	var b_id := int(b.id)
 	assert_almost_eq(_emitter(a).emit_rate, 45.0, 0.0001)
 	assert_almost_eq(_emitter(b).emit_rate, 15.0, 0.0001)
+	# The offset control turns the authored y_offset 2 + z_offset 4 * (2 * magnitude - 1)
+	# into the live spawn height and clears the camera pull: 0.75 -> 4.0, 0.25 -> 0.0
+	# (CEffectWorld_UpdateBlendValues, EffectScene.set_group_parameters).
+	assert_almost_eq(_emitter(a).spawn_y_offset, 4.0, 0.0001)
+	assert_almost_eq(_emitter(a).camera_pull, 0.0, 0.0001)
+	assert_almost_eq(_emitter(b).spawn_y_offset, 0.0, 0.0001)
 	position += Vector3(5, 2, -1)
 	presenter.present_vehicle_trail_visuals([
 		_row(41, 0, position, 1.25),
@@ -121,6 +127,8 @@ func test_points_follow_sampled_pose_and_tune_without_respawn() -> void:
 	assert_almost_eq(_emitter(a).position, position, POSITION_EPS)
 	assert_almost_eq(_emitter(a).emit_rate, 75.0, 0.0001,
 			"magnitudes above one remain unclamped")
+	assert_almost_eq(_emitter(a).spawn_y_offset, 8.0, 0.0001,
+			"1.25 extrapolates the spawn height past the authored z_offset")
 	presenter.present_vehicle_trail_visuals([_row(41, 1, position, 0.0, W4_EFFECT)])
 	assert_null(_live_owned_row(fx, a_key))
 	assert_true(_row_by_id(fx, a_id).detached)
@@ -175,16 +183,25 @@ func test_focal_wind_moves_the_authored_second_part_and_clears() -> void:
 	var rest: Transform3D = data.evaluate_panm(0, 0, {})[1]
 	model.rotation.y = 0.6
 	var world_offset := Vector3(2, 0.5, -1)
-	var local_offset := model.global_transform.basis.inverse() * world_offset
 	var bend := Basis.from_euler(Vector3(0.1, -0.08, 0.03))
-	var flip := Basis(Vector3(-1, 0, 0), Vector3.UP, Vector3.BACK)
-	var converted := flip * bend * flip
-	var pivot := Vector3(0, 1.3, 0) # authored second-part pivot in tank.3di
-	var expected := Transform3D(converted, pivot - converted * pivot + local_offset) * rest
+	# Hand-derived from the retail Sway pose (BoneCallback_Sway_World: the second
+	# part rotates about its authored pivot, then takes the wind offset), written
+	# in Godot's frame: R = flip * Ry(-0.08) * Rx(0.1) * Rz(0.03) * flip with
+	# flip = diag(-1, 1, 1); origin = pivot - R * pivot + Ry(0.6)^-1 * (2, 0.5, -1)
+	# for the tank.3di second-part pivot (0, 1.3, 0). Literal columns and origin,
+	# not the presenter's own composition.
+	var sway_basis := Basis(
+			Vector3(0.996114, -0.029846, -0.082864),
+			Vector3(0.037874, 0.994556, 0.097072),
+			Vector3(0.079515, -0.099833, 0.991822))
+	var sway_origin := Vector3(2.166077, 0.507077, 0.177755)
+	var expected := Transform3D(sway_basis, sway_origin) * rest
 	model.set_focal_sway(true, bend, world_offset)
 	assert_almost_eq(part.position, expected.origin, POSITION_EPS,
 			"world wind rotates around the authored pivot in model space")
-	assert_almost_eq(part.basis.get_euler(), expected.basis.get_euler(), POSITION_EPS)
+	assert_almost_eq(part.basis.x, expected.basis.x, POSITION_EPS)
+	assert_almost_eq(part.basis.y, expected.basis.y, POSITION_EPS)
+	assert_almost_eq(part.basis.z, expected.basis.z, POSITION_EPS)
 	ObjectModel.advance_awake_frame(0.016)
 	assert_almost_eq(part.position, expected.origin, POSITION_EPS,
 			"ordinary frame updates preserve the focal-wind pose")

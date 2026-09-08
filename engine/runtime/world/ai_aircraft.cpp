@@ -24,12 +24,20 @@ int32_t AiSystem::aircraft_ground_height(World &world, AiEntity &ai, int32_t rad
 			return collision->raycast_ground(
 					world, entity->handle, pos, x, y, 65536, 3145728, nullptr);
 		};
-		const int32_t n = tap(0, radius), s = tap(0, -radius), e = tap(radius, 0),
-					  w = tap(-radius, 0), c = tap(0, 0);
-		const int32_t top = std::max({ 0, n, s, e, w, c });
-		int32_t sum = io::bam_add(io::bam_add(n, s), io::bam_add(e, w));
-		sum = io::bam_add(sum, io::bam_dbl(io::bam_add(c, io::bam_dbl(top))));
-		ground = std::max(c, sum / 10);
+		if (radius == 0) {
+			// A zero radius is one centre ray, not five coincident taps: the
+			// weighted average would otherwise return 6c/10 for negative ground.
+			// [orig: the sampleRadius == 0 arm @0x457254 -> single
+			// Entity_RaycastGroundHeightAndObject(0,0,0x10000,3145728) @0x45735d]
+			ground = tap(0, 0);
+		} else {
+			const int32_t n = tap(0, radius), s = tap(0, -radius), e = tap(radius, 0),
+						  w = tap(-radius, 0), c = tap(0, 0);
+			const int32_t top = std::max({ 0, n, s, e, w, c });
+			int32_t sum = io::bam_add(io::bam_add(n, s), io::bam_add(e, w));
+			sum = io::bam_add(sum, io::bam_dbl(io::bam_add(c, io::bam_dbl(top))));
+			ground = std::max(c, sum / 10);
+		}
 	} else if (world.tables.terrain != nullptr)
 		ground = calc_average_ground_height(*world.tables.terrain, pos, radius, GroundClearance{});
 	if (entity->primary_occupant.valid())
@@ -211,7 +219,9 @@ void AiSystem::enter_aircraft_evade(AiEntity &ai, World &world) {
 	b.f[AiBrain::kStep] = 16;
 }
 
-// [orig: AI_UpdateHelicopterCombatMovement @0x461080]
+// [orig: AI_ProcessVehicleCombatState @0x461080 (IDB name; the aircraft evade-state tick:
+//  subtype-2 flare-only arm @0x4610a2, health<=0 -> event 3/4 @0x4611a9..0x4611e2,
+//  vtable+4 movement callback @0x46111f, fallback/8 @0x46112f..0x46113d, floor @0x461153)]
 void AiSystem::aircraft_evade_tick(AiEntity &ai, World &world) {
 	auto &b = ai.brain;
 	if (ai.profile.subtype == 2) {
@@ -244,6 +254,9 @@ void AiSystem::aircraft_evade_tick(AiEntity &ai, World &world) {
 // Per-entity movement callback dispatch. Controller phase/result/side are not
 // the shared AI scheduling budget. [orig: tables @0x8153B8/@0x8153E0;
 // @0x461C30/@0x461CB0/@0x466C20/@0x466DB0/@0x4613A0/@0x461870]
+// The two 0x1000x movers carry swapped-looking IDB names: AI_CalcGroundVehicleTarget
+// @0x4613A0 is the HELICOPTER mover (controller 0x10000, table 0x8153E0[1]) and
+// AI_CalcHelicopterTarget @0x461870 is the PLANE mover (0x10005, 0x815408[1]).
 int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 	auto &b = ai.brain;
 	const auto &p = ai.profile;
@@ -314,10 +327,15 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 	if (ai.aircraft_controller != 0x10000 && ai.aircraft_controller != 0x10005)
 		return 0;
 	const bool plane = ai.aircraft_controller == 0x10005;
-	b.f[AiBrain::kTargetRef] = 0;
+	// Only the helicopter mover clears the lateral-cyclic word at its head; the
+	// plane mover never writes [127]. [orig: AI_CalcGroundVehicleTarget @0x4613ca;
+	// no [127] store anywhere in AI_CalcHelicopterTarget @0x461870..0x461c1a]
+	if (!plane)
+		b.f[AiBrain::kTargetRef] = 0;
 	const Entity *target = target_entity(world, b.f[AiBrain::kTargetSlot]);
 	if (target == nullptr) {
 		if (!plane && b.f[AiBrain::kNoTargetIdle] != 0) {
+			// [orig: @0x4617a2..0x461811]
 			b.f[AiBrain::kWorkPosX] = ai.pos[0];
 			b.f[AiBrain::kWorkPosY] = ai.pos[1];
 			b.f[AiBrain::kWorkPosZ] = bam_add(aircraft_ground_height(world, ai, 327680), 327680);
@@ -326,6 +344,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 			b.f[AiBrain::kOutSpeed] = 0;
 			b.f[138] = mul32(3, p.field220 >> 1);
 		} else {
+			// [orig: helo @0x461812..0x461860; plane @0x461bc1..0x461c12]
 			const int32_t timer = b.f[AiBrain::kCombatTimer];
 			const int32_t turn = plane ? 417566240 : 1073741760;
 			b.f[AiBrain::kWorkHeading] = bam_add(ai.heading,
@@ -337,23 +356,27 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 		}
 		return 0;
 	}
+	const int32_t tx = to_fixed(target->position.x), ty = to_fixed(target->position.y);
 	const int32_t bearing = target_heading(ai, *target);
 	const uint32_t angle = folded_angle(bam_sub(bearing, ai.heading));
 	b.f[AiBrain::kWorkHeading] =
 			!plane || angle < 64 || b.f[AiBrain::kCombatTimer] > 186 ? bearing : ai.heading;
 	const int32_t ground = aircraft_ground_height(world, ai, 0x200000);
 	b.f[AiBrain::kWorkPosZ] = bam_add(b.f[51], plane ? p.field216 : bam_add(ground, p.field216));
-	const int32_t distance = planar_magnitude(bam_sub(to_fixed(target->position.x), ai.pos[0]),
-			bam_sub(to_fixed(target->position.y), ai.pos[1]));
+	const int32_t distance =
+			planar_magnitude(bam_sub(tx, ai.pos[0]), bam_sub(ty, ai.pos[1]));
 	if (b.f[AiBrain::kNoTargetIdle] != 0) {
+		// The retreat write. The helicopter returns here [orig: @0x461506..0x4615a1];
+		// the plane continues into the common tail below [orig: @0x4619a4..0x461a07,
+		// falling through to @0x461b3f].
 		b.f[AiBrain::kWorkHeading] = bam_add(bearing, 2147483520);
 		b.f[AiBrain::kWorkPosZ] = std::max(b.f[AiBrain::kWorkPosZ], bam_add(ground, p.min_agl));
 		b.f[AiBrain::kWorkPitch] = b.f[AiBrain::kWorkRoll] = 0;
 		b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA];
 		b.f[138] = p.field220;
-		return 0;
-	}
-	if (distance > p.approach_cap) {
+		if (!plane)
+			return 0;
+	} else if (distance > p.approach_cap) {
 		if (b.f[AiBrain::kCombatTimer] > (plane ? 930 : 620)) {
 			b.set_pend(b.f[AiBrain::kFallback]);
 			ai_set_target(world, ai, EntityHandle{});
@@ -374,17 +397,21 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 					b.f[AiBrain::kWorkHeading] = ai.heading;
 					if (angle < 64)
 						b.f[AiBrain::kOutSpeed] = planar_magnitude(
-								bam_sub(to_fixed(target->position.x), target->saved_live_pos[0]),
-								bam_sub(to_fixed(target->position.y), target->saved_live_pos[1]));
+								bam_sub(tx, target->saved_live_pos[0]),
+								bam_sub(ty, target->saved_live_pos[1]));
 				}
 			} else {
+				bool fire_check = true;
 				if (distance >= p.min_chase) {
+					// [orig: @0x46168a..0x4616ae]
 					b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA] >> 2;
 					const int32_t remaining = bam_sub(distance, p.min_chase);
 					if (remaining < mul32(b.f[AiBrain::kOutSpeed], b.f[AiBrain::kStep]) &&
 							b.f[AiBrain::kStep] != 0)
 						b.f[AiBrain::kOutSpeed] = remaining / b.f[AiBrain::kStep];
+					fire_check = angle <= 64; // > 0x40 skips straight to LABEL_35
 				} else {
+					// [orig: @0x461607..0x461676]
 					const AiEntity *other = for_handle(target->handle);
 					b.f[AiBrain::kOutSpeed] = other != nullptr
 							? other->brain.f[136]
@@ -392,30 +419,52 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 					const int32_t target_yaw = other != nullptr
 							? other->heading
 							: bam_heading_from_mission_yaw_deg(target->yaw);
-					if (angle <= 64 &&
-							folded_angle(bam_sub(bam_add(bearing, 2147483520), target_yaw)) <= 64)
+					// The reverse bearing is its own truncated atan2 of the negated
+					// deltas, not the forward bearing plus a half turn.
+					// [orig: fild/fild/fpatan/fmul/fistp @0x461453..0x46148c, folded
+					//  against target Yaw @0x46148c..0x46149e]
+					const int32_t reverse = detail::bearing_bam(
+							bam_sub(ai.pos[1], ty), bam_sub(ai.pos[0], tx));
+					if (angle <= 64 && folded_angle(bam_sub(reverse, target_yaw)) <= 64)
 						b.f[AiBrain::kOutSpeed] = bam_sub(0, b.f[AiBrain::kOutSpeed]);
 				}
-				if ((distance < p.min_chase || angle <= 64) &&
-						aircraft_target_in_sight(ai, world)) {
+				// Only the combat-timer reset is gated on the fire point; the
+				// lateral-cyclic word is written on every within-max_chase tick.
+				// [orig: AI_GetSuspensionFirePoint @0x4616b1 -> [40] = 0 @0x4616bd;
+				//  LABEL_35 [127] = [45] << 14 @0x4616c7, reached from both arms]
+				if (fire_check && aircraft_target_in_sight(ai, world))
 					b.f[AiBrain::kCombatTimer] = 0;
-					b.f[AiBrain::kTargetRef] = mul32(b.f[45], 16384);
-				}
+				b.f[AiBrain::kTargetRef] = mul32(b.f[45], 16384);
 			}
 		}
 	}
-	b.f[AiBrain::kWorkPosZ] = std::max(b.f[AiBrain::kWorkPosZ], bam_add(ground, p.min_agl));
-	if (b.f[AiBrain::kWorkPosZ] > bam_add(ground, 3276800))
-		b.f[AiBrain::kWorkPosZ] = bam_add(bam_add(ground, b.f[51]), 3276800);
-	if (plane)
-		b.f[AiBrain::kOutSpeed] =
-				std::min(b.f[AiBrain::kSpeedA], std::max(p.min_speed, b.f[AiBrain::kOutSpeed]));
-	else {
-		const bool reverse = b.f[AiBrain::kOutSpeed] < 0;
-		const int32_t magnitude =
-				reverse ? bam_sub(0, b.f[AiBrain::kOutSpeed]) : b.f[AiBrain::kOutSpeed];
-		const int32_t speed = std::min(b.f[AiBrain::kSpeedA], std::max(p.min_speed, magnitude));
-		b.f[AiBrain::kOutSpeed] = reverse ? bam_sub(0, speed) : speed;
+	// The common tail: floor, ceiling re-target, speed clamp, zeroed work X/Y.
+	// [orig: helo LABEL_40 @0x461702..0x461793; plane @0x461b3f..0x461bb3]
+	{
+		const int32_t floor_z = bam_add(ground, p.min_agl);
+		if (b.f[AiBrain::kWorkPosZ] < floor_z)
+			b.f[AiBrain::kWorkPosZ] = floor_z;
+		// The helicopter re-targets from 12.5 u above ground, the plane from 50 u;
+		// both replace with ground + [51] + 50 u. [orig: 819200 @0x46172c vs
+		// 3276800 @0x461b5c; replacement 3276800 @0x46173b/@0x461b6b]
+		else if (b.f[AiBrain::kWorkPosZ] > bam_add(ground, plane ? 3276800 : 819200))
+			b.f[AiBrain::kWorkPosZ] = bam_add(bam_add(ground, b.f[51]), 3276800);
+	}
+	if (plane) {
+		// [orig: @0x461b71..0x461b8b]
+		const int32_t current = b.f[AiBrain::kOutSpeed];
+		if (current < p.min_speed)
+			b.f[AiBrain::kOutSpeed] = p.min_speed;
+		else if (current > b.f[AiBrain::kSpeedA])
+			b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA];
+	} else {
+		// [orig: abs32 @0x46174c, the two-limit test @0x461752..0x461764, sign
+		//  restore @0x461768..0x46176c]
+		const int32_t current = b.f[AiBrain::kOutSpeed];
+		const int32_t magnitude = current < 0 ? bam_sub(0, current) : current;
+		int32_t limit = p.min_speed;
+		if (magnitude < limit || (limit = b.f[AiBrain::kSpeedA], magnitude > limit))
+			b.f[AiBrain::kOutSpeed] = current < 0 ? bam_sub(0, limit) : limit;
 	}
 	b.f[AiBrain::kWorkPosX] = b.f[AiBrain::kWorkPosY] = 0;
 	b.f[AiBrain::kWorkPitch] = b.f[AiBrain::kWorkRoll] = 0;
@@ -445,7 +494,9 @@ bool AiSystem::aircraft_target_in_sight(AiEntity &ai, World &world) {
 // Aircraft combat has distinct stationary, locked-burst, continuation and
 // processed-tick fire legs. In particular only primary shots set the fire bit,
 // and a locked burst reuses all six saved relative pose components.
-// [orig: AI_UpdateAircraftCombat @0x471710]
+// [orig: Entity_ProcessInfantryWeaponFire @0x471710 (IDB name; the aircraft/vehicle
+//  brain's combat-state fire leg, off_81523C[8]); the health<=0 head @0x471748..
+//  0x472ded is h_aircraft_combat_tick's queue_aircraft_death]
 void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 	auto &b = ai.brain;
 	const auto &p = ai.profile;
@@ -649,14 +700,20 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 			shoot(which, out);
 			post_mobile();
 		} else {
-			for (int slot = 1; slot <= 2; ++slot)
-				if ((weapon(slot).flags & 2) != 0) {
-					int32_t out[6] = { ai.pos[0], ai.pos[1], ai.pos[2], ai.heading, ai.pitch,
-						ai.roll };
-					solve_weapon_fire_transform(
-							world, ai, target, weapon(slot), aim_offset(), true, out);
-					save_delta(slot, out);
-				}
+			// No weapon on record: a TURRET-flagged (&1) block is re-solved so its
+			// saved delta tracks the moving hull; primary first and done, else the
+			// secondary, else nothing at all (the bone byte is left as it was).
+			// [orig: primary block flags (profile+120+16) & 1 @0x471c18 -> solve,
+			//  save, bone = 0, return @0x471d04..0x471d10; secondary block flags
+			//  (profile+152+16) & 1 == 0 -> return @0x471d18; else solve, save,
+			//  bone = 0 @0x471de9..0x471df5]
+			const int slot = (weapon(1).flags & 1) != 0 ? 1 : (weapon(2).flags & 1) != 0 ? 2 : 0;
+			if (slot == 0)
+				return;
+			int32_t out[6] = { ai.pos[0], ai.pos[1], ai.pos[2], ai.heading, ai.pitch, ai.roll };
+			solve_weapon_fire_transform(
+					world, ai, target, weapon(slot), aim_offset(), true, out);
+			save_delta(slot, out);
 			clear_bone();
 		}
 		return;
@@ -681,23 +738,33 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 		retreat(bam_add(bearing, 2147483520));
 	else
 		aircraft_movement(ai, world);
+	// The fire-arc limit is the profile's secondary FOV byte read SIGNED
+	// (movsx), OR'd with 1 at the head and with 2 at the gate, then shifted
+	// arithmetically and compared UNSIGNED against the folded bearing delta —
+	// so a byte >= 0x80 yields a negative limit that admits every bearing.
+	// [orig: movsx eax, byte ptr [profile+67]; or eax, 1 @0x471736..0x47173a;
+	//  or ecx, 2; sar ecx, 1; cmp eax, ecx; ja loc_472DF5 @0x472477..0x472481]
 	const int32_t limit = (int32_t(int8_t(p.fov_secondary)) | 3) >> 1;
-	if (folded_angle(bam_sub(bearing, ai.heading)) <= uint32_t(limit)) {
-		for (int which = 1; which <= 2; ++which) {
-			int32_t out[6];
-			if (!ready(which) ||
-					!solve_weapon_fire_transform(
-							world, ai, target, weapon(which), aim_offset(), false, out))
-				continue;
-			save_delta(which, out);
-			if (b.f[AiBrain::kAccuracy] != 4)
-				scatter(out);
-			shoot(which, out);
-			post_mobile();
-			b.f[AiBrain::kLastWeapon] = which;
-			return;
-		}
+	// Out of arc jumps straight to the epilogue: the bone byte and last_weapon
+	// keep their values so the continuation leg keeps firing between processed
+	// ticks. [orig: ja loc_472DF5 @0x472481 -> pop/ret @0x472df5]
+	if (folded_angle(bam_sub(bearing, ai.heading)) > uint32_t(limit))
+		return;
+	for (int which = 1; which <= 2; ++which) {
+		int32_t out[6];
+		if (!ready(which) ||
+				!solve_weapon_fire_transform(
+						world, ai, target, weapon(which), aim_offset(), false, out))
+			continue;
+		save_delta(which, out);
+		if (b.f[AiBrain::kAccuracy] != 4)
+			scatter(out);
+		shoot(which, out);
+		post_mobile();
+		b.f[AiBrain::kLastWeapon] = which;
+		return;
 	}
+	// In arc with neither block ready/solved. [orig: LABEL_209 @0x4729ed..0x4729f4]
 	clear_bone();
 	b.f[AiBrain::kLastWeapon] = 0;
 }

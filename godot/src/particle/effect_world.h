@@ -23,8 +23,11 @@
 #include "particle/particle_def.h"
 #include "particle/particle_file.h"
 
+namespace opennova::particle {
+class ParticleForceField;
+}
+
 namespace godot {
-class Simulation;
 
 class Camera3D;
 class ParticleRenderer;
@@ -166,6 +169,13 @@ public:
 	bool spawn_effect_by_handle(int64_t p_handle, const Vector3 &p_position,
 			const Vector3 &p_orientation = Vector3());
 	void stop_group(int64_t p_group_id);
+	// The rotor-wash re-trigger: every child emitter of a live group spawns
+	// one particle at `p_position` along `p_forward`, bound to `p_force_zone`
+	// (the retail dword_29D6BB0 spawn window). False for a dead group, which
+	// is retail's freed-slot no-op. The witness is cited on the portable
+	// particle::EffectScene::trigger_group_children this forwards to.
+	bool trigger_group_children(int64_t p_group_id, const Vector3 &p_position,
+			const Vector3 &p_forward, int p_force_zone);
 	// Update the two live arguments supplied by moving bone-trail effects:
 	// emission-rate control and vertical/camera-offset control. Inputs remain
 	// unclamped because the portable scene owns the retail formulas.
@@ -192,7 +202,10 @@ public:
 	bool has_no_owner_bindings() const;
 	// The only simulation clock. Callers feed fixed mission ticks (1 / 62.5 s).
 	void advance_fixed_tick(double p_delta);
-	void advance_simulation_tick(double p_delta, Simulation *simulation);
+	// The same clock with the simulation's borrowed force field (the
+	// helicopter focal-wind pool); null leaves ordinary effects unchanged.
+	void advance_simulation_tick(double p_delta,
+			const opennova::particle::ParticleForceField *p_forces);
 	// Explicit GameWorld device leg. Attachment poses and the
 	// immutable draw list are refreshed once at the pipeline's chosen point;
 	// particles never advance on render delta.

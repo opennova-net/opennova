@@ -95,16 +95,18 @@ int main() {
 				seen.push_back(e);
 			}
 	};
+	// NPC fire stays LIVE: the chain under test is observed through it, never
+	// with the NPCs disarmed. The scenario invites retaliation (a friendly is
+	// shot at 5 u in the open), so the player's entity carries the engine's own
+	// no-damage flag: every NPC round still flies, connects and stamps its
+	// reactions; only the damage-side zero on the player changes [orig: the
+	// Flags & 0x4000000 test in Entity_ApplyWeaponDamage @0x4e7ff6]. A victim
+	// that falls to that fire is retargeted, not counted (see the kill leg).
+	if (w::Entity *me = rig.world.registry.get(rig.world.cached.local_player))
+		me->engine_flags |= kIndestructibleFlag;
+
 	int seconds = 0;
 	const auto tick = [&]() {
-		// This test owns the player-kill -> WAC outcome chain. Keep NPC
-		// movement and hitboxes live, but prevent another shooter from
-		// killing the selected victim (or player) before the player's round.
-		for (int i = 0; i < rig.world.ai.count(); ++i) {
-			w::AiEntity *npc = rig.world.ai.at(i);
-			if (npc != nullptr && npc->handle != rig.world.cached.local_player)
-				npc->profile.ammo_primary = -1;
-		}
 		rig.tick();
 		keep_effects();
 	};
@@ -116,11 +118,20 @@ int main() {
 	std::set<uint16_t> blacklist;
 	int target_team = -1;
 	bool killed = false;
+	// The by-player bucket the WAC predicate reads for the locked victim's team
+	// [orig: Score_TallyKillByLocalPlayer @0x4fd160 — victim+354 0 = green,
+	//  1 = blue, else the enemy count].
+	const auto player_tally = [&](int team) -> int32_t {
+		const w::MissionKillStats &ks = rig.world.kill_stats;
+		return team == 0 ? ks.greenkills_by_player
+				: team == 1 ? ks.bluekills_by_player : ks.enemy_kills_by_player;
+	};
 	while (seconds < kMaxMissionSeconds && !killed) {
 		// Approach the current best candidate; out of reach (mission geography
 		// defeats straight-line walking) the victim is brought to the player —
 		// the outcome loop is under test, not nav.
 		w::EntityHandle target;
+		int32_t tally_at_lock = 0;
 		rig.local.input.forward = true;
 		while (seconds < kMaxMissionSeconds) {
 			const Victim npc = pick_victim(rig, blacklist);
@@ -135,6 +146,7 @@ int main() {
 			if (npc.distance <= kFireDistance) {
 				target = npc.ai->handle;
 				target_team = npc.ai->team;
+				tally_at_lock = player_tally(target_team);
 				std::printf("lose-flow: target lock net=%d team=%d flags=0x%x at %.1fu\n", int(npc.entity->net_id),
 						target_team, unsigned(npc.entity->engine_flags), npc.distance);
 				break;
@@ -196,10 +208,24 @@ int main() {
 			if (hp < hp_prev && hp >= 0) std::printf("lose-flow: HIT t=%ds target hp %d -> %d\n", seconds, hp_prev, hp);
 			hp_prev = hp;
 			if (tent == nullptr || !tent->alive || hp <= 0) {
-				killed = true;
 				rig.local.input.forward = false;
 				rig.local.set_weapon_input(false, false, false);
-				std::printf("lose-flow: KILLED t=%ds team-%d person down\n", seconds, target_team);
+				// Only a kill the host credits to the local player feeds the WAC
+				// (the by-player bucket, drained from the death record on the
+				// listen frame); a victim that fell to live NPC fire lands in the
+				// by-others family instead and is retargeted, never counted
+				// [orig: Score_TallyKillByLocalPlayer @0x4fd160 vs
+				//  Score_TallyKillByOthers @0x4fd300].
+				const int victim_net_id = tent != nullptr ? int(tent->net_id) : -1;
+				for (int t = 0; t < 62 && player_tally(target_team) == tally_at_lock; ++t) tick();
+				if (player_tally(target_team) > tally_at_lock) {
+					killed = true;
+					std::printf("lose-flow: KILLED t=%ds team-%d person down\n", seconds, target_team);
+				} else {
+					std::printf("lose-flow: net=%d fell to another shooter (tally unchanged) — retargeting\n",
+							victim_net_id);
+					blacklist.insert(target.packed);
+				}
 				break;
 			}
 			if (rig.local.player_health() <= 0) {

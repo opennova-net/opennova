@@ -86,9 +86,15 @@ void emit_source_anchor(World &world, const Entity &vehicle) {
     world.out.sound_emitters.publish(std::move(ev));
 }
 
+// `lifetime_ticks` is the registration's effect_params word +16: 30 for the
+// ground fold's loops, 15 for the helicopter's three. [orig: SoundEmitter_Register
+// @0x529270 packs its fifth argument @0x5292A6; update_vehicle_effect_emissions
+// @0x528F94 stores 15; SoundEmitter_RegisterSetLayers copies +16 into slot word
+// 21 @0x528471]
 void emit_emitter(World &world, Entity &vehicle, uint8_t lane, int slot,
                   const std::string &set_name, int32_t pitch_q16,
-                  uint16_t volume_q8_8) {
+                  uint16_t volume_q8_8,
+                  uint16_t lifetime_ticks = kEmitterLifetimeTicks) {
     // A null sound-set pointer makes the original wrapper a no-op. Zero controls,
     // however, are an explicit keyed clear and must cross the host seam even when
     // the authored slot itself is empty.
@@ -101,13 +107,13 @@ void emit_emitter(World &world, Entity &vehicle, uint8_t lane, int slot,
     ev.emitted_tick = producer_tick(world);
     ev.lane = lane;
     ev.slot = static_cast<uint8_t>(slot);
-    ev.lifetime_ticks = kEmitterLifetimeTicks;
+    ev.lifetime_ticks = lifetime_ticks;
     ev.pitch_q16 = pitch_q16;
     ev.volume_q8_8 = volume_q8_8;
     ev.set_name = set_name;
     if (pitch_q16 != 0 && volume_q8_8 != 0) {
         vehicle.veh.sound_anchor_until_tick =
-                ev.emitted_tick + kEmitterLifetimeTicks;
+                ev.emitted_tick + lifetime_ticks;
     }
     world.out.sound_emitters.publish(std::move(ev));
 }
@@ -194,7 +200,10 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
     // The PlayerControl ground caller skips the movement-sound function entirely
     // without entity+368. This is why an NPC claimant runs the engine just like a
     // player, while a passenger or surviving non-claimant controller does not.
-    // [orig: caller gate @0x48d181..0x48d1c7]
+    // [orig: caller gate @0x48d181..0x48d1c7; the selector-zero ground mover's
+    // twin @0x46f7e2..0x46f7f7 and the selector-zero boat's @0x471533..0x471546
+    // (IDB: Entity_ProcessInfantryPhysics @0x46E100 / Entity_ProcessAirVehiclePhysics
+    // @0x46FA00, both misnomers)]
     if (traits.player_control && !has_live_primary_claimant(world, vehicle)) {
         const uint32_t now = producer_tick(world);
         const uint32_t remaining =
@@ -222,8 +231,12 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
 	// boat in the stop lane.
 	int32_t max_speed =
 			traits.family == VehicleFamily::Watercraft ? traits.water_speed : traits.player_speed;
-	// The ground caller falls back to brain speed A, then the command.
-	// [orig: Entity_UpdateVehiclePhysics @0x48AF00, caller @0x48D196..0x48D1B8]
+	// The ground caller falls back to brain speed A, then the command; the
+	// selector-zero ground mover repeats that chain verbatim and the
+	// selector-zero boat runs it from waterSpeed (and skips the fold entirely
+	// when nothing resolves, see tick_simple_motor).
+	// [orig: Entity_UpdateVehiclePhysics @0x48AF00, caller @0x48D196..0x48D1B8;
+	//  @0x46F7F9..0x46F813; @0x4715AA..0x4715C6]
 	if (max_speed == 0 && (traits.family != VehicleFamily::Watercraft || traits.physics == 0)) {
 		if (const AiEntity *ai = world.ai.for_handle(vehicle.handle))
 			max_speed = ai->brain.f[AiBrain::kSpeedA];
@@ -301,8 +314,12 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
 
 	// The movement direction latch plays enginereverse on both direction edges.
     // Entering reverse waits for command AND actual speed to be negative; leaving
-    // only waits for a positive command.
-    // [orig: vehicleData+0x318 bit2 @0x48d1d1..0x48d222]
+    // only waits for a positive command. The latch is vehicleData+0x318 bit 1
+    // (value 2, `test al, 2` @0x48d1d7); bit 2 (value 4) is the lights latch
+    // @0x48d358, bit 3 (value 8) the skid latch @0x48d2c4 and bit 0 (value 1)
+    // the claimant latch @0x48d3a5.
+    // [orig: @0x48d1d1..0x48d222; the selector-zero twins @0x46f828..0x46f888
+    //  and @0x4715da..0x471667]
     if (!vehicle.primary_occupant.valid()) return;
     if (!vehicle.veh.reverse_sound_latched && vehicle.veh.cmd_speed < 0 &&
         vehicle.veh.speed < 0) {
@@ -316,21 +333,32 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
     }
 }
 
-// Skid edge and free-rev cadence follow movement sound. The timer increments
-// even without an occupant; a successful rev resets it before the increment.
-// [orig: cveh @0x48D226..0x48D34E / @0x48D43D, cbik @0x486793..0x4869F5,
-// ctan @0x48AB5D..0x48AE48]
+// Skid edge and free-rev cadence follow movement sound. The settle byte
+// (+0x2F0) skips the movement, direction and high-rev sections; cveh's jump
+// lands ON the skid section, so a settled wreck still clears a latched skid,
+// while ctan's jump lands past its skid section. The skid test is the ftol of
+// the contact-direction magnitude (sqrt of the three squares, flt_7C19E0 =
+// 2147418112.0 clamp): a sub-unit direction truncates to no skid. The timer
+// increments even without an occupant; a successful rev resets it before the
+// increment.
+// [orig: cveh settle jump @0x48D163..0x48D16A -> @0x48D264, high-rev
+// @0x48D22A..0x48D261, skid @0x48D264..0x48D34E (bit 8 set @0x48D2EB, clear
+// @0x48D345), timer @0x48D43D; cbik @0x4867DD..0x486904; ctan settle jump
+// @0x48AAB7..0x48AABE -> @0x48AD49, skid @0x48ABCB..0x48ACB5]
 void VehicleSystem::update_traction_sound(Entity &vehicle, const VehicleTraits &traits) {
 	auto &m = vehicle.veh;
-	if (m.settle_2f0 == 0) {
-		if (world_.registry.get(vehicle.primary_occupant) != nullptr && m.rev_sound_ticks > 124 &&
-				m.plat_airborne_ticks > 30) {
-			m.rev_sound_ticks = 0;
-			emit_profile_oneshot(world_, vehicle, profile_for(world_, traits), traits, 33);
-		}
-		const bool skid = (m.contact_direction[0] != 0 || m.contact_direction[1] != 0 ||
-								  m.contact_direction[2] != 0) &&
-				m.speed != 0 && (vehicle.flags & kEntityFlagInAir) == 0;
+	if (m.settle_2f0 == 0 && world_.registry.get(vehicle.primary_occupant) != nullptr &&
+			m.rev_sound_ticks > 124 && m.plat_airborne_ticks > 30) {
+		m.rev_sound_ticks = 0;
+		emit_profile_oneshot(world_, vehicle, profile_for(world_, traits), traits, 33);
+	}
+	if (m.settle_2f0 == 0 || traits.family != VehicleFamily::Tank) {
+		const double cx = m.contact_direction[0], cy = m.contact_direction[1],
+					 cz = m.contact_direction[2];
+		const int32_t magnitude = static_cast<int32_t>(
+				std::min(std::sqrt(cx * cx + cy * cy + cz * cz), 2147418112.0));
+		const bool skid =
+				magnitude != 0 && m.speed != 0 && (vehicle.flags & kEntityFlagInAir) == 0;
 		if (skid && !m.skid_sound_latched)
 			play_contact_sound(vehicle, traits, 25);
 		m.skid_sound_latched = skid;
@@ -338,9 +366,15 @@ void VehicleSystem::update_traction_sound(Entity &vehicle, const VehicleTraits &
 	++m.rev_sound_ticks;
 }
 
-// The claimant and lights edge lanes follow the continuous movement fold.
+// The claimant and lights edge lanes follow the continuous movement fold. The
+// selector-zero ground mover shares this tail verbatim (lights bit 2 -> slot
+// 24, claimant bit 0 -> slot 30 on the occupant eye above water, the
+// all-zero fold plus slot 31 on the hull +0x18000 when the claimant leaves);
+// the selector-zero boat has only the lights leg (tick_simple_motor).
 // [orig: Entity_UpdateVehiclePhysics @0x48AF00, tail @0x48D34E..0x48D429;
-// Entity_UpdateWatercraftPhysics @0x48D480, edge @0x48DAD1..0x48DB6B]
+// Entity_UpdateWatercraftPhysics @0x48D480, edge @0x48DAD1..0x48DB6B;
+// Entity_ProcessInfantryPhysics @0x46E100 (IDB misnomer, the selector-zero
+// ground mover) lights @0x46F8C3..0x46F8FC, claimant edge @0x46F8FC..0x46F99C]
 void VehicleSystem::update_engine_sound(Entity &vehicle, const VehicleTraits &traits) {
 	if (vehicle_family_uses_direct_air_mover(traits.family))
 		return;
@@ -432,14 +466,24 @@ void VehicleSystem::update_rotor_sound(Entity &vehicle, const VehicleTraits &tra
 				   lateral_volume = volume(std::min(lateral, 65535));
 	if (medium_volume == 0 && cruise_volume == 0 && lateral_volume == 0)
 		return;
+	// Lanes 21/11/1 read itemDef soundLoopId[2]/[1]/[0] (+2100/+2096/+2092;
+	// ItemDef.soundLoopId uint32_t[7] @0x82C, filled from res[16+i] =
+	// Soundloop_1..7 by ItemDef_ResolveAllResources @0x49E7F0), i.e. the
+	// Soundloop_3/2/1 profile slots, each registered with lifetime 15
+	// (effect_params +16 @0x528F94). Retail sndprof.def helicopter profiles
+	// author only soundloop_2 (*_ILP) and soundloop_3 (*_DLP), so the lateral
+	// lane is normally empty and Soundloop_4..7 are never consulted here.
+	// [orig: update_vehicle_effect_emissions @0x52919D..0x5291CE (lane 21),
+	//  @0x5291ED..0x52921D (lane 11), @0x529235..0x529260 (lane 1)]
+	constexpr uint16_t kRotorLifetimeTicks = 15;
 	const auto emit = [&](uint8_t lane, int slot, int32_t pitch, uint16_t level) {
 		const auto set = set_for_slot(profile, traits, slot);
 		if (!set.empty())
-			emit_emitter(world_, vehicle, lane, slot, set, pitch, level);
+			emit_emitter(world_, vehicle, lane, slot, set, pitch, level, kRotorLifetimeTicks);
 	};
-	emit(21, 6, cruise_pitch, cruise_volume);
-	emit(11, 5, medium_pitch, medium_volume);
-	emit(1, 4, ratio, lateral_volume);
+	emit(21, audio::kSlotSoundLoop1 + 2, cruise_pitch, cruise_volume);
+	emit(11, audio::kSlotSoundLoop1 + 1, medium_pitch, medium_volume);
+	emit(1, audio::kSlotSoundLoop1, ratio, lateral_volume);
 }
 
 void VehicleSystem::play_rotor_start_sound(Entity &vehicle, const VehicleTraits &traits) {

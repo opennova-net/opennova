@@ -116,12 +116,21 @@ CollisionMatrix four_wheel_orientation(const int32_t c[4][3]) {
 
 // The land lean servo. Its only caller supplies turnRate=0 (authored
 // lean_velocity*0.01) and scaleFactor=1 (unclamped error/8192).
-// [orig: Vehicle_UpdateTurretRotation @0x45AEA0; caller @0x47A7B1..0x47A7D3]
+// [orig: Entity_SmoothHeadingToTarget @0x45B2C0 (IDB name; the bike lean —
+//  its sole caller is Entity_ProcessLightVehiclePhysics @0x479600, site
+//  @0x47A7B1..0x47A7D3). The boat servo is Vehicle_UpdateTurretRotation
+//  @0x45AEA0 below.]
 void vehicle_bike_lean(Entity &e, const VehicleTraits &t, int32_t error) {
 	auto &m = e.veh;
-	if (m.crashed || m.settle_2f0 || (e.flags & kEntityFlagInAir) != 0)
+	// The caller's gate order: crashed skips everything; +0x2EF clears BEFORE
+	// the settle and airborne tests [orig: `cmp +0x2EC` @0x47A78B, `mov byte
+	// ptr [esi+2EFh], 0` @0x47A79F between `cmp +0x2F0` @0x47A798 and its jnz
+	// @0x47A7A6, then `test Flags, 0x2000` @0x47A7A8].
+	if (m.crashed)
 		return;
 	m.byte_2ef = 0;
+	if (m.settle_2f0 || (e.flags & kEntityFlagInAir) != 0)
+		return;
 	const double rate = double(float(double(t.lean_velocity) * double(0.01f)));
 	constexpr double bam_per_degree = 11930465.0;
 	const auto degrees = [](int32_t a) {
@@ -168,7 +177,9 @@ void vehicle_bike_lean(Entity &e, const VehicleTraits &t, int32_t error) {
 
 // Planing boats retain both the lean acceleration and the error interval
 // used to decelerate it. The +470 interval is deliberately a 16-bit store.
-// [orig: Entity_SmoothHeadingToTarget @0x45B2C0; caller @0x4838CF]
+// [orig: IDB: Vehicle_UpdateTurretRotation @0x45AEA0 (a misnomer — the boat
+//  lean servo; its sole caller is Entity_ProcessPlatformPhysics @0x481870,
+//  site @0x4838CF)]
 // Platform capsize latch and righting feed the retained chassis state.
 // [orig: @0x483474..0x48348B, @0x4835DA..0x48367D]
 void vehicle_boat_lean(Entity &e, const VehicleTraits &traits, int32_t error) {

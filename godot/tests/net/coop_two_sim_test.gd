@@ -36,6 +36,9 @@ const SPAWN_ZONE_TYPE := 1359 # pool-1 fixture; ItemDef supplies SpawnPoint (0x4
 # player slot; it does not fall through to DM's 6002 family.
 # [orig: Server_PositionPlayerForSpawn @0x50D1A7..0x50D201]
 const OBJECTIVE_COOP_START_TYPE := 6094
+# The USE scan admits a seat only inside the player's view cone (just under
+# 90 deg standing, 5 deg seated); a peer that presses USE looks at the seat first.
+const MountLook := preload("res://tests/support/mount_look.gd")
 
 # S16 native seat tables: the Dictionary install seam is gone. Tests compose a
 # flat asset dir under the gitignored res://.godot (ResourceRoot rejects
@@ -1003,6 +1006,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_eq(def_root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(host.load_weapon_table(def_root, "weapon.def"), OK)
 	assert_true(host.spawn_local_player(Vector3.ZERO, 120.0, 1))
+	MountLook.face(host, Vector3(2, 0, 0))
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
@@ -1165,6 +1169,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		OS.delay_msec(1)
 	assert_false(joiner.get_local_player_view().mounted)
 
+	MountLook.face(joiner, Vector3(2, 0, 0))
 	assert_true(joiner.local_player_toggle_mount(),
 			"Shift queues the joiner's C2S 0x26 attach")
 	assert_false(joiner.get_local_player_view().mounted,
@@ -1674,6 +1679,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	# then drive the zero-offset control seat. On every frame where the predicted
 	# carrier advances, joiner_pump must run its pose-only carrier follow after the
 	# vehicle mover; the old pre-prediction pose trails by exactly one motor step.
+	MountLook.face(joiner, Vector3(2, 0, 0))
 	assert_true(joiner.local_player_toggle_mount(),
 			"the nearby synthetic watercraft queues a real C2S attach")
 	var mounted_echoed := false

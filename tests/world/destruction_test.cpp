@@ -2548,6 +2548,38 @@ static void test_aircraft_death_lifecycle() {
 	CHECK(ai.brain.f[AiBrain::kCurState] == 23);
 }
 
+// The aircraft death spin rates in retail's evaluation order
+// [orig: Entity_InitDeathState @0x48F98A/@0x48F9A4 -> Death_RandomSpinRateBam
+//  @0x57B940]. Hand-derived from the rol-xor stream seeded 0x200: the first draw
+// is state rol4(0x200 + rol11(0x200)) ^ 1 = 0x01002001 -> low16 0x2001 = 8193,
+// r = 93; floor = ftol(0.45f * 11930464.0f) = ftol(0.449999988 * 11930464) =
+// 5368708; max = ftol(0.65f * 11930464.0f) = ftol(0.649999976 * 11930464) =
+// 7754801; t = 93 * 0.01f stays extended = 93 * 10737418 * 2^-30; v =
+// ftol(t * 7754801) = 7211964 (the float-rounded evaluation the port used to do
+// gives 7211966). The second draw is state 0x20028091 -> low16 0x8091 = 32913,
+// r = 13; floor = ftol(0.15f * 11930464) = 1789569; max = ftol(0.35f * 11930464)
+// = 4175662; v = ftol(13 * 0.01f * 4175662) is about 542.8k < floor, so the
+// pitch rate is -1789569. No death-piece roll precedes them for a hull without
+// death traits (Entity_SpawnDeathPieces returns at its husk gate).
+static void test_aircraft_death_spin_rates_roll_in_retail_order() {
+	auto storage = std::make_unique<World>();
+	World &w = *storage;
+	w.registry.configure_pool(1, 4);
+	w.env.water_z = INT32_MIN;
+	Entity seed;
+	seed.kind = EntityKind::Item;
+	seed.item_id = 4242;
+	seed.health = 0;
+	seed.position = { 10, 20, 30 };
+	const auto h = w.registry.spawn(1, seed);
+	Entity &e = *w.registry.get(h);
+	w.destruction_rng.state = 0x200u;
+	entity_init_aircraft_death(w, e, false);
+	CHECK(e.veh.air_roll_rate == 7211964);
+	CHECK(e.veh.air_pitch_rate == -1789569);
+	CHECK(w.destruction_rng.state == 0x20028091u);
+}
+
 // Captured AS zones select a category-compatible marker in team frontier order.
 // Occupied best markers defer instead of falling back to a lower priority marker.
 static void test_vehicle_spawn_marker_selection() {
@@ -2693,6 +2725,7 @@ int main() {
 	test_aircraft_landing_and_navigation_states();
 	test_vehicle_spawn_marker_selection();
 	test_aircraft_death_lifecycle();
+	test_aircraft_death_spin_rates_roll_in_retail_order();
 	test_vehicle_death_kills_authored_children();
 	test_vehicle_respawn_lifecycle();
 	test_generic_wreck_zero_velocity_and_inverted_rest();

@@ -334,6 +334,20 @@ public:
 	// Returns false for a missing/detached group or non-finite input.
 	bool set_group_parameters(EffectGroupId group, float rate_control,
 			float offset_control);
+	// Re-trigger a live group at a new position: every child emitter spawns
+	// one particle there along `forward`, bound to `force_zone` as its spawn
+	// window (0 leaves the particle zoneless; the trigger carries no force
+	// field). The emitters' own schedules are untouched. False for a missing
+	// or detached group, which is how a retail group that already died
+	// (pool slot freed) answers the weather slot's stale instance pointer.
+	// [orig: sub_5F6C10 @0x5F6C10 -> CEffectWorld_SpawnAllActiveChildren
+	//  @0x5E5E70: walks group+52's child list, vtable slot 6
+	//  (CParticleEmitter_SpawnNewParticle @0x5F35B0) on each child whose
+	//  nested-child word +264 is clear; CEffectWorld_UpdateAndReapGroups
+	//  @0x5EC920 frees a group once CEffectGroup_AdvanceChildrenAndReap
+	//  @0x5E59A0 reports its last child dead]
+	bool trigger_group_children(EffectGroupId group, const Vec3 &position,
+			const Vec3 &forward, std::uint16_t force_zone);
 	void detach(EffectGroupId group);
 	void detach_slot(EffectSlotToken slot);
 

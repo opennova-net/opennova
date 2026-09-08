@@ -144,6 +144,13 @@ void VehicleSystem::initialize_mission_vehicles() {
 			tick_motor(e, *t);
 		capture_spawn_pose(e);
 		mirror_pose(world_, e);
+		// The respawn budget seed: a hull with an AI slot stores thinkCooldown
+		// (+0x128) = aiRuntime[18] / 31 (the signed magic divide 0x84210843,
+		// sar 5, sign fix), which tick_dead consumes one per respawn and holds
+		// at 1. Promote seeds slot[18] = 62 * spawns, so the budget is 2 * spawns.
+		// [orig: Game_StartMission @0x526071..0x526095]
+		if (AiEntity *ai = world_.ai.for_handle(e.handle))
+			ai->inf.wait_cooldown = ai->slot.f[18] / 31;
 	}
 }
 
@@ -151,8 +158,12 @@ void VehicleSystem::initialize_mission_vehicles() {
 void VehicleSystem::respawn(Entity &e) {
 	world_.rotor_wash.release(e);
 	auto &m = e.veh;
-	// Respawn also retires the husk's three authored emitter banks.
-	// [orig: Entity_Respawn @0x45FF40 -> Entity_InitFromItemDef]
+	// Respawn also retires the husk's authored emitters: retail zeroes the bank
+	// handle words in place (+0x138 @0x4600ae, +0x1AC @0x46006e) and releases the
+	// two live emitters (CEffectEmitter_ReleaseSafe on +0x1CC @0x460199 and on
+	// +0x400 @0x4601b2); it never re-runs Entity_InitFromItemDef. Our banks are
+	// event-driven, so the three authored bank families are released explicitly.
+	// [orig: Entity_RespawnVehicle @0x45FF40]
 	for (uint8_t family = 1; family <= 3; ++family)
 		release_death_effect_bank(e, family, world_.out.destruction);
 	detail::vehicle_release_damage_effects(world_, e);
@@ -216,7 +227,12 @@ void VehicleSystem::tick_dead(Entity &e, AiEntity &ai) {
 	if ((e.item_attrib & kItemAttribPlayerControl) == 0 || !world_.ai.is_authority)
 		return;
 	if (((e.flags | e.engine_flags) & 0x1000u) != 0 || !world_.rules.vehicle_respawns) {
+		// The remove-and-notify frees the AI component with the entity; a later
+		// pool-1 spawn reusing this slot must not inherit a state-23 brain.
+		// [orig: Server_RemoveEntityAndNotify @0x467ede -> Entity_Destroy @0x43e810,
+		//  brain memset @0x43e995]
 		world_.out.entity_removals.push_back(e.handle.packed);
+		world_.ai.release(e.handle);
 		world_.registry.despawn(e.handle);
 		return;
 	}
@@ -274,6 +290,12 @@ void VehicleSystem::cleanup_destroyed_ref_group(Entity &vehicle) {
 			continue;
 		world_.out.scars.clear_entity(handle);
 		if (other->item_type != 1) {
+			// The two words are zeroed for every matched non-vehicle peer; the
+			// clip/reserve split only follows when a weapon row resolves.
+			// [orig: +804/+802 = 0 @0x5470f9..0x547100, then the optional
+			//  WeaponSlot_SplitAmmoIntoClipAndReserve @0x547107..0x54710e]
+			other->primary_weapon_slot.clip = 0;
+			other->primary_weapon_slot.reserve = 0;
 			const auto *weapon = world_.tables.weapons.by_index(other->primary_weapon_slot_adm);
 			if (weapon != nullptr && weapon->startrounds != -1 && weapon->clipsize != -1) {
 				other->primary_weapon_slot.clip =

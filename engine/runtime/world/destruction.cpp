@@ -60,6 +60,24 @@ float spin_rate_roll(World &world, const DeathPieceType &tp) {
     return v < tp.spin_min ? tp.spin_min : v;
 }
 
+// The BAM32/tick spin rate the aircraft death initializer stores directly, in
+// the retail evaluation order: floor = ftol(min * 11930464.0f); r = PRNG % 100;
+// t = r * 0.01f stays on the x87 stack in extended precision (0.01f is exactly
+// 10737418 * 2^-30, so t * max_bam is exact in 64-bit integer arithmetic);
+// max_bam = ftol(max * 11930464.0f); v = ftol(t * max_bam); max(v, floor).
+// [orig: Death_RandomSpinRateBam @0x57B940 — fmul flt_7D76D0 (11930464.0)
+//  @0x57b945, ftol @0x57b94b, PRNG_Next16 % 100 @0x57b952..0x57b95d, fild/fmul
+//  flt_7C56A8 (0.01) @0x57b963..0x57b967, max ftol @0x57b977, fimul/ftol
+//  @0x57b980..0x57b984, cmp/jge floor @0x57b989..0x57b98d]
+int32_t death_random_spin_rate_bam(World &world, float min_deg, float max_deg) {
+    const int32_t floor_bam = static_cast<int32_t>(static_cast<double>(min_deg) * 11930464.0);
+    const int32_t roll = death_rand16(world) % 100;
+    const int32_t max_bam = static_cast<int32_t>(static_cast<double>(max_deg) * 11930464.0);
+    const int32_t v = static_cast<int32_t>(
+            (static_cast<int64_t>(roll) * 10737418 * static_cast<int64_t>(max_bam)) >> 30);
+    return v < floor_bam ? floor_bam : v;
+}
+
 // [orig: g_death_piece_types @ 0x8404f0 — the 13 named rows, effect/sound slots
 // resolved to their interning names ({name, slot} pair tables @ 0x849150 /
 // @ 0x82F640). Field decode in world/destruction.h.]
@@ -911,6 +929,10 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
 // [orig: Entity_InitDeathState @0x48F7C0]
 void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 	stamp_saved_live_pose(target);
+	// Death init clears the focal-wind slot's owner tag; the other clear is
+	// entity destruction, which the rotor-wash tick's gone-owner sweep covers.
+	// [orig: Terrain_ClearShadowTileSlot @0x5CB0D0 called @0x48F9F8]
+	world.rotor_wash.release(target);
 	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
 	if (world.rules.logic_authority) {
 		const float radius = traits != nullptr && traits->kz != 0.0f
@@ -937,13 +959,11 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 	target.flags |= kEntityFlagDead | kEntityFlagHusk;
 	target.engine_flags |= kEntityFlagDead | kEntityFlagHusk;
 	target.alive = false;
-	DeathPieceType spin{};
-	spin.spin_min = 0.45f;
-	spin.spin_max = 0.65f;
-	target.veh.air_roll_rate = int32_t(double(spin_rate_roll(world, spin)) * 11930465.0);
-	spin.spin_min = 0.15f;
-	spin.spin_max = 0.35f;
-	target.veh.air_pitch_rate = -int32_t(double(spin_rate_roll(world, spin)) * 11930465.0);
+	// Roll rate (+172) from 0.45..0.65 deg/tick, pitch rate (+168) the negated
+	// 0.15..0.35 roll, in that PRNG order. [orig: Entity_InitDeathState
+	// @0x48F98A / @0x48F9A4 -> Death_RandomSpinRateBam @0x57B940]
+	target.veh.air_roll_rate = death_random_spin_rate_bam(world, 0.45f, 0.65f);
+	target.veh.air_pitch_rate = -death_random_spin_rate_bam(world, 0.15f, 0.35f);
 	if (target.veh.damage_fire_active) {
 		DestructionEffectEvent release;
 		release.family = 5;

@@ -120,6 +120,11 @@ public:
 	void detach_slot(int64_t p_slot_token);
 	bool set_group_parameters(int64_t p_group_id, float p_rate_control,
 			float p_offset_control);
+	// The rotor-wash re-trigger (particle::EffectScene::trigger_group_children):
+	// one particle per child emitter at `p_position` along `p_forward`, bound
+	// to `p_force_zone`. Native-only seam for the EffectWorld device.
+	bool trigger_group_children(int64_t p_group_id, const Vector3 &p_position,
+			const Vector3 &p_forward, int p_force_zone);
 	void reset_runtime_state();
 
 	// Runtime clock: advances simulation without materializing a render snapshot

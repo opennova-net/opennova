@@ -368,8 +368,21 @@ void test_landing_pair_alive_and_dead() {
     rig2.e->inf.anim_state = anim_state::kDeathFire; // an already-posed corpse (0x82 family)
     rig2.src.clips.insert(anim_state::kDeathFire);
     rig2.e->health = 0;
-    if (Entity *ent = rig2.world.registry.get(rig2.e->handle)) ent->health = 0;
-    rig2.run(1, 2); // settle the death edge bookkeeping
+    if (Entity *ent = rig2.world.registry.get(rig2.e->handle)) {
+        ent->health = 0;
+        // The pre-posed corpse skips the death edge, so seed what the edge
+        // would have: the corpse timer from the def's deathtime (the parse
+        // floor, 496 + 62 grace ticks). Without it the persistence block finds
+        // a drained timer on its first dead tick, no watcher, and destroys the
+        // row: Entity_Destroy frees the brain and the updater jumps to its
+        // epilogue, so no body is left to land on tick 2.
+        // [orig: seed +0x148 = def+0x890 @0x4b9c97; ItemDef_ParseProperty
+        //  @0x49fa6c-0x49faa0 (62*s, 0 -> 496, +62); decrement @0x4b9e74;
+        //  Entity_Destroy @0x4b9f93 then jmp loc_4BFC89 @0x4b9f9b]
+        ent->deathtime_ticks = 496 + 62;
+        ent->corpse_timer = ent->deathtime_ticks;
+    }
+    rig2.run(1, 2); // the per-tick corpse block only (the edge is pre-posed)
     rig2.take();
     rig2.e->inf.airborne = true;
     rig2.e->pos[0] = fx(10.0);

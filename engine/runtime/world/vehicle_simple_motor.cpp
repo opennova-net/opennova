@@ -1,10 +1,13 @@
 #include "vehicle_motor_detail.h"
 
+#include <runtime/audio/sound_profile.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/vehicle_system.h>
 #include <runtime/world/world.h>
+
+#include <optional>
 
 namespace opennova::world {
 using namespace detail;
@@ -170,18 +173,24 @@ int32_t boat_step(
 				io::bam_sub(m.wheel_rate_bam, io::bam_sar(io::bam_add(m.wheel_rate_bam, 2), 2));
 	};
 	if ((e.flags & 0x8000u) != 0) {
-		// Literal x87 constants at 7C6950/7C6F20..58; the 1.6 scales BOTH roll waves.
+		// The heave/roll wave, the x87 sequence verbatim [orig:
+		// Entity_ProcessAirVehiclePhysics @0x46FA00 (site @0x47115D..0x4711D9)]:
+		// P = fild(((x+y)>>10) + tick*4) * flt_7C6950 (1/256);
+		// pitch = ftol(cos(1.4P)*327680 + cos(P)*655360) (dbl_7C6F58/7C6F50/7C6F48);
+		// roll = ftol(sin(0.8P)*524288 + sin(1.2P)*655360) (dbl_7C6F40/7C6F38 and the
+		// leftover 655360) — NO 1.6 on the roll path; the 1.6 (dbl_7C6F28) scales the
+		// HEIGHT phase: height = -1024 - ftol(sin(1.6P) * -1024.0) (dbl_7C6F20,
+		// @0x4711BD..0x4711D9). The >>4 / >>2 bound-radius shifts are @0x4711DD..0x4711FC.
 		const int32_t phase_word = io::bam_add(
 				io::bam_sar(io::bam_add(x, y), 10), bam_shl_wrap(int32_t(world.logic_tick), 2));
 		const double phase = double(phase_word) * 0.00390625;
 		int32_t pitch = int32_t(std::cos(phase * 1.4) * 327680.0 + std::cos(phase) * 655360.0);
-		int32_t roll = int32_t(
-				(std::sin(phase * 0.8) * 524288.0 + std::sin(phase * 1.2) * 655360.0) * 1.6);
+		int32_t roll = int32_t(std::sin(phase * 0.8) * 524288.0 + std::sin(phase * 1.2) * 655360.0);
 		const int32_t radius = to_fixed(e.bound_radius);
 		const int shift = radius > 786432 ? 4 : radius > 393216 ? 2 : 0;
 		m.air_pitch_bam = io::bam_add(m.air_pitch_bam, pitch >> shift);
 		m.air_roll_bam = io::bam_add(m.air_roll_bam, roll >> shift);
-		const int32_t height = -1024 - int32_t(std::sin(phase) * -1024.0);
+		const int32_t height = -1024 - int32_t(std::sin(phase * 1.6) * -1024.0);
 		m.slide_z = io::bam_sar(io::bam_sub(io::bam_add(world.env.water_z, height), z), 1);
 	} else {
 		m.slide_z = io::bam_sub(m.slide_z, 167);
@@ -200,12 +209,20 @@ int32_t boat_step(
 // Selector-zero callbacks, reached by cveh/ctrn/catv/cbot dispatchers.
 // The amphibian selects the entire dry/wet motor before staging input.
 // [orig: Entity_ProcessInfantryPhysics @0x46E100;
-// Entity_ProcessAirVehiclePhysics @0x46FA00; Entity_DispatchPhysics_catv @0x48F010]
+// Entity_ProcessAirVehiclePhysics @0x46FA00; Entity_DispatchPhysicsUpdate @0x48F010]
 void VehicleSystem::tick_simple_motor(
 		Entity &e, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd, bool prediction) {
-	VehicleTraits t = traits;
-	if (t.amphibian && (e.flags & 0x8000u) != 0)
-		t.family = VehicleFamily::Watercraft;
+	// The family override is the only difference the afloat amphibian needs.
+	// Every other row — and an amphibian handed the already-overridden row by
+	// the watercraft entry — reads the table entry in place, so the hot path
+	// never copies the strings/vectors/trail block per tick.
+	std::optional<VehicleTraits> afloat_override;
+	if (traits.amphibian && (e.flags & 0x8000u) != 0 &&
+			traits.family != VehicleFamily::Watercraft) {
+		afloat_override.emplace(traits);
+		afloat_override->family = VehicleFamily::Watercraft;
+	}
+	const VehicleTraits &t = afloat_override ? *afloat_override : traits;
 	const bool boat = t.family == VehicleFamily::Watercraft;
 	auto &m = e.veh;
 	if (prediction && !m.net_predicted)
@@ -241,7 +258,12 @@ void VehicleSystem::tick_simple_motor(
 			m.steer_ramp_bam = 0;
 			e.flags &= ~0x80u;
 		} else if (controller->handle.pool() == 0 && controller->player_class != 0 &&
-				(!boat || !watercraft_driver_submerged(world_, *controller))) {
+				!watercraft_driver_submerged(world_, *controller)) {
+			// A player driver whose eye (CameraOffset.z + Z) sits at or below the
+			// water plane loses the wheel on the ground selector-zero mover too,
+			// not only the boat [orig: Entity_ProcessInfantryPhysics @0x46E100
+			// (site @0x46EA2E..0x46EA3A `add eax,[ecx+0Ch]; cmp eax,
+			// Env_WaterHeightFixed; jle loc_46ECB1` — the AI waypoint leg)].
 			stage_player_vehicle_input(world_, e, *controller, t);
 			m.stuck_ticks = 0;
 		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
@@ -293,18 +315,63 @@ void VehicleSystem::tick_simple_motor(
 		vehicle_sample_trails(world_, e, t, m.cmd_speed);
 		m.speed = contacted_speed;
 	}
-	// The water client wrapper's caller emits continuous sound once.
-	if (!prediction || !boat || traits.family != VehicleFamily::Watercraft)
-		update_ground_sound(e, t, e.health <= 0, !boat && m.plat_airborne_ticks > 30);
-	if (!boat && controller != nullptr && m.rev_sound_ticks > 124 && m.plat_airborne_ticks > 30) {
+	if (boat) {
+		// The selector-zero boat sounds its lights first, then runs the movement
+		// fold with the velocity magnitude (ftol of sqrt(vx^2 + vy^2 + vz^2),
+		// flt_7C19E0 clamp) standing in for a zero speed word and no fold at all
+		// when neither waterSpeed, brain speed A nor the command resolves, then
+		// the direction latch inside the fold. It has no high-rev, engine-start
+		// or engine-stop edge and never runs the part spin.
+		// [IDB: Entity_ProcessAirVehiclePhysics @0x46FA00 (a misnomer: the
+		//  selector-zero boat mover): lights @0x4714EA..0x471523 (slot 24,
+		//  +0x318 bit 2), the sound-system gate dword_24E0E80 @0x471523, fold
+		//  gate @0x471533..0x471546, speed substitute @0x47154C..0x4715A5,
+		//  maximum @0x4715AA..0x4715C6, fold @0x4715D2, direction latch
+		//  @0x4715DA..0x471667, tail @0x47166F]
+		const bool lights = (e.flags & 0x80u) != 0;
+		if (lights && !m.light_sound_latched)
+			play_contact_sound(e, t, audio::kSlotAudio1);
+		m.light_sound_latched = lights;
+		// The water client wrapper's caller emits continuous sound once.
+		if (!prediction || traits.family != VehicleFamily::Watercraft) {
+			int32_t maximum = t.water_speed;
+			if (maximum == 0)
+				if (const AiEntity *ai = world_.ai.for_handle(e.handle))
+					maximum = ai->brain.f[AiBrain::kSpeedA];
+			if (maximum == 0)
+				maximum = m.cmd_speed;
+			if (maximum != 0) {
+				const int32_t speed_word = m.speed;
+				if (speed_word == 0)
+					m.speed = static_cast<int32_t>(std::min(
+							std::sqrt(double(m.vel_x) * m.vel_x + double(m.vel_y) * m.vel_y +
+									double(m.slide_z) * m.slide_z),
+							2147418112.0));
+				update_ground_sound(e, t, e.health <= 0, false);
+				m.speed = speed_word;
+			}
+		}
+		return;
+	}
+	// The selector-zero ground mover shares the cveh sound tail verbatim: the
+	// movement fold (maximum = playerSpeed, brain speed A, then the command;
+	// collided = airborne ticks > 30), the direction latch, the high-rev edge,
+	// the lights edge, the claimant start/stop edge (slot 30 on the occupant
+	// eye above water, the all-zero fold plus slot 31 on the hull +0x18000)
+	// and the part spin, then the rev timer.
+	// [IDB: Entity_ProcessInfantryPhysics @0x46E100 (a misnomer: the
+	//  selector-zero ground mover): gate dword_24E0E80 @0x46F7C8, fold
+	//  @0x46F7D4..0x46F825, direction latch @0x46F828..0x46F888, high-rev
+	//  @0x46F88B..0x46F8C0, lights @0x46F8C3..0x46F8FC, claimant edge
+	//  @0x46F8FC..0x46F99C, part spin @0x46F99E, timer @0x46F9A6]
+	update_ground_sound(e, t, e.health <= 0, m.plat_airborne_ticks > 30);
+	if (controller != nullptr && m.rev_sound_ticks > 124 && m.plat_airborne_ticks > 30) {
 		play_contact_sound(e, t, 33);
 		m.rev_sound_ticks = 0;
 	}
 	update_engine_sound(e, t);
-	if (!boat) {
-		if (t.player_control)
-			part_anim_tick(e, t);
-		++m.rev_sound_ticks;
-	}
+	if (t.player_control)
+		part_anim_tick(e, t);
+	++m.rev_sound_ticks;
 }
 } // namespace opennova::world

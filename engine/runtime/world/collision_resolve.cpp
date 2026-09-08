@@ -504,7 +504,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     pos[2] += total_force[2];
 	// A hull opposing the walk widens the carrier entry ring. The signed sum
 	// and both angular gates are retail's exact tests, not a stalled-walk timer.
-	// [orig: Physics_ResolveEntityCollision @0x4B377A..0x4B37BB]
+	// [orig: Entity_MovementCollisionResolver @0x4B2BD0 (site @0x4B377A..0x4B37BB)]
 	if (int64_t(total_force[0]) + total_force[1] != 0) {
 		if (AiEntity *body = world.ai.for_handle(source)) {
 			const int32_t facing = io::bam_sub(body->inf.target_heading, body->inf.body_heading);

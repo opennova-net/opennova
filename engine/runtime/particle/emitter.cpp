@@ -367,7 +367,13 @@ std::uint32_t compute_spawn_flags(const ParticleDef &def, std::uint32_t graphic_
 	return flags;
 }
 
-bool emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
+// `position`/`forward` are the spawn-call arguments (the emitter's own for a
+// scheduled spawn, the hit position and +Y for a rotor-wash re-trigger);
+// `force_zone_window` is the open spawn window (retail dword_29D6BB0), 0 when
+// the spawn must search `forces` for its nearest zone.
+bool emit_one_internal(Emitter &e, const ParticleDef &def, const Vec3 &position,
+		const Vec3 &forward, std::uint16_t force_zone_window,
+		const ParticleForceField *forces) noexcept {
 	const std::size_t pool_limit = std::min(e.max_particles, kEmitterHardParticleLimit);
 	if (e.particles.size() >= pool_limit) {
 		return false;
@@ -425,15 +431,17 @@ bool emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	// def+3724 lands in the position; z_offset is NOT positional — it becomes
 	// the render-side camera-ward pull (emitter+0x140, seeded -z_offset in
 	// CEffectEmitter_Initialize @ 0x5e6349)].
-	p.position = e.position;
+	// The spawn-call `position` argument is added after the shape offset
+	// [orig: SpawnParticle @ 0x5e7d30..0x5e7d4f]; the order is immaterial to
+	// the sum.
+	p.position = position;
 	p.position.y += e.spawn_y_offset;
 	p.color_slot = static_cast<std::uint8_t>(pick_color_slot(e));
 	p.color = color_for_slot(def, p.graphic_layer, p.color_slot);
 	p.serial = e.next_serial++;
-	p.force_zone = e.force_zone;
 	apply_emission_shape(e, def, p);
-	// Velocity: EVERY shape gets direction-in-spread-cone around the emitter
-	// forward, scaled by `speed + speed_adj * rand_signed`
+	// Velocity: EVERY shape gets direction-in-spread-cone around the spawn
+	// call's direction argument, scaled by `speed + speed_adj * rand_signed`
 	// [orig: SpawnParticle @ 0x5e7640 post-switch block — the vtable direction
 	// helper, then the def+3892/+3896 multiply onto all three components;
 	// EMITVECTOR (0x10000) selects the alternate direction helper, an
@@ -441,9 +449,16 @@ bool emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	if (def.speed != 0.0f || def.speed_adj != 0.0f) {
 		const float speed = def.speed + emitter_rand_signed(e) * def.speed_adj;
 		const Vec3 dir = random_direction_in_cap(
-				e, e.forward, def.spread * 0.0174533f, def.spread_skip * 0.0174533f);
+				e, forward, def.spread * 0.0174533f, def.spread_skip * 0.0174533f);
 		p.velocity = vec3_add(p.velocity, vec3_scale(dir, speed));
 	}
+	// Every spawned particle binds its focal-wind zone once the position is
+	// final: the open trigger window when there is one, else the nearest
+	// containing zone [orig: CParticleEmitter_SpawnNewParticle @0x5F35B0 ->
+	// Terrain_FindNearestAmbientSoundZone(particle+24) @0x5F37C6..0x5F37D8;
+	// the window is dword_29D6BB0 @0x5CBCD3].
+	p.force_zone = force_zone_window != 0 ? force_zone_window
+			: (forces != nullptr ? forces->zone_at(p.position) : std::uint16_t{0});
 	// Retail completes the spawn RNG path but rejects particles whose resolved
 	// lifetime is non-positive or non-finite instead of clamping them alive.
 	if (!valid_lifetime) {
@@ -580,12 +595,21 @@ void emitter_translate(Emitter &e, Vec3 new_pos) noexcept {
 	}
 }
 
-bool emitter_spawn_one(Emitter &e) {
+bool emitter_spawn_one(Emitter &e, const ParticleForceField *forces) {
 	const std::size_t pool_limit = std::min(e.max_particles, kEmitterHardParticleLimit);
 	if (e.def == nullptr || e.particles.size() >= pool_limit) {
 		return false;
 	}
-	return emit_one_internal(e, *e.def);
+	return emit_one_internal(e, *e.def, e.position, e.forward, e.force_zone, forces);
+}
+
+bool emitter_spawn_one_at(Emitter &e, Vec3 position, Vec3 forward,
+		std::uint16_t force_zone_window, const ParticleForceField *forces) {
+	const std::size_t pool_limit = std::min(e.max_particles, kEmitterHardParticleLimit);
+	if (e.def == nullptr || e.particles.size() >= pool_limit) {
+		return false;
+	}
+	return emit_one_internal(e, *e.def, position, forward, force_zone_window, forces);
 }
 
 void emitter_advance(Emitter &e, float dt, const ParticleForceField *forces) {
@@ -673,7 +697,8 @@ void emitter_advance(Emitter &e, float dt, const ParticleForceField *forces) {
 					const std::size_t burst = std::min(requested, remaining);
 					bool emitted = false;
 					for (std::size_t b = 0; b < burst; ++b) {
-						if (!emit_one_internal(e, def)) {
+						if (!emit_one_internal(e, def, e.position, e.forward, e.force_zone,
+									forces)) {
 							break;
 						}
 						emitted = true;

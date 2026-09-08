@@ -300,7 +300,15 @@ struct InfantryState {
     int32_t move_target[3] = {};
     bool at_final_oneshot = false;
 
-	// Terrain-gradient push widens the boarding ring to carrier bound + 1 unit.
+	// The nonzero-ness of retail's entity+0x369 path-state byte (0 clear, 1 needs
+	// a path, 2 path found, 3): the two witnessed producers set it to 1 (the
+	// terrain-gradient shove @0x4BA94E and the collision resolver's facing push
+	// @0x4B37BB) and the boarding ring reads it (@0x4BB325: zero -> the 2 u ring,
+	// else carrier bound + 1 u). The 1/2/3 progression and the only clear are the
+	// cover/path consumer ai_find_cover_position @0x4afab0 (search -> 2
+	// @0x4afea8, clear within 1 u @0x4aff06), which is unported, so the byte is
+	// modeled as this bool and nothing here returns it to 0 on arrival (the
+	// arrival writes a frame local, var_1169 @0x4BBD8F).
 	// Named E/G/S/H entry points share this staged walk and pool-0 claim.
 	// [orig: Entity_UpdateInfantryAI @0x4B9910; pad_368[1], boneWalkStage/Slot]
 	bool board_blocked = false;

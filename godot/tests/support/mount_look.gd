@@ -1,0 +1,41 @@
+extends RefCounted
+# Looking at the seat before pressing USE.
+#
+# The USE scan (Entity_FindNearestSeatOrArmory) admits a seat only inside the
+# player's view cone: just under 90 deg for a standing player, 5.0 deg once
+# seated, measured from the entity yaw/pitch to the seat point lifted 0.1875 u,
+# and it scores by 3D reach plus that angular offset. A test that presses USE
+# therefore first looks at what it means to board, as a player does. The
+# debug teleport is the one seam that writes the local look directly; passing
+# the current position keeps the player where it stands.
+
+const SEAT_LIFT := 0.1875
+
+
+static func _mission(godot_vec: Vector3) -> Vector3:
+	return Vector3(godot_vec.x, -godot_vec.z, godot_vec.y)
+
+
+# The local player's position in mission space (Z-up).
+static func local_player_mission_position(sim: Simulation) -> Vector3:
+	return _mission(sim.get_local_player_position())
+
+
+# Point the local player at `target` (mission space, Z-up). `from` moves the
+# player there first (mission space); the default keeps its current position.
+static func face(sim: Simulation, target: Vector3, from = null) -> void:
+	var here: Vector3
+	if from == null:
+		here = local_player_mission_position(sim)
+	else:
+		here = from
+	# The scan measures from Position + CameraOffset, the entity's eye offset:
+	# the body tick stamps it from the head clip, and a clip-less headless
+	# fixture leaves it at zero, so read the live value rather than assume one.
+	var eye := here + _mission(sim.get_local_player_eye_offset())
+	var dx := target.x - eye.x
+	var dy := target.y - eye.y
+	var dz := target.z + SEAT_LIFT - eye.z
+	var yaw_deg := rad_to_deg(atan2(dx, dy))
+	var pitch_deg := rad_to_deg(atan2(dz, sqrt(dx * dx + dy * dy)))
+	assert(sim.debug_teleport_local_player(here, yaw_deg, pitch_deg) == OK)

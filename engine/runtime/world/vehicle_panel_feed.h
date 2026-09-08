@@ -15,6 +15,7 @@
 #include <formats/def/def.h>
 #include <runtime/hud/hud_frame.h>
 
+#include <array>
 #include <vector>
 
 namespace opennova::world {
@@ -37,6 +38,18 @@ struct VehiclePanelSlot {
 };
 inline constexpr int kVehiclePanelSlotMax = 10;
 
+// Retail's two 10-entry stack arrays (entityPtrs[10] / slotTypes[10]) as one
+// count-terminated list: fixed storage, no allocation per build — the aircraft
+// physics rebuilds it every tick for the flare scan [orig: the caller's frame
+// arrays @0x4911a5..0x4911b5; the zeroed tail @0x434db4..0x434dd3].
+struct VehiclePanelSlotList {
+    std::array<VehiclePanelSlot, kVehiclePanelSlotMax> slots{};
+    int count = 0;
+    const VehiclePanelSlot &operator[](int i) const { return slots[static_cast<size_t>(i)]; }
+    const VehiclePanelSlot *begin() const { return slots.data(); }
+    const VehiclePanelSlot *end() const { return slots.data() + count; }
+};
+
 // The vehicle the panel is drawn for, from the local player's mount. A mount
 // on an attached gun child re-roots to the child's parent vehicle
 // [orig: `if (!(rootEntity->def+84 & 0x40)) vehicle = rootEntity->parent`
@@ -57,7 +70,7 @@ EntityHandle vehicle_panel_root(const World &world, const Entity &local);
 // The child walk follows the parent's attachment list; this walks the registry
 // in handle order, which equals attachment order for authored emplacements.
 int build_vehicle_panel_slots(const World &world, EntityHandle root,
-                              std::vector<VehiclePanelSlot> &out);
+                              VehiclePanelSlotList &out);
 
 // The marker rows for the panel element: one per authored pair the vehicle
 // actually offers — passenger seats from the block's `seats` pairs (by retail

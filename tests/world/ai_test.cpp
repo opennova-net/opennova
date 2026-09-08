@@ -673,6 +673,16 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     victim_seed.net_id = 0x21;
     victim_seed.group_id = 2;
     victim_seed.position = {20.0f, 0.0f, 0.0f};
+    // The corpse timer's seed. JO persons author `deathtime 30` (37 of the 39
+    // type-person rows in JOX ITEMS.DEF), parse-scaled to 30*62 + 62 ticks
+    // [orig: ItemDef_ParseProperty @0x49fa6c-0x49faa0 -> def+0x890; the death
+    // edge copies it to entity+0x148 @0x4b9c97]. A def-less rig row leaves it 0,
+    // and retail runs the persistence block on the edge tick itself (loc_4B9D55
+    // falls into loc_4B9E4D): a zero timer skips the decrement (@0x4b9e70..0x4b9e72),
+    // fails the `> 0` keep (@0x4b9f44), and with no respawn tickets, no session and
+    // no local-player watcher reaches Entity_Destroy @0x4b9f93 -> jmp loc_4BFC89
+    // @0x4b9f9b, which frees the brain before the death clip is ever advanced.
+    victim_seed.deathtime_ticks = 30 * 62 + 62;
     const EntityHandle victim_h = w.registry.spawn(0, victim_seed);
 
     DeathTransitionRootSource root;
@@ -1717,6 +1727,346 @@ static void test_vehicle_weapon_pose_and_target_cleanup() {
 	w.registry.get(sh)->ai_target_refcount = 0;
 	sys.ai_set_target(w, other, sh);
 	CHECK(w.registry.get(sh)->ai_target_refcount == 0);
+}
+
+// The ground/boat/train brain machine differs from the air machine in three gates
+// and the spawn channel word [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0
+// vs EntityAI_ProcessInfantryStateMachine @0x4581b0]:
+//  - the alert edge pends GROUND_EVADE (18) unless cur == GROUND_PRETTY (22)
+//    (@0x458442..0x458448; the air machine pends 10 unless 14 @0x458239..0x45823b);
+//  - a client ticks only cur 21/23 (@0x458545..0x45854d; air 13/15);
+//  - a client commits pend 16 or 21..23 (@0x458579..0x458586; air 7 or 13..15);
+//  - the spawn AIEvent's channel word is bx == 0 (@0x45851a, xor ebx,ebx @0x4583cd;
+//    the air machine stores 9 @0x458312).
+static void test_vehicle_class_state_machine_gates() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	auto sys_heap = std::make_unique<AiSystem>();
+	AiSystem &sys = *sys_heap;
+	const int idx = sys.attach(EntityHandle::make(1, 0));
+	AiEntity &e = *sys.at(idx);
+	e.has_physics = true;
+	e.physics_flags = 0;
+	e.health = 100;
+
+	// Authority alert edge: GROUND_EVADE from a non-22 state, committed at once ...
+	sys.is_authority = true;
+	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
+	e.brain.f[AiBrain::kPrevAlert] = 0;
+	e.brain.f[AiBrain::kAlert] = 1;
+	sys.process_vehicle_state_machine(e, w, 0);
+	CHECK(e.brain.f[AiBrain::kPrevAlert] == 2);
+	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundEvade);
+	// ... and never out of GROUND_PRETTY.
+	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundPretty;
+	e.brain.f[AiBrain::kPrevAlert] = 0;
+	e.brain.f[AiBrain::kAlert] = 1;
+	sys.process_vehicle_state_machine(e, w, 0);
+	CHECK(e.brain.f[AiBrain::kPrevAlert] == 2);
+	CHECK(e.brain.f[AiBrain::kPendState] == kAiGroundPretty);
+	// The air machine, given the same edge from GROUND_PRETTY, pends HELO_EVADE.
+	e.brain.f[AiBrain::kPrevAlert] = 0;
+	e.brain.f[AiBrain::kAlert] = 1;
+	sys.is_authority = false; // hold the commit so the pend is observable
+	sys.process_infantry_state_machine(e, w, 0);
+	CHECK(e.brain.f[AiBrain::kPendState] == kAiGroundPretty); // no alert leg on a client
+	sys.is_authority = true;
+	e.brain.f[AiBrain::kPrevAlert] = 0;
+	e.brain.f[AiBrain::kAlert] = 1;
+	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
+	sys.process_infantry_state_machine(e, w, 0);
+	CHECK(e.brain.f[AiBrain::kCurState] == kAiHeloEvade);
+
+	// Client tick gate: GROUND_DYING (21) ticks under the vehicle machine — the
+	// dying tick queues the destroy event for a stopped hull — and not under the
+	// air machine.
+	sys.is_authority = false;
+	e.brain.f[AiBrain::kPrevAlert] = e.brain.f[AiBrain::kAlert];
+	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = 21;
+	e.vel_x = 0;
+	e.vel_z = 0;
+	const int queued_before = sys.events.count();
+	sys.process_infantry_state_machine(e, w, 0);
+	CHECK(sys.events.count() == queued_before);
+	sys.process_vehicle_state_machine(e, w, 0);
+	CHECK(sys.events.count() == queued_before + 1);
+
+	// Client commit gate: 17 holds, 16 and 22 commit; the air machine holds 16.
+	e.brain.f[AiBrain::kCurState] = kAiGroundFormation;
+	e.brain.f[AiBrain::kPendState] = kAiGroundCombat;
+	sys.process_vehicle_state_machine(e, w, 0);
+	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundFormation);
+	e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
+	sys.process_vehicle_state_machine(e, w, 0);
+	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundFollowWp);
+	e.brain.f[AiBrain::kPendState] = kAiGroundPretty;
+	sys.process_vehicle_state_machine(e, w, 0);
+	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundPretty);
+	e.brain.f[AiBrain::kCurState] = kAiGroundFormation;
+	e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
+	sys.process_infantry_state_machine(e, w, 0);
+	CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundFormation);
+
+	// Spawn event channel word: 0 for the vehicle machine, 9 for the air one.
+	sys.is_authority = true;
+	e.brain.f[AiBrain::kPrevAlert] = e.brain.f[AiBrain::kAlert];
+	e.brain.f[AiBrain::kCurState] = e.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
+	const int n0 = sys.events.count();
+	sys.process_vehicle_state_machine(e, w, 1);
+	CHECK(sys.events.count() == n0 + 1);
+	CHECK(sys.events.at(n0).f[0] == 1);
+	CHECK((sys.events.at(n0).f[1] & 0xffff) == 0);
+	CHECK((sys.events.at(n0).f[1] >> 16) == idx);
+	sys.process_infantry_state_machine(e, w, 1);
+	CHECK(sys.events.count() == n0 + 2);
+	CHECK((sys.events.at(n0 + 1).f[1] & 0xffff) == 9);
+}
+
+// A dead PlayerControl hull with vehicle respawns off is removed by the dead tick
+// [orig: AI_TickState_VehicleDead @0x467ede -> Server_RemoveEntityAndNotify
+//  @0x50A270 -> Entity_Destroy @0x43e810, which zeroes the AI component @0x43e995
+//  and nulls entity+100 @0x43e99d]. The registry hands the next pool-1 spawn the
+// same slot, so that entity must start brainless, and the freed AI slot is what
+// the next attach reuses [orig: Entity_InitVehicleAI's owner scan @0x460204..0x460222].
+static void test_dead_vehicle_despawn_frees_brain() {
+	auto owned = std::make_unique<World>();
+	World &w = *owned;
+	w.registry.configure_pool(1, 2);
+	w.rules.vehicle_respawns = false;
+	w.ai.is_authority = true;
+	Entity hull;
+	hull.kind = EntityKind::Item;
+	hull.item_id = 1291;
+	hull.item_attrib = kItemAttribPlayerControl;
+	hull.health = 0;
+	hull.alive = false;
+	hull.position = { 10, 20, 30 };
+	const EntityHandle h = w.registry.spawn(1, hull);
+	const int idx = w.ai.attach(h);
+	AiEntity &ai = *w.ai.at(idx);
+	ai.brain.f[AiBrain::kCurState] = ai.brain.f[AiBrain::kPendState] = kAiGroundDead;
+	ai.brain.f[AiBrain::kPrevAlert] = ai.brain.f[AiBrain::kAlert];
+	TickContext ctx{};
+	ctx.world = &w;
+	ctx.is_authority = true;
+	w.ai.tick(w, ctx);
+	CHECK(w.registry.get(h) == nullptr);
+	CHECK(w.out.entity_removals.size() == 1);
+	CHECK(w.ai.for_handle(h) == nullptr);
+	CHECK(w.ai.count() == 1 && w.ai.at(0)->brain.f[AiBrain::kOwner] == 0);
+	// The next pool-1 spawn lands in the freed registry slot, brainless; ticking
+	// again runs no dead tick on it (no second removal, the row survives).
+	Entity device;
+	device.kind = EntityKind::Item;
+	device.item_id = 100042;
+	device.health = 100;
+	device.alive = true;
+	const EntityHandle h2 = w.registry.spawn(1, device);
+	CHECK(h2.packed == h.packed);
+	CHECK(w.ai.for_handle(h2) == nullptr);
+	w.ai.tick(w, ctx);
+	CHECK(w.registry.get(h2) != nullptr);
+	CHECK(w.out.entity_removals.size() == 1);
+	// A fresh brain reuses the freed AI slot instead of growing the array.
+	CHECK(w.ai.attach(h2) == 0);
+	CHECK(w.ai.count() == 1 && w.ai.for_handle(h2) == w.ai.at(0));
+	CHECK(w.ai.at(0)->brain.f[AiBrain::kOwner] == 1 && w.ai.at(0)->handle == h2);
+}
+
+namespace {
+// The flat-field rig the aircraft brain pins share: a 500 hp hull at the origin
+// heading east, a live victim wherever the pin needs it, one ammo row.
+struct AircraftRig {
+	std::unique_ptr<World> owned = std::make_unique<World>();
+	World &w = *owned;
+	AiSystem &sys = w.ai;
+	std::vector<uint16_t> heights = std::vector<uint16_t>(64 * 64, 0);
+	std::vector<int> sectors = std::vector<int>(256, 1);
+	opennova::terrain::TerrainHeightField terrain;
+	EntityHandle hull_h, victim_h;
+	AiEntity *ai = nullptr;
+	explicit AircraftRig(Vec3 victim_pos) {
+		w.registry.configure_pool(0, 8);
+		w.registry.configure_pool(1, 8);
+		terrain.heightmap = heights.data();
+		terrain.dim = 64;
+		terrain.layout.sector_grid = sectors.data();
+		w.tables.terrain = &terrain;
+		w.tables.ammo.entries.resize(2);
+		w.tables.ammo.entries[1].valid = true;
+		w.tables.ammo.entries[1].velocity = 620;
+		w.tables.ammo.entries[1].max_age_ticks = 100;
+		Entity hull;
+		hull.health = 500;
+		hull.alive = true;
+		hull.position = { 0, 0, 10 };
+		hull.team = 1;
+		hull_h = w.registry.spawn(1, hull);
+		Entity victim;
+		victim.health = 100;
+		victim.alive = true;
+		victim.position = victim_pos;
+		victim.team = 2;
+		victim_h = w.registry.spawn(0, victim);
+		ai = sys.at(sys.attach(hull_h));
+		sys.is_authority = true;
+		ai->health = 500;
+		ai->pos[2] = 10 << 16;
+		ai->team = 1;
+		ai->profile.type = 1;
+		ai->profile.field220 = 6000;
+		ai->profile.patrol_climb = 3000;
+		ai->profile.field216 = 20 << 16;
+		ai->profile.patrol_altitude = 12 << 16;
+		ai->profile.min_agl = 5 << 16;
+		ai->profile.min_speed = 100;
+		ai->profile.min_chase = 20 << 16;
+		ai->profile.max_chase = 60 << 16;
+		ai->profile.approach_cap = 1000 << 16;
+		ai->profile.radar_fov_bam = INT32_MAX;
+		ai->profile.fov_secondary = 0x7f;
+		ai->profile.fire_a.ammo_index = 1;
+		ai->profile.fire_a.cone_bam = INT32_MAX;
+		ai->profile.fire_b = ai->profile.fire_a;
+		ai->profile.fire_interval_a = ai->profile.fire_interval_b = 1;
+		ai->brain.f[AiBrain::kSpeedA] = 2000;
+		ai->brain.f[AiBrain::kSpeedB] = 1000;
+		ai->brain.f[AiBrain::kFallback] = 7;
+	}
+};
+} // namespace
+
+// The processed-tick fire arc [orig: Entity_ProcessInfantryWeaponFire @0x471710]:
+// the limit is the profile's secondary FOV byte read SIGNED (movsx @0x471736),
+// OR 1 at the head, OR 2 at the gate, sar 1, compared UNSIGNED (ja @0x472481)
+// against the folded bearing delta. Out of arc jumps straight to the epilogue
+// (@0x472df5) without touching the bone byte or last_weapon; a byte >= 0x80
+// yields a negative limit that admits every bearing AT THE GATE. The gate is not
+// the only cone: the primary/secondary solve behind it validates the target in
+// the hull frame (Entity_ValidateWeaponTarget @0x53a400 -> the arc word
+// max(|yaw|,|pitch|) + 5*min>>4 @0x53a522..0x53a548, compared UNSIGNED against
+// the radar/heat FOV words @0x53a55e/@0x53a582), then folds the solved relative
+// yaw the same way and compares it (ja @0x456d4c) against
+// (block+8 | 0x2000000) >> 25 (sar @0x456d47) -- at most 63/256 of a turn for
+// any non-negative cone. A target dead astern (delta 128, |yaw| = 0x80000000)
+// therefore never solves however wide the gate is, and an in-arc tick with no
+// block solved takes LABEL_209 (@0x4729ed..0x4729f4): bone byte and last_weapon
+// cleared. (The earlier form of this test expected the primary to fire astern
+// under the negative gate limit; that premise ignored the solve's own cone.)
+static void test_aircraft_fire_arc_gate() {
+	AircraftRig r({ -100, 0, 10 }); // dead astern: folded delta 128
+	AiEntity &ai = *r.ai;
+	auto &b = ai.brain;
+	b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState] = 8;
+	AiThinkCtx ctx{ &r.sys, &ai, &r.w, nullptr };
+	r.sys.row(8).enter(ctx);
+	r.sys.ai_set_target(r.w, ai, r.victim_h);
+	b.f[AiBrain::kAmmoA] = 4;
+	b.f[AiBrain::kAmmoB] = 0;
+	b.f[AiBrain::kAccuracy] = 4;
+	ai.profile.flags100 = 0;
+	// (0x7f | 3) >> 1 = 63 < 128: out of arc, state untouched, no shot.
+	b.bytes()[AiBrain::kBoneFlagByte] = 0x40;
+	b.f[AiBrain::kLastWeapon] = 2;
+	b.f[AiBrain::kTickAccum] = 15;
+	r.sys.row(8).tick(ctx);
+	CHECK(r.w.out.rounds.count == 0);
+	CHECK(b.bytes()[AiBrain::kBoneFlagByte] == 0x40);
+	CHECK(b.f[AiBrain::kLastWeapon] == 2);
+	// (int8(0x80) | 3) >> 1 = -63, unsigned: the gate admits every bearing, but
+	// the astern target fails the solve (the 0x7fffffff radar FOV word cannot
+	// admit |yaw| = 0x80000000, and no non-negative cone admits a fold of 128):
+	// in arc, nothing solved -> LABEL_209 clears the bone byte and last_weapon.
+	ai.profile.fov_secondary = 0x80;
+	b.f[AiBrain::kTickAccum] = 15;
+	r.sys.row(8).tick(ctx);
+	CHECK(r.w.out.rounds.count == 0);
+	CHECK(b.bytes()[AiBrain::kBoneFlagByte] == 0);
+	CHECK(b.f[AiBrain::kLastWeapon] == 0);
+	// The same target 45 deg off the bow (folded delta 32) sits inside the
+	// solve's 63 cone, so the gate alone decides: (0x10 | 3) >> 1 = 9 < 32 is
+	// out of arc (state untouched again) ...
+	r.w.registry.get(r.victim_h)->position = { 100, 100, 10 };
+	b.bytes()[AiBrain::kBoneFlagByte] = 0x40;
+	b.f[AiBrain::kLastWeapon] = 2;
+	ai.profile.fov_secondary = 0x10;
+	b.f[AiBrain::kTickAccum] = 15;
+	r.sys.row(8).tick(ctx);
+	CHECK(r.w.out.rounds.count == 0);
+	CHECK(b.bytes()[AiBrain::kBoneFlagByte] == 0x40);
+	CHECK(b.f[AiBrain::kLastWeapon] == 2);
+	// ... and the negative limit admits it: the primary fires and becomes the
+	// weapon on record.
+	ai.profile.fov_secondary = 0x80;
+	b.f[AiBrain::kTickAccum] = 15;
+	r.sys.row(8).tick(ctx);
+	CHECK(r.w.out.rounds.count == 1);
+	CHECK(b.f[AiBrain::kLastWeapon] == 1);
+	CHECK((b.bytes()[AiBrain::kBoneFlagByte] & 0x40) != 0);
+	CHECK(r.sys.unported_calls == 0);
+}
+
+// The two 0x1000x combat movers. IDB names are swapped-looking: AI_CalcGroundVehicleTarget
+// @0x4613A0 is the HELICOPTER mover (0x10000), AI_CalcHelicopterTarget @0x461870 the
+// PLANE mover (0x10005).
+static void test_aircraft_combat_mover_pins() {
+	// Helicopter, target 40 u dead astern at 15 u: the >= min_chase arm with the
+	// bearing delta > 0x40 skips the fire-point check (combat timer untouched)
+	// but still writes [127] = [45] << 14 (LABEL_35 @0x4616c7); the work Z
+	// ([51] + target Z = 15 u) exceeds the 12.5 u helicopter ceiling
+	// (819200 @0x46172c) and re-targets to ground + [51] + 50 u (@0x46173b);
+	// the out-speed is [49] >> 2 = 500, inside [min_speed, [49]].
+	{
+		AircraftRig r({ -40, 0, 15 });
+		AiEntity &ai = *r.ai;
+		auto &b = ai.brain;
+		ai.aircraft_controller = 0x10000;
+		r.sys.ai_set_target(r.w, ai, r.victim_h);
+		b.f[45] = 1;
+		b.f[AiBrain::kStep] = 1;
+		b.f[AiBrain::kCombatTimer] = 100;
+		b.f[AiBrain::kNoTargetIdle] = 0;
+		b.f[AiBrain::kTargetRef] = 0;
+		CHECK(r.sys.aircraft_movement(ai, r.w) == 0);
+		CHECK(b.f[AiBrain::kTargetRef] == 16384);
+		CHECK(b.f[AiBrain::kCombatTimer] == 100);
+		CHECK(b.f[AiBrain::kWorkPosZ] == 3276800);
+		CHECK(b.f[AiBrain::kOutSpeed] == 500);
+		CHECK(b.f[AiBrain::kWorkPosX] == 0 && b.f[AiBrain::kWorkPosY] == 0);
+		CHECK(b.f[138] == 6000);
+		// The plane keeps a 15 u work Z: its ceiling is 50 u (3276800 @0x461b5c),
+		// and the plane mover never writes [127] (no store in @0x461870..0x461c1a).
+		ai.aircraft_controller = 0x10005;
+		b.f[AiBrain::kTargetRef] = 777;
+		b.f[AiBrain::kCombatTimer] = 100;
+		CHECK(r.sys.aircraft_movement(ai, r.w) == 0);
+		CHECK(b.f[AiBrain::kWorkPosZ] == 15 << 16);
+		CHECK(b.f[AiBrain::kTargetRef] == 777);
+	}
+	// Plane with a target while no_target_idle is set: the retreat write does not
+	// return early — the common tail still zeroes work X/Y and clamps the speed
+	// into [min_speed, [49]] (@0x4619a4..0x461a07 falling through to
+	// @0x461b3f..0x461bb3). The helicopter returns before the tail (@0x4615a1).
+	{
+		AircraftRig r({ 40, 0, 10 });
+		AiEntity &ai = *r.ai;
+		auto &b = ai.brain;
+		r.sys.ai_set_target(r.w, ai, r.victim_h);
+		b.f[AiBrain::kNoTargetIdle] = 1;
+		b.f[AiBrain::kStep] = 1;
+		ai.aircraft_controller = 0x10005;
+		b.f[AiBrain::kWorkPosX] = b.f[AiBrain::kWorkPosY] = 12345;
+		b.f[AiBrain::kOutSpeed] = 0;
+		CHECK(r.sys.aircraft_movement(ai, r.w) == 0);
+		CHECK(b.f[AiBrain::kWorkPosX] == 0 && b.f[AiBrain::kWorkPosY] == 0);
+		CHECK(b.f[AiBrain::kOutSpeed] == 2000);
+		CHECK(b.f[AiBrain::kWorkPosZ] == 20 << 16);
+		CHECK(b.f[138] == 6000);
+		ai.aircraft_controller = 0x10000;
+		b.f[AiBrain::kWorkPosX] = b.f[AiBrain::kWorkPosY] = 12345;
+		CHECK(r.sys.aircraft_movement(ai, r.w) == 0);
+		CHECK(b.f[AiBrain::kWorkPosX] == 12345 && b.f[AiBrain::kWorkPosY] == 12345);
+	}
 }
 
 int main() {
@@ -3100,6 +3450,10 @@ int main() {
     test_sm_turret_fire();
 	test_aircraft_combat_states();
 	test_vehicle_weapon_pose_and_target_cleanup();
+	test_vehicle_class_state_machine_gates();
+	test_dead_vehicle_despawn_frees_brain();
+	test_aircraft_fire_arc_gate();
+	test_aircraft_combat_mover_pins();
 
 	if (failures == 0)
 		std::printf("ai: all tests passed\n");

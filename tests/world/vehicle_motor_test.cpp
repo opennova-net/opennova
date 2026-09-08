@@ -14,6 +14,7 @@
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/vehicle_sound.h>
 #include <runtime/world/world.h>
+#include <runtime/terrain_query/height_field.h>
 
 #include <formats/def/def.h>
 
@@ -21,6 +22,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <vector>
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -374,7 +376,9 @@ void test_analog_driver_view_turn_and_freelook() {
 }
 
 // Ground's crash/settle bytes hold yaw rate; the bike only tests airborne.
-// [orig: ground @0x48BA17..0x48BA60; Entity_UpdateLightVehiclePhysics @0x483FE0]
+// [orig: ground Entity_UpdateVehiclePhysics @0x48AF00 (site @0x48C146..0x48C18F:
+//  `test Flags, 0x2000; cmp +0x2EC, 0; cmp +0x2F0, 0` before the +0xA4 write);
+//  Entity_UpdateLightVehiclePhysics @0x483FE0]
 void test_ground_crash_and_settle_hold_yaw_rate() {
 	for (const VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Bike }) {
 		for (int gate = 0; gate < 2; ++gate) {
@@ -584,6 +588,76 @@ void test_physics_selector_gate() {
 // Numeric witnesses for the separate selector-zero callbacks and suspension.
 // [orig: Entity_ProcessInfantryPhysics @0x46E100;
 // Entity_ProcessAirVehiclePhysics @0x46FA00; Entity_ProcessVehicleSuspension @0x463C60]
+// A zero playerSpeed pins the steering blend fraction at 0 in every ground
+// family, so the effective rate is minRate, not turnRate [orig:
+// Entity_UpdateVehiclePhysics @0x48AF00 (site @0x48C0A9..0x48C0D8 `cmp eax, edx;
+// jz -> xor ecx, ecx`); the cbik twin @0x485283..0x4852B0]. Hand trace:
+//   minRate = turn_rate2 = 41 * 192426 = 7889466
+//   eff     = minRate + ((turnRate - minRate) * 0 + 0x8000) >> 16 = 7889466
+//   delta   = min((0x40000000 - 0 + 32) >> 6 = 16777216, eff) = 7889466
+//   steer   = (4 - 32 * 7889466 - 0) >> 3 = -252462908 >> 3 = -31557864
+// (the retracted full-rate default gave eff = 12507690, steer = -50030760).
+void test_zero_player_speed_turns_at_min_rate() {
+	for (const VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Bike }) {
+		World world;
+		VehicleTraits t;
+		t.physics = 1;
+		t.family = family;
+		t.player_speed = 0;
+		t.turn_rate = 65 * 192426;
+		t.turn_rate2 = 41 * 192426;
+		Entity e;
+		e.health = e.health_max = 10000;
+		e.veh.yaw_seeded = true;
+		e.veh.yaw_bam = 0;
+		e.veh.steer_target_bam = 0x40000000;
+		e.position.z = 10.0f;
+		world.vehicles.tick_motor(e, t);
+		CHECK(e.veh.steer_state == -31557864);
+	}
+}
+
+// The grazing correction multiplies penetration by the -2r gradient with the
+// two-operand IMUL — a 32-bit low dword — before the signed divide [orig:
+// Entity_CheckCollisionState @0x462A30 (site @0x462C5F `imul eax, ebx; cdq;
+// idiv ebp` and @0x462C77 for Y); Entity_ComputeCollisionForces @0x462150
+// (site @0x4623BF)]. A 45-degree ramp h = x (heightmap[z][x] = x * 256) with a
+// wheel probe at X = 10 u, Y = -5 u (terrain z = +5 u), r = 2 u samples exactly
+// 8/12/10/10 u, so, hand-run:
+//   rel  = Z - 4 * avg = 768042 - 655360 = 112682
+//   gx = 262144, gy = 0, gz = -262144, norm = int(sqrt(2) * 262144) = 370727
+//   fx = 262144*131072/370727 = 92682 (truncated), fy = 0
+//   pen = rel + (-34359738368 / 370727 = -92682) = 20000 (terrain_gap 20000)
+//   pen * gz = -5242880000 -> low dword -947912704 -> / gx = -3616
+//     (the wide product would give -20000)
+//   |-3616| < |92682| -> fx = 92682 - 3616 = 89066, hit, pen = 0
+//   mag = int(sqrt(89066^2 + 112682^2)) = 143631
+//   cosr = (112682 << 22) / 143631 = 3290533 < soft (0x400000) -> severity 3:
+//   out.fx -= 89066, out.fy -= 0, out.fz -= 0.
+void test_plat_terrain_probe_grazing_uses_wrapped_product() {
+	World world;
+	std::vector<uint16_t> heightmap(64 * 64);
+	for (int z = 0; z < 64; ++z)
+		for (int x = 0; x < 64; ++x)
+			heightmap[z * 64 + x] = uint16_t(x * 256);
+	std::vector<int> sector_grid(256, 1);
+	opennova::terrain::TerrainHeightField field{};
+	field.heightmap = heightmap.data();
+	field.dim = 64;
+	field.layout.sector_grid = sector_grid.data();
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+	world.tables.terrain = &field;
+	detail::PlatProbeForce out{};
+	const int32_t severity = detail::plat_terrain_probe(world, 10 << 16, -(5 << 16), 768042,
+			2 << 16, 0x400000, 0x400000, out, /*wheel_probe=*/true);
+	CHECK(severity == 3);
+	CHECK(out.terrain_gap == 20000);
+	CHECK(out.fx == -89066);
+	CHECK(out.fy == 0);
+	CHECK(out.fz == 0);
+}
+
 void test_simple_motors_and_contact() {
 	World world;
 	VehicleTraits t;
@@ -647,6 +721,47 @@ void test_simple_motors_and_contact() {
 	CHECK(remote.veh.slide_z == e.veh.slide_z);
 	CHECK(remote.veh.air_pitch_bam == e.veh.air_pitch_bam);
 	CHECK(remote.position.x == e.position.x && remote.position.z == e.position.z);
+
+	// Nonzero phases pin the wave's x87 formula [orig: Entity_ProcessAirVehiclePhysics
+	// @0x46FA00 (site @0x47115D..0x4711D9)]: P = (((x+y)>>10) + tick*4) * (1/256).
+	// Case A: x = 2.0 u (131072 >> 10 = 128), tick 0 -> P = 0.5:
+	//   pitch  = ftol(cos(0.7)*327680 + cos(0.5)*655360)
+	//          = ftol(250623.488 + 575132.508 = 825755.9957) = 825755
+	//   roll   = ftol(sin(0.4)*524288 + sin(0.6)*655360)
+	//          = ftol(204167.364 + 370044.091 = 574211.4552) = 574211
+	//            (the retracted `* 1.6` on the roll path gave 918738)
+	//   height = -1024 - ftol(sin(0.8) * -1024) = -1024 - ftol(-734.5726) = -290
+	//            (sin(P) instead of sin(1.6P) gave -534)
+	//   slide_z = (water_z + height - z) >> 1 = -290 >> 1 = -145 (z == water_z).
+	// Case B: x = 0, tick 24 (phase word 96) -> P = 0.375:
+	//   pitch = ftol(283549.349 + 609817.475 = 893366.8243) = 893366
+	//   roll  = ftol(154937.698 + 285059.012 = 439996.7105) = 439996
+	//   height = -1024 - ftol(-578.1939) = -446 -> slide_z = -223.
+	// Every truncated value sits >= 0.004 from an integer, beyond any libm ulp.
+	{
+		Entity wave;
+		wave.health = wave.health_max = 10000;
+		wave.veh.yaw_seeded = true;
+		wave.flags = 0x8000;
+		wave.position = { 2.0f, 0.0f, 100.0f };
+		world.logic_tick = 0;
+		world.vehicles.tick_watercraft_motor(wave, t);
+		CHECK(wave.veh.air_pitch_bam == 825755);
+		CHECK(wave.veh.air_roll_bam == 574211);
+		CHECK(wave.veh.slide_z == -145);
+
+		Entity wave_b;
+		wave_b.health = wave_b.health_max = 10000;
+		wave_b.veh.yaw_seeded = true;
+		wave_b.flags = 0x8000;
+		wave_b.position = { 0.0f, 0.0f, 100.0f };
+		world.logic_tick = 24;
+		world.vehicles.tick_watercraft_motor(wave_b, t);
+		CHECK(wave_b.veh.air_pitch_bam == 893366);
+		CHECK(wave_b.veh.air_roll_bam == 439996);
+		CHECK(wave_b.veh.slide_z == -223);
+		world.logic_tick = 0;
+	}
 
 	// catv selects that boat path before its input/health/sound families.
 	t.family = VehicleFamily::Ground;
@@ -1479,6 +1594,104 @@ void test_engine_and_light_sound_edges() {
 	CHECK(boat.w.out.slot_sounds.empty());
 }
 
+// The selector-zero movers' sound tails: the ground twin shares cveh's lights
+// and claimant edges (slot 24, then slot 30 while the occupant eye is above
+// water, once), the boat twin has only its lights leg beside the movement fold
+// and never latches the engine.
+// [IDB: Entity_ProcessInfantryPhysics @0x46E100 (the selector-zero ground
+// mover) lights @0x46F8C3..0x46F8FC, claimant edge @0x46F8FC..0x46F99C;
+// Entity_ProcessAirVehiclePhysics @0x46FA00 (the selector-zero boat mover)
+// lights @0x4714EA..0x471523, fold @0x471523..0x4715D7, tail @0x47166F]
+void test_selector_zero_sound_tails() {
+	static constexpr char profile[] =
+			"begin \"SP_Zero\"\n"
+			"SSAudio1 V_LIGHT\nenginestart V_START\nenginestop V_STOP\nend\n";
+	Rig ground;
+	CHECK(ground.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+	VehicleTraits t = buggy_traits();
+	t.physics = 0;
+	t.sound_profile = "SP_Zero";
+	ground.w.vehicles.traits.set(ground.veh().item_id, t);
+	ground.mount();
+	// Lights are the occupant's order, not hull state: both selector-zero
+	// input blocks rewrite Flags 0x80 from the controller's MoveOrder bit
+	// 0x20 every tick, so a flag poked on the hull is gone before the tail
+	// [orig: ground `test byte [occ+12Ch],20h` @0x46EB47 -> `or [ent+24h],80h`
+	//  @0x46EB50 / `and [ent+24h],0FFFFFF7Fh` @0x46EB59; boat @0x47062B..0x47063D].
+	ground.drv().net_move_input = 0x20;
+	ground.w.vehicles.tick_motor(ground.veh(), t);
+	CHECK(ground.w.out.slot_sounds.size() == 2);
+	if (ground.w.out.slot_sounds.size() == 2) {
+		CHECK(ground.w.out.slot_sounds[0].slot == opennova::audio::kSlotAudio1);
+		CHECK(ground.w.out.slot_sounds[1].slot == opennova::audio::kSlotEngineStart);
+	}
+	CHECK(ground.veh().veh.engine_sound_latched);
+	ground.w.out.slot_sounds.clear();
+	ground.w.vehicles.tick_motor(ground.veh(), t);
+	CHECK(ground.w.out.slot_sounds.empty());
+
+	Rig boat;
+	CHECK(boat.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+	t.family = VehicleFamily::Watercraft;
+	t.water_speed = t.player_speed;
+	boat.w.vehicles.traits.set(boat.veh().item_id, t);
+	boat.mount();
+	boat.drv().net_move_input = 0x20; // the lights order (see above)
+	boat.w.vehicles.tick_motor(boat.veh(), t);
+	CHECK(boat.w.out.slot_sounds.size() == 1);
+	if (boat.w.out.slot_sounds.size() == 1)
+		CHECK(boat.w.out.slot_sounds[0].slot == opennova::audio::kSlotAudio1);
+	CHECK(!boat.veh().veh.engine_sound_latched);
+	boat.w.out.slot_sounds.clear();
+	boat.w.vehicles.tick_motor(boat.veh(), t);
+	CHECK(boat.w.out.slot_sounds.empty());
+	CHECK(!boat.veh().veh.engine_sound_latched);
+}
+
+// The critical warning (profile slot 34) cadence: `& 0x1F` in the ground
+// mover, `& 0x3F` in the direct-air mover. Tick 60 satisfies the 32-tick
+// mask only ((60 + 36) & 31 == 0, & 63 == 32); tick 28 satisfies both.
+// [orig: Entity_UpdateVehiclePhysics @0x48B08C; Entity_UpdateAircraftPhysics
+//  @0x4904D7..0x4904F0]
+void test_warning_cadence_by_family() {
+	static constexpr char profile[] = "begin \"SP_Warn\"\nwarning V_WARN\nend\n";
+	for (VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Helicopter }) {
+		Rig r;
+		CHECK(r.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+		VehicleTraits t = buggy_traits();
+		t.family = family;
+		t.critical_hp = 100;
+		t.critical_drain = 0;
+		t.climb_speed = 1000;
+		t.sound_profile = "SP_Warn";
+		r.veh().net_id = 1;
+		r.veh().health_max = 500;
+		r.veh().health = 100;
+		r.w.ai.is_authority = false; // stay in the critical band without draining
+		const auto warnings = [&] {
+			int count = 0;
+			for (const auto &sound : r.w.out.slot_sounds)
+				count += sound.slot == opennova::audio::kSlotWarning ? 1 : 0;
+			r.w.out.slot_sounds.clear();
+			return count;
+		};
+		const auto tick = [&] {
+			if (vehicle_family_uses_direct_air_mover(family)) {
+				r.veh().veh.ai_drive = true;
+				r.w.vehicles.aircraft_client_tick(r.veh(), t);
+			} else {
+				r.w.vehicles.tick_motor(r.veh(), t);
+			}
+		};
+		r.w.logic_tick = 60;
+		tick();
+		CHECK(warnings() == (family == VehicleFamily::Ground ? 1 : 0));
+		r.w.logic_tick = 28;
+		tick();
+		CHECK(warnings() == 1);
+	}
+}
+
 // A sideways skid keeps momentum across release, then turns toward the body
 // only after the authored recovery window. Exercise the public motor so input,
 // acceleration, wheel phase and velocity all participate.
@@ -1706,6 +1919,8 @@ int main() {
 	test_handbrake_skid_and_grip_recovery();
 	test_tank_pivot_retains_direction_and_previous_track_rate();
 	test_engine_and_light_sound_edges();
+	test_selector_zero_sound_tails();
+	test_warning_cadence_by_family();
 	test_family_health_cadence_and_submersion();
 	test_damage_effects_release_on_respawn();
 	test_zero_speed_displacement_and_submerged_sound();
@@ -1729,6 +1944,8 @@ int main() {
     test_dead_vehicle_holds();
     test_physics_selector_gate();
 	test_simple_motors_and_contact();
+	test_zero_player_speed_turns_at_min_rate();
+	test_plat_terrain_probe_grazing_uses_wrapped_product();
 	test_npc_claimant_registers_stationary_idle_sound();
 	test_controller_without_claimant_is_silent();
 	test_item_soundloop_override_wins_over_profile();

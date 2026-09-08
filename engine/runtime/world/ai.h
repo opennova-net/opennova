@@ -682,6 +682,16 @@ public:
     // leaves Z alone [orig: @0x4076b7/@0x4076c9].
     int attach_dismemberment_piece(EntityHandle h, const AiEntity &source,
                                    const int32_t impulse_q16[3]);
+    // Free the brain bound to h: the slot is zeroed in place (index-stable, so
+    // queued AIEvent entity indexes never re-point) and its owner word cleared,
+    // which is exactly what Entity_Destroy does to the AI component
+    // (memset(brain, 0, 812) + entity+100 = 0 @0x43e995..0x43e99d; the AiSlot
+    // memset @0x43e9ae); the next attach reuses the lowest free slot the way
+    // Entity_InitVehicleAI's owner scan does (@0x460204..0x460222). No brain
+    // for h is a no-op. Every registry despawn that can carry a brain calls
+    // this (the retail path is Server_RemoveEntityAndNotify @0x50A270 ->
+    // Entity_Destroy @0x43e810).
+    void release(EntityHandle h);
     AiEntity *at(int ai_index);
     const AiEntity *at(int ai_index) const;
     AiEntity *for_handle(EntityHandle h);
@@ -877,8 +887,22 @@ public:
     // when the shared scheduler budget exceeds the cap; forces idle/fallback.
     bool begin_update(AiEntity &e);
 
+    // The two class event callbacks (fn1 of g_EntityClassEventCallbackTable
+    // @0x813000, resolved per items.def ai_function by EntityDef_InitAllCallbacks
+    // @0x4a5aae -> Entity_LookupRenderCallbacks @0x407dc0): the CHel row and the
+    // cpln thunk @0x462120 run the air-class machine, the cveh row and the
+    // cbot/ctrn thunks @0x462130/@0x462140 the vehicle-class one. Both share one
+    // body; they differ only in the alert leg's state pair, the client tick and
+    // transition gates, and the spawn event's channel word.
     // [orig: EntityAI_ProcessInfantryStateMachine @0x4581b0] event: 0=update,1=spawn,4=death.
+    // (IDB name; it is the AIR-class brain machine: alert -> pend 10 unless cur 14,
+    // client ticks cur 13/15, client commits pend 7 or 13..15, spawn channel 9.)
     void process_infantry_state_machine(AiEntity &e, World &world, int event);
+    // [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0] the ground/boat/train
+    // machine: alert -> pend 18 unless cur 22 (@0x458442..0x458448), client ticks
+    // cur 21/23 (@0x458545..0x45854d), client commits pend 16 or 21..23
+    // (@0x458579..0x458586), spawn channel word 0 (@0x45851a, bx zeroed @0x4583cd).
+    void process_vehicle_state_machine(AiEntity &e, World &world, int event);
 
     // The shared pending-state transition (exit current, enter pending, commit).
     void apply_transition(AiEntity &e, World &world);

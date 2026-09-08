@@ -618,6 +618,42 @@ void test_tank_linear_spring_and_airborne_hold() {
 			"grounded tank uses the slow phase step");
 }
 
+// The tank's grounded catch-up skips its WHOLE block — the same-side pair
+// clear included — while the sink is within one growth step; the tracked twin
+// clamps the excess to zero and still runs the pair test.
+// [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 (site @0x478DC0..0x478DC9
+//  `mov eax,[eax]; sub eax, 0FAh; test eax, eax; jle loc_478E27`, the pair tests
+//  it skips @0x478DDF..0x478E0E); the tracked jns/xor clamp @0x47E9DC..0x47E9DE]
+void test_tank_grounded_catch_up_skips_within_one_step() {
+	auto heap = make_world(true);
+	World &w = *heap;
+	EntityHandle h;
+	Entity &v = spawn_veh(w, h);
+	VehicleTraits t = sprung_traits();
+	t.family = VehicleFamily::Tank;
+	t.spring = 10;
+	t.spring_comp = 100;
+	auto &m = v.veh;
+	// Pad 1 is off the ground with a sink of exactly one step (250 - 250 = 0):
+	// the jle skips the block, so the same-side pair (0, 3) in contact does NOT
+	// clear the landing marker and the corner target stays untouched. Pad 2 (sink
+	// 0, excess -250) skips the same way.
+	m.plat_acc[1] = 250;
+	m.landing_2ee = 1;
+	int32_t depth[4] = {};
+	const bool contact[4] = { true, false, false, true };
+	int32_t adj[4] = {};
+	w.vehicles.suspension_tank_loop(v, t, true, depth, contact, adj);
+	CHECK(m.landing_2ee == 1, "a within-step sink skips the tank's pair clear");
+	CHECK(adj[1] == 0 && adj[2] == 0, "and leaves the corner targets alone");
+	// One unit past the step the block runs: corner target -1, then the pair
+	// clears the marker.
+	m.plat_acc[1] = 251;
+	w.vehicles.suspension_tank_loop(v, t, true, depth, contact, adj);
+	CHECK(adj[1] == -1, "past the step the corner target drops by the excess");
+	CHECK(m.landing_2ee == 0, "and the same-side pair clears the marker");
+}
+
 // Authored action_value survives parse/bake and rocks only a mounted CTANK.
 // [orig: ActionDef_ParseScriptLine @0x4023C0; WeaponAction_Fire @0x542B10]
 void test_mounted_action_recoil() {
@@ -700,6 +736,7 @@ void test_mounted_action_recoil() {
 int main() {
 	test_mounted_action_recoil();
 	test_tank_linear_spring_and_airborne_hold();
+	test_tank_grounded_catch_up_skips_within_one_step();
 	test_def_keys_parse_raw();
 	test_fresh_row_never_arms();
 	test_request_arms_by_role_and_replication();

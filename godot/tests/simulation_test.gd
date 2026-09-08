@@ -55,6 +55,9 @@ const SYN_ARMRY_SPECIAL2_SLIDE := "res://../fixtures/threedi/synth/armory_specia
 const SYN_TANK_SPECIAL1_SLIDE_EWEP01 := "res://../fixtures/threedi/synth/tank_special1_slide_ewep01.3di"
 const SYN_PMP_LOD0_INERT_LOD1_LIVE := "res://../fixtures/threedi/synth/pump_lod0_inert_lod1_sine_rotz.3di"
 const SYN_PANM_LIVENESS_DIR := "res://../fixtures/threedi/synth/"
+# The USE scan admits a seat only inside the player's view cone (just under
+# 90 deg standing, 5 deg seated); a test that presses USE looks at the seat first.
+const MountLook := preload("res://tests/support/mount_look.gd")
 
 
 func _native_fixture_dir() -> String:
@@ -2451,7 +2454,8 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 	# Reproduce the production ordering bug: the one-time sweep happens before
 	# this player exists.
 	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
-	assert_true(sim.spawn_local_player(Vector3(2, 0, 0), 0.0, 1))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	MountLook.face(sim, Vector3(2, 0, 0))
 
 	var weapon_root := ResourceRoot.new()
 	assert_eq(weapon_root.set_root_dir(RetailData.def_root()), OK)
@@ -2513,7 +2517,9 @@ VEHICLE_END
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
-	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	# Two units off the carrier, facing it: its seats sit inside the scan cone.
+	assert_true(sim.spawn_local_player(Vector3(-2, 0, 0), 90.0, 1))
+	MountLook.face(sim, Vector3.ZERO)
 	assert_true(sim.local_player_toggle_mount())
 	# Pick a different seat first so key 1 exercises the driver's request.
 	sim.local_player_select_seat(1)
@@ -2781,6 +2787,9 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
+	# Facing the +x gun: the nearest scan wants one candidate inside its cone;
+	# the label list itself has no cone, only its 4.0 u radius.
+	MountLook.face(sim, Vector3(14, 0, 0))
 	var def_6 := WeaponDef.new()
 	def_6.name = "WPN_LABEL_SCOPE"
 	def_6.set_actions([
@@ -2995,6 +3004,7 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded the one-truck mission")
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	MountLook.face(sim, Vector3(2, 0, 0))
 	var def_7 := WeaponDef.new()
 	def_7.name = "WPN_GATE"
 	def_7.animadm = "gate.adm"
@@ -3058,6 +3068,7 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	MountLook.face(sim, Vector3(2, 0, 0))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			RetailData.def_root()), OK)
@@ -3156,6 +3167,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	MountLook.face(sim, Vector3(2, 0, 0))
 	# Listen-host player creation rebuilds the authoritative registry. Bind the
 	# collision instance to that final registry identity, as GameWorld does.
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
@@ -3378,6 +3390,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	MountLook.face(sim, Vector3(2, 0, 0))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			RetailData.def_root()), OK)
@@ -3500,6 +3513,9 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 		sim.step()
 		if sim.get_local_player_weapon_state().current_action < 2:
 			break
+	# A dismount leaves the player standing on the seat point (retail never
+	# displaces the rider); step a unit back and look at the gun to remount.
+	MountLook.face(sim, Vector3(2, 0, 0), Vector3(1, 0, 0))
 	assert_true(sim.local_player_toggle_mount())
 	var remount_event: PlayerWeaponEvent = null
 	for _tick in range(120):
@@ -3536,12 +3552,17 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 		return
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
+	# Three guns in a row along their +y facing, 3.5 u apart: a seated USE
+	# swaps only onto a seat inside the rider's 5 deg cone, which the gunner
+	# reaches by looking down the row at the next seat point (3.5 u out, a
+	# 10 deg depression from the eye); the 4.0 u reach keeps the third gun
+	# out of the first mount.
 	var first_gun := md.add_entity(MissionData.KIND_ITEM, 101294,
 			Vector3(2, 0, 0), Vector3.ZERO)
 	var second_gun := md.add_entity(MissionData.KIND_ITEM, 101295,
-			Vector3(3, 0, 0), Vector3.ZERO)
+			Vector3(2, 3.5, 0), Vector3.ZERO)
 	var third_gun := md.add_entity(MissionData.KIND_ITEM, 101296,
-			Vector3(3.5, 0, 0), Vector3.ZERO)
+			Vector3(2, 7, 0), Vector3.ZERO)
 	assert_not_null(first_gun)
 	assert_not_null(second_gun)
 	assert_not_null(third_gun)
@@ -3561,6 +3582,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	MountLook.face(sim, Vector3(2, 0, 0))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			RetailData.def_root()), OK)
@@ -3607,8 +3629,11 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 		if sim.get_local_player_weapon_state().current_action < 2:
 			break
 
+	# Look down the row at the second gun's seat point (the same seat offset,
+	# 3.5 u further along +y from this seat).
+	MountLook.face(sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
 	assert_true(sim.local_player_toggle_mount(),
-			"a nearby second gun is a direct mounted-seat swap")
+			"a second gun inside the seated 5 deg cone is a direct mounted-seat swap")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
 			"the old parent remains equipped until the rank commit")
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
@@ -3640,8 +3665,14 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			"SWITCHRANK does not queue SWITCHTO onto the target parent slot")
 	assert_true(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 
+	# The scan walks the rider's proximity slice, which refreshes every 16
+	# ticks; it was last built at the first gun's seat, 8 u from the third gun,
+	# so let it refresh before looking down the row.
+	for _tick in range(17):
+		sim.step()
+	MountLook.face(sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
 	assert_true(sim.local_player_toggle_mount(),
-			"a closer third gun drives a second direct mounted-seat swap")
+			"a third gun down the row drives a second direct mounted-seat swap")
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
 			second_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"the outgoing parent restores before the same-Def swap commits")
@@ -3690,6 +3721,7 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	sim.set_local_player_weapon(personal_def, {})
 	sim.drain_local_player_weapon_events()
 
+	MountLook.face(sim, Vector3(2, 0, 0))
 	assert_true(sim.local_player_toggle_mount())
 	sim.step()
 	var mount_event: PlayerWeaponEvent = null
@@ -3731,6 +3763,7 @@ func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	MountLook.face(sim, Vector3(2, 0, 0))
 	sim.clear_local_player_weapon()
 	assert_false(sim.local_player_toggle_mount(),
 			"retail rejects offline player UseGun attach without EquippedSlot")
@@ -3757,6 +3790,7 @@ end
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	MountLook.face(sim, Vector3(2, 0, 0))
 	sim.clear_local_player_weapon()
 	assert_true(sim.local_player_toggle_mount(),
 			"the null EquippedSlot gate is UseGun-only, not a generic seat gate")
@@ -4980,10 +5014,10 @@ func test_time_driven_collision_advances_without_an_ai_brain() -> void:
 		'free-running PANM uses retail milliseconds with zero controls')
 
 
-func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
-	# VaporizeSingle (action 22) despawns the registry slot while the AI entity
-	# stays in the pool - the card must keep a STABLE key set with typed
-	# defaults for the registry half, never a partial dictionary.
+func test_scripted_remove_frees_the_ai_entity_with_its_registry_slot() -> void:
+	# VaporizeSingle (action 22) destroys the registry row, and the brain goes
+	# with it (Entity_Destroy @0x43e810 frees the AI component, memset @0x43e995),
+	# so no card is reachable by the old AI index and the attached effects detach.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	md.add_entity(3, 0, Vector3(0, 0, 0), Vector3.ZERO)
@@ -5001,13 +5035,9 @@ func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 		sim.step()
 
 	var card: EntityCard = sim.entity_card_by_ai_index(0)
-	assert_not_null(card, "the AI entity outlives its registry slot")
-	assert_true(card.has_ai() and not card.has_world(),
-		"the registry slot is gone; the card keeps its stable AI shape")
-	assert_eq(card.get_kind(), -1, "...with typed defaults (kind -1)")
-	assert_false(card.is_alive(), "...alive false")
-	assert_eq(card.get_name(), "", "...empty name")
-	assert_eq(card.get_net_id(), ssn, "the AI half still reports its scalars")
+	assert_null(card, "the AI entity is freed with its registry slot")
+	assert_eq(sim.get_entity_net_id(0), 0,
+			"no live registry row answers for the vaporized entity")
 	assert_true(sim.get_entity_effect_state_for_ssn(ssn).is_empty(),
 			"attached effects detach as soon as VaporizeSingle removes the registry slot")
 

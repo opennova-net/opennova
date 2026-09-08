@@ -197,6 +197,9 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 		if (ctx.world != nullptr && owned_entity.valid()) {
 			ctx.world->match.remove_player(*ctx.world, owned_entity);
 			ctx.world->vehicles.detach(owned_entity);
+			// The player's brain (player_spawn attaches one) is freed with the row so
+			// the next pool-0 spawn into this slot starts brainless.
+			ctx.world->ai.release(owned_entity);
 			ctx.world->registry.despawn(owned_entity);
 		}
 		// The witnessed leave broadcast is S2C 0x46 bit15, which clears the peer's

@@ -98,20 +98,25 @@ public:
     bool attach_to_seat(EntityHandle player, const VehicleSeatSelection &selection);
     // The use-key nearest-seat scan [orig: Entity_FindNearestSeatOrArmory @0x435d50]: for
     // every live seat-bearing entity, test each FREE seat's world position against the player
-    // eye: horizontal distance <= 4.0 u (0x40000 16.16) and 3D distance <= 16384 u unmounted /
-    // 910.2 u while seat-swapping (0x3FFFFFC0 / 0x38E38E0), LOS-gated, score =
-    // horiz + dist3d/512, lowest wins. Enemy-occupied vehicles are skipped
+    // eye: 3D distance <= 4.0 u (0x40000 16.16) and the point inside the view cone —
+    // the yaw/pitch offset from the entity Yaw/Pitch, each clamped to +100 deg, as a
+    // BAM32 magnitude <= 0x3FFFFFC0 (just under 90 deg) standing / 0x38E38E0 (5.0 deg)
+    // seated — LOS-gated, score = dist3d + aim/512, lowest wins; a seated USE therefore
+    // swaps only onto a seat the rider looks at and dismounts otherwise. Enemy-occupied
+    // vehicles are skipped
     // [orig: Vehicle_HasEnemyOccupant reject @0x435e58]. armory_mode = the original's
     // searchMode != 0 [orig: @0x435f12]: instead of seats, "armory*" points of Armory-attrib
     // items are scanned with the same math (no occupancy), reporting SeatType::ArmoryPoint
     // [orig: the attrib 0x80000 walk @0x4361ee, seatType 4 @0x436417] — the label highlight
     // pick while the player stands in the armory volume; the mount toggle always scans seats.
-    // Tracked deviations (D-AI-11): the candidate set is a registry sweep (the original walks
-    // the player's proximity list), the eye is the +0.9 u chest stand-in + the witnessed
-    // +0.1875 u bias (CameraOffset unmodeled), the seated requester skips its CURRENT mount
-    // vehicle outright (the own-hull LOS occlusion stand-in until pool-1 collision lands —
-    // USE exits, never cycles seats; j), and the emplaced-gun carrier LOS/reject legs
-    // (def attrib 0x20 -> groundEntity) are unmodeled.
+    // The candidate set is the player's proximity slice (for_each_scan_candidate walks the
+    // same list the original does), the eye is the live entity+0x6C/+0x70/+0x74 offset the
+    // body tick restamps, the candidate's own hull never occludes its seats (the USE LOS
+    // walker skips the endpoint entity and both parent slots, so a mounted USE swaps to
+    // any free seat in reach and dismounts only when the scan is empty [orig:
+    // raycast_against_entity_pool ctx[17..20] @0x538832..0x538859]), and an emplaced
+    // gun's LOS endpoint is its carrier (def attrib 0x20 ->
+    // groundEntity) with the reject legs in place. Regressions: vehicle_mount_test.
     bool find_nearest_free_seat(const Entity &player, VehicleSeatSelection &out, bool armory_mode, const VehicleOccupancySource *source = nullptr);
     // The toggle's seat candidate, in the witnessed search order: an unmounted
     // player standing on a seat-bearing ground target takes that carrier's best
