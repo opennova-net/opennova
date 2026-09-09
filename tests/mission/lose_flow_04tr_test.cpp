@@ -127,6 +127,9 @@ struct Run {
 // Where the local pump spawns the player's rounds: the embedder-fed eye
 // sample when one is valid, else Position + 1.0 u — this bare kernel never
 // feeds one (player_weapon.cpp, the WeaponAction_Fire @0x542c5e spawn leg).
+// That pump rule is the D-WPN-8 residual (retail: Position + CameraOffset,
+// Entity_CalcWeaponFirePosition @0x4dc847); this helper tracks the pump, not
+// retail, so the staged LOS ray starts where the round actually spawns.
 w::Vec3 local_round_origin(const testrig::RetailMissionRig &rig) {
 	const w::LocalPlayerWeapon &wpn = rig.local.weapon;
 	if (wpn.eye_valid) return w::Vec3{wpn.eye_mission[0], wpn.eye_mission[1], wpn.eye_mission[2]};
@@ -285,7 +288,8 @@ int main() {
 	// shot at 4 u in the open), so the player's entity carries the engine's own
 	// no-damage flag: every NPC round still flies, connects and stamps its
 	// reactions; only the damage-side zero on the player changes [orig: the
-	// Flags & 0x4000000 test in Entity_ApplyWeaponDamage @0x4e7ff6]. A victim
+	// Flags & 0x4000000 test in Projectile_ProcessDamageOnTarget @0x4e7fb0,
+	// the test @0x4e7ff6]. A victim
 	// that falls to that fire is retargeted, not counted (see the kill leg).
 	if (w::Entity *me = rig.world.registry.get(rig.world.cached.local_player))
 		me->engine_flags |= kIndestructibleFlag;
@@ -319,10 +323,9 @@ int main() {
 			blacklist.insert(target.packed);
 			continue;
 		}
-		// Lock: pre-weaken through the SETHP store so the first connecting
-		// round completes the kill, then tap-fire verified shots.
+		// Lock, then tap-fire verified shots; the victim keeps its authored
+		// health and dies to the rounds' own damage.
 		const int32_t tally_at_lock = player_tally(target_team);
-		rig.world.commands.set_entity_health(target, 10);
 		if (const w::Entity *locked = rig.world.registry.get(target))
 			std::printf("lose-flow: target lock net=%d team=%d flags=0x%x\n", victim_net_id, target_team,
 					unsigned(locked->engine_flags));
