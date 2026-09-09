@@ -94,6 +94,7 @@ var _end_flow := MissionEndFlow.new()  # the SP end-of-mission flow (round_end -
 var _shutdown_prepared := false
 var _shutdown_resources_released := false
 var _quit_requested := false
+var _quit_drain_pending := false
 var _quit_policy_installed := false
 var _previous_auto_accept_quit := true
 var _shell_presentation := ShellPresentationSessionScript.new()
@@ -800,18 +801,38 @@ func _mission_start_gate() -> Error:
 
 
 ## Graceful runtime stop seam used by the shell and optional control service.
+## The shutdown itself runs once; a repeat close request while the music
+## drain is still pending ends the drain and quits right away, so a mixer
+## that stopped advancing can never swallow the window's close.
 func request_quit() -> void:
 	if _quit_requested:
+		if _quit_drain_pending:
+			_quit_drain_pending = false
+			_finish_quit()
 		return
 	_quit_requested = true
 	_complete_runtime_shutdown(begin_runtime_shutdown())
+
+
+## True while request_quit() is waiting for the music playbacks to drain
+## (ADR 0018 read seam for the lifecycle tests).
+func is_quit_drain_pending() -> bool:
+	return _quit_drain_pending
 
 
 func _complete_runtime_shutdown(load_operation: WorldLoadOperation) -> void:
 	if load_operation != null and not load_operation.is_settled():
 		await load_operation.settled
 	finish_runtime_shutdown()
+	_quit_drain_pending = true
 	await MusicService.await_playback_stopped()
+	if not _quit_drain_pending:
+		return # a repeat close request already finished the quit
+	_quit_drain_pending = false
+	_finish_quit()
+
+
+func _finish_quit() -> void:
 	_restore_quit_policy()
 	if is_inside_tree():
 		get_tree().quit()

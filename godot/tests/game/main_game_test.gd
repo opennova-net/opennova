@@ -82,6 +82,38 @@ func test_cannot_summon_while_picker_open() -> void:
 			"no second picker while one is already open")
 
 
+func test_repeat_close_request_ends_a_pending_music_drain() -> void:
+	# Out of the tree the quit's SceneTree exit is skipped, so the shell's own
+	# drain latch is the observable. The first close stops the music context and
+	# waits for the mixer to release the stopped playbacks; a second close while
+	# that drain is pending must finish the quit instead of being swallowed.
+	var game := _make()
+	var bank := SbfBank.new()
+	bank.load_from_path("res://../fixtures/sbf/synth_gamemus.sbf")
+	var script := MusicScript.new()
+	script.load_from_path("res://../fixtures/mus/synth_gamemus.bin")
+	var dir: MusicDirector = MusicService.director()
+	assert_not_null(dir, "the autoload owns the one director")
+	if dir == null:
+		return
+	dir.bank = bank
+	dir.load_mus_script(script)
+	dir.start()
+	await wait_until(dir.has_pending_playback, 2.0)
+	assert_true(dir.has_pending_playback(), "the fixture reached real streaming playback")
+	game.request_quit()
+	assert_true(game.is_quit_drain_pending(),
+			"the first close stops the context and waits for the mixer")
+	game.request_quit()
+	assert_false(game.is_quit_drain_pending(),
+			"a repeat close while the drain is pending finishes the quit at once")
+	await wait_until(func() -> bool: return not dir.has_pending_playback(), 2.0)
+	await get_tree().process_frame
+	assert_false(dir.has_pending_playback(), "the mixer released the stopped playback")
+	assert_false(game.is_quit_drain_pending(),
+			"the drained first request does not re-arm the latch")
+
+
 func test_loading_background_query_is_false_without_a_live_handoff() -> void:
 	var game := _make()
 	assert_false(game.has_loading_background(),

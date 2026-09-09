@@ -55,6 +55,31 @@ func test_exit_tree_stops_the_music_vm() -> void:
 	assert_eq(dir.vm_state(), 0, "tree exit stops the VM before its players leave")
 
 
+func test_service_playback_drain_is_bounded_and_reports_the_timeout() -> void:
+	# The quit path's drain (MusicService.await_playback_stopped) must give up
+	# after its bound instead of waiting on a mixer that never advances.
+	var bank := SbfBank.new()
+	bank.load_from_path(BANK_FIXTURE)
+	var script := MusicScript.new()
+	script.load_from_path(SCRIPT_FIXTURE)
+	var dir: MusicDirector = MusicService.director()
+	assert_not_null(dir, "the autoload owns the one director")
+	if dir == null:
+		return
+	dir.bank = bank
+	dir.load_mus_script(script)
+	dir.start()
+	await wait_until(dir.has_pending_playback, 2.0)
+	assert_true(dir.has_pending_playback(), "the fixture reached real streaming playback")
+	var drained: bool = await MusicService.await_playback_stopped(0)
+	assert_false(drained, "an exhausted bound reports the timeout while playback is pending")
+	assert_true(dir.has_pending_playback(), "the timeout leaves the playback to the mixer")
+	MusicService.stop_context()
+	drained = await MusicService.await_playback_stopped()
+	assert_true(drained, "a live mixer releases the stopped playback inside the bound")
+	assert_false(dir.has_pending_playback(), "the shutdown barrier clears after the drain")
+
+
 func test_stopped_playback_releases_its_bank_after_the_mixer_drains() -> void:
 	var bank := SbfBank.new()
 	bank.load_from_path(BANK_FIXTURE)
