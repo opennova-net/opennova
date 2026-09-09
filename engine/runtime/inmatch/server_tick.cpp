@@ -1372,8 +1372,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// change. Match ran the pass itself in advance_tick; the wire half rides the
 	// same service, after the authority's event scorers and before the capture
 	// transaction, so zone-capture points are observed by the following pass.
-	// [orig: Server_UpdateCaptureZoneProximity @0x5086A0; the 0x81 sync
-	// @0x508790]
+	// [orig: Server_UpdateCaptureZoneProximity @0x5086A0; the active-slot loop
+	// head @0x508720..0x508724; the 0x81 sync @0x508790]
 	if (periodic_second) emit_requester_score_refreshes(ctx, world);
 
 	// (2c) Win conditions at 1 Hz [orig: the g_periodic_second_timer block in

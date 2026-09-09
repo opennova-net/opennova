@@ -224,7 +224,7 @@ struct RoundSpawnParams {
     // The firing weapon slot's tracer cadence byte (retail MountSlot+0x80) —
     // set by producers that model per-slot weapon state (the local player's
     // inventory/mounted slots). Null falls back to the owner entity's byte
-    // (the NPC single-weapon stand-in, D-AI-5) or the remote wire-identity
+    // (the slot-less organic fire stand-in, D-AI-8 (a)) or the remote wire-identity
     // map. [orig: RoundData_SpawnRound @ 0x4ec199..0x4ec1bb reads the passed
     // weaponSlot's +0x80]
     uint8_t *tracer_counter = nullptr;

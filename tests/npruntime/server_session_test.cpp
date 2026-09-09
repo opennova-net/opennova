@@ -2067,7 +2067,7 @@ bool check_scoreboard_active_slot_filter_is_distinct() {
 // per-slot cache every authority pass and sends a reliable requester-only 0x81
 // on change. The primary-score projection is deliberately not involved.
 // [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
-//        CRenderState_GetFieldByIndex(player+18, 0x1C) @0x5086E5]
+//        CPlayerStats_GetFieldPlusOne(player+0x48, 0x1C) @0x508749]
 bool check_requester_score_delta_refresh() {
 	opennova::inmatch::NapiNPServerCtx ctx;
 	opennova::inmatch::set_connection_mode(

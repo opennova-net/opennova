@@ -276,7 +276,7 @@ struct AiProfile {
     // (profile+120 primary / +152 secondary; engine/formats/aip WeaponBlock).
     // ammo_index is the world.tables.ammo row resolved from the authored weapon NAME
     // at the item-traits sweep (-1 = unresolved -> the leg cannot fire), the
-    // sibling of the D-AI-5 infantry seed. [orig: AIProfile_ParseProperty
+    // sibling of the organic seed (Entity_InitOrganicAI @0x4BFCC0). [orig: AIProfile_ParseProperty
     // "primary_weap" -> AmmoDef_LookupByName -> profile+148 @0x45e0xx]
     struct WeaponFire {
         int32_t ammo_cap = 0;     // block+0: brain[53]/[54] spawn seed
@@ -293,9 +293,11 @@ struct AiProfile {
                                   // [orig: the ai.def copy block seeds brain[43]; source
                                   // field unwitnessed — part of Entity_CopyVehicleDefToAIComp]
     int32_t approach_cap = 0;     // +76: chase range cap (16.16)
-    // ---- the infantry combat pass (org1 riflemen; world-wac-ai-re §17.4, D-AI-5) ----
-    // Definition callback @0x4BFCC0: entity+0x358..0x35B are byte ammo IDs
-    // in closeattack/easyrocket/advancedrocket/marker3 order (zero = none).
+    // ---- the infantry combat pass (org1 riflemen; world-wac-ai-re §17.4/§33.35) ----
+    // The definition callback writes entity+0x358..0x35B as byte ammo IDs in
+    // closeattack/easyrocket/advancedrocket/marker3 order (zero = none), each
+    // resolved per field from its def name [orig: Entity_InitOrganicAI
+    // @0x4BFCC0 -> AmmoDef_LookupByName @0x409870, calls @0x4BFE27..0x4BFE81].
     // The three one-based launch points are +0x365/+0x366/+0x367; both
     // rocket ammo slots use the middle point. Runtime storage is per body.
     struct OrganicWeapons {

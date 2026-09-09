@@ -980,8 +980,9 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // tracer_rate-th round FROM THE FIRING WEAPON SLOT is a tracer — the counter is
     // the slot's +0x80 byte, so each weapon keeps its own phase across switches.
     // Producers with per-slot state pass that byte (params.tracer_counter); the
-    // owner-entity byte stands in for producers without one (NPCs — one modeled
-    // weapon per NPC, D-AI-5). Rate 0 = never; no shooter = every round; the
+    // owner-entity byte stands in for producers without one (slot-less organic
+    // fire, weaponSlot 0 at WeaponSlot_FireAndSpawnEffects @0x53F477 — the
+    // D-AI-8 (a) residual). Rate 0 = never; no shooter = every round; the
     // FORCETRACER ammo flag (0x8000) rides every round. Team = the shooter team
     // byte [orig: round+0x162 copy @0x4ec705; the slot+4 & 0x200 0xFF override is
     // unmodeled].

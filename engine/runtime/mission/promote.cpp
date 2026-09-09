@@ -134,14 +134,15 @@ int initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai, 
             ae.profile.slot_class[i] = ents[3 - i].second;
     }
     // The GROUND weapon def blocks (profile+120/+152) + their brain
-    // seeds. The ammo COUNT seed rides the same unwitnessed spawn
-    // block-copy family as D-AI-5 (no per-field writer exists; the
-    // stationary pump reads brain[53]/[54] as the live counts of the
-    // +120/+152 capacities), so the capacities seed them here. The
-    // authored "*_weap" ammo names resolve against the loaded ammo
-    // table at the item-traits sweep [orig: AIProfile_ParseProperty
-    // @0x45de70 GROUND block; AIEntity_ProcessWeaponFire field map
-    // §17.6].
+    // seeds. The ammo COUNT seed's spawn copy site (brain[53]/[54]) is
+    // still unwitnessed (world-wac-ai-re §17.7 item 1: the plain spawn
+    // path is a block/memset and only the command and savegame-restore
+    // writers are found; tracked under D-AI-2), while the stationary
+    // pump reads brain[53]/[54] as the live counts of the +120/+152
+    // capacities, so the capacities seed them here. The authored
+    // "*_weap" ammo names resolve against the loaded ammo table at the
+    // item-traits sweep [orig: AIProfile_ParseProperty @0x45de70 GROUND
+    // block; AIEntity_ProcessWeaponFire field map §17.6].
     if (data.type == 1 || data.type == 2) {
         const auto seed_block = [](world::AiProfile::WeaponFire &dst,
                                         const aip::WeaponBlock &src) {
@@ -171,7 +172,8 @@ int initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai, 
             // PROBABLE, not anchored: aim_skill (+28, clamped 0..4) is
             // the only 0..4-shaped profile field feeding the (6 -
             // brain[43]) scatter modulus; the spawn copy site itself
-            // is the same unwitnessed block-copy as the ammo counts.
+            // is the same unwitnessed block copy as the ammo counts
+            // (§17.7 item 1, D-AI-2).
             ae.profile.accuracy = data.aim_skill;
             b.f[AiBrain::kAccuracy] = data.aim_skill;
         }

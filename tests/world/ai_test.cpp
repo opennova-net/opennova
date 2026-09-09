@@ -3499,7 +3499,7 @@ int main() {
         EntityHandle player_h = w.registry.spawn(0, player_seed);
         CHECK(player_h.valid());
 
-        // The NPC rifleman: pool 0, team 1, armed via the D-AI-5 profile seed.
+        // The NPC rifleman: pool 0, team 1, armed via the organic ammo seed (§33.35).
         Entity npc_seed;
         npc_seed.kind = EntityKind::Organic;
         npc_seed.team = 1;

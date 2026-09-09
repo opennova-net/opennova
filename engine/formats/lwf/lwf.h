@@ -88,7 +88,12 @@ struct Multi {
   // [orig: SoundBank_SelectTriggerEntryFromBank @ 0x75c09e].
   uint32_t pitch_random_range = 0;
   std::vector<uint32_t> playlist_indices;  // indices into playlists table
-  uint32_t target_id = 0;           // authoring-tool field; runtime resolves by NAME, never by id
+  // The set's 3D one-shot CULL RANGE in whole units: file dword 18 (the
+  // authoring tool labels it "target id") lands in the in-memory set+72 and
+  // gates every positional fire; NAME resolution never reads it.
+  // [orig: SoundBank_LoadTriggerSets @ 0x75c489 -> Sound_Play3DPositional
+  //  @ 0x527cd1..0x527da1]
+  uint32_t target_id = 0;
   // Raw bytes for byte-perfect round-trip.
   std::array<char, 24> raw_name{};
   std::array<uint32_t, 8> raw_playlist_ids{};  // includes garbage in unused slots

@@ -247,8 +247,11 @@ bool HostRole::reset_to_baseline(SessionError &error) {
 		make_client_runtime(state.host_owner.ctx.config.game_type);
 		// The replacement local client starts with zero score. Reset the
 		// matching sender cache too, or an equal post-retry award is suppressed.
-		// [orig: Server_PlayerAdd clears player-slot+332 at round/player init;
-		// Server_UpdateCaptureZoneProximity @0x5086E5..0x508724]
+		// [orig: Server_PlayerAdd @0x51D50A (slot+0x14C zeroed at install; also
+		//  @0x51CD00 before the whole-slot memset @0x51CD06);
+		//  Server_UpdateCaptureZoneProximity @0x50874E..0x508790 (GetFieldPlusOne
+		//  0x1C @0x508749, cmp/store slot+0x14C @0x50874E/@0x50875F, the 0x81
+		//  send @0x508790)]
 		for (NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
 			if (conn.link.transport == &state.host_loop)
 				conn.reply.score_delta_sound_value = 0;
