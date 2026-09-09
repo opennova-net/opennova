@@ -35,6 +35,20 @@
 using namespace sim_internal;
 
 
+void Simulation::advance_facial_presentation(const Vector3 &p_camera) {
+    if (!kernel_ || !p_camera.is_finite()) return;
+    std::vector<opennova::world::FacialDraw> rows;
+    kernel_->world.facials.compile_draws(kernel_->world,
+            static_cast<int32_t>(p_camera.x * 65536.0),
+            static_cast<int32_t>(-p_camera.z * 65536.0),
+            kernel_->local.view.camera_mode == 0, rows);
+    // JO renders these targets then writes two unused globals. The complete
+    // .text/.rdata/.data audit found no texture sink; model materials retain
+    // their normal textures. Keep the frame counter/priority state live.
+    // [orig: sub_580360 @0x580360; sub_580030 @0x580030;
+    //  write-only globals @0x272137C/@0x2721380, world-wac-ai-re §33.30]
+}
+
 void Simulation::fill_minefield_draw_rows(
         std::vector<opennova::world::MinefieldDraw> &r_rows) const {
     r_rows.clear();
@@ -414,6 +428,16 @@ void Simulation::drain_terrain_scorches(
 	// mission (x,y,z) -> Godot (x,z,-y) as it inserts them.
 	r_events = kernel_->world.out.terrain_scorches.pending();
 	kernel_->world.out.terrain_scorches.clear_pending();
+}
+
+std::vector<std::string> Simulation::script_effect_names() const {
+    return world_installed_ ? kernel_->script_effect_catalog.interned_names() : std::vector<std::string>{};
+}
+
+void Simulation::drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events) {
+    events.clear();
+    if (!world_installed_) return;
+    events.swap(kernel_->world.out.script_effects);
 }
 
 TypedArray<MissionEffect> Simulation::drain_effects() {

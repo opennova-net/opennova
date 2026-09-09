@@ -17,6 +17,7 @@
 
 #include <formats/mission/bms.h>
 #include <runtime/world/system.h>
+#include <runtime/world/script_events.h>
 
 namespace opennova::mission {
 
@@ -37,7 +38,7 @@ struct ScriptedEvent {
     bool active = false;
 };
 
-class BmsEventSystem : public opennova::world::ISystem {
+class BmsEventSystem : public opennova::world::ISystem, public opennova::world::IScriptEventQuery {
 public:
     const char *name() const override { return "bms_events"; }
 
@@ -84,6 +85,13 @@ public:
                events_[index].activate_countdown == 0;
     }
 
+    // WAC sees the active latch even while an activation delay is pending.
+    // [orig: WacCmd_Event @0x4ED1E0, unlike BMS event_fired above]
+    bool is_active(int32_t index) const override {
+        return index >= 0 && static_cast<size_t>(index) < events_.size() &&
+                events_[static_cast<size_t>(index)].active;
+    }
+
     const std::vector<ScriptedEvent> &events() const { return events_; }
 
     // Test seams over the private evaluator/dispatcher (public API for the
@@ -121,7 +129,7 @@ private:
     void fire(opennova::world::World &w, ScriptedEvent &se);
     bool evaluate_chain(opennova::world::World &w, const std::vector<bms::Trigger> &triggers);
     bool evaluate_trigger(opennova::world::World &w, const bms::Trigger &t);
-    void dispatch_action(opennova::world::World &w, const bms::Action &a);
+    void dispatch_action(opennova::world::World &w, const bms::Action &a, int32_t event = -1, int32_t action = -1);
 };
 
 } // namespace opennova::mission

@@ -273,6 +273,12 @@ void Simulation::drain_weather_sounds(std::vector<opennova::world::WeatherSoundE
 	kernel_->world.out.weather_sounds.clear();
 }
 
+void Simulation::drain_script_sounds(std::vector<opennova::world::ScriptSoundEvent> &r_events) {
+    r_events.clear();
+    if (!world_installed_ || kernel_ == nullptr) return;
+    r_events.swap(kernel_->world.out.script_sounds);
+}
+
 Ref<EnvironmentSnapshot> Simulation::get_environment_snapshot() const {
 	opennova::devtools::EnvironmentSnapshot snapshot;
 	if (!native_environment_snapshot(snapshot)) return Ref<EnvironmentSnapshot>();
@@ -326,8 +332,7 @@ bool Simulation::native_environment_snapshot(
 	out.indoor_rgb = combine(out.ceiling_rgb, 0xB5u, out.floor_rgb, 0xB5u);
 	out.gain_rgb = rgb(core.modulator_chain.modulator.render_color);
 	out.iris_rgb = rgb(core.modulator_chain.modulator2.render_color);
-	out.fov_degrees = static_cast<int32_t>(
-			opennova::world::player_view_fov_h_deg(kernel_->local.view, 0, 1.0f));
+	out.fov_degrees = core.scalar_channels.camera_fov_fp >> 16;
 	out.sky_height_metres = w.sky_height_q16() >> 16;
 	out.sky_speed = w.cloud_scroll_rate() >> 10;
 	out.sky_speed_target = w.cloud_scroll_rate_target >> 10;
@@ -572,14 +577,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	}
 	ms::BootFileSource files;
 	if (p_resource_root.is_valid()) {
-		const opennova::ResourceIndex *index = &p_resource_root->native_index();
-		files.has_file = [index](const std::string &name) {
-			return index->has_file(name);
-		};
-		files.read_file = [index](const std::string &name,
-				std::vector<uint8_t> &out) {
-			return index->read_file(name, out);
-		};
+		files = ms::boot_files_from_index(p_resource_root->native_index());
 	}
 	// The mission text resolves BEFORE the kernel boots: the parsed briefings/
 	// locations feed the host bring-up context (S2C 0x7E/0x0F) and the
@@ -643,6 +641,10 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	// setter above built, or none): the kernel never loads one from files here.
 	options.terrain = false;
 	options.wac = !p_wac_basename.is_empty();
+	// This full world boot finishes at Weather::run_mission_start_boundary,
+	// after the environment seed. Running WAC here would lose weather writes
+	// when that boundary seeds the core, then refuse its already-run script.
+	options.defer_initial_wac = true;
 	options.wac_basename = std::string(p_wac_basename.utf8().get_data());
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	options.infantry_adm = p_infantry_adm.is_empty()
@@ -749,6 +751,11 @@ void Simulation::build_demo_mission() {
 void Simulation::restore_world_baseline() {
 	if (!world_installed_) return;
 	runtime_ = active_role().client_runtime();
+	// The host role rebuilt its score-feedback revision stream; joiners retain
+	// theirs. Consume the current baseline so old cursor values cannot hide a
+	// new equal-numbered notification (or replay an old joiner notification).
+	net_.score_feedback_updates_seen = runtime_ != nullptr
+			? runtime_->state().score_feedback.updates : 0;
 	// The logic tick rewinds and the runtime may be recreated below — a cached
 	// minimap snapshot keyed on (revision, tick) could collide across epochs.
 	present_.minimap_snapshot_valid = false;
@@ -792,6 +799,9 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 	}
 	opennova::wac::CompileEnv env;
 	env.registry = &kernel_->world.registry;
+	env.ammo = &kernel_->world.tables.ammo;
+    env.effects = &kernel_->script_effect_catalog;
+    env.sounds = &kernel_->script_sound_catalog;
 	opennova::wac::Program program = opennova::wac::compile_program(sources, env);
 	auto holder = std::make_shared<WacProgram>();
 	// Adopt the registry-compiled program into the holder so the retained

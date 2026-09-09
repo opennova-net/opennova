@@ -1257,6 +1257,31 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			/*is_authority=*/true,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
+	// WAC punts are connection descriptions, not gameplay damage or chat.
+	// The original slot wrapper ignores departed/retired slots; the live
+	// connection owner likewise rejects stale allocations and loopback nodes.
+	// [orig: WacCmd_PlayerPunt @0x4F0DA0; WacCmd_PlayerKillPunt @0x4F0D30;
+	// CNapiNPConnection_TrySendChatMessage @0x5006C0;
+	// CNapiNPConnection_SendChatMessage @0x4C7EF0]
+	for (const world::MatchPlayerPunt &punt : world.match.drain_player_punts()) {
+		const world::Entity *entity = world.registry.get(punt.entity);
+		if (entity == nullptr || entity->registry_spawn_id != punt.spawn_id ||
+				world.match.player(punt.entity) == nullptr)
+			continue;
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (conn.link.owned_entity != punt.entity ||
+					(conn.link.owned_entity_spawn_id != 0 &&
+					 conn.link.owned_entity_spawn_id != punt.spawn_id))
+				continue;
+			DisconnectEvent event;
+			event.ds = 1;
+			event.dc = 2;
+			event.dpc = punt.reason;
+			event.ddstr = "wac punt";
+			stage_host_disconnect(conn, event);
+			break;
+		}
+	}
 	lap.restart();
 	world.match.advance_tick(
 			world,

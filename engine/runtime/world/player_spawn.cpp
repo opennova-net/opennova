@@ -62,6 +62,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.roll = spawn.roll;
     seed.team = spawn.team;
     seed.health = hp;     // [orig: Entity_InitFromItemDef @0x49e550 — healthMax -> Health]
+    seed.critical_hp = retail_signed_i16(world.tables.player.critical_hp);
     seed.health_max = hp; // the §5.10 field-17 tier denominator (D-NET-144)
     seed.equipped_adm_index = spawn.equipped_adm_index; // entity+0x2B0 spawn default (D-NET-143)
     // entity+0x374 character selector + entity+0x15C wire NetId, picked per assigned team from

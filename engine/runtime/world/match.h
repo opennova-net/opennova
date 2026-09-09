@@ -109,6 +109,7 @@ struct MatchStats {
     static constexpr size_t kAttackerNearOwnObjectiveKills = 25;
     static constexpr size_t kVictimNearOwnObjectiveKills = 26;
     static constexpr size_t kAttackerNearVictimObjectiveKills = 27;
+    static constexpr size_t kSharedPointAwards = 28;
     static constexpr size_t kPoints = 29;
     static constexpr size_t kHillTime = 31;
     static constexpr size_t kHostileZoneTime = 32;
@@ -164,6 +165,20 @@ struct MatchPlayer {
     // score event 25. It advances for every periodic pass, whether or not the
     // mission contains a capture source. [orig: @0x5087C9..0x5087F1]
     int32_t periodic_score_ticks = 0;
+    // WAC pisvar/psetvar address player-slot bytes +392..+408. A new
+    // player-add clears them; team changes and death do not.
+    // [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0;
+    // Server_PlayerAdd @0x51D51C]
+    std::array<uint8_t, 17> script_vars{};
+};
+
+// The match requests a disconnect without owning the transport. The authority
+// consumes it after the script pass, before its ordinary player-state fan.
+// [orig: WacCmd_PlayerPunt @0x4F0DA0; WacCmd_PlayerKillPunt @0x4F0D30]
+struct MatchPlayerPunt {
+    EntityHandle entity;
+    uint64_t spawn_id = 0;
+    uint8_t reason = 33;
 };
 
 // One outcome latch for every producer: automatic multiplayer rules and the
@@ -252,10 +267,20 @@ class Match {
     // [orig: Entity_Destroy @0x43E8B1..0x43E8B8: a def+0x5C == 3 body calls
     // Entity_DropCarriedObject @0x439DF0 before its fields are wiped]
     void remove_player(World &world, EntityHandle entity);
+    // Entity destruction drops a carried objective without removing the
+    // player's score/roster record. [orig: Entity_DropCarriedObject @0x439DF0]
+    void drop_carried_object(World &world, EntityHandle player);
     const MatchPlayer *player(EntityHandle entity) const;
     MatchPlayer *player(EntityHandle entity);
     const std::vector<MatchPlayer> &players() const { return players_; }
     const MatchStats &team_stats(uint8_t team) const;
+
+    // Script player operations validate the registered slot, not the Player
+    // entity flag or health. AddExp alone also requires a resolved ItemDef.
+    // [orig: Entity_ValidatePtr @0x500910; WacCmd_AddExp @0x4F2690]
+    bool add_experience(const World &world, EntityHandle entity, int32_t amount);
+    bool request_player_punt(const World &world, EntityHandle entity, bool kill_punt);
+    std::vector<MatchPlayerPunt> drain_player_punts();
 
     // Authored objective totals used both by win evaluation and the pre-match
     // status report. The first read freezes the round census, as retail's
@@ -317,6 +342,7 @@ class Match {
         int32_t return_ticks = 0;
     };
 
+    void share_experience(const World &world, MatchPlayer &recipient, int32_t amount);
     int32_t score_value(size_t status_index) const;
     void add_event(MatchPlayer &player, size_t counter, int32_t points,
                    int32_t raw_delta = 1);
@@ -326,7 +352,6 @@ class Match {
     CarryObjectiveState *carry_state(World &world, EntityHandle objective);
     void record_flag_pickup(World &world, EntityHandle player, EntityHandle flag);
     void record_flag_save(World &world, EntityHandle player, EntityHandle flag);
-    void drop_carried_object(World &world, EntityHandle player);
     void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
                           EntityHandle actor = EntityHandle{});
     void update_objective_proximity(const World &world);
@@ -338,6 +363,7 @@ class Match {
     MatchOutcome outcome_;
     MatchResult result_;
     std::vector<MatchPlayer> players_;
+    std::vector<MatchPlayerPunt> player_punts_;
     std::array<MatchStats, 5> teams_{};
     std::array<int32_t, 5> team_hold_ticks_{};
     int32_t periodic_second_timer_ = 0;

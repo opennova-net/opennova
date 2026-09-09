@@ -87,7 +87,7 @@ std::string fourcc_prefix(const char *tag) {
 // wire id = def_id - 100000). The offset here is mandatory: without it every pool-1 lookup misses.
 // [orig: NapiNPClientMsg_0x00D @0x432c40; docs/net/novaworld-net-re.md D-NET-97]
 void resolve_item_traits(world::World &world, const DefItemsFile &items,
-                         const ItemWireClassFn &wire_class) {
+                         const ItemWireClassFn &wire_class, world::EntityHandle only) {
     const std::unordered_map<int, const DefItemDef *> by_id = index_items(items);
     // Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
     // after this sweep) seed full health without an item-db reach-back [orig:
@@ -98,6 +98,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
     world.tables.player.has_item_def = player_def != nullptr;
     world.tables.player.item_hp =
             world::retail_signed_i16(player_def != nullptr ? player_def->hp : 0);
+    world.tables.player.critical_hp =
+            world::retail_signed_i16(player_def != nullptr ? player_def->critical_hp : 0);
     world.tables.player.item_type =
             static_cast<uint8_t>(player_def != nullptr ? player_def->type : 0);
     world.tables.player.item_attrib = player_def != nullptr ? player_def->attrib : 0u;
@@ -113,7 +115,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
     world.tables.player.heat_sig = player_def != nullptr ? (player_def->heat_sig & 0xFFFF) : 0;
     std::vector<world::EntityHandle> handles;
     world.registry.for_each(
-            [&](const world::Entity &e) { handles.push_back(e.handle); });
+            [&](const world::Entity &e) {
+                if (!only.valid() || e.handle == only) handles.push_back(e.handle);
+            });
     for (const world::EntityHandle h : handles) {
         world::Entity *e = world.registry.get(h);
         if (!e) continue;
@@ -121,6 +125,11 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 static_cast<int>(e->item_id) + mission::kItemIdOffset;
         const DefItemDef *def = find_item(by_id, def_id);
         e->has_item_def = def != nullptr;
+        // The org1 initializer seeds this magazine even without an ammo name.
+        // Bind the definition value here; a later traits refresh must not refill it.
+        // [orig: Entity_InitOrganicAI @0x4BFE08, def+0x894]
+        if (world::AiEntity *body = world.ai.for_handle(h))
+            body->profile.clip_size = def != nullptr ? def->clipsize : 0;
 		e->vehicle_spawn_ids.clear();
 		if (def != nullptr) {
 			for (int group = 0; group < items.vehicle_spawn_id_count; ++group)
@@ -148,6 +157,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         const int hp = world::retail_signed_i16(def != nullptr ? def->hp : 0);
         e->health = world::retail_signed_i16(e->health);
         e->health_max = world::retail_signed_i16(e->health_max);
+        e->critical_hp = world::retail_signed_i16(def != nullptr ? def->critical_hp : 0);
+        e->mana_max = e->mana = world::retail_signed_i16(def != nullptr ? def->mana : 0);
+        e->music_location = world::retail_signed_i16(def != nullptr ? def->music_location : 0);
         e->armor_impact = world::retail_signed_i16(
                 def != nullptr ? def->armor_impact : 0);
         e->armor_kz = world::retail_signed_i16(
@@ -177,6 +189,16 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // above. [orig: ItemDef_ParseProperty @0x49fa6c; consumer
         // Entity_UpdateInfantryAI @0x4b9c97; world-wac-ai-re §19]
         e->deathtime_ticks = def != nullptr ? def->deathtime_ticks : 0;
+        e->door_event = def != nullptr && fourcc_prefix(def->ai_function) == "door";
+        e->door_motion = def != nullptr && fourcc_prefix(def->move_function) == "door";
+        if (def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_DOOR) != 0 &&
+                (def->type == DEF_ITEM_TYPE_BUILDING || def->type == DEF_ITEM_TYPE_DECORATION)) {
+            e->door_count = static_cast<int8_t>(def->deathtime_ticks);
+            e->door_first_bone = static_cast<int8_t>(static_cast<uint32_t>(def->deathtime_ticks) >> 8);
+            std::memcpy(e->door_open_sound, def->door_open_sound, sizeof(e->door_open_sound));
+            std::memcpy(e->door_close_sound, def->door_close_sound, sizeof(e->door_close_sound));
+            world.doors.initialize(*e, def->door_open_rate_q16, def->door_max_angle_bam);
+        }
         // The item's display name, once per distinct id (tooling: the
         // inspection records name an entity by its item, not only its label).
         if (def != nullptr && world.tables.item_names.get(e->item_id) == nullptr)
@@ -208,6 +230,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             t.debris_scale = def->debris_scale;
 			t.sound_profile = def->sound_profile;
 			t.sound_death = def->sounddeath;
+			t.particlespawn = def->particlespawn;
 			t.particledeath = def->particledeath;
 			t.particleh2odeath = def->particleh2odeath;
             t.particlefire = def->particlefire;
@@ -344,6 +367,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 			}
 		}
 	}
+	if (only.valid()) return; // runtime allocation must not reset active zones
 	// Throwable class bindings: every items.def entry whose ai_function /
     // move_function names a throwable class (nade/schl/clym/vmne/lndm) lands a
     // row keyed by type id (id - 100000, the ammo TrcrID space), with the def
@@ -379,18 +403,14 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
     world.zones.latch_control();
 }
 
-// The D-AI-5 host weapon seed. The original resolves the items.def ammo_closeattack/
-// easyrocket/advancedrocket/marker3 names into ammo-def ids on the def and block-copies
-// them onto the entity (+0x358..0x35B; the copy site is the open world-wac-ai-re §17.7
-// item 1 — no per-field writer exists). Until that copy is witnessed, the port carries
-// ONE ammo id + clipsize per NPC (AiProfile — JO riflemen author all four slots to the
-// same rifle round), stamped here from the def rows against the loaded ammo table.
-// Also seeds the spawn magazine: word entity+0x35C = itemDef+0x894 clipsize [orig:
-// Entity_ResetToSpawnState @ 0x4b97a9/0x4b97b5]. Consumption stays motor-gated: only
-// the infantry fire pass reads ammo_primary (host-side NPCs; never the local player).
-// [orig: ItemDef_ParseProperty @ 0x4a1823 (-> def+0x56B) / @ 0x49fa1c (-> def+0x894);
-// docs/divergence-ledger.md D-AI-5]
-int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
+// Organic initialization resolves each authored ammo name directly into its
+// entity byte (+0x358..0x35B) and each launch name into a one-based model
+// userpoint byte (+0x365..0x367). These are explicit stores, not a block copy.
+// The magazine is a signed word seeded from def+0x894.
+// [orig: Entity_InitOrganicAI @ 0x4BFCC0; ammo/point stores @0x4BFE21..0x4BFF82;
+// Entity_ResetToSpawnState @ 0x4B97A9]
+int resolve_ai_weapons(world::World &world, const DefItemsFile &items,
+                       world::EntityHandle only, SimModelCache *models) {
     const std::unordered_map<int, const DefItemDef *> by_id = index_items(items);
     int armed = 0;
     // Bind every body's sound-profile pair first — persons AND vehicles carry
@@ -422,7 +442,7 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
         }
         for (int i = 0; i < world.ai.count(); ++i) {
             world::AiEntity *ae = world.ai.at(i);
-            if (ae == nullptr) continue;
+            if (ae == nullptr || (only.valid() && ae->handle != only)) continue;
             const world::Entity *e = world.registry.get(ae->handle);
             if (e == nullptr) continue;
             const int def_id =
@@ -437,23 +457,43 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
                         world.tables.sound_profiles.index_of(def->sound_profile_female));
         }
     }
-    if (world.tables.ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed
     for (int i = 0; i < world.ai.count(); ++i) {
         world::AiEntity *ae = world.ai.at(i);
-        if (ae == nullptr) continue;
+        if (ae == nullptr || (only.valid() && ae->handle != only)) continue;
         const world::Entity *e = world.registry.get(ae->handle);
         if (e == nullptr) continue;
         const int def_id =
                 static_cast<int>(e->item_id) + mission::kItemIdOffset;
         const DefItemDef *def = find_item(by_id, def_id);
-        if (def == nullptr || def->ammo_closeattack[0] == '\0')
-            continue; // def authors no anim-fire round (e.g. the player)
-        const int ammo = world.tables.ammo.index_of(def->ammo_closeattack);
-        if (ammo < 0) continue; // name not in this mission's ammo.def — stay unarmed
-        ae->profile.ammo_primary = ammo;
+        if (def == nullptr) continue;
+        auto &weapons = ae->profile.organic;
+        const char *ammo_names[] = {def->ammo_closeattack, def->ammo_easyrocket,
+                                    def->ammo_advancedrocket, def->ammo_marker3};
+        for (size_t slot = 0; slot < weapons.ammo.size(); ++slot) {
+            if (ammo_names[slot][0] == '\0') continue;
+            const int id = world.tables.ammo.index_of(ammo_names[slot]);
+            weapons.ammo[slot] = static_cast<uint8_t>(id >= 0 ? id : 0);
+        }
+        // modelgpm_FindUserpointByName returns the FIRST case-insensitive
+        // match. The index-plus-one stores wrap to a byte, as in retail.
+        // [orig: Entity_InitOrganicAI @0x4BFE8F..0x4BFF82]
+        const auto *model = models != nullptr ? models->model_for(def->graphic) : nullptr;
+        const char *point_names[] = {def->launchups_closeattack,
+                                     def->launchups_rocket, def->launchups_marker3};
+        for (size_t slot = 0; slot < weapons.launch.size(); ++slot) {
+            weapons.launch[slot] = 0;
+            if (!model || !model->user_points || point_names[slot][0] == '\0') continue;
+            for (size_t point = 0; point < model->user_point_count; ++point) {
+                if (strutil::iequals(model->user_points[point].name, point_names[slot])) {
+                    weapons.launch[slot] = static_cast<uint8_t>(point + 1);
+                    break;
+                }
+            }
+        }
         ae->profile.clip_size = def->clipsize;
-        ae->inf.magazine = static_cast<int16_t>(ae->profile.clip_size);
-        ++armed;
+        ae->inf.magazine = static_cast<int16_t>(def->clipsize);
+        if (std::any_of(weapons.ammo.begin(), weapons.ammo.end(),
+                       [](uint8_t id) { return id != 0; })) ++armed;
     }
     // The SM weapon blocks' authored ammo names (.aip "primary_weap"/
     // "secondary_weap"), resolved against the same loaded table — retail
@@ -462,7 +502,7 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
     // our parse keeps the name because the table loads after promotion.
     for (int i = 0; i < world.ai.count(); ++i) {
         world::AiEntity *ae = world.ai.at(i);
-        if (ae == nullptr) continue;
+        if (ae == nullptr || (only.valid() && ae->handle != only)) continue;
         for (world::AiProfile::WeaponFire *wf : {&ae->profile.fire_a, &ae->profile.fire_b}) {
             if (wf->ammo_name.empty()) continue;
             wf->ammo_index = world.tables.ammo.index_of(wf->ammo_name.c_str());

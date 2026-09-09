@@ -19,7 +19,7 @@ void VehicleSystem::release_flares(Entity &vehicle) {
 		return;
 	const VehicleTraits *vt = traits.get(vehicle.item_id);
 	if (vt == nullptr || vt->flare_points.empty()) {
-		world_.round_sim.fire_source(world_, vehicle,
+		world_.round_sim.fire_source(world_, &vehicle,
 				{ to_fixed(vehicle.position.x), to_fixed(vehicle.position.y),
 						to_fixed(vehicle.position.z) },
 				vehicle.veh.yaw_seeded ? vehicle.veh.yaw_bam
@@ -45,7 +45,7 @@ void VehicleSystem::release_flares(Entity &vehicle) {
 		const int32_t pitch = static_cast<int32_t>(static_cast<uint32_t>(
 				static_cast<int64_t>(std::atan2(double(d[2]), double(horizontal)) * angle_scale)));
 		world_.round_sim.fire_source(
-				world_, vehicle, { p[0], p[1], p[2] }, yaw, pitch, uint8_t(ammo));
+				world_, &vehicle, { p[0], p[1], p[2] }, yaw, pitch, uint8_t(ammo));
 	}
 }
 

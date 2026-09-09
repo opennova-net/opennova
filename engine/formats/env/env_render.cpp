@@ -163,11 +163,11 @@ int spring_step(int current, int target, int step_clamp, int max_abs) {
 
 void EnvScalarChannels::tick() {
 	// The witnessed in-tick order [orig: Environment_UpdateWeatherTick scalar
-	// tail @ 0x57edd7..0x57ef92]; the FOV eighth-snap (@ 0x57ee62) and the
-	// cloud-scroll eighth-snap (@ 0x57eecc, CloudScrollState) interleave here
-	// in the original and live with their owners.
+	// tail @ 0x57edd7..0x57ef92]. CloudScrollState owns the cloud-scroll
+	// eighth-snap (@0x57EECC), interleaved after sky height.
 	fog_dist_fp = spring_step(fog_dist_fp, fog_dist_target_fp, fog_step_fp, fog_max_fp);
 	sun_dim_fp = spring_step(sun_dim_fp, sun_dim_target_fp, sun_dim_step_fp, sun_dim_max_fp);
+	camera_fov_fp = smooth_eighth(camera_fov_fp, camera_fov_target_fp);
 	sky_height_fp = smooth_eighth(sky_height_fp, sky_height_target_fp);
 	rain_pct_fp = spring_step(rain_pct_fp, rain_pct_target_fp, rain_step_fp, rain_max_fp);
 	overcast_fp = spring_step(overcast_fp, overcast_target_fp, overcast_step_fp, overcast_max_fp);
@@ -175,6 +175,7 @@ void EnvScalarChannels::tick() {
 
 void EnvScalarChannels::mission_start_init() {
 	// [orig: Environment_MissionStartInit (ex sub_57F1E0) @ 0x57f7d8..0x57f873]
+	camera_fov_fp = camera_fov_target_fp; // [orig: @0x57F7DE]
 	sun_dim_fp = sun_dim_target_fp;
 	sky_height_fp = sky_height_target_fp;
 	rain_pct_fp = rain_pct_target_fp;

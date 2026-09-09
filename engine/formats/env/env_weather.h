@@ -74,8 +74,8 @@ int spring_step(int current, int target, int step_clamp, int max_abs);
 // writer in the image, so the current can never leave 0: sunfade is inert
 // in retail), sky height (eighth-snap @ 0x26c6858/5c), rain percent (spring
 // @ 0x26c6880.. Env_RainPct*; > 48 gates the precipitation drops), overcast
-// blend (spring @ 0x26c6894..). The camera FOV eighth-snap (@ 0x26c6844)
-// rides the camera system, not this struct. All values are 16.16 fixed
+// blend (spring @ 0x26c6894..), and the camera FOV eighth-snap
+// (@ 0x26c6844/48). All values are 16.16 fixed
 // (percent channels are 16.16 fractions: 0x10000 = 100 %).
 //
 // The per-channel step/max clamps are what the image writes: the WAC handlers
@@ -106,6 +106,12 @@ struct EnvScalarChannels {
 	int32_t sun_dim_step_fp = 0;
 	int32_t sun_dim_max_fp = 0; // never written in retail (@ 0x26c6840 has no writer)
 
+	// The weather tick owns the current; WAC and player optics write the target.
+	// [orig: Environment_InitDefaults @0x57C19B; weather tick @0x57EE62]
+	static constexpr int32_t kCameraFovDefault = 80 << 16;
+	int32_t camera_fov_fp = kCameraFovDefault;
+	int32_t camera_fov_target_fp = kCameraFovDefault;
+
 	int32_t sky_height_fp = 175 << 16; // the authoring default (the raw-200 boot quirk is divergence #12)
 	int32_t sky_height_target_fp = 175 << 16;
 
@@ -120,7 +126,7 @@ struct EnvScalarChannels {
 	int32_t overcast_max_fp = kMissionRainMax;
 
 	// One 62.5 Hz step of every channel, in the witnessed in-tick order
-	// (fog -> sun-dim -> [FOV: camera-side] -> sky height -> [cloud scroll:
+	// (fog -> sun-dim -> FOV -> sky height -> [cloud scroll:
 	// CloudScrollState] -> rain -> overcast).
 	void tick();
 	// The mission-start initializer's scalar leg: every current <- target,

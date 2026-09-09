@@ -187,7 +187,12 @@ struct WeatherState {
     void command_overcast(int32_t percent, int32_t seconds);    // [orig: WacCmd_Overcast @ 0x4ee040]
     void command_fog_distance(int32_t metres);                  // [orig: WacCmd_FogDist @ 0x4ee100]
     void command_move_fog(int32_t metres, int32_t seconds);     // [orig: WacCmd_MoveFog @ 0x4ee0a0]
+    // Script operands are already Q16; the public whole-metre controls above
+    // convert once before entering these same handlers.
+    void command_fog_distance_q16(int32_t distance_q16);
+    void command_move_fog_q16(int32_t distance_q16, int32_t seconds);
     void command_sky_speed(int32_t rate);                       // [orig: WacCmd_SkySpeed @ 0x4edeb0]
+    void command_fov(int32_t degrees);                         // [orig: WacCmd_Fov @0x4EDEA0]
     void command_sky_height(int32_t height_raw);                // [orig: WacCmd_SkyHeight @ 0x4edec0]
     void command_quake(int32_t seconds);                        // [orig: WacCmd_Quake @ 0x4ed4c0]
     void command_time_of_day_minutes(int32_t minute_of_day);    // [orig: WacCmd_Tod @ 0x4edc70]

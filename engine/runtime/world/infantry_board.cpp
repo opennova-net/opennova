@@ -5,6 +5,8 @@
 #include <base/io/strutil.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/infantry_internal.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/vehicle_mount.h>
 #include <runtime/world/vehicle_attach.h>
@@ -153,9 +155,11 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 					// behind [[entity+0x188]+0x48] is a dword per state and the
 					// test is [rec+0x230] != [rec+0] (0x230 = 4 * 0x8C), which is
 					// the root-motion source's has_clip(kGuard). Retail also
-					// stamps attachParent (+0x184) = self and the S position into
-					// +0x2FC..+0x304 here; no consumer of either is witnessed
-					// (the IDB tracks no reader), so they are not modeled.
+					// stamps the self-attachment chased by the late movement tail.
+                    self.attach_parent = self.handle;
+                    inf.move_target[0] = sx;
+                    inf.move_target[1] = sy;
+                    inf.move_target[2] = sz;
 					// [orig: Entity_UpdateInfantryAI @0x4BB818..0x4BB858]
 					const IRootMotionSource *rm = world.ai.root_motion;
 					if (rm == nullptr || rm->has_clip(inf.adm_id, anim_state::kGuard))
@@ -165,6 +169,7 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 					e.pos[0] = sx;
 					e.pos[1] = sy;
 					e.pos[2] = std::max(e.pos[2], sz);
+                    self.attach_parent = {};
 				}
 			}
 		}
@@ -197,6 +202,96 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 	self.position = { e.pos[0] / 65536.0f, e.pos[1] / 65536.0f, e.pos[2] / 65536.0f };
 }
 } // namespace
+
+// [orig: Entity_UpdateInfantryAI @0x4B9910, attachment prepass before think]
+InfantryAttachmentPose infantry_attachment_pose(AiEntity &e, World &world) {
+    InfantryAttachmentPose result;
+    Entity *self = world.registry.get(e.handle);
+    if (self == nullptr || !self->attach_parent.valid() || self->attach_bone == 0) return result;
+    const Entity *parent = world.registry.get(self->attach_parent);
+    if (parent == nullptr || parent->item_id == 0) return result;
+    result.parent = parent->handle;
+    int32_t point[6] = {board_to_fixed(parent->position.x),
+                       board_to_fixed(parent->position.y), board_to_fixed(parent->position.z)};
+    // The stored LAST-match index is a gate; the reader resolves the FIRST
+    // named point, exactly as Entity_GetBoneTransformAndOrientation does.
+    named_point(world, *parent, "attach", point);
+    std::copy_n(point, 3, result.point);
+    if ((parent->item_attrib & 0x1000u) != 0) {
+        if (AiEntity *controller = world.ai.for_handle(parent->handle)) {
+            result.point[2] = controller->brain.f[141];
+            controller->brain.f[142] = std::min(controller->brain.f[142], e.pos[2]);
+        }
+    }
+    const double dx = io::bam_sub(point[0], e.pos[0]);
+    const double dy = io::bam_sub(point[1], e.pos[1]);
+    result.distance = static_cast<int32_t>(std::min(std::hypot(dx, dy), 2147418112.0));
+    self->flags &= ~kEntityFlagMounted;
+    self->engine_flags &= ~kEntityFlagMounted;
+    return result;
+}
+
+// [orig: Entity_UpdateInfantryAI @0x4B9910, attach walk/anim 150 selection]
+void infantry_attachment_select(AiEntity &e, World &world, const InfantryAttachmentPose &pose) {
+    Entity *self = world.registry.get(e.handle);
+    const Entity *parent = world.registry.get(pose.parent);
+    if (self == nullptr || parent == nullptr || !self->attach_parent.valid() ||
+            self->attach_bone == 0) return;
+    auto &inf = e.inf;
+    inf.target_dist = pose.distance;
+    if (pose.distance <= 0x10000) {
+        const AiEntity *parent_ai = world.ai.for_handle(parent->handle);
+        const int32_t yaw = parent_ai ? parent_ai->heading
+                : bam_heading_from_mission_yaw_deg(parent->yaw);
+        inf.target_heading = inf.aim_heading = yaw;
+        inf.leg_target[0] = inf.leg_target[1] = yaw;
+        inf.aim_pitch = 0;
+        inf.aim_established = inf.aim_valid = true;
+        inf.aim_override = true;
+        inf.move_mode = 0;
+        inf.path_state = 0;
+        self->flags &= ~0x40000u;
+        self->engine_flags &= ~0x40000u;
+        commit_body_state(inf, world.ai.infantry_resolve_state(inf.adm_id, 150),
+                          world.ai.root_motion);
+    } else {
+        inf.move_mode = 6;
+        inf.arrival_radius = 0x10000;
+        std::copy_n(pose.point, 3, inf.move_target);
+        inf.target_heading = board_bearing_to(io::bam_sub(pose.point[0], e.pos[0]),
+                                             io::bam_sub(pose.point[1], e.pos[1]));
+        world.ai.infantry_select(e, world);
+    }
+}
+
+// [orig: Entity_UpdateInfantryAI @0x4B9910, late attachment chase before root integrate]
+bool infantry_attachment_move(AiEntity &e, World &world, const InfantryAttachmentPose &pose) {
+    const Entity *self = world.registry.get(e.handle);
+    if (self == nullptr || !self->attach_parent.valid()) return false;
+    auto &inf = e.inf;
+    if (self->attach_parent == self->handle) {
+        for (int axis = 0; axis < 2; ++axis)
+            e.pos[axis] = io::bam_add(e.pos[axis],
+                    io::bam_sar(io::bam_sub(inf.move_target[axis], e.pos[axis]), 3));
+        e.pos[2] = std::max(e.pos[2], inf.move_target[2]);
+        return false; // self-attachment still executes the ordinary root/vertical tail
+    }
+    if (!pose.parent.valid() || self->attach_bone == 0 || pose.distance >= 147456) return false;
+    inf.vel[0] = inf.vel[1] = 0;
+    for (int axis = 0; axis < 2; ++axis) {
+        if (pose.distance < 0x4000) e.pos[axis] = pose.point[axis];
+        else e.pos[axis] = io::bam_add(e.pos[axis],
+                io::bam_sar(io::bam_add(io::bam_sub(pose.point[axis], e.pos[axis]), 8), 4));
+    }
+    if (e.pos[2] <= io::bam_add(pose.point[2], 49152))
+        e.pos[2] = io::bam_add(e.pos[2],
+                io::bam_sar(io::bam_add(io::bam_sub(pose.point[2], e.pos[2]), 4), 3));
+    else {
+        inf.vel[2] = std::max(io::bam_sub(inf.vel[2], 167), -18432);
+        e.pos[2] = io::bam_add(e.pos[2], inf.vel[2]);
+    }
+    return true; // skips both ordinary root translation and vertical collision
+}
 
 void AiSystem::infantry_command_think(AiEntity &e, World &world) {
     InfantryState &inf = e.inf;
@@ -254,7 +349,7 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
 	Entity *self = world.registry.get(e.handle);
 	if (target == nullptr || self == nullptr) {
 		slot.f[36] = 0;
-		inf.board_blocked = false;
+		inf.path_state = 0;
 		return;
 	}
 	if (slot.f[36] != int32_t(th.packed) + 1)
@@ -299,6 +394,7 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
 				seat_world_position(world, *carrier, carrier->seats[best.seat_index], goal);
 		}
 		// The latch is armed by the terrain-gradient shove, not a stalled walk.
+        // [orig: the remaining gradient producer @0x4BA94E]
 		// Recover the exact integer neighbour differences from the shared normal
 		// kernel. [orig: Terrain_GetHeightGradient @0x606330; @0x4BA85B]
 		if (world.tables.terrain && ((self->flags | self->engine_flags) & 0x90A000u) == 0) {
@@ -306,23 +402,22 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
 					*world.tables.terrain, e.pos[0] / 65536.0f, -e.pos[1] / 65536.0f);
 			const double gx = std::round(-256.0 * n.x / n.up), gy = std::round(-256.0 * n.z / n.up);
 			if (std::trunc(std::hypot(gx, gy)) >= 768)
-				inf.board_blocked = true;
+				inf.path_state = 1;
 		}
-		if (!inf.board_blocked)
+		if (inf.path_state == 0)
 			radius = 0x20000;
 	} else if (entry_type) {
 		entry_goal(e, world, *self, *target, goal, radius);
 	}
-	const int32_t dist = board_dist(e.pos, goal);
+	int32_t dist = board_dist(e.pos, goal);
+    infantry_escort_goal(e, world, *target, goal, radius, dist);
 	// Attach gate and calls [orig: @0x4BBDA6..0x4BBE07; @0x4BBDAF,
 	// @0x4BBDC4, @0x4BBDD4, @0x4BBDF2]; common move tail @0x4BBE11.
 	if (dist < radius) {
 		if (inf.board_entry_stage)
 			++inf.board_entry_stage;
-		// The arrival clears a frame LOCAL (var_1169 @0x4BBD8F), not the +0x369
-		// path-state byte, so board_blocked (its model) stays set here; only the
-		// unported cover/path consumer (ai_find_cover_position @0x4afab0, clear
-		// within 1 u @0x4aff06) returns that byte to 0.
+		// Arrival clears a frame local (var_1169 @0x4BBD8F); the common
+		// zero-distance selection subsequently clears path state @0x4BD2E9.
 		if (radius < 0x640000 &&
 				(target->item_attrib & (kItemAttribPlayerControl | kItemAttribEweap)) != 0)
 			world.commands.mount_boarding_command(self->net_id, ssn, static_cast<uint8_t>(command));

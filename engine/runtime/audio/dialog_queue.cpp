@@ -66,16 +66,4 @@ void DialogQueue::clear() {
 	line_active_ = false;
 }
 
-bool WacVoiceChannel::play(const std::string &filename) {
-	const bool interrupted = playing_;
-	current_ = filename;
-	playing_ = true;
-	return interrupted;
-}
-
-void WacVoiceChannel::stop() {
-	current_.clear();
-	playing_ = false;
-}
-
 } // namespace opennova::audio

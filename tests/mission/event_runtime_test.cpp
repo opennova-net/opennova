@@ -8,6 +8,7 @@
 // touched once per 64 ticks, on pass p where (p-1)&3 == i/ceil(n/4); the WAC VM
 // executes every 62nd tick [orig: WacScript_AdvanceTick @0x4f81b1].
 #include <cstdio>
+#include <array>
 
 #include <runtime/mission/event_runtime.h>
 #include <runtime/wac/compiler.h>
@@ -790,11 +791,11 @@ static void test_teammate_triggers() {
         w.registry.configure_pool(0, 4);
         w.rules.mp_session = c.mp;
         w.rules.teammates_disabled = c.disabled;
-        w.script.heli_lift_active_count = c.lifts;
         mission::BmsEventSystem sys;
         load_probe(sys, make_trigger(bms::TriggerMainType::Teammate, c.sub));
         w.add_system(&sys);
         w.load_systems();
+        w.script.heli_lift_active_count = c.lifts; // inject the query fixture after mission reset
         tick_n(w, kPass);
         CHECK((w.script.vars.get_mission(9) == 1) == c.fires);
     }
@@ -888,6 +889,7 @@ static void test_player_mount_trigger_dispatch() {
         veh.health = 1000;
         veh.net_id = 11;
         veh.bms_id = 11;
+        veh.item_id = 1; // Mount predicates require the target's item definition.
         world::EntityHandle vh = w.registry.spawn(1, veh);
         world::Entity pl{};
         pl.alive = true;
@@ -1587,13 +1589,12 @@ static void test_change_ai_command_family() {
         CHECK((w.registry.get(bh)->engine_flags &
                world::kEntityFlagIndestructible) == 0);
     }
-    // Authored-but-unported subs are counted, never silently swallowed.
+    // FIND_AND_USE with no matching model point leaves the prior relation alone.
     {
         const int before = ai.unported_calls;
-        dispatch(44, 7); // TARGETSSN
-        CHECK(ai.unported_calls == before + 1);
-        dispatch(41, 12); // a ported sub leaves the counter alone
-        CHECK(ai.unported_calls == before + 1);
+        dispatch(31, 7);
+        dispatch(41, 12);
+        CHECK(ai.unported_calls == before);
     }
     dispatch(32);
     CHECK(ae.brain.f[world::AiBrain::kUseWaypointZones] == 1);
@@ -1729,7 +1730,8 @@ static void test_structural_bms_actions() {
         CHECK(entity->position.z == 30.0f);
         CHECK(entity->yaw == 45);
         CHECK(entity->pitch == 5);
-        CHECK(entity->roll == -3);
+        // Pool 0 enters Entity_ResetToSpawnState, which levels Roll.
+        CHECK(entity->roll == (handle.pool() == 0 ? 0 : -3));
     }
     CHECK(w.registry.get(pool0_h)->spawn_position.x == 10.0f);
     CHECK((w.registry.get(pool0_h)->engine_flags &
@@ -1769,7 +1771,85 @@ static void test_structural_bms_actions() {
     CHECK(w.out.effects.count("unported_action") == 0);
 }
 
+static void test_bms_target_selectors_and_retail_noops() {
+    World w;
+    w.cached.humans = 1;
+    for (int pool = 0; pool <= 2; ++pool) w.registry.configure_pool(pool, 4);
+    world::Entity seed{};
+    seed.net_id = 42;
+    seed.group_id = 7;
+    const auto first = w.registry.spawn(0, seed);
+    const auto duplicate = w.registry.spawn(1, seed);
+    seed.net_id = 43;
+    seed.health = 0;
+    seed.alive = false;
+    const auto dead = w.registry.spawn(1, seed);
+    const auto excluded_pool = w.registry.spawn(2, seed);
+    mission::BmsEventSystem events;
+    w.add_system(&events);
+    const auto fire = [&](bms::ActionType type, int source, int target) {
+        bms::Action action{};
+        action.action_type = type;
+        action.param1 = source;
+        action.param2 = target;
+        events.load({simple_event(bms::EventFlags::None, 0)}, {}, {action});
+        w.load_systems();
+        tick_n(w, kCycle);
+    };
+    using S = world::AiTargetSelector;
+    const bms::ActionType singles[] = {bms::ActionType::SsnTargetSsnExc,
+        bms::ActionType::SsnTargetSsnPri, bms::ActionType::SsnTargetGroupExc,
+        bms::ActionType::SsnTargetGroupPri};
+    const bms::ActionType groups[] = {bms::ActionType::GroupTargetSsnExc,
+        bms::ActionType::GroupTargetSsnPri, bms::ActionType::GroupTargetGroupExc,
+        bms::ActionType::GroupTargetGroupPri};
+    const auto words = [](const world::Entity &entity) {
+        const auto &s = entity.target_selectors;
+        return std::array<uint16_t, 4>{s.exclusive_ssn, s.preferred_ssn, s.exclusive_group, s.preferred_group};
+    };
+    for (int field = 0; field < 4; ++field) {
+        fire(singles[field], 42, 0x10055 + field);
+        CHECK(words(*w.registry.get(first))[field] == 0x55 + field);
+        CHECK(words(*w.registry.get(duplicate))[field] == 0);
+        fire(groups[field], 7, 0xFFFF);
+        CHECK(words(*w.registry.get(first))[field] == 0xFFFF);
+        CHECK(words(*w.registry.get(duplicate))[field] == 0xFFFF);
+        CHECK(words(*w.registry.get(dead))[field] == 0xFFFF);
+        CHECK(words(*w.registry.get(excluded_pool))[field] == 0);
+        fire(groups[field], 0, 1);
+        CHECK(words(*w.registry.get(first))[field] == 0xFFFF);
+        fire(singles[field], 0x1002A, 1); // source is not narrowed to 16 bits
+        CHECK(words(*w.registry.get(first))[field] == 0xFFFF);
+        fire(groups[field], 7, 0); // clear each selector independently
+        CHECK(words(*w.registry.get(dead))[field] == 0);
+    }
+    fire(bms::ActionType::ExecuteWac, 1, 0);
+    CHECK(w.out.effects.count("execute_wac") == 0);
+    CHECK(w.out.effects.count("unported_action") == 0);
+
+    w.ai.attach(first);
+    auto &brain = w.ai.for_handle(first)->brain;
+    const auto command = [&](int sub, int target) {
+        bms::Action action{};
+        action.action_type = bms::ActionType::ChangeSingleAI;
+        action.action_sub_type = sub;
+        action.param1 = 42;
+        action.param2 = target;
+        events.load({simple_event(bms::EventFlags::None, 0)}, {}, {action});
+        tick_n(w, kCycle);
+    };
+    brain.f[world::AiBrain::kPriorityTarget] = int(duplicate.packed) + 1;
+    command(world::EntityCommands::kTargetSsn, 42);
+    CHECK(brain.f[world::AiBrain::kPriorityTarget] == int(duplicate.packed) + 1);
+    command(world::EntityCommands::kTargetSsn, 43); // only a pool-1 match -> clear
+    CHECK(brain.f[world::AiBrain::kPriorityTarget] == 0);
+    command(world::EntityCommands::kHudItem, 1);
+    command(world::EntityCommands::kTmateStatus, 1);
+    CHECK(w.ai.unported_calls == 0);
+}
+
 int main() {
+    test_bms_target_selectors_and_retail_noops();
     test_change_ai_command_family();
     test_structural_bms_actions();
     test_empty_host_holds_the_script();
@@ -1817,6 +1897,8 @@ int main() {
         auto put_marker = [&](int slot, int32_t type_id, int32_t wpn) {
             world::Entity m;
             m.item_id = type_id;
+            m.has_item_def = true;
+            m.script_effect_name = "authored_effect";
             m.wp_number = wpn;
             m.alive = true;
             m.position = {static_cast<float>(10 * slot), 20.0f, 30.0f};
@@ -1831,7 +1913,9 @@ int main() {
         CHECK(pw.commands.spawn_marker_particle_effects(1) == 1);
         CHECK(pw.commands.spawn_marker_particle_effects(2) == 2);
         CHECK(pw.commands.spawn_marker_particle_effects(3) == 0);
-        CHECK(pw.out.effects.count("particle_effect") == 3);
+        CHECK(pw.out.script_effects.size() == 3);
+        CHECK(pw.out.script_effects[0].name == "authored_effect");
+        CHECK(pw.out.script_effects[0].lookup_by_name);
     }
 
     return failures ? 1 : 0;

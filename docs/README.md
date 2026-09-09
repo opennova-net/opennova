@@ -34,6 +34,10 @@ behavior is summarized and cited.
 
 ## Architecture
 
+The current [NPC AI and mission scripting completion work](world/npc-mission-completion.md)
+owns its implementation scope and mission acceptance gates. Behavior evidence
+lands in [world-wac-ai-re.md section 33](world/world-wac-ai-re.md).
+
 | Doc | What it covers |
 |---|---|
 | [`current-state.md`](current-state.md) | Where the project is and where the next step is written down: the phase (maturity program closed, retail-fidelity slices current), the standing slice loop, which record names each domain's next step, and the research queue |

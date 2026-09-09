@@ -5,6 +5,10 @@ down". It holds no facts of its own: every number and every next step below is a
 pointer into the tracked instrument that owns it. When they disagree, the
 instrument wins and this page is stale.
 
+The [NPC AI and mission scripting completion work](world/npc-mission-completion.md)
+tracks the current shared-engine implementation and normal mission playthrough
+gates. Its focused tests and remaining gaps are separate from mission acceptance.
+
 ## The phase
 
 | Period | What it was | State |

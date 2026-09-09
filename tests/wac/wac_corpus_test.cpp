@@ -12,6 +12,13 @@
 
 #include <formats/wac/bytecode.h>
 #include <runtime/wac/compiler.h>
+#include <runtime/wac/wac_layered_load.h>
+#include <runtime/audio/oneshot_play.h>
+#include <runtime/world/ammo_table_build.h>
+#include <runtime/particle/effect_scene.h>
+#include <formats/particle/parser.h>
+#include <base/resource_index/resource_index.h>
+#include <runtime/mission/runtime_boot.h>
 #include "common/retail_paths.h"
 
 namespace fs = std::filesystem;
@@ -54,6 +61,30 @@ int main(int argc, char **argv) {
             std::printf("skip (absent): %s\n", d.c_str());
             continue;
         }
+        opennova::world::AmmoTable ammo;
+        opennova::def::DefAmmoFile parsed = {};
+        const std::string ammo_path = (fs::path(d) / "ammo.def").string();
+        if (opennova::def::def_parse_ammo(ammo_path.c_str(), &parsed) == 0) {
+            ammo = opennova::world::build_ammo_table(parsed);
+            opennova::def::def_free_ammo(&parsed);
+        }
+        opennova::ResourceIndex index;
+        index.scan(d);
+        const auto mounted = opennova::mission::boot_files_from_index(index);
+        opennova::particle::EffectScene effects;
+        opennova::particle::EffectSceneConfig effect_config;
+        for (const auto &extension : {std::string(".ptl"), index.particle_extension()}) {
+            for (const auto &name : mounted.list_files(extension)) {
+                std::vector<uint8_t> bytes;
+                opennova::particle::EffectCatalogDocument document;
+                opennova::particle::ParseError error;
+                document.source = name;
+                if (mounted.read_file(name, bytes) && opennova::particle::load_particles_from_buffer(
+                        reinterpret_cast<const char *>(bytes.data()), bytes.size(), document.file, error))
+                    effect_config.documents.push_back(std::move(document));
+            }
+        }
+        effects.open(effect_config);
         for (auto it = fs::recursive_directory_iterator(d, ec);
              it != fs::recursive_directory_iterator(); it.increment(ec)) {
             if (ec) break;
@@ -61,6 +92,11 @@ int main(int argc, char **argv) {
             ++files;
             std::string src = read_file(it->path());
             CompileEnv env;
+            env.ammo = &ammo;
+            env.effects = &effects;
+            opennova::audio::SoundSetIndex sounds;
+            load_script_sound_sets(mounted, it->path().stem().string(), sounds);
+            env.sounds = &sounds;
             Program prog = compile_source(src, env); // must not crash
             int errs = prog.error_count();
             hard_errors += errs;

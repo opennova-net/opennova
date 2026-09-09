@@ -108,6 +108,13 @@ public:
 	bool play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
 			const StringName &p_bus, const Vector3 &p_listener_pos = Vector3(INFINITY, INFINITY, INFINITY),
 			int p_source_bms_id = 0, const String &p_exclusive_key = String());
+    // Direct WAC/weather trigger: explicit distance controls layer gain; the
+    // position only supplies Godot's panner (D-SND-8). No 3D cull or occlusion.
+    bool play_oneshot_at_distance(Node3D *p_parent, const Vector3 &p_pan_position,
+            const String &p_name, const StringName &p_bus, int64_t p_dist_q16);
+    // Stop this bank's one-shot children on mission retry. Ambient and dialog
+    // channels retain their own owners.
+    void reset_oneshots(Node3D *p_parent);
 	// Spawn a one-shot, NON-positional voice for the named set (mission dialog/voice
 	// is centered and full-volume, not 3D-attenuated) and RETURN its
 	// AudioStreamPlayer (the first resolvable layer's voice) without auto-freeing it
@@ -176,6 +183,9 @@ private:
 	static double _member_base_pitch(const opennova::lwf::Sndparm &p_member);
 	AudioStreamPlayer3D *_make_player(const Ref<AudioStreamWAV> &p_stream, double p_base_pitch,
 			const StringName &p_bus, bool p_loop, int p_vol255);
+    bool _play_oneshot_plan(Node3D *p_parent, const Vector3 &p_world_pos,
+            const opennova::lwf::File &p_bank, const opennova::audio::OneshotPlan &p_plan,
+            const StringName &p_bus, const String &p_exclusive_key = String());
 	Ref<AudioStreamWAV> _resolve_stream(const String &p_wav_path);
 	static int64_t _stream_frames(const Ref<AudioStreamWAV> &p_stream);
 
@@ -195,6 +205,9 @@ private:
 	// play_oneshot_3d); entries go stale harmlessly (resolved through ObjectDB
 	// before use).
 	HashMap<String, ObjectID> exclusive_;
+    // Auto-freeing 3D voices owned by this bank. ObjectID protects against
+    // parent teardown and slot reuse without storing metadata on the nodes.
+    std::vector<ObjectID> oneshots_;
 };
 
 } // namespace godot

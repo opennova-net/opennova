@@ -17,6 +17,7 @@
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/world/mount_controls.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/round_sim.h>
@@ -52,6 +53,7 @@ int32_t bam_from_radians(double radians) {
 } // namespace
 
 MissionKernel::MissionKernel() : local(world) {
+    world.teammate_spawner = this;
 	occlusion.bind_focal_wind_random(&world.prng16_c_state);
 	// The kernel pumps the local player's slot itself (run_local_player_post_tick
 	// with the live trigger/reload/scope inputs), so the world's global local.weapon
@@ -64,6 +66,7 @@ MissionKernel::MissionKernel() : local(world) {
 MissionKernel::~MissionKernel() {
 	// The systems and providers the world points at outlive nothing: drop the
 	// non-owning links before the members tear down in reverse order.
+	world.teammate_spawner = nullptr;
 	world.collision = nullptr;
 	world.pose_provider = nullptr;
 	world.tables.terrain = nullptr;
@@ -101,11 +104,7 @@ bool MissionKernel::open(const std::string &root, const std::string &name,
 		error = name + " did not parse: " + parse_error;
 		return false;
 	}
-	BootFileSource files;
-	files.has_file = [this](const std::string &file) { return index.has_file(file); };
-	files.read_file = [this](const std::string &file, std::vector<uint8_t> &out) {
-		return index.read_file(file, out);
-	};
+	BootFileSource files = boot_files_from_index(index);
 	open_document(std::move(parsed), basename_of(name), std::move(files));
 	mission_name = name;
 	return true;
@@ -118,6 +117,7 @@ void MissionKernel::open_document(bms::File mission_doc,
 	mission_basename = std::move(mission_file_basename);
 	opened_ = true;
 	files_ = std::move(files);
+	world.script.voice.set_file_reader(files_.read_file);
 	if (items_ok) {
 		def_free_items(&items);
 		items = DefItemsFile{};
@@ -156,6 +156,8 @@ void MissionKernel::resolve_item_traits(simassets::ItemWireClassFn wire_class) {
 void MissionKernel::resweep_item_traits() {
 	if (item_wire_class_ && items_table() != nullptr)
 		simassets::resolve_item_traits(world, *items_table(), item_wire_class_);
+	if (items_table() != nullptr)
+        world.facials.configure(world, asset_index(), *items_table());
 	if (items_table() != nullptr && !world.tables.ammo.entries.empty())
 		simassets::resolve_minefields(world, *items_table(), models);
 }
@@ -286,11 +288,16 @@ bool MissionKernel::load_mission_into_world() {
 	// promote applies the retail 15-char copy at its cited port site.
 	opts.people_name_resolver = people_name_resolver_;
 	promo = promote_mission(mission, world, opts);
-	finish_load();
+    // DEF initialization precedes PreMission actions in retail. Marker/health
+    // predicates and dynamically spawned helpers must see those traits now.
+    // [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitFromModel]
+    if (items_table() != nullptr)
+        simassets::resolve_item_traits(world, *items_table(), item_wire_class_);
+	register_mission_systems();
 	return true;
 }
 
-void MissionKernel::finish_load() {
+void MissionKernel::register_mission_systems() {
 	events.load(mission.events, mission.triggers, mission.actions);
 	world.tables.mission_attrib_flags = static_cast<uint32_t>(mission.header.attrib_flags);
 	// The net half stands its session up here — between the world wiring and
@@ -311,10 +318,7 @@ void MissionKernel::finish_load() {
 	world.add_system(&events);
 	world.add_system(&world.ai);
 	world.load_systems();
-	// PreMission events settle initial scripted state before the clock starts.
-	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
-	w::count_mission_units(world);
-	capture_baseline();
+
 }
 
 void MissionKernel::capture_baseline() {
@@ -559,10 +563,11 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	if (has_files && options.wac) {
 		step("wac");
 		wac_loaded = false;
+        wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
 		std::string wac_error;
 		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac, files_,
 				options.wac_basename.empty() ? mission_basename : options.wac_basename,
-				&world.registry, options.wac_strict_diagnostics, wac_error);
+				&world.registry, options.wac_strict_diagnostics, wac_error, &script_effect_catalog, &script_sound_catalog);
 		if (status == wac::WacLayeredLoadStatus::kBlocked) {
 			if (options.wac_strict_diagnostics) {
 				wac_blocked_error = std::move(wac_error);
@@ -600,6 +605,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("item_traits");
 		simassets::resolve_item_traits(world, *items_table(),
 				[](int32_t) -> uint8_t { return 0; });
+        world.facials.configure(world, asset_index(), *items_table());
 	}
 	if (has_item_db && options.collision) {
 		// World-object collision instances (BVOL/BPLN) [orig: the movement
@@ -622,25 +628,37 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		// Ballistics table (ammo.def) + round_type resolve.
 		step("ammo_table");
 		const bool ammo_ok_now = load_ammo_table(files_);
-		// Seed each NPC's anim-fire weapon (the D-AI-5 host seed) — only
-		// against a loaded ammo table.
+		// Minefield resources require a loaded ammo table.
 		if (ammo_ok_now && has_item_db) {
-			step("ai_weapons");
-			simassets::resolve_ai_weapons(world, *items_table());
 			simassets::resolve_minefields(world, *items_table(), models);
 		}
+	}
+	if (has_item_db) {
+		step("ai_weapons");
+		simassets::resolve_ai_weapons(world, *items_table(), {}, &models);
 	}
 	if (!wac_blocked_error.empty()) {
 		error = wac_blocked_error;
 		return false;
 	}
+	// Definition callbacks finish before the pre-mission event pass. In
+	// particular, NPCs need their own ADM, ammunition and collision bindings.
+	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitOrganicAI @0x4BFCC0]
+	step("organic_init");
+	world.registry.for_each_in_pool(0, [&](const w::Entity &row) {
+		w::initialize_organic_ai(world, *world.registry.get(row.handle));
+	});
+	step("premission");
+	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
+	w::count_mission_units(world);
+	capture_baseline();
 	// Retail grounds parked PlayerControl hulls, runs their first callback,
 	// then captures the support-relative respawn pose. [orig: @0x525F80..0x526071]
 	world.vehicles.initialize_mission_vehicles();
 	world.vehicles.build_spawn_markers();
 	// WacScript_InitAndLoad executes the freshly loaded bytecode once before
 	// the world ticks.
-	if (wac_loaded) wac.execute_initial(world);
+	if (wac_loaded && !options.defer_initial_wac) wac.execute_initial(world);
 	return true;
 }
 
@@ -766,9 +784,12 @@ bool MissionKernel::restore_baseline() {
 		local.weapon.slot.clip = clip;
 		local.weapon.slot.reserve = reserve;
 	}
+	// Preserve the authored FOV baseline while clearing transient player optics.
+	const int32_t baseline_fov = world.weather.core.scalar_channels.camera_fov_target_fp;
 	// The FP channel position is a gated advance count, not a clock delta, so
 	// the restored world keeps the held clip pose with no epoch re-stamp.
 	w::local_player_view_reset(&world, local.weapon, local.view, local.view_tracker);
+	world.weather.core.scalar_channels.camera_fov_target_fp = baseline_fov;
 	// The baseline predates the embedder's items.def traits. Re-stamp those
 	// authoritative callback/health traits now, before any client view is
 	// rebuilt from the restored rows: the encoder and the client classifier
@@ -917,6 +938,18 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 }
 
 // --- world::IPoseProvider: muzzles / userpoints (the sim pose) ---------------
+
+bool MissionKernel::resolve_skeletal_anchor(w::World &p_world, w::EntityHandle entity,
+        w::SkeletalAnchor anchor, int32_t out[3]) {
+    ensure_collision_instance(p_world, entity);
+    return collision_pose.resolve_skeletal_anchor(p_world, entity, anchor, out);
+}
+
+bool MissionKernel::resolve_organic_attachment(w::World &p_world, w::EntityHandle entity,
+        uint8_t userpoint, int32_t out[3]) {
+    ensure_collision_instance(p_world, entity);
+    return collision_pose.resolve_organic_attachment(p_world, entity, userpoint, out);
+}
 
 bool MissionKernel::resolve_muzzle_pose(w::World &p_world, w::EntityHandle entity,
 		int32_t out[3]) {

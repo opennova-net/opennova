@@ -22,6 +22,8 @@
 #include <vector>
 
 #include <runtime/audio/dialog_queue.h>
+#include <runtime/world/script_voice.h>
+#include <runtime/world/script_sounds.h>
 #include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent
 #include <runtime/world/weather_state.h> // WeatherSoundEvent
 
@@ -106,6 +108,8 @@ public:
 	AudioStreamPlayer *dialog_voice() const;
 	Ref<MissionAudioPerf> get_perf_counters() const;
 	Ref<SoundBank> get_bank() const { return bank_; }
+    // Capture the frame's listener before session presentation fires one-shots.
+    void set_listener_position(const Vector3 &p_position) { last_camera_pos_ = p_position; }
 	// Apply the portable entity-attached emitter drain. These are keep-alive
 	// registrations, not one-shots: the same (source registry lifetime, lane,
 	// layer) refreshes in place and competes with placed ambience in retail's one
@@ -124,6 +128,9 @@ public:
 	// 1 m centred @ 0x57ecfb, B at 10 m from behind @ 0x57edc4).
 	void play_weather_sounds(const std::vector<opennova::world::WeatherSoundEvent> &p_events,
 			const Transform3D &p_camera_xform);
+    void play_script_sounds(const std::vector<opennova::world::ScriptSoundEvent> &p_events,
+            const Transform3D &p_camera_xform);
+    void reset_oneshot_playback();
 	// PlayWavList / event-action seam: fire a one-shot sound set by name at a world
 	// position. The .bms action param -> set-name decode is left to the caller (the
 	// engine resolves a pre-loaded sound_id handle; the action path plays it at full
@@ -146,7 +153,7 @@ public:
 	// Entity_PlaySound3D_FullVolume @ 0x528e20 -- emitter volume 255], with an
 	// optional exclusive key for the every-tick refire slots (chute flap/freefall).
 	bool slot_soundset(const String &p_name, const Vector3 &p_world_pos,
-			const String &p_exclusive_key = String());
+			const String &p_exclusive_key = String(), int p_source_bms_id = 0);
 	// Enqueue a mission dialog by its PlayWavList id (param1): the engine's
 	// resolution (runtime/audio/dialog_queue resolve_dialog_sets) then the
 	// serialized queue, pumped here by spawning one voice at a time. Returns
@@ -155,12 +162,12 @@ public:
 	// Resolve-only (no playback) for tests/diagnostics: the first set name a dialog id
 	// maps to that the loaded banks actually contain, or "" if none.
 	String resolve_dialog_set(int p_wav_id);
-	// Play a WAC-scripted voice .wav by filename: loads it from the VFS
-	// (tolerating a missing .wav extension) and plays it non-positional on the
-	// engine's single dedicated channel (dialog_queue.h WacVoiceChannel), which a
-	// new wave REPLACES -- independent of the .DBF dialog queue (they may
-	// overlap). Returns true if the wav resolved and played.
+	// Play through the mission's ScriptVoiceChannel. A new line interrupts the
+	// previous line independently of the DBF dialog queue. Standalone tooling
+	// uses the same interruption rule and tolerates a missing .wav extension.
+	// Returns true if the file resolved and played.
 	bool play_wac_wave(const String &p_filename);
+	void sync_script_voice();
 	// Pump for the mission clock; HHMM like MissionEnvironment.time_of_day.
 	void set_time_of_day_hhmm(double p_hhmm);
 	// World-driven eval clock: the world tick pushes the sim's logic tick after each
@@ -206,12 +213,16 @@ private:
 	Ref<Simulation> _simulation() const;
 	bool _record_fire(const String &p_set_name, const Vector3 &p_world_pos, int p_source_bms_id,
 			const String &p_exclusive_key, bool p_slot, bool p_played);
+    void _play_listener_relative(const String &p_name, int32_t p_distance_q16,
+            int32_t p_bearing, const Transform3D &p_camera_xform);
 	void _attach_under(Node3D *p_container);
 	void _free_voice_nodes();
 	std::vector<std::string> _resolve_dialog_sets(int p_wav_id) const;
 	void _pump_dialog_queue();
 	AudioStreamPlayer *_dialog_voice_node() const;
 	AudioStreamPlayer *_wac_voice_node() const;
+	void _on_script_voice_finished(int64_t p_serial, int64_t p_player_id);
+	void _stop_script_voice(bool p_report_finished);
 	Ref<AudioStreamWAV> _resolve_wav(const String &p_filename);
 	Ref<AudioStreamWAV> _resolve_candidate_stream(const Ref<AmbientLayer> &p_descriptor);
 	Ref<AudioStreamWAV> _validate_candidate_stream(int p_candidate_id,
@@ -281,9 +292,10 @@ private:
 	// the voice its active line plays on.
 	opennova::audio::DialogQueue dialog_queue_;
 	ObjectID dialog_voice_id_;
-	// The WAC scripted-voice channel rule (dialog_queue.h) and its one player.
-	opennova::audio::WacVoiceChannel wac_voice_;
+	// Standalone preview player; mission script ownership lives in World.
 	ObjectID wac_voice_id_;
+	ObjectID script_voice_id_;
+	opennova::world::ScriptVoiceChannel::Frame script_voice_frame_;
 	HashMap<String, Ref<AudioStreamWAV>> wac_wav_cache_; // filename(lower) -> stream (or null)
 	int64_t perf_tick_us_ = 0;
 	int perf_markers_ = 0;

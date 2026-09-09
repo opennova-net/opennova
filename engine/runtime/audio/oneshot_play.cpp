@@ -117,8 +117,18 @@ OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 			}
 		}
 	}
-	plan.in_range = true;
-	plan.dist_q16 = dist_q16;
+    return plan_oneshot_at_distance(bank, loc, dist_q16, selector, has_listener);
+}
+
+OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &loc,
+        int64_t dist_q16, SoundSelector &selector, bool attenuate) {
+    OneshotPlan plan;
+    if (!loc.valid() || loc.set < 0 || static_cast<size_t>(loc.set) >= bank.multis.size()) {
+        return plan;
+    }
+    const lwf::Multi &set = bank.multis[static_cast<size_t>(loc.set)];
+    plan.in_range = true;
+    plan.dist_q16 = dist_q16;
 	const std::vector<uint32_t> layers = set_layers(bank, set);
 	for (size_t li = 0; li < layers.size(); ++li) {
 		const lwf::Playlist &layer = bank.playlists[layers[li]];
@@ -131,7 +141,7 @@ OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 		const uint32_t sidx = members[static_cast<size_t>(member)];
 		const lwf::Sndparm &sndparm = bank.sndparms[sidx];
 		int32_t vol255 = static_cast<int32_t>(sndparm.volume);
-		if (has_listener) {
+		if (attenuate) {
 			vol255 = oneshot_layer_volume(dist_q16,
 					static_cast<int64_t>(layer.min_distance) << 16,
 					static_cast<int64_t>(layer.falloff_radius) << 16,

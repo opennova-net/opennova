@@ -86,7 +86,7 @@ static void run_boot_trace_gates() {
 		CHECK(kernel.boot(options, error));
 		const std::vector<std::string> expected = {
 				"ai_profiles", "mission_text", "load_mission", "infantry_anim", "wac",
-				"weapon_table", "ammo_table"};
+				"weapon_table", "ammo_table", "organic_init", "premission"};
 		CHECK(kernel.boot_trace == expected);
 		CHECK(!kernel.local.has_local_player());
 	}
@@ -99,7 +99,7 @@ static void run_boot_trace_gates() {
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		const std::vector<std::string> expected = {
-				"mission_text", "load_mission", "spawn_local_player"};
+				"mission_text", "load_mission", "spawn_local_player", "organic_init", "premission"};
 		CHECK(kernel.boot_trace == expected);
 		CHECK(kernel.local.has_local_player());
 	}
@@ -113,7 +113,36 @@ static void tick_no_net(opennova::mission::MissionKernel &kernel) {
 	role.run_tick(opennova::inmatch::TickInput{});
 }
 
+static void test_initial_wac_waits_for_the_weather_owner_once() {
+    std::map<std::string, std::string> files;
+    files["synth.wac"] = "if never then inc(v1) fov(40) endif\n";
+    ms::MissionKernel kernel;
+    kernel.open_document(bms::File{}, "synth", source_over(&files));
+    ms::KernelBootOptions options;
+    options.playable = false;
+    options.defer_initial_wac = true;
+    std::string error;
+    CHECK(kernel.boot(options, error));
+    CHECK(kernel.wac.runs() == 0);
+    CHECK(kernel.world.script.vars.get_mission(1) == 0);
+    kernel.world.weather.seed(w::WeatherSeed{});
+    CHECK(kernel.wac.execute_initial(kernel.world));
+    CHECK(!kernel.wac.execute_initial(kernel.world));
+    kernel.settle_weather_mission_start();
+    CHECK(kernel.world.script.vars.get_mission(1) == 1);
+    CHECK(kernel.world.weather.core.scalar_channels.camera_fov_fp == (40 << 16));
+    kernel.capture_baseline();
+    kernel.world.weather.command_fov(120);
+    kernel.tick_weather();
+    CHECK(kernel.restore_baseline());
+    CHECK(kernel.world.script.vars.get_mission(1) == 1);
+    CHECK(kernel.world.weather.core.scalar_channels.camera_fov_fp == (40 << 16));
+    CHECK(kernel.world.weather.core.scalar_channels.camera_fov_target_fp == (40 << 16));
+    CHECK(!kernel.wac.execute_initial(kernel.world));
+}
+
 int main() {
+	test_initial_wac_waits_for_the_weather_owner_once();
 	// The synthetic mission: two placed entities plus one (empty) BMS event,
 	// and a mission-named WAC layer in the in-memory source.
 	std::map<std::string, std::string> files;
@@ -158,7 +187,7 @@ int main() {
 	{
 		const std::vector<std::string> expected = {
 				"ai_profiles", "mission_text", "load_mission", "infantry_anim", "wac",
-				"spawn_local_player", "weapon_table", "ammo_table"};
+				"spawn_local_player", "weapon_table", "ammo_table", "organic_init", "premission"};
 		CHECK(kernel.boot_trace == expected);
 		if (kernel.boot_trace != expected)
 			for (const std::string &s : kernel.boot_trace) std::printf("  trace: %s\n", s.c_str());
@@ -223,7 +252,7 @@ int main() {
 	// verdict is a hard no — the same gate the pre-tick stamps onto
 	// inf.aimed_shot_available.
 	CHECK(!kernel.local.weapon.active);
-	CHECK(!kernel.local.local_player_can_fire(kernel.local.player_ai()));
+	CHECK(!kernel.local.local_player_can_fire());
 	tick_no_net(kernel);
 	if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(!body->inf.aimed_shot_available);
 

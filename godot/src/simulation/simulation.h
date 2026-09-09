@@ -39,6 +39,7 @@
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the attach-label scan)
 #include <runtime/world/destruction.h> // DestructionEvents (the destruction drain)
 #include <runtime/world/terrain_scorch_events.h> // TerrainScorchEvent (the scorch drain)
+#include <runtime/world/script_voice.h>
 #include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent (the emitter drain)
 #include <runtime/world/fire_sound.h> // ReadyFireSound (the fire-sound drain)
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
@@ -305,6 +306,8 @@ public:
 		PF_FOCAL_SWAY_X = opennova::world::PF_FOCAL_SWAY_X,
 		PF_FOCAL_SWAY_Y = opennova::world::PF_FOCAL_SWAY_Y,
 		PF_FOCAL_SWAY_Z = opennova::world::PF_FOCAL_SWAY_Z,
+		PF_DOOR_COUNT = opennova::world::PF_DOOR_COUNT,
+        PF_DOOR_PHASES = opennova::world::PF_DOOR_PHASES,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 
@@ -862,6 +865,7 @@ public:
 	// Thunder one-shots since the last drain (weather_state.h carries the cites).
 	// NOT ClassDB-bound: MissionAudio plays the engine rows.
 	void drain_weather_sounds(std::vector<opennova::world::WeatherSoundEvent> &r_events);
+    void drain_script_sounds(std::vector<opennova::world::ScriptSoundEvent> &r_events);
 	// The F3 Environment record (devtools/environment_snapshot.h) as a typed
 	// read for the GUT/probe side; null without a world.
 	Ref<EnvironmentSnapshot> get_environment_snapshot() const;
@@ -917,7 +921,9 @@ public:
 	// S9 (ADR 0028): the ordered mission boot — engine/runtime/mission
 	// runtime_boot owns the sequence + the file-resolution policy; this entry
 	// supplies the step bodies over the existing feeds. The shell composes
-	// role bring-up before it and presentation after it. Returns OK or
+	// role bring-up before it and presentation after it. The caller finishes
+	// startup WAC after seeding weather (Weather::run_mission_start_boundary).
+	// Returns OK or
 	// ERR_CANT_OPEN (mission missing / load failed; the sequence aborted).
 	int64_t boot_mission(const Ref<MissionData> &p_mission,
 			const Ref<ResourceRoot> &p_resource_root,
@@ -1503,6 +1509,8 @@ public:
 	// (engine: runtime/world/ammo_table.h). The native form is the C++
 	// consumer's (GameWorld); the bound form wraps the same rows for the tests.
 	void drain_round_impact_rows(std::vector<opennova::world::RoundImpactPresentation> &r_rows);
+    void drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events);
+    std::vector<std::string> script_effect_names() const;
 	TypedArray<RoundImpactRow> drain_round_impacts();
 	// Destructively drain permanent terrain-cache scorch insertions (mission
 	// 16.16 bounds; the consumer folds mission (x,y) to terrain/Godot (x,z)).
@@ -1789,6 +1797,10 @@ public:
 	// (engine: runtime/world/sound_emitter_mailbox.h) The native form is the
 	// fire pass's; the bound form wraps the same rows for the tests.
 	void drain_sound_emitter_events(std::vector<opennova::world::SoundEmitterEvent> &r_events);
+	// Typed audio presentation/acknowledgement seam; WAC owns the channel state.
+	opennova::world::ScriptVoiceChannel::Frame script_voice_frame(const Vector3 &p_listener);
+	void finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip);
+	bool play_script_wave(const String &p_filename);
 	TypedArray<SoundEmitterRow> drain_sound_emitters();
 
 	// The live tracer TRAIL channels — the per-round point rings behind every streak,
@@ -2170,6 +2182,7 @@ public:
 	// follows the viewer team (engine: runtime/world/round_sim.h).
 	// The native form is the throwable pass's; the bound form wraps the same
 	// rows for the tests.
+    void advance_facial_presentation(const Vector3 &p_camera);
 	void fill_minefield_draw_rows(std::vector<opennova::world::MinefieldDraw> &r_rows) const;
 	void fill_throwable_visual_rows(std::vector<opennova::world::ThrowableVisualRow> &r_rows) const;
 	TypedArray<ThrowableVisualRow> get_throwable_visuals() const;
@@ -2270,6 +2283,8 @@ public:
 	// serial (retail's slot carries the entity pointer from registration;
 	// this is the lookup that identity stands in for).
 	opennova::world::EntityHandle handle_for_bms_id(int p_bms_id) const;
+    // Native presentation identity for the existing audio occlusion query.
+    int sound_source_bms_id(uint16_t p_handle) const;
 
 	// The marched iris-exposure sampling (D-RLIT-2): three classification codes
 	// for env::WeatherCore::set_exposure_from_iris_samples — the camera ray runs

@@ -104,6 +104,10 @@ appear only where a record says so. Known scales, each owned by its record:
   ([bms-event-runtime-re.md §1.6](mission/bms-event-runtime-re.md)). How OpenNova's
   hosts drive that loop is [runtime-architecture.md](runtime-architecture.md).
 
+The active [NPC AI and mission scripting completion work](world/npc-mission-completion.md)
+uses this shared tick and entity model. Script dispatch coverage and focused
+tests do not by themselves establish a completed mission playthrough.
+
 ### The entity model, in brief
 
 - Entities live in indexed pools; spawn order is file order: items (pool 1) →

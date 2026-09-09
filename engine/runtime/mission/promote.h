@@ -22,6 +22,7 @@
 
 #include <formats/mission/bms.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/player_loadout.h>
 
@@ -164,6 +165,17 @@ struct PromoteOptions {
 std::string ai_profile_name_for(
         const bms::Entity &e, bool placed_item,
         const std::function<PromoteOptions::AiProfileDefaults(int32_t)> &defaults);
+
+// Shared spawn initialization; used by mission promotion and the BMS helper factory.
+int initialize_ai_profile(world::AiEntity &entity, const aip::Profile &profile,
+        world::AiSystem &ai, world::EntityKind kind);
+void initialize_item_seats(world::Entity &entity, const std::vector<ItemSeatSpec> &specs);
+struct ItemAttachmentSpawns {
+    std::vector<world::EntityHandle> handles;
+    int dropped = 0;
+};
+ItemAttachmentSpawns spawn_item_attachments(world::World &world,
+        const std::vector<world::EntityHandle> &carriers, const std::vector<ItemSeatSpec> &specs);
 
 struct PromoteResult {
     int spawned = 0;      // entities placed into the actor/static pools

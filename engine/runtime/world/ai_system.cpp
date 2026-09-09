@@ -64,10 +64,15 @@ int32_t apply_resolved_mounted_seat_frame(AiEntity &e, World &world,
     return resolved_heading;
 }
 
+bool npc_mounted_body(const AiEntity &e, const Entity &occupant) {
+    return e.inf.active && !e.inf.is_local_player && !e.net_is_remote_peer &&
+            ((occupant.flags | occupant.engine_flags) & kEntityFlagPlayer) == 0;
+}
+
 // A read-applied remote player in either vehicle-control seat has the same
 // split pose as the local driver: LOOK remains player/wire-owned because the
 // authority vehicle motor consumes Entity::yaw, while the carried body frame
-// remains seat-owned. Keep NPC drivers on the existing seat-owned path.
+// remains seat-owned. NPC drivers instead run the org1 independent look chase.
 bool remote_player_controls_vehicle(const AiEntity &e, const Entity &occupant,
                                     const Seat &seat) {
     return e.inf.active && e.net_is_remote_peer &&
@@ -78,14 +83,14 @@ bool remote_player_controls_vehicle(const AiEntity &e, const Entity &occupant,
 } // namespace
 
 // The mounted body's heading refresh after the seat frame is applied: the local
-// player, a gunner seat and a remote peer driving the vehicle keep their own
-// full-precision LOOK heading/pitch (retail restores the occupant's independent
-// look yaw/pitch after the seat transform), every other rider adopts the seat
-// heading. [orig: Entity_AttachToBoneAndUpdateTransform @0x5463D0, the look
+// player, every NPC seat, a gunner and a remote peer driving the vehicle keep
+// their full-precision LOOK heading/pitch after the seat transform. Other wire
+// riders adopt the seat heading. [orig: org1 mounted @0x4BEF57..0x4BEF97;
+// Entity_AttachToBoneAndUpdateTransform @0x5463D0, the look
 // restore @0x546661 / @0x546664; world-wac-ai-re.md §22.4 / §5.38]
 bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
     Entity *occupant = world.registry.get(e.handle);
-    if (occupant == nullptr || !occupant->mounted || occupant->health <= 0) return false;
+    if (occupant == nullptr || occupant->motor_suspended || !occupant->mounted || occupant->health <= 0) return false;
     Entity *vehicle = world.registry.get(occupant->mount_target);
     if (vehicle == nullptr || occupant->mount_seat < 0 ||
         occupant->mount_seat >= static_cast<int>(vehicle->seats.size()))
@@ -97,8 +102,8 @@ bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
             e, world, *occupant, *vehicle, seat);
 
     if (e.inf.active &&
-        (e.inf.is_local_player || seat.type == SeatType::Gunner ||
-         remote_player_controls_vehicle(e, *occupant, seat))) {
+        (e.inf.is_local_player || npc_mounted_body(e, *occupant) ||
+         seat.type == SeatType::Gunner || remote_player_controls_vehicle(e, *occupant, seat))) {
         // Independent LOOK was already promoted/chased in pose_if_mounted. Restore
         // that exact value without consulting input latches or advancing aim again.
         e.heading = saved_look_heading;
@@ -480,6 +485,11 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         }
     }
     world.round_sim.hits.clear();
+    // [orig: Entity_UpdateAllEntities @0x4C21F6, immediately before faces]
+    world.teammates.tick(world);
+    // Facial interpolation precedes the pool-0 infantry callback walk.
+    // [orig: Entity_UpdateAllEntities @0x4C21FB]
+    world.facials.tick(world);
     lap.mark(devtools::Slot::SIM_AI_REACTIONS);
     // Rebuild the pool-0/1 proximity tables once per tick, before any entity update
     // (the pool-2 statics table rebuilds only on its registry/instance edges).
@@ -518,7 +528,8 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                     return;
                 }
                 collision->refresh_blink(world, *ent);
-                ent->static_think_age = 62;
+                if (ent->door_event) world.doors.command(world, *ent, 0);
+                else ent->static_think_age = 62;
             });
         }
     }
@@ -539,7 +550,10 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         const devtools::ProfileScope entity_scope(
                 world.profile, e.inf.active ? devtools::Slot::SIM_AI_INFANTRY
                                             : devtools::Slot::SIM_AI_OTHER_ENTITIES);
+        const Entity *motor_entity = world.registry.get(e.handle);
+        const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
         if (e.inf.active) {
+            if (motor_suspended) continue;
             // Joiners retain seat-follow presentation for wire-owned peers. The
             // authority continues into the remote org2 animation/collision tail:
             // mounted contact callbacks remain live while model push is suppressed.
@@ -564,7 +578,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             continue;
         }
         // Non-infantry mounted controllers retain the seat-follow shortcut.
-        if (pose_if_mounted(e, world)) {
+        if (!motor_suspended && pose_if_mounted(e, world)) {
             advance_part_anim(e);
             continue;
         }
@@ -600,7 +614,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             // [orig: one entity update — the SM never integrates ground vehicles, the
             // physics does; Entity_DispatchPhysics_cveh @0x48efc0].
 			const bool motor_driven = vt != nullptr;
-			if (locomotion_enabled && !motor_driven) {
+			if (locomotion_enabled && !motor_driven && !motor_suspended) {
 				apply_locomotion(e);   // horizontal: advance pos[0]/pos[1] toward the node
                 apply_ground_clamp(e, &world); // vertical: snap pos[2] onto ground (no-op if unwired)
 			}
@@ -763,7 +777,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         e.pitch = saved_look_pitch;
         occ->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
                 mission_yaw_deg_from_bam_heading(saved_look_heading))));
-    } else if (e.inf.active && seat.type == SeatType::Gunner) {
+    } else if (e.inf.active && (seat.type == SeatType::Gunner || npc_mounted_body(e, *occ))) {
         // Attachment writes the seat/base pose but restores the child's independent
         // live look. The look then chases the desired solution instead of snapping:
         // yaw quarter-step clamped to +/-0x02000000, pitch eighth-step. Most mount
@@ -772,15 +786,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         //  base-relative clamp @0x4bef9a..0x4beff0]
         e.heading = saved_look_heading;
         e.pitch = saved_look_pitch;
-        if (e.inf.aim_valid) {
-            int32_t yaw_step = io::bam_sar(
-                    io::bam_add(io::bam_sub(e.inf.aim_heading, e.heading), 2), 2);
-            yaw_step = std::clamp(yaw_step, -0x02000000, 0x02000000);
-            e.heading = io::bam_add(e.heading, yaw_step);
-            const int32_t pitch_step = io::bam_sar(
-                    io::bam_add(io::bam_sub(e.inf.aim_pitch, e.pitch), 4), 3);
-            e.pitch = io::bam_add(e.pitch, pitch_step);
-        }
+        if (npc_mounted_body(e, *occ) || e.inf.aim_valid)
+            infantry_look_tick(e.inf, e.heading, e.pitch, true);
         const int cfg = veh->emplaced_config;
         const bool wide_mount = veh->emplaced_config_valid &&
                 (cfg == 3 || cfg == 4 || cfg == 5 || cfg == 7);

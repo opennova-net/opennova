@@ -7,41 +7,11 @@
 // IRootMotionSource) moves the entity. Without a source every state is unavailable and
 // the soldier stands — exactly the original's relationship between motion and clip data.
 //
-// Deviations (tracked):
-//   D-INF-1  primary-channel blend windows are ported: old/new clips keep independent
-//            playheads and their five numeric root lanes blend for 10 ticks (15 when
-//            the target state has flag 0x400). The secondary weapon channel still
-//            switches immediately.
-//   D-INF-2  commands 123/124/125 (move-to-entity orders: staged vehicle boarding via the
-//            E1..E8/S/G/H bones with per-soldier entry-slot claims at entity+866, UseGun
-//            emplacement manning, seat attach on arrival; dump 1545-2330) and 126
-//            (guard/hold) are decoded but not driven by a command source; they idle.
-//            127 (follow local player) idles because the simulation has no local player.
-//   D-INF-3  the ground/water resolver [orig: collision resolver
-//            @0x4b2bd0]: with a CollisionWorld wired (AiSystem::collision) the full
-//            resolver runs — wall push-out, standing on objects, hurt/zone volumes,
-//            person repulsion, blink/indoors (world/collision.h; witness
-//            docs/world/world-wac-ai-re.md §15, deferral tails D-COL-1..8). Without one
-//            (headless tests) the terrain-cache clearance stands. Remaining D-INF-3
-//            tail: water (swim transitions). The caller semantics are preserved either
-//            way: return <= 0 lifts the foot out of the floor, return > 0xF000 marks
-//            airborne, small positive clearance is left alone; the airborne edge stamps
-//            jump_loop 31 for the PLAYER only (org1's 47/31 ladder is parachute-gated —
-//            plain NPC falls keep the clip; the 47 variant rides the unmodeled Flags
-//            0x20) [orig: org1 @0x4bf8d4-0x4bf901, org2 @0x4b7e3c-0x4b7e61]. NOTE:
-//            patrol walking has NO
-//            peer/obstacle avoidance in the original — entity separation is the
-//            resolver's push-out, not a steering behavior (dump survey).
-//   D-INF-4  CLOSED: the direction table generator is witnessed and ported —
-//            Math_BuildSinTable @ 0x613050 builds ONE 1281-entry sin table at 2^22
-//            by an accumulating x87 loop (angle += 2pi/1024 per entry, ftol2_sse
-//            truncation); the cos read aliases table+256 entries (off_849934 =
-//            outMillis + 0x400). See quantized_dir below.
-//   D-INF-5  the idle look-at system (every-256-tick interest scan -> head-look + the
-//            43->125 / 44->126 look-idle swaps + greeting voice cues; dump 4089-4429) and
-//            its spotting side effects (enemy -> combat focus + alert 10, corpse -> alert
-//            25) are not ported; alerts currently come from the BMS seed / explicit state.
-//            Rides the combat pass with the rest of the targeting layer.
+// Open movement/presentation divergences are maintained in
+// docs/world/world-wac-ai-re.md (D-INF records). The shared motor includes
+// waypoint/boarding orders, obstacle detours, model collision and water state.
+// Idle interest/greeting selection and the remaining escort/drag behaviors
+// remain open; completed channel/boarding/water work is documented there.
 
 #include <algorithm>
 #include <cmath>
@@ -59,6 +29,7 @@
 #include <runtime/world/dir_table.h>
 #include <runtime/world/infantry_ladder.h>
 #include <runtime/world/infantry_internal.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/world/player_view.h> // player_view_floor_eye_to_terrain (the on-foot local eye leg)
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h> // registry.get for the local-player AiEntity->Entity mirror
@@ -471,21 +442,39 @@ int AiSystem::infantry_resolve_state(int adm_id, int state) const {
 // the same insert through the shared pair map (D-NET-209 / D-INF-23).
 
 void commit_body_state(InfantryState &inf, int resolved,
-                       const IRootMotionSource *root_motion) {
+                       const IRootMotionSource *root_motion, bool player_wash) {
     if (resolved < 0) return; // no clips at all: hold the current state
-    if (resolved == inf.anim_state) { inf.anim_pending = 0; return; }
-    const uint32_t curf = infantry_anim_flags(inf.anim_state);
-    if ((curf & 0x4u) != 0) {
-        inf.anim_pending = resolved;
-    } else if ((curf & 0x20u) == 0 || (infantry_anim_flags(resolved) & 0x1u) != 0) {
-        begin_body_transition_with_insert(inf, resolved, root_motion);
-    } else {
-        inf.anim_pending = resolved;
+    int committed = inf.anim_state;
+    // Equality skips arbitration, retaining pending. The player's subsequent
+    // wash substitution still runs. [orig: @0x4B7356..0x4B740B]
+    if (resolved != inf.anim_state) {
+        const uint32_t curf = infantry_anim_flags(inf.anim_state);
+        if ((curf & 0x4u) != 0) {
+            inf.anim_pending = resolved;
+        } else if ((curf & 0x20u) == 0 || (infantry_anim_flags(resolved) & 0x1u) != 0) {
+            committed = resolved;
+            inf.anim_pending = 0;
+        } else {
+            inf.anim_pending = resolved;
+        }
     }
+    if (player_wash && root_motion) {
+        if (committed == anim_state::kWalkForward &&
+                root_motion->has_clip(inf.adm_id, anim_state::kWashWalk))
+            committed = anim_state::kWashWalk;
+        if ((committed == anim_state::kIdle || committed == anim_state::kIdle2) &&
+                root_motion->has_clip(inf.adm_id, anim_state::kWashIdle))
+            committed = anim_state::kWashIdle;
+    }
+    // One final channel commit: intermediate land poses must not restart
+    // an unchanged wash blend every fourth body tick.
+    if (committed != inf.anim_state)
+        begin_body_transition_with_insert(inf, committed, root_motion);
 }
 
-void AiSystem::infantry_select(AiEntity &e, const Entity *self) {
+void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
     InfantryState &inf = e.inf;
+    const Entity *self = world.registry.get(e.handle);
 
     // EMPLACED. A mounted body in a GUNNER seat takes the emplaced state and
     // skips the gait/idle selection entirely:
@@ -547,9 +536,15 @@ void AiSystem::infantry_select(AiEntity &e, const Entity *self) {
     const bool alerted = inf.damage_timer != 0 ||
                          e.slot.bytes()[AiSlot::kAlertByte] != 0 || inf.was_hit;
 
-    int target = anim_state::kIdle; // [orig: targetAnimState seeds 43]
+    int target = selected_state > 0 ? selected_state : anim_state::kIdle;
     const bool moving = inf.move_mode != 0 && inf.target_dist > 0;
+    const bool dragging = infantry_is_dragger(e, world);
     if (moving) {
+        // A dragger searches and compares turn error while facing away from
+        // its travel goal. Restore body heading after the gait choice below.
+        // [orig: @0x4BD468, @0x4BD5B1]
+        if (dragging) inf.body_heading = io::bam_add(inf.body_heading, INT32_MIN);
+        infantry_detour(*this, e, world);
         target = alerted ? anim_state::kRunForward : anim_state::kWalkForward; // [dump 2898-2906]
         // Final-node approach gait. [orig: dump 2907-2924, ported literally incl. the skip]
         if ((inf.move_mode == 2 || inf.move_mode == 3) && inf.at_final_oneshot) {
@@ -563,11 +558,17 @@ void AiSystem::infantry_select(AiEntity &e, const Entity *self) {
         }
     }
 
-    // Turn-in-place overrides. [orig: Entity_UpdateInfantryAI @0x4b9910 dump 2940-2952]
-    {
+    if (!moving) inf.path_state = 0; // [orig: zero targetDist -> 0x4BD2E9]
+
+    // Turn-in-place overrides only in the moving branch. [orig: @0x4BD4AC]
+    if (moving) {
         const int32_t err = abs_bam(opennova::io::bam_sub(inf.target_heading, inf.body_heading));
         if (err > kTurnStopGate) target = anim_state::kStop;
         else if (err > kTurnWalkGate) target = anim_state::kWalkForward;
+        if (dragging) {
+            inf.body_heading = io::bam_add(inf.body_heading, INT32_MIN);
+            inf.target_heading = io::bam_add(inf.target_heading, INT32_MIN);
+        }
     }
 
     auto has = [&](int s) {
@@ -584,6 +585,17 @@ void AiSystem::infantry_select(AiEntity &e, const Entity *self) {
     // The previous-think move mode the pre_attack reaction reads [orig: @0x4bd356
     // `pad_368[2] = moveMode`, after the idle collapse].
     inf.prev_move_mode = inf.move_mode;
+
+    // [orig: @0x4BD35C..0x4BD393] Drag pose wins after the ordinary gait
+    // fallbacks, and suppresses idle gaze without changing the live look yaw.
+    if (dragging) {
+        inf.aim_override = true;
+        inf.aim_pitch = 0;
+        const bool walking = target == anim_state::kJogForward ||
+                target == anim_state::kRunForward || target == anim_state::kWalkForward;
+        const int drag_state = walking ? anim_state::kDraggerWalk : anim_state::kDraggerIdle;
+        if (has(drag_state)) target = drag_state;
+    }
 
     // Hit flinch: a body hit since the last think swaps its idle for cover_idle (163)
     // or its run/jog for cover_run (164) when the adm authors them, and wasHit is
@@ -609,7 +621,26 @@ void AiSystem::infantry_select(AiEntity &e, const Entity *self) {
             target = anim_state::kWoundedWalk;
     }
 
-    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion);
+    // The NPC applies wash before animation arbitration. Unlike the player
+    // path, its jog/run can select wash_run. [orig: @0x4BD78D..0x4BD7E6]
+    if (world.rotor_wash.nearby_zone(e.pos, 983040)) {
+        if (target == anim_state::kWalkForward && has(anim_state::kWashWalk))
+            target = anim_state::kWashWalk;
+        else if ((target == anim_state::kRunForward || target == anim_state::kJogForward) &&
+                has(anim_state::kWashRun))
+            target = anim_state::kWashRun;
+        else if ((target == anim_state::kIdle || target == anim_state::kIdle2) &&
+                has(anim_state::kWashIdle))
+            target = anim_state::kWashIdle;
+    }
+
+    // A forced state stays numerically selected even if the ADM aliases that
+    // slot to RESET. The ordinary gait fallbacks still apply to a later override.
+    // [orig: raw forced store @0x4BD266, common arbitration @0x4B9910]
+    const int resolved = world.script.forced_animation != 0 &&
+            target == world.script.forced_animation ? target :
+            infantry_resolve_state(inf.adm_id, target);
+    commit_body_state(inf, resolved, root_motion);
 }
 
 // The witnessed org2 player-body selection — see the ai.h declaration. One function
@@ -674,7 +705,7 @@ void infantry_rain_ambient(World &world, const Entity &ent) {
 }
 
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396]
-void AiSystem::player_body_select(AiEntity &e, uint32_t entity_flags) {
+void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_flags) {
     InfantryState &inf = e.inf;
     auto has = [&](int s) {
         return root_motion != nullptr && root_motion->has_clip(inf.adm_id, s);
@@ -738,8 +769,8 @@ void AiSystem::player_body_select(AiEntity &e, uint32_t entity_flags) {
         if (inf.lean_right) target = anim_state::kRollRight; // [orig: @0x4b734c]
     }
 
-    // SWIM. After the land selection (and retail's wash overlay 27/28,
-    // unported), a body on the float latch (0x8000) that is not dead takes the
+    // SWIM. After the land/wash selection, a body on the float latch
+    // (0x8000) that is not dead takes the
     // swim state STRAIGHT -- no availability test, no flag-table arbitration,
     // pending cleared: moving -> the direction index picks 37 forward / 38
     // left / 40 back / 39 right; idle -> 36. The same MoveOrder&7 index the
@@ -773,7 +804,8 @@ void AiSystem::player_body_select(AiEntity &e, uint32_t entity_flags) {
         return;
     }
 
-    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion);
+    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion,
+            world.rotor_wash.nearby_zone(e.pos, 983040) != 0);
 }
 
 // The lean-angle producer — see the ai.h declaration. Decay runs every body tick for
@@ -1042,6 +1074,41 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // following frame. The recoil PRNG draw is unconditional, including R=0.
     // [orig: Entity_UpdateInfantryPlayerBody / Entity_UpdateInfantryAI]
     Entity *tick_entity = world.registry.get(e.handle);
+    if (tick_entity != nullptr && tick_entity->motor_suspended) return;
+    // A newly spawned remote player is already org2 before its first pose
+    // uplink sets net_is_remote_peer. NPC corpse ownership must follow the
+    // entity's player bit, not whether a movement packet has arrived.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 vs org1 @0x4B9910]
+    const bool npc_body = !e.inf.is_local_player && !e.net_is_remote_peer &&
+            (tick_entity == nullptr ||
+             ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagPlayer) == 0);
+    if (tick_entity != nullptr && npc_body) {
+        npc_respawn_unhide(world, *this, *tick_entity);
+        if (((tick_entity->flags | tick_entity->engine_flags) & 1u) != 0) return;
+    }
+    // The org2 queued USE survives a ground-probe clear through entity+0x180.
+    // Clear the request after the attempt, including failed mounts. Ordinary
+    // local input still enters through LocalPlayer::toggle_mount.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B424A..0x4B4272]
+    if (!npc_body && tick_entity != nullptr && e.inf.adm_id > 0 &&
+        ((tick_entity->flags | tick_entity->engine_flags) & 0x201u) == 0x200u) {
+        if (!tick_entity->ground_target.valid())
+            tick_entity->ground_target = tick_entity->mount_toggle_fallback;
+        world.vehicles.player_toggle_mount(e.handle);
+        tick_entity->flags &= ~0x200u;
+        tick_entity->engine_flags &= ~0x200u;
+    }
+    // Org1 copies the primary state and its pending target into the secondary
+    // channel at the motor head, before think or authority interpolation. The
+    // two playheads and variant rings remain independent. No equipped ADM or
+    // player hold-pose selection participates in this write.
+    // [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48]
+    if (npc_body) {
+        const int state = e.inf.anim_state;
+        e.inf.begin_weapon_transition(state,
+                root_motion != nullptr ? root_motion->variant_count(e.inf.adm_id, state) : 1);
+        e.inf.wpn_deferred = e.inf.anim_pending;
+    }
     infantry_recoil_tick(e.inf, e.heading, e.pitch, world.next_prng16());
     InfantryWeightSpreadInputs weight_inputs;
     const uint32_t tick_flags = tick_entity != nullptr
@@ -1107,6 +1174,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     RootMotionFrame frame;
     bool have_clip = false;
     int death_transition = -1;
+    const InfantryAttachmentPose attachment = !inf.is_local_player && e.health > 0
+            ? infantry_attachment_pose(e, world) : InfantryAttachmentPose{};
 
     // 1. Death edge (once — the 0x82 death-family flag marks an already-posed corpse):
     // consume the damage-time anim selection, seed the corpse timer, drop any mount.
@@ -1126,17 +1195,21 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             if (ent != nullptr) {
                 ent->flags |= kEntityFlagDead;
                 ent->engine_flags |= kEntityFlagDead;
+                ent->attach_parent = {};
             }
             // A mounted body detaches so the corpse falls with the world, not the
             // seat [orig: entity+0x16C -> Entity_DetachFromVehicleIfServer @0x4b9c57;
             // the edge also clears Flags 0x40 @0x4b9d2a].
             if (ent != nullptr && ent->mounted)
                 world.vehicles.detach(e.handle);
-            // Corpse timer = the item's deathtime [orig: +0x148 = def+0x890 @0x4b9c97].
-            // Unmodeled edge variant (D-AI-9): the +0x134-bit0 silent cleanup
-            // (timer-61, tickets cleared, no scream @0x4b9c68) — JO persons never
-            // author the bit.
-            if (ent != nullptr) ent->corpse_timer = ent->deathtime_ticks;
+            // [orig: @0x4B9C68] Section bit 0 forces silent, shortened cleanup
+            // even for LeaveCorpse items and cancels scripted respawns.
+            const bool silent_cleanup = ent != nullptr && (ent->section_mask & 1u) != 0;
+            if (ent != nullptr) {
+                ent->corpse_timer = static_cast<int32_t>(
+                        uint32_t(ent->deathtime_ticks) - (silent_cleanup ? 61u : 0u));
+                if (silent_cleanup) ent->npc_respawns = 0;
+            }
             // The death scream. NPC (org1): profile slot 7 (sounddeath), or 8
             // (SSNightDead) on a night mission — the runtime reads the mission's
             // EnableNVG attribute as the night gate. [orig: @0x4b9ca3-0x4b9cc1
@@ -1147,7 +1220,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // slot fallback. [orig: @0x4b4c4a-0x4b4c6a ->
             // SoundProfile_FindByEntityAndType @0x528180 type 5/0 ->
             // Entity_PlaySound3D_FullVolume]
-            if (ent == nullptr || !ent->dismemberment_piece) {
+            if (!silent_cleanup && (ent == nullptr || !ent->dismemberment_piece)) {
                 const bool night_death =
                     (world.tables.mission_attrib_flags & MissionTables::kMissionAttribEnableNVG) != 0;
                 if (inf.is_local_player) {
@@ -1193,59 +1266,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             inf.target_dist = 0;
             inf.player_moving = false;
         }
-        // The corpse-persistence block, every dead tick (the edge tick included —
-        // the original falls through the same frame). Persons author no
-        // particledeath decay effect and no respawn tickets, so those legs are
-        // omitted [orig: the 186-tick effect spawn @0x4b9e7d and the +0x35E path
-        // @0x4b9fa0]; the SP watch-check gate (!in_session && no decay effect) maps
-        // to "a local player exists" on our host.
-        if (ent != nullptr && !ent->hidden && !ent->leave_corpse && !inf.is_local_player) {
-            if (ent->corpse_timer > 0) --ent->corpse_timer; // [orig: @0x4b9e74]
-            if (ent->corpse_timer <= 0) {
-                bool watched = false;
-                if (const Entity *lp = world.registry.get(world.cached.local_player)) {
-                    // The local-player visibility watch [orig: Physics_RaycastTerrain-
-                    // AndSectors(corpse, player) @0x4b9f77 on the entity origins; ours
-                    // lifts both endpoints 0.9 u explicitly — the D-AI-9 feet-ray
-                    // stand-in (ground-hugging rays false-block on the heightfield
-                    // leg), deliberately NOT the muzzle seam: a corpse has no live
-                    // pose and the watcher's eye is not a fire origin].
-                    constexpr int32_t kWatchLift = 0xE666; // 0.9 u
-                    const int32_t cpos[3] = {e.pos[0], e.pos[1], e.pos[2] + kWatchLift};
-                    const int32_t ppos[3] = {to_fixed(lp->position.x),
-                                             to_fixed(lp->position.y),
-                                             to_fixed(lp->position.z) + kWatchLift};
-                    watched = line_of_sight_clear(world, cpos, ppos, e.handle,
-                                                  world.cached.local_player);
-                }
-                if (watched) {
-                    ent->corpse_timer = 62; // seen -> retry in 1 s [orig: @0x4b9f83]
-                } else {
-                    // Despawn. Retail FREES the slot here and announces the removal
-                    // to every client [orig: Entity_Destroy @0x4b9f93; the notify is
-                    // Server_RemoveEntityAndNotify @0x50A270, body [u16 handle]].
-                    // We used to only set `hidden`, which ends our own presentation
-                    // but leaves the row in the registry AND in the replication fan —
-                    // so a corpse was streamed forever and the client never destroyed
-                    // it (S2C 0x12 absent, ledger D3). Record the handle for the net
-                    // layer to announce, then actually destroy the row so it stops
-                    // being replicated; announcing WITHOUT destroying would be worse
-                    // than either, since the client would drop a row we keep sending.
-                    ent->hidden = true;
-                    world.out.entity_removals.push_back(e.handle.packed);
-                    // Entity_Destroy frees the AI component with the row, and the
-                    // updater jumps straight to its epilogue afterwards.
-                    // [orig: brain memset @0x43e995; jmp loc_4BFC89 @0x4b9f9b]
-                    // release() zeroes this AiEntity (e.handle with it), so
-                    // take the handle first and destroy the row before the brain.
-                    const EntityHandle corpse = e.handle;
-                    world.registry.despawn(corpse);
-                    release(corpse);
-                    return;
-                }
-            }
+        if (ent != nullptr && npc_body) {
+            if (infantry_drag_corpse(e, world)) death_transition = 139;
+            const NpcCorpseStep result = step_npc_corpse(world, *this, *ent);
+            if (result == NpcCorpseStep::Removed) return;
+            if (result == NpcCorpseStep::Respawned) death_transition = -1;
         }
-    } else if (inf.is_local_player) {
+    }
+    if (e.health > 0 && inf.is_local_player) {
         // 2'. Local player: the player-body input is set from host input each frame
         // (world::apply_player_body_input), never by the org1 AI think path. The body
         // selection is the witnessed org2 selector, every 4th tick like the original
@@ -1278,7 +1306,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 ((ent->flags | ent->engine_flags) & kEntityFlagLadderContact) != 0;
         if ((logic_tick & 3u) == 0 && !inf.airborne && !carried) {
             if (!ladder_latched) {
-                player_body_select(e, ent != nullptr ? (ent->flags | ent->engine_flags) : 0u);
+                player_body_select(e, world, ent != nullptr ? (ent->flags | ent->engine_flags) : 0u);
             } else if (inf.player_moving) {
                 inf.idle_counter = 0;
             } else if (inf.stance == InfantryState::Stance::kStand) {
@@ -1287,7 +1315,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
         // The rain ambient registration rides the local body tick.
         if (ent != nullptr) infantry_rain_ambient(world, *ent);
-    } else if (is_authority && (key & 15u) == 0) {
+        if ((logic_tick & 15u) == 0) world.commands.update_local_location(e.handle);
+    } else if (e.health > 0 && is_authority && (key & 15u) == 0) {
 		// 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
 		// A cached board-any target can upgrade an already seated NPC once
 		// per 64 staggered ticks. Compare slot TYPE, not the userpoint index.
@@ -1302,6 +1331,25 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 				world.vehicles.attach_to_seat(e.handle, selected);
 		}
 		infantry_think(e, world);
+        // Combat produces the movement goal and preferred animation before the
+        // common detour/gait selector. The complete think is gated at 16 ticks.
+        // [orig: Entity_UpdateInfantryAI @0x4BA970; combat @0x4BBE24]
+        int combat_state;
+        {
+            const devtools::ProfileScope combat_scope(
+                    world.profile, devtools::Slot::SIM_AI_INFANTRY_COMBAT);
+            combat_state = infantry_combat_think(e, world, key);
+        }
+        // The debug/script override is after combat and before attachment and
+        // gait selection. It bypasses the current animation's lock, preserving
+        // pending until the ordinary arbiter changes it. Org2 never reads it.
+        // [orig: Entity_UpdateInfantryAI @0x4BD256..0x4BD271]
+        if (npc_body && world.script.forced_animation != 0) {
+            combat_state = world.script.forced_animation;
+            inf.store_body_animation(combat_state);
+            inf.move_mode = 0;
+            inf.target_dist = 0;
+        }
         // On a ladder the NPC's gait selection is suppressed — the org1
         // on-ladder block after the resolve owns states 32-35 (the same-tick
         // overwrite mapping as the player selection skip above; retail also
@@ -1309,10 +1357,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // [orig: @ 0x4bd18d — moveMode + the speed local zeroed on Flags 0x100000]
         if (tick_entity != nullptr &&
             ((tick_entity->flags | tick_entity->engine_flags) &
-             kEntityFlagLadderContact) != 0)
+             kEntityFlagLadderContact) != 0) {
             inf.move_mode = 0;
-		else {
-			infantry_select(e, tick_entity);
+            inf.target_dist = 0;
+            inf.path_state = 0;
+        }
+		else if (!attachment.parent.valid()) {
+			infantry_select(e, world, combat_state);
 			if (inf.board_anim >= 0 && inf.move_mode == 0 &&
 					(tick_entity == nullptr || !tick_entity->mounted))
 				inf.begin_body_transition(inf.board_anim);
@@ -1324,14 +1375,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // infantry_ladder.cpp. [orig: @ 0x4b7484-0x4b76d8]
     infantry_ladder_override(e, tick_entity);
 
-    // 2b. The combat pass (NPCs, authority, alive): perception every 32 ticks, the
-    // reaction/approach/aim layer per tick — its commits override the 16-tick gait pick,
-    // matching the original's later-in-flow targetAnimState overrides.
-    // [orig: Entity_UpdateInfantryAI @0x4b9910 §17.1-17.3/17.5 region]
-    if (!inf.is_local_player && is_authority && e.health > 0) {
-        const devtools::ProfileScope combat_scope(
-                world.profile, devtools::Slot::SIM_AI_INFANTRY_COMBAT);
-        infantry_combat_think(e, world, key);
+    if (!inf.is_local_player && is_authority && e.health > 0 && (key & 15u) == 0) {
+        infantry_attachment_select(e, world, attachment);
+        if (npc_body && (tick_flags & kEntityFlagDead) == 0)
+            infantry_attention_think(*this, e, world, key);
     }
 
     // Mounted pose is a late phase, not an update bypass: death ran first and a
@@ -1360,10 +1407,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // on every local-player body tick, including death ticks (the primary death state
     // disables rendering through its flag gate, but the independent playhead/timers
     // do not freeze on the corpse) [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0;
-    // witness §14.8]. The org1 body runs ONLY the shared dual-channel advance: both
-    // updaters pass their out-array to AnimMap_UpdateDualChannels @0x40b8c0, so an AI
-    // body's secondary channel promotes and steps like anyone's — but its SELECTION
-    // writer @0x4b9a28 is unwitnessed, so its state is never re-selected here.
+    // witness §14.8]. Org1's state/pending mirror ran at the motor head; its
+    // secondary channel now advances independently through the same dual-channel
+    // machinery. Its root motion is discarded. [orig: @0x4B9A28 -> @0x40B8C0]
     devtools::ProfileLap animation_lap(world.profile);
     if (inf.is_local_player) infantry_weapon_channel(e, world, logic_tick);
     else infantry_weapon_channel_advance(e);
@@ -1427,9 +1473,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             //  capsule legs, and @0x4b6908 has no floor of any kind].
             const bool seated = reg != nullptr && reg->mounted;
             if (!seated) {
-                float abs_eye[3] = {from_fixed(e.pos[0]) + head[0],
-                                    from_fixed(e.pos[1]) + head[1],
-                                    from_fixed(e.pos[2]) + head[2]};
+                float abs_eye[3] = {static_cast<float>(from_fixed(e.pos[0]) + head[0]),
+                                    static_cast<float>(from_fixed(e.pos[1]) + head[1]),
+                                    static_cast<float>(from_fixed(e.pos[2]) + head[2])};
                 player_view_floor_eye_to_terrain(
                         terrain,
                         reg != nullptr &&
@@ -1633,14 +1679,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             inf.leg_yaw[1], io::bam_sar(io::bam_sub(inf.leg_yaw[0], inf.leg_yaw[1]), 1));
     } else {
         // org1 [orig: Entity_UpdateInfantryAI @0x4be8fd-0x4beb18]. Body: quarter-step
-        // toward the target, clamped ±69273360; the render yaw moves by the SAME step
-        // (ours pins them equal — they never diverge). [orig: @0x4be8fd-0x4be931]
+        // toward the target, clamped ±69273360; live look moves by the SAME step,
+        // preserving its offset from the body. [orig: @0x4be8fd-0x4be931]
         const int32_t diff = io::bam_sub(inf.target_heading, inf.body_heading);
         int32_t step = io::bam_sar(io::bam_add(diff, 2), 2);
         if (step > kBodyTurnClamp) step = kBodyTurnClamp;
         if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
         inf.body_heading = io::bam_add(inf.body_heading, step);
-        e.heading = inf.body_heading;
+        e.heading = npc_body ? io::bam_add(e.heading, step) : inf.body_heading;
 
         // 5b. Legs. The carried (Flags 0x40) body-snap rides the mount slice. A
         // movement state or a def+84&0x200 body takes the WALK path: the right foot
@@ -1691,6 +1737,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 inf.leg_yaw[leg] = io::bam_sub(inf.body_heading, kLegTwistLimit);
         }
     }
+
+    if (npc_body) infantry_look_tick(inf, e.heading, e.pitch);
 
     // 6. The slope pass: conform-or-decay body_pitch/roll + the steep-ground slide.
     // Cadence lives inside (org1 every 8th tick on `key`; org2 decay every tick,
@@ -1755,6 +1803,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         e.pitch = inf.look_pitch;
     }
 
+    if (!inf.is_local_player && infantry_attachment_move(e, world, attachment)) {
+        finish_infantry_tick(e, world);
+        return;
+    }
+
     // 7-8. Rotate the root delta into world axes and integrate. [orig: full-precision
     // sin/cos at 2^22; org1 pos += rotated + velocity @0x4bf684-0x4bf6a2 (the
     // drowning-0x8000/ladder-0x100000 zeroing @0x4bf667-0x4bf680 rides those
@@ -1770,7 +1823,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // Root TRANSLATION is integrated for EVERY state, not just movement states. The original
         // advances the playing clip ONCE per tick (AnimMap_UpdateEntity @0x40b5f0) and integrates
         // the root delta unconditionally: the g_animStateFlagsTable bit0 flag gates the anim COMMIT rules
-        // (@0x4bd85c) and the idle LOOK-AT scan (@0x4be95f), NOT the position integration. Idle
+        // (@0x4bd85c) and the leg replant path (@0x4be95f), NOT the position integration. Idle
         // clips author a small mean-~0 root velocity — the bored weight-shift / "rock on the feet".
         // Integrating it sways the entity's centre of mass under the swaying skeleton, so the FEET
         // stay PLANTED (they pivot). Gating it (the prior D-INF-8 reading) held the body rigid while
@@ -1788,11 +1841,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         } else if (inf.anim_state == anim_state::kJumpLoop) {
             fwd = 1024; // [data: retail ADM dump root row 4756]
         }
-        // Org2 consumes the same-tick leg-midpoint body heading at entity+0x8C,
-        // while org1 keeps body/render heading unified in e.heading.
-        // [orig: Entity_UpdateInfantryPlayerBody loads entity+0x8C @0x4B41E4,
-        // then performs the Q22 root rotation @0x4B41F0..0x4B4255]
-        const int32_t move_heading = inf.is_local_player ? inf.body_heading : e.heading;
+        // Both motors rotate locomotion by BODY heading. Independent gaze must
+        // not steer a walking actor. [orig: org1 entity+0x8C @0x4BF001;
+        // org2 entity+0x8C @0x4B41E4, Q22 rotation @0x4B41F0..0x4B4255]
+        const int32_t move_heading = inf.body_heading;
         const double rad =
             static_cast<double>(move_heading) * io::kRadiansPerBam;
         const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
@@ -1890,7 +1942,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             if (inf.vel[2] < -16384) inf.vel[2] = -16384;
             e.pos[2] += 2 * inf.vel[2];
         } else if (org1_tick_gate_open) {
-            // [orig: kong 155814-155830 — the org1 gravity step and the
+            // [orig: Entity_UpdateInfantryAI @0x4BF8D4;
+            // kong 155814-155830 — the org1 gravity step and the
             //  `Position.Z += 2 * slideDecay` integrate, both inside the
             //  even-tick gate at kong 155809]
             if (!gravity_skip) inf.vel[2] -= kGravityStep;

@@ -24,17 +24,17 @@ namespace opennova::wac {
 enum class Op : uint8_t {
     Call = 0,         // function call; result -> accumulator (fold Assign)
     EnterEvent = 1,   // begin event/IF block (operand = event index)
-    MarkFired = 2,    // record event fired
+    MarkFired = 2,    // THEN: fire while true, otherwise jump to operand
     Jump = 3,         // unconditional jump to operand index
-    PLoop = 4,        // per-player countdown loop
-    DoRnd = 5,        // weighted random branch
-    DoSeq = 6,        // sequential countdown loop
+    DoSeq = 4,        // select next DO alternative; inline count/loop-id pair
+    DoRnd = 5,        // random DO selection (retail compiler emits 4 for DORND)
+    NextDo = 6,       // test/decrement selected alternative; inline loop id
     PopExpr = 7,      // expression-stack pop handling
     StoreVar = 8,     // store accumulator to a variable operand
     LocalPlayer = 9,  // resolve local player handle
     GroupIter = 0xA,  // begin group iteration over an event's entity list
-    AndChain = 0xB,   // boolean AND chain (else-if)
-    OrChain = 0xC,    // boolean OR chain / else / block-end
+    AndChain = 0xB,   // ENTER: fire on false -> true, otherwise jump
+    OrChain = 0xC,    // LEAVE: fire on true -> false, otherwise jump
     // 0x0F-0x1C are ALU folds used as the opcode of a CALL/value instruction:
     FoldAnd = 0x0F,
     FoldOr = 0x10,
@@ -94,7 +94,9 @@ enum class OperandKind : uint8_t {
     MissionVar = 1, // V# -> ScriptVarStore.mission
     GlobalVar = 2,  // G# -> ScriptVarStore.global
     MusicVar = 3,   // M# -> ScriptVarStore.music
-    Builtin = 4,    // read-only engine value (ticks/health/near*/...)
+    Builtin = 4,    // engine value (ticks/health/near*/...)
+    EventFired = 5, // named IF's fired flag [orig: dword_C6CE40]
+    EntitySsn = 6,  // authored net ID, bound to a packed handle at program startup
 };
 
 constexpr uint32_t kOperandKindShift = 28;
@@ -111,9 +113,14 @@ inline constexpr uint32_t operand_index(uint32_t ref) { return ref & kOperandInd
 // Named engine-value ids (subset of the original named-value table — 24
 // records {char name[16]; u32 param_type; u32 value_ptr} @0x82EEF0, count @0x82F130,
 // resolved case-insensitively by WacScript_ResolveParameter's third lookup leg).
-// Most currently modeled rows are read-only cache values; AccuracySpread retains
-// retail's writable pointer semantics.
+// Retail resolves named rows to mutable dword pointers. Cache values are
+// refreshed at bytecode entry; writes to them do not mutate the source entity.
 enum class Builtin : uint32_t {
+    SquadSSN = 20, // selected squad-event raw SSN @0xC60DCC
+    SquadWho = 21, // selected squad-event raw payload @0xC60DC4
+    RandomResult = 22, // RND, the last random() result @0xC6B23C
+    CurTOD = 19, // cached minute on the 8.24 clock [orig: @0x4F579E]
+    AutoItem = 18, // Player/Item/auto share the low-word entity handle @0xC6EC3C
 	Ticks = 0, // seconds-equivalent: logic tick counter [orig: wac_var_ticks @0xC6EAD8]
 	Result = 1, // accumulator / last return value [orig: wac_var_result @0xC6EB24]
 	Health = 2, // local player health [orig: wac_var_health @0xC6EB00]

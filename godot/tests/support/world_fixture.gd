@@ -90,6 +90,7 @@ static func stage_sound_bank(root_dir: String, set_names: PackedStringArray,
 	for set_name in set_names:
 		var set_i := lwf.add_set()
 		lwf.set_set_field(set_i, "name", set_name)
+		lwf.set_set_field(set_i, "target_id", falloff_radius)
 		var layer_i := lwf.add_layer(set_i)
 		lwf.set_layer_field(set_i, layer_i, "falloff_radius", falloff_radius)
 		var member_i := lwf.add_member(set_i, layer_i)

@@ -119,10 +119,7 @@ void test_vehicle_death_rows() {
     }
 }
 
-// The D-AI-6 muzzle seam: a FRESH embedder-fed posed muzzle replaces the chest-lift
-// origin for spawned rounds; absent or stale stamps fall back. [orig: the
-// anim-event fire spawns from Entity_GetAttachmentWorldPosition @0x4b2670 —
-// the posed gun-flash userpoint; our embedder present layer feeds it back.]
+// The sim resolves the launch point at each fire event, with a raw-origin fallback.
 // A stand-in for the asset-aware muzzle-pose provider (SimPoseProvider
 // in production): fixed points per handle, so the consumers' plumbing is pinned
 // without a rig. [orig: Entity_GetAttachmentWorldPosition @0x4b2670;
@@ -144,6 +141,9 @@ struct FakeMuzzleProvider : IPoseProvider {
         if (it == points.end()) return false;
         out[0] = it->second[0]; out[1] = it->second[1]; out[2] = it->second[2];
         return true;
+    }
+    bool resolve_organic_attachment(World &w, EntityHandle h, uint8_t point, int32_t out[3]) override {
+        return point != 0 && resolve_muzzle_pose(w, h, out);
     }
     bool resolve_userpoint_transform(World &, EntityHandle h, int, int32_t out[6]) override {
         const auto it = userpoints.find(h.packed);
@@ -173,7 +173,8 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     e.pos[0] = 10 << 16;
     e.pos[1] = 20 << 16;
     e.pos[2] = 5 << 16;
-    e.profile.ammo_primary = 1;
+    e.profile.organic.ammo.fill(1);
+    e.profile.organic.launch = {1, 2, 3};
 
     auto near_f = [](float a, float b) { return a > b - 0.01f && a < b + 0.01f; };
 
@@ -312,8 +313,7 @@ static void test_los_endpoints_use_muzzle_stamp() {
 // modeled non-person takes its def TARGET userpoint through the placement
 // matrix when the model carries one (def+1350), else its collision-bbox
 // center entity+0x1FC through the same matrix; without a model the raw
-// position; a person keeps the muzzle seam (the +0x6C leg is the D-AI-6
-// residual).
+// position; a person uses its time-phased eye offset.
 static void test_aim_origin_takes_the_non_person_leg() {
     World w;
     w.registry.configure_pool(0, 4);
@@ -354,31 +354,57 @@ static void test_aim_origin_takes_the_non_person_leg() {
     CHECK(out[0] == (11 << 16) && out[1] == (22 << 16) && out[2] == (33 << 16));
     CHECK(provider.rigid_index_seen == 2);
 
-    // A person keeps the muzzle seam: the posed muzzle when the provider has
-    // one, else the raw origin.
+    // Person target points use the actual tick VALUE plus 36 * SSN, never
+    // the weapon point or the address of the tick global. [orig: @0x43B4C5]
     Entity person_seed{};
     person_seed.kind = EntityKind::Organic;
     person_seed.has_item_def = true;
     person_seed.item_type = 3;
+    person_seed.net_id = 0;
     person_seed.alive = true;
     person_seed.position = Vec3{1.0f, 2.0f, 0.0f};
+    person_seed.eye_offset_x = 65536;
+    person_seed.eye_offset_y = -65536;
+    person_seed.eye_offset_z = 131072;
     const EntityHandle person = w.registry.spawn(0, person_seed);
-    sys.weapon_aim_origin(w, *w.registry.get(person), out);
-    CHECK(out[0] == (1 << 16) && out[1] == (2 << 16) && out[2] == 0);
-    provider.points[person.packed] = {3 << 16, 4 << 16, 5 << 16};
-    sys.weapon_aim_origin(w, *w.registry.get(person), out);
-    CHECK(out[0] == (3 << 16) && out[1] == (4 << 16) && out[2] == (5 << 16));
+    Entity &target = *w.registry.get(person);
+    provider.points[person.packed] = {3 << 16, 4 << 16, 99 << 16};
+    w.logic_tick = 0;
+    sys.weapon_aim_origin(w, target, out);
+    CHECK(out[0] == 94208 && out[1] == 96256 && out[2] == 131072);
+    w.logic_tick = 127;
+    sys.weapon_aim_origin(w, target, out);
+    CHECK(out[0] == 100352 && out[1] == 102400 && out[2] == 131072);
+    w.logic_tick = 128;
+    sys.weapon_aim_origin(w, target, out);
+    CHECK(out[0] == 77824 && out[1] == 112640 && out[2] == 65536);
+    target.net_id = 1;
+    w.logic_tick = 0;
+    sys.weapon_aim_origin(w, target, out);
+    CHECK(out[0] == 96256 && out[1] == 98304 && out[2] == 131072);
+    w.logic_tick = 0xFFFFFFFFu; // wrapped phase = 35, same jitter band
+    sys.weapon_aim_origin(w, target, out);
+    CHECK(out[0] == 96256 && out[1] == 98304 && out[2] == 131072);
+
+    // During the motor, the live fixed-point body/eye leads its registry mirror.
+    const int body_index = sys.attach(person);
+    AiEntity &body = *sys.at(body_index);
+    body.pos[0] = 17; body.pos[1] = 29; body.pos[2] = 41;
+    body.inf.eye_offset_x = -3; body.inf.eye_offset_y = -5; body.inf.eye_offset_z = 7;
+    target.net_id = 0;
+    w.logic_tick = 128;
+    sys.weapon_aim_origin(w, target, out);
+    CHECK(out[0] == -4080 && out[1] == -2021 && out[2] == 44);
+    target.has_item_def = false; // kind alone never selects the person leg
+    sys.weapon_aim_origin(w, target, out);
+    CHECK(out[0] == 65536 && out[1] == 131072 && out[2] == 0);
     w.pose_provider = nullptr;
 }
 
-// D-AI-6a: the aim solution's EYE and TARGET point ride the seam. Stampless,
-// both ends sit at the 0.9 u chest stand-in -> a level shot (pitch exactly 0;
-// the old code aimed down at the pelvis). A fresh NPC muzzle stamp 0.5 u up
-// tilts the pitch positive (aiming up at the target's chest); stamping the
-// TARGET's posed muzzle at 0.5 u too levels it again.
-// [orig: the combat-pass aim anchor Entity_GetAttachmentWorldPosition
-//  @0x4b2670 (+0x366); target chest via Entity_ComputeWeaponFireOrigin
-//  @0x43b4b0 — world-wac-ai-re §17.5/§21.4]
+// The aim source is the rocket launch point, while a person target uses its
+// time-phased eye offset. Its weapon muzzle does not affect the target point.
+// [orig: Entity_GetAttachmentWorldPosition @0x4B2670 (+0x366);
+// Entity_ComputeWeaponFireOrigin @0x43B4B0]
 static void test_aim_solution_uses_muzzle_stamp() {
     struct AttackSource : IRootMotionSource {
         bool has_clip(int, int id) const override {
@@ -398,6 +424,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
     w.registry.configure_pool(0, 8);
     Entity player_seed;
     player_seed.kind = EntityKind::Organic;
+    player_seed.item_id = 1001;
     player_seed.has_item_def = true;
     player_seed.item_type = 3;
     player_seed.team = 2;
@@ -425,6 +452,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
     npc.team = 1;
     npc.net_id = 0x11;
     npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 0;
+    npc.profile.organic.launch[1] = 2;
     npc.slot.f[10] = 0; // zero aim error: the pitch pin is exact
     npc.slot.f[11] = 0;
     npc.slot.f[15] = 60 << 16;
@@ -460,8 +488,10 @@ static void test_aim_solution_uses_muzzle_stamp() {
     CHECK(npc.inf.aim_valid);
     CHECK(npc.inf.aim_pitch < 0);
 
-    // The TARGET's posed point at 0.5 u too: both ends level again.
-    provider.points[player_h.packed] = {20 << 16, 0, static_cast<int32_t>(0.5 * 65536.0)};
+    // The target eye is 1 u (or half-height at phase bit 7), so the
+    // solution is level or up. An unrelated weapon point at 99 u is ignored.
+    w.registry.get(player_h)->eye_offset_z = 65536;
+    provider.points[player_h.packed] = {20 << 16, 0, 99 << 16};
     npc.inf.aim_valid = false;
     for (uint32_t end = t + 500; t < end; ++t) {
         tctx.logic_tick = t;
@@ -470,7 +500,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
         if (npc.inf.aim_valid) break;
     }
     CHECK(npc.inf.aim_valid);
-    CHECK(npc.inf.aim_pitch == 0);
+    CHECK(npc.inf.aim_pitch >= 0);
     w.pose_provider = nullptr;
 }
 
@@ -582,7 +612,7 @@ static void test_sm_turret_fire() {
         AiEventEntry cmd{};
         cmd.f[0] = 0x15;
         cmd.f[3] = 1;
-        CHECK(sys.ai_handle_command(*e, cmd));
+        CHECK(sys.ai_handle_command(*w, *e, cmd));
         CHECK(e->brain.bytes()[AiBrain::kGuardFireByte] == 1);
         e->brain.f[AiBrain::kTickAccum] = 16;
         e->brain.f[AiBrain::kCooldownPair] = 0x10001;
@@ -753,7 +783,8 @@ static void configure_rifleman(AiEntity &npc, uint16_t net_id, uint8_t team) {
     npc.team = team;
     npc.net_id = net_id;
     npc.health = 100;
-    npc.profile.ammo_primary = 1;
+    npc.profile.organic.ammo.fill(1);
+    npc.profile.organic.launch = {1, 2, 3};
     npc.profile.clip_size = 30;
     npc.inf.magazine = 30;
     npc.slot.f[10] = 0;
@@ -809,12 +840,119 @@ static void test_world_feed_never_engages_same_team() {
     CHECK(w->registry.get(ally_h)->health == 100);
 }
 
+static void test_script_target_policy_reaches_infantry_and_weapons() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    Entity seed{};
+    seed.kind = EntityKind::Organic;
+    seed.item_id = 1001;
+    seed.item_type = 3;
+    seed.net_id = 0x11;
+    seed.team = 1;
+    const EntityHandle npc_h = w->registry.spawn(0, seed);
+    seed.team = 2;
+    seed.net_id = 0x21;
+    seed.group_id = 5;
+    seed.position = {5, 0, 0};
+    const EntityHandle near_h = w->registry.spawn(0, seed);
+    seed.net_id = 0x22;
+    seed.group_id = 6;
+    seed.position = {12, 0, 0};
+    const EntityHandle far_h = w->registry.spawn(0, seed);
+    seed.net_id = 0x23;
+    seed.group_id = 7;
+    seed.team = 1;
+    seed.position = {25, 0, 0};
+    const EntityHandle ally_h = w->registry.spawn(0, seed);
+    AttackEventSource clips;
+    AiSystem &ai = w->ai;
+    ai.root_motion = &clips;
+    ai.attach(npc_h);
+    AiEntity &npc = *ai.for_handle(npc_h);
+    configure_rifleman(npc, 0x11, 1);
+    npc.profile.organic.ammo.fill(0);
+    int phase = 0;
+    const auto scan = [&] {
+        TickContext ctx{};
+        ctx.world = w.get();
+        ctx.is_authority = true;
+        ctx.logic_tick = 28 + 128 * phase++;
+        w->logic_tick = ctx.logic_tick;
+        ai.tick(*w, ctx);
+        return npc.inf.combat_target;
+    };
+    using S = AiTargetSelector;
+    CHECK(scan() == near_h);
+    w->commands.set_ssn_target_selector(0x11, S::ExclusiveSsn, 0x23);
+    CHECK(scan() == ally_h); // explicit policy admits the friendly candidate
+    w->commands.set_ssn_target_selector(0x11, S::ExclusiveGroup, 6);
+    CHECK(!scan().valid()); // both exclusive constraints apply
+    w->commands.set_ssn_target_selector(0x11, S::ExclusiveSsn, 0);
+    CHECK(scan() == far_h);
+    w->commands.set_ssn_target_selector(0x11, S::ExclusiveGroup, 0);
+    w->commands.set_ssn_target_selector(0x11, S::PreferredSsn, 0x21);
+    CHECK(scan() == far_h); // retail shifts mismatched NEGATIVE scores right
+
+    npc.profile.view_fov_bam = INT32_MAX;
+    npc.profile.view_dist = 0x640000;
+    npc.profile.radar_fov_bam = INT32_MAX;
+    npc.profile.approach_cap = 0x640000;
+    const int32_t pose[6] = {};
+    int32_t metrics[6];
+    w->commands.set_ssn_target_selector(0x11, S::ExclusiveGroup, 7);
+    CHECK(!ai.weapon_target_metrics(*w, npc, *w->registry.get(near_h), pose, 0, true, metrics));
+    CHECK(ai.weapon_target_metrics(*w, npc, *w->registry.get(ally_h), pose, 0, true, metrics));
+}
+
+static void test_guided_round_notification_and_ally_alert_scope() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 4);
+    w->registry.configure_pool(1, 8);
+    Entity seed{};
+    seed.item_id = 1001;
+    seed.team = 1;
+    seed.group_id = 4;
+    const auto own = w->registry.spawn(1, seed);
+    seed.position = {60, 0, 90}; // outside the 100-unit sphere
+    const auto high = w->registry.spawn(1, seed);
+    seed.position = {60, 0, 80}; // exactly on the sphere
+    const auto edge = w->registry.spawn(1, seed);
+    seed.position = {1, 0, 0};
+    const auto pool0 = w->registry.spawn(0, seed);
+    auto &ai = w->ai;
+    for (auto h : {own, high, edge, pool0}) ai.attach(h);
+    auto &self = *ai.for_handle(own);
+    self.team = 1;
+    self.profile.type = 1;
+    self.profile.flags96 = 0x10;
+    self.brain.f[AiBrain::kCurState] = 7;
+    AiEventEntry event{};
+    event.f[0] = 12;
+    CHECK(ai.ai_handle_command(*w, self, event));
+    CHECK(self.brain.f[AiBrain::kPendState] == 10);
+    CHECK(self.brain.f[AiBrain::kFireTimer] == 93);
+    CHECK(self.brain.f[AiBrain::kAlert] == 2);
+    CHECK(w->script.relations.group(4).alert == TriggerRelations::kAlertRed);
+    CHECK(ai.for_handle(edge)->brain.f[AiBrain::kAlert] == 2);
+    CHECK(ai.for_handle(high)->brain.f[AiBrain::kAlert] == 0);
+    CHECK(ai.for_handle(pool0)->brain.f[AiBrain::kAlert] == 0);
+    self.brain.f[AiBrain::kCurState] = 14;
+    self.brain.f[AiBrain::kFireTimer] = 0;
+    CHECK(ai.ai_handle_command(*w, self, event));
+    CHECK(self.brain.f[AiBrain::kFireTimer] == 0); // gated, still handled
+    event.f[0] = 13;
+    CHECK(!ai.ai_handle_command(*w, self, event));
+    CHECK(ai.unported_calls == 0); // retail shared-handler default
+}
+
 static void test_berserk_candidate_is_intentional_team_exception() {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 8);
 
     Entity candidate_seed{};
     candidate_seed.kind = EntityKind::Organic;
+    candidate_seed.item_id = 1001;
+    candidate_seed.item_type = 3;
     candidate_seed.team = 1;
     candidate_seed.health = 100;
     candidate_seed.net_id = 0x22;
@@ -836,10 +974,10 @@ static void test_berserk_candidate_is_intentional_team_exception() {
     const int candidate_index = ai.attach(candidate_h);
     AiEntity &npc = *ai.at(npc_index);
     configure_rifleman(npc, 0x11, 1);
-    npc.profile.ammo_primary = -1;
+    npc.profile.organic.ammo.fill(0);
     AiEntity &candidate = *ai.at(candidate_index);
     configure_rifleman(candidate, 0x22, 1);
-    candidate.profile.ammo_primary = -1;
+    candidate.profile.organic.ammo.fill(0);
     candidate.slot.f[1] |= 0x200;
 
     TickContext ctx{};
@@ -905,7 +1043,7 @@ static void test_damage_hit_sets_retail_alert_state() {
 
     CHECK(npc.slot.bytes()[AiSlot::kAlertByte] == 2);
     CHECK(w->script.relations.group(1).alert == TriggerRelations::kAlertRed);
-    CHECK(npc.inf.damage_timer == 9); // +10 on hit, then the body tick decays once
+    CHECK(npc.inf.damage_timer == 10); // hit lands between the 16-tick thinks
     CHECK(npc.inf.was_hit);
     CHECK(npc.inf.last_attacker == shooter_h);
 
@@ -923,7 +1061,10 @@ static void test_damage_hit_sets_retail_alert_state() {
     w->round_sim.hits.push_back(RoundHit{npc_h, shooter_h, 1, 1, 3});
     ctx.logic_tick = 3;
     ai.tick(*w, ctx);
-    CHECK(npc.inf.damage_timer == 33); // callback reaches 34, body tick decays once
+    CHECK(npc.inf.damage_timer == 34); // callback adds 10; this is not a think tick
+    ctx.logic_tick = 12; // (tick + 36*SSN 0x11) & 15 == 0
+    ai.tick(*w, ctx);
+    CHECK(npc.inf.damage_timer == 33); // the next think performs the one decay
 }
 
 static void test_remote_player_hit_skips_npc_group_alert() {
@@ -971,6 +1112,7 @@ static void test_mounted_gunner_acquires_and_fires() {
 
     Entity enemy_seed{};
     enemy_seed.kind = EntityKind::Organic;
+    enemy_seed.item_id = 1001;
     enemy_seed.has_item_def = true;
     enemy_seed.item_type = 3;
     enemy_seed.team = 2;
@@ -1011,7 +1153,7 @@ static void test_mounted_gunner_acquires_and_fires() {
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
     w->add_system(&ai);
-    npc.profile.ammo_primary = -1; // mounted fire must not use the personal rifle slot
+    npc.profile.organic.ammo.fill(0); // mounted fire must not use the personal rifle slot
     CHECK(w->commands.mount(0x11, 0x31));
 
     bool acquired = false;
@@ -1168,7 +1310,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     ai.is_authority = true;
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
-    npc.profile.ammo_primary = -1;
+    npc.profile.organic.ammo.fill(0);
     npc.slot.f[15] = 6 << 16;
     npc.inf.combat_target = target_h;
     npc.inf.aim_valid = true;
@@ -1719,7 +1861,7 @@ static void test_vehicle_weapon_pose_and_target_cleanup() {
 	sys.ai_set_target(w, other, sh);
 	other.brain.f[AiBrain::kPriorityTarget] = sh.packed + 1;
 	other.brain.f[AiBrain::kDamageInfo] = sh.packed + 1;
-	sys.clear_vehicle_target_references(w, ai);
+	sys.clear_entity_references(w, ai.handle);
 	CHECK(b.f[AiBrain::kTargetSlot] == 0 && w.registry.get(th)->ai_target_refcount == 0);
 	CHECK(other.brain.f[AiBrain::kTargetSlot] == sh.packed + 1);
 	CHECK(other.brain.f[AiBrain::kPriorityTarget] == 0 && other.brain.f[AiBrain::kDamageInfo] == 0);
@@ -3346,7 +3488,8 @@ int main() {
         // The player: pool 0, team 2, 20 u east of the NPC, at ground height 0.
         Entity player_seed;
         player_seed.kind = EntityKind::Organic;
-        player_seed.has_item_def = true;
+        player_seed.item_id = 1001;
+    player_seed.has_item_def = true;
         player_seed.item_type = 3;
         player_seed.team = 2;
         player_seed.health = 100;
@@ -3371,7 +3514,7 @@ int main() {
         // SimPoseProvider); without a provider both ends are the raw
         // origins at the feet and every level shot grazes the ground.
         FakeMuzzleProvider provider;
-        provider.points[player_h.packed] = {20 << 16, 0, static_cast<int32_t>(0.9 * 65536.0)};
+        w.registry.get(player_h)->eye_offset_z = static_cast<int32_t>(0.9 * 65536.0);
         provider.points[npc_h.packed] = {0, 0, static_cast<int32_t>(0.9 * 65536.0)};
         w.pose_provider = &provider;
 
@@ -3385,7 +3528,8 @@ int main() {
         npc.team = 1;
         npc.net_id = 0x11;
         npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 0;
-        npc.profile.ammo_primary = 1;          // -> w.tables.ammo[1]
+        npc.profile.organic.ammo.fill(1); // -> w.tables.ammo[1]
+        npc.profile.organic.launch = {1, 2, 3};
         npc.profile.clip_size = 30;
         npc.inf.magazine = 30;
         npc.slot.f[10] = 0;                    // perfect accuracy (w_accuracy 100)
@@ -3436,6 +3580,8 @@ int main() {
     test_aim_origin_takes_the_non_person_leg();
     test_world_feed_never_engages_same_team();
     test_berserk_candidate_is_intentional_team_exception();
+    test_script_target_policy_reaches_infantry_and_weapons();
+    test_guided_round_notification_and_ally_alert_scope();
     test_damage_hit_sets_retail_alert_state();
     test_remote_player_hit_skips_npc_group_alert();
     test_mounted_gunner_acquires_and_fires();

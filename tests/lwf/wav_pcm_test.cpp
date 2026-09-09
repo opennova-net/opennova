@@ -155,6 +155,41 @@ int main() {
 		if (!expect(out.pcm16.size() == 2, "clamped to the present bytes")) return 1;
 	}
 
+	// AOA1's sample count excludes interpolation padding and PCM8 is SIGNED.
+	for (const uint8_t width : {uint8_t(1), uint8_t(2)}) {
+		std::vector<uint8_t> aoa;
+		push_tag(aoa, "AOA1"); push_u32(aoa, 3); push_u32(aoa, 32768);
+		push_u32(aoa, width);
+		if (width == 1) aoa.insert(aoa.end(), {0x80, 0x00, 0x7F});
+		else { push_u16(aoa, 0x8000); push_u16(aoa, 0); push_u16(aoa, 0x7F00); }
+		const size_t payload_end = aoa.size();
+		aoa.insert(aoa.end(), 8, 0x55);
+		WavPcm out;
+		if (!expect(wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
+				"AOA1 signed PCM decodes")) return 1;
+		if (!expect(out.channels == 1 && out.sample_rate == 22050 && out.pcm16.size() == 6,
+				"AOA1 mono count/rate excludes mixer padding")) return 1;
+		if (!expect(sample_at(out, 0) == -32768 && sample_at(out, 1) == 0 &&
+				sample_at(out, 2) == 32512, "AOA1 signed sample extrema")) return 1;
+		aoa.resize(payload_end);
+		if (!expect(wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
+				"on-disk AOA1 does not require generated mixer padding")) return 1;
+		for (const size_t truncated : {size_t(4), size_t(15), payload_end - 1}) {
+			if (!expect(!wav_decode_pcm16(aoa.data(), truncated, out, error) &&
+					out.pcm16.empty() && !error.empty(), "AOA1 rejects truncation")) return 1;
+		}
+		aoa[4] = 0xFF; aoa[5] = 0xFF; aoa[6] = 0xFF; aoa[7] = 0xFF;
+		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
+				"AOA1 rejects oversized count before allocation")) return 1;
+		aoa[4] = 3; aoa[5] = aoa[6] = aoa[7] = 0;
+		aoa[12] = 3;
+		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
+				"AOA1 rejects unsupported sample width")) return 1;
+		aoa[12] = width; aoa[8] = aoa[9] = aoa[10] = aoa[11] = 0;
+		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
+				"AOA1 rejects zero rate")) return 1;
+	}
+
 	// Malformed streams report errors.
 	{
 		WavPcm out;

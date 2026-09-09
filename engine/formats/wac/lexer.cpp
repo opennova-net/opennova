@@ -92,6 +92,8 @@ std::vector<Token> lex(std::string_view src) {
         if (c == '(') { advance(1); push(TokKind::LParen, "(", tl, tc); continue; }
         if (c == ')') { advance(1); push(TokKind::RParen, ")", tl, tc); continue; }
         if (c == ',') { advance(1); push(TokKind::Comma, ",", tl, tc); continue; }
+        if (c == '[') { advance(1); push(TokKind::LBracket, "[", tl, tc); continue; }
+        if (c == ']') { advance(1); push(TokKind::RBracket, "]", tl, tc); continue; }
 
         // Two-char operators.
         if (i + 1 < n) {

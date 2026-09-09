@@ -190,7 +190,9 @@ Session teardown writes `Var10 = (reason==1 ? 2 : 1)` when not in session
   `Render_ProcessMainSceneFrame`) but has nothing to stream;
   `WacScript_FreeAll @ 0x4f634c` closes the never-opened handle. Net: **the WAC
   `music` command produces no audio in retail JO** (Delta Force-era leftover).
-  Our WAC VM accordingly leaves the emitted `music` effect unconsumed.
+  Our WAC VM explicitly preserves the null-stream return of 1 and emits no
+  presentation effect or unsupported-command diagnostic (verified 2026-09-09 by
+  wac_state and the loaded-mission retry test; world-wac-ai-re section 33.26).
 - No other code path starts gamemus SBF entries, so the `.bms` header `music`
   field (offset 272) has **no live consumer** in JO — it is vestigial data the
   mission editor round-trips. `MissionAudio._apply_music` stays a

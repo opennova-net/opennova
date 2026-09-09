@@ -8,17 +8,22 @@
 
 namespace opennova::world {
 
-// Faithful subset of [orig: Entity_ResetToSpawnState @ 0x4B9610] (net-re §5.2b step 5).
-// Backs up the current Position into the spawn-point fields and clears the entity+36
-// bit-1 movement gate — the gate Player_BuildTag0CInputBody @0x42A550 checks before the
-// C2S 0x0C uplink (§5.6). This is the in-process spawn signal, not a wire message.
-//
-// DEFERRED (cited, not yet modeled in the portable world): the original also splats Yaw
-// across the heading-field family, zeroes velocities / AI-target refs, detaches from any
-// vehicle, walks pools 0/1 removing cross-references to this entity, and rebuilds the
-// proximity lists. Those need the vehicle/AI/pool-cross-ref machinery the portable world
-// does not model yet; Phase 2 (the moving player) needs only the gate clear + position
-// backup. Revisit when death/respawn (Phase 3) and the vehicle layer land.
+class World;
+class AiSystem;
+
+// [orig: Entity_ResetToSpawnState @0x4B9610] Entity-only seeding is for a
+// fresh row before its motor is attached. Live rows use the World overload:
+// it also resets the motor, clears references/mounts and refreshes collision.
 void entity_reset_to_spawn_state(Entity &e);
+void entity_reset_to_spawn_state(World &world, Entity &e);
+void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &e);
+
+// Fresh NPC initialization after its ADM, definition and collision bindings.
+// [orig: Entity_InitOrganicAI @0x4BFCC0; warmup @0x4B8B20]
+void initialize_organic_ai(World &world, Entity &e);
+
+enum class NpcCorpseStep { Kept, Respawned, Removed };
+bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &e);
+NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &e);
 
 } // namespace opennova::world

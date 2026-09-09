@@ -294,10 +294,14 @@ struct AiProfile {
                                   // field unwitnessed — part of Entity_CopyVehicleDefToAIComp]
     int32_t approach_cap = 0;     // +76: chase range cap (16.16)
     // ---- the infantry combat pass (org1 riflemen; world-wac-ai-re §17.4, D-AI-5) ----
-    // One ammo id + clip stands in for the four anim-fire weapon bytes (+0x358..0x35B —
-    // JO riflemen author all four = the rifle round) until the block-copy writer is
-    // witnessed. -1 = unarmed (the pass never fires).
-    int32_t ammo_primary = -1;    // world.tables.ammo index [orig: items.def ammo_closeattack family]
+    // Definition callback @0x4BFCC0: entity+0x358..0x35B are byte ammo IDs
+    // in closeattack/easyrocket/advancedrocket/marker3 order (zero = none).
+    // The three one-based launch points are +0x365/+0x366/+0x367; both
+    // rocket ammo slots use the middle point. Runtime storage is per body.
+    struct OrganicWeapons {
+        std::array<uint8_t, 4> ammo{};
+        std::array<uint8_t, 3> launch{};
+    } organic;
     int32_t clip_size = 0;        // items.def clipsize (magazine reseed)
     // Indices into world.sound_profiles (the def's sound_profile pair, resolved
     // at the host's item-traits sweep; -1 = unresolved -> the table's
@@ -797,7 +801,7 @@ public:
 	// [orig: Entity_SetAITarget @0x45d760] brain[kTargetSlot] + AiSlot[3] = handle;
 	// maintain the OLD/NEW targets' Entity::ai_target_refcount (dec clamp >=0 / inc).
 	void ai_set_target(World &world, AiEntity &e, EntityHandle target);
-	void clear_vehicle_target_references(World &world, AiEntity &e);
+	void clear_entity_references(World &world, EntityHandle removed);
 
 	// The 8 relation-matrix writes of acquisition/fire: the sees quad + the targeted quad,
 	// in the witnessed order/keys (group = Entity::group_id +0x11C, single = net_id +0x7C).
@@ -828,6 +832,8 @@ public:
     void weapon_fire_origin(World &world, const AiEntity &e,
                             int32_t out[3]) const;
     void weapon_fire_origin(World &world, const Entity &e, int32_t out[3]) const;
+    // One of the NPC's three launch points and the live entity orientation.
+    void organic_fire_pose(World &, const AiEntity &, int launch_slot, int32_t out[6]) const;
 
     // LOS between two EXACT 16.16 endpoints, true = clear — callers supply the
     // fire origins (weapon_fire_origin) or their own witnessed endpoints: the
@@ -873,6 +879,10 @@ public:
     // turrets, aligned) — the caller then fires; false = hold (slewing, cone
     // miss, LOS block, or no valid solve). `out` = {pos xyz 16.16, yaw, pitch,
     // roll BAM}.
+    // Relative aim metrics and angular envelope shared by threat scans and
+    // weapon validation. [orig: compute_relative_position_metrics @0x545710]
+    static uint32_t weapon_relative_metrics(const int32_t pose[6], const int32_t aim[3],
+                                             int32_t metrics[6]);
 	bool weapon_target_metrics(World &world, AiEntity &e, const Entity &target,
 			const int32_t pose[6], int32_t aim_offset, bool skip_los, int32_t metrics[6]);
 	bool solve_weapon_fire_transform(World &world, AiEntity &e, const Entity *target,
@@ -881,7 +891,7 @@ public:
 	// [orig: AI_HandleCommand @0x465770] AI command dispatcher (cases 6..0x16). Deferred to the
     // AI-command phase; for damage/death/destroy events (1/3/4) the original returns 0, so this
     // returns false and the combat event switch proceeds faithfully.
-    bool ai_handle_command(AiEntity &e, const AiEventEntry &ev);
+    bool ai_handle_command(World &world, AiEntity &e, const AiEventEntry &ev);
 
     // [orig: AI_BeginUpdate @0x457b40] budget gate. Returns false (skip this frame)
     // when the shared scheduler budget exceeds the cap; forces idle/fallback.
@@ -955,6 +965,9 @@ public:
     // [orig: Entity_SetWaypointByTeam @0x43cdb4; nearest = Entity_FindNearestTriggerByType
     // @0x407ea0]
     void apply_route_order(AiEntity &e, int32_t list, int32_t node);
+    // Quantized 3D distance; the last equal-distance node wins. Reserved
+    // boarding commands retain slot[38]. [orig: @0x407EA0]
+    int32_t nearest_route_node(const AiEntity &e, uint32_t list) const;
 
     // The vehicle-physics input staging for a PlayerControl vehicle without a live PLAYER
     // controller [orig: Entity_UpdateVehiclePhysics @0x48af00 — the parked stamp
@@ -1038,9 +1051,10 @@ public:
     // -> rotate root delta by heading -> integrate + gravity/ground (every 2).
     void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick);
     // The infantry combat pass (org1 riflemen; world-wac-ai-re §17.1-17.3/17.5, D-AI-4):
-    // 32-tick staged perception -> target commit, then per-tick reactions (the attack
-    // anims), move modes, and the lead+error aim solution. Authority + alive only.
-    void infantry_combat_think(AiEntity &e, World &world, uint32_t key);
+    // 32-tick staged perception and 16-tick reactions, movement goals and aim.
+    // Returns the proposed animation (0 = no override) for the common selector.
+    // Authority + alive only. [orig: think gate @0x4BA970]
+    int infantry_combat_think(AiEntity &e, World &world, uint32_t key);
     // The anim-event sound pass (§17.4 sounds): the six SSAudio foley bits
     // (0x20..0x400 -> slots 24-29) then the two footstep bits (0x1/0x2 -> the
     // surface-picked slots 17-23, position dipped to foot level by the frame's
@@ -1097,7 +1111,7 @@ public:
     void infantry_board_think(AiEntity &e, World &world, int32_t command);
     // Map the movement order to an anim state (walk/run/jog/turn/stop/wounded + availability
     // fallbacks) and commit it under the lock/emote rules.
-    void infantry_select(AiEntity &e, const Entity *self);
+    void infantry_select(AiEntity &e, World &world, int selected_state = 0);
     // The witnessed org2 PLAYER-BODY selection, shared by the local player and the
     // authority-side remote-player path (the original runs ONE function for both):
     // moving base 1/11/19 + direction offset; idle 48 / 45 (46 idle_mortar for
@@ -1109,7 +1123,7 @@ public:
     // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396; swim @0x4b73c0-0x4b7452
     //  (the 8-case jumptable @0x4b7411: 0 -> 37, 1/2 -> 38, 3..5 -> 40, 6/7 -> 39,
     //  default 36 @0x4b7448); 4th-tick gate @0x4b70ce]
-    void player_body_select(AiEntity &e, uint32_t entity_flags);
+    void player_body_select(AiEntity &e, World &world, uint32_t entity_flags);
     // The lean-angle producer, every body tick: decay lean -= (lean+8)>>4, then the
     // on-foot ramp -0x3000000 (left) / +0x3000000 (right) per held lean bit, gated
     // alive + not prone + not latched on a ladder (entity_flags carries the retail
@@ -1165,9 +1179,9 @@ public:
     // playhead/blend step. Both body updaters pass their out-array to it
     // [orig: AnimMap_UpdateDualChannels @0x40b8c0, called from the org2 body
     //  @0x4b40e0 AND the org1 body @0x4b9910; witness world-wac-ai-re.md §14.8.1].
-    // The org1 SELECTION writer (@0x4b9a28) is unwitnessed, so an AI body's
-    // secondary state stays where its reset left it (RESET-backfilled idle) — the
-    // witnessed retail appearance for AI bodies lacking hold keys — until it is read.
+    // Org1 mirrors primary current/pending into the secondary at the motor
+    // head [orig: @0x4B9A14..0x4B9A48]; this advance keeps the two channels'
+    // phases, blends and variant rings independent.
     void infantry_weapon_channel_advance(AiEntity &e);
     // Availability resolution against root_motion->has_clip with the cited fallback chains.
     int infantry_resolve_state(int adm_id, int state) const;

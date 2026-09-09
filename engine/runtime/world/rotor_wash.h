@@ -31,6 +31,9 @@ public:
 	// nearest containing zone's handle out). [orig: Terrain_FindNearestAmbientSoundZone
 	// @0x5CBCD0 from CParticleEmitter_SpawnNewParticle @0x5F37D8]
 	uint16_t zone_at(const particle::Vec3 &position) const override;
+	// Organic downwash query: the nearest active zone within a quantized
+	// radius, with half-weighted height below the rotor. [orig: @0x5CBE30]
+	uint16_t nearby_zone(const int32_t position[3], int32_t radius) const;
 	bool sample_sway(const int32_t position[3], int32_t &magnitude, int32_t direction[3]) const;
 	std::size_t active_count() const;
 	const renderer::WaterWakePool &water_wakes() const { return water_wakes_; }

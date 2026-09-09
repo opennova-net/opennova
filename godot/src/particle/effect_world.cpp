@@ -358,6 +358,14 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_request(const String &p_name,
 	return receipt;
 }
 
+void EffectWorld::spawn_script_effect(const opennova::world::ScriptEffectEvent &event, uint32_t age_ticks) {
+    if (particles_disabled_) return;
+    const String key = vformat("script_entity:%d", int(event.owner.packed));
+    const int64_t slot = event.store_slot ? _slot_token_for(key) : 0;
+    const int64_t owner = event.owner.valid() ? _owner_token_for(key) : 0;
+    scene_->spawn_script_effect(event, slot, owner, age_ticks, water_height_);
+}
+
 int EffectWorld::warm_all_effects(const Vector3 &p_position) {
 	// Deterministic half first: one quad per FirstPerson blend shader plus a
 	// compositor request for all eight World RD pipelines, independent of
@@ -776,6 +784,7 @@ void EffectWorld::_bind_methods() {
 	BIND_CONSTANT(ADMISSION_ALWAYS);
 	BIND_CONSTANT(ADMISSION_REPLACE_OWNED);
 	BIND_CONSTANT(ADMISSION_SUPPRESS_WHILE_OWNED);
+    BIND_CONSTANT(ADMISSION_STORE_OWNED);
 	BIND_CONSTANT(BINDING_WORLD);
 	BIND_CONSTANT(BINDING_FOLLOW_OWNER);
 	BIND_CONSTANT(RENDER_DOMAIN_WORLD);

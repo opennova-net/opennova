@@ -2,6 +2,7 @@
 #include <base/io/le.h>
 
 #include <cstring>
+#include <limits>
 
 namespace opennova {
 namespace lwf {
@@ -11,6 +12,40 @@ namespace {
 bool tag_eq(const uint8_t *p, const char *tag) {
 	return p[0] == static_cast<uint8_t>(tag[0]) && p[1] == static_cast<uint8_t>(tag[1]) &&
 			p[2] == static_cast<uint8_t>(tag[2]) && p[3] == static_cast<uint8_t>(tag[3]);
+}
+
+// The native cache/file form accepted before RIFF parsing. It has one mono
+// signed-PCM lane, a declared sample count, and a Q16 rate relative to 44100 Hz.
+// Bytes after the declared samples are mixer interpolation padding, not audio.
+// [orig: Audio_LoadWavFileFromArchive @0x766480, AOA1 copy and LABEL_36]
+bool decode_aoa1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &error) {
+    if (size < 16) { error = "truncated AOA1 header"; return false; }
+    const uint32_t samples = io::read_u32_le(bytes + 4);
+    const uint32_t rate_q16 = io::read_u32_le(bytes + 8);
+    const uint8_t width = bytes[12];
+    if (width != 1 && width != 2) {
+        error = "unsupported AOA1 sample width"; return false;
+    }
+    const uint64_t payload_size = uint64_t(samples) * width;
+    if (samples == 0 || samples > std::numeric_limits<size_t>::max() / 2 ||
+            payload_size > size - 16) {
+        error = "truncated or empty AOA1 payload"; return false;
+    }
+    const uint32_t rate = static_cast<uint32_t>((uint64_t(rate_q16) * 44100 + 32768) >> 16);
+    if (rate == 0) { error = "invalid AOA1 sample rate"; return false; }
+    out.pcm16.resize(size_t(samples) * 2);
+    if (width == 2) {
+        std::memcpy(out.pcm16.data(), bytes + 16, out.pcm16.size());
+    } else {
+        // AOA1 PCM8 has already had the RIFF unsigned bias removed.
+        for (size_t i = 0; i < samples; ++i) {
+            out.pcm16[2 * i] = 0;
+            out.pcm16[2 * i + 1] = bytes[16 + i];
+        }
+    }
+    out.sample_rate = rate;
+    out.channels = 1;
+    return true;
 }
 
 // --- WAV IMA-ADPCM (audioFormat 0x11) decode to signed 16-bit PCM ---
@@ -126,6 +161,8 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error) {
 	r_out = WavPcm{};
 	r_error.clear();
+	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AOA1"))
+		return decode_aoa1(bytes, size, r_out, r_error);
 	if (bytes == nullptr || size < 44) {
 		r_error = "buffer too small to be a WAV";
 		return false;
@@ -189,7 +226,7 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 			// WAV PCM8 is UNSIGNED (128 = center). Upconvert to signed 16-bit LE.
 			r_out.pcm16.resize(static_cast<size_t>(data_size) * 2);
 			for (uint32_t i = 0; i < data_size; ++i) {
-				const int16_t s = static_cast<int16_t>((static_cast<int>(src[i]) - 128) << 8);
+				const int16_t s = static_cast<int16_t>((static_cast<int>(src[i]) - 128) * 256);
 				r_out.pcm16[i * 2] = static_cast<uint8_t>(s & 0xFF);
 				r_out.pcm16[i * 2 + 1] = static_cast<uint8_t>((s >> 8) & 0xFF);
 			}

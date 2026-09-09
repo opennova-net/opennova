@@ -249,7 +249,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	// word), and the current combat target.
 	d.sight_range_u = e.slot.f[AiSlot::kSightRange] / 65536.0;
 	d.attack_range_u = e.slot.f[AiSlot::kAttackRange] / 65536.0;
-	d.ammo_primary = e.profile.ammo_primary;
+	d.ammo_primary = e.profile.organic.ammo[0] != 0 ? e.profile.organic.ammo[0] : -1;
 	d.clip_size = e.profile.clip_size;
 	d.magazine = static_cast<int32_t>(e.inf.magazine);
 	d.combat_target_valid = e.inf.combat_target.valid();
@@ -463,6 +463,18 @@ EntityCard build_entity_card(World &world, bool with_brains, EntityHandle handle
 	if (const Entity *ent = world.registry.get(handle)) {
 		card.has_world = true;
 		fill_world_detail(world, *ent, card.world);
+        card.facial.display_frame = world.facials.display_frame();
+        if (const FacialSlot *face = world.facials.for_entity(*ent)) {
+            auto &d = card.facial;
+            d.available = true;
+            d.current = face->current; d.next = face->next;
+            d.expression_override = face->expression_override;
+            d.automatic = face->automatic;
+            d.override_timer = face->override_timer;
+            d.texture_priority = face->active ? face->priority : -1;
+            d.blend = face->blend;
+        }
+
 	}
 	if (ai != nullptr) {
 		card.ai_index = ai->index_for_handle(handle);
@@ -604,6 +616,9 @@ AiDebugReport ai_debug_report(World &world) {
 	report.counters.scheduler_budget = ai.scheduler.budget;
 	report.counters.event_count = ai.events.count();
 	report.counters.unported_calls = ai.unported_calls;
+    report.counters.runtime_gap_calls = world.diagnostics.total_calls();
+    report.counters.runtime_gap_sites = static_cast<uint32_t>(world.diagnostics.gaps().size());
+    report.runtime_gaps = world.diagnostics.gaps();
 	report.counters.rel_ops = static_cast<int32_t>(ai.rel_ops.size());
 	report.counters.find_target_calls = ai.find_target_calls;
 	return report;

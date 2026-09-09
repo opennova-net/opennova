@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <base/io/fixed.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include <runtime/mission/placement_traits.h>
 #include <runtime/simassets/sim_pose_provider.h>
@@ -69,6 +70,13 @@ struct CtrlNames {
 	String owner_sector_team = String("present:sector_team");
 	String owner_zone = String("present:zone");
 	String owner_world_heat = String("present:world_heat");
+    String owner_doors = String("present:doors");
+    String doors[30];
+    CtrlNames() {
+        for (int i = 0; i < 30; ++i)
+            doors[i] = opennova::threedi::threedi_ctrl_register_name(
+                    opennova::threedi::THREEDI_CTRL_DOOR_00 + i);
+    }
 };
 
 const CtrlNames &names() {
@@ -342,6 +350,7 @@ void EntityPresenter::present_scars() {
 
 void EntityPresenter::present_passes() {
     present_minefields();
+    if (Simulation *simulation = sim()) simulation->advance_facial_presentation(listener_position_);
 	fire_->present();
 	destruction_->present();
 	throwable_->present();
@@ -352,6 +361,7 @@ void EntityPresenter::present_passes() {
 
 PackedInt64Array EntityPresenter::profile_present_passes() {
     present_minefields();
+    if (Simulation *simulation = sim()) simulation->advance_facial_presentation(listener_position_);
 	PackedInt64Array spans;
 	spans.resize(PASS_PROFILE_SLOT_COUNT);
 	Time *clock = Time::get_singleton();
@@ -984,6 +994,8 @@ void EntityPresenter::release_part_anim_outputs() {
 		vehicle_motion_clear_typed(model);
 		zone_team_clear_typed(model);
 		world_heat_clear_typed(model);
+        for (const String &door : names().doors)
+            clear_owned_ctrl(model, names().owner_doors, door);
 		model->end_ctrl_update();
 	}
 }
@@ -1215,6 +1227,8 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 							Simulation::PF_WORLD_HEAT_GLOW_VALID) == 1
 					? 1
 					: 0;
+            const int32_t door_count = std::clamp(
+                    field_i(p, base, Simulation::PF_DOOR_COUNT), 0, 30);
 			const std::array<int32_t, CTRL_PUBLISH_COUNT>
 					next_ctrl_publish_state = {
 				active1,
@@ -1225,6 +1239,7 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 				zone_valid,
 				lfp_valid,
 				heat_valid,
+                door_count,
 			};
 			const bool cold = !row.ctrl_publish_state_valid;
 			const auto was_published = [&](CtrlPublishField field) {
@@ -1252,9 +1267,11 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 					was_published(CTRL_PUBLISH_LFP);
 			const bool heat_work = heat_valid != 0 || cold ||
 					was_published(CTRL_PUBLISH_HEAT);
+            const bool door_work = door_count != 0 || cold ||
+                    was_published(CTRL_PUBLISH_DOORS);
 			const bool any_work = set_part1 || set_part2 ||
 					clear_part1 || clear_part2 || emplaced_work ||
-					vehicle_work || zone_work || heat_work;
+					vehicle_work || zone_work || heat_work || door_work;
 			if (any_work) {
 				model->begin_ctrl_update();
 			}
@@ -1306,9 +1323,25 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 				stat_posed_ += applied;
 				++stat_control_dispatches_;
 			}
-			if (any_work) {
-				model->end_ctrl_update();
-			}
+            if (door_work) {
+                const int previous_count = cold ? 30 :
+                        row.ctrl_publish_state[CTRL_PUBLISH_DOORS];
+                for (int i = 0; i < std::max(door_count, previous_count); ++i) {
+                    const String &name = names().doors[i];
+                    if (i < door_count) {
+                        const uint32_t low = static_cast<uint32_t>(
+                                field_i(p, base, Simulation::PF_DOOR_PHASES + 2 * i));
+                        const uint32_t high = static_cast<uint32_t>(
+                                field_i(p, base, Simulation::PF_DOOR_PHASES + 2 * i + 1));
+                        model->set_ctrl_override(names().owner_doors, name,
+                                static_cast<int32_t>((high << 16) | low));
+                    } else {
+                        model->clear_ctrl_override(names().owner_doors, name);
+                    }
+                    ++stat_control_dispatches_;
+                }
+            }
+			if (any_work) model->end_ctrl_update();
 			row.ctrl_publish_state = next_ctrl_publish_state;
 			row.ctrl_publish_state_valid = true;
 		}

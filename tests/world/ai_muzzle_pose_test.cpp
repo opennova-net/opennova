@@ -70,6 +70,50 @@ int main() {
 		int32_t out[3] = {};
 		if (!rig.world.pose_provider->resolve_muzzle_pose(rig.world, e->handle, out)) continue;
 		++stamped;
+        int32_t indexed[3] = {};
+        expect(e->profile.organic.launch[0] != 0, "the DEF closeattack point is bound");
+        const bool indexed_ok = rig.world.pose_provider->resolve_organic_attachment(
+                rig.world, e->handle, e->profile.organic.launch[0], indexed);
+        expect(indexed_ok, "the bound organic launch byte resolves on the live skeleton");
+        if (indexed_ok) {
+            expect(indexed[0] == out[0] && indexed[1] == out[1] && indexed[2] == out[2],
+                    "indexed and named closeattack queries produce the same posed point");
+        }
+        for (int slot = 1; slot < 3; ++slot) {
+            if (e->profile.organic.launch[slot] == 0) continue;
+            expect(rig.world.pose_provider->resolve_organic_attachment(
+                    rig.world, e->handle, e->profile.organic.launch[slot], indexed),
+                    "each authored rocket/marker launch resolves independently");
+        }
+        expect(!rig.world.pose_provider->resolve_organic_attachment(
+                rig.world, e->handle, 0, indexed), "point zero takes the caller's fallback");
+        if (stamped == 1 && indexed_ok) {
+            w::AiEntity *live = rig.world.ai.for_handle(e->handle);
+            const int32_t saved_x = live->pos[0];
+            // One whole unit survives the skeletal float-matrix conversion
+            // exactly at CP01's coordinates; sub-unit Q16 deltas round there.
+            live->pos[0] += 65536; // motor position leads the registry/presentation mirror
+            const bool moved = rig.world.pose_provider->resolve_organic_attachment(
+                    rig.world, e->handle, e->profile.organic.launch[0], indexed);
+            expect(moved && indexed[0] == out[0] + 65536 &&
+                    indexed[1] == out[1] && indexed[2] == out[2],
+                    "attachment queries use the live fixed-point motor position");
+            live->pos[0] = saved_x;
+        }
+        int32_t head[3], hand[3];
+        const bool anchors = rig.world.pose_provider->resolve_skeletal_anchor(
+                rig.world, e->handle, w::SkeletalAnchor::Head, head) &&
+                rig.world.pose_provider->resolve_skeletal_anchor(
+                rig.world, e->handle, w::SkeletalAnchor::HeldWeapon, hand);
+        expect(anchors, "the NPC's live head and weapon-hand anchors resolve");
+        if (anchors) {
+            const double separation = std::sqrt(
+                    std::pow(double(head[0]) - hand[0], 2) +
+                    std::pow(double(head[1]) - hand[1], 2) +
+                    std::pow(double(head[2]) - hand[2], 2)) / 65536.0;
+            expect(separation > 0.01 && separation < 4.0,
+                    "posed head and hand remain distinct and inside one person's reach");
+        }
 		const w::Vec3 origin = testrig::ai_position(*e);
 		const float up = fx(out[2]) - origin.z;
 		const float horiz = std::hypot(fx(out[0]) - origin.x, fx(out[1]) - origin.y);

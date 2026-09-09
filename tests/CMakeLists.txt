@@ -296,6 +296,36 @@ add_test(NAME menu_lwf COMMAND menu_lwf_test)
 # score — score.ini scoring config: parse, canonical write, and the witnessed
 # row-index ladder. Committed fixture is AUTHORED (fixtures/score/score_sample.ini),
 # not retail data; <OPENNOVA_JO_ASSETS>/score.ini adds the retail sweep leg.
+add_executable(facial_animation_test world/facial_animation_test.cpp)
+target_link_libraries(facial_animation_test PRIVATE opennova_runtime)
+target_include_directories(facial_animation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME facial_animation COMMAND facial_animation_test)
+
+add_executable(teammate_spawn_test mission/teammate_spawn_test.cpp)
+target_link_libraries(teammate_spawn_test PRIVATE opennova_test_rig)
+target_include_directories(teammate_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME teammate_spawn COMMAND teammate_spawn_test)
+set_tests_properties(teammate_spawn PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(infantry_spawn_test world/infantry_spawn_test.cpp)
+target_link_libraries(infantry_spawn_test PRIVATE opennova_runtime)
+add_test(NAME infantry_spawn COMMAND infantry_spawn_test)
+
+add_executable(teammate_operations_test world/teammate_operations_test.cpp)
+target_link_libraries(teammate_operations_test PRIVATE opennova_runtime)
+target_include_directories(teammate_operations_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME teammate_operations COMMAND teammate_operations_test)
+
+add_executable(infantry_escort_test world/infantry_escort_test.cpp)
+target_link_libraries(infantry_escort_test PRIVATE opennova_runtime)
+target_include_directories(infantry_escort_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME infantry_escort COMMAND infantry_escort_test)
+
+add_executable(grm_roundtrip_test grm/grm_roundtrip_test.cpp)
+target_link_libraries(grm_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(grm_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME grm_roundtrip COMMAND grm_roundtrip_test)
+
 add_executable(score_roundtrip_test score/score_roundtrip_test.cpp)
 target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1458,6 +1488,11 @@ target_include_directories(ai_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ai_test PRIVATE cxx_std_17)
 add_test(NAME ai COMMAND ai_test)
 
+add_executable(npc_weapons_test world/npc_weapons_test.cpp)
+target_link_libraries(npc_weapons_test PRIVATE opennova_runtime)
+target_include_directories(npc_weapons_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npc_weapons COMMAND npc_weapons_test)
+
 # Item destruction: the explosion queue + AoE gates, the bullet armor gates, the
 # destructible death chain (husk flags + events + the kz chain blast), the
 # death-piece pool, and the dead-item settle (world/destruction.h;
@@ -1522,6 +1557,11 @@ if(MSVC)
 endif()
 add_test(NAME infantry COMMAND infantry_test)
 
+add_executable(infantry_attention_test world/infantry_attention_test.cpp)
+target_link_libraries(infantry_attention_test PRIVATE opennova_runtime)
+target_compile_features(infantry_attention_test PRIVATE cxx_std_17)
+add_test(NAME infantry_attention COMMAND infantry_attention_test)
+
 # The infantry slot-sound emissions (footsteps/foley/landing/screams).
 add_executable(slot_sound_test world/slot_sound_test.cpp)
 target_link_libraries(slot_sound_test PRIVATE opennova_runtime)
@@ -1535,6 +1575,15 @@ target_link_libraries(wire_body_sound_test PRIVATE opennova_runtime)
 target_include_directories(wire_body_sound_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(wire_body_sound_test PRIVATE cxx_std_17)
 add_test(NAME wire_body_sound COMMAND wire_body_sound_test)
+
+add_executable(doors_test world/doors_test.cpp)
+target_link_libraries(doors_test PRIVATE opennova_runtime)
+target_include_directories(doors_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(doors_test PRIVATE cxx_std_17)
+if(MSVC)
+    target_link_options(doors_test PRIVATE "/STACK:4194304")
+endif()
+add_test(NAME doors COMMAND doors_test)
 
 # World-object collision (Entity_TestCollisionSections @0x4aef90 / _RaycastCollisionModel
 # @0x413060 / _ComputeBoneCollisionForce @0x4ae150 / _ProcessCollisionAndPlatformPhysics
@@ -1834,13 +1883,22 @@ target_include_directories(wac_registry_oracle_test PRIVATE ${CMAKE_CURRENT_SOUR
 target_compile_features(wac_registry_oracle_test PRIVATE cxx_std_17)
 add_test(NAME wac_registry_oracle COMMAND wac_registry_oracle_test)
 
-foreach(test behavior corpus)
+foreach(test behavior corpus weapon_input voice actors projectiles effects sounds state players help)
     add_executable(wac_${test}_test wac/wac_${test}_test.cpp)
     target_link_libraries(wac_${test}_test PRIVATE opennova_runtime)
     target_include_directories(wac_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(wac_${test}_test PRIVATE cxx_std_17)
 endforeach()
 add_test(NAME wac_behavior COMMAND wac_behavior_test)
+add_test(NAME wac_weapon_input COMMAND wac_weapon_input_test)
+add_test(NAME wac_voice COMMAND wac_voice_test)
+add_test(NAME wac_actors COMMAND wac_actors_test)
+add_test(NAME wac_projectiles COMMAND wac_projectiles_test)
+add_test(NAME wac_effects COMMAND wac_effects_test)
+add_test(NAME wac_sounds COMMAND wac_sounds_test)
+add_test(NAME wac_state COMMAND wac_state_test)
+add_test(NAME wac_players COMMAND wac_players_test)
+add_test(NAME wac_help COMMAND wac_help_test)
 # The corpus sweep walks OPENNOVA_JO_ASSETS (argv dirs override); it reports
 # Skipped without it.
 opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)

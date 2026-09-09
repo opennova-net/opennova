@@ -90,7 +90,12 @@ namespace {
 
 void h_noop(AiThinkCtx &) {} // [orig: nullsub_69/70/71]
 
-void h_not_yet_ported(AiThinkCtx &ctx) { ++ctx.sys->unported_calls; }
+void h_not_yet_ported(AiThinkCtx &ctx) {
+    ++ctx.sys->unported_calls;
+    if (ctx.world != nullptr)
+        ctx.world->diagnostics.record({RuntimeGapKind::AiStateHandler,
+                ctx.self->brain.f[AiBrain::kCurState], 0, -1, int32_t(ctx.self->handle.packed)}, ctx.world->logic_tick);
+}
 
 // [orig: AI_SetStateIdle @0x457f00] brain+28 (=f[7] move step) = 16.
 void h_set_state_idle(AiThinkCtx &ctx) { ctx.self->brain.f[AiBrain::kStep] = 16; }
@@ -234,7 +239,7 @@ void h_combat_event(AiThinkCtx &ctx) {
     if (!ctx.event) return; // [orig: if !brain return 1 — brain is always live in this path]
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
-    if (ctx.sys->ai_handle_command(e, *ctx.event)) return; // [orig: AI_HandleCommand @0x465770]
+    if (ctx.sys->ai_handle_command(*ctx.world, e, *ctx.event)) return; // [orig: AI_HandleCommand @0x465770]
     switch (ctx.event->type()) {                            // [orig: switch(*event)]
         case 1: // damage
             b.f[AiBrain::kDamageInfo] = ctx.event->f[3];    // [orig: ai_data[39] = event[3]]
@@ -732,7 +737,7 @@ void h_enter_vehicle_dead(AiThinkCtx &ctx) {
 			if (ent->death_tick == 0) // [orig: +0x1AC first write wins @0x467e4a]
                 ent->death_tick = ctx.world->logic_tick;
         }
-		ctx.sys->clear_vehicle_target_references(*ctx.world, e);
+		ctx.sys->clear_entity_references(*ctx.world, e.handle);
 		if (b.f[AiBrain::kTargetSlot] != 0)
 			ctx.sys->ai_set_target(*ctx.world, e, EntityHandle{}); // [orig: @0x467e86]
     }
@@ -820,7 +825,7 @@ void h_aircraft_land_tick(AiThinkCtx &ctx) {
 // [orig: AI_HandleEvent_VehicleGeneric @0x465EF0; damage siblings
 // @0x466770/@0x4663D0/@0x4662A0/@0x466810]
 void h_aircraft_event(AiThinkCtx &ctx) {
-	if (ctx.event == nullptr || ctx.sys->ai_handle_command(*ctx.self, *ctx.event))
+	if (ctx.event == nullptr || ctx.sys->ai_handle_command(*ctx.world, *ctx.self, *ctx.event))
 		return;
 	auto &ai = *ctx.self;
 	auto &b = ai.brain;
@@ -969,7 +974,7 @@ void h_enter_aircraft_dead(AiThinkCtx &ctx) {
 			if (!entity->death_tick)
 				entity->death_tick = world.logic_tick;
 		}
-		ctx.sys->clear_vehicle_target_references(world, ai);
+		ctx.sys->clear_entity_references(world, ai.handle);
 		if (ai.brain.f[AiBrain::kTargetSlot] != 0) {
 			if ((ai.profile.flags100 & 8) == 0) {
 				const EntityHandle target{ uint16_t(ai.brain.f[AiBrain::kTargetSlot] - 1) };
@@ -1008,7 +1013,7 @@ void h_pretty_tick(AiThinkCtx &ctx) {
 // [orig: AI_HandleEvent_HelicopterDestroyOnly @0x468040;
 // AI_HandleEvent_VehicleDestroyOnly @0x466BE0]
 void h_pretty_event(AiThinkCtx &ctx) {
-	if (ctx.event == nullptr || ctx.sys->ai_handle_command(*ctx.self, *ctx.event))
+	if (ctx.event == nullptr || ctx.sys->ai_handle_command(*ctx.world, *ctx.self, *ctx.event))
 		return;
 	const bool ground = ctx.self->brain.f[AiBrain::kCurState] == 22;
 	if (ground && ctx.event->type() == 3)

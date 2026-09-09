@@ -11,6 +11,7 @@
 #include <runtime/inmatch/loopback_channel.h>
 #include <net/npwire/ingame_decode.h>
 #include <runtime/world/world.h>
+#include <runtime/world/player_view.h>
 
 #include <cstdio>
 #include <vector>
@@ -62,6 +63,44 @@ nw::FrameUpdate emit_phase2(w::World &world) {
 	CHECK(frame.flags2 == 2);
 	CHECK(frame.env.present);
 	return frame;
+}
+
+void test_fov_uses_the_shared_weather_current_and_snapshot() {
+    w::World world;
+    world.weather.seed(w::WeatherSeed{});
+    opennova::wac::CompileEnv compile_env;
+    auto program = opennova::wac::compile_source("fov(40) store(v1)\n", compile_env);
+    CHECK(program.ok());
+    opennova::wac::WacVm vm;
+    vm.load(program);
+    vm.execute(world);
+    auto &channels = world.weather.core.scalar_channels;
+    CHECK(world.script.vars.get_mission(1) == 0);
+    CHECK(channels.camera_fov_target_fp == (40 << 16));
+    CHECK(channels.camera_fov_fp == (80 << 16));
+    w::WeatherTickEvents events;
+    world.weather.tick_sim(&world, events);
+    CHECK(channels.camera_fov_fp == (75 << 16));
+    CHECK(w::player_view_fov_h_deg(w::PlayerViewState{}, channels.camera_fov_fp,
+                                   false, false, 1) == 75.0f);
+    const auto baseline = world.snapshot();
+    world.weather.command_fov(120);
+    world.weather.tick_sim(&world, events);
+    CHECK(channels.camera_fov_fp != (75 << 16));
+    world.restore(baseline);
+    CHECK(channels.camera_fov_fp == (75 << 16));
+    CHECK(channels.camera_fov_target_fp == (40 << 16));
+    // Whole-degree DWORD shift, including overflow; no camera-range clamp.
+    world.weather.command_fov(65576);
+    CHECK(channels.camera_fov_target_fp == (40 << 16));
+    world.weather.command_fov(-1);
+    CHECK(channels.camera_fov_target_fp == -65536);
+    world.weather.command_fov(40);
+    world.weather.mission_start_init();
+    CHECK(channels.camera_fov_fp == (40 << 16));
+    channels.camera_fov_target_fp = channels.camera_fov_fp - 1;
+    world.weather.tick_sim(&world, events);
+    CHECK(channels.camera_fov_fp == (40 << 16)); // negative <8-Q16 dead band
 }
 
 void test_scripted_sky_speed_reaches_the_wire() {
@@ -252,6 +291,49 @@ void test_tod_uses_retail_minute_to_fixed24_multiply() {
 	CHECK(frame.env.tod_fixed == 0x2C00);
 }
 
+void test_rgb_operands_and_skyfog_alias_reach_color_channels() {
+    w::World world;
+    auto &core = world.weather.core;
+    struct ColorCase {
+        const char *command;
+        opennova::env::WeatherColorBlock *block;
+    };
+    const ColorCase cases[] = {
+        {"sun", &core.sun_block}, {"sky", &core.sky_block},
+        {"ground", &core.fill_block}, {"floor", &core.sky_color_blocks.floor},
+        {"ceiling", &core.sky_color_blocks.ceiling}, {"cloud", &core.sky_color_blocks.cloud},
+        {"fog", &core.fog_block}, {"fogcolor", &core.fog_block},
+        {"skyfog", &core.sky_color_blocks.skyfog},
+        {"skyfogcolor", &core.sky_color_blocks.skyfog},
+        {"crash", &core.sky_color_blocks.skyfog},
+        {"gain", &core.modulator_chain.modulator},
+    };
+    for (const ColorCase &test : cases) {
+        test.block->snap(0);
+        const std::string source = std::string("colorfade(1)\nv1 = 62\nv2 = 124\nv3 = 186\n") +
+                test.command + "(v1,v2,v3" + (std::string(test.command) == "crash" ? ",999" : "") +
+                ") store(v4)\n";
+        auto program = opennova::wac::compile_source(source, {});
+        CHECK(program.ok());
+        opennova::wac::WacVm vm; vm.load(program); vm.execute(world);
+        CHECK(world.script.vars.get_mission(4) == 0);
+        CHECK(test.block->target == 0x003E7CBAu);
+        CHECK(test.block->max_rate[0] == 3 * 1048576);
+        CHECK(test.block->max_rate[1] == 2 * 1048576);
+        CHECK(test.block->max_rate[2] == 1048576);
+        test.block->tick(opennova::env::kModulatorIdentityPacked, 0);
+        CHECK(test.block->render_color == 0x00010203u);
+    }
+    // The fourth crash operand is ignored; overflowing RGB components carry
+    // exactly as the retail shifts/adds do, including the packed alpha byte.
+    auto program = opennova::wac::compile_source(
+            "crash(257,258,259,123)\nlightning(-1,256,1)\n", {});
+    CHECK(program.ok());
+    opennova::wac::WacVm vm; vm.load(program); vm.execute(world);
+    CHECK(core.sky_color_blocks.skyfog.target == 0x01020303u);
+    CHECK(world.weather.lightning_color == 1u);
+}
+
 void test_eager_wac_initializer_and_255_tick_boundary() {
 	w::World world;
 	w::WeatherTickEvents events;
@@ -302,6 +384,7 @@ void test_eager_wac_initializer_and_255_tick_boundary() {
 } // namespace
 
 int main() {
+	test_fov_uses_the_shared_weather_current_and_snapshot();
 	test_scripted_sky_speed_reaches_the_wire();
 	test_movefog_publishes_retail_target_and_duration_step();
 	test_movefog_uses_live_fog_current();
@@ -310,6 +393,7 @@ int main() {
 	test_overcast_advances_on_the_explicit_weather_tick();
 	test_quake_uses_retail_six_tick_units_and_countdown();
 	test_tod_uses_retail_minute_to_fixed24_multiply();
+	test_rgb_operands_and_skyfog_alias_reach_color_channels();
 	test_eager_wac_initializer_and_255_tick_boundary();
 	std::printf(failures ? "WAC ENVIRONMENT WIRE TEST FAILED (%d)\n"
 	                     : "WAC environment wire test passed\n",

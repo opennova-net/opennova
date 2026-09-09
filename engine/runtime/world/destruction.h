@@ -101,6 +101,7 @@ struct ItemDeathTraits {
     float debris_scale = 0.0f;  // def+0x1BC (0 -> pieces render at 1.0)
 	std::string sound_profile; // SndProf.def impact slots for falling wrecks
 	std::string sound_death; // def soundDeath name ('sounddeath')
+	std::string particlespawn;     // +0x506 name [orig: spawn reset @0x4B9767]
 	std::string particledeath;      // +0x416 name — the Dead-bone family (above water)
     std::string particleh2odeath;   // +0x44A name — the submerged family
     std::string particlefire;       // +0x47E name — the Fire-bone family

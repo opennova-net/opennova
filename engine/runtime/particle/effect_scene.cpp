@@ -563,11 +563,34 @@ EffectHandle EffectScene::intern(std::string_view effect_name_value) {
 	return handle;
 }
 
+EffectHandle EffectScene::find(std::string_view name) {
+    const std::string key = fold_ascii(name);
+    // The stock clone is registered in the retail world's named definition
+    // list by CEffectBank_CloneFromParent @0x5E49D0. A later direct lookup
+    // may use that existing clone, but does not create one itself.
+    if (impl_->effect_by_name.find(key) == impl_->effect_by_name.end() &&
+            impl_->interned_by_name.find(key) == impl_->interned_by_name.end()) return {};
+    return intern(name);
+}
+
 std::string EffectScene::effect_name(EffectHandle handle) const {
 	return impl_->interned_name(handle);
 }
 
+std::vector<std::string> EffectScene::interned_names() const {
+    std::vector<std::string> names;
+    names.reserve(impl_->interned.size());
+    for (const auto &effect : impl_->interned) names.push_back(effect.name);
+    return names;
+}
+
 EffectSpawnReceipt EffectScene::spawn(const EffectSpawnRequest &request) {
+    if (request.admission == EffectAdmission::StoreOwned) {
+        if (!request.slot) return impl_->rejected(request.effect, EffectSpawnStatus::MissingSlot);
+        // The overwritten group keeps running; its eventual death must not
+        // clear a newer owner (clear_slot_if_owned's pointer comparison).
+        impl_->group_by_slot.erase(request.slot.value);
+    }
 	const Impl::CatalogEffect *effect = impl_->catalog_effect(request.effect);
 	if (effect == nullptr) {
 		return impl_->rejected(request.effect, EffectSpawnStatus::InvalidHandle);

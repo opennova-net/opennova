@@ -89,6 +89,8 @@ void BmsEventSystem::resolve_zone_refs(World &w) {
 }
 
 void BmsEventSystem::on_load(World &w) {
+    w.script.bms_events = this;
+    w.teammates.reset(w);
     // File zone IDs -> zone-array indices, once per load() [orig: the mission-start
     // resolvers @0x453000/@0x453100 run right after EventTrigger_LoadAllData].
     if (!zone_refs_resolved_) {
@@ -192,17 +194,20 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     // RAW = "within" [orig: @0x45387f ->
                     // Entity_CheckProximity(hA, hB, p3<<16)].
                     return cmds.ssn_within_distance(static_cast<uint16_t>(t.param1),
-                            static_cast<uint16_t>(t.param2), t.param3);
+                            static_cast<uint16_t>(t.param2),
+                            static_cast<int32_t>(static_cast<uint32_t>(t.param3) << 16));
                 case bms::SingleTriggerType::SingleHasNoLOS:
                     // RAW = "in range AND ray clear" [orig: @0x4538c9 ->
                     // Entity_CheckLineOfSightInRange(hA, hB, p3<<16)].
                     return cmds.ssn_los_clear_within(static_cast<uint16_t>(t.param1),
-                            static_cast<uint16_t>(t.param2), t.param3);
+                            static_cast<uint16_t>(t.param2),
+                            static_cast<int32_t>(static_cast<uint32_t>(t.param3) << 16));
                 case bms::SingleTriggerType::SingleDoesNotSeeOrFarther:
                     // RAW = "sees": range + ray + the ±30° facing cone
                     // [orig: @0x453913 -> Entity_CheckLineOfSight(hA, hB, p3<<16)].
                     return cmds.ssn_sees_within(static_cast<uint16_t>(t.param1),
-                            static_cast<uint16_t>(t.param2), t.param3);
+                            static_cast<uint16_t>(t.param2),
+                            static_cast<int32_t>(static_cast<uint32_t>(t.param3) << 16));
                 default:
                     // Sub 8 is absent from the retail jump table too (§3b).
                     return false;
@@ -353,7 +358,7 @@ bool BmsEventSystem::evaluate_chain(World &w, const std::vector<bms::Trigger> &t
     return acc;
 }
 
-void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
+void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t event, int32_t action) {
     // [orig: EventAction_Dispatch @0x4542e0 switch(action_type).]
     auto &cmds = w.commands;
     switch (a.action_type) {
@@ -364,6 +369,11 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             // Entity_TeleportAllByNetId @0x43D5D0] Misnamed retail callee:
             // this removes the group.
             cmds.remove_group(a.param1);
+            break;
+        case bms::ActionType::GroupOpenDoorAction:
+        case bms::ActionType::GroupCloseDoorAction:
+            w.doors.command_group(w, a.param1,
+                    a.action_type == bms::ActionType::GroupOpenDoorAction, true);
             break;
         case bms::ActionType::GroupVelocity:
             // [orig: Entity_SetMoveSpeedKPH @0x43A960]
@@ -547,17 +557,45 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             // carries ONLY the occupant SSN (param1); the gun is found implicitly (proximity proxy).
             cmds.mount_best(static_cast<uint16_t>(a.param1));
             break;
+        case bms::ActionType::Teammates:
+            // [orig: EventAction_Dispatch @0x4542E0, case 39]
+            w.teammates.start(w, a.action_sub_type, a.param1, a.param2);
+            break;
         case bms::ActionType::ExecuteWac:
-            // One front-end invoking the other: the BMS action installs/runs a
-            // WAC program. Recorded as an effect here; the embedder wires the actual
-            // WAC invocation (the WacSystem) at runtime. [D-EVT-6]
-            w.out.effects.push({"execute_wac", a.param1, 0, 0, 0, std::string()});
+            // Retail has no case 41 arm; the default returns without a call.
+            // [orig: EventAction_Dispatch @0x4542E0]
+            break;
+        case bms::ActionType::SsnTargetSsnPri:
+            cmds.set_ssn_target_selector(a.param1, world::AiTargetSelector::PreferredSsn, a.param2);
+            break;
+        case bms::ActionType::SsnTargetSsnExc:
+            cmds.set_ssn_target_selector(a.param1, world::AiTargetSelector::ExclusiveSsn, a.param2);
+            break;
+        case bms::ActionType::SsnTargetGroupPri:
+            cmds.set_ssn_target_selector(a.param1, world::AiTargetSelector::PreferredGroup, a.param2);
+            break;
+        case bms::ActionType::SsnTargetGroupExc:
+            cmds.set_ssn_target_selector(a.param1, world::AiTargetSelector::ExclusiveGroup, a.param2);
+            break;
+        case bms::ActionType::GroupTargetSsnPri:
+            cmds.set_group_target_selector(a.param1, world::AiTargetSelector::PreferredSsn, a.param2);
+            break;
+        case bms::ActionType::GroupTargetSsnExc:
+            cmds.set_group_target_selector(a.param1, world::AiTargetSelector::ExclusiveSsn, a.param2);
+            break;
+        case bms::ActionType::GroupTargetGroupPri:
+            cmds.set_group_target_selector(a.param1, world::AiTargetSelector::PreferredGroup, a.param2);
+            break;
+        case bms::ActionType::GroupTargetGroupExc:
+            cmds.set_group_target_selector(a.param1, world::AiTargetSelector::ExclusiveGroup, a.param2);
             break;
         default:
             // No faithful in-engine handler yet: record as an UNPORTED marker (coverage /
             // diagnostic only — never a presentation effect). Supported missions should
             // emit zero of these; a test asserts that. The remaining owners are
             // ledgered as D-EVT-6 (bms-event-runtime-re §10.1).
+            w.diagnostics.record({world::RuntimeGapKind::BmsAction, int32_t(a.action_type), a.action_sub_type, event, action},
+                    w.logic_tick, {a.param1, a.param2, a.param3, a.param4});
             w.out.effects.push({"unported_action", static_cast<int32_t>(a.action_type), a.action_sub_type,
                             a.param1, a.param2, std::string()});
             break;
@@ -569,7 +607,9 @@ void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
     //  The g_InputActionBits/g_EventInputBitsMirror commit around the dispatch
     //  (input-trigger bit consumption) is an embedder input subsystem not ported here;
     //  recorded in docs/mission/bms-event-runtime-re.md.]
-    for (const bms::Action &a : se.actions) dispatch_action(w, a);
+    const int32_t event = static_cast<int32_t>(&se - events_.data());
+    for (size_t index = 0; index < se.actions.size(); ++index)
+        dispatch_action(w, se.actions[index], event, se.event.action_index + static_cast<int32_t>(index));
     // The waypoint completion hook: a fired event completes every route marker
     // linked to its index (the original computes the index from the record's
     // position in g_Events; events_ mirrors that array order).

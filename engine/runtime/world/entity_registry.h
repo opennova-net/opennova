@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,6 +26,12 @@ struct Area {
     // THIS id in the file and are rewritten to the array index at load
     // [orig: the load-time resolvers @0x453000/@0x453100 match record[0]].
     int32_t zone_id = -1;
+    Aabb script_bounds; // raw authored bounds; WAC area3D ignores constrain-Z
+};
+
+struct LocationVolume {
+    Aabb bounds;
+    int32_t id = 0;
 };
 
 // Stable identity for one allocation lifetime of a packed pool/slot handle.
@@ -80,13 +87,20 @@ public:
     // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the
     // authored record id [orig: zone record dword @0].
     int register_area(std::string name, const Aabb &bounds, bool active = true,
-                      int32_t zone_id = -1);
+                      int32_t zone_id = -1, std::optional<Aabb> script_bounds = {});
     // The load-time id -> index resolve [orig: the @0x453000/@0x453100 scan over
     // record[0]]; -1 when no record carries the id.
     int area_index_by_zone_id(int32_t zone_id) const;
     const Area *area(int id) const;
+    void clear_script_tables();
+    void register_location(const Aabb &bounds, int32_t id);
+    int32_t location_at(const Vec3 &position) const;
 
-    int intern_group(std::string_view name); // stable id for a named group
+    int intern_group(std::string_view name); // WAC named group, separate from BMS command groups
+    static int default_script_group_index(std::string_view name);
+    int script_group_index(std::string_view name) const;
+    void set_script_group_members(int group, const std::vector<EntityHandle> &members);
+    void script_groups(std::vector<std::vector<EntityHandle>> &out) const;
 
     size_t live_count() const;
     // Monotonic spawn serial: differs whenever any entity has spawned since a
@@ -132,7 +146,12 @@ private:
     std::array<Pool, kPoolCount> pools_{};
     uint64_t next_spawn_id_ = 1; // zero means "identity not recorded"
     std::vector<Area> areas_;
-    std::vector<std::string> group_names_;
+    std::vector<LocationVolume> locations_;
+    // [orig: GameMode_CreateDefaultDefs @0x4F9060]
+    std::vector<std::string> group_names_ = {
+        "emptygroup", "humans", "blueplayers", "redplayers", "ai", "blueai", "redai"
+    };
+    std::vector<std::vector<EntityHandle>> group_members_{7};
 };
 
 } // namespace opennova::world

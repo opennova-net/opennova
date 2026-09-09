@@ -677,18 +677,20 @@ typedef struct DefItemDef {
     char particlespawn[32];    /* +0x506 [orig: @ 0x4a179d] */
     char (*raw_lines)[512];
     size_t raw_lines_count;
-    /* Item fire slots: AI closeattack and lndm's large-mine marker3 ammo.
-       [orig: ItemDef_ParseProperty @ 0x4A1823, def+0x56B / +0x58B] */
+    /* Four organic fire ammo names; lndm also reads closeattack/marker3.
+       [orig: ItemDef_ParseProperty @ 0x4A1823, def+0x56B..+0x5CB;
+       Entity_InitOrganicAI @ 0x4BFCC0 -> entity+0x358..+0x35B] */
     char ammo_closeattack[32];
     char ammo_marker3[32];
-    /* items.def 'launchups_closeattack' — the def-AUTHORED launch userpoint
-       NAME for the closeattack fire family: the AI muzzle is this named point
-       on the entity's model, resolved case-insensitively at spawn (JO NPC
-       riflemen author mflash01). Only the closeattack launch-point slot is surfaced;
-       the rocket/marker3 launch-point siblings share the block.
-       [orig: ItemDef_ParseProperty launchups_* stores @ def+0x5EB/+0x5FB;
-       resolve Entity_ResolveBoneUserpoints (ex sub_545940) -> modelgpm_FindUserpointByName @ 0x5b2170] */
+    char ammo_easyrocket[32];     /* def+0x5AB -> organic entity+0x359 */
+    char ammo_advancedrocket[32]; /* def+0x5CB -> organic entity+0x35A */
+    /* The three organic launch-point names, resolved case-insensitively on
+       the person's own model; rocket is shared by easy/advanced ammo.
+       [orig: ItemDef_ParseProperty -> def+0x5EB/+0x5FB/+0x60B;
+       Entity_InitOrganicAI @ 0x4BFE8F..0x4BFF82 -> entity+0x365..+0x367] */
     char launchups_closeattack[32];
+    char launchups_rocket[32];  /* def+0x5FB -> organic entity+0x366 */
+    char launchups_marker3[32]; /* def+0x60B -> organic entity+0x367 */
     /* items.def weapon userpoint NAMES — the twelve 16-byte slots at def+0x61B..0x6CB
        in parse order: weaplbup, weaplmup, weaplcup, weaprbup, weaprmup, weaprcup, then
        the `2` variants (weaplbup2 .. weaprcup2). Field b = the FIRE ORIGIN point, m =
@@ -804,6 +806,18 @@ typedef struct DefItemDef {
 	/* 'pcvehicle_spawnlist' -> def+2772. Slots are shared across the file,
 	   allocated in first-use order, capped at 32. [orig: @0x4A0253; @0x49DFC0] */
 	uint32_t vehicle_spawn_mask;
+    /* 'music' -> signed word +0x1B2, consumed as the containing building's
+       WAC location ID. [orig: ItemDef_ParseProperty @0x49EB00] */
+    int music_location;
+    int mana; /* signed word +0x17E [orig: ItemDef_ParseProperty @0x49EB00] */
+    /* Door fields appended for ABI stability. num_doors/first_door alias the
+       low two bytes of deathtime_ticks; door_dir aliases clipsize.
+       [orig: ItemDef_ParseProperty @0x49F748..0x49F980] */
+    uint32_t door_type;
+    int32_t door_open_rate_q16;
+    int32_t door_max_angle_bam;
+    char door_open_sound[25];
+    char door_close_sound[25];
 } DefItemDef;
 
 typedef struct DefItemsFile {

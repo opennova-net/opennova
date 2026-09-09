@@ -20,7 +20,9 @@ struct WavPcm {
 	uint16_t channels = 0;  // 1 or 2
 };
 
-// Decode a RIFF/WAVE buffer to 16-bit PCM. Handles PCM8 (unsigned, upconverted
+// Decode RIFF/WAVE or AOA1 to 16-bit PCM. AOA1 stores mono signed PCM8/16,
+// a sample count and Q16 rate relative to 44100 Hz; trailing mixer padding is
+// excluded. RIFF handles PCM8 (unsigned, upconverted
 // signed<<8), PCM16 (passthrough), and IMA-ADPCM 0x11 (mono block-based; the
 // defensive stereo path interleaves 4-byte nibble words round-robin per
 // channel). A truncated final data chunk clamps and plays what is present.

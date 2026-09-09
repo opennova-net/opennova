@@ -1,21 +1,30 @@
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/angle.h>
+#include <algorithm>
 
 namespace opennova::world {
 
 void entity_reset_to_spawn_state(Entity &e) {
-    // [orig: Entity_ResetToSpawnState @ 0x4B9610] backs up the current Position into the
-    // entity's spawn-point fields (pad9[124/128/132]) ...
+    // [orig: Entity_ResetToSpawnState @0x4B9610] Save the current pose and
+    // flags before clearing death state.
     e.spawn_position = e.position;
-    // ... then `entity->Flags &= ~2u` clears entity+36 bit 1 — the movement gate
-    // (net-re §5.2b / §5.6). See entity_spawn.h for the deferred remainder of the reset.
-    // Our split-field model mirrors the SAME witnessed bit on engine_flags
-    // (the organic death edge latches both), so the reset clears both views.
+    e.spawn_heading = bam_heading_from_mission_yaw_deg(e.yaw);
+    e.spawn_flags = (e.flags | e.engine_flags) & ~kEntityFlagDead;
+    // Both portable flag views represent the same retail dword.
     e.flags &= ~2u;
     e.engine_flags &= ~2u;
     e.damage_state = 0;
-    // Spawn body-anim state 44 (idle2, or 153 when the class table maps it — class table
-    // unmodeled) + a fresh anim channel — the wire bytes 14/15 a freshly deployed player
-    // replicates. [orig: Entity_ResetToSpawnState anim reseed @0x4b9714]
+    e.health = std::max(e.health, e.health_max);
+    e.alive = e.health > 0;
+    e.mana = e.mana_max;
+    e.section_mask = 0;
+    e.last_attacker = {};
+    e.dragger = {};
+    e.dragger_spawn_id = 0;
+    e.roll = 0;
+    // The World overload selects 153 when the class has that clip and advances
+    // both channels. A fresh row without a motor seeds the fallback state.
+    // [orig: Entity_ResetToSpawnState anim reseed @0x4B9714]
     e.net_anim_state = 44;
     e.net_anim_pending = 0;
     e.net_anim_phase = 0;

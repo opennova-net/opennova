@@ -1,0 +1,118 @@
+#include <cstdio>
+#include <memory>
+#include <runtime/wac/compiler.h>
+#include <runtime/wac/vm.h>
+#include <runtime/wac/wac_system.h>
+#include <runtime/world/world.h>
+
+using namespace opennova::world;
+using namespace opennova::wac;
+static int failures = 0;
+#define CHECK(c) do { if (!(c)) { \
+    std::printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); ++failures; \
+} } while (0)
+
+struct Fixture {
+    std::unique_ptr<World> storage = std::make_unique<World>();
+    World &world = *storage;
+    Fixture() { world.registry.configure_pool(0, 8); }
+    void run(const std::string &source) {
+        const auto program = compile_source(source, {}); CHECK(program.ok());
+        WacVm vm; vm.load(program); vm.execute(world);
+    }
+    int32_t value(int index) const { return world.script.vars.get_mission(index); }
+};
+
+static void test_squad_selection_clear_and_retry() {
+    Fixture f;
+    Entity entity; entity.net_id = 7; entity.item_id = 1; entity.health = 100;
+    const auto handle = f.world.registry.spawn(0, entity);
+    auto &queue = f.world.script.squad_events;
+    CHECK(queue.publish(handle.packed, 24, 7, 3) == 7);
+    queue.publish(0x1002, 25, 8, 1);
+    queue.publish(0x2003, 35, 7, 4);
+    queue.publish(0x3004, 45, 9, 5);
+    queue.publish(0x4005, 55, 10, 6); // replaces the smallest TTL, not the oldest slot
+    f.run("squadevent(8) store(v1)\nsquadevent(7) store(v2)\n"
+          "v3=SquadSSN\nv4=SquadWho\nSSNHP(SquadSSN,42)\n"
+          "squadevent(99) store(v5)\nv6=SquadWho\n");
+    CHECK(f.value(1) == 0 && f.value(2) == 1 && f.value(5) == 0);
+    CHECK(f.value(3) == handle.packed && f.value(4) == 24 && f.value(6) == 24);
+    CHECK(f.world.registry.get(handle)->health == 42); // named SSN carries a packed handle
+    const auto baseline = f.world.snapshot();
+    f.run("squadclear() store(v7)\nsquadevent(7) store(v8)\nv9=SquadWho\n");
+    CHECK(f.value(7) == 0 && f.value(8) == 1 && f.value(9) == 35);
+    f.world.restore(baseline);
+    f.run("v10=SquadWho\nsquadclear()\nsquadevent(7) store(v11)\nv12=SquadWho\n");
+    CHECK(f.value(10) == 24 && f.value(11) == 1 && f.value(12) == 35);
+    CHECK(f.world.diagnostics.empty());
+}
+
+static void test_squad_ttl_is_per_execution_and_exports_are_mutable() {
+    Fixture f;
+    WacSystem system;
+    system.set_program(compile_source(
+            "squadevent(3) store(v1)\nv2=SquadWho\n", {}));
+    f.world.add_system(&system);
+    f.world.load_systems();
+    f.world.cached.humans = 1;
+    f.world.script.squad_events.publish(0x1234, 71, 3, 2);
+    CHECK(system.execute_initial(f.world));
+    CHECK(f.value(1) == 1 && f.value(2) == 71);
+    for (int i = 0; i < 61; ++i) f.world.run_logic_tick(true);
+    CHECK(f.value(1) == 1 && system.runs() == 1);
+    f.world.run_logic_tick(true);
+    CHECK(f.value(1) == 1 && system.runs() == 2); // observed before TTL reaches zero
+    for (int i = 0; i < 62; ++i) f.world.run_logic_tick(true);
+    CHECK(f.value(1) == 0 && f.value(2) == 71); // miss preserves selected exports
+    f.run("set(SquadSSN,4660)\nset(SquadWho,-7)\n"
+          "squadevent(99)\nv3=SquadSSN\nv4=SquadWho\n"
+          "squadclear() store(v5)\nv6=SquadSSN\nv7=SquadWho\n");
+    CHECK(f.value(3) == 4660 && f.value(4) == -7);
+    CHECK(f.value(5) == 0 && f.value(6) == 0 && f.value(7) == 0);
+    f.world.script.squad_events.publish(5, 6, 3, -1);
+    f.run("squadevent(3) store(v8)\n");
+    CHECK(f.value(8) == 1); // negative timers are active and continue decrementing
+    f.world.load_systems();
+    CHECK(!f.world.script.squad_events.query(3));
+    CHECK(f.world.script.squad_events.selected_who == 0);
+}
+
+static void test_random_named_result_and_wide_signed_product() {
+    Fixture f;
+    // Fixed expected words from IMUL/add-0x8000/SHRD-16/+1 with seed 0x12333333.
+    // Zero still consumes a draw; large limits must retain the high product word.
+    f.run("random(0) store(v1)\nv2=RND\n"
+          "random(2147483647) store(v3)\nv4=RND\n"
+          "random(-2147483648) store(v5)\nv6=RND\n"
+          "random(1) store(v7)\nv8=RND\n"
+          "random(65536) store(v9)\nv10=RND\n");
+    CHECK(f.value(1) == 1 && f.value(2) == 1);
+    CHECK(f.value(3) == 0 && f.value(4) == 32145409);
+    CHECK(f.value(5) == 0 && f.value(6) == -860946431);
+    CHECK(f.value(7) == 1 && f.value(8) == 1);
+    CHECK(f.value(9) == 0 && f.value(10) == 62355);
+    const auto baseline = f.world.snapshot();
+    f.run("set(RND,-17)\nv11=RND\n");
+    CHECK(f.value(11) == -17);
+    f.world.restore(baseline);
+    f.run("v12=RND\n");
+    CHECK(f.value(12) == 62355);
+    CHECK(f.world.diagnostics.empty());
+}
+
+static void test_music_closed_stream_is_a_witnessed_success() {
+    Fixture f;
+    f.run("music(0) store(v1)\nmusic(-1) store(v2)\nmusic(2147483647) store(v3)\n");
+    CHECK(f.value(1) == 1 && f.value(2) == 1 && f.value(3) == 1);
+    CHECK(f.world.diagnostics.empty() && f.world.out.effects.entries().empty());
+}
+
+int main() {
+    test_squad_selection_clear_and_retry();
+    test_squad_ttl_is_per_execution_and_exports_are_mutable();
+    test_random_named_result_and_wide_signed_product();
+    test_music_closed_stream_is_a_witnessed_success();
+    std::printf("wac_state: %d failures\n", failures);
+    return failures ? 1 : 0;
+}

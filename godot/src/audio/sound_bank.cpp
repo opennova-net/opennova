@@ -11,6 +11,7 @@
 
 #include <runtime/audio/ambient_mixer.h>
 
+#include <algorithm>
 #include <cmath>
 
 using namespace godot;
@@ -253,19 +254,54 @@ bool SoundBank::play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, co
 	const opennova::audio::OneshotPlan plan = opennova::audio::plan_oneshot_3d(bank, loc, world,
 			listener, has_listener, p_source_bms_id,
 			has_provider ? &SoundBank::occlusion_trampoline : nullptr, &ctx, selector_);
-	if (!plan.in_range) {
-		return false;
-	}
-	bool played = false;
-	for (const opennova::audio::OneshotVoice &voice : plan.voices) {
-		const opennova::lwf::Sndparm &member = bank.sndparms[voice.sndparm];
-		const Ref<AudioStreamWAV> stream = _resolve_stream(_member_wav_path(bank, member));
+    return _play_oneshot_plan(p_parent, p_world_pos, bank, plan, p_bus, p_exclusive_key);
+}
+
+bool SoundBank::play_oneshot_at_distance(Node3D *p_parent, const Vector3 &p_pan_position,
+        const String &p_name, const StringName &p_bus, int64_t p_dist_q16) {
+    const opennova::audio::SetLocation loc = _find_set(p_name);
+    if (!loc.valid() || p_parent == nullptr) {
+        return false;
+    }
+    const opennova::lwf::File &bank = _bank_at(loc);
+    const auto plan = opennova::audio::plan_oneshot_at_distance(bank, loc, p_dist_q16, selector_);
+    return _play_oneshot_plan(p_parent, p_pan_position, bank, plan, p_bus);
+}
+
+void SoundBank::reset_oneshots(Node3D *p_parent) {
+    oneshots_.erase(std::remove_if(oneshots_.begin(), oneshots_.end(), [&](ObjectID id) {
+        auto *player = Object::cast_to<AudioStreamPlayer3D>(ObjectDB::get_instance(id));
+        if (player == nullptr || player->is_queued_for_deletion()) return true;
+        if (p_parent == nullptr || player->get_parent() != p_parent) return false;
+        player->stop();
+        player->queue_free();
+        return true;
+    }), oneshots_.end());
+    exclusive_.clear();
+    selector_.reset();
+}
+
+bool SoundBank::_play_oneshot_plan(Node3D *p_parent, const Vector3 &p_world_pos,
+        const opennova::lwf::File &p_bank, const opennova::audio::OneshotPlan &p_plan,
+        const StringName &p_bus, const String &p_exclusive_key) {
+    if (!p_plan.in_range) {
+        return false;
+    }
+    oneshots_.erase(std::remove_if(oneshots_.begin(), oneshots_.end(), [](ObjectID id) {
+        const auto *player = Object::cast_to<AudioStreamPlayer3D>(ObjectDB::get_instance(id));
+        return player == nullptr || player->is_queued_for_deletion();
+    }), oneshots_.end());
+    bool played = false;
+    for (const opennova::audio::OneshotVoice &voice : p_plan.voices) {
+        const opennova::lwf::Sndparm &member = p_bank.sndparms[voice.sndparm];
+		const Ref<AudioStreamWAV> stream = _resolve_stream(_member_wav_path(p_bank, member));
 		if (stream.is_null()) {
 			continue;
 		}
 		AudioStreamPlayer3D *player = _make_player(stream, _member_base_pitch(member), p_bus, false,
 				voice.vol255);
 		player->set_position(p_world_pos);
+        oneshots_.push_back(ObjectID(player->get_instance_id()));
 		p_parent->add_child(player);
 		player->connect("finished", Callable(player, "queue_free"));
 		player->play();

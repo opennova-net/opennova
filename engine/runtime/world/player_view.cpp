@@ -205,19 +205,16 @@ bool player_view_nvg_visible(const PlayerViewState &v) {
     return v.nvg_active && !v.third_person;
 }
 
-float player_view_fov_h_deg(const PlayerViewState &v, int32_t def_flags, float scope_max_mag) {
-    // Effective-mode refresh guarantees this optical view is first-person.
+float player_view_fov_h_deg(const PlayerViewState &v, int32_t current_fov_q16,
+                           bool scoped, bool sighted, int32_t zoom) {
     if (v.binoculars_view_active) return kBinocularCameraFovHDeg;
-    // Third person renders at the base fov regardless of the scope state.
-    // [orig: @ 0x4df3fa g_camera_mode -> 80.0]
-    if (v.third_person) return kPlayerCameraFovHDeg;
-    // Sighted defs (file flag 2) with a magnification zoom to 80 / mag.
-    // [orig: Player_ToggleWeaponScope @ 0x4df401 -> 80.0 / zoom]
-    float mag = 1.0f;
-    if ((def_flags & 2) != 0 && scope_max_mag > 1.0f) mag = scope_max_mag;
-    const float f = player_view_scope_fraction(v);
-    const float scoped = kPlayerCameraFovHDeg / mag;
-    return kPlayerCameraFovHDeg + (scoped - kPlayerCameraFovHDeg) * f;
+    // ftol truncates the optical division back to Q16 before projection.
+    // Guard malformed zero/negative zoom instead of a floating divide by zero.
+    if (zoom < 1) zoom = 1;
+    int32_t fov = current_fov_q16;
+    if (sighted) fov = (80 << 16) / zoom;
+    else if (scoped) fov /= zoom;
+    return static_cast<float>(fov) / 65536.0f;
 }
 
 float fov_vertical_from_horizontal_deg(float fov_h_deg, float aspect) {

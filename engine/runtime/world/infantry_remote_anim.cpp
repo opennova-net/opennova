@@ -124,7 +124,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
                              : ((ent->net_stance_bits & 0x2u) != 0
                                     ? InfantryState::Stance::kCrouch
                                     : InfantryState::Stance::kStand);
-            player_body_select(e, ent->flags | ent->engine_flags);
+            player_body_select(e, world, ent->flags | ent->engine_flags);
         }
     }
     // The lean angle runs on the authority for every player body (the wire echoes the

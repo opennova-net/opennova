@@ -150,8 +150,13 @@ public:
 			std::vector<world::CollisionMatrix> &out) override;
 	bool resolve_muzzle_pose(world::World &world, world::EntityHandle entity,
 			int32_t out[3]) override;
+	bool resolve_organic_attachment(world::World &, world::EntityHandle,
+			uint8_t userpoint, int32_t out[3]) override;
+	bool resolve_skeletal_anchor(world::World &, world::EntityHandle,
+			world::SkeletalAnchor, int32_t out[3]) override;
 	bool resolve_userpoint_rigid(world::World &world, world::EntityHandle entity,
 			int userpoint_index, int32_t out[3]) override;
+	bool resolve_section_pivot(world::World &, world::EntityHandle, int, int32_t[3]) override;
 	bool resolve_userpoint_pivot(world::World &world, world::EntityHandle entity,
 			int userpoint_index, int32_t out[3]) override;
 	bool resolve_userpoint_transform(world::World &world,
@@ -159,6 +164,7 @@ public:
 			int32_t out[6]) override;
 	bool resolve_named_transform(
 			world::World &, world::EntityHandle, const char *name, int32_t out[6]) override;
+	int last_named_userpoint(world::World &, world::EntityHandle, const char *) override;
 	uint64_t muzzle_query_count() const { return muzzle_queries_; }
 	uint64_t muzzle_resolve_count() const { return muzzle_resolves_; }
 
@@ -167,6 +173,7 @@ private:
 		int32_t model_id = -1;
 		uint64_t registry_spawn_id = 0;
 		std::shared_ptr<const AdmSkeletalClips> rig;
+		const opennova::threedi::Threedi3di3 *model = nullptr; // owned by the sim model cache
 		int32_t muzzle_bone = -1;
 		int32_t muzzle_model_position[3] = {};
 	};
@@ -178,6 +185,8 @@ private:
 			world::EntityHandle entity, std::vector<anim::PoseBone> &r_pose,
 			anim::AimOverlayAngles *r_angles, anim::AimOverlayInputs &r_inputs,
 			const world::Entity *&r_entity, world::AiEntity *&r_ai) const;
+	bool build_skeletal_bone_matrix(world::World &, const SkeletalSource &,
+			world::EntityHandle, int bone_index, world::CollisionMatrix &) const;
 	bool build_skeletal(world::World &world, const SkeletalSource &source,
 			world::EntityHandle entity,
 			const world::CollisionMatrix &entity_world,

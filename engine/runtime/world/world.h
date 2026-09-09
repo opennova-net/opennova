@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <runtime/world/mission_diagnostics.h>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,15 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/doors.h>
+#include <runtime/world/facial_animation.h>
+#include <runtime/world/teammate_operations.h>
+#include <runtime/world/script_events.h>
+#include <runtime/world/script_effects.h>
+#include <runtime/world/script_sounds.h>
+#include <runtime/world/script_squad.h>
+#include <runtime/world/script_input.h>
+#include <runtime/world/script_voice.h>
 #include <runtime/world/match.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/entity_commands.h>
@@ -66,7 +76,7 @@ struct SoundSlotEvent {
     uint16_t source_handle = 0xFFFF; // packed EntityHandle of the body
     int32_t pos[3] = {0, 0, 0};      // mission-frame 16.16 (feet-level for footsteps)
     uint8_t slot = 0;                // audio::SoundProfileSlot, for tests/observability
-    char set_name[24] = {};
+    char set_name[25] = {}; // LWF Multi has 24 name bytes; reserve a terminator
 };
 
 // Packed player-character identity -> the Avatars.def head-sex bit used by
@@ -108,7 +118,7 @@ struct EnvState {
     // load; the infantry footstep water pick and the landing legs read it
     // sim-side. [orig: Env_WaterHeightFixed @ 0x26C6454]
     int32_t water_z = 0;
-    int32_t fog_dist = 0;      // 16.16 meters
+    int32_t fog_dist = 0;      // legacy whole-metre mirror; WeatherState owns the Q16 target
     int32_t sky_speed = 0;
     int32_t rain = 0;
     int32_t snow = 0;
@@ -144,8 +154,8 @@ private:
     std::vector<Effect> entries_;
 };
 
-// Once-per-tick transient snapshot (local player handle/health, near-enemy data).
-// [orig: WacScript_CacheLocalPlayerState @0x4f5780.]
+// Transient player identity and frame data. WAC refreshes local_health only
+// at bytecode entry [orig: WacScript_CacheLocalPlayerState @0x4F5780].
 struct CachedFrameState {
     EntityHandle local_player;
     // The shell-fed posed head-bone world position for the local player
@@ -205,6 +215,10 @@ struct WacNamedValues {
 	// Forced script detaches still apply. [orig: wac_var_seatbelt @0xC6EADC;
 	// WacScript_FreeAll @0x4F637B; Entity_ToggleVehicleMount @0x43698B]
 	int32_t seatbelt = 0;
+    // location() reads this cached player-body result, not a named-table row.
+    // [orig: dword_B763E8, org2 @0x4B634B; WacCmd_Location @0x4ED190]
+    int32_t local_location = 0;
+    int32_t random_result = 0; // RND @0xC6B23C, written by random and named-variable stores
 };
 
 // End-of-round outcome state. `ended` is the double-run latch every round-end
@@ -342,11 +356,16 @@ struct SubgoalState {
 };
 
 // What the mission script (WAC + BMS) reads and writes beyond the entity rows.
-// vars and wac_values ride the World snapshot; the rest is re-initialised by
+// vars, named values and input/voice state ride the snapshot; the rest is re-initialised by
 // the systems' on_load.
 struct ScriptState {
+    const IScriptEventQuery *bms_events = nullptr; // non-owning, bound by BMS on_load
     ScriptVarStore vars;       // shared by WAC + BMS (the C6B240/C6BA40 seam)
     WacNamedValues wac_values; // writable named engine values (the @0x82EEF0 table)
+    ScriptWeaponInput weapon_input;
+    ScriptVoiceChannel voice;
+    ScriptSquadEvents squad_events;
+    int32_t forced_animation = 0; // WAC forceanim; org1 think override [orig: @0xA87058]
     // Sticky trigger-relation state (BMS cats 1/2): matrices + group alert/
     // count records + waypoint has-visited. Cleared per mission load by the
     // BMS system's on_load [orig: EventSystem_FreeAll @ 0x453210].
@@ -359,9 +378,8 @@ struct ScriptState {
     // original anchors. (docs/interface/hud-re.md §Waypoint HUD)
     WaypointTrack waypoints;
     // Active teammate heli-lift operations [orig: dword_AC4F40, slots @0xAC4F48,
-    // incremented by HeliLift_SpawnPickup @0x45263a]. The heli-lift subsystem is
-    // not ported yet; this counter is its seam so TeammateMedicAssisting /
-    // TeammateEvacuating evaluate faithfully once it lands (0 = none active).
+    // incremented by HeliLift_SpawnPickup @0x45263a]. TeammateOperations owns
+    // the slots and publishes this trigger-visible count (0 = none active).
     int32_t heli_lift_active_count = 0;
 };
 
@@ -374,6 +392,7 @@ struct PlayerTemplate {
     // [orig: Entity_InitFromItemDef @0x49e550; D-NET-144]
     bool has_item_def = true;
     int32_t item_hp = 0;
+    int32_t critical_hp = 0;
     // The rest of the same Player items.def template, cached for host/late-join
     // entities allocated after the mission-wide trait sweep.
     uint8_t item_type = 3;
@@ -533,6 +552,9 @@ struct WorldOutbox {
 	// The WAC/BMS/sim effect log the presentation drains ("text", "dialog", the
 	// WAC fx command names, ...).
 	EffectLog effects;
+    std::vector<ScriptEffectEvent> script_effects;
+    std::vector<ScriptSoundEvent> script_sounds;
+    uint64_t next_script_effect_order = 0;
     // The impact-scar rings (world-wac-ai-re §24.9): 128 per-entity rings + the
     // terrain ring, written by the round stop and cleared on death. Presentation
     // state — the shell compiles it into quads each frame; it is NOT part of the
@@ -585,6 +607,7 @@ public:
     // The lifetime groups (declared above): what the script owns, what the
     // embedder feeds once, what the host stamps, what the drains consume.
     ScriptState script;
+    MissionDiagnostics diagnostics; // retained across ticks; restored with the mission baseline
     MissionTables tables;
     SessionRules rules;
     WorldOutbox out;
@@ -659,6 +682,11 @@ public:
     // Placed throwable devices + class bindings (world-wac-ai-re §27).
     ThrowableSim throwables;
     MinefieldSystem minefields;
+    DoorSystem doors;
+    FacialSystem facials;
+    TeammateOperations teammates;
+    int32_t vehicle_ai_spawn_phase = 0; // [orig: dword_B21F80]
+    ITeammateSpawner *teammate_spawner = nullptr; // non-owning mission asset factory
     DeathPieceSim death_pieces;
     DestructionRng destruction_rng;
 
@@ -748,10 +776,25 @@ public:
     // and systems re-init on restore.
     struct Snapshot {
         EntityRegistry registry;
+        MissionDiagnostics diagnostics;
         ScriptVarStore vars;
         WacNamedValues wac_values;
+        ScriptSquadEvents squad_events;
+        ScriptWeaponInput weapon_input;
+        ScriptVoiceChannel::State voice;
+        // Play-start particle descriptors have not been presented when the
+        // baseline seals. Replay them after the presenter's scene reset.
+        std::vector<ScriptEffectEvent> initial_script_effects;
+        std::vector<ScriptSoundEvent> initial_script_sounds;
+        std::vector<SoundSlotEvent> initial_slot_sounds;
+        uint64_t next_script_effect_order = 0;
+        int32_t forced_animation = 0;
         EnvState env;
         WeatherState weather;
+        DoorSystem doors;
+        FacialSystem facials;
+        TeammateOperations teammates;
+        int32_t vehicle_ai_spawn_phase = 0;
         Match match;
         SpawnWaveList spawn_waves;
         ZoneCaptureState zone_capture_state;

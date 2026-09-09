@@ -200,7 +200,33 @@ bool test_vehicle_suspension_reaches_present_rows() {
 	return ok;
 }
 
+bool test_door_phases_reach_present_rows() {
+    opennova::mission::MissionKernel kernel;
+    kernel.world.registry.configure_pool(2, 1);
+    w::Entity *e = spawn_pool_row(kernel, 2, 0, 1998);
+    if (!expect(e != nullptr, "door row spawns")) return false;
+    e->door_motion = e->door_event = true;
+    e->door_count = 1;
+    kernel.world.doors.initialize(*e, 65536, 0);
+    kernel.world.doors.command(kernel.world, *e, 7);
+    kernel.world.doors.tick(kernel.world);
+    im::PoolPresentLifecycleMap lifecycle;
+    std::vector<float> rows;
+    im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows);
+    if (!expect(rows.size() == w::PF_STRIDE, "one door row")) return false;
+    const float *row = row_at(rows, 0);
+    bool ok = expect(row[w::PF_DOOR_COUNT] == 1 &&
+            row[w::PF_DOOR_PHASES] == 0 && row[w::PF_DOOR_PHASES + 1] == 1,
+            "open phase 65536 publishes as the exact low/high words");
+    e->door_motion = false;
+    im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows);
+    ok = expect(row_at(rows, 0)[w::PF_DOOR_COUNT] == 0,
+            "a missing door movement callback releases phase ownership") && ok;
+    return ok;
+}
+
 int main() {
+    test_door_phases_reach_present_rows();
 	test_vehicle_suspension_reaches_present_rows();
 	bool ok = true;
 	ok = test_world_rows_carry_the_authoritative_record() && ok;

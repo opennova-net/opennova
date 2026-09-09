@@ -7,6 +7,7 @@
 // rebased analogue of WacScript_ResolveParameter @0x4f2920.
 #pragma once
 
+#include <functional>
 #include <string_view>
 #include <vector>
 
@@ -15,7 +16,11 @@
 
 namespace opennova::world {
 class EntityRegistry;
+struct AmmoTable;
 }
+
+namespace opennova::particle { class EffectScene; }
+namespace opennova::audio { class SoundSetIndex; }
 
 namespace opennova::wac {
 
@@ -23,6 +28,11 @@ struct CompileEnv {
     // Optional: lets symbolic group/area names resolve to interned ids. When null,
     // groups/areas must be numeric (sufficient for unit tests).
     opennova::world::EntityRegistry *registry = nullptr;
+    const opennova::audio::SoundSetIndex *sounds = nullptr;
+    opennova::particle::EffectScene *effects = nullptr; // mounted catalog, compile-time handles
+    const opennova::world::AmmoTable *ammo = nullptr; // literal AMMO bindings at compilation
+    std::vector<std::string> source_names; // parallel to compile_program's source texts
+    std::function<bool(const std::string &, std::string &)> load_source; // RUN's mounted-file reader
 };
 
 // Compile a parsed statement list into a Program. Diagnostics from both parse and

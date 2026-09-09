@@ -16,6 +16,9 @@ namespace opennova::world {
 class EntityRegistry;
 }
 
+namespace opennova::particle { class EffectScene; }
+namespace opennova::audio { class SoundSetIndex; }
+
 namespace opennova::wac {
 
 enum class WacLayeredLoadStatus {
@@ -35,6 +38,12 @@ enum class WacLayeredLoadStatus {
 WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		const mission::BootFileSource &files,
 		const std::string &mission_basename, world::EntityRegistry *registry,
-		bool strict_diagnostics, std::string &error);
+		bool strict_diagnostics, std::string &error,
+        particle::EffectScene *effect_catalog = nullptr,
+        const audio::SoundSetIndex *sound_catalog = nullptr);
+
+// Same mounted mission/global chain as the audio host; no WAV decode needed.
+void load_script_sound_sets(const mission::BootFileSource &files,
+        const std::string &mission_basename, audio::SoundSetIndex &sounds);
 
 } // namespace opennova::wac

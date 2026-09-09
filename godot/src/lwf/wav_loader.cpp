@@ -25,6 +25,10 @@ Ref<AudioStreamWAV> WavLoader::from_bytes(const PackedByteArray &p_bytes) {
 		UtilityFunctions::push_warning("WavLoader: ", String::utf8(error.c_str()));
 		return Ref<AudioStreamWAV>();
 	}
+	return from_pcm(decoded);
+}
+
+Ref<AudioStreamWAV> WavLoader::from_pcm(const opennova::lwf::WavPcm &decoded) {
 	PackedByteArray pcm;
 	pcm.resize(static_cast<int64_t>(decoded.pcm16.size()));
 	if (!decoded.pcm16.empty()) {

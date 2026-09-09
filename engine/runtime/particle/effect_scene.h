@@ -77,6 +77,9 @@ enum class EffectAdmission : std::uint8_t {
 	// Keep the current live group and report Suppressed. This is the witnessed
 	// weapon FIRE/action-start live-handle rule, not a name-based effect rule.
 	SuppressWhileOwned = 2,
+    // Overwrite the slot without detaching its older group, including when
+    // the new spawn fails. BMS/target FX store the raw result at entity+460.
+    StoreOwned = 3,
 };
 
 enum class EffectBinding : std::uint8_t {
@@ -322,7 +325,11 @@ public:
 	// Case-insensitive, stable 1-based handles. An unknown name aliases the
 	// catalog's stockeffect definition; returns 0 when stockeffect is absent.
 	EffectHandle intern(std::string_view effect_name);
+    // Direct named lookup; does not substitute stockeffect for a missing name.
+    // [orig: CEffectWorld_FindEffectDefByName @0x5E34F0]
+    EffectHandle find(std::string_view effect_name);
 	std::string effect_name(EffectHandle handle) const;
+    std::vector<std::string> interned_names() const;
 
 	EffectSpawnReceipt spawn(const EffectSpawnRequest &request);
 	void apply_owner_poses(const std::vector<EffectOwnerPoseUpdate> &updates);

@@ -120,7 +120,7 @@ void test_scalar_handlers() {
 	ws.command_color_fade(2);
 	CHECK(ws.color_fade_ticks == 124);
 	ws.command_lightning_color(0xFF112233u);
-	CHECK(ws.lightning_color == 0x112233u);
+	CHECK(ws.lightning_color == 0xFF112233u); // full retail DWORD, including alpha
 	ws.set_wind_scale(128);
 	CHECK(ws.wind_scale() == 128);
 	// sunfade(50, 1): target 0x320000 (16.16 percent), 62 ticks; the max

@@ -35,16 +35,18 @@ using ItemWireClassFn = std::function<uint8_t(int definition_id)>;
 // the AS zone-slot chain. Duplicate definition ids resolve last-wins, the
 // same load-order overwrite the binding's id-keyed item map exposed.
 // Idempotent; call after mission promotion (and again after spawning the
-// local player).
+// local player). A valid only handle initializes one new row without rebuilding
+// mission capture state; the default performs the original full load sweep.
 void resolve_item_traits(world::World &world, const opennova::def::DefItemsFile &items,
-                         const ItemWireClassFn &wire_class);
+                         const ItemWireClassFn &wire_class, world::EntityHandle only = {});
 
-// The D-AI-5 host weapon seed + per-body sound-profile bind: stamp each AI
-// entity's anim-fire round (items.def ammo_closeattack resolved against the
-// loaded mission ammo table) and clipsize magazine reseed, and bind its
-// items.def sound_profile against the loaded profile table. Returns the
-// armed-NPC count. Call AFTER the ammo table is loaded; an unresolved or
-// absent round name leaves the NPC unarmed.
-int resolve_ai_weapons(world::World &world, const opennova::def::DefItemsFile &items);
+// Resolve the organic's four ammo bytes and three launch userpoints, seed its
+// clipsize magazine, and bind body sound profiles and SM weapon ammo. Call after
+// mission tables/models are available, or with only for a newly spawned body.
+// Ammo lookup misses and unresolved userpoints store zero; an absent ammo key
+// preserves the initial byte. Returns the number of armed bodies/SM weapon blocks.
+// [orig: Entity_InitOrganicAI @ 0x4BFCC0]
+int resolve_ai_weapons(world::World &world, const opennova::def::DefItemsFile &items,
+                       world::EntityHandle only = {}, SimModelCache *models = nullptr);
 
 } // namespace opennova::simassets

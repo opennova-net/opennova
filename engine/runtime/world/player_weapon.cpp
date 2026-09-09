@@ -9,6 +9,7 @@
 
 #include <runtime/world/ai.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/local_player_view.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/world.h>
@@ -575,6 +576,15 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	view.scope_step = 0;
 	view.ease_steps = kScopeEaseSteps;
 	view.scope_hipfire = true;
+	// A cross-category non-ForceScoped mount resets the target, not its current.
+	// [orig: Player_MountWeaponSlot @0x4DFB44..0x4DFB66]
+	const int old_index = world.tables.weapons.index_of(w.def_name.c_str());
+	const int new_index = world.tables.weapons.index_of(data.name.c_str());
+	if (old_index >= 0 && new_index >= 0 &&
+			(data.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0 &&
+			world.tables.weapons.entries[old_index].category !=
+			world.tables.weapons.entries[new_index].category)
+		world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
 	w.def_name = data.name;
 	w.active = true;
 }
@@ -836,6 +846,19 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		}
 	} else {
 		w.power_throw_start_tick = 0;
+		// Ordinary presses and deferred auto-fire requests pass through WAC's
+		// category gate before the seat/fireability rejection. PowerThrow uses
+		// its separate press/release path above. Do not cancel an accepted FIRE:
+		// only refuse the new binding request, including a deferred one.
+		// [orig: Input_HandleActionBinding_0 @0x4E0968..0x4E097B]
+		if (player_alive && (w.fire_pressed || active_slot.refire_queued)) {
+			const WeaponTableEntry *def =
+					world.tables.weapons.by_index(player->equipped_adm_index);
+			if (def != nullptr && !world.script.weapon_input.record_fire_request(def->category)) {
+				in.fire_pressed = false;
+				active_slot.refire_queued = false;
+			}
+		}
 	}
 	// The dispatch gate runs here now: the raw reload edge is refused on a full
 	// magazine or an empty reserve [orig: input case 0xD3 @ 0x4e0420].
@@ -1208,13 +1231,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// The forced paths run the same refusing toggle — a mid-ease unscope keeps
 		// the scope (rare: a reload requested inside the raise ease)
 		// [orig: @ 0x543136 calls Player_ToggleWeaponScope, activeFlag-gated].
-		player_view_set_engaged(view, false,
-				(w.def.flags2 & weapon_flag2::kInset) != 0);
+		local_player_set_scope(world, w, view, active_slot, false);
 	}
 	if (ev.rescope) {
 		++w.rescope_serial;
-		player_view_set_engaged(view, true,
-				(w.def.flags2 & weapon_flag2::kInset) != 0);
+		local_player_set_scope(world, w, view, active_slot, true);
 	}
 	// Devtools instrumentation, last: the slot has finished mirroring, so the
 	// sample is the state this tick actually ends on.

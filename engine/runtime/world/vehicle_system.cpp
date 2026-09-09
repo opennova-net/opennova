@@ -39,7 +39,7 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
         vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_SCAN);
         for (const EntityHandle h : pass_handles_) {
             Entity *veh = world.registry.get(h);
-            if (veh == nullptr) continue;
+            if (veh == nullptr || veh->motor_suspended) continue;
 			// The installed death callback replaces +0x1C4's live mover.
 			// The AI death-state callback at +0x1C8 can also run this tick.
 			// [orig: Entity_UpdatePool1Slot @0x4B8E2A..0x4B8E53]
@@ -210,7 +210,7 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
         });
         for (const EntityHandle h : pass_handles_) {
             Entity *veh = world.registry.get(h);
-            if (veh == nullptr) continue;
+            if (veh == nullptr || veh->motor_suspended) continue;
 			// The installed death callback replaces +0x1C4's live mover.
 			// The AI death-state callback at +0x1C8 can also run this tick.
 			// [orig: Entity_UpdatePool1Slot @0x4B8E2A..0x4B8E53]

@@ -59,24 +59,4 @@ private:
 	bool line_active_ = false;
 };
 
-// WAC wave/pwave scripted voice: a single dedicated channel the engine RESETS
-// before each play (a new wave interrupts the previous one), independent of
-// the .DBF dialog queue [orig: wave/pwave @ 0x4ed610, channel dword_C6EC30].
-class WacVoiceChannel {
-public:
-	// Play a scripted voice .wav by filename [orig: wave/pwave @ 0x4ed610] on
-	// the one channel, REPLACING any currently-playing wave (the engine resets
-	// the channel before each play [orig: AudioChannel_ResetByHandle(dword_C6EC30)
-	// @ 0x4ed625]), so a new scripted line interrupts the previous one.
-	// Returns true when a previous wave was interrupted.
-	bool play(const std::string &filename);
-	void stop();
-	bool playing() const { return playing_; }
-	const std::string &current() const { return current_; }
-
-private:
-	std::string current_;
-	bool playing_ = false;
-};
-
 } // namespace opennova::audio

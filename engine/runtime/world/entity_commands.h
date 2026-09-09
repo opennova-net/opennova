@@ -18,6 +18,23 @@ inline constexpr int32_t kParticleEffectMarkerTypeId = 6088;
 
 class World;
 
+// An authored SSN is resolved at dispatch; a bound WAC operand already names
+// a pool slot. Preserve that distinction through shared commands: converting
+// a handle back to an SSN can select another row with the same authored id.
+class EntityTarget {
+public:
+    EntityTarget(uint16_t ssn) : ssn_(ssn) {}
+    EntityTarget(EntityHandle handle) : handle_(handle), bound_(true) {}
+    bool bound() const { return bound_; }
+    EntityHandle handle() const { return handle_; }
+    uint16_t ssn() const { return ssn_; }
+
+private:
+    uint16_t ssn_ = 0;
+    EntityHandle handle_;
+    bool bound_ = false;
+};
+
 // ----------------------------------------------------------------------------
 // Shared entity-command primitive layer. Models the original Entity_* mutation
 // functions (Entity_KillByNetId, Entity_SetWaypointByTeam, ...) that BOTH
@@ -37,32 +54,54 @@ public:
     // entities carry net_id 0 (the wire is handle-based), so the mapping lives
     // here at the script seam. [orig: EntityPool_FindByNetId @0x4f0a20]
     EntityHandle resolve_ssn(uint16_t ssn) const;
+    EntityHandle resolve_target(EntityTarget target) const;
 
-    // --- entity (by net id) ---
-    bool kill_ssn(uint16_t ssn);
-    bool remove_ssn(uint16_t ssn);
-    bool set_ssn_hp(uint16_t ssn, int32_t hp);
-    bool add_ssn_hp(uint16_t ssn, int32_t delta);
+    // --- entity (authored SSN or already-bound handle) ---
+    bool set_ssn_name(EntityTarget ssn, const std::string &name);
+    bool ssn_critical(EntityTarget ssn) const;
+    bool ssn_has_rider(EntityTarget target_ssn) const;
+    bool order_boarding(EntityTarget source_ssn, EntityTarget target_ssn);
+    // These arm the existing row's corpse lifecycle; they do not spawn immediately.
+    bool set_ssn_respawns(EntityTarget ssn, int32_t count);
+    void set_group_respawns(int32_t group, int32_t count);
+    bool kill_ssn(EntityTarget ssn);
+    bool remove_ssn(EntityTarget ssn);
+    bool set_ssn_hp(EntityTarget ssn, int32_t hp);
+    bool add_ssn_hp(EntityTarget ssn, int32_t delta);
     // WAC accuracy writes the controller-slot error pair as max(0, 100-value).
     // [orig: WacCmd_SetAccuracy @0x4F2070]
-    bool set_ssn_accuracy(uint16_t ssn, int32_t primary, int32_t secondary);
+    bool set_ssn_accuracy(EntityTarget ssn, int32_t primary, int32_t secondary);
     // WAC guard toggles entity Flags bit 0x40 even when the row has no AI brain.
     // [orig: WacCmd_SsnGuard @0x4F71C0]
-    bool set_ssn_guard(uint16_t ssn, bool guard);
+    bool set_ssn_guard(EntityTarget ssn, bool guard);
     // Structural BMS single-entity actions.
     bool set_ssn_team(uint16_t ssn, int32_t team);
     bool set_ssn_group(uint16_t ssn, int32_t group);
     bool teleport_ssn_to_marker(uint16_t ssn, int32_t marker_wp_number);
+    // WAC teleSSN has a witnessed marker self-copy; BMS uses the real teleport above.
+    bool wac_teleport_ssn(EntityTarget source, int32_t marker_wp_number);
+    bool play_ssn_soundset(EntityTarget target, const std::string &set);
     // `node < 0` selects the nearest node on the list (the two-argument WAC form);
     // BMS RedirectSingleTo carries an explicit node in param3.
-    bool set_ssn_waypoint(uint16_t ssn, int32_t wp, int32_t node = -1);
-    bool set_ssn_engage_min(uint16_t ssn, int32_t v);
-    bool set_ssn_engage_max(uint16_t ssn, int32_t v);
-    bool set_ssn_attack_max(uint16_t ssn, int32_t v);
-    bool set_ssn_anim(uint16_t ssn, int32_t anim_slot);
-    bool set_ssn_hidden(uint16_t ssn, bool hidden);
-    bool set_ssn_held(uint16_t ssn, bool held);
-    bool set_ssn_disabled(uint16_t ssn, bool disabled);
+    bool set_ssn_waypoint(EntityTarget ssn, int32_t wp, int32_t node = -1);
+    bool set_ssn_engage_min(EntityTarget ssn, int32_t v);
+    bool set_ssn_engage_max(EntityTarget ssn, int32_t v);
+    bool set_ssn_attack_max(EntityTarget ssn, int32_t v);
+    bool set_ssn_anim(EntityTarget ssn, int32_t anim_slot);
+    bool set_local_anim(int32_t anim_state);
+    bool raise_local_player();
+    bool set_ssn_turn(EntityTarget ssn, int32_t heading_degrees);
+    bool teleport_local_to_ssn(EntityTarget ssn);
+    bool set_ssn_hidden(EntityTarget ssn, bool hidden);
+    bool set_ssn_held(EntityTarget ssn, bool held);
+    bool set_ssn_disabled(EntityTarget ssn, bool disabled);
+
+    // BMS 42..49 preserve raw source ids and write one selector word. Single
+    // scans stop at the first pool-0/1 match; group scans visit all matches.
+    // No alive, item-definition or brain gate. Zero source selects nothing.
+    // [orig: EventAction_Dispatch @0x4542E0 -> 0x43D770..0x43DAC0]
+    bool set_ssn_target_selector(int32_t ssn, AiTargetSelector field, int32_t value);
+    int set_group_target_selector(int32_t group, AiTargetSelector field, int32_t value);
 
     // --- entity (by handle; the tool/probe mutation seam, ADR 0042 d5) ---
     // Write an entity's health through BOTH stores the scripted SETHP path
@@ -102,11 +141,14 @@ public:
     // mirror the behavior tests read.
     void set_fog_type(int32_t type);                       // fogtype
     void set_fog_distance(int32_t metres);                 // fogdist
-    void move_fog(int32_t metres, int32_t seconds);        // movefog
+    void move_fog(int32_t metres, int32_t seconds);        // whole-metre host control
+    void set_fog_distance_q16(int32_t distance_q16);       // WAC fogdist
+    void move_fog_q16(int32_t distance_q16, int32_t seconds); // WAC movefog
     void set_rain(int32_t percent, int32_t seconds);       // rain
     void set_snow(int32_t percent, int32_t seconds);       // snow
     void set_overcast(int32_t percent, int32_t seconds);   // overcast
     void set_sky_speed(int32_t rate);                      // skyspeed
+    void set_fov(int32_t degrees);                        // fov
     void set_sky_height(int32_t height_raw);               // skyheight
     void quake(int32_t seconds);                           // quake
     void set_time_of_day_minutes(int32_t minute_of_day);   // TOD
@@ -120,13 +162,16 @@ public:
     void set_wind_scale(int32_t value);                    // the `wind` named value
 
     // --- queries ---
-    bool ssn_exists(uint16_t ssn) const;
-    bool ssn_alive(uint16_t ssn) const;
-    bool ssn_dead(uint16_t ssn) const;
+    bool ssn_exists(EntityTarget ssn) const;
+    bool ssn_alive(EntityTarget ssn) const;
+    bool ssn_dead(EntityTarget ssn) const;
     // [orig: WacCmd_SsnWounded @0x4F1B80] Unsigned health <=
     // the signed max-health half reinterpreted as u16.
-    bool ssn_wounded(uint16_t ssn) const;
-    bool ssn_in_area(uint16_t ssn, int area_id) const;
+    bool ssn_wounded(EntityTarget ssn) const;
+    bool ssn_in_area(EntityTarget ssn, int area_id) const;
+    bool ssn_in_script_area(EntityTarget target, int32_t zone_id, bool three_dimensional) const;
+    bool ssn_at_location(EntityTarget target, int32_t location) const;
+    void update_local_location(EntityHandle player);
     // True only when the mission has at least one ACTIVE area trigger and the
     // local player's X/Y sits inside none of them — Z is ignored, and a world
     // with no local player (a serve-only host) reads as in-bounds. Feeds the
@@ -160,23 +205,25 @@ public:
     // [orig: Entity_IsOnTopOfChain @0x4f19a0] target reachable from ssn's
     // groundEntity chain (ground_target) within 3 hops; both entities gated
     // on item_id != 0.
-    bool ssn_on_chain_of(uint16_t ssn, uint16_t target_ssn) const;
-    // [orig: Entity_CheckProximity @0x4f14c0] Euclidean center distance
-    // <= meters (retail computes in float over the 16.16 centers with a
-    // 0x7FFF0000 overflow clamp before ftol — our float math needs no clamp).
-    bool ssn_within_distance(uint16_t ssn, uint16_t target_ssn, int32_t meters) const;
+    bool ssn_on_chain_of(EntityTarget ssn, EntityTarget target_ssn) const;
+    // Distances use Q16: WAC resolves literals; BMS shifts its whole metres.
+    // [orig: Entity_CheckProximity @0x4F14C0] Wrapped center deltas, clamped
+    // and truncated Euclidean length <= the raw distance operand.
+    bool ssn_within_distance(EntityTarget ssn, EntityTarget target_ssn, int32_t distance_q16) const;
+    bool ssn_leads_target(EntityTarget first, EntityTarget second,
+                         EntityTarget target, int32_t lead_q16) const;
     // [orig: Entity_CheckLineOfSightInRange @0x4f15e0] Center distance
-    // <= meters AND a radius-0 LOS ray between the two entities is clear.
-    // Retail rays between the +0x1FC offset points (unwalked) and picks the
+    // <= distance_q16 AND a radius-0 LOS ray between the two entities is clear.
+    // Retail rays between the +0x1FC bbox-center offset points and picks the
     // entity-aware walker at <= 20 u vs terrain/sectors above — our port rays
-    // through the one modeled LOS seam; both stand-ins tracked in §3b.
-    bool ssn_los_clear_within(uint16_t ssn, uint16_t target_ssn, int32_t meters) const;
+    // through the one modeled LOS seam; the walker split remains tracked in §3b.
+    bool ssn_los_clear_within(EntityTarget ssn, EntityTarget target_ssn, int32_t distance_q16) const;
     // [orig: Entity_CheckLineOfSight @0x4f17c0] ssn_los_clear_within PLUS the
     // facing gate: |wrap32(heading_bam - atan2(dy, dx)·(2^31/pi))| <= 30.0
     // deg (0x15555540 BAM), int32 wrap = shortest arc. Retail's cdq/xor/sub
     // abs leaves INT_MIN negative, so a target EXACTLY 180.0 deg astern
     // passes the signed compare — the quirk is carried bit-exactly.
-    bool ssn_sees_within(uint16_t ssn, uint16_t target_ssn, int32_t meters) const;
+    bool ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn, int32_t distance_q16) const;
 
     // --- group (by group id) ---
     int kill_group(int group);          // returns members affected
@@ -210,29 +257,42 @@ public:
     // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] Attach occupant_ssn into target_ssn's best
     // free root/child seat through the canonical vehicle attach operation. Reject if the
     // occupant is already mounted or the target has no free seat. Returns false on any reject.
-    bool mount(uint16_t occupant_ssn, uint16_t target_ssn,
+    bool mount(EntityTarget occupant_ssn, EntityTarget target_ssn,
                SeatSelectionMode mode = SeatSelectionMode::Any);
     // Port-side helper for authored "Goto SSN and board" commands 123/124/125, not a retail
     // symbol. Retail path: Entity_UpdateInfantryAI @0x4ba9ad -> Entity_FindBestSeatSlot
     // @0x4351f0 -> Entity_RequestVehicleAttach @0x4364a0. FindBestSeatSlot applies the rules:
     // 123 only accepts `sitex`, 124 rejects `ctrlx`, and 125 uses normal best-seat priority.
-    bool mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn, uint8_t command_id);
+    bool mount_boarding_command(EntityTarget occupant_ssn, EntityTarget target_ssn, uint8_t command_id);
 
     // WAC `ssnrelease` -- the release half of the AI boarding order.
     // [orig: WacCmd_SsnRelease @0x4f7420]
-    bool release_boarding_command(uint16_t occupant_ssn);
+    bool release_boarding_command(EntityTarget occupant_ssn);
+    // SSNUse mounts the controller's cached target, preserving its chosen child.
+    // [orig: WacScript_TryMountEntityToVehicle @0x4F70F0]
+    bool use_boarding_target(EntityTarget occupant);
 
     // BMS action 27 (PARTICLE_EFFECT): spawn the authored marker emitters whose
     // wp_number matches `wp_number`. Returns how many fired.
     // [orig: EventAction_Dispatch case 0x1B @0x4542e0 -> EventAction_SpawnParticleEffect]
     int spawn_marker_particle_effects(int32_t wp_number);
+    const Entity *script_target(int32_t wp_number) const;
+    int effect_at_ssn(int32_t effect, const std::string &name, EntityTarget ssn);
+    int effect_at_target(int32_t effect, const std::string &name, int32_t target);
+    int rain_effect(int32_t effect, const std::string &name, uint32_t random);
+    int sound_at_target(int32_t sound, const std::string &name, int32_t target);
+    int direct_sound(const std::string &name, int32_t distance, int32_t bearing);
+    int fire_ammo_at_target(int32_t ammo, int32_t target);
+    int fire_ammo_from_ssn(int32_t ammo, EntityTarget source, EntityTarget target);
+    int fire_ammo_in_area(int32_t ammo, int32_t area_id);
+    int rain_ammo_near_player(int32_t ammo, uint32_t random);
     // [orig: EventAction_Dispatch case 0x25 @0x4542e0] The BMS AttachToEmplaced entry: the action
     // carries ONLY the occupant SSN; the original finds the vehicle via the occupant model's +144
     // hierarchy link. We don't model that link, so the target is the nearest emplacement with a free
     // seat within kMountRadius (a tracked proximity proxy). Returns false if none.
     bool mount_best(uint16_t occupant_ssn);
     // [orig: Entity_DetachFromVehicle @0x4355f0] Free the occupant's seat + clear its mount ref.
-    bool dismount(uint16_t occupant_ssn);
+    bool dismount(EntityTarget occupant_ssn);
     // [orig: Vehicle_HasEnemyOccupant @0x4359f0] SSN of an entity riding target_ssn, else 0.
     uint16_t find_mounted_on(uint16_t target_ssn) const;
 
@@ -243,13 +303,13 @@ public:
     // (renamed 2026-07-16: Entity_IsLocalPlayerSeatedOnSsn / StandingOnSsn / DrivingSsn /
     // OnGunOfSsn — the shipped IDB names were permuted misnomers).]
     // PLYRATTACHED: seated in ANY seat of the SSN (or of something the SSN carries).
-    bool local_player_attached_to_ssn(uint16_t ssn) const;   // sub 38 @0x4f10d0
+    bool local_player_attached_to_ssn(EntityTarget ssn) const;   // sub 38 @0x4f10d0
     // PLYRONSSN: STANDING on the SSN (ground/carrier reference), not seated.
-    bool local_player_standing_on_ssn(uint16_t ssn) const;   // sub 39 @0x4f1260
+    bool local_player_standing_on_ssn(EntityTarget ssn) const;   // sub 39 @0x4f1260
     // PLYRDRIVING: seated on the SSN chain in a ctrlx/drvrx seat.
-    bool local_player_driving_ssn(uint16_t ssn) const;       // sub 40 @0x4f1150
+    bool local_player_driving_ssn(EntityTarget ssn) const;       // sub 40 @0x4f1150
     // PLYRONGUN: seated on the SSN chain in the UseGun seat.
-    bool local_player_on_gun_of_ssn(uint16_t ssn) const;     // sub 41 @0x4f11e0
+    bool local_player_on_gun_of_ssn(EntityTarget ssn) const;     // sub 41 @0x4f11e0
 
     // --- AI command (the AI-change action family) ---
     // [orig: Entity_ApplyCommand @0x43ab60, reached from EventAction_Dispatch @0x4542e0
@@ -259,7 +319,7 @@ public:
     // when there is no AI system or no brain for the target.
     // The ChangeAI action's sub-type ids, the dfx2med token names
     // [orig: Entity_ApplyCommand @0x43ab60's switch]. Subs the port does not
-    // carry (31/37/39/40/44) are named so the coverage counter reads.
+    // carry are reported by cumulative mission diagnostics.
     enum ChangeAiSub : int {
         kGuardBit = 2,
         kRedAlert = 5,
@@ -287,7 +347,7 @@ public:
         kAiStartFiring = 45,
         kAiFiringAngle = 46,
     };
-    bool apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4);
+    bool apply_ai_command(EntityTarget ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4);
     int apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4);
     int apply_area_ai_command(int zone_area_id, int team, int sub_type,
                               int32_t p2, int32_t p3, int32_t p4);

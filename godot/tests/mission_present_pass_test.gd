@@ -54,6 +54,12 @@ class Snapshot:
 					int(e.get("active1", 0)) != 0)
 			_write_phase(out, b, 2, int(e.get("phase2", 0)),
 					int(e.get("active2", 0)) != 0)
+			var doors: Array = e.get("doors", [])
+			out[b + Simulation.PF_DOOR_COUNT] = float(doors.size())
+			for door in range(doors.size()):
+				var bits := int(doors[door]) & 0xFFFFFFFF
+				out[b + Simulation.PF_DOOR_PHASES + 2 * door] = float(bits & 0xFFFF)
+				out[b + Simulation.PF_DOOR_PHASES + 2 * door + 1] = float(bits >> 16)
 			out[b + Simulation.PF_BODY_ANIM_SLOT] = float(e.get("body_anim_slot", -1))
 			out[b + Simulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
 			out[b + Simulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
@@ -239,6 +245,73 @@ func _clip_time(model: ObjectModel, key: String, phase_ticks: int) -> float:
 	var fps: float = model.get_skeletal_anim().get_clip_fps(key)
 	assert_gt(fps, 0.0, "fixture clip %s carries a frame rate" % key)
 	return float(phase_ticks) / (2.0 * fps)
+
+
+func test_door_phases_preserve_endpoints_and_release_only_their_owner() -> void:
+	var model := _model()
+	model.set_ctrl_value("DOOR_00", 77)
+	var p := _make_pass(_index_of({ 1: model }))
+	var snap := Snapshot.new()
+	snap.entities = [{ "bms_id": 1, "doors": [0, 65536, -1] }]
+	_present(p, snap)
+	assert_eq(_ctrl(model, "DOOR_00"), 0, "a closed door actively publishes zero")
+	assert_eq(_ctrl(model, "DOOR_01"), 65536, "fully open retains the high word")
+	assert_eq(_ctrl(model, "DOOR_02"), -1, "signed phase words survive the float row")
+	snap.entities[0]["doors"] = [32768]
+	_present(p, snap)
+	assert_eq(_ctrl(model, "DOOR_00"), 32768)
+	assert_false(model.get_ctrl_values().has("DOOR_01"))
+	assert_false(model.get_ctrl_values().has("DOOR_02"))
+	snap.entities[0]["doors"] = []
+	_present(p, snap)
+	assert_false(model.get_ctrl_values().has("DOOR_00"),
+			"retail CTRL is one value; overwritten values are never restored")
+	snap.entities[0]["doors"] = [123]
+	_present(p, snap)
+	model.set_ctrl_value("DOOR_00", 77)
+	snap.entities[0]["doors"] = []
+	_present(p, snap)
+	assert_eq(_ctrl(model, "DOOR_00"), 77, "stale door teardown preserves a later writer")
+	snap.entities[0]["doors"] = [456]
+	_present(p, snap)
+	p.set_output_channels(int(p.get_output_channels()) & ~EntityPresenter.OUTPUT_PART_ANIM)
+	assert_false(model.get_ctrl_values().has("DOOR_00"), "disabling the output releases doors")
+
+
+func test_retail_door_visible_part_uses_the_presented_phase() -> void:
+	var assets := RetailData.assets()
+	if assets.is_empty():
+		pending("OPENNOVA_JO_ASSETS is required for the Iblock01 door")
+		return
+	var data := ObjectData.new()
+	assert_eq(data.open_file(assets.path_join("IBlock01.3di")), OK)
+	var model := _model()
+	model.set_object_data(data)
+	var clock := PanmClock.new()
+	clock.set_time_ms_for_test(0)
+	model.set_panm_clock(clock)
+	var parts := model.get_render_part_nodes()
+	assert_true(parts.has(0) and parts.has(1))
+	if not parts.has(0) or not parts.has(1):
+		return
+	var building := parts[0] as Node3D
+	var door := parts[1] as Node3D
+	var p := _make_pass(_index_of({ 1: model }))
+	var snap := Snapshot.new()
+	snap.entities = [{ "bms_id": 1, "doors": [0] }]
+	_present(p, snap)
+	model.advance_runtime_frame(0.0)
+	var closed := door.transform
+	var fixed := building.transform
+	snap.entities[0]["doors"] = [65536]
+	_present(p, snap)
+	model.advance_runtime_frame(0.0)
+	assert_ne(door.transform, closed, "the retail door visibly opens at the endpoint")
+	assert_eq(building.transform, fixed, "the building stays fixed")
+	snap.entities[0]["doors"] = [0]
+	_present(p, snap)
+	model.advance_runtime_frame(0.0)
+	assert_eq(door.transform, closed, "closing returns to the exact initial transform")
 
 
 func test_active_channel_poses_to_phase() -> void:

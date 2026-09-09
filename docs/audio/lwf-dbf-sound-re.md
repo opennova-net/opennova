@@ -168,6 +168,58 @@ and a per-frame updater plays the queue **one audio channel at a time**:
 |---|---|---|---|
 | D-SND-4 | `MissionAudio.play_dialog` **enqueues** the resolved line set-name(s) and plays them one at a time, starting the next on the previous voice's `finished` (`_dialog_queue` + `spawn_oneshot_2d`) | one dialog channel, `dword_A895FC`-gated, advanced by `Dialog_UpdatePlayback` | reimpl-side serialization that reproduces the observable behavior (no dialog overlap). The prior reimpl played every drained `dialog` effect immediately and non-blocking, so a mission's PreMission/early `PlayWavList` actions blared simultaneously at t=0. We do not model the 16-active-slot table or the per-line countdown timing (the reimpl presents on stream `finished`); the *id -> "dlg%03d" -> .DBF group lines* resolution matches the engine's `"dlg%03i"` path. S13 close-out (2026-08-08): the FIFO stays **shell-owned by decision** — its advance trigger is the stream's `finished` signal (node/stream lifetime, the shell's half under the end-state rule), so a native queue would move no policy, only the Array. The witnessed one-channel serialization rule is this row. — PERMANENT 2026-08-29 (ADR 0022 register) |
 
+## WAC trigger-set commands (2026-09-09)
+
+The compiler now resolves SOUNDSET arguments and SS_ aliases against the mounted
+mission/global LWF chain before execution. References are stable nonzero handles
+into the program's complete name table; variables retain those handles, zero is
+the null reference, and unknown names are hard compile errors. Numeric literals
+in a SOUNDSET parameter are names, not indices. The resolver witness is
+WacScript_ResolveParameter at 0x4F2940 (expected type 19), calling
+SoundBank_FindSetByNameAnyBank at 0x5274F0. MissionKernel and hot script compilation
+use the same catalog as the presentation bank chain, including expansion banks.
+
+- sound (0x4ED590) returns 0 and passes its explicit Q16 distance and raw bearing
+  to Sound_PlayTriggerSetScaled (0x527B90). The helper constructs
+  {65536, bearing, g_SoundVolumeOption, 0, distance, 0} and enters
+  SoundBank_PlayTriggerEntries (0x75CCD0) directly. It does not perform the
+  positional set-range cull or occlusion query. Layer selection and attenuation
+  still run. The shared native planner now preserves that distinction; weather
+  thunder uses the same direct path.
+- sound2tgt (0x4F7F60) selects the first pool-3 marker with an ItemDef whose id is
+  6088 and whose WP_NUMBER at entity+668 matches the target. A nonzero sound plays
+  through Entity_PlaySound3D_FullVolume (0x528E20), with the entity origin and source
+  owner, and returns 0. Missing targets or zero sound return 1. There is no health
+  gate. The old IDB progress-bar description was incorrect.
+- SS2SSN (0x4F1DD0) requires a valid allocated packed handle and nonzero item index,
+  but does not require health or ItemDef. It uses the same positional entry and
+  returns 1 even for a zero sound; invalid sources return 0.
+
+World emits direct descriptors or the existing positional sound rows. Native
+motor positions retain their exact Q16 words. GameWorld publishes the listener
+before session presentation, fixing first-frame positional fires that previously
+used an infinite listener and bypassed attenuation. Positional rows retain the
+source identity for audio occlusion. A normal retry stops old bank-owned one-shot
+players, clears exclusive playback guards, and replays the sealed startup queues.
+
+Device policy remains D-SND-8: Godot supplies panning, options/bus gain and device
+availability. The direct path uses a unit listener-relative panner position while
+the native explicit distance controls gain. This is not a claim of byte-exact
+retail pan, master fade, underwater halving or pitch-jitter interleaving.
+Talking portraits remain D-SND-5.
+
+Validation: all seven focused native tests pass, including SOUNDSET aliases and
+numeric-name diagnostics, target/SSN admission, exact source coordinates, raw
+distance/bearing, retry queues, the explicit-distance planner, and the shipped WAC
+compile corpus (npc-sound-focused-ctest.log). Full native CTest passes 438 tests
+with one existing motorcycle asset skip (npc-sound-full-ctest.log, 79.00 seconds).
+The loaded-mission GUT regression passes 23 assertions against actual WAV players:
+both positional calls cull while direct sound plays at the expected layer gain,
+source ids survive, and normal retry stops and replaces the initial voice
+(npc-gut-wac-sounds.log). Full rebuilt-extension GUT subsequently passes 1,752 tests
+across 182 scripts, with 25 pending, 58,081 assertions and no collection errors
+(npc-gut-sound-range-full.log, 114.536 seconds). Existing shutdown caveats remain.
+
 ## WAC scripted voice — `wave` / `pwave` (grilled 2026-06-15; re-confirmed 2026-07-09)
 
 A WAC mission script triggers voice/wav lines separately from the BMS `PlayWavList`
@@ -198,7 +250,7 @@ direct `.wav` name, not a `.DBF` dialog id.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-5 | WAC `wave`/`pwave` emit a `"dialog_wav"` effect carrying the filename; the reimpl (`MissionAudio.play_wac_wave`) reads the wav through the VFS, decodes via `WavLoader`, and plays it on a single `_wac_voice` `AudioStreamPlayer` that `play()` restarts (interrupt-on-new) | `Wac_PlayScriptedVoiceWave` resets `dword_C6EC30` then plays the loaded wav | reimpl-side reproduction of the single interrupting voice channel. Previously WAC `wave`/`pwave` fell through `vm.cpp`'s default case to an unrouted `kind="wave"` effect and never played. Scope: `wave`/`pwave`; positional `SSNwave`/`SSNradio` (voice at an entity) and the rest of the sound family (`sound`, `sound2tgt`, `SS2SSN`, `waveready`) remain parsed-but-unconsumed, tracked follow-ups. |
+| D-SND-5 | Portrait identity has no talking-portrait consumer | Voice start/update @0x4ECC80/@0x4ED9C0 | WAC voice and trigger-set commands have native consumers and tested device playback. Portrait rendering remains open; device/panning policy is D-SND-8. |
 
 ## items.def marker sounds
 
@@ -727,8 +779,9 @@ semantics, and the global bank-slot order are all engine-witnessed and implement
   at a time (`Dialog_Register @ 0x44d980` queue, `Dialog_UpdatePlayback @ 0x44e470` gate);
   the reimpl reproduces this with a FIFO queue (D-SND-4) instead of firing every
   `PlayWavList` at once.
-- WAC `wave`/`pwave` scripted voice (D-SND-5): routed to a single interrupting reimpl voice
-  channel; the positional `SSNwave`/`SSNradio` family remains a tracked follow-up.
+- WAC wave/pwave and positional SSNwave/SSNradio now use the mission-owned
+  interrupting channel with physical completion feeding waveready. D-SND-5
+  tracks the remaining voice/audio predicates and presentation.
 - divergence (bank scope / D-SND-1): merged chain vs dialog-scoped co-named bank — accepted.
 - divergence (coverage / D-SND-2): CLOSED 2026-07-05 — expansion bank slots load in slot order off the runtime mount's expansion.
 - divergence (strictness / D-SND-3): parser rejects out-of-range single_index, >8 counts, bad

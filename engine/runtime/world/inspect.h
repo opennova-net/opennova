@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <runtime/world/entity.h>
+#include <runtime/world/mission_diagnostics.h>
 #include <runtime/world/geom.h>
 
 namespace opennova::world {
@@ -250,6 +251,15 @@ struct AiDetail {
 
 // The full per-entity debug card: the world/registry half, the AI half, or
 // both (valid = at least one resolved).
+// Facial state is independent of whether the entity has an AI brain.
+struct FacialDetail {
+    bool available = false;
+    int32_t current = 0, next = 0, expression_override = -1, automatic = -1;
+    int32_t override_timer = 0, texture_priority = -1;
+    float blend = 0.0f;
+    uint32_t display_frame = 0;
+};
+
 struct EntityCard {
 	bool valid = false;
 	uint16_t handle = EntityHandle::kInvalid;
@@ -258,6 +268,7 @@ struct EntityCard {
 	WorldDetail world;
 	bool has_ai = false;
 	AiDetail ai;
+    FacialDetail facial;
 };
 
 // One discovery row of the entity directory.
@@ -369,6 +380,8 @@ struct AiSystemCounters {
 	int32_t scheduler_budget = 0;
 	int32_t event_count = 0;
 	int32_t unported_calls = 0;
+    uint64_t runtime_gap_calls = 0;
+    uint32_t runtime_gap_sites = 0;
 	int32_t rel_ops = 0;
 	int32_t find_target_calls = 0;
 };
@@ -381,6 +394,7 @@ struct AiDebugReport {
 	std::vector<AiNavChannelRow> channels;
 	std::vector<AiGroupRow> groups;
 	AiSystemCounters counters;
+    std::vector<RuntimeGap> runtime_gaps;
 };
 
 // The AI-pool walk behind both debug surfaces. Non-const World: the muzzle

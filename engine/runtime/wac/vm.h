@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <formats/wac/program.h>
+#include <runtime/world/entity.h>
 
 namespace opennova::world {
 class World;
@@ -34,10 +35,14 @@ public:
 	// this state back to that owner's current program.
 	struct RuntimeState {
 		std::vector<EventState> events;
+        std::vector<uint8_t> loop_counters;
+        std::vector<uint8_t> loop_choices;
 		uint32_t rng_seed = 0x12333333u;
 		int32_t accumulator = 0;
 		int current_event = 0;
 		uint32_t time = 0;
+        std::vector<uint16_t> entity_bindings;
+        uint16_t auto_item = 0xFFFF;
 	};
 
     // Bind a compiled program (sizes the per-event state). Resets temporal state.
@@ -62,19 +67,30 @@ public:
 private:
     const Program *prog_ = nullptr;
     std::vector<EventState> events_;
+    std::vector<uint8_t> loop_counters_;
+    std::vector<uint8_t> loop_choices_;
     uint32_t rng_seed_ = 0x12333333u; // [orig: WacScript_InitAndLoad @ 0x4f966b — mov dword_C6EA40, 0x12333333]
     int32_t acc_ = 0;
     int cur_event_ = 0;
     uint32_t time_ = 0; // [orig: wac_var_ticks]
+    std::vector<uint16_t> entity_bindings_;
+    uint16_t auto_item_ = 0xFFFF;
+    int32_t cached_mana_ = 0;
+    int32_t cached_game_over_ = 0, cached_win_ = 0, cached_lose_ = 0;
+    int32_t cached_tod_ = 0;
+    void cache_player_state(opennova::world::World &);
+    std::vector<std::vector<world::EntityHandle>> groups_;
 
     int32_t read(opennova::world::World &w, uint32_t ref) const;
-    void write(opennova::world::World &w, uint32_t ref, int32_t v) const;
+    void write(opennova::world::World &w, uint32_t ref, int32_t v);
     int32_t arg_as_string_index(uint32_t ref) const; // for string-typed operands
     uint32_t next_rand();
     int32_t rand_range(int n);
 
+    void record_gap(opennova::world::World &w, int cmd, uint32_t instruction, const int32_t *arguments = nullptr);
+
     // Command dispatch (implemented subset; others recorded as effects).
-    int32_t dispatch(opennova::world::World &w, int cmd_index, const uint32_t *args, int argc);
+    int32_t dispatch(opennova::world::World &w, int cmd_index, const uint32_t *args, int argc, uint32_t instruction);
 };
 
 } // namespace opennova::wac

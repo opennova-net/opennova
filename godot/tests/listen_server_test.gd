@@ -348,12 +348,12 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 			snapshot[row_base + Simulation.PF_PITCH_DEG],
 			snapshot[row_base + Simulation.PF_YAW_DEG],
 			snapshot[row_base + Simulation.PF_ROLL_DEG])
-	assert_almost_eq(expected_rotation.x, 10.0, 0.001,
-			"the host snapshot restores authored pitch from the registry")
+	assert_almost_eq(expected_rotation.x, 0.0, 0.001,
+			"the host snapshot carries the organic initializer's level pitch")
 	assert_almost_eq(expected_rotation.y, 20.0, 1.5,
 			"yaw remains the retail compact-byte view")
-	assert_almost_eq(expected_rotation.z, 30.0, 0.001,
-			"the host snapshot restores authored roll from the registry")
+	assert_almost_eq(expected_rotation.z, 0.0, 0.001,
+			"the host snapshot carries the organic initializer's level roll")
 	var wire_handle := int(snapshot[row_base + Simulation.PF_WIRE_HANDLE])
 	var bms_id := int(snapshot[row_base + Simulation.PF_BMS_ID])
 	var ssn := int(snapshot[row_base + Simulation.PF_NET_ID])

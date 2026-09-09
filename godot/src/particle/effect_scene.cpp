@@ -1,4 +1,5 @@
 #include "particle/effect_scene.h"
+#include <runtime/particle/script_effects.h>
 #include "particle/effect_load_report.h"
 #include "particle/effect_spawn_records.h"
 #include "util/string_convert.h"
@@ -130,7 +131,7 @@ Ref<EffectSpawnReceipt> invalid_spawn_request(const String &message) {
 
 bool valid_admission(int value) noexcept {
 	return value >= EffectScene::ADMISSION_ALWAYS &&
-			value <= EffectScene::ADMISSION_SUPPRESS_WHILE_OWNED;
+			value <= EffectScene::ADMISSION_STORE_OWNED;
 }
 
 bool valid_binding(int value) noexcept {
@@ -185,6 +186,7 @@ void EffectScene::_bind_methods() {
 	BIND_ENUM_CONSTANT(ADMISSION_ALWAYS);
 	BIND_ENUM_CONSTANT(ADMISSION_REPLACE_OWNED);
 	BIND_ENUM_CONSTANT(ADMISSION_SUPPRESS_WHILE_OWNED);
+    BIND_ENUM_CONSTANT(ADMISSION_STORE_OWNED);
 	BIND_ENUM_CONSTANT(BINDING_WORLD);
 	BIND_ENUM_CONSTANT(BINDING_FOLLOW_OWNER);
 	BIND_ENUM_CONSTANT(RENDER_DOMAIN_WORLD);
@@ -229,6 +231,13 @@ Ref<EffectLoadReport> EffectScene::open(
 	result->assign(report, static_cast<int>(p_files.size()),
 			static_cast<int>(ignored_document_count));
 	return result;
+}
+
+void EffectScene::spawn_script_effect(const opennova::world::ScriptEffectEvent &event,
+        int64_t slot, int64_t owner, uint32_t age_ticks, float water_height) {
+    opennova::particle::spawn_script_effect(scene_, event,
+            {token_from_godot(slot)}, {token_from_godot(owner)}, age_ticks, water_height);
+    snapshot_dirty_ = true;
 }
 
 int64_t EffectScene::intern(const String &p_effect_name) {

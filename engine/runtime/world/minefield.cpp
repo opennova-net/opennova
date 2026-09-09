@@ -30,7 +30,7 @@ int32_t distance(FixedVec3 a, FixedVec3 b) {
 
 // [orig: Weapon_FireProcess @0x53F5B0]
 void fire(World &world, Entity &field, FixedVec3 p, uint8_t ammo_index) {
-	world.round_sim.fire_source(world, field, p,
+	world.round_sim.fire_source(world, &field, p,
 			field.veh.yaw_seeded ? field.veh.yaw_bam : bam_heading_from_mission_yaw_deg(field.yaw),
 			bam_from_degrees_wrapped(field.pitch), ammo_index);
 }

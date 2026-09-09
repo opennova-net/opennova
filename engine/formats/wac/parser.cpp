@@ -80,16 +80,44 @@ private:
         if (at_end()) return false;
         if (is_kw("if")) return parse_if(out);
         if (kw_in({"do", "dornd", "doseq", "ploop", "gloop"})) return parse_block(out);
-        if (kw_in({"var", "array"})) { skip_decl(); return false; }
-        if (is_kw("run") || is_kw("enter") || is_kw("leave")) { skip_line_word(); return false; }
+        if (kw_in({"var", "array", "run"})) {
+            out.kind = is_kw("run") ? Stmt::Run : Stmt::Declaration;
+            out.array_declaration = is_kw("array");
+            out.call.line = cur().line;
+            advance();
+            if (cur().kind != TokKind::Word && cur().kind != TokKind::String) {
+                error("expected a name");
+                return false;
+            }
+            out.call.name = cur().text;
+            advance();
+            return true;
+        }
         if (kw_in({"else", "elseif", "endif", "end", "enif", "then", "next", "enddo"})) {
             // Stray block terminator at statement scope; skip.
             advance();
             return false;
         }
         if (cur().kind == TokKind::Word) {
-            out.kind = Stmt::Action;
-            out.call = parse_call();
+            if (pos_ + 1 < toks_.size() && toks_[pos_ + 1].text == "=") {
+                out.kind = Stmt::Assignment;
+                out.assignment_target.text = cur().text;
+                out.call.line = cur().line;
+                advance();
+                advance();
+                out.cond = parse_expr();
+            } else {
+                out.cond = parse_expr();
+                if (out.cond.kind == Expr::Leaf && out.cond.call.name != kOperandMarker) {
+                    out.kind = Stmt::Action;
+                    out.call = out.cond.call;
+                } else out.kind = Stmt::Expression;
+            }
+            return true;
+        }
+        if (cur().kind == TokKind::LParen || is_op("-") || is_op("not") || is_op("!")) {
+            out.kind = Stmt::Expression;
+            out.cond = parse_expr();
             return true;
         }
         // Anything else (stray operator/paren) — skip to recover.
@@ -97,11 +125,36 @@ private:
         return false;
     }
 
+    IfMode parse_if_mode() {
+        IfMode mode = IfMode::Then;
+        if (is_kw("enter")) mode = IfMode::Enter;
+        else if (is_kw("leave")) mode = IfMode::Leave;
+        else if (!is_kw("then")) {
+            warn("expected 'then', 'enter' or 'leave'");
+            return mode;
+        }
+        advance();
+        return mode;
+    }
+
+    void parse_event_name(std::string &name) {
+        if (cur().kind != TokKind::LBracket) return;
+        advance();
+        if (cur().kind == TokKind::Word || cur().kind == TokKind::String) {
+            name = cur().text;
+            advance();
+        } else error("expected an event name");
+        if (cur().kind == TokKind::RBracket) advance();
+        else error("expected ']'");
+    }
+
     bool parse_if(Stmt &out) {
         out.kind = Stmt::If;
         advance(); // 'if'
+        parse_event_name(out.event_name);
         out.cond = parse_expr();
-        if (is_kw("then")) advance(); else warn("expected 'then'");
+        parse_event_name(out.event_name);
+        out.mode = parse_if_mode();
         out.body = parse_block_until({"else", "elseif", "endif", "end", "enif"});
         // Retail chains alternatives as `elseif` OR the two-word `else if`
         // (the shipped corpus' dominant form — e.g. 00TRg.wac), both closed by
@@ -116,8 +169,10 @@ private:
                 advance(); // 'if'
             }
             ElseIf ei;
+            parse_event_name(ei.event_name);
             ei.cond = parse_expr();
-            if (is_kw("then")) advance(); else warn("expected 'then' after elseif");
+            parse_event_name(ei.event_name);
+            ei.mode = parse_if_mode();
             ei.body = parse_block_until({"else", "elseif", "endif", "end", "enif"});
             out.elifs.push_back(std::move(ei));
         }
@@ -137,10 +192,22 @@ private:
     bool parse_block(Stmt &out) {
         out.kind = Stmt::Block;
         out.block_kind = cur().lowered;
+        out.call.line = cur().line;
         advance();
-        // Body runs to 'enddo' (loops) / 'endif'. 'next' separates sections — we
-        // flatten them in this milestone (full loop iteration semantics deferred).
-        out.body = parse_block_until({"enddo", "endif", "end", "enif"});
+        if (out.block_kind == "gloop") {
+            const bool parens = cur().kind == TokKind::LParen;
+            if (parens) advance();
+            if (!parse_arg(out.block_argument)) error("expected a group after GLOOP");
+            if (parens) {
+                if (cur().kind == TokKind::RParen) advance();
+                else error("expected ')' after GLOOP group");
+            }
+        }
+        out.body = parse_block_until({"next", "enddo", "endif", "end", "enif"});
+        while (is_kw("next")) {
+            advance();
+            out.next_bodies.push_back(parse_block_until({"next", "enddo", "endif", "end", "enif"}));
+        }
         if (kw_in({"enddo", "endif", "end", "enif"})) advance();
         return true;
     }
@@ -235,70 +302,33 @@ private:
         return false;
     }
 
-    // ---- expressions (xor < or < and < cmp < unary < primary) ----
-    Expr parse_expr() { return parse_xor(); }
+    // [orig: Script_GetOperatorPrecedence @0x4EE540] AND and OR share
+    // precedence 1; comparisons 2, +/- 3, */% 4, power 5.
+    static int precedence(std::string_view op) {
+        if (op == "and" || op == "or" || op == "&&" || op == "||" || op == "xor") return 1;
+        if (cmp_command(op)) return 2;
+        if (op == "+" || op == "-") return 3;
+        if (op == "*" || op == "/" || op == "%") return 4;
+        if (op == "^") return 5;
+        return 0;
+    }
 
-    Expr parse_xor() {
-        Expr e = parse_or();
-        while (is_op("xor")) {
-            advance();
-            Expr rhs = parse_or();
-            Expr combined;
-            combined.kind = Expr::Xor;
-            combined.kids.push_back(std::move(e));
-            combined.kids.push_back(std::move(rhs));
-            e = std::move(combined);
-        }
-        return e;
-    }
-    Expr parse_or() {
-        Expr e = parse_and();
-        while (is_op("or") || is_op("||")) {
-            advance();
-            Expr rhs = parse_and();
-            Expr combined;
-            combined.kind = Expr::Or;
-            combined.kids.push_back(std::move(e));
-            combined.kids.push_back(std::move(rhs));
-            e = std::move(combined);
-        }
-        return e;
-    }
-    Expr parse_and() {
-        Expr e = parse_cmp();
-        while (is_op("and") || is_op("&&")) {
-            advance();
-            Expr rhs = parse_cmp();
-            Expr combined;
-            combined.kind = Expr::And;
-            combined.kids.push_back(std::move(e));
-            combined.kids.push_back(std::move(rhs));
-            e = std::move(combined);
-        }
-        return e;
-    }
-    Expr parse_cmp() {
+    Expr parse_expr(int minimum = 1) {
         Expr left = parse_unary();
-        if (cur().kind == TokKind::Operator) {
-            const char *cmd = cmp_command(cur().lowered);
-            if (cmd) {
-                advance();
-                Expr right = parse_unary();
-                Arg la, ra;
-                if (expr_as_operand(left, la) && expr_as_operand(right, ra)) {
-                    Expr e;
-                    e.kind = Expr::Leaf;
-                    e.call.name = cmd;
-                    e.call.args.push_back(std::move(la));
-                    e.call.args.push_back(std::move(ra));
-                    return e;
-                }
-                // Mixed call/operand comparison — keep the left side as the leaf.
-                return left;
-            }
+        while (cur().kind == TokKind::Operator && precedence(cur().lowered) >= minimum) {
+            const std::string op = cur().lowered;
+            const int level = precedence(op);
+            advance();
+            Expr expression;
+            expression.kind = Expr::Binary;
+            expression.op = op;
+            expression.kids.push_back(std::move(left));
+            expression.kids.push_back(parse_expr(level + 1));
+            left = std::move(expression);
         }
         return left;
     }
+
     Expr parse_unary() {
         if (is_op("not") || is_op("!")) {
             advance();
@@ -311,9 +341,20 @@ private:
         return parse_primary();
     }
     Expr parse_primary() {
+        if (is_op("-")) {
+            Expr e;
+            e.call.name = kOperandMarker;
+            e.call.line = cur().line;
+            Arg a;
+            if (parse_arg(a)) e.call.args.push_back(std::move(a));
+            else error("expected a value after '-'");
+            return e;
+        }
         if (cur().kind == TokKind::LParen) {
             advance();
-            Expr e = parse_expr();
+            Expr e;
+            e.kind = Expr::Group;
+            e.kids.push_back(parse_expr());
             if (cur().kind == TokKind::RParen) advance(); else warn("expected ')'");
             return e;
         }
@@ -328,6 +369,7 @@ private:
             } else {
                 // bare operand -> truthiness leaf
                 e.call.name = kOperandMarker;
+                e.call.line = cur().line;
                 Arg a;
                 a.text = cur().text;
                 e.call.args.push_back(std::move(a));

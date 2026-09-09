@@ -60,6 +60,125 @@ std::string ai_profile_name_for(
     return "helo1";
 }
 
+// Shared DEF/profile initialization for placed and dynamically spawned AI.
+// [orig: Entity_InitVehicleAI @0x460200; Entity_InitHelicopterAI @0x461F00]
+int initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai, EntityKind kind) {
+    AiBrain &b = ae.brain;
+    int profile_initial_state = -1;
+    if (data.type == 1 || data.type == 2)
+        profile_initial_state = data.default_state;
+    if (data.combat_speed >= 0)
+        b.f[AiBrain::kSpeedA] = static_cast<int32_t>(
+                (static_cast<int64_t>(data.combat_speed) << 16) / 225);
+    if (data.patrol_speed >= 0)
+        b.f[AiBrain::kSpeedB] = static_cast<int32_t>(
+                (static_cast<int64_t>(data.patrol_speed) << 16) / 225);
+    if (data.has_ground_combat_speed)
+        b.f[AiBrain::kSpeedA] = data.ground_combat_speed;
+    if (data.has_ground_patrol_speed)
+        b.f[AiBrain::kSpeedB] = data.ground_patrol_speed;
+    b.f[AiBrain::kDriveSkill] = data.drive_skill;
+    b.f[AiBrain::kPrevAlert] = data.alert;
+    // The §16.2 class walk data: the four class-priority words and the
+    // derived +40..+52 walk order. The parse is already type-gated like
+    // retail's, so the words carry exactly what AIProfile_ParseProperty
+    // wrote; the sort loads its keys only for HELO/GROUND profiles
+    // [orig: AIProfile_ParseProperty @0x45de70 +80..+92;
+    // AIProfile_LoadOrFind @0x45fd80 qsort (CompareFunction @0x455d90,
+    // ascending, insertion-stable at 4 entries) stored REVERSED
+    // @0x45fed9-0x45ff04].
+    ae.profile.type = data.type;
+    ae.profile.subtype = data.subtype;
+    // The parsed profile is the runtime profile: retain its flight and
+    // targeting fields on both families. [orig: @0x45DE70; @0x460200]
+    ae.profile.flags96 = static_cast<uint8_t>(data.evade_flags);
+    ae.profile.field104 = std::max(0, data.react_ticks);
+    ae.profile.view_fov_bam = data.view_fov_bam;
+    ae.profile.radar_fov_bam = data.radar_fov_bam;
+    ae.profile.view_dist = data.view_dist;
+    ae.profile.fov_primary = uint8_t(uint32_t(data.radar_fov_bam) >> 24);
+    ae.profile.fov_secondary = uint8_t(uint32_t(data.view_fov_bam) >> 24);
+    ae.profile.range_primary = static_cast<int16_t>(data.radar_dist >> 16);
+    ae.profile.range_secondary = static_cast<int16_t>(data.view_dist >> 16);
+    ae.profile.approach_cap = data.radar_dist;
+    ae.profile.min_chase = data.min_chase;
+    ae.profile.max_chase = data.max_chase;
+    if (data.type == 1) {
+        if (data.helo_combat_speed >= 0)
+            b.f[AiBrain::kSpeedA] = data.helo_combat_speed;
+        if (data.helo_patrol_speed >= 0)
+            b.f[AiBrain::kSpeedB] = data.helo_patrol_speed;
+        ae.profile.patrol_altitude = data.helo_patrol_altitude;
+        ae.profile.patrol_climb = std::max(0, data.helo_patrol_climb);
+        ae.profile.field216 = data.helo_combat_altitude;
+        ae.profile.field220 = std::max(0, data.helo_combat_climb);
+        ae.profile.min_agl = data.min_agl;
+        ae.profile.min_speed = std::max(0, data.min_speed);
+        ae.profile.flight_flags = data.hunt_flags;
+        b.f[AiBrain::kUseWaypointZones] = data.use_waypoint_z;
+        if (kind == EntityKind::Item)
+            b.f[51] = (uint16_t(ai.prng_step_a()) % 20) << 16;
+    }
+    ae.profile.class_priority[0] = data.priority_air;
+    ae.profile.class_priority[1] = data.priority_ground;
+    ae.profile.class_priority[2] = data.priority_organics;
+    ae.profile.class_priority[3] = data.priority_decorations;
+    {
+        const bool keyed = data.type == 1 || data.type == 2;
+        std::array<std::pair<int32_t, int8_t>, 4> ents{};
+        for (int8_t i = 0; i < 4; ++i)
+            ents[i] = {keyed ? ae.profile.class_priority[i] : 0, i};
+        std::stable_sort(ents.begin(), ents.end(),
+                         [](const auto &a, const auto &b) { return a.first < b.first; });
+        for (int i = 0; i < 4; ++i)
+            ae.profile.slot_class[i] = ents[3 - i].second;
+    }
+    // The GROUND weapon def blocks (profile+120/+152) + their brain
+    // seeds. The ammo COUNT seed rides the same unwitnessed spawn
+    // block-copy family as D-AI-5 (no per-field writer exists; the
+    // stationary pump reads brain[53]/[54] as the live counts of the
+    // +120/+152 capacities), so the capacities seed them here. The
+    // authored "*_weap" ammo names resolve against the loaded ammo
+    // table at the item-traits sweep [orig: AIProfile_ParseProperty
+    // @0x45de70 GROUND block; AIEntity_ProcessWeaponFire field map
+    // §17.6].
+    if (data.type == 1 || data.type == 2) {
+        const auto seed_block = [](world::AiProfile::WeaponFire &dst,
+                                        const aip::WeaponBlock &src) {
+            dst.ammo_cap = src.ammo;
+            dst.cone_bam = src.cone_bam;
+            dst.flags = src.flags;
+            dst.facing_bam = src.facing_bam;
+            dst.pitch_bam = src.pitch_bam;
+            dst.ammo_name = src.weapon;
+        };
+        seed_block(ae.profile.fire_a, data.primary);
+        seed_block(ae.profile.fire_b, data.secondary);
+        b.f[AiBrain::kElevationBias] = data.primary.pitch_bam;
+        const aip::WeaponBlock *turret = (data.primary.flags & 1) != 0 ? &data.primary
+                : (data.secondary.flags & 1) != 0 ? &data.secondary
+                                                     : nullptr;
+        if (turret != nullptr)
+            b.f[AiBrain::kActiveYaw] = b.f[AiBrain::kStagingBlock + 3] = turret->facing_bam;
+        ae.profile.fire_interval_a = data.primary.rate_ticks;
+        ae.profile.fire_interval_b = data.secondary.rate_ticks;
+        b.f[AiBrain::kAmmoA] = data.primary.ammo;
+        b.f[AiBrain::kAmmoB] = data.secondary.ammo;
+        // COMBAT_FLAGS is the witnessed flags100 source (ATEAM/
+        // ATEAM_LOCK/RC_FIRE ride the SM weapon dispatch).
+        ae.profile.flags100 |= static_cast<uint8_t>(data.combat_flags);
+        if (data.aim_skill >= 0) {
+            // PROBABLE, not anchored: aim_skill (+28, clamped 0..4) is
+            // the only 0..4-shaped profile field feeding the (6 -
+            // brain[43]) scatter modulus; the spawn copy site itself
+            // is the same unwitnessed block-copy as the ammo counts.
+            ae.profile.accuracy = data.aim_skill;
+            b.f[AiBrain::kAccuracy] = data.aim_skill;
+        }
+    }
+    return profile_initial_state;
+}
+
 namespace {
 
 // degrees -> 32-bit binary angle (the entity-heading unit, entity+16). [orig: AI_HandleCommand
@@ -78,36 +197,13 @@ int pool_for_kind(EntityKind k) {
     return 0;
 }
 
-const ItemSeatSpec *seat_spec_for_type(const PromoteOptions &opts, int32_t type_id) {
-    for (const ItemSeatSpec &spec : opts.item_seat_specs) {
+const ItemSeatSpec *seat_spec_for_type(const std::vector<ItemSeatSpec> &specs, int32_t type_id) {
+    for (const ItemSeatSpec &spec : specs) {
         if (spec.type_id == type_id) return &spec;
     }
     return nullptr;
 }
 
-void seed_authored_seats(Entity &entity, const PromoteOptions &opts) {
-    const ItemSeatSpec *spec = seat_spec_for_type(opts, entity.item_id);
-    if (spec == nullptr) return;
-    entity.emplaced_config_valid = spec->mount_config_valid;
-    entity.emplaced_config = spec->mount_config_valid ? spec->mount_config : 0;
-    entity.armory_points = spec->armory_points;
-    entity.primary_weapon = spec->primary_weapon;
-    // Seat specs are the def-derived trait channel: a spec that declares the
-    // EWeap primary weapon carries items.def's attrib-0x20 nature. A world
-    // promoted before/without the item database (authored tool and test
-    // worlds) stamps the equivalent trait so the witnessed def gate in
-    // resolve_mounted_ammo_slot [orig: @0x5460E0] holds uniformly; a real
-    // items.def sweep overwrites this with the authoritative row.
-    if (!entity.has_item_def && !spec->primary_weapon.empty()) {
-        entity.has_item_def = true;
-        entity.item_attrib |= kItemAttribEweap;
-    }
-    if (spec->seats.empty()) return;
-    entity.seats = spec->seats;
-    for (Seat &seat : entity.seats) {
-        seat.occupant = EntityHandle{};
-    }
-}
 
 Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t origin) {
     Entity s;
@@ -127,11 +223,13 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
 	s.group_id = e.group_id;
 	s.waypoint_id = e.waypoint_id;
     s.wp_number = e.wp_number;
+    if (e.type_id == kParticleEffectMarkerTypeId) {
+        size_t length = 0;
+        while (length < 31 && e.gen_string[length] != '\0') ++length;
+        s.script_effect_name.assign(e.gen_string, length);
+    }
     s.alert_state = e.alert_state;
     s.ai_flags = e.bmsi_attributes;
-    s.engage_min = e.min_engagement_distance;
-    s.engage_max = e.max_engagement_distance;
-    s.attack_max = e.max_attack_distance;
     s.spawn_origin = origin;
     // The retail entity Flags dword (entity+36), BMS-attribute part — the 0x10 static record
     // streams it raw (D-NET-147/150). [orig: Entity_SpawnFromBMSRecord @0x40e9f0: attrib
@@ -261,117 +359,7 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     if (!want.empty()) {
         for (const PromoteOptions::AiProfileRow &ps : opts.ai_profiles) {
             if (ps.profile != want) continue;
-			if (ps.data.type == 1 || ps.data.type == 2)
-				profile_initial_state = ps.data.default_state;
-			if (ps.data.combat_speed >= 0)
-                b.f[AiBrain::kSpeedA] = static_cast<int32_t>(
-                        (static_cast<int64_t>(ps.data.combat_speed) << 16) / 225);
-            if (ps.data.patrol_speed >= 0)
-                b.f[AiBrain::kSpeedB] = static_cast<int32_t>(
-                        (static_cast<int64_t>(ps.data.patrol_speed) << 16) / 225);
-			if (ps.data.has_ground_combat_speed)
-				b.f[AiBrain::kSpeedA] = ps.data.ground_combat_speed;
-			if (ps.data.has_ground_patrol_speed)
-				b.f[AiBrain::kSpeedB] = ps.data.ground_patrol_speed;
-			b.f[AiBrain::kDriveSkill] = ps.data.drive_skill;
-			b.f[AiBrain::kPrevAlert] = ps.data.alert;
-			// The §16.2 class walk data: the four class-priority words and the
-			// derived +40..+52 walk order. The parse is already type-gated like
-			// retail's, so the words carry exactly what AIProfile_ParseProperty
-			// wrote; the sort loads its keys only for HELO/GROUND profiles
-			// [orig: AIProfile_ParseProperty @0x45de70 +80..+92;
-			// AIProfile_LoadOrFind @0x45fd80 qsort (CompareFunction @0x455d90,
-			// ascending, insertion-stable at 4 entries) stored REVERSED
-			// @0x45fed9-0x45ff04].
-			ae.profile.type = ps.data.type;
-			ae.profile.subtype = ps.data.subtype;
-			// The parsed profile is the runtime profile: retain its flight and
-			// targeting fields on both families. [orig: @0x45DE70; @0x460200]
-			ae.profile.flags96 = static_cast<uint8_t>(ps.data.evade_flags);
-			ae.profile.field104 = std::max(0, ps.data.react_ticks);
-			ae.profile.view_fov_bam = ps.data.view_fov_bam;
-			ae.profile.radar_fov_bam = ps.data.radar_fov_bam;
-			ae.profile.view_dist = ps.data.view_dist;
-			ae.profile.fov_primary = uint8_t(uint32_t(ps.data.radar_fov_bam) >> 24);
-			ae.profile.fov_secondary = uint8_t(uint32_t(ps.data.view_fov_bam) >> 24);
-			ae.profile.range_primary = static_cast<int16_t>(ps.data.radar_dist >> 16);
-			ae.profile.range_secondary = static_cast<int16_t>(ps.data.view_dist >> 16);
-			ae.profile.approach_cap = ps.data.radar_dist;
-			ae.profile.min_chase = ps.data.min_chase;
-			ae.profile.max_chase = ps.data.max_chase;
-			if (ps.data.type == 1) {
-				if (ps.data.helo_combat_speed >= 0)
-					b.f[AiBrain::kSpeedA] = ps.data.helo_combat_speed;
-				if (ps.data.helo_patrol_speed >= 0)
-					b.f[AiBrain::kSpeedB] = ps.data.helo_patrol_speed;
-				ae.profile.patrol_altitude = ps.data.helo_patrol_altitude;
-				ae.profile.patrol_climb = std::max(0, ps.data.helo_patrol_climb);
-				ae.profile.field216 = ps.data.helo_combat_altitude;
-				ae.profile.field220 = std::max(0, ps.data.helo_combat_climb);
-				ae.profile.min_agl = ps.data.min_agl;
-				ae.profile.min_speed = std::max(0, ps.data.min_speed);
-				ae.profile.flight_flags = ps.data.hunt_flags;
-				b.f[AiBrain::kUseWaypointZones] = ps.data.use_waypoint_z;
-				if (kind == EntityKind::Item)
-					b.f[51] = (uint16_t(ai.prng_step_a()) % 20) << 16;
-			}
-			ae.profile.class_priority[0] = ps.data.priority_air;
-			ae.profile.class_priority[1] = ps.data.priority_ground;
-            ae.profile.class_priority[2] = ps.data.priority_organics;
-            ae.profile.class_priority[3] = ps.data.priority_decorations;
-            {
-                const bool keyed = ps.data.type == 1 || ps.data.type == 2;
-                std::array<std::pair<int32_t, int8_t>, 4> ents{};
-                for (int8_t i = 0; i < 4; ++i)
-                    ents[i] = {keyed ? ae.profile.class_priority[i] : 0, i};
-                std::stable_sort(ents.begin(), ents.end(),
-                                 [](const auto &a, const auto &b) { return a.first < b.first; });
-                for (int i = 0; i < 4; ++i)
-                    ae.profile.slot_class[i] = ents[3 - i].second;
-            }
-            // The GROUND weapon def blocks (profile+120/+152) + their brain
-            // seeds. The ammo COUNT seed rides the same unwitnessed spawn
-            // block-copy family as D-AI-5 (no per-field writer exists; the
-            // stationary pump reads brain[53]/[54] as the live counts of the
-            // +120/+152 capacities), so the capacities seed them here. The
-            // authored "*_weap" ammo names resolve against the loaded ammo
-            // table at the item-traits sweep [orig: AIProfile_ParseProperty
-            // @0x45de70 GROUND block; AIEntity_ProcessWeaponFire field map
-            // §17.6].
-			if (ps.data.type == 1 || ps.data.type == 2) {
-				const auto seed_block = [](world::AiProfile::WeaponFire &dst,
-												const aip::WeaponBlock &src) {
-                    dst.ammo_cap = src.ammo;
-                    dst.cone_bam = src.cone_bam;
-                    dst.flags = src.flags;
-                    dst.facing_bam = src.facing_bam;
-                    dst.pitch_bam = src.pitch_bam;
-                    dst.ammo_name = src.weapon;
-				};
-				seed_block(ae.profile.fire_a, ps.data.primary);
-                seed_block(ae.profile.fire_b, ps.data.secondary);
-				b.f[AiBrain::kElevationBias] = ps.data.primary.pitch_bam;
-				const aip::WeaponBlock *turret = (ps.data.primary.flags & 1) != 0 ? &ps.data.primary
-						: (ps.data.secondary.flags & 1) != 0 ? &ps.data.secondary
-															 : nullptr;
-				if (turret != nullptr)
-					b.f[AiBrain::kActiveYaw] = b.f[AiBrain::kStagingBlock + 3] = turret->facing_bam;
-				ae.profile.fire_interval_a = ps.data.primary.rate_ticks;
-				ae.profile.fire_interval_b = ps.data.secondary.rate_ticks;
-                b.f[AiBrain::kAmmoA] = ps.data.primary.ammo;
-                b.f[AiBrain::kAmmoB] = ps.data.secondary.ammo;
-                // COMBAT_FLAGS is the witnessed flags100 source (ATEAM/
-                // ATEAM_LOCK/RC_FIRE ride the SM weapon dispatch).
-                ae.profile.flags100 |= static_cast<uint8_t>(ps.data.combat_flags);
-                if (ps.data.aim_skill >= 0) {
-                    // PROBABLE, not anchored: aim_skill (+28, clamped 0..4) is
-                    // the only 0..4-shaped profile field feeding the (6 -
-                    // brain[43]) scatter modulus; the spawn copy site itself
-                    // is the same unwitnessed block-copy as the ammo counts.
-                    ae.profile.accuracy = ps.data.aim_skill;
-                    b.f[AiBrain::kAccuracy] = ps.data.aim_skill;
-                }
-			}
+			profile_initial_state = initialize_ai_profile(ae, ps.data, ai, kind);
 			break;
 		}
     }
@@ -414,9 +402,9 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
 // Entity_SpawnFromBMSRecord @0x40e9f0 (the AiSlot block) — see docs/world/world-wac-ai-re.md §3.2.
 void init_infantry(AiEntity &ae, const bms::Entity &e) {
     ae.inf.active = true;
-    // Face stays where it spawned until an order steers it.
-    ae.inf.body_heading = ae.heading;
-    ae.inf.target_heading = ae.heading;
+    // Body and independent look start at the authored facing.
+    ae.inf.body_heading = ae.inf.target_heading = ae.inf.aim_heading = ae.heading;
+    ae.inf.aim_pitch = ae.pitch;
 
     AiSlot &s = ae.slot;
     // The authored AI attributes become AiSlot[1] control bits at spawn. Berserk
@@ -464,6 +452,120 @@ void init_infantry(AiEntity &ae, const bms::Entity &e) {
 }
 
 } // namespace
+
+void initialize_item_seats(Entity &entity, const std::vector<ItemSeatSpec> &specs) {
+    const ItemSeatSpec *spec = seat_spec_for_type(specs, entity.item_id);
+    if (spec == nullptr) return;
+    entity.emplaced_config_valid = spec->mount_config_valid;
+    entity.emplaced_config = spec->mount_config_valid ? spec->mount_config : 0;
+    entity.armory_points = spec->armory_points;
+    entity.primary_weapon = spec->primary_weapon;
+    // Seat specs are the def-derived trait channel: a spec that declares the
+    // EWeap primary weapon carries items.def's attrib-0x20 nature. A world
+    // promoted before/without the item database (authored tool and test
+    // worlds) stamps the equivalent trait so the witnessed def gate in
+    // resolve_mounted_ammo_slot [orig: @0x5460E0] holds uniformly; a real
+    // items.def sweep overwrites this with the authoritative row.
+    if (!entity.has_item_def && !spec->primary_weapon.empty()) {
+        entity.has_item_def = true;
+        entity.item_attrib |= kItemAttribEweap;
+    }
+    if (spec->seats.empty()) return;
+    entity.seats = spec->seats;
+    for (Seat &seat : entity.seats) {
+        seat.occupant = EntityHandle{};
+    }
+}
+
+ItemAttachmentSpawns spawn_item_attachments(World &world, const std::vector<EntityHandle> &carriers,
+        const std::vector<ItemSeatSpec> &specs) {
+    ItemAttachmentSpawns result;
+    // Every stored items.def addeweap* slot creates a pool-1 child. The public
+    // metadata already normalized the authored full item id to the raw type id;
+    // G/C flags and angle fallback presence remain separate. Children use a
+    // non-BMS origin sentinel so the listen-server WirePresentPass cannot defer
+    // them to an unrelated placed node with the same (kind,index).
+    struct AttachmentWork {
+        EntityHandle carrier;
+        std::vector<int32_t> lineage;
+    };
+    std::vector<AttachmentWork> attachment_work;
+    attachment_work.reserve(carriers.size());
+    for (EntityHandle h : carriers) {
+        const Entity *carrier = world.registry.get(h);
+        if (carrier != nullptr)
+            attachment_work.push_back(AttachmentWork{h, {carrier->item_id}});
+    }
+    for (size_t work_index = 0; work_index < attachment_work.size(); ++work_index) {
+        const AttachmentWork work = attachment_work[work_index];
+        Entity *carrier = world.registry.get(work.carrier);
+        if (carrier == nullptr) continue;
+        const ItemSeatSpec *carrier_spec =
+                seat_spec_for_type(specs, carrier->item_id);
+        if (carrier_spec == nullptr) continue;
+        if (work.lineage.size() >= 8) continue;
+        for (const ItemEmplacementAttachmentSpec &attachment :
+             carrier_spec->emplacement_attachments) {
+            if (attachment.child_type_id == 0 ||
+                std::find(work.lineage.begin(), work.lineage.end(),
+                          attachment.child_type_id) != work.lineage.end())
+                continue;
+            Entity child_seed;
+            child_seed.kind = EntityKind::Item;
+            child_seed.item_id = attachment.child_type_id;
+            child_seed.position = carrier->position;
+            child_seed.yaw = carrier->yaw;
+            child_seed.pitch = carrier->pitch;
+            child_seed.roll = carrier->roll;
+            child_seed.team = carrier->team;
+            child_seed.spawn_origin = 0xFFFFFFFFu;
+            const EntityHandle child_handle =
+                    world.registry.spawn(pool_for_kind(EntityKind::Item), child_seed);
+            if (!child_handle.valid()) {
+                ++result.dropped;
+                break;
+            }
+            result.handles.push_back(child_handle);
+            Entity *child = world.registry.get(child_handle);
+            carrier = world.registry.get(work.carrier);
+            if (child == nullptr || carrier == nullptr) continue;
+            child->emplacement_parent = work.carrier;
+            child->emplacement_parent_spawn_id =
+                    carrier->registry_spawn_id;
+            // NoNetworkCallback addeweap children also carry their host in the
+            // ordinary groundEntity field; retail's shared MountSlot resolver
+            // follows +0x28, not the attachment metadata pointer.
+            child->ground_target = work.carrier;
+            child->emplacement_local = attachment.anchor.seat_local;
+            child->emplacement_yaw_offset = attachment.anchor.yaw_offset;
+            child->emplacement_bone =
+                    attachment.anchor_found ? attachment.anchor.bone_index : 0;
+            child->emplacement_kind = static_cast<uint8_t>(attachment.kind);
+            child->emplacement_slot = attachment.stored_slot;
+            child->emplacement_attachment_flags = attachment.attachment_flags;
+            child->emplacement_angle_count = attachment.angle_count;
+            child->emplacement_down_limit_bam = attachment.down_limit_bam;
+            child->emplacement_up_limit_bam = attachment.up_limit_bam;
+            child->emplacement_right_limit_bam = attachment.right_limit_bam;
+            child->emplacement_left_limit_bam = attachment.left_limit_bam;
+            // Promotion is the authority-side source of the exact addeweap
+            // row, including its stored slot even when sibling types repeat.
+            child->emplacement_pose_metadata_resolved = true;
+            initialize_item_seats(*child, specs);
+            Seat anchor = attachment.anchor;
+            anchor.type = SeatType::Gunner;
+            anchor.bone_index = child->emplacement_bone;
+            anchor.attachment_frame = true;
+            world.vehicles.pose_mounted_occupant(*child, *carrier, anchor);
+
+            std::vector<int32_t> lineage = work.lineage;
+            lineage.push_back(attachment.child_type_id);
+            attachment_work.push_back(
+                    AttachmentWork{child_handle, std::move(lineage)});
+        }
+    }
+    return result;
+}
 
 PromoteResult promote_mission(const bms::File &m, World &world,
                               const PromoteOptions &opts) {
@@ -596,6 +698,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     // this the within-area triggers + AREA_AI family resolve against an empty table (always false).
     // [The designer-zone-id (1..99) <-> array-index correspondence + AREA_AI param1's exact zone
     // reference are grill-gated (P5); registering the table is the prerequisite.]
+    world.registry.clear_script_tables();
     for (const bms::AreaTrigger &at : m.area_triggers) {
         Aabb b;
         b.min.x = at.get_x_min(); b.max.x = at.get_x_max();
@@ -606,7 +709,23 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         // active zones [orig: Entity_IsLocalPlayerOutOfBounds @0x439d40]. The
         // authored id (record dword @0) rides along for the load-time zone-ref
         // resolve [orig: @0x453000/@0x453100 match record[0]].
-        world.registry.register_area(std::string(), b, at.is_active(), at.id);
+        Aabb raw = b;
+        raw.min.z = at.get_z_min(); raw.max.z = at.get_z_max();
+        world.registry.register_area(std::string(), b, at.is_active(), at.id, raw);
+    }
+
+    // [orig: Mission_LoadBMSFile @0x40FCC3] Normalize each bounding-box axis.
+    // Type 5 supplies WAC location IDs; these are not area-trigger records.
+    for (const bms::BoundingBox &box : m.bounding_boxes) {
+        if (box.type != 5) continue;
+        Aabb bounds;
+        bounds.min = {std::min(box.min_x, box.max_x) / 65536.0f,
+                      std::min(box.min_y, box.max_y) / 65536.0f,
+                      std::min(box.min_z, box.max_z) / 65536.0f};
+        bounds.max = {std::max(box.min_x, box.max_x) / 65536.0f,
+                      std::max(box.min_y, box.max_y) / 65536.0f,
+                      std::max(box.min_z, box.max_z) / 65536.0f};
+        world.registry.register_location(bounds, box.ref_id);
     }
 
 	// Spawn actors + AI brains (organics are AI-driven; vehicles get brains in the vehicle
@@ -669,7 +788,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             ++r.spawned;
             if (kind == EntityKind::Item) promoted_item_handles.push_back(h);
             if (Entity *spawned = world.registry.get(h)) {
-                seed_authored_seats(*spawned, opts);
+                initialize_item_seats(*spawned, opts.item_seat_specs);
             }
             const bool ai_capable =
                     ai_capable_default ||
@@ -686,96 +805,20 @@ PromoteResult promote_mission(const bms::File &m, World &world,
                 ae.net_id = seed.net_id;
                 ae.relmat_id = seed.net_id; // provisional relation-matrix id (net layer = later)
                 ae.health = 100;
+                if (kind == EntityKind::Item) {
+                    world.registry.get(h)->spawn_phase = world.vehicle_ai_spawn_phase;
+                    world.vehicle_ai_spawn_phase = (world.vehicle_ai_spawn_phase + 1) & 15;
+                }
                 ++r.brains;
             }
         }
     };
     promote_vec(m.items, EntityKind::Item, /*ai_capable=*/false);
 
-    // Every stored items.def addeweap* slot creates a pool-1 child. The public
-    // metadata already normalized the authored full item id to the raw type id;
-    // G/C flags and angle fallback presence remain separate. Children use a
-    // non-BMS origin sentinel so the listen-server WirePresentPass cannot defer
-    // them to an unrelated placed node with the same (kind,index).
-    struct AttachmentWork {
-        EntityHandle carrier;
-        std::vector<int32_t> lineage;
-    };
-    std::vector<AttachmentWork> attachment_work;
-    attachment_work.reserve(promoted_item_handles.size());
-    for (EntityHandle h : promoted_item_handles) {
-        const Entity *carrier = world.registry.get(h);
-        if (carrier != nullptr)
-            attachment_work.push_back(AttachmentWork{h, {carrier->item_id}});
-    }
-    for (size_t work_index = 0; work_index < attachment_work.size(); ++work_index) {
-        const AttachmentWork work = attachment_work[work_index];
-        Entity *carrier = world.registry.get(work.carrier);
-        if (carrier == nullptr) continue;
-        const ItemSeatSpec *carrier_spec =
-                seat_spec_for_type(opts, carrier->item_id);
-        if (carrier_spec == nullptr) continue;
-        if (work.lineage.size() >= 8) continue;
-        for (const ItemEmplacementAttachmentSpec &attachment :
-             carrier_spec->emplacement_attachments) {
-            if (attachment.child_type_id == 0 ||
-                std::find(work.lineage.begin(), work.lineage.end(),
-                          attachment.child_type_id) != work.lineage.end())
-                continue;
-            Entity child_seed;
-            child_seed.kind = EntityKind::Item;
-            child_seed.item_id = attachment.child_type_id;
-            child_seed.position = carrier->position;
-            child_seed.yaw = carrier->yaw;
-            child_seed.pitch = carrier->pitch;
-            child_seed.roll = carrier->roll;
-            child_seed.team = carrier->team;
-            child_seed.spawn_origin = 0xFFFFFFFFu;
-            const EntityHandle child_handle =
-                    world.registry.spawn(pool_for_kind(EntityKind::Item), child_seed);
-            if (!child_handle.valid()) {
-                ++r.dropped;
-                break;
-            }
-            ++r.spawned;
-            Entity *child = world.registry.get(child_handle);
-            carrier = world.registry.get(work.carrier);
-            if (child == nullptr || carrier == nullptr) continue;
-            child->emplacement_parent = work.carrier;
-            child->emplacement_parent_spawn_id =
-                    carrier->registry_spawn_id;
-            // NoNetworkCallback addeweap children also carry their host in the
-            // ordinary groundEntity field; retail's shared MountSlot resolver
-            // follows +0x28, not the attachment metadata pointer.
-            child->ground_target = work.carrier;
-            child->emplacement_local = attachment.anchor.seat_local;
-            child->emplacement_yaw_offset = attachment.anchor.yaw_offset;
-            child->emplacement_bone =
-                    attachment.anchor_found ? attachment.anchor.bone_index : 0;
-            child->emplacement_kind = static_cast<uint8_t>(attachment.kind);
-            child->emplacement_slot = attachment.stored_slot;
-            child->emplacement_attachment_flags = attachment.attachment_flags;
-            child->emplacement_angle_count = attachment.angle_count;
-            child->emplacement_down_limit_bam = attachment.down_limit_bam;
-            child->emplacement_up_limit_bam = attachment.up_limit_bam;
-            child->emplacement_right_limit_bam = attachment.right_limit_bam;
-            child->emplacement_left_limit_bam = attachment.left_limit_bam;
-            // Promotion is the authority-side source of the exact addeweap
-            // row, including its stored slot even when sibling types repeat.
-            child->emplacement_pose_metadata_resolved = true;
-            seed_authored_seats(*child, opts);
-            Seat anchor = attachment.anchor;
-            anchor.type = SeatType::Gunner;
-            anchor.bone_index = child->emplacement_bone;
-            anchor.attachment_frame = true;
-            world.vehicles.pose_mounted_occupant(*child, *carrier, anchor);
-
-            std::vector<int32_t> lineage = work.lineage;
-            lineage.push_back(attachment.child_type_id);
-            attachment_work.push_back(
-                    AttachmentWork{child_handle, std::move(lineage)});
-        }
-    }
+    const ItemAttachmentSpawns attachments =
+            spawn_item_attachments(world, promoted_item_handles, opts.item_seat_specs);
+    r.spawned += int(attachments.handles.size());
+    r.dropped += attachments.dropped;
 
     promote_vec(m.buildings, EntityKind::Building, /*ai_capable=*/false);
     promote_vec(m.markers, EntityKind::Marker, /*ai_capable=*/false);

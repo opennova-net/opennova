@@ -141,6 +141,24 @@ static func _create_fixture_publication(
 		_remove_tree_absolute(reservation, trusted_root)
 		return {"error": "fixture publication is busy"}
 	var publish_error := DirAccess.rename_absolute(reservation, transaction_root)
+	# Windows can transiently reject the rename of a newly created journal.
+	# Retry only while the destination is absent and the reservation and its
+	# ancestors remain ours. A competing owner or recovery claim still wins.
+	if publish_error != OK and OS.get_name() == "Windows":
+		for _attempt in range(3):
+			OS.delay_msec(1)
+			if not DirAccess.dir_exists_absolute(reservation) \
+					or DirAccess.dir_exists_absolute(transaction_root) \
+					or FileAccess.file_exists(transaction_root) \
+					or not _publication_path_has_safe_ancestors(reservation, trusted_root) \
+					or not _publication_path_has_safe_ancestors(transaction_root, trusted_root):
+				break
+			claims = _publication_recovery_claims(output, trusted_root)
+			if claims.has("error") or not (claims.get("paths", []) as Array).is_empty():
+				break
+			publish_error = DirAccess.rename_absolute(reservation, transaction_root)
+			if publish_error == OK:
+				break
 	if publish_error != OK:
 		_remove_tree_absolute(reservation, trusted_root)
 		return {"error": "cannot publish fixture transaction owner: %s" \

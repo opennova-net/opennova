@@ -66,56 +66,60 @@ void settle_ease(PlayerViewState &v) {
 // --- the scope toggle's refusal ladder ------------------------------------
 
 void test_scope_toggle_refuses_inactive_weapon() {
+    LocalWorld lw;
     LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
     w.active = false;
     PlayerViewState v;
     WeaponSlotState slot;
-    CHECK(!local_player_scope_toggle(w, v, slot));
+    CHECK(!local_player_scope_toggle(lw.w, w, v, slot));
     CHECK(!v.scope_engaged);
 }
 
 void test_scope_up_refused_while_moving_on_scoped_weapon() {
+    LocalWorld lw;
     // [orig: g_movementKeyHeld && (flags & 1) -> return @0x4df29c]
     LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
     PlayerViewState v;
     v.move_held = true;
     WeaponSlotState slot;
-    CHECK(!local_player_scope_toggle(w, v, slot));
+    CHECK(!local_player_scope_toggle(lw.w, w, v, slot));
     CHECK(!v.scope_engaged);
     v.move_held = false;
-    CHECK(local_player_scope_toggle(w, v, slot));
+    CHECK(local_player_scope_toggle(lw.w, w, v, slot));
     CHECK(v.scope_engaged);
 }
 
 void test_inset_scope_refused_under_nvg() {
+    LocalWorld lw;
     LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED, DEF_WEAPON_FLAG2_INSET);
     PlayerViewState v;
     v.nvg_active = true;
     WeaponSlotState slot;
-    CHECK(!local_player_scope_toggle(w, v, slot));
+    CHECK(!local_player_scope_toggle(lw.w, w, v, slot));
     v.nvg_active = false;
-    CHECK(local_player_scope_toggle(w, v, slot));
+    CHECK(local_player_scope_toggle(lw.w, w, v, slot));
     CHECK(v.scope_engaged);
     CHECK(v.ease_steps == kScopeEaseStepsInset); // the Inset ease latch
 }
 
 void test_mid_ease_toggle_refused_then_forcescoped_pins_the_sight() {
+    LocalWorld lw;
     // [orig: the !activeFlag gate @0x4df177; the ForceScoped pin @0x4df12d]
     LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_FORCESCOPED);
     PlayerViewState v;
     WeaponSlotState slot;
-    CHECK(local_player_scope_toggle(w, v, slot));
+    CHECK(local_player_scope_toggle(lw.w, w, v, slot));
     CHECK(v.scope_engaged);
     CHECK(player_view_scope_ease_active(v));
-    CHECK(!local_player_scope_toggle(w, v, slot)); // mid-ease: refused
+    CHECK(!local_player_scope_toggle(lw.w, w, v, slot)); // mid-ease: refused
     CHECK(v.scope_engaged);
     settle_ease(v);
     CHECK(!player_view_scope_ease_active(v));
-    CHECK(!local_player_scope_toggle(w, v, slot)); // settled ForceScoped: pinned
+    CHECK(!local_player_scope_toggle(lw.w, w, v, slot)); // settled ForceScoped: pinned
     CHECK(v.scope_engaged);
     // Without ForceScoped the settled sight un-scopes.
     LocalPlayerWeapon plain = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
-    CHECK(local_player_scope_toggle(plain, v, slot));
+    CHECK(local_player_scope_toggle(lw.w, plain, v, slot));
     CHECK(!v.scope_engaged);
 }
 
@@ -164,13 +168,13 @@ void test_nvg_drops_a_settled_inset_scope_and_restores_it() {
     LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED, DEF_WEAPON_FLAG2_INSET);
     PlayerViewState v;
     WeaponSlotState slot;
-    CHECK(local_player_scope_toggle(w, v, slot));
+    CHECK(local_player_scope_toggle(lw.w, w, v, slot));
     settle_ease(v);
     CHECK(v.scope_engaged && !player_view_scope_ease_active(v));
     int toggles = 0;
     const auto scope_toggle = [&]() -> bool {
         ++toggles;
-        return local_player_scope_toggle(w, v, slot);
+        return local_player_scope_toggle(lw.w, w, v, slot);
     };
     // NVG on over a settled Inset scope: the scope drops, the restore latches.
     CHECK(local_player_nvg_toggle(lw.w, w, v, scope_toggle));
@@ -192,7 +196,7 @@ void test_nvg_over_a_non_inset_scope_leaves_it_alone() {
     LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
     PlayerViewState v;
     WeaponSlotState slot;
-    CHECK(local_player_scope_toggle(w, v, slot));
+    CHECK(local_player_scope_toggle(lw.w, w, v, slot));
     settle_ease(v);
     int toggles = 0;
     const auto scope_toggle = [&]() -> bool { ++toggles; return false; };
@@ -253,6 +257,111 @@ void test_tick_without_a_player_resolves_first_person() {
 }
 
 // --- the frame read --------------------------------------------------------
+
+void test_scope_fov_target_and_render_queries_share_weather_state() {
+    LocalWorld lw;
+    lw.w.weather.seed(WeatherSeed{});
+    LocalPlayerWeapon weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
+    weapon.scope_max_mag = 3.0f;
+    PlayerViewState view;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    auto &channels = lw.w.weather.core.scalar_channels;
+    CHECK(local_player_scope_toggle(lw.w, weapon, view, weapon.slot));
+    CHECK(weapon.slot.scope_zoom == 3);
+    CHECK(channels.camera_fov_target_fp == 1747600); // 80 * trunc(65536/3)
+    CHECK(channels.camera_fov_fp == (80 << 16));
+    WeatherTickEvents events;
+    lw.w.weather.tick_sim(&lw.w, events);
+    CHECK(channels.camera_fov_fp == 4805970);
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.fov_h_deg == 4805970.0f / 65536.0f); // independent of 15-step pose
+    CHECK(channels.camera_fov_target_fp == 1747600); // no mid-ease reset
+    settle_ease(view);
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.scope_card_active);
+    CHECK(frame.fov_h_deg == 1747626.0f / 65536.0f); // direct 80/3, then ftol
+    weapon.slot.scope_zoom = 2;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.fov_h_deg == 40.0f);
+    CHECK(channels.camera_fov_target_fp == (40 << 16));
+    CHECK(local_player_scope_toggle(lw.w, weapon, view, weapon.slot));
+    CHECK(channels.camera_fov_target_fp == (80 << 16));
+
+    // Scoped optics divide the live weather current and do not replace a
+    // scripted target. A resolved third-person view does reset the target.
+    weapon.def.flags = DEF_WEAPON_FLAG_SCOPED;
+    view = PlayerViewState{};
+    channels.camera_fov_fp = 60 << 16;
+    channels.camera_fov_target_fp = 50 << 16;
+    CHECK(local_player_scope_toggle(lw.w, weapon, view, weapon.slot));
+    settle_ease(view);
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.fov_h_deg == 30.0f);
+    CHECK(channels.camera_fov_target_fp == (50 << 16));
+    view.third_person = true;
+    view.camera_mode = 1;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(!frame.scope_card_active && frame.fov_h_deg == 60.0f);
+    CHECK(channels.camera_fov_target_fp == (80 << 16));
+
+    // A gunner seat bypasses the optical query's target writer.
+    view.third_person = false;
+    view.camera_mode = 0;
+    weapon.def.flags = DEF_WEAPON_FLAG_SIGHTED;
+    lw.entity().mounted = true;
+    lw.entity().mount_type = SeatType::Gunner;
+    channels.camera_fov_target_fp = 55 << 16;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.scope_card_active && frame.fov_h_deg == 40.0f);
+    CHECK(channels.camera_fov_target_fp == (55 << 16));
+    local_player_view_reset(&lw.w, weapon, view, tracker);
+    CHECK(!view.scope_engaged && view.scope_step == 0);
+    CHECK(channels.camera_fov_fp == (60 << 16));
+    CHECK(channels.camera_fov_target_fp == (80 << 16));
+}
+
+void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
+    LocalWorld lw;
+    LocalPlayerWeapon weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
+    WeaponSlotState slot;
+    weapon.scope_max_mag = 4.0f;
+    CHECK(local_player_scope_zoom(weapon, slot) == 4);
+    slot.scope_zoom = 9;
+    CHECK(local_player_scope_zoom(weapon, slot) == 4);
+    slot.scope_zoom = -2;
+    CHECK(local_player_scope_zoom(weapon, slot) == 0);
+    CHECK(local_player_scope_zoom(weapon, slot) == 4);
+    weapon.scope_max_mag = 0;
+    slot.scope_zoom = 0;
+    CHECK(local_player_scope_zoom(weapon, slot) == 1);
+
+    for (int i = 0; i < 3; ++i) {
+        WeaponTableEntry row;
+        row.valid = true;
+        row.name = "fov_weapon_" + std::to_string(i);
+        row.category = i == 2 ? 2 : 1;
+        lw.w.tables.weapons.entries.push_back(row);
+    }
+    weapon.def_name = "fov_weapon_0";
+    WeaponInstallData data;
+    data.name = "fov_weapon_1";
+    PlayerViewState view;
+    auto &channels = lw.w.weather.core.scalar_channels;
+    channels.camera_fov_fp = 30 << 16;
+    channels.camera_fov_target_fp = 35 << 16;
+    local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
+    CHECK(channels.camera_fov_target_fp == (35 << 16)); // same category
+    data.name = "fov_weapon_2";
+    local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
+    CHECK(channels.camera_fov_target_fp == (80 << 16));
+    CHECK(channels.camera_fov_fp == (30 << 16));
+    channels.camera_fov_target_fp = 35 << 16;
+    data.name = "fov_weapon_0";
+    data.flags = DEF_WEAPON_FLAG_FORCESCOPED;
+    local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
+    CHECK(channels.camera_fov_target_fp == (35 << 16));
+}
 
 void test_frame_reads_the_state_and_the_card_selector() {
     LocalWorld lw;
@@ -522,6 +631,8 @@ int main() {
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();
+    test_scope_fov_target_and_render_queries_share_weather_state();
+    test_scope_zoom_clamps_and_weapon_category_fov_reset();
     test_frame_chase_shake_consumes_the_tick();
     test_set_eye_mirrors_the_head_into_the_world();
     test_pump_feeds_the_heat_window_water_gate_from_the_body_z();

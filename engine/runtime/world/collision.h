@@ -404,6 +404,10 @@ struct CollisionTargetView {
     // True only when the pose owner published one live matrix per COBJ section.
     // A yaw-only rigid fallback deliberately does not claim animated-bone fidelity.
     bool live_section_pose = false;
+    // Door map affects only non-player contact, never projectile/LOS rays.
+    // [orig: Entity_ComputeBoneCollisionForce @0x4AE289..0x4AE335]
+    uint64_t door_passable_sections = 0;
+    int32_t door_first_bone = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -971,6 +975,10 @@ public:
     // A spawn or registry rewind immediately republishes the existing pool
     // snapshot and its candidate slices.
     void refresh_after_registry_change(World &world);
+    // Direct candidate rebuild plus this entity's blink refresh. Pool position
+    // snapshots stay at their published epoch; unrelated contacts are retained.
+    // [orig: WacCmd_Tele @0x4F22D0 -> 0x4B8EB0, 0x4B3DC0]
+    void refresh_entity_proximity(World &world, Entity &entity);
 
     // Atomically replace the persistent decoded collision projection. Sorting
     // by wire handle gives both domains deterministic order; the wire-keyed
@@ -1446,6 +1454,7 @@ public:
 
 private:
     void build_tables(World &world, bool advance_candidate_slices);
+    void build_candidate_slices(World &world);
     // Contact-flag side effects shared by both resolver passes (DH/DM/DL damage +
     // the CA/CM entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
     void apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health, bool is_authority);
