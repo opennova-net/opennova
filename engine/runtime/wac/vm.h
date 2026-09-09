@@ -80,6 +80,7 @@ private:
     int32_t cached_mana_ = 0;
     int32_t cached_game_over_ = 0, cached_win_ = 0, cached_lose_ = 0;
     int32_t cached_tod_ = 0;
+    int32_t scratch_ = 0; // the unresolved-parameter sink, zeroed at entry [orig: dword_C6EAEC]
     void cache_player_state(opennova::world::World &);
     std::vector<std::vector<world::EntityHandle>> groups_;
 

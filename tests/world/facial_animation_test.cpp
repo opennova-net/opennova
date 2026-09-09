@@ -1,5 +1,7 @@
 // GRM fixture is authored in fixtures/grm/person.grm. These tests run the
 // real mounted format, WAC VM, slot scheduler, mesh evaluator and retry path.
+#include <base/crt/crt_rng.h>
+#include <base/io/crt_rand.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
 #include <runtime/wac/compiler.h>
@@ -67,6 +69,17 @@ void test_commands_and_retry() {
 	const auto a = f.spawn(7), b = f.spawn(8);
 	CHECK(f.slot(a).model == f.slot(b).model);
 	CHECK(f.entity(a).facial_slot == 0x8000 && f.entity(b).facial_slot == 0x8001);
+	// The gaze pair draws from the render/effects stream and leaves the
+	// session-seeded sim stream alone (D-NET-115). Without a present pass the
+	// display counter stays 0, so every tick draws the pair for each slot.
+	crt::crt_srand(1);
+	const uint32_t sim_state = f.world.crt_rand.state;
+	f.world.facials.tick(f.world);
+	CHECK(f.world.crt_rand.state == sim_state);
+	io::CrtRand effects_oracle;
+	effects_oracle.seed(1);
+	for (int draw = 0; draw < 4; ++draw) effects_oracle.next();
+	CHECK(crt::crt_rand_state() == effects_oracle.state);
 	f.world.cached.local_player = a;
 	const auto baseline = f.world.snapshot();
 	for (int attempt = 0; attempt < 2; ++attempt) {
@@ -101,41 +114,45 @@ void test_commands_and_retry() {
 
 void test_transition_and_eye_timing() {
 	FacialSlot s;
-	io::CrtRand rng;
 	s.expression_override = 1; s.override_timer = 80; s.automatic = 4;
-	step_facial_animation(s, false, rng, 1, 0);
+	step_facial_animation(s, false, 1, 0);
 	CHECK(s.current == 0 && s.next == 0 && s.blend == 1.0f && s.override_timer == 80);
-	step_facial_animation(s, false, rng, 1, 0);
+	step_facial_animation(s, false, 1, 0);
 	CHECK(s.current == 0 && s.next == 1 && s.blend == 0.0f && s.override_timer == 79);
-	for (int i = 0; i < 7; ++i) step_facial_animation(s, false, rng, 1, 0);
+	for (int i = 0; i < 7; ++i) step_facial_animation(s, false, 1, 0);
 	CHECK(s.current == 0 && s.next == 1 && s.blend == 0.875f && s.override_timer == 79);
-	step_facial_animation(s, false, rng, 1, 0);
+	step_facial_animation(s, false, 1, 0);
 	CHECK(s.current == 1 && s.next == 1 && s.blend == 1.0f && s.override_timer == 78);
-	for (int i = 0; i < 78; ++i) step_facial_animation(s, false, rng, 1, 0);
+	for (int i = 0; i < 78; ++i) step_facial_animation(s, false, 1, 0);
 	CHECK(s.override_timer == 0 && s.expression_override == 1);
-	step_facial_animation(s, false, rng, 1, 0);
+	step_facial_animation(s, false, 1, 0);
 	CHECK(s.override_timer == -1 && s.expression_override == -1 && s.next == 1);
-	step_facial_animation(s, false, rng, 1, 0);
+	step_facial_animation(s, false, 1, 0);
 	CHECK(s.next == 4 && s.current == 1);
 	s.blend = 1.0f; s.automatic = -1;
-	step_facial_animation(s, false, rng, 1, 7u << 10);
+	step_facial_animation(s, false, 1, 7u << 10);
 	CHECK(s.next == 7);
 
 	// Two draws only on a multiple-of-64 DISPLAY frame; each logic call
-	// on that display frame draws again, as the original does.
+	// on that display frame draws again, as the original does. The draws
+	// come from the thread-local effects stream (the same MSVC recurrence
+	// the oracle spells), never the sim stream.
+	crt::crt_srand(1);
 	FacialSlot eyes;
 	io::CrtRand oracle;
+	oracle.seed(1);
 	const float x = float((int(oracle.next()) - 16384) * 0.000061035156);
 	const float y = float((int(oracle.next()) - 16384) * 0.000061035156);
-	step_facial_animation(eyes, false, rng, 64, 0);
-	CHECK(rng.state == oracle.state && near(eyes.eyes.x, x * .25f));
+	step_facial_animation(eyes, false, 64, 0);
+	CHECK(crt::crt_rand_state() == oracle.state && near(eyes.eyes.x, x * .25f));
 	CHECK(near(eyes.eyes.y, y * .25f));
 	eyes.directed_eyes = {1.0f, 2.0f}; eyes.directed_timer = 2;
 	eyes.eyes = {};
-	step_facial_animation(eyes, false, rng, 65, 0);
+	step_facial_animation(eyes, false, 65, 0);
+	CHECK(crt::crt_rand_state() == oracle.state); // no draw off the 64 cadence
 	CHECK(eyes.directed_timer == 1 && eyes.eyes.x == .25f && eyes.eyes.y == .5f);
 	eyes.blend = 1.0f; eyes.expression_override = 4; eyes.override_timer = 20;
-	step_facial_animation(eyes, true, rng, 65, 0);
+	step_facial_animation(eyes, true, 65, 0);
 	CHECK(eyes.next == 5 && eyes.override_timer == 20 && eyes.directed_timer == 1);
 	CHECK(near(eyes.eyes.x, .2375f) && near(eyes.eyes.y, .365f));
 }

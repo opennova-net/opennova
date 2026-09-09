@@ -462,16 +462,8 @@ void initialize_item_seats(Entity &entity, const std::vector<ItemSeatSpec> &spec
     entity.emplaced_config = spec->mount_config_valid ? spec->mount_config : 0;
     entity.armory_points = spec->armory_points;
     entity.primary_weapon = spec->primary_weapon;
-    // Seat specs are the def-derived trait channel: a spec that declares the
-    // EWeap primary weapon carries items.def's attrib-0x20 nature. A world
-    // promoted before/without the item database (authored tool and test
-    // worlds) stamps the equivalent trait so the witnessed def gate in
-    // resolve_mounted_ammo_slot [orig: @0x5460E0] holds uniformly; a real
-    // items.def sweep overwrites this with the authoritative row.
-    if (!entity.has_item_def && !spec->primary_weapon.empty()) {
-        entity.has_item_def = true;
-        entity.item_attrib |= kItemAttribEweap;
-    }
+    // The item-definition traits (has_item_def, item_attrib) come only from
+    // the items.def sweep; a seat spec never stands in for a definition row.
     if (spec->seats.empty()) return;
     entity.seats = spec->seats;
     for (Seat &seat : entity.seats) {

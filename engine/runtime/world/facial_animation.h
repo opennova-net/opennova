@@ -4,7 +4,6 @@
 
 #include <formats/grm/grm.h>
 #include <runtime/world/entity.h>
-#include <base/io/crt_rand.h>
 
 #include <cstdint>
 #include <memory>
@@ -40,9 +39,12 @@ struct FacialSlot {
 
 // Separates the original simulation counter, display-frame counter and wall
 // clock. The first controls calls, the latter two random gaze and idle state.
+// The gaze pair is gated on the display counter, so it draws from the
+// thread-local render/effects CRT stream (base/crt/crt_rng.h), never from the
+// session-seeded World::crt_rand (D-NET-115).
 // [orig: scar_decal_update @0x57FA50, caller @0x4C21FB]
-void step_facial_animation(FacialSlot &slot, bool dead, io::CrtRand &random,
-		uint32_t display_frame, uint32_t wall_time_ms);
+void step_facial_animation(FacialSlot &slot, bool dead, uint32_t display_frame,
+		uint32_t wall_time_ms);
 
 // Position of every GRM mesh vertex after current/next gesture interpolation.
 // The texture coordinates themselves stay at the base mesh UVs.

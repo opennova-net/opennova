@@ -36,8 +36,12 @@ public:
 
 private:
     static constexpr int kCategories = 10;
-    // Negative script arguments are guarded instead of indexing before the
-    // retail arrays. Categories >=10 bypass this gate in the original.
+    // Retail bounds only the high side, with a signed compare against 10
+    // (jl @0x4ED367 / @0x4EE147, jge @0x4E0966), so categories >= 10 are
+    // refused in both. A negative category indexes before dword_C6EA44 /
+    // dword_C6EA6C in retail (the two arrays are 0x28 apart, so blockfire
+    // -10..-1 lands on the weaponfired latch of index+10); the negative half
+    // of this guard is the D-WAC-3 class-D divergence.
     static bool valid(int category) { return category >= 0 && category < kCategories; }
     std::array<bool, kCategories> requested_{};
     std::array<bool, kCategories> blocked_{};

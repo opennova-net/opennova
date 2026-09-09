@@ -1900,7 +1900,7 @@ target_include_directories(wac_registry_oracle_test PRIVATE ${CMAKE_CURRENT_SOUR
 target_compile_features(wac_registry_oracle_test PRIVATE cxx_std_17)
 add_test(NAME wac_registry_oracle COMMAND wac_registry_oracle_test)
 
-foreach(test behavior corpus weapon_input voice actors projectiles effects sounds state players help)
+foreach(test behavior corpus weapon_input voice actors projectiles effects sounds state players help dispatch_sweep)
     add_executable(wac_${test}_test wac/wac_${test}_test.cpp)
     target_link_libraries(wac_${test}_test PRIVATE opennova_runtime)
     target_include_directories(wac_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1916,6 +1916,7 @@ add_test(NAME wac_sounds COMMAND wac_sounds_test)
 add_test(NAME wac_state COMMAND wac_state_test)
 add_test(NAME wac_players COMMAND wac_players_test)
 add_test(NAME wac_help COMMAND wac_help_test)
+add_test(NAME wac_dispatch_sweep COMMAND wac_dispatch_sweep_test)
 # The corpus sweep walks OPENNOVA_JO_ASSETS (argv dirs override); it reports
 # Skipped without it.
 opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)

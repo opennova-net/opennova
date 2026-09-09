@@ -252,11 +252,15 @@ void EntityRegistry::set_script_group_members(int group, const std::vector<Entit
 
 // [orig: Server_BuildEntitySlotLists @0x4F97A0] These lists are independent
 // of entity+284's BMS command group, and retain pool-slot order and dead rows.
+// The walk covers the pool's high-water `used` count and skips a row whose
+// +0x20 itemDef pointer is null [orig: @0x4f9809]: a populated-slot gate, since
+// every spawn stores &gItemDefs[idx] (an unknown type resolves to row 0,
+// ItemList_FindIndexByTypeId @0x49E100) and Entity_Destroy @0x43E810 zeros the
+// row. The registry's live-slot walk is that gate; the type id is not tested.
 void EntityRegistry::script_groups(std::vector<std::vector<EntityHandle>> &out) const {
     out = group_members_;
     for (size_t i = 0; i < 7; ++i) out[i].clear();
     for_each_in_pool(0, [&](const Entity &e) {
-        if (e.item_id == 0) return;
         const uint32_t flags = e.flags | e.engine_flags;
         if ((flags & kEntityFlagPlayer) != 0) {
             if ((flags & 1u) != 0) return;
