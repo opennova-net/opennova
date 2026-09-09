@@ -1028,8 +1028,8 @@ void test_remote_player_jump_respects_world_state_flag_gates() {
     e->net_is_remote_peer = true;
     e->health = 100;
 
-    // 0x10000 is the witnessed second water-state bit; it intentionally remains
-    // unnamed in entity.h until that swimming state is modeled independently.
+    // 0x10000 is the terrain-gradient slide bit. This remote input gate consumes
+    // the replicated flag; the local motor's producer is covered by infantry_terrain.
     const std::array<uint32_t, 5> blocked_flags = {
         kEntityFlagDead, kEntityFlagInAir, kEntityFlagDrowning,
         0x10000u, kEntityFlagMounted,
