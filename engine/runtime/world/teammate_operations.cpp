@@ -110,7 +110,9 @@ void announce_pickup(World &world) {
     const Entity *local = world.registry.get(world.cached.local_player);
     if (!local) return;
     EntityHandle best;
-    int32_t best_distance = 2147418112;
+    // The running minimum seeds at 0x40000000 [orig: @0x4520c3]; the 2147418112.0
+    // below is the separate flt_7C19E0 clamp ahead of the ftol [orig: @0x4520d3].
+    int32_t best_distance = 0x40000000;
     const auto origin = position(world, *local);
     world.registry.for_each_in_pool(0, [&](const Entity &entity) {
         if (entity.item_id == 0 || dead(entity) || entity.team != 1 || entity.handle == local->handle)

@@ -339,12 +339,15 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
         entity.corpse_timer = 62;
         return NpcCorpseStep::Kept;
     }
+    // Corpse expiry is the shared destroy: the facial slot, scar entries and
+    // incoming references go with the row, not only the registry slot and the
+    // brain. [orig: Entity_UpdateInfantryAI @0x4B9F93 -> Entity_Destroy @0x43E810;
+    //  the updater then leaves through loc_4BFC89 @0x4B9F9B]
     release_corpse_effect(world, entity);
     entity.hidden = true;
     const EntityHandle handle = entity.handle;
     world.out.entity_removals.push_back(handle.packed);
-    world.registry.despawn(handle);
-    ai.release(handle);
+    world.commands.remove_ssn(handle);
     if (ai.collision != nullptr) ai.collision->refresh_after_registry_change(world);
     return NpcCorpseStep::Removed;
 }

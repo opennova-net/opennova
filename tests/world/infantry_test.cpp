@@ -2376,8 +2376,7 @@ void test_death_presentation() {
         seed.health = 0;
         seed.deathtime_ticks = 5;
         const EntityHandle h = w.registry.spawn(0, seed);
-        auto ai_heap = std::make_unique<AiSystem>();
-        AiSystem &ai = *ai_heap;
+        AiSystem &ai = w.ai; // the destroy releases the brain through the world's own AI
         AiEntity *e = soldier(ai);
         run_ticks(ai, w, 1, 3); // edge (timer=5, -1) + one more dead tick
         Entity *ent = w.registry.get(h);
@@ -3791,8 +3790,237 @@ static void test_downwash_query_and_body_selection() {
     CHECK(body.inf.anim_state == anim_state::kIdle); // no surviving wash owner
 }
 
+// Re-selecting the CURRENT body state. The org2 player arbitrates unconditionally
+// against the old state captured before the selection, so a queued pending is
+// overwritten with self (locked leg) or cleared (middle leg); org1 compares the
+// target with the current state first and skips the block, retaining pending.
+// [orig: player old state @0x4b70e5, arbitration @0x4b7356..0x4b7396 with no
+//  compare; org1 @0x4bd837..0x4bd843 cmp/jz loc_4BD87E]
+static void test_reselecting_current_state_arbitrates_player_but_skips_org1() {
+    auto owned = std::make_unique<World>();
+    World &world = *owned;
+    world.registry.configure_pool(0, 4);
+    Entity soldier;
+    soldier.kind = EntityKind::Organic;
+    soldier.item_type = 3;
+    const EntityHandle actor = world.registry.spawn(0, soldier);
+    AiEntity &body = *world.ai.at(world.ai.attach(actor));
+    TestSource source;
+    source.clips = {0, 1, 41, 43, 44, 45, 48};
+    world.ai.root_motion = &source;
+    const auto reset = [&](int state, int pending) {
+        body.inf = InfantryState{};
+        body.inf.active = true;
+        body.inf.adm_id = 0;
+        body.inf.max_health = 100;
+        body.health = 100;
+        body.slot = AiSlot{};
+        body.inf.anim_state = state;
+        body.inf.anim_pending = pending;
+    };
+    // Player, locked current (41: flags 0x285, bit 0x4): the queued 45 becomes self.
+    reset(anim_state::kRollLeft, anim_state::kIdleCrouch);
+    CHECK((infantry_anim_flags(anim_state::kRollLeft) & 0x4u) != 0);
+    body.inf.stance = InfantryState::Stance::kProne;
+    body.inf.lean_left = true;
+    world.ai.player_body_select(body, world, 0);
+    CHECK(body.inf.anim_state == anim_state::kRollLeft);
+    CHECK(body.inf.anim_pending == anim_state::kRollLeft);
+    // Player, unlocked current (43: flags 0x48): the middle leg clears the queued 45.
+    reset(anim_state::kIdle, anim_state::kIdleCrouch);
+    CHECK((infantry_anim_flags(anim_state::kIdle) & 0x24u) == 0);
+    world.ai.player_body_select(body, world, 0);
+    CHECK(body.inf.anim_state == anim_state::kIdle && body.inf.anim_pending == 0);
+    CHECK(body.inf.clip_phase == 0); // no channel restart on the unchanged state
+    // Org1, the same idle re-selection: the equality skip keeps the queued 45.
+    reset(anim_state::kIdle, anim_state::kIdleCrouch);
+    world.ai.infantry_select(body, world);
+    CHECK(body.inf.anim_state == anim_state::kIdle);
+    CHECK(body.inf.anim_pending == anim_state::kIdleCrouch);
+}
+
+// An aimed think clears the detour state byte ahead of the selector's detour
+// call: an approaching soldier steers at the enemy, never at a stale cached
+// side-step point. [orig: @0x4BCFDB, before the detour calls @0x4BD490..0x4BD5A4]
+static void test_aimed_think_clears_stale_detour_state() {
+    World w;
+    w.registry.configure_pool(0, 16);
+    AiSystem &ai = w.ai;
+    TestSource src;
+    src.step = 0; // nobody walks: the bearings stay exact
+    src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
+                 anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};
+    ai.root_motion = &src;
+    auto make = [&](int idx, uint8_t team, int32_t x) {
+        Entity body{};
+        body.alive = true;
+        body.item_id = 1001;
+        body.item_type = 3;
+        body.kind = EntityKind::Organic;
+        body.health = 150;
+        body.team = team;
+        body.net_id = uint16_t(200 + idx);
+        body.position = {float(x) / 65536.0f, 0.0f, 0.0f};
+        const EntityHandle h = w.registry.spawn(0, body);
+        AiEntity *e = ai.at(ai.attach(h));
+        e->inf.active = true;
+        e->net_id = body.net_id; // the think key stagger: blue thinks at 12 mod 16, scans at 28 mod 32
+        e->team = team;
+        e->health = 150;
+        e->inf.max_health = 150;
+        e->pos[0] = x;
+        e->slot.f[15] = 65536;      // attack range 1 u -> the 2 u enemy is OUTSIDE
+        e->slot.f[16] = 32768;      // min-engage 0.5 u -> and beyond it, so: approach
+        e->slot.f[17] = 40 * 65536; // sight
+        return e;
+    };
+    AiEntity *red = make(0, 2, 2 * 65536); // due east of blue: bearing 0
+    AiEntity *blue = make(1, 1, 0);
+    red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body
+    // Blue walks a route south (moving on every think, so the no-goal clear
+    // @0x4BD2E9 never runs) around a cached detour point 10 u to the +Y side;
+    // its first think (tick 12) precedes its first perception scan (tick 28).
+    route(ai, blue, {node(0, -50 * 65536, 65536)}, 0);
+    blue->inf.path_state = 2;
+    blue->inf.detour_target[0] = 0;
+    blue->inf.detour_target[1] = 10 * 65536;
+    blue->inf.detour_target[2] = 0;
+    bool walked = false, checked = false;
+    for (uint32_t tick = 0; tick < 96 && !checked; ++tick) {
+        run_ticks(ai, w, tick, tick + 1);
+        if (blue->inf.move_mode == 3 && !blue->inf.combat_target.valid()) {
+            // The route think keeps steering at the cached point [orig: state 2
+            // reads the point @0x4AFAB0].
+            walked = true;
+            CHECK(blue->inf.path_state == 2 && blue->inf.target_heading == 0x40000000);
+        }
+        if (blue->inf.move_mode != 1) continue;
+        checked = true;
+        CHECK(blue->inf.combat_target == red->handle);
+        CHECK(blue->inf.aim_valid); // the aim block ran this think
+        CHECK(blue->inf.path_state == 0);
+        CHECK(blue->inf.target_heading == 0); // at the enemy, not 0x40000000 at the point
+        CHECK(blue->inf.detour_target[1] == 10 * 65536); // no search re-cached it
+    }
+    CHECK(walked && checked);
+}
+
+// The self-attachment chase pulls toward the stamped S point, which no other
+// think path rewrites, while the same think's combat approach keeps retargeting
+// the movement goal. [orig: stamp @0x4BB840..0x4BB852; chase @0x4BF625..0x4BF664;
+//  the approach arm @0x4BC2F5..0x4BC316 writes frame locals and the goal Z only]
+static void test_self_attachment_chases_the_s_point_through_a_combat_approach() {
+    struct EntryPoints : IPoseProvider {
+        EntityHandle carrier;
+        int32_t point[6] = {fx(30), fx(30), 0, 0x30000000, 0, 0}; // S yaw 67.5 deg
+        bool resolve_named_transform(World &, EntityHandle h, const char *name, int32_t out[6]) override {
+            const std::string n = name;
+            if (h != carrier || (n != "E1" && n != "S1")) return false;
+            std::copy_n(point, 6, out);
+            return true;
+        }
+    } pose;
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(0, 8);
+    w.registry.configure_pool(1, 4);
+    TestSource motion;
+    motion.step = 0;
+    motion.clips = {anim_state::kIdle, anim_state::kIdle3, anim_state::kWalkForward,
+                    anim_state::kRunForward, anim_state::kStop, anim_state::kGuard,
+                    anim_state::kAttack};
+    w.ai.root_motion = &motion;
+    Entity prop;
+    prop.net_id = 77;
+    prop.item_id = 1002;
+    prop.item_type = 6; // an entry-walk object with authored E/S points, no PlayerControl
+    prop.has_item_def = true;
+    prop.alive = true;
+    prop.health = prop.health_max = 100;
+    prop.position = {40.0f, 30.0f, 0.0f};
+    prop.yaw = 90;
+    pose.carrier = w.registry.spawn(1, prop);
+    w.pose_provider = &pose;
+    auto make = [&](int idx, uint8_t team, float x, float y) {
+        Entity body{};
+        body.alive = true;
+        body.item_id = 1001;
+        body.item_type = 3;
+        body.kind = EntityKind::Organic;
+        body.health = 150;
+        body.team = team;
+        body.net_id = uint16_t(200 + idx);
+        body.position = {x, y, 0.0f};
+        const EntityHandle h = w.registry.spawn(0, body);
+        AiEntity *e = w.ai.at(w.ai.attach(h));
+        e->inf.active = true;
+        e->team = team;
+        e->health = 150;
+        e->inf.max_health = 150;
+        e->pos[0] = fx(x);
+        e->pos[1] = fx(y);
+        e->slot.f[15] = 65536;      // attack range 1 u
+        e->slot.f[16] = 32768;      // min-engage 0.5 u
+        e->slot.f[17] = 40 * 65536; // sight
+        return e;
+    };
+    AiEntity *self = make(0, 1, 30.0f, 30.0f); // standing on the S point
+    make(1, 2, 35.0f, 30.0f);                  // an enemy 5 u east, beyond attack range
+    self = w.ai.at(0);
+    const EntityHandle handle = self->handle;
+    self->slot.f[37] = 125; // board SSN 77 [orig: slot+148 / +152]
+    self->slot.f[38] = 77;
+    // net 200: thinks on tick % 16 == 0. Stage 0 -> E arrival (tick 0), S arrival
+    // (tick 16), the stamp (tick 32) while the body faces the enemy 67.5 deg off
+    // the S yaw: attached, not yet converged. The approach runs in the same think.
+    run_ticks(w.ai, w, 0, 33);
+    CHECK(w.registry.get(handle)->attach_parent == handle);
+    CHECK(self->inf.self_attach_point[0] == fx(30) && self->inf.self_attach_point[1] == fx(30));
+    CHECK(self->inf.move_mode == 1 && self->inf.move_target[0] == fx(35));
+    CHECK(self->pos[0] == fx(30) && self->pos[1] == fx(30));
+    run_ticks(w.ai, w, 33, 48); // the chase runs every tick between thinks
+    CHECK(w.registry.get(handle)->attach_parent == handle);
+    CHECK(self->inf.move_mode == 1 && self->inf.move_target[0] == fx(35));
+    CHECK(self->pos[0] == fx(30) && self->pos[1] == fx(30));
+    CHECK(w.ai.unported_calls == 0);
+}
+
+// Corpse expiry is the shared destroy: incoming brain references and the
+// shared-ring scars the body wrote go with the row. [orig: @0x4B9F93 ->
+//  Entity_Destroy @0x43E810: Scar_ClearEntriesByEntity @0x43E8E4,
+//  Entity_ClearAllReferences @0x43E921 over the pool-1 brains' +148/+156]
+static void test_npc_corpse_expiry_runs_the_shared_destroy() {
+    NpcRespawnRig r;
+    World &w = *r.storage;
+    Entity vehicle;
+    vehicle.kind = EntityKind::Item;
+    vehicle.item_id = 55;
+    vehicle.has_item_def = true;
+    const EntityHandle carrier = w.registry.spawn(1, vehicle);
+    w.ai.attach(carrier);
+    const int32_t packed = int32_t(r.handle.packed) + 1;
+    w.ai.for_handle(carrier)->brain.f[AiBrain::kPriorityTarget] = packed;
+    w.ai.for_handle(carrier)->brain.f[AiBrain::kDamageInfo] = packed;
+    ScarSlot &scar = w.out.scars.world_ring().slots[3];
+    scar.owner = r.handle;
+    scar.live = true;
+    r.kill();
+    r.tick(1, 6);
+    CHECK(w.registry.get(r.handle) == nullptr);
+    CHECK(w.ai.for_handle(r.handle) == nullptr);
+    CHECK(w.out.entity_removals.size() == 1);
+    CHECK(w.ai.for_handle(carrier)->brain.f[AiBrain::kPriorityTarget] == 0);
+    CHECK(w.ai.for_handle(carrier)->brain.f[AiBrain::kDamageInfo] == 0);
+    CHECK(!w.out.scars.world_ring().slots[3].live);
+    CHECK(!w.out.scars.world_ring().slots[3].owner.valid());
+}
+
 int main() {
     test_downwash_query_and_body_selection();
+    test_reselecting_current_state_arbitrates_player_but_skips_org1();
+    test_aimed_think_clears_stale_detour_state();
+    test_self_attachment_chases_the_s_point_through_a_combat_approach();
+    test_npc_corpse_expiry_runs_the_shared_destroy();
     test_find_and_use_attachment_motor();
     test_suspended_callback_preserves_independent_brain();
     test_gait_stance_transition_insert();

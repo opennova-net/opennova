@@ -60,8 +60,11 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
     if (inf.anim_state >= 0 && inf.anim_state < kInfantryAnimStateCount)
         world.facials.automatic_expression(*self, kInfantryFacialExpressions[inf.anim_state]);
 
+    // The scripted voice speaker rescans at the 32-tick perception phase, not on
+    // every think: the phase word stored at LABEL_373 is re-read by the speaker
+    // arm. [orig: Entity_UpdateInfantryAI phase @0x4BBE4A, gate @0x4BE0CA..0x4BE0E8]
     const bool speaker = world.script.voice.speaker() == e.handle;
-    if ((key & 255u) == 0 || speaker) {
+    if ((key & 255u) == 0 || (speaker && (key & 31u) == 0)) {
         const int32_t radius = std::min(e.slot.f[17], 20 * 65536);
         int32_t eye[3];
         eye_of(ai, *self, eye);

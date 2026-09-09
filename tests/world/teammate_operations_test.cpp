@@ -200,6 +200,40 @@ void test_capacity_retry_and_failed_allocation() {
     CHECK(failed.world.registry.get(failed.patient)->corpse_timer == 0);
     CHECK(failed.world.diagnostics.total_calls() == 1);
 }
+// The pickup announce goes to the nearest team-1 body inside the 40 u X/Y box
+// whose 3D length is under the 0x40000000 seed; Z takes part in the ranking and
+// in that ceiling, not in the box. [orig: Entity_FindNearestTeammate @0x4520B0:
+//  seed @0x4520c3, box @0x452120/@0x452136, strict-less @0x452175]
+void test_pickup_announce_seeds_the_nearest_teammate_at_0x40000000() {
+    // The local player stands 1000 u from the marker, so the pickup's own
+    // medics (spawned by the marker) never enter its box.
+    constexpr int32_t kBase = 1000 * 65536;
+    const auto person = [](Fixture &f, uint16_t ssn, int32_t x, int32_t y, int32_t z) {
+        Entity seed; seed.kind = EntityKind::Organic; seed.item_id = 5; seed.net_id = ssn;
+        seed.team = 1; seed.has_item_def = true;
+        const EntityHandle h = f.world.registry.spawn(0, seed);
+        f.world.ai.attach(h);
+        f.move(h, x, y, z);
+        return h;
+    };
+    Fixture f;
+    f.world.cached.local_player = person(f, 1, kBase, kBase, 0);
+    // Inside the box but 16384 u below: its 3D length reaches the seed, so it
+    // never qualifies; the farther-in-X body inside the box is announced.
+    person(f, 40, kBase + 30 * 65536, kBase, -0x40000000);
+    const auto near = person(f, 41, kBase + 39 * 65536, kBase, 0);
+    person(f, 42, kBase + 41 * 65536, kBase, 0); // outside the X box, close in 3D
+    f.action(1);
+    CHECK(f.world.script.voice.speaker() == near);
+    CHECK(f.world.script.voice.snapshot().filename == "DltB086C.wav");
+
+    Fixture lone;
+    lone.world.cached.local_player = person(lone, 1, kBase, kBase, 0);
+    person(lone, 40, kBase + 30 * 65536, kBase, -0x40000000);
+    lone.action(1);
+    CHECK(!lone.world.script.voice.speaker().valid());
+}
+
 void test_reused_patient_handle_is_not_dereferenced() {
     Fixture f; f.action(1);
     const auto old = f.slot().patient;
@@ -218,6 +252,7 @@ int main() {
     test_same_tick_hover_fallthrough();
     test_pickup_and_invalid_helicopter_boundary();
     test_capacity_retry_and_failed_allocation();
+    test_pickup_announce_seeds_the_nearest_teammate_at_0x40000000();
     test_reused_patient_handle_is_not_dereferenced();
     std::printf("teammate operations: %s\n", failures ? "FAIL" : "PASS");
     return failures ? 1 : 0;
