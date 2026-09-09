@@ -91,6 +91,17 @@ extension with no engine equivalent.
 | 4 | `game3.lwf` | static (absent in JO base assets) |
 | 5 | `game2.lwf` | static (absent in JO base assets) |
 
+A round restart keeps the loaded slots: [orig: SoundBank_OpenFile @0x75CAA0] first tests
+bank+0xC8 [orig: @0x75CAA5] and returns 1 for a loaded slot (the 0xCC memset only runs past that
+guard [orig: @0x75CABE]); `Game_StartMission`'s bank loop [orig: @0x525441..0x525461] ->
+[orig: SoundBank_LoadIfExists @0x527530] -> `j_SoundBank_OpenFile(&g_SoundBanks + 0xCC*slot)`
+[orig: @0x527553]; the bank free (`sub_527890`, memset + `[esi]=0` [orig: @0x5278B1]) is called only
+from [orig: Game_TeardownMission @0x522600], which [orig: Game_RestartRoundSP @0x5263A0] never
+calls. The playlist record's sequential cursor u16 +2 [orig: @0x75CD5E..0x75CD79], random-seq
+anchor +12 [orig: @0x75CD9B] and cycle bit 0x100 [orig: @0x75CDAA set; @0x75CDDF clear] therefore
+persist across a round restart; the port matches (`SoundBank::reset_oneshots` stops the bank-owned
+one-shot players without resetting the selector).
+
 Name lookups search the slots in that order, first match wins
 (`SoundBank_FindTriggerByName @ 0x75be90` — a case-insensitive `stricmp` over the 84-byte
 in-memory set records; the engine's "trigger" is our Multi/sound set). A static game trigger

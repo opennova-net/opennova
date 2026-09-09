@@ -1330,8 +1330,15 @@ resolve that existing name. The death callback [orig: Entity_ClearOwnerSessionIf
 clears entity+460 only when it still identifies the dying group.
 
 The shared WAC compiler binds FX literals to stable 1-based handles, including FX_ aliases assigned
-to variables. Mounted PTL and regional PTU/PTG documents provide the catalog; unknown names fail
-compilation without a stockeffect definition. Compiled names prime the presentation catalog before
+to variables, against `particle::EffectCatalogNames` (names plus stable 1-based interned handles;
+unknown -> the stockeffect alias exactly as [orig: CEffectWorld_InternEffectHandle @0x5F7310] ->
+[orig: CEffectWorld_FindEffectDefByName @0x5E34F0]), filled once per kernel boot by the
+`script_catalogs` step (gated on the file source only, ahead of `wac`; mission_kernel_test pins the
+order). The kernel no longer owns an EffectScene; the shell's EffectWorld stays the one runtime scene
+and re-interns compile-time names by string (`GameWorld::route_script_effects`), so the mounted PTL
+set plus the regional PTU/PTG are parsed twice (kernel names, shell scene) where retail's single
+[orig: CEffectSystem_Init @0x5F6070] parse serves both WAC binding and spawns from one handle pool.
+Unknown names fail compilation without a stockeffect definition. Compiled names prime the presentation catalog before
 descriptors are consumed, so a compile-only stock alias is available to later BMS effects. Script
 descriptors retain source tick/order, fixed pose, owner, and separate release/store flags. The
 portable particle consumer uses World binding, performs explicit release before spawn, and uses
