@@ -430,10 +430,29 @@ int AiSystem::infantry_resolve_state(int adm_id, int state) const {
     return anim_state::kIdle;
 }
 
-// Commit a resolved target state under the flag-table arbitration [orig:
-// @0x4b7356-0x4b7396, identical in the org1 selector dump 3693-3710]: an
-// uninterruptible current (bit 0x4) queues the target to pending; an exit-gated
-// current (0x20) commits only a movement-flagged (bit 0) target; else commit now.
+// The flag-table arbitration both selectors share [orig: org2
+// @0x4b7356..0x4b7396; org1 @0x4bd845..0x4bd874]: an uninterruptible current
+// (bit 0x4) queues the target to pending; an exit-gated current (0x20) commits
+// only a movement-flagged (bit 0) target; else commit now. Returns the state
+// the channel commits (the current one when the target was queued).
+static int arbitrate_body_state(InfantryState &inf, int resolved) {
+    const uint32_t curf = infantry_anim_flags(inf.anim_state);
+    if ((curf & 0x4u) != 0) {
+        inf.anim_pending = resolved;
+        return inf.anim_state;
+    }
+    if ((curf & 0x20u) == 0 || (infantry_anim_flags(resolved) & 0x1u) != 0) {
+        inf.anim_pending = 0;
+        return resolved;
+    }
+    inf.anim_pending = resolved;
+    return inf.anim_state;
+}
+
+// Commit a resolved org1 target state. The two selectors differ by one test:
+// org1 compares the target with the current state first and skips the whole
+// arbitration on equality, retaining pending [orig: Entity_UpdateInfantryAI
+// @0x4bd837..0x4bd843 cmp/jz loc_4BD87E].
 // The channel retarget with the gait->stance transition insert [orig:
 // AnimMap_UpdateEntity @0x40b662..0x40b737]: with no deferral armed, a forward
 // gait committing to its crouch/prone walk plays the 169-172 transition clip
@@ -441,24 +460,26 @@ int AiSystem::infantry_resolve_state(int adm_id, int state) const {
 // gated on the adm actually carrying the clip. The netsim replica channel runs
 // the same insert through the shared pair map (D-NET-209 / D-INF-23).
 
-void commit_body_state(InfantryState &inf, int resolved,
-                       const IRootMotionSource *root_motion, bool player_wash) {
+void commit_body_state(InfantryState &inf, int resolved, const IRootMotionSource *root_motion) {
     if (resolved < 0) return; // no clips at all: hold the current state
-    int committed = inf.anim_state;
-    // Equality skips arbitration, retaining pending. The player's subsequent
-    // wash substitution still runs. [orig: @0x4B7356..0x4B740B]
-    if (resolved != inf.anim_state) {
-        const uint32_t curf = infantry_anim_flags(inf.anim_state);
-        if ((curf & 0x4u) != 0) {
-            inf.anim_pending = resolved;
-        } else if ((curf & 0x20u) == 0 || (infantry_anim_flags(resolved) & 0x1u) != 0) {
-            committed = resolved;
-            inf.anim_pending = 0;
-        } else {
-            inf.anim_pending = resolved;
-        }
-    }
-    if (player_wash && root_motion) {
+    if (resolved == inf.anim_state) return;
+    const int committed = arbitrate_body_state(inf, resolved);
+    if (committed != inf.anim_state)
+        begin_body_transition_with_insert(inf, committed, root_motion);
+}
+
+// Commit a resolved org2 (player-body) target state. The player arbitrates
+// unconditionally against the old state captured before the selection, so a
+// re-selection of the current state overwrites a queued pending with itself
+// (locked / exit-gated legs) or clears it (the middle leg) [orig:
+// Entity_UpdateInfantryPlayerBody old state @0x4b70e5, arbitration
+// @0x4b7356..0x4b7396]. The rotor-wash substitution then rewrites the
+// committed state [orig: @0x4b73a0..0x4b73e5].
+void commit_player_body_state(InfantryState &inf, int resolved,
+                              const IRootMotionSource *root_motion, bool wash) {
+    if (resolved < 0) return; // no clips at all: hold the current state
+    int committed = arbitrate_body_state(inf, resolved);
+    if (wash && root_motion) {
         if (committed == anim_state::kWalkForward &&
                 root_motion->has_clip(inf.adm_id, anim_state::kWashWalk))
             committed = anim_state::kWashWalk;
@@ -804,7 +825,7 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
         return;
     }
 
-    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion,
+    commit_player_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion,
             world.rotor_wash.nearby_zone(e.pos, 983040) != 0);
 }
 

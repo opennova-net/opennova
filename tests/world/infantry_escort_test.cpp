@@ -166,12 +166,22 @@ void test_corpse_hand_follow_and_lifetime() {
     f.entity(patient).health = 0; f.entity(patient).alive = false;
     f.entity(patient).flags = kEntityFlagDead | kEntityFlagMounted;
     b.inf.anim_state = 198; b.inf.anim_pending = 43;
+    b.inf.aim_valid = true; // died holding an aim solution (aimFlag set)
     f.body(medic).inf.body_heading = 9876543;
     f.world.ai.tick_infantry(b, f.world, 1);
     CHECK(b.pos[0] == fx(2.5f) && b.pos[1] == fx(2.75f));
     CHECK(b.pos[2] == 0); // ground/gravity, never teleported to the hand's Z
     CHECK(b.inf.anim_state == 139 && b.inf.anim_pending == 0);
     CHECK(b.inf.aim_heading == 9876543);
+    // The drag clears aimFlag [orig: @0x4B9E30], so the same tick's look chase
+    // takes the eighth-step arm. The org1 body turn first quarter-steps the
+    // body heading by (9876543 + 2) >> 2 = 2469136 and moves the live look yaw
+    // by that same step [orig: @0x4be8fd..0x4be931]; the look chase then adds
+    // (9876543 - 2469136 + 4) >> 3 = 925926 (the quarter-step arm would add
+    // 1851852).
+    CHECK(!b.inf.aim_valid);
+    CHECK(b.inf.body_heading == 2469136);
+    CHECK(b.heading == 2469136 + 925926);
     CHECK((f.entity(patient).flags & kEntityFlagMounted) == 0);
     CHECK(f.anchors.head_queries == 1 && f.anchors.hand_queries == 1);
     const auto baseline = f.world.snapshot();

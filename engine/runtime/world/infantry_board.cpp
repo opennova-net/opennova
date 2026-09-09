@@ -155,12 +155,15 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 					// behind [[entity+0x188]+0x48] is a dword per state and the
 					// test is [rec+0x230] != [rec+0] (0x230 = 4 * 0x8C), which is
 					// the root-motion source's has_clip(kGuard). Retail also
-					// stamps the self-attachment chased by the late movement tail.
-                    self.attach_parent = self.handle;
-                    inf.move_target[0] = sx;
-                    inf.move_target[1] = sy;
-                    inf.move_target[2] = sz;
-					// [orig: Entity_UpdateInfantryAI @0x4BB818..0x4BB858]
+					// stamps the self-attachment chased by the late movement tail:
+					// the S point X/Y into their own pair (entity+0x2FC/+0x300,
+					// written nowhere else) and its Z into the goal Z (entity+0x304).
+					// [orig: Entity_UpdateInfantryAI @0x4BB818..0x4BB858; attach
+					//  @0x4BB840, stamp @0x4BB846/0x4BB84C/0x4BB852]
+					self.attach_parent = self.handle;
+					inf.self_attach_point[0] = sx;
+					inf.self_attach_point[1] = sy;
+					inf.move_target[2] = sz;
 					const IRootMotionSource *rm = world.ai.root_motion;
 					if (rm == nullptr || rm->has_clip(inf.adm_id, anim_state::kGuard))
 						inf.board_anim = anim_state::kGuard;
@@ -270,9 +273,11 @@ bool infantry_attachment_move(AiEntity &e, World &world, const InfantryAttachmen
     if (self == nullptr || !self->attach_parent.valid()) return false;
     auto &inf = e.inf;
     if (self->attach_parent == self->handle) {
+        // Eighth-step X/Y toward the stamped S point, Z floored at the goal Z.
+        // [orig: gate @0x4BF625..0x4BF62D; x/y @0x4BF636/0x4BF63C; z @0x4BF653..0x4BF664]
         for (int axis = 0; axis < 2; ++axis)
             e.pos[axis] = io::bam_add(e.pos[axis],
-                    io::bam_sar(io::bam_sub(inf.move_target[axis], e.pos[axis]), 3));
+                    io::bam_sar(io::bam_sub(inf.self_attach_point[axis], e.pos[axis]), 3));
         e.pos[2] = std::max(e.pos[2], inf.move_target[2]);
         return false; // self-attachment still executes the ordinary root/vertical tail
     }

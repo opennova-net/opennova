@@ -9,11 +9,14 @@
 namespace opennova::world {
 
 // BAM bearing of (dx, dy) [orig: dbl_7C19D8 @0x7c19d8 -- atan2 * 2^31/pi]; the body-state
-// commit with the gait->stance insert. Both defined in infantry.cpp, shared with
-// infantry_combat.cpp.
+// commits with the gait->stance insert: the org1 form skips the arbitration on
+// equality [orig: @0x4bd841], the org2 player form arbitrates unconditionally and
+// applies the rotor-wash substitution [orig: @0x4b7356..0x4b73e5]. All defined in
+// infantry.cpp, shared with infantry_combat.cpp and infantry_board.cpp.
 int32_t bearing_to(int32_t dx, int32_t dy);
-void commit_body_state(InfantryState &inf, int resolved, const IRootMotionSource *root_motion,
-                       bool player_wash = false);
+void commit_body_state(InfantryState &inf, int resolved, const IRootMotionSource *root_motion);
+void commit_player_body_state(InfantryState &inf, int resolved,
+                              const IRootMotionSource *root_motion, bool wash);
 // Select/cache an obstacle detour and publish target_heading before gait selection.
 // [orig: ai_find_cover_position @0x4AFAB0]
 void infantry_detour(AiSystem &ai, AiEntity &e, World &world);
@@ -21,7 +24,8 @@ void infantry_escort_goal(AiEntity &, World &, const Entity &target,
                          int32_t goal[3], int32_t &radius, int32_t &distance);
 bool infantry_is_dragger(const AiEntity &, const World &);
 bool infantry_drag_corpse(AiEntity &, World &);
-// Called after the authority's 16-tick selection; scan every 256 ticks or while speaking.
+// Called after the authority's 16-tick selection; scan every 256 ticks, or every 32
+// while the entity is the scripted voice speaker.
 // [orig: Entity_UpdateInfantryAI @0x4BE0D0..0x4BE7FD]
 void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t key);
 

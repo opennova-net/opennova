@@ -120,9 +120,9 @@ bool infantry_drag_corpse(AiEntity &e, World &world) {
     const AiEntity *body = world.ai.for_handle(dragger->handle);
     e.inf.target_heading = e.inf.aim_heading = body ? body->inf.body_heading
             : heading_of(world, *dragger);
-    e.inf.aim_override = false;
+    e.inf.aim_valid = false; // aimFlag [orig: @0x4B9E30]; the look chase takes its slow arm
     e.inf.aim_established = true;
-    e.inf.anim_pending = 0;
+    e.inf.anim_pending = 0; // [orig: @0x4B9E41]
     return true;
 }
 

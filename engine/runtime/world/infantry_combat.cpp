@@ -406,6 +406,11 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     // Body re-face when the aim drifts far off the body. [orig: > 262470208 (~22 deg)]
     if (opennova::io::bam_abs(opennova::io::bam_sub(inf.aim_heading, inf.target_heading)) > 262470208)
         inf.target_heading = inf.aim_heading;
+    // Every aimed think clears the detour state before the selector's detour
+    // call, whether or not the re-face fired: an aimed approach walks straight
+    // at the enemy, never at a cached side-step point. [orig: @0x4BCFDB, ahead
+    // of the ai_find_cover_position calls @0x4BD490..0x4BD5A4]
+    inf.path_state = 0;
 
     // The walking-fire latch: muzzle within ~5 deg of the solution, inside the attack
     // range, on the slot[22] cadence. [orig: §17.4 — shouldFireSecondary = 1;

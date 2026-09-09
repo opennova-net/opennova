@@ -301,7 +301,13 @@ struct InfantryState {
     int move_mode = 0;
     int32_t target_dist = 0;
     int32_t arrival_radius = 0;
+    // The goal. Retail persists only its Z (entity+0x304, every moving selection
+    // @0x4BD3F7 and the S stamp @0x4BB852); the X/Y are per-think frame locals.
     int32_t move_target[3] = {};
+    // The authored S point the self-attachment chase pulls toward while
+    // attach_parent == self. Written only by the S stamp, read only by the chase.
+    // [orig: entity+0x2FC/+0x300; stamp @0x4BB846/0x4BB84C, chase @0x4BF636/0x4BF63C]
+    int32_t self_attach_point[2] = {};
     bool at_final_oneshot = false;
 
 	// Collision/terrain arm state 1; the detour search caches a point and enters

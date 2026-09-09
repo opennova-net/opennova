@@ -134,14 +134,19 @@ static void test_speaker_identity_and_authority() {
     CHECK(!f.sees()); // Voice still obeys the outer 16-tick gate.
     f.tick(512, false);
     CHECK(!f.sees());
+    // The speaker rescans on the 32-tick perception phase, not on every think:
+    // 528 & 31 == 16 does not scan, 544 (& 255 == 32, & 31 == 0) does through
+    // the speaker arm alone. [orig: phase @0x4BBE4A, re-read @0x4BE0E0]
     f.tick(528);
+    CHECK(!f.body().inf.head_look_target.valid() && !f.sees());
+    f.tick(544);
     CHECK(f.body().inf.head_look_target == target && f.sees());
     Fixture anchored;
     anchored.person({8, 2, 2});
     voice.anchor = anchored.observer;
     voice.portrait = EntityHandle::make(0, 1);
     anchored.world.script.voice.restore(voice);
-    anchored.tick(528);
+    anchored.tick(544);
     CHECK(!anchored.sees());
 }
 
