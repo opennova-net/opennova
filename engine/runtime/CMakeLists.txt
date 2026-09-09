@@ -136,6 +136,7 @@ add_library(opennova_runtime STATIC
     # the language front end (lexer, parser/AST, command table, Program model)
     # is engine/formats/wac
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/compiler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wac/remote_command.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/vm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/wac_system.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/wac_layered_load.cpp

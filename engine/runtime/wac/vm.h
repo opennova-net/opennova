@@ -10,8 +10,10 @@
 #include <cstdint>
 #include <vector>
 
+#include <formats/wac/command.h>
 #include <formats/wac/program.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/script_remote_command.h>
 
 namespace opennova::world {
 class World;
@@ -91,6 +93,13 @@ private:
 
     // Command dispatch (implemented subset; others recorded as effects).
     int32_t dispatch(opennova::world::World &w, int cmd_index, const uint32_t *args, int argc, uint32_t instruction);
+    // The registry flags-0x18 arm of the call: serialize the operands for the
+    // S2C 0x23 record the server tick sends, then decide the local call
+    // (script_remote_command.h and remote_command.h carry the witnesses).
+    std::vector<world::ScriptRemoteArg> resolve_remote_args(opennova::world::World &w, const CommandDef &def,
+                                                            const uint32_t *args, int argc) const;
+    int32_t replicate(opennova::world::World &w, int cmd_index, const CommandDef &def,
+                      const uint32_t *args, int argc);
 };
 
 } // namespace opennova::wac

@@ -14,6 +14,11 @@ void LocalRole::run_tick(const TickInput &) {
 			nullptr, /*joiner=*/false, kernel.local.local_player_dead());
 	kernel.local.apply_player_input_pre_tick();
 	kernel.world.run_logic_tick(/*is_authority=*/true, world::TickPhase::Gameplay);
+	// The VM's replicated commands have no connection to reach without a
+	// session; the handler already ran locally, so the tick's queue is released.
+	// [orig: WacScript_ExecuteBytecode @0x4F58B0 -> NapiNPServer_SendFiltered
+	//  @0x4C87E0 walks an empty connection list]
+	kernel.world.out.script_remote_commands.clear();
 	// The weather tick follows the entity update [orig: Game_ProcessMainFrame
 	// @ 0x52674b -> @ 0x526774].
 	kernel.tick_weather();

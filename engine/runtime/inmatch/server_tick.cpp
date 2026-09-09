@@ -416,6 +416,40 @@ void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
 	}
 }
 
+// Send the WAC commands the VM replicated this tick as S2C 0x23. A targeted
+// record (send_mask 0x20) reaches the one connected, not-dropped connection
+// whose active player slot owns the addressed entity, in-match or not; a
+// broadcast record (send_mask 0x90) reaches every in-match remote and never
+// the listen host, whose VM already ran the handler. A session-less local
+// game has no recipient and the queue is simply released.
+// [orig: WacScript_ExecuteBytecode @0x4F58B0 — SendFiltered(0x23) @0x4f5e74 /
+//  @0x4f5ed1; NapiNPServer_SendFiltered @0x4C87E0 — mask 0x20 target slot
+//  active/not-dropped/connected @0x4c8a06..0x4c8a38, mask 0x10 host exclusion
+//  @0x4c88f6, mask 0x80 state 6/7 gate @0x4c893e]
+void route_script_remote_commands(NapiNPServerCtx &ctx, world::World &world) {
+	for (const world::ScriptRemoteCommand &command : world.out.script_remote_commands) {
+		ScriptRemoteCommand wire;
+		wire.command_index = command.command_index;
+		wire.args.reserve(command.args.size());
+		for (const world::ScriptRemoteArg &arg : command.args)
+			wire.args.push_back({static_cast<uint32_t>(arg.value), arg.text});
+		const std::vector<uint8_t> body = encode_script_remote_command(wire);
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (conn.link.transport == nullptr) continue;
+			if (command.targeted) {
+				if (conn.link.owned_entity != command.target ||
+						conn.host_disconnect_sent)
+					continue;
+			} else if (!is_in_match(conn) ||
+					conn.link.mode == replication::TransportMode::Loopback) {
+				continue;
+			}
+			conn.link.transport->host_send(s2c::SCRIPT_REMOTE_COMMAND, body);
+		}
+	}
+	world.out.script_remote_commands.clear();
+}
+
 // Drain the match domain's objective transitions through retail's two wire
 // lanes. Pickup/drop/save/return and non-CTF capture publish the complete 19-B
 // flag state (0x2F). A CTF capture retires the captured flag with 0x12 instead.
@@ -1302,6 +1336,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// tick get their broadcasts staged before this frame's 0x0A fan (§5.60; the 0x0A
 	// health byte carries the same-frame damage regardless).
 	route_throwable_events(ctx, world);
+	route_script_remote_commands(ctx, world);
 	route_round_deaths(ctx, world);
 	route_match_gameplay_events(ctx, world);
 	release_expired_local_respawns(ctx, world);

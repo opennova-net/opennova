@@ -4,10 +4,14 @@
 #include <string>
 #include <utility>
 
+#include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/udp_session_transport.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_message_id.h>
 #include <net/npwire/session_hello.h>
+#include <formats/wac/command.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
@@ -255,12 +259,147 @@ static void test_punt_retry_local_and_stale_slot_guards() {
     CHECK(local.world.match.drain_player_punts().empty());
 }
 
+// The registry's replicated classes. A flags-0x10 row (ptext/pwave/pconsol)
+// whose selection owns an active player slot other than the local player
+// queues a targeted S2C 0x23 record under the shared handler's wire index,
+// skips the local handler and reports 1; a local, unregistered or empty
+// selection runs the handler locally. A flags-0x08 row queues a broadcast
+// record AND runs locally. Ssn operands travel as the packed handle word.
+// [orig: WacScript_ExecuteBytecode @0x4F58B0 — 0x18 arm @0x4f5ca5..0x4f5ee9,
+//  wire index @0x4f5cb5..0x4f5cce; Entity_ValidatePtr @0x500910]
+static void test_remote_command_classes() {
+    Fixture f;
+    const auto local = f.spawn(10, 0);
+    const auto second = f.spawn(11, 1);
+    const auto third = f.spawn(12, 2);
+    const auto npc = f.spawn(13, 3, false);
+    f.world.cached.local_player = local;
+    for (const auto handle : {local, second, third})
+        f.world.registry.get(handle)->engine_flags |= kEntityFlagPlayer; // the humans group
+    std::vector<ScriptRemoteCommand> &queue = f.world.out.script_remote_commands;
+    // PLOOP visits the member array in reverse: third, second, then local.
+    f.run("ploop\nptext(hello) store(v1) add(v2,v1)\nend\n");
+    CHECK(f.value(1) == 0 && f.value(2) == 2);
+    CHECK(f.world.out.effects.count("text") == 1);
+    CHECK(queue.size() == 2);
+    if (queue.size() == 2) {
+        CHECK(queue[0].targeted && queue[0].target == third);
+        CHECK(queue[1].targeted && queue[1].target == second);
+        for (const ScriptRemoteCommand &record : queue) {
+            CHECK(record.command_index == wac_command_index("text"));
+            CHECK(record.args.size() == 1 && record.args[0].text == "hello");
+        }
+    }
+    queue.clear();
+    // A broadcast row: one record, and the local handler still runs.
+    f.run("text(all) store(v3)\n");
+    CHECK(f.value(3) == 0 && f.world.out.effects.count("text") == 2);
+    CHECK(queue.size() == 1 && !queue[0].targeted &&
+          queue[0].command_index == wac_command_index("text"));
+    CHECK(queue.size() == 1 && queue[0].args.size() == 1 && queue[0].args[0].text == "all");
+    queue.clear();
+    // The targeted class falls through to the local handler for an
+    // unregistered, invalid or local selection.
+    f.run(f.select(npc) + "ptext(npc) store(v4)\nitem=65535\nptext(none) store(v5)\n" +
+          f.select(local) + "pwave(brief)\n");
+    CHECK(f.value(4) == 0 && f.value(5) == 0);
+    CHECK(f.world.out.effects.count("text") == 4);
+    CHECK(f.world.out.effects.count("dialog_wav") == 1);
+    CHECK(queue.empty());
+    // pwave/pconsol travel as wave/consol and report 1 without a local call.
+    f.run(f.select(second) + "pwave(brief2) store(v6)\npconsol(dbg) store(v7)\n");
+    CHECK(f.value(6) == 1 && f.value(7) == 1);
+    CHECK(f.world.out.effects.count("dialog_wav") == 1);
+    CHECK(f.world.out.effects.count("debug_text") == 0);
+    CHECK(queue.size() == 2);
+    if (queue.size() == 2) {
+        CHECK(queue[0].targeted && queue[0].target == second);
+        CHECK(queue[0].command_index == wac_command_index("wave") &&
+              queue[0].args.size() == 1 && queue[0].args[0].text == "brief2");
+        CHECK(queue[1].command_index == wac_command_index("consol") &&
+              queue[1].args.size() == 1 && queue[1].args[0].text == "dbg");
+    }
+    queue.clear();
+    // Ssn and numeric operands travel resolved: the packed handle and the dword.
+    f.run("hideSSN(11)\ntext#(numbered,7)\n");
+    CHECK(queue.size() == 2);
+    if (queue.size() == 2) {
+        CHECK(!queue[0].targeted && queue[0].command_index == wac_command_index("hideSSN"));
+        CHECK(queue[0].args.size() == 1 && queue[0].args[0].value == second.packed);
+        CHECK(queue[1].args.size() == 2 && queue[1].args[0].text == "numbered" &&
+              queue[1].args[1].value == 7);
+    }
+    CHECK(f.world.diagnostics.empty());
+}
+
+// The server tick sends a targeted record to the one connection owning the
+// selected player and a broadcast record to every in-match remote, never to
+// the listen host, whose VM already ran the handler.
+// [orig: NapiNPServer_SendFiltered @0x4C87E0 — mask 0x20 target slot
+//  @0x4c8a06..0x4c8a38, mask 0x90 host exclusion @0x4c88f6 + state 6/7 @0x4c893e]
+static void test_remote_command_fanout_reaches_owner_and_remotes() {
+    HostFixture f;
+    repl::UdpSessionTransport observer_transport{repl::UdpSessionTransport::Role::Host};
+    repl::LoopbackChannel loopback;
+    const auto observer = f.spawn(11, 1);
+    const auto host = f.spawn(12, 2);
+    f.world.cached.local_player = host;
+    const auto add_connection = [&](repl::ISessionTransport *transport,
+                                    repl::TransportMode mode, EntityHandle owned) {
+        nm::NapiNPConnection conn;
+        conn.type = mode == repl::TransportMode::Loopback
+                ? nm::NapiNPConnection::kTypeClientSide : nm::NapiNPConnection::kTypeServerSide;
+        conn.phase = nm::ConnectionPhase::PlayerAdded;
+        conn.burst.spawned = true;
+        conn.link.mode = mode;
+        conn.link.transport = transport;
+        conn.link.owned_entity = owned;
+        conn.link.owned_entity_spawn_id = f.world.registry.get(owned)->registry_spawn_id;
+        f.ctx.np_protocol.connection_list.push_back(std::move(conn));
+    };
+    add_connection(&observer_transport, repl::TransportMode::Client, observer);
+    add_connection(&loopback, repl::TransportMode::Loopback, host);
+
+    f.run(f.select(f.actor) + "ptext(owner_only)\ntext(everyone)\n");
+    CHECK(f.world.out.script_remote_commands.size() == 2);
+    nm::Server_TickUpdate(f.ctx);
+    CHECK(f.world.out.script_remote_commands.empty());
+
+    const auto texts = [&](auto &transport, auto pop) {
+        std::vector<std::string> out;
+        repl::Datagram datagram;
+        while (pop(transport, datagram)) {
+            if (datagram.tag != opennova::s2c::SCRIPT_REMOTE_COMMAND) continue;
+            CHECK(datagram.reliable);
+            opennova::ScriptRemoteCommand command;
+            size_t consumed = 0;
+            CHECK(opennova::decode_script_remote_command(
+                    datagram.body.data(), datagram.body.size(), command, consumed));
+            CHECK(consumed == datagram.body.size());
+            CHECK(command.command_index == wac_command_index("text"));
+            out.push_back(command.args.empty() ? std::string() : command.args[0].text);
+        }
+        return out;
+    };
+    const auto pop_udp = [](repl::UdpSessionTransport &t, repl::Datagram &d) { return t.pop_outbound(d); };
+    const auto pop_loop = [](repl::LoopbackChannel &t, repl::Datagram &d) { return t.client_recv(d); };
+    const std::vector<std::string> owner = texts(f.transport, pop_udp);
+    const std::vector<std::string> remote = texts(observer_transport, pop_udp);
+    const std::vector<std::string> listen_host = texts(loopback, pop_loop);
+    CHECK(owner.size() == 2 && owner[0] == "owner_only" && owner[1] == "everyone");
+    CHECK(remote.size() == 1 && remote[0] == "everyone");
+    CHECK(listen_host.empty());
+    CHECK(f.world.out.effects.count("text") == 1); // the host ran only the broadcast row
+}
+
 int main() {
     test_registered_slot_predicates_and_byte_bank();
     test_experience_raw_scoring_validation_and_retry();
     test_experience_both_occupant_links_and_zero_shares();
     test_punt_command_reaches_connection_and_first_reason_wins();
     test_punt_retry_local_and_stale_slot_guards();
+    test_remote_command_classes();
+    test_remote_command_fanout_reaches_owner_and_remotes();
     std::printf("wac_players: %d failures\n", failures);
     return failures ? 1 : 0;
 }

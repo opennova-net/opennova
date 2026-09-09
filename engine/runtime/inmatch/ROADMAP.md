@@ -237,10 +237,11 @@ owner reframes it onto `conn.link.transport->push_inbound`, the proven path — 
 production `PeerC2SInMatch` consumer yet, so an inline apply would be dead code + a P7 double-apply
 trap). The per-frame `0x0A` codec is unchanged: `build_tag_0a_world_reference` already returns
 `encode_frame_update` (the witnessed §5.9 bytes `decode_frame_update`/`ClientReplicaPipeline` round-trip) — the
-P8 cleanup just lifts the snapshot→`FrameUpdate` adapter into netsim. The `0x23` entity-command body
-is unwitnessed and has zero callers, so no sink exists for it (faithful-port — never invent bytes; grill
-`NapiNPServer_SendFiltered` 0x23 then port once a caller exists; the empty `SerializingSink` that once
-stood in for it was deleted under ADR 0043 slice E3).
+P8 cleanup just lifts the snapshot→`FrameUpdate` adapter into netsim. The `0x23` body is the WAC VM's
+script remote command (`WacScript_ExecuteBytecode @0x4F58B0` is its one producer, registry flags 0x18;
+`GameMode_DispatchRemoteCommand @0x4F81E0` its consumer): `route_script_remote_commands` drains
+`World::out.script_remote_commands` and the joiner runs the row's handler through `wac::run_remote_command`
+(the empty `SerializingSink` that once stood in for it was deleted under ADR 0043 slice E3).
 
 Bar met: `npruntime_golden_gameplay` — the gameplay golden's real retail C2S `0x0C` (2351 extended
 uplinks) drains → SNAPs the owned entity → the emitted S2C `0x0A` anchor IS that entity's post-SNAP

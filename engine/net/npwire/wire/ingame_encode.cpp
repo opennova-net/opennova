@@ -1,6 +1,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/wire_handle.h>
 #include <base/io/le.h>
+#include <formats/wac/command.h>
 
 #include <algorithm>
 #include <limits>
@@ -975,6 +976,32 @@ std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat) {
 	w.u8(static_cast<uint8_t>(chat.channel));
 	w.u8(chat.sender_slot);
 	w.cstr(chat.text);
+	return out;
+}
+
+// [orig: WacScript_ExecuteBytecode @0x4F58B0 — payload build @0x4f5cd0..0x4f5dc2]
+std::vector<uint8_t> encode_script_remote_command(const ScriptRemoteCommand &command) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(command.command_index); // @0x4f5cf9
+	if (command.command_index >= wac::wac_command_count()) return out;
+	const wac::CommandDef &def = wac::wac_commands()[command.command_index];
+	for (int i = 0; i < def.argc; ++i) {
+		const ScriptRemoteCommandArg *arg = static_cast<size_t>(i) < command.args.size()
+				? &command.args[static_cast<size_t>(i)] : nullptr;
+		switch (def.params[i]) {
+		case wac::ParamType::Text:
+		case wac::ParamType::Filename:
+			w.cstr_capped(arg != nullptr ? arg->text : std::string(), 251); // 250 chars + NUL @0x4f5d73..0x4f5dab
+			break;
+		case wac::ParamType::Ssn:
+			w.u16(static_cast<uint16_t>(arg != nullptr ? arg->value : 0u)); // @0x4f5d3d
+			break;
+		default:
+			w.u32(arg != nullptr ? arg->value : 0u); // @0x4f5d59
+			break;
+		}
+	}
 	return out;
 }
 

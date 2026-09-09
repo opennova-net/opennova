@@ -9,6 +9,7 @@
 #include <formats/wac/bytecode.h>
 #include <formats/wac/command.h>
 #include <formats/wac/help.h>
+#include <runtime/wac/remote_command.h>
 #include <runtime/world/world.h>
 
 #include <base/io/strutil.h>
@@ -218,6 +219,10 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         return 0;
     }
     const CommandDef &def = wac_commands()[cmd];
+    // A command whose registry flags carry 0x18 is serialized for S2C 0x23
+    // before, or instead of, its local call. [orig: WacScript_ExecuteBytecode
+    // @0x4F58B0 — flags test @0x4f5ca5, the arm through @0x4f5ee9]
+    if (cmd_is_replicated(def)) return replicate(w, cmd, def, args, argc);
     const char *n = def.name;
     auto A = [&](int i) -> int32_t {
         if (i >= argc || args == nullptr) return 0;
@@ -239,12 +244,6 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         const int32_t handle = A(i);
         return handle > 0 && size_t(handle) <= prog_->effect_names.size()
                 ? prog_->effect_names[size_t(handle) - 1] : std::string();
-    };
-
-    const auto SOUND = [&](int i) -> std::string {
-        const int32_t handle = A(i);
-        return handle > 0 && size_t(handle) <= prog_->sound_names.size()
-                ? prog_->sound_names[size_t(handle) - 1] : std::string();
     };
 
     // [orig: WacCmd_Reset @0x4ED300] Reset this event and its descendants;
@@ -305,19 +304,12 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "SSNalive")) return cmds.ssn_alive(H(0)) ? 1 : 0;
     if (ieq(n, "SSNexists")) return cmds.ssn_exists(H(0)) ? 1 : 0;
     if (ieq(n, "SSNLeadSSN2SSN")) return cmds.ssn_leads_target(H(0), H(1), H(2), A(3));
-    if (ieq(n, "SS2SSN")) return cmds.play_ssn_soundset(H(1), SOUND(0));
-    if (ieq(n, "sound2tgt")) return cmds.sound_at_target(A(0), SOUND(0), A(1));
-    if (ieq(n, "sound")) return cmds.direct_sound(SOUND(0), A(1), A(2));
-    if (ieq(n, "fx2ssn")) return cmds.effect_at_ssn(A(0), FX(0), H(1));
-    if (ieq(n, "fx2tgt")) return cmds.effect_at_target(A(0), FX(0), A(1));
     if (ieq(n, "fxrain")) return A(0) != 0 ? cmds.rain_effect(A(0), FX(0), next_rand()) : 1;
-    if (ieq(n, "targetfx")) { cmds.spawn_marker_particle_effects(A(0)); return 0; }
     if (ieq(n, "ammo2tgt")) return cmds.fire_ammo_at_target(A(0), A(1));
     if (ieq(n, "ammo2ssn")) return cmds.fire_ammo_from_ssn(A(0), H(1), H(2));
     if (ieq(n, "ammoarea")) return cmds.fire_ammo_in_area(A(0), A(1));
     if (ieq(n, "ammorain"))
         return A(0) != 0 ? cmds.rain_ammo_near_player(A(0), next_rand()) : 1;
-    if (ieq(n, "teleSSN")) return cmds.wac_teleport_ssn(H(0), A(1));
     if (ieq(n, "teleport")) { cmds.teleport_group_to_marker(A(0), A(1)); return 0; }
     if (ieq(n, "SSNcritical")) return cmds.ssn_critical(H(0));
     if (ieq(n, "SSNride")) return cmds.ssn_has_rider(H(0));
@@ -390,10 +382,6 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     }
     if (ieq(n, "squadevent")) return w.script.squad_events.query(A(0));
     if (ieq(n, "squadclear")) return w.script.squad_events.clear_selected();
-    // [orig: Sbf_StartEntry @0x4ED910] The WAC stream handle is null: its
-    // opener @0x4ED6C0 has no callers in retail JO. Preserve the success
-    // return without touching the separate AudioVM/MUS music context.
-    if (ieq(n, "music")) return 1;
 
     // ---- variable mutation ----
     if (ieq(n, "set")) { if (argc >= 2) write(w, args[0], A(1)); return A(1); }
@@ -417,13 +405,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "SSNAtt")) return cmds.set_ssn_attack_max(H(0), A(1)) ? 1 : 0;
     if (ieq(n, "SSNanim")) return cmds.set_ssn_anim(H(0), A(1)) ? 1 : 0;
     if (ieq(n, "anim")) return cmds.set_local_anim(A(0)) ? 0 : 1;
-    // [orig: WacCmd_Face @0x4ED5D0; WacCmd_SsnFace @0x4F1C60]
-    if (ieq(n, "face")) {
-        const world::Entity *entity = w.registry.get(w.cached.local_player);
-        if (entity == nullptr) return 1;
-        w.facials.override_expression(*entity, A(0));
-        return 0;
-    }
+    // [orig: WacCmd_SsnFace @0x4F1C60]
     if (ieq(n, "ssnface")) {
         const world::Entity *entity = w.registry.get(H(0));
         if (entity == nullptr || entity->item_id == 0 || w.facials.for_entity(*entity) == nullptr)
@@ -472,12 +454,6 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         w.doors.command_group(w, A(0), ieq(n, "opendoors"), false);
         return 1;
     }
-    if (ieq(n, "hideSSN")) return cmds.set_ssn_hidden(H(0), true) ? 1 : 0;
-    if (ieq(n, "unhideSSN")) return cmds.set_ssn_hidden(H(0), false) ? 1 : 0;
-    if (ieq(n, "holdSSN")) return cmds.set_ssn_held(H(0), true) ? 1 : 0;
-    if (ieq(n, "unholdSSN")) return cmds.set_ssn_held(H(0), false) ? 1 : 0;
-    if (ieq(n, "disableSSN")) return cmds.set_ssn_disabled(H(0), true) ? 1 : 0;
-    if (ieq(n, "enableSSN")) return cmds.set_ssn_disabled(H(0), false) ? 1 : 0;
     if (ieq(n, "setaccuracy"))
         return cmds.set_ssn_accuracy(H(0), A(1), A(2)) ? 1 : 0;
     if (ieq(n, "ssnguard"))
@@ -565,12 +541,9 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "skyspeed")) { cmds.set_sky_speed(A(0)); return 0; }
     if (ieq(n, "fov")) { cmds.set_fov(A(0)); return 0; }
     if (ieq(n, "skyheight")) { cmds.set_sky_height(A(0)); return 0; }
-    if (ieq(n, "quake")) { cmds.quake(A(0)); return 0; }
     if (ieq(n, "TOD")) { cmds.set_time_of_day_minutes(A(0)); return 0; }
     if (ieq(n, "sunfade")) { cmds.sun_fade(A(0), A(1)); return 0; }
     if (ieq(n, "colorfade")) { cmds.set_color_fade(A(0)); return 0; }
-    if (ieq(n, "flash")) { cmds.lightning_flash(); return 0; }
-    if (ieq(n, "farflash")) { cmds.lightning_far_flash(); return 0; }
     // The handlers pack three independent operands, retaining carries between
     // components and dword wrap. Variables are evaluated at each execution.
     // [orig: WacCmd_Sun..SkyFogColor @0x4EDCD0..0x4EDE70]
@@ -613,16 +586,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         return 1;
     }
 
-    // ---- player text / debug console ----
-    // text/ptext feed the player message channel [orig: WAC text @ 0x4EDB50
-    // -> Chat_AddMessageChannel1 @ 0x4985D0], while consol/pconsol feed the
-    // distinct on-screen debug channel [orig: @ 0x4EDBE0 ->
-    // Chat_AddDebugMessage]. Keep them separate so game hosts can present
-    // mission text without leaking authored debug output into the HUD.
-    if (ieq(n, "text") || ieq(n, "ptext")) {
-        w.out.effects.push({"text", 0, 0, 0, 0, S(0)});
-        return 0;
-    }
+    // ---- debug console ----
     if (ieq(n, "Help")) {
         // [orig: WacCmd_Help @0x4F6DE0]
         const HelpExportResult result = export_help();
@@ -632,25 +596,9 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
             w.out.effects.push({"debug_text", 0, 0, 0, 0, "Current events.xml file saved"});
         return 0;
     }
-    if (ieq(n, "consol") || ieq(n, "pconsol")) {
-        w.out.effects.push({"debug_text", 0, 0, 0, 0, S(0)});
-        return 0;
-    }
-    if (ieq(n, "text#")) {
-        w.out.effects.push({"text", A(1), 0, 0, 0, S(0)});
-        return 0;
-    }
-    if (ieq(n, "consol#")) {
-        w.out.effects.push({"debug_text", A(1), 0, 0, 0, S(0)});
-        return 0;
-    }
 
-    // A dedicated, mission-owned voice channel with synchronous asset resolution
-    // and physical playback completion from the host.
-    // [orig: @0x4ED610, @0x4F78D0, @0x4F79B0, @0x4ED380]
-    if (ieq(n, "wave") || ieq(n, "pwave")) return w.script.voice.wave(w, S(0));
-    if (ieq(n, "SSNwave")) return w.script.voice.ssn_wave(w, H(0), S(1), A(2), false);
-    if (ieq(n, "SSNradio")) return w.script.voice.ssn_wave(w, H(0), S(1), 0, true);
+    // The mission-owned voice channel's readiness query; the wave commands
+    // themselves are replicated rows (remote_command.cpp). [orig: @0x4ED380]
     if (ieq(n, "waveready")) return w.script.voice.ready();
 
     // ssnrelease(ssn) -- detach a transported AI and CLEAR its boarding order.
@@ -668,6 +616,60 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // ---- default: record the command as an observable effect ----
     w.out.effects.push({def.name, A(0), A(1), A(2), A(3), S(0)});
     return 0;
+}
+
+// The operands as the S2C 0x23 body carries them: Text/Filename as the
+// string, Ssn as the packed handle word, everything else as the resolved dword.
+// [orig: WacScript_ExecuteBytecode @0x4F58B0 — payload loop @0x4f5d26..0x4f5dc2:
+//  types 17/18 @0x4f5d71..0x4f5dab, type 11 @0x4f5d3d, else @0x4f5d59]
+std::vector<world::ScriptRemoteArg> WacVm::resolve_remote_args(opennova::world::World &w,
+                                                               const CommandDef &def,
+                                                               const uint32_t *args, int argc) const {
+    std::vector<world::ScriptRemoteArg> out(static_cast<size_t>(def.argc));
+    for (int i = 0; i < def.argc && i < argc && args != nullptr; ++i) {
+        world::ScriptRemoteArg &arg = out[static_cast<size_t>(i)];
+        const ParamType type = def.params[i];
+        if (type == ParamType::Text || type == ParamType::Filename) {
+            const int32_t si = arg_as_string_index(args[i]);
+            if (si >= 0 && si < static_cast<int32_t>(prog_->strings.size())) arg.text = prog_->strings[si];
+        } else {
+            arg.value = read(w, args[i]);
+        }
+    }
+    return out;
+}
+
+// [orig: WacScript_ExecuteBytecode @0x4F58B0 — the registry flags-0x18 arm
+//  @0x4f5ca5..0x4f5ee9]
+int32_t WacVm::replicate(opennova::world::World &w, int cmd, const CommandDef &def,
+                         const uint32_t *args, int argc) {
+    world::ScriptRemoteCommand record;
+    record.command_index = static_cast<uint16_t>(remote_command_wire_index(cmd)); // @0x4f5cb5..0x4f5cce
+    record.args = resolve_remote_args(w, def, args, argc);                        // @0x4f5cf9..0x4f5dc2
+    const RemoteCommandNames names{&prog_->effect_names, &prog_->sound_names};
+    if ((def.flags & 0x10) != 0) {
+        // The targeted class reaches the selected player's connection alone
+        // and skips the local handler, reporting 1. An unselected, local or
+        // unregistered selection runs the handler here instead: the packed
+        // handle must name a pool below 5 and a slot inside it, not be the
+        // local player, and own an active player slot (Entity_ValidatePtr).
+        // [@0x4f5df9..0x4f5e8b; Entity_ValidatePtr @0x500910]
+        const world::EntityHandle target{auto_item_};
+        if (target.valid() && target.pool() < world::EntityRegistry::kPoolCount &&
+                w.registry.get(target) != nullptr && target != w.cached.local_player &&
+                w.match.player(target) != nullptr) {
+            record.targeted = true;
+            record.target = target;
+            w.out.script_remote_commands.push_back(std::move(record));
+            return 1;
+        }
+        return run_remote_command(w, cmd, record.args, names);
+    }
+    // The broadcast class reaches every in-match remote AND runs here.
+    // [@0x4f5ec7..0x4f5ed1, then the call-convention switch @0x4f5ef6]
+    const std::vector<world::ScriptRemoteArg> resolved = record.args;
+    w.out.script_remote_commands.push_back(std::move(record));
+    return run_remote_command(w, cmd, resolved, names);
 }
 
 void WacVm::record_gap(opennova::world::World &w, int cmd, uint32_t instruction, const int32_t *arguments) {

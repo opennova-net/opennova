@@ -1647,6 +1647,31 @@ struct PlayerDownedState {
 bool decode_player_downed_state(const uint8_t *body, size_t len,
 		PlayerDownedState &out, size_t &consumed);
 
+// S2C 0x23 — a WAC command the host VM replicated because its registry flags
+// carry 0x18. `[u16 wireIndex]` then one field per declared registry operand:
+// Text/Filename as a cstring of at most 250 chars plus NUL, Ssn as the packed
+// u16 handle, every other type as the resolved u32. The client reads the same
+// registry row; a body that ends early sets `read_error` and ZERO-FILLS the
+// remaining operands but still dispatches, and bytes past the last operand are
+// ignored. The decoder rejects only what that row walk cannot address — an
+// index past the registry (retail would read beyond its table) — and a row
+// without the 0x18 flags, which the client never dispatches.
+// [orig: WacScript_ExecuteBytecode @0x4F58B0 — u16 index @0x4f5cf9, operands
+//  @0x4f5d26..0x4f5dc2; GameMode_DispatchRemoteCommand @0x4F81E0 — u16 id
+//  @0x4f827e, operand loop @0x4f830a..0x4f840a, string cap @0x4f83d0,
+//  `(flags & 0x18)` gate @0x4f8429]
+struct ScriptRemoteCommandArg {
+	uint32_t value = 0;   // Ssn (u16) and every numeric operand
+	std::string text;     // Text / Filename operands
+};
+struct ScriptRemoteCommand {
+	uint16_t command_index = 0;
+	std::vector<ScriptRemoteCommandArg> args; // one per declared registry operand
+	bool read_error = false;
+};
+bool decode_script_remote_command(const uint8_t *body, size_t len,
+		ScriptRemoteCommand &out, size_t &consumed);
+
 // S2C 0x30 — entity-checksum request. `[u8 entityId][u16 checksum]` (3 B). The
 // client builds NetPacket_WriteEntityChecksum(entityId, checksum) and replies
 // C2S 0x20 (entity checksum). [orig: NapiNPClientMsg_HandleChecksumRequest @ 0x431170]

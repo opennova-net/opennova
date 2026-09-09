@@ -25,6 +25,7 @@
 #include <runtime/world/teammate_operations.h>
 #include <runtime/world/script_events.h>
 #include <runtime/world/script_effects.h>
+#include <runtime/world/script_remote_command.h>
 #include <runtime/world/script_sounds.h>
 #include <runtime/world/script_squad.h>
 #include <runtime/world/script_input.h>
@@ -555,6 +556,10 @@ struct WorldOutbox {
     std::vector<ScriptEffectEvent> script_effects;
     std::vector<ScriptSoundEvent> script_sounds;
     uint64_t next_script_effect_order = 0;
+    // The WAC commands the VM replicated this tick (registry flags 0x18) for
+    // the server tick to send as S2C 0x23; script_remote_command.h carries the
+    // witness. Cleared by the drain; a client-side World never fills it.
+    std::vector<ScriptRemoteCommand> script_remote_commands;
     // The impact-scar rings (world-wac-ai-re §24.9): 128 per-entity rings + the
     // terrain ring, written by the round stop and cleared on death. Presentation
     // state — the shell compiles it into quads each frame; it is NOT part of the
