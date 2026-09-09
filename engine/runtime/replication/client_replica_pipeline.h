@@ -227,6 +227,12 @@ public:
 	// routes each line by the HUD channel table and posts it to its ring.
 	std::vector<ClientChatLine> drain_chat_lines();
 	std::vector<WeaponReload> drain_weapon_reloads();
+	// S2C 0x23 WAC remote commands the fold accepted this frame; the embedding
+	// role runs each registry row's handler (wac::run_remote_command) against
+	// its world. A non-authority endpoint only: the retail handler returns
+	// before decoding on the authority. [orig: GameMode_DispatchRemoteCommand
+	// @0x4F81E0 — `!is_authority` @0x4f8249]
+	std::vector<ScriptRemoteCommand> drain_script_remote_commands();
 	// S2C 0x13 entity-death notifies folded by apply(): the row's health drops to
 	// zero and the record is surfaced once so the embedding sim can run the
 	// class death callback on its world twin (a destructible's husk/explosion
@@ -311,6 +317,7 @@ private:
 	void apply_player_downed_state(const std::vector<uint8_t> &body);
 	void apply_spawn_wave_status(const std::vector<uint8_t> &body);
 	void apply_score_delta_sound(const std::vector<uint8_t> &body);
+	void apply_script_remote_command(const std::vector<uint8_t> &body); // 0x23
 	// S2C 0x56 -- one chunk of the end-of-round stat board. Reassembles into
 	// ClientState::end_round and decodes when the board completes.
 	void apply_end_round_header(const std::vector<uint8_t> &body);
@@ -371,6 +378,7 @@ private:
 	std::vector<ClientGameEvent> pending_game_events_;
 	std::vector<ClientChatLine> pending_chat_lines_;
 	std::vector<WeaponReload> pending_weapon_reloads_;
+	std::vector<ScriptRemoteCommand> pending_script_remote_commands_;
 	std::vector<EntityDeathRecord> pending_entity_deaths_;
 	std::size_t unknown_tags_ = 0;
 	std::size_t malformed_bodies_ = 0;

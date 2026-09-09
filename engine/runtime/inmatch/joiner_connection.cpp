@@ -1861,6 +1861,17 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
+		} else if (m.tag == s2c::SCRIPT_REMOTE_COMMAND) {
+			// S2C 0x23 — a WAC command the host VM replicated. The replica
+			// pipeline folds it and the role runs the registry row's handler
+			// against its world. [orig: GameMode_DispatchRemoteCommand @0x4F81E0]
+			ScriptRemoteCommand command;
+			std::size_t consumed = 0;
+			if (decode_script_remote_command(
+					m.payload.data(), m.payload.size(), command, consumed)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
 		} else if (m.tag == s2c::DEATH_CAMERA_TARGET) {
 			DeathCameraTarget target;
 			std::size_t consumed = 0;

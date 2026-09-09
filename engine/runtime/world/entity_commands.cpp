@@ -28,10 +28,11 @@ static constexpr double kMountRadius = 20.0;
 
 // ----------------------------------------------------------------------------
 // EntityCommands — the shared Entity_* primitive layer.
-// Commands mutate the Entity model directly and locally. [orig: entity-targeted
-// commands serialize to a NAPI payload and NapiNPServer_SendFiltered(..., 0x23,
-// ...) to the owner when the target is not local] -- that 0x23 body is
-// unwitnessed and has no caller yet, so no outbound seam exists for it.
+// Commands mutate the Entity model directly and locally. The one outbound seam
+// is the WAC VM's: a registry row whose flags carry 0x18 is serialized as the
+// S2C 0x23 script remote command (world/script_remote_command.h) before, or
+// instead of, its local call [orig: WacScript_ExecuteBytecode @0x4F58B0 ->
+// NapiNPServer_SendFiltered(..., 0x23, ...) @0x4f5e74 / @0x4f5ed1].
 // ----------------------------------------------------------------------------
 
 // Script SSN -> entity handle, with the retail PLAYER mapping. Mission scripts

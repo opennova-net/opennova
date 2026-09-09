@@ -21,6 +21,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_catalog.h>
+#include <formats/wac/command.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -716,6 +717,24 @@ int check_S_54_player_downed_state() {
 	EXPECT(output.entity_handle == input.entity_handle);
 	EXPECT(output.revive_seconds == 120 && output.medic_request_active);
 	cover('S', 0x54);
+	return 0;
+}
+
+// S2C 0x23 — WAC script remote command: [u16 registry index] + that row's
+// operands (Text/Filename cstr, Ssn u16, else u32), here text#'s [Text][Number].
+int check_S_23_script_remote_command() {
+	ScriptRemoteCommand input;
+	input.command_index = uint16_t(wac::wac_command_index("text#"));
+	input.args = {{0, "mission text"}, {3, ""}};
+	const std::vector<uint8_t> wire = encode_script_remote_command(input);
+	EXPECT(wire.size() == 2 + 13 + 4);
+	ScriptRemoteCommand output;
+	size_t consumed = 0;
+	EXPECT(decode_script_remote_command(wire.data(), wire.size(), output, consumed));
+	EXPECT(consumed == wire.size() && !output.read_error);
+	EXPECT(output.command_index == input.command_index && output.args.size() == 2);
+	EXPECT(output.args[0].text == "mission text" && output.args[1].value == 3);
+	cover('S', 0x23);
 	return 0;
 }
 
@@ -1523,6 +1542,7 @@ int main() {
 	if (check_S_13_entity_death()) return 1;
 	if (check_S_52_death_camera_target()) return 1;
 	if (check_S_54_player_downed_state()) return 1;
+	if (check_S_23_script_remote_command()) return 1;
 	if (check_S_30_checksum_request()) return 1;
 	if (check_S_31_loadout_crc_request()) return 1;
 	if (check_S_42_input_flags()) return 1;

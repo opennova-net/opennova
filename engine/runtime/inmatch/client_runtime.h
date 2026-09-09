@@ -221,6 +221,9 @@ public:
 	// kill; a destructible's husk/explosion chain).
 	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — cb(entity, 4, 0) @0x42ebf5]
 	std::vector<EntityDeathRecord> drain_entity_deaths();
+	// S2C 0x23 WAC remote commands the recv fold surfaced this frame; the
+	// joiner role runs each registry row's handler against its world.
+	std::vector<ScriptRemoteCommand> drain_script_remote_commands();
 
 	// Deterministic golden replay (Joiner): seed the connection keys + seq/ack + self handle/type so
 	// frame_c2s_uplink reproduces a captured C2S 0x0C datagram byte-for-byte. [ROADMAP "Determinism"]

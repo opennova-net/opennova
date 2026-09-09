@@ -13,9 +13,11 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
+#include <formats/wac/command.h>
 
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 using namespace opennova;
@@ -1236,8 +1238,72 @@ static int test_objective_entity_state_roundtrip() {
 
 } // namespace
 
+// S2C 0x23 script remote command: [u16 index] then the registry row's operands
+// (Text/Filename cstr capped at 250 + NUL, Ssn u16, else u32); a short body
+// zero-fills what is missing and still decodes, trailing bytes are ignored,
+// and a row without the 0x18 flags never dispatches.
+//   encode_script_remote_command <- [orig: WacScript_ExecuteBytecode @0x4F58B0 payload @0x4f5cf9..0x4f5dc2]
+//   decode_script_remote_command <- [orig: GameMode_DispatchRemoteCommand @0x4F81E0 @0x4f827e..0x4f8429]
+int test_script_remote_command_roundtrip() {
+	// text#: [Text][Number]
+	ScriptRemoteCommand in;
+	in.command_index = uint16_t(wac::wac_command_index("text#"));
+	in.args = {{0, "hello"}, {7, ""}};
+	std::vector<uint8_t> wire = encode_script_remote_command(in);
+	EXPECT(wire.size() == 2 + 6 + 4);
+	EXPECT(wire[2] == 'h' && wire[7] == 0 && wire[8] == 7 && wire[11] == 0);
+	ScriptRemoteCommand out;
+	size_t consumed = 0;
+	EXPECT(decode_script_remote_command(wire.data(), wire.size(), out, consumed));
+	EXPECT(consumed == wire.size() && !out.read_error);
+	EXPECT(out.command_index == in.command_index && out.args.size() == 2);
+	EXPECT(out.args[0].text == "hello" && out.args[1].value == 7);
+
+	// SSNwave: [Ssn u16][Filename][Distance u32] — the handle word, not a dword.
+	ScriptRemoteCommand voice;
+	voice.command_index = uint16_t(wac::wac_command_index("SSNwave"));
+	voice.args = {{0x1042, ""}, {0, "voice1"}, {0x00050000, ""}};
+	wire = encode_script_remote_command(voice);
+	EXPECT(wire.size() == 2 + 2 + 7 + 4);
+	EXPECT(wire[2] == 0x42 && wire[3] == 0x10 && wire[4] == 'v');
+	EXPECT(decode_script_remote_command(wire.data(), wire.size(), out, consumed));
+	EXPECT(consumed == wire.size() && !out.read_error && out.args.size() == 3);
+	EXPECT(out.args[0].value == 0x1042 && out.args[1].text == "voice1" &&
+	       out.args[2].value == 0x00050000);
+
+	// A string past 250 chars is cut to 250 on the wire and read back as 250.
+	ScriptRemoteCommand longtext;
+	longtext.command_index = uint16_t(wac::wac_command_index("text"));
+	longtext.args = {{0, std::string(300, 'x')}};
+	wire = encode_script_remote_command(longtext);
+	EXPECT(wire.size() == 2 + 251);
+	EXPECT(decode_script_remote_command(wire.data(), wire.size(), out, consumed));
+	EXPECT(consumed == wire.size() && out.args.size() == 1 && out.args[0].text.size() == 250);
+
+	// A short body: the missing Number reads as zero with read_error set.
+	const uint8_t short_body[] = {uint8_t(in.command_index), uint8_t(in.command_index >> 8),
+	                              'h', 'i', 0};
+	EXPECT(decode_script_remote_command(short_body, sizeof(short_body), out, consumed));
+	EXPECT(out.read_error && consumed == 5 && out.args.size() == 2);
+	EXPECT(out.args[0].text == "hi" && out.args[1].value == 0);
+
+	// Trailing bytes are ignored; an unreplicated row and an index past the
+	// registry are rejected.
+	const uint8_t trailing[] = {uint8_t(wac::wac_command_index("flash")), 0, 0xAA};
+	EXPECT(decode_script_remote_command(trailing, sizeof(trailing), out, consumed));
+	EXPECT(consumed == 2 && out.args.empty() && !out.read_error);
+	const uint8_t plain[] = {uint8_t(wac::wac_command_index("elapse")), 0, 1, 0, 0, 0};
+	EXPECT(!decode_script_remote_command(plain, sizeof(plain), out, consumed));
+	const uint8_t beyond[] = {0xFF, 0xFF};
+	EXPECT(!decode_script_remote_command(beyond, sizeof(beyond), out, consumed));
+	EXPECT(!decode_script_remote_command(beyond, 1, out, consumed));
+	std::printf("PASS script_remote_command_roundtrip\n");
+	return 0;
+}
+
 int main() {
 	int rc = 0;
+	rc |= test_script_remote_command_roundtrip();
 	rc |= test_compress_fixedpoint_roundtrip();
 	rc |= test_frame_update_roundtrip();
 	rc |= test_frame_update_known_null_callback_record_is_header_only();

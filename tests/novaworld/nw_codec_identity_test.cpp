@@ -22,6 +22,7 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
+#include <formats/wac/command.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -441,6 +442,14 @@ std::vector<Case> build_corpus() {
 		add("player_list", encode_player_list(frame));
 	}
 
+	// S2C 0x23 WAC remote command — SSNwave's [Ssn u16][Filename cstr][Distance u32].
+	{
+		ScriptRemoteCommand command;
+		command.command_index = uint16_t(wac::wac_command_index("SSNwave"));
+		command.args = {{0x1042, ""}, {0, "voice1"}, {0x00050000, ""}};
+		add("script_remote_command_ssnwave", encode_script_remote_command(command));
+	}
+
 	return corpus;
 }
 
@@ -477,6 +486,7 @@ const Vector kExpected[] = {
 	{"player_sync_default_mask", 32u, 0xa53c98b5b727a16eull},
 	{"player_sync_removal", 3u, 0xb1ee804f3f7b976cull},
 	{"player_list", 47u, 0x2fcbe1019372dd9full},
+	{"script_remote_command_ssnwave", 15u, 0x422ee4f143405f15ull},
 };
 
 void dump(const std::vector<Case> &corpus) {

@@ -19,6 +19,7 @@
 
 #include <runtime/simassets/collision_resolve.h> // find_item_def (a rider's authored hp)
 #include <runtime/simassets/seat_spec_extract.h> // refresh_item_seat_spec (a streamed row's seats)
+#include <runtime/wac/remote_command.h>        // run_remote_command (the S2C 0x23 handler body)
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/destruction.h>   // destruction_notify_item_damage (S2C 0x13 net kill)
@@ -1636,6 +1637,29 @@ void JoinerRole::apply_gameplay_events() {
 		victim->alive = false;
 		victim->last_attacker = world::EntityHandle{};
 		world::destruction_notify_item_damage(world, *victim, 4);
+	}
+
+	// S2C 0x23 replicated WAC commands: run the registry row's handler here
+	// with the operands the wire carried — the same body the host VM ran for a
+	// broadcast row, or ran only here for a targeted ptext/pwave/pconsol. Fx
+	// and SoundSet operands index this peer's mounted catalogs.
+	// [orig: GameMode_DispatchRemoteCommand @0x4F81E0 — the call-convention
+	//  switch @0x4f8438 into the row's handler]
+	const std::vector<ScriptRemoteCommand> remote_commands =
+			rt.drain_script_remote_commands();
+	if (!remote_commands.empty()) {
+		const std::vector<std::string> effect_names =
+				kernel.script_effect_catalog.interned_names();
+		const wac::RemoteCommandNames names{
+				&effect_names, &kernel.script_sound_catalog.names()};
+		std::vector<world::ScriptRemoteArg> args;
+		for (const ScriptRemoteCommand &command : remote_commands) {
+			args.clear();
+			args.reserve(command.args.size());
+			for (const ScriptRemoteCommandArg &arg : command.args)
+				args.push_back({static_cast<int32_t>(arg.value), arg.text});
+			wac::run_remote_command(world, command.command_index, args, names);
+		}
 	}
 
 	// Retail's S2C 0x0A tag-2 record is a fired-round descriptor. Re-run the

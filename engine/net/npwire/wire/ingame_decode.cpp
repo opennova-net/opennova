@@ -4,6 +4,8 @@
 
 #include <net/npwire/wire_cursor.h>
 
+#include <formats/wac/command.h>
+
 #include <cmath>
 #include <cstring>
 #include <base/io/fixed.h>
@@ -1415,6 +1417,43 @@ bool decode_player_downed_state(const uint8_t *body, size_t len,
 	out.medic_request_active = (packed & 0x80u) != 0;
 	consumed = size_t(c.p - body);
 	return consumed == 3;
+}
+
+// [orig: GameMode_DispatchRemoteCommand @0x4F81E0]
+bool decode_script_remote_command(const uint8_t *body, size_t len,
+		ScriptRemoteCommand &out, size_t &consumed) {
+	out = ScriptRemoteCommand{};
+	consumed = 0;
+	if (body == nullptr || len < 2) return false;
+	Cursor c{body, body + len, true};
+	out.command_index = c.u16(); // @0x4f827e
+	if (out.command_index >= wac::wac_command_count()) return false;
+	const wac::CommandDef &def = wac::wac_commands()[out.command_index];
+	out.args.resize(static_cast<size_t>(def.argc));
+	for (int i = 0; i < def.argc; ++i) {
+		ScriptRemoteCommandArg &arg = out.args[static_cast<size_t>(i)];
+		const wac::ParamType type = def.params[i];
+		if (type == wac::ParamType::Text || type == wac::ParamType::Filename) {
+			// Byte by byte until the NUL; the 251st byte read is dropped in
+			// favor of a NUL, and a short body ends the string with zero.
+			// [@0x4f8385..0x4f83e9]
+			size_t chars = 0;
+			uint8_t ch = c.u8();
+			while (ch != 0) {
+				arg.text.push_back(static_cast<char>(ch));
+				++chars;
+				ch = c.u8();
+				if (chars >= 250) break;
+			}
+		} else if (type == wac::ParamType::Ssn) {
+			arg.value = c.u16(); // @0x4f8320..0x4f834a
+		} else {
+			arg.value = c.u32(); // @0x4f835a..0x4f837a
+		}
+	}
+	out.read_error = !c.ok;
+	consumed = size_t(c.p - body);
+	return wac::cmd_is_replicated(def); // @0x4f8429
 }
 
 // S2C 0x30 entity-checksum request — [u8 entityId][u16 checksum] (3 B) → C2S 0x20.

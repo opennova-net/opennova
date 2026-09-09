@@ -28,6 +28,7 @@
 //   NW_INGAME_HEXCAP=<hexcap> nw_pp     # env-driven, hexcap only (test contract)
 
 #include <formats/def/def.h>
+#include <formats/wac/command.h>
 #include <net/napi/envelope.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
@@ -1709,6 +1710,30 @@ void print_tag_2b_c2s(const std::vector<uint8_t> &body) {
 	            unsigned(request.offset));
 }
 
+// S2C 0x23 WAC remote command: the registry row and its operands typed by that
+// row (Text/Filename quoted, Ssn as a handle, else the dword).
+void print_tag_23(const std::vector<uint8_t> &body) {
+	opennova::ScriptRemoteCommand command;
+	size_t used = 0;
+	if (!decode_script_remote_command(body.data(), body.size(), command, used)) {
+		std::printf("        [0x23] script-remote-command decode failed (%zu B)\n", body.size());
+		return;
+	}
+	const opennova::wac::CommandDef &def = opennova::wac::wac_commands()[command.command_index];
+	std::printf("        [0x23] script-remote-command %s(", def.name);
+	for (size_t i = 0; i < command.args.size(); ++i) {
+		const opennova::wac::ParamType type = def.params[i];
+		if (i != 0) std::printf(", ");
+		if (type == opennova::wac::ParamType::Text || type == opennova::wac::ParamType::Filename)
+			std::printf("\"%s\"", command.args[i].text.c_str());
+		else if (type == opennova::wac::ParamType::Ssn)
+			std::printf("%s", handle_str(uint16_t(command.args[i].value)).c_str());
+		else
+			std::printf("%u", unsigned(command.args[i].value));
+	}
+	std::printf(")%s used=%zu\n", command.read_error ? " short-body" : "", used);
+}
+
 void print_tag_52(const std::vector<uint8_t> &body) {
 	DeathCameraTarget target;
 	size_t used = 0;
@@ -2023,6 +2048,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::MINIMAP_OVERLAY) print_tag_6b(payload);
 	else if (dir == 'S' && tag == s2c::WEAPON_RELOAD) print_tag_49(payload);
 	else if (dir == 'S' && tag == s2c::ENTITY_DEATH) print_tag_13(payload);
+	else if (dir == 'S' && tag == s2c::SCRIPT_REMOTE_COMMAND) print_tag_23(payload);
 	else if (dir == 'S' && tag == s2c::DEATH_CAMERA_TARGET) print_tag_52(payload);
 	else if (dir == 'S' && tag == s2c::PLAYER_DOWNED_STATE) print_tag_54(payload);
 	else if (dir == 'S' && tag == s2c::END_ROUND_HEADER) print_tag_1d(payload);

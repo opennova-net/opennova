@@ -1159,6 +1159,14 @@ target_link_libraries(client_replica_endround_test PRIVATE opennova_net opennova
 target_include_directories(client_replica_endround_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME client_replica_endround COMMAND client_replica_endround_test)
 
+# The S2C 0x23 WAC remote command end to end: the host VM's flags-0x18 arm
+# queues the typed record, the codec carries it, and the joiner fold runs the
+# shared handler body (wac::run_remote_command).
+add_executable(script_remote_command_test netsim/script_remote_command_test.cpp)
+target_link_libraries(script_remote_command_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(script_remote_command_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME script_remote_command COMMAND script_remote_command_test)
+
 # The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the

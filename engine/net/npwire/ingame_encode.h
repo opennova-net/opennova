@@ -382,6 +382,14 @@ std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat);
 std::vector<uint8_t> encode_auto_medic_preference(
 		const AutoMedicPreference &preference);
 
+// S2C 0x23 — the host VM's replicated WAC command, the inverse of
+// decode_script_remote_command: [u16 index] then the row's operands (Text/
+// Filename cstr capped at 250 chars + NUL, Ssn u16, else u32). An operand the
+// record does not carry is written as zero / empty.
+// [orig: WacScript_ExecuteBytecode @0x4F58B0 — index @0x4f5cf9, operand loop
+//  @0x4f5d26..0x4f5dc2]
+std::vector<uint8_t> encode_script_remote_command(const ScriptRemoteCommand &command);
+
 // The two fixed player-death tail bodies emitted by GameEvent_PlayerDeath.
 std::vector<uint8_t> encode_death_camera_target(
 		const DeathCameraTarget &target);
