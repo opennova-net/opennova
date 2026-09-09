@@ -411,7 +411,15 @@ struct InfantryState {
         leg_target[0] = leg_target[1] = heading;
         vel[0] = vel[1] = vel[2] = 0;
         stance = Stance::kStand;
-        airborne = false;
+        // `airborne` is deliberately NOT reset: it mirrors the registry word's
+        // 0x2000, and retail's respawn writers never touch that bit -- the
+        // reset zeroes the velocities and clears bit 1 only [orig:
+        // Entity_ResetToSpawnState @0x4b9668..0x4b9674 / @0x4b97b0, the
+        // +0x334 copy @0x4b9662 is `flags & ~2`; Server_ProcessPlayerDeath
+        // @0x51787a; the deploy leg @0x519fdb; Server_PositionPlayerForSpawn
+        // ORs 0x20/0x200 only @0x50d42a/@0x50d44d]. A body that died in the
+        // air deploys with the bit and lands on the first grounded tick
+        // through the org2 tail (the thump, then the clear of both halves).
         jump_requested = false;
         jump_cooldown = 0;
         pitch_restore_active = false;
