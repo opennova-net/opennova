@@ -1316,15 +1316,22 @@ void test_local_player_stale_airborne_word_lands_first() {
 
 // The org2 ledge edge stores `(Flags & ~0x40) | 0x2000` -- the carried bit
 // falls with the same write [orig: @0x4b7e34..0x4b7e3c]; org1's edge is the
-// bare OR [orig: @0x4bf8c8..0x4bf8cf]. Only the flag bit moves: Entity::mounted
-// mirrors the +0x16C seat link that Entity_DetachFromVehicle alone clears
-// [orig: @0x43577c], so it is untouched by the edge on both motors.
+// bare OR [orig: @0x4bf8c8..0x4bf8cf]. Only the flag bit moves: the seat link
+// (+0x16C parentEntity, +0x157 attachBoneId, +0x168 parentSlot -- the mount
+// trio here) is cleared by Entity_DetachFromVehicle alone [orig: @0x4355f0,
+// the +0x16C clear @0x435915 after the 0x40 clear @0x435910, then @0x43591b
+// and @0x435921], so it is untouched by the edge on both motors.
 void test_ledge_edge_carried_bit_by_motor() {
     for (const bool local : {true, false}) {
         LandingRig r(local);
         r.ent->flags |= kEntityFlagMounted;
         r.ent->engine_flags |= kEntityFlagMounted;
-        CHECK(!r.ent->mounted);
+        // The seat link seeded WITHOUT `mounted` (the motor keys on the bool),
+        // so the edge's flag write is the only thing that could move it.
+        const EntityHandle seat_link = EntityHandle::make(0, 3);
+        r.ent->mount_target = seat_link;
+        r.ent->mount_seat = 2;
+        r.ent->mount_bone = 7;
         r.e->pos[2] = r.floor_z + fx(3); // past the 0xF000 gap: the edge fires
         r.e->inf.airborne = false;
         run_ticks(r.ai, r.w, 2, 3); // an even tick: org1's edge block runs
@@ -1335,6 +1342,8 @@ void test_ledge_edge_carried_bit_by_motor() {
         const bool carried_dropped = (r.ent->flags & kEntityFlagMounted) == 0 &&
                                      (r.ent->engine_flags & kEntityFlagMounted) == 0;
         CHECK(local ? carried_dropped : carried_kept);
+        CHECK(r.ent->mount_target == seat_link);
+        CHECK(r.ent->mount_seat == 2 && r.ent->mount_bone == 7);
         CHECK(!r.ent->mounted);
     }
 }
@@ -4142,6 +4151,170 @@ static void test_aimed_think_clears_stale_detour_state() {
     }
 }
 
+// Block 1 writes nothing unless its heading candidate lies within ~85 deg of
+// the BODY heading (+0x8C): the candidate `[esp+60h] - atan` @0x4bc861..0x4bc865,
+// `sub eax,[esi+8Ch]` @0x4bc869, cdq/xor/sub, `cmp eax,3C71C6E0h; jge 0x4bc948`
+// @0x4bc874..0x4bc879 -- the jump lands on the fstp pair straight into block
+// 2's gate, past the +0x2EC write @0x4bc88e, the aimFlag @0x4bc894, the +0x2D0
+// write @0x4bc8da and the walking-fire latch @0x4bc8fa..0x4bc946. Inside the
+// cone the heading lands with the heading error twice [orig: `lea ebp,[ecx+edx]`
+// @0x4bc88b over the re-read [esp+60h] @0x4bc883], the pitch with the two-phase
+// error [orig: [esp+20h] @0x4bc8cd], and the latch follows.
+static void test_walking_aim_gates_on_the_body_cone() {
+    struct Rig {
+        // The think key: off the perception cadence (key & 0x1F != 0) with the
+        // two sawtooth phases apart -- (key>>2)&0x3F = 4, (key>>2 + key>>9)&0x3F = 7.
+        enum : uint32_t { kKey = 16 + 3 * 512 };
+        enum : int32_t { kAcc = 1 };
+        World w;
+        AiEntity *red = nullptr;
+        AiEntity *blue = nullptr;
+        Rig(int32_t red_x, int32_t red_y) {
+            w.registry.configure_pool(0, 16);
+            AiSystem &ai = w.ai;
+            auto make = [&](int idx, uint8_t team, int32_t x, int32_t y) {
+                Entity body{};
+                body.alive = true;
+                body.item_id = 1001;
+                body.item_type = 3;
+                body.kind = EntityKind::Organic;
+                body.health = 150;
+                body.team = team;
+                body.net_id = uint16_t(400 + idx);
+                body.position = {float(x) / 65536.0f, float(y) / 65536.0f, 0.0f};
+                AiEntity *e = ai.at(ai.attach(w.registry.spawn(0, body)));
+                e->inf.active = true;
+                e->net_id = body.net_id;
+                e->team = team;
+                e->health = 150;
+                e->inf.max_health = 150;
+                e->pos[0] = x;
+                e->pos[1] = y;
+                e->slot.f[11] = kAcc;       // accuracy B: this target was never fired at
+                e->slot.f[15] = 8 * 65536;  // attack range 8 u: the 2 u enemy is inside
+                e->slot.f[16] = 32768;      // min-engage 0.5 u
+                e->slot.f[17] = 40 * 65536; // sight
+                e->slot.f[22] = 0x400;      // cadence: the latch below 32, restamp 64
+                return e;
+            };
+            red = make(0, 2, red_x, red_y);
+            blue = make(1, 1, 0, 0);
+            red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body
+            // A held target with its lead sample seeded, the idle clip (43:
+            // flags 0x048, block 1 only), the body and the yaw both at bearing
+            // 0 (east), a stale route heading the skip must keep, and a live
+            // hold timer so the think takes the approach arm instead of
+            // stamping the reaction timer [orig: the stamp @0x4bc2a6 sits in
+            // the in-range arm].
+            blue->inf.combat_target = red->handle;
+            blue->inf.aim_point[0] = red_x;
+            blue->inf.aim_point[1] = red_y;
+            blue->inf.aim_point[2] = 0;
+            blue->inf.anim_state = anim_state::kIdle;
+            CHECK((infantry_anim_flags(blue->inf.anim_state) & 0x18u) == 0x8u);
+            blue->inf.body_heading = 0;
+            blue->heading = 0;
+            blue->inf.target_heading = 0x20000000;
+            blue->inf.combat_move_timer = 1;
+        }
+        void think() { w.ai.infantry_combat_think(*blue, w, kKey); }
+    };
+    // The witnessed error unit at the mission-load spread of 10 [orig: err =
+    // (119304 * dword_C6EAE8 * acc) >> 5 @0x4bc5ea..0x4bc5f7].
+    const int64_t err_unit = (static_cast<int64_t>(119304) * 10 * Rig::kAcc) >> 5;
+    const int32_t err_heading = static_cast<int32_t>(err_unit * (32 - 4));
+    const int32_t err_pitch = static_cast<int32_t>(err_unit * (32 - 7));
+    {
+        // Due east: the candidate (bearing 0 + the error) sits on the body.
+        Rig r(2 * 65536, 0);
+        r.think();
+        CHECK(r.blue->inf.move_mode == 1 && r.blue->inf.target_heading == 0);
+        CHECK(r.blue->inf.aim_valid);
+        CHECK(r.blue->inf.aim_heading == opennova::io::bam_add(err_heading, err_heading));
+        CHECK(r.blue->inf.aim_pitch == err_pitch);
+        CHECK(r.blue->inf.fire_secondary_latch);
+        CHECK(r.blue->inf.combat_move_timer == 0x400 >> 4);
+    }
+    {
+        // West-north-west, ~166 deg off the body: outside the cone. Nothing is
+        // written -- the aim heading keeps the re-seat on the target heading
+        // [orig: @0x4bc543..0x4bc549], the flag stays down, the latch never
+        // evaluates and the hold timer keeps its decayed 0.
+        Rig r(-2 * 65536, 32768);
+        r.think();
+        CHECK(r.blue->inf.move_mode == 1);
+        CHECK(!r.blue->inf.aim_valid);
+        CHECK(r.blue->inf.aim_heading == r.blue->inf.target_heading);
+        CHECK(!r.blue->inf.fire_secondary_latch);
+        CHECK(r.blue->inf.combat_move_timer == 0);
+    }
+}
+
+// The 32-tick scan's empty result re-commits the held target on phases 1-3
+// [orig: `test ebp,ebp; jz` @0x4bbee0..0x4bbee2 -> the fallback on phase 0 only;
+// `mov edi,[ecx+0Ch]; test edi,edi; jnz loc_4BBF2A` @0x4bbee4..0x4bbeed -> the
+// commit with slot[3]]; only a phase-0 miss reaches the clear
+// [orig: @0x4bbf7c..0x4bbf85]. A target standing between the 6 u near-scan and
+// the calm-halved sight range therefore survives three scans out of four.
+static void test_short_phase_scan_miss_keeps_the_held_target() {
+    World w;
+    w.registry.configure_pool(0, 16);
+    AiSystem &ai = w.ai;
+    auto make = [&](int idx, uint8_t team, int32_t x) {
+        Entity body{};
+        body.alive = true;
+        body.item_id = 1001;
+        body.item_type = 3;
+        body.kind = EntityKind::Organic;
+        body.health = 150;
+        body.team = team;
+        body.net_id = uint16_t(500 + idx);
+        body.position = {float(x) / 65536.0f, 0.0f, 0.0f};
+        AiEntity *e = ai.at(ai.attach(w.registry.spawn(0, body)));
+        e->inf.active = true;
+        e->net_id = body.net_id;
+        e->team = team;
+        e->health = 150;
+        e->inf.max_health = 150;
+        e->pos[0] = x;
+        e->slot.f[15] = 8 * 65536;  // attack range
+        e->slot.f[16] = 32768;      // min-engage
+        e->slot.f[17] = 40 * 65536; // sight 40 u: calm-halved to 20 u
+        return e;
+    };
+    AiEntity *red = make(0, 2, 15 * 65536); // 15 u: inside the phase-0 20 u, outside 6 u / 10 u
+    AiEntity *blue = make(1, 1, 0);
+    red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body
+    const auto scan = [&](uint32_t phase) {
+        ai.infantry_combat_think(*blue, w, phase << 5); // key & 0x1F == 0: the scan runs
+    };
+    // Phase 0 (20 u) acquires; phases 1/2/3 (6 u / 10 u / 6 u) miss and re-commit.
+    scan(0);
+    CHECK(blue->inf.combat_target == red->handle);
+    CHECK(blue->inf.same_target_ticks == 0);
+    scan(1);
+    CHECK(blue->inf.combat_target == red->handle);
+    CHECK(blue->inf.same_target_ticks == 1); // the re-commit counts as the same target
+    scan(2);
+    scan(3);
+    CHECK(blue->inf.combat_target == red->handle);
+    CHECK(blue->inf.same_target_ticks == 3);
+    CHECK(blue->slot.f[3] == int32_t(red->handle.packed) + 1);
+    // Beyond the alerted full range (40 u, no calm halving while the damage
+    // timer runs) and the 0x280000 scan cap: a phase-1 miss still keeps it; the
+    // phase-0 miss reaches the clear.
+    red->pos[0] = 50 * 65536;
+    w.registry.get(red->handle)->position.x = 50.0f;
+    scan(1);
+    CHECK(blue->inf.combat_target == red->handle);
+    scan(0);
+    CHECK(!blue->inf.combat_target.valid());
+    CHECK(blue->inf.same_target_ticks == 0 && blue->slot.f[3] == 0);
+    // With nothing held, a phase-1 miss has no target to re-commit.
+    scan(1);
+    CHECK(!blue->inf.combat_target.valid());
+}
+
 // The self-attachment chase pulls toward the stamped S point, which no other
 // think path rewrites, while the same think's combat approach keeps retargeting
 // the movement goal. [orig: stamp @0x4BB840..0x4BB852; chase @0x4BF625..0x4BF664;
@@ -4273,6 +4446,8 @@ int main() {
     test_downwash_query_and_body_selection();
     test_reselecting_current_state_arbitrates_player_but_skips_org1();
     test_aimed_think_clears_stale_detour_state();
+    test_walking_aim_gates_on_the_body_cone();
+    test_short_phase_scan_miss_keeps_the_held_target();
     test_self_attachment_chases_the_s_point_through_a_combat_approach();
     test_npc_corpse_expiry_runs_the_shared_destroy();
     test_find_and_use_attachment_motor();

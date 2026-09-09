@@ -2168,7 +2168,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 // half. Only the flag bit falls on the org2 edge: retail's
                 // parentEntity (+0x16C) seat link -- Entity::mounted and the
                 // mount trio here -- is cleared by Entity_DetachFromVehicle
-                // alone [orig: @0x4355f0, the +0x16C clear @0x43577c], so
+                // alone [orig: Entity_DetachFromVehicle @0x4355f0, the +0x16C
+                // clear @0x435915 (after the 0x40 clear @0x435910; the
+                // attachBoneId @0x43591b and parentSlot @0x435921 follow)], so
                 // `mounted` stays put exactly as the link does there.
                 // [orig: org2 @0x4b7e34..0x4b7e3c; org1 @0x4bf8c8..0x4bf8cf]
                 if (inf.is_local_player && !inf.airborne && tick_entity != nullptr) {
@@ -2189,22 +2191,32 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // @0x4b7d0a; org1 @0x4bf802], so the thump below sounds at the
             // snapped origin. Fall damage is AUTHORITY-only and skips Indestructible
             // (0x4000000) bodies on both legs [orig: org1 @0x4bf81e `is_authority`,
-            // @0x4bf826 `Flags & 0x4000000`; org2 @0x4b7d3b] -- a joiner's own body
-            // runs this motor branch locally and must not self-damage on top of the
-            // authority's damage. It skips DEAD bodies [orig: org1 `test dl,2`
-            // @0x4bf843 — without it a hard-landing corpse would round its health
-            // back toward 0 through the clamp]; a damaging landing also stages the
-            // fall death-anim selection (+0x2C0, cause 4 -> 174) [orig:
-            // @0x4bf85d-0x4bf879 — the staged selector matches our generic-death
+            // @0x4bf826 `Flags & 0x4000000`; org2 @0x4b7d3b, @0x4b7d43] -- a
+            // joiner's own body runs this motor branch locally and must not
+            // self-damage on top of the authority's damage. The rest of the gate
+            // is per motor. org1 runs its whole landing arm behind the airborne
+            // word [orig: `test edx,2000h; jz` @0x4bf812] and skips DEAD bodies
+            // [orig: `test dl,2` @0x4bf843 -- without it a hard-landing corpse
+            // would round its health back toward 0 through the clamp]. org2 tests
+            // the threshold ALONE [orig: @0x4b7d0d..0x4b7d21]: no 0x2000 and no
+            // dead test; its local-player red flash, Player_OnDamageReceived
+            // @0x4b7d2b..0x4b7d2d ahead of the authority test (so a joiner's own
+            // body flashes on a hard landing it never charges), is unmodeled. A
+            // damaging landing also stages the fall death-anim selection (+0x2C0,
+            // cause 4 -> 174) [orig: org1 @0x4bf85d-0x4bf879, org2
+            // @0x4b7d6f-0x4b7d8b -- the staged selector matches our generic-death
             // fallback]. There is NO zero test on fallmps: a tolerance of 0
             // makes every landing (vel_z <= 0) damaging by (-vel_z) >> 4
             // [orig: org1 @0x4bf82e..0x4bf841 `imul eax, -1057; cmp ecx, eax;
             // jg skip`; org2 @0x4b7d0d..0x4b7d21].
             e.pos[2] -= foot_clearance;
-            if (inf.airborne && e.health > 0 && is_authority &&
-                (tick_flags & kEntityFlagIndestructible) == 0 &&
-                inf.vel[2] <= -1057 * world.script.wac_values.fallmps) {
-                int32_t excess = (-1057 * world.script.wac_values.fallmps) - inf.vel[2];
+            const int32_t fall_threshold = -1057 * world.script.wac_values.fallmps;
+            const bool fall_charges = inf.is_local_player
+                    ? inf.vel[2] <= fall_threshold
+                    : inf.airborne && e.health > 0 && inf.vel[2] <= fall_threshold;
+            if (fall_charges && is_authority &&
+                (tick_flags & kEntityFlagIndestructible) == 0) {
+                int32_t excess = fall_threshold - inf.vel[2];
                 int32_t dmg = excess >> 4;
                 if (dmg > e.health) dmg = e.health;
                 e.health = static_cast<int16_t>(e.health - dmg);

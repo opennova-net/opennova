@@ -148,6 +148,16 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         else if (phase == 2) staged = std::max(range >> 1, std::min(range, 0x60000));
 
         EntityHandle found = infantry_scan_nearest_threat(*this, world, e, staged);
+        const bool scan_hit = found.valid();
+
+        // A short-phase miss KEEPS the held target: on phases 1-3 the empty
+        // result re-commits slot[3] itself [orig: `test ebp,ebp; jz` @0x4bbee0
+        // ..0x4bbee2 sends only phase 0 to the fallback; `mov edi,[ecx+0Ch];
+        // test edi,edi; jnz loc_4BBF2A` @0x4bbee4..0x4bbeed carries the held
+        // target into the commit]. Only a phase-0 miss, or a body holding no
+        // target, reaches the fallback and the clear [orig: @0x4bbf7c..0x4bbf85].
+        if (!found.valid() && phase != 0 && inf.combat_target.valid())
+            found = inf.combat_target;
 
         // Fallback: the last attacker, enemy + LOS-gated; consumed + cleared every scan.
         // [orig: @0x4bbf20-era block — slot+4 & 1 suppresses retaliation]
@@ -182,9 +192,11 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                 slot.f[3] = static_cast<int32_t>(found.packed) + 1; // raw slot[3] write
                                                                     // [orig: @0x4bbf83 —
                                                                     // no refcount here]
-                // The authority relation quads ride the scan hit [orig: the
-                // Entity_FindNearestThreat authority block @0x4b0a6f..0x4b0ae2].
-                if (is_authority) {
+                // The authority relation quads ride the scan HIT alone [orig: the
+                // Entity_FindNearestThreat authority block @0x4b0a6f..0x4b0ae2 --
+                // inside the scan, so neither the re-committed held target nor
+                // the lastAttacker fallback reaches it].
+                if (is_authority && scan_hit) {
                     if (const Entity *se = world.registry.get(e.handle))
                         apply_engage_relations(world, *se, *t);
                 }
@@ -403,16 +415,22 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     inf.aim_point[2] = tpos[2];
 
     // The sawtooth aim error: accuracy A when this target was already fired at
-    // (aiRef0 == target), else B; scaled by the difficulty global; two phases.
-    // [orig: (119304 * dword_C6EAE8 * acc) >> 5, x (32 - ((tick>>2 [+ tick>>9]) & 0x3F));
-    // the prone-in-foliage +40 concealment term needs the foliage-mask seam — D-AI-6.]
+    // (aiRef0 == target), else B; scaled by the difficulty global [orig: err =
+    // (119304 * dword_C6EAE8 * acc) >> 5 -- block 1 @0x4bc5ea..0x4bc60e, block 2
+    // @0x4bc9ce..0x4bc9f2]. Two phases of the think key, both blocks computing
+    // both: the HEADING error rides the (key>>2)-only phase [orig: block 1
+    // `and ebp,3Fh` @0x4bc630 -> [esp+60h] @0x4bc669; block 2 @0x4bca03..0x4bca11
+    // -> ebx], the PITCH error the (key>>2 + key>>9) phase [orig: block 1
+    // @0x4bc61e..0x4bc62d -> [esp+20h] @0x4bc64a; block 2 @0x4bca14..0x4bca2c ->
+    // [esp+20h]]. The prone-in-foliage +40 concealment term needs the
+    // foliage-mask seam -- D-AI-6.
     const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] : slot.f[11];
     const int64_t err_unit =
         (static_cast<int64_t>(119304) * world.script.wac_values.accuracy_spread * acc) >> 5;
-    const int32_t err_a = static_cast<int32_t>(
-        err_unit * (32 - static_cast<int32_t>(((key >> 2) + (key >> 9)) & 0x3Fu)));
-    const int32_t err_b = static_cast<int32_t>(
+    const int32_t err_heading = static_cast<int32_t>(
         err_unit * (32 - static_cast<int32_t>((key >> 2) & 0x3Fu)));
+    const int32_t err_pitch = static_cast<int32_t>(
+        err_unit * (32 - static_cast<int32_t>(((key >> 2) + (key >> 9)) & 0x3Fu)));
 
     // The aim EYE rides the muzzle seam — retail's combat-pass aim anchor IS
     // the posed launch bone [orig: Entity_GetAttachmentWorldPosition @0x4b2670
@@ -431,13 +449,31 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     const double ady = static_cast<double>(led[1]) + (t_origin[1] - tpos[1]) - eye[1];
     const double adz = static_cast<double>(led[2]) + (t_origin[2] - tpos[2]) - eye[2];
     const double horiz = std::sqrt(adx * adx + ady * ady);
-    inf.aim_heading = bearing_to(static_cast<int32_t>(adx), static_cast<int32_t>(ady)) + err_a;
-    inf.aim_established = true;
-    inf.aim_override = true;
-    inf.aim_pitch = static_cast<int32_t>(std::atan2(adz, horiz) * opennova::io::kBamPerRadian) + err_b;
-    inf.aim_valid = true;
+    const int32_t bearing = bearing_to(static_cast<int32_t>(adx), static_cast<int32_t>(ady));
+    const int32_t elevation =
+            static_cast<int32_t>(std::atan2(adz, horiz) * opennova::io::kBamPerRadian);
+    // The heading candidate: bearing + the heading error [orig: block 1
+    // `mov ecx,[esp+60h]; sub ecx,eax` @0x4bc861..0x4bc865; block 2 `sub ebx,eax`
+    // @0x4bcf71]; the pitch: elevation + the pitch error [orig: block 1
+    // @0x4bc8cd..0x4bc8da; block 2 @0x4bcf97..0x4bcf9d].
+    const int32_t candidate = opennova::io::bam_add(bearing, err_heading);
+    const int32_t pitch = opennova::io::bam_add(elevation, err_pitch);
 
     if (attack_stance) {
+        // Unported: block 2's parentSlot-3 mounted arm. With parentSlot 3 and a
+        // parent entity [orig: `cmp [esi+168h],3` @0x4bcd1c; `[esi+16Ch]`
+        // @0x4bcd31] retail rotates the aim delta into the parent's frame by
+        // the parent's yaw/pitch/roll sin/cos [orig: @0x4bcd3f..0x4bcea8],
+        // solves the local bearing and elevation, and adds the parent's yaw
+        // to +0x2EC [orig: `add ebx,[edi+10h]` @0x4bceee] and its pitch to
+        // +0x2D0 [orig: `add eax,[edi+14h]` @0x4bcf1b] ahead of the same tail
+        // @0x4bcfa3. An on-foot body takes the world-frame arm modeled here
+        // [orig: @0x4bcf29..0x4bcf9d].
+        inf.aim_heading = candidate; // [orig: @0x4bcf75]
+        inf.aim_pitch = pitch;       // [orig: @0x4bcf9d]
+        inf.aim_established = true;
+        inf.aim_override = true;
+        inf.aim_valid = true;        // aimFlag [orig: @0x4bcfb1]
         // Block 2's tail [orig: @0x4bcfa3..0x4bcff5]. The body re-face when the
         // aim drifts far off the body (> 262470208, ~22 deg) [orig:
         // @0x4bcfa3..0x4bcfcf]; the detour-state clear, whether or not the
@@ -457,6 +493,24 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         }
         return selected_state;
     }
+
+    // Block 1's body cone: the candidate must lie within ~85 deg of the BODY
+    // heading (+0x8C) or the block writes nothing -- no aim, no aimFlag, no
+    // latch -- and falls on the fstp pair straight into block 2's gate [orig:
+    // `sub eax,[esi+8Ch]` @0x4bc869, cdq/xor/sub, `cmp eax,3C71C6E0h; jge
+    // 0x4bc948` @0x4bc874..0x4bc879]. The aim heading keeps the re-seat above.
+    if (opennova::io::bam_abs(opennova::io::bam_sub(candidate, inf.body_heading)) >= 0x3c71c6e0) {
+        inf.aim_valid = false;
+        return selected_state;
+    }
+    // Inside the cone the heading lands with the heading error added a SECOND
+    // time: retail re-reads [esp+60h] into the `lea ebp,[ecx+edx]` that stores
+    // +0x2EC [orig: @0x4bc883..0x4bc88e]; aimFlag @0x4bc894; the pitch @0x4bc8da.
+    inf.aim_heading = opennova::io::bam_add(candidate, err_heading);
+    inf.aim_valid = true;
+    inf.aim_pitch = pitch;
+    inf.aim_established = true;
+    inf.aim_override = true;
 
     // Block 1's walking-fire latch: muzzle within ~5 deg of the solution, inside
     // the attack range, on the slot[22] cadence. [orig: §17.4, @0x4bc8fa..0x4bc946 —
