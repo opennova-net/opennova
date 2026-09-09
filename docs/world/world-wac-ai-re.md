@@ -7604,10 +7604,10 @@ these helpers.
 
 | Word | Meaning | Single-source writer | Group-source writer |
 | --- | --- | --- | --- |
-| +332 | exclusive SSN | 0x43DAC0 | 0x43D8F0 |
-| +334 | preferred SSN | 0x43DA50 | 0x43D870 |
-| +336 | exclusive command group | 0x43D9E0 | 0x43D7F0 |
-| +338 | preferred command group | 0x43D970 | 0x43D770 |
+| +332 | exclusive SSN | [orig: Entity_SetActionByBmsRef @0x43DAC0] | [orig: Entity_SetWeaponTypeByNetId @0x43D8F0] |
+| +334 | preferred SSN | [orig: Entity_SetAlertByBmsRef @0x43DA50] | [orig: Entity_SetActionByNetId @0x43D870] |
+| +336 | exclusive command group | [orig: Entity_SetWaypointByBmsRef @0x43D9E0] | [orig: Entity_SetAlertByNetId @0x43D7F0] |
+| +338 | preferred command group | [orig: sub_43D970 @0x43D970] | [orig: Entity_SetTargetByNetId @0x43D770] |
 
 Single-source writes take the first DcbId match in pools 0 then 1. Group writes
 visit all signed commandGroup matches in those pools. Neither walk requires a
@@ -7765,7 +7765,8 @@ seated riders [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 (the site
 @0x4B41A2..0x4B41B4); Entity_UpdateInfantryAI @0x4b9910 (the site
 @0x4B9960..0x4B9A11)], an emplacement child carries its hull there
 [orig: Entity_UpdateChildAttachment @0x4409A0], and the ground probe stores a
-deck-stander's carrier [orig: @0x414370]. It does not require a live-health or
+deck-stander's carrier [orig: Entity_RaycastGroundHeightAndObject @0x414320
+(the store @0x414370)]. It does not require a live-health or
 item-definition predicate on the rider.
 
 [orig: WacCmd_SsnToSsn @0x4F7330] requires valid item definitions on both
@@ -7863,12 +7864,9 @@ flags-0x10 row (ptext/pwave/pconsol) sends S2C 0x23 to that member's slot and
 returns 1 without the local call when the member is a registered non-local
 player; the local-player visit and unregistered members run locally (§33.39).
 
-The synthetic tick_digest changed from 116f65ec9ea08922 to e33cefc459163b68
-because the two elapse blocks now fire at boot (V1=2) and subsequent passes are
-held by the no-human gate. A temporary comparison replayed only the previous V1
-timeline (0 before logic tick 63, 1 before 125, then 2) over the new simulation
-and recovered the old digest exactly. Entity, AI and RNG state did not change in
-this fixture.
+The two elapse blocks now fire at boot (V1=2) and subsequent passes are held by
+the no-human gate, which moves the synthetic tick_digest; entity, AI and RNG
+state are unchanged in that fixture.
 
 Regression coverage: wac_behavior covers reverse iteration, reserved group
 filters, authored member order, empty loops, nested-loop rejection, handle
@@ -8013,7 +8011,7 @@ existing engagement/sight/attack fields read by infantry combat. The unused
 Entity copies of those three fields were removed. BMS promotion continues to
 seed the controller from its authored distance fields.
 
-[orig: Entity_CompareDistancesToTarget @0x4F12E0], SSNLeadSSN2SSN) resolves
+SSNLeadSSN2SSN [orig: Entity_CompareDistancesToTarget @0x4F12E0] resolves
 three entities and requires nonzero item indices, without an alive/flag gate. It
 subtracts wrapped Q16 positions before computing each 3D length, clamps each
 length to 2147418112 (`flt_7C19E0`), truncates, and tests
@@ -8040,7 +8038,7 @@ and clears the building flag or takes the organic reset. The requested source
 does not move. This was verified in assembly as stores from and to the same ESI
 object, and is kept separate from BMS's working single-entity teleport.
 
-[orig: WacCmd_SoundSetToSsn @0x4F1DD0], SS2SSN) requires a valid item-backed
+SS2SSN [orig: WacCmd_SoundSetToSsn @0x4F1DD0] requires a valid item-backed
 entity and emits a full-volume positional sound, including for dead rows. It
 uses the existing SoundSlotEvent/FirePresenter/MissionAudio path. The resolver
 strips SS_ before looking up the sound name [orig: WacScript_ResolveParameter
@@ -8055,8 +8053,6 @@ controller writes, pool scope and group return values, live sight acquisition
 after SSNMax, fractional fog and host-control compatibility, 24-byte sound
 names, and the difference between the two teleport commands.
 
-The pre-uplink player death regression also passes its isolated 21-test co-op
-file.
 
 ### 33.14 Door commands, motion, contact and presentation
 
@@ -8064,7 +8060,7 @@ The functions previously labelled fade effects own doors. [orig:
 HeliLift_ResetAll @0x44E870] clears 10,000 records of 24 bytes at 0xA8A418;
 [orig: FadeEffect_AllocateSlot @0x44E890] allocates monotonically until mission
 reset. [orig: Entity_SpawnFromBMSRecord @0x40e9f0 (the site
-@0x40F230)]..0x40F2F4 seeds Building/Decoration items carrying attrib 0x80. Each
+@0x40F230..0x40F2F4)] seeds Building/Decoration items carrying attrib 0x80. Each
 record has state, Q16 phase, Q16 step, maximum angle, owner and one-based
 section number. [orig: FadeEffect_UpdateAll @0x44E920] advances opening by
 wrapped dword addition and closing by subtraction, clamps at 65536/0 and enters
@@ -8122,17 +8118,15 @@ Regression coverage: the focused native door test passes definition
 aliases/defaults, selective contact masks, reversals, sound origins, first-match
 queries, WAC/BMS pool scopes, whole-world restart, monotonic exhaustion and
 signed step behavior. The shipped Iblock01 asset opens its collision section
-while its building section remains fixed. The collision suite passes the normal
-contact-to-event path and player/NPC split. The full Release build and native
-suite pass. The rebuilt Dev extension passes the isolated 41-test presenter
-file, including the actual Iblock01 render part opening and closing. This is
-subsystem validation, not an accepted normal SP mission playthrough.
+while its building section remains fixed. The collision regression covers the normal
+contact-to-event path and the player/NPC split; the presenter regression opens
+and closes the actual Iblock01 render part.
 
 | ID | Open divergence | Retail witness | Consequence / next owner |
 |----|-----------------|----------------|--------------------------|
-| D-DOOR-1 | Door network request/update messages and late-join state are not connected | C2S 0x1A at 0x42D0C0/0x514B20; S2C 0x37 at 0x50F9A0; initial static decode 0x433400 | SP and local door states advance, but remote door synchronization is incomplete. Preserve the witnessed zero-based command versus one-based completion packet quirk when porting. |
-| D-DOOR-2 | The separate ai_function target projectile callback is not implemented by DoorSystem | 0x43F880..0x43F8EB | Shoot-to-open targets need the hit-section event-1 producer and its slot-index quirk; ordinary ai_function door commands/contact are implemented. |
-| D-DOOR-3 | Exhausted/stale global slot reads are safely rejected; arbitrary alias-authored counts beyond 30 are not published beyond the declared phase span | allocator 0x44E890; raw signed bytes and unchecked bus writes at 0x43F370/0x4E3070 | Normal authored definitions retain their state and phases. Retail out-of-bounds memory behavior is not emulated. Cross-entity allocation order and rebind behavior need a wire witness before claiming full lifecycle parity. |
+| D-DOOR-1 | Door network request/update messages and late-join state are not connected | C2S 0x1A [orig: NetPacket_SendWeaponSwitch @0x42D0C0; NapiNPServerMsg_HandleVoteUpdate @0x514B20] (kong misnomers); S2C 0x37 [orig: Server_SendWeaponSlotActionPacket @0x50F9A0]; initial static decode [orig: NapiNPClientMsg_0x010 @0x433400] | SP and local door states advance, but remote door synchronization is incomplete. Preserve the witnessed zero-based command versus one-based completion packet quirk when porting. |
+| D-DOOR-2 | The separate ai_function target projectile callback is not implemented by DoorSystem | the target projectile callback [orig: @0x43F880..0x43F8EB] | Shoot-to-open targets need the hit-section event-1 producer and its slot-index quirk; ordinary ai_function door commands/contact are implemented. |
+| D-DOOR-3 | Exhausted/stale global slot reads are safely rejected; arbitrary alias-authored counts beyond 30 are not published beyond the declared phase span | allocator [orig: FadeEffect_AllocateSlot @0x44E890]; raw signed bytes and unchecked bus writes [orig: Entity_ProcessSectionDamageTransition @0x43F370; build_bone_transforms @0x4E3070] | Normal authored definitions retain their state and phases. Retail out-of-bounds memory behavior is not emulated. Cross-entity allocation order and rebind behavior need a wire witness before claiming full lifecycle parity. |
 | D-DOOR-4 | A joiner's decoded present rows carry no door phases (the collector reaches the door writer only for host-owned rows), so a joiner renders no door motion | Retail runs the door records on every peer: [orig: FadeEffect_UpdateAll @0x44E920] from [orig: Entity_UpdateAllEntities @0x4c2100 (the site @0x4C2307)], contact event 6 on authority and client | OPEN (route the joiner's local DoorSystem phases through the guarded local-row path) |
 
 ### 33.15 WAC execution-entry caches and BMS event queries
@@ -8152,22 +8146,24 @@ GameOver, WinVar and LoseVar therefore accept arithmetic/assignment as cache
 words; they do not write the player entity, clock or match winner. Every one of the 24
 rows is an lvalue [orig: @0x4f2a92..0x4f2a9f]; writes land on ticks (the run
 counter), result (the accumulator @0xC6EB24), humans, bluekills/greenkills,
-breathtime (@0xC6EAE0, seeded 20 [orig: WacScript_FreeAll @0x4f6381]) and
-autogain (@0xC6EAFC, seeded 1 [orig: @0x4f6371]) as stored words whose retail
-consumers ([orig: HUD_DrawBreathBar @0x59d70f; Server_UpdateEntityIdleTimers
-@0x50d7e6; GameEvent_PlayerDeath @0x5172f6; NetPacket_WritePlayerState @0x4ff9db;
-Environment_ApplyFogAndAmbient @0x57e514]) are not yet ported. The `night` write
+breathtime (@0xC6EAE0, seeded 20) and autogain (@0xC6EAFC, seeded 1)
+[orig: WacScript_FreeAll @0x4F6300 (the seeds @0x4f6381; @0x4f6371)] as stored
+words whose retail consumers ([orig: HUD_DrawBreathBar @0x59D6F0 (the read
+@0x59d70f); Server_UpdateEntityIdleTimers @0x50D770 (@0x50d7e6);
+GameEvent_PlayerDeath @0x516DD0 (@0x5172f6); NetPacket_WritePlayerState @0x4FF6B0
+(@0x4ff9db); Environment_ApplyFogAndAmbient @0x57E440 (@0x57e514)]) are not yet
+ported. The `night` write
 is dropped (D-WAC-4, §33.38): its row resolves to the Env dword @0x26C645C that
-[orig: Environment_ComputeTimeOfDayColors @0x57deae] rewrites on the next
+[orig: Environment_ComputeTimeOfDayColors @0x57DE40 (the store @0x57deae)] rewrites on the next
 time-of-day computation, and the port derives the night phase from the clock on
 every read. neartype/neardist/nearid are not JO rows (Jointops.exe carries no
 such strings) and were removed. An unresolvable argument is a NON-FATAL compile diagnostic
 carrying the action signature from [orig: WacScript_FormatActionParameters
 @0x4EFC20] with the operand pointed at the scratch dword &dword_C6EAEC
 [orig: Script_Compile @0x4f3ab2..0x4f3ae2], zeroed at every bytecode entry
-[orig: WacScript_CacheLocalPlayerState @0x4f57b5]; retail records only the
+[orig: WacScript_CacheLocalPlayerState @0x4F5780 (the clear @0x4f57b5)]; retail records only the
 first error in byte_C6EB30 [orig: Script_SetCompileError @0x4EE7C0] (read by
-[orig: Debug_DrawScriptState @0x4f652a] and the console), and
+[orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and the console), and
 [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute
 @0x4f976b)] ignores Script_Compile's return and executes the script anyway (the
 retail corpus ships `ASX_G13A.wac` with such a line). The port models the dword
@@ -8259,8 +8255,6 @@ escort/S-point details, and deterministic handling of malformed state 3.
 Retail's same-mode state-3 search reads an uninitialized stack start height; no
 state-3 producer was witnessed, so the portable path uses a ground probe instead
 of emulating undefined memory.
-
-No engine change was needed after the full run.
 
 ### 33.17 WAC fire requests and category blocks
 
@@ -8417,8 +8411,8 @@ preview uses its physical player.
 The color handlers receive three separate operands; the compiler does not pack
 them. The VM now packs blue + ((green + (red << 8)) << 8), with dword wrap and
 inter-component carries, for lightning, sun, sky, ground, floor, ceiling, cloud,
-fog/fogcolor, skyfog/skyfogcolor and gain [orig: WacCmd_Sun
-@0x4EDCD0]..0x4EDE70). The full packed word, including overflow into alpha,
+fog/fogcolor, skyfog/skyfogcolor and gain (the handler family from
+[orig: WacCmd_Sun @0x4EDCD0] to [orig: WacCmd_SkyFogColor @0x4EDE70]). The full packed word, including overflow into alpha,
 reaches the color block. Retail's crash registry row has four parameters but
 points to the same three-parameter sky-fog handler [orig: WacCmd_SkyFogColor
 @0x4EDE70], so its fourth argument is ignored. ColorFade supplies the existing
@@ -8426,7 +8420,7 @@ transition duration.
 
 ### 33.22 WAC ammunition names and script projectiles
 
-[orig: WacScript_ResolveParameter @0x4F2920], type 23) resolves literal Ammo
+[orig: WacScript_ResolveParameter @0x4F2920] (type 23) resolves literal Ammo
 operands by name before generic numeric parsing. AMMO_ symbols also work in
 ordinary value operands. The compiler now binds against the mounted ammo.def
 table, with the retail prefix fallback, and rejects unknown or null names.
@@ -8485,7 +8479,8 @@ Cross-category non-ForceScoped mounts reset the target [orig:
 Player_MountWeaponSlot @0x4dfa40 (the site @0x4DFB66)]. Player camera reset
 clears the scope pose and restores the target. On a mission retry retail's
 order is [orig: Game_RestartRoundSP @0x5263a0 (the call @0x5263DB)] ->
-[orig: Game_StartMission @0x524360]: [orig: Player_InitPlayer @0x525BBC] (its
+[orig: Game_StartMission @0x524360 (the call @0x525BBC)] -> [orig: Player_InitPlayer
+@0x4E15F0] (its
 tail [orig: Player_SwitchToWeaponByHandle @0x4E0170 (the site @0x4E19A1)] takes
 the unmounted branch @0x4E01FC into [orig: Player_ResetCameraAndMovementState
 @0x4DE1F0 (the store @0x4DE202)], g_cameraFovTargetQ16 = 0x500000), then
@@ -8512,8 +8507,7 @@ is observably different from the rendered direct division at zoom 3.
 New cases exercise WAC-to-weather-to-camera flow, whole-degree overflow, the
 negative dead band, snapshot restore, the two projection rules, in-flight scope
 protection, slot zoom clamps, gunner target-write exclusion, and
-category/ForceScoped mount resets. Full-suite and extension validation follow
-separately; these are subsystem checks, not SP playthrough evidence.
+category/ForceScoped mount resets.
 
 Startup/visibility follow-up (2026-09-09): the full world loader now defers
 initial WAC execution until the existing weather owner has seeded ENV/time
@@ -8724,7 +8718,8 @@ registration.
 - pisvar [orig: WacCmd_PlayerIsVar @0x4F0BD0] and psetvar [orig:
   WacCmd_PlayerSetVar @0x4F0CB0] read/test and set byte 1 at
   player-slot+392+index. The authored bank has 17 bytes, indices 0..16.
-  Server_PlayerAdd clears +392..+415, including all 17 bytes, at 0x51D51C. Death
+  [orig: Server_PlayerAdd @0x51CBC0 (the clear @0x51D51C)] clears +392..+415,
+  including all 17 bytes. Death
   and team changes do not clear this bank. Native identity updates preserve it;
   replacing a roster slot or restoring the mission baseline resets it through
   the existing Match owner.
@@ -8815,8 +8810,7 @@ wac_help executes the compiled command in its own temporary working directory,
 checks the generated syntax, fixed IDs, row counts and debug-message order, then
 exercises first-open failure, second-open failure and a successful repeat. The
 first failure preserves an existing XML file; the second preserves the new text
-file and reports only that successful export. The remaining WAC diagnostic
-fallbacks at this checkpoint were face and ssnface.
+file and reports only that successful export.
 
 ### 33.30 GRM facial state and the final WAC dispatch entries
 
@@ -8841,7 +8835,7 @@ and FACE_ values assigned into ordinary variables.
 @0x40E211..0x40E236] derives the sidecar from ItemDef+96, the model graphic
 name. The GRM allocation is outside that function's conditional GPM-model block;
 a missing rendered model is not an additional allocation gate. sub_57FCE0 strips
-path and extension, appendsGRM and reuses a loaded configuration
+path and extension, appends .GRM and reuses a loaded configuration
 case-insensitively. The cache holds 64 configurations. sub_57FDF0 appends up to
 256 character slots; freeing a character zeroes its slot without reclaiming its
 append index (sub_57FCA0). Native allocation also tracks registry spawn
@@ -8867,7 +8861,7 @@ round-trips byte-for-byte through the writer. It contains no retail bytes.
 D-GRM-1 records the original unsafe array/index/name and format-string cases:
 the native parser rejects unsafe model data and treats names as data.
 
-**Simulation.** [orig: CScarDecal_Init @0x57F900], an old misleading IDB name)
+**Simulation.** [orig: CScarDecal_Init @0x57F900] (an old misleading IDB name)
 seeds current/next NORMAL, zero blend and override/automatic -1. The facial
 [orig: scar_decal_update @0x57FA50] runs from [orig: Entity_UpdateAllEntities
 @0x4c2100 (the site @0x4C21FB)]. It adds 0.125 to blend, transfers next to
@@ -8899,8 +8893,8 @@ WAC override. The 252-entry table is copied directly from the IDB.
 **Presentation and the inactive JO sink.** sub_580360 advances the display
 counter. [orig: sort_scar_slots_by_distance @0x57FE60] stably ranks
 max(dx,dy)+min/2, excludes flag-bit-1 characters and the first-person local
-body, and enables only three slots. Their target sizes are 256/128/64 [orig:
-Water_CreateReflectionRenderTargets @0x57F940]). A slot updates when local,
+body, and enables only three slots. Their target sizes are 256/128/64 ([orig:
+Water_CreateReflectionRenderTargets @0x57F940], a misnamed helper). A slot updates when local,
 reassigned, within 81,920 fixed units, or on its every-fourth-frame cohort
 [orig: render_scar_slot @0x580170]. The normal Godot frame driver now advances
 this native schedule; typed entity cards expose its state and priority.
@@ -8915,8 +8909,8 @@ gaze times (0.02,0.01).
 
 The JO renderer's final binding helper [orig: sub_580030 @0x580030] only passes
 the two targets to setters [orig: sub_5899C0 @0x5899C0; sub_5899D0 @0x5899D0]. A
-complete absolute-reference byte scan oftext 0x401000..0x795000,rdata
-0x7C0510..0x813000 anddata 0x813000..0x334C000 found exactly those two stores
+complete absolute-reference byte scan of .text 0x401000..0x795000, .rdata
+0x7C0510..0x813000 and .data 0x813000..0x334C000 found exactly those two stores
 to 0x2721380/0x272137C, no reads and no address references. The nearby globals
 and [orig: apply_shader_parameters @0x58DB80] were also inspected: ordinary
 model materials never consume these face targets. The native port retains facial
@@ -8928,9 +8922,8 @@ Regression coverage: grm_roundtrip checks complete writer bytes, semantic edits,
 quoted/comma tokens, CRLF behavior and transactional malformed-input failures.
 facial_animation checks actual mounted GRM loading, both compiled WAC commands,
 exact timer/eye stepping, mesh deformation, three-slot scheduling, handle reuse,
-capacity, automatic attention expressions and retry. Fixture lint passes all 115
-fixtures. A read-only directory scan of all five installed PFFs (11,576 entries)
-found zerogrm assets; the extracted JOX corpus also has none. GRM tests
+capacity, automatic attention expressions and retry. A read-only directory scan
+of all five installed PFFs (11,576 entries) found zero .grm assets; the extracted JOX corpus also has none. GRM tests
 therefore use authored data, not a retail GRM corpus.
 
 ### 33.31 Organic escort offsets and medic dragging (2026-09-09)
@@ -9013,7 +9006,8 @@ Entity_UpdateAllEntities @0x4c2100 (the site @0x4C21F6);
 Entity_UpdateAllEntities @0x4c2100 (the site @0x4C21FB)]. The reset is [orig:
 EventTrigger_ResetAllSlots @0x4513B0], pickup start [orig: HeliLift_SpawnPickup
 @0x4525E0], flyover start [orig: HeliLift_SpawnFlyover @0x452730] and update
-0x451FA0. Subtypes 1/2 select the two starts; subtype 3 and the other values
+[orig: HeliLift_UpdateAll @0x451FA0] (slot compaction) ->
+[orig: HeliLift_UpdateSlotState @0x451730]. Subtypes 1/2 select the two starts; subtype 3 and the other values
 have no retail action arm. Patient lookup is the first matching full SSN in pool
 0, without a health/item gate. The destination is the first pool-3 type-6088
 item with an ItemDef and matching waypoint number. Capacity and
@@ -9134,7 +9128,7 @@ general organic initialization work in D-AI-9.
 ### 33.34 Organic initialization and mission startup (2026-09-09)
 
 The recovered org1 definition callback is [orig: Entity_InitOrganicAI
-@0x4BFCC0]..0x4C0320 (class row 0x813030). It saves the current position,
+@0x4BFCC0] (spanning 0x4BFCC0..0x4C0320; class row 0x813030). It saves the current position,
 heading and flags before warmup, seeds the body/look/leg headings, clears the
 roll/lean, drag and head-look references, and derives the respawn quota from
 AiSlot[18] / 62. Its magazine comes from the signed low word of definition
@@ -9185,17 +9179,13 @@ subtraction is a dword operation in the assembly [orig: Entity_InitOrganicAI
 explicit stores replace the old unwitnessed block-copy hypothesis; their
 consumer port follows in §33.35.
 
-Regression coverage: All 448 runnable native tests pass, with the existing
-motorcycle asset skip. The native infantry_spawn tests cover the ID permutation,
+Regression coverage: infantry_spawn covers the ID permutation,
 reset-clip blends, channel order, vertical-only warmup, mounted exclusion,
 posture/wash precedence, strict grounding limit, and pool-ordered control-point
 links. The loaded mission test verifies initialization precedes a real
 PreMission group change and that two baseline restores preserve the initialized
 state.
 
-The first broad GUT run's sole failure reproduced in the isolated listen_server
-file: its organic fixture expected authored pitch/roll to survive the original
-initializer's explicit zero writes.
 
 ### 33.35 Organic ammunition, launch points and target eyes (2026-09-09)
 
@@ -9373,11 +9363,11 @@ declined entry falls back to an OPEN class-D row.
 | --- | --- | --- | --- |
 | D-WAC-2 | pisvar/psetvar indices outside 0..16 return 0 and write nothing | [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0] check only `index <= 16`, so a negative index reads or writes unrelated earlier player-slot memory (§33.28) | PERMANENT (class D, proposed PR #642) |
 | D-GRM-1 | The GRM parser rejects unsafe indices, excessive row/parameter counts, non-finite coordinates and field-overflow names, and treats names as data | [orig: FaceAnimConfig_ParseProperty @0x5886A0] writes unbounded indices and sprintf-format names into fixed fields and admits `index == count` (§33.30) | PERMANENT (class D, proposed PR #642) |
-| D-TMATE-1 | Direct pickup initializes the helicopter reference before treatment; a failed helper allocation or a destroyed helicopter/teammate entity ends the operation instead of dereferencing it | [orig: HeliLift_SpawnPickup @0x4525E0] never initializes the pointer that [orig: HeliLift_UpdateAll @0x451FA0] dereferences on treatment expiry (§33.32) | PERMANENT (class D, proposed PR #642) |
+| D-TMATE-1 | Direct pickup initializes the helicopter reference before treatment; a failed helper allocation or a destroyed helicopter/teammate entity ends the operation instead of dereferencing it | [orig: HeliLift_SpawnPickup @0x4525E0] never initializes the pointer that [orig: HeliLift_UpdateSlotState @0x451730 (the deref @0x451e09; @0x451e4c)] dereferences on treatment expiry, reached from [orig: HeliLift_UpdateAll @0x451FA0] (compaction only) (§33.32) | PERMANENT (class D, proposed PR #642) |
 | D-WAC-3 | weaponfired/blockfire/record_fire_request refuse negative categories (return 0 / refuse / no stamp) | [orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire @0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge @0x4E0966)] bound only the high side and index before dword_C6EA44 / dword_C6EA6C for negatives (§33.17) | PERMANENT (class D, proposed PR #642) |
-| D-WAC-4 | `set(night, v)` (and add/sub/inc/dec/store on the `night` row) is dropped; the night phase is derived from the clock on every read (`WeatherState::is_night_phase`) | The `night` row @0x82EEF0 resolves to the Env dword @0x26C645C, which holds a script write until [orig: Environment_ComputeTimeOfDayColors @0x57deae] rewrites it on the next TOD computation; [orig: Environment_GetLightDirectionFloat @0x57d873] reads it meanwhile (§33.15) | OPEN (low: observable only as `set(night,1) set(v1,night)` -> 1 in retail vs the derived phase here until the light-direction getters consume a script-written word) |
+| D-WAC-4 | `set(night, v)` (and add/sub/inc/dec/store on the `night` row) is dropped; the night phase is derived from the clock on every read (`WeatherState::is_night_phase`) | The `night` row @0x82EEF0 resolves to the Env dword @0x26C645C, which holds a script write until [orig: Environment_ComputeTimeOfDayColors @0x57DE40 (the store @0x57deae)] rewrites it on the next TOD computation; [orig: Environment_GetLightDirectionFloat @0x57D870 (the read @0x57d873)] reads it meanwhile (§33.15) | OPEN (low: observable only as `set(night,1) set(v1,night)` -> 1 in retail vs the derived phase here until the light-direction getters consume a script-written word) |
 | D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends what [orig: WacScript_ResolveParameter @0x4f2920] stored: the SoundSet operand is the trigger-entry pointer from [orig: SoundBank_FindTriggerByName @0x75be90] via [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (`*(bank+56) + 84*index`, a host-process address; the site @0x4f2fe2), the Fx operand is the 1-based index into the effect world's global intern pool [orig: CEffectWorld_InternEffectHandle @0x5F7310] in first-intern order (the site @0x4f3067); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: the Fx half needs the intern order reproduced, the SoundSet half is inherently host-local; the decoder bounds are class-D portable boundaries) |
-| D-WAC-6 | An unresolved FX/FACE/SOUNDSET/ANIM/AMMO literal or a RUN/LOOP/NEXT/GLOOP structural error blocks the mission's script (`wac_layered_load` kBlocked) | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4f652a] and runs the script with the failed slot holding 0/-1/0xFFFF (§33.15); unknown commands and unresolved arguments are non-fatal on both sides | OPEN (low: only malformed authored scripts differ) |
+| D-WAC-6 | An unresolved FX/FACE/SOUNDSET/ANIM/AMMO literal or a RUN/LOOP/NEXT/GLOOP structural error blocks the mission's script (`wac_layered_load` kBlocked) | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0/-1/0xFFFF (§33.15); unknown commands and unresolved arguments are non-fatal on both sides | OPEN (low: only malformed authored scripts differ) |
 | D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
 | D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
 | D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |

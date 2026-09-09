@@ -18,32 +18,32 @@ Routing snapshot: 2026-09-09. This records every declared WAC command, BMS trigg
 | 7 | groupdead | 0x4ED1A0 | Number | Explicit branch; verify consumer |
 | 8 | groupalive | 0x4ED1C0 | Number | Explicit branch; verify consumer |
 | 9 | dooropen | 0x4F70A0 | Number | Explicit branch; consumer witnessed in section 33.14 (doors) |
-| 10 | SSNcritical | 0x4F1BF0 | Ssn | Explicit branch; verify consumer |
+| 10 | SSNcritical | 0x4F1BF0 | Ssn | Explicit branch; consumer witnessed in section 33.7 (wac_behavior) |
 | 11 | SSNexists | 0x4F1A70 | Ssn | Explicit branch; verify consumer |
 | 12 | SSNdead | 0x4F1AC0 | Ssn | Explicit branch; verify consumer |
 | 13 | SSNalive | 0x4F1B20 | Ssn | Explicit branch; verify consumer |
 | 14 | SSNwounded | 0x4F1B80 | Ssn | Explicit branch; verify consumer |
-| 15 | SSNride | 0x4F7000 | Ssn | Explicit branch; verify consumer |
+| 15 | SSNride | 0x4F7000 | Ssn | Explicit branch; consumer witnessed in section 33.7 (wac_behavior) |
 | 16 | SSNonSSN | 0x4F19A0 | Ssn, Ssn | Explicit branch; verify consumer |
 | 17 | SSNnearSSN | 0x4F14C0 | Ssn, Ssn, Distance | Explicit branch; verify consumer |
 | 18 | SSNlosSSN | 0x4F15E0 | Ssn, Ssn, Distance | Explicit branch; verify consumer |
 | 19 | SSNseesSSN | 0x4F17C0 | Ssn, Ssn, Distance | Explicit branch; verify consumer |
-| 20 | SSNarea | 0x4F1020 | Ssn, Area | Explicit branch; verify consumer |
-| 21 | SSNarea3D | 0x4F0F60 | Ssn, Area | Explicit branch; verify consumer |
-| 22 | SSNloc | 0x4F0E90 | Ssn, Number | Explicit branch; verify consumer |
-| 23 | SSNLeadSSN2SSN | 0x4F12E0 | Ssn, Ssn, Ssn, Distance | Explicit branch; verify consumer |
-| 24 | reset | 0x4ED300 | IfName | Explicit branch; verify consumer |
-| 25 | Gkill | 0x4F1F40 | Group | Explicit branch; verify consumer |
-| 26 | Gremove | 0x4F1F80 | Group | Explicit branch; verify consumer |
+| 20 | SSNarea | 0x4F1020 | Ssn, Area | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
+| 21 | SSNarea3D | 0x4F0F60 | Ssn, Area | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
+| 22 | SSNloc | 0x4F0E90 | Ssn, Number | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
+| 23 | SSNLeadSSN2SSN | 0x4F12E0 | Ssn, Ssn, Ssn, Distance | Explicit branch; consumer witnessed in section 33.13 (wac_behavior) |
+| 24 | reset | 0x4ED300 | IfName | Explicit branch; consumer witnessed in section 33.4 (wac_behavior) |
+| 25 | Gkill | 0x4F1F40 | Group | Explicit branch; consumer witnessed in section 33.10 (wac_behavior) |
+| 26 | Gremove | 0x4F1F80 | Group | Explicit branch; consumer witnessed in section 33.10 (wac_behavior) |
 | 27 | Gsetaccuracy | 0x4F7BE0 | Number, Number, Number | Explicit branch; verify consumer |
 | 28 | GtoWP | 0x4ED3D0 | Number, WpList | Explicit branch; verify consumer |
 | 29 | kill | 0x4EDC90 | Number | Explicit branch; verify consumer |
-| 30 | remove | 0x4EDCA0 | Number | Explicit branch; verify consumer |
-| 31 | teleport | 0x4EE170 | Number, Target | Explicit branch; verify consumer |
+| 30 | remove | 0x4EDCA0 | Number | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
+| 31 | teleport | 0x4EE170 | Number, Target | Explicit branch; consumer witnessed in section 33.13 (wac_behavior) |
 | 32 | GroupMin | 0x4F7C50 | Number, Distance | Explicit branch; consumer witnessed in section 33.13 (wac_behavior) |
 | 33 | GroupMax | 0x4F7CA0 | Number, Distance | Explicit branch; consumer witnessed in section 33.13 (wac_behavior) |
 | 34 | GroupAtt | 0x4F7CF0 | Number, Distance | Explicit branch; consumer witnessed in section 33.13 (wac_behavior) |
-| 35 | GroupSpawn | 0x4F7AE0 | Number, Number | Explicit branch; verify consumer |
+| 35 | GroupSpawn | 0x4F7AE0 | Number, Number | Explicit branch; consumer witnessed in section 33.12 (infantry_spawn) |
 | 36 | GroupHP | 0x4F7B30 | Number, Number | Explicit branch; verify consumer |
 | 37 | opendoors | 0x4F7D40 | Number | Explicit branch; consumer witnessed in section 33.14 (doors) |
 | 38 | closedoors | 0x4F7DA0 | Number | Explicit branch; consumer witnessed in section 33.14 (doors) |
@@ -59,26 +59,26 @@ Routing snapshot: 2026-09-09. This records every declared WAC command, BMS trigg
 | 48 | SSNtoWP | 0x4F1CE0 | Ssn, WpList | Explicit branch; verify consumer |
 | 49 | killSSN | 0x4F1E40 | Ssn | Explicit branch; verify consumer |
 | 50 | removeSSN | 0x4F1EE0 | Ssn | Explicit branch; verify consumer |
-| 51 | teleSSN | 0x4F7E00 | Ssn, Target | Explicit branch; verify consumer; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
+| 51 | teleSSN | 0x4F7E00 | Ssn, Target | Explicit branch; consumer witnessed in section 33.13 (wac_behavior); replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
 | 52 | SSNwave | 0x4F78D0 | Ssn, Filename, Distance | Explicit branch; verify consumer; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
 | 53 | SSNradio | 0x4F79B0 | Ssn, Filename | Explicit branch; verify consumer; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
 | 54 | SS2SSN | 0x4F1DD0 | SoundSet, Ssn | Verified binding, admission, positional playback and retry; device policy D-SND-8; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
-| 55 | SSNanim | 0x4F7630 | Ssn, Anim | Explicit branch; verify consumer |
+| 55 | SSNanim | 0x4F7630 | Ssn, Anim | Explicit branch; consumer witnessed in section 33.19 (wac_actors) |
 | 56 | SSNMin | 0x4F2010 | Ssn, Distance | Explicit branch; consumer witnessed in section 33.13 (wac_behavior) |
 | 57 | SSNMax | 0x4F2210 | Ssn, Distance | Explicit branch; consumer witnessed in section 33.13 (wac_behavior) |
 | 58 | SSNAtt | 0x4F2270 | Ssn, Distance | Explicit branch; consumer witnessed in section 33.13 (wac_behavior) |
-| 59 | SSNSpawn | 0x4F7A80 | Ssn, Number | Explicit branch; verify consumer |
+| 59 | SSNSpawn | 0x4F7A80 | Ssn, Number | Explicit branch; consumer witnessed in section 33.12 (infantry_spawn) |
 | 60 | SSNHP | 0x4F2100 | Ssn, Number | Explicit branch; verify consumer |
 | 61 | SSNADDHP | 0x4F2170 | Ssn, Number | Explicit branch; verify consumer |
-| 62 | ssn2ssn | 0x4F7330 | Ssn, Ssn | Explicit branch; verify consumer |
+| 62 | ssn2ssn | 0x4F7330 | Ssn, Ssn | Explicit branch; consumer witnessed in section 33.7 (wac_behavior) |
 | 63 | ssnrelease | 0x4F7420 | Ssn | Explicit branch; verify consumer |
 | 64 | ssnface | 0x4F1C60 | Ssn, Face | Timed GRM expression; witnessed inactive JO texture sink, section 33.30 |
 | 65 | ssnturn | 0x4F72B0 | Ssn, Heading | Explicit branch; consumer witnessed in section 33.24 (wac_actors) |
 | 66 | ssnguard | 0x4F71C0 | Ssn, Number | Explicit branch; verify consumer |
-| 67 | ssnname | 0x4F7230 | Ssn, TextToken | Explicit branch; verify consumer |
+| 67 | ssnname | 0x4F7230 | Ssn, TextToken | Explicit branch; consumer witnessed in section 33.7 (wac_behavior) |
 | 68 | ssnpspd | 0x4F7570 | Ssn, Number | Explicit branch; verify consumer |
 | 69 | ssncspd | 0x4F74B0 | Ssn, Number | Explicit branch; verify consumer |
-| 70 | ssnuse | 0x4F70F0 | Ssn | Explicit branch; verify consumer |
+| 70 | ssnuse | 0x4F70F0 | Ssn | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
 | 71 | set | 0x4ED520 | Variable, Value | Explicit branch; verify consumer |
 | 72 | add | 0x4ED530 | Variable, Value | Explicit branch; verify consumer |
 | 73 | sub | 0x4ED540 | Variable, Value | Explicit branch; verify consumer |
@@ -101,8 +101,8 @@ Routing snapshot: 2026-09-09. This records every declared WAC command, BMS trigg
 | 90 | skyspeed | 0x4EDEB0 | Number | Explicit branch; verify consumer |
 | 91 | skyheight | 0x4EDEC0 | Number | Explicit branch; verify consumer |
 | 92 | fogtype | 0x4EDED0 | Number | Explicit branch; verify consumer |
-| 93 | fogdist | 0x4EE100 | Distance | Explicit branch; verify consumer |
-| 94 | movefog | 0x4EE0A0 | Distance, Seconds | Explicit branch; verify consumer |
+| 93 | fogdist | 0x4EE100 | Distance | Explicit branch; consumer witnessed in section 33.13 (wac_environment_wire) |
+| 94 | movefog | 0x4EE0A0 | Distance, Seconds | Explicit branch; consumer witnessed in section 33.13 (wac_environment_wire) |
 | 95 | rain | 0x4EDF60 | Number, Seconds | Explicit branch; verify consumer |
 | 96 | snow | 0x4EDFD0 | Number, Seconds | Explicit branch; verify consumer |
 | 97 | overcast | 0x4EE040 | Number, Seconds | Explicit branch; verify consumer |
@@ -111,32 +111,32 @@ Routing snapshot: 2026-09-09. This records every declared WAC command, BMS trigg
 | 100 | consol | 0x4EDBE0 | Text | Explicit branch; verify consumer; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
 | 101 | consol# | 0x4EDC00 | Text, Number | Explicit branch; verify consumer; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
 | 102 | sound | 0x4ED590 | SoundSet, Distance, Heading | Verified explicit distance/bearing and direct audio consumer; D-SND-8; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
-| 103 | forceanim | 0x4F2610 | Anim | Explicit branch; verify consumer |
+| 103 | forceanim | 0x4F2610 | Anim | Explicit branch; consumer witnessed in section 33.19 (wac_actors) |
 | 104 | tele | 0x4F22D0 | Ssn | Explicit branch; consumer witnessed in section 33.24 (wac_actors) |
-| 105 | fall | 0x4ED4E0 | none | Explicit branch; verify consumer |
+| 105 | fall | 0x4ED4E0 | none | Explicit branch; consumer witnessed in section 33.19 (wac_actors) |
 | 106 | fov | 0x4EDEA0 | Number | Explicit branch; shared weather/camera consumer verified |
 | 107 | squadevent | 0x4ED070 | Number | Verified four-slot selection, named exports, TTL and retry; publisher has no retail callers |
 | 108 | random | 0x4ED280 | Number | Explicit branch; consumer witnessed in section 33.26 (wac_state) |
-| 109 | outside | 0x4ED050 | none | Explicit branch; verify consumer |
-| 110 | location | 0x4ED190 | Number | Explicit branch; verify consumer |
-| 111 | area | 0x4ED0C0 | Area | Explicit branch; verify consumer |
-| 112 | area3D | 0x4ED120 | Area | Explicit branch; verify consumer |
+| 109 | outside | 0x4ED050 | none | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
+| 110 | location | 0x4ED190 | Number | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
+| 111 | area | 0x4ED0C0 | Area | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
+| 112 | area3D | 0x4ED120 | Area | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
 | 113 | waveready | 0x4ED380 | none | Explicit branch; consumer witnessed in section 33.18 (wac_voice) |
-| 114 | weaponfired | 0x4ED360 | Number | Explicit branch; verify consumer |
+| 114 | weaponfired | 0x4ED360 | Number | Explicit branch; consumer witnessed in section 33.17 (wac_weapon_input) |
 | 115 | event | 0x4ED1E0 | Number | Reads the BMS active flag, including activation delay; verified |
-| 116 | meride | 0x4F1260 | Ssn | Explicit branch; verify consumer |
-| 117 | meattached | 0x4F10D0 | Ssn | Explicit branch; verify consumer |
+| 116 | meride | 0x4F1260 | Ssn | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
+| 117 | meattached | 0x4F10D0 | Ssn | Explicit branch; consumer witnessed in section 33.11 (wac_behavior) |
 | 118 | medrive | 0x4F1150 | Ssn | Explicit branch; verify consumer |
 | 119 | meongun | 0x4F11E0 | Ssn | Explicit branch; verify consumer |
 | 120 | ammorain | 0x4EE1A0 | Ammo | Explicit branch; projectile consumer verified |
 | 121 | fxrain | 0x4EE3E0 | Fx | Typed particle consumer; native command/lifetime tests; D-PTL-26 tracks shared entity-slot integration |
 | 122 | lightning | 0x4EDE20 | Red, Green, Blue | Explicit branch; consumer witnessed in section 33.21 (wac_environment_wire) |
 | 123 | face | 0x4ED5D0 | Face | Local timed GRM expression; section 33.30; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
-| 124 | anim | 0x4ED5B0 | Anim | Explicit branch; verify consumer |
+| 124 | anim | 0x4ED5B0 | Anim | Explicit branch; consumer witnessed in section 33.19 (wac_actors) |
 | 125 | sunfade | 0x4EDF10 | Number, Seconds | Explicit branch; verify consumer |
 | 126 | gain | 0x4EDD30 | Red, Green, Blue | Explicit branch; consumer witnessed in section 33.21 (wac_environment_wire) |
 | 127 | squadclear | 0x4ED390 | none | Verified selected-row and named-export clearing; retains selected index |
-| 128 | blockfire | 0x4EE140 | Number, Number | Explicit branch; verify consumer |
+| 128 | blockfire | 0x4EE140 | Number, Number | Explicit branch; consumer witnessed in section 33.17 (wac_weapon_input) |
 | 129 | colorfade | 0x4EDCB0 | Number | Explicit branch; verify consumer |
 | 130 | sun | 0x4EDCD0 | Red, Green, Blue | Explicit branch; consumer witnessed in section 33.21 (wac_environment_wire) |
 | 131 | sky | 0x4EDD00 | Red, Green, Blue | Explicit branch; consumer witnessed in section 33.21 (wac_environment_wire) |
@@ -163,8 +163,8 @@ Routing snapshot: 2026-09-09. This records every declared WAC command, BMS trigg
 | 152 | pconsol | 0x4EDBE0 | Text | Replicated S2C 0x23 targeted (flags 0x12) under wire index 39/40/100: a registered non-local selection is sent to that player only and the VM returns 1 without the local call; a local, unregistered or empty selection runs the local text/wave/consol handler (section 33.39) |
 | 153 | pisgold | 0x4F0AF0 | none | Witnessed clear Gold flag; section 33.28 |
 | 154 | AddExp | 0x4F2690 | Ssn, Number | Match raw points and recursive sharing; section 33.28 |
-| 155 | IsPSPallteam | 0x4EE4B0 | Number | Explicit branch; verify consumer |
-| 156 | dropflare | 0x4F2710 | Ssn | Explicit branch; verify consumer |
+| 155 | IsPSPallteam | 0x4EE4B0 | Number | Explicit branch; consumer witnessed in section 33.19 (wac_actors) |
+| 156 | dropflare | 0x4F2710 | Ssn | Explicit branch; consumer witnessed in section 33.19 (wac_actors) |
 | 157 | ammo2ssn | 0x4F24E0 | Ammo, Ssn, Ssn | Alternating posed model userpoints; source-fire ownership and retry verified |
 | 158 | fx2ssn | 0x4F23A0 | Fx, Ssn | Typed particle consumer; native command/lifetime tests; D-PTL-26 tracks shared entity-slot integration; replicated S2C 0x23 broadcast (flags 0x0a/0x0c) AND run locally through the shared handler wac::run_remote_command (section 33.39) |
 | 159 | piskills | 0x4F0B60 | Number | Registered player's signed enemy-kill counter; section 33.28 |
@@ -305,8 +305,8 @@ Every named schema value is listed below. Explicit cases are counted against the
 | 25 | SingleChangeGroup | Explicit case; verify consumer |
 | 26 | SingleTeleportAction | Explicit case; verify consumer |
 | 27 | ParticleEffectAction | Typed marker-name/position consumer; D-PTL-26 tracks shared entity-slot integration |
-| 30 | GroupOpenDoorAction | Explicit case; verify consumer |
-| 31 | GroupCloseDoorAction | Explicit case; verify consumer |
+| 30 | GroupOpenDoorAction | Door pool owner (DoorSystem); world-wac-ai-re section 33.14 |
+| 31 | GroupCloseDoorAction | Door pool owner (DoorSystem); world-wac-ai-re section 33.14 |
 | 32 | GroupResetHasVisited | Explicit case; verify consumer |
 | 33 | SingleResetHasVisited | Explicit case; verify consumer |
 | 34 | ResetEvent | Explicit case; verify consumer |
@@ -317,14 +317,14 @@ Every named schema value is listed below. Explicit cases are counted against the
 | 39 | Teammates | Eight-slot operation owner; world-wac-ai-re section 33.32 |
 | 40 | ShowWaypoints | Explicit case; verify consumer |
 | 41 | ExecuteWac | Witnessed no-op |
-| 42 | SsnTargetSsnPri | Explicit case; verify consumer |
-| 43 | SsnTargetSsnExc | Explicit case; verify consumer |
-| 44 | SsnTargetGroupPri | Explicit case; verify consumer |
-| 45 | SsnTargetGroupExc | Explicit case; verify consumer |
-| 46 | GroupTargetSsnPri | Explicit case; verify consumer |
-| 47 | GroupTargetSsnExc | Explicit case; verify consumer |
-| 48 | GroupTargetGroupPri | Explicit case; verify consumer |
-| 49 | GroupTargetGroupExc | Explicit case; verify consumer |
+| 42 | SsnTargetSsnPri | Target-policy word writer; world-wac-ai-re section 33.2 (D-EVT-6 closed) |
+| 43 | SsnTargetSsnExc | Target-policy word writer; world-wac-ai-re section 33.2 (D-EVT-6 closed) |
+| 44 | SsnTargetGroupPri | Target-policy word writer; world-wac-ai-re section 33.2 (D-EVT-6 closed) |
+| 45 | SsnTargetGroupExc | Target-policy word writer; world-wac-ai-re section 33.2 (D-EVT-6 closed) |
+| 46 | GroupTargetSsnPri | Target-policy word writer; world-wac-ai-re section 33.2 (D-EVT-6 closed) |
+| 47 | GroupTargetSsnExc | Target-policy word writer; world-wac-ai-re section 33.2 (D-EVT-6 closed) |
+| 48 | GroupTargetGroupPri | Target-policy word writer; world-wac-ai-re section 33.2 (D-EVT-6 closed) |
+| 49 | GroupTargetGroupExc | Target-policy word writer; world-wac-ai-re section 33.2 (D-EVT-6 closed) |
 
 ### AIActionSubType
 
@@ -344,17 +344,17 @@ Every named schema value is listed below. Explicit cases are counted against the
 | 28 | AiSetState | Shared Entity_ApplyCommand; review field/consumer parity |
 | 29 | CombatSpeed | Shared Entity_ApplyCommand; review field/consumer parity |
 | 30 | PatrolSpeed | Shared Entity_ApplyCommand; review field/consumer parity |
-| 31 | FindAndUse | Shared Entity_ApplyCommand; review field/consumer parity |
+| 31 | FindAndUse | Shared Entity_ApplyCommand; consumer witnessed in section 33.8 |
 | 32 | AiUseWpz | Shared Entity_ApplyCommand; review field/consumer parity |
 | 33 | AiClearWpz | Shared Entity_ApplyCommand; review field/consumer parity |
 | 34 | PlayPartAnim | Shared Entity_ApplyCommand; review field/consumer parity |
-| 37 | HudItem | Shared Entity_ApplyCommand; review field/consumer parity |
-| 39 | TmateStatus | Shared Entity_ApplyCommand; review field/consumer parity |
-| 40 | AiNodePathBit | Shared Entity_ApplyCommand; review field/consumer parity |
+| 37 | HudItem | Witnessed retail no-op; world-wac-ai-re section 33.3 |
+| 39 | TmateStatus | Witnessed retail no-op; world-wac-ai-re section 33.3 |
+| 40 | AiNodePathBit | Shared Entity_ApplyCommand; consumer witnessed in section 33.8 |
 | 41 | AttackDistanceValue | Shared Entity_ApplyCommand; review field/consumer parity |
 | 42 | EngageDistanceMin | Shared Entity_ApplyCommand; review field/consumer parity |
 | 43 | IndestructableBit | Shared Entity_ApplyCommand; review field/consumer parity |
-| 44 | TargetSsn | Shared Entity_ApplyCommand; review field/consumer parity |
+| 44 | TargetSsn | Shared Entity_ApplyCommand; consumer witnessed in section 33.3 |
 | 45 | StartFiringBit | Shared Entity_ApplyCommand; review field/consumer parity |
 | 46 | FiringAngle | Shared Entity_ApplyCommand; review field/consumer parity |
 
