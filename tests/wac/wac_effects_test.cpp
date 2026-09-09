@@ -4,6 +4,7 @@
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
+#include <runtime/particle/effect_catalog_names.h>
 #include <runtime/particle/script_effects.h>
 #include <runtime/mission/promote.h>
 
@@ -38,12 +39,17 @@ struct Fixture {
     std::unique_ptr<World> storage = std::make_unique<World>();
     World &world = *storage;
     p::EffectScene scene;
+    // The compiler's name catalog (MissionKernel::script_effect_catalog), built
+    // from the same documents the runtime scene opens.
+    p::EffectCatalogNames names;
     Fixture(bool stock = false) {
         for (int pool = 0; pool < 4; ++pool) world.registry.configure_pool(pool, 16);
-        scene.open(catalog(stock));
+        const p::EffectSceneConfig config = catalog(stock);
+        for (const auto &document : config.documents) names.add_document(document.file);
+        scene.open(config);
     }
     Program compile_script(const std::string &source) {
-        CompileEnv env; env.registry = &world.registry; env.effects = &scene;
+        CompileEnv env; env.registry = &world.registry; env.effects = &names;
         return compile_source(source, env);
     }
     void script(const std::string &source) {
@@ -61,6 +67,10 @@ struct Fixture {
         return world.registry.spawn(pool, entity);
     }
     p::EffectSpawnReceipt present(size_t index) {
+        // The shell re-interns every compile-time name into the one runtime
+        // scene before spawning (GameWorld::route_script_effects), so a stock
+        // clone a script bound at compile time answers later named lookups.
+        for (const auto &name : names.interned_names()) scene.intern(name);
         const auto &event = world.out.script_effects[index];
         const uint64_t token = uint64_t(event.owner.packed) + 1;
         return p::spawn_script_effect(scene, event, {token}, {token});

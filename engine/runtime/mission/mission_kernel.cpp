@@ -558,12 +558,21 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("infantry_anim");
 		(void)install_infantry_anim(options.infantry_adm);
 	}
+	// The script compiler's SOUNDSET and FX name catalogs, from the mounted
+	// banks and effect documents [orig: WacScript_ResolveParameter @0x4F2940
+	// binds both against the loaded tables; CEffectWorld_InternEffectHandle
+	// @0x5F7310]. Independent of the wac gate: a compile that arrives after
+	// the boot (Simulation::compile_and_set_wac) binds the same names.
+	if (has_files) {
+		step("script_catalogs");
+		wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
+		wac::load_script_effect_catalog(files_, script_effect_catalog);
+	}
 	// Mission WAC scripts [orig: WacScript_InitAndLoad]; absent files skip.
 	std::string wac_blocked_error; // strict mode's fatal diagnostic, if any
 	if (has_files && options.wac) {
 		step("wac");
 		wac_loaded = false;
-        wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
 		std::string wac_error;
 		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac, files_,
 				options.wac_basename.empty() ? mission_basename : options.wac_basename,
@@ -784,7 +793,16 @@ bool MissionKernel::restore_baseline() {
 		local.weapon.slot.clip = clip;
 		local.weapon.slot.reserve = reserve;
 	}
-	// Preserve the authored FOV baseline while clearing transient player optics.
+	// Retail's SP restart re-runs Game_StartMission [orig: Game_RestartRoundSP
+	// @0x5263DB -> Game_StartMission @0x524360]. There the player re-init's weapon
+	// switch resets the FOV target to 80 [orig: Player_InitPlayer @0x525BBC ->
+	// Player_SwitchToWeaponByHandle @0x4E19A1 -> Player_ResetCameraAndMovementState
+	// @0x4DE202] BEFORE Environment_SnapStateToTargets @0x525CAE re-seeds it from
+	// the .env default (@0x57D2BB) and WacScript_InitAndLoad @0x525CB3 re-applies
+	// the script's fov (WacCmd_Fov @0x4EDEA7), so the post-restart target is the
+	// authored value. The sealed baseline already holds that post-init target:
+	// restoring it after the reset stands in for the re-run (the port restores
+	// the sealed world instead of re-executing the script's initial pass).
 	const int32_t baseline_fov = world.weather.core.scalar_channels.camera_fov_target_fp;
 	// The FP channel position is a gated advance count, not a clock delta, so
 	// the restored world keeps the held clip pose with no epoch re-stamp.

@@ -1,5 +1,5 @@
 #include <runtime/wac/compiler.h>
-#include <runtime/particle/effect_scene.h>
+#include <runtime/particle/effect_catalog_names.h>
 #include <runtime/audio/oneshot_play.h>
 
 #include <cctype>

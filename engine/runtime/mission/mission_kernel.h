@@ -37,7 +37,7 @@
 #include <runtime/simassets/sim_model_cache.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
-#include <runtime/particle/effect_scene.h>
+#include <runtime/particle/effect_catalog_names.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
@@ -303,8 +303,13 @@ public:
 	world::World world;
 	BmsEventSystem events;
 	wac::WacSystem wac;
+    // The WAC compiler's SOUNDSET and FX name catalogs, built once per boot from
+    // the mounted files (the script_catalogs step) so every compile of this
+    // kernel — the boot's layered load or a later Simulation::compile_and_set_wac
+    // — binds against the same names. Names and handles only; the shell's
+    // EffectWorld owns the one runtime effect scene.
     audio::SoundSetIndex script_sound_catalog;
-    particle::EffectScene script_effect_catalog; // compile-time FX name/handle bindings
+    particle::EffectCatalogNames script_effect_catalog;
 	bool wac_loaded = false;
 	world::CollisionWorld collision;
 	world::OcclusionWorld occlusion;

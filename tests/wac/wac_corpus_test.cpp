@@ -15,8 +15,7 @@
 #include <runtime/wac/wac_layered_load.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/world/ammo_table_build.h>
-#include <runtime/particle/effect_scene.h>
-#include <formats/particle/parser.h>
+#include <runtime/particle/effect_catalog_names.h>
 #include <base/resource_index/resource_index.h>
 #include <runtime/mission/runtime_boot.h>
 #include "common/retail_paths.h"
@@ -71,20 +70,10 @@ int main(int argc, char **argv) {
         opennova::ResourceIndex index;
         index.scan(d);
         const auto mounted = opennova::mission::boot_files_from_index(index);
-        opennova::particle::EffectScene effects;
-        opennova::particle::EffectSceneConfig effect_config;
-        for (const auto &extension : {std::string(".ptl"), index.particle_extension()}) {
-            for (const auto &name : mounted.list_files(extension)) {
-                std::vector<uint8_t> bytes;
-                opennova::particle::EffectCatalogDocument document;
-                opennova::particle::ParseError error;
-                document.source = name;
-                if (mounted.read_file(name, bytes) && opennova::particle::load_particles_from_buffer(
-                        reinterpret_cast<const char *>(bytes.data()), bytes.size(), document.file, error))
-                    effect_config.documents.push_back(std::move(document));
-            }
-        }
-        effects.open(effect_config);
+        // The kernel's compile-time catalog: the mounted .ptl set plus the
+        // regional table, names only.
+        opennova::particle::EffectCatalogNames effects;
+        opennova::wac::load_script_effect_catalog(mounted, effects);
         for (auto it = fs::recursive_directory_iterator(d, ec);
              it != fs::recursive_directory_iterator(); it.increment(ec)) {
             if (ec) break;
