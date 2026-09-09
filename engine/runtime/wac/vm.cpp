@@ -135,9 +135,6 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 case Builtin::Ticks: return static_cast<int32_t>(time_); // VM executions [orig: wac_var_ticks]
                 case Builtin::Result: return acc_;
                 case Builtin::Health: return w.cached.local_health;
-                case Builtin::NearType: return w.cached.near_type;
-                case Builtin::NearDist: return w.cached.near_dist;
-                case Builtin::NearId: return w.cached.near_id;
                 case Builtin::Wind: return w.weather.wind_scale();   // Env_WindScale [orig: @0x26c68c0]
                 case Builtin::Mana: return cached_mana_;
                 case Builtin::CurTOD: return cached_tod_;
@@ -155,6 +152,9 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
 				case Builtin::Seatbelt:
 					return w.script.wac_values.seatbelt;
 				case Builtin::Night: return w.weather.is_night_phase() ? 1 : 0;   // Env_IsNightPhase [orig: @0x26c645c]
+                case Builtin::Breathtime: return w.script.wac_values.breathtime; // [orig: 0xC6EAE0]
+                case Builtin::Autogain: return w.script.wac_values.autogain;     // [orig: wac_var_autogain 0xC6EAFC]
+                case Builtin::Scratch: return scratch_;                          // [orig: dword_C6EAEC]
             }
             return 0;
         }
@@ -168,38 +168,40 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) {
         case OperandKind::GlobalVar: w.script.vars.set_global(static_cast<int>(operand_index(ref)), v); break;
         case OperandKind::MusicVar: w.script.vars.set_music(static_cast<int>(operand_index(ref)), v); break;
         case OperandKind::Builtin:
-            // The retail named-value resolver returns the address of this mutable
-            // engine dword, so ordinary set/add/sub/inc/dec/store write through.
-            // [orig: WacScript_ResolveParameter @0x4f2940 ->
-            //  wac_var_accuracyspread @0xC6EAE8 / dword_C6EAE4 (fallmps)]
-            if (static_cast<Builtin>(operand_index(ref)) == Builtin::AutoItem)
-                auto_item_ = static_cast<uint16_t>(v);
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::SquadSSN)
-                w.script.squad_events.selected_ssn = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::SquadWho)
-                w.script.squad_events.selected_who = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::RandomResult)
-                w.script.wac_values.random_result = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Health)
-                w.cached.local_health = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Mana)
-                cached_mana_ = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::CurTOD)
-                cached_tod_ = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::GameOver)
-                cached_game_over_ = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::WinVar)
-                cached_win_ = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::LoseVar)
-                cached_lose_ = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::AccuracySpread)
-                w.script.wac_values.accuracy_spread = v;
-            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Fallmps)
-                w.script.wac_values.fallmps = v;
-			else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Seatbelt)
-				w.script.wac_values.seatbelt = v;
-			else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Wind)
-                w.commands.set_wind_scale(v); // Env_WindScale [orig: the `wind` row @0x82EEF0]
+            // The retail named-value resolver returns the address of the row's
+            // mutable engine dword, so ordinary set/add/sub/inc/dec/store write
+            // through to every row. [orig: WacScript_ResolveParameter
+            // @0x4f2a92..0x4f2a9f -> the table @0x82EEF0]
+            switch (static_cast<Builtin>(operand_index(ref))) {
+                case Builtin::AutoItem: auto_item_ = static_cast<uint16_t>(v); break;
+                case Builtin::SquadSSN: w.script.squad_events.selected_ssn = v; break;
+                case Builtin::SquadWho: w.script.squad_events.selected_who = v; break;
+                case Builtin::RandomResult: w.script.wac_values.random_result = v; break;
+                case Builtin::Ticks: time_ = static_cast<uint32_t>(v); break;   // [orig: wac_var_ticks 0xC6EAD8]
+                case Builtin::Result: acc_ = v; break;                           // [orig: wac_var_result 0xC6EB24]
+                case Builtin::Health: w.cached.local_health = v; break;
+                case Builtin::Mana: cached_mana_ = v; break;
+                case Builtin::CurTOD: cached_tod_ = v; break;
+                case Builtin::GameOver: cached_game_over_ = v; break;
+                case Builtin::WinVar: cached_win_ = v; break;
+                case Builtin::LoseVar: cached_lose_ = v; break;
+                case Builtin::Bluekills: w.kill_stats.bluekills_by_player = v; break;   // [orig: 0xC846F0]
+                case Builtin::Greenkills: w.kill_stats.greenkills_by_player = v; break; // [orig: 0xC846F8]
+                // Rebuilt by the next slot-list pass. [orig: wac_var_humans 0xC6EB14]
+                case Builtin::Humans: w.cached.humans = v; break;
+                case Builtin::AccuracySpread: w.script.wac_values.accuracy_spread = v; break; // [orig: 0xC6EAE8]
+                case Builtin::Fallmps: w.script.wac_values.fallmps = v; break;       // [orig: 0xC6EAE4]
+                case Builtin::Seatbelt: w.script.wac_values.seatbelt = v; break;     // [orig: 0xC6EADC]
+                case Builtin::Breathtime: w.script.wac_values.breathtime = v; break; // [orig: 0xC6EAE0]
+                case Builtin::Autogain: w.script.wac_values.autogain = v; break;     // [orig: 0xC6EAFC]
+                case Builtin::Wind: w.commands.set_wind_scale(v); break; // Env_WindScale [orig: the `wind` row @0x82EEF0]
+                case Builtin::Scratch: scratch_ = v; break;               // [orig: dword_C6EAEC]
+                // The night phase is derived from the clock on every read
+                // here; retail's Env dword @0x26c645c takes the write until
+                // Environment_ComputeTimeOfDayColors @0x57deae rewrites it.
+                // Tracked divergence: the write is dropped.
+                case Builtin::Night: break;
+            }
             break;
         default: break; // pool values are not lvalues
     }
@@ -689,6 +691,7 @@ void WacVm::record_gap(opennova::world::World &w, int cmd, uint32_t instruction,
 // WacScript_ExecuteBytecode entry @0x4F58F4, including the initial execution]
 void WacVm::cache_player_state(opennova::world::World &w) {
     cached_tod_ = static_cast<int32_t>(w.weather.tod_fixed24) / 279620;
+    scratch_ = 0; // the unresolved-parameter sink [orig: @0x4f57b5]
     const int winner = w.match.outcome().winner_team;
     cached_game_over_ = winner != 0 ? 1 : 0;
     cached_win_ = winner == 1 ? 1 : 0;

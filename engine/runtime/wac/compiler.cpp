@@ -44,6 +44,8 @@ bool starts_with_ci(const std::string &s, const char *prefix) {
     return true;
 }
 
+// The 24-row named-value table @0x82EEF0 (count 0x18 @0x82F130), walked with
+// stricmp by WacScript_ResolveParameter's third lookup leg.
 int builtin_id(const std::string &name) {
     if (ieq(name, "ticks")) return static_cast<int>(Builtin::Ticks);
     if (ieq(name, "result")) return static_cast<int>(Builtin::Result);
@@ -55,9 +57,8 @@ int builtin_id(const std::string &name) {
     if (ieq(name, "wind")) return static_cast<int>(Builtin::Wind);
     if (ieq(name, "mana")) return static_cast<int>(Builtin::Mana);
     if (ieq(name, "CurTOD")) return static_cast<int>(Builtin::CurTOD);
-    if (ieq(name, "neartype")) return static_cast<int>(Builtin::NearType);
-    if (ieq(name, "neardist")) return static_cast<int>(Builtin::NearDist);
-    if (ieq(name, "nearid")) return static_cast<int>(Builtin::NearId);
+    if (ieq(name, "breathtime")) return static_cast<int>(Builtin::Breathtime);
+    if (ieq(name, "autogain")) return static_cast<int>(Builtin::Autogain);
     // Round-outcome names from the named-value table @0x82EEF0 (case-insensitive,
     // like every entry — the resolver walks the table with stricmp).
     if (ieq(name, "bluekills")) return static_cast<int>(Builtin::Bluekills);
@@ -149,8 +150,38 @@ private:
         return static_cast<int>(prog_.strings.size() - 1);
     }
 
+    // [orig: WacScript_FormatActionParameters @0x4EFC20] "  name (type, type)".
+    static std::string action_signature(const CommandDef &def) {
+        std::string text = "  ";
+        text += def.name;
+        text += " (";
+        for (int i = 0; i < 4; ++i) {
+            if (def.params[i] == ParamType::Null) continue;
+            if (i) text += ", ";
+            text += param_type_name(def.params[i]);
+        }
+        text += ")";
+        return text;
+    }
+
+    // [orig: Script_Compile @0x4F3AB2..0x4F3AE2] An argument the resolver
+    // returns NULL for logs the command's signature as the compile error
+    // (Script_SetCompileError @0x4EE7C0, a first-error buffer only the script
+    // debug overlay @0x4f652a and the console @0x4f6d3f read) and its operand
+    // slot points at the shared scratch dword &dword_C6EAEC (Builtin::Scratch,
+    // zeroed at every bytecode entry). Compilation continues and
+    // WacScript_InitAndLoad runs the program regardless [orig: @0x4f926a
+    // clears the buffer, @0x4f976b executes], so the diagnostic is not
+    // fatal: the lenient loader keeps the script. V0 is never an implicit
+    // target.
+    uint32_t unresolved_argument(const CommandDef *def, int line) {
+        prog_.diagnostics.push_back({line, 0,
+                def != nullptr ? action_signature(*def) : std::string("unresolved variable"), false});
+        return encode_operand(OperandKind::Builtin, static_cast<uint32_t>(Builtin::Scratch));
+    }
+
     // Resolve an argument to an operand reference word. [orig: WacScript_ResolveParameter.]
-    uint32_t resolve(const Arg &arg, ParamType type, int line) {
+    uint32_t resolve(const Arg &arg, ParamType type, int line, const CommandDef *def = nullptr) {
         const std::string &t = arg.text;
 
         // Declarations occupy the second half of the shared mission bank.
@@ -164,7 +195,8 @@ private:
             if (!event_names_[i].empty() && ieq(t, event_names_[i].c_str())) {
                 if (type == ParamType::IfName)
                     return encode_operand(OperandKind::Pool, push_pool(int32_t(i)));
-                if (type == ParamType::Variable) break;
+                // An event name is NULL for expectedType 27. [orig: @0x4f2a5e]
+                if (type == ParamType::Variable) return unresolved_argument(def, line);
                 return encode_operand(OperandKind::EventFired, uint32_t(i));
             }
         }
@@ -172,6 +204,9 @@ private:
             warn(line, "unknown event '" + t + "'");
             return encode_operand(OperandKind::Pool, push_pool(-1));
         }
+        // A quoted token matches no table or prefix, and expectedType 27 then
+        // resolves to NULL. [orig: @0x4f2b7e]
+        if (arg.is_string && type == ParamType::Variable) return unresolved_argument(def, line);
 
         // String / symbolic-asset params -> string pool, referenced as a pool value.
         bool string_like = (arg.is_string && type != ParamType::Group && type != ParamType::Anim && type != ParamType::Ammo && type != ParamType::Fx && type != ParamType::SoundSet && type != ParamType::Face) || type == ParamType::Text ||
@@ -201,31 +236,18 @@ private:
         }
         const int named_value = builtin_id(t);
         if (type == ParamType::Variable) {
-            // Cached rows are mutable dwords too. Writes affect the cached
-            // word until the next bytecode execution refreshes it.
-            // [orig: WacScript_ResolveParameter @0x4F2A92..0x4F2A9F]
-			if (named_value == static_cast<int>(Builtin::AccuracySpread) ||
-					named_value == static_cast<int>(Builtin::Fallmps) ||
-					named_value == static_cast<int>(Builtin::Seatbelt) ||
-					named_value == static_cast<int>(Builtin::Wind) ||
-                    named_value == static_cast<int>(Builtin::AutoItem) ||
-                    named_value == static_cast<int>(Builtin::Health) ||
-                    named_value == static_cast<int>(Builtin::Mana) ||
-                    named_value == static_cast<int>(Builtin::CurTOD) ||
-                    named_value == static_cast<int>(Builtin::GameOver) ||
-                    named_value == static_cast<int>(Builtin::WinVar) ||
-                    named_value == static_cast<int>(Builtin::LoseVar) ||
-                    named_value == static_cast<int>(Builtin::SquadSSN) ||
-                    named_value == static_cast<int>(Builtin::SquadWho) ||
-                    named_value == static_cast<int>(Builtin::RandomResult)) {
-				return encode_operand(OperandKind::Builtin,
-                                      static_cast<uint32_t>(named_value));
-			}
-			warn(line, "expected a variable");
-            return encode_operand(OperandKind::MissionVar, 0);
+            // Every row of the table @0x82EEF0 resolves to its mutable dword
+            // regardless of the expected type, so each is an lvalue; a write
+            // to a cached row lands on the cached word until the next bytecode
+            // execution refreshes it. [orig: WacScript_ResolveParameter
+            // @0x4f2a92..0x4f2a9f] Anything else is NULL for expectedType 27
+            // [orig: @0x4f2b7e], the compile error + scratch-sink pair.
+            if (named_value >= 0)
+                return encode_operand(OperandKind::Builtin, static_cast<uint32_t>(named_value));
+            return unresolved_argument(def, line);
         }
 
-        // Named engine values (health/ticks/near*/accuracyspread/...).
+        // Named engine values (health/ticks/humans/accuracyspread/...).
         if (named_value >= 0) {
             return encode_operand(OperandKind::Builtin,
                                   static_cast<uint32_t>(named_value));
@@ -362,9 +384,9 @@ private:
                                   push_pool(value));
         }
 
-        // Unknown symbol -> intern as a string, best effort.
-        int si = intern_string(t);
-        return encode_operand(OperandKind::Pool, push_pool(si));
+        // A token that matches no table, prefix or numeric form resolves to
+        // NULL [orig: @0x4f2a62], the compile error + scratch-sink pair.
+        return unresolved_argument(def, line);
     }
 
     // Emit a single command call (condition leaf or action). `fold` controls how
@@ -385,7 +407,7 @@ private:
         for (int i = 0; i < def.argc; ++i) {
             ParamType pt = def.params[i];
             if (i < static_cast<int>(call.args.size())) {
-                emit(resolve(call.args[i], pt, call.line));
+                emit(resolve(call.args[i], pt, call.line, &def));
             } else {
                 emit(encode_operand(OperandKind::Pool, push_pool(0)));
             }

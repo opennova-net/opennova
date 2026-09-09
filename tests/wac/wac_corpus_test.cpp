@@ -53,6 +53,7 @@ int main(int argc, char **argv) {
     int hard_errors = 0;
     int total_warnings = 0;
     std::vector<std::string> unknown_examples;
+    std::vector<std::string> error_examples;
 
     for (const std::string &d : dirs) {
         std::error_code ec;
@@ -90,10 +91,17 @@ int main(int argc, char **argv) {
             int errs = prog.error_count();
             hard_errors += errs;
             for (const Diagnostic &dg : prog.diagnostics) {
+                if (dg.error && error_examples.size() < 16)
+                    error_examples.push_back(it->path().filename().string() + ":" +
+                            std::to_string(dg.line) + ": " + dg.message);
                 if (!dg.error) {
                     ++total_warnings;
+                    // Unknown commands and the resolver's action-signature
+                    // diagnostics (an argument retail sinks into its scratch
+                    // word) are the shipped scripts' known blemishes.
                     if (unknown_examples.size() < 8 &&
-                        dg.message.rfind("unknown command", 0) == 0) {
+                        (dg.message.rfind("unknown command", 0) == 0 ||
+                         dg.message.rfind("  ", 0) == 0)) {
                         unknown_examples.push_back(it->path().filename().string() + ": " + dg.message);
                     }
                 }
@@ -109,6 +117,7 @@ int main(int argc, char **argv) {
 
     std::printf("corpus: %d files, %d hard errors, %d warnings\n", files, hard_errors, total_warnings);
     for (const std::string &u : unknown_examples) std::printf("  warn: %s\n", u.c_str());
+    for (const std::string &e : error_examples) std::printf("  error: %s\n", e.c_str());
 
     // Pass criteria: no crash (reaching here), no hard compile errors. Unknown-
     // command warnings are allowed (older games extend the keyword set).

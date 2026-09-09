@@ -889,6 +889,9 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     CHECK(w.diagnostics.empty());
 }
 
+// SSNride follows retail's +0x28 carrier link up to three hops; that one link
+// covers a seated rider, an emplacement child and a deck-stander alike.
+// [orig: WacCmd_SsnRide @0x4F7000]
 static void test_ssn_rider_query_bounds_parent_depth_and_pool() {
     BehaviorWorld w;
     w.registry.configure_pool(1, 8);
@@ -904,6 +907,7 @@ static void test_ssn_rider_query_bounds_parent_depth_and_pool() {
     const EntityHandle p2 = w.registry.spawn(1, parent);
     Entity rider;
     rider.net_id = 93;
+    rider.mounted = true;
     rider.mount_target = p2;
     const EntityHandle rh = w.registry.spawn(0, rider);
     CHECK(w.commands.ssn_has_rider(90)); // three links, even without an item id
@@ -912,8 +916,21 @@ static void test_ssn_rider_query_bounds_parent_depth_and_pool() {
     const EntityHandle p3 = w.registry.spawn(1, parent);
     w.registry.get(rh)->mount_target = p3;
     CHECK(!w.commands.ssn_has_rider(90)); // fourth link is outside the query
+    w.registry.get(rh)->mounted = false;
     w.registry.get(rh)->mount_target = {};
     CHECK(!w.commands.ssn_has_rider(90)); // pool-1 riders are never scanned
+
+    // Standing on the deck (the ground-probe store, not a seat) is riding.
+    w.registry.get(rh)->ground_target = th;
+    CHECK(w.commands.ssn_has_rider(90));
+    // A mixed chain: deck-stander on an emplacement child of the hull.
+    w.registry.get(rh)->ground_target = p1;
+    CHECK(w.commands.ssn_has_rider(90));
+    w.registry.get(rh)->ground_target = p3; // hull is the fourth hop again
+    CHECK(!w.commands.ssn_has_rider(90));
+    w.registry.get(rh)->ground_target = th;
+    w.registry.get(rh)->flags |= kEntityFlagDead; // Flags 2 excludes the rider
+    CHECK(!w.commands.ssn_has_rider(90));
 }
 
 static void test_player_group_loops_and_handle_aliases() {
@@ -934,8 +951,8 @@ static void test_player_group_loops_and_handle_aliases() {
     const EntityHandle red_ai = w.registry.spawn(0, seed);
     seed.net_id = 700; seed.flags = kEntityFlagPlayer;
     const EntityHandle pool_one = w.registry.spawn(1, seed);
-    seed.net_id = 701; seed.item_id = 0;
-    w.registry.spawn(0, seed); // no item definition, excluded
+    seed.net_id = 701;
+    w.registry.despawn(w.registry.spawn(0, seed)); // a destroyed slot inside the used count is skipped
     w.cached.local_player = first;
     const int custom = w.registry.intern_group("authored");
     w.registry.set_script_group_members(custom, {blue_ai, second, red_ai});
@@ -1423,6 +1440,79 @@ static void test_player_values_cache_at_bytecode_entry() {
     CHECK(w.script.vars.get_mission(8) == 0xFFFF);
 }
 
+// Every row of the named-value table is an lvalue, and a token the resolver
+// cannot bind is a logged compile diagnostic (the program still runs) whose
+// operand is the shared scratch sink (zeroed at each bytecode entry), never V0.
+// [orig: WacScript_ResolveParameter @0x4f2a92..0x4f2a9f / @0x4f2a5e /
+//  @0x4f2b7e / @0x4f2a62; Script_Compile @0x4f3ab2..0x4f3ae2;
+//  WacScript_CacheLocalPlayerState @0x4f57b5]
+static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
+    BehaviorWorld w;
+    w.kill_stats.bluekills_by_player = 2;
+    Program program = compile_source(
+        "set(ticks,5) set(v1,ticks)\n"
+        "set(humans,3) set(v2,humans)\n"
+        "set(bluekills,7) set(v3,bluekills)\n"
+        "inc(greenkills) set(v4,greenkills)\n"
+        "set(breathtime,4) set(v5,breathtime)\n"
+        "set(autogain,0) set(v6,autogain)\n"
+        "set(v7,breathtime) set(v8,autogain)\n"
+        "set(result,9)\n"
+        "set(night,1)\n", {});
+    CHECK(program.ok());
+    CHECK(program.diagnostics.empty());
+    WacVm vm; vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 5);
+    CHECK(vm.time() == 6); // the run counter advances from the written word
+    CHECK(w.script.vars.get_mission(2) == 3 && w.cached.humans == 3);
+    CHECK(w.script.vars.get_mission(3) == 7 && w.kill_stats.bluekills_by_player == 7);
+    CHECK(w.script.vars.get_mission(4) == 1 && w.kill_stats.greenkills_by_player == 1);
+    CHECK(w.script.vars.get_mission(5) == 4 && w.script.wac_values.breathtime == 4);
+    CHECK(w.script.vars.get_mission(6) == 0 && w.script.wac_values.autogain == 0);
+    CHECK(w.script.vars.get_mission(7) == 4 && w.script.vars.get_mission(8) == 0);
+    CHECK(w.script.vars.get_mission(0) == 0); // no named row aliases V0
+    BehaviorWorld seeds;
+    CHECK(seeds.script.wac_values.breathtime == 20 && seeds.script.wac_values.autogain == 1);
+
+    // Unresolvable lvalues and values: the diagnostic is the retail action
+    // signature (Script_SetCompileError's first-error buffer, which only the
+    // script debug overlay shows; the program compiles and runs), and
+    // neither V0 nor the guarded variable moves.
+    const char *sources[] = {
+        "set(5,1)\n", "set(nosuchname,1)\n", "set(\"v1\",1)\n",
+        "if [root] eq(1,2) then set(v9,1) endif\nset(root,1)\n",
+        "set(v1,nosuchname)\n", "if eq(nosuchname,1) then set(v9,1) endif\n",
+        "if SSNexists(1) then set(v1,notaname) endif\n"};
+    for (const char *source : sources) {
+        BehaviorWorld sink;
+        Program bad = compile_source(source, {});
+        CHECK(bad.ok());
+        CHECK(bad.diagnostics.size() == 1 && !bad.diagnostics[0].error);
+        WacVm bad_vm; bad_vm.load(bad); bad_vm.execute(sink);
+        CHECK(sink.script.vars.get_mission(0) == 0);
+        CHECK(sink.script.vars.get_mission(1) == 0);
+        CHECK(sink.script.vars.get_mission(9) == 0);
+    }
+    Program bad = compile_source("set(nosuchname,1)\n", {});
+    CHECK(bad.diagnostics.size() == 1 && bad.diagnostics[0].message == "  set (variable, value)");
+    bad = compile_source("if eq(nosuchname,1) then set(v9,1) endif\n", {});
+    CHECK(bad.diagnostics.size() == 1 && bad.diagnostics[0].message == "  eq (number, number)");
+
+    // The sink is one shared scratch word: a write reads back within the
+    // execution, and the next bytecode entry clears it.
+    Program scratch = compile_source(
+        "set(v1,nosuchname) set(nosuchname,6) set(v2,othername)\n", {});
+    CHECK(scratch.ok() && scratch.diagnostics.size() == 3);
+    BehaviorWorld shared;
+    WacVm scratch_vm; scratch_vm.load(scratch);
+    scratch_vm.execute(shared);
+    CHECK(shared.script.vars.get_mission(1) == 0 && shared.script.vars.get_mission(2) == 6);
+    shared.script.vars.set_mission(1, -1);
+    scratch_vm.execute(shared);
+    CHECK(shared.script.vars.get_mission(1) == 0 && shared.script.vars.get_mission(2) == 6);
+    CHECK(shared.script.vars.get_mission(0) == 0);
+}
+
 static void test_outcome_cache_changes_on_next_execution() {
     BehaviorWorld w;
     CompileEnv env;
@@ -1483,6 +1573,7 @@ static void test_bms_event_query_reads_active_during_delay() {
 int main() {
     test_player_values_cache_at_bytecode_entry();
     test_outcome_cache_changes_on_next_execution();
+    test_named_rows_are_lvalues_and_unresolved_arguments_sink();
     test_bms_event_query_reads_active_during_delay();
     test_distance_literals_and_lead_queries();
     test_script_ranges_drive_controller_and_perception();

@@ -167,9 +167,6 @@ struct CachedFrameState {
     Vec3 local_head;
     bool local_head_valid = false;
     int32_t local_health = 0;
-    int32_t near_type = 0;
-    int32_t near_dist = 0;
-    int32_t near_id = 0;
     // Active human player slot count — the WAC 'humans' builtin, rebuilt by the host
     // server tick just before the script pre-pass. Doubles in the original as the
     // empty-dedicated-server world-run gate (entities/WAC advance while humans > 0
@@ -216,6 +213,14 @@ struct WacNamedValues {
 	// Forced script detaches still apply. [orig: wac_var_seatbelt @0xC6EADC;
 	// WacScript_FreeAll @0x4F637B; Entity_ToggleVehicleMount @0x43698B]
 	int32_t seatbelt = 0;
+	// Two more rows of the named-value table @0x82EEF0 whose consumers are not
+	// yet ported: breathtime (read by HUD_DrawBreathBar @0x59d70f,
+	// Server_UpdateEntityIdleTimers @0x50d7e6, GameEvent_PlayerDeath @0x5172f6,
+	// the 0x0A player-state wire @0x4ff9db/@0x4301a1) and autogain (read by
+	// Environment_ApplyFogAndAmbient @0x57e514). Both seeded by
+	// WacScript_FreeAll [orig: @0x4f6381 = 20; @0x4f6371 = 1].
+	int32_t breathtime = 20;
+	int32_t autogain = 1;
     // location() reads this cached player-body result, not a named-table row.
     // [orig: dword_B763E8, org2 @0x4B634B; WacCmd_Location @0x4ED190]
     int32_t local_location = 0;

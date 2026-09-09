@@ -101,21 +101,37 @@ bool EntityCommands::ssn_critical(EntityTarget ssn) const {
     return health > 0 && health <= retail_signed_i16(entity->critical_hp);
 }
 
+// Retail's entity+0x28 (groundEntity) is ONE carrier link that covers
+// seated-in, emplacement-child-of and standing-on alike: both infantry movers
+// copy parentEntity (+0x16C) into it every tick while seated [orig:
+// Entity_UpdateInfantryPlayerBody @0x4B41A2..0x4B41B4; Entity_UpdateInfantryAI
+// @0x4B9960..0x4B9A11], an emplacement child carries its hull there [orig:
+// Entity_UpdateChildAttachment @0x4409A0], and the ground probe stores a
+// deck-stander's carrier [orig: @0x414370]. Our model splits those into
+// mount_target / emplacement_parent / ground_target, so every +0x28 hop
+// re-folds them in that order.
+static const Entity *carrier_of(const EntityRegistry &registry, const Entity &e) {
+    if (e.mounted && e.mount_target.valid())
+        return registry.get(e.mount_target);
+    if (e.emplacement_parent.valid())
+        return registry.get(e.emplacement_parent);
+    return registry.get(e.ground_target);
+}
+
 bool EntityCommands::ssn_has_rider(EntityTarget target_ssn) const {
-    // [orig: WacCmd_SsnRide @0x4F7000] Pool 0 only, at most three parent links.
+    // [orig: WacCmd_SsnRide @0x4F7000] Pool 0 only; a rider is any non-dead
+    // row whose +0x28 carrier chain reaches the target within three hops
+    // (@0x4f7067 / @0x4f707a / @0x4f7085; the Entity_IsOnTopOfChain @0x4f19a0
+    // shape). No health or item-definition predicate on the rider.
     const EntityHandle target = resolve_target(target_ssn);
     if (!world_.registry.get(target)) return false;
     bool found = false;
     world_.registry.for_each_in_pool(0, [&](const Entity &rider) {
         if (found || ((rider.flags | rider.engine_flags) & kEntityFlagDead) != 0) return;
-        const Entity *current = &rider;
-        for (int depth = 0; depth < 3; ++depth) {
-            const EntityHandle parent = current->mount_target.valid()
-                    ? current->mount_target : current->emplacement_parent;
-            if (!parent.valid()) return;
-            if (parent == target) { found = true; return; }
-            current = world_.registry.get(parent);
-            if (current == nullptr) return;
+        const Entity *hop = carrier_of(world_.registry, rider);
+        for (int depth = 0; depth < 3 && hop != nullptr; ++depth) {
+            if (hop->handle == target) { found = true; return; }
+            hop = carrier_of(world_.registry, *hop);
         }
     });
     return found;
@@ -763,27 +779,17 @@ bool EntityCommands::group_holding_group(int holder_group, int held_group) const
 bool EntityCommands::ssn_on_chain_of(EntityTarget ssn, EntityTarget target_ssn) const {
     // [orig: Entity_IsOnTopOfChain @0x4f19a0 — both resolved + ItemTypeIndex
     // gates; A's groundEntity(+0x28) chain, up to 3 hops, == B]
-    // Retail's +0x28 is ONE carrier link that covers standing-on, seated-in,
-    // and emplacement-child-of alike (a seated gunner's +0x28 is his seat
-    // entity, the seat's +0x28 its hull). Our model splits those into
-    // mount_target / emplacement_parent / ground_target, so the hop re-folds
-    // them — without the fold, "the player rides the Stryker" (the 05TRcoop
-    // convoy root trigger, Single/sub42 p1=10000) never evaluated true for a
-    // seated player and the chain stayed dead.
-    const auto carrier_of = [this](const Entity &e) -> const Entity * {
-        if (e.mounted && e.mount_target.valid())
-            return world_.registry.get(e.mount_target);
-        if (e.emplacement_parent.valid())
-            return world_.registry.get(e.emplacement_parent);
-        return world_.registry.get(e.ground_target);
-    };
+    // The +0x28 carrier fold is carrier_of above — without it, "the player
+    // rides the Stryker" (the 05TRcoop convoy root trigger, Single/sub42
+    // p1=10000) never evaluated true for a seated player and the chain stayed
+    // dead.
     const Entity *a = world_.registry.get(resolve_target(ssn));
     const Entity *b_probe = world_.registry.get(resolve_target(target_ssn));
     if (!a || !b_probe || a->item_id == 0 || b_probe->item_id == 0) return false;
-    const Entity *hop = carrier_of(*a);
+    const Entity *hop = carrier_of(world_.registry, *a);
     for (int i = 0; i < 3 && hop != nullptr; ++i) {
         if (hop == b_probe) return true;
-        hop = carrier_of(*hop);
+        hop = carrier_of(world_.registry, *hop);
     }
     return false;
 }

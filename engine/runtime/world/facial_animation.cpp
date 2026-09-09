@@ -1,5 +1,6 @@
 #include <runtime/world/facial_animation.h>
 
+#include <base/crt/crt_rng.h>
 #include <base/io/bam.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
@@ -57,13 +58,15 @@ int facial_expression_index(const std::string &name) {
 	return -1;
 }
 
-void step_facial_animation(FacialSlot &slot, bool dead, io::CrtRand &random,
-		uint32_t display_frame, uint32_t wall_time_ms) {
+void step_facial_animation(FacialSlot &slot, bool dead, uint32_t display_frame,
+		uint32_t wall_time_ms) {
 	// [orig: scar_decal_update @0x57FA50]
 	slot.blend += 0.125f;
 	if ((display_frame & 63u) == 0) {
-		slot.random_eyes.x = static_cast<float>((int32_t(random.next()) - 16384) * 0.000061035156);
-		slot.random_eyes.y = static_cast<float>((int32_t(random.next()) - 16384) * 0.000061035156);
+		// Render-family draw: the thread-local effects stream, not
+		// World::crt_rand (D-NET-115). [orig: rand @0x57FA69 / @0x57FA84]
+		slot.random_eyes.x = static_cast<float>((int32_t(crt::crt_rand15()) - 16384) * 0.000061035156);
+		slot.random_eyes.y = static_cast<float>((int32_t(crt::crt_rand15()) - 16384) * 0.000061035156);
 	}
 	if (slot.blend >= 1.0f) {
 		slot.current = slot.next;
@@ -212,7 +215,7 @@ void FacialSystem::tick(World &world) {
 		const Entity *entity = world.registry.get(slot.owner);
 		if (!entity || entity->registry_spawn_id != slot.spawn_id) continue;
 		step_facial_animation(slot, ((entity->flags | entity->engine_flags) & 2u) != 0,
-				world.crt_rand, display_frame_, now_ms);
+				display_frame_, now_ms);
 		// [orig: sub_57FFD0 @0x57FFD0, caller @0x4C2617]
 		position_of(world, *entity, slot.position);
 	}

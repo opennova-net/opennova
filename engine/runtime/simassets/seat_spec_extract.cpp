@@ -416,16 +416,8 @@ void refresh_item_seat_spec(world::World &world,
 			? spec->mount_config : 0;
 	p_entity.armory_points = spec->armory_points;
 	p_entity.primary_weapon = spec->primary_weapon;
-	// Seat specs are the def-derived trait channel: a spec that declares the
-	// EWeap primary weapon carries items.def's attrib-0x20 nature. A world
-	// running on installed specs without the item database (authored tool and
-	// test worlds) stamps the equivalent trait here so the witnessed def gate
-	// in resolve_mounted_ammo_slot [orig: @0x5460E0] holds uniformly; a real
-	// items.def sweep overwrites this with the authoritative row.
-	if (!p_entity.has_item_def && !spec->primary_weapon.empty()) {
-		p_entity.has_item_def = true;
-		p_entity.item_attrib |= world::kItemAttribEweap;
-	}
+	// The item-definition traits (has_item_def, item_attrib) come only from
+	// the items.def sweep; a seat spec never stands in for a definition row.
 	p_entity.seats = spec->seats;
 	for (size_t seat_index = 0; seat_index < p_entity.seats.size();
 			++seat_index) {
