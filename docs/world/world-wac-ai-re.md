@@ -8185,8 +8185,20 @@ quote @0x4f3338), looked up as a net id and stored in the SSN pool, with
 "Unknown SSN" as the first error when no entity carries it [orig:
 WacScript_ResolveParameter @0x4f2920 (the leg @0x4f2c94..0x4f2eed; the error
 @0x4f2edf)]; the port binds the pool entry at first execution and raises the
-same non-fatal diagnostic from the compile-time registry (the player alias
-10000 exempt). The replicated-row handler reports a dispatch gap
+same non-fatal diagnostic from the compile-time registry. The 10000 player
+alias that `EntityCommands::resolve_ssn` honours is a port seam resting on the
+dfx2med authoring convention, not a retail lookup: [orig: EntityPool_FindByNetId
+@0x4f0a20] keys on DcbId (entity+0x7C), which the JO player spawn leaves 0
+([orig: Entity_SpawnFromAnimSlotProperty @0x43c390] writes only
+ownerConnectionId +0x78 and the minimap NetId +0x15C). A quoted token outside a
+Text/Filename/TextToken slot is the NULL leg too: the tokenizer keeps the
+opening quote [orig: @0x4f3338] and only the type-17/18 copy consumes it
+[orig: @0x4f2ce9..0x4f2e1c], so the numeric test rejects it [orig: @0x4f2d01 ->
+@0x4f2a62]; an IfName token missing table 1 [orig: @0x4f29c2] falls through
+every leg to NULL and the command runs against event 0. The resolver's leg
+order is table 0 -> table 1 -> table 2 -> M#/V#/G# -> G_ (12) -> FX_ (22) ->
+FACE_ (21) -> SS_ (19) -> TT_ (20) -> ANIM_ (24) -> SSN_ (11) -> AMMO_ (23) ->
+the 17/18 copy -> numeric, and the port's try_resolve follows it. The replicated-row handler reports a dispatch gap
 (RuntimeGapKind::WacCommand) on both the host and the joiner, and the
 wac_dispatch_sweep ctest pins one dispatch per registry row. An unknown command is a
 non-fatal diagnostic on both sides; the port's HARD errors — an unresolved
