@@ -47,7 +47,7 @@ bool Simulation::request_local_player_scope_toggle() {
 	}
 	opennova::world::WeaponSlotState *active_slot = active_local_weapon_slot();
 	if (active_slot == nullptr) return false;
-	return opennova::world::local_player_scope_toggle(kernel_->local.weapon, kernel_->local.view, *active_slot);
+	return opennova::world::local_player_scope_toggle(kernel_->world, kernel_->local.weapon, kernel_->local.view, *active_slot);
 }
 
 bool Simulation::request_local_player_binoculars_toggle() {

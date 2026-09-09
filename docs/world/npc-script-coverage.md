@@ -1,0 +1,428 @@
+# NPC and mission scripting coverage inventory
+
+Routing snapshot: 2026-09-09. This records every declared WAC command, BMS trigger/action and brain-table row. An explicit branch can still contain approximations or depend on an unfinished consumer. It is not a parity or mission-playthrough verdict. The [completion record](npc-mission-completion.md) owns acceptance gates; [world-wac-ai-re.md section 33](world-wac-ai-re.md) records the current witnesses and tests.
+
+## WAC command registry
+
+165 registry entries; all 165 have explicit VM branches and none reach the unsupported-command diagnostic. Parameter types below are the declared contracts, not a claim that every asset resolver is complete.
+
+| Index | Command | Original | Parameters | Dispatch |
+| --- | --- | --- | --- | --- |
+| 0 | elapse | 0x4ECEF0 | Seconds | Explicit branch; verify consumer |
+| 1 | never | 0x4ED2E0 | none | Explicit branch; verify consumer |
+| 2 | previous | 0x4ECF90 | none | Explicit branch; verify consumer |
+| 3 | chain | 0x4ECF20 | Seconds | Explicit branch; verify consumer |
+| 4 | past | 0x4ED010 | Seconds | Explicit branch; verify consumer |
+| 5 | before | 0x4ED030 | Seconds | Explicit branch; verify consumer |
+| 6 | ontick | 0x4ECFF0 | Seconds | Explicit branch; verify consumer |
+| 7 | groupdead | 0x4ED1A0 | Number | Explicit branch; verify consumer |
+| 8 | groupalive | 0x4ED1C0 | Number | Explicit branch; verify consumer |
+| 9 | dooropen | 0x4F70A0 | Number | Explicit branch; verify consumer |
+| 10 | SSNcritical | 0x4F1BF0 | Ssn | Explicit branch; verify consumer |
+| 11 | SSNexists | 0x4F1A70 | Ssn | Explicit branch; verify consumer |
+| 12 | SSNdead | 0x4F1AC0 | Ssn | Explicit branch; verify consumer |
+| 13 | SSNalive | 0x4F1B20 | Ssn | Explicit branch; verify consumer |
+| 14 | SSNwounded | 0x4F1B80 | Ssn | Explicit branch; verify consumer |
+| 15 | SSNride | 0x4F7000 | Ssn | Explicit branch; verify consumer |
+| 16 | SSNonSSN | 0x4F19A0 | Ssn, Ssn | Explicit branch; verify consumer |
+| 17 | SSNnearSSN | 0x4F14C0 | Ssn, Ssn, Distance | Explicit branch; verify consumer |
+| 18 | SSNlosSSN | 0x4F15E0 | Ssn, Ssn, Distance | Explicit branch; verify consumer |
+| 19 | SSNseesSSN | 0x4F17C0 | Ssn, Ssn, Distance | Explicit branch; verify consumer |
+| 20 | SSNarea | 0x4F1020 | Ssn, Area | Explicit branch; verify consumer |
+| 21 | SSNarea3D | 0x4F0F60 | Ssn, Area | Explicit branch; verify consumer |
+| 22 | SSNloc | 0x4F0E90 | Ssn, Number | Explicit branch; verify consumer |
+| 23 | SSNLeadSSN2SSN | 0x4F12E0 | Ssn, Ssn, Ssn, Distance | Explicit branch; verify consumer |
+| 24 | reset | 0x4ED300 | IfName | Explicit branch; verify consumer |
+| 25 | Gkill | 0x4F1F40 | Group | Explicit branch; verify consumer |
+| 26 | Gremove | 0x4F1F80 | Group | Explicit branch; verify consumer |
+| 27 | Gsetaccuracy | 0x4F7BE0 | Number, Number, Number | Explicit branch; verify consumer |
+| 28 | GtoWP | 0x4ED3D0 | Number, WpList | Explicit branch; verify consumer |
+| 29 | kill | 0x4EDC90 | Number | Explicit branch; verify consumer |
+| 30 | remove | 0x4EDCA0 | Number | Explicit branch; verify consumer |
+| 31 | teleport | 0x4EE170 | Number, Target | Explicit branch; verify consumer |
+| 32 | GroupMin | 0x4F7C50 | Number, Distance | Explicit branch; verify consumer |
+| 33 | GroupMax | 0x4F7CA0 | Number, Distance | Explicit branch; verify consumer |
+| 34 | GroupAtt | 0x4F7CF0 | Number, Distance | Explicit branch; verify consumer |
+| 35 | GroupSpawn | 0x4F7AE0 | Number, Number | Explicit branch; verify consumer |
+| 36 | GroupHP | 0x4F7B30 | Number, Number | Explicit branch; verify consumer |
+| 37 | opendoors | 0x4F7D40 | Number | Explicit branch; verify consumer |
+| 38 | closedoors | 0x4F7DA0 | Number | Explicit branch; verify consumer |
+| 39 | text | 0x4EDB50 | Text | Explicit branch; verify consumer |
+| 40 | wave | 0x4ED610 | Filename | Explicit branch; verify consumer |
+| 41 | hideSSN | 0x4F7750 | Ssn | Explicit branch; verify consumer |
+| 42 | unhideSSN | 0x4F77B0 | Ssn | Explicit branch; verify consumer |
+| 43 | disableSSN | 0x4F7690 | Ssn | Explicit branch; verify consumer |
+| 44 | enableSSN | 0x4F76F0 | Ssn | Explicit branch; verify consumer |
+| 45 | holdSSN | 0x4F7810 | Ssn | Explicit branch; verify consumer |
+| 46 | unholdSSN | 0x4F7870 | Ssn | Explicit branch; verify consumer |
+| 47 | setaccuracy | 0x4F2070 | Ssn, Number, Number | Explicit branch; verify consumer |
+| 48 | SSNtoWP | 0x4F1CE0 | Ssn, WpList | Explicit branch; verify consumer |
+| 49 | killSSN | 0x4F1E40 | Ssn | Explicit branch; verify consumer |
+| 50 | removeSSN | 0x4F1EE0 | Ssn | Explicit branch; verify consumer |
+| 51 | teleSSN | 0x4F7E00 | Ssn, Target | Explicit branch; verify consumer |
+| 52 | SSNwave | 0x4F78D0 | Ssn, Filename, Distance | Explicit branch; verify consumer |
+| 53 | SSNradio | 0x4F79B0 | Ssn, Filename | Explicit branch; verify consumer |
+| 54 | SS2SSN | 0x4F1DD0 | SoundSet, Ssn | Verified binding, admission, positional playback and retry; device policy D-SND-8 |
+| 55 | SSNanim | 0x4F7630 | Ssn, Anim | Explicit branch; verify consumer |
+| 56 | SSNMin | 0x4F2010 | Ssn, Distance | Explicit branch; verify consumer |
+| 57 | SSNMax | 0x4F2210 | Ssn, Distance | Explicit branch; verify consumer |
+| 58 | SSNAtt | 0x4F2270 | Ssn, Distance | Explicit branch; verify consumer |
+| 59 | SSNSpawn | 0x4F7A80 | Ssn, Number | Explicit branch; verify consumer |
+| 60 | SSNHP | 0x4F2100 | Ssn, Number | Explicit branch; verify consumer |
+| 61 | SSNADDHP | 0x4F2170 | Ssn, Number | Explicit branch; verify consumer |
+| 62 | ssn2ssn | 0x4F7330 | Ssn, Ssn | Explicit branch; verify consumer |
+| 63 | ssnrelease | 0x4F7420 | Ssn | Explicit branch; verify consumer |
+| 64 | ssnface | 0x4F1C60 | Ssn, Face | Timed GRM expression; witnessed inactive JO texture sink, section 33.30 |
+| 65 | ssnturn | 0x4F72B0 | Ssn, Heading | explicit VM branch |
+| 66 | ssnguard | 0x4F71C0 | Ssn, Number | Explicit branch; verify consumer |
+| 67 | ssnname | 0x4F7230 | Ssn, TextToken | Explicit branch; verify consumer |
+| 68 | ssnpspd | 0x4F7570 | Ssn, Number | Explicit branch; verify consumer |
+| 69 | ssncspd | 0x4F74B0 | Ssn, Number | Explicit branch; verify consumer |
+| 70 | ssnuse | 0x4F70F0 | Ssn | Explicit branch; verify consumer |
+| 71 | set | 0x4ED520 | Variable, Value | Explicit branch; verify consumer |
+| 72 | add | 0x4ED530 | Variable, Value | Explicit branch; verify consumer |
+| 73 | sub | 0x4ED540 | Variable, Value | Explicit branch; verify consumer |
+| 74 | inc | 0x4ED550 | Variable | Explicit branch; verify consumer |
+| 75 | dec | 0x4ED560 | Variable | Explicit branch; verify consumer |
+| 76 | store | 0x4ED580 | Variable | Explicit branch; verify consumer |
+| 77 | load | 0x4ED570 | Value | Explicit branch; verify consumer |
+| 78 | TOD | 0x4EDC70 | Hour | Explicit branch; verify consumer |
+| 79 | targetfx | 0x4EE190 | Target | Typed particle consumer; native command/lifetime tests; D-PTL-24 tracks shared entity-slot integration |
+| 80 | ammo2tgt | 0x4F8100 | Ammo, Target | Explicit branch; projectile consumer verified |
+| 81 | fx2tgt | 0x4F7FD0 | Fx, Target | Typed particle consumer; native command/lifetime tests; D-PTL-24 tracks shared entity-slot integration |
+| 82 | ammoarea | 0x4EE240 | Ammo, Area | Explicit branch; projectile consumer verified |
+| 83 | sound2tgt | 0x4F7F60 | SoundSet, Target | Verified first target, return values and positional audio consumer; D-SND-8 |
+| 84 | flash | 0x4ED500 | none | Explicit branch; verify consumer |
+| 85 | farflash | 0x4ED510 | none | Explicit branch; verify consumer |
+| 86 | quake | 0x4ED4C0 | Number | Explicit branch; verify consumer |
+| 87 | win | 0x4ED4A0 | Team | Explicit branch; verify consumer |
+| 88 | lose | 0x4ED3F0 | Team | Explicit branch; verify consumer |
+| 89 | music | 0x4ED910 | Number | Witnessed closed-stream success; independent opener has no retail callers |
+| 90 | skyspeed | 0x4EDEB0 | Number | Explicit branch; verify consumer |
+| 91 | skyheight | 0x4EDEC0 | Number | Explicit branch; verify consumer |
+| 92 | fogtype | 0x4EDED0 | Number | Explicit branch; verify consumer |
+| 93 | fogdist | 0x4EE100 | Distance | Explicit branch; verify consumer |
+| 94 | movefog | 0x4EE0A0 | Distance, Seconds | Explicit branch; verify consumer |
+| 95 | rain | 0x4EDF60 | Number, Seconds | Explicit branch; verify consumer |
+| 96 | snow | 0x4EDFD0 | Number, Seconds | Explicit branch; verify consumer |
+| 97 | overcast | 0x4EE040 | Number, Seconds | Explicit branch; verify consumer |
+| 98 | Help | 0x4F6DE0 | none | Retail text/XML export and debug messages; section 33.29 |
+| 99 | text# | 0x4EDB70 | Text, Number | Explicit branch; verify consumer |
+| 100 | consol | 0x4EDBE0 | Text | Explicit branch; verify consumer |
+| 101 | consol# | 0x4EDC00 | Text, Number | Explicit branch; verify consumer |
+| 102 | sound | 0x4ED590 | SoundSet, Distance, Heading | Verified explicit distance/bearing and direct audio consumer; D-SND-8 |
+| 103 | forceanim | 0x4F2610 | Anim | Explicit branch; verify consumer |
+| 104 | tele | 0x4F22D0 | Ssn | explicit VM branch |
+| 105 | fall | 0x4ED4E0 | none | Explicit branch; verify consumer |
+| 106 | fov | 0x4EDEA0 | Number | Explicit branch; shared weather/camera consumer verified |
+| 107 | squadevent | 0x4ED070 | Number | Verified four-slot selection, named exports, TTL and retry; publisher has no retail callers |
+| 108 | random | 0x4ED280 | Number | Explicit branch; verify consumer |
+| 109 | outside | 0x4ED050 | none | Explicit branch; verify consumer |
+| 110 | location | 0x4ED190 | Number | Explicit branch; verify consumer |
+| 111 | area | 0x4ED0C0 | Area | Explicit branch; verify consumer |
+| 112 | area3D | 0x4ED120 | Area | Explicit branch; verify consumer |
+| 113 | waveready | 0x4ED380 | none | Explicit branch; verify consumer |
+| 114 | weaponfired | 0x4ED360 | Number | Explicit branch; verify consumer |
+| 115 | event | 0x4ED1E0 | Number | Reads the BMS active flag, including activation delay; verified |
+| 116 | meride | 0x4F1260 | Ssn | Explicit branch; verify consumer |
+| 117 | meattached | 0x4F10D0 | Ssn | Explicit branch; verify consumer |
+| 118 | medrive | 0x4F1150 | Ssn | Explicit branch; verify consumer |
+| 119 | meongun | 0x4F11E0 | Ssn | Explicit branch; verify consumer |
+| 120 | ammorain | 0x4EE1A0 | Ammo | Explicit branch; projectile consumer verified |
+| 121 | fxrain | 0x4EE3E0 | Fx | Typed particle consumer; native command/lifetime tests; D-PTL-24 tracks shared entity-slot integration |
+| 122 | lightning | 0x4EDE20 | Red, Green, Blue | Explicit branch; verify consumer |
+| 123 | face | 0x4ED5D0 | Face | Local timed GRM expression; section 33.30 |
+| 124 | anim | 0x4ED5B0 | Anim | Explicit branch; verify consumer |
+| 125 | sunfade | 0x4EDF10 | Number, Seconds | Explicit branch; verify consumer |
+| 126 | gain | 0x4EDD30 | Red, Green, Blue | Explicit branch; verify consumer |
+| 127 | squadclear | 0x4ED390 | none | Verified selected-row and named-export clearing; retains selected index |
+| 128 | blockfire | 0x4EE140 | Number, Number | Explicit branch; verify consumer |
+| 129 | colorfade | 0x4EDCB0 | Number | Explicit branch; verify consumer |
+| 130 | sun | 0x4EDCD0 | Red, Green, Blue | Explicit branch; verify consumer |
+| 131 | sky | 0x4EDD00 | Red, Green, Blue | Explicit branch; verify consumer |
+| 132 | ground | 0x4EDD60 | Red, Green, Blue | Explicit branch; verify consumer |
+| 133 | floor | 0x4EDDF0 | Red, Green, Blue | Explicit branch; verify consumer |
+| 134 | ceiling | 0x4EDDC0 | Red, Green, Blue | Explicit branch; verify consumer |
+| 135 | cloud | 0x4EDD90 | Red, Green, Blue | Explicit branch; verify consumer |
+| 136 | fogcolor | 0x4EDE40 | Red, Green, Blue | Explicit branch; verify consumer |
+| 137 | fog | 0x4EDE40 | Red, Green, Blue | Explicit branch; verify consumer |
+| 138 | skyfogcolor | 0x4EDE70 | Red, Green, Blue | Explicit branch; verify consumer |
+| 139 | skyfog | 0x4EDE70 | Red, Green, Blue | Explicit branch; verify consumer |
+| 140 | crash | 0x4EDE70 | Red, Green, Blue, Green | Explicit branch; verify consumer |
+| 141 | eq | 0x4ED220 | Number, Number | Explicit branch; verify consumer |
+| 142 | ne | 0x4ED230 | Number, Number | Explicit branch; verify consumer |
+| 143 | lt | 0x4ED240 | Number, Number | Explicit branch; verify consumer |
+| 144 | gt | 0x4ED250 | Number, Number | Explicit branch; verify consumer |
+| 145 | le | 0x4ED260 | Number, Number | Explicit branch; verify consumer |
+| 146 | ge | 0x4ED270 | Number, Number | Explicit branch; verify consumer |
+| 147 | true | 0x4ED200 | Number | Explicit branch; verify consumer |
+| 148 | false | 0x4ED210 | Number | Explicit branch; verify consumer |
+| 149 | onptick | 0x4F0E10 | Seconds | Explicit branch; verify consumer |
+| 150 | ptext | 0x4EDB50 | Text | Explicit branch; verify consumer |
+| 151 | pwave | 0x4ED610 | Filename | Explicit branch; verify consumer |
+| 152 | pconsol | 0x4EDBE0 | Text | Explicit branch; verify consumer |
+| 153 | pisgold | 0x4F0AF0 | none | Witnessed clear Gold flag; section 33.28 |
+| 154 | AddExp | 0x4F2690 | Ssn, Number | Match raw points and recursive sharing; section 33.28 |
+| 155 | IsPSPallteam | 0x4EE4B0 | Number | Explicit branch; verify consumer |
+| 156 | dropflare | 0x4F2710 | Ssn | Explicit branch; verify consumer |
+| 157 | ammo2ssn | 0x4F24E0 | Ammo, Ssn, Ssn | Alternating posed model userpoints; source-fire ownership and retry verified |
+| 158 | fx2ssn | 0x4F23A0 | Fx, Ssn | Typed particle consumer; native command/lifetime tests; D-PTL-24 tracks shared entity-slot integration |
+| 159 | piskills | 0x4F0B60 | Number | Registered player's signed enemy-kill counter; section 33.28 |
+| 160 | ppunt | 0x4F0DA0 | none | Connection description code 33; section 33.28 |
+| 161 | pkillpunt | 0x4F0D30 | none | Connection description code 49; section 33.28 |
+| 162 | pisvar | 0x4F0BD0 | Number | Player-slot byte bank; section 33.28 / D-WAC-2 |
+| 163 | psetvar | 0x4F0CB0 | Number | Player-slot byte bank; section 33.28 / D-WAC-2 |
+| 164 | pisteam | 0x4F0C50 | Team | Explicit branch; verify consumer |
+
+## BMS trigger and action schema
+
+Every named schema value is listed below. Explicit cases are counted against the evaluator/dispatcher, including cases whose side effects require more work. Unknown numeric values retain the existing default behavior. AI action subtypes enter the shared Entity_ApplyCommand dispatcher and need its field-level witness, not just this enum inventory.
+
+### TriggerMainType
+
+| Code | Name | Dispatch |
+| --- | --- | --- |
+| 1 | Group | Explicit case; verify consumer |
+| 2 | Single | Explicit case; verify consumer |
+| 3 | Event | Explicit case; verify consumer |
+| 4 | MissionVariable | Explicit case; verify consumer |
+| 5 | SecondTimeThrough | Explicit case; verify consumer |
+| 6 | Teammate | Explicit case; verify consumer |
+| 7 | Player | Explicit case; verify consumer |
+
+### GroupTriggerType
+
+| Code | Name | Dispatch |
+| --- | --- | --- |
+| 0 | Null | OPEN: no explicit case |
+| 1 | GroupSeesGroup | Explicit case; verify consumer |
+| 2 | GroupHasTargetedGroup | Explicit case; verify consumer |
+| 3 | GroupAtRedAlert | Explicit case; verify consumer |
+| 4 | GroupDestroyed | Explicit case; verify consumer |
+| 5 | GroupAlive | Explicit case; verify consumer |
+| 6 | GroupHasLostMoreUnits | Explicit case; verify consumer |
+| 7 | GroupAtWaypoint | Explicit case; verify consumer |
+| 9 | GroupIntact | Explicit case; verify consumer |
+| 10 | GroupIsWithinArea | Explicit case; verify consumer |
+| 11 | GroupHoldingGroup | Explicit case; verify consumer |
+| 12 | GroupHasMoreUnits | Explicit case; verify consumer |
+| 13 | GroupHasShotGroup | Explicit case; verify consumer |
+| 14 | GroupAtYellowAlert | Explicit case; verify consumer |
+| 15 | GroupHasTargetedSingle | Explicit case; verify consumer |
+| 16 | GroupSeesSingle | Explicit case; verify consumer |
+| 17 | GroupHasShotSingle | Explicit case; verify consumer |
+
+### SingleTriggerType
+
+| Code | Name | Dispatch |
+| --- | --- | --- |
+| 0 | Null | OPEN: no explicit case |
+| 1 | SingleSeesGroup | Explicit case; verify consumer |
+| 2 | SingleHasTargetedGroup | Explicit case; verify consumer |
+| 3 | SingleAtRedAlert | Explicit case; verify consumer |
+| 4 | SingleDestroyed | Explicit case; verify consumer |
+| 5 | SingleAlive | Explicit case; verify consumer |
+| 6 | SingleHasLostMoreUnits | Explicit case; verify consumer |
+| 7 | SingleAtWaypoint | Explicit case; verify consumer |
+| 9 | SingleIntact | Explicit case; verify consumer |
+| 10 | SingleIsWithinArea | Explicit case; verify consumer |
+| 11 | SingleHoldingGroup | Explicit case; verify consumer |
+| 12 | SingleHasMoreUnits | Explicit case; verify consumer |
+| 13 | SingleHasShotGroup | Explicit case; verify consumer |
+| 14 | SingleAtYellowAlert | Explicit case; verify consumer |
+| 15 | SingleHasTargetedSingle | Explicit case; verify consumer |
+| 16 | SingleSeesSingle | Explicit case; verify consumer |
+| 17 | SingleHasShotSingle | Explicit case; verify consumer |
+| 42 | SingleOnTopOf | Explicit case; verify consumer |
+| 43 | SingleFartherThan | Explicit case; verify consumer |
+| 44 | SingleHasNoLOS | Explicit case; verify consumer |
+| 45 | SingleDoesNotSeeOrFarther | Explicit case; verify consumer |
+
+### MissionVariableTriggerType
+
+| Code | Name | Dispatch |
+| --- | --- | --- |
+| 1 | MissionVariableIsEqual | Explicit case; verify consumer |
+| 2 | MissionVariableIsLessThan | Explicit case; verify consumer |
+| 3 | MissionVariableIsGreaterThan | Explicit case; verify consumer |
+| 4 | MissionVariableIsLessThanOrEqual | Explicit case; verify consumer |
+| 5 | MissionVariableIsGreaterThanOrEqual | Explicit case; verify consumer |
+
+### TeammateTriggerType
+
+| Code | Name | Dispatch |
+| --- | --- | --- |
+| 1 | TeammateIsEnabled | Explicit case; verify consumer |
+| 2 | TeammateMedicAssisting | Explicit case; verify consumer |
+| 3 | TeammateEvacuating | Explicit case; verify consumer |
+
+### PlayerTriggerType
+
+| Code | Name | Dispatch |
+| --- | --- | --- |
+| 18 | PlayerBerserk | OPEN: no explicit case |
+| 19 | PlayerFirstPerson | OPEN: no explicit case |
+| 20 | PlayerThirdPerson | OPEN: no explicit case |
+| 21 | PlayerCockpitView | OPEN: no explicit case |
+| 34 | PlayerDialogDone | OPEN: no explicit case |
+| 35 | PlayerDialogFinished | OPEN: no explicit case |
+| 36 | PlayerAwol | Explicit case; verify consumer |
+| 37 | PlayerSatchel | OPEN: no explicit case |
+| 38 | PlayerAttachedToSsn | Explicit case; verify consumer |
+| 39 | PlayerOnSsn | Explicit case; verify consumer |
+| 40 | PlayerDrivingSsn | Explicit case; verify consumer |
+| 41 | PlayerOnGun | Explicit case; verify consumer |
+
+### ActionType
+
+| Code | Name | Dispatch |
+| --- | --- | --- |
+| 0 | Null | Witnessed no-op |
+| 1 | RedirectGroupTo | Explicit case; verify consumer |
+| 2 | KillGroup | Explicit case; verify consumer |
+| 3 | ChangeGroupAI | Explicit case; verify consumer |
+| 4 | VaporizeGroup | Explicit case; verify consumer |
+| 5 | MisvarChange | Explicit case; verify consumer |
+| 6 | OutputText | Explicit case; verify consumer |
+| 7 | PlayWavList | Explicit case; verify consumer |
+| 8 | BlueWin | Explicit case; verify consumer |
+| 9 | RedWin | Explicit case; verify consumer |
+| 10 | GreenWin | Explicit case; verify consumer |
+| 11 | GroupVelocity | Explicit case; verify consumer |
+| 12 | AreaAiRed | Explicit case; verify consumer |
+| 13 | AreaAiBlue | Explicit case; verify consumer |
+| 14 | SubGoalWon | Explicit case; verify consumer |
+| 15 | SubGoalLost | Explicit case; verify consumer |
+| 16 | ChangeGTeamAction | Explicit case; verify consumer |
+| 17 | ChangeGroupAction | Explicit case; verify consumer |
+| 18 | GroupTeleportAction | Explicit case; verify consumer |
+| 19 | RedirectSingleTo | Explicit case; verify consumer |
+| 20 | KillSingle | Explicit case; verify consumer |
+| 21 | ChangeSingleAI | Explicit case; verify consumer |
+| 22 | VaporizeSingle | Explicit case; verify consumer |
+| 23 | SingleVelocity | Explicit case; verify consumer |
+| 24 | ChangeSteamAction | Explicit case; verify consumer |
+| 25 | SingleChangeGroup | Explicit case; verify consumer |
+| 26 | SingleTeleportAction | Explicit case; verify consumer |
+| 27 | ParticleEffectAction | Typed marker-name/position consumer; D-PTL-24 tracks shared entity-slot integration |
+| 30 | GroupOpenDoorAction | Explicit case; verify consumer |
+| 31 | GroupCloseDoorAction | Explicit case; verify consumer |
+| 32 | GroupResetHasVisited | Explicit case; verify consumer |
+| 33 | SingleResetHasVisited | Explicit case; verify consumer |
+| 34 | ResetEvent | Explicit case; verify consumer |
+| 35 | ShowWinSubgoal | Explicit case; verify consumer |
+| 36 | ShowLoseSubgoal | Explicit case; verify consumer |
+| 37 | AttachToEmplaced | Explicit case; verify consumer |
+| 38 | SetLightState | Explicit case; verify consumer |
+| 39 | Teammates | Eight-slot operation owner; world-wac-ai-re section 33.32 |
+| 40 | ShowWaypoints | Explicit case; verify consumer |
+| 41 | ExecuteWac | Witnessed no-op |
+| 42 | SsnTargetSsnPri | Explicit case; verify consumer |
+| 43 | SsnTargetSsnExc | Explicit case; verify consumer |
+| 44 | SsnTargetGroupPri | Explicit case; verify consumer |
+| 45 | SsnTargetGroupExc | Explicit case; verify consumer |
+| 46 | GroupTargetSsnPri | Explicit case; verify consumer |
+| 47 | GroupTargetSsnExc | Explicit case; verify consumer |
+| 48 | GroupTargetGroupPri | Explicit case; verify consumer |
+| 49 | GroupTargetGroupExc | Explicit case; verify consumer |
+
+### AIActionSubType
+
+| Code | Name | Dispatch |
+| --- | --- | --- |
+| 2 | GuardBit | Shared Entity_ApplyCommand; review field/consumer parity |
+| 5 | RedAlert | Shared Entity_ApplyCommand; review field/consumer parity |
+| 6 | GreenAlert | Shared Entity_ApplyCommand; review field/consumer parity |
+| 8 | Accuracy | Shared Entity_ApplyCommand; review field/consumer parity |
+| 15 | BlindBit | Shared Entity_ApplyCommand; review field/consumer parity |
+| 16 | BerserkBit | Shared Entity_ApplyCommand; review field/consumer parity |
+| 17 | ClimberBit | Shared Entity_ApplyCommand; review field/consumer parity |
+| 21 | CowardBit | Shared Entity_ApplyCommand; review field/consumer parity |
+| 22 | YellowAlert | Shared Entity_ApplyCommand; review field/consumer parity |
+| 26 | DriveSkill | Shared Entity_ApplyCommand; review field/consumer parity |
+| 27 | AimSkill | Shared Entity_ApplyCommand; review field/consumer parity |
+| 28 | AiSetState | Shared Entity_ApplyCommand; review field/consumer parity |
+| 29 | CombatSpeed | Shared Entity_ApplyCommand; review field/consumer parity |
+| 30 | PatrolSpeed | Shared Entity_ApplyCommand; review field/consumer parity |
+| 31 | FindAndUse | Shared Entity_ApplyCommand; review field/consumer parity |
+| 32 | AiUseWpz | Shared Entity_ApplyCommand; review field/consumer parity |
+| 33 | AiClearWpz | Shared Entity_ApplyCommand; review field/consumer parity |
+| 34 | PlayPartAnim | Shared Entity_ApplyCommand; review field/consumer parity |
+| 37 | HudItem | Shared Entity_ApplyCommand; review field/consumer parity |
+| 39 | TmateStatus | Shared Entity_ApplyCommand; review field/consumer parity |
+| 40 | AiNodePathBit | Shared Entity_ApplyCommand; review field/consumer parity |
+| 41 | AttackDistanceValue | Shared Entity_ApplyCommand; review field/consumer parity |
+| 42 | EngageDistanceMin | Shared Entity_ApplyCommand; review field/consumer parity |
+| 43 | IndestructableBit | Shared Entity_ApplyCommand; review field/consumer parity |
+| 44 | TargetSsn | Shared Entity_ApplyCommand; review field/consumer parity |
+| 45 | StartFiringBit | Shared Entity_ApplyCommand; review field/consumer parity |
+| 46 | FiringAngle | Shared Entity_ApplyCommand; review field/consumer parity |
+
+### MissionVariableActionSubType
+
+| Code | Name | Dispatch |
+| --- | --- | --- |
+| 0 | Null | OPEN: no explicit case |
+| 1 | Set | Explicit case; verify consumer |
+| 2 | Add | Explicit case; verify consumer |
+| 3 | Subtract | Explicit case; verify consumer |
+| 4 | Increment | Explicit case; verify consumer |
+| 5 | Decrement | Explicit case; verify consumer |
+
+### TeammateActionSubType
+
+| Code | Name | Dispatch |
+| --- | --- | --- |
+| 0 | Null | Witnessed no-op |
+| 1 | MedicAssist | Pickup operation; original missing-helicopter fault guarded |
+| 2 | EvacuateTt | Flyover operation and dynamic helicopter/medics; retail no-pilot outcome retained |
+| 3 | EvacuateAt | Witnessed no-op |
+
+## Brain handler table
+
+The 24 rows below are the actual enter/tick/exit/event bindings. The default handler is a no-op; a default row alone is not proof that retail performs no work. Remaining behavior and unmodeled fields stay in the owning RE record.
+
+| State | Enter | Tick | Exit | Event |
+| --- | --- | --- | --- | --- |
+| 0 | default | default | default | default |
+| 1 | default | default | default | default |
+| 2 | default | default | default | default |
+| 3 | default | default | default | default |
+| 4 | default | default | default | default |
+| 5 | default | default | default | default |
+| 6 | h_enter_aircraft_land | h_aircraft_land_tick | default | h_aircraft_event |
+| 7 | h_set_state_idle | h_aircraft_followwp_tick | default | h_aircraft_event |
+| 8 | h_enter_aircraft_combat | h_aircraft_combat_tick | h_clear_target_and_bone_flag | h_aircraft_event |
+| 9 | default | default | default | default |
+| 10 | h_enter_aircraft_evade | h_aircraft_evade_tick | h_clear_target_ref | h_aircraft_event |
+| 11 | h_reset_to_idle | h_aircraft_followwp_tick | default | h_aircraft_event |
+| 12 | default | default | default | default |
+| 13 | h_enter_aircraft_dying | h_aircraft_dying_tick | default | h_handle_alert_event |
+| 14 | h_reset_to_patrol | h_pretty_tick | default | h_pretty_event |
+| 15 | h_enter_aircraft_dead | h_vehicle_dead_tick | default | h_vehicle_dead_event |
+| 16 | h_set_state_idle | h_ground_followwp_tick | default | h_combat_event |
+| 17 | h_enter_ground_combat | h_ground_combat_tick | h_clear_bone_flag | h_combat_event |
+| 18 | h_enter_ground_evade | h_patrol_tick | default | h_combat_event |
+| 19 | h_full_reset_to_idle | h_ground_followwp_tick | default | h_combat_event |
+| 20 | default | default | default | default |
+| 21 | h_enter_vehicle_dying | h_vehicle_dying_tick | default | h_vehicle_dying_event |
+| 22 | h_full_reset_to_patrol | h_pretty_tick | default | h_pretty_event |
+| 23 | h_enter_vehicle_dead | h_vehicle_dead_tick | default | h_vehicle_dead_event |
+
+## Motor and presentation acceptance
+
+| Runtime family | Existing owner | Remaining acceptance |
+| --- | --- | --- |
+| Organic NPC | infantry.cpp and infantry_* helpers | Cover/path/retreat, idle/drag and remaining movement/weapon consumers; death/respawn fixtures are not a mission playthrough |
+| Local and remote player body | infantry.cpp, infantry_remote_anim.cpp, player_spawn.cpp | Normal failure/redeploy/retry; preserve the player lifecycle before the first remote uplink |
+| Wheeled/tracked ground vehicle | VehicleSystem and ground vehicle traits/motor | Shared brain inputs, remaining ground probes, spawn-marker and collision behavior |
+| Watercraft | VehicleSystem and watercraft motor | Mission routes and controller/seat transitions, including solo progression |
+| Helicopter and fixed-wing | Aircraft brain handlers and VehicleSystem | Route/engagement/death behavior and carrier spawn localization |
+| Emplacements and passengers | vehicle_attach, infantry_board and weapon-slot pump | Remaining seat-picker parity and scripted entry/exit consumers |
+| Attachments and suspended motors | infantry_board and motor_suspended | FIND_AND_USE/AINODEPATH behavior is covered by focused fixtures; normal mission choreography remains |
+| Corpses and wrecks | infantry_spawn and destruction lifecycle | Initial extended NPC spawn producer, remaining death/drag/force behavior and player-reset consolidation |
+| NPC sound and effects | SoundSlotEvent and destruction/fire output consumers | Script resource resolution, target/rain effect commands and normal presentation |
+| NPC body and held weapon | InfantryState channels and pose/presentation adapters | Held-weapon and remaining aim/fire/death appearance |
+| Mission outcome and retry | MissionKernel, Session and match/subgoal runtime | Normal spawn to success/failure, feedback, clean retry and next-mission transition |
+
+No normal SP mission playthrough is accepted by this routing inventory.

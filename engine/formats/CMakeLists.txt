@@ -43,6 +43,8 @@ add_library(opennova_formats STATIC
     # foliage — foliage defs + placement map
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/foliage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/runtime.cpp
+    # grm — facial texture mesh and gesture offsets
+    ${CMAKE_CURRENT_SOURCE_DIR}/grm/grm.cpp
     # lwf — sound profiles (+ the .wav payload decode the profiles reference)
     ${CMAKE_CURRENT_SOURCE_DIR}/lwf/lwf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lwf/wav_pcm.cpp
@@ -117,6 +119,7 @@ add_library(opennova_formats STATIC
     # (binds names/vars against the live world) and the VM are engine/runtime/wac.
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/command_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/command_table_data.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wac/help.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/lexer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/parser.cpp
 )

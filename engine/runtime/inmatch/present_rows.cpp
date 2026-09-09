@@ -37,6 +37,17 @@ inline constexpr double kFixed16 = 65536.0;
 inline constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
 inline constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
 
+inline void write_present_doors(float *row, const World &world, const Entity &entity) {
+    int32_t phases[DoorSystem::kMaxDoors] = {};
+    const int count = world.doors.write_phases(entity, phases, DoorSystem::kMaxDoors);
+    row[PF_DOOR_COUNT] = static_cast<float>(count);
+    for (int i = 0; i < count; ++i) {
+        const uint32_t phase = static_cast<uint32_t>(phases[i]);
+        row[PF_DOOR_PHASES + 2 * i] = static_cast<float>(phase & 0xFFFFu);
+        row[PF_DOOR_PHASES + 2 * i + 1] = static_cast<float>(phase >> 16);
+    }
+}
+
 inline void write_present_section_mask(float *row, uint32_t hidden_mask) {
 	row[PF_SECTION_MASK_VALID] = 1.0f;
 	row[PF_SECTION_MASK_LO] = static_cast<float>(hidden_mask & 0xFFFFu);
@@ -297,6 +308,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			// host/SP must prefer the source byte used by retail's gate.
 			r[PF_STANCE_BITS] = static_cast<float>(ent->net_stance_bits & 0x03u);
 			write_present_section_mask(r, ent->section_mask);
+            write_present_doors(r, kernel.world, *ent);
 			r[PF_RIGHT_HAND_COLLAPSED] =
 					simassets::mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
 			// The cveh render callback publishes directly from the live entity
@@ -560,6 +572,7 @@ void build_world_present_rows(const PresentRowsContext &context,
 		// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
 		r[PF_STANCE_BITS] = static_cast<float>(e.net_stance_bits & 0x03u);
 		write_present_section_mask(r, e.section_mask);
+        write_present_doors(r, w, e);
 		r[PF_RIGHT_HAND_COLLAPSED] =
 				simassets::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
 		// The cveh render callback publishes directly from the live entity

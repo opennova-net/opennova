@@ -151,7 +151,8 @@ void FirePresenter::present_slot_sounds(const std::vector<opennova::world::Sound
 		const Vector3 pos(static_cast<float>(ev.pos[0]) / 65536.0f,
 				static_cast<float>(ev.pos[2]) / 65536.0f,
 				static_cast<float>(-ev.pos[1]) / 65536.0f);
-		if (audio_node->slot_soundset(String(ev.set_name), pos, key)) {
+        const int source_id = sim() ? sim()->sound_source_bms_id(ev.source_handle) : 0;
+		if (audio_node->slot_soundset(String(ev.set_name), pos, key, source_id)) {
 			++stat_sounds_;
 		}
 	}

@@ -19,6 +19,8 @@ enum class TokKind {
     LParen,
     RParen,
     Comma,
+    LBracket,
+    RBracket,
     End,
 };
 

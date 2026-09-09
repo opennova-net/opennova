@@ -2694,8 +2694,8 @@ end
 	assert_eq(card.get_anim_key(), "anim_sit_13")
 
 	# The second rider found the controller claimed and took the first
-	# passenger row; sitex00d faces backward, so the seat's non-zero yaw
-	# offset must reach the mounted entity's authoritative yaw.
+	# passenger row; sitex00d faces backward, so the seat's yaw offset
+	# drives the carried BODY. The NPC's live gaze chases independently.
 	var rider_idx := -1
 	for ai_index in range(sim.get_entity_count()):
 		if ai_index == soldier_idx:
@@ -2713,8 +2713,17 @@ end
 	assert_eq(rider_card.get_mount_seat_source_name(), "sitex00d")
 	assert_eq(absi(rider_card.get_mount_seat_yaw_offset()), 180,
 			"the backward-facing passenger point extracts a half-turn offset")
-	assert_almost_eq(absf(wrapf(sim.get_entity_yaw_deg(rider_idx), -180.0, 180.0)),
-			180.0, 0.01, "non-gunner mounted seats carry their local yaw offset")
+	var mounted_rows := sim.get_present_snapshot()
+	var rider_body_yaw := NAN
+	for base in range(0, mounted_rows.size(), Simulation.PF_STRIDE):
+		if int(mounted_rows[base + Simulation.PF_WIRE_HANDLE]) == sim.get_entity_wire_handle(rider_idx):
+			rider_body_yaw = mounted_rows[base + Simulation.PF_AIM_BODY_YAW_DEG]
+			break
+	assert_false(is_nan(rider_body_yaw), "the passenger publishes its carried body frame")
+	assert_almost_eq(absf(wrapf(rider_body_yaw, -180.0, 180.0)),
+			180.0, 0.01, "the backward seat carries the body yaw offset")
+	assert_lte(absf(wrapf(sim.get_entity_yaw_deg(rider_idx) - rider_body_yaw, -180.0, 180.0)),
+			90.01, "independent passenger gaze stays within the mounted body arc")
 	var expected_rider := MissionObjectPlacer.entity_transform(
 			Vector3(10, 0, 0), Vector3.ZERO) * passenger_point
 	assert_lt(sim.get_entity_position(rider_idx).distance_to(expected_rider), 0.001)

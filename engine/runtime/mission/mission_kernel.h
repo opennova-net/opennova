@@ -37,6 +37,8 @@
 #include <runtime/simassets/sim_model_cache.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
+#include <runtime/particle/effect_scene.h>
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/local_player.h>
@@ -65,6 +67,9 @@ namespace opennova::mission {
 struct KernelBootOptions {
 	bool playable = true;   // spawn the authoritative side's own player after load
 	bool wac = true;        // game.wac / server.wac / <mission>.wac when present
+	// A world presenter prepares weather after boot, then runs execute_initial
+	// before the mission-start settle. Bare native boots execute it here.
+	bool defer_initial_wac = false;
 	// EVERY WAC diagnostic is fatal and fails the boot (the dedicated golden
 	// host's policy — running a partial script is a known wire-parity
 	// failure). false = the game's lenient policy: only a compile FAILURE
@@ -107,7 +112,7 @@ struct KernelBootOptions {
 	std::function<void()> bringup_net_session;
 };
 
-class MissionKernel : public world::IPoseProvider {
+class MissionKernel : public world::IPoseProvider, public world::ITeammateSpawner {
 public:
 	MissionKernel();
 	~MissionKernel() override;
@@ -298,6 +303,8 @@ public:
 	world::World world;
 	BmsEventSystem events;
 	wac::WacSystem wac;
+    audio::SoundSetIndex script_sound_catalog;
+    particle::EffectScene script_effect_catalog; // compile-time FX name/handle bindings
 	bool wac_loaded = false;
 	world::CollisionWorld collision;
 	world::OcclusionWorld occlusion;
@@ -374,6 +381,8 @@ public:
 	void sync_water_plane();
 	void wire_collision();
 
+	world::EntityHandle spawn_teammate(const world::TeammateSpawn &request) override;
+
 	// world::IPoseProvider: the seat leg is the kernel's own; the muzzle and
 	// userpoint legs ride collision_pose (the sim-clock skeleton / PANM pose).
 	bool resolve_mounted_pose(world::World &w, const world::Entity &carrier,
@@ -383,8 +392,12 @@ public:
 			int32_t model_id, const world::CollisionMatrix &entity_world,
 			const world::CollisionModel &model,
 			std::vector<world::CollisionMatrix> &out) override;
+	bool resolve_organic_attachment(world::World &, world::EntityHandle,
+			uint8_t userpoint, int32_t out[3]) override;
 	bool resolve_muzzle_pose(world::World &w, world::EntityHandle entity,
 			int32_t out[3]) override;
+	bool resolve_skeletal_anchor(world::World &, world::EntityHandle,
+			world::SkeletalAnchor, int32_t out[3]) override;
 	bool resolve_userpoint_transform(world::World &w, world::EntityHandle entity,
 			int userpoint_index, int32_t out[6]) override;
 	bool resolve_userpoint_rigid(world::World &w, world::EntityHandle entity,
@@ -393,7 +406,7 @@ public:
 private:
 	std::function<PromoteOptions::AiProfileDefaults(int32_t)> ai_profile_defaults_fn() const;
 	bool load_mission_into_world();
-	void finish_load();
+	void register_mission_systems();
 	// The live asset source: the embedder's installed index, else the kernel's
 	// own open() mount, else null (nothing to resolve against).
 	const ResourceIndex *asset_index() const {

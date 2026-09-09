@@ -51,6 +51,7 @@ public:
 		ADMISSION_ALWAYS = EffectScene::ADMISSION_ALWAYS,
 		ADMISSION_REPLACE_OWNED = EffectScene::ADMISSION_REPLACE_OWNED,
 		ADMISSION_SUPPRESS_WHILE_OWNED = EffectScene::ADMISSION_SUPPRESS_WHILE_OWNED,
+        ADMISSION_STORE_OWNED = EffectScene::ADMISSION_STORE_OWNED,
 		BINDING_WORLD = EffectScene::BINDING_WORLD,
 		BINDING_FOLLOW_OWNER = EffectScene::BINDING_FOLLOW_OWNER,
 		RENDER_DOMAIN_WORLD = EffectScene::RENDER_DOMAIN_WORLD,
@@ -112,6 +113,7 @@ public:
 	// the next Play reuses every load-time warm result.
 	void reset_runtime_state();
 	int64_t intern_effect(const String &p_name);
+    void spawn_script_effect(const opennova::world::ScriptEffectEvent &event, uint32_t age_ticks);
 	String effect_name_for_handle(int64_t p_handle) const;
 
 	// The effect pose for an authored forward vector: Z along the forward,

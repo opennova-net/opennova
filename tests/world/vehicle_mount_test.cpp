@@ -381,13 +381,19 @@ void test_live_pose_provider_and_static_fallback() {
         CHECK(w.vehicles.process_attach(occupant_h, vehicle_h, 7));
         check_pose(*w.registry.get(occupant_h), provider.pose);
 
+        // The carrier changes the BODY frame; idle LOOK remains independent.
+        body->heading = body->inf.aim_heading = 0;
+        body->pitch = body->inf.aim_pitch = 0;
         provider.pose = {{31.5f, 32.25f, 33.75f}, 44, 15, -19};
         TickContext ctx{};
         ctx.is_authority = true;
         ai.tick(w, ctx);
 
         const Entity *mounted = w.registry.get(occupant_h);
-        check_pose(*mounted, provider.pose);
+        MountedPose expected = provider.pose;
+        expected.yaw = 90; // BAM look 0, while the seated body faces yaw 44.
+        check_pose(*mounted, expected);
+        CHECK(body->heading == 0 && !body->inf.aim_valid);
         CHECK(body->pos[0] == to_fixed(31.5));
         CHECK(body->pos[1] == to_fixed(32.25));
         CHECK(body->pos[2] == to_fixed(33.75));
@@ -812,6 +818,54 @@ void test_restore_refreshes_completed_candidate_epoch() {
 
 // The deck path: standing ON the vehicle (ground_target) picks the BEST seat by weight —
 // ctrl/drvr (0x2000) beats sitex (0x200000). [orig: @0x4368cf -> @0x4351f0]
+
+void test_queued_player_mount_consumes_teleport_fallback_once() {
+    Rig r(30.0f);
+    r.sys.attach(r.player_h);
+    auto &body = *r.sys.for_handle(r.player_h);
+    body.inf.active = true;
+    body.inf.adm_id = 1;
+    body.inf.is_local_player = true;
+    CHECK(r.w.commands.teleport_local_to_ssn(r.veh_h));
+    r.player().ground_target = {}; // ground probe cleared the live reference
+    r.player().engine_flags |= 0x200u;
+    r.sys.tick_infantry(body, r.w, 1);
+    CHECK(r.player().mounted && r.player().mount_target == r.veh_h);
+    CHECK(r.player().mount_type == SeatType::Controller);
+    CHECK(((r.player().flags | r.player().engine_flags) & 0x200u) == 0);
+    r.sys.tick_infantry(body, r.w, 2);
+    CHECK(r.player().mounted); // no second USE/detach on the next tick
+
+    Rig failed(30.0f);
+    failed.sys.attach(failed.player_h);
+    auto &failed_body = *failed.sys.for_handle(failed.player_h);
+    failed_body.inf.active = true;
+    failed_body.inf.adm_id = 1;
+    failed_body.inf.is_local_player = true;
+    failed.player().engine_flags |= 0x200u;
+    failed.sys.tick_infantry(failed_body, failed.w, 1);
+    CHECK(!failed.player().mounted);
+    CHECK(((failed.player().flags | failed.player().engine_flags) & 0x200u) == 0);
+}
+
+void test_vehicle_respawn_clears_matching_teleport_ground_backup() {
+    Rig r;
+    CHECK(r.w.commands.teleport_local_to_ssn(r.veh_h));
+    Entity other;
+    other.item_id = 11;
+    other.mount_toggle_fallback = r.veh_h; // unmatched ground does not clear
+    const auto unmatched = r.w.registry.spawn(0, other);
+    other.item_id = 0;
+    other.ground_target = r.veh_h; // raw zero type index does not participate
+    const auto no_item = r.w.registry.spawn(0, other);
+    r.w.vehicles.respawn(r.veh());
+    CHECK(!r.player().ground_target.valid());
+    CHECK(!r.player().mount_toggle_fallback.valid());
+    CHECK(r.w.registry.get(unmatched)->mount_toggle_fallback == r.veh_h);
+    CHECK(r.w.registry.get(no_item)->ground_target == r.veh_h);
+    CHECK(r.w.registry.get(no_item)->mount_toggle_fallback == r.veh_h);
+}
+
 void test_toggle_deck_best_seat() {
     Rig r(30.0f); // out of scan range: only the deck path can mount
     r.player().ground_target = r.veh_h;
@@ -1193,7 +1247,10 @@ void test_bms_mount_predicates() {
 
     // A dead local player reads false on every sub [orig: the Flags & 2 gate].
     r.player().health = 0;
+    CHECK(cmds.local_player_attached_to_ssn(11)); // health alone is not the flag
+    r.player().flags |= kEntityFlagDead;
     CHECK(!cmds.local_player_attached_to_ssn(11));
+    r.player().flags &= ~kEntityFlagDead;
     r.player().health = 150;
 
     // The carrier chain: a gun CARRIED by SSN 11 counts for sub 38 against 11.
@@ -2569,7 +2626,61 @@ void test_seat_frame_matches_collision_frame() {
     CHECK(std::fabs(lat.z - veh.position.z) > 0.5);
 }
 
+static void test_script_remove_releases_carrier_and_occupant_ownership() {
+    {
+        Rig r;
+        r.veh().item_type = 1;
+        r.player().item_type = 3;
+        Entity passenger = r.player();
+        passenger.player_class = 0;
+        passenger.net_id = 42;
+        const EntityHandle passenger_h = r.w.registry.spawn(0, passenger);
+        CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+        CHECK(r.w.vehicles.process_attach(passenger_h, r.veh_h, 2));
+        r.sys.attach(r.veh_h);
+        r.sys.attach(r.player_h);
+        r.sys.attach(passenger_h);
+        AiEntity &observer = *r.sys.for_handle(passenger_h);
+        observer.inf.active = true;
+        observer.inf.combat_target = r.veh_h;
+        observer.slot.f[3] = r.veh_h.packed + 1;
+        r.w.registry.get(passenger_h)->ai_target = r.veh().net_id;
+        CollisionWorld collision;
+        r.w.collision = &collision;
+        const int model = collision.add_model(CollisionModel{});
+        collision.assign_entity(r.veh_h, model, r.veh().registry_spawn_id);
+        CHECK(collision.has_instance(r.veh_h));
+        CHECK(r.w.out.scars.ring_for(r.veh_h, r.veh().registry_spawn_id) != nullptr);
+        CHECK(r.w.out.scars.leased_count() == 1);
+        r.veh().death_effect_active[1] = 1;
+        CHECK(r.w.commands.remove_ssn(r.veh_h));
+        CHECK(r.w.registry.get(r.veh_h) == nullptr && r.sys.for_handle(r.veh_h) == nullptr);
+        CHECK(!r.player().mounted && !r.player().mount_target.valid());
+        CHECK(!r.w.registry.get(passenger_h)->mounted);
+        CHECK(!observer.inf.combat_target.valid() && observer.slot.f[3] == 0);
+        CHECK(r.w.registry.get(passenger_h)->ai_target == -1);
+        CHECK(!collision.has_instance(r.veh_h) && r.w.out.scars.leased_count() == 0);
+        CHECK(r.w.out.destruction.effects.size() == 4);
+        for (const auto &effect : r.w.out.destruction.effects)
+            CHECK(effect.release && effect.family == 2 && effect.attach_wire_handle == r.veh_h.packed);
+        CHECK(!r.w.commands.remove_ssn(r.veh_h));
+        r.w.collision = nullptr;
+    }
+    {
+        Rig r;
+        r.player().item_type = 3;
+        CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+        r.sys.attach(r.player_h);
+        CHECK(r.veh().primary_occupant == r.player_h);
+        CHECK(r.w.commands.remove_ssn(r.player_h));
+        CHECK(!r.veh().primary_occupant.valid());
+        CHECK(!r.veh().seats[0].occupant.valid());
+        CHECK(r.sys.for_handle(r.player_h) == nullptr);
+    }
+}
+
 int main() {
+    test_script_remove_releases_carrier_and_occupant_ownership();
 	test_vehicle_pending_death_survives_drive_tick();
 	test_seat_frame_matches_collision_frame();
 	test_usegun_attach_presnaps_local_look();
@@ -2582,6 +2693,8 @@ int main() {
     test_post_epoch_player_spawn_discovers_nearby_seat_immediately();
     test_restore_refreshes_completed_candidate_epoch();
     test_toggle_deck_best_seat();
+    test_queued_player_mount_consumes_teleport_fallback_once();
+    test_vehicle_respawn_clears_matching_teleport_ground_backup();
     test_toggle_dismount_and_swap();
 	test_scan_uses_live_eye_offset();
 	test_enemy_on_carried_gun_blocks_root_and_sibling();

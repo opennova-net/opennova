@@ -739,9 +739,12 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
         const CollisionSection &sec = model.sections[si];
         const CollisionMatrix &mat = target.matrices[si];
         if (sec.volume_count == 0 || mat.disabled()) continue;
-        // [orig: the building destroyed/animated bone-map skip @ 0x4ae30d — the
-        // itemDef+2192/2193 section map is not modeled yet (D-COL-2); sections
-        // always collide.]
+        // Opening/open building doors stop blocking NPCs immediately.
+        // Players continue to collide with the live animated section.
+        // [orig: Entity_ComputeBoneCollisionForce @0x4AE289..0x4AE335;
+        // building section skip @0x4AE30D]
+        if ((q.mask & 2u) == 0 && si < 64 &&
+                (target.door_passable_sections & (uint64_t{1} << si)) != 0) continue;
 
         CollisionMatrix inv;
         mat.invert_into(inv);
@@ -935,7 +938,8 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                         break;
                     case bvol_type::kDoorCD: // door touch [orig: @ 0x4aeb0f-0x4aeb22]
                         out.flags |= kTouchDoor;
-                        out.door_sections |= 1u << (si & 31);
+                        out.door_sections |= 1u << ((static_cast<uint32_t>(si) -
+                                static_cast<uint32_t>(target.door_first_bone)) & 31u);
                         break;
                     case bvol_type::kDamageHighDH: out.flags |= kTouchDamageHigh; break; // [orig: @ 0x4aeb39]
                     case bvol_type::kDamageMediumDM: out.flags |= kTouchDamageMedium; break; // [orig: @ 0x4aeb50]

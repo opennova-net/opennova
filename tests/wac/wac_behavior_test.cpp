@@ -5,8 +5,12 @@
 #include <string>
 
 #include <runtime/wac/compiler.h>
+#include <runtime/mission/event_runtime.h>
+#include <formats/wac/bytecode.h>
+#include <formats/wac/command.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/ai.h>
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::wac;
@@ -19,7 +23,7 @@ static int failures = 0;
     } while (0)
 
 struct BehaviorWorld final : World {
-    BehaviorWorld() { registry.configure_pool(0, 64); }
+    BehaviorWorld() { registry.configure_pool(0, 64); cached.humans = 1; }
 };
 
 // Run a program for `executions` VM executions. The VM self-gates to every 62nd
@@ -27,6 +31,7 @@ struct BehaviorWorld final : World {
 // units (past/elapse/Ticks) count executions, so the tests below keep reading in
 // "script steps".
 static void run(World &w, WacSystem &sys, int executions) {
+    w.cached.humans = 1; // this fixture models a human playing, including after restore
     const int ticks = executions * WacSystem::kTicksPerExecution;
     for (int i = 0; i < ticks; ++i) w.run_logic_tick(/*is_authority=*/true);
 }
@@ -99,10 +104,10 @@ static void test_var_math() {
 
     run(w, sys, 1);
     CHECK(w.script.vars.get_mission(1) == 5);
-    CHECK(w.script.vars.get_mission(2) == 1); // inc fires once on the rising edge
+    CHECK(w.script.vars.get_mission(2) == 1); // first true THEN evaluation
 
     run(w, sys, 5);
-    CHECK(w.script.vars.get_mission(2) == 1); // edge semantics: does not re-fire while eq stays true
+    CHECK(w.script.vars.get_mission(2) == 6); // THEN repeats while true
 }
 
 static void test_ssn_kill() {
@@ -138,6 +143,63 @@ static void test_temporal_past() {
     CHECK(w.script.vars.get_mission(5) == 1);
 }
 
+static void test_temporal_predecessors_and_intervals() {
+    BehaviorWorld w;
+    WacSystem sys;
+    sys.set_program(compile_source(
+        "if ontick(2) then if false(1) then inc(v9) endif endif\n"
+        "if previous then inc(v1) endif\n"
+        "if chain(2) then inc(v2) endif\n"
+        "if before(3) then inc(v3) endif\n"
+        "if elapse(3) then inc(v4) endif\n", {}));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 2); // ticks 0 and 1
+    CHECK(w.script.vars.get_mission(1) == 0);
+    CHECK(w.script.vars.get_mission(3) == 2);
+    CHECK(w.script.vars.get_mission(4) == 1); // first elapse fires immediately
+    run(w, sys, 1); // tick 2: skip the never-fired nested predecessor
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 0);
+    run(w, sys, 1); // tick 3
+    CHECK(w.script.vars.get_mission(4) == 2);
+    CHECK(w.script.vars.get_mission(3) == 3); // before is strict
+    run(w, sys, 1); // tick 4, two ticks after previous
+    CHECK(w.script.vars.get_mission(2) == 1);
+    run(w, sys, 4);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(4) == 3);
+}
+
+static void test_then_enter_leave_and_else() {
+    BehaviorWorld w;
+    WacSystem sys;
+    Program p = compile_source(
+        "if true(v0) then inc(v1) else inc(v2) endif\n"
+        "if true(v0) enter inc(v3) else inc(v4) endif\n"
+        "if true(v0) leave inc(v5) else inc(v6) endif\n", {});
+    CHECK(p.ok());
+    sys.set_program(std::move(p));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 2);
+    CHECK(w.script.vars.get_mission(2) == 2);
+    CHECK(w.script.vars.get_mission(5) == 0);
+    w.script.vars.set_mission(0, 1);
+    run(w, sys, 3);
+    CHECK(w.script.vars.get_mission(1) == 3);
+    CHECK(w.script.vars.get_mission(3) == 1);
+    CHECK(w.script.vars.get_mission(5) == 0);
+    w.script.vars.set_mission(0, 0);
+    run(w, sys, 2);
+    CHECK(w.script.vars.get_mission(5) == 1);
+    CHECK(w.script.vars.get_mission(4) == 6); // ELSE runs whenever ENTER does not
+    w.script.vars.set_mission(0, 1);
+    run(w, sys, 1);
+    CHECK(w.script.vars.get_mission(3) == 2);
+}
+
 static void test_else_branch() {
     BehaviorWorld w;
     WacSystem sys;
@@ -170,17 +232,18 @@ static void test_environment() {
     CHECK(w.env.generation >= 2);
 }
 
-static void test_paren_less_and_effects() {
+static void test_paren_less_music_success() {
     BehaviorWorld w;
     WacSystem sys;
     CompileEnv env;
-    // paren-less args + an unimplemented command recorded as an effect.
+    // Parenthesis-free calls preserve the dormant music stream's success result.
     sys.set_program(compile_source(
-        "if never then dropflare() endif\n", env));
+        "if never then music 1 store v1 endif\n", env));
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 1);
-    CHECK(w.out.effects.count("dropflare") == 1);
+    CHECK(w.out.effects.count("music") == 0);
+    CHECK(w.script.vars.get_mission(1) == 1 && w.diagnostics.empty());
 }
 
 // `flash` is a weather handler now: it arms the short lightning sequencer
@@ -204,6 +267,9 @@ static void test_flash_arms_the_weather_home() {
 // explicit handler they fall through to the default case as an unrouted "wave".
 static void test_wac_wave_emits_dialog_wav() {
     BehaviorWorld w;
+    Entity player;
+    player.alive = true;
+    w.cached.local_player = w.registry.spawn(0, player);
     WacSystem sys;
     CompileEnv env;
     sys.set_program(compile_source("if never then wave(brief1) endif\n", env));
@@ -351,7 +417,7 @@ static void test_win_and_outcome_builtins() {
     CHECK(w.script.vars.get_mission(1) == 0); // GameOver stays 0 pre-round-end
     CHECK(w.script.vars.get_mission(4) == 1); // humans visible from the first execution
 
-    run(w, sys, 3); // past(2) fires -> win(1); the builtins read it the same pass
+    run(w, sys, 3); // past(2) fires -> win(1); the next execution refreshes the cache
     CHECK(w.match.outcome().ended);
     CHECK(w.match.outcome().winner_team == 1);
     CHECK(w.script.vars.get_mission(1) == 1); // GameOver
@@ -491,7 +557,8 @@ static void test_wac_accuracy_guard_speed_and_group_remove() {
     Entity removable = single;
     removable.net_id = 44;
     removable.group_id = 9;
-    w.registry.spawn(0, removable);
+    const EntityHandle remove_h = w.registry.spawn(0, removable);
+    w.registry.set_script_group_members(w.registry.intern_group("remove_me"), {remove_h});
 
     ai.attach(single_h);
     ai.attach(group_h);
@@ -504,6 +571,7 @@ static void test_wac_accuracy_guard_speed_and_group_remove() {
 
     WacSystem sys;
     CompileEnv env;
+    env.registry = &w.registry;
     Program program = compile_source(
             "if never() then "
             "setaccuracy(42,70,80) "
@@ -511,7 +579,7 @@ static void test_wac_accuracy_guard_speed_and_group_remove() {
             "ssnguard(42,1) "
             "ssncspd(42,36) "
             "ssnpspd(42,18) "
-            "Gremove(9) "
+            "Gremove(G_remove_me) "
             "endif\n",
             env);
     CHECK(program.ok());
@@ -536,15 +604,914 @@ static void test_wac_accuracy_guard_speed_and_group_remove() {
     CHECK(single_ai.brain.f[AiBrain::kSpeedB] == 5242);
 }
 
+static void test_runtime_gaps_retain_source_and_restore_boot_evidence() {
+    BehaviorWorld w;
+    WacSystem sys;
+    CompileEnv env;
+    env.source_names = {"game.wac", "mission.wac"};
+    Program program = compile_program({
+        "if never then inc(v1) endif\n",
+        "\nif never then inc(v2) endif\n"}, env);
+    CHECK(program.ok());
+    // Corrupt the two zero-argument condition calls after compilation. This
+    // exercises missing dispatch without depending on an unfinished feature.
+    for (const auto &site : program.instruction_sources) {
+        if (instr_command_index(program.code[site.word]) == wac_command_index("never"))
+            program.code[site.word] = encode_call(0xFFFF);
+    }
+    sys.set_program(std::move(program));
+    w.add_system(&sys);
+    w.load_systems();
+    sys.execute_initial(w);
+    CHECK(w.diagnostics.gaps().size() == 2);
+    CHECK(w.diagnostics.total_calls() == 2);
+    const auto baseline = w.snapshot();
+    const auto vm_baseline = sys.capture_runtime_state();
+    run(w, sys, 3);
+    w.out.effects.clear();
+    CHECK(w.diagnostics.total_calls() == 8);
+    if (w.diagnostics.gaps().size() == 2) {
+        const auto &first = w.diagnostics.gaps()[0];
+        const auto &second = w.diagnostics.gaps()[1];
+        CHECK(first.origin.source == "game.wac");
+        CHECK(second.origin.source == "mission.wac");
+        CHECK(second.origin.line == 2);
+        CHECK(first.count == 4 && second.count == 4);
+        CHECK(first.first_tick == 0);
+        CHECK(first.last_tick > first.first_tick);
+    }
+    w.restore(baseline);
+    sys.restore_runtime_state(vm_baseline);
+    CHECK(w.diagnostics.total_calls() == 2);
+    run(w, sys, 1);
+    CHECK(w.diagnostics.total_calls() == 4);
+    w.load_systems();
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_nested_conditions_and_accumulator_lifetime() {
+    BehaviorWorld w;
+    WacSystem sys;
+    Program program = compile_source(
+        "load(7) store(v1)\n"
+        "if eq(result,7) then set(v2,1) endif\n"
+        "if true(0) and (true(1) or true(1)) then inc(v3) endif\n"
+        "if true(1) or (true(0) and true(0)) then inc(v4) endif\n"
+        "if true(1) and not (true(0) or true(0)) then inc(v5) endif\n"
+        "if true(0) or (true(1) and (true(0) or true(1))) then inc(v6) endif\n"
+        "if true(1) then if true(1) then load(9) endif store(v7) endif\n"
+        "set(v8,0) sub(v8,2) dec(v8) store(v9)\n"
+        "set(v10,2147483647) inc(v10) store(v11)\n", {});
+    CHECK(program.ok());
+    CHECK(program.event_count == 7); // bare actions do not invent events
+    sys.set_program(std::move(program));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 1);
+    CHECK(w.script.vars.get_mission(1) == 7);
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(3) == 0);
+    CHECK(w.script.vars.get_mission(4) == 1);
+    CHECK(w.script.vars.get_mission(5) == 0); // grouped NOT negates the saved byte
+    CHECK(w.script.vars.get_mission(6) == 1);
+    CHECK(w.script.vars.get_mission(7) == 9);
+    CHECK(w.script.vars.get_mission(8) == -3);
+    CHECK(w.script.vars.get_mission(9) == -3);
+    CHECK(w.script.vars.get_mission(10) == INT32_MIN);
+    CHECK(w.script.vars.get_mission(11) == INT32_MIN);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_do_sections_cycle_and_restore_independently() {
+    BehaviorWorld w;
+    WacSystem sys;
+    Program program = compile_source(
+        "doseq\n"
+        " inc(v1)\n"
+        "next\n"
+        " doseq inc(v2) next inc(v3) enddo\n"
+        "next\n"
+        " inc(v4)\n"
+        "enddo\n"
+        "dornd inc(v5) next inc(v6) enddo\n", {});
+    CHECK(program.ok());
+    CHECK(program.event_count == 0);
+    CHECK(program.loop_count == 3);
+    sys.set_program(std::move(program));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 2);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(3) == 0);
+    CHECK(w.script.vars.get_mission(4) == 0);
+    // DORND intentionally cycles too: the retail compiler emits opcode 4.
+    CHECK(w.script.vars.get_mission(5) == 1);
+    CHECK(w.script.vars.get_mission(6) == 1);
+    const auto baseline = w.snapshot();
+    const auto vm_baseline = sys.capture_runtime_state();
+    run(w, sys, 4);
+    CHECK(w.script.vars.get_mission(1) == 2);
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(3) == 1);
+    CHECK(w.script.vars.get_mission(4) == 2);
+    CHECK(w.script.vars.get_mission(5) == 3);
+    CHECK(w.script.vars.get_mission(6) == 3);
+    w.restore(baseline);
+    sys.restore_runtime_state(vm_baseline);
+    run(w, sys, 3);
+    CHECK(w.script.vars.get_mission(1) == 2);
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(3) == 1);
+    CHECK(w.script.vars.get_mission(4) == 1);
+    CHECK(w.script.vars.get_mission(5) == 3);
+    CHECK(w.script.vars.get_mission(6) == 2);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_named_event_reset_and_declared_variables() {
+    BehaviorWorld w;
+    WacSystem sys;
+    Program p = compile_source(
+        "var counter\narray spare\n"
+        "if [root] never then inc(counter)\n"
+        " if never [child] then inc(spare) endif\n"
+        "endif\n"
+        "if [adjacent] never then inc(v3) endif\n"
+        "if ontick(1) then reset(root) endif\n"
+        "set(v1,counter) set(v2,spare)\n"
+        "if true(root) then inc(v4) endif\n", {});
+    CHECK(p.ok());
+    CHECK(p.diagnostics.empty());
+    sys.set_program(std::move(p));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 2);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(3) == 1);
+    CHECK(w.script.vars.get_mission(4) == 1);
+    run(w, sys, 1);
+    CHECK(w.script.vars.get_mission(1) == 2);
+    CHECK(w.script.vars.get_mission(2) == 2);
+    CHECK(w.script.vars.get_mission(3) == 1); // reset stops at a sibling
+    CHECK(w.script.vars.get_mission(4) == 2);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_empty_server_holds_script_divider_after_boot() {
+    BehaviorWorld w;
+    WacSystem sys;
+    sys.set_program(compile_source("inc(v1)\n", {}));
+    w.add_system(&sys);
+    w.load_systems();
+    w.cached.humans = 0;
+    for (int i = 0; i < WacSystem::kTicksPerExecution * 3; ++i) w.run_logic_tick();
+    CHECK(sys.runs() == 1); // the first execution is admitted without humans
+    CHECK(w.script.vars.get_mission(1) == 1);
+    w.cached.humans = 1;
+    for (int i = 0; i < 31; ++i) w.run_logic_tick();
+    w.cached.humans = 0;
+    for (int i = 0; i < 124; ++i) w.run_logic_tick();
+    CHECK(sys.runs() == 1);
+    w.cached.humans = 1;
+    for (int i = 0; i < 31; ++i) w.run_logic_tick();
+    CHECK(sys.runs() == 2); // the held divider resumes where it stopped
+    CHECK(w.script.vars.get_mission(1) == 2);
+}
+
+static void test_arithmetic_assignment_and_retail_expression_order() {
+    BehaviorWorld w;
+    WacSystem sys;
+    Program p = compile_source(
+        "var count\ncount = 2 + 3 * 4\n"
+        "v1 = count\n"
+        "v2 = 20 - 2 * 3\n"
+        "v3 = (20 - 2) * 3\n"
+        "v4 = 300 + (2 * 3)\n"
+        "v5 = 2 ^ 3 ^ 2\n"
+        "v6 = -9 / 2\n"
+        "v7 = 9 % 4\n"
+        "if 1 or 0 and 0 then inc(v8) endif\n"
+        "if 5 < 2 + 7 then inc(v9) endif\n"
+        "if not (0 or 0) then inc(v10) endif\n"
+        "if 1 and not (0 or 0) then inc(v11) endif\n"
+        "v12 = (1 + (not (0 or 0)))\n"
+        "v14 = 300 + (2)\n"
+        "v15 = 2 ^ (3 ^ 2)\n", {});
+    CHECK(p.ok());
+    CHECK(p.diagnostics.empty());
+    sys.set_program(std::move(p));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 1);
+    CHECK(w.script.vars.get_mission(1) == 14);
+    CHECK(w.script.vars.get_mission(2) == -14); // new result 6 minus saved byte 20
+    CHECK(w.script.vars.get_mission(3) == 54);
+    CHECK(w.script.vars.get_mission(4) == 50); // saved 300 narrows to 44
+    CHECK(w.script.vars.get_mission(5) == 64); // equal precedence folds left to right
+    CHECK(w.script.vars.get_mission(6) == -4);
+    CHECK(w.script.vars.get_mission(7) == 1);
+    CHECK(w.script.vars.get_mission(8) == 0); // AND and OR have equal precedence
+    CHECK(w.script.vars.get_mission(9) == 0); // grouped compare tests 9 < 5
+    CHECK(w.script.vars.get_mission(10) == 1);
+    CHECK(w.script.vars.get_mission(11) == 0); // NOT negates the saved 1
+    CHECK(w.script.vars.get_mission(12) == 2); // parentheses separate NOT from ADD's pop
+    CHECK(w.script.vars.get_mission(14) == 46); // parentheses around one value still push
+    CHECK(w.script.vars.get_mission(15) == 81); // power also folds the grouped result first
+    CHECK(w.diagnostics.empty());
+
+    sys.set_program(compile_source("v1 = 5 / 0\ninc(v13)\n", {}));
+    run(w, sys, 1);
+    CHECK(!w.diagnostics.empty());
+    CHECK(w.script.vars.get_mission(13) == 0); // malformed arithmetic stops this pass
+}
+
+static void test_npc_wac_health_names_and_boarding_consumer() {
+    BehaviorWorld w;
+    w.registry.configure_pool(1, 8);
+    Entity soldier;
+    soldier.net_id = 42;
+    soldier.item_id = 1001;
+    soldier.item_type = 3;
+    soldier.has_item_def = true;
+    soldier.health = 20;
+    soldier.health_max = 100;
+    soldier.critical_hp = 25;
+    const EntityHandle sh = w.registry.spawn(0, soldier);
+    Entity carrier;
+    carrier.net_id = 77;
+    carrier.item_id = 1002;
+    carrier.item_type = 1;
+    carrier.has_item_def = true;
+    carrier.item_attrib = kItemAttribPlayerControl;
+    Seat seat;
+    seat.type = SeatType::Passenger;
+    seat.retail_slot = 0;
+    seat.bone_index = 1;
+    carrier.seats.push_back(seat);
+    const EntityHandle ch = w.registry.spawn(1, carrier);
+    w.ai.attach(sh);
+    AiEntity &brain = *w.ai.for_handle(sh);
+    brain.inf.active = true;
+    brain.inf.wait_cooldown = 99;
+
+    WacSystem sys;
+    sys.set_program(compile_source(
+        "if never then ssnname(42,\"abcdefghijklmnopqrstuvwxyz0123456789\") "
+        "ssn2ssn(42,77) endif\n"
+        "if SSNcritical(42) then inc(v1) endif\n"
+        "if SSNride(77) then inc(v2) endif\n", {}));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 1);
+    CHECK(w.registry.get(sh)->display_name == "abcdefghijklmnopqrstuvwxyz01234");
+    CHECK(brain.slot.f[37] == 125);
+    CHECK(brain.slot.f[38] == 77);
+    CHECK(brain.slot.f[36] == int32_t(ch.packed) + 1);
+    CHECK(brain.inf.wait_cooldown == 0);
+    CHECK(!w.registry.get(sh)->mounted); // command first, entry walk second
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 0);
+
+    w.ai.infantry_board_think(brain, w, brain.slot.f[37]);
+    CHECK(w.registry.get(sh)->mounted);
+    CHECK(w.registry.get(sh)->mount_target == ch);
+    run(w, sys, 1);
+    CHECK(w.script.vars.get_mission(2) == 1);
+    w.registry.get(sh)->health = 0;
+    w.registry.get(sh)->flags |= kEntityFlagDead;
+    run(w, sys, 1);
+    CHECK(w.script.vars.get_mission(1) == 2); // dead is not critical
+    CHECK(w.script.vars.get_mission(2) == 1); // dead occupants do not count
+    CHECK(!w.commands.set_ssn_name(42, ""));
+    CHECK(w.registry.get(sh)->display_name.size() == 31);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_ssn_rider_query_bounds_parent_depth_and_pool() {
+    BehaviorWorld w;
+    w.registry.configure_pool(1, 8);
+    Entity target;
+    target.net_id = 90;
+    const EntityHandle th = w.registry.spawn(1, target);
+    Entity parent;
+    parent.net_id = 91;
+    parent.emplacement_parent = th;
+    const EntityHandle p1 = w.registry.spawn(1, parent);
+    parent.net_id = 92;
+    parent.emplacement_parent = p1;
+    const EntityHandle p2 = w.registry.spawn(1, parent);
+    Entity rider;
+    rider.net_id = 93;
+    rider.mount_target = p2;
+    const EntityHandle rh = w.registry.spawn(0, rider);
+    CHECK(w.commands.ssn_has_rider(90)); // three links, even without an item id
+    parent.net_id = 94;
+    parent.emplacement_parent = p2;
+    const EntityHandle p3 = w.registry.spawn(1, parent);
+    w.registry.get(rh)->mount_target = p3;
+    CHECK(!w.commands.ssn_has_rider(90)); // fourth link is outside the query
+    w.registry.get(rh)->mount_target = {};
+    CHECK(!w.commands.ssn_has_rider(90)); // pool-1 riders are never scanned
+}
+
+static void test_player_group_loops_and_handle_aliases() {
+    BehaviorWorld w;
+    w.registry.configure_pool(1, 4);
+    Entity seed; seed.item_id = 1001; seed.health = seed.health_max = 100;
+    seed.flags = kEntityFlagPlayer; seed.team = 1; seed.net_id = 100;
+    const EntityHandle first = w.registry.spawn(0, seed);
+    seed.net_id = 500; seed.team = 2; seed.flags |= kEntityFlagDead;
+    const EntityHandle second = w.registry.spawn(0, seed); // dead humans stay in lists
+    seed.net_id = 1; seed.flags |= 1u;
+    const EntityHandle excluded = w.registry.spawn(0, seed); // net ID collides with second's handle
+    seed.net_id = 600; seed.flags = 1; seed.team = 1;
+    w.registry.spawn(0, seed); // enters all AI, not blue AI
+    seed.net_id = 601; seed.flags = 0;
+    const EntityHandle blue_ai = w.registry.spawn(0, seed);
+    seed.net_id = 602; seed.team = 2;
+    const EntityHandle red_ai = w.registry.spawn(0, seed);
+    seed.net_id = 700; seed.flags = kEntityFlagPlayer;
+    const EntityHandle pool_one = w.registry.spawn(1, seed);
+    seed.net_id = 701; seed.item_id = 0;
+    w.registry.spawn(0, seed); // no item definition, excluded
+    w.cached.local_player = first;
+    const int custom = w.registry.intern_group("authored");
+    w.registry.set_script_group_members(custom, {blue_ai, second, red_ai});
+    CompileEnv env; env.registry = &w.registry;
+    Program program = compile_source(
+        "ploop\n"
+        " v0 = auto\n"
+        " v1 = v1*10+v0\n"
+        " if pisteam(1) then inc(v2) endif\n"
+        " ssnname(v0, \"visited\")\n"
+        "end\n"
+        "v3 = Player\n"
+        "gloop G_ai inc(v4) end\n"
+        "gloop(G_blueai) inc(v5) end\n"
+        "gloop G_redai inc(v6) end\n"
+        "gloop G_emptygroup inc(v7) end\n"
+        "gloop G_authored v8 = v8*10+Item end\n"
+        "v9 = auto\n"
+        "v10 = SSN_500\n"
+        "ssnname(v10, \"aliased\")\n",
+        env);
+    CHECK(program.ok() && program.diagnostics.empty());
+    WacVm vm; vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 10); // reverse pool order: handles 1,0
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(3) == first.packed);
+    CHECK(w.script.vars.get_mission(4) == 3);
+    CHECK(w.script.vars.get_mission(5) == 1 && w.script.vars.get_mission(6) == 1);
+    CHECK(w.script.vars.get_mission(7) == 0);
+    CHECK(w.script.vars.get_mission(8) == 514); // authored order reversed: 5,1,4
+    CHECK(w.script.vars.get_mission(9) == first.packed);
+    CHECK(w.script.vars.get_mission(10) == second.packed);
+    CHECK(w.registry.get(first)->display_name == "visited");
+    CHECK(w.registry.get(second)->display_name == "aliased");
+    CHECK(w.registry.get(excluded)->display_name.empty());
+    CHECK(w.registry.get(pool_one)->display_name.empty());
+    CHECK(w.diagnostics.empty());
+    CHECK(!compile_source("ploop gloop G_ai inc(v1) end end", env).ok());
+
+    // Both rows now share an SSN; a bound variable must still name second.
+    w.registry.get(first)->net_id = 800;
+    w.registry.get(second)->net_id = 800;
+    w.registry.get(second)->display_name.clear();
+    vm.execute(w);
+    CHECK(w.registry.get(first)->display_name == "visited");
+    CHECK(w.registry.get(second)->display_name == "aliased");
+
+    // The compiled reference survives raw SSN changes and runtime restore.
+    const auto baseline = vm.capture_runtime_state();
+    w.registry.get(second)->net_id = 800;
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(10) == second.packed);
+    vm.restore_runtime_state(program, baseline);
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(10) == second.packed);
+}
+
+static void test_named_group_actions_use_member_handles() {
+    BehaviorWorld w;
+    Entity e; e.item_id = 1001; e.health = 100; e.net_id = 10; e.group_id = 7;
+    const EntityHandle first = w.registry.spawn(0, e);
+    const EntityHandle second = w.registry.spawn(0, e);
+    const EntityHandle keep = w.registry.spawn(0, e);
+    const int kill = w.registry.intern_group("killset");
+    const int remove = w.registry.intern_group("removeset");
+    w.registry.set_script_group_members(kill, {first});
+    w.registry.set_script_group_members(remove, {second});
+    CompileEnv env; env.registry = &w.registry;
+    const Program program = compile_source("Gkill(G_killset) Gremove(G_removeset)", env);
+    CHECK(program.ok() && program.diagnostics.empty());
+    WacVm vm; vm.load(program); vm.execute(w);
+    CHECK(w.registry.get(first) != nullptr && w.registry.get(first)->health == 0);
+    CHECK(w.registry.get(second) == nullptr);
+    CHECK(w.registry.get(keep) != nullptr && w.registry.get(keep)->health == 100);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_wac_area_and_location_queries() {
+    BehaviorWorld w;
+    w.registry.configure_pool(2, 4);
+    Entity e; e.item_id = 1001; e.net_id = 42; e.health = e.health_max = 100;
+    e.flags = kEntityFlagPlayer; e.position = {2, -2, 3};
+    const EntityHandle player = w.registry.spawn(0, e);
+    w.cached.local_player = player;
+    Aabb area; area.min = {-2, -2, 0}; area.max = {2, 2, 1};
+    w.registry.register_area("authored", area, false, 37);
+    Aabb duplicate; duplicate.min = {-100, -100, -100}; duplicate.max = {100, 100, 100};
+    w.registry.register_area("duplicate", duplicate, true, 37);
+    w.registry.register_location(duplicate, 8);
+    w.registry.register_location(area, 9);
+    e.position = {}; e.item_id = 2001; e.net_id = 100;
+    w.registry.spawn(2, e); // slot 0: packed blink hit must be nonzero
+    const EntityHandle building = w.registry.spawn(2, e);
+    Program program = compile_source(
+        "v1=area(37) v2=area3D(37) v3=SSNarea(42,37) v4=SSNarea3D(42,37) "
+        "v5=area(0) v6=outside v7=SSNloc(42,9) v8=location(9)", {});
+    CHECK(program.ok() && program.diagnostics.empty());
+    WacVm vm; vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 1 && w.script.vars.get_mission(3) == 1);
+    CHECK(w.script.vars.get_mission(2) == 0 && w.script.vars.get_mission(4) == 0);
+    CHECK(w.script.vars.get_mission(5) == 0 && w.script.vars.get_mission(6) == 1);
+    w.registry.get(player)->position.z = 1; // area edges are inclusive
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(2) == 1 && w.script.vars.get_mission(4) == 1);
+    CHECK(w.script.vars.get_mission(7) == 0); // location edges are strict
+    w.registry.get(player)->position = {0, 0, 0.5f};
+    w.commands.update_local_location(player);
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(7) == 1 && w.script.vars.get_mission(8) == 1);
+
+    w.registry.get(player)->blink_hits[0] = uint32_t(building.slot()) << 20;
+    w.registry.get(building)->music_location = 0;
+    w.commands.update_local_location(player);
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(6) == 0);
+    CHECK(w.script.vars.get_mission(7) == 0 && w.script.vars.get_mission(8) == 1);
+    CHECK(w.commands.ssn_at_location(player, 0)); // SSNloc honors an indoor zero
+    w.registry.get(building)->music_location = -3;
+    w.commands.update_local_location(player);
+    CHECK(w.commands.ssn_at_location(player, -3));
+    CHECK(w.script.wac_values.local_location == -3);
+    const auto baseline = w.snapshot();
+    w.registry.get(player)->blink_hits[0] = 0;
+    w.registry.get(player)->blink_hits[1] = 1u << 20;
+    w.registry.get(player)->health = 0;
+    w.registry.get(player)->flags |= kEntityFlagDead;
+    w.commands.update_local_location(player);
+    vm.execute(w);
+    CHECK(w.script.wac_values.local_location == -3); // dead body leaves cache alone
+    CHECK(w.script.vars.get_mission(1) == 1 && w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(6) == 1); // only the first blink matters
+    w.registry.get(player)->flags |= 1u;
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0 && w.script.vars.get_mission(3) == 0);
+    w.restore(baseline);
+    CHECK(w.script.wac_values.local_location == -3);
+    w.registry.get(player)->item_id = 0;
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0 && w.script.vars.get_mission(4) == 0);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_ssnuse_mounts_cached_child_and_clears_failed_choice() {
+    BehaviorWorld w;
+    w.registry.configure_pool(1, 8);
+    Entity e; e.item_id = 1001; e.item_type = 3; e.net_id = 42;
+    e.health = e.health_max = 100;
+    const EntityHandle rider = w.registry.spawn(0, e);
+    w.ai.attach(rider);
+    AiEntity &ai = *w.ai.for_handle(rider);
+    e.net_id = 77; e.item_id = 2001; e.item_type = 1;
+    e.has_item_def = true; e.item_attrib = kItemAttribPlayerControl;
+    e.position = {100, 100, 0};
+    Seat driver; driver.type = SeatType::Driver; driver.bone_index = 1;
+    e.seats.push_back(driver);
+    const EntityHandle carrier = w.registry.spawn(1, e);
+    e.net_id = 78; e.ground_target = carrier; e.seats.clear();
+    Seat passenger; passenger.type = SeatType::Passenger; passenger.bone_index = 2;
+    e.seats.push_back(passenger);
+    const EntityHandle child = w.registry.spawn(1, e);
+    ai.slot.f[36] = int32_t(carrier.packed) + 1;
+    ai.slot.f[37] = 123; // cached root's driver must be skipped
+    Program program = compile_source("v1=ssnuse(42)", {});
+    WacVm vm; vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.registry.get(rider)->mount_target == child);
+    CHECK(ai.slot.f[36] == int32_t(child.packed) + 1);
+    vm.execute(w); // already mounted: do not replace the cached choice
+    CHECK(w.script.vars.get_mission(1) == 0);
+    CHECK(ai.slot.f[36] == int32_t(child.packed) + 1);
+    w.vehicles.detach(rider);
+    w.registry.get(child)->seats.clear();
+    w.registry.get(rider)->flags |= kEntityFlagMounted;
+    w.registry.get(rider)->engine_flags |= kEntityFlagMounted;
+    w.registry.get(rider)->mount_type = SeatType::Passenger;
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0 && ai.slot.f[36] == 0);
+    CHECK(!w.registry.get(rider)->mount_target.valid());
+    CHECK(w.registry.get(rider)->mount_type == SeatType::None);
+    CHECK(((w.registry.get(rider)->flags | w.registry.get(rider)->engine_flags) & kEntityFlagMounted) == 0);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_meride_reads_standing_carrier_and_remove_uses_command_group() {
+    BehaviorWorld w;
+    w.registry.configure_pool(1, 4);
+    Entity e; e.item_id = 1001; e.net_id = 42; e.health = 100;
+    const EntityHandle player = w.registry.spawn(0, e);
+    w.cached.local_player = player;
+    e.net_id = 77; e.group_id = 7;
+    const EntityHandle carrier = w.registry.spawn(1, e);
+    Program program = compile_source("v1=meride(77) v2=meattached(77)", {});
+    WacVm vm; vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0 && w.script.vars.get_mission(2) == 0);
+    w.registry.get(player)->ground_target = carrier;
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 1 && w.script.vars.get_mission(2) == 0);
+    w.registry.get(player)->ground_target = {};
+    w.registry.get(player)->mount_target = carrier;
+    w.registry.get(player)->mounted = true;
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0 && w.script.vars.get_mission(2) == 1);
+    e.net_id = 78; e.item_id = 0; // removal has no item-definition gate
+    const EntityHandle missing_def = w.registry.spawn(1, e);
+    Program removal = compile_source("remove(0) remove(7)", {});
+    vm.load(removal); vm.execute(w);
+    CHECK(w.registry.get(player) != nullptr);
+    CHECK(w.registry.get(carrier) == nullptr && w.registry.get(missing_def) == nullptr);
+    CHECK(w.diagnostics.empty());
+}
+
+
+static void test_scripted_respawn_counts_are_not_immediate_spawns() {
+    BehaviorWorld w;
+    w.registry.configure_pool(1, 4);
+    Entity seed;
+    seed.net_id = 101;
+    seed.health = 0;
+    seed.alive = false;
+    seed.group_id = 7;
+    const auto one = w.registry.spawn(0, seed); // deliberately no item or AI
+    seed.net_id = 102;
+    const auto two = w.registry.spawn(0, seed);
+    seed.net_id = 103;
+    const auto vehicle = w.registry.spawn(1, seed);
+    seed.net_id = 104;
+    seed.group_id = 0;
+    const auto zero_group = w.registry.spawn(0, seed);
+    WacSystem script;
+    script.set_program(compile_source(
+            "v1 = SSNSpawn(101,65535)\n"
+            "v2 = SSNSpawn(999,1)\n"
+            "GroupSpawn(7,65538)\n"
+            "SSNSpawn(101,65535)\n"
+            "GroupSpawn(0,100)\n", {}));
+    CHECK(script.execute_initial(w));
+    CHECK(w.script.vars.get_mission(1) == 1 && w.script.vars.get_mission(2) == 0);
+    CHECK(w.registry.get(one)->npc_respawns == -1);
+    CHECK(w.registry.get(two)->npc_respawns == 2);
+    CHECK(w.registry.get(vehicle)->npc_respawns == 0); // group writer is pool 0 only
+    CHECK(w.registry.get(zero_group)->npc_respawns == 100);
+    CHECK(w.registry.get(one)->health == 0 && !w.registry.get(one)->alive);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_distance_literals_and_lead_queries() {
+    BehaviorWorld w;
+    Entity seed;
+    seed.item_id = 1;
+    seed.net_id = 101;
+    seed.position = {0.0f, 0.0f, 2.5f};
+    seed.yaw = 90;
+    seed.health = 0; seed.alive = false; seed.flags = kEntityFlagDead;
+    const auto a = w.registry.spawn(0, seed);
+    seed.net_id = 102; seed.position.z = 5.0f;
+    const auto b = w.registry.spawn(0, seed);
+    seed.net_id = 103; seed.position.z = 0.0f;
+    const auto goal = w.registry.spawn(0, seed);
+    WacVm vm;
+    Program program = compile_source(
+            "v1 = SSNLeadSSN2SSN(101,102,103,2.5)\n"
+            "v2 = SSNLeadSSN2SSN(101,102,103,2.499)\n"
+            "v3 = SSNLeadSSN2SSN(102,101,103,-2.5)\n"
+            "v5 = 163839\nv4 = SSNLeadSSN2SSN(101,102,103,v5)\n"
+            "v6 = SSNnearSSN(101,103,2.5)\n"
+            "v7 = SSNnearSSN(101,103,2.499)\n"
+            "v8 = SSNlosSSN(101,103,2.5)\n"
+            "v9 = SSNseesSSN(103,101,2.5)\n"
+            "v10 = 2.5M\nv11 = 3.5F\n"
+            "v12 = SSNLeadSSN2SSN(101,102,999,0)\n"
+            "v13 = SSNnearSSN(101,103,v10)\n"
+            "v14 = SSNnearSSN(101,103,3)\n"
+            "v15 = SSNnearSSN(101,103,v14)\n"
+            "v16 = 65536M\n", {});
+    CHECK(program.ok() && program.diagnostics.empty());
+    vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0); // equality does not lead
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(3) == 0);
+    CHECK(w.script.vars.get_mission(4) == 1); // raw variable is not multiplied again
+    CHECK(w.script.vars.get_mission(6) == 1 && w.script.vars.get_mission(7) == 0);
+    CHECK(w.script.vars.get_mission(8) == 1 && w.script.vars.get_mission(9) == 1);
+    CHECK(w.script.vars.get_mission(10) == 163840);
+    CHECK(w.script.vars.get_mission(11) == 75253); // 21501 * 3.5, truncation
+    CHECK(w.script.vars.get_mission(12) == 0);
+    CHECK(w.script.vars.get_mission(13) == 1);
+    CHECK(w.script.vars.get_mission(14) == 1 && w.script.vars.get_mission(15) == 0);
+    CHECK(w.script.vars.get_mission(16) == 0); // low dword of _ftol2_sse
+
+    // Wrapped coordinate subtraction precedes the Euclidean length.
+    w.registry.get(a)->position = {-32768.0f, 0.0f, 0.0f};
+    w.registry.get(b)->position = {32767.0f, 0.0f, 0.0f};
+    CHECK(w.commands.ssn_within_distance(a, b, 65536));
+    CHECK(!w.commands.ssn_within_distance(a, b, 65535));
+    w.registry.get(a)->position = {-32768.0f, -32768.0f, 0.0f};
+    w.registry.get(b)->position = {32767.0f, 32767.0f, 0.0f};
+    // Both lengths clamp to 0x7FFF0000 before the lead subtraction.
+    CHECK(!w.commands.ssn_leads_target(a, b, goal, 0));
+    CHECK(w.commands.ssn_leads_target(a, b, goal, -1));
+    w.registry.get(goal)->item_id = 0;
+    CHECK(!w.commands.ssn_leads_target(a, b, goal, -1));
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_script_ranges_drive_controller_and_perception() {
+    BehaviorWorld w;
+    w.registry.configure_pool(1, 4);
+    Entity seed;
+    seed.item_id = 1; seed.item_type = 3; seed.kind = EntityKind::Organic;
+    seed.health = 100; seed.team = 1; seed.group_id = 7; seed.net_id = 101;
+    const auto scanner = w.registry.spawn(0, seed);
+    seed.team = 2; seed.group_id = 0; seed.net_id = 102; seed.position.x = 5.0f;
+    const auto target = w.registry.spawn(0, seed);
+    seed.item_id = 0; seed.health = 0; seed.group_id = 7; seed.net_id = 103;
+    const auto itemless = w.registry.spawn(0, seed);
+    seed.net_id = 104;
+    const auto vehicle = w.registry.spawn(1, seed);
+    seed.net_id = 105;
+    const auto no_controller = w.registry.spawn(0, seed);
+    for (auto handle : {scanner, itemless, vehicle}) w.ai.attach(handle);
+    AiEntity &body = *w.ai.for_handle(scanner);
+    body.health = 100; body.team = 1; body.inf.active = true;
+    body.slot.bytes()[AiSlot::kAlertByte] = 2; // full sight range at phase 0
+    WacVm vm;
+    Program short_range = compile_source(
+            "v1 = GroupMin(7,1.5)\nv2 = GroupMax(7,4)\n"
+            "v3 = GroupAtt(7,8)\nv4 = GroupMax(999,20)\n"
+            "v5 = SSNMax(105,2.5)\nv6 = SSNMax(999,2.5)\n", {});
+    CHECK(short_range.ok()); vm.load(short_range); vm.execute(w);
+    CHECK(body.slot.f[AiSlot::kEngageMin] == 98304);
+    CHECK(body.slot.f[AiSlot::kSightRange] == 4 * 65536);
+    CHECK(body.slot.f[AiSlot::kAttackRange] == 8 * 65536);
+    CHECK(w.ai.for_handle(itemless)->slot.f[AiSlot::kSightRange] == 4 * 65536);
+    CHECK(w.ai.for_handle(vehicle)->slot.f[AiSlot::kSightRange] == 0);
+    CHECK(w.registry.get(no_controller) != nullptr);
+    for (int v = 1; v <= 5; ++v) CHECK(w.script.vars.get_mission(v) == 1);
+    CHECK(w.script.vars.get_mission(6) == 0);
+    w.ai.infantry_combat_think(body, w, 0);
+    CHECK(!body.inf.combat_target.valid());
+
+    Program long_range = compile_source(
+            "v7 = 6M\nSSNMax(101,v7)\nSSNMin(101,2.5)\nSSNAtt(101,3.5F)\n"
+            "GroupAtt(0,9)\n", {});
+    CHECK(long_range.ok()); vm.load(long_range); vm.execute(w);
+    CHECK(body.slot.f[AiSlot::kSightRange] == 6 * 65536);
+    CHECK(body.slot.f[AiSlot::kEngageMin] == 163840);
+    CHECK(body.slot.f[AiSlot::kAttackRange] == 75253);
+    w.ai.infantry_combat_think(body, w, 128);
+    CHECK(body.inf.combat_target == target); // WAC now changes the live sight scan
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_fractional_script_fog_uses_one_fixed_point_conversion() {
+    BehaviorWorld w;
+    w.weather.fog_reference_q16 = 1000 * 65536;
+    WacVm vm;
+    Program program = compile_source("fogdist(2.5)\n", {});
+    CHECK(program.ok()); vm.load(program); vm.execute(w);
+    CHECK(w.weather.core.scalar_channels.fog_dist_target_fp == 163840);
+    program = compile_source("v1 = 196608\nmovefog(v1,2)\n", {});
+    CHECK(program.ok()); vm.load(program); vm.execute(w);
+    CHECK(w.weather.core.scalar_channels.fog_dist_target_fp == 196608);
+    // The host's whole-metre UI contract reaches the same Q16 handler.
+    w.commands.set_fog_distance(4);
+    CHECK(w.weather.core.scalar_channels.fog_dist_target_fp == 262144);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_wac_positional_sound_and_teleport_quirk() {
+    BehaviorWorld w;
+    w.registry.configure_pool(1, 4);
+    w.registry.configure_pool(2, 4);
+    w.registry.configure_pool(3, 4);
+    Entity seed;
+    seed.net_id = 101; seed.position = {-2.0f, -3.0f, 4.0f};
+    const auto itemless = w.registry.spawn(0, seed);
+    seed.net_id = 102; seed.item_id = 1; seed.item_type = 3;
+    seed.health = 0; seed.alive = false; seed.health_max = 80;
+    seed.flags = seed.engine_flags = kEntityFlagDead;
+    seed.group_id = 7;
+    const auto person = w.registry.spawn(0, seed);
+    w.ai.attach(person);
+    w.ai.for_handle(person)->pos[0] = -2 * 65536;
+    w.ai.for_handle(person)->pos[1] = -3 * 65536;
+    w.ai.for_handle(person)->pos[2] = 4 * 65536;
+    seed.net_id = 103; seed.item_type = 1;
+    const auto vehicle = w.registry.spawn(1, seed);
+    seed.net_id = 104;
+    const auto building = w.registry.spawn(2, seed);
+    Entity marker;
+    marker.item_id = kParticleEffectMarkerTypeId;
+    marker.item_type = 4;
+    marker.wp_number = 9;
+    marker.position = {20.0f, 10.0f, 5.0f};
+    marker.yaw = 30; marker.roll = 4;
+    marker.flags = marker.engine_flags = kEntityFlagBuilding;
+    const auto first_marker = w.registry.spawn(3, marker);
+    marker.position.x = 40.0f;
+    const auto later_marker = w.registry.spawn(3, marker);
+    opennova::lwf::File bank;
+    for (const char *name : {"ABCDEFGHIJKLMNOPQRSTUVWX", "test"}) {
+        opennova::lwf::Multi set; set.name = name; bank.multis.push_back(set);
+    }
+    opennova::audio::SoundSetIndex sounds; sounds.add_bank(0, bank);
+    CompileEnv sound_env; sound_env.sounds = &sounds;
+    WacVm vm;
+    Program program = compile_source(
+            "v1 = SS2SSN(SS_ABCDEFGHIJKLMNOPQRSTUVWX,102)\n"
+            "v2 = SS2SSN(test,101)\nv3 = SS2SSN(test,999)\n"
+            "v4 = teleSSN(101,9)\nv5 = teleSSN(999,9)\nv6 = teleSSN(101,99)\n", sound_env);
+    CHECK(program.ok()); vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 1 && w.out.slot_sounds.size() == 1);
+    if (!w.out.slot_sounds.empty()) {
+        const auto &sound = w.out.slot_sounds.front();
+        CHECK(std::string(sound.set_name) == "abcdefghijklmnopqrstuvwx");
+        CHECK(sound.source_handle == person.packed);
+        CHECK(sound.pos[0] == -2 * 65536 && sound.pos[1] == -3 * 65536);
+        CHECK(sound.pos[2] == 4 * 65536);
+    }
+    CHECK(w.script.vars.get_mission(2) == 0 && w.script.vars.get_mission(3) == 0);
+    CHECK(w.script.vars.get_mission(4) == 1);
+    CHECK(w.script.vars.get_mission(5) == 0 && w.script.vars.get_mission(6) == 0);
+    CHECK(w.registry.get(itemless)->position.x == -2.0f); // retail loses the source
+    CHECK((w.registry.get(first_marker)->engine_flags & kEntityFlagBuilding) == 0);
+    CHECK((w.registry.get(later_marker)->engine_flags & kEntityFlagBuilding) != 0);
+    program = compile_source("v7 = teleport(7,9)\n", {});
+    CHECK(program.ok()); vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(7) == 0); // handler's return is not the moved count
+    for (auto handle : {person, vehicle, building}) {
+        CHECK(w.registry.get(handle)->position.x == 20.0f);
+        CHECK(w.registry.get(handle)->position.z == 5.0f);
+    }
+    CHECK(w.registry.get(person)->health == 80);
+    CHECK(w.ai.for_handle(person)->pos[0] == 20 * 65536);
+    CHECK(w.registry.get(itemless)->position.x == -2.0f);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_player_values_cache_at_bytecode_entry() {
+    BehaviorWorld w;
+    Entity player;
+    player.kind = EntityKind::Organic;
+    player.item_id = 1;
+    player.net_id = 10;
+    player.health = 321;
+    player.mana = 17;
+    const auto h = w.registry.spawn(0, player);
+    w.cached.local_player = h;
+    w.cached.local_health = 999; // stale host value must be refreshed at entry
+    CompileEnv env;
+    Program program = compile_source(
+        "if true(1) then set(v1,health) set(v2,mana) set(v3,CurTOD) "
+        "SSNHP(10,600) set(v4,health) set(health,12345) set(mana,-5) "
+        "set(v5,health) set(v6,mana) TOD(8) set(v7,CurTOD) set(v8,auto) "
+        "set(CurTOD,123) set(v9,CurTOD) endif\n", env);
+    CHECK(program.ok());
+    WacVm vm;
+    vm.load(program);
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 321);
+    CHECK(w.script.vars.get_mission(2) == 17);
+    CHECK(w.script.vars.get_mission(3) == 720);
+    CHECK(w.script.vars.get_mission(4) == 321); // SSNHP did not refresh the cache
+    CHECK(w.script.vars.get_mission(5) == 12345);
+    CHECK(w.script.vars.get_mission(6) == -5);
+    CHECK(w.script.vars.get_mission(7) == 720); // TOD change waits for the next entry
+    CHECK(w.script.vars.get_mission(8) == h.packed);
+    CHECK(w.script.vars.get_mission(9) == 123);
+    CHECK(w.script.vars.get_mission(0) == 0);
+    CHECK(w.registry.get(h)->health == 600);
+    CHECK(w.registry.get(h)->mana == 17); // cached-word writes do not change the actor
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 600);
+    CHECK(w.script.vars.get_mission(2) == 17);
+    CHECK(w.script.vars.get_mission(3) == 480);
+    w.registry.get(h)->health = 65535;
+    w.registry.get(h)->mana = -32768;
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == -1);
+    CHECK(w.script.vars.get_mission(2) == -32768);
+    w.registry.despawn(h);
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0);
+    CHECK(w.script.vars.get_mission(2) == 0);
+    CHECK(w.script.vars.get_mission(8) == 0xFFFF);
+}
+
+static void test_outcome_cache_changes_on_next_execution() {
+    BehaviorWorld w;
+    CompileEnv env;
+    Program program = compile_source(
+        "if never then win(1) endif\n"
+        "if true(1) then set(v1,GameOver) set(v2,WinVar) "
+        "set(GameOver,7) set(v3,GameOver) endif\n", env);
+    CHECK(program.ok());
+    WacVm vm;
+    vm.load(program);
+    vm.execute(w);
+    CHECK(w.match.outcome().winner_team == 1);
+    CHECK(w.script.vars.get_mission(1) == 0);
+    CHECK(w.script.vars.get_mission(2) == 0);
+    CHECK(w.script.vars.get_mission(3) == 7);
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(3) == 7);
+}
+
+static void test_bms_event_query_reads_active_during_delay() {
+    BehaviorWorld w;
+    opennova::mission::BmsEventSystem events;
+    opennova::bms::Event event{};
+    event.delay = 2;
+    events.load({event}, {}, {});
+    w.add_system(&events);
+    w.load_systems();
+    CompileEnv env;
+    Program program = compile_source(
+        "if event(0) then set(v1,1) else set(v1,0) endif\n"
+        "if event(1) then set(v2,1) else set(v2,0) endif\n"
+        "if event(-1) then set(v3,1) else set(v3,0) endif\n", env);
+    CHECK(program.ok());
+    WacVm vm;
+    vm.load(program);
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0);
+    for (int tick = 0; tick < 16; ++tick) w.run_logic_tick(true);
+    CHECK(events.is_active(0));
+    CHECK(!events.event_fired(0)); // BMS trigger waits for the delay; WAC does not
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 1);
+    CHECK(w.script.vars.get_mission(2) == 0);
+    CHECK(w.script.vars.get_mission(3) == 0);
+    events.on_load(w);
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0);
+    events.load({}, {}, {}); // query follows the owner across table replacement
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0);
+    w.script.bms_events = nullptr;
+    vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0);
+}
+
 int main() {
+    test_player_values_cache_at_bytecode_entry();
+    test_outcome_cache_changes_on_next_execution();
+    test_bms_event_query_reads_active_during_delay();
+    test_distance_literals_and_lead_queries();
+    test_script_ranges_drive_controller_and_perception();
+    test_fractional_script_fog_uses_one_fixed_point_conversion();
+    test_wac_positional_sound_and_teleport_quirk();
+    test_scripted_respawn_counts_are_not_immediate_spawns();
+    test_wac_area_and_location_queries();
+    test_ssnuse_mounts_cached_child_and_clears_failed_choice();
+    test_meride_reads_standing_carrier_and_remove_uses_command_group();
+    test_player_group_loops_and_handle_aliases();
+    test_named_group_actions_use_member_handles();
+    test_npc_wac_health_names_and_boarding_consumer();
+    test_ssn_rider_query_bounds_parent_depth_and_pool();
+    test_arithmetic_assignment_and_retail_expression_order();
+    test_named_event_reset_and_declared_variables();
+    test_empty_server_holds_script_divider_after_boot();
+    test_nested_conditions_and_accumulator_lifetime();
+    test_do_sections_cycle_and_restore_independently();
+    test_runtime_gaps_retain_source_and_restore_boot_evidence();
     test_execution_cadence();
 	test_initial_execution_and_runtime_state();
     test_var_math();
     test_ssn_kill();
     test_temporal_past();
+    test_temporal_predecessors_and_intervals();
+    test_then_enter_leave_and_else();
     test_else_branch();
     test_environment();
-    test_paren_less_and_effects();
+    test_paren_less_music_success();
     test_flash_arms_the_weather_home();
     test_wac_wave_emits_dialog_wav();
     test_wac_text_and_console_use_distinct_effect_channels();

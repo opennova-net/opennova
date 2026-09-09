@@ -101,7 +101,7 @@ public:
     // The Player_CanFireWeapon verdict the body updater and the HUD share
     // [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper
     // @0x4dcd30].
-    bool local_player_can_fire(const AiEntity *body) const;
+    bool local_player_can_fire();
     // The seat/armory labels the HUD draws around the local player: nothing
     // for a dead or absent player; armory mode is the raw entity flag [orig:
     // is_armory_mode = entity Flags & 0x400000 @0x5a32c4]; the nearest-only

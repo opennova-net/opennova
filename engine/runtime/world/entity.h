@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include <runtime/world/weapon_fsm.h>
+#include <runtime/world/ai_target_selectors.h>
 
 #include <runtime/world/geom.h>
 
@@ -279,6 +280,17 @@ struct MinefieldState {
 
 struct Entity {
     MinefieldState minefield;
+    // [orig: door slot base +0x2B8, section touch mask +0x2B4;
+    //  ItemDef door/target event classes @0x8131F8/@0x813210]
+    int16_t door_slot = -1;
+    int8_t door_count = 0;
+    int8_t door_first_bone = 0;
+    bool door_initialized = false;
+    bool door_event = false;
+    bool door_motion = false;
+    uint32_t door_touch_mask = 0;
+    char door_open_sound[25] = {};
+    char door_close_sound[25] = {};
     uint16_t net_id = 0;      // SSN; the field WAC/BMS address entities by
     int32_t bms_id = 0;       // file entity id (bms::Entity::id); the host keys placed nodes by this
                               // (MissionEntityRegistry), distinct from the runtime net_id/SSN.
@@ -349,6 +361,8 @@ struct Entity {
     // the client desyncs mid-frame (retail-join v13, 2026-07-02).
     uint8_t net_class_code = 0xFF;
 
+    uint16_t facial_slot = 0; // entity+440, GRM slot index | 0x8000
+    bool facial_checked = false; // model initialization attempted for this allocation
     Vec3 position;            // mission space (Z-up)
     int16_t yaw = 0;
     int16_t pitch = 0;
@@ -392,17 +406,19 @@ struct Entity {
     // so the player cannot move/crouch/prone. Set from the player's loadout at spawn (default a valid
     // class for players); 0 = unset / non-player. [orig: re-grill 2026-06-28; net-re §5.2b/§5.23]
     uint8_t player_class = 0;
-    // GamePlayerEntity.Name (entity+0xF4, 15 chars + NUL): the display name the
+    // GamePlayerEntity.Name (entity+0xF4): BMS copies 15 characters; WAC
+    // ssnname copies 31 [orig: WacCmd_SsnName @0x4F7230]. The display name the
     // friendly-tag drawer reads. Authored at BMS promote from the record's
     // name_index through the mission RTXT [PeopleNames] STRNAME%03i entry;
     // empty resolves the compiled-in fallback table at draw time.
     // [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; read
     //  HUD_DrawEntityLabel @0x5a4021]
     std::string display_name;
-    uint8_t group_id = 0;     // named-group membership
+    uint8_t group_id = 0;     // BMS commandGroup (+284), not the WAC named-group table
     uint8_t waypoint_id = 0;  // wplist / route this entity follows
     int32_t wp_number = 0;    // position along that route
 
+    AiTargetSelectors target_selectors;
     uint8_t alert_state = 0;  // green/yellow/red
     int32_t ai_state = 0;     // AI component state
     int32_t ai_target = -1;   // net id of current AI target, -1 = none
@@ -419,6 +435,10 @@ struct Entity {
     // (RoundSpawnParams::tracer_counter), so each weapon keeps its own phase
     // across switches. [orig: RoundData_SpawnRound @0x4ec199-0x4ec1bb]
     uint8_t tracer_shot_counter = 0;
+    // Entity+341: ammo2ssn alternates the first two model userpoints with this
+    // byte. The transient projectile class uses the same offset as bounce_count.
+    // [orig: WacScript_EntityFireAtTarget @0x4F259E..0x4F25C3]
+    uint8_t script_fire_userpoint_counter = 0;
     // Per-player replicated damage class, indexed by AmmoDef file index. C2S
     // loadout entry byte 4 writes it; 1 = x0.9, 2 = x1.1, other = x1.
     std::vector<uint8_t> ammo_damage_class;
@@ -429,6 +449,9 @@ struct Entity {
     // to hp for entities still at their spawn default. Feeds the §5.10 field-17 tier
     // denominator and the §5.13 vehicle health word.
     int32_t health_max = 0;   // signed i16 retail storage carried sign-extended
+    int16_t mana = 0;     // entity+288, ItemDef 'mana' [orig: @0x4B97D6]
+    int16_t mana_max = 0; // ItemDef+382 signed word
+    int32_t critical_hp = 0;  // itemDef+384 signed word [orig: WacCmd_SsnCritical @0x4F1BF0]
 
     // items.def radarsig/heatsig (def+0x178/+0x17A u16), stamped by the host's
     // item-traits sweep. The AI acquisition feed reads them as the candidate's
@@ -476,6 +499,15 @@ struct Entity {
     // death edge, decremented per dead tick; 0 -> despawn (SP holds while the local
     // player can see the corpse, 62-tick retries). [orig: @0x4b9c7f / @0x4b9e6a]
     int32_t corpse_timer = 0;
+    // WAC SSNSpawn/GroupSpawn store the low signed word; 100+ is unlimited.
+    // [orig: entity+0x35E; WacCmd_SsnSpawn @0x4F7A80]
+    int16_t npc_respawns = 0;
+    // Optional control-point link read by the org1 respawn/hidden gates.
+    // [orig: entity+0x354; Entity_UpdateInfantryAI @0x4B99DB/0x4B9FA0]
+    EntityHandle npc_respawn_zone;
+    int32_t spawn_phase = 0; // entity+0x2AC; organic helper=63, vehicle AI cycles 0..15
+    int32_t spawn_heading = 0; // BAM32, entity+0x330 [orig: @0x4B965C]
+    uint32_t spawn_flags = 0;  // entity+0x334, excludes dead [orig: @0x4B9662]
     // items.def 'deathtime' in ticks ((62*v or 496) + 62 at parse [orig:
     // ItemDef_ParseProperty @0x49fa96 -> def+0x890]), stamped by the item-traits
     // sweep. 0 = no token -> the corpse expires on the first dead tick (watch-check
@@ -486,9 +518,6 @@ struct Entity {
     bool leave_corpse = false;
     uint32_t ai_flags = 0;    // BmsiAttributeFlags
     int32_t move_speed_kph = 0;
-    int32_t engage_min = 0;
-    int32_t engage_max = 0;
-    int32_t attack_max = 0;
     // The body-anim CLIP the present pass plays (kBodyAnim*, body_anim.h), selected by the
     // infantry motor / AI brain each tick; -1 = no clip / hold rest. RENAMED from `anim_slot`:
     // this is presentation state, NOT the retail entity+0x374 `animSlot` below — echoing it
@@ -581,7 +610,8 @@ struct Entity {
     // radius. [orig: entity+0, read throughout the explosion sweep @ 0x4ead80]
     float bound_radius = 0.0f;
     // Kill-credit attacker (entity+0x178 lastAttacker): stamped by the damage
-    // paths; the explosion sweep only fills an EMPTY slot with its resolved
+    // paths. WAC ammo2ssn also overwrites this word with its target (0x4F25D4).
+    // The explosion sweep only fills an EMPTY slot with its resolved
     // attacker [orig: @ 0x4eb319/@ 0x4eb593; the dead-attacker chain walk
     // @ 0x4eae95..0x4eaece].
     EntityHandle last_attacker;
@@ -613,6 +643,13 @@ struct Entity {
     // [orig: Entity_SpawnDeathPieces @ 0x493983]
     uint32_t spawned_piece_mask = 0;
     DeathMotionMode death_motion = DeathMotionMode::None;
+    // The +0x1C4 callback is nullsub_28 while AINODEPATH is enabled.
+    // Independent +0x1C8 brain events remain active. [orig: @0x43B22A]
+    bool motor_suspended = false;
+    // FIND_AND_USE's attachment is independent of the seated parentEntity.
+    // [orig: Entity_FindAttachBone @0x4B9580; entity+0x184/+0x364]
+    EntityHandle attach_parent;
+    uint8_t attach_bone = 0;
 	uint8_t death_effect_active[3] = {}; // four owned handles per bank
 	bool death_effect_underwater = false;
 
@@ -665,6 +702,8 @@ struct Entity {
 
     uint32_t spawn_origin = 0; // back-ref to the BMS (kind,index) it was promoted from
     std::string name;          // named markers/areas
+    // BMS 6088 marker gen_string[31] -> entity+692 [orig: @0x40E9F0].
+    std::string script_effect_name;
 
     // --- vehicle/emplacement mounting (AttachToEmplaced) ---
     // Seats this entity OFFERS as a vehicle/emplacement (mirrors vehicle[400..] + model[605..]).
@@ -766,6 +805,7 @@ struct Entity {
     // Entity_BuildProximityList @ 0x4b406b / movement collision resolver
     // @ 0x4b36f0 from g_BlinkHitSlot0..3 @ 0xB57C74]
     uint32_t blink_hits[4] = {};
+    int16_t music_location = 0; // itemDef+434; containing-building WAC location
 
     // Render-occlusion three-ray latch countdown (entity+342): while nonzero the
     // entity renders and the byte counts down per render frame; at 0 the outdoors
@@ -782,6 +822,11 @@ struct Entity {
     // carrier the owning client uplinked (§5.10; D-NET-151) and the 0x0A echo re-emits
     // it (mount wins over ground [orig: NetPacket_SerializePlayerState op1 @0x4c0a08]).
     EntityHandle ground_target;         // kInvalid = free-standing
+    // Entity+0x180: backup ground target for the queued Flags 0x200 mount.
+    // WAC tele and carrier spawn write it; vehicle respawn clears it with
+    // matching ground references. [orig: @0x4F2375, @0x50D45A, @0x43ED46;
+    // org2 fallback read @0x4B4260]
+    EntityHandle mount_toggle_fallback;
 
     // Carried-object link (entity+0x268 mountedChild): the object this entity
     // is CARRYING (a picked-up flag/carryable), distinct from the seat-mount
@@ -800,6 +845,12 @@ struct Entity {
     // read LIVE at 0x0A tag-2 serialize time — a set handle adds the wire 0x40 flag +
     // target word [orig: NetPacket_SerializeRoundEvent @0x50485a]. (D-NET-152)
     EntityHandle last_fire_target;      // kInvalid = no target claimed
+
+    // Medic drag link: self identifies the backward-walking dragger; a corpse
+    // references its dragger. Serial prevents a recycled pool slot inheriting it.
+    // [orig: entity+0x350, HeliLift_UpdateSlotState @0x451730]
+    EntityHandle dragger;
+    uint64_t dragger_spawn_id = 0;
 
     // The mover-entry pose stamp riders consume — retail savedLivePose
     // (+0x80..+0x88) and the body* attitude triple (+0x8C..+0x94), stamped at

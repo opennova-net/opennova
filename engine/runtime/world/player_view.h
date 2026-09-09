@@ -1,5 +1,5 @@
 // The local player's view-side fixed-tick state: the ADS scope-camera ease and
-// the third-person anchor chase, plus the camera fov policy they drive.
+// the third-person anchor chase, plus the optical projection of the weather FOV.
 //
 // The original runs these in its 62 Hz frame loop: the scope camera interp is a
 // 15-step ease [orig: CNetPlayerInterp_Setup @ 0x4df36e; engaged mirror
@@ -9,10 +9,10 @@
 // [orig: Player_ToggleWeaponScope @ 0x4df401 / the g_camera_mode check
 // @ 0x4df3fa; base fov g_cameraFovDeg @ 0x26C6848 default 0x500000 = 80 deg].
 //
-// Hosted, the simulation ticks this state at the world cadence and render
-// frames only READ it — camera lag and the ADS swing are therefore identical
-// at 30, 60, or 144 fps (ADR 0016: policy, state, and cadence live in the
-// engine; the host samples input and applies node transforms).
+// Hosted, the simulation ticks camera lag and the ADS pose at world cadence.
+// The optical render query can rewrite the shared FOV target, as in retail;
+// the weather current advances only on simulation ticks. All policy remains
+// in the engine; the host samples input and applies node transforms.
 
 #pragma once
 
@@ -354,13 +354,12 @@ int32_t player_view_adjust_nvg_gain(PlayerViewState &v, int32_t delta);
 // is first-person only. [orig: g_camera_mode gates in the NVG render path]
 bool player_view_nvg_visible(const PlayerViewState &v);
 
-// The main camera's HORIZONTAL fov in degrees: 80 at the hip, eased to
-// 80 / scope_max_mag for sighted defs (file flag 2) with a magnification,
-// overridden by the fixed 20-degree binocular view, and pinned to 80 in third
-// person. `def_flags` is the raw weapon.def flag mask, `scope_max_mag` the
-// def's zoom (0 = key absent).
-// [orig: Player_ToggleWeaponScope @ 0x4df401; 3P suppress @ 0x4df3fa]
-float player_view_fov_h_deg(const PlayerViewState &v, int32_t def_flags, float scope_max_mag);
+// Main-camera horizontal FOV. The weather current is independent of the ADS
+// pose ease. Resolved optical flags select 80/zoom (Sighted) or current/zoom
+// (Scoped); binoculars select 20 degrees. The caller owns the visibility gates.
+// [orig: Render_ProcessMainSceneFrame @0x5CA3C5..0x5CA4A6]
+float player_view_fov_h_deg(const PlayerViewState &v, int32_t current_fov_q16,
+                           bool scoped, bool sighted, int32_t zoom);
 
 // Horizontal -> vertical projection fov through the aspect ratio, degrees.
 // [orig: Render_SetViewAndProjectionMatrices @ 0x58d900:

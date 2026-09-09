@@ -88,11 +88,14 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("fire_soundset", "name", "world_pos", "source_bms_id"),
 			&MissionAudio::fire_soundset, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("ui_soundset", "name"), &MissionAudio::ui_soundset);
-	ClassDB::bind_method(D_METHOD("slot_soundset", "name", "world_pos", "exclusive_key"),
-			&MissionAudio::slot_soundset, DEFVAL(String()));
+	ClassDB::bind_method(D_METHOD("slot_soundset", "name", "world_pos", "exclusive_key", "source_bms_id"),
+			&MissionAudio::slot_soundset, DEFVAL(String()), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("play_dialog", "wav_id"), &MissionAudio::play_dialog);
 	ClassDB::bind_method(D_METHOD("resolve_dialog_set", "wav_id"), &MissionAudio::resolve_dialog_set);
 	ClassDB::bind_method(D_METHOD("play_wac_wave", "filename"), &MissionAudio::play_wac_wave);
+	ClassDB::bind_method(D_METHOD("sync_script_voice"), &MissionAudio::sync_script_voice);
+	ClassDB::bind_method(D_METHOD("_on_script_voice_finished", "serial", "player_id"),
+			&MissionAudio::_on_script_voice_finished);
 	ClassDB::bind_method(D_METHOD("set_time_of_day_hhmm", "hhmm"), &MissionAudio::set_time_of_day_hhmm);
 	ClassDB::bind_method(D_METHOD("advance_ticks", "logic_tick"), &MissionAudio::advance_ticks);
 	ClassDB::bind_method(D_METHOD("set_simulation", "sim"), &MissionAudio::set_simulation);
@@ -448,19 +451,43 @@ void MissionAudio::apply_sound_emitter_events(
 void MissionAudio::play_weather_sounds(
 		const std::vector<opennova::world::WeatherSoundEvent> &p_events,
 		const Transform3D &p_camera_xform) {
-	if (p_events.empty() || bank_.is_null() || !root_attached_) {
-		return;
-	}
-	const Vector3 forward = -p_camera_xform.basis.get_column(2);
-	for (const opennova::world::WeatherSoundEvent &event : p_events) {
-		// The listener-relative distance (16.16) and the 8-bit-turn bearing.
-		const double distance = static_cast<double>(event.distance_q16) / 65536.0;
-		const int bearing = static_cast<int>(event.bearing);
-		const Vector3 dir = forward.rotated(Vector3(0.0f, 1.0f, 0.0f),
-				static_cast<real_t>(static_cast<double>(bearing) * Math_TAU / kBearingBam8Turn));
-		const Vector3 pos = p_camera_xform.origin + dir * static_cast<real_t>(distance);
-		bank_->play_oneshot_3d(this, pos, "THUNDER", StringName(kSfxBus), p_camera_xform.origin);
-	}
+    for (const auto &event : p_events) {
+        _play_listener_relative("THUNDER", event.distance_q16, event.bearing, p_camera_xform);
+    }
+}
+
+void MissionAudio::play_script_sounds(
+        const std::vector<opennova::world::ScriptSoundEvent> &p_events,
+        const Transform3D &p_camera_xform) {
+    for (const auto &event : p_events) {
+        _play_listener_relative(String::utf8(event.name.c_str()), event.distance_q16,
+                event.bearing, p_camera_xform);
+    }
+}
+
+void MissionAudio::_play_listener_relative(const String &p_name, int32_t p_distance_q16,
+        int32_t p_bearing, const Transform3D &p_camera_xform) {
+    if (bank_.is_null() || !root_attached_) {
+        return;
+    }
+    // Retail passes the raw bearing and distance straight to the trigger player.
+    // Godot supplies the device panner (D-SND-8); a unit offset preserves the
+    // bearing even for zero distance. The native plan owns attenuation.
+    const Vector3 forward = -p_camera_xform.basis.get_column(2);
+    const auto bearing = static_cast<uint8_t>(p_bearing);
+    const Vector3 direction = forward.rotated(Vector3(0, 1, 0),
+            static_cast<real_t>(static_cast<double>(bearing) * Math_TAU / kBearingBam8Turn));
+    const Vector3 position = p_camera_xform.origin + direction;
+    _record_fire(p_name, position, 0, String(), false,
+            bank_->play_oneshot_at_distance(this, position, p_name, StringName(kSfxBus),
+                    p_distance_q16));
+}
+
+void MissionAudio::reset_oneshot_playback() {
+    if (bank_.is_valid()) {
+        bank_->reset_oneshots(this);
+    }
+    recent_fires_.clear();
 }
 
 bool MissionAudio::fire_soundset(const String &p_name, const Vector3 &p_world_pos, int p_source_bms_id) {
@@ -480,13 +507,13 @@ bool MissionAudio::ui_soundset(const String &p_name) {
 }
 
 bool MissionAudio::slot_soundset(const String &p_name, const Vector3 &p_world_pos,
-		const String &p_exclusive_key) {
-	if (bank_.is_null() || !root_attached_) {
-		return _record_fire(p_name, p_world_pos, 0, p_exclusive_key, true, false);
-	}
-	return _record_fire(p_name, p_world_pos, 0, p_exclusive_key, true,
-			bank_->play_oneshot_3d(this, p_world_pos, p_name, StringName(kSfxBus), last_camera_pos_, 0,
-					p_exclusive_key));
+        const String &p_exclusive_key, int p_source_bms_id) {
+    if (bank_.is_null() || !root_attached_) {
+        return _record_fire(p_name, p_world_pos, p_source_bms_id, p_exclusive_key, true, false);
+    }
+    return _record_fire(p_name, p_world_pos, p_source_bms_id, p_exclusive_key, true,
+            bank_->play_oneshot_3d(this, p_world_pos, p_name, StringName(kSfxBus), last_camera_pos_,
+                    p_source_bms_id, p_exclusive_key));
 }
 
 bool MissionAudio::play_dialog(int p_wav_id) {
@@ -552,6 +579,14 @@ void MissionAudio::_on_dialog_finished() {
 }
 
 bool MissionAudio::play_wac_wave(const String &p_filename) {
+	const Ref<Simulation> sim = _simulation();
+	if (sim.is_valid()) {
+		const bool loaded = sim->play_script_wave(p_filename);
+		sync_script_voice();
+		return loaded;
+	}
+	// Standalone tooling shares the same interrupt-before-load rule.
+	if (AudioStreamPlayer *previous = _wac_voice_node()) previous->stop();
 	if (!root_attached_ || resource_root_.is_null() || p_filename.is_empty()) {
 		return false;
 	}
@@ -561,7 +596,6 @@ bool MissionAudio::play_wac_wave(const String &p_filename) {
 		return false;
 	}
 	// The engine's channel rule: one dedicated voice, reset before each play.
-	wac_voice_.play(std::string(p_filename.utf8().get_data()));
 	AudioStreamPlayer *voice = _wac_voice_node();
 	if (voice == nullptr) {
 		voice = memnew(AudioStreamPlayer);
@@ -603,6 +637,7 @@ void MissionAudio::set_time_of_day_hhmm(double p_hhmm) {
 }
 
 void MissionAudio::advance_ticks(int64_t p_logic_tick) {
+	sync_script_voice();
 	if (mixer_.is_null()) {
 		return;
 	}
@@ -641,6 +676,7 @@ void MissionAudio::set_occlusion_override(const Callable &p_override) {
 void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 	const uint64_t start = Time::get_singleton()->get_ticks_usec();
 	last_camera_pos_ = p_camera_pos;
+	sync_script_voice();
 	int writes = 0;
 	if (mixer_.is_null()) {
 		perf_markers_ = 0;
@@ -864,6 +900,7 @@ void MissionAudio::_stop_all_ambient_channels() {
 }
 
 void MissionAudio::_reset_mission_playback_state() {
+	_stop_script_voice(true);
 	// Dialog and WAC voices are mission-owned even though they use separate
 	// physical players from ambience. Stop them before replacing/queuing their
 	// audio root so neither playback nor a queued dialog can cross missions.
@@ -875,7 +912,6 @@ void MissionAudio::_reset_mission_playback_state() {
 	}
 	dialog_queue_.clear();
 	dialog_voice_id_ = ObjectID();
-	wac_voice_.stop();
 	wac_voice_id_ = ObjectID();
 	wac_wav_cache_.clear();
 	dbf_.unref();

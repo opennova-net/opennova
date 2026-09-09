@@ -940,6 +940,12 @@ func test_orphan_recovery_revalidates_owner_liveness_after_the_atomic_claim() ->
 
 
 func test_empty_terminal_journals_are_recoverable_after_owner_release() -> void:
+	# The Windows rename failure appears only during repeated journal turnover.
+	for _repetition in range(100 if OS.get_name() == "Windows" else 1):
+		_exercise_empty_terminal_journal_recovery()
+
+
+func _exercise_empty_terminal_journal_recovery() -> void:
 	var nonce := "%d-%d" % [OS.get_process_id(), Time.get_ticks_usec()]
 	var trusted_root := ProjectSettings.globalize_path(
 			"user://render-fixture-empty-journal-" + nonce)
@@ -957,7 +963,7 @@ func test_empty_terminal_journals_are_recoverable_after_owner_release() -> void:
 	var recovered: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root)
 	assert_false(recovered.has("error"),
-			"an empty journal is the normal terminal cleanup crash state")
+			"an empty journal is the normal terminal cleanup crash state: %s" % recovered)
 	assert_eq(FixturePublication.abort_fixture_publication(
 			String(recovered.get("staging_path", ""))), OK)
 
@@ -978,7 +984,7 @@ func test_empty_terminal_journals_are_recoverable_after_owner_release() -> void:
 	recovered = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root, owner_is_live)
 	assert_false(recovered.has("error"),
-			"owner release makes an empty claim terminal even before process exit")
+			"owner release makes an empty claim terminal even before process exit: %s" % recovered)
 	assert_false(DirAccess.dir_exists_absolute(abandoned_claim))
 	assert_eq(FixturePublication.abort_fixture_publication(
 			String(recovered.get("staging_path", ""))), OK)

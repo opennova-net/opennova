@@ -286,6 +286,9 @@ Error GameWorld::debug_refresh_render_pose(Camera3D *p_camera) {
 // --- the table rows -------------------------------------------------------------
 
 GameWorld::LegResult GameWorld::leg_begin(FrameContext &r_ctx) {
+    if (MissionAudio *audio = get_mission_audio()) {
+        audio->set_listener_position(frame_camera_pos_);
+    }
 	begin_device_frame();
 	return kLegRan;
 }
@@ -800,6 +803,9 @@ void GameWorld::mix_audio_frame(int p_ticks_run) {
 				std::vector<opennova::world::WeatherSoundEvent> thunder;
 				audio_sim->drain_weather_sounds(thunder);
 				audio->play_weather_sounds(thunder, frame_camera_xform_);
+                std::vector<opennova::world::ScriptSoundEvent> script_sounds;
+                audio_sim->drain_script_sounds(script_sounds);
+                audio->play_script_sounds(script_sounds, frame_camera_xform_);
 			}
 		}
 		audio->tick(frame_camera_pos_, frame_delta_);

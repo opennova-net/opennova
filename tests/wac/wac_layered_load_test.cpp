@@ -173,9 +173,44 @@ void test_strict_mode_blocks_what_the_game_only_warns_on() {
 	}
 }
 
+void test_run_files_share_order_symbols_and_diagnostics() {
+    TempResourceRoot root;
+    root.write("game.wac", "var shared\nset(shared,5) run extra inc(shared)\n");
+    root.write("extra.wac", "add(shared,2) run leaf\n");
+    root.write("leaf.wac", "add(shared,3)\n");
+    root.write("server.wac", "store(v1)\n");
+    root.write("sample.wac", "if eq(shared,11) then inc(v2) endif\n");
+    w::World world;
+    wc::WacSystem wac;
+    std::string error;
+    CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
+            true, error) == wc::WacLayeredLoadStatus::kLoaded);
+    CHECK(error.empty());
+    world.add_system(&wac);
+    world.load_systems();
+    CHECK(wac.execute_initial(world));
+    CHECK(world.script.vars.get_mission(1) == 11);
+    CHECK(world.script.vars.get_mission(2) == 1);
+    CHECK(wac.program().source_names.size() == 5);
+
+    root.write("leaf.wac", "run game\n");
+    CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
+            false, error) == wc::WacLayeredLoadStatus::kBlocked);
+    CHECK(error.find("RUN nesting") != std::string::npos);
+    root.write("leaf.wac", "if never then run extra endif\n");
+    CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
+            false, error) == wc::WacLayeredLoadStatus::kBlocked);
+    CHECK(error.find("inside blocks") != std::string::npos);
+    root.write("leaf.wac", "run missing\n");
+    // Third-level RUN fails its depth gate before attempting any file read.
+    CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world.registry,
+            false, error) == wc::WacLayeredLoadStatus::kBlocked);
+}
+
 } // namespace
 
 int main() {
+    test_run_files_share_order_symbols_and_diagnostics();
 	test_wac_layers_execute_in_retail_order();
 	test_absent_layers_are_the_valid_bms_only_mission();
 	test_retail_two_word_else_if_chain_is_clean_under_strict();

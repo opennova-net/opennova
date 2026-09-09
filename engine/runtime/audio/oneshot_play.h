@@ -92,6 +92,13 @@ struct OneshotPlan {
 	std::vector<OneshotVoice> voices;
 };
 
+// Plan a direct trigger-set fire at an explicit listener distance. This path
+// has no set-range cull or occlusion query; layer attenuation still applies.
+// [orig: Sound_PlayTriggerSetScaled @0x527B90 -> SoundBank_PlayTriggerEntries
+// @0x75CCD0]. The optional flat arm preserves menu playback without a listener.
+OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &loc,
+        int64_t dist_q16, SoundSelector &selector, bool attenuate = true);
+
 // Plan a one-shot fire of the set at `loc` at a world position (PlayWavList /
 // event actions). Volume is computed ONCE at fire time from the witnessed
 // distance model when the listener is known [orig: Sound_Play3DPositional

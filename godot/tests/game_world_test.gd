@@ -345,10 +345,9 @@ func _stage_lit_building_fixture(name: String) -> String:
 	return root_dir
 
 
-# Tmap supplies the terrain-normal table inputs (its ramp cell) and house.3di keeps
-# the SSN owner on the real placed-object path used by the routing assertion.
-# [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0 resolves the SSN entity,
-# then reads the terrain normal for its grid cell before creating the emitter.]
+# Tmap supplies a slope to distinguish entity orientation from a terrain normal;
+# house.3di keeps the SSN owner on the real placed-object path.
+# [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0 uses entity yaw/pitch.]
 func _stage_building_terrain_fixture(name: String) -> String:
 	var root_dir := _stage_impact_fixture(name)
 	assert_eq(DirAccess.copy_absolute(
@@ -687,54 +686,57 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 			"teardown releases the world's local view presenter")
 
 
-func test_fx2ssn_routes_position_owner_and_terrain_orientation() -> void:
+func test_fx2ssn_executes_with_entity_orientation_and_restores_on_retry() -> void:
 	var root_dir := _stage_building_terrain_fixture("fx2ssn")
+	WorldFixture.stage_effects(root_dir)
+	# Publish the script entry before ResourceRoot indexes the fixture.
+	WorldFixture.write_file(root_dir.path_join("mnml.wac"), "")
 	var world := WorldFixture.make_world(self)
-	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
+	var placed: Array = []
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				assert_true(mission.set_header_string("terrain", "Tmap"))
-				placed.append(mission.add_entity(
-						MissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO))), OK)
-	var ssn := (placed[0] as MissionEntityRecord).bms_id
-	assert_gt(ssn, 0, "the authored building carries a WAC/BMS-addressable SSN")
+				var building := mission.add_entity(
+						MissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO)
+				placed.append(building)
+				WorldFixture.write_file(root_dir.path_join("mnml.wac"),
+						("if never then fx2ssn(FX_Buildup,%d) store(v2) endif\n" +
+						"if eq(v1,1) then fx2ssn(Buildup,%d) store(v2) set(v1,0) endif\n")
+						% [building.bms_id, building.bms_id])), OK)
+	var sim := world.get_sim()
 	var effects := world.get_effect_world()
-	assert_true(effects.get_debug_group_report().is_empty(),
-			"the loaded fixture starts with no live group")
-
-	world.route_mission_effects([MissionEffect.make("fx2ssn", 0, ssn, 0, FX_FALLBACK_EFFECT)])
+	assert_eq(sim.get_mission_variable(2), 1, "the mounted FX handle reaches the real command")
 	var rows := effects.get_debug_group_report()
-	assert_eq(rows.size(), 1)
-	if rows.is_empty():
+	assert_eq(rows.size(), 1, "initial WAC effects survive the catalog warm/reset")
+	if rows.size() != 1:
 		return
 	var spawn: EffectGroupReport = rows[0]
-	assert_eq(spawn.owner_key, ssn,
-			"the emitter handle is owned per SSN entity (a scripted re-trigger replaces it)")
-	assert_eq(spawn.name, FX_FALLBACK_EFFECT)
-	var transform: Transform3D = spawn.transform
-	var spawn_pos := transform.origin
-	assert_almost_eq(spawn_pos.x, 6.0, 0.01,
-			"the SSN resolves to the real registry entity's Godot-space position")
-	assert_almost_eq(spawn_pos.z, -4.0, 0.01,
-			"mission (x, north, up) maps through the canonical frame")
-	var terrain := world.get_terrain_data()
-	assert_not_null(terrain)
-	# This independently spells out the recovered centered raw-height
-	# difference at the synthetic map's ramp cell (source 518,508).
-	# [orig: Terrain_GenerateNormalMap @0x603210, diff scale @0x7C6950;
-	# WacScript_SpawnEffectAtSsnEntity consumes that cell normal @0x4F23A0.]
-	var expected := Vector3(
-			terrain.get_height_world(spawn_pos + Vector3(-1, 0, 0))
-					- terrain.get_height_world(spawn_pos + Vector3(1, 0, 0)),
-			1.0,
-			terrain.get_height_world(spawn_pos + Vector3(0, 0, -1))
-					- terrain.get_height_world(spawn_pos + Vector3(0, 0, 1))).normalized()
-	# The effect pose puts the authored forward along the group's Z axis.
-	var orientation := transform.basis.z
-	assert_lt(orientation.distance_to(expected), 0.00001,
-			"fx2ssn receives the terrain cell's recovered surface normal")
-	assert_gt(orientation.distance_to(Vector3.UP), 0.01,
-			"the ramp witness cannot regress to the old UP placeholder")
+	assert_eq(spawn.name, FX_PERSISTENT_EFFECT)
+	assert_true(String(spawn.owner_key).begins_with("script_entity:"))
+	assert_eq(spawn.binding, EffectScene.BINDING_WORLD)
+	assert_almost_eq(spawn.transform.origin.x, 6.0, 0.01)
+	assert_almost_eq(spawn.transform.origin.z, -4.0, 0.01)
+	assert_lt(spawn.transform.basis.z.distance_to(Vector3.FORWARD), 0.00001,
+			"mission yaw zero faces north; the terrain slope does not orient this effect")
+	var initial_id := spawn.id
+	sim.set_mission_variable(1, 1)
+	for _tick in range(62):
+		world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
+	var active: Array[EffectGroupReport] = []
+	for row: EffectGroupReport in effects.get_debug_group_report():
+		if not row.detached:
+			active.append(row)
+	assert_eq(active.size(), 1, "retrigger releases the previous emitter")
+	if active.size() == 1:
+		assert_gt(active[0].id, initial_id)
+		assert_eq(active[0].source_tick, 62, "presentation retains the WAC source tick across frame batching")
+	world.get_runtime().stop() # mission restart also resets the presentation owners
+	rows = effects.get_debug_group_report()
+	assert_eq(rows.size(), 1, "retry replays the sealed initial descriptor once")
+	if rows.size() == 1:
+		assert_eq(rows[0].name, FX_PERSISTENT_EFFECT)
+		assert_false(rows[0].detached)
+	world.unload()
 
 
 func test_round_outcome_effects_pass_through_to_hud_consumers() -> void:

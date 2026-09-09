@@ -20,13 +20,11 @@ using namespace godot;
 // Fire mission audio + particle effects for presentation. PlayWavList actions
 // surface as "dialog" effects carrying the dialog/wav id in `a`; route them to
 // the mission audio (which resolves the id through the co-named .DBF and plays
-// the LWF set). WAC fx commands surface with the effect name in `str`; route
-// them to the effect world. Other kinds are still emitted via mission_effects
+// the LWF set). Typed WAC/BMS particle descriptors use route_script_effects.
+// Other kinds are still emitted via mission_effects
 // for downstream consumers (HUD, etc.).
 void GameWorld::route_mission_effects(const Array &p_effects) {
 	MissionAudio *audio = get_mission_audio();
-	EffectWorld *effect_world = get_effect_world();
-	MissionRoot *runtime = get_runtime();
 	for (int64_t i = 0; i < p_effects.size(); ++i) {
 		const Ref<MissionEffect> eff = p_effects[i];
 		if (eff.is_null()) {
@@ -41,37 +39,23 @@ void GameWorld::route_mission_effects(const Array &p_effects) {
 		} else if (kind == "dialog_wav") {
 			// WAC wave/pwave: a scripted voice .wav by filename on its own channel.
 			if (audio != nullptr) {
-				audio->play_wac_wave(eff->get_text());
-			}
-		} else if (kind == "fx2ssn") {
-			// WAC fx2ssn: spawn the named effect at the SSN entity's position with
-			// the emitter handle owned per entity — a scripted re-trigger detaches
-			// the previous group (spawn_effect_owned), so loops/respawns never stack
-			// emitters and FOREVEREMIT effects never accumulate
-			// [orig: WacScript_SpawnEffectAtSsnEntity @ 0x4f23a0 — renamed from the
-			// kong "sound" misnomer, it spawns a particle emitter]. The original
-			// orients the emitter to the terrain surface normal at the entity's
-			// grid cell, using the same recovered normal-map kernel as terrain.
-			// [orig: WacScript_SpawnEffectAtSsnEntity @0x4f23a0 reads
-			// outMillis/off_849934 after resolving the entity grid cell.]
-			if (effect_world != nullptr && runtime != nullptr) {
-				const int ssn = eff->get_b();
-				const Variant pos = runtime->entity_position_for_ssn(ssn);
-				if (pos.get_type() != Variant::NIL) {
-					const Vector3 position = pos;
-					Vector3 orientation(0, 1, 0);
-					if (terrain_data_.is_valid()) {
-						orientation = terrain_data_->get_surface_normal_world(position);
-					}
-					effect_world->spawn_effect_owned(ssn, eff->get_text(), position, orientation);
-				}
+				audio->sync_script_voice();
 			}
 		}
-		// fx2tgt (spawn at a placed type-6088 target marker
-		// [orig: WacScript_SpawnEffectAtTargetMarker @ 0x4f7fd0 — same misnomer
-		// family]) stays unrouted: which .bms record field carries the 1..99
-		// target number is unwitnessed — ptl-format-re.md §8.
 	}
+}
+
+void GameWorld::route_script_effects() {
+    const Ref<Simulation> sim = get_sim();
+    EffectWorld *effects = get_effect_world();
+    if (sim.is_null() || effects == nullptr) return;
+    std::vector<opennova::world::ScriptEffectEvent> events;
+    sim->drain_script_effects(events);
+    if (events.empty()) return;
+    // Compilation can register stock aliases before any FX command executes.
+    // BMS's direct named lookup sees those definitions too.
+    for (const auto &name : sim->script_effect_names()) effects->intern_effect(String::utf8(name.c_str()));
+    for (const auto &event : events) effects->spawn_script_effect(event, 0);
 }
 
 // Drain the flight sim's resolved round impacts and present both descriptor legs.
@@ -167,6 +151,7 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	}
 	route_terrain_scorches();
 	route_round_impacts();
+    route_script_effects();
 	// The light-pool lifecycle decay + the light_move round-glow follow, on
 	// the witnessed 62 Hz cadence [orig: EffectWorld_TickInstancesAndLightScale
 	// @ 0x5aa170 from Game_ProcessMainFrame; the round follow @ 0x4eaa9f].
@@ -196,6 +181,9 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 }
 
 void GameWorld::on_runtime_simulation_restarted() {
+    if (MissionAudio *audio = get_mission_audio()) {
+        audio->reset_oneshot_playback();
+    }
 	// A Stop/restart can restore the saved personal slot while the presenter still
 	// owns an emplaced model. Consume that control event synchronously; no fixed
 	// tick runs while stopped.
@@ -212,6 +200,7 @@ void GameWorld::on_runtime_simulation_restarted() {
 		return;
 	}
 	effect_world->reset_runtime_state();
+    route_script_effects();
 	// Persistent item effects belong to the restored entity set, not the scene
 	// that was just discarded. Re-register their admission and owner identities;
 	// restore emits fresh controller-start lifecycle events for occupied baselines.

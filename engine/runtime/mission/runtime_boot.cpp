@@ -3,6 +3,7 @@
 // The boot ORDER is MissionKernel::boot (ADR 0043 slice E9).
 #include <runtime/mission/runtime_boot.h>
 #include <base/io/strutil.h>
+#include <base/resource_index/resource_index.h>
 
 #include <formats/aip/aip.h>
 
@@ -23,6 +24,25 @@ std::string ascii_lower(const char *data, std::size_t max_len) {
 }
 
 } // namespace
+
+BootFileSource boot_files_from_index(const ResourceIndex &index) {
+    BootFileSource files;
+    files.expansion_name = index.mounted_expansion();
+    files.has_file = [&index](const std::string &name) { return index.has_file(name); };
+    files.read_file = [&index](const std::string &name, std::vector<uint8_t> &out) {
+        return index.read_file(name, out);
+    };
+    files.list_files = [&index](const std::string &extension) {
+        std::vector<std::string> result;
+        for (const auto &entry : index.resource_files("particle")) {
+            const auto dot = entry.logical_name.find_last_of('.');
+            if (dot != std::string::npos && strutil::to_lower(entry.logical_name.substr(dot)) == extension)
+                result.push_back(entry.logical_name);
+        }
+        return result;
+    };
+    return files;
+}
 
 MissionTextSource resolve_mission_text(const BootFileSource &files,
 		const std::string &mission_file_basename, std::vector<uint8_t> &out) {

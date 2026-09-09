@@ -91,7 +91,7 @@ misnomer "EventTrigger_NotifyEntityDeath") computes the FIRED EVENT's
 own index (`(entry - g_Events)/24`), scans the spawn-point table (`dword_B76570`,
 count `dword_B76568`) for records whose word +528 references that event, sets their
 pending byte +536 (backward-chaining via byte +535), then `SpawnPoint_SkipBlocked
-@0x4de310`. Spawn points are not ported — D-EVT-1.
+@0x4de310`. The SP route form is implemented by WaypointTrack; the MP POI/spectate reuse remains D-EVT-1.
 
 ### 1.6 Cadence — the fixed-timestep outer loop and per-system dividers
 
@@ -216,21 +216,15 @@ site, where this repo keeps such citations.
 
 Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
 
-- **D-EVT-1 — spawn-point activation on fire: WITNESSED-READY-DEFERRED** (was
-  OPEN-unwitnessed). The marker is `EventTrigger_MarkLinkedSpawnPoints @0x452ce0`
-  (renamed 2026-08-15, ex the "EventTrigger_NotifyEntityDeath" misnomer — the
-  arg is the fired EVENT entry), called from both dispatch
-  paths of UpdateEntry (@0x454cbd delay-expiry, @0x454d25 immediate),
-  authority-gated. The "spawn-point table" is the map POI / deploy-and-spectate
-  list (`0xB76570` ptrs / `0xB76568` count / `0xB7656C` selection, rebuilt by
-  `Entity_BuildMapPoiLists @0x42de40` (renamed 2026-08-15, ex Entity_BuildSpawnPointList)); marking walks entries whose
-  `word[e+0x210] == eventIndex` (strict `> 0` — event 0 can never be
-  referenced), sets `byte[e+0x218] = 1`, then back-chains while
-  `byte[prev+0x217] == 0`; `SpawnPoint_SkipBlocked @0x4de310` then cycles the
-  current selection off blocked entries. Authoring: entity+0x210 ← BMS record
-  u16 @+68 (type 6005 only, @0x40f0b7); the chain flag +0x217 ←
-  bmsi_attributes bit 0x400000 (@0x40f129). Port rides the deploy/POI
-  subsystem (not yet in engine/runtime/world).
+- **D-EVT-1: multiplayer POI/spectate reuse and live marker ownership remain.**
+  The SP route form is already ported: promotion copies type-6005 marker
+  linked-event/chain fields into WaypointTrack; the authority BMS hook marks
+  matching positive event indices, walks flagged predecessors backward and
+  skips completed selections (0x452CE0/0x4DE310). The same retail globals
+  0xB76570/0xB76568/0xB7656C also serve the multiplayer POI list assembled by
+  Entity_BuildMapPoiLists at 0x42DE40. That mode-specific builder and spectate
+  cycling remain separate work. The copied SP entries also do not follow
+  live marker removal or mutation.
 - **D-EVT-2 — quarter-pass piggyback: FIXED 2026-07-05.** The earlier
   "unrelated entity bookkeeping" dismissal was wrong: when the quarter cursor
   is 0 (once per 64 ticks) the pass calls `Entity_UpdatePlayerAwolCounter @0x439dc0` (renamed 2026-08-15, ex Entity_UpdateStuckCounter)
@@ -791,7 +785,7 @@ display as raw values and round-trip.
 | 24 | ChangeSteamAction | `Entity_FindByDCBAndSetFlag(p1)` | ENTITY | TEAM {0,1,2} | — | — |
 | 25 | SingleChangeGroup | `Entity_SetNetIdByParentRef(p1,p2)` | ENTITY | GROUP | — | — |
 | 26 | SingleTeleportAction | `EventAction_TeleportEntityToSpawn(p1)` | ENTITY | teleport-target | — | — |
-| 27 | ParticleEffectAction | `EventAction_SpawnParticleEffect (ex sub_4540E0)(p1)` | id | — | — | — |
+| 27 | ParticleEffectAction | `EventAction_SpawnParticleEffect (ex sub_4540E0)(p1)` | target WP_NUMBER | — | — | All matching pool-3 ItemDef 6088 markers; entity+692/gen_string effect name, zero direction, store without releasing previous group. Shared typed particle consumer; entity+460 lifetime sharing remains D-PTL-24. |
 | 28 | (special) | `EventAction_HandleSpecialTypes(block)` | — | — | — | — (editor marks 28/29 unused) |
 | 30 | GroupOpenDoorAction | `Entity_KillDestructiblesByTeam(p1)` (dmg-transition 7) | GROUP/team | — | — | — |
 | 31 | GroupCloseDoorAction | `Entity_KillDestructiblesByOwner(p1)` | owner ref | — | — | — |
@@ -1060,24 +1054,32 @@ the SSN.
 teleport flag rules, marker selection, AI mirrors, group speed conversion, the
 Null/SingleVelocity no-op arms, and absence of `unported_action` for this set.
 
-### 10.1 Remaining explicit action boundary (D-EVT-6)
+### 10.1 Teammate and remaining explicit action boundaries
 
-This slice does not claim every BMS action is complete. The default diagnostic
-still owns actions 30/31 (group door open/close), 39 (teammate order), and 42..49
-(the primary/exclusive single/group target writers). Action 41 `ExecuteWac`
-still crosses the presenter/embedder effect seam rather than invoking a
-`WacSystem` directly. Those actions need their door, teammate-command,
-target-reference, or runtime-composition owners; they are not modeled as
-generic flag writes. Tracked as **D-EVT-6** in the divergence ledger
-(minted 2026-09-01 — a declared residual with no row is exactly what the
-ledger exists to prevent).
+Action 39 now dispatches subtypes 1/2 through the eight-slot teammate
+operation owner, fully identified dynamic helper definitions and the shared
+native motor/animation paths. Other subtypes are witnessed no-ops. Snapshot
+and retry restore the owner; removal shares native relationship, AI,
+collision and effect-bank cleanup. The exact state sequence, JO's missing
+medic assets, the no-pilot flyover outcome and the guarded original null
+helicopter fault are recorded in
+[world-wac-ai-re section 33.32](../world/world-wac-ai-re.md#3332-teammate-operations-dynamic-helpers-and-removal-2026-09-09).
+Group door actions 30/31 reach DoorSystem, collision and presentation
+(section 33.14).
 
-**D-EVT-1 is unchanged.** `BmsEventSystem::fire` already publishes the fired
-event index to the waypoint completion hook, but retail's linked deploy/POI
-spawn-point table (`0xB76570`) and its blocked-selection walk remain a separate
-subsystem [orig: EventTrigger_MarkLinkedSpawnPoints @ 0x452CE0;
-SpawnPoint_SkipBlocked @ 0x4DE310]. The structural teleport markers above are
-pool-3 type-6088 entities and do not stand in for that deploy/POI table.
+The 2026-09-08 pass implements actions 42..49 through the four target-policy
+words and their infantry/weapon consumers. Action 41 `ExecuteWac` has no
+retail switch arm and is now an explicit no-op. Writer addresses, actual
+semantics, consumer evidence and regression coverage are recorded in
+[world-wac-ai-re.md section 33](../world/world-wac-ai-re.md#33-script-timing-and-target-policy-2026-09-08).
+
+**D-EVT-1 scope correction (2026-09-08):** WaypointTrack already owns the SP
+route form of list 0xB76570, including positive linked-event matching,
+backward completion chains and the blocked-selection walk. Its existing
+waypoint_track test covers those operations, and BmsEventSystem invokes it
+after both immediate and delayed actions on the authority. The remaining
+variant is Entity_BuildMapPoiLists (0x42DE40), plus live marker ownership;
+type-6088 structural teleport/effect markers are a different list.
 
 The queued ChangeAI half of the same parity round is recorded in
 [`world-wac-ai-re.md` §32](../world/world-wac-ai-re.md).

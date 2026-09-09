@@ -19,6 +19,8 @@
 // (world/player_loadout.h, S7b) — every other dependency (spawn needs the
 // promoted AI system, ai-weapon seeding needs the ammo table, collision needs
 // the item db + models) is the same partial order.
+namespace opennova { class ResourceIndex; }
+
 namespace opennova::mission {
 
 // The embedder's mounted-resource reader (the Godot binding backs this with
@@ -27,8 +29,15 @@ struct BootFileSource {
 	std::function<bool(const std::string &name)> has_file;
 	std::function<bool(const std::string &name, std::vector<uint8_t> &out)>
 			read_file;
+	// Optional mounted enumeration, in mount precedence order. Used by the
+	// particle catalog; ordinary in-memory BMS/AI boots need only the readers.
+	std::function<std::vector<std::string>(const std::string &extension)> list_files;
+    std::string expansion_name; // mounted bank-chain metadata, empty for the base game
 	bool valid() const { return has_file != nullptr && read_file != nullptr; }
 };
+
+// The index must outlive the returned readers.
+BootFileSource boot_files_from_index(const ResourceIndex &index);
 
 // The infantry clip-set default when the embedder authors none.
 inline constexpr char kDefaultInfantryAdm[] = "E_STAND.adm";

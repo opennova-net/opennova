@@ -198,19 +198,15 @@ void test_mode_arbiter() {
 
 void test_fov_policy() {
     PlayerViewState v;
-    const float eye[3] = {0, 0, 0};
-    // Hip: the witnessed 80-degree base.
-    CHECK(player_view_fov_h_deg(v, 2, 4.0f) == kPlayerCameraFovHDeg);
-    // Fully sighted with mag 4: 80 / 4. [orig: @ 0x4df401]
-    v.scope_engaged = true;
-    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
-    CHECK(player_view_fov_h_deg(v, 2, 4.0f) == 20.0f);
-    // No sighted flag, or no magnification: the base fov even when engaged.
-    CHECK(player_view_fov_h_deg(v, 1, 4.0f) == kPlayerCameraFovHDeg);
-    CHECK(player_view_fov_h_deg(v, 2, 0.0f) == kPlayerCameraFovHDeg);
-    // Third person suppresses the zoom outright. [orig: @ 0x4df3fa]
+    CHECK(player_view_fov_h_deg(v, 75 << 16, false, false, 1) == 75.0f);
+    // Scoped divides the weather current; Sighted selects a separate 80/zoom.
+    CHECK(player_view_fov_h_deg(v, 60 << 16, true, false, 4) == 15.0f);
+    CHECK(player_view_fov_h_deg(v, 60 << 16, true, true, 4) == 20.0f);
+    CHECK(player_view_fov_h_deg(v, 60 << 16, false, true, 3) == 1747626.0f / 65536.0f);
+    // Third-person mode clears the optical flags at the caller. Its raw
+    // weather current still eases back after the target's 80-degree reset.
     v.third_person = true;
-    CHECK(player_view_fov_h_deg(v, 2, 4.0f) == kPlayerCameraFovHDeg);
+    CHECK(player_view_fov_h_deg(v, 55 << 16, false, false, 1) == 55.0f);
 }
 
 void test_binoculars_effective_state_and_fov() {
@@ -226,7 +222,7 @@ void test_binoculars_effective_state_and_fov() {
     player_view_update_effective_modes(v, true, false);
     CHECK(v.binoculars_raised);
     CHECK(v.binoculars_view_active);
-    CHECK(player_view_fov_h_deg(v, 2, 8.0f) == kBinocularCameraFovHDeg);
+    CHECK(player_view_fov_h_deg(v, 80 << 16, false, false, 1) == kBinocularCameraFovHDeg);
 
     // Movement suppresses both derived states without consuming the request;
     // releasing movement restores them.
@@ -246,7 +242,7 @@ void test_binoculars_effective_state_and_fov() {
     CHECK(v.binoculars_requested);
     CHECK(v.binoculars_raised);
     CHECK(!v.binoculars_view_active);
-    CHECK(player_view_fov_h_deg(v, 2, 8.0f) == kPlayerCameraFovHDeg);
+    CHECK(player_view_fov_h_deg(v, 80 << 16, false, false, 1) == kPlayerCameraFovHDeg);
 
     // Death and round end are reversible gates too.
     v.third_person = false;

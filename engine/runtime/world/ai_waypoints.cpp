@@ -145,6 +145,33 @@ int AiSystem::update_waypoint_movement(AiEntity &e, World &world) {
     return result;
 }
 
+// [orig: Entity_FindNearestTriggerByType @0x407EA0] The subtraction and
+// squared-distance sum wrap at 32 bits, after arithmetic Q16 -> integer shifts.
+int32_t AiSystem::nearest_route_node(const AiEntity &e, uint32_t list) const {
+    if (list >= 123 && list <= 125) return e.slot.f[38];
+    if (list >= 126) return 0;
+    const NavChannel *ch = nav.channel(static_cast<int>(list));
+    if (ch == nullptr) return 0;
+    int32_t best = 0;
+    int32_t best_distance = INT32_MAX;
+    for (int i = 0; i < ch->count && i < 32; ++i) {
+        const NavEntry *node = nav.entry(ch->entries[i]);
+        if (node == nullptr) continue;
+        uint32_t squared = 0;
+        for (int axis = 0; axis < 3; ++axis) {
+            const int32_t delta = static_cast<int32_t>(
+                    uint32_t(e.pos[axis]) - uint32_t(node->f[axis + 1])) >> 16;
+            squared += uint32_t(delta) * uint32_t(delta);
+        }
+        const int32_t distance = static_cast<int32_t>(squared);
+        if (distance <= best_distance) {
+            best_distance = distance;
+            best = i;
+        }
+    }
+    return best;
+}
+
 // The brain half of a waypoint REDIRECT order [orig: Entity_SetWaypointByTeam @0x43cdb4
 // per-entity block — aiComp[35]=1 mode, [37]=list, [38]=node (nearest of the list when
 // unresolved [orig: Entity_FindNearestTriggerByType @0x407ea0]), think cooldown 0,
@@ -153,20 +180,7 @@ void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
     AiBrain &b = e.brain;
     const NavChannel *ch = nav.channel(list);
     if (ch == nullptr || ch->count <= 0) return; // dangling list: no order lands
-    if (node < 0) {
-        // Nearest node of THIS list [orig: @0x407ea0 — min 2D distance].
-        int best = 0;
-        int64_t best_d2 = INT64_MAX;
-        for (int i = 0; i < ch->count && i < 32; ++i) {
-            const NavEntry *ne = nav.entry(ch->entries[i]);
-            if (ne == nullptr) continue;
-            const int64_t dx = static_cast<int64_t>(ne->f[1]) - e.pos[0];
-            const int64_t dy = static_cast<int64_t>(ne->f[2]) - e.pos[1];
-            const int64_t d2 = dx * dx + dy * dy;
-            if (d2 < best_d2) { best_d2 = d2; best = i; }
-        }
-        node = best;
-    }
+    if (node < 0) node = nearest_route_node(e, static_cast<uint32_t>(list));
     b.f[AiBrain::kWpType] = 1;                                     // [orig: aiComp[35] = 1]
     b.f[AiBrain::kWpChannel] = list;                               // [orig: aiComp[37]]
     b.f[AiBrain::kWpNode] = std::min<int32_t>(node, ch->count - 1); // [orig: aiComp[38]]

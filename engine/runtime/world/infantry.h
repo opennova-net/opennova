@@ -33,6 +33,7 @@ std::string infantry_anim_key(int state);
 
 // Per-state behavior flags. [orig: g_animStateFlagsTable @0x8139E8]
 extern const uint32_t kInfantryAnimFlags[kInfantryAnimStateCount];
+extern const uint8_t kInfantryFacialExpressions[kInfantryAnimStateCount];
 
 namespace anim_state {
 enum : int {
@@ -46,6 +47,9 @@ enum : int {
     kWalkCrouchForwardRight = 12,
     kWalkCrouchForwardLeft = 18,
     kWalkProneForward = 19,  // 19..26: prone walk directional block
+    kWashIdle = 27,
+    kWashWalk = 28,
+    kWashRun = 29,
     kJumpStart = 30,
     kJumpLoop = 31,
     // The climb family (D-COL-5): idle holds on the ladder, up/down by the
@@ -300,18 +304,13 @@ struct InfantryState {
     int32_t move_target[3] = {};
     bool at_final_oneshot = false;
 
-	// The nonzero-ness of retail's entity+0x369 path-state byte (0 clear, 1 needs
-	// a path, 2 path found, 3): the two witnessed producers set it to 1 (the
-	// terrain-gradient shove @0x4BA94E and the collision resolver's facing push
-	// @0x4B37BB) and the boarding ring reads it (@0x4BB325: zero -> the 2 u ring,
-	// else carrier bound + 1 u). The 1/2/3 progression and the only clear are the
-	// cover/path consumer ai_find_cover_position @0x4afab0 (search -> 2
-	// @0x4afea8, clear within 1 u @0x4aff06), which is unported, so the byte is
-	// modeled as this bool and nothing here returns it to 0 on arrival (the
-	// arrival writes a frame local, var_1169 @0x4BBD8F).
+	// Collision/terrain arm state 1; the detour search caches a point and enters
+	// 2 until within one unit. State 3 searches without the one-leg fallback.
+	// Boarding also reads nonzero state to expand its arrival ring.
+	// [orig: entity+0x369; 0x4B37BB, 0x4BA94E, 0x4BB325, 0x4AFAB0]
+	uint8_t path_state = 0;
+	int32_t detour_target[3] = {}; // entity+0x324/+0x328/+0x32C
 	// Named E/G/S/H entry points share this staged walk and pool-0 claim.
-	// [orig: Entity_UpdateInfantryAI @0x4B9910; pad_368[1], boneWalkStage/Slot]
-	bool board_blocked = false;
 	uint8_t board_entry_slot = 1;
 	uint8_t board_entry_stage = 0;
 	int board_anim = -1;
@@ -353,6 +352,15 @@ struct InfantryState {
                         : 0.1f;
     }
 
+    // A raw animStateId store still retargets the presentation channel, but
+    // leaves the independent pending state intact. Script and ladder stores
+    // use this form. [orig: WacCmd_SsnAnim @0x4F7630; WacCmd_Anim @0x4ED5B0]
+    void store_body_animation(int state) {
+        const int pending = anim_pending;
+        begin_body_transition(state);
+        anim_pending = pending;
+    }
+
     void reset_body_animation(int state = opennova::world::anim_state::kIdle) {
         anim_state = state;
         anim_pending = 0;
@@ -375,6 +383,8 @@ struct InfantryState {
         player_moving = false;
         player_move_dir_index = 0;
         move_mode = 0;
+        path_state = 0;
+        detour_target[0] = detour_target[1] = detour_target[2] = 0;
         target_dist = 0;
         reset_body_animation(anim_state::kIdle);
         reset_weapon_animation(anim_state::kIdle);
@@ -643,10 +653,15 @@ struct InfantryState {
     int16_t max_health = 100;
 
     // ---- The infantry combat pass (org1 riflemen; world-wac-ai-re §17) ----
-    // The 32-tick perception commit + the per-tick behavior/aim/fire state. Handles
+    // The 32-tick perception commit + 16-tick behavior/aim decision state. Handles
     // stand in for the original entity pointers (container rebase).
     EntityHandle combat_target;       // AiSlot[3] mirror for the infantry pass [orig: slot+12]
     EntityHandle ai_focus;            // entity aiFocus (look/attention entity)
+    // Idle attention, distinct from combat/movement focus. History rotates on
+    // each scan, including a scan that selects nobody. [orig: +0x344/+0x348/+0x34C]
+    EntityHandle head_look_target;
+    EntityHandle last_look_target;
+    EntityHandle previous_look_target;
     EntityHandle last_attacker;       // entity lastAttacker (stamped by the damage pass,
                                       // consumed + cleared by each perception scan)
     EntityHandle aim_ref0;            // entity+0x2F0 — last fired-at target (accuracy settle)
@@ -662,13 +677,19 @@ struct InfantryState {
                                       // the walking-fire aim gate]
     int32_t aim_heading = 0;          // the aim solution (BAM; bearing + sawtooth error)
     int32_t aim_pitch = 0;            // (elevation + error)
+    bool aim_override = false;        // current think produced a non-idle aim solution
     bool aim_valid = false;           // entity aimFlag
+    int32_t last_advanced_ammo = 0; // entity+0x26C, advanced launch store @0x4BF481
     int16_t magazine = 0;             // entity+0x35C word (reload at <=0, refill = clipsize)
 };
 
 // Pure retail body-tick kernels, exposed so deterministic tests can pin the
 // wrap/arithmetic-shift behavior independently of locomotion.
 // [orig: Entity_UpdateInfantryPlayerBody / Entity_UpdateInfantryAI]
+// Independent NPC look chase. Mounted callers apply their parent-specific arc limit.
+// [orig: Entity_UpdateInfantryAI @0x4BEB18..0x4BEFF0]
+void infantry_look_tick(const InfantryState &inf, int32_t &heading, int32_t &pitch,
+                        bool mounted = false);
 void infantry_recoil_tick(InfantryState &inf, int32_t &heading,
                           int32_t &pitch, int32_t random16);
 

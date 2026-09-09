@@ -489,8 +489,12 @@ public:
     void present_fire(World &world, const RoundSpawnParams &params);
 	// Ammo-indexed source fire, including launch presentation and role routing.
 	// [orig: Weapon_FireProcess @0x53F5B0]
-	void fire_source(World &world, Entity &source, FixedVec3 position, int32_t yaw, int32_t pitch,
+	void fire_source(World &world, Entity *source, FixedVec3 position, int32_t yaw, int32_t pitch,
 			uint8_t ammo_index);
+	// NPC/script entry: authority first, then fire and launch presentation.
+	// [orig: WeaponSlot_FireAndSpawnEffects @0x53F440]
+	void fire_npc_ammo(World &world, EntityHandle shooter, FixedVec3 position,
+			int32_t yaw, int32_t pitch, uint8_t ammo_index);
 	int spawn(World &world, const RoundSpawnParams &params,
 			RoundConsequenceMode mode = RoundConsequenceMode::Authoritative);
 

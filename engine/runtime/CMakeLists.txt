@@ -56,12 +56,14 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/teammate_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/placement_traits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/promote.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/runtime_boot.cpp
     # particle — the emitter/effect-scene sim (.ptl model+parse+write: engine/formats/particle)
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/emitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_scene.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/particle/script_effects.cpp
     # hud — the retail game-font text engine + element frame math
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
@@ -135,6 +137,7 @@ add_library(opennova_runtime STATIC
     # is engine/formats/wac
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/compiler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/vm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wac/wac_system.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/wac_layered_load.cpp
     # world — the ONE runtime World: entities, AI, collision, players, vehicles,
     # weapons, zones (62 Hz tick)
@@ -160,6 +163,10 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/occlusion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/iris_march.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_attention.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_detour.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/teammate_operations.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_escort.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_ladder.cpp         # the D-COL-5 climb legs
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_board.cpp           # the 123..127 command legs (ex-D-INF-2)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_combat.cpp          # the D-AI-4 combat pass
@@ -170,6 +177,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_wire.cpp            # replicated anim/input mirror
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_tables.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_spawn.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/doors.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/facial_animation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/inspect.cpp   # the entity directory + debug cards (ADR 0042 d5)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_effects.cpp   # the ITEMS.DEF particlefx attach law: pool gates, identity aliases, attach plan
     ${CMAKE_CURRENT_SOURCE_DIR}/world/present_passes.cpp # the present passes' shared law: husk render pick, husk identity, settle tilt retention
@@ -230,6 +240,10 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ammo_table_build.cpp   # ammo.def -> AmmoTable + the round_type resolve
     ${CMAKE_CURRENT_SOURCE_DIR}/world/score_rules_build.cpp  # score.ini -> ScoreRules for the game type
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_table_build.cpp # weapon.def -> WeaponTable + the D-NET-141 loadout rules
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/script_projectiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/script_effects.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/script_sounds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/script_voice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_fsm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/wire_body_sound.cpp    # the wire-fed remote body's footstep/foley consume
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_inventory.cpp

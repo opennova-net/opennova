@@ -1,0 +1,43 @@
+; GRM File
+; Saved on 9/9/2026, 14:05:06
+; Last edited by OpenNova
+
+basetexture    face.tga
+eyetexture     iris.tga    iris_alpha.tga
+
+
+basemesh
+  vertices    4
+    vertex    0  0.0000  0.0000  xxx
+    vertex    1  1.0000  0.0000  brow
+    vertex    2  1.0000  1.0000  mouth
+    vertex    3  0.0000  1.0000  mouth
+  endvertices
+  triangles    2
+    tri       0    0   1   2
+    tri       1    0   2   3
+  endtriangles
+endbasemesh
+
+eyes
+  eyesize       0.0400  0.0600
+  eye1center    0.3500  0.5000
+  eye2center    0.6500  0.5000
+  eyelimits     0.0300  0.0100
+endeyes
+
+gestures  3
+    gesture      0  NORMAL
+    parameters   2
+    parm        0  0.0000  0.0000  brow
+    parm        1  0.0000  0.0000  mouth
+
+    gesture      1  HAPPY
+    parameters   2
+    parm        0  -0.0500  0.1000  brow
+    parm        1  0.1000  -0.2000  mouth
+
+    gesture      2  SURPRISE
+    parameters   1
+    parm        0  0.0000  0.1500  mouth
+endgestures

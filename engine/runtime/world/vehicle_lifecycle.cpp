@@ -156,6 +156,14 @@ void VehicleSystem::initialize_mission_vehicles() {
 
 // [orig: Entity_RespawnVehicle @0x45FF40]
 void VehicleSystem::respawn(Entity &e) {
+	// [orig: Entity_RespawnVehicle @0x460186 -> EntityList_ClearParentRef
+	// @0x43ED10] Only allocated pool-0 rows whose ground reference matches.
+	world_.registry.for_each_in_pool(0, [&](const Entity &row) {
+		if (row.item_id == 0 || row.ground_target != e.handle) return;
+		Entity &rider = *world_.registry.get(row.handle);
+		rider.ground_target = {};
+		rider.mount_toggle_fallback = {};
+	});
 	world_.rotor_wash.release(e);
 	auto &m = e.veh;
 	// Respawn also retires the husk's authored emitters: retail zeroes the bank
@@ -188,6 +196,9 @@ void VehicleSystem::respawn(Entity &e) {
 	e.health = e.health_max;
 	e.alive = e.health > 0;
 	e.death_motion = DeathMotionMode::None;
+	e.motor_suspended = false;
+	e.attach_parent = {};
+	e.attach_bone = 0;
 	e.death_tick = 0;
 	e.section_mask = 0;
 	e.spawned_piece_mask = 0;
@@ -232,8 +243,7 @@ void VehicleSystem::tick_dead(Entity &e, AiEntity &ai) {
 		// [orig: Server_RemoveEntityAndNotify @0x467ede -> Entity_Destroy @0x43e810,
 		//  brain memset @0x43e995]
 		world_.out.entity_removals.push_back(e.handle.packed);
-		world_.ai.release(e.handle);
-		world_.registry.despawn(e.handle);
+		world_.commands.remove_ssn(e.handle);
 		return;
 	}
 	if (m.stuck_ticks <= (aircraft ? 30 : 15))

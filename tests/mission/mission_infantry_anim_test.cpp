@@ -59,7 +59,7 @@ struct Assets {
 };
 
 struct Harness {
-	std::array<def::DefItemDef, 5> rows{};
+	std::array<def::DefItemDef, 6> rows{};
 	def::DefItemsFile items{rows.data(), rows.size()};
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
 	Assets &assets;
@@ -84,7 +84,7 @@ struct Harness {
 	void map(size_t row, const char *name) { std::strcpy(rows[row].anim_def, name); }
 
 	void boot(bool playable = true, bool organics = true,
-			const char *default_map = mission::kDefaultInfantryAdm) {
+			const char *default_map = mission::kDefaultInfantryAdm, bool premission = false) {
 		bms::File document;
 		if (organics) {
 			for (int i = 1; i < 5; ++i) {
@@ -97,6 +97,21 @@ struct Harness {
 				e.team = 1;
 				document.organics.push_back(e);
 			}
+		}
+		if (premission) {
+			document.organics[0].group_id = 7;
+			document.organics[0].spawns = 2;
+			rows[5].type = 1;
+			rows[5].attrib = w::kItemAttribSpawnPoint;
+			bms::Entity zone{};
+			zone.type = bms::ItemType::Item; zone.type_id = 46; zone.id = 20;
+			zone.group_id = 7; zone.team = 2;
+			document.items.push_back(zone);
+			bms::Event event{}; event.flags = bms::EventFlags::PreMission;
+			event.action_count = 1;
+			bms::Action action{}; action.action_type = bms::ActionType::SingleChangeGroup;
+			action.param1 = 1; action.param2 = 8;
+			document.events = {event}; document.actions = {action};
 		}
 		mission::BootFileSource files;
 		files.has_file = [this](const std::string &name) { return assets.index.has_file(name); };
@@ -169,6 +184,45 @@ void boot_without_default(Assets &assets) {
 	CHECK(h.kernel->local.player_position().y == saved.y);
 	CHECK(h.kernel->root_motion.adm_name(h.player_adm()) == "soldier.adm");
 	h.check_movement();
+}
+
+void initialized_before_premission_and_retry(Assets &assets) {
+    Harness h(assets);
+    h.rows[1].clipsize = 19; // no ammo.def: magazine still comes from the item definition
+    h.boot(false, true, mission::kDefaultInfantryAdm, true);
+    auto &world = h.kernel->world;
+    w::EntityHandle handle;
+    world.registry.for_each_in_pool(0, [&](const w::Entity &entity) {
+        if (entity.net_id == 1) handle = entity.handle;
+    });
+    CHECK(handle.valid());
+    const auto verify = [&] {
+        const auto *entity = world.registry.get(handle);
+        const auto *body = world.ai.for_handle(handle);
+        CHECK(entity && body);
+        CHECK(entity->group_id == 8); // changed by the real PreMission action
+        CHECK(entity->npc_respawn_zone.valid()); // linked using the authored group 7
+        CHECK(world.registry.get(entity->npc_respawn_zone)->group_id == 7);
+        CHECK(entity->hidden && (entity->spawn_flags & 1) == 0);
+        CHECK(entity->npc_respawns == 2);
+        CHECK(body->inf.magazine == 19);
+        CHECK(body->inf.clip_phase > 0 && body->inf.wpn_clip_phase > 0);
+        CHECK(entity->net_anim_phase > 0);
+    };
+    verify();
+    const auto initial = *world.ai.for_handle(handle);
+    const auto spawn = world.registry.get(handle)->spawn_position;
+    for (int retry = 0; retry < 2; ++retry) {
+        world.commands.set_entity_position(handle, {90, 80, 7});
+        world.ai.for_handle(handle)->inf.magazine = 1;
+        world.ai.for_handle(handle)->inf.clip_phase += 30;
+        world.registry.get(handle)->npc_respawn_zone = {};
+        CHECK(h.kernel->restore_baseline());
+        verify();
+        CHECK(world.ai.for_handle(handle)->inf.clip_phase == initial.inf.clip_phase);
+        CHECK(world.ai.for_handle(handle)->pos[2] == initial.pos[2]);
+        CHECK(world.registry.get(handle)->spawn_position.z == spawn.z);
+    }
 }
 
 void configured_fallback(Assets &assets) {
@@ -282,6 +336,7 @@ int main() {
 	try {
 		Assets assets;
 		boot_without_default(assets);
+		initialized_before_premission_and_retry(assets);
 		configured_fallback(assets);
 		no_clips_then_rearm(assets);
 		late_spawn_and_type_resolution(assets);

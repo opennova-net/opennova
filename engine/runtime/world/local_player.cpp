@@ -98,8 +98,8 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	if (w::player_view_move_input(view, move_held,
 				weapon.active ? weapon.def.flags : 0) &&
 			(weapon.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
-		if (w::player_view_set_engaged(view, false,
-					(weapon.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
+		if (w::local_player_set_scope(world, weapon, view,
+					*w::active_local_weapon_slot(world, weapon), false))
 			w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
 	}
 	w::local_player_view_refresh(&world, view);
@@ -134,8 +134,8 @@ bool LocalPlayer::request_stance(int stance) {
 void LocalPlayer::look(float dx_px, float dy_px) {
 	World &world = world_;
 	int32_t scoped_zoom = 0;
-	if (!view.binoculars_view_active && weapon.active && view.scope_engaged && weapon.scope_max_mag > 1.0f)
-		scoped_zoom = static_cast<int32_t>(weapon.scope_max_mag);
+	if (!view.binoculars_view_active && weapon.active && view.scope_engaged)
+		scoped_zoom = w::local_player_scope_zoom(weapon, *w::active_local_weapon_slot(world, weapon));
 	const bool prone = stance_latch_ == 2;
 	look_accum_x_ += dx_px;
 	look_accum_y_ += dy_px;
@@ -264,39 +264,8 @@ w::LocalPlayerViewFrame LocalPlayer::view_frame() {
 	return f;
 }
 
-bool LocalPlayer::local_player_can_fire(const w::AiEntity *body) const {
-	const World &world = world_;
-	// The Player_CanFireWeapon verdict the body updater and the HUD share
-	// [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper
-	// @0x4dcd30].
-	const w::Entity *local = world.registry.get(world.cached.local_player);
-	if (local == nullptr || body == nullptr || !weapon.active) return false;
-	bool mount_allows = true;
-	if (local->mounted)
-		mount_allows = local->mount_type == w::SeatType::Passenger ||
-				(local->mount_type == w::SeatType::Gunner && weapon.usegun_slot_active);
-	if (!mount_allows || view.third_person || view.binoculars_view_active) return false;
-	const w::WeaponSlotState *slot = w::active_local_weapon_slot(world, weapon);
-	if (slot == nullptr) return false;
-	const uint32_t flags = static_cast<uint32_t>(weapon.def.flags);
-	if (slot->current == w::weapon_action::kReload && (flags & DEF_WEAPON_FLAG_NOCARDSWITCH) == 0)
-		return false;
-	const bool scope_promoted = body->inf.scope_raised;
-	const bool scoped = scope_promoted && (flags & DEF_WEAPON_FLAG_SCOPED) != 0;
-	const bool sighted = scope_promoted && (flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
-			slot->current != w::weapon_action::kSwitchFrom;
-	const uint32_t entity_flags = local->flags | local->engine_flags;
-	const bool in_air = body->inf.airborne || (entity_flags & w::kEntityFlagInAir) != 0;
-	const bool submerged = (entity_flags & w::kEntityFlagDrowning) != 0 ||
-			w::entity_eye_below_water(world, body->pos[2], local->eye_offset_z);
-	// Dead (Flags & 0x2) and airborne (0x2000) share ONE can_fire=0 group
-	// that the FORCESCOPED override reverses, so a dead body holding a
-	// ForceScoped weapon still reads can_fire [orig: `Flags & 0x2002` @0x5cf7fb;
-	// the override @0x5cf845].
-	const bool dead = !local->alive || local->health <= 0;
-	const bool ordinary = !dead && !in_air && (sighted || (scoped && !body->inf.player_moving)) &&
-			(sighted || !submerged);
-	return (flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0 || ordinary;
+bool LocalPlayer::local_player_can_fire() {
+	return w::local_player_scope_view_visible(world_, weapon, view);
 }
 
 void LocalPlayer::collect_attach_labels(std::vector<w::AttachLabel> &out, const VehicleOccupancySource *source) {
@@ -306,9 +275,7 @@ void LocalPlayer::collect_attach_labels(std::vector<w::AttachLabel> &out, const 
 	if (player == nullptr || !player->alive || player->health <= 0) return;
 	// [orig: is_armory_mode = entity Flags & 0x400000 @0x5a32c4]
 	const bool armory_mode = (player->flags & w::kEntityFlagArmoryZone) != 0;
-	const w::AiEntity *body =
-			world.ai.for_handle(world.cached.local_player);
-	world.vehicles.collect_attach_labels(*player, armory_mode, local_player_can_fire(body), out, nullptr, source);
+	world.vehicles.collect_attach_labels(*player, armory_mode, local_player_can_fire(), out, nullptr, source);
 }
 
 bool LocalPlayer::local_player_dead() const {
@@ -367,7 +334,7 @@ void LocalPlayer::apply_player_input_pre_tick() {
 		p->inf.binoculars_raised = view.binoculars_raised;
 		p->inf.wpn_run_anim = weapon.active ? weapon.run_anim : 0;
 		p->inf.wpn_force_crouch = weapon.active && weapon.force_crouch;
-		p->inf.aimed_shot_available = local_player_can_fire(p);
+		p->inf.aimed_shot_available = local_player_can_fire();
 	}
 	if (w::Entity *entity = world.registry.get(world.cached.local_player)) {
 		// The per-frame view-flag restamp onto the body's Flags word

@@ -306,22 +306,27 @@ void AiSystem::ai_set_target(World &world, AiEntity &e, EntityHandle target) {
 }
 
 // [orig: Entity_ClearAllReferences @0x465670]
-void AiSystem::clear_vehicle_target_references(World &world, AiEntity &vehicle) {
-	const int32_t packed = int32_t(vehicle.handle.packed) + 1;
+void AiSystem::clear_entity_references(World &world, EntityHandle removed) {
+	const int32_t packed = int32_t(removed.packed) + 1;
+	AiEntity *body = for_handle(removed);
 	for (int pool = 0; pool < 2; ++pool)
 		world.registry.for_each_in_pool(pool, [&](const Entity &entity) {
 			AiEntity *other = for_handle(entity.handle);
 			if (other == nullptr)
 				return;
 			if (other->inf.active) {
-				if (other->slot.f[3] == packed)
+				if (other->slot.f[3] == packed) {
 					other->slot.f[3] = 0;
+					// These are mirrors of the same organic slot+12 pointer.
+					other->inf.combat_target = {};
+					world.registry.get(other->handle)->ai_target = -1;
+				}
 				return;
 			}
 			// Both assembly sites pass the destroyed entity to SetAITarget,
 			// preserving this retail quirk rather than clearing the other brain.
-			if (other->brain.f[AiBrain::kTargetSlot] == packed)
-				ai_set_target(world, vehicle, EntityHandle{});
+			if (other->brain.f[AiBrain::kTargetSlot] == packed && body)
+				ai_set_target(world, *body, EntityHandle{});
 			if (other->brain.f[AiBrain::kPriorityTarget] == packed)
 				other->brain.f[AiBrain::kPriorityTarget] = 0;
 			if (other->brain.f[AiBrain::kDamageInfo] == packed)
@@ -361,13 +366,57 @@ void AiSystem::weapon_fire_origin(World &world, const AiEntity &e, int32_t out[3
     weapon_fire_origin(e, out);
 }
 
+// The organic fire/aim source at one of the three resolved launch points.
+// [orig: Entity_GetAttachmentWorldPosition @0x4B2670]
+void AiSystem::organic_fire_pose(World &world, const AiEntity &e,
+                                 int launch_slot, int32_t out[6]) const {
+    weapon_fire_origin(e, out);
+    out[3] = e.heading; out[4] = e.pitch; out[5] = e.roll;
+    const Entity *entity = world.registry.get(e.handle);
+    const Entity *parent = entity != nullptr ? world.registry.get(entity->mount_target) : nullptr;
+    if (parent != nullptr && entity->mount_type == SeatType::Gunner &&
+            parent->has_item_def && (parent->item_attrib & 0x20u) != 0) {
+        // This special parent uses weapon slot zero's fire-origin point.
+        // [orig: @0x4B2682..0x4B26B6 -> @0x545C60, slot=0/field=0]
+        if (world.pose_provider != nullptr && world.pose_provider->resolve_userpoint_transform(
+                world, parent->handle, weapon_userpoint_byte(*parent, 0, 0), out)) return;
+        if (const AiEntity *parent_body = for_handle(parent->handle)) {
+            weapon_fire_origin(*parent_body, out);
+            out[3] = parent_body->heading; out[4] = parent_body->pitch; out[5] = parent_body->roll;
+        } else {
+            weapon_fire_origin(*parent, out);
+            out[3] = bam_heading_from_mission_yaw_deg(parent->yaw);
+            out[4] = bam_from_degrees_wrapped(parent->pitch);
+            out[5] = bam_from_degrees_wrapped(parent->roll);
+        }
+        return;
+    }
+    if (launch_slot >= 0 && launch_slot < 3 && world.pose_provider != nullptr) {
+        // The skeletal point supplies position; the original explicitly
+        // copies ENTITY orientation, not the weapon-bone matrix's euler.
+        world.pose_provider->resolve_organic_attachment(
+                world, e.handle, e.profile.organic.launch[size_t(launch_slot)], out);
+    }
+}
+
 void AiSystem::weapon_aim_origin(World &world, const Entity &e, int32_t out[3]) const {
-    // [orig: Entity_ComputeWeaponFireOrigin @0x43b4b0 — def+92 == 3 selects
-    //  the person leg; the +0x6C vector's writer is unwalked, so the muzzle
-    //  seam stands in for it (D-AI-6)]
-    const bool person = e.has_item_def ? e.item_type == 3 : e.kind == EntityKind::Organic;
-    if (person) {
-        weapon_fire_origin(world, e, out);
+    // The person target point is its CameraOffset, with a time/identity
+    // phase selecting the height and small XY jitter. The assembly loads
+    // tick's VALUE, not its address. [orig: @0x43B4C2..0x43B523]
+    if (e.has_item_def && e.item_type == 3) {
+        const AiEntity *body = for_handle(e.handle);
+        if (body) weapon_fire_origin(*body, out); else weapon_fire_origin(e, out);
+        const int32_t eye[3] = {body ? body->inf.eye_offset_x : e.eye_offset_x,
+                                body ? body->inf.eye_offset_y : e.eye_offset_y,
+                                body ? body->inf.eye_offset_z : e.eye_offset_z};
+        const uint32_t phase = world.logic_tick + 36u * uint32_t(e.net_id);
+        const bool low = (phase & 0x80u) != 0;
+        const int32_t jitter = int32_t(phase & 0x60u);
+        out[0] = io::bam_add(out[0], io::bam_add(io::bam_sar(eye[0], low ? 2 : 1),
+                                               (jitter - 64) * 64));
+        out[1] = io::bam_add(out[1], io::bam_add(io::bam_sar(eye[1], low ? 2 : 1),
+                                               (jitter - 32) * 64));
+        out[2] = io::bam_add(out[2], low ? io::bam_sar(eye[2], 1) : eye[2]);
         return;
     }
     // No graphic model: the raw position [orig: @0x43b54f..0x43b55b].
@@ -468,20 +517,23 @@ bool AiSystem::line_of_sight_clear_impl(World &world, const int32_t a[3],
     return !los_terrain_blocked(*terrain, a, b);
 }
 
-// [orig: Entity_AlertNearbyAllies @0x4654b0] same-team, alive, non-building entities
-// within `radius` (16.16): own AiSlot+136 = 2 and each ally's brain alert = 2. Container
-// rebase: the original scans pool 1; our brains live on the AiEntity list, so the walk
-// covers every brained entity (pool 0 organics included) — values written are identical.
-void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t radius) {
-    (void)world;
-    e.slot.bytes()[AiSlot::kAlertByte] = 2;
-    const int64_t r = radius;
-    for (AiEntity &ally : entities_) {
-        if (&ally == &e || ally.team != e.team || ally.health <= 0) continue;
-        const int64_t ddx = static_cast<int64_t>(ally.pos[0]) - e.pos[0];
-        const int64_t ddy = static_cast<int64_t>(ally.pos[1]) - e.pos[1];
-        if (ddx * ddx + ddy * ddy > r * r) continue;
-        ally.brain.f[AiBrain::kAlert] = 2;
+// The retail argument is unused: the radius is always 100 world units.
+// Only pool 1 is visited, and a qualifying ally makes the caller's controller
+// red even if that ally has no brain. [orig: Entity_AlertNearbyAllies @0x4654B0]
+void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/) {
+    if (e.brain.f[AiBrain::kOwner] == 0) return;
+    for (size_t slot = 0; slot < world.registry.pool_capacity(1); ++slot) {
+        const EntityHandle h = EntityHandle::make(1, static_cast<int>(slot));
+        const Entity *ally = world.registry.get(h);
+        if (ally == nullptr || ally->item_id == 0 || h == e.handle ||
+                ally->team != e.team || ally->health <= 0 ||
+                ((ally->flags | ally->engine_flags) & (2u | kEntityFlagPlayer)) != 0) continue;
+        const double dx = io::bam_sub(int32_t(ally->position.x * io::kFp16One), e.pos[0]);
+        const double dy = io::bam_sub(int32_t(ally->position.y * io::kFp16One), e.pos[1]);
+        const double dz = io::bam_sub(int32_t(ally->position.z * io::kFp16One), e.pos[2]);
+        if (std::sqrt(dx * dx + dy * dy + dz * dz) >= 6553601.0) continue;
+        e.slot.bytes()[AiSlot::kAlertByte] = 2;
+        if (AiEntity *brain = for_handle(h)) brain->brain.f[AiBrain::kAlert] = 2;
     }
 }
 
@@ -546,25 +598,8 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
 // The fire validator's full local-frame metrics, shared by the aircraft
 // movement visibility check and its weapon solver. [orig: sub_53AFC0 @0x53AFC0;
 // Entity_ValidateWeaponTarget @0x53A400; compute_relative_position_metrics @0x545710]
-bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &target,
-		const int32_t pose[6], int32_t aim_offset, bool skip_los, int32_t metrics[6]) {
-	if (target.handle == e.handle ||
-			(target.health <= 0 && int32_t(world.logic_tick - target.death_tick) > 16))
-		return false;
-	if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0 &&
-			world.match.outcome().ended)
-		return false;
-	int32_t aim[3];
-	weapon_aim_origin(world, target, aim);
-	if (aim_offset != 0) {
-		const int32_t zero[3] = {};
-		const CollisionMatrix yaw = collision_matrix_from_euler(e.heading, 0, 0, zero);
-		const int32_t offset[3] = { aim_offset, 0, 0 };
-		int32_t rotated[3];
-		yaw.rotate_point(offset, rotated);
-		for (int axis = 0; axis < 3; ++axis)
-			aim[axis] = io::bam_add(aim[axis], rotated[axis]);
-	}
+uint32_t AiSystem::weapon_relative_metrics(const int32_t pose[6], const int32_t aim[3],
+                                            int32_t metrics[6]) {
 	CollisionMatrix frame = collision_matrix_from_euler(pose[3], pose[4], pose[5], pose), inverse;
 	frame.invert_into(inverse);
 	const int32_t delta[3] = { io::bam_sub(aim[0], pose[0]), io::bam_sub(aim[1], pose[1]),
@@ -589,6 +624,32 @@ bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &ta
 	const uint32_t yaw = uint32_t(metrics[3] < 0 ? io::bam_sub(0, metrics[3]) : metrics[3]);
 	const uint32_t pitch = uint32_t(metrics[4] < 0 ? io::bam_sub(0, metrics[4]) : metrics[4]);
 	const uint32_t arc = std::max(yaw, pitch) + ((5u * std::min(yaw, pitch)) >> 4);
+	return arc;
+}
+
+bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &target,
+		const int32_t pose[6], int32_t aim_offset, bool skip_los, int32_t metrics[6]) {
+	if (target.handle == e.handle ||
+			(target.health <= 0 && int32_t(world.logic_tick - target.death_tick) > 16))
+		return false;
+	if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0 &&
+			world.match.outcome().ended)
+		return false;
+    const Entity *shooter = world.registry.get(e.handle);
+    if (shooter != nullptr && !shooter->target_selectors.allows(target.net_id, target.group_id))
+        return false; // [orig: Entity_ValidateWeaponTarget @0x53A400]
+	int32_t aim[3];
+	weapon_aim_origin(world, target, aim);
+	if (aim_offset != 0) {
+		const int32_t zero[3] = {};
+		const CollisionMatrix yaw = collision_matrix_from_euler(e.heading, 0, 0, zero);
+		const int32_t offset[3] = { aim_offset, 0, 0 };
+		int32_t rotated[3];
+		yaw.rotate_point(offset, rotated);
+		for (int axis = 0; axis < 3; ++axis)
+			aim[axis] = io::bam_add(aim[axis], rotated[axis]);
+	}
+	const uint32_t arc = weapon_relative_metrics(pose, aim, metrics);
 	const auto &p = e.profile;
 	// Context flags 111: heat and radar arms, with their separate FOV/range
 	// and signature caps. The cone-only range arm requires bit16, absent here.
@@ -806,7 +867,7 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t, bool 
 // cases 0x0C..0x14 remain explicit deferred arms. Combat event types (1/3/4)
 // are not commands, so the original returns 0 and the event switch proceeds;
 // this faithfully returns false.
-bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
+bool AiSystem::ai_handle_command(World &world, AiEntity &e, const AiEventEntry &ev) {
     int32_t t = ev.type();
     switch (t) {
     case 6: { // ChangeAI alert level [orig: AI_HandleCommand case 6
@@ -896,6 +957,25 @@ bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
         e.brain.f[t == 10 ? AiBrain::kSpeedA : AiBrain::kSpeedB] = fixed;
         return true;
     }
+    case 0x0C: { // incoming guided-round proximity notification
+        // [orig: AI_HandleCommand @0x465906..0x4659A6]
+        const int32_t current = e.brain.f[AiBrain::kCurState];
+        int next = -1;
+        if ((e.profile.flags96 & 0x10) != 0 && (e.profile.flags96 & 2) == 0) {
+            if (e.profile.type == 1 && current != 14 && current != 6) next = 10;
+            else if (e.profile.type == 2 && current != 22) next = 18;
+        }
+        if (next >= 0) {
+            e.brain.set_pend(next);
+            e.brain.f[AiBrain::kPrevAlert] = 2;
+            e.brain.f[AiBrain::kAlert] = 2;
+            if (const Entity *entity = world.registry.get(e.handle))
+                world.script.relations.group(entity->group_id).alert = TriggerRelations::kAlertRed;
+            alert_nearby_allies(world, e, 0x640000);
+            e.brain.f[AiBrain::kFireTimer] = 93;
+        }
+        return true;
+    }
     case 0x15: // stationary weapons-free [orig: @0x4659A7 — arg 0 clears byte
                // +785; nonzero pushes the type's combat state (GROUND -> 17,
                // HELO -> 8) into pending when different, then sets it 1]
@@ -917,7 +997,8 @@ bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
                 static_cast<int32_t>(ev.f[3] * kBamPerDegreeInt);
         return true;
     default:
-        if (t >= 0x0C && t <= 0x14) ++unported_calls; // deferred command arms
+        // 13..20 have no shared command arm: state-specific event handlers
+        // receive them after this false return. [orig: AI_HandleCommand @0x465770]
         return false;
     }
 }

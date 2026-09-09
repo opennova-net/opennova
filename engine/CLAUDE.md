@@ -7,9 +7,9 @@
   - `base/` — shared substrate and repo plumbing: io, crt, vfs, resource_index,
     gameprofile, pcapio.
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
-    runtime-fused: ADR 0030), 31 today: adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt,
+    runtime-fused: ADR 0030), 32 today: adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt,
     cbin, threedi, bad, def, avatars, mission, trn, cpt, til, foliage, env,
-    mnu, mns, sbf, lwf, dbf, mus, playersav, particle (.ptl), score, bink,
+    mnu, mns, sbf, lwf, dbf, mus, grm, playersav, particle (.ptl), score, bink,
     wac (front end; compiler/VM stay runtime).
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),

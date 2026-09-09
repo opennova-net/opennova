@@ -54,8 +54,7 @@ static void pose_emplacement_attachments(World &world) {
             });
             for (EntityHandle occupant : occupants)
                 world.vehicles.detach(occupant);
-            world.ai.release(orphan); // a brained child frees its brain with the row
-            world.registry.despawn(orphan);
+            world.commands.remove_ssn(orphan);
         }
     }
     lap.mark(devtools::Slot::SIM_ATTACHMENT_ORPHANS);
@@ -137,6 +136,7 @@ void World::add_system(ISystem *sys) {
 }
 
 void World::load_systems() {
+    diagnostics.clear();
     for (ISystem *s : systems_) s->on_load(*this);
 }
 
@@ -146,10 +146,8 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // phases below lap onto the SIM_WORLD_* rows.
     const devtools::ProfileScope tick_scope(profile, devtools::Slot::SIM_SERVER_WORLD);
     devtools::ProfileLap lap(profile);
-    // [orig: WacScript_AdvanceTick refreshes the per-tick local-player cache via
-    // WacScript_CacheLocalPlayerState @0x4f5780 at the top of the tick, before the
-    // script evaluators read it. Deferred: the mission sim has no local-player avatar
-    // yet, so `cached` stays host-populated and the WAC near-* builtins read it as-is.]
+    // The WAC player cache refreshes at bytecode entry, not at this tick
+    // boundary. [orig: WacScript_ExecuteBytecode @0x4F58F4]
     TickContext ctx;
     ctx.world = this;
     ctx.logic_tick = logic_tick;
@@ -277,6 +275,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     }
     if (gameplay) {
         minefields.tick_pool(*this, 2);
+        doors.tick(*this); // [orig: Entity_UpdateAllEntities @0x4C2307]
         minefields.tick_pool(*this, 3);
     }
     lap.mark(devtools::Slot::SIM_WORLD_DESTRUCTION);
@@ -310,6 +309,7 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     // latest-intent rows on the same logic clock so old entity lifetimes cannot
     // occupy mailbox admission indefinitely.
     out.sound_emitters.prune(logic_tick);
+    script.voice.refresh(*this);
     lap.mark(devtools::Slot::SIM_WORLD_HOUSEKEEPING);
 }
 
@@ -381,8 +381,21 @@ World::Snapshot World::snapshot() const {
     s.registry = registry;
     s.vars = script.vars;
     s.wac_values = script.wac_values;
+    s.squad_events = script.squad_events;
+    s.weapon_input = script.weapon_input;
+    s.voice = script.voice.snapshot();
+    s.initial_script_effects = out.script_effects;
+    s.initial_script_sounds = out.script_sounds;
+    s.initial_slot_sounds = out.slot_sounds;
+    s.next_script_effect_order = out.next_script_effect_order;
+    s.forced_animation = script.forced_animation;
+    s.diagnostics = diagnostics;
     s.env = env;
     s.weather = weather;
+    s.doors = doors;
+    s.facials = facials;
+    s.teammates = teammates;
+    s.vehicle_ai_spawn_phase = vehicle_ai_spawn_phase;
     s.match = match;
     s.spawn_waves = zones.spawn_waves;
     s.zone_capture_state = zones.capture;
@@ -404,6 +417,8 @@ void World::restore(const Snapshot &s) {
     script.wac_values = s.wac_values;
     env = s.env;
     weather = s.weather;
+    doors = s.doors;
+    facials = s.facials;
     match = s.match;
     zones.spawn_waves = s.spawn_waves;
     zones.capture = s.zone_capture_state;
@@ -426,11 +441,15 @@ void World::restore(const Snapshot &s) {
     cached = CachedFrameState{};
     cached.local_player = s.local_player;
     out.effects.clear();
+    out.script_effects = s.initial_script_effects;
+    out.script_sounds = s.initial_script_sounds;
+    out.next_script_effect_order = s.next_script_effect_order;
 	out.vehicle_effects.clear();
-	out.slot_sounds.clear();
+	out.slot_sounds = s.initial_slot_sounds;
 	out.sound_emitters.clear();
     out.fire_sounds.clear();
 	out.source_fires.clear();
+    out.rounds.clear();
 	round_sim.reset();
 	explosions.reset();
     throwables.reset();
@@ -445,6 +464,16 @@ void World::restore(const Snapshot &s) {
     // sealed, and reset must not reconstruct them through another seam.
     kill_stats = MissionKillStats{};
     load_systems(); // systems re-init their per-mission state
+    teammates = s.teammates;
+    vehicle_ai_spawn_phase = s.vehicle_ai_spawn_phase;
+    script.heli_lift_active_count = int32_t(teammates.count());
+    // on_load clears the WAC input arrays. A sealed play-start baseline may
+    // already contain controls authored by the initial script execution.
+    script.weapon_input = s.weapon_input;
+    script.voice.restore(s.voice);
+    script.squad_events = s.squad_events;
+    script.forced_animation = s.forced_animation;
+    diagnostics = s.diagnostics; // retain boot gaps, discard findings from the previous playthrough
     if (collision != nullptr) collision->refresh_after_registry_change(*this);
     registry.for_each([&](const Entity &vehicle) {
         if (vehicle.primary_occupant.valid())

@@ -372,6 +372,7 @@ void Match::configure(const MatchRules &rules) {
     if (!rules_.score_values.has_value())
         rules_.score_values = default_match_score_values(rules_.game_type);
     players_.clear();
+    player_punts_.clear();
     teams_ = {};
     team_hold_ticks_ = {};
     periodic_second_timer_ = 0;
@@ -440,6 +441,62 @@ MatchPlayer *Match::player(EntityHandle entity) {
 const MatchStats &Match::team_stats(uint8_t team) const {
     static const MatchStats empty;
     return team < teams_.size() ? teams_[team] : empty;
+}
+
+// This raw stats event deliberately bypasses score.ini and team scoring.
+// Positive awards recurse through the first AND second occupant links. The
+// second link can consequently receive both the nested half and direct quarter.
+// Zero recursive amounts still allow the caller's event-27 counter increment.
+// [orig: CPlayerStats_RecordEvent @0x52CAF8..0x52CBB3, event 28]
+void Match::share_experience(const World &world, MatchPlayer &recipient, int32_t amount) {
+    if (amount == 0) return;
+    recipient.stats[MatchStats::kPoints] =
+            wrap_add(recipient.stats[MatchStats::kPoints], amount);
+    const Entity *entity = world.registry.get(recipient.identity.entity);
+    if (amount <= 0 || entity == nullptr) return;
+    const Entity *first = world.registry.get(entity->primary_occupant);
+    if (first == nullptr) return;
+    const auto award = [&](EntityHandle handle, int32_t share) {
+        if (MatchPlayer *linked = player(handle)) {
+            share_experience(world, *linked, share);
+            linked->stats[MatchStats::kSharedPointAwards] =
+                    wrap_add(linked->stats[MatchStats::kSharedPointAwards], 1);
+        }
+    };
+    award(first->handle, amount >> 1);
+    if (const Entity *second = world.registry.get(first->primary_occupant))
+        award(second->handle, amount >> 2);
+}
+
+// [orig: WacCmd_AddExp @0x4F2690]
+bool Match::add_experience(const World &world, EntityHandle handle, int32_t amount) {
+    const Entity *entity = world.registry.get(handle);
+    MatchPlayer *recipient = player(handle);
+    if (entity == nullptr || !entity->has_item_def || amount == 0 || recipient == nullptr)
+        return false;
+    share_experience(world, *recipient, amount);
+    return true;
+}
+
+// Handler success means a registered player, including a dead player or the
+// local loopback. The connection owner applies its own disconnect gates.
+// [orig: WacCmd_PlayerPunt @0x4F0DA0; WacCmd_PlayerKillPunt @0x4F0D30;
+// CNapiNPConnection_TrySendChatMessage @0x5006C0]
+bool Match::request_player_punt(const World &world, EntityHandle handle, bool kill_punt) {
+    const Entity *entity = world.registry.get(handle);
+    if (entity == nullptr || player(handle) == nullptr) return false;
+    for (const MatchPlayerPunt &pending : player_punts_)
+        if (pending.entity == handle && pending.spawn_id == entity->registry_spawn_id)
+            return true; // the first pending disconnect event wins
+    player_punts_.push_back({handle, entity->registry_spawn_id,
+                             uint8_t(kill_punt ? 49 : 33)});
+    return true;
+}
+
+std::vector<MatchPlayerPunt> Match::drain_player_punts() {
+    std::vector<MatchPlayerPunt> result;
+    result.swap(player_punts_);
+    return result;
 }
 
 int32_t Match::flag_capture_target(const World &world, uint8_t scoring_team) {

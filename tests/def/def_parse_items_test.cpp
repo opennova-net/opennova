@@ -819,8 +819,10 @@ int main(void) {
 
     /* The anim-fire weapon family + clipsize default: absent keys leave the fields
        zeroed (the fixture predates the JO character-item authoring). */
-    if (soldier->ammo_closeattack[0] != '\0' || soldier->clipsize != 0 ||
-        soldier->launchups_closeattack[0] != '\0') {
+    if (soldier->ammo_closeattack[0] != '\0' || soldier->ammo_easyrocket[0] != '\0' ||
+        soldier->ammo_advancedrocket[0] != '\0' || soldier->ammo_marker3[0] != '\0' ||
+        soldier->clipsize != 0 || soldier->launchups_closeattack[0] != '\0' ||
+        soldier->launchups_rocket[0] != '\0' || soldier->launchups_marker3[0] != '\0') {
         fprintf(stderr, "FAIL: soldier ammo/clipsize/launchups should be unset, got '%s'/%d/'%s'\n",
                 soldier->ammo_closeattack, soldier->clipsize,
                 soldier->launchups_closeattack);
@@ -851,10 +853,12 @@ int main(void) {
         "  move_function org1\n"
         "  clipsize 30\n"
         "  ammo_closeattack    AMMO_AK47_556MM\n"
-        "  ammo_easyrocket     AMMO_AK47_556MM\n"
-        "  ammo_advancedrocket AMMO_AK47_556MM\n"
-        "  ammo_marker3        AMMO_AK47_556MM\n"
+        "  ammo_easyrocket     AMMO_EASY\n"
+        "  ammo_advancedrocket AMMO_ADVANCED\n"
+        "  ammo_marker3        AMMO_MARKER\n"
         "  launchups_closeattack    mflash01\n"
+        "  launchups_rocket         rocket01\n"
+        "  launchups_marker3        marker03\n"
         "  weaprbup   gunfire_r\n"
         "  weaplmup   flash_l\n"
         "  weaprcup2  casing_r2\n"
@@ -869,7 +873,9 @@ int main(void) {
         return 1;
     }
     if (strcmp(rifle_items.entries[0].ammo_closeattack, "AMMO_AK47_556MM") != 0 ||
-        strcmp(rifle_items.entries[0].ammo_marker3, "AMMO_AK47_556MM") != 0) {
+        strcmp(rifle_items.entries[0].ammo_easyrocket, "AMMO_EASY") != 0 ||
+        strcmp(rifle_items.entries[0].ammo_advancedrocket, "AMMO_ADVANCED") != 0 ||
+        strcmp(rifle_items.entries[0].ammo_marker3, "AMMO_MARKER") != 0) {
         fprintf(stderr, "FAIL: rifleman ammo_closeattack mismatch: '%s'\n",
                 rifle_items.entries[0].ammo_closeattack);
         def_free_items(&rifle_items);
@@ -877,7 +883,9 @@ int main(void) {
     }
     /* The def-authored launch userpoint NAME (the AI muzzle; world-wac-ai-re
        §21.2) [orig: ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB]. */
-    if (strcmp(rifle_items.entries[0].launchups_closeattack, "mflash01") != 0) {
+    if (strcmp(rifle_items.entries[0].launchups_closeattack, "mflash01") != 0 ||
+        strcmp(rifle_items.entries[0].launchups_rocket, "rocket01") != 0 ||
+        strcmp(rifle_items.entries[0].launchups_marker3, "marker03") != 0) {
         fprintf(stderr, "FAIL: rifleman launchups_closeattack mismatch: '%s'\n",
                 rifle_items.entries[0].launchups_closeattack);
         def_free_items(&rifle_items);

@@ -368,6 +368,15 @@ Dictionary EntityCard::to_json_value() const {
 	} else if (value_.has_world) {
 		out = world_json(value_.world);
 	}
+    out["facial_available"] = value_.facial.available;
+    out["facial_current"] = value_.facial.current;
+    out["facial_next"] = value_.facial.next;
+    out["facial_override"] = value_.facial.expression_override;
+    out["facial_automatic"] = value_.facial.automatic;
+    out["facial_override_timer"] = value_.facial.override_timer;
+    out["facial_texture_priority"] = value_.facial.texture_priority;
+    out["facial_blend"] = value_.facial.blend;
+    out["facial_display_frame"] = static_cast<int64_t>(value_.facial.display_frame);
 	if (replica_.valid) {
 		out["client_entity_debug"] = replica_json(replica_);
 	}
@@ -375,6 +384,15 @@ Dictionary EntityCard::to_json_value() const {
 }
 
 void EntityCard::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("has_facial_animation"), &EntityCard::has_facial_animation);
+	ClassDB::bind_method(D_METHOD("get_facial_expression"), &EntityCard::get_facial_expression);
+	ClassDB::bind_method(D_METHOD("get_facial_target"), &EntityCard::get_facial_target);
+	ClassDB::bind_method(D_METHOD("get_facial_override"), &EntityCard::get_facial_override);
+	ClassDB::bind_method(D_METHOD("get_facial_automatic"), &EntityCard::get_facial_automatic);
+	ClassDB::bind_method(D_METHOD("get_facial_override_timer"), &EntityCard::get_facial_override_timer);
+	ClassDB::bind_method(D_METHOD("get_facial_texture_priority"), &EntityCard::get_facial_texture_priority);
+	ClassDB::bind_method(D_METHOD("get_facial_blend"), &EntityCard::get_facial_blend);
+	ClassDB::bind_method(D_METHOD("get_facial_display_frame"), &EntityCard::get_facial_display_frame);
 	ClassDB::bind_method(D_METHOD("has_ai"), &EntityCard::has_ai);
 	ClassDB::bind_method(D_METHOD("has_world"), &EntityCard::has_world);
 	ClassDB::bind_method(D_METHOD("get_wire_handle"), &EntityCard::get_wire_handle);

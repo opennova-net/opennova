@@ -33,6 +33,8 @@ EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entit
             EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
             p.slots[s] = seed;
             p.slots[s].handle = h;
+            p.slots[s].facial_slot = 0;
+            p.slots[s].facial_checked = false;
             p.slots[s].registry_spawn_id = next_spawn_id_++;
             if (next_spawn_id_ == 0) next_spawn_id_ = 1;
             p.used[s] = 1;
@@ -53,6 +55,8 @@ EntityHandle EntityRegistry::spawn_at(EntityHandle h, const Entity &seed) {
         return EntityHandle{};
     p.slots[slot] = seed;
     p.slots[slot].handle = h;
+    p.slots[slot].facial_slot = 0;
+    p.slots[slot].facial_checked = false;
     p.slots[slot].registry_spawn_id = next_spawn_id_++;
     if (next_spawn_id_ == 0) next_spawn_id_ = 1;
     p.used[slot] = 1;
@@ -174,8 +178,9 @@ void EntityRegistry::in_area(const Aabb &zone, std::vector<EntityHandle> &out) c
 }
 
 int EntityRegistry::register_area(std::string name, const Aabb &bounds, bool active,
-                                  int32_t zone_id) {
-    areas_.push_back(Area{std::move(name), bounds, active, zone_id});
+                                  int32_t zone_id, std::optional<Aabb> script_bounds) {
+    areas_.push_back(Area{std::move(name), bounds, active, zone_id,
+                         script_bounds.value_or(bounds)});
     return static_cast<int>(areas_.size() - 1);
 }
 
@@ -193,12 +198,76 @@ const Area *EntityRegistry::area(int id) const {
     return &areas_[id];
 }
 
+void EntityRegistry::clear_script_tables() {
+    areas_.clear();
+    locations_.clear();
+    group_names_ = {"emptygroup", "humans", "blueplayers", "redplayers",
+                    "ai", "blueai", "redai"};
+    group_members_.assign(7, {});
+}
+
+void EntityRegistry::register_location(const Aabb &bounds, int32_t id) {
+    locations_.push_back({bounds, id});
+}
+
+int32_t EntityRegistry::location_at(const Vec3 &position) const {
+    // [orig: WacCmd_SsnLoc @0x4F0E90] Strict bounds, last matching type-5 box.
+    int32_t result = 0;
+    for (const LocationVolume &location : locations_) {
+        const Aabb &b = location.bounds;
+        if (position.x > b.min.x && position.x < b.max.x &&
+                position.y > b.min.y && position.y < b.max.y &&
+                position.z > b.min.z && position.z < b.max.z)
+            result = location.id;
+    }
+    return result;
+}
+
 int EntityRegistry::intern_group(std::string_view name) {
     for (size_t i = 0; i < group_names_.size(); ++i) {
         if (iequals(group_names_[i], name)) return static_cast<int>(i);
     }
     group_names_.emplace_back(name);
+    group_members_.emplace_back();
     return static_cast<int>(group_names_.size() - 1);
+}
+
+int EntityRegistry::default_script_group_index(std::string_view name) {
+    static constexpr const char *names[] = {
+        "emptygroup", "humans", "blueplayers", "redplayers", "ai", "blueai", "redai"
+    };
+    for (int i = 0; i < 7; ++i) if (iequals(name, names[i])) return i;
+    return -1;
+}
+
+int EntityRegistry::script_group_index(std::string_view name) const {
+    for (size_t i = 0; i < group_names_.size(); ++i)
+        if (iequals(group_names_[i], name)) return static_cast<int>(i);
+    return -1;
+}
+
+void EntityRegistry::set_script_group_members(int group, const std::vector<EntityHandle> &members) {
+    if (group >= 7 && size_t(group) < group_members_.size()) group_members_[group] = members;
+}
+
+// [orig: Server_BuildEntitySlotLists @0x4F97A0] These lists are independent
+// of entity+284's BMS command group, and retain pool-slot order and dead rows.
+void EntityRegistry::script_groups(std::vector<std::vector<EntityHandle>> &out) const {
+    out = group_members_;
+    for (size_t i = 0; i < 7; ++i) out[i].clear();
+    for_each_in_pool(0, [&](const Entity &e) {
+        if (e.item_id == 0) return;
+        const uint32_t flags = e.flags | e.engine_flags;
+        if ((flags & kEntityFlagPlayer) != 0) {
+            if ((flags & 1u) != 0) return;
+            out[1].push_back(e.handle);
+            if (e.team == 1 || e.team == 2) out[1 + e.team].push_back(e.handle);
+        } else {
+            out[4].push_back(e.handle);
+            if ((flags & 1u) == 0 && (e.team == 1 || e.team == 2))
+                out[4 + e.team].push_back(e.handle);
+        }
+    });
 }
 
 size_t EntityRegistry::live_count() const {

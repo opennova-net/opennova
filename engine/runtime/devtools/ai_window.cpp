@@ -116,9 +116,10 @@ void AiWindow::format_snapshot() {
 	const world::inspect::AiSystemCounters &c = snapshot_.report.counters;
 	char buf[192];
 	std::snprintf(buf, sizeof(buf),
-			"brains %d  budget %d  events %d  unported %d  rel_ops %d  find_target %d",
+			"brains %d  budget %d  events %d  unported %d  rel_ops %d  find_target %d  mission gaps %u / %llu calls",
 			c.brain_count, c.scheduler_budget, c.event_count, c.unported_calls,
-			c.rel_ops, c.find_target_calls);
+			c.rel_ops, c.find_target_calls, c.runtime_gap_sites,
+            static_cast<unsigned long long>(c.runtime_gap_calls));
 	counters_ = buf;
 	group_rows_.reserve(snapshot_.report.groups.size());
 	for (const world::inspect::AiGroupRow &g : snapshot_.report.groups) {
@@ -234,6 +235,27 @@ void AiWindow::draw_detail_pane() {
 }
 
 void AiWindow::draw_tables() {
+    if (ImGui::CollapsingHeader("Mission runtime gaps")) {
+        for (const auto &gap : snapshot_.report.runtime_gaps) {
+            const auto &site = gap.origin;
+            const char *kind = "unknown";
+            switch (site.kind) {
+                case world::RuntimeGapKind::WacCommand: kind = "WAC command"; break;
+                case world::RuntimeGapKind::WacOpcode: kind = "WAC opcode"; break;
+                case world::RuntimeGapKind::WacInstructionLimit: kind = "WAC instruction limit"; break;
+                case world::RuntimeGapKind::BmsAction: kind = "BMS action"; break;
+                case world::RuntimeGapKind::AiCommand: kind = "AI command"; break;
+                case world::RuntimeGapKind::AiStateHandler: kind = "AI state"; break;
+            }
+            ImGui::Text("%s %d/%d, event %d, site %d: %llu calls (ticks %u..%u)",
+                    kind, site.code, site.subcode, site.event, site.site,
+                    static_cast<unsigned long long>(gap.count), gap.first_tick, gap.last_tick);
+            if (!site.source.empty()) ImGui::TextDisabled("%s:%d", site.source.c_str(), site.line);
+            ImGui::TextDisabled("arguments: %d, %d, %d, %d", gap.arguments[0],
+                    gap.arguments[1], gap.arguments[2], gap.arguments[3]);
+        }
+        if (snapshot_.report.runtime_gaps.empty()) ImGui::TextDisabled("No runtime gaps observed.");
+    }
 	ImGui::SeparatorText("Groups");
 	if (group_rows_.empty()) {
 		ImGui::TextDisabled("No groups with members.");

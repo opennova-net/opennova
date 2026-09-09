@@ -245,6 +245,13 @@ bool HostRole::reset_to_baseline(SessionError &error) {
 	if (state.client_runtime) {
 		state.host_loop.clear();
 		make_client_runtime(state.host_owner.ctx.config.game_type);
+		// The replacement local client starts with zero score. Reset the
+		// matching sender cache too, or an equal post-retry award is suppressed.
+		// [orig: Server_PlayerAdd clears player-slot+332 at round/player init;
+		// Server_UpdateCaptureZoneProximity @0x5086E5..0x508724]
+		for (NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
+			if (conn.link.transport == &state.host_loop)
+				conn.reply.score_delta_sound_value = 0;
 		replication::ClientReplicaPipeline &view = state.client_runtime->view();
 		view.apply(0x10, opennova::encode_static_entity_batch(
 				replication::build_pool2_static_batch(kernel.world)));

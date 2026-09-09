@@ -100,6 +100,7 @@ begin "S5 Bunker"
   sid s5bunker
   husk bunk_husk
   huskfinal bunk_burn
+  music 65533
 end
 
 begin "S5 Bush"
@@ -230,7 +231,10 @@ int main() {
     std::strcpy(tank->particlefxw4.userpoint, "FX01");
     std::strcpy(tank->sound_profile, "SP_Tank");
     std::strcpy(tank->soundloops[0], "LP_TANK");
-    std::strcpy(rifle->ammo_closeattack, "AT_RIFLE");
+    std::strcpy(rifle->ammo_closeattack, "at_rifle");
+    std::strcpy(rifle->ammo_easyrocket, "AT_EASY");
+    std::strcpy(rifle->ammo_advancedrocket, "AT_ADVANCED");
+    std::strcpy(rifle->ammo_marker3, "AT_MARKER");
     std::strcpy(rifle->sound_profile, "SP_Test");
     std::strcpy(rifle->sound_profile_female, "SP_TestFemale");
     rifle->attrib |= DEF_ITEM_ATTRIB_LEAVECORPSE;
@@ -318,6 +322,7 @@ int main() {
     CHECK((bunker_e->engine_flags & 0x4000000u) != 0);
     CHECK(bunker_e->sub_type == 0xFF);
     CHECK(bunker_e->health == 100); // hp 0 lifts nothing
+    CHECK(bunker_e->music_location == -3); // parsed signed word survives trait promotion
     CHECK(bunker_e->is_capture_trigger);
     CHECK(bunker_e->is_spawn_point);
     CHECK(bunker_e->armor_impact == 12);
@@ -470,13 +475,18 @@ int main() {
     AmmoTableEntry at_rifle;
     at_rifle.name = "AT_RIFLE";
     at_rifle.valid = true;
-    w.tables.ammo.entries = {at_null, at_rifle};
+    AmmoTableEntry at_easy = at_rifle, at_advanced = at_rifle, at_marker = at_rifle;
+    at_easy.name = "AT_EASY";
+    at_advanced.name = "AT_ADVANCED";
+    at_marker.name = "AT_MARKER";
+    w.tables.ammo.entries = {at_null, at_rifle, at_easy, at_advanced, at_marker};
 
     CHECK(simassets::resolve_ai_weapons(w, file) == 1);
     AiEntity *rifle_b = ai.at(rifle_ai);
     CHECK(rifle_b != nullptr);
     if (rifle_b != nullptr) {
-        CHECK(rifle_b->profile.ammo_primary == 1);
+        CHECK((rifle_b->profile.organic.ammo == std::array<uint8_t, 4>{1, 2, 3, 4}));
+        CHECK((rifle_b->profile.organic.launch == std::array<uint8_t, 3>{}));
         CHECK(rifle_b->profile.clip_size == 30);
         CHECK(rifle_b->inf.magazine == 30);
         CHECK(rifle_b->profile.sound_profile == 1); // SP_Test
@@ -487,7 +497,7 @@ int main() {
     AiEntity *player_b = ai.at(player_ai);
     CHECK(player_b != nullptr);
     if (player_b != nullptr) {
-        CHECK(player_b->profile.ammo_primary == -1);
+        CHECK((player_b->profile.organic.ammo == std::array<uint8_t, 4>{}));
         CHECK(player_b->profile.sound_profile == -1);
         CHECK(player_b->profile.sound_profile_female == -1);
     }

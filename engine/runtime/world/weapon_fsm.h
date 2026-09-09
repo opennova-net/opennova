@@ -194,6 +194,9 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
 // phase +0x5A, kickIntensity +0x5B, burstCounter +0x62]
 struct WeaponSlotState {
     int32_t counter = 0;
+    // Current integer magnification; zero lazily selects the definition's max.
+    // [orig: MountSlot+0x0C; Player_GetClampedWeaponElevation @0x4DC6B0]
+    int32_t scope_zoom = 0;
     int32_t current = weapon_action::kIdle;
     int32_t next = weapon_action::kIdle;
     int32_t prev = weapon_action::kIdle;

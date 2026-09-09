@@ -228,6 +228,35 @@ int test_silent_layers_drop_and_every_layer_picks() {
 	return 0;
 }
 
+int test_direct_distance_skips_set_cull_but_retains_layer_gain_and_selection() {
+    BankBuilder b;
+    const uint32_t a = b.member(255, 255);
+    const uint32_t next = b.member(120, 255);
+    const uint32_t first = b.layer(200, 0, lwf::kFlagSequential, {a, next});
+    const uint32_t second = b.layer(50, 0, 0, {a});
+    b.set("DIRECT", 1, {first, second});
+    SoundSetIndex index; index.add_bank(0, b.file);
+    SoundSelector selector;
+    const auto loc = index.find("DIRECT");
+    const float far[3] = {100, 0, 0};
+    OcclusionProbe probe;
+    const auto positional = plan_oneshot_3d(b.file, loc, far, kOrigin, true, 0,
+            &OcclusionProbe::fn, &probe, selector);
+    TEST_EXPECT(!positional.in_range && probe.calls == 0);
+    const auto direct = plan_oneshot_at_distance(b.file, loc, 100LL << 16, selector);
+    TEST_EXPECT(direct.in_range && direct.dist_q16 == (100LL << 16));
+    TEST_EXPECT(direct.voices.size() == 1);
+    TEST_EXPECT(direct.voices[0].sndparm == a && direct.voices[0].vol255 == 63);
+    // A culled positional fire did not consume the cursor. Direct fires do,
+    // including layers whose own distance law makes them silent.
+    const auto nearby = plan_oneshot_at_distance(b.file, loc, 0, selector);
+    TEST_EXPECT(nearby.voices.size() == 2);
+    TEST_EXPECT(nearby.voices[0].sndparm == next);
+    TEST_EXPECT(!plan_oneshot_at_distance(b.file, {}, 0, selector).in_range);
+    TEST_EXPECT(plan_oneshot_at_distance(b.file, loc, 200LL << 16, selector).voices.empty());
+    return 0;
+}
+
 int test_member_pick_skips_dangling_indices() {
 	// An out-of-range sndparm index is dropped from the layer (the format
 	// reader's tree does the same), so the selector sees the carried count.
@@ -263,6 +292,7 @@ int main() {
 	failed |= test_no_listener_plays_the_member_volume_flat();
 	failed |= test_silent_layers_drop_and_every_layer_picks();
 	failed |= test_member_pick_skips_dangling_indices();
+    failed |= test_direct_distance_skips_set_cull_but_retains_layer_gain_and_selection();
 	if (failed) {
 		return 1;
 	}

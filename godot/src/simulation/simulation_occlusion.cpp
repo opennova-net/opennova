@@ -626,6 +626,14 @@ int64_t Simulation::sound_occlusion_distance_q16(const Vector3 &listener_pos,
 	                                                static_cast<int32_t>(distance_q16));
 }
 
+int Simulation::sound_source_bms_id(uint16_t p_handle) const {
+    if (!kernel_) return 0;
+    const opennova::world::EntityHandle handle{p_handle};
+    if (handle.valid() && handle == kernel_->world.cached.local_player) return -1;
+    const auto *entity = kernel_->world.registry.get(handle);
+    return entity ? entity->bms_id : 0;
+}
+
 opennova::world::EntityHandle Simulation::handle_for_bms_id(int p_bms_id) const {
 	if (!kernel_ || p_bms_id <= 0) return opennova::world::EntityHandle{};
 	const uint64_t serial = kernel_->world.registry.spawn_serial();

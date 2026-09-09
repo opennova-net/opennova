@@ -58,7 +58,11 @@ namespace {
 // The committed chain for the synthetic mission below over kSyntheticTicks
 // ticks. Moves ONLY with a ledgered behavior change; a structural slice that
 // moves it has changed behavior and must say why.
-constexpr uint64_t kSyntheticDigest = 0x116f65ec9ea08922ULL;
+// WAC retail timing (world-wac-ai-re.md section 33): both elapse blocks fire
+// at boot, then the no-human gate pauses the VM. V1 stays 2. Replaying only
+// the previous V1 timeline (0 until tick 63, 1 until 125, then 2) recovers
+// 0x116f65ec9ea08922 exactly; entity, AI and RNG state did not move.
+constexpr uint64_t kSyntheticDigest = 0xe33cefc459163b68ULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
@@ -168,8 +172,8 @@ ms::BootFileSource source_over(const std::map<std::string, std::string> *files) 
 	return s;
 }
 
-// Two opposing squads plus a few items, and a WAC layer that keeps a mission
-// variable moving so the script store is part of the chain.
+// Two opposing squads plus a few items, and a WAC layer whose boot writes
+// are part of the chain. There are no humans, so later WAC passes are gated.
 bms::File synthetic_mission() {
 	bms::File m{};
 	int32_t next_id = 20;

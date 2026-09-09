@@ -7,6 +7,7 @@
     "fixtures/README.md",
     "fixtures/anim/*",
     "fixtures/def/items.def",
+    "fixtures/grm/person.grm",
     "fixtures/mnu/widgets.mnu",
     "fixtures/mnu/all_widgets.mnu",
     "fixtures/mns/test_style.mns",

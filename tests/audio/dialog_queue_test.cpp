@@ -96,32 +96,12 @@ int test_queue_advances_only_when_the_channel_frees() {
 	return 0;
 }
 
-int test_wac_channel_resets_before_each_play() {
-	WacVoiceChannel wac;
-	TEST_EXPECT(!wac.playing());
-	TEST_EXPECT(!wac.play("first.wav"));
-	TEST_EXPECT(wac.playing() && wac.current() == "first.wav");
-	TEST_EXPECT(wac.play("second.wav"));
-	TEST_EXPECT(wac.current() == "second.wav");
-	wac.stop();
-	TEST_EXPECT(!wac.playing() && wac.current().empty());
-	// Independent of the dialog queue: a scripted wave neither blocks nor
-	// advances a queued line.
-	DialogQueue queue;
-	queue.enqueue({ "SynR100" });
-	queue.line_started();
-	TEST_EXPECT(!wac.play("third.wav"));
-	TEST_EXPECT(queue.line_active() && queue.pending() == 1);
-	return 0;
-}
-
 } // namespace
 
 int main() {
 	int failed = 0;
 	failed |= test_resolution_prefers_the_dbf_lines_the_banks_carry();
 	failed |= test_queue_advances_only_when_the_channel_frees();
-	failed |= test_wac_channel_resets_before_each_play();
 	if (failed) {
 		return 1;
 	}

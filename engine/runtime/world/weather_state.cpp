@@ -48,13 +48,10 @@ int32_t percent_target_q16(int32_t percent) noexcept {
     return fixed > 0x10000 ? 0x10000 : fixed;
 }
 
-// min(metres << 16, Env_FogDistReference) raised to 2 m — the fog distance
-// target. The << 16 is the script compiler's kind-6 operand shift (the
-// handlers receive the 16.16 value), a 32-bit shift that wraps
-// [orig: Script_Compile @ 0x4f4167 / @ 0x4f42c5; the clamps WacCmd_FogDist
-//  @ 0x4ee10c..0x4ee117, WacCmd_MoveFog @ 0x4ee0b8..0x4ee0c4].
-int32_t fog_command_target_q16(int32_t metres, int32_t reference_q16) noexcept {
-    int32_t fixed = static_cast<int32_t>(static_cast<uint32_t>(metres) << 16);
+// The handlers receive Q16 from WacScript_ResolveParameter @0x4F2D7D.
+// [orig: WacCmd_FogDist @0x4EE10C..0x4EE117;
+//        WacCmd_MoveFog @0x4EE0B8..0x4EE0C4]
+int32_t fog_command_target_q16(int32_t fixed, int32_t reference_q16) noexcept {
     if (fixed > reference_q16) fixed = reference_q16;
     if (fixed < 0x20000) fixed = 0x20000;
     return fixed;
@@ -196,20 +193,28 @@ void WeatherState::command_overcast(int32_t percent, int32_t seconds) {
 }
 
 void WeatherState::command_fog_distance(int32_t metres) {
+    command_fog_distance_q16(static_cast<int32_t>(static_cast<uint32_t>(metres) << 16));
+}
+
+void WeatherState::command_fog_distance_q16(int32_t distance_q16) {
     // [orig: WacCmd_FogDist @ 0x4ee100] target clamped [2 m, reference],
     // accel = |target - current| (an immediate arrival).
     env::EnvScalarChannels &ch = core.scalar_channels;
-    ch.fog_dist_target_fp = fog_command_target_q16(metres, fog_reference_q16);
+    ch.fog_dist_target_fp = fog_command_target_q16(distance_q16, fog_reference_q16);
     ch.fog_step_fp = wrap_abs(static_cast<int32_t>(
             static_cast<uint32_t>(ch.fog_dist_target_fp) - static_cast<uint32_t>(ch.fog_dist_fp)));
     bump_command();
 }
 
 void WeatherState::command_move_fog(int32_t metres, int32_t seconds) {
+    command_move_fog_q16(static_cast<int32_t>(static_cast<uint32_t>(metres) << 16), seconds);
+}
+
+void WeatherState::command_move_fog_q16(int32_t distance_q16, int32_t seconds) {
     // [orig: WacCmd_MoveFog @ 0x4ee0a0] the same target over ticks.
     const int32_t ticks = wac_ticks(seconds);
     env::EnvScalarChannels &ch = core.scalar_channels;
-    ch.fog_dist_target_fp = fog_command_target_q16(metres, fog_reference_q16);
+    ch.fog_dist_target_fp = fog_command_target_q16(distance_q16, fog_reference_q16);
     ch.fog_step_fp = transition_step(ch.fog_dist_fp, ch.fog_dist_target_fp, ticks);
     bump_command();
 }
@@ -217,6 +222,13 @@ void WeatherState::command_move_fog(int32_t metres, int32_t seconds) {
 void WeatherState::command_sky_speed(int32_t rate) {
     // [orig: WacCmd_SkySpeed @ 0x4edeb0] Env_CloudScrollRateTarget = n << 10.
     cloud_scroll_rate_target = static_cast<uint32_t>(rate) << 10;
+    bump_command();
+}
+
+void WeatherState::command_fov(int32_t degrees) {
+    // The literal is whole degrees; the DWORD store wraps. [orig: @0x4EDEA7]
+    core.scalar_channels.camera_fov_target_fp =
+        static_cast<int32_t>(static_cast<uint32_t>(degrees) << 16);
     bump_command();
 }
 
@@ -276,7 +288,7 @@ void WeatherState::command_color_fade(int32_t seconds) {
 
 void WeatherState::command_lightning_color(uint32_t rgb) {
     // [orig: Script_SetLightningColor @ 0x4ede20]
-    lightning_color = pack_rgb(rgb);
+    lightning_color = rgb;
     bump_command();
 }
 
@@ -314,7 +326,7 @@ void WeatherState::command_block_color(WeatherColorTarget target, uint32_t rgb) 
     // blocks are overwritten by the next ComputeTimeOfDayColors; the statics
     // (ceiling/cloud/floor) and the modulator keep it.
     env::WeatherColorBlock &block = block_for(target);
-    block.target = pack_rgb(rgb);
+    block.target = rgb;
     block.set_step_deltas(color_fade_ticks);
     bump_command();
 }

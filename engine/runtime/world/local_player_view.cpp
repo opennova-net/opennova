@@ -94,6 +94,12 @@ bool suppress_view_bias(const LocalPlayerWeapon &w, const WeaponSlotState *slot)
 
 void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
                              LocalPlayerViewTracker &t) {
+    // [orig: Player_ResetCameraAndMovementState @0x4DE1F0]
+    v.scope_engaged = false;
+    v.scope_step = 0;
+    v.ease_steps = kScopeEaseSteps;
+    v.scope_hipfire = true;
+    if (world != nullptr) world->weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
     v.binoculars_requested = false;
     v.binoculars_raised = false;
     v.binoculars_view_active = false;
@@ -162,7 +168,89 @@ void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
     sync_local_usegun_weapon_transition(world, w);
 }
 
-bool local_player_scope_toggle(const LocalPlayerWeapon &w, PlayerViewState &v,
+int32_t local_player_scope_zoom(const LocalPlayerWeapon &w, WeaponSlotState &slot) {
+    // [orig: Player_GetClampedWeaponElevation @0x4DC6B0]
+    int32_t maximum = static_cast<int32_t>(w.scope_max_mag);
+    if (maximum == 0) maximum = 1;
+    if (slot.scope_zoom == 0) slot.scope_zoom = maximum;
+    if (slot.scope_zoom < 0) slot.scope_zoom = 0;
+    else if (slot.scope_zoom > maximum) slot.scope_zoom = maximum;
+    return slot.scope_zoom;
+}
+
+namespace {
+int32_t sighted_fov_target(int32_t zoom) {
+    // Reciprocal is truncated to Q16 before the rounded multiply by 80 Q16.
+    // [orig: Player_ToggleWeaponScope @0x4DF401..0x4DF430]
+    if (zoom < 1) zoom = 1;
+    return static_cast<int32_t>((int64_t(80 << 16) * (65536 / zoom) + 0x8000) >> 16);
+}
+
+// Despite its original name, this is the optical-view gate. Its target writes
+// run at each body/weapon/HUD/render query, including frames with no simulation tick.
+// [orig: Player_CanFireWeapon @0x5CF780..0x5CF8D5]
+bool scope_view_visible(World &world, const LocalPlayerWeapon &w, const PlayerViewState &v,
+                        const Entity &player, WeaponSlotState &slot) {
+    if (!w.active || (player.mounted && is_vehicle_control_seat(player.mount_type)))
+        return false;
+    const bool force = (w.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0;
+    const bool no_card = (w.def.flags & weapon_flag::kNoCardSwitch) != 0 && !force;
+    if (suppress_view_bias(w, &slot) && !no_card) return false;
+    const bool active = v.scope_engaged && !player_view_scope_ease_active(v);
+    const bool scoped = active && (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0;
+    const bool sighted = active && (w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
+                         slot.current != weapon_action::kSwitchFrom;
+    // These fields share retail storage; use the motor/input mirror where it
+    // has not yet been published back into the registry on this tick.
+    const AiEntity *body = world.ai.for_handle(player.handle);
+    const uint32_t flags = player.flags | player.engine_flags;
+    const bool moving = body != nullptr ? body->inf.player_moving
+                                       : (player.net_move_input & 8u) != 0;
+    const bool airborne = (flags & kEntityFlagInAir) != 0 ||
+                          (body != nullptr && body->inf.airborne);
+    // [orig: entity Flags & 0x2002 gate @0x5CF7FB; ForceScoped override @0x5CF845]
+    bool visible = (flags & kEntityFlagDead) == 0 && !airborne && v.camera_mode == 0 &&
+                   (!moving || sighted) && (scoped || sighted);
+    if (force && v.camera_mode == 0) {
+        visible = true;
+    } else if (!sighted) {
+        const int32_t position_z = body != nullptr ? body->pos[2] : to_fixed(player.position.z);
+        const int32_t eye_z = static_cast<int32_t>(
+            uint32_t(position_z) + uint32_t(player.eye_offset_z));
+        if ((flags & 0x8000u) != 0 || eye_z < world.env.water_z)
+            visible = false;
+    }
+    if (!player_view_scope_ease_active(v) &&
+        !(player.mounted && player.mount_type == SeatType::Gunner)) {
+        auto &target = world.weather.core.scalar_channels.camera_fov_target_fp;
+        if (!visible) target = 80 << 16;
+        else if (sighted) target = sighted_fov_target(local_player_scope_zoom(w, slot));
+    }
+    return visible;
+}
+}
+
+bool local_player_scope_view_visible(World &world, LocalPlayerWeapon &w,
+                                      const PlayerViewState &v) {
+    const Entity *player = world.registry.get(world.cached.local_player);
+    WeaponSlotState *slot = active_local_weapon_slot(world, w);
+    return player != nullptr && slot != nullptr && scope_view_visible(world, w, v, *player, *slot);
+}
+
+bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
+                            WeaponSlotState &slot, bool engaged) {
+    if (engaged == v.scope_engaged) return true;
+    if (!player_view_set_engaged(v, engaged, (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
+        return false;
+    auto &target = world.weather.core.scalar_channels.camera_fov_target_fp;
+    if (!engaged) target = 80 << 16; // [orig: @0x4DF218]
+    if ((w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0)
+        target = engaged && v.camera_mode == 0
+            ? sighted_fov_target(local_player_scope_zoom(w, slot)) : 80 << 16;
+    return true;
+}
+
+bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
                                WeaponSlotState &active_slot) {
     if (!w.active) return false;
     // currentAction not in {RELOAD, SWITCHFROM}, then the Player_ToggleWeaponScope
@@ -183,8 +271,7 @@ bool local_player_scope_toggle(const LocalPlayerWeapon &w, PlayerViewState &v,
     // The toggle latches this ease's step count (7 for Inset weapons, else 15;
     // 1 on the hipfire-return leg) and REFUSES while the previous ease runs
     // [orig: Player_ToggleWeaponScope @0x4df177 !activeFlag; Setup @0x4df1b3..0x4df36e].
-    if (!player_view_set_engaged(v, !v.scope_engaged,
-                                 (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
+    if (!local_player_set_scope(world, w, v, active_slot, !v.scope_engaged))
         return false;
     if (v.scope_engaged)
         weapon_fsm_queue_scope_up(active_slot);
@@ -372,10 +459,10 @@ void local_player_set_eye_offset(World *world, const float offset_mission[3], bo
     world->cached.local_head_offset_valid = valid;
 }
 
-void local_player_view_frame(World *world, const LocalPlayerWeapon &w, const PlayerViewState &v,
+void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
                              const LocalPlayerViewTracker &t, LocalPlayerViewFrame &out) {
     out = LocalPlayerViewFrame();
-    const WeaponSlotState *active_slot =
+    WeaponSlotState *active_slot =
         world != nullptr ? active_local_weapon_slot(*world, w) : nullptr;
     out.scope_engaged = v.scope_engaged;
     out.binoculars_requested = v.binoculars_requested;
@@ -410,12 +497,23 @@ void local_player_view_frame(World *world, const LocalPlayerWeapon &w, const Pla
     // overrides it. The frame draws the card or the FP viewmodel, never both.
     // [orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 /
     //  @0x5caaf3..0x5cab15; suppression @0x4dcce0]
-    out.scope_card_active = w.active && active_slot != nullptr &&
+    const bool optical_view = world != nullptr && local != nullptr && active_slot != nullptr &&
+                              !v.death_screen_active &&
+                              local_player_scope_view_visible(*world, w, v);
+    out.scope_card_active = optical_view &&
                             weapon_sights_card_eligible(w.def, *active_slot) &&
-                            v.scope_engaged && !v.third_person && !v.binoculars_view_active &&
+                            v.scope_engaged && !v.binoculars_view_active &&
                             !player_view_scope_ease_active(v);
-    out.fov_h_deg = player_view_fov_h_deg(v, w.active ? w.def.flags : 0,
-                                          w.active ? w.scope_max_mag : 0.0f);
+    const bool sighted = out.scope_card_active &&
+                         (w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
+                         active_slot->current != weapon_action::kSwitchFrom;
+    const bool scoped = out.scope_card_active &&
+                        (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0 &&
+                        (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) == 0;
+    const int32_t current_fov = world != nullptr
+        ? world->weather.core.scalar_channels.camera_fov_fp : 80 << 16;
+    const int32_t zoom = sighted || scoped ? local_player_scope_zoom(w, *active_slot) : 1;
+    out.fov_h_deg = player_view_fov_h_deg(v, current_fov, scoped, sighted, zoom);
     out.tp_anchor[0] = v.tp_anchor[0];
     out.tp_anchor[1] = v.tp_anchor[1];
     out.tp_anchor[2] = v.tp_anchor[2];

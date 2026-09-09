@@ -627,7 +627,7 @@ int main() {
 
         CHECK(w.commands.mount(100, 200));
         CHECK(ae->heading == kRequestHeading); // request pre-snap, before live look resumes
-        ae->heading = kLookHeading;            // first post-attach NPC look update
+        ae->heading = ae->inf.aim_heading = kLookHeading; // live and desired post-attach gaze
         CHECK(ai.pose_if_mounted(*ae, w));
         const Entity *occ = w.registry.get(sh);
         CHECK(occ != nullptr);

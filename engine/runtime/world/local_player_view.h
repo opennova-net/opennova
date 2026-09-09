@@ -102,8 +102,20 @@ void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
 // [orig: Player_ToggleWeaponScope @0x4df0c0 — @0x4df29c, @0x4df12d,
 //  @0x4df177, @0x4df1b3..0x4df36e; WeaponSlot_TryQueueScopeUp @0x53f050 /
 //  ..ScopeDown @0x53f080]
-bool local_player_scope_toggle(const LocalPlayerWeapon &w, PlayerViewState &v,
+bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
                                WeaponSlotState &active_slot);
+
+// The one optical visibility query used by body, weapon, HUD and camera paths.
+// Its retail FOV target writes are synchronous, even without a weather tick.
+bool local_player_scope_view_visible(World &world, LocalPlayerWeapon &w,
+                                      const PlayerViewState &v);
+
+// The shared pose/FOV transition after a caller's refusal gates. The weapon
+// pump and movement unscope use the same transition as the input toggle.
+bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
+                            WeaponSlotState &slot, bool engaged);
+// The current slot zoom, lazily initialized and clamped by the retail getter.
+int32_t local_player_scope_zoom(const LocalPlayerWeapon &w, WeaponSlotState &slot);
 
 // Action 26: toggle the persistent binocular request. Refused while a
 // PowerThrow charge is live (the raised view would suppress the held weapon
@@ -189,7 +201,7 @@ struct LocalPlayerViewFrame {
     float fp_roll_deg = 0.0f;
     PlayerCameraPose camera;
 };
-void local_player_view_frame(World *world, const LocalPlayerWeapon &w,
+void local_player_view_frame(World *world, LocalPlayerWeapon &w,
                              const PlayerViewState &v, const LocalPlayerViewTracker &t,
                              LocalPlayerViewFrame &out);
 

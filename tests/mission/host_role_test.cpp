@@ -198,6 +198,22 @@ int main() {
 		host.host_loop.client_send(c2s::MOUNTED_WEAPON_SLOT_SELECT, std::vector<uint8_t>{0});
 		role.run_tick(tick_input(0));
 		CHECK(host.host_loop.c2s_pending() == 0);
+		// Recreate the local replica and repeat an equal point award. Both the
+		// sender's comparison cache and the client's score epoch must restart.
+		const w::EntityHandle scorer = kernel.world.cached.local_player;
+		CHECK(kernel.world.match.player(scorer) != nullptr);
+		kernel.capture_baseline();
+		for (int attempt = 0; attempt < 2; ++attempt) {
+			kernel.world.match.player(scorer)->stats[w::MatchStats::kPoints] = 17;
+			for (int tick = 0; tick < 62; ++tick) role.run_tick(tick_input(0));
+			const auto &feedback = host.client_runtime->state().score_feedback;
+			CHECK(feedback.updates == 1);
+			CHECK(feedback.score == 17 && feedback.delta == 17);
+			inmatch::SessionError reset_error;
+			CHECK(role.reset_to_baseline(reset_error));
+			CHECK(kernel.world.match.player(scorer)->stats[w::MatchStats::kPoints] == 0);
+			CHECK(host.client_runtime->state().score_feedback.updates == 0);
+		}
 	}
 
 	// --- the dedicated (HostOnly) bring-up -----------------------------------

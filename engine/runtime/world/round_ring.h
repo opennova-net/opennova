@@ -64,6 +64,14 @@ struct RoundRing {
     // [orig: playerSlot+97544 = stat_id after Server_BuildRoundEventListForPlayer].
     uint32_t last_stat() const { return next_stat - 1; }
 
+    // OpenNova retry boundary: discard the prior mission's pending rounds,
+    // but keep append sequences ahead of connected recipients' watermarks.
+    void clear() {
+        records = {};
+        cursor = 0;
+        count = 0;
+    }
+
     void add(RoundEvent ev) {
         ev.stat = next_stat++;
         records[static_cast<size_t>(cursor)] = ev;

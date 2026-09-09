@@ -913,6 +913,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
         mask |= (1u << (s & 31)); // x86 shl wraps the count mod 32 [orig: @ 0x493698]
     }
     target.spawned_piece_mask = mask; // [orig: entity+0x138 @ 0x493983]
+    target.motor_suspended = false; // installing a callback replaces nullsub_28
     target.death_motion = DeathMotionMode::Generic;
     if (traits->is_decoration)
         target.veh.slide_z -= 16182;
@@ -944,8 +945,10 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 	const bool was_husked = ((target.flags | target.engine_flags) & kEntityFlagHusk) != 0;
 	const uint32_t mask = spawn_death_pieces(world, target);
 	emit_death_sounds_and_effects(world, target, false);
-	if (simulate)
+	if (simulate) {
+        target.motor_suspended = false;
 		target.death_motion = DeathMotionMode::PiecePhysics;
+    }
 	else {
 		const bool water = to_fixed(target.position.z) <= world.env.water_z;
 		Vec3 pos = target.position;
@@ -1020,6 +1023,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         if (traits != nullptr && traits->husk_model_loaded) {
             mask = spawn_death_pieces(world, target);
             if (target.veh.slide_z > 0) target.veh.slide_z = 0;
+            target.motor_suspended = false;
             target.death_motion = DeathMotionMode::Static;
             world.out.destruction.sounds.push_back(
                     DestructionSoundEvent{"EXPLO_SHIP_TINY", target.position});
@@ -1121,7 +1125,7 @@ void destruction_tick_dead_items(World &world,
         const size_t cap = world.registry.pool_capacity(pool);
         for (size_t s = 0; s < cap; ++s) {
             Entity *e = world.registry.get(EntityHandle::make(pool, static_cast<int>(s)));
-            if (e == nullptr) continue;
+            if (e == nullptr || e->motor_suspended) continue;
             if ((e->engine_flags & kEntityFlagHusk) == 0) continue;
             const ItemDeathTraits *traits = world.tables.item_death_traits.get(e->item_id);
             // The wreck-fire random crackle (S12b), one roll per burning wreck

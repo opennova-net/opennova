@@ -103,6 +103,36 @@ int32_t RotorWashSystem::ground(int32_t x, int32_t y) const {
 			: 0;
 }
 
+// [orig: RotorWash_FindNearbyActiveZone @0x5CBE30]
+uint16_t RotorWashSystem::nearby_zone(const int32_t p[3], int32_t radius) const {
+	uint16_t result = 0;
+	for (std::size_t i = 0; i < count_; ++i) {
+		const auto &zone = zones_[i];
+		if (!zone.owner.valid() || zone.intensity < 8192) continue;
+		const auto absolute = [](int32_t value) {
+			return value < 0 ? io::bam_sub(0, value) : value;
+		};
+		const int32_t dx = absolute(io::bam_sub(zone.frame.m[3], p[0]));
+		if (dx > radius) continue;
+		const int32_t dy = absolute(io::bam_sub(zone.frame.m[7], p[1]));
+		if (dy > radius) continue;
+		const int32_t half_z = io::bam_sub(zone.frame.m[11], p[2]) >> 1;
+		if (half_z < 0 || half_z > q16_mul_rhu(radius, zone.intensity)) continue;
+		int32_t square = int32_t(int64_t(dx) * dx >> 22);
+		square = io::bam_add(square, int32_t(int64_t(dy) * dy >> 22));
+		square = io::bam_add(square, int32_t(int64_t(half_z) * half_z >> 22));
+		// x87 _ftol's indefinite INT_MIN shifts to zero on a wrapped
+		// negative square. Normal admitted coordinates never reach it.
+		const int32_t root = square < 0 ? INT32_MIN : int32_t(std::sqrt(double(square)));
+		const int32_t distance = bam_shl_wrap(root, 11);
+		if (distance < radius) {
+			radius = distance;
+			result = uint16_t(i | 0x8000u);
+		}
+	}
+	return result;
+}
+
 // The nearest spherical candidate inside its AABB; the pool's broader 45-unit
 // radius also feeds the foliage sampler. [orig: Terrain_FindNearestAmbientSoundZone @0x5CBCD0]
 uint16_t RotorWashSystem::nearest(const int32_t p[3]) const {

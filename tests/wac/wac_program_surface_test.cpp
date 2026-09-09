@@ -29,7 +29,7 @@ static int failures = 0;
 namespace {
 
 struct ScriptedWorld final : World {
-    ScriptedWorld() { registry.configure_pool(0, 16); }
+    ScriptedWorld() { registry.configure_pool(0, 16); cached.humans = 1; }
 };
 
 void tick_n(World &w, int n) {

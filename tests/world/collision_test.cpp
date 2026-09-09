@@ -226,7 +226,200 @@ struct Rig {
     }
 };
 
+
+// The resolver's path-state byte must reach the common movement selector;
+// cached detours persist until strictly within one horizontal unit.
+void test_infantry_detour_cache_and_arrival() {
+    Rig rig(box_model(1, 0, 2.0, 2.0, 3.0), 100.0, 100.0);
+    rig.world.ai.collision = &rig.cw;
+    rig.world.ai.terrain = &rig.field.field;
+    auto &brain = *rig.world.ai.at(rig.world.ai.attach(rig.soldier));
+    auto &inf = brain.inf;
+    inf.move_mode = 3;
+    inf.target_dist = fx(30);
+    inf.move_target[0] = fx(30);
+    inf.path_state = 1;
+    inf.body_heading = 0;
+    rig.world.ai.infantry_select(brain, rig.world);
+    CHECK(inf.path_state == 2);
+    CHECK(inf.detour_target[0] > fx(1.7) && inf.detour_target[0] < fx(1.8));
+    CHECK(inf.detour_target[1] < fx(-0.99) && inf.detour_target[1] > fx(-1.01));
+    CHECK(inf.detour_target[2] == 28672);
+    CHECK(inf.target_heading < 0); // equal-cost tie visits -30 degrees first
+    CHECK(inf.move_target[0] == fx(30) && inf.move_target[1] == 0);
+    const int32_t cached[3] = {inf.detour_target[0], inf.detour_target[1], inf.detour_target[2]};
+    inf.move_target[0] = 0;
+    inf.move_target[1] = fx(30);
+    rig.world.ai.infantry_select(brain, rig.world);
+    CHECK(inf.detour_target[0] == cached[0] && inf.detour_target[1] == cached[1]);
+    brain.pos[0] = cached[0] - fx(1);
+    brain.pos[1] = cached[1];
+    brain.pos[2] = fx(100); // arrival deliberately ignores height
+    rig.world.ai.infantry_select(brain, rig.world);
+    CHECK(inf.path_state == 2);
+    brain.pos[0] += fx(0.5);
+    rig.world.ai.infantry_select(brain, rig.world);
+    CHECK(inf.path_state == 0);
+    inf.path_state = 2;
+    inf.target_dist = 0;
+    rig.world.ai.infantry_select(brain, rig.world);
+    CHECK(inf.path_state == 0);
+    inf.path_state = 2;
+    inf.reset_for_spawn(0);
+    CHECK(inf.path_state == 0 && inf.detour_target[0] == 0 && inf.detour_target[1] == 0);
+}
+
+// A destination inside a solid has no second clear leg. State 1 accepts a
+// reachable fallback; state 3 must retain the goal. This uses real collision rays.
+void test_infantry_detour_one_leg_fallback() {
+    for (uint8_t state : {uint8_t{1}, uint8_t{3}}) {
+        Rig rig(box_model(1, 0, 2.0, 10.0, 3.0), 10.0, 0.0);
+        rig.world.ai.collision = &rig.cw;
+        auto &brain = *rig.world.ai.at(rig.world.ai.attach(rig.soldier));
+        auto &inf = brain.inf;
+        inf.move_mode = 3;
+        inf.target_dist = fx(10);
+        inf.move_target[0] = fx(10);
+        inf.path_state = state;
+        rig.world.ai.infantry_select(brain, rig.world);
+        CHECK(inf.path_state == 2);
+        if (state == 1) {
+            CHECK(inf.detour_target[0] < fx(8));
+            CHECK(inf.detour_target[1] > 0); // fallback <= tie replaces with +30 degrees
+        } else {
+            CHECK(inf.detour_target[0] == fx(10));
+            CHECK(inf.detour_target[1] == 0);
+            CHECK(inf.detour_target[2] == 8192);
+        }
+    }
+}
+
+
+// A normal route walker must consume a real collision-produced state and get
+// around the wall through its root-motion motor, without staging a detour point.
+void test_infantry_route_walks_around_wall() {
+    struct WalkingSource : IRootMotionSource {
+        bool has_clip(int, int) const override { return true; }
+        int32_t clip_length_ticks(int, int, int) const override { return 62; }
+        bool advance(int, int state, int32_t &phase, RootMotionFrame &frame) override {
+            phase = (phase + 1) % 62;
+            frame = {};
+            frame.capsule_top = fx(1.8);
+            if (state == anim_state::kWalkForward || state == anim_state::kRunForward ||
+                    state == anim_state::kJogForward)
+                frame.dx = fx(0.0625);
+            return true;
+        }
+    } source;
+    Rig rig(box_model(1, 0, 2.0, 2.0, 3.0));
+    rig.move_soldier(14.0, 10.0, 0.0);
+    auto &ai = rig.world.ai;
+    ai.collision = &rig.cw;
+    ai.terrain = &rig.field.field;
+    ai.root_motion = &source;
+    auto &body = *ai.at(ai.attach(rig.soldier));
+    body.inf.active = true;
+    body.pos[0] = fx(14);
+    body.pos[1] = fx(10);
+    body.heading = body.inf.body_heading = body.inf.target_heading = INT32_MIN;
+    ai.nav.channels.resize(2);
+    auto &channel = ai.nav.channels[1];
+    channel.count = 1;
+    channel.loopflag = 1;
+    channel.entries[0] = 0;
+    NavEntry goal;
+    goal.f[0] = fx(0.75);
+    goal.f[1] = fx(6);
+    goal.f[2] = fx(10);
+    ai.nav.nodes.push_back(goal);
+    body.slot.f[35] = 1;
+    body.slot.f[37] = 1;
+    bool saw_blockage = false;
+    bool saw_detour = false;
+    bool arrived = false;
+    for (uint32_t tick = 0; tick < 1200; ++tick) {
+        TickContext context;
+        context.world = &rig.world;
+        context.logic_tick = tick;
+        context.is_authority = true;
+        ai.tick(rig.world, context);
+        saw_blockage |= body.inf.path_state == 1;
+        saw_detour |= body.inf.path_state == 2;
+        if (std::hypot(double(body.pos[0] - fx(6)), double(body.pos[1] - fx(10))) < fx(0.75)) {
+            arrived = true;
+            break;
+        }
+    }
+    CHECK(saw_blockage && saw_detour);
+    CHECK(arrived);
+}
+
 // ---------------------------------------------------------------------------
+// Door CD volumes publish indices relative to first_door, and the normal
+// movement resolver invokes the peer-local event even without a solid force.
+void test_door_contact_and_player_collision_split() {
+    CollisionModel model = box_model(bvol_type::kDoorCD, 0, 2.0, 2.0, 3.0);
+    const CollisionSection door_section = model.sections[0];
+    model.sections.assign(3, CollisionSection{});
+    model.sections[2] = door_section;
+    model.finalize_sections();
+    const int32_t origin[3]{};
+    std::vector<CollisionMatrix> matrices(3, collision_matrix_from_heading(0, origin));
+    CollisionTargetView target;
+    target.model = &model;
+    target.matrices = matrices.data();
+    target.bound_radius = fx(8);
+    target.door_first_bone = 2;
+    CollisionPoint point{0, 0, fx(1), 0};
+    int32_t radius = 0;
+    ContactQuery query;
+    query.points = &point;
+    query.radii = &radius;
+    query.num_points = 1;
+    query.source_bound_radius = fx(1);
+    BlinkAccum blink;
+    LadderContact ladder;
+    ContactResult result;
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(result.flags == kTouchDoor && result.door_sections == 1);
+    target.door_passable_sections = uint64_t{1} << 2;
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(result.flags == 0);
+    query.mask = 2; // Flags&Player, independent of authority/local ownership
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(result.flags == kTouchDoor && result.door_sections == 1);
+
+    Rig rig(box_model(bvol_type::kDoorCD, 0, 2.0, 2.0, 3.0));
+    Entity &door = *rig.world.registry.get(rig.building);
+    door.item_type = 5;
+    door.door_count = 1;
+    door.door_event = door.door_motion = true;
+    rig.world.doors.initialize(door, 528, 0);
+    rig.move_soldier(10, 10, 0);
+    int32_t pos[3] = {fx(10), fx(10), 0};
+    int32_t velocity[3]{};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, velocity, velocity[2],
+            0, fx(1.8), 0, 0, false, false, 0, 43, 0u, health);
+    CHECK(rig.world.doors.slot(door, 0)->state == 1);
+    CHECK(door.door_touch_mask == 1);
+    CHECK(health == 100 && pos[0] == fx(10));
+    for (int i = 0; i < 125; ++i) rig.world.doors.tick(rig.world);
+    CHECK(rig.world.doors.slot(door, 0)->state == 2);
+    state = {};
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, velocity, velocity[2],
+            0, fx(1.8), 0, 0, false, true, 1, 43, 0u, health);
+    CHECK(rig.world.doors.slot(door, 0)->state == 2);
+    Entity *player = rig.world.registry.get(rig.soldier);
+    player->flags |= kEntityFlagPlayer;
+    player->engine_flags |= kEntityFlagPlayer;
+    state = {};
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, velocity, velocity[2],
+            0, fx(1.8), 0, 0, true, false, 2, 43, 0u, health);
+    CHECK(rig.world.doors.slot(door, 0)->state == 3);
+}
+
 void test_matrix_roundtrip() {
     // Entity_InitFromModel's signed Q16 multiply biases BOTH signs by +0x8000
     // before the arithmetic shift; it is not symmetric round-away-from-zero.
@@ -362,6 +555,43 @@ void test_retail_render_pose_matrix_roundtrip_and_order() {
 }
 
 // ---------------------------------------------------------------------------
+
+void test_script_teleport_rebuilds_candidates_and_blink_from_published_pools() {
+    Rig rig(box_model(8, 0x3C, 4.0, 4.0, 3.0));
+    rig.world.collision = &rig.cw;
+    rig.world.cached.local_player = rig.soldier;
+    rig.cw.local_player = rig.soldier;
+    rig.world.registry.configure_pool(1, 4);
+    rig.world.registry.configure_pool(3, 4);
+    Entity target;
+    target.kind = EntityKind::Marker;
+    target.position = {10.0f, 10.0f, 0.5f};
+    const auto marker = rig.world.registry.spawn(3, target);
+    Entity moving;
+    moving.kind = EntityKind::Item;
+    moving.position = {100.0f, 100.0f, 0.5f};
+    moving.bound_radius = 1.0f;
+    const auto dynamic = rig.world.registry.spawn(1, moving);
+    rig.cw.build_initial_tables(rig.world);
+    CHECK(rig.cw.candidate_count(rig.soldier) == 0);
+
+    // A direct 4B8EB0 call sees the source's new position and the dynamic's
+    // previously published position. It does not call the pool-table builder.
+    rig.world.registry.get(dynamic)->position = target.position;
+    CHECK(rig.world.commands.teleport_local_to_ssn(marker));
+    CHECK(rig.cw.candidate_count(rig.soldier) == 1);
+    const Entity &player = *rig.world.registry.get(rig.soldier);
+    CHECK((player.flags & kEntityFlagIndoors) != 0);
+    CHECK(player.blink_hits[0] != 0);
+    CHECK((rig.cw.local_player_blink_flags & 2) != 0);
+    for (int tick = 0; tick < 16; ++tick) {
+        rig.cw.build_tick_tables(rig.world);
+        CHECK(rig.cw.candidate_count(rig.soldier) == 1);
+    }
+    rig.cw.build_tick_tables(rig.world);
+    CHECK(rig.cw.candidate_count(rig.soldier) == 2);
+}
+
 void test_blink_query_and_refresh() {
     // Authored blink flags 0x3C = init 0x3E with the bit-1 letter cleared -> runtime
     // accum (0x3C ^ 6) = 0x3A carries bit 2 -> INDOORS. The 0x3E default does not.
@@ -704,7 +934,7 @@ void test_resolver_wall_pushout() {
     CHECK(health == 100);   // solid volumes never hurt
     // The wall separation moved the entity: the applied-push latch stores 1.
     CHECK(rig.cw.resolver_applied_push);
-	CHECK(brain.inf.board_blocked); // [orig: facing-push gate @0x4B37BB]
+	CHECK(brain.inf.path_state == 1); // [orig: facing-push gate @0x4B37BB]
 }
 
 // ---------------------------------------------------------------------------
@@ -5476,9 +5706,11 @@ void test_fixed_matrix_euler_round_trip() {
 int main() {
 	test_fixed_matrix_euler_witnessed_vector();
 	test_fixed_matrix_euler_round_trip();
+	test_door_contact_and_player_collision_split();
 	test_matrix_roundtrip();
 	test_retail_render_pose_matrix_roundtrip_and_order();
     test_blink_query_and_refresh();
+    test_script_teleport_rebuilds_candidates_and_blink_from_published_pools();
     test_negative_static_slot_candidates_and_blink();
     test_iris_candidate_blink_is_not_global_building_walk();
     test_iris_march_outdoor_levels_and_group_clear();
@@ -5489,6 +5721,9 @@ int main() {
     test_ray_clip();
     test_ground_probe_roof();
     test_resolver_wall_pushout();
+    test_infantry_detour_cache_and_arrival();
+    test_infantry_detour_one_leg_fallback();
+    test_infantry_route_walks_around_wall();
     test_resolver_move_callback_contact_replaces_solid_push();
     test_mounted_resolver_keeps_touch_without_parent_pushout();
     test_secondary_vertical_force_is_full_strength();

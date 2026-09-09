@@ -45,12 +45,7 @@ public:
 		initial_executed_ = false;
     }
 
-    void on_load(opennova::world::World &) override {
-        if (!prog_.code.empty()) vm_.load(prog_);
-        accum_ = 0;
-        runs_ = 0;
-		initial_executed_ = false;
-    }
+    void on_load(opennova::world::World &world) override;
 
 	// WacScript_InitAndLoad executes the freshly loaded bytecode once before
 	// the environment's 255-tick startup settle. This does not consume a logic
@@ -74,11 +69,7 @@ public:
         // sits under the same `if` as the BMS event pump.
         // [orig: wac_var_ticks @0x4f81d3; the wrapper described at
         //  World::script_may_advance]
-        // The tick republish is kept; the human-presence GATE is deferred to
-        // master pending the same decision as the #564-class wire commits.
-        // Re-enabling it is one line, but it changes wac_behavior_test's
-        // expectations, so it is not ours to switch on unilaterally.
-        (void)wac_publish_ticks_and_gate(world, runs_);
+        if (!wac_publish_ticks_and_gate(world, runs_)) return;
         if (++accum_ < kTicksPerExecution) return; // [orig: dword_C6EAD4 ++ / cmp 0x3E]
         accum_ = 0;
         vm_.execute(world);

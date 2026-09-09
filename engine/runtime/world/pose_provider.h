@@ -23,6 +23,10 @@ struct MountedPose;
 struct CollisionMatrix;
 struct CollisionModel;
 
+// Optional matrices returned by Entity_BuildBoneTransformMatrices @0x4B1290.
+// The weapon anchor includes its hand-pivot nudge; Head includes the face offset.
+enum class SkeletalAnchor : uint8_t { HeldWeapon, Head };
+
 class IPoseProvider {
 public:
 	virtual ~IPoseProvider() = default;
@@ -41,6 +45,18 @@ public:
 	virtual bool resolve_muzzle_pose(World &, EntityHandle, int32_t /*out*/[3]) {
 		return false;
 	}
+	// Organic userpoint through the skeletal pose. Its orientation remains
+	// the entity's live yaw/pitch/roll. Zero is the caller's raw-pose fallback.
+	// [orig: Entity_GetAttachmentWorldPosition @0x4B2670]
+	virtual bool resolve_organic_attachment(World &, EntityHandle, uint8_t, int32_t[3]) {
+		return false;
+	}
+	// The posed hand/head attachment origin used by organic escort and dragging.
+	// False retains the raw entity origin, as the no-model branch does.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290]
+	virtual bool resolve_skeletal_anchor(World &, EntityHandle, SkeletalAnchor, int32_t[3]) {
+		return false;
+	}
 	// A vehicle/eweap userpoint (1-based table index) through the model's
 	// current PANM part pose: out = {x, y, z (16.16), yaw, pitch, roll (BAM32,
 	// the posed bone's euler)}. [orig: Entity_ComputeUserpointWorldTransform
@@ -54,6 +70,9 @@ public:
 	virtual bool resolve_named_transform(World &, EntityHandle, const char *, int32_t[6]) {
 		return false;
 	}
+	// Last matching model userpoint, independent of whether a posed matrix
+	// is available. [orig: Entity_FindAttachBone @0x4B9580]
+	virtual int last_named_userpoint(World &, EntityHandle, const char *) { return 0; }
 	// A userpoint (1-based table index) through the entity placement matrix
 	// ALONE, no part pose: the aim/LOS origin's TARGET point (16.16 world).
 	// [orig: Entity_ComputeWeaponFireOrigin @0x43b5f6 Math_FixedPointTransformPoint22
@@ -67,6 +86,10 @@ public:
 	// The turret solve aims from this pivot before resolving its live muzzle.
 	// [orig: Entity_ComputeWeaponFireTransform_0 @0x456980]
 	virtual bool resolve_userpoint_pivot(World &, EntityHandle, int, int32_t[3]) { return false; }
+
+	// Unposed COBJ pivot through the entity placement, for door transition sound.
+	// [orig: Entity_ProcessSectionDamageTransition @0x43F496..0x43F501]
+	virtual bool resolve_section_pivot(World &, EntityHandle, int, int32_t[3]) { return false; }
 
 	// --- collision sections --------------------------------------------------
 	// An embedder may learn about dynamic entities after its mission-start

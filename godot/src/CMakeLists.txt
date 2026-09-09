@@ -194,6 +194,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_player_view.cpp
     simulation/simulation_player_weapon.cpp
     simulation/simulation_present.cpp
+    simulation/simulation_script_voice.cpp
     simulation/simulation_scars.cpp
     simulation/simulation_hud_feeds.cpp
     world/item_effect_director.cpp
@@ -219,6 +220,7 @@ add_library(${TARGET_NAME} SHARED
     audio/sound_bank.cpp
     audio/mission_audio_records.cpp
     audio/mission_audio.cpp
+    audio/mission_audio_voice.cpp
     dbf/dbf_data.cpp
     rtxt/rtxt_string_file.cpp
     util/engine_caches.cpp

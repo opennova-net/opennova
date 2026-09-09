@@ -620,6 +620,7 @@ private:
 
 	// --- the effect fan-out (game_world_effects.cpp) ---
 	void route_round_impacts();
+    void route_script_effects();
 	void route_terrain_scorches();
 	void resync_weather_after_restore();
 

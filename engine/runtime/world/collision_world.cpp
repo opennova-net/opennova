@@ -875,6 +875,10 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         ++slice_refresh_counter_;
         return; // keep the previous slices/arena
     }
+    build_candidate_slices(world);
+}
+
+void CollisionWorld::build_candidate_slices(World &world) {
     slice_refresh_counter_ = 0;
     candidate_slices_built_ = true;
     arena_.clear();
@@ -918,12 +922,13 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         }
         candidates_[e.handle.packed] = slice;
     };
-    // persons_ uses the same registry order and exact organic/active predicate,
-    // so it is also the already-compacted source walk for this refresh.
-    for (const PersonSlot &person : persons_) {
-        const Entity *e = world.registry.get(person.h);
-        if (e != nullptr) build_for(*e, 0x40000); // [orig: pool-0 +4.0u]
-    }
+    // Sources use their current live positions, including a direct teleport
+    // between pool-table publications. Keep the existing organic source gate;
+    // candidate target positions remain the published dynamics/statics.
+    world.registry.for_each_in_pool(0, [&](const Entity &e) {
+        if (e.kind == EntityKind::Organic && (e.flags & 1u) == 0)
+            build_for(e, 0x40000); // [orig: pool-0 +4.0u]
+    });
     // Pool-1 SOURCE slices for every retail-eligible active item, not merely
     // motor-driven vehicles. A source needs an ItemDef; EWeap/attachable rows
     // (attrib 0x20) are excluded unless the def's raw type is 1. This same
@@ -1008,6 +1013,12 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
                        dynamic.bound_radius_q16, 0x60000,
                        dynamic.registry_twin);
     }
+}
+
+void CollisionWorld::refresh_entity_proximity(World &world, Entity &entity) {
+    invalidate_trace_views();
+    build_candidate_slices(world);
+    refresh_blink(world, entity);
 }
 
 void CollisionWorld::refresh_after_registry_change(World &world) {

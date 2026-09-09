@@ -8,6 +8,7 @@
 #include "def_scan.h"
 
 #include <ctype.h>
+#include <cmath>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,13 @@ namespace opennova::def {
    foliage share 2, powerup and object share 6; an unknown token leaves 0
    (unset), and 7 is unused. [orig: ItemDef_ParseProperty @ 0x49eb00;
    docs/world/itemdef-re.md D-ITEMDEF-1] */
+// x87 _ftol2_sse stores the low dword of a truncated signed i64.
+static int32_t door_integer(double value) {
+    if (!std::isfinite(value) || value < -9223372036854775808.0 ||
+            value >= 9223372036854775808.0) return 0;
+    return static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(value)));
+}
+
 static int item_type_from_string(const char *s, size_t len) {
     char low[16];
     size_t ll = len < 15 ? len : 15;
@@ -139,7 +147,60 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
 
         int parsed = 0;
 
-        if (lower_starts_with(lower, ll, "id ", 3)) {
+        if (lower_match_key(lower, ll, "num_doors", 9) ||
+                lower_match_key(lower, ll, "first_door", 10)) {
+            const bool first = lower_match_key(lower, ll, "first_door", 10);
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, first ? 10 : 9, &vl);
+            int64_t count = parse_int_n(v, vl);
+            if (first) --count;
+            if (count < 0) count = 0;
+            if (count > 30) count = 30;
+            const unsigned shift = first ? 8 : 0;
+            const uint32_t bits = (static_cast<uint32_t>(current.deathtime_ticks) &
+                    ~(0xFFu << shift)) | (static_cast<uint32_t>(count) << shift);
+            current.deathtime_ticks = static_cast<int32_t>(bits);
+            current.attrib |= DEF_ITEM_ATTRIB_DOOR;
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "door_type", 9) ||
+                lower_match_key(lower, ll, "door_dir", 8)) {
+            const bool type = lower_match_key(lower, ll, "door_type", 9);
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, type ? 9 : 8, &vl);
+            Token tok[30];
+            const int n = tokenize(v, vl, tok, 30);
+            uint32_t bits = 0;
+            for (int i = 0; i < n; ++i)
+                if (parse_int_n(tok[i].s, tok[i].len) != 0) bits |= 1u << (i + 1);
+            if (type) current.door_type = bits;
+            else current.clipsize = static_cast<int32_t>(bits);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "open_rate", 9) ||
+                lower_match_key(lower, ll, "max_angle", 9)) {
+            const bool rate = lower_match_key(lower, ll, "open_rate", 9);
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            char value[128];
+            safe_copy(value, sizeof(value), v, vl);
+            const double number = atof(value);
+            if (rate) current.door_open_rate_q16 = door_integer(65536.0 / (number * 62.0));
+            else current.door_max_angle_bam = door_integer(number * (1.0 / 360.0) * 4294967295.0);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "door_open_sound_id", 18) ||
+                lower_match_key(lower, ll, "door_close_sound_id", 19)) {
+            const bool opening = lower_match_key(lower, ll, "door_open_sound_id", 18);
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, opening ? 18 : 19, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) > 0)
+                safe_copy(opening ? current.door_open_sound : current.door_close_sound,
+                        25, tok[0].s, tok[0].len);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "mana", 4)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            current.mana = signed_i16_value(parse_int_n(v, vl));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "music", 5)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.music_location = signed_i16_value(parse_int_n(v, vl));
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "id ", 3)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
             current.id = parse_int_n(v, vl);
             parsed = 1;
@@ -275,12 +336,28 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
 			consume_value_str(
 					trimmed, tlen, 12, current.ammo_marker3, sizeof(current.ammo_marker3));
 			parsed = 1;
+        } else if (lower_match_key(lower, ll, "ammo_easyrocket", 15)) {
+            consume_value_str(trimmed, tlen, 15, current.ammo_easyrocket,
+                    sizeof(current.ammo_easyrocket));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "ammo_advancedrocket", 19)) {
+            consume_value_str(trimmed, tlen, 19, current.ammo_advancedrocket,
+                    sizeof(current.ammo_advancedrocket));
+            parsed = 1;
         /* The closeattack launch USERPOINT name (the AI muzzle; see def.h)
            [orig: ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB] */
 		} else if (lower_match_key(lower, ll, "launchups_closeattack", 21)) {
 			consume_value_str(trimmed, tlen, 21, current.launchups_closeattack,
 					sizeof(current.launchups_closeattack));
 			parsed = 1;
+        } else if (lower_match_key(lower, ll, "launchups_rocket", 16)) {
+            consume_value_str(trimmed, tlen, 16, current.launchups_rocket,
+                    sizeof(current.launchups_rocket));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "launchups_marker3", 17)) {
+            consume_value_str(trimmed, tlen, 17, current.launchups_marker3,
+                    sizeof(current.launchups_marker3));
+            parsed = 1;
         /* The twelve weapon userpoint names (def.h weapon_userpoints; the vehicle/eweap
            fire/flash/casing anchors) [orig: ItemDef_ParseProperty @ 0x4a0ff2..0x4a1301] */
 		} else if (lower_match_key(lower, ll, "weaplbup2", 9)) {

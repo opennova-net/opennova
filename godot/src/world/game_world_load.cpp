@@ -343,6 +343,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM));
 	timeline->span("effects_warm");
 	warm_effect_world_catalog();
+    route_script_effects(); // initial WAC/BMS descriptors survived the warm-scene reset
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_FINISH));
 	timeline->finish();

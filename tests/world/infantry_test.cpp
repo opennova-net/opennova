@@ -18,6 +18,7 @@
 //     org1 2048/8-tick slide + eighth-step body_pitch/roll chase, the org2 atan2
 //     quarter-step leg, the non-conform decay — and the regression that a standing
 //     local player's camera roll chain stays level on side slopes.
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <base/io/bam.h>
@@ -30,6 +31,8 @@
 
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/entity_spawn.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/infantry_ladder.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/world.h>
@@ -2088,14 +2091,11 @@ void test_player_weapon_channel_ticks_while_dead() {
     CHECK(!infantry_weapon_channel_visible(e->inf, true, false));
 }
 
-// The org1 (AI) body runs the SHARED dual-channel advance on its secondary channel
-// — clip-end deferred promotion, playhead step, blend ramp — but NEVER the org2
-// selection ladder: both bodies pass their out-array to AnimMap_UpdateDualChannels,
-// while the AI's own secondary-state writer @0x4b9a28 is unwitnessed. So an AI body's
-// weapon channel plays and cross-fades whatever state it holds, and holds it.
-// [orig: AnimMap_UpdateDualChannels @0x40b8c0 from both @0x4b40e0 and @0x4b9910;
-//  witness world-wac-ai-re.md §14.8.1]
-void test_ai_weapon_channel_advances_without_selection() {
+// Org1 mirrors the primary state and pending target every motor tick, without
+// the org2 hold-pose/reload-window selector. Independent secondary playheads
+// still advance, promote deferred exits and cross-fade.
+// [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48 -> @0x40B8C0]
+void test_ai_weapon_channel_mirrors_primary_before_advance() {
     World w;
     AiSystem ai;
     ai.is_authority = true;
@@ -2114,8 +2114,8 @@ void test_ai_weapon_channel_advances_without_selection() {
     CHECK(e->inf.wpn_clip_phase > 0);
 
     // The org2 selection NEVER runs for it: a reload window that would flip a
-    // player's channel to 65 leaves an AI body's state alone through many slow
-    // passes (the ladder is the local/wire producer's; the AI writer is unread).
+    // player's channel to 65 leaves an AI body's primary-mirrored state alone
+    // through many slow passes.
     e->inf.reload_anim_ticks = 80;
     run_ticks(ai, w, 4, 4 + 64);
     CHECK(e->inf.wpn_state == anim_state::kIdle);
@@ -2124,12 +2124,12 @@ void test_ai_weapon_channel_advances_without_selection() {
     // Entity_UpdateInfantryPlayerBody], not in the shared advance.
     CHECK(e->inf.reload_anim_ticks == 80);
 
-    // But a state placed on the channel (as a future witnessed AI writer, or the
-    // wire, would) DOES play through the shared machinery: it advances, its
-    // deferred exit promotes at clip end, and the promotion cross-fades.
-    e->inf.reload_anim_ticks = 0;
-    e->inf.begin_weapon_transition(anim_state::kReload);
-    e->inf.wpn_deferred = anim_state::kIdle;
+    // A primary change reaches the secondary on the very next motor pass,
+    // including a non-authority NPC. Its old independent state is overwritten.
+    ai.is_authority = false; // keep the primary fixed through the test's slow passes
+    e->inf.reset_body_animation(anim_state::kReload);
+    e->inf.anim_pending = anim_state::kIdle;
+    e->inf.reset_weapon_animation(anim_state::kIdle);
     const int32_t p0 = e->inf.wpn_clip_phase;
     run_ticks(ai, w, 70, 75);
     CHECK(e->inf.wpn_state == anim_state::kReload);
@@ -2437,6 +2437,229 @@ void test_death_presentation() {
         CHECK(ent->corpse_timer > 0);  // parked on the 62-tick retry clock
         CHECK(ent->corpse_timer <= 62);
     }
+}
+
+
+struct NpcRespawnRig {
+    std::unique_ptr<World> storage = std::make_unique<World>();
+    TestSource source;
+    EntityHandle handle;
+
+    NpcRespawnRig() {
+        World &w = *storage;
+        w.registry.configure_pool(0, 8);
+        w.registry.configure_pool(1, 4);
+        w.registry.configure_pool(2, 4);
+        Entity seed;
+        seed.kind = EntityKind::Organic;
+        seed.item_id = 101;
+        seed.net_id = 101;
+        seed.team = 1;
+        seed.group_id = 7;
+        seed.health = seed.health_max = 125;
+        seed.mana_max = 37;
+        seed.position = {12.0f, 3.0f, 6.0f};
+        seed.yaw = 30;
+        seed.flags = seed.engine_flags = 0x400u;
+        seed.deathtime_ticks = 3;
+        handle = w.registry.spawn(0, seed);
+        w.ai.attach(handle);
+        body().inf.active = true;
+        body().profile.clip_size = 19;
+        source.clips = {44, 153, 174};
+        w.ai.root_motion = &source;
+        entity_reset_to_spawn_state(w, entity());
+        w.out.destruction.clear();
+    }
+    Entity &entity() { return *storage->registry.get(handle); }
+    AiEntity &body() { return *storage->ai.for_handle(handle); }
+    void kill() {
+        entity().health = 0;
+        entity().alive = false;
+        entity().death_anim_state = 174;
+        entity().position = {50.0f, 20.0f, 8.0f};
+        body().pos[0] = fx(50);
+        body().pos[1] = fx(20);
+        body().pos[2] = fx(8);
+        body().inf.reset_body_animation(44);
+    }
+    void tick(uint32_t from, uint32_t end) { run_ticks(storage->ai, *storage, from, end); }
+};
+
+void test_new_remote_player_death_keeps_the_entity_until_deploy() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    w.registry.configure_pool(0, 4);
+    w.rules.mp_session = true;
+    const EntityHandle handle = spawn_remote_player(w, PlayerSpawn{});
+    AiEntity *body = w.ai.for_handle(handle);
+    CHECK(body != nullptr && !body->net_is_remote_peer && !body->inf.is_local_player);
+    // No C2S pose has arrived. The player must still use the player death
+    // lifecycle, even with an expired NPC corpse timer and no SP watch.
+    w.registry.get(handle)->deathtime_ticks = 0;
+    CHECK(w.commands.kill_player(handle, {}));
+    run_ticks(w.ai, w, 1, 5);
+    const Entity *corpse = w.registry.get(handle);
+    CHECK(corpse != nullptr);
+    if (corpse != nullptr) {
+        CHECK(corpse->health == 0);
+        CHECK((corpse->flags & kEntityFlagDead) != 0);
+    }
+    CHECK(w.ai.for_handle(handle) != nullptr);
+    CHECK(w.out.entity_removals.empty());
+}
+
+void test_npc_respawn_counts_and_spawn_reset() {
+    NpcRespawnRig r;
+    const uint64_t identity = r.entity().registry_spawn_id;
+    CHECK(r.body().inf.anim_state == 153);
+    CHECK(r.body().inf.clip_phase == 12);
+    r.entity().npc_respawns = 1;
+    r.entity().mana = 0;
+    r.body().inf.magazine = 0;
+    r.kill();
+    r.tick(1, 3);
+    CHECK(r.entity().health == 0 && r.entity().corpse_timer == 1);
+    r.tick(3, 4);
+    CHECK(r.entity().alive && r.entity().health == 125);
+    CHECK(r.entity().mana == 37);
+    CHECK(r.entity().npc_respawns == 0);
+    CHECK(r.entity().registry_spawn_id == identity);
+    CHECK(r.entity().position.x == 12.0f && r.entity().position.y == 3.0f);
+    CHECK(r.entity().yaw == 30 && r.entity().flags == 0x400u);
+    CHECK(r.body().inf.magazine == 19 && r.body().inf.anim_state == 153);
+    CHECK(r.storage->out.entity_removals.empty());
+    r.kill();
+    r.tick(4, 7);
+    CHECK(r.storage->registry.get(r.handle) == nullptr);
+    CHECK(r.storage->ai.for_handle(r.handle) == nullptr);
+    CHECK(r.storage->out.entity_removals.size() == 1);
+
+    for (int16_t count : {int16_t(100), int16_t(32767)}) {
+        NpcRespawnRig endless;
+        endless.entity().npc_respawns = count;
+        endless.kill();
+        endless.tick(1, 4);
+        CHECK(endless.entity().npc_respawns == count);
+        CHECK(endless.entity().health == 125);
+    }
+}
+
+void test_npc_respawn_watch_and_control_point() {
+    NpcRespawnRig r;
+    World &w = *r.storage;
+    Entity player;
+    player.position = {100, 0, 0};
+    w.cached.local_player = w.registry.spawn(0, player);
+    r.entity().npc_respawns = 2;
+    r.kill();
+    r.tick(1, 4);
+    CHECK(r.entity().health == 0 && r.entity().corpse_timer == 62);
+    CHECK(r.entity().npc_respawns == 2);
+    w.rules.mp_session = true;
+    r.entity().corpse_timer = 1;
+    r.tick(4, 5);
+    CHECK(r.entity().health == 125 && r.entity().npc_respawns == 1);
+
+    Entity zone;
+    zone.team = 2;
+    zone.zone_control = 0x10000;
+    const EntityHandle zh = w.registry.spawn(2, zone);
+    r.entity().npc_respawn_zone = zh;
+    r.kill();
+    r.tick(5, 8);
+    CHECK(r.entity().hidden && (r.entity().flags & 1u) != 0);
+    CHECK(r.entity().npc_respawns == 1);
+    w.registry.get(zh)->team = 1;
+    w.registry.get(zh)->zone_control = 0xFFFF;
+    r.tick(8, 10);
+    CHECK(r.entity().hidden && r.entity().health == 0);
+    w.registry.get(zh)->zone_control = 0x10000;
+    r.tick(10, 11);
+    CHECK(!r.entity().hidden && r.entity().health == 125);
+    CHECK(r.entity().npc_respawns == 0);
+}
+
+void test_npc_silent_cleanup_and_corpse_effect_lifetime() {
+    {
+        NpcRespawnRig r;
+        r.entity().leave_corpse = true;
+        r.entity().section_mask = 1;
+        r.entity().npc_respawns = 100;
+        r.entity().deathtime_ticks = 100;
+        r.kill();
+        r.tick(1, 2);
+        CHECK(r.entity().npc_respawns == 0);
+        CHECK(r.entity().corpse_timer == 38); // (100 - 61) - first tick
+        CHECK(r.storage->out.slot_sounds.empty());
+        r.tick(2, 40);
+        CHECK(r.storage->registry.get(r.handle) == nullptr);
+    }
+    {
+        NpcRespawnRig r;
+        ItemDeathTraits traits;
+        traits.particledeath = "corpse_decay";
+        traits.particlespawn = "npc_spawn";
+        r.storage->tables.item_death_traits.set(r.entity().item_id, traits);
+        r.entity().deathtime_ticks = 188;
+        r.entity().npc_respawns = 1;
+        r.kill();
+        r.tick(1, 3);
+        const auto &effects = r.storage->out.destruction.effects;
+        CHECK(effects.size() == 1 && effects[0].effect == "corpse_decay");
+        CHECK(effects[0].family == 1 && effects[0].attach_wire_handle == r.handle.packed);
+        CHECK(r.entity().death_effect_active[0] == 1);
+        r.entity().corpse_timer = 1;
+        r.tick(3, 4);
+        bool released = false, spawned = false;
+        for (const auto &effect : effects) {
+            released |= effect.release && effect.attach_wire_handle == r.handle.packed;
+            spawned |= effect.effect == "npc_spawn" && effect.family == 0;
+        }
+        CHECK(released && spawned && r.entity().death_effect_active[0] == 0);
+        CHECK(r.entity().health == 125);
+    }
+}
+
+void test_spawn_reset_clears_refs_and_restarts_nearest_route() {
+    NpcRespawnRig r;
+    World &w = *r.storage;
+    Entity other;
+    other.item_id = 102;
+    const auto other_handle = w.registry.spawn(0, other);
+    w.ai.attach(other_handle);
+    auto *observer = w.ai.for_handle(other_handle);
+    observer->inf.active = true;
+    observer->inf.last_attacker = observer->inf.aim_ref0 = observer->inf.ai_focus = r.handle;
+    observer->inf.aim_point[0] = 12345;
+    w.registry.get(other_handle)->last_attacker = r.handle;
+    w.ai.ai_set_target(w, *observer, r.handle);
+    r.body().inf.last_attacker = r.body().inf.ai_focus = other_handle;
+    r.body().inf.was_hit = true;
+    r.body().inf.damage_timer = 12;
+    w.ai.ai_set_target(w, r.body(), other_handle);
+    auto n0 = node(fx(12), fx(3), fx(1));
+    n0.f[3] = fx(50); // same XY, far above
+    auto n1 = node(fx(13), fx(3), fx(1));
+    n1.f[3] = fx(6);
+    auto n2 = n1; // last tie wins
+    route(w.ai, &r.body(), {n0, n1, n2}, 0);
+    r.entity().health = 200; // reset raises to max, never lowers an overhealed row
+    entity_reset_to_spawn_state(w, r.entity());
+    CHECK(r.entity().health == 200);
+    CHECK(r.body().slot.f[38] == 2);
+    CHECK(r.body().slot.f[3] == 0 && !r.body().inf.combat_target.valid());
+    CHECK(!r.body().inf.last_attacker.valid() && !r.body().inf.ai_focus.valid());
+    CHECK(!r.body().inf.was_hit && r.body().inf.damage_timer == 0);
+    observer = w.ai.for_handle(other_handle);
+    CHECK(observer->slot.f[3] == 0 && !observer->inf.ai_focus.valid());
+    CHECK(!observer->inf.last_attacker.valid() && !observer->inf.aim_ref0.valid());
+    CHECK(observer->inf.aim_point[0] == 0);
+    CHECK(!w.registry.get(other_handle)->last_attacker.valid());
+    r.body().slot.f[37] = 125;
+    r.body().slot.f[38] = 912;
+    entity_reset_to_spawn_state(w, r.entity());
+    CHECK(r.body().slot.f[38] == 912); // boarding command's cache survives route reseed
 }
 
 void test_primary_body_blend_windows_keep_independent_playheads() {
@@ -2921,7 +3144,9 @@ void test_infantry_parity_pins_2026_08_28() {
         AiEntity *e = soldier(ai);
         e->inf.damage_timer = 40;
         e->slot.f[3] = 1;
-        run_ticks(ai, w, 0, 1);
+        // Isolate the selector: a full perception pass correctly clears this
+        // intentionally unregistered target before selecting its idle.
+        ai.infantry_select(*e, w);
         CHECK(e->inf.anim_state == anim_state::kIdle3);
         e->slot.f[3] = 0;
         e->inf.damage_timer = 40;
@@ -2973,6 +3198,9 @@ void test_pre_attack_wins_when_previously_idle() {
     auto make = [&](int slot_idx, uint8_t team, int32_t x) {
         Entity body{};
         body.alive = true;
+        body.item_id = 1001;
+        body.item_type = 3;
+        body.kind = EntityKind::Organic;
         body.health = 150;
         body.team = team;
         body.net_id = uint16_t(300 + slot_idx);
@@ -2991,14 +3219,30 @@ void test_pre_attack_wins_when_previously_idle() {
     };
     AiEntity *red = make(0, 2, 0);
     AiEntity *blue = make(1, 1, 2 * 65536);
+    red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body
     (void)red;
-    run_ticks(ai, w, 0, 96);
+    bool saw_pre_attack = false;
+    for (uint32_t tick = 0; tick < 96; ++tick) {
+        run_ticks(ai, w, tick, tick + 1);
+        if (blue->inf.combat_reaction) {
+            if (!saw_pre_attack) {
+                CHECK(blue->inf.anim_state == anim_state::kPreAttack);
+                CHECK(blue->inf.prev_move_mode == 7);
+                CHECK(blue->inf.combat_move_timer == 2); // Stamp 5, then the three close-range decrements.
+                saw_pre_attack = true;
+            }
+        }
+    }
+    CHECK(saw_pre_attack);
     CHECK(blue->inf.combat_target.valid());
-    CHECK(blue->inf.move_mode == 7);
-    CHECK(blue->inf.prev_move_mode == 0);
-    CHECK(blue->inf.anim_state == anim_state::kPreAttack);
-    CHECK(blue->inf.combat_reaction);
-    CHECK(blue->inf.combat_move_timer > 0);
+    CHECK(blue->inf.move_mode == 7 && blue->inf.prev_move_mode == 7);
+    // Independent gaze leaves this exact-behind target outside the walking-fire
+    // cone, so that latch no longer refreshes the timer on the final think.
+    CHECK(blue->inf.combat_move_timer == 0);
+    // With the hold timer expired, the next decision uses the saved combat
+    // mode and chooses attack, rather than re-entering pre_attack forever.
+    blue->inf.combat_move_timer = 0;
+    CHECK(ai.infantry_combat_think(*blue, w, 16) == anim_state::kAttack);
 }
 
 // The 00TRg rig can never produce combat: infantry_scan_nearest_threat caps its
@@ -3012,6 +3256,22 @@ void test_pre_attack_wins_when_previously_idle() {
 // combat/approach arms become observable and mutation-checkable.
 // [orig: the perception scan @0x4b9910 §17.1 (tick & 0x1F), the candidate walk
 //  Entity_FindTargets @0x53a7ea, and the attack-range gate on AiSlot[15].]
+
+// A damage alert lasts think steps; animation, root motion and firing continue
+// between them. [orig: authority/key&15 gate before LABEL_373 @0x4BA970]
+void test_combat_think_uses_sixteen_tick_cadence() {
+    World world;
+    AiSystem ai;
+    AiEntity *body = soldier(ai);
+    body->inf.damage_timer = 10;
+    run_ticks(ai, world, 0, 1);
+    CHECK(body->inf.damage_timer == 9);
+    run_ticks(ai, world, 1, 16);
+    CHECK(body->inf.damage_timer == 9);
+    run_ticks(ai, world, 16, 17);
+    CHECK(body->inf.damage_timer == 8);
+}
+
 void test_combat_fixture_acquires_a_target() {
     World w;
     // The threat scan walks pools 0..1 by POOL CAPACITY, so an unconfigured pool
@@ -3027,6 +3287,9 @@ void test_combat_fixture_acquires_a_target() {
     auto make = [&](int slot_idx, uint8_t team, int32_t x) {
         Entity body{};
         body.alive = true;
+        body.item_id = 1001;
+        body.item_type = 3;
+        body.kind = EntityKind::Organic;
         body.health = 150;
         body.team = team;
         body.net_id = uint16_t(100 + slot_idx);
@@ -3053,7 +3316,8 @@ void test_combat_fixture_acquires_a_target() {
     // calm scanner halves it and the 4-phase schedule clamps most phases to 6 u,
     // and traced runs show it landing at 3-5 u here. At 10 u the candidate was
     // found and then rejected on range every phase.
-    AiEntity *blue = make(1, 1, 2 * 65536); // 2 u: inside the effective scan radius
+    AiEntity *blue = make(1, 1, 2 * 65536);
+    red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body // 2 u: inside the effective scan radius
 
     run_ticks(ai, w, 0, 96); // >= 3 perception phases (every 32 ticks)
 
@@ -3062,10 +3326,9 @@ void test_combat_fixture_acquires_a_target() {
     // team (2 vs 1, both non-zero), LOS (returns clear with null terrain), the
     // 0x280000 radius cap, and the strict nearest-first test (spacing is now 10 u
     // against a calm-halved 20 u range). It reports instead of failing so the
-    // suite stays green while the instrument is finished; turn these into CHECKs
     // Acquisition WORKS: the scan finds the hostile and the combat think runs.
-    // Only the second-attached soldier acquires here; the first is a known fixture
-    // asymmetry and is not asserted.
+    // Both pointers were reacquired after attachment; the pool can relocate.
+    CHECK(red->inf.combat_target.valid());
     CHECK(blue->inf.combat_target.valid());
     // 2 u is INSIDE blue's 8 u attack range, so retail holds and fights: moveMode 7.
     CHECK(blue->inf.move_mode == 7);
@@ -3099,6 +3362,9 @@ void test_out_of_range_enemy_is_approached() {
     auto make = [&](int idx, uint8_t team, int32_t x) {
         Entity body{};
         body.alive = true;
+        body.item_id = 1001;
+        body.item_type = 3;
+        body.kind = EntityKind::Organic;
         body.health = 150;
         body.team = team;
         body.net_id = uint16_t(200 + idx);
@@ -3115,15 +3381,25 @@ void test_out_of_range_enemy_is_approached() {
         e->slot.f[17] = 40 * 65536; // sight
         return e;
     };
-    make(0, 2, 0);
+    AiEntity *red = make(0, 2, 0);
     AiEntity *blue = make(1, 1, 2 * 65536);
+    red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body
 
-    run_ticks(ai, w, 0, 96);
-
-    CHECK(blue->inf.combat_target.valid());
-    // Retail closes: moveMode 1 with the witnessed 655360 arrival radius.
-    CHECK(blue->inf.move_mode == 1);
-    CHECK(blue->inf.arrival_radius == 655360);
+    bool saw_approach = false;
+    double closest = 1e30;
+    for (uint32_t tick = 0; tick < 96; ++tick) {
+        run_ticks(ai, w, tick, tick + 1);
+        closest = std::min(closest, std::hypot(double(blue->pos[0] - red->pos[0]), double(blue->pos[1] - red->pos[1])));
+        if (blue->inf.move_mode == 1) {
+            saw_approach = true;
+            CHECK(blue->inf.arrival_radius == 655360);
+        }
+    }
+    CHECK(saw_approach && blue->inf.combat_target.valid());
+    // The goal now reaches gait selection in the same think, so this soldier
+    // actually closes and then fights. A permanently approaching pose is wrong.
+    CHECK(closest < fx(1));
+    CHECK(blue->inf.move_mode == 7);
 }
 
 // ---- the weapon channel on the retail data (SKIP-LEG without OPENNOVA_JO_ASSETS) ----
@@ -3285,7 +3561,239 @@ static void test_climber_bit_feeds_the_ladder_gate() {
     CHECK(!make_ladder_resolve_io(e, 0).ai_wants_climb);
 }
 
+static void test_find_and_use_attachment_motor() {
+    struct AttachPose : IPoseProvider {
+        EntityHandle carrier;
+        bool present = true;
+        int32_t point[6] = {fx(4), 0, fx(2), 0, 0, 0};
+        int last_named_userpoint(World &, EntityHandle h, const char *name) override {
+            return present && h == carrier && std::string(name) == "attach" ? 2 : 0;
+        }
+        bool resolve_named_transform(World &, EntityHandle h, const char *name, int32_t out[6]) override {
+            if (!present || h != carrier || std::string(name) != "attach") return false;
+            std::copy_n(point, 6, out);
+            return true;
+        }
+    } pose;
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    Entity person; person.net_id = 42; person.item_id = 1001;
+    person.health = person.health_max = 100; person.kind = EntityKind::Organic;
+    person.leave_corpse = true;
+    const EntityHandle self = w.registry.spawn(0, person);
+    Entity prop; prop.net_id = 77; prop.item_id = 1002; prop.yaw = 90;
+    pose.carrier = w.registry.spawn(1, prop);
+    w.pose_provider = &pose;
+    TestSource motion;
+    motion.clips = {anim_state::kIdle, anim_state::kWalkForward, anim_state::kRunForward,
+                    anim_state::kStop, 150};
+    w.ai.root_motion = &motion;
+    AiEntity &e = *w.ai.at(w.ai.attach(self));
+    e.inf.active = true;
+    e.net_id = person.net_id;
+    e.health = 100;
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kFindAndUse, 77, 0, 0));
+    CHECK(w.registry.get(self)->attach_parent == pose.carrier);
+    CHECK(w.registry.get(self)->attach_bone == 2);
+    // A missing model point preserves the existing relationship.
+    pose.present = false;
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kFindAndUse, 77, 0, 0));
+    CHECK(w.registry.get(self)->attach_parent == pose.carrier);
+    pose.present = true;
+    // Slow-pass phase: tick + 36*42 is a multiple of 16.
+    w.ai.tick_infantry(e, w, 8);
+    CHECK(e.inf.move_mode == 6);
+    CHECK(e.inf.arrival_radius == fx(1));
+    CHECK(e.pos[0] > 0);
+    const int32_t before_x = e.pos[0], before_z = e.pos[2];
+    const int32_t before_phase = e.inf.clip_phase;
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kAiNodePath, 1, 0, 0));
+    w.ai.tick_infantry(e, w, 9);
+    CHECK(e.pos[0] == before_x && e.pos[2] == before_z);
+    CHECK(e.inf.clip_phase == before_phase);
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kAiNodePath, 0, 0, 0));
+    for (uint32_t tick = 10; tick < 220; ++tick) w.ai.tick_infantry(e, w, tick);
+    CHECK(e.pos[0] == pose.point[0] && e.pos[1] == pose.point[1]);
+    CHECK(std::abs(e.pos[2] - pose.point[2]) <= 4);
+    CHECK(e.inf.anim_state == 150);
+    CHECK(e.inf.move_mode == 0);
+    CHECK(e.inf.aim_heading == 0 && e.inf.aim_pitch == 0);
+    CHECK(e.inf.vel[0] == 0 && e.inf.vel[1] == 0);
+    CHECK(!w.registry.get(self)->mounted); // use attachment, not a vehicle seat
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kFindAndUse, 0, 0, 0));
+    CHECK(!w.registry.get(self)->attach_parent.valid());
+    CHECK(w.registry.get(self)->attach_bone == 2);
+    CHECK(w.commands.apply_ai_command(42, EntityCommands::kFindAndUse, 77, 0, 0));
+    w.registry.get(self)->health = 0;
+    w.ai.tick_infantry(e, w, 220);
+    CHECK(!w.registry.get(self)->attach_parent.valid());
+    CHECK(w.ai.unported_calls == 0);
+    CHECK(w.diagnostics.empty());
+}
+
+static void test_suspended_callback_preserves_independent_brain() {
+    auto owned = std::make_unique<World>();
+    World &w = *owned;
+    w.registry.configure_pool(1, 4);
+    Entity seed; seed.net_id = 12; seed.item_id = 900; seed.kind = EntityKind::Item;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    // The command must also work before a brain has been allocated.
+    CHECK(w.commands.apply_ai_command(12, EntityCommands::kAiNodePath, 1, 0, 0));
+    CHECK(w.registry.get(h)->motor_suspended);
+    AiEntity &e = *w.ai.at(w.ai.attach(h));
+    e.brain.f[AiBrain::kPartAnimDir0] = 1;
+    e.brain.f[AiBrain::kPartAnimRate0] = 127;
+    TickContext ctx; ctx.logic_tick = 1; ctx.is_authority = true;
+    w.ai.tick(w, ctx);
+    CHECK(e.brain.f[AiBrain::kPartAnimPhase0] == 127);
+    CHECK(w.registry.get(h)->motor_suspended);
+    CHECK(w.commands.apply_ai_command(12, EntityCommands::kAiNodePath, 0, 0, 0));
+    CHECK(!w.registry.get(h)->motor_suspended);
+}
+
+static void test_downwash_query_and_body_selection() {
+    auto owned = std::make_unique<World>();
+    World &world = *owned;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_type = 1;
+    seed.position = {0, 0, 6};
+    seed.yaw = 90;
+    seed.veh.part_spin.speed = 214748352; // kRotorSpeedMax
+    const EntityHandle heli = world.registry.spawn(1, seed);
+    VehicleTraits traits;
+    traits.family = VehicleFamily::Helicopter;
+    world.rotor_wash.update(*world.registry.get(heli), traits);
+    const uint16_t zone = world.registry.get(heli)->veh.rotor_wash_handle;
+    int32_t point[3] = {0, 0, 6 * 65536};
+    CHECK(world.rotor_wash.nearby_zone(point, 15 * 65536) == zone);
+    point[0] = 15 * 65536;
+    CHECK(world.rotor_wash.nearby_zone(point, 15 * 65536) == 0); // strict radius
+    --point[0];
+    CHECK(world.rotor_wash.nearby_zone(point, 15 * 65536) == zone);
+    point[0] = 0;
+    ++point[2];
+    CHECK(world.rotor_wash.nearby_zone(point, 15 * 65536) == 0); // above the rotor
+    --point[2];
+    world.registry.get(heli)->veh.part_spin.speed = 214748352 / 8 - 1;
+    world.rotor_wash.update(*world.registry.get(heli), traits);
+    CHECK(world.rotor_wash.nearby_zone(point, 15 * 65536) == 0);
+    ++world.registry.get(heli)->veh.part_spin.speed;
+    world.rotor_wash.update(*world.registry.get(heli), traits);
+    CHECK(world.rotor_wash.nearby_zone(point, 15 * 65536) == zone); // intensity 8192
+    world.registry.get(heli)->veh.part_spin.speed = 214748352 / 2;
+    world.rotor_wash.update(*world.registry.get(heli), traits);
+    point[2] -= 15 * 65536;
+    CHECK(world.rotor_wash.nearby_zone(point, 15 * 65536) == zone); // height equality
+    point[2] -= 2;
+    CHECK(world.rotor_wash.nearby_zone(point, 15 * 65536) == 0);
+    world.registry.get(heli)->veh.part_spin.speed = 214748352;
+    world.rotor_wash.update(*world.registry.get(heli), traits);
+
+    Entity soldier;
+    soldier.kind = EntityKind::Organic;
+    soldier.item_type = 3;
+    const EntityHandle actor = world.registry.spawn(0, soldier);
+    AiEntity &body = *world.ai.at(world.ai.attach(actor));
+    TestSource source;
+    source.clips = {0, 1, 10, 27, 28, 29, 30, 36, 41, 43, 44, 146, 148, 149, 155};
+    world.ai.root_motion = &source;
+    const auto reset = [&] {
+        body.inf = InfantryState{};
+        body.inf.active = true;
+        body.inf.adm_id = 0;
+        body.inf.anim_state = 43;
+        body.inf.max_health = 100;
+        body.health = 100;
+        body.slot = AiSlot{};
+        body.pos[0] = body.pos[1] = body.pos[2] = 0;
+    };
+    reset();
+    world.ai.infantry_select(body, world);
+    CHECK(body.inf.anim_state == anim_state::kWashIdle);
+    reset();
+    body.inf.move_mode = 1;
+    body.inf.target_dist = 10 * 65536;
+    world.ai.infantry_select(body, world);
+    CHECK(body.inf.anim_state == anim_state::kWashWalk);
+    reset();
+    body.inf.move_mode = 1;
+    body.inf.target_dist = 10 * 65536;
+    body.slot.bytes()[AiSlot::kAlertByte] = 2;
+    world.ai.infantry_select(body, world);
+    CHECK(body.inf.anim_state == anim_state::kWashRun);
+    reset();
+    body.inf.move_mode = 1;
+    body.inf.target_dist = 10 * 65536;
+    body.slot.bytes()[AiSlot::kAlertByte] = 2;
+    source.clips.erase(29);
+    world.ai.infantry_select(body, world);
+    CHECK(body.inf.anim_state == anim_state::kRunForward); // missing authored wash clip
+    source.clips.insert(29);
+    reset();
+    body.inf.move_mode = 1;
+    body.inf.target_dist = 10 * 65536;
+    body.slot.bytes()[AiSlot::kAlertByte] = 2;
+    body.health = 50;
+    world.ai.infantry_select(body, world);
+    CHECK(body.inf.anim_state == anim_state::kWoundedRun); // wound selection precedes wash
+    reset();
+    world.ai.infantry_select(body, world, anim_state::kAttack);
+    CHECK(body.inf.anim_state == anim_state::kAttack);
+
+    reset();
+    world.ai.player_body_select(body, world, 0);
+    CHECK(body.inf.anim_state == anim_state::kWashIdle);
+    body.inf.clip_phase = 17000;
+    world.ai.player_body_select(body, world, 0);
+    CHECK(body.inf.anim_state == anim_state::kWashIdle && body.inf.clip_phase == 17000);
+    reset();
+    body.inf.player_moving = true;
+    body.inf.wpn_run_anim = -2;
+    world.ai.player_body_select(body, world, 0);
+    CHECK(body.inf.anim_state == anim_state::kWashWalk);
+    reset();
+    body.inf.player_moving = true;
+    world.ai.player_body_select(body, world, 0);
+    CHECK(body.inf.anim_state == anim_state::kRun3); // player has no wash_run substitution
+    reset();
+    body.inf.anim_state = anim_state::kRollLeft;
+    CHECK((infantry_anim_flags(body.inf.anim_state) & 4) != 0);
+    body.inf.player_moving = true;
+    body.inf.wpn_run_anim = -2;
+    world.ai.player_body_select(body, world, 0);
+    CHECK(body.inf.anim_state == anim_state::kRollLeft && body.inf.anim_pending == 1);
+    reset();
+    body.inf.anim_state = anim_state::kRollLeft;
+    body.inf.move_mode = 1;
+    body.inf.target_dist = 10 * 65536;
+    world.ai.infantry_select(body, world);
+    CHECK(body.inf.anim_state == anim_state::kRollLeft && body.inf.anim_pending == 28);
+    reset();
+    world.ai.player_body_select(body, world, kEntityFlagDrowning);
+    CHECK(body.inf.anim_state == anim_state::kSwimIdle && body.inf.anim_pending == 0);
+
+    const EntityHandle second = world.registry.spawn(1, seed);
+    world.rotor_wash.update(*world.registry.get(second), traits);
+    point[2] = 6 * 65536;
+    CHECK(world.rotor_wash.nearby_zone(point, 15 * 65536) == zone); // first equal-distance slot
+    CHECK(world.commands.remove_ssn(heli));
+    CHECK(world.rotor_wash.nearby_zone(point, 15 * 65536) ==
+            world.registry.get(second)->veh.rotor_wash_handle);
+    CHECK(world.commands.remove_ssn(second));
+    reset();
+    world.ai.infantry_select(body, world);
+    CHECK(body.inf.anim_state == anim_state::kIdle); // no surviving wash owner
+}
+
 int main() {
+    test_downwash_query_and_body_selection();
+    test_find_and_use_attachment_motor();
+    test_suspended_callback_preserves_independent_brain();
     test_gait_stance_transition_insert();
     test_player_ladder_climb_cycle();
     test_player_ladder_bottom_exit_and_jump_off();
@@ -3305,7 +3813,7 @@ int main() {
         e->inf.target_heading = 0x40000000; // 90 deg: quarter-step would be 268435456 -> clamped
         run_ticks(ai, w, 1, 2);
         CHECK(e->inf.body_heading == kClamp);
-        CHECK(e->heading == kClamp); // render yaw moves with the body
+        CHECK(e->heading == 60614190); // carry + the independent eighth-step look chase
         run_ticks(ai, w, 2, 3);
         CHECK(e->inf.body_heading == 2 * kClamp);
 
@@ -3526,7 +4034,7 @@ int main() {
         // (diff=1 -> step (1+2)>>2 = 0 is the converged fixed point).
         run_ticks(ai, w, 0, 120);
         CHECK(e->inf.target_heading == 0x20000000);
-        CHECK(std::abs(e->heading - 0x20000000) <= 2);
+        CHECK(std::abs(e->inf.body_heading - 0x20000000) <= 2);
         CHECK(e->pos[0] == 0 && e->pos[1] == 0);       // never walked
     }
 
@@ -4426,15 +4934,21 @@ int main() {
     test_player_arms_dip();
     test_player_weapon_channel_ticks_while_dead();
     test_climber_bit_feeds_the_ladder_gate();
-    test_ai_weapon_channel_advances_without_selection();
+    test_ai_weapon_channel_mirrors_primary_before_advance();
     test_weapon_channel_consumer_gate_and_switch_identity();
     test_death_presentation();
+    test_new_remote_player_death_keeps_the_entity_until_deploy();
+    test_npc_respawn_counts_and_spawn_reset();
+    test_npc_respawn_watch_and_control_point();
+    test_npc_silent_cleanup_and_corpse_effect_lifetime();
+    test_spawn_reset_clears_refs_and_restarts_nearest_route();
     test_primary_body_blend_windows_keep_independent_playheads();
     test_primary_body_mid_blend_retarget_keeps_original_primary();
     test_death_during_blend_finishes_old_tuple_then_retargets();
     test_remote_body_state_queue_gate();
 
     test_combat_fixture_acquires_a_target();
+    test_combat_think_uses_sixteen_tick_cadence();
     test_out_of_range_enemy_is_approached();
     test_infantry_parity_pins_2026_08_28();
     test_pre_attack_wins_when_previously_idle();

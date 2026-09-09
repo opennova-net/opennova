@@ -549,7 +549,35 @@ static void test_nameless_vehicle_takes_the_retail_default_profile() {
 		std::exit(1);
 }
 
+static void test_script_spatial_tables_are_promoted_and_replaced() {
+    bms::File mission{};
+    bms::AreaTrigger area{};
+    area.id = 37; area.x_min = area.y_min = -(2 << 16);
+    area.x_max = area.y_max = 2 << 16; area.z_max = 1 << 16;
+    mission.area_triggers.push_back(area); // no constrain-Z bit
+    bms::BoundingBox box{};
+    box.type = 5; box.ref_id = 9;
+    box.min_x = box.min_y = box.min_z = 2 << 16;
+    box.max_x = box.max_y = box.max_z = -(2 << 16); // load normalizes
+    mission.bounding_boxes.push_back(box);
+    auto w = std::make_unique<World>();
+    mission::promote_mission(mission, *w, {});
+    const Area *promoted = w->registry.area(0);
+    CHECK(promoted != nullptr && promoted->zone_id == 37);
+    CHECK(promoted->bounds.max.z == bms::AreaTrigger::kUnboundedZMax);
+    CHECK(promoted->script_bounds.max.z == 1);
+    CHECK(w->registry.location_at({0, 0, 0}) == 9);
+    CHECK(w->registry.location_at({2, 0, 0}) == 0);
+    w->registry.intern_group("old_mission");
+    mission::promote_mission(bms::File{}, *w, {});
+    CHECK(w->registry.area(0) == nullptr);
+    CHECK(w->registry.location_at({0, 0, 0}) == 0);
+    CHECK(w->registry.script_group_index("old_mission") == -1);
+    CHECK(w->registry.script_group_index("humans") == 1);
+}
+
 int main() {
+    test_script_spatial_tables_are_promoted_and_replaced();
     // A synthetic mission: 3 markers forming a path, 1 looping waypoint record (channel 0),
     // 2 organics on that route (teams 1/2), 1 building.
     bms::File m{};
@@ -1206,7 +1234,7 @@ int main() {
                 cai.root_motion = &hull_src;
 				// Inject the collision resolver's witnessed facing-push latch;
 				// zero root motion alone no longer impersonates a hull contact.
-				cai.at(0)->inf.board_blocked = true;
+				cai.at(0)->inf.path_state = 1;
 				cw.registry.get(cw.registry.find_by_net_id(11))->bound_radius = 3.0f;
 				cut = true;
             }

@@ -464,6 +464,11 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                         }
                     }
                     apply_touch_flags(ent, res.flags, health, is_authority);
+                    // The CD callback is peer-local and runs even with zero force.
+                    // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4B3505]
+                    if ((res.flags & kTouchDoor) != 0)
+                        if (Entity *door = world.registry.get(ch))
+                            world.doors.command(world, *door, 6, res.door_sections);
                 }
             }
             if (pass == 0) {
@@ -513,7 +518,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
 					io::kBamPerRadian);
 			if (std::abs(int64_t(facing)) < 95443712 &&
 					std::abs(int64_t(io::bam_sub(body->inf.target_heading, against))) < 178956960)
-				body->inf.board_blocked = true;
+				body->inf.path_state = 1;
 		}
 	}
 	lap.mark(devtools::Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS);

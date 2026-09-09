@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <formats/lwf/wav_pcm.h>
 
 namespace godot {
 
@@ -24,6 +25,8 @@ public:
 	// or unsupported encoding. loop_mode/loop points are left at defaults; the
 	// caller applies looping.
 	static Ref<AudioStreamWAV> from_bytes(const PackedByteArray &p_bytes);
+	// Box an engine-decoded clip without decoding/caching a second copy.
+	static Ref<AudioStreamWAV> from_pcm(const opennova::lwf::WavPcm &decoded);
 };
 
 } // namespace godot

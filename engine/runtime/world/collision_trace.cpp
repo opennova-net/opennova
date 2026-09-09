@@ -116,6 +116,8 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     scratch.is_ground_of_source = false;
     scratch.uniform_scale_q16 = e->uniform_scale_q16;
     scratch.live_section_pose = live_pose;
+    scratch.door_passable_sections = world.doors.passable_sections(*e);
+    scratch.door_first_bone = e->door_first_bone;
     return &scratch;
 }
 

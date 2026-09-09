@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <runtime/particle/effect_scene.h>
+#include <runtime/world/script_effects.h>
 
 #include "particle/particle_file.h"
 
@@ -55,6 +56,7 @@ public:
 		ADMISSION_ALWAYS = 0,
 		ADMISSION_REPLACE_OWNED = 1,
 		ADMISSION_SUPPRESS_WHILE_OWNED = 2,
+        ADMISSION_STORE_OWNED = 3,
 	};
 
 	enum Binding {
@@ -105,6 +107,9 @@ public:
 	Ref<EffectLoadReport> open(const TypedArray<ParticleFile> &p_files,
 			const Dictionary &p_options = Dictionary());
 	int64_t intern(const String &p_effect_name);
+    // Native-only script descriptor bridge; no Variant round trip.
+    void spawn_script_effect(const opennova::world::ScriptEffectEvent &event,
+            int64_t slot, int64_t owner, uint32_t age_ticks, float water_height);
 	String effect_name(int64_t p_effect_handle) const;
 
 	// One spawn (particle/effect_spawn_records.h): a null or invalid request
