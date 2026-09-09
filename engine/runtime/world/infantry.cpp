@@ -89,7 +89,7 @@ constexpr int32_t kWaterRiseBias = 0x70;          // [orig: @0x4b8124 `+ 112`]
 constexpr int32_t kWaterPitchTermBase = 0x1000;   // [orig: @0x4b80d6 `+ 4096`]
 constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4b80f0 `2048`]
 // The org2 jump gate's exact entity Flags mask: in-air (0x2000), dead (0x2),
-// drowning/water (0x8000), and the second witnessed water-state bit (0x10000).
+// drowning/water (0x8000), and the terrain-gradient slide bit (0x10000).
 // Carried (0x40) is tested separately immediately afterward. The reimpl keeps
 // flags in two mirrors plus a typed mounted relation, so collapse those carriers
 // at the one shared local/remote eligibility seam.
@@ -1066,6 +1066,50 @@ static bool entity_is_player_class(const World &world, EntityHandle handle) {
     return ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0;
 }
 
+
+// The two organic motors share the gradient/gain kernel but apply its result
+// on opposite sides of the body rotation. The NPC also arms the detour latch.
+// [orig: Entity_UpdateInfantryAI @0x4BA896..0x4BA96E;
+// Entity_UpdateInfantryPlayerBody @0x4B79DC..0x4B7AAE]
+static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
+        const terrain::TerrainHeightField *field, bool npc, int32_t &dx, int32_t &dy) {
+    const bool carried = entity != nullptr &&
+            (entity->mounted || entity->ground_target.valid());
+    // Org1's carrier branch bypasses the gradient without touching Flags
+    // 0x10000 after the deck rotation. Org2 clears the bit for a carrier.
+    // [orig: carrier @0x4BA85B; exit @0x4BA891]
+    if (npc && carried) return false;
+    const uint32_t flags = entity != nullptr ? entity->flags | entity->engine_flags : 0u;
+    terrain::TerrainHeightGradient gradient;
+    if (!carried && (flags & 0x90A000u) == 0 && field != nullptr)
+        gradient = terrain::height_field_gradient_fixed(*field, e.pos[0], e.pos[1]);
+    const int32_t magnitude = static_cast<int32_t>(std::min(
+            std::sqrt(double(gradient.dx) * gradient.dx + double(gradient.dy) * gradient.dy),
+            2147418112.0));
+    if (magnitude < 768) {
+        if (entity != nullptr) {
+            entity->flags &= ~0x10000u;
+            entity->engine_flags &= ~0x10000u;
+        }
+        return false;
+    }
+    // IMUL, ADD/ADC 0x8000, SHRD 16: retain the low signed dword.
+    // The unsigned shift also pins the negative-product bits in C++17.
+    const auto scale = [](int32_t value) {
+        return static_cast<int32_t>(
+                static_cast<uint64_t>(int64_t(value) * 419392 + 0x8000) >> 16);
+    };
+    dx = io::bam_sub(0, scale(gradient.dx));
+    dy = scale(gradient.dy);
+    e.inf.vel[2] = std::min(e.inf.vel[2], -167);
+    if (entity != nullptr) {
+        entity->flags |= 0x10000u;
+        entity->engine_flags |= 0x10000u;
+    }
+    if (npc) e.inf.path_state = 1; // [orig: @0x4BA94E; boarding reads @0x4BB325]
+    return true;
+}
+
 void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Recoil/dispersion live ahead of the network-snap motor exit [orig: the
     // Entity_UpdateInfantryAI flag test @0x4b9a03 exits past the sound block]. Received
@@ -1273,6 +1317,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             if (result == NpcCorpseStep::Respawned) death_transition = -1;
         }
     }
+    // Org1 samples before the think so path_state=1 is visible to this tick's
+    // boarding and detour selection. Its replacement motion survives the later
+    // animation advance and still rotates by body heading. [orig: @0x4BA8CC,
+    // @0x4BA917..0x4BA94E; root rotation @0x4BF001]
+    const auto *gradient_field = world.tables.terrain ? world.tables.terrain : terrain;
+    int32_t gradient_dx = 0, gradient_dy = 0;
+    const bool terrain_slide = npc_body && infantry_terrain_motion(
+            e, tick_entity, gradient_field, true, gradient_dx, gradient_dy);
+
     if (e.health > 0 && inf.is_local_player) {
         // 2'. Local player: the player-body input is set from host input each frame
         // (world::apply_player_body_input), never by the org1 AI think path. The body
@@ -1819,7 +1872,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // this tick's step into the slide velocity [orig: @0x4b7d97 keeps them live].
     int32_t root_wx = 0, root_wy = 0;
     {
-        int32_t fwd = frame.dx, lat = frame.dy;
+        int32_t fwd = terrain_slide ? gradient_dx : frame.dx;
+        int32_t lat = terrain_slide ? gradient_dy : frame.dy;
         // Root TRANSLATION is integrated for EVERY state, not just movement states. The original
         // advances the playing clip ONCE per tick (AnimMap_UpdateEntity @0x40b5f0) and integrates
         // the root delta unconditionally: the g_animStateFlagsTable bit0 flag gates the anim COMMIT rules
@@ -1853,6 +1907,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                      static_cast<int32_t>((static_cast<int64_t>(lat) * s) >> 22);
         int32_t wy = static_cast<int32_t>((static_cast<int64_t>(fwd) * s) >> 22) +
                      static_cast<int32_t>((static_cast<int64_t>(lat) * c) >> 22);
+        // Org2 replaces the already-rotated world pair after slide decay.
+        // It does not write the NPC path-state byte. [orig: @0x4B7A64..0x4B7A93]
+        if (inf.is_local_player)
+            infantry_terrain_motion(e, tick_entity, gradient_field, false, wx, wy);
         int32_t dz = frame.dz;
         // Root suppression: drowning zeroes the vertical lane, a ladder latch
         // zeroes the horizontal pair — on a ladder the clip's vertical lane IS

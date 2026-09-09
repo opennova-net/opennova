@@ -162,6 +162,7 @@ func begin_runtime_shutdown() -> WorldLoadOperation:
 		# The F3 windows' Simulation dies with the runtime unload frees.
 		_dev_tools.set_simulation(null)
 		_world.unload()
+	MusicService.stop_context()
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	return load_operation
 
@@ -810,6 +811,7 @@ func _complete_runtime_shutdown(load_operation: WorldLoadOperation) -> void:
 	if load_operation != null and not load_operation.is_settled():
 		await load_operation.settled
 	finish_runtime_shutdown()
+	await MusicService.await_playback_stopped()
 	_restore_quit_policy()
 	if is_inside_tree():
 		get_tree().quit()

@@ -32,6 +32,10 @@ func _ready() -> void:
 	add_child(_director)
 
 
+func _exit_tree() -> void:
+	stop_context()
+
+
 func director() -> MusicDirector:
 	return _director
 
@@ -164,6 +168,14 @@ func stop_context() -> void:
 		_director.set_script_name(&"")
 	_context = ""
 	_script = null
+
+
+## Godot releases stopped streaming playbacks on a later audio/main-thread pass.
+## Orderly application shutdown must keep that pump alive until the extension's
+## playback objects are gone; stopping the VM alone does not release them.
+func await_playback_stopped() -> void:
+	while is_instance_valid(_director) and _director.has_pending_playback():
+		await get_tree().process_frame
 
 
 func set_var(idx: int, value: int) -> void:

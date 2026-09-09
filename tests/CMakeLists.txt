@@ -1557,6 +1557,10 @@ if(MSVC)
 endif()
 add_test(NAME infantry COMMAND infantry_test)
 
+add_executable(infantry_terrain_test world/infantry_terrain_test.cpp)
+target_link_libraries(infantry_terrain_test PRIVATE opennova_runtime)
+add_test(NAME infantry_terrain COMMAND infantry_terrain_test)
+
 add_executable(infantry_attention_test world/infantry_attention_test.cpp)
 target_link_libraries(infantry_attention_test PRIVATE opennova_runtime)
 target_compile_features(infantry_attention_test PRIVATE cxx_std_17)

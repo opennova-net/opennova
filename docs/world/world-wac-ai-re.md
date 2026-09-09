@@ -398,9 +398,8 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     control-posed parent userpoint. PR #640 (re-grilled 2026-09-08) ported the staged E/G/S/H
     walk-to-seat, 126/127, child-seat traversal, the non-UseGun full-basis follow, the can't-enter
     arm and driver lean 107..110 (vehicle-client-movers-re §36). Remaining (the ledger row carries
-    the addresses): the scripted organic escort offsets 11000/12000/12001; the general terrain-gradient
-    detour producer and self-referential drag reversal (the collision-to-detour consumer is now
-    implemented, section 33.16); the S-point side
+    the addresses): the scripted organic escort offsets 11000/12000/12001; self-referential drag reversal (the collision-to-detour consumer is
+    implemented in section 33.16 and the general terrain-gradient producer in section 33.36); the S-point side
     writes `+0x184` / `+0x2FC..+0x304` `@0x4BB840..0x4BB852` (no reader witnessed).
     Driver-lean thresholds are verified in section 33.16.
   - **D-INF-3** movement resolver now includes the horizontal CB capsule, object/terrain
@@ -8032,7 +8031,7 @@ Driver-lean follow-up: 0x4BEE3D compares signed hull roll strictly below 0xFBBBB
 
 The existing combat fixtures retained the first AiEntity pointer across a second attach, which can reallocate the vector. Reacquiring both bodies removes the stale-pointer asymmetry and permits meaningful distance assertions. Temporary diagnosis traces were removed.
 
-Open D-INF-2 residuals include the general terrain-gradient detour producer (currently scoped to boarding), self-referential drag reversal, the documented escort/S-point details, and deterministic handling of malformed state 3. Retail's same-mode state-3 search reads an uninitialized stack start height; no state-3 producer was witnessed, so the portable path uses a ground probe instead of emulating undefined memory.
+The general terrain-gradient detour producer is implemented in section 33.36. Open D-INF-2 residuals include self-referential drag reversal, the documented escort/S-point details, and deterministic handling of malformed state 3. Retail's same-mode state-3 search reads an uninitialized stack start height; no state-3 producer was witnessed, so the portable path uses a ground probe instead of emulating undefined memory.
 
 
 Validation checkpoint for sections 33.15/33.16: the complete Release build succeeds. The full CTest pass exercised 433 tests: 431 passed, one asset-gated motorcycle skip, and the ai file exposed two obsolete per-tick alert assertions. After correcting that fixture to the SSN-staggered think boundary (tick + 36*SSN), its isolated rerun passes; all 432 runnable tests are covered. No engine change was needed after the full run (npc-detour-full-ctest.log, 102.37 seconds; npc-detour-rerun-ctest.log). The rebuilt Dev extension passes full GUT in a fresh isolated process: 1,745 passing, 25 pending/skipped, 178 scripts, 56,618 assertions, no parse errors or dropped scripts (npc-gut-detour-full.log, 156.622 seconds). One existing orphan and 13 resources still in use are still reported at shutdown. Normal SP mission playthrough acceptance remains outstanding.
@@ -8800,3 +8799,64 @@ lint pass also moved one-shot audio ownership into SoundBank's typed
 ObjectID list and routed the door fixture through RetailData. Existing
 shutdown orphan/resource reports remain. Normal mission playthrough
 acceptance and the remaining combat solver are still open.
+
+### 33.36 Terrain-gradient motion and detour production
+
+The shared terrain query now ports Terrain_GetHeightGradient at 0x606330.
+It takes mission X/Y as signed Q16, negates Y with register wrap before
+arithmetic shifts, selects a sector, and subtracts the unsigned raw16
+neighbours at +1 and -1. It does not normalize or convert height units.
+The four source quadrants retain their independent X/Y neighbour locks.
+
+PolyTrn_LoadTerrainConfig at 0x60E450 reads configuration +0x1304/+0x1308:
+the parser's polytrn_wrapx/polytrn_wrapy fields, not the authored grid
+extent. At 0x60E4B1..0x60E4CB each nonzero wrap value produces mask zero;
+zero produces -16. A non-wrapping out-of-grid sample clamps to cell 0
+or 15 according to sign, then uses the same local 512-cell offset.
+Wrapping uses the low four grid bits. Both owning and borrowed height
+fields copy these flags, including reload/clear, within the existing
+four padding bytes. The gradient query uses this policy; the older
+floating-point height samplers' global edge mapping is unchanged.
+
+Org1 runs the gradient block every motor tick, before the 16-tick think
+(0x4BA896..0x4BA96E). A ground/carrier reference bypasses the block,
+preserving Flags 0x10000. Otherwise Flags & 0x90A000 clears that bit.
+A truncated gradient magnitude below 768 also clears it. At 768 or
+above, the motor replaces the horizontal animation pair with
+X = -((419392 * dx + 0x8000) >> 16) and
+Y =  ((419392 * dy + 0x8000) >> 16), retaining the low signed dword.
+It clamps vertical slide velocity downward to -167, sets Flags 0x10000,
+and writes path_state=1 at entity+0x369 (0x4BA94E). The replacement pair
+later rotates by body heading (0x4BF001); it is not added as world-space
+velocity and does not replace the clip's vertical lane. The response
+also runs on clients. The path state reaches ordinary route/detour
+selection in the same think tick. Boarding at 0x4BB325 only reads it
+for the arrival radius; the former boarding-only reconstruction from
+a normalized terrain normal has been removed.
+
+Org2 uses the same gradient and gain at 0x4B79DC..0x4B7AAE, after its
+horizontal slide decay and after root rotation. Its replacement pair
+is already in world axes. A carrier clears Flags 0x10000 in this motor,
+and org2 does not write the NPC detour byte. Its later jump gate reads
+the current gradient flag: a stale flag on flat terrain cannot block
+jumping, while an actual steep slope does. The prior description of
+0x10000 as a second water bit was incorrect.
+
+The new infantry_terrain native test exercises raw unsigned differences,
+signed fractional coordinates, each quadrant, locked and unlocked seams,
+independent global edge policies, threshold/magnitude boundaries, signed
+rounding, both motion spaces, carrier and flag suppression, vertical
+velocity preservation, client ticks, same-think route detours and the
+real player jump producer. TerrainFieldStore tests verify wrap-field
+construction, reload and clear. All seven focused terrain/infantry/AI/
+mission-animation targets pass. Full native CTest passes 450 tests with
+one existing motorcycle asset skip (451 total, 169.94 seconds,
+npc-gradient-full-ctest.log). Both Windows GDExtension flavours build.
+Full GUT passes 1,760 tests with 25 pending (1,785 total, 187 scripts,
+58,245 assertions, 123.536 seconds, npc-gradient-full-gut.log); collection
+has no parse errors or drops. The existing LAN test orphan and 12-resource
+exit report remain. Release Windows packaging passes both exported-app
+startup checks, ONED's 40-file game pack and both ZIP integrity checks
+(npc-windows-release-package-final.log). The exported runtime also passes
+two orderly WM_CLOSE runs over the retail mount. Forced SceneTree quit
+with streaming music remains D-MUS-EXIT, documented in mus-sbf-re.md.

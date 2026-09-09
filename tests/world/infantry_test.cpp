@@ -1132,9 +1132,10 @@ void test_local_player_jump_respects_world_state_flag_gates() {
     e->pos[2] = floor_z;
     run_ticks(ai, w, 0, 2); // seed the terrain cache and settle
 
-    const std::array<uint32_t, 5> blocked_flags = {
-        kEntityFlagDead, kEntityFlagInAir, kEntityFlagDrowning,
-        0x10000u, kEntityFlagMounted,
+    // Terrain-slide 0x10000 is produced/cleared before the jump gate; the
+    // real-slope and stale-flat-flag cases live in infantry_terrain_test.
+    const std::array<uint32_t, 4> blocked_flags = {
+        kEntityFlagDead, kEntityFlagInAir, kEntityFlagDrowning, kEntityFlagMounted,
     };
     uint32_t tick = 2;
     for (const uint32_t blocked : blocked_flags) {

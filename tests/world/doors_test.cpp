@@ -8,7 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
-#include <cstdlib>
+#include "common/retail_paths.h"
 #include <base/resource_index/resource_index.h>
 #include <runtime/simassets/collision_resolve.h>
 #include <runtime/simassets/sim_model_cache.h>
@@ -206,9 +206,9 @@ static void test_pool_limit_and_wrapping_rate() {
 }
 
 static void test_retail_door_pose() {
-    const char *assets = std::getenv("OPENNOVA_JO_ASSETS");
-    if (assets == nullptr || *assets == '\0') {
-        std::puts("door retail pose: skipped (OPENNOVA_JO_ASSETS unset)");
+    const std::string assets = retail::assets();
+    if (assets.empty()) {
+        retail::skip_leg("door retail pose (OPENNOVA_JO_ASSETS unset)");
         return;
     }
     ResourceIndex index;

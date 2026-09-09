@@ -20,7 +20,7 @@ void TerrainFieldStore::clear() {
 
 void TerrainFieldStore::build(const uint16_t *heightmap, size_t heightmap_count,
 		const int *sector_grid, int32_t origin_x, int32_t origin_y,
-		int32_t sector_count, int32_t sector_rows,
+		int32_t sector_count, int32_t sector_rows, bool wrap_x, bool wrap_z,
 		const CoordsQuadrantLocks &locks,
 		const uint8_t *charmap, int32_t charmap_width, int32_t charmap_height) {
 	// Clear first so a null/empty heightmap disables grounding.
@@ -45,6 +45,8 @@ void TerrainFieldStore::build(const uint16_t *heightmap, size_t heightmap_count,
 	field_.layout.sector_count = sector_count;
 	field_.layout.sector_rows = sector_rows;
 	field_.locks = locks;
+	field_.wrap_x = wrap_x;
+	field_.wrap_z = wrap_z;
 	// The water plane arrives separately (set_water_plane, fed from the
 	// world's environment): a rebuilt field starts without one.
 	field_.water_y = 0;
@@ -80,6 +82,8 @@ void height_field_apply_trn(TerrainHeightField &field, const TrnConfig &trn) {
 	field.layout.sector_count = trn.sector_count;
 	field.layout.sector_rows = trn.sector_rows;
 	field.locks = coords_locks_from(trn);
+	field.wrap_x = trn.wrap_x != 0;
+	field.wrap_z = trn.wrap_y != 0;
 }
 
 TerrainHeightField height_field_from(const CptFile &cpt, const TrnConfig &trn) {
@@ -99,7 +103,7 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 		int32_t charmap_height) {
 	store.build(cpt.depth_buffer.data(), cpt.depth_buffer.size(),
 			&trn.sector_grid[0][0], trn.origin_x, trn.origin_y,
-			trn.sector_count, trn.sector_rows,
+			trn.sector_count, trn.sector_rows, trn.wrap_x != 0, trn.wrap_y != 0,
 			coords_locks_from(trn), charmap, charmap_width, charmap_height);
 }
 

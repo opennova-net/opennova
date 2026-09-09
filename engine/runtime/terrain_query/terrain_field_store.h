@@ -41,6 +41,7 @@ public:
 	//   origin_x/y       the .trn sector origins in 512-unit sector coords.
 	//   sector_count/rows the authored grid width/height for bounds-checked
 	//                    queries (runtime sampling still wraps the 16x16 grid).
+	//   wrap_x/z         the .trn's global wrap flags for fixed-point gradients.
 	//   locks            the .trn's four lock_* pairs folded to the portable
 	//                    neighbour-tap policy (coords_locks_from).
 	//   charmap          optional palette-indexed surface raster (row-major
@@ -49,7 +50,7 @@ public:
 	//                    the sampler's "no charmap -> surface 1" leg.
 	void build(const uint16_t *heightmap, size_t heightmap_count,
 			const int *sector_grid, int32_t origin_x, int32_t origin_y,
-			int32_t sector_count, int32_t sector_rows,
+			int32_t sector_count, int32_t sector_rows, bool wrap_x, bool wrap_z,
 			const CoordsQuadrantLocks &locks,
 			const uint8_t *charmap = nullptr, int32_t charmap_width = 0,
 			int32_t charmap_height = 0);
