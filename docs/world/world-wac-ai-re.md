@@ -9385,7 +9385,8 @@ ledge edge stores `(Flags & ~0x40) | 0x2000` [orig: @0x4b7e34..0x4b7e3c] where
 org1 ORs the bit [orig: @0x4bf8c8..0x4bf8cf]. No writer on the death or deploy
 path touches 0x2000 ([orig: Entity_ResetToSpawnState @0x4B9610 (the `and`
 @0x4b97b0; the +0x334 copy @0x4b9662)]; [orig: Server_ProcessPlayerDeath
-@0x516dd0 (the site @0x51787a)]; the deploy leg @0x519fdb), so a body that died
+@0x517740 (the site @0x51787a)]; the deploy leg's `and [eax+24h],~1` @0x519fdb in
+the undefined chunk that calls Server_ProcessPlayerDeath @0x51a00c), so a body that died
 airborne respawns with the bit set and clears it on its first grounded tick;
 the port's motor mirror follows the word across a respawn.
 
