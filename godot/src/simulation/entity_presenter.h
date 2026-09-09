@@ -1,5 +1,7 @@
 #pragma once
 
+#include <godot_cpp/variant/packed_int32_array.hpp>
+
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/immediate_mesh.hpp>
 #include <godot_cpp/classes/node3d.hpp>
@@ -143,11 +145,16 @@ public:
 	int get_output_channels() const { return output_channels_; }
 
 	// The runtime driver pre-fetches one shared snapshot and hands it to both
-	// walks (present_snapshot, then present_wire_snapshot).
+	// walks (present_snapshot, then present_wire_snapshot). `door_phases` is
+	// the snapshot's door side table (Simulation::get_present_door_phases):
+	// (row index, count, phase[count]) entries in row order for the rows whose
+	// PF_DOOR_COUNT is nonzero; a source without doors passes none.
 	void present_snapshot(const PackedFloat32Array &snap, int stride,
-			int64_t layout_revision);
+			int64_t layout_revision,
+			const PackedInt32Array &door_phases = PackedInt32Array());
 	PackedInt64Array profile_present_snapshot(const PackedFloat32Array &snap,
-			int stride, int64_t layout_revision);
+			int stride, int64_t layout_revision,
+			const PackedInt32Array &door_phases = PackedInt32Array());
 
 	Ref<MissionPresentStats> get_stats_record() const;
 
@@ -491,7 +498,8 @@ private:
 	bool row_plan_is_current(int64_t size, int stride,
 			int64_t layout_revision);
 	void present_snapshot_impl(const PackedFloat32Array &snap, int stride,
-			int64_t layout_revision, MissionFrameProfile *p_profile);
+			int64_t layout_revision, const PackedInt32Array &door_phases,
+			MissionFrameProfile *p_profile);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
 			int64_t layout_revision);
 	void release_planned_rows();

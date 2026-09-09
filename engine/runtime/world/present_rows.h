@@ -216,11 +216,13 @@ enum PresentField : int {
 	PF_FOCAL_SWAY_X,
 	PF_FOCAL_SWAY_Y,
 	PF_FOCAL_SWAY_Z,
-    // Exact signed door phases as low/high u16 pairs, including phase 65536.
-    // The array follows retail's ordinal bus beyond DOOR_15 when authored.
-    PF_DOOR_COUNT,
-    PF_DOOR_PHASES,
-    PF_STRIDE = PF_DOOR_PHASES + 2 * 30
+	// How many door phases this row publishes (0 for every row without door
+	// motion; the presenter's ownership/release edge). The phases themselves
+	// ride the door side table beside the rows (runtime/inmatch/present_rows.h,
+	// exact signed dwords including phase 65536, following retail's ordinal
+	// bus beyond DOOR_15 when authored), so only door-bearing rows pay for it.
+	PF_DOOR_COUNT,
+	PF_STRIDE
 };
 
 } // namespace opennova::world

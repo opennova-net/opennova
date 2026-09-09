@@ -56,10 +56,6 @@ class Snapshot:
 					int(e.get("active2", 0)) != 0)
 			var doors: Array = e.get("doors", [])
 			out[b + Simulation.PF_DOOR_COUNT] = float(doors.size())
-			for door in range(doors.size()):
-				var bits := int(doors[door]) & 0xFFFFFFFF
-				out[b + Simulation.PF_DOOR_PHASES + 2 * door] = float(bits & 0xFFFF)
-				out[b + Simulation.PF_DOOR_PHASES + 2 * door + 1] = float(bits >> 16)
 			out[b + Simulation.PF_BODY_ANIM_SLOT] = float(e.get("body_anim_slot", -1))
 			out[b + Simulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
 			out[b + Simulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
@@ -143,6 +139,20 @@ class Snapshot:
 				out[ob] = a.x
 				out[ob + 1] = a.y
 				out[ob + 2] = a.z
+		return out
+	# The door side table Simulation.get_present_door_phases() emits beside the
+	# rows: (row index, count, phase[count]) entries for the rows whose "doors"
+	# list is non-empty, in row order.
+	func build_doors() -> PackedInt32Array:
+		var out := PackedInt32Array()
+		for i in range(entities.size()):
+			var doors: Array = entities[i].get("doors", [])
+			if doors.is_empty():
+				continue
+			out.append(i)
+			out.append(doors.size())
+			for door in doors:
+				out.append(int(door))
 		return out
 
 
@@ -230,7 +240,7 @@ func _make_pass(index: EntityIndex, sim: Simulation = null,
 
 
 func _present(p: Object, snap: Snapshot, revision: int = 1) -> void:
-	p.present_snapshot(snap.build(), Simulation.PF_STRIDE, revision)
+	p.present_snapshot(snap.build(), Simulation.PF_STRIDE, revision, snap.build_doors())
 
 
 func _ctrl(model: ObjectModel, name: String) -> int:
@@ -276,6 +286,31 @@ func test_door_phases_preserve_endpoints_and_release_only_their_owner() -> void:
 	_present(p, snap)
 	p.set_output_channels(int(p.get_output_channels()) & ~EntityPresenter.OUTPUT_PART_ANIM)
 	assert_false(model.get_ctrl_values().has("DOOR_00"), "disabling the output releases doors")
+
+
+func test_cold_door_row_releases_only_what_the_door_writer_owned() -> void:
+	# A cold row cannot enumerate the door registers it published before, so
+	# the cold present releases by OWNER instead of probing all 30 names: a
+	# stale present:doors value goes, a foreign writer's DOOR register stays,
+	# and a zero-door cold row issues no per-register work at all.
+	var model := _model()
+	model.set_ctrl_override("present:doors", "DOOR_05", 1)
+	model.set_ctrl_override("foreign", "DOOR_00", 77)
+	var p := _make_pass(_index_of({ 1: model }))
+	var snap := Snapshot.new()
+	snap.entities = [{ "bms_id": 1, "doors": [] }]
+	var before := _stat(p, "control_dispatches")
+	_present(p, snap)
+	assert_false(model.get_ctrl_values().has("DOOR_05"),
+			"the cold present releases the stale door this writer owned")
+	assert_eq(_ctrl(model, "DOOR_00"), 77, "a foreign DOOR register survives the cold release")
+	assert_eq(_stat(p, "control_dispatches") - before, 8,
+			"a zero-door cold row pays only the sibling writers' cold clears " +
+			"(2 emplaced + 2 vehicle + 3 zone + 1 heat), no door probes")
+	snap.entities[0]["doors"] = [0, 65536]
+	_present(p, snap)
+	assert_eq(_ctrl(model, "DOOR_00"), 0, "a door row overwrites the foreign value (one CTRL value)")
+	assert_eq(_ctrl(model, "DOOR_01"), 65536, "the side table carries the exact signed dword")
 
 
 func test_retail_door_visible_part_uses_the_presented_phase() -> void:

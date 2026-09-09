@@ -307,7 +307,6 @@ public:
 		PF_FOCAL_SWAY_Y = opennova::world::PF_FOCAL_SWAY_Y,
 		PF_FOCAL_SWAY_Z = opennova::world::PF_FOCAL_SWAY_Z,
 		PF_DOOR_COUNT = opennova::world::PF_DOOR_COUNT,
-        PF_DOOR_PHASES = opennova::world::PF_DOOR_PHASES,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 
@@ -2011,6 +2010,10 @@ public:
 	// get_entity_count() records, PF_STRIDE floats each, fields per the PresentField enum. Avoids the
 	// ~10 Variant-boxed scalar getter calls per entity the present loop would otherwise make.
 	PackedFloat32Array get_present_snapshot() const;
+	// The door side table the most recent get_present_snapshot() built beside
+	// its rows: (row index, count, phase[count]) int32 entries in row order,
+	// only for rows whose PF_DOOR_COUNT is nonzero (runtime/inmatch/present_rows.h).
+	PackedInt32Array get_present_door_phases() const;
 	// Revision for the exact ordered identity layout of the most recently
 	// returned snapshot. Pose-only changes keep this stable.
 	int64_t get_present_layout_revision() const {

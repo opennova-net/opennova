@@ -84,6 +84,8 @@ struct SimulationPresentState {
 	// scratch the PackedFloat32Array copies from.
 	mutable opennova::inmatch::PoolPresentLifecycleMap pool_lifecycle;
 	mutable std::vector<float> rows_scratch;
+	// The door side table of the last snapshot (runtime/inmatch/present_rows.h).
+	mutable opennova::inmatch::DoorPhaseTable door_phases_scratch;
 	// The last snapshot's build time and row count (the F3 counters).
 	mutable uint64_t last_snapshot_us = 0;
 	mutable int last_entity_count = 0;

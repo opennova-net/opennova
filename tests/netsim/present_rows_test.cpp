@@ -69,8 +69,10 @@ bool test_world_rows_carry_the_authoritative_record() {
 	const im::PresentRowsContext context{kernel, nullptr, false};
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
-	im::build_world_present_rows(context, lifecycle, rows);
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
 	bool ok = expect(rows.size() == w::PF_STRIDE, "one row per live registry slot");
+	ok = expect(doors.empty(), "a row without door motion publishes no door entry") && ok;
 	if (!ok) return false;
 	const float *r = row_at(rows, 0);
 	ok = expect(static_cast<int>(r[w::PF_TYPE_ID]) == 1291, "PF_TYPE_ID is the item id") && ok;
@@ -96,12 +98,12 @@ bool test_world_rows_carry_the_authoritative_record() {
 	// The dead->alive edge of the authoritative flags bumps the revision once;
 	// a re-spawned slot (new registry_spawn_id) forgets the old edge state.
 	e->flags |= w::kEntityFlagDead;
-	im::build_world_present_rows(context, lifecycle, rows);
+	im::build_world_present_rows(context, lifecycle, rows, doors);
 	e->flags &= ~static_cast<uint32_t>(w::kEntityFlagDead);
-	im::build_world_present_rows(context, lifecycle, rows);
+	im::build_world_present_rows(context, lifecycle, rows, doors);
 	ok = expect(static_cast<int>(row_at(rows, 0)[w::PF_RESPAWN_REVISION]) == 1,
 			"a dead->alive edge bumps the respawn revision") && ok;
-	im::build_world_present_rows(context, lifecycle, rows);
+	im::build_world_present_rows(context, lifecycle, rows, doors);
 	ok = expect(static_cast<int>(row_at(rows, 0)[w::PF_RESPAWN_REVISION]) == 1,
 			"a steady alive row keeps its revision") && ok;
 	return ok;
@@ -137,8 +139,10 @@ bool test_replica_rows_project_the_decoded_state_and_keep_the_pulses() {
 
 	const im::PresentRowsContext context{kernel, &runtime, true};
 	std::vector<float> rows;
-	im::build_client_replica_present_rows(context, rows);
+	im::DoorPhaseTable doors;
+	im::build_client_replica_present_rows(context, rows, doors);
 	bool ok = expect(rows.size() == 2 * w::PF_STRIDE, "one row per decoded replica");
+	ok = expect(doors.empty(), "a joiner's decoded rows carry no door entries") && ok;
 	if (!ok) return false;
 	const float *first = row_at(rows, 0);
 	ok = expect(static_cast<int>(first[w::PF_TYPE_ID]) == 0x1410 &&
@@ -175,7 +179,8 @@ bool test_vehicle_suspension_reaches_present_rows() {
 	e->veh.wheel_comp[3] = 1000;
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows);
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
 	if (!expect(rows.size() == w::PF_STRIDE, "one vehicle presentation row"))
 		return false;
 	const int expected[] = { 100, 200, 300, 600, 1000, 500 };
@@ -188,7 +193,7 @@ bool test_vehicle_suspension_reaches_present_rows() {
 	kernel.world.vehicles.traits.set(1291, traits);
 	e->veh.track_phase[0] = -65536;
 	e->veh.track_phase[1] = 0x12340000;
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows);
+	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
 	ok = expect((static_cast<int>(rows[w::PF_VEHICLE_CTRL_MASK]) & w::VC_TRACKS) != 0 &&
 						 (static_cast<int>(rows[w::PF_VEHICLE_CTRL_MASK]) & w::VC_TIRES) == 0,
 				 "tank render selects tracks without ground suspension ownership") &&
@@ -210,19 +215,20 @@ bool test_door_phases_reach_present_rows() {
     kernel.world.doors.initialize(*e, 65536, 0);
     kernel.world.doors.command(kernel.world, *e, 7);
     kernel.world.doors.tick(kernel.world);
-    im::PoolPresentLifecycleMap lifecycle;
-    std::vector<float> rows;
-    im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows);
-    if (!expect(rows.size() == w::PF_STRIDE, "one door row")) return false;
-    const float *row = row_at(rows, 0);
-    bool ok = expect(row[w::PF_DOOR_COUNT] == 1 &&
-            row[w::PF_DOOR_PHASES] == 0 && row[w::PF_DOOR_PHASES + 1] == 1,
-            "open phase 65536 publishes as the exact low/high words");
-    e->door_motion = false;
-    im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows);
-    ok = expect(row_at(rows, 0)[w::PF_DOOR_COUNT] == 0,
-            "a missing door movement callback releases phase ownership") && ok;
-    return ok;
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	if (!expect(rows.size() == w::PF_STRIDE, "one door row")) return false;
+	bool ok = expect(row_at(rows, 0)[w::PF_DOOR_COUNT] == 1 &&
+					 doors == im::DoorPhaseTable{ 0, 1, 65536 },
+			"open phase 65536 rides the door side table exactly (row 0, one phase)");
+	e->door_motion = false;
+	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_DOOR_COUNT] == 0 && doors.empty(),
+				 "a missing door movement callback releases phase ownership") &&
+			ok;
+	return ok;
 }
 
 int main() {

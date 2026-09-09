@@ -56,16 +56,26 @@ using PoolPresentLifecycleMap = std::unordered_map<uint16_t, PoolPresentLifecycl
 double pool_present_yaw_deg(const world::Entity &e, const world::AiEntity *ae,
 		EntityClass cls);
 
+// The door phases of the rows that publish any: a flat int32 side table of
+// (row index, count, phase[count]) entries in row order, rebuilt beside the
+// rows on every build, so only door-bearing entities carry retail's ordinal
+// DOOR_xx bus [orig: build_bone_transforms @0x4E3070 loop @0x4e312a..0x4e3145;
+//  BoneCallback_AnimatedBones_World @0x4E3180 loop @0x4e3201..0x4e3218 write
+//  exactly num_doors slots per model]. A row's PF_DOOR_COUNT is its entry's
+// count (0 = no entry); the signed phase dwords ride exactly.
+using DoorPhaseTable = std::vector<int32_t>;
+
 // The joiner's rows: one per decoded ClientState entity (PF_STRIDE floats
 // each), the self echo left at its zero defaults. Does NOT consume the
 // animation pulses: the caller clears them (ClientState::clear_anim_pulses)
 // once the rows are handed on, so each transition pulse dispatches exactly
 // one presented frame.
 void build_client_replica_present_rows(const PresentRowsContext &context,
-		std::vector<float> &out);
+		std::vector<float> &out, DoorPhaseTable &door_phases);
 
 // The host/SP rows: one per live registry slot, in registry order.
 void build_world_present_rows(const PresentRowsContext &context,
-		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out);
+		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out,
+		DoorPhaseTable &door_phases);
 
 } // namespace opennova::inmatch
