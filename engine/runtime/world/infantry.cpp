@@ -174,12 +174,26 @@ int32_t bearing_to(int32_t dx, int32_t dy) {
 // file-local helpers; they keep their bodies verbatim and only gain external
 // linkage so the extracted leg can call them. Declared in infantry_internal.h.
 
-bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent) {
+// The two halves of the org2 jump gate's Flags reads. The 0x1A002 word test
+// (`test eax,1A002h` @0x4b7ea4: in-air, dead, the water pair, the terrain
+// slide) fails INTO the landing else-leg @0x4b7f71; the carried test past it
+// (`test al,40h; jnz 0x4b8020` @0x4b7ebb) skips the whole tail instead. The
+// local block keys on the halves; the remote projection reads the union.
+namespace {
+bool player_jump_flags_blocked(const InfantryState &inf, const Entity *ent) {
     if (inf.airborne) return true;
     if (ent == nullptr) return false;
-    const uint32_t flags = ent->flags | ent->engine_flags;
-    return (flags & kPlayerJumpBlockedFlags) != 0 || ent->mounted ||
-           (flags & kEntityFlagMounted) != 0;
+    return ((ent->flags | ent->engine_flags) & kPlayerJumpBlockedFlags) != 0;
+}
+
+bool player_jump_carried(const Entity *ent) {
+    return ent != nullptr &&
+           (ent->mounted || ((ent->flags | ent->engine_flags) & kEntityFlagMounted) != 0);
+}
+} // namespace
+
+bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent) {
+    return player_jump_flags_blocked(inf, ent) || player_jump_carried(ent);
 }
 
 bool reset_capsule_bottom_state(int state) {
@@ -929,7 +943,9 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.leg_target[0] = inf.leg_target[1] = heading;
     inf.vel[0] = inf.vel[1] = inf.vel[2] = 0;
     inf.stance = InfantryState::Stance::kStand;
-    inf.airborne = false;
+    // `airborne` stays with the registry word, which no retail respawn writer
+    // touches (see InfantryState::reset_for_spawn) [orig: Entity_ResetToSpawnState
+    // @0x4b97b0 `Flags &= ~2`; Server_ProcessPlayerDeath @0x51787a].
     inf.jump_requested = false;
     inf.jump_cooldown = 0;
     // A restore armed by a pre-death ladder exit must not chase the fresh
@@ -2143,9 +2159,25 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             }
             if (fall_edge_allowed) {
                 // The airborne set lands in the ONE retail Flags word; the
-                // motor keeps its own copy for rowless bodies. [orig: org2
-                // `or eax,2000h; mov [esi+24h],eax` @0x4b7e37-0x4b7e3c; org1
-                // @0x4bf8c8-0x4bf8cf]
+                // motor keeps its own copy for rowless bodies. org2's edge
+                // store is `and eax,0FFFFFFBFh; or eax,2000h; mov [esi+24h],eax`
+                // -- the same write drops the carried bit (0x40); org1's is
+                // the bare `or eax,2000h`. Both stores sit behind a gate that
+                // includes 0x2000 itself (0x10A002 / 0x10A000), so the carried
+                // clear is an EDGE write; the re-sync below is the idempotent
+                // half. Only the flag bit falls on the org2 edge: retail's
+                // parentEntity (+0x16C) seat link -- Entity::mounted and the
+                // mount trio here -- is cleared by Entity_DetachFromVehicle
+                // alone [orig: @0x4355f0, the +0x16C clear @0x43577c], so
+                // `mounted` stays put exactly as the link does there.
+                // [orig: org2 @0x4b7e34..0x4b7e3c; org1 @0x4bf8c8..0x4bf8cf]
+                if (inf.is_local_player && !inf.airborne && tick_entity != nullptr) {
+                    tick_entity->flags =
+                            (tick_entity->flags & ~kEntityFlagMounted) | kEntityFlagInAir;
+                    tick_entity->engine_flags =
+                            (tick_entity->engine_flags & ~kEntityFlagMounted) |
+                            kEntityFlagInAir;
+                }
                 inf.airborne = true;
                 if (tick_entity != nullptr) {
                     tick_entity->flags |= kEntityFlagInAir;
@@ -2153,7 +2185,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 }
             }
         } else if (foot_clearance <= 0) {
-            // Landing. Fall damage is AUTHORITY-only and skips Indestructible
+            // Landing. Both motors snap FIRST [orig: org2 `sub [esi+0Ch],eax`
+            // @0x4b7d0a; org1 @0x4bf802], so the thump below sounds at the
+            // snapped origin. Fall damage is AUTHORITY-only and skips Indestructible
             // (0x4000000) bodies on both legs [orig: org1 @0x4bf81e `is_authority`,
             // @0x4bf826 `Flags & 0x4000000`; org2 @0x4b7d3b] -- a joiner's own body
             // runs this motor branch locally and must not self-damage on top of the
@@ -2166,6 +2200,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // makes every landing (vel_z <= 0) damaging by (-vel_z) >> 4
             // [orig: org1 @0x4bf82e..0x4bf841 `imul eax, -1057; cmp ecx, eax;
             // jg skip`; org2 @0x4b7d0d..0x4b7d21].
+            e.pos[2] -= foot_clearance;
             if (inf.airborne && e.health > 0 && is_authority &&
                 (tick_flags & kEntityFlagIndestructible) == 0 &&
                 inf.vel[2] <= -1057 * world.script.wac_values.fallmps) {
@@ -2174,27 +2209,39 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 if (dmg > e.health) dmg = e.health;
                 e.health = static_cast<int16_t>(e.health - dmg);
             }
-            // The landing thump on the airborne-clear edge, dead bodies included
-            // (a corpse thrown airborne lands with SSFallDead): profile slot 16
-            // SSFallAlive, 15 SSFallDead when dead, at the entity origin.
-            // [orig: org1 @0x4bf87f-0x4bf89c (Flags&2 pick) before the 0x2000
-            // clear @0x4bf89f; org2 @0x4b7f7c-0x4b7f9e]
-            if (inf.airborne)
-                emit_slot_sound(world, e,
-                                e.health > 0 ? audio::kSlotFallAlive : audio::kSlotFallDead,
-                                e.pos);
-            e.pos[2] -= foot_clearance;
-            inf.vel[2] = 0;
-            // Flags &= ~0x2000 [orig: org2 @0x4b7fa1; org1 @0x4bf89f]
-            inf.airborne = false;
-            if (tick_entity != nullptr) {
-                tick_entity->flags &= ~kEntityFlagInAir;
-                tick_entity->engine_flags &= ~kEntityFlagInAir;
+            if (inf.is_local_player) {
+                // org2's arm ends at vel_z = 0 [orig: @0x4b7d91] with NO 0x2000
+                // test and NO clear: the word is re-read whole @0x4b7d9f, the
+                // jump gates @0x4b7ea4 still see the bit on the landing tick,
+                // and the SSFall thump + the clear ride the post-jump else-leg
+                // below [orig: @0x4b7f71..0x4b7fa1] -- a jump key held on the
+                // landing tick launches on the NEXT one.
+                inf.vel[2] = 0;
+            } else {
+                // org1: the thump on the airborne-clear edge, dead bodies included
+                // (a corpse thrown airborne lands with SSFallDead): profile slot 16
+                // SSFallAlive, 15 SSFallDead when dead, at the entity origin; then
+                // the clear; then vel_z = 0.
+                // [orig: @0x4bf87f-0x4bf89c (Flags&2 pick) -> `and [esi+24h],
+                // 0FFFFDFFFh` @0x4bf89f -> `mov [esi+0A0h],ebx` @0x4bf8a6]
+                if (inf.airborne)
+                    emit_slot_sound(world, e,
+                                    e.health > 0 ? audio::kSlotFallAlive
+                                                 : audio::kSlotFallDead,
+                                    e.pos);
+                inf.airborne = false;
+                if (tick_entity != nullptr) {
+                    tick_entity->flags &= ~kEntityFlagInAir;
+                    tick_entity->engine_flags &= ~kEntityFlagInAir;
+                }
+                inf.vel[2] = 0;
             }
         }
 
         // 9b. Player jump — witnessed org2 order: integrate -> resolver -> edges ->
-        // the jump block [orig: @0x4b7de0-0x4b7f0c]. The cooldown lives in the
+        // the jump block [orig: @0x4b7de0-0x4b7f0c] -> the not-jumping tail (the
+        // landing thump + clear, the ladder bottom dismount) [orig:
+        // @0x4b7f71-0x4b8019]. The cooldown lives in the
         // REUSED +0x1A8 field there (org1's targetHeading slot): clamp [0,32], >1
         // counts down, held-at-1 until the key releases (no auto-repeat while held),
         // jump only from 0 [orig: maintenance @0x4b7de0-0x4b7e15, release edge
@@ -2214,11 +2261,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             } else if (inf.jump_cooldown == 1 && !inf.jump_requested) {
                 inf.jump_cooldown = 0;                          // [orig: @0x4b7e7a-0x4b7e82]
             }
-            bool jumped = false;
-            if (inf.jump_cooldown == 0 && inf.jump_requested &&
-                !player_jump_world_state_blocked(inf, tick_entity) && e.health > 0 &&
-                inf.stance != InfantryState::Stance::kProne) {
-                jumped = true;
+            // The four gates [orig: @0x4b7e8c..0x4b7eb5] fail INTO the landing
+            // else-leg; the carried test past them (`test al,40h; jnz 0x4b8020`
+            // @0x4b7ebb) skips the whole tail instead.
+            const bool jump_gates_open =
+                inf.jump_cooldown == 0 && inf.jump_requested &&
+                !player_jump_flags_blocked(inf, tick_entity) && e.health > 0 &&
+                inf.stance != InfantryState::Stance::kProne;
+            if (jump_gates_open && !player_jump_carried(tick_entity)) {
                 inf.vel[0] += (3 * root_wx) >> 2; // [orig: @0x4b7ec3-0x4b7ed5]
                 inf.vel[1] += (3 * root_wy) >> 2;
                 inf.vel[2] = kJumpImpulseVelZ;    // [orig: @0x4b7ee5]
@@ -2244,18 +2294,47 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 }
             }
             inf.jump_requested = false;
-            // The grounded bottom dismount: standing on ground below the anchor
-            // steps the climber 0.5u back off the face and drops the latch —
-            // how climbing down ends. The entry's stance Z-bump exists exactly
-            // so a fresh mount is not instantly grounded here.
-            // [orig: the not-jumping branch @ 0x4b7fba-0x4b8019 — clearance
-            //  <= 0 (Yaw_high > 0 skips @ 0x4b7f76), latched, and
-            //  g_LadderContactZ > pos.z]
-            if (!jumped && foot_clearance <= 0 && on_ladder_now &&
-                collision != nullptr &&
-                collision->last_ladder_frame.anchor[2] > e.pos[2]) {
-                ladder_push_back(e.pos, inf.body_heading);
-                ladder_unlatch(tick_entity);
+            // The not-jumping tail [orig: @0x4b7f71..0x4b8019]: a gate failed and
+            // the resolver clearance is <= 0 (`cmp var_10FC,0; jg 0x4b8020`
+            // @0x4b7f71..0x4b7f76).
+            if (!jump_gates_open && foot_clearance <= 0) {
+                // The landing on the word's OWN bit: retail re-tests the Flags
+                // read @0x4b7d9f, so a 0x2000 the deploy left behind (the death
+                // and reset writers touch bits 0/1 only: the deploy leg
+                // @0x519fdb, Server_ProcessPlayerDeath @0x51787a,
+                // Entity_ResetToSpawnState @0x4b97b0; the spawn placer only ORs
+                // 0x20/0x200 @0x50d42a/@0x50d44d) lands here on the first
+                // grounded tick with the same thump, one tick of refused jump
+                // included. Rowless bodies keep the motor's copy. The SSFall
+                // pair: slot 16 SSFallAlive, 15 SSFallDead when dead (`test
+                // al,2`), at the entity origin; then Flags &= ~0x2000.
+                // [orig: @0x4b7f7c..0x4b7f9e; the clear @0x4b7fa1]
+                const bool landed_from_air = tick_entity != nullptr
+                        ? ((tick_entity->flags | tick_entity->engine_flags) &
+                           kEntityFlagInAir) != 0
+                        : inf.airborne;
+                if (landed_from_air) {
+                    emit_slot_sound(world, e,
+                                    e.health > 0 ? audio::kSlotFallAlive
+                                                 : audio::kSlotFallDead,
+                                    e.pos);
+                    inf.airborne = false;
+                    if (tick_entity != nullptr) {
+                        tick_entity->flags &= ~kEntityFlagInAir;
+                        tick_entity->engine_flags &= ~kEntityFlagInAir;
+                    }
+                }
+                // The grounded bottom dismount: standing on ground below the
+                // anchor steps the climber 0.5u back off the face and drops the
+                // latch -- how climbing down ends. The entry's stance Z-bump
+                // exists exactly so a fresh mount is not instantly grounded here.
+                // [orig: @0x4b7fa8-0x4b8019 -- latched (0x100000) and
+                //  g_LadderContactZ > pos.z]
+                if (on_ladder_now && collision != nullptr &&
+                    collision->last_ladder_frame.anchor[2] > e.pos[2]) {
+                    ladder_push_back(e.pos, inf.body_heading);
+                    ladder_unlatch(tick_entity);
+                }
             }
         }
 

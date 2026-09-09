@@ -278,6 +278,44 @@ void test_npc_fall_edge_under_overhang_through_motor() {
         CHECK(rig.body->inf.vel[2] == (dominant ? -167 : 0x1600 - 2 * 416 - 166));
     }
 }
+// The same order through the real resolver: a player FALLING (cooldown 0 the
+// whole way) with the jump key held. The resolver's clearance <= 0 arm snaps
+// and zeroes vel_z but never clears 0x2000; the gates after it still see the
+// bit, and the thump + clear ride the else-leg, so the launch is the tick
+// AFTER the landing. [orig: Entity_UpdateInfantryPlayerBody @0x4b7cf4 ->
+//  @0x4b7d0a..0x4b7d91 -> @0x4b7d9f -> @0x4b7ea4 -> @0x4b7f71..0x4b7fa1]
+void test_player_fall_landing_tick_defers_the_held_jump() {
+    MotorRig rig(0, 0, -16384, fp(10), /*player=*/true, fp(3)); // 3 u up; the slab far above
+    rig.body->inf.jump_requested = true;
+    rig.tick(0); // the fall edge arms the word; the held key is refused in the air
+    CHECK(rig.in_air() == kEntityFlagInAir);
+    CHECK(rig.body->inf.airborne);
+    CHECK(rig.body->inf.jump_cooldown == 0);
+    uint32_t t = 1;
+    uint32_t landing_tick = 0;
+    while (t < 120) {
+        rig.body->inf.jump_requested = true;
+        rig.tick(t);
+        if (rig.in_air() == 0) {
+            landing_tick = t;
+            break;
+        }
+        CHECK(rig.body->inf.jump_cooldown == 0);
+        CHECK(rig.body->inf.vel[2] < 0);
+        ++t;
+    }
+    CHECK(landing_tick != 0);
+    CHECK(rig.body->pos[2] == 0);
+    CHECK(rig.body->inf.vel[2] == 0);
+    CHECK(rig.body->inf.jump_cooldown == 0);
+    CHECK(!rig.body->inf.airborne);
+    rig.body->inf.jump_requested = true;
+    rig.tick(landing_tick + 1);
+    CHECK(rig.body->inf.jump_cooldown == 32);
+    CHECK(rig.body->inf.vel[2] == 0x1600);
+    CHECK(rig.in_air() == kEntityFlagInAir);
+    CHECK(rig.body->inf.airborne);
+}
 } // namespace
 
 int main() {
@@ -285,6 +323,7 @@ int main() {
     test_horizontal_ceiling_response_and_threshold();
     test_airborne_and_carrier_gates();
     test_player_jump_into_ceiling_through_motor();
+    test_player_fall_landing_tick_defers_the_held_jump();
     test_npc_fall_edge_under_overhang_through_motor();
     if (failures == 0) std::puts("collision_vertical_test: all checks passed");
     return failures == 0 ? 0 : 1;

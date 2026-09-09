@@ -1144,9 +1144,8 @@ void test_local_player_jump_respects_world_state_flag_gates() {
         e->inf.airborne = false;
         e->inf.vel[2] = 0;
         // A body presenting 0x2000 hovers within the airborne gap so neither
-        // edge rewrites the word this tick: the landing clear precedes the
-        // gate here, whereas retail's landing arm (@0x4b7f71..0x4b7fa1) runs
-        // after the jump gates and only when no jump was taken.
+        // edge rewrites the word this tick; the grounded case is the landing
+        // leg's own scenario (test_local_player_stale_airborne_word_lands_first).
         e->pos[2] = floor_z + (blocked == kEntityFlagInAir ? fx(0.5) : 0);
         ent->engine_flags = blocked;
         e->inf.jump_requested = true;
@@ -1170,6 +1169,174 @@ void test_local_player_jump_respects_world_state_flag_gates() {
     CHECK(!e->inf.airborne);
     CHECK((ent->flags & kEntityFlagInAir) == 0);
     CHECK((ent->engine_flags & kEntityFlagInAir) == 0);
+}
+
+// A minimal profile so the landing thump is observable on the world's
+// slot-sound queue (the host parses SndProf.def into the same table).
+const char kLandingProfiles[] =
+    "begin \"default\"\n"
+    "     SSFallDead     T_FALLDEAD\n"
+    "     SSFallAlive    T_LAND\n"
+    "end\n";
+
+// A motored body with a registry row on flat ground at 50 u: the org2 local
+// player by default, an org1 NPC otherwise.
+struct LandingRig {
+    Field flat{[](int) { return static_cast<uint16_t>(50 * 256); }};
+    const int32_t floor_z = fx(50);
+    World w;
+    AiSystem ai;
+    TestSource src;
+    Entity *ent = nullptr;
+    AiEntity *e = nullptr;
+
+    explicit LandingRig(bool local = true) {
+        w.registry.configure_pool(0, 4);
+        w.tables.sound_profiles.parse(kLandingProfiles, sizeof(kLandingProfiles) - 1);
+        Entity seed;
+        seed.kind = EntityKind::Organic;
+        seed.health = 100;
+        if (local) seed.flags |= kEntityFlagPlayer; // the retail player classifier
+        const EntityHandle h = w.registry.spawn(0, seed);
+        ent = w.registry.get(h);
+        ai.terrain = &flat.field;
+        src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+        ai.root_motion = &src;
+        e = soldier(ai);
+        e->inf.is_local_player = local;
+        e->health = 100;
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = floor_z;
+        run_ticks(ai, w, 0, 2); // seed the terrain cache and settle
+    }
+    uint32_t in_air() const { return (ent->flags | ent->engine_flags) & kEntityFlagInAir; }
+    // Drain the queue; count the SSFallAlive thumps it held.
+    int take_landings() {
+        int n = 0;
+        for (const SoundSlotEvent &ev : w.out.slot_sounds)
+            if (ev.slot == opennova::audio::kSlotFallAlive) ++n;
+        w.out.slot_sounds.clear();
+        return n;
+    }
+};
+
+// Retail's org2 tick order: resolver -> the clearance <= 0 arm (snap, fall
+// damage, vel_z = 0 and NO 0x2000 clear) -> `mov eax,[esi+24h]` -> cooldown
+// maintenance -> the jump gates (`test eax,1A002h` sees the still-set bit) ->
+// ELSE the SSFall thump and the clear. A jump key held with cooldown 0 on the
+// exact landing tick T therefore launches on T+1, never on T.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b7cf4..0x4b7d91 -> @0x4b7d9f ->
+//  @0x4b7de0 -> @0x4b7e8c..0x4b7ebd -> @0x4b7f71..0x4b7fa1]
+void test_local_player_landing_tick_defers_a_held_jump() {
+    LandingRig r;
+    uint32_t t = 2;
+    r.e->inf.jump_requested = true;
+    run_ticks(r.ai, r.w, t, t + 1);
+    ++t;
+    CHECK(r.e->inf.jump_cooldown == 32);
+    CHECK(r.e->inf.vel[2] == 0x1600);
+    CHECK(r.in_air() == kEntityFlagInAir);
+    // Release the key until the cooldown reads 0 (32 ticks; the arc is longer,
+    // so the body is still in flight).
+    while (r.e->inf.jump_cooldown != 0 && t < 100) {
+        run_ticks(r.ai, r.w, t, t + 1);
+        ++t;
+    }
+    CHECK(r.e->inf.jump_cooldown == 0);
+    CHECK(r.in_air() == kEntityFlagInAir);
+    CHECK(r.e->inf.airborne);
+    // Hold the key for the rest of the flight: every airborne tick refuses it,
+    // and so does the landing tick itself.
+    r.take_landings();
+    uint32_t landing_tick = 0;
+    while (t < 200) {
+        r.e->inf.jump_requested = true;
+        run_ticks(r.ai, r.w, t, t + 1);
+        if (r.in_air() == 0) {
+            landing_tick = t;
+            break;
+        }
+        CHECK(r.e->inf.jump_cooldown == 0);
+        CHECK(r.e->inf.vel[2] != 0x1600);
+        ++t;
+    }
+    CHECK(landing_tick != 0);
+    // T: snapped, vel_z = 0, the cooldown still 0, the thump played, the word
+    // and the mirror clear, and NO launch.
+    CHECK(r.e->pos[2] == r.floor_z);
+    CHECK(r.e->inf.vel[2] == 0);
+    CHECK(r.e->inf.jump_cooldown == 0);
+    CHECK(!r.e->inf.airborne);
+    CHECK(r.take_landings() == 1);
+    // T+1 with the key still held: the launch.
+    r.e->inf.jump_requested = true;
+    run_ticks(r.ai, r.w, landing_tick + 1, landing_tick + 2);
+    CHECK(r.e->inf.jump_cooldown == 32);
+    CHECK(r.e->inf.vel[2] == 0x1600);
+    CHECK(r.in_air() == kEntityFlagInAir);
+    CHECK(r.e->inf.airborne);
+    CHECK(r.e->inf.anim_state == anim_state::kJumpStart);
+    CHECK(r.take_landings() == 0);
+}
+
+// A deploy after a mid-air death keeps the word's 0x2000: none of retail's
+// death/reset writers touch it (the deploy leg `and [eax+24h],0FFFFFFFEh`
+// @0x519fdb; Server_ProcessPlayerDeath `&= ~2` @0x51787a;
+// Entity_ResetToSpawnState `&= ~2` @0x4b97b0; Server_PositionPlayerForSpawn
+// only ORs 0x20 / 0x200 @0x50d42a / @0x50d44d), and the deploy's motor reset
+// keeps the mirror with it. The first grounded tick then lands on the word's
+// own bit: the jump gates refuse the key, the thump plays, both halves clear,
+// and the next tick launches. [orig: the else-leg @0x4b7f71..0x4b7fa1 over
+// the read @0x4b7d9f]
+void test_local_player_stale_airborne_word_lands_first() {
+    LandingRig r;
+    // The mid-air death's coherent pair: the word and the motor's mirror.
+    r.ent->flags |= kEntityFlagInAir;
+    r.ent->engine_flags |= kEntityFlagInAir;
+    r.e->inf.airborne = true;
+    r.e->inf.reset_for_spawn(r.e->heading); // the deploy's motor reset
+    CHECK(r.e->inf.airborne);               // the mirror survives with the word
+    CHECK(r.in_air() == kEntityFlagInAir);
+    r.take_landings();
+    r.e->inf.jump_requested = true;
+    run_ticks(r.ai, r.w, 2, 3);
+    CHECK(r.e->inf.jump_cooldown == 0);
+    CHECK(r.e->inf.vel[2] == 0);
+    CHECK(r.e->pos[2] == r.floor_z);
+    CHECK(r.in_air() == 0);
+    CHECK(r.take_landings() == 1);
+    r.e->inf.jump_requested = true;
+    run_ticks(r.ai, r.w, 3, 4);
+    CHECK(r.e->inf.jump_cooldown == 32);
+    CHECK(r.e->inf.vel[2] == 0x1600);
+    CHECK(r.in_air() == kEntityFlagInAir);
+    CHECK(r.e->inf.airborne);
+}
+
+// The org2 ledge edge stores `(Flags & ~0x40) | 0x2000` -- the carried bit
+// falls with the same write [orig: @0x4b7e34..0x4b7e3c]; org1's edge is the
+// bare OR [orig: @0x4bf8c8..0x4bf8cf]. Only the flag bit moves: Entity::mounted
+// mirrors the +0x16C seat link that Entity_DetachFromVehicle alone clears
+// [orig: @0x43577c], so it is untouched by the edge on both motors.
+void test_ledge_edge_carried_bit_by_motor() {
+    for (const bool local : {true, false}) {
+        LandingRig r(local);
+        r.ent->flags |= kEntityFlagMounted;
+        r.ent->engine_flags |= kEntityFlagMounted;
+        CHECK(!r.ent->mounted);
+        r.e->pos[2] = r.floor_z + fx(3); // past the 0xF000 gap: the edge fires
+        r.e->inf.airborne = false;
+        run_ticks(r.ai, r.w, 2, 3); // an even tick: org1's edge block runs
+        CHECK(r.e->inf.airborne);
+        CHECK(r.in_air() == kEntityFlagInAir);
+        const bool carried_kept = (r.ent->flags & kEntityFlagMounted) != 0 &&
+                                  (r.ent->engine_flags & kEntityFlagMounted) != 0;
+        const bool carried_dropped = (r.ent->flags & kEntityFlagMounted) == 0 &&
+                                     (r.ent->engine_flags & kEntityFlagMounted) == 0;
+        CHECK(local ? carried_dropped : carried_kept);
+        CHECK(!r.ent->mounted);
+    }
 }
 
 // The uplink side of D-NET-199: the LOCAL player's wire mirror must carry the
@@ -5155,6 +5322,9 @@ int main() {
     test_remote_player_jump_respects_world_state_flag_gates();
     test_remote_player_jump_hold_release_cooldown_matches_retail();
     test_local_player_jump_respects_world_state_flag_gates();
+    test_local_player_landing_tick_defers_a_held_jump();
+    test_local_player_stale_airborne_word_lands_first();
+    test_ledge_edge_carried_bit_by_motor();
     test_local_player_uplink_carries_the_jump_bit();
     test_recoil_and_weapon_weight_kernels();
     test_hurt_volume_updates_registry_health();
