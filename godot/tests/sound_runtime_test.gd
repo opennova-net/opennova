@@ -248,6 +248,43 @@ func test_zero_range_oneshot_only_fires_at_the_exact_source() -> void:
 		"equality passes, so a zero-range set can still fire at its exact source")
 
 
+func test_mission_retry_keeps_the_sequential_member_cursor() -> void:
+	# Stop/Start stops the bank's voices but never reloads the bank: retail's
+	# round restart re-enters Game_StartMission, whose bank loop returns early
+	# on a loaded slot [orig: SoundBank_OpenFile @ 0x75caa5], so a sequential
+	# (0x10) layer's cursor (playlist word +2) carries on where it left off.
+	var samples := PackedByteArray()
+	samples.resize(32)
+	var root := _real_root({
+		"a.wav": _build_wav(samples, 1, 22050, 16),
+		"b.wav": _build_wav(samples, 1, 22050, 16),
+		"c.wav": _build_wav(samples, 1, 22050, 16),
+	})
+	var profile := _profile_with_set("SEQ", "a.wav")
+	profile.set_layer_field(0, 0, "selection_mode", LwfData.SELECTION_SEQUENTIAL)
+	for wav in ["b.wav", "c.wav"]:
+		var mi := profile.add_member(0, 0)
+		profile.set_member_field(0, 0, mi, "wav_path", wav)
+	var bank = SoundBank.create(root)
+	bank.add_bank(profile)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var streams: Array = []
+	for _fire in range(2):
+		assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "SEQ", StringName(), Vector3.ZERO))
+		var voice := parent.get_child(parent.get_child_count() - 1) as AudioStreamPlayer3D
+		streams.append(voice.stream)
+	assert_ne(streams[0], streams[1], "a sequential layer walks its members in order")
+	var first_voices := parent.get_children()
+	bank.reset_oneshots(parent)
+	for voice in first_voices:
+		assert_true(voice.is_queued_for_deletion(), "the retry stops the bank's live voices")
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "SEQ", StringName(), Vector3.ZERO))
+	var third := (parent.get_child(parent.get_child_count() - 1) as AudioStreamPlayer3D).stream
+	assert_ne(third, streams[0], "the cursor survives the retry: the third member, not the first")
+	assert_ne(third, streams[1])
+
+
 func test_oneshot_occlusion_distance_drives_fire_volume() -> void:
 	# Raw distance is 50u, but the witnessed two-ray result inflates it to 100u.
 	# With a 200u falloff, that is the pinned half-range volume byte 63.
