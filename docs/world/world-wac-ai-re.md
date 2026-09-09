@@ -2112,9 +2112,9 @@ D-INF-10/§22):
    contact-flag dispatch runs EVEN ON A ZERO-FORCE RETURN (`the goto @ 0x4b2fa5`
    — a pure CL/zone touch still latches; `collision` ctest ladder-contact pin);
    forces accumulate NEGATED; a mostly-vertical negative force is dropped
-   (standing pressure `@ 0x4b3010`); while swimming (Flags 0x2000) an UPWARD
-   force damps slideDecay toward -167 (-83 steps; `@ 0x4b304e-0x4b308c` —
-   rides the D-INF-3 water tail, unported); contact-flag dispatch:
+   (standing pressure `@ 0x4b3010`); while airborne (Flags 0x2000), positive
+   contact Z damps slideDecay before the NEGATED force pushes downward
+   (`@ 0x4b304e-0x4b308c`; both passes ported, section 33.37); contact-flag dispatch:
    0x40/0x80/0x100 DL/DM/DH damage -1/-6/-50 HP (authority only `@ 0x4b317b-0x4b31d7`,
    skipped entirely for Flags 0x4000000 sources `@ 0x4b3148`; each hit also
    stamps the damage-source attribution); 0x200 CT change-team/capture touch ->
@@ -2270,8 +2270,9 @@ this port (walls push out, roofs carry via the model-aware ground probe), and
 the ladder locomotion tail landed with the D-COL-5 port 2026-08-15 (§30), and
 the swim transitions landed 2026-08-24 (#566 — §29.1 + `world/infantry_water.cpp`,
 states 36-40 through the 8-case jumptable `@ 0x4b7411`); the remaining D-INF-3
-tail is the submerged scope auto-untoggle, the resolver
-swim damping and the forward-speed question (ledger row).
+tail is the submerged scope auto-untoggle and the forward-speed question
+(ledger row). The former swim-damping entry was actually airborne collision
+response and is now implemented (section 33.37).
 
 ### 15.6 The armory / loadout-zone flow (cross-record pointer)
 
@@ -4408,8 +4409,8 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
    D-INF-20. The WATER half is §29.1 (witnessed; replica-ported AND, 2026-08-24,
    ported in the LOCAL motors — `AiSystem::infantry_water_block` /
    `player_water_block` in world/infantry_water.cpp — with the swim selection
-   36-40; the wash 27/28, scope auto-untoggle and resolver swim-force damping
-   remain on D-INF-3).
+   36-40; the wash 27/28 and scope auto-untoggle remain on D-INF-3). The
+   former resolver swim-force entry was airborne collision response (33.37).
 2. The mounted ±120° look clamp and true per-tick transform for generic non-UseGun seats remain;
    the host-fed seat frame synchronizes body/legs/pitch/roll while preserving the local look.
    UseGun root position now follows the live control-posed userpoint, but its full matrix basis is
@@ -8859,4 +8860,44 @@ exit report remain. Release Windows packaging passes both exported-app
 startup checks, ONED's 40-file game pack and both ZIP integrity checks
 (npc-windows-release-package-final.log). The exported runtime also passes
 two orderly WM_CLOSE runs over the retail mount. Forced SceneTree quit
-with streaming music remains D-MUS-EXIT, documented in mus-sbf-re.md.
+with streaming music remains D-MUS-13, documented in mus-sbf-re.md.
+
+### 33.37 Airborne collision vertical response (2026-09-09)
+
+The former D-INF-3 description of "swim upward-force damping" was incorrect.
+Entity_MovementCollisionResolver tests Flags 0x2000 (airborne), not the
+afloat bit 0x8000. The first pass at 0x4B304C..0x4B3092 and the second pass
+at 0x4B365F..0x4B36A5 use the same response before subtracting the contact
+force. A positive force Z therefore pushes the body downward, as with a
+ceiling contact.
+
+After the existing standing-pressure clamp, a solid contact changes
+entity+0xA0 only if force Z > 0, vertical velocity > -167 and Flags 0x2000
+is set. If Z is strictly greater than both absolute horizontal components,
+velocity becomes -167. Otherwise it loses 83. Equality takes the subtract
+path, and that subtraction can cross below -167 (-166 becomes -249);
+there is no saturating clamp on this branch. Both passes may subtract
+when the first result still exceeds -167. Carrier suppression and the
+Powerup/MoveCB branches bypass this ordinary solid response. No authority
+or player-class gate applies.
+
+The shared resolver now applies this response through its existing vertical
+velocity reference, including the replica flag seam. collision_vertical
+uses actual authored CB ceiling geometry: vertical-dominant, equal-axis and
+horizontal-dominant contacts, signed horizontal normals, both actor classes,
+authority/client calls, engine-only flags, replica rows, strict velocity
+thresholds and afloat/carried suppression. The regression failed on ten
+velocity assertions before the implementation; the collision, infantry and
+collision_vertical targets then passed. A complete native rebuild and
+CTest run pass 451 tests with one existing motorcycle asset skip (452 total,
+139.81 seconds, npc-collision-ceiling-full-ctest.log). Both Windows extension
+flavours build, and all ten lint gates pass. Full GUT passes 1,760 tests
+with 25 pending, 187 scripts and 58,245 assertions (331.827 seconds,
+npc-collision-ceiling-full-gut.log), without parse errors or collection
+drops. Its existing LAN orphan and 12-resource exit report remain.
+Release Windows packaging passes both exported-app startup checks, the
+40-file ONED game pack and both ZIP integrity checks (53.5 seconds,
+npc-collision-ceiling-package.log). The refreshed runtime passes two
+orderly WM_CLOSE runs over the retail mount, with no leaked-object reports
+(npc-ceiling-release-window-close-0.log and -1.log). Normal SP playthrough
+acceptance and forced-quit music cleanup (D-MUS-13) remain open.

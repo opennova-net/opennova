@@ -92,7 +92,7 @@ The menu driver/input dispatch also held a RefCounted ownership cycle.
 The dispatch now keeps a WeakRef to its owner, with a regression proving
 the attached driver, input helper and document are released.
 
-D-MUS-EXIT remains OPEN: a forced SceneTree quit (including --quit-after)
+D-MUS-13 remains OPEN: a forced SceneTree quit (including --quit-after)
 bypasses the orderly runtime drain and can still crash with live streaming
 extension objects. Package startup smokes use fresh temporary Windows
 user data so saved retail mounts cannot alter their input; retail music

@@ -1607,6 +1607,11 @@ if(MSVC)
 endif()
 add_test(NAME collision COMMAND collision_test)
 
+add_executable(collision_vertical_test world/collision_vertical_test.cpp)
+target_link_libraries(collision_vertical_test PRIVATE opennova_runtime)
+target_compile_features(collision_vertical_test PRIVATE cxx_std_17)
+add_test(NAME collision_vertical COMMAND collision_vertical_test)
+
 # Asset-gated (OPENNOVA_JO_DIR): the 00TRg transport-unload repro over the
 # real DTruck1 collision; the pipeline preconditions are asserted, the escape
 # verdict stays a report while the divergence is open.

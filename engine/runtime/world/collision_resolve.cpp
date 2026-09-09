@@ -52,7 +52,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     }
 
     // Idle skip-throttle. [orig: @ 0x4b2c3d-0x4b2cba — full update when the anim
-    // state's table bit 0 is set, moving, sliding, displaced > 200, swimming
+    // state's table bit 0 is set, moving, sliding, displaced > 200, airborne
     // (Flags 0x2000), or every 64th tick; otherwise counter 0..10 full, 11..20
     // skip (revert the caller's gravity integration + zero vel_z).]
     bool full_update = false;
@@ -302,6 +302,19 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                             f[1] = 0;
                         }
                         f[2] = 0;
+                    }
+                    // Positive contact Z pushes DOWN because the response is
+                    // subtracted. Only airborne bodies damp their vertical
+                    // velocity, on both contact passes; this is not a swim gate.
+                    // Equal horizontal/vertical force takes the -83 path, which
+                    // may cross below -167 before the next contact's guard.
+                    // [orig: @0x4B304C..0x4B3092; @0x4B365F..0x4B36A5]
+                    const uint32_t flags =
+                        (ent != nullptr ? ent->flags | ent->engine_flags : 0u) |
+                        (replica_flags_ != nullptr ? *replica_flags_ : 0u);
+                    if (f[2] > 0 && vel_z > -167 && (flags & kEntityFlagInAir) != 0) {
+                        vel_z = f[2] > abs32(f[0]) && f[2] > abs32(f[1])
+                            ? -167 : io::bam_sub(vel_z, 83);
                     }
                     pass_force[0] -= f[0];
                     pass_force[1] -= f[1];
