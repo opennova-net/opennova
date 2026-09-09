@@ -105,7 +105,7 @@ bool run_field_mapping() {
 	            "state flags = the RAW entity+0x24 low byte, unmasked on the write side"))
 		return false;
 	if (!expect(up.priority_handle_0 == 0 && up.priority_score_0 == 0,
-	            "anti-cheat counters 0 (host receive ignores them)")) return false;
+	            "requested-interest feedback is not yet supplied by this builder")) return false;
 	return true;
 }
 
@@ -281,6 +281,9 @@ bool run_mounted_moving_carrier_roundtrip() {
 	source_body->pitch = static_cast<int32_t>(0xF4000000u);
 	if (!expect(source_ai_system.refresh_mounted_pose(*source_body, source),
 	            "moved carrier pose refreshed")) return false;
+	source.registry.get(source_player_h)->net_analog_x = -64;
+	source.registry.get(source_player_h)->net_analog_y = 37;
+	source.registry.get(source_player_h)->net_analog_z = -128;
 	if (!expect(source_body->pos[0] != initial_x || source_body->pos[1] != initial_y,
 	            "mounted local body followed the moving carrier")) return false;
 	const nw::PlayerExtendedUplink up = ns::build_player_uplink(
@@ -329,6 +332,10 @@ bool run_mounted_moving_carrier_roundtrip() {
 			static_cast<uint32_t>(carrier_axis_bam(source_carrier->roll)));
 	const w::AiEntity *host_body = host_ai_system.for_handle(host_player_h);
 	const w::Entity *host_player = host.registry.get(host_player_h);
+	if (!expect(host_player != nullptr && host_player->net_analog_x == -64 &&
+	                    host_player->net_analog_y == 37 && host_player->net_analog_z == -128,
+	            "mounted throttle and steering reach authority through the real uplink"))
+		return false;
 	if (!expect(host_body != nullptr && host_body->pos[0] == lifted.x &&
 	                    host_body->pos[1] == lifted.y && host_body->pos[2] == lifted.z,
 	            "host lifts mounted local pose through the full carrier frame")) return false;

@@ -449,8 +449,9 @@ public:
 		return initial_admission_complete_;
 	}
 	// Frame one C2S 0x0E [i16 wire_value] deployment pick (0xFFFF parameter-0 default,
-	// 0xFFFE auto team spawn, else a pool<<12|slot spawn-target handle). Allowed in
-	// AwaitDeployPick and again in AwaitDeployRelease (the re-pick); empty otherwise.
+	// 0xFFFE auto team spawn, else a pool<<12|slot spawn-target handle). Accepts an
+	// initial overlay selection after admission, AwaitDeployPick, and a re-pick in
+	// AwaitDeployRelease. ClientRuntime gates initial selection on the active overlay.
 	std::vector<uint8_t> frame_deployment_pick(uint16_t wire_value);
 	// Semantic-message form for ClientRuntime's shared send boundary. A successful preparation
 	// records the sequence about to be framed so the later S2C 0x5A must cumulatively ACK this pick.

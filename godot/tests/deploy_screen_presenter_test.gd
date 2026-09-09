@@ -1,13 +1,11 @@
 extends GutTest
 
-# DeployScreenPresenter on the typed surfaces (ADR 0034): the joiner state is a
-# REAL loopback join — host + joiner Simulations over real UDP, the
-# coop_two_sim recipe — driven to the DEATH edge: the initial join deploys with
-# no pick (retail sends no initial C2S 0x0E), then the authority kills the
-# joiner and begin_redeployment genuinely holds is_join_deploy_pick_pending.
-# The world seam is a GameWorld subclass harness. The deployment RELEASE is the
-# real thing too: the picked C2S 0x0E reaches the host and the falling pending
-# bit closes the screen.
+# DeployScreenPresenter on the typed surfaces (ADR 0034): host and joiner
+# Simulations communicate over real UDP. Initial admission and an alive
+# player's deploy-map selection are separate steps. Death re-arms the same
+# request/release path through begin_redeployment.
+# The world seam is a WorldView interface harness. A real C2S 0x0E reaches the
+# host and releases its pending hold for both the initial and death selections.
 #
 # (The old value-double's host-side zone-mutation refresh leg — a zone turning
 # contested between refreshes — has no typed equivalent without host-side zone
@@ -150,9 +148,9 @@ func _spawn_zone_mission() -> MissionData:
 	return md
 
 
-# A REAL loopback join driven to in-match with NO pick owed (retail's initial
-# join sends no C2S 0x0E) over the spawn-zone host, which keeps the D-NET-156
-# respawn-pending hold. Returns {host, joiner}; both are autofreed Nodes.
+# A real loopback join completes admission without forcing a pick. The
+# spawn-zone host retains its pending hold until a user selects a spawn.
+# Returns {host, joiner}; both are autofreed Simulations.
 func _join_pair_in_match() -> Dictionary:
 	var mission := _spawn_zone_mission()
 	var item_db := _spawn_zone_item_db()
@@ -192,7 +190,7 @@ func _join_pair_in_match() -> Dictionary:
 		OS.delay_msec(2)
 	assert_true(reached, "the joiner reached in-match over real loopback UDP")
 	assert_false(joiner.is_join_deploy_pick_pending(),
-			"the initial join deploys with no forced C2S 0x0E")
+			"initial admission does not force a C2S 0x0E")
 	return {"host": host, "joiner": joiner}
 
 
@@ -309,16 +307,25 @@ func test_open_refuses_when_no_pick_is_owed() -> void:
 	assert_false(presenter.is_open())
 
 
-# The host-driven deploy-map OVERLAY: the spawn-zone host keeps the D-NET-156
-# respawn-pending hold, whose per-frame 0x0A flags1 bit1 arms
-# is_join_deploy_overlay_active while NO pick is owed. The same death.mnu
-# screen opens off it, live frames keep it open while the host keeps the bit
-# set, and a spawn-row click dismisses it LOCALLY with no 0x0E (retail input
-# case 12's dialogs-reset half; the send half is unported pending a
-# deployed-dismiss capture — the presenter documents why).
-# [orig: the open Render_ProcessMainSceneFrame @0x5cab5e; the per-frame fold
-#  NapiNPClientMsg_0x00A @0x42ff82]
-func test_overlay_opens_with_no_pick_and_a_row_click_dismisses() -> void:
+func _assert_deployment_released(pair: Dictionary) -> void:
+	var released := false
+	for _i in range(400):
+		pair.host.step()
+		pair.joiner.step()
+		if pair.joiner.is_joined_in_match() \
+				and not pair.joiner.is_join_deploy_pick_pending() \
+				and not pair.joiner.is_join_deploy_overlay_active():
+			released = true
+			break
+		OS.delay_msec(2)
+	assert_true(released,
+			"the real host clears deployment-pending and releases the selection")
+
+
+# An alive, admitted player may still be held on the authority's deploy map.
+# Initial map selection must send C2S 0x0E, not just dismiss the local screen.
+# [orig: Input_HandleActionBinding @0x49AD40, case 12 @0x49B0C5..0x49B17B; Server_OnPlayerJoin @0x51A680, hold @0x51A6F2]
+func test_initial_overlay_row_selection_releases_authority_deployment() -> void:
 	var pair := _join_pair_in_match()
 	var overlay := false
 	for _i in range(240):
@@ -329,7 +336,7 @@ func test_overlay_opens_with_no_pick_and_a_row_click_dismisses() -> void:
 			break
 		OS.delay_msec(2)
 	assert_true(overlay, "the held joiner's per-frame flags1 bit1 arms the overlay")
-	assert_false(pair.joiner.is_join_deploy_pick_pending(), "no pick is owed")
+	assert_false(pair.joiner.is_join_deploy_pick_pending(), "no selection has been sent yet")
 	var presenter := _make_presenter(pair.joiner)
 	watch_signals(presenter)
 	assert_true(presenter.open(), "the overlay opens the deploy screen without a pick")
@@ -350,14 +357,12 @@ func test_overlay_opens_with_no_pick_and_a_row_click_dismisses() -> void:
 	presenter.select_spawn_row(row)
 	assert_false(presenter.is_open(), "the overlay row click closes the screen locally")
 	assert_signal_emitted(presenter, "closed")
-	assert_false(pair.joiner.is_join_deploy_pick_pending(),
-			"no 0x0E was sent — nothing armed a pick or release wait")
+	_assert_deployment_released(pair)
 
 
-# Retail's deploy keys 'X' and SPACE (input case 12) dismiss the OVERLAY-only
-# screen locally; while a pick is owed they stay inert (the pick flow keeps its
-# list-select). The witnesses live in hud-re D-HUD-19.
-func test_overlay_x_and_space_dismiss_only_without_a_pending_pick() -> void:
+# The initial overlay's default-spawn key must send the same request as a row
+# click. Existing death-pick keyboard handling remains list-driven.
+func test_initial_overlay_space_sends_default_spawn_selection() -> void:
 	var pair := _join_pair_with_pending_pick()
 	var presenter := _make_presenter(pair.joiner)
 	watch_signals(presenter)
@@ -381,7 +386,7 @@ func test_overlay_x_and_space_dismiss_only_without_a_pending_pick() -> void:
 			break
 		OS.delay_msec(2)
 	assert_true(overlay, "the held joiner's overlay arms")
-	assert_false(pair2.joiner.is_join_deploy_pick_pending(), "no pick is owed")
+	assert_false(pair2.joiner.is_join_deploy_pick_pending(), "no selection has been sent yet")
 	var overlay_presenter := _make_presenter(pair2.joiner)
 	watch_signals(overlay_presenter)
 	assert_true(overlay_presenter.open(), "the overlay opens without a pick")
@@ -391,8 +396,9 @@ func test_overlay_x_and_space_dismiss_only_without_a_pending_pick() -> void:
 	overlay_presenter.get_viewport().push_input(space)
 	await get_tree().process_frame
 	assert_false(overlay_presenter.is_open(),
-			"SPACE dismisses the overlay-only screen locally")
+			"SPACE selects the default spawn and closes the initial overlay")
 	assert_signal_emitted(overlay_presenter, "closed")
+	_assert_deployment_released(pair2)
 
 
 # The active session keeps running under the death screen — per-frame S2C 0x0A
