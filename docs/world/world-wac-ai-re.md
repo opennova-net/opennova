@@ -9281,15 +9281,22 @@ clears it. At 768 or above, the motor replaces the horizontal animation pair
 with X = -((419392 * dx + 0x8000) >> 16) and Y =  ((419392 * dy + 0x8000) >>
 16), retaining the low signed dword. It clamps vertical slide velocity downward
 to -167, sets Flags 0x10000, and writes path_state=1 at entity+0x369 [orig:
-Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BA94E)]. The byte is cleared by
-the combat aim solution on every aimed think, ahead of the
-`ai_find_cover_position` calls [orig: @0x4BCFDB; the calls @0x4BD490..0x4BD5A4],
-and at [orig: @0x4BD2E9] (no goal), [orig: @0x4BD349] and [orig: @0x4BD956]; the
-aim-solution clear is ported (`infantry_combat.cpp`). Still unported adjacent
-sites: the tail `if (moveMode != 1 && moveMode != 5) { moveMode = 7; targetDist
-= 0; }` [orig: @0x4BCFD9..0x4BCFF5] and the aim-block gate (retail: aiFocus set
-and !(Flags & 0x80000) and animFlags & 0x10 [orig: @0x4BC94C..0x4BC973]; the
-port tests sflags & 0x18). The replacement pair
+Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BA94E)]. The clear [orig: @0x4BCFDB]
+belongs to the attack-stance aim block only, entered through the gate [orig:
+@0x4BC94C..0x4BC973] (aiFocus != self, !(Flags & 0x80000), animFlags & 0x10);
+the flag-0x8 block [orig: @0x4BC555..0x4BC948] (the aim writes, aimFlag = 1
+@0x4bc894, the walking-fire latch @0x4bc8fa..0x4bc946) never writes +0x369; the
+other clears sit at [orig: @0x4BD2E9] (no goal), [orig: @0x4BD349] and [orig:
+@0x4BD956]. The block-2 tail `if (moveMode != 1 && moveMode != 5) { moveMode =
+7; targetDist = 0; }` [orig: @0x4BCFD5..0x4BCFF5] is ported with the gate
+(`infantry_combat.cpp`; no anim state carries both 0x8 and 0x10 in the flag
+table @0x8139e8). Still unported: block 2's no-target arm [orig:
+@0x4BCA95 -> @0x4BCBEB..0x4BCCC1] (the carried body's savedLivePose aim point,
+then the retained-point solve into the same tail), block 1's itemDef attrib
+0x400 [orig: @0x4BC560] and parentSlot 2/5 [orig: @0x4BC570..0x4BC582] skips,
+the Flags 0x80000 read at the reaction/approach arm [orig: @0x4BC054] and that
+flag's writer, and the hold-timer decay's `slot+4 & 8` gate with the extra
+state-49 decrement [orig: @0x4bc4db..0x4bc4f7]. The replacement pair
 later rotates by body heading [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
 @0x4BF001)]; it is not added as world-space velocity and does not replace the
 clip's vertical lane. The response also runs on clients. The path state reaches
@@ -9343,6 +9350,25 @@ Flags word: the org2 jump [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 (the
 player, org1 NPCs and wire replicas alike, and the regression drives a real
 jump and fall through the motors (collision_vertical MotorRig) rather than a
 stamped flag.
+
+The org2 landing order is retail's: resolver -> the clearance<=0 arm (snap,
+fall damage, vel_z = 0; no 0x2000 test) [orig: Entity_UpdateInfantryPlayerBody
+@0x4b40e0 (the arm @0x4b7d0a..0x4b7d91)] -> the Flags read [orig: @0x4b7d9f] ->
+cooldown maintenance [orig: @0x4b7de0] -> the jump gates [orig:
+@0x4b7e8c..0x4b7ebd], which still see the set bit -> the jump commit, ELSE the
+landing tail [orig: @0x4b7f71..0x4b7fa1] (clearance<=0, `test eax,2000h`, the
+SSFall sound, `and [esi+24h],0FFFFDFFFh`) ahead of the ladder bottom dismount.
+A jump key held with cooldown 0 on the landing tick therefore launches on the
+next tick, and the carried test [orig: @0x4b7ebb] skips the whole tail. org1's
+order is unchanged [orig: Entity_UpdateInfantryAI @0x4b9910 (the arm
+@0x4bf802..0x4bf8a6)]; both motors sound the thump after the snap. The org2
+ledge edge stores `(Flags & ~0x40) | 0x2000` [orig: @0x4b7e34..0x4b7e3c] where
+org1 ORs the bit [orig: @0x4bf8c8..0x4bf8cf]. No writer on the death or deploy
+path touches 0x2000 ([orig: Entity_ResetToSpawnState @0x4B9610 (the `and`
+@0x4b97b0; the +0x334 copy @0x4b9662)]; [orig: Server_ProcessPlayerDeath
+@0x516dd0 (the site @0x51787a)]; the deploy leg @0x519fdb), so a body that died
+airborne respawns with the bit set and clears it on its first grounded tick;
+the port's motor mirror follows the word across a respawn.
 
 The shared resolver now applies this response through its existing vertical
 velocity reference, including the replica flag seam. collision_vertical uses
