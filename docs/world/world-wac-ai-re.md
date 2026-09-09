@@ -2875,6 +2875,12 @@ Runs when `tick & 0x1F == 0` (the per-entity staggered tick, §3.1):
   `Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130` (ex `sub_53B130`; terrain LOS
   `@ 0x53b080` + entity-collision raycast `@ 0x539a70`, returns 1 = clear) passes.
   `lastAttacker` is consumed + cleared every scan — retaliation has a 32-tick memory.
+  A no-hit scan on phases 1-3 re-commits the held slot[3] target instead
+  (`mov edi,[ecx+0Ch]; test edi,edi; jnz` [orig: @0x4bbee4..0x4bbeed]); only a
+  phase-0 miss (`test ebp,ebp; jz` [orig: @0x4bbee0]) or an empty slot reaches the
+  fallback and the clear [orig: @0x4bbf7c..0x4bbf85] (ported 2026-09-09: the port
+  cleared the target on every miss, so a target between the 6 u near scan and
+  the sight range flickered every other scan).
 - **Commit**: `aimPoint = target pos`, `aiFocus = target`, `damageTimer += 12` (cap ~27,
   −1/tick — stays alerted while seeing a target), `slot[3] = target` (same field the SM
   layer uses, §16.3), same-target tick counter `+0x33C` increments (reset on switch),
@@ -3084,8 +3090,14 @@ Recomputed for the stationary leg (anim-state flag `& 0x10`) and the moving leg
   fired at this target = settled) / `slot[11]` (fresh target), each
   `err = (119304 · dword_C6EAE8 · acc) >> 5` with `dword_C6EAE8` the difficulty
   global; two sawtooth phases `err · (32 − ((tick>>2 [+ tick>>9]) & 0x3F))` wander the
-  yaw/pitch solution (±31·err) — `aimHeading = bearing + errA`,
-  `aimPitch = elevation + errB`. **Concealment**: a target in-game, in a prone-family
+  yaw/pitch solution (±31·err) — the HEADING error is the `(tick>>2)`-only phase and
+  the PITCH error the `(tick>>2 + tick>>9)` phase in both aim blocks (block 2
+  [orig: @0x4bca03..0x4bca2c] -> +0x2EC [orig: @0x4bcf71] / +0x2D0 [orig:
+  @0x4bcf97]; corrected 2026-09-09, the port had them swapped); block 1 adds the
+  heading error twice (`lea ebp,[ecx+edx]` [orig: @0x4bc88b]) and writes nothing
+  unless its candidate lies within 0x3C71C6E0 (~85 deg) of the body heading +0x8C
+  [orig: @0x4bc861..0x4bc879]; block 2's parentSlot-3 mounted arm [orig:
+  @0x4bcd1c..0x4bcf1b] remains unported. **Concealment**: a target in-game, in a prone-family
   anim (flag & 2) AND on foliage (`Foliage_SampleFoliageMapMask @ 0x606620`) adds
   +40 to BOTH accuracy params — hard to hit while prone in grass.
 - Body re-faces the aim when it drifts > ~22° (262470208 BAM); mounted `parentSlot 3`
@@ -9316,7 +9328,9 @@ Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BA94E)]. The clear [orig: @0x4BC
 belongs to the attack-stance aim block only, entered through the gate [orig:
 @0x4BC94C..0x4BC973] (aiFocus != self, !(Flags & 0x80000), animFlags & 0x10);
 the flag-0x8 block [orig: @0x4BC555..0x4BC948] (the aim writes, aimFlag = 1
-@0x4bc894, the walking-fire latch @0x4bc8fa..0x4bc946) never writes +0x369; the
+@0x4bc894, the walking-fire latch @0x4bc8fa..0x4bc946, all behind the body cone
+`|candidate - bodyHeading| < 0x3C71C6E0` [orig: @0x4bc861..0x4bc879], its heading
+error applied twice [orig: @0x4bc88b]) never writes +0x369; the
 other clears sit at [orig: @0x4BD2E9] (no goal), [orig: @0x4BD349] and [orig:
 @0x4BD956]. The block-2 tail `if (moveMode != 1 && moveMode != 5) { moveMode =
 7; targetDist = 0; }` [orig: @0x4BCFD5..0x4BCFF5] is ported with the gate
@@ -9382,8 +9396,11 @@ player, org1 NPCs and wire replicas alike, and the regression drives a real
 jump and fall through the motors (collision_vertical MotorRig) rather than a
 stamped flag.
 
-The org2 landing order is retail's: resolver -> the clearance<=0 arm (snap,
-fall damage, vel_z = 0; no 0x2000 test) [orig: Entity_UpdateInfantryPlayerBody
+The org2 landing order is retail's: resolver -> the clearance<=0 arm (snap;
+fall damage gated on the threshold, the local red flash
+[orig: Player_OnDamageReceived @0x4b7d2b (unmodeled)], authority and
+Indestructible only, no 0x2000 and no dead test, which are org1's [orig:
+@0x4bf812; @0x4bf843]; vel_z = 0) [orig: Entity_UpdateInfantryPlayerBody
 @0x4b40e0 (the arm @0x4b7d0a..0x4b7d91)] -> the Flags read [orig: @0x4b7d9f] ->
 cooldown maintenance [orig: @0x4b7de0] -> the jump gates [orig:
 @0x4b7e8c..0x4b7ebd], which still see the set bit -> the jump commit, ELSE the
