@@ -8167,9 +8167,28 @@ first error in byte_C6EB30 [orig: Script_SetCompileError @0x4EE7C0] (read by
 [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute
 @0x4f976b)] ignores Script_Compile's return and executes the script anyway (the
 retail corpus ships `ASX_G13A.wac` with such a line). The port models the dword
-as `Builtin::Scratch` and emits the diagnostic as a warning. A named row in a
-Variable slot is always the row's own storage; a literal, quoted string, event
-name or unknown token there is the same diagnostic. An unknown command is a
+as `Builtin::Scratch` and emits the diagnostic as a warning. A NULL slot does
+not consume its token: the SAME token feeds the next parameter slot [orig:
+Script_Compile @0x4f31f0 (the NULL leg @0x4f3ab2..0x4f3aed -> loc_4F3990; the
+retry @0x4f3a71..0x4f3aaa)], and the leftover tokens after the last slot take
+the statement-level default: a value becomes a `load` that assigns the
+accumulator [orig: @0x4f5108; @0x4f5124; @0x4f5321..0x4f533f], an action name
+starts a new call fed by the remaining tokens [orig: @0x4f5252..0x4f5282], and
+anything else is the first-error `Unknown '%s'` with nothing emitted [orig:
+@0x4f5293; @0x4f52b4]. Observable: `if eq(nosuchname,1)` compiles as EQ
+scratch,scratch and is TRUE (the stray `1` loads the accumulator afterwards);
+`if eq(nosuchname,0)` is FALSE. A named row in a Variable slot is always the
+row's own storage; a literal, quoted string, event name or unknown token there
+is the same diagnostic. An Ssn slot (expected type 11) is never the NULL leg:
+the token is `atol`'d (0 for a name or a quoted token, whose buffer keeps the
+quote @0x4f3338), looked up as a net id and stored in the SSN pool, with
+"Unknown SSN" as the first error when no entity carries it [orig:
+WacScript_ResolveParameter @0x4f2920 (the leg @0x4f2c94..0x4f2eed; the error
+@0x4f2edf)]; the port binds the pool entry at first execution and raises the
+same non-fatal diagnostic from the compile-time registry (the player alias
+10000 exempt). The replicated-row handler reports a dispatch gap
+(RuntimeGapKind::WacCommand) on both the host and the joiner, and the
+wac_dispatch_sweep ctest pins one dispatch per registry row. An unknown command is a
 non-fatal diagnostic on both sides; the port's HARD errors — an unresolved
 FX/FACE/SOUNDSET/ANIM/AMMO literal and the RUN/LOOP/NEXT/GLOOP structural
 checks — still block the mission's script (`wac_layered_load` kBlocked), where
