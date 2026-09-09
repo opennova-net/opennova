@@ -55,8 +55,11 @@ struct Fixture {
 static void test_ammo_names_bind_indices_and_reject_unknown_names() {
     Fixture f;
     f.marker(77, {0, 0, 20});
+    // Retail uppercases a bare token [orig: Script_Compile @0x4f3418], so the
+    // AMMO_ prefix and the name walk are case-insensitive
+    // [orig: AmmoDef_LookupByName @0x409870, stricmp].
     f.script("v1 = AMMO_SCRIPT\nv2 = AMMO_FALLBACK\n"
-             "ammo2tgt(v1,77) store(v3)\nammo2tgt(\"aMmO_sCrIpT\",77) store(v4)\n");
+             "ammo2tgt(v1,77) store(v3)\nammo2tgt(aMmO_sCrIpT,77) store(v4)\n");
     CHECK(f.world.script.vars.get_mission(1) == 1);
     CHECK(f.world.script.vars.get_mission(2) == 2);
     CHECK(f.world.script.vars.get_mission(3) == 0 && f.world.script.vars.get_mission(4) == 0);
@@ -66,6 +69,11 @@ static void test_ammo_names_bind_indices_and_reject_unknown_names() {
     CHECK(!f.compile_script("ammo2tgt(MISSING,77)\n").ok());
     CHECK(!f.compile_script("ammo2tgt(1,77)\n").ok()); // literal Ammo parameters are names
     CHECK(!f.compile_script("ammo2tgt(AMMO_AT_NULL,77)\n").ok());
+    // A quoted token keeps its opening quote in retail's buffer [orig:
+    // Script_Compile @0x4f3338]: the AMMO_ prefix never matches it and the
+    // Ammo leg walks the names with the quoted text, an Unknown AMMO
+    // [orig: WacScript_ResolveParameter @0x4f2cc5..0x4f2e8a].
+    CHECK(!f.compile_script("ammo2tgt(\"AMMO_SCRIPT\",77)\n").ok());
     CHECK(!compile_source("v1 = AMMO_SCRIPT\n", {}).ok()); // unavailable table is observable
 }
 

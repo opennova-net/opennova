@@ -199,8 +199,15 @@ private:
     // operand pool, so an Ssn slot is never the NULL leg. The port binds the
     // net id when the VM first meets its world (WacVm::execute) and asks the
     // compile-time registry, when the embedder passes one, the question
-    // retail's pool answered; the script-facing player alias has no entity
-    // net id (EntityCommands::resolve_ssn) and is exempt.
+    // retail's pool answered. The kLocalPlayerSsn (10000) exemption is a
+    // port seam, not a retail rule: retail's leg has no alias, and
+    // EntityPool_FindByNetId @0x4f0a20 keys on GamePlayerEntity+0x7C (DcbId),
+    // which the JO player spawn [orig: Entity_SpawnFromAnimSlotProperty
+    // @0x43c390] leaves at 0, so retail reports Unknown SSN for 10000 unless
+    // an authored entity carries that DcbId. The exemption mirrors
+    // EntityCommands::resolve_ssn, which honours the dfx2med authoring
+    // convention (the local player is SSN 10000) that mission scripts are
+    // written against.
     uint32_t ssn_operand(int32_t net, int line) {
         if (env_.registry != nullptr && uint16_t(net) != world::EntityCommands::kLocalPlayerSsn &&
                 !env_.registry->find_by_net_id(uint16_t(net)).valid())
@@ -208,117 +215,97 @@ private:
         return encode_operand(OperandKind::EntitySsn, push_pool(net));
     }
 
-    // The resolver proper; std::nullopt is retail's NULL return.
+    // The resolver proper; std::nullopt is retail's NULL return. Retail's
+    // token buffer keeps a quoted token's opening quote [orig: Script_Compile
+    // @0x4f3338] and uppercases a bare one [orig: @0x4f3418..0x4f341d], so
+    // every stricmp, prefix and first-character test misses a quoted token:
+    // only a slot's type-gated leg consumes one, and a slot with no such leg
+    // (Number, Value, Distance, Hour, ...) reaches the numeric test, which
+    // the quote fails into the NULL return [orig: @0x4f2d01 -> @0x4f2a62].
+    // `bare` is that quote gate.
     // [orig: WacScript_ResolveParameter @0x4f2920]
     std::optional<uint32_t> try_resolve(const Arg &arg, ParamType type, int line) {
         const std::string &t = arg.text;
+        const bool bare = !arg.is_string;
 
-        // Declarations occupy the second half of the shared mission bank.
-        // ARRAY follows the same scalar address path in this retail compiler.
-        // [orig: Script_Compile @0x4F31F0; resolver @0x4F2940]
-        for (size_t i = 0; !arg.is_string && i < variables_.size(); ++i) {
+        // Table 0: the declared variables, the second half of the shared
+        // mission bank. ARRAY follows the same scalar address path in this
+        // retail compiler. [orig: Script_Compile @0x4F31F0; the resolver's
+        // first table @0x4f2970..0x4f2a3c]
+        for (size_t i = 0; bare && i < variables_.size(); ++i) {
             if (ieq(t, variables_[i].c_str()))
                 return encode_operand(OperandKind::MissionVar, uint32_t(i + 256));
         }
-        for (size_t i = 0; !arg.is_string && i < event_names_.size(); ++i) {
+        // Table 1: the event names. An IfName slot takes the index as a pool
+        // value [orig: @0x4f2a6c]; expectedType 27 is NULL [orig: @0x4f2a5e];
+        // every other slot reads the fired dword [orig: @0x4f2a8a]. A miss
+        // falls through to every leg below [orig: @0x4f29c2 -> loc_4F29C4],
+        // so an IfName token naming no event is whatever those make of it,
+        // and a bare name ends in the NULL return.
+        for (size_t i = 0; bare && i < event_names_.size(); ++i) {
             if (!event_names_[i].empty() && ieq(t, event_names_[i].c_str())) {
                 if (type == ParamType::IfName)
                     return encode_operand(OperandKind::Pool, push_pool(int32_t(i)));
-                // An event name is NULL for expectedType 27. [orig: @0x4f2a5e]
                 if (type == ParamType::Variable) return std::nullopt;
                 return encode_operand(OperandKind::EventFired, uint32_t(i));
             }
         }
-        if (type == ParamType::IfName) {
-            warn(line, "unknown event '" + t + "'");
-            return encode_operand(OperandKind::Pool, push_pool(-1));
-        }
-        // A quoted token matches no table or prefix, and expectedType 27 then
-        // resolves to NULL. [orig: @0x4f2b7e]
-        if (arg.is_string && type == ParamType::Variable) return std::nullopt;
-
-        // String / symbolic-asset params -> string pool, referenced as a pool value.
-        bool string_like = (arg.is_string && type != ParamType::Group && type != ParamType::Anim && type != ParamType::Ammo && type != ParamType::Fx && type != ParamType::SoundSet && type != ParamType::Face && type != ParamType::Ssn) || type == ParamType::Text ||
-                           type == ParamType::Filename ||
-                           type == ParamType::TextToken;
-        if (string_like) {
-            int si = intern_string(t);
-            return encode_operand(OperandKind::Pool, push_pool(si));
+        // Table 2: the named engine values (health/ticks/humans/...). Every
+        // row of the table @0x82EEF0 resolves to its mutable dword regardless
+        // of the expected type [orig: @0x4f2a92..0x4f2a9f], so each is an
+        // lvalue for expectedType 27 too; a write to a cached row lands on
+        // the cached word until the next bytecode execution refreshes it.
+        if (bare) {
+            const int named_value = builtin_id(t);
+            if (named_value >= 0)
+                return encode_operand(OperandKind::Builtin, static_cast<uint32_t>(named_value));
         }
 
-        // Variable lvalue/rvalue: V# mission, G# global, M# music.
-        if (!t.empty() && (t[0] == 'V' || t[0] == 'v') && all_digits(std::string_view(t).substr(1))) {
+        // M# music, V# mission, G# global: a letter then a digit, in retail's
+        // order [orig: @0x4f29f8 (M), @0x4f2aa7 (V), @0x4f2b0e (G)].
+        if (bare && !t.empty() && (t[0] == 'M' || t[0] == 'm') && t.size() > 1 &&
+            std::isdigit(static_cast<unsigned char>(t[1]))) {
+            int idx = std::atoi(t.c_str() + 1);
+            return encode_operand(OperandKind::MusicVar, idx);
+        }
+        if (bare && !t.empty() && (t[0] == 'V' || t[0] == 'v') && all_digits(std::string_view(t).substr(1))) {
             int idx = std::atoi(t.c_str() + 1);
             if (idx >= 256) { warn(line, "V# too big"); idx = 255; }
             return encode_operand(OperandKind::MissionVar, idx);
         }
-        if (!t.empty() && (t[0] == 'G' || t[0] == 'g') && t.size() > 1 &&
+        if (bare && !t.empty() && (t[0] == 'G' || t[0] == 'g') && t.size() > 1 &&
             std::isdigit(static_cast<unsigned char>(t[1]))) {
             int idx = std::atoi(t.c_str() + 1);
             if (idx >= world::ScriptVarStore::kGlobalVars) { warn(line, "G# too big"); idx = world::ScriptVarStore::kGlobalVars - 1; }
             return encode_operand(OperandKind::GlobalVar, idx);
         }
-        if (!t.empty() && (t[0] == 'M' || t[0] == 'm') && t.size() > 1 &&
-            std::isdigit(static_cast<unsigned char>(t[1]))) {
-            int idx = std::atoi(t.c_str() + 1);
-            return encode_operand(OperandKind::MusicVar, idx);
-        }
-        const int named_value = builtin_id(t);
-        if (type == ParamType::Variable) {
-            // Every row of the table @0x82EEF0 resolves to its mutable dword
-            // regardless of the expected type, so each is an lvalue; a write
-            // to a cached row lands on the cached word until the next bytecode
-            // execution refreshes it. [orig: WacScript_ResolveParameter
-            // @0x4f2a92..0x4f2a9f] Anything else is NULL for expectedType 27
-            // [orig: @0x4f2b7e], the compile error + scratch-sink pair.
-            if (named_value >= 0)
-                return encode_operand(OperandKind::Builtin, static_cast<uint32_t>(named_value));
-            return std::nullopt;
-        }
 
-        // Named engine values (health/ticks/humans/accuracyspread/...).
-        if (named_value >= 0) {
-            return encode_operand(OperandKind::Builtin,
-                                  static_cast<uint32_t>(named_value));
-        }
+        // Anything else is NULL for expectedType 27 [orig: @0x4f2b7e], the
+        // compile error + scratch-sink pair.
+        if (type == ParamType::Variable) return std::nullopt;
 
-        // Animation symbols resolve to the retail numeric state table, even
-        // when used as an ordinary value. They are not string-pool indices.
-        // [orig: WacScript_ResolveParameter @0x4F2920 -> AnimMap_FindSlotByName]
-        const bool anim_prefix = starts_with_ci(t, "ANIM_");
-        const bool numeric = !t.empty() &&
-                (std::isdigit(static_cast<unsigned char>(t[0])) ||
-                 t[0] == '-' || t[0] == '+' || t[0] == '.');
-        if (anim_prefix || (type == ParamType::Anim && !numeric)) {
-            const std::string name = anim_prefix ? t.substr(5) : t;
-            for (int state = 0; state < world::kInfantryAnimStateCount; ++state)
-                if (ieq(name, world::kInfantryAnimNames[state]))
-                    return encode_operand(OperandKind::Pool, push_pool(state));
-            prog_.diagnostics.push_back({line, 0, "unknown animation '" + t + "'", true});
-            return encode_operand(OperandKind::Pool, push_pool(-1));
-        }
+        // From here the legs run in retail's order, each taken by its prefix
+        // (never on a quoted token) or by the slot's expected type: G_/12
+        // @0x4f2b8d, FX_/22 @0x4f2bb4, FACE_/21 @0x4f2be7, SS_/19 @0x4f2c0e,
+        // TT_/20 @0x4f2c34, ANIM_/24 @0x4f2c6a, SSN_/11 @0x4f2c94, AMMO_/23
+        // @0x4f2cc5, the 17/18 string copy @0x4f2ce9, then the numeric test
+        // @0x4f2d01.
 
-        // [orig: WacScript_ResolveParameter @0x4F2920 -> AmmoDef_LookupByName]
-        // AMMO_ is a type prefix. The value is the ammo.def table index,
-        // including when stored in a variable before a later fire command.
-        // The null row (index zero) is not a successful name resolution.
-        const bool ammo_prefix = starts_with_ci(t, "AMMO_");
-        if (ammo_prefix || type == ParamType::Ammo) {
-            const std::string name = ammo_prefix ? t.substr(5) : t;
-            int index = env_.ammo ? env_.ammo->index_of(name.c_str()) : -1;
-            if (index <= 0 && env_.ammo)
-                index = env_.ammo->index_of(("ammo_" + name).c_str());
-            if (index <= 0) {
-                prog_.diagnostics.push_back({line, 0, "unknown AMMO '" + t + "'", true});
-                index = 0;
-            }
-            return encode_operand(OperandKind::Pool, push_pool(index));
+        // [orig: WacScript_ResolveParameter @0x4F2940] Named WAC groups
+        // never select entities by their BMS commandGroup field.
+        const bool group_prefix = bare && starts_with_ci(t, "G_");
+        if (group_prefix || type == ParamType::Group) {
+            const std::string_view name = group_prefix ? std::string_view(t).substr(2) : t;
+            int group = env_.registry ? env_.registry->script_group_index(name)
+                    : world::EntityRegistry::default_script_group_index(name);
+            if (group < 0) { warn(line, "unknown group '" + std::string(name) + "'"); group = 0; }
+            return encode_operand(OperandKind::Pool, push_pool(group));
         }
 
         // [orig: WacScript_ResolveParameter @0x4F2940 -> @0x5F7310]
         // FX literals, including numeric-looking names, bind at compile time.
         // Variable operands were resolved above and carry the actual handle.
-        const bool fx_prefix = starts_with_ci(t, "FX_");
+        const bool fx_prefix = bare && starts_with_ci(t, "FX_");
         if (fx_prefix || type == ParamType::Fx) {
             const std::string name = fx_prefix ? t.substr(3) : t;
             const particle::EffectHandle handle = env_.effects ? env_.effects->intern(name)
@@ -329,10 +316,22 @@ private:
             return encode_operand(OperandKind::Pool, push_pool(int32_t(handle.value)));
         }
 
+        // FACE literals bind to the nine expression rows. Variables above
+        // carry already-resolved values; numeric-looking literals still name
+        // expressions and report Unknown FACE.
+        // [orig: WacScript_ResolveParameter @0x4F2920 -> AnimState_FindByName @0x5800B0]
+        const bool face_prefix = bare && starts_with_ci(t, "FACE_");
+        if (face_prefix || type == ParamType::Face) {
+            const int index = world::facial_expression_index(face_prefix ? t.substr(5) : t);
+            if (index < 0)
+                prog_.diagnostics.push_back({line, 0, "unknown FACE '" + t + "'", true});
+            return encode_operand(OperandKind::Pool, push_pool(index));
+        }
+
         // [orig: WacScript_ResolveParameter @0x4F2940, expectedType 19]
         // SOUNDSET is an asset reference; variables carry the resolved handle,
         // and numeric literals name sets rather than bypassing resolution.
-        const bool sound_prefix = starts_with_ci(t, "SS_");
+        const bool sound_prefix = bare && starts_with_ci(t, "SS_");
         if (sound_prefix || type == ParamType::SoundSet) {
             const std::string name = sound_prefix ? t.substr(3) : t;
             int32_t handle = 0;
@@ -346,47 +345,72 @@ private:
             return encode_operand(OperandKind::Pool, push_pool(handle));
         }
 
-        // FACE literals bind to the nine expression rows. Variables above
-        // carry already-resolved values; numeric-looking literals still name
-        // expressions and report Unknown FACE.
-        // [orig: WacScript_ResolveParameter @0x4F2920 -> AnimState_FindByName @0x5800B0]
-        const bool face_prefix = starts_with_ci(t, "FACE_");
-        if (face_prefix || type == ParamType::Face) {
-            const int index = world::facial_expression_index(face_prefix ? t.substr(5) : t);
-            if (index < 0)
-                prog_.diagnostics.push_back({line, 0, "unknown FACE '" + t + "'", true});
-            return encode_operand(OperandKind::Pool, push_pool(index));
-        }
-
-        // Symbolic asset prefixes -> string pool.
-        if (starts_with_ci(t, "TT_")) {
+        // Text-tool tokens -> string pool. Retail stores the mission-text
+        // pointer the key resolves to [orig: @0x4f2f9e]; the port keeps the
+        // key and resolves the text at execution.
+        if ((bare && starts_with_ci(t, "TT_")) || type == ParamType::TextToken) {
             int si = intern_string(t);
             return encode_operand(OperandKind::Pool, push_pool(si));
         }
 
-        // [orig: WacScript_ResolveParameter @0x4F2940] Named WAC groups
-        // never select entities by their BMS commandGroup field.
-        if (starts_with_ci(t, "G_") || type == ParamType::Group) {
-            const std::string_view name = starts_with_ci(t, "G_") ? std::string_view(t).substr(2) : t;
-            int group = env_.registry ? env_.registry->script_group_index(name)
-                    : world::EntityRegistry::default_script_group_index(name);
-            if (group < 0) { warn(line, "unknown group '" + std::string(name) + "'"); group = 0; }
-            return encode_operand(OperandKind::Pool, push_pool(group));
+        // Animation symbols resolve to the retail numeric state table, even
+        // when used as an ordinary value. They are not string-pool indices.
+        // [orig: WacScript_ResolveParameter @0x4F2920 -> AnimMap_FindSlotByName]
+        const bool anim_prefix = bare && starts_with_ci(t, "ANIM_");
+        const bool numeric = bare && !t.empty() &&
+                (std::isdigit(static_cast<unsigned char>(t[0])) ||
+                 t[0] == '-' || t[0] == '+' || t[0] == '.');
+        if (anim_prefix || (type == ParamType::Anim && !numeric)) {
+            const std::string name = anim_prefix ? t.substr(5) : t;
+            for (int state = 0; state < world::kInfantryAnimStateCount; ++state)
+                if (ieq(name, world::kInfantryAnimNames[state]))
+                    return encode_operand(OperandKind::Pool, push_pool(state));
+            prog_.diagnostics.push_back({line, 0, "unknown animation '" + t + "'", true});
+            return encode_operand(OperandKind::Pool, push_pool(-1));
         }
 
         // Entity SSN constants bind once when the VM first receives its World;
         // subsequent reads and variable aliases carry the packed entity handle.
-        // The leg sits after the G_ / group test and before the numeric forms,
-        // as in retail [orig: @0x4f2c94..0x4f2ca4]; a quoted token reads 0.
-        const bool ssn_prefix = starts_with_ci(t, "SSN_");
+        // The leg sits after the ANIM test and before the AMMO one, as in
+        // retail [orig: @0x4f2c94..0x4f2ca4 precedes @0x4f2cc5]: an AMMO_
+        // token in an Ssn slot is atol'd (0) and looked up, and an SSN_ token
+        // in an Ammo slot is this leg's. A quoted token reads 0.
+        const bool ssn_prefix = bare && starts_with_ci(t, "SSN_");
         if (ssn_prefix || type == ParamType::Ssn) {
-            int32_t net = arg.is_string ? 0 : std::atoi(t.c_str() + (ssn_prefix ? 4 : 0));
+            int32_t net = bare ? std::atoi(t.c_str() + (ssn_prefix ? 4 : 0)) : 0;
             if (arg.negate) net = -net;
             return ssn_operand(net, line);
         }
 
+        // [orig: WacScript_ResolveParameter @0x4F2920 -> AmmoDef_LookupByName]
+        // AMMO_ is a type prefix. The value is the ammo.def table index,
+        // including when stored in a variable before a later fire command.
+        // The null row (index zero) is not a successful name resolution.
+        const bool ammo_prefix = bare && starts_with_ci(t, "AMMO_");
+        if (ammo_prefix || type == ParamType::Ammo) {
+            const std::string name = ammo_prefix ? t.substr(5) : t;
+            int index = env_.ammo ? env_.ammo->index_of(name.c_str()) : -1;
+            if (index <= 0 && env_.ammo)
+                index = env_.ammo->index_of(("ammo_" + name).c_str());
+            if (index <= 0) {
+                prog_.diagnostics.push_back({line, 0, "unknown AMMO '" + t + "'", true});
+                index = 0;
+            }
+            return encode_operand(OperandKind::Pool, push_pool(index));
+        }
+
+        // Text / Filename slots take the token, quoted or bare, as a
+        // string-pool operand [orig: @0x4f2ce9..0x4f2e1c, expectedType 17/18;
+        // the copy skips the opening quote @0x4f2db4]. No other slot does: a
+        // quoted token anywhere else reaches the numeric test below and is
+        // NULL there.
+        if (type == ParamType::Text || type == ParamType::Filename) {
+            int si = intern_string(t);
+            return encode_operand(OperandKind::Pool, push_pool(si));
+        }
+
         // HH:MM time literal.
-        if (t.find(':') != std::string::npos && std::isdigit(static_cast<unsigned char>(t[0]))) {
+        if (bare && t.find(':') != std::string::npos && std::isdigit(static_cast<unsigned char>(t[0]))) {
             int colon = static_cast<int>(t.find(':'));
             int h = std::atoi(t.substr(0, colon).c_str());
             int m = std::atoi(t.c_str() + colon + 1);
@@ -401,7 +425,7 @@ private:
         // Distance literals and M suffixes use Q16; F uses the retail 21501
         // factor. Named variables returned above already contain raw words
         // and are never rescaled at a distance-typed call site.
-        if (!t.empty() && (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '.' || t[0] == '-')) {
+        if (bare && !t.empty() && (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '.' || t[0] == '-')) {
             double d = std::atof(t.c_str());
             if (arg.negate) d = -d;
             const int suffix = std::toupper(static_cast<unsigned char>(t.back()));
@@ -417,8 +441,10 @@ private:
             return encode_operand(OperandKind::Pool, push_pool(value));
         }
 
-        // A token that matches no table, prefix or numeric form resolves to
-        // NULL [orig: @0x4f2a62], the compile error + scratch-sink pair.
+        // A token that matches no table, prefix or numeric form, a quoted
+        // token outside a Text/Filename slot among them, resolves to NULL
+        // [orig: @0x4f2d01 -> @0x4f2a62], the compile error + scratch-sink
+        // pair.
         return std::nullopt;
     }
 
