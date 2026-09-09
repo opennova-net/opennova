@@ -8160,14 +8160,22 @@ is dropped (D-WAC-4, §33.38): its row resolves to the Env dword @0x26C645C that
 [orig: Environment_ComputeTimeOfDayColors @0x57deae] rewrites on the next
 time-of-day computation, and the port derives the night phase from the clock on
 every read. neartype/neardist/nearid are not JO rows (Jointops.exe carries no
-such strings) and were removed. An unresolvable argument is a compile error
+such strings) and were removed. An unresolvable argument is a NON-FATAL compile diagnostic
 carrying the action signature from [orig: WacScript_FormatActionParameters
 @0x4EFC20] with the operand pointed at the scratch dword &dword_C6EAEC
 [orig: Script_Compile @0x4f3ab2..0x4f3ae2], zeroed at every bytecode entry
-[orig: WacScript_CacheLocalPlayerState @0x4f57b5]; the port models that dword as
-`Builtin::Scratch`. A named row in a Variable slot is always the row's own
-storage; a literal, quoted string, event name or unknown token there is the same
-compile error.
+[orig: WacScript_CacheLocalPlayerState @0x4f57b5]; retail records only the
+first error in byte_C6EB30 [orig: Script_SetCompileError @0x4EE7C0] (read by
+[orig: Debug_DrawScriptState @0x4f652a] and the console), and
+[orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute
+@0x4f976b)] ignores Script_Compile's return and executes the script anyway (the
+retail corpus ships `ASX_G13A.wac` with such a line). The port models the dword
+as `Builtin::Scratch` and emits the diagnostic as a warning. A named row in a
+Variable slot is always the row's own storage; a literal, quoted string, event
+name or unknown token there is the same diagnostic. A HARD compile error (an
+unknown command) still blocks the mission's script in the port
+(`wac_layered_load` kBlocked), which is stricter than retail's record-and-run
+(D-WAC-6, §33.38).
 
 [orig: WacCmd_Event @0x4ED1E0] reads the zero-based BMS event record's active
 byte at +20. An event in its activation delay already returns true; testing the
@@ -9366,6 +9374,7 @@ declined entry falls back to an OPEN class-D row.
 | D-WAC-3 | weaponfired/blockfire/record_fire_request refuse negative categories (return 0 / refuse / no stamp) | [orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire @0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge @0x4E0966)] bound only the high side and index before dword_C6EA44 / dword_C6EA6C for negatives (§33.17) | PERMANENT (class D, proposed PR #642) |
 | D-WAC-4 | `set(night, v)` (and add/sub/inc/dec/store on the `night` row) is dropped; the night phase is derived from the clock on every read (`WeatherState::is_night_phase`) | The `night` row @0x82EEF0 resolves to the Env dword @0x26C645C, which holds a script write until [orig: Environment_ComputeTimeOfDayColors @0x57deae] rewrites it on the next TOD computation; [orig: Environment_GetLightDirectionFloat @0x57d873] reads it meanwhile (§33.15) | OPEN (low: observable only as `set(night,1) set(v1,night)` -> 1 in retail vs the derived phase here until the light-direction getters consume a script-written word) |
 | D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends the values [orig: WacScript_ResolveParameter @0x4f2920] stores: [orig: CEffectWorld_InternEffectHandle @0x5F7310] (the site @0x4f3067) and [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (the site @0x4f2fe2); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: byte layout identical (u32), a retail joiner on an OpenNova host would resolve a different effect/sound for those five commands until retail's intern/set-id numbering is witnessed; the decoder bounds are class-D portable boundaries with no observable difference for any retail-emitted body) |
+| D-WAC-6 | A hard WAC compile error (unknown command) blocks the mission's script (`wac_layered_load` kBlocked) | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first error text in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4f652a] and executes the script (§33.15) | OPEN (low: only malformed authored scripts differ; the argument-signature diagnostic is already non-fatal) |
 | D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
 | D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
 | D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |
