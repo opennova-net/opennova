@@ -788,6 +788,28 @@ void ObjectModel::clear_ctrl_override(const String &p_owner, const String &p_nam
 	finish_ctrl_change(true);
 }
 
+void ObjectModel::clear_ctrl_overrides_owned(const String &p_owner) {
+	if (p_owner.is_empty()) {
+		return;
+	}
+	Vector<String> owned;
+	for (const KeyValue<String, String> &entry : ctrl_value_owners_) {
+		if (entry.value == p_owner) {
+			owned.push_back(entry.key);
+		}
+	}
+	for (const String &reg : owned) {
+		for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
+			linked->clear_ctrl_override(p_owner, reg);
+		}
+		ctrl_value_owners_.erase(reg);
+		ctrl_values_.erase(reg);
+	}
+	if (!owned.is_empty()) {
+		finish_ctrl_change(true);
+	}
+}
+
 Dictionary ObjectModel::get_ctrl_values() const {
 	return ctrl_values_.duplicate(true);
 }
@@ -1902,6 +1924,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_ctrl_override);
 	ClassDB::bind_method(D_METHOD("clear_ctrl_override", "owner", "name"),
 			&ObjectModel::clear_ctrl_override);
+	ClassDB::bind_method(D_METHOD("clear_ctrl_overrides_owned", "owner"),
+			&ObjectModel::clear_ctrl_overrides_owned);
 	ClassDB::bind_method(D_METHOD("get_ctrl_values"), &ObjectModel::get_ctrl_values);
 
 	ClassDB::bind_method(D_METHOD("set_skeletal_anim", "skeletal"),

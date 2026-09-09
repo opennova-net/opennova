@@ -115,12 +115,13 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_output_channels"),
 			&EntityPresenter::get_output_channels);
 	ClassDB::bind_method(
-			D_METHOD("present_snapshot", "snap", "stride", "layout_revision"),
-			&EntityPresenter::present_snapshot);
+			D_METHOD("present_snapshot", "snap", "stride", "layout_revision",
+					"door_phases"),
+			&EntityPresenter::present_snapshot, DEFVAL(PackedInt32Array()));
 	ClassDB::bind_method(
 			D_METHOD("profile_present_snapshot", "snap", "stride",
-					"layout_revision"),
-			&EntityPresenter::profile_present_snapshot);
+					"layout_revision", "door_phases"),
+			&EntityPresenter::profile_present_snapshot, DEFVAL(PackedInt32Array()));
 	ClassDB::bind_method(D_METHOD("get_stats_record"),
 			&EntityPresenter::get_stats_record);
 	// --- the wire walk ---
@@ -994,8 +995,9 @@ void EntityPresenter::release_part_anim_outputs() {
 		vehicle_motion_clear_typed(model);
 		zone_team_clear_typed(model);
 		world_heat_clear_typed(model);
-        for (const String &door : names().doors)
-            clear_owned_ctrl(model, names().owner_doors, door);
+		// The ordinal DOOR_xx bus has no fixed register set: release whatever
+		// this writer owns instead of probing all 30 names.
+		model->clear_ctrl_overrides_owned(names().owner_doors);
 		model->end_ctrl_update();
 	}
 }
@@ -1010,14 +1012,15 @@ const String &EntityPresenter::infantry_key(int state) {
 }
 
 void EntityPresenter::present_snapshot(const PackedFloat32Array &snap,
-		int stride, int64_t layout_revision) {
-	present_snapshot_impl(snap, stride, layout_revision, nullptr);
+		int stride, int64_t layout_revision, const PackedInt32Array &door_phases) {
+	present_snapshot_impl(snap, stride, layout_revision, door_phases, nullptr);
 }
 
 PackedInt64Array EntityPresenter::profile_present_snapshot(
-		const PackedFloat32Array &snap, int stride, int64_t layout_revision) {
+		const PackedFloat32Array &snap, int stride, int64_t layout_revision,
+		const PackedInt32Array &door_phases) {
 	MissionFrameProfile profile;
-	present_snapshot_impl(snap, stride, layout_revision, &profile);
+	present_snapshot_impl(snap, stride, layout_revision, door_phases, &profile);
 	PackedInt64Array result;
 	result.resize(MISSION_PROFILE_SLOT_COUNT);
 	result.set(MISSION_PROFILE_CORE_US, profile.core_us);
@@ -1032,12 +1035,19 @@ PackedInt64Array EntityPresenter::profile_present_snapshot(
 }
 
 void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
-		int stride, int64_t layout_revision, MissionFrameProfile *p_profile) {
+		int stride, int64_t layout_revision, const PackedInt32Array &door_phases,
+		MissionFrameProfile *p_profile) {
 	if (stride < Simulation::PF_STRIDE || index_.is_null()) {
 		return;
 	}
 	const float *p = snap.ptr();
 	const int64_t size = snap.size();
+	// The door side table's (row index, count, phases...) entries sit in row
+	// order, so one cursor advanced along the ascending row walk finds each
+	// door row's entry without a search.
+	const int32_t *door_table = door_phases.ptr();
+	const int64_t door_table_size = door_phases.size();
+	int64_t door_cursor = 0;
 	if (!row_plan_is_current(size, stride, layout_revision)) {
 		rebuild_row_plan(p, size, stride, layout_revision);
 	}
@@ -1323,24 +1333,46 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 				stat_posed_ += applied;
 				++stat_control_dispatches_;
 			}
-            if (door_work) {
-                const int previous_count = cold ? 30 :
-                        row.ctrl_publish_state[CTRL_PUBLISH_DOORS];
-                for (int i = 0; i < std::max(door_count, previous_count); ++i) {
-                    const String &name = names().doors[i];
-                    if (i < door_count) {
-                        const uint32_t low = static_cast<uint32_t>(
-                                field_i(p, base, Simulation::PF_DOOR_PHASES + 2 * i));
-                        const uint32_t high = static_cast<uint32_t>(
-                                field_i(p, base, Simulation::PF_DOOR_PHASES + 2 * i + 1));
-                        model->set_ctrl_override(names().owner_doors, name,
-                                static_cast<int32_t>((high << 16) | low));
-                    } else {
-                        model->clear_ctrl_override(names().owner_doors, name);
-                    }
-                    ++stat_control_dispatches_;
-                }
-            }
+			if (door_work) {
+				// Retail writes exactly num_doors slots of the ordinal bus and
+				// never clears [orig: build_bone_transforms @0x4E3070 loop
+				// @0x4e312a..0x4e3145; BoneCallback_AnimatedBones_World @0x4E3180
+				// loop @0x4e3201..0x4e3218]; releasing a shrunk row is the port's
+				// retained-override bookkeeping. A cold row cannot enumerate what
+				// it owned, so the owner-scoped release stands in for a
+				// 30-register probe; a warm row shrinks by its published count.
+				if (cold) {
+					model->clear_ctrl_overrides_owned(names().owner_doors);
+				}
+				const int previous_count = cold ? 0 :
+						row.ctrl_publish_state[CTRL_PUBLISH_DOORS];
+				const int32_t *phases = nullptr;
+				int available = 0;
+				if (door_count > 0) {
+					const int32_t row_index = static_cast<int32_t>(base / stride);
+					while (door_cursor + 2 <= door_table_size &&
+							door_table[door_cursor] < row_index) {
+						door_cursor += 2 + std::max<int64_t>(0, door_table[door_cursor + 1]);
+					}
+					if (door_cursor + 2 <= door_table_size &&
+							door_table[door_cursor] == row_index) {
+						available = static_cast<int>(std::clamp<int64_t>(
+								door_table[door_cursor + 1], 0,
+								std::min<int64_t>(30, door_table_size - door_cursor - 2)));
+						phases = door_table + door_cursor + 2;
+					}
+				}
+				for (int i = 0; i < std::max(door_count, previous_count); ++i) {
+					const String &name = names().doors[i];
+					if (i < door_count) {
+						model->set_ctrl_override(names().owner_doors, name,
+								i < available ? phases[i] : 0);
+					} else {
+						model->clear_ctrl_override(names().owner_doors, name);
+					}
+					++stat_control_dispatches_;
+				}
+			}
 			if (any_work) model->end_ctrl_update();
 			row.ctrl_publish_state = next_ctrl_publish_state;
 			row.ctrl_publish_state_valid = true;

@@ -427,6 +427,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_phase", "index", "channel"), &Simulation::get_entity_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_active", "index", "channel"), &Simulation::get_entity_part_anim_active);
 	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &Simulation::get_present_snapshot);
+	ClassDB::bind_method(D_METHOD("get_present_door_phases"),
+			&Simulation::get_present_door_phases);
 	ClassDB::bind_method(D_METHOD("get_present_layout_revision"),
 			&Simulation::get_present_layout_revision);
 	ClassDB::bind_method(D_METHOD("get_present_stride"), &Simulation::get_present_stride);
@@ -715,7 +717,6 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_FOCAL_SWAY_Y);
 	BIND_ENUM_CONSTANT(PF_FOCAL_SWAY_Z);
 	BIND_ENUM_CONSTANT(PF_DOOR_COUNT);
-    BIND_ENUM_CONSTANT(PF_DOOR_PHASES);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);

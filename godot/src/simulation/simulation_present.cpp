@@ -1184,16 +1184,18 @@ PackedFloat32Array Simulation::get_present_snapshot() const {
 	// Empty when no runtime is active (a bare sim) — scalar getters (get_entity_*) read the
 	// AI pool for tooling.
 	PackedFloat32Array out;
+	present_.door_phases_scratch.clear();
 	if (runtime_ && kernel_) {
 		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner()};
 		if (is_joiner()) {
-			opennova::inmatch::build_client_replica_present_rows(context, present_.rows_scratch);
+			opennova::inmatch::build_client_replica_present_rows(
+					context, present_.rows_scratch, present_.door_phases_scratch);
 			// Consume-once: each transition pulse dispatches exactly one presented
 			// frame (the rows copied any live pulse into PF_ANIM_STATE_PULSE).
 			runtime_->state().clear_anim_pulses();
 		} else {
-			opennova::inmatch::build_world_present_rows(
-					context, present_.pool_lifecycle, present_.rows_scratch);
+			opennova::inmatch::build_world_present_rows(context, present_.pool_lifecycle,
+					present_.rows_scratch, present_.door_phases_scratch);
 		}
 		out.resize(static_cast<int64_t>(present_.rows_scratch.size()));
 		if (!present_.rows_scratch.empty())
@@ -1219,6 +1221,15 @@ PackedFloat32Array Simulation::get_present_snapshot() const {
 	}
 	if (runtime_profiling_enabled_)
 		present_.last_snapshot_us = opennova::io::perf_now_us() - start_us;
+	return out;
+}
+
+PackedInt32Array Simulation::get_present_door_phases() const {
+	PackedInt32Array out;
+	const opennova::inmatch::DoorPhaseTable &table = present_.door_phases_scratch;
+	out.resize(static_cast<int64_t>(table.size()));
+	if (!table.empty())
+		std::memcpy(out.ptrw(), table.data(), table.size() * sizeof(int32_t));
 	return out;
 }
 

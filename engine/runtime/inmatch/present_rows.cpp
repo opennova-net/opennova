@@ -37,15 +37,17 @@ inline constexpr double kFixed16 = 65536.0;
 inline constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
 inline constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
 
-inline void write_present_doors(float *row, const World &world, const Entity &entity) {
-    int32_t phases[DoorSystem::kMaxDoors] = {};
-    const int count = world.doors.write_phases(entity, phases, DoorSystem::kMaxDoors);
-    row[PF_DOOR_COUNT] = static_cast<float>(count);
-    for (int i = 0; i < count; ++i) {
-        const uint32_t phase = static_cast<uint32_t>(phases[i]);
-        row[PF_DOOR_PHASES + 2 * i] = static_cast<float>(phase & 0xFFFFu);
-        row[PF_DOOR_PHASES + 2 * i + 1] = static_cast<float>(phase >> 16);
-    }
+// The row's door count plus, for a row that publishes any, one
+// (row index, count, phases...) entry on the side table.
+inline void write_present_doors(float *row, int row_index, const World &world,
+		const Entity &entity, DoorPhaseTable &door_phases) {
+	int32_t phases[DoorSystem::kMaxDoors] = {};
+	const int count = world.doors.write_phases(entity, phases, DoorSystem::kMaxDoors);
+	row[PF_DOOR_COUNT] = static_cast<float>(count);
+	if (count <= 0) return;
+	door_phases.push_back(row_index);
+	door_phases.push_back(count);
+	door_phases.insert(door_phases.end(), phases, phases + count);
 }
 
 inline void write_present_section_mask(float *row, uint32_t hidden_mask) {
@@ -230,7 +232,7 @@ double pool_present_yaw_deg(const Entity &e, const AiEntity *ae, EntityClass cls
 }
 
 void build_client_replica_present_rows(const PresentRowsContext &context,
-		std::vector<float> &out) {
+		std::vector<float> &out, DoorPhaseTable &door_phases) {
 	out.clear();
 	if (context.runtime == nullptr) return;
 	mission::MissionKernel &kernel = context.kernel;
@@ -244,6 +246,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 	const ClientReplicaPresentContext replica_present_context{
 			&kernel.seat_specs, &kernel.world.tables.weapons, joiner};
 	out.assign(static_cast<size_t>(count) * PF_STRIDE, 0.0f);
+	door_phases.clear();
 	float *w = out.data();
 	for (int i = 0; i < count; ++i) {
 		float *r = w + static_cast<size_t>(i) * PF_STRIDE;
@@ -308,7 +311,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			// host/SP must prefer the source byte used by retail's gate.
 			r[PF_STANCE_BITS] = static_cast<float>(ent->net_stance_bits & 0x03u);
 			write_present_section_mask(r, ent->section_mask);
-            write_present_doors(r, kernel.world, *ent);
+			write_present_doors(r, i, kernel.world, *ent, door_phases);
 			r[PF_RIGHT_HAND_COLLAPSED] =
 					simassets::mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
 			// The cveh render callback publishes directly from the live entity
@@ -495,7 +498,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 }
 
 void build_world_present_rows(const PresentRowsContext &context,
-		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out) {
+		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out,
+		DoorPhaseTable &door_phases) {
 	out.clear();
 	mission::MissionKernel &kernel = context.kernel;
 	const World &w = kernel.world;
@@ -510,10 +514,12 @@ void build_world_present_rows(const PresentRowsContext &context,
 	int count = 0;
 	w.registry.for_each([&](const Entity &) { ++count; });
 	out.assign(static_cast<size_t>(count) * PF_STRIDE, 0.0f);
+	door_phases.clear();
 	float *rows = out.data();
 	int i = 0;
 	w.registry.for_each([&](const Entity &e) {
-		float *r = rows + static_cast<size_t>(i++) * PF_STRIDE;
+		const int row_index = i++;
+		float *r = rows + static_cast<size_t>(row_index) * PF_STRIDE;
 		const EntityHandle h = e.handle;
 		const EntityClass cls = replication::entity_class_of(e);
 		const AiEntity *ae = w.ai.for_handle(h);
@@ -572,7 +578,7 @@ void build_world_present_rows(const PresentRowsContext &context,
 		// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
 		r[PF_STANCE_BITS] = static_cast<float>(e.net_stance_bits & 0x03u);
 		write_present_section_mask(r, e.section_mask);
-        write_present_doors(r, w, e);
+		write_present_doors(r, row_index, w, e, door_phases);
 		r[PF_RIGHT_HAND_COLLAPSED] =
 				simassets::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
 		// The cveh render callback publishes directly from the live entity

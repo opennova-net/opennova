@@ -866,6 +866,10 @@ public:
 	void clear_ctrl_value(const String &p_name);
 	void set_ctrl_override(const String &p_owner, const String &p_name, int64_t p_value);
 	void clear_ctrl_override(const String &p_owner, const String &p_name);
+	// Release every register `p_owner` holds here (and on the linked parts that
+	// share them): the cold/teardown release of a writer whose register set is
+	// not enumerable up front (the ordinal DOOR_xx bus), at O(owned) cost.
+	void clear_ctrl_overrides_owned(const String &p_owner);
 	Dictionary get_ctrl_values() const;
 
 	// --- main-body skeletal + part channels ---
