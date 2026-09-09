@@ -32,6 +32,7 @@ void SoundBank::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_bank", "lwf"), &SoundBank::add_bank);
 	ClassDB::bind_method(D_METHOD("has_set", "name"), &SoundBank::has_set);
 	ClassDB::bind_method(D_METHOD("get_set_names"), &SoundBank::get_set_names);
+	ClassDB::bind_method(D_METHOD("reset_oneshots", "parent"), &SoundBank::reset_oneshots);
 	ClassDB::bind_method(D_METHOD("describe_ambient", "name"), &SoundBank::describe_ambient);
 	ClassDB::bind_method(D_METHOD("resolve_ambient_stream", "layer"), &SoundBank::resolve_ambient_stream);
 	ClassDB::bind_static_method("SoundBank",
@@ -278,7 +279,12 @@ void SoundBank::reset_oneshots(Node3D *p_parent) {
         return true;
     }), oneshots_.end());
     exclusive_.clear();
-    selector_.reset();
+    // The per-layer selection state (playlist record cursor +2, anchor +12,
+    // cycle bit 0x100) survives a round restart: Game_RestartRoundSP @0x5263A0
+    // re-enters Game_StartMission, whose bank loop (SoundBank_LoadIfExists
+    // @0x52544A) returns early on an already loaded slot
+    // [orig: SoundBank_OpenFile @0x75CAA5]; only Game_TeardownMission @0x522600
+    // -> sub_527890 frees the banks. The selector therefore keeps its cursors.
 }
 
 bool SoundBank::_play_oneshot_plan(Node3D *p_parent, const Vector3 &p_world_pos,

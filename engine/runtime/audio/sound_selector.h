@@ -51,8 +51,11 @@ public:
     // engine's "no selection flags -> random" default [orig: @ 0x75cdfc].
     int select(uint64_t key, int member_count, int mode);
 
-    // Drop all per-key state (sequence cursors + cycle anchors). The RNG stream is left running;
-    // the engine never reseeds it across bank reloads.
+    // Drop all per-key state (sequence cursors + cycle anchors). This is the bank REPLACEMENT
+    // reset (a resource-root swap reloads every bank into fresh playlist records), never a
+    // round-restart hook: retail keeps its loaded banks and their per-layer words across
+    // Game_RestartRoundSP @0x5263A0 (SoundBank_OpenFile @0x75CAA5 returns early on a loaded
+    // slot). The RNG stream is left running; the engine never reseeds it across bank reloads.
     void reset();
 
     // Compose the per-layer key the embedder addresses state by. Distinct (bank,set,layer) triples map
