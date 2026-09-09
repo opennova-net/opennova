@@ -18,6 +18,7 @@
 #include <godot_cpp/classes/audio_stream.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/memory.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
@@ -48,6 +49,7 @@ void MusicDirector::_bind_methods() {
 	// Methods
 	ClassDB::bind_method(D_METHOD("start"), &MusicDirector::start);
 	ClassDB::bind_method(D_METHOD("stop"), &MusicDirector::stop);
+	ClassDB::bind_method(D_METHOD("has_pending_playback"), &MusicDirector::has_pending_playback);
 	ClassDB::bind_method(D_METHOD("pause"), &MusicDirector::pause);
 	ClassDB::bind_method(D_METHOD("resume"), &MusicDirector::resume);
 	ClassDB::bind_method(D_METHOD("jump_to_section", "section_name"), &MusicDirector::jump_to_section);
@@ -158,6 +160,11 @@ void MusicDirector::_ready() {
 }
 
 void MusicDirector::_process(double p_delta) {
+	for (int i = _playbacks.size() - 1; i >= 0; --i) {
+		if (ObjectDB::get_instance(_playbacks[i]) == nullptr) {
+			_playbacks.remove_at(i);
+		}
+	}
 	if (!_vm_running || _vm == nullptr) {
 		return;
 	}
@@ -185,6 +192,7 @@ void MusicDirector::_process(double p_delta) {
 }
 
 void MusicDirector::_exit_tree() {
+	stop();
 	// AudioStreamPlayer children are owned by the Node tree and freed
 	// automatically; just drop our pointers so the next _ready can rebuild.
 	_players.clear();
@@ -237,6 +245,15 @@ void MusicDirector::stop() {
 		}
 	}
 	_active_play = nullptr;
+}
+
+bool MusicDirector::has_pending_playback() const {
+	for (int i = 0; i < _playbacks.size(); ++i) {
+		if (ObjectDB::get_instance(_playbacks[i]) != nullptr) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void MusicDirector::pause() {
@@ -304,6 +321,10 @@ void MusicDirector::_on_play_sound(void *user, uint32_t sbf_entry_index, int wai
 			if (p != nullptr) {
 				p->set_stream(stream);
 				p->play();
+				Ref<AudioStreamPlayback> playback = p->get_stream_playback();
+				if (playback.is_valid()) {
+					self->_playbacks.push_back(ObjectID(playback->get_instance_id()));
+				}
 				// Gate the VM on this track finishing (see _process). The original
 				// streams exactly one music context at a time (audio_stream_update),
 				// so the most-recently started player is THE active track.

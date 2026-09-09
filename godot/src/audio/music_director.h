@@ -11,6 +11,7 @@
 #include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
+#include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -75,6 +76,9 @@ public:
 	// Methods
 	void start();
 	void stop();
+	// stop() requests the mixer's fade-out. This stays true until all started
+	// playbacks (including retired pool entries) have actually been released.
+	bool has_pending_playback() const;
 	void pause();
 	void resume();
 	void jump_to_section(const StringName &p_section_name);
@@ -107,6 +111,8 @@ private:
 
 	opennova::mus::MusVM *_vm = nullptr;
 	Vector<AudioStreamPlayer *> _players;
+	// IDs observe AudioServer ownership without keeping a stopped stream alive.
+	Vector<ObjectID> _playbacks;
 	int _next_player = 0;
 	bool _vm_running = false;
 	// The player streaming the track the VM's last `play` started. The VM is only

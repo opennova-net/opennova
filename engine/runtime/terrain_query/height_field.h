@@ -35,6 +35,11 @@ struct TerrainHeightField {
 	// Sits here, next to `dim`, so it lands in that member's tail padding: this is a
 	// by-value POD copied into deep stack frames and it must not grow.
 	CoordsQuadrantLocks locks{};
+	// Global .trn wrap flags for the fixed-point gradient query. Together with
+	// the two lock bytes these still occupy the original four padding bytes.
+	// [orig: PolyTrn_LoadTerrainConfig @0x60E4B1..0x60E4CB]
+	bool wrap_x = false;
+	bool wrap_z = false;
 	SectorLayout layout;     // world->source sector remap (the *_world variants)
 	int32_t water_y = 0;     // [orig: worldY @0x26C6454] water plane, 16.16 fixed
 	bool has_water = false;
@@ -53,7 +58,7 @@ struct TerrainSurfaceNormal {
 };
 
 namespace detail {
-// The same layout minus the locks. They are free only if they fit its padding.
+// The original layout without the sampling policy. Its four bytes must fit the padding.
 struct TerrainHeightFieldNoLocks {
 	const uint16_t *heightmap;
 	int dim;
@@ -64,7 +69,7 @@ struct TerrainHeightFieldNoLocks {
 } // namespace detail
 
 static_assert(sizeof(TerrainHeightField) == sizeof(detail::TerrainHeightFieldNoLocks),
-              "TerrainHeightField grew: the packed locks no longer fit its padding. This is a "
+              "TerrainHeightField grew: the sampling policy no longer fits its padding. This is a "
               "by-value POD copied into deep stack frames — a 32-byte lock array here overflowed "
               "tests/world/infantry_test's stack.");
 
@@ -97,5 +102,19 @@ TerrainSurfaceNormal height_field_normal_from_raw16(
 // normal at the entity grid cell; Terrain_GenerateNormalMap @0x603210]
 TerrainSurfaceNormal height_field_surface_normal_world(
 		const TerrainHeightField &f, float world_x, float world_z);
+
+// Raw plus-minus neighbour differences; dx follows atlas X and dy follows
+// atlas Y (opposite mission Y). No height-unit conversion or normalization.
+struct TerrainHeightGradient {
+	int32_t dx = 0;
+	int32_t dy = 0;
+};
+
+// Fixed-point mission X/Y, with retail's NEG/SAR, global wrap/clamp and
+// quadrant-local tap locks. Empty terrain/cells return zero differences, as
+// the two motor callers initialize the retail out-parameters to zero.
+// [orig: Terrain_GetHeightGradient @0x606330]
+TerrainHeightGradient height_field_gradient_fixed(
+		const TerrainHeightField &f, int32_t mission_x, int32_t mission_y);
 
 } // namespace opennova::terrain

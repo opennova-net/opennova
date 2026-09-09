@@ -209,7 +209,7 @@ function Invoke-GodotExport {
         $proc = Start-Process `
             -FilePath $GODOT_EXE `
             -ArgumentList $arguments `
-            -NoNewWindow `
+            -WindowStyle Hidden `
             -Wait `
             -PassThru `
             -RedirectStandardOutput $stdoutLog `
@@ -258,15 +258,23 @@ function Test-GodotAppBoot {
 
     $stdoutLog = [System.IO.Path]::GetTempFileName()
     $stderrLog = [System.IO.Path]::GetTempFileName()
+    $smokeTempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+    $bootProfile = Join-Path $smokeTempRoot ("opennova-package-smoke-" + [Guid]::NewGuid().ToString("N"))
+    $previousAppData = [Environment]::GetEnvironmentVariable("APPDATA", "Process")
     try {
+        # This startup smoke must not discover the packager's saved retail mount,
+        # credentials, or editor state. Music with retail data is validated through
+        # the runtime's orderly quit; --quit-after bypasses its playback drain.
+        New-Item -ItemType Directory -Path $bootProfile | Out-Null
+        [Environment]::SetEnvironmentVariable("APPDATA", $bootProfile, "Process")
         # Headless uses Godot's Dummy renderer, so a render loop cannot validate
         # GPU work here. Disable it to keep --quit-after from racing render-server
         # teardown while this smoke still loads the product scene, scripts,
         # shaders, and GDExtension.
         $proc = Start-Process `
             -FilePath $ExePath `
-            -ArgumentList "--headless --disable-render-loop --quit-after 120 --verbose" `
-            -NoNewWindow `
+            -ArgumentList "--headless --disable-render-loop --disable-crash-handler --quit-after 120 --verbose" `
+            -WindowStyle Hidden `
             -Wait `
             -PassThru `
             -RedirectStandardOutput $stdoutLog `
@@ -284,7 +292,17 @@ function Test-GodotAppBoot {
         }
     }
     finally {
-        Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+        [Environment]::SetEnvironmentVariable("APPDATA", $previousAppData, "Process")
+        Remove-Item -LiteralPath $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $bootProfile) {
+            $resolvedProfile = (Resolve-Path -LiteralPath $bootProfile).Path
+            $tempPrefix = $smokeTempRoot.TrimEnd('\') + '\'
+            if (-not $resolvedProfile.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+                ((Get-Item -LiteralPath $bootProfile).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Refusing to remove unexpected smoke profile path: $resolvedProfile"
+            }
+            Remove-Item -LiteralPath $resolvedProfile -Recurse -Force
+        }
     }
 }
 
@@ -353,7 +371,7 @@ function Invoke-PackGame {
         $proc = Start-Process `
             -FilePath $MODTOOLS_EXE `
             -ArgumentList "--headless -- --pack-game `"$AssetsDir`" `"$GameDir`"" `
-            -NoNewWindow `
+            -WindowStyle Hidden `
             -Wait `
             -PassThru `
             -RedirectStandardOutput $stdoutLog `

@@ -62,6 +62,43 @@ content rate in real time. The decoded PCM itself is pinned byte-exact by the `s
 golden tests; the prior reimpl 1:1 frame mapping played SBF content at half speed on the 44100 Hz
 mix rate.
 
+## Godot playback shutdown (implementation validation, 2026-09-09)
+
+Stopping the MUS VM does not synchronously destroy its Godot playback.
+Godot 4.6.1 marks a stopped stream for a mixer fade-out, then releases
+the retired playback on a subsequent main-thread cleanup pass
+([AudioServer source](https://github.com/godotengine/godot/blob/4.6.1-stable/servers/audio/audio_server.cpp)).
+Its forced shutdown unregisters scene extension classes before final audio
+server cleanup
+([Main::cleanup source](https://github.com/godotengine/godot/blob/4.6.1-stable/main/main.cpp)).
+The retail menu reproduction hit a freed virtual-call target during that
+sequence. Loading either bank or script alone exited cleanly; stopping
+and allowing the mixer to drain removed the crash.
+
+MusicDirector now observes every started playback by ObjectID, including
+retired pool entries, without keeping them alive. Tree exit stops the VM.
+MainGame begins shutdown by closing MusicService's context and keeps the
+frame pump alive until has_pending_playback() is false before quitting.
+There is no fixed sleep. The synthetic music tests cover tree exit and
+actual playback/bank release; the tree-exit regression failed against the
+previous DLL. Three full application runs with live retail menu music
+then quit through MainGame.request_quit() with exit 0 and no leaked-object
+reports (npc-orderly-retail-quit-0/1/2.log). The exported release also
+passes two real WM_CLOSE runs over the retail mount using owned hidden
+windows and the Dummy audio driver, with exit 0 and no leaked objects
+(npc-release-window-close-0/1.log).
+
+The menu driver/input dispatch also held a RefCounted ownership cycle.
+The dispatch now keeps a WeakRef to its owner, with a regression proving
+the attached driver, input helper and document are released.
+
+D-MUS-EXIT remains OPEN: a forced SceneTree quit (including --quit-after)
+bypasses the orderly runtime drain and can still crash with live streaming
+extension objects. Package startup smokes use fresh temporary Windows
+user data so saved retail mounts cannot alter their input; retail music
+shutdown is separate validation. Normal SP playthrough acceptance is
+still outstanding.
+
 ## Music state variable selection — the shell sets the section discriminator (grilled 2026-06-15; re-verified 2026-07-11)
 
 The MUS scripts are var-driven state machines: a "discriminator" global selects which

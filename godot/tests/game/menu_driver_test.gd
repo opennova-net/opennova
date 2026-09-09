@@ -191,6 +191,18 @@ func _key(keycode: Key, unicode := 0, pressed := true, echo := false) -> InputEv
 # --- (a) action dispatch --------------------------------------------------------
 
 
+func test_attached_driver_releases_its_input_and_document() -> void:
+	var driver := _framed_driver(ACTIONS_XML)
+	var driver_ref: WeakRef = weakref(driver)
+	var input_ref: WeakRef = weakref(driver.input)
+	var document_ref: WeakRef = weakref(driver.document())
+	driver.get_frame().configure(null, "", null, null, {})
+	driver = null
+	assert_null(driver_ref.get_ref(), "the dispatcher does not own its driver")
+	assert_null(input_ref.get_ref(), "the frame signal does not retain the dispatcher")
+	assert_null(document_ref.get_ref(), "closing the driver releases its document")
+
+
 func test_screen_action_same_file_navigates_and_pushes_stack() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
 	# Empty file = same file.

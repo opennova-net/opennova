@@ -393,17 +393,8 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command) 
 			if (carrier)
 				seat_world_position(world, *carrier, carrier->seats[best.seat_index], goal);
 		}
-		// The latch is armed by the terrain-gradient shove, not a stalled walk.
-        // [orig: the remaining gradient producer @0x4BA94E]
-		// Recover the exact integer neighbour differences from the shared normal
-		// kernel. [orig: Terrain_GetHeightGradient @0x606330; @0x4BA85B]
-		if (world.tables.terrain && ((self->flags | self->engine_flags) & 0x90A000u) == 0) {
-			const auto n = terrain::height_field_surface_normal_world(
-					*world.tables.terrain, e.pos[0] / 65536.0f, -e.pos[1] / 65536.0f);
-			const double gx = std::round(-256.0 * n.x / n.up), gy = std::round(-256.0 * n.z / n.up);
-			if (std::trunc(std::hypot(gx, gy)) >= 768)
-				inf.path_state = 1;
-		}
+		// The motor produces the gradient latch before think. Boarding only reads
+		// it to choose its arrival radius. [orig: @0x4BB325..0x4BB34A]
 		if (inf.path_state == 0)
 			radius = 0x20000;
 	} else if (entry_type) {

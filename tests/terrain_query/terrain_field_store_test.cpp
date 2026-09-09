@@ -106,6 +106,8 @@ int main() {
 	// --- the format-typed build over parsed documents ------------------------
 	CptFile cpt = make_cpt();
 	TrnConfig trn = make_trn();
+	trn.wrap_x = 7; // any nonzero source value enables wrapping
+	trn.wrap_y = 0;
 	// 4x4 charmap raster with distinct surface classes per texel.
 	std::vector<uint8_t> charmap(16);
 	for (int i = 0; i < 16; ++i) charmap[i] = static_cast<uint8_t>(i + 2);
@@ -115,9 +117,12 @@ int main() {
 	check(store.valid(), "store builds valid from synthetic cpt/trn");
 
 	check_extent_queries(store.height_field());
+	check(store.height_field().wrap_x && !store.height_field().wrap_z,
+			"owning field copies the TRN wrap flags");
 	const terrain::TerrainHeightField borrowed = terrain::height_field_from(cpt, trn);
 	check(borrowed.heightmap == cpt.depth_buffer.data(), "non-owning field borrows the CPT");
 	check_extent_queries(borrowed);
+	check(borrowed.wrap_x && !borrowed.wrap_z, "borrowed field copies the TRN wrap flags");
 	const terrain::TerrainHeightField &field = store.height_field();
 	check(field.dim == kDim, "dim = sqrt(depth-buffer sample count)");
 	check(field.layout.origin_x == -4 && field.layout.origin_y == -4,
@@ -158,6 +163,8 @@ int main() {
 	charmap.assign(charmap.size(), 0);
 	charmap.clear();
 	check_extent_queries(store.height_field());
+	check(store.height_field().wrap_x && !store.height_field().wrap_z,
+			"owning field copies the TRN wrap flags");
 	check_close(terrain::height_field_height_world_bilinear(store.height_field(), 3.0f, 2.0f),
 			19.0, 1e-4, "height sample survives the source documents being freed");
 	check(terrain::surface_type_at_fixed(store.surface_map(), 300 << 16, -(200 << 16)) == 3,
@@ -170,7 +177,7 @@ int main() {
 		terrain::CoordsQuadrantLocks locks{};
 		locks.set(0, true, true);
 		terrain::TerrainFieldStore bare;
-		bare.build(hm.data(), hm.size(), grid.data(), 0, 0, 6, 5, locks);
+		bare.build(hm.data(), hm.size(), grid.data(), 0, 0, 6, 5, true, false, locks);
 		check(bare.valid(), "format-free build over raw buffers");
 		check(bare.height_field().locks.locked_x(0) && bare.height_field().locks.locked_z(0),
 				"raw locks pass through");
@@ -187,13 +194,17 @@ int main() {
 				"set_water_plane feeds the clamp plane");
 		bare.set_water_plane(0);
 		check(!bare.height_field().has_water, "a zero plane is no authored water");
-		bare.build(hm.data(), hm.size(), grid.data(), 0, 0, 2, 3, locks);
+		bare.build(hm.data(), hm.size(), grid.data(), 0, 0, 2, 3, false, true, locks);
 		check(terrain::coords_sector_id_at_cell(bare.height_field().layout, 2, 1) == 1,
 				"rebuild accepts the new last cell");
 		check(terrain::coords_sector_id_at_cell(bare.height_field().layout, 3, 1) == 0 &&
 				terrain::coords_sector_id_at_cell(bare.height_field().layout, 2, 2) == 0,
 				"rebuild replaces both previous extents");
+		check(!bare.height_field().wrap_x && bare.height_field().wrap_z,
+				"raw rebuild replaces wrap flags");
 		bare.clear();
+		check(!bare.height_field().wrap_x && !bare.height_field().wrap_z,
+				"clear resets wrap flags");
 		check(bare.height_field().layout.sector_count == 0 &&
 				bare.height_field().layout.sector_rows == 0, "clear resets the extent");
 		check(!bare.valid(), "clear() invalidates the store");
@@ -206,7 +217,10 @@ int main() {
 		auto next_field = terrain::height_field_from(next_cpt, next_trn);
 		next_trn.sector_count = 2;
 		next_trn.sector_rows = 3;
+		next_trn.wrap_x = 0;
+		next_trn.wrap_y = -2;
 		terrain::height_field_apply_trn(next_field, next_trn);
+		check(!next_field.wrap_x && next_field.wrap_z, "TRN reload replaces wrap flags");
 		check(terrain::coords_sector_id_at_cell(next_field.layout, 2, 1) == 1 &&
 				terrain::coords_sector_id_at_cell(next_field.layout, 3, 1) == 0 &&
 				terrain::coords_sector_id_at_cell(next_field.layout, 2, 2) == 0,

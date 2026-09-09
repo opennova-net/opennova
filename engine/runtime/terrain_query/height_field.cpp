@@ -1,4 +1,5 @@
 #include <runtime/terrain_query/height_field.h>
+#include <base/io/bam.h>
 
 #include <cstddef>
 #include <cmath>
@@ -120,6 +121,40 @@ TerrainSurfaceNormal height_field_surface_normal_world(
 			raw_at(taps.x(cell_x + 1), taps.z(cell_z)),
 			raw_at(taps.x(cell_x), taps.z(cell_z - 1)),
 			raw_at(taps.x(cell_x), taps.z(cell_z + 1)));
+}
+
+
+TerrainHeightGradient height_field_gradient_fixed(
+		const TerrainHeightField &f, int32_t mission_x, int32_t mission_y) {
+	if (!f.valid() || !f.layout.sector_grid) return {};
+	// Retail NEG/SAR before sector lookup, including negative fractions and
+	// INT32_MIN. A non-wrapping axis clamps to the padded 16-cell grid edges,
+	// NOT the authored sector_count/rows. [orig: Terrain_GetHeightGradient
+	// @0x606330..0x606385; mask producer PolyTrn_LoadTerrainConfig @0x60E4B1]
+	const int32_t atlas_y = io::bam_sub(0, mission_y);
+	const int32_t grid_x = io::bam_sub(io::bam_sar(mission_x, 25), f.layout.origin_x);
+	const int32_t grid_y = io::bam_sub(io::bam_sar(atlas_y, 25), f.layout.origin_y);
+	const auto grid_cell = [](int32_t cell, bool wrap) {
+		if (!wrap && (cell & ~15) != 0) return cell < 0 ? 0 : 15;
+		return cell & 15;
+	};
+	const int child = io::bam_sub(f.layout.sector_grid[
+			16 * grid_cell(grid_y, f.wrap_z) + grid_cell(grid_x, f.wrap_x)], 1);
+	if (child < 0) return {};
+	const int quadrant_x = (child & 2) != 0 ? 512 : 0;
+	const int quadrant_y = (child & 1) != 0 ? 512 : 0;
+	const int x = (io::bam_sar(mission_x, 16) & 511) + quadrant_x;
+	const int y = (io::bam_sar(atlas_y, 16) & 511) + quadrant_y;
+	const CoordsTaps taps = coords_taps_for_quadrant(
+			f.locks, quadrant_x, quadrant_y, f.dim);
+	const auto raw_at = [&](int tx, int ty) {
+		return static_cast<int32_t>(f.heightmap[
+				static_cast<std::size_t>(taps.z(ty)) * f.dim + taps.x(tx)]);
+	};
+	// Unsigned raw16 neighbours, plus-minus, without /256 or /2. The motor
+	// applies its own fixed-point gain. [orig: @0x60648F..0x60650C]
+	return {raw_at(x + 1, y) - raw_at(x - 1, y),
+	        raw_at(x, y + 1) - raw_at(x, y - 1)};
 }
 
 } // namespace opennova::terrain

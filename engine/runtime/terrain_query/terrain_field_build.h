@@ -25,7 +25,7 @@ namespace opennova::terrain {
 CoordsQuadrantLocks coords_locks_from(const TrnConfig &trn);
 
 // Everything a TerrainHeightField takes from the TRN: sector origins, extent and
-// the neighbour-tap locks. The heightmap and sector-grid POINTERS stay the
+// the global wrap flags and neighbour-tap locks. The heightmap and sector-grid POINTERS stay the
 // caller's, but the derived members live here so a second field builder cannot
 // silently miss one — which is exactly how the sim's grounding field kept the
 // pre-lock full-atlas wrap, and the player kept falling through ground the

@@ -74,7 +74,7 @@ int EntityCommands::rain_effect(int32_t effect, const std::string &name, uint32_
     event.position[0] = io::bam_add(event.position[0], int32_t(int16_t(random >> 16)) * 6);
     event.position[1] = io::bam_add(event.position[1], int32_t(int16_t(random)) * 6);
     event.position[2] = io::bam_add(event.position[2], 8 * 65536);
-    event.direction = {0, 0, -32768};
+    event.direction = {0, 0, -io::kFp16OneInt / 2};
     event.store_slot = false;
     emit(world_, std::move(event));
     return 0;

@@ -9,7 +9,12 @@ extends RefCounted
 
 const DOUBLE_CLICK_MS := 400
 
-var _driver: MenuDriver
+## The driver owns this dispatcher; the reverse link must not keep its menu,
+## document and native resources alive through process teardown.
+var _driver_ref: WeakRef
+var _driver: MenuDriver:
+	get:
+		return _driver_ref.get_ref() as MenuDriver if _driver_ref != null else null
 var _focus_id := -1        # keyboard/edit focus [orig: g_ui_focus_wnd @ 0x31C16D4]
 var _open_combo_id := -1   # single open dropdown [orig: g_ui_active_combo_wnd @ 0x31C16D0]
 var _last_claim := -1
@@ -21,14 +26,14 @@ var _last_click_ms := 0
 
 var _frame: MenuFrame:
 	get:
-		return _driver.get_frame()
+		return _driver.get_frame() if _driver != null else null
 var _doc: MnuDocument:
 	get:
-		return _driver.document()
+		return _driver.document() if _driver != null else null
 
 
 func setup(driver: MenuDriver) -> void:
-	_driver = driver
+	_driver_ref = weakref(driver)
 
 
 ## A new document: no focus, no open popup, no claim.
@@ -152,6 +157,8 @@ func _apply_cursor(texture: Texture2D) -> void:
 
 
 func on_frame_widget_clicked(index: int) -> void:
+	if _driver == null:
+		return
 	var id := _driver.id_at_index(index)
 	if id < 0 or _frame.is_widget_disabled(index):
 		return
