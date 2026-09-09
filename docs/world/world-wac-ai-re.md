@@ -339,7 +339,8 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     the winner publishes all four Sees relations. Tracking drives independent
     yaw/pitch and available idle/guard look animations. `PlayerSlot_SetTimeout`
     5/6/7 and `byte_813DE0` are automatic GRM facial-expression writes, not voice
-    cues; their facial consumer remains D-INF-5.
+    cues; their facial consumer is the §33.30 facial state machine (D-INF-5 closed
+    2026-09-09).
 14. **Recoil/flinch decay** (dump 4430–4462, combat pass): entity[224]/[225] impulses decay by
     sixteenth-steps (floor 768→0) feeding pitch entity[5] and a PRNG-signed heading jitter
     entity[4]; entity[44]/[219] decay. Torso roll entity[183] (`@0x4b5cff-0x4b5d6d`,
@@ -415,7 +416,6 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     prior closed form for every entry — pinned in `infantry` ctest with landmark
     values 0 / 4194304 / 0 / −4194304; any residual x87-extended vs SSE2-double
     low-bit difference is the D-3DI-1 substrate class).
-  - **D-INF-5** automatic GRM facial expressions from body state/idle attention (§4.13); look/spotting and independent gaze are implemented in §33.27.
   - **D-INF-6** infantry/player grounding settles `pos[2]` (the model origin) to **`ground +
     capsule_bottom`**, so the entity's collision-capsule bottom (the origin→feet offset) rests on
     the terrain and a waist-origin model's feet land exactly on the ground. WITNESSED end-to-end
@@ -2853,7 +2853,8 @@ PORT (same day): the infantry pass = `AiSystem::infantry_combat_think` /
 `apply_engage_relations` / `ai_set_target`, the SM rows = `h_enter_ground_combat` /
 `h_enter_ground_evade` / `h_ground_combat_tick` (`engine/runtime/world/ai_handlers.cpp`), AI fire →
 ring + RoundSim = `fire_ai_round`. Exit pin: the `ai` ctest's NPC-kills-player block.
-Residual deviations: ledger D-AI-1/2/4 (residuals), D-AI-5/6 (open); the §17.4
+Residual deviations: ledger D-AI-1/2/4 (residuals), D-AI-6 (open; D-AI-5 closed
+2026-09-09, §33.35); the §17.4
 presentation tail and the D-AI-7 LOS collision leg landed 2026-07-16 session 4 (§18).
 
 ### 17.1 Perception — the 32-tick scan `[orig: @ 0x4bbe80–0x4bbf60 region, call @ 0x4bbecc]`
@@ -3455,8 +3456,8 @@ round+0x1B4 `[orig: @ 0x4ec8da]`. The MP `NoTracers` rules bit (`dword_24D1E34 &
 (retail `weaponSlot+0x80`; D-AI-8a CLOSED 2026-08-12 — the local player's fire
 passes its active `WeaponSlotState::tracer_shot_counter` through
 `RoundSpawnParams::tracer_counter`, so each weapon keeps its own phase across
-switches; slot-less NPC fire keeps the shooter-entity byte, exactly one
-modeled weapon per NPC under D-AI-5); the trail pool =
+switches; slot-less NPC fire keeps the shooter-entity byte and draws its
+ammo from the §33.35 organic family, D-AI-5 closed 2026-09-09); the trail pool =
 `world/tracer_trails.{h,cpp}`, the spawn-time style select + NoTracers gate =
 `RoundSim::spawn`, the ribbons = `fire_presenter.cpp` via
 `get_tracer_trails()`; the round graphic / glow / smoke-anim residuals are
@@ -5943,7 +5944,7 @@ FrameFX leg]`. The normal-pass geometry:
 
 | Component | Verdict | Evidence |
 |---|---|---|
-| Tracer decision (cadence/forcetracer/team) | MATCHING (per-slot cadence byte landed 2026-08-12 — D-AI-8a closed; NPC fire keeps the entity stand-in byte, one modeled weapon per NPC under D-AI-5) | `round_sim.cpp` spawn; `npruntime_round_sim` section 6 incl. the per-slot phase pin |
+| Tracer decision (cadence/forcetracer/team) | MATCHING (per-slot cadence byte landed 2026-08-12 — D-AI-8a closed; NPC fire keeps the entity stand-in byte; the ammo comes from the §33.35 organic family, D-AI-5 closed 2026-09-09) | `round_sim.cpp` spawn; `npruntime_round_sim` section 6 incl. the per-slot phase pin |
 | Trail channel lifecycle (alloc/append/drain/free) | MATCHING | `TracerTrailPool` [orig cites inline]; `npruntime_round_sim` section 7 |
 | Spawn-time friendly/enemy style select + NoTracers gate | MATCHING (the rules bit itself = the D-AI-8e net seam, sim field `no_tracers_rule`) | `round_sim.cpp` spawn at the 0x4ec740 cite; ctest section 7 |
 | Per-tick pre-move append + death append | MATCHING | `RoundSim::tick`; ctest section 7 |
@@ -7567,29 +7568,29 @@ The structural BMS action half of this same parity round is recorded in
 
 ## 33. Script timing and target policy (2026-09-08)
 
-The witness for this pass is retail Jointops.exe.kong.i64, imagebase
-0x400000. These changes use the shared MissionKernel/World runtime.
+The witness for this pass is retail Jointops.exe.kong.i64, imagebase 0x400000.
+These changes use the shared MissionKernel/World runtime.
 
 ### 33.1 WAC event timing
 
-Script_Compile @0x4F31F0 emits opcode 2 for THEN, 11 for ENTER, and 12
-for LEAVE. ExecuteBytecode @0x4F58B0 runs THEN whenever the condition is
-true; ENTER runs on a false-to-true edge; LEAVE runs on a true-to-false
-edge. ELSE is reached whenever the selected branch opcode does not fire.
-The earlier port incorrectly emitted ENTER for every THEN.
+[orig: Script_Compile @0x4F31F0] emits opcode 2 for THEN, 11 for ENTER, and 12
+for LEAVE. [orig: WacScript_ExecuteBytecode @0x4F58B0] runs THEN whenever the
+condition is true; ENTER runs on a false-to-true edge; LEAVE runs on a
+true-to-false edge. ELSE is reached whenever the selected branch opcode does not
+fire. The earlier port incorrectly emitted ENTER for every THEN.
 
-The event nesting byte at byte_C67E18 is written for IF and ELSEIF.
-WacCmd_Previous @0x4ECF90 and WacCmd_Chain @0x4ECF20 scan backward past
-events deeper than the current event. The predecessor must have fired and
-its last-fire tick must be strictly newer than this event's last-fire
-tick. CHAIN additionally waits its authored delay after that predecessor.
-Both arrays start at zero, including last-fire ticks: a predecessor fired
-only at tick zero cannot satisfy that strict comparison.
+The event nesting byte at byte_C67E18 is written for IF and ELSEIF. [orig:
+WacCmd_Previous @0x4ECF90] and [orig: WacCmd_Chain @0x4ECF20] scan backward past
+events deeper than the current event. The predecessor must have fired and its
+last-fire tick must be strictly newer than this event's last-fire tick. CHAIN
+additionally waits its authored delay after that predecessor. Both arrays start
+at zero, including last-fire ticks: a predecessor fired only at tick zero cannot
+satisfy that strict comparison.
 
-WacCmd_Elapse @0x4ECEF0 accepts an event that has never fired immediately.
-Otherwise it compares signed(ticks - lastFire - delay) against zero.
-WacCmd_Before @0x4ED030 compares signed(ticks - threshold) < 0;
-WacCmd_Past @0x4ED010 uses >= 0. Subtractions wrap as dwords before the
+[orig: WacCmd_Elapse @0x4ECEF0] accepts an event that has never fired
+immediately. Otherwise it compares signed(ticks - lastFire - delay) against
+zero. [orig: WacCmd_Before @0x4ED030] compares signed(ticks - threshold) < 0;
+[orig: WacCmd_Past @0x4ED010] uses >= 0. Subtractions wrap as dwords before the
 signed test. Program::event_depths and WacVm preserve these semantics.
 
 Regression coverage: wac_behavior's temporal predecessor/interval and
@@ -7597,9 +7598,9 @@ THEN/ENTER/LEAVE cases. Compilation success alone is not execution coverage.
 
 ### 33.2 BMS target selectors and infantry query
 
-BMS 42..49 write four independent unsigned entity words. Their curated
-IDA names are misleading; no health, waypoint, weapon-type or alert field
-is written by these helpers.
+BMS 42..49 write four independent unsigned entity words. Their curated IDA names
+are misleading; no health, waypoint, weapon-type or alert field is written by
+these helpers.
 
 | Word | Meaning | Single-source writer | Group-source writer |
 | --- | --- | --- | --- |
@@ -7608,209 +7609,213 @@ is written by these helpers.
 | +336 | exclusive command group | 0x43D9E0 | 0x43D7F0 |
 | +338 | preferred command group | 0x43D970 | 0x43D770 |
 
-Single-source writes take the first DcbId match in pools 0 then 1.
-Group writes visit all signed commandGroup matches in those pools.
-Neither walk requires a live entity, item definition or AI component.
-Source zero selects nothing; the value is narrowed to its low word.
-EntityCommands and Entity::target_selectors own these writes.
+Single-source writes take the first DcbId match in pools 0 then 1. Group writes
+visit all signed commandGroup matches in those pools. Neither walk requires a
+live entity, item definition or AI component. Source zero selects nothing; the
+value is narrowed to its low word. EntityCommands and Entity::target_selectors
+own these writes.
 
-Entity_FindTargets @0x53A610 admits same-team or neutral candidates when
-any nonzero selector matches, subject to the scanner's outer team gate.
-Entity_ValidateWeaponTarget @0x53A400 enforces BOTH exclusive selectors.
-Weapon_CalcDamageByType @0x539140 arithmetic-shifts the score right by
-two for each mismatching preferred selector. This literal rule also
-applies to negative threat scores; it is not an intuitive priority bonus.
+[orig: Entity_FindTargets @0x53A610] admits same-team or neutral candidates when
+any nonzero selector matches, subject to the scanner's outer team gate. [orig:
+Entity_ValidateWeaponTarget @0x53A400] enforces BOTH exclusive selectors. [orig:
+Weapon_CalcDamageByType @0x539140] arithmetic-shifts the score right by two for
+each mismatching preferred selector. This literal rule also applies to negative
+threat scores; it is not an intuitive priority bonus.
 
-The infantry query now walks pools 0..2, includes corpses through tick 16,
-uses the 70-degree radar/range arm plus the capped half-range surrounding
-arm, scores the context-7/8/9 penalties, applies the armor and occupancy
-gates, and performs LOS after stable descending selection. Retail sorts
-at 128 entries and resumes insertion at 127; the port keeps that boundary.
-The geometry calculation is shared with weapon validation as
-AiSystem::weapon_relative_metrics [orig: compute_relative_position_metrics
-@0x545710]. The player cheat-rule bit 0x800 and the existing person
-aim-origin/vector and ray-query residuals remain separate open work.
+The infantry query now walks pools 0..2, includes corpses through tick 16, uses
+the 70-degree radar/range arm plus the capped half-range surrounding arm, scores
+the context-7/8/9 penalties, applies the armor and occupancy gates, and performs
+LOS after stable descending selection. Retail sorts at 128 entries and resumes
+insertion at 127; the port keeps that boundary. The geometry calculation is
+shared with weapon validation as AiSystem::weapon_relative_metrics [orig:
+compute_relative_position_metrics @0x545710]. The player cheat-rule bit 0x800
+and the existing person aim-origin/vector and ray-query residuals remain
+separate open work.
 
-Regression coverage: event_runtime_bms exercises all eight writes through
-loaded BMS events, including dead rows, source zero, duplicate SSNs, pool
-exclusion, low-word values and clearing. ai exercises actual infantry
-selection and weapon validation, including friendly explicit targets,
-combined restrictions and the signed score shift.
+Regression coverage: event_runtime_bms exercises all eight writes through loaded
+BMS events, including dead rows, source zero, duplicate SSNs, pool exclusion,
+low-word values and clearing. ai exercises actual infantry selection and weapon
+validation, including friendly explicit targets, combined restrictions and the
+signed score shift.
 
 ### 33.3 Command event 12 and retail no-ops
 
-AI_HandleCommand @0x465770 event 12 reacts to guided-round proximity.
-For type 1 with flags96 bit 0x10 set and bit 2 clear, states other than
-14/6 request state 10. Type 2 under the same flags, except current state
-22, requests state 18. An admitted reaction writes both brain alerts to
-2, marks the trigger group red, alerts nearby allies, and sets fireTimer
-to 93. A gated reaction still returns handled. Events 13..20 take the
-shared handler's default false return; they are not missing shared arms.
+[orig: AI_HandleCommand @0x465770] event 12 reacts to guided-round proximity.
+For type 1 with flags96 bit 0x10 set and bit 2 clear, states other than 14/6
+request state 10. Type 2 under the same flags, except current state 22, requests
+state 18. An admitted reaction writes both brain alerts to 2, marks the trigger
+group red, alerts nearby allies, and sets fireTimer to 93. A gated reaction
+still returns handled. Events 13..20 take the shared handler's default false
+return; they are not missing shared arms.
 
-Entity_AlertNearbyAllies @0x4654B0 scans only pool 1 within a fixed
-100-unit 3D radius. It requires a live, nonplayer, same-team candidate.
-A qualifying candidate sets the caller's controller alert byte to 2;
-the candidate's brain alert is also set when that brain exists. It does
-not unconditionally alert the caller or visit pool 0.
+[orig: Entity_AlertNearbyAllies @0x4654B0] scans only pool 1 within a fixed
+100-unit 3D radius. It requires a live, nonplayer, same-team candidate. A
+qualifying candidate sets the caller's controller alert byte to 2; the
+candidate's brain alert is also set when that brain exists. It does not
+unconditionally alert the caller or visit pool 0.
 
-Authored HUDITEM (37) and TMATESTATUS (39) have no Entity_ApplyCommand
-@0x43AB60 arms. BMS ExecuteWac (41) likewise has no EventAction_Dispatch
-@0x4542E0 arm. These are explicit retail no-ops.
+Authored HUDITEM (37) and TMATESTATUS (39) have no [orig: Entity_ApplyCommand
+@0x43AB60] arms. BMS ExecuteWac (41) likewise has no [orig: EventAction_Dispatch
+@0x4542E0] arm. These are explicit retail no-ops.
 
-TARGETSSN (44) passes the brain pointer to Entity_FindByNetId @0x4655B0,
-whose +148 store therefore addresses brain[37]. A nonzero target matching
-the first live pool-0 DcbId returns without a store, preserving the old
-priority pointer. A dead pool-0 match, absent target, zero argument, or
-pool-1/2-only match leaves zero. The apparent temporary pool-1/2 stores
-are overwritten by the unconditional tail clear. The port preserves
-this behavior; it does not substitute normal target assignment.
+TARGETSSN (44) passes the brain pointer to [orig: Entity_FindByNetId @0x4655B0],
+whose +148 store therefore addresses brain[37]. A nonzero target matching the
+first live pool-0 DcbId returns without a store, preserving the old priority
+pointer. A dead pool-0 match, absent target, zero argument, or pool-1/2-only
+match leaves zero. The apparent temporary pool-1/2 stores are overwritten by the
+unconditional tail clear. The port preserves this behavior; it does not
+substitute normal target assignment.
 
-FIND_AND_USE (31) and AINODEPATH (40) are implemented in section 33.8.
-Full script completion and mission playthrough remain open.
+FIND_AND_USE (31) and AINODEPATH (40) are implemented in section 33.8. Full
+script completion and mission playthrough remain open.
 
 ### 33.4 DO sections, expression state and declared names
 
-Script_Compile's stores at 0x4F4143 and 0x4F429D both emit opcode 4:
-DOSEQ and DORND therefore cycle their NEXT sections in this executable.
-The VM also implements opcode 5's random choice for bytecode which carries
-it. Each DO owns a byte counter and byte choice; NEXT decrements the choice
-and enters its section only when the previous value was one. Nested DOs
-retain separate counters. Runtime capture/restore includes these bytes.
+Script_Compile's stores [orig: Script_Compile @0x4f31f0 (the site @0x4F4143)]
+and [orig: @0x4F429D] both emit opcode 4: DOSEQ and DORND therefore cycle their
+NEXT sections in this executable. The VM also implements opcode 5's random
+choice for bytecode which carries it. Each DO owns a byte counter and byte
+choice; NEXT decrements the choice and enters its section only when the previous
+value was one. Nested DOs retain separate counters. Runtime capture/restore
+includes these bytes.
 
-Opcode 1 changes the current event and clears expression-stack depth, but
-does not clear the accumulator. END does not restore an enclosing event.
-Bare actions create no event. Grouped conditions preserve the enclosing
-accumulator in the retail 16-byte expression stack. ADD/SUB/INC/DEC wrap as
-32-bit arithmetic; SUB and DEC do not clamp at zero.
+Opcode 1 changes the current event and clears expression-stack depth, but does
+not clear the accumulator. END does not restore an enclosing event. Bare actions
+create no event. Grouped conditions preserve the enclosing accumulator in the
+retail 16-byte expression stack. ADD/SUB/INC/DEC wrap as 32-bit arithmetic; SUB
+and DEC do not clamp at zero.
 
-VAR and ARRAY each declare one scalar address in the second half of the
-mission bank, starting at 0xC6B640. The resolver's direct V# syntax is limited
-to 0..255; declared names use the separate 256-slot namespace. ARRAY follows
-the same scalar resolver path in this retail build; it is not an indexed
-container. Names are copied to an 18-character field.
+VAR and ARRAY each declare one scalar address in the second half of the mission
+bank, starting at 0xC6B640. The resolver's direct V# syntax is limited to
+0..255; declared names use the separate 256-slot namespace. ARRAY follows the
+same scalar resolver path in this retail build; it is not an indexed container.
+Names are copied to an 18-character field.
 
-A bracketed IF name resolves to that event's fired flag for value reads and
-to its index for RESET. WacCmd_Reset @0x4ED300 clears fired, last-fire and
+A bracketed IF name resolves to that event's fired flag for value reads and to
+its index for RESET. [orig: WacCmd_Reset @0x4ED300] clears fired, last-fire and
 active state for the event and subsequent deeper events, stopping before a
-sibling or ancestor. RUN compiles mounted files inline into the same program
-and symbol scope. The literal include-depth check admits two nested RUN
-levels and rejects the third; RUN inside a block is an error.
+sibling or ancestor. RUN compiles mounted files inline into the same program and
+symbol scope. The literal include-depth check admits two nested RUN levels and
+rejects the third; RUN inside a block is an error.
 
 WacSystem now honors the shared human-presence gate without advancing its
-62-tick divider during a hold. Eager startup still executes directly.
-Regression coverage: wac_behavior (nested DO choice, grouped boolean state,
-accumulator lifetime, arithmetic, named reset, empty-server hold),
-wac_layered_load (include order and limits), wac_program_surface (retry).
-All six WAC/BMS suites passed with the available retail assets on 2026-09-08.
+62-tick divider during a hold. Eager startup still executes directly. Regression
+coverage: wac_behavior (nested DO choice, grouped boolean state, accumulator
+lifetime, arithmetic, named reset, empty-server hold), wac_layered_load (include
+order and limits), wac_program_surface (retry). All six WAC/BMS suites passed
+with the available retail assets on 2026-09-08.
 
 ### 33.5 Cumulative completion diagnostics
 
-World::diagnostics records unsupported WAC commands/opcodes, instruction
-limits, BMS actions, AI commands and state handlers. Each site retains a
-count, first/last simulation tick, and latest arguments. WAC sites include
-the source filename, line and bytecode word; BMS sites include authored
-event/action indices. This is implementation evidence, not retail gameplay.
+World::diagnostics records unsupported WAC commands/opcodes, instruction limits,
+BMS actions, AI commands and state handlers. Each site retains a count,
+first/last simulation tick, and latest arguments. WAC sites include the source
+filename, line and bytecode word; BMS sites include authored event/action
+indices. This is implementation evidence, not retail gameplay.
 
 Effect draining does not erase these records. World snapshots retain boot
-evidence; restore discards later playthrough evidence while restoring the
-sealed baseline. The AI inspection report and debug window expose the
-records. wac_behavior verifies multiple source files, repeated execution,
-effect draining, boot-state restoration and a clean mission load.
+evidence; restore discards later playthrough evidence while restoring the sealed
+baseline. The AI inspection report and debug window expose the records.
+wac_behavior verifies multiple source files, repeated execution, effect
+draining, boot-state restoration and a clean mission load.
 
 ### 33.6 Arithmetic, assignment and explicit parentheses
 
-Script_ParseExpression @0x4EE540 uses equal precedence for AND/OR,
-then comparisons, addition/subtraction, multiplication/division/modulo,
-then power. Operators at each level associate left. Declared scalar and
-V# assignments now emit opcode 8 stores after evaluating the expression.
+[orig: Script_GetOperatorPrecedence @0x4EE540] uses equal precedence for AND/OR,
+then comparisons, addition/subtraction, multiplication/division/modulo, then
+power. Operators at each level associate left. Declared scalar and V#
+assignments now emit opcode 8 stores after evaluating the expression.
 
-Script_Execute @0x4F58B0 keeps only the low byte of an enclosing accumulator
-on the expression stack. A grouped right operand is folded as the new
-accumulator OP saved byte, including subtraction, comparisons and power.
-NOT on such a group negates the saved byte. Multiple nested opening
-parentheses merge their PUSH bit onto the same first instruction; multiple
-pops at depth zero consequently reuse stack slot zero. Explicit parentheses
-must therefore survive parsing even around a single command.
+[orig: WacScript_ExecuteBytecode @0x4F58B0] keeps only the low byte of an
+enclosing accumulator on the expression stack. A grouped right operand is folded
+as the new accumulator OP saved byte, including subtraction, comparisons and
+power. NOT on such a group negates the saved byte. Multiple nested opening
+parentheses merge their PUSH bit onto the same first instruction; multiple pops
+at depth zero consequently reuse stack slot zero. Explicit parentheses must
+therefore survive parsing even around a single command.
 
-Witnessed examples, covered by wac_behavior: 2+3*4 yields 14; 20-2*3
-yields -14; (20-2)*3 yields 54; 300+(2*3) yields 50; 2^3^2 yields 64;
-2^(3^2) yields 81; 1 OR 0 AND 0 is false. These are executable quirks.
-Math_PowFloat @0x4F9BA0 takes a binary32 base, performs integer-power
-squaring in double precision and returns the truncated low dword through
-the x87 integer conversion. ADD/SUB/MUL and variable increments wrap.
+Witnessed examples, covered by wac_behavior: 2+3*4 yields 14; 20-2*3 yields -14;
+(20-2)*3 yields 54; 300+(2*3) yields 50; 2^3^2 yields 64; 2^(3^2) yields 81; 1
+OR 0 AND 0 is false. These are executable quirks. [orig: Math_PowFloat
+@0x4F9BA0] takes a binary32 base, performs integer-power squaring in double
+precision and returns the truncated low dword through the x87 integer
+conversion. ADD/SUB/MUL and variable increments wrap.
 
-Portable divergence: malformed division by zero or INT_MIN/-1 halts the
-current WAC pass and records a WacOpcode diagnostic with subcode 2, instead
-of raising the retail x86 integer exception in the host process.
+Portable divergence: malformed division by zero or INT_MIN/-1 halts the current
+WAC pass and records a WacOpcode diagnostic with subcode 2, instead of raising
+the retail x86 integer exception in the host process.
 
-Validation: wac_behavior, wac_corpus and wac_program_surface passed after
-the arithmetic/assignment changes on 2026-09-08.
+Regression coverage: wac_behavior, wac_corpus and wac_program_surface passed
+after the arithmetic/assignment changes on 2026-09-08.
 
 ### 33.7 NPC-facing WAC commands
 
-WacCmd_SsnCritical @0x4F1BF0 requires an item definition and compares signed
-16-bit health with signed 16-bit itemDef+384: health must be positive and
-at most the critical threshold. It does not derive critical state from
-the dead flag. Item trait resolution now preserves that threshold for
-placed actors and player templates.
+[orig: WacCmd_SsnCritical @0x4F1BF0] requires an item definition and compares
+signed 16-bit health with signed 16-bit itemDef+384: health must be positive and
+at most the critical threshold. It does not derive critical state from the dead
+flag. Item trait resolution now preserves that threshold for placed actors and
+player templates.
 
-WacCmd_SsnName @0x4F7230 copies a nonempty name to the valid item's 31-byte
-display-name payload. WacCmd_SsnRide @0x4F7000 scans pool 0, excludes only
-the dead flag, and checks up to three seated-parent links against the
-requested entity. It does not require a live-health or item-definition
+[orig: WacCmd_SsnName @0x4F7230] copies a nonempty name to the valid item's
+31-byte display-name payload. [orig: WacCmd_SsnRide @0x4F7000] scans pool 0,
+excludes only the dead flag, and checks up to three seated-parent links against
+the requested entity. It does not require a live-health or item-definition
 predicate on the rider.
 
-WacCmd_SsnToSsn @0x4F7330 requires valid item definitions on both entities
-and an AI controller on the source. It detaches the source, selects command
-125 with the target's net ID and cached pointer, and clears the wait
-cooldown. The existing infantry entry walk chooses and attaches a seat;
-the WAC producer does not teleport the actor into one.
+[orig: WacCmd_SsnToSsn @0x4F7330] requires valid item definitions on both
+entities and an AI controller on the source. It detaches the source, selects
+command 125 with the target's net ID and cached pointer, and clears the wait
+cooldown. The existing infantry entry walk chooses and attaches a seat; the WAC
+producer does not teleport the actor into one.
 
-Validation: wac_behavior follows the WAC boarding order through
+Regression coverage: wac_behavior follows the WAC boarding order through
 infantry_board_think to a seat and checks the subsequent SSNride query.
-Additional checks cover the three-parent limit, pool exclusion, critical
-health and bounded names. wac_behavior, infantry and event_runtime_bms
-passed on 2026-09-08.
+Additional checks cover the three-parent limit, pool exclusion, critical health
+and bounded names. wac_behavior, infantry and event_runtime_bms passed on
+2026-09-08.
 
-IDB annotations saved during this pass: expression parser @0x4EE540,
-VM @0x4F58B0, boarding producer @0x4F7330 and attachment lookup @0x4B9580.
+IDB annotations saved during this pass: expression parser [orig:
+Script_GetOperatorPrecedence @0x4EE540], VM [orig: WacScript_ExecuteBytecode
+@0x4F58B0], boarding producer [orig: WacCmd_SsnToSsn @0x4F7330] and attachment
+lookup [orig: Entity_FindAttachBone @0x4B9580].
 
 ### 33.8 FIND_AND_USE and motor callback suspension
 
-Entity_ApplyCommand @0x43AB60 sub 31 admits the org1 callback or nullsub_28.
-Entity_FindAttachBone @0x4B9580 scans to the first pool-1 raw net-ID match,
-then stores the last case-insensitive "attach" userpoint index plus one as
-a byte and the parent handle. Missing targets/points preserve the old
-relation. Zero clears only the parent. The metadata query is independent
-of whether a posed model matrix is available.
+[orig: Entity_ApplyCommand @0x43AB60] sub 31 admits the org1 callback or
+nullsub_28. [orig: Entity_FindAttachBone @0x4B9580] scans to the first pool-1
+raw net-ID match, then stores the last case-insensitive "attach" userpoint index
+plus one as a byte and the parent handle. Missing targets/points preserve the
+old relation. Zero clears only the parent. The metadata query is independent of
+whether a posed model matrix is available.
 
-Entity_UpdateInfantryAI @0x4B9910 resolves the first named "attach" point
-during its prepass; the stored index is only a gate. Planar Q16 distance
-uses the 2147418112 clamp. Item attrib 0x1000 takes Z from parent brain[141]
-and lowers brain[142] to the child's Z. Within 1 unit the selector requests
-state 150, faces the parent and stops; farther away it selects moveMode 6
-with a 1-unit arrival radius.
+[orig: Entity_UpdateInfantryAI @0x4B9910] resolves the first named "attach"
+point during its prepass; the stored index is only a gate. Planar Q16 distance
+uses the 2147418112 clamp. Item attrib 0x1000 takes Z from parent brain[141] and
+lowers brain[142] to the child's Z. Within 1 unit the selector requests state
+150, faces the parent and stops; farther away it selects moveMode 6 with a
+1-unit arrival radius.
 
-The late mover handles a different parent within 147456 Q16 (2.25 units):
-XY snaps below 0x4000 distance, otherwise chases by sixteenths with +8
-rounding. Z chases by eighths with +4 rounding while at most 49152 above
-the target; otherwise slideDecay decreases by 167 to a floor of -18432.
-This branch returns before ordinary root translation and vertical collision.
-The S-stage's self-parent instead chases its stored XY by eighths, raises
-Z to the stored goal when lower, and continues ordinary movement. The
-death edge clears the attachment.
+The late mover handles a different parent within 147456 Q16 (2.25 units): XY
+snaps below 0x4000 distance, otherwise chases by sixteenths with +8 rounding. Z
+chases by eighths with +4 rounding while at most 49152 above the target;
+otherwise slideDecay decreases by 167 to a floor of -18432. This branch returns
+before ordinary root translation and vertical collision. The S-stage's
+self-parent instead chases its stored XY by eighths, raises Z to the stored goal
+when lower, and continues ordinary movement. The death edge clears the
+attachment.
 
-AINODEPATH sub 40 replaces the entity's motor callback with nullsub_28
-for nonzero p2 and restores the item's callback for zero. This also replaces
-an installed death callback. The port suspends infantry and vehicle motors
-while preserving independent brain events/part channels. Installing a new
-death callback or respawning restores that callback's ownership.
+AINODEPATH sub 40 replaces the entity's motor callback with nullsub_28 for
+nonzero p2 and restores the item's callback for zero. This also replaces an
+installed death callback. The port suspends infantry and vehicle motors while
+preserving independent brain events/part channels. Installing a new death
+callback or respawning restores that callback's ownership.
 
-Validation: infantry checks approach/arrival, pause/resume without motion
-or clip advancement, release, death cleanup and independent brain animation.
-ai, infantry, wac_behavior and event_runtime_bms passed on 2026-09-08.
-The broader infantry combat/path and model-pose residuals remain open.
-IDB annotations at @0x43AB60 and @0x4B9910 were saved.
+Regression coverage: infantry checks approach/arrival, pause/resume without
+motion or clip advancement, release, death cleanup and independent brain
+animation. ai, infantry, wac_behavior and event_runtime_bms passed on
+2026-09-08. The broader infantry combat/path and model-pose residuals remain
+open. IDB annotations at [orig: Entity_ApplyCommand @0x43AB60] and [orig:
+Entity_UpdateInfantryAI @0x4B9910] were saved.
 
 ### 33.9 Malformed arithmetic divergence
 
@@ -7820,99 +7825,103 @@ IDB annotations at @0x43AB60 and @0x4B9910 were saved.
 
 ### 33.10 Player/group loops and bound entity operands
 
-Script_Compile @0x4F31F0 emits group selection (opcode 10), member
-iteration (opcode 9) and a backward jump for PLOOP/GLOOP. The VM
-@0x4F58B0 visits the member array in reverse order and restores the local
-player handle when exhausted. Nested player/group loops are rejected.
-Player, Item and auto refer to the same mutable 16-bit packed handle.
+[orig: Script_Compile @0x4F31F0] emits group selection (opcode 10), member
+iteration (opcode 9) and a backward jump for PLOOP/GLOOP. The VM [orig:
+WacScript_ExecuteBytecode @0x4F58B0] visits the member array in reverse order
+and restores the local player handle when exhausted. Nested player/group loops
+are rejected. Player, Item and auto refer to the same mutable 16-bit packed
+handle.
 
-WacScript_InitAndLoad @0x4F91F0 prepares the seven reserved named groups:
-emptygroup, humans, blueplayers, redplayers, ai, blueai and redai. The
-runtime list builder scans pool 0 and requires ItemTypeIndex. Humans
-require Flags 0x100 and exclude Flags 1; all AI includes Flags 1, while
-team AI excludes it. Dead health and Flags 2 do not exclude a member.
-These member arrays are separate from BMS commandGroup values.
-XML_ParseGroupMember @0x4CD6F0 supplies authored names/member arrays;
-its normal mission-boot caller remains unconnected in the portable engine.
+[orig: WacScript_InitAndLoad @0x4F91F0] prepares the seven reserved named
+groups: emptygroup, humans, blueplayers, redplayers, ai, blueai and redai. The
+runtime list builder scans pool 0 and requires ItemTypeIndex. Humans require
+Flags 0x100 and exclude Flags 1; all AI includes Flags 1, while team AI excludes
+it. Dead health and Flags 2 do not exclude a member. These member arrays are
+separate from BMS commandGroup values. [orig: XML_ParseGroupMember @0x4CD6F0]
+supplies authored names/member arrays; its normal mission-boot caller remains
+unconnected in the portable engine.
 
-WacScript_ResolveParameter @0x4F2940 resolves authored SSNs to packed
-handles once. The portable VM binds them on first execution, when the
-World is available, and preserves them across runtime capture/restore.
-Assignments and Player/Item/auto aliases keep handles through command
-dispatch, including when multiple rows share one authored SSN.
-Gkill/Gremove walk named member arrays forward; numeric kill still uses
-the BMS command group. Gkill's per-member helper requires an item
-definition; Gremove does not.
+[orig: WacScript_ResolveParameter @0x4F2920] resolves authored SSNs to packed
+handles once. The portable VM binds them on first execution, when the World is
+available, and preserves them across runtime capture/restore. Assignments and
+Player/Item/auto aliases keep handles through command dispatch, including when
+multiple rows share one authored SSN. Gkill/Gremove walk named member arrays
+forward; numeric kill still uses the BMS command group. Gkill's per-member
+helper requires an item definition; Gremove does not.
 
-The synthetic tick_digest changed from 116f65ec9ea08922 to
-e33cefc459163b68 because the two elapse blocks now fire at boot (V1=2)
-and subsequent passes are held by the no-human gate. A temporary comparison
-replayed only the previous V1 timeline (0 before logic tick 63, 1 before
-125, then 2) over the new simulation and recovered the old digest exactly.
-Entity, AI and RNG state did not change in this fixture.
+The synthetic tick_digest changed from 116f65ec9ea08922 to e33cefc459163b68
+because the two elapse blocks now fire at boot (V1=2) and subsequent passes are
+held by the no-human gate. A temporary comparison replayed only the previous V1
+timeline (0 before logic tick 63, 1 before 125, then 2) over the new simulation
+and recovered the old digest exactly. Entity, AI and RNG state did not change in
+this fixture.
 
-Validation: wac_behavior covers reverse iteration, reserved group filters,
-authored member order, empty loops, nested-loop rejection, handle aliases
-and runtime restore. Named-group boot loading remains an open capability.
+Regression coverage: wac_behavior covers reverse iteration, reserved group
+filters, authored member order, empty loops, nested-loop rejection, handle
+aliases and runtime restore. Named-group boot loading remains an open
+capability.
 
 ### 33.11 Script spatial conditions and cached boarding
 
-The four area handlers resolve the first matching authored zone ID among
-128 records, reject ID 0, require a valid item and reject entity Flags 1.
-They ignore dead health, Flags 2 and the mission-area flag. area/SSNarea
-test inclusive XY; area3D/SSNarea3D test inclusive XYZ using the raw
-authored Z bounds, independent of constrain-Z. Mission promotion retains
-these raw bounds alongside the BMS bounds used by existing event queries.
-Anchors: WacCmd_Area @0x4ED0C0, Area3D @0x4ED120, SsnArea @0x4F1020
-and SsnArea3D @0x4F0F60.
+The four area handlers resolve the first matching authored zone ID among 128
+records, reject ID 0, require a valid item and reject entity Flags 1. They
+ignore dead health, Flags 2 and the mission-area flag. area/SSNarea test
+inclusive XY; area3D/SSNarea3D test inclusive XYZ using the raw authored Z
+bounds, independent of constrain-Z. Mission promotion retains these raw bounds
+alongside the BMS bounds used by existing event queries. Anchors: [orig:
+WacCmd_Area @0x4ED0C0], [orig: WacCmd_Area3D @0x4ED120], [orig: WacCmd_SsnArea
+@0x4F1020] and [orig: WacCmd_SsnArea3D @0x4F0F60].
 
-SSNloc @0x4F0E90 scans normalized type-5 mission bounding boxes with strict
-XYZ comparisons; the last match wins. A nonzero first blink hit selects
-its pool-2 building and overrides the box with the signed items.def
-music word at +434, including zero. location @0x4ED190 instead reads
-the local player's cached result: the living org2 body updates it every
-16 ticks, preferring nonzero indoor music and otherwise using the last
-box. The dead body leaves the cache unchanged. Outside @0x4ED050 simply
-tests whether the first blink hit is zero. Music metadata now passes through
-the definition parser and the normal item-trait sweep. Mission promotion
-replaces script spatial/named tables so the previous mission cannot leave
-zones or member lists behind.
+[orig: WacCmd_SsnLoc @0x4F0E90] scans normalized type-5 mission bounding boxes
+with strict XYZ comparisons; the last match wins. A nonzero first blink hit
+selects its pool-2 building and overrides the box with the signed items.def
+music word at +434, including zero. [orig: WacCmd_Location @0x4ED190] instead
+reads the local player's cached result: the living org2 body updates it every 16
+ticks, preferring nonzero indoor music and otherwise using the last box. The
+dead body leaves the cache unchanged. [orig: WacCmd_Outside @0x4ED050] simply
+tests whether the first blink hit is zero. Music metadata now passes through the
+definition parser and the normal item-trait sweep. Mission promotion replaces
+script spatial/named tables so the previous mission cannot leave zones or member
+lists behind.
 
-Meride uses the standing groundEntity chain, with one carrier link, from
-Entity_IsLocalPlayerStandingOnSsn @0x4F1260. Meattached remains the
-seated-parent query @0x4F10D0. Their shared predicate requires an item
-on the target and rejects the local player's dead flag, not zero health
-by itself.
+Meride uses the standing groundEntity chain, with one carrier link, from [orig:
+Entity_IsLocalPlayerStandingOnSsn @0x4F1260]. Meattached remains the
+seated-parent query [orig: Entity_IsLocalPlayerSeatedOnSsn @0x4F10D0]. Their
+shared predicate requires an item on the target and rejects the local player's
+dead flag, not zero health by itself.
 
-SSNUse @0x4F70F0 takes the AI controller's cached boarding pointer, chooses
-a seat with its 123/124 restrictions, replaces the cache with the selected
-root/child and attempts the canonical attach operation. It performs no
-proximity search. A failed selection clears the cached pointer and, if
-still unmounted, clears Flags 0x40 and parentSlot. An already-mounted
-actor returns before changing the cache.
+SSNUse [orig: WacScript_TryMountEntityToVehicle @0x4F70F0] takes the AI
+controller's cached boarding pointer, chooses a seat with its 123/124
+restrictions, replaces the cache with the selected root/child and attempts the
+canonical attach operation. It performs no proximity search. A failed selection
+clears the cached pointer and, if still unmounted, clears Flags 0x40 and
+parentSlot. An already-mounted actor returns before changing the cache.
 
-Remove @0x4EDCA0 dispatches the existing command-group removal walk
-@0x43D5D0: nonzero group, pool order 2/0/1/3, all matching rows, no
-item-definition gate. This differs from Gremove's named member list.
+[orig: WacCmd_Remove @0x4EDCA0] dispatches the existing command-group removal
+walk [orig: Entity_TeleportAllByNetId @0x43D5D0]: nonzero group, pool order
+2/0/1/3, all matching rows, no item-definition gate. This differs from Gremove's
+named member list.
 
-Validation covers zone IDs distinct from array indices, first-record
+Regression coverage covers zone IDs distinct from array indices, first-record
 selection, XY/XYZ and strict/inclusive boundaries, indoor-zero precedence,
-snapshot restore, normal promotion/trait loading, cached child boarding,
-failure cleanup, standing/seated distinction and definition-free removal.
-
+snapshot restore, normal promotion/trait loading, cached child boarding, failure
+cleanup, standing/seated distinction and definition-free removal.
 
 ### 33.12 NPC respawn counts and the shared organic reset (2026-09-08)
 
-Witnesses: WacCmd_SsnSpawn `0x4F7A80`, GroupSpawn's mislabeled
-WacScript_SetEntityWaypoint `0x4F7AE0`, Entity_ResetToSpawnState `0x4B9610`,
-Entity_FindNearestTriggerByType `0x407EA0`, and the org1 head/corpse block
-`0x4B99DB..0x4BA071`. These were checked in the same canonical Jointops IDB.
+Witnesses: WacCmd_SsnSpawn [orig: WacCmd_SsnSpawn @0x4F7A80], GroupSpawn's
+mislabeled WacScript_SetEntityWaypoint [orig: WacScript_SetEntityWaypoint
+@0x4F7AE0], Entity_ResetToSpawnState [orig: Entity_ResetToSpawnState @0x4B9610],
+Entity_FindNearestTriggerByType [orig: Entity_FindNearestTriggerByType
+@0x407EA0], and the org1 head/corpse block [orig: Entity_UpdateInfantryAI
+@0x4b9910 (the site @0x4B99DB..0x4BA071)]. These were checked in the same
+canonical Jointops IDB.
 
 SSNSpawn writes the low signed word to entity+0x35E after handle validation,
 without an item, health or brain gate. GroupSpawn writes that word to every
-pool-0 row with the matching signed command group, including group zero;
-it always returns 1. Neither command immediately revives or allocates a row.
-The corpse timer decrements when nonzero, including negative values. At expiry,
+pool-0 row with the matching signed command group, including group zero; it
+always returns 1. Neither command immediately revives or allocates a row. The
+corpse timer decrements when nonzero, including negative values. At expiry,
 positive counts restore the saved position, heading and live flags and call the
 organic reset. Counts 1..99 decrement; 100..32767 remain unchanged. A linked
 control point must be friendly and fully secured (control >= 0x10000); otherwise
@@ -7925,13 +7934,13 @@ Section-mask bit 0 cancels respawns, seeds deathtime minus 61, suppresses the
 scream, and overrides LeaveCorpse. An authored particledeath starts once when
 the timer reaches 186 and owns one attached emitter at the entity origin.
 Reset/removal releases that ownership. Respawn emits particlespawn at the
-collision-adjusted origin. Existing destruction events carry both families;
-no independent presentation queue was introduced.
+collision-adjusted origin. Existing destruction events carry both families; no
+independent presentation queue was introduced.
 
-The World-aware reset synchronizes the motor and registry, restores heading
-and leg channels, clears hit/focus/target references, refills the NPC magazine,
-raises health without lowering an overhealed row, restores the signed mana
-word (ItemDef's `mana`, +382), clears section damage and levels roll. Live-flag
+The World-aware reset synchronizes the motor and registry, restores heading and
+leg channels, clears hit/focus/target references, refills the NPC magazine,
+raises health without lowering an overhealed row, restores the signed mana word
+(ItemDef's `mana`, +382), clears section damage and levels roll. Live-flag
 callers choose state 153 when authored, otherwise 44, and advance both animation
 channels twelve times before collision correction. Dead-flag callers retain
 their body pose. The authority detaches the entity and removes modeled incoming
@@ -7944,59 +7953,159 @@ wrap, and replace on <= so the last tie wins. Commands 123..125 preserve their
 existing slot[38]; values >=126 return zero. This fixes the prior flat-distance,
 first-tie implementation.
 
-Validation: native `infantry`, `entity_spawn`, `wac_behavior`, `ai`,
-`event_runtime_bms` and `simassets_item_traits` all pass with retail asset
-roots configured. Tests exercise the actual death/respawn motor, finite and
-unlimited counts, unchanged entity identity, visibility/session gating,
-control-point hide/release, silent LeaveCorpse cleanup, effect ownership,
-health/magazine restoration, incoming-reference cleanup and nearest-node ties.
-They are focused runtime evidence, not accepted mission playthroughs.
+Regression coverage: native `infantry`, `entity_spawn`, `wac_behavior`, `ai`,
+`event_runtime_bms` and `simassets_item_traits` all pass with retail asset roots
+configured. Tests exercise the actual death/respawn motor, finite and unlimited
+counts, unchanged entity identity, visibility/session gating, control-point
+hide/release, silent LeaveCorpse cleanup, effect ownership, health/magazine
+restoration, incoming-reference cleanup and nearest-node ties. They are focused
+runtime evidence, not accepted mission playthroughs.
 
-Open boundaries: the initial org1 extended spawn-state/link producer still
-needs a complete load-path witness; promotion's existing spawn_position seed
-remains while scripted/BMS reset producers are implemented. The headLookTarget
-and medic-drag references belong to the still-open idle/drag consumers; the
-full player redeploy callers still contain their earlier reset/snap sequence.
-The shared session-rule mapping and unresolved effect-resource behavior retain
-their existing owner-record limitations.
+Open boundaries: the initial org1 extended spawn-state/link producer still needs
+a complete load-path witness; promotion's existing spawn_position seed remains
+while scripted/BMS reset producers are implemented. The headLookTarget and
+medic-drag references belong to the still-open idle/drag consumers; the full
+player redeploy callers still contain their earlier reset/snap sequence. The
+shared session-rule mapping and unresolved effect-resource behavior retain their
+existing owner-record limitations.
 
-Godot integration exposed a player/NPC classification edge: a new remote player can die before its first C2S pose sets net_is_remote_peer. NPC corpse cleanup must exclude the entity's player flag from birth, or it removes the player before the authority can replicate the death. The native regression uses spawn_remote_player before any uplink. Both formerly failing Godot death tests reproduce alone before the fix; afterward the full coop_two_sim_test.gd file passes all 21 tests, including medic calls and redeployment. The full GUT suite remains a separate validation gate.
-
+Godot integration exposed a player/NPC classification edge: a new remote player
+can die before its first C2S pose sets net_is_remote_peer. NPC corpse cleanup
+must exclude the entity's player flag from birth, or it removes the player
+before the authority can replicate the death. The native regression uses
+spawn_remote_player before any uplink. The full GUT suite remains a separate
+validation gate.
 
 ### 33.13 WAC distance operands, live range controls and spatial commands (2026-09-08)
 
-WacScript_ResolveParameter at `0x4F2940` converts distance literals to Q16 before dispatch (`0x4F2D7D`), including fractions. An M suffix uses 65536; F uses the exact retail factor 21501 (`dbl_7CDE70`). Hour literals multiply by 60. Variables are direct references returned before numeric conversion, so a variable passed to a distance command is already a raw Q16 word. Numeric conversion truncates to signed 64 bits and stores the low dword, as `_ftol2_sse` does. The earlier whole-unit approximation discarded fractions and implicitly rescaled variables at some consumers.
+[orig: WacScript_ResolveParameter @0x4F2920] converts distance literals to Q16
+before dispatch [orig: WacScript_ResolveParameter @0x4f2920 (the site
+@0x4F2D7D)], including fractions. An M suffix uses 65536; F uses the exact
+retail factor 21501 (`dbl_7CDE70`). Hour literals multiply by 60. Variables are
+direct references returned before numeric conversion, so a variable passed to a
+distance command is already a raw Q16 word. Numeric conversion truncates to
+signed 64 bits and stores the low dword, as `_ftol2_sse` does. The earlier
+whole-unit approximation discarded fractions and implicitly rescaled variables
+at some consumers.
 
-SSNMin/SSNMax/SSNAtt (`0x4F2010`, `0x4F2210`, `0x4F2270`) write controller offsets +64/+68/+60 respectively. They require only a valid entity; a missing controller still returns 1. GroupMin/GroupMax/GroupAtt (`0x4F7C50`, `0x4F7CA0`, `0x4F7CF0`) scan pool 0 by signed command group, including zero and dead/itemless rows, and always return 1. These now reach the existing engagement/sight/attack fields read by infantry combat. The unused Entity copies of those three fields were removed. BMS promotion continues to seed the controller from its authored distance fields.
+SSNMin/SSNMax/SSNAtt [orig: WacCmd_SsnMin @0x4F2010], [orig: WacCmd_SsnMax
+@0x4F2210], [orig: WacCmd_SsnAtt @0x4F2270] write controller offsets +64/+68/+60
+respectively. They require only a valid entity; a missing controller still
+returns 1. GroupMin/GroupMax/GroupAtt [orig: WacScript_SetEntityAITarget
+@0x4F7C50], [orig: WacScript_SetEntityAlertState @0x4F7CA0], [orig:
+WacScript_SetEntityAIAction @0x4F7CF0] scan pool 0 by signed command group,
+including zero and dead/itemless rows, and always return 1. These now reach the
+existing engagement/sight/attack fields read by infantry combat. The unused
+Entity copies of those three fields were removed. BMS promotion continues to
+seed the controller from its authored distance fields.
 
-Entity_CompareDistancesToTarget (`0x4F12E0`, SSNLeadSSN2SSN) resolves three entities and requires nonzero item indices, without an alive/flag gate. It subtracts wrapped Q16 positions before computing each 3D length, clamps each length to 2147418112 (`flt_7C19E0`), truncates, and tests distance(second,target) minus distance(first,target) strictly greater than the supplied lead. Proximity/LOS/seeing commands now use the same raw distance convention and retain their own center/bbox-origin rules. BMS single triggers 43..45 shift their whole-metre parameter before calling these shared helpers. The LOS walker split remains an open approximation; this slice does not claim that the existing shared ray seam reproduces both retail walkers.
+[orig: Entity_CompareDistancesToTarget @0x4F12E0], SSNLeadSSN2SSN) resolves
+three entities and requires nonzero item indices, without an alive/flag gate. It
+subtracts wrapped Q16 positions before computing each 3D length, clamps each
+length to 2147418112 (`flt_7C19E0`), truncates, and tests
+distance(second,target) minus distance(first,target) strictly greater than the
+supplied lead. Proximity/LOS/seeing commands now use the same raw distance
+convention and retain their own center/bbox-origin rules. BMS single triggers
+43..45 shift their whole-metre parameter before calling these shared helpers.
+The LOS walker split remains an open approximation; this slice does not claim
+that the existing shared ray seam reproduces both retail walkers.
 
-FogDist/MoveFog consume Q16 directly. Whole-metre host controls convert once before entering the same weather handler; the old integer inspection mirror does not own the weather state. This also corrects an earlier comment that mistook Script_Compile's DO-group counter packing at `0x4F4167/0x4F42C5` for distance conversion.
+FogDist/MoveFog consume Q16 directly. Whole-metre host controls convert once
+before entering the same weather handler; the old integer inspection mirror does
+not own the weather state. This also corrects an earlier comment that mistook
+Script_Compile's DO-group counter packing at [orig: Script_Compile @0x4f31f0
+(the site @0x4F4167); Script_Compile @0x4f31f0 (the site @0x4F42C5)] for
+distance conversion.
 
-WacCmd_Teleport (`0x4EE170`) passes both arguments to Entity_TeleportTeamToSpawn (`0x43D390`) and returns 0. WacCmd_TeleSsn (`0x4F7E00`) validates its source handle but discards that pointer at `0x4F7E47`; the first pool-3 type-6088 marker matching WP_NUMBER copies its own pose, refreshes its body/saved pose, and clears the building flag or takes the organic reset. The requested source does not move. This was verified in assembly as stores from and to the same ESI object, and is kept separate from BMS's working single-entity teleport.
+[orig: WacCmd_Teleport @0x4EE170] passes both arguments to [orig:
+Entity_TeleportTeamToSpawn @0x43D390] and returns 0. [orig: WacCmd_TeleSsn
+@0x4F7E00] validates its source handle but discards that pointer [orig:
+WacCmd_TeleSsn @0x4f7e00 (the site @0x4F7E47)]; the first pool-3 type-6088
+marker matching WP_NUMBER copies its own pose, refreshes its body/saved pose,
+and clears the building flag or takes the organic reset. The requested source
+does not move. This was verified in assembly as stores from and to the same ESI
+object, and is kept separate from BMS's working single-entity teleport.
 
-WacCmd_SoundSetToSsn (`0x4F1DD0`, SS2SSN) requires a valid item-backed entity and emits a full-volume positional sound, including for dead rows. It uses the existing SoundSlotEvent/FirePresenter/MissionAudio path. The resolver strips SS_ before looking up the sound name (`0x4F2C0E`, `0x4F2FE2`). The event reserves a terminator after all 24 LWF Multi name bytes. Missing-bank resolution still belongs to the existing sound consumer; this slice does not introduce a compile-time bank validator.
+[orig: WacCmd_SoundSetToSsn @0x4F1DD0], SS2SSN) requires a valid item-backed
+entity and emits a full-volume positional sound, including for dead rows. It
+uses the existing SoundSlotEvent/FirePresenter/MissionAudio path. The resolver
+strips SS_ before looking up the sound name [orig: WacScript_ResolveParameter
+@0x4f2920 (the site @0x4F2C0E)], [orig: WacScript_ResolveParameter @0x4f2920
+(the site @0x4F2FE2)]). The event reserves a terminator after all 24 LWF Multi
+name bytes. Missing-bank resolution still belongs to the existing sound
+consumer; this slice does not introduce a compile-time bank validator.
 
-The behavior fixtures cover strict lead equality, fractional/M/F operands, raw variables, wrapped coordinate subtraction, overflow clamping, valid itemless controller writes, pool scope and group return values, live sight acquisition after SSNMax, fractional fog and host-control compatibility, 24-byte sound names, and the difference between the two teleport commands.
+The behavior fixtures cover strict lead equality, fractional/M/F operands, raw
+variables, wrapped coordinate subtraction, overflow clamping, valid itemless
+controller writes, pool scope and group return values, live sight acquisition
+after SSNMax, fractional fog and host-control compatibility, 24-byte sound
+names, and the difference between the two teleport commands.
 
-Validation: full native build and CTest, 431 passed / one asset-gated skip / zero failures; fresh rebuilt Godot process, 1,743 passed / 25 pending, no parse/drop failures. The pre-uplink player death regression also passes its isolated 21-test co-op file. Runtime evidence remains distinct from normal mission playthrough acceptance.
-
+The pre-uplink player death regression also passes its isolated 21-test co-op
+file.
 
 ### 33.14 Door commands, motion, contact and presentation
 
-The functions previously labelled fade effects own doors. HeliLift_ResetAll at 0x44E870 clears 10,000 records of 24 bytes at 0xA8A418; FadeEffect_AllocateSlot at 0x44E890 allocates monotonically until mission reset. Entity_SpawnFromBMSRecord at 0x40F230..0x40F2F4 seeds Building/Decoration items carrying attrib 0x80. Each record has state, Q16 phase, Q16 step, maximum angle, owner and one-based section number. FadeEffect_UpdateAll at 0x44E920 advances opening by wrapped dword addition and closing by subtraction, clamps at 65536/0 and enters open/closed. Entity_UpdateAllEntities calls it between pools 2 and 3 at 0x4C2307.
+The functions previously labelled fade effects own doors. [orig:
+HeliLift_ResetAll @0x44E870] clears 10,000 records of 24 bytes at 0xA8A418;
+[orig: FadeEffect_AllocateSlot @0x44E890] allocates monotonically until mission
+reset. [orig: Entity_SpawnFromBMSRecord @0x40e9f0 (the site
+@0x40F230)]..0x40F2F4 seeds Building/Decoration items carrying attrib 0x80. Each
+record has state, Q16 phase, Q16 step, maximum angle, owner and one-based
+section number. [orig: FadeEffect_UpdateAll @0x44E920] advances opening by
+wrapped dword addition and closing by subtraction, clamps at 65536/0 and enters
+open/closed. Entity_UpdateAllEntities calls it between pools 2 and 3 at
+0x4C2307.
 
-ItemDef_ParseProperty at 0x49F748..0x49F980 clamps num_doors to 0..30 and first_door minus one to 0..30. They write the low two bytes of deathtime, preserving the real alias and parse ordering. door_dir aliases clipsize; door_type and door_dir use one-based bit indices. open_rate is truncated 65536/(seconds*62); max_angle uses degrees/360 times 4294967295. Sound names carry all 24 authored bytes. The normalized format appends fields to preserve existing offsets.
+ItemDef_ParseProperty [orig: @0x49F748..0x49F980] clamps num_doors to 0..30 and
+first_door minus one to 0..30. They write the low two bytes of deathtime,
+preserving the real alias and parse ordering. door_dir aliases clipsize;
+door_type and door_dir use one-based bit indices. open_rate is truncated
+65536/(seconds*62); max_angle uses degrees/360 times 4294967295. Sound names
+carry all 24 authored bytes. The normalized format appends fields to preserve
+existing offsets.
 
-The door event callback at 0x43F370 has states 0 closed, 1 opening, 2 open and 3 closing. Event 7 opens/reverses closing; event 8 closes/reverses opening; event 6 selects the contact mask and toggles only stationary states. Repeated opening/closing contacts do not restart motion or replay sound. Transitions play the authored set at the unposed COBJ pivot transformed by placement, falling back to entity origin. Every callback sets static think age to 1920.
+The door event callback [orig: Entity_ProcessSectionDamageTransition @0x43F370]
+has states 0 closed, 1 opening, 2 open and 3 closing. Event 7 opens/reverses
+closing; event 8 closes/reverses opening; event 6 selects the contact mask and
+toggles only stationary states. Repeated opening/closing contacts do not restart
+motion or replay sound. Transitions play the authored set at the unposed COBJ
+pivot transformed by placement, falling back to entity origin. Every callback
+sets static think age to 1920.
 
-WAC OpenDoors/CloseDoors at 0x4F7D40/0x4F7DA0 visit pool 2 only, comparing the signed command-group word and exact door callback. BMS actions 30/31 at 0x4541A0/0x454240 visit pool 2 then pool 1. WAC DoorOpen at 0x4F70A0 returns the FIRST matching door entity's first slot state==2; a later open door cannot override an earlier closed one.
+WAC OpenDoors/CloseDoors at [orig: WacScript_SendWeaponDetachEvent @0x4F7D40;
+Entity_SendWeaponEvent8ToPool2 @0x4F7DA0] visit pool 2 only, comparing the
+signed command-group word and exact door callback. BMS actions 30/31 at [orig:
+Entity_KillDestructiblesByTeam @0x4541A0; Entity_KillDestructiblesByOwner
+@0x454240] visit pool 2 then pool 1. WAC [orig: WacCmd_DoorOpen @0x4F70A0]
+returns the FIRST matching door entity's first slot state==2; a later open door
+cannot override an earlier closed one.
 
-Entity_ComputeBoneCollisionForce at 0x4AE150 emits CD mask bits relative to first_door (0x4AEB0F), and the movement resolver invokes event 6 even without solid force (0x4B3505), on both authority and client. Non-player queries skip opening/open building door sections; player-class queries retain animated collision. This resolves the old D-COL-2 finding: the table represented door states, not destroyed walls.
+[orig: Entity_ComputeBoneCollisionForce @0x4AE150] emits CD mask bits relative
+to first_door [orig: Entity_ComputeBoneCollisionForce @0x4ae150 (the site
+@0x4AEB0F)], and the movement resolver invokes event 6 even without solid force
+[orig: Entity_MovementCollisionResolver @0x4b2bd0 (the site @0x4B3505)], on both
+authority and client. Non-player queries skip opening/open building door
+sections; player-class queries retain animated collision. This resolves the old
+D-COL-2 finding: the table represented door states, not destroyed walls.
 
-build_bone_transforms at 0x4E3070 and BoneCallback_AnimatedBones_World at 0x4E3180 publish phases from CTRL ordinal DOOR_00. SimPoseProvider and the engine present-row collector now read the same DoorSystem. Present rows preserve signed phase dwords as two u16 halves, including the fully open value 65536. EntityPresenter publishes the same consecutive ordinal range, including authored indices beyond the 16 named DOOR registers, and releases its own overrides when ownership ends.
+[orig: build_bone_transforms @0x4E3070] and [orig:
+BoneCallback_AnimatedBones_World @0x4E3180] publish phases from CTRL ordinal
+DOOR_00. SimPoseProvider and the engine present-row collector now read the same
+DoorSystem. Present rows preserve signed phase dwords as two u16 halves,
+including the fully open value 65536. EntityPresenter publishes the same
+consecutive ordinal range, including authored indices beyond the 16 named DOOR
+registers, and releases its own overrides when ownership ends.
 
-Validation: the focused native door test passes definition aliases/defaults, selective contact masks, reversals, sound origins, first-match queries, WAC/BMS pool scopes, whole-world restart, monotonic exhaustion and signed step behavior. The shipped Iblock01 asset opens its collision section while its building section remains fixed. The collision suite passes the normal contact-to-event path and player/NPC split. The full Release build and native suite pass (432 pass, one existing motorcycle asset-gate skip, zero failures; npc-door-full-ctest.log, 116.09 seconds). The rebuilt Dev extension passes the isolated 41-test presenter file, including the actual Iblock01 render part opening and closing. Full GUT passes 1,745 tests across 178 scripts (25 pending/skipped, no parse errors or dropped scripts; npc-gut-doors-full.log, 110.154 seconds). The existing one orphan and 13 resources still in use remain reported at shutdown. This is subsystem validation, not an accepted normal SP mission playthrough.
+Regression coverage: the focused native door test passes definition
+aliases/defaults, selective contact masks, reversals, sound origins, first-match
+queries, WAC/BMS pool scopes, whole-world restart, monotonic exhaustion and
+signed step behavior. The shipped Iblock01 asset opens its collision section
+while its building section remains fixed. The collision suite passes the normal
+contact-to-event path and player/NPC split. The full Release build and native
+suite pass. The rebuilt Dev extension passes the isolated 41-test presenter
+file, including the actual Iblock01 render part opening and closing. This is
+subsystem validation, not an accepted normal SP mission playthrough.
 
 | ID | Open divergence | Retail witness | Consequence / next owner |
 |----|-----------------|----------------|--------------------------|
@@ -8004,571 +8113,846 @@ Validation: the focused native door test passes definition aliases/defaults, sel
 | D-DOOR-2 | The separate ai_function target projectile callback is not implemented by DoorSystem | 0x43F880..0x43F8EB | Shoot-to-open targets need the hit-section event-1 producer and its slot-index quirk; ordinary ai_function door commands/contact are implemented. |
 | D-DOOR-3 | Exhausted/stale global slot reads are safely rejected; arbitrary alias-authored counts beyond 30 are not published beyond the declared phase span | allocator 0x44E890; raw signed bytes and unchecked bus writes at 0x43F370/0x4E3070 | Normal authored definitions retain their state and phases. Retail out-of-bounds memory behavior is not emulated. Cross-entity allocation order and rebind behavior need a wire witness before claiming full lifecycle parity. |
 
-
 ### 33.15 WAC execution-entry caches and BMS event queries
 
-WacScript_CacheLocalPlayerState at `0x4F5780` is called by ExecuteBytecode at `0x4F58F4`, not by the 62.5 Hz world tick. Each bytecode execution snapshots signed-word player health and mana (armor at entity +0x288), time of day divided by 279620 into minutes, and the current winner flags. Missing players yield zero health/mana and auto handle 0xFFFF. Writes or gameplay changes during that execution do not refresh the other cached values. The next bytecode execution does.
+[orig: WacScript_CacheLocalPlayerState @0x4F5780] is called by [orig:
+WacScript_ExecuteBytecode @0x4f58b0 (the site @0x4F58F4)], not by the 62.5 Hz
+world tick. Each bytecode execution snapshots signed-word player health and mana
+(armor at entity +0x288), time of day divided by 279620 into minutes, and the
+current winner flags. Missing players yield zero health/mana and auto handle
+0xFFFF. Writes or gameplay changes during that execution do not refresh the
+other cached values. The next bytecode execution does.
 
-The 24-entry named-value table at `0x82EEF0` contains mutable pointers. ResolveParameter at `0x4F2A92..0x4F2A9F` returns operand type 1 for them. Health, Mana, CurTOD, GameOver, WinVar and LoseVar therefore accept arithmetic/assignment as cache words; they do not write the player entity, clock or match winner. The compiler previously rejected these lvalues and silently redirected them to V0. The compiler and VM now preserve their actual destination. Other named-value bindings and write consumers still need review, including SquadSSN/SquadWho, breathtime, autogain and RND.
+The 24-entry named-value table at `0x82EEF0` contains mutable pointers.
+ResolveParameter [orig: WacScript_ResolveParameter @0x4f2920 (the site
+@0x4F2A92..0x4F2A9F)] returns operand type 1 for them. Health, Mana, CurTOD,
+GameOver, WinVar and LoseVar therefore accept arithmetic/assignment as cache
+words; they do not write the player entity, clock or match winner. The compiler
+previously rejected these lvalues and silently redirected them to V0. The
+compiler and VM now preserve their actual destination. Other named-value
+bindings and write consumers still need review, including SquadSSN/SquadWho,
+breathtime, autogain and RND.
 
-WacCmd_Event at `0x4ED1E0` reads the zero-based BMS event record's active byte at +20. An event in its activation delay already returns true; testing the later event-fired predicate was incorrect. WAC now reads the BMS owner's active state through a narrow query interface, without keeping a second event-state table. Missing owners and invalid indices safely return zero.
-
-Validation: wac_behavior passes signed-word values, absent players, per-execution refresh, cache-only writes with V0 preservation, time units, outcome timing and delayed BMS activity. event_runtime_bms, world and tick_digest also pass. These focused native checks do not replace the next rebuilt-extension check or the outstanding mission playthrough gate.
-
+[orig: WacCmd_Event @0x4ED1E0] reads the zero-based BMS event record's active
+byte at +20. An event in its activation delay already returns true; testing the
+later event-fired predicate was incorrect. WAC now reads the BMS owner's active
+state through a narrow query interface, without keeping a second event-state
+table. Missing owners and invalid indices safely return zero.
 
 ### 33.16 Infantry obstacle detours and common think ordering
 
-The function labelled ai_find_cover_position at 0x4AFAB0 seeks a clear path toward the movement goal. It does not seek occluded combat cover. Collision at 0x4B37BB arms entity +0x369 to 1. The search samples radii 2..15 units and headings -120..120 degrees in 30-degree steps, excluding headings within 357913920 BAM of bodyHeading. Candidate ground is raised 28672; the start ground is raised 24576; both LOS legs use height offset 8192. Cost is distance-step plus absolute heading offset, with 195 for water and 390 for the state-1 one-leg fallback. The fallback accepts equal cost, so its last equal-cost sample wins; successful two-leg paths use strict improvement and keep the first tie.
+The function labelled [orig: ai_find_cover_position @0x4AFAB0] seeks a clear
+path toward the movement goal. It does not seek occluded combat cover. Collision
+[orig: Entity_MovementCollisionResolver @0x4b2bd0 (the site @0x4B37BB)] arms
+entity +0x369 to 1. The search samples radii 2..15 units and headings -120..120
+degrees in 30-degree steps, excluding headings within 357913920 BAM of
+bodyHeading. Candidate ground is raised 28672; the start ground is raised 24576;
+both LOS legs use height offset 8192. Cost is distance-step plus absolute
+heading offset, with 195 for water and 390 for the state-1 one-leg fallback. The
+fallback accepts equal cost, so its last equal-cost sample wins; successful
+two-leg paths use strict improvement and keep the first tie.
 
-The selected point is cached at entity +0x324/+0x328/+0x32C and state becomes 2 even if no sample improves the goal. Subsequent movement uses that point until horizontal distance is strictly below 65536, then clears the byte. Zero movement distance also clears it at 0x4BD2E9. Spawn reset clears the cache. The former board_blocked boolean has been replaced by this actual state and target; boarding continues to read its nonzero value for the arrival ring.
+The selected point is cached at entity +0x324/+0x328/+0x32C and state becomes 2
+even if no sample improves the goal. Subsequent movement uses that point until
+horizontal distance is strictly below 65536, then clears the byte. Zero movement
+distance also clears it [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
+@0x4BD2E9)]. Spawn reset clears the cache. The former board_blocked boolean has
+been replaced by this actual state and target; boarding continues to read its
+nonzero value for the arrival ring.
 
-The apparent authored graph path is ineffective in this build: CAIPath_Init at 0x40942A zeroes capacity, the sole FindPath caller uses that fresh local, 0x409677 passes zero as maxResults and 0x408E47 exits backtracking without emitting a node. GetCurrentNode therefore cannot replace the goal, even with a loaded AIN3. The portable detour preserves that effective zero-node behavior rather than inventing graph navigation. The helper always returns 1, making its caller's failure-mode ladder unreachable.
+The apparent authored graph path is ineffective in this build: [orig:
+CAIPath_Init @0x409420 (the site @0x40942A)] zeroes capacity, the sole FindPath
+caller uses that fresh local, [orig: CAIPath_FindPath @0x409580 (the site
+@0x409677)] passes zero as maxResults and [orig: CAIPathfinder_FindPath
+@0x408d30 (the site @0x408E47)] exits backtracking without emitting a node.
+GetCurrentNode therefore cannot replace the goal, even with a loaded AIN3. The
+portable detour preserves that effective zero-node behavior rather than
+inventing graph navigation. The helper always returns 1, making its caller's
+failure-mode ladder unreachable.
 
-The entire organic think is gated by key & 15 at 0x4BA970 and authority at 0x4BA97E. Combat follows navigation inside that gate; perception adds its key & 31 test at 0x4BBE47. Damage alert and movement timers therefore decay on think steps, and combat supplies its movement goal and proposed animation before the common detour/gait selector. The previous implementation ran combat every tick after selection, consuming wasHit too early and overwriting the newly selected movement direction. Combat now returns its proposed animation and the common selector commits it once. The saved previous movement mode is published after the combat decision, so an already fighting NPC does not re-enter pre_attack because the navigation-only mode was zeroed.
+The entire organic think is gated by key & 15 at [orig: Entity_UpdateInfantryAI
+@0x4b9910 (the site @0x4BA970)] and authority [orig: Entity_UpdateInfantryAI
+@0x4b9910 (the site @0x4BA97E)]. Combat follows navigation inside that gate;
+perception adds its key & 31 test [orig: Entity_UpdateInfantryAI @0x4b9910 (the
+site @0x4BBE47)]. Damage alert and movement timers therefore decay on think
+steps, and combat supplies its movement goal and proposed animation before the
+common detour/gait selector. The previous implementation ran combat every tick
+after selection, consuming wasHit too early and overwriting the newly selected
+movement direction. Combat now returns its proposed animation and the common
+selector commits it once. The saved previous movement mode is published after
+the combat decision, so an already fighting NPC does not re-enter pre_attack
+because the navigation-only mode was zeroed.
 
-Focused validation: infantry and collision pass. Tests cover signed/quantized detour heading, first versus last tie behavior, one-leg fallback, state-3 second-leg requirement, goal preservation, strict horizontal arrival, idle and spawn clears, 16-tick alert decay, first pre_attack versus later attack decisions, and actual approach into attack range. A route-walking fixture starts outside a solid wall with no staged blockage or detour; its normal collision arms state 1, selection enters 2 and the root-motion motor reaches the waypoint on the far side. This is a synthetic integrated movement check, not a normal SP mission playthrough.
+Focused validation: infantry and collision pass. Tests cover signed/quantized
+detour heading, first versus last tie behavior, one-leg fallback, state-3
+second-leg requirement, goal preservation, strict horizontal arrival, idle and
+spawn clears, 16-tick alert decay, first pre_attack versus later attack
+decisions, and actual approach into attack range. A route-walking fixture starts
+outside a solid wall with no staged blockage or detour; its normal collision
+arms state 1, selection enters 2 and the root-motion motor reaches the waypoint
+on the far side. This is a synthetic integrated movement check, not a normal SP
+mission playthrough.
 
-Driver-lean follow-up: 0x4BEE3D compares signed hull roll strictly below 0xFBBBBBC0 (-71582784) for state 110; 0x4BEE50 compares strictly above 0x04444440 (+71582784) for 109. Negative speed overrides lean with 108, then abs(speed) below 200 overrides both with 107. The existing mounted_anim_state_for_seat implementation and vehicle_mount boundary cases match, closing the previously unwitnessed threshold item.
+Driver-lean follow-up: [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
+@0x4BEE3D)] compares signed hull roll strictly below 0xFBBBBBC0 (-71582784) for
+state 110; [orig: Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BEE50)]
+compares strictly above 0x04444440 (+71582784) for 109. Negative speed overrides
+lean with 108, then abs(speed) below 200 overrides both with 107. The existing
+mounted_anim_state_for_seat implementation and vehicle_mount boundary cases
+match, closing the previously unwitnessed threshold item.
 
-The existing combat fixtures retained the first AiEntity pointer across a second attach, which can reallocate the vector. Reacquiring both bodies removes the stale-pointer asymmetry and permits meaningful distance assertions. Temporary diagnosis traces were removed.
+The existing combat fixtures retained the first AiEntity pointer across a second
+attach, which can reallocate the vector. Reacquiring both bodies removes the
+stale-pointer asymmetry and permits meaningful distance assertions. Temporary
+diagnosis traces were removed.
 
-The general terrain-gradient detour producer is implemented in section 33.36. Open D-INF-2 residuals include self-referential drag reversal, the documented escort/S-point details, and deterministic handling of malformed state 3. Retail's same-mode state-3 search reads an uninitialized stack start height; no state-3 producer was witnessed, so the portable path uses a ground probe instead of emulating undefined memory.
+The general terrain-gradient detour producer is implemented in section 33.36.
+Open D-INF-2 residuals include self-referential drag reversal, the documented
+escort/S-point details, and deterministic handling of malformed state 3.
+Retail's same-mode state-3 search reads an uninitialized stack start height; no
+state-3 producer was witnessed, so the portable path uses a ground probe instead
+of emulating undefined memory.
 
-
-Validation checkpoint for sections 33.15/33.16: the complete Release build succeeds. The full CTest pass exercised 433 tests: 431 passed, one asset-gated motorcycle skip, and the ai file exposed two obsolete per-tick alert assertions. After correcting that fixture to the SSN-staggered think boundary (tick + 36*SSN), its isolated rerun passes; all 432 runnable tests are covered. No engine change was needed after the full run (npc-detour-full-ctest.log, 102.37 seconds; npc-detour-rerun-ctest.log). The rebuilt Dev extension passes full GUT in a fresh isolated process: 1,745 passing, 25 pending/skipped, 178 scripts, 56,618 assertions, no parse errors or dropped scripts (npc-gut-detour-full.log, 156.622 seconds). One existing orphan and 13 resources still in use are still reported at shutdown. Normal SP mission playthrough acceptance remains outstanding.
+No engine change was needed after the full run.
 
 ### 33.17 WAC fire requests and category blocks
 
-weaponfired at 0x4ED360 reads one of ten request latches. blockfire at 0x4EE140 writes the corresponding block word and returns one for a valid category. Input_HandleActionBinding_0 stamps the request at 0x4E0968 before checking the block at 0x4E096F, and before the later seat/fireability rejection. The index is WeaponDef.Type (the armory category), not the scoreboard weapon class. PowerThrow press/release takes a separate path before these arrays.
+[orig: WacCmd_WeaponFired @0x4ED360] reads one of ten request latches. [orig:
+WacCmd_BlockFire @0x4EE140] writes the corresponding block word and returns one
+for a valid category. Input_HandleActionBinding_0 stamps the request [orig:
+Input_HandleActionBinding_0 @0x4e0420 (the site @0x4E0968)] before checking the
+block [orig: @0x4E096F], and before the later seat/fireability rejection. The
+index is WeaponDef.Type (the armory category), not the scoreboard weapon class.
+PowerThrow press/release takes a separate path before these arrays.
 
-ScriptWeaponInput is owned by World. The local binding dispatcher records ordinary presses and deferred automatic-fire requests; a held trigger alone does not create another request. A block refuses the new request while leaving already accepted FIRE actions intact. WacScript_ExecuteBytecode calls the counter reset at 0x4F61F2, so requests remain observable throughout the pass and clear at its end. Blocks persist until changed or mission load. The play-start snapshot restores authored controls after system on_load resets.
+ScriptWeaponInput is owned by World. The local binding dispatcher records
+ordinary presses and deferred automatic-fire requests; a held trigger alone does
+not create another request. A block refuses the new request while leaving
+already accepted FIRE actions intact. WacScript_ExecuteBytecode calls the
+counter reset [orig: WacScript_ExecuteBytecode @0x4f58b0 (the site @0x4F61F2)],
+so requests remain observable throughout the pass and clear at its end. Blocks
+persist until changed or mission load. The play-start snapshot restores authored
+controls after system on_load resets.
 
-The new wac_weapon_input native test passes: command-to-input-to-query behavior, category versus score slot, refused driver input, deferred auto-fire, accepted delayed shots, PowerThrow bypass, invalid categories, the 62-tick divider and retry state. wac_behavior and local_player_view also pass. Negative indices use an explicit bounds guard rather than retail's out-of-array access.
+Negative indices use an explicit bounds guard rather than retail's out-of-array
+access.
 
 ### 33.18 WAC voice ownership and completion
 
-The mission now owns ScriptVoiceChannel: synchronous file resolution/PCM decode, acoustic anchor, portrait identity, range and readiness. The host presents the decoded clip and acknowledges physical completion. wave/pwave return zero on successful load and one on missing player or failed load; SSNwave/SSNradio return one on successful load and zero on invalid entity or failed load. Source validation precedes interruption. SSNwave uses the speaker as its acoustic anchor; radio uses the local player and retains the speaker as its portrait identity.
+The mission now owns ScriptVoiceChannel: synchronous file resolution/PCM decode,
+acoustic anchor, portrait identity, range and readiness. The host presents the
+decoded clip and acknowledges physical completion. wave/pwave return zero on
+successful load and one on missing player or failed load; SSNwave/SSNradio
+return one on successful load and zero on invalid entity or failed load. Source
+validation precedes interruption. SSNwave uses the speaker as its acoustic
+anchor; radio uses the local player and retains the speaker as its portrait
+identity.
 
-Audio_Play3DPositionalSound at 0x4ECC96 overrides range to 100 Q16 units for the local anchor. This also applies to SSNwave(local,...) and to radio; the radio handler's lack of a range write does not preserve the preceding positional range after a successful start. Ordinary positional voices follow the actor and use the existing retail distance curve, with silence at the range boundary. Physical silence does not make waveready true.
+[orig: Audio_Play3DPositionalSound @0x4ecc80 (the site @0x4ECC96)] overrides
+range to 100 Q16 units for the local anchor. This also applies to
+SSNwave(local,...) and to radio; the radio handler's lack of a range write does
+not preserve the preceding positional range after a successful start. Ordinary
+positional voices follow the actor and use the existing retail distance curve,
+with silence at the range boundary. Physical silence does not make waveready
+true.
 
-ResetByHandle at 0x767160 invalidates the previous physical handle before file loading. A failed replacement releases its old buffer but leaves the nonzero handle word visible to waveready until the playback validation pass. The port preserves that same-pass behavior. Playback validation at 0x4ED9E8..0x4EDA2A stops anchors with a null ItemDef pointer or the dead flag. This is distinct from the command's nonzero ItemTypeIndex check: +28 is the type index, +32 the definition pointer. The port uses Entity.has_item_def for the latter. Generation plus decoded-clip identity rejects obsolete completion callbacks; restoring a baseline issues a new generation and restarts its clip. The host guards callbacks from obsolete player nodes as well.
+[orig: AudioChannel_ResetByHandle @0x767160] invalidates the previous physical
+handle before file loading. A failed replacement releases its old buffer but
+leaves the nonzero handle word visible to waveready until the playback
+validation pass. The port preserves that same-pass behavior. Playback validation
+[orig: Audio_UpdateAmbientStream @0x4ed9c0 (the site @0x4ED9E8..0x4EDA2A)] stops
+anchors with a null ItemDef pointer or the dead flag. This is distinct from the
+command's nonzero ItemTypeIndex check: +28 is the type index, +32 the definition
+pointer. The port uses Entity.has_item_def for the latter. Generation plus
+decoded-clip identity rejects obsolete completion callbacks; restoring a
+baseline issues a new generation and restarts its clip. The host guards
+callbacks from obsolete player nodes as well.
 
-Native wac_voice, wac_weapon_input and wac_behavior pass (4.09 seconds). The voice fixture covers synchronous returns/readiness, failed replacement, exact filenames, obsolete completion, positional movement/range, radio anchors, dead speakers and retry. Extension/playback validation follows separately.
+The voice fixture covers synchronous returns/readiness, failed replacement,
+exact filenames, obsolete completion, positional movement/range, radio anchors,
+dead speakers and retry. Extension/playback validation follows separately.
 
-D-SND-5 still tracks sound/sound2tgt and talking-portrait presentation. AOA1 decoding is implemented in section 33.20. Spatial panning, option quantization and audio-device details remain in the existing D-SND-8 scope. No headless timed-completion substitute has been invented: a host that presents voice must report physical channel completion.
+D-SND-5 still tracks sound/sound2tgt and talking-portrait presentation. AOA1
+decoding is implemented in section 33.20. Spatial panning, option quantization
+and audio-device details remain in the existing D-SND-8 scope. No headless
+timed-completion substitute has been invented: a host that presents voice must
+report physical channel completion.
 
 ### 33.19 Scripted actor controls and NPC secondary state
 
-WAC SSNanim (0x4F7630) writes current body state +0x2BC after checking the nonzero type index at +0x1C. It does not check health or the ItemDef pointer. The local anim command (0x4ED5B0) requires only the local entity and returns zero on success, one without it. Both now reach the motor, wire and presentation stores. Raw stores preserve pending +0x2B8 while retargeting the existing clip/blend machinery. The common animation arbiter also preserves pending when current already equals desired; retail skips that entire block on equality.
+WAC [orig: WacCmd_SsnAnim @0x4F7630] writes current body state +0x2BC after
+checking the nonzero type index at +0x1C. It does not check health or the
+ItemDef pointer. The local anim command [orig: WacCmd_Anim @0x4ED5B0] requires
+only the local entity and returns zero on success, one without it. Both now
+reach the motor, wire and presentation stores. Raw stores preserve pending
++0x2B8 while retargeting the existing clip/blend machinery. The common animation
+arbiter also preserves pending when current already equals desired; retail skips
+that entire block on equality.
 
-Animation arguments now resolve through the 252-entry retail table (WacScript_ResolveParameter 0x4F2920 -> AnimMap_FindSlotByName 0x40CFA0), including prefixed symbols used as values, unprefixed names in Anim parameters and case-insensitive names. Previously symbolic animations became string-pool indices. Unknown names report a compile error; numeric states and variable operands remain supported.
+Animation arguments now resolve through the 252-entry retail table
+(WacScript_ResolveParameter [orig: WacScript_ResolveParameter @0x4F2920] ->
+AnimMap_FindSlotByName [orig: AnimMap_FindSlotByName @0x40CFA0], including
+prefixed symbols used as values, unprefixed names in Anim parameters and
+case-insensitive names. Previously symbolic animations became string-pool
+indices. Unknown names report a compile error; numeric states and variable
+operands remain supported.
 
-forceanim (0x4F2610) writes the mission-owned override and emits its debug text through the existing text channel. The org1 think consumer at 0x4BD256 runs after combat and before attachment/gait selection, clears movement mode/distance and writes the forced body state. It bypasses the current state's animation lock. A missing ADM clip still retains the numeric forced state, as retail's missing slots alias RESET. Org2 and non-authority NPC think do not consume the override. WAC load clears it and retry restores the sealed baseline.
+forceanim [orig: Script_ForceAnimation @0x4F2610] writes the mission-owned
+override and emits its debug text through the existing text channel. The org1
+think consumer [orig: Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BD256)]
+runs after combat and before attachment/gait selection, clears movement
+mode/distance and writes the forced body state. It bypasses the current state's
+animation lock. A missing ADM clip still retains the numeric forced state, as
+retail's missing slots alias RESET. Org2 and non-authority NPC think do not
+consume the override. WAC load clears it and retry restores the sealed baseline.
 
-fall (0x4ED4E0) adds 500 Q16 units to live player Z with dword wrap, preserving velocity and other pose/lifecycle fields; the split registry/motor stores are reconciled. A missing player is guarded instead of reproducing retail's null dereference. dropflare (0x4F2710) tests the ItemDef pointer at +0x20, then invokes the existing flare-point/round-simulation path and returns one. It does not gate on health or the type index. IsPSPallteam (0x4EE4B0) reads the actual spawn registry, including dead spawn points in pools 1/2; empty returns zero and team is compared as a signed byte against the complete argument. It does not read the Advance & Secure capture chain.
+fall [orig: Cheat_RaiseLocalPlayerZ @0x4ED4E0] adds 500 Q16 units to live player
+Z with dword wrap, preserving velocity and other pose/lifecycle fields; the
+split registry/motor stores are reconciled. A missing player is guarded instead
+of reproducing retail's null dereference. [orig: WacCmd_DropFlare @0x4F2710]
+tests the ItemDef pointer at +0x20, then invokes the existing
+flare-point/round-simulation path and returns one. It does not gate on health or
+the type index. [orig: WacCmd_IsPspAllTeam @0x4EE4B0] reads the actual spawn
+registry, including dead spawn points in pools 1/2; empty returns zero and team
+is compared as a signed byte against the complete argument. It does not read the
+Advance & Secure capture chain.
 
-The org1 secondary writer is now witnessed and implemented: 0x4B9A14..0x4B9A48 copies primary current +0x2BC to secondary +0x2C8 and primary pending +0x2B8 to secondary pending +0x2C4 at the motor head before the authority/interpolation gate and think. Each channel retains its own phase, blend and variant ring. The secondary advances first and contributes no root motion. No equipped-ADM lookup participates in this writer; the earlier D-INF-24 dependency on finding such a source was incorrect. The player hold-pose/reload-window selector remains specific to org2.
+The org1 secondary writer is now witnessed and implemented: [orig:
+Entity_UpdateInfantryAI @0x4b9910 (the site @0x4B9A14..0x4B9A48)] copies primary
+current +0x2BC to secondary +0x2C8 and primary pending +0x2B8 to secondary
+pending +0x2C4 at the motor head before the authority/interpolation gate and
+think. Each channel retains its own phase, blend and variant ring. The secondary
+advances first and contributes no root motion. No equipped-ADM lookup
+participates in this writer; the earlier D-INF-24 dependency on finding such a
+source was incorrect. The player hold-pose/reload-window selector remains
+specific to org2.
 
-The new wac_actors test covers symbolic state resolution, current/pending propagation, local/SSN gate differences, forced-think cadence and replica/player exclusion, missing clips, retry, Z overflow, real spawn-registry membership and real flare rounds. The revised infantry regression exercises primary-to-secondary state/pending copies and independent promotion/blending. These tests, wac_behavior and tick_digest pass (npc-secondary-channel-tests.log, 4.05 seconds).
+The new wac_actors test covers symbolic state resolution, current/pending
+propagation, local/SSN gate differences, forced-think cadence and replica/player
+exclusion, missing clips, retry, Z overflow, real spawn-registry membership and
+real flare rounds. The revised infantry regression exercises
+primary-to-secondary state/pending copies and independent promotion/blending.
 
 ### 33.20 AOA1 audio payloads
 
-Audio_LoadWavFileFromArchive (0x766480) accepts AOA1 before attempting RIFF. The 16-byte header contains a mono sample count at +4, a Q16 rate relative to 44100 Hz at +8 and bytes-per-sample (1 or 2) at +12. PCM8 is already signed; applying RIFF's unsigned bias again corrupts it. The shared decoder now normalizes both widths to signed PCM16 and excludes the eight mixer interpolation bytes after the declared sample count. Truncated/empty payloads, unsupported widths and zero rates are rejected before allocation. The host uses the nearest integral sample rate recovered from the Q16 ratio.
+[orig: Audio_LoadWavFileFromArchive @0x766480] accepts AOA1 before attempting
+RIFF. The 16-byte header contains a mono sample count at +4, a Q16 rate relative
+to 44100 Hz at +8 and bytes-per-sample (1 or 2) at +12. PCM8 is already signed;
+applying RIFF's unsigned bias again corrupts it. The shared decoder now
+normalizes both widths to signed PCM16 and excludes the eight mixer
+interpolation bytes after the declared sample count. Truncated/empty payloads,
+unsupported widths and zero rates are rejected before allocation. The host uses
+the nearest integral sample rate recovered from the Q16 ratio.
 
-wav_pcm passes signed-extrema, count/rate/padding, truncation and oversized-count cases. The available extracted JOX corpus contains 5,658 WAV files, all RIFF; AOA1 coverage is synthetic format and playback coverage, not evidence of an AOA1 file in that corpus. The former standalone WacVoiceChannel bookkeeping was removed; World owns mission script voice and the standalone preview uses its physical player.
-
+wav_pcm passes signed-extrema, count/rate/padding, truncation and
+oversized-count cases. The available extracted JOX corpus contains 5,658 WAV
+files, all RIFF; AOA1 coverage is synthetic format and playback coverage, not
+evidence of an AOA1 file in that corpus. The former standalone WacVoiceChannel
+bookkeeping was removed; World owns mission script voice and the standalone
+preview uses its physical player.
 
 ### 33.21 WAC RGB operands and crash alias
 
-The color handlers receive three separate operands; the compiler does not pack them. The VM now packs blue + ((green + (red << 8)) << 8), with dword wrap and inter-component carries, for lightning, sun, sky, ground, floor, ceiling, cloud, fog/fogcolor, skyfog/skyfogcolor and gain (0x4EDCD0..0x4EDE70). The full packed word, including overflow into alpha, reaches the color block. Retail's crash registry row has four parameters but points to the same three-parameter sky-fog handler at 0x4EDE70, so its fourth argument is ignored. ColorFade supplies the existing transition duration. The environment-wire regression executes every spelling with variable operands, checks all RGB channel rates and the rendered first transition step, and checks overflow plus crash's ignored fourth parameter; it passes (0.99 seconds).
-
+The color handlers receive three separate operands; the compiler does not pack
+them. The VM now packs blue + ((green + (red << 8)) << 8), with dword wrap and
+inter-component carries, for lightning, sun, sky, ground, floor, ceiling, cloud,
+fog/fogcolor, skyfog/skyfogcolor and gain [orig: WacCmd_Sun
+@0x4EDCD0]..0x4EDE70). The full packed word, including overflow into alpha,
+reaches the color block. Retail's crash registry row has four parameters but
+points to the same three-parameter sky-fog handler [orig: WacCmd_SkyFogColor
+@0x4EDE70], so its fourth argument is ignored. ColorFade supplies the existing
+transition duration.
 
 ### 33.22 WAC ammunition names and script projectiles
 
-WacScript_ResolveParameter (0x4F2920, type 23) resolves literal Ammo operands by name before generic numeric parsing. AMMO_ symbols also work in ordinary value operands. The compiler now binds against the mounted ammo.def table, with the retail prefix fallback, and rejects unknown or null names. Mission-layer compilation loads that same table before world ballistics initialization; live compilation uses the world's table. A literal 1 is an ammunition name, while a variable may carry index 1. Full-width command validation precedes the firing entry's byte narrowing.
+[orig: WacScript_ResolveParameter @0x4F2920], type 23) resolves literal Ammo
+operands by name before generic numeric parsing. AMMO_ symbols also work in
+ordinary value operands. The compiler now binds against the mounted ammo.def
+table, with the retail prefix fallback, and rejects unknown or null names.
+Mission-layer compilation loads that same table before world ballistics
+initialization; live compilation uses the world's table. A literal 1 is an
+ammunition name, while a variable may carry index 1. Full-width command
+validation precedes the firing entry's byte narrowing.
 
-ammo2tgt (0x4F8100) selects the first pool-3 marker with a nonnull ItemDef pointer, item type 6088 and matching WP_NUMBER. It fires from the marker's position and yaw/pitch with a null source. ammoarea (0x4EE240) uses the first matching authored area below index 128, including an inactive area, and its raw script bounds. Three draws from the AI stream at 0x31BFBB8 choose rounded X/Y fractions and a 0..50-unit rise. The shared collision/terrain surface probe starts at area minimum Z plus 400 units; the launch is surface height plus 200 units plus the rise. The disassembly's 0xC80000 is the literal 200-unit offset, not a view-distance variable. Both commands use the source firing entry at 0x53F5B0.
+ammo2tgt [orig: WacCmd_AmmoToTarget @0x4F8100] selects the first pool-3 marker
+with a nonnull ItemDef pointer, item type 6088 and matching WP_NUMBER. It fires
+from the marker's position and yaw/pitch with a null source. [orig:
+WacCmd_AmmoArea @0x4EE240] uses the first matching authored area below index
+128, including an inactive area, and its raw script bounds. Three draws from the
+AI stream at 0x31BFBB8 choose rounded X/Y fractions and a 0..50-unit rise. The
+shared collision/terrain surface probe starts at area minimum Z plus 400 units;
+the launch is surface height plus 200 units plus the rise. The disassembly's
+0xC80000 is the literal 200-unit offset, not a view-distance variable. Both
+commands use the source firing entry [orig: Weapon_FireProcess @0x53F5B0].
 
-ammorain (0x4EE1A0) consumes one WAC-stream draw only for nonzero ammunition. Its wrapped offsets are 25 * signed(random << 8) >> 15 for X (multiplication after the shift), 50 * signed-low-word for Y, and 10 * ((random & 0xFFFFFF00) + 0x30000) for Z. It uses the NPC firing entry at 0x53F440 with a null shooter and pitch 0xC0000040. The source entry presents before its authority gate; the NPC entry gates before presentation. Ceasefire suppresses rounds while retaining the accepted fire presentation. The shared spawn path suppresses duplicate presentation only on its copy of the launch parameters. Invalid local-player and replica-null-source dereferences are guarded.
+[orig: WacCmd_AmmoRain @0x4EE1A0] consumes one WAC-stream draw only for nonzero
+ammunition. Its wrapped offsets are 25 * signed(random << 8) >> 15 for X
+(multiplication after the shift), 50 * signed-low-word for Y, and 10 * ((random
+& 0xFFFFFF00) + 0x30000) for Z. It uses the NPC firing entry [orig:
+WeaponSlot_FireAndSpawnEffects @0x53F440] with a null shooter and pitch
+0xC0000040. The source entry presents before its authority gate; the NPC entry
+gates before presentation. Ceasefire suppresses rounds while retaining the
+accepted fire presentation. The shared spawn path suppresses duplicate
+presentation only on its copy of the launch parameters. Invalid local-player and
+replica-null-source dereferences are guarded.
 
-The new wac_projectiles native test verifies symbol binding, packed/index gates, slot order, exact RNG state and offsets, collision-surface altitude, authority/ceasefire presentation order, snapshot replay and real projectile damage. It passes alongside minefield after correcting an early presentation-suppression flag (npc-wac-projectile-presentation-tests.log, 1.81 seconds). The existing WAC behavior, actors, retail corpus, layered loading, environment wiring and deterministic digest checks also pass. Extension and full-suite validation are recorded separately; no normal SP playthrough is established here.
-
+The new wac_projectiles native test verifies symbol binding, packed/index gates,
+slot order, exact RNG state and offsets, collision-surface altitude,
+authority/ceasefire presentation order, snapshot replay and real projectile
+damage. It passes alongside minefield after correcting an early
+presentation-suppression flag.
 
 ### 33.23 Shared FOV target and optical projection
 
-WAC fov (0x4EDEA0) shifts whole degrees left 16 with DWORD wrap into 0x26C6848. The adjacent 0x26C6844 is the current, and 0x26C684C the default. These now belong to WeatherCore.scalar_channels: Environment_UpdateWeatherTick (0x57EE62..0x57EE92) adds the wrapped (target - current + 7) >> 3 with crossing clamps. The asymmetric sub-eight negative dead band is retained. Environment_MissionStartInit copies target to current at 0x57F7DE. The value is independent of the ADS pose's 15/7-step interpolation and participates in the world snapshot.
+WAC [orig: WacCmd_Fov @0x4EDEA0] shifts whole degrees left 16 with DWORD wrap
+into 0x26C6848. The adjacent 0x26C6844 is the current, and 0x26C684C the
+default. These now belong to WeatherCore.scalar_channels:
+Environment_UpdateWeatherTick [orig: @0x57EE62..0x57EE92] adds the wrapped
+(target - current + 7) >> 3 with crossing clamps. The asymmetric sub-eight
+negative dead band is retained. Environment_MissionStartInit copies target to
+current [orig: Environment_MissionStartInit @0x57f1e0 (the site @0x57F7DE)]. The
+value is independent of the ADS pose's 15/7-step interpolation and participates
+in the world snapshot.
 
-The slot's integer zoom at +0x0C is initialized and clamped by Player_GetClampedWeaponElevation (0x4DC6B0), whose old ammunition description was incorrect. Scope-up on a Sighted definition writes 80 times a truncated Q16 reciprocal, with the multiply rounded; scope-down writes 80 Q16 (0x4DF218/0x4DF401..0x4DF430). Cross-category non-ForceScoped mounts reset the target (0x4DFB66). Player camera reset clears the scope pose and restores the target; mission retry retains the authored weather baseline through that transient reset.
+The slot's integer zoom at +0x0C is initialized and clamped by [orig:
+Player_GetClampedWeaponElevation @0x4DC6B0], whose old ammunition description
+was incorrect. Scope-up on a Sighted definition writes 80 times a truncated Q16
+reciprocal, with the multiply rounded; scope-down writes 80 Q16 [orig:
+Player_ToggleWeaponScope @0x4df0c0 (the site @0x4DF218)]/[orig:
+Player_ToggleWeaponScope @0x4df0c0 (the site @0x4DF401..0x4DF430)].
+Cross-category non-ForceScoped mounts reset the target [orig:
+Player_MountWeaponSlot @0x4dfa40 (the site @0x4DFB66)]. Player camera reset
+clears the scope pose and restores the target; mission retry retains the
+authored weather baseline through that transient reset.
 
-Player_CanFireWeapon (0x5CF780) also writes the target after its optical visibility gates when the camera interpolation is inactive and parent slot is not 3. Invisible optics reset it to 80; visible Sighted optics write the reciprocal result. This function is called by input, body, weapon, HUD and render paths, not solely by drawing. Render_ProcessMainSceneFrame (0x5CA3C5..0x5CA4A6) selects fixed 20 degrees for binoculars, 80/zoom for visible Sighted optics, current/zoom for visible non-Inset Scoped optics, or the current otherwise. The optical divisions truncate to Q16 before projection; zero/negative malformed divisors are guarded. The target's reciprocal rounding is observably different from the rendered direct division at zoom 3.
+[orig: Player_CanFireWeapon @0x5CF780] also writes the target after its optical
+visibility gates when the camera interpolation is inactive and parent slot is
+not 3. Invisible optics reset it to 80; visible Sighted optics write the
+reciprocal result. This function is called by input, body, weapon, HUD and
+render paths, not solely by drawing. Render_ProcessMainSceneFrame [orig:
+@0x5CA3C5..0x5CA4A6] selects fixed 20 degrees for binoculars, 80/zoom for
+visible Sighted optics, current/zoom for visible non-Inset Scoped optics, or the
+current otherwise. The optical divisions truncate to Q16 before projection;
+zero/negative malformed divisors are guarded. The target's reciprocal rounding
+is observably different from the rendered direct division at zoom 3.
 
-The native wac_environment_wire, local_player_view, player_view, weather_state, weapon_inventory and tick_digest checks pass (npc-fov-focused-tests.log, 4.68 seconds). New cases exercise WAC-to-weather-to-camera flow, whole-degree overflow, the negative dead band, snapshot restore, the two projection rules, in-flight scope protection, slot zoom clamps, gunner target-write exclusion, and category/ForceScoped mount resets. Full-suite and extension validation follow separately; these are subsystem checks, not SP playthrough evidence.
+New cases exercise WAC-to-weather-to-camera flow, whole-degree overflow, the
+negative dead band, snapshot restore, the two projection rules, in-flight scope
+protection, slot zoom clamps, gunner target-write exclusion, and
+category/ForceScoped mount resets. Full-suite and extension validation follow
+separately; these are subsystem checks, not SP playthrough evidence.
 
+Startup/visibility follow-up (2026-09-09): the full world loader now defers
+initial WAC execution until the existing weather owner has seeded ENV/time
+state. Previously MissionKernel executed the startup commands, weather seeding
+erased their targets, and the post-seed execution was rejected as a duplicate.
+Standalone/native boot keeps immediate execution unless the embedder selects the
+deferred boundary. The mission-kernel regression verifies exactly-once execution
+and both world/WAC retry state; the loaded-mission Godot test verifies startup
+fov(40), the first scheduled fov(120) eighth-step, and retry to 40.
 
-Startup/visibility follow-up (2026-09-09): the full world loader now defers initial WAC execution until the existing weather owner has seeded ENV/time state. Previously MissionKernel executed the startup commands, weather seeding erased their targets, and the post-seed execution was rejected as a duplicate. Standalone/native boot keeps immediate execution unless the embedder selects the deferred boundary. The mission-kernel regression verifies exactly-once execution and both world/WAC retry state; the loaded-mission Godot test verifies startup fov(40), the first scheduled fov(120) eighth-step, and retry to 40.
-
-Body, HUD and render reads now call one optical predicate. Its water comparison uses the already-Q16 Env_WaterHeightFixed value directly; an accidental second conversion caused two real Simulation regressions, reproduced in isolation and fixed without changing those assertions. All 92 Simulation tests pass. The subsequent complete native run passes all 436 runnable tests with one asset skip, and full GUT passes 1,751 with 25 pending (npc-turn-tele-full-ctest.log; npc-gut-turn-tele-full.log). This includes the actor follow-up below.
+Body, HUD and render reads now call one optical predicate. Its water comparison
+uses the already-Q16 Env_WaterHeightFixed value directly; an accidental second
+conversion caused two real Simulation regressions, reproduced in isolation and
+fixed without changing those assertions. This includes the actor follow-up
+below.
 
 ### 33.24 SSN turn and local teleport
 
-WAC ssnturn (0x4F72B0) requires an allocated row and nonzero raw item index; it does not require health or a resolved ItemDef. Its store to entity+0x1A8 is ((wrap32(90-heading)<<16)/360)<<16 with signed truncating division and wrapped shifts. The org1 motor consumes this as target_heading, preserving the existing quarter-step/clamped body turn. In org2 the same word is jump_cooldown; local, remote and pre-uplink player-class rows all use that interpretation. A valid nonmotor row still returns 1.
+WAC [orig: WacCmd_SsnTurn @0x4F72B0] requires an allocated row and nonzero raw
+item index; it does not require health or a resolved ItemDef. Its store to
+entity+0x1A8 is ((wrap32(90-heading)<<16)/360)<<16 with signed truncating
+division and wrapped shifts. The org1 motor consumes this as target_heading,
+preserving the existing quarter-step/clamped body turn. In org2 the same word is
+jump_cooldown; local, remote and pre-uplink player-class rows all use that
+interpretation. A valid nonmotor row still returns 1.
 
-WAC tele (0x4F22D0) requires allocated target/local rows only. It stores health 20000, target Position into both live and saved-position triples, and target references into groundEntity (+0x28) and the queued mount fallback (+0x180). Velocity, live/saved attitude, mount state and dead/alive flags are not reset. The split AI mirror receives the exact Q16 position and health. The org2 queued Flags 0x200 consumer restores the fallback only when groundEntity is null and clears the request after its mount attempt (0x4B424A..0x4B4272). Vehicle respawn clears both references on pool-0 rows with a nonzero item index and matching groundEntity (0x460186 -> 0x43ED10).
+WAC [orig: WacCmd_Tele @0x4F22D0] requires allocated target/local rows only. It
+stores health 20000, target Position into both live and saved-position triples,
+and target references into groundEntity (+0x28) and the queued mount fallback
+(+0x180). Velocity, live/saved attitude, mount state and dead/alive flags are
+not reset. The split AI mirror receives the exact Q16 position and health. The
+org2 queued Flags 0x200 consumer restores the fallback only when groundEntity is
+null and clears the request after its mount attempt [orig:
+Entity_UpdateInfantryPlayerBody @0x4b40e0 (the site @0x4B424A..0x4B4272)].
+Vehicle respawn clears both references on pool-0 rows with a nonzero item index
+and matching groundEntity [orig: Entity_RespawnVehicle @0x45ff40 (the site
+@0x460186)] -> [orig: EntityList_ClearParentRef @0x43ED10]).
 
-The direct collision boundary extracts the existing candidate builder from the steady-state cadence. tele rebuilds source slices against the already-published dynamic/static target positions, resets the 17-tick refresh counter, then refreshes the local blink boxes (0x4B8EB0, 0x4B3DC0). It does not rebuild all pool tables or clear unrelated contact queues. The existing organic/active source filter remains; this change does not establish parity for every candidate-source eligibility rule or the other queued-mount admission rules.
+The direct collision boundary extracts the existing candidate builder from the
+steady-state cadence. tele rebuilds source slices against the already-published
+dynamic/static target positions, resets the 17-tick refresh counter, then
+refreshes the local blink boxes [orig: Entity_BuildProximityListsFromPools
+@0x4B8EB0], [orig: Entity_BuildProximityList @0x4B3DC0]). It does not rebuild
+all pool tables or clear unrelated contact queues. The existing organic/active
+source filter remains; this change does not establish parity for every
+candidate-source eligibility rule or the other queued-mount admission rules.
 
-wac_actors verifies the actual NPC turn step, arithmetic wrap, org2 word interpretation, gate/return behavior, position/health stores, preserved movement state and retry. collision verifies immediate blink/indoor changes and the deliberately stale dynamic target table until the seventeenth tick. vehicle_mount verifies one queued attempt, successful and failed request clearing, and the selective vehicle-respawn cleanup. All pass, as do the complete native/Godot runs cited above. These are subsystem checks; no normal SP mission playthrough is accepted.
-
+wac_actors verifies the actual NPC turn step, arithmetic wrap, org2 word
+interpretation, gate/return behavior, position/health stores, preserved movement
+state and retry. collision verifies immediate blink/indoor changes and the
+deliberately stale dynamic target table until the seventeenth tick.
+vehicle_mount verifies one queued attempt, successful and failed request
+clearing, and the selective vehicle-respawn cleanup. All pass, as do the
+complete native/Godot runs cited above. These are subsystem checks; no normal SP
+mission playthrough is accepted.
 
 ### 33.25 Scripted source fire and retry round ownership
 
-WAC ammo2ssn (WacScript_EntityFireAtTarget, 0x4F24E0) requires an allocated source, an ItemDef pointer, a nonzero ammo word, a nonzero unsigned health word and a model. It post-increments entity+341 and selects the first two model userpoints alternately. Userpoint_ComputeWorldTransform (0x56C420) receives a null direction output: the posed bone Euler triple supplies the fire direction; the point's authored direction and the target's position do not aim this shot. The command writes the target/null to entity+376, temporarily substitutes the source for a null primary occupant, calls Weapon_FireProcess (0x53F5B0), restores the occupant and returns 1. Missing model/userpoint data is guarded in OpenNova.
+WAC ammo2ssn (WacScript_EntityFireAtTarget, [orig: WacScript_EntityFireAtTarget
+@0x4F24E0] requires an allocated source, an ItemDef pointer, a nonzero ammo
+word, a nonzero unsigned health word and a model. It post-increments entity+341
+and selects the first two model userpoints alternately. [orig:
+Userpoint_ComputeWorldTransform @0x56C420] receives a null direction output: the
+posed bone Euler triple supplies the fire direction; the point's authored
+direction and the target's position do not aim this shot. The command writes the
+target/null to entity+376, temporarily substitutes the source for a null primary
+occupant, calls [orig: Weapon_FireProcess @0x53F5B0], restores the occupant and
+returns 1. Missing model/userpoint data is guarded in OpenNova.
 
-The shared source-fire path preserves presentation, ownership, authority and ceasefire handling. wac_projectiles exercises both real SimPoseProvider userpoints, their positions and directions, byte wrap, health-word truncation, null/invalid target handling, temporary and existing occupants, client ownership and retry. The test exposed a stale outgoing RoundRing after World::restore. Restore now discards its records/cursor/count while retaining the monotonic append sequence, so connected recipients' watermarks can accept subsequent shots. This is an OpenNova retry boundary adaptation.
+The shared source-fire path preserves presentation, ownership, authority and
+ceasefire handling. wac_projectiles exercises both real SimPoseProvider
+userpoints, their positions and directions, byte wrap, health-word truncation,
+null/invalid target handling, temporary and existing occupants, client ownership
+and retry. The test exposed a stale outgoing RoundRing after World::restore.
+Restore now discards its records/cursor/count while retaining the monotonic
+append sequence, so connected recipients' watermarks can accept subsequent
+shots. This is an OpenNova retry boundary adaptation.
 
-The focused native run passes wac_projectiles, wac_actors, tick_digest, npruntime_client_fire and npruntime_round_sim (npc-round-retry-ctest.log, 8.56 seconds). The rebuilt Godot extension passes the scheduled loaded-mission projectile test (npc-gut-round-retry.log, 13 assertions). The broader ammunition aim/ray/target-metadata families remain open; these checks do not establish normal SP playthrough acceptance.
+The rebuilt Godot extension passes the scheduled loaded-mission projectile test.
 
 ### 33.26 Squad events, named random result, and dormant music
 
 The shared ScriptSquadEvents owner ports the four event rows, the selected slot,
-and the mutable SquadSSN/SquadWho exports. WacCmd_SquadEvent (0x4ED070) finds the
-first matching event with nonzero TTL, records its index, copies its two payloads
-and returns 1. A miss returns 0 without clearing the selected values.
-WacCmd_SquadClear (0x4ED390) zeros the selected row and both exports, retains the
-selected index and returns 0. The bytecode epilog (0x4F61F2 -> 0x4EE6D0) decrements
-each nonzero TTL once, including initial execution. It does not age on ordinary
-logic ticks. World restores this owner after system load resets.
+and the mutable SquadSSN/SquadWho exports. [orig: WacCmd_SquadEvent @0x4ED070]
+finds the first matching event with nonzero TTL, records its index, copies its
+two payloads and returns 1. A miss returns 0 without clearing the selected
+values. [orig: WacCmd_SquadClear @0x4ED390] zeros the selected row and both
+exports, retains the selected index and returns 0. The bytecode epilog [orig:
+WacScript_ExecuteBytecode @0x4f58b0 (the site @0x4F61F2)] -> [orig:
+WacScript_DecrementTimersAndResetCounters @0x4EE6D0] decrements each nonzero TTL
+once, including initial execution. It does not age on ordinary logic ticks.
+World restores this owner after system load resets.
 
-The publisher at 0x4F0390 selects the first minimum signed TTL with an initial
-comparison ceiling of 10000, replaces that row with four raw arguments and
-returns the event id. It has no code or data callers in this Jointops executable.
-The portable publisher is available to native callers; no AI/UI producers have
-been invented. The old squadclear font-state annotation was incorrect.
+The publisher [orig: WacScript_PublishSquadEvent @0x4F0390] selects the first
+minimum signed TTL with an initial comparison ceiling of 10000, replaces that
+row with four raw arguments and returns the event id. It has no code or data
+callers in this Jointops executable. The portable publisher is available to
+native callers; no AI/UI producers have been invented. The old squadclear
+font-state annotation was incorrect.
 
 SquadSSN (table type 11), SquadWho and RND (type 2) are now actual mutable named
-values from the 24-row table at 0x82EEF0. SquadSSN carries the packed handle into
-entity commands. WacCmd_Random (0x4ED280) always advances the shared WAC PRNG,
-including zero or negative limits, uses signed 64-bit IMUL plus 0x8000 followed
-by SHRD 16 and wrapped +1, stores RND, then returns whether RND equals 1. The old
-32-bit multiplication dropped the upper product word for large limits and did
-not expose RND. Zero previously skipped its PRNG draw.
+values from the 24-row table at 0x82EEF0. SquadSSN carries the packed handle
+into entity commands. [orig: WacCmd_Random @0x4ED280] always advances the shared
+WAC PRNG, including zero or negative limits, uses signed 64-bit IMUL plus 0x8000
+followed by SHRD 16 and wrapped +1, stores RND, then returns whether RND equals
+1. The old 32-bit multiplication dropped the upper product word for large limits
+and did not expose RND. Zero previously skipped its PRNG draw.
 
-WAC music calls Sbf_StartEntry (0x4ED910). Its independent WAC stream is never
-opened in this executable: Sbf_OpenFile_Gamemus (0x4ED6C0) has no references.
-The null-handle arm returns 1 before checking the index. The VM now explicitly
-returns that success, without a fallback diagnostic or generic presentation
-effect. It does not drive the separate AudioVM/MUS adaptive-music context.
-The owning audio witness is mus-sbf-re.md, Game music driving.
+WAC music calls [orig: Sbf_StartEntry @0x4ED910]. Its independent WAC stream is
+never opened in this executable: [orig: Sbf_OpenFile_Gamemus @0x4ED6C0] has no
+references. The null-handle arm returns 1 before checking the index. The VM now
+explicitly returns that success, without a fallback diagnostic or generic
+presentation effect. It does not drive the separate AudioVM/MUS adaptive-music
+context. The owning audio witness is mus-sbf-re.md, Game music driving.
 
 wac_state verifies slot replacement, first-match selection, named SSN execution,
-mutable exports, failed-query preservation, clearing, per-execution TTL, negative
-TTL, fresh-load reset and retry restoration. Fixed arithmetic cases verify the
-zero/negative/large-limit random results and the RND snapshot. The loaded-mission
-GUT test verifies startup values, scheduled execution and identical random results
-after normal retry (npc-gut-wac-state.log, 12 assertions). All seven focused native
-tests pass (npc-wac-state-focused-ctest.log); full native CTest passes 439 tests
-with one existing motorcycle asset skip (npc-wac-state-full-ctest.log, 72.14 seconds).
-Full rebuilt-extension GUT passes 1,753 tests across 183 scripts, with 25 pending,
-58,093 assertions and no collection errors (npc-gut-wac-state-full.log, 121.28
-seconds). Existing orphan/resource shutdown caveats remain; mission playthrough
-acceptance is still open.
+mutable exports, failed-query preservation, clearing, per-execution TTL,
+negative TTL, fresh-load reset and retry restoration. Fixed arithmetic cases
+verify the zero/negative/large-limit random results and the RND snapshot. The
+loaded-mission GUT test verifies startup values, scheduled execution and
+identical random results after normal retry.
 
 ### 33.27 NPC idle attention and independent gaze (2026-09-09)
 
-Entity_UpdateInfantryAI (0x4B9910) now has its idle attention and look motor in
-infantry_attention.cpp. The authority's living org1 body runs attention after
-the 16-tick selection, using key = logic tick + 36 * runtime SSN. The pool-0
-interest scan runs at key % 256 == 0, or on each think while the entity is the
-scripted voice speaker. Radio's portrait identity, not its listener anchor, is
-g_voicePlaybackEntity (WacCmd_SsnRadio 0x4F7A2F).
+[orig: Entity_UpdateInfantryAI @0x4B9910] now has its idle attention and look
+motor in infantry_attention.cpp. The authority's living org1 body runs attention
+after the 16-tick selection, using key = logic tick + 36 * runtime SSN. The
+pool-0 interest scan runs at key % 256 == 0, or on each think while the entity
+is the scripted voice speaker. Radio's portrait identity, not its listener
+anchor, is g_voicePlaybackEntity (WacCmd_SsnRadio [orig: @0x4F7A2F]).
 
-The scan at 0x4BE0D0..0x4BE463 uses live position plus all three CameraOffset
-lanes. Its axis bounds are min(slot[17], 20u); allocation/item ID, hidden bit 1,
-self and the local-player rule bit 0x800 are its candidate gates. It does not
-require health or an ItemDef pointer. The distance clamp is an upper bound:
-flt_7C19E0 = 2147418112.0f (bits 0x4EFFFE00). The unsigned
-(radius - distance) >> 16 closeness term admits the retail diagonal-underflow
-score. The remaining score is speaker/friendly +8, local player +2, nearby
-facing-me +4, last look -12, exclusion of the previous look, baseline -12 and
-the SSN/tick phase term. LOS uses the exact eye endpoints.
+The scan [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
+@0x4BE0D0..0x4BE463)] uses live position plus all three CameraOffset lanes. Its
+axis bounds are min(slot[17], 20u); allocation/item ID, hidden bit 1, self and
+the local-player rule bit 0x800 are its candidate gates. It does not require
+health or an ItemDef pointer. The distance clamp is an upper bound: flt_7C19E0 =
+2147418112.0f (bits 0x4EFFFE00). The unsigned (radius - distance) >> 16
+closeness term admits the retail diagonal-underflow score. The remaining score
+is speaker/friendly +8, local player +2, nearby facing-me +4, last look -12,
+exclusion of the previous look, baseline -12 and the SSN/tick phase term. LOS
+uses the exact eye endpoints.
 
-After LOS, a dead body can raise damageTimer to 25; an enemy can set raw-position
-aimPoint, aiFocus and timer 10 unless the Blind/retaliation bit suppresses it.
-These writes precede the winner's 70-degree front-arc/minimum-score checks.
-The winner publishes all four Sees relations, without Targeted. Last/previous
-history rotates even when nobody wins. Entity_ResetToSpawnState (0x4B9610)
-also clears other actors' headLookTarget references to the resetting entity;
-snapshot/retry preserves and restores the whole attention state.
+After LOS, a dead body can raise damageTimer to 25; an enemy can set
+raw-position aimPoint, aiFocus and timer 10 unless the Blind/retaliation bit
+suppresses it. These writes precede the winner's 70-degree
+front-arc/minimum-score checks. The winner publishes all four Sees relations,
+without Targeted. Last/previous history rotates even when nobody wins. [orig:
+Entity_ResetToSpawnState @0x4B9610] also clears other actors' headLookTarget
+references to the resetting entity; snapshot/retry preserves and restores the
+whole attention state.
 
-Tracking at 0x4BE463..0x4BE7FD retains the three tick-phase eye jitters, 25u
-distance and 75-degree body-relative arc, 30-degree pitch clamp, and available
-43->125 / 44->126 / 140->141 substitutions for both current and pending
-animation. Combat and attachment aim producers inhibit idle aiming. A moving
-controller/driver also inhibits it: the decompiler's misleading
-renderInstance->_pad_135[1] is parent entity+0x64's AiBrain[136], commanded speed,
-not a model flag. The nearby helper PlayerSlot_SetTimeout (0x4AD4C0) writes
-automatic GRM facial expression at facial slot+52; its phase values 5/6/7 and
-byte_813DE0 are not greeting audio. Those facial writes/consumers remain D-INF-5.
+Tracking [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
+@0x4BE463..0x4BE7FD)] retains the three tick-phase eye jitters, 25u distance and
+75-degree body-relative arc, 30-degree pitch clamp, and available 43->125 /
+44->126 / 140->141 substitutions for both current and pending animation. Combat
+and attachment aim producers inhibit idle aiming. A moving controller/driver
+also inhibits it: the decompiler's misleading renderInstance->_pad_135[1] is
+parent entity+0x64's AiBrain[136], commanded speed, not a model flag. The nearby
+helper [orig: PlayerSlot_SetTimeout @0x4AD4C0] writes automatic GRM facial
+expression at facial slot+52; its phase values 5/6/7 and byte_813DE0 are not
+greeting audio. Those facial writes feed the §33.30 automatic slot (D-INF-5
+closed 2026-09-09).
 
 The body quarter-chase now adds the same step to live Yaw, preserving the
-existing gaze offset (0x4BE92B/0x4BE931). Independent look then chases desired
-yaw/pitch on every tick. Instruction bytes confirm the unusual positive
-thresholds: firing compares against 0x1E000000 but stores 0x1E00000; idle yaw
-compares 0xE000000/stores 0xE00000 and pitch compares 0xC000000/stores 0xC00000.
-The negative clamps use the smaller constants. These must not become symmetric
-clamps. On-foot twist is bounded to 90 degrees. All mounted NPC seats use the
-unconditional quarter-step yaw (bounded to 0x02000000) and eighth-step pitch,
-with the existing parent-config arc exceptions. The later carrier refresh
-preserves the chased look without a second chase. Root translation rotates by
-bodyHeading at entity+0x8C (0x4BF001), so looking sideways cannot steer walking.
+existing gaze offset [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
+@0x4BE92B); Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BE931)]. Independent
+look then chases desired yaw/pitch on every tick. Instruction bytes confirm the
+unusual positive thresholds: firing compares against 0x1E000000 but stores
+0x1E00000; idle yaw compares 0xE000000/stores 0xE00000 and pitch compares
+0xC000000/stores 0xC00000. The negative clamps use the smaller constants. These
+must not become symmetric clamps. On-foot twist is bounded to 90 degrees. All
+mounted NPC seats use the unconditional quarter-step yaw (bounded to 0x02000000)
+and eighth-step pitch, with the existing parent-config arc exceptions. The later
+carrier refresh preserves the chased look without a second chase. Root
+translation rotates by bodyHeading at entity+0x8C [orig: Entity_UpdateInfantryAI
+@0x4b9910 (the site @0x4BF001)], so looking sideways cannot steer walking.
 
 infantry_attention exercises the full motor's stagger, speaker identity,
-candidate gates, unsigned diagonal score, history, eye offsets, LOS, alert
-side effects, clip availability, reset cleanup, snapshot restore, independent
-root direction and every mounted seat's commanded-speed gate. Instruction
-boundary tests cover the asymmetric turn rates and BAM wrap. Existing infantry,
-WAC-turn and mount fixtures now distinguish desired gaze, live gaze and body
-heading. The pre-attack fixture pins the actual timer stamp (5 followed by
-three close-range decrements), then its expiry; its former final-frame
-positive-timer assertion depended on the old pinned look.
+candidate gates, unsigned diagonal score, history, eye offsets, LOS, alert side
+effects, clip availability, reset cleanup, snapshot restore, independent root
+direction and every mounted seat's commanded-speed gate. Instruction boundary
+tests cover the asymmetric turn rates and BAM wrap. Existing infantry, WAC-turn
+and mount fixtures now distinguish desired gaze, live gaze and body heading. The
+pre-attack fixture pins the actual timer stamp (5 followed by three close-range
+decrements), then its expiry; its former final-frame positive-timer assertion
+depended on the old pinned look.
 
-The asset-backed GameWorld regression npc_attention_test.gd passes 27 assertions
-(npc-gut-attention.log): two authored same-team NPCs satisfy a BMS GroupSeesGroup
-event, their native head overlay reaches the real 19-bone skeleton, and normal
-runtime stop/play resets and repeats the behavior. This is subsystem evidence,
-not an accepted SP playthrough. The remaining combat/movement aim-override
-producers stay in D-AI-4; automatic facial expressions stay in D-INF-5.
+This is subsystem evidence, not an accepted SP playthrough. The remaining
+combat/movement aim-override producers stay in D-AI-4; automatic facial
+expressions are the §33.30 automatic slot (D-INF-5 closed 2026-09-09).
 
-Full validation: native CTest 440 passed, one existing motorcycle asset skip
-(npc-attention-final-full-ctest.log, 22.94 seconds); rebuilt-extension GUT
-1,754 passed, 25 pending, 184 scripts and 58,122 assertions, with no collection
-errors (npc-gut-attention-final-full.log, 111.21 seconds). The full-suite
-passenger fixture failure reproduced in the isolated Simulation file. Its
-assertion now checks the authored seat body heading and the independent look
-arc separately. The existing one orphan and 13-resource shutdown reports remain.
+Its assertion now checks the authored seat body heading and the independent look
+arc separately.
 
-### 33.28 — WAC player-slot commands and raw experience accounting
+### 33.28 WAC player-slot commands and raw experience accounting
 
 Recovered and implemented against Jointops.exe on 2026-09-09. These commands
 resolve their implicit Player/Item/auto packed handle through the active
-player-slot table, not the Entity Player flag. Entity_ValidatePtr (0x500910)
-requires an active slot whose entity pointer matches; it does not require
-positive health or an ItemDef. The native Match roster owns that registration.
+player-slot table, not the Entity Player flag. [orig: Entity_ValidatePtr
+@0x500910] requires an active slot whose entity pointer matches; it does not
+require positive health or an ItemDef. The native Match roster owns that
+registration.
 
-- piskills (0x4F0B60) compares the signed argument against
-  CPlayerStats_GetFieldPlusOne(stats, 4), the raw enemy-kill field 5.
-- pisvar (0x4F0BD0) and psetvar (0x4F0CB0) read/test and set byte 1 at
+- piskills [orig: WacCmd_PlayerIsKills @0x4F0B60] compares the signed argument
+  against CPlayerStats_GetFieldPlusOne(stats, 4), the raw enemy-kill field 5.
+- pisvar [orig: WacCmd_PlayerIsVar @0x4F0BD0] and psetvar [orig:
+  WacCmd_PlayerSetVar @0x4F0CB0] read/test and set byte 1 at
   player-slot+392+index. The authored bank has 17 bytes, indices 0..16.
-  Server_PlayerAdd clears +392..+415, including all 17 bytes, at 0x51D51C.
-  Death and team changes do not clear this bank. Native identity updates
-  preserve it; replacing a roster slot or restoring the mission baseline
-  resets it through the existing Match owner.
-- The retail variable handlers check only index <= 16. Negative indices
-  address unrelated earlier slot memory. D-WAC-2 records the portable
-  boundary: return 0 outside 0..16 without reading or modifying other fields.
-- AddExp (0x4F2690) additionally requires the explicit SSN's ItemDef pointer
-  and a nonzero amount. Its argument is a dword bit pattern, so negative
-  amounts are accepted. It dispatches raw stats event 28, independently of
-  score.ini, game-type score-table gates, team points or entity health.
-- CPlayerStats_RecordEvent case 28 (0x52CAF8..0x52CBB3) adds the amount to
-  field 29 with dword wrap. Positive amounts recurse through entity+368:
-  the first registered occupant receives amount >> 1 and the second receives
-  amount >> 2. Both calls use the same recursive event, and both are followed
-  by event 27, incrementing field 28. The direct second-link route runs even
-  when the first link has no player slot. The counter increments even if the
-  shifted award is zero. A three-player chain given 64 therefore receives
-  64/32/32 points, with shared-award counters 0/1/2, not 64/32/16.
-- ppunt (0x4F0DA0) and pkillpunt (0x4F0D30) return 1 for a registered slot,
-  even if the underlying connection wrapper declines the send. They pass
-  an empty reason string, reason codes 33 and 49 respectively, and extra
-  info "wac punt". pkillpunt does not apply entity damage.
-  The misleadingly named CNapiNPConnection_TrySendChatMessage (0x5006C0)
-  checks slot+5 and slot+96481 before following the session pointer.
-  CNapiNPConnection_SendChatMessage (0x4C7EF0) creates the pending disconnect
-  description (DC=2), retaining the first event. The authority drains native
-  MatchPlayerPunt requests before its ordinary state fan, using the existing
-  reliable H:0x03 description producer. Local loopback nodes have no remote
-  description recipient. Requests retain allocation identity, so a recycled
-  packed entity handle cannot disconnect its replacement.
-- pisgold (0x4F0AF0) reads NapiNPPlayer+744 low-byte bit 1. NapiNPPlayer_Create
-  (0x4C7850) zero-initializes all 748 bytes. The PlayEnter response calls
-  CNapiNetwork_ParseServerVarList at 0x4D1C08: its loop only extracts/discards
-  tokens into a local buffer, then clears the entire +744 dword at 0x4C4387.
-  The full text-segment displacement audit found no nonzero producer for
-  that player's Gold flag. The native handler returns the witnessed false
-  result; no invented account-permission or Gold-membership source is added.
+  Server_PlayerAdd clears +392..+415, including all 17 bytes, at 0x51D51C. Death
+  and team changes do not clear this bank. Native identity updates preserve it;
+  replacing a roster slot or restoring the mission baseline resets it through
+  the existing Match owner.
+- The retail variable handlers check only index <= 16. Negative indices address
+  unrelated earlier slot memory. D-WAC-2 records the portable boundary: return 0
+  outside 0..16 without reading or modifying other fields.
+- [orig: WacCmd_AddExp @0x4F2690] additionally requires the explicit SSN's
+  ItemDef pointer and a nonzero amount. Its argument is a dword bit pattern, so
+  negative amounts are accepted. It dispatches raw stats event 28, independently
+  of score.ini, game-type score-table gates, team points or entity health.
+- CPlayerStats_RecordEvent case 28 [orig: @0x52CAF8..0x52CBB3] adds the amount
+  to field 29 with dword wrap. Positive amounts recurse through entity+368: the
+  first registered occupant receives amount >> 1 and the second receives amount
+  >> 2. Both calls use the same recursive event, and both are followed by event
+  27, incrementing field 28. The direct second-link route runs even when the
+  first link has no player slot. The counter increments even if the shifted
+  award is zero. A three-player chain given 64 therefore receives 64/32/32
+  points, with shared-award counters 0/1/2, not 64/32/16.
+- ppunt [orig: WacCmd_PlayerPunt @0x4F0DA0] and pkillpunt [orig:
+  WacCmd_PlayerKillPunt @0x4F0D30] return 1 for a registered slot, even if the
+  underlying connection wrapper declines the send. They pass an empty reason
+  string, reason codes 33 and 49 respectively, and extra info "wac punt".
+  pkillpunt does not apply entity damage. The misleadingly named [orig:
+  CNapiNPConnection_TrySendChatMessage @0x5006C0] checks slot+5 and slot+96481
+  before following the session pointer. [orig: CNapiNPConnection_SendChatMessage
+  @0x4C7EF0] creates the pending disconnect description (DC=2), retaining the
+  first event. The authority drains native MatchPlayerPunt requests before its
+  ordinary state fan, using the existing reliable H:0x03 description producer.
+  Local loopback nodes have no remote description recipient. Requests retain
+  allocation identity, so a recycled packed entity handle cannot disconnect its
+  replacement.
+- pisgold [orig: WacCmd_PlayerIsGold @0x4F0AF0] reads NapiNPPlayer+744 low-byte
+  bit 1. [orig: NapiNPPlayer_Create @0x4C7850] zero-initializes all 748 bytes.
+  The PlayEnter response calls CNapiNetwork_ParseServerVarList [orig:
+  CNapiGameSession_HandlePlayEnterResponse @0x4d1940 (the site @0x4D1C08)]: its
+  loop only extracts/discards tokens into a local buffer, then clears the entire
+  +744 dword [orig: CNapiNetwork_ParseServerVarList @0x4c4310 (the site
+  @0x4C4387)]. The full text-segment displacement audit found no nonzero
+  producer for that player's Gold flag. The native handler returns the witnessed
+  false result; no invented account-permission or Gold-membership source is
+  added.
 
 wac_players exercises source validity, signed kill thresholds, all bank
 boundaries, independent player banks, identity update versus slot replacement,
 normal snapshot restore, negative/wrapping points, both sharing routes,
 zero-share counters, exact decoded punt descriptions, first-event precedence,
-local loopback, stale allocation rejection and retry. Focused native validation
-passes (npc-wac-players-focused-ctest.log).
+local loopback, stale allocation rejection and retry.
 
 The loaded GameWorld test first reproduced a missing second score notification
-after normal stop/play: the Match points and player bank restored correctly,
-but the sender retained its previous score and the Godot reader retained its
+after normal stop/play: the Match points and player bank restored correctly, but
+the sender retained its previous score and the Godot reader retained its
 previous revision. HostRole now resets the local-loopback sender's score
 comparison when recreating that client; Simulation synchronizes its cursor to
 the replacement/retained view's current revision. Native host_role repeats an
-equal award across baseline resets. The focused GameWorld test passes all 25
-assertions, including a new 17-point score/delta through the local client's
-0x81 feed on both attempts (npc-gut-wac-players-retry.log).
+equal award across baseline resets.
 
-Full validation passes 441 native tests with one existing motorcycle asset skip
-(npc-wac-players-final-full-ctest.log, 113.71 seconds), and 1,755 Godot tests across
-185 scripts with 25 pending, 58,147 assertions and no collection errors
-(npc-gut-wac-players-full.log, 116.35 seconds). The existing one orphan and
-13-resource shutdown reports remain. This does not accept a normal SP playthrough.
+This does not accept a normal SP playthrough.
 
-### 33.29 — WAC Help file export
+### 33.29 WAC Help file export
 
-WacCmd_Help (0x4F6DE0) opens help.wac for truncating text output in the process
-working directory. An unsuccessful open returns immediately and does not touch
-events.xml. After closing the text file it reports "Current Help.wac file
+[orig: WacCmd_Help @0x4F6DE0] opens help.wac for truncating text output in the
+process working directory. An unsuccessful open returns immediately and does not
+touch events.xml. After closing the text file it reports "Current Help.wac file
 saved" through the debug channel, then attempts events.xml. That file has its
 own saved message and its open can fail independently. The native
-formats/wac/help exporter uses the same fixed filenames and open ordering;
-the VM reports successful exports through the existing debug-text consumer.
+formats/wac/help exporter uses the same fixed filenames and open ordering; the
+VM reports successful exports through the existing debug-text consumer.
 
 The text export contains the flow-control, compiler, arithmetic and assignment
-reference, then command rows in registry order. WacScript_DumpActionDefsToFile
-(0x4F0400) uses flags & mask for masks 1, 2 and 4: 31 trigger, 87 action and 47
-debug rows. All four declared parameter slots participate, including optional
-parameters, using the existing 28-entry parameter-name table.
+reference, then command rows in registry order. [orig:
+WacScript_DumpActionDefsToFile @0x4F0400] uses flags & mask for masks 1, 2 and
+4: 31 trigger, 87 action and 47 debug rows. All four declared parameter slots
+participate, including optional parameters, using the existing 28-entry
+parameter-name table.
 
-The XML export's filter is different: (flags & 0xFE) == type, for types 0, 2
-and 4. Its categories therefore contain 31 conditions, 61 actions and 45 debug
+The XML export's filter is different: (flags & 0xFE) == type, for types 0, 2 and
+4. Its categories therefore contain 31 conditions, 61 actions and 45 debug
 actions; replicated variants with additional flags do not join those exact
-categories. WacScript_DumpActionDefsToXML (0x4F0560) emits each entry's NAME,
-FORMAT placeholders and WAC call template. Its ID is a hash of the first six
-zero-padded name bytes (low five bits, folded with four-bit shifts, then shifted
-six bits) XORed with the last nonzero byte, twice the preceding byte and eight
-times the last index modulo eight. These are not bytecode command indices.
+categories. [orig: WacScript_DumpActionDefsToXML @0x4F0560] emits each entry's
+NAME, FORMAT placeholders and WAC call template. Its ID is a hash of the first
+six zero-padded name bytes (low five bits, folded with four-bit shifts, then
+shifted six bits) XORed with the last nonzero byte, twice the preceding byte and
+eight times the last index modulo eight. These are not bytecode command indices.
 Retail registry/instruction oracles include elapse 276853067, Help 4396560,
 ssnturn 1293142234, AddExp 1175785544 and psetvar 30476320.
 
 wac_help executes the compiled command in its own temporary working directory,
-checks the generated syntax, fixed IDs, row counts and debug-message order,
-then exercises first-open failure, second-open failure and a successful repeat.
-The first failure preserves an existing XML file; the second preserves the new
-text file and reports only that successful export. Focused native validation
-passes (npc-wac-help-focused-ctest.log, 0.17 seconds). Full native validation
-passes 442 tests with one existing motorcycle asset skip (npc-wac-help-full-ctest.log,
-124.90 seconds). Full rebuilt-extension GUT passes 1,755 tests across 185 scripts,
-with 25 pending, 58,147 assertions and no collection errors (npc-gut-wac-help-full.log,
-115.60 seconds). The existing orphan and resource shutdown reports remain.
-The remaining WAC diagnostic fallbacks at this checkpoint were face and ssnface.
+checks the generated syntax, fixed IDs, row counts and debug-message order, then
+exercises first-open failure, second-open failure and a successful repeat. The
+first failure preserves an existing XML file; the second preserves the new text
+file and reports only that successful export. The remaining WAC diagnostic
+fallbacks at this checkpoint were face and ssnface.
 
-### 33.30 — GRM facial state and the final WAC dispatch entries
+### 33.30 GRM facial state and the final WAC dispatch entries
 
-The two remaining registry entries, face (0x4ED5D0) and ssnface (0x4F1C60),
-write a timed expression override into the entity's GRM slot (+440, masked
-with 0x7FFF). face returns 1 without a local player and 0 when the player
-exists, including a player with no slot. ssnface requires a valid pool-0..4
-handle, nonzero item id and allocated slot; it returns 1 after the write.
-Neither handler rejects a dead character. Both store the requested expression
-and an 80-transition timer. Native world/facial_animation owns this state;
-the VM no longer sends either entry to its unsupported-command fallback.
+The two remaining registry entries, [orig: WacCmd_Face @0x4ED5D0] and [orig:
+WacCmd_SsnFace @0x4F1C60], write a timed expression override into the entity's
+GRM slot (+440, masked with 0x7FFF). face returns 1 without a local player and 0
+when the player exists, including a player with no slot. ssnface requires a
+valid pool-0..4 handle, nonzero item id and allocated slot; it returns 1 after
+the write. Neither handler rejects a dead character. Both store the requested
+expression and an 80-transition timer. Native world/facial_animation owns this
+state; the VM no longer sends either entry to its unsupported-command fallback.
 
-WacScript_ResolveParameter (0x4F2920) resolves a FACE_ prefix or a Face-typed
-literal through AnimState_FindByName (0x5800B0). The case-insensitive table
-at 0x7D7960 has nine 64-byte rows: NORMAL, HAPPY, SAD, SMIRK, ANGRY, SURPRISE,
-DISGUST, FEAR and AGGRESSIVE. Variable operands resolve before this lookup.
-A numeric-looking literal is still a name and fails Unknown FACE. The native
-compiler now preserves this distinction, including quoted names and FACE_
-values assigned into ordinary variables.
+[orig: WacScript_ResolveParameter @0x4F2920] resolves a FACE_ prefix or a
+Face-typed literal through [orig: AnimState_FindByName @0x5800B0]. The
+case-insensitive table at 0x7D7960 has nine 64-byte rows: NORMAL, HAPPY, SAD,
+SMIRK, ANGRY, SURPRISE, DISGUST, FEAR and AGGRESSIVE. Variable operands resolve
+before this lookup. A numeric-looking literal is still a name and fails Unknown
+FACE. The native compiler now preserves this distinction, including quoted names
+and FACE_ values assigned into ordinary variables.
 
-**Format and allocation.** Entity_InitFromModel's final type-3 branch
-(0x40E211..0x40E236) derives the sidecar from ItemDef+96, the model graphic
-name. The GRM allocation is outside that function's conditional GPM-model
-block; a missing rendered model is not an additional allocation gate.
-sub_57FCE0 strips path and extension, appends .GRM and reuses a loaded
-configuration case-insensitively. The cache holds 64 configurations.
-sub_57FDF0 appends up to 256 character slots; freeing a character zeroes its
-slot without reclaiming its append index (sub_57FCA0). Native allocation also
-tracks registry spawn identity, preventing a recycled handle from inheriting
-the previous character's expression or texture priority.
+**Format and allocation.** Entity_InitFromModel's final type-3 branch [orig:
+@0x40E211..0x40E236] derives the sidecar from ItemDef+96, the model graphic
+name. The GRM allocation is outside that function's conditional GPM-model block;
+a missing rendered model is not an additional allocation gate. sub_57FCE0 strips
+path and extension, appendsGRM and reuses a loaded configuration
+case-insensitively. The cache holds 64 configurations. sub_57FDF0 appends up to
+256 character slots; freeing a character zeroes its slot without reclaiming its
+append index (sub_57FCA0). Native allocation also tracks registry spawn
+identity, preventing a recycled handle from inheriting the previous character's
+expression or texture priority.
 
-The new formats/grm library owns the file grammar and writer. LoadFile
-(0x588BE0) splits CRLF lines, loses the final byte of an unterminated last
-line, tokenizes at most 1,000 bytes into 30 tokens (0x588AD0), and ignores
-unknown statements. Delimiters are space, comma and tab outside quotes.
-ParseProperty (0x5886A0) reads base/eye texture names; indexed vertices and
-triangles; indexed gestures and up to 32 named offset parameters; eye
-size, centers and limits. The triangle keyword is tri. The first eye texture
-goes to +520, the second to +260. InitEyeDefaults (0x588D20) installs centers
+The new formats/grm library owns the file grammar and writer. [orig:
+FaceAnimConfig_LoadFile @0x588BE0] splits CRLF lines, loses the final byte of an
+unterminated last line, tokenizes at most 1,000 bytes into 30 tokens [orig:
+tokenize_config_line @0x588AD0], and ignores unknown statements. Delimiters are
+space, comma and tab outside quotes. [orig: FaceAnimConfig_ParseProperty
+@0x5886A0] reads base/eye texture names; indexed vertices and triangles; indexed
+gestures and up to 32 named offset parameters; eye size, centers and limits. The
+triangle keyword is tri. The first eye texture goes to +520, the second to +260.
+[orig: FaceAnimConfig_InitEyeDefaults @0x588D20] installs centers
 (0.35,0.5)/(0.65,0.5), size (0.04,0.06) and limits (0.03,0.01).
 
-The recovered writer at 0x588320 reconstructs the text in that order, with
-four decimal places, fixed indentation, CRLF and the local date/user header.
-The native model represents the save header as named fields; its saving
+The recovered writer [orig: sub_588320 @0x588320] reconstructs the text in that
+order, with four decimal places, fixed indentation, CRLF and the local date/user
+header. The native model represents the save header as named fields; its saving
 caller supplies the author/time. The authored fixtures/grm/person.grm
 round-trips byte-for-byte through the writer. It contains no retail bytes.
 D-GRM-1 records the original unsafe array/index/name and format-string cases:
 the native parser rejects unsafe model data and treats names as data.
 
-**Simulation.** CScarDecal_Init (0x57F900, an old misleading IDB name) seeds
-current/next NORMAL, zero blend and override/automatic -1. The facial update
-(0x57FA50) runs from Entity_UpdateAllEntities at 0x4C21FB. It adds 0.125 to
-blend, transfers next to current at one, and selects death SURPRISE (5),
-a timed override, automatic state, or (GetTickCount >> 10) % 9. The timer
-decrements on these transitions, expires below zero, and still supplies the
-override on its final decrement. Equal current/next set blend to one, so an
-unchanging expression consumes a timer count every logic tick after settling.
+**Simulation.** [orig: CScarDecal_Init @0x57F900], an old misleading IDB name)
+seeds current/next NORMAL, zero blend and override/automatic -1. The facial
+[orig: scar_decal_update @0x57FA50] runs from [orig: Entity_UpdateAllEntities
+@0x4c2100 (the site @0x4C21FB)]. It adds 0.125 to blend, transfers next to
+current at one, and selects death SURPRISE (5), a timed override, automatic
+state, or (GetTickCount >> 10) % 9. The timer decrements on these transitions,
+expires below zero, and still supplies the override on its final decrement.
+Equal current/next set blend to one, so an unchanging expression consumes a
+timer count every logic tick after settling.
 
-Random gaze draws twice from CRT rand whenever the separate display counter
-is a multiple of 64; every logic update on that display frame draws again.
-Live gaze eases by 0.25 toward the random or directed target. Dead gaze eases
-by 0.05 toward (0,-2.2). Native stepping shares World::crt_rand and uses a
-monotonic millisecond clock for the unforced nine-state cycle. Snapshot/retry
-restores slots, ownership, overrides, counters and the CRT stream.
+Random gaze draws twice from CRT rand whenever the separate display counter is a
+multiple of 64; every logic update on that display frame draws again. Live gaze
+eases by 0.25 toward the random or directed target. Dead gaze eases by 0.05
+toward (0,-2.2). Native stepping shares World::crt_rand and uses a monotonic
+millisecond clock for the unforced nine-state cycle. Snapshot/retry restores
+slots, ownership, overrides, counters and the CRT stream.
 
-The NPC attention pass now writes byte_813DE0[body_state] to the automatic
-slot field (+52, PlayerSlot_SetTimeout at 0x4AD4C0). Within two units, a
-character looking back within 25 degrees selects phased values 5/7/6 for
-key & 0x180 equal to 0x100/0x180/0x80. These writes remain independent of the
-timed WAC override. The 252-entry table is copied directly from the IDB.
+The NPC attention pass now writes byte_813DE0[body_state] to the automatic slot
+field (+52, [orig: PlayerSlot_SetTimeout @0x4AD4C0]. Within two units, a
+character looking back within 25 degrees selects phased values 5/7/6 for key &
+0x180 equal to 0x100/0x180/0x80. These writes remain independent of the timed
+WAC override. The 252-entry table is copied directly from the IDB.
 
 **Presentation and the inactive JO sink.** sub_580360 advances the display
-counter. sort_scar_slots_by_distance (0x57FE60) stably ranks max(dx,dy)+min/2,
-excludes flag-bit-1 characters and the first-person local body, and enables
-only three slots. Their target sizes are 256/128/64 (0x57F940). A slot updates
-when local, reassigned, within 81,920 fixed units, or on its every-fourth-frame
-cohort (0x580170). The normal Godot frame driver now advances this native
-schedule; typed entity cards expose its state and priority.
+counter. [orig: sort_scar_slots_by_distance @0x57FE60] stably ranks
+max(dx,dy)+min/2, excludes flag-bit-1 characters and the first-person local
+body, and enables only three slots. Their target sizes are 256/128/64 [orig:
+Water_CreateReflectionRenderTargets @0x57F940]). A slot updates when local,
+reassigned, within 81,920 fixed units, or on its every-fourth-frame cohort
+[orig: render_scar_slot @0x580170]. The normal Godot frame driver now advances
+this native schedule; typed entity cards expose its state and priority.
 
 The GRM evaluator resolves case-insensitive gesture names with last-match
-selection, falls back to the other gesture when one is absent, and blends
-the first matching parameter's displacement into each base vertex.
-Group zero is the sentinel xxx (0x588D90, 0x588FE0, 0x589090, 0x5890F0).
-Original texture UVs stay at the base positions. Eye displacement is the
-current gaze times (0.02,0.01).
+selection, falls back to the other gesture when one is absent, and blends the
+first matching parameter's displacement into each base vertex. Group zero is the
+sentinel xxx [orig: collect_unique_material_names @0x588D90], [orig: sub_588FE0
+@0x588FE0], [orig: sub_589090 @0x589090], [orig: sub_5890F0 @0x5890F0]).
+Original texture UVs stay at the base positions. Eye displacement is the current
+gaze times (0.02,0.01).
 
-The JO renderer's final binding helper (0x580030) only passes the two targets
-to setters 0x5899C0/0x5899D0. A complete absolute-reference byte scan of .text
-0x401000..0x795000, .rdata 0x7C0510..0x813000 and .data 0x813000..0x334C000
-found exactly those two stores to 0x2721380/0x272137C, no reads and no address
-references. The nearby globals and apply_shader_parameters (0x58DB80) were
-also inspected: ordinary model materials never consume these face targets.
-The native port retains facial state, scheduling and mesh evaluation without
-adding an unwitnessed model-texture replacement. JO's inactive display endpoint
-is witnessed behavior, not a missing consumer.
+The JO renderer's final binding helper [orig: sub_580030 @0x580030] only passes
+the two targets to setters [orig: sub_5899C0 @0x5899C0; sub_5899D0 @0x5899D0]. A
+complete absolute-reference byte scan oftext 0x401000..0x795000,rdata
+0x7C0510..0x813000 anddata 0x813000..0x334C000 found exactly those two stores
+to 0x2721380/0x272137C, no reads and no address references. The nearby globals
+and [orig: apply_shader_parameters @0x58DB80] were also inspected: ordinary
+model materials never consume these face targets. The native port retains facial
+state, scheduling and mesh evaluation without adding an unwitnessed
+model-texture replacement. JO's inactive display endpoint is witnessed behavior,
+not a missing consumer.
 
-**Validation.** grm_roundtrip checks complete writer bytes, semantic edits,
+Regression coverage: grm_roundtrip checks complete writer bytes, semantic edits,
 quoted/comma tokens, CRLF behavior and transactional malformed-input failures.
-facial_animation checks actual mounted GRM loading, both compiled WAC
-commands, exact timer/eye stepping, mesh deformation, three-slot scheduling,
-handle reuse, capacity, automatic attention expressions and retry. Both
-focused native tests pass (0.45 seconds). Full native CTest passes all 444
-runnable tests with one existing motorcycle asset skip (npc-facial-full-ctest.log,
-159.94 seconds). The rebuilt extension passes the focused loaded-mission facial
-regression, including two normal retries (one test, 23 assertions, 0.736 seconds).
-Full GUT passes 1,756 tests across 186 scripts, with 25 pending, 58,170 assertions
-and no collection errors (npc-gut-wac-faces-full.log, 112.422 seconds). Existing
-orphan/resource shutdown reports remain. Fixture lint passes all 115 fixtures.
-A read-only directory scan of all five installed PFFs
-(11,576 entries) found zero .grm assets; the extracted JOX corpus also has
-none. GRM tests therefore use authored data, not a retail GRM corpus, and do
-not constitute normal SP playthrough acceptance.
+facial_animation checks actual mounted GRM loading, both compiled WAC commands,
+exact timer/eye stepping, mesh deformation, three-slot scheduling, handle reuse,
+capacity, automatic attention expressions and retry. Fixture lint passes all 115
+fixtures. A read-only directory scan of all five installed PFFs (11,576 entries)
+found zerogrm assets; the extracted JOX corpus also has none. GRM tests
+therefore use authored data, not a retail GRM corpus.
 
 ### 33.31 Organic escort offsets and medic dragging (2026-09-09)
 
-**Witness.** The teammate helpers at 0x4525E0/0x452730 spawn PERSON definitions
-4529 (DeltaMED / Medic02) and 4520 (Medic01 / Medic01) with DcbIds 12000 and
-12001; the helicopter helper at 0x4521A0 uses definition 1281 and DcbId 11000.
-A read-only mounted ItemDatabase probe confirms all three definitions and
-H_BHawkN.aip exist in the installed base/JOX mount. No retail assets were copied.
+**Witness.** The teammate helpers at [orig: HeliLift_SpawnPickup @0x4525E0;
+HeliLift_SpawnFlyover @0x452730] spawn PERSON definitions 4529 (DeltaMED /
+Medic02) and 4520 (Medic01 / Medic01) with DcbIds 12000 and 12001; the
+helicopter helper [orig: Entity_SpawnHelicopter @0x4521A0] uses definition 1281
+and DcbId 11000. A read-only mounted ItemDatabase probe confirms all three
+definitions and H_BHawkN.aip exist in the installed base/JOX mount. No retail
+assets were copied.
 
-After ordinary target/entry-point selection, Entity_UpdateInfantryAI
-0x4BB62C..0x4BBD87 applies the identity-specific offsets. Escort 12000 clears
+After ordinary target/entry-point selection, Entity_UpdateInfantryAI [orig:
+@0x4BB62C..0x4BBD87] applies the identity-specific offsets. Escort 12000 clears
 aim pitch and uses radius 81,920. Against 11000, distances above four units
-offset along target yaw minus 1,073,741,760 BAM: two units through eight
-units, four units beyond eight, with the farther branch lowering Z by 163,840.
-These far branches retain the distance measured before the offset. At four
-units or nearer the offset is 49,152 at yaw plus 1,073,741,760, Z lowers by
-114,688 and distance recomputes with signed delta-Z shifted right by three.
-Against another identity, 12000 approaches its posed head X/Y, retains the
-original target Z, uses that same weighted distance, and radius 24,576.
+offset along target yaw minus 1,073,741,760 BAM: two units through eight units,
+four units beyond eight, with the farther branch lowering Z by 163,840. These
+far branches retain the distance measured before the offset. At four units or
+nearer the offset is 49,152 at yaw plus 1,073,741,760, Z lowers by 114,688 and
+distance recomputes with signed delta-Z shifted right by three. Against another
+identity, 12000 approaches its posed head X/Y, retains the original target Z,
+uses that same weighted distance, and radius 24,576.
 
 Escort 12001 starts with radius 65,536. Its helicopter far branches match the
 other escort. At four units or nearer it lowers Z by 98,304; strictly below
 122,880 distance, it also offsets forward by 122,880, recomputes weighted
-distance and uses radius 106,496. Arrival stamps the target's live yaw.
-The shared board/attach tail still decides whether a seat is entered.
+distance and uses radius 106,496. Arrival stamps the target's live yaw. The
+shared board/attach tail still decides whether a seat is entered.
 
-**Dragging.** HeliLift_UpdateSlotState (0x451730) writes entity+0x350 to self
-for the dragger and to that dragger for the patient. The gait selector
+**Dragging.** [orig: HeliLift_UpdateSlotState @0x451730] writes entity+0x350 to
+self for the dragger and to that dragger for the patient. The gait selector
 temporarily adds 0x80000000 to body heading before detour and turn-error
-evaluation (0x4BD468), then restores body heading and reverses target heading
-(0x4BD5B1). After ordinary gait selection, the same self-reference forces
-aim override and zero pitch; authored 138 replaces walk/jog/run, and authored
-137 replaces other states (0x4BD350..0x4BD3AB / 0x4BD622).
+evaluation [orig: Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BD468)], then
+restores body heading and reverses target heading [orig: Entity_UpdateInfantryAI
+@0x4b9910 (the site @0x4BD5B1)]. After ordinary gait selection, the same
+self-reference forces aim override and zero pitch; authored 138 replaces
+walk/jog/run, and authored 137 replaces other states [orig:
+Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BD350..0x4BD3AB)] / [orig:
+Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BD622)]).
 
-The dead org1 pass (0x4B9D60..0x4B9E41) clears flag 0x40 and follows only a
-nonzero item-index dragger without dead flag 2, when the patient's ADM has
-139. It adds the dragger's held-weapon anchor minus its own head anchor to
-X/Y only, leaves vertical movement to the ordinary motor, writes the
-dragger's body heading to target/aim heading, clears aimFlag and pending,
-and selects 139. Entity_ResetToSpawnState (0x4B9610) clears its own drag
-reference. Native links additionally carry the registry lifetime so a
-recycled pool slot cannot become a new dragger.
+The dead org1 pass [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
+@0x4B9D60..0x4B9E41)] clears flag 0x40 and follows only a nonzero item-index
+dragger without dead flag 2, when the patient's ADM has 139. It adds the
+dragger's held-weapon anchor minus its own head anchor to X/Y only, leaves
+vertical movement to the ordinary motor, writes the dragger's body heading to
+target/aim heading, clears aimFlag and pending, and selects 139. [orig:
+Entity_ResetToSpawnState @0x4B9610] clears its own drag reference. Native links
+additionally carry the registry lifetime so a recycled pool slot cannot become a
+new dragger.
 
 **Pose ownership.** IPoseProvider::resolve_skeletal_anchor obtains both anchors
 from the existing native skeleton/overlay/secondary-channel evaluator.
-SimPoseProvider shares its bone-matrix fold with muzzle resolution.
-Entity_BuildBoneTransformMatrices (0x4B1290) supplies the hand-pivot nudge
+SimPoseProvider shares its bone-matrix fold with muzzle resolution. [orig:
+Entity_BuildBoneTransformMatrices @0x4B1290] supplies the hand-pivot nudge
 (+0.05,-0.05,+0.051 in the original render frame) and the head-pivot offset
 (0,+0.15,+0.10). Missing model/pose data retains raw entity position, matching
 the function's no-model tail. MissionKernel resolves late collision/rig
 registration before the query. No Godot-authored movement or duplicated
 presentation skeleton drives these mechanics.
 
-**Validation.** infantry_escort exercises both offset ladders and their strict
-distance boundaries, posed-head approach and raw-position fallback, reversed
-root motion and clip gates, actual per-tick corpse following, reset/snapshot,
-and a recycled dragger handle. The existing infantry suite and retail CP01
-ai_muzzle_pose test also pass; the latter now checks live head/hand anchors
-on each resolving foot NPC. Focused CTest: three tests passed in 2.59 seconds
-(npc-escort-focused-ctest.log). Both native and Godot extension builds pass.
-Full native CTest passes 445 tests with one existing motorcycle asset skip
-(`npc-escort-full-ctest.log`, 119.39 seconds). Full rebuilt-extension GUT
-passes 1,756 tests across 186 scripts, with 25 pending, 58,170 assertions and
-no collection errors (`npc-gut-escort-full.log`, 113.677 seconds). Existing
-orphan/resource shutdown reports persist. BMS action 39's operation owner and dynamic spawn
-consumer remain open at this checkpoint; these motor tests do not establish a mission playthrough.
+Regression coverage: infantry_escort exercises both offset ladders and their
+strict distance boundaries, posed-head approach and raw-position fallback,
+reversed root motion and clip gates, actual per-tick corpse following,
+reset/snapshot, and a recycled dragger handle. The existing infantry suite and
+retail CP01 ai_muzzle_pose test also pass; the latter now checks live head/hand
+anchors on each resolving foot NPC.
 
 ### 33.32 Teammate operations, dynamic helpers and removal (2026-09-09)
 
 BMS action 39 now owns the eight-slot operation array through
-`world::TeammateOperations`. The array is part of the mission snapshot and
-ticks before facial animation, matching the call order at 0x4C21F6/0x4C21FB.
-The reset is 0x4513B0, pickup start 0x4525E0, flyover start 0x452730 and update
+`world::TeammateOperations`. The array is part of the mission snapshot and ticks
+before facial animation, matching the call order at [orig:
+Entity_UpdateAllEntities @0x4c2100 (the site @0x4C21F6);
+Entity_UpdateAllEntities @0x4c2100 (the site @0x4C21FB)]. The reset is [orig:
+EventTrigger_ResetAllSlots @0x4513B0], pickup start [orig: HeliLift_SpawnPickup
+@0x4525E0], flyover start [orig: HeliLift_SpawnFlyover @0x452730] and update
 0x451FA0. Subtypes 1/2 select the two starts; subtype 3 and the other values
-have no retail action arm. Patient lookup is the first matching full SSN
-in pool 0, without a health/item gate. The destination is the first pool-3
-type-6088 item with an ItemDef and matching waypoint number. Capacity and
+have no retail action arm. Patient lookup is the first matching full SSN in pool
+0, without a health/item gate. The destination is the first pool-3 type-6088
+item with an ItemDef and matching waypoint number. Capacity and
 missing-patient/marker gates return without creating an operation.
 
-The helper owner allocates the actual definitions: helicopter 1281 / SSN
-11000 / H_BHawkN, medic 4529 / SSN 12000 / Medic02 and medic 4520 / SSN 12001 /
-Medic01. The factory shares profile, seat/attachment, trait, weapon, model,
-collision and ADM resolution with placed entities. Its single-entity trait
-and weapon folds preserve other NPCs' magazine state and capture zones.
-The helicopter uses the CHel definition callback at 0x4683C0, not the
-different initialization at 0x461F00. The generic allocator at 0x460200
-restores zero current/pending/fallback states after profile loading. These
-templates have no entity+368 controller; the native helper now preserves
-that absence instead of inheriting AiEntity's test-fixture default.
+The helper owner allocates the actual definitions: helicopter 1281 / SSN 11000 /
+H_BHawkN, medic 4529 / SSN 12000 / Medic02 and medic 4520 / SSN 12001 / Medic01.
+The factory shares profile, seat/attachment, trait, weapon, model, collision and
+ADM resolution with placed entities. Its single-entity trait and weapon folds
+preserve other NPCs' magazine state and capture zones. The helicopter uses the
+CHel definition callback [orig: Entity_InitHelicopterAIFromDef @0x4683C0], not
+the different initialization [orig: Entity_InitHelicopterAI @0x461F00]. The
+generic allocator [orig: Entity_InitVehicleAI @0x460200] restores zero
+current/pending/fallback states after profile loading. These templates have no
+entity+368 controller; the native helper now preserves that absence instead of
+inheriting AiEntity's test-fixture default.
 
-The helicopter starts 600 units along world X and 80 above the marker,
-with heading 2147483520, hover height 35, radius 20, and queued commands
-7/5 and 11/120. The medic offset uses the original quarter-unit heading
-offset, minus one-eighth on XY and 1.5 on Z; the second is another quarter
-unit along both XY axes. Their initial slots, team, orders, corpse timers,
-heading and animation-state seeds follow 0x4521A0/0x452390. Each gets its
-own mounted ADM rather than an assumed generic medic animation. General
-organic initialization/warmup remains separately tracked in D-AI-9.
+The helicopter starts 600 units along world X and 80 above the marker, with
+heading 2147483520, hover height 35, radius 20, and queued commands 7/5 and
+11/120. The medic offset uses the original quarter-unit heading offset, minus
+one-eighth on XY and 1.5 on Z; the second is another quarter unit along both XY
+axes. Their initial slots, team, orders, corpse timers, heading and
+animation-state seeds follow [orig: Entity_SpawnHelicopter @0x4521A0;
+Entity_SpawnFromItemDef @0x452390]. Each gets its own mounted ADM rather than an
+assumed generic medic animation. General organic initialization/warmup remains
+separately tracked in D-AI-9.
 
 | State | Native consumer |
 | --- | --- |
@@ -8583,321 +8967,298 @@ organic initialization/warmup remains separately tracked in D-AI-9.
 | 8 depart | The nonzero distance below 30 retires the patient, medics and live-brained helicopter |
 | 9 finished | The next pass compacts the complete array suffix and reprocesses the same index |
 
-The patient wiggle multiplies the two cosine phases for pitch and the two
-sine phases for roll; it is not a simple single-frequency tilt. Packed
-handles retain allocation serials so stale operation pointers cannot mutate
-a later occupant. Failed helper allocation rolls back the new helpers before
-committing AI events or touching the patient.
+The patient wiggle multiplies the two cosine phases for pitch and the two sine
+phases for roll; it is not a simple single-frequency tilt. Packed handles retain
+allocation serials so stale operation pointers cannot mutate a later occupant.
+Failed helper allocation rolls back the new helpers before committing AI events
+or touching the patient.
 
 Two limits are witnessed in JO. Direct pickup never assigns its helicopter
 pointer; treatment expiry would dereference null in the original. The port
-records that boundary and finishes the operation without destroying the
-patient or medics (D-TMATE-1). The flyover creates no pilot. The aircraft
-mover changes the initial state 0 to 14; queued commands can enter 7, but the
-no-pilot leg parks it again (0x490310, 0x491C5E). There is no invented pilot
-or forced flight to make this legacy path complete.
+records that boundary and finishes the operation without destroying the patient
+or medics (D-TMATE-1). The flyover creates no pilot. The aircraft mover changes
+the initial state 0 to 14; queued commands can enter 7, but the no-pilot leg
+parks it again [orig: Entity_UpdateAircraftPhysics @0x490310], [orig:
+Entity_UpdateAircraftPhysics @0x490310 (the site @0x491C5E)]). There is no
+invented pilot or forced flight to make this legacy path complete.
 
 Shared removal now performs the native carry/mount cleanup, facial release
-(0x57FCA0), scar release, rotor-wash release, active death-effect-bank stops,
-the 0x465670 target-reference walk, AI release and collision-instance
-retirement before freeing the registry row. Dead-vehicle and orphaned
-emplacement removal use the same primitive. Organic combat-target mirrors
-clear with slot+12. The original vehicle-reference walk's unusual call to
-SetAITarget on the destroyed entity remains preserved. The separate shared
-script/native entity+460 effect-slot work remains D-PTL-24.
+[orig: sub_57FCA0 @0x57FCA0], scar release, rotor-wash release, active
+death-effect-bank stops, the [orig: Entity_ClearAllReferences @0x465670]
+target-reference walk, AI release and collision-instance retirement before
+freeing the registry row. Dead-vehicle and orphaned emplacement removal use the
+same primitive. Organic combat-target mirrors clear with slot+12. The original
+vehicle-reference walk's unusual call to SetAITarget on the destroyed entity
+remains preserved. The separate shared script/native entity+460 effect-slot work
+remains D-PTL-26 (ptl-format-re.md).
 
-**Validation.** `teammate_operations` covers the state sequence, strict
+Regression coverage: `teammate_operations` covers the state sequence, strict
 boundaries, same-call 4/5 fallthrough, capacity, snapshot/retry, failed
-allocation and recycled-patient lifetime. `teammate_spawn` boots CP01 with
-an authored pre-mission teammate event and verifies real helper definitions,
-profiles, traits, initial controller absence, the no-pilot outcome,
-magazine preservation and two baseline restores. JO contains Fblkhawm.3di
-and H_BHawkN.aip but lacks DeltaMED.3di, Medic01.3di, Medic01.adm and
-Medic02.adm; the test explicitly reports that retail presentation coverage
-as unexercised. The loaded-scene GUT regression supplies authored helper
-assets and verifies the two 19-bone medics, native dynamic presentation,
-the BMS active query and two normal stop/retry cycles (65 assertions).
-The removal regressions cover carrier and occupant teardown, collision,
-scars, death effects and immediate facial-slot release. These are subsystem
-checks; no normal mission playthrough is established by them.
+allocation and recycled-patient lifetime. `teammate_spawn` boots CP01 with an
+authored pre-mission teammate event and verifies real helper definitions,
+profiles, traits, initial controller absence, the no-pilot outcome, magazine
+preservation and two baseline restores. JO contains Fblkhawm.3di and
+H_BHawkN.aip but lacks DeltaMED.3di, Medic01.3di, Medic01.adm and Medic02.adm;
+the test explicitly reports that retail presentation coverage as unexercised.
+The loaded-scene GUT regression supplies authored helper assets and verifies the
+two 19-bone medics, native dynamic presentation, the BMS active query and two
+normal stop/retry cycles. The removal regressions cover carrier and occupant
+teardown, collision, scars, death effects and immediate facial-slot release.
+These are subsystem checks; no normal mission playthrough is established by
+them.
 
 ### 33.33 Organic rotor-wash animation (2026-09-09)
 
-The original function formerly named Terrain_FindNearestAmbientSoundSource
-is the focal-wind pool query at 0x5CBE30, now named
-RotorWash_FindNearbyActiveZone. It has no audio consumer. A candidate needs
-a live owner and intensity at least 8192. XY distances use the shrinking
-best radius; half the signed vertical difference must be nonnegative and
-no larger than the radius multiplied by intensity with the rounded Q16
-fold. Each squared coordinate shifts right 22 before summing; the truncated
-square root shifts left 11. The strict nearest comparison preserves the
-first equal-distance slot. The native query reads the existing rotor pool.
+The original function formerly named Terrain_FindNearestAmbientSoundSource is
+the focal-wind pool query [orig: RotorWash_FindNearbyActiveZone @0x5CBE30], now
+named RotorWash_FindNearbyActiveZone. It has no audio consumer. A candidate
+needs a live owner and intensity at least 8192. XY distances use the shrinking
+best radius; half the signed vertical difference must be nonnegative and no
+larger than the radius multiplied by intensity with the rounded Q16 fold. Each
+squared coordinate shifts right 22 before summing; the truncated square root
+shifts left 11. The strict nearest comparison preserves the first equal-distance
+slot. The native query reads the existing rotor pool.
 
-NPC gait selection uses the 15-unit query after wounded/cover selection,
-before animation arbitration (0x4BD78D): walk 1 becomes 28, jog/run 148/149
-becomes 29, and idle 43/44 becomes 27, each only when that ADM clip exists.
-Player selection at 0x4B73A9 applies only the walk and idle substitutions
-after arbitration; it has no wash-run substitution. Swimming still
-overrides the result. The final channel commits once, preserving pending
-animation rules and avoiding a blend restart every fourth tick while
-remaining in the same wash pose. The shared player selector serves both
-local and remote bodies.
+NPC gait selection uses the 15-unit query after wounded/cover selection, before
+animation arbitration [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
+@0x4BD78D)]: walk 1 becomes 28, jog/run 148/149 becomes 29, and idle 43/44
+becomes 27, each only when that ADM clip exists. Player selection [orig:
+Entity_UpdateInfantryPlayerBody @0x4b40e0 (the site @0x4B73A9)] applies only the
+walk and idle substitutions after arbitration; it has no wash-run substitution.
+Swimming still overrides the result. The final channel commits once, preserving
+pending animation rules and avoiding a blend restart every fourth tick while
+remaining in the same wash pose. The shared player selector serves both local
+and remote bodies.
 
 The native regression exercises radius and rotor-intensity boundaries,
-half-height admission, equal-distance selection, owner removal, missing
-clips, wounded/attack precedence, different NPC/player pending-state
-ordering, unchanged-pose phase preservation and the swim override.
-Spawn-time selection at 0x4BFCC0 and its 0x4B8B20 dual-channel warmup remain
-part of the general organic initialization work in D-AI-9.
-
-The combined teammate/removal/wash changes pass all 447 runnable native
-CTest cases, with one existing motorcycle asset skip
-(`npc-teammate-wash-full-ctest.log`, 179.30 seconds). Full rebuilt-extension
-GUT passes 1,757 tests across 187 scripts, with 25 pending, 58,235 assertions
-and no collection errors (`npc-gut-teammate-wash-full.log`, 153.604 seconds).
-The existing orphan/resource shutdown reports remain; these results do not
-establish normal mission playthrough acceptance.
+half-height admission, equal-distance selection, owner removal, missing clips,
+wounded/attack precedence, different NPC/player pending-state ordering,
+unchanged-pose phase preservation and the swim override. Spawn-time selection
+[orig: Entity_InitOrganicAI @0x4BFCC0] and its [orig:
+Entity_WarmUpOrganicAnimation @0x4B8B20] dual-channel warmup remain part of the
+general organic initialization work in D-AI-9.
 
 ### 33.34 Organic initialization and mission startup (2026-09-09)
 
-The recovered org1 definition callback is Entity_InitOrganicAI at
-0x4BFCC0..0x4C0320 (class row 0x813030). It saves the current position,
-heading and flags before warmup, seeds the body/look/leg headings, clears
-the roll/lean, drag and head-look references, and derives the respawn quota
-from AiSlot[18] / 62. Its magazine comes from the signed low word of
-definition clipsize even when the definition names no ammunition.
+The recovered org1 definition callback is [orig: Entity_InitOrganicAI
+@0x4BFCC0]..0x4C0320 (class row 0x813030). It saves the current position,
+heading and flags before warmup, seeds the body/look/leg headings, clears the
+roll/lean, drag and head-look references, and derives the respawn quota from
+AiSlot[18] / 62. Its magazine comes from the signed low word of definition
+clipsize even when the definition names no ammunition.
 
-The initial primary state is 43, or 1 when the slot has a route. Flag
-0x200 with clip 76 selects 76, then flag 0x40 with clip 140 selects 140.
-Reserved route 126 overrides these with 44; route 127 with 43. The
-15-unit rotor-wash query applies the same available-clip replacements as
-ordinary NPC selection. A parent overrides the body with 67, or 68..75
-when its definition phrase_set is 1..8 and that clip exists; the organic
-inherits the parent's ground link. The secondary channel starts at 43.
+The initial primary state is 43, or 1 when the slot has a route. Flag 0x200 with
+clip 76 selects 76, then flag 0x40 with clip 140 selects 140. Reserved route 126
+overrides these with 44; route 127 with 43. The 15-unit rotor-wash query applies
+the same available-clip replacements as ordinary NPC selection. A parent
+overrides the body with 67, or 68..75 when its definition phrase_set is 1..8 and
+that clip exists; the organic inherits the parent's ground link. The secondary
+channel starts at 43.
 
-Entity_WarmUpOrganicAnimation at 0x4B8B20 runs both animation channels in
-secondary/primary order. Its ID-derived iteration count is
-8 * ((netId & 12) + 8 * ((netId & 2) + 4 * (netId & 1))) + 10.
-Mounted bodies only advance animation. Unmounted bodies add vertical root
-motion on each iteration, add the final capsule bottom, advance once
-more and add its vertical root motion, then resolve collision. The
-collision throttle byte is zero before and after that solve. Signed
-clearance strictly below 65536 is subtracted, including positive
-clearance below one unit. Horizontal root motion and motor event
-consumers do not run during warmup. AnimMap_RegisterEntity at 0x40BB60
-starts both channels on the ADM reset slot; the first warmup update
-therefore blends from that reset clip (0x40B5F0).
+[orig: Entity_WarmUpOrganicAnimation @0x4B8B20] runs both animation channels in
+secondary/primary order. Its ID-derived iteration count is 8 * ((netId & 12) + 8
+* ((netId & 2) + 4 * (netId & 1))) + 10. Mounted bodies only advance animation.
+Unmounted bodies add vertical root motion on each iteration, add the final
+capsule bottom, advance once more and add its vertical root motion, then resolve
+collision. The collision throttle byte is zero before and after that solve.
+Signed clearance strictly below 65536 is subtracted, including positive
+clearance below one unit. Horizontal root motion and motor event consumers do
+not run during warmup. [orig: AnimMap_RegisterEntity @0x40BB60] starts both
+channels on the ADM reset slot; the first warmup update therefore blends from
+that reset clip [orig: AnimMap_UpdateEntity @0x40B5F0].
 
-The initial aim point uses savedLivePose plus a three-unit forward Q22
-offset, not the collision-corrected position. Respawn-zone linking scans
-pool 1 and pool 2 independently for their first nonzero item with a
-definition, SpawnPoint attribute and matching nonzero command-group word.
-The first pool-2 match replaces the pool-1 match. A differing team sets
-the hidden flag after the spawn backup. This is the missing producer for
-the existing control-point respawn/unhide consumers.
+The initial aim point uses savedLivePose plus a three-unit forward Q22 offset,
+not the collision-corrected position. Respawn-zone linking scans pool 1 and pool
+2 independently for their first nonzero item with a definition, SpawnPoint
+attribute and matching nonzero command-group word. The first pool-2 match
+replaces the pool-1 match. A differing team sets the hidden flag after the spawn
+backup. This is the missing producer for the existing control-point
+respawn/unhide consumers.
 
 MissionKernel now retains early network bring-up and WAC/BMS/AI system
-registration, then binds terrain, ADM maps, traits, collision and weapons
-before running fresh NPC initialization and the PreMission pass. The
-baseline captures those initialized bodies and resulting script state.
-The BMS teammate factory calls the same organic initializer after binding
-its own model and collision resources.
+registration, then binds terrain, ADM maps, traits, collision and weapons before
+running fresh NPC initialization and the PreMission pass. The baseline captures
+those initialized bodies and resulting script state. The BMS teammate factory
+calls the same organic initializer after binding its own model and collision
+resources.
 
-**Additional recovered ammunition writer.** The callback explicitly
-resolves four definition strings into bytes: closeattack at def+0x56B
-to entity+0x358; marker3 at +0x58B to +0x35B; easyrocket at +0x5AB to
-+0x359; advancedrocket at +0x5CB to +0x35A. The three launchups names
-at def+0x5EB/+0x5FB/+0x60B resolve to userpoint index plus one at
-entity+0x365/+0x366/+0x367. The second pointer subtraction is a dword
-operation in the assembly (0x4BFF17), despite Hex-Rays' byte-pointer
-rendering. These explicit stores replace the old unwitnessed block-copy
-hypothesis; their consumer port follows in §33.35.
+**Additional recovered ammunition writer.** The callback explicitly resolves
+four definition strings into bytes: closeattack at def+0x56B to entity+0x358;
+marker3 at +0x58B to +0x35B; easyrocket at +0x5AB to +0x359; advancedrocket at
++0x5CB to +0x35A. The three launchups names at def+0x5EB/+0x5FB/+0x60B resolve
+to userpoint index plus one at entity+0x365/+0x366/+0x367. The second pointer
+subtraction is a dword operation in the assembly [orig: Entity_InitOrganicAI
+@0x4bfcc0 (the site @0x4BFF17)], despite Hex-Rays' byte-pointer rendering. These
+explicit stores replace the old unwitnessed block-copy hypothesis; their
+consumer port follows in §33.35.
 
-**Validation.** All 448 runnable native tests pass, with the existing
-motorcycle asset skip (`npc-organic-init-full-ctest.log`, 175.78 seconds).
-Full rebuilt-extension GUT passes 1,757 tests across 187 scripts, with
-25 pending, 58,235 assertions and no collection errors
-(`npc-gut-organic-init-final-full.log`, 145.106 seconds). The native
-infantry_spawn tests cover the ID permutation, reset-clip blends, channel
-order, vertical-only warmup, mounted exclusion, posture/wash precedence,
-strict grounding limit, and pool-ordered control-point links. The loaded
-mission test verifies initialization precedes a real PreMission group
-change and that two baseline restores preserve the initialized state.
+Regression coverage: All 448 runnable native tests pass, with the existing
+motorcycle asset skip. The native infantry_spawn tests cover the ID permutation,
+reset-clip blends, channel order, vertical-only warmup, mounted exclusion,
+posture/wash precedence, strict grounding limit, and pool-ordered control-point
+links. The loaded mission test verifies initialization precedes a real
+PreMission group change and that two baseline restores preserve the initialized
+state.
 
-The first broad GUT run's sole failure reproduced in the isolated
-listen_server file: its organic fixture expected authored pitch/roll to
-survive the original initializer's explicit zero writes. Its expected
-level angles are corrected; all eight isolated tests pass (174 assertions,
-`npc-gut-organic-init-listen-fixed.log`). Existing orphan/resource shutdown
-reports and normal mission playthrough acceptance remain open.
+The first broad GUT run's sole failure reproduced in the isolated listen_server
+file: its organic fixture expected authored pitch/roll to survive the original
+initializer's explicit zero writes.
 
 ### 33.35 Organic ammunition, launch points and target eyes (2026-09-09)
 
-Entity_InitOrganicAI at 0x4BFCC0 resolves four ammo names directly into
-entity bytes +0x358..+0x35B, ordered closeattack, easyrocket,
-advancedrocket and marker3. AmmoDef_LookupByName at 0x409870 returns
-the first case-insensitive table match, or zero. An absent authored
-string leaves the initialized byte alone; a nonempty unresolved string
-stores zero. The byte stores preserve truncation. The three launchups
-names resolve to the first case-insensitive model userpoint, plus one,
-and likewise truncate to bytes +0x365..+0x367. Missing model/table/name
-stores zero. The rocket point is shared by easy and advanced fire.
+[orig: Entity_InitOrganicAI @0x4BFCC0] resolves four ammo names directly into
+entity bytes +0x358..+0x35B, ordered closeattack, easyrocket, advancedrocket and
+marker3. [orig: AmmoDef_LookupByName @0x409870] returns the first
+case-insensitive table match, or zero. An absent authored string leaves the
+initialized byte alone; a nonempty unresolved string stores zero. The byte
+stores preserve truncation. The three launchups names resolve to the first
+case-insensitive model userpoint, plus one, and likewise truncate to bytes
++0x365..+0x367. Missing model/table/name stores zero. The rocket point is shared
+by easy and advanced fire.
 
-The event consumer at 0x4BF322 runs closeattack (bit 4), secondary-latch
-set (bit 8), and marker3 (bit 0x10) on odd ticks, in that order. The
-secondary latch is consumed OUTSIDE this parity gate at 0x4BF406.
+The event consumer [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
+@0x4BF322)] runs closeattack (bit 4), secondary-latch set (bit 8), and marker3
+(bit 0x10) on odd ticks, in that order. The secondary latch is consumed OUTSIDE
+this parity gate [orig: Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BF406)].
 Nonzero easyrocket fires and decrements the signed magazine word
-unconditionally, even when it was empty or authority/cease-fire prevents
-a round. The low word wraps. A distinct nonzero advancedrocket then
-fires without spending another magazine count and writes entity+0x26C.
-Both event and latch paths assign aimRef0 from slot[3]; the firing byte
-is temporary, returns to zero, and nonzero fire attempts mark priority.
+unconditionally, even when it was empty or authority/cease-fire prevents a
+round. The low word wraps. A distinct nonzero advancedrocket then fires without
+spending another magazine count and writes entity+0x26C. Both event and latch
+paths assign aimRef0 from slot[3]; the firing byte is temporary, returns to
+zero, and nonzero fire attempts mark priority.
 
-Entity_GetAttachmentWorldPosition at 0x4B2670 transforms the selected
-userpoint through its live skeletal bone. It copies entity yaw/pitch/roll
-for the shot direction; neither the bone's Euler angles nor an extra
-recoil term replaces that triple. Entity_BuildBoneTransformMatrices
-restores the entity triple after its temporary overlay writes. Zero or
-unresolvable points use raw position and orientation. Parent slot 3 with
-a definition carrying attrib 0x20 instead uses the parent's weapon slot
-zero fire point through Entity_ComputeUserpointWorldTransform at
-0x545C60, including the parent's raw-pose fallback.
+[orig: Entity_GetAttachmentWorldPosition @0x4B2670] transforms the selected
+userpoint through its live skeletal bone. It copies entity yaw/pitch/roll for
+the shot direction; neither the bone's Euler angles nor an extra recoil term
+replaces that triple. Entity_BuildBoneTransformMatrices restores the entity
+triple after its temporary overlay writes. Zero or unresolvable points use raw
+position and orientation. Parent slot 3 with a definition carrying attrib 0x20
+instead uses the parent's weapon slot zero fire point through [orig:
+Entity_ComputeUserpointWorldTransform @0x545C60], including the parent's
+raw-pose fallback.
 
-The port carries the ammo/launch family in AiProfile::OrganicWeapons,
-replacing the D-AI-5 single-ammo stand-in.
-Mission startup and dynamic helper creation share the resource fold.
-SimPoseProvider resolves the indexed point at the call site, validates
-the registry lifetime, and takes the live fixed-point motor position.
-Organic fire enters RoundSim::fire_npc_ammo, the shared
-WeaponSlot_FireAndSpawnEffects port: session authority gates the whole
-entry; cease-fire suppresses the round while preserving launch
-presentation. The advanced-ammo store is preserved, but guided missile
-flight is still a separate unported consumer.
+The port carries the ammo/launch family in AiProfile::OrganicWeapons, replacing
+the D-AI-5 single-ammo stand-in. Mission startup and dynamic helper creation
+share the resource fold. SimPoseProvider resolves the indexed point at the call
+site, validates the registry lifetime, and takes the live fixed-point motor
+position. Organic fire enters RoundSim::fire_npc_ammo, the shared
+WeaponSlot_FireAndSpawnEffects port: session authority gates the whole entry;
+cease-fire suppresses the round while preserving launch presentation. The
+advanced-ammo store is preserved, but guided missile flight is still a separate
+unported consumer.
 
-Entity_ComputeWeaponFireOrigin at 0x43B4B0 uses a person's CameraOffset
-as the target/LOS endpoint. Phase is the unsigned sum of the actual
-logic tick and 36 times SSN. With bit 7 clear, it adds half eye X/Y and
-full Z; with bit 7 set, quarter X/Y and half Z. For j = phase & 0x60,
-it adds (j - 64) * 64 on X and (j - 32) * 64 on Y. Shifts are signed
-and additions wrap. The assembly at 0x43B4C5 loads the tick DWORD from
-0x24C1968 (instruction bytes 8B 0D 68 19 4C 02). The earlier
-address-hash interpretation of Hex-Rays' pointer expression was wrong.
-The record and saved IDB comment now carry the correction.
+[orig: Entity_ComputeWeaponFireOrigin @0x43B4B0] uses a person's CameraOffset as
+the target/LOS endpoint. Phase is the unsigned sum of the actual logic tick and
+36 times SSN. With bit 7 clear, it adds half eye X/Y and full Z; with bit 7 set,
+quarter X/Y and half Z. For j = phase & 0x60, it adds (j - 64) * 64 on X and (j
+- 32) * 64 on Y. Shifts are signed and additions wrap. The assembly [orig:
+Entity_ComputeWeaponFireOrigin @0x43b4b0 (the site @0x43B4C5)] loads the tick
+DWORD from 0x24C1968 (instruction bytes 8B 0D 68 19 4C 02). The earlier
+address-hash interpretation of Hex-Rays' pointer expression was wrong. The
+record and saved IDB comment now carry the correction.
 
-Validation covers independent parser fields, distinct and wrapped
-ammo/userpoint bindings, event/latch order, magazine underflow, rejected
-shots, copied angles, parent fallback, target-eye phase boundaries and
-live fixed-point eye inputs. CP01's mounted retail assets exercise the
-indexed launch queries against actual ADM poses. Full native CTest passes 449 tests with the existing motorcycle asset skip
-(`npc-ammo-full-ctest.log`, 155.03 seconds). The rebuilt extension's full GUT
-run passes 1,757 tests across 187 scripts, with 25 pending and 58,235
-assertions (`npc-gut-ammo-full.log`, 131.678 seconds); no scripts were dropped.
-All ten CI lint gates pass. CP01 resolves all 112 live foot NPC launch
-points, with 99 inside the standing rifle envelope. The exact translation
-test uses a whole-unit displacement because the witnessed float-matrix
-conversion rounds sub-unit Q16 steps at those world coordinates. The PR
-lint pass also moved one-shot audio ownership into SoundBank's typed
-ObjectID list and routed the door fixture through RetailData. Existing
-shutdown orphan/resource reports remain. Normal mission playthrough
-acceptance and the remaining combat solver are still open.
+Regression coverage covers independent parser fields, distinct and wrapped
+ammo/userpoint bindings, event/latch order, magazine underflow, rejected shots,
+copied angles, parent fallback, target-eye phase boundaries and live fixed-point
+eye inputs. CP01's mounted retail assets exercise the indexed launch queries
+against actual ADM poses. CP01 resolves all 112 live foot NPC launch points,
+with 99 inside the standing rifle envelope. The exact translation test uses a
+whole-unit displacement because the witnessed float-matrix conversion rounds
+sub-unit Q16 steps at those world coordinates. The PR lint pass also moved
+one-shot audio ownership into SoundBank's typed ObjectID list and routed the
+door fixture through RetailData.
 
 ### 33.36 Terrain-gradient motion and detour production
 
-The shared terrain query now ports Terrain_GetHeightGradient at 0x606330.
+The shared terrain query now ports [orig: Terrain_GetHeightGradient @0x606330].
 It takes mission X/Y as signed Q16, negates Y with register wrap before
-arithmetic shifts, selects a sector, and subtracts the unsigned raw16
-neighbours at +1 and -1. It does not normalize or convert height units.
-The four source quadrants retain their independent X/Y neighbour locks.
+arithmetic shifts, selects a sector, and subtracts the unsigned raw16 neighbours
+at +1 and -1. It does not normalize or convert height units. The four source
+quadrants retain their independent X/Y neighbour locks.
 
-PolyTrn_LoadTerrainConfig at 0x60E450 reads configuration +0x1304/+0x1308:
-the parser's polytrn_wrapx/polytrn_wrapy fields, not the authored grid
-extent. At 0x60E4B1..0x60E4CB each nonzero wrap value produces mask zero;
-zero produces -16. A non-wrapping out-of-grid sample clamps to cell 0
-or 15 according to sign, then uses the same local 512-cell offset.
-Wrapping uses the low four grid bits. Both owning and borrowed height
-fields copy these flags, including reload/clear, within the existing
-four padding bytes. The gradient query uses this policy; the older
-floating-point height samplers' global edge mapping is unchanged.
+[orig: PolyTrn_LoadTerrainConfig @0x60e3d0 (the site @0x60E450)] reads
+configuration +0x1304/+0x1308: the parser's polytrn_wrapx/polytrn_wrapy fields,
+not the authored grid extent. At [orig: @0x60E4B1..0x60E4CB] each nonzero wrap
+value produces mask zero; zero produces -16. A non-wrapping out-of-grid sample
+clamps to cell 0 or 15 according to sign, then uses the same local 512-cell
+offset. Wrapping uses the low four grid bits. Both owning and borrowed height
+fields copy these flags, including reload/clear, within the existing four
+padding bytes. The gradient query uses this policy; the older floating-point
+height samplers' global edge mapping is unchanged.
 
-Org1 runs the gradient block every motor tick, before the 16-tick think
-(0x4BA896..0x4BA96E). A ground/carrier reference bypasses the block,
-preserving Flags 0x10000. Otherwise Flags & 0x90A000 clears that bit.
-A truncated gradient magnitude below 768 also clears it. At 768 or
-above, the motor replaces the horizontal animation pair with
-X = -((419392 * dx + 0x8000) >> 16) and
-Y =  ((419392 * dy + 0x8000) >> 16), retaining the low signed dword.
-It clamps vertical slide velocity downward to -167, sets Flags 0x10000,
-and writes path_state=1 at entity+0x369 (0x4BA94E). The replacement pair
-later rotates by body heading (0x4BF001); it is not added as world-space
-velocity and does not replace the clip's vertical lane. The response
-also runs on clients. The path state reaches ordinary route/detour
-selection in the same think tick. Boarding at 0x4BB325 only reads it
-for the arrival radius; the former boarding-only reconstruction from
-a normalized terrain normal has been removed.
+Org1 runs the gradient block every motor tick, before the 16-tick think [orig:
+Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BA896..0x4BA96E)]. A
+ground/carrier reference bypasses the block, preserving Flags 0x10000. Otherwise
+Flags & 0x90A000 clears that bit. A truncated gradient magnitude below 768 also
+clears it. At 768 or above, the motor replaces the horizontal animation pair
+with X = -((419392 * dx + 0x8000) >> 16) and Y =  ((419392 * dy + 0x8000) >>
+16), retaining the low signed dword. It clamps vertical slide velocity downward
+to -167, sets Flags 0x10000, and writes path_state=1 at entity+0x369 [orig:
+Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BA94E)]. The replacement pair
+later rotates by body heading [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
+@0x4BF001)]; it is not added as world-space velocity and does not replace the
+clip's vertical lane. The response also runs on clients. The path state reaches
+ordinary route/detour selection in the same think tick. Boarding [orig:
+Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BB325)] only reads it for the
+arrival radius; the former boarding-only reconstruction from a normalized
+terrain normal has been removed.
 
-Org2 uses the same gradient and gain at 0x4B79DC..0x4B7AAE, after its
-horizontal slide decay and after root rotation. Its replacement pair
-is already in world axes. A carrier clears Flags 0x10000 in this motor,
-and org2 does not write the NPC detour byte. Its later jump gate reads
-the current gradient flag: a stale flag on flat terrain cannot block
-jumping, while an actual steep slope does. The prior description of
-0x10000 as a second water bit was incorrect.
+Org2 uses the same gradient and gain [orig: Entity_UpdateInfantryPlayerBody
+@0x4b40e0 (the site @0x4B79DC..0x4B7AAE)], after its horizontal slide decay and
+after root rotation. Its replacement pair is already in world axes. A carrier
+clears Flags 0x10000 in this motor, and org2 does not write the NPC detour byte.
+Its later jump gate reads the current gradient flag: a stale flag on flat
+terrain cannot block jumping, while an actual steep slope does. The prior
+description of 0x10000 as a second water bit was incorrect.
 
-The new infantry_terrain native test exercises raw unsigned differences,
-signed fractional coordinates, each quadrant, locked and unlocked seams,
-independent global edge policies, threshold/magnitude boundaries, signed
-rounding, both motion spaces, carrier and flag suppression, vertical
-velocity preservation, client ticks, same-think route detours and the
-real player jump producer. TerrainFieldStore tests verify wrap-field
-construction, reload and clear. All seven focused terrain/infantry/AI/
-mission-animation targets pass. Full native CTest passes 450 tests with
-one existing motorcycle asset skip (451 total, 169.94 seconds,
-npc-gradient-full-ctest.log). Both Windows GDExtension flavours build.
-Full GUT passes 1,760 tests with 25 pending (1,785 total, 187 scripts,
-58,245 assertions, 123.536 seconds, npc-gradient-full-gut.log); collection
-has no parse errors or drops. The existing LAN test orphan and 12-resource
-exit report remain. Release Windows packaging passes both exported-app
-startup checks, ONED's 40-file game pack and both ZIP integrity checks
-(npc-windows-release-package-final.log). The exported runtime also passes
-two orderly WM_CLOSE runs over the retail mount. Forced SceneTree quit
-with streaming music remains D-MUS-13, documented in mus-sbf-re.md.
+The new infantry_terrain native test exercises raw unsigned differences, signed
+fractional coordinates, each quadrant, locked and unlocked seams, independent
+global edge policies, threshold/magnitude boundaries, signed rounding, both
+motion spaces, carrier and flag suppression, vertical velocity preservation,
+client ticks, same-think route detours and the real player jump producer.
+TerrainFieldStore tests verify wrap-field construction, reload and clear. All
+seven focused terrain/infantry/AI/ mission-animation targets pass. A forced
+SceneTree quit with streaming music still bypasses the orderly drain (Godot
+shutdown ordering, tracked in npc-mission-completion.md; mus-sbf-re.md).
 
 ### 33.37 Airborne collision vertical response (2026-09-09)
 
 The former D-INF-3 description of "swim upward-force damping" was incorrect.
-Entity_MovementCollisionResolver tests Flags 0x2000 (airborne), not the
-afloat bit 0x8000. The first pass at 0x4B304C..0x4B3092 and the second pass
-at 0x4B365F..0x4B36A5 use the same response before subtracting the contact
-force. A positive force Z therefore pushes the body downward, as with a
-ceiling contact.
+Entity_MovementCollisionResolver tests Flags 0x2000 (airborne), not the afloat
+bit 0x8000. The first pass [orig: @0x4B304C..0x4B3092] and the second pass
+[orig: @0x4B365F..0x4B36A5] use the same response before subtracting the contact
+force. A positive force Z therefore pushes the body downward, as with a ceiling
+contact.
 
-After the existing standing-pressure clamp, a solid contact changes
-entity+0xA0 only if force Z > 0, vertical velocity > -167 and Flags 0x2000
-is set. If Z is strictly greater than both absolute horizontal components,
-velocity becomes -167. Otherwise it loses 83. Equality takes the subtract
-path, and that subtraction can cross below -167 (-166 becomes -249);
-there is no saturating clamp on this branch. Both passes may subtract
-when the first result still exceeds -167. Carrier suppression and the
-Powerup/MoveCB branches bypass this ordinary solid response. No authority
-or player-class gate applies.
+After the existing standing-pressure clamp, a solid contact changes entity+0xA0
+only if force Z > 0, vertical velocity > -167 and Flags 0x2000 is set. If Z is
+strictly greater than both absolute horizontal components, velocity becomes
+-167. Otherwise it loses 83. Equality takes the subtract path, and that
+subtraction can cross below -167 (-166 becomes -249); there is no saturating
+clamp on this branch. Both passes may subtract when the first result still
+exceeds -167. Carrier suppression and the Powerup/MoveCB branches bypass this
+ordinary solid response. No authority or player-class gate applies.
 
 The shared resolver now applies this response through its existing vertical
-velocity reference, including the replica flag seam. collision_vertical
-uses actual authored CB ceiling geometry: vertical-dominant, equal-axis and
+velocity reference, including the replica flag seam. collision_vertical uses
+actual authored CB ceiling geometry: vertical-dominant, equal-axis and
 horizontal-dominant contacts, signed horizontal normals, both actor classes,
 authority/client calls, engine-only flags, replica rows, strict velocity
-thresholds and afloat/carried suppression. The regression failed on ten
-velocity assertions before the implementation; the collision, infantry and
-collision_vertical targets then passed. A complete native rebuild and
-CTest run pass 451 tests with one existing motorcycle asset skip (452 total,
-139.81 seconds, npc-collision-ceiling-full-ctest.log). Both Windows extension
-flavours build, and all ten lint gates pass. Full GUT passes 1,760 tests
-with 25 pending, 187 scripts and 58,245 assertions (331.827 seconds,
-npc-collision-ceiling-full-gut.log), without parse errors or collection
-drops. Its existing LAN orphan and 12-resource exit report remain.
-Release Windows packaging passes both exported-app startup checks, the
-40-file ONED game pack and both ZIP integrity checks (53.5 seconds,
-npc-collision-ceiling-package.log). The refreshed runtime passes two
-orderly WM_CLOSE runs over the retail mount, with no leaked-object reports
-(npc-ceiling-release-window-close-0.log and -1.log). Normal SP playthrough
-acceptance and forced-quit music cleanup (D-MUS-13) remain open.
+thresholds and afloat/carried suppression. The regression failed on ten velocity
+assertions before the implementation; the collision, infantry and
+collision_vertical targets then passed.
+
+### 33.38 Divergence catalog for the section 33 ports
+
+The ledger mirrors these rows; the record owns them. The PERMANENT rows are
+proposed in PR #642 and take effect at its merge (ADR 0022 register); a
+declined entry falls back to an OPEN class-D row.
+
+| ID | Ours | Original | Status |
+| --- | --- | --- | --- |
+| D-WAC-2 | pisvar/psetvar indices outside 0..16 return 0 and write nothing | [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0] check only `index <= 16`, so a negative index reads or writes unrelated earlier player-slot memory (§33.28) | PERMANENT (class D, proposed PR #642) |
+| D-GRM-1 | The GRM parser rejects unsafe indices, excessive row/parameter counts, non-finite coordinates and field-overflow names, and treats names as data | [orig: FaceAnimConfig_ParseProperty @0x5886A0] writes unbounded indices and sprintf-format names into fixed fields and admits `index == count` (§33.30) | PERMANENT (class D, proposed PR #642) |
+| D-TMATE-1 | Direct pickup initializes the helicopter reference before treatment; a failed helper allocation or a destroyed helicopter/teammate entity ends the operation instead of dereferencing it | [orig: HeliLift_SpawnPickup @0x4525E0] never initializes the pointer that [orig: HeliLift_UpdateAll @0x451FA0] dereferences on treatment expiry (§33.32) | PERMANENT (class D, proposed PR #642) |
+| D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
+| D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
+| D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |

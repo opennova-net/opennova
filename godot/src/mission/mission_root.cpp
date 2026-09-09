@@ -47,8 +47,6 @@ void MissionRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "mission", "container", "options"),
 			&MissionRoot::setup, DEFVAL(Ref<MissionSetupOptions>()));
 	ClassDB::bind_method(D_METHOD("get_setup_error"), &MissionRoot::get_setup_error);
-	ClassDB::bind_method(D_METHOD("entity_position_for_ssn", "ssn"),
-			&MissionRoot::entity_position_for_ssn);
 	ClassDB::bind_method(D_METHOD("entity_effect_transform_for_ssn", "ssn"),
 			&MissionRoot::entity_effect_transform_for_ssn);
 	ClassDB::bind_method(D_METHOD("has_current_present_effect_snapshot"),
@@ -394,18 +392,6 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	capture_transforms();
 	return sim_->get_entity_count();
-}
-
-// [orig: WacScript_SpawnEffectAtSsnEntity @ 0x4f23a0].
-Variant MissionRoot::entity_position_for_ssn(int p_ssn) const {
-	if (sim_.is_null() || p_ssn <= 0) {
-		return Variant();
-	}
-	const PackedVector3Array state = sim_->get_entity_effect_state_for_ssn(p_ssn);
-	if (state.size() != Simulation::EFFECT_STATE_COUNT) {
-		return Variant();
-	}
-	return state[Simulation::EFFECT_STATE_POSITION];
 }
 
 Variant MissionRoot::entity_effect_transform_for_ssn(int p_ssn) const {

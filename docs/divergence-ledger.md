@@ -443,6 +443,16 @@ Closed 2026-08-15: **D-THROW-7** -> `FIXED` — authoritative placed-device conv
 
 Closed 2026-09-04: **D-THROW-6** -> `FIXED`: the retail corpus contains 98 `lndm` fields in `00TRd.bms` and 74 in `CP09.bms`. Def ammo binding, fourteen-point init/contact, pool cadence, shared PRNG B, ceasefire/replica lifecycle and marked submodel rendering are ported; the retail damage regression also corrected the blast consumer to the witnessed entity LOS query. Native `minefield`, `minefield_retail`, `minefield_replica` and GUT marker/LOD tests cover the slice (world-wac-ai-re.md §27.6a).
 
+Closed 2026-09-09: **D-INF-5** -> `FIXED` — the idle look-at system is ported as the NPC attention pass (the 16-tick speaker/threat scan, tracking, the independent head/look chase and the spotting side effects) and its automatic GRM facial writes reach the facial state machine `[orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50]` (full entry: world/world-wac-ai-re.md §33.27/§33.30/§33.38).
+
+Closed 2026-09-09: **D-INF-24** -> `FIXED` — the org1 secondary weapon-channel writer is witnessed and ported: the motor head copies primary current +0x2BC to secondary +0x2C8 and primary pending +0x2B8 to secondary pending +0x2C4 before the authority/interpolation gate, with no equipped-ADM lookup `[orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)]` (full entry: world/world-wac-ai-re.md §33.19/§33.38).
+
+Closed 2026-09-09: **D-EVT-6** -> `FIXED` — the last explicit BMS action boundary is owned: 30/31 group door open/close reach `DoorSystem` `[orig: EventAction_Dispatch @0x4542E0; WacCmd_DoorOpen @0x4F70A0]`, 39 reaches the eight-slot teammate operation owner `[orig: HeliLift_SpawnPickup @0x4525E0; HeliLift_SpawnFlyover @0x452730; HeliLift_UpdateSlotState @0x451730]`, 42..49 write the four target-policy words `[orig: Entity_SetActionByBmsRef @0x43DAC0; Entity_SetAlertByBmsRef @0x43DA50; Entity_SetWaypointByBmsRef @0x43D9E0; sub_43D970 @0x43D970; Entity_SetWeaponTypeByNetId @0x43D8F0; Entity_SetActionByNetId @0x43D870; Entity_SetAlertByNetId @0x43D7F0; Entity_SetTargetByNetId @0x43D770]`, and 41 `ExecuteWac` is a witnessed no-op with no retail case arm (full entry: mission/bms-event-runtime-re.md §10.1; world/world-wac-ai-re.md §33.2/§33.14/§33.32).
+
+Closed 2026-09-09: **D-AI-5** -> `FIXED` — the anim-fire weapon bytes' load-time writer is witnessed: organic initialization copies the def's `ammo_closeattack/easyrocket/advancedrocket/marker3` ids and the three `launchups_*` points per field, and organic fire resolves them through the shared NPC round entry `[orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0]`, replacing the single-ammo stand-in (`AiProfile::OrganicWeapons`; full entry: world/world-wac-ai-re.md §33.35/§33.38).
+
+Closed 2026-09-09 (ratification = this PR's merge; each entry falls back to an OPEN class-D row if declined): **D-WAC-1**, **D-WAC-2**, **D-GRM-1**, **D-TMATE-1** -> `PERMANENT` (the register below, proposed in [PR #642](https://github.com/opennova-net/opennova/pull/642); full entries: world/world-wac-ai-re.md §33.9/§33.28/§33.30/§33.32/§33.38).
+
 Closed 2026-08-15: **D-THROW-10** -> `FIXED` — after the 0x59 conversion the host enforces retail's live per-owner pool-1 device cap `[orig: Server_EnforcePlacedDeviceCapByOwner @0x5119E0; callers @0x448bd5 / @0x447b56]`: keyed on the conversion MOTOR (AT mines author `move_function schl` and ride the satchel motor's max-3 call; claymores max 4), a surplus retires the armed entry with the most negative age; the placed-device think is gated on the PRE-decrement age with the unconditional wrap decrement after `[orig: @0x4b8e1b / @0x4b8ea0]` (full entry: world-wac-ai-re.md §27.6/§27.8).
 
 Closed 2026-07-05: **D-INF-4** → `FIXED` (the direction-table generator witnessed —
@@ -549,7 +559,6 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-MUS-13 | Godot 4.6.1 forced SceneTree quit (including --quit-after) can unregister extension classes before deferred music playback cleanup. Normal runtime quit now stops the context and drains observed playback lifetimes; forced exit still bypasses that barrier. Reproduction and device-layer evidence: audio/mus-sbf-re.md, Godot playback shutdown. | A | OPEN (forced exit with streaming music) | PAR-UI |
 | D-MNU-5 | Text-item rendering scope: combo/list image/color items not backed (shipped menus are text-only there) | A | OPEN | PAR-UI |
 | D-MNU-6 | CBIN credits custom `~F` fonts / `~I` images not resolved from the resource root (default font only) | A | OPEN | PAR-UI (see credits audit PAR-R5) |
 | D-MNU-9 | Armory per-class loadout memory: the visible row model + weight path match, but retail's separate remembered per-class buffers (save-on-class-flip counts) remain deferred | A | OPEN (kept-deferred) | PAR-UI |
@@ -675,7 +684,7 @@ witness: [mission/mis-format-re.md](mission/mis-format-re.md).
 |---|---|---|---|---|
 | D-MIS-2 | `weapon_availability` emitted empty + skipped on read; the semantics are now grilled (SEMANTICS CLOSED 2026-07-18 in mis-format-re.md — the per-map `{name, statusByte}` weapon-rules list, `[orig: build_item_restriction_table @ 0x54ddb0]`, net-re §5.63); the `.mis` text section stays empty-emitted pending the dfx2med grammar grill (D-MIS-3); the tuple names `{name, ammoPri, ammoSec, flags}` are applied to `bms.h` + the loadout panel (2026-07-30) | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-MIS-3 | Full `dfx2med.exe` `.mis` grammar unmapped (hand-authored / legacy variants beyond the writer subset) | B | NEEDS-RE | PAR-WORLD |
-| D-PTL-24 | Script entity+460 slots still need unification with native actor/vehicle effect groups and their destruction/corpse/respawn releases; WAC/BMS command pose, selection and per-script group replacement are implemented (ptl-format-re.md script follow-up) | A | OPEN | PAR-WORLD |
+| D-PTL-26 | Script entity+460 slots still need unification with native actor/vehicle effect groups and their destruction/corpse/respawn releases; WAC/BMS command pose, selection and per-script group replacement are implemented (ptl-format-re.md script follow-up) | A | OPEN | PAR-WORLD |
 
 Retired from the tables 2026-08-28: **D-3DILW-1**, **D-3DILW-2**, **D-3DILW-3** - the
 `threedi_lw` parser they describe never landed (PR #45 closed) and ADR 0027 removed the
@@ -697,6 +706,13 @@ Closed 2026-07-14: **D-PTL-3** -> `FIXED` — `mod2x` approximated `DESTCOLOR`/`
 Closed 2026-07-14: **D-PTL-4** -> `FIXED` — `bump`/`bumpadd` used the wrong rotation axis and saturated encoded light bytes (full detail: ptl-format-re.md + git history).
 Closed 2026-07-14: **D-PTL-5** -> `FIXED` — `distort` used an arbitrary fixed-strength screen-texture offset (full detail: ptl-format-re.md + git history).
 Closed 2026-07-14: **D-PTL-6** -> `FIXED` — Atlas registrar, allocator, type preprocessing, and inset were approximated by per-emitter shelf packing (full detail: ptl-format-re.md + git history).
+Closed 2026-08-12, corrected 2026-09-09: **D-PTL-7** -> `FIXED` (premise corrected) — fx2ssn/fx2tgt
+direction is the Q22 sine/cosine of the entity's rounded BAM32 yaw and pitch
+(`(angle + 0x200000) >> 22`), written as the Q16 triple `{cos p*cos y, cos p*sin y, sin p}`; the
+2026-08-12 terrain-normal reading was wrong (`off_849934` is the +256-entry cosine quarter of
+`g_bam_sin_table_q22`, not a terrain table) `[orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0;
+WacScript_SpawnEffectAtTargetMarker @0x4F7FD0]` (full detail: particles/ptl-format-re.md §4 catalog
+row + the 2026-09-09 script particle follow-up).
 Closed: **D-PTL-13** -> `FIXED` — Parser hard-failed a whole .ptl on any unrecognized top-level or `=`-less line where retail ignores unclaimed lines (full detail: ptl-format-re.md + git history).
 Closed 2026-07-14: **D-PTL-14** -> `FIXED` — Flipbook frame naming was guessed, causing missing shipped frames and procedural-fallback strobing (full detail: ptl-format-re.md + git history).
 Closed 2026-07-14: **D-PTL-15** -> `FIXED` — Static-batch buildings/decorations/no-anim vehicles formerly lost ITEMS.DEF `particlefx` because they had no per-entity Node/model handle (full detail: correspondence.md + git history).
@@ -1239,8 +1255,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Foliage | 3 | 0 | 0 | 3 | 0 |
 | Render — draw order | 1 | 0 | 0 | 1 | 0 |
 | Render — occlusion | 4 | 0 | 1 | 5 | 0 |
-| Music VM | 1 | 0 | 0 | 1 | 0 |
-| **Total** | **103** | **6** | **9** | **118** | 3 |
+| **Total** | **102** | **6** | **9** | **117** | 3 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-97, D-OCC-9.
 
@@ -1316,10 +1331,10 @@ one-line rationale for why porting it would be *wrong*.
 
 | ID | Divergence | Why porting it would be wrong |
 |---|---|---|
-| D-WAC-1 | Invalid IDIV operands stop the current WAC pass with a diagnostic; retail faults the process | Avoid crashing the host on malformed script arithmetic; world/world-wac-ai-re.md section 33.9 |
-| D-TMATE-1 | Guard the original teammate operation's null helicopter and failed allocation dereferences; retain allocation lifetime checks | Direct pickup never initializes the helicopter pointer before treatment dereferences it (0x4525E0, 0x451FA0). Failed helper allocation is also unchecked. The port diagnoses the undefined boundary; failed starts roll back new helpers and leave the patient unchanged. Defined state behavior and the flyover's no-pilot outcome are preserved; world/world-wac-ai-re.md section 33.32. |
-| D-GRM-1 | Reject unsafe GRM indices, excessive row/parameter counts, non-finite coordinates and field-overflow names; treat names as data | Retail FaceAnimConfig_ParseProperty @0x5886A0 writes unbounded indices/format-string names into fixed fields and the renderer dereferences triangle indices unchecked. The native format preserves defined mesh/gesture behavior without unrelated-memory access; world/world-wac-ai-re.md section 33.30. |
-| D-WAC-2 | Negative pisvar/psetvar indices return 0; retail accesses preceding player-slot memory | Keep the authored 0..16 byte bank without arbitrary unrelated-memory reads/writes; world/world-wac-ai-re.md section 33.28 |
+| D-WAC-1 | Invalid IDIV operands stop the current WAC pass with a diagnostic; retail faults the process | Avoid crashing the host on malformed script arithmetic; world/world-wac-ai-re.md §33.9/§33.38. PROPOSED in PR #642 (2026-09-09), ratification = merge |
+| D-TMATE-1 | Guard the original teammate operation's null helicopter and failed allocation dereferences; retain allocation lifetime checks, and skip an operation whose helicopter or teammate entity was destroyed mid-flight (`TeammateOperations::update`) | Direct pickup never initializes the helicopter pointer before treatment dereferences it (0x4525E0, 0x451FA0). Failed helper allocation is also unchecked. The port diagnoses the undefined boundary; failed starts roll back new helpers and leave the patient unchanged. Defined state behavior and the flyover's no-pilot outcome are preserved; world/world-wac-ai-re.md section 33.32. PROPOSED in PR #642 (2026-09-09), ratification = merge |
+| D-GRM-1 | Reject unsafe GRM indices, excessive row/parameter counts, non-finite coordinates and field-overflow names; treat names as data | Retail FaceAnimConfig_ParseProperty @0x5886A0 writes unbounded indices/format-string names into fixed fields and the renderer dereferences triangle indices unchecked. The native format preserves defined mesh/gesture behavior without unrelated-memory access; world/world-wac-ai-re.md section 33.30. PROPOSED in PR #642 (2026-09-09), ratification = merge |
+| D-WAC-2 | Negative pisvar/psetvar indices return 0; retail accesses preceding player-slot memory | Keep the authored 0..16 byte bank without arbitrary unrelated-memory reads/writes; world/world-wac-ai-re.md §33.28/§33.38. PROPOSED in PR #642 (2026-09-09), ratification = merge |
 | env #11 | Original packs negative color components as garbage (no lower clamp); the reimpl clamps to 0 | Reproducing unclamped negative-color UB would carry garbage bytes through the parser for no defined behavior. |
 | D-NET-133 (empty-slot facet) | An in-capacity EMPTY 0x18 slot replies a zeroed type-0 record; retail serializes the slot's raw (possibly stale) memory | The observable effect is identical (the client stops at the type gate either way); reproducing retail's stale-memory bytes would be manufacturing garbage. |
 | D-MUS-7 | `op_callvl` (`0x0A` call form) resolves against an uninitialised-BSS name table in Jointops, so the opcode is dead; the reimpl mirrors the dead stub (push 0) | The original behavior *is* "do nothing" (the table is never populated); porting a "working" call would invent behavior the engine never had. |

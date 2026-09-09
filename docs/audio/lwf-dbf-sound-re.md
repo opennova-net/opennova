@@ -174,51 +174,45 @@ The compiler now resolves SOUNDSET arguments and SS_ aliases against the mounted
 mission/global LWF chain before execution. References are stable nonzero handles
 into the program's complete name table; variables retain those handles, zero is
 the null reference, and unknown names are hard compile errors. Numeric literals
-in a SOUNDSET parameter are names, not indices. The resolver witness is
-WacScript_ResolveParameter at 0x4F2940 (expected type 19), calling
-SoundBank_FindSetByNameAnyBank at 0x5274F0. MissionKernel and hot script compilation
-use the same catalog as the presentation bank chain, including expansion banks.
+in a SOUNDSET parameter are names, not indices. The resolver witness is [orig:
+WacScript_ResolveParameter @0x4F2920] (expected type 19), calling
+[orig: SoundBank_FindSetByNameAnyBank @0x5274F0]. MissionKernel and hot script
+compilation use the same catalog as the presentation bank chain, including
+expansion banks.
 
-- sound (0x4ED590) returns 0 and passes its explicit Q16 distance and raw bearing
-  to Sound_PlayTriggerSetScaled (0x527B90). The helper constructs
-  {65536, bearing, g_SoundVolumeOption, 0, distance, 0} and enters
-  SoundBank_PlayTriggerEntries (0x75CCD0) directly. It does not perform the
-  positional set-range cull or occlusion query. Layer selection and attenuation
-  still run. The shared native planner now preserves that distinction; weather
-  thunder uses the same direct path.
-- sound2tgt (0x4F7F60) selects the first pool-3 marker with an ItemDef whose id is
-  6088 and whose WP_NUMBER at entity+668 matches the target. A nonzero sound plays
-  through Entity_PlaySound3D_FullVolume (0x528E20), with the entity origin and source
-  owner, and returns 0. Missing targets or zero sound return 1. There is no health
-  gate. The old IDB progress-bar description was incorrect.
-- SS2SSN (0x4F1DD0) requires a valid allocated packed handle and nonzero item index,
-  but does not require health or ItemDef. It uses the same positional entry and
-  returns 1 even for a zero sound; invalid sources return 0.
+- [orig: WacCmd_Sound @0x4ED590] returns 0 and passes its explicit Q16 distance
+  and raw bearing to [orig: Sound_PlayTriggerSetScaled @0x527B90]. The helper
+  constructs {65536, bearing, g_SoundVolumeOption, 0, distance, 0} and enters
+  [orig: SoundBank_PlayTriggerEntries @0x75CCD0] directly. It does not perform
+  the positional set-range cull or occlusion query. Layer selection and
+  attenuation still run. The shared native planner now preserves that
+  distinction; weather thunder uses the same direct path.
+- sound2tgt [orig: WacCmd_SoundToTarget @0x4F7F60] selects the first pool-3
+  marker with an ItemDef whose id is 6088 and whose WP_NUMBER at entity+668
+  matches the target. A nonzero sound plays through [orig:
+  Entity_PlaySound3D_FullVolume @0x528E20], with the entity origin and source
+  owner, and returns 0. Missing targets or zero sound return 1. There is no
+  health gate. The old IDB progress-bar description was incorrect.
+- SS2SSN [orig: WacCmd_SoundSetToSsn @0x4F1DD0] requires a valid allocated
+  packed handle and nonzero item index, but does not require health or ItemDef.
+  It uses the same positional entry and returns 1 even for a zero sound; invalid
+  sources return 0.
 
 World emits direct descriptors or the existing positional sound rows. Native
 motor positions retain their exact Q16 words. GameWorld publishes the listener
 before session presentation, fixing first-frame positional fires that previously
 used an infinite listener and bypassed attenuation. Positional rows retain the
-source identity for audio occlusion. A normal retry stops old bank-owned one-shot
-players, clears exclusive playback guards, and replays the sealed startup queues.
+source identity for audio occlusion. A normal retry stops old bank-owned
+one-shot players, clears exclusive playback guards, and replays the sealed
+startup queues.
 
-Device policy remains D-SND-8: Godot supplies panning, options/bus gain and device
-availability. The direct path uses a unit listener-relative panner position while
-the native explicit distance controls gain. This is not a claim of byte-exact
-retail pan, master fade, underwater halving or pitch-jitter interleaving.
-Talking portraits remain D-SND-5.
+Device policy remains D-SND-8: Godot supplies panning, options/bus gain and
+device availability. The direct path uses a unit listener-relative panner
+position while the native explicit distance controls gain. This is not a claim
+of byte-exact retail pan, master fade, underwater halving or pitch-jitter
+interleaving. Talking portraits remain D-SND-5.
 
-Validation: all seven focused native tests pass, including SOUNDSET aliases and
-numeric-name diagnostics, target/SSN admission, exact source coordinates, raw
-distance/bearing, retry queues, the explicit-distance planner, and the shipped WAC
-compile corpus (npc-sound-focused-ctest.log). Full native CTest passes 438 tests
-with one existing motorcycle asset skip (npc-sound-full-ctest.log, 79.00 seconds).
-The loaded-mission GUT regression passes 23 assertions against actual WAV players:
-both positional calls cull while direct sound plays at the expected layer gain,
-source ids survive, and normal retry stops and replaces the initial voice
-(npc-gut-wac-sounds.log). Full rebuilt-extension GUT subsequently passes 1,752 tests
-across 182 scripts, with 25 pending, 58,081 assertions and no collection errors
-(npc-gut-sound-range-full.log, 114.536 seconds). Existing shutdown caveats remain.
+Existing shutdown caveats remain.
 
 ## WAC scripted voice — `wave` / `pwave` (grilled 2026-06-15; re-confirmed 2026-07-09)
 

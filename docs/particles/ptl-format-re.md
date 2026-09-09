@@ -1041,7 +1041,7 @@ witnessed behavior gap stay in §8.
 | D-PTL-4 | `bump`/`bumpadd` formerly rotated the light around view-Z and saturated its byte encoding | **FIXED 2026-07-14** — the Godot scene-to-quad adapter evaluates `transpose(Rx(roll) × view)`, transforms `bump_scale × (+k,+k,+k)`, and retains the original truncating conversion's low byte before the DOT3 pipelines; the portable compiler owns ordering and batching of the authored quads (§5.3) |
 | D-PTL-5 | `distort` formerly used an arbitrary fixed-strength `SCREEN_UV` offset | **FIXED 2026-07-14** — the exact decoded normal/wave/projective equation samples one immutable pre-particle scene-color copy; Godot render-buffer UV remains the bounded reimpl mapping (§5.4) |
 | D-PTL-6 | Atlas registration, page allocation, preprocessing, and inset were formerly approximated by a per-emitter horizontal shelf | **FIXED 2026-07-14** — the portable shared builder implements the witnessed name identity, 1024/256 type families, type-1/2 sharing, stable width sort, skyline allocator quirks, exact rect, 2.5-pixel inset, alpha clear, and type-3/6/7 conversions [orig: BuildTextureAtlases @ 0x5e8db0] |
-| D-PTL-7 | Scripted-spawn initial orientation (§4 runtime chain) | **CORRECTED 2026-09-09** — fx2ssn/fx2tgt derive direction from the entity yaw and pitch through the Q22 trigonometric tables. The earlier terrain-normal interpretation was incorrect. Typed native descriptors and the loaded GameWorld regression now verify the entity direction; see the script particle follow-up below. Native entity+460 lifetime sharing remains D-PTL-24. [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0; WacCmd_FxToTarget @0x4F7FD0] |
+| D-PTL-7 | Scripted-spawn initial orientation (§4 runtime chain) | **FIXED 2026-08-12, premise corrected 2026-09-09** — fx2ssn/fx2tgt derive direction from the entity yaw and pitch through the Q22 trigonometric tables. The earlier terrain-normal interpretation was incorrect. Typed native descriptors and the loaded GameWorld regression now verify the entity direction; see the script particle follow-up below. Native entity+460 lifetime sharing remains D-PTL-24. [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0; WacCmd_FxToTarget @0x4F7FD0] |
 | D-PTL-8 | Unknown effect name at intern (§4 runtime chain): the engine clones `stockeffect` under the requested name | **CLOSED 2026-07-12** — `EffectWorld.intern_effect` clones the mounted `stockeffect` entry under the requested name (0 only when no stockeffect is mounted). [orig: CEffectWorld_InternEffectHandle @ 0x5f7310] |
 | D-PTL-9 | Direction sampling (spawn velocity + sphere/cone shape caps): the reimpl reconstructs the retail helper's independently bounded signed yaw/pitch rotations on a perpendicular basis, including `spread_skip`; it does not call the original orientation-helper vtable (`CEffectEmitter_SetOrientationFromDirection @ 0x5e5b00` family) | **PERMANENT (bounded)** — authored component bounds and two-draw cadence match; portable LCG and exact DirectX/FPU basis construction are not byte-identical. [orig: SpawnParticle @ 0x5e7640] |
 | D-PTL-10 | GFXFLIPRAND start offset: the engine derives the per-particle flipbook offset from the particle SLOT POINTER (`(ptr + (ptr>>3)) % frames`); the port derives it from the particle serial | **PERMANENT (bounded)** — same distribution intent; the engine's value is address-dependent and unreproducible by design. [orig: CParticleEmitter_RenderStaticBillboards @ 0x5f4e10, the GFXFLIPRAND offset @ 0x5f4f70] |
@@ -1061,6 +1061,7 @@ witnessed behavior gap stay in §8.
 
 | D-PTL-24 | The effect catalog loaded only `.ptl`, dropping the regional gore set. `ResourceIndex` classified `.ptu`/`.ptg` as no kind at all, so they never entered the index, and `EffectWorld` asked only for `.ptl`. Retail loads `.ptl` **plus** `.ptu` (US) or `.ptg` (German) through the same parse callback. Every effect defined only in that set fell to the invisible `stockeffect` clone (D-PTL-8) with no error: `Effect_AmHitBody`/`Effect_SGvBody` (the blood puffs, `US_BLOOD.PTU`) and the whole `Effect_FX50Cal*` impact family (`FX50CAL.PTU`) — 16 effectdefs in the plaintext `.ptu` files alone, 11 of them referenced by `ammo.def`. Symptom: no blood on any flesh hit, and no .50cal impact anywhere | **FIXED 2026-08-22** — all three extensions classify as the `particle` kind; `ResourceIndex::particle_extension()` reproduces the presence-of-`fgn2.bin` selection and `EffectWorld.load_from_resource_root` loads `.ptl` plus the active set. Catalog `open()` registers every particledef across all documents before resolving any effectdef, so cross-file pdef references resolve regardless of load order; order only picks the first-registered duplicate id, and `.ptl`-before-gore-set matches retail on shipped data. [orig: CEffectSystem_Init @ 0x5f6070 — extension select @0x5f608b..0x5f6095, loose legs @0x5f6228/@0x5f6356, archive match @0x5f64f3, shared callback CEffectWorld_ParseSectionCallback @ 0x5ecb40; selector Game_LoadConfig @ 0x5514e8..0x5514fa] |
 | D-PTL-25 | `particlefxw3` / `particlefxw4` were parsed but discarded before `VehicleTraits`; the watercraft motor published no speed-controlled effect state, and `EffectScene` exposed only spawn-time randomized rate/offset values. Shipped boats therefore had no wake despite valid item rows and particle definitions | **FIXED 2026-09-04** — W3/W4 definitions retain their effect/userpoint pair, the shared cbot core samples their two witnessed Q16 magnitudes and exact pose/water frame every even tick, and the fixed-tick presenter owns one live group per matched userpoint and registry generation. The portable particle scene now updates emission rate and spawn offset in place, including unclamped extrapolation and zero camera pull. W1/W2/FXS remain separate open movement tiers. |
+| D-PTL-26 | Script entity+460 effect slots (fx2ssn/fx2tgt/targetfx, BMS 27) are a separate owner from the native actor/vehicle effect groups and their destruction/corpse/respawn releases | **OPEN** (minted 2026-09-09) — retail keeps one `ownerSession`-named group pointer at entity+460 for both; the WAC/BMS command pose, selection and per-script group replacement are implemented [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0; WacScript_SpawnEffectAtTargetMarker @0x4F7FD0; EventAction_SpawnParticleEffect @0x4540E0] |
 
 WANDER/BUBBLE (engine-vestigial, zero xrefs), persistent emitter-AABB lifecycle, the full ORBIT
 orientation-matrix/age-chain port, collision sounds,
@@ -1306,17 +1307,47 @@ needs the rename-everywhere treatment.
 
 ### Script particle command follow-up (2026-09-09)
 
-The earlier D-PTL-7 terrain-normal conclusion was disproved by the handler's instruction operands. The tables at outMillis/off_849934 are the 1024-entry Q22 sine/cosine tables. fx2ssn (0x4F23A0) and fx2tgt (0x4F7FD0) index them with rounded entity yaw/pitch, then write a Q16 direction. Position and angles come from the exact motor fields when an AI mirror exists. No terrain-normal query participates.
+The earlier D-PTL-7 terrain-normal conclusion was disproved by the handler's instruction operands.
+The tables at outMillis/off_849934 are the 1024-entry Q22 sine/cosine tables. fx2ssn [orig:
+WacScript_SpawnEffectAtSsnEntity @0x4F23A0] and fx2tgt [orig: WacScript_SpawnEffectAtTargetMarker
+@0x4F7FD0] index them with rounded entity yaw/pitch, then write a Q16 direction. Position and angles
+come from the exact motor fields when an AI mirror exists. No terrain-normal query participates.
 
-fx2ssn requires allocation, ItemDef and nonzero FX, releases the current entity+460 group before attempting the new spawn, stores the result and returns 1. fx2tgt chooses the first pool-3 ItemDef-id-6088 marker with matching WP_NUMBER; missing marker/zero FX returns 1, otherwise it overwrites the slot without releasing the previous group and returns 0. Neither handler checks health. fxrain (0x4EE3E0) draws one WAC PRNG word after the nonzero gate: x/y add six times its signed high/low halves, z adds 8 units, direction is (0,0,-32768), owner is the local player, and no entity slot is stored.
+fx2ssn requires allocation, ItemDef and nonzero FX, releases the current entity+460 group before
+attempting the new spawn, stores the result and returns 1. fx2tgt chooses the first pool-3
+ItemDef-id-6088 marker with matching WP_NUMBER; missing marker/zero FX returns 1, otherwise it
+overwrites the slot without releasing the previous group and returns 0. Neither handler checks
+health. [orig: WacCmd_FxRain @0x4EE3E0] draws one WAC PRNG word after the nonzero gate: x/y add six
+times its signed high/low halves, z adds 8 units, direction is (0,0,-32768), owner is the local
+player, and no entity slot is stored.
 
-BMS action 27 and targetfx (0x4EE190 -> 0x4540E0) visit ALL matching pool-3 markers, use the 31-byte BMS gen_string copied to entity+692 by Entity_SpawnFromBMSRecord (0x40E9F0), and supply zero direction. The named lookup itself does not substitute stockeffect. CEffectBank_CloneFromParent (0x5E49D0), however, registers a previously interned stock clone in the world's definition list, so subsequent direct lookup can resolve that existing name. The death callback at 0x453580 clears entity+460 only when it still identifies the dying group.
+BMS action 27 and [orig: WacCmd_TargetFx @0x4EE190] -> [orig: EventAction_SpawnParticleEffect
+@0x4540E0] visit ALL matching pool-3 markers, use the 31-byte BMS gen_string copied to entity+692 by
+[orig: Entity_SpawnFromBMSRecord @0x40E9F0], and supply zero direction. The named lookup itself does
+not substitute stockeffect. [orig: CEffectBank_CloneFromParent @0x5E49D0], however, registers a
+previously interned stock clone in the world's definition list, so subsequent direct lookup can
+resolve that existing name. The death callback [orig: Entity_ClearOwnerSessionIfMatches @0x453580]
+clears entity+460 only when it still identifies the dying group.
 
-The shared WAC compiler binds FX literals to stable 1-based handles, including FX_ aliases assigned to variables. Mounted PTL and regional PTU/PTG documents provide the catalog; unknown names fail compilation without a stockeffect definition. Compiled names prime the presentation catalog before descriptors are consumed, so a compile-only stock alias is available to later BMS effects. Script descriptors retain source tick/order, fixed pose, owner, and separate release/store flags. The portable particle consumer uses World binding, performs explicit release before spawn, and uses StoreOwned for non-detaching slot replacement. Failed replacement still clears the slot; a dying older group cannot clear its successor.
+The shared WAC compiler binds FX literals to stable 1-based handles, including FX_ aliases assigned
+to variables. Mounted PTL and regional PTU/PTG documents provide the catalog; unknown names fail
+compilation without a stockeffect definition. Compiled names prime the presentation catalog before
+descriptors are consumed, so a compile-only stock alias is available to later BMS effects. Script
+descriptors retain source tick/order, fixed pose, owner, and separate release/store flags. The
+portable particle consumer uses World binding, performs explicit release before spawn, and uses
+StoreOwned for non-detaching slot replacement. Failed replacement still clears the slot; a dying
+older group cannot clear its successor.
 
-Initial WAC/BMS descriptors are captured before presentation at the play-start baseline, delivered after catalog warmup, and replayed after MissionRoot's normal restart resets the particle scene. This supports mission retry; it is not a mid-mission particle savegame. wac_effects covers compile bindings, raw gates, target selection, marker name promotion, exact pose/RNG, release-before-failure, failed stores and final-child ownership. The GameWorld integration executes a real mounted script and checks startup, scheduled retrigger, entity orientation and normal restart (18 assertions, npc-gut-fx-retry-focused.log). Complete-suite validation is recorded separately.
+Initial WAC/BMS descriptors are captured before presentation at the play-start baseline, delivered
+after catalog warmup, and replayed after MissionRoot's normal restart resets the particle scene.
+This supports mission retry; it is not a mid-mission particle savegame. wac_effects covers compile
+bindings, raw gates, target selection, marker name promotion, exact pose/RNG,
+release-before-failure, failed stores and final-child ownership. The GameWorld integration executes
+a real mounted script and checks startup, scheduled retrigger, entity orientation and normal
+restart. Complete-suite validation is recorded separately.
 
-D-PTL-24 remains open: the script entity slot is not yet unified with the native actor/vehicle effect slots and all their destruction, corpse and respawn release consumers. Their shared retail ownerSession field at entity+460 is a particle group pointer, not a network/session pointer. This follow-up does not claim those lifecycle families complete.
-
-
-Validation checkpoint: the complete Release build and all 437 runnable native tests pass, with one existing motorcycle asset skip (npc-fx-full-ctest.log, 95.06 seconds). Full rebuilt-extension GUT passes 1,751 tests, 25 pending and 58,058 assertions across 181 scripts (npc-gut-fx-full.log, 112.949 seconds); there are no collection errors. The existing single orphan and 13-resource shutdown notices remain. These results cover the final stock-alias lookup/synchronization correction and the real WAC GameWorld startup/retrigger/restart test; they are not normal mission playthrough acceptance.
+D-PTL-26 (minted 2026-09-09; D-PTL-24 is the closed gore-set row) remains open: the script entity
+slot is not yet unified with the native actor/vehicle effect slots and all their destruction, corpse
+and respawn release consumers. Their shared retail ownerSession field at entity+460 is a particle
+group pointer, not a network/session pointer. This follow-up does not claim those lifecycle families
+complete.

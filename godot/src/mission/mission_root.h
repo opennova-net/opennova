@@ -97,9 +97,6 @@ public:
 			const Ref<MissionSetupOptions> &p_options = Ref<MissionSetupOptions>());
 	int get_setup_error() const { return setup_error_; }
 
-	// World position of the entity addressed by a runtime SSN (WAC/BMS
-	// addressing), or null when no live registry entity carries that net id.
-	Variant entity_position_for_ssn(int p_ssn) const;
 	// Full attached-effect transform for fx2ssn. Simulation owns the LIVE
 	// registry lookup and frame data; presentation applies the single
 	// canonical basis conversion shared with the mission present pass.

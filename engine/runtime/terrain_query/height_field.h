@@ -98,8 +98,7 @@ TerrainSurfaceNormal height_field_normal_from_raw16(
 // Resolve a world position through the runtime sector/quadrant mapping, floor
 // to its terrain grid cell, and return the exact generated normal for that
 // cell. Invalid fields and empty sectors return canonical up.
-// [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0 reads the terrain surface
-// normal at the entity grid cell; Terrain_GenerateNormalMap @0x603210]
+// [orig: Terrain_GenerateNormalMap @0x603210; scale @0x7C6950]
 TerrainSurfaceNormal height_field_surface_normal_world(
 		const TerrainHeightField &f, float world_x, float world_z);
 
