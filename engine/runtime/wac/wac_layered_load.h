@@ -16,7 +16,7 @@ namespace opennova::world {
 class EntityRegistry;
 }
 
-namespace opennova::particle { class EffectScene; }
+namespace opennova::particle { class EffectCatalogNames; }
 namespace opennova::audio { class SoundSetIndex; }
 
 namespace opennova::wac {
@@ -34,16 +34,26 @@ enum class WacLayeredLoadStatus {
 // compiler labels recoverable/legacy syntax issues as warnings so retail
 // scripts keep running. Strict (the dedicated golden host's policy): EVERY
 // diagnostic is fatal — running a partial script is a known wire-parity
-// failure.
+// failure. The FX and SOUNDSET literals bind against the embedder's catalogs
+// (MissionKernel builds both once per boot, see load_script_effect_catalog /
+// load_script_sound_sets); a caller without them gets temporaries read from
+// the same files.
 WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		const mission::BootFileSource &files,
 		const std::string &mission_basename, world::EntityRegistry *registry,
 		bool strict_diagnostics, std::string &error,
-        particle::EffectScene *effect_catalog = nullptr,
+        particle::EffectCatalogNames *effect_catalog = nullptr,
         const audio::SoundSetIndex *sound_catalog = nullptr);
 
 // Same mounted mission/global chain as the audio host; no WAV decode needed.
 void load_script_sound_sets(const mission::BootFileSource &files,
         const std::string &mission_basename, audio::SoundSetIndex &sounds);
+
+// The effect NAMES the mounted .ptl files plus the regional .ptu/.ptg table
+// define, in the effect world's load order (first registration wins)
+// [orig: CEffectSystem_Init @0x5F6070]. Names only: the shell's EffectWorld
+// owns the one runtime scene.
+void load_script_effect_catalog(const mission::BootFileSource &files,
+        particle::EffectCatalogNames &effects);
 
 } // namespace opennova::wac

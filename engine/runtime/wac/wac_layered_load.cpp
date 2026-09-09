@@ -3,7 +3,7 @@
 #include <formats/wac/program.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/world/ammo_table_build.h>
-#include <runtime/particle/effect_scene.h>
+#include <runtime/particle/effect_catalog_names.h>
 #include <formats/particle/parser.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/audio/bank_chain.h>
@@ -31,10 +31,29 @@ void load_script_sound_sets(const mission::BootFileSource &files,
     }
 }
 
+void load_script_effect_catalog(const mission::BootFileSource &files,
+        particle::EffectCatalogNames &effects) {
+    effects.clear();
+    if (!files.valid() || !files.list_files) return;
+    // The effect world's mounted PTL + regional table load order.
+    // [orig: CEffectSystem_Init @0x5F6070]
+    const std::string regional = files.has_file("fgn2.bin") ? ".ptg" : ".ptu";
+    for (const std::string &extension : {std::string(".ptl"), regional}) {
+        for (const std::string &name : files.list_files(extension)) {
+            std::vector<uint8_t> bytes;
+            particle::ParticleFile document;
+            particle::ParseError parse_error;
+            if (files.read_file(name, bytes) && particle::load_particles_from_buffer(
+                    reinterpret_cast<const char *>(bytes.data()), bytes.size(), document, parse_error))
+                effects.add_document(document);
+        }
+    }
+}
+
 WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		const mission::BootFileSource &files,
 		const std::string &mission_basename, world::EntityRegistry *registry,
-		bool strict_diagnostics, std::string &error, particle::EffectScene *effect_catalog,
+		bool strict_diagnostics, std::string &error, particle::EffectCatalogNames *effect_catalog,
         const audio::SoundSetIndex *sound_catalog) {
 	error.clear();
 	if (!files.valid()) return WacLayeredLoadStatus::kAbsent;
@@ -74,27 +93,9 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
     audio::SoundSetIndex temporary_sounds;
     if (!sound_catalog) load_script_sound_sets(files, mission_basename, temporary_sounds);
     env.sounds = sound_catalog ? sound_catalog : &temporary_sounds;
-    // Match the effect world's mounted PTL + regional table load order.
-    // [orig: CEffectSystem_Init @0x5F6070]
-    particle::EffectScene temporary_effects;
-    particle::EffectScene &effects = effect_catalog ? *effect_catalog : temporary_effects;
-    particle::EffectSceneConfig effect_config;
-    if (files.list_files) {
-        const std::string regional = files.has_file("fgn2.bin") ? ".ptg" : ".ptu";
-        for (const std::string &extension : {std::string(".ptl"), regional}) {
-            for (const std::string &name : files.list_files(extension)) {
-                std::vector<uint8_t> bytes;
-                particle::EffectCatalogDocument document;
-                particle::ParseError parse_error;
-                document.source = name;
-                if (files.read_file(name, bytes) && particle::load_particles_from_buffer(
-                        reinterpret_cast<const char *>(bytes.data()), bytes.size(), document.file, parse_error))
-                    effect_config.documents.push_back(std::move(document));
-            }
-        }
-    }
-    effects.open(effect_config);
-    env.effects = &effects;
+    particle::EffectCatalogNames temporary_effects;
+    if (!effect_catalog) load_script_effect_catalog(files, temporary_effects);
+    env.effects = effect_catalog ? effect_catalog : &temporary_effects;
     if (sources.empty()) return WacLayeredLoadStatus::kAbsent;
 	Program program = compile_program(sources, env);
 	// ok() is false only when a diagnostic carries error=true, so the strict

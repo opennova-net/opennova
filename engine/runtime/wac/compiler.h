@@ -19,7 +19,7 @@ class EntityRegistry;
 struct AmmoTable;
 }
 
-namespace opennova::particle { class EffectScene; }
+namespace opennova::particle { class EffectCatalogNames; }
 namespace opennova::audio { class SoundSetIndex; }
 
 namespace opennova::wac {
@@ -29,7 +29,8 @@ struct CompileEnv {
     // groups/areas must be numeric (sufficient for unit tests).
     opennova::world::EntityRegistry *registry = nullptr;
     const opennova::audio::SoundSetIndex *sounds = nullptr;
-    opennova::particle::EffectScene *effects = nullptr; // mounted catalog, compile-time handles
+    // The mounted catalog's names; FX literals intern compile-time handles here.
+    opennova::particle::EffectCatalogNames *effects = nullptr;
     const opennova::world::AmmoTable *ammo = nullptr; // literal AMMO bindings at compilation
     std::vector<std::string> source_names; // parallel to compile_program's source texts
     std::function<bool(const std::string &, std::string &)> load_source; // RUN's mounted-file reader
