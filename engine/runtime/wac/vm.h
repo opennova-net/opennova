@@ -63,6 +63,9 @@ public:
     // the Ticks builtin count in these units. [orig: wac_var_ticks — the run counter
     // WacScript_AdvanceTick advances after each execution @0x4f81d3]
     uint32_t time() const { return time_; }
+    // Executed CALL instructions since load(), the unsupported-command ones
+    // included: the dispatch sweep's proof that every registry row ran.
+    uint64_t dispatch_count() const { return dispatch_count_; }
 	RuntimeState capture_runtime_state() const;
 	void restore_runtime_state(const Program &program, const RuntimeState &state);
 
@@ -75,6 +78,7 @@ private:
     int32_t acc_ = 0;
     int cur_event_ = 0;
     uint32_t time_ = 0; // [orig: wac_var_ticks]
+    uint64_t dispatch_count_ = 0;
     std::vector<uint16_t> entity_bindings_;
     uint16_t auto_item_ = 0xFFFF;
     int32_t cached_mana_ = 0;
@@ -100,7 +104,7 @@ private:
     std::vector<world::ScriptRemoteArg> resolve_remote_args(opennova::world::World &w, const CommandDef &def,
                                                             const uint32_t *args, int argc) const;
     int32_t replicate(opennova::world::World &w, int cmd_index, const CommandDef &def,
-                      const uint32_t *args, int argc);
+                      const uint32_t *args, int argc, uint32_t instruction);
 };
 
 } // namespace opennova::wac

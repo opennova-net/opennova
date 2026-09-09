@@ -39,11 +39,21 @@ bool is_remote_command(int command_index);
 // [orig: WacScript_ExecuteBytecode @0x4f5cb5..0x4f5cce]
 int remote_command_wire_index(int command_index);
 
+// The outcome of running one row's handler here.
+struct RemoteCommandResult {
+    bool handled = false; // a branch matched the row and its body ran
+    int32_t value = 0;    // the handler's return value
+};
+
 // Run the row's handler against the world with resolved operands, one per
 // declared parameter; a missing operand reads as zero / empty, the client's
-// zero-filled default. Returns the handler's value.
-int32_t run_remote_command(world::World &world, int command_index,
-                           const std::vector<world::ScriptRemoteArg> &args,
-                           const RemoteCommandNames &names);
+// zero-filled default. `handled` is false when no branch matched the row (a
+// non-replicated index, or a replicated row without a body here): the caller
+// records that RuntimeGapKind::WacCommand miss the way WacVm::dispatch does,
+// the VM at its instruction site and the joiner at the wire index, so no
+// replicated row can fall through silently.
+RemoteCommandResult run_remote_command(world::World &world, int command_index,
+                                       const std::vector<world::ScriptRemoteArg> &args,
+                                       const RemoteCommandNames &names);
 
 } // namespace opennova::wac

@@ -111,8 +111,11 @@ inline constexpr OperandKind operand_kind(uint32_t ref) {
 inline constexpr uint32_t operand_index(uint32_t ref) { return ref & kOperandIndexMask; }
 
 // Named engine-value ids (the original named-value table — 24 records
-// {char name[20]; u32 value_ptr} @0x82EEF0, count 0x18 @0x82F130, resolved
-// case-insensitively by WacScript_ResolveParameter's third lookup leg).
+// {char name[19]; u8 param_type; u32 value_ptr} @0x82EEF0, count 0x18
+// @0x82F130, resolved case-insensitively by WacScript_ResolveParameter's
+// third lookup leg). The type byte at +19 is 2 (number) for most rows, 11
+// (ssn) for SquadSSN/Player/Item/auto and 9 (hour) for CurTOD; the resolver
+// reads only the pointer at +20 [orig: (&off_82EF04)[6 * idx] @0x4f2a9f].
 // Retail resolves every row to its mutable dword pointer regardless of the
 // expected parameter type [orig: @0x4f2a92..0x4f2a9f], so each row is an
 // lvalue. Cache values are refreshed at bytecode entry; writes to them do not

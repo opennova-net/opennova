@@ -56,6 +56,7 @@ void WacVm::load(const Program &program) {
     acc_ = 0;
     cur_event_ = 0;
     time_ = 0;
+    dispatch_count_ = 0;
     entity_bindings_.clear();
     groups_.clear();
     auto_item_ = 0xFFFF;
@@ -216,6 +217,7 @@ int32_t WacVm::arg_as_string_index(uint32_t ref) const {
 }
 
 int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args, int argc, uint32_t instruction) {
+    ++dispatch_count_;
     if (cmd < 0 || cmd >= wac_command_count()) {
         record_gap(w, cmd, instruction);
         return 0;
@@ -224,7 +226,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // A command whose registry flags carry 0x18 is serialized for S2C 0x23
     // before, or instead of, its local call. [orig: WacScript_ExecuteBytecode
     // @0x4F58B0 — flags test @0x4f5ca5, the arm through @0x4f5ee9]
-    if (cmd_is_replicated(def)) return replicate(w, cmd, def, args, argc);
+    if (cmd_is_replicated(def)) return replicate(w, cmd, def, args, argc, instruction);
     const char *n = def.name;
     auto A = [&](int i) -> int32_t {
         if (i >= argc || args == nullptr) return 0;
@@ -644,7 +646,17 @@ std::vector<world::ScriptRemoteArg> WacVm::resolve_remote_args(opennova::world::
 // [orig: WacScript_ExecuteBytecode @0x4F58B0 — the registry flags-0x18 arm
 //  @0x4f5ca5..0x4f5ee9]
 int32_t WacVm::replicate(opennova::world::World &w, int cmd, const CommandDef &def,
-                         const uint32_t *args, int argc) {
+                         const uint32_t *args, int argc, uint32_t instruction) {
+    // A replicated row without a handler body is the same dispatch gap the
+    // local arm records, at the same instruction site.
+    auto finish = [&](const RemoteCommandResult &result) -> int32_t {
+        if (!result.handled) {
+            int32_t values[4] = {};
+            for (int i = 0; i < 4 && i < argc && args != nullptr; ++i) values[i] = read(w, args[i]);
+            record_gap(w, cmd, instruction, values);
+        }
+        return result.value;
+    };
     world::ScriptRemoteCommand record;
     record.command_index = static_cast<uint16_t>(remote_command_wire_index(cmd)); // @0x4f5cb5..0x4f5cce
     record.args = resolve_remote_args(w, def, args, argc);                        // @0x4f5cf9..0x4f5dc2
@@ -665,13 +677,13 @@ int32_t WacVm::replicate(opennova::world::World &w, int cmd, const CommandDef &d
             w.out.script_remote_commands.push_back(std::move(record));
             return 1;
         }
-        return run_remote_command(w, cmd, record.args, names);
+        return finish(run_remote_command(w, cmd, record.args, names));
     }
     // The broadcast class reaches every in-match remote AND runs here.
     // [@0x4f5ec7..0x4f5ed1, then the call-convention switch @0x4f5ef6]
     const std::vector<world::ScriptRemoteArg> resolved = record.args;
     w.out.script_remote_commands.push_back(std::move(record));
-    return run_remote_command(w, cmd, resolved, names);
+    return finish(run_remote_command(w, cmd, resolved, names));
 }
 
 void WacVm::record_gap(opennova::world::World &w, int cmd, uint32_t instruction, const int32_t *arguments) {

@@ -1,12 +1,18 @@
 // Every registry entry dispatches explicitly: no registered command name
-// reaches the VM's unsupported-command diagnostic (RuntimeGapKind::WacCommand).
-// One statement per command is synthesized from the registry's own parameter
-// types [orig: the 165-row table @0x82D290], compiled against a fixture that
-// resolves every asset class, and executed once on a fixture world.
+// reaches the VM's unsupported-command diagnostic (RuntimeGapKind::WacCommand),
+// whether its body lives in the VM's local arm or in the replicated-row
+// handler (remote_command.cpp). One statement per command is synthesized from
+// the registry's own parameter types [orig: the 165-row table @0x82D290],
+// compiled against a fixture that resolves every asset class, and executed
+// once on a fixture world; the call-site census and the VM's dispatch count
+// prove every row was compiled and ran, so a silent fall-through anywhere
+// fails rather than hides.
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include <formats/wac/bytecode.h>
 #include <formats/wac/command.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/particle/effect_catalog_names.h>
@@ -114,7 +120,7 @@ struct Fixture {
 
 static void test_every_registry_entry_dispatches_explicitly() {
     Fixture f;
-    std::string source = "if [root] never then set(v0,1) endif\n";
+    std::string source = "if [root] never then endif\n"; // the IfName token's event
     for (int i = 0; i < wac_command_count(); ++i) {
         const CommandDef &def = wac_commands()[i];
         source += "if ";
@@ -124,16 +130,35 @@ static void test_every_registry_entry_dispatches_explicitly() {
             if (a) source += ",";
             source += token_for(def.params[a]);
         }
-        source += ") then set(v1,1) endif\n";
+        source += ") then endif\n";
     }
     const Program program = f.compile(source);
     CHECK(program.ok());
     CHECK(program.diagnostics.empty());
     for (const Diagnostic &d : program.diagnostics)
         std::printf("diagnostic line %d: %s\n", d.line, d.message.c_str());
+    // Every registry row has exactly one call site (the [root] guard adds a
+    // second never): a compile that dropped a row, or re-fed a token into a
+    // neighbouring slot, shows here before anything runs.
+    std::vector<int> sites(static_cast<size_t>(wac_command_count()), 0);
+    for (const InstructionSource &site : program.instruction_sources)
+        ++sites[instr_command_index(program.code[site.word])];
+    for (int i = 0; i < wac_command_count(); ++i) {
+        const std::string name = wac_commands()[i].name;
+        const int expected = name == "never" ? 2 : 1;
+        CHECK(sites[static_cast<size_t>(i)] == expected);
+        if (sites[static_cast<size_t>(i)] != expected)
+            std::printf("call sites: %s x%d\n", name.c_str(), sites[static_cast<size_t>(i)]);
+    }
     WacVm vm;
     vm.load(program);
     vm.execute(f.world);
+    // Every row's condition ran once, plus the [root] guard's never: a handler
+    // that returned without dispatching, or a body that ended the execution
+    // early, leaves the count short.
+    CHECK(vm.dispatch_count() == static_cast<uint64_t>(wac_command_count()) + 1);
+    if (vm.dispatch_count() != static_cast<uint64_t>(wac_command_count()) + 1)
+        std::printf("dispatches: %llu\n", static_cast<unsigned long long>(vm.dispatch_count()));
     for (const auto &gap : f.world.diagnostics.gaps()) {
         CHECK(gap.origin.kind != RuntimeGapKind::WacCommand);
         if (gap.origin.kind == RuntimeGapKind::WacCommand) {

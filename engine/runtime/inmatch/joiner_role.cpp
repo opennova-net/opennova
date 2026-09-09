@@ -1658,7 +1658,13 @@ void JoinerRole::apply_gameplay_events() {
 			args.reserve(command.args.size());
 			for (const ScriptRemoteCommandArg &arg : command.args)
 				args.push_back({static_cast<int32_t>(arg.value), arg.text});
-			wac::run_remote_command(world, command.command_index, args, names);
+			const wac::RemoteCommandResult result =
+					wac::run_remote_command(world, command.command_index, args, names);
+			// A wire row with no handler body here is the joiner's dispatch gap;
+			// the host VM records the same kind at its instruction site.
+			if (!result.handled)
+				world.diagnostics.record({world::RuntimeGapKind::WacCommand,
+						command.command_index, 0, -1, -1}, world.logic_tick);
 		}
 	}
 
