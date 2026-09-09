@@ -1058,7 +1058,9 @@ void AiSystem::infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t ke
     }
 
     // The conform chase. org1: eighth-step on both fields; dead NPCs also aim along
-    // the slope (aimPitch/aimHeading/aimFlag — unmodeled fields). org2: quarter-step;
+    // the slope (aimPitch = slope, aimHeading = targetHeading, aimFlag = 0 on the
+    // 8th tick while Flags & 2 [orig: @0x4ba307..0x4ba319] — not ported here; the
+    // drag block's aimFlag clear lives in infantry_escort.cpp). org2: quarter-step;
     // a corpse additionally tips its LOOK pitch eighth-step, and the roll write is
     // skipped while a combat roll 41/42 plays (the torso-roll ramp owns those ticks).
     // [orig: @0x4ba320-0x4ba34c / @0x4b6fa9-0x4b6ff4]
