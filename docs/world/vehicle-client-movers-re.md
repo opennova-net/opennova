@@ -5057,14 +5057,23 @@ retain the existing family fallback.
 D-INF-2 scope after the 2026-09-08 review: the `+0x369` path-state byte is
 modeled as nonzero-ness only (`board_blocked`) — producers `@0x4BA94E` and
 `@0x4B37BB` and the ring reader `@0x4BB325` are ported, the arrival writes a
-frame local (`var_1169 @0x4BBD8F`), not `+0x369`, and the 1/2/3 progression with
-its only clear lives in the unported cover/path consumer `ai_find_cover_position
-@0x4afab0` / `CAIPath_FindPath @0x409580` (search → 2 `@0x4afea8`, clear within
-1 u `@0x4aff06`). The S-point leg `@0x4BB7B2..0x4BB88F`: the guard clip is gated
+frame local (`var_1169 @0x4BBD8F`), not `+0x369`, and the 1/2/3 progression's
+search → 2 `@0x4afea8` / clear-within-1 u `@0x4aff06` live in the unported
+cover/path consumer `ai_find_cover_position @0x4afab0` / `CAIPath_FindPath
+@0x409580`; the byte's other clears are in `Entity_UpdateInfantryAI` itself — the
+combat aim solution `@0x4BCFDB` (ported 2026-09-09, `infantry_combat.cpp`),
+`@0x4BD2E9`, `@0x4BD349`, `@0x4BD956`. The S-point leg `@0x4BB7B2..0x4BB88F`: the guard clip is gated
 on `[[entity+0x188]+0x48][0x8C] != [0]` (= `has_clip(kGuard)`) — ported; its side
 writes `attachParent (+0x184) = self @0x4BB840` and the S position into
-`+0x2FC..+0x304` `@0x4BB846..0x4BB852` (then `+0x184 = 0 @0x4BB885`) are NOT
-modeled (no reader witnessed). The live can't-enter arm (goal = self, radius
+`+0x2FC..+0x304` `@0x4BB846..0x4BB852` (then `+0x184 = 0 @0x4BB885`) are modeled
+(2026-09-09): the reader is the self-attachment chase `@0x4BF625..0x4BF664` (gate
+`+0x184 == self @0x4BF625..0x4BF62D`; eighth-step X/Y from `+0x2FC/+0x300`
+`@0x4BF636/0x4BF63C`; Z = max(Z, `+0x304`) `@0x4BF653..0x4BF664`), ported in
+`infantry_attachment_move`. Field split: `+0x2FC/+0x300` has one writer (the S
+stamp) and one reader (the chase) → `InfantryState::self_attach_point`;
+`+0x304` is the goal Z written by the stamp `@0x4BB852` and every moving
+selection `@0x4BD3F7` (seeded `@0x4BFE07`, player `@0x4B709D`) →
+`move_target[2]`; retail's goal X/Y are per-think frame locals. The live can't-enter arm (goal = self, radius
 0x7D0000 `@0x4BB2CE..0x4BB2EC`; arrival stage++ `@0x4BBD9E`, attach skipped by
 the 0x640000 gate `@0x4BBDAF`) is ported, and the arrival no longer clears
 `board_blocked` (retail cleared the frame local). Driver lean 107..110 is

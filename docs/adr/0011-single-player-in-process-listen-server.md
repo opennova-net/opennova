@@ -1,9 +1,11 @@
 # ADR 0011 — Single-player is the in-process listen server (network-shaped from day one)
 
 Status: accepted. Amended by [ADR 0043](0043-canonical-cpp-and-godot-hard-cut.md) (2026-09-02): the
-`INetCommandSink` / `LocalSink` / `SerializingSink` seam is deleted. The 0x23 entity-command payload is
-unwitnessed and the sink never had a caller; every entity command runs locally through `EntityCommands`,
-and an outbound seam is ported once a witnessed caller exists.
+`INetCommandSink` / `LocalSink` / `SerializingSink` seam is deleted. The 0x23 payload is the WAC VM's script remote
+command (producer `WacScript_ExecuteBytecode @0x4F58B0`, consumer
+`GameMode_DispatchRemoteCommand @0x4F81E0`), ported 2026-09-09: the outbound seam is the typed
+`World::out.script_remote_commands` queue drained by `Server_TickUpdate`; every other entity command
+runs locally through `EntityCommands`.
 
 ## Context
 

@@ -154,6 +154,11 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
   @0x4F0CB0`) checks only `index <= 16`, so a negative index reads or writes unrelated
   player-slot memory. **Proposed in PR #642 (2026-09-09); requires maintainer
   ratification at merge.**
+- **D-WAC-3** — `weaponfired`/`blockfire` and the fire-request stamp refuse negative weapon
+  categories; retail bounds only the high side (`WacCmd_WeaponFired @0x4ED360`,
+  `WacCmd_BlockFire @0x4EE140`, `Input_HandleActionBinding_0 @0x4E0420`) and indexes the
+  BSS before `dword_C6EA44` / `dword_C6EA6C` for a negative category. **Proposed in PR #642
+  (2026-09-09); requires maintainer ratification at merge.**
 - **D-GRM-1** — the GRM facial-rig parser rejects unsafe indices, excessive row/parameter
   counts, non-finite coordinates and field-overflow names, and treats names as data;
   retail's `FaceAnimConfig_ParseProperty @0x5886A0` writes unbounded indices and

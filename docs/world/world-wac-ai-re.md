@@ -7758,9 +7758,15 @@ player templates.
 
 [orig: WacCmd_SsnName @0x4F7230] copies a nonempty name to the valid item's
 31-byte display-name payload. [orig: WacCmd_SsnRide @0x4F7000] scans pool 0,
-excludes only the dead flag, and checks up to three seated-parent links against
-the requested entity. It does not require a live-health or item-definition
-predicate on the rider.
+excludes only the dead flag, and follows the rider's +0x28 groundEntity carrier
+link up to three hops against the requested entity [orig: @0x4f7067 / @0x4f707a /
+@0x4f7085]. The movers copy parentEntity +0x16C into that link each tick for
+seated riders [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 (the site
+@0x4B41A2..0x4B41B4); Entity_UpdateInfantryAI @0x4b9910 (the site
+@0x4B9960..0x4B9A11)], an emplacement child carries its hull there
+[orig: Entity_UpdateChildAttachment @0x4409A0], and the ground probe stores a
+deck-stander's carrier [orig: @0x414370]. It does not require a live-health or
+item-definition predicate on the rider.
 
 [orig: WacCmd_SsnToSsn @0x4F7330] requires valid item definitions on both
 entities and an AI controller on the source. It detaches the source, selects
@@ -7834,7 +7840,11 @@ handle.
 
 [orig: WacScript_InitAndLoad @0x4F91F0] prepares the seven reserved named
 groups: emptygroup, humans, blueplayers, redplayers, ai, blueai and redai. The
-runtime list builder scans pool 0 and requires ItemTypeIndex. Humans require
+runtime list builder scans pool 0 and skips rows whose +0x20 ItemDef pointer is
+null [orig: Server_BuildEntitySlotLists @0x4F97A0 (the site @0x4f9809)], i.e.
+destroyed or never-populated slots inside the pool's used count; an unknown type
+still resolves to gItemDefs[0] [orig: ItemList_FindIndexByTypeId @0x49E100] and
+is included. Humans require
 Flags 0x100 and exclude Flags 1; all AI includes Flags 1, while team AI excludes
 it. Dead health and Flags 2 do not exclude a member. These member arrays are
 separate from BMS commandGroup values. [orig: XML_ParseGroupMember @0x4CD6F0]
@@ -7847,7 +7857,11 @@ available, and preserves them across runtime capture/restore. Assignments and
 Player/Item/auto aliases keep handles through command dispatch, including when
 multiple rows share one authored SSN. Gkill/Gremove walk named member arrays
 forward; numeric kill still uses the BMS command group. Gkill's per-member
-helper requires an item definition; Gremove does not.
+helper [orig: Entity_ResetWeaponState @0x4F1E40] requires a nonzero +0x1C
+ItemTypeIndex [orig: @0x4f1e89]; Gremove does not. Each member visit of a
+flags-0x10 row (ptext/pwave/pconsol) sends S2C 0x23 to that member's slot and
+returns 1 without the local call when the member is a registered non-local
+player; the local-player visit and unregistered members run locally (§33.39).
 
 The synthetic tick_digest changed from 116f65ec9ea08922 to e33cefc459163b68
 because the two elapse blocks now fire at boot (V1=2) and subsequent passes are
@@ -8127,11 +8141,26 @@ The 24-entry named-value table at `0x82EEF0` contains mutable pointers.
 ResolveParameter [orig: WacScript_ResolveParameter @0x4f2920 (the site
 @0x4F2A92..0x4F2A9F)] returns operand type 1 for them. Health, Mana, CurTOD,
 GameOver, WinVar and LoseVar therefore accept arithmetic/assignment as cache
-words; they do not write the player entity, clock or match winner. The compiler
-previously rejected these lvalues and silently redirected them to V0. The
-compiler and VM now preserve their actual destination. Other named-value
-bindings and write consumers still need review, including SquadSSN/SquadWho,
-breathtime, autogain and RND.
+words; they do not write the player entity, clock or match winner. Every one of the 24
+rows is an lvalue [orig: @0x4f2a92..0x4f2a9f]; writes land on ticks (the run
+counter), result (the accumulator @0xC6EB24), humans, bluekills/greenkills,
+breathtime (@0xC6EAE0, seeded 20 [orig: WacScript_FreeAll @0x4f6381]) and
+autogain (@0xC6EAFC, seeded 1 [orig: @0x4f6371]) as stored words whose retail
+consumers ([orig: HUD_DrawBreathBar @0x59d70f; Server_UpdateEntityIdleTimers
+@0x50d7e6; GameEvent_PlayerDeath @0x5172f6; NetPacket_WritePlayerState @0x4ff9db;
+Environment_ApplyFogAndAmbient @0x57e514]) are not yet ported. The `night` write
+is dropped (D-WAC-4, §33.38): its row resolves to the Env dword @0x26C645C that
+[orig: Environment_ComputeTimeOfDayColors @0x57deae] rewrites on the next
+time-of-day computation, and the port derives the night phase from the clock on
+every read. neartype/neardist/nearid are not JO rows (Jointops.exe carries no
+such strings) and were removed. An unresolvable argument is a compile error
+carrying the action signature from [orig: WacScript_FormatActionParameters
+@0x4EFC20] with the operand pointed at the scratch dword &dword_C6EAEC
+[orig: Script_Compile @0x4f3ab2..0x4f3ae2], zeroed at every bytecode entry
+[orig: WacScript_CacheLocalPlayerState @0x4f57b5]; the port models that dword as
+`Builtin::Scratch`. A named row in a Variable slot is always the row's own
+storage; a literal, quoted string, event name or unknown token there is the same
+compile error.
 
 [orig: WacCmd_Event @0x4ED1E0] reads the zero-based BMS event record's active
 byte at +20. An event in its activation delay already returns true; testing the
@@ -8235,14 +8264,21 @@ persist until changed or mission load. The play-start snapshot restores authored
 controls after system on_load resets.
 
 Negative indices use an explicit bounds guard rather than retail's out-of-array
-access.
+access (D-WAC-3, §33.38): retail bounds only the high side with a signed compare
+[orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire
+@0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge
+@0x4E0966)] and indexes before dword_C6EA44 / dword_C6EA6C for a negative
+category (0xC6EA6C - 0x28 == 0xC6EA44, so blockfire -10..-1 writes the
+weaponfired latch of index+10).
 
 ### 33.18 WAC voice ownership and completion
 
 The mission now owns ScriptVoiceChannel: synchronous file resolution/PCM decode,
 acoustic anchor, portrait identity, range and readiness. The host presents the
 decoded clip and acknowledges physical completion. wave/pwave return zero on
-successful load and one on missing player or failed load; SSNwave/SSNradio
+successful load and one on missing player or failed load, and pwave with a
+registered non-local selection returns 1 WITHOUT loading (the remote-target leg
+[orig: WacScript_ExecuteBytecode @0x4f58b0 (the site @0x4f5e8b)], §33.39); SSNwave/SSNradio
 return one on successful load and zero on invalid entity or failed load. Source
 validation precedes interruption. SSNwave uses the speaker as its acoustic
 anchor; radio uses the local player and retains the speaker as its portrait
@@ -8285,9 +8321,16 @@ checking the nonzero type index at +0x1C. It does not check health or the
 ItemDef pointer. The local anim command [orig: WacCmd_Anim @0x4ED5B0] requires
 only the local entity and returns zero on success, one without it. Both now
 reach the motor, wire and presentation stores. Raw stores preserve pending
-+0x2B8 while retargeting the existing clip/blend machinery. The common animation
-arbiter also preserves pending when current already equals desired; retail skips
-that entire block on equality.
++0x2B8 while retargeting the existing clip/blend machinery. The org1 selector compares
+target vs current and skips the arbitration on equality, retaining pending
+[orig: Entity_UpdateInfantryAI @0x4b9910 (the cmp/jz @0x4BD837..0x4BD843)]; the
+org2 player selector has no equality test and arbitrates unconditionally against
+the old state captured at [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 (the
+site @0x4B70E5; the arbitration @0x4B7356..0x4B7396; the wash substitution
+@0x4B73A0..0x4B73E5)], so re-selecting the current state overwrites a queued
+pending with self (the 0x4 locked leg; the 0x20 exit-gated leg with bit 0 clear)
+or clears it (the middle leg). Port: `commit_body_state` (org1) /
+`commit_player_body_state` (org2) over a shared `arbitrate_body_state`.
 
 Animation arguments now resolve through the 252-entry retail table
 (WacScript_ResolveParameter [orig: WacScript_ResolveParameter @0x4F2920] ->
@@ -8568,8 +8611,10 @@ identical random results after normal retry.
 [orig: Entity_UpdateInfantryAI @0x4B9910] now has its idle attention and look
 motor in infantry_attention.cpp. The authority's living org1 body runs attention
 after the 16-tick selection, using key = logic tick + 36 * runtime SSN. The
-pool-0 interest scan runs at key % 256 == 0, or on each think while the entity
-is the scripted voice speaker. Radio's portrait identity, not its listener
+pool-0 interest scan runs at key % 256 == 0, or at key % 32 == 0 while the
+entity is the scripted voice speaker (the phase word tickCounter & 0x1F stored
+[orig: @0x4BBE4A], re-read by the speaker arm [orig: @0x4BE0E0]; the gate
+@0x4BE0CA..0x4BE0E8). Radio's portrait identity, not its listener
 anchor, is g_voicePlaybackEntity (WacCmd_SsnRadio [orig: @0x4F7A2F]).
 
 The scan [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
@@ -8805,9 +8850,15 @@ timer count every logic tick after settling.
 Random gaze draws twice from CRT rand whenever the separate display counter is a
 multiple of 64; every logic update on that display frame draws again. Live gaze
 eases by 0.25 toward the random or directed target. Dead gaze eases by 0.05
-toward (0,-2.2). Native stepping shares World::crt_rand and uses a monotonic
-millisecond clock for the unforced nine-state cycle. Snapshot/retry restores
-slots, ownership, overrides, counters and the CRT stream.
+toward (0,-2.2). The gaze pair draws from the thread-local render/effects CRT stream
+(`engine/base/crt/crt_rng.h`), the D-NET-115 assignment for the scar/GRM render
+family: its gate is the display counter dword_26C7768, advanced only by
+[orig: Render_ProcessMainSceneFrame @0x5ca0f0 (the site @0x5CA50C)] and the
+radar overlay, never by the simulation, so the draws must not perturb
+`World::crt_rand` (a host with no present pass leaves the counter at 0 and draws
+every tick on the effects stream, which no coupled value observes). Native
+stepping uses a monotonic millisecond clock for the unforced nine-state cycle.
+Snapshot/retry restores slots, ownership, overrides and counters.
 
 The NPC attention pass now writes byte_813DE0[body_state] to the automatic slot
 field (+52, [orig: PlayerSlot_SetTimeout @0x4AD4C0]. Within two units, a
@@ -8917,6 +8968,12 @@ reset/snapshot, and a recycled dragger handle. The existing infantry suite and
 retail CP01 ai_muzzle_pose test also pass; the latter now checks live head/hand
 anchors on each resolving foot NPC.
 
+The drag block's aimFlag clear is `InfantryState::aim_valid` in the port
+[orig: @0x4B9E30], its pending clear [orig: @0x4B9E41]. Still unported sibling:
+the grounded-corpse slope-conform aim writes (aimPitch = slope, aimHeading =
+targetHeading, aimFlag = 0 on every 8th tick while Flags & 2)
+[orig: Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BA307..0x4BA319)].
+
 ### 33.32 Teammate operations, dynamic helpers and removal (2026-09-09)
 
 BMS action 39 now owns the eight-slot operation array through
@@ -8987,7 +9044,13 @@ Shared removal now performs the native carry/mount cleanup, facial release
 death-effect-bank stops, the [orig: Entity_ClearAllReferences @0x465670]
 target-reference walk, AI release and collision-instance retirement before
 freeing the registry row. Dead-vehicle and orphaned emplacement removal use the
-same primitive. Organic combat-target mirrors clear with slot+12. The original
+same primitive, and so does NPC corpse expiry ([orig: Entity_UpdateInfantryAI
+@0x4b9910 (the call @0x4B9F93)] enters Entity_Destroy directly and leaves through
+loc_4BFC89 [orig: @0x4B9F9B]). The pickup announcement seeds its nearest-teammate
+minimum with 0x40000000 [orig: Entity_FindNearestTeammate @0x4520B0 (the seed
+@0x4520C3; the per-candidate 2147418112.0 clamp before ftol @0x4520D3; the
+strict-less compare @0x452175; the X/Y-only 40 u box @0x452120 / @0x452136)],
+called from [orig: HeliLift_SpawnPickup @0x4525e0 (the site @0x4526F0)]. Organic combat-target mirrors clear with slot+12. The original
 vehicle-reference walk's unusual call to SetAITarget on the destroyed entity
 remains preserved. The separate shared script/native entity+460 effect-slot work
 remains D-PTL-26 (ptl-format-re.md).
@@ -9194,7 +9257,15 @@ clears it. At 768 or above, the motor replaces the horizontal animation pair
 with X = -((419392 * dx + 0x8000) >> 16) and Y =  ((419392 * dy + 0x8000) >>
 16), retaining the low signed dword. It clamps vertical slide velocity downward
 to -167, sets Flags 0x10000, and writes path_state=1 at entity+0x369 [orig:
-Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BA94E)]. The replacement pair
+Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BA94E)]. The byte is cleared by
+the combat aim solution on every aimed think, ahead of the
+`ai_find_cover_position` calls [orig: @0x4BCFDB; the calls @0x4BD490..0x4BD5A4],
+and at [orig: @0x4BD2E9] (no goal), [orig: @0x4BD349] and [orig: @0x4BD956]; the
+aim-solution clear is ported (`infantry_combat.cpp`). Still unported adjacent
+sites: the tail `if (moveMode != 1 && moveMode != 5) { moveMode = 7; targetDist
+= 0; }` [orig: @0x4BCFD9..0x4BCFF5] and the aim-block gate (retail: aiFocus set
+and !(Flags & 0x80000) and animFlags & 0x10 [orig: @0x4BC94C..0x4BC973]; the
+port tests sflags & 0x18). The replacement pair
 later rotates by body heading [orig: Entity_UpdateInfantryAI @0x4b9910 (the site
 @0x4BF001)]; it is not added as world-space velocity and does not replace the
 clip's vertical lane. The response also runs on clients. The path state reaches
@@ -9259,6 +9330,59 @@ declined entry falls back to an OPEN class-D row.
 | D-WAC-2 | pisvar/psetvar indices outside 0..16 return 0 and write nothing | [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0] check only `index <= 16`, so a negative index reads or writes unrelated earlier player-slot memory (§33.28) | PERMANENT (class D, proposed PR #642) |
 | D-GRM-1 | The GRM parser rejects unsafe indices, excessive row/parameter counts, non-finite coordinates and field-overflow names, and treats names as data | [orig: FaceAnimConfig_ParseProperty @0x5886A0] writes unbounded indices and sprintf-format names into fixed fields and admits `index == count` (§33.30) | PERMANENT (class D, proposed PR #642) |
 | D-TMATE-1 | Direct pickup initializes the helicopter reference before treatment; a failed helper allocation or a destroyed helicopter/teammate entity ends the operation instead of dereferencing it | [orig: HeliLift_SpawnPickup @0x4525E0] never initializes the pointer that [orig: HeliLift_UpdateAll @0x451FA0] dereferences on treatment expiry (§33.32) | PERMANENT (class D, proposed PR #642) |
+| D-WAC-3 | weaponfired/blockfire/record_fire_request refuse negative categories (return 0 / refuse / no stamp) | [orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire @0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge @0x4E0966)] bound only the high side and index before dword_C6EA44 / dword_C6EA6C for negatives (§33.17) | PERMANENT (class D, proposed PR #642) |
+| D-WAC-4 | `set(night, v)` (and add/sub/inc/dec/store on the `night` row) is dropped; the night phase is derived from the clock on every read (`WeatherState::is_night_phase`) | The `night` row @0x82EEF0 resolves to the Env dword @0x26C645C, which holds a script write until [orig: Environment_ComputeTimeOfDayColors @0x57deae] rewrites it on the next TOD computation; [orig: Environment_GetLightDirectionFloat @0x57d873] reads it meanwhile (§33.15) | OPEN (low: observable only as `set(night,1) set(v1,night)` -> 1 in retail vs the derived phase here until the light-direction getters consume a script-written word) |
+| D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends the values [orig: WacScript_ResolveParameter @0x4f2920] stores: [orig: CEffectWorld_InternEffectHandle @0x5F7310] (the site @0x4f3067) and [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (the site @0x4f2fe2); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: byte layout identical (u32), a retail joiner on an OpenNova host would resolve a different effect/sound for those five commands until retail's intern/set-id numbering is witnessed; the decoder bounds are class-D portable boundaries with no observable difference for any retail-emitted body) |
 | D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
 | D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
 | D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |
+
+### 33.39 WAC remote-command replication (S2C 0x23)
+
+The registry's flags word (byte_82D290, stride 44, 165 rows) marks two
+replicated classes: 0x08 broadcast rows (text, wave, hideSSN, unhideSSN,
+disableSSN, enableSSN, holdSSN, unholdSSN, teleSSN, SSNwave, SSNradio, SS2SSN,
+targetfx, fx2tgt, sound2tgt, flash, farflash, quake, music, text#, consol,
+consol#, fx2ssn at 0x0a; sound and face at 0x0c) and 0x10 player-targeted rows
+(ptext 150, pwave 151, pconsol 152 at 0x12). The producer is the VM's default
+arm [orig: WacScript_ExecuteBytecode @0x4F58B0 (the flags test @0x4f5ca5)]: the
+wire index is the FIRST registry row sharing the handler [orig: @0x4f5cb5..0x4f5cce],
+so ptext/pwave/pconsol travel as text 39 / wave 40 / consol 100; the body is a
+u16 index [orig: @0x4f5cf9] followed by one operand per declared ParamType
+[orig: @0x4f5d26..0x4f5dc2]: Text/Filename as a cstring of at most 250 chars
+plus NUL, Ssn as u16, everything else as u32. A 0x10 row resolves its
+Player/Item/auto selection through the active player-slot table
+[orig: Entity_ValidatePtr @0x500910]; a registered non-local player gets the
+message with send mask 0x20 to that slot [orig: @0x4f5dd1..0x4f5e8b], the local
+handler is skipped and the operand result is 1; otherwise the row runs locally.
+A 0x08 row sends with mask 0x90 [orig: @0x4f5ec7; @0x4f5ed1] and then runs the
+local handler. The recipient rules are [orig: NapiNPServer_SendFiltered
+@0x4C87E0]: mask 0x20 = the target slot when active, not dropped and connected
+[orig: @0x4c8a06..0x4c8a38]; mask 0x10 excludes the host [orig: @0x4c88f6]; mask
+0x80 = connection state 6/7 [orig: @0x4c893e]. The message is reliable (class 1).
+
+The consumer [orig: GameMode_DispatchRemoteCommand @0x4F81E0] runs only on a
+non-authority [orig: @0x4f8249], reads the u16 index [orig: @0x4f827e], decodes
+the operands by that row's ParamType table [orig: @0x4f830a..0x4f840a] with the
+250-char cap [orig: @0x4f83d0], sets read_error, zero-fills the rest and STILL
+dispatches on a short body, requires flags & 0x18 [orig: @0x4f8429], and enters
+the same handler the host calls through the call-convention switch
+[orig: @0x4f8438].
+
+Port: `WacVm::dispatch` routes every flags-0x18 row through `WacVm::replicate`,
+which queues a typed `world::ScriptRemoteCommand` on `World::out` (runtime/wac
+stays net-agnostic); the 28 flagged handler bodies live in
+`wac::run_remote_command(World&, index, args, names)` in
+`engine/runtime/wac/remote_command.cpp`, shared by the host and the joiner.
+`engine/net/npwire` carries `s2c::SCRIPT_REMOTE_COMMAND = 0x23` with
+`encode_/decode_script_remote_command`; `Server_TickUpdate` drains the queue
+(targeted -> the connection owning the entity, broadcast -> every in-match
+remote, never the loopback); the joiner decodes behind the authority-recipient
+gate and runs the shared handler with the wire operands. The Fx/SoundSet operand
+representation is D-WAC-5 (§33.38).
+
+Regression coverage: wac_players (test_remote_command_classes,
+test_remote_command_fanout_reaches_owner_and_remotes), script_remote_command
+(netsim host VM -> encode -> joiner pipeline -> shared handler), nw_ingame_encode
+(byte layout, 250 cap, short-body zero-fill), nw_message_coverage (Decoded drift
+guard) and nw_codec_identity (committed vector script_remote_command_ssnwave).

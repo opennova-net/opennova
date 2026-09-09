@@ -10,7 +10,8 @@ namespace opennova::crt {
 // the sim-visible draws (slot-table, far-marker spawn scores, the 0x100
 // death roll) own the session-seeded `World::crt_rand` (io/crt_rand.h),
 // while this thread-local owner carries the ported RENDER/EFFECTS consumers
-// — scorch texture rolls, material/PANM waveform noise, and the
+// — scorch texture rolls, material/PANM waveform noise, the GRM gaze jitter
+// (scar_decal_update @0x57FA50, gated on the display counter) and the
 // Effect_RollSurfaceEffectProbability glass-reseed target — so their draw
 // and reseed order stays shared among themselves in retail order.
 // [orig: rand @0x76B00A; srand @0x76AFFD]
