@@ -104,6 +104,7 @@ func _build_attach_stage() -> bool:
 	if not _write_text(fixture_dir.path_join("items.def"), """begin "Labels Gun"
   id 101294
   type object
+  attrib: EWeap
   graphic labelgun
   primary_weapon WPN_EMPLCD50
 end
@@ -117,6 +118,8 @@ end
 		return _fail("could not mount attach fixture")
 	var sim := Simulation.new()
 	sim.set_asset_root(root)
+	# The mount's EWeap nature comes from the items.def sweep, never from the seat spec.
+	sim.resolve_item_traits(item_db)
 	if not sim.install_seat_specs_for_type_ids(item_db,
 			PackedInt32Array([1294])) \
 			or not sim.load_from_mission_data(md) \

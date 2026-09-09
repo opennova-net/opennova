@@ -48,6 +48,7 @@ void Simulation::resolve_infantry_adm_ids(const Ref<ResourceRoot> &p_resource_ro
 void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 	if (p_item_db.is_null()) return;
 	assets_.item_traits_db = p_item_db;
+	if (!world_installed_) pending_item_traits_db_ = p_item_db;
 	// The kernel's item legs (the collision demand sweep, the adm resolve)
 	// read the same rows; the Ref above pins their lifetime.
 	kernel_->set_items_table(&p_item_db->native_items());

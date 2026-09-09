@@ -585,6 +585,12 @@ private:
 	// session_.state(); this prevents partially constructed worlds from
 	// serving data while Loading/Failed transitions are in flight.
 	bool world_installed_ = false;
+	// An item database handed to resolve_item_traits before any mission is
+	// installed (the tool/test order). The next load_from_mission_data installs
+	// its table ahead of the boot and sweeps the booted rows, exactly as the
+	// file-fed overload does with its explicit database, then drops it: a
+	// later load without a new resolve_item_traits gets no stale database.
+	Ref<class ItemDatabase> pending_item_traits_db_;
 
 	// --- in-match net runtime (P7, ADR 0009/0011): the SP / LAN host in-process listen server. OFF
 	// by default, so an explicit non-network fixture uses the direct AI-pool present. When

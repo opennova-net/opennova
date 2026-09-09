@@ -697,10 +697,14 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	if (p_mission.is_null()) return false;
 	if (!begin_session_load()) return false;
 	// An item database installed ahead of the load (resolve_item_traits before
-	// the mission, the tool/test order) is applied to the booted rows the way
-	// the file-fed overload applies its explicit database: the definition
-	// traits (has_item_def, item_attrib) come only from the items.def sweep.
-	const Ref<ItemDatabase> retained_item_db = assets_.item_traits_db;
+	// the mission, the tool/test order) is consumed once: the booted rows are
+	// swept after the boot, so the definition traits (has_item_def,
+	// item_attrib) come only from the items.def sweep. Deliberately unlike the
+	// file-fed overload, the table is NOT installed ahead of the boot: a tool
+	// or test world boots its bare promote path without the trait-gated boot
+	// steps (collision items, AI weapons) that a mounted install supplies.
+	const Ref<ItemDatabase> pending_item_db = pending_item_traits_db_;
+	pending_item_traits_db_.unref();
 	reset_world();
 	// Do not infer this from the role: tests/tools and legacy direct joins may
 	// still load a complete BMS, whose authored promotion is already canonical.
@@ -722,7 +726,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 		return false;
 	}
 	finish_kernel_boot();
-	if (retained_item_db.is_valid()) resolve_item_traits(retained_item_db);
+	if (pending_item_db.is_valid()) resolve_item_traits(pending_item_db);
 	complete_session_load();
 	return true;
 }
