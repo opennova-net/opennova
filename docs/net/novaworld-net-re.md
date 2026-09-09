@@ -6453,7 +6453,7 @@ so this is internal-fidelity debt, not a wire bug.
 **Deeper grill (2026-06-27, the field-identity reconciliation the fix must do first).** Two more
 witnesses make the model precise: (a) `Entity_SpawnFromAnimSlotProperty @0x43c390` (the player entity
 spawn) memsets the entity and writes ONLY `entity+0x78` (ownerConnectionId/dcb = spawnData[6]) as an id —
-it never writes Ssn@0x2e, DcbId@0x7c, or NetId@0x15c, so a player's Ssn/DcbId/NetId are all 0. (b)
+it never writes Ssn@0x2e or DcbId@0x7c (NetId@0x15c does receive the minimap slot id from `Server_PlayerAdd @0x51cbc0`, corrected 2026-09-09), so a player's Ssn/DcbId are 0. (b)
 `EntityPool_FindByNetId @0x4f0a20` keys on **`entity+0x7C` (DcbId)**, NOT Ssn@0x2e (and has no netId==0
 guard). So the WAC/BMS `set_ssn_*` addressing is actually by **DcbId**. The reimpl conflates this: our
 `EntityRegistry::find_by_net_id` matches `Entity.net_id` (entity.h labels it "SSN"), while the original's
