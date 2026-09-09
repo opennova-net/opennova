@@ -1,4 +1,5 @@
-// D-AI-5 on the retail data: the slice-1 threat loop (world-wac-ai-re §17).
+// The organic ammo seed (§33.35) on the retail data: the slice-1 threat loop
+// (world-wac-ai-re §17).
 // CP01 boots on the engine's own boot policy, the local player walks toward
 // the nearest foot NPC (retail start markers deliberately spawn FARTHEST from
 // the enemy set, net-re §5.2c — out of perception range), then stands still

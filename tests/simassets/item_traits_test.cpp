@@ -3,8 +3,8 @@
 // byte, healthMax lift + retail i16 wrap, armor, AS zone attribs, corpse
 // timing), the per-item death-trait and 21-field vehicle-trait tables
 // (distinct sentinels per field so a transposition cannot pass), the
-// throwable class scan with last-wins duplicate ids, and the D-AI-5 weapon
-// seed. Parser token semantics are def's own tests; exotic fields are stamped
+// throwable class scan with last-wins duplicate ids, and the organic ammo
+// seed (§33.35). Parser token semantics are def's own tests; exotic fields are stamped
 // post-parse so this file pins only the FOLD's mapping.
 #include <formats/def/def.h>
 #include <runtime/simassets/item_traits.h>
@@ -464,7 +464,7 @@ int main() {
     CHECK(w.vehicles.traits.get(500) != nullptr);
     CHECK(w.registry.get(tank_h)->health == -25536);
 
-    // ---- resolve_ai_weapons: the D-AI-5 seed + sound-profile bind ----
+    // ---- resolve_ai_weapons: the organic ammo seed + sound-profile bind ----
     AiSystem &ai = w.ai;
     const int rifle_ai = ai.attach(rifle_h);
     const int player_ai = ai.attach(player_h);

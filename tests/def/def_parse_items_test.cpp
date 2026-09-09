@@ -840,7 +840,7 @@ int main(void) {
     }
 
 
-    /* The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5):
+    /* The person-item anim-fire weapon family (world-wac-ai-re §17.4/§33.35):
        'ammo_closeattack' name -> def+0x56B, 'clipsize' atol -> def+0x894
        [orig: ItemDef_ParseProperty @ 0x4a1823 / @ 0x49fa1c]. The tracked fixture
        has no character items, so pin the parse on an inline JOX-shaped block

@@ -245,8 +245,8 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.anim_key = e.inf.active ? infantry_anim_key(e.inf.anim_state) : std::string();
 	// Infantry combat diagnostics (the P1 threat-loop bring-up surface): the
 	// perception/attack ranges the scan reads (AiSlot +68/+60, world units),
-	// the D-AI-5 weapon seed (AiProfile ammo index + clip, the live magazine
-	// word), and the current combat target.
+	// the organic ammo[0] byte (closeattack) plus clipsize, the live magazine
+	// word, and the current combat target.
 	d.sight_range_u = e.slot.f[AiSlot::kSightRange] / 65536.0;
 	d.attack_range_u = e.slot.f[AiSlot::kAttackRange] / 65536.0;
 	d.ammo_primary = e.profile.organic.ammo[0] != 0 ? e.profile.organic.ammo[0] : -1;
