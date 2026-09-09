@@ -1016,7 +1016,7 @@ WAC/BMS command and structural-action closure (grill-ida, 2026-08-30; world-wac-
 | `Entity_TeleportTeamToSpawn` / `EventAction_TeleportEntityToSpawn` | `0x43d390` / `0x43dfc0` | pool-3 type-6088/WP_NUMBER marker lookup; group vs single pool/Flags/reset distinctions | decompile 2026-08-30; bms-event-runtime-re §10 | ported with registry, AI-pose, and collision refresh (`event_runtime_bms`) |
 | `Entity_FindByDCBAndSetFlag` / `Entity_SetNetIdByParentRef` / `sub_43DEA0` | `0x43db30` / `0x43d6c0` / `0x43dea0` | single team, single group, and the witnessed no-op SingleVelocity action | decompile 2026-08-30; bms-event-runtime-re §10 | ported / mirrored no-op (`event_runtime_bms`) |
 
-Infantry combat pass (engine-research 2026-07-16 session 2; world-wac-ai-re §17; port tracked D-AI-4/D-AI-5):
+Infantry combat pass (engine-research 2026-07-16 session 2; world-wac-ai-re §17; port tracked D-AI-4; D-AI-5 closed 2026-09-09 by §33.35):
 
 | original | addr | role | evidence | status |
 |---|---|---|---|---|
@@ -1067,7 +1067,7 @@ The tracer trail pool + ribbon renderer (grill-ida 2026-07-18; world-wac-ai-re �
 | `Entity_RenderNVGLaserBeam` | `0x5c6090` | (renamed ex kong `Entity_BuildProjectileTrailRay` — wrong) the NVG IR laser: weapon def+8 & 0x40000000 + `g_NVGActive`, aim ray clipped by proximity raycasts, ≤ 8.0 u, 0.25-u samples, style 8 | decompile | not ported (D-AI-12f) |
 | `Projectile_SpawnTracerScarEffect` | `0x4e5ac0` | the whiz-by leg: fires when the tick's path passes within ammo+140 of the listener on X AND Y `@0x4ea998` | decompile refs | witnessed-only (follow-up) |
 | `Entity_InitHardpoints` (ammo leg) | `0x4417d0` | resolves items.def `ammo_closeattack` → entity+0x2B4 and `ammo_marker3` → entity+0x2B8 (dwords @0x4418a5/@0x4418c3 — hardpoint/close-attack consumers, NOT the +0x358 anim-fire bytes) | disasm; world-wac-ai-re §17.4 | confirm-only |
-| `ItemDef_ParseProperty` (AI weapon leg) | `0x49eb00` | parses `primary_weapon` (def+0x54B → the held-weapon ADM via `WeaponSlot_InitFromEntityDef @0x5466c0`) + `ammo_closeattack/marker3/easyrocket/advancedrocket` (def+0x56B/0x58B/0x5AB/0x5CB) + `launchups_*` (+0x5EB/0x5FB) name fields — the D-AI-5 weapon-byte source | disasm @0x4a17e0–0x4a1996 | confirm-only |
+| `ItemDef_ParseProperty` (AI weapon leg) | `0x49eb00` | parses `primary_weapon` (def+0x54B → the held-weapon ADM via `WeaponSlot_InitFromEntityDef @0x5466c0`) + `ammo_closeattack/marker3/easyrocket/advancedrocket` (def+0x56B/0x58B/0x5AB/0x5CB) + `launchups_*` (+0x5EB/0x5FB) name fields — the organic ammo-byte source (consumed by `Entity_InitOrganicAI @0x4BFCC0`, §33.35) | disasm @0x4a17e0–0x4a1996 | confirm-only |
 | `AIEntity_ReleaseFlareCountermeasures` (ex the `Entity_ComputeWeaponFirePositions` misnomer) | `0x455ef0` | the AI flare/countermeasure dispenser — brain[9] flare timer, brain[89]/brain+360 fire points, `FLARE`/`GROUND_FLARE` (profile+16==2) via cached `AmmoDef_LookupByName` → `Weapon_FireProcess` per point; renamed in the IDB 2026-08-15 | decompile; world-wac-ai-re §16.5 item 5 | confirm-only |
 
 Death presentation (engine-research 2026-07-16 session 5; world-wac-ai-re §19; port tracked D-AI-9):

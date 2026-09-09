@@ -71,8 +71,11 @@ scene extension classes before the final audio-server cleanup. MusicDirector
 therefore observes every started playback by ObjectID (including retired pool
 entries) without keeping it alive, tree exit stops the VM, and the normal quit
 path closes MusicService's context and keeps the frame pump alive until
-`has_pending_playback()` is false before quitting. A forced SceneTree quit
-(including `--quit-after`) bypasses that drain; retail has no exit-path music
+`has_pending_playback()` is false, bounded by `PLAYBACK_DRAIN_TIMEOUT_MSEC`
+(1000 ms; a live mixer drains in a few frames, a WASAPI driver that lost its
+endpoint never mixes again), before quitting; past the bound, or on a repeated
+close request while the drain is pending, the quit proceeds without the drain. A
+forced SceneTree quit (including `--quit-after`) bypasses it entirely; retail has no exit-path music
 stop to port (`AudioVM_StopMusicContext @0x671E00`'s only caller is the
 `Game_StartMission @0x5255AE` SP gate), so the remaining forced-quit ordering is
 tracked as reimpl work in world/npc-mission-completion.md, not as a D-row.

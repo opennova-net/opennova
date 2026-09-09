@@ -8106,10 +8106,17 @@ D-COL-2 finding: the table represented door states, not destroyed walls.
 [orig: build_bone_transforms @0x4E3070] and [orig:
 BoneCallback_AnimatedBones_World @0x4E3180] publish phases from CTRL ordinal
 DOOR_00. SimPoseProvider and the engine present-row collector now read the same
-DoorSystem. Present rows preserve signed phase dwords as two u16 halves,
-including the fully open value 65536. EntityPresenter publishes the same
-consecutive ordinal range, including authored indices beyond the 16 named DOOR
-registers, and releases its own overrides when ownership ends.
+DoorSystem. The present row carries only PF_DOOR_COUNT; the phases ride a
+door side table (`inmatch::DoorPhaseTable`: row index, count, phase[count] as
+exact signed dwords including the fully open 65536, in row order for rows with
+door motion, built by both collectors, `Simulation.get_present_door_phases()`,
+handed to `EntityPresenter.present_snapshot` beside the snapshot). EntityPresenter
+publishes the same consecutive ordinal range, including authored indices beyond
+the 16 named DOOR registers, and releases by owner
+(`ObjectModel::clear_ctrl_overrides_owned`) on a cold row or teardown and by
+published count on a shrink; retail writes exactly num_doors slots and never
+clears [orig: build_bone_transforms @0x4E3070 (the loop @0x4e312a..0x4e3145);
+BoneCallback_AnimatedBones_World @0x4E3180 (the loop @0x4e3201..0x4e3218)].
 
 Regression coverage: the focused native door test passes definition
 aliases/defaults, selective contact masks, reversals, sound origins, first-match
@@ -8465,8 +8472,20 @@ Player_ToggleWeaponScope @0x4df0c0 (the site @0x4DF218)]/[orig:
 Player_ToggleWeaponScope @0x4df0c0 (the site @0x4DF401..0x4DF430)].
 Cross-category non-ForceScoped mounts reset the target [orig:
 Player_MountWeaponSlot @0x4dfa40 (the site @0x4DFB66)]. Player camera reset
-clears the scope pose and restores the target; mission retry retains the
-authored weather baseline through that transient reset.
+clears the scope pose and restores the target. On a mission retry retail's
+order is [orig: Game_RestartRoundSP @0x5263a0 (the call @0x5263DB)] ->
+[orig: Game_StartMission @0x524360]: [orig: Player_InitPlayer @0x525BBC] (its
+tail [orig: Player_SwitchToWeaponByHandle @0x4E0170 (the site @0x4E19A1)] takes
+the unmounted branch @0x4E01FC into [orig: Player_ResetCameraAndMovementState
+@0x4DE1F0 (the store @0x4DE202)], g_cameraFovTargetQ16 = 0x500000), then
+[orig: Environment_SnapStateToTargets @0x57d1e0 (the target load @0x57D29F..
+0x57D2BB)], then [orig: WacScript_InitAndLoad @0x4F91F0 (the call @0x525CB3)]
+(WacCmd_Fov writes the target @0x4EDEA7), then [orig:
+Environment_MissionStartInit @0x57f1e0 (current <- target @0x57F7CA)]; the reset
+precedes the snap and the script re-run, so retail's post-restart target is the
+authored value. The port's sealed-baseline restore (`World::restore` plus
+`wac.restore_runtime_state` re-marking `initial_executed_`) stands in for that
+re-run; `restore_baseline`'s FOV save/restore reaches the same end state.
 
 [orig: Player_CanFireWeapon @0x5CF780] also writes the target after its optical
 visibility gates when the camera interpolation is inactive and parent slot is
@@ -9252,7 +9271,11 @@ height samplers' global edge mapping is unchanged.
 Org1 runs the gradient block every motor tick, before the 16-tick think [orig:
 Entity_UpdateInfantryAI @0x4b9910 (the site @0x4BA896..0x4BA96E)]. A
 ground/carrier reference bypasses the block, preserving Flags 0x10000. Otherwise
-Flags & 0x90A000 clears that bit. A truncated gradient magnitude below 768 also
+Flags & 0x90A000 clears that bit; the 0x2000 member of that mask is the live
+in-air carrier for local bodies too, mirrored into the registry pair by the
+motors at the jump, the ledge/fall edges and the landings (§33.37), and the
+infantry_terrain regression drives it through the org1 fall edge and the org2
+jump. A truncated gradient magnitude below 768 also
 clears it. At 768 or above, the motor replaces the horizontal animation pair
 with X = -((419392 * dx + 0x8000) >> 16) and Y =  ((419392 * dy + 0x8000) >>
 16), retaining the low signed dword. It clamps vertical slide velocity downward
@@ -9308,7 +9331,17 @@ strictly greater than both absolute horizontal components, velocity becomes
 subtraction can cross below -167 (-166 becomes -249); there is no saturating
 clamp on this branch. Both passes may subtract when the first result still
 exceeds -167. Carrier suppression and the Powerup/MoveCB branches bypass this
-ordinary solid response. No authority or player-class gate applies.
+ordinary solid response. No authority or player-class gate applies. The resolver
+reads the registry Flags pair (flags | engine_flags, plus the replica mirror),
+and the local motors write 0x2000 into that pair where retail writes its one
+Flags word: the org2 jump [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 (the
+`or eax,2000h` @0x4b7edb; the store @0x4b7eef)], the org2 ledge edge [orig:
+@0x4b7e37..0x4b7e3c], the org1 fall edge [orig: Entity_UpdateInfantryAI
+@0x4b9910 (the site @0x4bf8c8..0x4bf8cf)], cleared at the landings [orig: org2
+@0x4b7fa1; org1 @0x4bf89f]; the response is therefore live for the local
+player, org1 NPCs and wire replicas alike, and the regression drives a real
+jump and fall through the motors (collision_vertical MotorRig) rather than a
+stamped flag.
 
 The shared resolver now applies this response through its existing vertical
 velocity reference, including the replica flag seam. collision_vertical uses

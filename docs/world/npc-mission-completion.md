@@ -32,7 +32,7 @@ retry and mission transitions are included.
 | BMS actions | MP POI/live-marker ownership and remaining shared script/native effect-slot consumers | bms-event-runtime-re.md |
 | WAC execution | Complete registered runtime semantics and presentation routing; replace silent effect fallthrough with explicit disposition | formats/wac command registry; runtime/wac VM |
 | Mission lifecycle | Playthrough, objective feedback, success/failure, retry and transitions; fix adjacent blockers | MissionKernel, Session and mission-end tests |
-| Runtime shutdown | A forced SceneTree quit (including `--quit-after`) with streaming music bypasses the orderly drain that normal quit performs (Godot shutdown ordering, not an engine divergence) | audio/mus-sbf-re.md Godot playback note; `music_service.gd` `await_playback_stopped` |
+| Runtime shutdown | A forced SceneTree quit (including `--quit-after`) with streaming music bypasses the orderly, 1000 ms-bounded drain that normal quit performs (Godot shutdown ordering, not an engine divergence) | audio/mus-sbf-re.md Godot playback note; `music_service.gd` `await_playback_stopped` |
 
 ## Evidence rules
 
