@@ -18,6 +18,9 @@ const PUBLICATION_CREATING_SEGMENT := ".creating."
 const PUBLICATION_RECOVERING_SEGMENT := ".recovering."
 const PUBLICATION_TRANSACTION_SCHEMA := \
 		"opennova.fixture-publication-transaction.v1"
+# Extra reservation -> journal rename attempts after a transient Windows
+# rejection (the first attempt is not counted).
+const PUBLISH_RENAME_RETRIES := 3
 
 
 static func publication_name_is_canonical(value: String) -> bool:
@@ -57,7 +60,8 @@ static func begin_fixture_publication(
 		output_abs: String,
 		trusted_root_abs: String,
 		owner_is_running: Callable = Callable(),
-		after_recovery_claim: Callable = Callable()) -> Dictionary:
+		after_recovery_claim: Callable = Callable(),
+		publish_rename: Callable = Callable()) -> Dictionary:
 	var output := _normalized_publication_path(output_abs)
 	var trusted_root := _normalized_publication_path(trusted_root_abs)
 	if output.is_empty() or trusted_root.is_empty() \
@@ -90,11 +94,14 @@ static func begin_fixture_publication(
 	if recovery_error != OK:
 		return {"error": "cannot recover prior fixture publication: %s" \
 				% error_string(recovery_error)}
-	return _create_fixture_publication(output, trusted_root)
+	return _create_fixture_publication(output, trusted_root, publish_rename)
 
 
+# `publish_rename` is the reservation -> journal rename (the same seam shape
+# as commit's install/restore renames); empty means DirAccess.rename_absolute.
 static func _create_fixture_publication(
-		output: String, trusted_root: String) -> Dictionary:
+		output: String, trusted_root: String,
+		publish_rename: Callable = Callable()) -> Dictionary:
 	var transaction_root := _publication_transaction_root(output)
 	var reservation := "%s%s%d.%d" % [
 		transaction_root, PUBLICATION_CREATING_SEGMENT,
@@ -140,12 +147,13 @@ static func _create_fixture_publication(
 			or FileAccess.file_exists(transaction_root):
 		_remove_tree_absolute(reservation, trusted_root)
 		return {"error": "fixture publication is busy"}
-	var publish_error := DirAccess.rename_absolute(reservation, transaction_root)
+	var publish_error := _rename_absolute_with(
+			reservation, transaction_root, publish_rename)
 	# Windows can transiently reject the rename of a newly created journal.
 	# Retry only while the destination is absent and the reservation and its
 	# ancestors remain ours. A competing owner or recovery claim still wins.
 	if publish_error != OK and OS.get_name() == "Windows":
-		for _attempt in range(3):
+		for _attempt in range(PUBLISH_RENAME_RETRIES):
 			OS.delay_msec(1)
 			if not DirAccess.dir_exists_absolute(reservation) \
 					or DirAccess.dir_exists_absolute(transaction_root) \
@@ -156,7 +164,8 @@ static func _create_fixture_publication(
 			claims = _publication_recovery_claims(output, trusted_root)
 			if claims.has("error") or not (claims.get("paths", []) as Array).is_empty():
 				break
-			publish_error = DirAccess.rename_absolute(reservation, transaction_root)
+			publish_error = _rename_absolute_with(
+					reservation, transaction_root, publish_rename)
 			if publish_error == OK:
 				break
 	if publish_error != OK:

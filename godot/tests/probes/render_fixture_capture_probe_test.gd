@@ -939,13 +939,55 @@ func test_orphan_recovery_revalidates_owner_liveness_after_the_atomic_claim() ->
 	assert_eq(FixturePublication.abort_fixture_publication(staging), OK)
 
 
+func test_publish_rename_retries_a_transient_rejection_then_gives_up() -> void:
+	# The reservation -> journal rename retries PUBLISH_RENAME_RETRIES times on
+	# Windows (the platform that transiently rejects renaming a just-created
+	# directory); elsewhere the first failure is final. Injected through the
+	# same rename seam the commit path's install/restore renames use.
+	var nonce := "%d-%d" % [OS.get_process_id(), Time.get_ticks_usec()]
+	var trusted_root := ProjectSettings.globalize_path(
+			"user://render-fixture-publish-retry-" + nonce)
+	var final_dir := trusted_root.path_join("fixture")
+	assert_eq(DirAccess.make_dir_recursive_absolute(final_dir), OK)
+	var retries: int = FixturePublication.PUBLISH_RENAME_RETRIES \
+			if OS.get_name() == "Windows" else 0
+	var failures_left := [retries]
+	var flaky_rename := func(source: String, target: String) -> Error:
+		if failures_left[0] > 0:
+			failures_left[0] -= 1
+			return ERR_CANT_CREATE
+		return DirAccess.rename_absolute(source, target)
+
+	var transaction: Dictionary = FixturePublication.begin_fixture_publication(
+			final_dir, trusted_root, Callable(), Callable(), flaky_rename)
+	assert_false(transaction.has("error"),
+			"the last permitted attempt publishes the journal: %s" % transaction)
+	assert_eq(failures_left[0], 0, "every rejection was retried")
+	assert_eq(FixturePublication.abort_fixture_publication(
+			String(transaction.get("staging_path", ""))), OK)
+
+	failures_left[0] = retries + 1
+	var exhausted: Dictionary = FixturePublication.begin_fixture_publication(
+			final_dir, trusted_root, Callable(), Callable(), flaky_rename)
+	assert_true(String(exhausted.get("error", "")).begins_with(
+			"cannot publish fixture transaction owner"),
+			"one rejection past the retry budget is final: %s" % exhausted)
+	assert_eq(failures_left[0], 0, "the budget was spent before giving up")
+	assert_eq(_reservation_dirs(trusted_root), PackedStringArray(),
+			"a failed publish leaves no reservation behind")
+	assert_eq(DirAccess.remove_absolute(final_dir), OK)
+	assert_eq(DirAccess.remove_absolute(trusted_root), OK)
+
+
+func _reservation_dirs(root: String) -> PackedStringArray:
+	var found := PackedStringArray()
+	for name in DirAccess.get_directories_at(root):
+		if name.contains(FixturePublication.PUBLICATION_CREATING_SEGMENT):
+			found.append(name)
+	return found
+
+
 func test_empty_terminal_journals_are_recoverable_after_owner_release() -> void:
-	# The Windows rename failure appears only during repeated journal turnover.
-	for _repetition in range(100 if OS.get_name() == "Windows" else 1):
-		_exercise_empty_terminal_journal_recovery()
-
-
-func _exercise_empty_terminal_journal_recovery() -> void:
 	var nonce := "%d-%d" % [OS.get_process_id(), Time.get_ticks_usec()]
 	var trusted_root := ProjectSettings.globalize_path(
 			"user://render-fixture-empty-journal-" + nonce)
@@ -988,6 +1030,8 @@ func _exercise_empty_terminal_journal_recovery() -> void:
 	assert_false(DirAccess.dir_exists_absolute(abandoned_claim))
 	assert_eq(FixturePublication.abort_fixture_publication(
 			String(recovered.get("staging_path", ""))), OK)
+	assert_eq(DirAccess.remove_absolute(final_dir), OK)
+	assert_eq(DirAccess.remove_absolute(trusted_root), OK)
 
 
 func test_marker_write_and_cleanup_failure_leave_a_recoverable_rollback() -> void:
