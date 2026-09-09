@@ -167,7 +167,8 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
 - **D-TMATE-1** — the teammate pickup/flyover operation initializes its helicopter reference
   before treatment and ends the operation on a failed helper allocation or a destroyed
   helicopter/teammate entity; retail's `HeliLift_SpawnPickup @0x4525E0` never initializes
-  the pointer that `HeliLift_UpdateAll @0x451FA0` dereferences on treatment expiry.
+  the pointer that `HeliLift_UpdateSlotState @0x451730` dereferences on treatment expiry
+  (`@0x451e09`; `@0x451e4c`; `HeliLift_UpdateAll @0x451FA0` only compacts the slots and calls it).
   **Proposed in PR #642 (2026-09-09); requires maintainer ratification at merge.**
 - **D-RORD-6** — the two original sort-key quirks (opaque key bits 15+ carry residual
   stack garbage; the transparent key lags one strip within a render object) are not

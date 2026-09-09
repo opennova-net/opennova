@@ -592,8 +592,9 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         default:
             // No faithful in-engine handler yet: record as an UNPORTED marker (coverage /
             // diagnostic only — never a presentation effect). Supported missions should
-            // emit zero of these; a test asserts that. The remaining owners are
-            // ledgered as D-EVT-6 (bms-event-runtime-re §10.1).
+            // emit zero of these; a test asserts that. The arm is diagnostic-only
+            // for unauthored action types; the last explicit boundary closed as
+            // D-EVT-6 (bms-event-runtime-re §10.1).
             w.diagnostics.record({world::RuntimeGapKind::BmsAction, int32_t(a.action_type), a.action_sub_type, event, action},
                     w.logic_tick, {a.param1, a.param2, a.param3, a.param4});
             w.out.effects.push({"unported_action", static_cast<int32_t>(a.action_type), a.action_sub_type,
