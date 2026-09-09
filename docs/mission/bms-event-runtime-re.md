@@ -1067,6 +1067,19 @@ helicopter fault are recorded in
 Group door actions 30/31 reach DoorSystem, collision and presentation
 (section 33.14).
 
+**D-EVT-6 closed 2026-09-09.** The remaining explicit action boundary of the
+2026-09-01 residual is owned: 30/31 `[orig: EventAction_Dispatch @0x4542E0;
+WacCmd_DoorOpen @0x4F70A0]`, 39 `[orig: HeliLift_SpawnPickup @0x4525E0;
+HeliLift_SpawnFlyover @0x452730; HeliLift_UpdateSlotState @0x451730]`, 42..49
+`[orig: Entity_SetActionByBmsRef @0x43DAC0; Entity_SetAlertByBmsRef @0x43DA50;
+Entity_SetWaypointByBmsRef @0x43D9E0; sub_43D970 @0x43D970;
+Entity_SetWeaponTypeByNetId @0x43D8F0; Entity_SetActionByNetId @0x43D870;
+Entity_SetAlertByNetId @0x43D7F0; Entity_SetTargetByNetId @0x43D770]` (the
+curated names are misleading: they write the +332/+334/+336/+338 target-policy
+words, world-wac-ai-re section 33.2), and 41 `ExecuteWac` has no retail case
+arm. The default arm of the dispatcher is diagnostic-only for unauthored action
+types.
+
 The 2026-09-08 pass implements actions 42..49 through the four target-policy
 words and their infantry/weapon consumers. Action 41 `ExecuteWac` has no
 retail switch arm and is now an explicit no-op. Writer addresses, actual

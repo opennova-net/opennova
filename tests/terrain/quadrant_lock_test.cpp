@@ -181,8 +181,7 @@ int main() {
     // 4. Normal queries use the retail generated-map basis: centered raw16
     //    differences, a literal unit up, normalization, and the same quadrant
     //    locks as height sampling. Invalid/empty sectors retain canonical up.
-    // [orig: Terrain_GenerateNormalMap @0x603210; diff scale @0x7C6950;
-    // WacScript_SpawnEffectAtSsnEntity terrain-normal read @0x4F23A0]
+    // [orig: Terrain_GenerateNormalMap @0x603210; diff scale @0x7C6950]
     {
         const TerrainSurfaceNormal asymmetric =
                 height_field_normal_from_raw16(512, 0, 768, 256);

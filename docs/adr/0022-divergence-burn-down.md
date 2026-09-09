@@ -144,6 +144,26 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
   existing lifetime contract; requires maintainer ratification at merge — no
   sign-off has been recorded yet.**
 
+- **D-WAC-1** — invalid IDIV operands (division by zero, INT_MIN/-1) stop the current WAC
+  pass with a diagnostic; retail's `WacScript_ExecuteBytecode @0x4F58B0` executes the x86
+  IDIV and faults the process. Malformed mission input must not crash a host.
+  **Proposed in PR #642 (2026-09-09); requires maintainer ratification at merge — no
+  sign-off has been recorded yet.**
+- **D-WAC-2** — `pisvar`/`psetvar` indices outside the authored 0..16 byte bank return 0
+  and write nothing; retail (`WacCmd_PlayerIsVar @0x4F0BD0`, `WacCmd_PlayerSetVar
+  @0x4F0CB0`) checks only `index <= 16`, so a negative index reads or writes unrelated
+  player-slot memory. **Proposed in PR #642 (2026-09-09); requires maintainer
+  ratification at merge.**
+- **D-GRM-1** — the GRM facial-rig parser rejects unsafe indices, excessive row/parameter
+  counts, non-finite coordinates and field-overflow names, and treats names as data;
+  retail's `FaceAnimConfig_ParseProperty @0x5886A0` writes unbounded indices and
+  sprintf-format names into fixed fields. **Proposed in PR #642 (2026-09-09); requires
+  maintainer ratification at merge.**
+- **D-TMATE-1** — the teammate pickup/flyover operation initializes its helicopter reference
+  before treatment and ends the operation on a failed helper allocation or a destroyed
+  helicopter/teammate entity; retail's `HeliLift_SpawnPickup @0x4525E0` never initializes
+  the pointer that `HeliLift_UpdateAll @0x451FA0` dereferences on treatment expiry.
+  **Proposed in PR #642 (2026-09-09); requires maintainer ratification at merge.**
 - **D-RORD-6** — the two original sort-key quirks (opaque key bits 15+ carry residual
   stack garbage; the transparent key lags one strip within a render object) are not
   reproduced — reproducing either manufactures garbage. (Ratified at REN-3; entry
