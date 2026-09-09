@@ -40,7 +40,8 @@
 // slot is NOT yet witnessed (only two indices are known from call sites:
 // 0x24 = the scoring interval and 0x0C = the capture threshold
 // [orig: Server_UpdateCaptureZoneProximity preamble @0x5086A0: entry 0x24
-//  @0x5086C4, entry 0x0C @0x5086E5, each clamped to >= 1 @0x5086F6]). Until
+//  @0x5086C4 (defaults to 0xFFFF when < 1 @0x5086D5), entry 0x0C @0x5086E5
+//  (clamped to >= 1 @0x5086F6)]). Until
 // that ordering is witnessed, look values up
 // BY NAME with `var_value()`; do not synthesise a row image.
 #pragma once
