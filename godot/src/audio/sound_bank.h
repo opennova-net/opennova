@@ -112,8 +112,10 @@ public:
     // position only supplies Godot's panner (D-SND-8). No 3D cull or occlusion.
     bool play_oneshot_at_distance(Node3D *p_parent, const Vector3 &p_pan_position,
             const String &p_name, const StringName &p_bus, int64_t p_dist_q16);
-    // Stop this bank's one-shot children on mission retry (the retail reset
-    // stops channels and frees sample buffers, never a loaded bank). Ambient
+    // Stop this bank's one-shot children on mission retry (the retail restart
+    // reset re-inits the audio channels and IO [orig: sub_527910 @0x527910]
+    // and never frees or reloads a bank; sample buffers are freed only at
+    // teardown [orig: Game_TeardownMission @0x522600 -> sub_527930]). Ambient
     // and dialog channels retain their own owners; the per-layer selection
     // state is untouched because the banks stay loaded across a round restart.
     void reset_oneshots(Node3D *p_parent);

@@ -182,13 +182,15 @@ func stop_context() -> void:
 ## mix step, and a WASAPI driver that lost its endpoint (or ended its thread
 ## on a buffer error) never mixes again, so an unbounded wait would hold the
 ## quit forever. A healthy mixer drains in a few frames; after
-## `timeout_msec` the caller quits with live playback (the D-MUS-13
-## forced-exit path). Returns false on that timeout.
+## `timeout_msec` the caller quits with live playback (the forced-exit
+## ordering tracked in docs/world/npc-mission-completion.md "Runtime
+## shutdown"; docs/audio/mus-sbf-re.md "Godot playback shutdown"). Returns
+## false on that timeout.
 func await_playback_stopped(timeout_msec: int = PLAYBACK_DRAIN_TIMEOUT_MSEC) -> bool:
 	var deadline := Time.get_ticks_msec() + timeout_msec
 	while is_instance_valid(_director) and _director.has_pending_playback():
 		if Time.get_ticks_msec() >= deadline:
-			push_warning("MusicService: playback drain timed out; quitting with live playback (D-MUS-13)")
+			push_warning("MusicService: playback drain timed out; quitting with live playback (forced-exit ordering, see mus-sbf-re.md)")
 			return false
 		await get_tree().process_frame
 	return true

@@ -8133,6 +8133,7 @@ subsystem validation, not an accepted normal SP mission playthrough.
 | D-DOOR-1 | Door network request/update messages and late-join state are not connected | C2S 0x1A at 0x42D0C0/0x514B20; S2C 0x37 at 0x50F9A0; initial static decode 0x433400 | SP and local door states advance, but remote door synchronization is incomplete. Preserve the witnessed zero-based command versus one-based completion packet quirk when porting. |
 | D-DOOR-2 | The separate ai_function target projectile callback is not implemented by DoorSystem | 0x43F880..0x43F8EB | Shoot-to-open targets need the hit-section event-1 producer and its slot-index quirk; ordinary ai_function door commands/contact are implemented. |
 | D-DOOR-3 | Exhausted/stale global slot reads are safely rejected; arbitrary alias-authored counts beyond 30 are not published beyond the declared phase span | allocator 0x44E890; raw signed bytes and unchecked bus writes at 0x43F370/0x4E3070 | Normal authored definitions retain their state and phases. Retail out-of-bounds memory behavior is not emulated. Cross-entity allocation order and rebind behavior need a wire witness before claiming full lifecycle parity. |
+| D-DOOR-4 | A joiner's decoded present rows carry no door phases (the collector reaches the door writer only for host-owned rows), so a joiner renders no door motion | Retail runs the door records on every peer: [orig: FadeEffect_UpdateAll @0x44E920] from [orig: Entity_UpdateAllEntities @0x4c2100 (the site @0x4C2307)], contact event 6 on authority and client | OPEN (route the joiner's local DoorSystem phases through the guarded local-row path) |
 
 ### 33.15 WAC execution-entry caches and BMS event queries
 
@@ -8172,9 +8173,11 @@ first error in byte_C6EB30 [orig: Script_SetCompileError @0x4EE7C0] (read by
 retail corpus ships `ASX_G13A.wac` with such a line). The port models the dword
 as `Builtin::Scratch` and emits the diagnostic as a warning. A named row in a
 Variable slot is always the row's own storage; a literal, quoted string, event
-name or unknown token there is the same diagnostic. A HARD compile error (an
-unknown command) still blocks the mission's script in the port
-(`wac_layered_load` kBlocked), which is stricter than retail's record-and-run
+name or unknown token there is the same diagnostic. An unknown command is a
+non-fatal diagnostic on both sides; the port's HARD errors — an unresolved
+FX/FACE/SOUNDSET/ANIM/AMMO literal and the RUN/LOOP/NEXT/GLOOP structural
+checks — still block the mission's script (`wac_layered_load` kBlocked), where
+retail records the message and runs with the failed slot holding 0/-1/0xFFFF
 (D-WAC-6, §33.38).
 
 [orig: WacCmd_Event @0x4ED1E0] reads the zero-based BMS event record's active
@@ -9373,8 +9376,8 @@ declined entry falls back to an OPEN class-D row.
 | D-TMATE-1 | Direct pickup initializes the helicopter reference before treatment; a failed helper allocation or a destroyed helicopter/teammate entity ends the operation instead of dereferencing it | [orig: HeliLift_SpawnPickup @0x4525E0] never initializes the pointer that [orig: HeliLift_UpdateAll @0x451FA0] dereferences on treatment expiry (§33.32) | PERMANENT (class D, proposed PR #642) |
 | D-WAC-3 | weaponfired/blockfire/record_fire_request refuse negative categories (return 0 / refuse / no stamp) | [orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire @0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge @0x4E0966)] bound only the high side and index before dword_C6EA44 / dword_C6EA6C for negatives (§33.17) | PERMANENT (class D, proposed PR #642) |
 | D-WAC-4 | `set(night, v)` (and add/sub/inc/dec/store on the `night` row) is dropped; the night phase is derived from the clock on every read (`WeatherState::is_night_phase`) | The `night` row @0x82EEF0 resolves to the Env dword @0x26C645C, which holds a script write until [orig: Environment_ComputeTimeOfDayColors @0x57deae] rewrites it on the next TOD computation; [orig: Environment_GetLightDirectionFloat @0x57d873] reads it meanwhile (§33.15) | OPEN (low: observable only as `set(night,1) set(v1,night)` -> 1 in retail vs the derived phase here until the light-direction getters consume a script-written word) |
-| D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends the values [orig: WacScript_ResolveParameter @0x4f2920] stores: [orig: CEffectWorld_InternEffectHandle @0x5F7310] (the site @0x4f3067) and [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (the site @0x4f2fe2); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: byte layout identical (u32), a retail joiner on an OpenNova host would resolve a different effect/sound for those five commands until retail's intern/set-id numbering is witnessed; the decoder bounds are class-D portable boundaries with no observable difference for any retail-emitted body) |
-| D-WAC-6 | A hard WAC compile error (unknown command) blocks the mission's script (`wac_layered_load` kBlocked) | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first error text in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4f652a] and executes the script (§33.15) | OPEN (low: only malformed authored scripts differ; the argument-signature diagnostic is already non-fatal) |
+| D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends what [orig: WacScript_ResolveParameter @0x4f2920] stored: the SoundSet operand is the trigger-entry pointer from [orig: SoundBank_FindTriggerByName @0x75be90] via [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (`*(bank+56) + 84*index`, a host-process address; the site @0x4f2fe2), the Fx operand is the 1-based index into the effect world's global intern pool [orig: CEffectWorld_InternEffectHandle @0x5F7310] in first-intern order (the site @0x4f3067); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: the Fx half needs the intern order reproduced, the SoundSet half is inherently host-local; the decoder bounds are class-D portable boundaries) |
+| D-WAC-6 | An unresolved FX/FACE/SOUNDSET/ANIM/AMMO literal or a RUN/LOOP/NEXT/GLOOP structural error blocks the mission's script (`wac_layered_load` kBlocked) | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4f652a] and runs the script with the failed slot holding 0/-1/0xFFFF (§33.15); unknown commands and unresolved arguments are non-fatal on both sides | OPEN (low: only malformed authored scripts differ) |
 | D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
 | D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
 | D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |
@@ -9421,7 +9424,12 @@ stays net-agnostic); the 28 flagged handler bodies live in
 (targeted -> the connection owning the entity, broadcast -> every in-match
 remote, never the loopback); the joiner decodes behind the authority-recipient
 gate and runs the shared handler with the wire operands. The Fx/SoundSet operand
-representation is D-WAC-5 (§33.38).
+representation is D-WAC-5 (§33.38): retail's SoundSet operand is the
+trigger-entry pointer [orig: SoundBank_FindTriggerByName @0x75be90] and its Fx
+operand the global intern-pool index [orig: CEffectWorld_InternEffectHandle
+@0x5F7310]. Retail takes the operand COUNT from the source row and the operand
+TYPES from the wire row [orig: @0x4f5c8a; @0x4f5cce; @0x4f5d1a]; the shipped
+table makes the two identical for every shared handler.
 
 Regression coverage: wac_players (test_remote_command_classes,
 test_remote_command_fanout_reaches_owner_and_remotes), script_remote_command

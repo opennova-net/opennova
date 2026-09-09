@@ -281,8 +281,8 @@ void SoundBank::reset_oneshots(Node3D *p_parent) {
     exclusive_.clear();
     // The per-layer selection state (playlist record cursor +2, anchor +12,
     // cycle bit 0x100) survives a round restart: Game_RestartRoundSP @0x5263A0
-    // re-enters Game_StartMission, whose bank loop (SoundBank_LoadIfExists
-    // @0x52544A) returns early on an already loaded slot
+    // re-enters Game_StartMission, whose bank loop (Game_StartMission @0x52544A
+    // -> SoundBank_LoadIfExists @0x527530) returns early on an already loaded slot
     // [orig: SoundBank_OpenFile @0x75CAA5]; only Game_TeardownMission @0x522600
     // -> sub_527890 frees the banks. The selector therefore keeps its cursors.
 }
