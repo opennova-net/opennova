@@ -2139,7 +2139,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     inf.anim_pending = 0; // [orig: @0x4bf901]
                 }
             }
-            if (fall_edge_allowed) inf.airborne = true;
+            if (fall_edge_allowed) {
+                // The airborne set lands in the ONE retail Flags word; the
+                // motor keeps its own copy for rowless bodies. [orig: org2
+                // `or eax,2000h; mov [esi+24h],eax` @0x4b7e37-0x4b7e3c; org1
+                // @0x4bf8c8-0x4bf8cf]
+                inf.airborne = true;
+                if (tick_entity != nullptr) {
+                    tick_entity->flags |= kEntityFlagInAir;
+                    tick_entity->engine_flags |= kEntityFlagInAir;
+                }
+            }
         } else if (foot_clearance <= 0) {
             // Landing. Fall damage is AUTHORITY-only and skips Indestructible
             // (0x4000000) bodies on both legs [orig: org1 @0x4bf81e `is_authority`,
@@ -2173,7 +2183,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                                 e.pos);
             e.pos[2] -= foot_clearance;
             inf.vel[2] = 0;
+            // Flags &= ~0x2000 [orig: org2 @0x4b7fa1; org1 @0x4bf89f]
             inf.airborne = false;
+            if (tick_entity != nullptr) {
+                tick_entity->flags &= ~kEntityFlagInAir;
+                tick_entity->engine_flags &= ~kEntityFlagInAir;
+            }
         }
 
         // 9b. Player jump — witnessed org2 order: integrate -> resolver -> edges ->
@@ -2205,7 +2220,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 inf.vel[0] += (3 * root_wx) >> 2; // [orig: @0x4b7ec3-0x4b7ed5]
                 inf.vel[1] += (3 * root_wy) >> 2;
                 inf.vel[2] = kJumpImpulseVelZ;    // [orig: @0x4b7ee5]
-                inf.airborne = true;              // Flags |= 0x2000 [orig: @0x4b7edb]
+                // Flags |= 0x2000 [orig: @0x4b7edb; the store @0x4b7eef]
+                inf.airborne = true;
+                if (tick_entity != nullptr) {
+                    tick_entity->flags |= kEntityFlagInAir;
+                    tick_entity->engine_flags |= kEntityFlagInAir;
+                }
                 inf.jump_cooldown = 32;           // [orig: @0x4b7f06]
                 // STRAIGHT stamps — the org2 jump block has NO clip
                 // availability check (world-wac-ai-re jump witness: "anim 30

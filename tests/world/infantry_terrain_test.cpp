@@ -244,13 +244,46 @@ void test_motor_gradient_and_rotation() {
 }
 
 void test_suppression_and_carriers() {
-    for (const uint32_t blocked : {0x2000u, 0x8000u, 0x100000u, 0x800000u}) {
+    for (const uint32_t blocked : {0x8000u, 0x100000u, 0x800000u}) {
         Motor m(768, 0);
         m.entity().flags |= blocked | 0x10000;
         m.entity().engine_flags |= 0x10000;
         m.tick();
         CHECK(((m.entity().flags | m.entity().engine_flags) & 0x10000) == 0);
         CHECK(m.ai().pos[0] == q16(100) + (blocked == 0x100000u ? 0 : 1111));
+    }
+    // The 0x2000 half of the mask is the motors' own product, written into the
+    // registry Flags pair: org1 on its fall edge [orig: @0x4BF8C8..0x4BF8CF],
+    // org2 on the jump [orig: @0x4B7EDB..0x4B7EEF]. Neither is stamped here.
+    {
+        Motor m(768, 0);
+        m.tick(2); // grounded sample on the even tick: slide + clamp, then the edge
+        CHECK((m.entity().engine_flags & 0x10000) != 0);
+        CHECK((m.entity().flags & 0x2000) != 0);
+        CHECK((m.entity().engine_flags & 0x2000) != 0);
+        CHECK(m.ai().inf.airborne);
+        m.ai().inf.vel[2] = 0x1600; // an upward impulse the clamp would otherwise eat
+        const int32_t x = m.ai().pos[0];
+        m.tick(4);
+        CHECK(((m.entity().flags | m.entity().engine_flags) & 0x10000) == 0);
+        CHECK(m.ai().pos[0] == x + 1111);         // the clip root is kept, no slide pair
+        CHECK(m.ai().inf.vel[2] == 0x1600 - 416); // gravity only, no -167 clamp
+    }
+    {
+        Motor m(0, 0, true); // the jump gate refuses steep ground (0x10000)
+        m.ai().pos[2] = 5000 * 256;
+        m.ai().inf.jump_requested = true;
+        m.tick(1);
+        CHECK(m.ai().inf.airborne);
+        CHECK((m.entity().flags & 0x2000) != 0);
+        CHECK((m.entity().engine_flags & 0x2000) != 0);
+        CHECK(m.ai().inf.vel[2] == 0x1600);
+        m.field.gradient(100, 100, 768, 0); // the arc now sits over a steep cell
+        const int32_t x = m.ai().pos[0];
+        m.tick(2);
+        CHECK(((m.entity().flags | m.entity().engine_flags) & 0x10000) == 0);
+        CHECK(m.ai().inf.vel[2] == 0x1600 - 208); // no -167 clamp
+        CHECK(m.ai().pos[0] == x + 819);          // (63 * 833) >> 6 momentum, no slide pair
     }
     for (bool player : {false, true}) {
         Motor m(768, 0, player);
@@ -285,6 +318,7 @@ void test_player_jump_uses_current_slope() {
         m.tick();
         CHECK(m.ai().inf.jump_cooldown == (steep ? 0 : 32));
         CHECK(m.ai().inf.airborne == !steep);
+        CHECK((((m.entity().flags | m.entity().engine_flags) & 0x2000) != 0) == !steep);
         CHECK(((m.entity().engine_flags & 0x10000) != 0) == steep);
     }
 }

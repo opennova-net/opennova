@@ -96,6 +96,7 @@ void AiSystem::infantry_water_block(AiEntity &e, World &world, Entity *tick_enti
                                   /*airborne=*/(flags & kEntityFlagInAir) != 0);
     }
     tick_entity->flags = (flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
+    tick_entity->engine_flags &= ~kEntityFlagInAir; // the pair's other half of that clear
     e.inf.airborne = false; // the motor-side mirror of the 0x2000 clear
 
     // The vertical is a QUARTER-step toward the target, not a snap: that is what

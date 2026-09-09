@@ -1143,7 +1143,11 @@ void test_local_player_jump_respects_world_state_flag_gates() {
         e->inf.jump_cooldown = 0;
         e->inf.airborne = false;
         e->inf.vel[2] = 0;
-        e->pos[2] = floor_z;
+        // A body presenting 0x2000 hovers within the airborne gap so neither
+        // edge rewrites the word this tick: the landing clear precedes the
+        // gate here, whereas retail's landing arm (@0x4b7f71..0x4b7fa1) runs
+        // after the jump gates and only when no jump was taken.
+        e->pos[2] = floor_z + (blocked == kEntityFlagInAir ? fx(0.5) : 0);
         ent->engine_flags = blocked;
         e->inf.jump_requested = true;
         run_ticks(ai, w, tick, tick + 1);
@@ -1158,6 +1162,14 @@ void test_local_player_jump_respects_world_state_flag_gates() {
     run_ticks(ai, w, tick, tick + 1);
     CHECK(e->inf.jump_cooldown == 32);
     CHECK(e->inf.airborne);
+    // The jump writes the registry Flags pair as well [orig: @0x4b7edb / @0x4b7eef];
+    // the landing clears it again [orig: @0x4b7fa1].
+    CHECK((ent->flags & kEntityFlagInAir) != 0);
+    CHECK((ent->engine_flags & kEntityFlagInAir) != 0);
+    run_ticks(ai, w, tick + 1, tick + 70);
+    CHECK(!e->inf.airborne);
+    CHECK((ent->flags & kEntityFlagInAir) == 0);
+    CHECK((ent->engine_flags & kEntityFlagInAir) == 0);
 }
 
 // The uplink side of D-NET-199: the LOCAL player's wire mirror must carry the
