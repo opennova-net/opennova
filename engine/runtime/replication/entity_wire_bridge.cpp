@@ -787,7 +787,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 PlayerExtendedUplink build_player_uplink(const world::World &world,
                                          const world::Entity &e,
                                          const world::AiEntity &ae) {
-	PlayerExtendedUplink up; // wire defaults: carrier_handle 0xFFFF, all counters 0
+	PlayerExtendedUplink up; // wire defaults include the no-carrier handle 0xFFFF
 	// Live engine-frame pose (the AiEntity store apply_player_intent SNAPs back on receive):
 	// pos[] is already i32 16.16; heading/pitch are BAM32 whose HIGH half is the i16 wire field
 	// (the exact inverse of apply_player_intent's `intent.heading << 16`). [orig: case 4
@@ -828,8 +828,8 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 		up.heading = static_cast<int16_t>(local_heading >> 16);
 	}
 	// The +0x12C movement-INPUT byte for our own player (the host ingests + echoes it in our
-	// 0x0A record so OTHER clients motor-drive our avatar). Until the local input bitfield is
-	// exported from the motor, carry the last known value (0 = idle). [witness 2026-07-02:
+	// 0x0A record so OTHER clients motor-drive our avatar). The local motor publishes
+	// this byte after applying the held controls. [witness 2026-07-02:
 	// corrected from the anim_slot misnomer — this byte is locomotion input, not an anim slot.]
 	up.move_input_byte = e.net_move_input;
 	// The RAW entity+0x24 (Flags) low byte, written verbatim and unmasked — the byte the
@@ -844,9 +844,16 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 	// over: the original does not mask on the write side, and the receiver already does.
 	// [orig: NetPacket_SerializePlayerState case 3 @0x4c1b17 `mov cl, [edi+24h]`]
 	up.state_flags_byte = static_cast<uint8_t>(e.flags & 0xFFu);
+	// Preserve the signed control bytes as wire bit patterns. The authority
+	// consumes these for analog throttle and steering. Dropping them loses
+	// controls that may already have affected local vehicle prediction.
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0, case 3 @0x4C1B2E..0x4C1B74;
+	// entity+0x130/131/132; case 4 @0x4C1E6A..0x4C1EA4]
+	up.analog_x = static_cast<uint8_t>(e.net_analog_x);
+	up.analog_y = static_cast<uint8_t>(e.net_analog_y);
+	up.analog_z = static_cast<uint8_t>(e.net_analog_z);
 	// The equipped-weapon adm index for our own player — the host ingests it (category-gated)
-	// and echoes it at our 0x0A off-16 so other clients resolve our weapon-anim def. Carries
-	// the spawn default (WPN_M4AUTO) until joiner-side weapon switching exports a live value.
+	// and echoes it at our 0x0A off-16 so other clients resolve our weapon-anim def.
 	// [orig: the client fills byte 24 from entity+0x2B0; case-4 store @0x4C20A3] (D-NET-143)
 	up.equipped_adm_index = e.equipped_adm_index;
 	return up;

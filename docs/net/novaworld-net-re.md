@@ -2371,6 +2371,14 @@ MoveOrder LOW byte (dir/moving/lean — bits 8/9 crouch/prone are above it), and
 replicates via the dedicated **C2S 0x1D stance-change** (dispatch table), and the server
 recomputes the body anim itself (D-NET-159 / the §5.10 off-14 bullet).
 
+2026-09-09 send-path correction: `build_player_uplink` now copies all three
+`Entity::net_analog_*` bytes into body offsets 21..23. The writer previously
+left them at zero despite the receiver already applying them. The signed
+byte patterns survive the real uplink and host apply in
+`netsim_build_player_uplink::run_mounted_moving_carrier_roundtrip`.
+The retail write sites are `NetPacket_SerializePlayerState @0x4C09C0`, case 3
+`@0x4C1B2E..0x4C1B74`; this is separate from the initial deployment regression.
+
 #### C2S 0x26/0x27 — vehicle attach/detach flow (witnessed 2026-07-03, D-NET-157)
 
 Client senders: **0x26** = `[u16 senderEntityHandle][u16 vehicleHandle][u8 modelBoneIndex]
@@ -8359,18 +8367,26 @@ queues a fresh 0x0E.
 Reimpl correction (2026-08-02, retail↔reimpl objective-Co-op matrix): the joiner's active
 session phase, deploy-screen stage, `ClientRuntime` gameplay gate, and authoritative spawn/health
 latch are independent. The **first valid initial grant** opens gameplay as soon as H is known,
-while the second grant plus policy only mark the deploy UI ready (since 2026-08-31,
-f76e7000c, the initial admission owes NO pick: the C2S `0x0E` is the death re-pick
-only, and the pick-based initial deploy's client trigger — the local entity's
-entity+0x24 UNDEPLOYED bit — is the open residual). Queueing `0x0E` closes
+while the second grant plus policy complete initial admission without forcing a
+pick. **Correction 2026-09-09:** the absence of a pick in an automatic-spawn
+co-op capture does not make C2S `0x0E` death-only. An alive player can still be
+held respawn-pending by a spawn-zone host. Selecting the initial overlay must
+queue the same request from the completed admission stage; closing the local
+UI alone leaves retail's hold set and causes vehicle prediction snapback.
+The local retail AAS comparison measured 0 m server movement before the fix
+and 31.071 m after the same four-second driving action (details and scope in
+[the regression record](retail-vehicle-deployment-regression.md)).
+Queueing `0x0E` closes
 only the gameplay gate, and the ACK-qualified post-pick `0x5A` opens it again; it cannot force
 local health to zero. A real death closes the authoritative spawn/health latch. The local pose
 protection/snap edge uses `deployment_release_revision()`—not the gameplay revision or a stale
 positive `0x0A` tail—and accepts revival only with a later positive authoritative-health tail.
-`npruntime_client_runtime::run_roundtrip_with_spawn_zones` pins actual framed pre-pick
-C2S `0x0C` and `0x4C` and the absence of any `0x0E` on the initial admission.
-It also stages an older `0x0C` ahead of a non-default `0x0E` and proves the next host tick cannot
-overwrite the selected pose; successful deploy dispatch fences all pre-release staged uplinks.
+`npruntime_client_runtime::run_roundtrip_with_spawn_zones` pins admission without
+an automatic pick, then a real user selection and host/client release, including
+the dictated twelve-tick send period. The existing spawn tests retain the
+pre-release uplink fence that prevents an older staged pose from overwriting
+the selected spawn. `deploy_screen_presenter_test.gd` covers initial row and
+Space-key selection through real UDP and server release.
 `coop_two_sim_test.gd` pins both the live initial-pick hold and the death/stale-positive boundary
 over real loopback UDP.
 
@@ -12797,8 +12813,9 @@ occupied-seat replacement, unchanged-carrier primary-claim repair and mounted Us
 scan-before-detach. The joiner handles H/L explicitly and uses canonical decoded remote
 occupancy for Use, labels and the vehicle panel, including compact health tiers and
 dismounts superseding spawn slots. `inmatch_joiner_role` and `netsim_loopback_identity`
-cover these paths. Live retail/NovaWorld driving remains to be verified; the existing
-lower attach and collision residuals above are not closed by these tests.
+cover these paths. Public NovaWorld driving remains to be verified; the local
+retail AAS comparison is recorded in the D-NET-156 correction below. The lower
+attach and collision residuals above are not closed by these tests.
 
 **D-NET-156** [reimpl gap, FIXED 2026-07-03; **v32 LIVE: the hold/pick/release chain WORKS
 (picker appears, pick lands, C 0x0E on the wire from both joiners) but the session found the
@@ -12834,6 +12851,15 @@ the 0x0F location-name block (def-2044 markers, §5.29) + the 0x0D zone byte/rad
 byte13 + tail clear on deploy), `zone_chain_test` (spawn-zone presence + the packed zone
 byte). Death does NOT set the flag — the death screen is client-local (flags1 bit0 edges
 drive it; §5.9).
+
+2026-09-09 correction: initial admission and an alive player's deployment hold
+are independent. The initial overlay's local-only dismiss regression is fixed:
+row/default-key selection now sends C2S `0x0E` from completed admission and
+uses the existing ACK-qualified release. Matched retail AAS driving changed
+from 0 m authoritative displacement to 31.071 m; the pending driver's flags
+changed from `0x141` to `0x140`. The same unreleased hold also arms the section
+5.64 `t35` idle punt. See [the regression record](retail-vehicle-deployment-regression.md)
+for witnesses, test coverage, and the local-retail/public-endpoint distinction.
 
 **D-NET-155** [reimpl gap, FIXED 2026-07-03 (v29)] **The 0x16 player-list re-push was
 one-shot-per-connection to the JOINING client only — every existing client's roster (and

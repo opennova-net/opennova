@@ -1013,9 +1013,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		    m.tag == s2c::WORLD_STATE_LOAD && m.payload.size() > 22) {
 			// The S2C 0x0F world-state-load is the deployment-policy marker that
 			// (with both initial 0x5A grants) completes initial admission. Its
-			// game_flags bit0 (payload[22] & 1) only raises the deploy-map OVERLAY
-			// g_deploy_screen_active; it does NOT gate the spawn on a C2S 0x0E — the
-			// host spawns the player directly (see the admission-complete release).
+			// game_flags bit0 (payload[22] & 1) raises g_deploy_screen_active.
+			// Completing admission must preserve the user's later selection:
+			// a spawn-zone host can still require C2S 0x0E to release its hold.
 			// [orig: NapiNPClientMsg_0x00F @0x42e2ed]
 			deployment_policy_seen_ = true;
 		}
@@ -1980,20 +1980,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	    deployment_policy_seen_ &&
 	    post_auth_stage_ == PostAuthStage::AwaitDeployment) {
 		initial_admission_complete_ = true;
-		// Retail's initial network deploy never blocks on a C2S 0x0E spawn pick. The
-		// player deploys through the two C2S 0x2F loadout submits already flushed at
-		// the world-stream terminator; the host then spawns them directly and drives
-		// the deploy-map OVERLAY (not a hidden/respawn-pending hold) through the
-		// per-frame S2C 0x0A flags1 bit1 (=0x02). The local player is ALIVE from its
-		// first 0x0A — the death/spectator bit0 (=0x01) stays clear. The C2S 0x0E is
-		// only the DEATH spawn-point re-pick (begin_redeployment), a separate flow.
-		// [orig: NapiNPClientMsg_0x00F @0x42e2ed sets g_deploy_screen_active from the
-		//  0x0F game_flags bit0 yet still revives g_local_player_entity (Flags &= ~1u
-		//  @0x42e403); NapiNPClientMsg_0x00A @0x42fec0 flags1 bit0=death/spectator,
-		//  bit1=g_deploy_screen_active overlay; the host holds the overlay via
-		//  NetPacket_WritePlayerState @0x4ff7bd. Witnessed on the wire: a stock
-		//  1.7.5.7 client joining a live retail co-op host spawns ALIVE (0x0A
-		//  flags1=0x02, health 150) after the 0x2F pair with zero C2S 0x0E.]
+		// The grant pair completes admission independently of the deploy-map
+		// overlay: a wave host can spawn without a manual selection. A spawn-zone
+		// host can instead keep its alive player respawn-pending (0x0A flags1 bit1)
+		// until the user selects a spawn. prepare_deployment_pick accepts that
+		// initial overlay selection from Complete as well as a death re-pick.
+		// [orig: NapiNPClientMsg_0x00F @0x42E2ED revives the local player @0x42E403;
+		// Server_OnPlayerJoin @0x51A680, hold @0x51A6F2 holds slot state bit0x10 for spawn zones;
+		// NetPacket_WritePlayerState @0x4FF6B0, @0x4FF7BD exposes that hold as the overlay]
 		release_deployment(/*deployment_complete=*/true);
 	}
 	// If none of the handlers produced a substantive reply, carry this packet's ACK to the send
@@ -2192,11 +2186,13 @@ bool JoinerConnection::prepare_deployment_pick(
 	// re-pick racing an already-sent release must not raise the ack bar past it
 	// (the grant-vs-release discrimination only needs the ack to clear the first
 	// pick — a cumulative ack covering any later pick clears it too).
-	if (post_auth_stage_ != PostAuthStage::AwaitDeployPick &&
+	const bool initial_overlay = post_auth_stage_ == PostAuthStage::Complete &&
+			phase_ == Phase::InMatch && has_self_handle_;
+	if (!initial_overlay && post_auth_stage_ != PostAuthStage::AwaitDeployPick &&
 	    post_auth_stage_ != PostAuthStage::AwaitDeployRelease) {
-		return {};
+		return false;
 	}
-	if (!deployment_pick_sent_)
+	if (initial_overlay || !deployment_pick_sent_)
 		deployment_pick_sequence_ = conn_.seq.next_outbound_seq;
 	message_out = make_protocol_message(
 			0x0E, {static_cast<uint8_t>(wire_value & 0xFFu),

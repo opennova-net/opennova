@@ -1,14 +1,13 @@
 class_name DeployScreenPresenter
 extends Node
 
-## The deploy-map screen — death.mnu's DEATH screen — shown while the host holds
-## the joining player respawn-pending (0x0A flags1 bit1) and a deployment pick is
-## owed. The witnessed original drives this same .mnu screen in code: the shroud
-## reveals immediately when the deploy flag is up, the SPAWNPOINTS_LIST carries
-## the Default Spawn row plus one lettered row per team-owned SECURED deploy
-## zone, and a list select queues the pick — re-picks stay possible because a
-## host silently drops an invalid/contested pick and the screen only closes when
-## the server-side respawn-pending flag falls (the deployment release).
+## The deploy-map screen (death.mnu's DEATH screen) handles the authority's
+## initial deployment hold and later death picks. Its shroud reveals immediately
+## when the deploy flag is up. SPAWNPOINTS_LIST carries the Default Spawn row
+## plus one lettered row per team-owned SECURED zone. Selection always queues a
+## spawn request. Initial selection closes the dialog immediately; death re-picks
+## remain available until the server releases its pending hold because invalid
+## or contested picks can be silently dropped.
 ## [orig: death.mnu <NAME>DEATH</NAME>; DeathScreen_UpdateShroudReveal @0x554730 (shroud reveal:
 ##  immediate on g_deploy_screen_active, 240 ticks after death; content refresh
 ##  every 16 ticks); UI_UpdateDeathScreenContent @0x5536a0 (list populate:
@@ -157,12 +156,9 @@ func close() -> void:
 	closed.emit()
 
 
-# Retail's deploy-screen keys 'X' and SPACE route input case 12 (dialogs reset
-# + a 0x0E). On the OVERLAY-only screen (no pick owed) they act as the local
-# dismiss; the DEATH pick flow keeps its list-select picks, so the keys stay
-# inert there rather than inventing an unpicked default send. (The key and
-# case-12 witnesses live in hud-re D-HUD-19; the 0x0E half is unported — see
-# _on_widget_value_changed.)
+# Retail's initial deploy-screen keys X and SPACE select the default spawn.
+# Closing just the local dialog leaves a spawn-zone host respawn-pending.
+# [orig: Input_HandleActionBinding @0x49AD40, case 12 @0x49B0C5..0x49B17B]
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_open():
 		return
@@ -174,8 +170,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null or bool(sim.is_join_deploy_pick_pending()):
 		return
-	close()
-	get_viewport().set_input_as_handled()
+	if sim.send_deployment_pick(0):
+		close()
+		get_viewport().set_input_as_handled()
 
 
 func teardown() -> void:
@@ -255,18 +252,11 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 	var param := _spawn_rows[index].param
 	if param == -1:
 		return
-	if not bool(sim.is_join_deploy_pick_pending()):
-		# The OVERLAY-only screen (the player is already deployed — a wave
-		# host): retail's input case 12 resets the dialogs (closing this
-		# screen) and still sends one C2S 0x0E the host is free to drop. The
-		# send half is NOT ported yet: case 12 also re-arms the client uplink
-		# hold, and how a host releases that hold for an already-deployed
-		# player is unwitnessed (the stock wave-join capture carries zero
-		# 0x0E) — silence is the wire-safe posture until a capture pins it.
-		# (The case-12 witnesses live in hud-re D-HUD-19.)
+	var initial_overlay := not bool(sim.is_join_deploy_pick_pending())
+	if sim.send_deployment_pick(param) and initial_overlay:
+		# Input case 12 resets the dialogs and queues the request even for an
+		# alive player. Runtime holds gameplay until the host releases the pick.
 		close()
-		return
-	sim.send_deployment_pick(param)
 
 
 func _populate_spawn_list(sim: Simulation) -> void:

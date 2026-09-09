@@ -348,7 +348,14 @@ public:
 	// framing waits for the next open send boundary. Re-picks while awaiting the
 	// release are allowed. False means the deployment UI/state cannot accept a pick.
 	bool queue_deployment_pick(uint16_t wire_value) {
-		if (!joiner_ || !joiner_->deployment_pick_pending()) return false;
+		if (!joiner_) return false;
+		// Initial admission may finish while the authority still holds the
+		// deploy-map overlay. Its selection sends the same request as a death
+		// re-pick, even though the player is alive and no pick is in flight yet.
+		// [orig: Input_HandleActionBinding @0x49AD40, case 12 @0x49B0C5..0x49B17B]
+		const bool initial_overlay = joiner_->in_match() &&
+				joiner_->initial_admission_complete() && view_.state().deploy_overlay_active;
+		if (!joiner_->deployment_pick_pending() && !initial_overlay) return false;
 		pending_deployment_pick_ = wire_value;
 		pending_deployment_pick_set_ = true;
 		deployed_ = false;

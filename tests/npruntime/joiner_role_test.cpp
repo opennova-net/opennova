@@ -14,6 +14,8 @@
 #include <net/npwire/session_keys.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
+#include <runtime/inmatch/loopback_channel.h>
+#include <runtime/replication/connection_fan.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <runtime/world/vehicle_motor.h>
@@ -31,6 +33,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -256,7 +259,8 @@ bool run_spawn_stamps_equipped_adm_from_midframe_grant() {
 // the joiner frame's confirmed mount, input and client prediction together.
 // [orig: Client_ProcessNetworkFrame @0x42c180;
 // Entity_UpdateVehiclePhysics @0x48af00; net-re section 5.13]
-bool run_confirmed_vehicle_drive(int occupancy) {
+bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
+		bool internet_conditions = false) {
 	Harness h;
 	w::World &world = h.kernel->world;
 	world.registry.configure_pool(1, 16);
@@ -276,6 +280,7 @@ bool run_confirmed_vehicle_drive(int occupancy) {
 	vehicle.has_item_def = true;
 	vehicle.item_type = 1;
 	vehicle.item_attrib = 0x40u;
+	vehicle.net_class_code = static_cast<uint8_t>(EntityClass::Vehicle);
 	vehicle.spawn_origin = (1u << 24) | 3u;
 	vehicle.position = local->position;
 	vehicle.position.x += 1.0f; // a step away: the scan aims from the eye at the seat point
@@ -369,8 +374,116 @@ bool run_confirmed_vehicle_drive(int occupancy) {
 	if (!expect(world.registry.get(vh)->primary_occupant == local->handle &&
 			world.registry.get(vh)->seats[occupancy == 4 ? 1 : 0].occupant == local->handle,
 			"confirmed controller relation restores its control link")) return false;
+	// Keep an independent authority alive: a prediction-only test can pass
+	// while the host stays parked and every received compact pulls us back.
+	auto authority = std::make_unique<w::World>();
+	replication::LoopbackChannel channel;
+	replication::Connection connection{
+			&channel, replication::TransportMode::Client, w::EntityHandle{self_handle}, 0};
+	if (server_feedback) {
+		h.role.runtime->view().set_item_class_resolver([](uint16_t type) -> std::optional<EntityClass> {
+			if (type == 1291) return EntityClass::Vehicle;
+			if (type == w::kPlayerInfantryTypeId) return EntityClass::Player;
+			return std::nullopt;
+		});
+		authority->registry.configure_pool(0, 16);
+		authority->registry.configure_pool(1, 16);
+		authority->add_system(&authority->ai);
+		authority->load_systems();
+		w::Entity peer = *local;
+		peer.mounted = false;
+		peer.mount_target = {};
+		peer.mount_seat = -1;
+		peer.flags &= ~w::kEntityFlagMounted;
+		authority->registry.spawn_from(0, self_handle, peer);
+		authority->ai.attach(w::EntityHandle{self_handle});
+		w::Entity carrier = vehicle;
+		for (auto &seat : carrier.seats) seat.occupant = {};
+		authority->registry.spawn_from(1, vh.slot(), carrier);
+		authority->vehicles.traits.set(vehicle.item_id, traits);
+		if (!expect(authority->vehicles.process_attach(
+				w::EntityHandle{self_handle}, vh, 1), "authority confirms driver")) return false;
+	}
+	// NovaWorld dictates a 12-tick uplink period. Add six ticks each way
+	// (~194 ms RTT at 62 Hz); only newly emitted controls reach the authority.
+	// Re-sending the last observed packet every tick would hide a pacing bug.
+	const int period = internet_conditions ? 12 : 4;
+	const int delay = internet_conditions ? 6 : 0;
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	auto frame_server = [&](const std::vector<ProtocolMessage> &messages) {
+		std::vector<uint8_t> body;
+		if (!frame_session_packet(server_tx, SessionCrypto{kServerScrk, {}, kClientKey},
+				messages, body)) return std::vector<uint8_t>{};
+		return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+	};
+	if (internet_conditions) {
+		const auto settings = frame_server({make_protocol_message(0x00,
+				{0x01, 0x08, 0x00, 0x00, 0x00, 12, 0x00, 0x00, 0x00}, 0xA0)});
+		h.role.runtime->receive(settings.data(), settings.size());
+	}
+	std::deque<std::pair<int, ProtocolMessage>> toward_host;
+	std::deque<std::pair<int, std::vector<uint8_t>>> toward_client;
+	std::size_t sent_cursor = h.socket.datagrams.size();
+	int control_packets = 0;
 	h.kernel->local.set_movement_keys(true, false, false, false, false, false, false);
-	for (int tick = 0; tick < 62; ++tick) h.role.run_tick(h.input);
+	const int drive_ticks = internet_conditions ? 186 : 62;
+	for (int tick = 0; tick < drive_ticks; ++tick) {
+		while (!toward_client.empty() && toward_client.front().first <= tick) {
+			const auto &packet = toward_client.front().second;
+			h.role.runtime->receive(packet.data(), packet.size());
+			toward_client.pop_front();
+		}
+		h.role.run_tick(h.input);
+		if (!server_feedback) continue;
+		for (; sent_cursor < h.socket.datagrams.size(); ++sent_cursor) {
+			const auto &packet = h.socket.datagrams[sent_cursor];
+			uint8_t opcode = 0;
+			std::vector<uint8_t> body;
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!nw_decode_inbound(packet.data(), packet.size(), opcode, body) ||
+					opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
+					!decode_protocol_packet_plaintext(body.data(), body.size(), kClientScrk,
+						header, messages)) continue;
+			for (auto &message : messages) {
+				if (message.tag != 0x0C) continue;
+				++control_packets;
+				toward_host.emplace_back(tick + delay, std::move(message));
+			}
+		}
+		while (!toward_host.empty() && toward_host.front().first <= tick) {
+			const auto &message = toward_host.front().second;
+			channel.client_send(message.tag, message.payload);
+			toward_host.pop_front();
+		}
+		replication::drain_connection_c2s(*authority, connection);
+		authority->run_logic_tick(true);
+		if ((tick + 1) % period == 0) {
+			if (!expect(replication::emit_connection_s2c(*authority, connection,
+					replication::snapshot_world(*authority)), "authority emits vehicle update"))
+				return false;
+			replication::Datagram update;
+			while (channel.client_recv(update)) {
+				auto packet = frame_server({make_protocol_message(update.tag, update.body)});
+				if (!expect(!packet.empty(), "authority frames a real S2C update")) return false;
+				toward_client.emplace_back(tick + delay, std::move(packet));
+			}
+		}
+	}
+	if (internet_conditions &&
+			!expect(h.role.runtime->send_holdoff_ticks() == 12 &&
+					control_packets >= 15 && control_packets <= 16,
+					"NovaWorld vehicle controls are emitted once every twelve ticks")) return false;
+	if (server_feedback) {
+		if (!expect(h.role.runtime->view().malformed_bodies() == 0 &&
+				h.role.runtime->state().find(vh.packed)->compact_revision > 1,
+				"continuous server vehicle records were decoded and applied")) return false;
+		const auto *host_vehicle = authority->registry.get(vh);
+		if (!expect(host_vehicle->veh.speed > 0 &&
+				std::hypot(host_vehicle->position.x - vehicle.position.x,
+						host_vehicle->position.y - vehicle.position.y) > 0.5f,
+				"the authority drives the vehicle from real joiner packets")) return false;
+	}
 	const auto *driven = world.registry.get(vh);
 	ProtocolMessage movement;
 	EntityPacketSubHeader sub;
@@ -402,7 +515,7 @@ bool run_confirmed_vehicle_drive(int occupancy) {
 			panel[0].health == local->health,
 			"vehicle overlay highlights the confirmed local seat and its health")) return false;
 
-	if (occupancy == 4) return true;
+	if (occupancy == 4 || server_feedback) return true;
 
 	// The use-item scan can select another nearby carrier while mounted.
 	// It must queue attach, keep the current seat until the echo, then detach
@@ -669,6 +782,8 @@ int main() {
 	ok &= run_confirmed_vehicle_drive(2);
 	ok &= run_confirmed_vehicle_drive(3);
 	ok &= run_confirmed_vehicle_drive(4);
+	ok &= run_confirmed_vehicle_drive(0, true);
+	ok &= run_confirmed_vehicle_drive(0, true, true);
 	ok &= run_flare_descriptor_carries_the_pilot_handheld();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
