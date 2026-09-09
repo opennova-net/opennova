@@ -262,6 +262,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_guided.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_pipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_script_commands.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_placed_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_scoreboard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_roster_tags.cpp
