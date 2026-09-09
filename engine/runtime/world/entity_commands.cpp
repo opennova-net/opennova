@@ -105,9 +105,12 @@ bool EntityCommands::ssn_critical(EntityTarget ssn) const {
 // seated-in, emplacement-child-of and standing-on alike: both infantry movers
 // copy parentEntity (+0x16C) into it every tick while seated [orig:
 // Entity_UpdateInfantryPlayerBody @0x4B41A2..0x4B41B4; Entity_UpdateInfantryAI
-// @0x4B9960..0x4B9A11], an emplacement child carries its hull there [orig:
-// Entity_UpdateChildAttachment @0x4409A0], and the ground probe stores a
-// deck-stander's carrier [orig: @0x414370]. Our model splits those into
+// @0x4B9960..0x4B9A11], an emplacement child's word is READ as the hull by
+// Entity_UpdateChildAttachment @0x4409A0 (@0x4409c6 / @0x4409d6; the
+// host-side attach-time writer is unwitnessed, a joiner takes the word from
+// the full-spawn record [orig: NapiNPClientMsg_FullEntitySpawn @0x433cdd]),
+// and the ground probe stores a deck-stander's carrier [orig: @0x414370]. Our
+// model splits those into
 // mount_target / emplacement_parent / ground_target, so every +0x28 hop
 // re-folds them in that order.
 static const Entity *carrier_of(const EntityRegistry &registry, const Entity &e) {

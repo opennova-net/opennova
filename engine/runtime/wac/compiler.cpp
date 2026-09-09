@@ -4,13 +4,16 @@
 
 #include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
+#include <optional>
 #include <string>
 
 #include <formats/wac/bytecode.h>
 #include <formats/wac/command.h>
 #include <formats/wac/lexer.h>
 #include <formats/wac/parser.h>
+#include <runtime/world/entity_commands.h>
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/facial_animation.h>
@@ -180,8 +183,34 @@ private:
         return encode_operand(OperandKind::Builtin, static_cast<uint32_t>(Builtin::Scratch));
     }
 
-    // Resolve an argument to an operand reference word. [orig: WacScript_ResolveParameter.]
+    // Resolve an argument to an operand reference word, or the scratch sink
+    // plus the signature diagnostic when the resolver's answer is NULL.
     uint32_t resolve(const Arg &arg, ParamType type, int line, const CommandDef *def = nullptr) {
+        if (const std::optional<uint32_t> ref = try_resolve(arg, type, line)) return *ref;
+        return unresolved_argument(def, line);
+    }
+
+    // [orig: WacScript_ResolveParameter @0x4f2920, the SSN leg
+    //  @0x4f2c94..0x4f2eed] The SSN leg takes every token an Ssn slot receives
+    // (expectedType 11) and every SSN_-prefixed token: atol (0 for a name, or
+    // a quoted token, whose buffer keeps its quote @0x4f3338) ->
+    // EntityPool_FindByNetId; a 0xFFFF miss logs "Unknown SSN"
+    // (Script_SetCompileError @0x4f2edf) and the handle still lands in the
+    // operand pool, so an Ssn slot is never the NULL leg. The port binds the
+    // net id when the VM first meets its world (WacVm::execute) and asks the
+    // compile-time registry, when the embedder passes one, the question
+    // retail's pool answered; the script-facing player alias has no entity
+    // net id (EntityCommands::resolve_ssn) and is exempt.
+    uint32_t ssn_operand(int32_t net, int line) {
+        if (env_.registry != nullptr && uint16_t(net) != world::EntityCommands::kLocalPlayerSsn &&
+                !env_.registry->find_by_net_id(uint16_t(net)).valid())
+            warn(line, "Unknown SSN");
+        return encode_operand(OperandKind::EntitySsn, push_pool(net));
+    }
+
+    // The resolver proper; std::nullopt is retail's NULL return.
+    // [orig: WacScript_ResolveParameter @0x4f2920]
+    std::optional<uint32_t> try_resolve(const Arg &arg, ParamType type, int line) {
         const std::string &t = arg.text;
 
         // Declarations occupy the second half of the shared mission bank.
@@ -196,7 +225,7 @@ private:
                 if (type == ParamType::IfName)
                     return encode_operand(OperandKind::Pool, push_pool(int32_t(i)));
                 // An event name is NULL for expectedType 27. [orig: @0x4f2a5e]
-                if (type == ParamType::Variable) return unresolved_argument(def, line);
+                if (type == ParamType::Variable) return std::nullopt;
                 return encode_operand(OperandKind::EventFired, uint32_t(i));
             }
         }
@@ -206,10 +235,10 @@ private:
         }
         // A quoted token matches no table or prefix, and expectedType 27 then
         // resolves to NULL. [orig: @0x4f2b7e]
-        if (arg.is_string && type == ParamType::Variable) return unresolved_argument(def, line);
+        if (arg.is_string && type == ParamType::Variable) return std::nullopt;
 
         // String / symbolic-asset params -> string pool, referenced as a pool value.
-        bool string_like = (arg.is_string && type != ParamType::Group && type != ParamType::Anim && type != ParamType::Ammo && type != ParamType::Fx && type != ParamType::SoundSet && type != ParamType::Face) || type == ParamType::Text ||
+        bool string_like = (arg.is_string && type != ParamType::Group && type != ParamType::Anim && type != ParamType::Ammo && type != ParamType::Fx && type != ParamType::SoundSet && type != ParamType::Face && type != ParamType::Ssn) || type == ParamType::Text ||
                            type == ParamType::Filename ||
                            type == ParamType::TextToken;
         if (string_like) {
@@ -244,7 +273,7 @@ private:
             // [orig: @0x4f2b7e], the compile error + scratch-sink pair.
             if (named_value >= 0)
                 return encode_operand(OperandKind::Builtin, static_cast<uint32_t>(named_value));
-            return unresolved_argument(def, line);
+            return std::nullopt;
         }
 
         // Named engine values (health/ticks/humans/accuracyspread/...).
@@ -335,12 +364,6 @@ private:
             return encode_operand(OperandKind::Pool, push_pool(si));
         }
 
-        // Entity SSN constants bind once when the VM first receives its World.
-        // Subsequent reads and variable aliases carry the packed entity handle.
-        if (starts_with_ci(t, "SSN_")) {
-            int net = std::atoi(t.c_str() + 4);
-            return encode_operand(OperandKind::EntitySsn, push_pool(net));
-        }
         // [orig: WacScript_ResolveParameter @0x4F2940] Named WAC groups
         // never select entities by their BMS commandGroup field.
         if (starts_with_ci(t, "G_") || type == ParamType::Group) {
@@ -349,6 +372,17 @@ private:
                     : world::EntityRegistry::default_script_group_index(name);
             if (group < 0) { warn(line, "unknown group '" + std::string(name) + "'"); group = 0; }
             return encode_operand(OperandKind::Pool, push_pool(group));
+        }
+
+        // Entity SSN constants bind once when the VM first receives its World;
+        // subsequent reads and variable aliases carry the packed entity handle.
+        // The leg sits after the G_ / group test and before the numeric forms,
+        // as in retail [orig: @0x4f2c94..0x4f2ca4]; a quoted token reads 0.
+        const bool ssn_prefix = starts_with_ci(t, "SSN_");
+        if (ssn_prefix || type == ParamType::Ssn) {
+            int32_t net = arg.is_string ? 0 : std::atoi(t.c_str() + (ssn_prefix ? 4 : 0));
+            if (arg.negate) net = -net;
+            return ssn_operand(net, line);
         }
 
         // HH:MM time literal.
@@ -380,13 +414,17 @@ private:
             if (std::isfinite(d) && d >= -9223372036854775808.0 &&
                     d < 9223372036854775808.0)
                 value = static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(d)));
-            return encode_operand(type == ParamType::Ssn ? OperandKind::EntitySsn : OperandKind::Pool,
-                                  push_pool(value));
+            return encode_operand(OperandKind::Pool, push_pool(value));
         }
 
         // A token that matches no table, prefix or numeric form resolves to
         // NULL [orig: @0x4f2a62], the compile error + scratch-sink pair.
-        return unresolved_argument(def, line);
+        return std::nullopt;
+    }
+
+    void emit_call_word(int idx, Op fold, bool negate, const Call &call) {
+        prog_.instruction_sources.push_back({static_cast<uint32_t>(prog_.code.size()), call.source_index, call.line});
+        emit(encode_call(static_cast<uint16_t>(idx), fold, /*push=*/false, negate));
     }
 
     // Emit a single command call (condition leaf or action). `fold` controls how
@@ -402,15 +440,65 @@ private:
             return;
         }
         const CommandDef &def = wac_commands()[idx];
-        prog_.instruction_sources.push_back({static_cast<uint32_t>(prog_.code.size()), call.source_index, call.line});
-        emit(encode_call(static_cast<uint16_t>(idx), fold, /*push=*/false, negate));
-        for (int i = 0; i < def.argc; ++i) {
-            ParamType pt = def.params[i];
-            if (i < static_cast<int>(call.args.size())) {
-                emit(resolve(call.args[i], pt, call.line, &def));
-            } else {
+        emit_call_word(idx, fold, negate, call);
+        // Retail's argument loop owns ONE token buffer. A token the resolver
+        // binds fills the slot and the tokenizer reads the next token
+        // [orig: Script_Compile @0x4f3af2..0x4f3afd -> loc_4F32E0]; a token it
+        // returns NULL for fills the slot with the scratch sink and re-enters
+        // the loop with the SAME token [orig: @0x4f3ab2..0x4f3aed ->
+        // loc_4F3990], which the next slot's expected type re-classifies
+        // [orig: @0x4f3a71..0x4f3aaa]. The source cursor and the slot index
+        // therefore move apart, and the tokens left once the slots are full
+        // are statement-level tokens [orig: @0x4f3a76 -> loc_4F3B02].
+        size_t cursor = 0;
+        for (int slot = 0; slot < def.argc; ++slot) {
+            if (cursor >= call.args.size()) {
                 emit(encode_operand(OperandKind::Pool, push_pool(0)));
+                continue;
             }
+            const std::optional<uint32_t> ref = try_resolve(call.args[cursor], def.params[slot], call.line);
+            if (ref) {
+                emit(*ref);
+                ++cursor;
+            } else {
+                emit(unresolved_argument(&def, call.line));
+            }
+        }
+        stray_arguments(call, cursor);
+    }
+
+    // The statement-level classification of the tokens left over once a
+    // call's slots are full [orig: Script_Compile's keyword default]: the
+    // token is resolved as a bare value with expectedType 1
+    // (@0x4f50f5..0x4f5108) and, with no `=` following (@0x4f511a), rewritten
+    // to `load` (@0x4f5124..0x4f5136), whose CALL word takes the already
+    // cleared operator state, an assign of the accumulator
+    // (@0x4f5321..0x4f533d), and the value as its inline operand (@0x4f533f);
+    // a token that is NULL there walks the action table (@0x4f5252..0x4f5282)
+    // and starts a new call fed by the tokens after it; a token matching
+    // nothing is the first-error "Unknown '<token>'" (@0x4f5293) and the
+    // tokenizer moves on with nothing emitted (@0x4f52b4). A quoted token
+    // keeps its quote in retail's buffer (@0x4f3338), so nothing matches it.
+    void stray_arguments(const Call &call, size_t cursor) {
+        while (cursor < call.args.size()) {
+            const Arg &arg = call.args[cursor++];
+            if (!arg.is_string) {
+                if (const std::optional<uint32_t> ref = try_resolve(arg, ParamType::Value, call.line)) {
+                    emit_call_word(wac_command_index("load"), Op::Call, false, call);
+                    emit(*ref);
+                    continue;
+                }
+                if (wac_command_index(arg.text) >= 0) {
+                    Call rest;
+                    rest.name = arg.text;
+                    rest.args.assign(call.args.begin() + static_cast<std::ptrdiff_t>(cursor), call.args.end());
+                    rest.line = call.line;
+                    rest.source_index = call.source_index;
+                    emit_call(std::move(rest), Op::Call, false);
+                    return;
+                }
+            }
+            warn(call.line, "Unknown '" + arg.text + "'");
         }
     }
 

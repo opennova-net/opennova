@@ -1442,9 +1442,12 @@ static void test_player_values_cache_at_bytecode_entry() {
 
 // Every row of the named-value table is an lvalue, and a token the resolver
 // cannot bind is a logged compile diagnostic (the program still runs) whose
-// operand is the shared scratch sink (zeroed at each bytecode entry), never V0.
+// operand is the shared scratch sink (zeroed at each bytecode entry), never V0;
+// the same token then feeds the next slot, and the tokens left over are
+// statement-level tokens (a value becomes load, anything else Unknown).
 // [orig: WacScript_ResolveParameter @0x4f2a92..0x4f2a9f / @0x4f2a5e /
-//  @0x4f2b7e / @0x4f2a62; Script_Compile @0x4f3ab2..0x4f3ae2;
+//  @0x4f2b7e / @0x4f2a62; Script_Compile @0x4f3ab2..0x4f3ae2 -> loc_4F3990
+//  @0x4f3a71, the statement default @0x4f5108 / @0x4f5124 / @0x4f5293;
 //  WacScript_CacheLocalPlayerState @0x4f57b5]
 static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
     BehaviorWorld w;
@@ -1476,41 +1479,135 @@ static void test_named_rows_are_lvalues_and_unresolved_arguments_sink() {
 
     // Unresolvable lvalues and values: the diagnostic is the retail action
     // signature (Script_SetCompileError's first-error buffer, which only the
-    // script debug overlay shows; the program compiles and runs), and
-    // neither V0 nor the guarded variable moves.
+    // script debug overlay shows; the program compiles and runs), the slot
+    // takes the scratch sink and the SAME token feeds the next slot [orig:
+    // Script_Compile @0x4f3ab2..0x4f3aed -> loc_4F3990 @0x4f3a71], so neither
+    // V0 nor the guarded variable moves. Every diagnostic is non-fatal and the
+    // first is the signature; the re-feed logs it once per slot the token
+    // fails and the stray tokens add their own, so the count is not pinned.
     const char *sources[] = {
         "set(5,1)\n", "set(nosuchname,1)\n", "set(\"v1\",1)\n",
         "if [root] eq(1,2) then set(v9,1) endif\nset(root,1)\n",
-        "set(v1,nosuchname)\n", "if eq(nosuchname,1) then set(v9,1) endif\n",
+        "set(v1,nosuchname)\n",
         "if SSNexists(1) then set(v1,notaname) endif\n"};
     for (const char *source : sources) {
         BehaviorWorld sink;
         Program bad = compile_source(source, {});
         CHECK(bad.ok());
-        CHECK(bad.diagnostics.size() == 1 && !bad.diagnostics[0].error);
+        CHECK(!bad.diagnostics.empty());
+        for (const Diagnostic &d : bad.diagnostics) CHECK(!d.error);
         WacVm bad_vm; bad_vm.load(bad); bad_vm.execute(sink);
         CHECK(sink.script.vars.get_mission(0) == 0);
         CHECK(sink.script.vars.get_mission(1) == 0);
         CHECK(sink.script.vars.get_mission(9) == 0);
     }
     Program bad = compile_source("set(nosuchname,1)\n", {});
-    CHECK(bad.diagnostics.size() == 1 && bad.diagnostics[0].message == "  set (variable, value)");
-    bad = compile_source("if eq(nosuchname,1) then set(v9,1) endif\n", {});
-    CHECK(bad.diagnostics.size() == 1 && bad.diagnostics[0].message == "  eq (number, number)");
-
-    // The sink is one shared scratch word: a write reads back within the
-    // execution, and the next bytecode entry clears it.
+    CHECK(!bad.diagnostics.empty() && bad.diagnostics[0].message == "  set (variable, value)");
+    // A leftover the statement level cannot classify is "Unknown '<token>'"
+    // [orig: Script_Compile @0x4f5293]; nothing is emitted for it.
+    bad = compile_source("set(v1,nosuchname)\n", {});
+    CHECK(!bad.diagnostics.empty() && bad.diagnostics[0].message == "  set (variable, value)");
+    CHECK(bad.diagnostics.back().message == "Unknown 'nosuchname'");
+    // The sink is one shared scratch word. set(nosuchname,6) re-feeds the
+    // name into the value slot too (SET scratch,scratch; the 6 is a stray
+    // load), so only its own zero ever reaches it and v2 reads 0 on every
+    // execution.
     Program scratch = compile_source(
         "set(v1,nosuchname) set(nosuchname,6) set(v2,othername)\n", {});
-    CHECK(scratch.ok() && scratch.diagnostics.size() == 3);
+    CHECK(scratch.ok() && !scratch.diagnostics.empty());
     BehaviorWorld shared;
     WacVm scratch_vm; scratch_vm.load(scratch);
     scratch_vm.execute(shared);
-    CHECK(shared.script.vars.get_mission(1) == 0 && shared.script.vars.get_mission(2) == 6);
+    CHECK(shared.script.vars.get_mission(1) == 0 && shared.script.vars.get_mission(2) == 0);
     shared.script.vars.set_mission(1, -1);
+    shared.script.vars.set_mission(2, -1);
     scratch_vm.execute(shared);
-    CHECK(shared.script.vars.get_mission(1) == 0 && shared.script.vars.get_mission(2) == 6);
+    CHECK(shared.script.vars.get_mission(1) == 0 && shared.script.vars.get_mission(2) == 0);
     CHECK(shared.script.vars.get_mission(0) == 0);
+}
+
+// The re-feed's observable outcomes. World is a large object and MSVC sizes a
+// frame for every local at entry, so these fixtures live in their own
+// function rather than beside the named-row ones.
+// [orig: Script_Compile @0x4f3ab2..0x4f3aed -> loc_4F3990 @0x4f3a71; the
+//  stray load @0x4f5124 / @0x4f5321..0x4f533d]
+static void test_refed_tokens_and_stray_loads() {
+    // The name fills BOTH eq slots with the sink, so EQ is true, and the
+    // stray literal becomes load(1): the accumulator stays 1 and the body runs...
+    Program refed_program = compile_source("if eq(nosuchname,1) then set(v9,1) endif\n", {});
+    CHECK(refed_program.ok() && !refed_program.diagnostics.empty());
+    CHECK(refed_program.diagnostics[0].message == "  eq (number, number)");
+    BehaviorWorld refed;
+    WacVm refed_vm; refed_vm.load(refed_program); refed_vm.execute(refed);
+    CHECK(refed.script.vars.get_mission(9) == 1);
+    // ...while a stray 0 loads over the true comparison and the body stays cold.
+    Program stray = compile_source("if eq(nosuchname,0) then set(v9,1) endif\n", {});
+    CHECK(stray.ok() && !stray.diagnostics.empty() && stray.diagnostics[0].message == "  eq (number, number)");
+    BehaviorWorld cold;
+    WacVm stray_vm; stray_vm.load(stray); stray_vm.execute(cold);
+    CHECK(cold.script.vars.get_mission(9) == 0);
+    // A literal re-fed from the variable slot into the value slot DOES write
+    // the sink word (SET scratch,5): it reads back within the execution, and
+    // the next bytecode entry clears it before the first read.
+    Program written = compile_source("set(v3,othername) set(5,6) set(v2,othername)\n", {});
+    CHECK(written.ok());
+    BehaviorWorld word;
+    WacVm written_vm; written_vm.load(written);
+    written_vm.execute(word);
+    CHECK(word.script.vars.get_mission(3) == 0 && word.script.vars.get_mission(2) == 5);
+    word.script.vars.set_mission(2, -1);
+    written_vm.execute(word);
+    CHECK(word.script.vars.get_mission(3) == 0 && word.script.vars.get_mission(2) == 5);
+    CHECK(word.script.vars.get_mission(0) == 0);
+}
+
+// An Ssn slot never takes the scratch sink: retail's SSN leg atol's the token
+// (0 for a name or a quoted token), looks the net id up and keeps the handle,
+// logging "Unknown SSN" on a miss. The port binds at the first execution and
+// asks the compile-time registry, when one is given, the same question.
+// [orig: WacScript_ResolveParameter @0x4f2c94..0x4f2eed; Script_SetCompileError
+//  @0x4f2edf; Script_Compile's token buffer keeps the quote @0x4f3338]
+static void test_ssn_slot_binds_unknown_tokens_like_net_id_zero() {
+    // No net-id-0 entity: the name binds to 0xFFFF and the compile-time
+    // registry logs the miss, non-fatally, ahead of the value-slot signature.
+    BehaviorWorld w;
+    Entity e; e.net_id = 7; e.item_id = 1; e.alive = true;
+    w.registry.spawn(0, e);
+    CompileEnv env; env.registry = &w.registry;
+    Program program = compile_source(
+        "if SSNexists(nosuchssn) then set(v1,1) endif\n"
+        "if SSNexists(7) then set(v2,1) endif\n"
+        "if SSNexists(\"7\") then set(v4,1) endif\n"
+        "set(v3,nosuchssn)\n", env);
+    CHECK(program.ok());
+    CHECK(program.diagnostics.size() >= 3);
+    CHECK(program.diagnostics[0].message == "Unknown SSN" && !program.diagnostics[0].error);
+    CHECK(program.diagnostics[1].message == "Unknown SSN");
+    CHECK(program.diagnostics[2].message == "  set (variable, value)");
+    WacVm vm; vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(1) == 0);
+    CHECK(w.script.vars.get_mission(2) == 1);
+    CHECK(w.script.vars.get_mission(4) == 0);
+    CHECK(w.script.vars.get_mission(3) == 0); // a value slot is still the sink
+    // A net-id-0 entity is what the name binds to, and the registry is silent.
+    BehaviorWorld zero;
+    Entity z; z.net_id = 0; z.item_id = 1; z.alive = true;
+    zero.registry.spawn(0, z);
+    CompileEnv zero_env; zero_env.registry = &zero.registry;
+    Program bound = compile_source(
+        "if SSNexists(nosuchssn) then set(v1,1) endif\n"
+        "if SSNexists(\"7\") then set(v4,1) endif\n", zero_env);
+    CHECK(bound.ok() && bound.diagnostics.empty());
+    WacVm bound_vm; bound_vm.load(bound); bound_vm.execute(zero);
+    CHECK(zero.script.vars.get_mission(1) == 1);
+    CHECK(zero.script.vars.get_mission(4) == 1);
+    // No compile-time registry: nothing to ask, so no diagnostic; the binding
+    // still waits for the world and misses there.
+    Program deferred = compile_source("if SSNexists(nosuchssn) then set(v1,1) endif\n", {});
+    CHECK(deferred.ok() && deferred.diagnostics.empty());
+    BehaviorWorld empty;
+    WacVm deferred_vm; deferred_vm.load(deferred); deferred_vm.execute(empty);
+    CHECK(empty.script.vars.get_mission(1) == 0);
 }
 
 static void test_outcome_cache_changes_on_next_execution() {
@@ -1574,6 +1671,8 @@ int main() {
     test_player_values_cache_at_bytecode_entry();
     test_outcome_cache_changes_on_next_execution();
     test_named_rows_are_lvalues_and_unresolved_arguments_sink();
+    test_refed_tokens_and_stray_loads();
+    test_ssn_slot_binds_unknown_tokens_like_net_id_zero();
     test_bms_event_query_reads_active_during_delay();
     test_distance_literals_and_lead_queries();
     test_script_ranges_drive_controller_and_perception();
