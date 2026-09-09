@@ -1561,6 +1561,55 @@ static void test_refed_tokens_and_stray_loads() {
     CHECK(word.script.vars.get_mission(0) == 0);
 }
 
+// A quoted token binds only in a Text/Filename slot: retail's buffer keeps
+// the opening quote, so a Number or Value slot's numeric test fails it into
+// the NULL leg [orig: Script_Compile @0x4f3338; WacScript_ResolveParameter
+// @0x4f2ce9 (17/18 only), @0x4f2d01 -> @0x4f2a62]. Both eq slots take the
+// sink, the quoted token is a stray "Unknown", and the bare literal loads over
+// the true comparison exactly as the unknown name does above. (A World is a
+// large stack object: no more than three per test function.)
+static void test_quoted_tokens_outside_text_slots_are_the_null_leg() {
+    Program quoted = compile_source("if eq(\"1\",1) then set(v9,1) endif\n", {});
+    CHECK(quoted.ok() && quoted.diagnostics.size() == 3);
+    CHECK(quoted.diagnostics[0].message == "  eq (number, number)");
+    CHECK(quoted.diagnostics[1].message == "  eq (number, number)");
+    CHECK(quoted.diagnostics[2].message == "Unknown '1'");
+    BehaviorWorld quoted_world;
+    WacVm quoted_vm; quoted_vm.load(quoted); quoted_vm.execute(quoted_world);
+    CHECK(quoted_world.script.vars.get_mission(9) == 1);
+    Program quoted_cold = compile_source("if eq(\"1\",0) then set(v9,1) endif\n", {});
+    BehaviorWorld quoted_cold_world;
+    WacVm quoted_cold_vm; quoted_cold_vm.load(quoted_cold); quoted_cold_vm.execute(quoted_cold_world);
+    CHECK(quoted_cold_world.script.vars.get_mission(9) == 0);
+    // A Value slot is no different: set(v3,"5") writes the sink's 0.
+    Program quoted_value = compile_source("set(v3,\"5\")\n", {});
+    CHECK(quoted_value.ok() && quoted_value.diagnostics.size() == 2);
+    CHECK(quoted_value.diagnostics[0].message == "  set (variable, value)");
+    CHECK(quoted_value.diagnostics[1].message == "Unknown '5'");
+    BehaviorWorld quoted_value_world;
+    quoted_value_world.script.vars.set_mission(3, 7);
+    WacVm quoted_value_vm; quoted_value_vm.load(quoted_value); quoted_value_vm.execute(quoted_value_world);
+    CHECK(quoted_value_world.script.vars.get_mission(3) == 0);
+}
+
+// An IfName token naming no event misses retail's table 1 and falls through
+// every leg to the NULL return [orig: WacScript_ResolveParameter @0x4f29c2 ->
+// loc_4F29C4 .. @0x4f2a62]: reset's slot takes the sink, the token is a stray
+// "Unknown", and at execution reset(0) clears event 0's history
+// [orig: WacCmd_Reset @0x4ED300], so `never` fires every execution.
+static void test_unknown_ifname_token_sinks_to_event_zero() {
+    Program unknown_event = compile_source(
+        "if never then inc(v1) endif\n"
+        "reset(nosuchevent)\n", {});
+    CHECK(unknown_event.ok() && unknown_event.diagnostics.size() == 2);
+    CHECK(unknown_event.diagnostics[0].message == "  reset (ifname)");
+    CHECK(unknown_event.diagnostics[1].message == "Unknown 'nosuchevent'");
+    BehaviorWorld reset_world;
+    WacVm reset_vm; reset_vm.load(unknown_event);
+    for (int i = 0; i < 3; ++i) reset_vm.execute(reset_world);
+    CHECK(reset_world.script.vars.get_mission(1) == 3);
+}
+
 // An Ssn slot never takes the scratch sink: retail's SSN leg atol's the token
 // (0 for a name or a quoted token), looks the net id up and keeps the handle,
 // logging "Unknown SSN" on a miss. The port binds at the first execution and
@@ -1608,6 +1657,34 @@ static void test_ssn_slot_binds_unknown_tokens_like_net_id_zero() {
     BehaviorWorld empty;
     WacVm deferred_vm; deferred_vm.load(deferred); deferred_vm.execute(empty);
     CHECK(empty.script.vars.get_mission(1) == 0);
+}
+
+// Retail tests the SSN leg (expectedType 11 / SSN_) before the AMMO leg
+// (23 / AMMO_) [orig: WacScript_ResolveParameter @0x4f2c94 before @0x4f2cc5]:
+// an AMMO_ token in an Ssn slot is atol'd to net id 0 and looked up, and an
+// SSN_ token in an Ammo slot is the SSN leg's, never AMMO's. Both miss an
+// empty registry with the leg's own "Unknown SSN" and bind silently once the
+// net ids exist.
+static void test_ssn_leg_precedes_ammo_leg() {
+    BehaviorWorld w;
+    CompileEnv env; env.registry = &w.registry;
+    Program program = compile_source(
+        "if SSNexists(AMMO_nosuch) then set(v1,1) endif\n"
+        "ammorain(SSN_7)\n", env);
+    CHECK(program.ok());
+    CHECK(program.diagnostics.size() == 2);
+    CHECK(program.diagnostics[0].message == "Unknown SSN" && !program.diagnostics[0].error);
+    CHECK(program.diagnostics[1].message == "Unknown SSN" && !program.diagnostics[1].error);
+    BehaviorWorld bound;
+    Entity zero; zero.net_id = 0; zero.item_id = 1; zero.alive = true;
+    Entity seven; seven.net_id = 7; seven.item_id = 1; seven.alive = true;
+    bound.registry.spawn(0, zero);
+    bound.registry.spawn(0, seven);
+    CompileEnv bound_env; bound_env.registry = &bound.registry;
+    Program bound_program = compile_source(
+        "if SSNexists(AMMO_nosuch) then set(v1,1) endif\n"
+        "ammorain(SSN_7)\n", bound_env);
+    CHECK(bound_program.ok() && bound_program.diagnostics.empty());
 }
 
 static void test_outcome_cache_changes_on_next_execution() {
@@ -1672,7 +1749,10 @@ int main() {
     test_outcome_cache_changes_on_next_execution();
     test_named_rows_are_lvalues_and_unresolved_arguments_sink();
     test_refed_tokens_and_stray_loads();
+    test_quoted_tokens_outside_text_slots_are_the_null_leg();
+    test_unknown_ifname_token_sinks_to_event_zero();
     test_ssn_slot_binds_unknown_tokens_like_net_id_zero();
+    test_ssn_leg_precedes_ammo_leg();
     test_bms_event_query_reads_active_during_delay();
     test_distance_literals_and_lead_queries();
     test_script_ranges_drive_controller_and_perception();

@@ -35,13 +35,22 @@ static constexpr double kMountRadius = 20.0;
 // NapiNPServer_SendFiltered(..., 0x23, ...) @0x4f5e74 / @0x4f5ed1].
 // ----------------------------------------------------------------------------
 
-// Script SSN -> entity handle, with the retail PLAYER mapping. Mission scripts
-// (WAC SSN* commands + BMS Single triggers/actions) address the local player as
-// SSN 10000 — retail player entities carry 10000+slot as their net id, so
-// EntityPool_FindByNetId @0x4f0a20 resolves them like any SSN. Our player
-// entities deliberately carry net_id 0 (the wire is handle-based), so this
-// script seam restores the mapping; MP joiner SSNs (10001+) wait on the net
-// track. [orig: dfx2med player-slot SSN convention; EntityPool_FindByNetId]
+// Script SSN -> entity handle. Mission scripts (WAC SSN* commands + BMS Single
+// triggers/actions) written under the dfx2med authoring convention address the
+// local player as SSN 10000 (10000 + player slot). The kLocalPlayerSsn alias
+// below is a port seam that honours that convention; it is not a retail
+// lookup. Retail JO has no alias: its SSN leg is atol(token) ->
+// EntityPool_FindByNetId @0x4f0a20, which keys on GamePlayerEntity+0x7C
+// (DcbId, low 16 bits; pools 0..3, no netId gate), and the JO player spawn
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43c390] memsets the record and
+// writes only +0x78 (ownerConnectionId) and +0x15c (NetId, the minimap slot
+// id), never DcbId@0x7C or Ssn@0x2e. A retail lookup of 10000 therefore
+// misses every player and the compiler reports "Unknown SSN" unless an
+// authored entity carries that DcbId (docs/net/novaworld-net-re.md, the
+// field-identity grill). Our player entities carry net_id 0 (the wire is
+// handle-based), and this seam resolves the authoring convention in their
+// place; MP joiner SSNs (10001+) wait on the net track.
+// [orig: EntityPool_FindByNetId @0x4f0a20; Entity_SpawnFromAnimSlotProperty @0x43c390]
 EntityHandle EntityCommands::resolve_ssn(uint16_t ssn) const {
     if (ssn == kLocalPlayerSsn && world_.cached.local_player.valid())
         return world_.cached.local_player;
