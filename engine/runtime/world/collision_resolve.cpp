@@ -61,7 +61,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     if (vel_z > 0 || vel_z < -420) full_update = true;
     if (abs32(pos[0] - state.prev_pos[0]) > 200 || abs32(pos[1] - state.prev_pos[1]) > 200)
         full_update = true;
-    if (ent != nullptr && (ent->flags & kEntityFlagInAir) != 0) full_update = true; // [orig: @ 0x4b2ca6]
+    // The registry pair is the one retail Flags word; the infantry motors set
+    // the bit at their jump / fall edges and clear it on landing.
+    if (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagInAir) != 0)
+        full_update = true; // [orig: @ 0x4b2ca6]
     // The replica row's flags mirror serves the same discriminant.
     if (replica_flags_ != nullptr && (*replica_flags_ & kEntityFlagInAir) != 0) full_update = true;
     if ((tick & 0x3Fu) == 0) full_update = true;
@@ -308,6 +311,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     // velocity, on both contact passes; this is not a swim gate.
                     // Equal horizontal/vertical force takes the -83 path, which
                     // may cross below -167 before the next contact's guard.
+                    // The bit is read from the registry pair, which the
+                    // infantry motors write at their jump / fall edges, so a
+                    // local body presents it the same way a wire-driven one does.
                     // [orig: @0x4B304C..0x4B3092; @0x4B365F..0x4B36A5]
                     const uint32_t flags =
                         (ent != nullptr ? ent->flags | ent->engine_flags : 0u) |

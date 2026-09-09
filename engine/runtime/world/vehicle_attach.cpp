@@ -127,6 +127,8 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
                 kEntityFlagMounted;
         // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775]
     }
+    // The infantry motor's copy of the 0x2000 bit follows the same scrub.
+    if (AiEntity *body = world.ai.for_handle(occ.handle)) body->inf.airborne = false;
     occ.mount_target = veh.handle;                 // [orig: parentEntity(0x16C) = vehicle]
     occ.mount_target_net_id = veh.net_id;
     occ.mount_target_bms_id = veh.bms_id;
