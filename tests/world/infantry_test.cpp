@@ -4018,70 +4018,128 @@ static void test_reselecting_current_state_arbitrates_player_but_skips_org1() {
     CHECK(body.inf.anim_pending == anim_state::kIdleCrouch);
 }
 
-// An aimed think clears the detour state byte ahead of the selector's detour
-// call: an approaching soldier steers at the enemy, never at a stale cached
-// side-step point. [orig: @0x4BCFDB, before the detour calls @0x4BD490..0x4BD5A4]
+// The detour-state clear rides the ATTACK-STANCE aim block only. Retail's two
+// aim blocks split on the anim's flag-table bits [data: g_animStateFlagsTable
+// @0x8139e8; no state carries both]: block 1 (flag 0x8; walk 1 = 0x449) writes
+// the aim and the walking-fire latch and never touches entity+0x369 [orig:
+// @0x4bc555..0x4bc948]; block 2 (flag 0x10; attack 155 = 0x14) is entered only
+// through the gate @0x4bc94c..0x4bc973 (aiFocus != self, !(Flags & 0x80000),
+// flag 0x10) and owns the re-face @0x4bcfa3..0x4bcfcf, the clear @0x4bcfdb and
+// the mode-7 tail @0x4bcfd5..0x4bcff5, all ahead of the selector's detour calls
+// @0x4bd490..0x4bd5a4.
 static void test_aimed_think_clears_stale_detour_state() {
-    World w;
-    w.registry.configure_pool(0, 16);
-    AiSystem &ai = w.ai;
-    TestSource src;
-    src.step = 0; // nobody walks: the bearings stay exact
-    src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
-                 anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};
-    ai.root_motion = &src;
-    auto make = [&](int idx, uint8_t team, int32_t x) {
-        Entity body{};
-        body.alive = true;
-        body.item_id = 1001;
-        body.item_type = 3;
-        body.kind = EntityKind::Organic;
-        body.health = 150;
-        body.team = team;
-        body.net_id = uint16_t(200 + idx);
-        body.position = {float(x) / 65536.0f, 0.0f, 0.0f};
-        const EntityHandle h = w.registry.spawn(0, body);
-        AiEntity *e = ai.at(ai.attach(h));
-        e->inf.active = true;
-        e->net_id = body.net_id; // the think key stagger: blue thinks at 12 mod 16, scans at 28 mod 32
-        e->team = team;
-        e->health = 150;
-        e->inf.max_health = 150;
-        e->pos[0] = x;
-        e->slot.f[15] = 65536;      // attack range 1 u -> the 2 u enemy is OUTSIDE
-        e->slot.f[16] = 32768;      // min-engage 0.5 u -> and beyond it, so: approach
-        e->slot.f[17] = 40 * 65536; // sight
-        return e;
-    };
-    AiEntity *red = make(0, 2, 2 * 65536); // due east of blue: bearing 0
-    AiEntity *blue = make(1, 1, 0);
-    red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body
-    // Blue walks a route south (moving on every think, so the no-goal clear
-    // @0x4BD2E9 never runs) around a cached detour point 10 u to the +Y side;
-    // its first think (tick 12) precedes its first perception scan (tick 28).
-    route(ai, blue, {node(0, -50 * 65536, 65536)}, 0);
-    blue->inf.path_state = 2;
-    blue->inf.detour_target[0] = 0;
-    blue->inf.detour_target[1] = 10 * 65536;
-    blue->inf.detour_target[2] = 0;
-    bool walked = false, checked = false;
-    for (uint32_t tick = 0; tick < 96 && !checked; ++tick) {
-        run_ticks(ai, w, tick, tick + 1);
-        if (blue->inf.move_mode == 3 && !blue->inf.combat_target.valid()) {
-            // The route think keeps steering at the cached point [orig: state 2
-            // reads the point @0x4AFAB0].
-            walked = true;
-            CHECK(blue->inf.path_state == 2 && blue->inf.target_heading == 0x40000000);
+    struct Rig {
+        World w;
+        TestSource src;
+        AiEntity *red = nullptr;
+        AiEntity *blue = nullptr;
+        Rig() {
+            w.registry.configure_pool(0, 16);
+            AiSystem &ai = w.ai;
+            src.step = 0; // nobody walks: the bearings stay exact
+            src.clips = {anim_state::kWalkForward, anim_state::kRunForward,
+                         anim_state::kIdle, anim_state::kIdle3, anim_state::kAttack};
+            ai.root_motion = &src;
+            auto make = [&](int idx, uint8_t team, int32_t x) {
+                Entity body{};
+                body.alive = true;
+                body.item_id = 1001;
+                body.item_type = 3;
+                body.kind = EntityKind::Organic;
+                body.health = 150;
+                body.team = team;
+                body.net_id = uint16_t(200 + idx);
+                body.position = {float(x) / 65536.0f, 0.0f, 0.0f};
+                const EntityHandle h = w.registry.spawn(0, body);
+                AiEntity *e = ai.at(ai.attach(h));
+                e->inf.active = true;
+                // The think key stagger (key = tick + 36 * net): blue thinks at
+                // 12 mod 16 and scans at 28 mod 32.
+                e->net_id = body.net_id;
+                e->team = team;
+                e->health = 150;
+                e->inf.max_health = 150;
+                e->pos[0] = x;
+                e->slot.f[15] = 65536;      // attack range 1 u -> the 2 u enemy is OUTSIDE
+                e->slot.f[16] = 32768;      // min-engage 0.5 u -> and beyond it, so: approach
+                e->slot.f[17] = 40 * 65536; // sight
+                return e;
+            };
+            red = make(0, 2, 2 * 65536); // due east of blue: bearing 0
+            blue = make(1, 1, 0);
+            red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body
+            // Blue walks a route south (moving on every think, so the no-goal
+            // clear @0x4BD2E9 never runs) around a cached detour point 10 u to
+            // the +Y side; its first think (tick 12) precedes its first
+            // perception scan (tick 28), which shares the tick-28 think.
+            route(ai, blue, {node(0, -50 * 65536, 65536)}, 0);
+            blue->inf.path_state = 2;
+            blue->inf.detour_target[0] = 0;
+            blue->inf.detour_target[1] = 10 * 65536;
+            blue->inf.detour_target[2] = 0;
         }
-        if (blue->inf.move_mode != 1) continue;
-        checked = true;
-        CHECK(blue->inf.combat_target == red->handle);
-        CHECK(blue->inf.aim_valid); // the aim block ran this think
-        CHECK(blue->inf.path_state == 0);
-        CHECK(blue->inf.target_heading == 0); // at the enemy, not 0x40000000 at the point
-        CHECK(blue->inf.detour_target[1] == 10 * 65536); // no search re-cached it
+        // Through the tick-12 route think: the detour steers at the cached
+        // point [orig: state 2 reads the point @0x4AFAB0]; the body heading
+        // (0) sits 90 deg off it, so the turn-in-place gate selects stop 147,
+        // which this source does not author, and the resolve falls back to
+        // idle 43 (flags 0x48) rather than walk 1 (0x449) -- either way a
+        // flag-0x8 state at the tick-28 think: block 1 only.
+        void walk_to_the_scan() {
+            run_ticks(w.ai, w, 0, 28);
+            CHECK(blue->inf.move_mode == 3 && !blue->inf.combat_target.valid());
+            CHECK(blue->inf.path_state == 2 && blue->inf.target_heading == 0x40000000);
+            CHECK((infantry_anim_flags(blue->inf.anim_state) & 0x18u) == 0x8u);
+        }
+        void aimed_think() {
+            run_ticks(w.ai, w, 28, 29);
+            CHECK(blue->inf.combat_target == red->handle);
+            CHECK(blue->inf.aim_valid);
+            CHECK(blue->inf.detour_target[1] == 10 * 65536); // no search re-cached it
+        }
+    };
+    {
+        // Block 1: the walking body (walk 1 carries flag 0x8 only) keeps its
+        // detour state through the aimed approach think, so the selector's
+        // detour call still steers it at the cached point.
+        Rig r;
+        r.walk_to_the_scan();
+        r.aimed_think();
+        CHECK(r.blue->inf.move_mode == 1);
+        CHECK(r.blue->inf.path_state == 2);
+        CHECK(r.blue->inf.target_heading == 0x40000000);
     }
-    CHECK(walked && checked);
+    {
+        // Block 2 with the approach: the attack clip (155 = 0x14) passes the
+        // flag-0x10 gate @0x4bc96b..0x4bc973; the clear @0x4bcfdb drops the cached
+        // point, so the same think's detour call steers straight at the enemy;
+        // the approach (mode 1) is exempt from the hold [orig: `cmp al, 1`
+        // @0x4bcfe4].
+        Rig r;
+        r.walk_to_the_scan();
+        r.blue->inf.anim_state = anim_state::kAttack;
+        r.aimed_think();
+        CHECK(r.blue->inf.move_mode == 1 && r.blue->inf.target_dist > 0);
+        CHECK(r.blue->inf.path_state == 0);
+        CHECK(r.blue->inf.target_heading == 0); // at the enemy, not 0x40000000 at the point
+    }
+    {
+        // Block 2 without the approach (min-engage == sight, so the approach
+        // arm never runs [orig: slot[16] < slot[17] @0x4bc2c5]): the route's
+        // mode 3 and the point heading reach the tail. The aim at the enemy
+        // (east) sits > 22 deg off the point heading (north): the re-face
+        // @0x4bcfbd..0x4bcfcf turns the body to the aim, and the hold
+        // @0x4bcfd5..0x4bcff5 collapses mode 3 to 7 with a zero goal distance.
+        Rig r;
+        r.blue->slot.f[16] = r.blue->slot.f[17];
+        r.walk_to_the_scan();
+        r.blue->inf.anim_state = anim_state::kAttack;
+        r.aimed_think();
+        CHECK(r.blue->inf.path_state == 0);
+        CHECK(r.blue->inf.target_heading == r.blue->inf.aim_heading);
+        CHECK(opennova::io::bam_abs(opennova::io::bam_sub(r.blue->inf.target_heading, 0x40000000)) >
+              262470208);
+        CHECK(r.blue->inf.move_mode == 7 && r.blue->inf.target_dist == 0);
+    }
 }
 
 // The self-attachment chase pulls toward the stamped S point, which no other
@@ -4120,7 +4178,7 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
     prop.yaw = 90;
     pose.carrier = w.registry.spawn(1, prop);
     w.pose_provider = &pose;
-    auto make = [&](int idx, uint8_t team, float x, float y) {
+    auto make = [&](int idx, uint8_t team, float x, float y, float z) {
         Entity body{};
         body.alive = true;
         body.item_id = 1001;
@@ -4129,7 +4187,7 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
         body.health = 150;
         body.team = team;
         body.net_id = uint16_t(200 + idx);
-        body.position = {x, y, 0.0f};
+        body.position = {x, y, z};
         const EntityHandle h = w.registry.spawn(0, body);
         AiEntity *e = w.ai.at(w.ai.attach(h));
         e->inf.active = true;
@@ -4138,13 +4196,14 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
         e->inf.max_health = 150;
         e->pos[0] = fx(x);
         e->pos[1] = fx(y);
+        e->pos[2] = fx(z);
         e->slot.f[15] = 65536;      // attack range 1 u
         e->slot.f[16] = 32768;      // min-engage 0.5 u
         e->slot.f[17] = 40 * 65536; // sight
         return e;
     };
-    AiEntity *self = make(0, 1, 30.0f, 30.0f); // standing on the S point
-    make(1, 2, 35.0f, 30.0f);                  // an enemy 5 u east, beyond attack range
+    AiEntity *self = make(0, 1, 30.0f, 30.0f, 0.0f); // standing on the S point
+    make(1, 2, 35.0f, 30.0f, 2.0f); // an enemy 5 u east and 2 u up, beyond attack range
     self = w.ai.at(0);
     const EntityHandle handle = self->handle;
     self->slot.f[37] = 125; // board SSN 77 [orig: slot+148 / +152]
@@ -4156,11 +4215,27 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
     CHECK(w.registry.get(handle)->attach_parent == handle);
     CHECK(self->inf.self_attach_point[0] == fx(30) && self->inf.self_attach_point[1] == fx(30));
     CHECK(self->inf.move_mode == 1 && self->inf.move_target[0] == fx(35));
+    // The approach goal Z is the enemy's Z [orig: rayEnd.Z @0x4bc302 ->
+    // entity+0x304 @0x4bd3f7]; the chase floors the body there.
+    CHECK(self->inf.move_target[2] == fx(2));
     CHECK(self->pos[0] == fx(30) && self->pos[1] == fx(30));
-    run_ticks(w.ai, w, 33, 48); // the chase runs every tick between thinks
+    // Knock the body 8 u east of the S point. Every tick between thinks the
+    // chase pulls X/Y an eighth of the way back [orig: @0x4bf636..0x4bf65f] and
+    // floors Z at the goal Z [orig: @0x4bf653..0x4bf664]; nothing else moves it
+    // (no root step, no terrain to resolve against).
+    self->pos[0] += fx(8);
+    int32_t x = self->pos[0];
+    for (uint32_t tick = 33; tick < 48; ++tick) {
+        const int32_t expected = opennova::io::bam_add(
+                x, opennova::io::bam_sar(opennova::io::bam_sub(fx(30), x), 3));
+        run_ticks(w.ai, w, tick, tick + 1);
+        CHECK(self->pos[0] == expected);
+        CHECK(self->pos[1] == fx(30));
+        CHECK(self->pos[2] >= fx(2));
+        x = self->pos[0];
+    }
     CHECK(w.registry.get(handle)->attach_parent == handle);
     CHECK(self->inf.move_mode == 1 && self->inf.move_target[0] == fx(35));
-    CHECK(self->pos[0] == fx(30) && self->pos[1] == fx(30));
     CHECK(w.ai.unported_calls == 0);
 }
 

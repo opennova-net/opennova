@@ -223,6 +223,10 @@ inline constexpr uint32_t kEntityFlagPriorityTarget = 0x4000; // set on every fi
                                                               // [orig: @0x4bf370 set; @0x4bbfa4 clear; §16.2 x6 scoring]
 inline constexpr uint32_t kEntityFlagDrowning = 0x8000;       // zeroes vertical swim input [orig: §7 movement]
 inline constexpr uint32_t kEntityFlagBuilding = 0x20000;      // [orig: Entity_InitFromModel @0x40e105]
+inline constexpr uint32_t kEntityFlagNoEngage = 0x80000;      // org1 combat think: skips the attack-stance aim
+                                                              // block [orig: @0x4bc958] and the reaction/approach
+                                                              // arm [orig: @0x4bc054, unported there]; the writer
+                                                              // is unwitnessed (world-wac-ai-re.md §17 open item 7)
 inline constexpr uint32_t kEntityFlagLadderContact = 0x100000; // CL/type-4 touch; locks upper-body pose + skips
                                                                // gravity while aligned [orig: @0x4b3291]
 inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;   // type-6 volume touch [orig: @0x4aea45]

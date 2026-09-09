@@ -221,6 +221,12 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     if (tent == nullptr) {
         if (inf.combat_move_timer > 0) --inf.combat_move_timer;
         inf.aim_valid = false;
+        // Unported here: the attack-stance aim block's no-target arm. Its gate
+        // [orig: @0x4bc94c..0x4bc973] carries no target term; with slot+12 empty
+        // the block skips the lead [orig: @0x4bca95 -> @0x4bcbeb], re-seats the
+        // aim point from savedLivePose for a carried body on tick byte 32
+        // [orig: @0x4bcbeb..0x4bccc1], solves toward the retained aim point and
+        // runs the same tail [orig: @0x4bcfa3..0x4bcff5].
         return selected_state;
     }
 
@@ -351,12 +357,40 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     }
 
     // --- The aim solution. [orig: §17.5 — lead + sawtooth error] ---
-    // Gate: an aim-capable anim (flag bits 0x8 moving-fire / 0x10 attack stance).
+    // Retail runs TWO aim blocks over the same lead + sawtooth math, keyed by the
+    // anim's g_animStateFlagsTable bits @0x8139e8 (no state carries both):
+    //   block 1 [orig: @0x4bc555..0x4bc948] on a flag-0x8 anim (the walks, the
+    //     plain idles 43/44): the aim writes, aimFlag @0x4bc894 and the
+    //     walking-fire latch; it never writes the detour byte +0x369;
+    //   block 2 [orig: @0x4bc94c..0x4bcff5] on a flag-0x10 anim (idle3 49, the
+    //     attack clips 155-158, emplaced 67-75): the aim writes, then the body
+    //     re-face, the detour-state clear and the mode-7 tail.
+    // Both are skipped while the focus entity is the body itself [orig:
+    // @0x4bc53d..0x4bc54f -> LABEL_584, re-tested @0x4bc94c..0x4bc952]; the aim
+    // heading is re-seated on the target heading ahead of the test
+    // [orig: @0x4bc543..0x4bc549].
+    inf.aim_heading = inf.target_heading;
+    const bool focus_is_self = inf.ai_focus == e.handle;
     const uint32_t sflags = infantry_anim_flags(inf.anim_state);
-    if ((sflags & 0x18u) == 0) {
+    // Block 1's gate [orig: @0x4bc555..0x4bc596]: the target (slot+12, held
+    // above) and flag 0x8. Its itemDef attrib 0x400 skip [orig: @0x4bc560..0x4bc56a]
+    // and its parentSlot 2/5 skip [orig: @0x4bc570..0x4bc582] are unported.
+    const bool moving_fire = !focus_is_self && (sflags & 0x8u) != 0;
+    // Block 2's gate [orig: @0x4bc94c..0x4bc973]: not self-focused, Flags
+    // 0x80000 clear [orig: @0x4bc958], flag 0x10 [orig: @0x4bc96b]. It has no
+    // target term; the no-target arm is named at the return above.
+    const Entity *self_entity = world.registry.get(e.handle);
+    const uint32_t self_flags = self_entity != nullptr
+            ? (self_entity->flags | self_entity->engine_flags) : 0u;
+    const bool attack_stance = !focus_is_self &&
+            (self_flags & kEntityFlagNoEngage) == 0 && (sflags & 0x10u) != 0;
+    if (!moving_fire && !attack_stance) {
         inf.aim_valid = false;
         return selected_state;
     }
+    // Block 2 re-arms the hold timer for a teamless (slot+4 & 8) body ahead of
+    // its aim writes. [orig: @0x4bca44..0x4bca76]
+    if (attack_stance && (slot.f[1] & 8) != 0) inf.combat_move_timer = slot.f[22] >> 4;
     // Lead the target by its per-tick delta x (dist/0x81074 + 1). The previous-position
     // sample lives in aim_point between think ticks [orig: target savedLivePose +0x80..].
     const int32_t lead = dist16 / 0x81074 + 1;
@@ -403,18 +437,31 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     inf.aim_pitch = static_cast<int32_t>(std::atan2(adz, horiz) * opennova::io::kBamPerRadian) + err_b;
     inf.aim_valid = true;
 
-    // Body re-face when the aim drifts far off the body. [orig: > 262470208 (~22 deg)]
-    if (opennova::io::bam_abs(opennova::io::bam_sub(inf.aim_heading, inf.target_heading)) > 262470208)
-        inf.target_heading = inf.aim_heading;
-    // Every aimed think clears the detour state before the selector's detour
-    // call, whether or not the re-face fired: an aimed approach walks straight
-    // at the enemy, never at a cached side-step point. [orig: @0x4BCFDB, ahead
-    // of the ai_find_cover_position calls @0x4BD490..0x4BD5A4]
-    inf.path_state = 0;
+    if (attack_stance) {
+        // Block 2's tail [orig: @0x4bcfa3..0x4bcff5]. The body re-face when the
+        // aim drifts far off the body (> 262470208, ~22 deg) [orig:
+        // @0x4bcfa3..0x4bcfcf]; the detour-state clear, whether or not the
+        // re-face fired, ahead of the selector's ai_find_cover_position calls
+        // [orig: @0x4bcfdb; the calls @0x4bd490..0x4bd5a4]: an attack-stance
+        // body walks straight at its enemy, never at a cached side-step point;
+        // then the hold: every move mode but the combat approach (1) and 5
+        // collapses to 7 with a zero goal distance [orig: @0x4bcfd5..0x4bcff5 —
+        // `cmp al, 5` @0x4bcfd9 and `cmp al, 1` @0x4bcfe4, the decompiler folds
+        // the 5 test].
+        if (opennova::io::bam_abs(opennova::io::bam_sub(inf.aim_heading, inf.target_heading)) > 262470208)
+            inf.target_heading = inf.aim_heading;
+        inf.path_state = 0;
+        if (inf.move_mode != 1 && inf.move_mode != 5) {
+            inf.move_mode = 7;
+            inf.target_dist = 0;
+        }
+        return selected_state;
+    }
 
-    // The walking-fire latch: muzzle within ~5 deg of the solution, inside the attack
-    // range, on the slot[22] cadence. [orig: §17.4 — shouldFireSecondary = 1;
-    // moveTimer = slot[22] >> 4; def attrib & 4 gate unmodeled]
+    // Block 1's walking-fire latch: muzzle within ~5 deg of the solution, inside
+    // the attack range, on the slot[22] cadence. [orig: §17.4, @0x4bc8fa..0x4bc946 —
+    // shouldFireSecondary = 1; moveTimer = slot[22] >> 4; the itemDef attrib 4
+    // gate @0x4bc930 unmodeled]
     if (opennova::io::bam_abs(opennova::io::bam_sub(inf.aim_heading, e.heading)) < 59652320 &&
         dist16 < slot.f[15] && inf.combat_move_timer < (slot.f[22] >> 5)) {
         inf.combat_move_timer = slot.f[22] >> 4;
