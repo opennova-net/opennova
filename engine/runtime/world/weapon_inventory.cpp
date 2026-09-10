@@ -245,6 +245,15 @@ void weapon_inventory_seed_pools(const WeaponTable &table, WeaponInventory &inv,
     }
 }
 
+void weapon_inventory_apply_authority_pools(const WeaponTable &table, WeaponInventory &inv,
+                                            const std::array<int32_t, 128> &pools) {
+    // [orig: NapiNPClientMsg_0x00F @ 0x42e324..0x42e34a copy loop, then the
+    //  recalc call @ 0x42e424]
+    const size_t count = inv.pools.size() < pools.size() ? inv.pools.size() : pools.size();
+    for (size_t i = 0; i < count; ++i) inv.pools[i] = pools[i];
+    weapon_inventory_recalc_clips(table, inv);
+}
+
 void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv) {
     // [orig: WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280 — return the clip to
     //  the pool, then draw one full clip clamped by what the pool affords. The

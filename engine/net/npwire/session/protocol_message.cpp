@@ -397,14 +397,18 @@ std::vector<uint32_t> build_session_missing_sequence_list(
 		return missing;
 	}
 
-	// The witnessed walk is bounded by the queue's HEAD node — the lowest queued
-	// sequence for our ordered map — not the highest: gaps between later queued
-	// packets are requested on a later pass, after the frontier advances.
-	// [orig: CNapiNPConnection_BuildMissingSeqList @0x6234b0 — the
-	//  `while (candidate < head_node->seq)` bound @0x623527]
-	const uint32_t first_queued = seq.queued_inbound.begin()->first;
+	// The witnessed walk is bounded by the queue's TAIL node — the HIGHEST queued
+	// sequence: every hole below it, including the gaps BETWEEN queued packets,
+	// is requested in this one pass (up to the sixteen-entry cap).
+	// [orig: CNapiNPConnection_BuildMissingSeqList @0x6234b0 — the tail link
+	//  `mov eax, [ebp+7A4h]` @0x623503 (the list at +0x7A0/+0x7A4/+0x7A8 is
+	//  head/tail/count: CNapiNPConnection_FindTimerByIdFromHead @0x621e18 walks
+	//  from +0x7A0, NapiNPProtocol_HandleSessionPacket @0x626c22 caps on +0x7A8);
+	//  the `while (candidate < tail_node->seq)` bound @0x623527. The earlier
+	//  head-bound reading here was a misread, re-witnessed 2026-09-10.]
+	const uint32_t last_queued = seq.queued_inbound.rbegin()->first;
 	for (uint32_t candidate = expected + 1;
-	     candidate < first_queued && missing.size() < SESSION_RESEND_LIST_MAX;
+	     candidate < last_queued && missing.size() < SESSION_RESEND_LIST_MAX;
 	     ++candidate) {
 		if (seq.queued_inbound.find(candidate) == seq.queued_inbound.end()) {
 			missing.push_back(candidate);

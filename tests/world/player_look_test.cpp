@@ -39,7 +39,10 @@ int main() {
         CHECK(pitch2 < 0);
     }
 
-    // --- sensitivity clamps to [1, 0x1FF] [orig: the mousescale adjust @ 0x49b19b].
+    // --- the setting is consumed RAW per frame: no clamp on this path [orig: the
+    //     `shl 11` @ 0x4996dd reads dword_24D207C as is; the [1, 0x1FF] range is the
+    //     +/- adjust's @ 0x49b19b, i.e. the writer's, and the profile apply
+    //     @ 0x55161e copies unclamped].
     {
         PlayerLookSettings lo, hi;
         lo.sensitivity = -50;
@@ -48,11 +51,12 @@ int main() {
         player_look_apply(yaw_lo, pitch, lo, 100, 0, 0, false);
         player_look_apply(yaw_hi, pitch, hi, 100, 0, 0, false);
         const int32_t want_lo = -static_cast<int32_t>(
-            static_cast<uint32_t>((100LL * (1 << 11) + 0x8000) >> 16) << 16);
+            static_cast<uint32_t>((100LL * (-50LL * 2048) + 0x8000) >> 16) << 16);
         const int32_t want_hi = -static_cast<int32_t>(
-            static_cast<uint32_t>((100LL * (0x1FFLL << 11) + 0x8000) >> 16) << 16);
+            static_cast<uint32_t>((100LL * (5000LL * 2048) + 0x8000) >> 16) << 16);
         CHECK(yaw_lo == want_lo);
         CHECK(yaw_hi == want_hi);
+        CHECK(yaw_lo > 0);  // a negative setting turns the other way, as retail would
     }
 
     // --- the scoped zoom reduction divides the scaled sens [orig: @ 0x499714 —

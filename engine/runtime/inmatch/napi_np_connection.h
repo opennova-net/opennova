@@ -237,7 +237,7 @@ struct SessionReplyState {
 	// Authority-side per-ammo-class pool table (serverPlayer+88664), written in
 	// full by S2C 0x0F after loadout acceptance. Indices are the weapon table's
 	// retail ammo-class ids; unused classes remain zero.
-	std::array<int32_t, 128> slot_type_scores{};
+	std::array<int32_t, 128> ammo_pools{};
 	// The last GRANTED 0x5A loadout body, retained for the deploy-release re-send: the retail
 	// deploy leg re-sends the player's loadout, and the client's 0x5A handler is the deploy
 	// UN-LATCHER — it resets dword_81474C (set by the 0x0E pick) on completion, which is what

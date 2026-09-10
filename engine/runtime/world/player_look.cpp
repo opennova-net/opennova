@@ -11,10 +11,13 @@ void player_look_apply(int32_t &yaw_bam, int32_t &pitch_bam, const PlayerLookSet
     // setting dword is 0]
     const int32_t dy = s.invert_y ? dy_px : -dy_px;
 
-    int32_t setting = s.sensitivity;
-    if (setting < kMouseSensitivityMin) setting = kMouseSensitivityMin;
-    if (setting > kMouseSensitivityMax) setting = kMouseSensitivityMax;
-    int64_t sens = static_cast<int64_t>(setting) << 11; // [orig: @ 0x4996dd]
+    // The setting dword is read RAW here — no clamp on the per-frame path. The
+    // [1, 0x1FF] range belongs to the 'mousescale' +/- adjust that WRITES the
+    // setting [orig: @0x49b19b-0x49b1b9]; the profile apply copies it unclamped
+    // [orig: apply_session_settings_to_globals @0x55161e]. (x2048 == the
+    // witnessed `shl 11` @0x4996dd, spelled as a multiply so a negative setting
+    // is defined arithmetic here too.)
+    int64_t sens = static_cast<int64_t>(s.sensitivity) * 2048; // [orig: @ 0x4996dd]
     // The scoped reduction: base sens divided by the CURRENT zoom magnification.
     // [orig: @ 0x499714 — sens = base / Player_GetClampedWeaponElevation()]
     if (scoped_zoom > 1) sens /= scoped_zoom;

@@ -158,7 +158,10 @@ Quat quat_normalize(Quat q);
 Quat quat_mul(Quat a, Quat b);
 Quat quat_inv(Quat q);          // conjugate of the normalized quat
 Vec3 quat_rotate(Quat q, Vec3 v);
-// Shortest-path slerp (lerp fast-path when near-parallel), mirrors Math_QuaternionSlerp @0x615e20.
+// Shortest-path slerp, the port of Math_QuaternionSlerp @0x615e20: the LINEAR path
+// (weights 1-t, t; no renormalization) whenever 1 - dot <= 0.01, the acos/sin
+// weights otherwise. Inputs are consumed as stored; the result is unit only on
+// the spherical path (the pose chain normalizes downstream).
 Quat quat_slerp(Quat a, Quat b, float t);
 // BAD channel quaternion (stored x, y, z, w) -> our w-first {w,x,y,z}, normalized
 // (a reorder only -- the engine consumes BAD quaternions natively, no axis swap).

@@ -12,7 +12,7 @@ static int failures = 0;
 
 int main() {
     replication::ClientReplicaPipeline pipeline;
-    std::vector<uint8_t> load(23 + kWorldStateScoreCount * 4 + 4);
+    std::vector<uint8_t> load(23 + kWorldStateAmmoPoolCount * 4 + 4);
     load[22] = 8;
     pipeline.apply(s2c::WORLD_STATE_LOAD, load);
     CHECK(pipeline.state().cease_fire);

@@ -1309,7 +1309,8 @@ public:
 	// scoped zoom reduction, (px*sens+0x8000)>>16 per axis; yaw wraps; pitch clamps
 	// +-80 deg with the up-limit +40 deg while prone. (engine: runtime/mission/mission_kernel.cpp)
 	void add_local_player_look(float p_dx_px, float p_dy_px);
-	// Mouse options: sensitivity [1,511], default 128; Y invert (flipmouse, default off).
+	// Mouse options: sensitivity (default 128; copied unclamped like the profile
+	// apply — the [1,511] range is the +/- adjust's); Y invert (flipmouse, default off).
 	// (engine: runtime/world/player_look.h)
 	void set_local_player_mouse(int p_sensitivity, bool p_invert_y);
 	// Stance SELECT request (0 stand / 1 crouch / 2 prone) — the 3-key semantics: each

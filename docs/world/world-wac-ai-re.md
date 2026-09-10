@@ -525,7 +525,13 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     in the retail image (full-image displacement sweep, 2026-07-13) — pool memory is
     zero-initialized, so the band is constantly 2. `player_body_select` bakes the 2 and
     records the thresholds here; if a sibling title (DFX/BHD) turns out to write +0x37C,
-    lift the term into a live field. `engine/runtime/world/infantry.cpp`.
+    lift the term into a live field. `engine/runtime/world/infantry.cpp`. The
+    promotion's fallthrough (re-witnessed from the disassembly 2026-09-10, corroborated
+    by the jo-c reconstruction): tier ≥ 2 tests `animMap[10] != animMap[0]` (run_3)
+    [orig: `@0x4b72f3-0x4b72f8`] and the ABSENT case `jz short loc_4B730A` lands on the
+    tier-1 arm's `animMap[9] != animMap[0]` (run_2) test [orig: `@0x4b730a-0x4b7311`],
+    so a body adm without run_3 runs at run_2; tier 1 tests run_2 only; tier 0 stays in
+    the walk. (A 2026-08-26 decompile reading removed that fallback; it is restored.)
   - **D-INF-17** lean producer gate legs unmodeled. The on-foot lean ramp skips on
     `Flags & 0x100020` (bit 5 + the on-ladder bit) and the prone roll-anim selection
     skips on `Flags & 0x112002`'s 0x10000/0x100000 legs [orig: `@0x4b7da2/@0x4b7322`];

@@ -1147,9 +1147,9 @@ bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &ou
 	out.pitch = c.i16();
 	out.roll  = c.i16();
 	out.game_flags = c.u8();
-	// Fixed 128-entry team-score table (loop fills [outTable, data) @ 0x42e324).
-	for (int i = 0; i < kWorldStateScoreCount; ++i)
-		out.team_scores[i] = int32_t(c.u32());
+	// Fixed 128-entry ammo-pool table (loop fills [g_localAmmoPools, data) @ 0x42e324).
+	for (int i = 0; i < kWorldStateAmmoPoolCount; ++i)
+		out.ammo_pools[i] = int32_t(c.u32());
 	out.waypoint_count = c.u16();
 	if (!c.ok) return false;
 	// Waypoint records ride the wire ONLY for a waypoint gametype — an off-wire

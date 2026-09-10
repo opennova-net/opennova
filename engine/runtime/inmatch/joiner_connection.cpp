@@ -1018,6 +1018,21 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// a spawn-zone host can still require C2S 0x0E to release its hold.
 			// [orig: NapiNPClientMsg_0x00F @0x42e2ed]
 			deployment_policy_seen_ = true;
+			// The authority's ammo-pool image rides the fixed span at body offset
+			// 23, ahead of the off-wire waypoint gate, so it reads without the
+			// gametype hint. Retail copies all 128 dwords into g_localAmmoPools
+			// (a short body reads zeros for the missing tail @0x42e337).
+			// [orig: @0x42e324..0x42e34a]
+			out.ammo_pools_set = true;
+			out.ammo_pools.fill(0);
+			for (size_t i = 0; i < out.ammo_pools.size(); ++i) {
+				const size_t at = 23u + i * 4u;
+				if (at + 4u > m.payload.size()) break;
+				const uint8_t *p = m.payload.data() + at;
+				out.ammo_pools[i] = static_cast<int32_t>(
+						uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
+						(uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24));
+			}
 		}
 	}
 	auto release_deployment = [&](bool deployment_complete) {

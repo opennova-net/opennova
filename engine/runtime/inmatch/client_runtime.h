@@ -502,6 +502,15 @@ public:
 	const WeaponLoadout &authoritative_loadout() const {
 		return authoritative_loadout_;
 	}
+	// The last S2C 0x0F ammo-pool image (the authority's serverPlayer+88664 copy
+	// retail lands in g_localAmmoPools) and its monotonic revision; the embedder
+	// applies it to the local inventory after the 0x5A slot rebuild.
+	uint64_t authoritative_ammo_pools_revision() const {
+		return authoritative_ammo_pools_revision_;
+	}
+	const std::array<int32_t, kWorldStateAmmoPoolCount> &authoritative_ammo_pools() const {
+		return authoritative_ammo_pools_;
+	}
 	uint32_t send_holdoff_countdown() const { return send_holdoff_countdown_; }
 	uint32_t send_holdoff_ticks() const { return send_holdoff_ticks_; }
 
@@ -565,6 +574,8 @@ private:
 	std::unordered_map<uint16_t, ZoneState> zone_states_;
 	WeaponLoadout authoritative_loadout_;
 	uint64_t authoritative_loadout_revision_ = 0;
+	std::array<int32_t, kWorldStateAmmoPoolCount> authoritative_ammo_pools_{};
+	uint64_t authoritative_ammo_pools_revision_ = 0;
 	bool deployed_ = false;
 	uint64_t deployment_release_revision_ = 0;
 	bool authoritative_spawn_released_ = false;

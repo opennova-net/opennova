@@ -778,20 +778,20 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
     // tier = pitch_tier + run_anim; the pitch tier reads entity+0x37C, which has NO
     // writer in the retail image (zero-initialized pool memory), so it contributes
     // the constant 2 (0 <= 0 < 0x210000 band; thresholds recorded in the RE doc,
-    // tier 1 -> run_2 if authored; tier >= 2 -> run_3 if authored, and NOTHING
-    // otherwise: the tier>=2 arm tests ONLY run_3 -- a body adm without run_3
-    // stays in the walk (no run_2 fallback; the earlier fallback here was an
-    // invention, corrected 2026-08-26 from the kong differential).
-    // [orig: @0x4b729d-0x4b731b; the >=2 arm tests only clip 10 @0x4b72fa
-    // (kong 193694-193701); scope Flags&0x10 test @0x4b72e2]
+    // D-INF-16). tier 1 -> run_2 if authored; tier >= 2 -> run_3 if authored,
+    // ELSE the same run_2 test: the run_3-absent compare `jz short loc_4B730A`
+    // @0x4b72f8 lands on the tier-1 arm's `animMap[9] != animMap[0]` test
+    // @0x4b730a, so a body adm without run_3 runs at run_2 when it has one.
+    // (The 2026-08-26 "tier>=2 tests ONLY run_3" reading was a decompile
+    // misread; re-witnessed from the disassembly 2026-09-10 against jo-c.)
+    // [orig: @0x4b729d-0x4b731b; scope Flags&0x10 test @0x4b72e2; run_3 test
+    //  @0x4b72f3-0x4b72f8, store @0x4b72fa; run_2 test @0x4b730a, store @0x4b7311]
     if (target == anim_state::kWalkForward && !inf.scope_raised) {
         const int tier = 2 + inf.wpn_run_anim;
-        if (tier >= 2) {
-            if (has(anim_state::kRun3))
-                target = anim_state::kRun3;          // [orig: @0x4b72fa]
-        } else if (tier >= 1 && has(anim_state::kRun2)) {
+        if (tier >= 2 && has(anim_state::kRun3))
+            target = anim_state::kRun3;              // [orig: @0x4b72fa]
+        else if (tier >= 1 && has(anim_state::kRun2))
             target = anim_state::kRun2;              // [orig: @0x4b7311]
-        }
     }
 
     // Prone lean rolls from the lean bits; right (bit 7) wins when both are held.

@@ -111,7 +111,7 @@ void test_self_wave_zone() {
 // byte 22), the 128-entry zero score table, then zero waypoint/team-name
 // counts — the exact end the strict decoder requires.
 std::vector<uint8_t> world_state_load_body(uint8_t game_flags) {
-	std::vector<uint8_t> b(23 + kWorldStateScoreCount * 4 + 4, 0);
+	std::vector<uint8_t> b(23 + kWorldStateAmmoPoolCount * 4 + 4, 0);
 	b[22] = game_flags;
 	return b;
 }

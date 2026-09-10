@@ -162,7 +162,7 @@ std::vector<uint8_t> serialize_briefing_text(const NapiNPServerCtx &ctx) {
 
 // [orig: Server_SendEntityStateToPlayer @0x517ba0 / NapiNPClientMsg_0x00F @0x42E200; §5.29] S2C 0x0F
 // world-state-load — the game-start deploy unsticker. Carries the joiner's spawn pose, game flags, and
-// the fixed 128-entry team-score block; the client handler clears its dword_81474C load-gate and queues
+// the fixed 128-entry ammo-pool block; the client handler clears its dword_81474C load-gate and queues
 // the post-load C2S burst (0x22/0x23/0x28/0x29/0x2D/0x32) that lets it deploy. Without it a retail
 // joiner world-loads but stays undeployed (floods C2S 0x0f) — the observed live "stuck at 7%". Minimal
 // faithful body: the TDM/DM path has waypointCount 0; waypoint Co-op serializes the recipient's
@@ -214,7 +214,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	// The fixed 128-i32 block is the authority player's per-ammo-class pool
 	// table (serverPlayer+88664 -> client g_localAmmoPools @0xB75FE8), retained
 	// when this connection's C2S 0x2F loadout is accepted.
-	for (int32_t value : conn.reply.slot_type_scores)
+	for (int32_t value : conn.reply.ammo_pools)
 		put_u32(b, static_cast<uint32_t>(value));
 	// The waypoint body is present only for the witnessed waypoint gametype and
 	// a blue/team-1 recipient. Promotion retains the first BlueTeam route in

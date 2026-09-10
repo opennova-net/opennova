@@ -569,7 +569,7 @@ struct GrantedWeaponLoadout {
 	// The serverPlayer+88664 authority pool image copied by S2C 0x0F. Each
 	// accepted request writes its ammo class in wire order, so a later weapon
 	// sharing that class wins exactly as retail does.
-	std::array<int32_t, 128> slot_type_scores{};
+	std::array<int32_t, 128> ammo_pools{};
 	// Final player+89688 values, keyed by the resolved AmmoDef index. The retail
 	// request walk overwrites this table in request order, so the last accepted
 	// weapon using an ammo type controls every granted slot that uses that ammo.
@@ -664,7 +664,7 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 							static_cast<size_t>(we->ammo_class_id)];
 					if (pool > cap) pool = cap;
 				}
-				grant.slot_type_scores[
+				grant.ammo_pools[
 						static_cast<size_t>(we->ammo_class_id)] = pool;
 			}
 			const uint8_t damage_class = normalized_damage_class(e.variant);
@@ -696,9 +696,9 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 			// (AT4/smoke), 2->1 (HE), and 1->0 (flashbang).
 			const world::WeaponTableEntry *we = table->by_index(slot.wire.type_id);
 			if (we != nullptr && we->ammo_class_id >= 0 &&
-			    we->ammo_class_id < static_cast<int>(grant.slot_type_scores.size()) &&
+			    we->ammo_class_id < static_cast<int>(grant.ammo_pools.size()) &&
 			    we->ammo_class_count != 0 && we->clipsize != -1) {
-				int32_t &pool = grant.slot_type_scores[
+				int32_t &pool = grant.ammo_pools[
 						static_cast<size_t>(we->ammo_class_id)];
 				int32_t draw = static_cast<int32_t>(we->clipsize) * we->ammo_class_count;
 				if (draw > pool) draw = pool;
@@ -1617,7 +1617,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
 				// 0x5A apply is the deploy un-latcher — resets dword_81474C; §5.30, D-NET-156).
 				st.last_loadout_reply = encode_weapon_loadout(grant.reply);
-				st.slot_type_scores = grant.slot_type_scores;
+				st.ammo_pools = grant.ammo_pools;
 				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
