@@ -90,7 +90,11 @@ Ref<DeployStatus> Simulation::get_deploy_status() {
 	opennova::world::DeployStaticsInput statics_in;
 	statics_in.hold_seconds = hold;
 	statics_in.revive_seconds = revive;
-	statics_in.local_mounted = kernel_->local.view.mount.control_seat;
+	// The +0x1E0 being-revived latch rides the joiner's ClientState (S2C 0x3A);
+	// a listen host's own player has no revive sender ported yet, so it stays
+	// clear there.
+	statics_in.local_medic_reviving =
+			is_joiner() && runtime_ ? runtime_->state().local_medic_reviving : false;
 	const opennova::world::DeployStaticsVisibility statics =
 			opennova::world::deploy_statics_visibility(statics_in);
 	opennova::world::DeployScreenStatus v;

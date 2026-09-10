@@ -1408,6 +1408,10 @@ struct WorldStateLoad {
 bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &out,
                              bool is_waypoint_gametype = false);
 
+// S2C 0x3A — medic-reviving: no fields (the handler reads no bytes), any
+// length accepted. [orig: NapiNPClientMsg_0x03A @ 0x422680]
+bool decode_medic_reviving(const uint8_t *body, size_t len);
+
 // S2C 0x60 / 0x64 — chunked file transfer (§5.28). BOTH tags share a 12-byte
 // header `[u32 transferId/checksum][u32 totalSize][u32 chunkOffset]` then
 // `len - 12` RAW file bytes, written at chunkOffset into a reassembly buffer.

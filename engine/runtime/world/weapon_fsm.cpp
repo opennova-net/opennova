@@ -679,10 +679,15 @@ void weapon_fsm_queue_scope_up(WeaponSlotState &slot) {
 }
 
 bool weapon_fsm_reload_allowed(const WeaponFsmDef &def, const WeaponSlotState &slot) {
-    // [orig: the reload input case 0xD3 @ 0x4e0420 compares the clip against
-    // clipsize and the reserve against zero before WeaponSlot_RequestReload]
-    if (def.clip_capacity <= 0) return false;
-    return slot.clip != def.clip_capacity && slot.reserve > 0;
+    // [orig: the reload input case 0xD3 @0x4e1278..0x4e12f3 — pool =
+    //  Entity_GetScoreValueBySlotType(def+0xD8) @0x4e12a7; `cmp eax,[ecx+58h]`
+    //  clip == clipsize skips @0x4e12d7; `test edi,edi` pool == 0 skips
+    //  @0x4e12e0; else WeaponSlot_RequestReload]. There is NO capacity gate:
+    // a clipsize -1 weapon (emplaced guns, medpack, designator, detonator)
+    // still queues its RELOAD row — the refill itself is what
+    // WeaponSlot_ReloadAmmo skips for clipsize -1 — and a NEGATIVE pool
+    // (shipped -1 startrounds) passes the zero test.
+    return slot.clip != def.clip_capacity && slot.reserve != 0;
 }
 
 bool weapon_fsm_scope_toggle_allowed(const WeaponFsmDef &def, const WeaponSlotState &slot) {

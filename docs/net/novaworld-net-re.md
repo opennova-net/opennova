@@ -382,7 +382,7 @@ sweep; blank = not yet characterized.
 | 0x37 | 0x431250 | `_0x037` | |
 | 0x38 | 0x4260B0 | `_0x038` | |
 | 0x39 | 0x42E6D0 | `_0x039` | anti-cheat charattr CHARACTER-row CRC challenge `[u32 seed]` → C2S 0x1C (§5.34) |
-| 0x3A | 0x422680 | `_0x03A` | |
+| 0x3A | 0x422680 | `_0x03A` | MEDIC-REVIVING (empty body, witnessed 2026-09-10): the recipient's `+0x1E0` "a medic is reviving me" word <- 1, `dword_B764BC` <- 255, the default progress bar, the player ambient sound. The latch hides the DEATH screen's MEDIC/CALLMEDIC statics (`!entity+0x1E0` @0x553ec5) and blocks a second medic (`GameEvent_HandleMedicInteraction @0x4E6790`); cleared by `Game_InitNewRound @0x422740` (the local respawn) and mission start @0x524360; the host stamps the victim in the revive sender @0x517CD0. Ported: `ClientState::local_medic_reviving` -> the deploy statics feed |
 | 0x3B | 0x431340 | `_0x03B` | |
 | 0x3D | 0x422870 | `_0x03D` | |
 | 0x3E | 0x4226D0 | `_0x03E` | ack-style |
@@ -4452,7 +4452,7 @@ own* player locally.
 | Stage | Function | What it does |
 |---|---|---|
 | Look | `[orig: Input_ProcessMouseAxisBindings @ 0x499680]` (via `Input_ProcessPlayerFrame @ 0x49d4c0`) | mouse deltas `dword_3342E54`(X)/`dword_3342E58`(Y) (Y negated unless invert-Y `dword_24D2078`) × sensitivity `dword_24D207C << 11` (reduced by weapon zoom), fixed-point `(delta*sens + 0x8000) >> 16`, dispatched via `Input_TryTriggerMouseAxisBinding(bindIdx, entity, dX, dY)` to the entity's look-axis bindings → `Yaw` (entity+0x10) / `Pitch` (entity+0x14) |
-| Move | `[orig: Player_PackInputStateToEntity @ 0x4df450]` (via `Client_ProcessNetworkFrame @ 0x42c180`, call @ 0x42c3e9, every frame) | `g_inputFlags` (`dword_B3B728`) → 4 direction bits (F/B/L/R) → 8-way `move_direction_index` (0..7) via switch → DWORD at `entity->pad7[12]` (= **entity+0x12C**): low = move index, `\|0x8` = is_moving, plus fire `0x10` / scope `0x100,0x200` / lean `0x1000,0x2000` / grenade `0x4000,0x8000`; analog axes → pad7[16..19] (entity+0x130..0x133) |
+| Move | `[orig: Player_PackInputStateToEntity @ 0x4df450]` (via `Client_ProcessNetworkFrame @ 0x42c180`, call @ 0x42c3e9, every frame) | `g_inputFlags` (`dword_B3B728`) → 4 direction bits (F/B/L/R) → 8-way `move_direction_index` (0..7) via switch → DWORD at `entity->pad7[12]` (= **entity+0x12C**): low = move index, `\|0x8` = is_moving, then (corrected 2026-09-10 from the packer's stores `@0x4df6e0..0x4df790`): `0x10` = FreeLook (RMB-hold row 97, input 0x8000), `0x20` = jump (input 0x1000), `0x40`/`0x80` = lean L/R (0x2000/0x4000), `0x100`/`0x200` = the prone/crouch latches (`g_PlayerStanceProneLatch`/`CrouchLatch`), `0x1000`/`0x2000` = TurnLeft/TurnRight keys (rows 14/15), `0x4000`/`0x8000` = LookUp/LookDown keys (rows 13/12) — the earlier "fire/scope/grenade" reading was wrong (the port's lean/stance bits were already right); analog axes → pad7[16..19] (entity+0x130..0x133). FreeLook and the four look/turn key bits are not sampled by the shell yet |
 | Simulate | `Entity_UpdateInfantryAI` `loc_4B9C3E` (above) | consumes the move order at entity+0x12C — the player's analog of the AI think order — plus the look-set `Yaw`, producing the new live pose |
 | Serialize | `[orig: Player_BuildTag0CInputBody @ 0x42A550]` | gate `entity+286 (healthMax) != 0 && (entity+36 & 2) == 0`; → `Pool_SerializeEntityViaVTable` → `NetPacket_SerializePlayerState @ 0x4C09C0` writes the live pose into C2S 0x0C |
 

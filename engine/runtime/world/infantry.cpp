@@ -238,7 +238,10 @@ void begin_body_transition_with_insert(InfantryState &inf, int resolved,
         const int trans = gait_stance_transition_clip(inf.anim_state, resolved);
         if (trans >= 0 && root_motion != nullptr &&
             root_motion->has_clip(inf.adm_id, trans)) {
-            inf.begin_body_transition(trans);
+            // The blend duration comes from the REQUESTED state's flags (15
+            // ticks for the crouch/prone walks), not the insert clip's
+            // [orig: the +0x2BC flags test @0x40b64b precedes the insert].
+            inf.begin_body_transition(trans, resolved);
             inf.anim_pending = resolved; // deferred to the clip end [orig: @0x40b737]
             return;
         }

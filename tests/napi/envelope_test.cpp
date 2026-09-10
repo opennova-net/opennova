@@ -196,6 +196,39 @@ bool check_zero_carrier_small_header_size_rejected() {
 			"zero carrier with candidate header size below four rejects");
 }
 
+// A zero carrier whose payload byte 5 (packet +9) reads exactly 4 is the
+// ORDINARY layout again: retail takes the four-byte path with the zero
+// carrier and decodes the packet [orig: NapiNP_UnpackPacket `cmp ebx,4; jz`
+// @0x62ca6a]. The pre-2026-09-10 port rejected that packet outright.
+bool check_zero_carrier_header_size_four_decodes() {
+	std::vector<uint8_t> src(48);
+	std::vector<uint8_t> envelope(src.size() + 4);
+	size_t env_size = 0;
+	bool found = false;
+	// Even bytes keep the scatter carrier zero; byte 5 stays 4 or 5 depending
+	// on CRC bit 5, so vary a byte outside the scatter window until the CRC
+	// leaves the low bit clear.
+	for (unsigned seed = 0; seed < 256 && !found; seed += 2) {
+		for (size_t i = 0; i < src.size(); ++i)
+			src[i] = static_cast<uint8_t>((i * 6u + 2u) & 0xFEu);
+		src[5] = 4;
+		src[40] = static_cast<uint8_t>(seed);
+		if (opennova::napi_envelope_encode(src.data(), src.size(),
+				envelope.data(), envelope.size(), &env_size) != 0)
+			return expect(false, "header-size-four candidate encodes");
+		found = envelope[0] == 0 && envelope[1] == 0 && envelope[2] == 0 &&
+				envelope[3] == 0 && envelope[9] == 4;
+	}
+	if (!expect(found, "a zero-carrier packet with +9 == 4 exists")) return false;
+	std::vector<uint8_t> decoded(src.size());
+	size_t dec_size = 0;
+	if (!expect(opennova::napi_envelope_decode(envelope.data(), env_size,
+			decoded.data(), decoded.size(), &dec_size) == 0,
+			"zero carrier with header size four decodes on the ordinary path")) return false;
+	return expect(dec_size == src.size() && decoded == src,
+			"header-size-four packet restores its payload");
+}
+
 // Small payloads: the 4-byte header is literally the CRC of the payload.
 bool check_small_header_equals_crc() {
 	const std::vector<uint8_t> src = {0x01, 0x02, 0x03, 0x04, 0x05};
@@ -225,6 +258,7 @@ int main() {
 	if (!check_variable_header_decode()) return 1;
 	if (!check_zero_carrier_fallback()) return 1;
 	if (!check_zero_carrier_small_header_size_rejected()) return 1;
+	if (!check_zero_carrier_header_size_four_decodes()) return 1;
 	if (!check_small_header_equals_crc()) return 1;
 	std::printf("OK: LSB-scatter CRC envelope roundtrips + CRC detection\n");
 	return 0;

@@ -728,6 +728,15 @@ struct ClientState {
 	// (unported) and stays 0 here.
 	bool death_screen_active = false;
 	std::uint8_t death_screen_submode = 0;
+	// The local entity's +0x1E0 "a medic is reviving me" latch: set by S2C
+	// 0x3A, cleared when the local player's own dead->alive edge runs
+	// Game_InitNewRound and at mission start. The DEATH screen hides its
+	// MEDIC/CALLMEDIC statics while it is set [orig: NapiNPClientMsg_0x03A
+	// @0x422680 store; Game_InitNewRound @0x422740 clear; the statics test
+	// `!entity+0x1E0` @0x553ec5].
+	bool local_medic_reviving = false;
+	// The self row's respawn_revision the latch clear last consumed.
+	std::uint32_t local_respawn_revision_seen = 0;
 	bool enemy_tags_visible = false;
 	// The deploy-map OVERLAY (retail g_deploy_screen_active @0xA860DC): armed by
 	// the S2C 0x0F game_flags bit0 unless the death screen is already up, then

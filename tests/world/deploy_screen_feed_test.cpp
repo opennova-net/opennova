@@ -122,8 +122,9 @@ void test_statics() {
 	CHECK(deploy_statics_visibility(in).psp_respawn);
 	in.revive_seconds = 100;
 	CHECK(deploy_statics_visibility(in).medic);
-	// entity+0x1E0 nonzero hides the medic pair [orig: @0x553ec5].
-	in.local_mounted = true;
+	// entity+0x1E0 nonzero (a medic already reviving) hides the medic pair
+	// [orig: @0x553ec5].
+	in.local_medic_reviving = true;
 	CHECK(!deploy_statics_visibility(in).medic);
 }
 

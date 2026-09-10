@@ -495,18 +495,23 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
 }
 
 bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, EntityHandle source,
-		const int32_t start_in[3], const int32_t end_in[3], int32_t height_offset, bool all_types) {
+		const int32_t start_in[3], const int32_t end_in[3], int32_t height_offset, bool all_types,
+		bool query_parent_cleared) {
 	const Entity *le = listener.valid() ? world.registry.get(listener) : nullptr;
     const Entity *se = source.valid() ? world.registry.get(source) : nullptr;
     // The walker's two parent slots: per endpoint entity, parentEntity (+0x16C,
     // the seat mount) wins over mountedChild (+0x268) [orig:
     // raycast_find_collision_entity @0x539ab8..0x539b10 -> ctx[19]/ctx[20]].
-    const auto walker_parent = [](const Entity *e) -> EntityHandle {
+    // The blast sweep nulls the query entity's parentEntity for the call
+    // (`mov [edi+16Ch], 0` @0x4eb158, restored @0x4eb16c), so its slot holds
+    // only the mountedChild there.
+    const auto walker_parent = [](const Entity *e, bool parent_cleared) -> EntityHandle {
         if (e == nullptr) return EntityHandle{};
+        if (parent_cleared) return e->mounted_child;
         return e->mount_target.valid() ? e->mount_target : e->mounted_child;
     };
-    const EntityHandle parent_a = walker_parent(le);
-    const EntityHandle parent_b = walker_parent(se);
+    const EntityHandle parent_a = walker_parent(le, query_parent_cleared);
+    const EntityHandle parent_b = walker_parent(se, false);
 
     // --- Terrain leg. [orig: Physics_CheckTerrainLineOfSight @ 0x53b080] ---
     bool terrain_clear = false;

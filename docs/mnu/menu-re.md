@@ -957,8 +957,10 @@ Class / Action / Control) the shell fills with the player's key bindings, switch
 device (Keyboard / Mouse / Joystick). The `.mnu` declares only the table template; the rows are
 shell-populated, like the mission/mod lists (see menu-wiring.md). The 2026-06-23b grill.
 
-**Data model.** A static action catalog `aAbsoluteTurnLe @ 0x8159cb` (108-byte stride, ~112
-entries) holds per action: a marker-prefixed English display NAME (offset 0; the leading `!`/`|`
+**Data model.** A static action catalog `aAbsoluteTurnLe @ 0x8159cb` (108-byte stride; 768
+slots, 119 populated rows 0..118 — rows 113-118 are hidden cheat/fps rows with no keys; the
+190 figure is the CAPACITY of the 72-byte filtered table and the 432-byte Options array, 109
+of them populated by the flag-0x4000000 filter) holds per action: a marker-prefixed English display NAME (offset 0; the leading `!`/`|`
 no-localize marker is stripped on display), a config TOKEN (offset 40, e.g. `move_forward`), a
 category/**Class id** (offset 85), and a default keyboard binding (primary + secondary Windows-VK
 codes in the record's lead bytes — i.e. at the catalog record's `-15`/`-13` offset relative to the
@@ -1270,17 +1272,30 @@ authored Actions and cross the explicit host boundary with their full payload.
 Accepted/divergent (each a documented decision, not a defect):
 
 - **D-CTRL-1 (mouse/joystick defaults):** the keyboard defaults are byte-exact from the catalog;
-  the per-device mouse/joystick binding arrays are profile-built at runtime, not static, and are
-  not ported — mouse/joystick rows show the action list with a blank Control column.
+  the mouse/joystick defaults are NOT ported — mouse/joystick rows show the action list with a
+  blank Control column. Corrected 2026-09-10: those defaults are STATIC too. The 108-byte
+  catalog row (base `0x8159A8 + 108*id`; 768 slots, 119 populated) carries `+24` mouse mask,
+  `+26` joystick axis/button byte, `+28/+30` keyboard modifier VKs, `+32` mouse modifier VK,
+  `+34` joystick button; `KeyBinding_BuildFilteredTable @0x54c2b0` copies the flag-0x4000000
+  rows into the 72-byte `g_FilteredKeyBindings @0x254CC20` (190 capacity), `PlayerProfile_InitDefaults
+  @0x54bb40` memcpys that table into the profile (`push 3570h` @0x54bb7b), and `sub_562DF0
+  @0x562df0` writes the profile records back INTO the static rows; `default.key` is only an
+  optional override (`@0x54c3b6`) that ships in no PFF. Witnessed defaults: Prone MMB 0x10,
+  cycleweaponP/N wheel 0x400/0x800, ScopeZeroDec/Inc wheel + Ctrl mouse modifier, attack_1 LMB,
+  FreeLook RMB-hold (row 97, MoveOrder 0x10), scope RMB, spectator rows 110-112 MMB/LMB/RMB,
+  joystick axes 0x81-0x84 on rows 12-15; dispatch `Input_DispatchMouseEvent @0x761470` ->
+  `process_input_bindings @0x4DDA50` -> `try_dispatch_binding_by_weapon_type @0x499180`
+  (256/512 per wheel notch). The port is a shell slice (data + router), still open.
   2026-09-05: the keyboard slot-1 MODIFIER column is byte-exact too — the catalog row's +24
   word is VK_CONTROL (17) on seat1..seat10, ScopeZeroInc, nvggainup/nvggaindown, gtalk,
   sqtalk, respawn, command2 and hudcolor (the +26 slot-2 word is zero on every row), and
   `BindingSet::restore_defaults` seeds `primary_mod` from it, so the seat chords no longer
-  collide with the digit weapon rows [orig: seat1 @ 0x8160D8 +24; the dispatcher's
-  modifier-first pass `Input_ProcessKeyboardEvents @ 0x49d35b..0x49d3a7`, fallback
-  `@ 0x49d3ba..0x49d488`]. Witnessed but still unported here: the same row's +20 word is a
-  static MOUSE default mask (Prone 0x10 middle button; ScopeZeroDec/Inc 0x800/0x400 wheel
-  with a Ctrl mouse modifier at +28; attack_1 0x1 left) — the D-CTRL-1 mouse hunt's data.
+  collide with the digit weapon rows [orig: seat1 flags @ 0x8160D8 (row base 0x8160D4), the
+  modifier word at row +28 = @ 0x8160F4; the dispatcher's modifier-first pass
+  `Input_ProcessKeyboardEvents @ 0x49d35b..0x49d3a7`, fallback `@ 0x49d3ba..0x49d488`].
+  Witnessed but still unported here: the same row's +24 word is a static MOUSE default mask
+  (Prone 0x10 middle button; ScopeZeroDec/Inc 0x800/0x400 wheel with a Ctrl mouse modifier at
+  +32; attack_1 0x1 left) — the D-CTRL-1 data above.
 - **D-CTRL-2 (visibility filter) — FIXED 2026-07-05:** the witnessed per-entry gate
   (`(*entry & 0x20)==0 && (*entry & 0x800)!=0` in `UI_PopulateControlMappingList @ 0x55c0c0`)
   is ported: every catalog row carries its witnessed flag word (the static catalog's flags
@@ -1597,8 +1612,8 @@ activation (the shipped REMAP_INSTRUCTION text documents double-click).
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
-- The binding DATA side of the D-CTRL family remains: D-CTRL-1 (the
-  mouse/joystick default binding arrays are an RE hunt), the player.sav
+- The binding DATA side of the D-CTRL family remains: D-CTRL-1 (the static
+  mouse/joystick defaults and their event dispatch, witnessed 2026-09-10, unported), the player.sav
   profile-record format (only its geometry is witnessed), and the
   refresh pass's yellow active-binding highlight
   (`refresh_control_mapping_list @ 0x55b320`, unwalked interior).

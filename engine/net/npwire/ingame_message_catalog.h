@@ -137,7 +137,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', s2c::VEHICLE_SPAWN_NOTIFY, "vehicle-spawn-notify", MsgCoverage::Unhandled, "retail handler; runtime parity remains under audit [orig: NapiNPClientMsg_0x036 @0x426120]"},
 		{'S', s2c::WEAPON_SLOT_ACTION, "weapon-slot-action", MsgCoverage::Unhandled, "retail handler; runtime parity remains under audit [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250]"},
 		{'S', s2c::WEAPON_SWITCH, "weapon-switch", MsgCoverage::Unhandled, "retail handler; runtime parity remains under audit [orig: handle_weapon_switch_packet @0x4260b0]"},
-		{'S', s2c::CAMERA_RESET, "camera-reset", MsgCoverage::Unhandled, "retail handler; runtime parity remains under audit [orig: NapiNPClientMsg_0x03A @0x422680]"},
+		{'S', s2c::MEDIC_REVIVING, "medic-reviving", MsgCoverage::Decoded, "decode_medic_reviving (empty body, any length accepted like the handler); latches the local entity's +0x1E0 being-revived word (ClientState::local_medic_reviving) — hides the DEATH screen's MEDIC/CALLMEDIC statics; cleared at the local respawn [orig: NapiNPClientMsg_0x03A @0x422680]"},
 		{'S', s2c::FORM_POST_REQUEST, "form-post-request", MsgCoverage::PrinterOnly, "no fields read; queues reliable C2S 0x01 with one zero byte [orig: NapiNPClientMsg_0x03B @0x431340]"},
 		{'S', s2c::EXIT_SESSION_ALT, "exit-session-alt", MsgCoverage::Unhandled, "retail handler; runtime parity remains under audit [orig: NapiNPClientMsg_0x03D @0x422870]"},
 		{'S', s2c::OBJECTIVE_NOTIFICATION, "objective-notification", MsgCoverage::Unhandled, "retail handler; runtime parity remains under audit [orig: NapiNPClientMsg_0x03F @0x42bb20]"},

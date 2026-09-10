@@ -241,7 +241,11 @@ int main_impl() {
 		}
 		if (!expect(
 				state.waypoints.size() == 1 && state.waypoint_count == 1 &&
-						state.waypoints[0].slot_id == 0x300C &&
+						// The raw pool-3 record index, exactly as the stock
+						// client feeds Pool_GetEntryUnchecked(3, word) — a
+						// 0x3000|node handle would index 12288 records past the
+						// pool [orig: writer @0x502f35/@0x502f45, reader @0x42e4a3].
+						state.waypoints[0].slot_id == 0x000C &&
 						state.waypoints[0].name_id == 0 &&
 						state.waypoints[0].pad == 0,
 				"0x0F carries 00TRg's blue-route waypoint record")) {
@@ -563,8 +567,12 @@ int main_impl() {
 		if (!expect(paced_calls > 3, "burst was actually PACED across multiple calls (not one-shot)")) return 1;
 		if (!expect(!jconn.burst.spawned, "joiner burst not yet spawned (waiting for loadout)")) return 1;
 
-		// Simulate the C2S 0x2F -> sets loadout_received; drive to completion.
+		// Simulate the C2S 0x2F -> sets loadout_received, and the stock client's
+		// C2S 0x0B mission-file report that TRIGGERS the bundle [orig:
+		// NapiNPServerMsg_PlayerJoinRequest @0x51AB10 -> Server_OnPlayerJoin
+		// @0x51A680]; drive to completion.
 		jconn.burst.loadout_received = true;
+		jconn.reply.mission_status_received = true;
 		bool saw_0f = false, saw_42 = false, saw_3e = false;
 		bool saw_transient_42 = false;
 		bool reached = false;

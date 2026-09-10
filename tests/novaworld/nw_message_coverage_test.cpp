@@ -1526,6 +1526,16 @@ int check_C_32_empty_slots_request() {
 	return 0;
 }
 
+// S2C 0x3A — medic-reviving: the handler reads no bytes; any body length is
+// accepted, as retail ignores it. [orig: NapiNPClientMsg_0x03A @0x422680]
+int check_S_3A_medic_reviving() {
+	EXPECT(decode_medic_reviving(nullptr, 0));
+	const uint8_t junk[3] = {1, 2, 3};
+	EXPECT(decode_medic_reviving(junk, sizeof(junk)));
+	cover('S', 0x3A);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -1614,6 +1624,7 @@ int main() {
 	if (check_S_50_team_assign()) return 1;
 	if (check_S_5D_destroy_list()) return 1;
 	if (check_C_32_empty_slots_request()) return 1;
+	if (check_S_3A_medic_reviving()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

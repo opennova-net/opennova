@@ -264,45 +264,71 @@ bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &
     return true;
 }
 
-// [orig: Physics_ComputeReflectionForce @ 0x4e4310] — normal = the hit face
-// normal (fallback: -v normalized); v' = (v - (v.n)n) + n * (1 - |v.n|), then
-// |v'| rescaled to 0.35 * |v_in| (flt_7C6FA8).
+// [orig: Math_FixedPointNormalize3 @0x613280 — magnitude in x87 double,
+//  TRUNCATED to an int, then each component `(c << 16) / (int)magnitude` as a
+//  signed 64-bit division]. A zero vector would divide by zero in retail; the
+//  caller only reaches it with trunc(hspeed) != 0, so the guard is inert.
+void fixed_normalize3(int32_t v[3]) {
+    const double mag = std::sqrt(static_cast<double>(v[1]) * v[1] +
+                                 static_cast<double>(v[2]) * v[2] +
+                                 static_cast<double>(v[0]) * v[0]);
+    const int32_t imag = static_cast<int32_t>(mag);
+    if (imag == 0) return;
+    for (int i = 0; i < 3; ++i)
+        v[i] = static_cast<int32_t>((static_cast<int64_t>(v[i]) << 16) / imag);
+}
+
+// [orig: Physics_ComputeReflectionForce @ 0x4e4310] The normal starts as -v
+// normalized in x87 (65536/|v| per component, ftol; zero when |v| == 0)
+// @0x4e432d..0x4e43c6 and is REPLACED by the struck face's normal when the hit
+// carries bone/face data @0x4e43ea..0x4e449d — our sweep hands that face
+// normal in (zero when it has none). Then, in 16.16:
+//   dot     = (v . n) >> 16 from the ORIGINAL velocity        @0x4e44df
+//   hspeed  = sqrt(vx^2 + vy^2) / 65536  (NO vz)              @0x4e44dd..0x4e44f2
+//   if trunc(hspeed) != 0: v = normalize3(v)                  @0x4e44fe..0x4e4510
+//   v -= (dot * n + 0x8000) >> 16                              @0x4e4530..0x4e4563
+//   v += ((0x10000 - |dot|) * n + 0x8000) >> 16                @0x4e458b..0x4e45c6
+//   damped = ftol(hspeed * 0.35f * 65536)   (flt_7C6FA8, flt_7C32BC)
+//   v = (damped * v + 0x8000) >> 16                            @0x4e45f0..0x4e462f
+// The exit speed therefore scales with the HORIZONTAL speed only, and — below
+// 1 u/tick, i.e. every thrown grenade — quadratically with it, because v is
+// left un-normalized; nothing renormalizes the result. The earlier float port
+// rescaled to 0.35 x |v_in| in 3-D, which popped near-vertical drops and
+// under-bounced fast horizontal hits.
 void reflect_velocity(MotorFrame &f, const int32_t normal_q16[3]) {
-    const double vx = from_fixed(f.vx), vy = from_fixed(f.vy), vz = from_fixed(f.vz);
-    const double vin = std::sqrt(vx * vx + vy * vy + vz * vz);
-    double nx = from_fixed(normal_q16[0]);
-    double ny = from_fixed(normal_q16[1]);
-    double nz = from_fixed(normal_q16[2]);
-    const double nlen = std::sqrt(nx * nx + ny * ny + nz * nz);
-    if (nlen > 1e-6) {
-        nx /= nlen;
-        ny /= nlen;
-        nz /= nlen;
-    } else if (vin > 1e-6) {
-        nx = -vx / vin;
-        ny = -vy / vin;
-        nz = -vz / vin;
-    } else {
-        return;
+    int32_t v[3] = {f.vx, f.vy, f.vz};
+    int32_t n[3] = {normal_q16[0], normal_q16[1], normal_q16[2]};
+    if (n[0] == 0 && n[1] == 0 && n[2] == 0) {
+        const double nvx = -static_cast<double>(v[0]);
+        const double nvy = -static_cast<double>(v[1]);
+        const double nvz = -static_cast<double>(v[2]);
+        const double len = std::sqrt(nvx * nvx + nvy * nvy + nvz * nvz);
+        if (len > 0.0) {
+            const double s = 65536.0 / len; // [orig: fdivr flt_7C32BC @0x4e437d]
+            n[0] = static_cast<int32_t>(nvx * s);
+            n[1] = static_cast<int32_t>(nvy * s);
+            n[2] = static_cast<int32_t>(nvz * s);
+        }
     }
-    const double dot = vx * nx + vy * ny + vz * nz;
-    double rx = vx - dot * nx;
-    double ry = vy - dot * ny;
-    double rz = vz - dot * nz;
-    const double pop = 1.0 - std::fabs(dot); // [orig: (0x10000 - |dot|) leg]
-    rx += pop * nx;
-    ry += pop * ny;
-    rz += pop * nz;
-    const double rlen = std::sqrt(rx * rx + ry * ry + rz * rz);
-    const double target = vin * 0.35; // [orig: flt_7C6FA8 damping]
-    if (rlen > 1e-6 && target > 0.0) {
-        rx *= target / rlen;
-        ry *= target / rlen;
-        rz *= target / rlen;
-    }
-    f.vx = to_fixed(rx);
-    f.vy = to_fixed(ry);
-    f.vz = to_fixed(rz);
+    const int32_t dot = static_cast<int32_t>(
+            (static_cast<int64_t>(v[1]) * n[1] + static_cast<int64_t>(v[0]) * n[0] +
+             static_cast<int64_t>(v[2]) * n[2]) >> 16);
+    const double hspeed = std::sqrt(static_cast<double>(v[0]) * v[0] +
+                                    static_cast<double>(v[1]) * v[1]) / 65536.0;
+    if (static_cast<int32_t>(hspeed) != 0) fixed_normalize3(v);
+    for (int i = 0; i < 3; ++i)
+        v[i] -= static_cast<int32_t>((static_cast<int64_t>(dot) * n[i] + 0x8000) >> 16);
+    const int32_t absdot = dot < 0 ? -dot : dot;
+    for (int i = 0; i < 3; ++i)
+        v[i] += static_cast<int32_t>(
+                (static_cast<int64_t>(0x10000 - absdot) * n[i] + 0x8000) >> 16);
+    const int32_t damped = static_cast<int32_t>(
+            hspeed * static_cast<double>(0.35f) * 65536.0); // [orig: @0x4e455d/@0x4e45c0]
+    for (int i = 0; i < 3; ++i)
+        v[i] = static_cast<int32_t>((static_cast<int64_t>(damped) * v[i] + 0x8000) >> 16);
+    f.vx = v[0];
+    f.vy = v[1];
+    f.vz = v[2];
 }
 
 // The flying-phase wrapper: a LiveRound has no registry entity, so the

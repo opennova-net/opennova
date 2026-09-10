@@ -3527,6 +3527,7 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	conn.burst.sync_state = 4;
 	conn.burst.world_stream_phase = 8;
 	conn.burst.loadout_received = true;
+	conn.reply.mission_status_received = true; // the stock client's 0x0B, the bundle trigger
 	conn.burst.entity_batch_count = 1;
 	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
 	owner.ctx.np_protocol.next_connection_id = inmatch::kFirstJoinerDcb + 1;
