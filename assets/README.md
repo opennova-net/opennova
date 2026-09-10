@@ -1,13 +1,13 @@
 # `assets/` — the game's source-owned assets
 
 These are **the game's assets** — the loose source tree OpenNova is built from
-and committed here. They are not an ONED project or a test fixture: the
-per-format `fixtures/<fmt>/` sets and the retail-derived ones are expected to
-give way to this tree as it grows.
+and committed here. The per-format `fixtures/<fmt>/` sets and the
+retail-derived ones are expected to give way to this tree as it grows.
 
-Every byte is authored from scratch by our own writers and tools; no retail
-asset is committed. Retail `Jointops.exe` is the **oracle**, not the target: it
-is the original consumer, so an asset it loads and renders is a correct asset.
+The native source set is authored by our own writers and tools, with the
+explicit temporary retail bring-up exception documented below. Retail
+`Jointops.exe` is the **oracle**, not the target: it is the original consumer,
+so an asset it loads and renders is a correct asset.
 That is the whole reason the retail loop exists — proving compatibility both
 validates our writers and source files and tells our own engine what it has to
 accept.
@@ -21,11 +21,18 @@ parity writers emit bytes a stock client loads.
 ## Why this can be committed (asset policy)
 
 [../docs/asset-gated-tests.md](../docs/asset-gated-tests.md) forbids
-committing retail assets. Nothing here is a retail asset: every byte is
-produced by an OpenNova writer from an authored source, MIT-licensed, exactly
-like the existing per-format `fixtures/<fmt>/` sets. The retail install is
-needed only to *validate* the set (launch JO), which is the asset-gated
-acceptance step, never a committed input.
+committing retail assets. The authored files here are produced by OpenNova
+writers from MIT-licensed sources, like the per-format `fixtures/<fmt>/` sets;
+the temporary exception below identifies the remaining retail files. For the
+authored set, the retail install serves as the asset-gated validation consumer
+(launch JO).
+
+**One deliberate, temporary exception (2026-08-31, narrowed 2026-09-06):**
+`charattr.def` and `SndProf.def` remain retail data. They are individually
+allowlisted under the TEMPORARY banner in `.gitignore`, ship in both zip
+flavors, and are tracked as replacement debt in [`../TODO.md`](../TODO.md).
+The bring-up models, textures, avatar table, animation definitions and clips
+have been replaced by authored sources and writer-produced artifacts.
 
 ## Layout
 
@@ -41,17 +48,14 @@ acceptance step, never a committed input.
   once let loose retail copies slip into a commit. `.gitattributes` keeps that
   `.gitignore` a plain text blob on every checkout (an LFS pointer ignores
   nothing).
-- ONED's Stage & Run Retail stages this tree and the retail runtime into
-  **ONED's own data dir** (`user://packed`) — never beside the source
-  assets.
+- The Godot **OpenNova** dock stages the active world source and retail
+  runtime into `godot/.godot/opennova/retail/` for **Stage & Run Retail**.
 - **This tree also ships, in two flavors**: the dev zip (`opennova-windows`)
   stages the tracked files here under `assets/` — the game default-mounts that
-  loose tree and ONED offers it as the implicit loose-data selection, so the
-  game runs the tracked source files with no packing in the loop. The
-  tagged-release zip
-  (`opennova-game-windows`) carries the same game packed into `localres.pff`
-  beside `opennova.exe`, built by ONED's hidden
-  `opennova-modtools.exe --headless -- --pack-game <src> <game_dir>` command.
+  loose tree, so the game runs the tracked source files with no packing in
+  the loop. The tagged-release zip (`opennova-game-windows`) carries the same game packed into `localres.pff`
+  beside `opennova.exe`, built through the source project
+  [headless pack command](../godot/tools/README.md#headless-release-packaging).
 
 ## The set (grounded in required-resources.md)
 
@@ -68,19 +72,25 @@ gracefully on miss is deliberately omitted to keep "minimal" honest.
 | `gametext.bin` | `engine/formats/rtxt` | game strings RTXT `[orig: @ 0x4a6fed]` — minimal table (the menu/HUD keys the set references). |
 | `vmacros.bin` | `engine/formats/rtxt` | voice-macro strings `[orig: @ 0x4a702f]` — may be empty-but-valid. |
 | `keyhelp.bin` | `engine/formats/rtxt` | keyboard-map strings `[orig: @ 0x4a7072]` — may be empty-but-valid. |
-| `items.def` | authored text | `[orig: @ 0x4a71a3 → ItemDef_ParseProperty @ 0x49eb00]` — minimal: only what the mission places or the engine spawns by fixed id (witnessed mapping, D-ITEMDEF-1): the player item `105310` (spawned by its own id, never placed) and the mesh-less marker family (`106001` player start, `106003`/`106004` team starts, plus the retail-canonical `100000`/`106002`/`106005`). Model-bearing entries the map does not place are not carried ahead of their models. Ids the engine addresses **by number** are reserved; ids that merely also exist in retail's catalogue are free, and our own content goes at `108001+`. |
+| `items.def` | authored text | `[orig: @ 0x4a71a3 → ItemDef_ParseProperty @ 0x49eb00]` — minimal: only what the mission places or the engine spawns by fixed id (witnessed mapping, D-ITEMDEF-1): the player item `105310` (spawned by its own id, never placed) and the mesh-less marker family (`106001` player start, `106003`/`106004` team starts, plus the retail-canonical `100000`/`106002`/`106005`). Model-bearing entries the map does not place are not carried ahead of their models. Ids the engine addresses **by number** are reserved; ids that merely also exist in retail's catalogue are free, and our own content goes at `108001+`: the house (`108001`, `type building`, `graphic house`, `sid house`, `hp 5000`) is the first entry there, placed by `mnml.bms`. |
 | `main.mnu` (`"Startup"` node) | project-authored MNU | the entry screen `[orig: Menu_InitShellResources @ 0x552651 -> UIScene_LoadAndParseContent @ 0x63c830 -> CUIScene_SelectNodeByName @ 0x63b6b0]`. |
 
 ### Host + join + single player — mission start + menus
 
 | File | Origin | Notes |
 |---|---|---|
-| `mnml.bms` | project-authored BMS | the mission: the `106001` player start, both team starts (`106003`/`106004`), one objective, minimal item set. Retail does not spawn the player from a placed entity — it spawns item `105310` by its own id and reads the placed `106001` marker to learn where (confirmed against retail's `00TRa.bms`: 1331 entities, exactly one `106001`, no player entity; the two ids are observed from the shipped data and the spawn behaviour — neither appears as an immediate in `Jointops.exe`, so the binary site that carries them is unwitnessed). |
+| `mnml.bms` | project-authored BMS | the mission: the `106001` player start, both team starts (`106003`/`106004`), one objective, and the house (`108001`, in the building pool) 24 m north of the player start (BMS axes: x east, y north, z up). Its weapon kit is the one rifle, `WPN_AK47AUTO` (six clips), and its availability list names the same rifle as mission-allowed: the single-player load promotes the kit over the engine's `WPN_M4AUTO` default `[orig: Mission_LoadBMSFile @ 0x40F4E0, the non-session branch]`, while a live session skips both chunks and takes the player's profile. Retail does not spawn the player from a placed entity — it spawns item `105310` by its own id and reads the placed `106001` marker to learn where (confirmed against retail's `00TRa.bms`: 1331 entities, exactly one `106001`, no player entity; the two ids are observed from the shipped data and the spawn behaviour — neither appears as an immediate in `Jointops.exe`, so the binary site that carries them is unwitnessed). |
 | `mnml.trn` + `mnml.cpt` | terrain writers (`save_trn` + the CDEP builder) | the terrain config and its baked polydata. JO reads the compressed CDEP depth `[orig: Terrain_LoadLodStorage @ 0x603550 — the 'CDEP' fourcc compare @ 0x603620 and the 'DPTH' compare @ 0x6037b3]`; the BHD-era DPTH the builder defaults to is a `.cpt` retail cannot decode. `sector_count` is the grid WIDTH, not a count of active sectors. |
 | `mnml.env` | `engine/formats/env` writer | one time-of-day; defaults elsewhere. The mission header's Q8.8 start hour overrides the `.env`'s own `curtime`, so the mission starts at noon rather than rendering under the midnight ramp. |
 | `mp.mnu` | project-authored MNU | the host/join menu `[orig: @ 0x5588fa]`. |
 | `sp.mnu` | project-authored MNU | the single-player mission screen `[orig: SinglePlayer_PopulateMissionList @ 0x561840]` — where the packed mission has to appear. |
-| `weapon.def`, `ammo.def` | authored text | minimal: one spawn weapon + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. Two entries for ONE rifle, because the engine addresses two weapon names by LITERAL and a set that wants an armed player with a visible viewmodel has to answer both: `WPN_M4AUTO` is the spawn/equip default resolved by name at player spawn `[orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]` (without it the player spawns unarmed), and `WPN_AK47AUTO` is the name the first-person viewmodel bring-up resolves. Both carry the viewmodel slice — `ANIMADM`/`GFX1`/`GFX1A` plus the `pos`/`TPOS` hip and ADS offsets `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`. `GFX1A` is parse-and-discard in the original — the arms come from the CHARACTER's arms model `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]` — and is carried for retail-shape fidelity. No `PARTICLE` rows: the set ships no `.ptl` catalogue yet. |
+| `AVATARS.DEF` | `minimal_avatars_gen` (the `engine/formats/avatars` writer, ADR 0021; `--write` re-emits it) | the avatar table: one head (`person_hd.3di`), one body (`person.3di`), the arms (`arms.3di`), and one nationality per alignment (`N00` good, `N01` evil) carrying one division with that one combo, so the join profile's packed character ids resolve on both sides. CRLF from the writer. |
+| `weapon.def`, `ammo.def` | authored text | minimal: one rifle shape + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. ONE entry, `WPN_AK47AUTO`: the rifle the bring-up set actually ships (our `akm` first-person model on the retail AKM `.adm` and clips). The engine's hardcoded spawn default `WPN_M4AUTO` `[orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]` is deliberately unanswered: `mnml.bms` arms the player instead (below). The entry carries `ANIMADM`/`GFX1`/`GFX1A` plus the `pos`/`TPOS` hip and ADS offsets `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`. `GFX1A` is parse-and-discard in the original — the arms come from the CHARACTER's arms model `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]` — and is carried for retail-shape fidelity. No `PARTICLE` rows: the set ships no `.ptl` catalogue yet. |
+| `person.3di` + `person.tga`, `person_hd.3di` + `person_hd.tga` | the Godot model tool: `godot/authoring/person/` and `person_hd/` (Blender rigs through the glTF importer) | the player body and head on the retail reset clip's rig: the twenty `DT1RST.BAD` rows (`BN01 Hips` .. `BN19 L Foot` plus the ground-level proxy part) with retail's own pivots, so the retail clips still under the banner animate them (`minimal_model_validate` runs the engine's bind relation over the pivots and pins the clip's bone positions to 2 mm); blocky limb boxes weighted one bone each, a bone sphere per section and a body hull on the root section, the `Look` (head) and `GFlash01` (left hand) user points retail's models carry; `VS_SKBASIC` over one 32 x 32 texture each. `AVATARS.DEF` names them as the one combo of one nationality per alignment. |
+| `person.adm` + 34 `.bad` clips (`person_rst`, `failsafe`, `pers_idle`, `pers_walk<dir>` / `pers_cwlk<dir>` / `pers_crwl<dir>` in eight directions, `pers_run`, `pers_jog`, `pers_crouch`, `pers_prone`, `pers_jump`, `pers_death`, `pers_reload`); `akm.adm` + `akm_rst`, `akm_idle`, `akm_fire`, `akm_reload` | the Godot clip tool (ADR 0047): `godot/authoring/person/person_clips.tres` over `person.tscn`'s AnimationPlayer and `godot/authoring/akm/akm_clips.tres` over `fp_rig.tscn` (the 46 rAKM rows with the rifle's pivots); `--export-clips` re-projects them, `clip_export_guard_test.gd` byte-compares | the body's clip set on its twenty rows (reset, idle, one walk cycle exported in eight directions by turning its root motion, run, jog, crouch and prone holds with their eight-direction walks, jump, reload, one fall every death key plays; `failsafe.bad` is the reset under the name every mission start loads) and the rifle's on the FP rig (retail's nine AKM keys: reset, idle, fire with the bolt's translation, reload with the magazine's drop; the rifle's 45 parts and the arms' 38 rows read their prefix). Identity binds: the reset holds the rest pose, so the runtime's `Transpose(bind) x channel` is the channel itself. `items.def`'s `anim_def person`, `weapon.def`'s `ANIMADM akm` and the engine's default infantry set (`kDefaultInfantryAdm`) name them. |
+| `akm.3di` + `akm.tga`, `akm_n.tga`, `brass.tga`; `arms.3di` + `arms.tga`, `arms_n.tga` | the Godot model tool: `godot/authoring/akm/` and `arms/` (Blender through the glTF importer) | the first-person rifle and arms on the retail `rAKM_RST.bad` rig: the rifle rigid with 45 parts (`PN01`..`PN45`, AKM_1st's own pivots, reproducing the clip's rows to 1.4 mm) carrying blocky receiver/barrel/stock/grip, magazine, bolt and spare-magazine parts on retail's strip-owning rows, the `bcasing`/`bullet`/`MFLASH01` user points at retail's positions, `VS_PHONGT` (diffuse + a flat type-5 normal, so VERT carries the tangent format 0x15) plus an `FF_ST_OP` brass cartridge; the arms skinned with 38 rows (the rifle's pivot table for the 37 rig rows, retail's ground proxy last; retail's own ArmsG.3di drifts 7.7 mm off the clip on its finger rows) carrying six limb boxes weighted one bone each, `VS_SKBUMPPHONGT` (0x55, the format retail's FP pass needs). `weapon.def` `GFX1`/`GFX1A` and the `AVATARS.DEF` arms name them; the retail clips still drive both. |
+| `crate.3di` + `crate.tga` | the Godot model tool (ADR 0046): `godot/authoring/crate/` (a Blender box through Godot's glTF importer, the manifest beside it) exported by the `opennova_model` addon through `threedi_3di3_write`; re-exported and byte-compared by `godot/tests/model_export_guard_test.gd` | the first model authored in Godot (`items.def 108002`, `type building`, placed once in `mnml.bms` 8 m east and 18 m north of the player start): one part, one box, a 12-face collision box and one CB volume, the `ground` user point; material `FF_ST_OP` served by the authored `_ffp.fx`; the texture a 16 x 16 plank checker exported from its PNG source through `engine/formats/tga`. |
+| `house.3di` + `wall.tga`/`roof.tga`/`wood.tga` | `minimal_3di_gen` (the `house` recipe through `threedi_3di3_write`; the swatches minted beside it) | the set's own model, byte-identical to `fixtures/threedi/synth/house.3di`: one inert part, three boxes (an 8 x 10 x 4 m wall block, the roof slab, the chimney) over a face box, three CB volumes and the collision-only water-tank prism off its east side; every material `FF_ST_OP`, served by the authored `_ffp.fx`. The three textures are 16 x 16 flat-colour 24 bpp TGAs (the shape of the `mnml_*` terrain art retail already loads loose). |
 | `game.wac` / `server.wac` | — | optional (silent skip) — add only if the join needs mission logic to progress. |
 
 ### Where the mission list looks (witnessed against retail)
@@ -167,58 +177,72 @@ way. One LF-normalizing save silently breaks the boot again, so
 
 ### Deliberately omitted (graceful-on-miss — keeps the set minimal)
 
-Videos (`BIK` — see above), `SndProf.def`, `charattr.def`
-(soft error, continues), `powerup.def` (soft), `hudfx/hudpos.def` (default
+Videos (`BIK` — see above), `powerup.def` (soft), `hudfx/hudpos.def` (default
 positions), `game.bin` (fallback literals), `nw_cdata.coo`. Each is listed in
 the R8 manifest with its graceful failure; adding any is a deliberate step up
 from minimal, not a requirement. `Avatars.def` left this list with the
-first-person arms — see the bring-up section below.
+first-person arms, `charattr.def` rode the same bring-up, and `SndProf.def`
+left it 2026-08-31: its "soft miss" survives boot but not a moving player —
+the empty profile table's find-miss path hands the first footstep a garbage
+sound-set pointer and retail AVs in `Sound_Play3DPositional` reading set+72
+(`[orig: @ 0x527cd1]`; witnessed via SYSDUMP against this exact set). All
+two are retail files under the TEMPORARY banner — see the bring-up section
+below.
 
-### Bring-up: the retail model + anim set (staged locally, never committed)
+### Remaining retail bring-up definitions
 
-The set has no models of its own yet, so the player body, its animations and the
-first-person viewmodel are brought up by **copying the retail files into this
-directory**, exactly like `Jointops.exe` and its runtime writes. They are covered
-by the blanket `/*` ignore and carry no allowlist line, so they cannot be
-committed — that is the whole point of the allowlist shape. The dev zip stages
-`git ls-files assets`, so they never ship either.
+Only two retail files remain in the temporary exception:
 
-What gets staged, from an extracted retail resource tree (~212 files):
-
-| Group | Files |
+| Purpose | File |
 |---|---|
-| player body + anims | `US01.3di`, `US01.ADM`, the **150** `.bad` clips its keys name, and `failsafe.bad` (the every-mission-start fallback, `../docs/required-resources.md`) |
-| avatar combo | `Avatars.def` plus the first combo's three models — `Boonie.3di` (head), `JntOpsB1.3di` (body), `ArmsG.3di` (arms) |
-| weapon | `AKM_1st.3di`, `AKM_1ST.adm`, its six `rAKM_*.bad` clips |
-| the default infantry clip set | `E_STAND.adm` and the 87 `.bad` clips it names — **required for the player to walk at all**, see below |
-| textures | the stems the five models name, resolved to whatever extension ships them — 33 `.dds`, one `.tga`, plus the `.MDT` sidecars |
+| character attributes | `charattr.def` |
+| sound profiles | `SndProf.def`, the 49-profile table used by the player and weapon definitions |
 
-Three things about this set are worth knowing. **`E_STAND.adm` is load-bearing far
-beyond the AI bodies it names.** Infantry locomotion is entirely root-motion driven —
-the playing clip's translation track moves the entity, and there is no non-clip fallback
-(`engine/runtime/world/infantry.cpp` header) — and the kernel resolves each entity's own
-`items.def` `anim_def` only once the DEFAULT set
-(`engine/runtime/mission/runtime_boot.h:35`, `"E_STAND.adm"`) has registered
-(`engine/runtime/mission/mission_kernel.cpp:253`/`:299`). Without it `ai.root_motion` is
-null, the local player never picks up `US01.adm`, and it spawns, renders and plays
-`anim_idle` forever while refusing to walk — with the only symptom a single
-`no infantry clips from 'E_STAND.adm'` warning. The coupling itself is tracked in
-[`../TODO.md`](../TODO.md); until it is undone, this file is part of the minimal set.
+The original 213-file bring-up set established the playable baseline. Its
+models, textures, avatar table, animation definitions and 156 clips were
+replaced on 2026-09-06. The flat game tree now uses `person` / `person_hd`
+for the player, `akm` / `arms` for the first-person pair, and `person.adm`
+/ `akm.adm` for their authored clips. The authored `AVATARS.DEF` selects
+those models. No `E_STAND.adm`, `US01.adm` or retail model is needed by the
+minimal tree.
 
-Two further things. **`Avatars.def` moves the body
-lookup**: with it present the local player's body is the avatar combo's head +
-body pair, not `items.def`'s `graphic`; `US01` stays the fallback body and, as
-`anim_def`, the clip map that drives the rig either way. And **every model names
-its textures `.tga` while retail ships them `.dds`** — retail relies on its own
-`.dds` substitution probe `[orig: Texture_LoadByNameWithChannel @ 0x58b52c]` for
-its stock content, and whether that probe still runs for a LOOSE file under `/d`
-is not witnessed (`../docs/vfs/vfs-pff-mount-re.md` records only that a loose
-`.tga` skips it). The retail validation run below settles it from `_filelog.txt`.
+The Godot model tool (ADR 0046, `godot/addons/opennova_model/`) exports the
+scenes and manifests under `godot/authoring/` through `threedi_3di3_write`.
+The house (`house.3di`, item `108001`) comes from the C++ recipe in
+`engine/formats/threedi/threedi_build.h`; the crate (`crate.3di`, item
+`108002`) and the player/viewmodel rigs come from Godot scenes. The clip
+tool (ADR 0047) projects the scenes' animations through the `.bad` and
+`.adm` writers. GUT re-exports every manifest and clip set and compares
+the resulting bytes to the tracked artifacts.
 
-This set is replaced by our own once that run is green. The model side already
-has a path — `tests/fixtures/minimal_3di_builder.h` mints a nineteen-part skinned
-`person` rig in the retail bone order through `threedi_3di3_write`. The clip side
-needs a `.bad` **writer** first: `engine/formats/bad/bad.h` is parse-only today.
+Infantry locomotion is driven by the selected clip's root motion. The
+kernel resolves each entity's `items.def` `anim_def` independently of the
+default set, so retail missions retain their own clip maps while the
+minimal mission uses `person.adm`. `minimal_runtime_loadout` and the
+mission infantry-animation tests cover the actual runtime boot path.
+
+## Shaders: the authored `.fx` set
+
+The 14 committed `.fx` files are **ours** — authored HLSL implementing the
+witnessed effect contract (tags, technique/pass annotations, parameter names,
+the fixed-function variant matrix), replacing the 47 retail files the bring-up
+first carried. The plaintext sources live in `tests/fixtures/fx/`; the
+committed artifacts are those sources wrapped in the SCR container retail's
+effect loader requires — `'SCR',0x01` + the shader keystream, 0xA55B1EED
+`[orig: ScriptFile_LoadAndDecrypt @ 0x5AE060]`; a bare-text `.fx` is rejected
+(NULL) by that sniff, which is why the wrapped form is what ships. Eight are
+effects (`_ffp.fx` — the 24-variant fixed-function matrix, loaded by literal
+name; `phongt.fx` for the rifle's `VS_PHONGT`; the six supported skinned effect variants) and six are shared includes (underscore-prefixed
+like retail's, so the loose override walk skips them). The set covers exactly
+the effect tags the committed models reference — the other retail
+effects (glass, mirrors, tracer, flag, foliage, ...) return when models that
+name them do.
+
+`minimal_fx_gen` regenerates and guards the pair (`--write` after editing a
+source); `fx_compile_validate` compiles every source through
+`D3DXCreateEffect` under the loader's define sets — the loud version of
+retail's silent boot drop (skips where D3DX9 or a D3D9 device is missing).
+Validated on retail 2026-08-31: all 14 PFF-loaded, FP viewmodel drawn.
 
 ## Guards (ctest, run in CI)
 
@@ -229,12 +253,24 @@ rather than asserting byte-equality against a throwaway generator:
 | Guard | Covers |
 |---|---|
 | `minimal_rtxt_gen` | the string tables emit + round-trip |
-| `minimal_def_validate` | `items.def` / `weapon.def` / `ammo.def` parse through `engine/formats/def` |
+| `minimal_3di_gen` | `house.3di` byte-equals the `house` recipe minted through `threedi_3di3_write` (the `fixtures/threedi/synth` twin) and `wall.tga`/`roof.tga`/`wood.tga` byte-equal their swatch recipes (`minimal_3di_gen_test --write` re-emits them) |
+| `minimal_model_validate` | every model authored in Godot (`crate`, `person`, `person_hd`, `akm`, `arms`) names itself, carries a runtime-safe collision block, shader tags the authored `.fx` set serves, allowlisted `.tga` textures and the tangent vertex format iff a tag reads TANGENT; the bytes themselves are guarded by the GUT `model_export_guard_test.gd` over `godot/authoring/` |
+| `minimal_def_validate` | `items.def` / `weapon.def` / `ammo.def` parse through `engine/formats/def`; `items.def` carries the house row `108001` as a building naming `house` and the crate row `108002`; `weapon.def` carries exactly one weapon, `WPN_AK47AUTO`, with its AKM viewmodel slice |
 | `minimal_mnu_validate` | `main.mnu` (Startup), `mp.mnu` (LAN host/join), `sp.mnu` (single player) parse and carry their screens |
-| `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight |
+| `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight, arms `WPN_AK47AUTO` as its kit and lists it as its one allowed weapon, and places the house (`108001`) and the crate (`108002`) exactly once each (`minimal_map_validate_test --write` performs the surgical edits) |
+| `minimal_runtime_loadout` | the production mission kernel boots the real minimal tree and the promoted kit, equipped inventory slot, and player entity all resolve to `WPN_AK47AUTO` (the set answers no `WPN_M4AUTO`, so this is the proof the player spawns armed) |
 | `minimal_trn_gen` | `mnml.trn` round-trips, keeps the 8-wide sector grid + quadrant block, names exactly the shipped `mnml_*` art (`minimal_trn_gen_test --write` re-emits the config) |
-| `minimal_art_validate` | every image `mnml.trn` names decodes; the colormap is big enough to quadrant-split; the cursor is a 32×32 type-2 32 bpp alpha TGA |
+| `minimal_art_validate` | every image `mnml.trn` names decodes, and so do the house's three swatches; the colormap is big enough to quadrant-split; the cursor is a 32×32 type-2 32 bpp alpha TGA |
 | `minimal_eol_guard` | every hand-authored text file is CRLF |
+| `minimal_fx_gen` | each committed `.fx` byte-equals wrap(its `tests/fixtures/fx/` source) and no stray `.fx` rides in assets/ |
+| `fx_compile_validate` | every authored effect compiles through `D3DXCreateEffect` under the loader's define sets (Skipped without D3DX9/D3D9) |
+| `minimal_pff_manifest` | the explicit `assets/.gitignore` authored manifest is complete and its loose set retains the AK viewmodel + player locomotion chain |
+
+The BMS remains an authored document, not a generated one; `minimal_map_validate_test --write` is the
+repeatable command for applying these edits. It sets the kit and the
+availability list to the AK when they differ, adds the house building when no
+record names `108001`, and emits through `bms::write`; every other record and
+field is preserved.
 
 ## Packaging
 
@@ -248,15 +284,21 @@ rather than asserting byte-equality against a throwaway generator:
   defs, mission, fonts and music scripts, `resource.pff` = the map and terrain
   (`.env`/`.trn`/`.cpt`/source art).
 - `minimal_pff_package_test --install <dir>` assembles a runnable **loose**
-  install: everything flat plus a zero-entry `resource.pff` boot token, run with `/d`.
+  install: every explicitly allowlisted authored file flat, including the
+  authored models, animations and textures, plus the two temporary retail definitions, plus the shader-bearing
+  `resource.pff` (it clears the boot gate AND carries the `.fx` set the
+  PFF-walk-only precompile needs), run with `/d`. `--check` validates that same
+  manifest without writing.
   With `OPENNOVA_JO_DIR` set it also stages `Jointops.exe` + `binkw32.dll` +
   `game.cfg` from your own install (never committed).
 
-ONED's Stage & Run Retail is the everyday compatibility loop: it stages the
-selected tree loose under ONED's own data dir (`user://packed`), adds
-the zero-entry `resource.pff` boot token, stages the retail runtime beside it,
-and runs it with `/d`; Stop ends that managed child. The hidden `--pack-game`
-command instead builds the packed `localres.pff` layout used by releases.
+The Godot **OpenNova** dock provides **Stage & Run Retail** and **Stop** for
+the active world source. It preserves existing boot archives; a loose-only
+source receives a zero-entry `resource.pff` token. That staging path does not
+archive loose `.fx` files, so use the shader-bearing install from
+`minimal_pff_package_test --install` for this set's retail viewmodel validation.
+The source-project `--pack-game` command builds the packed `localres.pff`
+layout used by releases. See [game data workflows](../godot/tools/README.md).
 
 ## Validation (asset-gated — needs a retail JO install)
 
@@ -273,9 +315,27 @@ command instead builds the packed `localres.pff` layout used by releases.
 Records the run under the asset-gated protocol (never commit the capture); the
 recipe is the acceptance test for "the minimal set hosts + joins."
 
-Known gaps: no model here is ours yet — the player body, its animations and
-the viewmodel are the staged retail bring-up set described above, and the
-committed tree still declares graphics it does not carry. The terrain has
+Validated on retail 2026-08-31: boot → menu → `mnml` → an armed player that
+walks with a drawn first-person viewmodel, all from this set loose + the
+shader-bearing `resource.pff`.
+
+Revalidated on retail 2026-09-01 after the loose-package manifest fix: onHook
+0.6.0 captured the drawn AK viewmodel before its overlay, and real player input
+moved the reported BMS pose from `(0, 0, 0)` to
+`(-12.835, -12.958, 0.869)`.
+
+Revalidated on retail 2026-09-06 with the Godot-authored models: a `/FRISK`
+boot on the `--install` staging logs `person.3DI`, `person_hd.3DI`,
+`arms.3DI`, `akm.3DI`, `crate.3DI`, their `.TGA` textures (the 32 bpp flat
+normals on the type-5 slots included) and the authored `AVATARS.DEF` as
+loaded; mission entry with the drawn viewmodel is owed to the next onHook
+session. Our own runtime on the same staging draws the rifle and arms in first
+person and the body in the chase camera, posed by the retail clips.
+
+Known gaps: the shaders, the house, the crate, the body and head, the rifle
+and arms, the avatar table, the clips and their `.adm` tables are ours
+(above); the two definition tables (`charattr.def`, `SndProf.def`) are the
+last retail bytes. The terrain has
 relief and a full-size colormap but no tile overlay, and there is no `.ptl`
 catalogue, so the weapon authors no muzzle-flash or casing effect.
 

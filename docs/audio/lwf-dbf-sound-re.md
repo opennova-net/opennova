@@ -843,4 +843,4 @@ semantics, and the global bank-slot order are all engine-witnessed and implement
   impact consumers are recorded in vehicle-client-movers-re sections 11 through 37.
 - follow-up: rename the `engine/formats/lwf` `Multi.target_id` field and its
   wrappers to the witnessed one-shot-cull-range meaning. The retired ONED sound
-  workspace exposed it as "(id N)"; no current ONED UI exposes the field.
+  workspace exposed it as "(id N)"; no current editor UI exposes the field.

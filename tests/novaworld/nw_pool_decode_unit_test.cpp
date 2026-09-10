@@ -206,7 +206,7 @@ void test_pool3_sync_0x20_via_pcap() {
 // A pool spawn's 0x01-gated euler_z (entity+16) is the engine yaw heading, NOT
 // velocity. It must surface as the spawn-pose heading the spectator renders, and
 // (90 - heading) must recover the authored BMS yaw the editor places from — so a
-// net static sits exactly where ONED's bms_to_godot_basis would put it. Before the
+// net static sits exactly where the placer's bms_to_godot_basis would put it. Before the
 // fix this field was dropped and every static stood at heading 0 (faced east).
 void test_spawn_heading_survives_the_wire() {
 	const double bms_yaw = 30.0;                 // what an author would set in the .bms

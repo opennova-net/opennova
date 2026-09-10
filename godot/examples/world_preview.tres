@@ -1,0 +1,5 @@
+[gd_resource type="WorldSource" format=3]
+
+[resource]
+data_directory = "res://../assets"
+mission_name = "mnml.bms"

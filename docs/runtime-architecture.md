@@ -21,6 +21,48 @@ OpenNova keeps that shape. Catch-up is capped at 31 ticks, render reads the
 latest state without interpolation, and WAC/BMS dividers remain inside their
 own systems.
 
+## Editor preview
+
+The OpenNova World editor plugin loads the active scene's authored GameWorld
+nodes directly. A WorldSource Resource persists the selection of native data.
+GameWorld.load_preview shares environment, terrain and object placement with
+mission loading, but never starts Simulation, mission audio or effects. Its
+refresh supplies the primary editor camera through a scoped RenderView and
+runs the third leg table, `kPreviewRefresh` in
+`godot/src/world/game_world_frame.cpp` beside `kFrameLegs` and
+`kFrozenPoseRefresh` (ADR 0043 d9: one frame-leg home), pinned by
+`preview_leg_names()`. It runs the frozen replay's settle prefix (celestial
+glare, sun veil, the exposure chain) and then the live camera-producer legs
+at delta 0, including the point-light select and the environment cube; every
+omitted row is annotated in that file. The live frame table is unchanged.
+
+Terrain, foliage, environment and water expose their loaded configuration in
+the ordinary Inspector. PreviewProperties marks source-derived properties as
+read-only and non-stored while loaded, then restores their authored values on
+unload. Generated meshes and models have no scene owner. No duplicate GameWorld
+is instanced, so preview cannot create a cyclic scene inclusion on Save.
+The editor camera borrows a separate environment and DisplayDecode compositor;
+the authored ClearColor resource is unchanged. Teardown restores the camera and
+shader globals and clears generated resources. Runtime compositors remain
+dormant during editor scene entry. Native format I/O remains direct; WorldSource
+is editor configuration, not a second mission document.
+
+Placement authoring reads and moves entities through the preview's entity
+projections. Every preview load mints one `WorldEntityProxy` per mission
+entity record under the runtime root's `PreviewEntities` node (no scene
+owner, so Save never persists them): its transform is the placed world
+transform, its typed identity names the record, and its representation says
+whether the preview rendered a retained batched static instance, an individual
+model, or nothing. `GameWorld.update_preview_entity(kind, index)` re-projects
+one record after its transform changed: the placer re-stamps the retained
+instance's population rows, RLOD sphere, light-draw and item-effect rows and
+terrain shadow source in place (`MissionObjectPlacer.set_static_instance_transform`,
+keeping the spatial bin placement assigned), or moves the individual model.
+`reload_preview_entities()` re-places the whole document for added or removed
+records and changed items; a changed item id under `update_preview_entity`
+falls through to it. Pinned by `godot/tests/world_preview_test.gd`.
+See [the preview guide](../godot/addons/opennova_world/README.md).
+
 ## Live OpenNova path
 
 [ADR 0036](adr/0036-one-inmatch-session-wire-first.md) splits the frame
@@ -190,7 +232,7 @@ the leg table (`render_particle_frame`, `render_material_frame`, and the
 per-model advance is one static driver over a shared awake set
 (`ObjectModel::advance_awake_frame`, per-frame-guarded); the menu shell and
 its portrait models drive that same static advance from the game process loop
-outside a live mission. ONED has no preview-model loop (ADR 0037).
+outside a live mission. The Godot editor uses a frozen native world preview (ADRs 0044/0045).
 
 D-RORD-8 (fixed 2026-08-12): the one-frame visibility lag was the CAMERA, not
 the occlusion-after-present order. The local-player camera/viewmodel placement

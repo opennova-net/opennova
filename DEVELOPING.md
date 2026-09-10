@@ -1,7 +1,7 @@
 # Developing OpenNova
 
 How to build and run OpenNova locally: the C++ core, the Godot GDExtension, the
-game and ONED, and the NovaWorld servers, including how to test the servers
+game and Godot editor tools, and the NovaWorld servers, including how to test the servers
 against both retail Joint Operations and our own Godot client.
 
 For the runtime build and release layout see [README.md](README.md). For
@@ -69,7 +69,7 @@ scripts/build_godot.sh Release    # Release   -> plain /O2, no symbols
 ```
 
 All three flavors produce the same `template_debug`-named artifact, the one loaded by
-the Godot editor and source/debug runs of the game or ONED; they differ only
+the Godot editor and source/debug game runs; they differ only
 in compiler flags. Build `DebugFull` when you need to step through native code;
 expect roughly 1.5x whole-frame cost in-game while it is installed, so never profile
 against it. The `template_release` DLL that a release export loads is not produced by
@@ -83,7 +83,27 @@ hot-reload reliably, and on Windows the running editor holds the DLL lock so the
 deferred. A stale DLL shows up as GDScript "class not found" errors for classes that
 `engine/` has since added.
 
-## Run the game and ONED
+## Preview a world in the Godot editor
+
+Open `godot/project.godot`, then choose **Project > Tools > OpenNova: Open
+example world**. The plugin shows native terrain and mission placements before
+Play. Configure a WorldSource in the Inspector and use Reload after changing
+the selection or its source files.
+
+For a full retail world, copy a stock Joint Operations install's
+`resource.pff`, `localres.pff` and `language.pff` into the ignored
+`local-data/jo/` directory at the repository root. Choose **Project > Tools >
+OpenNova: Open retail world** to preview Operation: Emerald Scorpion
+(`res://examples/retail_world.tscn`).
+
+Select Terrain, FoliageDispatcher, MissionEnvironment, or Water in the scene tree
+to inspect their loaded configuration. Source-derived values are read-only during
+preview; Reload refreshes them from the native data.
+
+See [the preview guide](godot/addons/opennova_world/README.md) for source modes,
+local installation settings, and the first milestone's limits.
+
+## Run the game and Godot editor tools
 
 ```bash
 $GODOT_BIN --path godot
@@ -95,17 +115,17 @@ On a fresh checkout, import the resources once before the first run:
 $GODOT_BIN --headless --path godot --import
 ```
 
-The import can crash on a cold cache; just run it again (CI retries it). The project's
-main scene is the runtime game. To run ONED from source, pass its feature-override
-scene explicitly:
+The project's main scene is the runtime game. Open a configured world in Godot
+for authoring and run controls:
 
 ```bash
-$GODOT_BIN --path godot res://modtools/oned_main.tscn
+$GODOT_BIN --editor --path godot res://examples/world_preview.tscn
 ```
 
-ONED provides Settings, Run OpenNova, Stage & Run Retail,
-and Stop. It has no asset-authoring workspaces; see
-[`godot/modtools/README.md`](godot/modtools/README.md).
+The OpenNova bottom dock provides Run Game, Stage & Run Retail, Stop, and Pack
+Game Data, using the active World's source. The viewport toolbar's Play World
+launches the selected mission. See [game data workflows](godot/tools/README.md)
+and the [world editor guide](godot/addons/opennova_world/README.md).
 
 ## Run the NovaWorld servers locally
 

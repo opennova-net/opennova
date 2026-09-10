@@ -74,3 +74,128 @@
 !/mnml_t.tga
 !/mnml_m.pcx
 !/mnml_f.pcx
+
+# --- Shaders: the authored .fx set (SCR-wrapped; sources in tests/fixtures/fx/) ---
+# The boot shader precompile enumerates .fx through PFF directory walks and the
+# effect loader accepts only the 'SCR',0x01 container (key 0xA55B1EED)
+# [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060] -- without these the FP viewmodel
+# and every skinned draw silently fall back to fixed-function. minimal_fx_gen
+# guards that each artifact byte-equals wrap(source) and that no stray .fx
+# rides beside them.
+!/_baseinc.fx
+!/_vsshared.fx
+!/_vsskshared.fx
+!/_psshared.fx
+!/_tdepth.fx
+!/_tskin.fx
+!/_ffp.fx
+!/phongt.fx
+!/skbasic.fx
+!/skbdifft2.fx
+!/skbdiffo.fx
+!/skbdiffo2.fx
+!/skbphongt.fx
+!/skbphongo.fx
+
+# --- Models + textures we author: the house (items.def 108001, placed in mnml) ---
+# assets/house.3di is the fixtures/threedi/synth `house` recipe minted again by
+# minimal_3di_gen (one recipe, two byte-guarded copies); the three flat-colour
+# swatch textures it names are minted beside it.
+!/house.3di
+!/wall.tga
+!/roof.tga
+!/wood.tga
+
+# --- Models + textures authored in Godot (sources under godot/authoring/<name>/) ---
+# Exported by the opennova_model addon through the parity writer and re-exported
+# + byte-compared by godot/tests/model_export_guard_test.gd. The crate (items.def
+# 108002, placed in mnml) is the first: a Blender box through Godot's glTF importer.
+!/crate.3di
+!/crate.tga
+# The player body and head on the retail reset clip's 20-row rig (DT1RST.BAD bone
+# order and pivots, until our own clips exist; ADR 0046 decision 5): the avatar
+# combo AVATARS.DEF names, minted from godot/authoring/person and person_hd.
+!/person.3di
+!/person.tga
+!/person_hd.3di
+!/person_hd.tga
+# The first-person rifle (rigid, 45 parts) and arms (skinned, 38 rows) on the
+# retail rAKM_RST.bad rig with AKM_1st's pivots (the arms share the rifle's
+# table; ArmsG's ground proxy ends theirs), minted from godot/authoring/akm and
+# arms: weapon.def's GFX1 and the AVATARS.DEF arms. The type-5 normal slots
+# take a flat 32 bpp TGA (the normal rides the alpha, retail's flat_N.tga form).
+!/akm.3di
+!/akm.tga
+!/akm_n.tga
+!/brass.tga
+!/arms.3di
+!/arms.tga
+!/arms_n.tga
+
+# --- Definitions we author with the engine writers ---
+# The avatar table: one head, one body, the arms, one nationality per
+# alignment. Minted by minimal_avatars_gen (--write).
+!/AVATARS.DEF
+
+# --- Clips we author in Godot (sources: godot/authoring/<name>/*_clips.tres) ---
+# Projected from the rigs' Animations by the opennova_model addon through the
+# .bad/.adm writers and re-exported + byte-compared by
+# godot/tests/clip_export_guard_test.gd (ADR 0047). The body set on person's
+# twenty rows (person.adm: reset, idle, the eight walk / crouch-walk / crawl
+# directions, run, jog, crouch, prone, jump, death and reload, every death key
+# on the one fall; failsafe.bad is the reset under the name every mission
+# start loads) and the first-person rifle set on the 46 rAKM rows (akm.adm:
+# reset, idle, fire, reload; the rifle's 45 parts and the arms' 38 rows read
+# their own prefix).
+!/failsafe.bad
+!/pers_crouch.bad
+!/pers_crwlb.bad
+!/pers_crwlbl.bad
+!/pers_crwlbr.bad
+!/pers_crwlf.bad
+!/pers_crwlfl.bad
+!/pers_crwlfr.bad
+!/pers_crwll.bad
+!/pers_crwlr.bad
+!/pers_cwlkb.bad
+!/pers_cwlkbl.bad
+!/pers_cwlkbr.bad
+!/pers_cwlkf.bad
+!/pers_cwlkfl.bad
+!/pers_cwlkfr.bad
+!/pers_cwlkl.bad
+!/pers_cwlkr.bad
+!/pers_death.bad
+!/pers_idle.bad
+!/pers_jog.bad
+!/pers_jump.bad
+!/pers_prone.bad
+!/pers_reload.bad
+!/pers_run.bad
+!/pers_walkb.bad
+!/pers_walkbl.bad
+!/pers_walkbr.bad
+!/pers_walkf.bad
+!/pers_walkfl.bad
+!/pers_walkfr.bad
+!/pers_walkl.bad
+!/pers_walkr.bad
+!/person.adm
+!/person_rst.bad
+!/akm.adm
+!/akm_fire.bad
+!/akm_idle.bad
+!/akm_reload.bad
+!/akm_rst.bad
+
+
+# --- TEMPORARY: the retail bring-up set (committed 2026-08-31, to be replaced) ---
+# These are RETAIL Joint Operations bytes: the two definition tables the
+# bring-up set README.md describes (the models, textures, avatar table, clips
+# and anim defs are ours now, above). Committed by explicit decision so the
+# minimal set runs (and ships) from a fresh checkout; every line is deleted
+# as our own writer-produced replacement lands. Names stay individually
+# listed on purpose: removing one is the same conscious call as adding one.
+# retail defs
+!/charattr.def
+!/SndProf.def

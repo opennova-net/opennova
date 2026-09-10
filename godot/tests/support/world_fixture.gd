@@ -101,6 +101,19 @@ static func stage_sound_bank(root_dir: String, set_names: PackedStringArray,
 	assert(lwf.save_file(root_dir.path_join(bank_name)) == OK, "the fixture bank saves")
 
 
+## Re-emit the mission at `source` through MissionData with its authored
+## weapon kit cleared, into `dest` (the same path is fine). The committed
+## mnml.bms promotes an AK kit that outranks any PLAYER_INFO selection
+## offline, so a fixture that wants the profile to win stages this copy.
+static func write_mission_without_loadout(test: GutTest, source: String, dest: String) -> void:
+	var mission := MissionData.new()
+	test.assert_eq(mission.open_file(source), OK,
+			"the mission opens for the no-kit fixture: %s" % source)
+	test.assert_true(mission.set_weapon_loadout([]),
+			"the profile-over-fallback fixture can clear the authored kit")
+	test.assert_eq(mission.save_as(dest), OK, "the no-kit mission serializes")
+
+
 ## The packaged world scene, instantiated and parented under the test. The
 ## world unloads itself (and clears its mounted root's caches) as it leaves
 ## the tree: a loaded world freed without unload() leaves render state behind
@@ -205,6 +218,8 @@ const SHELL_RESOURCE_FILES := [
 	"mnml.env", "mnml.trn", "mnml_c.tga", "mnml_dm.tga",
 	"mnml_dc1.tga", "mnml_dc2.tga", "mnml_dc3.tga", "mnml_dmd.tga", "mnml_d1.tga",
 	"mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx",
+	# The set's own model (items.def 108001, placed in mnml.bms) + its swatches.
+	"house.3di", "wall.tga", "roof.tga", "wood.tga",
 ]
 # The synthetic Tmap terrain (its .trn names the mnml art packed above).
 const SHELL_BAKED_TERRAIN_FILES := ["Tmap.cpt", "Tmap_f.pcx", "Tmap_m.pcx"]
@@ -265,8 +280,13 @@ static func write_pff(test: GutTest, path: String, entries: Array) -> void:
 ## lifecycle substitutions: the render-capable Tmap.trn under mnml.trn's
 ## name, the shipped JO in-world menus (when the reference fixture set is
 ## present) under the game.mnu / weapon.mnu archive names, and
-## SHELL_WEAPON_DEF as weapon.def.
-static func shell_archive_entries(test: GutTest, filenames: Array) -> Array:
+## SHELL_WEAPON_DEF as weapon.def. With `without_mission_loadout` the
+## committed mnml.bms is re-emitted with its authored kit cleared
+## (write_mission_without_loadout, saved beside the archives in
+## `staging_dir`), so a shell test can watch the PLAYER_INFO selection win
+## over the engine fallback.
+static func shell_archive_entries(test: GutTest, filenames: Array,
+		without_mission_loadout := false, staging_dir := "") -> Array:
 	var entries: Array = []
 	for filename in filenames:
 		var source := MINIMAL_ASSETS_DIR.path_join(filename)
@@ -287,6 +307,10 @@ static func shell_archive_entries(test: GutTest, filenames: Array) -> Array:
 			if source.is_empty():
 				source = MINIMAL_ASSETS_DIR.path_join("main.mnu")
 		var bytes := FileAccess.get_file_as_bytes(source)
+		if filename == "mnml.bms" and without_mission_loadout:
+			var no_kit_path := staging_dir.path_join("mnml_no_kit.bms")
+			write_mission_without_loadout(test, ProjectSettings.globalize_path(source), no_kit_path)
+			bytes = FileAccess.get_file_as_bytes(no_kit_path)
 		if filename == "weapon.def":
 			bytes = SHELL_WEAPON_DEF.to_utf8_buffer()
 		test.assert_false(bytes.is_empty(),
@@ -298,11 +322,13 @@ static func shell_archive_entries(test: GutTest, filenames: Array) -> Array:
 ## The three boot-table archives (language / localres / resource) written into
 ## `dir` from the minimal pack; `with_baked_terrain` packs the Tmap payload +
 ## textures into resource.pff (the shell boot needs them: the minimal TRN is
-## CPT-less and cannot create render RIDs).
+## CPT-less and cannot create render RIDs); `without_mission_loadout` packs
+## the kit-less mnml.bms (shell_archive_entries).
 static func stage_shell_archives(test: GutTest, dir: String,
-		with_baked_terrain := true) -> void:
+		with_baked_terrain := true, without_mission_loadout := false) -> void:
 	var language_entries := shell_archive_entries(test, SHELL_LANGUAGE_FILES)
-	var localres_entries := shell_archive_entries(test, SHELL_LOCALRES_FILES)
+	var localres_entries := shell_archive_entries(test, SHELL_LOCALRES_FILES,
+			without_mission_loadout, dir)
 	var resource_entries := shell_archive_entries(test, SHELL_RESOURCE_FILES)
 	if with_baked_terrain:
 		# The minimal TRN is intentionally CPT-less and cannot create render RIDs.
@@ -322,15 +348,16 @@ static func stage_shell_archives(test: GutTest, dir: String,
 ## process frame), or null when the scene did not instantiate. The persisted
 ## resource dir / expansion / game are pointed at the staged archives (the
 ## caller saves and restores the settings file around the test). The shell is
-## a plain child: pair with release_shell() in after_each.
-static func boot_shell(test: GutTest) -> MainGame:
+## a plain child: pair with release_shell() in after_each. `without_mission_loadout`
+## stages the kit-less mnml.bms (stage_shell_archives).
+static func boot_shell(test: GutTest, without_mission_loadout := false) -> MainGame:
 	_last_shell_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
 	test.assert_eq(DirAccess.make_dir_recursive_absolute(_last_shell_dir), OK)
 	test.assert_eq(SHELL_LANGUAGE_FILES.size() + SHELL_LOCALRES_FILES.size()
-			+ SHELL_RESOURCE_FILES.size(), 31,
+			+ SHELL_RESOURCE_FILES.size(), 35,
 			"the retail-shaped archives contain every minimal fixture resource")
-	stage_shell_archives(test, _last_shell_dir, true)
+	stage_shell_archives(test, _last_shell_dir, true, without_mission_loadout)
 
 	ResourceDirSettings.set_resource_dir(_last_shell_dir)
 	ResourceDirSettings.set_expansion("")

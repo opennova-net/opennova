@@ -105,6 +105,9 @@ public:
 		int item_id = 0;
 		int robj_index = 0;
 		AABB world_bounds;
+		// The ROBJ's merged model-rest-space bounds, so a re-stamped entity
+		// transform recomputes world_bounds without the batches.
+		AABB local_bounds;
 	};
 
 	enum {
@@ -296,6 +299,28 @@ public:
 			bool p_active);
 	bool clear_static_terrain_shadow_replacement(int p_bms_id);
 
+	// --- editor authoring seams (ADR 0044) --------------------------------
+	// Whether place() retained a batched static instance for the entity id.
+	bool has_static_instance(int p_bms_id) const;
+	// The exact world transform place() stamped for the retained static
+	// instance (identity when none is retained).
+	Transform3D get_static_instance_transform(int p_bms_id) const;
+	// The merged model-rest-space bounds of the retained instance's ROBJ
+	// light-draw rows (an empty AABB when no row carries geometry).
+	AABB get_static_instance_local_bounds(int p_bms_id) const;
+	// The transform place() stamps for an entity of `item_id` authored at
+	// the position/rotation: the entity transform under the item's authored
+	// model scale.
+	Transform3D placement_transform(const Vector3 &p_position,
+			const Vector3 &p_rotation_deg, int p_item_id);
+	// Re-stamp one retained static instance at a new world transform: every
+	// population row it occupies, its RLOD bound sphere, its light-draw and
+	// item-effect rows and its terrain shadow source follow. The instance
+	// keeps the spatial bin population place() assigned it (bins are chosen
+	// once at placement; a full re-place re-bins). False when no instance is
+	// retained for the id.
+	bool set_static_instance_transform(int p_bms_id, const Transform3D &p_xform);
+
 	// Register an already-resolved object plus its static render batches —
 	// the construction seam for callers that already own parsed geometry
 	// (including asset-free tests). Each batch row may carry "lod_index"
@@ -360,6 +385,7 @@ private:
 		int slot = -1; // the population-local slot (the shadow meta index)
 		int row = -1;
 		int lod_index = 0;
+		Transform3D offset; // the batch's model-rest offset under the entity
 		Transform3D live_xform; // the row's transform while the level is live
 		Color custom_data; // the light-atlas row (visible populations)
 		bool shadow_only = false; // the filtered shadow twin
@@ -438,7 +464,8 @@ private:
 			const Transform3D &p_xform);
 	int _append_static_light_draw_source(int p_source_index, int p_kind,
 			int p_entity_index, int p_bms_id, int p_item_id,
-			int p_robj_index, const AABB &p_world_bounds);
+			int p_robj_index, const AABB &p_world_bounds,
+			const AABB &p_local_bounds);
 	void _record_static_terrain_shadow_source(int p_kind, int p_index,
 			int p_bms_id, int p_team, uint32_t p_entity_attrib, int p_item_id,
 			const String &p_graphic, const Transform3D &p_xform,
@@ -494,6 +521,11 @@ private:
 		// Legacy/manual registrations use `graphic`.
 		String batch_key;
 		int index = -1;
+		// The entity record identity (kind, index) the instance projects,
+		// so a re-stamped transform reaches the terrain shadow source (-1
+		// for a manual registration).
+		int kind = -1;
+		int entity_index = -1;
 		Transform3D xform;
 		bool casts_static_shadow = false;
 		bool mirror_reflected = false;

@@ -48,38 +48,54 @@ int main() {
 		DefItemsFile items{};
 		CHECK(def_parse_items(path("items.def").c_str(), &items) == 0, "items.def parses");
 		bool has_person = false;
+		bool has_mp_player = false;
+		const DefItemDef *house = nullptr;
+		const DefItemDef *crate = nullptr;
 		for (size_t i = 0; i < items.count; ++i) {
 			// type 8 == person in the witnessed mapping (D-ITEMDEF-1); check by
 			// the presence of a spawnable person via its id range instead of the
 			// raw enum to stay robust to the FFI field name.
 			if (items.entries[i].id == 105310 || items.entries[i].id == 105311) has_person = true;
+			// retail declares BOTH player rows and hosts spawn the MP one: the
+			// runtime's player template is wire type 0x14B9 = items.def id 105305
+			// (engine/net/npwire/entity_class.h kPlayerPersonTypeId), so a set
+			// without this row leaves every hosted/joined player with no graphic
+			// and no anim_def.
+			if (items.entries[i].id == 105305) has_mp_player = true;
+			// The set's own model: the synth house (assets/house.3di), placed in
+			// mnml.bms as a building. 108001 is the first id of our own range.
+			if (items.entries[i].id == 108001) house = &items.entries[i];
+			// The crate (assets/crate.3di): the first model authored in Godot.
+			if (items.entries[i].id == 108002) crate = &items.entries[i];
 		}
 		CHECK(items.count >= 1, "items.def has at least one item");
 		CHECK(has_person, "items.def carries a spawnable person (player/soldier)");
+		CHECK(has_mp_player, "items.def carries the MP player row (105305 = wire 0x14B9)");
+		CHECK(house != nullptr, "items.def carries the house row (108001)");
+		CHECK(crate != nullptr, "items.def carries the crate row (108002)");
+		if (house != nullptr) {
+			CHECK(house->type == DEF_ITEM_TYPE_BUILDING, "the house is a building (the BMS building pool)");
+			CHECK(std::strcmp(house->graphic, "house") == 0, "the house names assets/house.3di");
+		}
 		def_free_items(&items);
 	}
 
-	// weapon.def — one selectable rifle so a joined player spawns armed, and
-	// the first-person viewmodel slice that rifle submits. The name is the one
-	// the viewmodel bring-up resolves, so a rename silently blanks the view.
+	// weapon.def — the ONE rifle: WPN_AK47AUTO, the authored akm first-person
+	// model and clip set. The engine's hardcoded WPN_M4AUTO spawn default
+	// [orig: PlayerClass_InitEntity @ 0x4B1116] is deliberately unanswered: the
+	// mission's kit arms the player (minimal_map_validate pins it).
 	{
 		DefWeaponsFile weapons{};
 		CHECK(def_parse_weapons(path("weapon.def").c_str(), &weapons) == 0, "weapon.def parses");
-		CHECK(weapons.count >= 1, "weapon.def has at least one weapon");
-		// Both names the engine addresses by LITERAL: the spawn/equip default
-		// [orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]
-		// and the one the first-person viewmodel bring-up resolves. A minimal set
-		// missing either spawns the player unarmed or blanks the view.
-		CHECK(find_weapon(weapons, "WPN_M4AUTO") != nullptr,
-				"weapon.def carries WPN_M4AUTO (the spawn/equip default)");
+		CHECK(weapons.count == 1, "weapon.def carries exactly one weapon");
 		const DefWeaponDef *rifle = find_weapon(weapons, "WPN_AK47AUTO");
-		CHECK(rifle != nullptr, "weapon.def carries WPN_AK47AUTO (the bring-up viewmodel name)");
+		CHECK(rifle != nullptr, "weapon.def carries WPN_AK47AUTO (the one rifle)");
 		if (rifle != nullptr) {
-			CHECK(std::strcmp(rifle->gfx1, "AKM_1st") == 0, "the rifle names its first-person model");
-			CHECK(std::strcmp(rifle->animadm, "AKM_1ST") == 0, "the rifle names its first-person .adm");
+			CHECK(std::strcmp(rifle->gfx1, "akm") == 0, "the rifle names the authored first-person model");
+			CHECK(std::strcmp(rifle->animadm, "akm") == 0, "the rifle names the authored first-person clip set");
 			// GFX1A is parse-and-discard in the original (the arms come from the
 			// character), carried for retail-shape fidelity.
-			CHECK(std::strcmp(rifle->gfx1a, "ARMSG") == 0, "the rifle carries the retail arms row");
+			CHECK(std::strcmp(rifle->gfx1a, "arms") == 0, "the rifle carries the arms row");
 			// Raw def units; the /256 scale is the consumer's
 			// [runtime/simassets/fp_viewmodel_spec.h kWeaponDefPosScale].
 			CHECK(rifle->pos[0] == 10.0f && rifle->pos[2] == -201.0f, "the hip viewmodel offset");

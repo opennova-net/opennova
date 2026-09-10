@@ -9,8 +9,8 @@ add_subdirectory(../../third_party/godot-cpp godot-cpp)
 # replication live in runtime/, ADR 0043 d4), NEVER opennova_novaworld_service,
 # so no sqlite or service code ends up in the binary.
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
-# Dear ImGui + the engine's ImGui pass (ADR 0039) build in every flavour (ONED's
-# run surface needs them in the release-mode dev zip too). The game's dev-tool
+# Dear ImGui + the engine's ImGui pass (ADR 0039) build in every flavour.
+# The game's dev-tool
 # windows ride the GDExtension flavour: every template_debug build (the editor,
 # scripts/build_godot.sh, PR CI, debug packaging) carries them; the
 # template_release DLL compiles them out and the game's release export strips the
@@ -158,7 +158,6 @@ add_library(${TARGET_NAME} SHARED
     devtools/debug_control_records.cpp
     devtools/debug_shell_host.cpp
     devtools/debug_control_table.cpp
-    devtools/oned_ui.cpp
     hud/hud_pos.cpp
     hud/vehicle_hud_block.cpp
     mission/mission_data.cpp
@@ -200,6 +199,23 @@ add_library(${TARGET_NAME} SHARED
     world/item_effect_director.cpp
     world/occlusion_frame.cpp
     world/game_world.cpp
+    world/world_source.cpp
+    world/world_entity_proxy.cpp
+    model/model_document.cpp
+    model/model_material_spec.cpp
+    model/model_authoring_manifest.cpp
+    model/model_collision_section_3d.cpp
+    model/model_bounding_volume_3d.cpp
+    model/model_user_point_3d.cpp
+    model/model_light_3d.cpp
+    model/model_scene_projector.cpp
+    model/model_scene_exporter.cpp
+    model/model_texture_encoder.cpp
+    model/clip_document.cpp
+    model/anim_def_document.cpp
+    model/clip_set_source.cpp
+    model/clip_projector.cpp
+    world/game_world_preview.cpp
     world/game_world_frame.cpp
     world/game_world_load.cpp
     world/game_world_effects.cpp

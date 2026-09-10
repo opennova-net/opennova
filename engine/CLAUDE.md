@@ -10,13 +10,13 @@
     runtime-fused: ADR 0030), 32 today: adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt,
     cbin, threedi, bad, def, avatars, mission, trn, cpt, til, foliage, env,
     mnu, mns, sbf, lwf, dbf, mus, grm, playersav, particle (.ptl), score, bink,
-    wac (front end; compiler/VM stay runtime).
+    tga (encode only), wac (front end; compiler/VM stay runtime).
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,
     environment, hud, menu, simassets, and devtools (the Dear ImGui pass, ADR
     0039: infrastructure like io/vfs, not a port, so it sits in the citation
-    allowlist; the pass, the frame-stats board and ONED's run surface build in
+    allowlist; the pass and the frame-stats board build in
     every flavour, the game's F3 windows only with `OPENNOVA_DEVTOOLS` — off for
     the release GDExtension flavour; ImGui headers never leave the group, the
     shell hands the context over as plain pointers via `devtools/imgui_abi.h`).

@@ -139,6 +139,22 @@ void Celestial::_ready() {
 	_rebuild_if_needed();
 }
 
+void Celestial::clear() {
+	for (const KeyValue<String, Body> &entry : bodies_) {
+		if (entry.value.model == nullptr) continue;
+		remove_child(entry.value.model);
+		entry.value.model->queue_free();
+	}
+	bodies_.clear();
+	if (star_mmi_ != nullptr) {
+		remove_child(star_mmi_);
+		star_mmi_->queue_free();
+		star_mmi_ = nullptr;
+	}
+	loaded_names_.clear();
+	cached_cam_id_ = ObjectID();
+}
+
 void Celestial::_rebuild_if_needed() {
 	Ref<EnvFile> env_data = _env_data();
 	if (env_data.is_null() || resource_root_.is_null()) {
@@ -188,15 +204,8 @@ void Celestial::_rebuild_if_needed() {
 			return;
 		}
 	}
+	clear();
 	loaded_names_ = signature;
-
-	for (int i = get_child_count() - 1; i >= 0; --i) {
-		Node *child = get_child(i);
-		remove_child(child);
-		child->queue_free();
-	}
-	bodies_.clear();
-	star_mmi_ = nullptr;
 	_build_star_field(env_data->get_star_3di());
 
 	for (const Spec &spec : wanted) {

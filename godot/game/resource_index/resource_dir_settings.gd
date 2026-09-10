@@ -1,8 +1,8 @@
 class_name ResourceDirSettings
 extends RefCounted
 
-## The runtime's persisted resource directory and player preferences. ONED has its
-## own `user://oned.cfg`; neither side reads the other's state.
+## The runtime's persisted resource directory and player preferences. The editor's
+## machine-local paths live separately in Godot project metadata.
 
 const CONFIG_PATH := "user://opennova.cfg"
 const SECTION := "resources"

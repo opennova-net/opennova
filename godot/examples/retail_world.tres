@@ -1,0 +1,6 @@
+[gd_resource type="WorldSource" format=3]
+
+[resource]
+source_kind = 1
+data_directory = "res://../local-data/jo"
+mission_name = "CP01.bms"

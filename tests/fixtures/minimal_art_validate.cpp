@@ -2,7 +2,7 @@
 // and the mission-family map overview.
 //
 // This used to be a GENERATOR: it filled each image with a solid colour and asserted the
-// committed bytes matched. The terrain art is now authored in ONED and exported through the
+// committed bytes matched. The terrain art is now authored in the editor and exported through the
 // engine's own terrain writer, so the byte guard only asserted that the throwaway C++ writer
 // still agreed with itself -- and it went red the moment the editor authored a real colormap,
 // which is the wrong signal entirely.
@@ -113,6 +113,10 @@ int main() {
 	    {"mnml_f.pcx", true, 0, false},                 // foliagemap
 	    {"newarow1.tga", false, 0, true},               // menu cursor
 	    {"mnml.pcx", true, 0, false},                   // mission-family map overview
+	    // The house's swatches (assets/house.3di names them; minted by minimal_3di_gen).
+	    {"wall.tga", false, 0, false},
+	    {"roof.tga", false, 0, false},
+	    {"wood.tga", false, 0, false},
 	};
 
 	for (const Art &a : art) {

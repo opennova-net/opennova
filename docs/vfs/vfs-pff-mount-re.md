@@ -74,7 +74,11 @@ stands confirmed.
    **forced 0** — Mission_LoadBMSFromPFF @ 0x40d43c,
    FileSystem_ValidateBMSFile @ 0x40d39c. Texture_LoadByNameWithChannel
    @ 0x58b52c reads the flag directly (a loose TGA under /d skips the .dds
-   substitution probe).
+   substitution probe). The probe itself still RUNS under /d when the named
+   .tga misses everywhere: witnessed 2026-08-31 on the minimal set (retail
+   /w /d /FRISK) — every model asked `<stem>.tga` and all 37 loose
+   `<stem>.dds` beside them loaded, so loose-only texture sets work as long
+   as no same-stem `.tga` shadows them.
 5. **Entry lookup** (`PFF_FindEntry @ 0x7685d0`): query strncpy'd to 32
    (truncates at 31 chars) and uppercased. The apparent trailing-space trim is
    dead as compiled: it begins at `upper_name[strlen]`, tests the terminating
@@ -123,7 +127,11 @@ stands confirmed.
 entry · +168 read cursor · +172 open flag · +176 last whole-load size ·
 +180 last-lookup-failed (the loop tie-break) · +184 report-errors gate
 (never set). **Entry (36 B):** +0 flags (bit0 = XOR-encrypted) · +4 offset ·
-+8 size · +12 timestamp (unread) · +16 name[16] (uppercased in place) ·
++8 size · +12 timestamp (unread by the by-name lookup; the boot shader-precompile
+directory WALK does read it and skips archives whose entries are zero-stamped —
+witnessed 2026-08-31 on the minimal set: a zero-stamped `resource.pff` behaves
+like no shaders at all (fixed-function fallback, no FP viewmodel), while generic
+nonzero stamps — pack-time `time()` + a CRC32 checksum — are accepted) · +16 name[16] (uppercased in place) ·
 +32 extra (unread).
 
 **Globals:** `0x33417F8` shared raw handle · `0x3341800` primary ptr
@@ -143,7 +151,7 @@ paths (16×16 B) · `0x33428C0` /FRISK gate · `0x829F90` name table[6][260] ·
 | D-VFS-5 | B | FIXED (2026-08-29, corpus-checked) | Encrypted-entry (bit0) streaming: retail decrypts ONLY whole-file reads (`PFF_ReadFile @ 0x768a30` / `PFF_LoadFileToMemory @ 0x768920`); `PFF_ReadFilePartial @ 0x768ab0` and the `FileSystem_Read @ 0x75abe0` stream return ciphertext; ours decrypts in `pff_extract`. **Faithful-nothing:** a read-only scan of the 36-byte directory entries' `flags` word over the five retail JO archives (`language.pff` 3913, `localres.pff` 2812, `resource.pff` 2565, `expansion/jox01/jox01.pff` 1481, `jox01L.pff` 805 = 11,576 entries) found NO bit0 entry, so no shipped read can reach the divergence — and `engine/base/vfs` exposes no partial or streaming read (every archive read is `pff_extract`, `vfs.cpp`), so neither side of it exists here. Decrypt semantics stay pinned by `pff_unit` |
 | D-VFS-7 | A | FIXED (2026-07-17) | Retail archive lookup now has a dedicated query key: at most 31 bytes, ASCII-uppercase, compared exactly against the entry name uppercased at mount. No trimming occurs—the apparent trim starts on the NUL and is dead—so stored/query trailing spaces remain significant; overlength queries cannot match the format's ≤16-byte entry names. `test_archive_names_keep_trailing_spaces` pins the distinction [orig: `PFF_FindEntry @ 0x7685d0`; `PFF_CompareSearchNameToEntry @ 0x768240`] |
 | D-VFS-10 | C | PERMANENT (2026-07-17) | The retail loose path is built from an unchecked query; the reimpl rejects rooted/drive-qualified/ADS/`..` queries and canonicalizes every component so symlinks cannot escape a mounted search root. This is a ratified mount-sandbox boundary: legitimate relative, case-insensitive in-root queries retain retail behavior, while exposing arbitrary host files through an asset name would be wrong. Pinned by `test_retail_query_stays_inside_mounted_root` [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] |
-| D-VFS-11 | C | PERMANENT (2026-07-30) | ONED's Run OpenNova loose action boots a loose-only directory past retail's zero-archives fatal: under `--loose-root`, `BootRootMount.mount` (the shell boot-mount helper) falls back to the selected loose directory when no boot-table archive opens; unflagged standalone launches keep the witnessed fatal ("No game data archives could be opened"). Ratified by ADR 0037; pinned by the boot-root loose-fallback test [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check @ 0x4a6f44 in Game_InitSubsystems @ 0x4a6cd0] |
+| D-VFS-11 | C | PERMANENT (2026-07-30) | The editor's Run Game / Play World (ADR 0045; formerly ONED's Run OpenNova loose action) boots a loose-only directory past retail's zero-archives fatal: under `--loose-root`, `BootRootMount.mount` (the shell boot-mount helper) falls back to the selected loose directory when no boot-table archive opens; unflagged standalone launches keep the witnessed fatal ("No game data archives could be opened"). Ratified by ADR 0037; pinned by the boot-root loose-fallback test [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check @ 0x4a6f44 in Game_InitSubsystems @ 0x4a6cd0] |
 
 **Ratified permanent decisions** (in the ledger's register):
 D-VFS-4 (raw runtime reads now probe live while indexed listings and decoded
@@ -154,7 +162,7 @@ reproducing manufactures garbage, ADR 0003 class), D-VFS-8 (retail's
 capacity supersets), D-VFS-9 (`<exp>L.pff` as our persistent primary vs
 retail's secondary slot 0 — identical effective precedence, model note),
 D-VFS-10 (mounted-root containment — reimpl safety boundary), and D-VFS-11
-(the ONED-managed `--loose-root` boot fallback — ADR 0037 tooling boundary).
+(the editor-managed `--loose-root` boot fallback — ADR 0037/0045 tooling boundary).
 
 ## Not witnessed
 

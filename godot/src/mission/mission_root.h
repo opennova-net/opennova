@@ -199,7 +199,7 @@ public:
 	// tick fired (and effects were drained). The deterministic single-tick
 	// primitive: standalone F3/MCP Step and isolated tests/tooling previews
 	// use this. GameWorld is the sole live real-time owner and advances the
-	// native session; ONED has no self-ticking mission runtime.
+	// native session; the editor preview has no self-ticking mission runtime.
 	bool tick();
 	// Real-time frame entry: bank `delta`, drain it in fixed tick_dt quanta, run that many single logic
 	// ticks (clamped to the native kMaxCatchupTicks), and present ONCE after the batch — the faithful

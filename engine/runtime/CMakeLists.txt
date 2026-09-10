@@ -20,12 +20,11 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/oneshot_play.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_selector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_profile.cpp
-    # devtools — the ImGui pass, ONED's run surface and the frame-stats board
+    # devtools — the ImGui pass and the frame-stats board
     # (every flavour); the game's dev-tool windows are added below under
     # OPENNOVA_DEVTOOLS (ADR 0039)
     ${CMAKE_CURRENT_SOURCE_DIR}/devtools/frame_stats_board.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/devtools/imgui_pass.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/devtools/oned_ui.cpp
     # controls — the JO input-binding catalog + CONTROL_MAPPING model
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/controls.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/binding_set.cpp

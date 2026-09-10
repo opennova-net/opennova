@@ -124,6 +124,7 @@ void GameWorld::_process(double p_delta) {
 
 void GameWorld::_notification(int p_what) {
 	if (p_what == NOTIFICATION_EXIT_TREE) {
+		unload_preview();
 		stop_water_render_stats();
 		return;
 	}
@@ -319,10 +320,8 @@ Ref<ArmoryWorldView> GameWorld::armory_view() {
 }
 
 Color GameWorld::get_current_frame_clear_color() const {
-	if (clear_color_ == nullptr || clear_color_->get_environment().is_null()) {
-		return Color(0, 0, 0);
-	}
-	return clear_color_->get_environment()->get_bg_color();
+	const Ref<Environment> environment = frame_clear_environment();
+	return environment.is_valid() ? environment->get_bg_color() : Color(0, 0, 0);
 }
 
 // --- the frame stats / perf probe ------------------------------------------
@@ -558,6 +557,24 @@ void GameWorld::on_nw_host_error(const String &p_message) {
 // --- bindings ----------------------------------------------------------------
 
 void GameWorld::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_world_source", "source"), &GameWorld::set_world_source);
+	ClassDB::bind_method(D_METHOD("get_world_source"), &GameWorld::get_world_source);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "world_source", PROPERTY_HINT_RESOURCE_TYPE,
+			"WorldSource"), "set_world_source", "get_world_source");
+	ClassDB::bind_method(D_METHOD("load_preview", "local_directory"), &GameWorld::load_preview, DEFVAL(String()));
+	ClassDB::bind_method(D_METHOD("load_preview_documents", "root", "mission", "terrain", "environment"),
+			&GameWorld::load_preview_documents);
+	ClassDB::bind_method(D_METHOD("update_preview_settings", "environment"), &GameWorld::update_preview_settings);
+	ClassDB::bind_method(D_METHOD("refresh_preview", "camera"), &GameWorld::refresh_preview);
+	ClassDB::bind_method(D_METHOD("unload_preview"), &GameWorld::unload_preview);
+	ClassDB::bind_method(D_METHOD("is_preview_active"), &GameWorld::is_preview_active);
+	ClassDB::bind_method(D_METHOD("get_preview_environment"), &GameWorld::get_preview_environment);
+	ClassDB::bind_method(D_METHOD("get_preview_status"), &GameWorld::get_preview_status);
+	ClassDB::bind_method(D_METHOD("get_preview_diagnostics"), &GameWorld::get_preview_diagnostics);
+	ClassDB::bind_method(D_METHOD("get_preview_entity_proxies"), &GameWorld::get_preview_entity_proxies);
+	ClassDB::bind_method(D_METHOD("get_preview_entity_proxy", "kind", "index"), &GameWorld::get_preview_entity_proxy);
+	ClassDB::bind_method(D_METHOD("update_preview_entity", "kind", "index"), &GameWorld::update_preview_entity);
+	ClassDB::bind_method(D_METHOD("reload_preview_entities"), &GameWorld::reload_preview_entities);
 	ADD_SIGNAL(MethodInfo(kSignalWorldLoaded));
 	ADD_SIGNAL(MethodInfo(kSignalLoadFailed, PropertyInfo(Variant::STRING, "reason")));
 	// A joiner's authoritative session record (post-auth S2C 0x7B) resolved
@@ -699,6 +716,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_names"), &GameWorld::frame_leg_names);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frozen_pose_leg_names"),
 			&GameWorld::frozen_pose_leg_names);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("preview_leg_names"), &GameWorld::preview_leg_names);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_stops_frame", "name"),
 			&GameWorld::frame_leg_stops_frame);
 	ClassDB::bind_method(D_METHOD("debug_refresh_render_pose", "camera"),

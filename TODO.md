@@ -1,11 +1,28 @@
 # TODO
 
-Everything here is work that is **not** a parity divergence: ONED and OpenNova Launcher UX, code
+Everything here is work that is **not** a parity divergence: editor and OpenNova Launcher UX, code
 hardening, and project health. Divergences from the original engine belong in
 [docs/divergence-ledger.md](docs/divergence-ledger.md) instead, and
 [docs/current-state.md](docs/current-state.md) explains which is which.
 
 ## Cleanup & verification backlog
+
+- [ ] Replace the committed retail bring-up set with authored assets. `assets/` carries
+      2 retail files (`charattr.def`/`SndProf.def`)
+      by explicit 2026-08-31 decision, allowlisted by name under the TEMPORARY banner in
+      `assets/.gitignore`, so the minimal set runs from a fresh checkout — and they ship
+      in both zip flavors until replaced. The 47 retail `.fx` are already replaced (the
+      authored set under `tests/fixtures/fx/`, retail-validated 2026-08-31) and the
+      never-loaded files trimmed against the validated run's `/FRISK` log. The model side
+      has its tool (ADR 0046: `godot/addons/opennova_model/` exports an authoring scene
+      under `godot/authoring/` through `threedi_3di3_write`; the crate, the body and the
+      head are authored that way, the house from a C++ recipe; the body and head stand on
+      the retail `DT1RST` rows, the arms and rifle on the `rAKM_RST` rows) and the clip
+      side its tool (ADR 0047: the rigs' Animations project through the `.bad`/`.adm`
+      writers; the body and rifle clip sets replaced the 159 retail clips and tables).
+      What is left is the definition slice. Land a replacement by swapping the
+      file and deleting its allowlist line; the `minimal_*` guards, the GUT export guard
+      and the retail A/B loop stay the acceptance.
 
 - [ ] Retail-LAN parity four-topology verdict: the tracked 24-cell matrix harness
       (`run_parity_matrix.ps1`/`generate_parity_manifest.ps1`/`verify_parity_matrix.ps1`
@@ -91,7 +108,7 @@ hardening, and project health. Divergences from the original engine belong in
       row, the a11y flag on Flush tail, effects live count,
       fire/destruction/throwable/wire present stats, occlusion counts (`occl`).
       Each returns as a VALUE slot fed by the shell sampler that owns the source.
-- [ ] Managed-game shutdown: ONED close/Stop may still require forced termination.
+- [ ] Managed-game shutdown: the editor's Stop and plugin shutdown may still require forced termination.
       Add a bounded graceful-quit window before the current forced termination,
       and keep the process-handle lifecycle reliable so a stopped retail child
       releases the staged files before the next pack.

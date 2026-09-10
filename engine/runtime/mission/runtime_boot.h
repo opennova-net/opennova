@@ -40,7 +40,7 @@ struct BootFileSource {
 BootFileSource boot_files_from_index(const ResourceIndex &index);
 
 // The infantry clip-set default when the embedder authors none.
-inline constexpr char kDefaultInfantryAdm[] = "E_STAND.adm";
+inline constexpr char kDefaultInfantryAdm[] = "person.adm";
 
 // Resolve the per-mission MissionText RTXT table bytes: <mission>.bin when it
 // exists, else medmssn.bin. Preserves the original fallback — medmssn.bin is

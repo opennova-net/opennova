@@ -829,8 +829,10 @@ void stash_mission_loadout_rules(
     r_kit_rows.clear();
     for (const bms::ItemAvailabilityEntry &row : mission.item_availability) {
         if (row.name.empty()) continue;
-        r_availability_rows.emplace_back(row.name,
-                                         static_cast<int32_t>(row.status));
+        // The status byte is signed in the original's read (a -1 pair value maps
+        // to 3 mission-allowed at apply) [orig: @0x54de3f..0x54de49].
+        r_availability_rows.emplace_back(
+                row.name, static_cast<int32_t>(static_cast<int8_t>(row.status)));
     }
     for (const bms::WeaponLoadoutRecord &row : mission.loadout.entries) {
         if (row.name.empty()) continue;

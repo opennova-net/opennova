@@ -1,7 +1,7 @@
 // Organic ammo binding and event consumers through the real round path.
 // [orig: Entity_InitOrganicAI @0x4BFCC0; Entity_UpdateInfantryAI @0x4BF322]
 #include "common/test_paths.h"
-#include "fixtures/minimal_3di_builder.h"
+#include <formats/threedi/threedi_build.h>
 #include <base/io/bam.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
@@ -206,7 +206,7 @@ static void test_definition_names_byte_width_and_missing_resources() {
     CHECK(std::filesystem::create_directory(root));
     const auto path = root / "WEAPONS.3di";
     {
-        synth3di::Model model;
+        threedi::ThreediBuildModel model;
         model.name = "WEAPONS";
         const int lod = model.add_lod();
         model.add_part(lod, 0, {});
@@ -217,8 +217,8 @@ static void test_definition_names_byte_width_and_missing_resources() {
         model.add_user_point("Marker", {}, {}, 0, 83);
         model.add_user_point("Wrapped", {}, {}, 0, 83);
         model.add_user_point("Next", {}, {}, 0, 83);
-        synth3di::Assembled assembled;
-        synth3di::assemble(model, assembled);
+        threedi::ThreediAssembled assembled;
+        threedi::threedi_build_assemble(model, assembled);
         CHECK(threedi::threedi_3di3_write(path.string().c_str(), &assembled.model) == 0);
         ResourceIndex index;
         CHECK(index.scan(root.string(), "", VfsMountMode::LooseOnly));

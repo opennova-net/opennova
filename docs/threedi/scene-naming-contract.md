@@ -1,9 +1,11 @@
 # Scene naming contract
 
-This document preserves the format-neutral names a future GLB/GLTF editor can
-use when converting ordinary scene data to and from 3DI. It is a naming
-contract, not an importer, exporter, Blender schema, or license to depend on
-custom properties.
+This document is the format-neutral naming contract the Godot model tool
+(ADR 0046: `ModelSceneProjector` / `ModelSceneExporter`, `godot/src/model/`)
+reads and writes when converting ordinary scene data to and from 3DI. It is a
+naming contract, not an importer, exporter, Blender schema, or license to
+depend on custom properties; the words a name cannot carry live in the typed
+`ModelAuthoringManifest` beside the scene.
 
 Names are ASCII and case-stable. Numeric identities are zero-padded to two
 digits. A converter must reject ambiguous DCC deduplication suffixes such as
@@ -17,14 +19,20 @@ digits. A converter must reject ambiguous DCC deduplication suffixes such as
 | Attachment | `~NNx attach` | Named attachment `x` on part `NN` |
 | User point | `UPcNN <label>` | User-point type `c`, part `NN`, optional label |
 | Light | `LP##` | Stable light identity |
-| Bone | `BN##` | Stable bone identity used by joints and weights |
+| Bone | `BN##` | Stable bone identity used by joints and weights (a label may follow a space: `BN01 Hips`; retail's own reset clips name their rows this way, `assets/DT1RST.BAD`) |
+| LOD | `LOD#` | The RLOD container (0-based, the file's order); its threshold, type tag and PANM rows ride the manifest's `ModelLodSpec` |
+| Collision section | `CO##` | One COBJ, paired with part `##`; `CO## faces` is its collision-face mesh (surfaces named `pt<poly>_mf<flags>`, faces wound clockwise seen from outside, the retail winding) |
 
 Collision and occlusion nodes retain their established two-letter type prefix,
 numeric identity, and the `-colonly` or `-oconly` role suffix (the tables
-below, from the retired `pyopennova/scene_naming.py`). Their complete field
-mapping is intentionally deferred until the GLB editor is designed; names alone
-must not be treated as a lossless encoding for flags, planes, or connected-part
-data.
+below, from the retired `pyopennova/scene_naming.py`). A bounding volume's
+flags, bounds and planes travel as the typed `ModelBoundingVolume3D` node the
+projector writes; a plain mesh named per the contract exports its AABB as an
+axis box. Godot's scene importer takes `-colonly` as its own hint (the mesh
+becomes a `StaticBody3D` named by the stem, `CB01`, holding a collision
+shape); the exporter accepts that converted form as the same volume. Occlusion
+records (`-oconly`) have no scene form yet and are refused by name. Names alone
+are never a lossless encoding for flags, planes, or connected-part data.
 
 ### Collision volumes
 
@@ -63,8 +71,17 @@ or animated-texture state. UV sets use `UVMap` for the primary channel and
 `UVMap_Lightmap` for the lightmap channel where those names are available.
 
 Hierarchy, transforms, meshes, materials, skinning, weights, UVs, lights, and
-animation travel as standard scene/GLTF data. Coordinate conversion has one
-owner per direction and happens exactly once. Nova-specific semantics that
+animation travel as standard scene/GLTF data. Static parts nest by parent with
+the pivot as the node position and meshes local to their part; skinned parts
+are the bones of one `Skeleton3D` with translation-only rests, their meshes
+under the skeleton named by the part that owns their strips. User points
+(`UPcNN <label>`, the direction being the node's -Z axis) and lights (`LP##`)
+sit under `UserPoints` and `Lights` in file order. An `ArrayMesh` packs normals
+and tangents octahedrally, so a projection keeps the file's exact values in
+RGB float custom channels (`CUSTOM0` normal, `CUSTOM1` tangent, `CUSTOM2`
+bitangent) the exporter prefers when present. Coordinate conversion has one
+owner per direction (`engine/formats/threedi/threedi_build.h`) and happens
+exactly once. Nova-specific semantics that
 standard GLTF cannot represent require a future, explicit editor decision;
 they must never be recovered from importer-private metadata or custom
 properties.

@@ -51,6 +51,11 @@ foreach(test ctrl decode pose runtime wave)
 endforeach()
 
 # Placement ground-anchor resolution (ground userpoint, else the model origin)
+add_executable(threedi_scene_names_test threedi/scene_names_test.cpp)
+target_link_libraries(threedi_scene_names_test PRIVATE opennova_formats)
+target_include_directories(threedi_scene_names_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_scene_names COMMAND threedi_scene_names_test)
+
 add_executable(threedi_ground_anchor_test threedi/ground_anchor_test.cpp)
 target_link_libraries(threedi_ground_anchor_test PRIVATE opennova_formats)
 target_include_directories(threedi_ground_anchor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -77,7 +82,7 @@ add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
 
 # The synthetic 3DI model set fixtures/threedi/synth (eleven base models plus
 # the one-edit variants the GUT suite loads), minted through the parity
-# writer from tests/fixtures/minimal_3di_builder.h and byte-compared every run
+# writer from engine/formats/threedi/threedi_build.h and byte-compared every run
 # (--write regenerates). Every 3DI consumer below reads from that directory.
 add_executable(minimal_3di_gen_test fixtures/minimal_3di_gen.cpp)
 target_link_libraries(minimal_3di_gen_test PRIVATE opennova_formats)
@@ -85,14 +90,29 @@ target_compile_features(minimal_3di_gen_test PRIVATE cxx_std_17)
 target_include_directories(minimal_3di_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_3di_gen COMMAND minimal_3di_gen_test)
 
+# The TGA encoder: the shape retail's loose-texture loader and the menu cursor
+# depend on (type 2, 24/32 bpp, bottom-up rows).
+add_executable(tga_write_test tga/tga_write_test.cpp)
+target_link_libraries(tga_write_test PRIVATE opennova_formats)
+target_include_directories(tga_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_write COMMAND tga_write_test)
+
+# The models authored in Godot (godot/authoring/ -> assets/*.3di): what the engine and
+# retail need from each file (runtime-safe collision, shader tags the authored .fx set
+# serves, allowlisted textures, the tangent vertex-format rule).
+add_executable(minimal_model_validate_test fixtures/minimal_model_validate.cpp)
+target_link_libraries(minimal_model_validate_test PRIVATE opennova_runtime)
+target_include_directories(minimal_model_validate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_model_validate COMMAND minimal_model_validate_test)
+
 # ADM tests. adm_parse pins the shipped mp5_1st.adm from the reference fixture
 # set (gated on OPENNOVA_JO_ASSETS); the rest author their maps in memory.
-foreach(test comment trim_value parse variants)
+foreach(test comment trim_value parse variants write)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
     target_link_libraries(adm_${test}_test PRIVATE opennova_formats)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
-foreach(test comment trim_value variants)
+foreach(test comment trim_value variants write)
     add_test(NAME adm_${test} COMMAND adm_${test}_test)
 endforeach()
 opennova_add_gated_test(adm_parse COMMAND adm_parse_test)
@@ -103,6 +123,12 @@ add_executable(bad_parse_test bad/bad_parse_test.cpp)
 target_link_libraries(bad_parse_test PRIVATE opennova_formats)
 target_include_directories(bad_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_parse COMMAND bad_parse_test)
+# bad_roundtrip: the writer against the reader -- our fixtures byte-exact, a
+# from-scratch clip field-equal and re-write-stable, BINOC.bad as the SKIP-LEG leg.
+add_executable(bad_roundtrip_test bad/bad_roundtrip_test.cpp)
+target_link_libraries(bad_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 
 # Native BIKi menu-video decoder: a deterministic generated bitstream plus an
 # OPENNOVA_JO_DIR-gated retail smoke test.
@@ -668,6 +694,15 @@ target_compile_definitions(minimal_map_validate_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_map_validate COMMAND minimal_map_validate_test)
 
+# Minimal mission boot through the production kernel: its offline BMS kit
+# overrides the WPN_M4AUTO engine fallback and equips the real AK identity.
+add_executable(minimal_runtime_loadout_test fixtures/minimal_runtime_loadout.cpp)
+target_link_libraries(minimal_runtime_loadout_test PRIVATE opennova_runtime)
+target_compile_features(minimal_runtime_loadout_test PRIVATE cxx_std_17)
+target_compile_definitions(minimal_runtime_loadout_test PRIVATE
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_runtime_loadout COMMAND minimal_runtime_loadout_test)
+
 # Minimal map's terrain config (.trn) — round-trip guarded; the heavy .cpt/tiles
 # are generate-at-package (not committed).
 add_executable(minimal_trn_gen_test fixtures/minimal_trn_gen.cpp)
@@ -728,15 +763,38 @@ add_executable(minimal_mus_gen_test fixtures/minimal_mus_gen.cpp)
 target_link_libraries(minimal_mus_gen_test PRIVATE opennova_formats)
 add_test(NAME minimal_mus_gen COMMAND minimal_mus_gen_test)
 
+# The authored .fx shader set: wrap(tests/fixtures/fx/*.fx) must byte-equal
+# the committed SCR artifacts (assets/*.fx), and assets/ must hold exactly the
+# authored set. `--write` regenerates. (docs/required-resources.md shader row)
+add_executable(minimal_fx_gen_test fixtures/minimal_fx_gen.cpp)
+target_link_libraries(minimal_fx_gen_test PRIVATE opennova_formats)
+target_compile_features(minimal_fx_gen_test PRIVATE cxx_std_17)
+target_compile_definitions(minimal_fx_gen_test PRIVATE
+    FX_SOURCE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/fx"
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_fx_gen COMMAND minimal_fx_gen_test)
+
+# Compile-validates the authored .fx sources through D3DXCreateEffect with the
+# loader's define sets (the loud version of retail's silent boot drop). Skips
+# without d3dx9_36.dll or a creatable D3D9 device (CI, headless).
+add_executable(fx_compile_validate_test fx/fx_compile_validate.cpp)
+target_compile_features(fx_compile_validate_test PRIVATE cxx_std_17)
+target_compile_definitions(fx_compile_validate_test PRIVATE
+    FX_SOURCE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/fx")
+if(WIN32)
+    target_link_libraries(fx_compile_validate_test PRIVATE d3d9 user32)
+endif()
+opennova_add_gated_test(fx_compile_validate COMMAND fx_compile_validate_test)
+
 # Minimal set's packaging tool: PFF-bundle the committed assets/ tree or
-# assemble a loose install. A TOOL, not a test: it only acts on
-# `minimal_pff_package_test --write-pff` / `--install <dir>` (assets/README.md),
-# so it is built here beside the generators but never registered with ctest.
+# assemble a loose install. Its read-only manifest check runs in ctest; writes
+# remain opt-in through `--write-pff` / `--install <dir>` (assets/README.md).
 add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
 target_include_directories(minimal_pff_package_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(minimal_pff_package_test PRIVATE opennova_runtime opennova_formats)
 target_compile_definitions(minimal_pff_package_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_pff_manifest COMMAND minimal_pff_package_test --check)
 
 # RTXT parity over the minted synthetic string tables (format invariants + byte
 # roundtrip); the same checks over the retail bins are the gated install sweep.
@@ -2765,15 +2823,12 @@ add_test(NAME npruntime_two_endpoint_socket COMMAND npruntime_two_endpoint_socke
 add_subdirectory(playersav)
 
 # The in-engine dev tools (ADR 0039, engine/runtime/devtools). The frame-stats
-# board, the ImGui pass and ONED's surface are unconditional; the game-window
+# board and the ImGui pass are unconditional; the game-window
 # test needs them compiled in (OPENNOVA_DEVTOOLS, the root default). The ImGui
 # tests drive a null backend.
 add_executable(frame_stats_board_test devtools/frame_stats_board_test.cpp)
 target_link_libraries(frame_stats_board_test PRIVATE opennova_runtime)
 add_test(NAME frame_stats_board COMMAND frame_stats_board_test)
-add_executable(oned_ui_test devtools/oned_ui_test.cpp)
-target_link_libraries(oned_ui_test PRIVATE opennova_runtime opennova_imgui)
-add_test(NAME oned_ui COMMAND oned_ui_test)
 if(OPENNOVA_DEVTOOLS)
     add_executable(devtools_test devtools/devtools_test.cpp)
     target_link_libraries(devtools_test PRIVATE opennova_runtime opennova_imgui)

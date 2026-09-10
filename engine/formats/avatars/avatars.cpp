@@ -606,6 +606,16 @@ int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size) {
         s += "}\n\n";
     }
 
+    // The canonical form ends its lines in CRLF (ADR 0021): retail's own table
+    // ships CRLF and its text parsers are not LF-tolerant.
+    std::string crlf;
+    crlf.reserve(s.size() + s.size() / 16);
+    for (const char c : s) {
+        if (c == '\n') crlf += '\r';
+        crlf += c;
+    }
+    s.swap(crlf);
+
     char *buf = (char *)malloc(s.size() + 1);
     if (!buf) return 1;
     memcpy(buf, s.data(), s.size());

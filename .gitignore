@@ -121,3 +121,6 @@ stripify_call_*.log
 
 # The CI checkout of opennova-net/opennova-reference-retail-packed (the OPENNOVA_JO_DIR install).
 .reference-retail-packed/
+
+# Local retail data used by configured Godot worlds; never committed.
+/local-data/

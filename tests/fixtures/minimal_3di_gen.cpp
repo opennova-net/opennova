@@ -1,7 +1,7 @@
 // Generator + guard for the synthetic 3DI model set fixtures/threedi/synth
 // (fixtures/README.md): eleven base models and the one-edit variants the GUT
 // suite loads, authored from small integer-friendly data in
-// minimal_3di_builder.h and minted through our own parity writer
+// engine/formats/threedi/threedi_build.h and minted through our own parity writer
 // (threedi_3di3_write), so every file is reproduced byte-for-byte on every
 // platform and no retail bytes live in the tree (ADR 0003).
 //
@@ -42,7 +42,14 @@
 // Default: rebuild every file in memory and byte-compare the committed
 // copies; `--write` (re)writes them. Every run re-reads the committed bytes
 // and checks the authored facts the consumers pin.
-#include "fixtures/minimal_3di_builder.h"
+//
+// The minimal set's own model rides the same run: assets/house.3di is the
+// `house` recipe minted again (byte-identical to the fixture), and the three
+// flat-colour swatch textures it names (wall/roof/wood.tga) are minted beside
+// it. items.def row 108001 places it in mnml.bms (assets/README.md). One
+// recipe owns both copies, so the fixture and the shipped model cannot drift.
+#include <formats/tga/tga_write.h>
+#include <formats/threedi/threedi_build.h>
 
 #include <formats/threedi/threedi_panm_pose.h>
 
@@ -55,8 +62,6 @@
 #include <functional>
 #include <string>
 #include <vector>
-
-using namespace synth3di;
 
 #include "common/file_io.h"
 
@@ -74,13 +79,13 @@ bool expect(bool cond, const std::string &msg) {
 	return cond;
 }
 
-Box box(double x0, double y0, double z0, double x1, double y1, double z1) {
-	return Box{Vec3{x0, y0, z0}, Vec3{x1, y1, z1}};
+ThreediBuildBox box(double x0, double y0, double z0, double x1, double y1, double z1) {
+	return ThreediBuildBox{ThreediBuildVec3{x0, y0, z0}, ThreediBuildVec3{x1, y1, z1}};
 }
 
-constexpr Vec3 kUp{0.0, 0.0, 1.0};
-constexpr Vec3 kForward{1.0, 0.0, 0.0};
-constexpr Vec3 kBackward{-1.0, 0.0, 0.0};
+constexpr ThreediBuildVec3 kUp{0.0, 0.0, 1.0};
+constexpr ThreediBuildVec3 kForward{1.0, 0.0, 0.0};
+constexpr ThreediBuildVec3 kBackward{-1.0, 0.0, 0.0};
 constexpr int kWhite[3] = {255, 255, 255};
 constexpr int kBlack[3] = {0, 0, 0};
 constexpr int kWarm[3] = {255, 246, 222};
@@ -89,7 +94,7 @@ constexpr int kBulbEnd[3] = {250, 235, 214};
 constexpr int kGlow[3] = {115, 46, 0};
 
 // A part whose box also carries a collision face box + CB volume in its own COBJ.
-int solid_part(Model &m, int lod, int parent, Vec3 pivot, int material, const Box &b) {
+int solid_part(ThreediBuildModel &m, int lod, int parent, ThreediBuildVec3 pivot, int material, const ThreediBuildBox &b) {
 	const int part = m.add_part(lod, parent, pivot);
 	m.add_box(lod, part, material, b);
 	return part;
@@ -98,17 +103,17 @@ int solid_part(Model &m, int lod, int parent, Vec3 pivot, int material, const Bo
 // The register-driven slide every "slide" recipe writes: translation x on
 // CTRL register `reg`, 0..4 units, no speed (control 113 = control register).
 ThreediPartAnimation slide_row(int part, int reg) {
-	ThreediPartAnimation row = inert_panm(part, 0);
+	ThreediPartAnimation row = threedi_build_inert_panm(part, 0);
 	row.flags = threedi_panm_pack_flags(0, 0, 0, THREEDI_TRANS_X);
-	row.translation = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, static_cast<uint8_t>(reg), 0, 0, 4 * THREEDI_PANM_VALUE_ONE);
+	row.translation = threedi_build_track(THREEDI_PANM_STYLE_CONTROL_REGISTER, static_cast<uint8_t>(reg), 0, 0, 4 * THREEDI_PANM_VALUE_ONE);
 	return row;
 }
 
 // A sine rotation 0..90 degrees at speed 1 on one axis (the House/pump recipes).
 ThreediPartAnimation sine_rotation_row(int part, int axis) {
-	ThreediPartAnimation row = inert_panm(part, 0);
+	ThreediPartAnimation row = threedi_build_inert_panm(part, 0);
 	row.flags = threedi_panm_pack_flags(0, 2, 0, 0);
-	const ThreediTransform t = track(THREEDI_PANM_STYLE_SINE_WAVE, 0, THREEDI_PANM_VALUE_ONE, 0,
+	const ThreediTransform t = threedi_build_track(THREEDI_PANM_STYLE_SINE_WAVE, 0, THREEDI_PANM_VALUE_ONE, 0,
 			static_cast<int16_t>(threedi_panm_rotation_raw_from_deg(90.0)));
 	if (axis == 0) row.rotation_x = t;
 	if (axis == 1) row.rotation_y = t;
@@ -117,57 +122,57 @@ ThreediPartAnimation sine_rotation_row(int part, int axis) {
 }
 
 // ---------------------------------------------------------------------------
-Model make_crate() {
-	Model m;
+ThreediBuildModel make_crate() {
+	ThreediBuildModel m;
 	m.name = "crate";
 	const int lod = m.add_lod();
 	const int mat = m.add_material("FF_ST_OP", "crate.tga");
-	const Box b = box(-0.5, -0.5, 0.0, 0.5, 0.5, 1.0);
-	solid_part(m, lod, 0, Vec3{}, mat, b);
+	const ThreediBuildBox b = box(-0.5, -0.5, 0.0, 0.5, 0.5, 1.0);
+	solid_part(m, lod, 0, ThreediBuildVec3{}, mat, b);
 	m.add_panm(lod, 0, 0);
-	m.add_user_point("ground", Vec3{}, kUp, 0, kUserPointGameplay);
+	m.add_user_point("ground", ThreediBuildVec3{}, kUp, 0, THREEDI_USER_POINT_GAMEPLAY);
 	const int cobj = m.add_cobj(0);
 	m.add_face_box(cobj, b);
 	m.add_volume(cobj, 1, 0, b);
 	return m;
 }
 
-Model make_gun() {
-	Model m;
+ThreediBuildModel make_gun() {
+	ThreediBuildModel m;
 	m.name = "gun";
 	const int lod = m.add_lod();
 	const int mat = m.add_material("FF_ST_OP", "gun.tga");
-	const int receiver = m.add_part(lod, 0, Vec3{});
+	const int receiver = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, receiver, mat, box(-0.25, -0.03, 0.10, 0.25, 0.03, 0.20));
-	const int barrel = m.add_part(lod, receiver, Vec3{0.25, 0.0, 0.15});
+	const int barrel = m.add_part(lod, receiver, ThreediBuildVec3{0.25, 0.0, 0.15});
 	m.add_box(lod, barrel, mat, box(0.25, -0.02, 0.13, 0.75, 0.02, 0.17));
 	m.add_panm(lod, 0, 0);
 	m.add_panm(lod, 1, 0);
 	// The flash point first: the user-point overlay pins its FIRST row to a
 	// drawing part whose pivot is off the model root. The muzzle (`Bullet01`)
 	// rides the root so a one-bone rig can carry it.
-	m.add_user_point("MFlash01", Vec3{0.72, 0.0, 0.15}, kForward, barrel, kUserPointEffect);
-	m.add_user_point("Bullet01", Vec3{0.75, 0.0, 0.15}, kForward, 0, kUserPointEffect);
-	m.add_user_point("bcasing", Vec3{0.0, -0.05, 0.18}, Vec3{0.0, -1.0, 0.0}, 0, kUserPointEffect);
-	m.add_user_point("ground", Vec3{}, kUp, 0, kUserPointGameplay);
+	m.add_user_point("MFlash01", ThreediBuildVec3{0.72, 0.0, 0.15}, kForward, barrel, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("Bullet01", ThreediBuildVec3{0.75, 0.0, 0.15}, kForward, 0, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("bcasing", ThreediBuildVec3{0.0, -0.05, 0.18}, ThreediBuildVec3{0.0, -1.0, 0.0}, 0, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("ground", ThreediBuildVec3{}, kUp, 0, THREEDI_USER_POINT_GAMEPLAY);
 	return m;
 }
 
-Model make_shed() {
-	Model m;
+ThreediBuildModel make_shed() {
+	ThreediBuildModel m;
 	m.name = "shed";
 	const int lod = m.add_lod();
 	const int walls = m.add_material("FF_ST_OP", "shed.tga");
 	const int bulb = m.add_material("FF_ST_AB", "bulb.tga");
-	const Box hut = box(-2.0, -3.0, 0.0, 2.0, 3.0, 3.0);
-	const Box step = box(2.0, -0.5, 0.0, 2.4, 0.5, 0.3);
-	const int part = m.add_part(lod, 0, Vec3{});
+	const ThreediBuildBox hut = box(-2.0, -3.0, 0.0, 2.0, 3.0, 3.0);
+	const ThreediBuildBox step = box(2.0, -0.5, 0.0, 2.4, 0.5, 0.3);
+	const int part = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, part, walls, hut);
 	m.add_box(lod, part, bulb, box(-0.1, -0.1, 2.4, 0.1, 0.1, 2.6), true);
 	m.add_panm(lod, 0, 0);
 	m.add_control_register("FLICKER");
-	m.add_user_point("ground", Vec3{}, kUp, 0, kUserPointGameplay);
-	m.add_light(Vec3{0.0, 0.0, 1.25}, 0.0, 3.0, 24, 0, kWarm, kBlack);
+	m.add_user_point("ground", ThreediBuildVec3{}, kUp, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_light(ThreediBuildVec3{0.0, 0.0, 1.25}, 0.0, 3.0, 24, 0, kWarm, kBlack);
 	const int cobj = m.add_cobj(0);
 	m.add_face_box(cobj, hut);
 	m.add_volume(cobj, 1, 0, hut);
@@ -175,22 +180,22 @@ Model make_shed() {
 	return m;
 }
 
-Model make_house() {
-	Model m;
+ThreediBuildModel make_house() {
+	ThreediBuildModel m;
 	m.name = "house";
 	const int lod = m.add_lod();
 	const int wall = m.add_material("FF_ST_OP", "wall.tga");
 	const int roof = m.add_material("FF_ST_OP", "roof.tga");
 	const int wood = m.add_material("FF_ST_OP", "wood.tga");
-	const Box walls = box(-4.0, -5.0, 0.0, 4.0, 5.0, 4.0);
-	const Box roof_slab = box(-4.5, -5.5, 4.0, 4.5, 5.5, 4.4);
-	const Box chimney = box(2.0, 3.0, 4.4, 2.6, 3.6, 5.4);
-	const int part = m.add_part(lod, 0, Vec3{});
+	const ThreediBuildBox walls = box(-4.0, -5.0, 0.0, 4.0, 5.0, 4.0);
+	const ThreediBuildBox roof_slab = box(-4.5, -5.5, 4.0, 4.5, 5.5, 4.4);
+	const ThreediBuildBox chimney = box(2.0, 3.0, 4.4, 2.6, 3.6, 5.4);
+	const int part = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, part, wall, walls);
 	m.add_box(lod, part, roof, roof_slab);
 	m.add_box(lod, part, wood, chimney);
 	m.add_panm(lod, 0, 0);
-	m.add_user_point("ground", Vec3{}, kUp, 0, kUserPointGameplay);
+	m.add_user_point("ground", ThreediBuildVec3{}, kUp, 0, THREEDI_USER_POINT_GAMEPLAY);
 	const int cobj = m.add_cobj(0);
 	m.add_face_box(cobj, walls);
 	m.add_volume(cobj, 1, 0, walls);
@@ -200,17 +205,17 @@ Model make_house() {
 	return m;
 }
 
-Model make_bird() {
-	Model m;
+ThreediBuildModel make_bird() {
+	ThreediBuildModel m;
 	m.name = "bird";
 	m.skinned = true;
 	const int lod = m.add_lod();
 	const int mat = m.add_material("VS_SKBASIC", "bird.tga");
 	// The Bird1 hierarchy: body; wing roots; wing mids; wing tips; head; tail.
 	const int parents[9] = {0, 0, 0, 1, 2, 3, 4, 0, 0};
-	const Vec3 pivots[9] = {{0, 0, 0}, {0.05, 0.1, 0.05}, {0.05, -0.1, 0.05}, {0.05, 0.35, 0.05},
+	const ThreediBuildVec3 pivots[9] = {{0, 0, 0}, {0.05, 0.1, 0.05}, {0.05, -0.1, 0.05}, {0.05, 0.35, 0.05},
 		{0.05, -0.35, 0.05}, {0.05, 0.6, 0.05}, {0.05, -0.6, 0.05}, {0.3, 0.0, 0.08}, {-0.3, 0.0, 0.02}};
-	const Box boxes[9] = {box(-0.25, -0.1, 0.0, 0.25, 0.1, 0.12), box(0.0, 0.1, 0.04, 0.1, 0.35, 0.06),
+	const ThreediBuildBox boxes[9] = {box(-0.25, -0.1, 0.0, 0.25, 0.1, 0.12), box(0.0, 0.1, 0.04, 0.1, 0.35, 0.06),
 		box(0.0, -0.35, 0.04, 0.1, -0.1, 0.06), box(0.0, 0.35, 0.04, 0.1, 0.6, 0.06),
 		box(0.0, -0.6, 0.04, 0.1, -0.35, 0.06), box(0.0, 0.6, 0.04, 0.1, 0.8, 0.06),
 		box(0.0, -0.8, 0.04, 0.1, -0.6, 0.06), box(0.25, -0.04, 0.05, 0.4, 0.04, 0.12),
@@ -220,16 +225,16 @@ Model make_bird() {
 		m.add_box(lod, part, mat, boxes[i], false, part);
 		m.add_panm(lod, part, parents[i]);
 		const int cobj = m.add_cobj(parents[i], pivots[i]);
-		const Box &b = boxes[i];
-		const Vec3 quad[4] = {{b.min.x, b.min.y, b.max.z}, {b.max.x, b.min.y, b.max.z},
+		const ThreediBuildBox &b = boxes[i];
+		const ThreediBuildVec3 quad[4] = {{b.min.x, b.min.y, b.max.z}, {b.max.x, b.min.y, b.max.z},
 			{b.max.x, b.max.y, b.max.z}, {b.min.x, b.max.y, b.max.z}};
 		m.add_face_quad(cobj, quad);
 	}
 	return m;
 }
 
-Model make_person() {
-	Model m;
+ThreediBuildModel make_person() {
+	ThreediBuildModel m;
 	m.name = "person";
 	m.skinned = true;
 	const int lod = m.add_lod();
@@ -238,13 +243,13 @@ Model make_person() {
 	// upper arms; thighs; forearms; shins; neck; head; hands; feet. Origin at
 	// the pelvis, feet a little over a unit below it.
 	const int parents[19] = {0, 0, 1, 2, 2, 3, 4, 0, 0, 5, 6, 7, 8, 2, 13, 10, 9, 11, 12};
-	const Vec3 pivots[19] = {{0, 0, 0}, {0, 0, 0.125}, {0, 0, 0.375}, {0, -0.0625, 0.625},
+	const ThreediBuildVec3 pivots[19] = {{0, 0, 0}, {0, 0, 0.125}, {0, 0, 0.375}, {0, -0.0625, 0.625},
 		{0, 0.0625, 0.625}, {0, -0.25, 0.625}, {0, 0.25, 0.625}, {0, -0.125, 0}, {0, 0.125, 0},
 		{0, -0.4375, 0.4375}, {0, 0.4375, 0.4375}, {0, -0.125, -0.4375}, {0, 0.125, -0.4375},
 		{0, 0, 0.6875}, {0.03125, 0, 0.75}, {0, 0.6875, 0.3125}, {0, -0.6875, 0.3125},
 		{-0.0625, -0.125, -0.875}, {-0.0625, 0.125, -0.875}};
 	// Each bone's box spans from its pivot toward its child (or a stub).
-	const Box boxes[19] = {box(-0.125, -0.125, -0.0625, 0.125, 0.125, 0.125),
+	const ThreediBuildBox boxes[19] = {box(-0.125, -0.125, -0.0625, 0.125, 0.125, 0.125),
 		box(-0.1, -0.1, 0.125, 0.1, 0.1, 0.375), box(-0.125, -0.15, 0.375, 0.125, 0.15, 0.625),
 		box(-0.05, -0.25, 0.575, 0.05, -0.0625, 0.675), box(-0.05, 0.0625, 0.575, 0.05, 0.25, 0.675),
 		box(-0.05, -0.3, 0.4375, 0.05, -0.2, 0.625), box(-0.05, 0.2, 0.4375, 0.05, 0.3, 0.625),
@@ -259,18 +264,18 @@ Model make_person() {
 		m.add_box(lod, part, mat, boxes[i], false, part);
 		m.add_panm(lod, part, parents[i]);
 	}
-	m.add_user_point("bullet", Vec3{0.3, -0.6875, 0.3125}, kForward, 16, kUserPointEffect);
-	m.add_user_point("MFlash01", Vec3{0.35, -0.6875, 0.3125}, kForward, 16, kUserPointEffect);
-	m.add_user_point("LOOK", Vec3{0.125, 0.0, 0.85}, kForward, 14, kUserPointEffect);
+	m.add_user_point("bullet", ThreediBuildVec3{0.3, -0.6875, 0.3125}, kForward, 16, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("MFlash01", ThreediBuildVec3{0.35, -0.6875, 0.3125}, kForward, 16, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("LOOK", ThreediBuildVec3{0.125, 0.0, 0.85}, kForward, 14, THREEDI_USER_POINT_EFFECT);
 	// COBJ 0 carries the body's face box; every other bone is a sphere section.
 	const int body = m.add_cobj(0);
 	m.add_face_box(body, box(-0.125, -0.15, -0.0625, 0.125, 0.15, 0.625));
 	for (int i = 1; i < 19; ++i) {
-		const Box &b = boxes[i];
-		Vec3 center{(b.min.x + b.max.x) * 0.5, (b.min.y + b.max.y) * 0.5, (b.min.z + b.max.z) * 0.5};
+		const ThreediBuildBox &b = boxes[i];
+		ThreediBuildVec3 center{(b.min.x + b.max.x) * 0.5, (b.min.y + b.max.y) * 0.5, (b.min.z + b.max.z) * 0.5};
 		double radius = 0.125;
 		if (i == 14) {
-			center = Vec3{0.0625, 0.0, 0.8125};
+			center = ThreediBuildVec3{0.0625, 0.0, 0.8125};
 			radius = 0.15625;
 		}
 		m.add_sphere_cobj(parents[i], pivots[i], center, radius);
@@ -279,24 +284,24 @@ Model make_person() {
 }
 
 // The pump jack: shared by both LODs (LOD1 drops the base slab's post).
-void pump_parts(Model &m, int lod, bool detailed) {
+void pump_parts(ThreediBuildModel &m, int lod, bool detailed) {
 	const int mat = 0;
 	const int post_mat = 1;
-	const int base = m.add_part(lod, 0, Vec3{});
+	const int base = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, base, mat, box(-1.0, -1.0, 0.0, 1.0, 1.0, 0.5));
 	if (detailed) m.add_box(lod, base, post_mat, box(-0.2, -0.2, 0.5, 0.2, 0.2, 3.0));
-	const int beam = m.add_part(lod, base, Vec3{0.0, 0.0, 3.0});
+	const int beam = m.add_part(lod, base, ThreediBuildVec3{0.0, 0.0, 3.0});
 	m.add_box(lod, beam, mat, box(-2.0, -0.15, 2.85, 2.0, 0.15, 3.15));
-	const int head = m.add_part(lod, beam, Vec3{2.0, 0.0, 3.0});
+	const int head = m.add_part(lod, beam, ThreediBuildVec3{2.0, 0.0, 3.0});
 	m.add_box(lod, head, mat, box(2.0, -0.3, 2.7, 2.6, 0.3, 3.3));
-	const int rod = m.add_part(lod, head, Vec3{2.3, 0.0, 2.7});
+	const int rod = m.add_part(lod, head, ThreediBuildVec3{2.3, 0.0, 2.7});
 	m.add_box(lod, rod, mat, box(2.2, -0.1, 0.5, 2.4, 0.1, 2.7));
-	const int weight = m.add_part(lod, base, Vec3{-2.0, 0.0, 3.0});
+	const int weight = m.add_part(lod, base, ThreediBuildVec3{-2.0, 0.0, 3.0});
 	m.add_box(lod, weight, mat, box(-2.6, -0.4, 2.6, -2.0, 0.4, 3.4));
 }
 
-Model make_pump() {
-	Model m;
+ThreediBuildModel make_pump() {
+	ThreediBuildModel m;
 	m.name = "pump";
 	m.add_material("FF_ST_OP", "pump.tga");
 	const int post = m.add_material("FF_MT_OP", "pump.tga");
@@ -313,32 +318,32 @@ Model make_pump() {
 			ThreediPartAnimation &row = m.add_panm(lod, part, parents[part]);
 			if (lod == 0 && part == 1) {
 				row.flags = threedi_panm_pack_flags(0, 2, 0, 0);
-				row.rotation_z = track(THREEDI_PANM_STYLE_SINE_WAVE, 0, 128, 682, -682);
+				row.rotation_z = threedi_build_track(THREEDI_PANM_STYLE_SINE_WAVE, 0, 128, 682, -682);
 			}
 			if (lod == 0 && part == 0) row.flags = threedi_panm_pack_flags(0, 0, 0, THREEDI_TRANS_Z);
 		}
 	}
-	m.add_user_point("Noname", Vec3{}, kForward, 0, kUserPointGameplay);
-	m.add_user_point("Sound", Vec3{0.0, 0.0, 2.5}, kForward, 0, kUserPointGameplay);
-	m.add_user_point("ground", Vec3{}, kUp, 0, kUserPointGameplay);
-	const Box slab = box(-1.0, -1.0, 0.0, 1.0, 1.0, 0.5);
+	m.add_user_point("Noname", ThreediBuildVec3{}, kForward, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("Sound", ThreediBuildVec3{0.0, 0.0, 2.5}, kForward, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("ground", ThreediBuildVec3{}, kUp, 0, THREEDI_USER_POINT_GAMEPLAY);
+	const ThreediBuildBox slab = box(-1.0, -1.0, 0.0, 1.0, 1.0, 0.5);
 	const int base = m.add_cobj(0);
 	m.add_face_box(base, slab);
 	m.add_volume(base, 1, 0, slab);
 	m.add_volume(base, 1, 0, box(-0.2, -0.2, 0.5, 0.2, 0.2, 3.0));
-	const int beam = m.add_cobj(0, Vec3{0.0, 0.0, 3.0});
+	const int beam = m.add_cobj(0, ThreediBuildVec3{0.0, 0.0, 3.0});
 	m.add_face_box(beam, box(-2.0, -0.15, 2.85, 2.0, 0.15, 3.15));
-	const int head = m.add_cobj(1, Vec3{2.0, 0.0, 3.0});
+	const int head = m.add_cobj(1, ThreediBuildVec3{2.0, 0.0, 3.0});
 	m.add_face_box(head, box(2.0, -0.3, 2.7, 2.6, 0.3, 3.3));
-	const int rod = m.add_cobj(2, Vec3{2.3, 0.0, 2.7});
+	const int rod = m.add_cobj(2, ThreediBuildVec3{2.3, 0.0, 2.7});
 	m.add_face_box(rod, box(2.2, -0.1, 0.5, 2.4, 0.1, 2.7));
-	const int weight = m.add_cobj(0, Vec3{-2.0, 0.0, 3.0});
+	const int weight = m.add_cobj(0, ThreediBuildVec3{-2.0, 0.0, 3.0});
 	m.add_face_box(weight, box(-2.6, -0.4, 2.6, -2.0, 0.4, 3.4));
 	return m;
 }
 
-Model make_armory() {
-	Model m;
+ThreediBuildModel make_armory() {
+	ThreediBuildModel m;
 	m.name = "armory";
 	const int lod = m.add_lod(0, "bldg");
 	const int exterior = m.add_material("FF_MT_OP", "armry.tga");
@@ -350,33 +355,33 @@ Model make_armory() {
 	m.set_rgb_gen(bulb, THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0.0, kBulb, kBulbEnd);
 	const int glass = m.add_material("FFP_GLASS", "");
 	m.materials[glass].is_glass = 1;
-	for (int k = 0; k < 3; ++k) m.materials[glass].reflect_color[k] = byte_unit(128);
+	for (int k = 0; k < 3; ++k) m.materials[glass].reflect_color[k] = threedi_byte_unit(128);
 	const int pane = m.add_material("FF_ST_AB", "pane.tga");
 	// The retail floor plan (entity-local, mission axes): east room x 1.1..5.7,
 	// west room x -6.8..-0.6, middle x -0.5..1.1, all y -3.2..2.8 (west to 3.7).
-	const Box shell = box(-7.0, -3.5, 0.0, 6.0, 4.0, 3.0);
-	const Box east = box(1.1, -3.2, 0.0, 5.7, 2.8, 3.0);
-	const Box west = box(-6.8, -3.2, 0.0, -0.6, 3.7, 3.0);
-	const Box middle = box(-0.5, -3.2, 0.0, 1.1, 2.8, 3.0);
-	const int p_exterior = m.add_part(lod, 0, Vec3{});
+	const ThreediBuildBox shell = box(-7.0, -3.5, 0.0, 6.0, 4.0, 3.0);
+	const ThreediBuildBox east = box(1.1, -3.2, 0.0, 5.7, 2.8, 3.0);
+	const ThreediBuildBox west = box(-6.8, -3.2, 0.0, -0.6, 3.7, 3.0);
+	const ThreediBuildBox middle = box(-0.5, -3.2, 0.0, 1.1, 2.8, 3.0);
+	const int p_exterior = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, p_exterior, exterior, shell);
 	m.add_box(lod, p_exterior, exterior, box(-7.2, -3.7, 3.0, 6.2, 4.2, 3.3)); // the roof slab
-	const int p_east = m.add_part(lod, 0, Vec3{});
+	const int p_east = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, p_east, interior, east);
 	m.add_box(lod, p_east, bulb, box(3.3, -0.4, 2.7, 3.5, -0.2, 2.9));
 	m.add_box(lod, p_east, glass, box(2.1, -3.45, 1.0, 3.1, -3.4, 2.5), true); // the south window
-	const int p_west = m.add_part(lod, 0, Vec3{});
+	const int p_west = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, p_west, interior, west);
 	m.add_box(lod, p_west, pane, box(-4.0, 3.6, 1.0, -3.0, 3.65, 2.5), true); // a north pane
-	const int p_middle = m.add_part(lod, 0, Vec3{});
+	const int p_middle = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, p_middle, interior, middle);
 	m.add_box(lod, p_middle, lamp, box(0.2, -0.3, 2.7, 0.4, -0.1, 2.9));
 	for (int part = 0; part < 4; ++part) m.add_panm(lod, part, 0);
 	m.add_control_register("FLICKER");
-	m.add_user_point("Armory", Vec3{-3.7, 0.3, 0.9}, kUp, 0, kUserPointGameplay);
-	m.add_user_point("Ground", Vec3{}, kUp, 0, kUserPointEffect);
-	m.add_light(Vec3{3.4, -0.3, 2.8}, 0.0, 4.0, 24, 1, kWarm, kBlack);
-	m.add_light(Vec3{-3.7, 0.3, 2.8}, 0.0, 4.0, 55, 2, kWarm, kWarm, 0, 179, 76);
+	m.add_user_point("Armory", ThreediBuildVec3{-3.7, 0.3, 0.9}, kUp, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("Ground", ThreediBuildVec3{}, kUp, 0, THREEDI_USER_POINT_EFFECT);
+	m.add_light(ThreediBuildVec3{3.4, -0.3, 2.8}, 0.0, 4.0, 24, 1, kWarm, kBlack);
+	m.add_light(ThreediBuildVec3{-3.7, 0.3, 2.8}, 0.0, 4.0, 55, 2, kWarm, kWarm, 0, 179, 76);
 	// Collision: COBJ 0 = the shell (four walls, roof, the armory trigger, the
 	// vehicle hull, a ladder on the east wall); COBJ 1..3 = one blink box per
 	// room (east 0x2E, west 0x28, middle 0x2E).
@@ -392,7 +397,7 @@ Model make_armory() {
 	m.add_volume(c_shell, 4, 0, box(6.0, -0.5, 0.0, 6.4, 0.5, 3.3));
 	const int c_east = m.add_cobj(0);
 	{
-		const Vec3 walls[4][4] = {
+		const ThreediBuildVec3 walls[4][4] = {
 			{{1.1, -3.2, 0.0}, {1.1, 2.8, 0.0}, {1.1, 2.8, 3.0}, {1.1, -3.2, 3.0}},
 			{{5.7, -3.2, 0.0}, {5.7, -3.2, 3.0}, {5.7, 2.8, 3.0}, {5.7, 2.8, 0.0}},
 			{{1.1, -3.2, 0.0}, {1.1, -3.2, 3.0}, {5.7, -3.2, 3.0}, {5.7, -3.2, 0.0}},
@@ -402,13 +407,13 @@ Model make_armory() {
 	m.add_volume(c_east, 8, 0x2E, box(1.05, -3.2, 0.0, 5.7, 2.8, 3.0));
 	const int c_west = m.add_cobj(0);
 	{
-		const Vec3 floor[4] = {{-6.8, -3.2, 0.0}, {-0.6, -3.2, 0.0}, {-0.6, 3.7, 0.0}, {-6.8, 3.7, 0.0}};
+		const ThreediBuildVec3 floor[4] = {{-6.8, -3.2, 0.0}, {-0.6, -3.2, 0.0}, {-0.6, 3.7, 0.0}, {-6.8, 3.7, 0.0}};
 		m.add_face_quad(c_west, floor);
 	}
 	m.add_volume(c_west, 8, 0x28, west);
 	const int c_middle = m.add_cobj(0);
 	{
-		const Vec3 floor[4] = {{-0.5, -3.2, 0.0}, {1.1, -3.2, 0.0}, {1.1, 2.8, 0.0}, {-0.5, 2.8, 0.0}};
+		const ThreediBuildVec3 floor[4] = {{-0.5, -3.2, 0.0}, {1.1, -3.2, 0.0}, {1.1, 2.8, 0.0}, {-0.5, 2.8, 0.0}};
 		m.add_face_quad(c_middle, floor);
 	}
 	m.add_volume(c_middle, 8, 0x2E, box(-0.5, -3.2, 0.0, 1.15, 2.8, 3.0));
@@ -421,18 +426,18 @@ Model make_armory() {
 	m.add_occ_box(0, 0, 0, box(-7.0, -3.5, 0.0, -6.8, 4.0, 3.0));
 	m.add_occ_box(0, 0, 0, box(5.7, -3.5, 0.0, 6.0, 4.0, 3.0));
 	{
-		const Vec3 window[4] = {{2.1, -3.5, 1.0}, {3.1, -3.5, 1.0}, {3.1, -3.5, 2.5}, {2.1, -3.5, 2.5}};
-		m.add_occ_quad(2, 1, 0, window, Vec3{0.0, -1.0, 0.0});
-		const Vec3 door_east[4] = {{1.1, 0.75, 0.0}, {1.1, 1.75, 0.0}, {1.1, 1.75, 2.2}, {1.1, 0.75, 2.2}};
+		const ThreediBuildVec3 window[4] = {{2.1, -3.5, 1.0}, {3.1, -3.5, 1.0}, {3.1, -3.5, 2.5}, {2.1, -3.5, 2.5}};
+		m.add_occ_quad(2, 1, 0, window, ThreediBuildVec3{0.0, -1.0, 0.0});
+		const ThreediBuildVec3 door_east[4] = {{1.1, 0.75, 0.0}, {1.1, 1.75, 0.0}, {1.1, 1.75, 2.2}, {1.1, 0.75, 2.2}};
 		m.add_occ_quad(3, 1, 3, door_east, kBackward);
-		const Vec3 door_west[4] = {{-0.54, -2.75, 0.0}, {-0.54, -1.75, 0.0}, {-0.54, -1.75, 2.2}, {-0.54, -2.75, 2.2}};
+		const ThreediBuildVec3 door_west[4] = {{-0.54, -2.75, 0.0}, {-0.54, -1.75, 0.0}, {-0.54, -1.75, 2.2}, {-0.54, -2.75, 2.2}};
 		m.add_occ_quad(3, 3, 2, door_west, kBackward);
 	}
 	return m;
 }
 
-Model make_mount() {
-	Model m;
+ThreediBuildModel make_mount() {
+	ThreediBuildModel m;
 	m.name = "mount";
 	const int lod = m.add_lod();
 	const int body = m.add_material("FF_ST_OP", "mount.tga");
@@ -442,19 +447,19 @@ Model make_mount() {
 	const int glow = m.add_material("FF_ST_AD_LUM", "glow.tga");
 	m.materials[glow].emissive_type = THREEDI_EMISSIVE_FULL;
 	m.set_rgb_gen(glow, 114, 0, 0.5, kBlack, kGlow);
-	const Box plate = box(-0.4, -0.4, 0.0, 0.4, 0.4, 0.1);
-	const Box post = box(-0.1, -0.1, 0.1, 0.1, 0.1, 0.3);
-	const Box cradle = box(-0.3, -0.15, 0.3, 0.1, 0.15, 0.45);
-	const Box sight = box(-0.29, -0.05, 0.45, -0.15, 0.05, 0.5);
-	const Box gun = box(-0.7, -0.1, 0.4, 1.6, 0.1, 0.55);
-	const Box heat = box(0.2, -0.06, 0.42, 1.2, 0.06, 0.53);
-	const int p_base = m.add_part(lod, 0, Vec3{});
+	const ThreediBuildBox plate = box(-0.4, -0.4, 0.0, 0.4, 0.4, 0.1);
+	const ThreediBuildBox post = box(-0.1, -0.1, 0.1, 0.1, 0.1, 0.3);
+	const ThreediBuildBox cradle = box(-0.3, -0.15, 0.3, 0.1, 0.15, 0.45);
+	const ThreediBuildBox sight = box(-0.29, -0.05, 0.45, -0.15, 0.05, 0.5);
+	const ThreediBuildBox gun = box(-0.7, -0.1, 0.4, 1.6, 0.1, 0.55);
+	const ThreediBuildBox heat = box(0.2, -0.06, 0.42, 1.2, 0.06, 0.53);
+	const int p_base = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, p_base, body, plate);
 	m.add_box(lod, p_base, body, post);
-	const int p_cradle = m.add_part(lod, 0, Vec3{0.0, 0.0, 0.3});
+	const int p_cradle = m.add_part(lod, 0, ThreediBuildVec3{0.0, 0.0, 0.3});
 	m.add_box(lod, p_cradle, body, cradle);
 	m.add_box(lod, p_cradle, cutout, sight);
-	const int p_gun = m.add_part(lod, 0, Vec3{0.0, 0.0, 0.5});
+	const int p_gun = m.add_part(lod, 0, ThreediBuildVec3{0.0, 0.0, 0.5});
 	m.add_box(lod, p_gun, body, gun);
 	m.add_box(lod, p_gun, glow, heat, true);
 	m.add_control_register("HEAT_GLOW");
@@ -463,44 +468,44 @@ Model make_mount() {
 	// The retail B50Cal articulation: the cradle yaws on register 1, the gun
 	// yaws on 1 and pitches on 2 (rotation x = the authored yaw axis).
 	ThreediPartAnimation &r0 = m.add_panm(lod, 0, 0, threedi_panm_pack_flags(0, 2, 1, 0));
-	r0.rotation_x = track(0, 0, 0, 0, 16384);
+	r0.rotation_x = threedi_build_track(0, 0, 0, 0, 16384);
 	ThreediPartAnimation &r1 = m.add_panm(lod, 1, 0, threedi_panm_pack_flags(0, 2, 1, 0));
-	r1.rotation_x = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0, 0, 16384);
-	r1.rotation_y = track(0, 0, 0, 16384, 0);
+	r1.rotation_x = threedi_build_track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0, 0, 16384);
+	r1.rotation_y = threedi_build_track(0, 0, 0, 16384, 0);
 	ThreediPartAnimation &r2 = m.add_panm(lod, 2, 0, threedi_panm_pack_flags(0, 2, 1, 0));
-	r2.rotation_x = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0, 0, 16384);
-	r2.rotation_y = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 2, 0, 16384, 0);
-	m.add_user_point("BCasing", Vec3{-0.3, -0.07, 0.48}, Vec3{0.0, -1.0, 0.0}, 2, kUserPointEffect);
-	m.add_user_point("Bullet", Vec3{1.7, 0.0, 0.48}, kForward, 2, kUserPointEffect);
-	m.add_user_point("Camera", Vec3{-0.85, 0.0, 0.6}, kForward, 2, kUserPointGameplay);
-	m.add_user_point("heat", Vec3{0.4, 0.0, 0.48}, kUp, 2, kUserPointEffect);
-	m.add_user_point("MFlash01", Vec3{1.58, 0.0, 0.48}, kForward, 2, kUserPointEffect);
-	m.add_user_point("Usegun", Vec3{-1.13, 0.0, 0.0}, kUp, 0, kUserPointGameplay);
+	r2.rotation_x = threedi_build_track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0, 0, 16384);
+	r2.rotation_y = threedi_build_track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 2, 0, 16384, 0);
+	m.add_user_point("BCasing", ThreediBuildVec3{-0.3, -0.07, 0.48}, ThreediBuildVec3{0.0, -1.0, 0.0}, 2, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("Bullet", ThreediBuildVec3{1.7, 0.0, 0.48}, kForward, 2, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("Camera", ThreediBuildVec3{-0.85, 0.0, 0.6}, kForward, 2, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("heat", ThreediBuildVec3{0.4, 0.0, 0.48}, kUp, 2, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("MFlash01", ThreediBuildVec3{1.58, 0.0, 0.48}, kForward, 2, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("Usegun", ThreediBuildVec3{-1.13, 0.0, 0.0}, kUp, 0, THREEDI_USER_POINT_GAMEPLAY);
 	const int c_base = m.add_cobj(0);
 	m.add_face_box(c_base, plate);
 	m.add_volume(c_base, 1, 0, plate);
-	const int c_cradle = m.add_cobj(0, Vec3{0.0, 0.0, 0.3});
+	const int c_cradle = m.add_cobj(0, ThreediBuildVec3{0.0, 0.0, 0.3});
 	m.add_face_box(c_cradle, cradle);
 	m.add_volume(c_cradle, 1, 0, cradle);
-	const int c_gun = m.add_cobj(0, Vec3{0.0, 0.0, 0.5});
+	const int c_gun = m.add_cobj(0, ThreediBuildVec3{0.0, 0.0, 0.5});
 	m.add_face_box(c_gun, gun);
 	m.add_volume(c_gun, 1, 0, gun);
 	return m;
 }
 
-Model make_carrier() {
-	Model m;
+ThreediBuildModel make_carrier() {
+	ThreediBuildModel m;
 	m.name = "carrier";
 	const int lod = m.add_lod();
 	const int paint = m.add_material("FF_ST_OP", "carrier.tga");
 	const int cabin_mat = m.add_material("FF_ST_OP", "cabin.tga");
-	const Box wheels = box(-2.5, -1.2, 0.0, 2.5, 1.2, 0.6);
-	const Box body = box(-2.5, -1.0, 0.6, 2.5, 1.0, 1.4);
-	const Box cabin = box(1.0, -1.0, 1.4, 2.5, 1.0, 2.2);
-	const int p_hull = m.add_part(lod, 0, Vec3{});
+	const ThreediBuildBox wheels = box(-2.5, -1.2, 0.0, 2.5, 1.2, 0.6);
+	const ThreediBuildBox body = box(-2.5, -1.0, 0.6, 2.5, 1.0, 1.4);
+	const ThreediBuildBox cabin = box(1.0, -1.0, 1.4, 2.5, 1.0, 2.2);
+	const int p_hull = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, p_hull, paint, wheels);
 	m.add_box(lod, p_hull, paint, body);
-	const int p_cabin = m.add_part(lod, 0, Vec3{2.0, 0.0, 0.5});
+	const int p_cabin = m.add_part(lod, 0, ThreediBuildVec3{2.0, 0.0, 0.5});
 	m.add_box(lod, p_cabin, cabin_mat, cabin);
 	m.add_control_register("VEHICLE_STEERING");
 	m.add_control_register("VEHICLE_WHEELS");
@@ -510,45 +515,45 @@ Model make_carrier() {
 	m.add_control_register("VEHICLE_TIRE03");
 	m.add_panm(lod, 0, 0);
 	ThreediPartAnimation &row = m.add_panm(lod, 1, 0, threedi_panm_pack_flags(0, 2, 1, THREEDI_TRANS_Y));
-	row.rotation_x = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0, 0, 16338);
-	row.rotation_y = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0, 0, 16338);
-	row.translation = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 2, 0, 0, 256);
+	row.rotation_x = threedi_build_track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0, 0, 16338);
+	row.rotation_y = threedi_build_track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0, 0, 16338);
+	row.translation = threedi_build_track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 2, 0, 0, 256);
 	// The dsuv1 user-point order: the controller first, then the eweap
 	// anchor, the passengers, the exhaust effect, the ground point.
-	m.add_user_point("ctrlx13", Vec3{0.08, 0.63, 1.09}, kForward, 0, kUserPointGameplay);
-	m.add_user_point("ewep01", Vec3{-0.78, -0.49, 1.39}, kForward, 0, kUserPointGameplay);
-	m.add_user_point("sitex00d", Vec3{-2.52, 0.0, 0.9}, kBackward, 0, kUserPointGameplay);
-	m.add_user_point("sitex08c", Vec3{-1.7, 0.59, 1.21}, kBackward, 0, kUserPointGameplay);
-	m.add_user_point("FX01", Vec3{-2.69, 0.0, 0.18}, kBackward, 0, kUserPointEffect);
-	m.add_user_point("ground", Vec3{}, kUp, 0, kUserPointGameplay);
-	m.add_user_point("sitex06b", Vec3{-0.81, 0.46, 1.09}, kBackward, 0, kUserPointGameplay);
-	m.add_user_point("sitex12a", Vec3{0.08, -0.58, 1.09}, kForward, 0, kUserPointGameplay);
+	m.add_user_point("ctrlx13", ThreediBuildVec3{0.08, 0.63, 1.09}, kForward, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("ewep01", ThreediBuildVec3{-0.78, -0.49, 1.39}, kForward, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("sitex00d", ThreediBuildVec3{-2.52, 0.0, 0.9}, kBackward, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("sitex08c", ThreediBuildVec3{-1.7, 0.59, 1.21}, kBackward, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("FX01", ThreediBuildVec3{-2.69, 0.0, 0.18}, kBackward, 0, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("ground", ThreediBuildVec3{}, kUp, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("sitex06b", ThreediBuildVec3{-0.81, 0.46, 1.09}, kBackward, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("sitex12a", ThreediBuildVec3{0.08, -0.58, 1.09}, kForward, 0, THREEDI_USER_POINT_GAMEPLAY);
 	const int c_hull = m.add_cobj(0);
 	m.add_face_box(c_hull, body);
 	m.add_volume(c_hull, 1, 0, wheels);
 	m.add_volume(c_hull, 1, 0, body);
-	const int c_cabin = m.add_cobj(0, Vec3{2.0, 0.0, 0.5});
+	const int c_cabin = m.add_cobj(0, ThreediBuildVec3{2.0, 0.0, 0.5});
 	m.add_face_box(c_cabin, cabin);
 	m.add_volume(c_cabin, 1, 0, cabin);
 	return m;
 }
 
-Model make_tank() {
-	Model m;
+ThreediBuildModel make_tank() {
+	ThreediBuildModel m;
 	m.name = "tank";
 	const int lod = m.add_lod();
 	const int armor = m.add_material("FF_ST_OP", "tank.tga");
 	const int tread = m.add_material("FF_ST_OP", "tread.tga");
-	const Box hull = box(-3.0, -1.5, 0.3, 3.0, 1.5, 1.3);
-	const Box track_l = box(-3.0, 1.5, 0.0, 3.0, 1.9, 1.0);
-	const Box track_r = box(-3.0, -1.9, 0.0, 3.0, -1.5, 1.0);
-	const Box turret = box(-1.0, -1.0, 1.3, 1.2, 1.0, 2.0);
-	const Box barrel = box(1.2, -0.1, 1.55, 4.0, 0.1, 1.75);
-	const int p_hull = m.add_part(lod, 0, Vec3{});
+	const ThreediBuildBox hull = box(-3.0, -1.5, 0.3, 3.0, 1.5, 1.3);
+	const ThreediBuildBox track_l = box(-3.0, 1.5, 0.0, 3.0, 1.9, 1.0);
+	const ThreediBuildBox track_r = box(-3.0, -1.9, 0.0, 3.0, -1.5, 1.0);
+	const ThreediBuildBox turret = box(-1.0, -1.0, 1.3, 1.2, 1.0, 2.0);
+	const ThreediBuildBox barrel = box(1.2, -0.1, 1.55, 4.0, 0.1, 1.75);
+	const int p_hull = m.add_part(lod, 0, ThreediBuildVec3{});
 	m.add_box(lod, p_hull, armor, hull);
 	m.add_box(lod, p_hull, tread, track_l);
 	m.add_box(lod, p_hull, tread, track_r);
-	const int p_turret = m.add_part(lod, 0, Vec3{0.0, 0.0, 1.3});
+	const int p_turret = m.add_part(lod, 0, ThreediBuildVec3{0.0, 0.0, 1.3});
 	m.add_box(lod, p_turret, armor, turret);
 	m.add_box(lod, p_turret, armor, barrel);
 	m.add_control_register("VEHICLE_GUNYAW");
@@ -556,17 +561,17 @@ Model make_tank() {
 	m.add_control_register("VEHICLE_TIRE00");
 	m.add_panm(lod, 0, 0);
 	ThreediPartAnimation &row = m.add_panm(lod, 1, 0, threedi_panm_pack_flags(0, 2, 0, 0));
-	row.rotation_x = track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0, 0, 16384);
-	m.add_user_point("ctrlx25", Vec3{1.5, 0.0, 0.7}, kForward, 0, kUserPointGameplay);
-	m.add_user_point("ewep01", Vec3{0.0, 0.0, 1.65}, kForward, p_turret, kUserPointGameplay);
-	m.add_user_point("fx00", Vec3{-3.7, 0.9, 0.6}, kBackward, 0, kUserPointEffect);
-	m.add_user_point("ground", Vec3{}, kUp, 0, kUserPointGameplay);
+	row.rotation_x = threedi_build_track(THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0, 0, 16384);
+	m.add_user_point("ctrlx25", ThreediBuildVec3{1.5, 0.0, 0.7}, kForward, 0, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("ewep01", ThreediBuildVec3{0.0, 0.0, 1.65}, kForward, p_turret, THREEDI_USER_POINT_GAMEPLAY);
+	m.add_user_point("fx00", ThreediBuildVec3{-3.7, 0.9, 0.6}, kBackward, 0, THREEDI_USER_POINT_EFFECT);
+	m.add_user_point("ground", ThreediBuildVec3{}, kUp, 0, THREEDI_USER_POINT_GAMEPLAY);
 	const int c_hull = m.add_cobj(0);
 	m.add_face_box(c_hull, hull);
 	m.add_volume(c_hull, 1, 0, hull);
 	m.add_volume(c_hull, 19, 0, track_l);
 	m.add_volume(c_hull, 19, 0, track_r);
-	const int c_turret = m.add_cobj(0, Vec3{0.0, 0.0, 1.3});
+	const int c_turret = m.add_cobj(0, ThreediBuildVec3{0.0, 0.0, 1.3});
 	m.add_face_box(c_turret, turret);
 	m.add_volume(c_turret, 1, 0, turret);
 	return m;
@@ -576,20 +581,20 @@ Model make_tank() {
 // The variant recipes (fixtures/README.md "threedi/synth"): one authored edit
 // each, spelled with the same runtime vocabulary the retired ObjectData
 // editing surface used.
-using Edit = std::function<void(Model &)>;
+using Edit = std::function<void(ThreediBuildModel &)>;
 
 struct Recipe {
 	const char *file;
-	Model (*base)();
+	ThreediBuildModel (*base)();
 	Edit edit;
 };
 
-void rename_register(Model &m, int index, const char *name) { m.control_registers[index] = name; }
+void rename_register(ThreediBuildModel &m, int index, const char *name) { m.control_registers[index] = name; }
 
-void delete_lod0_rows(Model &m) { m.lods[0].panm.clear(); }
+void delete_lod0_rows(ThreediBuildModel &m) { m.lods[0].panm.clear(); }
 
 // The first LOD0 track with control 113 on register `param` (the mount's yaw).
-ThreediTransform *controlled_track(Model &m, uint8_t param) {
+ThreediTransform *controlled_track(ThreediBuildModel &m, uint8_t param) {
 	for (ThreediPartAnimation &row : m.lods[0].panm) {
 		ThreediTransform *tracks[7] = {&row.rotation_x, &row.rotation_y, &row.rotation_z, &row.scale_x, &row.scale_y, &row.scale_z, &row.translation};
 		for (ThreediTransform *t : tracks)
@@ -604,10 +609,10 @@ void set_light_position_model(ThreediLight &l, float x, float y, float z) {
 	l.offset[2] = z;
 }
 
-Model make_liveness_case(uint32_t flags, const std::vector<int> &live_tracks) {
-	Model m = make_shed();
+ThreediBuildModel make_liveness_case(uint32_t flags, const std::vector<int> &live_tracks) {
+	ThreediBuildModel m = make_shed();
 	delete_lod0_rows(m);
-	ThreediPartAnimation row = inert_panm(0, 0);
+	ThreediPartAnimation row = threedi_build_inert_panm(0, 0);
 	row.flags = flags;
 	ThreediTransform *tracks[7] = {&row.rotation_x, &row.rotation_y, &row.rotation_z, &row.scale_x, &row.scale_y, &row.scale_z, &row.translation};
 	for (int index : live_tracks) tracks[index]->control = THREEDI_PANM_STYLE_SLIDE;
@@ -624,40 +629,40 @@ const std::vector<Recipe> &recipes() {
 		{"bird", make_bird, nullptr},
 		{"person", make_person, nullptr},
 		{"pump", make_pump, nullptr},
-        {"pump_minefield", make_pump, [](Model &m) {
-            m.add_user_point("ignored", Vec3{}, kUp, 0, kUserPointGameplay);
+        {"pump_minefield", make_pump, [](ThreediBuildModel &m) {
+            m.add_user_point("ignored", ThreediBuildVec3{}, kUp, 0, THREEDI_USER_POINT_GAMEPLAY);
             const char *names[] = {"SMLMARKED", "small", "LrgMarked", "large"};
             for (int i = 0; i < 16; ++i)
-                m.add_user_point(names[i % 4], Vec3{double(i) / 4, -0.5, 2.0},
-                        kUp, i % 5, kUserPointGameplay);
+                m.add_user_point(names[i % 4], ThreediBuildVec3{double(i) / 4, -0.5, 2.0},
+                        kUp, i % 5, THREEDI_USER_POINT_GAMEPLAY);
         }},
 		{"armory", make_armory, nullptr},
 		{"mount", make_mount, nullptr},
 		{"carrier", make_carrier, nullptr},
 		{"tank", make_tank, nullptr},
 		// --- CTRL bus (object_data_ctrl_bus_test.gd) ---
-		{"mount_ctrl1_heat_glow", make_mount, [](Model &m) { rename_register(m, 1, "HEAT_GLOW"); }},
-		{"mount_ctrl1_not_retail", make_mount, [](Model &m) { rename_register(m, 1, "NOT_RETAIL"); }},
-		{"mount_yaw_style114", make_mount, [](Model &m) { controlled_track(m, 1)->control = 114; }},
-		{"mount_ctrl1_lod_frac_yaw_style114", make_mount, [](Model &m) {
+		{"mount_ctrl1_heat_glow", make_mount, [](ThreediBuildModel &m) { rename_register(m, 1, "HEAT_GLOW"); }},
+		{"mount_ctrl1_not_retail", make_mount, [](ThreediBuildModel &m) { rename_register(m, 1, "NOT_RETAIL"); }},
+		{"mount_yaw_style114", make_mount, [](ThreediBuildModel &m) { controlled_track(m, 1)->control = 114; }},
+		{"mount_ctrl1_lod_frac_yaw_style114", make_mount, [](ThreediBuildModel &m) {
 			rename_register(m, 1, "LOD_FRAC");
 			controlled_track(m, 1)->control = 114;
 		}},
-		{"mount_mtrl0_rgbgen113_reg1", make_mount, [](Model &m) {
+		{"mount_mtrl0_rgbgen113_reg1", make_mount, [](ThreediBuildModel &m) {
 			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0.0, kBlack, kWhite);
 		}},
 		// --- Q3 bloom source (framefx_test.gd): the heat slab as an AlphaBlend
 		// LUM (its SELFLUM copy carries alpha 0 into the Q3 target) ---
-		{"mount_mtrl2_ab_lum", make_mount, [](Model &m) {
+		{"mount_mtrl2_ab_lum", make_mount, [](ThreediBuildModel &m) {
 			std::snprintf(m.materials[2].shader_name, sizeof(m.materials[2].shader_name), "FF_ST_AB_LUM");
 		}},
 		// --- Q3 bloom source (framefx_test.gd): a per-vertex skinned model wearing
 		// a LUM material; retail's bone path never copies it into Q3 ---
-		{"person_mtrl0_ad_lum", make_person, [](Model &m) {
+		{"person_mtrl0_ad_lum", make_person, [](ThreediBuildModel &m) {
 			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_AD_LUM");
 			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
 		}},
-		{"armory_lght0_colorgen113_flicker", make_armory, [](Model &m) {
+		{"armory_lght0_colorgen113_flicker", make_armory, [](ThreediBuildModel &m) {
 			ThreediLight &l = m.lights[0];
 			l.flags = static_cast<uint8_t>(l.flags & ~THREEDI_LIGHT_FLAG_DISABLE_OBJECTS);
 			l.style = THREEDI_PANM_STYLE_CONTROL_REGISTER;
@@ -667,20 +672,20 @@ const std::vector<Recipe> &recipes() {
 			l.color_end[3] = 0;
 		}},
 		// --- PANM apply (object_data_panm_apply_test.gd): a same-time noise track ---
-		{"pump_anim0_noise_translation", make_pump, [](Model &m) {
+		{"pump_anim0_noise_translation", make_pump, [](ThreediBuildModel &m) {
 			ThreediPartAnimation &row = m.lods[0].panm[0];
 			row.flags = threedi_panm_pack_flags(threedi_panm_scale_type(row.flags), threedi_panm_rotation_type(row.flags),
 					static_cast<uint8_t>(threedi_panm_rotation_reversed(row.flags)), THREEDI_TRANS_Z);
-			row.translation = track(0x36, 0, 0, 0, 32767);
+			row.translation = threedi_build_track(0x36, 0, 0, 0, 32767);
 		}},
 		// --- effect lights / per-model isolation ---
-		{"shed_lght0_sub2_origin_atten100", make_shed, [](Model &m) {
+		{"shed_lght0_sub2_origin_atten100", make_shed, [](ThreediBuildModel &m) {
 			ThreediLight &l = m.lights[0];
 			l.subobj_index = 2;
 			set_light_position_model(l, 0.0f, 0.0f, 0.0f);
 			l.atten_end = 100.0f;
 		}},
-		{"armory_lght0_sub1_offset", make_armory, [](Model &m) {
+		{"armory_lght0_sub1_offset", make_armory, [](ThreediBuildModel &m) {
 			ThreediLight &l = m.lights[0];
 			l.subobj_index = 1;
 			set_light_position_model(l, -0.25f, 0.5f, -0.75f); // Godot (0.25, 0.5, -0.75)
@@ -688,12 +693,12 @@ const std::vector<Recipe> &recipes() {
 			l.flags = static_cast<uint8_t>(l.flags & ~THREEDI_LIGHT_FLAG_DISABLE_OBJECTS);
 		}},
 		// --- terrain static shadow (terrain_static_shadow_runtime_test.gd) ---
-		{"house_lod0_sine_rotx", make_house, [](Model &m) { m.lods[0].panm.push_back(sine_rotation_row(0, 0)); }},
-		{"house_lod0_sine_rotx_uv1", make_house, [](Model &m) {
+		{"house_lod0_sine_rotx", make_house, [](ThreediBuildModel &m) { m.lods[0].panm.push_back(sine_rotation_row(0, 0)); }},
+		{"house_lod0_sine_rotx_uv1", make_house, [](ThreediBuildModel &m) {
 			m.lods[0].panm.push_back(sine_rotation_row(0, 0));
 			m.materials[0].u_params.style = 1;
 		}},
-		{"house_mtrl0_uvscroll16_alphatest", make_house, [](Model &m) {
+		{"house_mtrl0_uvscroll16_alphatest", make_house, [](ThreediBuildModel &m) {
 			m.materials[0].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
 			m.materials[0].u_params.style = 16;
 			m.materials[0].u_params.gen_rate = 1.0f;
@@ -701,27 +706,27 @@ const std::vector<Recipe> &recipes() {
 		// --- render_swatch projshadow (render_swatch_pass_modes.gd): the _MT
 		// post alpha-tested so the slot capture's Diffuse2.a coverage is
 		// observable at the discard boundary ---
-		{"pump_mtrl1_mt_alphatest", make_pump, [](Model &m) {
+		{"pump_mtrl1_mt_alphatest", make_pump, [](ThreediBuildModel &m) {
 			m.materials[1].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
 			m.materials[1].alpha_test_value_byte = 32;
 		}},
 		// --- simulation_test.gd ---
-		{"mount_heat_glow_slide_part1", make_mount, [](Model &m) {
+		{"mount_heat_glow_slide_part1", make_mount, [](ThreediBuildModel &m) {
 			rename_register(m, 0, "HEAT_GLOW");
 			delete_lod0_rows(m);
 			m.lods[0].panm.push_back(slide_row(1, 0));
 		}},
-		{"armory_special1_slide_part1", make_armory, [](Model &m) {
+		{"armory_special1_slide_part1", make_armory, [](ThreediBuildModel &m) {
 			rename_register(m, 0, "VEHICLE_SPECIAL1");
 			delete_lod0_rows(m);
 			m.lods[0].panm.push_back(slide_row(1, 0));
 		}},
-		{"armory_special2_slide_part1", make_armory, [](Model &m) {
+		{"armory_special2_slide_part1", make_armory, [](ThreediBuildModel &m) {
 			rename_register(m, 0, "VEHICLE_SPECIAL2");
 			delete_lod0_rows(m);
 			m.lods[0].panm.push_back(slide_row(1, 0));
 		}},
-		{"tank_special1_slide_ewep01", make_tank, [](Model &m) {
+		{"tank_special1_slide_ewep01", make_tank, [](ThreediBuildModel &m) {
 			rename_register(m, 0, "VEHICLE_SPECIAL1");
 			int anchor = -1;
 			for (const ThreediUserPoint &p : m.user_points)
@@ -729,9 +734,9 @@ const std::vector<Recipe> &recipes() {
 			delete_lod0_rows(m);
 			m.lods[0].panm.push_back(slide_row(anchor, 0));
 		}},
-		{"pump_lod0_inert_lod1_sine_rotz", make_pump, [](Model &m) {
+		{"pump_lod0_inert_lod1_sine_rotz", make_pump, [](ThreediBuildModel &m) {
 			m.lods[0].panm.clear();
-			m.lods[0].panm.push_back(inert_panm(0, 0));
+			m.lods[0].panm.push_back(threedi_build_inert_panm(0, 0));
 			m.lods[1].panm.clear();
 			m.lods[1].panm.push_back(sine_rotation_row(0, 2));
 		}},
@@ -750,7 +755,7 @@ const std::vector<Recipe> &recipes() {
 	return kRecipes;
 }
 
-Model build_recipe(const Recipe &r) {
+ThreediBuildModel build_recipe(const Recipe &r) {
 	if (r.base == nullptr) {
 		// (flags, live tracks): rx ry rz sx sy sz tr = 0..6
 		if (!std::strcmp(r.file, "panm_live_01_spinner")) return make_liveness_case(1u << 8, {});
@@ -764,7 +769,7 @@ Model build_recipe(const Recipe &r) {
 		if (!std::strcmp(r.file, "panm_live_09_translation")) return make_liveness_case(1u << 24, {6});
 		return make_liveness_case(1u << 16, {});
 	}
-	Model m = r.base();
+	ThreediBuildModel m = r.base();
 	if (r.edit) r.edit(m);
 	return m;
 }
@@ -892,6 +897,57 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 
 using test_io::read_file;
 
+// ---------------------------------------------------------------------------
+// The minimal set's copies (assets/): the house and its swatch textures.
+struct AssetTexture {
+	const char *file;
+	uint8_t rgb[3];
+};
+const AssetTexture kAssetTextures[] = {
+	{"wall.tga", {200, 190, 170}}, // plaster
+	{"roof.tga", {140, 60, 50}},   // terracotta
+	{"wood.tga", {110, 75, 45}},   // the chimney's timber
+};
+constexpr int kSwatchSize = 16;
+
+// A uniform flat-colour swatch through the engine TGA encoder (type 2, 24 bpp,
+// bottom-up rows): the shape of the retail-loaded mnml_*.tga terrain art, so
+// retail's loose-file texture path takes it as is.
+std::vector<uint8_t> make_swatch_tga(const uint8_t rgb[3]) {
+	opennova::tga::TgaImage img;
+	img.width = kSwatchSize;
+	img.height = kSwatchSize;
+	img.bpp = 24;
+	for (int i = 0; i < kSwatchSize * kSwatchSize; ++i) {
+		img.pixels.push_back(rgb[2]);
+		img.pixels.push_back(rgb[1]);
+		img.pixels.push_back(rgb[0]);
+	}
+	std::vector<uint8_t> out;
+	opennova::tga::tga_encode(img, out);
+	return out;
+}
+
+// The assets/ copy of one minted file: written under --write, else byte-compared.
+void guard_asset(const std::string &path, const std::vector<uint8_t> &bytes, bool write_mode) {
+	if (write_mode) {
+		std::ofstream o(path, std::ios::binary);
+		o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+		std::printf("wrote %s (%zu bytes)\n", path.c_str(), bytes.size());
+		return;
+	}
+	std::vector<uint8_t> committed;
+	if (!expect(read_file(path, committed), path + " missing; run with --write")) return;
+	static const char kLfsSentinel[] = "version https://git-lfs";
+	if (committed.size() >= sizeof(kLfsSentinel) - 1 &&
+			std::memcmp(committed.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0) {
+		std::printf("[skip] %s is an unpulled LFS pointer\n", path.c_str());
+		return;
+	}
+	expect(committed == bytes, path + " differs from the generator output; regenerate with --write");
+	std::printf("%-40s %6zu bytes\n", path.c_str(), committed.size());
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -900,13 +956,12 @@ int main(int argc, char **argv) {
 		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
 	const std::string dir = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth";
 	std::filesystem::create_directories(dir);
-	const std::string scratch = std::string(test_paths_temp_dir()) + "/minimal_3di_gen_scratch.3di";
 
 	for (const Recipe &recipe : recipes()) {
 		const std::string path = dir + "/" + recipe.file + ".3di";
-		const Model model = build_recipe(recipe);
+		const ThreediBuildModel model = build_recipe(recipe);
 		std::vector<uint8_t> bytes;
-		if (!expect(mint(model, scratch, bytes), std::string(recipe.file) + ": the writer accepts the model")) continue;
+		if (!expect(threedi_build_mint(model, bytes), std::string(recipe.file) + ": the writer accepts the model")) continue;
 		if (write_mode) {
 			std::ofstream o(path, std::ios::binary);
 			o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
@@ -926,6 +981,20 @@ int main(int argc, char **argv) {
 		check_facts(recipe.file, committed);
 		std::printf("%-40s %6zu bytes\n", recipe.file, committed.size());
 	}
-	if (failures == 0 && !write_mode) std::printf("OK: fixtures/threedi/synth byte-reproducible\n");
+
+	// The minimal set's own model: assets/house.3di from the same `house`
+	// recipe, plus the three swatch textures it names.
+	const std::string assets = std::string(test_paths_repo_root(__FILE__)) + "/assets";
+	for (const Recipe &recipe : recipes()) {
+		if (std::strcmp(recipe.file, "house") != 0) continue;
+		std::vector<uint8_t> bytes;
+		if (expect(threedi_build_mint(build_recipe(recipe), bytes), "assets/house.3di: the writer accepts the model"))
+			guard_asset(assets + "/house.3di", bytes, write_mode);
+	}
+	for (const AssetTexture &texture : kAssetTextures)
+		guard_asset(assets + "/" + texture.file, make_swatch_tga(texture.rgb), write_mode);
+
+	if (failures == 0 && !write_mode)
+		std::printf("OK: fixtures/threedi/synth + assets/house byte-reproducible\n");
 	return failures == 0 ? 0 : 1;
 }

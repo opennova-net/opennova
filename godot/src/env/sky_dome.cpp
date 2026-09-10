@@ -133,14 +133,21 @@ void SkyDome::_ready() {
 	build();
 }
 
-void SkyDome::build() {
+void SkyDome::clear() {
 	if (mesh_instance_ != nullptr) {
+		remove_child(mesh_instance_);
 		mesh_instance_->queue_free();
 		mesh_instance_ = nullptr;
 	}
 	built_ = false;
 	bound_cloud_tex1_.unref();
 	bound_cloud_tex2_.unref();
+	sky_material_.unref();
+	cached_cam_id_ = ObjectID();
+}
+
+void SkyDome::build() {
+	clear();
 
 	Ref<Shader> sky_shader =
 			ResourceLoader::get_singleton()->load("res://shaders/sky.gdshader");

@@ -1,5 +1,9 @@
 #pragma once
 
+#include "world/world_source.h"
+#include "world/world_entity_proxy.h"
+#include "util/preview_properties.h"
+
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/node3d.hpp>
@@ -98,8 +102,10 @@ namespace godot {
 // THE FRAME: the witnessed per-frame order (the original main loop's
 // server-tick-then-client-render) is ONE static leg table (kFrameLegs, the
 // witness citations on the leg bodies in game_world_frame.cpp) run by one loop
-// with one RAII LegScope timing; the frozen-pose capture replay is a second
-// table (kFrozenPoseRefresh) through the same loop. inmatch::Session decides
+// with one RAII LegScope timing; the frozen-pose capture replay
+// (kFrozenPoseRefresh) and the editor preview refresh (kPreviewRefresh) are
+// the second and third tables through the same loop, all three in that one
+// file. inmatch::Session decides
 // lifecycle, cadence, input consumption, catch-up, and cancellation; the
 // table orders the actual Godot devices around that one typed call. There is
 // deliberately no generic renderer interface: every leg is a direct method
@@ -142,6 +148,41 @@ public:
 	};
 
 	GameWorld();
+
+	// The editor loads the authored nodes directly. Source-derived properties
+	// are inspectable, transient, and restored on unload. No mission session starts.
+	void set_world_source(const Ref<WorldSource> &p_source) { world_source_ = p_source; }
+	Ref<WorldSource> get_world_source() const { return world_source_; }
+	Error load_preview(const String &p_local_directory = String());
+	// Authoring sessions retain these documents across scene switches. The
+	// preview owns a separate effective ENV so mission overrides never edit the base.
+	Error load_preview_documents(const Ref<ResourceRoot> &p_root, const Ref<MissionData> &p_mission,
+			const Ref<TerrainData> &p_terrain, const Ref<EnvFile> &p_environment);
+	// Refresh the supported settings (clock, ENV, foliage) without replacing objects.
+	Error update_preview_settings(const Ref<EnvFile> &p_environment);
+	Error refresh_preview(Camera3D *p_camera);
+	void unload_preview();
+	bool is_preview_active() const { return preview_active_; }
+	Ref<Environment> get_preview_environment() const { return preview_environment_; }
+	String get_preview_status() const { return preview_status_; }
+	PackedStringArray get_preview_diagnostics() const { return preview_diagnostics_; }
+	// --- the editor's entity projections (ADR 0044) ---
+	// One WorldEntityProxy per mission entity record, minted under the runtime
+	// root's PreviewEntities node by every preview load and reload: the
+	// authoring selection and gizmo surface. Both it and the placer's
+	// MissionObjects sit at identity under the runtime root, so a proxy's
+	// transform is the placed world transform. Empty outside a preview.
+	TypedArray<WorldEntityProxy> get_preview_entity_proxies() const;
+	WorldEntityProxy *get_preview_entity_proxy(int p_kind, int p_index) const;
+	// Re-project one entity from its current mission record: the retained
+	// static instance's rows or the individual model take the record's
+	// transform, and its proxy follows. A record whose item changed falls
+	// through to reload_preview_entities. ERR_UNAVAILABLE outside a ready
+	// preview, ERR_DOES_NOT_EXIST for a record the preview never projected.
+	Error update_preview_entity(int p_kind, int p_index);
+	// Re-place every entity from the mission document (added or removed
+	// records, changed items) and mint the proxies again.
+	Error reload_preview_entities();
 
 	// --- the exported boot options ------------------------------------------
 	// A mission (.bms) to boot into. When set, the mission's header selects the
@@ -357,6 +398,7 @@ public:
 	// The leg table as literal names, in order (the frame-order pin).
 	static PackedStringArray frame_leg_names();
 	static PackedStringArray frozen_pose_leg_names();
+	static PackedStringArray preview_leg_names();
 	// Whether the named live leg stops the frame on a false return.
 	static bool frame_leg_stops_frame(const String &p_name);
 	// Re-evaluates only camera-dependent production render state for an
@@ -513,6 +555,7 @@ public:
 	void on_nw_host_error(const String &p_message);
 
 protected:
+	void _validate_property(PropertyInfo &property) const { preview_properties_.validate(property); }
 	static void _bind_methods();
 	void _notification(int p_what);
 
@@ -530,6 +573,8 @@ private:
 	static const int kFrameLegCount;
 	static const FrameLeg kFrozenPoseRefresh[];
 	static const int kFrozenPoseRefreshCount;
+	static const FrameLeg kPreviewRefresh[];
+	static const int kPreviewRefreshCount;
 	// The one loop: every row through one LegScope over the frame's latched
 	// board (null when the frame is untimed or the board is not capturing);
 	// a kLegSkipped body cancels its scope, a kLegStop from a kStopsFrame
@@ -610,6 +655,7 @@ private:
 	void place_streamed_mission_objects(const Ref<Simulation> &p_sim);
 	void clear_mission_tile_info();
 	bool load_terrain(const String &p_trn_path);
+	bool bind_terrain_data(const Ref<TerrainData> &p_data);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void load_player_weapon_profile();
@@ -643,6 +689,22 @@ private:
 	// advances them from render_environment_nodes_frame (the render
 	// diagnostics report it).
 	bool env_presenters_world_driven_ = false;
+
+	PreviewProperties preview_properties_;
+	Ref<Environment> preview_environment_;
+	Ref<Environment> frame_clear_environment() const;
+	void set_preview_configuration(bool enabled);
+	Ref<WorldSource> world_source_;
+	bool preview_active_ = false;
+	String preview_status_ = "idle";
+	PackedStringArray preview_diagnostics_;
+	void collect_preview_diagnostics();
+	ObjectID preview_entities_id_;
+	Node3D *preview_entities() const;
+	void build_preview_entities();
+	void free_preview_entities();
+	void sync_preview_entity_proxy(WorldEntityProxy *p_proxy, const Ref<MissionEntityRecord> &p_record);
+	ObjectModel *placed_model_for(int p_kind, int p_index) const;
 
 	// --- the mission state ---
 	Ref<TerrainData> terrain_data_;

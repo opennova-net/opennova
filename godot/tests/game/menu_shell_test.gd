@@ -749,7 +749,7 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 	_rm_runtime_dir(dir)
 
 
-# A loose authoring root (the ONED --loose-root play-test mount, ADR 0025) has no
+# A loose authoring root (the editor's --loose-root play-test mount, ADR 0025/0045) has no
 # packed archives to relayer: applying a discoverable expansion must refuse and
 # leave the live loose mount untouched, not remount it through mount_runtime into
 # a cleared root (the zero-archives fatal would kill the running play-test).

@@ -212,6 +212,7 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_event_action", "event_index", "action"), &MissionData::add_event_action);
 	ClassDB::bind_method(D_METHOD("save_file"), &MissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &MissionData::save_as);
+	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &MissionData::save_to_path);
 	ClassDB::bind_method(D_METHOD("set_mis_base_heights", "flat_write_order"), &MissionData::set_mis_base_heights);
 	ClassDB::bind_method(D_METHOD("is_modified"), &MissionData::is_modified);
 	ClassDB::bind_method(D_METHOD("object_records_revision"), &MissionData::object_records_revision);
@@ -250,9 +251,11 @@ void MissionData::_bind_methods() {
 	BIND_CONSTANT(ATTRIB_SEARCH_AND_DESTROY);
 	BIND_CONSTANT(ATTRIB_GAME_MODE_MASK);
 	BIND_CONSTANT(ITEM_ID_OFFSET);
+	BIND_CONSTANT(PLAYER_START_ITEM_ID);
 }
 
 static_assert(MissionData::ITEM_ID_OFFSET == mission::kItemIdOffset);
+static_assert(MissionData::PLAYER_START_ITEM_ID == 6001 + mission::kItemIdOffset);
 // Every ATTRIB_* mirror is pinned to its engine home (engine/formats/mission
 // bms.h AttribFlags) — a drifted copy here would silently mis-edit headers.
 static_assert(MissionData::ATTRIB_FORCE_INDOORS ==
@@ -1051,6 +1054,15 @@ Error MissionData::save_file() {
 }
 
 Error MissionData::save_as(const String &path) {
+	const Error error = save_to_path(path);
+	if (error == OK) {
+		source_path = path;
+		modified = false;
+	}
+	return error;
+}
+
+Error MissionData::save_to_path(const String &path) {
 	last_error = String();
 	if (path.is_empty()) {
 		return ERR_INVALID_PARAMETER;
@@ -1104,8 +1116,6 @@ Error MissionData::save_as(const String &path) {
 		last_error = String(error.c_str());
 		return ERR_FILE_CANT_WRITE;
 	}
-	source_path = path;
-	modified = false;
 	return OK;
 }
 

@@ -77,7 +77,7 @@ D-CBIN-1's markup grill.
 ## Cross-references
 
 - Reimpl: `engine/formats/cbin` (`cbin.h`/`cbin.cpp`) and `godot/src/cbin`
-  (credits resource + player). ONED has no credits editor.
+  (credits resource + player). The Godot editor has no credits authoring surface.
 - The one tracked credits divergence: `D-MNU-6` ([mnu/menu-re.md](../mnu/menu-re.md)).
 
 ## Ledger de-table transplants (2026-08-06)

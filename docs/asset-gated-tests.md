@@ -78,8 +78,13 @@ and read the output: a real run prints its measurements, a skipped one prints
 
 ## CI
 
-Retail data never reaches public runners as tracked files (copyright, size,
-credentials). Two private repositories carry what CI needs:
+Retail reference corpora are kept out of the public repository (copyright,
+size, credentials). The existing temporary playable-asset exception is limited
+to `assets/charattr.def` and `assets/SndProf.def`: both are tracked, pulled by
+public CI and included in the game ZIPs until their authored replacements
+land (see [assets/README.md](../assets/README.md)). No reference install or
+capture is included in that exception. Two private repositories carry the
+reference corpora CI needs:
 `opennova-net/opennova-reference-assets` (the extracted tree behind
 `OPENNOVA_JO_ASSETS`: the loose asset set, the shipped `.bms` missions and the
 reference fixture set; its README lists the files) and `opennova-net/opennova-reference-retail-packed` (the packed install

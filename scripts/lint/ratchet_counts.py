@@ -13,7 +13,7 @@ in maturity_baseline.json:
                         `class X extends Y` / `class X:` + `extends Y`) under
                         godot/tests/**/*.gd whose base is a PRODUCTION class:
                         a `class_name` declared under godot/game or
-                        godot/modtools, or a class registered in
+                        godot/tools, or a class registered in
                         godot/src/register_types.cpp. ADR 0043 rule 11: a test
                         boots a real fixture or fakes a GDScript INTERFACE
                         class (GameShell, WorldView, RunSessionPlatform,
@@ -26,7 +26,7 @@ in maturity_baseline.json:
                         the allowlisted infra libs (citation is inapplicable
                         there) -- the faithful-port rule's coverage floor.
   godot_orig_cites      "[orig:" citations across the whole Godot side --
-                        godot/src C++ plus the godot/game, godot/modtools and
+                        godot/src C++ plus the godot/game, godot/tools and
                         godot/probes GDScript -- as ONE count (ADR 0043 merged
                         the former adapter_cpp_orig_cites / gd_orig_cites
                         pair). A cite moves freely between the two Godot-side
@@ -36,7 +36,7 @@ in maturity_baseline.json:
                         marker is `[orig: Name @0xADDR]` (ADR 0042 d7).
   gd_foreign_private_accesses
                         lines in the shipping GDScript (godot/game,
-                        godot/modtools) that access an _underscore member of
+                        godot/tools) that access an _underscore member of
                         ANOTHER object (self._ excluded) -- a "method annex"
                         reaching into its owner's privates is not a class
                         boundary (ADR 0043). Non-increasing; target zero.
@@ -50,7 +50,7 @@ in maturity_baseline.json:
                         exists for it.
   godot_node_meta_sites Object metadata calls (set_meta / get_meta / has_meta /
                         remove_meta) anywhere under godot/ (bindings, game
-                        scripts, modtools, probes, tests). An ABSOLUTE zero
+                        scripts, tools, probes, tests). An ABSOLUTE zero
                         floor like mcp_boundary_cites: a fact hung on a node
                         by string key is an untyped record nobody can find;
                         it belongs on the node class as a typed property, on
@@ -60,7 +60,7 @@ in maturity_baseline.json:
                         never saw headers).
   gd_dict_key_sites     Dictionary-keyed reads (`x["key"]`, `.get("key"`) on
                         code lines of the shipping GDScript (godot/game,
-                        godot/modtools), excluding godot/game/mcp (the
+                        godot/tools), excluding godot/game/mcp (the
                         sanctioned JSON transport edge) and godot/game/probe
                         (the probe model: its arguments are JSON Schema and
                         its status pages are the game_probe wire by design,
@@ -118,12 +118,32 @@ def _in_build_dir(parts) -> bool:
         parts[2].startswith("build")
 
 
+# godot/addons/ holds two kinds of tree: the vendored third-party addons (gut,
+# imgui-godot) that no counter may judge, and the first-party editor plugin
+# (opennova_world and opennova_model, ADR 0044/0045/0046), which is shipping OpenNova GDScript like
+# godot/game and godot/tools and is counted with them.
+FIRST_PARTY_ADDONS = ("opennova_world", "opennova_model")
+# The shipping GDScript trees, relative to godot/: every counter that judges
+# production scripts walks exactly these.
+SHIPPING_GD_SUBDIRS = ("game", "tools") + tuple(f"addons/{a}" for a in FIRST_PARTY_ADDONS)
+
+
+def _in_third_party_addon(parts) -> bool:
+    """True under godot/addons/<x>/ for every <x> except the first-party
+    plugins in FIRST_PARTY_ADDONS."""
+    parts = tuple(parts)
+    for i, part in enumerate(parts):
+        if part == "addons":
+            return i + 1 >= len(parts) or parts[i + 1] not in FIRST_PARTY_ADDONS
+    return False
+
+
 def _count_private_pokes(subdirs: tuple[str, ...]) -> int:
     count = 0
     for sub in subdirs:
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
+            if _in_third_party_addon(parts) or _in_build_dir(parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -144,11 +164,11 @@ def count_test_private_pokes() -> int:
 
 def count_gd_foreign_private_accesses() -> int:
     """Foreign `._member` accesses in the SHIPPING GDScript (godot/game,
-    godot/modtools): the annex pattern -- a RefCounted "method annex" split
+    godot/tools, the first-party addons): the annex pattern -- a RefCounted "method annex" split
     off its owner for size and reaching back through `_owner._field` -- is
     C++ `friend` without the keyword. A class owns its state; an object that
     needs another's privates is a method of that other class (ADR 0043)."""
-    return _count_private_pokes(("game", "modtools"))
+    return _count_private_pokes(SHIPPING_GD_SUBDIRS)
 
 
 CLASS_NAME_DECL = re.compile(r"^class_name\s+([A-Za-z_]\w*)", re.M)
@@ -160,10 +180,10 @@ TEST_EXTENDS = re.compile(r"^\s*(?:class\s+\w+\s+)?extends\s+([A-Za-z_]\w*)\s*:?
 
 def _production_class_names() -> set[str]:
     names: set[str] = set()
-    for sub in ("game", "modtools"):
+    for sub in SHIPPING_GD_SUBDIRS:
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
+            if _in_third_party_addon(parts) or _in_build_dir(parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -184,7 +204,7 @@ def count_gd_test_production_subclasses() -> int:
     count = 0
     for path in (REPO / "godot" / "tests").rglob("*.gd"):
         parts = path.relative_to(REPO).parts
-        if "addons" in parts or _in_build_dir(parts):
+        if _in_third_party_addon(parts) or _in_build_dir(parts):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -245,10 +265,10 @@ def count_godot_orig_cites() -> int:
         except OSError:
             continue
         count += text.count("[orig:")
-    for sub in ("game", "modtools", "probes"):
+    for sub in SHIPPING_GD_SUBDIRS + ("probes",):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
+            if _in_third_party_addon(parts) or _in_build_dir(parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -323,8 +343,10 @@ GD_PRINT = re.compile(r"(?:^|[^_a-zA-Z\"])(?:print|prints|printerr|print_rich|pr
 # The shipping Godot layer routes diagnostics through push_error/push_warning,
 # print_verbose, or the dev tools (F3).
 GD_PRINT_ALLOWLIST: set[str] = {
-    # Hidden release-build CLI: stdout/stderr is its user interface.
-    "godot/modtools/pack_game_cli.gd",
+    # Headless project commands: stdout/stderr is their user interface.
+    "godot/tools/pack_game_cli.gd",
+    "godot/tools/export_models_cli.gd",
+    "godot/tools/export_clips_cli.gd",
 }
 CPP_CONSOLE = re.compile(
     r"UtilityFunctions::print(?!_verbose)\s*\(|UtilityFunctions::printerr\s*\("
@@ -339,7 +361,7 @@ def count_gd_prints_outside_debug() -> int:
     godot/probes log through their ProbeContext, so they are in scope.
     godot/src is C++-only (ADR 0034 d6); its .gd leg here is a tripwire."""
     count = 0
-    for sub in ("src", "game", "modtools", "probes"):
+    for sub in ("src",) + SHIPPING_GD_SUBDIRS + ("probes",):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             rel = path.relative_to(REPO).as_posix()
             if rel in GD_PRINT_ALLOWLIST:
@@ -369,7 +391,7 @@ def count_has_method_guards() -> int:
     has_method() probe is the same duck dispatch, just invisible to GDScript
     greps."""
     count = 0
-    for sub in ("src", "game", "modtools", "probes"):
+    for sub in ("src",) + SHIPPING_GD_SUBDIRS + ("probes",):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -461,7 +483,7 @@ GD_DICT_KEY_SITE = re.compile(r'\["[A-Za-z_]\w*"\]|\.get\("')
 
 def count_gd_dict_key_sites() -> int:
     """Dictionary-keyed reads in the shipping GDScript (godot/game and
-    godot/modtools; godot/game/mcp excluded as the sanctioned JSON transport
+    godot/tools; godot/game/mcp excluded as the sanctioned JSON transport
     edge, godot/game/probe as the probe model whose arguments are JSON Schema
     and whose status pages are the game_probe wire by design): `row["key"]`
     and `.get("key"` on code lines. Each site is a record crossing a seam
@@ -469,10 +491,10 @@ def count_gd_dict_key_sites() -> int:
     is the documented transport edges (the dict-contract allowlist in this
     file's baseline)."""
     count = 0
-    for sub in ("game", "modtools"):
+    for sub in SHIPPING_GD_SUBDIRS:
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
+            if _in_third_party_addon(parts) or _in_build_dir(parts):
                 continue
             if sub == "game" and len(parts) > 2 and parts[2] in ("mcp", "probe"):
                 continue
@@ -524,7 +546,7 @@ def count_godot_node_meta_sites() -> int:
         if path.suffix not in (".gd", ".cpp", ".h"):
             continue
         parts = path.relative_to(REPO).parts
-        if "addons" in parts or "third_party" in parts or _in_build_dir(parts):
+        if _in_third_party_addon(parts) or "third_party" in parts or _in_build_dir(parts):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")

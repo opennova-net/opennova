@@ -1,0 +1,349 @@
+//////////////////////////////////////////////////////////////////////
+//
+// Character Def File
+//
+// Attributes: AutoScope KnifeBonus Medic  WaterGirl
+//
+// Notes: Cammo IDs are listed in itemsid.h
+//
+// HPBONUS is added to standard 8 hitpoints
+// 1.0 generally denotes an unmodified rate.  higher is more exagerated, generally
+// NL Cheat to change chars: setchar n    (n = 1-5)
+//////////////////////////////////////////////////////////////////////
+//
+
+//	CHAR_TYPE_DELTASP				(1)		// generic single player DELTA character
+//	CHAR_TYPE_RANGERSP				(2)		// generic single player RANGER character
+//	CHAR_TYPE_TENTHMTNSP			(3)		// generic single player TENTHMTN character
+//	CHAR_TYPE_DELTAMP				(4)		// multiplayer basic (unclassed) DELTA
+//	CHAR_TYPE_DELTAMP_MEDIC			(5)		// multiplayer medic
+//	CHAR_TYPE_DELTAMP_SNIPER		(6)		// multiplayer sniper
+//	CHAR_TYPE_DELTAMP_GUNNER		(7)		// multiplayer gunner
+//	CHAR_TYPE_DELTAMP_RIFLEMAN		(8)		// multiplayer rifleman
+//	CHAR_TYPE_DELTAMP_ENGINEER		(9)		// multiplayer engineer
+//	CHAR_TYPE_DELTAMP_PILOT			(?)		// multiplayer pilot
+//	CHAR_TYPE_DELTAMP_CQB			(?)		// multiplayer cqb
+//
+//	1-3  will be used for single player missions, where the mission dictates what role you are playing
+//
+//	 4   was a placeholder for multiplayer games, no longer used
+//
+//	5-9  are our multiplayer character 'personas', to allow character selection ala DFLW 
+
+
+
+////////////////////////////////////////
+//////// Jont Ops Single Player ////////
+////////////////////////////////////////
+[CHARACTER1]
+STEALTH			= 25
+HPBONUS			= 2	
+RECOIL_MUTE 	= 0.75	
+XHAIR_MUTE		= 2.5	
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE  	= 0.0	
+RELOAD_MUTE  	= 0.5	
+JUNGLE_CAMMO	= 5310
+DESERT_CAMMO	= 5310
+ARCTIC_CAMMO	= 5310
+RUN_MODIFIER	= 0
+ATTRIBUTES  	= AutoScope 
+
+/////////////////////////////////////////////
+//////// Joint Ops Multiplayer Medic ////////
+/////////////////////////////////////////////
+[CHARACTER5]
+STEALTH			= 25
+HPBONUS			= 2	
+RECOIL_MUTE 	= 0.75	
+XHAIR_MUTE		= 2.5	
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE  	= 0.0	
+RELOAD_MUTE  	= 0.5	
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+RUN_MODIFIER	= 1
+ATTRIBUTES  	= Medic 
+
+//////////////////////////////////////////////
+//////// Joint Ops Multiplayer Sniper ////////
+//////////////////////////////////////////////
+[CHARACTER6]
+STEALTH			= 25
+HPBONUS			= 2	
+RECOIL_MUTE 	= 0.75	
+XHAIR_MUTE		= 2.5	
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE  	= 0.0	
+RELOAD_MUTE  	= 0.5	
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+RUN_MODIFIER	= 0
+ATTRIBUTES  	= AutoScope 
+
+//////////////////////////////////////////////
+//////// Joint Ops Multiplayer Gunner ////////
+//////////////////////////////////////////////
+[CHARACTER7]
+STEALTH			= 25
+HPBONUS			= 2	
+RECOIL_MUTE 	= 0.75	
+XHAIR_MUTE		= 2.5	
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE  	= 0.0	
+RELOAD_MUTE  	= 0.5	
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+RUN_MODIFIER	= -1
+ATTRIBUTES  	= AutoScope 
+
+
+
+////////////////////////////////////////////////
+//////// Joint Ops Multiplayer Rifleman ////////
+////////////////////////////////////////////////
+[CHARACTER8]
+STEALTH			= 25
+HPBONUS			= 2	
+RECOIL_MUTE 	= 0.75	
+XHAIR_MUTE		= 2.5	
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE  	= 0.0	
+RELOAD_MUTE  	= 0.5	
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+RUN_MODIFIER	= 0
+ATTRIBUTES  	= KnifeBonus 
+
+
+////////////////////////////////////////////////
+//////// Joint Ops Multiplayer Engineer	////////
+////////////////////////////////////////////////
+[CHARACTER9]
+STEALTH			= 25
+HPBONUS			= 2	
+RECOIL_MUTE 	= 0.75	
+XHAIR_MUTE		= 2.5	
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE  	= 0.0	
+RELOAD_MUTE  	= 0.5	
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+RUN_MODIFIER	= 0
+ATTRIBUTES  	= KnifeBonus 
+
+
+
+
+
+
+
+////////////////////////////////////////
+////////////////////////////////////////
+////		OLD CHARACTER LIST		////
+////////////////////////////////////////
+////////////////////////////////////////
+
+////////////////////////////////////////
+////////		MP CQB			////////
+////////////////////////////////////////
+//[CHARACTER?]
+//STEALTH			= 25
+//HPBONUS			= 2	
+//RECOIL_MUTE 	= 0.75	
+//XHAIR_MUTE		= 2.5	
+//XHAIRDX_MUTE	= 2.5
+//SCOPE_MUTE  	= 0.0	
+//RELOAD_MUTE  	= 0.5	
+//JUNGLE_CAMMO	= 5305
+//DESERT_CAMMO	= 5305
+//ARCTIC_CAMMO	= 5305
+//JUNGLE_CAMMO_ALT= 5308
+//DESERT_CAMMO_ALT= 5308
+//ARCTIC_CAMMO_ALT= 5308
+//RUN_MODIFIER	= 0
+//ATTRIBUTES  	= KnifeBonus 
+
+
+
+////////////////////////////////////////
+////////	Delta MP Pilot		////////
+////////////////////////////////////////
+//[CHARACTER?]
+//STEALTH			= 25
+//HPBONUS			= 2	
+//RECOIL_MUTE 	= 0.75	
+//XHAIR_MUTE		= 2.5	
+//XHAIRDX_MUTE	= 2.5
+//SCOPE_MUTE  	= 0.0	
+//RELOAD_MUTE  	= 0.5	
+//JUNGLE_CAMMO	= 5310
+//DESERT_CAMMO	= 5301
+//ARCTIC_CAMMO	= 5301
+//JUNGLE_CAMMO_ALT= 5308
+//DESERT_CAMMO_ALT= 5308
+//ARCTIC_CAMMO_ALT= 5308
+//RUN_MODIFIER	= 0
+//ATTRIBUTES  	= 
+
+//////////////////////////////////////////
+////////		Ranger SP		////////
+////////////////////////////////////////
+//[CHARACTER2]
+//STEALTH			= 25
+//HPBONUS			= 2	
+//RECOIL_MUTE 	= 0.75	
+//XHAIR_MUTE		= 2.5	
+//XHAIRDX_MUTE	= 2.5
+//SCOPE_MUTE  	= 0.0	
+//RELOAD_MUTE  	= 0.5	
+//JUNGLE_CAMMO	= 5302
+//DESERT_CAMMO	= 5302
+//ARCTIC_CAMMO	= 5302
+//RUN_MODIFIER	= 0
+//ATTRIBUTES  	= AutoScope 
+
+////////////////////////////////////////
+////////		TenthMtn SP		////////
+////////////////////////////////////////
+//[CHARACTER3]
+//STEALTH			= 25
+//HPBONUS			= 2	
+//RECOIL_MUTE 	= 0.75	
+//XHAIR_MUTE		= 2.5	
+//XHAIRDX_MUTE	= 2.5
+//SCOPE_MUTE  	= 0.0	
+//RELOAD_MUTE  	= 0.5	
+//JUNGLE_CAMMO	= 5303
+//DESERT_CAMMO	= 5303
+//ARCTIC_CAMMO	= 5303
+//RUN_MODIFIER	= 0
+//ATTRIBUTES  	= AutoScope 
+
+////////////////////////////////////////
+////////		Delta MP		////////
+////////////////////////////////////////
+//[CHARACTER4]
+//STEALTH			= 25
+//HPBONUS			= 2	
+//RECOIL_MUTE 	= 0.75	
+//XHAIR_MUTE		= 2.5	
+//XHAIRDX_MUTE	= 2.5
+//SCOPE_MUTE  	= 0.0	
+//RELOAD_MUTE  	= 0.5	
+//JUNGLE_CAMMO	= 5301
+//DESERT_CAMMO	= 5301
+//ARCTIC_CAMMO	= 5301
+//JUNGLE_CAMMO_ALT= 5308
+//DESERT_CAMMO_ALT= 5308
+//ARCTIC_CAMMO_ALT= 5308
+//RUN_MODIFIER	= 0
+//ATTRIBUTES  	= AutoScope 
+
+
+//sniper
+[CHARACTER1]
+STRENGTH		= 28.0
+STEALTH			= 25
+HPBONUS			= 2	
+CRAWL_SPEED 	= 4.0	
+RUN_SPEED		= 1.0	
+WALK_SPEED		= 1.1	
+SWIM_SPEED		= 1.1	
+RECOIL_MUTE 	= 0.75	
+XHAIR_MUTE		= 2.5	
+XHAIRDX_MUTE	= 2.5
+SCOPE_MUTE  	= 0.0	
+RELOAD_MUTE  	= 0.5	
+PREF_WEAP		= 1,2,3,4,11,12,14	// Sniper Rifles
+JUNGLE_CAMMO	= 5301
+DESERT_CAMMO	= 5301
+ARCTIC_CAMMO	= 5301
+ATTRIBUTES  	= AutoScope 
+
+//gunner
+[CHARACTER2]
+STRENGTH		= 40.0
+STEALTH			= 25
+HPBONUS			= 5
+CRAWL_SPEED 	= 2.0	
+RUN_SPEED		= 0.95	
+WALK_SPEED		= 1.0	
+SWIM_SPEED		= 1.0	
+RECOIL_MUTE 	= 0.5	
+XHAIR_MUTE		= 2.0	
+XHAIRDX_MUTE	= 2.0
+SCOPE_MUTE  	= 1.0	
+RELOAD_MUTE  	= 1.25	
+PREF_WEAP		= 7,8,9,10,12,13,21	// M249 SAW, FNMAG, Steyr AUG, AK47
+JUNGLE_CAMMO	= 5300
+DESERT_CAMMO	= 5300
+ARCTIC_CAMMO	= 5300
+ATTRIBUTES  	= NULL
+
+//cqb
+[CHARACTER3]
+STRENGTH		= 20.0
+STEALTH			= 25
+HPBONUS			= 1
+CRAWL_SPEED 	= 3.0		
+RUN_SPEED		= 1.1		
+WALK_SPEED		= 1.2		
+SWIM_SPEED		= 1.2		
+RECOIL_MUTE 	= 0.75		
+XHAIR_MUTE		= 1.5		
+XHAIRDX_MUTE	= 1.5
+SCOPE_MUTE  	= 0.75		
+RELOAD_MUTE  	= 0.95		
+PREF_WEAP		= 5,6,7,11,13,15,16,17,21	// Pistols, MP5, UMP, Calico, AK-47, Jackhammer
+JUNGLE_CAMMO	= 5300
+DESERT_CAMMO	= 5300
+ARCTIC_CAMMO	= 5300
+ATTRIBUTES  	= KnifeBonus
+
+//aquatic
+[CHARACTER4]
+STRENGTH		= 24.0
+STEALTH			= 25
+HPBONUS			= 0
+CRAWL_SPEED 	= 2.3	
+RUN_SPEED		= 1.05	
+WALK_SPEED		= 1.1	
+SWIM_SPEED		= 1.5	
+RECOIL_MUTE 	= 0.5	
+XHAIR_MUTE		= 2.0	
+XHAIRDX_MUTE	= 1.33
+SCOPE_MUTE  	= 0.5	
+RELOAD_MUTE  	= 0.85	
+PREF_WEAP		= 5,6,7,18,19	// Pistols, HKP11, UAW Rifle
+JUNGLE_CAMMO	= 5300
+DESERT_CAMMO	= 5300
+ARCTIC_CAMMO	= 5300
+ATTRIBUTES  	= Medic WaterGirl
+
+//grenadier
+[CHARACTER5]
+STRENGTH		= 33.0
+STEALTH			= 25
+HPBONUS			= 4
+CRAWL_SPEED 	= 2.1	
+RUN_SPEED		= 1.0	
+WALK_SPEED		= 1.0	
+SWIM_SPEED		= 1.1	
+RECOIL_MUTE 	= 0.6	
+XHAIR_MUTE		= 1.75	
+XHAIRDX_MUTE	= 1.75
+SCOPE_MUTE  	= 0.75	
+RELOAD_MUTE  	= 1.0	
+PREF_WEAP		= 20,14,12		// MM-1, grenaded guns
+JUNGLE_CAMMO	= 5300
+DESERT_CAMMO	= 5300
+ARCTIC_CAMMO	= 5300
+ATTRIBUTES		= NULL
+
+

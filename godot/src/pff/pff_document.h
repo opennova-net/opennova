@@ -18,7 +18,7 @@
 
 namespace godot {
 
-// Godot PFF document binding used by ONED's hidden pack command and format tests.
+// Godot PFF document binding used by the editor and headless pack command and format tests.
 // Wraps the engine/formats/pff reader + streaming writer + the payload decode
 // layer + the game-profile table. A "game" choice drives
 // both the container key (for encrypting added files) and the payload codec (for decoding on

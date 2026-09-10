@@ -5,7 +5,8 @@ Checks ONLY lines ADDED in the given diff range — untouched code is never
 flagged (the ratchet in ratchet_counts.py covers the stock):
 
   dict-contract (ADR 0017): new Dictionary-shaped public contracts in
-      godot/game/ or godot/modtools/ GDScript (godot/src/ stays in scope
+      godot/game/, godot/tools/ or godot/addons/opennova_world/ GDScript
+      (godot/src/ stays in scope
       as a tripwire — it is C++-only by policy) — a public `-> Dictionary`
       return, a public `var x: Dictionary`, or a `const NAME := {` map
       table, all at CLASS level (column 0). Indented declarations are
@@ -45,8 +46,12 @@ BASELINE_PATH = Path(__file__).resolve().parent / "maturity_baseline.json"
 # ADR 0034 split — the #460 rename pointed this at godot/src/ (now C++-only)
 # and silently dropped the game layer; restored 2026-08-11. godot/src/ stays
 # as a zero-cost tripwire against policy-violating GDScript. godot/probes/
-# (the game_probe runtime probes) joined the scope under ADR 0042 d7.
-LINT_SCOPES = ("godot/modtools/", "godot/game/", "godot/src/", "godot/probes/")
+# (the game_probe runtime probes) joined the scope under ADR 0042 d7, and
+# godot/addons/opennova_world/ (the first-party editor plugin, ADR 0044/0045)
+# is shipping GDScript like godot/game; the vendored addons (gut, imgui-godot)
+# stay out.
+LINT_SCOPES = ("godot/tools/", "godot/game/", "godot/src/", "godot/probes/",
+               "godot/addons/opennova_world/", "godot/addons/opennova_model/")
 
 # Column 0 only: class-level declarations. GDScript function bodies are
 # indented, so an indented match is a local, not a contract.
@@ -104,8 +109,8 @@ def added_lines(diff_range: str) -> list[tuple[str, int, str]]:
 #   32768/32787 the retail LAN host port range net_ports.h / HostSessionConfig
 #   0x30020     the retail Co-op g_GameType    game_type.h / HostSessionConfig.GAME_TYPE_COOP
 PROMOTED_LITERAL = re.compile(r"(?<![\w.])(?:7597|32768|32787|0x30020)(?![\w.])", re.IGNORECASE)
-PROMOTED_SCOPES = ("godot/src/", "godot/game/", "godot/modtools/",
-                   "engine/", "apps/")
+PROMOTED_SCOPES = ("godot/src/", "godot/game/", "godot/tools/",
+                   "godot/addons/opennova_world/", "godot/addons/opennova_model/", "engine/", "apps/")
 PROMOTED_SUFFIXES = (".gd", ".cpp", ".h", ".hpp", ".c")
 PROMOTED_CANONICAL = (
     "godot/game/world/host_session_config.gd",

@@ -135,6 +135,12 @@ public:
 		// re-hardcodes the 100000. [orig: the +100000 item-id bias in the BMS
 		// entity records — mission/mission.h]
 		ITEM_ID_OFFSET = 100000,
+		// The player start marker the engine addresses BY NUMBER: marker family
+		// 6001 (+ ITEM_ID_OFFSET), the start the spawn pose resolver falls back
+		// to when no mode-specific marker exists (the witness lives with
+		// resolve_player_spawn_pose in engine/runtime/world/spawn_select.cpp;
+		// pinned in the .cpp). Bound so the editor never re-hardcodes 106001.
+		PLAYER_START_ITEM_ID = 106001,
 	};
 
 	Error open_file(const String &path);
@@ -336,6 +342,8 @@ public:
 	// ERR_INVALID_PARAMETER when there is no current path (shell then offers Save As).
 	Error save_file();
 	Error save_as(const String &path);
+	// Write a copy without adopting its path or clearing the document dirty flag.
+	Error save_to_path(const String &path);
 	// Stage editor-sampled terrain base heights for the NEXT save that routes through the
 	// .mis writer: one 16.16 fixed-point height per entity, FLAT in WRITE ORDER (items,
 	// buildings, markers, organics). The .mis writer emits each as the entity's

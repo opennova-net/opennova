@@ -14,7 +14,7 @@
 //                 changing the runtime's persisted preference.
 //   --loose-mission <name.bms>
 //                 boot the exact top-level loose BMS from --resource-dir.
-//   --loose-root  ONED/dev runs: when the directory holds none of the packed
+//   --loose-root  editor/dev runs: when the directory holds none of the packed
 //                 game archives, mount it as loose files instead of failing
 //                 the boot. Ordinary standalone launches omit it, keeping
 //                 retail's no-archives fatal error (ADR 0025).
@@ -119,7 +119,7 @@ std::string bundled_assets_dir(const std::string &exe_dir, const BootDirProbe &f
 // persisted pick, then the game bundled around a shipped exe — the exe's own
 // directory when it carries a boot archive (the tagged release zip,
 // retail-style), else the loose assets/ beside it (the dev zip, where the
-// game plays the same tree ONED exposes). The bundled defaults are per-boot
+// game plays the selected loose tree). The bundled defaults are per-boot
 // and never persisted; dev runs from the editor are unchanged (its binary's
 // dir carries neither). "" means ask.
 std::string boot_resource_dir(const LaunchFlags &flags, const std::string &persisted,

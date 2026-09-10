@@ -22,7 +22,7 @@ subdirectory here may be named `base`, `formats`, `runtime` or `net`
 Citations (ADR 0042 d7, ADR 0043): a witness citation is `[orig: Name @ 0xADDR]`
 everywhere — there is no second marker form. `godot_orig_cites` is ONE
 non-increasing count over the whole Godot side (`godot/src` plus the
-`godot/game`, `godot/modtools` and `godot/probes` GDScript): a cite moves freely
+`godot/game`, `godot/tools` and `godot/probes` GDScript): a cite moves freely
 between GDScript and binding C++; the count shrinks only when witnessed code
 moves to its engine home (or dies as verified dead code) and may never grow.
 Genuinely witnessed engine behavior still belongs in `engine/` (ADR 0042's
@@ -42,7 +42,9 @@ table itself is C++ here (`devtools/debug_control_table`, ADR 0043 d12): the F3
 windows' `ControlRequest`s and MCP's `game_debug` drive the one instance.
 
 Placement rule: no GDScript here, ever. Game scripts go to `godot/game/`;
-ONED scripts go to `godot/modtools/`.
+editor plugin scripts go to `godot/addons/opennova_world/` or
+`godot/addons/opennova_model/`; the run, staging
+and packing workflow scripts go to `godot/tools/`.
 
 Error/diagnostic channels (ratcheted at zero — `gd_prints_outside_debug`,
 `cpp_binding_console_writes`): a failure the caller already receives through the
@@ -51,7 +53,7 @@ drive those legs; GUT counts engine errors as failures); `push_error` is for
 invariant violations nothing recovers from. Load/lifecycle narration uses
 `print_verbose` (visible under `--verbose`), live inspection goes through the
 dev tools (F3: engine-owned ImGui windows; `devtools/` here is the
-`ImGuiPassNode` seam with its two product nodes `DevTools`/`OnedUi` and the
+`ImGuiPassNode` seam with its product node `DevTools` and the
 `FrameStats` board binding, ADR 0039), and `engine/` diagnostics ride the
 `io/log.h` sink.
 Never raw `print`/`printerr`/`print_line`/`WARN_PRINT`/`ERR_PRINT` in shipping

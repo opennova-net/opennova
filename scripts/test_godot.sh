@@ -10,8 +10,8 @@
 #
 # The suite runs against an ISOLATED user:// (see below). Tests that persist
 # settings or drop scratch files therefore cannot reach the developer's real
-# Godot user directory -- a run must never change which resource directory ONED
-# or the game opens next time, nor leave debris behind.
+# Godot user directory -- a run must never change which resource directory
+# the game opens next time, nor leave debris behind.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

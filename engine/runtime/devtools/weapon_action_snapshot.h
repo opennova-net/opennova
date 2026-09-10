@@ -77,7 +77,7 @@ struct WeaponLiveSnapshot {
 	int32_t heat = 0;
 
 	// The real input gates, evaluated by the embedder through the engine
-	// predicates, as the ONED readiness idiom: an empty string enables the
+	// predicates, as the disabled-button readiness idiom: an empty string enables the
 	// trigger, a non-empty one disables it AND is the tooltip that names which
 	// leg refused. The window never queues a request the FSM would reject.
 	std::string fire_block;    // the pump's own input gate (dead, seat, UseGun switch)

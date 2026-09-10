@@ -1,0 +1,26 @@
+[gd_resource type="ModelAuthoringManifest" format=3]
+
+[ext_resource type="PackedScene" path="res://authoring/crate/crate.tscn" id="1_58v5g"]
+
+[sub_resource type="ModelPartAnimationRow" id="ModelPartAnimationRow_h33yp"]
+
+[sub_resource type="ModelLodSpec" id="ModelLodSpec_ob7af"]
+part_animations = Array[ModelPartAnimationRow]([SubResource("ModelPartAnimationRow_h33yp")])
+
+[sub_resource type="ModelTextureRow" id="ModelTextureRow_5muwd"]
+texture_name = "crate.tga"
+
+[sub_resource type="ModelMaterialSpec" id="ModelMaterialSpec_s56f0"]
+material_name = "crate"
+textures = Array[ModelTextureRow]([SubResource("ModelTextureRow_5muwd")])
+
+[sub_resource type="ModelTextureSource" id="ModelTextureSource_46gj0"]
+source_path = "res://authoring/crate/crate.png"
+output_name = "crate.tga"
+
+[resource]
+model_name = "crate"
+scene = ExtResource("1_58v5g")
+materials = Array[ModelMaterialSpec]([SubResource("ModelMaterialSpec_s56f0")])
+lods = Array[ModelLodSpec]([SubResource("ModelLodSpec_ob7af")])
+texture_sources = Array[ModelTextureSource]([SubResource("ModelTextureSource_46gj0")])

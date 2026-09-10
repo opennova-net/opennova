@@ -23,7 +23,7 @@ All commands are Git Bash, from the repo root.
    submodule, but building the GDExtension needs godot-cpp too.)
 3. Addons installed: `bash scripts/bootstrap_godot.sh` — it copies GUT into
    `godot/addons/gut/` AND runs `scripts/bootstrap_imgui_godot.sh` for the
-   imgui-godot addon the `DevTools`/`OnedUi` nodes draw through (ADR 0039).
+   imgui-godot addon the `DevTools` node draw through (ADR 0039).
    `scripts/build.sh` and `scripts/test_godot.sh` call it; `scripts/build_godot.sh`
    does NOT, so a build-only path leaves both addons missing.
 4. GDExtension built: fresh worktrees have no DLL in `godot/bin/` →
@@ -60,8 +60,7 @@ The wrapper takes no arguments; invoke GUT directly:
 ## Flaky-failure protocol (mandatory)
 
 Full-suite failures can come from shared `user://` state (tests can encounter
-the same persisted product config as a local run, including
-`user://oned.cfg`). On any reported failure:
+the same persisted product config as a local run, including game runtime preferences). On any reported failure:
 
 1. Re-run that test FILE alone with `-gtest=` as above.
 2. Fails alone → real failure; debug it.

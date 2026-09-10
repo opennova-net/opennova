@@ -85,4 +85,4 @@ witnessed reader but is not witnessed engine behavior.
 - Reimpl: `engine/formats/fnt` (`fnt.h`/`fnt.cpp`), `godot/src/fnt/fnt_resource`,
   and `godot/src/util/cp1252.h`.
 - The FNT shelf packer remains in `engine/formats/fnt`; this record covers the
-  format and load contract. ONED has no font-authoring consumer.
+  format and load contract. The Godot editor has no font-authoring consumer.

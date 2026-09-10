@@ -22,7 +22,7 @@ namespace godot {
 // Godot-facing wrapper around a parsed MNU menu document (NovaLogic's XML-like
 // UI markup). All format behavior lives in engine/formats/mnu; this Resource adds
 // the read surface the menu driver walks and Godot byte/file I/O. Documents are
-// read-only here since ONED went run-only (ADR 0037); the authoring half was
+// read-only here since menu authoring was removed (ADR 0037); the authoring half was
 // deleted 2026-09-02.
 //
 // Widgets are addressed by a positional integer id: screens and windows are

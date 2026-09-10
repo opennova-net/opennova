@@ -7,16 +7,50 @@
 begin "Player #1, Single player"
   id 105310
   type person
-  graphic US01
-  graphicenemy Indo01
+  unit_type 9
+  graphic person
+  graphicenemy person
   sid player1_sp
-  anim_def US01
+  anim_def person
+  attrib: aidata fo pfoil
   hp 150
+  armor 0 0
+  radarsig 300
+  mana 0
+  phrase_set 0
   sound_profile SP_JO_SP_PlayerM1
   sound_profileFemale SP_JO_SP_PlayerF1
   ai_function plyr
   disk_function PLAYER
   move_function org2
+  input_function troop
+end
+
+// The multiplayer twin. Retail declares BOTH player rows and hosts spawn the
+// MP one; our runtime's player template id is 0x14B9 (105305 - 100000), so a
+// set that omits this row leaves every hosted/joined player with no graphic and
+// no anim_def. Identical to the SP row apart from the phrase set and the sound
+// profiles, exactly as retail authors it.
+begin "Player #1, Multiplayer"
+  id 105305
+  type person
+  unit_type 9
+  graphic person
+  graphicenemy person
+  sid player1_mp
+  anim_def person
+  attrib: aidata fo pfoil
+  hp 150
+  armor 0 0
+  radarsig 300
+  mana 0
+  phrase_set 7
+  sound_profile SP_JO_MP_PlayerM1
+  sound_profileFemale SP_JO_MP_PlayerF1
+  ai_function plyr
+  disk_function PLAYER
+  move_function org2
+  input_function troop
 end
 
 // --- The canonical marker family -------------------------------------------
@@ -54,4 +88,26 @@ end
 begin "waypoint"
   id 106005
   type marker
+end
+
+// Our own content (108001+): the synth house, the set's first authored model
+// (assets/house.3di, the fixtures/threedi/synth `house` recipe), placed in
+// mnml.bms as a building. No anim_def or husk: it has neither.
+begin "House"
+  id 108001
+  type building
+  graphic house
+  sid house
+  hp 5000
+end
+
+// The crate: the first model authored in Godot (godot/authoring/crate/, a Blender box
+// through the glTF importer, exported as assets/crate.3di by the opennova_model addon),
+// placed in mnml.bms as a building beside the house.
+begin "Crate"
+  id 108002
+  type building
+  graphic crate
+  sid crate
+  hp 500
 end

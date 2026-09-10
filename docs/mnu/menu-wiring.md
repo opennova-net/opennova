@@ -33,8 +33,9 @@ its sibling panels and showing its own. There is no "tab" widget type.
 Runtime path: `MenuDriver` widget activation → `MenuDriver.dispatch_action_row` routes
 menu-owned Actions directly and hands browser/form/application Actions to their
 shell. Same-file `screen` navigates in place; `file` jumps emit `menu_requested`
-for the Menu Shell to open. ONED has no menu preview or authoring surface (ADR
-0037); format-specific tools edit and serialize these `<ACTION>` rows directly.
+for the Menu Shell to open. The Godot editor has no menu preview or authoring
+surface (ADR 0037, ADR 0045); format-specific tools edit and serialize these
+`<ACTION>` rows directly.
 
 ## What populates a list box
 

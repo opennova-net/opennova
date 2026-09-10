@@ -495,7 +495,7 @@ The first-person viewmodel draws inside the beauty pass (its instances
 apply the retail renderfov projection + depth band in the vertex stage,
 `viewmodel_pass.gdshaderinc`), so it shares the beauty target's one
 terminal transfer and needs no composite of its own. A 3D
-view with no `FrameFx` (ONED workspace previews, the menu avatar
+view with no `FrameFx` (the editor world preview, the menu avatar
 preview, probes) installs the decode-only `DisplayDecode` node, which
 is the same terminal effect without a Q3 source. The obsolete per-shader
 `gamma_to_linear` / `linear_to_gamma` API was deleted in this

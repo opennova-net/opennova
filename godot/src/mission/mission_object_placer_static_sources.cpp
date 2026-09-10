@@ -7,6 +7,7 @@
 #include <runtime/simassets/model_builders.h>
 
 #include "mission/mission_object_placer_keys.h"
+#include "render/object_lod_frame.h"
 
 using namespace opennova::threedi;
 
@@ -228,7 +229,8 @@ int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
 
 int MissionObjectPlacer::_append_static_light_draw_source(int p_source_index,
 		int p_kind, int p_entity_index, int p_bms_id, int p_item_id,
-		int p_robj_index, const AABB &p_world_bounds) {
+		int p_robj_index, const AABB &p_world_bounds,
+		const AABB &p_local_bounds) {
 	StaticLightDrawRow row;
 	const int atlas_row = static_light_draw_sources_.size();
 	row.source_index = p_source_index;
@@ -238,9 +240,86 @@ int MissionObjectPlacer::_append_static_light_draw_source(int p_source_index,
 	row.item_id = p_item_id;
 	row.robj_index = p_robj_index;
 	row.world_bounds = p_world_bounds;
+	row.local_bounds = p_local_bounds;
 	static_light_draw_sources_.push_back(row);
 	++static_light_draw_source_revision_;
 	return atlas_row;
+}
+
+// --- editor authoring seams (ADR 0044) ---------------------------------------
+
+bool MissionObjectPlacer::has_static_instance(int p_bms_id) const {
+	return destruction_instances_.has(p_bms_id);
+}
+
+Transform3D MissionObjectPlacer::get_static_instance_transform(int p_bms_id) const {
+	const DestructionInstance *inst = destruction_instances_.getptr(p_bms_id);
+	return inst != nullptr ? inst->xform : Transform3D();
+}
+
+AABB MissionObjectPlacer::get_static_instance_local_bounds(int p_bms_id) const {
+	AABB merged;
+	bool any = false;
+	for (const StaticLightDrawRow &row : static_light_draw_sources_) {
+		if (row.bms_id != p_bms_id) continue;
+		merged = any ? merged.merge(row.local_bounds) : row.local_bounds;
+		any = true;
+	}
+	return merged;
+}
+
+Transform3D MissionObjectPlacer::placement_transform(const Vector3 &p_position,
+		const Vector3 &p_rotation_deg, int p_item_id) {
+	_ensure_item_db();
+	return _entity_transform_for_item(p_position, p_rotation_deg, p_item_id);
+}
+
+bool MissionObjectPlacer::set_static_instance_transform(int p_bms_id,
+		const Transform3D &p_xform) {
+	_check_epoch();
+	DestructionInstance *inst = destruction_instances_.getptr(p_bms_id);
+	if (inst == nullptr) return false;
+	inst->xform = p_xform;
+	HashSet<int> touched;
+	if (inst->lod_instance >= 0 && inst->lod_instance < static_lod_instances_.size()) {
+		StaticLodInstance &retained = static_lod_instances_.write[inst->lod_instance];
+		retained.origin = p_xform.origin;
+		if (retained.profile >= 0 && retained.profile < static_lod_profiles_.size()) {
+			retained.radius = static_lod_profiles_[retained.profile].sphere_radius *
+					ObjectLodFrame::uniform_scale(p_xform.basis);
+		}
+		for (int b = 0; b < retained.bindings.size(); ++b) {
+			StaticLodBinding &binding = retained.bindings.write[b];
+			binding.live_xform = p_xform * binding.offset;
+			if (binding.row < 0 || binding.population < 0 ||
+					binding.population >= static_populations_.size()) {
+				continue;
+			}
+			StaticPopulation &population = static_populations_.write[binding.population];
+			if (population.multimesh.is_valid()) {
+				population.multimesh->set_instance_transform(binding.row, binding.live_xform);
+			}
+			touched.insert(binding.population);
+		}
+	}
+	bool light_rows_changed = false;
+	for (int i = 0; i < static_light_draw_sources_.size(); ++i) {
+		StaticLightDrawRow &row = static_light_draw_sources_.write[i];
+		if (row.bms_id != p_bms_id) continue;
+		row.world_bounds = p_xform.xform(row.local_bounds);
+		light_rows_changed = true;
+	}
+	if (light_rows_changed) ++static_light_draw_source_revision_;
+	for (int i = 0; i < static_item_effect_sources_.size(); ++i) {
+		StaticEffectSourceRow &row = static_item_effect_sources_.write[i];
+		if (row.bms_id == p_bms_id) row.world_transform = p_xform;
+	}
+	if (inst->kind >= 0 && inst->entity_index >= 0) {
+		update_static_terrain_shadow_source_transform(
+				static_cast<MissionData::EntityKind>(inst->kind), inst->entity_index, p_xform);
+	}
+	if (!touched.is_empty()) _flush_static_population_changes(touched);
+	return true;
 }
 
 // --- destruction support (world-wac-ai-re §24.6) -----------------------------

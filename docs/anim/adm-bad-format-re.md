@@ -2,9 +2,11 @@
 
 The on-disk animation pair: `.adm` (the text animation-definition map binding
 anim slots to `.bad` clip names) and `.bad` (the binary skeletal clip
-container). Implementing code: `engine/formats/adm` (parser), `engine/formats/bad`
-(parser); the `adm_write`/`bad_write.cpp` writers and their flat C ABI were
-retired 2026-08-26 (ADR 0038); runtime consumers
+container). Implementing code: `engine/formats/adm` (parser + the canonical-form writer
+`adm_write.cpp`), `engine/formats/bad` (parser + the from-scratch writer
+`bad_write.cpp`; both writers returned 2026-09-06 as the clip tool's output
+path, ADR 0047, after their 2026-08-26 retirement with the FFI, ADR 0038);
+runtime consumers
 `engine/runtime/anim` (clip sampling), `engine/runtime/simassets` (clip
 index / root motion / skeletal clip resolution), and
 `godot/src/object/skeletal_anim.cpp`.
@@ -22,8 +24,8 @@ in place.
 | Component | Verdict | Evidence |
 |---|---|---|
 | `.adm` grammar (rows, comments, variant rings) | MATCHING | ctests `adm_parse`, `adm_comment`, `adm_trim_value`, `adm_variants`; 3 `[orig]` cites in `adm/adm.h` |
-| `.adm` writer | RETIRED (ADR 0038, 2026-08-26): the canonical-form writer and ctest `adm_write` are gone; grammar parity is read-side | ctests `adm_parse`, `adm_variants` |
-| `.bad` container read | MATCHING (retail-corpus parse; layout pinned by the reader) | ctests `bad_parse`, `simassets_adm_skeletal_clips_weapon_channel` (weapon-channel resolution over real clips), the asset-gated `anim_positions_from_model_corpus` (every viewmodel `.bad` under `OPENNOVA_JO_ASSETS`); the byte-exact write round-trip (`bad_roundtrip`; the FFI twin `test_bad_write_ffi.py` retired with ADR 0038) retired with the writer, ADR 0038 |
+| `.adm` writer | MATCHING (canonical form; parse-equality with retail's hand-edited tables) | ctest `adm_write` (the pinned form, parse-equal, refusals); GUT `anim_def_document_test.gd` |
+| `.bad` container read | MATCHING (retail-corpus parse; layout pinned by the reader) | ctests `bad_parse`, `simassets_adm_skeletal_clips_weapon_channel` (weapon-channel resolution over real clips), the asset-gated `anim_positions_from_model_corpus` (every viewmodel `.bad` under `OPENNOVA_JO_ASSETS`); the write round-trip `bad_roundtrip` (our fixtures byte-exact; a from-scratch translated clip field-equal and re-write-stable; the shipped `BINOC.bad` parse -> write -> parse field-equal, its bytes differing only in the uninitialized junk retail's exporter left past each name's NUL) |
 | `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table rig; rest-carrying composition) | ctest `anim_sample` (`sample_clip(model_bind)` is the reference form; production loaders run the equivalent rest-carrying factorization); ledger D-INF-14 (mechanism witnessed + ported) |
 | `.bad` runtime consumption — world/body rigs | UNGRILLED, OPEN | ledger D-INF-13 — CORRECTED 2026-08-17: bodies and FP rigs run the SAME loader path (`model_bind=true` has no production caller); what is open is the equivalence proof against `build_world_bone_matrices @0x40c770` (its table source, padding loop, frame), not an FP-only path to extend |
 | `BadBone.position` | dead at runtime (original never reads it) | correspondence `BoneAnim_BuildWorldMatrices @ 0x40c400` row; ctest `anim_sample` (synthetic) + the asset-gated ctest `anim_positions_from_model_corpus` (retail rigs) |
@@ -49,15 +51,15 @@ ADR 0021 Avatars writer). Callers order entries; `anim_reset` first by
 convention (the reset row doubles as the rig's skeleton source — see the bind
 rule below).
 
-Surface: `adm_parse`, `adm_parse_buffer` (VFS byte path), `adm_free`; C-linked
-POD records (`AdmEntry{key[64], variant_count, variants[8][64]}`). `adm_write`
-and the `ADM_EXPORT` flat C ABI retired with the FFI (ADR 0038).
+Surface: `adm_parse`, `adm_parse_buffer` (VFS byte path), `adm_free`,
+`adm_write_buffer` / `adm_write` (the canonical form above; a row the parser
+could not read back is refused); POD records
+(`AdmEntry{key[64], variant_count, variants[8][64]}`).
 
 ## The `.bad` format
 
-Binary little-endian container (layout mirrored by the reader `bad.cpp`; the
-from-scratch writer `bad_write.cpp`, never passthrough per ADR 0003, retired
-2026-08-26 with the FFI, ADR 0038):
+Binary little-endian container (layout mirrored by the reader `bad.cpp` and
+written from scratch by `bad_write.cpp`, never passthrough per ADR 0003):
 
 | Offset | Block | Shape |
 |---|---|---|
@@ -68,12 +70,14 @@ from-scratch writer `bad_write.cpp`, never passthrough per ADR 0003, retired
 | bone | bone table | bone_count × stride: `name[32]`, 3 pad + index byte, `num_children`, `child_addr`, `parent_addr`, `length`, `position[3]`, `rotation[9]` (row-major 3×3) |
 | trn | translations | when `flags & 2`: `num_translations` × `f32 x,y,z`, frame-major |
 
-Conventions preserved from stock assets and the historical exporter (recorded
-at the retired writer's head, 5820432c1): channels and events carry `frame_count + 1` entries (the
-terminal duplicate); child/parent are absolute byte addresses recomputed from
-`parent_index`; root bones write `parent_offset 0` — a deliberate correction
-over the historical exporter's `-1`, which only ever parsed correctly for
-bone 0 because the parser force-overrides it.
+Conventions the corpus pins and the writer keeps: channels and events carry
+`frame_count + 1` entries (the terminal duplicate); child/parent are absolute
+byte addresses recomputed from `parent_index`; a root bone's parent address
+and a leaf's child address are 0 (BINOC.bad's rows; the historical exporter's
+`-1` only ever parsed for bone 0 because the parser force-overrides it); the
+bone's spare +35 byte is its own index; the seven header words the reader
+never names ride at the values every retail clip ships (`[8]` 0, `[9]` 0,
+`[10]` 8, `[14]` 1, `[17]` 1, `[18]` 0, `[19]` 0).
 
 The on-disk bone record (100 bytes, raw IEEE floats) and the runtime entity
 skeleton bone (108 bytes, fp16.16 with `parentIndex @ +40`, pivots

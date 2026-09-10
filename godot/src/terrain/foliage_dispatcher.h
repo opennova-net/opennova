@@ -1,5 +1,7 @@
 #pragma once
 
+#include "util/preview_properties.h"
+
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/mesh.hpp>
@@ -77,6 +79,18 @@ private:
 // Foliage_GenerateModelTileInstances @ 0x600980, see docs/foliage/foliage-re.md]
 class FoliageDispatcher : public Node3D {
   GDCLASS(FoliageDispatcher, Node3D)
+
+	PreviewProperties preview_properties_;
+
+public:
+	// GameWorld owns the source-derived state while its editor preview is active.
+	void set_preview_configuration(bool enabled) {
+		if (enabled) preview_properties_.begin(this, { "terrain_data", "tile_info", "colormap_source", "height_sampler", "detail_foliage_sampler", "foliage_sampler", "silhouette_anchors" });
+		else preview_properties_.end(this);
+	}
+
+protected:
+	void _validate_property(PropertyInfo &property) const { preview_properties_.validate(property); }
 
 public:
   // Diagnostic-only selection keys for the raster probes. These classify the
@@ -225,6 +239,14 @@ public:
   // Persistent configuration result, one row per retail slot. Authored slots
   // report enabled, missing_mesh, or invalid_mesh instead of failing silently.
   Array get_slot_diagnostics() const;
+  Array get_slot_meshes() const { return slot_meshes_; }
+  Array get_slot_textures() const {
+    Array textures;
+    for (const auto &texture : fd_textures_) textures.append(texture);
+    return textures;
+  }
+  Terrain *get_terrain() const { return terrain_; }
+  Weather *get_weather() const { return _weather(); }
 
   // Replace a >=4x4 power-of-two RGBA8 Image with retail's complete :fd mip
   // chain, including Godot's required 2x2/1x1 terminal levels.
@@ -305,6 +327,7 @@ private:
   std::array<Ref<Texture2D>, opennova::FOLIAGE_MAX_DEFS> fd_textures_{};
   std::unordered_map<int, uint32_t> palette_masks_;
   Array slot_diagnostics_;
+  Array slot_meshes_;
   int authored_slot_count_ = 0;
   int enabled_slot_count_ = 0;
   int disabled_slot_count_ = 0;

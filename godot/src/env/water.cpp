@@ -51,7 +51,7 @@ void Water::_bind_methods() {
 			"set_water_height", "get_water_height");
 	ClassDB::bind_method(D_METHOD("get_water_alpha"), &Water::get_water_alpha);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "water_alpha",
-						 PROPERTY_HINT_RANGE, "0,1,0.01"),
+						 PROPERTY_HINT_RANGE, "0,1,0.01", PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY),
 			"", "get_water_alpha");
 
 	ClassDB::bind_method(D_METHOD("set_mission_water_height_override", "value"),
@@ -316,9 +316,11 @@ void Water::_notification(int p_what) {
 	} else if (p_what == NOTIFICATION_ENTER_TREE && built_ &&
 			reflection_camera_ != nullptr &&
 			reflection_decode_effect_.is_null()) {
-		// Re-entry after an EXIT_TREE release: the retained mirror camera needs
-		// a fresh decode effect (the released one stays shut down).
+		// The editor reparents authored scenes while opening them. Reconnect
+		// the texture cleared on exit as well as replacing the released effect.
 		_install_reflection_decode();
+		Ref<ViewportTexture> rtt = reflection_viewport_->get_texture();
+		water_material_->set_shader_parameter("u_reflection", rtt);
 	}
 }
 
@@ -601,7 +603,7 @@ void Water::advance_frame(double p_delta) {
 
 	// Regenerate the animated noise pair once per rendered water frame;
 	// unlike the fixed-62 Hz weather clock, this is explicitly render-driven.
-	frame_counter_ += 1;
+	if (!RenderView::is_preview(this)) frame_counter_ += 1;
 	water_core_->update(frame_counter_);
 	const int size = water_core_->get_texture_size();
 	noise_color_img_->set_data(size, size, false, Image::FORMAT_RGBA8,
@@ -672,8 +674,8 @@ void Water::_update_reflection_camera(Camera3D *p_cam) {
 		return;
 	}
 	const Vector2 source_size = viewport->get_visible_rect().size;
-	// A one-pixel viewport is a real transient state while ONED swaps or
-	// lays out workspaces. The strip builder below already treats either
+	// A one-pixel viewport is a real transient state while the Godot editor
+	// lays out or resizes its viewports. The strip builder below already treats either
 	// dimension <= 1 as non-drawable; stop the mirror projection here too,
 	// before an extreme aspect asks Camera3D for an out-of-range FOV.
 	if (source_size.x <= 1.0f || source_size.y <= 1.0f) {

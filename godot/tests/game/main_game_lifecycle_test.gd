@@ -346,7 +346,7 @@ func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
 
 
 func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
-	# The ONED run contract: with --loose-root, a directory
+	# The editor run contract (ADR 0045): with --loose-root, a directory
 	# holding none of the packed archives mounts as the loose file set being
 	# authored; without it, retail's no-archives fatal stands. Parameterized
 	# entry so the contract is testable without process arguments (ADR 0018).
@@ -952,8 +952,42 @@ func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 			"closing removes the click picker again")
 
 
-func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:
+func test_minimal_mission_ak_loadout_outranks_player_info_selection() -> void:
 	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	_shell.set_local_player_profile({
+		"player_class": 5,
+		"primary": "WPN_M4",
+		"primary_clips": -1,
+		"secondary": "",
+		"secondary_clips": -1,
+		"accessory": "",
+		"accessory_clips": -1,
+	})
+
+	menu_shell.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await get_tree().process_frame
+
+	assert_true(bool(world.get_sim().has_explicit_spawn_loadout()),
+		"the committed minimal mission promotes an authored offline kit")
+	assert_eq(world.local_player_weapon_name(), "WPN_AK47AUTO",
+		"the mission-authored AK outranks the PLAYER_INFO selection")
+	var viewmodel_def: PlayerViewmodelDef = world.local_player_viewmodel_def()
+	assert_not_null(viewmodel_def)
+	assert_eq(viewmodel_def.weapon_name, "WPN_AK47AUTO")
+	assert_eq(viewmodel_def.gfx1, "AK_TEST_FIRST",
+		"the first viewmodel resolves through the actual AK identity")
+	var inventory: PlayerInventory = world.get_sim().get_local_player_inventory()
+	assert_eq(inventory.equipped_name, "WPN_AK47AUTO",
+		"the spawned simulation equips the same mission-authored AK")
+
+
+func test_player_info_loadout_is_equipped_when_mission_has_no_kit() -> void:
+	_shell = await _make_shell(true)
 	if _shell == null:
 		return
 	var world = _shell.get_node("World")
@@ -1103,8 +1137,8 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 
 # The packed shell (WorldFixture.boot_shell): the staged archive dir is this
 # test's _temp_dir so after_each removes it once the shell released its roots.
-func _make_shell() -> MainGame:
-	var shell: MainGame = await WorldFixture.boot_shell(self)
+func _make_shell(without_mission_loadout := false) -> MainGame:
+	var shell: MainGame = await WorldFixture.boot_shell(self, without_mission_loadout)
 	_temp_dir = WorldFixture.last_shell_dir()
 	return shell
 

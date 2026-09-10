@@ -1,11 +1,14 @@
 // GameWorld's frame: the ONE static leg table the witnessed per-frame order
 // lives in (ADR 0043 decision 9), the loop that runs it with one RAII
-// LegScope timing, the frozen-pose capture replay as a second table through
-// the same loop, the leg bodies with their witness citations, and the
-// per-frame device latch. The former game_frame_pipeline.gd +
-// world_device_frame.gd (slice G10).
+// LegScope timing, the frozen-pose capture replay and the editor preview
+// refresh as the second and third tables through the same loop, the leg
+// bodies with their witness citations, and the per-frame device latch. Every
+// leg table lives in this file: a row elsewhere would be a second frame
+// order. The former game_frame_pipeline.gd + world_device_frame.gd
+// (slice G10).
 
 #include "world/game_world.h"
+#include "render/render_view.h"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
@@ -195,6 +198,62 @@ const GameWorld::FrameLeg GameWorld::kFrozenPoseRefresh[] = {
 const int GameWorld::kFrozenPoseRefreshCount =
 		sizeof(GameWorld::kFrozenPoseRefresh) / sizeof(GameWorld::kFrozenPoseRefresh[0]);
 
+// The editor preview refresh (refresh_preview): the OpenNova World plugin
+// re-renders the loaded native documents at the fixed authored time from the
+// editor camera, once per editor frame, through a scoped RenderView. No
+// session, kernel, wall clock, script, audio, or effect simulation enters
+// this table. Unlike the frozen replay the preview's environment nodes are
+// not frozen, so the live device legs advance them here at delta 0. The
+// preview never creates a Simulation, so the weather runtime never ticks;
+// the settle prefix below is what lifts every refresh off the mission-reset
+// identity gain (the D-RLIT-2 starved look). Same loop, delta 0, no timing.
+const GameWorld::FrameLeg GameWorld::kPreviewRefresh[] = {
+	// The frozen replay's settle prefix, minus iris_stamp: the iris march
+	// is a Simulation query (stamp_iris_samples returns without one), so a
+	// preview stamps no samples and feed_exposure_target takes retail's
+	// no-sample outdoor fallback, which weather_settle chases to its fixed
+	// point.
+	{ "celestial_settle", kNoSlot, &GameWorld::leg_celestial_settle, kLegNone },
+	{ "sun_veil", kNoSlot, &GameWorld::leg_sun_veil, kLegNone },
+	{ "weather_settle", kNoSlot, &GameWorld::leg_weather_settle, kLegNone },
+	// The live camera-producer order at delta 0. environment_nodes and
+	// water are the live legs whose zero-delta seams the frozen replay
+	// reaches through sky_settle / water_settle; the preview runs the legs
+	// themselves, so those two settle rows are not repeated.
+	{ "scene_environment", kNoSlot, &GameWorld::leg_scene_environment, kLegNone },
+	{ "environment_nodes", kNoSlot, &GameWorld::leg_environment_nodes, kLegNone },
+	{ "terrain", kNoSlot, &GameWorld::leg_terrain, kLegNone },
+	{ "water", kNoSlot, &GameWorld::leg_water, kLegNone },
+	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
+	// The point-light select for the editor camera: the preview load
+	// re-attaches the placed models' authored light records (the director
+	// walk mission start runs), so the lit statics, the terrain light rows
+	// and the coronas render as in the game.
+	{ "lights", kNoSlot, &GameWorld::leg_lights, kLegNone },
+	{ "materials", kNoSlot, &GameWorld::leg_materials, kLegNone },
+	{ "clear", kNoSlot, &GameWorld::leg_clear, kLegNone },
+	// The chrome/environment cube: retail's forced + every-128-frames
+	// capture, centered on the render camera when no player exists. This
+	// is the leg that honours update_preview_settings' force_capture.
+	{ "environment_cube", kNoSlot, &GameWorld::leg_environment_cube, kLegNone },
+	// Omitted frozen-replay rows, each for a stated reason:
+	//   iris_stamp   -- stamp_iris_samples needs a Simulation (above).
+	//   occlusion    -- OcclusionFrame.apply_frame is the Simulation's
+	//                   visibility walk; without one every placed node
+	//                   stays visible, which is the preview's contract.
+	//   sky_settle, water_settle -- environment_nodes / water run here.
+	//   particles    -- the preview never starts the EffectWorld.
+	//   slot_shadows -- the render-slot shadow pass is a runtime
+	//                   compositor SlotShadow keeps dormant in the editor.
+	// Omitted live rows: begin / finish (the timing latch and the wall-clock
+	// panm sample the preview deliberately never takes), session,
+	// local_view, network, blink, iris (the live sampler; needs a
+	// Simulation), framefx (runtime compositor, dormant in the editor),
+	// precipitation (needs the runtime), audio.
+};
+const int GameWorld::kPreviewRefreshCount =
+		sizeof(GameWorld::kPreviewRefresh) / sizeof(GameWorld::kPreviewRefresh[0]);
+
 PackedStringArray GameWorld::frame_leg_names() {
 	PackedStringArray names;
 	for (int i = 0; i < kFrameLegCount; ++i) {
@@ -207,6 +266,14 @@ PackedStringArray GameWorld::frozen_pose_leg_names() {
 	PackedStringArray names;
 	for (int i = 0; i < kFrozenPoseRefreshCount; ++i) {
 		names.append(kFrozenPoseRefresh[i].name);
+	}
+	return names;
+}
+
+PackedStringArray GameWorld::preview_leg_names() {
+	PackedStringArray names;
+	for (int i = 0; i < kPreviewRefreshCount; ++i) {
+		names.append(kPreviewRefresh[i].name);
 	}
 	return names;
 }
@@ -253,6 +320,7 @@ void GameWorld::tick(const Vector3 &p_camera_pos, const Transform3D &p_camera_xf
 
 Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 		const Transform3D &p_camera_xform, double p_delta, const Ref<MissionFrameInput> &p_input) {
+	if (preview_active_) return Ref<MissionFrameOutcome>();
 	Ref<MissionFrameInput> input = p_input;
 	if (input.is_null()) {
 		input.instantiate();
@@ -673,7 +741,7 @@ void GameWorld::apply_scene_environment_frame() {
 	bool water_active = is_water_render_active() && is_inside_tree();
 	float eye_y = 0.0f;
 	if (water_active) {
-		Camera3D *cam = get_viewport()->get_camera_3d();
+		Camera3D *cam = render_camera();
 		if (cam == nullptr) {
 			water_active = false;
 		} else {
@@ -696,10 +764,7 @@ void GameWorld::apply_scene_environment_frame() {
 // The live camera the imminent render uses (null for a headless world or a
 // viewport without a current camera).
 Camera3D *GameWorld::render_camera() const {
-	if (is_inside_tree()) {
-		return get_viewport()->get_camera_3d();
-	}
-	return nullptr;
+	return RenderView::camera(const_cast<GameWorld *>(this));
 }
 
 // The view the imminent render uses: the live camera AFTER the local-view
@@ -821,8 +886,8 @@ void GameWorld::render_material_frame() {
 	// at a defined ladder slot (after occlusion resolves visibility, before
 	// the particle composite) [orig: Terrain_RenderSectorModels @ 0x5c5d30
 	// computes model runtime constants during the render sector walk].
-	Viewport *viewport = is_inside_tree() ? get_viewport() : nullptr;
-	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
+	Camera3D *camera = render_camera();
+	Viewport *viewport = camera != nullptr ? camera->get_viewport() : nullptr;
 	if (camera != nullptr) {
 		const Vector2 viewport_size = viewport->get_visible_rect().size;
 		ObjectModel::update_authored_lods(camera->get_global_transform(), camera->get_fov(),
@@ -870,7 +935,6 @@ void GameWorld::render_light_frame() {
 	if (light_director_.is_null() || !is_inside_tree()) {
 		return;
 	}
-	Viewport *viewport = get_viewport();
 	TypedArray<ObjectModel> viewmodel_parts;
 	LocalPlayerPresenter *presenter = local_view_presenter();
 	if (presenter != nullptr) {
@@ -881,8 +945,9 @@ void GameWorld::render_light_frame() {
 	if (sim.is_valid() && sim->has_local_player()) {
 		viewmodel_owner = sim->get_local_player_wire_handle();
 	}
-	light_director_->render_frame(viewport != nullptr ? viewport->get_camera_3d() : nullptr,
-			viewmodel_parts, viewmodel_owner, frame_stats_on_);
+	// The render view (the live viewport camera; the editor camera under a
+	// preview RenderView), like every other camera-driven leg (D-RORD-8).
+	light_director_->render_frame(render_camera(), viewmodel_parts, viewmodel_owner, frame_stats_on_);
 	// The terrain leg of the same pool: the next terrain frame re-draws its
 	// patches with the pool lights they overlap.
 	render_terrain_light_leg();
@@ -1074,10 +1139,8 @@ void GameWorld::stamp_iris_samples(const Transform3D &p_camera_xform) {
 
 void GameWorld::restore_idle_frame_clear_color() {
 	clear_env_generation_ = -1;
-	if (clear_color_ == nullptr || clear_color_->get_environment().is_null()) {
-		return;
-	}
-	clear_color_->get_environment()->set_bg_color(idle_frame_clear_color_);
+	const Ref<Environment> environment = frame_clear_environment();
+	if (environment.is_valid()) environment->set_bg_color(idle_frame_clear_color_);
 }
 
 // The witnessed frame clear: the horizon-blended skyfog above water, the lit
@@ -1092,10 +1155,8 @@ void GameWorld::restore_idle_frame_clear_color() {
 // must stay BG_COLOR with ambient disabled - BG_SKY with no sky renders black
 // and swallows these writes (GUT-pinned).
 void GameWorld::update_frame_clear_color() {
-	if (clear_color_ == nullptr || clear_color_->get_environment().is_null() || env_ == nullptr) {
-		return;
-	}
-	Ref<Environment> environment = clear_color_->get_environment();
+	Ref<Environment> environment = frame_clear_environment();
+	if (environment.is_null() || env_ == nullptr) return;
 	// The clear SELECTION (black indoors / skyfog above water / lit water
 	// underwater) is the engine's (environment_state.h carries the witness);
 	// this device classifies the eye and writes the color. The sentinel

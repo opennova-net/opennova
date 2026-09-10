@@ -1,0 +1,698 @@
+[gd_resource type="ClipSetSource" format=3]
+
+[ext_resource type="PackedScene" path="res://authoring/person/person.tscn" id="1_8f4y2"]
+
+[sub_resource type="ClipSpec" id="ClipSpec_4d38q"]
+clip_name = "person_rst"
+
+[sub_resource type="ClipSpec" id="ClipSpec_kf4ja"]
+clip_name = "failsafe"
+
+[sub_resource type="ClipSpec" id="ClipSpec_bfn8c"]
+animation = "idle"
+clip_name = "pers_idle"
+
+[sub_resource type="ClipSpec" id="ClipSpec_q6jdi"]
+animation = "walk"
+clip_name = "pers_walkf"
+forward_speed = 1.5
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_k4j47"]
+animation = "crouch_walk"
+clip_name = "pers_cwlkf"
+forward_speed = 0.9
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_tgbqr"]
+animation = "crawl"
+clip_name = "pers_crwlf"
+forward_speed = 0.5
+
+[sub_resource type="ClipSpec" id="ClipSpec_l4lcx"]
+animation = "walk"
+clip_name = "pers_walkfr"
+forward_speed = 1.06065
+lateral_speed = -1.06065
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_s5ou5"]
+animation = "crouch_walk"
+clip_name = "pers_cwlkfr"
+forward_speed = 0.63639
+lateral_speed = -0.63639
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_44wb5"]
+animation = "crawl"
+clip_name = "pers_crwlfr"
+forward_speed = 0.35355
+lateral_speed = -0.35355
+
+[sub_resource type="ClipSpec" id="ClipSpec_x6o48"]
+animation = "walk"
+clip_name = "pers_walkr"
+lateral_speed = -1.5
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_w1dca"]
+animation = "crouch_walk"
+clip_name = "pers_cwlkr"
+lateral_speed = -0.9
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_qoab3"]
+animation = "crawl"
+clip_name = "pers_crwlr"
+lateral_speed = -0.5
+
+[sub_resource type="ClipSpec" id="ClipSpec_nn2iw"]
+animation = "walk"
+clip_name = "pers_walkbr"
+forward_speed = -1.06065
+lateral_speed = -1.06065
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_pb7j0"]
+animation = "crouch_walk"
+clip_name = "pers_cwlkbr"
+forward_speed = -0.63639
+lateral_speed = -0.63639
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_8i8ss"]
+animation = "crawl"
+clip_name = "pers_crwlbr"
+forward_speed = -0.35355
+lateral_speed = -0.35355
+
+[sub_resource type="ClipSpec" id="ClipSpec_skt83"]
+animation = "walk"
+clip_name = "pers_walkb"
+forward_speed = -1.5
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_km6ac"]
+animation = "crouch_walk"
+clip_name = "pers_cwlkb"
+forward_speed = -0.9
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_dkyyc"]
+animation = "crawl"
+clip_name = "pers_crwlb"
+forward_speed = -0.5
+
+[sub_resource type="ClipSpec" id="ClipSpec_77vpt"]
+animation = "walk"
+clip_name = "pers_walkbl"
+forward_speed = -1.06065
+lateral_speed = 1.06065
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_p3lf3"]
+animation = "crouch_walk"
+clip_name = "pers_cwlkbl"
+forward_speed = -0.63639
+lateral_speed = 0.63639
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_4mcyu"]
+animation = "crawl"
+clip_name = "pers_crwlbl"
+forward_speed = -0.35355
+lateral_speed = 0.35355
+
+[sub_resource type="ClipSpec" id="ClipSpec_huul3"]
+animation = "walk"
+clip_name = "pers_walkl"
+lateral_speed = 1.5
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_dnnj2"]
+animation = "crouch_walk"
+clip_name = "pers_cwlkl"
+lateral_speed = 0.9
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_7qgc1"]
+animation = "crawl"
+clip_name = "pers_crwll"
+lateral_speed = 0.5
+
+[sub_resource type="ClipSpec" id="ClipSpec_6ujm7"]
+animation = "walk"
+clip_name = "pers_walkfl"
+forward_speed = 1.06065
+lateral_speed = 1.06065
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_uh0jf"]
+animation = "crouch_walk"
+clip_name = "pers_cwlkfl"
+forward_speed = 0.63639
+lateral_speed = 0.63639
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_jb8ta"]
+animation = "crawl"
+clip_name = "pers_crwlfl"
+forward_speed = 0.35355
+lateral_speed = 0.35355
+
+[sub_resource type="ClipSpec" id="ClipSpec_2fac2"]
+animation = "run"
+clip_name = "pers_run"
+forward_speed = 5.5
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_p3rmn"]
+animation = "walk"
+clip_name = "pers_jog"
+forward_speed = 3.0
+triggers = PackedInt32Array(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+
+[sub_resource type="ClipSpec" id="ClipSpec_s8t84"]
+animation = "crouch"
+clip_name = "pers_crouch"
+
+[sub_resource type="ClipSpec" id="ClipSpec_h2x3m"]
+animation = "prone"
+clip_name = "pers_prone"
+
+[sub_resource type="ClipSpec" id="ClipSpec_poe1j"]
+animation = "jump"
+clip_name = "pers_jump"
+loop = false
+
+[sub_resource type="ClipSpec" id="ClipSpec_eggur"]
+animation = "death"
+clip_name = "pers_death"
+loop = false
+
+[sub_resource type="ClipSpec" id="ClipSpec_vpf6o"]
+animation = "reload"
+clip_name = "pers_reload"
+loop = false
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_k4h4m"]
+key = "anim_reset"
+variants = PackedStringArray("person_rst")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_aotwi"]
+key = "anim_idle"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_vi6hv"]
+key = "anim_idle_2"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_l3i1o"]
+key = "anim_idle_3"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_vovi1"]
+key = "anim_idle_look"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_7c37b"]
+key = "anim_idle_2_look"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_rmrb7"]
+key = "anim_stop"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_us804"]
+key = "anim_guard"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_obex8"]
+key = "anim_guard_look"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_d4kv2"]
+key = "anim_post_attack"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_46bko"]
+key = "anim_pre_attack"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_3uj0j"]
+key = "anim_attack"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_8n042"]
+key = "anim_attack_2"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_d5ta3"]
+key = "anim_attack_3"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_755ms"]
+key = "anim_attack_4"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_6xika"]
+key = "anim_cover_idle"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_2q4jt"]
+key = "anim_cover_attack"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_ttcqo"]
+key = "anim_cover_attack_2"
+variants = PackedStringArray("pers_idle")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_a7rb6"]
+key = "anim_walk_forward"
+variants = PackedStringArray("pers_walkf")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_emxok"]
+key = "anim_walk_forwardright"
+variants = PackedStringArray("pers_walkfr")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_go000"]
+key = "anim_walk_right"
+variants = PackedStringArray("pers_walkr")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_s1nt6"]
+key = "anim_walk_backright"
+variants = PackedStringArray("pers_walkbr")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_44vfw"]
+key = "anim_walk_back"
+variants = PackedStringArray("pers_walkb")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_3pgh5"]
+key = "anim_walk_backleft"
+variants = PackedStringArray("pers_walkbl")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_3lrpj"]
+key = "anim_walk_left"
+variants = PackedStringArray("pers_walkl")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_gxl1w"]
+key = "anim_walk_forwardleft"
+variants = PackedStringArray("pers_walkfl")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_io1qt"]
+key = "anim_walk_crouch_forward"
+variants = PackedStringArray("pers_cwlkf")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_c7sw6"]
+key = "anim_walk_crouch_forwardright"
+variants = PackedStringArray("pers_cwlkfr")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_vkhjh"]
+key = "anim_walk_crouch_right"
+variants = PackedStringArray("pers_cwlkr")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_ft32x"]
+key = "anim_walk_crouch_backright"
+variants = PackedStringArray("pers_cwlkbr")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_apgn1"]
+key = "anim_walk_crouch_back"
+variants = PackedStringArray("pers_cwlkb")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_fa3sj"]
+key = "anim_walk_crouch_backleft"
+variants = PackedStringArray("pers_cwlkbl")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_0a45s"]
+key = "anim_walk_crouch_left"
+variants = PackedStringArray("pers_cwlkl")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_0ang6"]
+key = "anim_walk_crouch_forwardleft"
+variants = PackedStringArray("pers_cwlkfl")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_r0vhl"]
+key = "anim_walk_prone_forward"
+variants = PackedStringArray("pers_crwlf")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_0uv6q"]
+key = "anim_walk_prone_forwardright"
+variants = PackedStringArray("pers_crwlfr")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_6f34q"]
+key = "anim_walk_prone_right"
+variants = PackedStringArray("pers_crwlr")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_3wd0s"]
+key = "anim_walk_prone_backright"
+variants = PackedStringArray("pers_crwlbr")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_of7pd"]
+key = "anim_walk_prone_back"
+variants = PackedStringArray("pers_crwlb")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_68fms"]
+key = "anim_walk_prone_backleft"
+variants = PackedStringArray("pers_crwlbl")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_mxys8"]
+key = "anim_walk_prone_left"
+variants = PackedStringArray("pers_crwll")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_tvknf"]
+key = "anim_walk_prone_forwardleft"
+variants = PackedStringArray("pers_crwlfl")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_xx8ad"]
+key = "anim_run_2"
+variants = PackedStringArray("pers_run")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_cqpsk"]
+key = "anim_run_3"
+variants = PackedStringArray("pers_run")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_bqhs7"]
+key = "anim_run_forward"
+variants = PackedStringArray("pers_run")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_ke8sj"]
+key = "anim_wounded_run"
+variants = PackedStringArray("pers_run")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_8umfm"]
+key = "anim_run_attack"
+variants = PackedStringArray("pers_run")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_318cb"]
+key = "anim_run_away"
+variants = PackedStringArray("pers_run")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_nr328"]
+key = "anim_cover_run"
+variants = PackedStringArray("pers_run")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_jmb06"]
+key = "anim_jog_forward"
+variants = PackedStringArray("pers_jog")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_fwatk"]
+key = "anim_wounded_walk"
+variants = PackedStringArray("pers_jog")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_vytj1"]
+key = "anim_idle_crouch"
+variants = PackedStringArray("pers_crouch")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_fynbl"]
+key = "anim_idle_prone"
+variants = PackedStringArray("pers_prone")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_pdm6n"]
+key = "anim_jump_start"
+variants = PackedStringArray("pers_jump")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_apocf"]
+key = "anim_jump_loop"
+variants = PackedStringArray("pers_jump")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_c4poo"]
+key = "anim_reload"
+variants = PackedStringArray("pers_reload")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_0qsc2"]
+key = "anim_reload2"
+variants = PackedStringArray("pers_reload")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_xoegs"]
+key = "anim_death_fire"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_bvgwq"]
+key = "anim_death_pungi"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_gkhi4"]
+key = "anim_death_drown"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_elwji"]
+key = "anim_death_grenade_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_p7mw6"]
+key = "anim_death_grenade_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_w3bhh"]
+key = "anim_death_grenade_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_6qk63"]
+key = "anim_death_grenade_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_hd3ol"]
+key = "anim_death_bullet_hip_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_dwi4c"]
+key = "anim_death_bullet_hip_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_pmfwo"]
+key = "anim_death_bullet_hip_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_4ixr7"]
+key = "anim_death_bullet_hip_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_81kx1"]
+key = "anim_death_bullet_torso_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_ops5l"]
+key = "anim_death_bullet_torso_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_w3d7v"]
+key = "anim_death_bullet_torso_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_24jao"]
+key = "anim_death_bullet_torso_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_q8e31"]
+key = "anim_death_bullet_head_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_51ky6"]
+key = "anim_death_bullet_head_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_jmbfo"]
+key = "anim_death_bullet_head_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_s0ou3"]
+key = "anim_death_bullet_head_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_uqt5l"]
+key = "anim_death_bullet_rightshoulder_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_skb1e"]
+key = "anim_death_bullet_rightshoulder_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_iprs4"]
+key = "anim_death_bullet_rightshoulder_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_cc44h"]
+key = "anim_death_bullet_rightshoulder_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_lhx2i"]
+key = "anim_death_bullet_leftshoulder_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_vf83i"]
+key = "anim_death_bullet_leftshoulder_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_lx76s"]
+key = "anim_death_bullet_leftshoulder_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_omo8a"]
+key = "anim_death_bullet_leftshoulder_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_wsgsq"]
+key = "anim_death_bullet_rightarm_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_nop8v"]
+key = "anim_death_bullet_rightarm_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_v5ei3"]
+key = "anim_death_bullet_rightarm_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_hksyi"]
+key = "anim_death_bullet_rightarm_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_hmmml"]
+key = "anim_death_bullet_leftarm_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_biyk7"]
+key = "anim_death_bullet_leftarm_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_deswm"]
+key = "anim_death_bullet_leftarm_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_opgxs"]
+key = "anim_death_bullet_leftarm_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_brm5y"]
+key = "anim_death_bullet_righthand_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_bw78i"]
+key = "anim_death_bullet_righthand_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_l6yeg"]
+key = "anim_death_bullet_righthand_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_bxbhq"]
+key = "anim_death_bullet_righthand_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_6ylg7"]
+key = "anim_death_bullet_lefthand_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_et865"]
+key = "anim_death_bullet_lefthand_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_3j7j8"]
+key = "anim_death_bullet_lefthand_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_vxqdv"]
+key = "anim_death_bullet_lefthand_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_haq63"]
+key = "anim_death_bullet_rightthigh_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_qnp70"]
+key = "anim_death_bullet_rightthigh_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_nef4s"]
+key = "anim_death_bullet_rightthigh_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_qxjd3"]
+key = "anim_death_bullet_rightthigh_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_8us5w"]
+key = "anim_death_bullet_leftthigh_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_v1t8q"]
+key = "anim_death_bullet_leftthigh_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_ja6kr"]
+key = "anim_death_bullet_leftthigh_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_66pna"]
+key = "anim_death_bullet_leftthigh_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_mngge"]
+key = "anim_death_bullet_rightcalf_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_dtx6i"]
+key = "anim_death_bullet_rightcalf_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_ggwg6"]
+key = "anim_death_bullet_rightcalf_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_a2g5u"]
+key = "anim_death_bullet_rightcalf_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_m5rgw"]
+key = "anim_death_bullet_leftcalf_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_00ybd"]
+key = "anim_death_bullet_leftcalf_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_etnap"]
+key = "anim_death_bullet_leftcalf_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_mlwtk"]
+key = "anim_death_bullet_leftcalf_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_ip41l"]
+key = "anim_death_bullet_rightfoot_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_4323e"]
+key = "anim_death_bullet_rightfoot_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_x0h0w"]
+key = "anim_death_bullet_rightfoot_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_566vc"]
+key = "anim_death_bullet_rightfoot_left"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_i34kg"]
+key = "anim_death_bullet_leftfoot_forward"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_cj53a"]
+key = "anim_death_bullet_leftfoot_right"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_kysw2"]
+key = "anim_death_bullet_leftfoot_back"
+variants = PackedStringArray("pers_death")
+
+[sub_resource type="AnimSetRow" id="AnimSetRow_r4rhn"]
+key = "anim_death_bullet_leftfoot_left"
+variants = PackedStringArray("pers_death")
+
+[resource]
+adm_name = "person"
+scene = ExtResource("1_8f4y2")
+clips = Array[ClipSpec]([SubResource("ClipSpec_4d38q"), SubResource("ClipSpec_kf4ja"), SubResource("ClipSpec_bfn8c"), SubResource("ClipSpec_q6jdi"), SubResource("ClipSpec_k4j47"), SubResource("ClipSpec_tgbqr"), SubResource("ClipSpec_l4lcx"), SubResource("ClipSpec_s5ou5"), SubResource("ClipSpec_44wb5"), SubResource("ClipSpec_x6o48"), SubResource("ClipSpec_w1dca"), SubResource("ClipSpec_qoab3"), SubResource("ClipSpec_nn2iw"), SubResource("ClipSpec_pb7j0"), SubResource("ClipSpec_8i8ss"), SubResource("ClipSpec_skt83"), SubResource("ClipSpec_km6ac"), SubResource("ClipSpec_dkyyc"), SubResource("ClipSpec_77vpt"), SubResource("ClipSpec_p3lf3"), SubResource("ClipSpec_4mcyu"), SubResource("ClipSpec_huul3"), SubResource("ClipSpec_dnnj2"), SubResource("ClipSpec_7qgc1"), SubResource("ClipSpec_6ujm7"), SubResource("ClipSpec_uh0jf"), SubResource("ClipSpec_jb8ta"), SubResource("ClipSpec_2fac2"), SubResource("ClipSpec_p3rmn"), SubResource("ClipSpec_s8t84"), SubResource("ClipSpec_h2x3m"), SubResource("ClipSpec_poe1j"), SubResource("ClipSpec_eggur"), SubResource("ClipSpec_vpf6o")])
+rows = Array[AnimSetRow]([SubResource("AnimSetRow_k4h4m"), SubResource("AnimSetRow_aotwi"), SubResource("AnimSetRow_vi6hv"), SubResource("AnimSetRow_l3i1o"), SubResource("AnimSetRow_vovi1"), SubResource("AnimSetRow_7c37b"), SubResource("AnimSetRow_rmrb7"), SubResource("AnimSetRow_us804"), SubResource("AnimSetRow_obex8"), SubResource("AnimSetRow_d4kv2"), SubResource("AnimSetRow_46bko"), SubResource("AnimSetRow_3uj0j"), SubResource("AnimSetRow_8n042"), SubResource("AnimSetRow_d5ta3"), SubResource("AnimSetRow_755ms"), SubResource("AnimSetRow_6xika"), SubResource("AnimSetRow_2q4jt"), SubResource("AnimSetRow_ttcqo"), SubResource("AnimSetRow_a7rb6"), SubResource("AnimSetRow_emxok"), SubResource("AnimSetRow_go000"), SubResource("AnimSetRow_s1nt6"), SubResource("AnimSetRow_44vfw"), SubResource("AnimSetRow_3pgh5"), SubResource("AnimSetRow_3lrpj"), SubResource("AnimSetRow_gxl1w"), SubResource("AnimSetRow_io1qt"), SubResource("AnimSetRow_c7sw6"), SubResource("AnimSetRow_vkhjh"), SubResource("AnimSetRow_ft32x"), SubResource("AnimSetRow_apgn1"), SubResource("AnimSetRow_fa3sj"), SubResource("AnimSetRow_0a45s"), SubResource("AnimSetRow_0ang6"), SubResource("AnimSetRow_r0vhl"), SubResource("AnimSetRow_0uv6q"), SubResource("AnimSetRow_6f34q"), SubResource("AnimSetRow_3wd0s"), SubResource("AnimSetRow_of7pd"), SubResource("AnimSetRow_68fms"), SubResource("AnimSetRow_mxys8"), SubResource("AnimSetRow_tvknf"), SubResource("AnimSetRow_xx8ad"), SubResource("AnimSetRow_cqpsk"), SubResource("AnimSetRow_bqhs7"), SubResource("AnimSetRow_ke8sj"), SubResource("AnimSetRow_8umfm"), SubResource("AnimSetRow_318cb"), SubResource("AnimSetRow_nr328"), SubResource("AnimSetRow_jmb06"), SubResource("AnimSetRow_fwatk"), SubResource("AnimSetRow_vytj1"), SubResource("AnimSetRow_fynbl"), SubResource("AnimSetRow_pdm6n"), SubResource("AnimSetRow_apocf"), SubResource("AnimSetRow_c4poo"), SubResource("AnimSetRow_0qsc2"), SubResource("AnimSetRow_xoegs"), SubResource("AnimSetRow_bvgwq"), SubResource("AnimSetRow_gkhi4"), SubResource("AnimSetRow_elwji"), SubResource("AnimSetRow_p7mw6"), SubResource("AnimSetRow_w3bhh"), SubResource("AnimSetRow_6qk63"), SubResource("AnimSetRow_hd3ol"), SubResource("AnimSetRow_dwi4c"), SubResource("AnimSetRow_pmfwo"), SubResource("AnimSetRow_4ixr7"), SubResource("AnimSetRow_81kx1"), SubResource("AnimSetRow_ops5l"), SubResource("AnimSetRow_w3d7v"), SubResource("AnimSetRow_24jao"), SubResource("AnimSetRow_q8e31"), SubResource("AnimSetRow_51ky6"), SubResource("AnimSetRow_jmbfo"), SubResource("AnimSetRow_s0ou3"), SubResource("AnimSetRow_uqt5l"), SubResource("AnimSetRow_skb1e"), SubResource("AnimSetRow_iprs4"), SubResource("AnimSetRow_cc44h"), SubResource("AnimSetRow_lhx2i"), SubResource("AnimSetRow_vf83i"), SubResource("AnimSetRow_lx76s"), SubResource("AnimSetRow_omo8a"), SubResource("AnimSetRow_wsgsq"), SubResource("AnimSetRow_nop8v"), SubResource("AnimSetRow_v5ei3"), SubResource("AnimSetRow_hksyi"), SubResource("AnimSetRow_hmmml"), SubResource("AnimSetRow_biyk7"), SubResource("AnimSetRow_deswm"), SubResource("AnimSetRow_opgxs"), SubResource("AnimSetRow_brm5y"), SubResource("AnimSetRow_bw78i"), SubResource("AnimSetRow_l6yeg"), SubResource("AnimSetRow_bxbhq"), SubResource("AnimSetRow_6ylg7"), SubResource("AnimSetRow_et865"), SubResource("AnimSetRow_3j7j8"), SubResource("AnimSetRow_vxqdv"), SubResource("AnimSetRow_haq63"), SubResource("AnimSetRow_qnp70"), SubResource("AnimSetRow_nef4s"), SubResource("AnimSetRow_qxjd3"), SubResource("AnimSetRow_8us5w"), SubResource("AnimSetRow_v1t8q"), SubResource("AnimSetRow_ja6kr"), SubResource("AnimSetRow_66pna"), SubResource("AnimSetRow_mngge"), SubResource("AnimSetRow_dtx6i"), SubResource("AnimSetRow_ggwg6"), SubResource("AnimSetRow_a2g5u"), SubResource("AnimSetRow_m5rgw"), SubResource("AnimSetRow_00ybd"), SubResource("AnimSetRow_etnap"), SubResource("AnimSetRow_mlwtk"), SubResource("AnimSetRow_ip41l"), SubResource("AnimSetRow_4323e"), SubResource("AnimSetRow_x0h0w"), SubResource("AnimSetRow_566vc"), SubResource("AnimSetRow_i34kg"), SubResource("AnimSetRow_cj53a"), SubResource("AnimSetRow_kysw2"), SubResource("AnimSetRow_r4rhn")])

@@ -58,8 +58,8 @@ opennova::inmatch::HostBringup Simulation::host_bringup() {
 	// fold it into ClientState (runtime_) to render the host's own view.
 	// Serve-and-play (default) vs dedicated. Standalone SP is ALWAYS serve-and-play (it renders the
 	// host's own player); isolated test/tooling MissionRoot instantiations keep that default too.
-	// ONED has no live editor-preview branch: MainGame/GameWorld is its sole live mission runtime
-	// (ADR 0025). A LAN host honors the UI server-type (net_.host_serve_and_play, from
+	// The editor preview (ADR 0044) never reaches here: MainGame/GameWorld is the sole live mission
+	// runtime (ADR 0025). A LAN host honors the UI server-type (net_.host_serve_and_play, from
 	// configure_host_session). A dedicated host (serve_and_play=false) skips the own-player spawn +
 	// the local view below and lets host_session_pump discard the host loopback (step 5) — mirroring
 	// start_host_session's gating [orig: SinglePlayer_StartMission @0x561af0].

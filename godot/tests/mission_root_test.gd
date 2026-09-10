@@ -452,7 +452,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 
 
 # (Historical transform-restore test deleted: MissionRoot.stop() still
-# rewinds Simulation for teardown/fixtures, but ONED no longer owns a live
+# rewinds Simulation for teardown/fixtures, but no editor owns a live
 # runtime whose Stop must restore authored editor nodes.)
 
 

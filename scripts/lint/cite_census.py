@@ -42,15 +42,27 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "cite_census_baseline.json"
 
-SCOPES = ("engine", "godot/src", "godot/game", "godot/modtools", "godot/probes",
-          "apps", "tests")
+SCOPES = ("engine", "godot/src", "godot/game", "godot/tools", "godot/probes",
+          "godot/addons/opennova_world", "godot/addons/opennova_model", "apps", "tests")
 SUFFIXES = (".c", ".cc", ".cpp", ".h", ".hpp", ".gd")
-EXCLUDED_PARTS = ("third_party", "addons")
+# Vendored trees: third_party/ and every godot/addons/<x>/ except the
+# first-party editor plugin (opennova_world, ADR 0044/0045), which is a scope.
+EXCLUDED_PARTS = ("third_party",)
+FIRST_PARTY_ADDONS = ("opennova_world", "opennova_model")
 
 # The anchor address of a cite (`@0x52b630`, `@ 0x52b630`) and the far end of a
 # cited range (`0x40F157..0x40F173`). Both are witnesses.
 ANCHOR = re.compile(r"@\s*0x([0-9A-Fa-f]{4,8})\b")
 RANGE_END = re.compile(r"\.\.\s*0x([0-9A-Fa-f]{4,8})\b")
+
+
+def _in_vendored_tree(parts: tuple[str, ...]) -> bool:
+    if any(p in EXCLUDED_PARTS for p in parts):
+        return True
+    for i, part in enumerate(parts):
+        if part == "addons":
+            return i + 1 >= len(parts) or parts[i + 1] not in FIRST_PARTY_ADDONS
+    return False
 
 
 def _in_build_dir(parts: tuple[str, ...]) -> bool:
@@ -78,7 +90,7 @@ def census() -> Counter:
             if path.suffix.lower() not in SUFFIXES:
                 continue
             parts = path.relative_to(REPO).parts
-            if _in_build_dir(parts) or any(p in EXCLUDED_PARTS for p in parts):
+            if _in_build_dir(parts) or _in_vendored_tree(parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")

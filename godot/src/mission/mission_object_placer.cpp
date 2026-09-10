@@ -189,6 +189,18 @@ void MissionObjectPlacer::_bind_methods() {
 			D_METHOD("update_static_terrain_shadow_source_transform", "kind",
 					"index", "xform"),
 			&MissionObjectPlacer::update_static_terrain_shadow_source_transform);
+	ClassDB::bind_method(D_METHOD("has_static_instance", "bms_id"),
+			&MissionObjectPlacer::has_static_instance);
+	ClassDB::bind_method(D_METHOD("get_static_instance_transform", "bms_id"),
+			&MissionObjectPlacer::get_static_instance_transform);
+	ClassDB::bind_method(D_METHOD("get_static_instance_local_bounds", "bms_id"),
+			&MissionObjectPlacer::get_static_instance_local_bounds);
+	ClassDB::bind_method(
+			D_METHOD("placement_transform", "position", "rotation_deg", "item_id"),
+			&MissionObjectPlacer::placement_transform);
+	ClassDB::bind_method(
+			D_METHOD("set_static_instance_transform", "bms_id", "xform"),
+			&MissionObjectPlacer::set_static_instance_transform);
 	ClassDB::bind_method(
 			D_METHOD("set_static_terrain_shadow_replacement", "bms_id",
 					"graphic", "xform", "active"),
@@ -703,7 +715,8 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 								? group.entity_indices[i] : -1,
 						i < group.bms_ids.size() ? group.bms_ids[i] : 0,
 						i < group.item_ids.size() ? group.item_ids[i] : 0,
-						robj_index, group.xforms[i].xform(*local_bounds));
+						robj_index, group.xforms[i].xform(*local_bounds),
+						*local_bounds);
 				light_draw_rows[static_light_draw_key(i, robj_index)] = row;
 			}
 		}
@@ -754,6 +767,9 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 				inst.graphic = graphic;
 				inst.batch_key = group_key;
 				inst.index = i;
+				inst.kind = i < group.kinds.size() ? group.kinds[i] : -1;
+				inst.entity_index =
+						i < group.entity_indices.size() ? group.entity_indices[i] : -1;
 				inst.xform = group.xforms[i];
 				inst.casts_static_shadow =
 						i < group.shadow_slots.size() && group.shadow_slots[i];
@@ -821,6 +837,7 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 				binding.population = population_index;
 				binding.slot = local_index;
 				binding.lod_index = p_batch.lod_index;
+				binding.offset = p_batch.offset;
 				binding.live_xform = group.xforms[slot] * p_batch.offset;
 				const int *row = light_draw_rows.getptr(
 						static_light_draw_key(slot, p_batch.robj_index));
