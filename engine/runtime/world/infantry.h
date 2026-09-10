@@ -336,7 +336,10 @@ struct InfantryState {
 
     bool body_blend_active() const { return anim_blend_weight < 1.0f; }
 
-    void begin_body_transition(int target_state) {
+    // `blend_key_state` is the state whose flags pick the blend duration when
+    // it differs from the played clip (the gait->stance insert); -1 = the
+    // target itself.
+    void begin_body_transition(int target_state, int blend_key_state = -1) {
         if (target_state == anim_state) {
             anim_pending = 0;
             return;
@@ -352,8 +355,15 @@ struct InfantryState {
         anim_pending = 0;
         clip_phase = 0;
         anim_blend_weight = 0.0f;
+        // The blend duration is picked from the REQUESTED state's flags before
+        // a transition insert replaces the played clip: a run->crouch/prone
+        // insert (169-172) blends over the crouch/prone walk's 15 ticks, not
+        // the insert clip's own 10 [orig: AnimMap_UpdateEntity — the flags
+        // test on +0x2BC @0x40b64b..0x40b65d, the insert overwriting +0x2BC
+        // @0x40b662..0x40b737, edx pushed unchanged as the duration @0x40b75b].
+        const int blend_key = blend_key_state >= 0 ? blend_key_state : target_state;
         anim_blend_step =
-                (infantry_anim_flags(target_state) & 0x400u) != 0
+                (infantry_anim_flags(blend_key) & 0x400u) != 0
                         ? (1.0f / 15.0f)
                         : 0.1f;
     }

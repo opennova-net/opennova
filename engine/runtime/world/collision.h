@@ -1137,9 +1137,13 @@ public:
     // terrain ray and shrinks/inflates the solid clip. Audio and blasts share
     // this distinct retail query [orig: Entity_CheckLineOfSightTerrainAndEntities
     // @ 0x53B130; Physics_CheckTerrainLineOfSight @ 0x53B080].
+	// `query_parent_cleared` models a caller that NULLS the query entity's
+	// parentEntity (+0x16C) around the call, so the walker's parent slot falls
+	// to mountedChild and the occupant's own mount hull can block the ray
+	// [orig: Projectile_ProcessExplosionQueue pool-0 leg @0x4eb142..0x4eb16c].
 	bool entity_los_clear(World &world, EntityHandle query, EntityHandle endpoint,
 			const int32_t start[3], const int32_t end[3], int32_t height_offset,
-			bool all_types = false);
+			bool all_types = false, bool query_parent_cleared = false);
 	// Same exact query with per-target section matrices retained for a caller-
     // declared stable world phase. The server resets the cache after gameplay
     // movement and again before snapshot fan-out; every recipient LOS ray can

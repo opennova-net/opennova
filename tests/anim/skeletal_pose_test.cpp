@@ -68,13 +68,16 @@ int main() {
     eval_clip_pose(oneshot, -1.0, pose); // negative clamps to key 0
     CHECK(near(pose[0].origin.x, 0.0f));
 
-    // ---- loop: cycles the frame_count interval windows (the seam key is
-    // unwalked: window 1 interpolates key1 -> key0 via the modulo) ----
+    // ---- loop: cycles the frame_count interval windows; the LAST window heads
+    // to the authored seam key (key 2 here), never back to key 0 — the sampler
+    // blends key i -> key i+1 with no modulo and only the playhead wraps
+    // [orig: BoneAnim_TransformBones @0x4103ce/@0x410453; AdvancePlayback wrap
+    //  @0x40b199] ----
     const Clip looped = test_clip(true);
     eval_clip_pose(looped, 2.0 * kFrame, pose); // exactly one cycle: key 0
     CHECK(near(pose[0].origin.x, 0.0f));
-    eval_clip_pose(looped, 1.5 * kFrame, pose); // mid window 1: key1 -> key0
-    CHECK(near(pose[0].origin.x, 0.5f));
+    eval_clip_pose(looped, 1.5 * kFrame, pose); // mid window 1: key1 -> key2 (the seam)
+    CHECK(near(pose[0].origin.x, 1.5f));
 
     // ---- a one-frame clip is one full window of motion, not a static pose ----
     Clip single = test_clip(false);

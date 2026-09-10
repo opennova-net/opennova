@@ -112,12 +112,16 @@ std::string deploy_status_text(const DeployStatusLine &line,
 // shows while the spawn-target hold (dword_A85B68, slot+364) is nonzero;
 // STATIC_MEDIC_MSG1 + STATIC_CALLMEDIC_MSG show while the local revive
 // window (dword_A85B60, slot+368) is nonzero AND the local entity's +0x1E0
-// word is zero (`!weaponSlots[16]` @0x553ec5 — the carried/mounted parent
-// reference in the player layout).
+// word is zero (`!weaponSlots[16]` @0x553ec5). That word is the "a medic is
+// reviving me" latch — set by S2C 0x3A (NapiNPClientMsg_0x03A @0x422680) and
+// by the host's revive sender (@0x517cd0 stamps the victim), cleared by the
+// local respawn (Game_InitNewRound @0x422740) and mission start; it is NOT a
+// mount reference (the pre-2026-09-10 reading; the IDB's weaponSlots[44]
+// blob swallows it).
 struct DeployStaticsInput {
     int hold_seconds = 0;
     int revive_seconds = 0;
-    bool local_mounted = false; // entity+0x1E0 != 0
+    bool local_medic_reviving = false; // entity+0x1E0 != 0
 };
 struct DeployStaticsVisibility {
     bool psp_respawn = false;

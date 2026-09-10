@@ -611,8 +611,11 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // said "everybody out" and nothing happened: the occupant stayed mounted at
     // command 125 for the rest of the mission.
     if (ieq(n, "ssnrelease")) {
-        w.commands.release_boarding_command(H(0));
-        return 0;
+        // Returns 1 once the handle resolves to a live item WITH a parent (a
+        // null AI slot still returns 1); every earlier gate returns 0
+        // [orig: WacCmd_SsnRelease @0x4F7420 — the +0x1C item test, the
+        //  +0x16C parent test @0x4f7463, the canonical 1 past the detach].
+        return w.commands.release_boarding_command(H(0)) ? 1 : 0;
     }
 
     const int32_t values[4] = {A(0), A(1), A(2), A(3)};

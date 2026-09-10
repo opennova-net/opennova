@@ -219,7 +219,14 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	// The waypoint body is present only for the witnessed waypoint gametype and
 	// a blue/team-1 recipient. Promotion retains the first BlueTeam route in
 	// World::waypoints; each entry's node is the corresponding pool-3 marker
-	// index, so its wire handle is 0x3000|node. [orig @0x502e41..0x502edb]
+	// index, and the wire word IS that raw pool-3 index — NOT a 0x3000|node
+	// handle: the writer stores the same dword it passed to
+	// Pool_GetEntryUnchecked(3, index) (`movzx ecx, word ptr [ebx]` @0x502f35 ->
+	// `mov [edi], cx` @0x502f45), and the stock client indexes
+	// `pool3.base + word * stride` with it unmasked (@0x42e4a3 ->
+	// Pool_GetEntryUnchecked @0x441fc0, then strncpy into that record). A
+	// 0x3000|node word sent a retail joiner 12288 records past the pool
+	// (corrected 2026-09-10, jo-c cross-check). [orig @0x502e41..0x502edb]
 	const bool waypoint_gametype =
 			game_type::is_waypoint_family(ctx.config.game_type);
 	std::vector<const world::WaypointEntry *> waypoints;
@@ -234,7 +241,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	}
 	put_u16(b, static_cast<uint16_t>(waypoints.size()));
 	for (const world::WaypointEntry *entry : waypoints) {
-		put_u16(b, static_cast<uint16_t>(0x3000u | entry->node));
+		put_u16(b, static_cast<uint16_t>(entry->node));
 		put_u16(b, static_cast<uint16_t>(entry->name_id));
 		b.push_back(0);
 	}
@@ -684,12 +691,27 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 			b.sync_state = 4;         // [orig: @0x5132b1]
 			b.world_stream_phase = InitialStateBurst::kStreamInit; // [orig: @0x5132f6]
 		}
-		if (is_remote && b.sync_state == 4 && b.world_stream_phase == InitialStateBurst::kStreamGameStartBundle && !b.loadout_received) {
-			// WAIT for the client's C2S 0x2F (loadout select) -> S2C 0x5A before the game-start
-			// bundle AND the per-frame 0x0A stream — with NO timeout. The golden retail host
-			// emits NOTHING in-match until the joiner's 0x2F: its first S2C 0x0A directly follows
-			// the 0x5A reply (retail-ashi5a f223117-f223118), and the 0x2F is the client's
-			// load-complete signal (it cannot build a loadout before its own weapon.def/AdmDef
+		// The game-start bundle's trigger is the client's C2S 0x0B mission-file
+		// status report, not its loadout select: retail's 0x0B receiver is the
+		// ONLY player-path caller of Server_OnPlayerJoin (the bundle builder —
+		// 0x42, live 0x0A, 0x0F, 0x4D, 0x61, 0x3E) [orig: NapiNPServerMsg_PlayerJoinRequest
+		// @0x51AB10 -> Server_OnPlayerJoin @0x51A680 @0x51aba1/@0x51abb5; the two
+		// other callers @0x51b93a/@0x51d2e1 are the spectator arms]. A stock client
+		// flushes its first 0x2F alone, pumps, runs Player_InitPlayer, THEN sends
+		// 2F#2 + 0x0B — so a bundle released on the first 0x2F could land before
+		// the client's own init (corrected 2026-09-10, jo-c cross-check). The
+		// spectator arms fire at player-add; our spectator flow keeps its 0x2F
+		// gate (an empty grant) since it never reports a mission file.
+		const bool bundle_trigger_seen = conn.link.spectator
+				? b.loadout_received
+				: (b.loadout_received && conn.reply.mission_status_received);
+		if (is_remote && b.sync_state == 4 && b.world_stream_phase == InitialStateBurst::kStreamGameStartBundle && !bundle_trigger_seen) {
+			// WAIT for the client's C2S 0x2F (loadout select) -> S2C 0x5A and its 0x0B before
+			// the game-start bundle AND the per-frame 0x0A stream — with NO timeout. The golden
+			// retail host emits NOTHING in-match until the joiner's 0x2F/0x0B: its first S2C
+			// 0x0A directly follows the 0x5A reply (retail-ashi5a f223117-f223118, where 2F#2
+			// and 0x0B share the packet), and the 0x2F is the client's load-complete signal
+			// (it cannot build a loadout before its own weapon.def/AdmDef
 			// table exists). The prior reimpl-invented ~10 s fallback force-opened this gate and
 			// blasted 0x0A at a still-LOADING client; once the records carried real anim-def
 			// bytes, the client's UNGATED off-16 apply (§5.10) touched its mid-build AdmDef table

@@ -94,24 +94,36 @@ int napi_envelope_decode(const uint8_t *packet, size_t packet_len,
 				out, out_cap, out_size) ? 0 : -1;
 	}
 
-	// A zero first dword selects the extended form. Retail reads the unsigned
-	// header size from +9. Only a value greater than the ordinary four-byte
-	// header enters the extended-attempt/fallback arm; smaller values reject.
-	// The fallback is required because zero is also a legitimate scatter
-	// carrier when the first 32 original payload bytes all had clear low bits.
-	// [orig: NapiNP_UnpackPacket @0x62ca29..0x62cd43]
+	// A zero first dword makes retail read the header size from the unsigned
+	// byte at +9 with NO range check [orig: NapiNP_UnpackPacket @0x62ca3c].
+	// Exactly four is the ORDINARY layout again — the carrier stays the first
+	// dword (`cmp ebx,4; jz` @0x62ca6a) and the packet decodes normally; the
+	// earlier port rejected it outright, dropping a legitimate packet whose
+	// first 32 original payload bytes all had clear low bits AND whose payload
+	// byte 5 is 0x04 (corrected 2026-09-10, jo-c cross-check). Any other size
+	// is attempted as the extended layout (carrier/CRC at +4, payload at +size;
+	// a size below four cannot hold that dword and fails as retail's CRC compare
+	// does), and only a size ABOVE four takes the four-byte fallback that a zero
+	// scatter carrier needs [orig: NapiNP_UnpackPacket @0x62ca29..0x62cd43 —
+	// the `header_size_saved > 4` retry arm inside it].
 	if (packet_len <= 9) return -1;
 	const size_t variable_header_size = packet[9];
-	if (variable_header_size <= HEADER_SIZE) return -1;
+	if (variable_header_size == HEADER_SIZE) {
+		return decode_with_header(packet, packet_len, HEADER_SIZE,
+				out, out_cap, out_size) ? 0 : -1;
+	}
 	// Retail assumes a well-formed packet here. Keep the structural port
-	// bounded: +9 and the +4 CRC dword must both belong to the header.
-	if (variable_header_size >= 10 && variable_header_size < packet_len &&
+	// bounded: the header must lie inside the packet.
+	if (variable_header_size < packet_len &&
 			decode_with_header(packet, packet_len, variable_header_size,
 					out, out_cap, out_size)) {
 		return 0;
 	}
-	return decode_with_header(packet, packet_len, HEADER_SIZE,
-			out, out_cap, out_size) ? 0 : -1;
+	if (variable_header_size > HEADER_SIZE) {
+		return decode_with_header(packet, packet_len, HEADER_SIZE,
+				out, out_cap, out_size) ? 0 : -1;
+	}
+	return -1;
 }
 
 } // namespace opennova

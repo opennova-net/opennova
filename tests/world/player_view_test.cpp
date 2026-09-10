@@ -321,16 +321,20 @@ void test_input_dispatch_gates() {
     WeaponSlotState slot;
     slot.clip = 30;
     slot.reserve = 300;
-    // Reload: refused on a full magazine, an empty reserve, or a clipless def.
-    // [orig: input case 0xD3 @ 0x4e0420]
+    // Reload: refused on a full magazine or a ZERO reserve; a clipless def
+    // (clipsize -1) and a negative pool still queue the row.
+    // [orig: input case 0xD3 @0x4e12a7..0x4e12e0 — clip == clipsize skip,
+    //  pool == 0 skip, no capacity gate]
     CHECK(!weapon_fsm_reload_allowed(def, slot));
     slot.clip = 12;
     CHECK(weapon_fsm_reload_allowed(def, slot));
     slot.reserve = 0;
     CHECK(!weapon_fsm_reload_allowed(def, slot));
+    slot.reserve = -1; // the shipped -1 startrounds pool passes the zero test
+    CHECK(weapon_fsm_reload_allowed(def, slot));
     slot.reserve = 300;
-    def.clip_capacity = 0;
-    CHECK(!weapon_fsm_reload_allowed(def, slot));
+    def.clip_capacity = -1; // clipless: the row still queues (no refill later)
+    CHECK(weapon_fsm_reload_allowed(def, slot));
     def.clip_capacity = 30;
 
     // Scope toggle: refused during RELOAD/SWITCHFROM and for unscoped defs.

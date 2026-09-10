@@ -126,7 +126,7 @@ DeployStaticsVisibility deploy_statics_visibility(const DeployStaticsInput &in) 
     DeployStaticsVisibility v;
     // [orig: dword_A85B68 @0x553e2a; dword_A85B60 && !entity+0x1E0 @0x553eb8..0x553ecc]
     v.psp_respawn = in.hold_seconds != 0;
-    v.medic = in.revive_seconds != 0 && !in.local_mounted;
+    v.medic = in.revive_seconds != 0 && !in.local_medic_reviving;
     return v;
 }
 

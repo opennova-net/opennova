@@ -87,6 +87,17 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::TEXT_COMMAND:
         apply_text_command(body);
         break;
+	case s2c::MEDIC_REVIVING:
+		// Empty body: the local entity's +0x1E0 "a medic is reviving me" latch
+		// [orig: NapiNPClientMsg_0x03A @0x422680 — the store @0x422688; the
+		// progress bar and ambient sound are presentation legs]. Cleared by the
+		// local player's own dead->alive edge (Game_InitNewRound) below.
+		if (decode_medic_reviving(body.data(), body.size()) &&
+		    !state_.local_medic_reviving) {
+			state_.local_medic_reviving = true;
+			state_.mark_changed();
+		}
+		break;
 	case s2c::WORLD_STATE_LOAD: {
 		// The 0x0F's client-global fold modeled here: the deploy-map overlay is
 		// zeroed, then armed from game_flags bit0 UNLESS the death screen is
@@ -824,6 +835,10 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// clip and defers the real target — gated on the adm actually carrying
 	// the transition clip (retail: table entry != entry 0; here: the state
 	// resolves a track).
+	// The blend duration is picked from the REQUESTED state's flags before
+	// the insert replaces the played clip [orig: the +0x2BC flags test
+	// @0x40b64b..0x40b65d precedes the insert @0x40b662..0x40b737].
+	const int blend_key_state = target_state;
 	if (es.net_anim_pending == 0 && es.rm_state >= 0 &&
 			es.net_anim_current >= 0 && target_state != es.rm_state) {
 		const int trans =
@@ -858,7 +873,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		es.net_anim_ratio_live = false;
 		es.rm_blend_weight = 0.0f;
 		es.rm_blend_step =
-				(world::infantry_anim_flags(target_state) & 0x400u) != 0
+				(world::infantry_anim_flags(blend_key_state) & 0x400u) != 0
 						? (1.0f / 15.0f)
 						: 0.1f;
 	}
@@ -1267,6 +1282,17 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		es.net_saved_live_pose[2] = es.z;
 
 		const bool is_self = es.handle == self_handle;
+		// The local player's own dead->alive edge runs Game_InitNewRound, which
+		// clears the +0x1E0 being-revived latch [orig: the 1->0 edge hook
+		// @0x4c1109 -> Game_InitNewRound @0x422740, the store @0x422796 area
+		// `entity+0x1E0 = 0`].
+		if (is_self && es.respawn_revision != state_.local_respawn_revision_seen) {
+			state_.local_respawn_revision_seen = es.respawn_revision;
+			if (state_.local_medic_reviving) {
+				state_.local_medic_reviving = false;
+				state_.mark_changed();
+			}
+		}
 		const int64_t dx = int64_t(es.net_smooth_target[0]) - es.x;
 		const int64_t dy = int64_t(es.net_smooth_target[1]) - es.y;
 		const int64_t dz = int64_t(es.net_smooth_target[2]) - es.z;

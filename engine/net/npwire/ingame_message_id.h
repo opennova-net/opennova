@@ -118,7 +118,14 @@ inline constexpr uint8_t PLAYER_ACTION = 0x35;
 inline constexpr uint8_t VEHICLE_SPAWN_NOTIFY = 0x36;
 inline constexpr uint8_t WEAPON_SLOT_ACTION = 0x37;
 inline constexpr uint8_t WEAPON_SWITCH = 0x38;
-inline constexpr uint8_t CAMERA_RESET = 0x3A;
+// A medic has started reviving the recipient: the handler latches the local
+// entity's +0x1E0 "being revived" word, draws the default progress bar and
+// starts the player's ambient sound; empty body. The latch hides the DEATH
+// screen's MEDIC/CALLMEDIC statics and blocks a second medic until the local
+// respawn (Game_InitNewRound @0x422740) or mission start clears it.
+// [orig: NapiNPClientMsg_0x03A @0x422680; host sender @0x517cd0 stamps the
+//  victim's +0x1E0 = 1; reader GameEvent_HandleMedicInteraction @0x4e6790]
+inline constexpr uint8_t MEDIC_REVIVING = 0x3A;
 inline constexpr uint8_t FORM_POST_REQUEST = 0x3B;
 inline constexpr uint8_t EXIT_SESSION_ALT = 0x3D;
 inline constexpr uint8_t OBJECTIVE_NOTIFICATION = 0x3F;

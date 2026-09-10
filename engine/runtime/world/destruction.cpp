@@ -286,17 +286,22 @@ Vec3 rotate_authored_point(const CollisionMatrix &orientation, const Vec3 &point
 bool blast_los_clear(World &world, CollisionWorld *collision,
                      const terrain::TerrainHeightField *terrain,
                      const Vec3 &from, const Vec3 &to,
-                     EntityHandle endpoint, float z_bias) {
+                     EntityHandle endpoint, float z_bias, bool query_parent_cleared) {
     const int32_t a[3] = {to_fixed(from.x), to_fixed(from.y), to_fixed(from.z + z_bias)};
     const int32_t b[3] = {to_fixed(to.x), to_fixed(to.y), to_fixed(to.z + z_bias)};
     if (collision != nullptr) {
         const CollisionWorld::RayDebugScope ray_scope(
                 collision, CollisionWorld::RayDebugCategory::kExplosionLos);
-        // The blast caller passes entity B = null and radius -0.25, using
-        // the victim's candidate slice, not the global pool ray. A quantized
-        // mine point just below terrain therefore remains reachable.
-        // [orig: Projectile_ProcessExplosionQueue @ 0x4EAD80, calls @ 0x4EB162/0x4EB4F6]
-        return collision->entity_los_clear(world, endpoint, {}, a, b, -0x4000);
+        // The blast caller passes entity B = null, radius -0.25 and
+        // allTypes = 1 (`push 1` @0x4eb148 / @0x4eb49a): EVERY candidate kind
+        // blocks a blast — vehicles, crates, emplacements, items — not just
+        // buildings, and the flag-27 rows stay in. It uses the victim's
+        // candidate slice, not the global pool ray, so a quantized mine point
+        // just below terrain remains reachable. The pool-0 leg also nulls the
+        // victim's parentEntity around the call (@0x4eb158/@0x4eb16c).
+        // [orig: Projectile_ProcessExplosionQueue @ 0x4EAD80, calls @ 0x4EB162/0x4EB4CA]
+        return collision->entity_los_clear(world, endpoint, {}, a, b, -0x4000,
+                                           /*all_types=*/true, query_parent_cleared);
     }
     if (terrain != nullptr && terrain->valid()) {
         // The same null-entity terrain leg when no collision device is bound.
@@ -608,11 +613,33 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // flinch/knockback/burn legs (Entity_OnDamageReceived
                 // @ 0x4eb05c, Entity_ApplyCollisionForce @ 0x4eb1d2, the
                 // attached hit emitter @ 0x4eb292) are tracked stubs — §24.
-                // The LOS gate [orig: @ 0x4eb162 — type 4 direct hits skip it].
-                if (e.type != ammo_kz::kRadiusBlast &&
-                    !blast_los_clear(world, collision, terrain, t->position, e.pos,
-                                     t->handle, 0.0f))
-                    continue;
+                if (e.type != ammo_kz::kRadiusBlast) {
+                    // The mounted-occupant gate ahead of the LOS [orig: the
+                    // parentSlot switch @0x4eb0e2..0x4eb136]: seats 1/2/5 with
+                    // a parent that has no ItemDef, or a type-1 (vehicle)
+                    // parent, leave the sweep — a crew takes its damage through
+                    // the vehicle; seat 3 (a gun standing on something) leaves
+                    // it when the parent's groundEntity is a vehicle. Every
+                    // other seat state falls through to the LOS.
+                    const int seat = t->mount_seat;
+                    const Entity *parent = t->mount_target.valid()
+                            ? world.registry.get(t->mount_target) : nullptr;
+                    if (seat == 1 || seat == 2 || seat == 5) {
+                        if (parent != nullptr && (!parent->has_item_def || parent->item_type == 1))
+                            continue;
+                    } else if (seat == 3) {
+                        const Entity *ground = (parent != nullptr && parent->ground_target.valid())
+                                ? world.registry.get(parent->ground_target) : nullptr;
+                        if (ground != nullptr && ground->has_item_def && ground->item_type == 1)
+                            continue;
+                    }
+                    // The LOS gate [orig: @ 0x4eb162 — type 4 direct hits skip
+                    // it]. The victim's parentEntity is NULLED around the call,
+                    // so its own mount hull is a blocker here.
+                    if (!blast_los_clear(world, collision, terrain, t->position, e.pos,
+                                         t->handle, 0.0f, /*query_parent_cleared=*/true))
+                        continue;
+                }
                 entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
             }
         }
@@ -635,10 +662,11 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                     continue;
                 const float dist = vec_len(d);
                 if (dist > reach) continue;
-                // LOS with the witnessed +0.25 lift [orig: @ 0x4eb4ca].
+                // LOS with the witnessed +0.25 lift [orig: @ 0x4eb4ca]; this
+                // leg leaves the item's parentEntity in place.
                 if (e.type != ammo_kz::kRadiusBlast &&
                     !blast_los_clear(world, collision, terrain, t->position, e.pos,
-                                     t->handle, 0.25f))
+                                     t->handle, 0.25f, /*query_parent_cleared=*/false))
                     continue;
                 if (!cone_gate(e, cone_half, d)) continue;
                 // Destructible-class targets record the blast center as the

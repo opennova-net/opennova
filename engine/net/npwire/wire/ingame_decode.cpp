@@ -1175,6 +1175,14 @@ bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &ou
 	return (c.p == c.end);
 }
 
+// S2C 0x3A medic-reviving. The handler takes no arguments and reads no
+// bytes — it latches the local entity's +0x1E0 word and runs two presentation
+// legs — so any body length is accepted, exactly as retail ignores it.
+// [orig: NapiNPClientMsg_0x03A @ 0x422680]
+bool decode_medic_reviving(const uint8_t * /*body*/, size_t /*len*/) {
+	return true;
+}
+
 // S2C 0x60 / 0x64 chunked file transfer (shared decoder).
 // [orig: NapiNPClientMsg_HandleFileTransferChunk @ 0x432350 (0x60) /
 //        NapiNPClientMsg_HandleMissionDataChunk @ 0x432410 (0x64)]

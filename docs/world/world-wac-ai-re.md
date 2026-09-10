@@ -4499,8 +4499,10 @@ mount toggle, in that witnessed order [orig: Input_HandleActionBinding_0
    `Entity_ToggleVehicleMount(g_local_player_entity)` [orig: @ 0x49d6dc].
 
 The `useitem` row (catalog row 44, default VK_SHIFT, flags 0x0C000805: bit 4 =
-a HELD binding) is polled every frame by `Input_ProcessToggleBindings
-@ 0x499480`, so its action re-fires while the key is down and the latch stays
+a HELD binding) is polled every frame by `Input_ProcessAnalogBindings
+@ 0x4995f0` (the held-row scan over `word_8159BC/BE` @0x49960b..0x499629, which
+ignores the row's modifier words; `0x499480` is the JOYSTICK pass, gated on
+`dword_24D2088` — corrected 2026-09-10), so its action re-fires while the key is down and the latch stays
 live for the whole hold. The hold doubles as a chord: `Input_ProcessKeyboardEvents
 @ 0x49d1f0` runs `Input_HandleSpecialKeys @ 0x49c5c0` on every key-down event
 BEFORE the binding tables, and its `dword_24C18E0` arm (USE was held last
@@ -4591,7 +4593,7 @@ with the control seat, then attached gun children, then passenger slots 0..7.
 It is independent of USRP/vector order and HUD texture availability. A
 gun-child mount re-roots to its carrier; a root without vehicle attrib 0x40
 or a control bone produces no list.
-[orig: the binding catalog @ 0x8159AC (108-byte rows; seat1 @ 0x8160D8, +24 =
+[orig: the binding catalog flags column @ 0x8159AC (108-byte rows from base 0x8159A8; seat1 flags @ 0x8160D8, +24 from the flags word = row +28 =
 0x11); Input_ProcessKeyboardEvents @ 0x49d35b..0x49d3a7 (modifier pass),
 @ 0x49d3ba..0x49d488 (fallback); Input_HandleActionBinding_0 @ 0x4E0B81..0x4E0C22;
 Entity_BuildWeaponSlotList @ 0x434C60..0x434DDA]

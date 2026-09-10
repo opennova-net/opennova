@@ -134,11 +134,17 @@ void eval_clip_pose(const Clip &clip, double playhead_seconds,
     double frac = 0.0;
     // The pose table holds frame_count + 1 keys (the header counts INTERVALS;
     // the sampler bakes every channel key). Loops cycle the frame_count
-    // interval windows (the seam key ~= key 0; the original's loop-wrap window
-    // is unwalked); one-shots play every window and HOLD the true final key —
-    // a one-frame clip is one full window of motion, not a static pose.
-    // [orig: BoneAnim_FindKeyframeAtTime @0x410220 — hold-last past the
-    // summed durations]
+    // interval windows, and the LAST window heads to the authored seam key
+    // `frame_count`, never back to key 0: the keyframe walk returns key i and
+    // the sampler blends i -> i+1 with no modulo, the loop wrap happening on
+    // the playhead alone [orig: BoneAnim_FindKeyframeAtTime @0x410276..0x41028e;
+    // BoneAnim_TransformBones @0x4103ce/@0x410453 `lea edx,[eax+10h]`;
+    // AnimChannel_AdvancePlayback wrap `t -= 1.0` @0x40b199]. 55 shipped
+    // looping .bads carry a seam key more than 0.5 deg from key 0 (DV_BURN,
+    // M4_1d, ak47_1f, ...): retail shows that pose then pops at the wrap.
+    // One-shots play every window and HOLD the true final key — a one-frame
+    // clip is one full window of motion, not a static pose [orig: hold-last
+    // past the summed durations @0x410220].
     const int last_pose = static_cast<int>(clip.frames.size()) - 1;
     if (clip.loops() && frame_count > 1) {
         double m = std::fmod(frame_time, static_cast<double>(frame_count));
@@ -147,7 +153,7 @@ void eval_clip_pose(const Clip &clip, double playhead_seconds,
         }
         a = static_cast<int>(std::floor(m));
         frac = m - a;
-        b = (a + 1) % frame_count;
+        b = std::min(a + 1, last_pose);
     } else if (frame_time <= 0.0) {
         a = b = 0;
     } else if (frame_time >= last_pose) {
