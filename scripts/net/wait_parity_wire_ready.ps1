@@ -253,7 +253,7 @@ function ConvertFrom-ParityLines {
             continue
         }
 
-        if ($line -match '^PARITY_EVENT frame=(\d+) ts_ns=(\d+) dir=([SC]) session=(\d+) tag=0x([0-9a-fA-F]{2}) settings=([01]) len=(\d+) body=([0-9a-fA-F]*|-)$') {
+        if ($line -match '^PARITY_EVENT frame=(\d+) ts_ns=(\d+) dir=([SC]) session=(\d+) participant=(?<participant>\d+) tag=0x([0-9a-fA-F]{2}) settings=([01]) len=(\d+) body=([0-9a-fA-F]*|-)$') {
             $direction = $Matches[3]
             $tag = $Matches[5].ToLowerInvariant()
             $settings = [int]$Matches[6]
@@ -279,6 +279,7 @@ function ConvertFrom-ParityLines {
             $events.Add([pscustomobject]@{
                 frame = [int]$Matches[1]; ts_ns = [uint64]$Matches[2]
                 dir = $direction; session = [int]$Matches[4]; tag = $tag
+                participant = [int]$Matches['participant']
                 settings = $settings; identity = ('{0}:{1}' -f $tag, $settings)
                 length = $declaredLength; body = $body
             })
@@ -856,7 +857,7 @@ function Add-SyntheticEvent {
         ('PARITY_PACKET frame={0} ts_ns={1} dir={2} session=32776 sid=0x{3} seq={0} ack=0 flags=0x00 records=1 tags=0x0{4} wire=0x0{4}:0x{5}:{6}:-' -f
             $frame, $Timestamp, $Direction, $sid, $Tag, $wireFlags, $Length))
     $Builder.lines.Add(
-        ('PARITY_EVENT frame={0} ts_ns={1} dir={2} session=32776 tag=0x{3} settings=0 len={4} body={5}' -f
+        ('PARITY_EVENT frame={0} ts_ns={1} dir={2} session=32776 participant=1 tag=0x{3} settings=0 len={4} body={5}' -f
             $frame, $Timestamp, $Direction, $Tag, $Length, $Body))
     return $frame
 }
@@ -954,6 +955,29 @@ function New-SyntheticParityLines {
 }
 
 function Invoke-WireReadinessSelfTest {
+    # Match nw_pp's current event schema, including the participant column.
+    $participantFacts = ConvertFrom-ParityLines @(
+        'PARITY_PACKET frame=5 ts_ns=1789006567605281900 dir=S session=32776 sid=0x22222222 seq=5 ack=0 flags=0x00 records=1 tags=0x100 wire=0x100:0xa0:9:-'
+        'PARITY_EVENT frame=5 ts_ns=1789006567605281900 dir=S session=32776 participant=1 tag=0x00 settings=1 len=9 body=000020000014050000'
+    )
+    if ($participantFacts.events.Count -ne 1 -or
+            $participantFacts.events[0].participant -ne 1 -or
+            $participantFacts.events[0].body.Length -ne 9 -or
+            $participantFacts.events[0].settings -ne 1) {
+        throw 'Current participant event schema did not preserve its fields.'
+    }
+    foreach ($malformedEvent in @(
+        'PARITY_EVENT frame=5 ts_ns=1 dir=S session=32776 participant=bad tag=0x00 settings=1 len=1 body=00',
+        'PARITY_EVENT frame=5 ts_ns=1 dir=S session=32776 participant=1 tag=0x00 settings=1 len=2 body=00'
+    )) {
+        $rejected = $false
+        try { $null = ConvertFrom-ParityLines @($malformedEvent) }
+        catch {
+            $rejected = $_.Exception.Message -match
+                'Malformed or unsupported nw_pp parity line|body length does not match'
+        }
+        if (-not $rejected) { throw 'Malformed participant event was accepted.' }
+    }
     $missionHeader = [byte[]]::new(616)
     $missionHeader[0] = [byte][char]'B'; $missionHeader[1] = [byte][char]'M'
     $missionHeader[2] = [byte][char]'S'; $missionHeader[3] = 19
@@ -1093,8 +1117,8 @@ function Invoke-WireReadinessSelfTest {
     }
     $duplicateOrdinary = @(
         'PARITY_PACKET frame=900 ts_ns=17000000000 dir=S session=32776 sid=0x22222222 seq=900 ack=0 flags=0x00 records=2 tags=0x00a,0x00a wire=0x00a:0x40:600:-,0x00a:0x40:600:-'
-        'PARITY_EVENT frame=900 ts_ns=17000000000 dir=S session=32776 tag=0x0a settings=0 len=600 body=-'
-        'PARITY_EVENT frame=900 ts_ns=17000000000 dir=S session=32776 tag=0x0a settings=0 len=600 body=-'
+        'PARITY_EVENT frame=900 ts_ns=17000000000 dir=S session=32776 participant=1 tag=0x0a settings=0 len=600 body=-'
+        'PARITY_EVENT frame=900 ts_ns=17000000000 dir=S session=32776 participant=1 tag=0x0a settings=0 len=600 body=-'
         'PARITY_STATE frame=900 ts_ns=17000000000 dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=0 local_mount=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=0,65535,0,0,0'
         'PARITY_STATE frame=900 ts_ns=17000000000 dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=0 local_mount=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=0,65535,0,0,0'
     )

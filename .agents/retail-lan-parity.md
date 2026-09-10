@@ -27,6 +27,13 @@ recorded with it.
 ## Safety and evidence
 
 - Use two distinct retail copies for SERVER and CLIENT.
+- Use the complete patched-Bink deployment, including the original Bink DLL
+  under the forwarding filename expected by that proxy. For revx02, retain
+  `PatchesEnabled 1`: the observed expansion has 2,455 item definitions, above
+  retail's unpatched 2,048-item limit. Verify the hook log reports the expanded
+  item table and allocation. Disabling this group reproduced a host startup
+  access violation before any client connected. Record the effective hook
+  configuration with the run; optional transport patches are separate switches.
 - Keep retail files, captures, hook logs, screenshots, account data, machine
   paths, adapter addresses, and DLLs beneath the ignored `.scratch/` tree.
 - Record the repository commit, onHook commit, deployed proxy SHA-256, Godot
@@ -56,12 +63,19 @@ pwsh -File scripts/net/run_parity_topology.ps1 `
     -HostSessionName 'Untitled ' `
     -ReadinessMode in_match `
     -RunId 01tr-rr-001 `
+    -MissionArtifactPath C:\retail\corpus\missions\01TR.bms `
+    -MissionSha256 ((Get-FileHash C:\retail\corpus\missions\01TR.bms -Algorithm SHA256).Hash.ToLowerInvariant()) `
     -RetailServerRoot C:\retail\SERVER `
     -RetailClientRoot C:\retail\CLIENT `
     -OnHookMcpPath C:\opennova-int\onhook\onhook-mcp.exe `
     -GodotLauncher C:\Godot\Godot_v4.6.1-stable_win64_console.exe `
     -HostMcpPort 8975 -JoinerMcpPort 8976
 ```
+
+The mission artifact must be the exact BMS used by the installed expansion.
+Place matching extracted `items.def` one directory above its `missions/`
+directory; the packet readiness gate uses both files to validate mission
+identity and decode entity types.
 
 Run the command once for each of `RR`, `RO`, `OR`, and `OO`, changing `RunId`
 for every cell while holding all other case inputs fixed. Ports supported by
