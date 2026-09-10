@@ -280,6 +280,13 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	// [orig: 0x82 MI TLV = conn->connection_id @ CNapiNPConnection_SendSessionInit 0x620ef0] — the
 	// host-assigned dcb the joiner stores as its own ConnectionId and echoes in its 0x48 client-ack.
 	reply.mi = conn.connection_id;
+	// A GAME host advertises the JOINTOPERATIONS session template (120 s reap,
+	// 30 s idle keepalive, 10 s active probe, 512/256 pools, 1200 msg cap), not
+	// the NOVAWORLDUDP service block build_server_auth defaults to for the
+	// service [orig: CNapiNetwork_Init @0x4ca4a0 -> CNapiNPConnection_Create
+	// @0x62acb0 -> SendSessionInit @0x620ef0].
+	reply.client_cs = jointoperations_client_cs_fields();
+	reply.server_cs = jointoperations_server_cs_fields();
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply));
 }
 

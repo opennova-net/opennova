@@ -410,8 +410,15 @@ bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {
 	// independent of the local World's logic clock, which starts after load.
 	// [orig: NetPacket_WriteEntityPositionUpdate @0x42A62F]
 	stamped.current_tick = current_tick_;
-	gameplay_send_queue_.push_back(
-			make_protocol_message(c2s::FIRED_ROUND, encode_client_fired_round(stamped)));
+	ProtocolMessage fire = make_protocol_message(c2s::FIRED_ROUND, encode_client_fired_round(stamped));
+	// The fire's retained node lives 62 send flushes (~1 s) and is then pruned
+	// unsent — after a lossy stretch a stale shot is NOT replayed by the NACK
+	// path, while a retail host would still apply it (no age gate on its side)
+	// [orig: CNapiNetwork_QueueReliableMessage(ctx, 6, 62, ...) in
+	//  Entity_FireWeaponAndSendPacket @0x42bd80; the deadline
+	//  send_flush_counter + userParam - 1 in BuildOutgoingPackets @0x628430].
+	fire.retention_flushes = 62;
+	gameplay_send_queue_.push_back(std::move(fire));
 	return true;
 }
 
@@ -436,8 +443,11 @@ bool ClientRuntime::queue_medic_request() {
 		return false;
 	MedicRequest request;
 	request.entity_index = joiner_->self_handle();
-	pre_send_queue_.push_back(
-			make_protocol_message(c2s::MEDIC_REQUEST, encode_medic_request(request)));
+	ProtocolMessage medic = make_protocol_message(c2s::MEDIC_REQUEST, encode_medic_request(request));
+	// A 310-flush (~5 s) finite lifetime like the 0x4C quality report
+	// [orig: CNapiNetwork_QueueReliableMessage(ctx, 0x2E, 310, ...)].
+	medic.retention_flushes = 310;
+	pre_send_queue_.push_back(std::move(medic));
 	return true;
 }
 

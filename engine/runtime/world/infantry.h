@@ -584,6 +584,15 @@ struct InfantryState {
     // stance-change requests are refused [orig: @0x4e0d8a].
     int wpn_run_anim = 0;
     bool wpn_force_crouch = false;
+    // entity+0x37C: the LOADOUT WEIGHT (16.16 u) the S2C 0x5A apply sums over the
+    // 780 weapon slots — weaponweight + live total clips x clipweight per slot
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 -> the misnamed
+    //  Terrain_AccumulateSectorScores @0x425220 store @0x425310]. The run
+    //  promotion bands it: > 67.0 u or negative -> no run, 33.0..67.0 -> run_2,
+    //  < 33.0 -> run_3 (then + run_anim) [orig: @0x4b72aa..0x4b72cf]. Only the
+    //  local player's entity is ever written (remote bodies stay 0 = the
+    //  lightest band), exactly as here.
+    int32_t loadout_weight_fp16 = 0;
     uint32_t last_events = 0;
     int32_t prev_capsule_bottom = 0;      // anim_slot[19]
     // The eye/camera-offset triple (entity+0x6C/+0x70/+0x74, 16.16), restamped

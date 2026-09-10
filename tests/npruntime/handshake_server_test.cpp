@@ -427,6 +427,9 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	dedicated_config.game_type = 0;
 	dedicated_config.max_players = 4;
 	dedicated_config.expansion.clear();
+	// The captured install's rules word (TeamChoose spin persisted ON): the
+	// P2 pin below reads the LIVE value, not the cfg default (0x3A02).
+	dedicated_config.mp_attributes = 0x3A06u;
 	inmatch::test::bring_up_host(dedicated, inmatch::ConnectionMode::HostOnly,
 	                        inmatch::SocketMode::Lan, kHostKey, nullptr, dedicated_config);
 	auto empty_reply = inmatch::handle_server_datagram(

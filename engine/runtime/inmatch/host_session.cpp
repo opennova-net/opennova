@@ -349,6 +349,9 @@ void dispatch_event(HostOwner &owner, opennova::IDatagramSocket &sock, const Pee
 	}
 }
 
+static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now,
+		bool force_open);
+
 void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		HostBeforeServerTickFn before_server_tick, void *before_server_tick_context,
 		HostEventObserverFn event_observer, void *event_observer_context) {
@@ -460,9 +463,31 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	lap.mark(devtools::Slot::SIM_SERVER_TICK);
 
 	// (4) S2C flush — reframe each remote (type-1) transport's identity [tag][body] as a 0x83 + send.
-	// Drain each remote transport into the ordered pending queue every tick;
-	// only an open boundary frames and sends it. The host's own type-2 loopback
-	// is consumed in-process and skipped here.
+	flush_s2c_boundaries(owner, sock, now, /*force_open=*/false);
+
+	// (5) A dedicated host registers no type-2 local client. If its embedder nevertheless supplied a
+	// loopback channel, defensively drain it so that unused input cannot accumulate. A serve-and-play
+	// owner instead folds the registered loopback into ClientState after this pump, so preserve it.
+	if (owner.host_loopback != nullptr && !owner.serve_and_play) {
+		replication::Datagram discard;
+		while (owner.host_loopback->client_recv(discard)) { /* discard the host's own view */ }
+	}
+
+	++owner.now_tick;
+	lap.mark(devtools::Slot::SIM_HOST_SEND);
+}
+
+void host_session_flush_s2c(HostOwner &owner, opennova::IDatagramSocket &sock) {
+	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/true);
+}
+
+// The pump's step (4). Drain each remote transport into the ordered pending
+// queue every tick; only an open boundary frames and sends it (force_open
+// ships regardless — the teardown's last flush). The host's own type-2 loopback
+// is consumed in-process and skipped here.
+static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now,
+		bool force_open) {
+	auto &pending_session_messages = owner.pending_session_messages;
 	for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
 		if (c.type != NapiNPConnection::kTypeServerSide) continue;
 		// A type-1 remote peer's transport is always the UdpSessionTransport admit_peer attached, so the
@@ -480,7 +505,7 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 				pending_session_messages[c.peer].push_back(std::move(message));
 			}
 		}
-		if (!c.s2c_send_boundary_open) continue;
+		if (!c.s2c_send_boundary_open && !force_open) continue;
 		// These packets were framed before this boundary and therefore carry
 		// lower sequence numbers than the semantic messages framed below.
 		auto pending_datagrams = owner.pending_session_datagrams.find(c.peer);
@@ -534,17 +559,6 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 			c.s2c_send_boundary_open = true;
 		}
 	}
-
-	// (5) A dedicated host registers no type-2 local client. If its embedder nevertheless supplied a
-	// loopback channel, defensively drain it so that unused input cannot accumulate. A serve-and-play
-	// owner instead folds the registered loopback into ClientState after this pump, so preserve it.
-	if (owner.host_loopback != nullptr && !owner.serve_and_play) {
-		replication::Datagram discard;
-		while (owner.host_loopback->client_recv(discard)) { /* discard the host's own view */ }
-	}
-
-	++owner.now_tick;
-	lap.mark(devtools::Slot::SIM_HOST_SEND);
 }
 
 void start_host_session(HostOwner &owner, const HostConfig &cfg) {

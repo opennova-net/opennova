@@ -145,8 +145,14 @@ int main() {
 	int hp_prev = 10;
 	int fire_seconds = 0;
 	bool killed = false;
+	// One press edge per second: a held trigger sustains a volley only until
+	// the magazine runs dry, and the auto-reload does NOT resume it without a
+	// fresh press (the witnessed deferred-refire rounds gate). The approach
+	// speed is the kit's weight band (a 59.7 u kit runs at run_2), so the first
+	// magazine can be spent on the move before the 8 u standing fire.
 	bool pressed = true;
 	while (seconds < kMaxMissionSeconds && fire_seconds < kFireSeconds) {
+		pressed = true;
 		for (int t = 0; t < 62; ++t) {
 			const w::AiEntity *tai = rig.world.ai.for_handle(target);
 			if (tai != nullptr) {

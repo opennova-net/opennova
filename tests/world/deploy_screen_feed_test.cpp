@@ -49,15 +49,21 @@ void test_rows_sort_and_occupants() {
 	in.zones.push_back(zone(0, true));
 	in.zones.push_back(zone(1, true));
 	std::vector<DeployListRow> rows = build_deploy_rows(in);
-	CHECK(rows.size() == 4);
+	// Every team zone appends one blank spacer after its row even with nobody
+	// queued [orig: the unconditional UIList_AddRow @0x553dbf], so the sorted
+	// list reads A, blank, B, blank, C, blank, D.
+	CHECK(rows.size() == 7);
 	CHECK(rows[0].value == 1 && rows[0].text == "<c4040FF>'A' Zone 001");
-	CHECK(rows[1].value == 2);
-	CHECK(rows[2].value == 3);
+	CHECK(rows[1].value == -1 && rows[1].text.empty());
+	CHECK(rows[2].value == 2);
+	CHECK(rows[3].value == -1 && rows[3].text.empty());
+	CHECK(rows[4].value == 3);
+	CHECK(rows[5].value == -1 && rows[5].text.empty());
 	// 'D' sorts after 'C': the Default row lands LAST here — the witnessed
 	// whole-list sort includes it.
-	CHECK(rows[3].value == 0 && rows[3].text == "<c4040FF>'D' Home Base");
+	CHECK(rows[6].value == 0 && rows[6].text == "<c4040FF>'D' Home Base");
 
-	// Occupants land after their zone row, self marked, then one blank row.
+	// Occupants land after their zone row, self marked, then the blank row.
 	DeployOccupant ace;
 	ace.handle = 0x0002;
 	ace.name = "Ace";
@@ -67,13 +73,16 @@ void test_rows_sort_and_occupants() {
 	me.self = true;
 	in.zones[2].occupants = {ace, me}; // zone B (index 1)
 	rows = build_deploy_rows(in);
-	CHECK(rows.size() == 7);
-	CHECK(rows[1].value == 2);
-	CHECK(rows[2].value == -1 && rows[2].text == "Ace");
-	CHECK(rows[3].value == -1 && rows[3].text == "<b><cFF4040>** Me **");
-	CHECK(rows[4].value == -1 && rows[4].text.empty());
-	CHECK(rows[5].value == 3);
-	CHECK(rows[6].value == 0);
+	CHECK(rows.size() == 9);
+	CHECK(rows[0].value == 1);
+	CHECK(rows[1].value == -1 && rows[1].text.empty());
+	CHECK(rows[2].value == 2);
+	CHECK(rows[3].value == -1 && rows[3].text == "Ace");
+	CHECK(rows[4].value == -1 && rows[4].text == "<b><cFF4040>** Me **");
+	CHECK(rows[5].value == -1 && rows[5].text.empty());
+	CHECK(rows[6].value == 3);
+	CHECK(rows[7].value == -1 && rows[7].text.empty());
+	CHECK(rows[8].value == 0);
 }
 
 // A zone with occupants but no list row (not secured: the second loop has no
@@ -86,12 +95,15 @@ void test_unsecured_zone_occupants_land_after_row_zero() {
 	bee.name = "Bee";
 	in.zones[1].occupants = {bee};
 	const std::vector<DeployListRow> rows = build_deploy_rows(in);
-	// Sorted: 'A' zone, then 'D' default; the quirk inserts after row 0.
-	CHECK(rows.size() == 4);
+	// Sorted: 'A' zone, then 'D' default. Zone A (listed, nobody queued) still
+	// appends its blank after row 0; the unlisted zone B's quirk then inserts
+	// Bee after row 0 and its own blank after Bee.
+	CHECK(rows.size() == 5);
 	CHECK(rows[0].value == 1);
 	CHECK(rows[1].value == -1 && rows[1].text == "Bee");
 	CHECK(rows[2].value == -1 && rows[2].text.empty());
-	CHECK(rows[3].value == 0);
+	CHECK(rows[3].value == -1 && rows[3].text.empty());
+	CHECK(rows[4].value == 0);
 }
 
 void test_status_line() {

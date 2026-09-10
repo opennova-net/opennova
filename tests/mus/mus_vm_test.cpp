@@ -819,9 +819,10 @@ static int test_vm_intrinsic_fisset(void) {
     return 1;
 }
 
-/* FIsClear (idx 8) is a real bound handler in Jointops (AudioVM_Intrinsic_FIsClear
-   @ 0x6723C0): returns -1 when NONE of the mask bits are set in *var, else 0 -- the
-   inverse of FIsSet. */
+/* FIsClear (idx 8) has a handler body in Jointops (@ 0x6723C0) but the name
+   resolver's bound dword_84F20C is 8, so the ninth name never resolves: a
+   `method FIsClear` runs the NULL-handler path and pushes 0 for every call
+   [orig: AudioVM_FindContextByName @0x6723E0; AudioVM_Op_Method @0x672CF0]. */
 static int test_vm_intrinsic_fisclear(void) {
     static uint8_t code[] = {
         /* Var00 = 0x0F via FSet (empty drains the return value) */
@@ -849,8 +850,8 @@ static int test_vm_intrinsic_fisclear(void) {
     mus_vm_start(vm);
     mus_vm_tick(vm, 16);
     mus_vm_tick(vm, 16);
-    CHECK(mus_vm_get_var(vm, 1) == -1, "FIsClear(0x10) over 0x0F = -1 (bits clear)");
-    CHECK(mus_vm_get_var(vm, 2) == 0,  "FIsClear(0x03) over 0x0F = 0 (bits set)");
+    CHECK(mus_vm_get_var(vm, 1) == 0, "FIsClear(0x10) resolves to no handler: pushes 0");
+    CHECK(mus_vm_get_var(vm, 2) == 0, "FIsClear(0x03) resolves to no handler: pushes 0");
     mus_vm_destroy(vm);
     return 1;
 }

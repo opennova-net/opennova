@@ -111,6 +111,9 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     weapon_inventory_seed_pools(table, inventory,
             loadout_seed_class(world, loadout));
     weapon_inventory_recalc_clips(table, inventory);
+    // The loadout weight the next 0x5A apply would stamp into entity+0x37C
+    // [orig: Terrain_AccumulateSectorScores @0x425220 via @0x4296f9].
+    loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory);
     inventory_valid = true;
     weapon.switch_in_flight = false;
     weapon.switch_deferred_action = -1;
@@ -204,6 +207,10 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
         }
     }
     weapon_inventory_recalc_clips(table, inventory);
+    // The S2C 0x5A apply's last leg: the loadout weight into the local
+    // entity's +0x37C (the run-promotion band) [orig:
+    // NapiNPClientMsg_HandleWeaponLoadoutSync @0x4296f9 -> @0x425220].
+    loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory);
     return true;
 }
 

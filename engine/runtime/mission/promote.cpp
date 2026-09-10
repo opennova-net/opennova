@@ -265,6 +265,12 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // BMS byte 155 (.mis "lfp_group") -> entity+538 — the AS zone number (net-re §5.61).
     // [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
     s.zone_number = e.lfp_group;
+    // A numbered zone spawns SECURED: entity+540 (the control level) is seeded
+    // to 1.0 for every record whose byte 155 is nonzero, so the owner's frontier
+    // zone is spawnable from the first tick and no first-presence Secure edge
+    // fires [orig: `movzx edx,[edi+0A5h]; mov [esi+164h],dl; jz; mov dword ptr
+    // [esi+21Ch],10000h` @0x40ec0a..0x40ec19].
+    if (e.lfp_group != 0) s.zone_control = 0x10000;
     // BMS word 14 (wp_distance low u16) -> entity+350 — the capture-zone/proximity radius
     // the 0x0D record's 0x2000/0x8000-gated u16 streams (golden ASH_I5A bunkers: 70).
     // [orig: Entity_SpawnFromBMSRecord @0x40e9f0; net-re §5.11]
@@ -749,6 +755,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         return false;
     };
     std::vector<EntityHandle> promoted_item_handles;
+    uint32_t spawn_phase_counter = 0; // dword_A77638, reset per load [orig: @0x40f5c0 area]
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {
         uint32_t idx = 0;
         for (const bms::Entity &e : vec) {
@@ -783,6 +790,16 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             if (kind == EntityKind::Item) promoted_item_handles.push_back(h);
             if (Entity *spawned = world.registry.get(h)) {
                 initialize_item_seats(*spawned, opts.item_seat_specs);
+                // The spawn-phase stagger: every spawned record takes the load
+                // counter modulo 60 into entity+0x2AC and the counter steps by
+                // 11, so the first blink/indoors refresh of the statics is spread
+                // over the first 60 ticks in 11-tick steps instead of all firing
+                // in the first cohort pass [orig: `mov ecx,dword_A77638 ...
+                // mov [esi+2ACh],ecx; add dword_A77638,0Bh` @0x40ec8c..0x40ecb8;
+                // the counter resets per load]. Vehicles re-stamp their own
+                // 0..15 phase below.
+                spawned->static_think_age = static_cast<int32_t>(spawn_phase_counter % 60u);
+                spawn_phase_counter += 11u;
             }
             const bool ai_capable =
                     ai_capable_default ||
@@ -829,8 +846,12 @@ void stash_mission_loadout_rules(
     r_kit_rows.clear();
     for (const bms::ItemAvailabilityEntry &row : mission.item_availability) {
         if (row.name.empty()) continue;
+        // The status byte is SIGNED in retail: -1 is the "mission allowed"
+        // sentinel the availability builder maps to 3 [orig:
+        // build_item_restriction_table @0x54ddb0 reads `(char)name[strlen+1]`,
+        // `== -1 -> 3`]; an unsigned widen (255) would never hit that arm.
         r_availability_rows.emplace_back(row.name,
-                                         static_cast<int32_t>(row.status));
+                                         static_cast<int32_t>(static_cast<int8_t>(row.status)));
     }
     for (const bms::WeaponLoadoutRecord &row : mission.loadout.entries) {
         if (row.name.empty()) continue;

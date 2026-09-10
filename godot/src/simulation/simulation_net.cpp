@@ -898,7 +898,13 @@ std::vector<opennova::world::DeployZoneRow> Simulation::deploy_zone_rows() {
 		row.index = static_cast<int>(i);
 		row.letter = static_cast<char>('A' + static_cast<int>(i));
 		row.name_key = vformat("STRWPNAME%03d", static_cast<int>(i) + 1).utf8().get_data();
-		row.secured = !(e->zone_number != 0 && effective_control < effective_limit);
+		// The first-loop gate: a zone whose live timer entry sits below its limit
+		// is NOT listed; no entry (or level >= limit) lists it. There is no zone-
+		// number term (an earlier port carried one) — the retail list walk tests
+		// only the timer entry's level against its limit and then the def's
+		// spawn-zone attribute (engine record: deploy_screen_feed.h cites the
+		// UI_UpdateDeathScreenContent list loop).
+		row.secured = !(effective_control < effective_limit);
 		// The 0x6E wave group on this zone: its countdown (entity+548) and the
 		// queued members, named through the roster the way retail reads the
 		// member entity's Name (the player entity's name IS the roster name)

@@ -39,6 +39,12 @@ struct LocalPlayerLoadout {
     // retail's out-of-range clamp default [orig: Server_PlayerAdd class clamp
     // @ 0x51d102].
     int32_t pending_player_class = -1;
+    // The kit's weight (16.16 u) as the S2C 0x5A apply sums it into the local
+    // entity's +0x37C — the run-promotion band input. Recomputed by every
+    // accept/rebuild here (the same formula over the resulting inventory) and
+    // mirrored into InfantryState::loadout_weight_fp16 each tick.
+    // [orig: Terrain_AccumulateSectorScores @0x425220 (misnamed)]
+    int32_t weight_fp16 = 0;
 
     void reset() {
         availability.reset();

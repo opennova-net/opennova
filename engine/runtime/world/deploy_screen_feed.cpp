@@ -44,11 +44,14 @@ std::vector<DeployListRow> build_deploy_rows(const DeployListInput &in) {
     // included [orig: @0x553c5a]. std::stable_sort: the original qsort's
     // order among EQUAL texts is unspecified and two rows never share text.
     std::stable_sort(rows.begin(), rows.end(), row_text_less);
-    // The second loop: every team zone with a wave entry (NO secured gate)
-    // inserts its members after the row valued index + 1, else at position 0
-    // [orig: @0x553c5f..0x553de3].
+    // The second loop: EVERY team zone (team byte, def attrib 0x40000, in the
+    // spawn-zone list — NO secured gate and NO occupant gate) inserts its
+    // members after the row valued index + 1, else at position 0, then appends
+    // one blank spacer row unconditionally — so a zone with nobody queued still
+    // contributes its blank [orig: @0x553c5f..0x553de3; the member gate
+    // `cmp dword_A85BC4[ecx*4],0; jle` @0x553d2f..0x553d36 skips only the member
+    // run, the blank UIList_AddRow @0x553dbf..0x553dce follows either way].
     for (const DeployZoneRow &z : in.zones) {
-        if (z.occupants.empty()) continue;
         int insert_pos = 0;
         for (size_t r = 0; r < rows.size(); ++r) {
             if (rows[r].value == z.index + 1) {

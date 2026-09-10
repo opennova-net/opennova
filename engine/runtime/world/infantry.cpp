@@ -778,19 +778,22 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
     }
 
     // Run promotion: pure-forward standing walk only, suppressed while scoped.
-    // tier = pitch_tier + run_anim; the pitch tier reads entity+0x37C, which has NO
-    // writer in the retail image (zero-initialized pool memory), so it contributes
-    // the constant 2 (0 <= 0 < 0x210000 band; thresholds recorded in the RE doc,
-    // D-INF-16). tier 1 -> run_2 if authored; tier >= 2 -> run_3 if authored,
+    // tier = weight band + run_anim. The band reads entity+0x37C = the LOADOUT
+    // WEIGHT the S2C 0x5A apply sums (weaponweight + clips x clipweight over the
+    // slots; Terrain_AccumulateSectorScores @0x425220, store @0x425310, called
+    // @0x4296f9) — the "no writer" reading behind the old constant 2 (D-INF-16)
+    // missed that store: > 0x430000 (67 u) or negative -> 0 (no run), >= 0x210000
+    // (33 u) -> 1 (run_2), else 2 (run_3) [orig: @0x4b72aa..0x4b72cf]. Heavy kits
+    // jog or walk. tier 1 -> run_2 if authored; tier >= 2 -> run_3 if authored,
     // ELSE the same run_2 test: the run_3-absent compare `jz short loc_4B730A`
     // @0x4b72f8 lands on the tier-1 arm's `animMap[9] != animMap[0]` test
     // @0x4b730a, so a body adm without run_3 runs at run_2 when it has one.
-    // (The 2026-08-26 "tier>=2 tests ONLY run_3" reading was a decompile
-    // misread; re-witnessed from the disassembly 2026-09-10 against jo-c.)
     // [orig: @0x4b729d-0x4b731b; scope Flags&0x10 test @0x4b72e2; run_3 test
     //  @0x4b72f3-0x4b72f8, store @0x4b72fa; run_2 test @0x4b730a, store @0x4b7311]
     if (target == anim_state::kWalkForward && !inf.scope_raised) {
-        const int tier = 2 + inf.wpn_run_anim;
+        const int32_t w = inf.loadout_weight_fp16;
+        const int band = (w > 0x430000 || w < 0) ? 0 : (w >= 0x210000 ? 1 : 2);
+        const int tier = band + inf.wpn_run_anim;
         if (tier >= 2 && has(anim_state::kRun3))
             target = anim_state::kRun3;              // [orig: @0x4b72fa]
         else if (tier >= 1 && has(anim_state::kRun2))
@@ -859,7 +862,15 @@ void AiSystem::infantry_lean_tick(AiEntity &e, uint32_t entity_flags) {
     // of the same mask rides D-INF-20. [orig: (Flags & 0x100020) gate @0x4b7dad]
     if ((entity_flags & (kEntityFlagLadderContact | kEntityFlagParachute)) != 0)
         return;
-    if (inf.stance == InfantryState::Stance::kProne) return; // [orig: the prone skip]
+    // The prone skip reads prone_local = the latch AND none of Flags 0x10A000
+    // (in air / drowning / ladder) — afloat or airborne the ramp still runs
+    // [orig: the prone_local derivation @0x4b416c..0x4b4183; the ramp gate
+    //  @0x4b7da9].
+    const bool prone_effective =
+            inf.stance == InfantryState::Stance::kProne &&
+            (entity_flags & (kEntityFlagInAir | kEntityFlagDrowning |
+                             kEntityFlagLadderContact)) == 0;
+    if (prone_effective) return; // [orig: the prone skip]
     if (inf.lean_left) inf.lean_angle = io::bam_add(inf.lean_angle, -0x3000000);
     if (inf.lean_right) inf.lean_angle = io::bam_add(inf.lean_angle, 0x3000000);
 }
@@ -1728,14 +1739,26 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // While latched on a ladder the view yaw is clamped to ±120° of the
         // body heading (infantry_ladder.cpp). [orig: gate @ 0x4b4978; clamp
         // @ 0x4b4b04-0x4b4b42]
-        infantry_ladder_view_clamp(
-            inf, tick_entity != nullptr
-                     ? (tick_entity->flags | tick_entity->engine_flags)
-                     : 0u);
+        const uint32_t leg_flags = tick_entity != nullptr
+                ? (tick_entity->flags | tick_entity->engine_flags)
+                : 0u;
+        infantry_ladder_view_clamp(inf, leg_flags);
         e.heading = inf.target_heading; // mouse-instant render/aim yaw [orig:
                                         // Input_HandleActionBinding @0x49ad40 writes +0x10]
         const int32_t yaw = e.heading;
-        if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0) {
+        if ((leg_flags & (kEntityFlagLadderContact | kEntityFlagMounted |
+                          kEntityFlagParachute)) != 0) {
+            // Latched on a ladder, carried, or under a chute: the whole
+            // re-plant / chase / midpoint model is SKIPPED and both legs snap
+            // to the body heading — the legs stay locked to the ladder while
+            // the torso alone twists toward the view [orig: `test ecx,100060h;
+            // jnz loc_4B4AC6` @0x4b4972..0x4b4978; the tail `mov eax,[esi+8Ch];
+            // mov [esi+2D4h],eax; mov [esi+2D8h],eax` @0x4b4b5f..0x4b4b6b].
+            inf.leg_target[0] = inf.body_heading;
+            inf.leg_target[1] = inf.body_heading;
+            inf.leg_yaw[0] = inf.body_heading;
+            inf.leg_yaw[1] = inf.body_heading;
+        } else if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0) {
             // A movement state re-plants both feet on the yaw every tick.
             // [orig: @0x4b4984 flag-table bit0 -> @0x4b49dd/@0x4b49e3]
             inf.leg_target[1] = yaw;
@@ -1754,7 +1777,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 (abs_bam(dr) > kLegReplantSnap || (key & 63u) == 0))
                 inf.leg_target[0] = yaw;
         }
-        for (int leg = 0; leg < 2; ++leg) {
+        const bool leg_model_skipped =
+                (leg_flags & (kEntityFlagLadderContact | kEntityFlagMounted |
+                              kEntityFlagParachute)) != 0;
+        for (int leg = 0; leg < 2 && !leg_model_skipped; ++leg) {
             // Quarter-step, rate clamp ±0x3000000 (~4.2 deg/tick — 3/5 the org1
             // rate), twist limit ±0x30000000 (67.5 deg) vs the YAW, not the body.
             // [orig: R @0x4b49e9-0x4b4a43; L @0x4b4a49-0x4b4aa9]
@@ -1770,8 +1796,29 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 inf.leg_yaw[leg] = io::bam_sub(yaw, kLegTwistLimitOrg2);
         }
         // bodyHeading = legL + (legR - legL)/2. [orig: @0x4b4aa9-0x4b4abb]
-        inf.body_heading = io::bam_add(
-            inf.leg_yaw[1], io::bam_sar(io::bam_sub(inf.leg_yaw[0], inf.leg_yaw[1]), 1));
+        if (!leg_model_skipped)
+            inf.body_heading = io::bam_add(
+                inf.leg_yaw[1], io::bam_sar(io::bam_sub(inf.leg_yaw[0], inf.leg_yaw[1]), 1));
+        // The motor-side look-pitch clamp RELATIVE TO THE BODY PITCH: ±80 deg,
+        // ±40 deg while effectively prone, measured from the slope-conformed
+        // body pitch (+0x90) rather than level — prone uphill shifts the window.
+        // Skipped only for a seat in a vehicle parent flagged +0x2EC (mounted
+        // bodies leave this block earlier). "Effectively prone" = the prone
+        // latch with none of Flags 0x10A000 (in air / drowning / ladder).
+        // [orig: @0x4b4b71..0x4b4bc6 — limit select @0x4b4b76/@0x4b4b7d, the
+        //  two-sided clamp on +0x14 against +0x90 @0x4b4ba2..0x4b4bc6;
+        //  prone_local gate @0x4b416c..0x4b4183]
+        {
+            const bool prone_effective =
+                    inf.stance == InfantryState::Stance::kProne &&
+                    (leg_flags & (kEntityFlagInAir | kEntityFlagDrowning |
+                                  kEntityFlagLadderContact)) == 0;
+            // 0x1C71C700 (+40 deg) / 0x38E38E00 (+80 deg) — the same two BAM
+            // constants player_look.h names for the input-side clamp.
+            const int32_t limit = prone_effective ? 0x1C71C700 : 0x38E38E00;
+            if (inf.look_pitch - e.body_pitch > limit) inf.look_pitch = e.body_pitch + limit;
+            if (inf.look_pitch - e.body_pitch < -limit) inf.look_pitch = e.body_pitch - limit;
+        }
     } else {
         // org1 [orig: Entity_UpdateInfantryAI @0x4be8fd-0x4beb18]. Body: quarter-step
         // toward the target, clamped ±69273360; live look moves by the SAME step,
@@ -2023,14 +2070,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             e.pos[2] += inf.vel[2];
             // The freefall rush while dropping fast without a parachute (the
             // chute flag 0x20 is unmodeled, so the "chute closed" leg always
-            // applies): profile slot 44, refired every body tick — the engine's
-            // finite channel pool folds the refires into a continuous rush; our
-            // reimpl instead declines to restart the set while its voice still
-            // plays. The chute family (slots 41-43 + the vel brake @0x4b7bfd)
-            // rides the parachute slice. [orig: @0x4b7c4c-0x4b7c74; vel gate
-            // < -0x3000 @0x4b7c52; the smoothTargetPos-delta gate skips
+            // applies): profile slot 44, restarted once per 64-tick window —
+            // the gate is the RAW tick's low six bits being zero, not every
+            // body tick. The chute family (slots 41-43 + the vel brake
+            // @0x4b7bfd) rides the parachute slice. [orig: @0x4b7c4c-0x4b7c74;
+            // `cmp var_10A8,0` (= current_tick & 0x3F @0x4b4680) @0x4b7c4c; vel
+            // gate < -0x3000 @0x4b7c52; the smoothTargetPos-delta gate skips
             // net-pulled bodies — our net peers skip the whole motor]
-            if (inf.vel[2] < -0x3000) emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
+            if ((logic_tick & 63u) == 0 && inf.vel[2] < -0x3000)
+                emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
         } else if ((gravity_flags & kEntityFlagAiClimb) != 0) {
             // The org1 ladder-climb chase replaces gravity: sixteenth-step Z
             // toward the AI move target, capped 0x4000 up, floor -16384 (half
@@ -2279,10 +2327,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // The four gates [orig: @0x4b7e8c..0x4b7eb5] fail INTO the landing
             // else-leg; the carried test past them (`test al,40h; jnz 0x4b8020`
             // @0x4b7ebb) skips the whole tail instead.
+            // The prone gate reads prone_local (the latch with none of Flags
+            // 0x10A000), so a prone-latched body on a ladder can still jump off
+            // [orig: prone_local @0x4b416c..0x4b4183; the jump gate @0x4b7e99].
+            const uint32_t jump_flags = tick_entity != nullptr
+                    ? (tick_entity->flags | tick_entity->engine_flags)
+                    : 0u;
+            const bool prone_effective =
+                    inf.stance == InfantryState::Stance::kProne &&
+                    (jump_flags & (kEntityFlagInAir | kEntityFlagDrowning |
+                                   kEntityFlagLadderContact)) == 0;
             const bool jump_gates_open =
                 inf.jump_cooldown == 0 && inf.jump_requested &&
                 !player_jump_flags_blocked(inf, tick_entity) && e.health > 0 &&
-                inf.stance != InfantryState::Stance::kProne;
+                !prone_effective;
             if (jump_gates_open && !player_jump_carried(tick_entity)) {
                 inf.vel[0] += (3 * root_wx) >> 2; // [orig: @0x4b7ec3-0x4b7ed5]
                 inf.vel[1] += (3 * root_wy) >> 2;

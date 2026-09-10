@@ -245,6 +245,56 @@ void weapon_inventory_seed_pools(const WeaponTable &table, WeaponInventory &inv,
     }
 }
 
+int32_t weapon_inventory_total_clips(const WeaponTable &table, const WeaponInventory &inv,
+                                     int32_t combo) {
+    // [orig: WeaponSlot_GetTotalClips @ 0x5425F0 — null def -> 0 @0x5425fc;
+    //  pool = Entity_GetScoreValueBySlotType(def+216) @0x542640 + the loaded
+    //  rounds slot+16 @0x54265b; clipsize -1 -> -1 @0x542669; /= clipsize
+    //  @0x542673; clamp 127 @0x54267a]
+    const WeaponTableEntry *def = entry_at(table, inv, combo);
+    const WeaponInventorySlot *slot = inv.slot(combo);
+    if (def == nullptr || slot == nullptr) return 0;
+    int32_t result = weapon_pool_get(inv, def->ammo_class_id) + slot->clip;
+    if (def->clipsize == -1) return -1;
+    if (def->clipsize != 0) result /= def->clipsize;
+    if (result > 127) return 127;
+    return result;
+}
+
+int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
+                                             const WeaponInventory &inv) {
+    // [orig: Terrain_AccumulateSectorScores @ 0x425220 (misnamed): the slot walk
+    //  @0x425233..0x425304, weaponweight @0x425252, clips x clipweight @0x42525e..
+    //  0x425272, the +0x3AC sub-entry loop @0x425286..0x4252c8 keyed on the
+    //  +0xD8 ammo-class byte @0x4252b2, the skip @0x4252ec]
+    int32_t weight = 0;
+    for (int32_t combo = 0; combo < weapon_combo::kSlotCount; ++combo) {
+        const WeaponTableEntry *def = entry_at(table, inv, combo);
+        const WeaponInventorySlot *slot = inv.slot(combo);
+        if (def == nullptr || slot == nullptr) continue;
+        weight += def->weaponweight_fp16 +
+                  weapon_inventory_total_clips(table, inv, combo) * def->clipweight_fp16;
+        const int32_t subs = def->loadout_subclasses;
+        for (int32_t k = 1; k <= subs; ++k) {
+            // The sub-variant entries follow the main's adm index
+            // [orig: AdmDef_GetEntryByIndex(mainIndex + k) @0x42528e].
+            const WeaponTableEntry *sub = table.by_index(
+                    static_cast<uint8_t>(static_cast<int32_t>(slot->adm_index) + k));
+            if (sub == nullptr) continue;
+            const int32_t sub_combo = static_cast<int32_t>(sub->category) * 65 + sub->rank;
+            if (sub->ammo_class_id == def->ammo_class_id) continue;
+            // The FIRST sub-entry of a different ammo class ends the scan: its
+            // clips ride the MAIN def's clipweight, then the loop breaks — a
+            // second differing sub-entry never counts [orig: the `jnz` out of
+            // the loop @0x4252b8 into the single add @0x4252d1..0x4252e2].
+            weight += weapon_inventory_total_clips(table, inv, sub_combo) * def->clipweight_fp16;
+            break;
+        }
+        combo += subs; // the walk skips the sub-variant slots [orig: @0x4252ec]
+    }
+    return weight;
+}
+
 void weapon_inventory_apply_authority_pools(const WeaponTable &table, WeaponInventory &inv,
                                             const std::array<int32_t, 128> &pools) {
     // [orig: NapiNPClientMsg_0x00F @ 0x42e324..0x42e34a copy loop, then the

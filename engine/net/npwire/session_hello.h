@@ -281,16 +281,22 @@ bool parse_client_cu_chunk(const uint8_t *data, size_t len, uint8_t &out_type,
                            std::string &out_name, std::string &out_value);
 
 // Control-setting entry — (direction_byte, field_index, uint32 value).
-// CLIENT_* direction=1, SERVER_* direction=0. The per-channel timeout_ms values are the WITNESSED
-// engine template (D-NET-1, identical both directions): {0:240000,1:4,4:60000,5:1000,6:0xFFFFFFFF,
-// 8:2048,9:128,10:100,11:500,12:1,13:1300(MTU),14:0xFFFFFFFF}; idx 2/3/7 = 0. [orig:
-// CNapiGameSession_InitNPConnection @0x4d3e1f / CNapiNPConnection_SendSessionInit @0x620ef0]
+// CLIENT_* direction=1, SERVER_* direction=0. TWO templates exist, identical across their own two
+// directions: the NOVAWORLDUDP SERVICE protocol's {0:240000,1:4,4:60000,5:1000,6:0xFFFFFFFF,
+// 8:2048,9:128,10:100,11:500,12:1,13:1300(MTU),14:0xFFFFFFFF} (the `default_*` pair; [orig:
+// CNapiGameSession_InitNPConnection @0x4d3e1f]) and the JOINTOPERATIONS in-game protocol's
+// {0:120000,1:4,4:30000,5:10000,6:0xFFFFFFFF,8:512,9:256,10:100,11:1200,12:1,13:1300,
+// 14:0xFFFFFFFF} (the `jointoperations_*` pair; [orig: CNapiNetwork_Init @0x4ca4a0]); idx 2/3/7
+// = 0. A GAME host's 0x82 carries the latter [orig: CNapiNPConnection_Create @0x62acb0 copies
+// the protocol object's +0xE44/+0xE80 blocks; CNapiNPConnection_SendSessionInit @0x620ef0].
 struct CsField {
 	uint8_t field_index;
 	uint32_t value;
 };
-std::vector<CsField> default_client_cs_fields();
-std::vector<CsField> default_server_cs_fields();
+std::vector<CsField> default_client_cs_fields();          // NOVAWORLDUDP service
+std::vector<CsField> default_server_cs_fields();          // NOVAWORLDUDP service
+std::vector<CsField> jointoperations_client_cs_fields();  // the in-game session
+std::vector<CsField> jointoperations_server_cs_fields();  // the in-game session
 
 struct ServerAuth {
 	uint32_t ci = 0;      // echo client.ci

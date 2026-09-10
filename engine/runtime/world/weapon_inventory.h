@@ -184,6 +184,23 @@ void weapon_inventory_seed_pools(const WeaponTable &table, WeaponInventory &inv,
 void weapon_inventory_apply_authority_pools(const WeaponTable &table, WeaponInventory &inv,
                                             const std::array<int32_t, 128> &pools);
 
+// The slot's TOTAL AMMO IN CLIPS on the LIVE inventory [orig:
+// WeaponSlot_GetTotalClips @ 0x5425F0 — (class pool + loaded rounds) / clipsize;
+// clipsize -1 returns -1; clamp 127; the pass-type shared-pool leg (def+0xDC)
+// is the deferred D-WPN-20 residual]. Unpopulated slot -> 0.
+int32_t weapon_inventory_total_clips(const WeaponTable &table, const WeaponInventory &inv,
+                                     int32_t combo);
+
+// The loadout weight the S2C 0x5A apply stores into the local entity's +0x37C
+// [orig: the misnamed Terrain_AccumulateSectorScores @ 0x425220, called
+//  @0x4296f9 after Player_MountWeaponSlot]: over the 780 slots in combo order,
+//  weaponweight + total clips x clipweight for every populated slot, plus — for
+//  each of the def's +0x3AC sub-variant entries whose ammo class DIFFERS from
+//  the main's — that sub slot's total clips x the MAIN def's clipweight; the walk
+//  then skips the sub-variant slots. 16.16 units.
+int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
+                                             const WeaponInventory &inv);
+
 // The clip normalization [orig: WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280]:
 // for each populated slot with ammo_class_count (pool-units/round) nonzero and
 // clipsize != -1: return the current clip to the pool, then draw one full clip
