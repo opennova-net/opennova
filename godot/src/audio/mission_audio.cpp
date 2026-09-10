@@ -460,8 +460,11 @@ void MissionAudio::play_script_sounds(
         const std::vector<opennova::world::ScriptSoundEvent> &p_events,
         const Transform3D &p_camera_xform) {
     for (const auto &event : p_events) {
-        _play_listener_relative(String::utf8(event.name.c_str()), event.distance_q16,
-                event.bearing, p_camera_xform);
+        if (event.kind == opennova::world::ScriptSoundEvent::Kind::Interface)
+            ui_soundset(String::utf8(event.name.c_str()));
+        else
+            _play_listener_relative(String::utf8(event.name.c_str()), event.distance_q16,
+                    event.bearing, p_camera_xform);
     }
 }
 

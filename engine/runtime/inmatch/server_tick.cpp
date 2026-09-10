@@ -635,7 +635,7 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 					victim_connection->link.transport != nullptr) {
 				victim_connection->link.transport->host_send(
 						s2c::TICK_SEED,
-						Server_DisarmPlayerTickSeed(*victim_connection));
+						Server_DisarmPlayerTickSeed(*victim_connection, world.logic_tick));
 			}
 
 			// Then target the victim with the fixed-point position used by the
@@ -834,7 +834,7 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 		// state. The client pulls 0x56 independently, so no board chunk is pushed.
 		// [orig: Server_ProcessRoundEnd @0x516790..0x51685E]
 		conn.link.transport->host_send(
-				s2c::TICK_SEED, Server_DisarmPlayerTickSeed(conn));
+				s2c::TICK_SEED, Server_DisarmPlayerTickSeed(conn, world.logic_tick));
 		conn.link.transport->host_send(
 				s2c::END_ROUND_HEADER,
 				encode_end_round_header(
@@ -1179,6 +1179,9 @@ std::vector<uint8_t> Server_RerollPlayerTickSeed(
 		NapiNPConnection &connection) {
 	connection.tick_seed =
 			((make_random_session_u32() & 0xFEu) + 1u) << 16;
+	connection.fire_tick_floor = connection.tick_seed;
+	connection.fire_disarmed_at = 0;
+	connection.fire_tick_mode = true;
 	std::vector<uint8_t> body;
 	body.reserve(4);
 	put_u32le(body, connection.tick_seed);
@@ -1189,9 +1192,25 @@ std::vector<uint8_t> Server_RerollPlayerTickSeed(
 // four-zero 0x61. [orig: Server_SendRandomSeedToPlayer @0x5101A0,
 // enable==0 arm @0x510237..0x510278]
 std::vector<uint8_t> Server_DisarmPlayerTickSeed(
-		NapiNPConnection &connection) {
+		NapiNPConnection &connection, uint32_t host_tick) {
+	connection.fire_disarmed_at = host_tick;
+	connection.fire_tick_mode = false;
 	connection.tick_seed = 0;
 	return std::vector<uint8_t>(4, 0);
+}
+
+// The comparisons are signed x86 compares, including wrap at bit 31. A
+// zero client tick never passes, even during the death/round-end grace.
+// [orig: PlayerSlot_IsActive @0x4FC760]
+bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
+		uint32_t client_tick, uint32_t host_tick, uint32_t send_holdoff_ticks) {
+	if (client_tick == 0) return false;
+	if (connection.fire_tick_mode)
+		return connection.fire_tick_floor != 0 &&
+				static_cast<int32_t>(client_tick) > static_cast<int32_t>(connection.fire_tick_floor);
+	const uint32_t deadline = connection.fire_disarmed_at + 3u * send_holdoff_ticks;
+	return connection.fire_disarmed_at != 0 &&
+			static_cast<int32_t>(host_tick) < static_cast<int32_t>(deadline);
 }
 
 bool Server_StageHostDisconnect(

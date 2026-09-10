@@ -6,6 +6,9 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 
+#include <runtime/world/world.h>
+
+#include <cstring>
 #include <utility>
 #include <cmath>
 #include <cstddef>
@@ -367,6 +370,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	view_.drain_weapon_reloads();
 	view_.drain_entity_deaths();
 	view_.drain_script_remote_commands();
+	view_.drain_sound_commands();
 	view_.set_game_type(0);
 	view_.set_mp_session(true); // a joiner is in-session by definition
 	return joiner_->start();
@@ -491,6 +495,28 @@ std::vector<replication::ClientRoundEvent> ClientRuntime::drain_round_events() {
 
 std::vector<replication::ClientGameEvent> ClientRuntime::drain_game_events() {
 	return view_.drain_game_events();
+}
+
+// [orig: NapiNPClientMsg_PlaySoundByName @0x4283A0]
+void ClientRuntime::apply_received_sounds(world::World &world) {
+	for (const PlaySoundCommand &command : view_.drain_sound_commands()) {
+		if (command.flag == 0) {
+			world::ScriptSoundEvent event;
+			event.name = command.sound_name;
+			event.kind = world::ScriptSoundEvent::Kind::Interface;
+			world.out.script_sounds.push_back(std::move(event));
+		} else {
+			world::SoundSlotEvent event;
+			// LWF sound-set keys contain at most 24 bytes. An overlong name
+			// cannot resolve; truncating it could play a different valid set.
+			if (command.sound_name.size() >= sizeof(event.set_name)) continue;
+			std::memcpy(event.set_name, command.sound_name.data(), command.sound_name.size());
+			event.pos[0] = int32_t{command.pos_x} * 65536;
+			event.pos[1] = int32_t{command.pos_y} * 65536;
+			event.pos[2] = int32_t{command.pos_z} * 65536;
+			world.out.slot_sounds.push_back(event);
+		}
+	}
 }
 
 std::vector<EntityDeathRecord> ClientRuntime::drain_entity_deaths() {
@@ -638,9 +664,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				pending_deployment_pick_set_ = false;
 				return std::move(pr.outbound);
 			}
-			// S2C 0x7B may have updated the wire-invisible phase-3 layout hint
-			// before this datagram's 0x0A bodies are folded.
-			view_.set_game_type(joiner_->game_type());
+			// 0x08/0x7B update the reducer's layout at their wire position.
+			// The connection's final game type may belong to a later message
+			// in this datagram and must not reinterpret an earlier body.
 			view_.set_viewer_handle(joiner_->has_self_handle()
 					? joiner_->self_handle()
 					: 0xFFFFu);

@@ -97,6 +97,56 @@ inline constexpr uint8_t FULL_PLAYER_INFO = 0x7B;           // §5.32 full playe
 inline constexpr uint8_t SERVER_CONFIG_STRINGS = 0x7E;      // two cstrings
 inline constexpr uint8_t SCORE_DELTA_SOUND = 0x81;          // i32 score; positive delta plays hit-confirm sound
 
+
+// Remaining retail dispatch rows; meanings and witnesses live in the catalog.
+inline constexpr uint8_t CLIENT_CONSOLE_COMMAND = 0x06;
+inline constexpr uint8_t RESERVED_NOOP_07 = 0x07;
+inline constexpr uint8_t ENTITY_SLOT_MESSAGE = 0x17;
+inline constexpr uint8_t NETWORK_DELAY = 0x1B;
+inline constexpr uint8_t COUNTDOWN_SYNC = 0x1F;
+inline constexpr uint8_t EXPLOSION_EFFECT = 0x21;
+inline constexpr uint8_t ENTITY_CREATE = 0x22;
+inline constexpr uint8_t GAME_RESET = 0x25;
+inline constexpr uint8_t SPAWN_EFFECT = 0x27;
+inline constexpr uint8_t DIALOG_PLAYER_NAME = 0x28;
+inline constexpr uint8_t EXIT_SESSION = 0x2B;
+inline constexpr uint8_t TRACKED_TARGET_VOICE = 0x2D;
+inline constexpr uint8_t FORM_FIELD = 0x2E;
+inline constexpr uint8_t FORMATTED_GAME_TEXT = 0x32;
+inline constexpr uint8_t WAYPOINT_CREATE = 0x33;
+inline constexpr uint8_t PLAYER_ACTION = 0x35;
+inline constexpr uint8_t VEHICLE_SPAWN_NOTIFY = 0x36;
+inline constexpr uint8_t WEAPON_SLOT_ACTION = 0x37;
+inline constexpr uint8_t WEAPON_SWITCH = 0x38;
+inline constexpr uint8_t CAMERA_RESET = 0x3A;
+inline constexpr uint8_t FORM_POST_REQUEST = 0x3B;
+inline constexpr uint8_t EXIT_SESSION_ALT = 0x3D;
+inline constexpr uint8_t OBJECTIVE_NOTIFICATION = 0x3F;
+inline constexpr uint8_t TARGET_LIST = 0x48;
+inline constexpr uint8_t TARGET_LIST_PAGE = 0x4F;
+inline constexpr uint8_t WORLD_SYNC_REQUEST = 0x5B;
+inline constexpr uint8_t LOAD_SAVED_GAME = 0x5C;
+inline constexpr uint8_t RESERVED_NOOP_5E = 0x5E;
+inline constexpr uint8_t RESERVED_NOOP_5F = 0x5F;
+inline constexpr uint8_t MEMORY_CRC_CHALLENGE = 0x62;
+inline constexpr uint8_t POOF_TOGGLE = 0x63;
+inline constexpr uint8_t RESERVED_NOOP_65 = 0x65;
+inline constexpr uint8_t TELEPORT = 0x67;
+inline constexpr uint8_t SQUAD_LIST = 0x6A;
+inline constexpr uint8_t TRACKED_PLAYER_VOICE = 0x6D;
+inline constexpr uint8_t WEAPON_SLOT_LIST = 0x70;
+inline constexpr uint8_t SQUAD_JOIN = 0x71;
+inline constexpr uint8_t TEAM_NAME = 0x72;
+inline constexpr uint8_t SQUAD_LEAVE = 0x73;
+inline constexpr uint8_t SQUAD_RECRUITED = 0x74;
+inline constexpr uint8_t GO_CODE = 0x78;
+inline constexpr uint8_t DESTROY_ENTITY = 0x7C;
+inline constexpr uint8_t CLIENT_METRICS_REQUEST = 0x7D;
+inline constexpr uint8_t RESERVED_NOOP_7F = 0x7F;
+inline constexpr uint8_t SCORE_TRACKER_RESET = 0x80;
+inline constexpr uint8_t SCORE_TRACKER_TIME = 0x82;
+inline constexpr uint8_t PLAYER_PROFILE_REFRESH = 0x83;
+
 } // namespace opennova::s2c
 
 namespace opennova::c2s { // client -> server [orig: g_np_msginfo_server @0x82B5D8]
@@ -141,5 +191,40 @@ inline constexpr uint8_t PING = 0x47;                       // re-broadcast requ
 inline constexpr uint8_t CLIENT_ACK = 0x48;                 // 4 B read + discarded; server handler is an empty stub
 inline constexpr uint8_t CLIENT_QUALITY = 0x4C;             // §5.33 burst client quality
 inline constexpr uint8_t GAME_START_ACK = 0x4E;             // 4 B reply to s2c::GAME_START_SIGNAL
+
+
+// Remaining retail dispatch rows; meanings and witnesses live in the catalog.
+inline constexpr uint8_t ADMIN_NETLOG_COMMAND = 0x04;
+inline constexpr uint8_t RESERVED_NOOP_07 = 0x07;
+inline constexpr uint8_t SECTOR_ACTION = 0x13;
+inline constexpr uint8_t OBJECT_SOUND = 0x14;
+inline constexpr uint8_t WEAPON_OVERLAY_ACTION = 0x17;
+inline constexpr uint8_t WEAPON_SPAWN = 0x18;
+inline constexpr uint8_t ENTITY_REMOVE_REQUEST = 0x19;
+inline constexpr uint8_t WEAPON_STATE_BROADCAST = 0x1A;
+inline constexpr uint8_t PLAYER_CLASS_SELECT = 0x1B;
+inline constexpr uint8_t BAN_PUNT_COMMAND = 0x24;
+inline constexpr uint8_t LOAD_SAVED_GAME_REQUEST = 0x30;
+inline constexpr uint8_t RESERVED_NOOP_31 = 0x31;
+inline constexpr uint8_t MEMORY_CRC_REPLY = 0x35;
+inline constexpr uint8_t RESERVED_NOOP_36 = 0x36;
+inline constexpr uint8_t RESERVED_NOOP_38 = 0x38;
+inline constexpr uint8_t RESERVED_NOOP_39 = 0x39;
+inline constexpr uint8_t CLIENT_CRC_VALIDATION = 0x3C;
+inline constexpr uint8_t RESERVED_NOOP_3E = 0x3E;
+inline constexpr uint8_t VOTE_KICK_TARGET = 0x3F;
+inline constexpr uint8_t VEHICLE_SPAWN_REQUEST = 0x40;
+inline constexpr uint8_t DEATH_TIMEOUT_RESET = 0x41;
+inline constexpr uint8_t WEAPON_SLOT_LIST_REQUEST = 0x42;
+inline constexpr uint8_t SQUAD_ENTITY_SYNC = 0x43;
+inline constexpr uint8_t SQUAD_CHAT_BROADCAST = 0x44;
+inline constexpr uint8_t SQUAD_TEAM_ASSIGNMENT = 0x45;
+inline constexpr uint8_t SQUAD_VOTE_KICK = 0x46;
+inline constexpr uint8_t PLAYER_PROFILE = 0x49;
+inline constexpr uint8_t PLAYER_PROFILE_BROADCAST = 0x4B;
+inline constexpr uint8_t TEAM_CHANGE_REQUEST = 0x4D;
+inline constexpr uint8_t WEAPON_SLOT_UPDATE = 0x4F;
+inline constexpr uint8_t CLIENT_METRICS = 0x50;
+inline constexpr uint8_t SPECTATOR_RESPAWN = 0x51;
 
 } // namespace opennova::c2s

@@ -377,6 +377,13 @@ struct NapiNPConnection {
 	//  playerCtx+0x178D8 / arm +0x178E0; fresh-roll senders @0x51a982 / @0x51aa02 join,
 	//  @0x51796d deploy, @0x517e47 revive; disarm @0x516ef4 death, arm @0x510237]
 	uint32_t tick_seed = 0;
+	// PlayerSlot_IsActive's two clock modes. The floor advances only after an
+	// accepted shot; disarming retains it and opens the short receive grace.
+	// [orig: PlayerSlot_IsActive @0x4FC760; Server_SendRandomSeedToPlayer @0x5101A0]
+	uint32_t fire_tick_floor = 0;     // playerSlot+96472
+	uint32_t fire_disarmed_at = 0;   // playerSlot+96460 (host logic tick)
+	bool fire_tick_mode = false;    // playerSlot+96480
+
 
 	// [orig: CNapiNPConnection_Create @0x62ACB0 direction mirroring, §6.5] 1 = server-side
 	// connection (the host's view of a client), 2 = client-side connection (a client's view of

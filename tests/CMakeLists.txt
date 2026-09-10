@@ -2714,6 +2714,10 @@ target_link_libraries(npruntime_client_runtime_test PRIVATE opennova_net opennov
 target_include_directories(npruntime_client_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}) # common/null_datagram_socket.h
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
+add_executable(npruntime_client_message_dispatch_test npruntime/client_message_dispatch_test.cpp)
+target_link_libraries(npruntime_client_message_dispatch_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_client_message_dispatch COMMAND npruntime_client_message_dispatch_test)
+
 # D-NET-194: a joiner retains the host's exact S2C 0x0B BMS header and
 # reassembles the paged S2C 0x45 terrain-tile stream for wire-driven loading.
 add_executable(npruntime_join_wire_assets_test npruntime/join_wire_assets_test.cpp)

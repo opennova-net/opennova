@@ -226,8 +226,10 @@ void HostRole::run_tick(const TickInput &input) {
 	// (host_loop -> ClientState). The S2C serialize/emit half rides inside
 	// host_session_pump, fused with the logic tick.
 	const int64_t net_start = static_cast<int64_t>(io::perf_now_us());
-	if (state.client_runtime)
+	if (state.client_runtime) {
 		state.client_runtime->Client_ProcessNetworkFrame(now);
+		state.client_runtime->apply_received_sounds(kernel.world);
+	}
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;
 	if (kernel.world.profile != nullptr)
 		kernel.world.profile->add(devtools::Slot::SIM_NET, last_net_us_);

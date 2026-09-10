@@ -269,6 +269,12 @@ struct ClientEntityState {
 	uint16_t spawn_ammo_count = 0;
 	uint8_t spawn_ref_num = 0;
 	uint8_t spawn_sub_type = 0;
+	// The full 0x18 repair carries these fields in addition to pool-load data.
+	uint32_t spawn_owner_connection_id = 0;
+	uint8_t spawn_player_class = 0;
+	uint8_t spawn_ai_state = 0;
+	uint8_t spawn_anim_slot = 0;
+	uint8_t spawn_byte_154 = 0;
 	// Pool-1 0x0D's fixed retail mountHandles image. Slots 0..7 are
 	// selected by spawn_mount_mask; slots 8/9 are the block's two
 	// unconditional tail handles. Preserve all ten raw decoder values here:
@@ -692,6 +698,11 @@ struct ClientState {
 	// networking and maintenance remain live while nonzero.
 	// [orig: reader @0x430064; Game_ProcessMainFrame gate @0x52672C]
 	std::uint8_t preround_delay_seconds = 0;
+	// S2C 0x66 replaces the complete 255-entry armory availability image.
+	// Revision zero means no host policy has arrived.
+	// [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0]
+	std::array<int32_t, 255> weapon_availability{};
+	uint64_t weapon_availability_revision = 0;
 	bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
 	// The joiner's copy of the round clock, in 62 Hz ticks (-1 = untimed),
 	// folded from the 0x0A sub-block-1 timer snapshot: 62 x the wire's whole

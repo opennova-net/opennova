@@ -826,6 +826,14 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	for (const std::vector<uint8_t> &dg : outs) send(dg);
 	// The wire leg ends here (the stats board's net split).
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - wire_leg_start_us_;
+	// The host policy is installed before either the granted kit or side
+	// reseed can consult availability. A pre-load packet remains retained in
+	// ClientState until the first world frame reaches this boundary.
+	// [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0]
+	if (weapon_availability_revision_seen_ != rt.state().weapon_availability_revision) {
+		lp.loadout.availability.values = rt.state().weapon_availability;
+		weapon_availability_revision_seen_ = rt.state().weapon_availability_revision;
+	}
 	if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
 	// The team selector may only just have become known (the S2C 0x04 latch landing
 	// after the catalog) or may have moved us across the line (S2C 0x50). Either way the
@@ -1616,6 +1624,7 @@ void JoinerRole::apply_gameplay_events() {
 	world::World &world = kernel.world;
 	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
+	rt.apply_received_sounds(world);
 	// S2C 0x13 entity-death notifies: run the class death callback on the world
 	// twin — retail's client zeroes Health and invokes deathCallback(entity, 4, 0),
 	// which for a destructible item IS the local husk-swap + death-explosion
@@ -1827,6 +1836,7 @@ void JoinerRole::reset_for_join() {
 	// A fresh ClientRuntime restarts the environment revision at 0: the
 	// phase-2 cursor must not swallow the first sample of a rejoin.
 	weather_revision_seen_ = 0;
+	weapon_availability_revision_seen_ = 0;
 	// The verbatim enable_join latch reset. self_team_revision_seen_ is
 	// deliberately absent — the shipped binding never reset it on a fresh
 	// join, and this move preserves behavior exactly (S10b owns any

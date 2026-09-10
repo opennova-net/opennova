@@ -227,6 +227,7 @@ public:
 	// routes each line by the HUD channel table and posts it to its ring.
 	std::vector<ClientChatLine> drain_chat_lines();
 	std::vector<WeaponReload> drain_weapon_reloads();
+	std::vector<PlaySoundCommand> drain_sound_commands();
 	// S2C 0x23 WAC remote commands the fold accepted this frame; the embedding
 	// role runs each registry row's handler (wac::run_remote_command) against
 	// its world. A non-authority endpoint only: the retail handler returns
@@ -326,12 +327,14 @@ private:
 	// Load-time world-stream spawn/static batches (§5.2a) -> ClientState upsert. Each carries
 	// ABSOLUTE world positions (no anchor) + the entity identity/type, so spawn-only entities
 	// (statics/markers) and not-yet-moving organics are present before any 0x0A motion arrives.
+	void apply_full_entity_spawn(const std::vector<uint8_t> &body); // 0x18 repair
 	void apply_organic_spawn(const std::vector<uint8_t> &body); // 0x0C pool-0
 	void apply_pool_spawn(const std::vector<uint8_t> &body);    // 0x0D pool-1
 	void apply_static_batch(const std::vector<uint8_t> &body);  // 0x10 pool-2
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
 	// The live placed-device lifecycle (client_replica_placed_device.cpp).
 	void apply_game_event(const std::vector<uint8_t> &body);   // 0x1E (the feed)
+	void apply_weapon_restrictions(const std::vector<uint8_t> &body);
 	void apply_text_command(const std::vector<uint8_t> &body);
 	void apply_chat_broadcast(const std::vector<uint8_t> &body); // 0x14 (player chat)
 	void apply_player_list(const std::vector<uint8_t> &body);  // 0x16 (the Tab board)
@@ -341,6 +344,8 @@ private:
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void apply_objective_entity_state(const std::vector<uint8_t> &body); // 0x2F
 	void erase_entity_tree(uint16_t root_handle);
+	uint32_t begin_entity_lifetime(uint16_t handle);
+	void discard_entity_notifications(uint16_t handle);
 	// Land one decoded compact world sample on a row: live snap in snap mode /
 	// on the forced edges (respawn, vehicle dead-pose); smooth-target staging +
 	// interpProgress reset in remote-motion mode (§5.38e stage-only reads).
@@ -378,8 +383,11 @@ private:
 	std::vector<ClientGameEvent> pending_game_events_;
 	std::vector<ClientChatLine> pending_chat_lines_;
 	std::vector<WeaponReload> pending_weapon_reloads_;
+	std::vector<PlaySoundCommand> pending_sound_commands_;
 	std::vector<ScriptRemoteCommand> pending_script_remote_commands_;
 	std::vector<EntityDeathRecord> pending_entity_deaths_;
+	// Survives row deletion until this pipeline is destroyed.
+	std::unordered_map<uint16_t, uint32_t> spawn_revisions_;
 	std::size_t unknown_tags_ = 0;
 	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;

@@ -67,14 +67,9 @@ void ClientReplicaPipeline::apply_deployed_item(
 
 	const bool type_changed = existing != nullptr &&
 			existing->type_id != selected_type;
-	uint32_t next_spawn_revision = 1;
-	if (existing != nullptr) {
-		next_spawn_revision = existing->spawn_revision;
-		if (type_changed || next_spawn_revision == 0) {
-			++next_spawn_revision;
-			if (next_spawn_revision == 0) next_spawn_revision = 1;
-		}
-	}
+	const uint32_t next_spawn_revision = existing == nullptr || type_changed ||
+			existing->spawn_revision == 0 ? begin_entity_lifetime(spawn.slot_handle)
+			: existing->spawn_revision;
 
 	ClientEntityState &row = state_.upsert(spawn.slot_handle);
 	if (type_changed) state_.mark_topology_changed();

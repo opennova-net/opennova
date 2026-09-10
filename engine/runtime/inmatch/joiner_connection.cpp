@@ -1113,6 +1113,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		// connection control, not the regular S2C 0x00 JOIN acknowledgement below.
 		if (m.flags.settings_update || m.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
 
+		// Every admitted game message reaches the client in wire order, including
+		// handlers that need no connection-level response. A selective list here
+		// silently lost text commands, chat, and full-entity repair replies while
+		// reducer-only and loopback tests still passed.
+		// [orig: g_np_msginfo_client @0x82AE28]
+		out.inbound_reducer.emplace_back(m.tag, m.payload);
+
 		// Dispatch records in wire order. Keeping this out of the metadata pre-pass
 		// ensures a 0x39 before a same-packet 0x5A still sees the prior class.
 		bool valid_weapon_loadout = false;
@@ -1215,7 +1222,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				// folds it — ClientRuntime applies inbound_reducer alone.
 				// [orig: NapiNPClientMsg_PlayerList @0x42FAE0]
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				player_list_seen_ = true;
 				if (post_auth_stage_ == PostAuthStage::AwaitPlayerList) {
 					// Golden frame 23: transition marker and first player-sync request share
@@ -1238,7 +1244,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.data(), m.payload.size(),
 					(game_type_ & 0x10000u) == 0, header)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				// A valid 0x1D immediately starts the requester-driven board stream
 				// at zero. [orig: NapiNPClientMsg_0x01D @0x430840 queues
 				// reliable C2S 0x2B {0}]
@@ -1251,7 +1256,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_end_round_stats_chunk(
 					m.payload.data(), m.payload.size(), chunk)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				if (!chunk.complete()) {
 					const uint16_t next = static_cast<uint16_t>(
 							chunk.chunk_offset + chunk.chunk.size());
@@ -1341,12 +1345,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				}
 			}
 			out.inbound_world.emplace_back(m.tag, m.payload);
-			out.inbound_reducer.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::POOL_SPAWN || m.tag == s2c::STATIC_ENTITY_BATCH || m.tag == s2c::POOL3_SYNC) {
 			// The rest of the load-time world stream (§5.2a): pool-1 spawns / pool-2 statics /
 			// pool-3 markers. Surface raw for the caller's ClientReplicaPipeline to upsert.
 			out.inbound_world.emplace_back(m.tag, m.payload);
-			out.inbound_reducer.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::SESSION_SLOT_CONFIG) {
 			// S2C 0x04 slot assignment: the tail byte is this joiner's server-assigned team —
 			// retail's byte_A85B48, the 0x2F loadout-submit header byte 0. A retail host always
@@ -1392,7 +1394,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			    world::EntityHandle{assign.entity_handle}.valid() &&
 			    world::EntityHandle{assign.entity_handle}.pool() < world::kEntityPoolCount) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				// Retail's header gates: not the 0xFFFF sentinel, and the pool
 				// nibble must address one of the five entity pools.
 				out.entity_team_assigns.emplace_back(
@@ -1440,7 +1441,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_destroy_entity_list(
 					m.payload.data(), m.payload.size(), destroy_list)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				for (uint16_t index : destroy_list.pool0_indices)
 					out.destroyed_pool0_slots.push_back(index);
 			}
@@ -1460,7 +1460,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				// beside the connection-level bookkeeping below.
 				// [orig: NapiNPClientMsg_PlayerSync @0x431370]
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				if (sync.removal)
 					out.cleared_player_slots.push_back(sync.slot_id);
 				// Bit 0x4000 is the ACK-driven roster cursor. Retail advances
@@ -1497,7 +1496,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// The reducer folds the 0x0F's retained client globals (the
 			// deploy-map overlay arm) in this same wire position
 			// [orig: g_deploy_screen_active @0x42e2d8/@0x42e2f8].
-			out.inbound_reducer.emplace_back(m.tag, m.payload);
 			uint32_t world_state_tick = 0;
 			std::size_t consumed = 0;
 			decode_u32_scalar(m.payload.data(), m.payload.size(),
@@ -1767,18 +1765,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		} else if (m.tag == s2c::PER_FRAME_UPDATE) {
 			// Per-frame world snapshot — surface for the caller's ClientReplicaPipeline.
 			out.inbound_0a.push_back(m.payload);
-			out.inbound_reducer.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::CAPTURE_ZONE_STATE) {
 			CaptureZoneOverlayBatch batch;
 			if (decode_capture_zone_overlay(m.payload.data(), m.payload.size(), batch)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::MINIMAP_OVERLAY) {
 			MinimapOverlayBatch batch;
 			if (decode_minimap_overlay_batch(m.payload.data(), m.payload.size(), batch)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::WEAPON_LOADOUT && valid_weapon_loadout &&
 		           post_auth_stage_ == PostAuthStage::AwaitDeployment) {
@@ -1805,7 +1800,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.data(), m.payload.size(), spawn, consumed) &&
 					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::ENTITY_REMOVE) {
 			EntityRemove removal;
@@ -1814,7 +1808,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.data(), m.payload.size(), removal, consumed) &&
 					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::OBJECTIVE_ENTITY_STATE) {
 			ObjectiveEntityState state;
@@ -1823,27 +1816,23 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.data(), m.payload.size(), state, consumed) &&
 					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::SPAWN_WAVE_STATUS) {
 			SpawnWaveStatus status;
 			if (decode_spawn_wave_status(
 					m.payload.data(), m.payload.size(), status)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::SCORE_DELTA_SOUND) {
 			ScoreDeltaSound score;
 			if (decode_score_delta_sound(
 					m.payload.data(), m.payload.size(), score)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::WEAPON_RELOAD) {
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
 			// Surface it once through the decoded client-view event path.
 			out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			out.inbound_reducer.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::ENTITY_DEATH) {
 			// S2C 0x13 ENTITY DEATH — the host's per-death notify for every
 			// non-player victim (the AI/item leg of Entity_CheckAndProcessDeath).
@@ -1859,7 +1848,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_entity_death(
 					m.payload.data(), m.payload.size(), death, death_consumed)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::SCRIPT_REMOTE_COMMAND) {
 			// S2C 0x23 — a WAC command the host VM replicated. The replica
@@ -1870,7 +1858,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_script_remote_command(
 					m.payload.data(), m.payload.size(), command, consumed)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::DEATH_CAMERA_TARGET) {
 			DeathCameraTarget target;
@@ -1879,7 +1866,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.data(), m.payload.size(), target, consumed) &&
 					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::PLAYER_DOWNED_STATE) {
 			PlayerDownedState state;
@@ -1888,7 +1874,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.data(), m.payload.size(), state, consumed) &&
 					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::KILL_SYNC) {
 			// S2C 0x26 KILL SYNC — the second death route (the destructible
@@ -1903,7 +1888,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_kill_record(
 					m.payload.data(), m.payload.size(), kill, kill_consumed)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::GAME_EVENT) {
 			// S2C 0x1E kill/objective/medic feed event. The replica pipeline
@@ -1916,7 +1900,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_game_event(m.payload.data(), m.payload.size(),
 					game_event, game_event_consumed)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::ENTITY_ROUTED) {
 			// S2C 0x44 entity-routed sub-packet — the guided-missile channel
@@ -1930,7 +1913,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_entity_routed_packet(
 					m.payload.data(), m.payload.size(), routed)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::ZONE_TIMER_VALUE) {
 			ZoneTimerValue value;

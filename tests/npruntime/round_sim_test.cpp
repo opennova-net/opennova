@@ -95,7 +95,13 @@ w::PlayerSpawn player_spawn(uint16_t net_id, float x, float y, float z) {
 	return s;
 }
 
-using conn_fixture::make_conn;
+inmatch::NapiNPConnection make_conn(uint32_t id, int type,
+        ns::ISessionTransport *transport, ns::TransportMode mode,
+        w::EntityHandle owned, bool spawned) {
+    auto connection = conn_fixture::make_conn(id, type, transport, mode, owned, spawned);
+    if (spawned) (void)inmatch::Server_RerollPlayerTickSeed(connection);
+    return connection;
+}
 
 void put_u16(std::vector<uint8_t> &b, uint16_t v) {
 	b.push_back(uint8_t(v & 0xFF));
@@ -109,10 +115,10 @@ void put_u32(std::vector<uint8_t> &b, uint32_t v) {
 }
 
 // The fixed 45-B C2S 0x06 body (§5.16 field order).
-std::vector<uint8_t> fire_body(uint16_t shooter, uint8_t adm, int32_t px, int32_t py,
+std::vector<uint8_t> fire_body(uint32_t tick, uint16_t shooter, uint8_t adm, int32_t px, int32_t py,
                                int32_t pz, int32_t dx, int32_t dy) {
 	std::vector<uint8_t> b;
-	put_u32(b, 12345);
+	put_u32(b, tick);
 	put_u16(b, shooter);
 	b.push_back(0x02); // primary fire
 	b.push_back(adm);
@@ -1025,7 +1031,7 @@ int main() {
 	// Wire yaw BAM 0 -> mission bearing 0 = +X: the 0x06 yaw IS the mission bearing
 	// (v29 wire-validated; D-NET-153). Muzzle at torso height (hit spheres at z + 0.9).
 	const int32_t muzzle_z = int32_t((10.0 + 0.9) * 65536.0);
-	dispatch_fire(roster[1], roster, world, fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
+	dispatch_fire(roster[1], roster, world, fire_body(roster[1].fire_tick_floor + 1u, hb.packed, 5, 0, 0, muzzle_z, 0, 0));
 	if (!expect(world.round_sim.active_count == 1, "one live round after the fire")) return 1;
 	{
 		const w::LiveRound &r = world.round_sim.rounds[0];
@@ -1137,7 +1143,7 @@ int main() {
 	drain_all(udp_c);
 	for (int shot = 0; shot < 2; ++shot) {
 		dispatch_fire(roster[1], roster, world,
-		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
+		              fire_body(roster[1].fire_tick_floor + 1u, hb.packed, 5, 0, 0, muzzle_z, 0, 0));
 		for (int i = 0; i < 4; ++i) inmatch::Server_TickUpdate(ctx);
 	}
 	if (!expect(world.registry.get(hc)->health == 0, "victim dead at 0 hp (clamped)")) return 1;
@@ -1463,7 +1469,7 @@ int main() {
 	drain_all(udp_b);
 	for (int shot = 0; shot < 3; ++shot) {
 		dispatch_fire(roster[1], roster, world,
-		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
+		              fire_body(roster[1].fire_tick_floor + 1u, hb.packed, 5, 0, 0, muzzle_z, 0, 0));
 		for (int i = 0; i < 6; ++i) inmatch::Server_TickUpdate(ctx);
 	}
 	if (!expect(world.registry.get(ha)->health == 0, "host player dead")) return 1;
