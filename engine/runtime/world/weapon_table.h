@@ -119,6 +119,15 @@ struct WeaponTableEntry {
     // them; explicit authored timings and all state transitions are retained.
     // [orig: Anim_InitActions @0x541fa0]
     WeaponFsmDef action_fsm;
+    // AdmDef+1104: FIRE delayEnd + RECOIL delayStart + RECOIL delayEnd.
+    // Derive from the baked actions so a later ADM rebind cannot stale the floor.
+    // [orig: AdmDefs_PostParseRecompute @0x53FEA0]
+    uint32_t fire_interval_ticks() const {
+        return static_cast<uint32_t>(action_fsm.actions[weapon_action::kFire].delay_end) +
+                static_cast<uint32_t>(action_fsm.actions[weapon_action::kRecoil].delay_start) +
+                static_cast<uint32_t>(action_fsm.actions[weapon_action::kRecoil].delay_end);
+    }
+
     bool valid = false;
 };
 

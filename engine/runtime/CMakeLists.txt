@@ -259,6 +259,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_death.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_endround.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_lifecycle.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_guided.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_pipeline.cpp

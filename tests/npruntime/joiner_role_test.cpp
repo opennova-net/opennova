@@ -9,6 +9,8 @@
 // requests and the matching seat overlays run through the production frame.
 
 #include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -767,9 +769,73 @@ bool run_flare_descriptor_carries_the_pilot_handheld() {
 	return ok;
 }
 
+bool run_received_loadout_policy_and_sounds() {
+    Harness h;
+    h.role.poll_preload();
+    h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+            1, 0, 5, w::kPlayerInfantryTypeId);
+    SessionSequencing tx = inmatch::make_jo_game_session_sequencing();
+    auto deliver = [&](const std::vector<ProtocolMessage> &messages) {
+        std::vector<uint8_t> body;
+        if (!frame_session_packet(tx, SessionCrypto{kServerScrk, {}, kClientKey},
+                messages, body)) return false;
+        const auto datagram = nw_encode_outbound(
+                SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+        h.role.runtime->receive(datagram.data(), datagram.size());
+        h.role.run_tick(h.input);
+        return true;
+    };
+    if (!deliver({make_protocol_message(s2c::WEAPON_RESTRICTIONS,
+            {5, 5, 0, 7, 2, 9, 1, 10, 3, 255, 0})})) return false;
+    auto &availability = h.kernel->local.loadout.availability;
+    if (!expect(availability.value_for(5) == 0 && availability.value_for(7) == 2,
+            "host weapon bans and armory-only rules reach the joiner's real loadout table")) return false;
+    if (!expect(availability.value_for(9) == 1 && availability.value_for(10) == 1,
+            "retail ignores restriction values other than 0 and 2")) return false;
+    if (!deliver({make_protocol_message(s2c::WEAPON_RESTRICTIONS, {0})})) return false;
+    if (!expect(availability.value_for(5) == 1 && availability.value_for(7) == 1,
+            "an empty restriction list restores the all-allowed table")) return false;
+    if (!deliver({make_protocol_message(s2c::WEAPON_RESTRICTIONS, {1, 254, 2})})) return false;
+    if (!expect(availability.value_for(254) == 2,
+            "the final valid weapon index accepts an armory restriction")) return false;
+    if (!deliver({make_protocol_message(s2c::WEAPON_RESTRICTIONS, {1, 9})})) return false;
+    if (!expect(availability.value_for(9) == 0 && availability.value_for(254) == 1,
+            "a short restriction pair zero-fills its missing value after resetting the table")) return false;
+    if (!deliver({make_protocol_message(s2c::WEAPON_RESTRICTIONS, {})})) return false;
+    if (!expect(availability.value_for(9) == 1,
+            "an empty body still resets retail's availability table")) return false;
+    PlaySoundCommand positioned;
+    positioned.flag = 1;
+    positioned.has_pos = true;
+    positioned.sound_name = "MEDIC_REQUEST";
+    positioned.pos_x = -12;
+    positioned.pos_y = 23;
+    positioned.pos_z = 4;
+    PlaySoundCommand listener;
+    listener.sound_name = "MP_COMMAND1";
+    const std::size_t before = h.kernel->world.out.slot_sounds.size();
+    const std::size_t direct_before = h.kernel->world.out.script_sounds.size();
+    if (!deliver({make_protocol_message(s2c::PLAY_SOUND, encode_play_sound(positioned)),
+            make_protocol_message(s2c::PLAY_SOUND, encode_play_sound(listener))})) return false;
+    if (!expect(h.kernel->world.out.slot_sounds.size() == before + 1,
+            "positioned sound reaches the audio output exactly once")) return false;
+    const auto &sound = h.kernel->world.out.slot_sounds.back();
+    if (!expect(std::string(sound.set_name) == "MEDIC_REQUEST" &&
+            sound.pos[0] == -12 * 65536 && sound.pos[1] == 23 * 65536 && sound.pos[2] == 4 * 65536,
+            "wire sound coordinates are signed world units, converted to fixed point")) return false;
+    if (!expect(h.kernel->world.out.script_sounds.size() == direct_before + 1 &&
+            h.kernel->world.out.script_sounds.back().name == "MP_COMMAND1" &&
+            h.kernel->world.out.script_sounds.back().kind == w::ScriptSoundEvent::Kind::Interface,
+            "unpositioned sound reaches listener audio")) return false;
+    h.role.run_tick(h.input);
+    return expect(h.kernel->world.out.script_sounds.size() == direct_before + 1,
+            "a received sound is not replayed on the next frame");
+}
+
 } // namespace
 
 int main() {
+	if (!run_received_loadout_policy_and_sounds()) return 1;
 	bool ok = true;
 	ok &= run_pre_match_frame();
 	ok &= run_preload_frame();

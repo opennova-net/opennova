@@ -148,6 +148,7 @@ public:
 	void reset_for_load(uint64_t deployment_release_revision_baseline) {
 		local_spawned_ = false;
 		deployment_release_revision_seen_ = deployment_release_revision_baseline;
+		weapon_availability_revision_seen_ = 0;
 		redeploy_release_pending_ = false;
 		redeploy_health_updates_at_release_ = 0;
 		self_wire_handle_ = 0;
@@ -157,6 +158,7 @@ public:
 	void reset_for_runtime_rebuild() {
 		started_ = false;
 		weather_revision_seen_ = 0;
+		weapon_availability_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
 		replica_peer_scratch_src_ = nullptr;
 		replica_peer_scratch_count_ = 0;
@@ -267,6 +269,7 @@ private:
 	uint32_t replica_peer_scratch_tick_ = 0;
 	// The last S2C 0x0A phase-2 ENV revision folded into the weather home.
 	uint32_t weather_revision_seen_ = 0;
+	uint64_t weapon_availability_revision_seen_ = 0;
 
 	// ~1 Hz frozen-session tripwire state.
 	std::size_t last_gap_depth_ = 0;

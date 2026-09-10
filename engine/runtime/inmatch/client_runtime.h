@@ -44,6 +44,8 @@
 //
 // [orig: Client_ProcessNetworkFrame @0x42c180; PumpClientProtocolRecv @0x42c228 / Send @0x42c4bc;
 //  Player_BuildTag0CInputBody @0x42a550; docs/net §5.44]. No socket I/O lives here.
+namespace opennova::world { class World; }
+
 namespace opennova::inmatch {
 
 class ClientRuntime {
@@ -221,6 +223,8 @@ public:
 	// kill; a destructible's husk/explosion chain).
 	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — cb(entity, 4, 0) @0x42ebf5]
 	std::vector<EntityDeathRecord> drain_entity_deaths();
+	// Both remote and listen clients consume the same one-shot sound commands.
+	void apply_received_sounds(world::World &world);
 	// S2C 0x23 WAC remote commands the recv fold surfaced this frame; the
 	// joiner role runs each registry row's handler against its world.
 	std::vector<ScriptRemoteCommand> drain_script_remote_commands();

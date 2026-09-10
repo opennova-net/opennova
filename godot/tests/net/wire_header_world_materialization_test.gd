@@ -337,21 +337,35 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	assert_eq(_present_wire_handle_for_type(joiner, ZONE_TYPE),
 			host_zone.get_wire_handle())
 
-	# The joiner completed initial admission with NO C2S 0x0E (retail sends none;
-	# the wave witness) while the host keeps the D-NET-156 spawn-zone pick hold.
-	# The initial deploy against a pick-held host — and the mount/ammo tail that
-	# rode it — is retired until the pick-based CLIENT trigger lands (the
-	# per-frame undeployed signal awaits a pick-based mission capture; see
-	# tests/npruntime/client_runtime_test.cpp run_roundtrip_with_spawn_zones).
-	# The designated-G variant below exercises the streamed-vehicle mount/ammo
-	# wire mechanics through the death re-pick; on THIS fixture the death
-	# transaction does not reach the held joiner's client (its per-frame 0x0A
-	# recipient tail never lands), so the death re-pick cannot stand in here.
-	assert_false(joiner.is_join_deploy_pick_pending(),
-			"the initial join owes no C2S 0x0E (retail sends none)")
-	assert_true(joiner.is_joined_in_match(),
-			"the joiner completes admission while the host keeps the pick hold")
-	pending("the streamed-zone deploy + mount tail awaits the pick-based initial-deploy client trigger (D-NET-156)")
+	# Admission can finish while the authority still holds initial deployment.
+	# Exercise the actual zone pick with the body-empty client and streamed rows.
+	# [orig: Server_OnPlayerJoin @0x51A680; Input_HandleActionBinding @0x49AD40]
+	var overlay := false
+	for _tick in range(240):
+		host.step()
+		joiner.step()
+		if joiner.is_join_deploy_overlay_active():
+			overlay = true
+			break
+		OS.delay_msec(2)
+	assert_true(overlay, "the streamed-world joiner receives its initial deployment hold")
+	if not overlay:
+		return
+	assert_false(joiner.is_join_deploy_pick_pending(), "no selection has been sent yet")
+	var zones := joiner.get_deploy_spawn_zones()
+	var zone_param := (zones[0] as DeployZoneRow).param
+	assert_true(joiner.send_deployment_pick(zone_param))
+	var deployed := false
+	for _tick in range(400):
+		host.step()
+		joiner.step()
+		if not joiner.is_join_deploy_pick_pending() \
+				and not joiner.is_join_deploy_overlay_active() \
+				and absf(joiner.get_local_player_position().x - 12.0) < 1.0:
+			deployed = true
+			break
+		OS.delay_msec(2)
+	assert_true(deployed, "the streamed-zone pick releases and places the body-empty joiner")
 
 
 func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:

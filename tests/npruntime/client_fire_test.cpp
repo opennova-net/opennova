@@ -17,6 +17,7 @@
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_tick.h>
 
 #include <runtime/replication/connection.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -62,7 +63,13 @@ w::PlayerSpawn player_spawn(uint16_t net_id) {
 	return s;
 }
 
-using conn_fixture::make_conn;
+inmatch::NapiNPConnection make_conn(uint32_t id, int type,
+        ns::ISessionTransport *transport, ns::TransportMode mode,
+        w::EntityHandle owned, bool spawned) {
+    auto connection = conn_fixture::make_conn(id, type, transport, mode, owned, spawned);
+    if (spawned) (void)inmatch::Server_RerollPlayerTickSeed(connection);
+    return connection;
+}
 
 void put_u16(std::vector<uint8_t> &b, uint16_t v) {
 	b.push_back(uint8_t(v & 0xFF));
@@ -81,7 +88,8 @@ std::vector<uint8_t> fire_body(uint16_t shooter, uint8_t fire_flags, uint8_t adm
                                uint16_t target, uint16_t hit_part, uint8_t extra2,
                                uint8_t misc) {
 	std::vector<uint8_t> b;
-	put_u32(b, 12345);            // current_tick
+	static uint32_t next_client_tick = 0x01000000u;
+	put_u32(b, next_client_tick++); // beyond any 0x61 seed; each new shot advances time
 	put_u16(b, shooter);
 	b.push_back(fire_flags);
 	b.push_back(adm);
@@ -342,9 +350,80 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	return expect(ack_hdr.ack_count == 2, "host echoes the highest contiguous C2S sequence");
 }
 
+bool check_retail_fire_admission() {
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
+    std::vector<inmatch::NapiNPConnection> roster;
+    roster.push_back(conn_fixture::make_conn(2, 1, nullptr, ns::TransportMode::Client, shooter, true));
+    auto &conn = roster[0];
+    world.tables.weapons.entries.resize(6);
+    auto &weapon = world.tables.weapons.entries[5];
+    weapon.name = "FRESHNESS_RIFLE";
+    weapon.valid = true;
+    weapon.clipsize = 20;
+    weapon.category = 3;
+    weapon.rank = 2;
+    weapon.action_fsm.actions[w::weapon_action::kFire].delay_start = 100; // not in the sum
+    weapon.action_fsm.actions[w::weapon_action::kFire].delay_end = 2;
+    weapon.action_fsm.actions[w::weapon_action::kRecoil].delay_start = 3;
+    weapon.action_fsm.actions[w::weapon_action::kRecoil].delay_end = 4;
+    const auto send = [&](uint32_t tick, uint8_t flags = 0, uint8_t adm = 5) {
+        ClientFiredRound fire;
+        fire.current_tick = tick;
+        fire.shooter_handle = shooter.packed;
+        fire.target_handle = 0xFFFF;
+        fire.adm_index = adm;
+        fire.fire_flags = flags;
+        dispatch_fire(conn, roster, world, encode_client_fired_round(fire));
+    };
+    send(100);
+    if (!expect(world.out.rounds.count == 0, "unseeded host player cannot fire")) return false;
+    (void)inmatch::Server_RerollPlayerTickSeed(conn);
+    const uint32_t seed = conn.tick_seed;
+    send(0);
+    send(seed);
+    if (!expect(world.out.rounds.count == 0, "zero and seed-equal fire ticks are rejected")) return false;
+    send(seed + 1);
+    if (!expect(world.out.rounds.count == 1, "first tick beyond seed fires")) return false;
+    send(seed + 1);
+    send(seed + 10);
+    if (!expect(world.out.rounds.count == 1, "duplicate and cooldown-equal shots are rejected")) return false;
+    send(seed + 11);
+    if (!expect(world.out.rounds.count == 2, "fire-end plus recoil delays define cooldown")) return false;
+    world.rules.cease_fire = true;
+    send(seed + 100);
+    if (!expect(world.out.rounds.count == 2, "cease-fire rejects the shot before ammo or stamp changes")) return false;
+    world.rules.cease_fire = false;
+    conn.link.spectator = true;
+    send(seed + 100);
+    if (!expect(world.out.rounds.count == 2, "spectator shots are rejected")) return false;
+    conn.link.spectator = false;
+    send(seed + 100, 0, 4); // invalid weapon must not consume the stamp
+    send(seed + 21, 1);    // alt fire advances by zero, not the primary cooldown
+    send(seed + 22, 1);
+    if (!expect(world.out.rounds.count == 4, "rejects preserve the clock and alt shots stamp only their tick")) return false;
+    if (!expect(conn.weapon_slots[uint16_t(3 * 65 + 2)].clip == 18,
+            "only the two accepted primary shots consume cartridges")) return false;
+    (void)inmatch::Server_DisarmPlayerTickSeed(conn, 100);
+    world.logic_tick = 100;
+    send(seed + 23, 1);
+    world.logic_tick = 102;
+    send(seed + 23, 1); // the grace arm checks host time, not monotonic packet time
+    world.logic_tick = 103; // default SP send period 1, strict 3-period boundary
+    send(seed + 23, 1);
+    if (!expect(world.out.rounds.count == 6,
+            "disarmed player accepts in-flight shots only before the three-period deadline")) return false;
+    (void)inmatch::Server_RerollPlayerTickSeed(conn);
+    send(conn.tick_seed);
+    return expect(world.out.rounds.count == 6,
+            "re-deployment resets freshness to the newly advertised seed");
+}
+
 } // namespace
 
 int main() {
+	if (!check_retail_fire_admission()) return 1;
 	if (!check_mounted_slot_select_fire_and_reload()) return 1;
 	if (!check_duplicate_c2s_session_does_not_refire()) return 1;
 

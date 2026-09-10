@@ -26,6 +26,7 @@
 #include <net/npwire/ingame_message_id.h>
 
 #include <base/io/strutil.h>
+#include <base/io/byte_reader.h>
 #include <algorithm>
 #include <cstdlib>
 #include <iomanip>
@@ -46,6 +47,24 @@ void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body)
         state_.cease_fire = std::strtol(value.c_str(), nullptr, 10) != 0;
         state_.mark_changed();
     }
+}
+
+// This byte-only handler intentionally zero-fills short reads, just as
+// retail does; even an empty body first restores the all-allowed table.
+// [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0]
+void ClientReplicaPipeline::apply_weapon_restrictions(const std::vector<uint8_t> &body) {
+	state_.weapon_availability.fill(1);
+	io::ByteReader reader(body.data(), body.size());
+	const uint8_t count = reader.read_u8();
+	for (unsigned i = 0; i < count; ++i) {
+		const uint8_t index = reader.read_u8();
+		const uint8_t value = reader.read_u8();
+		if (index != 0xFF && (value == 0 || value == 2))
+			state_.weapon_availability[index] = value;
+	}
+	if (!reader.ok()) ++malformed_bodies_;
+	++state_.weapon_availability_revision;
+	state_.mark_changed();
 }
 
 void ClientReplicaPipeline::apply_game_event(const std::vector<uint8_t> &body) {
@@ -92,6 +111,12 @@ void ClientReplicaPipeline::apply_chat_broadcast(const std::vector<uint8_t> &bod
 	line.sender_slot = rec.sender_slot;
 	line.text = rec.text;
 	pending_chat_lines_.push_back(std::move(line));
+}
+
+std::vector<PlaySoundCommand> ClientReplicaPipeline::drain_sound_commands() {
+	std::vector<PlaySoundCommand> result;
+	result.swap(pending_sound_commands_);
+	return result;
 }
 
 } // namespace opennova::replication

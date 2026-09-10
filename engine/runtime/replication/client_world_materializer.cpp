@@ -67,6 +67,12 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.ammo_count = static_cast<uint8_t>(row.spawn_ammo_count & 0xFFu);
 	seed.ref_num = row.spawn_ref_num;
 	seed.sub_type = row.spawn_sub_type;
+	seed.owner_connection_id = row.spawn_owner_connection_id;
+	seed.player_class = row.spawn_player_class;
+	if (row.cls == EntityClass::Player || row.cls == EntityClass::Infantry) {
+		seed.ai_state = row.spawn_ai_state;
+		seed.anim_slot = row.spawn_anim_slot;
+	}
 	seed.zone_number = static_cast<uint8_t>(row.zone_number_rank & 0x1Fu);
 	seed.zone_radius = row.zone_radius;
 	seed.bound_radius = static_cast<float>(row.spawn_bound_radius_q16) /

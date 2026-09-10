@@ -1928,19 +1928,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				st.mission_status_received = true;
 				break;
 			case c2s::FIRED_ROUND: { // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
-				// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310 ->
-				// Server_ClientFiredRound @0x50baa0]. An accepted PRIMARY fire re-enters the
-				// validator locally through the adm 'fire' action (WeaponAction_Fire @0x542b10
-				// -> Entity_FireWeaponAndSendPacket @0x42bd80), and RoundData_AddRound @0x4fdb40
-				// appends the g_round_ring event the per-recipient 0x0A fan serializes as the
-				// §5.9.1 tag-2 round event; ALT fire appends directly. Our altitude: validate ->
-				// clip bookkeeping -> ring append. Deferred (D-NET-152 tails): the round SPAWN
-				// (RoundData_SpawnRound @0x4ec0d0 — projectile entity, spread, damage), the
-				// cease-fire gate (g_InCeaseFire unmodeled), the +96472 fire-rate stamp (the adm
-				// cooldown dword adm[276] is unparsed), the savedLivePose warp compensation
-				// (@0x50bbac — our net-snapped peers have zero intra-tick motion), and the
-				// moving-carrier re-anchor (@0x50bc41).
-				if (world == nullptr || !conn.burst.spawned) break; // [orig: gates @0x513338..62]
+				// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310, slot lookup @0x513338]
+				// Residual Server_ClientFiredRound compensation (D-NET-152): saved-live-pose
+				// subtraction @0x50BBAC and moving-carrier re-anchor branch @0x50BC41.
+				// Cease-fire and spectator gates precede the clock, ammo, and round
+				// effects. Freshness is checked on this host, never on a joiner's
+				// predicted-fire path [orig: Entity_FireWeaponAndSendPacket @0x42BD80].
+				if (world == nullptr || !conn.burst.spawned ||
+						world->rules.cease_fire || conn.link.spectator) break;
 				// The host's own loopback fire is a net-path no-op [orig: @0x50c18d returns 0
 				// for the local player — its fire already ran locally].
 				if (conn.link.mode == replication::TransportMode::Loopback) break;
@@ -1958,6 +1953,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					break;
 				world::Entity *shooter = world->registry.get(conn.link.owned_entity);
 				if (shooter == nullptr) break;
+				if (!Server_AcceptsPlayerFireTick(conn, fr.current_tick, world->logic_tick,
+						config.effective_send_holdoff_ticks())) break;
 
 				const bool alt_fire = (fr.fire_flags & 0x01) != 0; // [orig: @0x50bb0d]
 				// ADM + ammo authority — armory-fed hosts only (a table-less host accepts,
@@ -2062,6 +2059,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						rp.charge = fr.misc_byte;
 						world->round_sim.spawn(*world, rp);
 					}
+				}
+				// A rejected shot leaves this floor untouched. Alt fire stamps only
+				// its tick; primary adds the baked ADM action interval.
+				// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310, stamp @0x513740]
+				if (conn.fire_tick_mode) {
+					const auto *adm = world->tables.weapons.by_index(fr.adm_index);
+					conn.fire_tick_floor = fr.current_tick +
+							(!alt_fire && adm != nullptr ? adm->fire_interval_ticks() : 0u);
 				}
 				// No reactive reply — the echo rides the per-frame 0x0A fan (netsim
 				// select_round_events), reaching every OTHER in-match recipient.

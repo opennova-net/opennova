@@ -39,7 +39,11 @@ std::vector<uint8_t> Server_RerollPlayerTickSeed(
 // client's network-role tick until the next re-arm.
 // [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm @0x510237]
 std::vector<uint8_t> Server_DisarmPlayerTickSeed(
-		NapiNPConnection &connection);
+		NapiNPConnection &connection, uint32_t host_tick);
+
+// [orig: PlayerSlot_IsActive @0x4FC760]
+bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
+		uint32_t client_tick, uint32_t host_tick, uint32_t send_holdoff_ticks);
 
 // The authoritative per-frame host loop [orig: Server_TickUpdate @0x51d7e0]. One call = one engine
 // tick (the original 62 Hz cadence). Walks the SINGLE-OWNER connection table

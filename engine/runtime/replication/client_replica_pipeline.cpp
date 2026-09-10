@@ -71,6 +71,19 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::PER_FRAME_UPDATE:
 		apply_frame_update(body);
 		break;
+	case s2c::PLAY_SOUND: {
+		// [orig: NapiNPClientMsg_PlaySoundByName @0x4283A0]
+		if (!mp_session_) break;
+		PlaySoundCommand command;
+		if (!decode_play_sound(body.data(), body.size(), command))
+			++malformed_bodies_;
+		else if (command.flag <= 1)
+			pending_sound_commands_.push_back(std::move(command));
+		break;
+	}
+	case s2c::WEAPON_RESTRICTIONS:
+		apply_weapon_restrictions(body);
+		break;
 	case s2c::TEXT_COMMAND:
         apply_text_command(body);
         break;
@@ -174,6 +187,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 				static_cast<int16_t>(kill.attacker));
 		break;
 	}
+	case s2c::FULL_ENTITY_SPAWN:
+		apply_full_entity_spawn(body);
+		break;
 	case s2c::ENTITY_SPAWN_BATCH: // pool-0 organic spawn batch (§5.23)
 		apply_organic_spawn(body);
 		break;
@@ -1506,10 +1522,7 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		ClientEntityState *existing = state_.find(rec.slot_id);
 		const bool type_changed = existing != nullptr &&
 				existing->type_id != rec.item_type_id;
-		uint32_t next_spawn_revision = existing != nullptr
-				? existing->spawn_revision + 1u
-				: 1u;
-		if (next_spawn_revision == 0) next_spawn_revision = 1;
+		const uint32_t next_spawn_revision = begin_entity_lifetime(rec.slot_id);
 		ClientEntityState &es = state_.upsert(rec.slot_id);
 		if (type_changed) state_.mark_topology_changed();
 		// Retail clears the complete 0x2B4-byte slot before applying every
@@ -1568,53 +1581,6 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	// not a hidden requirement.
 	refresh_carried_entities();
 	if (changed) state_.mark_changed();
-}
-
-void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
-	// Retail destroys ONE row and DETACHES its dependents: Entity_Destroy
-	// walks the occupant + mount handles through the vehicle detach and then
-	// memsets only the target entity — a child attached to the removed row
-	// survives with its parent link cleared until its own remove arrives.
-	// [orig: Entity_Destroy @0x43e810 — occupant detach @0x43e9e9, per-mount
-	//  detach loop @0x43ea38..0x43ea59, memset(entity, 0, 0x2B4) @0x43ea70]
-	bool detached = false;
-	for (ClientEntityState &entity : state_.entities) {
-		if (entity.parent_handle != root_handle) continue;
-		entity.parent_handle = wire_handle::kInvalid;
-		entity.parent_pose_valid = false;
-		detached = true;
-	}
-	const std::size_t before = state_.entities.size();
-	state_.entities.erase(
-			std::remove_if(state_.entities.begin(), state_.entities.end(),
-					[&](const ClientEntityState &entity) {
-						return entity.handle == root_handle;
-					}),
-			state_.entities.end());
-	if (detached || state_.entities.size() != before)
-		state_.mark_topology_changed();
-}
-
-// [orig: NapiNPClientMsg_DestroyEntityList @0x429730 — the body carries RAW pool-0
-//  indices, resolved with Pool_GetEntryUnchecked(0, idx), so the wire handle is
-//  (0 << 12) | idx]
-void ClientReplicaPipeline::destroy_pool0_slot(uint16_t pool0_index) {
-	if (wire_handle::pool(pool0_index) != wire_handle::kPoolOrganic) return; // not a pool-0 slot index
-	if (state_.find(pool0_index) == nullptr) return;
-	erase_entity_tree(pool0_index);
-}
-
-// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the non-authority entity team store @0x4319ee]
-void ClientReplicaPipeline::apply_team_assign(uint16_t handle, uint8_t team) {
-	// Retail's gates: not the 0xFFFF sentinel, and the pool nibble must address one
-	// of the five entity pools (@0x431910 header checks).
-	const world::EntityHandle h{handle};
-	if (!h.valid() || h.pool() >= world::kEntityPoolCount) return;
-	ClientEntityState &entity = state_.upsert(handle);
-	if (entity.team == team && entity.team_known) return;
-	entity.team = team;
-	entity.team_known = true;
-	state_.mark_changed();
 }
 
 void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
@@ -1851,10 +1817,7 @@ void ClientReplicaPipeline::apply_static_batch(const std::vector<uint8_t> &body)
 		ClientEntityState *existing = state_.find(handle);
 		const bool type_changed = existing != nullptr &&
 				existing->type_id != rec.item_type_id;
-		uint32_t next_spawn_revision = existing != nullptr
-				? existing->spawn_revision + 1u
-				: 1u;
-		if (next_spawn_revision == 0) next_spawn_revision = 1;
+		const uint32_t next_spawn_revision = begin_entity_lifetime(handle);
 		ClientEntityState &es = state_.upsert(handle);
 		if (type_changed) state_.mark_topology_changed();
 		// The retail 0x10 handler memsets the selected slot before itemType.
@@ -1930,10 +1893,7 @@ void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) 
 		ClientEntityState *existing = state_.find(handle);
 		const bool type_changed = existing != nullptr &&
 				existing->type_id != rec.item_type_id;
-		uint32_t next_spawn_revision = existing != nullptr
-				? existing->spawn_revision + 1u
-				: 1u;
-		if (next_spawn_revision == 0) next_spawn_revision = 1;
+		const uint32_t next_spawn_revision = begin_entity_lifetime(handle);
 		ClientEntityState &es = state_.upsert(handle);
 		if (type_changed) state_.mark_topology_changed();
 		// The retail 0x20 handler likewise memsets its complete selected slot.
