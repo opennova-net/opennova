@@ -149,12 +149,11 @@ catalog records decoded, printer-only and uncharacterized coverage explicitly.
 
 ## Validation
 
-- Full Release native build succeeded. The 455-test sweep passed 453 tests,
-  skipped `motorcycle_gravity_06tr` because the installed root lacks its loose
-  `06TR.bms`, and exposed one outdated synthetic fire fixture. After giving that
-  fixture a real seed and increasing shot ticks, `npruntime_round_sim` passed.
-  Final aggregate: **454 passed, one asset skip**. The focused coverage,
-  message-dispatch, client-fire and joiner-role suites also pass.
+- Full Release native build succeeded. Final aggregate: **455 native tests
+  passed**. The round-simulation fixture now seeds its connection and advances
+  shot ticks. The previously asset-skipped `motorcycle_gravity_06tr` passes with
+  the supplied revx02 installation. The focused coverage, message-dispatch,
+  client-fire and joiner-role suites also pass.
 - Rebuilt the final Godot extension from this worktree and imported with
   isolated user settings. The network/audio/deployment selection passes
   **92 tests, 1,810 assertions**, with no pending tests, parse errors or dropped
@@ -162,10 +161,46 @@ catalog records decoded, printer-only and uncharacterized coverage explicitly.
   initial streamed-zone pick and release; deployment also covers death selections.
 - Repository size/maturity, module/include graph, header ownership, fixture,
   environment, conventions, citation census and ledger gates pass.
-- Live four-topology retail matrix: **BLOCKED before launch**. The prescribed
-  runner selects `revx02`; the available install contains `jox01`, and onHook
-  rejects the missing `expansion/revx02` prerequisite. No live retail verdict
-  is claimed for these changes. Native and Godot two-endpoint tests exercise
-  the OpenNova host/client paths; they cannot substitute for this matrix.
+- `wait_parity_wire_ready.ps1 -SelfTest` passes. Live captures exposed a schema
+  drift: `nw_pp` emits a participant column on `PARITY_EVENT`, but the parser
+  rejected it. The parser now retains that field; its synthetic packet owners
+  and positive/malformed-event regressions use the current format.
+
+### Live revx02 checks
+
+The supplied installation unblocked live testing. All cells used `01TR.bms`,
+game type `65568`, port `32787`, 1920x1080, session name `Untitled ` (including
+its trailing space), and callsigns `ParityHost`/`ParityJoin`. The mission header
+is bound to the exact BMS hash, with matching extracted item definitions.
+Runtime code was commit `9d3dea0e04a16a7ff6cfa1b027726c3f5216379a`; the parser
+fix above was applied for these runs.
+
+| Host / client | Run suffix | Result | Decoded uplinks / local frames / matched RTT replies at readiness |
+|---|---|---|---|
+| Retail / retail | `rr-revx02-20260909-h` | PASS | 60 / 60 / 59 |
+| Retail / OpenNova | `ro-revx02-20260909-a` | PASS | 58 / 53 / 57 |
+| OpenNova / retail | `or-revx02-20260909-a` | BLOCKED | Host loaded and answered LAN discovery; installed MCP has no `onhook_join_lan` tool |
+| OpenNova / OpenNova | `oo-revx02-20260909-a` | PASS | 111 / 43 / 107 |
+
+Run IDs have the prefix `netcode-`. Passing cells prove authenticated in-match
+readiness, at least ten seconds of decoded gameplay traffic, and a 15-second
+steady window containing completed input exercises. The OpenNova movement probes
+completed while remaining in match. Captures have verified completion; retail
+capture counters report no drops/truncation/write errors, and OpenNova roles
+shut down cleanly. Full native decoding of the canonical RR/RO/OO captures
+covers 324/330/287 gameplay state records respectively, with zero state decode
+failures. These checks do not establish all-message fidelity or replace the
+remaining work listed above.
+
+The initial retail startup crashes were test provisioning errors: disabling
+`PatchesEnabled` also disabled the expanded item table and memory allocation.
+The supplied definitions contain 2,455 item blocks, above the unpatched
+2,048-item capacity. Keeping the supplied patched Bink DLL and enabling that
+group eliminated the repeated pre-connection access violation. The runbook now
+records the required DLL companions, startup patches and corpus arguments.
+Exact binary hashes, effective hook configs and full captures are recorded
+locally. The supplied hook's source commit was not verified; these results are
+specific to that hash-bound instrumented build. The newest available MCP was
+also checked and lacks the retail joiner tool, so no OR verdict is claimed.
 
 Raw captures, local install paths and tool transcripts stay in ignored scratch.
