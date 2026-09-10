@@ -63,8 +63,9 @@ int main() {
 					geometry, material, 9999, controls);
 	if (!expect(controlled.issues == kTerrainStaticShadowUnsupportedNone,
 			"controlled AlphaGen/UV must be an exact supported state") ||
-			!expect(near(controlled.alpha_scale, 110.0f / 255.0f),
-					"projected _FFP AlphaGen must use the shared signed CTRL evaluator") ||
+			!expect(near(controlled.alpha_scale, 10.0f / 255.0f),
+					"projected _FFP AlphaGen 113 holds the authored start (a constant style, "
+					"not register-driven) [orig: AlphaGen_EvaluateValue @0x5B2320]") ||
 			!expect(near(controlled.uv.m00, 1.0f) &&
 						near(controlled.uv.m20, 1.0f),
 					"projected alpha UVs must retain the complete controlled transform")) {

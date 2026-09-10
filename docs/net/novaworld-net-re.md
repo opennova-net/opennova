@@ -1310,6 +1310,9 @@ in-process. The flow:
    pending-connection list, applies team-balance, then per accepted player calls
    `[orig: Server_BuildPlayerInfoAndAdd @ 0x51d560]` (builds the player-INFO buffer and delegates
    entity registration to `[orig: player_ServerAdd @ 0x51cbc0]`, stored at `CGameSession+4512`;
+   for the HOST'S OWN player that call only LINKS the slot to an entity `Game_StartMission`
+   already built inside its authority tail — `Server_InitAllPlayerEntitiesForRound @0x516aa0`
+   `@0x525BB7`, then `Player_InitPlayer` `@0x525BBC` (jo-c cross-check 2026-09-10);
    the entity field-init sequence is §5.2b), sends spawn msgs `3` (weapon-restriction flag) /
    `5` (bool true) / `4` /
    `0x7B`, then `[orig: CNetPlayer_SetGameState @ 0x4c4060]` → state 8 and
@@ -2282,9 +2285,15 @@ misnomers corrected here):**
   43-then-44 after 62 selection passes (`state = 0x2B + (++entity[0x148] >= 0x3E)`
   @ 0x4b727b-0x4b7293); **the run promotion (decoded 2026-07-13)**: pure-forward standing walk
   (state == 1 only) promotes to `run_2`/`run_3` (ANIMNUM 9/10) by
-  `tier = pitchTier(entity+0x37C) + AdmDef.run_anim` — the tier bands are `>0x430000 or <0 → 0`,
-  `≥0x210000 → 1`, `else 2`, but **entity+0x37C has NO writer in the retail image** (pool
-  zero-init ⇒ the constant 2); `run_anim` is the weapon.def key at AdmDefs+0xAC
+  `tier = weightBand(entity+0x37C) + AdmDef.run_anim` — the bands are `>0x430000 or <0 → 0`,
+  `≥0x210000 → 1`, `else 2`, and **entity+0x37C IS written**: the S2C 0x5A apply's last leg
+  (`NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0` → the misnamed
+  `Terrain_AccumulateSectorScores @0x425220`, store `@0x425310`) sums the LOADOUT WEIGHT —
+  weaponweight + total clips × clipweight over the 780 slots (+ the +0x3AC sub-variant
+  clips × the main clipweight when their ammo class differs) — into the LOCAL entity, so
+  kits above 67.0 u never promote, 33.0..67.0 u jog at run_2, lighter kits sprint at run_3
+  (the 2026-07-13 "no writer" sweep missed the double-indirect store; corrected 2026-09-10,
+  jo-c cross-check); `run_anim` is the weapon.def key at AdmDefs+0xAC
   (`dword_24E808C[adm*0x460]`, parser @ 0x543d15, JOX ships only 0/1 ⇒ every weapon runs at
   run_3); tier 1 → 9 if `animMap[9]!=animMap[0]`, tier ≥ 2 → 10 with a 9 fallback; suppressed
   by Flags & 0x10 (scope) (@ 0x4b729d-0x4b731b); prone lean rolls 41/42 from MoveOrder bits 6/7
@@ -11703,7 +11712,7 @@ confirmed, fix specified, not yet applied). Dispositions map to the canonical vo
 in [divergence-ledger.md](../divergence-ledger.md).
 
 `session_hello.cpp` (A4 ClientAuth/ServerSessionInit 0x42/0x82):
-- **D-NET-1** [HIGH, FIXED] CS field default tables were onnet guesses, wrong at idx 4/8/9/10/12/13. Engine template (IDENTICAL both directions): `{0:240000,1:4,4:60000,5:1000,6:0xFFFFFFFF,8:2048,9:128,10:100,11:500,12:1,13:MTU(1300),14:0xFFFFFFFF}`. [orig: CNapiGameSession_InitNPConnection @ 0x4d3e1f / CNapiNPConnection_Create @ 0x62acb0 / CNapiNPConnection_SendSessionInit @ 0x620ef0]
+- **D-NET-1** [HIGH, FIXED; template split corrected 2026-09-10] CS field default tables were onnet guesses, wrong at idx 4/8/9/10/12/13. The `{0:240000,1:4,4:60000,5:1000,6:0xFFFFFFFF,8:2048,9:128,10:100,11:500,12:1,13:MTU(1300),14:0xFFFFFFFF}` block is the NOVAWORLDUDP SERVICE protocol's — `CNapiGameSession_InitNPConnection @ 0x4d3e1f` writes it into the object it creates with PN "NOVAWORLDUDP". The in-game JOINTOPERATIONS protocol object gets `{0:120000,1:4,4:30000,5:10000,6:0xFFFFFFFF,8:512,9:256,10:100,11:1200,12:1,13:MTU(1300),14:0xFFFFFFFF}` from `CNapiNetwork_Init @ 0x4ca4a0` (stores @0x4caa81..0x4cab48 / @0x4cab54..0x4cabd0), and that is what `CNapiNPConnection_Create @ 0x62acb0` copies into a game connection and `CNapiNPConnection_SendSessionInit @ 0x620ef0` emits in a GAME host's 0x82. Until 2026-09-10 our game host advertised the service block (a retail joiner then ran a 240 s reap, 60 s idle keepalive and a 1 s active probe); `jointoperations_*_cs_fields` now feeds `make_server_auth_datagram`, the service keeps `default_*` (jo-c cross-check).
 - **D-NET-2** [LOW, FIXED] CI/HK/CK were emitted unconditionally; retail gates each on non-zero (like SIP/SPN). [orig: CNapiNPConnection_SendClientJoin @ 0x61fe20]
 - **D-NET-3** [LOW, FIXED] `parse_server_auth` now parses JFC/JFP/JFS rejected-join fields (failure code/param/string); SCRK-less rejections are valid auth packets and surface as rejections, not malformed. [orig: NapiNP_HandleServerJoinResponse @ 0x629840]
 - **D-NET-4** [LOW, FIXED] RIP/RPN were emitted unconditionally; retail gates on peer_addr/peer_port != 0. [orig: CNapiNPConnection_SendSessionInit @ 0x620ef0]

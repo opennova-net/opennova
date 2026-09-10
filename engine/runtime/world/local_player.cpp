@@ -334,6 +334,8 @@ void LocalPlayer::apply_player_input_pre_tick() {
 		p->inf.binoculars_raised = view.binoculars_raised;
 		p->inf.wpn_run_anim = weapon.active ? weapon.run_anim : 0;
 		p->inf.wpn_force_crouch = weapon.active && weapon.force_crouch;
+		// entity+0x37C mirror: the kit weight the last 0x5A/accept stamped.
+		p->inf.loadout_weight_fp16 = loadout.weight_fp16;
 		p->inf.aimed_shot_available = local_player_can_fire();
 	}
 	if (w::Entity *entity = world.registry.get(world.cached.local_player)) {

@@ -122,7 +122,7 @@ The loader/format slice. The event runtime, tick cadence, and promotion are the
 | `bms::parse_area_trigger` | area-trigger loop in `Mission_LoadBMSFile` | `0x40fc45` | `word_A76410` × 0x20 into `unk_A32D10` | count = 0 in all fixtures | unknown (layout + Y/Z swap untested) |
 | `bms_to_godot_position` (`godot/src/mission/mission_object_placer.cpp`) | `Mission_LoadBMSAndExtractSpawnPoints` | `0x40d650` | axis convention: (x,y) = plane, z = up, y inverted | grid `(x>>18)+512`, `512−(y>>18)` | matching |
 | `bms_to_godot_rotation` (`godot/src/mission/mission_object_placer.cpp`) | `Entity_SpawnFromBMSRecord` (heading) | `0x40eb66` | heading = `(90−yaw)`; pitch/roll direct | fixed-point angle conv | matching (was `180−yaw`; fixed 2026-06-08 mission-foundation pass, IDA-verified) |
-| mission orchestration | `Game_StartMission` | `0x524360` | validate → load → terrain/net/HUD | xrefs to `0x40e250`/`0x40f4e0` | confirm-only (not reimplemented) |
+| mission orchestration | `Game_StartMission` | `0x524360` | validate → load → terrain/net/HUD; the authority tail builds the host's own entity inside this function (`Server_InitAllPlayerEntitiesForRound @0x516aa0` @0x525BB7, then `Player_InitPlayer` @0x525BBC; `Server_PlayerAdd @0x51cbc0` only LINKS the slot to it) and seeds PRNG A/A/C/B (0x10101010 / 0x1A10101A / 0x10101010 / 0x5ADEADA5 @0x5245ed..0x524610) | xrefs to `0x40e250`/`0x40f4e0`; decompile 2026-09-10 | ported (`MissionKernel::boot` + `host_session.cpp start_host_session`; the PreMission ordering residual is noted in the boot code) |
 
 ## 4. Sound stack function table (.lwf / .dbf / selection, grilled 2026-06-09)
 
@@ -604,7 +604,7 @@ Host-side spawn flow (R1, 2026-06-16; net-re §5.2a):
 
 | original | addr | role | evidence | status |
 |---|---|---|---|---|
-| `Server_InitNewRoundState` | `0x51c8e0` | host new-round init: player-slot table + local-player ctx (name from `CHAR` var iff `transport_mode==1`) + clears timeout gate | decompile; §5.2a | confirm-only |
+| `Server_InitNewRoundState` | `0x51c8e0` | host new-round init: player-slot table + local-player ctx (name from `CHAR` var iff `transport_mode==1`) + clears timeout gate; send budget 600 @0x51ca7c; the 0x79 countdown clear @0x51CA9E | decompile; §5.2a | ported (`server_spawn.cpp`, `server_session.cpp:60-70`) |
 | `CNapiServer_ProcessPendingPlayerSpawns` | `0x4c8dc0` | server spawn acceptor (gated `is_authority && !gate`): builds player entity, sends spawn msgs 3/5/4/0x7B, game-state 8 | decompile; §5.2a | confirm-only |
 | `Server_BuildPlayerInfoAndAdd` | `0x51d560` | builds the 226-B player-INFO buffer (name/flags/JSP/PCID/squad); delegates entity registration to `Server_PlayerAdd` | called by `0x4c8dc0`; §5.2b | confirm-only |
 | `Server_PlayerAdd` | `0x51cbc0` | player-SLOT manager: memsets the 100584-B slot, `Server_AssignPlayerTeam`, spectator team-0/hidden body, ServerLog Name/IpPort/PCID/Team/Type records, holds `g_local_player_entity` | decompile; §5.2b/§5.0e | core spawn path ported, including spectator admission |
@@ -1047,7 +1047,7 @@ Fire presentation + LOS raycast (engine-research 2026-07-16 session 4; world-wac
 | `Physics_RaycastTerrainAndSectors` | `0x539910` | TRUE = clear; arg 5 = ray radius; terrain leg `Terrain_RaycastHeightmapHiRes @0x60c760` (both-INDOORS skip / buried-endpoint null-entity variant); sector legs pool 2 → pool 1 | decompile; world-wac-ai-re §18.5 | ported (`CollisionWorld::raycast_clear` + `los_terrain_blocked`; `collision` ctest `test_raycast_clear_los`; residuals D-AI-7) |
 | `Physics_RaycastIntContext` | `0x5385e0` | ray context prologue: float-normalized 16.16 dir, per-axis min/max, length; < 16 raw → caller returns CLEAR | decompile | ported (folded into `raycast_clear`'s prologue) |
 | `raycast_against_entity_pool` | `0x538720` | the per-pool walk: in-use +0x28, skip Flags&1 / &0x8000000, exclusions (A/B + collision handles + the +0x28 owner link), bound-sphere broad phase (the shared `@0x4139a4` projection), itemDef type-3 person sphere case (same-team < 3.0 u exempt), husk swap on Flags&4, TYPE-1 convex clip via the model+168 matrices; progressive clip, boolean blocked | decompile; world-wac-ai-re §18.5 | ported (two-pass registry walk; person case + husk swap = D-AI-7 residuals) |
-| `Entity_ResetToSpawnState` | `0x4b9610` | respawn restore: magazine word +0x35C = `itemDef->clipsize` @0x4b97b5; clears every OTHER entity's lastAttacker/occupant/aiRef0/headLookTarget/aiFocus/slot[3] refs to the respawned entity (authority) | decompile; world-wac-ai-re §17.4 | confirm-only |
+| `Entity_ResetToSpawnState` | `0x4b9610` | respawn restore: magazine word +0x35C = `itemDef->clipsize` @0x4b97b5; clears every OTHER entity's lastAttacker/occupant/aiRef0/headLookTarget/aiFocus/slot[3] refs to the respawned entity (authority); the non-local `+0x1E0` clear | decompile; world-wac-ai-re §17.4 | ported (`entity_spawn.cpp entity_reset_to_spawn_state` + `infantry_spawn.cpp`) |
 
 The tracer trail pool + ribbon renderer (grill-ida 2026-07-18; world-wac-ai-re §25; port = `engine/runtime/world` `tracer_trails.{h,cpp}` + `RoundSim` integration + `fire_presenter.cpp` ribbons via `Simulation::get_tracer_trails`; residuals D-AI-12):
 

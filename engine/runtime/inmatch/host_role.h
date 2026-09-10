@@ -87,7 +87,9 @@ public:
 	bool send_medic_request() override;
 	void run_tick(const TickInput &input) override;
 	bool reset_to_baseline(SessionError &error) override;
-	void close() override {}
+	// The host's mission exit: the round-reset 0x25 to every in-match remote,
+	// the "NP.C:SH:STOP" description on every connection, one final flush.
+	void close() override;
 	ClientRuntime *client_runtime() override { return state.client_runtime.get(); }
 	int64_t last_net_us() const override { return last_net_us_; }
 

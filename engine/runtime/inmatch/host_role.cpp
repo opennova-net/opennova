@@ -6,6 +6,8 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h> // DisconnectEvent
+#include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/null_datagram_socket.h>
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -233,6 +235,36 @@ void HostRole::run_tick(const TickInput &input) {
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;
 	if (kernel.world.profile != nullptr)
 		kernel.world.profile->add(devtools::Slot::SIM_NET, last_net_us_);
+}
+
+// The host's mission exit. Retail's authority teardown walks every active
+// player slot in the in-match states 2..7 and sends each one S2C 0x25 (empty
+// body, one-send to that slot), sets its net player to game state 8 and its
+// slot state back to 1; the session reset then stops the server: every
+// connection is stamped with the description {ds 1, dc 9, dp 0, dstr "", dpc
+// 0, ddstr "NP.C:SH:STOP"} and destroyed. A joiner (retail or ours) therefore
+// leaves the match at once instead of sitting through the 120 s silence reap.
+// [orig: Game_TeardownMission @0x522350 -> Server_DisconnectAndResetAllPlayerSlots
+//  @0x516160 (the six `push 25h` / NapiNPServer_SendFiltered @0x5161bb..0x516385);
+//  CNapiGameSession_ResetActiveSession @0x4C8A70 -> NapiNPProtocol_StopServer
+//  @0x62A820 (the event stamp + CNapiNPConnection_Destroy per connection)]
+void HostRole::close() {
+	opennova::IDatagramSocket &socket =
+			socket_ != nullptr ? *socket_ : null_datagram_socket();
+	for (NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list) {
+		if (conn.type != NapiNPConnection::kTypeServerSide || conn.link.transport == nullptr)
+			continue;
+		if (conn.burst.sync_state >= 2)
+			conn.link.transport->host_send(s2c::GAME_RESET, std::vector<uint8_t>{},
+					/*reliable=*/false);
+		DisconnectEvent stop;
+		stop.ds = 1;
+		stop.dc = 9;
+		stop.dpc = 0;
+		stop.ddstr = "NP.C:SH:STOP";
+		Server_StageHostDisconnect(conn, stop);
+	}
+	inmatch::host_session_flush_s2c(state.host_owner, socket);
 }
 
 // The editor Stop/Start rewind: the kernel's own restore, then a fresh

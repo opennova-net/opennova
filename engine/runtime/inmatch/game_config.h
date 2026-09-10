@@ -91,7 +91,12 @@ struct GameConfig {
 	static constexpr uint32_t kMpAttribNoFriendlyFire = 0x200;
 	static constexpr uint32_t kMpAttribNoFriendlyTag = 0x400;
 	static constexpr uint32_t kMpAttribClaymorePref = 0x8000;
-	uint32_t mp_attributes = 14854;             // [orig game_settings +0xD0]
+	// [orig game_settings +0xD0; the cfg default `mov g_mpattrib_flags,3A02h`
+	//  @0x54d406 in Config_SetDefaults = 14850. The captured 14854 carried the
+	//  TEAM_CHOOSE spin's bit 0x4 persisted on in that install's game.cfg; a
+	//  fresh retail host advertises P2 0x900, not 0x904 (jo-c cross-check
+	//  2026-09-10). The spin is the shell's to set.]
+	uint32_t mp_attributes = 14850;
 	// The host-global class availability word sent to every joining client as
 	// S2C 0x76. Retail derives its ten low bits from the per-class host settings
 	// and the selected mission-list entry; all classes enabled is the stock

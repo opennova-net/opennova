@@ -112,8 +112,11 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `couri20b.fnt` | optional | [orig: @ 0x572a67 / @ 0x572f24] | graceful |
 
 Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
-`_netlog.txt`, `SYSDUMP.TXT`, `activesrvr.txt`, `mru.txt`,
+`_netlog.txt`, `SYSDUMP.TXT`, `mru.txt`,
 `hello.bin`/`hello2.bin` [orig: ChunkFile_TestWriteAndReload @ 0x56f810].
+`activesrvr.txt` is only ever DELETED (`Game_Run`'s shutdown `DeleteFileA`); its
+would-be writer `Game_HostMultiplayerSession @ 0x4A65A0` has no caller and no
+in-image bytes (jo-c cross-check 2026-09-10).
 
 ## Ordered boot sequence (witnessed)
 

@@ -212,6 +212,13 @@ bool Simulation::fill_friendly_tags(std::vector<opennova::world::FriendlyTagSour
 	opennova::world::FriendlyTagPassContext ctx;
 	ctx.death_screen = local_death_screen_active();
 	ctx.game_type = runtime_ ? runtime_->game_type() : 0;
+	// The session's rules word: a joiner's S2C 0x64 fixed block (+44), the
+	// host's own mp_attributes. Bit 0x400 = the host option FriendlyTag 0.
+	const uint32_t rules_word = (is_joiner() && runtime_)
+			? runtime_->view().mp_attributes()
+			: net_.host_session_config.mp_attributes;
+	ctx.rules_no_friendly_tags =
+			(rules_word & opennova::inmatch::GameConfig::kMpAttribNoFriendlyTag) != 0;
 	// The player walk's slot owner. On the authority the connection table IS
 	// the player-slot table: each link's owned entity, revive window, and
 	// medic-request latch (retail's PlayerSlot +0x24/+0x10/+0x2C).
@@ -232,7 +239,7 @@ bool Simulation::fill_friendly_tags(std::vector<opennova::world::FriendlyTagSour
 			};
 	if (!is_joiner()) ctx.slot_lookup = &authority_slot_lookup;
 	opennova::world::collect_friendly_tags(kernel_->world, *player, tags, ctx);
-	if (is_joiner() && runtime_) {
+	if (is_joiner() && runtime_ && !ctx.rules_no_friendly_tags) {
 		// A joiner's players are decoded rows, not World twins: the roster walk
 		// over ClientState supplies them (netsim/client_roster_tags.h).
 		const int32_t player_hp = kernel_->world.tables.player.item_hp;

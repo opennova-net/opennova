@@ -171,13 +171,19 @@ MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
     if (mat.alpha_gen.style == 0) {
         rt.alpha = 1.0f;
     } else {
-        // [orig: AlphaGen_EvaluateValue @ 0x5B2320]
+        // [orig: AlphaGen_EvaluateValue @ 0x5B2320 — `if (style != 24 && style
+        //  != 113) { waveform } return start`: style 113 ('q') is a CONSTANT
+        //  start like 24, not the register-driven form RgbGen 113/114 use
+        //  (@0x5B24AC); its sole caller @0x58DB80 uploads the value to constant
+        //  223 with no 113 special case. The earlier port drove it from the
+        //  CTRL register (jo-c cross-check 2026-09-10).]
         const int32_t ctrl = regValue(mat.alpha_gen.reg, ctrl_names, ctrl_bus);
+        (void)ctrl;
         const int32_t fraction =
                 mat.alpha_gen.style == 24
                         ? 0
                         : (mat.alpha_gen.style == 113
-                                   ? ctrl
+                                   ? 0
                                    : waveformFraction(
                                              mat.alpha_gen.style,
                                              phaseOrRegisterByte(

@@ -643,10 +643,15 @@ public:
 	// fire crackle, the occlusion focal-wind sampler) draws behind listener,
 	// camera-distance or render gates, so its value diverges per machine and
 	// no authoritative system may read it or compare it across peers. It is
-	// snapshotted only so an editor play/stop cycle restores the boot state.
-	// [orig: PRNG_Next16_C @0x6131B0, BSS boot state; WeatherParticle_UpdateAllEmitters
-	//  @0x5CB100 draws it after the 0x2200000 camera gate @0x5CB1CD]
-	uint32_t prng16_c_state = 0;
+	// snapshotted only so an editor play/stop cycle restores the mission-start
+	// state. Seeded at every mission start like streams A and B: Game_StartMission
+	// pushes 0x10101010 into the stream-C setter right after the A seeds
+	// [orig: `push 10101010h; call sub_6131A0` @0x524601/@0x524606 -> dword_31BFBB4;
+	//  PRNG_Next16_C @0x6131B0 reads/writes it @0x6131b3/@0x6131dd;
+	//  WeatherParticle_UpdateAllEmitters @0x5CB100 draws it after the 0x2200000
+	//  camera gate @0x5CB1CD]. (The pre-2026-09-10 "BSS boot state" 0 was wrong.)
+	static constexpr uint32_t kMissionPrng16CSeed = 0x10101010u;
+	uint32_t prng16_c_state = kMissionPrng16CSeed;
 	uint16_t next_prng16_c() noexcept;
 	// The simulation's owner of the CRT rand() recurrence retail draws from
 	// (the far-marker spawn scores @0x50CEA2, the 0x100 death-family roll

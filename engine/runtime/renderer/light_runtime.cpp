@@ -116,10 +116,19 @@ WorldLightingBlock build_world_lighting(const WorldLightingInputs &in) {
 		auto rewrite = [&](std::array<float, 3> &c) {
 			c = { c[0] * fade + mr, c[1] * fade + mg, c[2] * fade + mb };
 		};
+		// The ceiling/floor blocks (constants 16..18 / 20..22) add the
+		// modulator's R term to ALL THREE channels — the same st(0) term is
+		// reused in each of the six `fld st(1); fmul; fadd st,st(1); fstp`
+		// sequences — while sky/ground use the per-byte terms
+		// [orig: @0x5c82a5..0x5c82e9 vs @0x5c8258..0x5c82a1]. Latent unless the
+		// modulator is tinted (autogain targets grey), but literal.
+		auto rewrite_r = [&](std::array<float, 3> &c) {
+			c = { c[0] * fade + mr, c[1] * fade + mr, c[2] * fade + mr };
+		};
 		rewrite(out.hemi_sky);
 		rewrite(out.hemi_ground);
-		rewrite(out.ceiling_color);
-		rewrite(out.floor_color);
+		rewrite_r(out.ceiling_color);
+		rewrite_r(out.floor_color);
 	}
 
 	// dir = -normalize(light_dir) [orig: @ 0x5c82fc..0x5c8378].

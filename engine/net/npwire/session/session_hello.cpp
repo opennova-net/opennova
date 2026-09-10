@@ -466,6 +466,32 @@ static std::vector<CsField> engine_cs_fields() {
 std::vector<CsField> default_client_cs_fields() { return engine_cs_fields(); }
 std::vector<CsField> default_server_cs_fields() { return engine_cs_fields(); }
 
+// The JOINTOPERATIONS in-game template — what a retail GAME host's 0x82 carries.
+// CNapiNetwork_Init writes it into the game session's protocol object at
+// +0xE44 (dir 0) / +0xE80 (dir 1) and CNapiNPConnection_Create copies the
+// fifteen dwords into every connection (`rep movsd ecx=0Fh` @0x62ae7b/
+// @0x62aeb8), which SendSessionInit @0x620ef0 emits verbatim. The block above
+// is the NOVAWORLDUDP SERVICE protocol's (CNapiGameSession_InitNPConnection
+// @0x4d3be0 writes it into the object it creates with PN "NOVAWORLDUDP"), so a
+// game host advertising it handed retail joiners a 240 s dead-host timeout, a
+// 60 s idle keepalive and a 1 s active probe (D-NET-1's closure read the wrong
+// object; corrected 2026-09-10, jo-c cross-check).
+// [orig: CNapiNetwork_Init @0x4ca4a0 — 120000 @0x4caa81/@0x4cab54, 4 @0x4caa90/
+//  @0x4cab60, 30000 @0x4caab5/@0x4cab88, 10000 @0x4caac5/@0x4cab98, -1, 0, 512
+//  @0x4caaf0/@0x4cabc0, 256 @0x4cab00/@0x4cabd0, 100 @0x4cab10, 1200 (0x4B0)
+//  @0x4cab20, 1 @0x4cab2c, MTU @0x4cab3c, -1 @0x4cab48; dir 1 identical]
+static std::vector<CsField> jointoperations_cs_fields() {
+	return {
+		{0, 120000u}, {1, 4u}, {2, 0u}, {3, 0u},
+		{4, 30000u}, {5, 10000u}, {6, 0xFFFFFFFFu}, {7, 0u},
+		{8, 512u}, {9, 256u}, {10, 100u}, {11, 1200u},
+		{12, 1u}, {13, 1300u}, {14, 0xFFFFFFFFu},
+	};
+}
+
+std::vector<CsField> jointoperations_client_cs_fields() { return jointoperations_cs_fields(); }
+std::vector<CsField> jointoperations_server_cs_fields() { return jointoperations_cs_fields(); }
+
 ServerAuth build_server_auth(const ClientAuth &client,
                              uint32_t client_ip_net,
                              uint16_t client_port,

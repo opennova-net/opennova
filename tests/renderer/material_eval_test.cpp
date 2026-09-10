@@ -386,14 +386,17 @@ int main() {
         material.alpha_gen.reg = 0;
         material.alpha_gen.start = 10;
         material.alpha_gen.end = 210;
+        // Style 113 is a CONSTANT style like 24: the evaluator returns the
+        // packed start for both and never reads a register or the clock
+        // [orig: AlphaGen_EvaluateValue @0x5B2320 `if (style != 24 && style != 113)`].
         const opennova::renderer::MaterialRuntime controlled =
                 eval_runtime(material, 999, {"FLICKER"}, {{"FLICKER", 32768}});
-        expect(nearly_equal(controlled.alpha, 110.0f * kInv255),
-               "Alpha style 113 should use the retail CTRL-table interpolation");
+        expect(nearly_equal(controlled.alpha, 10.0f * kInv255),
+               "Alpha style 113 should hold the packed start regardless of CTRL");
         const opennova::renderer::MaterialRuntime endpoint =
                 eval_runtime(material, 999, {"FLICKER"}, {{"FLICKER", 65536}});
-        expect(nearly_equal(endpoint.alpha, 210.0f * kInv255),
-               "Alpha CTRL 0x10000 should reach the exact endpoint");
+        expect(nearly_equal(endpoint.alpha, 10.0f * kInv255),
+               "Alpha style 113 should ignore a saturated CTRL register");
 
         material.alpha_gen.style = 114;
         material.alpha_gen.reg = 37;

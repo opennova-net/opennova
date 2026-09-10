@@ -512,19 +512,26 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
         // Occupied: the driverless stuck count rests [orig: `moveTimer = 0` at
         // the occupied entry split, the boat twin @0x48DFA8..0x48DFCD].
         if (occ != nullptr) m.stuck_ticks = 0;
-        // The handbrake stop latch and the crashed stop [orig: @0x48c03a..0x48c095
-        // — `occupant && Flags & 8 && itemDef->handBrake` sets byte +0x3CD, else
-        // clears it (@0x48c066); while set, [136] = 0 (@0x48c07a); the crashed
-        // byte +0x2EC zeroes [136] too (@0x48c086..0x48c08f)]. Flags bit 3 is
-        // the player leg's lean-right mirror above, so the handbrake IS the
-        // lean-right key while driving.
+    }
+    // The handbrake stop latch and the crashed stop sit OUTSIDE the attrib-0x40
+    // authority/occupant block, so a DRIVING CLIENT runs them on its predicted
+    // hull too — without them the joiner predicts full drive while the retail
+    // host skids or stops (the D-NET-161 snapback on the lean-right key)
+    // [orig: cveh @0x48c03a..0x48c095 — `occupant && Flags & 8 &&
+    //  itemDef->handBrake` sets byte +0x3CD, else clears it (@0x48c066); while
+    //  set, [136] = 0 (@0x48c07a); the crashed byte +0x2EC zeroes [136] too
+    //  (@0x48c086..0x48c08f); the cbik twin has the same shape; ctan never
+    //  writes +0x3CD]. Flags bit 3 is the player leg's lean-right mirror, so the
+    // handbrake IS the lean-right key while driving. (Re-homed 2026-09-10 from
+    // inside the player_control gate, jo-c cross-check.)
+    if (traits.family != VehicleFamily::Tank) {
         if (occ != nullptr && (veh.flags & 0x8u) != 0 && traits.hand_brake != 0)
             m.handbrake_latched = 1;
         else
             m.handbrake_latched = 0;
         if (m.handbrake_latched != 0) m.cmd_speed = 0;
-        if (m.crashed != 0) m.cmd_speed = 0;
     }
+    if (m.crashed != 0) m.cmd_speed = 0;
 
     // ------------------------------------------------------------- steering chase
     // Turn rate blends DOWN with speed: eff = (turnRate - minRate) * clamp01(1 -
@@ -742,12 +749,26 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 					veh.last_attacker = {};
 			}
 		}
+		// A settled tank (the +0x2F0 latch) zeroes its planar velocity after the
+		// water block — the halving coast alone never reaches zero on a negative
+		// LSB (`-1 >> 1 == -1`), so without this the hull creeps forever and the
+		// sleep gate never closes [orig: `cmp byte ptr [esi+2F0h],0` @0x48a8ab ->
+		// velocityX = velocityY = 0 in Entity_UpdateTankVehiclePhysics].
+		if (traits.family == VehicleFamily::Tank && m.settle_2f0 != 0) {
+			m.vel_x = 0;
+			m.vel_y = 0;
+		}
 
 		const int32_t prev[3] = { to_fixed(veh.position.x), to_fixed(veh.position.y),
 			to_fixed(veh.position.z) };
-		int32_t px = prev[0] + m.vel_x;
-        int32_t py = prev[1] + m.vel_y;
-        int32_t pz = prev[2] + m.slide_z;
+		// The bike integrates through `2 * ftol(v * 0.5)` per axis — the odd LSB
+		// of every velocity is dropped each tick (a wire-visible 1-LSB drift on
+		// odd values) [orig: Entity_UpdateLightVehiclePhysics `fmul 0.5; ftol;
+		// add eax,eax` on X/Y/Z]. Truncation toward zero matches ftol.
+		const bool bike = traits.family == VehicleFamily::Bike;
+		int32_t px = prev[0] + (bike ? 2 * (m.vel_x / 2) : m.vel_x);
+        int32_t py = prev[1] + (bike ? 2 * (m.vel_y / 2) : m.vel_y);
+        int32_t pz = prev[2] + (bike ? 2 * (m.slide_z / 2) : m.slide_z);
 
 		// Entity_CheckCollisionState @0x462A30 runs over the authored wheel
 		// and spine probes inside each family solve (@0x47CB8C/@0x47D213).

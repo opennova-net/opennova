@@ -66,6 +66,13 @@ struct FriendlyTagPassContext {
     const PlayerSlotLookup *slot_lookup = nullptr;
     bool death_screen = false;
     uint32_t game_type = 0;
+    // The session's rules word bit 0x400 (host option FriendlyTag 0): the
+    // whole pass returns before either walk [orig: `test g_rules_flags,400h;
+    // jnz locret` @0x5a4480..0x5a448a — g_rules_flags @0x24D1E34 is the
+    // session descriptor's +44 word: the host's mp_attributes, a joiner's
+    // S2C 0x64 fixed block]. The same bit nulls Entity_GetDisplayName
+    // @0x59BF70 for the map labels.
+    bool rules_no_friendly_tags = false;
 };
 
 // The two walks of the tags pass [orig: HUD_DrawFriendlyTagsPass @0x5a4480]:

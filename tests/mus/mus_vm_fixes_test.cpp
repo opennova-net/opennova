@@ -68,8 +68,10 @@ int main(void) {
     int32_t got = mus_vm_get_var(vm, 0);
     CHECK(got == exp_rnd, "GGRnd exact rol32 PRNG value");
     CHECK(got >= 10 && got <= 20, "GGRnd result in [lo,hi]");
-    CHECK(mus_vm_get_var(vm, 1) == -1, "FIsClear true -> -1 (bits clear)");
-    CHECK(mus_vm_get_var(vm, 6) == 0,  "FIsClear false -> 0 (a bit set)");
+    /* FIsClear never resolves in retail (resolver bound 8 @0x84F20C): both
+       calls run the NULL-handler path and push 0. */
+    CHECK(mus_vm_get_var(vm, 1) == 0, "FIsClear unresolved -> 0 (bits clear case)");
+    CHECK(mus_vm_get_var(vm, 6) == 0, "FIsClear unresolved -> 0 (a bit set case)");
     CHECK(mus_vm_get_var(vm, 5) == 5,  "0x0A block-copy Var02 -> Var05");
     CHECK(mus_vm_state(vm) != MUS_VM_ERROR, "s1 ran without VM error");
     mus_vm_destroy(vm);

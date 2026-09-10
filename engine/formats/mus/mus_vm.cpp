@@ -913,7 +913,16 @@ static void init_intrinsics(void) {
     kIntrinsics[5]  = intrinsic_fset;
     kIntrinsics[6]  = intrinsic_fclear;
     kIntrinsics[7]  = intrinsic_fisset;
-    kIntrinsics[8]  = intrinsic_fisclear;  /* bound in Jointops (@ 0x6723C0) */
+    /* FIsClear's handler EXISTS in the image (@ 0x6723C0) but is unreachable:
+       the intrinsic name resolver walks `index < dword_84F20C` and that count
+       is 8, so the ninth name never resolves and a `method FIsClear` runs the
+       NULL-handler path (push 0). Bound only through index 8 exactly as retail's
+       resolver leaves it: unbound. [orig: AudioVM_FindContextByName @0x6723E0
+       bound @0x84F20C = 8; the table @0x84F0C8; AudioVM_Op_Method @0x672CF0
+       NULL path] (jo-c cross-check 2026-09-10; intrinsic_fisclear stays as the
+       reference body). */
+    (void)intrinsic_fisclear;
+    kIntrinsics[8]  = intrinsic_unbound;
     kIntrinsics[9]  = intrinsic_unbound;   /* TStart: absent in this build */
     kIntrinsics[10] = intrinsic_unbound;   /* TStop:  absent in this build */
 }

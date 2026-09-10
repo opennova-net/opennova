@@ -519,13 +519,22 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     [orig: `@0x4b4afb-0x4b4b5f`] and generic non-UseGun seat-bone follow
     [orig: `@0x4b654e`] (D-INF-2 / mount). UseGun root-position follow is separately matched
     through `Entity_AttachToBoneAndUpdateTransform @ 0x5463d0`.
-  - **D-INF-16** the run promotion's pitch-tier term ported as the constant 2. The
-    original reads `entity+0x37C` (`>0x430000 or <0 → 0; ≥0x210000 → 1; else 2` before
-    adding `run_anim` [orig: `@0x4b72aa-0x4b72cf`]), but the field has NO writer anywhere
-    in the retail image (full-image displacement sweep, 2026-07-13) — pool memory is
-    zero-initialized, so the band is constantly 2. `player_body_select` bakes the 2 and
-    records the thresholds here; if a sibling title (DFX/BHD) turns out to write +0x37C,
-    lift the term into a live field. `engine/runtime/world/infantry.cpp`. The
+  - **D-INF-16 (FIXED 2026-09-10)** the run promotion's band term IS live: `entity+0x37C` is
+    the LOADOUT WEIGHT the S2C 0x5A apply stores — `NapiNPClientMsg_HandleWeaponLoadoutSync
+    @0x4290E0` calls the misnamed `Terrain_AccumulateSectorScores @0x425220` `@0x4296f9`
+    with `&g_local_player_entity`, which walks the 780 weapon slots (stride 100) summing
+    `weaponweight (+0x154) + WeaponSlot_GetTotalClips × clipweight (+0x150)` per populated
+    slot, plus the FIRST `+0x3AC` sub-variant whose `+0xD8` ammo class differs (the scan
+    `jnz`s out `@0x4252b8` into one add `@0x4252d1-0x4252e2`; a later differing sub never
+    counts, and a clipsize -1 sub contributes GetTotalClips' -1 × the main clipweight),
+    skipping the sub slots, and stores the 16.16 sum `@0x425310`. The
+    reader `@0x4b72aa-0x4b72cf` bands it `>0x430000 or <0 → 0; ≥0x210000 → 1; else 2`
+    before adding `run_anim`: kits above 67.0 u never promote, 33.0..67.0 u jog at run_2,
+    lighter kits sprint. Only the local entity is written (remote bodies stay 0 = band 2).
+    The 2026-07-13 "no writer" sweep missed the double-indirect store, so the port baked
+    the constant 2. Ported: `weapon_inventory_loadout_weight_fp16` stamps
+    `LocalPlayerLoadout::weight_fp16` on every accept/rebuild, mirrored per tick into
+    `InfantryState::loadout_weight_fp16`; `player_body_select` bands it. The
     promotion's fallthrough (re-witnessed from the disassembly 2026-09-10, corroborated
     by the jo-c reconstruction): tier ≥ 2 tests `animMap[10] != animMap[0]` (run_3)
     [orig: `@0x4b72f3-0x4b72f8`] and the ABSENT case `jz short loc_4B730A` lands on the

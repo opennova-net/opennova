@@ -686,6 +686,12 @@ void LocalPlayerPresenter::update_scope_camera() {
 		return;
 	}
 	cam->set_fov(Simulation::fov_vertical_from_horizontal(view_->get_fov_h_deg(), size.x / size.y));
+	// The world pass's near plane is 0.2 u every frame (retail re-pins it
+	// beside the FOV; the far plane is floor(fog)+1, which rides the fog
+	// owner) — Godot's 0.05 default rendered surfaces retail clips.
+	// (engine witness: render-order-re.md, the Render_ProcessMainSceneFrame
+	// per-frame depth pins)
+	cam->set_near(0.2f);
 }
 
 void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {

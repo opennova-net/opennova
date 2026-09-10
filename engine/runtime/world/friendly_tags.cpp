@@ -70,6 +70,9 @@ bool pass_gates(uint8_t team, const Entity &local,
 void collect_friendly_tags(World &world, const Entity &local,
                            std::vector<FriendlyTagSource> &out,
                            const FriendlyTagPassContext &ctx) {
+    // The session rule FriendlyTag 0 (rules word bit 0x400) returns before
+    // either walk [orig: `test g_rules_flags,400h; jnz locret` @0x5a4480..0x5a448a].
+    if (ctx.rules_no_friendly_tags) return;
     // Walk 1: the pool-0 organic loop skips the Player class bit
     // [orig: @0x5a44b0, `test [eax+24h], 100h` @0x5a44b9].
     world.registry.for_each([&](const Entity &e) {
