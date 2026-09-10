@@ -593,7 +593,7 @@ bool run_empty_slot_sweep_retires_the_row() {
 		// The fixed 0x0F header through gameFlags (byte 22) plus the score block —
 		// only its arrival matters here; the burst reply is what is under test.
 		std::vector<uint8_t> body(
-				4u + 12u + 6u + 1u + 4u * kWorldStateScoreCount + 4u, 0);
+				4u + 12u + 6u + 1u + 4u * kWorldStateAmmoPoolCount + 4u, 0);
 		const std::vector<uint8_t> dg = frame_server_session(
 				server_tx, {make_protocol_message(0x0F, body)});
 		client.receive(dg.data(), dg.size());

@@ -346,6 +346,8 @@ std::vector<uint8_t> ClientRuntime::start() {
 	tracked_window_ = TrackedCaptureWindow{};
 	authoritative_loadout_ = WeaponLoadout{};
 	authoritative_loadout_revision_ = 0;
+	authoritative_ammo_pools_.fill(0);
+	authoritative_ammo_pools_revision_ = 0;
 	deployed_ = false;
 	deployment_release_revision_ = 0;
 	authoritative_spawn_released_ = false;
@@ -736,6 +738,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			for (const WeaponLoadout &grant : pr.loadout_grants) {
 				authoritative_loadout_ = grant;
 				++authoritative_loadout_revision_;
+			}
+			// The 0x0F pool image follows the 0x5A grants in retail's burst; the
+			// embedder applies it AFTER the slot rebuild, as the client handler's
+			// copy-then-recalc does [orig: NapiNPClientMsg_0x00F @0x42e324/@0x42e424].
+			if (pr.ammo_pools_set) {
+				authoritative_ammo_pools_ = pr.ammo_pools;
+				++authoritative_ammo_pools_revision_;
 			}
 			for (const JoinerConnection::ZoneTimerUpdate &update :
 			     pr.zone_timer_updates) {

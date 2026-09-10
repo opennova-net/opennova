@@ -420,16 +420,17 @@ bool check_session_resend_list_wire_and_gap_selection() {
 
 	const std::vector<uint32_t> missing =
 			opennova::build_session_missing_sequence_list(rx, false);
-	// The witnessed walk is bounded by the queue HEAD (the lowest queued sequence, 5
-	// here): holes between later queued packets (6, 8, 9) are requested on a later
-	// pass once the frontier advances past them.
-	// [orig: CNapiNPConnection_BuildMissingSeqList @0x6234b0 head-bound @0x623527]
-	if (!expect(missing == std::vector<uint32_t>({4}),
-	            "retail missing list starts at expected and stops at the queue head"))
+	// The witnessed walk is bounded by the queue TAIL (the highest queued sequence,
+	// 10 here): every hole below it is requested in this pass — the frontier gap
+	// (4) and the holes between queued packets (6, 8, 9); queued 5 and 7 are not.
+	// [orig: CNapiNPConnection_BuildMissingSeqList @0x6234b0 — tail link read
+	//  @0x623503 (conn+0x7A4), the `candidate < tail->seq` bound @0x623527]
+	if (!expect(missing == std::vector<uint32_t>({4, 6, 8, 9}),
+	            "retail missing list starts at expected and stops at the queue tail"))
 		return false;
 	const std::vector<uint32_t> forced =
 			opennova::build_session_missing_sequence_list(rx, true);
-	if (!expect(forced == std::vector<uint32_t>({4, 0}),
+	if (!expect(forced == std::vector<uint32_t>({4, 0, 6, 8, 9}),
 	            "forced retail missing list places the zero sentinel after expected"))
 		return false;
 
@@ -441,6 +442,9 @@ bool check_session_resend_list_wire_and_gap_selection() {
 		0x44, 0x33, 0x22, 0x11,
 		0x04, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00,
+		0x06, 0x00, 0x00, 0x00,
+		0x08, 0x00, 0x00, 0x00,
+		0x09, 0x00, 0x00, 0x00,
 	};
 	if (!expect(body == expected_wire,
 	            "resend-list plaintext is key then LE dwords with no count or terminator"))

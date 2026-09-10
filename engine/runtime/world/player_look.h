@@ -19,7 +19,9 @@
 
 namespace opennova::world {
 
-// [orig: dword_24D207C default 128; clamp 1..0x1FF @ 0x49b19b-0x49b1b9]
+// [orig: dword_24D207C default 128; the 1..0x1FF clamp is the +/- ADJUST's
+//  @ 0x49b19b-0x49b1b9 — neither the profile apply @0x55161e nor the per-frame
+//  read @0x4996dd clamps, so the range is documentation here, not a gate]
 constexpr int32_t kMouseSensitivityDefault = 128;
 constexpr int32_t kMouseSensitivityMin = 1;
 constexpr int32_t kMouseSensitivityMax = 0x1FF;

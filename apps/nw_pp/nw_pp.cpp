@@ -1429,8 +1429,9 @@ void print_tag_7b(const std::vector<uint8_t> &body) {
 	if (!fi.game_name.empty()) std::printf("            game=\"%s\"\n", fi.game_name.c_str());
 }
 
-// S2C 0x0F world-state-load. The 128-entry score table is summarized (non-zero
-// count); the spawn pose + waypoint/team-name counts + team names are shown.
+// S2C 0x0F world-state-load. The 128-entry ammo-pool table (the authority's
+// serverPlayer+88664 image -> client g_localAmmoPools) is summarized (non-zero
+// count); the spawn pose + waypoint/location-name counts + names are shown.
 void print_tag_0f(const std::vector<uint8_t> &body) {
 	WorldStateLoad ws;
 	// Waypoint records ride the 0x0F wire only for a waypoint gametype (the host
@@ -1439,17 +1440,17 @@ void print_tag_0f(const std::vector<uint8_t> &body) {
 	const bool clean = decode_world_state_load(body.data(), body.size(), ws,
 	                                           gt_is_waypoint());
 	int nonzero = 0;
-	for (int32_t s : ws.team_scores) if (s) ++nonzero;
+	for (int32_t s : ws.ammo_pools) if (s) ++nonzero;
 	std::printf("        [0x0F] world-state tick=%u spawn=(%.1f, %.1f, %.1f) "
-	            "yaw=%d pitch=%d roll=%d flags=0x%02x scores[%d nz] waypoints=%u "
+	            "yaw=%d pitch=%d roll=%d flags=0x%02x ammoPools[%d nz] waypoints=%u "
 	            "teamNames=%u%s\n",
 	            ws.session_tick, fp16(ws.pos_x), fp16(ws.pos_y), fp16(ws.pos_z),
 	            int(ws.yaw), int(ws.pitch), int(ws.roll), unsigned(ws.game_flags),
 	            nonzero, unsigned(ws.waypoint_count), unsigned(ws.team_name_count),
 	            clean ? "" : " (DECODE INCOMPLETE)");
-	for (std::size_t i = 0; i < ws.team_scores.size(); ++i) {
-		if (ws.team_scores[i] != 0)
-			std::printf("            score[%zu]=%d\n", i, ws.team_scores[i]);
+	for (std::size_t i = 0; i < ws.ammo_pools.size(); ++i) {
+		if (ws.ammo_pools[i] != 0)
+			std::printf("            score[%zu]=%d\n", i, ws.ammo_pools[i]);
 	}
 	for (const auto &w : ws.waypoints)
 		std::printf("            waypoint slot=%s nameId=%u (STRWPNAME%03u) pad=%u\n",

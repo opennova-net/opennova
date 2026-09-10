@@ -1369,12 +1369,17 @@ struct FullPlayerInfo {
 };
 bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &out);
 
-// S2C 0x0F — world-state-load (§5.29). The joiner's spawn pose + game flags + a
-// fixed team-score table + waypoint/team-name lists (~624 B). Layout:
+// S2C 0x0F — world-state-load (§5.29). The joiner's spawn pose + game flags + the
+// authority's per-ammo-class POOL table + waypoint/location-name lists (~624 B).
+// Layout:
 //   [i32 sessionTick][i32 posX][i32 posY][i32 posZ]   (pos 16.16)
 //   [i16 yaw][i16 pitch][i16 roll]                     (each <<16 to 16.16)
 //   [u8 gameFlags]
-//   i32 teamScores[kWorldStateScoreCount]              (fixed 128-entry block)
+//   i32 ammoPools[kWorldStateAmmoPoolCount]            (fixed 128-entry block: the
+//       serverPlayer+88664 image, copied straight into the client's
+//       g_localAmmoPools @0xB75FE8 and followed by the clip recalculation
+//       [orig: loop @0x42e324..0x42e34a -> WeaponSlots_RecalculateAmmoFromCapacity
+//        @0x42e424]; NOT a score table — the pre-2026-09-10 label was wrong)
 //   [u16 waypointCount]
 //     { u16 slotId, u16 nameId, u8 pad } × waypointCount  // host-gametype-gated
 //   [u16 teamNameCount]
@@ -1383,7 +1388,7 @@ bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &ou
 // 0x10020 (a waypoint gametype). That gate is NOT on the wire, so an off-wire
 // decoder takes the is_waypoint_gametype hint (default false; TDM/DM send
 // waypointCount 0 / no records). [orig: NapiNPClientMsg_0x00F @ 0x42E200]
-inline constexpr int kWorldStateScoreCount = 128; // (data - outTable)/4 @ 0x42e324
+inline constexpr int kWorldStateAmmoPoolCount = 128; // (data - g_localAmmoPools)/4 @ 0x42e324
 struct WorldStateWaypoint {
 	uint16_t slot_id = 0;
 	uint16_t name_id = 0;
@@ -1394,7 +1399,7 @@ struct WorldStateLoad {
 	int32_t  pos_x = 0, pos_y = 0, pos_z = 0;
 	int16_t  yaw = 0, pitch = 0, roll = 0;
 	uint8_t  game_flags = 0;
-	std::array<int32_t, kWorldStateScoreCount> team_scores{};
+	std::array<int32_t, kWorldStateAmmoPoolCount> ammo_pools{};
 	uint16_t waypoint_count = 0;
 	std::vector<WorldStateWaypoint> waypoints;  // populated only when the hint is set
 	uint16_t team_name_count = 0;

@@ -5220,13 +5220,24 @@ int main() {
         CHECK(e->inf.anim_state == anim_state::kRun2);
         e->inf.wpn_run_anim = 0;
 
-        e->inf.player_move_dir_index = 4; // moving BACK: never promotes
+        // Tier 2 on a body adm WITHOUT run_3 falls through to the run_2 test:
+        // the run_3-absent `jz` @0x4b72f8 lands on the tier-1 arm @0x4b730a.
+        src.clips.erase(anim_state::kRun3);
         run_ticks(ai, w, 12, 16);
+        CHECK(e->inf.anim_state == anim_state::kRun2);
+        src.clips.erase(anim_state::kRun2); // neither authored: the walk stands
+        run_ticks(ai, w, 16, 20);
+        CHECK(e->inf.anim_state == anim_state::kWalkForward);
+        src.clips.insert(anim_state::kRun2);
+        src.clips.insert(anim_state::kRun3);
+
+        e->inf.player_move_dir_index = 4; // moving BACK: never promotes
+        run_ticks(ai, w, 20, 24);
         CHECK(e->inf.anim_state == anim_state::kWalkForward + 4);
         e->inf.player_move_dir_index = 0;
 
         e->inf.stance = InfantryState::Stance::kCrouch; // crouch gait: never promotes
-        run_ticks(ai, w, 16, 20);
+        run_ticks(ai, w, 24, 28);
         CHECK(e->inf.anim_state == anim_state::kWalkCrouchForward);
     }
 

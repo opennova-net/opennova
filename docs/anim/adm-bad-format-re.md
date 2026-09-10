@@ -107,7 +107,17 @@ actually mean:
   (`positions_from_model`; synthetic pin in `tests/anim/anim_sample_test.cpp`, retail pin in the `OPENNOVA_JO_ASSETS`-gated `anim_positions_from_model_corpus` ctest).
 - **Channel evaluation** slerps the quaternion keyframes per bone
   [orig: `BoneAnim_TransformBones @ 0x410360`]; translations apply only under
-  `flags & 2`.
+  `flags & 2`. The blend itself is `Math_QuaternionSlerp @ 0x615e20`
+  (witnessed 2026-09-10): no input or output normalization; a negative dot flips
+  B onto the short arc `@0x615e51`; `1 - dot <= 0.01` (float `0x3C23D70A
+  @0x7c56a8`, tested `@0x615ea6`) takes the LINEAR path with plain weights
+  `(1-t, t)`, everything else the acos/sin weights `@0x615eaa..0x615ecd`; the
+  linear result goes to `Math_QuaternionToMatrix3x3 @ 0x615a70` unnormalized.
+  Ported in `engine/runtime/anim/anim_sample.cpp quat_slerp` (the earlier 0.9995
+  nlerp threshold with renormalization was a stand-in); the reimpl's quaternion
+  pose chain still normalizes at the bind compose / parent-local extraction, so
+  the sub-unit linear-path length (|q|² ≥ 0.995) never becomes a bone scale —
+  a presentation residual below visibility, not a motion-timing one.
 
 ## Divergences
 

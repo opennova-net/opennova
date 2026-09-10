@@ -175,6 +175,15 @@ WeaponFillResult weapon_inventory_load_from_display(
 void weapon_inventory_seed_pools(const WeaponTable &table, WeaponInventory &inv,
                                  int player_class);
 
+// The joiner's S2C 0x0F pool apply [orig: NapiNPClientMsg_0x00F @ 0x42e324..0x42e34a —
+// the 128 wire dwords land in g_localAmmoPools verbatim (every entry, zeros
+// included; indexed by the retail ammo-class id), then
+// WeaponSlots_RecalculateAmmoFromCapacity @ 0x42e424 returns each slot's clip and
+// re-draws it from the authority's pools]. Entries past the table's class count
+// have no home here and are dropped.
+void weapon_inventory_apply_authority_pools(const WeaponTable &table, WeaponInventory &inv,
+                                            const std::array<int32_t, 128> &pools);
+
 // The clip normalization [orig: WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280]:
 // for each populated slot with ammo_class_count (pool-units/round) nonzero and
 // clipsize != -1: return the current clip to the pool, then draw one full clip

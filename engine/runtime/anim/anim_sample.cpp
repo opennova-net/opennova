@@ -84,24 +84,34 @@ Quat mat3_to_quat(const float m[9]) {
     return quat_normalize(q);
 }
 
+// [orig: Math_QuaternionSlerp @0x615e20 — no input or output normalization. A
+//  negative dot flips B onto the short arc @0x615e51..0x615e74; `1 - dot <=
+//  0.01` (the float 0x3C23D70A @0x7c56a8, tested @0x615ea6) takes the LINEAR
+//  path with plain weights (1-t, t) @0x615ed3/0x615ed7, everything else the
+//  acos/sin weights @0x615eaa..0x615ecd. The linear result is NOT renormalized:
+//  retail hands it to Math_QuaternionToMatrix3x3 @0x615a70 as is. Our pose chain
+//  is quaternion-based and normalizes at the bind compose and the parent-local
+//  extraction, so that sub-unit length (|q|^2 >= 0.995 at the threshold) never
+//  becomes a bone scale here — a presentation residual, not a timing one; the
+//  threshold and the weights are what shape the motion.]
 Quat quat_slerp(Quat a, Quat b, float t) {
-    a = quat_normalize(a);
-    b = quat_normalize(b);
     float dot = a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z;
-    if (dot < 0.0f) {  // shortest path (hemisphere flip)
+    if (dot < 0.0f) {  // shortest path (hemisphere flip) [orig: @0x615e51]
         b = {-b.w, -b.x, -b.y, -b.z};
         dot = -dot;
     }
-    if (dot > 0.9995f) {  // near-parallel: nlerp (matches the engine's small-angle fast path)
-        return quat_normalize({a.w + (b.w - a.w) * t, a.x + (b.x - a.x) * t,
-                               a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t});
+    float wa, wb;
+    if (1.0f - dot <= 0.0099999998f) {  // [orig: @0x615ea6 — linear weights]
+        wb = t;
+        wa = 1.0f - t;
+    } else {
+        const float omega = std::acos(dot);                 // [orig: @0x615eaa]
+        const float inv_sin = 1.0f / std::sin(omega);       // [orig: @0x615eb7]
+        wa = std::sin((1.0f - t) * omega) * inv_sin;
+        wb = inv_sin * std::sin(t * omega);
     }
-    const float theta = std::acos(dot);
-    const float inv_sin = 1.0f / std::sin(theta);
-    const float wa = std::sin((1.0f - t) * theta) * inv_sin;
-    const float wb = std::sin(t * theta) * inv_sin;
-    return quat_normalize({a.w * wa + b.w * wb, a.x * wa + b.x * wb,
-                           a.y * wa + b.y * wb, a.z * wa + b.z * wb});
+    return {a.w * wa + wb * b.w, a.x * wa + wb * b.x,
+            b.y * wb + wa * a.y, wb * b.z + wa * a.z};
 }
 
 namespace {

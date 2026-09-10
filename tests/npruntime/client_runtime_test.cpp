@@ -4791,6 +4791,56 @@ bool run_finite_quality_retention_expires_on_flush_310() {
 	            "C2S 0x4C expires individually at finite boundary C+309");
 }
 
+// S2C 0x0F carries the authority's 128-dword ammo-pool image (serverPlayer+88664 ->
+// client g_localAmmoPools) at the fixed body offset 23; the runtime retains it with
+// a revision the embedder applies after the 0x5A slot rebuild, and start() clears
+// it with the other authoritative state. [orig: NapiNPClientMsg_0x00F
+// @0x42e324..0x42e34a -> WeaponSlots_RecalculateAmmoFromCapacity @0x42e424]
+bool run_world_state_load_pools_reach_the_runtime() {
+	const std::string client_scrk = "CLIENT-POOLS-SCRK";
+	const std::string server_scrk = "SERVER-POOLS-SCRK";
+	uint64_t now_ms = 0x01020304u;
+	inmatch::ClientRuntime client("Pools", [&now_ms] { return now_ms; });
+	client.seed_session(
+			0x44556677u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	if (!expect(client.authoritative_ammo_pools_revision() == 0,
+			"a fresh runtime holds no authority pool image"))
+		return false;
+
+	// 23-byte fixed header, the 128 pool dwords, zero waypoint/location counts.
+	std::vector<uint8_t> body(23 + kWorldStateAmmoPoolCount * 4 + 4, 0);
+	const auto put_pool = [&body](size_t index, uint32_t value) {
+		const size_t at = 23 + index * 4;
+		body[at] = uint8_t(value);
+		body[at + 1] = uint8_t(value >> 8);
+		body[at + 2] = uint8_t(value >> 16);
+		body[at + 3] = uint8_t(value >> 24);
+	};
+	put_pool(3, 270);  // the golden team-1 image: M16 300 -> 270 after the clip draw
+	put_pool(21, 63);  // .45 70 -> 63
+	put_pool(76, 2);   // AT4 3 -> 2
+	put_pool(127, 0xFFFFFFF7u); // a negative pool rides as is (shipped -1 startrounds)
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> framed = frame_server_session(
+			server_tx, server_scrk, 1u, {make_protocol_message(0x0F, body)});
+	client.receive(framed.data(), framed.size());
+	(void)client.Client_ProcessNetworkFrame(10);
+	const std::array<int32_t, kWorldStateAmmoPoolCount> &pools =
+			client.authoritative_ammo_pools();
+	if (!expect(client.authoritative_ammo_pools_revision() == 1 &&
+	                    pools[3] == 270 && pools[21] == 63 && pools[76] == 2 &&
+	                    pools[127] == -9 && pools[0] == 0 && pools[4] == 0,
+			"the 0x0F pool image is retained verbatim with one revision"))
+		return false;
+
+	(void)client.start();
+	return expect(client.authoritative_ammo_pools_revision() == 0 &&
+	                      client.authoritative_ammo_pools()[3] == 0,
+			"start clears the authority pool image with the other authoritative state");
+}
+
 bool run_start_resets_reusable_runtime_state() {
 	const std::string client_scrk = "CLIENT-REUSE-SCRK";
 	const std::string server_scrk = "SERVER-REUSE-SCRK";
@@ -5353,6 +5403,7 @@ int main() {
 	                run_settings_send_holdoff_blocks_exact_frame_count() &&
 	                run_send_holdoff_defers_due_housekeeping() &&
 	                run_finite_quality_retention_expires_on_flush_310() &&
+	                run_world_state_load_pools_reach_the_runtime() &&
 	                run_start_resets_reusable_runtime_state() &&
 	                run_joiner_correlates_handshake_echoes() &&
 	                run_tick_seed_anchors_the_client_clock() &&

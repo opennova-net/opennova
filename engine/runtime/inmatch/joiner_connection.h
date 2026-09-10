@@ -144,6 +144,13 @@ public:
 		bool send_holdoff_set = false;
 		uint32_t send_holdoff = 0;
 		std::vector<WeaponLoadout> loadout_grants;
+		// S2C 0x0F — the authority's per-ammo-class pool image (serverPlayer+88664),
+		// the fixed 128-dword span at body offset 23 that retail copies straight into
+		// g_localAmmoPools before re-drawing every clip. `set` marks a 0x0F seen this
+		// poll (a later one in the same poll wins, as the last handler run would).
+		// [orig: NapiNPClientMsg_0x00F @0x42e324..0x42e34a -> @0x42e424]
+		bool ammo_pools_set = false;
+		std::array<int32_t, kWorldStateAmmoPoolCount> ammo_pools{};
 		std::vector<ZoneTimerUpdate> zone_timer_updates;
 		// S2C 0x50 leg 1: this poll re-latched OUR OWN team (the same byte_A85B48
 		// latch the S2C 0x04 tail writes). The binding re-styles friend/foe from it.

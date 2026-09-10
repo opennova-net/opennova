@@ -583,21 +583,33 @@ Error Simulation::load_weapon_profile(const String &p_path) {
 void Simulation::apply_joiner_authoritative_loadout() {
 	if (!is_joiner() || !runtime_ || !kernel_ || kernel_->world.tables.weapons.empty()) return;
 	const uint64_t revision = runtime_->authoritative_loadout_revision();
-	if (revision == 0 || revision <= net_.joiner_applied_loadout_revision) return;
-
-	// The grant -> kit-row conversion (name resolve + SIGNED clip reinterpret)
-	// is inmatch::kit_from_authoritative_grant's.
-	const opennova::WeaponLoadout &grant = runtime_->authoritative_loadout();
-	std::vector<opennova::world::WeaponKitEntry> kit;
-	opennova::inmatch::kit_from_authoritative_grant(kernel_->world.tables.weapons, grant, kit);
-	// Do not echo an authoritative grant back as a new C2S 0x2F request. The
-	// S2C handler rebuilds the slots directly at recv-before-actions. The rebuild
-	// inside still re-arms the seam, but its ROWS come from the profile page, never
-	// from the grant — only the live equipped slot refreshes, which is exactly what
-	// retail's second submit carries [orig: Game_StartMission @0x525c2e].
-	if (apply_local_player_loadout_rows(
-				std::move(kit), grant.avatar_class, /*p_submit_joiner_request=*/false))
-		net_.joiner_applied_loadout_revision = revision;
+	if (revision != 0 && revision > net_.joiner_applied_loadout_revision) {
+		// The grant -> kit-row conversion (name resolve + SIGNED clip reinterpret)
+		// is inmatch::kit_from_authoritative_grant's.
+		const opennova::WeaponLoadout &grant = runtime_->authoritative_loadout();
+		std::vector<opennova::world::WeaponKitEntry> kit;
+		opennova::inmatch::kit_from_authoritative_grant(kernel_->world.tables.weapons, grant, kit);
+		// Do not echo an authoritative grant back as a new C2S 0x2F request. The
+		// S2C handler rebuilds the slots directly at recv-before-actions. The rebuild
+		// inside still re-arms the seam, but its ROWS come from the profile page, never
+		// from the grant — only the live equipped slot refreshes, which is exactly what
+		// retail's second submit carries [orig: Game_StartMission @0x525c2e].
+		if (apply_local_player_loadout_rows(
+					std::move(kit), grant.avatar_class, /*p_submit_joiner_request=*/false))
+			net_.joiner_applied_loadout_revision = revision;
+	}
+	// The S2C 0x0F pool image lands AFTER the 0x5A slot rebuild, exactly as the
+	// retail client handler copies g_localAmmoPools and re-draws every clip (the
+	// engine's weapon_inventory_apply_authority_pools carries the witness). It
+	// waits for a valid inventory: the rebuild above is what makes one on a joiner.
+	const uint64_t pools_revision = runtime_->authoritative_ammo_pools_revision();
+	if (pools_revision != 0 && pools_revision > net_.joiner_applied_ammo_pools_revision &&
+	    kernel_->local.inventory_valid) {
+		opennova::world::weapon_inventory_apply_authority_pools(
+				kernel_->world.tables.weapons, kernel_->local.inventory,
+				runtime_->authoritative_ammo_pools());
+		net_.joiner_applied_ammo_pools_revision = pools_revision;
+	}
 }
 
 Ref<PlayerInventory> Simulation::get_local_player_inventory() const {

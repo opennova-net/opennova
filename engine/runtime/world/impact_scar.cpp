@@ -20,13 +20,18 @@ int64_t dot_q16(const int32_t a[3], const int32_t b[3]) {
 			static_cast<int64_t>(a[2]) * b[2]) >> 16;
 }
 
+// [orig: Math_FixedPointCrossProduct @0x6134A0 — EACH 64-bit product is
+//  rounded (+0x8000, >> 16) BEFORE the subtraction (`imul; add 0x8000; adc;
+//  shrd 16` per term @0x6134f7/@0x61353f/@0x613588); the scar basis calls it
+//  @0x5CCADA and @0x5CCAE6. Shifting the difference instead is off by one LSB
+//  on roughly half the inputs.]
 void cross_q16(const int32_t a[3], const int32_t b[3], int32_t out[3]) {
-	out[0] = static_cast<int32_t>((static_cast<int64_t>(a[1]) * b[2] -
-			static_cast<int64_t>(a[2]) * b[1]) >> 16);
-	out[1] = static_cast<int32_t>((static_cast<int64_t>(a[2]) * b[0] -
-			static_cast<int64_t>(a[0]) * b[2]) >> 16);
-	out[2] = static_cast<int32_t>((static_cast<int64_t>(a[0]) * b[1] -
-			static_cast<int64_t>(a[1]) * b[0]) >> 16);
+	const auto mul_q16 = [](int32_t x, int32_t y) {
+		return static_cast<int32_t>((static_cast<int64_t>(x) * y + 0x8000) >> 16);
+	};
+	out[0] = mul_q16(a[1], b[2]) - mul_q16(a[2], b[1]);
+	out[1] = mul_q16(a[2], b[0]) - mul_q16(a[0], b[2]);
+	out[2] = mul_q16(a[0], b[1]) - mul_q16(a[1], b[0]);
 }
 
 // The writer's normalise [orig: the fsqrt / 65536 block @0x5CCA74..0x5CCAD7;

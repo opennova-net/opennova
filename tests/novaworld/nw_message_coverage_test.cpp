@@ -501,16 +501,16 @@ int check_S_0F_world_state() {
 	w.u32(100); w.u32(200); w.u32(300);      // pos x/y/z (16.16)
 	w.u16(0x4000); w.u16(0); w.u16(0);       // yaw/pitch/roll (i16)
 	w.u8(0x00);                              // game_flags
-	for (int i = 0; i < kWorldStateScoreCount; ++i) w.u32(0); // 128 scores
+	for (int i = 0; i < kWorldStateAmmoPoolCount; ++i) w.u32(0); // 128 scores
 	w.u16(0);                                // waypoint_count
 	w.u16(0);                                // team_name_count
-	EXPECT(w.b.size() == size_t(4 + 12 + 6 + 1 + 4 * kWorldStateScoreCount + 2 + 2));
+	EXPECT(w.b.size() == size_t(4 + 12 + 6 + 1 + 4 * kWorldStateAmmoPoolCount + 2 + 2));
 	WorldStateLoad out;
 	EXPECT(decode_world_state_load(w.b.data(), w.b.size(), out));
 	EXPECT(out.session_tick == 0x11223344);
 	EXPECT(out.yaw == 0x4000);
 	EXPECT(out.waypoint_count == 0);
-	EXPECT(out.team_scores.size() == size_t(kWorldStateScoreCount));
+	EXPECT(out.ammo_pools.size() == size_t(kWorldStateAmmoPoolCount));
 	cover('S', 0x0F);
 	return 0;
 }

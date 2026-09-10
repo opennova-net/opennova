@@ -340,7 +340,7 @@ sweep; blank = not yet characterized.
 | 0x0B | 0x422660 | `_HandleBMSHeader` | copies the 616-byte BMS header into `g_BmsHeaderBlock @ 0xA761D0` (field map §5.4) — a JOINER's only mission-identity source; it never opens the `.bms` (§5.28 correction, D-NET-194) |
 | 0x0C | 0x42E730 | `_0x00C` | pool-0 organic spawn batch (AI infantry + players); `[u16 count]` header + per-record FLAT layout (slotId-first, no flag-gated optionals) per the §5.23 field map; parses name inline (crash-safe on `0x14B9` where 0x0D is not, §5.6); team → entity+354 |
 | 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; `[u16 count]` header + per-entity record per the §5.11 field map (always: 2×u16 flags+slot, u16 type, cstr name, 3×i32 pos, u8 team byte → entity+354 (gate 0x10) + u8 bone byte → entity+290 always; D-NET-58; conditional fields gated by every flag bit 0x01-0x8000); AI-flagged item defs (`ItemDef[+84] & 0x100000`) require the `flags & 0x800` trailer = **`[u32][u32][cstring ai_name]`** (§5.6/§5.11) |
-| 0x0F | 0x42E200 | `_0x00F` | **WORLD-STATE-LOAD** (no descriptive Kong name; any "game-start" label is misleading): i32 sessionTick + 3×i32 spawn pos, 3×i16 angles, u8 flags, **fixed 128-i32 score block**, then waypoint records (off-wire gametype gate) + team names; sets `dword_81474C=0` (load-bearing input/heartbeat gate); client replies with the C2S burst 0x22 0x23 0x28 0x29 0x2D 0x32; ~624 B. Full field map **§5.29** (decoded) |
+| 0x0F | 0x42E200 | `_0x00F` | **WORLD-STATE-LOAD** (no descriptive Kong name; any "game-start" label is misleading): i32 sessionTick + 3×i32 spawn pos, 3×i16 angles, u8 flags, **fixed 128-i32 ammo-pool block** (the authority's player+88664 image → client `g_localAmmoPools @0xB75FE8`, then the clip recalc; the pre-2026-09-10 "score block" label was wrong), then waypoint records (off-wire gametype gate) + team names; sets `dword_81474C=0` (load-bearing input/heartbeat gate); client replies with the C2S burst 0x22 0x23 0x28 0x29 0x2D 0x32; ~624 B. Full field map **§5.29** (decoded) |
 | 0x10 | 0x433400 | `_0x010` | static entity batch (pool 2): u16 start_idx, u16 count, flag-driven per-entity records; 612-644 B in retail, every frame; **full field map §5.9** |
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
 | 0x12 | 0x425EE0 | `_0x012` | **entity removal (decoded + PORTED 2026-08-15, `decode_entity_remove`)** — body `[u16 handle]` (a short body reads 0); gated `!is_authority`; `0xFFFF` ignored, pool must be `< 5` and slot `< capacity`, then `Entity_Destroy @0x43e810` (KOTH/flag types first re-pick the waypoint when the removed base point was `g_currentWaypoint`) — a SINGLE-row destroy: attached children DETACH rather than being erased with the parent. Sender `Server_RemoveEntityAndNotify @0x50A270`: writes the handle, `send_mask 0x90` (alive + not-host), msgClass 1, then removes a PLAYER's placed devices (`Entity_RemovePlacedDevicesByOwner @0x546e00`, itself recursing here) and destroys the row; also reached from the per-owner same-type device cap `Server_EnforcePlacedDeviceCapByOwner @0x5119E0` (surplus → oldest armed, D-THROW-10), player disconnect/death sweeps, and pool-1 slot expiry `Entity_UpdatePool1Slot @0x4b8dd0` (§5.36) |
@@ -3806,10 +3806,10 @@ entities, never the file. Custom missions reference stock terrain/tile-set/env a
 name, so nothing else must exist client-side. Full witness chain and the now-fixed
 OpenNova divergence: D-NET-194.
 
-### 5.29 Tag 0x0F — world-state-load (joiner spawn + scores + location names; probe2, 2026-06-18; server writer + field roles witnessed 2026-07-03)
+### 5.29 Tag 0x0F — world-state-load (joiner spawn + ammo pools + location names; probe2, 2026-06-18; server writer + field roles witnessed 2026-07-03; the 128-dword block re-witnessed as the AMMO POOLS 2026-09-10)
 
 After the mission header/metadata stream (§5.28) the host sends the joiner its spawn pose, the game flags, the
-per-slot-type score table, and the waypoint / location-name lists. ~624 B.
+authority's per-ammo-class pool table, and the waypoint / location-name lists. ~624 B.
 [orig: client `NapiNPClientMsg_0x00F @ 0x42E200`; server writer
 `NetPacket_WriteWorldStateLoad0x0F @ 0x502D10` — renamed 2026-07-03 from
 NetPacket_WriteWorldStateLoad0x0F (it serializes THIS body, not generic player state). Server
@@ -3823,7 +3823,7 @@ player+88664][u16 pool3Count + {u16 id, u16 val, u8}× when player+354 == 1][u16
 | 4 | i32 ×3 | posX/Y/Z | local-player spawn (16.16); → entity+4/8/12 when `!is_authority` |
 | 16 | i16 ×3 | yaw/pitch/roll | each `<< 16` to 16.16 → entity Yaw/Pitch/Roll |
 | 22 | u8 | gameFlags | bit0 = spawn zones exist (server: `SpawnZoneList_GetCount() != 0` @ 0x502da7) → sets `g_deploy_screen_active @ 0xA860DC` ONCE (gated on `g_death_screen_active @ 0xA860EC == 0`) — momentary without the 0x0A flags1-bit1 hold (§5.9/D-NET-156); bit1 = `g_respawn_requires_team_dead && in_session` → `A860DD`. The global name is misleading: cfg key `nodefaultspawnpoints` controls the target-less spawn-zone availability rule described in §5.61, not a living-player census; bit2 → `A860DE`; bit3 = ceasefire |
-| 23 | i32 ×128 | slotTypeScores | **FIXED 128-entry block** — the **per-slot-type SCORE table** (client outTable @ 0xB75FE8; readers `Entity_GetScoreValueBySlotType` / `WeaponSlot_*`; server source player+88664), NOT zone data — zeros are benign for the deploy picker (2026-07-03 correction of the "teamScores" reading). Fills `[outTable, data)` @ 0x42e324 (512 B; the bulk of the body) |
+| 23 | i32 ×128 | ammoPools | **FIXED 128-entry block** — the authority's **per-ammo-class POOL table** (server source serverPlayer+88664, the image retained at 0x2F acceptance after the initial clip draw; client target `g_localAmmoPools @ 0xB75FE8`, filled `[g_localAmmoPools, data)` @ 0x42e324..0x42e34a, then `WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280` re-draws every slot's clip from it @ 0x42e424). Indexed by the retail ammo-class id. NOT zone data and NOT a score table: the 2026-07-03 "per-slot-type SCORE table" reading (and the earlier "teamScores") were wrong — corrected 2026-09-10 (jo-c cross-check + the handler's `g_localAmmoPools` target). 512 B; the bulk of the body |
 | 535 | u16 | waypointCount | |
 | 537 | … | waypointRecords | `{ u16 slotId, u16 nameId, u8 pad }` × waypointCount — **present ONLY for a waypoint gametype** `(g_GameType & 0xFFFDFFFF) == 0x10020`; that gate is **not on the wire** (off-wire, like the §5.9 0x0A objective block), so the decoder takes the `is_waypoint_gametype` hint. **First witnessed in probe3** (Co-op `g_GameType 0x30020`): `waypointCount=4` (slots p3/6-9), `teamNameCount=0`; byte-exact once the hint is supplied (D-NET-75). TDM/A&S send count 0 |
 | … | u16 | nameCount | |
@@ -3849,8 +3849,9 @@ Because the waypoint gate is off-wire, an off-wire decoder takes an `is_waypoint
 byte-exact. A non-authority client then queues the C2S burst replies
 `0x28`/`0x29`/`0x2D`/`0x32`/`0x22`/`0x23` (§5.33). **Witness:** probe2 `0x0F` — `decode_world_state_load`
 consumes the 539-byte body to the byte: `tick=501013671 spawn=(85.0, 0.0, 27.6) yaw=0xC000 flags=0x01
-scores[7 nz] waypoints=0 teamNames=0` (spawn x=85 matches an authored Red start; `waypoints=0`
-confirms the TDM gate-off default and the 128-entry score-block count).
+ammoPools[7 nz] waypoints=0 teamNames=0` (spawn x=85 matches an authored Red start; `waypoints=0`
+confirms the TDM gate-off default and the 128-entry ammo-pool block count; the seven
+non-zero entries are the accepted loadout's ammo classes).
 
 ### 5.30 Tag 0x5A — weapon-loadout sync (probe2, 2026-06-18)
 
@@ -5312,7 +5313,7 @@ mouse delta: `Yaw ±= analog<<16` (**wraps, no clamp**); `Pitch = clamp(Pitch ±
 ±954437120)` = **±80°** (turret variant +40° when entity flag 0x100); center-view → `Pitch = 0`.
 
 **Sensitivity / FOV** `[orig: Input_ProcessMouseAxisBindings @ 0x499680]`: `scaled = (raw_delta ·
-(dword_24D207C<<11) + 0x8000) >> 16`; `dword_24D207C ∈ [1,511]`; Y inverted unless `dword_24D2078`.
+(dword_24D207C<<11) + 0x8000) >> 16`; the setting is read RAW here — the mousescale +/- adjust keeps it in [1,511] `[orig: @0x49b19b-0x49b1b9]` while the profile apply copies it unclamped `[orig: apply_session_settings_to_globals @0x55161e]`; Y inverted unless `dword_24D2078`.
 FOV = `dword_A7839C / 65536` degrees (16.16; base `dword_26C6844`, scope-modified)
 `[orig: Render_ProcessMainSceneFrame @ 0x5ca0f0 @ 0x5ca601]`.
 Completed 2026-07-13: the raw deltas are **center-lock cursor PIXELS per frame**
@@ -11721,6 +11722,19 @@ in [divergence-ledger.md](../divergence-ledger.md).
   therefore never poison the receiver's reassembly buffer. The 1199-retained +
   two-record regression pins this boundary beside the ordinary 1199+2 prefix
   case (`npruntime_server_session`).
+
+  **D-NET-164 request-bound correction (FIXED 2026-09-10, flagged by the jo-c
+  reconstruction):** the builder's walk is bounded by the packet list's TAIL, not
+  its head. The connection's `NapiListHead {self, next, prev, count}` sits at
+  conn+0x79C (`NapiNPPacket_CreateAndInsert` takes its address @0x6243fa): +0x7A0
+  `next` is the head link `CNapiNPConnection_FindTimerByIdFromHead @0x621e18`
+  walks, +0x7A4 `prev` is the last node, +0x7A8 the count the session-packet cap
+  compares. `BuildMissingSeqList` reads +0x7A4 @0x623503 and runs
+  `candidate < tail->seq` @0x623527, so ONE pass requests every hole below the
+  highest queued sequence — the frontier gap and every gap between queued
+  packets — up to the sixteen-entry cap. The port had bounded the walk by the
+  lowest queued sequence (one gap per pass); `build_session_missing_sequence_list`
+  and its `protocol_message` pin now follow the tail.
 
   **D-NET-164 active-send refinement (PORTED 2026-07-23, interval corrected 2026-07-24):**
   retention alone does not resend a

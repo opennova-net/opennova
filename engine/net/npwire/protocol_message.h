@@ -299,8 +299,10 @@ size_t session_outbound_message_prefix_count(
 
 // Retail's 0x44/0x84 NACK carries at most sixteen requested packet sequences. Its outer-NWU-
 // decrypted body is `[peer_local_key:u32le][requested_seq:u32le...]`; there is no count field.
-// [orig: BuildMissingSeqList @0x6234B0; SendMissingSeqList @0x623560;
-// NapiNP_HandleResendList @0x623800]
+// The list is `expected` [, 0] then every unqueued sequence below the queue TAIL (the
+// highest queued sequence), ascending, until the cap.
+// [orig: BuildMissingSeqList @0x6234B0 (tail bound @0x623503/@0x623527);
+// SendMissingSeqList @0x623560; NapiNP_HandleResendList @0x623800]
 constexpr size_t SESSION_RESEND_LIST_MAX = 16;
 
 std::vector<uint32_t> build_session_missing_sequence_list(

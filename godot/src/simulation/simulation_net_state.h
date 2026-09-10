@@ -121,6 +121,10 @@ struct SimulationNetState {
 	// Requests may rebuild optimistically, but only a newer host grant becomes
 	// the durable spawn/respawn kit.
 	uint64_t joiner_applied_loadout_revision = 0;
+	// Last S2C 0x0F ammo-pool image copied into the local inventory (after the
+	// grant above rebuilt the slots; engine: world/weapon_inventory.h
+	// weapon_inventory_apply_authority_pools carries the witness).
+	uint64_t joiner_applied_ammo_pools_revision = 0;
 	// The deploy/spawn-zone registry (letters/pick-index space), built lazily
 	// per load (engine: runtime/hud/hud_lfp_panel.h), and the joiner role's
 	// world-sync serial it was last derived at (a streamed topology change

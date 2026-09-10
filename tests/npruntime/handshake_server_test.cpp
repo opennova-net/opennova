@@ -2411,7 +2411,7 @@ bool run_loadout_resolve_with_armory() {
 		}
 		if (!expect(
 				connection != nullptr && pool_id >= 0 && pool_id < 128 &&
-						connection->reply.slot_type_scores[static_cast<size_t>(pool_id)] ==
+						connection->reply.ammo_pools[static_cast<size_t>(pool_id)] ==
 								expected_pool,
 				"accepted 0x2F retains the authority ammo pool for S2C 0x0F")) {
 			return false;
