@@ -3170,7 +3170,64 @@ void test_unwitnessed_class_keeps_tree_body() {
 	CHECK(count_effect(w, "Effect_LrgOrdExp", 1) == 1);
 }
 
+// The retail parentSlot codes describe the attachment TYPE, not the dense
+// seat-vector index. Exercise the production attach path with reordered seats.
+// [orig: Projectile_ProcessExplosionQueue @0x4eb0e2..0x4eb136]
+int mounted_blast_health(SeatType seat_type, int seat_index, bool gun_on_vehicle) {
+    auto world = std::make_unique<World>();
+    World &w = *world;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    w.tables.ammo.entries.resize(2);
+    auto &ammo = w.tables.ammo.entries[1];
+    ammo.valid = true;
+    ammo.kztype = ammo_kz::kStandard;
+    ammo.kz_damage = 50;
+    ammo.kz_minradius = 1;
+    ammo.kz_maxradius = 8;
+    ammo.flags = kAmmoFlagNoMItems | kAmmoFlagNoDItems;
+    Entity vehicle;
+    vehicle.kind = EntityKind::Item;
+    vehicle.has_item_def = true;
+    vehicle.item_type = 1;
+    vehicle.health = 200;
+    vehicle.position = {0,0,0};
+    if (gun_on_vehicle) vehicle.ground_target = w.registry.spawn(1, vehicle);
+    vehicle.seats.resize(6);
+    for (int i = 0; i < 6; ++i) {
+        vehicle.seats[i].type = seat_type;
+        vehicle.seats[i].bone_index = static_cast<uint8_t>(i + 1);
+    }
+    EntityHandle vh = w.registry.spawn(1, vehicle);
+    Entity passenger;
+    passenger.kind = EntityKind::Organic;
+    passenger.health = 100;
+    passenger.health_max = 100;
+    passenger.position = {0,0,0};
+    EntityHandle ph = w.registry.spawn(0, passenger);
+    CHECK(w.vehicles.process_attach(ph, vh, static_cast<uint8_t>(seat_index + 1)));
+    CHECK(w.registry.get(ph)->mount_type == seat_type);
+    CHECK(w.registry.get(ph)->mount_seat == seat_index);
+    ExplosionEntry blast;
+    blast.type = ammo_kz::kStandard;
+    blast.ammo_index = 1;
+    blast.pos = {0,0,0};
+    w.explosions.queue_explosion(w, blast);
+    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    return w.registry.get(ph)->health;
+}
+
+void test_mounted_blast_protection_follows_seat_type() {
+    for (SeatType type : {SeatType::Passenger, SeatType::Controller, SeatType::Driver})
+        for (int index : {0, 1, 3, 5}) CHECK(mounted_blast_health(type, index, false) == 100);
+    for (int index : {0, 1, 3, 5}) {
+        CHECK(mounted_blast_health(SeatType::Gunner, index, true) == 100);
+        CHECK(mounted_blast_health(SeatType::Gunner, index, false) == 50);
+    }
+}
+
 int main() {
+    test_mounted_blast_protection_follows_seat_type();
 	test_gnrl_death_is_husk_sound_and_one_effect();
 	test_gnrl_client_kill_leg();
 	test_gnrc_death_lands_husk_four_ticks_later();

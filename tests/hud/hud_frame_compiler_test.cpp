@@ -1602,6 +1602,21 @@ void test_sights_card_element(const fnt_font_t *font) {
 					"index 2 draws the scale row's full box");
 		}
 	}
+	// Native widescreen aspect: scale the rounded viewport Y coordinates
+	// around the viewport centre by 3 / (4 * height/width).
+	// [orig: draw_weapon_sight_overlays @0x4dd0cd..0x4dd0f7]
+	{
+		const auto quads = sight_quads(compiler.compile(state, 1920.0f, 1080.0f));
+		CHECK(quads.size() == 3, "widescreen preserves every sights row");
+		if (quads.size() == 3) {
+			CHECK(quads[0].x0 == 188.0f && quads[0].x1 == 563.0f,
+					"sights corners round through the viewport scaler");
+			CHECK(std::fabs(quads[0].y0 - (540.0f + (281.0f - 540.0f) * 4.0f / 3.0f)) < 0.001f,
+					"widescreen sights correct Y about the viewport centre");
+			CHECK(std::fabs(quads[2].y0 - (540.0f + (315.0f - 540.0f) * 4.0f / 3.0f)) < 0.001f,
+					"the slide offset receives the same aspect correction");
+		}
+	}
 	state.binoculars_view_active = true;
 	CHECK(sight_quads(compiler.compile(state, 1024.0f, 768.0f)).empty(),
 			"the binocular view suppresses the card");

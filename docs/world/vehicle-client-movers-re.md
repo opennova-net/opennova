@@ -662,6 +662,15 @@ The `(is_authority || occupant == local)` gate's other arm of the aircraft mover
    the boarders hold [@ 0x491b7a..0x491c01]. The parked block (no pilot / dead)
    [@ 0x491be6..0x491c6d] zeroes the registers, calls the stuck check
    [@ 0x491c5e] and clears Flags 0x80.
+   The pilot/AI/parking block is entered only for PlayerControl (def+0x54 &
+   0x40). A non-drivable aircraft skips it; on authority it seeds brain[131]
+   to sampled ground + brain[137], then joins the rotor/engine gate. A client
+   keeps the replicated target [orig: Entity_UpdateAircraftPhysics @ 0x490310,
+   gate @ 0x490ef6, authority branch @ 0x491da7, store @ 0x491dbd].
+   `chel_ai_drive` preserves the collective on that path and
+   `aircraft_client_tick` applies the ground-relative target. Ctest
+   `aircraft_client_motor` exercises the real vehicle pass with a gunner-only
+   aircraft and contrasts the drivable, unpiloted parking path.
 4. **Engine flag** [@ 0x491dfd..0x491e11]: `Flags 0x80 = [548] != 0` — port:
    `VehicleMotorState::net_climb` carries [548] on the authority (the client
    path keeps folding it into `net_alt_target`).

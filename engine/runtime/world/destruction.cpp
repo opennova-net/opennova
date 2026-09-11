@@ -638,13 +638,14 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                     // the vehicle; seat 3 (a gun standing on something) leaves
                     // it when the parent's groundEntity is a vehicle. Every
                     // other seat state falls through to the LOS.
-                    const int seat = t->mount_seat;
+                    const SeatType seat = t->mount_type;
                     const Entity *parent = t->mount_target.valid()
                             ? world.registry.get(t->mount_target) : nullptr;
-                    if (seat == 1 || seat == 2 || seat == 5) {
+                    if (seat == SeatType::Passenger || seat == SeatType::Controller ||
+                            seat == SeatType::Driver) {
                         if (parent != nullptr && (!parent->has_item_def || parent->item_type == 1))
                             continue;
-                    } else if (seat == 3) {
+                    } else if (seat == SeatType::Gunner) {
                         const Entity *ground = (parent != nullptr && parent->ground_target.valid())
                                 ? world.registry.get(parent->ground_target) : nullptr;
                         if (ground != nullptr && ground->has_item_def && ground->item_type == 1)

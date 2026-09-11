@@ -131,13 +131,13 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 		# The rect the card draws is the engine's mode-resolved one (a `scale`
 		# row shrinks about its centre at the default sight-scale index; a
 		# standalone card carries slide multiplier 0), scaled through the
-		# engine's witnessed per-corner pixel snap (HudPos.scale_rect
+		# engine's witnessed per-corner pixel snap and aspect correction (HudPos.sight_scale_rect
 		# [orig: Viewport_ScaleToVirtualCoords @0x5d2b20]), which replaced the
 		# old .gd position*scale approximation.
 		var design := sight.evaluate_rect(HudOverlay.sight_scale_index_default(), 0)
 		assert_eq(card.row_rect(i), design,
 			"SIGHTS row %d resolves its rect through the engine evaluator" % i)
-		var expected := HudPos.scale_rect(design, surface)
+		var expected := HudPos.sight_scale_rect(design, surface)
 		assert_eq(RenderingServer.debug_canvas_item_get_rect(row.get_canvas_item()), expected,
 			"SIGHTS row %d emits its mode-resolved draw rectangle" % i)
 	# The scale-flagged red-dot row draws three quarters of its authored box
@@ -859,3 +859,10 @@ func test_lfp_panel_device_seam() -> void:
 	await get_tree().process_frame
 	hud.set_lfp_panel(false, 0, 0, 0, {}, null)
 	assert_true(is_instance_valid(hud), "Hiding the zone panel is safe.")
+
+
+func test_sights_viewport_aspect_preserves_square_reticle() -> void:
+	var square := Rect2(384, 256, 256, 256)
+	assert_eq(HudPos.sight_scale_rect(square, Vector2(1024, 768)), square)
+	assert_eq(HudPos.sight_scale_rect(square, Vector2(1920, 1080)),
+			Rect2(720, 300, 480, 480), "widescreen reticle stays square and centered")

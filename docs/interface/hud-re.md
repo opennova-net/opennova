@@ -642,8 +642,14 @@ writer in the image. Retail honours `scale`/`slide` only as token 7 with >= 8
 tokens (`@0x544b7a`); our parser scans any trailing token, a superset. After
 `Viewport_ScaleToVirtualCoords` the drawer also applies an aspect y-correction
 `y' = (y - H/2) * 3/(4*flt_8409EC) + H/2` (`@0x4dd0cd..0x4dd0f7`, the factor
-from `Render_SetAspectRatioMode @0x58d870`; mode 0 = 0.75 = identity) — not
-ported (no aspect-mode state exists in the port).
+from `Render_SetAspectRatioMode @ 0x58d870`; mode 0 = 0.75 = identity).
+The port uses native aspect, `flt_8409EC = H/W` [orig: Render_SetAspectRatioMode
+@ 0x58d870, native store @ 0x58d8c9..0x58d8d9]. `sight_rect_to_viewport`
+applies per-corner pixel rounding first, then this correction about H/2;
+`HudFrameCompiler` and the thin `HudPos::sight_scale_rect` binding share it.
+Ctest `hud_frame_compiler` pins plain and sliding rows at 1920x1080; GUT
+`hud_overlay_test` pins a square reticle at both 4:3 and 16:9. Explicit aspect-mode
+selection remains absent; the native viewport path is ported.
 
 Port: `world::weapon_sights_card_eligible` owns the dynamic selector, the sim
 publishes it as `scope_card_active`, `engine/runtime/hud/sight_overlay.h`

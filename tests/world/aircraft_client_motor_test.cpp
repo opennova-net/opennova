@@ -12,6 +12,8 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
+#include <runtime/world/vehicle_part_anim.h>
+#include <runtime/devtools/tick_profile.h>
 
 #include <base/io/bam.h>
 
@@ -449,10 +451,53 @@ bool run_flare_roles_and_seat_cadence() {
 	return ok;
 }
 
+// The no-PlayerControl branch bypasses pilot/AI parking and derives the
+// authority hover target from ground + brain[137].
+// [orig: Entity_UpdateAircraftPhysics @0x490ef6..0x490efa, @0x491da7..0x491dbd]
+bool run_non_drivable_hover_seed() {
+	bool ok = true;
+	for (bool player_control : {false, true}) {
+		Rig r;
+		make_rig(r);
+		r.world.ai.is_authority = true;
+		r.traits.player_control = player_control;
+		w::Entity *heli = prime(r, true);
+		heli->veh.net_predicted = false;
+		heli->health = heli->health_max = 100;
+		heli->veh.ground_cache = w::to_fixed(40);
+		heli->veh.part_spin.speed = w::kRotorSpeedMax;
+		// A UseGun occupant spins the rotor without being a flight controller.
+		w::Seat seat;
+		seat.type = w::SeatType::Gunner;
+		seat.bone_index = 6;
+		heli->seats.push_back(seat);
+		w::Entity gunner;
+		gunner.kind = w::EntityKind::Organic;
+		gunner.health = 100;
+		const auto gunner_h = r.world.registry.spawn(0, gunner);
+		ok &= expect(r.world.vehicles.process_attach(gunner_h, r.heli, 6), "gunner attaches");
+		auto *brain = r.world.ai.at(r.world.ai.attach(r.heli));
+		brain->profile.type = 1;
+		brain->brain.f[w::AiBrain::kWorkPosZ] = w::to_fixed(60);
+		brain->brain.f[137] = w::to_fixed(25);
+		r.world.vehicles.traits.set(heli->item_id, r.traits);
+		opennova::devtools::ProfileLap lap(r.world.profile);
+		r.world.vehicles.tick_motors(true, lap);
+		ok &= expect(heli->veh.net_climb == (player_control ? 0 : w::to_fixed(25)),
+				"only a drivable aircraft without a pilot clears collective");
+		ok &= expect(heli->veh.net_alt_target == (player_control ? w::to_fixed(40) - 0x4000 : w::to_fixed(65)),
+				"non-drivable authority aircraft seed hover above terrain");
+		ok &= expect(brain->brain.f[w::AiBrain::kWorkPosZ] == heli->veh.net_alt_target,
+				"the vehicle motor publishes hover altitude back to its brain");
+	}
+	return ok;
+}
+
 } // namespace
 
 int main() {
-	bool ok = run_collective_and_view_boundaries();
+	bool ok = run_non_drivable_hover_seed();
+	ok &= run_collective_and_view_boundaries();
 	ok &= run_dead_hull_skips_live_servos();
 	ok &= run_flare_roles_and_seat_cadence();
 	ok &= run_gear_clearance_servo();

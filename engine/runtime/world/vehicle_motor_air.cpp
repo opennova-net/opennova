@@ -329,6 +329,13 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 		}
 	}
 
+	// The non-drivable authority arm keeps brain[137]'s hover clearance and
+	// writes brain[131] = ground + clearance before the ordinary rotor gate.
+	// Clients retain their received altitude target.
+	// [orig: Entity_UpdateAircraftPhysics @0x491da7..0x491dc3]
+	if (!traits.player_control && motor_is_authority && ground != INT32_MIN)
+		m.net_alt_target = io::bam_add(ground, m.net_climb);
+
 	// ---- 2a. Engine flag. Retail splits this by role: the AUTHORITY DERIVES the
 	// flag from the climb-above-ground register every tick, and only a CLIENT
 	// runs the engine-off override (`if (!is_authority) goto LABEL_305`). We

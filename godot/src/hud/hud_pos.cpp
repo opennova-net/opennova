@@ -7,6 +7,7 @@
 
 #include <formats/def/def.h>
 #include <runtime/hud/hud_math.h>
+#include <runtime/hud/sight_overlay.h>
 #include <runtime/hud/loading_screen.h>
 #include <runtime/hud/view_effects.h>
 
@@ -111,6 +112,7 @@ Dictionary graphic_to_dict(const DefHudGraphic &g) {
 void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("scale_point", "design", "surface"), &HudPos::scale_point);
 	ClassDB::bind_static_method("HudPos", D_METHOD("scale_rect", "design", "surface"), &HudPos::scale_rect);
+	ClassDB::bind_static_method("HudPos", D_METHOD("sight_scale_rect", "design", "surface"), &HudPos::sight_scale_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("pixel_delta_to_design", "delta", "surface"), &HudPos::pixel_delta_to_design);
 	ClassDB::bind_static_method("HudPos", D_METHOD("fade_decay", "elapsed_ticks", "ramp_ticks"), &HudPos::fade_decay);
 	ClassDB::bind_static_method("HudPos", D_METHOD("fade_flash_alpha", "elapsed_ticks", "ramp_ticks", "base_alpha", "max_alpha"), &HudPos::fade_flash_alpha);
@@ -548,6 +550,15 @@ Rect2 HudPos::scale_rect(const Rect2 &p_design, const Vector2 &p_surface) {
 	const Vector2 p0 = scale_point(p_design.position, p_surface);
 	const Vector2 p1 = scale_point(p_design.position + p_design.size, p_surface);
 	return Rect2(p0, p1 - p0);
+}
+
+Rect2 HudPos::sight_scale_rect(const Rect2 &p_design, const Vector2 &p_surface) {
+	const opennova::hud::SightRect rect{static_cast<int32_t>(p_design.position.x),
+			static_cast<int32_t>(p_design.position.y),
+			static_cast<int32_t>(p_design.position.x + p_design.size.x),
+			static_cast<int32_t>(p_design.position.y + p_design.size.y)};
+	const auto screen = opennova::hud::sight_rect_to_viewport(rect, p_surface.x, p_surface.y);
+	return Rect2(screen.x1, screen.y1, screen.x2 - screen.x1, screen.y2 - screen.y1);
 }
 
 Vector2 HudPos::pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface) {

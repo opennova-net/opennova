@@ -3,6 +3,7 @@
 //  case 216 @0x4e0c31].
 
 #include <runtime/hud/sight_overlay.h>
+#include <runtime/hud/hud_math.h>
 
 namespace opennova::hud {
 
@@ -48,6 +49,21 @@ SightRect sight_row_rect(const SightRowSpec &row, int sight_scale_index,
 		out.y1 += offset;
 		out.y2 += offset;
 	}
+	return out;
+}
+
+SightViewportRect sight_rect_to_viewport(const SightRect &rect, float width, float height) {
+	if (width <= 0.0f || height <= 0.0f) return {};
+	const float aspect = height / width;
+	const float correction = 3.0f / (4.0f * aspect);
+	const float center_y = height * 0.5f;
+	SightViewportRect out;
+	out.x1 = static_cast<float>(scale_axis(rect.x1, width, kDesignWidth));
+	out.x2 = static_cast<float>(scale_axis(rect.x2, width, kDesignWidth));
+	const float y1 = static_cast<float>(scale_axis(rect.y1, height, kDesignHeight));
+	const float y2 = static_cast<float>(scale_axis(rect.y2, height, kDesignHeight));
+	out.y1 = center_y + (y1 - center_y) * correction;
+	out.y2 = center_y + (y2 - center_y) * correction;
 	return out;
 }
 

@@ -59,6 +59,7 @@ const EntityIntField kEntityIntFields[] = {
 	{"waypoint_id", IntFieldWidth::kU8, [](bms::Entity &e, int v) { e.waypoint_id = clamp_u8(v); }},
 	{"wp_number", IntFieldWidth::kI32, [](bms::Entity &e, int v) { e.wp_number = v; }},
 	{"team", IntFieldWidth::kU8, [](bms::Entity &e, int v) { e.team = clamp_u8(v); }},
+	{"lfp_group", IntFieldWidth::kU8, [](bms::Entity &e, int v) { e.lfp_group = clamp_u8(v); }},
 	{"ai_flags", IntFieldWidth::kI32, [](bms::Entity &e, int v) { e.bmsi_attributes = static_cast<uint32_t>(v); }},
 	{"perception", IntFieldWidth::kI32, [](bms::Entity &e, int v) { e.perception2 = v; }},
 	{"accuracy", IntFieldWidth::kI16, [](bms::Entity &e, int v) { e.w_accuracy1 = static_cast<int16_t>(v); }},

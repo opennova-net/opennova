@@ -66,13 +66,26 @@ struct SightRect {
 SightRect sight_row_rect(const SightRowSpec &row, int sight_scale_index,
 		int32_t slide_multiplier);
 
+// Pixel-space corners after viewport rounding and the card's Y correction.
+struct SightViewportRect {
+	float x1 = 0.0f;
+	float y1 = 0.0f;
+	float x2 = 0.0f;
+	float y2 = 0.0f;
+};
+
+// The native-aspect card scales Y about half the viewport height by
+// 3 / (4 * height/width), after both corners pass the virtual-coordinate scaler.
+// [orig: draw_weapon_sight_overlays @0x4dd0ad..0x4dd0f7;
+// Render_SetAspectRatioMode @0x58d8c9..0x58d8d9 native mode]
+SightViewportRect sight_rect_to_viewport(const SightRect &rect, float width, float height);
+
 // ---------------------------------------------------------------------------
 // The SLIDE multiplier — retail's scope-zero system as the drawer samples it
-// [orig: @0x4dcf4c..0x4dcffc]. None of these inputs has a port yet (the
-// reimpl's weapon.def parser drops the `scope_max_zero` key and no runtime
-// carries the zero word or the rangefinder stash), so the evaluator takes
-// them typed; the absent-key case (every def field 0, zero word 0) resolves
-// to multiplier 0, the plain rect.
+// [orig: @0x4dcf4c..0x4dcffc]. The parsed scope_max_zero fields supply the
+// default-zero path. Manual zero selection and the rangefinder stash remain
+// unwired; the evaluator accepts their typed inputs. With every def field
+// and the zero word at 0, the multiplier is 0, the plain rect.
 
 struct ScopeZeroInputs {
 	// MountSlot+0x60, the equipped slot's scope-zero word (IDA's
