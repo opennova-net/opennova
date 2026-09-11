@@ -168,7 +168,7 @@ The caller sets `entity->ItemTypeIndex` (`+28`, from
 **`ItemDefAttrib2` (`+0x58`, bitmask)** — `VehicleBay 0x1`, `AutoInheritTeam
 0x2`, `VehicleSpawn 0x4`, `DynamicShadow 0x10`, `StaticShadow 0x20`,
 `TunnelPiece 0x40`, `UseVK 0x80`, `StaticDeath 0x100`, `OnTurret 0x400`,
-`HasTurret 0x800`, `IsTurret 0x1000`, `Farp 0x2000`, `LandMine 0x4000`.
+`HasTurret 0x800`, `IsTurret 0x1000` (consumer: Entity_UpdateChildAttachment @0x440a36 selects the rate-limited turret slew + gunner tether, world-wac-ai-re §26.5a), `Farp 0x2000`, `LandMine 0x4000`.
 
 ## Vehicle child-emplacement attachments
 

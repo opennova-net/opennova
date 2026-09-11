@@ -540,6 +540,10 @@ void JoinerRole::pump() {
 	// The provider closures below persist on the pipeline across frames; they
 	// read this latched pointer at call time, never a per-call reference.
 	world_ = &world;
+	// A joiner is never the logic authority. run_logic_tick restamps this every
+	// tick, but the gameplay events applied BEFORE the first tick (a phase-4
+	// class death callback, for one) already read it; the default is true.
+	world.rules.logic_authority = false;
 	// The phase clocks (F3 Stats): each span below laps onto the SIM_CLIENT_*
 	// rows of the world's profile; an inactive profile reads no clock at all.
 	// The wire leg (Client_ProcessNetworkFrame) has its own rows.
@@ -1394,19 +1398,30 @@ void JoinerRole::mirror_mission_entities() {
 						traits->family == world::VehicleFamily::Plane;
 				world::Entity::VehicleMotorState &m = local->veh;
 				// The witnessed mover freezes: wire bit0 (not-ready/attached),
-				// the dead-pose/wreck bit, and a carried row riding a deck
-				// carrier all stop the prediction motor — the row keeps its
-				// snapped wire pose (wreck eulers included) / its per-tick
-				// seat-follow, and the mirror-back below yields via
-				// net_predicted [orig: the Flags&1 early return @0x4b9a03; the
-				// dead-pose short form's frozen live stores @0x460930..0x460A50].
-				// D-NET-66: death stays a snap.
+				// the dead-pose/wreck bit, and a carried row riding a MOVING
+				// deck (a pool-1 carrier: LCAC/ship) all stop the prediction
+				// motor — the row keeps its snapped wire pose (wreck eulers
+				// included) / its per-tick seat-follow, and the mirror-back
+				// below yields via net_predicted [orig: the Flags&1 early return
+				// @0x4b9a03; the dead-pose short form's frozen live stores
+				// @0x460930..0x460A50]. D-NET-66: death stays a snap.
+				// A vehicle whose §5.13 carrier is a STATIC (pool 2/3: the
+				// bridge, roof or ramp its groundEntity resolves to while it
+				// drives over a structure) is not a deck ride: the fold composed
+				// the record into a world sample, and the family mover predicts
+				// from it exactly as the 0xFFFF form — retail's reader composes
+				// the carrier form and still runs the not-driven client leg for
+				// it [orig: Entity_TransformLocalToWorld @0x4608ce; the
+				// not-driven leg @0x48B7F0].
+				const bool deck_ride = es.net_seat_valid &&
+						es.carrier_handle != 0xFFFFu &&
+						world::EntityHandle{es.carrier_handle}.pool() == 1;
 				const bool wire_frozen =
 						(es.state_flags_known &&
 								(es.state_flags &
 										(0x01u | replication::kVehicleFlagDeadPose)) !=
 										0u) ||
-						(es.net_seat_valid && es.carrier_handle != 0xFFFFu);
+						deck_ride;
 				if (wire_frozen) {
 					// The row holds its snapped/followed pose; the registry
 					// entity adopts it below like any un-predicted row so
@@ -1427,6 +1442,7 @@ void JoinerRole::mirror_mission_entities() {
 					m.speed_accel = 0;
 					m.cmd_speed = 0;
 					m.slide_z = 0;
+					es.vehicle_vertical_velocity_pending = false;
 					m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
 							m.plat_acc[3] = 0;
 					m.plat_at_rest = false;
@@ -1453,6 +1469,13 @@ void JoinerRole::mirror_mission_entities() {
 					m.net_recv_speed = es.vehicle_speed_reg;
 					m.net_recv_steer_bam = es.vehicle_steer_bam;
 					m.net_recv_lat = es.vehicle_lat_reg;
+					// entity+0xA0 vertical velocity: every live record the
+					// wire-dead gate admitted re-lands the family prediction's
+					// slide_z [orig: the mode-2 store @0x46091e].
+					if (es.vehicle_vertical_velocity_pending) {
+						m.slide_z = es.vehicle_vertical_velocity;
+						es.vehicle_vertical_velocity_pending = false;
+					}
 					// The replicated engine/collective bit [orig: Flags 0x80,
 					// air families].
 					m.net_engine_on = (es.state_flags & 0x80u) != 0u;
@@ -1635,8 +1658,8 @@ void JoinerRole::apply_gameplay_events() {
 	// gates keep AI-driven vehicles on their state-machine death path, exactly
 	// like the authority side.
 	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
-	//  cb(entity, 4, 0) @0x42ebf5; cb == Entity_HandleDestructibleDeathEvent
-	//  @0x440210 for destructibles]
+	//  deathAnimStateId store @0x42ebdf, cb(entity, 4, 0) @0x42ebf5;
+	//  cb == Entity_HandleDestructibleDeathEvent @0x440210 for destructibles]
 	for (const EntityDeathRecord &death : rt.drain_entity_deaths()) {
 		const world::EntityHandle handle{death.entity_handle};
 		if (handle.pool() < 1 || handle.pool() > 3) continue;
@@ -1644,6 +1667,11 @@ void JoinerRole::apply_gameplay_events() {
 		if (victim == nullptr) continue;
 		victim->health = 0;
 		victim->alive = false;
+		// The wire word is the victim's +0x2C0 death-anim slot; retail stores
+		// it sign-extended into that same field before the callback (the
+		// field the 0x0A dead-record park also targets, D-NET-209).
+		// [orig: movsx @0x42eb8d, store @0x42ebdf]
+		victim->death_anim_state = death.death_anim_state_id;
 		victim->last_attacker = world::EntityHandle{};
 		world::destruction_notify_item_damage(world, *victim, 4);
 	}

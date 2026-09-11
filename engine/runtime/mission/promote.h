@@ -49,6 +49,11 @@ struct ItemEmplacementAttachmentSpec {
     uint8_t attachment_flags = 0; // designated C bit 1 / G bit 2
     world::Seat anchor;        // authored parent userpoint frame; bone 0 = parent root
     bool anchor_found = false;
+    // The anchor userpoint's subobject index (the 48-byte record's +0x18): the
+    // parent-brain turret publication runs only for a child anchored on
+    // subobject 0 [orig: Entity_UpdateTransformAndTurret `cmp [ebx+18h],0`
+    // @0x440f50]. -1 = no anchor stamped.
+    int16_t anchor_subobject = -1;
     uint8_t angle_count = 0;   // 0 = weapon.def fallback, 4 = explicit (even all-zero)
     int32_t down_limit_bam = 0;
     int32_t up_limit_bam = 0;
@@ -88,12 +93,6 @@ struct PromoteOptions {
     // AiBrain kSpeedA/kSpeedB (the per-node mover speed) when the real profile speed is
     // unmodeled. Nonzero so routed entities visibly advance once locomotion (step 2) lands.
     int32_t default_speed = 20;
-
-    // Init waypoint-followers straight into GROUND_FOLLOWWP (state 16). Tracked deviation:
-    // Entity_InitVehicleAI inits state 0 and the engine transitions to 16 via the (still
-    // unwitnessed) waypoint-assignment path; setting 16 here lets routed entities patrol on
-    // spawn. With this false, entities stay in state 0 (faithful init, no movement).
-    bool patrol_on_spawn = true;
 
     // Modeled seat metadata, keyed by the raw BMS type_id. The original derives these from
     // model userpoints/seat bones in Entity_FindBestSeatSlot @0x4351f0; hosts that load models
@@ -167,8 +166,25 @@ std::string ai_profile_name_for(
         const std::function<PromoteOptions::AiProfileDefaults(int32_t)> &defaults);
 
 // Shared spawn initialization; used by mission promotion and the BMS helper factory.
-int initialize_ai_profile(world::AiEntity &entity, const aip::Profile &profile,
+// The profile copy: speeds, the flight/targeting fields, the class walk and the
+// GROUND weapon blocks. The parsed default_state (profile+0x18) is deliberately
+// NOT consumed — retail writes it at parse time and never reads it; every
+// vehicle-family brain starts in state 0 (initialize_vehicle_brain) and the
+// first family mover tick promotes it to PRETTY
+// [orig: AIProfile_ParseProperty @0x45ebf4 the only +0x18 store; no reader].
+void initialize_ai_profile(world::AiEntity &entity, const aip::Profile &profile,
         world::AiSystem &ai, world::EntityKind kind);
+// The generic AI allocator's own brain seeds, shared by the BMS promote and the
+// teammate factory so a placed and a dynamically spawned vehicle brain start
+// identically: the three state words are the memset's zero read back, and the
+// constant block that follows the profile copy — sweep phase, the 25.0 u climb
+// seed, the entity yaw, one PRNG C draw — lands in the witnessed order. The def
+// callbacks that wrap this write the move step and the waypoint words afterwards.
+// `heading` is the entity's engine-frame yaw (entity+0x10).
+// [orig: Entity_InitVehicleAI @0x460200 — memset @0x460246, `mov ebx,[esi+18h]`
+//  @0x46024b, the state stores @0x46028b/@0x46028e/@0x460291, the constants
+//  @0x4602b8..0x460377]
+void initialize_vehicle_brain(world::AiEntity &entity, world::World &world, int32_t heading);
 void initialize_item_seats(world::Entity &entity, const std::vector<ItemSeatSpec> &specs);
 struct ItemAttachmentSpawns {
     std::vector<world::EntityHandle> handles;

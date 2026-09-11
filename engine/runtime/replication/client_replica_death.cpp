@@ -15,7 +15,7 @@ namespace opennova::replication {
 // surfaces one record for the embedding sim's class death callback.
 // [orig: NapiNPClientMsg_EntityDeath @0x42EB50 / Entity_KillBySlotId @0x42BCE0]
 void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
-		int16_t killer_source) {
+		int16_t death_anim_state_id) {
 	const world::EntityHandle handle{handle_packed};
 	if (handle_packed == wire_handle::kInvalid ||
 			handle.pool() >= world::kEntityPoolCount ||
@@ -29,7 +29,7 @@ void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
 	}
 	EntityDeathRecord death;
 	death.entity_handle = handle_packed;
-	death.killer_source = killer_source;
+	death.death_anim_state_id = death_anim_state_id;
 	pending_entity_deaths_.push_back(death);
 }
 

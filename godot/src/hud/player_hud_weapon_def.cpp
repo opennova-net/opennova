@@ -20,6 +20,7 @@ Ref<PlayerHudWeaponDef> PlayerHudWeaponDef::from_weapon_def(const Ref<WeaponDef>
 	out->rndgfx_step_ = Vector2i(layout.x, layout.y);
 	out->rounds_per_icon_ = rounds_per_icon_from_layout(layout);
 	out->sights_ = p_def->get_sights();
+	out->sight_slide_multiplier_ = p_def->get_sight_slide_multiplier();
 	return out;
 }
 
@@ -54,6 +55,7 @@ void PlayerHudWeaponDef::_bind_methods() {
 	PLAYER_HUD_WEAPON_DEF_PROPERTY(Variant::VECTOR2I, rndgfx_offset)
 	PLAYER_HUD_WEAPON_DEF_PROPERTY(Variant::VECTOR2I, rndgfx_step)
 	PLAYER_HUD_WEAPON_DEF_PROPERTY(Variant::INT, rounds_per_icon)
+	PLAYER_HUD_WEAPON_DEF_PROPERTY(Variant::INT, sight_slide_multiplier)
 #undef PLAYER_HUD_WEAPON_DEF_PROPERTY
 	ClassDB::bind_method(D_METHOD("get_sights"), &PlayerHudWeaponDef::get_sights);
 	ClassDB::bind_method(D_METHOD("set_sights", "value"), &PlayerHudWeaponDef::set_sights);

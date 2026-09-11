@@ -2720,7 +2720,466 @@ static void test_aircraft_landing_and_navigation_states() {
 	CHECK(b.f[AiBrain::kOutSpeed] == 2000 && w.ai.unported_calls == 0);
 }
 
+// ---------------------------------------------------------------------------
+// The ai_function class dispatch (D-ITEM-7): the items.def fold stamps the
+// event-callback row on the death traits and destruction_notify_item_damage
+// runs THAT row's body, not the tree body for every item.
+// [orig: g_EntityClassEventCallbackTable @0x813000 — gnrc 0x407020, gnrl
+//  0x407F80, gnl2 0x4070F0, tree 0x440210, ewep 0x4409A0, null 0x406FF0]
+// ---------------------------------------------------------------------------
+
+ItemDeathTraits class_traits(ItemDeathClass cls) {
+	ItemDeathTraits t = barrel_traits();
+	t.death_class = cls;
+	return t;
+}
+
+EntityHandle spawn_prop(World &w, int pool, int32_t item_id, int32_t health) {
+	Entity seed;
+	seed.kind = pool == 2 ? EntityKind::Building : EntityKind::Item;
+	seed.item_id = item_id;
+	seed.health = health;
+	seed.position = Vec3{10.0f, 0.0f, 0.0f};
+	seed.bound_radius = 1.0f;
+	return w.registry.spawn(pool, seed);
+}
+
+int count_sound(const World &w, const char *name) {
+	int n = 0;
+	for (const DestructionSoundEvent &s : w.out.destruction.sounds)
+		if (s.sound == name) ++n;
+	return n;
+}
+
+int count_effect(const World &w, const char *name, uint8_t family) {
+	int n = 0;
+	for (const DestructionEffectEvent &fx : w.out.destruction.effects)
+		if (fx.effect == name && fx.family == family) ++n;
+	return n;
+}
+
+int count_active_pieces(const World &w) {
+	int n = 0;
+	for (const DeathPiece &p : w.death_pieces.pieces)
+		if (p.active) ++n;
+	return n;
+}
+
+// gnrl (the shipped WpnCt crates, Radio04, the hp-10 decorations): scar clear,
+// Flags |= 6 at once, the death tick, the def death sound and ONE transient
+// particledeath effect. No section debris and no Entity_InitDeathSounds
+// bank/KZ chain — the kz_OrganicBlast an ammo crate used to detonate with came
+// from the tree body every item ran. [orig: sub_407F80 — the Flags&4 gate
+// @0x407f89, the alive re-arm @0x4080ba, the kill leg @0x4080bd..0x4080f4,
+// the tail @0x408044/@0x40806b]
+void test_gnrl_death_is_husk_sound_and_one_effect() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	seed_ammo(w);
+	w.registry.configure_pool(1, 8);
+	w.logic_tick = 100;
+	const EntityHandle h = spawn_prop(w, 1, 500, 104);
+	ItemDeathTraits traits = class_traits(ItemDeathClass::kGnrl);
+	traits.kz_points = {Vec3{0.0f, 0.0f, 1.0f}}; // a KZ point the tree body would blast
+	w.tables.item_death_traits.set(500, traits);
+	Entity *b = w.registry.get(h);
+
+	// Alive: a nonlethal notify only re-arms the think.
+	b->health = 50;
+	destruction_notify_item_damage(w, *b, 1);
+	CHECK((b->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) == 0);
+	CHECK(b->alive);
+
+	b->health = 0;
+	destruction_notify_item_damage(w, *b, 1);
+	CHECK((b->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+			(kEntityFlagDead | kEntityFlagHusk));
+	CHECK(!b->alive);
+	CHECK(b->death_tick == 100);
+	CHECK(w.out.destruction.items_destroyed == 1);
+	CHECK(w.out.destruction.husk_swaps.size() == 1);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
+	CHECK(count_effect(w, "Effect_LrgOrdExp", 0) == 1); // transient, unattached
+	CHECK(count_effect(w, "Effect_LrgOrdExp", 1) == 0); // no Dead-bone bank
+	CHECK(count_effect(w, "Effect_Fire", 2) == 0);      // no fire bank
+	CHECK(w.out.destruction.debris_triangles == 0);
+	CHECK(w.explosions.queue.empty()); // no kz chain blast
+	if (!w.out.destruction.effects.empty()) {
+		const DestructionEffectEvent &fx = w.out.destruction.effects[0];
+		CHECK(fx.attach_net_id == 0 && fx.attach_wire_handle == EntityHandle::kInvalid);
+		CHECK(std::abs(fx.pos.x - 10.0f) < 1.0e-6f);
+	}
+
+	// Husked: every later notify meets the Flags&4 gate, and the class think
+	// expiry has nothing to add for gnrl.
+	destruction_notify_item_damage(w, *b, 2);
+	CHECK(w.out.destruction.items_destroyed == 1);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
+	w.logic_tick = 140;
+	destruction_tick_class_death_think(w);
+	CHECK(w.out.destruction.items_destroyed == 1);
+	CHECK(w.explosions.queue.empty());
+}
+
+// The gnrl client kill leg: a non-authority peer acts on the S2C 0x13 phase
+// alone and lands the same husk + sound + one effect locally.
+// [orig: @0x407fff..0x408074]
+void test_gnrl_client_kill_leg() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	seed_ammo(w);
+	w.registry.configure_pool(1, 8);
+	w.rules.logic_authority = false;
+	w.logic_tick = 7;
+	const EntityHandle h = spawn_prop(w, 1, 500, 104);
+	w.tables.item_death_traits.set(500, class_traits(ItemDeathClass::kGnrl));
+	Entity *b = w.registry.get(h);
+	b->health = 0;
+	// A client damage notify is not a kill.
+	destruction_notify_item_damage(w, *b, 1);
+	destruction_notify_item_damage(w, *b, 2);
+	CHECK((b->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) == 0);
+	CHECK(w.out.destruction.husk_swaps.empty());
+	destruction_notify_item_damage(w, *b, 4);
+	CHECK((b->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+			(kEntityFlagDead | kEntityFlagHusk));
+	CHECK(!b->alive);
+	CHECK(b->death_tick == 7);
+	CHECK(w.out.destruction.husk_swaps.size() == 1);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
+	CHECK(count_effect(w, "Effect_LrgOrdExp", 0) == 1);
+	CHECK(w.explosions.queue.empty());
+}
+
+// gnrc (the shipped oil tanks, dishes, generators, the wooden bridge): the
+// first authority call marks the entity dead WITHOUT the husk and arms a
+// four-tick think; the expiry runs Entity_UpdateDeathTransforms — the
+// unitType piece dispatch, the husk, Entity_InitDeathSounds' sound, banks
+// and kz blast — then the 0x26 resend and Flags |= 4.
+// [orig: sub_407020 — @0x4070b2..0x4070e2 (Flags |= 2, +0x2AC = 4), the
+//  Flags&2 leg @0x407072..0x4070a6; Entity_UpdatePool1Slot @0x4b8e1b gate]
+void test_gnrc_death_lands_husk_four_ticks_later() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	seed_ammo(w);
+	w.registry.configure_pool(2, 8);
+	w.logic_tick = 200;
+	const EntityHandle h = spawn_prop(w, 2, 500, 200);
+	w.tables.item_death_traits.set(500, class_traits(ItemDeathClass::kGnrc));
+	Entity *b = w.registry.get(h);
+	b->health = 0;
+	destruction_notify_item_damage(w, *b, 2);
+	CHECK((b->engine_flags & kEntityFlagDead) != 0);
+	CHECK((b->engine_flags & kEntityFlagHusk) == 0);
+	CHECK(!b->alive);
+	CHECK(b->death_tick == 200);
+	CHECK(w.out.destruction.husk_swaps.empty());
+	CHECK(w.out.destruction.items_destroyed == 0);
+	CHECK(w.out.destruction.sounds.empty());
+	CHECK(w.out.destruction.effects.empty());
+	CHECK(w.explosions.queue.empty());
+	CHECK(count_active_pieces(w) == 0);
+
+	// The countdown: nothing until the fourth tick after the death tick.
+	for (uint32_t t = 200; t < 204; ++t) {
+		w.logic_tick = t;
+		destruction_tick_class_death_think(w);
+		CHECK((b->engine_flags & kEntityFlagHusk) == 0);
+	}
+	w.logic_tick = 204;
+	destruction_tick_class_death_think(w);
+	CHECK((b->engine_flags & kEntityFlagHusk) != 0);
+	CHECK(w.out.destruction.husk_swaps.size() == 1);
+	CHECK(w.out.destruction.items_destroyed == 1);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
+	CHECK(count_effect(w, "Effect_LrgOrdExp", 1) == 1); // the Dead-bone bank
+	CHECK(w.explosions.queue.size() == 1);              // the kz chain blast
+	if (w.explosions.queue.size() == 1)
+		CHECK(w.explosions.queue[0].radius_override == 4.0f);
+	CHECK(count_active_pieces(w) == 3); // husk sections 1..3
+	CHECK(b->spawned_piece_mask == 0xEu);
+	CHECK(b->death_motion == DeathMotionMode::Generic);
+
+	// Idempotent afterwards: the later think re-arms and the husked notify
+	// meets its gate.
+	w.logic_tick = 240;
+	destruction_tick_class_death_think(w);
+	destruction_notify_item_damage(w, *b, 1);
+	CHECK(w.out.destruction.items_destroyed == 1);
+	CHECK(w.explosions.queue.size() == 1);
+	CHECK(count_active_pieces(w) == 3);
+}
+
+// The gnrc client kill leg runs the whole Entity_UpdateDeathTransforms chain
+// at once on phase 4 [orig: @0x40702a..0x407062]; a client damage notify is
+// inert.
+void test_gnrc_client_kill_runs_death_transforms_at_once() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	seed_ammo(w);
+	w.registry.configure_pool(2, 8);
+	w.rules.logic_authority = false;
+	w.logic_tick = 9;
+	const EntityHandle h = spawn_prop(w, 2, 500, 200);
+	w.tables.item_death_traits.set(500, class_traits(ItemDeathClass::kGnrc));
+	Entity *b = w.registry.get(h);
+	b->health = 0;
+	destruction_notify_item_damage(w, *b, 1);
+	CHECK((b->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) == 0);
+	destruction_notify_item_damage(w, *b, 4);
+	CHECK((b->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+			(kEntityFlagDead | kEntityFlagHusk));
+	CHECK(!b->alive);
+	CHECK(b->death_tick == 9);
+	CHECK(w.out.destruction.husk_swaps.size() == 1);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
+	CHECK(w.explosions.queue.size() == 1);
+	CHECK(count_active_pieces(w) == 3);
+	// The think tick is authority-only and finds nothing pending anyway.
+	w.logic_tick = 60;
+	destruction_tick_class_death_think(w);
+	CHECK(w.out.destruction.items_destroyed == 1);
+}
+
+// ewep (a standalone B50cal / minigun, a tank's turret child): the authority
+// kill leg dismounts the seated gunner BEFORE the husk flags land — only the
+// occupant whose mount target IS this emplacement — then scar clear, Flags |=
+// 6, the death tick, the death sound and one transient effect; no kz chain.
+// [orig: Entity_UpdateChildAttachment @0x4409A0 — @0x440c0d..0x440c1a the
+//  parentEntity check + Entity_DetachFromVehicleIfServer, the kill leg
+//  @0x440c23..0x440c87]
+void test_ewep_death_dismounts_gunner_before_husk() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	seed_ammo(w);
+	w.registry.configure_pool(0, 4);
+	w.registry.configure_pool(1, 8);
+	w.logic_tick = 50;
+	const EntityHandle gun_h = spawn_prop(w, 1, 700, 10);
+	const EntityHandle other_h = spawn_prop(w, 1, 700, 10);
+	w.tables.item_death_traits.set(700, class_traits(ItemDeathClass::kEwep));
+	Entity gunner_seed;
+	gunner_seed.kind = EntityKind::Organic;
+	gunner_seed.health = 100;
+	gunner_seed.position = Vec3{10.0f, 0.0f, 1.0f};
+	const EntityHandle gunner_h = w.registry.spawn(0, gunner_seed);
+
+	Entity *gun = w.registry.get(gun_h);
+	Entity *gunner = w.registry.get(gunner_h);
+	Seat use_gun;
+	use_gun.type = SeatType::Gunner;
+	use_gun.occupant = gunner_h;
+	gun->seats.push_back(use_gun);
+	gunner->mounted = true;
+	gunner->mount_target = gun_h;
+	gunner->mount_seat = 0;
+	gunner->mount_type = SeatType::Gunner;
+	gun->primary_occupant = gunner_h;
+
+	// A second emplacement whose occupant slot names a rider seated ELSEWHERE
+	// leaves that rider alone [orig: the parentEntity == entity check @0x440c11].
+	Entity *other = w.registry.get(other_h);
+	other->primary_occupant = gunner_h;
+	other->health = 0;
+	destruction_notify_item_damage(w, *other, 1);
+	CHECK(gunner->mounted && gunner->mount_target == gun_h);
+	CHECK((other->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+			(kEntityFlagDead | kEntityFlagHusk));
+
+	gun->health = 0;
+	destruction_notify_item_damage(w, *gun, 1);
+	CHECK(!gunner->mounted);
+	CHECK(!gunner->mount_target.valid());
+	CHECK(gunner->mount_seat == -1);
+	CHECK(!gun->seats[0].occupant.valid());
+	CHECK(!gun->primary_occupant.valid());
+	CHECK((gun->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+			(kEntityFlagDead | kEntityFlagHusk));
+	CHECK(!gun->alive);
+	CHECK(gun->death_tick == 50);
+	CHECK(w.out.destruction.items_destroyed == 2);
+	CHECK(w.out.destruction.husk_swaps.size() == 2);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 2);
+	CHECK(count_effect(w, "Effect_LrgOrdExp", 0) == 2);
+	CHECK(count_effect(w, "Effect_LrgOrdExp", 1) == 0);
+	CHECK(w.explosions.queue.empty());
+	CHECK(w.out.destruction.debris_triangles == 0);
+	// Husked: the entry gate only re-arms.
+	destruction_notify_item_damage(w, *gun, 2);
+	CHECK(w.out.destruction.items_destroyed == 2);
+}
+
+// The ewep client kill leg performs NO detach: a joiner's gunner is
+// dismounted by the server's own detach packet, its emplacement husks on
+// phase 4 alone. [orig: @0x440b6c..0x440ba7]
+void test_ewep_client_kill_keeps_gunner_mounted() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	seed_ammo(w);
+	w.registry.configure_pool(0, 4);
+	w.registry.configure_pool(1, 8);
+	w.rules.logic_authority = false;
+	w.logic_tick = 11;
+	const EntityHandle gun_h = spawn_prop(w, 1, 700, 10);
+	w.tables.item_death_traits.set(700, class_traits(ItemDeathClass::kEwep));
+	Entity gunner_seed;
+	gunner_seed.kind = EntityKind::Organic;
+	gunner_seed.health = 100;
+	const EntityHandle gunner_h = w.registry.spawn(0, gunner_seed);
+	Entity *gun = w.registry.get(gun_h);
+	Entity *gunner = w.registry.get(gunner_h);
+	Seat use_gun;
+	use_gun.type = SeatType::Gunner;
+	use_gun.occupant = gunner_h;
+	gun->seats.push_back(use_gun);
+	gunner->mounted = true;
+	gunner->mount_target = gun_h;
+	gunner->mount_seat = 0;
+	gunner->mount_type = SeatType::Gunner;
+	gun->primary_occupant = gunner_h;
+
+	gun->health = 0;
+	destruction_notify_item_damage(w, *gun, 1);
+	CHECK((gun->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) == 0);
+	destruction_notify_item_damage(w, *gun, 4);
+	CHECK((gun->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+			(kEntityFlagDead | kEntityFlagHusk));
+	CHECK(gun->death_tick == 11);
+	CHECK(gunner->mounted && gunner->mount_target == gun_h);
+	CHECK(gun->primary_occupant == gunner_h);
+	CHECK(w.out.destruction.husk_swaps.size() == 1);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
+	CHECK(count_effect(w, "Effect_LrgOrdExp", 0) == 1);
+	CHECK(w.explosions.queue.empty());
+}
+
+// The null row (an absent, unknown or callback-less ai_function): the item
+// takes damage but never dies. [orig: 0x406FF0 — +0x2AC = 0x1000000, ret]
+void test_null_class_never_dies() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	seed_ammo(w);
+	w.registry.configure_pool(2, 8);
+	const EntityHandle h = spawn_prop(w, 2, 500, 10);
+	w.tables.item_death_traits.set(500, class_traits(ItemDeathClass::kNull));
+	Entity *b = w.registry.get(h);
+	b->health = 0;
+	destruction_notify_item_damage(w, *b, 1);
+	destruction_notify_item_damage(w, *b, 2);
+	destruction_notify_item_damage(w, *b, 4);
+	w.rules.logic_authority = false;
+	destruction_notify_item_damage(w, *b, 4);
+	CHECK((b->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) == 0);
+	CHECK(b->alive);
+	CHECK(b->death_tick == 0);
+	CHECK(w.out.destruction.husk_swaps.empty());
+	CHECK(w.out.destruction.sounds.empty());
+	CHECK(w.out.destruction.effects.empty());
+	CHECK(w.explosions.queue.empty());
+}
+
+// gnl2: the authority kill leg marks the entity dead, plays the death sound
+// and one effect, and arms a 32-tick think; the expiry broadcasts the
+// detonation — Effect_AirExp plus one kz_M406HE blast one unit above the
+// entity, credited to its last attacker with the ammo's own radius — then
+// lands the husk. [orig: Entity_HandleDeathEvent @0x4070F0 — the kill leg
+//  @0x407279..0x4072dd (+0x2AC = 0x20), the Flags&2 leg @0x4071ef..0x40725f
+//  -> Server_BroadcastExplosionEffect @0x508450 -> Entity_SpawnExplosionEffects
+//  @0x4399c0 (@0x4399e3 effect, @0x439a06 queue push)]
+void test_gnl2_death_detonates_thirty_two_ticks_later() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	seed_ammo(w);
+	w.tables.ammo.entries.resize(5);
+	AmmoTableEntry &he = w.tables.ammo.entries[4];
+	he.name = "kz_M406HE";
+	he.valid = true;
+	he.kztype = ammo_kz::kStandard;
+	he.kz_damage = 100;
+	he.kz_minradius = 1.0f;
+	he.kz_maxradius = 6.0f;
+	w.registry.configure_pool(0, 4);
+	w.registry.configure_pool(1, 8);
+	w.logic_tick = 300;
+	Entity attacker_seed;
+	attacker_seed.kind = EntityKind::Organic;
+	attacker_seed.health = 100;
+	const EntityHandle attacker = w.registry.spawn(0, attacker_seed);
+	const EntityHandle h = spawn_prop(w, 1, 500, 50);
+	w.tables.item_death_traits.set(500, class_traits(ItemDeathClass::kGnl2));
+	Entity *b = w.registry.get(h);
+	b->last_attacker = attacker;
+	b->health = 0;
+	destruction_notify_item_damage(w, *b, 1);
+	CHECK((b->engine_flags & kEntityFlagDead) != 0);
+	CHECK((b->engine_flags & kEntityFlagHusk) == 0);
+	CHECK(!b->alive);
+	CHECK(b->death_tick == 300);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
+	CHECK(count_effect(w, "Effect_LrgOrdExp", 0) == 1);
+	CHECK(w.out.destruction.husk_swaps.empty());
+	CHECK(w.explosions.queue.empty());
+
+	for (uint32_t t = 300; t < 332; ++t) {
+		w.logic_tick = t;
+		destruction_tick_class_death_think(w);
+		CHECK((b->engine_flags & kEntityFlagHusk) == 0);
+	}
+	w.logic_tick = 332;
+	destruction_tick_class_death_think(w);
+	CHECK((b->engine_flags & kEntityFlagHusk) != 0);
+	CHECK(w.out.destruction.husk_swaps.size() == 1);
+	CHECK(w.out.destruction.items_destroyed == 1);
+	CHECK(count_effect(w, "Effect_AirExp", 0) == 1);
+	CHECK(w.explosions.queue.size() == 1);
+	if (w.explosions.queue.size() == 1) {
+		const ExplosionEntry &blast = w.explosions.queue[0];
+		CHECK(blast.ammo_index == 4);
+		CHECK(blast.owner == attacker);
+		CHECK(blast.hit_word == 1);
+		CHECK(blast.radius_override == 0.0f); // the ammo's kz_maxradius
+		CHECK(std::abs(blast.pos.x - 10.0f) < 1.0e-6f);
+		CHECK(std::abs(blast.pos.z - 1.0f) < 1.0e-6f);
+	}
+	// No death sound replay and no second detonation.
+	w.logic_tick = 400;
+	destruction_tick_class_death_think(w);
+	destruction_notify_item_damage(w, *b, 2);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
+	CHECK(count_effect(w, "Effect_AirExp", 0) == 1);
+	CHECK(w.explosions.queue.size() == 1);
+}
+
+// A row without a class (hand-built, or a def whose callback is unported)
+// keeps the tree body: the section-debris death with the kz chain.
+void test_unwitnessed_class_keeps_tree_body() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	seed_ammo(w);
+	w.registry.configure_pool(1, 8);
+	const EntityHandle h = spawn_prop(w, 1, 500, 30);
+	ItemDeathTraits traits = barrel_traits();
+	CHECK(traits.death_class == ItemDeathClass::kUnwitnessed);
+	w.tables.item_death_traits.set(500, traits);
+	Entity *b = w.registry.get(h);
+	b->health = 0;
+	destruction_notify_item_damage(w, *b, 1);
+	CHECK((b->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+			(kEntityFlagDead | kEntityFlagHusk));
+	CHECK(w.explosions.queue.size() == 1);
+	CHECK(count_effect(w, "Effect_LrgOrdExp", 1) == 1);
+}
+
 int main() {
+	test_gnrl_death_is_husk_sound_and_one_effect();
+	test_gnrl_client_kill_leg();
+	test_gnrc_death_lands_husk_four_ticks_later();
+	test_gnrc_client_kill_runs_death_transforms_at_once();
+	test_ewep_death_dismounts_gunner_before_husk();
+	test_ewep_client_kill_keeps_gunner_mounted();
+	test_null_class_never_dies();
+	test_gnl2_death_detonates_thirty_two_ticks_later();
+	test_unwitnessed_class_keeps_tree_body();
 	test_death_effect_banks_and_water_crossings();
 	test_aircraft_landing_and_navigation_states();
 	test_vehicle_spawn_marker_selection();

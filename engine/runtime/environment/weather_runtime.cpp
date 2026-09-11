@@ -465,27 +465,26 @@ WaterUvState WeatherRuntime::water_uv_state(float cam_x, float cam_z,
 WeatherShaderGlobals build_weather_shader_globals(
 		const EnvironmentState &env, const WeatherRuntime &weather,
 		bool underwater_view) {
-	// The env's public hemisphere getters include the camera-gated NVG gain
-	// rewrite; publishing the smoother directly would bypass it each tick.
+	// Everything reads back through the env: the tick's write-back already
+	// put the smoothed currents there (write_weather_state), and the env's
+	// public builders carry the camera-gated NVG rewrite and the thermal
+	// view's selections that publishing the smoother directly would bypass.
 	WeatherShaderGlobals globals;
 	globals.base.fill_light = env.fill_light();
-	globals.base.sun_light = weather.smooth_sun();
-	globals.base.sky_ambient = env.sky_ambient();
-	globals.base.fog_color = weather.smooth_fog();
+	// The sun/sky pair and the pass fog quartet are the terrain's per-pass
+	// selection (foliage inherits the same two device constants; underwater
+	// the pass swaps in Env_WaterColorLit, thermal the 0x808080 grey).
+	const TerrainEnvUniforms terrain = env.build_terrain_uniforms(underwater_view);
+	globals.base.sun_light = terrain.sun_light;
+	globals.base.sky_ambient = terrain.sky_ambient;
+	globals.base.fog_color = terrain.fog_color;
 	// Terrain tile DOT3 and foliage follow the current environment light
 	// (sun by day, moon by night), not the always-solar sky highlight vector
 	// [orig: Environment_GetLightDirectionFloat @ 0x57d870].
 	globals.base.sun_direction = env.light_direction();
-	globals.base.fog_end = env.fog_end_distance();
-	globals.base.fog_start = env.fog_start();
-	globals.base.fog_type = env.fog_type();
-	if (underwater_view) {
-		const SceneFogValues fog = env.build_scene_fog(true);
-		globals.base.fog_color = fog.color;
-		globals.base.fog_end = fog.end;
-		globals.base.fog_start = fog.start;
-		globals.base.fog_type = fog.type;
-	}
+	globals.base.fog_end = terrain.fog_end;
+	globals.base.fog_start = terrain.fog_start;
+	globals.base.fog_type = terrain.fog_type;
 	// The modulator /64 gain (iris exposure) for self-lit/effect shaders
 	// [orig: Render_UnpackModulatorToLightScale @ 0x58db30].
 	globals.color_src_gain = weather.color_src_gain();

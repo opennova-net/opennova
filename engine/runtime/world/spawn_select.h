@@ -26,7 +26,34 @@ struct SpawnPointResult {
     int16_t yaw = 0;    // mission yaw (degrees); spawn_player applies the (90 - yaw) heading
     int16_t pitch = 0;
     int16_t roll = 0;
+    // The Co-op direct-marker arm's two survivor latches. The chosen 6094/6001
+    // marker's parachute bit (0x20) is copied onto the player, and a marker
+    // whose team byte is 2 additionally arms the queued mount (0x200) with
+    // `carrier` = the marker's parent when it has one, else the MARKER itself,
+    // destined for entity+0x16C/+0x180. The body update's 0x200 toggle performs
+    // the actual seat attach; nothing here flips the mounted state. Zero
+    // outside that arm (the scored non-Co-op markers and the picked-zone path
+    // carry neither). [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
+    uint32_t flags_or = 0;
+    EntityHandle carrier;
 };
+
+// The player-slot bytes the no-pick arm reads beside the assigned team: the
+// spectator latch (slot+100567, the addEvent+108 byte Server_PlayerAdd stores
+// @0x51CD83) and the restore team (slot+100568). A latched slot is POSITIONED
+// with a substitute team while its assigned team stays 0.
+// [orig: Server_PositionPlayerForSpawn @0x50D17C..0x50D1C6]
+struct SpawnSlotState {
+    bool spectator = false;
+    uint8_t restore_team = 0;
+};
+
+// Install the resolved latches on the positioned player: OR the flags, and
+// when a carrier was armed write it to mount_target (+0x16C) and
+// mount_toggle_fallback (+0x180) exactly as the marker arm does. The pose
+// itself is the caller's copy (join builds a PlayerSpawn, deploy/boot write the
+// entity directly). [orig: Server_PositionPlayerForSpawn @0x50D42A, @0x50D44D..0x50D45A]
+void apply_spawn_point_latches(Entity &player, const SpawnPointResult &sel);
 
 
 // Resolve one complete spawn pose. A valid target selects the picked-zone path
@@ -34,14 +61,19 @@ struct SpawnPointResult {
 // exact: 6095→6002 solo; 6096..6099→6003/6004/6090/6091 team; and
 // 6094→6001→numbered entity Co-op. `player_slot` is Co-op's direct-marker
 // rotation input; `spawning_player` is excluded from the Flags&0x100 avoidance
-// set used by non-Co-op marker scoring. The mission-global cycle advances at
-// the same non-Co-op/scatter sites as retail.
-// [orig: Server_PositionPlayerForSpawn @0x50CF60;
+// set used by non-Co-op marker scoring and supplies the dead bit the spectator
+// team substitution reads. `slot` carries the spectator latch/restore team; a
+// latched slot positions as team 1 in Co-op, in team modes as the nonzero
+// restore team of a dead-flagged entity or else 2 - (logic_tick & 1), and
+// unchanged elsewhere. The mission-global cycle advances at the same
+// non-Co-op/scatter sites as retail.
+// [orig: Server_PositionPlayerForSpawn @0x50CF60 (spectator arm @0x50D17C..0x50D1C6);
 // Entity_FindBestSpawnPoint @0x50CCC0; CPlayerStats_GetFieldPlusOne (ex CRenderState_GetFieldByIndex)
 // @0x52D7D0 field 6]
 SpawnPointResult resolve_player_spawn_pose(
     World &world, EntityHandle spawning_player, EntityHandle target,
-    uint8_t player_slot, uint8_t team, uint32_t game_type);
+    uint8_t player_slot, uint8_t team, uint32_t game_type,
+    const SpawnSlotState &slot = {});
 
 struct ZoneChain; // world/zone_chain.h
 

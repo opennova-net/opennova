@@ -48,6 +48,10 @@ public:
 	bool get_nvg_active() const { return value_.nvg_active; }
 	bool get_nvg_visible() const { return value_.nvg_visible; }
 	int get_nvg_gain() const { return value_.nvg_gain; }
+	// The thermal-imaging view's two gates (the engine struct carries the
+	// witnesses): the world block / fog / clear latch, and the terrain-ramp gate.
+	bool get_thermal_view() const { return value_.thermal_view; }
+	bool get_thermal_terrain_view() const { return value_.thermal_terrain_view; }
 	// The main camera's HORIZONTAL fov with the policy applied.
 	float get_fov_h_deg() const { return value_.fov_h_deg; }
 	// The chased eye anchor (Godot space).

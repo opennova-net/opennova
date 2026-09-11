@@ -213,8 +213,9 @@ private:
 
 // The shader-global refresh the weather tick publishes each write-back — the
 // same value block the standalone owner builds, plus the live sway pair and
-// the modulator gain. The deliberate split: fill/sky read back through the
-// env's NVG-gated public getters while sun/fog publish the smoother directly.
+// the modulator gain. Every colour reads back through the env's builders
+// (build_terrain_uniforms carries the NVG sky blend and the thermal ramps /
+// fog), so the smoother's write-back is the only thing the tick contributes.
 struct WeatherShaderGlobals {
 	EnvShaderGlobals base;
 	Rgb color_src_gain;

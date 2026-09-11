@@ -673,8 +673,13 @@ struct VehicleCompactRecord {
 	int16_t  euler_y = 0;                 // src entity+24 -> read-dest entity+584
 	int16_t  euler_x = 0;                 // src entity+20 -> read-dest entity+580
 
-	// Live branch (is_dead_pose = false) — vehicle health + weapon-aim block:
-	uint16_t weapon_x = 0;                // entity+160 (compressed)
+	// Live branch (is_dead_pose = false) — vertical velocity + vehicle health + the
+	// prediction registers:
+	uint16_t vertical_velocity = 0;       // entity+0xA0 slideDecay (compressed 16.16 u/tick): the
+	                                      // vehicle's vertical velocity, re-landed at entity+0xA0
+	                                      // by the read when !(stateFlags & 2) [orig: write
+	                                      // @0x460d5a..0x460d7b; read @0x460910..0x46091e]. The
+	                                      // old `weapon_x` name was a D-NET-63-era misnomer.
 	uint16_t health_word = 0;             // entity+286 (raw u16) = the vehicle HEALTH word: the
 	                                      // read stores it back to entity+286 [orig: @0x460aff]
 	                                      // and the destroyed-transition kill gates on it being
@@ -1616,15 +1621,20 @@ bool decode_medic_request(const uint8_t *body, size_t len,
 		MedicRequest &out, size_t &consumed);
 
 // S2C 0x13 — entity death (the SECOND death path, beside 0x26 kill-sync).
-// `[u16 entityHandle][i16 killerSource]` (4 B). The handler sets the entity's
-// Health=0, stores killerSource at entity+pad9[36], clears entity+pad8[86], and
-// fires its death callback(entity, 4, 0); if the local player died it stamps the
-// respawn tick + toggles the weapon scope. Unlike 0x26 (which routes through
-// Entity_KillBySlotId), this path acts directly on the entity.
-// [orig: NapiNPClientMsg_EntityDeath @ 0x42EB50]
+// `[u16 entityHandle][i16 deathAnimStateId]` (4 B). The host writes word1 from
+// the victim's entity+0x2C0 staged death-anim slot — never the killer; both
+// infantry death edges consume and zero that slot before the send, so it is 0
+// on every edge-driven death. The handler sets the entity's Health=0, stores
+// the word sign-extended at entity+0x2C0 (deathAnimStateId), clears
+// entity+0x1BA, and fires its death callback(entity, 4, 0); if the local
+// player died it stamps the respawn tick + toggles the weapon scope. Unlike
+// 0x26 (which routes through Entity_KillBySlotId), this path acts directly on
+// the entity.
+// [orig: BuildDeathNotifyPayload @0x5036E0 (@0x503733);
+//  NapiNPClientMsg_EntityDeath @0x42EB50 (movsx @0x42EB8D, store @0x42EBDF)]
 struct EntityDeathRecord {
-	uint16_t entity_handle = 0;  // the dying entity
-	int16_t  killer_source = 0;  // killer / damage source (i16)
+	uint16_t entity_handle = 0;        // the dying entity
+	int16_t  death_anim_state_id = 0;  // victim entity+0x2C0 death-anim slot (i16)
 };
 bool decode_entity_death(const uint8_t *body, size_t len,
                          EntityDeathRecord &out, size_t &consumed);

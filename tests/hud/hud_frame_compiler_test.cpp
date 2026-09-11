@@ -1540,6 +1540,73 @@ void test_static_frame_pick() {
 			"the rule is last-wins for any count");
 }
 
+// The SIGHTS card element: each fed row resolves through the engine's
+// three-mode evaluator before the design-space scale — a `scale` row draws
+// (index + 2) / 8 of its box about its centre and follows the per-player
+// sight-scale index, a `slide` row shifts by frames * multiplier in y only,
+// a plain row keeps its authored rect; the binocular view suppresses the
+// card. [orig: draw_weapon_sight_overlays @0x4dce00 — the mode gates
+//  @0x4dce8d / @0x4dcf42, the plain arm @0x4dd050]
+void test_sights_card_element(const fnt_font_t *font) {
+	using opennova::hud::HudQuad;
+	using opennova::hud::HudSightsRow;
+	using opennova::hud::kHudTexSightsBase;
+	HudLayout layout;
+	HudSightsRow plain;
+	plain.x0 = 100.0f;
+	plain.y0 = 200.0f;
+	plain.x1 = 300.0f;
+	plain.y1 = 400.0f;
+	plain.texture_valid = true;
+	HudSightsRow scaled = plain;
+	scaled.scale = true;
+	scaled.additive = true;
+	HudSightsRow slid = plain;
+	slid.slide = true;
+	slid.slide_frames = 8;
+	layout.sights = {plain, scaled, slid};
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	HudFrameState state;
+	state.weapon.sights_card_up = true;
+	state.sight_slide_multiplier = 3;
+	const auto sight_quads = [](const HudDrawList &list) {
+		std::vector<HudQuad> out;
+		for (const HudQuad &q : list.quads) {
+			if (q.texture >= kHudTexSightsBase) out.push_back(q);
+		}
+		return out;
+	};
+	const auto quad_is = [](const HudQuad &q, float x0, float y0, float x1, float y1) {
+		return q.x0 == x0 && q.y0 == y0 && q.x1 == x1 && q.y1 == y1;
+	};
+	{
+		const std::vector<HudQuad> quads = sight_quads(compiler.compile(state, 1024.0f, 768.0f));
+		CHECK(quads.size() == 3, "three fed rows emit three sight quads");
+		if (quads.size() == 3) {
+			CHECK(quad_is(quads[0], 100.0f, 200.0f, 300.0f, 400.0f),
+					"the plain row keeps its authored rect");
+			CHECK(quad_is(quads[1], 125.0f, 225.0f, 275.0f, 375.0f),
+					"the scale row draws three quarters of its box about the centre at index 1");
+			CHECK(quads[1].additive, "the row's blend rides along");
+			CHECK(quad_is(quads[2], 100.0f, 224.0f, 300.0f, 424.0f),
+					"the slide row shifts y by frames * multiplier, x untouched");
+		}
+	}
+	state.sight_scale_index = opennova::hud::next_sight_scale_index(state.sight_scale_index);
+	{
+		const std::vector<HudQuad> quads = sight_quads(compiler.compile(state, 1024.0f, 768.0f));
+		CHECK(quads.size() == 3, "the cycled index still emits three sight quads");
+		if (quads.size() == 3) {
+			CHECK(quad_is(quads[1], 100.0f, 200.0f, 300.0f, 400.0f),
+					"index 2 draws the scale row's full box");
+		}
+	}
+	state.binoculars_view_active = true;
+	CHECK(sight_quads(compiler.compile(state, 1024.0f, 768.0f)).empty(),
+			"the binocular view suppresses the card");
+}
+
 // The mounted-vehicle panel element: what draws, in what order, and the
 // occupied/empty split. [orig: HUD_DrawVehicleHealthBars @0x5A4FD0]
 void test_vehicle_panel_element(const fnt_font_t *font) {
@@ -1944,6 +2011,7 @@ int main() {
 	test_compiler_friendly_tags(&font);
 	test_compiler_label_fonts(&font);
 	test_static_frame_pick();
+	test_sights_card_element(&font);
 	test_vehicle_panel_element(&font);
 	test_compiler_stdbox_geometry(&font);
 	test_compiler_scoreboard_rows(&font);

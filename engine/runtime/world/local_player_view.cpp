@@ -504,6 +504,14 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
                             weapon_sights_card_eligible(w.def, *active_slot) &&
                             v.scope_engaged && !v.binoculars_view_active &&
                             !player_view_scope_ease_active(v);
+    // The thermal view (local_player_view.h): optical_view IS the CanFire
+    // verdict this frame, so the latched byte is that AND the equipped def's
+    // Thermal bit; the terrain ramps key on the def bit in first person alone
+    // [orig: Render_ProcessMainSceneFrame @0x5ca290 -> @0x5ca2da..0x5ca2e3;
+    //  Render_TerrainScene @0x610e51..0x610e5b].
+    const bool thermal_def = w.active && (w.def.flags2 & DEF_WEAPON_FLAG2_THERMAL) != 0;
+    out.thermal_view = optical_view && thermal_def;
+    out.thermal_terrain_view = thermal_def && v.camera_mode == 0;
     const bool sighted = out.scope_card_active &&
                          (w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
                          active_slot->current != weapon_action::kSwitchFrom;

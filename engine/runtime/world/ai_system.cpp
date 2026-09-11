@@ -10,6 +10,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/body_anim.h>
+#include <runtime/world/mount_controls.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_part_anim.h>
@@ -727,6 +728,19 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         e.heading = e.inf.target_heading;
         e.pitch = e.inf.look_pitch;
     }
+    // The gun's own update precedes this body's: retail walks pool 1 before
+    // the pool-0 organics, and the ewep pair refreshes the gun's stored
+    // yaw/pitch words from the look this tick starts with (an IsTurret gun
+    // slews them and tethers the gunner's own yaw), then pins the words to
+    // the seat/weapon window and STORES the pinned look into the occupant.
+    // Every look mirror below therefore carries the tethered/pinned look.
+    // [orig: Entity_UpdateAllEntities @0x4c2100 (the pool-1 walk before the
+    //  organic loop); Entity_UpdatePool1Slot @0x4b8dd0 ai-fn @0x4b8e3c then
+    //  class update @0x4b8e53 — Entity_UpdateChildAttachment @0x4409A0 +
+    //  Entity_UpdateTransformAndTurret @0x440ca0, gated on the UseGun
+    //  claimant [esi+170h] whose parent is this gun @0x4411e4]
+    if (seat.type == SeatType::Gunner && veh->primary_weapon_owner == occ->handle)
+        tick_emplaced_weapon_channel(world, *veh, *occ, e);
     const int32_t saved_look_heading = e.heading;
     const int32_t saved_look_pitch = e.pitch;
     const int32_t seat_heading = apply_resolved_mounted_seat_frame(
@@ -798,11 +812,13 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
             else if (rel < -0x40000000)
                 e.heading = io::bam_sub(seat_heading, 0x40000000);
         }
-        // The chase above changes the semantic EWEAP controls consumed by a
-        // model-aware provider. Resolve once more so the NPC root/body and the
-        // parent gun presented after this tick use the same Hn+1 control phase.
-        // Keep the first frame as the existing clamp base and preserve LOOK as
-        // the child's independent heading/pitch after the second seat resolve.
+        // The chase above moves the look a model-aware provider may read for
+        // the NPC root/body (the gun's own EWEAP words are the stored pair the
+        // channel tick at the head already refreshed, and do not move with the
+        // chase). Resolve once more so the root/body presented after this tick
+        // sits on the Hn+1 look. Keep the first frame as the existing clamp
+        // base and preserve LOOK as the child's independent heading/pitch
+        // after the second seat resolve.
         if (e.heading != saved_look_heading || e.pitch != saved_look_pitch) {
             const int32_t chased_look_heading = e.heading;
             const int32_t chased_look_pitch = e.pitch;

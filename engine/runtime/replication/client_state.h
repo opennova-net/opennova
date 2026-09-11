@@ -448,6 +448,13 @@ struct ClientEntityState {
 	// wire weapon_aim_z, decompressed) — the CHel/cpln prediction leg's second
 	// axis [orig: the three-register air mirror @0x490C9E].
 	int32_t vehicle_lat_reg = 0;
+	// entity+0xA0 slideDecay mirror — the vertical velocity (16.16 u/tick) the
+	// family prediction integrates. Every compact whose wire flags clear bit 0x02
+	// re-lands it (the dead-pose form lands 0); `pending` marks a fresh landing
+	// for the joiner's world mover to adopt as its slide_z
+	// [orig: the mode-2 read @0x460910..0x46091e; the short form's 0 @0x460684].
+	int32_t vehicle_vertical_velocity = 0;
+	bool vehicle_vertical_velocity_pending = false;
 	// Armed by the first folded compact for this row: the chase never runs
 	// toward a zero-initialized target on rows that only ever saw load-stream
 	// spawns (pool-2/3 statics).
@@ -458,6 +465,9 @@ struct ClientEntityState {
 	// carrier attach each frame (the rider's own mover is bit0-skipped)
 	// [orig: Entity_AttachToVehicle bit0 set @0x43C14A; the D-NET-67 lift]. A
 	// record with carrier 0xFFFF clears it (per-record consumption, D-NET-195).
+	// A world-mover VEHICLE row is only a seat-follow when its carrier is a
+	// pool-1 deck; on a static carrier (pool 2/3) the fold composes the record
+	// once and the sim predicts from that sample (no per-tick recompose).
 	// Set by the embedding sim when a WORLD-side family mover owns this row's
 	// motion (the joiner's pool-1 prediction, §5.38e B-facet): the fold live-
 	// snaps the wire sample, tick_remote_motion skips the row, and the sim
@@ -504,10 +514,12 @@ struct ClientEntityState {
 	int32_t rm_body_heading = 0;
 	bool rm_leg_seeded = false;
 	int32_t net_seat_local[3] = {};
-	uint8_t net_seat_local_yaw_byte = 0;
-	// Player/infantry seats compose the carrier yaw; a carrier-local VEHICLE
-	// keeps its world-absolute wire euler [orig: @0x4607f5].
-	bool net_seat_compose_yaw = false;
+	// The record's carrier-LOCAL heading (BAM32): the player/infantry yaw byte
+	// widened (<< 24), the vehicle euler_z high half (<< 16). Every carried class
+	// composes world = carrier + local on each recompose [orig: the player read
+	// @0x4c10d4; the vehicle read's Entity_TransformLocalToWorld @0x4608ce,
+	// out[3] = carrier[3] + local[3] @0x43bd00, then the entity+576 store @0x4607f5].
+	int32_t net_seat_local_heading_bam = 0;
 	bool net_seat_valid = false;
 };
 

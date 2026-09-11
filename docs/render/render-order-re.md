@@ -472,10 +472,13 @@ driver; camera above water shown — the sides mirror when underwater):
    - skybox sun glow is drawn after the murk overlay (`@ 0x5c9714`) and before
      the later HUD (`@ 0x5cad04`), so retail glare is deliberately not
      attenuated by the underwater quad.
-   With reflection enabled, each entity wave adds a mirrored sub-pass +
-   flush(1) under mirrored lighting (`CTerrainRenderer_BuildLightingShaderConstants
-   @ 0x5c8090` arg 1), using the mirror matrix/CLIP machinery above and the
-   mirror-winding byte — the full reflection spec is env #30 (REN-6).
+   The 4th argument of `Terrain_RenderSceneWithReflection` is the THERMAL byte
+   (`@ 0x5ca8e3`; the IDB's `reflectionEnabled` is a misnomer, corrected 2026-09-10): under
+   it each far-water-side BySide wave runs ONCE under the flat 0.25 block
+   (`CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090` arg 1, `@ 0x5c9511` /
+   `@ 0x5c95f8`) with its MATCHTERRAIN sub-pass (BySide 4th arg 1) skipped, then Build(0)
+   restores the grey world block (`@ 0x5c9534` / `@ 0x5c9616`). The mirror matrix/CLIP
+   machinery above is the reflection spec proper — env #30 (REN-6).
 6. Player shadow/scar dispatch (`Render_DispatchShadowByType @ 0x584440` —
    the Scar_ decal/overlay family; out of REN port scope. The render-slot
    ENTITY ground shadows are a different family and are ported — they render

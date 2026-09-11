@@ -577,8 +577,9 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 		out.euler_y = int16_t(c.u16());
 		out.euler_x = int16_t(c.u16());
 	} else {
-		// Unmounted: weaponX + vehicle HEALTH word (entity+286) + weapon-aim Y/Z + heading BAM.
-		out.weapon_x           = c.u16();
+		// Live: vertical velocity (entity+0xA0) + vehicle HEALTH word (entity+286) + the
+		// [136]/[135]/[132] prediction registers.
+		out.vertical_velocity  = c.u16();
 		out.health_word        = c.u16();
 		out.weapon_aim_y       = c.u16();
 		out.weapon_aim_z       = c.u16();
@@ -1385,14 +1386,14 @@ bool decode_medic_request(const uint8_t *body, size_t len,
 	return true;
 }
 
-// S2C 0x13 entity death (second path) — [u16 handle][i16 killerSource] (4 B).
-// [orig: NapiNPClientMsg_EntityDeath @ 0x42EB50]
+// S2C 0x13 entity death (second path) — [u16 handle][i16 deathAnimStateId] (4 B).
+// [orig: BuildDeathNotifyPayload @0x5036E0; NapiNPClientMsg_EntityDeath @ 0x42EB50]
 bool decode_entity_death(const uint8_t *body, size_t len,
                          EntityDeathRecord &out, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};
 	out.entity_handle = c.u16();
-	out.killer_source = c.i16();
+	out.death_anim_state_id = c.i16();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 4;

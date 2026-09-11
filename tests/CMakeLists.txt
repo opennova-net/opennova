@@ -1124,6 +1124,11 @@ target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_frame_compiler COMMAND hud_frame_compiler_test)
 
+# The SIGHTS card row modes + the dotsize sight-scale cycle (hud/sight_overlay.h).
+add_executable(sight_overlay_test hud/sight_overlay_test.cpp)
+target_link_libraries(sight_overlay_test PRIVATE opennova_runtime)
+add_test(NAME sight_overlay COMMAND sight_overlay_test)
+
 add_executable(client_minimap_overlay_test netsim/client_minimap_overlay_test.cpp)
 target_link_libraries(client_minimap_overlay_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(client_minimap_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1858,6 +1863,15 @@ target_link_libraries(turret_window_test PRIVATE opennova_runtime)
 target_compile_features(turret_window_test PRIVATE cxx_std_17)
 add_test(NAME turret_window COMMAND turret_window_test)
 
+# The emplaced gun channel's stored words (entity+0x322/+0x324): the immediate and
+# IsTurret producers of Entity_UpdateChildAttachment @0x4409A0 (the recoil term, the
+# 0x92CF34/tick traverse, the local/NPC gunner-yaw tethers) and the window clamp's
+# occupant write-back in Entity_UpdateTransformAndTurret @0x440ca0.
+add_executable(emplaced_gun_channel_test world/emplaced_gun_channel_test.cpp)
+target_link_libraries(emplaced_gun_channel_test PRIVATE opennova_runtime opennova_formats)
+target_compile_features(emplaced_gun_channel_test PRIVATE cxx_std_17)
+add_test(NAME emplaced_gun_channel COMMAND emplaced_gun_channel_test)
+
 add_executable(vehicle_motor_test world/vehicle_motor_test.cpp)
 target_link_libraries(vehicle_motor_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2521,6 +2535,24 @@ target_link_libraries(netsim_client_replica_pipeline_occupant_backref_test PRIVA
 add_test(NAME netsim_client_replica_pipeline_occupant_backref
     COMMAND netsim_client_replica_pipeline_occupant_backref_test)
 
+# The §5.13 vehicle compact's carrier form (groundEntity handle + carrier-local
+# position/heading, composed back on read) and its off-11 vertical-velocity word
+# [orig: Entity_SerializeVehicleState @0x460560], host fan and joiner pipeline.
+add_executable(netsim_vehicle_compact_carrier_test
+    netsim/vehicle_compact_carrier_test.cpp)
+target_link_libraries(netsim_vehicle_compact_carrier_test PRIVATE opennova_runtime)
+add_test(NAME netsim_vehicle_compact_carrier
+    COMMAND netsim_vehicle_compact_carrier_test)
+
+# The joiner's carried-vehicle prediction freeze through the production
+# JoinerRole frame: a pool-1 deck rider stays frozen (seat-follow), a vehicle
+# whose §5.13 carrier is a pool-2 static predicts from the composed sample.
+add_executable(netsim_vehicle_carrier_prediction_test
+    netsim/vehicle_carrier_prediction_test.cpp)
+target_link_libraries(netsim_vehicle_carrier_prediction_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_vehicle_carrier_prediction
+    COMMAND netsim_vehicle_carrier_prediction_test)
+
 add_executable(netsim_client_replica_pipeline_target_carrier_follow_test
     netsim/client_replica_pipeline_target_carrier_follow_test.cpp)
 target_link_libraries(netsim_client_replica_pipeline_target_carrier_follow_test
@@ -2642,6 +2674,10 @@ add_test(NAME npruntime_client_fire COMMAND npruntime_client_fire_test)
 add_executable(npruntime_round_sim_test npruntime/round_sim_test.cpp)
 target_link_libraries(npruntime_round_sim_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_round_sim COMMAND npruntime_round_sim_test)
+
+add_executable(npruntime_medic_recipient_test npruntime/medic_recipient_test.cpp)
+target_link_libraries(npruntime_medic_recipient_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_medic_recipient COMMAND npruntime_medic_recipient_test)
 
 # The headless AI path conformance report over the kernel-booted mission (the
 # fast half of the host-parity loop; --report / --ticks / --bms for diagnosis).

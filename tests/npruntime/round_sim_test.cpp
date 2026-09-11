@@ -6,7 +6,7 @@
 // @0x4ec920 — min(62*|vel|,1219) * weight_in_grains / 875, floored/capped by
 // min/max_damage], clamped to remaining health [orig: @0x4e8064], and a health<=0 victim
 // raises the death routing [orig: Entity_CheckAndProcessDeath @0x51b550]: S2C 0x13
-// [u16 victim][u16 killerSource] to every non-host in-match connection, victim-only
+// [u16 victim][i16 deathAnimStateId] to every non-host in-match connection, victim-only
 // S2C 0x61 tick seed + 0x52 killer position, mask-0x80 S2C 0x1E kill-feed, and
 // the conditional S2C 0x54
 // downed/revive-window split; every victim receives the retail +360/+364
@@ -978,7 +978,8 @@ int main() {
 		conn.link.last_deploy_tick_valid = true;
 	}
 	// Only the shooter is a Medic. Retail's send mask 0x580 is the conjunction of
-	// active/alive + same team + the charattr Medic bit [orig:
+	// slot state 6/7 (in-match) + same team byte + the charattr Medic bit — no
+	// entity health/dead test [orig:
 	// NapiNPServer_SendFiltered @0x4C87E0]. The victim disables OPTIONS_AUTOMEDIC
 	// through C2S 0x03, so their death exercises the split branch: medics get state
 	// zero while the victim alone gets the live 120-second revive window [orig:
@@ -1203,12 +1204,22 @@ int main() {
 		            "one S2C 0x13 death notify per client"))
 			return 1;
 		const std::vector<uint8_t> &n = notif_b[0];
-		if (!expect(n.size() == 4, "0x13 body is 4 B [u16 victim][u16 killerSource]"))
+		if (!expect(n.size() == 4, "0x13 body is 4 B [u16 victim][i16 deathAnimStateId]"))
 			return 1;
 		const uint16_t victim = uint16_t(n[0] | (n[1] << 8));
-		const uint16_t killer = uint16_t(n[2] | (n[3] << 8));
-		if (!expect(victim == hc.packed && killer == hb.packed,
-		            "0x13 carries victim + killer handles"))
+		const uint16_t death_anim_slot = uint16_t(n[2] | (n[3] << 8));
+		// word1 is the victim's +0x2C0 death-anim slot as the sender sees it —
+		// never the killer handle. The infantry death edge consumes and zeroes
+		// that slot before retail's send, so an infantry death ships 0 (every
+		// 0x13 in the retail capture carries 0) even though the bullet kill
+		// staged a nonzero selection for the edge.
+		// [orig: BuildDeathNotifyPayload @0x5036E0 (@0x503733); edge zero
+		//  @0x4B9D38 -> Entity_CheckAndProcessDeath @0x4B9D4D]
+		if (!expect(victim == hc.packed && death_anim_slot == 0,
+		            "0x13 carries the victim handle + the post-edge zero death-anim slot"))
+			return 1;
+		if (!expect(death_anim_slot != hb.packed,
+		            "0x13 word1 is not the killer's packed handle"))
 			return 1;
 	}
 	{

@@ -230,6 +230,7 @@ void extract_attachments(const DefItemDef &def, const Threedi3di3 *model,
 				spec.anchor_found = true;
 				spec.anchor.bone_index = static_cast<uint8_t>(
 						std::clamp(static_cast<int>(u) + 1, 0, 255));
+				spec.anchor_subobject = static_cast<int16_t>(up.subobject_index);
 				spec.anchor.source_name = up.name;
 				spec.anchor.seat_local = seat_local_from_user_point(up);
 				spec.anchor.yaw_offset = static_cast<int16_t>(std::clamp<int>(
@@ -386,6 +387,8 @@ void refresh_item_seat_spec(world::World &world,
 				p_entity.emplacement_yaw_offset = match->anchor.yaw_offset;
 				p_entity.emplacement_bone =
 						match->anchor_found ? match->anchor.bone_index : 0;
+				p_entity.emplacement_anchor_subobject =
+						match->anchor_found ? match->anchor_subobject : int16_t{-1};
 				p_entity.emplacement_kind = static_cast<uint8_t>(match->kind);
 				p_entity.emplacement_slot = match->stored_slot;
 				p_entity.emplacement_attachment_flags = match->attachment_flags;

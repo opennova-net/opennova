@@ -621,26 +621,19 @@ void Terrain::render_frame() {
 		}
 	}
 
-	// Update lighting from MissionEnvironment, prefer smoothed colors from
-	// Weather — both native now, direct typed calls (ADR 0034 d6).
+	// Update lighting from MissionEnvironment — native, direct typed calls
+	// (ADR 0034 d6).
 	if (terrain_material.is_valid()) {
 		if (cached_env_node && cached_env_node->is_loaded()) {
-			// Base env -> terrain-uniform push, shared with the editor preview
-			// (MissionEnvironment.apply_terrain_uniforms drives both shaders' uniforms).
+			// The env -> terrain-uniform push, shared with the editor preview
+			// (MissionEnvironment.apply_terrain_uniforms drives both shaders'
+			// uniforms). With a weather node the env already holds the tick's
+			// written-back smoothed currents, and its per-pass builder adds
+			// what the raw smoother lacks: the NVG sky blend, the thermal
+			// ramps, the underwater Env_WaterColorLit fog. The terrain surface
+			// consumes only c1 = light + c0 = sky [orig: @ 0x604420, see
+			// docs/terrain/terrain-re.md].
 			cached_env_node->apply_terrain_uniforms(terrain_material);
-			// Runtime-only: prefer Weather-smoothed colors when a weather node
-			// is present (overriding the ones it smooths). The terrain surface
-			// consumes only c1 = light + c0 = sky [orig: @ 0x604420, see docs/terrain/terrain-re.md].
-			if (cached_weather_node) {
-				terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->get_smooth_sun());
-				terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->get_smooth_sky());
-				// The underwater pass replaces the weather fog block with
-				// Env_WaterColorLit. Above water, retain Weather's direct smoothed
-				// color override exactly as before.
-				if (!cached_env_node->is_underwater_view()) {
-					terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->get_smooth_fog());
-				}
-			}
 			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
 			// one multiply; the shared runtime/ONED tile path consumes this uniform.
 			// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md].

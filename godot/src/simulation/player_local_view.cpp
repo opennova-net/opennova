@@ -56,6 +56,8 @@ void PlayerLocalView::_bind_methods() {
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, nvg_active)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, nvg_visible)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::INT, nvg_gain)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, thermal_view)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, thermal_terrain_view)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, fov_h_deg)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::VECTOR3, tp_anchor)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, tp_anchor_valid)

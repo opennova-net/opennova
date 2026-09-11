@@ -62,6 +62,25 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
 			// Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
 			// stamps every mover carries; rider deltas read (current - saved)].
 			stamp_saved_live_pose(*veh);
+			// The family movers promote a freshly allocated brain out of the
+			// allocator's state 0 at their HEAD, before the occupant/AI-driver
+			// block reads the word: the AI leg's PRETTY -> FOLLOWWP hand-back
+			// (22 -> 16 @0x48bc16, 14 -> 7 @0x49158a) has to see PRETTY, not 0.
+			// Our drive staging runs ahead of the motor (and of the motor-side
+			// twin in tick_health), so the promotion is hoisted with it: a driven
+			// hull left at 0 here never handed back — the state machine commits
+			// the pending 0 straight back every tick — and AI_BeginUpdate's
+			// [128] = [49] out-speed reached the AI leg unzeroed (the routeless
+			// 00TRa armory truck drove off at combat speed).
+			// [orig: Entity_UpdateVehiclePhysics `cmp [edi+10h],0; jnz; mov
+			//  [edi+10h],16h` @0x48afac..0x48afb2, ahead of the occupant block
+			//  @0x48b949; Entity_UpdateAircraftPhysics @0x490377..0x49037d
+			//  (0 -> 14); the boat family shares the ground stamp]
+			if (AiEntity *brain = world.ai.for_handle(h)) {
+				if (brain->brain.f[AiBrain::kCurState] == 0)
+					brain->brain.f[AiBrain::kCurState] =
+							vehicle_family_uses_direct_air_mover(traits->family) ? 14 : 22;
+			}
 			// Direct CHel/cpln rows never reach the ground cmd/motor leg: the
             // class table routes them to the shared aircraft mover, whose AI
             // brain leg and physics live in one function. A live PLAYER pilot

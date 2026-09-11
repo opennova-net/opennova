@@ -712,18 +712,18 @@ int check_C_03_auto_medic_preference() {
 	return 0;
 }
 
-// S2C 0x13 — entity death (second path): [u16 handle][i16 killerSource] (4 B).
+// S2C 0x13 — entity death (second path): [u16 handle][i16 deathAnimStateId] (4 B).
 int check_S_13_entity_death() {
 	LE w;
 	w.u16(0x0006);
-	w.u16(0xFFFF);     // killer_source = -1
+	w.u16(0xFFFF);     // death_anim_state_id = -1 (sign-extended like the retail movsx)
 	EXPECT(w.b.size() == 4);
 	EntityDeathRecord d;
 	size_t consumed = 0;
 	EXPECT(decode_entity_death(w.b.data(), w.b.size(), d, consumed));
 	EXPECT(consumed == 4);
 	EXPECT(d.entity_handle == 0x0006);
-	EXPECT(d.killer_source == -1);
+	EXPECT(d.death_anim_state_id == -1);
 	cover('S', 0x13);
 	return 0;
 }

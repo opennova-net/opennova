@@ -150,6 +150,69 @@ begin "S5 Dup B"
   move_function nade
   hp 12
 end
+
+begin "S5 Crate"
+  id 100540
+  type decoration
+  graphic crate
+  sid s5crate
+  ai_function gnrl
+  hp 104
+end
+
+begin "S5 Oil Tank"
+  id 100541
+  type decoration
+  graphic oiltank
+  sid s5oil
+  ai_function GNRC
+  hp 200
+end
+
+begin "S5 Pump"
+  id 100542
+  type decoration
+  graphic pump
+  sid s5pump
+  ai_function gnl2
+  hp 50
+end
+
+begin "S5 Gun"
+  id 100543
+  type decoration
+  graphic b50cal
+  sid s5gun
+  ai_function ewep
+  hp 10
+end
+
+begin "S5 Palm"
+  id 100544
+  type decoration
+  graphic palm
+  sid s5palm
+  ai_function tree
+  hp 10
+end
+
+begin "S5 Radar"
+  id 100545
+  type building
+  graphic radar
+  sid s5radar
+  ai_function bld2
+  hp 300
+end
+
+begin "S5 Typo"
+  id 100546
+  type decoration
+  graphic typo
+  sid s5typo
+  ai_function gnr1
+  hp 10
+end
 )";
 
 // The minimal SndProf shape ("default" first, so a real profile lands at
@@ -190,7 +253,7 @@ int main() {
     CHECK(def_parse_items_memory(
                   reinterpret_cast<const uint8_t *>(kItemsDef),
                   sizeof(kItemsDef) - 1, &file) == 0);
-    CHECK(file.count == 12);
+    CHECK(file.count == 19);
 
     // Stamp the fields whose authored-token spellings are the def parser's own
     // test surface: distinct sentinels per vehicle-physics slot so any
@@ -260,7 +323,7 @@ int main() {
     World w;
     w.registry.configure_pool(0, 8);  // organics
     w.registry.configure_pool(1, 8);  // items/vehicles
-    w.registry.configure_pool(2, 8);  // buildings
+    w.registry.configure_pool(2, 16); // buildings (bunker, bush, unknown + the 7 class rows)
     const EntityHandle tank_h = spawn(w, 1, 500, EntityKind::Item);
     const EntityHandle apc_h = spawn(w, 1, 501, EntityKind::Item);
     const EntityHandle helo_h = spawn(w, 1, 502, EntityKind::Item);
@@ -270,6 +333,9 @@ int main() {
     const EntityHandle bunker_h = spawn(w, 2, 520, EntityKind::Building);
     const EntityHandle bush_h = spawn(w, 2, 530, EntityKind::Building);
     const EntityHandle unknown_h = spawn(w, 2, 999, EntityKind::Building);
+    // The ai_function class rows (one entity each; only the death-trait row
+    // is read back).
+    for (uint16_t id = 540; id <= 546; ++id) spawn(w, 2, id, EntityKind::Building);
 
     // The wire-class supplier stub: the fold must stamp the returned byte
     // verbatim and default a functor miss to 0 (Unknown, fail closed).
@@ -370,6 +436,40 @@ int main() {
     CHECK(busht != nullptr && busht->is_decoration);
     const ItemDeathTraits *tankt = w.tables.item_death_traits.get(500);
     CHECK(tankt != nullptr && !tankt->has_husk);
+
+    // ---- the event/death callback row (D-ITEM-7) ----
+    // The fold resolves the ai_function tag the way retail's whole-string
+    // stricmp walk of g_EntityClassEventCallbackTable @0x813000 does: a
+    // mixed-case tag matches, the absent tag / a tag without a row (the
+    // shipped "gnr1" typo) / the callback-less nade row resolve the null row
+    // (0x406FF0, never dies), and a row whose callback is unported (bld2
+    // @0x43EEE0) keeps the pre-dispatch tree body. [orig:
+    // Entity_LookupRenderCallbacks @0x407dc0; EntityDef_InitAllCallbacks @0x4a5aa9]
+    const auto class_of = [&](int32_t id) {
+        const ItemDeathTraits *t = w.tables.item_death_traits.get(id);
+        return t != nullptr ? t->death_class : ItemDeathClass::kUnwitnessed;
+    };
+    CHECK(w.tables.item_death_traits.get(540) != nullptr);
+    CHECK(class_of(540) == ItemDeathClass::kGnrl);
+    CHECK(class_of(541) == ItemDeathClass::kGnrc); // "GNRC": case-insensitive
+    CHECK(class_of(542) == ItemDeathClass::kGnl2);
+    CHECK(class_of(543) == ItemDeathClass::kEwep);
+    CHECK(class_of(544) == ItemDeathClass::kTree);
+    CHECK(class_of(545) == ItemDeathClass::kUnwitnessed); // bld2: unported row
+    CHECK(class_of(546) == ItemDeathClass::kNull);        // "gnr1": no row
+    CHECK(class_of(520) == ItemDeathClass::kNull);        // the bunker authors no tag
+    CHECK(class_of(530) == ItemDeathClass::kNull);        // nor the bush
+    CHECK(class_of(500) == ItemDeathClass::kUnwitnessed); // cveh: the AI machine's death
+    CHECK(item_death_class_from_tag("") == ItemDeathClass::kNull);
+    CHECK(item_death_class_from_tag("null") == ItemDeathClass::kNull);
+    CHECK(item_death_class_from_tag("nade") == ItemDeathClass::kNull);   // fn1 = 0
+    CHECK(item_death_class_from_tag("psec") == ItemDeathClass::kNull);   // row 27 -> 0x406FF0
+    CHECK(item_death_class_from_tag("pwrp") == ItemDeathClass::kNull);   // row 36 -> 0x406FF0
+    CHECK(item_death_class_from_tag("Tree") == ItemDeathClass::kTree);
+    CHECK(item_death_class_from_tag("EWEP") == ItemDeathClass::kEwep);
+    CHECK(item_death_class_from_tag("gnrcx") == ItemDeathClass::kNull);  // whole-string, not a prefix
+    CHECK(item_death_class_from_tag("towr") == ItemDeathClass::kUnwitnessed);
+    CHECK(item_death_class_from_tag("emit") == ItemDeathClass::kUnwitnessed);
 
     // ---- the vehicle-trait table: every slot's sentinel in its own field ----
     const VehicleTraits *vt = w.vehicles.traits.get(500);

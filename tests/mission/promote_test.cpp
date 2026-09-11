@@ -528,7 +528,29 @@ static void test_nameless_vehicle_takes_the_retail_default_profile() {
     CHECK(ai.count() == 1);
     CHECK(ai.at(0) != nullptr && ai.at(0)->profile.type == 1);
 	const AiEntity &air = *ai.at(0);
-	CHECK(air.brain.cur_state() == kAiHeloLand);
+	// The .aip default_state (HELO_LAND here) is parsed but has NO reader in retail:
+	// the allocator's three state words are the memset's zero read back
+	// [orig: Entity_InitVehicleAI @0x460200 — `mov ebx,[esi+18h]` @0x46024b after the
+	//  memset @0x460246, stores @0x46028b..0x460291]; the first aircraft mover tick
+	//  promotes 0 -> 14 [orig: @0x490377..0x49037d] (teammate_spawn_test pins that leg).
+	CHECK(air.brain.cur_state() == 0);
+	CHECK(air.brain.f[AiBrain::kPendState] == 0 && air.brain.f[AiBrain::kFallback] == 0);
+	// The allocator's constant block, in the witnessed order after the profile copy
+	// [orig: @0x4602b8 sweep -196608, @0x4602c2 burst 0, @0x460345 f[137] 25.0 u,
+	//  @0x460352 f[179] = entity Yaw, @0x460358 f[199] 0, @0x46035e..0x460371 f[200] =
+	//  PRNG_Next16_C % 0x80000, @0x460377 f[201] 0].
+	CHECK(air.brain.f[AiBrain::kSweepPhase] == -196608);
+	CHECK(air.brain.f[AiBrain::kBurstWindow] == 0);
+	CHECK(air.brain.f[137] == 1638400);
+	CHECK(air.brain.f[179] == air.heading);
+	CHECK(air.brain.f[199] == 0 && air.brain.f[201] == 0);
+	{
+		// Exactly ONE PRNG C draw per placed vehicle: f[200] is the fresh stream's
+		// first value and the promoted world's next draw is the fresh stream's second.
+		World fresh;
+		CHECK(air.brain.f[200] == static_cast<int32_t>(fresh.next_prng16_c()) % 0x80000);
+		CHECK(world.next_prng16_c() == fresh.next_prng16_c());
+	}
 	CHECK(air.brain.f[AiBrain::kSpeedA] == 5000 && air.brain.f[AiBrain::kSpeedB] == 3000);
 	CHECK(air.profile.patrol_altitude == (20 << 16) && air.profile.field216 == (40 << 16));
 	CHECK(air.profile.patrol_climb == 4000 && air.profile.field220 == 6000);
@@ -678,7 +700,7 @@ int main() {
     CHECK(ai.nav.channel(3) != nullptr && ai.nav.channel(3)->count == 2);
     CHECK(ai.nav.channel(3)->entries[0] == 2);
 
-    // organic 0 is in GROUND_FOLLOWWP with its route + spawn transform.
+    // organic 0 carries its route + spawn transform; its brain starts in state 0.
     AiEntity *e0 = ai.at(0);
     // Engage-range UNITS, both conventions pinned together so they cannot drift apart
     // again: the AI PROFILE takes the BMS value unscaled (world units, i16), while the
@@ -690,7 +712,10 @@ int main() {
     CHECK(e0->slot.f[15] == (500 << 16));
     CHECK(e0->slot.f[16] == (50 << 16));
     CHECK(e0 != nullptr);
-    CHECK(e0->brain.f[AiBrain::kCurState] == 16); // GROUND_FOLLOWWP (patrol_on_spawn)
+    // State 0 at spawn: retail organics carry no vehicle brain at all (the AiSlot drives
+    // the infantry motor), and the former patrol_on_spawn 16 seed had no witness.
+    CHECK(e0->brain.f[AiBrain::kCurState] == 0);
+    CHECK(e0->brain.f[AiBrain::kPendState] == 0 && e0->brain.f[AiBrain::kFallback] == 0);
     CHECK(e0->brain.f[AiBrain::kWpType] == 1);
     CHECK(e0->brain.f[AiBrain::kWpChannel] == 1); // 1-based channel
     CHECK(e0->brain.f[AiBrain::kWpNode] == 0);
@@ -830,16 +855,6 @@ int main() {
         // The raw route-flags word rides the nav channel (bit1 = the blue mark).
         CHECK((wai.nav.channel(2)->loopflag &
                static_cast<int32_t>(bms::WaypointFlags::BlueTeam)) != 0);
-    }
-
-    // a non-routed entity option: with patrol_on_spawn=false the brain stays in state 0.
-    {
-        World w2;
-        AiSystem &ai2 = w2.ai;
-        mission::PromoteOptions o2;
-        o2.patrol_on_spawn = false;
-        mission::promote_mission(m, w2, o2);
-        CHECK(ai2.at(0)->brain.f[AiBrain::kCurState] == 0); // faithful init, no auto-patrol
     }
 
     // ---- command 125: BMS wp_number is a target entity serial, not a path node ----

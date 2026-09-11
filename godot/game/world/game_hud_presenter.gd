@@ -102,6 +102,16 @@ var _hud_hidden_saved_detail_level := 0
 # global (bit 0 = the FP gun, bit 1 = the corner spinmap block).
 var _showhud_flags := HudOverlay.showhud_flags_default()
 var _showhud_was_down := false
+# The dotsize row's down latch (catalog row 38, default O): the sight-scale
+# index itself lives on the overlay (per HUD build, like the per-mission
+# player init) and the SIGHTS card draws its `scale` rows from it.
+var _dotsize_was_down := false
+# The SIGHTS card's `slide` multiplier for the equipped weapon at its default
+# zero (PlayerHudWeaponDef.sight_slide_multiplier, the engine evaluator over
+# the def's scope_max_zero table); re-resolved on weapon change.
+var _sight_slide_multiplier := 0
+# The Goals row's down latch (catalog row 55, default G): the objectives toggle.
+var _goals_was_down := false
 # The view-action rows' down latches (view1st / viewwithgun / viewchase).
 var _view1st_was_down := false
 var _viewwithgun_was_down := false
@@ -124,14 +134,15 @@ const MAP_FOOTPRINT_QUERY_INTERVAL_TICKS := 62
 # action is witnessed; the authored default binding rows ride the unported
 # input-binding layer (D-CTRL-3), so the keys themselves are reimpl mappings.
 # Objectives = the co-op alpha toggle [orig: @0x49b68b ->
-# HUD_DrawWinConditions @0x5be163]; friendly tags KEY_F, N is NVG [orig:
-# action 30 @0x49b573]. Retail has NO HUD-visibility key: H is only the
-# secondary `pause` binding (SP-only), and the boot /NOHUD switch is the sole
-# whole-overlay master [orig: catalog row 70 vk2 0x48; case 25 @0x49b520;
-# /NOHUD gates dword_840B18 & 2 @0x4a7a09 — a DIFFERENT global from the
-# declutter level]. The huddetail/hudcolor/showhud cycles ride their polled
-# binding rows in tick() instead of shell keys.
-const OBJECTIVES_KEY := KEY_O
+# HUD_DrawWinConditions @0x5be163], polled from its catalog row `Goals` (row
+# 55, dispatch 31, default G) in tick() like the other HUD rows; friendly
+# tags KEY_F, N is NVG [orig: action 30 @0x49b573]. Retail has NO
+# HUD-visibility key: H is only the secondary `pause` binding (SP-only), and
+# the boot /NOHUD switch is the sole whole-overlay master [orig: catalog row
+# 70 vk2 0x48; case 25 @0x49b520; /NOHUD gates dword_840B18 & 2 @0x4a7a09 —
+# a DIFFERENT global from the declutter level]. The
+# huddetail/hudcolor/showhud/dotsize cycles ride their polled binding rows in
+# tick() instead of shell keys.
 const FRIENDLY_TAGS_KEY := KEY_F
 
 
@@ -139,8 +150,6 @@ const FRIENDLY_TAGS_KEY := KEY_F
 ## shell lets it fall through to the other handlers).
 func handle_gameplay_key(keycode: int) -> bool:
 	match keycode:
-		OBJECTIVES_KEY:
-			toggle_objectives()
 		FRIENDLY_TAGS_KEY:
 			cycle_friendly_tags()
 		_:
@@ -263,6 +272,7 @@ func ensure_game_hud() -> void:
 	_sights_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_hud.add_child(_sights_card)
 	_sights_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_push_sight_state()
 	var hudpos := HudPos.new()
 	var root: ResourceRoot = _world.get_resource_root() \
 			if _world != null else null
@@ -394,6 +404,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_game_hud.clear_weapon()
 		if _sights_card != null:
 			var sights: Array[WeaponSightRow] = weapon.sights if weapon != null else []
+			_sight_slide_multiplier = weapon.sight_slide_multiplier if weapon != null else 0
+			_push_sight_state()
 			_sights_card.set_weapon_sights(sights,
 					_world.get_resource_root() if _world != null else null)
 
@@ -491,6 +503,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 			ControlsBindings.pressed("hudcolor"), hud_keys_chorded,
 			gameplay_input_active)
 	poll_showhud_edge(ControlsBindings.pressed("showhud"), hud_keys_chorded,
+			gameplay_input_active)
+	poll_dotsize_edge(ControlsBindings.pressed("dotsize"), hud_keys_chorded,
+			gameplay_input_active)
+	poll_goals_edge(ControlsBindings.pressed("Goals"), hud_keys_chorded,
 			gameplay_input_active)
 	poll_view_action_edges(ControlsBindings.pressed("view1st"),
 			ControlsBindings.pressed("viewwithgun"),
@@ -943,6 +959,51 @@ func cycle_showhud() -> void:
 	if _game_hud != null:
 		_game_hud.set_showhud_flags(_showhud_flags)
 	_apply_fp_gun_visible()
+
+
+## The dotsize edge poll (catalog row 38 "Sights Dot Size", default O): the
+## same latch/gate/chord rules as the showhud poll.
+func poll_dotsize_edge(dotsize_down: bool, chorded: bool, active: bool) -> void:
+	if dotsize_down and not _dotsize_was_down and active and not chorded:
+		cycle_sight_scale()
+	_dotsize_was_down = dotsize_down
+
+
+## The dotsize cycle: the overlay advances its per-player sight-scale index
+## (the engine's policy, runtime/hud/sight_overlay.h: default 1, then
+## 2 -> 0 -> 1 ...) and the SIGHTS card re-resolves its `scale` rows.
+func cycle_sight_scale() -> void:
+	if _game_hud == null:
+		return
+	_game_hud.cycle_sight_scale()
+	_push_sight_state()
+
+
+## The SIGHTS card's row-mode inputs: the overlay's sight-scale index and the
+## equipped weapon's `slide` multiplier at its DEFAULT zero (the engine
+## evaluator over the def's scope_max_zero table with the slot's zero word 0).
+## The manual zero word and the rangefinder arm have no port yet (D-WPN-8),
+## so a zero adjust never moves the row here.
+func _push_sight_state() -> void:
+	if _sights_card == null or _game_hud == null:
+		return
+	_sights_card.set_sight_state(_game_hud.get_sight_scale_index(),
+			_sight_slide_multiplier)
+
+
+## The Goals edge poll (catalog row 55 "Goals", default G): the objectives
+## panel toggle, same latch/gate/chord rules as the other HUD rows.
+func poll_goals_edge(goals_down: bool, chorded: bool, active: bool) -> void:
+	if goals_down and not _goals_was_down and active and not chorded:
+		toggle_objectives()
+	_goals_was_down = goals_down
+
+
+## The live per-player sight-scale index (the engine default without a HUD).
+func sight_scale_index() -> int:
+	if _game_hud == null:
+		return HudOverlay.sight_scale_index_default()
+	return _game_hud.get_sight_scale_index()
 
 
 ## The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,

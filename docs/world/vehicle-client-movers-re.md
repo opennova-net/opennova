@@ -5048,11 +5048,35 @@ separate latch producer. This replaces the earlier stalled-walk heuristic.
 waits for its selected gun's equip action to permit USE, then checks
 hull-based exit and the gun following its driven carrier.
 
-Promotion consumes the parsed profile's initial state, including zero,
-for current, pending and fallback state (`Entity_InitVehicleAI @ 0x460200`).
-The native profile regression selects HELO_LAND to distinguish this from
-the old unconditional HELO_FOLLOWWP seed. Missing-profile fixture worlds
-retain the existing family fallback.
+Promotion leaves current, pending and fallback state at 0 for every vehicle
+brain (`Entity_InitVehicleAI @ 0x460200`: the memset's zero is read back
+`@ 0x46024b` and stored `@ 0x46028b..0x460291`; `profile+0x18` has no reader),
+and the first mover tick promotes 0 → PRETTY (22 / 14). The native profile
+regression authors `default_state HELO_LAND` to prove the profile state is NOT
+consumed (corrected 2026-09-10; the earlier "consumes the parsed profile's
+initial state" reading was wrong). The same promotion seeds the @ 0x460200
+constant block through `initialize_vehicle_brain`, shared with the dynamic
+teammate spawn. ORDER MATTERS: retail promotes 0 -> 22/14 at the mover HEAD
+(`@ 0x48afac..0x48afb2`, `@ 0x490377..0x49037d`) BEFORE the occupant/AI-driver
+block (`@ 0x48b949`) whose 22 -> 16 hand-back (`@ 0x48bc16`) lets the state
+machine run row 16 and zero the out-speed; our authority pass stages the AI
+drive ahead of the motor, so `VehicleSystem` hoists the promotion to the pass
+head (the in-motor stamp stays for direct motor callers). The old profile seed
+(row 17 GROUND_COMBAT for every GROUND_FOLLOWWP profile, because
+`AIState_LookupByName` returns 17 for that name) had hidden the inversion: with a
+faithful 0 seed and the promotion inside the motor, a boarded AI driver drove
+at combat speed (00TRa's DTruck2 1714 drove off its spot). The single boarding-tick
+command pulse that follows is FAITHFUL: per entity the AI callback runs before the
+class mover (`Entity_UpdatePool1Slot @ 0x4b8dd0`: ai-fn `@ 0x4b8e3c`, class update
+`@ 0x4b8e53`), so on the tick a driver first sits in a PRETTY hull the state machine
+sees 22, row 22 leaves `AI_BeginUpdate`'s `[128] = [49]` standing, the mover hands
+back 22 -> 16 and copies `[136] = min([128], playerSpeed)` once; only the next tick's
+row 16 zeroes it (a sub-unit coast, pinned by `vehicle_motor`'s state-0 driver
+case). Residuals noted, not
+ledgered: `AiEntity::arrival_prox` (retail def+2340) is never stamped, so a brain
+entering GROUND_EVADE with the flee goal stays in row 18; `AiEntity::has_physics`
+(the entity+368 stand-in) defaults true for promoted vehicles while retail's +368
+is null until a driver boards.
 
 D-INF-2 scope after the 2026-09-08 review: the `+0x369` path-state byte is
 modeled as nonzero-ness only (`board_blocked`) — producers `@0x4BA94E` and

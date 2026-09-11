@@ -9,8 +9,9 @@
 //   fog/skyfog render colors are doubled with saturation (@ 0x57f17c).
 // It owns: the .env keyframe table plus the .trn/overcast.def table the
 // overcast blend cross-fades against, the keyframe-TARGET vs smoothed-CURRENT
-// color split shared with the weather tick, the NVG hemisphere rewrite, and
-// the change-gated env generation every lit consumer keys on. The mission
+// color split shared with the weather tick, the NVG hemisphere rewrite, the
+// thermal-view overrides (world block, fog, clear, terrain ramps), and the
+// change-gated env generation every lit consumer keys on. The mission
 // clock, the weather scalars (fog distance, sky height, sun dim, rain,
 // overcast, cloud scroll, quake, fog type, precipitation kind) live in ONE
 // home, world::WeatherState (runtime/world/weather_state.h); this state reads
@@ -226,6 +227,24 @@ public:
 	bool set_nvg_view(bool active, int gain);
 	int nvg_gain() const { return nvg_gain_; }
 
+	// --- the thermal view -------------------------------------------------
+
+	// The local player's thermal-imaging view, already resolved by the view
+	// frame (world::LocalPlayerViewFrame carries the two gates and their
+	// witnesses). `world` = the CanFire verdict AND the equipped weapon def's
+	// Thermal bit: the flat grey world lighting block, the 0x808080 device
+	// fog and frame clear. `terrain` = the def bit in first person alone:
+	// the flat terrain ramps. NVG in first person outranks the terrain
+	// ramps, while the world block's thermal grey outranks the NVG rewrite.
+	// Returns true when the state actually changed.
+	// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c837c..0x5c843c;
+	//  Render_ProcessMainSceneFrame @ 0x5ca2da..0x5ca2e3 (the per-frame
+	//  latch), @ 0x5ca771..0x5ca778 (clear), @ 0x5ca83c (fog);
+	//  Render_TerrainScene @ 0x610d10..0x610ea1]
+	bool set_thermal_view(bool world, bool terrain);
+	bool thermal_view() const { return thermal_view_; }
+	bool thermal_terrain_view() const { return thermal_terrain_view_; }
+
 	// --- current render colors (the smoothed/current slots) ---------------
 
 	Rgb sun_light() const { return sun_light_; }
@@ -242,17 +261,21 @@ public:
 	// device Clear @ 0x677100; defaults @ 0x57c0b0 / 0x60fca3].
 	Rgb frame_clear_color() const { return skyfog_color_rt_; }
 	// The witnessed per-frame clear SELECTION [orig:
-	// Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792 + the indoors gate
+	// Render_ProcessMainSceneFrame @ 0x5ca771..0x5ca792 + the indoors gate
 	// @ 0x5c1597]: BLACK while the blink indoors bit is set (the
-	// Env_SkyfogBlock clear runs only when it is clear), the horizon-blended
-	// skyfog above water, and underwater the lit water color — water x
-	// combined terrain light, the same derived chain the water surface
-	// renders with [orig: @ 0x5ca78b]. Both branches serve RENDER-SPACE
-	// (x2-gained) colors for the modulate2x-path device Clear (D-RMAT-7).
+	// Env_SkyfogBlock clear runs only when it is clear), the flat 0x808080
+	// grey while the thermal view is latched (it outranks the water test
+	// [orig: @ 0x5ca771..0x5ca778]), the horizon-blended skyfog above water,
+	// and underwater the lit water color — water x combined terrain light,
+	// the same derived chain the water surface renders with [orig:
+	// @ 0x5ca78b]. Every branch serves RENDER-SPACE (x2-gained) colors for
+	// the modulate2x-path device Clear (D-RMAT-7).
 	Rgb frame_clear_color_for(bool indoors, bool above_water) const;
-	Rgb ceiling_color() const { return ceiling_color_rt_; }
+	// The interior pair, NVG-gated like sky/ground but with the modulator's
+	// R term on all three channels (apply_nvg_hemi_gain_r).
+	Rgb ceiling_color() const;
 	Rgb cloud_tint() const { return cloud_tint_rt_; }
-	Rgb floor_color() const { return floor_color_rt_; }
+	Rgb floor_color() const;
 	Rgb sky_base() const { return sky_base_rt_; }
 	Rgb sky_bright() const { return sky_bright_rt_; }
 	Rgb sky_highlight() const { return sky_highlight_rt_; }
@@ -400,19 +423,28 @@ public:
 
 	// The current world lighting/fog record — the witnessed block mapping:
 	// dir_color <- the light block (sun/moon), hemi_sky <- the sky block,
-	// hemi_ground <- the ground block, gain <- the modulator /64
-	// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090;
-	//  ColorSrcGlobalGain bind @ 0x58e05d;
-	//  sun/moon select Environment_GetLightDirectionFloat @ 0x57d870].
+	// hemi_ground <- the ground block, gain <- the modulator /64; the NVG
+	// rewrite rides the getters and the thermal grey override the tail
+	// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090
+	//  (thermal grey @ 0x5c837c..0x5c843c); ColorSrcGlobalGain bind
+	//  @ 0x58e05d; sun/moon select Environment_GetLightDirectionFloat
+	//  @ 0x57d870].
 	// Returns false when not loaded (the shell publishes its retail-noon
 	// defaults record instead); `default_dir` is the fallback for a
 	// near-zero light direction.
 	bool build_light_values(const Vec3 &default_dir,
 			WorldLightValues &out, bool underwater_view = false) const;
 	// The standalone-owner global refresh (weather absent): wind sway rests at
-	// its 1.0/0.0 idle values.
+	// its 1.0/0.0 idle values. Its sun/sky pair is the terrain pair below
+	// (foliage inherits the terrain's two device constants).
 	EnvShaderGlobals build_shader_globals(bool underwater_view = false) const;
+	// The terrain c1 light / c0 sky pair plus the pass fog; the thermal
+	// terrain ramps and the NVG sky blend select here
+	// [orig: Render_TerrainScene @ 0x610d10..0x610ea1].
 	TerrainEnvUniforms build_terrain_uniforms(bool underwater_view = false) const;
+	// The per-pass device fog: lit water underwater, else the thermal
+	// 0x808080, else the weather fog block
+	// [orig: Environment_ApplyFogAndAmbient @ 0x57e471..0x57e4ad].
 	SceneFogValues build_scene_fog(bool underwater_view) const;
 
 	// The one witnessed render-eye/waterline rule. The device fog selector is
@@ -494,8 +526,15 @@ private:
 	int nvg_gain_ = 0;
 	// Applies the first-person-visible NVG hemisphere rewrite. color_src_gain
 	// is the retail modulator byte unpacked as /64, so modulator*f/640 becomes
-	// color_src_gain*f/10 here [orig: NVG world-light gain rewrite].
+	// color_src_gain*f/10 here [orig: NVG world-light gain rewrite
+	// @ 0x5c8205..0x5c82a1].
 	Rgb apply_nvg_hemi_gain(const Rgb &color) const;
+	// The ceiling/floor form: the modulator's R term on all three channels
+	// [orig: @ 0x5c82a5..0x5c82e9].
+	Rgb apply_nvg_hemi_gain_r(const Rgb &color) const;
+	// The thermal view's two shell-fed gates (see set_thermal_view).
+	bool thermal_view_ = false;
+	bool thermal_terrain_view_ = false;
 
 	bool weather_driven_ = false;
 	int64_t env_generation_ = 0;

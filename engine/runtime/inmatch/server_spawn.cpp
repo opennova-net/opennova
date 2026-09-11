@@ -218,10 +218,20 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	spawn.team = Server_ReservePlayerTeam(
 			ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
 			conn, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
+	// The join spawn enters the no-pick arm (Server_OnPlayerJoin passes spawn
+	// handle low word 0, which Server_ResolveSpawnTargetHandle rejects), where
+	// a spectator slot is POSITIONED with the substitute team (Co-op 1; team
+	// modes 2 - (tick & 1) for this fresh, not-dead entity) while its assigned
+	// team stays 0 — the hidden body lands on a real start marker, never at
+	// the origin. [orig: Server_OnPlayerJoin @0x51A786 ->
+	// Server_PositionPlayerForSpawn @0x50D17C..0x50D1C6; the latch is
+	// slot+100567 stored by Server_PlayerAdd @0x51CD83]
+	const world::SpawnSlotState slot_state{
+			conn.link.spectator, conn.spectator_restore_team};
 	const world::SpawnPointResult sel =
 			world::resolve_player_spawn_pose(
 					world, world::EntityHandle{}, world::EntityHandle{},
-					*player_slot, spawn.team, ctx.config.game_type);
+					*player_slot, spawn.team, ctx.config.game_type, slot_state);
 	if (sel.found) {
 		spawn.position = sel.position; // mission space, straight from the chosen marker
 		spawn.yaw = sel.yaw;
@@ -293,6 +303,10 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	const world::EntityHandle h =
 			is_host_own ? world::spawn_player(world, spawn) : world::spawn_remote_player(world, spawn);
 	if (!h.valid()) return h;
+	// The Co-op marker arm's survivors land on the fresh entity: the marker's
+	// chute bit and, for a team-2 marker, the queued 0x200 mount onto its
+	// carrier (+0x16C/+0x180). [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
+	world::apply_spawn_point_latches(*world.registry.get(h), sel);
 
 	conn.link.owned_entity = h; // the per-connection S2C anchor + C2S owner-verify subject
 	conn.link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
@@ -458,6 +472,8 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		player->pitch = selected.pitch;
 		player->roll = selected.roll;
 	}
+	// [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
+	world::apply_spawn_point_latches(*player, selected);
 	player->team = team;
 	player->flags &= ~1u;
 	player->flags &= ~world::kEntityFlagDead;

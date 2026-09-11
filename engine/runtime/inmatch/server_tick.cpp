@@ -602,7 +602,28 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 		if (ctx.is_in_session) {
 			std::vector<uint8_t> body13;
 			put_u16le(body13, d.victim_handle);
-			put_u16le(body13, d.killer_handle); // the killerSource stamp [orig: entity+704]
+			// word1 = the victim's entity+0x2C0 death-anim slot AS THE SENDER
+			// SEES IT — never the killer. Both infantry death edges consume the
+			// slot into the anim state and ZERO it before the authority-gated
+			// Entity_CheckAndProcessDeath call, so an edge-driven infantry
+			// death always ships 0 (every 0x13 in the retail capture carries
+			// 0); only the direct third sender ships a live slot. Our death
+			// routing runs in the damage tick, before the next body update's
+			// edge (infantry.cpp) consumes the staged selection, so a person
+			// victim reports the post-edge zero here rather than the selection
+			// its edge still owns; every other kind ships the slot as stored.
+			// The retail receiver stores the word sign-extended into +0x2C0.
+			// [orig: BuildDeathNotifyPayload @0x5036E0 (movzx word [esi+2C0h]
+			//  @0x503733, store @0x50374A); edges @0x4B9D38 -> @0x4B9D4D (AI)
+			//  and @0x4B4CD5 -> @0x4B4CEA (player body); direct sender
+			//  @0x4D29EC; receiver NapiNPClientMsg_EntityDeath @0x42EB8D/@0x42EBDF]
+			const bool edge_consumes_slot = victim_entity != nullptr &&
+					(victim_entity->item_type == 3 ||
+					 (victim_entity->item_type == 0 &&
+					  victim_entity->kind == world::EntityKind::Organic));
+			put_u16le(body13, victim_entity != nullptr && !edge_consumes_slot
+					? static_cast<uint16_t>(victim_entity->death_anim_state)
+					: uint16_t{0});
 			std::vector<uint8_t> body1e;
 			if (victim_is_player) {
 				body1e.push_back(feed.event_type);
@@ -672,12 +693,15 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 				}
 			}
 
-			// Finally publish the revive window to active, alive same-team
-			// Medics. Manual Auto-Medic preference first clears their marker and
-			// sends the live window to the victim alone; automatic mode sends the
-			// window directly to the Medic group. Mask 0x580 does include the host.
-			// [orig: GameEvent_PlayerDeath @0x516DD0;
-			// NapiNPServer_SendFiltered @0x4C87E0]
+			// Finally publish the revive window to in-match same-team Medics
+			// (mask 0x580 tests slot state 6/7, the team byte and the Medic
+			// class — never the medic's own health or dead bit, so a dead
+			// medic is a recipient too). Manual Auto-Medic preference first
+			// clears their marker and sends the live window to the victim
+			// alone; automatic mode sends the window directly to the Medic
+			// group. Mask 0x580 does include the host.
+			// [orig: GameEvent_PlayerDeath @0x516DD0 (mask @0x51739C, team
+			//  filter @0x5173AF); NapiNPServer_SendFiltered @0x4C87E0]
 			if (victim_connection != nullptr && victim_entity != nullptr &&
 					victim_connection->link.downed_revive_seconds != 0u) {
 				auto send_downed = [&](NapiNPConnection &recipient,

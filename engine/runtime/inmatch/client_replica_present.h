@@ -88,8 +88,20 @@ inline bool emplaced_weapon_controls_for_client(
 				? static_cast<int32_t>(
 						static_cast<uint32_t>(occupant.pitch_byte) << 24)
 				: occupant.pitch_bam;
+		// The immediate producer of the gun words, over the replica: yaw =
+		// gun - occupant; pitch = gun - occupant.recoilPitch - occupant, the
+		// recoil being the row's reconstructed entity+0x380 (stamped from the
+		// received round event, decayed by the local body pass). The replica
+		// carries neither the stored +0x322/+0x324 words nor the mount's
+		// ItemDefAttrib2, so the IsTurret slew/tether leg and the window
+		// clamp's occupant write-back (both authority-side in
+		// world/mount_controls.h) are not mirrored here: a joiner presents a
+		// remote IsTurret turret at the occupant's aim, not the slewed word.
+		// [orig: Entity_UpdateChildAttachment @0x4409A0 immediate path
+		//  @0x440b39..0x440b58 — `sub ecx,[edx+380h]` @0x440b4c]
 		int32_t yaw_delta = io::bam_sub(parent_heading, occupant_heading);
-		int32_t pitch_delta = io::bam_sub(mount.pitch_bam, occupant_pitch);
+		int32_t pitch_delta = io::bam_sub(
+				io::bam_sub(mount.pitch_bam, occupant.recoil_pitch), occupant_pitch);
 		// The per-seat authored window wins first — the CARRIER's addeweap arc
 		// for this attach point, matched by the mount row's streamed carrier +
 		// bone (the same key the seat match above uses). Any nonzero value

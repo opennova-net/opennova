@@ -141,9 +141,9 @@ WorldLightingBlock build_world_lighting(const WorldLightingInputs &in) {
 		out.dir = { 0.0f, 0.0f, 0.0f };
 	}
 
-	// The vehicle-scope grey override [orig: @ 0x5c8389..0x5c843c]: dir 0.1,
+	// The thermal-view grey override [orig: @ 0x5c837c..0x5c843c]: dir 0.1,
 	// hemis/floor/ceiling 0.5, dir disabled.
-	if (in.vehicle_scope_grey) {
+	if (in.thermal_grey) {
 		out.dir_enabled = false;
 		out.dir_color = { 0.1f, 0.1f, 0.1f };
 		out.hemi_sky = { 0.5f, 0.5f, 0.5f };
@@ -152,9 +152,9 @@ WorldLightingBlock build_world_lighting(const WorldLightingInputs &in) {
 		out.floor_color = { 0.5f, 0.5f, 0.5f };
 	}
 
-	// The NVG world dim [orig: @ 0x5c8448..0x5c84f0]: dir zeroed + disabled,
-	// everything else 0.25.
-	if (in.nvg_world_dim) {
+	// The flat quarter block of the thermal frame's BySide waves [orig:
+	// @ 0x5c8448..0x5c84f0]: dir zeroed + disabled, everything else 0.25.
+	if (in.thermal_wave_dim) {
 		out.dir_enabled = false;
 		out.dir_color = { 0.0f, 0.0f, 0.0f };
 		out.hemi_sky = { 0.25f, 0.25f, 0.25f };

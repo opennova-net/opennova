@@ -24,6 +24,7 @@
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <set>
@@ -530,6 +531,112 @@ int main() {
 		            "SP host still spawns under a default (0) game type")) return 1;
 		if (!expect(unseeded.x == 0.0f && unseeded.y == 0.0f,
 		            "the default 0 word walks the DM 6095/6002 chain past 6001 and lands at the origin")) return 1;
+	}
+
+	// A join-time spectator is POSITIONED with the substitute team while its
+	// assigned team stays 0: in a team mode the tick parity (odd -> team 1,
+	// even -> team 2) selects the base marker, so the hidden body lands on a
+	// real start marker instead of the mission origin.
+	// [orig: Server_OnPlayerJoin @0x51A786 -> Server_PositionPlayerForSpawn
+	//  @0x50D17C..0x50D1C6; the latch is slot+100567 from Server_PlayerAdd @0x51CD83]
+	{
+		auto team_world = std::make_unique<w::World>();
+		team_world->registry.configure_pool(0, 16);
+		team_world->registry.configure_pool(3, 16);
+		auto add_marker = [&](int32_t item_id, float x) {
+			w::Entity start;
+			start.kind = w::EntityKind::Marker;
+			start.item_id = item_id;
+			start.position = {x, 0.0f, 0.0f};
+			team_world->registry.spawn(3, start);
+		};
+		add_marker(6096, 10.0f);
+		add_marker(6097, 20.0f);
+
+		inmatch::NapiNPServerCtx team_ctx;
+		inmatch::GameConfig settings;
+		settings.max_players = 8;
+		settings.game_type = opennova::game_type::kTeamDeathmatch;
+		inmatch::test::bring_up_host(team_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+		                        /*host_key=*/0, nullptr, settings);
+		team_ctx.world = team_world.get();
+		auto admit_spectator = [&](uint32_t dcb) {
+			inmatch::NapiNPConnection joining;
+			joining.type = 1;
+			joining.connection_id = dcb;
+			joining.self_id_seen = true;
+			joining.phase = inmatch::ConnectionPhase::Joined;
+			joining.link.spectator = true;
+			team_ctx.np_protocol.connection_list.push_back(joining);
+		};
+		team_world->logic_tick = 1;
+		admit_spectator(inmatch::kFirstJoinerDcb);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(team_ctx, *team_world) == 1,
+		            "odd-tick spectator admission spawns")) return 1;
+		const w::Entity *odd = pool0_player(*team_world, inmatch::kFirstJoinerDcb);
+		if (!expect(odd != nullptr && odd->team == 0 && odd->position.x == 10.0f,
+		            "an odd-tick team-mode spectator positions on the team-1 base and keeps team 0")) return 1;
+		team_world->logic_tick = 2;
+		admit_spectator(inmatch::kFirstJoinerDcb + 1);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(team_ctx, *team_world) == 1,
+		            "even-tick spectator admission spawns")) return 1;
+		const w::Entity *even = pool0_player(*team_world, inmatch::kFirstJoinerDcb + 1);
+		if (!expect(even != nullptr && even->team == 0 && even->position.x == 20.0f,
+		            "an even-tick team-mode spectator positions on the team-2 base and keeps team 0")) return 1;
+	}
+
+	// A Co-op join onto a team-2 start marker parented to a carrier arms the
+	// queued 0x200 mount (+0x16C/+0x180 = the parent) and copies the marker's
+	// chute bit; the seat attach itself is the body update's 0x200 toggle, so
+	// the fresh player is positioned on the transformed marker, not mounted.
+	// [orig: Server_PositionPlayerForSpawn @0x50D406..0x50D45A;
+	//  consumer Entity_UpdateInfantryPlayerBody @0x4B424A..0x4B4272]
+	{
+		auto coop_world = std::make_unique<w::World>();
+		coop_world->registry.configure_pool(0, 16);
+		coop_world->registry.configure_pool(1, 4);
+		coop_world->registry.configure_pool(3, 16);
+		w::Entity carrier;
+		carrier.kind = w::EntityKind::Item;
+		carrier.position = {100.0f, 50.0f, 10.0f};
+		const w::EntityHandle carrier_handle = coop_world->registry.spawn(1, carrier);
+		w::Entity start;
+		start.kind = w::EntityKind::Marker;
+		start.item_id = 6094;
+		start.has_item_def = true;
+		start.team = 2;
+		start.position = {1.0f, 0.0f, 2.0f};
+		start.yaw = 90;
+		start.flags = w::kEntityFlagParachute;
+		start.ground_target = carrier_handle;
+		coop_world->registry.spawn(3, start);
+
+		inmatch::NapiNPServerCtx coop_ctx;
+		inmatch::GameConfig settings;
+		settings.max_players = 8;
+		settings.game_type = opennova::game_type::for_mission_mode(0); // stock Co-op 0x10020
+		inmatch::test::bring_up_host(coop_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+		                        /*host_key=*/0, nullptr, settings);
+		coop_ctx.world = coop_world.get();
+		inmatch::NapiNPConnection joiner;
+		joiner.type = 1;
+		joiner.connection_id = inmatch::kFirstJoinerDcb;
+		joiner.self_id_seen = true;
+		joiner.phase = inmatch::ConnectionPhase::Joined;
+		coop_ctx.np_protocol.connection_list.push_back(joiner);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(coop_ctx, *coop_world) == 1,
+		            "Co-op carrier-marker joiner spawns")) return 1;
+		const w::Entity *rider = pool0_player(*coop_world, inmatch::kFirstJoinerDcb);
+		if (!expect(rider != nullptr &&
+		                    (rider->flags & 0x200u) != 0 &&
+		                    (rider->flags & w::kEntityFlagParachute) != 0,
+		            "a team-2 parented Co-op marker latches Flags 0x200 and the marker's chute bit")) return 1;
+		if (!expect(rider->mount_target == carrier_handle &&
+		                    rider->mount_toggle_fallback == carrier_handle && !rider->mounted,
+		            "the carrier lands in +0x16C/+0x180 without flipping the mounted state")) return 1;
+		if (!expect(std::fabs(rider->position.x - 100.0f) < 1e-3f &&
+		                    std::fabs(rider->position.y - 51.0f) < 1e-3f,
+		            "the join pose is the parent-transformed marker")) return 1;
 	}
 
 	std::printf("OK\n");

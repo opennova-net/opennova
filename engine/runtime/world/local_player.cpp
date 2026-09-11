@@ -305,7 +305,10 @@ void LocalPlayer::sync_local_mounted_input_heading() {
 	const w::AiEntity *body = world.ai.for_handle(world.cached.local_player);
 	if (player_entity == nullptr || body == nullptr || !body->inf.is_local_player) return;
 	// A post-tick difference from the pre-tick input copy is "the sim wrote
-	// the view this tick" (the mount-attach yaw snap, the ladder legs).
+	// the view this tick" (the mount-attach yaw snap, the ladder legs, the
+	// emplaced gun's gunner-yaw tether and window write-back — retail's
+	// g_LocalPlayerLookYaw stores @0x440aa8 / @0x441277 and the occupant
+	// Pitch store @0x4412b3, folded here into the input-owned look).
 	if (body->inf.target_heading != input.look_heading) input.look_heading = body->inf.target_heading;
 	if (body->inf.look_pitch != input.look_pitch) input.look_pitch = body->inf.look_pitch;
 }

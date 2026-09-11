@@ -72,7 +72,7 @@ end).
 | Waypoint track (list/current/advance/mission gate) | **ported** (`engine/runtime/world` waypoint track + `Simulation`, D-HUD-16/17) | list `[orig: NetPacket_WriteWorldStateLoad0x0F @0x502d10 @0x502e41]` (nav channel `flags&2`); BMS marker fields `[orig: Entity_SpawnFromBMSRecord @0x40f0aa]`; advance `[orig: Player_UpdatePerFrame @0x4de5f7]`; done-mark `[orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0]`; cycle `[orig: Spectator_CycleTarget @0x4dc1d0]` + input case 23 `[orig: @0x49b3de]`; `ShowWaypoints` `[orig: Game_SetShowWaypoints @0x58fb50]` |
 | Gameplay spinmap (`HUDSPINMAP*`: heading-up terrain, blips, pulse markers, waypoint tether/distance, compass ring) | **ported** (`HudMinimapCompiler` → `HudFrameCompiler::element_spinmap` → `HudOverlay`; retained 0x40/0x6B state in `ClientReplicaPipeline`; in-map indicator/label legs = D-HUD-21) | `[orig: HUD_RenderAllOverlays @0x5a8070 (gate @0x5a86e8, mask 0xD07FF @0x5a86f0)]` → `[orig: HUD_DrawMapOverlay @0x5a5f40]`; transform `[orig: Terrain_FixedPointToWorldFloat @0x607060]`; terrain `[orig: render_terrain_decal @0x6071C0]`; blips `[orig: MapOverlay_RenderAllByLayer @0x5be590 → render_minimap_slot_blip @0x5be240]`; compass `[orig: draw_compass_indicator @0x59c900]`; ctests `hud_frame_compiler`/`client_minimap_overlay`/`minimap_overlay` + GUT `hud_overlay_test.gd` |
 | Fullscreen / CMAP / DEATH map surfaces | witnessed — deferred (D-HUD-19) | shared fullscreen `HUD_DrawMapOverlay @0x5a5f40` legs plus windowed `MapOverlay_DrawView @0x5a58e0`: pan/zoom, grid coordinates, command/deploy labels and window hosting |
-| Objectives panel + subgoal state (MISSION OBJECTIVES) | **ported** (`world::SubgoalState` + `HudFrameCompiler::element_objectives` + `game_hud_presenter.gd`, D-HUD-18) | `[orig: HUD_DrawWinConditions @0x5ba940]` full witness; actions 14/15/35/36 `[orig: EventAction_Dispatch @0x454500/@0x4545e0/@0x4546af/@0x454724]`; toggle `[orig: @0x49b68b]`; ctest `event_runtime_bms` subgoal block |
+| Objectives panel + subgoal state (MISSION OBJECTIVES) | **ported** (`world::SubgoalState` + `HudFrameCompiler::element_objectives` + `game_hud_presenter.gd`, D-HUD-18; the toggle is polled from catalog row 55 `Goals` (dispatch 31, default G) since 2026-09-10 — the earlier hard-coded O collided with `dotsize`) | `[orig: HUD_DrawWinConditions @0x5ba940]` full witness; actions 14/15/35/36 `[orig: EventAction_Dispatch @0x454500/@0x4545e0/@0x4546af/@0x454724]`; toggle `[orig: @0x49b68b]`; ctest `event_runtime_bms` subgoal block |
 | HUD declutter (`hud_detail` + `HUDDECLUT_*` masks) | **ported** (`engine/runtime/hud/hud_declutter.*` + `HudFrameCompiler` per-slot gates + the shell's persisted `hud_detail`) | `[orig: HUD_ParseHudposToken @0x59F370 mask arms → CRenderState_SetLayerVisibility @0x59B0F0 → dword_2723C80]`; cycle `[orig: Input_HandleActionBinding_0 @0x4e060b..24]`; level-3 blackout `[orig: @0x5a80c4]`; death force-3 `[orig: @0x42e410]`; the full section below |
 | Mounted-vehicle panel (VEHICLE_HUD silhouette + seat markers) | **ported end to end** (2026-08-21: `HudFrameCompiler` vehicle-panel leg + `hud_vehicle_panel.h` band/marker policy + the `def_hudpos` VEHICLE_HUD blocks + `world/vehicle_panel_feed` (the re-root, the slot list, the three marker arms) + `HudOverlay::set_vehicle_panel` (the per-sid `interface` upload) + `vehicle_panel_presenter.gd` — the device + lane landed 2026-08-21, D-HUD) | `[orig: HUD_DrawVehicleHealthBars @0x5a4fd0; Entity_BuildWeaponSlotList @0x434c60; Entity_GetMountSlotBoneIndex @0x546680; the VEHICLE_HUD arms of HUD_ParseHudposToken @0x59f370 (@0x59f380..0x59f5cb)]`; ctest `hud_vehicle_panel`, `hud_frame_compiler`, `vehicle_panel_feed`, `def_parse_hudpos` |
 | Recent Messages window (the J-key `OldMessages` history) | **ported** (2026-08-21: `hud_frame_message_log.cpp` over the two display-slot rings, `hud_message_log.h` layout; the `OldMessages` toggle lane `message_log_presenter.gd` landed 2026-08-21, D-HUD) | `[orig: HUD_DrawMessageLog @0x5b9d70]` (IDB-renamed 2026-08-21, ex `draw_credits_scroll`); the `g_showMessageLog`-only gate `[orig: Server_DrawStatusScreen @0x50b211..0x50b21f]`; ctest `hud_message_log`, `hud_frame_compiler` |
@@ -616,10 +616,50 @@ The Godot card reproduces those modes per row; in particular, transparent
 pixels in `multiplyat` textures are discarded instead of blacking out the
 scene.
 
+Each row is drawn in one of three modes (2026-09-10, jo-c cross-check):
+**scaled** (row+0x1C, the `scale` token) draws half-extents
+`((x2-x1)*(idx+2))>>3` / `((y2-y1)*(idx+2))>>3` about the row centre
+`((x1+x2)>>1, (y1+y2)>>1)` `[orig: @0x4dce8d gate; @0x4dcead..0x4dcf2c]`, where
+`idx = dword_B76780` is the per-player sight-scale index — default 1 at
+`Player_InitPlayer @0x4e160f/@0x4e178c` (so 3/4 of the authored box), cycled
+by action 216 = catalog row 38 `dotsize` ("Sights Dot Size", default O):
+`idx + 1`, signed `cmp eax,3; jl` keeps it else 0 `[orig:
+Input_HandleActionBinding_0 @0x4e0c31..0x4e0c46]`; **slide** (row+0x20, the
+`slide` token, row+0x18 = slide frames): `y1 += frames*m`, `y2 += frames*m`, x
+untouched `[orig: @0x4dcf42 gate; @0x4dd014/@0x4dd043]`, where the multiplier
+keys on the MountSlot zero word +0x60 `[orig: @0x4dcf4c]`: word 0 →
+`Weapon_GetScopeZoomLevel(0, (def+0xA0<<16)/1638400) * 25 / def+0x9C` when
+def+0xA0 != 0 and `byte_24D217C == 0` (`@0x4dcf57..0x4dcfa6`); word 0xFFFF →
+`dword_B76808 / (def+0x9C<<16)`, negative → 0, capped at def+0x84
+(`@0x4dcfb7..0x4dcff7`); else the signed word itself (`@0x4dcff9`); **plain**
+otherwise (`@0x4dd050`). def+0x84/+0x9C/+0xA0 are the three `atol`'d tokens of
+the weapon.def key `scope_max_zero <maxSteps> <stepMetres> <defaultMetres>`
+`[orig: WeaponDefs_ParseLineCallback @0x544e8b..0x544ed9]`; `dword_B76808` is
+the aim ray's hit distance (Q16) restamped by `Entity_UpdateInfantryPlayerBody
+@0x4b5056..0x4b50ad` and seeded with def+0xA0 on mounting a Flags 0x20000000
+weapon (`Player_MountWeaponSlot @0x4dfb3b..0x4dfb44`); `byte_24D217C` has no
+writer in the image. Retail honours `scale`/`slide` only as token 7 with >= 8
+tokens (`@0x544b7a`); our parser scans any trailing token, a superset. After
+`Viewport_ScaleToVirtualCoords` the drawer also applies an aspect y-correction
+`y' = (y - H/2) * 3/(4*flt_8409EC) + H/2` (`@0x4dd0cd..0x4dd0f7`, the factor
+from `Render_SetAspectRatioMode @0x58d870`; mode 0 = 0.75 = identity) — not
+ported (no aspect-mode state exists in the port).
+
 Port: `world::weapon_sights_card_eligible` owns the dynamic selector, the sim
-publishes it as `scope_card_active`, and `HudFrameCompiler::element_sights_card`
-+ `godot/game/world/hud_sights_card.gd` always materialize the authored rows
-and use that selector only for visibility.
+publishes it as `scope_card_active`, `engine/runtime/hud/sight_overlay.h`
+evaluates the three row modes (`sight_row_rect`, `sight_slide_multiplier`, the
+index policy `next_sight_scale_index`), `HudFrameCompiler::element_sights_card`
++ `godot/game/world/hud_sights_card.gd` materialize the evaluated rows and use
+the selector only for visibility, and `game_hud_presenter.gd` polls the
+`dotsize` binding (`HudOverlay::cycle_sight_scale`). The slide multiplier's
+rangefinder (0xFFFF) and manual-word arms wait on the scope-zero keys
+(MountSlot+0x60, the `ScopeZeroInc/Dec` rows 41/42) that the port does not carry
+yet; the default arm is live from the parsed `scope_max_zero` ints
+(`WeaponDef::get_sight_slide_multiplier`). Shipped data: the sole `slide` author,
+`WPN_M16M203HE`, authors `scope_max_zero 10 50 0 0`, so its default arm resolves
+to multiplier 0 (`Weapon_GetScopeZoomLevel(0, d)` returns `d` untouched
+`@0x422fd1..0x422fd5`); the `10 100 200 x` weapons resolve to 2 (a 33-frame row
+shifts 66 px), `1 100 100 1` and `1 300 300` to 1, `10 100 300 1` to 3.
 
 ### Mission triggered text — `HUD_DisplayTriggeredText @0x51f190` (ported 2026-07-09)
 

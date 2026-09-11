@@ -90,16 +90,14 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     if (profile) {
         // CHel's definition callback is @0x4683C0 (the separate @0x461F00
         // respawn init has different flags/slide writes). Its generic allocator
-        // starts all three state words at zero before calling the enter handler.
+        // starts all three state words at zero and lands the constant block
+        // (the shared initialize_vehicle_brain); the callback then writes the
+        // move step before calling the enter handler
+        // [orig: Entity_InitHelicopterAIFromDef @0x4683C0 — the @0x460200 call
+        //  @0x4684bf/@0x4684cf, `[brain+1Ch] = 10h` @0x468645].
         initialize_ai_profile(ai, *profile, world.ai, world::EntityKind::Item);
-        ai.brain.f[AiBrain::kCurState] = 0;
-        ai.brain.f[AiBrain::kPendState] = 0;
-        ai.brain.f[AiBrain::kFallback] = 0;
+        initialize_vehicle_brain(ai, world, request.heading);
         ai.brain.f[AiBrain::kStep] = 16;
-        ai.brain.f[AiBrain::kSweepPhase] = -196608;
-        ai.brain.f[137] = 1638400;
-        ai.brain.f[179] = request.heading;
-        ai.brain.f[200] = world.next_prng16_c() % 0x80000;
         std::memcpy(ai.slot.bytes() + 156, "H_BHawkN", 8);
         world.vehicle_ai_spawn_phase = (world.vehicle_ai_spawn_phase + 1) & 15;
     } else {

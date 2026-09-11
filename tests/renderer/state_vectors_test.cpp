@@ -470,12 +470,13 @@ std::string generate() {
 	win_nvg.modulator_packed = 0x404040u;
 	print_block("nvg", opennova::renderer::build_world_lighting(win_nvg));
 
+	// The golden labels predate the field renames (thermal_grey / thermal_wave_dim).
 	opennova::renderer::WorldLightingInputs win_scope = win;
-	win_scope.vehicle_scope_grey = true;
+	win_scope.thermal_grey = true;
 	print_block("scope", opennova::renderer::build_world_lighting(win_scope));
 
 	opennova::renderer::WorldLightingInputs win_dim = win;
-	win_dim.nvg_world_dim = true;
+	win_dim.thermal_wave_dim = true;
 	print_block("nvgdim", opennova::renderer::build_world_lighting(win_dim));
 
 	const auto print_uniforms = [&](const char *label, const opennova::renderer::EntityLightingUniforms &u) {

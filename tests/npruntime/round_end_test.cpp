@@ -500,14 +500,16 @@ void test_demolition_death_routes_score_and_round_wire() {
 			if (datagram.tag != s2c::ENTITY_DEATH) continue;
 			EntityDeathRecord death;
 			size_t consumed = 0;
+			// word1 is the victim's +0x2C0 death-anim slot, never the killer;
+			// a building never stages one. [orig: BuildDeathNotifyPayload @0x5036E0]
 			if (decode_entity_death(datagram.body.data(), datagram.body.size(),
 					death, consumed) && consumed == datagram.body.size() &&
 					death.entity_handle == target.packed &&
-					static_cast<uint16_t>(death.killer_source) == attacker.packed)
+					death.death_anim_state_id == 0)
 				saw_death = true;
 		}
 		expect(saw_death,
-			"demolition target death fans the exact 0x13 target/killer handles");
+			"demolition target death fans the exact 0x13 target handle + zero death-anim slot");
 
 		for (int i = 0; i < 60; ++i) inmatch::Server_TickUpdate(ctx);
 		expect(!world.match.outcome().ended,

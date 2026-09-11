@@ -342,6 +342,10 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 	}
 	spawn.team = 1;
 	if (!spawn_local_player(spawn)) return -1;
+	// The Co-op marker arm's chute bit and queued carrier mount.
+	// [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
+	if (w::Entity *player = world.registry.get(world.cached.local_player))
+		w::apply_spawn_point_latches(*player, sel);
 	return sel.found ? 1 : 0;
 }
 

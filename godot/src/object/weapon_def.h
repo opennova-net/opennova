@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
@@ -41,6 +42,11 @@ public:
 	bool is_scale() const { return value_.scale != 0; }
 	bool is_slide() const { return value_.slide != 0; }
 	int get_slide_frames() const { return value_.slide_frames; }
+	// The row's draw rectangle in the 1024x768 design space for a sight-scale
+	// index and a scope-zero slide multiplier: plain, scaled about its centre,
+	// or slid (the engine's sight_row_rect, <runtime/hud/sight_overlay.h>,
+	// carries the three-mode policy).
+	Rect2 evaluate_rect(int p_sight_scale_index, int p_slide_multiplier) const;
 
 	// A row from its texture, 1024x768 rect and blend mode plus the optional
 	// scale/slide flags.
@@ -156,7 +162,21 @@ public:
 	WEAPON_DEF_SCALAR(int, heat_per_shot, heat_per_shot)
 	WEAPON_DEF_SCALAR(int, heat_decay_per_tick, heat_decay_per_tick)
 	WEAPON_DEF_SCALAR(int, heat_glow_threshold, heat_glow_threshold)
+	// The scope-zero table ('scope_max_zero <maxSteps> <stepMetres>
+	// <defaultMetres> [<extra>]'; the struct in <formats/def/def.h> carries the
+	// witness).
+	WEAPON_DEF_SCALAR(int, scope_max_zero_steps, scope_max_zero_steps)
+	WEAPON_DEF_SCALAR(int, scope_zero_step, scope_zero_step)
+	WEAPON_DEF_SCALAR(int, scope_zero_default, scope_zero_default)
+	WEAPON_DEF_SCALAR(int, scope_zero_extra, scope_zero_extra)
 #undef WEAPON_DEF_SCALAR
+
+	// The SIGHTS card's `slide` multiplier for this def at its DEFAULT zero:
+	// the engine's sight_slide_multiplier (<runtime/hud/sight_overlay.h>) over
+	// the scope-zero table with the slot's zero word 0 and no rangefinder
+	// sample. The manual-word and rangefinder arms wait on the scope-zero
+	// adjust port (D-WPN-8) and contribute nothing here.
+	int get_sight_slide_multiplier() const;
 
 	// xyz raw file units (/256 = world), then yaw/pitch/roll degrees.
 	PackedFloat32Array get_pos() const;

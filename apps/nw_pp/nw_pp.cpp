@@ -887,8 +887,8 @@ void print_vehicle_compact_record(const FrameUpdate *fu, const VehicleCompactRec
 	if (r.is_dead_pose) {
 		std::printf(" euler=(x=%d y=%d)\n", int(r.euler_x), int(r.euler_y));
 	} else {
-		std::printf(" health=%u weap=(x=0x%04x aimY=0x%04x aimZ=0x%04x hdgBAM=%d)\n",
-		            unsigned(r.health_word), unsigned(r.weapon_x),
+		std::printf(" health=%u vz=0x%04x weap=(aimY=0x%04x aimZ=0x%04x hdgBAM=%d)\n",
+		            unsigned(r.health_word), unsigned(r.vertical_velocity),
 		            unsigned(r.weapon_aim_y), unsigned(r.weapon_aim_z),
 		            int(r.weapon_heading_bam));
 	}
@@ -1635,8 +1635,8 @@ void print_tag_13(const std::vector<uint8_t> &body) {
 		std::printf("        [0x13] entity-death decode failed (need 4 B got %zu)\n", body.size());
 		return;
 	}
-	std::printf("        [0x13] entity-death handle=%s killerSource=%d\n",
-	            handle_str(d.entity_handle).c_str(), int(d.killer_source));
+	std::printf("        [0x13] entity-death handle=%s deathAnimStateId=%d\n",
+	            handle_str(d.entity_handle).c_str(), int(d.death_anim_state_id));
 }
 
 void print_tag_1d(const std::vector<uint8_t> &body) {

@@ -494,10 +494,25 @@ void HudFrameCompiler::element_sights_card(const HudFrameState &state,
 		if (!r.texture_valid) {
 			continue;
 		}
-		// Row rects live in the 1024x768 design space and scale per draw
+		// The row's mode resolves in the 1024x768 design space first — plain,
+		// scaled about its centre by the sight-scale index, or slid by the
+		// scope-zero multiplier (sight_overlay.h sight_row_rect carries the
+		// witness) — then the corners scale per draw
 		// [orig: Viewport_ScaleToVirtualCoords @ 0x5d2b20].
-		emit_rect(r.x0 * w / kDesignW, r.y0 * h / kDesignH,
-				r.x1 * w / kDesignW, r.y1 * h / kDesignH, 0xFFFFFFFFu, true,
+		SightRowSpec spec;
+		spec.x1 = static_cast<int32_t>(r.x0);
+		spec.y1 = static_cast<int32_t>(r.y0);
+		spec.x2 = static_cast<int32_t>(r.x1);
+		spec.y2 = static_cast<int32_t>(r.y1);
+		spec.scale = r.scale;
+		spec.slide = r.slide;
+		spec.slide_frames = r.slide_frames;
+		const SightRect rect = sight_row_rect(spec, state.sight_scale_index,
+				state.sight_slide_multiplier);
+		emit_rect(static_cast<float>(rect.x1) * w / kDesignW,
+				static_cast<float>(rect.y1) * h / kDesignH,
+				static_cast<float>(rect.x2) * w / kDesignW,
+				static_cast<float>(rect.y2) * h / kDesignH, 0xFFFFFFFFu, true,
 				kHudTexSightsBase + static_cast<int32_t>(row), r.additive);
 	}
 	++draw_list_.elements_drawn;

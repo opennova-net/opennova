@@ -12,6 +12,13 @@ extends Control
 ## multiply equation and the alpha-test variants [orig:
 ## WeaponDef_CreateBlendNamedMaterial @0x540180; blend decoder @0x680f00;
 ## CGfxDevice_SetAlphaTestRef(128) @0x5ccdae].
+## Each row draws in one of three authored modes -- plain, `scale` (the box
+## shrinks about its centre by the per-player sight-scale index the dotsize
+## key cycles), or `slide` (the box shifts in y by its frame count times the
+## scope-zero multiplier); the rect evaluation is the engine's
+## (WeaponSightRow.evaluate_rect -> runtime/hud/sight_overlay.h, which
+## carries the witness), and this card only re-evaluates when the inputs
+## change (set_sight_state).
 ##
 ## This stays a shell-side child-control stack (not a HudDrawList element)
 ## because each row needs its own CanvasItem for its blend mode; the engine
@@ -67,7 +74,15 @@ void fragment() {
 class SightRowControl:
 	extends Control
 	var tex: Texture2D
+	var sight: WeaponSightRow = null
 	var rect_v := Rect2()
+
+	## Re-resolve the design-space rect for the card's current mode inputs.
+	func evaluate(sight_scale_index: int, slide_multiplier: int) -> void:
+		if sight == null:
+			return
+		rect_v = sight.evaluate_rect(sight_scale_index, slide_multiplier)
+		queue_redraw()
 
 	func _draw() -> void:
 		if tex == null:
@@ -85,6 +100,10 @@ class SightRowControl:
 
 var _rows: Array = []
 var _card_up := false
+# The row-mode inputs (the engine's defaults; the presenter restamps them from
+# the overlay's per-player sight-scale index and the scope-zero multiplier).
+var _sight_scale_index: int = HudOverlay.sight_scale_index_default()
+var _slide_multiplier := 0
 
 
 ## Rebuild the card for the equipped weapon's authored SIGHTS rows
@@ -101,9 +120,8 @@ func set_weapon_sights(sights: Array[WeaponSightRow], root: ResourceRoot) -> voi
 			continue
 		var row := SightRowControl.new()
 		row.tex = tex
-		var x1 := float(e.get_x1())
-		var y1 := float(e.get_y1())
-		row.rect_v = Rect2(x1, y1, float(e.get_x2()) - x1, float(e.get_y2()) - y1)
+		row.sight = e
+		row.evaluate(_sight_scale_index, _slide_multiplier)
 		var material := _material_for_blend(e.get_blend())
 		if material != null:
 			row.material = material
@@ -129,8 +147,32 @@ func is_card_up() -> bool:
 	return _card_up
 
 
+## The row-mode inputs: the per-player sight-scale index (`scale` rows) and
+## the scope-zero slide multiplier (`slide` rows). Every row re-resolves its
+## rect through the engine evaluator when either changes.
+func set_sight_state(sight_scale_index: int, slide_multiplier: int) -> void:
+	if sight_scale_index == _sight_scale_index and slide_multiplier == _slide_multiplier:
+		return
+	_sight_scale_index = sight_scale_index
+	_slide_multiplier = slide_multiplier
+	for row: SightRowControl in _rows:
+		if is_instance_valid(row):
+			row.evaluate(_sight_scale_index, _slide_multiplier)
+
+
+func sight_scale_index() -> int:
+	return _sight_scale_index
+
+
 func row_count() -> int:
 	return _rows.size()
+
+
+## A row's current design-space rect (a read seam for the tests).
+func row_rect(index: int) -> Rect2:
+	if index < 0 or index >= _rows.size():
+		return Rect2()
+	return (_rows[index] as SightRowControl).rect_v
 
 
 static func _material_for_blend(blend: int) -> Material:

@@ -1080,11 +1080,13 @@ void GameWorld::restore_idle_frame_clear_color() {
 	clear_color_->get_environment()->set_bg_color(idle_frame_clear_color_);
 }
 
-// The witnessed frame clear: the horizon-blended skyfog above water, the lit
-// water color underwater [orig: Render_ProcessMainSceneFrame @ 0x5ca776..
-// 0x5ca792 - clear color = alternate_fog ? 0x808080 : cam above water ?
-// skyfog[0] : Env_WaterColorLit; the vehicle alternate-fog view is not
-// modeled yet]. Both branches serve RENDER-SPACE (x2-gained) colors, consumed
+// The witnessed frame clear: the thermal view's flat grey, else the
+// horizon-blended skyfog above water, the lit water color underwater [orig:
+// Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792 - clear color =
+// thermal ? 0x808080 : cam above water ? skyfog[0] : Env_WaterColorLit; the
+// selection is the engine's frame_clear_color_for, and the thermal latch
+// reaches it through MissionEnvironment::set_thermal_view, whose generation
+// bump re-runs this leg]. Every branch serves RENDER-SPACE (x2-gained) colors, consumed
 // VERBATIM by the modulate2x-path Clear this renderer reproduces (D-RMAT-7):
 // above water the post-blend DOUBLED skyfog, underwater Env_WaterColorLit =
 // water x light >> 7; the halving branch [orig: @ 0x67715d] is the

@@ -59,13 +59,19 @@ struct WorldLightingInputs {
 	bool nvg_hemi_rewrite = false;
 	int nvg_level = 0;              // 0..4
 	uint32_t modulator_packed = 0;  // Env_ModulatorBlock[0] @ 0x26c6644
-	// The vehicle-scope grey override: dir 0.1, everything else 0.5, dir
-	// disabled [orig: @ 0x5c8389..0x5c843c, gated on Player_CanFireWeapon &&
-	// Player_IsVehicleSeatHasFlag4].
-	bool vehicle_scope_grey = false;
-	// The NVG world-dim override (the function's bool arg): everything 0.25,
-	// dir zeroed and disabled [orig: @ 0x5c8448..0x5c84f0].
-	bool nvg_world_dim = false;
+	// The thermal-view grey override: dir 0.1, everything else 0.5, dir
+	// disabled [orig: @ 0x5c837c..0x5c843c, gated on Player_CanFireWeapon &&
+	// the equipped weapon def's flags2 & 4 (Thermal) — the IDB's
+	// Player_IsVehicleSeatHasFlag4 @ 0x4dcd70 reads EquippedSlot(+0x118)
+	// ->Def(+0x20)->flags2(+0x0C)]. The production feed is
+	// env::EnvironmentState::set_thermal_view.
+	bool thermal_grey = false;
+	// The flat quarter block (the function's bool arg): everything 0.25, dir
+	// zeroed and disabled [orig: @ 0x5c8448..0x5c84f0]. Its one caller passes
+	// 1 only under the thermal byte, bracketing the two BySide sector-entity
+	// waves, and restores with 0 [orig: Terrain_RenderSceneWithReflection
+	// @ 0x5c9511/0x5c9534, @ 0x5c95f8/0x5c9616].
+	bool thermal_wave_dim = false;
 };
 
 struct WorldLightingBlock {

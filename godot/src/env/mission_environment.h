@@ -80,8 +80,14 @@ public:
 	void set_weather_driven(bool p_driven);
 	bool is_weather_driven() const;
 
-	// --- NVG ----------------------------------------------------------------
+	// --- NVG / thermal ------------------------------------------------------
 	void set_nvg_view(bool p_active, int p_gain);
+	// The local player's thermal-imaging view, fed per presented tick like
+	// NVG from the sim's view frame (the engine state carries the two gates
+	// and their witnesses): the world gate greys the object lighting block
+	// and selects the 0x808080 pass fog and frame clear; the terrain gate
+	// selects the flat terrain ramps.
+	void set_thermal_view(bool p_world, bool p_terrain);
 	// The main scene pass selection, sampled from the render eye after local
 	// camera placement and before terrain/foliage submit. This does not mutate
 	// authored/current weather state; it selects the derived pass fog payload.

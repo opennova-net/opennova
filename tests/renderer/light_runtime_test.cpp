@@ -118,23 +118,44 @@ int main() {
     }
 
     {
-        auto scoped = base;
-        scoped.vehicle_scope_grey = true;
-        const auto lit = build_world_lighting(scoped);
-        expect(!lit.dir_enabled, "vehicle scope override should disable direction");
-        expect_vector(lit.dir_color, std::array<float, 3>{0.0f, 0.0f, 0.0f},
-                      "disabled direction should be zeroed at the context store");
-        expect_vector(lit.hemi_sky, std::array<float, 3>{0.5f, 0.5f, 0.5f},
-                      "vehicle scope override should use neutral half-grey hemisphere");
+        // A tinted modulator separates the two NVG term forms: sky/ground take
+        // the per-byte terms, ceiling/floor reuse the R term on every channel
+        // [orig: @0x5c8258..0x5c82a1 vs @0x5c82a5..0x5c82e9].
+        auto nvg = base;
+        nvg.sky_packed = nvg.ground_packed = 0;
+        nvg.ceiling_packed = nvg.floor_packed = 0;
+        nvg.nvg_hemi_rewrite = true;
+        nvg.nvg_level = 4;
+        nvg.modulator_packed = 0x00402010u;
+        const auto lit = build_world_lighting(nvg);
+        expect_vector(lit.hemi_sky, std::array<float, 3>{0.1f, 0.05f, 0.025f},
+                      "NVG sky/ground should take the per-channel modulator terms");
+        expect_vector(lit.ceiling_color, std::array<float, 3>{0.1f, 0.1f, 0.1f},
+                      "NVG ceiling should reuse the modulator R term on all channels");
+        expect_vector(lit.floor_color, std::array<float, 3>{0.1f, 0.1f, 0.1f},
+                      "NVG floor should reuse the modulator R term on all channels");
     }
 
     {
-        auto nvg_dim = base;
-        nvg_dim.nvg_world_dim = true;
-        const auto lit = build_world_lighting(nvg_dim);
-        expect(!lit.dir_enabled, "NVG world dim should disable direction");
+        auto thermal = base;
+        thermal.thermal_grey = true;
+        const auto lit = build_world_lighting(thermal);
+        expect(!lit.dir_enabled, "thermal grey override should disable direction");
+        expect_vector(lit.dir_color, std::array<float, 3>{0.0f, 0.0f, 0.0f},
+                      "disabled direction should be zeroed at the context store");
+        expect_vector(lit.hemi_sky, std::array<float, 3>{0.5f, 0.5f, 0.5f},
+                      "thermal grey override should use neutral half-grey hemisphere");
+        expect_vector(lit.floor_color, std::array<float, 3>{0.5f, 0.5f, 0.5f},
+                      "thermal grey override should reach the interior pair");
+    }
+
+    {
+        auto wave_dim = base;
+        wave_dim.thermal_wave_dim = true;
+        const auto lit = build_world_lighting(wave_dim);
+        expect(!lit.dir_enabled, "thermal wave dim should disable direction");
         expect_vector(lit.hemi_ground, std::array<float, 3>{0.25f, 0.25f, 0.25f},
-                      "NVG world dim should force quarter-intensity ambience");
+                      "thermal wave dim should force quarter-intensity ambience");
     }
 
     {

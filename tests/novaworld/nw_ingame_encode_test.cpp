@@ -509,7 +509,7 @@ int test_vehicle_compact_roundtrip_unmounted() {
 	r.pos_z_compressed = 0xCCCC;
 	r.euler_z = int16_t(0x0DDD);
 	r.flags_byte = 0x00;            // unmounted
-	r.weapon_x = 0x0101;
+	r.vertical_velocity = 0x0101;
 	r.health_word = 0x0202;
 	r.weapon_aim_y = 0x0303;
 	r.weapon_aim_z = 0x0404;
@@ -524,7 +524,7 @@ int test_vehicle_compact_roundtrip_unmounted() {
 	EXPECT(!d.is_dead_pose);
 	EXPECT(d.parent_slot_handle == 0xFFFF);
 	EXPECT(d.pos_x_compressed == 0xAAAA);
-	EXPECT(d.weapon_x == 0x0101);
+	EXPECT(d.vertical_velocity == 0x0101);
 	EXPECT(d.health_word == 0x0202);
 	EXPECT(d.weapon_aim_y == 0x0303);
 	EXPECT(d.weapon_aim_z == 0x0404);
@@ -677,7 +677,7 @@ int test_frame_update_roundtrip() {
 		in.records.push_back(p);
 		FrameUpdateRecord v; v.handle = 0x1002; v.type_id = 200; v.cls = EntityClass::Vehicle;
 		v.vehicle.parent_slot_handle = 0xFFFF; v.vehicle.flags_byte = 0x00;
-		v.vehicle.weapon_x = 0x0101; v.vehicle.weapon_aim_y = 0x0303;
+		v.vehicle.vertical_velocity = 0x0101; v.vehicle.weapon_aim_y = 0x0303;
 		in.records.push_back(v);
 		FrameUpdateRecord inf; inf.handle = 0x2003; inf.type_id = 300; inf.cls = EntityClass::Infantry;
 		inf.infantry.vehicle_slot_handle = 0xFFFF; inf.infantry.pos_x_compressed = 0xABCD;
@@ -698,7 +698,7 @@ int test_frame_update_roundtrip() {
 		EXPECT(out.records.size() == 3);
 		EXPECT(out.records[0].cls == EntityClass::Player && out.records[0].handle == 0x0001);
 		EXPECT(out.records[0].player.pos_x_compressed == 0x1234);
-		EXPECT(out.records[1].cls == EntityClass::Vehicle && out.records[1].vehicle.weapon_x == 0x0101);
+		EXPECT(out.records[1].cls == EntityClass::Vehicle && out.records[1].vehicle.vertical_velocity == 0x0101);
 		EXPECT(out.records[1].vehicle.weapon_aim_y == 0x0303);
 		EXPECT(out.records[2].cls == EntityClass::Infantry && out.records[2].infantry.pos_x_compressed == 0xABCD);
 		EXPECT(out.round_events.size() == 1 && out.round_events[0].adm_index == 9 &&

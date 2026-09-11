@@ -676,10 +676,19 @@ Jointops.exe retail unless marked `dfx2med.exe` (the DFX2 mission editor, imageb
   (entity+104) and fills accuracy/engagement/FOV; when BMS record byte 79 is nonzero it sets
   `slot[140] = 1` (follow-path flag), `slot[148] = record[79]` (path number), `slot[152] = wp_number`.
   Still no state 16.
-- ⇒ The 0 → 16 (GROUND_FOLLOWWP) transition fires at the **first AI tick** — the state-0 tick handler
-  reads `slot[140]` — never at spawn. Our promote force-set of `kCurState=16` (gated by
-  `opts.patrol_on_spawn`) is a tracked deviation; the faithful port routes through a state-0 handler
-  that reads the follow flag.
+- ⇒ (re-witnessed 2026-09-10) `Entity_InitVehicleAI` zeroes cur/pend/fallback: the memset
+  precedes `mov ebx,[esi+18h]` @0x46024b, so the "saved field" read back is 0 and the stores
+  @0x46028b..0x460291 write 0; `profile+0x18` (`default_state`) has NO reader anywhere. Row 0 is
+  `{nullsub_69 @0x457650, nullsub_71 @0x457660, nullsub_70 @0x457670, sub_457680}` — there is
+  no state-0 tick that reads `slot[140]`. The first mover tick promotes 0 → 22 (ground,
+  `@0x48afac..0x48afb2`) / 0 → 14 (air, `@0x490377..0x49037d`); the route states come only from
+  the PlayerControl hand-back (22 → 16 `@0x48bc16`, 14 → 7 `@0x49158a`) or a WAC AISETSTATE
+  (`AI_HandleCommand` case 7 `@0x46581c` → `AIState_SetByEntityType @0x457570`). The old
+  `opts.patrol_on_spawn` seed of 16 and the default_state seed are gone: promote leaves every
+  vehicle brain at 0 and also seeds the @0x460200 constant block (sweep phase −196608 `@0x4602b8`,
+  f[137] = 25.0 u `@0x460345`, f[179] = yaw `@0x460352`, f[200] = one PRNG_Next16_C draw
+  `@0x46035e..0x460371`, the zeroed f[177]/[178]/[181]/[199]/[201]) through the shared
+  `initialize_vehicle_brain` that the dynamic teammate spawn already used.
 
 ### 7.2 Heading convention — RESOLVED: engine heading = 90 − yaw
 Spawn writes `entityData[4] = (90 − bmsYawDeg) · kBamPerDegree` (`kBamPerDegree = 11930464 = 2^32/360`),
@@ -4947,10 +4956,17 @@ target vehicle id (DcbId) in boarding modes (waypoint node index otherwise);
   slots + the turn budget.
 - Spawn-time crews: BMS attribute bit 1 ("Guarding") -> `Flags |= 0x40` at
   spawn [orig: Entity_SpawnFromBMSRecord @ 0x40e9f0] (neither training mission
-  authors it); the MP deploy-into-vehicle leg latches `Flags |= 0x200` +
-  the carrier into +364/+384 when the spawn target is a vehicle
-  [orig: Server_PositionPlayerForSpawn @ 0x50d44d], consumed by the body
-  update's 0x200-toggle [orig: Entity_UpdateInfantryPlayerBody @ 0x4b426a].
+  authors it); the no-pick Co-op marker arm of the spawn placer (behind
+  `(g_GameType & 0xFFFDFFFF) == 0x10020` @ 0x50d3a7) copies the chosen
+  6094/6001 marker's Flags 0x20 onto the player [orig: @ 0x50d424..0x50d42a]
+  and, when that marker's team byte is 2 and no saved game is pending
+  (`dword_A892C8 == 0`), latches `Flags |= 0x200` + the marker's PARENT (or the
+  marker itself when unparented) into +364/+384
+  [orig: Server_PositionPlayerForSpawn @ 0x50d42e..0x50d45a], consumed by the
+  body update's 0x200-toggle [orig: Entity_UpdateInfantryPlayerBody @ 0x4b426a].
+  PORTED 2026-09-10 (`spawn_select.cpp coop_marker_pose` +
+  `apply_spawn_point_latches`); an earlier reading placed this leg on "a
+  vehicle spawn target", which the instructions do not key on.
 - **PORTED (#571, `world/infantry_board.cpp`; re-witnessed 2026-08-25 tidy)**:
   the 123/124/125 board orders resolve the target by DcbId across pools 0-3
   [@ 0x4bee93..0x4beec6 — the authority gate, the 123/124/125 compare
@@ -5228,8 +5244,58 @@ words.
 
 ### 24.3 The destructible death chain
 
+**Class dispatch (witnessed 2026-09-10, jo-c cross-check).** The death callback is
+NOT chosen by kind: `EntityDef_InitAllCallbacks @ 0x4a5aa9` resolves the items.def
+`ai_function` tag through `Entity_LookupRenderCallbacks @ 0x407dc0` (a whole-string
+`stricmp` walk of `g_EntityClassEventCallbackTable @ 0x813000`, 41 24-byte rows
+`{name[8], fn1, fn2, ...}`; an empty or unknown tag takes row 0 "null") into
+def+0x138, copied to entity+0x1C8 at spawn and invoked as `cb(entity, 2, 0)` from the
+blast damage leg `@ 0x4e6f84..0x4e6f93` and `cb(entity, 4, 0)` from S2C 0x13
+`@ 0x42ebd0..0x42ebf5`. Rows that matter for shipped JOX ITEMS.DEF (0 `tree`, 74 `gnrc`,
+37 `gnrl`, 82 `emit`, 7 `bld2`, 1 `towr`):
+
+- `null` @ 0x813000 → `0x406FF0`: `+0x2AC = 0x1000000`, never dies.
+- `gnrc` @ 0x8130C0 → `sub_407020`: authority first call at health <= 0: scar clear,
+  Flags |= 2, `+0x2AC = 4`, death tick, `sub_50C840` (0x26 + scoring if def+0x54 &
+  0x8000 `@ 0x50c876`); when the 4-tick countdown expires with Flags & 2 and !4:
+  `Entity_UpdateDeathTransforms @ 0x407081` (the §24.4 unitType dispatch / pieces +
+  `Entity_InitDeathSounds`), scar clear, 0x26 `@ 0x40708e`, Flags |= 4, `+0x2AC = 0x20`;
+  the client (phase 4) runs the death transforms at once `@ 0x407045`.
+- `gnrl` @ 0x8130D8 → `sub_407F80`: alive → `+0x2AC = 0x744`; kill leg
+  `@ 0x4080bd..0x4080f4`: scar clear, Flags |= 6 at once, `+0x2AC = 0x20`, death tick,
+  `sub_50C840`, then the shared tail: death sound def+0x860 `@ 0x408044` and ONE
+  `submit_effect_descriptor(def word +0x412)` `@ 0x40806b`; the Flags & 2 arm
+  `@ 0x40807b..0x4080a6` resends 0x26 with hitrecord[14], Flags |= 4, `+0x2AC = 0x1F`.
+  No section debris, no death transforms, no KZ blast.
+- `gnl2` @ 0x8130F0 → `Entity_HandleDeathEvent @ 0x4070F0`: like gnrc but the
+  countdown expiry (`+0x2AC = 0x20`) broadcasts the explosion
+  (`Server_BroadcastExplosionEffect @ 0x508450` → `Entity_SpawnExplosionEffects
+  @ 0x4399c0`: Effect_AirExp `@ 0x4399e3` + a kz_M406HE queue entry `@ 0x439a06`
+  credited to the last attacker).
+- `ewep` @ 0x813090 → `Entity_UpdateChildAttachment @ 0x4409A0` (death half): the
+  authority kill leg `@ 0x440bff..0x440c8f` FIRST detaches the mounted gunner when its
+  +0x16C parent is this emplacement (`Entity_DetachFromVehicleIfServer @ 0x4359d0`
+  `@ 0x440c1a`), then scar clear, Flags |= 6, `+0x2AC = 0x1F`, death tick, `sub_50C840`,
+  the def+0x860 sound and the def+0x412 effect; when the countdown expires it
+  re-detaches a still-present occupant, sends the entity-state packet and sets
+  Flags |= 4 `@ 0x440bb2..0x440bf2`. The client leg (phase 4) performs NO detach.
+- `tree` @ 0x813258 → `Entity_HandleDestructibleDeathEvent @ 0x440210` = the body below.
+  `Entity_ProcessDestructibleDeath @ 0x43FBC0` has exactly two callers, both inside it,
+  and the explosion queue's blast-center store is gated on this callback
+  `@ 0x4eb53f`.
+
+Ported 2026-09-10: `world::ItemDeathClass` (`item_traits.cpp` stamps it from
+`DefItemDef::ai_function` at trait build), `destruction_notify_item_damage` dispatches
+on it, `destruction_tick_class_death_think` runs the gnrc/gnl2 countdown expiries
+(death tick + 4 / + 32; the pool-2 cohort quantization of the countdown is not
+modelled), and unwitnessed rows (bld2 `@ 0x43EEE0`, towr `@ 0x4406A0`, emit, brrl,
+bldg, cran, target, palm, flag, envs, squib, ele0) still run the tree body. Our tree
+body also runs `Entity_InitDeathSounds` after the debris, which retail's `@ 0x43FBC0`
+does not call (pre-existing; reached by no shipped JOX item). The gnl2 attacker-weapon
+sound and SP shrapnel legs are unported.
+
 `Entity_HandleDestructibleDeathEvent @ 0x440210` (the destructible-class
-deathCallback): phase 0 = the ambient time-of-day shot leg
+deathCallback, the `tree` row): phase 0 = the ambient time-of-day shot leg
 (`Entity_SpawnRegionalEffect @ 0x408290` — dawnShot/dayShot/duskShot/nightShot
 + the interval reschedule into the entity timer); on the authority, already
 husked resends S2C 0x26, else health <= 0 sends 0x26
@@ -5562,7 +5628,7 @@ the FFI structs.
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs: organic knockback (`Entity_ApplyCollisionForce`), the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
-| D-ITEM-7 | Which items take the destructible death path is routed by KIND (non-organic, non-AI-capable) + unit_type; retail routes via the def class resolve (`EntityDef_LoadModelsAndCallbacks @ 0x439f50` callback columns, unwitnessed per class) | deathCallback (+0x1C8) authored per def class | same observable for shipped JO data (destructibles author no ai/move function); witness the class-to-callback table to close |
+| D-ITEM-7 | FIXED 2026-09-10: the death callback is dispatched by the items.def `ai_function` class row (`g_EntityClassEventCallbackTable @ 0x813000` via `Entity_LookupRenderCallbacks @ 0x407dc0`; gnrc/gnrl/gnl2/ewep/tree/null bodies ported, see §24.3). The old premise "destructibles author no ai/move function" was false: JOX ITEMS.DEF authors 74 gnrc, 37 gnrl and 0 tree rows, so every shipped destructible took the tree body (section debris + kz_OrganicBlast) instead of its own | deathCallback (+0x1C8) authored per def class | residual: the unwitnessed rows (bld2, towr, emit, brrl, bldg, cran, target, palm, flag, envs, squib, ele0) still run the tree body; the pool-2 cohort quantization of the +0x2AC countdown, the gnl2 attacker-weapon sound and SP shrapnel are unported |
 | D-ITEM-8 | The crane/water-tower special death (the "scrane" pool walk + the double kz queue `@ 0x43fc70`) and `Entity_ProcessCraneDestruction @ 0x43eee0` are unported; the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are unported | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
 | D-ITEM-9 | The Falling/Generic wreck callbacks and unitType-3's four short slope rays ground on TERRAIN only. Falling/Generic use sec0 z extents synthesized from LOD-0 primitive bounds (upright leg only); PiecePhysics uses the husk-flag pick — the husk collision shell's floor for a husked piece (the section-AABB union stands in for the CMDL header z-lo), `box_z_lo` otherwise. Static's separate terrain/water thresholds are ported as described in §24.5 | `Entity_RaycastGroundHeightAndObject @0x414320` (Falling/Generic, terrain + objects, mask 0x200000); `Entity_RaycastGroundHeight @0x4142c0` x4 from `Entity_CalcSlopeForces @0x4b0b00`; section-row +84/+88 extents `@0x461e23-0x461e4b` | a wreck dying on a roof can sink to terrain below; port the object-return leg for both query shapes and verify the generic runtime section-row fields against the render-model builder |
 | D-ITEM-10 | `dword_2C25C64` is resolved and both routed/specialized water crossings now emit `Effect_MedSplash`; fallback sounds are ported (`IMP_DEBLRG_WATER` / `IMP_VCL_DROP`, and specialized `EXPLO_HELO_WATER` / `EXPLO_VEHCL_LG`). The def per-item landing (+140) and water (+156) sound slots remain unmodeled | `@0x4940c6-0x494100 / @0x49417c-0x4941af`; specialized twins `@0x48f547..0x48f588 / @0x48f726..0x48f759` | items authoring custom impact sounds still play the matching fallback; splash visuals now route through the ordinary destruction-effect presenter |
@@ -6188,14 +6254,54 @@ this chase/clamp against that base.
 ### 26.5a EWEAP model articulation (grill-ida, 2026-07-21)
 
 The attached organic owns live aim, but the parent owns the embedded weapon model.
-Retail bridges those two records in Entity_UpdateTransformAndTurret @ 0x440ca0.
-For a live occupant it publishes the wrapped high words of the parent-minus-occupant
-BAM angles: occupant Yaw = parent Yaw - turretYaw
-[@ 0x441251-0x441263] and occupant Pitch = parent Pitch - turretPitch
-[@ 0x441298-0x4412b3]. The resulting uint16 values are written into the model
-animation state as yaw slots 118/124 [@ 0x441007/0x44100d] and pitch slots
-119/125 [@ 0x44101a/0x441020]. Negative angles therefore wrap through 65535;
-they are not signed-degree values and must not be clamped.
+Retail bridges those two records through two STORED words on the emplacement entity,
++0x322 (gun yaw) and +0x324 (gun pitch), the gun channel relative to the parent
+(re-witnessed 2026-09-10 from the disassembly; the 2026-07-21 reading below of
+@ 0x441251/@ 0x4412b3 as "publishing" was a misread of occupant STORES).
+
+**Producer — Entity_UpdateChildAttachment @ 0x4409a0** (the `ewep` class fn1, every
+occupied tick): IMMEDIATE path (item attrib2 IsTurret 0x1000 clear, `test [eax+58h],1000h`
+@ 0x440a36): word322 = (gun.Yaw - occ.Yaw) >> 16; word324 = (gun.Pitch - occ.recoilPitch(+0x380)
+- occ.Pitch) >> 16 [@ 0x440b39..0x440b58; the recoil term @ 0x440b4c]. IsTurret path (JOX:
+only "Turret for M1A1" 100166 / "Turret for T80" 100167): the deltas eax = gun.Yaw -
+(word322<<16 + 0x8000) - occ.Yaw and ecx = gun.Pitch - occ.Pitch - (word324<<16 + 0x8000)
+[@ 0x440a43..0x440a74]; the LOCAL gunner's yaw is tethered to +-0x3FFFFFC0 (90 deg) and
+written back (`occ.Yaw = gun.Yaw - eax - word`, @ 0x440a7e..0x440a9c, mirrored into
+g_LocalPlayerLookYaw @ 0x440aa8); an occupant without the Player bit 0x100 is tethered to
++-0x2D82D80 (4.0 deg) and written back [@ 0x440ab4..0x440ade]; a remote Player gets neither;
+then both deltas are rate-clamped to +-0x92CF34 per tick (0.806 deg, ~50 deg/s)
+[@ 0x440ae1..0x440b13] and integrated into the words [@ 0x440b1e..0x440b58], the pitch
+subtracting occ.recoilPitch AFTER the rate clamp (@ 0x440b2a, not rate-limited).
+
+**Window — Entity_UpdateTransformAndTurret @ 0x440ca0** (the class update, after fn1):
+the stored words (`movzx/shl 10h` @ 0x4411f0/@ 0x4411f7) are clamped to the seat/weapon
+window by Math_ClampAngleToBounds @ 0x540cc0 (returns 1 when it clamped) and on a clamp
+the OCCUPANT's live angles are STORED at the arc edge: `occ.Yaw = gun.Yaw - clamped`
+[@ 0x441251..0x441263, `mov [eax+10h],edx`], g_LocalPlayerLookYaw mirrored for the local
+player [@ 0x44126c..0x441277], `occ.Pitch = gun.Pitch - clamped` [@ 0x44129c..0x4412b3,
+`mov [edx+14h],ecx`; no pitch look global]; the words are rewritten @ 0x44125c/@ 0x4412a4.
+**Parent-brain publication — the same function @ 0x440f04..0x441020** (before the window
+leg): for a child whose anchor userpoint record (`table + 48*(child+0x319 - 1)`, child+0x319 =
+the userpoint index + 1 = our `emplacement_bone`) has subobject +0x18 == 0 (`cmp [ebx+18h],0`
+@ 0x440f50) and whose parent carries a brain (+0x64): profile type 2 (ground) writes word322<<16
+RAW into brain +0x1D8/+0x1F0 (our `kActiveYaw` / `kStagingBlock+3`) [@ 0x440f70..0x440f8a];
+profile type 1 (air) with parent def attrib +0x54 & 0x20 (EWeap) clamps both words by the
+parent's `weaponSlots[1].def` (+0x494) limits +0x13C/+0x140/+0x144 and writes the yaw AND pitch
+channels [@ 0x440fa1..0x441020]. The resulting uint16 values are written into the model
+animation state as yaw slots 118/124 [@ 0x441007/0x44100d] and pitch slots 119/125
+[@ 0x44101a/0x441020]. Negative angles therefore wrap through 65535; they are not
+signed-degree values and must not be clamped. Ported 2026-09-10
+(`publish_emplaced_gun_words_to_parent`; the anchor subobject is stamped from the userpoint
+record as `Entity::emplacement_anchor_subobject`; the type-1 slot-1 def clamp is coded but the
+Entity carries no second authored weapon yet, so the pair publishes unclamped there — the
+child's own addeweapG window pins it each tick). Ported 2026-09-10: `world/mount_controls.h` (`tick_emplaced_gun_words`,
+`clamp_emplaced_gun_words_to_window`, the publisher reads the stored words), run from
+`AiSystem::pose_if_mounted` at the head of the gunner tick; the write-backs land in the
+gunner's heading/pitch and, for the local player, `inf.target_heading`/`inf.look_pitch`
+so the input fold carries the pinned look. The joiner twin
+(`inmatch/client_replica_present.h`) subtracts the row's reconstructed recoil pitch but
+carries no stored words or IsTurret bit, so a remote IsTurret turret presents at the
+occupant's aim on a joiner.
 
 The semantic CTRL names are EWEAP_GUNYAW @ 0x83e3c8 and
 EWEAP_GUNPITCH @ 0x83e3e8. They are not PLAYPARTANIM channels. The global

@@ -71,6 +71,11 @@ public:
 	// [orig: draw_weapon_sight_overlays @0x4dce00]
 	TypedArray<WeaponSightRow> get_sights() const { return sights_; }
 	void set_sights(const TypedArray<WeaponSightRow> &p_value) { sights_ = p_value; }
+	// The card's `slide` multiplier at the def's default zero
+	// (WeaponDef::get_sight_slide_multiplier; the engine evaluator carries
+	// the witness). 0 for a def without a scope-zero default.
+	int get_sight_slide_multiplier() const { return sight_slide_multiplier_; }
+	void set_sight_slide_multiplier(int p_value) { sight_slide_multiplier_ = p_value; }
 
 protected:
 	static void _bind_methods();
@@ -87,6 +92,7 @@ private:
 	Vector2i rndgfx_step_;
 	int rounds_per_icon_ = 0;
 	TypedArray<WeaponSightRow> sights_;
+	int sight_slide_multiplier_ = 0;
 };
 
 } // namespace godot
