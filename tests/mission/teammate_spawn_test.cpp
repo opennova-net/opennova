@@ -75,10 +75,14 @@ int main() {
         const int32_t initial_x = heli->pos[0];
         rig.tick(125);
         heli = rig.world.ai.for_handle(slot.helicopter.handle);
-        // The allocator starts at zero, then the aircraft mover stamps 14
-        // (@0x490310). Queued commands can enter 7, but the no-pilot motor
-        // parks it again (@0x491C5E). No pilot is created by this operation.
-        CHECK(heli && heli->brain.f[w::AiBrain::kCurState] == 14);
+        // The authored helicopter has no PlayerControl: its initial queued
+        // FOLLOWWP (7) survives the no-pilot mover. Baseline restoration drops
+        // transient AI events, so that pass reaches the class idle state (14).
+        // [orig: Entity_UpdateAircraftPhysics @0x490310, gate @0x490ef6]
+        const auto *traits = rig.world.vehicles.traits.get(1281);
+        CHECK(traits && !traits->player_control);
+        const int expected_state = attempt == 0 ? 7 : 14;
+        CHECK(heli && heli->brain.f[w::AiBrain::kCurState] == expected_state);
         CHECK(heli && heli->pos[0] == initial_x);
         CHECK(rig.world.teammates.at(0)->state == w::TeammateOperations::State::FlyToHover);
         w::EntityHandle existing;

@@ -5165,6 +5165,13 @@ lastAttacker (+0x178) chain while dead and not player-flagged (Flags & 0x100)
 attacker (`@ 0x4eb319/@ 0x4eb593`). Destructible-class victims (deathCallback
 == `Entity_HandleDestructibleDeathEvent @ 0x440210`) get the blast center
 written into +0x80 — the debris launch origin (`@ 0x4eb553-0x4eb569`).
+Mounted organic protection reads the semantic parentSlot (+0x168): Passenger (1),
+Controller (2), and Driver (5) are protected when their parent is a vehicle (or
+has no definition); Gunner (3) is protected when its parent's ground entity is a
+vehicle [orig: Projectile_ProcessExplosionQueue @ 0x4ead80, seat gate
+@ 0x4eb0e2..0x4eb12e]. This is `Entity::mount_type`, not the port's dense
+`mount_seat` index. Ctest `destruction` attaches each seat type at several indices
+through the vehicle API before processing an explosion.
 
 **Glass user-point port (2026-08-16, D-ITEM-17 CLOSED).** Collision asset
 resolution retains the first exact case-insensitive user point selected by
@@ -6286,19 +6293,28 @@ the userpoint index + 1 = our `emplacement_bone`) has subobject +0x18 == 0 (`cmp
 @ 0x440f50) and whose parent carries a brain (+0x64): profile type 2 (ground) writes word322<<16
 RAW into brain +0x1D8/+0x1F0 (our `kActiveYaw` / `kStagingBlock+3`) [@ 0x440f70..0x440f8a];
 profile type 1 (air) with parent def attrib +0x54 & 0x20 (EWeap) clamps both words by the
-parent's `weaponSlots[1].def` (+0x494) limits +0x13C/+0x140/+0x144 and writes the yaw AND pitch
-channels [@ 0x440fa1..0x441020]. The resulting uint16 values are written into the model
-animation state as yaw slots 118/124 [@ 0x441007/0x44100d] and pitch slots 119/125
-[@ 0x44101a/0x441020]. Negative angles therefore wrap through 65535; they are not
-signed-degree values and must not be clamped. Ported 2026-09-10
-(`publish_emplaced_gun_words_to_parent`; the anchor subobject is stamped from the userpoint
-record as `Entity::emplacement_anchor_subobject`; the type-1 slot-1 def clamp is coded but the
-Entity carries no second authored weapon yet, so the pair publishes unclamped there — the
-child's own addeweapG window pins it each tick). Ported 2026-09-10: `world/mount_controls.h` (`tick_emplaced_gun_words`,
-`clamp_emplaced_gun_words_to_window`, the publisher reads the stored words), run from
-`AiSystem::pose_if_mounted` at the head of the gunner tick; the write-backs land in the
-gunner's heading/pitch and, for the local player, `inf.target_heading`/`inf.look_pitch`
-so the input fold carries the pinned look. The joiner twin
+parent's weapon-slot def (+0x494): max pitch +0x13C, min pitch +0x140, symmetric yaw
++0x144. The parser multiplies authored degrees by 11930464 with 32-bit wrap (the pitch
+minimum is negated) [orig: WeaponDefs_ParseLineCallback @ 0x543680, conversions
+@ 0x5443ec / @ 0x544424 / @ 0x544441..0x54446e]. The parent reads those raw limits: 180 spans the signed angle
+domain, and both clamps run even for zero limits, locking that axis to zero
+[orig: Entity_UpdateTransformAndTurret @ 0x440ca0, calls @ 0x440fea / @ 0x440ffa].
+It stores BAM yaw in brain slots 118/124 and pitch in 119/125
+[@ 0x441007 / @ 0x44100d / @ 0x44101a / @ 0x441020]. The aircraft slot at
++0x474 is initialized from the existing items.def `primary_weapon` string (+0x54B),
+not a second authored weapon [orig: Entity_InitInfantryBoneData @ 0x490160,
+call @ 0x49017b; WeaponSlot_InitFromEntityDef @ 0x5466c0, name lookup
+@ 0x5466d8..0x54670a]. `publish_emplaced_gun_words_to_parent` resolves that
+parent weapon through the production table; `emplacement_anchor_subobject` retains
+the root-anchor gate. The ground parent's yaw remains unclamped.
+
+The channel producer and window write-backs run from `AiSystem::pose_if_mounted`
+at the head of the gunner tick. The later carrier/rider positioning pass uses
+`refresh_mounted_pose`, preserving the gunner's look without advancing IsTurret a
+second time. The write-backs land in heading/pitch and, for a local player,
+`inf.target_heading`/`inf.look_pitch`. Ctest `emplaced_gun_channel` exercises full
+world ticks (0x93 then 0x126 high-word yaw for both standalone and attached guns)
+and production parent-weapon lookup, including zero-limit locks. The joiner twin
 (`inmatch/client_replica_present.h`) subtracts the row's reconstructed recoil pitch but
 carries no stored words or IsTurret bit, so a remote IsTurret turret presents at the
 occupant's aim on a joiner.

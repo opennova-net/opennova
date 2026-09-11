@@ -509,10 +509,8 @@ void HudFrameCompiler::element_sights_card(const HudFrameState &state,
 		spec.slide_frames = r.slide_frames;
 		const SightRect rect = sight_row_rect(spec, state.sight_scale_index,
 				state.sight_slide_multiplier);
-		emit_rect(static_cast<float>(rect.x1) * w / kDesignW,
-				static_cast<float>(rect.y1) * h / kDesignH,
-				static_cast<float>(rect.x2) * w / kDesignW,
-				static_cast<float>(rect.y2) * h / kDesignH, 0xFFFFFFFFu, true,
+		const SightViewportRect screen = sight_rect_to_viewport(rect, w, h);
+		emit_rect(screen.x1, screen.y1, screen.x2, screen.y2, 0xFFFFFFFFu, true,
 				kHudTexSightsBase + static_cast<int32_t>(row), r.additive);
 	}
 	++draw_list_.elements_drawn;

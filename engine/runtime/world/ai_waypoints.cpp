@@ -687,6 +687,16 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 	m.net_alt_target = b.f[AiBrain::kWorkPosZ];
 	m.steer_target_bam = b.f[AiBrain::kWorkHeading];
 	m.net_climb = b.f[137];
+	// A non-PlayerControl aircraft bypasses the complete occupant/AI driving
+	// block, including its uncrewed parking reset. Keep its command registers;
+	// the aircraft mover derives absolute hover height from the climb register.
+	// [orig: Entity_UpdateAircraftPhysics @0x490ef6..0x490efa -> @0x491da7]
+	if (!traits.player_control) {
+		m.cmd_lateral_speed = b.f[135];
+		m.cmd_speed = b.f[136];
+		return;
+	}
+
 	const int32_t ground = m.ground_cache != INT32_MIN ? m.ground_cache : ve->pos[2];
 
 	const bool wrecked = veh.health <= 0 || !veh.alive ||

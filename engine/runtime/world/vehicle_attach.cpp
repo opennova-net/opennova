@@ -110,7 +110,7 @@ bool candidate_relevant_for_mode(const Entity &candidate, bool armory_mode) {
 void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone) {
     world.vehicles.presnap_attach_heading(occ, veh, veh.seats[seat_idx]);
     veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
-    occ.mount_type = veh.seats[seat_idx].type;
+    occ.mount_type = veh.seats[seat_idx].type; // [orig: parentSlot(0x168) = slotType]
     static_assert((kEntityFlagDrowning | kEntityFlagInAir) == 0xA000u,
                   "the witnessed gunner-mount scrub mask");
     static_assert((kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted) == 0xA040u,
@@ -134,7 +134,7 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.mount_target_bms_id = veh.bms_id;
     occ.mount_target_spawn_origin = veh.spawn_origin;
     occ.mount_bone = bone;                          // [orig: attachBoneId(0x157) = bone]
-    occ.mount_seat = static_cast<int8_t>(seat_idx); // [orig: parentSlot(0x168) = slotType]
+    occ.mount_seat = static_cast<int8_t>(seat_idx); // port-local dense seat index
     occ.mounted = true;
     occ.mounted_config_valid = veh.emplaced_config_valid;
     occ.mounted_config = veh.emplaced_config_valid ? veh.emplaced_config : 0;

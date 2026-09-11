@@ -83,7 +83,8 @@ static void pose_emplacement_attachments(World &world) {
     lap.mark(devtools::Slot::SIM_ATTACHMENT_CHILDREN);
 
     // A gunner riding an attached child was posed earlier in the AI system loop,
-    // before the carrier moved. Refresh those occupants from the child's fresh pose.
+    // before the carrier moved. Refresh only the seat frame: the gun channel and
+    // gunner look already advanced once during that body's update.
     world.registry.for_each([&](const Entity &snapshot) {
         if (!snapshot.mounted) return;
         Entity *occupant = world.registry.get(snapshot.handle);
@@ -94,7 +95,7 @@ static void pose_emplacement_attachments(World &world) {
             snapshot.mount_seat >= static_cast<int>(target->seats.size()))
             return;
         if (AiEntity *body = world.ai.for_handle(snapshot.handle)) {
-            world.ai.pose_if_mounted(*body, world);
+            world.ai.refresh_mounted_pose(*body, world);
             return;
         }
         world.vehicles.pose_mounted_occupant(*occupant, *target, target->seats[snapshot.mount_seat]);

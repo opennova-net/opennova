@@ -510,7 +510,7 @@ func test_demo_mission_promotes() -> void:
 	assert_eq(sim.get_entity_count(), 2, "two organics got AI brains")
 	assert_eq(sim.get_brain_count(), 2, "two AI brains attached")
 	assert_eq(sim.get_spawned_count(), 6, "one building + three markers + two organics spawned into pools")
-	assert_eq(sim.get_entity_state(0), 16, "a routed organic starts in GROUND_FOLLOWWP (16)")
+	assert_eq(sim.get_entity_state(0), 0, "an organic leaves the unused vehicle brain in state zero")
 
 
 func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> void:
@@ -3998,8 +3998,8 @@ func test_entity_debug_card_carries_named_scalars() -> void:
 	var card: EntityCard = sim.entity_card_by_ai_index(0)
 	assert_not_null(card, "a live entity has a card")
 	assert_true(card.has_ai() and card.has_world(), "both card halves resolve")
-	assert_eq(card.get_state(), 16, "routed organic starts in GROUND_FOLLOWWP")
-	assert_eq(card.get_state_name(), "GROUND_FOLLOWWP", "...with its readable name")
+	assert_eq(card.get_state(), 0, "an organic does not enter a vehicle brain state")
+	assert_eq(card.get_state_name(), "?", "state zero has no named vehicle behavior")
 	assert_eq(card.get_position(), sim.get_entity_position(0),
 			"position matches the scalar getter")
 	assert_almost_eq(float(card.get_yaw_deg()), sim.get_entity_yaw_deg(0), 0.01)

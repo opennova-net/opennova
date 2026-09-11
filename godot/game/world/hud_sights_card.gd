@@ -88,10 +88,10 @@ class SightRowControl:
 		if tex == null:
 			return
 		# The virtual design space and rect scaling are the engine's
-		# (HudPos.DESIGN_* / scale_rect — the witness lives at the engine home,
+		# (HudPos.DESIGN_* / sight_scale_rect — the witness lives at the engine home,
 		# engine/runtime/hud hud/hud_math.h).
 		draw_texture_rect(tex,
-				HudPos.scale_rect(rect_v, get_viewport_rect().size), false)
+				HudPos.sight_scale_rect(rect_v, get_viewport_rect().size), false)
 
 	func _notification(what: int) -> void:
 		if what == NOTIFICATION_RESIZED:

@@ -145,6 +145,9 @@ func _spawn_zone_mission() -> MissionData:
 	if zone != null:
 		assert_true(md.set_entity_property_int(
 				MissionData.KIND_ITEM, zone.index, "team", 1))
+		# A numbered team zone starts secured and is selectable immediately.
+		assert_true(md.set_entity_property_int(
+				MissionData.KIND_ITEM, zone.index, "lfp_group", 1))
 	return md
 
 
@@ -439,9 +442,9 @@ func test_refresh_preserves_selected_spawn_identity_by_param() -> void:
 	var zone_rows: Array = pair.joiner.get_deploy_spawn_zones()
 	assert_eq(zone_rows.size(), 1,
 			"the fixture exposes one team-owned non-default spawn-zone row")
-	assert_eq(driver.get_widget_items(list_id).size(), 1 + zone_rows.size(),
-			"default plus the secured zone")
-	assert_eq(presenter.get_spawn_rows().size(), 1 + zone_rows.size(),
+	assert_eq(driver.get_widget_items(list_id).size(), 1 + 2 * zone_rows.size(),
+			"default plus the secured zone and its blank separator")
+	assert_eq(presenter.get_spawn_rows().size(), 1 + 2 * zone_rows.size(),
 			"the presenter row model aligns with the compiled list")
 	var zone_param := (zone_rows[0] as DeployZoneRow).param
 	assert_gt(zone_param, 0)
@@ -483,11 +486,15 @@ func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
 	if driver == null:
 		return
 	var list_id := driver.widget_id("SPAWNPOINTS_LIST")
-	# Every real row is a pick (0 default, index+1 zone) — the fixture's wave
-	# groups are empty, so no node -1 rows exist yet.
+	# Even an empty team zone contributes a non-selectable blank separator.
+	var separator_count := 0
 	for row in presenter.get_spawn_rows():
-		assert_gte(row.param, 0,
-				"list rows without occupants are all picks")
+		if row.param == -1:
+			separator_count += 1
+		else:
+			assert_gte(row.param, 0, "spawn choices carry a nonnegative param")
+	assert_eq(separator_count, 1, "the empty fixture zone retains its separator")
+	presenter.select_spawn_row(_row_index_for_param(presenter, -1))
 	# The engine builder's row model IS what a wave group would insert: a
 	# synthetic occupant row at the presenter seam proves the guard.
 	presenter.append_spawn_row("Ace", -1)

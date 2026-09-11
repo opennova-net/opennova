@@ -23,7 +23,8 @@ struct WeaponTableEntry {
     int16_t startrounds = -1;       // +0x5C, engine default -1 [orig: @0x53ff19]
     // Emplaced turret articulation limits, degrees. Azimuth is symmetric
     // +-turret_yaw_range; elevation spans [-turret_pitch_min, +turret_pitch_max].
-    // 0 = not authored (no clamp window). These author the itemDef turret-limit
+    // 0 skips the child window; the aircraft parent clamp locks a zero axis.
+    // These author the itemDef turret-limit
     // fallback the per-frame turret clamp reads.
     // [orig: Entity_GetWeaponTurretLimits fallback @0x540e35..0x540e58;
     //  clamp consumer Entity_UpdateTransformAndTurret @0x441228..0x44128c]

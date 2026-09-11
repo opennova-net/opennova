@@ -96,6 +96,7 @@ public:
 	// Both corners through scale_point (the original scales x1,y1 and x2,y2
 	// independently and differences them for the size).
 	static Rect2 scale_rect(const Rect2 &p_design, const Vector2 &p_surface);
+	static Rect2 sight_scale_rect(const Rect2 &p_design, const Vector2 &p_surface);
 	static Vector2 pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface);
 	static int fade_decay(int p_elapsed_ticks, int p_ramp_ticks);
 	static int fade_flash_alpha(int p_elapsed_ticks, int p_ramp_ticks,

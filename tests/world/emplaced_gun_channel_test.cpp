@@ -352,36 +352,85 @@ void test_parent_publication_gates() {
 }
 
 // Profile type 1 (helo) with EWeap: both words, clamped by the parent's
-// slot-1 weapon window when one is supplied, land in the live and staged
+// authored primary-weapon window, land in the live and staged
 // yaw AND pitch channels. [orig: @0x440f95..0x441020]
 void test_parent_publication_helo_clamped_pair() {
     ParentRig pr(/*profile_type=*/1, 0, kItemAttribEweap);
     const int32_t look_heading = bam_sub(kGunHeading, 50 * kBamPerDegree);
     pr.r.look(look_heading, -25 * kBamPerDegree);
-    // Through the tick: no slot-1 row is carried, so the pair publishes
-    // unclamped.
-    CHECK(pr.r.w.ai.pose_if_mounted(*pr.r.body, pr.r.w));
-    const int32_t yaw = emplaced_word_bam(pr.r.gun().emplaced_gun_yaw_word);
-    const int32_t pitch = emplaced_word_bam(pr.r.gun().emplaced_gun_pitch_word);
-    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == yaw);
-    CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] == yaw);
-    CHECK(pr.parent_ai->brain.f[AiBrain::kActivePitch] == pitch);
-    CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 4] == pitch);
-    // The clamp leg itself, with a slot-1 row: yaw +-30, pitch [-10, +20].
-    WeaponTableEntry slot1;
+    // Aircraft +0x474 is initialized from items.def primary_weapon, just
+    // as an ewep's +0x2B4 is. Resolve it through the production channel tick.
+    // [orig: Entity_InitInfantryBoneData @0x490173..0x49017b;
+    // WeaponSlot_InitFromEntityDef @0x5466d8..0x54670a]
+    auto &table = pr.r.w.tables.weapons;
+    table.entries.resize(2);
+    WeaponTableEntry &slot1 = table.entries[1];
+    slot1.valid = true;
+    slot1.name = "PARENT_GUN";
     slot1.turret_yaw_range_deg = 30;
     slot1.turret_pitch_max_deg = 20;
     slot1.turret_pitch_min_deg = 10;
-    publish_emplaced_gun_words_to_parent(pr.r.w, pr.r.gun(), &slot1);
-    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == turret_window_limit_bam(30));
-    CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] == turret_window_limit_bam(30));
-    CHECK(pr.parent_ai->brain.f[AiBrain::kActivePitch] == turret_window_limit_bam(20));
-    CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 4] == turret_window_limit_bam(20));
+    pr.r.w.registry.get(pr.parent_h)->primary_weapon = slot1.name;
+    CHECK(pr.r.w.ai.pose_if_mounted(*pr.r.body, pr.r.w));
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 30 * kBamPerDegree);
+    CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] == 30 * kBamPerDegree);
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActivePitch] == 20 * kBamPerDegree);
+    CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 4] == 20 * kBamPerDegree);
+    // Unlike the child's optional window, the parent's two clamps always
+    // run: a zero range locks that axis to zero.
+    slot1.turret_yaw_range_deg = 0;
+    slot1.turret_pitch_max_deg = 0;
+    slot1.turret_pitch_min_deg = 0;
+    CHECK(pr.r.w.ai.pose_if_mounted(*pr.r.body, pr.r.w));
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0);
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActivePitch] == 0);
+    // Raw 180-degree bounds admit the complete signed angle domain; this
+    // path must not reinterpret them as zero-width optional windows.
+    slot1.turret_yaw_range_deg = 180;
+    slot1.turret_pitch_max_deg = 180;
+    slot1.turret_pitch_min_deg = 180;
+    CHECK(pr.r.w.ai.pose_if_mounted(*pr.r.body, pr.r.w));
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x238E0000);
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActivePitch] == 0x11C70000);
+}
+
+// A full world tick refreshes attached riders after the carrier pose. That
+// second pose must not run the IsTurret producer a second time.
+// [orig: Entity_UpdateChildAttachment @0x4409A0, once in the pool-1 walk @0x4b8e3c]
+void test_attached_turret_slews_once_per_world_tick() {
+    for (bool attached : {false, true}) {
+        Rig r(/*local=*/true, /*player_bit=*/true,
+                opennova::def::DEF_ITEM_ATTRIB2_ISTURRET);
+        if (attached) {
+            Entity carrier;
+            carrier.kind = EntityKind::Item;
+            carrier.health = 100;
+            carrier.position = {8, 12, 4};
+            const EntityHandle parent = r.w.registry.spawn(1, carrier);
+            r.gun().emplacement_parent = parent;
+            r.gun().emplacement_parent_spawn_id = r.w.registry.get(parent)->registry_spawn_id;
+            r.gun().emplacement_pose_metadata_resolved = true;
+        }
+        const int32_t look = bam_sub(kGunHeading, 30 * kBamPerDegree);
+        r.look(look, 0);
+        r.w.add_system(&r.w.ai);
+        r.w.run_logic_tick(true);
+        CHECK(r.gun().emplaced_gun_yaw_word == 0x93);
+        CHECK(r.body->heading == look);
+        if (attached) {
+            CHECK(r.body->pos[0] == to_fixed(8));
+            CHECK(r.body->pos[1] == to_fixed(12));
+            CHECK(r.body->pos[2] == to_fixed(4));
+        }
+        r.w.run_logic_tick(true);
+        CHECK(r.gun().emplaced_gun_yaw_word == 0x126);
+    }
 }
 
 } // namespace
 
 int main() {
+    test_attached_turret_slews_once_per_world_tick();
     test_immediate_path_words_and_recoil_term();
     test_window_clamp_writes_occupant_look();
     test_isturret_slews_per_tick();
