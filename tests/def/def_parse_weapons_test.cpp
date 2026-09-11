@@ -458,6 +458,40 @@ int main(void) {
         def_free_weapons(&wf);
         return 1;
     }
+
+    /* The scope-zero table [orig: 'scope_max_zero' @ 0x544e8b..0x544efd]: the
+       M16/M203 authors `10 50 0 0` and carries the ONE shipped `slide` SIGHTS row
+       (m16203b.tga 112 -68 892 703, 33 frames, its third row); the M4 has no key. */
+    {
+        const DefWeaponDef *m203 = NULL;
+        for (size_t i = 0; i < wf.count; ++i) {
+            if (strcmp(wf.entries[i].weapon_name, "WPN_M16M203HE") == 0) {
+                m203 = &wf.entries[i];
+                break;
+            }
+        }
+        if (!m203 || m203->scope_max_zero_steps != 10 || m203->scope_zero_step != 50 ||
+            m203->scope_zero_default != 0 || m203->scope_zero_extra != 0 ||
+            m4->scope_max_zero_steps != 0 || m4->scope_zero_step != 0 ||
+            m4->scope_zero_default != 0 || m4->scope_zero_extra != 0) {
+            fprintf(stderr, "FAIL: scope_max_zero: m203=%d/%d/%d/%d m4=%d/%d/%d/%d\n",
+                    m203 ? m203->scope_max_zero_steps : -1, m203 ? m203->scope_zero_step : -1,
+                    m203 ? m203->scope_zero_default : -1, m203 ? m203->scope_zero_extra : -1,
+                    m4->scope_max_zero_steps, m4->scope_zero_step, m4->scope_zero_default,
+                    m4->scope_zero_extra);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        if (m203->sights_count < 3 || !m203->sights[2].slide ||
+            m203->sights[2].slide_frames != 33 || m203->sights[2].scale ||
+            m203->sights[2].x1 != 112 || m203->sights[2].y1 != -68 ||
+            m203->sights[2].x2 != 892 || m203->sights[2].y2 != 703) {
+            fprintf(stderr, "FAIL: M16M203HE slide row: count=%zu\n", m203->sights_count);
+            def_free_weapons(&wf);
+            return 1;
+        }
+    }
+    printf("scope_max_zero + the M203 slide row OK\n");
     }  /* retail leg */
     {
         /* WeaponDef_CreateBlendNamedMaterial recognizes all six tokens at
@@ -503,6 +537,55 @@ int main(void) {
         }
         def_free_weapons(&sf);
         printf("sight blend-token map OK\n");
+    }
+    {
+        /* The scope-zero table's token forms [orig: 'scope_max_zero'
+           @ 0x544e8b..0x544efd]: three values store +0x84/+0x9C/+0xA0; a fourth stores
+           +0x88 only when the line carries four (`cmp dword ptr [esi],4; jle`
+           @ 0x544edf counts the key); an absent key leaves the entry memset's zeros. */
+        static const char kZeroDef[] =
+            "weapon \"WPN_ZERO_FOUR\"\n"
+            "\tscope_max_zero 10 100 200 1\n"
+            "end\n"
+            "weapon \"WPN_ZERO_THREE\"\n"
+            "\tscope_max_zero  1 300 300\n"
+            "end\n"
+            "weapon \"WPN_ZERO_NONE\"\n"
+            "end\n";
+        DefWeaponsFile zf;
+        memset(&zf, 0, sizeof(zf));
+        if (def_parse_weapons_memory((const unsigned char *)kZeroDef,
+                                     sizeof(kZeroDef) - 1, &zf) != 0 ||
+            zf.count != 3) {
+            fprintf(stderr, "FAIL: scope_max_zero inline parse failed\n");
+            def_free_weapons(&zf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        const DefWeaponDef *four = &zf.entries[0];
+        const DefWeaponDef *three = &zf.entries[1];
+        const DefWeaponDef *none = &zf.entries[2];
+        if (four->scope_max_zero_steps != 10 || four->scope_zero_step != 100 ||
+            four->scope_zero_default != 200 || four->scope_zero_extra != 1 ||
+            three->scope_max_zero_steps != 1 || three->scope_zero_step != 300 ||
+            three->scope_zero_default != 300 || three->scope_zero_extra != 0 ||
+            none->scope_max_zero_steps != 0 || none->scope_zero_step != 0 ||
+            none->scope_zero_default != 0 || none->scope_zero_extra != 0) {
+            fprintf(stderr,
+                    "FAIL: scope_max_zero forms: four=%d/%d/%d/%d three=%d/%d/%d/%d "
+                    "none=%d/%d/%d/%d\n",
+                    four->scope_max_zero_steps, four->scope_zero_step,
+                    four->scope_zero_default, four->scope_zero_extra,
+                    three->scope_max_zero_steps, three->scope_zero_step,
+                    three->scope_zero_default, three->scope_zero_extra,
+                    none->scope_max_zero_steps, none->scope_zero_step,
+                    none->scope_zero_default, none->scope_zero_extra);
+            def_free_weapons(&zf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&zf);
+        printf("scope_max_zero token forms OK\n");
     }
     {
         static const char kFovDef[] =

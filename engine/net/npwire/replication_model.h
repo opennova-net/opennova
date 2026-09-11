@@ -126,6 +126,10 @@ struct GameEntitySnapshot {
 	int32_t vehicle_forward_speed_reg = 0;
 	int32_t vehicle_lateral_speed_reg = 0;
 	int32_t vehicle_steer_target_bam = 0;
+	// entity+0xA0 slideDecay — the vehicle's vertical velocity (16.16 u/tick), the live
+	// compact's off-11 word [orig: @0x460d5a..0x460d7b]; the reader lands it back at
+	// entity+0xA0 when the wire flags clear bit 0x02 [orig: @0x460910..0x46091e].
+	int32_t vehicle_vertical_velocity = 0;
 	// The RIDDEN vehicle (entity+0x16C) when mounted, else 0xFFFF. The player record's carrier
 	// select prefers this over ground_handle [orig: op1 @0x4c0a08 — mount wins].
 	uint16_t mount_handle = 0xFFFF;

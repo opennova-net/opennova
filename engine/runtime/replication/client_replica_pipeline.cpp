@@ -169,7 +169,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			++malformed_bodies_;
 			break;
 		}
-		apply_entity_death(death.entity_handle, death.killer_source);
+		apply_entity_death(death.entity_handle, death.death_anim_state_id);
 		break;
 	}
 	case s2c::DEATH_CAMERA_TARGET:
@@ -1685,7 +1685,18 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 			// successfully resolved local sample. A missing carrier invalidates
 			// the sample rather than leaving an offset that could attach to a
 			// later handle reuse.
-			if (child.net_seat_valid && child.carrier_handle != wire_handle::kInvalid) {
+			// A world-mover VEHICLE whose carrier is not a pool-1 deck (a static
+			// bridge/roof/ramp its groundEntity resolved to) is predicted by the
+			// embedding sim from the composed record sample; its row publishes
+			// the mirrored predicted pose, so the per-tick recompose must not
+			// drag it back to the record's sample between records (the static
+			// never moves, and the fold already landed the composed pose).
+			const bool predicted_on_static = child.cls == EntityClass::Vehicle &&
+					child.net_world_mover &&
+					child.carrier_handle != wire_handle::kInvalid &&
+					world::EntityHandle{child.carrier_handle}.pool() != 1;
+			if (child.net_seat_valid && child.carrier_handle != wire_handle::kInvalid &&
+					!predicted_on_static) {
 				const ClientEntityState *carrier = find_row(child.carrier_handle);
 				if (carrier == nullptr) {
 					child.net_seat_valid = false;
@@ -1699,15 +1710,9 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 					child.x = posed.x;
 					child.y = posed.y;
 					child.z = posed.z;
-					if (child.net_seat_compose_yaw) {
-						child.heading_bam = io::bam_add(
-								carrier->heading_bam,
-								static_cast<int32_t>(
-										static_cast<uint32_t>(
-												child.net_seat_local_yaw_byte)
-										<< 24));
-						child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
-					}
+					child.heading_bam = io::bam_add(
+							carrier->heading_bam, child.net_seat_local_heading_bam);
+					child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
 				}
 			}
 
@@ -2072,13 +2077,13 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		uint16_t cx;
 		uint16_t cy;
 		uint16_t cz;
-		uint8_t local_yaw_byte;
-		// Player/infantry compacts carry a carrier-RELATIVE yaw byte; the
-		// vehicle compact's orientation stays world-absolute even when its
-		// position is carrier-local [orig: the read path stores the wire
-		// eulerZ untransformed at entity+576 @0x4607f5 while the position
-		// goes through Entity_TransformLocalToWorld @0x4608ce].
-		bool compose_yaw;
+		// The carrier-RELATIVE heading every parented record carries (BAM32):
+		// the player/infantry yaw byte widened, the vehicle compact's euler_z
+		// high half — the writer's Entity_TransformWorldToLocal out[3] = own -
+		// carrier [orig: @0x460c2a / @0x43bb87]; the reads compose it back
+		// [orig: player @0x4c10d4; vehicle Entity_TransformLocalToWorld
+		// @0x4608ce -> the entity+576 store @0x4607f5].
+		int32_t local_heading_bam;
 	};
 	std::vector<PendingCarrierPose> pending_carrier_poses;
 	pending_carrier_poses.reserve(fu.records.size());
@@ -2240,7 +2245,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			if (rec.player.carrier_handle != wire_handle::kInvalid) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.player.carrier_handle, cx, cy, cz,
-						rec.player.yaw_byte, /*compose_yaw=*/true});
+						static_cast<int32_t>(
+								static_cast<uint32_t>(rec.player.yaw_byte) << 24)});
 				skip_pos = true;
 			} else {
 				es.yaw_byte = rec.player.yaw_byte;
@@ -2270,17 +2276,25 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			// can ride a resolving deck carrier between records.
 			es.carrier_handle = rec.vehicle.parent_slot_handle;
 			if (rec.vehicle.parent_slot_handle != wire_handle::kInvalid) {
+				// The parented form's euler_z is the CARRIER-LOCAL heading (the
+				// writer's Entity_TransformWorldToLocal out[3] = own - carrier
+				// @0x460c2a); the reader composes position AND heading through
+				// Entity_TransformLocalToWorld into the same pose buffer before
+				// the entity+576 store [orig: @0x4608ce, out[3] = carrier[3] +
+				// local[3] @0x43bd00, then @0x4607f1..0x4607f5], so the world
+				// heading lands with the position in the second pass.
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.vehicle.parent_slot_handle, cx, cy, cz,
-						0, /*compose_yaw=*/false});
+						static_cast<int32_t>(rec.vehicle.euler_z) * 65536});
 				skip_pos = true;
+			} else {
+				// Free-standing: the wire euler_z is the world heading (entity+16
+				// @0x460cec) at its full 16-bit precision.
+				es.yaw_byte = static_cast<uint8_t>(
+						static_cast<uint16_t>(rec.vehicle.euler_z) >> 8);
+				heading_target = static_cast<int32_t>(rec.vehicle.euler_z) * 65536;
+				has_heading_target = true;
 			}
-			es.yaw_byte = static_cast<uint8_t>(
-					static_cast<uint16_t>(rec.vehicle.euler_z) >> 8);
-			// The vehicle heading target keeps the wire's full 16-bit euler_z —
-			// world-absolute even for carrier-local positions [orig: @0x4607f5].
-			heading_target = static_cast<int32_t>(rec.vehicle.euler_z) * 65536;
-			has_heading_target = true;
 			es.health_word = rec.vehicle.health_word;
 			es.health_known = true;
 			// The raw speed register mirror ([177] source field) — gates the
@@ -2292,6 +2306,17 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 						rec.vehicle.weapon_heading_bam) * 65536;
 				es.vehicle_lat_reg =
 						network_decompress_fixedpoint(rec.vehicle.weapon_aim_z);
+			}
+			// entity+0xA0 slideDecay (the vertical velocity the family prediction
+			// integrates) lands from every record whose WIRE flags clear bit 0x02;
+			// the dead-pose form carries 0 there [orig: `and esi,2; jnz` on the
+			// wire byte @0x460911..0x460918, the store @0x46091e; the short
+			// form's weaponX = 0 @0x460684].
+			if ((rec.vehicle.flags_byte & 0x02u) == 0u) {
+				es.vehicle_vertical_velocity = rec.vehicle.is_dead_pose
+						? 0
+						: network_decompress_fixedpoint(rec.vehicle.vertical_velocity);
+				es.vehicle_vertical_velocity_pending = true;
 			}
 			// Live vehicle compacts omit entity+20/+24. Preserve the last full
 			// spawn/dead-pose values until the short dead-pose form carries new
@@ -2323,7 +2348,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			if (rec.infantry.vehicle_slot_handle != wire_handle::kInvalid) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,
-						rec.infantry.yaw_byte, /*compose_yaw=*/true});
+						static_cast<int32_t>(
+								static_cast<uint32_t>(rec.infantry.yaw_byte) << 24)});
 				skip_pos = true;
 			} else {
 				es.yaw_byte = rec.infantry.yaw_byte;
@@ -2406,18 +2432,6 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			const int32_t wz = fu.anchor_z + network_decompress_fixedpoint(cz);
 			land_compact_pose(es, wx, wy, wz, has_heading_target, heading_target,
 			                  force_live_snap);
-		} else if (skip_pos && rec.cls == EntityClass::Vehicle &&
-				has_heading_target) {
-			// Carrier-local vehicle positions defer to the second pass, but the
-			// wire euler stays world-absolute and lands LIVE: a deck-carried
-			// vehicle is a carried OBJECT (the bit0-flagged attach class
-			// @0x43C14A — distinct from seat mounts' 0x40) whose mover is
-			// bit0-skipped, and the per-tick seat-follow owns its motion between
-			// records, so there is no chase to consume a staged heading
-			// [orig: the untransformed entity+576 store @0x4607f5]. Keep the
-			// staged slot coherent for a later carrier-clear record.
-			es.heading_bam = heading_target;
-			es.net_smooth_heading = heading_target;
 		}
 	}
 
@@ -2447,24 +2461,26 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		child->net_seat_local[0] = network_decompress_fixedpoint(pending.cx);
 		child->net_seat_local[1] = network_decompress_fixedpoint(pending.cy);
 		child->net_seat_local[2] = network_decompress_fixedpoint(pending.cz);
-		child->net_seat_local_yaw_byte = pending.local_yaw_byte;
-		child->net_seat_compose_yaw = pending.compose_yaw;
+		child->net_seat_local_heading_bam = pending.local_heading_bam;
 		child->net_seat_valid = true;
 		child->net_has_compact = true;
 		child->x = w.x;
 		child->y = w.y;
 		child->z = w.z;
-		// World yaw byte = carrier yaw + local yaw; BAM addition holds in the
-		// 8-bit ring used by the compact view. Vehicle records keep their
-		// world-absolute wire euler instead (compose_yaw false) [orig: the
-		// untransformed entity+576 store @0x4607f5].
-		if (pending.compose_yaw) {
-			child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
-			child->heading_bam = io::bam_add(
-					carrier->heading_bam,
-					static_cast<int32_t>(
-							uint32_t(pending.local_yaw_byte) << 24));
-		}
+		// World heading = carrier + local for every carried class: the player
+		// read composes its yaw byte [orig: @0x4c10d4] and the vehicle read
+		// lifts its eulerZ through Entity_TransformLocalToWorld's out[3] =
+		// carrier[3] + local[3] [orig: @0x4608ce / @0x43bd00 -> the entity+576
+		// store @0x4607f5]. BAM addition holds in the yaw byte's 8-bit ring.
+		child->heading_bam = io::bam_add(carrier->heading_bam, pending.local_heading_bam);
+		child->yaw_byte = yaw_byte_from_bam(child->heading_bam);
+		// A deck-carried vehicle is a carried OBJECT (the bit0-flagged attach
+		// class @0x43C14A) whose mover is bit0-skipped — the per-tick
+		// seat-follow owns its motion between records, so nothing chases a
+		// staged heading; keep the staged slot coherent with the landed pose for
+		// a later carrier-clear record [orig: the +0x240 stage @0x4607f5].
+		if (child->cls == EntityClass::Vehicle)
+			child->net_smooth_heading = child->heading_bam;
 	}
 
 	refresh_carried_entities();

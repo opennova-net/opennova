@@ -219,6 +219,153 @@ int main() {
         CHECK(approx(r.position.y, 51.0f));
         CHECK(approx(r.position.z, 12.0f));
         CHECK(r.yaw == 0 && r.pitch == 4 && r.roll == 5);
+        CHECK(r.flags_or == 0 && !r.carrier.valid()); // team 0 marker: no latch
+    }
+
+    // --- The Co-op direct-marker arm's two survivors: the chosen marker's
+    //     parachute bit is copied, and a team-2 marker arms the queued 0x200
+    //     mount with carrier = its parent (else the MARKER itself, since
+    //     player+0x28 was never replaced) for +0x16C/+0x180. Team-1 markers
+    //     copy the chute bit alone; the scored non-Co-op families never enter
+    //     the arm. The applier ORs the flags and writes the two carrier fields
+    //     without flipping the mounted state (the body update's toggle does).
+    // [orig: Server_PositionPlayerForSpawn @0x50D406..0x50D45A]
+    {
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(0, 8);
+        w.registry.configure_pool(1, 4);
+        w.registry.configure_pool(3, 16);
+        Entity parent;
+        parent.kind = EntityKind::Item;
+        parent.position = {100.0f, 50.0f, 10.0f};
+        const EntityHandle carrier = w.registry.spawn(1, parent);
+        const EntityHandle marker_h = spawn_marker(w, 6094, {1.0f, 0.0f, 2.0f}, 90);
+        Entity *marker = w.registry.get(marker_h);
+        marker->team = 2;
+        marker->flags |= kEntityFlagParachute;
+        marker->ground_target = carrier;
+        SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
+        CHECK(r.found && approx(r.position.x, 100.0f) && approx(r.position.y, 51.0f));
+        CHECK(r.flags_or == (kEntityFlagParachute | 0x200u));
+        CHECK(r.carrier == carrier);
+
+        Entity body;
+        body.kind = EntityKind::Organic;
+        Entity *rider = w.registry.get(w.registry.spawn(0, body));
+        apply_spawn_point_latches(*rider, r);
+        CHECK((rider->flags & (kEntityFlagParachute | 0x200u)) ==
+              (kEntityFlagParachute | 0x200u));
+        CHECK(rider->mount_target == carrier);
+        CHECK(rider->mount_toggle_fallback == carrier);
+        CHECK(!rider->mounted);
+
+        // Unparented team-2 marker: the marker itself is the carrier.
+        marker = w.registry.get(marker_h);
+        marker->ground_target = EntityHandle{};
+        marker->flags &= ~kEntityFlagParachute;
+        r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
+        CHECK(r.found && r.flags_or == 0x200u && r.carrier == marker_h);
+
+        // Team 1 with a chute: the 0x20 copy only, and the applier leaves the
+        // carrier fields untouched.
+        marker->team = 1;
+        marker->flags |= kEntityFlagParachute;
+        r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
+        CHECK(r.found && r.flags_or == kEntityFlagParachute && !r.carrier.valid());
+        Entity *walker = w.registry.get(w.registry.spawn(0, body));
+        apply_spawn_point_latches(*walker, r);
+        CHECK((walker->flags & kEntityFlagParachute) != 0 && (walker->flags & 0x200u) == 0);
+        CHECK(!walker->mount_target.valid() && !walker->mount_toggle_fallback.valid());
+
+        // The 6001 fallback rides the same arm.
+        marker = w.registry.get(marker_h);
+        marker->item_id = 6001;
+        marker->team = 2;
+        r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
+        CHECK(r.found && r.flags_or == (kEntityFlagParachute | 0x200u) &&
+              r.carrier == marker_h);
+
+        // A scored team-mode marker with the same bytes carries neither latch.
+        Entity *scored = w.registry.get(spawn_marker(w, 6097, {5.0f, 5.0f, 0.0f}));
+        scored->team = 2;
+        scored->flags |= kEntityFlagParachute;
+        r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 2, 0x10010u);
+        CHECK(r.found && approx(r.position.x, 5.0f));
+        CHECK(r.flags_or == 0 && !r.carrier.valid());
+    }
+
+    // --- A slot with the spectator latch is POSITIONED with a substitute team
+    //     while its assigned team stays 0: Co-op -> 1; team modes -> a
+    //     dead-flagged entity's nonzero restore team, else 2 - (tick & 1)
+    //     (odd -> 1, even -> 2); non-team modes keep the team. Without the
+    //     latch, team 0 in a team mode still resolves no marker.
+    // [orig: Server_PositionPlayerForSpawn @0x50D17C..0x50D1C6]
+    {
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(0, 8);
+        w.registry.configure_pool(3, 16);
+        spawn_marker(w, 6096, {10.0f, 0.0f, 0.0f});
+        spawn_marker(w, 6097, {20.0f, 0.0f, 0.0f});
+        spawn_marker(w, 6095, {30.0f, 0.0f, 0.0f});
+        const SpawnSlotState spectator{true, 0};
+        const SpawnSlotState plain{};
+
+        w.logic_tick = 1;
+        CHECK(!resolve_player_spawn_pose(
+                   w, EntityHandle{}, EntityHandle{}, 0, 0, 0x10010u, plain).found);
+        SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 0, 0x10010u, spectator);
+        CHECK(r.found && approx(r.position.x, 10.0f)); // odd tick -> team 1
+        w.logic_tick = 2;
+        r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 0, 0x10010u, spectator);
+        CHECK(r.found && approx(r.position.x, 20.0f)); // even tick -> team 2
+
+        // A dead-flagged entity keeps a nonzero restore team; zero falls back
+        // to the parity, and a live entity ignores the restore team.
+        const EntityHandle corpse = spawn_body(w, {0.0f, 0.0f, 0.0f}, true, false);
+        w.registry.get(corpse)->flags |= kEntityFlagDead;
+        w.logic_tick = 1;
+        r = resolve_player_spawn_pose(
+            w, corpse, EntityHandle{}, 0, 0, 0x10010u, SpawnSlotState{true, 2});
+        CHECK(r.found && approx(r.position.x, 20.0f));
+        r = resolve_player_spawn_pose(
+            w, corpse, EntityHandle{}, 0, 0, 0x10010u, SpawnSlotState{true, 0});
+        CHECK(r.found && approx(r.position.x, 10.0f));
+        const EntityHandle live = spawn_body(w, {0.0f, 0.0f, 0.0f}, true);
+        r = resolve_player_spawn_pose(
+            w, live, EntityHandle{}, 0, 0, 0x10010u, SpawnSlotState{true, 2});
+        CHECK(r.found && approx(r.position.x, 10.0f));
+
+        // Non-team: the team byte is untouched (team 0 walks the solo chain).
+        w.logic_tick = 2;
+        r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 0, 0x00000u, spectator);
+        CHECK(r.found && approx(r.position.x, 30.0f));
+
+        // Objective Co-op substitutes team 1 for the numbered-entity arm too.
+        auto c_storage = std::make_unique<World>();
+        World &c = *c_storage;
+        c.registry.configure_pool(1, 4);
+        c.registry.configure_pool(3, 4);
+        const EntityHandle blue = spawn_zone(c, 1, 1, 1);
+        const EntityHandle red = spawn_zone(c, 1, 2, 2);
+        c.registry.get(blue)->position = {100.0f, 0.0f, 0.0f};
+        c.registry.get(blue)->has_item_def = true;
+        c.registry.get(red)->position = {200.0f, 0.0f, 0.0f};
+        c.registry.get(red)->has_item_def = true;
+        CHECK(!resolve_player_spawn_pose(
+                   c, EntityHandle{}, EntityHandle{}, 0, 0, 0x30020u, plain).found);
+        r = resolve_player_spawn_pose(
+            c, EntityHandle{}, EntityHandle{}, 0, 0, 0x30020u, spectator);
+        CHECK(r.found && approx(r.position.x, 100.0f));
     }
 
     // --- CRenderState_GetFieldByIndex(team, 6) = team field 7 (Deaths)

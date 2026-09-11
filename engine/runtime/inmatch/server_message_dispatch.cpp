@@ -1053,9 +1053,14 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 						world, target_zone, player->handle, selected))
 			return replies;
 	}
+	// The no-pick arm reads the slot's spectator latch/restore team beside the
+	// team byte [orig: Server_ProcessPlayerDeath @0x517863 ->
+	// Server_PositionPlayerForSpawn @0x50D17C..0x50D1C6].
+	const world::SpawnSlotState slot_state{
+			conn.link.spectator, conn.spectator_restore_team};
 	world::SpawnPointResult pose = world::resolve_player_spawn_pose(
 			world, player->handle, target_zone, conn.reply.player_slot,
-			player->team, config.game_type);
+			player->team, config.game_type, slot_state);
 	if (pose.found) {
 		player->position = pose.position;
 		player->yaw = pose.yaw;
@@ -1069,6 +1074,10 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		// Entity_ResetToSpawnState @0x4B9610; D-NET-66]
 		player->position = player->spawn_position;
 	}
+	// The Co-op marker arm's chute bit and queued carrier mount survive the
+	// spawn-state reset below (it clears only the dead bit).
+	// [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
+	world::apply_spawn_point_latches(*player, pose);
 	world::entity_reset_to_spawn_state(*player);
 	if (world.tables.player.has_item_def && world.tables.player.item_hp != 0)
 		player->health = world::retail_signed_i16(world.tables.player.item_hp);
@@ -1126,13 +1135,19 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 
 bool is_medic_recipient(const NapiNPConnection &candidate,
 		const world::World &world, uint8_t team) {
+	// The mask-0x580 group: bit 0x80 admits player-slot state 6/7 (deployed /
+	// round ended — the in-match state; the ordinary death path never rewrites
+	// slot+0x20), bit 0x100 compares the slot team byte, bit 0x400 the Medic
+	// class attribute. No leg reads entity health or the Flags dead bit, so a
+	// dead or respawn-pending same-team Medic still receives the record.
+	// [orig: NapiNPServer_SendFiltered @0x4C87E0 — roster gate @0x4C889F,
+	//  0x80 @0x4C8948..0x4C8953, 0x100 @0x4C896A..0x4C8977,
+	//  0x400 @0x4C8990..0x4C89A8]
 	if (!is_in_match(candidate) || candidate.link.transport == nullptr ||
 			!candidate.link.owned_entity.valid())
 		return false;
 	const world::Entity *medic = world.registry.get(candidate.link.owned_entity);
-	return medic != nullptr && medic->alive &&
-			(medic->flags & world::kEntityFlagDead) == 0u &&
-			medic->team == team &&
+	return medic != nullptr && medic->team == team &&
 			world.tables.class_has_attribute(medic->player_class,
 					world::MissionTables::kCharAttrMedic);
 }

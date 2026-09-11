@@ -56,7 +56,43 @@ struct DeathEffectBank {
 	std::vector<DeathEffectPoint> points; // first-16 mask, full walk with x86 shift wrapping
 };
 
+// The items.def ai_function class row that owns an item's event/death
+// callback. Retail resolves the tag by whole-string stricmp against
+// g_EntityClassEventCallbackTable @0x813000 (41 x 24-B rows: name[8], the
+// event callback, three more), stores the callback in def+0x138 and copies it
+// to entity+0x1C8 at spawn; the damage sites invoke it as cb(entity, 1|2, 0),
+// the S2C 0x13 client kill as cb(entity, 4, 0), and the pool think walks as
+// cb(entity, 0, 0) whenever the entity's +0x2AC countdown expires. An empty
+// tag and a tag without a row resolve the "null" row.
+// [orig: Entity_LookupRenderCallbacks @0x407dc0 — stricmp @0x407de2, the
+//  row-0 miss default @0x407dee, def+0x138 @0x407e2d; EntityDef_InitAllCallbacks
+//  @0x4a5aa9 ("Null" for an empty tag); the notify sites @0x4e6f93 / @0x42ebf5;
+//  the pool-1 think gate @0x4b8e1b, the pool-2 cohort gate @0x4c2291]
+enum class ItemDeathClass : uint8_t {
+	// Rows built without a def (hand-built tests) and the class rows whose
+	// event callback is not ported yet (bld2 @0x43EEE0, towr @0x4406A0, emit
+	// @0x43F8F0, brrl, bldg, cran, door, target, palm, flag, envs, squib,
+	// ele0, the throwable rows, and the organic/vehicle rows that never
+	// reach this notify): the pre-dispatch body, i.e. the tree callback.
+	kUnwitnessed = 0,
+	kNull, // "null" @0x813000 (and psec @0x813288, pwrp @0x813360, the
+	       // callback-less nade @0x813138, an empty/unknown tag) -> 0x406FF0:
+	       // +0x2AC = 0x1000000 and nothing else — the item never dies
+	kGnrc, // "gnrc" @0x8130C0 -> 0x407020
+	kGnrl, // "gnrl" @0x8130D8 -> 0x407F80
+	kGnl2, // "gnl2" @0x8130F0 -> Entity_HandleDeathEvent @0x4070F0
+	kTree, // "tree" @0x813258 -> Entity_HandleDestructibleDeathEvent @0x440210
+	kEwep, // "ewep" @0x813090 -> Entity_UpdateChildAttachment @0x4409A0
+};
+
+// The class row for an items.def ai_function tag — the retail table walk
+// (whole-string, case-insensitive; a miss and the empty tag are the null row).
+ItemDeathClass item_death_class_from_tag(const char *ai_function);
+
 struct ItemDeathTraits {
+    // The event/death callback row (item_death_class_from_tag on the def's
+    // ai_function) — destruction_notify_item_damage dispatches on it.
+    ItemDeathClass death_class = ItemDeathClass::kUnwitnessed;
     bool static_death = false;  // attrib2 & 0x100; generic death motion freezes
     int32_t unit_type = 0;      // def+0x196 — the death-dispatch row key
     float kz = 0.0f;            // def+0x198 — death-blast radius (units); 0 = none
@@ -418,13 +454,24 @@ public:
 // The item death chain.
 // ----------------------------------------------------------------------------
 
-// Damage notify for a destructible item — the deathCallback equivalence
-// [orig: Entity_HandleDestructibleDeathEvent @ 0x440210]: on the authority,
-// health <= 0 and not yet husked -> process the destruction. Phase mirrors the
-// witnessed callback param (1 bullet hit, 2 explosion hit, 4 net kill).
+// Damage notify for a destructible item — the entity+0x1C8 event callback,
+// dispatched on the def's ai_function class row (ItemDeathClass): gnrc
+// @0x407020 (the two-step unitType piece death), gnrl @0x407F80 (husk + death
+// sound + one effect), gnl2 @0x4070F0 (the delayed detonation), tree
+// @0x440210 (the section-debris death), ewep @0x4409A0 (the gunner dismount +
+// husk), null @0x406FF0 (never dies). Phase mirrors the witnessed callback
+// param (1 bullet hit, 2 explosion hit, 4 net kill); the authority legs run
+// under rules.logic_authority, a client acts on phase 4 only.
 void destruction_notify_item_damage(World &world, Entity &target, int phase);
 
-// The destruction itself [orig: Entity_ProcessDestructibleDeath @ 0x43fbc0 +
+// The pool think walks' cb(entity, 0, 0) on the +0x2AC expiry, for the class
+// rows whose death arms a countdown with a body of its own: the gnrc Flags&2
+// leg four ticks after death and the gnl2 one 32 ticks after. Once per logic
+// tick on the authority [orig: Entity_UpdatePool1Slot @0x4b8dd0 gate
+// @0x4b8e1b..0x4b8e3c + decrement @0x4b8ea0].
+void destruction_tick_class_death_think(World &world);
+
+// The tree-class destruction [orig: Entity_ProcessDestructibleDeath @ 0x43fbc0 +
 // the Entity_InitDeathSounds presentation leg]: Flags |= 6 (dead + husk swap),
 // death tick, section-debris burst, scar clear (no decal system — tracked),
 // death sound + particledeath family + the kz KZ-point blasts.

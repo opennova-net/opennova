@@ -58,6 +58,30 @@ SpawnPointResult marker_pose(const World &world, const Entity &marker) {
     return out;
 }
 
+// The Co-op direct-marker arm: the parent-transformed pose plus the two
+// latches that survive the leg. player+0x28 first holds the marker
+// (@0x50d406) and becomes the marker's PARENT only when one exists
+// (@0x50d421); the marker's parachute bit is copied (@0x50d424..0x50d42a);
+// and a team-2 marker arms the queued mount with that player+0x28 value into
+// +0x16C/+0x180 (@0x50d42e..0x50d45a) unless a saved-game load is pending
+// (dword_A892C8, set only outside a session by sub_439680 @0x4396be and
+// cleared by NapiNPClientMsg_0x05C @0x425207 — zero in every session, and
+// this runtime has no saved-game load, so the arm is unconditional here).
+// player+0x28 itself is cleared before Entity_BuildProximityList (@0x50d6c6),
+// so the flags and the +0x16C/+0x180 carrier are the only survivors.
+// [orig: Server_PositionPlayerForSpawn @0x50D3DB..0x50D45A]
+SpawnPointResult coop_marker_pose(const World &world, const Entity &marker) {
+    SpawnPointResult out = marker_pose(world, marker);
+    const bool parented = world.registry.get(marker.ground_target) != nullptr;
+    if (((marker.flags | marker.engine_flags) & kEntityFlagParachute) != 0)
+        out.flags_or |= kEntityFlagParachute; // [orig: @0x50D42A]
+    if (marker.team == 2) {                   // [orig: cmp byte ptr [esi+162h],2 @0x50D42E]
+        out.flags_or |= 0x200u;               // [orig: @0x50D44D]
+        out.carrier = parented ? marker.ground_target : marker.handle;
+    }
+    return out;
+}
+
 std::vector<const Entity *> markers_of_type(const World &world, int32_t type) {
     std::vector<const Entity *> out;
     world.registry.for_each([&](const Entity &entity) {
@@ -207,9 +231,33 @@ int32_t team_fallback_marker(uint8_t team) {
     }
 }
 
+// The POSITIONING team of the no-pick arm. A slot with the spectator latch
+// never positions as its assigned team 0: Co-op substitutes 1; a team mode
+// keeps a dead-flagged entity's nonzero restore team, else takes the tick
+// parity (odd tick -> 1, even -> 2: `and bl,1; neg bl; sbb bl,bl; add ebx,2`);
+// a non-team mode leaves the team untouched. The result feeds the Deaths
+// check and the 6096..6099 / 6003..6004 (and objective Co-op) selection; the
+// assigned team itself is not written.
+// [orig: Server_PositionPlayerForSpawn @0x50D17C..0x50D1C6]
+uint8_t positioning_team(const World &world, EntityHandle spawning_player,
+                         uint8_t team, uint32_t game_type_value,
+                         const SpawnSlotState &slot) {
+    if (!slot.spectator) return team;                          // [orig: @0x50D17C]
+    if (game_type::is_objective(game_type_value)) return 1;    // [orig: @0x50D195..0x50D197]
+    if (!game_type::is_team(game_type_value)) return team;     // [orig: @0x50D19B]
+    const Entity *entity = world.registry.get(spawning_player);
+    const bool dead = entity != nullptr &&
+        ((entity->flags | entity->engine_flags) & kEntityFlagDead) != 0;
+    if (dead && slot.restore_team != 0) return slot.restore_team; // [orig: @0x50D1A6..0x50D1B4]
+    return static_cast<uint8_t>(2u - (world.logic_tick & 1u));   // [orig: @0x50D1B6..0x50D1C3]
+}
+
 SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
-                              uint8_t player_slot, uint8_t team,
-                              uint32_t game_type_value) {
+                              uint8_t player_slot, uint8_t assigned_team,
+                              uint32_t game_type_value,
+                              const SpawnSlotState &slot) {
+    const uint8_t team = positioning_team(world, spawning_player, assigned_team,
+                                          game_type_value, slot);
     // CPlayerStats_GetFieldPlusOne (ex CRenderState_GetFieldByIndex)(team, 6) returns team field 7: the Deaths
     // counter (the accessor returns field[index+1]; event case 6 records a
     // death). The initial-start markers therefore serve until the team's first
@@ -222,11 +270,11 @@ SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
         if (primary_allowed) {
             const std::vector<const Entity *> primary = markers_of_type(world, 6094);
             if (!primary.empty())
-                return marker_pose(world, *primary[player_slot % primary.size()]);
+                return coop_marker_pose(world, *primary[player_slot % primary.size()]);
         }
         const std::vector<const Entity *> fallback = markers_of_type(world, 6001);
         if (!fallback.empty())
-            return marker_pose(world, *fallback[player_slot % fallback.size()]);
+            return coop_marker_pose(world, *fallback[player_slot % fallback.size()]);
         return game_type::is_objective(game_type_value)
             ? objective_coop_entity_pose(world, team)
             : SpawnPointResult{};
@@ -253,12 +301,22 @@ SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
 
 SpawnPointResult resolve_player_spawn_pose(
     World &world, EntityHandle spawning_player, EntityHandle target,
-    uint8_t player_slot, uint8_t team, uint32_t game_type_value) {
+    uint8_t player_slot, uint8_t team, uint32_t game_type_value,
+    const SpawnSlotState &slot) {
     // [orig: Server_PositionPlayerForSpawn @0x50CF60]
     if (const Entity *target_entity = world.registry.get(target))
         return target_pose(world, *target_entity);
     return no_pick_pose(world, spawning_player, player_slot, team,
-                        game_type_value);
+                        game_type_value, slot);
+}
+
+void apply_spawn_point_latches(Entity &player, const SpawnPointResult &sel) {
+    // Both portable flag views represent the same retail dword; the body
+    // update's toggle reads their union [orig: @0x4B424A].
+    player.flags |= sel.flags_or;                 // [orig: @0x50D42A, @0x50D44D]
+    if (!sel.carrier.valid()) return;
+    player.mount_target = sel.carrier;            // [orig: entity+0x16C @0x50D454]
+    player.mount_toggle_fallback = sel.carrier;   // [orig: entity+0x180 @0x50D45A]
 }
 
 const Entity *ZoneSystem::resolve_spawn_target(uint8_t requester_team, uint16_t handle) const {

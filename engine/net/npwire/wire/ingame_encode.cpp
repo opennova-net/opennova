@@ -390,7 +390,8 @@ std::vector<uint8_t> encode_vehicle_compact_record(const VehicleCompactRecord &r
 		w.u16(uint16_t(rec.euler_y));           // entity+24 Euler Y  [orig: 0x460d4c]
 		w.u16(uint16_t(rec.euler_x));           // entity+20 Euler X  [orig: 0x460d52 -> 0x460e10]
 	} else {
-		w.u16(rec.weapon_x);                    // entity+160         [orig: 0x460d7b]
+		w.u16(rec.vertical_velocity);           // entity+0xA0 slideDecay, compressed
+		                                        // [orig: 0x460d5a -> 0x460d7b]
 		w.u16(rec.health_word);                 // entity+286 vehicle HEALTH u16 [orig: 0x460d9b;
 		                                        // read stores it @0x460aff — 0 kills the vehicle]
 		w.u16(rec.weapon_aim_y);                // vehicleData[136]   [orig: 0x460dc2]

@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include <base/io/bam.h>
+#include <base/io/strutil.h>
 #include <base/crt/crt_rng.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/angle.h>
@@ -103,6 +104,11 @@ const DeathPieceType kDeathPieceTypes[kDeathPieceTypeCount] = {
 // World::ammo (the host loads ammo.def before missions run).
 constexpr const char *kAmmoKzOrganicBlast = "kz_OrganicBlast";
 constexpr const char *kAmmoKzMItemBlast = "kz_MItemBlast";
+// The grenade-family detonation pair the gnl2 death expiry fires through
+// Entity_SpawnExplosionEffects [orig: g_ammo_kz_M406HE @0x24E7DB0, interned
+// @0x540569; g_fx_AirExp @0x2C25BA0, the {name, slot} pair row @0x8490D0].
+constexpr const char *kAmmoKzM406HE = "kz_M406HE";
+constexpr const char *kAirExplosionEffect = "Effect_AirExp";
 
 constexpr int32_t kPiecePhysicsGravityQ16 = 334;
 constexpr int32_t kPiecePhysicsWaterFallFloorQ16 = -2048;
@@ -331,6 +337,17 @@ EntityHandle resolve_attacker_chain(World &world, EntityHandle owner) {
         resolved = e->last_attacker;
     }
     return resolved;
+}
+
+// Whether the victim's event callback is the tree one — the class whose death
+// launches section debris from the recorded blast center [orig: the
+// `cmp [edi+1C8h], offset Entity_HandleDestructibleDeathEvent` gate on the
+// +0x80 store @0x4eb53f]. A row without a class runs that same body.
+bool runs_tree_death_body(const World &world, const Entity &target) {
+	if (target.is_ai_capable) return false;
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
+	return traits == nullptr || traits->death_class == ItemDeathClass::kTree ||
+			traits->death_class == ItemDeathClass::kUnwitnessed;
 }
 
 // The cone gate [orig: @ 0x4eafe0..0x4eaffa — atan2(dy, dx) in BAM vs the entry
@@ -669,10 +686,11 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                                      t->handle, 0.25f, /*query_parent_cleared=*/false))
                     continue;
                 if (!cone_gate(e, cone_half, d)) continue;
-                // Destructible-class targets record the blast center as the
-                // debris launch origin [orig: the deathCallback ==
+                // Tree-class targets record the blast center as the debris
+                // launch origin [orig: the deathCallback ==
                 // Entity_HandleDestructibleDeathEvent check @ 0x4eb553].
-                if (t->health > 0 && !t->is_ai_capable) t->death_blast_center = e.pos;
+                if (t->health > 0 && runs_tree_death_body(world, *t))
+                    t->death_blast_center = e.pos;
                 float surface = dist - bound;
                 if (surface < 0.0f) surface = 0.0f;
                 entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
@@ -705,7 +723,8 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // leg emits the already transformed transient effect rows.
                 shatter_glass_points(
                         world, *t, e.pos, ammo->kz_maxradius, events);
-                if (t->health > 0 && !t->is_ai_capable) t->death_blast_center = e.pos;
+                if (t->health > 0 && runs_tree_death_body(world, *t))
+                    t->death_blast_center = e.pos;
                 entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
             }
         }
@@ -715,18 +734,6 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
 // ----------------------------------------------------------------------------
 // The item death chain
 // ----------------------------------------------------------------------------
-
-void destruction_notify_item_damage(World &world, Entity &target, int phase) {
-    // [orig: Entity_HandleDestructibleDeathEvent @ 0x440210 — the authority
-    // destroys at health <= 0; a client destroys on the net kill phase 4. Our
-    // world is the authority by construction; AI-driven vehicles die through
-    // their state machine (rows 21/23), not this notify.]
-    (void)phase;
-    if (target.kind == EntityKind::Organic || target.is_ai_capable) return;
-    if ((target.engine_flags & kEntityFlagHusk) != 0) return; // already husked
-    if (target.health > 0) return;
-    process_destructible_death(world, target);
-}
 
 namespace {
 
@@ -818,6 +825,382 @@ void process_destructible_death(World &world, Entity &target) {
     // @ 0x509d70) is the net track's emit — staged with the other MP legs
     // (tracked §24).
     emit_death_sounds_and_effects(world, target, /*silent=*/false);
+}
+
+// The event-callback table in its shipped row order, each row resolved to the
+// ported death body (kUnwitnessed while its callback is unported). The walk
+// is a whole-string stricmp; a miss and the empty tag take row 0.
+// [orig: g_EntityClassEventCallbackTable @0x813000, count 41 @0x8133D8;
+//  Entity_LookupRenderCallbacks @0x407dc0 — stricmp @0x407de2, the row-0
+//  default @0x407dee; EntityDef_InitAllCallbacks @0x4a5aa9 pushes "Null" for
+//  an empty tag]
+ItemDeathClass item_death_class_from_tag(const char *ai_function) {
+	struct Row {
+		const char *name;
+		ItemDeathClass cls;
+	};
+	static constexpr Row kRows[] = {
+		{"null", ItemDeathClass::kNull},          // @0x813000 -> 0x406FF0
+		{"org0", ItemDeathClass::kUnwitnessed},   // @0x813018 -> 0x407310 (persons: not this notify)
+		{"org1", ItemDeathClass::kUnwitnessed},   // @0x813030 -> 0x407310
+		{"plyr", ItemDeathClass::kUnwitnessed},   // @0x813048 -> 0x407720
+		{"brrl", ItemDeathClass::kUnwitnessed},   // @0x813060 -> 0x407CC0
+		{"envs", ItemDeathClass::kUnwitnessed},   // @0x813078 -> 0x408290
+		{"ewep", ItemDeathClass::kEwep},          // @0x813090 -> 0x4409A0
+		{"ele0", ItemDeathClass::kUnwitnessed},   // @0x8130A8 -> 0x4A20D0
+		{"gnrc", ItemDeathClass::kGnrc},          // @0x8130C0 -> 0x407020
+		{"gnrl", ItemDeathClass::kGnrl},          // @0x8130D8 -> 0x407F80
+		{"gnl2", ItemDeathClass::kGnl2},          // @0x8130F0 -> 0x4070F0
+		{"flag", ItemDeathClass::kUnwitnessed},   // @0x813108 -> 0x408430
+		{"squib", ItemDeathClass::kUnwitnessed},  // @0x813120 -> 0x449810
+		{"nade", ItemDeathClass::kNull},          // @0x813138 -> no event callback (0)
+		{"schl", ItemDeathClass::kUnwitnessed},   // @0x813150 -> 0x443670
+		{"clym", ItemDeathClass::kUnwitnessed},   // @0x813168 -> 0x4438C0
+		{"vmne", ItemDeathClass::kUnwitnessed},   // @0x813180 -> 0x443BB0
+		{"lndm", ItemDeathClass::kUnwitnessed},   // @0x813198 -> 0x441A40
+		{"bldg", ItemDeathClass::kUnwitnessed},   // @0x8131B0 -> 0x43EE60
+		{"bld2", ItemDeathClass::kUnwitnessed},   // @0x8131C8 -> 0x43EEE0
+		{"cran", ItemDeathClass::kUnwitnessed},   // @0x8131E0 -> 0x43FC70
+		{"door", ItemDeathClass::kUnwitnessed},   // @0x8131F8 -> 0x43F370
+		{"target", ItemDeathClass::kUnwitnessed}, // @0x813210 -> 0x43F880
+		{"emit", ItemDeathClass::kUnwitnessed},   // @0x813228 -> 0x43F8F0
+		{"towr", ItemDeathClass::kUnwitnessed},   // @0x813240 -> 0x4406A0
+		{"tree", ItemDeathClass::kTree},          // @0x813258 -> 0x440210
+		{"palm", ItemDeathClass::kUnwitnessed},   // @0x813270 -> 0x53C4C0
+		{"psec", ItemDeathClass::kNull},          // @0x813288 -> 0x406FF0
+		{"CHel", ItemDeathClass::kUnwitnessed},   // @0x8132A0 -> 0x4581B0
+		{"rokt", ItemDeathClass::kUnwitnessed},   // @0x8132B8 -> 0x443630
+		{"stng", ItemDeathClass::kUnwitnessed},   // @0x8132D0 -> 0x443630
+		{"hlfr", ItemDeathClass::kUnwitnessed},   // @0x8132E8 -> 0x443630
+		{"jvln", ItemDeathClass::kUnwitnessed},   // @0x813300 -> 0x443630
+		{"arty", ItemDeathClass::kUnwitnessed},   // @0x813318 -> 0x443640
+		{"aflr", ItemDeathClass::kUnwitnessed},   // @0x813330 -> 0x443650
+		{"gflr", ItemDeathClass::kUnwitnessed},   // @0x813348 -> 0x443660
+		{"pwrp", ItemDeathClass::kNull},          // @0x813360 -> 0x406FF0
+		{"cveh", ItemDeathClass::kUnwitnessed},   // @0x813378 -> 0x4583C0
+		{"cbot", ItemDeathClass::kUnwitnessed},   // @0x813390 -> 0x462130
+		{"cpln", ItemDeathClass::kUnwitnessed},   // @0x8133A8 -> 0x462120
+		{"ctrn", ItemDeathClass::kUnwitnessed},   // @0x8133C0 -> 0x462140
+	};
+	if (ai_function == nullptr || ai_function[0] == '\0') return ItemDeathClass::kNull;
+	for (const Row &row : kRows)
+		if (strutil::iequals(row.name, ai_function)) return row.cls;
+	return ItemDeathClass::kNull; // [orig: the row-0 miss default @0x407dee]
+}
+
+namespace {
+
+// Flags |= 2 as the class bodies write it: the entity is dead from this tick
+// on (the attachment, seat and AI passes read `alive`).
+void mark_class_dead(Entity &target) {
+	target.engine_flags |= kEntityFlagDead;
+	target.alive = false;
+}
+
+// Flags |= 4 IS the husk swap in retail (the renderer reads the bit); our
+// presenter consumes the event. One swap per entity.
+void land_class_husk(World &world, Entity &target) {
+	if ((target.engine_flags & kEntityFlagHusk) != 0) return;
+	target.engine_flags |= kEntityFlagHusk;
+	world.out.destruction.husk_swaps.push_back(HuskSwapEvent{target.net_id,
+			target.handle.packed, target.bms_id, target.spawn_origin, target.item_id,
+			target.spawned_piece_mask, target.position});
+	++world.out.destruction.items_destroyed;
+}
+
+// The death presentation the gnrl/gnl2/ewep callbacks run themselves: the
+// def death sound at the entity position and ONE transient particledeath
+// effect (the interned def+0x412 handle, unattached, undirected) — not the
+// Entity_InitDeathSounds bank/KZ chain, which only the tree and gnrc rows
+// reach. [orig: Sound_PlayWithDistanceAttenuation(def+0x860, &Position,
+//  entity) + submit_effect_descriptor(0, 0, &Position, word def+0x412): gnrl
+//  @0x408044/@0x40806b, gnl2 @0x40714c/@0x40716f and @0x4072ba/@0x4072dd,
+//  ewep @0x440c64/@0x440c87]
+void emit_class_death_sound_and_effect(World &world, const Entity &target) {
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
+	if (traits == nullptr) return;
+	DestructionEvents &ev = world.out.destruction;
+	if (!traits->sound_death.empty())
+		ev.sounds.push_back(DestructionSoundEvent{traits->sound_death, target.position});
+	if (!traits->particledeath.empty())
+		ev.effects.push_back(
+				DestructionEffectEvent{traits->particledeath, target.position, Vec3{}});
+}
+
+// The "gnrl" event callback [orig: sub_407F80 — row @0x8130D8].
+void gnrl_death_event(World &world, Entity &target, int phase) {
+	// A husked entity only re-arms its think [orig: @0x407f89 Flags & 4 ->
+	// +0x2AC = 0x3E0]. The 10-slot seat validation walk that follows
+	// (@0x407f98..0x407fee) is alive-time seat upkeep the seat system owns.
+	if ((target.engine_flags & kEntityFlagHusk) != 0) return;
+	if (!world.rules.logic_authority) {
+		// The client kill leg acts on the S2C 0x13 phase alone [orig:
+		// @0x407fff; Flags |= 6 @0x408005, death tick if unset @0x408018,
+		// +0x2AC = 0x3E0 @0x40801f, scar clear @0x408029, the sound/effect
+		// tail].
+		if (phase != 4) return;
+		mark_class_dead(target);
+		if (target.death_tick == 0) target.death_tick = world.logic_tick;
+		land_class_husk(world, target);
+		world.out.scars.clear_entity(target.handle);
+		emit_class_death_sound_and_effect(world, target);
+		return;
+	}
+	if ((target.engine_flags & kEntityFlagDead) == 0) {
+		if (target.health > 0) return; // alive: +0x2AC = 0x744 [orig: @0x4080ba]
+		// The authority kill leg [orig: @0x4080bd..0x4080f4]: scar clear,
+		// Flags |= 6, +0x2AC = 0x20 (its expiry meets the Husk gate above),
+		// the death tick (unconditional), sub_50C840 @0x4080e3 — the S2C 0x26
+		// entity-state send + the def-attrib-0x8000 kill scoring, both staged
+		// on the net track / the damage sites (tracked §24) — then the
+		// sound/effect tail.
+		world.out.scars.clear_entity(target.handle);
+		mark_class_dead(target);
+		land_class_husk(world, target);
+		target.death_tick = world.logic_tick;
+		emit_class_death_sound_and_effect(world, target);
+		return;
+	}
+	// Dead without the husk (a Flags 2 written elsewhere — no engine path does
+	// so today): the resend arm [orig: @0x40807b..0x4080a6 —
+	// Server_SendEntityStatePacket(entity, hitRecord[14]), Flags |= 4, death
+	// tick if unset, +0x2AC = 0x1F].
+	land_class_husk(world, target);
+	if (target.death_tick == 0) target.death_tick = world.logic_tick;
+}
+
+// The Flags&2 think expiry of the "gnrc" callback [orig: @0x407072..0x4070a6
+// — Entity_UpdateDeathTransforms(entity, 0) @0x407081 (the unitType piece
+// dispatch, which lands Flags 6, then Entity_InitDeathSounds), scar clear
+// @0x407087, Server_SendEntityStatePacket(entity, hitRecord[14]) @0x40708e,
+// Flags |= 4 @0x407096, +0x2AC = 0x20 @0x40709b].
+void gnrc_death_expiry(World &world, Entity &target) {
+	entity_update_death_transforms(world, target, /*silent=*/false);
+	world.out.scars.clear_entity(target.handle);
+	land_class_husk(world, target); // the dispatch rows landed it: the guard holds
+}
+
+// The "gnrc" event callback [orig: sub_407020 — row @0x8130C0].
+void gnrc_death_event(World &world, Entity &target, int phase) {
+	if (!world.rules.logic_authority) {
+		// The client kill leg [orig: @0x40702a phase 4 only; scar clear
+		// @0x40703a, Entity_UpdateDeathTransforms(entity, 0) @0x407045, scar
+		// clear @0x40704b, Flags |= 6 @0x407053, +0x2AC = 0x400 @0x407057].
+		if (phase != 4) return;
+		world.out.scars.clear_entity(target.handle);
+		entity_update_death_transforms(world, target, /*silent=*/false);
+		world.out.scars.clear_entity(target.handle);
+		mark_class_dead(target);
+		land_class_husk(world, target);
+		return;
+	}
+	if ((target.engine_flags & kEntityFlagHusk) != 0) return; // +0x2AC = 0x400 [orig: @0x40706a]
+	if ((target.engine_flags & kEntityFlagDead) != 0) {
+		gnrc_death_expiry(world, target); // [orig: @0x40706e — the Flags&2 leg]
+		return;
+	}
+	if (target.health > 0) return; // +0x2AC = 0x3E0 [orig: @0x4070a7]
+	// The first authority kill leg [orig: @0x4070b2..0x4070e2]: scar clear,
+	// Flags |= 2 (dead, NOT yet husked), +0x2AC = 4 — the expiry above runs
+	// four ticks on (destruction_tick_class_death_think) — the death tick
+	// (unconditional), sub_50C840 @0x4070d9 (the 0x26 send + kill scoring,
+	// staged on the net track / the damage sites, tracked §24).
+	world.out.scars.clear_entity(target.handle);
+	mark_class_dead(target);
+	target.death_tick = world.logic_tick;
+}
+
+// The Flags&2 think expiry of the "gnl2" callback [orig: @0x4071ef..0x40725f]:
+// Server_BroadcastExplosionEffect(lastAttacker, {x, y, z + 1.0, yaw, pitch,
+// roll}) @0x407233 — the S2C 0x21 fan-out (a net-track seam) plus its local
+// half Entity_SpawnExplosionEffects @0x4399c0: Effect_AirExp at the raised
+// point (@0x4399e3), one kz_M406HE blast there credited to the attacker with
+// radius 0 = the ammo's kz_maxradius (@0x439a06), the attacker's weapon
+// detonation sound (@0x439a28 — an AmmoDef row lookup the port does not
+// carry) and the SP-only shrapnel projectiles (@0x439a55.., unported) — then
+// Server_SendEntityStatePacket(entity, hitRecord[14]) @0x40723d, Flags |= 4
+// @0x407242, death tick if unset @0x407258, +0x2AC = 0x20 @0x40725f.
+void gnl2_death_expiry(World &world, Entity &target) {
+	const Vec3 raised{target.position.x, target.position.y, target.position.z + 1.0f};
+	world.out.destruction.effects.push_back(
+			DestructionEffectEvent{kAirExplosionEffect, raised, Vec3{}});
+	const int ammo_index = world.tables.ammo.index_of(kAmmoKzM406HE);
+	if (ammo_index >= 0) {
+		ExplosionEntry blast;
+		if (const AmmoTableEntry *ammo = world.tables.ammo.by_index(ammo_index))
+			blast.type = ammo->kztype;
+		blast.ammo_index = ammo_index;
+		blast.owner = target.last_attacker;
+		blast.hit_word = 1;
+		blast.pos = raised;
+		world.explosions.queue_explosion(world, blast);
+	}
+	land_class_husk(world, target);
+	if (target.death_tick == 0) target.death_tick = world.logic_tick;
+}
+
+// The "gnl2" event callback [orig: Entity_HandleDeathEvent @0x4070F0 — row
+// @0x8130F0].
+void gnl2_death_event(World &world, Entity &target, int phase) {
+	if (!world.rules.logic_authority) {
+		// The client kill leg [orig: @0x40710b phase 4: scar clear @0x407113,
+		// Flags |= 6 @0x407118, death tick if unset @0x40712d, +0x2AC = 0x400
+		// @0x407136, the sound/effect tail @0x40714c/@0x40716f]. The alive
+		// branch that follows registers the def soundloop emitter
+		// (SoundEmitter_Register @0x407199) — the audio track's loop, not a
+		// death leg.
+		if (phase != 4) return;
+		world.out.scars.clear_entity(target.handle);
+		mark_class_dead(target);
+		if (target.death_tick == 0) target.death_tick = world.logic_tick;
+		land_class_husk(world, target);
+		emit_class_death_sound_and_effect(world, target);
+		return;
+	}
+	if ((target.engine_flags & kEntityFlagHusk) != 0) return; // +0x2AC = 0x400 [orig: @0x4071d9]
+	if ((target.engine_flags & kEntityFlagDead) != 0) {
+		gnl2_death_expiry(world, target); // [orig: @0x4071ed — the Flags&2 leg]
+		return;
+	}
+	// Alive: the soundloop emitter registration / +0x2AC = 0x780 [orig: @0x407276].
+	if (target.health > 0) return;
+	// The first authority kill leg [orig: @0x407279..0x4072dd]: scar clear,
+	// Flags |= 2, +0x2AC = 0x20 — the expiry above runs 32 ticks on — the
+	// death tick (unconditional), sub_50C840 @0x40729f (0x26 + scoring,
+	// staged), the death sound and the one particledeath effect.
+	world.out.scars.clear_entity(target.handle);
+	mark_class_dead(target);
+	target.death_tick = world.logic_tick;
+	emit_class_death_sound_and_effect(world, target);
+}
+
+// The "ewep" event callback [orig: Entity_UpdateChildAttachment @0x4409A0 —
+// row @0x813090]. Its alive legs (@0x4409c6..0x440b58: the parent-bone pose
+// copy into the weapon slots and the occupant yaw/pitch follow with the
+// local-player clamp) are the attachment and seat systems' per-frame work;
+// this is the death half.
+void ewep_death_event(World &world, Entity &target, int phase) {
+	// A husked emplacement only re-arms [orig: @0x4409ae Flags & 4 ->
+	// +0x2AC = 0x3E0].
+	if ((target.engine_flags & kEntityFlagHusk) != 0) return;
+	const EntityHandle occupant = target.primary_occupant; // entity+0x170 occupantEntity
+	if (!world.rules.logic_authority) {
+		// The client kill leg performs NO detach — a joiner's gunner is
+		// dismounted by the server's own detach packet [orig: @0x440b6c
+		// phase 4: Flags |= 6 @0x440b72, death tick if unset @0x440b85,
+		// +0x2AC = 0x3E0 @0x440b8c, scar clear @0x440b96, the sound/effect
+		// tail].
+		if (phase != 4) return;
+		mark_class_dead(target);
+		if (target.death_tick == 0) target.death_tick = world.logic_tick;
+		land_class_husk(world, target);
+		world.out.scars.clear_entity(target.handle);
+		emit_class_death_sound_and_effect(world, target);
+		return;
+	}
+	if ((target.engine_flags & kEntityFlagDead) == 0) {
+		if (target.health > 0) return; // [orig: @0x440c07]
+		// Kick the gunner off BEFORE the husk flags land [orig: @0x440c0d..
+		// 0x440c1a — the occupant whose parentEntity (+0x16C) is this
+		// emplacement -> Entity_DetachFromVehicleIfServer @0x4359d0 (the
+		// authority gate we are inside) -> Entity_DetachFromVehicle
+		// @0x4355F0].
+		const Entity *rider = world.registry.get(occupant);
+		if (rider != nullptr && rider->mount_target == target.handle)
+			world.vehicles.detach(occupant);
+		// Then the kill leg [orig: @0x440c23..0x440c87]: scar clear, Flags |=
+		// 6, +0x2AC = 0x1F (its expiry meets the Husk gate above), the death
+		// tick (unconditional), sub_50C840 @0x440c49 (0x26 + scoring,
+		// staged), the sound/effect tail.
+		world.out.scars.clear_entity(target.handle);
+		mark_class_dead(target);
+		land_class_husk(world, target);
+		target.death_tick = world.logic_tick;
+		emit_class_death_sound_and_effect(world, target);
+		return;
+	}
+	// Dead without the husk: the second leg [orig: @0x440bb7..0x440bf2 —
+	// re-detach the occupant if still seated (no parent check @0x440bb9),
+	// Server_SendEntityStatePacket(entity, hitRecord[14]) @0x440bd1, Flags |=
+	// 4 @0x440bd6, death tick if unset, +0x2AC = 0x1F @0x440bf2].
+	if (occupant.valid()) world.vehicles.detach(occupant);
+	land_class_husk(world, target);
+	if (target.death_tick == 0) target.death_tick = world.logic_tick;
+}
+
+// The "tree" event callback [orig: Entity_HandleDestructibleDeathEvent
+// @0x440210 — row @0x813258]: the authority destroys at health <= 0 (the S2C
+// 0x26 send @0x4402a7 ahead of Entity_ProcessDestructibleDeath @0x4402b1), a
+// client on the net-kill phase 4 (@0x440269); a husked entity resends its
+// state (@0x440272) and re-arms. Also the pre-dispatch body for rows built
+// without a def and for the class rows still unported (kUnwitnessed).
+void tree_death_event(World &world, Entity &target, int phase) {
+	(void)phase;
+	if ((target.engine_flags & kEntityFlagHusk) != 0) return; // already husked
+	if (target.health > 0) return;
+	process_destructible_death(world, target);
+}
+
+} // namespace
+
+void destruction_notify_item_damage(World &world, Entity &target, int phase) {
+	// The entity+0x1C8 event callback, keyed by the def's ai_function class
+	// row and invoked as cb(entity, phase, 0): 1 from the round damage, 2
+	// from the blast damage [orig: @0x4e6f93], 4 from the S2C 0x13 net kill
+	// [orig: @0x42ebf5]. Organics run the person callbacks and AI-driven
+	// vehicles die through their state machine (rows 21/23), not here.
+	if (target.kind == EntityKind::Organic || target.is_ai_capable) return;
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
+	switch (traits != nullptr ? traits->death_class : ItemDeathClass::kUnwitnessed) {
+	case ItemDeathClass::kNull:
+		return; // [orig: 0x406FF0 — +0x2AC = 0x1000000 and nothing else]
+	case ItemDeathClass::kGnrc:
+		gnrc_death_event(world, target, phase);
+		return;
+	case ItemDeathClass::kGnrl:
+		gnrl_death_event(world, target, phase);
+		return;
+	case ItemDeathClass::kGnl2:
+		gnl2_death_event(world, target, phase);
+		return;
+	case ItemDeathClass::kEwep:
+		ewep_death_event(world, target, phase);
+		return;
+	case ItemDeathClass::kTree:
+	case ItemDeathClass::kUnwitnessed:
+		tree_death_event(world, target, phase);
+		return;
+	}
+}
+
+void destruction_tick_class_death_think(World &world) {
+	// The pool think walks call the class callback as cb(entity, 0, 0) once
+	// the entity's +0x2AC countdown has expired [orig: Entity_UpdatePool1Slot
+	// @0x4b8dd0 — the gate @0x4b8e1b..0x4b8e3c, the per-tick decrement
+	// @0x4b8ea0; the pool-2 walk @0x4c2291..0x4c22c9 is the same gate at the
+	// 8-tick cohort stride]. The only expiries with a body of their own are
+	// the gnrc (+0x2AC = 4) and gnl2 (+0x2AC = 0x20) Flags&2 legs — every
+	// other class re-arm meets its Husk gate — so the countdown folds to
+	// death_tick + N on the pool-1 cadence (gate, then decrement: a 4 written
+	// at tick T fires at T + 4; the pool-2 cohort quantization is not
+	// modelled). Authority-only: a client husks on its phase-4 notify.
+	if (!world.rules.logic_authority) return;
+	for (int pool = 1; pool <= 2; ++pool) {
+		const size_t cap = world.registry.pool_capacity(pool);
+		for (size_t s = 0; s < cap; ++s) {
+			Entity *e = world.registry.get(EntityHandle::make(pool, static_cast<int>(s)));
+			if (e == nullptr || e->is_ai_capable) continue;
+			if ((e->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) != kEntityFlagDead)
+				continue;
+			const ItemDeathTraits *traits = world.tables.item_death_traits.get(e->item_id);
+			if (traits == nullptr) continue;
+			const uint32_t elapsed = world.logic_tick - e->death_tick;
+			if (traits->death_class == ItemDeathClass::kGnrc && elapsed >= 4)
+				gnrc_death_expiry(world, *e);
+			else if (traits->death_class == ItemDeathClass::kGnl2 && elapsed >= 32)
+				gnl2_death_expiry(world, *e);
+		}
+	}
 }
 
 uint32_t spawn_death_pieces(World &world, Entity &target) {

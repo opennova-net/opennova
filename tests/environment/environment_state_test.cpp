@@ -1,9 +1,11 @@
 // EnvironmentState + WeatherRuntime (engine/runtime/environment): the state
 // owner and the weather embedding ported from the environment.gd /
 // weather.gd shell scripts (2026-08-09 de-scripting). Pins the mission
-// clock views, the weather-driven targets/currents split, the NVG rewrite,
-// generation discipline, the reset/prewarm epoch, the network wire units, and
-// the shader-global publication policy. RE record: docs/env/env-tod-re.md.
+// clock views, the weather-driven targets/currents split, the NVG rewrite
+// (sky/ground per-channel, ceiling/floor R-term), the thermal view (grey
+// world block, 0x808080 fog/clear, flat terrain ramps), generation
+// discipline, the reset/prewarm epoch, the network wire units, and the
+// shader-global publication policy. RE record: docs/env/env-tod-re.md.
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/sky_frame.h>
 #include <runtime/environment/water_frame.h>
@@ -146,6 +148,141 @@ int main() {
 		ok &= expect(near(env.fill_light().r, 0.8f * 0.15f + 0.5f * 0.06f),
 				"the NVG hemisphere rewrite (modulator*f/640 as gain*f/10)");
 		ok &= expect(!env.set_nvg_view(true, 2), "identical NVG is idempotent");
+	}
+
+	// --- the NVG interior pair: the modulator R term on all channels ---------
+	{
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		env.set_static_colors_rt({0.8f, 0.4f, 0.2f}, {0.5f, 0.5f, 0.5f},
+				{0.2f, 0.4f, 0.8f});
+		env.set_color_src_gain({0.5f, 0.25f, 0.75f});
+		// The served sky is the envscale-quantized keyframe (0.4 -> 51/255 at
+		// envscale .5): read it raw before NVG instead of assuming the authored
+		// value.
+		const opennova::env::Rgb sky_raw = env.sky_ambient();
+		ok &= expect(env.set_nvg_view(true, 2), "NVG change reported");
+		// f = .6: ceiling'/floor' = c*.15 + gain.r*.06 on EVERY channel (the
+		// R term reused [orig: @ 0x5c82a5..0x5c82e9]) ...
+		ok &= expect(rgb_near(env.ceiling_color(),
+					{0.8f * 0.15f + 0.03f, 0.4f * 0.15f + 0.03f,
+							0.2f * 0.15f + 0.03f}),
+				"the NVG ceiling rewrite adds the modulator R term to all channels");
+		ok &= expect(rgb_near(env.floor_color(),
+					{0.2f * 0.15f + 0.03f, 0.4f * 0.15f + 0.03f,
+							0.8f * 0.15f + 0.03f}),
+				"the NVG floor rewrite adds the modulator R term to all channels");
+		// ... while sky/ground keep their per-channel terms (gain.g on g, not
+		// the R term) [orig: @ 0x5c8258..0x5c82a1].
+		ok &= expect(near(env.sky_ambient().g, sky_raw.g * 0.15f + 0.25f * 0.06f) &&
+						!near(env.sky_ambient().g, sky_raw.g * 0.15f + 0.5f * 0.06f),
+				"sky/ground keep the per-channel modulator terms");
+		opennova::env::WorldLightValues values;
+		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values) &&
+						rgb_near(values.ceiling, env.ceiling_color()) &&
+						rgb_near(values.floor_color, env.floor_color()),
+				"the published block carries the rewritten interior pair");
+		env.set_nvg_view(false, 2);
+		ok &= expect(rgb_near(env.ceiling_color(), {0.8f, 0.4f, 0.2f}) &&
+						rgb_near(env.floor_color(), {0.2f, 0.4f, 0.8f}),
+				"NVG off serves the raw interior pair");
+	}
+
+	// --- the thermal view --------------------------------------------------
+	{
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		env.set_color_src_gain({0.5f, 0.25f, 0.75f});
+		const opennova::env::SceneFogValues underwater_before =
+				env.build_scene_fog(true);
+		const int64_t gen = env.env_generation();
+		ok &= expect(!env.set_thermal_view(false, false),
+				"the idle thermal view is idempotent");
+		ok &= expect(env.set_thermal_view(true, true) &&
+						env.env_generation() == gen + 1,
+				"a thermal change reports and bumps once");
+		const opennova::env::Rgb grey{0.5f, 0.5f, 0.5f};
+		opennova::env::WorldLightValues values;
+		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values) &&
+						rgb_near(values.hemi_sky, grey) &&
+						rgb_near(values.hemi_ground, grey) &&
+						rgb_near(values.ceiling, grey) &&
+						rgb_near(values.floor_color, grey),
+				"the thermal world block is flat 0.5 on every hemisphere");
+		ok &= expect(rgb_near(values.dir_color, {0.0f, 0.0f, 0.0f}),
+				"the thermal block disables the directional light");
+		ok &= expect(rgb_near(values.gain, {0.5f, 0.25f, 0.75f}),
+				"the modulator gain is not part of the thermal block");
+		// The device fog / clear: unk_808080, in the render space the Clear
+		// consumes verbatim.
+		const opennova::env::Rgb grey_fog{128.0f / 255.0f, 128.0f / 255.0f,
+				128.0f / 255.0f};
+		const opennova::env::SceneFogValues dry = env.build_scene_fog(false);
+		ok &= expect(rgb_near(dry.color, grey_fog) &&
+						near(dry.end, env.fog_end_distance()) &&
+						dry.type == env.fog_type(),
+				"the thermal dry pass fogs to 0x808080 over the weather range");
+		ok &= expect(rgb_near(env.build_scene_fog(true).color,
+					underwater_before.color),
+				"underwater lit water outranks the thermal fog");
+		ok &= expect(rgb_near(env.frame_clear_color_for(false, true), grey_fog) &&
+						rgb_near(env.frame_clear_color_for(false, false), grey_fog),
+				"the thermal clear outranks the water test");
+		ok &= expect(rgb_near(env.frame_clear_color_for(true, true),
+					{0.0f, 0.0f, 0.0f}),
+				"indoors still clears black");
+		// The terrain ramps: c1 light 0x101010, c0 sky 0xF0F0F0.
+		const opennova::env::Rgb ramp_light{16.0f / 255.0f, 16.0f / 255.0f,
+				16.0f / 255.0f};
+		const opennova::env::Rgb ramp_sky{240.0f / 255.0f, 240.0f / 255.0f,
+				240.0f / 255.0f};
+		ok &= expect(rgb_near(env.build_terrain_uniforms(false).sun_light,
+							 ramp_light) &&
+						rgb_near(env.build_terrain_uniforms(false).sky_ambient,
+								ramp_sky),
+				"the thermal terrain ramps are the flat 0x101010 / 0xF0F0F0 pair");
+		ok &= expect(rgb_near(env.build_shader_globals(false).sun_light,
+							 ramp_light) &&
+						rgb_near(env.build_shader_globals(false).sky_ambient,
+								ramp_sky),
+				"the sun/sky globals publish the terrain pair");
+		// NVG precedence differs per side: NVG in first person takes the
+		// terrain's NVG blend, while the world block's grey outranks NVG.
+		env.set_nvg_view(true, 0);
+		ok &= expect(rgb_near(env.build_terrain_uniforms(false).sky_ambient,
+							 env.sky_ambient()) &&
+						rgb_near(env.build_terrain_uniforms(false).sun_light,
+								env.sun_light()),
+				"NVG in first person outranks the thermal terrain ramps");
+		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values) &&
+						rgb_near(values.hemi_sky, grey) &&
+						rgb_near(values.ceiling, grey),
+				"the world block's thermal grey outranks the NVG rewrite");
+		env.set_nvg_view(false, 0);
+		// A Thermal def held un-scoped in first person: only the terrain gate.
+		ok &= expect(env.set_thermal_view(false, true),
+				"the two gates change independently");
+		ok &= expect(env.build_light_values({0.0f, 1.0f, 0.0f}, values) &&
+						rgb_near(values.hemi_sky, env.sky_ambient()) &&
+						rgb_near(values.dir_color, env.sun_light()),
+				"the world block needs the CanFire gate");
+		ok &= expect(rgb_near(env.build_scene_fog(false).color, env.fog_color()) &&
+						rgb_near(env.frame_clear_color_for(false, true),
+								env.frame_clear_color()),
+				"the fog and clear need the CanFire gate");
+		ok &= expect(rgb_near(env.build_terrain_uniforms(false).sun_light,
+					ramp_light),
+				"the terrain ramps key on the def bit alone");
+		env.set_thermal_view(false, false);
+		ok &= expect(rgb_near(env.build_terrain_uniforms(false).sun_light,
+							 env.sun_light()) &&
+						rgb_near(env.build_terrain_uniforms(false).sky_ambient,
+								env.sky_ambient()),
+				"thermal off restores the light/sky ramps");
 	}
 
 	// --- per-scene-pass underwater fog --------------------------------------
@@ -449,6 +586,38 @@ int main() {
 					near(underwater_globals.base.fog_end, underwater.end) &&
 					underwater_globals.base.fog_type == underwater.type,
 				"Weather's direct global write preserves the selected underwater pass fog");
+		// Once a tick wrote back, the env-routed publication equals the
+		// smoother (behaviour-identical without NVG / thermal) ...
+		weather.tick_fixed(&env);
+		const opennova::env::WeatherShaderGlobals ticked =
+				opennova::env::build_weather_shader_globals(env, weather);
+		ok &= expect(rgb_near(ticked.base.sun_light, weather.smooth_sun()) &&
+						rgb_near(ticked.base.sky_ambient, weather.smooth_sky()) &&
+						rgb_near(ticked.base.fog_color, weather.smooth_fog()) &&
+						near(ticked.base.fog_end, env.fog_end_distance()) &&
+						near(ticked.base.fog_start, env.fog_start()) &&
+						ticked.base.fog_type == env.fog_type(),
+				"the env-routed weather publication equals the written-back smoother");
+		// ... and carries the thermal fog and terrain ramps the smoother lacks.
+		env.set_thermal_view(true, true);
+		const opennova::env::WeatherShaderGlobals thermal =
+				opennova::env::build_weather_shader_globals(env, weather);
+		ok &= expect(rgb_near(thermal.base.fog_color,
+							 {128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f}) &&
+						rgb_near(thermal.base.sun_light,
+								{16.0f / 255.0f, 16.0f / 255.0f, 16.0f / 255.0f}) &&
+						rgb_near(thermal.base.sky_ambient,
+								{240.0f / 255.0f, 240.0f / 255.0f, 240.0f / 255.0f}) &&
+						near(thermal.base.fog_end, ticked.base.fog_end) &&
+						thermal.base.fog_type == ticked.base.fog_type &&
+						rgb_near(thermal.base.fill_light, ticked.base.fill_light),
+				"the weather publication carries the thermal fog and terrain ramps");
+		ok &= expect(rgb_near(opennova::env::build_weather_shader_globals(
+											env, weather, true)
+									.base.fog_color,
+							 env.build_scene_fog(true).color),
+				"underwater lit water still outranks the thermal fog in the publication");
+		env.set_thermal_view(false, false);
 	}
 
 	// --- the terrain colour reciprocal the loaded config parses to ----------

@@ -756,6 +756,30 @@ struct Entity {
     WeaponSlotState primary_weapon_slot;
     uint8_t primary_weapon_slot_adm = 0xFF;
     EntityHandle primary_weapon_owner;
+    // The emplaced gun channel: the gun's yaw/pitch relative to this
+    // emplacement's own frame, the two stored words retail keeps on the ewep
+    // entity (+0x322 yaw / +0x324 pitch = the high words of the BAM32
+    // deltas). The 'ewep' per-tick update refreshes them from the UseGun
+    // occupant (IsTurret items slew them at most 0x92CF34/tick and pull the
+    // gunner's own yaw back toward the turret), the per-update window clamp
+    // pins them at the arc edge and writes the pinned look into the occupant,
+    // and the model's EWEAP_GUNYAW/GUNPITCH CTRL pair publishes them as
+    // stored. Never cleared on detach: an IsTurret turret stays where its last
+    // gunner left it. Producer/consumer: world/mount_controls.h.
+    // [orig: Entity_UpdateChildAttachment @0x4409A0 stores @0x440b23/@0x440b45
+    //  (yaw) and @0x440b58 (pitch); Entity_UpdateTransformAndTurret @0x440ca0
+    //  window write-back @0x44125c (yaw) / @0x4412a4 (pitch)]
+    int16_t emplaced_gun_yaw_word = 0;   // entity+0x322
+    int16_t emplaced_gun_pitch_word = 0; // entity+0x324
+    // The subobject (bone) the child's anchor userpoint rides — retail reads
+    // it off the parent model's 48-byte userpoint record (+0x18, indexed by
+    // the child's 1-based userpoint index entity+0x319 = emplacement_bone)
+    // as the parent-brain publication gate: only a child sitting on the
+    // parent ROOT (0) drives the parent's turret channel with its gun words.
+    // -1 = not stamped (the publication stays off); the value is
+    // ThreediUserPoint::subobject_index of the resolved anchor.
+    // [orig: Entity_UpdateTransformAndTurret @0x440f1d..0x440f54]
+    int16_t emplacement_anchor_subobject = -1;
     // The resolved weapon userpoint bytes (entity+0x327..0x332): four weapon
     // slots x {b fire origin, m flash anchor, c casing anchor}, each a 1-based
     // index into the model's userpoint table (0 = none). Resolved from the def's

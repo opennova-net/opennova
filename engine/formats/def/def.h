@@ -415,6 +415,24 @@ typedef struct DefWeaponDef {
        weaponweight store @ 0x54410D] */
     int weaponweight_fp16;
     int clipweight_fp16;
+    /* 'scope_max_zero <maxSteps> <stepMetres> <defaultMetres> [<extra>]': the
+       scope-zero table the SIGHTS card's `slide` rows and Weapon_GetScopeZoomLevel
+       read. Three atol'd ints in order -> AdmDef+0x84 (the zero-step cap), +0x9C
+       (metres per zero step), +0xA0 (the default zero distance, metres); a fourth
+       value, stored only when the line carries four (`cmp dword ptr [esi],4; jle` —
+       the count includes the key), -> +0x88 (0 or 1 in every shipped JOX row; its
+       consumer is not traced). 0 = key absent (the entry memset). Shipped forms:
+       the M16/M203 `10 50 0 0` (the one def with a `slide` row), `10 100 200 0/1`,
+       `1 100 100 1`, `1 300 300`, `10 100 300 1`.
+       [orig: WeaponDefs_ParseLineCallback @ 0x544e8b..0x544efd — stores @ 0x544eac /
+        @ 0x544ec1 / @ 0x544ed9, the count gate @ 0x544edf, the fourth store
+        @ 0x544efd; consumers draw_weapon_sight_overlays @ 0x4dcf57..0x4dcff7
+        (runtime/hud/sight_overlay.h sight_slide_multiplier),
+        Weapon_GetScopeZoomLevel @ 0x422ff3] */
+    int scope_max_zero_steps;  /* +0x84 */
+    int scope_zero_step;       /* +0x9C */
+    int scope_zero_default;    /* +0xA0 */
+    int scope_zero_extra;      /* +0x88, the optional fourth value */
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

@@ -270,6 +270,11 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
                 env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
         explosions.process(*this, ai.collision, tables.terrain,
                            water_z, out.destruction);
+        // The class event callbacks' think expiry — the gnrc/gnl2 second
+        // death legs their +0x2AC countdown arms [orig: the pool-1 walk's
+        // cb(entity, 0, 0) @0x4b8e1b..0x4b8e3c]. Ahead of the settle so a
+        // husk that lands this tick settles from this tick on.
+        destruction_tick_class_death_think(*this);
         destruction_tick_dead_items(*this, tables.terrain, water_z, out.destruction);
         death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
     }

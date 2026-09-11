@@ -208,11 +208,16 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // [orig: the ItemDef fields Entity_ApplyWeaponDamage / the death dispatch /
         // Entity_InitDeathSounds read — armor +0x190/+0x192, unitType +0x196, kz
         // +0x198, huskSubPart* +0x100.., debrisScale +0x1BC, soundDeath +0x860,
-        // the particledeath family +0x412..]
+        // the particledeath family +0x412..; the event/death callback row
+        // def+0x138 resolved from the ai_function tag by the whole-string
+        // stricmp walk of g_EntityClassEventCallbackTable @0x813000
+        // (Entity_LookupRenderCallbacks @0x407dc0 via EntityDef_InitAllCallbacks
+        // @0x4a5aa9, "Null" for an empty tag)]
         e->item_unit_type = def != nullptr ? def->unit_type : 0;
         if (world.tables.item_death_traits.get(e->item_id) == nullptr &&
                 def != nullptr) {
             world::ItemDeathTraits t;
+            t.death_class = world::item_death_class_from_tag(def->ai_function);
             t.unit_type = def->unit_type;
             t.kz = def->kz;
             t.armor_impact = def->armor_impact;

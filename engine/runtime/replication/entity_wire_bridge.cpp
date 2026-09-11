@@ -150,6 +150,9 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.vehicle_forward_speed_reg = e.veh.cmd_speed;          // vehicleData[136]
 	s.vehicle_lateral_speed_reg = e.veh.cmd_lateral_speed; // vehicleData[135]
 	s.vehicle_steer_target_bam = e.veh.steer_target_bam;   // vehicleData[132]
+	// entity+0xA0 slideDecay — the vertical velocity the joiner's family prediction
+	// integrates [orig: the live compact's off-11 source @0x460d5a].
+	s.vehicle_vertical_velocity = e.veh.slide_z;
 	s.mount_handle = (e.mounted && e.mount_target.valid()) ? e.mount_target.packed : wire_handle::kInvalid;
 	// entity+0x28 groundEntity — the standing-on carrier the player record echoes when not
 	// mounted [orig: op1 @0x4c0a08 reads +0x28 as the default carrier]. Mirrored from the
@@ -234,10 +237,14 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 		}
 		// Resolve the record carrier's pose here, where the registry is in reach — the
 		// carrier is often a pool-2 STATIC (building) with no snapshot of its own in the
-		// 0x0A list. Mount wins over ground [orig: op1 @0x4c0a08]; a stale handle simply
-		// leaves the pose invalid and the record falls back to the free-standing form.
-		const uint16_t carrier =
-				s.mount_handle != wire_handle::kInvalid ? s.mount_handle : s.ground_handle;
+		// 0x0A list. The organic records prefer the mount over the ground entity [orig:
+		// op1 @0x4c0a08]; the vehicle record reads only its groundEntity (+0x28) [orig:
+		// Entity_SerializeVehicleState @0x460b4d]. A stale handle simply leaves the pose
+		// invalid and the record falls back to the free-standing form.
+		const uint16_t carrier = s.entity_class == EntityClass::Vehicle
+				? s.ground_handle
+				: (s.mount_handle != wire_handle::kInvalid ? s.mount_handle
+				                                            : s.ground_handle);
 		if (carrier != wire_handle::kInvalid) {
 			if (const world::Entity *c =
 			            w.registry.get(world::EntityHandle{carrier})) {

@@ -129,6 +129,10 @@ int HudOverlay::showhud_flags_default() { return static_cast<int>(opennova::hud:
 int HudOverlay::next_showhud_flags(int p_flags) {
 	return static_cast<int>(opennova::hud::next_showhud_flags(static_cast<uint32_t>(p_flags)));
 }
+int HudOverlay::sight_scale_index_default() { return opennova::hud::kSightScaleIndexDefault; }
+int HudOverlay::next_sight_scale_index(int p_index) {
+	return opennova::hud::next_sight_scale_index(p_index);
+}
 HudOverlay::FriendlyTagMode HudOverlay::friendly_tag_mode_default() {
 	return static_cast<FriendlyTagMode>(opennova::hud::kFriendlyTagModeDefault);
 }
@@ -153,6 +157,8 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_detail_level", "level"), &HudOverlay::next_hud_detail_level);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("showhud_flags_default"), &HudOverlay::showhud_flags_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_showhud_flags", "flags"), &HudOverlay::next_showhud_flags);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("sight_scale_index_default"), &HudOverlay::sight_scale_index_default);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_sight_scale_index", "index"), &HudOverlay::next_sight_scale_index);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("friendly_tag_mode_default"), &HudOverlay::friendly_tag_mode_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_friendly_tag_mode", "mode"), &HudOverlay::next_friendly_tag_mode);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("friendly_tag_lift"), &HudOverlay::friendly_tag_lift);
@@ -235,6 +241,9 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::get_hud_detail_level);
 	ClassDB::bind_method(D_METHOD("set_showhud_flags", "flags"),
 			&HudOverlay::set_showhud_flags);
+	ClassDB::bind_method(D_METHOD("cycle_sight_scale"), &HudOverlay::cycle_sight_scale);
+	ClassDB::bind_method(D_METHOD("get_sight_scale_index"),
+			&HudOverlay::get_sight_scale_index);
 	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "water_mask"),
 			&HudOverlay::set_minimap_terrain, DEFVAL(Ref<Texture2D>()));
 	ClassDB::bind_method(D_METHOD("get_minimap_water_mask"),
@@ -1235,6 +1244,16 @@ void HudOverlay::set_showhud_flags(int p_flags) {
 	// docs/interface/hud-re.md]
 	state_.showhud_flags = static_cast<uint32_t>(p_flags) & 3u;
 	queue_redraw();
+}
+
+int HudOverlay::cycle_sight_scale() {
+	state_.sight_scale_index = opennova::hud::next_sight_scale_index(state_.sight_scale_index);
+	queue_redraw();
+	return state_.sight_scale_index;
+}
+
+int HudOverlay::get_sight_scale_index() const {
+	return state_.sight_scale_index;
 }
 
 void HudOverlay::set_friendly_tag_env(float p_fog_distance_units,

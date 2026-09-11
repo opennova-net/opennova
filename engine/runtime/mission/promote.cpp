@@ -62,11 +62,8 @@ std::string ai_profile_name_for(
 
 // Shared DEF/profile initialization for placed and dynamically spawned AI.
 // [orig: Entity_InitVehicleAI @0x460200; Entity_InitHelicopterAI @0x461F00]
-int initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai, EntityKind kind) {
+void initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai, EntityKind kind) {
     AiBrain &b = ae.brain;
-    int profile_initial_state = -1;
-    if (data.type == 1 || data.type == 2)
-        profile_initial_state = data.default_state;
     if (data.combat_speed >= 0)
         b.f[AiBrain::kSpeedA] = static_cast<int32_t>(
                 (static_cast<int64_t>(data.combat_speed) << 16) / 225);
@@ -178,7 +175,32 @@ int initialize_ai_profile(AiEntity &ae, const aip::Profile &data, AiSystem &ai, 
             b.f[AiBrain::kAccuracy] = data.aim_skill;
         }
     }
-    return profile_initial_state;
+}
+
+// [orig: Entity_InitVehicleAI @0x460200 — the profile pointer only arrives in
+//  eax @0x460288, AFTER `mov ebx,[esi+18h]` @0x46024b read the zeroed slot, so
+//  fallback/cur/pend are 0 and never profile+0x18. The constants follow the
+//  four profile copies (+0x1C/+0x20/+0x24/+0x38 -> brain +0xAC/+0xB0/+0xBC/
+//  +0x1B0) and the smooth-target pose copy (entity+0x234..+0x248, +0x27C = 0).]
+void initialize_vehicle_brain(AiEntity &ae, World &world, int32_t heading) {
+    AiBrain &b = ae.brain;
+    b.f[AiBrain::kFallback] = 0;         // @0x46028b
+    b.f[AiBrain::kCurState] = 0;         // @0x46028e
+    b.f[AiBrain::kPendState] = 0;        // @0x460291
+    b.f[AiBrain::kSweepPhase] = -196608; // -3.0 u sweep end  @0x4602b8
+    b.f[AiBrain::kBurstWindow] = 0;      // @0x4602c2
+    b.f[177] = 0;                        // @0x46032d
+    b.f[178] = 0;                        // @0x460333
+    b.f[AiBrain::kOutSpeed] = 0;         // @0x460339
+    b.f[AiBrain::kTargetRef] = 0;        // @0x46033f
+    b.f[137] = 1638400;                  // 25.0 u climb seed  @0x460345
+    b.f[179] = heading;                  // entity Yaw  @0x46034f..0x460352
+    b.f[199] = 0;                        // @0x460358
+    // PRNG_Next16_C @0x6131b0 returns a 16-bit value; the signed `% 0x80000`
+    // idiom (`and eax,8007FFFFh; jns; dec; or 0FFF80000h; inc`) is the identity
+    // on it, kept for the structural draw [orig: @0x46035e..0x460371].
+    b.f[200] = static_cast<int32_t>(world.next_prng16_c()) % 0x80000;
+    b.f[201] = 0;                        // @0x460377
 }
 
 namespace {
@@ -292,11 +314,16 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
 }
 
 // Initialize a freshly-attached AI brain for a spawned entity. Grounded in Entity_InitVehicleAI
-// @0x460200 (geometry copy from entity+4.., initial state 0, idle move-step); the profile/speed
-// mapping is from the mission AI fields (tracked deviation: the real items.def AIProfile_LoadOrFind
-// @0x45fd80 + the state-0 -> 16 transition are unmodeled).
-void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, AiSystem &ai,
-		EntityKind kind) {
+// @0x460200 (geometry copy from entity+4.., the zero state words and the constant block via
+// initialize_vehicle_brain) plus the def callbacks that wrap it (profile speeds, the waypoint
+// words, the move step). Every brain starts in state 0: the vehicle family's first mover tick
+// promotes it to GROUND_PRETTY (22) / HELO_PRETTY (14) [orig: Entity_UpdateVehiclePhysics
+// @0x48afac..0x48afb2; Entity_UpdateAircraftPhysics @0x490377..0x49037d], and only the
+// AISETSTATE command, an alert edge or damage moves it on from there. Organics carry no
+// vehicle brain in retail (the AiSlot drives the infantry motor), so the port's organic
+// AiEntity simply keeps the freshly-attached zero words.
+void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, World &world,
+		AiSystem &ai, EntityKind kind) {
 	AiBrain &b = ae.brain;
 
 	// Geometry (entity+4/+8/+12 = x/y/z, all 16.16; entity+16 heading = BAM). The engine heading is
@@ -310,11 +337,14 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     ae.heading = static_cast<int32_t>(static_cast<int64_t>(90 - e.yaw) * kBamPerDegree);
     ae.team = e.team;
 
-    // [orig Entity_InitVehicleAI: brain[4]=brain[5]=brain[6]=0] initial state 0.
+    // [orig Entity_InitVehicleAI: brain[4]=brain[5]=brain[6]=0 @0x46028b..0x460291] initial
+    // state 0 (re-stamped with the constant block below for the vehicle family).
     b.f[AiBrain::kCurState] = 0;
     b.f[AiBrain::kPendState] = 0;
     b.f[AiBrain::kFallback] = 0;
-    b.f[AiBrain::kStep] = 16; // idle move-step (AI_SetStateIdle); nonzero so the mover advances
+    // The def callbacks' move step [orig: Entity_InitVehicleAIFromDef `[brain+1Ch] = 10h`
+    // @0x468915; Entity_InitHelicopterAIFromDef @0x468645]; nonzero so the mover advances.
+    b.f[AiBrain::kStep] = 16;
 
     // Profile (movement-relevant subset) from the mission AI fields.
     ae.profile.flags96 = 0;   // not combat-capable / can-fire here (the weapon phase sets these)
@@ -361,18 +391,30 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // resolution the boot resolver used to load the rows, so a nameless
     // Blackhawk finds its helo1 row here [orig: Entity_InitHelicopterAIFromDef
     // @0x4683C0 / Entity_InitVehicleAIFromDef @0x4686C0 name arms].
-	int profile_initial_state = -1;
 	const std::string want =
             ai_profile_name_for(e, kind == EntityKind::Item, opts.ai_profile_defaults);
     if (!want.empty()) {
         for (const PromoteOptions::AiProfileRow &ps : opts.ai_profiles) {
             if (ps.profile != want) continue;
-			profile_initial_state = initialize_ai_profile(ae, ps.data, ai, kind);
+			initialize_ai_profile(ae, ps.data, ai, kind);
 			break;
 		}
     }
+	// The allocator's own seeds (state 0, the constant block, the PRNG C draw) land for
+	// every vehicle-family brain — retail always reaches @0x460200 for an AI-data item,
+	// profile row found or not (AIProfile_LoadOrFind never returns null there). Organics
+	// never run it: their AiSlot is the retail AI record [orig: Entity_InitAllFromModels
+	// pool-1 loop @0x40E5B8..0x40E5D8 -> the def callbacks' @0x460200 call @0x4687ff /
+	// @0x4684bf / @0x4684cf]. (The former flags100 |= 2 no-acquire stand-in is gone: the
+	// class walk gates on the profile's priority words, and the shipped drivable-transport
+	// profiles author them zero — the same no-scan outcome, now via the witnessed path.)
+	if (kind == EntityKind::Item) initialize_vehicle_brain(ae, world, ae.heading);
 
-    // Waypoint route -> GROUND_FOLLOWWP (channel = the entity's waypoint_id).
+    // Waypoint route words (channel = the entity's waypoint_id). The state stays 0: the
+    // route is consumed only once the brain reaches GROUND_FOLLOWWP / HELO_FOLLOWWP
+    // through the mover's PRETTY promotion and the PlayerControl hand-back (22 -> 16
+    // @0x48bc16..0x48bc1c, 14 -> 7 @0x49158a..0x491590) or an AISETSTATE command
+    // [orig: AI_HandleCommand case 7 @0x46581c -> AIState_SetByEntityType @0x457570].
     // Id 0 is the reserved no-route id REGARDLESS of the table's slot-0 contents
     // — retail's positional table simply never authors list 0 and every consumer
     // 0-gates [orig: AIWaypoint_UpdateTarget @0x457380 navMeshId==0 -> -1]; the
@@ -383,27 +425,7 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
         b.f[AiBrain::kWpType] = 1; // nav-node waypoint
         b.f[AiBrain::kWpChannel] = e.waypoint_id;
         b.f[AiBrain::kWpNode] = std::min<int32_t>(e.wp_number, ch->count - 1);
-        if (opts.patrol_on_spawn) {
-            b.f[AiBrain::kCurState] = 16; // GROUND_FOLLOWWP (tracked deviation: orig inits 0)
-            b.f[AiBrain::kPendState] = 16;
-        }
     }
-
-	// The resolved profile supplies the initial state, including state zero.
-	// Model-less fixture worlds retain the family fallback when no profile was
-	// supplied. [orig: Entity_InitVehicleAI @0x460200 copies profile[6] into
-	// cur_state, pend_state and fallback; Entity_InitHelicopterAI @0x461F00]
-	if (kind == EntityKind::Item) {
-		const int state = profile_initial_state >= 0 ? profile_initial_state
-													 : (ae.profile.type == 1 ? 7 : 16);
-		b.f[AiBrain::kCurState] = state;
-		b.f[AiBrain::kPendState] = state;
-		b.f[AiBrain::kFallback] = state;
-		// (The former flags100 |= 2 no-acquire stand-in is gone: the class walk now
-		// gates on the profile's priority words, and the shipped drivable-transport
-		// profiles author them zero (d_5ton/d_buggy/G_Jeep priority_* 0) — the same
-		// no-scan outcome, now via the witnessed path.)
-	}
 }
 
 // Seed the infantry motor + AiSlot for an organic (entity class org1). Field map grounded in
@@ -540,6 +562,8 @@ ItemAttachmentSpawns spawn_item_attachments(World &world, const std::vector<Enti
             child->emplacement_yaw_offset = attachment.anchor.yaw_offset;
             child->emplacement_bone =
                     attachment.anchor_found ? attachment.anchor.bone_index : 0;
+            child->emplacement_anchor_subobject =
+                    attachment.anchor_found ? attachment.anchor_subobject : int16_t{-1};
             child->emplacement_kind = static_cast<uint8_t>(attachment.kind);
             child->emplacement_slot = attachment.stored_slot;
             child->emplacement_attachment_flags = attachment.attachment_flags;
@@ -807,7 +831,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             if (ai_capable) {
                 int ai_idx = ai.attach(h);
                 AiEntity &ae = *ai.at(ai_idx);
-                init_brain(ae, e, opts, ai, kind);
+                init_brain(ae, e, opts, world, ai, kind);
                 if (kind == EntityKind::Organic) {
                     // Soldiers run the infantry motor, not the vehicle SM.
                     // [orig: g_EntityClassPhysicsTable "org1" -> Entity_UpdateInfantryAI]

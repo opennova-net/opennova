@@ -2,6 +2,8 @@
 
 #include "util/string_convert.h"
 
+#include <runtime/hud/sight_overlay.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -51,6 +53,21 @@ Ref<WeaponSightRow> WeaponSightRow::make(const String &p_texture, int p_x1, int 
 	return row;
 }
 
+Rect2 WeaponSightRow::evaluate_rect(int p_sight_scale_index, int p_slide_multiplier) const {
+	opennova::hud::SightRowSpec spec;
+	spec.x1 = value_.x1;
+	spec.y1 = value_.y1;
+	spec.x2 = value_.x2;
+	spec.y2 = value_.y2;
+	spec.scale = value_.scale != 0;
+	spec.slide = value_.slide != 0;
+	spec.slide_frames = value_.slide_frames;
+	const opennova::hud::SightRect rect = opennova::hud::sight_row_rect(spec,
+			p_sight_scale_index, static_cast<int32_t>(p_slide_multiplier));
+	return Rect2(static_cast<real_t>(rect.x1), static_cast<real_t>(rect.y1),
+			static_cast<real_t>(rect.x2 - rect.x1), static_cast<real_t>(rect.y2 - rect.y1));
+}
+
 void WeaponSightRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_texture"), &WeaponSightRow::get_texture);
 	ClassDB::bind_method(D_METHOD("get_x1"), &WeaponSightRow::get_x1);
@@ -61,6 +78,8 @@ void WeaponSightRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_scale"), &WeaponSightRow::is_scale);
 	ClassDB::bind_method(D_METHOD("is_slide"), &WeaponSightRow::is_slide);
 	ClassDB::bind_method(D_METHOD("get_slide_frames"), &WeaponSightRow::get_slide_frames);
+	ClassDB::bind_method(D_METHOD("evaluate_rect", "sight_scale_index", "slide_multiplier"),
+			&WeaponSightRow::evaluate_rect);
 	ClassDB::bind_static_method("WeaponSightRow",
 			D_METHOD("make", "texture", "x1", "y1", "x2", "y2", "blend", "scale", "slide",
 					"slide_frames"),
@@ -193,6 +212,17 @@ Vector3 WeaponDef::get_tpos_units() const {
 	return Vector3(value_.tpos[0], value_.tpos[1], value_.tpos[2]);
 }
 
+int WeaponDef::get_sight_slide_multiplier() const {
+	opennova::hud::ScopeZeroInputs in;
+	in.slot_zero_word = 0;
+	in.scope_max_zero_steps = value_.scope_max_zero_steps;
+	in.scope_zero_step = value_.scope_zero_step;
+	in.scope_zero_default = value_.scope_zero_default;
+	in.rangefinder_q16 = 0;
+	in.scoring_disabled = false;
+	return static_cast<int>(opennova::hud::sight_slide_multiplier(in));
+}
+
 Vector2i WeaponDef::get_hudclipgfx_offset() const {
 	return Vector2i(value_.hudclipgfx_offset[0], value_.hudclipgfx_offset[1]);
 }
@@ -290,6 +320,12 @@ void WeaponDef::_bind_methods() {
 	WEAPON_DEF_PROP(Variant::INT, heat_per_shot);
 	WEAPON_DEF_PROP(Variant::INT, heat_decay_per_tick);
 	WEAPON_DEF_PROP(Variant::INT, heat_glow_threshold);
+	WEAPON_DEF_PROP(Variant::INT, scope_max_zero_steps);
+	WEAPON_DEF_PROP(Variant::INT, scope_zero_step);
+	WEAPON_DEF_PROP(Variant::INT, scope_zero_default);
+	WEAPON_DEF_PROP(Variant::INT, scope_zero_extra);
+	ClassDB::bind_method(D_METHOD("get_sight_slide_multiplier"),
+			&WeaponDef::get_sight_slide_multiplier);
 	WEAPON_DEF_PROP(Variant::PACKED_FLOAT32_ARRAY, error);
 	WEAPON_DEF_PROP(Variant::STRING, hudclipgfx_texture);
 	WEAPON_DEF_PROP(Variant::VECTOR2I, hudclipgfx_offset);

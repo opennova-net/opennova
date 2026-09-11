@@ -355,6 +355,24 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
                 cw.scope_max_mag = parse_float_n(v, vl);
                 parsed = 1;
+            } else if (lower_match_key(lower, ll, "scope_max_zero", 14)) {
+                /* The scope-zero table: atol x3 in order -> +0x84 / +0x9C / +0xA0,
+                   plus an optional fourth value -> +0x88, stored only when the line
+                   carries four (the token count the gate compares includes the key:
+                   `cmp dword ptr [esi],4; jle`). Consumers: the SIGHTS `slide`
+                   multiplier in draw_weapon_sight_overlays @ 0x4dcf57..0x4dcff7 and
+                   Weapon_GetScopeZoomLevel @ 0x422ff3; see def.h.
+                   [orig: WeaponDefs_ParseLineCallback @ 0x544e8b..0x544efd — the
+                    stores @ 0x544eac / @ 0x544ec1 / @ 0x544ed9, the count gate
+                    @ 0x544edf, the fourth store @ 0x544efd] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+                Token zv[MAX_TOKENS];
+                int zn = split_values(v, vl, zv, MAX_TOKENS);
+                if (zn >= 1) cw.scope_max_zero_steps = parse_int_n(zv[0].s, zv[0].len);
+                if (zn >= 2) cw.scope_zero_step = parse_int_n(zv[1].s, zv[1].len);
+                if (zn >= 3) cw.scope_zero_default = parse_int_n(zv[2].s, zv[2].len);
+                if (zn >= 4) cw.scope_zero_extra = parse_int_n(zv[3].s, zv[3].len);
+                parsed = 1;
             } else if (lower_match_key(lower, ll, "heat_values", 11)) {
                 /* percent-per-shot / percent-per-second, each through the engine's
                    digit parser then integer-divided by 100 and by 100*62 (the logic

@@ -14,6 +14,7 @@
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_scoreboard.h>
 #include <runtime/hud/hud_minimap.h>
+#include <runtime/hud/sight_overlay.h> // the SIGHTS row modes + sight-scale default
 
 #include <array>
 #include <cstdint>
@@ -181,6 +182,12 @@ struct HudSightsRow {
 	float y1 = 0.0f;
 	bool additive = false;
 	bool texture_valid = false;
+	// The row's authored draw mode (sight_overlay.h SightRowSpec carries the
+	// witness): `scale` rides the sight-scale index, `slide` the scope-zero
+	// multiplier times these frames.
+	bool scale = false;
+	bool slide = false;
+	int32_t slide_frames = 0;
 };
 
 // The layout globals parsed once from hudpos.def (the embedder resolves
@@ -562,6 +569,14 @@ struct HudFrameState {
 	// for the input binding row (identical visually: alpha 0 draws nothing).
 	uint32_t objectives_alpha = 0xFF;
 	HudWeaponState weapon;
+	// The SIGHTS card's per-PLAYER inputs (they outlive the weapon record,
+	// which clear_weapon resets): the sight-scale index retail keeps in
+	// dword_B76780 (default at player init, cycled by the dotsize action —
+	// sight_overlay.h next_sight_scale_index) and the scope-zero slide
+	// multiplier (sight_overlay.h sight_slide_multiplier; 0 until the
+	// scope-zero state has a port).
+	int sight_scale_index = kSightScaleIndexDefault;
+	int32_t sight_slide_multiplier = 0;
 	HudWaypointState waypoint;
 	std::vector<HudObjectiveRow> objectives;
 	// THE MOUNTED-VEHICLE PANEL (hud/hud_vehicle_panel.h owns its policy).

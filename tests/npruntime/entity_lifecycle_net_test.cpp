@@ -670,7 +670,7 @@ bool run_entity_death_notify_reaches_the_sim() {
 	std::vector<uint8_t> body13;
 	body13.push_back(static_cast<uint8_t>(kBarrel & 0xFFu));
 	body13.push_back(static_cast<uint8_t>(kBarrel >> 8));
-	body13.push_back(0x03); // killerSource
+	body13.push_back(0x03); // deathAnimStateId (the victim's +0x2C0 slot)
 	body13.push_back(0x00);
 	const std::vector<uint8_t> dg = frame_server_session(
 			server_tx, {make_protocol_message(0x13, body13)});
@@ -683,7 +683,7 @@ bool run_entity_death_notify_reaches_the_sim() {
 		return false;
 	const std::vector<EntityDeathRecord> deaths = client.drain_entity_deaths();
 	if (!expect(deaths.size() == 1 && deaths[0].entity_handle == kBarrel &&
-				deaths[0].killer_source == 3,
+				deaths[0].death_anim_state_id == 3,
 			"0x13: exactly one death record reaches the sim drain"))
 		return false;
 	if (!expect(client.drain_entity_deaths().empty(),
@@ -704,7 +704,7 @@ bool run_entity_death_notify_reaches_the_sim() {
 	(void)client.Client_ProcessNetworkFrame(3);
 	const std::vector<EntityDeathRecord> kills = client.drain_entity_deaths();
 	return expect(kills.size() == 1 && kills[0].entity_handle == kBarrel &&
-				kills[0].killer_source == 7,
+				kills[0].death_anim_state_id == 7,
 			"0x26: the kill-sync route reaches the same sim drain");
 }
 

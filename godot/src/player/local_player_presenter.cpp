@@ -1,5 +1,6 @@
 #include "player/local_player_presenter.h"
 
+#include "env/mission_environment.h"
 #include "mission/mission_object_placer.h"
 #include "mission/mission_root.h"
 #include "object/item_database.h"
@@ -28,6 +29,20 @@ namespace {
 
 const Vector3 kNoSample(INFINITY, INFINITY, INFINITY);
 const Vector2 kNoProjection(INFINITY, INFINITY);
+
+// The thermal view feed, the NVG feed's sibling: the sim's two resolved gates
+// (world::LocalPlayerViewFrame) onto the world's environment, resolved the way
+// LocalPlayerVisuals resolves it.
+void feed_world_thermal_view(Node *p_world, bool p_world_gate, bool p_terrain_gate) {
+	if (p_world == nullptr) {
+		return;
+	}
+	MissionEnvironment *env = Object::cast_to<MissionEnvironment>(
+			static_cast<Object *>(p_world->call("get_environment_node")));
+	if (env != nullptr) {
+		env->set_thermal_view(p_world_gate, p_terrain_gate);
+	}
+}
 
 } // namespace
 
@@ -231,6 +246,7 @@ Ref<MissionFrameInput> LocalPlayerPresenter::before_world_tick(double p_delta, b
 void LocalPlayerPresenter::after_world_tick() {
 	if (!has_player()) {
 		set_world_nvg_view(false, 0);
+		feed_world_thermal_view(world(), false, false);
 		set_fly_camera_locked(false);
 		input_router_.release_mouse_capture();
 		clear_models();
@@ -258,6 +274,7 @@ void LocalPlayerPresenter::after_world_tick() {
 		input_router_.release_mouse_capture();
 		clear_models();
 		set_world_nvg_view(false, 0);
+		feed_world_thermal_view(world(), false, false);
 		visuals_->drain_local_player_weapon_events();
 		if (weapon_effects_.is_valid()) {
 			weapon_effects_->reset();
@@ -271,6 +288,8 @@ void LocalPlayerPresenter::after_world_tick() {
 			opennova::world::presents_third_person(view_->get_third_person(), view_->get_camera_mode());
 	set_world_nvg_view(view_.is_valid() && view_->get_nvg_visible(),
 			view_.is_valid() ? view_->get_nvg_gain() : 0);
+	feed_world_thermal_view(world(), view_.is_valid() && view_->get_thermal_view(),
+			view_.is_valid() && view_->get_thermal_terrain_view());
 	// Place the camera/viewmodel root for THIS tick before consuming one-shot
 	// presentation events. On the first live tick the freshly built model is
 	// still at its default transform; on later ticks it otherwise trails
@@ -328,6 +347,7 @@ void LocalPlayerPresenter::reset_state() {
 	view_.unref();
 	set_spectator_camera_active(false);
 	set_world_nvg_view(false, 0);
+	feed_world_thermal_view(world(), false, false);
 	const Ref<Simulation> reset_sim = sim();
 	if (reset_sim.is_valid()) {
 		reset_sim->set_local_player_debug_third_person(false);

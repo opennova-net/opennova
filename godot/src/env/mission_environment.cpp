@@ -92,6 +92,8 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::is_weather_driven);
 	ClassDB::bind_method(D_METHOD("set_nvg_view", "active", "gain"),
 			&MissionEnvironment::set_nvg_view);
+	ClassDB::bind_method(D_METHOD("set_thermal_view", "world", "terrain"),
+			&MissionEnvironment::set_thermal_view);
 	ClassDB::bind_method(D_METHOD("set_underwater_view", "underwater"),
 			&MissionEnvironment::set_underwater_view);
 	ClassDB::bind_method(D_METHOD("is_underwater_view"),
@@ -566,12 +568,36 @@ void MissionEnvironment::set_nvg_view(bool p_active, int p_gain) {
 	}
 	flush_publication();
 	// The weather owns the full per-frame global write while present. Refresh
-	// only the affected channel immediately, and let its next tick
-	// publish the same getter-derived values again without disturbing
+	// only the affected channels immediately (the terrain sun/sky pair: NVG
+	// selects between the sky blend and the thermal ramps), and let its next
+	// tick publish the same engine-derived values again without disturbing
 	// wind/fog state.
+	const opennova::env::TerrainEnvUniforms uniforms =
+			state_.build_terrain_uniforms(underwater_view_);
 	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->global_shader_parameter_set("opennova_sun_light",
+			to_vector3(uniforms.sun_light));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
-			to_vector3(state_.sky_ambient()));
+			to_vector3(uniforms.sky_ambient));
+}
+
+void MissionEnvironment::set_thermal_view(bool p_world, bool p_terrain) {
+	if (!state_.set_thermal_view(p_world, p_terrain)) {
+		return;
+	}
+	// The object block republishes through the generation bump (the frame
+	// clear leg re-reads its selection on the same generation); the pass fog
+	// and the terrain sun/sky pair are the engine's selections for this view,
+	// committed now like the NVG channels above.
+	flush_publication();
+	_write_scene_fog_globals();
+	const opennova::env::TerrainEnvUniforms uniforms =
+			state_.build_terrain_uniforms(underwater_view_);
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->global_shader_parameter_set("opennova_sun_light",
+			to_vector3(uniforms.sun_light));
+	rs->global_shader_parameter_set("opennova_sky_ambient",
+			to_vector3(uniforms.sky_ambient));
 }
 
 void MissionEnvironment::set_underwater_view(bool p_underwater) {

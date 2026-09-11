@@ -212,6 +212,14 @@ public:
 	// @0x4E0561]: bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.
 	void set_showhud_flags(int p_flags);
+	// The per-player sight-scale index the SIGHTS card's `scale` rows draw
+	// at, held on the compiler's frame state so it outlives weapon changes
+	// and starts at the engine default with each HUD build (the per-mission
+	// player init); the `dotsize` action cycles it (the engine's
+	// next_sight_scale_index, <runtime/hud/sight_overlay.h>). The cycle
+	// returns the new index.
+	int cycle_sight_scale();
+	int get_sight_scale_index() const;
 	// Per-frame environment feed: the fog cull distance in world units (<= 0
 	// disables; the 16.16 form is this seam's) and the speaking entity's voice
 	// level 0..255.
@@ -268,6 +276,10 @@ public:
 	static int next_hud_detail_level(int p_level);
 	static int showhud_flags_default();
 	static int next_showhud_flags(int p_flags);
+	// The sight-scale index policy (engine/runtime/hud/sight_overlay.h): the
+	// player-init default and the dotsize cycle.
+	static int sight_scale_index_default();
+	static int next_sight_scale_index(int p_index);
 	static FriendlyTagMode friendly_tag_mode_default();
 	static FriendlyTagMode next_friendly_tag_mode(FriendlyTagMode p_mode);
 	static float friendly_tag_lift();

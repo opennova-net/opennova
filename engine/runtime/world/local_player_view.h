@@ -181,6 +181,20 @@ struct LocalPlayerViewFrame {
     bool nvg_active = false;
     bool nvg_visible = false;
     int32_t nvg_gain = 0;
+    // The thermal-imaging view of a Thermal-flagged weapon def (flags2 & 4;
+    // the IDB's Player_IsVehicleSeatHasFlag4 @0x4dcd70 reads EquippedSlot
+    // (+0x118)->Def(+0x20)->flags2(+0x0C) & 4). `thermal_view` is the frame's
+    // latched byte -- the CanFire verdict AND the def bit -- that greys the
+    // world lighting block and selects the 0x808080 device fog and clear;
+    // `thermal_terrain_view` is the def bit in first person alone, the
+    // terrain-ramp gate. The only shipped trigger is WPN_EMP50BD (Emplaced +
+    // Thermal + ForceScoped), on which the two coincide.
+    // [orig: Render_ProcessMainSceneFrame @0x5ca290 (Player_CanFireWeapon)
+    //  -> @0x5ca2da..0x5ca2e3 (the latch), read @0x5ca363;
+    //  CTerrainRenderer_BuildLightingShaderConstants @0x5c837c..0x5c8389;
+    //  Render_TerrainScene @0x610e51..0x610e5b]
+    bool thermal_view = false;
+    bool thermal_terrain_view = false;
     bool mounted = false;
     bool third_person = false;
     bool third_person_selected = false;

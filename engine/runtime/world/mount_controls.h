@@ -11,6 +11,8 @@
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
 
+#include <formats/def/def.h>
+
 #include <base/io/bam.h>
 
 #include <cstdint>
@@ -55,11 +57,57 @@ inline bool world_model_heat_glow_for(
 	return true;
 }
 
+// ---------------------------------------------------------------------------
+// The emplaced gun channel: the two stored words on the ewep entity
+// (Entity::emplaced_gun_yaw_word / emplaced_gun_pitch_word = retail
+// entity+0x322 / +0x324, the gun's yaw/pitch relative to the emplacement's own
+// frame as BAM32 high words) and the two per-tick legs that own them.
+//
+// Producer — Entity_UpdateChildAttachment @0x4409A0, the 'ewep' ai_function
+// fn1 (ai-fn table row @0x813090), run every tick the gun is occupied
+// (Entity_UpdatePool1Slot @0x4b8dd0 calls the ai-fn @0x4b8e3c whenever the
+// +0x2AC age is <= 0, and the occupied leg never re-arms that age). Two paths
+// on the item def's ItemDefAttrib2 IsTurret bit (0x1000, @0x440a36):
+//   immediate: word322 = (gun.Yaw - occ.Yaw) >> 16,
+//              word324 = (gun.Pitch - occ.recoilPitch - occ.Pitch) >> 16
+//              [@0x440b39..0x440b58];
+//   IsTurret:  the words slew toward the occupant at most 0x92CF34 BAM
+//              (0.806 deg, ~50 deg/s at 62 Hz) per tick, and the OCCUPANT's
+//              own Yaw is pulled back to within +-0x3FFFFFC0 (90 deg) of the
+//              turret for the local player (mirrored into the local look yaw)
+//              or +-0x2D82D80 (4 deg) for a non-Player occupant; a remote
+//              Player occupant gets neither tether. The recoil term is
+//              subtracted AFTER the pitch rate clamp [@0x440a43..0x440b37].
+// Consumer — Entity_UpdateTransformAndTurret @0x440ca0, the 'weap' class
+// update (@0x4b8e53, right after fn1): first an addeweap child riding the
+// parent ROOT publishes its words to the parent's AI brain turret channel
+// [@0x440f04..0x441020, publish_emplaced_gun_words_to_parent]; then, while
+// the UseGun claimant's parent is this gun, the words are clamped to the
+// seat/weapon window through Math_ClampAngleToBounds and, on a clamp, the
+// OCCUPANT's Yaw/Pitch are STORED at the arc edge (the local look yaw
+// mirrored too) [@0x4411d1..0x4412b3]. The model's EWEAP_GUNYAW/GUNPITCH
+// CTRL pair then reads the words as stored — emplaced_weapon_controls_for
+// below.
+//
+// Both legs run inside the pool-1 walk, which precedes the pool-0 organic
+// walk [orig: Entity_UpdateAllEntities @0x4c2100]: the occupant's own body
+// update sees the tethered/pinned look. Our AiSystem runs them at the head
+// of the gunner's pose_if_mounted for the same effect.
+// ---------------------------------------------------------------------------
+
 struct EmplacedWeaponControls {
 	bool valid = false;
 	uint16_t gun_yaw = 0;
 	uint16_t gun_pitch = 0;
 };
+
+// The IsTurret per-tick traverse rate and the two gunner-yaw tethers, BAM32.
+// [orig: 0x92CF34 @0x440ae1/@0x440af0 (yaw) and @0x440afc/@0x440b0b (pitch);
+//  0x3FFFFFC0 / 0xC0000040 @0x440a7e/@0x440a8c (the local player);
+//  0x2D82D80 / 0xFD27D280 @0x440abd/@0x440acb (a non-Player occupant)]
+inline constexpr int32_t kEmplacedTurretSlewPerTick = 0x92CF34;
+inline constexpr int32_t kEmplacedLocalGunnerYawTether = 0x3FFFFFC0;
+inline constexpr int32_t kEmplacedNpcGunnerYawTether = 0x2D82D80;
 
 // Degrees -> BAM clamp bound. A half-arc of 180 or more is the full circle
 // (the "360" gun family) — no effective window; 0 tells callers to skip.
@@ -88,6 +136,252 @@ inline bool emplaced_clamp_turret_bam(int32_t &value, int32_t upper,
 	return clamped;
 }
 
+// The emplacement's own frame — retail's entity Yaw/Pitch of the ewep (+0x10 /
+// +0x14). A vehicle motor preserves sub-degree parent yaw in BAM; a static
+// EWEAP uses its mission-yaw field. Pitch has no separate motor accumulator.
+inline int32_t emplaced_gun_frame_heading(const Entity &mount) {
+	return mount.veh.yaw_seeded
+			? mount.veh.yaw_bam
+			: bam_heading_from_mission_yaw_deg(static_cast<double>(mount.yaw));
+}
+
+inline int32_t emplaced_gun_frame_pitch(const Entity &mount) {
+	return bam_from_degrees_wrapped(static_cast<double>(mount.pitch));
+}
+
+// A stored word back to the BAM32 the IsTurret leg integrates: the raw 16
+// bits shifted up plus the 0x8000 half-step. [orig: `movzx / shl 10h /
+// add 8000h` @0x440a43..0x440a69]
+inline int32_t emplaced_word_bam_rounded(int16_t word) {
+	return opennova::io::bam_add(
+			static_cast<int32_t>(
+					static_cast<uint32_t>(static_cast<uint16_t>(word)) << 16),
+			0x8000);
+}
+
+// The window clamp's input form: the raw word shifted up, no half-step.
+// [orig: `movzx / shl 10h` @0x4411f0/@0x4411fe and @0x4411f7/@0x44120d]
+inline int32_t emplaced_word_bam(int16_t word) {
+	return static_cast<int32_t>(
+			static_cast<uint32_t>(static_cast<uint16_t>(word)) << 16);
+}
+
+// The word store: the high 16 bits of the BAM32 (`sar 10h; mov [..],ax` in
+// the producer, `shr 10h; mov [..],cx` in the consumer — the same 16 bits).
+inline int16_t emplaced_bam_word(int32_t bam) {
+	return static_cast<int16_t>(
+			static_cast<uint16_t>(static_cast<uint32_t>(bam) >> 16));
+}
+
+// The symmetric +-bound clamp the tethers and the rate limit use — two
+// compares, the bound wins. [orig: the cmp/jle/mov, cmp/jge/mov pairs
+// @0x440a7e..0x440a93, @0x440abd..0x440ad2, @0x440ae1..0x440b13]
+inline int32_t emplaced_clamp_symmetric(int32_t value, int32_t bound) {
+	if (value > bound) return bound;
+	if (value < -bound) return -bound;
+	return value;
+}
+
+// The producer: refresh the stored words from the UseGun occupant. `gunner`
+// is the occupant's live look (retail's one entity Yaw/Pitch: our AiEntity
+// heading/pitch, the local player's input-owned look mirrored in
+// inf.target_heading / inf.look_pitch); `occupant` is its registry row (the
+// Player-class bit). Writes the gunner's heading on the IsTurret tethers.
+// [orig: Entity_UpdateChildAttachment @0x4409A0, occupant leg @0x440a1c..0x440b58]
+inline void tick_emplaced_gun_words(Entity &mount, const Entity &occupant,
+		AiEntity &gunner) {
+	const int32_t gun_yaw = emplaced_gun_frame_heading(mount);
+	const int32_t gun_pitch = emplaced_gun_frame_pitch(mount);
+	using opennova::io::bam_add;
+	using opennova::io::bam_sub;
+	if ((mount.item_attrib2 & opennova::def::DEF_ITEM_ATTRIB2_ISTURRET) == 0) {
+		// The immediate path: the words follow the occupant's look this tick,
+		// pitch less the occupant's recoil accumulator (entity+0x380).
+		// [orig: @0x440a36 jz -> @0x440b39..0x440b58; `sub ecx,[edx+380h]`
+		//  @0x440b4c]
+		mount.emplaced_gun_yaw_word =
+				emplaced_bam_word(bam_sub(gun_yaw, gunner.heading));
+		mount.emplaced_gun_pitch_word = emplaced_bam_word(
+				bam_sub(bam_sub(gun_pitch, gunner.inf.recoil_pitch), gunner.pitch));
+		return;
+	}
+	// The IsTurret path. edi/ebx = the previous words as rounded BAM32;
+	// eax = gun.Yaw - edi - occ.Yaw; ecx = gun.Pitch - occ.Pitch - ebx.
+	// [orig: @0x440a43..0x440a74]
+	const int32_t prev_yaw = emplaced_word_bam_rounded(mount.emplaced_gun_yaw_word);
+	const int32_t prev_pitch =
+			emplaced_word_bam_rounded(mount.emplaced_gun_pitch_word);
+	int32_t yaw_step = bam_sub(bam_sub(gun_yaw, prev_yaw), gunner.heading);
+	int32_t pitch_step = bam_sub(bam_sub(gun_pitch, gunner.pitch), prev_pitch);
+	if (gunner.inf.is_local_player) {
+		// The local player's own yaw is pulled back to within +-90 deg of the
+		// turret and the look-yaw global mirrors it. [orig: `cmp edx,
+		// g_local_player_entity` @0x440a76; clamp @0x440a7e..0x440a93;
+		// occ.Yaw = gun.Yaw - eax - edi @0x440a98..0x440a9c;
+		// g_LocalPlayerLookYaw = occ.Yaw @0x440aa8]
+		yaw_step = emplaced_clamp_symmetric(yaw_step, kEmplacedLocalGunnerYawTether);
+		gunner.heading = bam_sub(bam_sub(gun_yaw, yaw_step), prev_yaw);
+		gunner.inf.target_heading = gunner.heading;
+	}
+	if (((occupant.flags | occupant.engine_flags) & kEntityFlagPlayer) == 0) {
+		// A non-Player occupant (an NPC gunner) is tethered to +-4 deg; a
+		// remote Player skips both tethers. [orig: `test [edx+24h],100h`
+		// @0x440ab4 jnz; clamp @0x440abd..0x440ad2; store @0x440ad7..0x440ade]
+		yaw_step = emplaced_clamp_symmetric(yaw_step, kEmplacedNpcGunnerYawTether);
+		gunner.heading = bam_sub(bam_sub(gun_yaw, yaw_step), prev_yaw);
+	}
+	// The per-tick traverse rate on both axes, then the integrate: yaw word =
+	// (eax + edi) >> 16; pitch word = (ecx - occ.recoilPitch + ebx) >> 16 —
+	// the recoil term lands after the rate clamp, so it is never rate-limited.
+	// [orig: @0x440ae1..0x440b13; @0x440b1e..0x440b23; @0x440b2a..0x440b58]
+	yaw_step = emplaced_clamp_symmetric(yaw_step, kEmplacedTurretSlewPerTick);
+	pitch_step = emplaced_clamp_symmetric(pitch_step, kEmplacedTurretSlewPerTick);
+	mount.emplaced_gun_yaw_word = emplaced_bam_word(bam_add(yaw_step, prev_yaw));
+	mount.emplaced_gun_pitch_word = emplaced_bam_word(
+			bam_add(bam_sub(pitch_step, gunner.inf.recoil_pitch), prev_pitch));
+}
+
+// The consumer's window leg: clamp the stored words to the seat/weapon window
+// and, on a clamp, STORE the pinned look into the occupant — the gunner's
+// view cannot rotate past the gun's limits while mounted. Window source
+// selection lives in world::select_turret_window — the per-seat addeweap arc
+// first, the weapon-def window second (the [orig] map is on the helper).
+// Per-seat clamps BOTH axes with the quartet verbatim (an authored zero pair
+// pins); the weapon-def leg keeps the witnessed per-axis zero-means-no-window
+// semantics.
+// [orig: Entity_UpdateTransformAndTurret @0x440ca0 — gate `occupant &&
+//  occupant->parentEntity == this` @0x4411d1..0x4411ea; the words read
+//  @0x4411f0/@0x4411f7; Entity_GetWeaponTurretLimits @0x441228;
+//  yaw: Math_ClampAngleToBounds @0x44123c, on 1: word @0x44125c, occ.Yaw =
+//  gun.Yaw - clamped @0x44124c/@0x441251/@0x441263, g_LocalPlayerLookYaw =
+//  occ.Yaw when local @0x44126c/@0x441277; pitch: clamp @0x44128c, on 1:
+//  word @0x4412a4, occ.Pitch = gun.Pitch - clamped @0x44129c/@0x4412b1/
+//  @0x4412b3 (no look global for pitch — the entity Pitch IS the look)]
+inline void clamp_emplaced_gun_words_to_window(const World &world,
+		Entity &mount, AiEntity &gunner) {
+	int32_t yaw = emplaced_word_bam(mount.emplaced_gun_yaw_word);
+	int32_t pitch = emplaced_word_bam(mount.emplaced_gun_pitch_word);
+	const TurretWindow window = select_turret_window(
+			mount.emplacement_down_limit_bam,
+			mount.emplacement_up_limit_bam,
+			mount.emplacement_right_limit_bam,
+			mount.emplacement_left_limit_bam,
+			mount.primary_weapon_slot_adm != kAdmSlotNone
+					? world.tables.weapons.by_index(mount.primary_weapon_slot_adm)
+					: nullptr);
+	bool yaw_clamped = false;
+	bool pitch_clamped = false;
+	if (window.per_seat) {
+		yaw_clamped = emplaced_clamp_turret_bam(yaw, window.yaw_upper,
+				window.yaw_lower);
+		pitch_clamped = emplaced_clamp_turret_bam(pitch, window.pitch_upper,
+				window.pitch_lower);
+	} else {
+		if (window.yaw_upper != 0)
+			yaw_clamped = emplaced_clamp_turret_bam(yaw, window.yaw_upper,
+					window.yaw_lower);
+		if (window.pitch_upper != 0 || window.pitch_lower != 0)
+			pitch_clamped = emplaced_clamp_turret_bam(pitch, window.pitch_upper,
+					window.pitch_lower);
+	}
+	if (yaw_clamped) {
+		mount.emplaced_gun_yaw_word = emplaced_bam_word(yaw);
+		gunner.heading = opennova::io::bam_sub(emplaced_gun_frame_heading(mount), yaw);
+		if (gunner.inf.is_local_player)
+			gunner.inf.target_heading = gunner.heading;
+	}
+	if (pitch_clamped) {
+		mount.emplaced_gun_pitch_word = emplaced_bam_word(pitch);
+		gunner.pitch = opennova::io::bam_sub(emplaced_gun_frame_pitch(mount), pitch);
+		// Our split of retail's one entity Pitch: the local look pitch lives
+		// in the input-owned mirror, so the occupant store lands there too.
+		if (gunner.inf.is_local_player)
+			gunner.inf.look_pitch = gunner.pitch;
+	}
+}
+
+// The parent-brain publication: an addeweap child whose anchor userpoint
+// rides the parent ROOT hands its gun words to the parent's AI brain turret
+// channel — the live/staged yaw (and, for a helicopter parent, the pitch) the
+// hull model's turret CTRL reads (vehicle_motor.cpp gun_yaw/gun_pitch from
+// kActiveYaw/kActivePitch), so a player-gunned tank hull turret follows the
+// slewed word. Gates, in order: the child hangs on a parent (+0x28), the
+// parent model has a userpoint table and the child's 1-based userpoint
+// index (+0x319) addresses it, that record's subobject is 0, the parent has
+// a brain. Then by the parent's AI profile type: GROUND (2) takes the raw
+// yaw word into +0x1D8 / +0x1F0; HELO (1) whose def carries EWeap (attrib
+// 0x20) clamps BOTH words by the parent's weaponSlots[1] def turret limits
+// (slot 1 at parent+0x474, its def +0x494: targetpitchmax +0x13C /
+// targetpitchmin +0x140 / targetyawrange +0x144) and writes yaw to
+// +0x1D8/+0x1F0 and pitch to +0x1DC/+0x1F4. It runs BEFORE the window leg
+// below, on the words the refresh just produced.
+// `parent_slot1_weapon` is that slot-1 def's table row; the Entity carries
+// no slot-1 weapon today, so the caller passes nullptr and the HELO leg
+// publishes unclamped (its words are already pinned by the child's own
+// window from the previous tick).
+// [orig: Entity_UpdateTransformAndTurret @0x440ca0: parent @0x440cbf,
+//  model/table/index gates @0x440f04..0x440f34, entry = table +
+//  48*(index-1) @0x440f3a..0x440f40, `cmp [ebx+18h],0` @0x440f50, brain
+//  [edi+64h] @0x440f5a, profile type [brain+4]+0x10 @0x440f65..0x440f6b;
+//  type 2 @0x440f70..0x440f8a; type 1 `test [def+54h],20h` @0x440fa1,
+//  slot-1 def [edi+494h] @0x440fbc, Math_ClampAngleToBounds yaw (+0x144,
+//  -0x144) @0x440fea and pitch (+0x13C, +0x140) @0x440ffa, stores
+//  @0x441007/@0x44100d (yaw) and @0x44101a/@0x441020 (pitch)]
+inline void publish_emplaced_gun_words_to_parent(World &world,
+		const Entity &mount, const WeaponTableEntry *parent_slot1_weapon) {
+	if (!mount.emplacement_parent.valid()) return;
+	// A child promoted onto an authored userpoint (index > 0) that rides the
+	// parent root; an unstamped subobject (-1) keeps the leg off.
+	if (mount.emplacement_bone == 0 || mount.emplacement_anchor_subobject != 0)
+		return;
+	AiEntity *parent_ai = world.ai.for_handle(mount.emplacement_parent);
+	if (parent_ai == nullptr || parent_ai->brain.f[AiBrain::kOwner] == 0)
+		return;
+	int32_t yaw = emplaced_word_bam(mount.emplaced_gun_yaw_word);
+	if (parent_ai->profile.type == 2) {
+		parent_ai->brain.f[AiBrain::kActiveYaw] = yaw;
+		parent_ai->brain.f[AiBrain::kStagingBlock + 3] = yaw;
+		return;
+	}
+	if (parent_ai->profile.type != 1) return;
+	const Entity *parent = world.registry.get(mount.emplacement_parent);
+	if (parent == nullptr || (parent->item_attrib & kItemAttribEweap) == 0)
+		return;
+	int32_t pitch = emplaced_word_bam(mount.emplaced_gun_pitch_word);
+	// The same weapon-def window form the child's own fallback leg uses
+	// (symmetric yaw, +max/-min pitch through the witnessed no-window
+	// degree conversion), sourced from the PARENT's slot-1 weapon.
+	const TurretWindow window =
+			select_turret_window(0, 0, 0, 0, parent_slot1_weapon);
+	if (window.yaw_upper != 0)
+		emplaced_clamp_turret_bam(yaw, window.yaw_upper, window.yaw_lower);
+	if (window.pitch_upper != 0 || window.pitch_lower != 0)
+		emplaced_clamp_turret_bam(pitch, window.pitch_upper, window.pitch_lower);
+	parent_ai->brain.f[AiBrain::kActiveYaw] = yaw;
+	parent_ai->brain.f[AiBrain::kStagingBlock + 3] = yaw;
+	parent_ai->brain.f[AiBrain::kActivePitch] = pitch;
+	parent_ai->brain.f[AiBrain::kStagingBlock + 4] = pitch;
+}
+
+// One occupied tick of the gun channel in retail order: the ai-fn refresh,
+// then the class update's parent-brain publication and its window clamp +
+// occupant write-back.
+// [orig: Entity_UpdatePool1Slot @0x4b8dd0 — ai-fn @0x4b8e3c, class update
+//  @0x4b8e53 (publication @0x440f04..0x441020 precedes the window leg
+//  @0x4411d1..0x4412b3 inside it)]
+inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
+		const Entity &occupant, AiEntity &gunner) {
+	tick_emplaced_gun_words(mount, occupant, gunner);
+	publish_emplaced_gun_words_to_parent(world, mount, nullptr);
+	clamp_emplaced_gun_words_to_window(world, mount, gunner);
+}
+
+// The publication: the stored words, verbatim, while the gun has a live
+// UseGun occupant. Nothing is recomputed here — the words are what the tick
+// left (slewed, tethered, window-pinned), exactly what the model's
+// EWEAP_GUNYAW/GUNPITCH CTRL registers read in retail.
+// [orig: the CTRL-global writers read the +0x322/+0x324 high words; the
+//  0x440ca0 leg publishes them to the parent brain @0x440f70..0x441020]
 inline bool emplaced_weapon_controls_for(
 		const World &world,
 		const Entity &mount,
@@ -100,50 +394,10 @@ inline bool emplaced_weapon_controls_for(
 			occupant->mount_type != SeatType::Gunner ||
 			occupant->mount_target != mount.handle)
 		return false;
-	const AiEntity *gunner = world.ai.for_handle(occupant->handle);
-	if (gunner == nullptr) return false;
-
-	// The parent owns the embedded weapon/model while the organic owns live look.
-	// A vehicle motor preserves sub-degree parent yaw in BAM; a static EWEAP uses
-	// its mission-yaw field. Pitch has no separate motor accumulator.
-	const int32_t parent_heading = mount.veh.yaw_seeded
-			? mount.veh.yaw_bam
-			: bam_heading_from_mission_yaw_deg(static_cast<double>(mount.yaw));
-	const int32_t parent_pitch =
-			bam_from_degrees_wrapped(static_cast<double>(mount.pitch));
-	int32_t yaw_delta = opennova::io::bam_sub(parent_heading, gunner->heading);
-	int32_t pitch_delta = opennova::io::bam_sub(parent_pitch, gunner->pitch);
-	// Window source selection lives in world::select_turret_window — the
-	// per-seat addeweap arc first, the weapon-def window second (the [orig]
-	// map is on the helper). Per-seat clamps BOTH axes with the quartet
-	// verbatim (an authored zero pair pins); the weapon-def leg keeps the
-	// witnessed per-axis zero-means-no-window semantics.
-	// [orig: the per-update clamp @0x441228..0x44128c via Math_ClampAngleToBounds]
-	const TurretWindow window = select_turret_window(
-			mount.emplacement_down_limit_bam,
-			mount.emplacement_up_limit_bam,
-			mount.emplacement_right_limit_bam,
-			mount.emplacement_left_limit_bam,
-			mount.primary_weapon_slot_adm != kAdmSlotNone
-					? world.tables.weapons.by_index(mount.primary_weapon_slot_adm)
-					: nullptr);
-	if (window.per_seat) {
-		emplaced_clamp_turret_bam(yaw_delta, window.yaw_upper,
-				window.yaw_lower);
-		emplaced_clamp_turret_bam(pitch_delta, window.pitch_upper,
-				window.pitch_lower);
-	} else {
-		if (window.yaw_upper != 0)
-			emplaced_clamp_turret_bam(yaw_delta, window.yaw_upper,
-					window.yaw_lower);
-		if (window.pitch_upper != 0 || window.pitch_lower != 0)
-			emplaced_clamp_turret_bam(pitch_delta, window.pitch_upper,
-					window.pitch_lower);
-	}
+	if (world.ai.for_handle(occupant->handle) == nullptr) return false;
 	out.valid = true;
-	out.gun_yaw = static_cast<uint16_t>(static_cast<uint32_t>(yaw_delta) >> 16);
-	out.gun_pitch =
-			static_cast<uint16_t>(static_cast<uint32_t>(pitch_delta) >> 16);
+	out.gun_yaw = static_cast<uint16_t>(mount.emplaced_gun_yaw_word);
+	out.gun_pitch = static_cast<uint16_t>(mount.emplaced_gun_pitch_word);
 	return true;
 }
 

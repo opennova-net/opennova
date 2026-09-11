@@ -36,6 +36,18 @@ float vec3_length(const Vec3 &v) {
 	return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
+// The thermal view's flat colours: the world block's 0.5 hemispheres
+// (flt_7C3B94) and the unk_808080 device fog / frame clear, both in the
+// render space the modulate2x path consumes verbatim; the terrain ramp pair
+// 0x101010 (c1 light) / 0xF0F0F0 (c0 sky).
+// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8396 (0.5);
+//  Environment_ApplyFogAndAmbient @ 0x57e499 and Render_ProcessMainSceneFrame
+//  @ 0x5ca778 (unk_808080); Render_TerrainScene @ 0x610e65]
+constexpr Rgb kThermalHemi{0.5f, 0.5f, 0.5f};
+constexpr Rgb kThermalGrey{128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f};
+constexpr Rgb kThermalTerrainLight{16.0f / 255.0f, 16.0f / 255.0f, 16.0f / 255.0f};
+constexpr Rgb kThermalTerrainSky{240.0f / 255.0f, 240.0f / 255.0f, 240.0f / 255.0f};
+
 } // namespace
 
 void EnvironmentState::set_config(const Config *config, bool loaded) {
@@ -294,8 +306,30 @@ Rgb EnvironmentState::apply_nvg_hemi_gain(const Rgb &color) const {
 	return Rgb{scaled.r + gain.r, scaled.g + gain.g, scaled.b + gain.b};
 }
 
+// The interior pair takes the modulator's R term on all three channels: the
+// same st(0) term is reused by each of the six `fld st(1); fmul; fadd
+// st,st(1); fstp` sequences, while sky/ground use the per-byte terms
+// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c82a5..0x5c82e9
+//  vs @ 0x5c8258..0x5c82a1].
+Rgb EnvironmentState::apply_nvg_hemi_gain_r(const Rgb &color) const {
+	const float f = static_cast<float>(nvg_gain_ + 1) * 0.2f;
+	const Rgb scaled = rgb_scale(color, 0.25f * f);
+	const float gain_r = color_src_gain_.r * (f / 10.0f);
+	return Rgb{scaled.r + gain_r, scaled.g + gain_r, scaled.b + gain_r};
+}
+
 Rgb EnvironmentState::fill_light() const {
 	return nvg_view_active_ ? apply_nvg_hemi_gain(fill_light_) : fill_light_;
+}
+
+Rgb EnvironmentState::ceiling_color() const {
+	return nvg_view_active_ ? apply_nvg_hemi_gain_r(ceiling_color_rt_)
+							: ceiling_color_rt_;
+}
+
+Rgb EnvironmentState::floor_color() const {
+	return nvg_view_active_ ? apply_nvg_hemi_gain_r(floor_color_rt_)
+							: floor_color_rt_;
 }
 
 // The SMOOTHED sky block when the weather tick drives it — written back per
@@ -307,6 +341,18 @@ Rgb EnvironmentState::fill_light() const {
 Rgb EnvironmentState::sky_ambient() const {
 	return nvg_view_active_ ? apply_nvg_hemi_gain(sky_ambient_rt_)
 							: sky_ambient_rt_;
+}
+
+// --- the thermal view --------------------------------------------------------
+
+bool EnvironmentState::set_thermal_view(bool world, bool terrain) {
+	if (world == thermal_view_ && terrain == thermal_terrain_view_) {
+		return false;
+	}
+	thermal_view_ = world;
+	thermal_terrain_view_ = terrain;
+	bump_env_generation();
+	return true;
 }
 
 // --- keyframe targets ------------------------------------------------------
@@ -429,6 +475,11 @@ Rgb EnvironmentState::frame_clear_color_for(bool indoors,
 		bool above_water) const {
 	if (indoors) {
 		return Rgb{0.0f, 0.0f, 0.0f};
+	}
+	// The thermal frame clears to unk_808080 before the water test
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca771..0x5ca778].
+	if (thermal_view_) {
+		return kThermalGrey;
 	}
 	if (above_water) {
 		return frame_clear_color();
@@ -604,6 +655,22 @@ bool EnvironmentState::build_light_values(const Vec3 &default_dir,
 	out.hemi_ground = fill_light();
 	out.ceiling = ceiling_color();
 	out.floor_color = floor_color();
+	// The thermal grey override, after the NVG rewrite the getters carry:
+	// constant [0] (the dir-enable flag) clears — the ctx store then zeroes
+	// the dir colour, so the 0.1 written into [1..4] never reaches a draw —
+	// and every sky/ground/ceiling/floor channel becomes 0.5; the gain is
+	// bound separately and untouched
+	// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c837c
+	//  (Player_CanFireWeapon) && @ 0x5c8389 (EquippedSlot->Def flags2 & 4)
+	//  -> @ 0x5c839c..0x5c843c; RenderBatchCtx_StoreLightingConstants
+	//  @ 0x5d8b06..0x5d8b33].
+	if (thermal_view_) {
+		out.dir_color = Rgb{0.0f, 0.0f, 0.0f};
+		out.hemi_sky = kThermalHemi;
+		out.hemi_ground = kThermalHemi;
+		out.ceiling = kThermalHemi;
+		out.floor_color = kThermalHemi;
+	}
 	out.gain = color_src_gain();
 	out.fog_enabled = true;
 	out.fog_color = fog_color();
@@ -632,8 +699,11 @@ EnvShaderGlobals EnvironmentState::build_shader_globals(
 		bool underwater_view) const {
 	EnvShaderGlobals globals;
 	globals.fill_light = fill_light();
-	globals.sun_light = sun_light_;
-	globals.sky_ambient = sky_ambient();
+	// The sun/sky globals are the terrain's c1/c0 pair (foliage inherits the
+	// same two device constants), so the thermal ramps select once, below.
+	const TerrainEnvUniforms terrain = build_terrain_uniforms(underwater_view);
+	globals.sun_light = terrain.sun_light;
+	globals.sky_ambient = terrain.sky_ambient;
 	globals.sun_direction = light_dir_;
 	const SceneFogValues fog = build_scene_fog(underwater_view);
 	globals.fog_color = fog.color;
@@ -646,8 +716,20 @@ EnvShaderGlobals EnvironmentState::build_shader_globals(
 TerrainEnvUniforms EnvironmentState::build_terrain_uniforms(
 		bool underwater_view) const {
 	TerrainEnvUniforms uniforms;
-	uniforms.sun_light = sun_light();
-	uniforms.sky_ambient = sky_ambient();
+	// c1 <- the light block, c0 <- the sky block (the NVG sky blend rides
+	// sky_ambient()); the thermal view in first person swaps in the flat
+	// 0x101010 / 0xF0F0F0 pair, unless NVG in first person took its branch
+	// first [orig: Render_TerrainScene @ 0x610d10 (NVG gate) / @ 0x610e51
+	//  (flags2 & Thermal && camera mode 0) -> init_terrain_lighting_color_ramps
+	//  (0x101010, 0xF0F0F0) @ 0x610e65; else (Env_LightBlock, Env_SkyBlock)
+	//  @ 0x610ea1].
+	if (thermal_terrain_view_ && !nvg_view_active_) {
+		uniforms.sun_light = kThermalTerrainLight;
+		uniforms.sky_ambient = kThermalTerrainSky;
+	} else {
+		uniforms.sun_light = sun_light();
+		uniforms.sky_ambient = sky_ambient();
+	}
 	uniforms.sun_direction = light_direction();
 	uniforms.tile_overlay_tint = tile_overlay_tint();
 	const SceneFogValues fog = build_scene_fog(underwater_view);
@@ -666,7 +748,10 @@ SceneFogValues EnvironmentState::build_scene_fog(
 		bool underwater_view) const {
 	SceneFogValues fog;
 	if (!underwater_view) {
-		fog.color = fog_color();
+		// The dry pass: the thermal view's unk_808080, else the weather fog
+		// block; the range and type stay the weather's either way
+		// [orig: Environment_ApplyFogAndAmbient @ 0x57e491..0x57e4ad].
+		fog.color = thermal_view_ ? kThermalGrey : fog_color();
 		fog.start = fog_start();
 		fog.end = fog_end_distance();
 		fog.type = fog_type();

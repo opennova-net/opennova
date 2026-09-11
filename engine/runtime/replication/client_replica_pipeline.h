@@ -239,8 +239,8 @@ public:
 	// class death callback on its world twin (a destructible's husk/explosion
 	// chain — reason 4, the net kill).
 	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
-	//  deathAnimStateId = killerSource @0x42ebdf, deathCallback(entity, 4, 0)
-	//  @0x42ebf5]
+	//  +0x2C0 deathAnimStateId = the sign-extended word1 (movsx @0x42eb8d,
+	//  store @0x42ebdf), deathCallback(entity, 4, 0) @0x42ebf5]
 	std::vector<EntityDeathRecord> drain_entity_deaths();
 
 	// Install the items.def-derived per-type classifier — the table the retail client
@@ -309,7 +309,7 @@ private:
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
 	// Entity_KillBySlotId @0x42BCE0]
-	void apply_entity_death(uint16_t handle_packed, int16_t killer_source);
+	void apply_entity_death(uint16_t handle_packed, int16_t death_anim_state_id);
 	void apply_capture_zone_overlay(const std::vector<uint8_t> &body);
 	void apply_minimap_overlay_batch(const std::vector<uint8_t> &body);
 	// The death-screen folds live together in client_replica_death.cpp;

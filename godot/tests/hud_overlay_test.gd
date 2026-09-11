@@ -128,17 +128,30 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 		assert_true(row.visible, "SIGHTS row %d is visible while the card is up" % i)
 		RenderingServer.canvas_item_set_custom_rect(row.get_canvas_item(), false)
 		var sight: WeaponSightRow = sights[i]
-		var x1 := float(sight.get_x1())
-		var y1 := float(sight.get_y1())
-		# The card scales through the engine's witnessed per-corner pixel snap
-		# (HudPos.scale_rect [orig: Viewport_ScaleToVirtualCoords @0x5d2b20]),
-		# which replaced the old .gd position*scale approximation.
-		var expected := HudPos.scale_rect(Rect2(
-			Vector2(x1, y1),
-			Vector2(float(sight.get_x2()) - x1,
-				float(sight.get_y2()) - y1)), surface)
+		# The rect the card draws is the engine's mode-resolved one (a `scale`
+		# row shrinks about its centre at the default sight-scale index; a
+		# standalone card carries slide multiplier 0), scaled through the
+		# engine's witnessed per-corner pixel snap (HudPos.scale_rect
+		# [orig: Viewport_ScaleToVirtualCoords @0x5d2b20]), which replaced the
+		# old .gd position*scale approximation.
+		var design := sight.evaluate_rect(HudOverlay.sight_scale_index_default(), 0)
+		assert_eq(card.row_rect(i), design,
+			"SIGHTS row %d resolves its rect through the engine evaluator" % i)
+		var expected := HudPos.scale_rect(design, surface)
 		assert_eq(RenderingServer.debug_canvas_item_get_rect(row.get_canvas_item()), expected,
-			"SIGHTS row %d emits its authored draw rectangle" % i)
+			"SIGHTS row %d emits its mode-resolved draw rectangle" % i)
+	# The scale-flagged red-dot row draws three quarters of its authored box
+	# about its centre at the default index, never the full box.
+	var reticle_x1 := float(reticle.get_x1())
+	var reticle_y1 := float(reticle.get_y1())
+	var reticle_authored := Rect2(Vector2(reticle_x1, reticle_y1),
+		Vector2(float(reticle.get_x2()) - reticle_x1, float(reticle.get_y2()) - reticle_y1))
+	assert_ne(card.row_rect(2), reticle_authored,
+		"The scale-flagged red-dot row draws smaller than its authored box")
+	# Each half-extent floors ((w * 3) >> 3), so the resolved width sits within
+	# two pixels of three quarters.
+	assert_almost_eq(card.row_rect(2).size.x, reticle_authored.size.x * 0.75, 2.0,
+		"The default sight-scale index draws the red-dot row at three quarters width")
 	var reticle_row := card.get_child(2) as Control
 	var reticle_material := reticle_row.material as CanvasItemMaterial
 	assert_not_null(reticle_material, "The red-dot row gets a canvas material")

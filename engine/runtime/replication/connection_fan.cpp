@@ -270,21 +270,50 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			break;
 		case EntityClass::Vehicle:
 			// 15/21-B vehicle compact record [orig: Entity_SerializeVehicleState @0x460560
-			// op 1]. parent (entity+40 @0x460b4d) unmodeled -> 0xFFFF = world-frame position;
-			// flags = entity+36 low byte verbatim [orig: @0x460d22]. Bit 0x04 selects the 4-B
-			// DEAD-POSE euler tail over the 10-B weapon tail (encode_vehicle_compact_record
+			// op 1]. flags = entity+36 low byte verbatim [orig: @0x460d22]. Bit 0x04 selects
+			// the 4-B DEAD-POSE euler tail over the 10-B live tail (encode_vehicle_compact_record
 			// mirrors the split): the death family sets Flags |= 6, so the short form is the
 			// WRECK pose (drive-authority witness 2026-07-04 — a LIVE driven vehicle stays
 			// full-form; the old "mounted form" reading was the D-NET-63-era misnomer). Bit
 			// 0x02's wire transitions drive Entity_KillBySlotId / Entity_RespawnVehicle on the
 			// client [orig: @0x460a25/@0x460918] — our route_round_deaths does not yet kill
 			// vehicles, so live emission always takes the full form (correct for ridden ones).
-			rec.vehicle.parent_slot_handle = 0xFFFF;
+			//
+			// op1 carrier: the vehicle's groundEntity (entity+0x28) alone — the deck or
+			// structure it rests on, which the ground raycast maintains every 8th tick
+			// (vehicle_contact.cpp). A live carrier sends its pool handle plus the
+			// CARRIER-LOCAL position and heading (Entity_TransformWorldToLocal's out[3] =
+			// own - carrier); only a null carrier takes the 0xFFFF + anchor-relative +
+			// world-heading leg [orig: +0x28 load @0x460b4d, null test @0x460b56, handle
+			// store @0x460ba1, the transform @0x460bb6, local pos @0x460bda/@0x460bff/
+			// @0x460c24, local eulerZ pickup @0x460c2a; the 0xFFFF leg @0x460c61 with the
+			// g_priority_ref subtraction @0x460c71/@0x460c9b/@0x460cc5 and entity+16
+			// @0x460cec]. The retail reader re-lands +0x28 from the handle and composes
+			// local->world INCLUDING the heading [orig: @0x460802; Entity_TransformLocalToWorld
+			// @0x4608ce]. A carrier whose pose we could not resolve (stale handle) falls back
+			// to the free-standing form, like the player record.
+			if (e.ground_handle != wire_handle::kInvalid && e.carrier_pose_valid) {
+				const WorldPose local = network_transform_world_to_local(
+						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
+						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
+						uint32_t(e.carrier_roll_bam));
+				rec.vehicle.parent_slot_handle = e.ground_handle;
+				rec.vehicle.pos_x_compressed = network_compress_fixedpoint(local.x);
+				rec.vehicle.pos_y_compressed = network_compress_fixedpoint(local.y);
+				rec.vehicle.pos_z_compressed = network_compress_fixedpoint(local.z);
+				// LOCAL heading = own - carrier (the transform's out[3]), rounded to its
+				// high i16 exactly like the free-standing form [orig: @0x460c2a ->
+				// `add ecx,8000h; sar ecx,10h` @0x460cf2..0x460d0a].
+				rec.vehicle.euler_z = static_cast<int16_t>(
+						(uint32_t(e.euler_z) - uint32_t(e.carrier_yaw_bam) + 0x00008000u) >> 16);
+			} else {
+				rec.vehicle.parent_slot_handle = 0xFFFF;
+				rec.vehicle.pos_x_compressed = cx;
+				rec.vehicle.pos_y_compressed = cy;
+				rec.vehicle.pos_z_compressed = cz;
+				rec.vehicle.euler_z = yaw_bam16; // world heading i16 [orig: @0x460cec -> @0x460d0a]
+			}
 			rec.vehicle.flags_byte = e.state_flags;
-			rec.vehicle.pos_x_compressed = cx;
-			rec.vehicle.pos_y_compressed = cy;
-			rec.vehicle.pos_z_compressed = cz;
-			rec.vehicle.euler_z = yaw_bam16; // heading i16 [orig: @0x460d0a]
 			// entity+286 = the vehicle HEALTH word, stored back verbatim by the read
 			// [orig: write @0x460d9b, read store @0x460aff]. Sending 0 here zeroed every
 			// vehicle's health each frame — live-witnessed as all map vehicles dying
@@ -292,7 +321,12 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// unwitnessed decode-era guess (D-NET-63 correction).
 			rec.vehicle.health_word = static_cast<uint16_t>(
 					e.health > 0 ? (e.health < 0xFFFF ? e.health : 0xFFFF) : 0);
-			// entity+160 (weapon X) remains zero until turret aim is modeled.
+			// entity+0xA0 slideDecay — the vehicle's vertical velocity (16.16 u/tick), which
+			// the joiner's family prediction integrates between records; the reader lands it
+			// when the wire flags clear bit 0x02 [orig: write @0x460d5a..0x460d7b; read
+			// @0x460910..0x46091e]. (The old "weapon X" reading was a D-NET-63-era misnomer.)
+			rec.vehicle.vertical_velocity =
+					network_compress_fixedpoint(e.vehicle_vertical_velocity);
 			// Live prediction registers: fixed-point forward/lateral commands use
 			// the retail 16-bit codec; steering is the rounded BAM32 high word.
 			// [orig: @0x460dc2..0x460e10; net-re section 5.13]

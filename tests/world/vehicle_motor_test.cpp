@@ -1913,7 +1913,72 @@ void test_vehicle_carrier_follow_and_refresh() {
 	CHECK(!v.ground_target.valid());
 }
 
+// A freshly allocated brain (state 0, the allocator's zero words) with an AI
+// driver aboard, driven through the REAL pass order (state machine, then the
+// vehicle pass): the pass promotes 0 -> PRETTY at the mover head, BEFORE the
+// AI-driver staging, so the hand-back lands in FOLLOWWP and the row-16 tick
+// zeroes AI_BeginUpdate's [128] = [49] out-speed every tick — a routeless
+// driven hull stays put. Staging the drive ahead of the promotion left the
+// brain at 0 for the AI leg (the machine commits the pending 0 straight back
+// each tick), so it never handed back and the un-zeroed combat out-speed drove
+// the hull straight (the 00TRa armory-truck drift, 2026-09-10).
+// [orig: Entity_UpdateVehiclePhysics 0 -> 22 @0x48afac..0x48afb2 ahead of the
+//  occupant block @0x48b949 and the AI hand-back @0x48bc16; AI_BeginUpdate
+//  @0x457b40 `[128] = [49]`]
+void test_state0_brain_with_ai_driver_holds() {
+	Rig r;
+	r.mount();
+	r.drv().player_class = 0; // an NPC driver: the AI-driver leg, not the player leg
+	const VehicleTraits t = buggy_traits();
+	r.w.vehicles.traits.set(r.veh().item_id, t);
+	r.w.ai.is_authority = true;
+	const int idx = r.w.ai.attach(r.veh_h);
+	AiEntity &ae = *r.w.ai.at(idx);
+	ae.brain.f[AiBrain::kCurState] = 0;
+	ae.brain.f[AiBrain::kPendState] = 0;
+	ae.brain.f[AiBrain::kFallback] = 0;
+	ae.brain.f[AiBrain::kStep] = 16;
+	ae.brain.f[AiBrain::kSpeedA] = 16019; // d_5ton combat speed 55 (x65536/225)
+	ae.brain.f[AiBrain::kSpeedB] = 16019;
+	ae.profile.type = 2;
+	ae.profile.flags100 = 0x5; // FOLLOW_WP | FLEE — the d_5ton combat_flags
+	ae.has_physics = false;    // retail's entity+368 is null: no alert edge
+	const Vec3 start = r.veh().position;
+	TickContext ctx{};
+	ctx.world = &r.w;
+	ctx.is_authority = true;
+	r.w.ai.tick(r.w, ctx);
+	// One pass: 0 -> 22 at the head, then the AI leg's 22 -> 16 hand-back.
+	CHECK(ae.brain.f[AiBrain::kCurState] == kAiGroundFollowWp);
+	// The tick a driver first sits in a PRETTY hull commands one pulse in retail
+	// too: the entity's AI callback runs before its class mover
+	// [orig: Entity_UpdatePool1Slot @0x4b8dd0 — ai-fn @0x4b8e3c, class update
+	//  @0x4b8e53], row 22's tick leaves AI_BeginUpdate's [128] = [49] standing,
+	//  and the mover's hand-back copies it into [136] once before row 16 zeroes
+	//  it. The pin is therefore not "never moved" but "does not keep driving":
+	//  the buggy coasts that one pulse out over ~100 ticks (0.22 u here) and
+	//  is then at rest in FOLLOWWP, whereas the sustained drive was ~0.24 u
+	//  per tick (30 u over this run).
+	for (int i = 1; i < 100; ++i) {
+		ctx.logic_tick = static_cast<uint32_t>(i);
+		r.w.ai.tick(r.w, ctx);
+	}
+	const Vec3 late = r.veh().position;
+	for (int i = 100; i < 124; ++i) {
+		ctx.logic_tick = static_cast<uint32_t>(i);
+		r.w.ai.tick(r.w, ctx);
+	}
+	const float moved = std::hypot(r.veh().position.x - start.x, r.veh().position.y - start.y);
+	const float moved_late = std::hypot(r.veh().position.x - late.x, r.veh().position.y - late.y);
+	CHECK(ae.brain.f[AiBrain::kCurState] == kAiGroundFollowWp);
+	CHECK(r.veh().veh.cmd_speed == 0); // no route: the row-16 tick froze the out-speed
+	CHECK(r.veh().veh.speed == 0);
+	CHECK(moved_late == 0.0f); // at rest: no sustained drive
+	CHECK(moved < 1.0f);       // the one boarding-tick pulse's coast, nothing more
+}
+
 int main() {
+	test_state0_brain_with_ai_driver_holds();
 	test_vehicle_carrier_follow_and_refresh();
 	test_skid_effects_and_sound_edges();
 	test_handbrake_skid_and_grip_recovery();
