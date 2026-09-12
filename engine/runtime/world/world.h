@@ -760,6 +760,8 @@ public:
     //  (WacScript_AdvanceTick @0x4f81b1), the BMS normal-event quarter pass runs every 16th
     //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
     uint32_t logic_tick = 0;
+    // The tick process_round_end ran on (the SP epilog gate's reference).
+    uint32_t round_end_tick = 0;
 
     // May the mission script advance this tick? Retail wraps its WAC tick, the
     // idle-timer sweep and the BMS event pump in ONE condition, and the half that
@@ -771,17 +773,33 @@ public:
     // firing into an empty session: 05TRcoop kills ten AI a fifth of a second in,
     // and without this an unattended host runs that before anyone can join.
     //
-    // Unmodeled halves of the same condition: retail also requires
-    // `!g_preround_delay_timer` (the pre-round countdown) and
-    // `!g_epilog_screen_active` (the end-of-round screen); we have neither
-    // concept yet, and both only ever ADD holds, so omitting them cannot make the
-    // script run where retail would not.
-    // [orig: the wrapper @0x51b8xx region — `if (!g_preround_delay_timer &&
-    //  (wac_var_humans || !wac_var_ticks) && !g_epilog_screen_active)` around
-    //  WacScript_AdvanceTick + Server_UpdateEntityIdleTimers +
-    //  EventTrigger_UpdateQuarterRoundRobin @0x454d50]
+    // The pre-round half of the same condition (`!g_preround_delay_timer`) is
+    // the PreRound tick phase (WAC frozen with the entities). The epilog half
+    // is epilog_screen_active() below.
+    // [orig: Server_TickUpdate @0x51d7e0, the gate @0x51d8bd — `if
+    //  (!g_preround_delay_timer && (wac_var_humans || !wac_var_ticks) &&
+    //  !g_epilog_screen_active)` around WacScript_AdvanceTick @0x51d8bf +
+    //  Server_UpdateEntityIdleTimers + EventTrigger_UpdateQuarterRoundRobin
+    //  @0x454d50]
     bool script_may_advance() const {
-        return cached.humans > 0 || cached.wac_ticks == 0;
+        return (cached.humans > 0 || cached.wac_ticks == 0) && !epilog_screen_active();
+    }
+    // The SP end-of-round screen's gate over the script tick. A single-player
+    // round that ends against the player (`Server_ProcessRoundEnd` with any
+    // winner but 1) starts the LOSE cine on the spot (`Cine_StartPlayback
+    // @0x577840`, the SP tail @0x51691d..0x51698f); the next frame's cine
+    // dispatch enters lose state 1 and the frame after builds the MISSION
+    // FAILED screen, raising `g_epilog_screen_active @0xA87054`
+    // (`Cinematic_EpilogUpdate @0x577950`, the mode-2 leg @0x5744fd..0x57450c).
+    // From then on the WAC and the BMS quarter pass never run again, so a
+    // `Lose` line reaches the chat exactly once. The WIN epilog raises the flag
+    // only after its flyaway (state 4 @0x5764ec) — that flow is unported
+    // (D-AI-10), so a won SP round keeps the script running as before.
+    // [orig: g_epilog_screen_active writers @0x57450c (lose) / @0x5764ec (win);
+    //  the gate read @0x51d8b7]
+    bool epilog_screen_active() const {
+        return !rules.mp_session && match.outcome().ended && match.outcome().winner_team != 1 &&
+               logic_tick > round_end_tick;
     }
     // Authoritative whole-second pre-round phase. Networking and the frame
     // clock remain live while World gameplay systems are frozen; phase-0 0x0A

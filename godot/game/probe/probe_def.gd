@@ -430,6 +430,28 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"burst_frames": { "type": "integer", "minimum": 1, "default": 20 },
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, true, 300_000),
+		ProbeDef.make("mission_playthrough",
+				"The first SP mission played through its authored sequence on the real "
+				+ "input path (docs/world/npc-mission-completion.md): load `mission`, then "
+				+ "the ten gates in order — load, movement/view/stance, the walk to truck "
+				+ "`truck_ssn`, boarding with USE, the instructor ride and its triggered "
+				+ "text, dismount, the armory, the authored friendly-fire failure, the clean "
+				+ "exit and the repeat launch. `auto` drives every key itself; `observe` "
+				+ "watches the maintainer play; `travel` moves between gates by the debug "
+				+ "teleport (default) or on foot. The gates' own interactions always ride "
+				+ "the real input path; the per-gate verdict, a sample log and a PNG per "
+				+ "gate are the artifacts.",
+				RUNTIME + "mission_playthrough_probe.gd", {
+					"mission": { "type": "string", "default": "00TRa.bms" },
+					"truck_ssn": { "type": "integer", "minimum": 1, "default": 11 },
+					"mode": { "type": "string", "enum": ["auto", "observe"], "default": "auto" },
+					"travel": { "type": "string", "enum": ["teleport", "walk"], "default": "teleport" },
+					"route": { "type": "array", "items": { "type": "array", "items": { "type": "number" } },
+							"default": [] },
+					"start_gate": { "type": "integer", "minimum": 1, "maximum": 10, "default": 1 },
+					"target_ssn": { "type": "integer", "minimum": 0, "default": 0 },
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, false, 1_800_000),
 		ProbeDef.make("hud_killfeed",
 				"The message-feed screenshot (D-HUD-23): three real gametext Canned Msg "
 				+ "lines through the engine formatters and HudOverlay.push_feed_line with "

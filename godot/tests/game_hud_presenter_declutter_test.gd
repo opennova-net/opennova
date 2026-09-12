@@ -4,14 +4,18 @@ const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
 
 # The HUD declutter seam on GameHudPresenter: the huddetail edge cycles the
-# persisted hud_detail level with wrap, the death screen forces level 3
-# through the same seam, the value survives via the settings path, and a
-# shared physical key fires huddetail — not hudcolor — modeling retail's
-# first-match catalog order (rows 50 < 76; D-CTRL-4 keeps hudcolor live on
-# its own key). The capture case runs over a REAL HudOverlay (HudFixture).
-# [orig: the huddetail cycle Input_HandleActionBinding_0 @0x4E0601..0x4E0624;
-#  the death force NapiNPClientMsg_0x00F @0x42E410..0x42E41C; the first-match
-#  key scan @0x49d42f]
+# LIVE hud_detail level with wrap, the death screen forces level 3 through the
+# same live seam, neither write reaches the persisted config value (which only
+# the settings path owns), every mission start re-seeds the live level from
+# that config value, and a shared physical key fires huddetail — not hudcolor
+# — modeling retail's first-match catalog order (rows 50 < 76; D-CTRL-4 keeps
+# hudcolor live on its own key). The capture case runs over a REAL HudOverlay
+# (HudFixture).
+# [orig: the huddetail cycle Input_HandleActionBinding_0 @0x4E0601..0x4E0624
+#  (the layer global only); the death force NapiNPClientMsg_0x00F
+#  @0x42E410..0x42E41C (the layer global only); the mission-start apply
+#  apply_session_settings_to_globals @0x55154d from the config struct that
+#  Game_SaveConfig @0x54c80d persists; the first-match key scan @0x49d42f]
 #
 # user:// settings hygiene: every test wraps its cycles back to the starting
 # value so the shared settings.cfg survives (the hud_color tests' pattern).
@@ -32,9 +36,12 @@ func _persisted_hud_detail() -> int:
 			GameHudPresenter.HUD_DETAIL_CONFIG_KEY, 0))
 
 
-func test_huddetail_edge_cycles_and_wraps_persisted_level() -> void:
+func test_huddetail_edge_cycles_and_wraps_the_live_level() -> void:
 	var presenter: GameHudPresenter = autofree(GameHudPresenter.new())
+	var config := presenter.hud_detail_config()
 	var start := presenter.hud_detail_level()
+	assert_eq(start, config,
+			"a fresh presenter's live level is the persisted config value")
 
 	# A plain down edge cycles once; holding the key does not repeat.
 	presenter.poll_hud_detail_edge(true, false, true)
@@ -63,32 +70,36 @@ func test_huddetail_edge_cycles_and_wraps_persisted_level() -> void:
 	assert_eq(presenter.hud_detail_level(), start,
 			"four cycles wrap 0->1->2->3->0 back to the start")
 
-	# The persisted value survives the settings path: a fresh presenter
-	# instance reads the cycled token back.
+	# The cycle writes the LIVE level only: the persisted config value and a
+	# fresh presenter (the next mission's start) never see it, and the
+	# mission-start apply re-seeds the live level from the config value.
 	presenter.cycle_hud_detail()
+	assert_eq(_persisted_hud_detail(), config,
+			"the cycle leaves the persisted config value alone")
 	var reread: GameHudPresenter = autofree(GameHudPresenter.new())
-	assert_eq(reread.hud_detail_level(), (start + 1) % 4,
-			"a fresh presenter reads the persisted hud_detail back")
-	for i in range(3):
-		presenter.cycle_hud_detail()
-	assert_eq(presenter.hud_detail_level(), start,
-			"the test leaves the persisted level where it started")
+	assert_eq(reread.hud_detail_level(), config,
+			"a fresh presenter re-seeds from the config value, not the cycled live level")
+	presenter.reapply_persisted_hud_detail()
+	assert_eq(presenter.hud_detail_level(), config,
+			"the mission-start apply re-seeds the live level from the config value")
 
 
-func test_death_screen_forces_level_3_through_the_persisted_seam() -> void:
+func test_death_screen_forces_level_3_on_the_live_level_only() -> void:
 	var presenter: GameHudPresenter = autofree(GameHudPresenter.new())
-	var start := presenter.hud_detail_level()
+	var config := presenter.hud_detail_config()
 
 	presenter.apply_death_screen_hud_detail()
 	assert_eq(presenter.hud_detail_level(), 3,
-			"the death screen forces the declutter level to 3")
+			"the death screen forces the live declutter level to 3")
+	assert_eq(_persisted_hud_detail(), config,
+			"the force never touches the persisted config value")
 	var reread: GameHudPresenter = autofree(GameHudPresenter.new())
-	assert_eq(reread.hud_detail_level(), 3,
-			"the force writes the persisted global like retail")
+	assert_eq(reread.hud_detail_level(), config,
+			"the next mission's presenter starts from the config value")
 
-	presenter.set_hud_detail_level(start)
-	assert_eq(presenter.hud_detail_level(), start,
-			"the test restores the persisted level")
+	presenter.reapply_persisted_hud_detail()
+	assert_eq(presenter.hud_detail_level(), config,
+			"the mission-start apply ends the forced blank")
 
 
 func test_hud_hidden_capture_is_scoped_non_persisting_and_keeps_effects_active() -> void:
@@ -96,12 +107,14 @@ func test_hud_hidden_capture_is_scoped_non_persisting_and_keeps_effects_active()
 	var presenter := HudFixture.booted_presenter(self, _staged_dir)
 	var hud := presenter.get_game_hud()
 	var persisted_start := _persisted_hud_detail()
-	# The runtime level enters through the public gameplay action, which
-	# persists it; from here on capture must leave that token alone.
+	# The runtime level enters through the live gameplay seam; neither it nor
+	# the capture may write the persisted config value.
 	var runtime_start := (persisted_start + 1) % 3
 	presenter.set_hud_detail_level(runtime_start)
 	assert_eq(hud.get_hud_detail_level(), runtime_start,
 			"the real overlay carries the presenter's runtime level")
+	assert_eq(_persisted_hud_detail(), persisted_start,
+			"the live seam never writes the persisted config value")
 
 	assert_eq(presenter.begin_hud_hidden_capture(), OK)
 	assert_eq(hud.get_hud_detail_level(), 3,
@@ -133,7 +146,7 @@ func test_hud_hidden_capture_is_scoped_non_persisting_and_keeps_effects_active()
 	assert_false(witness.player_view_effects_active,
 			"effects hidden by their GameHud ancestor are not capture-active")
 	hud.visible = true
-	assert_eq(_persisted_hud_detail(), runtime_start,
+	assert_eq(_persisted_hud_detail(), persisted_start,
 			"capture must not write the user's persisted HUD detail")
 
 	presenter.finish_hud_hidden_capture()
@@ -174,13 +187,14 @@ func test_shared_key_fires_huddetail_not_hudcolor() -> void:
 			"the hudcolor edge leaves the declutter level alone")
 	presenter.poll_hud_keys(false, false, false, true)
 
-	# Wrap both persisted tokens back to their starting values.
+	# Wrap the live level and the persisted color token back to their
+	# starting values.
 	for i in range(3):
 		presenter.cycle_hud_detail()
 	for i in range(5):
 		presenter.cycle_hud_color()
 	assert_eq(presenter.hud_detail_level(), detail_start,
-			"the test leaves the persisted level where it started")
+			"the test leaves the live level where it started")
 	assert_eq(presenter.hud_color_index(), color_start,
 			"the test leaves the persisted scheme where it started")
 
