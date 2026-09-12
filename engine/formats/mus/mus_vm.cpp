@@ -154,6 +154,21 @@ void mus_vm_stop(MusVM *vm) {
     vm->state = MUS_VM_STOPPED;
 }
 
+/* The embedder dropping its script: the VM keeps only a borrowed pointer to
+   the MusScript (mus_vm_load_script), so a context teardown must clear it
+   before the owner frees the program, or a later signal/advance reads freed
+   memory. */
+void mus_vm_unload_script(MusVM *vm) {
+    if (!vm) return;
+    vm->script = NULL;
+    vm->state  = MUS_VM_STOPPED;
+    vm->pc = 0;
+    vm->sp = 0;
+    vm->csp = 0;
+    vm->halt_latch = 0;
+    vm->current_section_name[0] = 0;
+}
+
 void mus_vm_pause(MusVM *vm) {
     if (!vm) return;
     if (vm->state == MUS_VM_RUNNING) vm->state = MUS_VM_PAUSED;

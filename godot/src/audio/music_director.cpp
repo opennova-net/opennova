@@ -114,6 +114,14 @@ Ref<MusicPairNames> MusicDirector::resolve_game_music_pair(const String &p_expan
 // --- Property setters / getters ----------------------------------------
 
 void MusicDirector::load_mus_script(const Ref<MusicScript> &p_script) {
+	// The VM borrows a pointer into the MusicScript resource (mus_vm_load_script);
+	// swapping or dropping the script must clear that borrow first, or a later
+	// signal_end_track / advance reads a freed program.
+	if (_vm != nullptr && (p_script.is_null() || p_script != _script)) {
+		mus_vm_unload_script(_vm);
+		_vm_running = false;
+		_active_play = nullptr;
+	}
 	_script = p_script;
 }
 

@@ -291,6 +291,9 @@ int mus_vm_load_script(MusVM *vm, const MusScript *script);
    transitions to STOPPED from any state. */
 void mus_vm_start (MusVM *vm);
 void mus_vm_stop  (MusVM *vm);
+/* Drop the borrowed script pointer (the owner is about to free it); the VM
+   parks STOPPED with no program until the next mus_vm_load_script. */
+void mus_vm_unload_script(MusVM *vm);
 void mus_vm_pause (MusVM *vm);
 void mus_vm_resume(MusVM *vm);
 
