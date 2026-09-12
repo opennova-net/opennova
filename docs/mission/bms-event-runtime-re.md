@@ -76,6 +76,18 @@ flag byte: bit1 = OR, bit2 = XOR, default AND. Ours: `evaluate_chain` — byte-e
   is mirrored into `dword_AE06F8` at chain-eval entry (@0x45405a), bit-toggled on match
   (@0x453bab), and committed back before action dispatch (@0x454c8b/@0x454cfa).
   Unmodeled (input categories return false), D-EVT-3.
+- The chain fold is FLAT and left-to-right (`EventTrigger_EvaluateChain @0x454050`,
+  re-read 2026-09-12): the accumulator takes `|=` / `^=` / `&=` with the operator
+  bits of the PREVIOUS trigger (`@0x4540b6..0x4540c5`), no precedence and no
+  short-circuit. Consequence witnessed on `00TRa.bms` during the first playthrough
+  acceptance: events 46/47 — `Group.IsWithinArea(3, 17|18) and Player.OnSsn(11) or
+  Group.IsWithinArea(4, 17|18) and Player.OnSsn(1714)`, the range-arrival dialogs 30/31
+  — fold as `((A and B) or C) and D`, false for a rider of truck 11 and true only for
+  a rider of truck 1714. The port folds identically (`BmsEventSystem::evaluate_chain`),
+  so the dialogs a truck-11 rider never hears are the authored mission's, not a
+  divergence. `lose_flow_test --bms <mission> --events` prints a mission's whole event
+  table (triggers and actions by name, the Triggered Text each OutputText resolves to,
+  the area zones, the events the PreMission pass fired) as the reference for such reads.
 
 ### 1.5 Action dispatch — `EventAction_Dispatch @0x4542e0`
 

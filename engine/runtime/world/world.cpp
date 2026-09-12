@@ -335,6 +335,9 @@ void World::process_round_end(int32_t winning_team) {
     // reason 4; SP never drains it — the epilog owns the SP exit).
     // Match::finish sets the sole outcome latch before the network/presentation
     // tails, matching retail's double-run guard without copying its global.
+    // The tick the round ended on: the SP lose cine that the tail starts halts
+    // the script from the following frames on (World::epilog_screen_active).
+    round_end_tick = logic_tick;
     // The SP tail [orig: @0x51691d..0x51698f]: stop the dialog audio channel
     // (DialogAudio_PlayNextChunkOrStop(0) @0x51694b) + Dialog_ResetAll + park the
     // mission music, then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390:

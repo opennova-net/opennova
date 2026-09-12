@@ -59,7 +59,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `process_infantry_state_machine` | SM dispatcher (vehicle classes) | 0x4581b0 | event-callback fn1 rows | **matching**; name is now known to be historical — it is the AI-VEHICLE SM |
 | `h_ground_followwp_tick` etc. | state 16/17/18 rows | 0x815338+ | prior grill (raw bytes) | **matching** |
 | P2 combat/targeting | `AI_FindBestTargetB` etc. | 0x466f60+ | prior adversarial grill; candidate FEED + LOS + refcount witnessed 2026-07-16 (§16.2/16.3) | **matching** (scoring core; the feed port is D-AI-1, the SM combat states D-AI-2/3) |
-| `AiSystem::apply_locomotion` | — (model) | — | vehicle-layer kinematic model only (organics no longer pass through it); HELO/vehicle physics remain visible `not_yet_ported` stubs | tracked model (vehicle slice) |
+| `AiSystem::apply_locomotion` | — (model) | — | vehicle-layer kinematic model only (organics no longer pass through it); the vehicle and HELO motors are ported per family since PR #640 — [vehicle-client-movers-re.md](vehicle-client-movers-re.md) §11–§38 carries their verdicts and the D-NET-161 residuals | **matching** (per family; vehicle record) |
 | organics → `tick_infantry` routing | `g_EntityClassPhysicsTable` row "org1" | 0x82abc8 → 0x4b9910 | promote marks `inf.active`; `AiSystem::tick` branches before the SM | **matching** |
 | `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in engine/runtime/world/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ D-INF-1..10 (enumerated below) |
 | `kInfantryAnimNames/Flags` | `g_animStateNameTable` (ex `off_8135F0`) / `g_animStateFlagsTable` | 0x8135F0/0x8139E8 | body entries index-verified vs IDB; full table is 253 entries — body 0–239 + `wpn_*` 240–251 + `EOF` 252 (§14.8.2) | **matching** (body slice) |
@@ -650,8 +650,9 @@ and the vehicle rows 21/23) — ported 2026-07-16.
   semantics pinned by disasm + the real-clip grill; the exact playhead dt derivation is open
   item 16 (the injection seam owns phase policy).
 - **AI vehicle decision layer** (SM states 16–18, budget gate, waypoint mover, P1/P2 combat):
-  **MATCHING** as before — those verdicts stand; it no longer drives organics. Vehicle/HELO
-  movement physics remain visible `not_yet_ported` stubs (not deviations).
+  **MATCHING** as before — those verdicts stand; it no longer drives organics. The vehicle
+  and HELO motors that were `not_yet_ported` stubs at this pass are ported per family since
+  PR #640 (vehicle-client-movers-re.md §11–§38; the residuals are D-NET-161).
 - **WAC VM**: **MATCHING** (unchanged this pass).
 
 ## 6. IDA write-backs applied (2026-06-10, IDB saved)
@@ -4197,6 +4198,24 @@ table read. This leg is now ported through `World::script.wac_values` and consum
 directly by `AiSystem::infantry_combat_think`. D-AI-6 remains open for only the
 bone-derived LOS/aim endpoints and prone-in-foliage concealment term.
 
+### 20.8a Playthrough evidence on 00TRa (2026-09-12)
+
+The first mission's authored failure is now exercised two ways, separate from
+the focused-test witnesses above. The `lose_flow_00tra` ctest (the
+mission-parametric `tests/mission/lose_flow_test.cpp`, `--bms 00TRa.bms
+--victim-team 1`) kills the seated friendly on the armory truck with the
+staged round — the round stops on the mount and the occupant leg resolves the
+damage — and asserts `bluekills 1`, the WAC `Lose(1)`, the `lose` effect with
+`STRMISC_KILLEDBLUE` and `round_end` winner 2 (00TRa.wac is the single line `If
+true(bluekills) then Lose (1)`). The live half is the `mission_playthrough`
+probe's gate 8 on the running game (docs/mcp.md; the dated verdict lives in
+[npc-mission-completion.md](npc-mission-completion.md)): real rounds through the
+input path at the seated instructor, then the shell's parked input, the 3 s
+beat and the MISSION FAILED screen, ESC to the menu. The retail RESTART
+(`UI_IngameRestartCommand @0x555410` -> `Game_RestartRoundSP`) is still
+unported (the SP epilog/respawn flow, D-AI-10 / D-LOADSCR-8); the probe's
+"retry" gate is a repeat launch from the menu and says so.
+
 ### 20.9 Open follow-ups
 
 1. `mana` (entity+0x120, cached `@ 0x4f582e`) — the field's true semantics
@@ -5078,6 +5097,22 @@ WAC seatbelt, full admission gates, facing-push arrival radius and the
 for the current witness and validation map. The scripted organic escort
 identities 11000/12000/12001 remain in the separate D-INF-2 infantry scope.
 
+
+### 23.4a Live evidence: the 00TRa instructor ride (2026-09-12)
+
+The `mission_playthrough` probe rode truck 11 on the running game through the
+real input path (docs/mcp.md; the accepted run reached the truck by the
+probe's teleport travel, the walk-mode iterations before it on foot from the
+barracks spawn): USE on the release edge (seat 7, type 1), event 2 (PLYRATTACHED 11 ->
+RedirectGroupTo 3 list 2 + PatrolSpeed 40) firing within the quantum, the
+ride of 423.5 u with the rider carried at a gap of at most 0.8 u, events 3
+and 4 (list-2 waypoints 15 and 19: speed 20, then stop + ShowWaypoints) and
+45 (the attached-player dialog 28) firing on the way, the truck at rest at
+the range, USE releasing the seat. The two boarding dialogs (event 38's line
+29 at the truck's zone, event 45's line 28) played; the range-arrival lines
+30/31 (events 46/47) did not, which is the authored chain fold (see
+[bms-event-runtime-re.md §1.4](../mission/bms-event-runtime-re.md)), not a
+divergence.
 
 ### 23.5 The mounted seat carry (the ride)
 
@@ -5978,7 +6013,7 @@ the FFI structs.
 | D-ITEM-9 | The Falling/Generic wreck callbacks and unitType-3's four short slope rays ground on TERRAIN only. Falling/Generic use sec0 z extents synthesized from LOD-0 primitive bounds (upright leg only); PiecePhysics uses the husk-flag pick — the husk collision shell's floor for a husked piece (the section-AABB union stands in for the CMDL header z-lo), `box_z_lo` otherwise. Static's separate terrain/water thresholds are ported as described in §24.5 | `Entity_RaycastGroundHeightAndObject @0x414320` (Falling/Generic, terrain + objects, mask 0x200000); `Entity_RaycastGroundHeight @0x4142c0` x4 from `Entity_CalcSlopeForces @0x4b0b00`; section-row +84/+88 extents `@0x461e23-0x461e4b` | a wreck dying on a roof can sink to terrain below; port the object-return leg for both query shapes and verify the generic runtime section-row fields against the render-model builder |
 | D-ITEM-10 | `dword_2C25C64` is resolved and both routed/specialized water crossings now emit `Effect_MedSplash`; fallback sounds are ported (`IMP_DEBLRG_WATER` / `IMP_VCL_DROP`, and specialized `EXPLO_HELO_WATER` / `EXPLO_VEHCL_LG`). The def per-item landing (+140) and water (+156) sound slots remain unmodeled | `@0x4940c6-0x494100 / @0x49417c-0x4941af`; specialized twins `@0x48f547..0x48f588 / @0x48f726..0x48f759` | items authoring custom impact sounds still play the matching fallback; splash visuals now route through the ordinary destruction-effect presenter |
 | D-ITEM-11 | The round exclusion set skips shooter + mount (Controller/Gunner/Driver seats only — a Passenger's rounds can hit their own vehicle) + the Gunner mount's standing-on carrier, PORTED 2026-07-18 (§15.8a); the FOURTH slot — `projectile+388` ← the fire request's dword +40 — is consumed by every prox walk but its fill is an uninitialized extra on the client fire path, provenance OPEN (the server path `Server_ClientFiredRound @ 0x50baa0` unwalked) | `ray[17..20] @ 0x4ea2a5-0x4ea2f8`; `RoundData_SpawnRound @ 0x4ec0d0` ([97] ← hitData+40); compares `@ 0x4e5572/@ 0x4e5782/@ 0x4e5983/@ 0x4e4c4e` | firing from Controller/Gunner/Driver seats no longer self-hits the hull; walk 0x50baa0's cmd[21]→spawn plumbing to close the +388 slot |
-| D-ITEM-12 | Round BALLISTICS are absent: no gravity, drag, wind, water. Original: velZ −= 167/tick for non-thruster rounds without ammo flag 0x100 (`@ 0x4eaa5a`; the 0x100 class takes −167 inside the slow regime instead `@ 0x4e6329`); per-tick drag force = `g_ProjectileDragTable[62·speed>>16, clamp 1219]` scaled by ammo drag (+28) — the 4000-entry table is generated at init by a piecewise power-law over ~40 speed regimes (transonic bands 1025..1360 ft/s) — direction −vel normalized, WIND-relative (`@ 0x2C059E4..EC`), 25× underwater, a velocity-reversal zero clamp, and a one-shot random TUMBLE kick when the speed index first drops below ammo+176 (spread ammo+180, seeded by ownerConnectionId); water: hitType-4 splash at the plane + rounds continue submerged, killed when speed < 0x4000 below water (`@ 0x4ea13e`) | `Entity_ApplyDragAndBounceForce @ 0x4e5ec0`; `Projectile_InitDragTable @ 0x4e78d0`; `g_ProjectileDragTable @ 0xB7B300`; gravity `@ 0x4eaa5a`; water `@ 0x4ea4e0` | our rounds fly straight forever — no drop, no slowdown, crosshair-perfect at any range, no water interaction; port = extract the ~40 (exponent, scale) double pairs + the two scale constants off 0x4e78d0 and the wind source |
+| D-ITEM-12 (**CLOSED** — `RESOLVED/SUPERSEDED` in the ledger: the ordinary-round ballistic path is ported, D-WPN-25 carries the bounded residuals; the row below is the original finding) | Round BALLISTICS were absent: no gravity, drag, wind, water. Original: velZ −= 167/tick for non-thruster rounds without ammo flag 0x100 (`@ 0x4eaa5a`; the 0x100 class takes −167 inside the slow regime instead `@ 0x4e6329`); per-tick drag force = `g_ProjectileDragTable[62·speed>>16, clamp 1219]` scaled by ammo drag (+28) — the 4000-entry table is generated at init by a piecewise power-law over ~40 speed regimes (transonic bands 1025..1360 ft/s) — direction −vel normalized, WIND-relative (`@ 0x2C059E4..EC`), 25× underwater, a velocity-reversal zero clamp, and a one-shot random TUMBLE kick when the speed index first drops below ammo+176 (spread ammo+180, seeded by ownerConnectionId); water: hitType-4 splash at the plane + rounds continue submerged, killed when speed < 0x4000 below water (`@ 0x4ea13e`) | `Entity_ApplyDragAndBounceForce @ 0x4e5ec0`; `Projectile_InitDragTable @ 0x4e78d0`; `g_ProjectileDragTable @ 0xB7B300`; gravity `@ 0x4eaa5a`; water `@ 0x4ea4e0` | our rounds fly straight forever — no drop, no slowdown, crosshair-perfect at any range, no water interaction; port = extract the ~40 (exponent, scale) double pairs + the two scale constants off 0x4e78d0 and the wind source |
 | D-ITEM-13 | Hit-resolution residuals: (a) the terrain leg sub-steps the bilinear column at 2-u intervals with a crossing refinement — the original raycasts the hi-res heightmap (`Terrain_RaycastHeightmapHiRes_Thunk @ 0x610890`) with a proportional end-below-ground fallback (`@ 0x4ea42b-0x4ea4af`), so thin crests can tunnel in ours (the strict-less tie-break itself was FIXED 2026-07-18); (b) the person effect point is FIXED 2026-07-18 (`ray[29] - 0x800`), but generic item/terrain effect backoff and retail's post-hit round parking at hit+0x800 (+victim boundRadius for persons) remain absent `@ 0x4ea603-0x4ea7d5`; (c) ~~the pool-0 person path used one body cylinder~~ FIXED 2026-07-18: `Physics_RaycastAgainstBoneSections @ 0x4e4670` now walks the current posed COBJ spheres with strict `COBJ[i]` ↔ `boneMatrix[i]` pairing (COBJ parent/offset/CXLT ignored), exact radius scaling/caps, section mask, split `ray[31]` reaction/death and `ray[32]` normal-infantry damage semantics, ammo bullet radius, and first-person-entity termination; the bounded torso sphere is only used when graphic resolution cannot supply a usable COBJ model; (d) ~~our sphere gate was segment-vs-sphere (a boundary-crossing requirement: a tick segment entirely INSIDE a big bound sphere skipped the entity — the in-play shoot-through-building-walls report)~~ FIXED 2026-07-18b: the item-leg gate is now the witnessed per-axis AABB + UNCLAMPED perpendicular line distance (`round_broad_phase`, round_sim.cpp), the face-less stand-in hits at t=0 from inside, and the ctest `collision` `test_round_inside_bound_sphere_hits_wall` pins both the inside-sphere wall stop and the past-the-edge fly-on | as cited; person path §15.8b; the gate `@ 0x4e53d4-0x4e554a` / `@ 0x4e5492`; the dispatch order `@ 0x4ea3b4-0x4ea5f2` | posed reaction/death bones and normal-infantry damage zones are live; remaining drift is thin terrain crests, generic effect/parking offsets, the optional FatBullets floor, and the attrib-0x200 seat x6 branch |
 | D-ITEM-14 | CLOSED 2026-08-12: the four ported transition sites (`transition_to_ground_death` — routed-falling `@0x494113`, static legs `@0x4942c6`/`@0x4943da`, unitType-3 pitch equality `@0x48f0c7`) play the item's authored `particlefinale` once at the grounded pose and stamp savedLivePose; the periodic-sound clear closed as FAITHFUL-NOTHING — the pool has no producer in retail JO (allocator `@0x57b380` + reset `@0x57b360` have zero xrefs; `PeriodicSound_TickAll @0x57b450` walks an always-empty pool), so the entity-matched clear never clears anything and no pool is modeled. The old "+0x4E0 impact pair" gloss corrected: only the +0x4E2 `particlefinale` handle is read `@0x493088` | `Entity_TransitionToGroundDeath @0x493080`; intern site `resolve_item_materials_and_spawn_bone_trails @0x5231cb` (name +0x4E4 → handle +0x4E2); `PeriodicSound_ClearByEntity @0x57b3e0` over `g_periodic_sound_pool @0x26B8050`; the separate DeathPiece pool is 256x180 B at `0x26BAC58` | `destruction_test` pins routed and specialized finale/saved-pose transitions plus generic silence |
 | D-ITEM-15 | FIXED (PR #640): four-slot Dead/water, Fire and Other bone banks with per-slot follow, PRNG_C crackle and underwater steam/restart | Entity_InitDeathSounds @0x4939B0; Entity_UpdateDeadWreckEffects @0x493140 | destruction and destruction_present_pass regressions; vehicle-client-movers-re section 28 |

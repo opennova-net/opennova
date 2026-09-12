@@ -88,15 +88,19 @@ var _hud_color_index: int = HudOverlay.clamp_hud_color_index(
 				HUD_COLOR_CONFIG_KEY, HudOverlay.hud_color_index_default())))
 var _hud_color_was_down := false
 var _score_fanfare := ScoreFanfarePresenter.new()  # the S2C 0x81 hit-confirm lane
-# The HUD declutter level, persisted like retail's config token round trip.
+# The HUD declutter level is TWO states in retail (hud-re.md, "HUD declutter"):
+# the persisted config value `hud_detail` (the game.cfg token, read at boot and
+# written only by the config round trip) and the LIVE layer level the huddetail
+# cycle and the death screen write. Every mission start re-seeds the live level
+# from the config value, so a death's forced blank never outlives its mission.
 const HUD_DETAIL_CONFIG_KEY := "hud_detail"
-var _hud_detail_level: int = HudOverlay.clamp_hud_detail_level(
+var _hud_detail_config: int = HudOverlay.clamp_hud_detail_level(
 		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
 				HUD_DETAIL_CONFIG_KEY, HudOverlay.hud_detail_level_default())))
+var _hud_detail_level: int = _hud_detail_config
 var _hud_detail_was_down := false
-# Render-comparison declutter is a reversible runtime transaction. It must not
-# share set_hud_detail_level(), because that public gameplay action faithfully
-# persists the user's cfg token.
+# Render-comparison declutter is a reversible runtime transaction over the
+# live level; it saves and restores the exact level around the capture.
 var _hud_hidden_capture_active := false
 var _hud_hidden_saved_detail_level := 0
 # The showhud 2-bit FP-view flags, session state like retail's process-lifetime
@@ -326,8 +330,8 @@ func ensure_game_hud() -> void:
 	# like retail's process-lifetime global [orig: g_friendlyTagsMode @0x24C18C4].
 	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
 	_game_hud.set_hud_color_index(_hud_color_index)
-	# The HUD build re-applies the persisted declutter level, mirroring the
-	# round-init HUD reset re-applying the global. [orig: the re-apply
+	# The HUD build stamps the LIVE declutter level, mirroring the round-init
+	# HUD reset re-applying the layer global. [orig: the re-apply
 	# @0x59DD75 from Game_InitNewRound / HUD_InitOverlaySystem]
 	_game_hud.set_hud_detail_level(_hud_detail_level)
 	_game_hud.set_showhud_flags(_showhud_flags)
@@ -877,19 +881,30 @@ func cycle_hud_detail() -> void:
 	set_hud_detail_level(HudOverlay.next_hud_detail_level(_hud_detail_level))
 
 
-## The one declutter-level write seam: persists the level like retail's config
-## token round trip and restamps a built HUD. The cycle, the round-init
-## re-apply, and the death-screen force all land here.
+## The one LIVE declutter-level write seam: the cycle, the death-screen force
+## and the mission-start re-seed all land here; it restamps a built HUD and
+## never touches the persisted config value (retail's cycle and death force
+## write the layer level only; game.cfg carries the config value).
 func set_hud_detail_level(level: int) -> void:
 	_hud_detail_level = HudOverlay.clamp_hud_detail_level(level)
-	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
-			HUD_DETAIL_CONFIG_KEY, _hud_detail_level)
 	if _game_hud != null:
 		_game_hud.set_hud_detail_level(_hud_detail_level)
 
 
+## The mission-start apply: the live level re-seeded from the persisted config
+## value (retail applies its session settings to the globals at every mission
+## start, so a death screen's forced blank ends with its mission).
+func reapply_persisted_hud_detail() -> void:
+	set_hud_detail_level(_hud_detail_config)
+
+
 func hud_detail_level() -> int:
 	return _hud_detail_level
+
+
+## The persisted config value (read at boot; the settings path owns writes).
+func hud_detail_config() -> int:
+	return _hud_detail_config
 
 
 ## The persisted HUD color-scheme index (the token cycle_hud_color writes).
@@ -902,10 +917,10 @@ func friendly_tag_mode() -> int:
 	return _friendly_tag_mode
 
 
-## Temporarily apply retail's blank HUD declutter level without writing the
-## user's settings.cfg. The overlay, its PlayerViewEffects child, and the
-## shell HUD CanvasLayer stay mounted and active; only compiled gameplay HUD
-## commands are decluttered. Pair with finish_hud_hidden_capture().
+## Temporarily apply retail's blank HUD declutter level around a capture. The
+## overlay, its PlayerViewEffects child, and the shell HUD CanvasLayer stay
+## mounted and active; only compiled gameplay HUD commands are decluttered.
+## Pair with finish_hud_hidden_capture().
 func begin_hud_hidden_capture() -> Error:
 	if _hud_hidden_capture_active:
 		return ERR_BUSY
@@ -920,8 +935,8 @@ func begin_hud_hidden_capture() -> Error:
 	return OK
 
 
-## Idempotent capture cleanup: restore the exact in-memory level that was
-## active before capture, again without touching the persisted cfg token.
+## Idempotent capture cleanup: restore the exact live level that was active
+## before the capture.
 func finish_hud_hidden_capture() -> void:
 	if not _hud_hidden_capture_active:
 		return
