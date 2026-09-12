@@ -5317,6 +5317,13 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 		return false;
 	reliable_joiner.complete_send_flush();
 
+	// The 0x61 takes the last free node; the 0x62 is the pool overflow. A
+	// client-side connection's RequestDisconnect tears it down INLINE, so
+	// nothing queued this boundary is built: the result is the 4x 0x46 burst
+	// carrying {2, 4, count, max, "", 0, "NP.C:MSGCRE"} (count = 1,199 retained
+	// + 1 admitted + 1), the retained depth stays 1,199 and the session is
+	// terminal. [orig: NapiNPMessage_Create @0x628099..0x628112 ->
+	//  RequestDisconnect @0x61e0fa -> TeardownActiveConnection @0x62549e]
 	const std::vector<std::vector<uint8_t>> capped =
 			reliable_joiner.frame_messages({
 					make_protocol_message(0x61, {0xA1}),
@@ -5324,14 +5331,29 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 			});
 	ProtocolPacketHeader header;
 	std::vector<ProtocolMessage> messages;
-	if (!expect(capped.size() == 1 &&
-	                    decode_client_session(
-	                            capped[0], client_scrk, header, messages) &&
-	                    messages.size() == 1 && messages[0].tag == 0x61 &&
+	if (!expect(capped.size() == 4 &&
 	                    reliable_joiner.retained_outbound_depth() ==
-	                            JO_SESSION_OUTBOUND_MESSAGE_MAX,
-			"at 1,199 retained nodes retail admits the first queued node and drops the tail"))
+	                            JO_SESSION_OUTBOUND_MESSAGE_MAX - 1 &&
+	                    reliable_joiner.phase() ==
+	                            inmatch::JoinerConnection::Phase::Error &&
+	                    reliable_joiner.has_disconnect_event() &&
+	                    reliable_joiner.last_disconnect_event().ddstr == "NP.C:MSGCRE",
+			"at 1,199 retained nodes the 1,201st queued node is the MSGCRE overflow: "
+			"the goodbye burst, nothing built, the session terminal"))
 		return false;
+	const std::vector<uint8_t> expected_goodbye = client_goodbye_to_bytes(
+			0x12345678u,
+			make_disconnect_event(2, 4, JO_SESSION_OUTBOUND_MESSAGE_MAX + 1,
+					JO_SESSION_OUTBOUND_MESSAGE_MAX, "", 0, "NP.C:MSGCRE"));
+	for (const std::vector<uint8_t> &datagram : capped) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!expect(nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
+		                    opcode == SESSION_OPCODE_CLIENT_GOODBYE &&
+		                    body == expected_goodbye,
+				"every 0x46 of the overflow burst carries the MSGCRE record keyed by the SK"))
+			return false;
+	}
 
 	inmatch::JoinerConnection failing_joiner("FailedSuffix");
 	failing_joiner.seed_in_match(
@@ -5353,8 +5375,9 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 
 	// Transient/userParam=1 nodes do not enter the resend map, but every node
 	// already framed in this OPEN boundary still occupies msg_out_max. A single
-	// semantic queue spanning multiple MTU packets therefore admits exactly the
-	// same first 1,200 nodes as retail's per-node Create loop.
+	// semantic queue of exactly 1,200 nodes spanning multiple MTU packets fills
+	// the pool without overflowing it, like retail's per-node Create loop (a
+	// 1,201st would be the MSGCRE overflow above).
 	inmatch::JoinerConnection transient_joiner("TransientPrefix");
 	transient_joiner.seed_in_match(
 			0x87654321u, 1u, client_scrk, server_scrk,
@@ -5362,7 +5385,7 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 	ProtocolMessage transient = make_protocol_message(0x63, {});
 	transient.reliable = false;
 	std::vector<ProtocolMessage> transient_nodes(
-			JO_SESSION_OUTBOUND_MESSAGE_MAX + 1, transient);
+			JO_SESSION_OUTBOUND_MESSAGE_MAX, transient);
 	const std::vector<std::vector<uint8_t>> transient_datagrams =
 			transient_joiner.frame_messages(transient_nodes);
 	std::size_t admitted = 0;
@@ -5374,8 +5397,11 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 		admitted += messages.size();
 	}
 	return expect(admitted == JO_SESSION_OUTBOUND_MESSAGE_MAX &&
-	                      transient_joiner.retained_outbound_depth() == 0,
-			"MTU-split transient queue admits exactly the first 1,200 nodes");
+	                      transient_joiner.retained_outbound_depth() == 0 &&
+	                      !transient_joiner.has_disconnect_event() &&
+	                      transient_joiner.phase() !=
+	                              inmatch::JoinerConnection::Phase::Error,
+			"an MTU-split transient queue of exactly 1,200 nodes ships whole without an overflow");
 }
 
 // [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430;

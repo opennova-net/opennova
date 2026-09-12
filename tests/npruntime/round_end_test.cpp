@@ -441,6 +441,256 @@ void test_dm_round_wire_named_header() {
 			"the named rows are recipient-independent");
 }
 
+// The DM/KOTH-family board orders by the game-type primary (kills), not raw
+// points, and the 0x1D draw byte is the all-tied test.
+// [orig: Player_ComputeScore @0x500ad0..0x500adf; Server_BuildEndOfRoundScoreboard
+// @0x50920e..0x50926c; Server_ProcessRoundEnd @0x5165a3..0x5167fd]
+void test_dm_round_wire_kill_order_and_tie() {
+	// (a) Ace: 2 kills + 3 suicides = 5 points; Bee: 1 kill - 1 death = 8
+	// points. The named rows and their scores follow kills.
+	{
+		w::World world;
+		world.registry.configure_pool(0, 8);
+		w::MatchRules rules;
+		rules.game_type = game_type::kDeathmatch;
+		rules.score_values.emplace();
+		(*rules.score_values)[3] = 10;
+		(*rules.score_values)[4] = -3;
+		(*rules.score_values)[5] = -2;
+		world.match.configure(rules);
+		const w::EntityHandle ace = match_player(world, 3, 1, "Ace");
+		const w::EntityHandle bee = match_player(world, 7, 2, "Bee");
+		const w::EntityHandle cid = match_player(world, 9, 3, "Cid");
+		world.match.record_death(world, bee, ace);
+		world.match.record_death(world, cid, ace);
+		for (int i = 0; i < 3; ++i) world.match.record_death(world, ace, ace);
+		world.match.record_death(world, cid, bee);
+		expect(world.match.player(ace)->stats[w::MatchStats::kPoints] == 5 &&
+				world.match.player(bee)->stats[w::MatchStats::kPoints] == 8,
+				"the DM fixture makes points and kills disagree");
+		world.process_round_end(0);
+		const w::MatchResult &result = world.match.result();
+		expect(result.players.size() == 3 &&
+				result.players[0].identity.name == "Ace" &&
+				result.players[1].identity.name == "Bee" &&
+				result.players[2].identity.name == "Cid",
+				"the frozen DM board is ordered by kills, not points");
+		expect(!result.draw, "a clear DM leader is not a draw");
+		const EndRoundHeader header =
+				inmatch::build_end_round_header(result, 7, /*non_team_form=*/true);
+		expect(header.player_names[0] == "Ace" && header.player_scores[0] == 2 &&
+				header.player_names[1] == "Bee" && header.player_scores[1] == 1 &&
+				header.player_names[2] == "Cid" && header.player_scores[2] == 0,
+				"the named 0x1D rows carry the kill-ordered primaries");
+		expect(header.draw == 0 && header.player_index == 1,
+				"the recipient index follows the kill order");
+		const std::vector<uint8_t> wire = encode_end_round_header(header, true);
+		EndRoundHeader decoded;
+		expect(decode_end_round_header(wire.data(), wire.size(), true, decoded) &&
+				decoded.draw == 0 && decoded.player_scores[0] == 2 &&
+				decoded.player_names[0] == "Ace",
+				"the named 0x1D form round-trips the kill order and draw byte");
+		expect(world.match.player(ace)->stats[w::MatchStats::kRoundMarker] == 2 &&
+				world.match.player(bee)->stats[w::MatchStats::kRoundMarker] == 0,
+				"the non-team winner marker lands on the top scorer only");
+	}
+
+	// (b) Both rows tied at one kill: the all-tied test makes it a draw, the
+	// rows keep slot order, and nobody is awarded.
+	{
+		w::World world;
+		world.registry.configure_pool(0, 8);
+		w::MatchRules rules;
+		rules.game_type = game_type::kDeathmatch;
+		rules.score_values.emplace();
+		(*rules.score_values)[3] = 10;
+		world.match.configure(rules);
+		const w::EntityHandle ace = match_player(world, 7, 1, "Ace");
+		const w::EntityHandle bee = match_player(world, 3, 2, "Bee");
+		world.match.record_death(world, bee, ace);
+		world.match.record_death(world, ace, bee);
+		world.process_round_end(0);
+		const w::MatchResult &result = world.match.result();
+		expect(result.draw, "every row at the top score is a draw");
+		expect(result.players.size() == 2 &&
+				result.players[0].identity.name == "Bee" &&
+				result.players[1].identity.name == "Ace",
+				"tied rows keep the slot-scan order");
+		const EndRoundHeader header =
+				inmatch::build_end_round_header(result, 7, /*non_team_form=*/true);
+		const std::vector<uint8_t> wire = encode_end_round_header(header, true);
+		EndRoundHeader decoded;
+		expect(decode_end_round_header(wire.data(), wire.size(), true, decoded) &&
+				decoded.draw == 1 && decoded.player_index == 1 &&
+				decoded.player_scores[0] == 1 && decoded.player_scores[1] == 1,
+				"the tied 0x1D form carries draw = 1");
+		expect(world.match.player(ace)->stats[w::MatchStats::kRoundMarker] == 0 &&
+				world.match.player(bee)->stats[w::MatchStats::kRoundMarker] == 0,
+				"a tied board awards nobody");
+	}
+}
+
+size_t expected_board_stream_size(const EndRoundStats &board, size_t configured) {
+	size_t size = 1 + 2 + 2 + 1 + 2 * board.team_fields.size() + 1;
+	for (const EndRoundPlayerRow &row : board.players) {
+		size += 1 + (row.name.size() + 1) + (row.clan.size() + 1) +
+				(row.tag.size() + 1) + 1 + 1 + 7 * 2 +
+				2 * board.team_fields.size();
+	}
+	return size + 1 + board.team_rows.size() * configured * 2;
+}
+
+// A configured column with every player value at zero is left out of the
+// declared columns and the player rows, but the trailing matrix still writes
+// every CONFIGURED column per team row; the retail client reads the declared
+// count per row, so only row 0 lands aligned.
+// [orig: Server_BuildEndOfRoundScoreboard — the active flags @0x509398..0x5093db,
+// the player-row gate @0x509534, the matrix @0x5095a0..0x5095cc;
+// NapiNPClientMsg_0x056 @0x432174..0x4321a4]
+void test_tdm_inactive_columns_keep_configured_matrix_width() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::MatchRules rules;
+	rules.game_type = game_type::kTeamDeathmatch;
+	rules.score_values.emplace();
+	(*rules.score_values)[3] = 10;
+	(*rules.score_values)[5] = -2;
+	world.match.configure(rules);
+	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
+	const w::EntityHandle red = match_player(world, 7, 2, "Red");
+	world.match.record_death(world, red, blue);
+	world.process_round_end(1);
+	const w::MatchResult &result = world.match.result();
+	const size_t configured = result.score_fields.size();
+	expect(configured == 14, "TDM configures fourteen columns");
+
+	const EndRoundStats board = inmatch::build_end_round_stats(result);
+	const size_t active = board.team_fields.size();
+	// One kill leaves points (19), kills (3), deaths (4) and the shots-per-kill
+	// column (21, -1 for the killless victim) active; the other ten are zero.
+	expect(active == 4 &&
+			board.team_fields[0] == std::pair<uint8_t, uint8_t>{19, 1} &&
+			board.team_fields[1] == std::pair<uint8_t, uint8_t>{3, 1} &&
+			board.team_fields[2] == std::pair<uint8_t, uint8_t>{4, 1} &&
+			board.team_fields[3] == std::pair<uint8_t, uint8_t>{21, 1},
+			"only columns with a nonzero player value are declared");
+	bool player_rows_active = !board.players.empty();
+	for (const EndRoundPlayerRow &row : board.players)
+		player_rows_active = player_rows_active && row.per_team.size() == active;
+	expect(player_rows_active, "player rows carry the active columns only");
+	bool matrix_configured = board.team_rows.size() == 3;
+	for (const std::vector<int16_t> &row : board.team_rows)
+		matrix_configured = matrix_configured && row.size() == configured;
+	expect(matrix_configured,
+			"every team row carries every configured column");
+	expect(board.team_rows[1][0] == 10 && board.team_rows[1][1] == 1 &&
+			board.team_rows[2][0] == -2 && board.team_rows[2][3] == 1 &&
+			board.team_rows[1][5] == 0,
+			"team rows resolve the configured columns in configured order");
+
+	const std::vector<uint8_t> stream = encode_end_round_stats(board);
+	expect(stream.size() == expected_board_stream_size(board, configured),
+			"0x56 stream = header + active player columns + configured-width matrix");
+
+	EndRoundStats decoded;
+	expect(decode_end_round_stats(stream.data(), stream.size(), decoded) &&
+			decoded.team_rows.size() == 3 &&
+			decoded.team_rows[0].size() == active,
+			"the retail client reads the declared count per team row");
+	expect(std::equal(decoded.team_rows[0].begin(), decoded.team_rows[0].end(),
+					board.team_rows[0].begin()),
+			"team row 0 lands aligned");
+	// The client's row 1 starts at word `active` of the producer's row 0 (a
+	// zero of the neutral row), not at the producer's team-1 row (10 points).
+	expect(decoded.team_rows[1][0] == board.team_rows[0][active] &&
+			decoded.team_rows[1][0] == 0 && board.team_rows[1][0] == 10,
+			"team row 1 begins inside the producer's row 0, as on a retail host");
+}
+
+// Team KOTH freezes five team rows at any team count and fills matrix column
+// id 5 from the TeamRecord hold timer, not from the stats accessor.
+// [orig: Server_BuildEndOfRoundScoreboard @0x50928c..0x50929c (count 5),
+// @0x5092e5..0x5092e7 (the id-5 read), @0x508fa7 (the header team score)]
+void test_tkoth_board_five_rows_and_hold_column() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(3, 4);
+	w::MatchRules rules;
+	rules.game_type = game_type::kTeamKingOfTheHill;
+	rules.game_time_minutes = 10;
+	rules.hill_limit_minutes = 99;
+	world.match.configure(rules);
+	const w::EntityHandle blue_a = match_player(world, 3, 1, "BlueA");
+	const w::EntityHandle blue_b = match_player(world, 4, 1, "BlueB");
+	const w::EntityHandle red = match_player(world, 7, 2, "Red");
+	world.registry.get(blue_a)->position = {0.0f, 0.0f, 0.0f};
+	world.registry.get(blue_b)->position = {0.0f, 0.0f, 0.0f};
+	world.registry.get(red)->position = {100.0f, 0.0f, 0.0f};
+	w::Entity hill;
+	hill.kind = w::EntityKind::Item;
+	hill.item_id = 6006;
+	hill.has_item_def = true;
+	hill.position = {0.0f, 0.0f, 0.0f};
+	hill.bound_radius = 10.0f;
+	hill.alive = true;
+	world.registry.spawn(3, hill);
+	// Three one-second service passes: the first fires on the first tick.
+	world.match.advance_tick(world);
+	for (int i = 0; i < 2 * 62; ++i) world.match.advance_tick(world);
+	expect(world.match.player(blue_a)->objective_ticks == 3 &&
+			world.match.player(blue_b)->objective_ticks == 3,
+			"both holders accumulate their own hill ticks");
+
+	world.process_round_end(1);
+	const w::MatchResult &result = world.match.result();
+	expect(result.team_row_count == 5 && result.team_hold_ticks[1] == 3,
+			"a two-team TKOTH freezes five rows and the team-1 hold timer");
+	const EndRoundStats board = inmatch::build_end_round_stats(result);
+	expect(board.team_score_0 == 3 && board.team_score_1 == 0,
+			"the header team score is the hold timer, not the six-tick fold");
+	const size_t configured = result.score_fields.size();
+	size_t column_five = configured;
+	for (size_t i = 0; i < configured; ++i)
+		if (result.score_fields[i].field == 5) column_five = i;
+	expect(configured == 18 && column_five == 1,
+			"TKOTH configures column id 5 second");
+	bool five_rows = board.team_rows.size() == 5;
+	for (const std::vector<int16_t> &row : board.team_rows)
+		five_rows = five_rows && row.size() == configured;
+	expect(five_rows, "five configured-width team rows");
+	expect(board.team_rows[1][column_five] == 3 &&
+			board.team_rows[2][column_five] == 0 &&
+			board.team_rows[0][column_five] == 0,
+			"matrix column 5 is the team hold timer");
+	expect(w::match_score_field_value(result.team_stats[1], 5, result.game_type) == 0,
+			"the stats accessor would have read zero for the same column");
+	// Rows 3 and 4 are the zero TeamRecords read through the same fill: every
+	// configured column resolves through CPlayerStats_GetFieldByIndex over a
+	// zero record — 0 everywhere except the shots-per-kill column (id 21),
+	// whose zero-kills leg returns -1 — and the id-5 hold word reads 0.
+	// [orig: Server_BuildEndOfRoundScoreboard fill @0x5092D0..0x509327;
+	//  CPlayerStats_GetFieldByIndex case 21 @0x52d6fa..0x52d70b]
+	bool tail_rows_zero_records = true;
+	for (size_t row = 3; row < 5; ++row) {
+		for (size_t i = 0; i < configured; ++i) {
+			const uint8_t field = result.score_fields[i].field;
+			const int16_t expected_word = field == 5
+					? int16_t{0}
+					: static_cast<int16_t>(w::match_score_field_value(
+							  w::MatchStats{}, field, result.game_type));
+			tail_rows_zero_records = tail_rows_zero_records &&
+					board.team_rows[row][i] == expected_word;
+		}
+	}
+	expect(tail_rows_zero_records && board.team_rows[3][configured - 1] == -1 &&
+					board.team_rows[4][configured - 1] == -1,
+			"rows 3 and 4 of a two-team TKOTH are the zero team records read through "
+			"the accessor (-1 shots per kill)");
+	const std::vector<uint8_t> stream = encode_end_round_stats(board);
+	expect(stream.size() == expected_board_stream_size(board, configured),
+			"the TKOTH 0x56 stream carries five configured-width rows");
+}
+
 void test_demolition_death_routes_score_and_round_wire() {
 	for (const uint32_t game_type : {
 			game_type::kSearchAndDestroy, game_type::kAttackDefend}) {
@@ -1142,6 +1392,9 @@ int main() {
 
 	test_tdm_round_wire_and_linger();
 	test_dm_round_wire_named_header();
+	test_dm_round_wire_kill_order_and_tie();
+	test_tdm_inactive_columns_keep_configured_matrix_width();
+	test_tkoth_board_five_rows_and_hold_column();
 	test_demolition_death_routes_score_and_round_wire();
 	test_aas_round_wire();
 	test_coop_script_producers_share_round_wire();

@@ -126,12 +126,31 @@ const char *weapon_category_token(int index);
 // replaced) [orig: UI_PopulateControlMappingList @ 0x55c0c0].
 bool is_player_visible(const ActionDef &action);
 
-// Windows VK code -> display key name ("Mouse 1", "Up", "Space", "F1", "W", ...).
-// [orig: KeyBinding_GetKeyNameAndDisplayName @ 0x494c60]
+// The pair the VK switch writes: the "Keys" table lookup key (the binding
+// name, "LBUTTON" / "F1" / "PRINT" / "W") and the untranslated display
+// fallback ("XXMouse 1" / "XXF1" / "XXPrint Screen" / "W"). A printable VK
+// is its own character in both; every other unlisted VK is
+// "<KEY label> <vk>" in both (e.g. "Key 0", "Key 226") through the same table
+// [orig: KeyBinding_GetKeyNameAndDisplayName @ 0x494c60 -- the default arm
+//  @0x496235..0x49629f].
+struct KeyNames {
+  std::string binding;  // the "Keys" lookup key
+  std::string display;  // the fallback the lookup returns on a miss
+};
+KeyNames key_binding_names(int vk);
+
+// Windows VK code -> the label every formatter appends: the "Keys" table entry
+// for the binding name, else the display fallback ("Mouse 1", "Up", "Space",
+// "F1", "W", "Print Screen", "Key 226", ...) [orig: the
+// KeyHelp_GetStringWithFallback("Keys", keyName, displayName) calls
+// @0x496d61/@0x496f01/@0x559b61 over KeyBinding_GetKeyNameAndDisplayName
+// @ 0x494c60; key_strings.h].
 std::string key_name(int vk);
 
-// Format a binding for the Control column: the primary key, optionally joined to a
-// secondary with " or ". Empty when unbound.
+// Format a binding for the Control column: up to two key slots, each behind
+// its "Ctrl-"/"Shift-" prefix (modifier word 17 / 16), the second joined by
+// the localized "OR" separator. Every prefix, the separator and the key names
+// come from the "Keys" table (key_strings.h). Empty when unbound.
 // [orig: KeyBinding_FormatBindingString @ 0x559a10]
 std::string format_binding(int key, int key2, int modifier = 0,
                            int modifier2 = 0);

@@ -209,8 +209,41 @@ void test_run_files_share_order_symbols_and_diagnostics() {
 
 } // namespace
 
+// `gloop(G_x)` is the retail Unknown Group leg, not a structural error: the
+// `(` is the group token, the compile keeps running with group 0, and the
+// game's lenient policy loads the script (the strict host still refuses every
+// diagnostic). [orig: Script_Compile tokenizer @0x4f32e0..0x4f3464; the GLOOP
+//  operand resolve @0x4f365d..0x4f3693 -> WacScript_ResolveParameter group leg
+//  @0x4f30fc]
+void test_parenthesised_gloop_is_the_unknown_group_leg() {
+	TempResourceRoot root;
+	root.write("sample.wac", "gloop(G_ai) inc(v1) end\ninc(v2)\n");
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	wc::WacSystem lenient, strict;
+	std::string error;
+	CHECK(wc::wac_layered_load(lenient, root.files(), "sample", &world.registry,
+				  /*strict_diagnostics=*/false, error) ==
+			wc::WacLayeredLoadStatus::kLoaded);
+	CHECK(error.empty());
+	world.add_system(&lenient);
+	world.load_systems();
+	CHECK(lenient.execute_initial(world));
+	CHECK(world.script.vars.get_mission(1) == 0); // group 0 is empty: the body never runs
+	CHECK(world.script.vars.get_mission(2) == 1); // the script kept running past the error
+	CHECK(wc::wac_layered_load(strict, root.files(), "sample", &world.registry,
+				  /*strict_diagnostics=*/true, error) ==
+			wc::WacLayeredLoadStatus::kBlocked);
+	CHECK(error.find("failed to compile cleanly") != std::string::npos);
+	bool unknown_group = false;
+	for (const wc::Diagnostic &d : lenient.program().diagnostics)
+		if (!d.error && d.message.find("Unknown Group") != std::string::npos) unknown_group = true;
+	CHECK(unknown_group);
+}
+
 int main() {
     test_run_files_share_order_symbols_and_diagnostics();
+	test_parenthesised_gloop_is_the_unknown_group_leg();
 	test_wac_layers_execute_in_retail_order();
 	test_absent_layers_are_the_valid_bms_only_mission();
 	test_retail_two_word_else_if_chain_is_clean_under_strict();

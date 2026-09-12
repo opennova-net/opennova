@@ -105,6 +105,10 @@ const char *mus_vm_current_section(const MusVM *vm) {
     return vm ? vm->current_section_name : "";
 }
 
+int mus_vm_call_depth(const MusVM *vm) {
+    return vm ? vm->csp : 0;
+}
+
 uint32_t mus_vm_pc(const MusVM *vm) {
     return vm ? vm->pc : 0;
 }
@@ -964,14 +968,12 @@ static void check_section_transition(MusVM *vm) {
     }
 }
 
-/* Tick: witnessed dispatch loop @ Jointops.exe!AudioVM_DispatchLoop @ 0x00672720.
-   Budget = 32 instructions (dword_3246B24). Halt latches break early. */
-int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
-    init_handlers();
-    if (!vm) return 0;
-    if (vm->state != MUS_VM_RUNNING) return 0;
-    if (!vm->script || !vm->script->code) return 0;
-
+/* The dispatch loop @ Jointops.exe!AudioVM_DispatchLoop @ 0x00672720 --
+   shared by the per-tick step and the restart frame. Budget = 32
+   instructions (dword_3246B24). Halt latches break early. `gate_on_running`
+   is the embedder's start/stop/pause seam (the tick honours it; the restart
+   frame runs on any loaded script, like retail's step). */
+static void run_dispatch_loop(MusVM *vm, int gate_on_running) {
     vm->halt_latch = 0;
     /* [orig: AudioVM_DispatchLoop @ 0x672720] the instruction budget
        (dword_3246B24 = 32) is a SOFT floor, not a hard cap. The loop tail is
@@ -988,7 +990,11 @@ int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
        forever (the original hangs too); cap it so the embedder never wedges. */
     int extension = kTickBudget * 64;
     for (;;) {
-        if (vm->state != MUS_VM_RUNNING) break;
+        if (gate_on_running) {
+            if (vm->state != MUS_VM_RUNNING) break;
+        } else if (vm->state == MUS_VM_ERROR || vm->state == MUS_VM_HALTED) {
+            break;
+        }
         if (vm->pc >= vm->script->code_size) {
             vm->state = MUS_VM_HALTED;
             break;
@@ -1007,7 +1013,44 @@ int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
         if (--budget <= 0 && vm->sp <= 0) break;   /* budget spent + stack drained */
         if (--extension <= 0) break;               /* safety: never spin forever */
     }
+}
+
+/* Tick: the per-update step [orig: sub_672EE0 -> sub_672E50 @ 0x672ec1 with
+   the restart byte clear -> AudioVM_DispatchLoop @ 0x672720]. */
+int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
+    init_handlers();
+    if (!vm) return 0;
+    if (vm->state != MUS_VM_RUNNING) return 0;
+    if (!vm->script || !vm->script->code) return 0;
+
+    run_dispatch_loop(vm, 1);
     return (int)dt_ms;
+}
+
+/* The restart frame [orig: sub_672E50 @ 0x672e95..0x672ec1]:
+     movzx eax,[esi+20h]; test eax,eax; jz normal_step   ; restart byte (ctx+32)
+     mov byte [esi+20h],0                                 ; clear it
+     mov edx,[esi+18h]; mov [edi],edx; add edi,4          ; push IP on the return stack
+     mov [ebp],eax; xor ebx,ebx; mov [ebp+4],ebx; add ebp,8 ; push (value, 0)
+     mov ecx,chunk; mov esi,[ecx+40h]; jnz dispatch        ; IP = MessageHandler
+     call AudioVM_DispatchLoop; mov [ctx+18h],esi          ; run, store the IP
+   MusicCtx_SelectEndTrack @ 0x672fd0 sets the byte and calls this step at
+   once whenever chunk_04 is loaded, so the two are one call here. */
+int mus_vm_signal(MusVM *vm, int32_t value) {
+    init_handlers();
+    if (!vm || !vm->script || !vm->script->code) return -1;
+    if (!vm->script->has_message_handler) return -2;
+    if (vm->csp >= kCallStackCap) {
+        snprintf(vm->last_error, sizeof(vm->last_error), "call stack overflow");
+        vm->state = MUS_VM_ERROR;
+        return -3;
+    }
+    vm->call_stack[vm->csp++] = vm->pc;
+    vm_push(vm, value);
+    vm_push(vm, 0);
+    vm->pc = vm->script->message_handler_offset;
+    run_dispatch_loop(vm, 0);
+    return 0;
 }
 
 /* ---- Globals accessors ------------------------------------------------ */

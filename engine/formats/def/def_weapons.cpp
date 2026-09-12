@@ -65,6 +65,9 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 cw_raw_cap = 0; cw_act_cap = 0; cw_sight_cap = 0;
                 /* [orig: AdmDef_InitEntryDefaults @ 0x53ff31 seeds renderfov = 80.0] */
                 cw.renderfov = 80.0f;
+                /* [orig: AdmDef_InitEntryDefaults def[38] = 2 @ 0x53ff73 -> +0x98
+                   'scope_min_mag', the scope zoom floor] */
+                cw.scope_min_mag = 2;
                 extract_quoted(trimmed, tlen, cw.weapon_name, sizeof(cw.weapon_name));
                 state = ST_WEAPON;
             }
@@ -361,9 +364,24 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "scope_max_mag", 13)) {
                 /* ADS zoom magnification; the scoped FOV = 80 / clamped zoom
-                   [orig: Player_ToggleWeaponScope @ 0x4df401]. */
+                   [orig: Player_ToggleWeaponScope @ 0x4df401]. Two atol'd values:
+                   the max -> +0x90 and the slot's initial zoom -> +0x94, which
+                   stays 0 when the row carries one value (atol of the empty
+                   second token) [orig: WeaponDefs_ParseLineCallback @ 0x544f1e
+                   / @ 0x544f29 and @ 0x544f33 / @ 0x544f44]. */
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
-                cw.scope_max_mag = parse_float_n(v, vl);
+                Token values[2];
+                const int count = split_values(v, vl, values, 2);
+                cw.scope_max_mag = count >= 1
+                        ? (float)parse_int_n(values[0].s, values[0].len) : 0.0f;
+                cw.scope_max_mag_arg2 = count >= 2
+                        ? parse_int_n(values[1].s, values[1].len) : 0;
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "scope_min_mag", 13)) {
+                /* The scope zoom floor -> +0x98, atol [orig: WeaponDefs_ParseLineCallback
+                   @ 0x544f4f..0x544f7a]. */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+                cw.scope_min_mag = parse_int_n(v, vl);
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "soundfireloop", 13)) {
                 consume_value_str(trimmed, tlen, 13, cw.soundfireloop, sizeof(cw.soundfireloop));

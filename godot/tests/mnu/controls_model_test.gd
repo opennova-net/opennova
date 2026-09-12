@@ -175,3 +175,54 @@ func test_static_mouse_and_joystick_defaults_survive_profile_round_trip() -> voi
 	_press(KEY_CTRL, true)
 	assert_eq(restored.mouse_event_token(MOUSE_BUTTON_WHEEL_UP), "ScopeZeroInc")
 	_press(KEY_CTRL, false)
+
+
+# Every binding label resolves through the process-wide "Keys" table (retail's
+# g_TextKeyHelp = keyhelp.bin, the engine's KeyHelp_GetStringWithFallback lookup
+# behind controls::format_binding / key_name) that the shell installs through
+# RtxtStringFile.install_key_strings when it registers Strings.TABLE_KEYHELP.
+# The shipped table renders "Ctrl-" and " or "; with no table installed the
+# binary's own literals render marker-stripped ("Ctrl - ", " or ").
+func test_key_labels_resolve_through_the_installed_keys_table() -> void:
+	var table := RtxtStringFile.new()
+	var keys: int = table.add_section("Keys")
+	table.add_entry("Ctrl-", "Ctrl-", keys, Vector2i.ZERO)
+	table.add_entry("OR", " or ", keys, Vector2i.ZERO)
+	table.add_entry("UP", "Up Arrow", keys, Vector2i.ZERO)
+	var model := ControlsModel.new()
+	var action: int = model.action_index_for_row(0)
+	assert_true(model.assign_godot_key(action, KEY_Y, true), "Ctrl+Y assigns")
+	RtxtStringFile.clear_key_strings()
+	assert_false(RtxtStringFile.has_key_strings(), "no table before the install")
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"Ctrl - Y or Up", "no table: the marker-stripped literals render")
+	table.install_key_strings()
+	assert_true(RtxtStringFile.has_key_strings(), "the table is installed process-wide")
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"Ctrl-Y or Up Arrow", "the installed entries replace the prefix, separator and key name")
+	RtxtStringFile.clear_key_strings()
+	assert_false(RtxtStringFile.has_key_strings(), "clear forgets the table")
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"Ctrl - Y or Up", "the literals are back once the table is cleared")
+
+
+# The Strings registry is the shell's install point: registering keyhelp under
+# Strings.TABLE_KEYHELP installs it, unregistering (or clear()) forgets it.
+func test_strings_keyhelp_registration_installs_the_keys_table() -> void:
+	var table := RtxtStringFile.new()
+	var keys: int = table.add_section("Keys")
+	table.add_entry("OR", " / ", keys, Vector2i.ZERO)
+	RtxtStringFile.clear_key_strings()
+	Strings.register_table(Strings.TABLE_KEYHELP, table)
+	assert_true(RtxtStringFile.has_key_strings(), "registering keyhelp installs the table")
+	var model := ControlsModel.new()
+	var action: int = model.action_index_for_row(0)
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"W / Up", "the registered table's separator renders")
+	Strings.register_table(Strings.TABLE_KEYHELP, null)
+	assert_false(RtxtStringFile.has_key_strings(), "unregistering forgets it")
+	Strings.register_table(Strings.TABLE_KEYHELP, table)
+	Strings.clear()
+	assert_false(RtxtStringFile.has_key_strings(), "clear() forgets it with the registry")
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"W or Up", "the literal separator is back")

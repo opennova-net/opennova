@@ -651,9 +651,36 @@ void h_enter_vehicle_dying(AiThinkCtx &ctx) {
                 entity_update_death_transforms(*ctx.world, *ent, /*silent=*/false);
         }
     }
-	// The def+0x548 count builds this authored child list at promotion. Clear
-	// health before its phase-1 death callback, including client-side rows.
-	// [orig: AI_TransitionToDeath_GroundVehicle @0x467B6E..0x467BBB]
+	// The `Parent` (ItemDef+0x548) gate over the brain's +576/+580 gunner-attachment
+	// list the class init built (VehicleSystem::setup_gunner_attachments): every
+	// live child's health word is zeroed and its class death callback runs with
+	// phase 1, on clients too [orig: AI_TransitionToDeath_GroundVehicle
+	// @0x467B6E (the +1352 byte) .. @0x467BBB (child deathCallback(child, 1, 0));
+	// the +286 > 0 gate @0x467B9A, the hit-record attacker clear @0x467BAD].
+	if (ctx.world != nullptr) {
+		World &world = *ctx.world;
+		const Entity *parent = world.registry.get(e.handle);
+		const VehicleTraits *traits =
+				parent != nullptr ? world.vehicles.traits.get(parent->item_id) : nullptr;
+		if (traits != nullptr && traits->attrib_parent) {
+			const int32_t count =
+					std::min<int32_t>(b.f[AiBrain::kAttachCount], AiBrain::kAttachSlotMax);
+			for (int slot = 0; slot < count; ++slot) {
+				const int32_t word = b.f[AiBrain::kAttachSlots + 2 * slot + 1];
+				if (word <= 0) continue;
+				Entity *child = world.registry.get(EntityHandle{ static_cast<uint16_t>(word - 1) });
+				if (child == nullptr || child->health <= 0) continue;
+				child->health = 0;
+				child->last_attacker = {};
+				if (AiEntity *brain = world.ai.for_handle(child->handle))
+					brain->health = 0;
+				destruction_notify_item_damage(world, *child, 1);
+			}
+		}
+	}
+	// The addeweap emplacement children (items.def addeweap*, a different list
+	// from the refNum peers above) keep the earlier stand-in kill until the
+	// world.cpp orphan cascade alone carries them (destruction_test pins it).
 	if (ctx.world != nullptr) {
 		World &world = *ctx.world;
 		const Entity *parent = world.registry.get(e.handle);

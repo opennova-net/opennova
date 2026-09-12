@@ -75,8 +75,18 @@ typedef struct MusChunkHeader {
     uint32_t debug_info_count;            /* 0 in stripped runtime files */
     uint32_t string_section_offset;       /* editor-only */
     uint32_t string_section_size;         /* observed 0x20 */
-    uint32_t aux_table_a_offset;          /* relocated if nonzero */
-    uint32_t aux_table_b_offset;          /* relocated if nonzero */
+    /* +0x40: chunk-relative code pointer of the MessageHandler entry, relocated
+       when nonzero [orig: AudioVM_FixupPointers @ 0x672495 vmData[16]]; the
+       restart frame jumps the VM here [orig: sub_672E50 @ 0x672eba]. Retail
+       gamemus.bin carries 0x91 (`enter 2; method 4; empty; push_l 0x20;
+       tablexec 3 [setstate 1 | setstate 2 | setstate 4]`), menumus.bin 0x94
+       (= its bytecode start). 0 = no handler. */
+    uint32_t message_handler_offset;
+    /* +0x44: chunk-relative code pointer, relocated when nonzero
+       [orig: AudioVM_FixupPointers @ 0x6724a1 vmData[17]]; both shipped chunks
+       carry the bytecode start here (gamemus 0x88, menumus 0x94). No runtime
+       reader witnessed. */
+    uint32_t main_entry_offset;
 } MusChunkHeader;
 
 static_assert(sizeof(MusFileHeader)  == 44, "MusFileHeader must be 44 bytes");
@@ -115,6 +125,12 @@ typedef struct MusScript {
        AudioVM_Op_Enter @ 0x672C20; MDEdit invariantly emits 0x20. Parsed from
        the chunk; the compiler defaults it to 0x20. 0 is treated as 0x20. */
     uint32_t    locals_frame_offset;
+    /* The MessageHandler entry (bytecode-relative PC) the restart frame jumps
+       to, from the chunk's +0x40 pointer; has_message_handler is 0 when the
+       chunk carries none (the compiler never emits one; retail's shipped
+       chunks both carry one). [orig: sub_672E50 @ 0x672e95..0x672ec1] */
+    uint32_t    message_handler_offset;
+    int         has_message_handler;
 
     /* Editor debug info (string_section / aux tables in the chunk). Empty when
        the chunk was stripped. Witnessed: editor MDEdit writes a 256-byte source
@@ -286,11 +302,32 @@ void mus_vm_resume(MusVM *vm);
    on success, 0 if the VM is not RUNNING. */
 int mus_vm_tick(MusVM *vm, uint32_t dt_ms);
 
+/* The restart frame [orig: sub_672E50 @ 0x672e95..0x672ec1 -- the step the
+   per-update pump (sub_672EE0) and MusicCtx_SelectEndTrack @ 0x672fd0 share]:
+   when the context's restart byte (ctx+32) is set the step clears it, pushes
+   the current IP on the return stack, pushes (value, 0) on the data stack,
+   sets IP = the chunk's +0x40 MessageHandler pointer and runs the dispatch
+   loop. MusicCtx_SelectEndTrack(value) sets the byte and steps at once
+   whenever a script is loaded, so the flag never outlives the call; this
+   entry point is that pair. Server_ProcessRoundEnd's single-player tail
+   calls it with 1 (win, after Cine_InitPlayback @ 0x51696b) and 2 (lose,
+   after Cine_StartPlayback @ 0x51698f); retail gamemus.bin's handler
+   dispatches 1 -> Missionwin, 2 -> Missionlose, 0 -> the idle section.
+   Runs regardless of the RUNNING/STOPPED state (retail's step ignores the
+   streaming-active flag; it needs only a loaded script). Returns 0 when the
+   frame ran, -1 with no script, -2 when the script carries no handler
+   (retail would read through a null chunk pointer), -3 on a return-stack
+   overflow. */
+int mus_vm_signal(MusVM *vm, int32_t value);
+
 /* State accessors. */
 MusVMState  mus_vm_state          (const MusVM *vm);
 const char *mus_vm_last_error     (const MusVM *vm);
 const char *mus_vm_current_section(const MusVM *vm);
 uint32_t    mus_vm_pc             (const MusVM *vm);
+/* Return-stack depth (the interrupted PCs `enter`-frames and the restart
+   frame push; `return` pops). */
+int         mus_vm_call_depth     (const MusVM *vm);
 
 /* Globals area accessors (Var00..Var15 at byte offsets 0..60 = var_index 0..15;
    one user global slot at var_index 16). Out-of-range indices are silent. */

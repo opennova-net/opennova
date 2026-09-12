@@ -866,12 +866,71 @@ void test_vehicle_respawn_clears_matching_teleport_ground_backup() {
     CHECK(r.w.registry.get(no_item)->mount_toggle_fallback == r.veh_h);
 }
 
+// The toggle's two arms key on the queued Co-op spawn-marker mount latch
+// (Flags 0x200) alone: with it set, the best free seat of the groundEntity
+// carrier or NOTHING (a full carrier does not fall through to the scan); with
+// it clear, the look-cone scan even for a player standing on the carrier's
+// deck — he boards the seat he looks at, not the priority seat.
+// [orig: Entity_TryEnterNearestVehicle @0x4368CF / @0x4368E0 / @0x436903 /
+//  @0x43691A; the latch's writer Server_PositionPlayerForSpawn @0x50D44D]
 void test_toggle_deck_best_seat() {
-    Rig r(30.0f); // out of scan range: only the deck path can mount
-    r.player().ground_target = r.veh_h;
-    CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
-    CHECK(r.player().mounted);
-    CHECK(r.player().mount_type == SeatType::Controller);
+    {
+        Rig r(30.0f); // out of scan range: only the queued arm can mount
+        r.player().ground_target = r.veh_h;
+        r.player().flags |= kEntityFlagQueuedMount;
+        CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
+        CHECK(r.player().mounted);
+        CHECK(r.player().mount_type == SeatType::Controller);
+    }
+    {
+        Rig r(30.0f); // a bare deck stander out of scan range mounts nothing
+        r.player().ground_target = r.veh_h;
+        CHECK(!r.w.vehicles.player_toggle_mount(r.player_h));
+        CHECK(!r.player().mounted);
+    }
+    {
+        // A deck stander in reach boards the LOOKED-AT passenger seat, not the
+        // controller the priority weights would pick.
+        Rig r(-2.5f);
+        r.player().ground_target = r.veh_h;
+        look_at(r.w, r.player_h, entity_local_point_world(r.veh(), r.veh().seats[1].seat_local));
+        CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
+        CHECK(r.player().mount_seat == 1);
+        CHECK(r.player().mount_type == SeatType::Passenger);
+    }
+    {
+        // The queued arm on a FULL carrier returns nothing and never scans a
+        // neighbouring vehicle, even one with a free seat in reach.
+        Rig r(2.0f);
+        Entity other;
+        other.kind = EntityKind::Organic;
+        other.item_id = 5305;
+        other.player_class = 8;
+        other.health = 150;
+        other.alive = true;
+        const EntityHandle oh1 = r.w.registry.spawn(0, other);
+        const EntityHandle oh2 = r.w.registry.spawn(0, other);
+        CHECK(r.w.vehicles.process_attach(oh1, r.veh_h, 1));
+        CHECK(r.w.vehicles.process_attach(oh2, r.veh_h, 2));
+        Entity neighbour = r.veh();
+        neighbour.net_id = 12;
+        neighbour.bms_id = 12;
+        neighbour.position = {102.0f, 201.0f, 10.0f}; // beside the player: seats in reach
+        for (Seat &seat : neighbour.seats) seat.occupant = EntityHandle{};
+        neighbour.primary_occupant = EntityHandle{};
+        const EntityHandle nh = r.w.registry.spawn(1, neighbour);
+        r.player().ground_target = r.veh_h;
+        r.player().flags |= kEntityFlagQueuedMount;
+        look_at(r.w, r.player_h, entity_local_point_world(*r.w.registry.get(nh), r.veh().seats[0].seat_local));
+        CHECK(!r.w.vehicles.player_toggle_mount(r.player_h));
+        CHECK(!r.player().mounted);
+        VehicleSeatSelection preview;
+        CHECK(!r.w.vehicles.find_mount_toggle_candidate(r.player(), preview));
+        // Without the latch the same press scans and finds the neighbour.
+        r.player().flags &= ~kEntityFlagQueuedMount;
+        CHECK(r.w.vehicles.find_mount_toggle_candidate(r.player(), preview));
+        CHECK(preview.vehicle == nh);
+    }
 }
 
 CollisionModel make_seat_hull() {
@@ -1239,8 +1298,11 @@ void test_bms_mount_predicates() {
     CHECK(cmds.local_player_standing_on_ssn(11));
     CHECK(!cmds.local_player_attached_to_ssn(11));
 
-    // Mounted into the ctrl seat: 38 + 40 true, 41 false.
-    CHECK(r.w.vehicles.player_toggle_mount(r.player_h)); // deck path -> ctrl seat
+    // Mounted into the ctrl seat: 38 + 40 true, 41 false. The queued-mount
+    // latch takes the FindBestSeatSlot arm (a bare deck stander would scan).
+    r.player().flags |= kEntityFlagQueuedMount;
+    CHECK(r.w.vehicles.player_toggle_mount(r.player_h)); // queued arm -> ctrl seat
+    r.player().flags &= ~kEntityFlagQueuedMount;
     CHECK(cmds.local_player_attached_to_ssn(11));
     CHECK(cmds.local_player_driving_ssn(11));
     CHECK(!cmds.local_player_on_gun_of_ssn(11));
@@ -1991,8 +2053,11 @@ void test_helo_ai_flight() {
 		// libm differences in the trig lanes, not a behavior band). The pre-port
 		// `x < 300` held only while state 7 had no tick handler and the rig's
 		// unseeded SM speed left the command at the 132-count creep seed
-		// (@0x49181b..0x491834).
-		CHECK(std::fabs(h.r.veh().position.x - 414.44f) < 0.25f);
+		// (@0x49181b..0x491834). The brain's route bearing now refreshes only
+		// on its think visits (every brain[7] pool-1 visits, Entity_UpdatePool1Slot
+		// @0x4b8e1b / @0x4b8ea0), so the orbit's exact 414.44 pin retired with
+		// the every-tick think; the band brackets the same crossing-and-orbit.
+		CHECK(h.r.veh().position.x > 380.0f && h.r.veh().position.x < 450.0f);
 	}
 	{
         HeloRig h; // no route: the parked altitude target holds -> it settles
@@ -2146,7 +2211,9 @@ void test_local_player_drive_mirror() {
     pe.inf.is_local_player = true;
     pe.health = 150;
     r.player().ground_target = r.veh_h;
-    CHECK(r.w.vehicles.player_toggle_mount(r.player_h)); // deck path -> ctrl seat
+    r.player().flags |= kEntityFlagQueuedMount; // the queued arm picks the ctrl seat
+    CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
+    r.player().flags &= ~kEntityFlagQueuedMount;
     CHECK(is_vehicle_control_seat(r.player().mount_type));
 
     // Live input: forward held, looking along +x (mission yaw 90).
@@ -2190,7 +2257,12 @@ void test_driver_animation() {
 		body.inf.is_local_player = local;
 		body.health = 150;
 		r.player().ground_target = r.veh_h;
+		// Out of scan reach (30 u): the queued-mount latch takes the
+		// FindBestSeatSlot(groundEntity) arm into the ctrl seat [orig:
+		// Entity_TryEnterNearestVehicle @0x4368CF -> @0x4368E0].
+		r.player().flags |= kEntityFlagQueuedMount;
 		CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
+		r.player().flags &= ~kEntityFlagQueuedMount;
 		r.veh().veh.yaw_seeded = true;
 		struct Case {
 			int32_t roll, speed;

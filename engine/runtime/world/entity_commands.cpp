@@ -350,7 +350,10 @@ bool EntityCommands::kill_player(EntityHandle victim, EntityHandle killer) {
     RoundDeath d;
     d.victim = victim;
     d.victim_handle = victim.packed;
-    d.killer = killer;
+    // An unstamped killer falls back to the victim's +0x178 lastAttacker, the
+    // field GameEvent_PlayerDeath reads; the infantry death edge has already
+    // emptied it for a body nothing ever hit [orig: @0x516f6b].
+    d.killer = killer.valid() ? killer : e->last_attacker;
     d.killer_handle = killer.valid() ? killer.packed : 0xFFFFu;
     world_.round_sim.deaths.push_back(d);
     return true;
@@ -1004,7 +1007,11 @@ static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
     RoundDeath d;
     d.victim = h;
     d.victim_handle = h.packed;
-    // killer_handle stays at its default: retail's unstamped entity+704.
+    // The victim's +0x178 lastAttacker is the killer GameEvent_PlayerDeath
+    // reads [orig: @0x516f6b]; the edge's fallback has already emptied it for
+    // a body nothing ever hit. killer_handle stays at its default: retail's
+    // unstamped entity+704.
+    d.killer = e.last_attacker;
     d.killer_handle = 0;
     world.round_sim.deaths.push_back(d);
     e.alive = false;

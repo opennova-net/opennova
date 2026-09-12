@@ -1630,6 +1630,13 @@ void test_selector_zero_sound_tails() {
 	ground.w.vehicles.tick_motor(ground.veh(), t);
 	CHECK(ground.w.out.slot_sounds.empty());
 
+	// The boat runs the claimant start/stop edge at its HEAD (the PlayerControl
+	// block before the authority split) and the lights edge in its tail, so a
+	// first tick with a fresh claimant and the lights order emits the engine
+	// start BEFORE the lights one-shot; the claimant's departure fires the stop
+	// one-shot on the hull +0x18000 above the water plane.
+	// [orig: Entity_ProcessAirVehiclePhysics @0x46FA00 claimant edge
+	//  @0x470055..0x4700EB, lights @0x4714EA..0x471523]
 	Rig boat;
 	CHECK(boat.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
 	t.family = VehicleFamily::Watercraft;
@@ -1638,14 +1645,27 @@ void test_selector_zero_sound_tails() {
 	boat.mount();
 	boat.drv().net_move_input = 0x20; // the lights order (see above)
 	boat.w.vehicles.tick_motor(boat.veh(), t);
-	CHECK(boat.w.out.slot_sounds.size() == 1);
-	if (boat.w.out.slot_sounds.size() == 1)
-		CHECK(boat.w.out.slot_sounds[0].slot == opennova::audio::kSlotAudio1);
-	CHECK(!boat.veh().veh.engine_sound_latched);
+	CHECK(boat.w.out.slot_sounds.size() == 2);
+	if (boat.w.out.slot_sounds.size() == 2) {
+		CHECK(boat.w.out.slot_sounds[0].slot == opennova::audio::kSlotEngineStart);
+		CHECK(boat.w.out.slot_sounds[1].slot == opennova::audio::kSlotAudio1);
+	}
+	CHECK(boat.veh().veh.engine_sound_latched);
 	boat.w.out.slot_sounds.clear();
 	boat.w.vehicles.tick_motor(boat.veh(), t);
 	CHECK(boat.w.out.slot_sounds.empty());
+	CHECK(boat.veh().veh.engine_sound_latched);
+	// The claimant's departure: the detach leg fires the stop one-shot and
+	// drops the latch [orig: Entity_DetachFromVehicle @0x4356e9..0x435759]; the
+	// mover's own no-claimant arm then has nothing left to fire.
+	boat.w.out.slot_sounds.clear();
+	CHECK(boat.w.vehicles.detach(boat.drv_h));
+	boat.w.vehicles.tick_motor(boat.veh(), t);
 	CHECK(!boat.veh().veh.engine_sound_latched);
+	int stops = 0;
+	for (const auto &sound : boat.w.out.slot_sounds)
+		if (sound.slot == opennova::audio::kSlotEngineStop) ++stops;
+	CHECK(stops == 1);
 }
 
 // The critical warning (profile slot 34) cadence: `& 0x1F` in the ground
@@ -1951,21 +1971,27 @@ void test_state0_brain_with_ai_driver_holds() {
 	r.w.ai.tick(r.w, ctx);
 	// One pass: 0 -> 22 at the head, then the AI leg's 22 -> 16 hand-back.
 	CHECK(ae.brain.f[AiBrain::kCurState] == kAiGroundFollowWp);
-	// The tick a driver first sits in a PRETTY hull commands one pulse in retail
+	// The tick a driver first sits in a PRETTY hull commands a pulse in retail
 	// too: the entity's AI callback runs before its class mover
 	// [orig: Entity_UpdatePool1Slot @0x4b8dd0 — ai-fn @0x4b8e3c, class update
 	//  @0x4b8e53], row 22's tick leaves AI_BeginUpdate's [128] = [49] standing,
-	//  and the mover's hand-back copies it into [136] once before row 16 zeroes
-	//  it. The pin is therefore not "never moved" but "does not keep driving":
-	//  the buggy coasts that one pulse out over ~100 ticks (0.22 u here) and
-	//  is then at rest in FOLLOWWP, whereas the sustained drive was ~0.24 u
-	//  per tick (30 u over this run).
-	for (int i = 1; i < 100; ++i) {
+	//  and the mover's hand-back copies it into [136] until row 16's first
+	//  think zeroes it — the brain thinks only every brain[7] pool-1 visits
+	//  (@0x4b8e1b / @0x4b8ea0), so the pulse lasts up to 16 ticks of the
+	//  accel-limited ramp (60/tick from rest, well under a unit). The pin is
+	//  therefore not "never moved" but "does not keep driving": the buggy
+	//  coasts that pulse out and is then at rest in FOLLOWWP, whereas the
+	//  sustained drive was ~0.24 u per tick (30 u over this run). The coast is
+	//  long: the 16-tick ramp peaks at 1401 (the standing start's raw 1/32
+	//  chase, then 15 x 60) and the zero-target 1/32 servo only reaches the
+	//  <48 stop snap ~106 ticks later [orig: the chase @0x48C1FC..0x48C215,
+	//  the snap @0x48C308..0x48C31C], so the at-rest window opens at tick 200.
+	for (int i = 1; i < 200; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
 		r.w.ai.tick(r.w, ctx);
 	}
 	const Vec3 late = r.veh().position;
-	for (int i = 100; i < 124; ++i) {
+	for (int i = 200; i < 224; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
 		r.w.ai.tick(r.w, ctx);
 	}
@@ -1975,7 +2001,7 @@ void test_state0_brain_with_ai_driver_holds() {
 	CHECK(r.veh().veh.cmd_speed == 0); // no route: the row-16 tick froze the out-speed
 	CHECK(r.veh().veh.speed == 0);
 	CHECK(moved_late == 0.0f); // at rest: no sustained drive
-	CHECK(moved < 1.0f);       // the one boarding-tick pulse's coast, nothing more
+	CHECK(moved < 2.0f);       // the boarding pulse's ramp and coast, nothing more
 }
 
 int main() {

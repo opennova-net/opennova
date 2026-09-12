@@ -165,7 +165,145 @@ int main(void) {
     mus_vm_tick(vm6, 16);   /* exactly ONE tick */
     CHECK(mus_vm_get_var(vm6, 0) == 42, "tablexec forward setstate continues the SAME tick (Var0=42 after 1 tick)");
     CHECK(mus_vm_state(vm6) != MUS_VM_ERROR, "tablexec-setstate script ran without error");
+    /* A script with no MessageHandler: the restart frame is refused (retail
+       would read through a null chunk pointer) and nothing moves. */
+    {
+        uint32_t pc_before = mus_vm_pc(vm6);
+        CHECK(mus_vm_signal(vm6, 1) == -2, "signal on a handler-less script returns -2");
+        CHECK(mus_vm_pc(vm6) == pc_before && mus_vm_call_depth(vm6) == 0,
+              "a refused restart frame pushes nothing");
+    }
     mus_vm_destroy(vm6);
+
+    /* ---- Script 7: the MessageHandler restart frame ----
+       [orig: sub_672E50 @0x672e95..0x672ec1 (push IP on the return stack, push
+       (value, 0), IP = chunk+0x40, dispatch); MusicCtx_SelectEndTrack
+       @0x672fd0; Server_ProcessRoundEnd SP tail @0x51696b (1) / @0x51698f (2)].
+       The sections mirror the retail gamemus.bin shape (Start/Idle, the
+       Missionwin -> WinTracks pair playing entries 2..7, the Missionlose ->
+       LoseTracks pair playing 8..12) and the handler is the retail bytecode:
+       enter 2; method 4 (GFB); empty; push_l 0x20; tablexec 3 (inner 0x3b,
+       2-byte entries) = [setstate 1 | setstate 2 | setstate 4]. */
+    uint8_t code7[] = {
+        /* sec0 Start       @0  */ 0x3E,0x00, 0x3B,0x01,
+        /* sec1 Idle        @4  */ 0x3E,0x01, 0x3B,0x01,
+        /* sec2 Missionwin  @8  */ 0x3B,0x03,
+        /* sec3 WinTracks   @10 */ 0x3E,0x02, 0x3E,0x03, 0x3E,0x04, 0x3E,0x05, 0x3E,0x06, 0x3E,0x07, 0x3B,0x01,
+        /* sec4 Missionlose @24 */ 0x3B,0x05,
+        /* sec5 LoseTracks  @26 */ 0x3E,0x08, 0x3E,0x09, 0x3E,0x0A, 0x3E,0x0B, 0x3E,0x0C, 0x3B,0x01,
+        /* handler          @38 */ 0x38,0x02, 0x40,0x04, 0x0F, 0x04,0x20,
+                                   0x35, 0x03,0x3B,0x02,0x0B, 0x3B,0x01, 0x3B,0x02, 0x3B,0x04
+    };
+    MusSection sec7[6]; memset(sec7, 0, sizeof(sec7));
+    const char *names7[6] = {"Start", "Idle", "Missionwin", "WinTracks", "Missionlose", "LoseTracks"};
+    const uint32_t offs7[6] = {0, 4, 8, 10, 24, 26};
+    for (int i = 0; i < 6; ++i) { strcpy(sec7[i].name, names7[i]); sec7[i].code_offset = offs7[i]; }
+    MusScript s7; memset(&s7, 0, sizeof(s7));
+    strcpy(s7.name, "gamescript"); s7.code = code7; s7.code_size = sizeof(code7);
+    s7.sections = sec7; s7.section_count = 6; s7.entry_section_index = 0;
+    s7.globals_size = 68; s7.locals_size = 0x28;
+    s7.message_handler_offset = 38; s7.has_message_handler = 1;
+
+    struct PlayCap { int count; int idx[32]; } plays = {0, {0}};
+    MusVMHooks hooks7; memset(&hooks7, 0, sizeof(hooks7));
+    hooks7.user = &plays;
+    hooks7.on_play_sound = [](void *user, uint32_t idx, int) {
+        PlayCap *cap = (PlayCap *)user;
+        if (cap->count < 32) cap->idx[cap->count] = (int)idx;
+        ++cap->count;
+    };
+    MusVM *vm7 = mus_vm_create();
+    CHECK(mus_vm_load_script(vm7, &s7) == 0, "load s7");
+    mus_vm_set_hooks(vm7, &hooks7);
+    mus_vm_start(vm7);
+    mus_vm_tick(vm7, 16);   /* Start: play 0, halt at the setstate */
+    CHECK(plays.count == 1 && plays.idx[0] == 0, "the entry section plays entry 0");
+    CHECK(mus_vm_call_depth(vm7) == 0, "no frame before the signal");
+
+    /* signal(1): the frame lands in Missionwin at once; the interrupted pc
+       sits on the return stack (setstate jumps away, nothing pops it). */
+    plays.count = 0;
+    CHECK(mus_vm_signal(vm7, 1) == 0, "signal(1) runs the restart frame");
+    CHECK(strcmp(mus_vm_current_section(vm7), "Missionwin") == 0, "value 1 -> setstate 2 (Missionwin)");
+    CHECK(mus_vm_pc(vm7) == 8, "pc = the Missionwin entry");
+    CHECK(mus_vm_call_depth(vm7) == 1, "the interrupted pc holds on the return stack");
+    CHECK(mus_vm_state(vm7) == MUS_VM_RUNNING, "the frame leaves the VM running");
+    for (int t = 0; t < 8; ++t) mus_vm_tick(vm7, 16);   /* setstate 3; play 2..7; setstate 1 */
+    CHECK(plays.count == 6, "Missionwin plays six entries");
+    {
+        int ok = plays.count == 6;
+        for (int i = 0; ok && i < 6; ++i) ok = plays.idx[i] == 2 + i;
+        CHECK(ok, "the win sting is entries 2..7 in order");
+    }
+    CHECK(strcmp(mus_vm_current_section(vm7), "Idle") == 0, "the win sting returns to the idle section");
+
+    /* signal(2): Missionlose -> LoseTracks plays 8..12 then idles. */
+    plays.count = 0;
+    CHECK(mus_vm_signal(vm7, 2) == 0, "signal(2) runs the restart frame");
+    CHECK(strcmp(mus_vm_current_section(vm7), "Missionlose") == 0, "value 2 -> setstate 4 (Missionlose)");
+    for (int t = 0; t < 7; ++t) mus_vm_tick(vm7, 16);   /* setstate 5; play 8..12; setstate 1 */
+    CHECK(plays.count == 5, "Missionlose plays five entries");
+    {
+        int ok = plays.count == 5;
+        for (int i = 0; ok && i < 5; ++i) ok = plays.idx[i] == 8 + i;
+        CHECK(ok, "the lose sting is entries 8..12 in order");
+    }
+    CHECK(strcmp(mus_vm_current_section(vm7), "Idle") == 0, "the lose sting returns to the idle section");
+    CHECK(mus_vm_call_depth(vm7) == 2, "each frame leaves one interrupted pc behind");
+
+    /* signal(0): the handler's first table entry is the idle section. */
+    CHECK(mus_vm_signal(vm7, 0) == 0, "signal(0) runs the restart frame");
+    CHECK(strcmp(mus_vm_current_section(vm7), "Idle") == 0 && mus_vm_pc(vm7) == 4,
+          "value 0 -> setstate 1 (Idle)");
+
+    /* The frame ignores the embedder's streaming state: a stopped VM with a
+       loaded script still takes it [orig: sub_672E50 tests only ctx+32 and the
+       chunk pointer; AudioVM_StopMusicContext @0x671e00 keeps chunk_04]. */
+    mus_vm_stop(vm7);
+    CHECK(mus_vm_signal(vm7, 1) == 0, "signal on a stopped VM still runs");
+    CHECK(strcmp(mus_vm_current_section(vm7), "Missionwin") == 0, "the stopped VM lands in Missionwin");
+    CHECK(mus_vm_state(vm7) == MUS_VM_STOPPED, "the frame does not restart the embedder state");
+    CHECK(mus_vm_signal(NULL, 1) == -1, "signal without a VM is refused");
+    mus_vm_destroy(vm7);
+
+    /* The +0x40 pointer round-trips the container: the encoder writes it
+       chunk-relative like the section entries, the parser normalises it back
+       [orig: AudioVM_FixupPointers @0x672495 vmData[16]]. */
+    {
+        const MusScript *arr[1] = { &s7 };
+        uint8_t *buf = NULL; size_t buf_size = 0;
+        CHECK(mus_encode_file(arr, 1, &buf, &buf_size) == 0 && buf != NULL, "encode the handler script");
+        if (buf) {
+            MusFile mf; memset(&mf, 0, sizeof(mf));
+            CHECK(mus_open_memory(&mf, buf, buf_size) == 0, "reopen the encoded script");
+            CHECK(mf.header.chunk_count == 1 && mf.scripts != NULL, "one chunk");
+            if (mf.scripts) {
+                CHECK(mf.scripts[0].has_message_handler == 1, "the handler pointer survives the container");
+                CHECK(mf.scripts[0].message_handler_offset == 38, "and is bytecode-relative again");
+                CHECK(mf.scripts[0].code_size == sizeof(code7), "the bytecode region is intact");
+                /* The reopened script runs the same frame. */
+                MusVM *vm8 = mus_vm_create();
+                mus_vm_load_script(vm8, &mf.scripts[0]);
+                mus_vm_start(vm8);
+                CHECK(mus_vm_signal(vm8, 2) == 0 && mus_vm_pc(vm8) == 24,
+                      "the reopened handler dispatches value 2 to Missionlose");
+                mus_vm_destroy(vm8);
+            }
+            mus_close(&mf);
+            mus_free(buf);
+        }
+        /* A handler-less script encodes +0x40 = 0 and parses back without one. */
+        const MusScript *arr6[1] = { &s6 };
+        buf = NULL; buf_size = 0;
+        CHECK(mus_encode_file(arr6, 1, &buf, &buf_size) == 0 && buf != NULL, "encode the plain script");
+        if (buf) {
+            MusFile mf; memset(&mf, 0, sizeof(mf));
+            CHECK(mus_open_memory(&mf, buf, buf_size) == 0, "reopen the plain script");
+            CHECK(mf.scripts && mf.scripts[0].has_message_handler == 0, "no handler pointer, no handler");
+            mus_close(&mf);
+            mus_free(buf);
+        }
+    }
 
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;

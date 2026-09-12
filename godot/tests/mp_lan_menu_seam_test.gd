@@ -384,6 +384,10 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 			"FlagBall never boots into retail's immediate team-1 zero-limit outcome")
 	assert_eq(options.koth_delta, 5)
 	assert_eq(options.flag_return_ticks, 210)
+	assert_eq(options.flag_reset_seconds, 420,
+			"the flag carry limit carries the engine's retail default")
+	assert_eq(options.armory_reuse_time, 30,
+			"the armory-reuse cooldown carries the engine's retail default")
 	assert_eq(options.capture_duration_seconds, 15)
 	assert_eq(options.capture_speed_setting, 1)
 	assert_eq(options.spawn_wave_time_base, 0)

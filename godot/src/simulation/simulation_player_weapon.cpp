@@ -56,9 +56,30 @@ void Simulation::request_local_player_weapon_category(WeaponCategory p_category)
 }
 
 void Simulation::request_local_player_weapon_cycle(int p_direction) {
-	if (kernel_->local.view.binoculars_view_active) return;
-	// [orig: input cases 212/214 -> Player_CycleWeaponSlot @ 0x4dfe70; the mounted-gun
-	//  elevation dual-purpose leg belongs to the vehicle channel, not this walk]
+	// The next/prev-weapon actions (212/214) are dual-purpose: the engine's
+	// dispatcher leg (runtime/world/local_player_view.h
+	// local_player_weapon_cycle_route) refuses them while the binocular view
+	// is up or a PowerThrow charge is live, steps the scope zoom by +/-2 in
+	// place of a cycle while the optical view is up on a def whose
+	// scope_min_mag differs from scope_max_mag, and otherwise hands the cycle
+	// (weapon_cycle_slot) back to this walk. The def's scope_min_mag rides
+	// from the kernel's retained weapon.def row; a shell-installed row with no
+	// retained parse takes the engine's record default.
+	const DefWeaponDef *row = native_equipped_weapon_row();
+	const int32_t scope_min_mag = row != nullptr
+			? row->scope_min_mag
+			: opennova::world::ScopeZoomLimits{}.scope_min_mag;
+	const opennova::world::ScopeZoomLimits limits =
+			opennova::world::local_player_scope_zoom_limits(
+					kernel_->world, kernel_->local.weapon, scope_min_mag);
+	switch (opennova::world::local_player_weapon_cycle_route(kernel_->world,
+			kernel_->local.weapon, kernel_->local.view, limits, p_direction)) {
+		case opennova::world::WeaponCycleRoute::kRefused:
+		case opennova::world::WeaponCycleRoute::kZoomStep:
+			return;
+		case opennova::world::WeaponCycleRoute::kCycle:
+			break;
+	}
 	if (kernel_->local.weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
 	if (!kernel_->local.inventory_valid) return;
 	handle_weapon_switch_outcome(opennova::world::weapon_cycle_slot(

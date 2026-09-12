@@ -323,6 +323,16 @@ The currently hosted writer-value families are:
   `[orig: HUD_CacheWeaponSlotInfo @ 0x440930, sole caller
   Entity_AttachToBoneAndUpdateTransform @ 0x546518;
   Player_RenderFirstPersonViewModel @ 0x4DED60]`.
+- `TALK` (5) and `DEATH` (6) have exactly one retail writer, the org0 skin
+  bone-callback `BoneCallback_org0_Skin @ 0x4E3620` (world-wac-ai-re §13.6):
+  `0x83FD10` = the mixer output meter `<< 6` clamped to `0x10000` for the
+  voice-playback entity, else 0 `[orig: @ 0x4e362a..0x4e364e]`; `0x83FD18` =
+  `((Flags & 2) && moveTimer < 248) ? (max(0, moveTimer - 62) << 16) / 186 :
+  0xFFFF` `[orig: @ 0x4e3669..0x4e368e]`. DEATH's value function is ported
+  (`world::death_ctrl_register_value`, 2026-09-12) and rides the present row
+  (`PF_DEATH_CTRL`: the authoritative organic row's dead flag + corpse timer);
+  the shell presenter's CTRL write is pending, so both ordinals stay in the
+  "publisher open" partition above. TALK waits on the D-INF-11 mixer tap.
 - `EWEAP_GUNYAW`/`EWEAP_GUNPITCH` (55/56) retain the witnessed emplaced-weapon
   angular stores in world and first-person presentation scopes.
 - `VEHICLE_STEERING` (61) zero-extends the high word of the live cveh steering

@@ -196,12 +196,21 @@ private:
         out.call.line = cur().line;
         advance();
         if (out.block_kind == "gloop") {
-            const bool parens = cur().kind == TokKind::LParen;
-            if (parens) advance();
-            if (!parse_arg(out.block_argument)) error("expected a group after GLOOP");
-            if (parens) {
-                if (cur().kind == TokKind::RParen) advance();
-                else error("expected ')' after GLOOP group");
+            // The GLOOP operand is the NEXT token, whatever it is: retail's
+            // tokenizer splits on its 20-byte operator set (`{}()[]+-*/|&^%<>=!~`
+            // @0x7CE2E8), so `gloop(G_x)` lexes as GLOOP `(` G_X `)` and the
+            // `(` becomes the group token (an Unknown Group -> group 0 in the
+            // compiler); the leftover `G_x` `)` are statements of the body.
+            // [orig: Script_Compile tokenizer @0x4f32e0..0x4f3464 (operator
+            //  tests @0x4f3370/@0x4f3448); the GLOOP operand resolve
+            //  @0x4f365d..0x4f3693]
+            if (!parse_arg(out.block_argument)) {
+                if (at_end()) {
+                    error("expected a group after GLOOP");
+                } else {
+                    out.block_argument.text = cur().text;
+                    advance();
+                }
             }
         }
         out.body = parse_block_until({"next", "enddo", "endif", "end", "enif"});

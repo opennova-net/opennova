@@ -478,6 +478,8 @@ struct PlayerList {
 	uint8_t  spectator_count = 0; // trailer -> g_scoreboard_spectator_count (g_scoreboard_spectator_count);
 	                              // HUD "Number of players" = accepted rows − this
 };
+// The row loop runs min(player_count, 252) rows — the retail parser's 252-row
+// table clamp [orig: @0x42fb3a..0x42fb3c]; `player_count` keeps the wire byte.
 bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out);
 
 // S2C 0x46 player-sync field bits. Names follow the SERIALIZER's field
@@ -494,7 +496,12 @@ inline constexpr uint16_t kPlayerSyncHasVehicleScore = 0x0020;
 inline constexpr uint16_t kPlayerSyncHasSquad        = 0x0040;
 inline constexpr uint16_t kPlayerSyncHasSide         = 0x0080;
 inline constexpr uint16_t kPlayerSyncHasQuality      = 0x0400;
-inline constexpr uint16_t kPlayerSyncHasVehicleTimer = 0x0800; // u32 (§5.21 "entityRef" label)
+// u32 NovaWorld ACCOUNT netId: the serializer reads the slot connection's
+// napi_player_data +420 (0 without a connection, so 0 on LAN) @0x506257/@0x506246;
+// the client stores it in slot dword 15 and keys PlayerSlot_SetName on it
+// (@0x431736 -> @0x43173d) to pull the clan-roster TAG into the Tab row. The
+// old "vehicle timer" / §5.21 "entityRef" labels were misreads of that offset.
+inline constexpr uint16_t kPlayerSyncHasAccountId    = 0x0800;
 inline constexpr uint16_t kPlayerSyncHasLateJoinFlag = 0x1000;
 inline constexpr uint16_t kPlayerSyncAck             = 0x4000; // roster-walk ack; no body
 inline constexpr uint16_t kPlayerSyncRemoval         = 0x8000; // removal; no body fields
@@ -505,7 +512,7 @@ inline constexpr uint16_t kPlayerSyncJoinBroadcastFields =
 		kPlayerSyncHasName | kPlayerSyncHasTeamString | kPlayerSyncHasTeamByte |
 		kPlayerSyncHasVehicleName | kPlayerSyncHasVehicleScore |
 		kPlayerSyncHasSquad | kPlayerSyncHasSide | kPlayerSyncHasQuality |
-		kPlayerSyncHasVehicleTimer | kPlayerSyncHasLateJoinFlag;
+		kPlayerSyncHasAccountId | kPlayerSyncHasLateJoinFlag;
 static_assert(kPlayerSyncJoinBroadcastFields == 0x1CF7,
               "the witnessed Server_PlayerAdd broadcast mask");
 inline constexpr uint16_t kPlayerSyncRosterWalkFields =
@@ -531,7 +538,7 @@ struct PlayerSync {
 	uint8_t  field_0040 = 0;         // 0x0040
 	uint8_t  field_0080 = 0;         // 0x0080
 	uint8_t  quality = 0;            // 0x0400 (clamp 4)
-	uint32_t entity_ref = 0;         // 0x0800
+	uint32_t account_id = 0;         // 0x0800 NovaWorld account netId -> slot dword 15, the clan-roster key (0 on LAN)
 	bool     queue_ack = false;      // 0x4000 — no body byte; client queues a C2S 0x22 ack
 };
 bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out);
@@ -1039,12 +1046,22 @@ struct KillRecord {
 bool decode_kill_record(const uint8_t *body, size_t len, KillRecord &out,
                         size_t &consumed);
 
-// S2C 0x4E — batch despawn/kill. `[u16 count][count × u16 slot]`; each slot is
-// killed via Entity_KillBySlotId(slot, 0, 1), then the handler replies C2S 0x28.
-// [orig: NapiNPClientMsg_HandleBatchKill @ 0x431870 (Kong labeled this HandleBatchSpawn; it kills)].
+// S2C 0x4E — one PAGE of the join-window kill list: `[u16 resume][u16 slot]×N`
+// to the body end. `count` is the host iterator's resume index (0xFFFF when the
+// walk is exhausted; the retail handler names it count and never uses it as a
+// read bound); every following slot dies via Entity_KillBySlotId(slot, 0, 1)
+// and, when at least one slot followed, the client queues the C2S 0x28
+// continuation {dword_A82360 (the S2C 0x19 value), dword_A82364 (the S2C 0x1A
+// value), count} so the host serves the next page from `count`. A bare `FF FF`
+// (a walk that found nothing) ends the exchange with no reply. A page holds at
+// most 33 slots (the builder loops while `count <= 32`).
+// [orig: NapiNPClientMsg_HandleBatchKill @ 0x431870 — count @0x43188a, the kill
+//  loop @0x4318a5..0x4318c2, the reply @0x4318db..0x4318ff, the bare-page return
+//  @0x431904; page builder collect_valid_weapon_slots @0x516000 (resume store
+//  @0x5160d7); Kong labeled the handler HandleBatchSpawn; it kills].
 struct BatchKillBatch {
-	uint16_t count = 0;
-	std::vector<uint16_t> slots;    // (pool<<12)|slot of each despawned entity
+	uint16_t count = 0;             // the resume index echoed as the next C2S 0x28 `start`
+	std::vector<uint16_t> slots;    // (pool<<12)|slot of each entity that died inside the window
 };
 bool decode_batch_kill(const uint8_t *body, size_t len, BatchKillBatch &out);
 
@@ -1471,13 +1488,29 @@ bool decode_burst_visible_request(const uint8_t *body, size_t len, size_t &consu
 //  client sender NapiNPClientMsg_0x00F @ 0x42e647]
 bool decode_empty_slots_request(const uint8_t *body, size_t len, size_t &consumed);
 
-// C2S 0x28 — weapon-loadout request `[u32 loadoutFilter][u32 flags][u16 extra]`
-// (10 B). Server replies S2C 0x4E.
-// [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550]
+// C2S 0x28 — the join-window KILL-LIST request `[u32 windowMin][u32 windowMax]
+// [u16 start]` (10 B; each missing field reads 0 @0x51a58e/@0x51a59d/@0x51a5ac).
+// The host pages the entities whose last state-change stamp (entity+560, a
+// GetTickCount ms) lies in [windowMin, windowMax] AND that are dead/destroyed
+// (flags & 2 || flags & 4 || health <= 0) over pools 0..2 from `start`
+// (category = start >> 12 advancing 0 -> 0x1000 -> 0x2000, index = start &
+// 0xFFF; 0xFFFF = exhausted), replying ONE S2C 0x4E page of <= 33 slots plus its
+// resume word, or nothing when spawns are suspended, the round gate is set, or
+// the walk starts exhausted. Client senders: the 0x0F reply burst
+// {dword_A82360 (S2C 0x19), dword_A82368 (the 0x0F body's session tick), 0}
+// @0x42e5d3..0x42e5f7, and the 0x4E continuation {dword_A82360, dword_A82364
+// (S2C 0x1A), the page's leading word} @0x4318db..0x4318ff. The IDB's
+// "weapon loadout" reading named the fields below; the consumers still spell
+// them: loadout_filter = windowMin, flags = windowMax, extra = start.
+// [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550 ->
+//  collect_valid_weapon_slots @0x516000 (spawn-suspended / round-gate return
+//  @0x51602e, exhausted-at-begin return @0x516057, append @0x5160a9, loop bound
+//  @0x5160d1, resume word @0x5160d7); weapon_loadout_iterator_begin @0x501680;
+//  ItemPoolIterator_Advance @0x501740; NetSync_IsEntityEligibleInWindow @0x507AA0]
 struct BurstLoadoutRequest {
-	uint32_t loadout_filter = 0;
-	uint32_t flags = 0;
-	uint16_t extra = 0;
+	uint32_t loadout_filter = 0;  // windowMin: the S2C 0x19 spawn-ack timestamp (dword_A82360)
+	uint32_t flags = 0;           // windowMax: the S2C 0x1A value (dword_A82364) or the 0x0F session tick (dword_A82368)
+	uint16_t extra = 0;           // start: 0 for the burst, the previous page's resume word after
 };
 bool decode_burst_loadout_request(const uint8_t *body, size_t len,
                                   BurstLoadoutRequest &out, size_t &consumed);
@@ -2218,6 +2251,150 @@ struct LoadoutSubmit {
 	bool     terminated = false;    // saw the 0xFF terminator
 };
 bool decode_loadout_submit(const uint8_t *body, size_t len, LoadoutSubmit &out);
+
+// ===========================================================================
+// Door-row sync — S2C 0x37 / C2S 0x1A (docs/world/world-wac-ai-re.md §33.14).
+// The IDB calls both "weapon slot" messages; the rows they carry are the
+// 0xA8A418 door records {state, phaseQ16, stepQ16, maxAngle, entity, number}.
+// ===========================================================================
+
+// The one 5-byte body both directions share: `[u16 handle][i16 state][u8 number]`.
+// Every retail reader takes each field as 0 when the body runs short
+// [orig: client @0x431263..0x431293; server @0x514b5f..0x514b8c], so a short
+// body decodes zero-filled and returns false (its `number` is then 0, which the
+// `number != 0` gate of every receiver drops — behaviorally identical).
+//   S2C 0x37 (authority -> clients, send_mask 0x90; the 0x1A reply uses 0x30):
+//     row = (int16)entity+0x2B8 + number - 1; gate itemDef && row > -1 &&
+//     number != 0 && number <= (int8)itemDef+0x890; row.state = state; state 0
+//     snaps the phase to 0, state 2 to 0x10000, 1/3 leave it for FadeEffect_UpdateAll
+//     [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250 — gate @0x4312f8,
+//      store @0x431307, snaps @0x43131f / @0x431316].
+//     Senders: Server_SendWeaponSlotActionPacket @0x50F9A0 — the state word is
+//     the state of row (door_slot + n - 1), 0 when n > door count (@0x50f9c0..
+//     0x50f9ce; unguarded for n == 0), called with the 1-based row number on
+//     each completion (FadeEffect_UpdateAll @0x44e978..0x44e982) and with the
+//     0-based section index for EVERY selected section of a door command,
+//     transition or not (Entity_ProcessSectionDamageTransition @0x43f462).
+//   C2S 0x1A (non-authority -> host): the same command sites queue it reliable
+//     with the row's CURRENT state when row > -1 && idx != 0 && idx <= count
+//     [orig: NetPacket_SendWeaponSwitch @0x42D0C0 — gate @0x42d0f9, payload
+//      @0x42d138, queue @0x42d169]. The host: authority + sender player + its
+//     entity, pool lookup, the same gate, then state 0/3 -> 1 iff value == 1;
+//     state 1/2 -> value iff number == 3 (the SECTION number, @0x514c2a); reply
+//     S2C 0x37 {handle, row.state, number} to the requester
+//     [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20 — switch @0x514c20..
+//      0x514c35, reply @0x514c46..0x514c74].
+struct DoorSlotAction {
+	uint16_t entity_handle = 0;  // (pool<<12)|slot; 0xFFFF when the sender's entity is in no pool
+	int16_t  state = 0;          // door row state: 0 closed, 1 opening, 2 open, 3 closing
+	uint8_t  number = 0;         // 1-based row number on completions; 0-based section idx on commands
+};
+bool decode_door_slot_action(const uint8_t *body, size_t len,
+                             DoorSlotAction &out, size_t &consumed);
+
+// ===========================================================================
+// NovaWorld clan roster — S2C 0x6A / C2S 0x4E. A per-account linked list on
+// every peer (node +12 netId, +16 name[65], +81 tag[9]) whose TAG is the
+// highlighted third column of the Tab list: PlayerSlotTable_UpdateAllDisplayNames
+// @0x434A00 -> PlayerSlot_SetName @0x4348F0 copies the tag of the node whose
+// netId equals the slot's account id (slot dword 15 = the 0x46 field-0x0800
+// u32, PlayerSync::account_id) into slot dword 8, which
+// NapiNPClientMsg_PlayerList @0x42fd85 copies into the row's 8-char third
+// string. LAN accounts have netId 0: no node, no 0x6A, no reply to the walk.
+// ===========================================================================
+
+inline constexpr uint8_t kClanRosterAdd = 1;        // Server_PlayerAdd @0x51ceef, first slot of an account (mask 4112)
+inline constexpr uint8_t kClanRosterRemove = 2;     // Server_HandlePlayerDisconnect @0x51b7eb, last slot (mask 4112)
+inline constexpr uint8_t kClanRosterWalkReply = 3;  // reply to C2S 0x4E (requester only, mask 32); the client re-queues C2S 0x4E {netId}
+inline constexpr size_t  kClanRosterNameChars = 64; // node +16 is char[65]
+inline constexpr size_t  kClanRosterTagChars = 8;   // node +81 is char[9]
+
+// S2C 0x6A — `[u8 action][u32 accountNetId]`, then for actions 1/3 `[cstr name]
+// [cstr tag]`. The reader keeps at most 64 / 8 chars (stopping at NUL or the
+// body end) but skips to the NUL of the FULL name before the tag; a short id
+// reads 0; any other action is ignored (this decoder returns false for it).
+// Non-authority only: the host keeps its own list from the join records.
+// [orig: NapiNPClientMsg_HandlePlayerJoinLeave @0x432510 — action @0x43254b,
+//  remove @0x432578, id @0x4325b1, name loop @0x4325bc..0x4325db, tag
+//  @0x4325ea..0x43261b, upsert CLinkedList_FindOrCreateByNetId @0x43262e,
+//  the action-3 walk continuation @0x43266c]
+struct ClanRosterUpdate {
+	uint8_t     action = 0;      // kClanRosterAdd / kClanRosterRemove / kClanRosterWalkReply
+	uint32_t    account_id = 0;  // the NovaWorld account netId (0 on LAN)
+	std::string name;            // <= kClanRosterNameChars (actions 1/3)
+	std::string tag;             // <= kClanRosterTagChars (actions 1/3)
+};
+bool decode_clan_roster_update(const uint8_t *body, size_t len, ClanRosterUpdate &out);
+
+// C2S 0x4E — `[u32 afterNetId]` (a short body reads 0). {0} is the walk KICK
+// the client sends when the S2C 0x05 flag is nonzero, after freeing its list
+// (@0x42e1b3 / @0x42e1d9); {netId} is the continuation queued from each 0x6A
+// action 3 (@0x43266c). The host answers with the smallest node id strictly
+// greater than the value as 0x6A action 3, or nothing when none exists.
+// [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210 — read @0x511245,
+//  sub_52B190 @0x511253, serialize_minimap_slot(3) @0x51127c, send @0x51129e]
+struct ClanRosterWalkRequest {
+	uint32_t after_account_id = 0;
+};
+bool decode_clan_roster_walk_request(const uint8_t *body, size_t len,
+                                     ClanRosterWalkRequest &out, size_t &consumed);
+
+// ===========================================================================
+// Vehicle spawning — C2S 0x42 -> S2C 0x70 availability list, C2S 0x40 pick.
+// The host keeps a 128-row EntityLimit table (23 rows at mission start: per
+// type the cap, the initial per-team allotment and 70 per-team counters)
+// [orig: EntityLimit_InitTable @0x509A70, EntityLimit_SetEntry @0x500E50,
+//  the availability gate sub_5104C0 @0x5104C0, Server_CountEntitiesByTypeAndTeam
+//  @0x510460]; this is that table's wire face.
+// ===========================================================================
+
+// S2C 0x70 — `[u8 3]` then per table row `[u16 typeId][u8 avail][u8 max]`,
+// terminated by `u16 0`. Per row the writer ladders: unlimited vehicles
+// (dword_24D1E38) -> 0xFF/0xFF; max == -1 && initial == -1 -> 0xFF/0xFF;
+// initial == -1 -> max 0xFF, avail = (u8)max_count - liveCount; else max =
+// limit[team], avail = (max_count == -1) ? max : min((u8)max_count - liveCount,
+// max) (unsigned compare) [orig: serialize_weapon_overlay_slots_0 @0x5105A0 —
+// the constant 3 @0x5105c3, the ladder @0x5105ff..0x510651, rows @0x510660..
+// 0x510681, terminator @0x5106b8]. The client stores the leading byte
+// (dword_A81BB4) and fills a 12-B-stride table until the 0 word or fewer than
+// two bytes remain; missing row bytes read 0 [orig:
+// NapiNPClientMsg_HandleWeaponLoadoutList @0x429a30 — count @0x429a53, the loop
+// @0x429a6a..0x429ab9]. Requester-only reply to C2S 0x42 (send_mask 32)
+// [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930].
+inline constexpr uint8_t kVehicleSpawnAvailabilityLeadingByte = 3;
+inline constexpr uint8_t kVehicleSpawnUnlimited = 0xFF;
+struct VehicleSpawnAvailabilityRow {
+	uint16_t type_id = 0;    // items.def id from a pcvehicle_spawnlist row (never 0: that is the terminator)
+	uint8_t  available = 0;  // spawns left for the requester's team (kVehicleSpawnUnlimited)
+	uint8_t  max_count = 0;  // the team's cap (kVehicleSpawnUnlimited)
+};
+struct VehicleSpawnAvailabilityList {
+	uint8_t leading_byte = kVehicleSpawnAvailabilityLeadingByte; // retail writes the constant; the client stores it unused
+	std::vector<VehicleSpawnAvailabilityRow> rows;
+	bool terminated = false;  // the u16 0 word was seen
+};
+bool decode_vehicle_spawn_availability(const uint8_t *body, size_t len,
+                                       VehicleSpawnAvailabilityList &out);
+
+// C2S 0x42 — the availability request. The host reads NO fields (it only needs
+// the sender's player entity), so the decoder consumes nothing and accepts any
+// length; the client's sender is the unported vehicle.mnu screen.
+// [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930]
+bool decode_vehicle_spawn_availability_request(const uint8_t *body, size_t len,
+                                               size_t &consumed);
+
+// C2S 0x40 — the spawn pick `[u16 sourceHandle][u8 typeIndex]` (3 B; each
+// missing field reads 0 @0x51c517 / @0x51c52a, and this decoder then returns
+// false). typeIndex is a bit of the SOURCE entity's def+2772 pcvehicle_spawnlist
+// mask and indexes the shared g_ItemGroups slot table for the item id
+// [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0 — reads
+//  @0x51c515..0x51c52a, gates @0x51c532..0x51c5f6].
+struct VehicleSpawnRequest {
+	uint16_t source_handle = 0;  // the spawner entity (carrier / base object) the player is at
+	uint8_t  type_index = 0;     // index into the source def's vehicle_spawn_mask / the shared slot table
+};
+bool decode_vehicle_spawn_request(const uint8_t *body, size_t len,
+                                  VehicleSpawnRequest &out, size_t &consumed);
 
 struct ExplosionEffectRecord {
     uint8_t type = 0;

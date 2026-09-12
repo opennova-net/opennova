@@ -77,7 +77,7 @@ endpoint never mixes again), before quitting; past the bound, or on a repeated
 close request while the drain is pending, the quit proceeds without the drain. A
 forced SceneTree quit (including `--quit-after`) bypasses it entirely; retail has no exit-path music
 stop to port (`AudioVM_StopMusicContext @0x671E00`'s only caller is the
-`Game_StartMission @0x5255AE` SP gate), so the remaining forced-quit ordering is
+`Game_StartMission @0x5255AE` dedicated-server gate), so the remaining forced-quit ordering is
 tracked as reimpl work in world/npc-mission-completion.md, not as a D-row.
 
 ## Music state variable selection — the shell sets the section discriminator (grilled 2026-06-15; re-verified 2026-07-11)
@@ -147,9 +147,16 @@ expansion (re)load:
   `g_napi_np_ctx.is_mp_session_peer`: MP peer →
   `AudioVM_OpenMusicContext(g_path_game_sbf, g_path_game_bin, "music")` +
   `AudioVM_SetGlobalVolume` (`@ 0x525589-0x5255a4`); NOT a peer →
-  `AudioVM_StopMusicContext @ 0x671e00` (`@ 0x5255ae`) — retail single-player
-  plays **no front-end music in-mission at all** (the stop also kills the menu
-  context that was still streaming).
+  `AudioVM_StopMusicContext @ 0x671e00` (`@ 0x5255ae`). **Corrected 2026-09-12:**
+  `is_mp_session_peer` is the `is_client` bit of the connection mode
+  (`CGameSession_SetConnectionMode @ 0x4c49f0`: mode 3 = host+client stores
+  `is_host = is_client = 1` at ctx+0x5C/+0x60/+0x64), and retail single player
+  runs as mode 3 (net-re section 5.0; `Player_UpdatePerFrame @ 0x4de375` also
+  early-returns on the bit, so it is set whenever the local player runs). So
+  gamemus IS opened and active in SP; only a dedicated server (mode 1) takes
+  the Stop branch (which also kills the menu context that was still streaming).
+  The stop clears `g_audiovm_context_active` and frees the stream but does NOT
+  clear `chunk_04`: the loaded script survives it.
 - Var seeding then runs on BOTH branches (`@ 0x5255b3-0x52561b+`):
   `Var1 = dword_A762E0`, `Var2..Var6 = 0`, `Var7 = 100`, `Var8..Var12 = 0`.
 - `AudioVM_SetGlobalVolume @ 0x671f20` clamps [0,255] and stores `vol << 16`
@@ -160,10 +167,68 @@ expansion (re)load:
 
 `dword_A762E0` (the Var1 seed) has **no writers anywhere in Jointops.exe** (its
 single xref is the seed read `@ 0x5255b3`), so gamemus always enters its
-`var1=0` path: the `Multiplayerstart` section looping track `P0`. The
-`Missionnull`/`Missionwin`/`Missionlose` sections in the shipped gamemus.bin are
-**unreachable dead content** (BHD-era mission-music machinery) — retail JO has
-no win/lose stings and no mission-state music transitions. Do not invent them.
+`var1=0` path: the `Multiplayerstart` section looping track `P0`; the `var1=1`
+`Missionnull` section is unreachable. **Corrected 2026-09-12:** `Missionwin` and
+`Missionlose` are NOT dead: they are reached through the chunk's MessageHandler
+and the VM's restart frame (next section), not through Var1: the single-player
+round end plays the `Missionwin` sting (SBF entries 2..7) on a win and the
+`Missionlose` sting (entries 8..12) on a loss, then idles. The earlier "no
+win/lose stings" reading was wrong.
+
+### The MessageHandler restart frame: the SP win/lose stings (witnessed 2026-09-12)
+
+- **Chunk pointers.** `MusChunkHeader` +0x40 is the MessageHandler code pointer
+  and +0x44 a second code pointer, both chunk-relative and relocated when
+  nonzero by `AudioVM_FixupPointers @ 0x672470` (`vmData[16] @ 0x672495`,
+  `vmData[17] @ 0x6724a1`). Retail gamemus.bin: +0x40 = 0x91, +0x44 = 0x88 (the
+  bytecode start; section table @0x68 = `[0x89,0xa3,0xa6,0xa9,0xb8,0xbb,0xc8,0xdc]`);
+  menumus.bin: +0x40 = +0x44 = 0x94 (its bytecode start). No runtime reader of
+  +0x44 is witnessed. (These were misnamed `aux_table_a/b_offset` in `mus.h`
+  until this correction; now `message_handler_offset` / `main_entry_offset`.)
+- **The frame.** `sub_672E50 @ 0x672e50` is the step both the per-update pump
+  (`sub_672EE0`) and `MusicCtx_SelectEndTrack` call. `@ 0x672e95..0x672ec1`:
+  `movzx eax,[ctx+20h]; jz normal_step; mov byte [ctx+20h],0` (the restart
+  byte, consumed); `mov edx,[ctx+18h]; mov [edi],edx; add edi,4` (the current
+  IP pushed on the return stack `off_84F21C`); `mov [ebp],eax; mov [ebp+4],0;
+  add ebp,8` (`(value, 0)` pushed on the data stack `off_84F218`);
+  `mov esi,[chunk+40h]; jnz dispatch` (IP = the MessageHandler; a null pointer
+  falls into `mov esi,[esi+18h]` with esi = 0); `call AudioVM_DispatchLoop
+  @ 0x672720; mov [ctx+18h],esi`. The step tests only the byte and the chunk
+  pointer, never `g_audiovm_context_active`.
+- **The driver.** `MusicCtx_SelectEndTrack(value) @ 0x672fd0` (thunk
+  `j_MusicCtx_SelectEndTrack @ 0x671ba0`): `if (g_AudioVmInstance.chunk_04)
+  { restart_20 = value; sub_672E50(&g_AudioVmInstance); }`; the byte never
+  outlives the call. Its only callers are `Server_ProcessRoundEnd @ 0x5164f0`'s
+  `!is_in_session` tail: value 1 after `Cine_InitPlayback` (win) `@ 0x51696b`,
+  value 2 after `Cine_StartPlayback` (lose) `@ 0x51698f`.
+- **The shipped handler** (gamemus chunk+0x91, decoded with the `mus_decode.h`
+  widths): `enter 2` (locals msgtype @0x20, source @0x24); `method 4` (GFB,
+  pushes 0); `empty`; `push_l 0x20`; `tablexec 3` (inner 0x3b, 2-byte entries)
+  = `[setstate 1 | setstate 2 | setstate 4]`. Section 2 `Missionwin`: `setstate
+  3`; section 3: `play 2,3,4,5,6,7; setstate 1`; section 4 `Missionlose`:
+  `setstate 5`; section 5: `play 8,9,10,11,12; setstate 1`; section 1 is the
+  idle self-loop (`play 0 x20; play 1; setstate 1` via section 7). Entry 0:
+  `push 0xc8; method 2; empty; setstate 6` -> section 6 reads Var1 (`push_g 4`)
+  `!= 0 ? setstate 1 : setstate 7`.
+- **Port.** `MusScript.message_handler_offset` / `has_message_handler`
+  (parsed from +0x40, normalised bytecode-relative like the section entries;
+  the encoder writes it back chunk-relative and +0x44 = the bytecode start),
+  `mus_vm_signal(vm, value)` = the frame + dispatch (runs on any loaded script,
+  RUNNING or not; refused with -2 when the chunk carries no handler),
+  `mus_vm_call_depth` for the tests (`tests/mus/mus_vm_fixes_test.cpp` script
+  7: 1 -> entries 2..7, 2 -> 8..12, 0 -> idle, the interrupted pc on the
+  return stack, the container round trip). `World::process_round_end` carries
+  the end track in the `round_end` effect's `b` field (1 win / 2 lose); the
+  shell's SP round-end consumer (`main_game.gd` on the effect, once
+  `MissionEndFlow.begin` arms -- an MP round is refused there) signals the
+  MusicDirector's VM with it (`MusicDirector::signal_end_track` ->
+  `mus_vm_signal`; the flow's lead-in beat stands in for the cine, so the
+  signal rides the arm; GUT `mus_director_test.gd` pins the seam's codes) --
+  the gamemus context stays open in SP, which is retail parity; see
+  D-MUS-SPGATE. Not verified: whether retail's `AudioVM_StartSound` cuts the
+  running stream at that step; the director's pacing gate lets the handler's
+  `setstate` land at once and the sting's first entry play after the sounding
+  track ends.
 
 ### Per-frame var writes (local player only)
 
@@ -220,7 +285,7 @@ Session teardown writes `Var10 = (reason==1 ? 2 : 1)` when not in session
 
 | ID | Ours | Original | Why / consequence |
 | --- | --- | --- | --- |
-| D-MUS-SPGATE | the gamemus context opens at mission start in ALL sessions | opens only when `g_napi_np_ctx.is_mp_session_peer`; otherwise `AudioVM_StopMusicContext` (retail SP is music-silent in-mission) | maintainer decision 2026-07-09: our single-player runs as a listen server (ADR 0009/0011/0012), so every session is architecturally an MP session, and silent-SP reads as a defect to players. One-line seam at the open site; retail parity available by gating on the session-peer flag. |
+| D-MUS-SPGATE | the gamemus context opens at mission start in every session that has a local client (our headless/dedicated host carries no music context at all) | opens when `g_napi_np_ctx.is_mp_session_peer` = the `is_client` bit of the connection mode (`CGameSession_SetConnectionMode @0x4c49f0`; retail single player is mode 3 = host+client, so SP opens gamemus); only a dedicated server (mode 1) takes the `AudioVM_StopMusicContext` branch `@0x5255ae` | **CLOSED 2026-09-12 (witness correction).** The 2026-07-09 row read the branch as "retail SP is music-silent" and recorded the always-open port as a maintainer divergence; the bit is set in SP, so opening in every session with a local client IS retail behavior and no divergence exists. Consequence: the SP round end reaches the gamemus MessageHandler (`Missionwin`/`Missionlose` stings, section above). |
 
 ## SCR container codec — witness map (grill of 2026-06-09)
 

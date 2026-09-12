@@ -2463,35 +2463,46 @@ static void test_vehicle_respawn_lifecycle() {
 	CHECK(std::get<EntityRemoveEvent>(w.out.entity_events[0]).handle == h.packed);
 }
 
+// A `Parent` vehicle's death kills the gunner children the class init listed
+// in its brain's +576/+580 block — the other pool-1 entities sharing its
+// nonzero refNum — through the child's class death callback; a peer with
+// another refNum and an item with no refNum are untouched.
+// [orig: Entity_SetupGunnerAttachments @0x468130..0x468173 (the list);
+//  AI_TransitionToDeath_GroundVehicle @0x467B6E..0x467BBB (the kill walk)]
 static void test_vehicle_death_kills_authored_children() {
 	auto storage = std::make_unique<World>();
 	World &w = *storage;
 	w.registry.configure_pool(1, 8);
 	Entity seed;
 	seed.kind = EntityKind::Item;
+	seed.item_id = 700;
+	seed.ref_num = 9;
 	seed.health = 0;
 	seed.is_ai_capable = true;
 	const auto parent_h = w.registry.spawn(1, seed);
 	w.ai.attach(parent_h);
-	seed.health = 100;
-	seed.is_ai_capable = false;
-	seed.emplacement_parent = parent_h;
-	seed.emplacement_parent_spawn_id = w.registry.get(parent_h)->registry_spawn_id;
-	const auto child_h = w.registry.spawn(1, seed);
-	++seed.emplacement_parent_spawn_id;
-	const auto stale_h = w.registry.spawn(1, seed);
-	seed.emplacement_parent = {};
-	const auto unrelated_h = w.registry.spawn(1, seed);
-	auto &brain = *w.ai.for_handle(parent_h);
-	brain.brain.f[AiBrain::kCurState] = 22;
 	VehicleTraits traits;
 	traits.family = VehicleFamily::Ground;
+	traits.attrib_parent = true;
+	w.vehicles.traits.set(700, traits);
+	seed.item_id = 0;
+	seed.health = 100;
+	seed.is_ai_capable = false;
+	const auto child_h = w.registry.spawn(1, seed); // refNum 9: listed
+	seed.ref_num = 10;
+	const auto other_ref_h = w.registry.spawn(1, seed); // another refNum: not listed
+	seed.ref_num = 0;
+	const auto unrelated_h = w.registry.spawn(1, seed);
+	w.vehicles.setup_gunner_attachments(*w.registry.get(parent_h));
+	auto &brain = *w.ai.for_handle(parent_h);
+	CHECK(brain.brain.f[AiBrain::kAttachCount] == 1);
+	brain.brain.f[AiBrain::kCurState] = 22;
 	w.vehicles.tick_health(*w.registry.get(parent_h), traits);
 	CHECK(brain.brain.f[AiBrain::kPendState] == 21);
 	w.ai.apply_transition(brain, w);
 	CHECK(w.registry.get(child_h)->health == 0);
 	CHECK((w.registry.get(child_h)->engine_flags & kEntityFlagHusk) != 0);
-	CHECK(w.registry.get(stale_h)->health == 100);
+	CHECK(w.registry.get(other_ref_h)->health == 100);
 	CHECK(w.registry.get(unrelated_h)->health == 100);
 }
 

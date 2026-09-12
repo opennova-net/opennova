@@ -12,6 +12,7 @@
 #include <net/npwire/ingame_encode.h> // encode_organic_spawn_batch
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h> // parse_disconnect_event (the staged H:0x03 record)
 #include <net/npwire/session_keys.h>
 
 #include <runtime/world/entity.h>
@@ -92,115 +93,102 @@ std::vector<ProtocolMessage> send_session_batches(
 		return true;
 	};
 
+	// Admission is per physical node, in queue order, exactly NapiNPMessage_Create's per-node
+	// check: every record — a whole message or one SplitAtLength piece, which also goes through
+	// Create — is admitted while `retained + transient + admitted-so-far + 1 <= msg_out_max`, and
+	// a capacity-exempt (flag 0x10) record bypasses the check. The FIRST non-exempt node that does
+	// not fit is DROPPED and the connection is asked to disconnect: the MSGCRE record
+	// {1, 4, count, max, "", 0, "NP.C:MSGCRE"} latches (first cause wins) and pending_disconnect
+	// marks the node for the next protocol pump, which sends the 0x86 burst and destroys it. Every
+	// later non-exempt node in this boundary fails the same way (the count never shrinks inside
+	// one boundary), exempt ones still ship. Retail never defers a fragment group for capacity: a
+	// FIRST that fit is built and sent while its over-cap MID fails and tears the connection down.
+	// [orig: NapiNPMessage_Create @0x627FC0 — flag-0x10 exemption @0x628031, `msg_out_max >= 0`
+	//  @0x628048, count @0x628062..0x62806b, the record @0x628099..0x6280eb, latch-if-invalid
+	//  @0x6280f9..0x62810a, RequestDisconnect @0x628112 (state 1 -> pending_disconnect @0x61e107),
+	//  NULL return either way; SplitAtLength @0x62838f pieces go through Create too; the
+	//  destroy is NapiNPProtocol_Pump @0x62a6fd after the per-connection send pump @0x62a6f8]
 	std::vector<ProtocolMessage> enveloped;
-	std::vector<ProtocolMessage> capacity_retry;
 	std::size_t available_nodes = session_outbound_message_prefix_count(
 			connection.seq, std::numeric_limits<std::size_t>::max());
+	const std::size_t occupied_nodes =
+			connection.seq.retained_outbound_message_count +
+			connection.seq.transient_outbound_message_count;
+	std::size_t admitted_nodes = 0;
 	bool ordinary_tail_rejected = false;
 	std::size_t planned_packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
-	for (std::size_t semantic_index = 0;
-	     semantic_index < messages.size(); ++semantic_index) {
-		// A pre-enveloped FIRST/MID/FINAL run re-queued by an earlier failed
-		// flush arrives as separate queue entries (possibly headless when its
-		// leading pieces already shipped). Its consecutive fragment-flagged
-		// pieces are ONE capacity unit through the closing FINAL, or a
-		// partially admitted group strands the receiver's reassembly buffer.
-		std::size_t unit_end = semantic_index;
-		const bool fragment_unit =
-				messages[semantic_index].flags.frag_cont ||
-				messages[semantic_index].flags.frag_end;
-		if (fragment_unit) {
-			while (unit_end + 1 < messages.size()) {
-				const ProtocolMessageFlags &piece_flags =
-						messages[unit_end].flags;
-				if (piece_flags.frag_end && !piece_flags.frag_cont)
-					break; // the closing FINAL
-				const ProtocolMessageFlags &next_flags =
-						messages[unit_end + 1].flags;
-				if (!next_flags.frag_cont && !next_flags.frag_end)
-					break; // run ends unclosed
-				++unit_end;
+	for (ProtocolMessage &message : messages) {
+		// A staged H:0x03 connection description is retail's SendChatMessage: the
+		// record is stored on the connection (only while none is latched) and THEN
+		// queued through Create with the 0x10 exemption, so in queue order it sits
+		// after every earlier node's overflow. This port defers Create to the send
+		// boundary, so the latch rides the record's admission here and keeps that
+		// first-cause-wins order; the 0x46 that answers the punt then makes the
+		// 0x86 burst echo this record. [orig: CNapiNPConnection_SendChatMessage
+		//  @0x4C7EF0 — the record @0x4c7f8e..0x4c7fe4, latch-if-!valid
+		//  @0x4c7ff2..0x4c8004, TrySendSessionInit @0x4c800c ->
+		//  NapiNPDataTransfer_SendDescription @0x628C80 serializes
+		//  conn->disconnect_event and Creates it with flag 0x10 @0x628e42]
+		if (message.capacity_exempt &&
+		    message.full_tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION) {
+			DisconnectEvent description;
+			if (parse_disconnect_event(message.payload.data(), message.payload.size(),
+			                           description))
+				latch_disconnect_event(connection, description);
+		}
+		std::size_t message_packet_bytes = planned_packet_bytes;
+		std::vector<ProtocolMessage> pieces = split_protocol_message_to_fill(
+				message, kGameSessionMaxPacketBytes, message_packet_bytes);
+		bool piece_rejected = false;
+		for (ProtocolMessage &piece : pieces) {
+			if (!piece.capacity_exempt) {
+				if (ordinary_tail_rejected || available_nodes == 0) {
+					if (!ordinary_tail_rejected) {
+						latch_disconnect_event(connection, make_disconnect_event(
+								1, 4,
+								static_cast<uint32_t>(occupied_nodes + admitted_nodes + 1),
+								static_cast<uint32_t>(connection.seq.outbound_message_limit),
+								"", 0, "NP.C:MSGCRE"));
+						connection.pending_disconnect = true;
+						ordinary_tail_rejected = true;
+					}
+					piece_rejected = true;
+					continue; // the node is dropped
+				}
+				--available_nodes;
+				++admitted_nodes;
 			}
+			enveloped.push_back(std::move(piece));
 		}
-		std::vector<ProtocolMessage> pieces;
-		std::size_t unit_packet_bytes = planned_packet_bytes;
-		for (std::size_t piece_index = semantic_index;
-				piece_index <= unit_end; ++piece_index) {
-			std::vector<ProtocolMessage> sub =
-					split_protocol_message_to_fill(messages[piece_index],
-							kGameSessionMaxPacketBytes, unit_packet_bytes);
-			pieces.insert(pieces.end(),
-					std::make_move_iterator(sub.begin()),
-					std::make_move_iterator(sub.end()));
-		}
-		const std::size_t charged_nodes = static_cast<std::size_t>(std::count_if(
-				pieces.begin(), pieces.end(),
-				[](const ProtocolMessage &piece) {
-					return !piece.capacity_exempt;
-				}));
-		// FIRST/MID/FINAL is one semantic unit.  Admitting a capacity prefix of
-		// its physical records can strand the receiver's reassembly buffer, so
-		// retry that unit as a whole — including a re-queued orphan run whose
-		// earlier pieces already shipped (retail's queue never holds a
-		// half-shipped group, so its one-record drop rule cannot apply there).
-		// An ordinary one-record message still follows retail
-		// QueueMessage/Create prefix rejection: it and the later tail are
-		// dropped when no node remains. Capacity-exempt records remain
-		// admissible after that rejected tail, matching retail's internal
-		// flag-0x10 bypass.
-		if (charged_nodes != 0 &&
-				(ordinary_tail_rejected || charged_nodes > available_nodes)) {
-			if (!ordinary_tail_rejected &&
-					(pieces.size() > 1 || fragment_unit)) {
-				for (std::size_t piece_index = semantic_index;
-						piece_index <= unit_end; ++piece_index)
-					capacity_retry.push_back(std::move(messages[piece_index]));
-			}
-			ordinary_tail_rejected = true;
-			semantic_index = unit_end;
-			continue;
-		}
-		available_nodes -= charged_nodes;
-		planned_packet_bytes = unit_packet_bytes;
-		enveloped.insert(enveloped.end(),
-				std::make_move_iterator(pieces.begin()),
-				std::make_move_iterator(pieces.end()));
-		semantic_index = unit_end;
+		// The fill planner only advances over nodes that were actually queued.
+		if (!piece_rejected) planned_packet_bytes = message_packet_bytes;
 	}
-	auto append_capacity_retry = [&](std::vector<ProtocolMessage> retry) {
-		retry.insert(retry.end(),
-				std::make_move_iterator(capacity_retry.begin()),
-				std::make_move_iterator(capacity_retry.end()));
-		return retry;
-	};
 	for (std::size_t i = 0; i < enveloped.size(); ++i) {
 		const ProtocolMessage &message = enveloped[i];
 		std::vector<uint8_t> candidate = encoded_messages;
 		if (!append_protocol_message(candidate, message)) {
 			if (!flush()) {
 				batch.insert(batch.end(), enveloped.begin() + i, enveloped.end());
-				return append_capacity_retry(std::move(batch));
+				return batch;
 			}
-			return append_capacity_retry(std::vector<ProtocolMessage>(
-					enveloped.begin() + i, enveloped.end()));
+			return std::vector<ProtocolMessage>(enveloped.begin() + i, enveloped.end());
 		}
 		if (PROTOCOL_DATAGRAM_OVERHEAD + candidate.size() >
 				kGameSessionMaxPacketBytes) {
 			if (!flush()) {
 				batch.insert(batch.end(), enveloped.begin() + i, enveloped.end());
-				return append_capacity_retry(std::move(batch));
+				return batch;
 			}
 			candidate.clear();
 			if (!append_protocol_message(candidate, message)) {
-				return append_capacity_retry(std::vector<ProtocolMessage>(
-						enveloped.begin() + i, enveloped.end()));
+				return std::vector<ProtocolMessage>(enveloped.begin() + i, enveloped.end());
 			}
 		}
 		batch.push_back(message);
 		encoded_messages = std::move(candidate);
 	}
-	if (!flush()) return append_capacity_retry(std::move(batch));
-	return capacity_retry;
+	if (!flush()) return batch;
+	return {};
 }
 
 bool is_established_s2c_datagram(const std::vector<uint8_t> &datagram) {
@@ -528,6 +516,11 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	create_session(
 			owner.ctx, cfg.config, startup,
 			cfg.serve_and_play ? owner.host_loopback : nullptr); // also runs Server_InitNewRoundState
+	// The connection template every server-side node is created with and the 0x82
+	// advertises: 120000 ms / 1200 records, or the game directory's loose
+	// `_NSTMOUT.TXT` override [orig: CNapiNetwork_Init @0x4ca9d7..0x4caa4b, stores
+	//  @0x4caa81/@0x4cab20/@0x4cab54/@0x4cabf0].
+	owner.ctx.np_protocol.connection_template = load_session_timeout_config(cfg.game_root);
 	// The type-2 loopback is the host's own client: it never uploads ClientAuth CU
 	// vars, so its per-side character selection is installed here — before
 	// Server_ProcessPendingPlayerSpawns stamps the local player from it.

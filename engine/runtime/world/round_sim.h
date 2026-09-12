@@ -310,6 +310,11 @@ struct LiveRound {
     // Armed at 2 ticks remaining above water; the expiry queues the kill zone
     // [orig: the runtime 0x1000 flag @ 0x444a29 consumed by the update head].
     bool det_at_expiry = false;
+    // The round's player-kill count [orig: byte +688]: every authoritative lethal
+    // hit on a player-flag victim increments it, and past the first kill the
+    // victim takes the same-projectile cause bit 0x100 [orig:
+    // Projectile_ProcessDamageOnTarget @0x4e8169..0x4e816b].
+    uint8_t player_kills = 0;
 };
 
 // Retail keeps the selected TrcrID item/class bound independently of tracer
@@ -332,9 +337,12 @@ struct RoundDeath {
     // classifier. -1 means the death has no ammo source.
     int32_t ammo_index = -1;
     // GameEvent_PlayerDeath's entity+44 cause bits. 0x100 is the same-bullet
-    // multi-kill family, 0x400 knife, and 0x800 critical/headshot. This is event
-    // state, deliberately distinct from Entity::flags (entity+36). The revive
-    // window is suppressed by either 0x400 or 0x800.
+    // multi-kill family, 0x400 knife, and 0x800 critical/headshot. Deliberately
+    // distinct from Entity::flags (entity+36): the bits LIVE on the entity
+    // (Entity::cause_flags, latched at hit time and cleared by the plyr think
+    // cadence), and the round-sim death snapshots `cause_flags & 0xF00` here
+    // for the host's classifier. The revive window is suppressed by either
+    // 0x400 or 0x800.
     uint32_t event_flags = 0;
 };
 

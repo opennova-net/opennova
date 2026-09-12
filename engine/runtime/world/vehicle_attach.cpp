@@ -749,16 +749,22 @@ bool VehicleSystem::player_toggle_mount(EntityHandle player) {
 		return false;
 
 	if (!p->mounted) {
-        // Standing ON a seat-bearing carrier -> best free seat on it [orig: the Flags 0x200
-        // deck branch @0x4368cf -> Entity_FindBestSeatSlot @0x4351f0; represented by
-        // the generic ground_target carrier, not a CL ladder volume].
-        Entity *g = world.registry.get(p->ground_target);
-        if (g != nullptr && !g->seats.empty()) {
+        // Two arms, keyed on the queued Co-op spawn-marker mount latch alone:
+        // with Flags 0x200 set, the best free seat of the groundEntity carrier
+        // (+0x180 restored it in the body update) and NOTHING else — no seat
+        // there returns 0 without the scan; with it clear, the look-cone/LOS
+        // nearest-seat scan. Standing on a deck does not set 0x200: a player on
+        // a truck bed boards the seat he looks at, never the priority seat.
+        // [orig: Entity_TryEnterNearestVehicle @0x4368CF (Flags & 0x200) ->
+        //  Entity_FindBestSeatSlot(player, groundEntity) @0x4368E0, no target ->
+        //  return 0 @0x436903; else Entity_FindNearestSeatOrArmory @0x43691A;
+        //  the latch's writer Server_PositionPlayerForSpawn @0x50D442..0x50D45A]
+        if (((p->flags | p->engine_flags) & kEntityFlagQueuedMount) != 0) {
+            Entity *g = world.registry.get(p->ground_target);
             VehicleSeatSelection selection;
-            if (find_best_vehicle_seat(
-                        world, g->handle, player, selection) &&
-                world.vehicles.attach_to_seat(player, selection))
-                return true;
+            if (g != nullptr && find_best_vehicle_seat(world, g->handle, player, selection))
+                return world.vehicles.attach_to_seat(player, selection);
+            return false;
         }
         VehicleSeatSelection hit;
         if (world.vehicles.find_nearest_free_seat(*p, hit, false))
@@ -782,21 +788,16 @@ bool weapon_state_allows_mount_toggle(int32_t current_action, int32_t next_actio
 
 bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source) {
     World &world = world_;
-    // The candidate-PREVIEW form of player_toggle_vehicle_mount's unmounted
-    // search (a joiner picks its request target without mutating L): the same
-    // ground-carrier preference [orig: the Flags 0x200 deck branch @0x4368cf
-    // -> Entity_FindBestSeatSlot @0x4351f0], then the nearest scan. The
-    // authority toggle keeps its inline form because a failed ground-seat
-    // ATTACH falls through to the nearest scan there; the preview reports the
-    // ground candidate outright.
-    if (!player.mounted) {
-        Entity *ground = world.registry.get(player.ground_target);
-        if (ground != nullptr && !ground->seats.empty()) {
-            if (find_best_vehicle_seat(
-                        world, ground->handle, player.handle, r_hit, SeatSelectionMode::Any, source)) {
-                return true;
-            }
-        }
+    // The candidate-PREVIEW form of player_toggle_mount's unmounted search (a
+    // joiner picks its request target without mutating L): the same two arms
+    // — the queued-mount latch selects the groundEntity carrier's best seat or
+    // nothing, otherwise the nearest scan [orig: Entity_TryEnterNearestVehicle
+    // @0x4368CF / @0x4368E0 / @0x436903 / @0x43691A].
+    if (!player.mounted && ((player.flags | player.engine_flags) & kEntityFlagQueuedMount) != 0) {
+        const Entity *ground = world.registry.get(player.ground_target);
+        return ground != nullptr &&
+                find_best_vehicle_seat(
+                        world, ground->handle, player.handle, r_hit, SeatSelectionMode::Any, source);
     }
     return world.vehicles.find_nearest_free_seat(player, r_hit, false, source);
 }

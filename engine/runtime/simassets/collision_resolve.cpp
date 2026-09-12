@@ -476,6 +476,25 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 						}
 					}
 				}
+				// The gunner-attachment points: the first 16 'agun'-prefix userpoint
+				// locals (strnicmp 4; model-local 16.16), which the class init's setup
+				// collects from the model's 48-byte userpoint rows and
+				// VehicleSystem::setup_gunner_attachments transforms per carrier.
+				// [orig: Entity_SetupGunnerAttachments @0x4681AA..0x4681D9]
+				if (vt->agun_points.empty()) {
+					if (const Threedi3di3 *model = deps.models.model_for(key)) {
+						for (size_t i = 0; model->user_points != nullptr &&
+								i < model->user_point_count && vt->agun_points.size() < 16;
+								++i) {
+							const auto &point = model->user_points[i];
+							const std::string name(point.name);
+							if (name.size() < 4 || !strutil::iequals(name.substr(0, 4), "agun"))
+								continue;
+							vt->agun_points.push_back({ { point.x, point.y, point.z },
+									{ point.rot_x, point.rot_y, point.rot_z } });
+						}
+					}
+				}
 				// brain[11] is the CMDL floor's absolute value.
 				// [orig: Entity_InitHelicopterAIFromDef @0x4683C0]
 				const world::AiEntity *vehicle_ai = world.ai.for_handle(e->handle);

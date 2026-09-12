@@ -233,6 +233,13 @@ enum PresentField : int {
     PF_OBJECT_DESTROY03,
     PF_OBJECT_DESTROY04,
     PF_OBJECT_DESTROY05,
+    // The org0 skin bone-callback's DEATH register (CTRL ordinal 6, the corpse
+    // fade): world::death_ctrl_register_value over the authoritative organic
+    // row's dead flag and corpse timer. 0xFFFF is retail's LIVE value, not a
+    // clear, so every other row (non-organics, wire-only joiner rows without
+    // a corpse timer) publishes it too.
+    // [orig: BoneCallback_org0_Skin @0x4e3669..0x4e368e]
+    PF_DEATH_CTRL,
 	PF_STRIDE
 };
 

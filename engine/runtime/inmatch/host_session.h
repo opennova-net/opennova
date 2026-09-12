@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <runtime/replication/connection.h>            // replication::TransportMode
@@ -126,6 +127,10 @@ struct HostConfig {
 	uint32_t host_start_tick = 0;
 	uint32_t session_seed_id = 0;
 	bool serve_and_play = false; // true: HostClient + local player; false: HostOnly, no local player
+	// The host's game directory — where CNapiNetwork_Init looks for the loose
+	// `_NSTMOUT.TXT` reap/pool override (session_timeout_config.h). Empty = no
+	// override lookup, the 120000 ms / 1200-record template stands.
+	std::string game_root;
 	// The listen host's OWN per-side character selection (weapon.sav / PLAYER_INFO),
 	// installed on its type-2 loopback connection before the local player add — the
 	// same fields a joiner uploads in ClientAuth. Retail fills its local player

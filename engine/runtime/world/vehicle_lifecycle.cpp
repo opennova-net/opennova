@@ -1,10 +1,13 @@
 #include "vehicle_system.h"
 #include "world.h"
+#include "ai.h"
 #include "angle.h"
+#include "collision.h"
 #include "vehicle_motor_detail.h"
 #include <base/io/bam.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace opennova::world {
 namespace {
@@ -120,6 +123,18 @@ bool VehicleSystem::resolve_spawn_pose(const Entity &e, int32_t pose[6]) const {
 void VehicleSystem::initialize_mission_vehicles() {
 	std::vector<EntityHandle> handles;
 	world_.registry.for_each_in_pool(1, [&](const Entity &e) { handles.push_back(e.handle); });
+	// The class init's gunner-attachment setup runs once every pool-1 record is
+	// resident (retail's model init walks pool 1 after the whole load) and
+	// before the first mover tick below, whose installed +0x1C4 callback already
+	// carries the children [orig: Entity_InitAllFromModels @0x40E5B8..0x40E5D8
+	//  -> the def callbacks @0x4686C0/@0x4683C0 -> Entity_SetupGunnerAttachments
+	//  @0x468964/@0x468692]. The def's `Parent` byte reaches the port through
+	// VehicleTraits::attrib_parent, which the items.def traits sweep feeds after
+	// promotion, so the setup sits here rather than in promote's brain init.
+	for (EntityHandle handle : handles) {
+		if (Entity *entry = world_.registry.get(handle))
+			setup_gunner_attachments(*entry);
+	}
 	for (EntityHandle handle : handles) {
 		Entity *entry = world_.registry.get(handle);
 		if (entry == nullptr)
@@ -323,6 +338,196 @@ void VehicleSystem::cleanup_destroyed_ref_group(Entity &vehicle) {
 		}
 		if (world_.rules.logic_authority && other->primary_occupant.valid())
 			detach(other->primary_occupant);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Gunner attachments: the class init's same-refNum pool-1 peer list ridden on
+// the vehicle's 'agun' userpoints, and the per-tick follow the installed
+// +0x1C4 callback runs after the saved motor. Retail installs the follow as
+// the entity's update callback and calls the saved motor from it; the port's
+// motor pass calls the follow right after the mover, which is the same order.
+// [orig: Entity_SetupGunnerAttachments @0x468100, called by
+//  Entity_InitVehicleAIFromDef @0x46895A..0x468964 and
+//  Entity_InitHelicopterAIFromDef @0x468688..0x468692 when ItemDef+0x548
+//  (the items.def attrib token `Parent`) is set; Entity_UpdateAttachedChildren
+//  @0x45D550 (saved callback first @0x45D573, guard gate @0x45D578)]
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// The greedy pass's distance: sqrt in double over the Q16 deltas (z first, the
+// x87 order), clamped at 2147418100.0, truncated to int64 and compared UNSIGNED
+// against the -1 sentinel [orig: @0x468301..0x468369].
+uint32_t attachment_distance(const int32_t child[3], const int32_t point[3]) {
+	const double dz = double(child[2]) - double(point[2]);
+	const double dy = double(child[1]) - double(point[1]);
+	const double dx = double(child[0]) - double(point[0]);
+	double dist = std::sqrt(dz * dz + dy * dy + dx * dx);
+	if (dist > 2147418100.0)
+		dist = 2147418100.0;
+	return static_cast<uint32_t>(static_cast<int64_t>(dist));
+}
+
+EntityHandle attached_child_handle(const AiBrain &b, int slot) {
+	const int32_t word = b.f[AiBrain::kAttachSlots + 2 * slot + 1];
+	return word > 0 ? EntityHandle{ static_cast<uint16_t>(word - 1) } : EntityHandle{};
+}
+
+} // namespace
+
+void VehicleSystem::setup_gunner_attachments(Entity &vehicle) {
+	World &world = world_;
+	// The class init reaches the setup only for an AI-data item whose def sets
+	// `Parent` [orig: @0x46895A..0x468964]; the setup itself bails without the
+	// 812-byte brain [orig: @0x46811E].
+	const VehicleTraits *t = traits.get(vehicle.item_id);
+	AiEntity *ai = world.ai.for_handle(vehicle.handle);
+	if (t == nullptr || !t->attrib_parent || ai == nullptr)
+		return;
+	AiBrain &b = ai->brain;
+
+	// Every OTHER pool-1 entity whose refNum byte equals this entity's nonzero
+	// refNum, in pool slot order, sixteen at most [orig: the g_pool_list[1]
+	// walk @0x468130..0x468173: self skip @0x468154, refNum nonzero @0x46815E,
+	// the +533 compare @0x468166, the slot store @0x468168, the 16 cap @0x468173].
+	int32_t count = 0;
+	world.registry.for_each_in_pool(1, [&](const Entity &candidate) {
+		if (count >= AiBrain::kAttachSlotMax)
+			return;
+		if (candidate.handle == vehicle.handle)
+			return;
+		if (vehicle.ref_num == 0 || candidate.ref_num != vehicle.ref_num)
+			return;
+		b.f[AiBrain::kAttachSlots + 2 * count] = 0;
+		b.f[AiBrain::kAttachSlots + 2 * count + 1] =
+				static_cast<int32_t>(candidate.handle.packed) + 1;
+		++count;
+	});
+	// No peer: nothing is installed and the count word stays [orig: @0x468177].
+	if (count == 0)
+		return;
+	// The count word (+576) and the callback chain: the saved motor keeps
+	// running first, then the follow [orig: @0x468183..0x468193].
+	b.f[AiBrain::kAttachCount] = count;
+
+	// The first sixteen 'agun' userpoints, transformed by the entity's affine
+	// fixed-point matrix (the scale variant when the entity carries anim data
+	// or an item scale — entity_placement_matrix's own select)
+	// [orig: @0x4681AA..0x4681D9; the matrix select @0x468200/@0x46823E;
+	//  Math_FixedPointTransformPoint22 per point @0x468288].
+	const CollisionMatrix matrix = entity_placement_matrix(vehicle);
+	const int point_count =
+			std::min<int>(static_cast<int>(t->agun_points.size()), AiBrain::kAttachSlotMax);
+	int32_t world_points[AiBrain::kAttachSlotMax][3] = {};
+	bool available[AiBrain::kAttachSlotMax] = {};
+	for (int i = 0; i < point_count; ++i) {
+		matrix.transform_point(t->agun_points[static_cast<size_t>(i)].position, world_points[i]);
+		available[i] = true;
+	}
+
+	// Greedy nearest neighbour, child slot order: each child takes the closest
+	// unassigned point and consumes it; a child with no point left keeps bone
+	// 0 and stays where it is [orig: @0x4682C1..0x4683AB — best -1/-1
+	// @0x4682DD..0x4682E0, the consumed-bone skip @0x4682F4, the unsigned
+	// compare @0x468365, the store @0x468389 and the zeroing @0x46838B].
+	for (int slot = 0; slot < count; ++slot) {
+		const Entity *child = world.registry.get(attached_child_handle(b, slot));
+		if (child == nullptr)
+			continue;
+		const int32_t child_pos[3] = { to_fixed(child->position.x),
+			to_fixed(child->position.y), to_fixed(child->position.z) };
+		uint32_t best = 0xFFFFFFFFu;
+		int best_index = -1;
+		for (int j = 0; j < point_count; ++j) {
+			if (!available[j])
+				continue;
+			const uint32_t distance = attachment_distance(child_pos, world_points[j]);
+			if (distance < best) {
+				best_index = j;
+				best = distance;
+			}
+		}
+		if (best_index >= 0) {
+			b.f[AiBrain::kAttachSlots + 2 * slot] = best_index + 1;
+			available[best_index] = false;
+		}
+	}
+}
+
+void VehicleSystem::update_attached_children(Entity &vehicle) {
+	World &world = world_;
+	AiEntity *ai = world.ai.for_handle(vehicle.handle);
+	if (ai == nullptr)
+		return;
+	AiBrain &b = ai->brain;
+	// The guard gate: no attached children, nothing to follow [orig: @0x45D578].
+	const int32_t count =
+			std::min<int32_t>(b.f[AiBrain::kAttachCount], AiBrain::kAttachSlotMax);
+	if (count <= 0)
+		return;
+	const VehicleTraits *t = traits.get(vehicle.item_id);
+	// The parent matrix, rebuilt every tick from the live position and eulers
+	// (the scale variant when the parent carries anim data or an item scale)
+	// [orig: @0x45D585..0x45D5D1].
+	const CollisionMatrix matrix = entity_placement_matrix(vehicle);
+	const int32_t heading = vehicle.veh.yaw_seeded
+			? vehicle.veh.yaw_bam
+			: bam_heading_from_mission_yaw_deg(static_cast<double>(vehicle.yaw));
+	const int32_t pitch = vehicle.veh.yaw_seeded
+			? vehicle.veh.air_pitch_bam
+			: bam_from_degrees_wrapped(static_cast<double>(vehicle.pitch));
+	const int32_t roll = vehicle.veh.yaw_seeded
+			? vehicle.veh.air_roll_bam
+			: bam_from_degrees_wrapped(static_cast<double>(vehicle.roll));
+	for (int slot = 0; slot < count; ++slot) {
+		// A child with no assigned point is left alone [orig: @0x45D5F5].
+		const int32_t bone = b.f[AiBrain::kAttachSlots + 2 * slot];
+		if (bone <= 0)
+			continue;
+		Entity *child = world.registry.get(attached_child_handle(b, slot));
+		if (child == nullptr || t == nullptr ||
+				bone > static_cast<int32_t>(t->agun_points.size()))
+			continue;
+		// child +4..+24 = the parent's position and eulers, then +4/+8/+12 =
+		// the point's local position through the parent matrix (translation
+		// included) [orig: @0x45D5FF..0x45D61D; @0x45D641..0x45D663].
+		int32_t world_point[3];
+		matrix.transform_point(t->agun_points[static_cast<size_t>(bone - 1)].position, world_point);
+		child->position = { static_cast<float>(from_fixed(world_point[0])),
+			static_cast<float>(from_fixed(world_point[1])),
+			static_cast<float>(from_fixed(world_point[2])) };
+		child->yaw = vehicle.yaw;
+		child->pitch = vehicle.pitch;
+		child->roll = vehicle.roll;
+		child->veh.yaw_seeded = vehicle.veh.yaw_seeded;
+		child->veh.yaw_bam = vehicle.veh.yaw_bam;
+		child->veh.air_pitch_bam = vehicle.veh.air_pitch_bam;
+		child->veh.air_roll_bam = vehicle.veh.air_roll_bam;
+		// The six-dword velocity block (+152..+172: velocityX/Y, slideDecay and
+		// the modelPtr0..2 rates) is the parent's unless the child is dead
+		// (+286 <= 0) or flagged dead/husk (Flags & 6), then zero
+		// [orig: @0x45D65B..0x45D6CA].
+		const bool dead = child->health <= 0 ||
+				((child->flags | child->engine_flags) & (kEntityFlagDead | kEntityFlagHusk)) != 0;
+		child->veh.vel_x = dead ? 0 : vehicle.veh.vel_x;
+		child->veh.vel_y = dead ? 0 : vehicle.veh.vel_y;
+		child->veh.slide_z = dead ? 0 : vehicle.veh.slide_z;
+		child->veh.wheel_rate_bam = dead ? 0 : vehicle.veh.wheel_rate_bam;
+		child->veh.air_pitch_rate = dead ? 0 : vehicle.veh.air_pitch_rate;
+		child->veh.air_roll_rate = dead ? 0 : vehicle.veh.air_roll_rate;
+		// One entity struct in retail: a child that carries its own brain reads
+		// the same words through the AiEntity mirrors.
+		if (AiEntity *child_ai = world.ai.for_handle(child->handle)) {
+			child_ai->pos[0] = world_point[0];
+			child_ai->pos[1] = world_point[1];
+			child_ai->pos[2] = world_point[2];
+			child_ai->heading = heading;
+			child_ai->pitch = pitch;
+			child_ai->roll = roll;
+			child_ai->vel_x = child->veh.vel_x; // entity+152
+			child_ai->vel_z = child->veh.vel_y; // entity+156
+		}
 	}
 }
 

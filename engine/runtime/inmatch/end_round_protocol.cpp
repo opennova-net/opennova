@@ -85,17 +85,29 @@ EndRoundStats build_end_round_stats(const world::MatchResult &result) {
 		}
 		out.players.push_back(std::move(row));
 	}
+	// The trailing matrix is NOT gated on the active-column flags: every
+	// configured column is filled and written for every team row
+	// (g_scoreTeamCount words per row), while the declared count byte above
+	// stays the ACTIVE count. Column id 5 reads the TeamRecord hold word
+	// (+0x150) directly; every other id resolves through
+	// CPlayerStats_GetFieldByIndex on the team stats. The score table is
+	// reloaded at the start of every build, so no earlier client parse ever
+	// narrows it. [orig: Server_BuildEndOfRoundScoreboard — the fill
+	// @0x5092D0..0x509327 (id 5 @0x5092E5..0x5092E7, GetFieldByIndex
+	// @0x5092F3), the write @0x509581..0x5095CC (no Block[] gate);
+	// load_scoring_table_for_game_type @0x508FE5 -> @0x52D3F8..0x52D42C]
 	const size_t team_row_count = std::min<size_t>(
 			result.team_row_count, result.team_stats.size());
 	out.team_rows.resize(team_row_count);
 	for (size_t team = 0; team < team_row_count; ++team) {
-		out.team_rows[team].reserve(active_fields.size());
-		for (const size_t index : active_fields) {
-			const world::MatchScoreField &field = result.score_fields[index];
-			out.team_rows[team].push_back(wire_i16(
-					world::match_score_field_value(
+		out.team_rows[team].reserve(result.score_fields.size());
+		for (const world::MatchScoreField &field : result.score_fields) {
+			const int32_t value = field.field == 5
+					? result.team_hold_ticks[team]
+					: world::match_score_field_value(
 							result.team_stats[team], field.field,
-							result.game_type)));
+							result.game_type);
+			out.team_rows[team].push_back(wire_i16(value));
 		}
 	}
 	return out;
@@ -110,7 +122,8 @@ EndRoundHeader build_end_round_header(const world::MatchResult &result,
 	out.draw = result.draw ? 1u : 0u;
 	if (non_team_form) {
 		// The non-team form serializes the top three rows of the frozen
-		// (points-descending) board: the 32-byte entry name and the
+		// board (descending by the Player_ComputeScore key, which for a
+		// non-team type is the primary itself): the 32-byte entry name and the
 		// game-type primary score the board builder selected into
 		// entry+0x40 (the ScoreRules_GetPrimaryScoreField (ex sub_52C850)(g_GameType, ...) store @0x509152).
 		// [orig: EndRoundScoreboard_SerializeHeader @0x5052bf..0x505381,

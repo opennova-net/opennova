@@ -34,6 +34,12 @@ const SECTION_CLIENT := "Client"
 const SECTION_LOADING_TEXT := "LoadingText"
 const TABLE_MENUTXT := "menutxt"
 const TABLE_GAMEUI := "gameui"
+## keyhelp.bin: the "Keys" table every key-binding label (modifier prefixes,
+## the " or " separator, mouse and key names) resolves through. Registering it
+## installs it process-wide for the engine's binding formatters
+## (RtxtStringFile.install_key_strings -> controls::set_key_strings, the
+## KeyHelp_GetStringWithFallback lookup over retail's g_TextKeyHelp).
+const TABLE_KEYHELP := "keyhelp"
 const SECTION_MENU := "Menu"
 const SECTION_AVATARS := "Avatars"
 
@@ -71,6 +77,9 @@ func clear() -> void:
 	_table = null
 	_tables.clear()
 	_override_table = null
+	# The installed "Keys" table goes with the registry: every binding label
+	# falls back to its literal until the next keyhelp registration.
+	RtxtStringFile.clear_key_strings()
 
 
 ## --- Named-table registry [orig: Game_InitSubsystems @ 0x4A6CD0] ---
@@ -83,6 +92,13 @@ func register_table(name: String, table: RtxtStringFile) -> void:
 		_tables.erase(id)
 	else:
 		_tables[id] = table
+	# keyhelp.bin doubles as the engine's process-wide "Keys" binding-label
+	# table (TABLE_KEYHELP): registering installs it, unregistering forgets it.
+	if id == TABLE_KEYHELP:
+		if table != null:
+			table.install_key_strings()
+		else:
+			RtxtStringFile.clear_key_strings()
 
 
 func get_table(name: String) -> RtxtStringFile:

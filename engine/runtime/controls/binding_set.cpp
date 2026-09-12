@@ -1,4 +1,5 @@
 #include <runtime/controls/binding_set.h>
+#include <runtime/controls/key_strings.h>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -7,53 +8,70 @@
 namespace opennova::controls {
 
 std::string format_display_string(const BindingRecord &rec, bool flagged) {
-  // [orig: KeyBinding_FormatDisplayString @0x496bd0]
+  // [orig: KeyBinding_FormatDisplayString @0x496bd0]. Every prefix, separator,
+  // mouse name and key name is a "Keys" table lookup with the binary's literal
+  // as the fallback (key_strings.h).
   std::string out;
   const uint16_t keys[2] = {rec.primary, rec.secondary};
   const uint16_t mods[2] = {rec.primary_mod, rec.secondary_mod};
-  // Arm 1: a keyed slot WITH a modifier — walk both slots [orig: @0x496c0e].
+  // The keyName/displayName scratch: resolved from the PRIMARY up front
+  // (@0x496c07, unconditionally) and re-resolved for every keyed slot arm 1
+  // visits (@0x496ca7); arm 2 appends whatever it holds LAST (@0x496f01).
+  uint16_t last_key = keys[0];
+  // Arm 1: a keyed slot WITH a modifier -- walk both slots [orig: the up-front
+  // resolve's stack pop @0x496c0c..0x496c0e, then the four-compare gate
+  // @0x496c0f..0x496c2d (its last compare @0x496c28) and the two-slot loop
+  // @0x496c40..0x496da5].
   if ((keys[0] != 0 && mods[0] != 0) || (keys[1] != 0 && mods[1] != 0)) {
-    int printed = 0;
     for (int slot = 0; slot < 2; ++slot) {
-      if (keys[slot] == 0) {
-        ++printed;
-        continue;
-      }
-      if (printed > 0) out += " or ";
-      if (mods[slot] == 17) out += "Ctrl - ";
-      if (mods[slot] == 16) out += "Shift - ";
+      if (keys[slot] == 0) continue;
+      // The separator rides the SLOT INDEX (result > 0 @0x496c4d), not a
+      // printed count.
+      if (slot > 0) out += key_string("OR", " XXor ");  // @0x496c8f
+      last_key = keys[slot];
+      // "Ctrl-": the lookup call @0x496cc5 (the earlier cite @0x496cc7 is a
+      // byte inside that call), inlined strcat copy @0x496cf1; "Shift-":
+      // copy @0x496d41.
+      if (mods[slot] == 17) out += key_string("Ctrl-", "XXCtrl - ");
+      if (mods[slot] == 16) out += key_string("Shift-", "XXShift - ");
+      // The key name: lookup @0x496d59, then the inlined strcat -- `mov ecx,eax`
+      // @0x496d61, `mov edi,ebx` @0x496d6c..0x496d6d, `sub eax,ecx`
+      // @0x496d6e..0x496d6f, copy @0x496d84.
       out += key_name(keys[slot]);
-      ++printed;
     }
   }
   // Arm 2: a keyed slot WITHOUT a modifier resets the buffer and prints the
-  // FIRST slot's key behind either slot's modifier [orig: @0x496cc7..0x496d6d].
+  // LAST resolved key behind either slot's modifier [orig: @0x496dc5..0x496f24].
   if ((keys[0] != 0 && mods[0] == 0) || (keys[1] != 0 && mods[1] == 0)) {
-    out.clear();
-    if (mods[0] == 17 || mods[1] == 17) out += "Ctrl - ";
-    if (mods[0] == 18 || mods[1] == 18) out += "Alt - ";
-    if (mods[0] == 16 || mods[1] == 16) out += "Shift - ";
-    out += key_name(keys[0]);
+    out.clear();                                                                     // @0x496dd5
+    if (mods[0] == 17 || mods[1] == 17) out += key_string("Ctrl-", "XXCtrl - ");     // @0x496e21
+    // "Alt-": lookup @0x496e51, then the inlined strcat -- `add edi,-1`
+    // @0x496e6f and `mov cl,[edi+1]` @0x496e72 (the earlier cites @0x496e70 /
+    // @0x496e73 are bytes inside those two), copy @0x496e81.
+    if (mods[0] == 18 || mods[1] == 18) out += key_string("Alt-", "XXAlt - ");
+    if (mods[0] == 16 || mods[1] == 16) out += key_string("Shift-", "XXShift - ");   // @0x496ee1
+    out += key_name(last_key);                                                       // @0x496f01
   }
-  // Arm 3: the mouse slot [orig: @0x496d6f..0x496e70]. The mouse modifier
+  // Arm 3: the mouse slot [orig: @0x496f34..0x49714f]. The mouse modifier
   // (entry word 16) RESETS the buffer with "<mod>-" -- retail sprintf's it
   // over the keyed text [orig: mask test @0x496f34, modifier load @0x496f3f,
-  // sprintf "%s-" @0x496f79] -- then " or " joins a keyed slot
-  // [orig: strcat @0x496fd4]; the button names ride the same "Keys"
-  // fallbacks.
+  // lookup("Keys", modKeyName, modDisplayName) @0x496f6d, sprintf "%s-"
+  // @0x496f79] -- then the separator joins a keyed slot [orig: strcat
+  // @0x496fd4]; the button names are "Keys" lookups over the lowercase
+  // "XXmouse n" literals (the shipped table maps them to "Mouse n").
   if (rec.mouse_mask != 0) {
     if (rec.mouse_mod != 0) out = key_name(rec.mouse_mod) + "-";
-    if (keys[0] != 0 || keys[1] != 0) out += " or ";
+    if (keys[0] != 0 || keys[1] != 0) out += key_string("OR", " XXor ");
     switch (rec.mouse_mask) {
-      case 1: out += "Mouse 1"; break;
-      case 2: out += "Mouse 2"; break;
-      case 16: out += "Mouse 3"; break;
-      case 1024: out += "Mouse Whl Up"; break;
-      case 2048: out += "Mouse Whl Dn"; break;
+      case 1: out += key_string("LBUTTON", "XXmouse 1"); break;          // @0x497058
+      case 2: out += key_string("RBUTTON", "XXmouse 2"); break;          // @0x49701c
+      case 16: out += key_string("MBUTTON", "XXmouse 3"); break;         // @0x497098
+      case 1024: out += key_string("MWHLUP", "XXMouse Whl Up"); break;   // @0x497125
+      case 2048: out += key_string("MWHLDN", "XXMouse Whl Dn"); break;   // @0x4970ea
       default: break;
     }
   }
-  if (flagged) out += " *"; // entry[1] & 0x200 [orig: @0x496e73]
+  if (flagged) out += " *"; // entry[1] & 0x200 [orig: @0x497166]
   return out;
 }
 

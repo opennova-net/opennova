@@ -242,6 +242,21 @@ void VehicleSystem::tick_simple_motor(
 	Entity *controller = t.player_control ? resolve_controller(e) : nullptr;
 	if (controller != nullptr && (!controller->alive || controller->health <= 0))
 		controller = nullptr;
+	if (boat && t.player_control) {
+		// The selector-zero boat's PlayerControl block sits at its HEAD, before
+		// the authority split, so it runs for the authority and for a client's
+		// prediction of a hull it does not drive: the claimant engine start/stop
+		// edge, then the GROUND-profile part-spin machine (d_lcac is `type
+		// GROUND`; DLCAC1's fan consumes HELO_TAILROTOR) — never the wheel-phase
+		// step, which this mover writes from its command inside boat_step.
+		// [orig: Entity_ProcessAirVehiclePhysics @0x46FA00 (the selector-zero
+		//  boat mover): `test byte [itemDef+54h],40h` @0x47004B, claimant edge
+		//  @0x470055..0x4700EB, Entity_UpdatePartSpinAccumulator @0x4700F5, the
+		//  is_authority split @0x470109; dispatch Entity_DispatchPhysics_cbot
+		//  @0x48EF97/@0x48EFAC, Entity_DispatchPhysicsUpdate @0x48F023/@0x48F035]
+		update_claimant_engine_sound(e, t);
+		rotor_machine_tick(e, t);
+	}
 	if (prediction) {
 		vehicle_client_chase(e);
 		if (controller != nullptr && controller->handle == world_.cached.local_player) {
@@ -320,8 +335,9 @@ void VehicleSystem::tick_simple_motor(
 		// fold with the velocity magnitude (ftol of sqrt(vx^2 + vy^2 + vz^2),
 		// flt_7C19E0 clamp) standing in for a zero speed word and no fold at all
 		// when neither waterSpeed, brain speed A nor the command resolves, then
-		// the direction latch inside the fold. It has no high-rev, engine-start
-		// or engine-stop edge and never runs the part spin.
+		// the direction latch inside the fold. It has no high-rev edge; its
+		// claimant start/stop edge and part spin ran at the HEAD (the
+		// PlayerControl block above, before the authority split).
 		// [IDB: Entity_ProcessAirVehiclePhysics @0x46FA00 (a misnomer: the
 		//  selector-zero boat mover): lights @0x4714EA..0x471523 (slot 24,
 		//  +0x318 bit 2), the sound-system gate dword_24E0E80 @0x471523, fold

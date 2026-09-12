@@ -302,15 +302,34 @@ int check_S_26_kill() {
 	return 0;
 }
 
-// S2C 0x4E — batch despawn: [u16 count][u16 slot...].
+// S2C 0x4E — one join-window kill-list page: [u16 resume][u16 slot...] to the
+// body end; the bare FF FF is a walk that found nothing. Round-trips through
+// encode_batch_kill (the host page builder's byte order).
+// [orig: NapiNPClientMsg_HandleBatchKill @0x431870; collect_valid_weapon_slots @0x516000]
 int check_S_4E_batch_kill() {
 	LE w;
-	w.u16(1);        // count (echo only)
+	w.u16(0x1002);   // resume index (the iterator's current slot)
 	w.u16(0x1234);   // one slot
 	BatchKillBatch out;
 	EXPECT(decode_batch_kill(w.b.data(), w.b.size(), out));
+	EXPECT(out.count == 0x1002);
 	EXPECT(out.slots.size() == 1);
 	EXPECT(out.slots[0] == 0x1234);
+	// The exhausted-and-empty page: FF FF alone, no slots, no continuation.
+	LE bare;
+	bare.u16(0xFFFF);
+	EXPECT(decode_batch_kill(bare.b.data(), bare.b.size(), out));
+	EXPECT(out.count == 0xFFFF && out.slots.empty());
+	// Host page -> wire -> client page, byte for byte.
+	BatchKillBatch page;
+	page.count = 0xFFFF;
+	page.slots = {0x0007, 0x1003, 0x2000};
+	const std::vector<uint8_t> wire = encode_batch_kill(page);
+	const uint8_t expected[] = {0xFF, 0xFF, 0x07, 0x00, 0x03, 0x10, 0x00, 0x20};
+	EXPECT(wire.size() == sizeof(expected));
+	EXPECT(std::memcmp(wire.data(), expected, sizeof(expected)) == 0);
+	EXPECT(decode_batch_kill(wire.data(), wire.size(), out));
+	EXPECT(out.count == 0xFFFF && out.slots == page.slots);
 	cover('S', 0x4E);
 	return 0;
 }
@@ -358,6 +377,36 @@ int check_S_16_player_list() {
 	EXPECT(out.teams.size() == 2);
 	EXPECT(out.players[0].flags == 0x02);
 	cover('S', 0x16);
+	return 0;
+}
+
+// S2C 0x16 — the 252-row clamp: a count byte of 0xFF followed by exactly 252 rows,
+// a team table and the trailer decodes 252 rows (retail's `count > 0xFC ? 252`);
+// a 0xFD body carrying 253 rows misparses on both ends (the team table is read
+// from row 253) and is rejected here. [orig: NapiNPClientMsg_PlayerList @0x42fb3a]
+int check_S_16_player_list_252_clamp() {
+	auto build = [](uint8_t count_byte, unsigned rows) {
+		LE w;
+		w.u8(1);           // flags
+		w.u8(count_byte);  // player_count (the wire byte)
+		for (unsigned i = 0; i < rows; ++i) {
+			w.u8(uint8_t(i)); w.u16(0); w.u16(1); w.u16(2); w.u8(0x02);
+		}
+		w.u8(0);           // team_count -> 1 row (T0)
+		w.u16(0); w.u16(0); w.u8(0); w.u8(0);
+		w.u8(0); w.u8(0);  // trailer
+		return w.b;
+	};
+	PlayerList out;
+	const std::vector<uint8_t> clamped = build(0xFF, 252);
+	EXPECT(clamped.size() == 2 + 252 * 8 + 1 + 6 + 2);
+	EXPECT(decode_player_list(clamped.data(), clamped.size(), out));
+	EXPECT(out.player_count == 0xFF);
+	EXPECT(out.players.size() == 252);
+	EXPECT(out.players[251].slot_id == 251);
+	EXPECT(out.teams.size() == 1);
+	const std::vector<uint8_t> over = build(0xFD, 253);
+	EXPECT(!decode_player_list(over.data(), over.size(), out));
 	return 0;
 }
 
@@ -561,7 +610,9 @@ int check_C_23_visible_request() {
 	return 0;
 }
 
-// C2S 0x28 — loadout request: [u32][u32][u16].
+// C2S 0x28 — the join-window kill-list request [u32 windowMin][u32 windowMax][u16 start];
+// the encoder is the 0x0F-burst / 0x4E-continuation sender's byte order.
+// [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @0x51A550; senders @0x42e5f7, @0x4318ff]
 int check_C_28_loadout_request() {
 	LE w;
 	w.u32(0x11111111);
@@ -571,8 +622,199 @@ int check_C_28_loadout_request() {
 	size_t consumed = 0;
 	EXPECT(decode_burst_loadout_request(w.b.data(), w.b.size(), r, consumed));
 	EXPECT(consumed == 10);
-	EXPECT(r.flags == 0x22222222);
+	EXPECT(r.loadout_filter == 0x11111111);  // windowMin
+	EXPECT(r.flags == 0x22222222);           // windowMax
+	EXPECT(r.extra == 0x3333);               // start
+	// The 0x4E continuation form {A82360, A82364, resume} round-trips to the same 10 B.
+	BurstLoadoutRequest cont;
+	cont.loadout_filter = 0x0001E240;  // the S2C 0x19 value
+	cont.flags = 0x0001E6A8;           // the S2C 0x1A value
+	cont.extra = 0x1002;               // the page's resume word
+	const std::vector<uint8_t> wire = encode_burst_loadout_request(cont);
+	EXPECT(wire.size() == 10);
+	EXPECT(wire == std::vector<uint8_t>({0x40, 0xE2, 0x01, 0x00, 0xA8, 0xE6, 0x01, 0x00, 0x02, 0x10}));
+	EXPECT(decode_burst_loadout_request(wire.data(), wire.size(), r, consumed));
+	EXPECT(r.loadout_filter == 0x0001E240 && r.flags == 0x0001E6A8 && r.extra == 0x1002);
 	cover('C', 0x28);
+	return 0;
+}
+
+// S2C 0x37 / C2S 0x1A — the shared 5-byte door-row body [u16 handle][i16 state][u8 number];
+// a short body zero-fills (the retail readers' defaults) and reports false. One decoder
+// serves both directions; cover() each so the drift guard balances.
+// [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250; NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+int check_door_slot_action_pair() {
+	LE w;
+	w.u16(0x2005);   // pool 2 (static) slot 5
+	w.u16(0x0002);   // state 2 = open
+	w.u8(1);         // 1-based row number (a completion)
+	DoorSlotAction out;
+	size_t consumed = 0;
+	EXPECT(decode_door_slot_action(w.b.data(), w.b.size(), out, consumed));
+	EXPECT(consumed == 5);
+	EXPECT(out.entity_handle == 0x2005 && out.state == 2 && out.number == 1);
+	// The state word is signed on both ends (i16 reads @0x431279 / @0x514b76).
+	LE neg;
+	neg.u16(0x0001); neg.u16(0xFFFF); neg.u8(3);
+	EXPECT(decode_door_slot_action(neg.b.data(), neg.b.size(), out, consumed));
+	EXPECT(out.state == -1 && out.number == 3);
+	// Short body: handle + state only -> number 0 (dropped by every receiver's gate), false.
+	EXPECT(!decode_door_slot_action(w.b.data(), 4, out, consumed));
+	EXPECT(consumed == 4 && out.entity_handle == 0x2005 && out.state == 2 && out.number == 0);
+	const uint8_t none[1] = {0};
+	EXPECT(!decode_door_slot_action(none, 0, out, consumed));
+	EXPECT(consumed == 0 && out.entity_handle == 0 && out.state == 0 && out.number == 0);
+	cover('S', 0x37);
+	cover('C', 0x1A);
+	return 0;
+}
+
+// S2C 0x6A — clan-roster update: actions 1/3 [u8][u32 id][cstr name][cstr tag] with the
+// 64 / 8 char caps, action 2 [u8 2][u32 id]; any other action is ignored (false).
+// [orig: NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; serialize_minimap_slot @0x5073B0]
+int check_S_6A_clan_roster() {
+	ClanRosterUpdate add;
+	add.action = kClanRosterAdd;
+	add.account_id = 0x00ABCDEF;
+	add.name = "Sgt Rock";
+	add.tag = "[TAG]";
+	const std::vector<uint8_t> wire = encode_clan_roster_update(add);
+	EXPECT(wire.size() == 1 + 4 + 9 + 6);
+	EXPECT(wire[0] == 1 && wire[1] == 0xEF && wire[2] == 0xCD && wire[3] == 0xAB && wire[4] == 0x00);
+	ClanRosterUpdate out;
+	EXPECT(decode_clan_roster_update(wire.data(), wire.size(), out));
+	EXPECT(out.action == kClanRosterAdd && out.account_id == 0x00ABCDEF);
+	EXPECT(out.name == "Sgt Rock" && out.tag == "[TAG]");
+	// Action 3 (the walk reply) carries the same body.
+	add.action = kClanRosterWalkReply;
+	const std::vector<uint8_t> reply = encode_clan_roster_update(add);
+	EXPECT(reply.size() == wire.size() && reply[0] == 3);
+	EXPECT(decode_clan_roster_update(reply.data(), reply.size(), out));
+	EXPECT(out.action == kClanRosterWalkReply && out.name == "Sgt Rock");
+	// Action 2 is the 5-byte removal.
+	ClanRosterUpdate remove;
+	remove.action = kClanRosterRemove;
+	remove.account_id = 0x00ABCDEF;
+	const std::vector<uint8_t> gone = encode_clan_roster_update(remove);
+	EXPECT(gone.size() == 5);
+	EXPECT(decode_clan_roster_update(gone.data(), gone.size(), out));
+	EXPECT(out.action == kClanRosterRemove && out.account_id == 0x00ABCDEF && out.name.empty());
+	// The reader keeps 64 name / 8 tag chars but skips the FULL name before the tag.
+	LE w;
+	w.u8(1);
+	w.u32(7);
+	for (int i = 0; i < 70; ++i) w.u8('n');
+	w.u8(0);
+	for (int i = 0; i < 12; ++i) w.u8('t');
+	w.u8(0);
+	EXPECT(decode_clan_roster_update(w.b.data(), w.b.size(), out));
+	EXPECT(out.account_id == 7);
+	EXPECT(out.name.size() == 64 && out.tag.size() == 8);
+	// The encoder applies the node buffer caps (char[65] / char[9]).
+	ClanRosterUpdate longs;
+	longs.action = kClanRosterAdd;
+	longs.name = std::string(70, 'n');
+	longs.tag = std::string(12, 't');
+	const std::vector<uint8_t> capped = encode_clan_roster_update(longs);
+	EXPECT(capped.size() == 1 + 4 + 65 + 9);
+	// An unknown action serializes to nothing (retail returns 0 and skips the send)
+	// and decodes as ignored.
+	ClanRosterUpdate other;
+	other.action = 9;
+	EXPECT(encode_clan_roster_update(other).empty());
+	const uint8_t nine[5] = {9, 0, 0, 0, 0};
+	EXPECT(!decode_clan_roster_update(nine, sizeof(nine), out));
+	cover('S', 0x6A);
+	return 0;
+}
+
+// C2S 0x4E — the clan-roster walk [u32 afterNetId]: {0} kick, {netId} continuation.
+// [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210]
+int check_C_4E_clan_roster_walk() {
+	ClanRosterWalkRequest kick;
+	const std::vector<uint8_t> wire = encode_clan_roster_walk_request(kick);
+	EXPECT(wire == std::vector<uint8_t>({0, 0, 0, 0}));   // the golden frame-17 burst bytes
+	ClanRosterWalkRequest out;
+	size_t consumed = 0;
+	EXPECT(decode_clan_roster_walk_request(wire.data(), wire.size(), out, consumed));
+	EXPECT(consumed == 4 && out.after_account_id == 0);
+	ClanRosterWalkRequest next;
+	next.after_account_id = 0x00ABCDEF;
+	const std::vector<uint8_t> cont = encode_clan_roster_walk_request(next);
+	EXPECT(decode_clan_roster_walk_request(cont.data(), cont.size(), out, consumed));
+	EXPECT(out.after_account_id == 0x00ABCDEF);
+	// A short body reads 0 (@0x511247) and is reported short.
+	EXPECT(!decode_clan_roster_walk_request(cont.data(), 2, out, consumed));
+	EXPECT(consumed == 0 && out.after_account_id == 0);
+	cover('C', 0x4E);
+	return 0;
+}
+
+// S2C 0x70 — vehicle-spawn availability: [u8 3] + rows [u16 typeId][u8 avail][u8 max]
+// + u16 0. Byte fixture pinned against the retail serializer's write order.
+// [orig: serialize_weapon_overlay_slots_0 @0x5105A0; NapiNPClientMsg_HandleWeaponLoadoutList @0x429a30]
+int check_S_70_vehicle_spawn_availability() {
+	VehicleSpawnAvailabilityList list;
+	list.rows.push_back({1300, 1, 3});                                            // (1300,1,3): one left of the allotment
+	list.rows.push_back({1292, kVehicleSpawnUnlimited, kVehicleSpawnUnlimited});  // unlimited
+	list.rows.push_back({2010, 0, 2});
+	const std::vector<uint8_t> wire = encode_vehicle_spawn_availability(list);
+	const uint8_t expected[] = {
+		0x03,
+		0x14, 0x05, 0x01, 0x03,   // 1300
+		0x0C, 0x05, 0xFF, 0xFF,   // 1292
+		0xDA, 0x07, 0x00, 0x02,   // 2010
+		0x00, 0x00,
+	};
+	EXPECT(wire.size() == sizeof(expected));
+	EXPECT(std::memcmp(wire.data(), expected, sizeof(expected)) == 0);
+	VehicleSpawnAvailabilityList out;
+	EXPECT(decode_vehicle_spawn_availability(wire.data(), wire.size(), out));
+	EXPECT(out.leading_byte == 3 && out.terminated);
+	EXPECT(out.rows.size() == 3);
+	EXPECT(out.rows[0].type_id == 1300 && out.rows[0].available == 1 && out.rows[0].max_count == 3);
+	EXPECT(out.rows[1].available == 0xFF && out.rows[1].max_count == 0xFF);
+	EXPECT(out.rows[2].type_id == 2010 && out.rows[2].available == 0 && out.rows[2].max_count == 2);
+	// An empty table is the 3-byte {03 00 00}.
+	const std::vector<uint8_t> empty = encode_vehicle_spawn_availability(VehicleSpawnAvailabilityList{});
+	EXPECT(empty == std::vector<uint8_t>({0x03, 0x00, 0x00}));
+	EXPECT(decode_vehicle_spawn_availability(empty.data(), empty.size(), out));
+	EXPECT(out.rows.empty() && out.terminated);
+	// Missing terminator: the client stops when fewer than two bytes remain; unclean here.
+	EXPECT(!decode_vehicle_spawn_availability(wire.data(), wire.size() - 2, out));
+	EXPECT(out.rows.size() == 3 && !out.terminated);
+	cover('S', 0x70);
+	return 0;
+}
+
+// C2S 0x42 — the availability request: the host reads nothing.
+// [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930]
+int check_C_42_vehicle_spawn_availability_request() {
+	size_t consumed = 1;
+	EXPECT(decode_vehicle_spawn_availability_request(nullptr, 0, consumed));
+	EXPECT(consumed == 0);
+	const uint8_t junk[2] = {1, 2};
+	EXPECT(decode_vehicle_spawn_availability_request(junk, sizeof(junk), consumed));
+	EXPECT(consumed == 0);
+	cover('C', 0x42);
+	return 0;
+}
+
+// C2S 0x40 — the spawn pick [u16 sourceHandle][u8 typeIndex]; missing fields read 0.
+// [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0]
+int check_C_40_vehicle_spawn_request() {
+	VehicleSpawnRequest pick;
+	pick.source_handle = 0x1007;  // pool 1 slot 7 (the carrier)
+	pick.type_index = 5;          // bit 5 of the source def's pcvehicle_spawnlist mask
+	const std::vector<uint8_t> wire = encode_vehicle_spawn_request(pick);
+	EXPECT(wire == std::vector<uint8_t>({0x07, 0x10, 0x05}));
+	VehicleSpawnRequest out;
+	size_t consumed = 0;
+	EXPECT(decode_vehicle_spawn_request(wire.data(), wire.size(), out, consumed));
+	EXPECT(consumed == 3 && out.source_handle == 0x1007 && out.type_index == 5);
+	EXPECT(!decode_vehicle_spawn_request(wire.data(), 2, out, consumed));
+	EXPECT(consumed == 2 && out.source_handle == 0x1007 && out.type_index == 0);
+	cover('C', 0x40);
 	return 0;
 }
 
@@ -1601,6 +1843,7 @@ int main() {
 	if (check_S_4E_batch_kill()) return 1;
 	if (check_S_10_static_entity()) return 1;
 	if (check_S_16_player_list()) return 1;
+	if (check_S_16_player_list_252_clamp()) return 1;
 	if (check_S_46_player_sync()) return 1;
 	if (check_C_0C_extended_uplink()) return 1;
 	if (check_C_06_fired_round()) return 1;
@@ -1614,6 +1857,12 @@ int main() {
 	if (check_C_22_player_sync_request()) return 1;
 	if (check_C_23_visible_request()) return 1;
 	if (check_C_28_loadout_request()) return 1;
+	if (check_door_slot_action_pair()) return 1;
+	if (check_S_6A_clan_roster()) return 1;
+	if (check_C_4E_clan_roster_walk()) return 1;
+	if (check_S_70_vehicle_spawn_availability()) return 1;
+	if (check_C_42_vehicle_spawn_availability_request()) return 1;
+	if (check_C_40_vehicle_spawn_request()) return 1;
 	if (check_C_29_team_spawn_ack()) return 1;
 	if (check_C_4C_client_quality()) return 1;
 	if (check_rtt_sample()) return 1;

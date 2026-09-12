@@ -103,6 +103,17 @@ public:
 			const Ref<RtxtStringFile> &p_table, const String &p_section,
 			const String &p_key);
 
+	// --- The process-wide "Keys" table (engine controls::key_strings.h) ---
+	// install_key_strings copies THIS table in as the binding-label table
+	// every key name, modifier prefix and separator resolves through (retail's
+	// g_TextKeyHelp: keyhelp.bin, loaded at boot beside gametext.bin; the
+	// engine's KeyHelp_GetStringWithFallback lookup). The shell installs the
+	// mounted keyhelp.bin at the boot point that registers the text tables;
+	// clear_key_strings forgets it (every label falls back to its literal).
+	void install_key_strings() const;
+	static void clear_key_strings();
+	static bool has_key_strings();
+
 	// Native access for the loader/saver.
 	void set_native(const opennova::rtxt::File &p_file);
 	const opennova::rtxt::File &get_native() const { return file_; }

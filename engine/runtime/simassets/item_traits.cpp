@@ -299,7 +299,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             t.kz = def->kz;
             t.armor_impact = def->armor_impact;
             t.armor_blast = def->armor_blast;
-            t.team_protect = (attrib & 0x8000u) != 0; // 0x8000 is NOT in the witnessed attrib token table — stays raw
+            // The S&D/A&D objective target's same-team blast immunity [orig: the
+            // blast applier's same-team gate, jo-c 261654: attacker team == target
+            // team && itemDef->attrib & 0x8000 -> return].
+            t.team_protect = (attrib & DEF_ITEM_ATTRIB_SD) != 0;
             t.no_die = (attrib & DEF_ITEM_ATTRIB_NODIE) != 0;
             t.static_death =
                     (def->attrib2 & DEF_ITEM_ATTRIB2_STATICDEATH) != 0;
@@ -388,6 +391,11 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				// def->top_heavy is parsed for parity but dead in retail —
 				// no consumer, so the traits do not carry it.
 				vt.player_control = (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
+				// The `Parent` byte (ItemDef+0x548): the gunner-attachment gate
+				// VehicleSystem::setup_gunner_attachments tests [orig:
+				// Entity_InitVehicleAIFromDef @0x46895A; Entity_InitHelicopterAIFromDef
+				// @0x468688].
+				vt.attrib_parent = def->attrib_parent != 0;
 				// The per-frame physics mover is selected exclusively by the
                 // move_function callback resolved into itemDef+0x158. ai_function
                 // selects the event/brain callback and may deliberately differ: the

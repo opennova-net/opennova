@@ -131,6 +131,10 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
                     //  @0x48B7F0]
                     world.vehicles.part_anim_tick(*veh, *traits);
 				}
+				// The installed +0x1C4 callback: the saved mover above, then the
+				// same-refNum children ride the 'agun' points [orig:
+				// Entity_UpdateAttachedChildren @0x45D550, @0x45D573 then @0x45D578..].
+				world.vehicles.update_attached_children(*veh);
 				if (AiEntity *ve = world.ai.for_handle(h)) {
                     ve->pos[0] = to_fixed(veh->position.x);
                     ve->pos[1] = to_fixed(veh->position.y);
@@ -187,6 +191,10 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
             } else {
                 world.vehicles.tick_motor(*veh, *traits, &cmd);
             }
+            // The installed +0x1C4 callback: the saved mover above, then the
+            // same-refNum children ride the 'agun' points [orig:
+            // Entity_UpdateAttachedChildren @0x45D550, @0x45D573 then @0x45D578..].
+            world.vehicles.update_attached_children(*veh);
             // Mirror the integrated transform back into the brain entity — one struct in
             // the original; the SM mover and the present snapshot read pos[]/heading.
             if (AiEntity *ve = world.ai.for_handle(h)) {

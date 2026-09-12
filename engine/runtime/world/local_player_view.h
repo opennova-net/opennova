@@ -117,6 +117,86 @@ bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerView
 // The current slot zoom, lazily initialized and clamped by the retail getter.
 int32_t local_player_scope_zoom(const LocalPlayerWeapon &w, WeaponSlotState &slot);
 
+// --- the scope ZOOM STEP (actions 212/214 on a raised scope, action 215) -------
+
+// The two def facts the zoom writers read beside the equipped weapon's
+// scope_max_mag [orig: WeaponDef +0x98 'scope_min_mag' (@0x544f7a; the record
+// default 2 @0x53ff73), +0 'category' (3 = Primary)]. The session bit the
+// class-6 sniper lock consults is World::rules.allow_sniper_scope_zoom
+// (byte_A821F0). Carried by the caller until LocalPlayerWeapon grows the
+// scope_min_mag field (WeaponInstallData::scope_min_mag <- DefWeaponDef::
+// scope_min_mag); `local_player_scope_zoom_limits` fills the category from
+// the weapon table by the equipped def name.
+struct ScopeZoomLimits {
+    int32_t scope_min_mag = 2;
+    int32_t category = 0;
+};
+ScopeZoomLimits local_player_scope_zoom_limits(const World &world, const LocalPlayerWeapon &w,
+                                               int32_t scope_min_mag);
+
+// The zoom FLOOR both writers share: scope_min_mag, or scope_max_mag (the zoom
+// locked at max) for a class-6 (sniper) local player on a Primary (category 3)
+// def while the session forbids sniper scope zoom
+// [orig: Player_AdjustWeaponElevation @0x4dbe29..0x4dbe3f;
+//  Player_MountWeaponSlot @0x4dfadd..0x4dfb01].
+int32_t local_player_scope_zoom_floor(const World &world, const ScopeZoomLimits &limits,
+                                      int32_t scope_max_mag);
+
+// The zoom-step click [orig: Sound_PlayInterfaceTriggerSet(dword_24E08B4)
+// @0x4dbe64 -- entry 1 of the @0x82F590 resolver table (@0x82f5b4 -> 0x24e08b4,
+// DialogSystem_Init @0x5275e0), the "GF_SCOPE" trigger set]. Raised as an
+// Interface ScriptSoundEvent like the scope-zero click.
+inline constexpr const char *kScopeZoomStepSoundset = "GF_SCOPE";
+
+// Player_AdjustWeaponElevation @0x4dbdf0, the +/-2 step the weapon-cycle
+// actions take instead of a cycle while the optical view is up on a def whose
+// scope_min_mag != scope_max_mag (and action 215's own +/-2): gated on the
+// CanFire verdict (the optical-view gate) and the equipped def
+// (@0x4dbdfc..0x4dbe0e); next = slot zoom + delta; below the floor it is the
+// floor, else capped at scope_max_mag (@0x4dbe47..0x4dbe57); a changed value
+// clicks (@0x4dbe5b..0x4dbe64) and the slot stores it either way (@0x4dbe6c).
+// Returns whether the zoom changed.
+bool local_player_adjust_scope_zoom(World &world, LocalPlayerWeapon &w, const PlayerViewState &v,
+                                    WeaponSlotState &slot, const ScopeZoomLimits &limits,
+                                    int32_t delta);
+
+// The mount-time clamp of the slot's zoom into [floor, scope_max_mag] on a
+// Scoped (Flags & 1) def with a nonzero scope_max_mag: a fresh slot (zoom 0)
+// lands on the floor, an over-max carry-over on the max; Sighted-only defs and
+// a zero max leave the slot alone. Runs at the slot install, before the view
+// reset [orig: Player_MountWeaponSlot @0x4dfacf..0x4dfb16].
+void local_player_scope_zoom_mount_clamp(const World &world, const ScopeZoomLimits &limits,
+                                         int32_t def_flags, int32_t scope_max_mag,
+                                         WeaponSlotState &slot);
+
+// The weapon-cycle actions' dispatcher leg [orig: Input_HandleActionBinding_0
+// cases 0xD4 (212, next) / 0xD6 (214, prev) @0x4e130c..0x4e13ae]: refused while
+// the binocular view is up or a PowerThrow charge is live (g_fireChargeStartTick);
+// on an equipped def whose scope_min_mag != scope_max_mag while the optical view
+// is up (Player_CanFireWeapon) the action steps the zoom by +2 / -2 in place of a
+// cycle; otherwise the caller runs Player_CycleWeaponSlot(direction)
+// (weapon_cycle_slot). Action 215 (0xD7) is the bare step -- its fifth argument
+// picks -2 / +2 -- and calls local_player_adjust_scope_zoom directly.
+enum class WeaponCycleRoute : uint8_t { kRefused, kZoomStep, kCycle };
+WeaponCycleRoute local_player_weapon_cycle_route(World &world, LocalPlayerWeapon &w,
+                                                 const PlayerViewState &v,
+                                                 const ScopeZoomLimits &limits,
+                                                 int32_t direction);
+
+// --- the USE-ITEM action's vehicle-loadout arm --------------------------------
+
+// Action 177 (useitem) in a vehicle-loadout volume [orig: Input_HandleActionBinding_0
+// @0x4e0420 case 0xB1 -- parentSlot == 0 @0x4e0a91, not in an armory volume or
+// the MP preround @0x4e0aa1..0x4e0ab0, Flags & 0x800 @0x4e0ab2]: the press
+// never latches the mount toggle; it opens vehicle.mnu when the ground
+// entity's team byte is 0 or the player's (@0x4e0ad8..0x4e0aeb, the
+// groundEntity +0x28 read has no null test) and does nothing otherwise.
+// `local_player_in_vehicle_loadout_zone` is the arm's gate (an unmounted local
+// player carrying the type-11 volume touch); `local_player_vehicle_zone_team_matches`
+// the team test (a free-standing player reads team 0 = open).
+bool local_player_in_vehicle_loadout_zone(const World &world);
+bool local_player_vehicle_zone_team_matches(const World &world);
+
 // Action 26: toggle the persistent binocular request. Refused while a
 // PowerThrow charge is live (the raised view would suppress the held weapon
 // input and turn the charge into an unintended release) and while a scope is
@@ -177,7 +257,8 @@ struct LocalPlayerViewFrame {
     int32_t scope_zero_step = 0;
     int32_t scope_zero_default = 0;
     int32_t aim_range_q16 = 0;
-    bool scope_engaged = false;
+    bool scope_engaged = false; // the TARGET (g_scopeEngaged)
+    bool scope_settled = false; // the PROMOTED byte (g_weaponScopeActive)
     bool binoculars_requested = false;
     bool binoculars_raised = false;
     bool binoculars_view_active = false;

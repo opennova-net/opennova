@@ -18,10 +18,13 @@ FpViewmodelSpec fp_viewmodel_spec(bool has_def, const std::string &gfx1,
 		spec.show_arms = !character_arms.empty();
 		return spec;
 	}
-	// A resolved def with no fpModel submits no gun; missing animadm rides the
-	// bring-up adm so the clip rings stay sized.
+	// A resolved def with no fpModel submits no gun. An empty animadm loads NO
+	// anim map (AnimMap_LoadAdmFile returns 0 for an empty name) and the FP
+	// renderer then submits every bone with the root matrix: no clip set, never
+	// the bring-up adm [orig: AnimMap_LoadAdmFile @0x40cca1;
+	// Player_RenderFirstPersonViewModel no-channel branch @0x4def88..0x4defcf].
 	spec.gun = gfx1;
-	spec.adm = animadm.empty() ? kBringupFallbackModel : animadm;
+	spec.adm = animadm;
 	// [orig: @ 0x4dedc7 — emplaced mounts omit the carried character arms]
 	spec.show_arms = (flags & kWeaponFlagEmplaced) == 0u && !character_arms.empty();
 	return spec;

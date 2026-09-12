@@ -42,6 +42,7 @@
 #include <runtime/terrain_query/height_field.h>
 
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/infantry.h>
@@ -239,6 +240,7 @@ bool run_death_feed_classifier_matrix() {
 		v->health = 100;
 		v->damage_state = 0;
 		v->team = 2;
+		v->cause_flags = 0;
 		v->mounted_child = w::EntityHandle{};
 		roster[1].link.respawn_pending = false;
 		roster[1].link.respawn_hold_armed = false;
@@ -261,6 +263,17 @@ bool run_death_feed_classifier_matrix() {
 		d.ammo_index = 0;
 		return d;
 	};
+	// The classifier reads the victim's LIVE entity+44 cause word and clears the
+	// bit it reports; the RoundDeath carries only the snapshot every producer
+	// stamps. A hand-built death therefore latches the cause on the entity the
+	// way Weapon_CalcImpactDamage / the projectile death edge do.
+	// [orig: GameEvent_PlayerDeath @0x517180 / @0x517311 reads entity+44;
+	//  the clears @0x5171ca / @0x5171e8 / @0x517206 / @0x517325]
+	auto cause = [&](w::RoundDeath d, uint32_t bits) {
+		d.event_flags = bits;
+		world.registry.get(victim)->cause_flags = bits;
+		return d;
+	};
 	auto route = [&](const w::RoundDeath &d) {
 		world.round_sim.deaths.push_back(d);
 		inmatch::Server_TickUpdate(ctx);
@@ -281,22 +294,22 @@ bool run_death_feed_classifier_matrix() {
 		return false;
 	reset();
 	{
-		w::RoundDeath d = death(attacker);
-		d.event_flags = 0x800u;
+		const w::RoundDeath d = cause(death(attacker), 0x800u);
 		if (!expect_family(10, 12, d, "critical/headshot kills use event types 10..12"))
+			return false;
+		if (!expect(world.registry.get(victim)->cause_flags == 0,
+		            "the reported 0x800 bit is cleared on the entity [orig: @0x5171e8]"))
 			return false;
 	}
 	reset();
 	{
-		w::RoundDeath d = death(attacker);
-		d.event_flags = 0x400u;
+		const w::RoundDeath d = cause(death(attacker), 0x400u);
 		if (!expect_family(13, 15, d, "knife kills use event types 13..15"))
 			return false;
 	}
 	reset();
 	{
-		w::RoundDeath d = death(attacker);
-		d.event_flags = 0x100u;
+		const w::RoundDeath d = cause(death(attacker), 0x100u);
 		const uint32_t state_before = world.crt_rand.state;
 		if (!expect_family(32, 32, d,
 		                  "retail's narrowed CRT roll makes the same-bullet branch event 32"))
@@ -310,8 +323,7 @@ bool run_death_feed_classifier_matrix() {
 	reset();
 	{
 		world.registry.get(victim)->mounted_child = flag;
-		w::RoundDeath d = death(attacker);
-		d.event_flags = 0x800u;
+		const w::RoundDeath d = cause(death(attacker), 0x800u);
 		if (!expect_family(24, 24, d,
 		                  "killing the carrier of a retail flag type uses event 24"))
 			return false;
@@ -359,8 +371,7 @@ bool run_death_feed_classifier_matrix() {
 	}
 	reset();
 	{
-		w::RoundDeath d = death(w::EntityHandle{});
-		d.event_flags = 0x200u;
+		const w::RoundDeath d = cause(death(w::EntityHandle{}), 0x200u);
 		if (!expect_family(23, 23, d,
 		                  "a killer-less crash cause at the breath boundary uses event 23"))
 			return false;
@@ -618,7 +629,10 @@ struct DismembermentRig {
 	w::EntityHandle shooter;
 	w::EntityHandle victim;
 
-	explicit DismembermentRig(size_t pool_capacity, uint32_t victim_attrib = 0) {
+	// `on_ray_bone` is the ONE authored section the +X round crosses (the
+	// hit-record bone hitRecord[14]); every lower section is unposed.
+	explicit DismembermentRig(size_t pool_capacity, uint32_t victim_attrib = 0,
+	                          int on_ray_bone = 3) {
 		world.registry.configure_pool(0, pool_capacity);
 		world.rules.projectile_authority = true;
 
@@ -660,19 +674,20 @@ struct DismembermentRig {
 		body->inf.vel[2] = 300;
 
 		w::CollisionModel model;
-		model.sections.resize(4);
+		model.sections.resize(static_cast<size_t>(on_ray_bone + 1));
 		for (w::CollisionSection &section : model.sections)
 			section.radius = -1;
-		w::CollisionSection &bone3 = model.sections[3];
-		bone3.authored_bounds = true;
-		bone3.min_x = bone3.min_y = bone3.min_z = -0x4000;
-		bone3.max_x = bone3.max_y = bone3.max_z = 0x4000;
-		bone3.radius = 0x4000;
+		w::CollisionSection &on_ray = model.sections[static_cast<size_t>(on_ray_bone)];
+		on_ray.authored_bounds = true;
+		on_ray.min_x = on_ray.min_y = on_ray.min_z = -0x4000;
+		on_ray.max_x = on_ray.max_y = on_ray.max_z = 0x4000;
+		on_ray.radius = 0x4000;
 		const int model_id = collision.add_model(std::move(model));
 		collision.assign_entity(victim, model_id);
 		const int32_t bone_at[3] = {5 * 65536, 0, 58982};
 		std::vector<w::CollisionMatrix> pose(
-				4, w::collision_matrix_from_heading(0, bone_at));
+				static_cast<size_t>(on_ray_bone + 1),
+				w::collision_matrix_from_heading(0, bone_at));
 		collision.publish_entity_section_matrices(victim, pose);
 		collision.build_tick_tables(world);
 
@@ -823,12 +838,108 @@ bool test_dismemberment_damage_path() {
 	return true;
 }
 
+// Every projectile hit on a person runs the class callback's presentation
+// legs — the +0x2C0 selection, the torso-stack body roll, the +0x178 attacker
+// stamp — lethal or not, damage 0 included; only the killing hit's lethal
+// tail (dismemberment, the death record) stays behind the health test.
+// [orig: Entity_HandleDamageTrigger @0x407483 select, @0x40755e..0x407575
+//  roll; Projectile_ProcessDamageOnTarget @0x4e81e7..0x4e81f9 lastAttacker,
+//  callback(entity, 1, 0) @0x4e820e after the authority-gated subtraction]
+bool test_person_hit_presentation_legs_run_on_every_hit() {
+	struct Case {
+		int16_t yaw;          // victim Entity yaw (mission deg); the round flies +X
+		int32_t expected_roll;
+		const char *label;
+	};
+	const Case cases[] = {
+		{90, -0x05B05B00, "rear quadrant 2 tips a living body backward"},
+		{-90, 0x05B05B00, "front quadrant 0 tips a living body forward"},
+		{180, 0, "side quadrant 1 leaves the roll"},
+		{0, 0, "side quadrant 3 leaves the roll"},
+	};
+	for (const Case &c : cases) {
+		DismembermentRig rig(3);
+		w::Entity *victim = rig.world.registry.get(rig.victim);
+		w::AiEntity *body = rig.ai.for_handle(rig.victim);
+		victim->health = 100;
+		body->health = 100;
+		victim->yaw = c.yaw;
+		rig.fire();
+		if (!expect(victim->health == 90 && rig.world.round_sim.deaths.empty() &&
+		                    rig.piece() == nullptr,
+		            "a non-lethal torso hit takes damage without a death or a clone"))
+			return false;
+		if (!expect(body->roll == c.expected_roll, c.label)) return false;
+		const int quadrant = w::death_quadrant_from_round(
+				w::bam_heading_from_mission_yaw_deg(c.yaw), 1.0f, 0.0f);
+		if (!expect(victim->death_anim_state ==
+		                    w::compute_death_anim_state(3, quadrant, w::death_cause::kBullet),
+		            "a non-lethal hit stages the bone/quadrant bullet death in +0x2C0"))
+			return false;
+		if (!expect(victim->last_attacker == rig.shooter,
+		            "a non-lethal hit stamps the shooter as the attacker"))
+			return false;
+	}
+	{
+		// A limb bone (>= 5) stages and stamps but never rolls.
+		DismembermentRig rig(3, 0, 6);
+		w::Entity *victim = rig.world.registry.get(rig.victim);
+		w::AiEntity *body = rig.ai.for_handle(rig.victim);
+		victim->health = 100;
+		body->health = 100;
+		rig.fire();
+		if (!expect(victim->health == 90 && body->roll == 0 &&
+		                    victim->death_anim_state ==
+		                            w::compute_death_anim_state(6, 2, w::death_cause::kBullet) &&
+		                    victim->last_attacker == rig.shooter,
+		            "a limb hit (bone >= 5) stages without tipping the body"))
+			return false;
+	}
+	{
+		// A zero-damage authoritative hit (the +0x124 damage-state gate) still
+		// runs the callback: the roll and the selection land, nothing else does.
+		DismembermentRig rig(3);
+		w::Entity *victim = rig.world.registry.get(rig.victim);
+		w::AiEntity *body = rig.ai.for_handle(rig.victim);
+		victim->health = 100;
+		body->health = 100;
+		victim->damage_state = 620;
+		rig.fire();
+		if (!expect(victim->health == 100 && rig.world.round_sim.hits.empty() &&
+		                    rig.world.round_sim.deaths.empty(),
+		            "a damage-state-gated hit applies no damage"))
+			return false;
+		if (!expect(body->roll == -0x05B05B00 &&
+		                    victim->death_anim_state ==
+		                            w::compute_death_anim_state(3, 2, w::death_cause::kBullet) &&
+		                    victim->last_attacker == rig.shooter,
+		            "a zero-damage hit still rolls, stages, and stamps the attacker"))
+			return false;
+	}
+	{
+		// A body already flagged dead takes nothing (the callback's first return).
+		DismembermentRig rig(3);
+		w::Entity *victim = rig.world.registry.get(rig.victim);
+		w::AiEntity *body = rig.ai.for_handle(rig.victim);
+		victim->health = 100;
+		body->health = 100;
+		victim->flags |= w::kEntityFlagDead;
+		victim->engine_flags |= w::kEntityFlagDead;
+		rig.fire();
+		if (!expect(body->roll == 0 && victim->death_anim_state == 0,
+		            "a dead body neither rolls nor re-stages [orig: @0x40772f]"))
+			return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
 	if (!test_retail_random_spread_vectors()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;
+	if (!test_person_hit_presentation_legs_run_on_every_hit()) return 1;
 	if (!run_death_feed_classifier_matrix()) return 1;
 	w::World world;
 	world.registry.configure_pool(0, 16);

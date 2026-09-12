@@ -250,31 +250,56 @@ void HostRole::run_tick(const TickInput &input) {
 // The host's mission exit. Retail's authority teardown walks every active
 // player slot in the in-match states 2..7 and sends each one S2C 0x25 (empty
 // body, one-send to that slot), sets its net player to game state 8 and its
-// slot state back to 1; the session reset then stops the server: every
-// connection is stamped with the description {ds 1, dc 9, dp 0, dstr "", dpc
-// 0, ddstr "NP.C:SH:STOP"} and destroyed. A joiner (retail or ours) therefore
-// leaves the match at once instead of sitting through the 120 s silence reap.
+// slot state back to 1; the session reset then stops the server: while
+// host_running is still set, every connection has the record {ds 1, dc 9, dp
+// 0, dstr "", dpc 0, ddstr "NP.C:SH:STOP"} latched (first cause wins) and is
+// destroyed — the destroy sends the 0x86 SERVER_GOODBYE burst (four identical
+// keyed datagrams carrying that record) to the peer, then runs the player
+// teardown — and only after the walk is host_running cleared. A joiner (retail
+// or ours) therefore leaves the match at once instead of sitting through the
+// 120 s silence reap; the burst, not a reliable description record, is what
+// retail puts on the wire here.
 // [orig: Game_TeardownMission @0x522350 -> Server_DisconnectAndResetAllPlayerSlots
 //  @0x516160 (the six `push 25h` / NapiNPServer_SendFiltered @0x5161bb..0x516385);
 //  CNapiGameSession_ResetActiveSession @0x4C8A70 -> NapiNPProtocol_StopServer
-//  @0x62A820 (the event stamp + CNapiNPConnection_Destroy per connection)]
+//  @0x62A820 (the record @0x62a8c3..0x62a8f6 latched-if-invalid @0x62a904..0x62a919,
+//  CNapiNPConnection_Destroy @0x62a924 per connection, host_running cleared
+//  @0x62a95c) -> TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
 void HostRole::close() {
 	opennova::IDatagramSocket &socket =
 			socket_ != nullptr ? *socket_ : null_datagram_socket();
-	for (NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list) {
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide || conn.link.transport == nullptr)
 			continue;
 		if (conn.burst.sync_state >= 2)
 			conn.link.transport->host_send(s2c::GAME_RESET, std::vector<uint8_t>{},
 					/*reliable=*/false);
-		DisconnectEvent stop;
-		stop.ds = 1;
-		stop.dc = 9;
-		stop.dpc = 0;
-		stop.ddstr = "NP.C:SH:STOP";
-		Server_StageHostDisconnect(conn, stop);
 	}
 	inmatch::host_session_flush_s2c(state.host_owner, socket);
+	// NapiNPProtocol_StopServer: latch STOP and destroy every server-side node in
+	// list order; the burst rides the socket directly, like retail's SendTo.
+	std::vector<PeerAddr> peers;
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type == NapiNPConnection::kTypeServerSide) peers.push_back(conn.peer);
+	}
+	for (const PeerAddr &peer : peers) {
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (conn.peer == peer && conn.type == NapiNPConnection::kTypeServerSide) {
+				latch_disconnect_event(conn,
+						make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP"));
+				break;
+			}
+		}
+		std::vector<std::vector<uint8_t>> goodbye;
+		if (!inmatch::destroy_connection(ctx, peer, &goodbye)) continue;
+		for (const std::vector<uint8_t> &datagram : goodbye)
+			socket.send_to(peer, datagram.data(), datagram.size());
+		state.host_owner.peers.erase(peer);
+		state.host_owner.pending_session_messages.erase(peer);
+		state.host_owner.pending_session_datagrams.erase(peer);
+	}
+	ctx.np_protocol.host_running = 0;
 }
 
 // The editor Stop/Start rewind: the kernel's own restore, then a fresh

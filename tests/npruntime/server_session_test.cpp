@@ -822,11 +822,16 @@ bool check_host_frame_failure_preserves_owner_queue() {
 }
 
 // A FIRST/MID/FINAL run re-queued by a failed flush arrives as separate
-// pending entries (headless once its leading pieces shipped). The capacity
-// gate must treat the run as ONE unit: admitting a prefix — or dropping the
-// closing FINAL under the one-record rejection rule — permanently strands the
-// receiver's reassembly buffer on the ordered reliable channel.
-bool check_requeued_fragment_run_stays_one_capacity_unit() {
+// pending entries (headless once its leading pieces shipped). Retail never
+// defers a fragment group for capacity: every piece goes through
+// NapiNPMessage_Create's per-node check, so with one free node the orphan MID
+// is admitted and shipped while the closing FINAL is the pool overflow — the
+// MSGCRE record latches, the connection is asked to disconnect, and the next
+// protocol pump bursts the 0x86 goodbye and destroys the node (the receiver's
+// reassembly buffer dies with the connection instead of stranding).
+// [orig: NapiNPMessage_Create @0x627FC0 (@0x628048..0x628112);
+//  NapiNPProtocol_Pump @0x62a6fd -> Destroy @0x62a793]
+bool check_requeued_fragment_run_overflows_per_node() {
 	opennova::inmatch::HostOwner owner;
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
@@ -874,33 +879,21 @@ bool check_requeued_fragment_run_stays_one_capacity_unit() {
 
 	CaptureDatagramSocket socket;
 	opennova::inmatch::host_session_pump(owner, socket);
-	auto pending = owner.pending_session_messages.find(peer);
-	if (!expect(socket.sent.empty() &&
-	                    pending != owner.pending_session_messages.end() &&
-	                    pending->second.size() == 2 &&
-	                    pending->second[0].flags.frag_cont &&
-	                    pending->second[0].flags.frag_end &&
-	                    pending->second[1].flags.frag_end &&
-	                    !pending->second[1].flags.frag_cont,
-	            "one free node cannot split the orphan MID/FINAL run — both "
-	            "pieces stay queued in order"))
-		return false;
-
 	auto &remote = owner.ctx.np_protocol.connection_list.front();
-	remote.seq.retained_outbound[1].clear();
-	remote.seq.retained_outbound_message_count = 0;
-	opennova::inmatch::host_session_pump(owner, socket);
 	if (!expect(socket.sent.size() == 1 &&
 	                    owner.pending_session_messages.find(peer) ==
-	                            owner.pending_session_messages.end(),
-	            "the freed boundary drains the whole orphan run at once"))
+	                            owner.pending_session_messages.end() &&
+	                    remote.seq.retained_outbound_message_count ==
+	                            opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX,
+	            "one free node admits and ships the orphan MID; the FINAL is "
+	            "dropped, never held"))
 		return false;
 
 	uint8_t opcode = 0;
 	std::vector<uint8_t> session_body;
 	opennova::ProtocolPacketHeader header;
 	std::vector<opennova::ProtocolMessage> messages;
-	return expect(
+	if (!expect(
 			opennova::nw_decode_inbound(
 					socket.sent[0].data(), socket.sent[0].size(), opcode,
 					session_body) &&
@@ -908,11 +901,47 @@ bool check_requeued_fragment_run_stays_one_capacity_unit() {
 					opennova::decode_protocol_packet_plaintext(
 							session_body.data(), session_body.size(),
 							remote.server_scrk, header, messages) &&
-					messages.size() == 2 && messages[0].tag == 0x63 &&
-					messages[0].flags.frag_cont && messages[0].flags.frag_end &&
-					messages[1].tag == 0x63 && messages[1].flags.frag_end &&
-					!messages[1].flags.frag_cont,
-			"the drained packet carries MID then FINAL so reassembly completes");
+					messages.size() == 1 && messages[0].tag == 0x63 &&
+					messages[0].flags.frag_cont && messages[0].flags.frag_end,
+			"the shipped packet carries the MID alone"))
+		return false;
+	// count = 1,199 retained + the admitted MID + the FINAL itself.
+	if (!expect(remote.pending_disconnect && remote.disconnect_event_valid &&
+	                    remote.disconnect_event.ds == 1 &&
+	                    remote.disconnect_event.dc == 4 &&
+	                    remote.disconnect_event.dp1 ==
+	                            opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX + 1 &&
+	                    remote.disconnect_event.dp2 ==
+	                            opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX &&
+	                    remote.disconnect_event.dstr.empty() &&
+	                    remote.disconnect_event.dpc == 0 &&
+	                    remote.disconnect_event.ddstr == "NP.C:MSGCRE",
+	            "the over-cap FINAL latches the MSGCRE record and requests disconnect"))
+		return false;
+
+	opennova::inmatch::host_session_pump(owner, socket);
+	if (!expect(socket.sent.size() == 5 &&
+	                    owner.ctx.np_protocol.connection_list.empty(),
+	            "the next pump destroys the overflowed connection with the "
+	            "four-datagram 0x86 burst"))
+		return false;
+	const std::vector<uint8_t> expected_body = opennova::server_goodbye_to_bytes(
+			0x10203040u,
+			opennova::make_disconnect_event(
+					1, 4, opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX + 1,
+					opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX, "", 0, "NP.C:MSGCRE"));
+	for (std::size_t i = 1; i < 5; ++i) {
+		std::vector<uint8_t> body;
+		if (!expect(opennova::nw_decode_inbound(
+		                    socket.sent[i].data(), socket.sent[i].size(),
+		                    opcode, body) &&
+		                    opcode == opennova::SESSION_OPCODE_SERVER_GOODBYE &&
+		                    body == expected_body && socket.sent_to[i] == peer,
+		            "every 0x86 of the overflow burst carries the MSGCRE record "
+		            "keyed by the CK"))
+			return false;
+	}
+	return true;
 }
 
 // D-NET-173, host side: with nothing queued and nothing retained, retail's
@@ -1066,6 +1095,21 @@ bool check_host_admits_exact_retail_message_prefix() {
 						opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX,
 			"host's exact admitted prefix reaches the retail 1,200-node bound"))
 		return false;
+	// The dropped 0x62 was retail's pool overflow: {1, 4, count, max, "", 0,
+	// "NP.C:MSGCRE"} latched (count = 1,199 retained + 1 admitted + 1) and the
+	// connection asked to disconnect. [orig: NapiNPMessage_Create @0x628099..0x628112]
+	if (!expect(remote.pending_disconnect && remote.disconnect_event_valid &&
+	                    remote.disconnect_event.ds == 1 &&
+	                    remote.disconnect_event.dc == 4 &&
+	                    remote.disconnect_event.dp1 ==
+	                            opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX + 1 &&
+	                    remote.disconnect_event.dp2 ==
+	                            opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX &&
+	                    remote.disconnect_event.dstr.empty() &&
+	                    remote.disconnect_event.dpc == 0 &&
+	                    remote.disconnect_event.ddstr == "NP.C:MSGCRE",
+			"the 1,201st node latches the MSGCRE record and requests disconnect"))
+		return false;
 
 	opennova::inmatch::HostOwner transient_owner;
 	opennova::inmatch::set_connection_mode(
@@ -1093,12 +1137,15 @@ bool check_host_admits_exact_retail_message_prefix() {
 	transient_conn.seq = opennova::inmatch::make_jo_game_session_sequencing();
 	transient_owner.ctx.np_protocol.connection_list.push_back(
 			std::move(transient_conn));
+	// Exactly msg_out_max transient nodes fill the pool without overflowing it:
+	// every node already framed in this OPEN boundary occupies a slot, and the
+	// 1,200th still fits (a 1,201st would be the MSGCRE overflow).
 	opennova::ProtocolMessage transient =
 			opennova::make_protocol_message(0x63, {});
 	transient.reliable = false;
 	transient_owner.pending_session_messages[transient_peer] =
 			std::vector<opennova::ProtocolMessage>(
-					opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX + 1, transient);
+					opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX, transient);
 
 	CaptureDatagramSocket transient_socket;
 	opennova::inmatch::host_session_pump(transient_owner, transient_socket);
@@ -1116,13 +1163,17 @@ bool check_host_admits_exact_retail_message_prefix() {
 			return expect(false, "decode host MTU-split transient prefix");
 		admitted += messages.size();
 	}
+	const auto &transient_remote =
+			transient_owner.ctx.np_protocol.connection_list.front();
 	return expect(
 			admitted == opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX &&
-					transient_owner.ctx.np_protocol.connection_list.front()
-							.seq.retained_outbound_message_count == 0 &&
+					transient_remote.seq.retained_outbound_message_count == 0 &&
+					!transient_remote.pending_disconnect &&
+					!transient_remote.disconnect_event_valid &&
 					transient_owner.pending_session_messages.find(transient_peer) ==
 							transient_owner.pending_session_messages.end(),
-			"host MTU splits count exactly 1,200 transient nodes in one boundary");
+			"host MTU splits ship exactly 1,200 transient nodes in one boundary "
+			"without an overflow");
 }
 
 // The dictated CS field-3 period applies in both directions. The host keeps
@@ -1645,10 +1696,18 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 	return true;
 }
 
-// A semantic message that needs FIRST/FINAL records must be admitted as one
-// group.  With only one queue node free, emitting FIRST and dropping FINAL
-// poisons the receiver's reassembly buffer and corrupts the next message.
-bool check_fragment_group_waits_for_full_node_capacity() {
+// A semantic message that needs FIRST/FINAL records goes through the per-node
+// check piece by piece: NapiNPMessage_Create runs for the whole message and
+// again for every SplitAtLength piece. With one queue node free the FIRST is
+// admitted and shipped while the FINAL is the pool overflow — dropped, the
+// MSGCRE record latched, the connection asked to disconnect — and the next
+// protocol pump bursts the 0x86 goodbye and destroys the node. Retail never
+// holds a fragment group back for capacity.
+// [orig: NapiNPMessage_Create @0x627FC0 (`msg_out_max >= 0` @0x628048, count
+//  @0x628062..0x62806b, the record @0x628099..0x6280eb, latch-if-invalid
+//  @0x6280f9..0x62810a, RequestDisconnect @0x628112); SplitAtLength @0x628350
+//  -> Create @0x62838f; NapiNPProtocol_Pump @0x62a6fd -> Destroy @0x62a793]
+bool check_fragment_group_overflows_per_node() {
 	opennova::inmatch::HostOwner owner;
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
@@ -1682,48 +1741,68 @@ bool check_fragment_group_waits_for_full_node_capacity() {
 			std::vector<uint8_t>(opennova::inmatch::kGameSessionMaxPacketBytes, 0x5Au));
 	oversized.reliable = true;
 	owner.pending_session_messages[peer] = {oversized};
+	// msg_out_max 102 with 101 retained records: exactly one node free.
 	remote.seq.outbound_message_limit = 102;
+	remote.seq.retained_outbound[1] = std::vector<opennova::ProtocolMessage>(
+			101, opennova::make_protocol_message(0x60, {}));
 	remote.seq.retained_outbound_message_count = 101;
 
 	CaptureDatagramSocket socket;
 	opennova::inmatch::host_session_pump(owner, socket);
-	auto pending = owner.pending_session_messages.find(peer);
-	if (!expect(socket.sent.empty(),
-	            "one free node emits no partial semantic fragment group") ||
-			!expect(pending != owner.pending_session_messages.end() &&
-			            pending->second.size() == 1 &&
-			            pending->second.front().payload == oversized.payload,
-			        "capacity rejection retains the whole semantic message for retry"))
+	if (!expect(socket.sent.size() == 1 &&
+	                    owner.pending_session_messages.find(peer) ==
+	                            owner.pending_session_messages.end() &&
+	                    remote.seq.retained_outbound_message_count == 102,
+	            "one free node admits and ships the FIRST piece; the FINAL is "
+	            "dropped, never held for retry"))
 		return false;
 
-	remote.seq.retained_outbound_message_count = 0;
-	opennova::inmatch::host_session_pump(owner, socket);
-	if (!expect(socket.sent.size() == 2,
-	            "full node capacity emits the complete FIRST/FINAL group") ||
-			!expect(owner.pending_session_messages.find(peer) ==
-			            owner.pending_session_messages.end(),
-			        "successful fragment group retry drains the semantic queue"))
-		return false;
-
-	for (std::size_t i = 0; i < socket.sent.size(); ++i) {
-		uint8_t opcode = 0;
-		std::vector<uint8_t> session_body;
-		opennova::ProtocolPacketHeader header;
-		std::vector<opennova::ProtocolMessage> messages;
-		if (!expect(opennova::nw_decode_inbound(socket.sent[i].data(),
-		                    socket.sent[i].size(), opcode, session_body) &&
-		                    opcode == opennova::SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
-		                    opennova::decode_protocol_packet_plaintext(
+	uint8_t opcode = 0;
+	std::vector<uint8_t> session_body;
+	opennova::ProtocolPacketHeader header;
+	std::vector<opennova::ProtocolMessage> messages;
+	if (!expect(opennova::nw_decode_inbound(socket.sent[0].data(),
+	                    socket.sent[0].size(), opcode, session_body) &&
+	                    opcode == opennova::SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
+	                    opennova::decode_protocol_packet_plaintext(
 							session_body.data(), session_body.size(), remote.server_scrk,
 							header, messages) &&
-		                    messages.size() == 1,
-		            "retried fragment packet decodes as one protocol record"))
-			return false;
-		const auto &fragment = messages.front();
-		if (!expect(i == 0
-					? fragment.flags.frag_cont && !fragment.flags.frag_end
-					: !fragment.flags.frag_cont && fragment.flags.frag_end,
-		            "retried fragment group preserves FIRST/FINAL ordering"))
+	                    messages.size() == 1 &&
+	                    messages[0].tag == opennova::s2c::EMPTY_SLOT_SWEEP &&
+	                    messages[0].flags.frag_cont && !messages[0].flags.frag_end,
+	            "the shipped packet carries the FIRST piece alone"))
+		return false;
+	// count = 101 retained + the admitted FIRST + the FINAL itself; max = 102.
+	if (!expect(remote.pending_disconnect && remote.disconnect_event_valid &&
+	                    remote.disconnect_event.ds == 1 &&
+	                    remote.disconnect_event.dc == 4 &&
+	                    remote.disconnect_event.dp1 == 103 &&
+	                    remote.disconnect_event.dp2 == 102 &&
+	                    remote.disconnect_event.dstr.empty() &&
+	                    remote.disconnect_event.dpc == 0 &&
+	                    remote.disconnect_event.ddstr == "NP.C:MSGCRE",
+	            "the over-cap FINAL latches the MSGCRE record and requests disconnect"))
+		return false;
+
+	opennova::inmatch::host_session_pump(owner, socket);
+	if (!expect(socket.sent.size() == 5 &&
+	                    owner.ctx.np_protocol.connection_list.empty(),
+	            "the next pump destroys the overflowed connection with the "
+	            "four-datagram 0x86 burst"))
+		return false;
+	const std::vector<uint8_t> expected_body = opennova::server_goodbye_to_bytes(
+			0x55667788u,
+			opennova::make_disconnect_event(1, 4, 103, 102, "", 0, "NP.C:MSGCRE"));
+	for (std::size_t i = 1; i < 5; ++i) {
+		std::vector<uint8_t> body;
+		if (!expect(opennova::nw_decode_inbound(
+		                    socket.sent[i].data(), socket.sent[i].size(),
+		                    opcode, body) &&
+		                    opcode == opennova::SESSION_OPCODE_SERVER_GOODBYE &&
+		                    body == expected_body && socket.sent_to[i] == peer &&
+		                    socket.sent[i] == socket.sent[1],
+		            "every 0x86 of the fragment overflow burst carries the MSGCRE "
+		            "record keyed by the CK"))
 			return false;
 	}
 	return true;
@@ -1788,19 +1867,45 @@ bool check_host_pump_reconnect_keeps_fresh_connection() {
 	socket.incoming.push_back({peer, std::move(auth)});
 	opennova::inmatch::host_session_pump(owner, socket);
 
-	if (!expect(socket.sent.size() == 2 && socket.sent_to.size() == 2 &&
-	                    socket.sent_to[0] == peer && socket.sent_to[1] == peer,
-	            "replacement sends immediate 0x82 then fresh boundary 0x83"))
+	// The old occupant is Destroyed first: its 0x86 burst (nothing latched => a
+	// zero record) goes to the shared endpoint keyed by the OLD CK, then the
+	// replacement's immediate 0x82 and its fresh-boundary 0x83 follow.
+	// [orig: HandleClientJoin @0x62befb CNapiNPConnection_Destroy ->
+	//  TeardownActiveConnection @0x6253ef..0x625424 (four SendDisconnectPacket
+	//  @0x61F2A0, opcode 0x86 @0x61f367, the peer CK @0x61f3af), then
+	//  CNapiNPConnection_Create @0x62bf06 -> SendSessionInit]
+	if (!expect(socket.sent.size() == 6 && socket.sent_to.size() == 6,
+	            "replacement sends the old occupant's four 0x86, then the immediate "
+	            "0x82, then fresh boundary 0x83"))
 		return false;
+	const std::vector<uint8_t> old_goodbye_body = opennova::server_goodbye_to_bytes(
+			0x11112222u, opennova::DisconnectEvent{});
+	for (std::size_t i = 0; i < 6; ++i) {
+		if (!expect(socket.sent_to[i] == peer,
+		            "every replacement datagram targets the shared endpoint"))
+			return false;
+		if (i >= 4) continue;
+		uint8_t goodbye_opcode = 0;
+		std::vector<uint8_t> goodbye_body;
+		if (!expect(opennova::nw_decode_inbound(
+		                    socket.sent[i].data(), socket.sent[i].size(),
+		                    goodbye_opcode, goodbye_body) &&
+		                    goodbye_opcode == opennova::SESSION_OPCODE_SERVER_GOODBYE &&
+		                    goodbye_body == old_goodbye_body &&
+		                    socket.sent[i] == socket.sent[0],
+		            "the old occupant's burst is four identical 0x86 keyed by its "
+		            "CK with a zero record"))
+			return false;
+	}
 	uint8_t auth_opcode = 0;
 	uint8_t settings_opcode = 0;
 	std::vector<uint8_t> auth_body;
 	std::vector<uint8_t> settings_body;
 	if (!expect(opennova::nw_decode_inbound(
-	                    socket.sent[0].data(), socket.sent[0].size(),
+	                    socket.sent[4].data(), socket.sent[4].size(),
 	                    auth_opcode, auth_body) &&
 	                    opennova::nw_decode_inbound(
-	                            socket.sent[1].data(), socket.sent[1].size(),
+	                            socket.sent[5].data(), socket.sent[5].size(),
 	                            settings_opcode, settings_body) &&
 	                    auth_opcode == opennova::SESSION_OPCODE_SERVER_AUTH &&
 	                    settings_opcode ==
@@ -3725,7 +3830,7 @@ int main() {
 	ok = check_host_pump_batches_one_send_boundary() && ok;
 	ok = check_initial_stream_batches_with_reactive_reply() && ok;
 	ok = check_host_frame_failure_preserves_owner_queue() && ok;
-	ok = check_requeued_fragment_run_stays_one_capacity_unit() && ok;
+	ok = check_requeued_fragment_run_overflows_per_node() && ok;
 	ok = check_host_idle_send_interval_keepalive() && ok;
 	ok = check_host_admits_exact_retail_message_prefix() && ok;
 	ok = check_host_s2c_holdoff_and_frame_envelope() && ok;
@@ -3733,7 +3838,7 @@ int main() {
 	ok = check_initial_stream_obeys_connection_holdoff() && ok;
 	ok = check_host_loopback_does_not_inherit_udp_envelope() && ok;
 	ok = check_sparse_empty_slot_sweep_fragments_without_loss() && ok;
-	ok = check_fragment_group_waits_for_full_node_capacity() && ok;
+	ok = check_fragment_group_overflows_per_node() && ok;
 	ok = check_host_pump_reconnect_keeps_fresh_connection() && ok;
 	ok = check_global_scoreboard_integrity_phase() && ok;
 	ok = check_scoreboard_active_slot_filter_is_distinct() && ok;

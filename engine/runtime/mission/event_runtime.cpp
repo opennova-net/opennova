@@ -1,5 +1,6 @@
 #include <runtime/mission/event_runtime.h>
 
+#include <base/io/strutil.h>
 #include <runtime/world/world.h>
 
 namespace opennova::mission {
@@ -100,6 +101,11 @@ void BmsEventSystem::on_load(World &w) {
     // The sticky relation/visited/group state zeroes once per mission load
     // [orig: EventSystem_FreeAll @ 0x453210].
     w.script.relations.clear();
+    // Round init clears both dialog tables the PLYRDIALOG subs read [orig:
+    // Game_InitNewRound @0x422741/@0x4227ac -> Dialog_ResetAll @0x44dc90].
+    // The input-action word and its mirror are BSS words with no load-time
+    // writer; they keep whatever the producers left.
+    w.script.dialog.reset();
     for (ScriptedEvent &se : events_) {
         se.active = false;
         se.activate_countdown = 0;
@@ -300,11 +306,91 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
             return false; // [orig: sub-type range check @0x453b3c]
         }
         case bms::TriggerMainType::Player: {
+            // [orig: EventTrigger_EvaluateCondition cat 7 @0x453b7e]
+            // The shared leg every input sub takes: test the LIVE word, toggle
+            // the matched bit in the chain's mirror, true. The mirror is
+            // committed back to the live word only when the event fires
+            // (fire()), so a matched bit is consumed exactly then and stays
+            // set otherwise. [orig: @0x453ba5 test -> 0; @0x453bab
+            //  g_EventInputBitsMirror ^= mask; @0x453bb1 result 1]
+            auto input_bit = [&](uint32_t mask) {
+                if ((mask & w.script.input_action_bits) == 0) return false;
+                w.script.input_action_mirror ^= mask;
+                return true;
+            };
             switch (static_cast<bms::PlayerTriggerType>(t.sub_type)) {
+                case bms::PlayerTriggerType::PlayerBerserk: {
+                    // The local player's AiSlot behavior word, bit 0x200
+                    // (Berserk). No brain reads false (retail dereferences
+                    // the runtime pointer unchecked). [orig: @0x453b99
+                    //  g_local_player_entity->aiRuntime[1] & 0x200]
+                    const world::AiEntity *ai = w.ai.for_handle(w.cached.local_player);
+                    return ai != nullptr &&
+                           (ai->slot.f[world::AiSlot::kBehaviorFlags] & 0x200) != 0;
+                }
+                // The fixed-mask input subs; the 22-25/28-30 masks have no
+                // setter in the image, so they read false in retail as well.
+                case bms::PlayerTriggerType::PlayerFirstPerson:  return input_bit(0x4000000u);  // @0x453b9a
+                case bms::PlayerTriggerType::PlayerThirdPerson:  return input_bit(0x8000000u);  // @0x453c73
+                case bms::PlayerTriggerType::PlayerCockpitView:  return input_bit(0x10000000u); // @0x453c69
+                case bms::PlayerTriggerType::PlayerInputBit10:   return input_bit(0x400u);      // @0x453c7d
+                case bms::PlayerTriggerType::PlayerInputBit11:   return input_bit(0x800u);      // @0x453c87
+                case bms::PlayerTriggerType::PlayerInputBit12:   return input_bit(0x1000u);     // @0x453c91
+                case bms::PlayerTriggerType::PlayerInputBit13:   return input_bit(0x2000u);     // @0x453c9b
+                case bms::PlayerTriggerType::PlayerInputBit29:   return input_bit(0x20000000u); // @0x453cc5
+                case bms::PlayerTriggerType::PlayerInputBit14:   return input_bit(0x4000u);     // @0x453ccf
+                case bms::PlayerTriggerType::PlayerInputBit15:   return input_bit(0x8000u);     // @0x453cd9
+                case bms::PlayerTriggerType::PlayerInputBitIndex:
+                    // `1 << p1` (the x86 shift count is masked to 5 bits) [orig: @0x453ceb]
+                    return input_bit(1u << (static_cast<uint32_t>(t.param1) & 31u));
+                case bms::PlayerTriggerType::PlayerInputBitIndexPlus15:
+                    // `1 << (byte @ trigger+12 + 15)`: the low byte of param1 [orig: @0x453cfd]
+                    return input_bit(1u << ((static_cast<uint32_t>(static_cast<uint8_t>(t.param1)) + 15u) & 31u));
+                case bms::PlayerTriggerType::PlayerLookByteBit0Clear:
+                case bms::PlayerTriggerType::PlayerLookByteBit0Set:
+                    // `(byte_27234FC & 1) == 0` / `!= 0` [orig: @0x453cb5/@0x453cc4].
+                    // The byte's bit-0 writer is not reachable by xref (its
+                    // readers are this pair, HUD_DrawLookModeLabel @0x594100
+                    // bit 0x20 and the lock reticle @0x594580 bits 0/0x40), so
+                    // the pair stays false: the D-EVT-3 residue.
+                    return false;
+                case bms::PlayerTriggerType::PlayerDialogDone:
+                    // [orig: @0x453d1b Dialog_ExistsByIndex(p1) == 0 -- absent
+                    //  from the 16-slot active table]
+                    return !w.script.dialog.active_exists(t.param1);
+                case bms::PlayerTriggerType::PlayerDialogFinished:
+                    // [orig: @0x453d20 sub_44E220(p1): in the registered-history
+                    //  list (@0x44e253..0x44e28e, miss -> 0 @0x44e291) AND absent
+                    //  from the active table (found -> 0 @0x44e313, else 1
+                    //  @0x44e2f5)]
+                    return w.script.dialog.registered(t.param1) &&
+                           !w.script.dialog.active_exists(t.param1);
                 case bms::PlayerTriggerType::PlayerAwol:
                     // AWOL quanta (once per 64 ticks, ~1.02 s each) vs the authored
                     // threshold. [orig: @0x453d40 — getter @0x439de0 >= param1] (D-EVT-2)
                     return awol_64tick_count_ >= t.param1;
+                case bms::PlayerTriggerType::PlayerSatchel: {
+                    // Any populated pool-1 row whose ammo def is the satchel and
+                    // whose position lies inside area record param1 (the zone
+                    // INDEX after resolve_zone_refs): the x/y box always, the z
+                    // range only when the record's flag byte has bit 2, else
+                    // -0x40000000..0x40000000 (16.16) -- exactly the unbounded z
+                    // the registered area carries. Inclusive compares.
+                    // [orig: EventTrigger_AnySatchelInArea @0x547160: record
+                    //  @0x54716d, z gate @0x547196, populated-row gate @0x5471cc,
+                    //  == g_ammo_satchel @0x5471ea, x/y/z @0x5471f9/@0x547208/@0x547215]
+                    const world::Area *area = w.registry.area(t.param1);
+                    if (area == nullptr) return false;
+                    for (const world::PlacedDevice &d : w.throwables.devices) {
+                        if (!d.active) continue;
+                        const world::Entity *e = w.registry.get(d.entity);
+                        if (e == nullptr || e->registry_spawn_id != d.entity_spawn_id) continue;
+                        const world::AmmoTableEntry *ammo = w.tables.ammo.by_index(d.ammo_index);
+                        if (ammo == nullptr || !strutil::iequals(ammo->name, "satchel")) continue;
+                        if (area->bounds.contains(e->position)) return true;
+                    }
+                    return false;
+                }
                 // The four mount subs resolve param1 as an SSN and test the LOCAL player's
                 // mount/stand state, one carrier link deep. [orig: EventTrigger_
                 // EvaluateCondition cat-7 subs 38-41 -> @0x4f10d0/0x4f1260/0x4f1150/0x4f11e0]
@@ -319,8 +405,8 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                 default:
                     break;
             }
-            // The remaining Player subs (view modes, dialog, satchel) ride their embedder
-            // subsystems' ports; false until witnessed-wired.
+            // Subs outside 18..41 (and the unassigned 31) fall to the
+            // dispatcher default [orig: @0x453d41].
             return false;
         }
         default:
@@ -333,6 +419,11 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
 bool BmsEventSystem::evaluate_chain(World &w, const std::vector<bms::Trigger> &triggers) {
     // [orig: EventTrigger_EvaluateChain @0x454050.] Each trigger negated by its own bit0; the
     // join operator (and/or/xor) comes from the PREVIOUS trigger. Empty => true.
+    // Every predicate runs (no short-circuit), so every matched input bit of
+    // the chain toggles in the mirror even when an earlier term already
+    // decided the result. The mirror is seeded from the live word at entry,
+    // before the count test [orig: @0x45405a].
+    w.script.input_action_mirror = w.script.input_action_bits;
     if (triggers.empty()) return true;
     bool acc = evaluate_trigger(w, triggers[0]);
     if (triggers[0].is_negated()) acc = !acc;
@@ -578,6 +669,18 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         case bms::ActionType::GroupTargetGroupExc:
             cmds.set_group_target_selector(a.param1, world::AiTargetSelector::ExclusiveGroup, a.param2);
             break;
+        case bms::ActionType::SpecialSubType:
+            // [orig: EventAction_Dispatch case 28 @0x4548e1 ->
+            //  EventAction_HandleSpecialTypes @0x4535a0] Sub 38 clears the
+            // input-action word (@0x4535c2), so every pending input bit is
+            // dropped. Subs 37 (RenderState_SetLayerVisibilityByIndex
+            // @0x4535d5) and 39 (dword_AE0718 = p1 == 0 @0x4535bc) have no
+            // witnessed consumer here and fall to the unported marker below.
+            if (a.action_sub_type == 38) {
+                w.script.input_action_bits = 0;
+                break;
+            }
+            [[fallthrough]];
         default:
             // No faithful in-engine handler yet: record as an UNPORTED marker (coverage /
             // diagnostic only — never a presentation effect). Supported missions should
@@ -593,10 +696,13 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
 }
 
 void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
-    // [orig: the dispatch loops @0x454ca6/@0x454d0e — every action entry in order.
-    //  The g_InputActionBits/g_EventInputBitsMirror commit around the dispatch
-    //  (input-trigger bit consumption) is an embedder input subsystem not ported here;
-    //  recorded in docs/mission/bms-event-runtime-re.md.]
+    // [orig: the dispatch loops @0x454ca6/@0x454d0e — every action entry in order.]
+    // The input-bit consume: the chain mirror (the live word with every
+    // matched bit toggled off) is committed back to the live word right
+    // before the actions run, at BOTH dispatch sites -- the immediate fire
+    // and the delayed fire, which commits whatever the mirror holds at
+    // expiry [orig: @0x454c8b immediate, @0x454cfa delayed].
+    w.script.input_action_bits = w.script.input_action_mirror;
     const int32_t event = static_cast<int32_t>(&se - events_.data());
     for (size_t index = 0; index < se.actions.size(); ++index)
         dispatch_action(w, se.actions[index], event, se.event.action_index + static_cast<int32_t>(index));

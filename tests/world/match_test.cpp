@@ -494,7 +494,7 @@ void test_deathmatch_and_hill_outcomes() {
     const auto tkoth_limit = world->match.winner_if_finished(*world);
     CHECK(tkoth_limit.has_value() && *tkoth_limit == 1);
     CHECK(world->match.primary_score(*world->match.player(solo)) == 60);
-    CHECK(world->match.team_primary_score(*world, 1) == 60);
+    CHECK(world->match.team_primary_score(1) == 60);
 }
 
 void test_retail_objective_proximity_state_and_kill_bonuses() {
@@ -1219,6 +1219,215 @@ void test_end_result_is_frozen_in_retail_board_order() {
     CHECK(aas.team_row_count == 3);
 }
 
+// The trailing matrix row count: 0 for a non-team type, 3 for a team type,
+// 5 for four-team TDM and for Team KOTH / FlagBall at ANY configured team
+// count. [orig: Server_BuildEndOfRoundScoreboard @0x509259..0x50929C]
+void test_end_round_team_row_count_rule() {
+    auto expect_rows = [](uint32_t game_type, uint8_t team_count, uint8_t expected) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        MatchRules configured = rules(game_type, 10, 0);
+        configured.team_count = team_count;
+        world->match.configure(configured);
+        world->process_round_end(1);
+        const uint8_t rows = world->match.result().team_row_count;
+        if (rows != expected) {
+            std::printf("FAIL %s:%d  team_row_count(game_type=0x%x, teams=%u) == %u, expected %u\n",
+                        __FILE__, __LINE__, unsigned(game_type), unsigned(team_count),
+                        unsigned(rows), unsigned(expected));
+            ++failures;
+        }
+    };
+    expect_rows(gt::kTeamKingOfTheHill, 2, 5);
+    expect_rows(gt::kFlagBall, 2, 5);
+    expect_rows(gt::kTeamDeathmatch, 4, 5);
+    expect_rows(gt::kTeamDeathmatch, 2, 3);
+    expect_rows(gt::kCaptureTheFlag, 4, 3);
+    expect_rows(gt::kAdvanceAndSecure, 4, 3);
+    expect_rows(gt::kDeathmatch, 2, 0);
+    expect_rows(gt::kKingOfTheHill, 4, 0);
+}
+
+EntityHandle spawn_hill(World &world) {
+    Entity entity;
+    entity.kind = EntityKind::Item;
+    entity.item_id = 6006;
+    entity.has_item_def = true;
+    entity.position = {0.0f, 0.0f, 0.0f};
+    entity.bound_radius = 10.0f;
+    entity.alive = true;
+    return world.registry.spawn(3, entity);
+}
+
+// The team primary score and the frozen per-team hold word both read the
+// TeamRecord+0x150 hill hold timer (one tick per service pass with a holder),
+// never the per-second fold of the players' own slot ticks (+0x148).
+// [orig: Server_BuildEndOfRoundScoreboard @0x508FA7/@0x5092E7;
+// Server_BuildAndBroadcastScoreboard @0x50DCB8; Game_AccumulateTeamScores
+// @0x508DAD (the timer) / @0x508E0A (the fold)]
+void test_end_result_freezes_team_hold_timer() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 8);
+    world->registry.configure_pool(3, 4);
+    MatchRules tkoth;
+    tkoth.game_type = gt::kTeamKingOfTheHill;
+    tkoth.game_time_minutes = 10;
+    tkoth.hill_limit_minutes = 99;
+    world->match.configure(tkoth);
+    const EntityHandle blue_a = player(*world, 0, 1, "BlueA");
+    const EntityHandle blue_b = player(*world, 1, 1, "BlueB");
+    const EntityHandle red = player(*world, 2, 2, "Red");
+    world->registry.get(blue_a)->position = {0.0f, 0.0f, 0.0f};
+    world->registry.get(blue_b)->position = {0.0f, 0.0f, 0.0f};
+    world->registry.get(red)->position = {100.0f, 0.0f, 0.0f};
+    spawn_hill(*world);
+    advance_initial_periodic_passes(*world, 3);
+    CHECK(world->match.player(blue_a)->objective_ticks == 3);
+    CHECK(world->match.player(blue_b)->objective_ticks == 3);
+    // Two holders accumulate one team tick per pass, not two.
+    CHECK(world->match.team_primary_score(1) == 3);
+    CHECK(world->match.team_primary_score(2) == 0);
+    CHECK(world->match.live_scoreboard(*world).teams[1].primary_score == 3);
+
+    world->process_round_end(1);
+    const MatchResult &result = world->match.result();
+    CHECK(result.team_row_count == 5);
+    CHECK(result.team_hold_ticks[1] == 3 && result.team_hold_ticks[2] == 0);
+    CHECK(result.team_scores[0] == 3 && result.team_scores[1] == 0);
+    CHECK(!result.draw);
+}
+
+// Non-team boards: the frozen order follows the game-type primary
+// (Player_ComputeScore), the draw byte is the all-tied test, and the winner
+// marker goes to every non-spectator row whose key equals row 0's unless the
+// board is a draw or its first two rows tie.
+// [orig: Player_ComputeScore @0x500AD0..0x500ADF; Server_BuildEndOfRoundScoreboard
+// @0x509053/@0x50920E/@0x50926A/@0x5092B2; Server_ProcessRoundEnd
+// @0x5165A3..0x5165C3 and @0x5167E2..0x5167FD; GameEvent_ProcessScoring @0x52F6FA]
+void test_nonteam_board_order_draw_and_winner_marker() {
+    auto marker = [](const MatchResult &result, const char *name) {
+        for (const MatchResultPlayer &row : result.players) {
+            if (row.identity.name == name)
+                return row.stats[MatchStats::kRoundMarker];
+        }
+        return int32_t{-1};
+    };
+
+    // (a) Points and kills disagree: Ace has 2 kills and 3 suicides (5 points),
+    // Bee 1 kill (8 points). DM orders by kills.
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 8);
+        world->match.configure(rules(gt::kDeathmatch, 10, 0));
+        const EntityHandle ace = player(*world, 3, 1, "Ace");
+        const EntityHandle bee = player(*world, 7, 2, "Bee");
+        const EntityHandle cid = player(*world, 9, 3, "Cid");
+        world->match.record_death(*world, bee, ace);
+        world->match.record_death(*world, cid, ace);
+        for (int i = 0; i < 3; ++i)
+            world->match.record_death(*world, ace, ace);
+        world->match.record_death(*world, cid, bee);
+        CHECK(world->match.player(ace)->stats[MatchStats::kPoints] == 5);
+        CHECK(world->match.player(bee)->stats[MatchStats::kPoints] == 8);
+        world->process_round_end(0);
+        const MatchResult &result = world->match.result();
+        CHECK(result.players.size() == 3);
+        CHECK(result.players[0].identity.name == "Ace" && result.players[0].primary_score == 2);
+        CHECK(result.players[1].identity.name == "Bee" && result.players[1].primary_score == 1);
+        CHECK(result.players[2].identity.name == "Cid" && result.players[2].primary_score == 0);
+        CHECK(!result.draw);
+        CHECK(marker(result, "Ace") == 2);
+        CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 2);
+        CHECK(marker(result, "Bee") == 0 && marker(result, "Cid") == 0);
+    }
+
+    // (b) Every row tied at zero: a draw, no marker.
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 8);
+        world->match.configure(rules(gt::kDeathmatch, 10, 0));
+        player(*world, 3, 1, "Ace");
+        player(*world, 7, 2, "Bee");
+        world->process_round_end(0);
+        const MatchResult &result = world->match.result();
+        CHECK(result.draw);
+        CHECK(marker(result, "Ace") == 0 && marker(result, "Bee") == 0);
+    }
+
+    // (c) A lone row: a draw at zero, a win with any positive score.
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 8);
+        world->match.configure(rules(gt::kDeathmatch, 10, 0));
+        player(*world, 3, 1, "Solo");
+        world->process_round_end(0);
+        CHECK(world->match.result().draw);
+        CHECK(marker(world->match.result(), "Solo") == 0);
+
+        world->match.configure(rules(gt::kDeathmatch, 10, 0));
+        const EntityHandle solo = player(*world, 3, 1, "Solo");
+        world->match.player(solo)->stats[MatchStats::kEnemyKills] = 1;
+        world->process_round_end(0);
+        CHECK(!world->match.result().draw);
+        CHECK(marker(world->match.result(), "Solo") == 2);
+    }
+
+    // (d) Two rows tied at the top over a third: not a draw, but no marker.
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 8);
+        world->match.configure(rules(gt::kDeathmatch, 10, 0));
+        const EntityHandle ace = player(*world, 3, 1, "Ace");
+        const EntityHandle bee = player(*world, 7, 2, "Bee");
+        const EntityHandle cid = player(*world, 9, 3, "Cid");
+        world->match.record_death(*world, cid, ace);
+        world->match.record_death(*world, cid, bee);
+        world->process_round_end(0);
+        const MatchResult &result = world->match.result();
+        CHECK(!result.draw);
+        CHECK(result.players[0].identity.name == "Ace" && result.players[1].identity.name == "Bee");
+        CHECK(marker(result, "Ace") == 0 && marker(result, "Bee") == 0 && marker(result, "Cid") == 0);
+    }
+
+    // (e) KOTH orders by the hill ticks the primary selects, not points.
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 8);
+        MatchRules koth;
+        koth.game_type = gt::kKingOfTheHill;
+        koth.game_time_minutes = 10;
+        koth.hill_limit_minutes = 99;
+        world->match.configure(koth);
+        const EntityHandle solo = player(*world, 3, 1, "Solo");
+        const EntityHandle red = player(*world, 7, 2, "Red");
+        world->match.player(solo)->objective_ticks = 5;
+        world->match.player(solo)->stats[MatchStats::kPoints] = 50;
+        world->match.player(red)->objective_ticks = 9;
+        world->process_round_end(0);
+        const MatchResult &result = world->match.result();
+        CHECK(result.players[0].identity.name == "Red" && result.players[0].primary_score == 9);
+        CHECK(!result.draw);
+        CHECK(marker(result, "Red") == 2 && marker(result, "Solo") == 0);
+    }
+
+    // (f) A spectator-flagged top scorer receives no award.
+    {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 8);
+        world->match.configure(rules(gt::kDeathmatch, 10, 0));
+        const EntityHandle ace = player(*world, 3, 1, "Ace");
+        const EntityHandle bee = player(*world, 7, 2, "Bee");
+        world->match.record_death(*world, bee, ace);
+        world->match.set_player_spectator(ace, true);
+        world->process_round_end(0);
+        const MatchResult &result = world->match.result();
+        CHECK(!result.draw);
+        CHECK(result.players[0].identity.name == "Ace");
+        CHECK(marker(result, "Ace") == 0 && marker(result, "Bee") == 0);
+        CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 0);
+    }
+}
+
 void test_coop_remains_script_owned() {
     for (const uint32_t game_type : {gt::kCoop, gt::kObjectiveCoop}) {
         auto world = std::make_unique<World>();
@@ -1268,6 +1477,9 @@ int main() {
     test_flagball_four_team_bays_consume_exact_contacts();
     test_cac_combines_flag_and_zone_objectives();
     test_end_result_is_frozen_in_retail_board_order();
+    test_end_round_team_row_count_rule();
+    test_end_result_freezes_team_hold_timer();
+    test_nonteam_board_order_draw_and_winner_marker();
     test_coop_remains_script_owned();
     if (failures != 0) {
         std::printf("match_test: %d failure(s)\n", failures);

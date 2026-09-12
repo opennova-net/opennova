@@ -86,6 +86,15 @@ public:
 	void set_var(int p_var_index, int p_value);
 	int vm_state() const;
 	String last_error() const;
+	// The loaded script's MessageHandler restart frame (engine mus_vm_signal:
+	// the step MusicCtx_SelectEndTrack runs at once): the SP round-end tail
+	// hands the end track here (1 win / 2 lose; retail gamemus.bin dispatches
+	// them to Missionwin / Missionlose). Runs on any loaded script regardless
+	// of the streaming state; the handler's setstate lands at once and the
+	// sting's first entry plays on the next paced advance. Returns 0 when the
+	// frame ran, -1 with no script, -2 when the script carries no handler, -3
+	// on a return-stack overflow.
+	int signal_end_track(int p_value);
 
 	// Engine callbacks (Node virtuals via godot-cpp)
 	void _ready() override;

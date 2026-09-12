@@ -586,6 +586,136 @@ int test_weapon_reload_roundtrip() {
 	return 0;
 }
 
+// S2C 0x4E page + C2S 0x28 request: the join-window kill-list walk's two bodies.
+// [orig: collect_valid_weapon_slots @0x516000 / NapiNPClientMsg_HandleBatchKill @0x431870;
+//  the 0x4E continuation @0x4318db..0x4318ff / NapiNPServerMsg_HandleWeaponLoadoutRequest @0x51A550]
+int test_join_window_kill_walk_roundtrip() {
+	BatchKillBatch page;
+	page.count = 0x2001;                 // resume: category 2, index 1
+	page.slots = {0x0004, 0x0FFF, 0x1000, 0x1FFF, 0x2000};
+	std::vector<uint8_t> wire = encode_batch_kill(page);
+	EXPECT(wire.size() == 2 + 2 * page.slots.size());
+	BatchKillBatch d;
+	EXPECT(decode_batch_kill(wire.data(), wire.size(), d));
+	EXPECT(d.count == 0x2001);
+	EXPECT(d.slots == page.slots);
+	// The bare sentinel: FF FF and nothing else.
+	BatchKillBatch bare;
+	bare.count = 0xFFFF;
+	wire = encode_batch_kill(bare);
+	EXPECT(wire.size() == 2 && wire[0] == 0xFF && wire[1] == 0xFF);
+	EXPECT(decode_batch_kill(wire.data(), wire.size(), d));
+	EXPECT(d.count == 0xFFFF && d.slots.empty());
+	// The continuation the client answers a non-empty page with.
+	BurstLoadoutRequest req;
+	req.loadout_filter = 0xDEADBEEF;  // windowMin
+	req.flags = 0xCAFEF00D;           // windowMax
+	req.extra = page.count;           // start = the page's resume word
+	wire = encode_burst_loadout_request(req);
+	EXPECT(wire.size() == 10);
+	BurstLoadoutRequest r;
+	size_t consumed = 0;
+	EXPECT(decode_burst_loadout_request(wire.data(), wire.size(), r, consumed));
+	EXPECT(consumed == 10);
+	EXPECT(r.loadout_filter == 0xDEADBEEF && r.flags == 0xCAFEF00D && r.extra == 0x2001);
+	std::printf("PASS join_window_kill_walk_roundtrip\n");
+	return 0;
+}
+
+// S2C 0x6A clan-roster + C2S 0x4E walk. [orig: serialize_minimap_slot @0x5073B0 /
+//  NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; NapiNPServerMsg_HandleMinimapSlotRequest @0x511210]
+int test_clan_roster_roundtrip() {
+	for (uint8_t action : {kClanRosterAdd, kClanRosterWalkReply}) {
+		ClanRosterUpdate in;
+		in.action = action;
+		in.account_id = 0x12345678;
+		in.name = std::string(64, 'x');   // the node's full char[65]
+		in.tag = "12345678";              // the node's full char[9]
+		const std::vector<uint8_t> wire = encode_clan_roster_update(in);
+		EXPECT(wire.size() == 1 + 4 + 65 + 9);
+		ClanRosterUpdate d;
+		EXPECT(decode_clan_roster_update(wire.data(), wire.size(), d));
+		EXPECT(d.action == action && d.account_id == 0x12345678);
+		EXPECT(d.name == in.name && d.tag == in.tag);
+	}
+	ClanRosterUpdate gone;
+	gone.action = kClanRosterRemove;
+	gone.account_id = 0x12345678;
+	const std::vector<uint8_t> wire = encode_clan_roster_update(gone);
+	EXPECT(wire.size() == 5);
+	ClanRosterUpdate d;
+	EXPECT(decode_clan_roster_update(wire.data(), wire.size(), d));
+	EXPECT(d.action == kClanRosterRemove && d.account_id == 0x12345678 && d.name.empty() && d.tag.empty());
+	ClanRosterWalkRequest walk;
+	walk.after_account_id = 0x12345678;
+	const std::vector<uint8_t> w = encode_clan_roster_walk_request(walk);
+	ClanRosterWalkRequest wd;
+	size_t consumed = 0;
+	EXPECT(decode_clan_roster_walk_request(w.data(), w.size(), wd, consumed));
+	EXPECT(consumed == 4 && wd.after_account_id == 0x12345678);
+	std::printf("PASS clan_roster_roundtrip\n");
+	return 0;
+}
+
+// S2C 0x37 / C2S 0x1A door-slot action: the 5-byte body both directions share.
+// [orig: Server_SendWeaponSlotActionPacket @0x50F9A0 / NetPacket_SendWeaponSwitch @0x42D0C0]
+int test_door_slot_action_roundtrip() {
+	DoorSlotAction in;
+	in.entity_handle = 0x2013;  // pool 2 slot 19
+	in.state = 3;               // closing
+	in.number = 2;
+	const std::vector<uint8_t> wire = encode_door_slot_action(in);
+	EXPECT(wire.size() == 5);
+	EXPECT(wire[0] == 0x13 && wire[1] == 0x20 && wire[2] == 0x03 && wire[3] == 0x00 && wire[4] == 0x02);
+	DoorSlotAction d;
+	size_t consumed = 0;
+	EXPECT(decode_door_slot_action(wire.data(), wire.size(), d, consumed));
+	EXPECT(consumed == 5 && d.entity_handle == 0x2013 && d.state == 3 && d.number == 2);
+	// The no-pool sender handle and a negative state word survive the u16 write.
+	in.entity_handle = 0xFFFF;
+	in.state = -2;
+	const std::vector<uint8_t> w2 = encode_door_slot_action(in);
+	EXPECT(decode_door_slot_action(w2.data(), w2.size(), d, consumed));
+	EXPECT(d.entity_handle == 0xFFFF && d.state == -2);
+	std::printf("PASS door_slot_action_roundtrip\n");
+	return 0;
+}
+
+// C2S 0x42 -> S2C 0x70 availability list and the C2S 0x40 pick.
+// [orig: serialize_weapon_overlay_slots_0 @0x5105A0 / NapiNPClientMsg_HandleWeaponLoadoutList
+//  @0x429a30; NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0]
+int test_vehicle_spawn_codec_roundtrip() {
+	VehicleSpawnAvailabilityList list;
+	// The 23-row mission-start table's ids [orig: EntityLimit_InitTable @0x509A70],
+	// each with a distinct avail/max pair.
+	const uint16_t ids[] = {1292, 1306, 1307, 2010, 1308, 1215, 1300, 1214, 1291, 1301, 1302,
+	                        1305, 1294, 1295, 1304, 1213, 2015, 1293, 2003, 1299, 1200, 1296, 1303};
+	for (unsigned i = 0; i < 23; ++i)
+		list.rows.push_back({ids[i], uint8_t(i), uint8_t(i + 1)});
+	const std::vector<uint8_t> wire = encode_vehicle_spawn_availability(list);
+	EXPECT(wire.size() == 1 + 23 * 4 + 2);
+	EXPECT(wire[0] == 3);
+	EXPECT(wire[wire.size() - 2] == 0 && wire[wire.size() - 1] == 0);
+	VehicleSpawnAvailabilityList d;
+	EXPECT(decode_vehicle_spawn_availability(wire.data(), wire.size(), d));
+	EXPECT(d.leading_byte == 3 && d.terminated && d.rows.size() == 23);
+	for (unsigned i = 0; i < 23; ++i) {
+		EXPECT(d.rows[i].type_id == ids[i]);
+		EXPECT(d.rows[i].available == i && d.rows[i].max_count == i + 1);
+	}
+	VehicleSpawnRequest pick;
+	pick.source_handle = 0x1021;
+	pick.type_index = 22;
+	const std::vector<uint8_t> req = encode_vehicle_spawn_request(pick);
+	EXPECT(req.size() == 3);
+	VehicleSpawnRequest rd;
+	size_t consumed = 0;
+	EXPECT(decode_vehicle_spawn_request(req.data(), req.size(), rd, consumed));
+	EXPECT(consumed == 3 && rd.source_handle == 0x1021 && rd.type_index == 22);
+	std::printf("PASS vehicle_spawn_codec_roundtrip\n");
+	return 0;
+}
+
 // C2S 0x2F loadout submit: encode_loadout_submit <-> decode_loadout_submit identity,
 // plus the golden capture-default pair byte shape (the joiner's canned submission).
 // [orig: NetPacket_SendLoadoutSubmit @0x42cdc0 / NapiNPServerMsg_HandlePlayerLoadout @0x515790]
@@ -1326,6 +1456,10 @@ int main() {
 	rc |= test_vehicle_compact_roundtrip_unmounted();
 	rc |= test_player_compact_roundtrip();
 	rc |= test_weapon_reload_roundtrip();
+	rc |= test_join_window_kill_walk_roundtrip();
+	rc |= test_clan_roster_roundtrip();
+	rc |= test_door_slot_action_roundtrip();
+	rc |= test_vehicle_spawn_codec_roundtrip();
 	rc |= test_loadout_submit_roundtrip();
 	rc |= test_player_sync_roundtrip();
 	rc |= test_player_list_roundtrip();

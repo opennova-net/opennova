@@ -30,6 +30,7 @@ add_library(opennova_runtime STATIC
     # controls — the JO input-binding catalog + CONTROL_MAPPING model
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/controls.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/binding_set.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controls/key_strings.cpp
     # environment — the TOD environment state owner + the weather runtime
     # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
     # target-feed/writeback order) + the mission-start network sample
@@ -305,6 +306,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_challenge_profile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_disconnect.cpp  # the punt/goodbye/reap/leave family of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/local_role.cpp
@@ -313,6 +315,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_markers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_initial_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_loadout_grant.cpp        # the C2S 0x2F grant family (split off server_message_dispatch.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_message_dispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp

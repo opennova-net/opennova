@@ -170,6 +170,11 @@ struct MatchPlayer {
     // [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0;
     // Server_PlayerAdd @0x51D51C]
     std::array<uint8_t, 17> script_vars{};
+    // Player-slot +100567, the live spectator latch. The scorer refuses
+    // every event for a spectator-flagged slot, so the non-team round winner
+    // award skips the row. The authority mirrors its connection latch here.
+    // [orig: GameEvent_ProcessScoring @0x52F6FA]
+    bool spectator = false;
 };
 
 // The match requests a disconnect without owning the transport. The authority
@@ -209,10 +214,24 @@ struct MatchResult {
     uint32_t game_type = 0;
     int32_t winner_team = 0;
     std::array<int32_t, 2> team_scores{}; // teams 1 and 2
+    // Team games: team_scores[0] == team_scores[1]. Non-team games: every
+    // board row's primary equals the largest sort key, except a lone row
+    // with a positive score. [orig: Server_BuildEndOfRoundScoreboard
+    // @0x5092AD (team); @0x50909D/@0x50920E/@0x50926A (non-team)]
     bool draw = false;
     std::vector<MatchScoreField> score_fields;
     std::vector<MatchResultPlayer> players;
     std::array<MatchStats, 5> team_stats{};
+    // TeamRecord+0x150 (unknown_040[272]) per row: the hill hold timer
+    // Game_AccumulateTeamScores drives. The board builder passes it as
+    // ScoreRules_GetPrimaryScoreField's third argument for the team scores
+    // and reads it directly for matrix column id 5.
+    // [orig: Server_BuildEndOfRoundScoreboard @0x508FA7/@0x5092E7;
+    // Game_AccumulateTeamScores @0x508DAD/@0x508DC2]
+    std::array<int32_t, 5> team_hold_ticks{};
+    // 0 for non-team types, 3 for team types, 5 for four-team TDM and for
+    // Team KOTH / FlagBall at any team count.
+    // [orig: Server_BuildEndOfRoundScoreboard @0x509259..0x50929C]
     uint8_t team_row_count = 0;
 };
 
@@ -270,11 +289,23 @@ class Match {
     // Entity destruction drops a carried objective without removing the
     // player's score/roster record. [orig: Entity_DropCarriedObject @0x439DF0]
     void drop_carried_object(World &world, EntityHandle player);
+    // Re-sync a flag to its authored pose without a feed event or scoring: a
+    // flag already AT that pose is left alone (no send); one displaced under
+    // 2 u keeps its position but re-publishes its 0x2F state; one displaced
+    // further snaps home, drops its ground link, and publishes. Returns true
+    // only for the snap. The 1 Hz carry-limit break is its caller here.
+    // [orig: Entity_SyncPositionFromDefinition @0x43A9B0 — equality return
+    //  @0x43a9f8, near path @0x43aa3b..0x43aa7c, snap + ground raycast +
+    //  send @0x43aa7d..0x43ab40]
+    bool sync_flag_to_authored_pose(World &world, EntityHandle flag);
     // Per-flag class callback (+0x2AC), independent of the server's 1 Hz clock.
     void tick_flag_event(World &world, Entity &flag);
     const MatchPlayer *player(EntityHandle entity) const;
     MatchPlayer *player(EntityHandle entity);
     const std::vector<MatchPlayer> &players() const { return players_; }
+    // Mirrors the player-slot spectator latch (+100567) onto the roster row.
+    // [orig: Server_PlayerAdd @0x51CD83; Server_KillPlayerAndNotify @0x519E76]
+    void set_player_spectator(EntityHandle entity, bool spectator);
     const MatchStats &team_stats(uint8_t team) const;
 
     // Script player operations validate the registered slot, not the Player
@@ -333,7 +364,12 @@ class Match {
 
     int32_t primary_score(const MatchStats &stats, int32_t objective_ticks = 0) const;
     int32_t primary_score(const MatchPlayer &player) const;
-    int32_t team_primary_score(const World &world, uint8_t team) const;
+    // The team row's primary: ScoreRules_GetPrimaryScoreField over the team
+    // stats with the team's hill hold timer (TeamRecord+0x150) as the KOTH
+    // family's external score, on both the live and the end-round board.
+    // [orig: Server_BuildAndBroadcastScoreboard @0x50DB92..@0x50DCCE;
+    // Server_BuildEndOfRoundScoreboard @0x508FA7/@0x508FB8]
+    int32_t team_primary_score(uint8_t team) const;
     MatchLiveScoreboard live_scoreboard(World &world);
 
   private:

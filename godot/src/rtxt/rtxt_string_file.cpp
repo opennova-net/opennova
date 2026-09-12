@@ -1,6 +1,7 @@
 #include "rtxt/rtxt_string_file.h"
 
 #include "resource_index/resource_root.h"
+#include <runtime/controls/key_strings.h> // the process-wide "Keys" binding-label table
 #include <runtime/mission/runtime_boot.h>
 
 #include "util/cp1252.h"
@@ -313,6 +314,21 @@ String RtxtStringFile::lookup_with_override(const Ref<RtxtStringFile> &p_overrid
 			override_file, file, gd_to_std(p_section), gd_to_std(p_key)));
 }
 
+// --- The process-wide "Keys" table (engine controls/key_strings.h) ---
+
+void RtxtStringFile::install_key_strings() const {
+	// The engine copies the table; this resource stays the shell's registry entry.
+	opennova::controls::set_key_strings(file_);
+}
+
+void RtxtStringFile::clear_key_strings() {
+	opennova::controls::clear_key_strings();
+}
+
+bool RtxtStringFile::has_key_strings() {
+	return opennova::controls::has_key_strings();
+}
+
 void RtxtStringFile::set_native(const opennova::rtxt::File &p_file) {
 	file_ = p_file;
 	file_.build_lookup();
@@ -364,6 +380,10 @@ void RtxtStringFile::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("to_byte_array"), &RtxtStringFile::to_byte_array);
 	ClassDB::bind_method(D_METHOD("load_from_byte_array", "bytes"), &RtxtStringFile::load_from_byte_array);
+
+	ClassDB::bind_method(D_METHOD("install_key_strings"), &RtxtStringFile::install_key_strings);
+	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("clear_key_strings"), &RtxtStringFile::clear_key_strings);
+	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("has_key_strings"), &RtxtStringFile::has_key_strings);
 
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("strip_hotkey", "text"), &RtxtStringFile::strip_hotkey);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("format_miss_marker", "section", "key"), &RtxtStringFile::format_miss_marker);

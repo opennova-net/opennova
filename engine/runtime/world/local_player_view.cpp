@@ -9,6 +9,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 
 #include <formats/def/def.h>        // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 #include <formats/mission/bms.h>    // bms::AttribFlags::StartWithNVGOn
@@ -95,10 +96,7 @@ bool suppress_view_bias(const LocalPlayerWeapon &w, const WeaponSlotState *slot)
 void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
                              LocalPlayerViewTracker &t) {
     // [orig: Player_ResetCameraAndMovementState @0x4DE1F0]
-    v.scope_engaged = false;
-    v.scope_step = 0;
-    v.ease_steps = kScopeEaseSteps;
-    v.scope_hipfire = true;
+    player_view_scope_reset(v);
     if (world != nullptr) world->weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
     v.binoculars_requested = false;
     v.binoculars_raised = false;
@@ -178,6 +176,110 @@ int32_t local_player_scope_zoom(const LocalPlayerWeapon &w, WeaponSlotState &slo
     return slot.scope_zoom;
 }
 
+ScopeZoomLimits local_player_scope_zoom_limits(const World &world, const LocalPlayerWeapon &w,
+                                               int32_t scope_min_mag) {
+    // [orig: EquippedSlot->Def +0 (category) @0x4dbe2f / @0x4dfaee, +0x98
+    //  @0x4dbe29 / @0x4dfadd]
+    ScopeZoomLimits limits;
+    limits.scope_min_mag = scope_min_mag;
+    const int index = w.active ? world.tables.weapons.index_of(w.def_name.c_str()) : -1;
+    limits.category =
+        index >= 0 ? world.tables.weapons.entries[static_cast<size_t>(index)].category : 0;
+    return limits;
+}
+
+int32_t local_player_scope_zoom_floor(const World &world, const ScopeZoomLimits &limits,
+                                      int32_t scope_max_mag) {
+    // [orig: Player_AdjustWeaponElevation @0x4dbe29 ecx = Def+0x98; the lock
+    //  @0x4dbe2f..0x4dbe3f: player+0x294 == 6 && Def+0 == 3 && !byte_A821F0
+    //  -> ecx = Def+0x90; Player_MountWeaponSlot @0x4dfadd..0x4dfb01 the same;
+    //  byte_A821F0 = rules.allow_sniper_scope_zoom]
+    const Entity *player = world.registry.get(world.cached.local_player);
+    const bool sniper_lock = player != nullptr && player->player_class == 6 &&
+                             limits.category == 3 && !world.rules.allow_sniper_scope_zoom;
+    return sniper_lock ? scope_max_mag : limits.scope_min_mag;
+}
+
+bool local_player_adjust_scope_zoom(World &world, LocalPlayerWeapon &w, const PlayerViewState &v,
+                                    WeaponSlotState &slot, const ScopeZoomLimits &limits,
+                                    int32_t delta) {
+    // [orig: Player_AdjustWeaponElevation @0x4dbdf0 -- Player_CanFireWeapon
+    //  @0x4dbdfc, EquippedSlot @0x4dbe07, Def @0x4dbe0e]
+    if (!w.active || !local_player_scope_view_visible(world, w, v)) return false;
+    const int32_t maximum = static_cast<int32_t>(w.scope_max_mag);
+    const int32_t current = slot.scope_zoom;
+    int32_t next = current + delta;                                   // @0x4dbe26
+    const int32_t floor = local_player_scope_zoom_floor(world, limits, maximum);
+    if (next >= floor) {                                              // @0x4dbe47
+        if (next > maximum) next = maximum;                           // @0x4dbe4d..0x4dbe57
+    } else {
+        next = floor;                                                 // @0x4dbe49
+    }
+    if (next != current) {                                            // @0x4dbe5b
+        // Sound_PlayInterfaceTriggerSet(dword_24E08B4) @0x4dbe64: the
+        // non-positional interface play of the "GF_SCOPE" set.
+        ScriptSoundEvent click;
+        click.name = kScopeZoomStepSoundset;
+        click.kind = ScriptSoundEvent::Kind::Interface;
+        world.out.script_sounds.push_back(std::move(click));
+    }
+    slot.scope_zoom = next;                                           // @0x4dbe6c
+    return next != current;
+}
+
+void local_player_scope_zoom_mount_clamp(const World &world, const ScopeZoomLimits &limits,
+                                         int32_t def_flags, int32_t scope_max_mag,
+                                         WeaponSlotState &slot) {
+    // [orig: Player_MountWeaponSlot -- Def+8 Flags & 1 @0x4dfacf..0x4dfad1,
+    //  Def+0x90 != 0 @0x4dfad3..0x4dfadb, the floor @0x4dfadd..0x4dfb01, the
+    //  clamp of MountSlot+0xC @0x4dfb03..0x4dfb13]
+    if ((def_flags & static_cast<int32_t>(DEF_WEAPON_FLAG_SCOPED)) == 0 || scope_max_mag == 0)
+        return;
+    const int32_t floor = local_player_scope_zoom_floor(world, limits, scope_max_mag);
+    if (slot.scope_zoom < floor) slot.scope_zoom = floor;                      // @0x4dfb0a
+    else if (slot.scope_zoom > scope_max_mag) slot.scope_zoom = scope_max_mag; // @0x4dfb13
+}
+
+WeaponCycleRoute local_player_weapon_cycle_route(World &world, LocalPlayerWeapon &w,
+                                                 const PlayerViewState &v,
+                                                 const ScopeZoomLimits &limits,
+                                                 int32_t direction) {
+    // [orig: Input_HandleActionBinding_0 case 0xD4 @0x4e130c / 0xD6 @0x4e1364:
+    //  g_binocularsViewActive || g_fireChargeStartTick -> return]
+    if (v.binoculars_view_active || w.power_throw_start_tick != 0)
+        return WeaponCycleRoute::kRefused;
+    // EquippedSlot && Def && Def+0x98 != Def+0x90 && Player_CanFireWeapon()
+    // @0x4e1312..0x4e1333 / @0x4e136a..0x4e138b
+    WeaponSlotState *slot = active_local_weapon_slot(world, w);
+    if (w.active && slot != nullptr &&
+        limits.scope_min_mag != static_cast<int32_t>(w.scope_max_mag) &&
+        local_player_scope_view_visible(world, w, v)) {
+        // Player_AdjustWeaponElevation(2) @0x4e13d5 (212) / (-2) @0x4e1394 (214)
+        local_player_adjust_scope_zoom(world, w, v, *slot, limits, direction > 0 ? 2 : -2);
+        return WeaponCycleRoute::kZoomStep;
+    }
+    return WeaponCycleRoute::kCycle; // Player_CycleWeaponSlot(direction) @0x4e1341 / @0x4e13a4
+}
+
+bool local_player_in_vehicle_loadout_zone(const World &world) {
+    // [orig: Input_HandleActionBinding_0 case 0xB1 -- parentSlot == 0 @0x4e0a91,
+    //  Flags & 0x800 @0x4e0ab2 (the type-11 volume touch, entity.h)]
+    const Entity *e = world.registry.get(world.cached.local_player);
+    return e != nullptr && !e->mounted &&
+           ((e->flags | e->engine_flags) & kEntityFlagVehicleLoadoutZone) != 0;
+}
+
+bool local_player_vehicle_zone_team_matches(const World &world) {
+    // [orig: @0x4e0ad8 edx = player->groundEntity (+0x28); @0x4e0adb al =
+    //  groundEntity->Team byte (+0x162); 0 opens @0x4e0ae3, else it must equal
+    //  the player's Team byte @0x4e0ae5..0x4e0aeb]
+    const Entity *e = world.registry.get(world.cached.local_player);
+    if (e == nullptr) return false;
+    const Entity *ground = world.registry.get(e->ground_target);
+    const uint8_t ground_team = ground != nullptr ? ground->team : 0;
+    return ground_team == 0 || ground_team == e->team;
+}
+
 namespace {
 int32_t sighted_fov_target(int32_t zoom) {
     // Reciprocal is truncated to Q16 before the rounded multiply by 80 Q16.
@@ -196,7 +298,9 @@ bool scope_view_visible(World &world, const LocalPlayerWeapon &w, const PlayerVi
     const bool force = (w.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0;
     const bool no_card = (w.def.flags & weapon_flag::kNoCardSwitch) != 0 && !force;
     if (suppress_view_bias(w, &slot) && !no_card) return false;
-    const bool active = v.scope_engaged && !player_view_scope_ease_active(v);
+    // The PROMOTED byte [orig: Player_IsEquippedWeaponScoped reads
+    // g_weaponScopeActive], never the target or the ease.
+    const bool active = player_view_scope_settled(v);
     const bool scoped = active && (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0;
     const bool sighted = active && (w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
                          slot.current != weapon_action::kSwitchFrom;
@@ -239,7 +343,7 @@ bool local_player_scope_view_visible(World &world, LocalPlayerWeapon &w,
 
 bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
                             WeaponSlotState &slot, bool engaged) {
-    if (engaged == v.scope_engaged) return true;
+    if (!player_view_scope_request_pending(v, engaged)) return true;
     if (!player_view_set_engaged(v, engaged, (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
         return false;
     auto &target = world.weather.core.scalar_channels.camera_fov_target_fp;
@@ -256,24 +360,28 @@ bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerV
     // currentAction not in {RELOAD, SWITCHFROM}, then the Player_ToggleWeaponScope
     // view/definition gates. [orig: Player_ToggleWeaponScope @0x4df0c0]
     if (!weapon_fsm_scope_toggle_allowed(w.def, active_slot)) return false;
-    // Scope-UP is refused while a movement key is held on a Scoped weapon
-    // [orig: g_movementKeyHeld && (flags & 1) -> return @0x4df29c].
-    if (!v.scope_engaged && player_view_scope_up_blocked(v, w.def.flags)) return false;
+    // The toggle branches on the PROMOTED byte, not the target: a promoted
+    // sight disengages, anything else engages [orig: the g_weaponScopeActive
+    // branch @0x4df17f].
+    const bool promoted = player_view_scope_settled(v);
+    // ForceScoped pins the raised sight: un-scoping is refused once promoted
+    // [orig: (flags1 & 0x20000000) == 0 || !g_weaponScopeActive @0x4df12d].
+    if (promoted && (w.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0) return false;
     // Inset optics cannot be raised under NVG. Non-Inset sights retain the
     // original independent behavior.
-    if (!v.scope_engaged && v.nvg_active && (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0)
+    if (!promoted && v.nvg_active && (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0)
         return false;
-    // ForceScoped pins the raised sight: un-scoping is refused once settled
-    // [orig: (flags1 & 0x20000000) == 0 || !g_weaponScopeActive @0x4df12d].
-    if (v.scope_engaged && (w.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0 &&
-        !player_view_scope_ease_active(v))
-        return false;
+    // Every toggle is refused while the previous ease runs
+    // [orig: (flags & 3) && !g_fpCameraInterp.activeFlag @0x4df177].
+    if (player_view_scope_ease_active(v)) return false;
+    // Scope-UP is refused while a movement key is held on a Scoped weapon
+    // [orig: the engage branch's g_movementKeyHeld && (flags & 1) -> return @0x4df29c].
+    if (!promoted && player_view_scope_up_blocked(v, w.def.flags)) return false;
     // The toggle latches this ease's step count (7 for Inset weapons, else 15;
-    // 1 on the hipfire-return leg) and REFUSES while the previous ease runs
-    // [orig: Player_ToggleWeaponScope @0x4df177 !activeFlag; Setup @0x4df1b3..0x4df36e].
-    if (!local_player_set_scope(world, w, v, active_slot, !v.scope_engaged))
+    // 1 on the hipfire-return leg) [orig: Setup @0x4df1b3..0x4df36e].
+    if (!local_player_set_scope(world, w, v, active_slot, !promoted))
         return false;
-    if (v.scope_engaged)
+    if (!promoted)
         weapon_fsm_queue_scope_up(active_slot);
     else
         weapon_fsm_queue_scope_down(active_slot);
@@ -311,8 +419,8 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
     if (world.registry.get(world.cached.local_player) == nullptr) return false;
     if (!v.nvg_active) {
         w.nvg_scope_restore = false;
-        if (w.active && v.scope_engaged && (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0 &&
-            !player_view_scope_ease_active(v)) {
+        if (w.active && player_view_scope_settled(v) &&
+            (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0) {
             w.nvg_scope_restore = scope_toggle();
         }
         return player_view_toggle_nvg(v);
@@ -468,6 +576,7 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     WeaponSlotState *active_slot =
         world != nullptr ? active_local_weapon_slot(*world, w) : nullptr;
     out.scope_engaged = v.scope_engaged;
+    out.scope_settled = player_view_scope_settled(v);
     out.binoculars_requested = v.binoculars_requested;
     out.binoculars_raised = v.binoculars_raised;
     out.binoculars_view_active = v.binoculars_view_active;
@@ -505,8 +614,7 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
                               local_player_scope_view_visible(*world, w, v);
     out.scope_card_active = optical_view &&
                             weapon_sights_card_eligible(w.def, *active_slot) &&
-                            v.scope_engaged && !v.binoculars_view_active &&
-                            !player_view_scope_ease_active(v);
+                            player_view_scope_settled(v) && !v.binoculars_view_active;
     // The thermal view (local_player_view.h): optical_view IS the CanFire
     // verdict this frame, so the latched byte is that AND the equipped def's
     // Thermal bit; the terrain ramps key on the def bit in first person alone

@@ -1761,6 +1761,15 @@ target_include_directories(death_camera_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(death_camera_test PRIVATE cxx_std_17)
 add_test(NAME death_camera COMMAND death_camera_test)
 
+# The per-entity death state beside the infantry death edges (world/infantry.h):
+# the plyr think cadence + kill-cause bit clear, the edge's attacker fallback,
+# and the org0 skin callback's DEATH corpse-fade register.
+add_executable(death_state_test world/death_state_test.cpp)
+target_link_libraries(death_state_test PRIVATE opennova_runtime)
+target_include_directories(death_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(death_state_test PRIVATE cxx_std_17)
+add_test(NAME death_state COMMAND death_state_test)
+
 # The local player's view cluster, orchestrated (world/local_player_view.h):
 # the scope/binocular/NVG request gates, the tick's arbiter feed + death-camera
 # entry edge, the composed frame read.
@@ -1831,6 +1840,11 @@ add_executable(vehicle_part_anim_test world/vehicle_part_anim_test.cpp)
 target_link_libraries(vehicle_part_anim_test PRIVATE opennova_runtime)
 target_include_directories(vehicle_part_anim_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME vehicle_part_anim COMMAND vehicle_part_anim_test)
+
+add_executable(vehicle_attachments_test world/vehicle_attachments_test.cpp)
+target_link_libraries(vehicle_attachments_test PRIVATE opennova_runtime)
+target_include_directories(vehicle_attachments_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME vehicle_attachments COMMAND vehicle_attachments_test)
 
 add_executable(tp_camera_mount_test world/tp_camera_mount_test.cpp)
 target_link_libraries(tp_camera_mount_test PRIVATE opennova_runtime)
@@ -2797,6 +2811,13 @@ target_link_libraries(npruntime_handshake_server_test
 target_include_directories(npruntime_handshake_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_handshake_server COMMAND npruntime_handshake_server_test)
 
+# The `_NSTMOUT.TXT` connection-template override (CNapiNetwork_Init's NEVER / seconds /
+# negative legs) and the joiner's 0x82 CS overlay of the host's timeout_ms / msg_out_max:
+# the reap runs from the accepted 0x82, -1 disables it, and the pool bound follows the host.
+add_executable(npruntime_handshake_timeout_override_test npruntime/handshake_timeout_override_test.cpp)
+target_link_libraries(npruntime_handshake_timeout_override_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_handshake_timeout_override COMMAND npruntime_handshake_timeout_override_test)
+
 # App-layer readiness gate used by the automated retail interop harness: send
 # the shared retail 0x41 probe over a real loopback socket, accept only a valid
 # game-server 0x81, and retain a bounded no-responder timeout.
@@ -2838,6 +2859,19 @@ add_test(NAME npruntime_session_resend COMMAND npruntime_session_resend_test)
 add_executable(npruntime_host_punt_test npruntime/host_punt_test.cpp)
 target_link_libraries(npruntime_host_punt_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_host_punt COMMAND npruntime_host_punt_test)
+
+# Server_TickUpdate's maintenance legs from the jo-c cross-check: the 620-tick spawn
+# protection and its fire clear, the 1 Hz 0x2F flag refresh, the violation sweep's carry
+# limit, the team-mode 0x46 downed resend, the armory-reuse cooldown, the 744-tick
+# priority-target sweep, the kit-weight recompute, the spawn-wave eviction and the C2S 0x0E
+# C&C / handle-0 admission. [orig: Server_UpdateAllActivePlayerSlots @0x518820; sub_517B20
+# @0x517b20; Server_CheckPlayerViolations @0x51abd0; Server_TickUpdate @0x51e2d0;
+# NapiNPServerMsg_HandlePlayerLoadout @0x515790; EntityPool_ClearDirtyFlags @0x508e30;
+# recalculate_all_player_scores @0x5014e0; SpawnWaveList_TryQueuePlayer @0x52a490;
+# Server_ProcessClientRequestRespawn @0x519af0]
+add_executable(npruntime_server_tick_maintenance_test npruntime/server_tick_maintenance_test.cpp)
+target_link_libraries(npruntime_server_tick_maintenance_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_server_tick_maintenance COMMAND npruntime_server_tick_maintenance_test)
 
 # Loss-tolerant pre-session UDP join: dropped 0x41/0x42 datagrams are retried on the retail active
 # send interval without changing their wire bytes, and the retried legs complete against the real host.

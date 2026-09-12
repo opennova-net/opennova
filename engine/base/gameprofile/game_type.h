@@ -128,10 +128,10 @@ constexpr bool has_score_table(uint32_t game_type) {
 
 // Retail permits four active sides only for the three symmetric team modes.
 // Every other team code serializes exactly two sides, regardless of the host's
-// mp_numteams setting; solo modes serialize zero. This count is shared by both
-// live and end-round scoreboards.
-// [orig: Server_BuildAndBroadcastScoreboard @0x50D960;
-// Server_BuildEndOfRoundScoreboard @0x508F30]
+// mp_numteams setting; solo modes serialize zero. This is the LIVE S2C 0x16
+// board's count only; the end-round board's trailing matrix has its own 0/3/5
+// row rule (world::scoreboard_team_row_count in runtime/world/match.cpp).
+// [orig: Server_BuildAndBroadcastScoreboard @0x50DB41..0x50DB72]
 constexpr uint8_t active_team_count(uint32_t game_type, uint8_t configured) {
     if (!is_team(game_type))
         return 0;

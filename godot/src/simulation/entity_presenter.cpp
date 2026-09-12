@@ -15,6 +15,8 @@
 
 #include <runtime/mission/placement_traits.h>
 #include <runtime/simassets/sim_pose_provider.h>
+#include <runtime/world/entity.h>       // EntityKind: the organic-row gate of the DEATH leg
+#include <runtime/world/present_rows.h> // PF_DEATH_CTRL: the org0 skin DEATH register word
 
 #include "audio/mission_audio.h"
 #include "env/mission_environment.h"
@@ -72,10 +74,16 @@ struct CtrlNames {
 	String owner_world_heat = String("present:world_heat");
     String owner_doors = String("present:doors");
     String doors[30];
+    // The org0 skin bone-callback's DEATH register (catalog ordinal 6, the
+    // corpse fade) the organic rows publish from PF_DEATH_CTRL.
+    String owner_death = String("present:death");
+    String death;
     CtrlNames() {
         for (int i = 0; i < 30; ++i)
             doors[i] = opennova::threedi::threedi_ctrl_register_name(
                     opennova::threedi::THREEDI_CTRL_DOOR_00 + i);
+        death = opennova::threedi::threedi_ctrl_register_name(
+                opennova::threedi::THREEDI_CTRL_DEATH);
     }
 };
 
@@ -1014,6 +1022,7 @@ void EntityPresenter::release_part_anim_outputs() {
 		// this writer owns instead of probing all 30 names.
 		model->clear_ctrl_overrides_owned(names().owner_doors);
         model->clear_ctrl_overrides_owned("present:destruction");
+		model->clear_ctrl_overrides_owned(names().owner_death);
 		model->end_ctrl_update();
 	}
 }
@@ -1296,11 +1305,27 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 					was_published(CTRL_PUBLISH_HEAT);
             const bool door_work = door_count != 0 || cold ||
                     was_published(CTRL_PUBLISH_DOORS);
+			// The org0 skin bone-callback's DEATH register (the corpse fade)
+			// rides the organic row's PF_DEATH_CTRL word, which the engine
+			// fills with world::death_ctrl_register_value over the
+			// authoritative dead flag and corpse timer. 0xFFFF is retail's
+			// LIVE value, not a clear, so the writer publishes it on every
+			// submission with no edge state; the model-side setter makes an
+			// unchanged owner/value a no-op. Only organic rows carry the
+			// register (the callback is the organic skin's).
+			const bool death_work = row.entity_kind ==
+					static_cast<int32_t>(opennova::world::EntityKind::Organic);
 			const bool any_work = set_part1 || set_part2 ||
 					clear_part1 || clear_part2 || emplaced_work ||
-					vehicle_work || zone_work || heat_work || door_work;
+					vehicle_work || zone_work || heat_work || door_work ||
+					death_work;
 			if (any_work) {
 				model->begin_ctrl_update();
+			}
+			if (death_work) {
+				model->set_ctrl_override(names().owner_death, names().death,
+						field_i(p, base, opennova::world::PF_DEATH_CTRL));
+				++stat_control_dispatches_;
 			}
 			// A falling/cold EWEAP release precedes generic phase replay. This
 			// preserves the master compatibility surface for a third-party node

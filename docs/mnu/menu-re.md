@@ -988,10 +988,22 @@ conflicting rows yellow (`sub_640110(row, …, -256)`). The device radios call
 `REMAP_Keyboard`/`REMAP_Mouse`/`REMAP_Joystick`, repopulates).
 
 **Control column format** `[orig: KeyBinding_FormatBindingString @ 0x559a10]`: up to two key slots,
-each prefixed `Ctrl-` / `Shift-` when its modifier word is `17` / `16`, joined by the localized
-"OR" (` XXor ` fallback -> ` or `). Key names decode through `KeyBinding_GetKeyNameAndDisplayName
-@ 0x494c60`, a Windows-VK switch returning a display name ("Mouse 1", "Up", "Space", "F1", "[", or
-the printable char). Mouse buttons use special codes (`1` left, `2` right, `16` middle, `1024`
+each prefixed `Ctrl-` / `Shift-` when its modifier word is `17` / `16` (`@0x559af1` / `@0x559b41`),
+the slot with index > 0 led by the localized "OR" separator (`@0x559a8f`; a keyed secondary behind an
+empty primary still leads with it). Every prefix, the separator and each key name is a
+`KeyHelp_GetStringWithFallback("Keys", key, fallback) @ 0x51ed40` lookup over keyhelp.bin with the
+binary's literal as the fallback: keys `Ctrl-` / `Shift-` / `OR` (fallbacks `XXCtrl - ` / `XXShift - ` /
+` XXor `), which the shipped table resolves to `Ctrl-` / `Shift-` / ` or `. Key names decode through
+`KeyBinding_GetKeyNameAndDisplayName @ 0x494c60`, a Windows-VK switch writing a binding name (the
+`Keys` lookup key: `LBUTTON`, `F1`, `PRINT`, `HANGUL`, ...) and an `XX`-marked display fallback
+(`XXMouse 1`, `XXF1`, `XXPrint Screen`, ...); a printable VK is its own character in both, and every
+other VK is `"%s %d"` over the `KEY` label (shipped `Key`, so VK 0 = `Key 0`, VK_OEM_102 = `Key 226`)
+`@0x496235..0x49629f`; the label appended is `lookup("Keys", bindingName, displayName) @0x559b61`.
+Port (2026-09-12): `controls::key_string` (`engine/runtime/controls/key_strings.h`, the process-wide
+table the shell installs from keyhelp.bin at the menu boot -- `main_game.gd` registers it as
+`Strings.TABLE_KEYHELP`, which runs `RtxtStringFile.install_key_strings`; `Strings.clear()` forgets it;
+GUT `controls_model_test.gd`; a miss returns the fallback with the `XX` marker stripped,
+the port's one deviation), `controls::key_binding_names` / `key_name`, `controls::format_binding`. Mouse buttons use special codes (`1` left, `2` right, `16` middle, `1024`
 wheel up, `2048` wheel down); joystick uses `JOYBUTTON%d`.
 
 Reimpl: **`engine/runtime/controls`** (Godot-agnostic) ports the catalog (`controls.cpp` `k_catalog` —
@@ -1861,7 +1873,8 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/controls.cpp`) + `menu_shell.gd::_fill_control_mapping` |
 | `UI_BuildKeyBindingLoadoutTable @ 0x559e50` (catalog `aAbsoluteTurnLe @ 0x8159cb`) | `engine/runtime/controls` `k_catalog` — `controls.cpp` |
 | `KeyBinding_BuildCategoryPages @ 0x4966c0` (Class id -> name) | `controls::action_class_name` |
-| `KeyBinding_GetKeyNameAndDisplayName @ 0x494c60` (VK -> display name) | `controls::key_name` |
+| `KeyBinding_GetKeyNameAndDisplayName @ 0x494c60` (VK -> binding name + display fallback) | `controls::key_binding_names` / `controls::key_name` |
+| `KeyHelp_GetStringWithFallback @ 0x51ed40` (the keyhelp.bin `Keys` lookup with the caller's fallback) | `controls::key_string` (`key_strings.h`) |
 | `KeyBinding_FormatBindingString @ 0x559a10` (`Ctrl-`/`Shift-`/`OR`) | `controls::format_binding` |
 | `UI_SelectControlsInputDevice @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `menu_shell.gd::_seed_control_mapping` |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` (header `type="id"` `@ 0x64344a`, SCROLLBAR delegate `@ 0x643b22`) + `CUITable_Render @ 0x6411d0` | `mnu::parse_table_*` + `MenuFrameCompiler::emit_table` — FONT "W" header height, separate top-level-MIN_ITEM_HEIGHT body rows/page, full-height authored-or-22px scrollbar rect, default-state art/thumb geometry |

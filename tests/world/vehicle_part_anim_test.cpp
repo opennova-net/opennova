@@ -337,10 +337,10 @@ void test_helo_family_decays_at_the_helo_rate() {
 
 } // namespace
 
-// A WATERCRAFT runs no rotor machine — its mover never calls either — so a
-// non-player-control boat draws NOTHING from the shared stream and its spin
-// state stays zero; only the wheel phase advances, once per tick, from the
-// forward command.
+// A physics-keyed WATERCRAFT runs no rotor machine — its full mover never
+// calls either — so a non-player-control boat draws NOTHING from the shared
+// stream and its spin state stays zero; only the wheel phase advances, once
+// per tick, from the forward command.
 void test_watercraft_runs_no_rotor_machine() {
 	Rig r;
 	VehicleTraits t = buggy_traits(false);
@@ -361,6 +361,71 @@ void test_watercraft_runs_no_rotor_machine() {
 	r.w.vehicles.tick_watercraft_motor(veh, t, nullptr);
 	CHECK(veh.veh.wheel_phase == (veh.veh.cmd_speed << 13),
 			"one authority tick advances the phase by one step");
+}
+
+// The SELECTOR-ZERO boat mover (a cbot row with no physics key, or an afloat
+// catv row without one: the shipped Drivable LCAC / Indo Landing Craft) runs
+// the GROUND-profile spin machine inside its PlayerControl block at the head
+// of the mover: a player-control hull seeds the full rate on its claimant with
+// no PRNG draw, spins up 186413/tick to the cap, decays 186413/tick after the
+// dismount, and never touches the wheel phase there (the mover's own
+// command-driven step does). The claimant start/stop sound edge sits in the
+// same block. [orig: Entity_ProcessAirVehiclePhysics @0x46FA00 gate @0x47004B,
+//  claimant edge @0x470055..0x4700EB, Entity_UpdatePartSpinAccumulator
+//  @0x4700F5; Entity_DispatchPhysics_cbot @0x48EFAC;
+//  Entity_DispatchPhysicsUpdate @0x48F035]
+void test_selector_zero_boat_runs_the_ground_machine() {
+	for (int form = 0; form < 2; ++form) {
+		Rig r;
+		VehicleTraits t = buggy_traits(true);
+		t.physics = 0;
+		t.water_speed = t.player_speed;
+		Entity &veh = r.veh();
+		if (form == 0) {
+			t.family = VehicleFamily::Watercraft; // cbot, no physics key
+		} else {
+			t.family = VehicleFamily::Ground; // catv, no physics key, afloat
+			t.amphibian = true;
+			veh.flags |= 0x8000u;
+		}
+		r.w.vehicles.traits.set(veh.item_id, t);
+		auto &brain = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+		brain.profile.type = 2; // d_lcac: `type GROUND`
+		const uint32_t prng0 = r.w.prng16_state;
+		r.tick(2, t);
+		CHECK(veh.veh.part_spin.rate == 0 && veh.veh.part_spin.speed == 0,
+				"unoccupied: the selector-zero boat seeds no rate");
+		r.mount();
+		CHECK(veh.primary_occupant.valid(), "the claimant latched");
+		r.tick(3, t);
+		CHECK(veh.veh.part_spin.rate == kRotorRateFull,
+				"occupied: the ground machine seeds the full rate on the boat");
+		CHECK(veh.veh.part_spin.speed == 3 * kRotorRateFull,
+				"the selector-zero boat spins up 186413/tick");
+		CHECK(part_register(veh.veh.part_spin.angle) > 0,
+				"the HELO_TAILROTOR register (the fan) turns");
+		CHECK(r.w.prng16_state == prng0,
+				"a player-control boat never draws the rotor roll");
+		CHECK(veh.veh.wheel_phase == 0,
+				"the block writes no wheel phase (the command is zero)");
+		CHECK(r.w.vehicles.detach(r.drv_h), "dismount");
+		r.tick(1, t);
+		CHECK(veh.veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayGround,
+				"unoccupied: the ground decay");
+		CHECK(veh.veh.part_spin.rate == 0, "the unoccupied tick clears the rate");
+	}
+	// The physics-keyed boat keeps no machine at all.
+	{
+		Rig r;
+		VehicleTraits t = buggy_traits(true);
+		t.family = VehicleFamily::Watercraft;
+		t.water_speed = t.player_speed;
+		r.w.vehicles.traits.set(r.veh().item_id, t);
+		r.mount();
+		for (int i = 0; i < 3; ++i) r.w.vehicles.tick_watercraft_motor(r.veh(), t, nullptr);
+		CHECK(r.veh().veh.part_spin.rate == 0 && r.veh().veh.part_spin.speed == 0,
+				"the full watercraft mover runs no rotor machine");
+	}
 }
 
 void test_suspension_registers_and_rotor_threshold_tick() {
@@ -761,6 +826,7 @@ int main() {
 	test_suspension_registers_and_rotor_threshold_tick();
 
 	test_watercraft_runs_no_rotor_machine();
+	test_selector_zero_boat_runs_the_ground_machine();
 	test_player_control_rotor_symmetry();
 	test_rolled_rate();
 	test_spawn_full();

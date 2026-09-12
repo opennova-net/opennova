@@ -82,11 +82,28 @@ int main() {
     // shared var store.
     w.script.vars.set_mission(5, 42);
     CHECK(w.script.vars.get_mission(5) == 42);
+    w.script.vars.set_mission(256, 17); // the first compiler-declared slot (0xC6B640)
+    w.script.vars.set_mission(511, 18); // the last one
     w.script.vars.set_global(3, -7);
     CHECK(w.script.vars.get_global(3) == -7);
-    w.script.vars.clear_mission();
+    // The per-load clear is V0..V255 only [orig: WacScript_InitAndLoad memset
+    // 0x400 @0x4f95ee]; the declared half and the globals survive it.
+    w.script.vars.clear_numbered_mission_vars();
     CHECK(w.script.vars.get_mission(5) == 0);
+    CHECK(w.script.vars.get_mission(256) == 17);
+    CHECK(w.script.vars.get_mission(511) == 18);
     CHECK(w.script.vars.get_global(3) == -7); // globals survive mission clear
+    // The carry into a rebuilt store copies ONLY the declared half.
+    {
+        ScriptVarStore fresh;
+        fresh.set_mission(5, 1);
+        fresh.set_global(3, 1);
+        fresh.carry_declared_from(w.script.vars);
+        CHECK(fresh.get_mission(256) == 17);
+        CHECK(fresh.get_mission(511) == 18);
+        CHECK(fresh.get_mission(5) == 1);
+        CHECK(fresh.get_global(3) == 1);
+    }
 
     // The music bank (M0..M15) + clear_all (the bank the snapshot bindings read).
     w.script.vars.set_music(2, 11);
@@ -407,6 +424,9 @@ int main() {
         World kw;
         kw.registry.configure_pool(0, 8);
         Entity a; a.net_id = 900; a.group_id = 9; a.alive = true; a.health = 150;
+        // A prior non-lethal hit's shooter on the victim's +0x178: the script
+        // death reports it (GameEvent_PlayerDeath reads the victim's word).
+        a.last_attacker = EntityHandle::make(0, 6);
         Entity b; b.net_id = 901; b.group_id = 9; b.alive = true; b.health = 150;
         const EntityHandle ha = kw.registry.spawn(0, a);
         kw.registry.spawn(0, b);
@@ -419,6 +439,8 @@ int main() {
             // from a shot one in the capture.
             CHECK(kw.round_sim.deaths[0].killer_handle == 0);
             CHECK(kw.round_sim.deaths[1].killer_handle == 0);
+            CHECK(kw.round_sim.deaths[0].killer == EntityHandle::make(0, 6));
+            CHECK(!kw.round_sim.deaths[1].killer.valid()); // never hit: unattributed
         }
         CHECK(kw.commands.group_dead(9));
 

@@ -90,7 +90,21 @@ void Simulation::set_local_player_third_person_selected(bool p_selected) {
 	// The preference re-resolves the mode at once [orig: the next frame's
 	// arbiter; see world/player_view.h].
 	opennova::world::player_view_set_third_person_selected(kernel_->local.view, p_selected);
+	// The BMS input-action word's view bits (world::ScriptState::input_action_bits,
+	// the Input_HandleActionBinding producers the cat-7 player triggers read):
+	// viewchase (402) |= 0x8000000, view1st (400) |= 0x4000000. The authority's
+	// own player only: the evaluator runs the host's chains and a joiner never
+	// opens the .bms. This seam cannot tell viewwithgun (401, |= 0x10000000) or
+	// the 412 toggle apart from the plain selection; they read as the chase /
+	// first-person selection they resolve to.
+	if (!is_joiner()) {
+		kernel_->world.script.input_action_bits |= p_selected ? 0x8000000u : 0x4000000u;
+	}
 	refresh_local_player_view_effects();
+}
+
+int Simulation::debug_input_action_bits() const {
+	return kernel_ ? static_cast<int>(kernel_->world.script.input_action_bits) : 0;
 }
 
 void Simulation::set_local_player_debug_third_person(bool p_enabled) {

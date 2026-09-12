@@ -2685,7 +2685,15 @@ void test_new_remote_player_death_keeps_the_entity_until_deploy() {
     // No C2S pose has arrived. The player must still use the player death
     // lifecycle, even with an expired NPC corpse timer and no SP watch.
     w.registry.get(handle)->deathtime_ticks = 0;
+    // The unstamped script kill reports the victim's +0x178 lastAttacker (a
+    // prior non-lethal hit's shooter) as its killer; the wire handle stays unset.
+    w.registry.get(handle)->last_attacker = EntityHandle::make(0, 3);
     CHECK(w.commands.kill_player(handle, {}));
+    CHECK(w.round_sim.deaths.size() == 1);
+    if (!w.round_sim.deaths.empty()) {
+        CHECK(w.round_sim.deaths.back().killer == EntityHandle::make(0, 3));
+        CHECK(w.round_sim.deaths.back().killer_handle == 0xFFFFu);
+    }
     run_ticks(w.ai, w, 1, 5);
     const Entity *corpse = w.registry.get(handle);
     CHECK(corpse != nullptr);

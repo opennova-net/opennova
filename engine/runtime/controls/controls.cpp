@@ -1,5 +1,6 @@
 #include <runtime/controls/controls.h>
 #include <runtime/controls/binding_set.h>
+#include <runtime/controls/key_strings.h>
 
 namespace opennova::controls {
 
@@ -157,113 +158,149 @@ bool is_player_visible(const ActionDef &action) {
   return (action.flags & 0x20u) == 0u && (action.flags & 0x800u) != 0u;
 }
 
-// Windows VK code -> display name. Ported from the engine's switch; the original
-// returns a binding name plus an "XX"-prefixed display name and we keep the
-// marker-stripped display form. [orig: KeyBinding_GetKeyNameAndDisplayName @ 0x494c60]
-std::string key_name(int vk) {
+// Windows VK code -> the (binding name, display fallback) pair. A structural
+// port of the engine's switch: every arm strcpy's the "Keys" lookup key and
+// the "XX"-marked display fallback [orig: KeyBinding_GetKeyNameAndDisplayName
+// @ 0x494c60 -- arms @0x494c8b..0x496233; the default arm @0x496235: a
+// printable VK (219 "[" and 221 "]" included) writes "%c" to both, anything
+// else sprintf's "%s %d" over KeyHelp_GetStringWithFallback("Keys", "KEY",
+// "KEY") (0x7C7150 = "KEY") @0x496274/@0x49629f].
+KeyNames key_binding_names(int vk) {
   switch (vk) {
-    case 0x01: return "Mouse 1";
-    case 0x02: return "Mouse 2";
-    case 0x03: return "Cancel";
-    case 0x04: return "Mouse 3";
-    case 0x08: return "Backspace";
-    case 0x09: return "Tab";
-    case 0x0C: return "Clear";
-    case 0x0D: return "Enter";
-    case 0x10: return "Shift";
-    case 0x11: return "Ctrl";
-    case 0x12: return "Alt";
-    case 0x13: return "Pause";
-    case 0x14: return "Caps Lock";
-    case 0x1B: return "Esc";
-    case 0x20: return "Space";
-    case 0x21: return "Page Up";
-    case 0x22: return "Page Down";
-    case 0x23: return "End";
-    case 0x24: return "Home";
-    case 0x25: return "Left";
-    case 0x26: return "Up";
-    case 0x27: return "Right";
-    case 0x28: return "Down";
-    case 0x29: return "Select";
-    case 0x2A: return "Print";
-    case 0x2C: return "Snapshot";
-    case 0x2D: return "Insert";
-    case 0x2E: return "Delete";
-    case 0x2F: return "Help";
-    case 0x5B: return "Lwin";
-    case 0x5C: return "Rwin";
-    case 0x5D: return "Apps";
-    case 0x6A: return "Numpad *";
-    case 0x6B: return "Numpad +";
-    case 0x6C: return "Separator";
-    case 0x6D: return "Numpad -";
-    case 0x6E: return "Numpad .";
-    case 0x6F: return "Numpad /";
-    case 0x90: return "Numlock";
-    case 0x91: return "Scroll Lock";
-    case 0xA0: return "Left Shift";
-    case 0xA1: return "Right Shift";
-    case 0xA2: return "Left Ctrl";
-    case 0xA3: return "Right Ctrl";
-    case 0xA4: return "Left Alt";
-    case 0xA5: return "Right Alt";
-    case 0xBA: return ";";
-    case 0xBB: return "=";
-    case 0xBC: return ",";
-    case 0xBD: return "-";
-    case 0xBE: return ".";
-    case 0xBF: return "/";
-    case 0xC0: return "`";
-    case 0xDB: return "[";
-    case 0xDC: return "\\";
-    case 0xDD: return "]";
-    case 0xDE: return "'";
-    case 0x10D: return "Numpad Enter";
+    case 0x01: return {"LBUTTON", "XXMouse 1"};
+    case 0x02: return {"RBUTTON", "XXMouse 2"};
+    case 0x03: return {"CANCEL", "XXCancel"};
+    case 0x04: return {"MBUTTON", "XXMouse 3"};
+    case 0x08: return {"BACK", "XXBackspace"};
+    case 0x09: return {"TAB", "XXTab"};
+    case 0x0C: return {"CLEAR", "XXClear"};
+    case 0x0D: return {"RETURN", "XXEnter"};
+    case 0x10: return {"SHIFT", "XXShift"};
+    case 0x11: return {"CONTROL", "XXCtrl"};
+    case 0x12: return {"MENU", "XXAlt"};
+    case 0x13: return {"PAUSE", "XXPause"};
+    case 0x14: return {"CAPITAL", "XXCaps Lock"};
+    case 0x15: return {"HANGUL", "XXHangul"};
+    case 0x17: return {"JUNJA", "XXJunja"};
+    case 0x18: return {"FINAL", "XXFinal"};
+    case 0x19: return {"HANJA", "XXHanja"};
+    case 0x1B: return {"ESCAPE", "XXEsc"};
+    case 0x1C: return {"CONVERT", "XXConvert"};
+    case 0x1D: return {"NONCONVERT", "XXNon Convert"};
+    case 0x1E: return {"ACCEPT", "XXAccept"};
+    case 0x1F: return {"MODECHANGE", "XXModechange"};
+    case 0x20: return {"SPACE", "XXSpace"};
+    case 0x21: return {"PRIOR", "XXPage Up"};
+    case 0x22: return {"NEXT", "XXPage Down"};
+    case 0x23: return {"END", "XXEnd"};
+    case 0x24: return {"HOME", "XXHome"};
+    case 0x25: return {"LEFT", "XXLeft"};
+    case 0x26: return {"UP", "XXUp"};
+    case 0x27: return {"RIGHT", "XXRight"};
+    case 0x28: return {"DOWN", "XXDown"};
+    case 0x29: return {"SELECT", "XXSelect"};
+    case 0x2A: return {"PRINT", "XXPrint Screen"};
+    case 0x2B: return {"EXECUTE", "XXExecute"};
+    case 0x2C: return {"SNAPSHOT", "XXSnapshot"};
+    case 0x2D: return {"INSERT", "XXInsert"};
+    case 0x2E: return {"DELETE", "XXDelete"};
+    case 0x2F: return {"HELP", "XXHelp"};
+    case 0x5B: return {"LWIN", "XXLwin"};
+    case 0x5C: return {"RWIN", "XXRwin"};
+    case 0x5D: return {"APPS", "XXApps"};
+    case 0x6A: return {"MULTIPLY", "XXNumpad *"};
+    case 0x6B: return {"ADD", "XXNumpad +"};
+    case 0x6C: return {"SEPARATOR", "XXSeparator"};
+    case 0x6D: return {"SUBTRACT", "XXNumpad -"};
+    case 0x6E: return {"DECIMAL", "XXNumpad ."};
+    case 0x6F: return {"DIVIDE", "XXNumpad /"};
+    case 0x90: return {"NUMLOCK", "XXNumlock"};
+    case 0x91: return {"SCROLL", "XXScroll Lock"};
+    case 0xA0: return {"LSHIFT", "XXLeft Shift"};
+    case 0xA1: return {"RSHIFT", "XXRight Shift"};
+    case 0xA2: return {"LCONTROL", "XXLeft Ctrl"};
+    case 0xA3: return {"RCONTROL", "XXRight Ctrl"};
+    case 0xA4: return {"LMENU", "XXLeft Alt"};
+    case 0xA5: return {"RMENU", "XXRight Alt"};
+    case 0xBA: return {";", "XX;"};
+    case 0xBB: return {"=", "XX="};
+    case 0xBC: return {",", "XX,"};
+    case 0xBD: return {"-", "XX-"};
+    case 0xBE: return {".", "XX."};
+    case 0xBF: return {"/", "XX/"};
+    case 0xC0: return {"`", "XX`"};
+    case 0xDC: return {"\\", "XX\\"};
+    case 0xDE: return {"'", "XX'"};
+    case 0xF6: return {"ATTN", "XXAttn"};
+    case 0xF7: return {"CRSEL", "XXCRSEL"};
+    case 0xF8: return {"EXSEL", "XXEXSEL"};
+    case 0xF9: return {"EREOF", "XXEREOF"};
+    case 0xFA: return {"PLAY", "XXPLAY"};
+    case 0xFB: return {"ZOOM", "XXZOOM"};
+    case 0xFC: return {"NONAME", "XXNONAME"};
+    case 0xFD: return {"PA1", "XXPA1"};
+    case 0xFE: return {"OEM_CLEAR", "XXOEM_CLEAR"};
+    case 0x10D: return {"PADENTER", "XXNumpad Enter"};
     default:
       break;
   }
   if (vk >= 0x60 && vk <= 0x69) {
-    return std::string("Numpad ") + static_cast<char>('0' + (vk - 0x60));
+    // "NUMPAD0".."NUMPAD9" / "XXNumpad 0".."XXNumpad 9" [orig: @0x495570..0x4957e5]
+    const char digit = static_cast<char>('0' + (vk - 0x60));
+    return {std::string("NUMPAD") + digit, std::string("XXNumpad ") + digit};
   }
   if (vk >= 0x70 && vk <= 0x87) {
-    return std::string("F") + std::to_string(vk - 0x6F);
+    // "F1".."F24" / "XXF1".."XXF24" [orig: @0x4959db..0x495d8c]
+    const std::string fn = std::string("F") + std::to_string(vk - 0x6F);
+    return {fn, "XX" + fn};
   }
-  if (vk >= 0x20 && vk <= 0x7E) {
-    // Printable letters/digits/punctuation render as the character itself.
-    return std::string(1, static_cast<char>(vk));
+  // The default arm [orig: @0x496235..0x49629f]: isprint (the C locale's
+  // 0x20..0x7E) plus the two bracket VKs write the character itself to BOTH
+  // names -- 219 "[" @0x4962b1, 221 "]" (word_7C18E4) @0x4962e9, else "%c"
+  // @0x49630e.
+  if ((vk >= 0x20 && vk <= 0x7E) || vk == 0xDB || vk == 0xDD) {
+    const char c = vk == 0xDB ? '[' : vk == 0xDD ? ']' : static_cast<char>(vk);
+    return {std::string(1, c), std::string(1, c)};
   }
-  if (vk == 0) {
-    return std::string();
-  }
-  return std::string("#") + std::to_string(vk);
+  // Everything else (VK 0 included): "<KEY label> <vk>" in both names, the
+  // label itself a "Keys" lookup with the raw "KEY" fallback [orig: @0x496269
+  // ..0x49629f; 0x7C7150 = "KEY"; the shipped table maps it to "Key"].
+  const std::string label = key_string("KEY", "KEY") + " " + std::to_string(vk);
+  return {label, label};
+}
+
+std::string key_name(int vk) {
+  // The label the formatters append: lookup("Keys", keyName, displayName)
+  // [orig: @0x496d61/@0x496f01/@0x559b61].
+  const KeyNames names = key_binding_names(vk);
+  return key_string(names.binding.c_str(), names.display.c_str());
 }
 
 std::string format_binding(int key, int key2, int modifier, int modifier2) {
-  // Per-slot modifier prefix: word 17 (VK_CONTROL) -> "Ctrl - ", 16
-  // (VK_SHIFT) -> "Shift - " (the "XXCtrl - "/"XXShift - " fallbacks,
-  // marker-stripped like the " XXor " separator)
-  // [orig: KeyBinding_FormatBindingString @ 0x559a10].
-  auto prefix = [](int mod) -> std::string {
-    if (mod == 17) {
-      return "Ctrl - ";
-    }
-    if (mod == 16) {
-      return "Shift - ";
-    }
-    return "";
-  };
+  // [orig: KeyBinding_FormatBindingString @ 0x559a10]: the two-slot loop
+  // @0x559a40..0x559b9e -- a keyed slot with a nonzero SLOT INDEX first
+  // appends the "OR" separator (" XXor " fallback) @0x559a8f (so an empty
+  // primary behind a keyed secondary still leads with the separator, as
+  // written), then "Ctrl-" ("XXCtrl - ") for modifier word 17 @0x559af1,
+  // "Shift-" ("XXShift - ") for 16 @0x559b41, then the localized key name
+  // @0x559b61.
+  const int keys[2] = {key, key2};
+  const int mods[2] = {modifier, modifier2};
   std::string out;
-  if (key != 0) {
-    out = prefix(modifier) + key_name(key);
-  }
-  if (key2 != 0) {
-    // Slots joined by the engine's " or " separator (the " XXor " fallback,
-    // marker-stripped). [orig: KeyBinding_FormatBindingString @ 0x559a10]
-    if (!out.empty()) {
-      out += " or ";
+  for (int slot = 0; slot < 2; ++slot) {
+    if (keys[slot] == 0) {
+      continue;
     }
-    out += prefix(modifier2) + key_name(key2);
+    if (slot > 0) {
+      out += key_string("OR", " XXor ");
+    }
+    if (mods[slot] == 17) {
+      out += key_string("Ctrl-", "XXCtrl - ");
+    }
+    if (mods[slot] == 16) {
+      out += key_string("Shift-", "XXShift - ");
+    }
+    out += key_name(keys[slot]);
   }
   return out;
 }

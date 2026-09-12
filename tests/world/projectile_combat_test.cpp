@@ -7,7 +7,11 @@
 
 #include <base/crt/crt_rng.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/system.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -746,7 +750,15 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     CHECK(target->armor_kz == before.armor_kz);
     CHECK(target->flags == before.flags);
     CHECK(target->last_attacker == before.last_attacker);
-    CHECK(target->death_anim_state == before.death_anim_state);
+    // The person class callback still fires on the non-authority peer's own
+    // body (the call follows the authority-gated subtraction, with the forced
+    // zero damage) and its event-1 leg stages the bone/quadrant bullet death
+    // in +0x2C0: the organic stand-in is synthetic torso 1 and the +X round on
+    // a heading-0 body is quadrant 3. Presentation, not a gameplay consequence.
+    // [orig: Projectile_ProcessDamageOnTarget @0x4e820e;
+    //  Entity_HandleDamageAndTriggerZones @0x4077eb select]
+    CHECK(target->death_anim_state ==
+          compute_death_anim_state(1, 3, death_cause::kBullet));
     CHECK(!r.world.script.relations.group_group(
         TriggerRelations::kShot, shooter->group_id, target->group_id));
     CHECK(!r.world.script.relations.single_group(
@@ -2293,6 +2305,357 @@ void test_item_callbacks_receive_geometric_section_on_both_peers() {
         }
     }
 }
+
+// The clips a player body's org2 anim path asks for while these rigs tick it:
+// the idle pair plus the whole death family.
+struct DeathClipSource final : IRootMotionSource {
+    bool has_clip(int, int state_id) const override {
+        return state_id == anim_state::kIdle || state_id == anim_state::kIdle2 ||
+               (state_id >= anim_state::kDeathFire &&
+                state_id <= anim_state::kDeathBulletBase + 59);
+    }
+    int32_t clip_length_ticks(int, int, int) const override { return -1; }
+    bool advance(int, int state_id, int32_t &phase, RootMotionFrame &out) override {
+        if (!has_clip(0, state_id)) return false;
+        ++phase;
+        out = RootMotionFrame{};
+        return true;
+    }
+};
+
+// A remote-peer PLAYER body the authority animates (so the org2 think cadence
+// runs over it) behind a posed 14-section collision model: section 13 is the
+// x3 critical head zone, section 0 the x1.25 body zone; `pose` puts exactly one
+// of them on the +X ray.
+struct PlayerVictimRig : HeapWorldFixture {
+    static constexpr int kSectionCount = 14;
+    CollisionWorld collision;
+    DeathClipSource clips;
+    EntityHandle shooter;
+    EntityHandle victim;
+    uint32_t tick = 0;
+
+    PlayerVictimRig() {
+        world.registry.configure_pool(0, 8);
+        world.tables.player.has_item_def = true;
+        world.tables.player.item_type = 3;
+        world.tables.player.item_hp = 5000;
+        world.ai.is_authority = true;
+        world.ai.root_motion = &clips;
+
+        Entity s;
+        s.kind = EntityKind::Organic;
+        s.item_type = 3;
+        s.health = 100;
+        shooter = world.registry.spawn(0, s);
+
+        PlayerSpawn spawn;
+        spawn.position = {5.0f, 0.0f, 0.0f};
+        spawn.net_id = 0xFFF1;
+        spawn.yaw = 90; // engine heading 0: the +X round arrives from behind
+        victim = spawn_remote_player(world, spawn);
+        CHECK(victim.valid());
+        AiEntity *body = world.ai.for_handle(victim);
+        CHECK(body != nullptr);
+        if (body != nullptr) body->net_is_remote_peer = true;
+
+        AmmoTableEntry ammo;
+        ammo.name = "ZONE";
+        ammo.valid = true;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = 20;
+        ammo.weight_in_grains = 875;
+        world.tables.ammo.entries.push_back(ammo);
+
+        CollisionModel model;
+        model.sections.resize(kSectionCount);
+        for (CollisionSection &section : model.sections) {
+            section.authored_bounds = true;
+            section.min_x = section.min_y = section.min_z = -0x10000;
+            section.max_x = section.max_y = section.max_z = 0x10000;
+            section.radius = 0x10000;
+        }
+        const int32_t model_id = collision.add_model(std::move(model));
+        collision.assign_entity(victim, model_id);
+        world.collision = &collision;
+        pose(13);
+    }
+
+    Entity *victim_entity() { return world.registry.get(victim); }
+    AiEntity *victim_body() { return world.ai.for_handle(victim); }
+
+    void pose(int on_ray_section) {
+        std::vector<CollisionMatrix> matrices;
+        matrices.reserve(kSectionCount);
+        for (int section = 0; section < kSectionCount; ++section) {
+            const int32_t center[3] = {
+                5 * 65536,
+                section == on_ray_section ? 0 : (20 + section) * 65536,
+                58982,
+            };
+            matrices.push_back(collision_matrix_from_heading(0, center));
+        }
+        CHECK(collision.publish_entity_section_matrices(victim, std::move(matrices)));
+        collision.build_tick_tables(world);
+    }
+
+    void set_health(int32_t health) {
+        victim_entity()->health = health;
+        if (AiEntity *body = victim_body()) body->health = static_cast<int16_t>(health);
+    }
+
+    void fire_and_tick() {
+        RoundSpawnParams params;
+        params.owner = shooter;
+        params.shooter_handle = shooter.packed;
+        params.origin = {0.0f, 0.0f, 0.9f};
+        params.ammo_index = 0;
+        CHECK(world.round_sim.spawn(world, params) >= 0);
+        collision.build_tick_tables(world);
+        world.round_sim.tick(world, nullptr);
+    }
+
+    // The org2 body update over the victim only (no round flight).
+    void run_body_ticks(int count) {
+        TickContext ctx;
+        ctx.world = &world;
+        ctx.is_authority = true;
+        for (int i = 0; i < count; ++i) {
+            ctx.logic_tick = ++tick;
+            world.ai.tick(world, ctx);
+        }
+    }
+};
+
+// The kill-cause bits live on the ENTITY (retail +44 bits 8..11), latched at
+// hit time and read at the death edge: a non-lethal head hit marks the next
+// kill critical until the plyr callback's 64-tick think clears it, and every
+// hit re-arms that window. [orig: Weapon_CalcImpactDamage @0x4ec9c6 latch;
+// Entity_UpdateInfantryPlayerBody @0x4b4bc9..0x4b4be9 cadence;
+// Entity_HandleDamageAndTriggerZones @0x407b4d..0x407b4f clear, @0x407b5e /
+// @0x407c71 re-arm; GameEvent_PlayerDeath @0x5171d8 consumer]
+void test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence() {
+    {
+        // A non-lethal head hit latches 0x800; a limb kill 30 ticks later
+        // reports critical.
+        auto r = std::make_unique<PlayerVictimRig>();
+        r->fire_and_tick();
+        Entity *v = r->victim_entity();
+        CHECK(v->health == 5000 - 1860);
+        CHECK(r->world.round_sim.deaths.empty());
+        CHECK((v->cause_flags & 0x800u) != 0);
+        CHECK(v->spawn_phase == 64);
+        r->run_body_ticks(30);
+        CHECK(v->spawn_phase == 34);
+        CHECK((v->cause_flags & 0x800u) != 0);
+        r->pose(0);
+        r->set_health(100);
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.deaths.size() == 1);
+        CHECK(v->health == 0);
+        if (r->world.round_sim.deaths.size() == 1)
+            CHECK((r->world.round_sim.deaths[0].event_flags & 0x800u) != 0);
+    }
+    {
+        // 65 body ticks with no further hit clear the latch: the same kill is
+        // a standard one. The 64th tick brings the counter to 0; the 65th
+        // fires the think.
+        auto r = std::make_unique<PlayerVictimRig>();
+        r->fire_and_tick();
+        Entity *v = r->victim_entity();
+        r->run_body_ticks(64);
+        CHECK(v->spawn_phase == 0);
+        CHECK((v->cause_flags & 0x800u) != 0);
+        r->run_body_ticks(1);
+        CHECK(v->spawn_phase == 63);
+        CHECK((v->cause_flags & 0x800u) == 0);
+        r->pose(0);
+        r->set_health(100);
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.deaths.size() == 1);
+        if (r->world.round_sim.deaths.size() == 1)
+            CHECK(r->world.round_sim.deaths[0].event_flags == 0);
+    }
+    {
+        // A non-critical hit at tick 60 re-arms the window, so a kill at tick
+        // 100 still reports the head hit from tick 0.
+        auto r = std::make_unique<PlayerVictimRig>();
+        r->fire_and_tick();
+        Entity *v = r->victim_entity();
+        r->run_body_ticks(60);
+        CHECK(v->spawn_phase == 4);
+        r->pose(0);
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.deaths.empty());
+        CHECK(v->spawn_phase == 64);
+        CHECK((v->cause_flags & 0x800u) != 0);
+        r->run_body_ticks(40);
+        CHECK(v->spawn_phase == 24);
+        r->set_health(100);
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.deaths.size() == 1);
+        if (r->world.round_sim.deaths.size() == 1)
+            CHECK((r->world.round_sim.deaths[0].event_flags & 0x800u) != 0);
+    }
+    {
+        // OneShotKill returns before the zone branch: no latch even on the
+        // head. Its flat 2000 [orig: Weapon_CalcImpactDamage @0x4ec942] kills
+        // a stock-HP player; the rig's 5000 HP exists only to survive the
+        // 1860 head hit of the blocks above, so bring the body back to a
+        // stock 100 first.
+        auto r = std::make_unique<PlayerVictimRig>();
+        r->world.rules.mp_session = true;
+        r->world.rules.one_shot_kill = true;
+        r->set_health(100);
+        r->fire_and_tick();
+        CHECK(r->world.round_sim.deaths.size() == 1);
+        if (r->world.round_sim.deaths.size() == 1)
+            CHECK(r->world.round_sim.deaths[0].event_flags == 0);
+        CHECK((r->victim_entity()->cause_flags & 0x800u) == 0);
+    }
+}
+
+// One round's second lethal player hit latches the same-projectile bit 0x100
+// on that victim (the +688 kill byte past 1); the first victim never carries
+// it. [orig: Projectile_ProcessDamageOnTarget @0x4e8159..0x4e816b]
+void test_same_projectile_second_player_kill_latches_0x100() {
+    HeapWorldFixture fixture;
+    World &world = fixture.world;
+    world.registry.configure_pool(0, 8);
+    Entity s;
+    s.kind = EntityKind::Organic;
+    s.item_type = 3;
+    s.health = 100;
+    const EntityHandle shooter = world.registry.spawn(0, s);
+    auto spawn_player_victim = [&](float x) {
+        Entity t;
+        t.kind = EntityKind::Organic;
+        t.has_item_def = true;
+        t.item_type = 3;
+        t.position = {x, 0.0f, 0.0f};
+        t.health = 10;
+        t.flags = kEntityFlagPlayer;
+        t.engine_flags = kEntityFlagPlayer;
+        return world.registry.spawn(0, t);
+    };
+    const EntityHandle first = spawn_player_victim(5.0f);
+    const EntityHandle second = spawn_player_victim(6.0f);
+
+    AmmoTableEntry ammo;
+    ammo.name = "ZONE";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    ammo.weight_in_grains = 875;
+    world.tables.ammo.entries.push_back(ammo);
+
+    LiveRound round;
+    round.active = true;
+    round.owner = shooter;
+    round.shooter_handle = shooter.packed;
+    round.ammo_index = 0;
+    round.vel = {10.0f, 0.0f, 0.0f};
+    auto hit_person = [&](EntityHandle h) {
+        ProjectileHit hit;
+        hit.hit_class = ProjectileHitClass::Person;
+        hit.geometry_entity = h;
+        hit.section_index = 1;
+        hit.bone_index = 1;
+        hit.hit_zone = 1;
+        FixedVec3 velocity{10 * 65536, 0, 0};
+        world.round_sim.process_damage_hit(world, round, hit, velocity);
+    };
+    hit_person(first);
+    hit_person(second);
+    CHECK(round.player_kills == 2);
+    CHECK(world.round_sim.deaths.size() == 2);
+    CHECK(world.registry.get(first)->health == 0);
+    CHECK(world.registry.get(second)->health == 0);
+    CHECK((world.registry.get(first)->cause_flags & 0x100u) == 0);
+    CHECK((world.registry.get(second)->cause_flags & 0x100u) != 0);
+    if (world.round_sim.deaths.size() == 2) {
+        CHECK((world.round_sim.deaths[0].event_flags & 0x100u) == 0);
+        CHECK((world.round_sim.deaths[1].event_flags & 0x100u) != 0);
+    }
+}
+
+// On a non-authority in-session peer the person class callback still fires
+// (with Weapon_CalcImpactDamage's forced zero) on the peer's OWN body — the
+// only person a joiner resolves to a World entity: the hit stages the death
+// anim, tips the body (the FP camera roll's source), and stamps the attacker,
+// with no health, hit, death, or cause-bit consequence. [orig:
+// Weapon_CalcImpactDamage @0x4ec933; Projectile_ProcessDamageOnTarget
+// @0x4e81b1 (authority-gated subtraction) / @0x4e820e (callback)]
+void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequences() {
+    HeapWorldFixture fixture;
+    World &world = fixture.world;
+    world.registry.configure_pool(0, 8);
+    world.rules.mp_session = true;
+    world.rules.projectile_authority = false;
+    world.rules.logic_authority = false;
+    world.tables.player.has_item_def = true;
+    world.tables.player.item_type = 3;
+    world.tables.player.item_hp = 100;
+
+    Entity s;
+    s.kind = EntityKind::Organic;
+    s.item_type = 3;
+    s.health = 100;
+    const EntityHandle shooter = world.registry.spawn(0, s);
+
+    PlayerSpawn spawn;
+    spawn.position = {5.0f, 0.0f, 0.0f};
+    spawn.net_id = 0xFFF0;
+    spawn.yaw = 90;
+    const EntityHandle victim = spawn_player(world, spawn); // the joiner's own body
+    CHECK(victim.valid() && world.cached.local_player == victim);
+    AiEntity *body = world.ai.for_handle(victim);
+    CHECK(body != nullptr);
+
+    AmmoTableEntry ammo;
+    ammo.name = "ZONE";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    ammo.weight_in_grains = 875;
+    world.tables.ammo.entries.push_back(ammo);
+
+    CollisionWorld collision;
+    CollisionModel model;
+    model.sections.resize(4);
+    for (CollisionSection &section : model.sections) section.radius = -1;
+    CollisionSection &torso = model.sections[3];
+    torso.authored_bounds = true;
+    torso.min_x = torso.min_y = torso.min_z = -0x4000;
+    torso.max_x = torso.max_y = torso.max_z = 0x4000;
+    torso.radius = 0x4000;
+    const int32_t model_id = collision.add_model(std::move(model));
+    collision.assign_entity(victim, model_id);
+    const int32_t bone_at[3] = {5 * 65536, 0, 58982};
+    std::vector<CollisionMatrix> matrices(4, collision_matrix_from_heading(0, bone_at));
+    CHECK(collision.publish_entity_section_matrices(victim, std::move(matrices)));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    RoundSpawnParams params;
+    params.owner = shooter;
+    params.shooter_handle = shooter.packed;
+    params.origin = {0.0f, 0.0f, 0.9f};
+    params.ammo_index = 0;
+    CHECK(world.round_sim.spawn(world, params, RoundConsequenceMode::VisualOnly) >= 0);
+    world.round_sim.tick(world, nullptr);
+
+    Entity *v = world.registry.get(victim);
+    CHECK(v->health == 100);
+    CHECK(world.round_sim.hits.empty());
+    CHECK(world.round_sim.deaths.empty());
+    CHECK(v->cause_flags == 0);
+    CHECK(v->death_anim_state == compute_death_anim_state(3, 2, death_cause::kBullet));
+    CHECK(v->last_attacker == shooter);
+    if (body != nullptr) CHECK(body->roll == -0x05B05B00);
+    world.collision = nullptr;
+}
+
 int main() {
     test_item_callbacks_receive_geometric_section_on_both_peers();
     test_projectile_stamps_burn_before_death_dispatch();
@@ -2328,6 +2691,9 @@ int main() {
     test_consumed_hit_skips_post_sweep_forces();
     test_move_effect_water_release_reads_pre_move_z();
     test_move_effect_ballistic_leg_ignores_the_water_plane();
+    test_kill_cause_bits_latch_per_hit_and_clear_on_the_think_cadence();
+    test_same_projectile_second_player_kill_latches_0x100();
+    test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequences();
     if (failures == 0) std::printf("projectile_combat_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

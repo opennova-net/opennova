@@ -260,14 +260,25 @@ Every named schema value is listed below. Explicit cases are counted against the
 
 | Code | Name | Dispatch |
 | --- | --- | --- |
-| 18 | PlayerBerserk | OPEN: no explicit case |
-| 19 | PlayerFirstPerson | OPEN: no explicit case |
-| 20 | PlayerThirdPerson | OPEN: no explicit case |
-| 21 | PlayerCockpitView | OPEN: no explicit case |
-| 34 | PlayerDialogDone | OPEN: no explicit case |
-| 35 | PlayerDialogFinished | OPEN: no explicit case |
+| 18 | PlayerBerserk | Explicit case; local player's AiSlot behavior word (bms-event-runtime-re section 1.4) |
+| 19 | PlayerFirstPerson | Explicit case; input-bit mirror consume (bms-event-runtime-re section 1.4); the view-action producers are a shell hook |
+| 20 | PlayerThirdPerson | Explicit case; input-bit mirror consume; producers a shell hook |
+| 21 | PlayerCockpitView | Explicit case; input-bit mirror consume; producers a shell hook |
+| 22 | PlayerInputBit10 | Explicit case; the mask has no setter in the image (false in retail too) |
+| 23 | PlayerInputBit11 | Explicit case; no setter in the image |
+| 24 | PlayerInputBit12 | Explicit case; no setter in the image |
+| 25 | PlayerInputBit13 | Explicit case; no setter in the image |
+| 26 | PlayerLookByteBit0Clear | Explicit case reading false; byte_27234FC bit-0 writer unwitnessed (D-EVT-3 residue) |
+| 27 | PlayerLookByteBit0Set | Explicit case reading false; byte_27234FC bit-0 writer unwitnessed (D-EVT-3 residue) |
+| 28 | PlayerInputBit29 | Explicit case; no setter in the image |
+| 29 | PlayerInputBit14 | Explicit case; no setter in the image |
+| 30 | PlayerInputBit15 | Explicit case; no setter in the image |
+| 32 | PlayerInputBitIndex | Explicit case; `1 << p1` through the mirror consume |
+| 33 | PlayerInputBitIndexPlus15 | Explicit case; `1 << (low byte of p1 + 15)` through the mirror consume |
+| 34 | PlayerDialogDone | Explicit case over `ScriptDialogRegistry`; the dialog playback producer is a shell hook |
+| 35 | PlayerDialogFinished | Explicit case over `ScriptDialogRegistry`; producer a shell hook |
 | 36 | PlayerAwol | Explicit case; verify consumer |
-| 37 | PlayerSatchel | OPEN: no explicit case |
+| 37 | PlayerSatchel | Explicit case over the placed satchels and the area bounds (event_runtime ctest) |
 | 38 | PlayerAttachedToSsn | Explicit case; verify consumer |
 | 39 | PlayerOnSsn | Explicit case; verify consumer |
 | 40 | PlayerDrivingSsn | Explicit case; verify consumer |
@@ -305,6 +316,7 @@ Every named schema value is listed below. Explicit cases are counted against the
 | 25 | SingleChangeGroup | Explicit case; verify consumer |
 | 26 | SingleTeleportAction | Explicit case; verify consumer |
 | 27 | ParticleEffectAction | Typed marker-name/position consumer; D-PTL-26 tracks shared entity-slot integration |
+| 28 | SpecialSubType | Explicit case: sub 38 clears the input-action word; subs 37/39 fall to the unported marker (bms-event-runtime-re section 7.5) |
 | 30 | GroupOpenDoorAction | Door pool owner (DoorSystem); world-wac-ai-re section 33.14 |
 | 31 | GroupCloseDoorAction | Door pool owner (DoorSystem); world-wac-ai-re section 33.14 |
 | 32 | GroupResetHasVisited | Explicit case; verify consumer |

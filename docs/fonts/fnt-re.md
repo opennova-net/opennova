@@ -45,6 +45,20 @@ Each page becomes a GPU texture named `GFONT<this>:<NN>` (`GTexture_FindOrCreate
 - `CGameFont_DrawText @ 0x6752c0` (the F2 `EngineTextPreview` cites it) draws glyphs
   from the pages using the glyph UV rects; the half-bright right-aligned HUD path is
   `HUD_DrawTextRightAligned_HalfBright @ 0x580850`.
+- `CGameFont_GetCharExtent @ 0x674dc0` (witnessed 2026-09-12): the single-byte extent
+  the chat word-wrap walks with (`HUD_WordWrapText @ 0x580980`, `charSize[0]`
+  `@ 0x5809db`, plus 1 per byte `@ 0x5809e4`): `out[0] = floor(((u1 - u0) * 256
+  [flt_7D1D70] + glyph_spacing [this+356] - 1 [flt_7C3280]) * (800 / design_width)
+  [this+4844] + 0.5 [flt_7C3B94])` `@ 0x674de4..0x674e25`, the `(glyph_spacing - 1)`
+  pad INCLUDED (the measurer strips one trailing pad from its final width, this does
+  not); `out[1] = (space.v1 - space.v0) * (800 / design_width) * 256`
+  `@ 0x674e2c..0x674e49`. No scale argument. A tab (`ch == 9`) returns the font's
+  **tab width `this+0x168`** when nonzero, else measures the SPACE glyph `@ 0x674dd8`;
+  any other byte below 0x20 measures 0 and returns -1 `@ 0x674e55`. `this+0x168` is
+  a runtime field (no `.fnt` header word feeds it); our `GameFontState.tab_width`
+  models the same stop for the measurer/drawer, and `GameFont::char_width` takes it
+  as an argument. Port: `GameFont::char_width` (`tests/hud/hud_frame_compiler_test.cpp`
+  `test_char_extent` / `test_chat_wrap_slots`).
 
 ## D-FNT divergence catalog
 

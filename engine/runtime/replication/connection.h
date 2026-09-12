@@ -148,6 +148,24 @@ struct Connection {
 	uint32_t spawn_target_hold_seconds = 0; // playerSlot+364
 	bool respawn_hold_armed = false;
 
+	// The armory-reuse cooldown (whole seconds) and the pre-round loadout latch.
+	// A nonzero-class C2S 0x2F is accepted only while the cooldown has expired
+	// or the pre-round timer runs; an accept re-arms it from the host's
+	// `armory_reuse_time` unless the latch is set, and clears the latch. Join and
+	// every deploy zero the cooldown and set the latch iff pre-round; the 1 Hz
+	// player maintenance decrements it.
+	// [orig: playerSlot+356 (slot[89]) — seed @0x515ba6, gate @0x5158d0, zero
+	//  @0x51a752/@0x517900, decrement @0x51e00b..0x51e022; playerSlot+89912 bit 1 —
+	//  set @0x51a6e2/@0x517812, test @0x515b96, clear @0x515bb3]
+	int32_t armory_reuse_seconds = 0;
+	bool preround_loadout_latch = false;
+
+	// Consecutive periodic seconds this player has carried a 4091/4093/4095 flag
+	// in CTF / FlagBall / Flag Me; at the host's `flag_reset_seconds` the carry is
+	// broken and the carrier killed. [orig: playerSlot+89872 (slot[22468]) in
+	//  Server_CheckPlayerViolations @0x51ac5a..0x51ac77]
+	uint32_t flag_carry_seconds = 0;
+
 	// Retail's downed/medic player-slot state. +368 is the whole-second revive
 	// window (armed to 120 for a revivable player death and decremented at 1 Hz).
 	// +372 is the inverse OPTIONS_AUTOMEDIC preference: zero on the retail wire
@@ -156,6 +174,14 @@ struct Connection {
 	// [orig: GameEvent_PlayerDeath @0x516DD0; NapiNPServerMsg_AutoMedicPreference
 	// @0x501BE0; NetPacket_SerializePlayerSync0x46 @0x505E80]
 	uint32_t downed_revive_seconds = 0; // playerSlot+368
+	// The team-mode 1 Hz 0x46 field-0x0008 resend walks every dead slot whose
+	// entity+44 cause bits 0x400 (knife) / 0x800 (headshot) are clear. Our Entity
+	// carries no cause word: the cause rides RoundDeath::event_flags, so the
+	// death transaction latches the predicate here and the deploy clears it.
+	// [orig: Weapon_CalcImpactDamage @0x4EC920 writes entity+44 |= 0x800
+	//  @0x4ec9c6/@0x4ec994; Server_TickUpdate reads `(entity+44 & 0xC00) == 0`
+	//  @0x51e333]
+	bool death_cause_revivable = false;
 	bool auto_medic_enabled = true;     // inverse playerSlot+372
 	// playerSlot+89856. No host producer yet: the C2S medic-request message
 	// (Server_BroadcastMedicRequest @0x515390) is unported (D-NET-108), so the

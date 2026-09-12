@@ -1266,6 +1266,10 @@ int Compiler::finalize(const char **err) {
     out.locals_size = 0x28;       /* match the JO fixture default */
     out.locals_frame_offset = MUS_DEFAULT_LOCALS_BASE;   /* `enter` frame base; JO/MDEdit witness */
     out.entry_section_index = 0;
+    /* The source language declares no MessageHandler; the restart frame's
+       +0x40 entry only ever comes from a parsed chunk. */
+    out.message_handler_offset = 0;
+    out.has_message_handler = 0;
 
     /* Populate intrinsic names with the canonical 11. */
     for (int i = 0; i < MUS_INTRINSIC_NAMES; ++i) {
@@ -1526,6 +1530,14 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
         ch.section_table_offset = (uint32_t)sec_tab_off_in_chunk;
         ch.section_count        = s->section_count;
         ch.entry_section_index  = s->entry_section_index;
+        /* +0x40 MessageHandler pointer (chunk-relative, like the section
+           entries) when the script carries one; +0x44 = the bytecode start,
+           the value both shipped chunks carry (gamemus 0x88, menumus 0x94).
+           [orig: AudioVM_FixupPointers @ 0x672495/@ 0x6724a1] */
+        ch.message_handler_offset = s->has_message_handler
+            ? (uint32_t)bc_off_in_chunk + s->message_handler_offset
+            : 0;
+        ch.main_entry_offset    = (uint32_t)bc_off_in_chunk;
         if (emit_debug) {
             ch.debug_info_offset    = (uint32_t)(debug_info_at - chunk_hdr_at);
             ch.debug_info_count     = 0;

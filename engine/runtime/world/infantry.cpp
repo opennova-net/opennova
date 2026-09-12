@@ -981,6 +981,24 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.ground_cache_valid = false;
 }
 
+// See the infantry.h contract. [orig: Entity_HandleDamageAndTriggerZones
+// @0x40772f return; @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm]
+void player_body_class_think(Entity &body) {
+    if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;
+    body.cause_flags &= ~0xF00u;
+    body.spawn_phase = 64;
+}
+
+// See the infantry.h contract. [orig: BoneCallback_org0_Skin @0x4e3669..0x4e368e]
+int32_t death_ctrl_register_value(bool dead, int32_t corpse_timer) {
+    if (dead && corpse_timer < 248) {
+        int32_t ramp = corpse_timer - 62;
+        if (ramp < 0) ramp = 0;
+        return (ramp << 16) / 186;
+    }
+    return 0xFFFF;
+}
+
 // ----------------------------------------------------------------------------
 // The per-tick motor. [orig: Entity_UpdateInfantryAI @0x4b9910]
 // ----------------------------------------------------------------------------
@@ -1063,12 +1081,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // local input still enters through LocalPlayer::toggle_mount.
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B424A..0x4B4272]
     if (!npc_body && tick_entity != nullptr && e.inf.adm_id > 0 &&
-        ((tick_entity->flags | tick_entity->engine_flags) & 0x201u) == 0x200u) {
+        ((tick_entity->flags | tick_entity->engine_flags) &
+         (kEntityFlagQueuedMount | kEntityFlagCarried)) == kEntityFlagQueuedMount) {
         if (!tick_entity->ground_target.valid())
             tick_entity->ground_target = tick_entity->mount_toggle_fallback;
-        world.vehicles.player_toggle_mount(e.handle);
-        tick_entity->flags &= ~0x200u;
-        tick_entity->engine_flags &= ~0x200u;
+        world.vehicles.player_toggle_mount(e.handle); // the latch is still set: the 0x200 arm
+        tick_entity->flags &= ~kEntityFlagQueuedMount;
+        tick_entity->engine_flags &= ~kEntityFlagQueuedMount;
     }
     // Org1 copies the primary state and its pending target into the secondary
     // channel at the motor head, before think or authority interpolation. The
@@ -1111,6 +1130,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 e.inf.stance == InfantryState::Stance::kCrouch ? 2 : 0;
         emit_stance_change_sound(world, e.handle.packed, e.pos, e.inf.stance_sound_state,
                 stance_bits, tick_flags, parent != nullptr && parent->has_item_def);
+    }
+
+    // The player body's think cadence, ahead of BOTH org2 death edges (the
+    // local edge below and remote_player_body_anim's): the plyr class callback
+    // fires as event 0 whenever entity+0x2AC is <= 0, and the counter decrements
+    // every tick, corpse included (the callback then returns on Flags&2, so a
+    // dead body neither clears its kill-cause bits nor re-arms). The callback
+    // also runs a trigger-zone relation pass (@0x407b64..0x407c5f) that is not
+    // ported here. [orig: Entity_UpdateInfantryPlayerBody @0x4b4bc9..0x4b4be9;
+    //  the edge gate follows @0x4b4bf1]
+    if (tick_entity != nullptr && !npc_body &&
+        (tick_flags & kEntityFlagPlayer) != 0) {
+        if (tick_entity->spawn_phase <= 0) player_body_class_think(*tick_entity);
+        --tick_entity->spawn_phase;
     }
 
     // A remote player's locomotion source is its C2S pose snapshot, so do not
@@ -1224,9 +1257,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 }
             }
             // Consume the kill's selection; none staged -> the generic death
-            // (cause 4 -> 174 death_pungi) [orig: @0x4b9cc9 fallback + the
-            // deathCallback(entity, 1, 0) dispatch; consumed +0x2C0 clears @0x4b9d38.
-            // The Flags&0x8000 drowning override (175) rides the unmodeled swim flags.]
+            // (cause 4 -> 174 death_pungi) AND the attacker slot (+0x178) is
+            // cleared, so a death nothing stamped (script/WAC) reports as
+            // unattributed while one that follows a non-lethal hit keeps that
+            // hit's clip and shooter [orig: @0x4b9cc9 fallback, @0x4b9ceb
+            // lastAttacker = 0, + the deathCallback(entity, 1, 0) dispatch;
+            // the player-body edge's twin @0x4b4c72..0x4b4c8d; consumed +0x2C0
+            // clears @0x4b9d38. The Flags&0x8000 drowning override (175) rides
+            // the unmodeled swim flags.]
+            if (ent != nullptr && ent->death_anim_state == 0)
+                ent->last_attacker = EntityHandle{};
             int death = (ent != nullptr && ent->death_anim_state != 0)
                                 ? ent->death_anim_state
                                 : compute_death_anim_state(0, 0, death_cause::kGeneric);

@@ -192,10 +192,15 @@ public:
 
 	// Frame the retail leave: a burst of identical 0x46 ClientGoodBye datagrams for the owner to
 	// ship before dropping the socket (the host's only non-timeout teardown trigger). Empty until
-	// ServerAuth assigns the session key, and idempotent — a second call returns nothing.
+	// ServerAuth assigns the session key, and idempotent — a second call returns nothing. The
+	// body carries the connection's LATCHED disconnect record: a host punt/goodbye already latched
+	// its record (echoed back), the silence reap its CLNTTMOUT record, a pool overflow MSGCRE;
+	// a user leave with nothing latched latches {2, 2, 0, 0, "I.C:CIDEMIS", 0, ""} first.
 	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 -> SendDisconnectPacket
-	// @0x61f2a0; send count clamped by cs_dir0.recv_max_per_tick (JO template: 4 —
-	// CNapiNetwork_Init @0x4ca4a0 stores @0x4cab60)]
+	// @0x61f2a0 (the record TLVs @0x61f3d0..0x61f4aa); send count clamped by
+	// cs_dir0.recv_max_per_tick (JO template: 4 — CNapiNetwork_Init @0x4ca4a0 stores @0x4cab60);
+	// the leave record Input_HandleActionBinding case 3 @0x49af38..0x49af42 ->
+	// CNapiNetwork_DisconnectActiveConnection @0x4C9140 @0x4c91ef..0x4c923e]
 	std::vector<std::vector<uint8_t>> disconnect();
 
 	// Build a C2S 0x0C player uplink datagram: 5-byte sub-header (handle = H, item_type_id = type,
@@ -423,11 +428,17 @@ public:
 		std::string jfs;
 	};
 	const JoinRejectRecord &last_join_reject() const { return last_join_reject_; }
-	// The first host connection-description record (the explicit close), raw.
+	// The connection's LATCHED disconnect record (retail's conn+0x654 NapiNPDisconnectEvent):
+	// the first host description punt / 0x86 goodbye received, the silence-reap CLNTTMOUT, a
+	// pool-overflow MSGCRE, or the user-leave CIDEMIS — whichever came first. disconnect()
+	// serializes it into the 0x46 burst.
 	bool has_disconnect_event() const { return disconnect_event_set_; }
 	const DisconnectEvent &last_disconnect_event() const {
 		return last_disconnect_event_;
 	}
+	// The cs_dir0 values this connection runs under: the template, overlaid by the host's 0x82 CS
+	// block at acceptance (CS field 0 = timeout_ms, field 11 = msg_out_max).
+	const SessionTimeoutConfig &session_timeouts() const { return conn_.timeouts; }
 
 	// Inbound-gap diagnostics: how many future S2C packets are queued behind an
 	// unresolved sequence gap, and how many reliable outbound records remain
@@ -511,10 +522,13 @@ public:
 	// terminal at ANY stage: the joiner moves to Phase::Error so nothing keeps pumping a
 	// closed session, and the FIRST such record wins, exactly like retail's
 	// store-if-not-valid event slot.
-	// (2) Nothing arrives for the JO connection template's cs_dir0/cs_dir1 `timeout_ms`
-	// (120000 ms) — the fallback for a host that vanishes without a goodbye. Reported
-	// only once the connection is in-match; the pre-match admission stall is the shell
-	// watchdog's.
+	// (2) Nothing arrives for the JO connection template's cs_dir0 `timeout_ms` (120000 ms,
+	// or the host's advertised override; < 0 disables the reap) — the fallback for a host
+	// that vanishes without a goodbye. Armed from the accepted 0x82 (retail state 5) onward
+	// with no gameplay gate: the join stages, the world stream, the deploy screen and the
+	// in-match phases all reap the same way; the shell's 60 s admission watchdogs merely
+	// run alongside it. (3) The host's 0x86 SERVER_GOODBYE burst (its reap, StopServer, a
+	// replacement, its answer to our own leave) is the third cause, handled like (1).
 	//
 	// Neither raises an in-world dialog in retail: the disconnect handler clears the
 	// session strings and maps the reason code onto g_mission_exit_reason / an error
@@ -642,6 +656,12 @@ private:
 	void on_server_auth(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_session(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_resend_list(const std::vector<uint8_t> &body, PollResult &out);
+	// S2C 0x86 SERVER_GOODBYE: the host's teardown burst — keyed by OUR CK, its record latched
+	// with the peer role 1, answered with the 0x46 burst, then terminal like a description punt.
+	void on_server_goodbye(const std::vector<uint8_t> &body, PollResult &out);
+	// Store `event` (with `role` as DS) as the connection's disconnect record only while none is
+	// latched — retail's store-if-!valid slot. The 128/32-byte record caps apply.
+	void latch_disconnect_event(const DisconnectEvent &event, uint32_t role);
 	void retain_mission_metadata_chunk(const FileTransferChunk &chunk);
 	// Accumulate the S2C 0x60 server-info transfer and, at its final chunk,
 	// walk the `[key\0][u32 len][bytes]` VarList for EXP_FANFARE.
@@ -680,15 +700,15 @@ private:
 	std::vector<uint8_t> handshake_retry_datagram_;
 	uint64_t handshake_last_send_ms_ = 0;
 	bool handshake_retry_clock_armed_ = false;
-	// Wall-clock stamp of the last VALID inbound datagram — retail's per-connection
-	// receive-activity clock, the one cs_dir0.timeout_ms is measured against.
-	// [orig: CNapiNetwork_Init @0x4ca4a0 timeout_ms = 120000 @0x4caa81/@0x4cab54]
+	// Wall-clock stamp of the last IN-ORDER admitted 0x83 (a zero-message keepalive counts;
+	// duplicates, futures, 0x84 resend lists and every other opcode do not) — retail's
+	// per-connection reap clock conn+0x5E8, initialized at state-5 entry (the accepted 0x82)
+	// and measured against cs_dir0.timeout_ms.
+	// [orig: CNapiNPConnection_OnStateChange @0x62612f (init); CNapiNPConnection_ParseMessages
+	//  @0x625d54 (stamp); Nwu_HandlePing @0x623c56 (the unmodeled 0x85 ping also stamps);
+	//  read by PumpStateMachine @0x6295b2]
 	uint64_t last_receive_ms_ = 0;
 	bool receive_clock_armed_ = false;
-	// Once gameplay has opened, retain that fact while death temporarily reuses
-	// Phase::Driving for the deployment-pick exchange. Initial admission also
-	// uses Driving, so phase alone cannot identify a live session for silence reap.
-	bool in_match_session_established_ = false;
 	bool silence_timeout_latched_ = false;
 	PostAuthStage post_auth_stage_ = PostAuthStage::Inactive;
 	uint64_t session_last_send_ms_ = 0;

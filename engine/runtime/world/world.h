@@ -369,12 +369,87 @@ struct SubgoalState {
     uint8_t lose_text_ids[9] = {};
 };
 
+// The mission-dialog registry the two PLYRDIALOG trigger subs read: the
+// registered-history list (every Dialog_Register appends the dialog; the
+// count saturates at 255, so slot 255 is overwritten and never scanned) and
+// the 16-slot active table (inserted at register, removed when the dialog's
+// last line finishes, both cleared by Dialog_ResetAll). Keyed by the dialog
+// index the "dlg%.3d" name encodes. The producer is the dialog playback
+// owner (the shell's mission audio): register on a resolved play, finished
+// when that dialog's last line ends, reset at round init.
+// [orig: Dialog_PlayByIndex @0x527ae0 -> Dialog_PlayByName @0x44d9f0 ->
+//  Dialog_Register @0x44d980 (history @0x44d98d..0x44d9a3, active table
+//  @0x44d9b1..0x44d9de); Dialog_UpdatePlayback @0x44e470 -> Dialog_FreeByName
+//  @0x44db40 (slot clear @0x44dc07..0x44dc18); Dialog_ResetAll @0x44dc90;
+//  readers Dialog_ExistsByIndex @0x44e170 and sub_44E220 @0x44e220]
+struct ScriptDialogRegistry {
+    static constexpr int kHistoryCapacity = 256; // [orig: dword_A89600]
+    static constexpr int kActiveCapacity = 16;   // [orig: dword_A8A248, 16-byte slots]
+
+    // Dialog_Register: the history append (count saturates at 255), then the
+    // first free active slot; a full active table skips the insert.
+    void register_started(int32_t index) {
+        history[history_count] = index;                                    // @0x44d98d
+        history_count = history_count == 255 ? 255 : history_count + 1;    // @0x44d99c/@0x44d9a3
+        if (active_count < kActiveCapacity) active[active_count++] = index; // @0x44d9b1..0x44d9de
+    }
+    // Dialog_FreeByName: drop the first active entry naming the dialog and
+    // compact the table [orig: @0x44dc07..0x44dc18 -> sub_44DAF0].
+    void finished(int32_t index) {
+        for (int i = 0; i < active_count; ++i) {
+            if (active[i] != index) continue;
+            for (int j = i + 1; j < active_count; ++j) active[j - 1] = active[j];
+            --active_count;
+            return;
+        }
+    }
+    // Dialog_ResetAll @0x44dc90: both tables.
+    void reset() {
+        history_count = 0;
+        active_count = 0;
+    }
+    // Dialog_ExistsByIndex @0x44e170: the active-table scan.
+    bool active_exists(int32_t index) const {
+        for (int i = 0; i < active_count; ++i)
+            if (active[i] == index) return true;
+        return false;
+    }
+    // sub_44E220's first scan @0x44e253..0x44e28e over [0, history_count).
+    bool registered(int32_t index) const {
+        for (int i = 0; i < history_count; ++i)
+            if (history[i] == index) return true;
+        return false;
+    }
+
+    std::array<int32_t, kHistoryCapacity> history{};
+    int history_count = 0; // [orig: dword_A895F8]
+    std::array<int32_t, kActiveCapacity> active{};
+    int active_count = 0;  // [orig: dword_A8A244]
+};
+
 // What the mission script (WAC + BMS) reads and writes beyond the entity rows.
 // vars, named values and input/voice state ride the snapshot; the rest is re-initialised by
 // the systems' on_load.
 struct ScriptState {
     const IScriptEventQuery *bms_events = nullptr; // non-owning, bound by BMS on_load
     ScriptVarStore vars;       // shared by WAC + BMS (the C6B240/C6BA40 seam)
+    // The player's input-action word and the BMS chain mirror [orig:
+    // g_InputActionBits @0xB3B738; g_EventInputBitsMirror @0xAE06F8]. The
+    // producers are the authority's local-player view actions: view1st (400)
+    // |= 0x4000000, viewwithgun (401) |= 0x10000000, viewchase (402)
+    // |= 0x8000000, the 412 toggle (third person set -> clear it and set
+    // cockpit; else clear cockpit and set third person), orbit yaw 405/406
+    // |= 0x10/0x40 (cleared every input frame, `&= ~0x50`), orbit pitch
+    // 407/408 |= 0x100/0x4, chase zoom 409/410 |= 0x80/0x200 [orig:
+    // Input_HandleActionBinding @0x49c073..0x49c253; Input_ProcessFrame
+    // @0x49d52b]; BMS action 28 sub 38 zeroes the word [orig: @0x4535c2].
+    // Bits 0x400/0x800/0x1000/0x2000/0x4000/0x8000/0x20000000 have no setter
+    // in the image. The BMS evaluator copies the word into the mirror at
+    // every chain entry, toggles matched bits in the mirror, and commits the
+    // mirror back to the word only when the event fires (event_runtime.cpp).
+    uint32_t input_action_bits = 0;
+    uint32_t input_action_mirror = 0;
+    ScriptDialogRegistry dialog;
     WacNamedValues wac_values; // writable named engine values (the @0x82EEF0 table)
     ScriptWeaponInput weapon_input;
     ScriptVoiceChannel voice;
@@ -540,6 +615,19 @@ struct SessionRules {
     // WeaponSlot_InitFromDef @0x53ef17 reads), so the bit is live only when a
     // host cfg carries it in mpattrib.
     bool auto_scope_zero = false;
+    // The host's allowSniperScopeZoom option as the SESSION sees it (byte_A821F0):
+    // the class-6 sniper lock on a Primary def's scope zoom (its floor becomes
+    // scope_max_mag) reads it at the zoom step and the mount clamp. Retail zeroes
+    // it outside a session, stamps the serving host's config value on the
+    // authority and, on a joiner, bit 16 of the S2C 0x08 flags dword (the bit
+    // server_initial_state.cpp emits from the option); offline it stays 0, which
+    // locks snipers at max. Hosts stamp it from GameConfig::allow_sniper_scope_zoom,
+    // joiners from their session-config bitflags.
+    // [orig: apply_session_settings_to_globals @0x552284 (the reset) / @0x5522b9
+    //  (the authority stamp); NapiNPClientMsg_HandleSessionConfig @0x428392;
+    //  readers Player_AdjustWeaponElevation @0x4dbe36, Player_MountWeaponSlot
+    //  @0x4dfaf9, WeaponSlot_InitFromDef @0x53ef17]
+    bool allow_sniper_scope_zoom = false;
     // Multiplayer blast damage to Building ItemDefs is disabled unless the
     // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.
     // [orig: g_destroy_buildings gate in Entity_ApplyWeaponDamage
@@ -791,6 +879,24 @@ public:
     // decrement @0x51DC20..0x51DC33; writer @0x4FF82D]
     uint32_t preround_delay_seconds = 0;
 
+    // Three more Server_TickUpdate globals, kept beside the pre-round timer
+    // because the mission owns their reset exactly as it owns that one; the
+    // host tick is their only reader/writer.
+    // The 744-tick priority-target sweep countdown: zero-armed, so the first
+    // authority tick of every mission sweeps entity Flags 0x4000 off pools 0/1
+    // and reloads 744. [orig: g_dirtyflag_clear_timer @0xC8D810; zeroed per
+    // mission by Nbstat_StartupInit @0x4fde30 <- Game_StartMission @0x526108;
+    // Server_TickUpdate @0x51d82b..0x51d840]
+    uint32_t priority_target_clear_countdown = 0;
+    // The 1 Hz round-robin S2C 0x2F flag-state refresh cursor: the pool-1 flag
+    // index the next periodic second re-broadcasts; a walk that sends nothing
+    // resets it. [orig: dword_24C10D4, read/written only by sub_517B20 @0x517B20]
+    uint32_t flag_refresh_cursor = 0;
+    // The team-mode 62-tick countdown behind the per-second S2C 0x46 field-0x0008
+    // (downed state) resend to a dead teammate's side. [orig: g_weapon_resend_timer
+    // @0xC947A0; Server_TickUpdate @0x51e2db..0x51e307]
+    uint32_t team_downed_resend_countdown = 0;
+
     void add_system(ISystem *sys);
     void load_systems();       // calls on_load for each
 
@@ -808,13 +914,15 @@ public:
     // the server win-condition check. [orig: Server_ProcessRoundEnd @0x5164f0]
     void process_round_end(int32_t winning_team);
 
-    // Group population counts for the trigger records. Initial: once per
-    // mission start, right after the pre pass, live copied from it and group 0
-    // forced to zero [orig: EntityPool_RecountByType @ 0x40e7e0, sole call
-    // Game_StartMission @ 0x525b8b]. Live: a full alive-member rescan, run on
-    // a 62-tick cadence inside the logic tick and after group reassignment
-    // [orig: EntityPool_RecountLiveByGroup @ 0x40e8d0; timer @ 0x51db6d,
-    // reload 0x3E @ 0x51db93, call @ 0x51dc02].
+    // Group population counts for the trigger records over pools 2, 0, 1.
+    // Initial: once per mission start, right after the pre pass -- EVERY used
+    // row tallied by its group id with no dead/health test, group 0 forced to
+    // zero, then live copied from it for every group [orig:
+    // EntityPool_RecountByType @ 0x40e7e0, sole call Game_StartMission
+    // @ 0x525b8b]. Live: a full rescan counting only rows that are not dead
+    // (Flags & 2) and hold health > 0, run on a 62-tick cadence inside the
+    // logic tick and after group reassignment [orig: EntityPool_RecountLiveByGroup
+    // @ 0x40e8d0; timer @ 0x51db6d, reload 0x3E @ 0x51db93, call @ 0x51dc02].
     void recount_group_initials();
     void recount_group_live();
 

@@ -15,6 +15,7 @@
 #include <runtime/simassets/fp_viewmodel_spec.h> // the FP viewmodel submit rule
 #include <runtime/replication/client_roster_tags.h> // the joiner's player walk of the tag pass
 #include <runtime/world/friendly_tags.h> // the D-HUD-20 tag gather
+#include <runtime/world/local_player_view.h> // the USE key's vehicle-loadout zone gates
 
 #include <algorithm>
 #include <cstdio>
@@ -144,6 +145,18 @@ bool Simulation::local_player_in_armory_zone() const {
 	// volume bit [orig: Input_HandleActionBinding_0 @0x4e0b3f, parentSlot == 0].
 	return e != nullptr && !e->mounted &&
 	       (e->flags & opennova::world::kEntityFlagArmoryZone) != 0;
+}
+
+bool Simulation::local_player_in_vehicle_loadout_zone() const {
+	// The useitem vehicle-loadout arm's gate (engine local_player_in_vehicle_loadout_zone:
+	// unmounted + the type-11 volume touch).
+	return kernel_ && opennova::world::local_player_in_vehicle_loadout_zone(kernel_->world);
+}
+
+bool Simulation::local_player_vehicle_zone_team_matches() const {
+	// The bay's team gate (engine local_player_vehicle_zone_team_matches: the
+	// ground entity's team byte 0 or equal to the player's).
+	return kernel_ && opennova::world::local_player_vehicle_zone_team_matches(kernel_->world);
 }
 
 bool Simulation::local_player_toggle_mount() {

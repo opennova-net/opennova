@@ -66,7 +66,7 @@ inline constexpr uint8_t PLAYER_SYNC = 0x46;                // §5.21 player syn
 inline constexpr uint8_t WEAPON_RELOAD = 0x49;              // §5.35 reload echo of c2s::WEAPON_RELOAD_REQUEST (retired misnomer: "camera_sync")
 inline constexpr uint8_t TARGET_ASSIGNMENT = 0x4C;          // squad/AI order list
 inline constexpr uint8_t SPAWN_SLOT_TIP = 0x4D;             // u8 slot tip
-inline constexpr uint8_t KILL_BY_SLOT = 0x4E;               // §5.26 batch kill (retired misnomer: "BatchSpawn")
+inline constexpr uint8_t KILL_BY_SLOT = 0x4E;               // §5.26 paginated join-window kill list [u16 resume][u16 slot...]; any slot -> c2s::LOADOUT_REQUEST continuation (retired misnomer: "BatchSpawn")
 inline constexpr uint8_t TEAM_ASSIGN = 0x50;                // identity pair latch + team write
 inline constexpr uint8_t TEAM_CHANGE_CONFIRM = 0x51;        // §5.59 team-change only, never on plain join (D-NET-148)
 inline constexpr uint8_t DEATH_CAMERA_TARGET = 0x52;        // victim-only [3xi32] killer/death position
@@ -116,7 +116,14 @@ inline constexpr uint8_t FORMATTED_GAME_TEXT = 0x32;
 inline constexpr uint8_t WAYPOINT_CREATE = 0x33;
 inline constexpr uint8_t PLAYER_ACTION = 0x35;
 inline constexpr uint8_t VEHICLE_SPAWN_NOTIFY = 0x36;
-inline constexpr uint8_t WEAPON_SLOT_ACTION = 0x37;
+// Door-row sync: [u16 handle][i16 state][u8 number] (5 B). The IDB names it a
+// "weapon slot action"; the rows it writes are the 0xA8A418 door records
+// (docs/world/world-wac-ai-re.md §33.14). Emitted by the authority on every
+// row completion and per selected section of a door command, and as the
+// requester-only reply to c2s::DOOR_SLOT_REQUEST.
+// [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250; senders
+//  Server_SendWeaponSlotActionPacket @0x50F9A0, the 0x1A reply @0x514c74]
+inline constexpr uint8_t DOOR_SLOT_ACTION = 0x37;
 inline constexpr uint8_t WEAPON_SWITCH = 0x38;
 // A medic has started reviving the recipient: the handler latches the local
 // entity's +0x1E0 "being revived" word, draws the default progress bar and
@@ -139,9 +146,19 @@ inline constexpr uint8_t MEMORY_CRC_CHALLENGE = 0x62;
 inline constexpr uint8_t POOF_TOGGLE = 0x63;
 inline constexpr uint8_t RESERVED_NOOP_65 = 0x65;
 inline constexpr uint8_t TELEPORT = 0x67;
-inline constexpr uint8_t SQUAD_LIST = 0x6A;
+// NovaWorld clan roster: [u8 action][u32 accountNetId] + (actions 1/3)
+// [cstr name <=64][cstr tag <=8]; action 2 removes. Action 3 is the reply to
+// the c2s::GAME_START_ACK roster walk and re-queues it with the node's id.
+// [orig: NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; serializer
+//  serialize_minimap_slot @0x5073B0]
+inline constexpr uint8_t CLAN_ROSTER = 0x6A;
 inline constexpr uint8_t TRACKED_PLAYER_VOICE = 0x6D;
-inline constexpr uint8_t WEAPON_SLOT_LIST = 0x70;
+// Per-vehicle-type spawn availability for the requester's team, from the
+// host's EntityLimit table: [u8 3] + rows [u16 typeId][u8 avail][u8 max] +
+// u16 0. Requester-only reply to c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutList @0x429A30;
+//  serialize_weapon_overlay_slots_0 @0x5105A0]
+inline constexpr uint8_t VEHICLE_SPAWN_AVAILABILITY = 0x70;
 inline constexpr uint8_t SQUAD_JOIN = 0x71;
 inline constexpr uint8_t TEAM_NAME = 0x72;
 inline constexpr uint8_t SQUAD_LEAVE = 0x73;
@@ -182,7 +199,7 @@ inline constexpr uint8_t WEAPON_RELOAD_REQUEST = 0x25;      // §5.58 mid-game r
                                                             // (same 4-B body). Direction asymmetry vs S2C 0x25 — §5.3.
 inline constexpr uint8_t VEHICLE_ATTACH_REQUEST = 0x26;     // word0 overwritten with requester's own handle
 inline constexpr uint8_t VEHICLE_DETACH_REQUEST = 0x27;     // u16 handle detach
-inline constexpr uint8_t LOADOUT_REQUEST = 0x28;            // §5.33 burst loadout request
+inline constexpr uint8_t LOADOUT_REQUEST = 0x28;            // §5.33 join-window kill-list request [u32 windowMin][u32 windowMax][u16 start] -> s2c::KILL_BY_SLOT page (0x0F burst + 0x4E continuation; IDB misnomer "weapon loadout")
 inline constexpr uint8_t TEAM_SPAWN_ACK = 0x29;             // §5.59 deploy/team ack (D-NET-148)
 inline constexpr uint8_t END_ROUND_STATS_REQUEST = 0x2B;    // §5.68 [u16 nextOffset] -> s2c::END_ROUND_STATS
 inline constexpr uint8_t RTT_CONSUMED = 0x2C;               // §5.34 rtt sample
@@ -197,7 +214,7 @@ inline constexpr uint8_t LOADED_MODEL_PAGE_REPLY = 0x3D;    // §5.34 frozen loa
 inline constexpr uint8_t PING = 0x47;                       // re-broadcast request -> s2c::SPECTATOR_FLAGS
 inline constexpr uint8_t CLIENT_ACK = 0x48;                 // 4 B read + discarded; server handler is an empty stub
 inline constexpr uint8_t CLIENT_QUALITY = 0x4C;             // §5.33 burst client quality
-inline constexpr uint8_t GAME_START_ACK = 0x4E;             // 4 B reply to s2c::GAME_START_SIGNAL
+inline constexpr uint8_t GAME_START_ACK = 0x4E;             // clan-roster walk [u32 afterNetId]: {0} kick on s2c::GAME_START_SIGNAL @0x42e1d9, {netId} continuation on s2c::CLAN_ROSTER action 3 @0x43266c (misnomer; the joiner caller still spells it)
 
 
 // Remaining retail dispatch rows; meanings and witnesses live in the catalog.
@@ -208,7 +225,12 @@ inline constexpr uint8_t OBJECT_SOUND = 0x14;
 inline constexpr uint8_t WEAPON_OVERLAY_ACTION = 0x17;
 inline constexpr uint8_t WEAPON_SPAWN = 0x18;
 inline constexpr uint8_t ENTITY_REMOVE_REQUEST = 0x19;
-inline constexpr uint8_t WEAPON_STATE_BROADCAST = 0x1A;
+// A non-authority's door-row request: the same [u16 handle][i16 state][u8 number]
+// body as s2c::DOOR_SLOT_ACTION, queued reliable per selected section of a
+// door command; the host answers s2c::DOOR_SLOT_ACTION to the requester only.
+// [orig: NetPacket_SendWeaponSwitch @0x42D0C0 -> NapiNPServerMsg_HandleVoteUpdate
+//  @0x514B20 (both IDB misnomers)]
+inline constexpr uint8_t DOOR_SLOT_REQUEST = 0x1A;
 inline constexpr uint8_t PLAYER_CLASS_SELECT = 0x1B;
 inline constexpr uint8_t BAN_PUNT_COMMAND = 0x24;
 inline constexpr uint8_t LOAD_SAVED_GAME_REQUEST = 0x30;
@@ -220,9 +242,13 @@ inline constexpr uint8_t RESERVED_NOOP_39 = 0x39;
 inline constexpr uint8_t CLIENT_CRC_VALIDATION = 0x3C;
 inline constexpr uint8_t RESERVED_NOOP_3E = 0x3E;
 inline constexpr uint8_t VOTE_KICK_TARGET = 0x3F;
+// Vehicle-spawn pick: [u16 sourceHandle][u8 typeIndex] (3 B; the type index is
+// the source def's pcvehicle_spawnlist bit). [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0]
 inline constexpr uint8_t VEHICLE_SPAWN_REQUEST = 0x40;
 inline constexpr uint8_t DEATH_TIMEOUT_RESET = 0x41;
-inline constexpr uint8_t WEAPON_SLOT_LIST_REQUEST = 0x42;
+// No fields read; the host answers s2c::VEHICLE_SPAWN_AVAILABILITY to the requester.
+// [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930]
+inline constexpr uint8_t VEHICLE_SPAWN_AVAILABILITY_REQUEST = 0x42;
 inline constexpr uint8_t SQUAD_ENTITY_SYNC = 0x43;
 inline constexpr uint8_t SQUAD_CHAT_BROADCAST = 0x44;
 inline constexpr uint8_t SQUAD_TEAM_ASSIGNMENT = 0x45;

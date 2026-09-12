@@ -343,6 +343,54 @@ void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
     slot.scope_zoom = 0;
     CHECK(local_player_scope_zoom(weapon, slot) == 1);
 
+    // The zoom STEP [orig: Player_AdjustWeaponElevation @0x4dbdf0]: +/-2 over
+    // [scope_min_mag, scope_max_mag] with the click on a change, the CanFire
+    // verdict in front (ForceScoped in first person holds it).
+    LocalPlayerWeapon stepped = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED | DEF_WEAPON_FLAG_FORCESCOPED);
+    stepped.scope_max_mag = 10.0f;
+    PlayerViewState step_view;
+    WeaponSlotState step_slot;
+    ScopeZoomLimits limits;
+    limits.category = 3;
+    CHECK(local_player_scope_zoom(stepped, step_slot) == 10); // the lazy seed
+    lw.w.out.script_sounds.clear();
+    CHECK(local_player_adjust_scope_zoom(lw.w, stepped, step_view, step_slot, limits, -2));
+    CHECK(step_slot.scope_zoom == 8);
+    CHECK(lw.w.out.script_sounds.size() == 1);
+    CHECK(lw.w.out.script_sounds[0].name == kScopeZoomStepSoundset);
+    CHECK(lw.w.out.script_sounds[0].kind == ScriptSoundEvent::Kind::Interface);
+    for (int i = 0; i < 3; ++i) CHECK(local_player_adjust_scope_zoom(lw.w, stepped, step_view, step_slot, limits, -2));
+    CHECK(step_slot.scope_zoom == 2);
+    CHECK(!local_player_adjust_scope_zoom(lw.w, stepped, step_view, step_slot, limits, -2)); // the floor
+    CHECK(step_slot.scope_zoom == 2);
+    CHECK(lw.w.out.script_sounds.size() == 4); // no click without a change
+    for (int i = 0; i < 4; ++i) CHECK(local_player_adjust_scope_zoom(lw.w, stepped, step_view, step_slot, limits, 2));
+    CHECK(step_slot.scope_zoom == 10);
+    CHECK(!local_player_adjust_scope_zoom(lw.w, stepped, step_view, step_slot, limits, 2)); // the cap
+    CHECK(step_slot.scope_zoom == 10);
+    // The class-6 sniper lock on a Primary def without the session bit floors
+    // at the max; the bit, or another class/category, restores scope_min_mag
+    // [orig: @0x4dbe2f..0x4dbe3f].
+    lw.entity().player_class = 6;
+    CHECK(local_player_scope_zoom_floor(lw.w, limits, 10) == 10);
+    step_slot.scope_zoom = 8;
+    CHECK(local_player_adjust_scope_zoom(lw.w, stepped, step_view, step_slot, limits, -2));
+    CHECK(step_slot.scope_zoom == 10);
+    lw.w.rules.allow_sniper_scope_zoom = true; // byte_A821F0
+    CHECK(local_player_scope_zoom_floor(lw.w, limits, 10) == 2);
+    lw.w.rules.allow_sniper_scope_zoom = false;
+    limits.category = 2;
+    CHECK(local_player_scope_zoom_floor(lw.w, limits, 10) == 2);
+    lw.entity().player_class = 8;
+    limits.category = 3;
+    limits.scope_min_mag = 4;
+    CHECK(local_player_scope_zoom_floor(lw.w, limits, 10) == 4);
+    // The CanFire gate: no equipped weapon, no step, no click.
+    stepped.active = false;
+    lw.w.out.script_sounds.clear();
+    CHECK(!local_player_adjust_scope_zoom(lw.w, stepped, step_view, step_slot, limits, -2));
+    CHECK(step_slot.scope_zoom == 10 && lw.w.out.script_sounds.empty());
+
     for (int i = 0; i < 3; ++i) {
         WeaponTableEntry row;
         row.valid = true;
@@ -370,6 +418,91 @@ void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
     CHECK(channels.camera_fov_target_fp == (35 << 16));
 }
 
+// The weapon-cycle actions' dispatcher leg [orig: Input_HandleActionBinding_0
+// cases 0xD4/0xD6 @0x4e130c..0x4e13ae] and the mount-time zoom clamp
+// [orig: Player_MountWeaponSlot @0x4dfacf..0x4dfb16], over the limits built
+// from the weapon table's category and the rules' allowSniperScopeZoom bit.
+void test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp() {
+    LocalWorld lw;
+    WeaponTableEntry row;
+    row.valid = true;
+    row.name = "route_primary";
+    row.category = 3;
+    lw.w.tables.weapons.entries.push_back(row);
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED | DEF_WEAPON_FLAG_FORCESCOPED);
+    w.def_name = "route_primary";
+    w.scope_max_mag = 10.0f;
+    PlayerViewState v;
+    const ScopeZoomLimits limits = local_player_scope_zoom_limits(lw.w, w, 2);
+    CHECK(limits.category == 3 && limits.scope_min_mag == 2);
+    LocalPlayerWeapon unknown = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
+    unknown.def_name = "route_unknown";
+    CHECK(local_player_scope_zoom_limits(lw.w, unknown, 4).category == 0);
+    CHECK(local_player_scope_zoom_limits(lw.w, unknown, 4).scope_min_mag == 4);
+
+    // The mount clamp: Sighted-only (no Flags & 1) and a zero max leave the slot
+    // alone; a Scoped def lands a fresh slot on the floor and an over-max
+    // carry-over on the max.
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    CHECK(w.slot.scope_zoom == 0);
+    w.def.flags |= static_cast<int32_t>(DEF_WEAPON_FLAG_SCOPED);
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 0, w.slot);
+    CHECK(w.slot.scope_zoom == 0);
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    CHECK(w.slot.scope_zoom == 2);
+    w.slot.scope_zoom = 14;
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    CHECK(w.slot.scope_zoom == 10);
+    w.slot.scope_zoom = 6;
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    CHECK(w.slot.scope_zoom == 6);
+    // The class-6 lock at mount floors the zoom at the max; the session bit
+    // (World::rules.allow_sniper_scope_zoom = byte_A821F0) lifts it.
+    lw.entity().player_class = 6;
+    w.slot.scope_zoom = 4;
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    CHECK(w.slot.scope_zoom == 10);
+    lw.w.rules.allow_sniper_scope_zoom = true;
+    w.slot.scope_zoom = 4;
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    CHECK(w.slot.scope_zoom == 4);
+    lw.w.rules.allow_sniper_scope_zoom = false;
+    lw.entity().player_class = 8;
+
+    // The route: next (+1) steps +2, prev (-1) steps -2 with the GF_SCOPE click,
+    // and no cycle; at the cap the step still takes the route, just silently.
+    lw.w.out.script_sounds.clear();
+    w.slot.scope_zoom = 4;
+    CHECK(local_player_weapon_cycle_route(lw.w, w, v, limits, 1) == WeaponCycleRoute::kZoomStep);
+    CHECK(w.slot.scope_zoom == 6);
+    CHECK(local_player_weapon_cycle_route(lw.w, w, v, limits, -1) == WeaponCycleRoute::kZoomStep);
+    CHECK(w.slot.scope_zoom == 4);
+    CHECK(lw.w.out.script_sounds.size() == 2);
+    CHECK(lw.w.out.script_sounds[1].name == kScopeZoomStepSoundset);
+    w.slot.scope_zoom = 10;
+    CHECK(local_player_weapon_cycle_route(lw.w, w, v, limits, 1) == WeaponCycleRoute::kZoomStep);
+    CHECK(w.slot.scope_zoom == 10 && lw.w.out.script_sounds.size() == 2);
+    // Refused outright: the binocular view, then a live PowerThrow charge.
+    v.binoculars_view_active = true;
+    CHECK(local_player_weapon_cycle_route(lw.w, w, v, limits, 1) == WeaponCycleRoute::kRefused);
+    v.binoculars_view_active = false;
+    w.power_throw_start_tick = 5;
+    CHECK(local_player_weapon_cycle_route(lw.w, w, v, limits, -1) == WeaponCycleRoute::kRefused);
+    w.power_throw_start_tick = 0;
+    CHECK(w.slot.scope_zoom == 10);
+    // scope_min_mag == scope_max_mag (the shipped 2x optics) cycles; so does a
+    // lowered optical view (no ForceScoped pin, hip view) and no equipped weapon.
+    ScopeZoomLimits fixed = limits;
+    fixed.scope_min_mag = 10;
+    CHECK(local_player_weapon_cycle_route(lw.w, w, v, fixed, 1) == WeaponCycleRoute::kCycle);
+    w.def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_SCOPED);
+    CHECK(local_player_weapon_cycle_route(lw.w, w, v, limits, 1) == WeaponCycleRoute::kCycle);
+    CHECK(w.slot.scope_zoom == 10);
+    w.active = false;
+    CHECK(local_player_weapon_cycle_route(lw.w, w, v, limits, 1) == WeaponCycleRoute::kCycle);
+    CHECK(lw.w.out.script_sounds.size() == 2);
+}
+
 void test_frame_reads_the_state_and_the_card_selector() {
     LocalWorld lw;
     LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
@@ -386,12 +519,15 @@ void test_frame_reads_the_state_and_the_card_selector() {
     CHECK(!f.scope_card_active);
     CHECK(f.fov_h_deg == kPlayerCameraFovHDeg);
     CHECK(!f.camera_pose_valid); // no AI entity attached: no composed pose
-    // The engaged, settled sight on a Sighted weapon selects the card (first
+    // The engaged, PROMOTED sight on a Sighted weapon selects the card (first
     // person, no binoculars) [orig: Render_ProcessMainSceneFrame @0x5ca299].
-    v.scope_engaged = true;
+    CHECK(player_view_set_engaged(v, true, false));
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.scope_engaged && !f.scope_settled && !f.scope_card_active); // mid-raise
     settle_ease(v);
     local_player_view_frame(&lw.w, w, v, t, f);
     CHECK(f.scope_fraction == 1.0f);
+    CHECK(f.scope_settled && f.scope_card_active);
     CHECK(f.fov_h_deg == kPlayerCameraFovHDeg / 4.0f);
     v.binoculars_view_active = true;
     local_player_view_frame(&lw.w, w, v, t, f);
@@ -440,6 +576,39 @@ void test_frame_chase_shake_consumes_the_tick() {
     CHECK(fc.camera.yaw_deg == fd.camera.yaw_deg);
     CHECK(fc.camera.pitch_deg == fd.camera.pitch_deg);
     CHECK(fc.camera.roll_deg == fd.camera.roll_deg);
+}
+
+// The USE-ITEM action's vehicle-loadout arm gates [orig: Input_HandleActionBinding_0
+// case 0xB1 -- parentSlot @0x4e0a91, Flags & 0x800 @0x4e0ab2, the ground entity
+// team byte @0x4e0ad8..0x4e0aeb].
+void test_use_item_vehicle_loadout_zone_gates() {
+    LocalWorld lw;
+    CHECK(!local_player_in_vehicle_loadout_zone(lw.w));
+    lw.entity().flags |= kEntityFlagVehicleLoadoutZone;
+    CHECK(local_player_in_vehicle_loadout_zone(lw.w));
+    lw.entity().mounted = true; // a seated player takes the toggle latch instead
+    CHECK(!local_player_in_vehicle_loadout_zone(lw.w));
+    lw.entity().mounted = false;
+    lw.entity().flags &= ~kEntityFlagVehicleLoadoutZone;
+    lw.entity().engine_flags |= kEntityFlagVehicleLoadoutZone; // the replica's copy
+    CHECK(local_player_in_vehicle_loadout_zone(lw.w));
+    // The team test: no ground entity reads team 0 (open); a foreign team refuses.
+    lw.entity().team = 1;
+    CHECK(local_player_vehicle_zone_team_matches(lw.w));
+    Entity pad;
+    pad.kind = EntityKind::Item;
+    pad.item_id = 0x2000;
+    pad.team = 2;
+    const EntityHandle ground = lw.w.registry.spawn(0, pad);
+    lw.entity().ground_target = ground;
+    CHECK(!local_player_vehicle_zone_team_matches(lw.w));
+    lw.w.registry.get(ground)->team = 1;
+    CHECK(local_player_vehicle_zone_team_matches(lw.w));
+    lw.w.registry.get(ground)->team = 0;
+    CHECK(local_player_vehicle_zone_team_matches(lw.w));
+    World empty;
+    CHECK(!local_player_in_vehicle_loadout_zone(empty));
+    CHECK(!local_player_vehicle_zone_team_matches(empty));
 }
 
 void test_set_eye_mirrors_the_head_into_the_world() {
@@ -780,6 +949,98 @@ void test_scope_zero_bake_max_range() {
     CHECK(zero.max_range_q16 == 655359); // below stable on the first tick
 }
 
+// Every mount and clear resets the scope tri-state through the one reset
+// (player_view_scope_reset): a promoted sight never survives a weapon change,
+// and the interp parks idle at the hip.
+// [orig: Player_MountWeaponSlot zeroes the view biases @ 0x4dfbcf]
+void test_install_and_clear_reset_the_scope_tri_state() {
+    LocalWorld lw;
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
+    PlayerViewState v;
+    CHECK(player_view_set_engaged(v, true, false));
+    settle_ease(v);
+    CHECK(player_view_scope_settled(v) && !v.scope_hipfire);
+    WeaponInstallData data;
+    data.name = "WPN_RESET";
+    local_weapon_install(lw.w, w, data, false, false, nullptr, v);
+    CHECK(!v.scope_engaged && !v.scope_settled && v.scope_hipfire);
+    CHECK(!player_view_scope_ease_active(v) && player_view_scope_fraction(v) == 0.0f);
+    CHECK(player_view_set_engaged(v, true, false));
+    settle_ease(v);
+    CHECK(player_view_scope_settled(v));
+    local_weapon_clear(w, v);
+    CHECK(!v.scope_engaged && !v.scope_settled && v.scope_hipfire);
+    CHECK(!player_view_scope_ease_active(v));
+}
+
+// The listen host's OWN validated fire ends its spawn protection the way the
+// remote C2S 0x06 clear does (Entity_FireWeaponAndSendPacket's authority leg
+// -> Server_ClientFiredRound): in an MP session a non-spectator's nonzero
+// entity+292 goes to 0 on the fire commit; an SP fire and a joiner's predicted
+// fire leave the word alone, and a spectator slot keeps its -1.
+void test_host_own_fire_ends_spawn_protection() {
+    struct Case {
+        bool authority;
+        bool mp_session;
+        bool spectator;
+        int32_t expect;
+    };
+    const Case cases[] = {
+        {true, true, false, 0},    // the listen host in session: cleared
+        {true, false, false, 620}, // SP: not this mechanism's word
+        {false, true, false, 620}, // a joiner defers to the host's clear
+        {true, true, true, -1},    // a spectator slot keeps its -1
+    };
+    for (const Case &c : cases) {
+        LocalWorld lw;
+        lw.ai.attach(lw.local);
+        lw.w.rules.mp_session = c.mp_session;
+        lw.w.tables.weapons.entries.resize(6);
+        WeaponTableEntry &rifle = lw.w.tables.weapons.entries[5];
+        rifle.name = "WPN_TESTRIFLE";
+        rifle.category = 3;
+        rifle.clipsize = 30;
+        rifle.ammo_index = 1;
+        rifle.valid = true;
+        lw.w.tables.ammo.entries.resize(2);
+        lw.w.tables.ammo.entries[1].name = "TEST_BALL";
+        lw.w.tables.ammo.entries[1].velocity = 620;
+        lw.w.tables.ammo.entries[1].max_age_ticks = 248;
+        lw.w.tables.ammo.entries[1].valid = true;
+        lw.entity().equipped_adm_index = 5;
+        lw.entity().damage_state = c.spectator ? -1 : 620;
+        if (c.spectator) {
+            MatchPlayerIdentity id;
+            id.entity = lw.local;
+            lw.w.match.upsert_player(id);
+            lw.w.match.set_player_spectator(lw.local, true);
+        }
+        LocalPlayerWeapon weapon;
+        WeaponInstallData data;
+        data.name = "WPN_TESTRIFLE";
+        data.clipsize = 30;
+        data.rows.resize(3);
+        std::snprintf(data.rows[0].name, sizeof(data.rows[0].name), "idle");
+        data.rows[0].delaystart = 0;
+        std::snprintf(data.rows[1].name, sizeof(data.rows[1].name), "fire");
+        data.rows[1].delaystart = 0;
+        data.rows[1].delayend = 6;
+        std::snprintf(data.rows[2].name, sizeof(data.rows[2].name), "recoil");
+        data.rows[2].delaystart = 0;
+        data.rows[2].delayend = 0;
+        PlayerViewState view;
+        local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
+        local_weapon_set_input(weapon, view, true, true, false);
+        LocalWeaponPumpIO io;
+        io.view = &view;
+        io.is_authority = c.authority;
+        lw.w.logic_tick = 10;
+        local_weapon_pump_tick(lw.w, weapon, io);
+        CHECK(weapon.fired_serial == 1);
+        CHECK(lw.entity().damage_state == c.expect);
+    }
+}
+
 int main() {
     test_target_lock_cadence_and_audio();
     {
@@ -812,12 +1073,16 @@ int main() {
     test_frame_reads_the_state_and_the_card_selector();
     test_scope_fov_target_and_render_queries_share_weather_state();
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
+    test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();
     test_frame_chase_shake_consumes_the_tick();
+    test_use_item_vehicle_loadout_zone_gates();
     test_set_eye_mirrors_the_head_into_the_world();
     test_pump_feeds_the_heat_window_water_gate_from_the_body_z();
     test_weapon_trace_records_one_sample_per_pump_tick();
     test_weapon_trace_samples_since_is_incremental();
     test_local_weapon_input_block_mirrors_the_pump_gate();
+    test_install_and_clear_reset_the_scope_tri_state();
+    test_host_own_fire_ends_spawn_protection();
     if (failures == 0) std::printf("local_player_view_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

@@ -744,8 +744,11 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 		w.u8(0);        // side [orig: slot+100577]
 	if (field_flags & kPlayerSyncHasQuality)
 		w.u8(1);        // quality [orig: slot+418; client clamps <=4 @0x431370]
-	if (field_flags & kPlayerSyncHasVehicleTimer)
-		w.u32(0);       // vehicle timer dword [orig: vehicle_data+420 when mounted, else 0 @0x506230]
+	if (field_flags & kPlayerSyncHasAccountId)
+		w.u32(0);       // NovaWorld account netId [orig: the slot connection's napi_player_data+420
+		                //  @0x506257, else 0 @0x506246] — 0 = a LAN account (no clan-roster node);
+		                // the NovaWorld-account value rides with the host clan-roster port
+
 	return out;
 }
 
@@ -863,11 +866,18 @@ std::vector<uint8_t> encode_end_round_stats(const EndRoundStats &stats) {
 					f < row.per_team.size() ? row.per_team[f] : 0));
 	}
 
+	// The trailing matrix writes every word each row carries (the producer
+	// fills g_scoreTeamCount CONFIGURED columns per row), not the declared
+	// active count the player rows are gated on. The retail client reads the
+	// declared count per row (decode_end_round_stats), so rows after row 0
+	// misalign whenever a configured column is inactive; that asymmetry is
+	// retail's own. [orig: Server_BuildEndOfRoundScoreboard — the count byte
+	// @0x509581, the row/column loops @0x5095A0..0x5095CC with no Block[]
+	// gate versus the player-row gate @0x509534]
 	w.u8(static_cast<uint8_t>(team_row_count));
 	for (size_t i = 0; i < team_row_count; ++i) {
-		for (size_t f = 0; f < field_count; ++f)
-			w.u16(static_cast<uint16_t>(
-					f < stats.team_rows[i].size() ? stats.team_rows[i][f] : 0));
+		for (const int16_t value : stats.team_rows[i])
+			w.u16(static_cast<uint16_t>(value));
 	}
 	return out;
 }
@@ -1114,6 +1124,97 @@ std::vector<uint8_t> encode_explosion_effect(const ExplosionEffectRecord &event)
     w.u32(uint32_t(event.x)); w.u32(uint32_t(event.y)); w.u32(uint32_t(event.z));
     w.u16(uint16_t(event.heading));
     return out;
+}
+
+// [orig: collect_valid_weapon_slots @0x516000 — the leading word is reserved
+//  @0x51607f, each eligible slot appended @0x5160a9, and the iterator's current
+//  slot stored into the leading word after the loop @0x5160d7]
+std::vector<uint8_t> encode_batch_kill(const BatchKillBatch &page) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(page.count);
+	for (uint16_t slot : page.slots) w.u16(slot);
+	return out;
+}
+
+// [orig: the 0x4E continuation @0x4318db (windowMin) / @0x4318e8 (windowMax) /
+//  @0x4318ee (start), len 10 @0x4318f5; the 0x0F burst form @0x42e5d3..0x42e5f7]
+std::vector<uint8_t> encode_burst_loadout_request(const BurstLoadoutRequest &request) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u32(request.loadout_filter);  // windowMin
+	w.u32(request.flags);           // windowMax
+	w.u16(request.extra);           // start
+	return out;
+}
+
+// [orig: serialize_minimap_slot @0x5073B0 — `*buf = type` @0x5073dd; types 1/3
+//  write the node id @0x50741a then name @0x507440 and tag @0x507470 as
+//  strlen+1 copies; type 2 writes the id only @0x5073fb (5 B); anything else
+//  returns 0 @0x507408 and the caller sends nothing]
+std::vector<uint8_t> encode_clan_roster_update(const ClanRosterUpdate &update) {
+	std::vector<uint8_t> out;
+	if (update.action == kClanRosterAdd || update.action == kClanRosterWalkReply) {
+		Writer w{out};
+		w.u8(update.action);
+		w.u32(update.account_id);
+		w.cstr_capped(update.name, kClanRosterNameChars + 1);  // node +16 is char[65]
+		w.cstr_capped(update.tag, kClanRosterTagChars + 1);    // node +81 is char[9]
+	} else if (update.action == kClanRosterRemove) {
+		Writer w{out};
+		w.u8(update.action);
+		w.u32(update.account_id);
+	}
+	return out;
+}
+
+// [orig: NapiNPClientMsg_HandleGameStart @0x42E180 writes {0} @0x42e1c9, len 4
+//  @0x42e1cf; NapiNPClientMsg_HandlePlayerJoinLeave @0x432510 writes the node id
+//  @0x43265c, len 4 @0x432662]
+std::vector<uint8_t> encode_clan_roster_walk_request(const ClanRosterWalkRequest &request) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u32(request.after_account_id);
+	return out;
+}
+
+// [orig: Server_SendWeaponSlotActionPacket @0x50F9A0 — handle @0x50fa15, state
+//  word @0x50fa2d, number byte @0x50fa34, len 5 @0x50fa3a; the same 5-byte layout
+//  from NetPacket_WriteShortShortByte @0x42B2B0 and NetPacket_WriteTwoShortsAndByte
+//  @0x505E00]
+std::vector<uint8_t> encode_door_slot_action(const DoorSlotAction &action) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(action.entity_handle);
+	w.u16(static_cast<uint16_t>(action.state));
+	w.u8(action.number);
+	return out;
+}
+
+// [orig: serialize_weapon_overlay_slots_0 @0x5105A0 — the constant 3 @0x5105c3,
+//  per row the type id @0x510660, avail @0x510674, max @0x510681, then the 0 word
+//  @0x5106b8]
+std::vector<uint8_t> encode_vehicle_spawn_availability(const VehicleSpawnAvailabilityList &list) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(kVehicleSpawnAvailabilityLeadingByte);
+	for (const VehicleSpawnAvailabilityRow &row : list.rows) {
+		w.u16(row.type_id);
+		w.u8(row.available);
+		w.u8(row.max_count);
+	}
+	w.u16(0);
+	return out;
+}
+
+// [orig: the host read order NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0
+//  — u16 handle @0x51c51b, u8 type index @0x51c52a]
+std::vector<uint8_t> encode_vehicle_spawn_request(const VehicleSpawnRequest &request) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(request.source_handle);
+	w.u8(request.type_index);
+	return out;
 }
 
 } // namespace opennova

@@ -20,6 +20,8 @@
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
+#include <runtime/world/vehicle_mount.h>
+
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -51,6 +53,28 @@ bool camera_check(testrig::RetailMissionRig &rig, const char *label, bool expect
 
 bool control_seat(w::SeatType t) { return t == w::SeatType::Controller || t == w::SeatType::Driver; }
 
+// Aim the local player's view at a world point through the input-owned look
+// mirrors; the next tick lands them on the body Yaw/Pitch the seat scan measures
+// its cone from [orig: Entity_FindNearestSeatOrArmory @0x4360b6 / @0x4360c6].
+void aim_local_at(testrig::RetailMissionRig &rig, const w::Vec3 &target) {
+	const w::Entity *pl = rig.local.player();
+	if (pl == nullptr) return;
+	const w::Vec3 eye{ pl->position.x + pl->eye_offset_x / 65536.0f,
+		pl->position.y + pl->eye_offset_y / 65536.0f, pl->position.z + pl->eye_offset_z / 65536.0f };
+	rig.local.aim_at(eye, target);
+}
+
+// The first free seat the USE scan can take (the truck's ctrl seat is crewed at
+// spawn by the instructor's authored command mount); -1 when none.
+int first_free_seat(const w::Entity &vehicle) {
+	for (size_t i = 0; i < vehicle.seats.size(); ++i) {
+		const w::Seat &seat = vehicle.seats[i];
+		if (seat.type == w::SeatType::None || seat.occupant.valid()) continue;
+		return static_cast<int>(i);
+	}
+	return -1;
+}
+
 } // namespace
 
 int main() {
@@ -79,13 +103,49 @@ int main() {
 
 	// Bring the player to the truck (the spawn point sits inside the barracks;
 	// the motor pool is open ground and the truck's list-2 route starts there).
+	// USE is the nearest-seat scan: a FREE seat within 4.0 u of the eye, inside
+	// the standing aim cone, with LOS [orig: Entity_TryEnterNearestVehicle
+	// @0x4368C0 -> Entity_FindNearestSeatOrArmory @0x435D50; the Flags 0x200
+	// FindBestSeatSlot arm @0x4368CF is the queued Co-op spawn-marker mount,
+	// never a deck stander's], so drop the player onto the hull over a free
+	// seat and aim him at it.
 	const w::Vec3 tpos = truck->position;
-	rig.world.commands.set_entity_position(
-			player_handle, w::Vec3{ tpos.x, tpos.y, tpos.z + truck->bound_radius + 1.0f });
+	const int free_seat = first_free_seat(*truck);
+	if (!expect(free_seat >= 0, "the truck offers a free seat")) return 1;
+	const w::Seat &truck_seat_spec = truck->seats[static_cast<size_t>(free_seat)];
+	const w::Vec3 seat_point = w::entity_local_point_world(*truck, truck_seat_spec.seat_local);
+	std::printf("ride: free seat %d (%s) at (%.1f, %.1f, %.1f)\n", free_seat,
+			truck_seat_spec.source_name.c_str(), seat_point.x, seat_point.y, seat_point.z);
+	// Stand on the ground beside the bed, 1.25 u outboard of the seat (away from
+	// the hull origin), the way a player walks up to a truck: the eye then sits
+	// well inside the 4.0 u reach (a stander on the hull roof is 4.3 u from a bed
+	// seat and the scan refuses him). Never straight over the seat: the scan's
+	// cone is a yaw/pitch delta pair and the yaw of a point right under the eye
+	// is ill-conditioned. The settle drops him onto the terrain.
+	w::Vec3 drop{ seat_point.x, seat_point.y, tpos.z + 0.5f };
+	{
+		const float ox = seat_point.x - tpos.x, oy = seat_point.y - tpos.y;
+		const float ol = std::sqrt(ox * ox + oy * oy);
+		if (ol > 0.5f) {
+			drop.x += 1.25f * ox / ol;
+			drop.y += 1.25f * oy / ol;
+		} else {
+			drop.x += 1.25f;
+		}
+	}
+	rig.world.commands.set_entity_position(player_handle, drop);
 	rig.tick(31);
+	aim_local_at(rig, w::Vec3{ seat_point.x, seat_point.y, seat_point.z + 0.1875f });
+	rig.tick(2);
+	{
+		const w::Vec3 stand = rig.local.player_position();
+		std::printf("ride: standing at (%.1f, %.1f, %.1f), %.2fu from the seat\n", stand.x, stand.y,
+				stand.z, testrig::distance(stand, seat_point));
+	}
 
 	// --- Toggle mount: the player must end up seated on SSN 11.
-	if (!expect(rig.local.toggle_mount(), "the mount toggle accepts (a seat within the 4 u scan gate)")) return 1;
+	if (!expect(rig.local.toggle_mount(),
+			"the mount toggle accepts (a free seat within the 4 u scan gate and the aim cone)")) return 1;
 	rig.tick(31);
 	const w::Entity *pl = rig.local.player();
 	if (!expect(pl != nullptr && pl->mounted, "the player is mounted after the toggle")) return 1;
@@ -146,6 +206,16 @@ int main() {
 	const w::Vec3 here2 = rig.local.player_position();
 	rig.world.commands.set_entity_position(atv_handle, w::Vec3{here2.x + 1.5f, here2.y, here2.z});
 	rig.tick(19);
+	if (const w::Entity *atv_now = rig.world.registry.get(atv_handle)) {
+		// The same scan: look at the ATV's seat so the cone admits it.
+		const int atv_seat_index = first_free_seat(*atv_now);
+		if (atv_seat_index >= 0) {
+			const w::Vec3 p = w::entity_local_point_world(
+					*atv_now, atv_now->seats[static_cast<size_t>(atv_seat_index)].seat_local);
+			aim_local_at(rig, w::Vec3{ p.x, p.y, p.z + 0.1875f });
+			rig.tick(2);
+		}
+	}
 	rig.local.toggle_mount(); // mount the ATV
 	rig.tick(31);
 	pl = rig.local.player();

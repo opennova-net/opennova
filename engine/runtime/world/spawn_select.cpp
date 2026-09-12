@@ -76,7 +76,7 @@ SpawnPointResult coop_marker_pose(const World &world, const Entity &marker) {
     if (((marker.flags | marker.engine_flags) & kEntityFlagParachute) != 0)
         out.flags_or |= kEntityFlagParachute; // [orig: @0x50D42A]
     if (marker.team == 2) {                   // [orig: cmp byte ptr [esi+162h],2 @0x50D42E]
-        out.flags_or |= 0x200u;               // [orig: @0x50D44D]
+        out.flags_or |= kEntityFlagQueuedMount; // [orig: @0x50D44D]
         out.carrier = parented ? marker.ground_target : marker.handle;
     }
     return out;
@@ -496,22 +496,40 @@ bool SpawnWaveList::try_queue(const World &world, EntityHandle zone,
                               EntityHandle player) {
     const Entity *player_entity = world.registry.get(player);
     if (player_entity == nullptr) return false;
-    auto target = std::find_if(entries_.begin(), entries_.end(),
-                               [&](const SpawnWaveEntry &entry) {
-                                   return entry.zone == zone &&
-                                          entry.team == player_entity->team;
-                               });
-    if (target == entries_.end()) return false;
-    if (std::find(target->queued.begin(), target->queued.end(), player) !=
-            target->queued.end())
-        return false;
-    if (target->queued.size() >= 8) return false;
-    // A player belongs to at most one wave group. Retail removes the pointer
-    // from all other rows before appending it to the selected row.
-    // [orig: SpawnWaveList_TryQueuePlayer @0x52A490]
-    remove_player(player);
-    target->queued.push_back(player);
-    return true;
+    // The retail row walk visits EVERY row. A row for another zone evicts the
+    // player unconditionally, whatever the picked row decides; the picked
+    // row yields 0 on a team mismatch, 0 on a duplicate (the player STAYS in
+    // that row), 0 when it already holds eight, and 1 on the append. So a
+    // failed pick (a full row, an unnumbered zone of the other team) still
+    // dequeues the player everywhere and it must re-pick.
+    // [orig: SpawnWaveList_TryQueuePlayer @0x52A490 — team @0x52a4b6,
+    //  duplicate @0x52a4ca, cap 8 @0x52a4e6, append @0x52a4ec..0x52a4f3,
+    //  other-row CIntList_RemoveById @0x52a4f8, result @0x52a511]
+    bool result = false;
+    for (SpawnWaveEntry &entry : entries_) {
+        if (entry.zone != zone) {
+            const auto old_end = entry.queued.end();
+            const auto new_end = std::remove(entry.queued.begin(), old_end, player);
+            entry.queued.erase(new_end, old_end);
+            continue;
+        }
+        if (entry.team != player_entity->team) {
+            result = false;
+            continue;
+        }
+        if (std::find(entry.queued.begin(), entry.queued.end(), player) !=
+                entry.queued.end()) {
+            result = false;
+            continue;
+        }
+        if (entry.queued.size() < 8) {
+            entry.queued.push_back(player);
+            result = true;
+        } else {
+            result = false;
+        }
+    }
+    return result;
 }
 
 std::vector<SpawnWaveRelease> SpawnWaveList::tick(const World &world) {

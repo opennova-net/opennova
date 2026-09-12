@@ -372,8 +372,7 @@ void LocalPlayer::apply_player_input_pre_tick() {
 	w::apply_player_body_input(*p, w::pack_player_body_input(input));
 	if (w::Entity *entity = world.registry.get(p->handle))
 		entity->analog_throttle = input.analog_throttle;
-	const bool scope_promoted = weapon.active && view.scope_engaged &&
-			!w::player_view_scope_ease_active(view);
+	const bool scope_promoted = weapon.active && w::player_view_scope_settled(view);
 	p->inf.aimed_shot_available = false;
 	if (p->inf.active) {
 		if (weapon.active) w::infantry_weapon_switch_stamp(p->inf, weapon.anim_map_serial);
@@ -429,9 +428,7 @@ void LocalPlayer::reset_for_new_round() {
     view.binoculars_requested = false;
     view.binoculars_raised = false;
     view.binoculars_view_active = false;
-    view.scope_engaged = false;
-    view.scope_step = 0;
-    view.scope_hipfire = true;
+    w::player_view_scope_reset(view);
     hud_map_control.mode = 0;
     stance_latch_ = 0;
     input.crouch = input.prone = false;

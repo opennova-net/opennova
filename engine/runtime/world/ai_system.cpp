@@ -376,6 +376,14 @@ void process_class_state_machine(
         if (b.f[AiBrain::kOwner] == 0)
             return;
         ++b.f[AiBrain::kTick];
+        // The brain-step mirror: the pool-1 visit's think countdown (entity+684)
+        // is re-armed from brain[7] after every event-0 update, on clients too
+        // (the tick-table gate above is separate); the visit's own trailing
+        // decrement follows, so the next think lands brain[7] pool-1 visits
+        // later [orig: EntityAI_ProcessVehicleStateMachine
+        // @0x458561..0x458568; EntityAI_ProcessInfantryStateMachine @0x45835c..0x458363].
+        if (Entity *ent = world.registry.get(e.handle))
+            ent->spawn_phase = b.f[AiBrain::kStep];
         update_body_anim_slot(e, world); // pick walk/idle from state+movement for the present pass
         finish();
         return;
@@ -437,6 +445,14 @@ void AiSystem::apply_transition(AiEntity &e, World &world) {
         row(cur).exit(ctx);                       // off_815240
         row(b.f[AiBrain::kPendState]).enter(ctx); // off_815238
         b.f[AiBrain::kCurState] = b.f[AiBrain::kPendState];
+        // A committed transition zeroes the pool-1 think countdown (entity+684),
+        // so the brain thinks again on the very next pool-1 visit — both class
+        // machines share this commit arm [orig: EntityAI_ProcessVehicleStateMachine
+        // @0x4585ae..0x4585b4; EntityAI_ProcessInfantryStateMachine @0x4583b0].
+        // The enter handler may have destroyed the entity: re-resolve it.
+        if (b.f[AiBrain::kOwner] != 0)
+            if (Entity *ent = world.registry.get(e.handle))
+                ent->spawn_phase = 0;
     }
 }
 
@@ -559,7 +575,34 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             advance_part_anim(e);
             continue;
         }
-        if (begin_update(e)) {
+        // The pool-1 visit's think gate: the class event callback (the brain
+        // machine) runs only on the visits where the PRE-decrement entity+684
+        // countdown (Entity::spawn_phase) is <= 0, and the countdown drops by
+        // one on every visit (after the machine's re-arm), so a brain thinks
+        // once every brain[7] visits (16 with the class init's step 16), on the
+        // visit after any committed transition (apply_transition zeroes it),
+        // spread by the class init's 0..15 spawn stagger. The +0x1C4 motor runs
+        // every visit regardless
+        // (world.vehicles.tick_motors below). A brain outside pool 1 has no
+        // pool-1 visit and keeps the every-tick think.
+        // [orig: Entity_UpdatePool1Slot @0x4B8DD0 gate @0x4B8E1B..0x4B8E22, the
+        //  +0x1C8 call @0x4B8E3C, the decrement @0x4B8EA0; the pool-1 walk
+        //  Entity_UpdateAllEntities @0x4C2158..0x4C21F1; the seed
+        //  Entity_InitVehicleAIFromDef @0x468915..0x468945 /
+        //  Entity_InitHelicopterAIFromDef @0x468645..0x468669]
+        // A think visit first refreshes the thinking entity's own blink/indoors
+        // state -- Entity_BuildProximityList @0x4B3DC0 is CollisionWorld::refresh_blink
+        // (the call @0x4B8E25 on the +684 gate alone, ahead of the +0x1C8
+        // callback). The per-source candidate slice is the separate 17-tick
+        // Entity_BuildProximityListsFromPools @0x4B8EB0 rebuild
+        // (collision->build_tick_tables above).
+        Entity *countdown_entity = e.handle.pool() == 1 ? world.registry.get(e.handle) : nullptr;
+        const uint64_t countdown_lifetime =
+                countdown_entity != nullptr ? countdown_entity->registry_spawn_id : 0;
+        const bool think = countdown_entity == nullptr || countdown_entity->spawn_phase <= 0;
+        if (think && countdown_entity != nullptr && collision != nullptr)
+            collision->refresh_blink(world, *countdown_entity);
+        if (think && begin_update(e)) {
             const Entity *ent = world.registry.get(e.handle);
             const VehicleTraits *vt =
                     ent != nullptr ? world.vehicles.traits.get(ent->item_id) : nullptr;
@@ -597,6 +640,15 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
 			}
 		}
         advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
+        // The visit's trailing decrement, every pool-1 visit whether or not the
+        // brain thought — the think may have destroyed and re-used the slot, so
+        // only the same registry lifetime counts down [orig: `add [esi+2ACh],-1`
+        // @0x4B8EA0 after the motor/emitter/light legs].
+        if (countdown_entity != nullptr) {
+            Entity *live = world.registry.get(e.handle);
+            if (live != nullptr && live->registry_spawn_id == countdown_lifetime)
+                --live->spawn_phase;
+        }
     }
     lap.mark(devtools::Slot::SIM_AI_ENTITIES);
     world.vehicles.tick_motors(is_authority, lap);

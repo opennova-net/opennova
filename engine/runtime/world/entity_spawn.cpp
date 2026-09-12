@@ -13,7 +13,10 @@ void entity_reset_to_spawn_state(Entity &e) {
     // Both portable flag views represent the same retail dword.
     e.flags &= ~2u;
     e.engine_flags &= ~2u;
-    e.damage_state = 0;
+    // The +0x124 damage-disabled state is NOT touched here: the deploy leg that
+    // calls this reset seeds its 620-tick spawn protection afterwards
+    // [orig: no [esi+124h] store anywhere in @0x4B9610; the seed is
+    //  Server_ProcessPlayerDeath @0x517937/@0x517952/@0x517960].
     e.health = std::max(e.health, e.health_max);
     e.alive = e.health > 0;
     e.mana = e.mana_max;

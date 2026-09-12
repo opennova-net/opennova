@@ -410,10 +410,24 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# polled `useitem` row -- the hold latch, the USE+digit seat pick, the mount
 	# toggle on the release edge (PlayerInputRouter::sample_use_item); the screen
 	# this arm opens leaves gameplay input inactive, which resets that chain.
-	# (The vehicle-loadout-volume vehicle.mnu arm @0x4e0bfe awaits that screen's
-	# port.)
 	if is_gameplay_input_active() and _is_use_item_key(key.keycode):
 		if _try_open_armory():
+			get_viewport().set_input_as_handled()
+			return
+		# The vehicle-loadout-volume arm @0x4e0bfe (the engine's
+		# local_player_in_vehicle_loadout_zone: an unmounted local player carrying
+		# the type-11 volume touch): the press is consumed here and never latches
+		# the router's chain -- no mount toggle on the release, no USE+digit chord.
+		# The bay's team gate (local_player_vehicle_zone_team_matches: the ground
+		# entity's team 0 or the player's own) selects vehicle.mnu's VEHICLE
+		# screen, unported (D-HUD-14). A mounted player never reaches this arm (the
+		# predicate rejects a seated player), so the seat chain stays unconditional.
+		var use_sim: Simulation = _world.get_sim() if _world != null else null
+		if use_sim != null and use_sim.local_player_in_vehicle_loadout_zone():
+			if _player_presenter != null:
+				_player_presenter.consume_use_hold()
+			if use_sim.local_player_vehicle_zone_team_matches():
+				pass  # vehicle.mnu VEHICLE (D-HUD-14)
 			get_viewport().set_input_as_handled()
 		return
 	# Gameplay keys (B/N/NVG, Z/X/C stance) live on LocalPlayerPresenter; view rows on GameHudPresenter.
@@ -530,12 +544,23 @@ func is_gameplay_input_active() -> bool:
 # --- End of mission (SP) -------------------------------------------------------
 
 # The sim's round_end effect arms MissionEndFlow; the flow's beat and screen run
-# from _process.
+# from _process. The effect's b word is the end track the SP tail hands the
+# gamemus MessageHandler (1 win / 2 lose; the world's process_round_end selects
+# it): MusicDirector.signal_end_track runs the VM's restart frame (the engine's
+# mus_vm_signal, MusicCtx_SelectEndTrack's step) once the flow arms. Retail
+# signals right after the cine starts; the flow's lead-in beat stands in for
+# the cine, so the signal rides the arm. begin() refuses an MP round
+# (EndRoundPresenter owns it), so a net session never signals.
 func _on_shell_mission_effects(effects: Array) -> void:
 	for e_v in effects:
 		var e := e_v as MissionEffect
 		if e != null and e.kind == "round_end":
+			var armed_before := _end_flow.is_round_ended()
 			_end_flow.begin(e.a, _world.get_sim() if _world != null else null)
+			if not armed_before and _end_flow.is_round_ended():
+				var director: MusicDirector = MusicService.director()
+				if director != null:
+					director.signal_end_track(e.b)
 
 
 func _show_end_screen() -> void:
@@ -616,11 +641,31 @@ func _enter_menu(dir: String) -> bool:
 	_wire_shell()
 	if _player_info_companion != null:
 		_player_info_companion.set_persisted_profile(_chosen_avatar)
+	# The boot's text tables: the menu shell registers menutxt/gametext/gameui
+	# in setup(); keyhelp.bin (the "Keys" binding-label table) is registered
+	# here beside them, which installs it for the engine's binding formatters
+	# (Strings.TABLE_KEYHELP -> RtxtStringFile.install_key_strings).
+	Strings.register_table(Strings.TABLE_KEYHELP, _load_keyhelp_table(_root))
 	if not _menu_shell.setup(_root):
 		push_warning("MainGame: no menu found in resource dir (looked for %s)"
 				% _menu_shell.main_menu_file)
 	_menu_shell.show_menu()
 	return true
+
+
+# keyhelp.bin off the mounted root as an RtxtStringFile; null when the root
+# carries none or it does not parse (every binding label then renders its
+# literal fallback).
+static func _load_keyhelp_table(root: ResourceRoot) -> RtxtStringFile:
+	if root == null:
+		return null
+	var bytes: PackedByteArray = root.read_file("keyhelp.bin")
+	if bytes.is_empty():
+		return null
+	var table := RtxtStringFile.new()
+	if table.load_from_byte_array(bytes) != OK:
+		return null
+	return table
 
 
 # The one-shot MenuShell wiring (every return to the menu re-enters _enter_menu):

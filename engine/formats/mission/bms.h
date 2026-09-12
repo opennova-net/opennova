@@ -287,12 +287,28 @@ enum class TeammateTriggerType : int32_t {
     TeammateEvacuating = 3,
 };
 
-// Player trigger subtypes
+// Player trigger subtypes [orig: EventTrigger_EvaluateCondition cat 7 @0x453b7e].
+// 19-25, 28-30, 32 and 33 test one bit of the input-action word g_InputActionBits
+// and consume it through the chain mirror (docs/mission/bms-event-runtime-re.md
+// section 1.4); only the view bits (19/20/21) and the orbit/zoom bits 32/33 can
+// address (bit indices 2, 4, 6, 7, 8, 9, 26, 27, 28) have a setter in the image --
+// the 22-25 and 28-30 masks are never set, so those subs read false in retail too.
 enum class PlayerTriggerType : int32_t {
-    PlayerBerserk = 18,
-    PlayerFirstPerson = 19,
-    PlayerThirdPerson = 20,
-    PlayerCockpitView = 21,
+    PlayerBerserk = 18,           // local player's AiSlot behavior word & 0x200
+    PlayerFirstPerson = 19,       // input bit 0x4000000 (view1st)
+    PlayerThirdPerson = 20,       // input bit 0x8000000 (viewchase)
+    PlayerCockpitView = 21,       // input bit 0x10000000 (viewwithgun)
+    PlayerInputBit10 = 22,        // input bit 0x400 (no setter in the image)
+    PlayerInputBit11 = 23,        // input bit 0x800 (no setter)
+    PlayerInputBit12 = 24,        // input bit 0x1000 (no setter)
+    PlayerInputBit13 = 25,        // input bit 0x2000 (no setter)
+    PlayerLookByteBit0Clear = 26, // (byte_27234FC & 1) == 0; the bit-0 writer is unwitnessed
+    PlayerLookByteBit0Set = 27,   // (byte_27234FC & 1) != 0
+    PlayerInputBit29 = 28,        // input bit 0x20000000 (no setter)
+    PlayerInputBit14 = 29,        // input bit 0x4000 (no setter)
+    PlayerInputBit15 = 30,        // input bit 0x8000 (no setter)
+    PlayerInputBitIndex = 32,     // input bit 1 << param1
+    PlayerInputBitIndexPlus15 = 33, // input bit 1 << (low byte of param1 + 15)
     PlayerDialogDone = 34,
     PlayerDialogFinished = 35,
     PlayerAwol = 36,
@@ -333,6 +349,11 @@ enum class ActionType : int32_t {
     SingleChangeGroup = 25,
     SingleTeleportAction = 26,
     ParticleEffectAction = 27,
+    // The sub-type-selected global writes (the editor marks 28/29 unused):
+    // sub 37 render-layer visibility by param1, sub 38 clears the input-action
+    // word g_InputActionBits, sub 39 stores (param1 == 0) into dword_AE0718.
+    // [orig: EventAction_Dispatch case 28 @0x4548e1 -> EventAction_HandleSpecialTypes @0x4535a0]
+    SpecialSubType = 28,
     GroupOpenDoorAction = 30,
     GroupCloseDoorAction = 31,
     GroupResetHasVisited = 32,
