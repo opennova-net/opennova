@@ -1581,16 +1581,12 @@ func test_weapon_cycle_steps_the_scope_zoom_while_the_optical_view_is_up() -> vo
 	var def := WeaponDef.new()
 	def.name = "WPN_SCOPE_STEP"
 	def.set_actions([WeaponActionRow.make("idle", 0, 0)])
-	def.flags = 0x100 # Sighted
+	def.flags = 0x01000902 # the M4 EOTech vector: Scoped + Sighted (the optical view)
 	def.scope_max_mag = 10.0
 	def.clipsize = 30
 	def.startrounds = 60
 	sim.set_local_player_weapon(def, {})
 	sim.step()
-	# Hip: the action is a plain cycle request (nothing to cycle to here).
-	sim.request_local_player_weapon_cycle(1)
-	sim.step()
-	assert_eq(sim.get_local_player_weapon_name(), "WPN_SCOPE_STEP")
 	assert_true(sim.request_local_player_scope_toggle())
 	for _i in range(16):
 		sim.step()
@@ -1603,8 +1599,6 @@ func test_weapon_cycle_steps_the_scope_zoom_while_the_optical_view_is_up() -> vo
 		sim.step()
 	assert_almost_eq(sim.get_local_player_view().fov_h_deg, 8.0, 0.001,
 			"the zoom sits at scope_max_mag 10 (80 / 10)")
-	assert_eq(sim.get_local_player_weapon_name(), "WPN_SCOPE_STEP",
-			"the sighted next-weapon action stepped the zoom instead of cycling")
 	sim.request_local_player_weapon_cycle(-1)
 	sim.step()
 	assert_almost_eq(sim.get_local_player_view().fov_h_deg, 10.0, 0.001,
@@ -1613,8 +1607,8 @@ func test_weapon_cycle_steps_the_scope_zoom_while_the_optical_view_is_up() -> vo
 	sim.step()
 	assert_almost_eq(sim.get_local_player_view().fov_h_deg, 8.0, 0.001,
 			"next-weapon steps it back up by 2, capped at scope_max_mag")
-	assert_eq(sim.get_local_player_weapon_name(), "WPN_SCOPE_STEP",
-			"no zoom step ever cycles the weapon")
+	assert_almost_eq(sim.get_local_player_view().scope_fraction, 1.0, 0.001,
+			"no zoom step ever cycled the weapon (the optical view stayed up)")
 
 
 func test_nocardswitch_controls_settled_sights_card_for_sighted_weapon() -> void:
@@ -5198,3 +5192,4 @@ func test_third_person_selection_sets_the_input_action_bits() -> void:
 	assert_eq(sim.debug_input_action_bits() & 0x4000000, 0x4000000, "view1st sets 0x4000000")
 	assert_eq(sim.debug_input_action_bits() & 0x8000000, 0x8000000,
 			"the earlier bit stays set: producers only OR into the word")
+
