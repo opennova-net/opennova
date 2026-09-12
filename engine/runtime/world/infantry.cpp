@@ -196,8 +196,17 @@ bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
                              RootMotionFrame &out) {
     out = RootMotionFrame{};
 
-    if (!primary_blend_active(inf))
-        return source.advance(inf.adm_id, inf.anim_state, inf.clip_phase, out);
+    if (!primary_blend_active(inf)) {
+        // A queued state arms the channel's end-notify: the promotion tick (the
+        // clip's first end, clip_length_ticks -- the step-3b clock) samples the
+        // parked clip end, not the wrapped start
+        // [orig: AnimChannel_AdvancePlayback @0x40B193..0x40B1B1].
+        const int32_t armed_boundary = inf.anim_pending != 0
+                ? source.clip_length_ticks(inf.adm_id, inf.anim_state, 0)
+                : -1;
+        return source.advance_armed(inf.adm_id, inf.anim_state, 0, inf.clip_phase,
+                                    armed_boundary, out);
+    }
 
     inf.anim_blend_weight += inf.anim_blend_step;
     if (inf.anim_blend_weight >= 1.0f) {
@@ -739,7 +748,7 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
         uint32_t logic_tick) {
     InfantryState &inf = e.inf;
     // Burn selection bypasses the ordinary movement/swim/lean selector, including
-    // the pass that clears the timer. [orig: @0x4B70DE..0x4B7180 -> LABEL_654]
+    // the pass that clears the timer. [orig: Entity_UpdateInfantryPlayerBody @0x4B70D9..0x4B717E -> LABEL_654]
     if (inf.burn_state != 0) {
         const int target = select_infantry_burn(inf, root_motion, true, logic_tick);
         commit_player_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion,
@@ -1539,6 +1548,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Before this, a pending target parked behind a locked state (the prone rolls
     // 41/42, flags 0x285) could never land. [orig: AnimMap_UpdateEntity @0x40b77b
     // promotes the queued state on the channel end flag]
+    // advance_primary_channel parks this same first-end tick on the clip end.
     if (inf.anim_pending != 0 && root_motion != nullptr) {
         const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state, 0);
         if (len >= 0 && inf.clip_phase >= len) {

@@ -74,6 +74,11 @@ public:
     // @0x4df4c9..0x4df4ec; the ForceScoped pin @0x4df12d]
     void set_movement_keys(bool forward, bool back, bool left, bool right,
             bool lean_left, bool lean_right, bool jump);
+    // The zero-step keys [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0]: the
+    // -1 floor keys on the session's sniper-zoom rule bit; a change clicks
+    // GF_SCOPE_ZERO, moves the look pitch by the elevation delta and
+    // recomputes the equipped slot's zero-yaw term (WeaponSlotState::zero_yaw,
+    // retail MountSlot+8). Returns whether the zero changed.
     bool request_scope_zero(int delta);
     void set_view_keys(bool free_look, bool up, bool down, bool left, bool right);
     // Stance SELECT request (0 stand / 1 crouch / 2 prone): mutual exclusion

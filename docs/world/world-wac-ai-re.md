@@ -3013,7 +3013,7 @@ An absent clip preserves the selected animation and burn byte. Every sixteenth
 logic tick, a nonzero timer decrements; a timer already zero clears the byte.
 That clearing pass still bypasses movement, lean and swim selection, reaching the
 shared player animation arbiter. [orig: Entity_UpdateInfantryPlayerBody
-@ 0x4B40E0, burn block @ 0x4B70DE..0x4B7180]
+@ 0x4B40E0, burn block @ 0x4B70D9..0x4B717E]
 
 The org1 sixteen-tick think instead clears the byte immediately when the matching
 clip is absent. Its burn timer decrements once per think. A byte that remains
@@ -3082,7 +3082,7 @@ with an item definition. Native authoritative/local bodies and remote joiner
 Player rows publish this through `emit_stance_change_sound`; `infantry_stance_sound`
 pins transitions, repeats, prone suppression, and the joiner's full tick.
 [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0; MoveOrder gates @ 0x4B416C;
-stance sound dispatch @ 0x4B7034..0x4B70A6; sound globals @ 0x24E09D0,
+stance sound dispatch @ 0x4B703D..0x4B709D; sound globals @ 0x24E09D0,
 @ 0x24E09D4, @ 0x24E09D8, named by table rows @ 0x82FFB0..0x82FFF8]
 
 
@@ -5344,7 +5344,10 @@ dispatch, and pool-specific event clocks. The additional class bodies and
 resource binding are described in §24.3a; squib, shared destruction phases, scoring, and explosion replication are covered in §24.3b.
 The tree body also runs `Entity_InitDeathSounds` after debris, which retail's
 `@ 0x43FBC0` does not call (reached by no shipped JOX item). The gnl2
-attacker-weapon sound and SP shrapnel legs remain unported.
+attacker-weapon detonation sound is ported through `spawn_item_explosion`
+(`Entity_SpawnExplosionEffects @ 0x4399C0`, the row-five sound `@ 0x439A28`);
+the SP shrapnel lead is refuted in §24.3b (the draw-only
+`Weapon_SpawnSingleProjectile`).
 
 `Entity_HandleDestructibleDeathEvent @ 0x440210` (the destructible-class
 deathCallback, the `tree` row): phase 0 = the ambient time-of-day shot leg
@@ -5429,25 +5432,35 @@ represented by `Entity::class_think_ticks`. Pool 1 checks the old value, invokes
 phase 0 at <=0, and subtracts one even from a freshly rearmed clock. Pool 2
 visits slots with `slot & 7 == tick & 7`: a positive clock subtracts eight,
 otherwise the callback executes without a trailing decrement. Pool 3 uses the
-same branches with a 64-slot cohort and subtracts 64. Wreck motion follows each
-entity's callback and runs outside the cohort gate. The death-piece pool runs
-before the explosion queue. Thus a gnrc clock of four written at tick 200 for
+same branches with a 64-slot cohort and subtracts 64. The pool-2/3 update
+callbacks (wreck and section motion, the emitter transform) run on that same
+cohort visit, independent of the +0x2AC clock: the entity+0x1C4 call sits
+inside the 8-/64-stepped walk, so a crane half, tower section or palm fragment
+advances once per eight (pool 2) or 64 (pool 3) ticks, while pool 1 runs its
+update callback every tick. The death-piece pool runs before the explosion
+queue. Thus a gnrc clock of four written at tick 200 for
 pool-2 slot zero fires at 208; a gnl2 clock of 32 written at tick 300 fires at
 332 in pool 1 and 336 in pool-2 slot zero. Organic/vehicle AI clocks and the
 minefield clocks retain their own represented owners.
-[orig: pool-1 gates @ 0x4B8E1B / 0x4B8EA0; pool-2/3 gates @ 0x4C2291 / 0x4C2330;
-DeathPiece_TickAll call @ 0x4C221C; Projectile_ProcessExplosionQueue call @ 0x4C223F]
+[orig: pool-1 gates @ 0x4B8E1B / 0x4B8EA0; pool-2/3 gates @ 0x4C2291 / 0x4C2369;
+pool-2/3 update-callback calls @ 0x4C22D5..0x4C22E7 / @ 0x4C2388..0x4C2393 inside
+the stepped walks (step @ 0x4C228C / @ 0x4C234E); DeathPiece_TickAll call
+@ 0x4C221C; Projectile_ProcessExplosionQueue call @ 0x4C223F]
 
 **Regional sounds.** Phase zero requires at least one resolved SHOT set. Add
 `(packedHandle & 15) << 11` to time-of-day Q16, with signed wrapping, then use
 strict intervals (4,10), (10,17), and (17,21); every other value selects night.
 Exact boundaries therefore select night. The first intact-model SOUND
 userpoint supplies position when its one-based byte resolves; otherwise use the
-entity origin. After attempting the selected sound, consume one PRNG16 draw
-even when only another region has a resolved sound. Store the base delay plus
-the low dword of `(range * random16 + 0x8000) >> 16`.
+entity origin, transformed by the cached entity orientation matrix (entity+0xB4,
+which carries the def scale). After attempting the selected sound, take one step
+of the inline dword_31BFBB8 rotate LCG (`@ 0x4083F0`, the throwable fan stream's
+owner, not PRNG_Next16's dword_31BFBB0) even when only another region has a
+resolved sound. Store the base delay plus the low dword of
+`(range * random16 + 0x8000) >> 16`. The emitter class re-arms through the same
+dword_31BFBB8 step (`@ 0x43F999`).
 [orig: Entity_SpawnRegionalEffect @ 0x408290; Entity_CalcTimeOfDayRegion @ 0x408110;
-Entity_InitFromModel @ 0x40DC30]
+Entity_InitFromModel @ 0x40DC30; entity_spawn_bone_trail_effect @ 0x43F8F0]
 
 `dawnshot/dayshot/duskshot/nightshot` parse a 24-byte name plus two doubles
 multiplied by **62.0**, truncated through the x87 signed-i64 low-dword store.
@@ -5572,7 +5585,11 @@ lower and already detached sections, and run the separate 0x4A8340 motor. Its
 spin, pitch acceleration, two endpoint contacts, half-unit gravity, eighth-speed
 vertical bounce and final 0x4A8220 effect clock are ported. Spawn pivots come from
 intact COBJ, while the death renderer pivots around the first surviving section
-of the final-husk-or-primary-husk COBJ.
+of the primary-husk COBJ: the section template stores only +0x34 huskModel
+(`@ 0x440343`), never +0x38, so the renderer's +0x38 ?: +0x34 pick (`@ 0x492B46`)
+always lands on the primary husk. Its two endpoint contacts and the settle
+loop emit the interned def+0x412 `particledeath` handle (`@ 0x4A84B8`,
+`@ 0x4A8565`, `@ 0x4A8880`), the same word the 0x4A8220 clock reads.
 [orig: Entity_UpdateSectionDamage @ 0x4406A0; Entity_SpawnSectionEntity @ 0x4402D0;
 Entity_CloneFromTemplateByType @ 0x4398A0; Entity_InitFloatingPhysics @ 0x4A8340;
 Entity_UpdateFloatingPhysics @ 0x4A8220; Entity_BuildDeathSectionTransforms @ 0x492AF0]
@@ -5585,7 +5602,7 @@ and calls phase four without overwriting the animation or attacker. Authority
 class sends and 0x12 removals reach active remote players including dead players,
 with reliable/life-zero packets and drained outboxes.
 [orig: Projectile_ProcessDamageOnTarget @ 0x4E7FB0; Weapon_CalcImpactDamage @ 0x4EC920;
-NapiNPClientMsg_EntityStateUpdate @ 0x42EC30; Entity_KillBySlotId @ 0x42BCE0;
+NapiNPClientMsg_0x026 @ 0x42EC30; Entity_KillBySlotId @ 0x42BCE0;
 Server_SendEntityStatePacket @ 0x509D70]
 
 **Class boundaries.** Squib and the shared state, scoring, fade, ambient, and
@@ -5594,8 +5611,11 @@ world-space group with the entity, but discards the returned handle: it neither
 stores +0x1CC nor follows/releases with the entity. The transient path matches
 that behavior (0x4A82E7/0x4A8325 -> 0x5F6FE0 -> 0x5F6DF0; destructor 0x5E3460).
 Malformed source models/section indices are bounded: absent palm pivots suppress
-fragment allocation, and tower indices beyond its owned 256-byte counter bank or
-loaded COBJ count are inert. Retail dereferences these unchecked (D-ITEM-7).
+fragment allocation, and tower indices beyond the def's int8 husk section count
+(the authority bound `@ 0x440722`, applied to the client leg too, whose retail
+bound is only `> 0` `@ 0x4406C2`) or the loaded COBJ count are inert; the
+per-section damage bytes live in a bank that grows to the written section, so an
+unwritten section reads zero. Retail dereferences these unchecked (D-ITEM-7).
 [orig: Entity_UpdateSectionDamage @ 0x4406A0; WeaponOverlay_HandleDamage @ 0x53C4C0;
 entity_spawn_bone_trail_effect @ 0x43F8F0; crane callback @ 0x43FC70;
 Entity_ApplyGravityAndGroundCheck @ 0x43FB30; Entity_UpdateWaterPhysicsAndEffects @ 0x4A92E0;

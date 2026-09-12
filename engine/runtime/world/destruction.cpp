@@ -1149,8 +1149,9 @@ static void transition_to_ground_death(Entity &e, const ItemDeathTraits *traits,
 
 void tick_item_death_motion(World &world, Entity &entity,
         const terrain::TerrainHeightField *terrain, float water_height, DestructionEvents &events) {
-    // The update callback runs after this entity's class event and on every
-    // visit, including ticks outside the pool's event-clock cohort.
+    // The update callback runs after this entity's class event on the same
+    // pool visit: every tick in pool 1, the slot cohort (every 8 / 64 ticks)
+    // in pools 2/3 [orig: Entity_UpdateAllEntities @0x4C22E7 / @0x4C2393].
     Entity *e = &entity;
     if (e->motor_suspended) return;
     if (tick_item_class_motion(world, entity, terrain)) return;

@@ -176,14 +176,15 @@ void tick_squib(World &world, Entity &entity) {
         if (old) {
             const char *sound = weapon ?
                     weapon->action_fsm.actions[weapon_action::kFire].soundsetend : ammo->ai_launch_set.c_str();
-            world.out.fire_sounds.play_with_distance_delay(sound,center,entity.bms_id);
+            world.out.fire_sounds.play_with_distance_delay(sound,center,entity.bms_id,entity.handle.packed);
         } else {
             const int32_t next = state.next_ssn;
             const int32_t bms_id = entity.bms_id;
+            const uint16_t packed = entity.handle.packed;
             world.commands.remove_ssn(EntityTarget(entity.handle));
             if (next) world.commands.kill_ssn(EntityTarget(uint16_t(next)));
             else if (weapon) world.out.fire_sounds.play_with_distance_delay(
-                    weapon->action_fsm.soundtrailoff,center,bms_id);
+                    weapon->action_fsm.soundtrailoff,center,bms_id,packed);
             // Retail may continue reading freed pool memory during catch-up.
             // Stop at destruction; never let a later allocation inherit that work.
             return;

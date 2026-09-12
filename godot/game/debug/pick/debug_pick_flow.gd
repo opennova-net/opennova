@@ -8,9 +8,12 @@ const PICK_TOAST_SECONDS := 1.6
 var _toast: Label = null
 
 
+## `presenter` is the presenter the surface draws through (null for a bare
+## camera).
 func pick_at_crosshair(sim: Simulation, camera: Camera3D,
-		pick_list: DebugPickList, toast_mount: Node) -> void:
-	var pick := DebugEntityPicker.pick_at_crosshair(sim, camera)
+		presenter: LocalPlayerPresenter, pick_list: DebugPickList,
+		toast_mount: Node) -> void:
+	var pick := DebugEntityPicker.pick_at_crosshair(sim, camera, presenter)
 	if pick == null:
 		return
 	if not pick.hit:

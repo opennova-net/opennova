@@ -190,7 +190,8 @@ void VehicleSystem::play_contact_sound(Entity &vehicle, const VehicleTraits &tra
 		// The global name-to-slot table @0x82F590 binds +0x24E0908 and
 		// +0x24E08D4 to these sets. Fallbacks use propagation delay.
 		world_.out.fire_sounds.play_with_distance_delay(
-				slot == 25 ? "TIRE_SKID" : "IMP_DEBMED_LAND", vehicle.position, vehicle.bms_id);
+				slot == 25 ? "TIRE_SKID" : "IMP_DEBMED_LAND", vehicle.position, vehicle.bms_id,
+				vehicle.handle.packed);
 }
 
 void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &traits, bool wrecked, bool collided) {

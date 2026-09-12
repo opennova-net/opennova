@@ -210,7 +210,39 @@ static void test_vehicle_spawn_pose_is_captured_after_initial_wac() {
  CHECK(hull->position.x == 100 && hull->veh.spawn_pose[0] == 100 * 65536);
 }
 
+// SndProf.def is parsed by the kernel's script_catalogs step exactly once, and
+// a table an embedder filled before the boot wins (the parse appends).
+static void test_sound_profiles_parse_once_and_keep_a_pre_boot_override() {
+    std::map<std::string, std::string> files;
+    files["SndProf.def"] = "begin alpha\nend\nbegin beta\nend\n";
+    {
+        ms::MissionKernel kernel;
+        kernel.open_document(bms::File{}, "synth", source_over(&files));
+        ms::KernelBootOptions options;
+        options.playable = false;
+        std::string error;
+        CHECK(kernel.boot(options, error));
+        const auto &entries = kernel.world.tables.sound_profiles.entries();
+        CHECK(entries.size() == 2);
+        CHECK(entries.size() == 2 && entries[0].name == "alpha" && entries[1].name == "beta");
+    }
+    {
+        ms::MissionKernel kernel;
+        kernel.open_document(bms::File{}, "synth", source_over(&files));
+        const std::string pre = "begin embedder\nend\n";
+        kernel.world.tables.sound_profiles.parse(pre.data(), pre.size());
+        ms::KernelBootOptions options;
+        options.playable = false;
+        std::string error;
+        CHECK(kernel.boot(options, error));
+        const auto &entries = kernel.world.tables.sound_profiles.entries();
+        CHECK(entries.size() == 1);
+        CHECK(!entries.empty() && entries[0].name == "embedder");
+    }
+}
+
 int main() {
+	test_sound_profiles_parse_once_and_keep_a_pre_boot_override();
 	test_vehicle_spawn_pose_is_captured_after_initial_wac();
 	test_initial_wac_waits_for_the_weather_owner_once();
 	// The synthetic mission: two placed entities plus one (empty) BMS event,

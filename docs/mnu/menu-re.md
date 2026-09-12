@@ -2145,6 +2145,7 @@ g_hostClassAllowMask`; `WeaponLoadout_ApplyFromBuffer` param 3 ->
 | --- | --- | --- |
 | Host dialog readback and live-rule sentinels | MATCHING (read-only grill) | `HostDialog_ReadSettings @ 0x555940`, `apply_session_settings_to_globals @ 0x551500`; `npruntime_host_settings`; GUT `mp_lan_menu_seam_test` |
 | Aspect control selection and persistence | MATCHING (read-only grill) | `UI_SyncRenderSettingsToWidgets @ 0x55a140`; GUT `menu_shell_test` restores the authored semantic value, persists a change and applies it to the simulation |
+| Aspect projection and the first-launch seed | MATCHING | `Render_SetAspectRatioMode @ 0x58d870`, `Render_SetViewAndProjectionMatrices @ 0x58d900`, `Game_RunVideoTestDialog @ 0x53ed3e`; ctest `player_view` (`view_projection`, `fresh_profile_aspect_seed`), GUT `local_player_presenter_test` (the stretched target), `player_options_test` / `menu_shell_test` (the desktop-ratio seed, persisted once) |
 
 `engine/runtime/inmatch/host_settings.cpp` owns the host control names, integer
 readback, bit polarity and cfg-to-runtime conversions. `MpMenuCompanion` samples
@@ -2188,3 +2189,48 @@ The `16x9DISPLAY` spin is interactive and restores/persists the selected item's
 choices; the other quality controls remain governed by that table. The shared
 player-options state feeds the same aspect mode to camera and sights projection.
 [orig: UI_SyncRenderSettingsToWidgets @ 0x55a140]
+
+Follow-up (2026-09-12): the persisted value is the `Render_SetAspectRatioMode`
+index (0 = 4:3, 1 = 16:10, 2 = 16:9, 3 = 5:4; any other value = the surface's own
+ratio, reachable from the cfg only since the shipped spin authors just the 0 and 1
+rows). The word has three writers. `Config_SetDefaults` assigns it nothing (its
+memset leaves the 0 placeholder), but the FIRST launch seeds it: with no cfg the
+adapter name and GUID stay empty, so the device-name `strnicmp` / GUID `stricmp`
+pair (`Mission_HasMapOrNameChanged` is a kong misnomer for it) reports a change
+and `Game_InitSubsystems` runs the video test, which samples the primary desktop
+(`GetSystemMetrics` SM_CXSCREEN / SM_CYSCREEN), presets the word to 1, drops it
+to 0 unless width / height exceeds the single-precision literal 1.34 (an x87
+`fild`/`fidiv` quotient through `fcom` + `test ah, 5` / `jnp`, the strict ordered
+compare: unordered also drops to 0), mirrors the verdict into the recommended
+block, and saves the whole config, so a later launch reads the word back through
+the settings parser (`display_16x9`, `atol`) and never samples the desktop again.
+The options screen's apply writes the spin's selected value; the session copies
+the video block as is and `Game_StartMission` applies the copy. The port seeds
+`PlayerOptions.aspect_mode` once on a fresh profile (the cfg key absent) through
+`renderer::fresh_profile_aspect_mode` fed by the primary screen and persists it
+at once; `DEFAULT_ASPECT_MODE` 0 stays only as the memset placeholder. (Earlier
+the word defaulted to -1 = native, which no authored row carries, so a fresh
+profile showed the 4:3 row while running native; the first draft of this
+follow-up defaulted it to 0 on the claim that only the parser writes it.) The
+projection itself is reproduced rather than approximated: the
+horizontal fov is mode-invariant across the real width and the vertical
+half-extent follows the SELECTED ratio (`world::view_projection`, the frustum of
+aspect 1/selected stretched selected/(h/w) onto the surface), which the Godot
+shell draws through a SubViewport target of the selected aspect blitted over the
+whole surface (`LocalPlayerPresenter.view_projection`); the first-person viewmodel
+pass rides the same scale, so its fold's focal ratio is the ratio of the two
+horizontal half-tangents (`world::viewmodel_focal_ratio`). Before this the shell
+handed the mode's vertical fov to a height-keeping camera, which widened the
+horizontal fov on a wide surface (96 degrees for mode 0 on 16:9) while the sights
+card already assumed the retail stretch.
+[orig: Config_SetDefaults @ 0x54d046; Game_InitSubsystems @ 0x4a711c /
+@ 0x4a7125; the device-name/GUID compare @ 0x53de40; Game_RunVideoTestDialog
+@ 0x53ecd8 / @ 0x53ece2 (the desktop sample), @ 0x53ed3e / @ 0x53ed4e
+(fild/fidiv), @ 0x53ed52 (preset 1), @ 0x53ed5c (flt_7D15AC = 1.34f),
+@ 0x53ed62 (fcom), @ 0x53ed69 (jnp), @ 0x53ed6b (0), @ 0x53ed77..0x53ed88 (the
+recommended block), @ 0x53edb6 (Game_SaveConfig); Config_ParseSettingsLine
+@ 0x54fd4b; the options apply (sub_55A710) @ 0x55a8b4;
+apply_session_settings_to_globals @ 0x551574; Game_StartMission @ 0x524732;
+Render_SetAspectRatioMode @ 0x58d8a7; Render_SetViewAndProjectionMatrices
+@ 0x58d9b2; Render_SetViewProjectionWithDefaults @ 0x58f6b0; the FP pass
+@ 0x4dee7f]

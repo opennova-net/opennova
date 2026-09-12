@@ -733,16 +733,19 @@ void Match::record_target_destroyed(const World &world, EntityHandle target_hand
     if (target == nullptr || attacker_entity == nullptr ||
         (target->item_attrib & kItemAttribObjectiveTarget) == 0)
         return;
-    // [orig: GameEvent_ProcessScoring @0x52F550, event 11]
+    // [orig: GameEvent_ProcessScoring @0x52F550, event 11 @0x52fa61..0x52fb0e:
+    //  ++stats[14] @0x52fa67, points += table[87] @0x52fa7f, then
+    //  RecordEvent(28, bonus>>1) @0x52faba and RecordEvent(28, bonus>>2)
+    //  @0x52faff on the first and second occupant links, each with an
+    //  event-27 count @0x52facb/@0x52fb0e. Event 28 recurses through both
+    //  links itself (CPlayerStats_RecordEvent @0x52caf8..0x52cbb3), which is
+    //  exactly share_experience: the second link takes the nested
+    //  (bonus>>1)>>1 AND the direct bonus>>2. The scoring head's table gate
+    //  @0x52f627 covers the whole event, the occupant awards included.]
     const int32_t bonus = score_value(13);
-    if (attacker) {
-        add_event(*attacker, MatchStats::kTargetsDestroyed, bonus);
-        const Entity *carrier = world.registry.get(attacker_entity->primary_occupant);
-        for (int hop=1; carrier && hop<=2; ++hop) {
-            if (bonus > 0) if (MatchPlayer *driver=player(carrier->handle))
-                add_event(*driver, MatchStats::kSharedPointAwards, bonus >> hop);
-            carrier=world.registry.get(carrier->primary_occupant);
-        }
+    if (attacker && gt::has_score_table(rules_.game_type)) {
+        add_event(*attacker, MatchStats::kTargetsDestroyed, 0);
+        share_experience(world, *attacker, bonus);
     }
     if ((rules_.game_type & 0x10000u) != 0)
         add_team_event(attacker_entity->team, MatchStats::kTargetsDestroyed, bonus);

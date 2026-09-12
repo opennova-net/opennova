@@ -374,7 +374,7 @@ consumed by the death edge's `is_local_player` branch.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-10 | FIXED 2026-09-11: chute/freefall refires use the finite 26-channel allocator; exclusive-voice shortcut removed | Retail refires obey normal channel stealing | Supersedes the 2026-08-29 permanent mechanism choice; oneshot_play and sound_runtime_test |
+| D-SND-10 | FIXED 2026-09-11 (own-channel reuse added 2026-09-12): entity-sourced refires run the finite 26-channel allocator keyed on the source entity (`audio::oneshot_sound_id`: the packed handle, BMS-id fallback), carried by `ReadyFireSound` and the slot-sound drain into the open; the exclusive-voice shortcut is removed | the open scores a channel already playing the same wave for the same entity at ZERO, so a refire retakes its OWN channel and kills the previous instance instead of stealing the quietest other one (`audio_find_and_open_channel @ 0x766F46` / `@ 0x766F8E`; the entity rides `Sound_Play3DPositional @ 0x527E4A` -> `SoundBank_PlayTriggerEntries @ 0x75CE4F` -> the open `@ 0x75CFD4` / `@ 0x75CFE3`); id-less plays (interface `@ 0x527C04`, weather `@ 0x527BB4`, delayed slots `@ 0x52937B`) steal normally | Supersedes the 2026-08-29 permanent mechanism choice; ctests `audio_oneshot_play` + `audio_fire_sound_peer_gate`, GUT `sound_runtime_test` |
 | D-SND-11 | FIXED 2026-08-13: the pick reads the live `Entity::ground_target` — the `entity+0x28 groundEntity` link the collision resolve's ground probe stores unconditionally every tick (null on a miss) — and the terrain-cache fallback (no collision world) clears it, mirroring the probe's null store. The never-set `InfantryState::standing_on_entity` mirror is deleted | `entity+0x28 groundEntity` (written by the ground probes, `Entity_RaycastGroundHeightAndObject @ 0x414320` — the unconditional `+0x28` store `@ 0x414370`; the resolver call `@ 0x525fd0`) selects `SS*FootOBJ` when standing on an entity; the sound block runs BEFORE the tick's resolve in both bodies (org1 `@ 0x4bf23e` precedes the resolve tail `@ 0x4bf7b8`), so the read is last tick's link — matched | a single generic OBJ pair, no per-object material (a wooden dock plays the walker's `SS*FootOBJ` — retail behavior); ctest `slot_sound` (`test_foot_obj_pick`: pick, water>OBJ>snow order, fallback staleness clear) |
 | D-SND-12 | FIXED 2026-08-15: both items.def profiles resolve, and player slot sounds choose the female profile when the reset-stable `CharacterTraitsTable` marks the entity's packed avatar id female; unknown ids and NPCs stay on primary | the character entity's female byte picks def+2152 `@ 0x52831c` | `AvatarDatabase` projects packed character id + `combo.head.sex` through `Simulation::set_character_avatar_database`; `slot_sound` pins female selection, unknown fallback, and the NPC packed-id collision guard, while `avatars_data_test` pins the retail projection |
 | D-SND-13 | SndProf.def parses per mission load off the mission resource root | one boot-time load + expansion reloads | same file, same table; no observable difference — PERMANENT 2026-08-29 (ADR 0022 register) |
@@ -875,21 +875,35 @@ The native one-shot allocator models 26 physical channels (12 reserved and
 14 general), the priority-two replacement rule, and set/member pitch
 jitter draws before attenuation. The ROL3 stream starts at 0x2B0749C1 and
 advances even when authored jitter is zero. Default master/category volume
-is 192. Repeated chute/freefall plays use this finite allocator; D-SND-10's
-former exclusive-voice choice is no longer implemented.
+is 192. Entity-sourced plays hand the source entity to the open as its
+sound_id, and a channel already playing the same wave for the same entity
+scores zero, so a refire retakes its own channel (D-SND-10); the former
+exclusive-voice choice is no longer implemented. Mission dialog never enters
+the trigger-set player: the line resolves to one wave entry by name and plays
+at the dialog module's fixed frequency, with no set/member pitch composition
+and none of its two ROL3 draws (the port's per-layer member pick still draws
+for random layers: the older, separately tracked selector divergence).
 [orig: SoundBank_PlayTriggerEntries @ 0x75CCD0;
-audio_find_and_open_channel @ 0x766E80]
+audio_find_and_open_channel @ 0x766E80, own-channel score @ 0x766F46 / @ 0x766F8E;
+Sound_Play3DPositional @ 0x527E4A; Dialog_LoadAudioClip @ 0x44DE8B ->
+AudioChannel_PlaySound, the name lookup @ 0x44DD0B -> @ 0x75BDD4]
 
 Weapon head/fireloop/trailoff and Finish's kick gate are ported. Loop lifetime
-is the sign-extended kick byte; ownerless slots still decay but cannot emit
-head/tail/loop. Held receive replay and carrier ownership are detailed in
+is the sign-extended kick byte stored as the slot's 16-bit word and read back
+UNSIGNED (a kick of 0x80 or more is a 65408..65535-tick loop, never a dead
+one; `audio::emitter_lifetime_word`); ownerless slots still decay but cannot emit
+head/tail/loop. The presenting-peer gate sits inside the plays, so a
+listener-less host still replays the adm arm's kick/heat rows and readies
+nothing. Held receive replay and carrier ownership are detailed in
 net-re's weapon-replay section. S2C 0x3A queues local medic kit/voice cues;
 0x6D retains independent chat/voice mute decisions and request state,
 including canonical replica-only speakers. Feed 19/20/21 uses its witnessed
 immediate sound and delayed interface-voice tables.
 [orig: ActionSlot_FinishActivePhase @ 0x53F7B0;
-WeaponAction_ProcessFrame @ 0x540E60; NapiNPClientMsg_0x03A @ 0x422680;
-NapiNPClientMsg_HandleEntityDeath @ 0x430C50]
+WeaponAction_ProcessFrame @ 0x540E60, the kick sign-extend @ 0x5412E8;
+SoundEmitter_RegisterSetLayers @ 0x528471; SoundEmitter_UpdateAndMixTop8
+@ 0x528529..0x52854D; Sound_Play3DPositional @ 0x527CB3;
+NapiNPClientMsg_0x03A @ 0x422680; NapiNPClientMsg_HandleEntityDeath @ 0x430C50]
 
 Validation: oneshot_play, fire_sound, weapon_fsm, npruntime_client_runtime,
 npruntime_client_message_dispatch, and focused sound/presenter GUT cases.

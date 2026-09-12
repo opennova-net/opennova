@@ -44,7 +44,31 @@ struct FriendlyTagSource {
     bool has_slot = false;
     uint8_t revive_seconds = 0;
     bool medic_request = false;
+    // The radio-request icon's per-tag fold: the entity's S2C 0x6D latch
+    // (entity+885) AND no def-type-1 carrier in its groundEntity walk
+    // [orig: HUD_DrawEntityLabel `cmp byte ptr [ebx+375h], 0` @0x5a3bfe;
+    //  Entity_FindChildByDefType(entity, 1, 1) @0x5a3c0e; `xor ebp, ebp`
+    //  @0x5a3c1a]. The viewer half of the arm is
+    // friendly_tag_radio_request_viewer below.
+    bool radio_request = false;
 };
+
+// Whether the groundEntity walk from `first` reaches a def-type-1 (vehicle)
+// link within the 19-link bound [orig: Entity_FindChildByDefType @0x43bea0 —
+// the entity's groundEntity @0x43bea4, the itemDef NULL stop @0x43bec5, the
+// `iteration >= 20` stop @0x43beca, `def->type == defType` @0x43becf, the
+// next link @0x43bed7]. `first` is the walked entity's own ground_target (the
+// drawer passes the entity; the walk starts at its +0x28); a joiner's roster
+// walk passes the decoded row's carrier handle, the same field off the wire.
+bool friendly_tag_aboard_vehicle(const World &world, EntityHandle first);
+
+// The radio-request icon's VIEWER gate: the local player's mount state
+// (+0x168) is a Controller (2) or Driver (5) seat, or the local player
+// carries its own +885 latch [orig: HUD_DrawEntityLabel @0x5a3bba..0x5a3be8
+// — `mov ecx, [eax+168h]; cmp ecx, 2` @0x5a3bcb, `cmp ecx, 5` @0x5a3bd6,
+// `cmp byte ptr [eax+375h], 0` @0x5a3bdf]. Feeds
+// HudFrameState::radio_request_icon_viewer.
+bool friendly_tag_radio_request_viewer(const Entity &local);
 
 // The facts a player's connection slot contributes to its tag [orig: the
 // PlayerSlot bytes +0x10 (revive seconds) and +0x2C (medic request), written

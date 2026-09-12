@@ -113,11 +113,35 @@ private:
 	std::array<Channel, kAudioChannelCount> channels_{};
 };
 
+// The one-shot's own-channel reuse key. Retail hands the SOURCE ENTITY pointer
+// to the open call as its sound_id, and the allocator scores a channel already
+// playing the same wave for the same id at ZERO, so an entity re-firing a wave
+// restarts its own voice instead of stealing the quietest other one
+// [orig: audio_find_and_open_channel @0x766F46 / @0x766F8E (score 0 on the
+// (wave, sound_id) match; the 12*vol floor @0x766F0A never beats it);
+// Sound_Play3DPositional @0x527E4A stores the entity, SoundBank_PlayTriggerEntries
+// @0x75CE4F carries it into the open call (push @0x75CFD4, call @0x75CFE3),
+// Entity_PlaySound3D_FullVolume @0x528E31 forwards it]. Our entities have no pointer identity: the packed
+// handle is tagged into a nonzero word (pool 0 slot 0 packs to 0) and a
+// handle-less caller falls back to its tagged BMS id. 0 = no identity, the
+// retail NULL of the interface, weather and delayed-slot plays
+// [orig: play_positional_sound @0x528E02; Sound_PlayTriggerSetScaled @0x527BB4;
+// Sound_PlayInterfaceTriggerSet @0x527C04].
+inline constexpr uint16_t kNoSourceHandle = 0xFFFFu; // world::EntityHandle::kInvalid
+inline uint32_t oneshot_sound_id(uint16_t packed_handle, int32_t bms_id) {
+	if (packed_handle != kNoSourceHandle) return 0x10000u | packed_handle;
+	if (bms_id != 0) return 0x80000000u | static_cast<uint32_t>(bms_id);
+	return 0;
+}
+
 struct OneshotPlan {
 	// The set passed the range cull (and the post-occlusion recheck).
 	bool in_range = false;
 	// The fire distance the volumes snapshot (occlusion-inflated).
 	int64_t dist_q16 = 0;
+	// The own-channel reuse key the allocator scores by (oneshot_sound_id);
+	// 0 on the id-less plans.
+	uint32_t sound_id = 0;
 	std::vector<OneshotVoice> voices;
 };
 
@@ -135,10 +159,11 @@ OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &l
 // play, no per-frame update]; `has_listener` false plans distance-flat (menu /
 // tests). Every layer picks its member (advancing the selector) even when the
 // shell later fails to resolve its wave, so the pick stream matches a full
-// fire. `occl` may be null (an unoccluded fire).
+// fire. `occl` may be null (an unoccluded fire). `sound_id` is the own-channel
+// reuse key (oneshot_sound_id) the plan carries to the allocator.
 OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 		const float world_pos[3], const float listener_pos[3], bool has_listener,
-		int64_t source_bms_id, OcclusionFn occl, void *occl_ctx,
+		int64_t source_bms_id, uint32_t sound_id, OcclusionFn occl, void *occl_ctx,
 		SoundSelector &selector);
 
 } // namespace opennova::audio

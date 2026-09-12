@@ -199,7 +199,21 @@ func test_start_game_defaults() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
 	var driver := _make_host_driver()
+	# The retail config defaults copy the Menu/UNTITLED gametext into the
+	# session name before the host screen is populated from the config.
+	var previous_gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	var gametext := RtxtStringFile.new()
+	gametext.add_entry("UNTITLED", "!Untitled", gametext.add_section("Menu"), Vector2i.ZERO)
+	Strings.register_table(Strings.TABLE_GAMETEXT, gametext)
 	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	Strings.register_table(Strings.TABLE_GAMETEXT, previous_gametext)
+	assert_eq(driver.get_widget_text(driver.widget_id("GAME_NAME")), "!Untitled",
+			"the populate seeds GAME_NAME from the Menu/UNTITLED gametext")
+	assert_eq(driver.get_widget_text(driver.widget_id("MAX_PLAYERS")),
+			str(HostSessionConfig.DEFAULT_MAX_PLAYERS),
+			"the populate seeds MAX_PLAYERS from the record's cap")
+	assert_false(driver.is_widget_checked(driver.widget_id("ALLOW_SPECTATORS")),
+			"the populate seeds ALLOW_SPECTATORS off (spectator_slots 0)")
 	# An empty rotation never starts [orig: the START_GAME interactive gate on
 	# the selected table @0x557f09 / the init disable @0x5589f2].
 	_press(driver, "START_GAME")
@@ -214,14 +228,22 @@ func test_start_game_defaults() -> void:
 			"a filled rotation arms START_GAME")
 	_press(driver, "START_GAME")
 	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
-	assert_eq(config.server_name, "", "an existing blank name field is read verbatim")
-	assert_eq(config.max_players, 0, "blank edit reads zero before the live slot clamp")
+	assert_eq(config.server_name, "!Untitled", "an untouched host screen hosts under the seeded name")
+	assert_eq(config.max_players, HostSessionConfig.DEFAULT_MAX_PLAYERS,
+			"an untouched host screen hosts with the seeded cap")
 	assert_eq(config.spectator_slots, 0,
 			"unchecked ALLOW_SPECTATORS disables spectator admission")
 	assert_eq(config.spectator_password, "")
 	assert_eq(config.mission, "alpha.bms", "the rotation head is the mission")
 	assert_eq(config.bind_port, HostSessionConfig.DEFAULT_LAN_PORT,
 		"the witnessed retail LAN host port rides the record default")
+	# A user-cleared edit is still read verbatim: no shell fallback substitutes.
+	driver.set_widget_text(driver.widget_id("GAME_NAME"), "")
+	driver.set_widget_text(driver.widget_id("MAX_PLAYERS"), "")
+	_press(driver, "START_GAME")
+	var cleared: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
+	assert_eq(cleared.server_name, "", "a cleared name field is read verbatim")
+	assert_eq(cleared.max_players, 0, "a cleared cap edit reads zero before the live slot rule")
 
 
 # The SERVERTYPE/GAME_TYPE spin semantics ride the authored item `value=` attr, NOT
@@ -403,8 +425,27 @@ func test_host_rule_controls_reach_native_session_configuration() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
 	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	# The populate seeds the rule controls from the record defaults: the
+	# inverted flag spins show a CLEAR bit as 1, the sentinels map back to
+	# their dialog numbers, SERVERTYPE reads serve-and-play as 0.
+	assert_eq(driver.get_widget_text(driver.widget_id("TIME")), "30")
+	assert_eq(driver.get_widget_text(driver.widget_id("RESPAWN")), "5")
+	assert_eq(driver.get_widget_text(driver.widget_id("MAX_KOTH")), "10")
+	assert_eq(driver.get_widget_text(driver.widget_id("KILL_LIMIT")), "50")
+	assert_eq(driver.get_widget_text(driver.widget_id("TAKEOVER_TIME")), "15")
+	assert_eq(driver.spin_value_attr(driver.widget_id("FRIENDLY_TAG")), "1",
+			"friendly tags default on (mp_attributes bit 0x400 clear)")
+	assert_eq(driver.spin_value_attr(driver.widget_id("TEAM_FF")), "0",
+			"friendly fire defaults off (mp_attributes bit 0x200 set)")
+	assert_eq(driver.spin_value_attr(driver.widget_id("LFP_TAKEOVER")), "1")
+	assert_eq(driver.spin_value_attr(driver.widget_id("SERVERTYPE")), "0")
 	for control in edits:
 		driver.set_widget_text(driver.widget_id(control), edits[control])
+	# The user turns friendly fire, tags, the warning and tracers off ...
+	for control in ["TEAM_FF", "FRIENDLY_TAG", "FF_WARNING", "TRACERS"]:
+		driver.select_row(driver.widget_id(control), 0)
+	# ... and team choice, claymore preference, the takeover speed and the
+	# dedicated server type on.
 	for control in ["TEAM_CHOOSE", "CLAYMORE_PREF", "LFP_TAKEOVER", "SERVERTYPE"]:
 		driver.select_row(driver.widget_id(control), 1)
 	mp.seed_host_pool([_pool_row("alpha.bms")])

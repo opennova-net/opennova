@@ -11,7 +11,7 @@ add_library(opennova_runtime STATIC
     # anim — skeletal sampling + the aim overlay (.adm parse: engine/formats/adm)
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/aim_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/anim_sample.cpp
-    anim/clip_timeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/anim/clip_timeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/skeletal_pose.cpp
     # audio — mixers, bank chain, envs markers, selectors, profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_mixer.cpp
@@ -257,9 +257,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/radio_call.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/script_voice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_fsm.cpp
-    world/weapon_fire_gate.cpp
-    world/weapon_scope_zero.cpp
-    world/local_player_targeting.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_fire_gate.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_scope_zero.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player_targeting.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/wire_body_sound.cpp    # the wire-fed remote body's footstep/foley consume
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_inventory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/zone_capture.cpp

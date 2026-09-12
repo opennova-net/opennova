@@ -3652,8 +3652,13 @@ Z):
    `Entity_ComputeSuspensionAndOrientation` @ 0x4698A0 (the third §4-family
    instance; positive-only corner average + fidiv by the positive count
    @ 0x46AF54..0x46AFE1, the same MAIN_FIT core as `plat_fit_corners`).
-   Inverted: select the retained maximum over ALL 13 d's [orig: @ 0x478D15 with the
-   gated scan @ 0x477FF4..0x478014]; the upside no-wheel-contact arm lifts by
+   Inverted: select the retained maximum over ALL 13 d's [orig: seed
+   @ 0x478391, gate (+2EC || up.z < 0 || +2F0) @ 0x4783BA..0x4783D1, the
+   13-record max (stride 0Ch, bound 9Ch) @ 0x4783D5..0x4783EC, consumer
+   `Position.Z +=` @ 0x479311..0x479318; the four-WHEEL max the failed-fit
+   arms add instead is seeded @ 0x478B69/@ 0x478B72, scanned
+   @ 0x478D0E..0x478D4D and consumed @ 0x479075..0x479079 /
+   @ 0x4791D9..0x4791DD]; the upside no-wheel-contact arm lifts by
    the max over the SEVEN contact slots [orig: @ 0x47843E..0x478540].
 6. **The corner quad lifts by the four WHEEL d's only** (belly/spine d's feed
    severity and the Z maxes) [orig: the zero-state spring loop
@@ -5179,7 +5184,7 @@ The +0x3E0 launch vector normalizes displacement from **saved live pose**,
 replaces X/Y with the pre-solve forward axis, then normalizes again. Active
 supported travel consumes all three components; the not-crashed off-contact
 arm writes X/Y and retains vertical velocity. This closes D-NET-161 (a).
-[orig: Entity_ProcessLightVehiclePhysics @ 0x47BF01..0x47C03B;
+[orig: Entity_ProcessLightVehiclePhysics @ 0x47BF00..0x47C03B;
 Entity_UpdateLightVehiclePhysics @ 0x486052..0x48657E]
 
 Validation: native `vehicle_followups`, `vehicle_motor`, and
@@ -5199,3 +5204,17 @@ contact and suspension handling. The 0x468BC1 witness now sits at that contact
 gate. The 0x48524C store arms wheelie-active (+0x3DE), alongside the request
 byte at 0x485245. The citation census retires the two mid-instruction addresses
 0x478D06 and 0x468CE1; no translated behavior was deleted.
+
+Follow-up (2026-09-12, PR #646 review): the wheeled crash-depth pairing above
+was itself wrong. 0x477FF4..0x478014 is argument marshalling for the
+`Entity_ComputeBoundingQuad` call @ 0x47801C (both endpoints mid-instruction)
+and 0x478D15 is the `cmp eax, -1` of the FOUR-wheel-record max
+(@ 0x478D0E..0x478D4D, seeded -1 @ 0x478B69/@ 0x478B72) that only the
+failed-fit arms add to Position.Z (@ 0x479075..0x479079 /
+@ 0x4791D9..0x4791DD). The gated 13-record crash max is seeded @ 0x478391,
+gated on `+2EC || up.z < 0 || +2F0` @ 0x4783BA..0x4783D1, scanned
+@ 0x4783D5..0x4783EC (stride 0Ch, bound 9Ch) and consumed @ 0x479311..0x479318.
+The 7-slot scan @ 0x478726..0x4787AF is the +2EF/+364/+365 latch arm, not a
+depth. The census retires 0x477FF4, 0x478014 and 0x478D15 as crash-depth
+witnesses; the translated `crash_depth` / `wheel_depth` split was already
+correct. [orig: Entity_ProcessWheeledVehiclePhysics @ 0x475DE0]

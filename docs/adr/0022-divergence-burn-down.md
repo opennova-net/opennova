@@ -124,7 +124,9 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
   choices tabled 2026-08-04: the merged bank chain (a collision-free superset), the
   authoring-side parser strictness, the dialog FIFO (no overlap either way), the
   ChuteFlap/FreeFall voice coalescing (audibly equivalent), and the per-load SndProf.def
-  parse (same file, same table). (Ratified 2026-08-29.)
+  parse (same file, same table). (Ratified 2026-08-29. D-SND-10 was superseded 2026-09-11:
+  the coalescing is gone and the ledger closes it `FIXED` on retail's own-channel score-0
+  reuse in `audio_find_and_open_channel @0x766E80`.)
 - **D-LOADSCR-1 / D-LOADSCR-6 / D-LOADSCR-7** — the loading-screen structural choices
   tabled 2026-08-04: the coarser progress granularity (same values, same pump), the
   unmodulated background (MODULATE2X-neutral, net-identical), and the uninterruptible
@@ -170,6 +172,15 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
   the pointer that `HeliLift_UpdateSlotState @0x451730` dereferences on treatment expiry
   (`@0x451e09`; `@0x451e4c`; `HeliLift_UpdateAll @0x451FA0` only compacts the slots and calls it).
   **Proposed in PR #642 (2026-09-09); requires maintainer ratification at merge.**
+- **D-EVT-7** — the BMS loadout-record sanitizer bounds an incomplete tail to empty
+  strings and retains oversized typed records; retail's `AIProfile_SanitizeConfigData
+  @0x40cfe0` walks three verbatim strings plus the optional fourth field past the chunk
+  and can overflow its 2048-byte temporary before capping the final copy. Reading past
+  the record and overflowing a fixed temporary is memory corruption whose outcome depends
+  on the adjacent bytes; well-formed records never reach the boundary
+  (mission/bms-event-runtime-re.md §6.3a). **Proposed in PR #646 (2026-09-11) as a
+  bounded format projection; requires maintainer ratification at merge — no sign-off has
+  been recorded yet.**
 - **D-RORD-6** — the two original sort-key quirks (opaque key bits 15+ carry residual
   stack garbage; the transparent key lags one strip within a render object) are not
   reproduced — reproducing either manufactures garbage. (Ratified at REN-3; entry

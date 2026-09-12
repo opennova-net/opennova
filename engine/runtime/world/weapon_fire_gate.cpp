@@ -13,6 +13,9 @@ void weapon_fire_environment_inputs(const World &world, const Entity &owner,
             world.env.water_z;
     inputs.drowning = ((owner.flags | owner.engine_flags) & 0x8000u) != 0;
     inputs.ignore_ammo_cost = world.rules.ignore_weapon_ammo_cost;
+    // The outer loop's catch-up flag the fire-loop emitter reads
+    // [orig: dword_24E0E80 @0x5412a7; Game_MainLoop @0x52ba32..0x52ba3a].
+    inputs.last_tick_of_batch = world.rules.last_tick_of_batch;
     inputs.protected_carrier = false;
     // First type-1 carrier in the 19-link groundEntity walk.
     // [orig: Entity_FindChildByDefType @0x43bea0]
@@ -87,8 +90,16 @@ int weapon_fire_origin_status(const World &world, const Entity &owner,
         squared += double(dz) * dz;
         const Entity *mount = world.registry.get(owner.mount_target);
         limit = mount != nullptr ? to_fixed(2.0f * mount->bound_radius) : 0x30000;
-        if (mount != nullptr && (mount->emplacement_attachment_flags & 2u) != 0 &&
-                (mount->item_attrib & 0x80000u) != 0) {
+        // A gunner on an attached, parent-routed mountable gun
+        // (Entity_IsMountableGun: itemdef && type != 1 && attrib & 0x20; the
+        // attachment flag +0x326 & 2; the MountSlot+0x5E redirect bit at
+        // entity+0x312 & 8) measures against its type-1 EWEAP hull instead.
+        // [orig: Server_ClientFiredRound @0x50c43e..0x50c475;
+        //  Entity_IsMountableGun @0x434240]
+        if (mount != nullptr && mount->has_item_def && mount->item_type != 1 &&
+                (mount->item_attrib & kItemAttribEweap) != 0 &&
+                (mount->emplacement_attachment_flags & 2u) != 0 &&
+                mount->primary_weapon_slot.redirect_to_parent_slot) {
             const Entity *parent = world.registry.get(mount->ground_target);
             if (parent != nullptr && parent->has_item_def && parent->item_type == 1 &&
                     (parent->item_attrib & 0x20u) != 0)

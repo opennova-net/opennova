@@ -778,6 +778,41 @@ void test_retail_zone_and_tkoth_win_quirks() {
     }
 }
 
+// Event 11's occupant awards run through event 28, which recurses through both
+// occupant links: the first link takes bonus>>1, the second the nested
+// (bonus>>1)>>1 plus the direct bonus>>2 with TWO event-27 counts.
+// [orig: GameEvent_ProcessScoring @0x52fa61..0x52fb0e;
+// CPlayerStats_RecordEvent @0x52caf8..0x52cbb3]
+void test_target_destroyed_shares_through_both_occupant_links() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 8);
+    world->registry.configure_pool(1, 16);
+    const EntityHandle blue = player(*world, 0, 1, "Blue");
+    const EntityHandle first = player(*world, 1, 1, "First");
+    const EntityHandle second = player(*world, 2, 1, "Second");
+    world->registry.get(blue)->primary_occupant = first;
+    world->registry.get(first)->primary_occupant = second;
+
+    MatchRules demolition;
+    demolition.game_type = gt::kSearchAndDestroy;
+    demolition.game_time_minutes = 1;
+    world->match.configure(demolition);
+    world->match.upsert_player({blue, 0, "Blue"});
+    world->match.upsert_player({first, 1, "First"});
+    world->match.upsert_player({second, 2, "Second"});
+    const EntityHandle red_target = demolition_target(*world, 2);
+    world->match.advance_tick(*world); // freezes the authored target census
+    world->match.record_target_destroyed(*world, red_target, blue);
+    const int32_t bonus = 50; // scoringTable[87] for the demolition family
+    CHECK(world->match.player(blue)->stats[MatchStats::kTargetsDestroyed] == 1);
+    CHECK(world->match.player(blue)->stats[MatchStats::kPoints] == bonus);
+    CHECK(world->match.player(first)->stats[MatchStats::kPoints] == (bonus >> 1));
+    CHECK(world->match.player(first)->stats[MatchStats::kSharedPointAwards] == 1);
+    CHECK(world->match.player(second)->stats[MatchStats::kPoints] ==
+          ((bonus >> 1) >> 1) + (bonus >> 2));
+    CHECK(world->match.player(second)->stats[MatchStats::kSharedPointAwards] == 2);
+}
+
 void test_demolition_flag_and_flagball_gameplay() {
     auto world = std::make_unique<World>();
     world->registry.configure_pool(0, 8);
@@ -1226,6 +1261,7 @@ int main() {
     test_retail_objective_proximity_scoring_events();
     test_retail_zone_and_tkoth_win_quirks();
     test_demolition_flag_and_flagball_gameplay();
+    test_target_destroyed_shares_through_both_occupant_links();
     test_flag_me_keeps_retails_unreachable_score_arm();
     test_flag_contact_requires_the_retail_move_callback_gate();
     test_aas_capture_scoring_and_outcomes();

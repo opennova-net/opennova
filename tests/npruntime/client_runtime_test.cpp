@@ -1240,6 +1240,11 @@ bool run_retail_post_auth_prelude() {
 		mission_data_chunk[12 + 44 + static_cast<std::size_t>(shift / 8)] =
 				static_cast<uint8_t>(kMissionMpAttributes >> shift);
 	}
+	constexpr uint32_t kMissionMaxPlayers = 24u; // the fixed block's dword @36
+	for (int shift = 0; shift < 32; shift += 8) {
+		mission_data_chunk[12 + 36 + static_cast<std::size_t>(shift / 8)] =
+				static_cast<uint8_t>(kMissionMaxPlayers >> shift);
+	}
 	const std::vector<uint8_t> mission_data_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{
@@ -1251,7 +1256,8 @@ bool run_retail_post_auth_prelude() {
 			joiner.handle_datagram(
 					mission_data_datagram.data(), mission_data_datagram.size());
 	if (!expect(mission_data_result.outbound.empty() &&
-			joiner.mp_attributes() == kMissionMpAttributes,
+			joiner.mp_attributes() == kMissionMpAttributes &&
+			joiner.session_max_players() == kMissionMaxPlayers,
 			"final mission-data chunk waits for the player-list boundary")) {
 		return false;
 	}
@@ -5574,6 +5580,113 @@ bool run_contextual_radio_keys_match_retail() {
             "tank driver's second radio uses the wheeled-vehicle remap");
 }
 
+// The 0x21 source is the credited attacker; a pool-1..3 source resolves to the
+// joiner's materialized twin, so the explosion's row-5 impact sound reads its
+// +0x26C damage ammo and bms id rather than the row snapshot's zero defaults.
+bool run_explosion_sound_reads_the_pool_twin_damage_ammo() {
+    inmatch::ClientRuntime runtime("ExplosionAudio");
+    w::World world;
+    world.rules.logic_authority = false;
+    world.rules.mp_session = true;
+    world.registry.configure_pool(1, 8);
+    w::Entity attacker;
+    attacker.item_id = 1291; attacker.has_item_def = true;
+    attacker.bms_id = 4242;
+    attacker.squib.damage_ammo_index = 2;
+    const auto source = world.registry.spawn(1, attacker);
+    ns::ClientEntityState &row = runtime.state().upsert(source.packed);
+    row.type_id = 1291; row.cls = EntityClass::Vehicle;
+    world.tables.ammo.entries.resize(3);
+    world.tables.ammo.entries[0].valid = true;
+    world.tables.ammo.entries[0].impact_effects[5].sound = "DEFAULT_BOOM";
+    world.tables.ammo.entries[2].valid = true;
+    world.tables.ammo.entries[2].impact_effects[5].sound = "ITEM_BOOM";
+    world.out.fire_sounds.set_listener({});
+    ExplosionEffectRecord effect;
+    effect.source = source.packed; effect.count = 4;
+    runtime.view().apply(s2c::EXPLOSION_EFFECT, encode_explosion_effect(effect));
+    runtime.apply_received_effects(world);
+    const auto ready = world.out.fire_sounds.drain();
+    return expect(ready.size() == 1 && ready[0].set_name == "ITEM_BOOM" && ready[0].source_bms_id == 4242,
+            "a pool-1 explosion source resolves through its twin's damage ammo and bms id");
+}
+
+// The remote stance latch's prone clear reads only a MOUNT parent's def: a
+// deck-standing remote (carrier = the ground link, mount_bone 0) keeps TO_PRONE.
+bool run_remote_stance_sound_parent_is_the_mount_only() {
+    inmatch::ClientRuntime runtime("StanceAudio");
+    w::World world;
+    world.registry.configure_pool(1, 4);
+    w::Entity deck; deck.item_id = 1291; deck.has_item_def = true;
+    const auto carrier = world.registry.spawn(1, deck);
+    const auto make_row = [&](uint16_t handle, uint8_t mount_bone) {
+        ns::ClientEntityState &row = runtime.state().upsert(handle);
+        row.type_id = w::kPlayerInfantryTypeId; row.cls = EntityClass::Player;
+        row.carrier_handle = carrier.packed; row.mount_bone = mount_bone;
+        row.net_stance_bits = 1; // prone
+    };
+    const auto standing = w::EntityHandle::make(0, 1);
+    make_row(standing.packed, 0);
+    make_row(w::EntityHandle::make(0, 2).packed, 3);
+    runtime.tick_remote_stance_sounds(world);
+    const auto &sounds = world.out.slot_sounds;
+    return expect(sounds.size() == 1 && std::string(sounds[0].set_name) == "TO_PRONE" &&
+            sounds[0].source_handle == standing.packed,
+            "only the deck-standing remote plays TO_PRONE; a mount parent's def suppresses it");
+}
+
+// MP A&S radio context: the NEAREST qualifying capture entry decides, and its
+// Q16 coverage is zero on the radius itself even when a farther entry covers.
+bool run_radio_zone_context_uses_the_nearest_entry_coverage() {
+    ns::LoopbackChannel loop;
+    inmatch::ClientRuntime runtime(loop);
+    runtime.view().set_mp_session(true);
+    std::vector<uint8_t> config(51, 0);
+    config[12] = 0x10; config[14] = 0x01; // fields[3] = 0x10010 (MP A&S)
+    loop.host_send(s2c::SESSION_CONFIG, config); // the joiner learns g_GameType on its receive path
+    runtime.Client_ProcessNetworkFrame();
+    w::World world;
+    world.rules.mp_session = true;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(3, 4);
+    w::Entity person; person.item_id = 11; person.has_item_def = true;
+    world.cached.local_player = world.registry.spawn(0, person);
+    const auto remote = w::EntityHandle::make(0, 1);
+    runtime.view().apply(s2c::ENTITY_SPAWN_BATCH,
+            make_organic_spawn(remote.packed, "Caller", 0, 0, 0, 0, 1, 1));
+    const auto spawn_zone = [&](float x, uint16_t radius) {
+        w::Entity zone; zone.item_id = 6006; zone.has_item_def = true;
+        zone.position = {x, 0.0f, 0.0f}; zone.zone_radius = radius;
+        return world.registry.spawn(3, zone);
+    };
+    const auto edge = spawn_zone(100.0f, 100);  // dist == radius: coverage 0
+    const auto inner = spawn_zone(150.0f, 200); // farther, but covered
+    for (const auto handle : {edge, inner}) {
+        loop.host_send(s2c::ZONE_TIMER_WINDOW, zone_timer_window_body(handle.packed, 1, 4, 10, 40, 2));
+        auto &slot = runtime.state().minimap.transient[handle.slot()];
+        slot.active = true; slot.handle = handle.packed;
+        slot.remaining_ticks = 1000; // the transient bank clears a slot at zero each frame
+    }
+    runtime.Client_ProcessNetworkFrame();
+    std::vector<std::string> voices;
+    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+            -> std::optional<w::ScriptVoiceChannel::SetSelection> {
+        voices.push_back(name); return std::nullopt;
+    });
+    const auto call = [&] {
+        loop.host_send(s2c::TRACKED_PLAYER_VOICE, {9, uint8_t(remote.slot()), 255, 255});
+        runtime.Client_ProcessNetworkFrame();
+        runtime.apply_received_effects(world);
+    };
+    call();
+    if (!expect(voices == std::vector<std::string>{"BM1_RAD_ENG1"},
+            "the nearest entry sits on its radius: zero coverage, class context")) return false;
+    runtime.state().find(remote.packed)->x = 50 << 16;
+    call();
+    return expect(voices.size() == 2 && voices.back() == "BM1_RAD_MP_A&S1",
+            "inside the nearest entry the A&S context applies");
+}
+
 int main() {
 	const bool ok = run_radio_events_preserve_order_chat_and_mute_state(false) &&
                     run_radio_events_preserve_order_chat_and_mute_state(true) &&
@@ -5610,6 +5723,9 @@ int main() {
 	                run_reverse_rtt_probe_is_echoed() &&
 	                run_medic_reviving_plays_both_receive_cues() &&
                     run_flag_event_audio_and_feed_drain_independently() &&
+                    run_explosion_sound_reads_the_pool_twin_damage_ammo() &&
+                    run_remote_stance_sound_parent_is_the_mount_only() &&
+                    run_radio_zone_context_uses_the_nearest_entry_coverage() &&
 	                run_direct_uplink_framing_is_transient() &&
 	                run_network_spawn_does_not_mutate_loaded_model_snapshot() &&
 	                run_split_batch_keeps_deployment_pick_ack_causal() &&

@@ -6,7 +6,37 @@
 #include <cstdio>
 using namespace opennova::world;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL %d: %s\n",__LINE__,#c); return 1; } } while(0)
+// The move-function row selects only the motor; the +0x2C8 spread (and the
+// +0x160/+0x26C ammo words) come from the ai_function class row's init slot.
+// [orig: sub_448CE0 @0x448CE0 via def+0x148; the move table row @0x82AC88]
+static int test_squib_init_keys_on_ai_function() {
+    const char text[]="begin AiOnly\n id 106034\n type marker\n ai_function squib\n"
+        " move_function nade\n sqb_error 20\n end\n"
+        "begin MoveOnly\n id 106035\n type marker\n ai_function null\n"
+        " move_function squib\n sqb_error 20\n end\n";
+    opennova::def::DefItemsFile definitions{};
+    CHECK(opennova::def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(text),
+            sizeof(text)-1,&definitions)==0);
+    CHECK(definitions.count==2);
+    auto heap=std::make_unique<World>();
+    auto &w=*heap;
+    w.registry.configure_pool(3,4);
+    Entity marker; marker.kind=EntityKind::Marker;
+    marker.item_id=6034;
+    const auto ai_only=w.registry.spawn(3,marker);
+    marker.item_id=6035;
+    const auto move_only=w.registry.spawn(3,marker);
+    opennova::simassets::resolve_item_traits(w,definitions,{});
+    CHECK(w.registry.get(ai_only)->has_item_def && w.registry.get(move_only)->has_item_def);
+    CHECK(!w.registry.get(ai_only)->squib.motor);
+    CHECK(w.registry.get(ai_only)->squib.spread_q16==20*65536);
+    CHECK(w.registry.get(move_only)->squib.motor);
+    CHECK(w.registry.get(move_only)->squib.spread_q16==0);
+    opennova::def::def_free_items(&definitions);
+    return 0;
+}
 int main() {
+    if (test_squib_init_keys_on_ai_function()!=0) return 1;
     const char text[]="begin Squib\n id 106031\n type marker\n ai_function squib\n"
         " move_function squib\n sqb_rate 6\n sqb_distance 1.25\n sqb_error 20\n"
         " ammo_marker3 BALL\n end\n";

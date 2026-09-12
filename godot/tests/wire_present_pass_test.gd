@@ -1350,6 +1350,52 @@ func test_person_body_and_late_held_weapon_share_the_thermal_wave_lane() -> void
 	_assert_entity_light(weapon, expected, "the held model preserves that same wave")
 
 
+# The composed two-part avatar is ONE retail entity submission: the head and
+# the body draw inside the same Terrain_RenderSectorEntitiesBySide iteration
+# under the lighting block the frame set once around that wave, so the head
+# part linked under a wire body carries the body's thermal wave lane too.
+# [orig: Terrain_RenderSectorEntitiesBySide head submit @0x5c7ffc, body
+#  submit @0x5c8020; CTerrainRenderer_BuildLightingShaderConstants(1)
+#  @0x5c9511 / @0x5c95f8 in Terrain_RenderSceneWithReflection]
+func test_composed_avatar_head_shares_the_body_thermal_wave_lane() -> void:
+	var avatar_path := ProjectSettings.globalize_path(
+			"user://wire_thermal_avatars_%d.def" % Time.get_ticks_usec())
+	var avatars := FileAccess.open(avatar_path, FileAccess.WRITE)
+	assert_not_null(avatars)
+	# Head and body both resolve to the flat root's shed.3di; the rig is the
+	# rifleman item's soldier.adm, exactly as the placed avatar composes.
+	avatars.store_string(
+			"define head HEAD\n{\n graphic shed.3di\n camo 32 64 96\n voice 3\n sex m\n}\n"
+			+ "define body BODY\n{\n graphic shed.3di\n camo 100 120 140\n}\n"
+			+ "define arms ARMS\n{\n graphic shed.3di\n camo 200 210 220\n}\n"
+			+ "nationality 0 NAT\n{\n alignment good\n division 0 DIV\n {\n"
+			+ "  combo 2 HEAD BODY ARMS\n }\n}\n")
+	avatars.close()
+	var avatar_db := AvatarDatabase.new()
+	assert_eq(avatar_db.load(avatar_path), OK)
+	var placer := _placer()
+	placer.set_avatar_db(avatar_db)
+	var p := _wire_pass(_sim(), placer, _container())
+	var snap := Snapshot.new()
+	snap.entities = [{
+		"type_id": TYPE_RIFLEMAN,
+		"handle": 0x0006,
+		"character_id": 0x0400,
+	}]
+	_present(p, snap)
+	var body: ObjectModel = p.resolve_wire_handle(0x0006)
+	assert_not_null(body)
+	var head := body.find_child("PlayerAvatarHead_*", true, false) as ObjectModel
+	assert_not_null(head, "the selected character composes a head part under the wire body")
+	# No lighting context was pushed for the handle: both parts sit on the
+	# default factors, and only the wave lane (w) is the person's thermal flag.
+	var expected := Vector4(1.0, 0.0, 0.0, 1.0)
+	_assert_entity_light(body, expected, "the wire person body carries the thermal wave")
+	_assert_entity_light(head, expected,
+			"the linked head part shares the body's thermal wave lane")
+	DirAccess.remove_absolute(avatar_path)
+
+
 func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	var sim := _sim()
 	assert_eq(sim.load_weapon_table(_flat_root(), "weapon.def"), OK,

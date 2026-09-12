@@ -11,6 +11,8 @@
 
 #include <runtime/replication/client_roster_tags.h>
 #include <runtime/replication/client_state.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/world.h>
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -66,7 +68,7 @@ void test_walk_and_gates() {
 
 	std::vector<world::FriendlyTagSource> tags;
 	collect_roster_tags(s, 0x0001, 1, false, 0x30020u, tags,
-			[](uint16_t) { return 80; });
+			[](uint16_t) { return 80; }, nullptr);
 	CHECK(tags.size() == 2);
 	bool saw_ace = false;
 	bool saw_bee = false;
@@ -89,17 +91,17 @@ void test_walk_and_gates() {
 
 	// Game type 0 without the death screen draws nothing [orig: @0x5a456d].
 	tags.clear();
-	collect_roster_tags(s, 0x0001, 1, false, 0, tags);
+	collect_roster_tags(s, 0x0001, 1, false, 0, tags, {}, nullptr);
 	CHECK(tags.empty());
 	// The death screen lifts both the team gate and the game-type gate
 	// [orig: @0x5a4564 / @0x5a4576]: the enemy joins, self and hidden stay out.
 	tags.clear();
-	collect_roster_tags(s, 0x0001, 1, true, 0, tags);
+	collect_roster_tags(s, 0x0001, 1, true, 0, tags, {}, nullptr);
 	CHECK(tags.size() == 3);
 	// No def hp -> max 1: any positive health is the full good tier
 	// [orig: `if (!max) max = 1` @0x5a3b95].
 	tags.clear();
-	collect_roster_tags(s, 0x0001, 1, false, 0x30020u, tags);
+	collect_roster_tags(s, 0x0001, 1, false, 0x30020u, tags, {}, nullptr);
 	for (const world::FriendlyTagSource &t : tags)
 		if (t.name == "Ace") CHECK(t.health_ratio_fp16 == 0x10000);
 	// A row whose type has NO def takes the drawer's entry bail — the shared
@@ -107,14 +109,64 @@ void test_walk_and_gates() {
 	// @0x5a39fb]; the roster copy had dropped it.
 	tags.clear();
 	collect_roster_tags(s, 0x0001, 1, false, 0x30020u, tags,
-			[](uint16_t) { return 0; });
+			[](uint16_t) { return 0; }, nullptr);
 	CHECK(tags.empty());
+}
+
+// The radio-request fold on a roster row [orig: the +885 latch @0x5a3bfe,
+// Entity_FindChildByDefType(entity, 1, 1) @0x5a3c0e]: the receive-event
+// 0x6D latch stands until the carrier walk over the joiner's materialized
+// twins, from the row's echoed carrier handle, reaches a def-type-1 vehicle.
+void test_radio_request_fold() {
+	auto owned = std::make_unique<ClientState>();
+	ClientState &s = *owned;
+	add_player(s, 0x0001, 1, 0x00, 60); // self
+	add_player(s, 0x0002, 1, 0x00, 40);
+	add_player(s, 0x0003, 1, 0x00, 40);
+	bind_slot(s, 0, "Self", 1);
+	bind_slot(s, 1, "Ace", 2);
+	bind_slot(s, 2, "Bee", 3);
+	ClientEntityState &ace = *s.find(0x0002); // after the last upsert: the rows are a vector
+	const RosterTagMaxHealth hp = [](uint16_t) { return 80; };
+	auto gather = [&](const world::World *twins) {
+		std::vector<world::FriendlyTagSource> tags;
+		collect_roster_tags(s, 0x0001, 1, false, 0x30020u, tags, hp, twins);
+		CHECK(tags.size() == 2);
+		bool ace_request = false;
+		for (const world::FriendlyTagSource &t : tags) {
+			if (t.name == "Ace") ace_request = t.radio_request;
+			if (t.name == "Bee") CHECK(!t.radio_request);
+		}
+		return ace_request;
+	};
+	CHECK(!gather(nullptr));
+	ace.radio_request = 1;
+	CHECK(gather(nullptr)); // no twins: the latch alone
+
+	world::World w;
+	w.registry.configure_pool(1, 4);
+	world::Entity vehicle;
+	vehicle.kind = world::EntityKind::Item;
+	vehicle.has_item_def = true;
+	vehicle.item_type = 1;
+	const world::EntityHandle veh = w.registry.spawn(1, vehicle);
+	world::Entity deck = vehicle;
+	deck.item_type = 2;
+	const world::EntityHandle floor = w.registry.spawn(1, deck);
+	CHECK(gather(&w)); // free-standing (0xFFFF carrier)
+	ace.carrier_handle = veh.packed;
+	CHECK(!gather(&w)); // aboard the vehicle twin
+	ace.carrier_handle = floor.packed;
+	CHECK(gather(&w)); // on a building floor: not a carrier ...
+	w.registry.get(floor)->ground_target = veh;
+	CHECK(!gather(&w)); // ... unless the floor itself rides the vehicle
 }
 
 } // namespace
 
 int main() {
 	test_walk_and_gates();
+	test_radio_request_fold();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

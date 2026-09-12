@@ -76,11 +76,16 @@ void turn_contact_direction(
 bool vehicle_traction_acceleration(
 		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed) {
 	auto &m = vehicle.veh;
-    if (traits.family == VehicleFamily::Bike && m.crashed) {
-        if (m.speed > 0) m.speed_accel = io::bam_sub(0, traits.deceleration);
-        if (m.speed < 0) m.speed_accel = traits.deceleration;
-        return true;
-    }
+	// Crashed bike: -/+ deceleration into speedAccel, no clamp tree, speed==0
+	// keeps the servo value [orig: Entity_UpdateLightVehiclePhysics @0x483FE0
+	//  -- the +2EC branch @0x4853F1..0x4853F9 -> @0x485687..0x4856C5 (`neg
+	//  eax` @0x48569D, `mov [esi+2A0h], eax` @0x4856A5/@0x4856BF, `jmp
+	//  loc_4854EF` @0x4856C5)].
+	if (traits.family == VehicleFamily::Bike && m.crashed) {
+		if (m.speed > 0) m.speed_accel = io::bam_sub(0, traits.deceleration);
+		if (m.speed < 0) m.speed_accel = traits.deceleration;
+		return true;
+	}
 	if (!vehicle_has_contact_direction(m))
 		return false;
 	if (traits.family == VehicleFamily::Tank) {
@@ -190,19 +195,25 @@ void vehicle_traction_velocity(
 			// into Z only while the nose points down [orig: `jz loc_48CF97`
 			// @0x48CE6E; the store @0x48CF97..0x48D003 with `cmp var_110, 0;
 			// jge` @0x48CFD9]; the tank holds every register [orig: `jz
-			// loc_48A828` @0x48A6AD]. The bike's off-contact arm writes X/Y only.
-            // [orig: Entity_UpdateLightVehiclePhysics @ 0x4863DA..0x48657E]
-            if (bike) {
-                const int32_t *source = m.wheelie_active ? m.bike_launch_direction : forward;
-                const int64_t raw[3] = {source[0], source[1], source[2]};
-                int32_t direction[3];
-                q16_normalize(raw, direction);
-                velocity_from_direction(m, direction, m.speed, false);
-                if (m.slip_started_tick != 0 &&
-                        int32_t(world.logic_tick - m.slip_started_tick) <= bam_mul_wrap(5, traits.tire_slip))
-                    m.slip_started_tick = world.logic_tick;
-                else clear_direction(m);
-            } else if (!tank)
+			// loc_48A828` @0x48A6AD]. The bike's off-contact arm writes X/Y only:
+			// a wheelie normalizes the 3-D launch vector, else the PLANAR
+			// forward row (two squares, the third ftol of a zero), so a pitched
+			// bike keeps its full planar speed [orig:
+			// Entity_UpdateLightVehiclePhysics +3DE gate @0x4863DA; 3-D
+			// normalize of +3E0..+3E8 @0x4863E3..0x486455; planar normalize of
+			// the forward row @0x48645D..0x4864AB; X/Y stores @0x486572..0x486578].
+			if (bike) {
+				const int32_t *source = m.wheelie_active ? m.bike_launch_direction : forward;
+				const int64_t raw[3] = {source[0], source[1],
+						m.wheelie_active ? int64_t(source[2]) : int64_t(0)};
+				int32_t direction[3];
+				q16_normalize(raw, direction);
+				velocity_from_direction(m, direction, m.speed, false);
+				if (m.slip_started_tick != 0 &&
+						int32_t(world.logic_tick - m.slip_started_tick) <= bam_mul_wrap(5, traits.tire_slip))
+					m.slip_started_tick = world.logic_tick;
+				else clear_direction(m);
+			} else if (!tank)
 				velocity_from_direction(m, forward, m.speed, forward[2] < 0);
 			return;
 		}

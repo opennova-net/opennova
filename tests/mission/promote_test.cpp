@@ -643,7 +643,10 @@ static void test_bms_admission_preserves_holes_and_signed_thresholds() {
         options.game_type = c.game_type;
         options.item_attributes = [](int32_t type) { return type == 206 ? 0x10000u : 0u; };
         const auto result = mission::promote_mission(file, *world, options);
-        int accepted = c.session ? 1 : 2;
+        // Organics: offline both records spawn; in a session the rejected
+        // teammate leaves pool 0's used count at 1, so the accepted 5001 at
+        // record index 1 sits outside the window and is never live.
+        int accepted = c.session ? 0 : 2;
         for (size_t i = 0; i < c.admitted.size(); ++i) {
             const Entity *row = world->registry.get(EntityHandle::make(1, static_cast<int>(i)));
             CHECK((row != nullptr) == c.admitted[i]);
@@ -661,13 +664,41 @@ static void test_bms_admission_preserves_holes_and_signed_thresholds() {
             CHECK(teammate->player_class == 1);
         }
         const Entity *next = world->registry.get(EntityHandle::make(0, 1));
-        CHECK(next != nullptr && next->net_id == 202);
+        CHECK((next != nullptr) == !c.session);
+        if (next) CHECK(next->net_id == 202);
         CHECK(file.organics[0].type_id == 5305); // the document remains authored
     }
     auto world = std::make_unique<World>();
     world->rules.teammates_disabled = true;
     mission::promote_mission(file, *world);
     CHECK(world->registry.get(EntityHandle::make(0, 0)) == nullptr);
+}
+
+// Pool 0's used count is the accepted count, not the record count: with one
+// rejected organic in the middle, the record at the last index falls outside
+// the window while the accepted record between the hole and it stays live.
+// [orig: Mission_LoadBMSFile @0x40fb0d..0x40fb34]
+static void test_bms_pool0_used_window_is_the_accepted_count() {
+    bms::File file;
+    file.organics.resize(4);
+    for (size_t i = 0; i < file.organics.size(); ++i) {
+        file.organics[i].type_id = 5001;
+        file.organics[i].id = 301 + static_cast<int32_t>(i);
+        file.organics[i].team = 1;
+    }
+    file.organics[1].bmsi_attributes = 0x40; // single-player only: rejected in a session
+    auto world = std::make_unique<World>();
+    world->rules.mp_session = true;
+    mission::PromoteOptions options;
+    options.player_limit = 8;
+    const auto result = mission::promote_mission(file, *world, options);
+    CHECK(result.spawned == 2 && result.dropped == 2 && result.brains == 2);
+    CHECK(world->registry.get(EntityHandle::make(0, 0)) != nullptr);
+    CHECK(world->registry.get(EntityHandle::make(0, 1)) == nullptr);
+    const Entity *third = world->registry.get(EntityHandle::make(0, 2));
+    CHECK(third != nullptr && third->net_id == 303);
+    CHECK(world->registry.get(EntityHandle::make(0, 3)) == nullptr);
+    CHECK(world->registry.by_net_id(304) == nullptr);
 }
 
 static void test_bms_admission_zeros_rejected_marker_projections() {
@@ -692,6 +723,7 @@ static void test_bms_admission_zeros_rejected_marker_projections() {
 
 int main() {
     test_bms_admission_preserves_holes_and_signed_thresholds();
+    test_bms_pool0_used_window_is_the_accepted_count();
     test_bms_admission_zeros_rejected_marker_projections();
     test_script_spatial_tables_are_promoted_and_replaced();
     // A synthetic mission: 3 markers forming a path, 1 looping waypoint record (channel 0),

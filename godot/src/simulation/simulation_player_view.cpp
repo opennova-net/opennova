@@ -143,6 +143,10 @@ float Simulation::fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect
     return opennova::world::fov_vertical_from_horizontal_deg(p_fov_h_deg, 1.0f / selected);
 }
 
+int Simulation::fresh_profile_aspect_mode(int p_width, int p_height) {
+	return opennova::renderer::fresh_profile_aspect_mode(p_width, p_height);
+}
+
 Vector3 Simulation::presentation_forward(float p_yaw_deg, float p_pitch_deg) {
 	float f[3];
 	opennova::world::presentation_forward_from_angles(p_yaw_deg, p_pitch_deg, f);

@@ -443,8 +443,11 @@ Vec3 vec_from_fixed(const FixedVec3 &v) {
                 static_cast<float>(from_fixed(v.z))};
 }
 
+// `surface_normal` is Entity_ApplyDragAndBounceForce's third argument: 0 for
+// the flight call, a positive multiplier for the person-hit call.
 void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
-                            int32_t position_z_q16, int32_t water_z_q16) {
+                            int32_t position_z_q16, int32_t water_z_q16,
+                            int32_t surface_normal) {
     if (ammo.drag_fp16 == 0) return;
 
     const int32_t old_magnitude = fixed_magnitude(velocity);
@@ -454,8 +457,13 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     const int64_t first_division =
         (static_cast<int64_t>(raw) << 16) / ammo.drag_fp16;
     const int64_t scaled_drag = first_division / io::kTicksPerSecondInt;
+    // A positive surface multiplier scales the step directly and skips the
+    // water/air legs [orig: the surfaceNormal > 0 arm @0x4e604e..0x4e6097
+    // ahead of the water-height test @0x4e60a9].
     const bool underwater = water_z_q16 != 0 && position_z_q16 <= water_z_q16;
-    const int64_t drag_step = underwater ? scaled_drag * 25 : scaled_drag;
+    const int64_t drag_step = surface_normal > 0 ? scaled_drag * surface_normal
+                              : underwater      ? scaled_drag * 25
+                                                : scaled_drag;
 
     // Retail normalizes against the un-truncated x87 magnitude (PC53 = double
     // semantics), multiplying each negated component by 65536/|v| and truncating
@@ -543,6 +551,11 @@ void apply_armor_deceleration(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     velocity.z = retail_q16_mul_rhu(new_speed, static_cast<int32_t>(velocity.z * normalize));
 }
 
+// The surface multiplier every type-3 (person) hit hands the drag/bounce
+// force after the armor arms [orig: Weapon_CalcImpactDamage `push 23h`
+// @0x4ecc38].
+constexpr int32_t kPersonHitDragSurface = 35;
+
 // The kinetic damage number [orig: Weapon_CalcImpactDamage @ 0x4EC920]. `vel` is
 // units/tick; the original wraps 62 * |vel|_16.16 as signed 32-bit, shifts it by 16,
 // applies only an upper clamp of 1219 (@0x4ecad6), then wraps the signed speed*weight
@@ -597,8 +610,16 @@ int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
     }
     if (damage <= ammo.min_damage) damage = ammo.min_damage;
     if (ammo.max_damage > 0 && damage >= ammo.max_damage) damage = ammo.max_damage;
+    if (target.item_type != 3) return damage;
     if (body_armor)
         apply_armor_deceleration(velocity_q16, ammo, ammo.armor_density[armor_class]);
+    // Every person hit then bleeds the round through the drag/bounce force
+    // with the fixed surface multiplier 35, armored or not: the three armor
+    // arms and the no-armor path all fall into the same call.
+    // [orig: Weapon_CalcImpactDamage — the type-3 gate @0x4ecb96, the
+    //  `push 23h; push 1; push esi; call Entity_ApplyDragAndBounceForce`
+    //  leg @0x4ecc38..0x4ecc42]
+    apply_aerodynamic_drag(velocity_q16, ammo, 0, 0, kPersonHitDragSurface);
     return damage;
 }
 
@@ -762,7 +783,11 @@ bool entity_eye_below_water(const World &world, int32_t body_z_q16,
 
 void projectile_apply_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     int32_t position_z_q16, int32_t water_z_q16) {
-    apply_aerodynamic_drag(velocity, ammo, position_z_q16, water_z_q16);
+    apply_aerodynamic_drag(velocity, ammo, position_z_q16, water_z_q16, /*surface_normal=*/0);
+}
+
+void projectile_apply_person_hit_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo) {
+    apply_aerodynamic_drag(velocity, ammo, 0, 0, kPersonHitDragSurface);
 }
 
 void RoundSim::reset() noexcept {
@@ -1545,7 +1570,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             r.pos = vec_from_fixed(end_q16);
             if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
             if (ammo != nullptr)
-                apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z);
+                apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z,
+                                       /*surface_normal=*/0);
             r.vel = vec_from_fixed(velocity_q16);
             if (submerged_stall) {
                 if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);

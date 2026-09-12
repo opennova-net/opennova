@@ -57,8 +57,9 @@ inline constexpr uint16_t kMouseWheelDown = 0x800;
 // modifier walks the two slots joining with " or " and prefixing "Ctrl - " /
 // "Shift - " per slot; (2) a slot with a key and NO modifier RESETS the
 // buffer and prints the first slot's key behind whichever modifier either
-// slot carries (Ctrl / Alt / Shift); (3) a mouse button appends "<mod>-" for
-// the mouse modifier, " or " when a keyboard slot exists, then "Mouse 1/2/3"
+// slot carries (Ctrl / Alt / Shift); (3) a mouse button RESETS the buffer
+// to "<mod>-" for the mouse modifier (sprintf, not strcat @0x496f79), then
+// appends " or " when a keyboard slot exists, then "Mouse 1/2/3"
 // or "Mouse Whl Up/Dn"; finally " *" when the record's flag word carries
 // 0x200. The localized "Keys" table falls back to the marker-stripped names
 // key_name() already produces.
@@ -149,15 +150,23 @@ class BindingSet {
   // Held mouse rows are polled independently. Event rows dispatch the FIRST
   // eligible match, modified rows before unmodified, in catalog order.
   // [orig: Input_ProcessMouseAxisBindings @0x499680;
-  //  process_input_bindings @0x4dda50; Input_InitBindings @0x499ab0]
+  //  process_input_bindings @0x4dda50; Input_InitBindingSystem @0x499ab0]
   bool pressed_mouse(int index, uint16_t held_mask,
       const std::function<bool(int)> &key_down, bool dead = false) const;
   int mouse_event_action(uint16_t mask,
       const std::function<bool(int)> &key_down, bool dead = false) const;
 
   // Buttons 1..128 followed by four four-bit POV hats. The caller retains
-  // event edges; held action rows can repeat each tick.
-  // [orig: Input_TryTriggerJoystickButton @0x497b30]
+  // event edges; held action rows can repeat each tick. The row's joystick
+  // modifier (+34) never gates the fire: retail's dispatcher walks three
+  // passes per row and the third fires the button with NO modifier test
+  // [orig: Input_ProcessToggleBindings @0x499480 -- fallback @0x499594..
+  //  0x4995c8 fires without a modifier test; the Scroll-Lock arm @0x49959d
+  //  tests an address (lea @0x4994e5) and skips every row;
+  //  Input_TryTriggerJoystickButton @0x497b30 reads only +26 @0x497b38].
+  // Shared-button arbitration (modified rows listed first + the consumed
+  // latch dword_334305C @0x497b89..0x497b97) lands with joystick capture
+  // (the D-CTRL-1 residual).
   bool pressed_joystick(int index, const std::function<bool(int)> &button_down,
       const std::array<int32_t, 4> &pov_angles, bool dead = false) const;
 

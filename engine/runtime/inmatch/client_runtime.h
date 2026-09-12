@@ -421,7 +421,15 @@ public:
 	// ClientState position), so the binding spawns its local player L from it. Joiner-only; valid once
 	// in_match() (the caller gates on that). Mirrors the self_handle() passthrough.
 	const JoinerConnection::SelfSpawn &spawn_pose() const { return joiner_->spawn_pose(); }
-	uint32_t game_type() const { return joiner_ ? joiner_->game_type() : view_.game_type(); }
+	// One g_GameType: every forwarded 0x08 / 0x7B lands in the view; the joiner's
+	// own fold covers only the handshake window before the view has seen one.
+	uint32_t game_type() const {
+		return view_.game_type_known() || joiner_ == nullptr ? view_.game_type() : joiner_->game_type();
+	}
+	// The joined session's published player cap (the S2C 0x64 block's dword at
+	// offset 36; 0 until that transfer completes). Joiner-only: the embedder's
+	// own full-BMS load admits against it.
+	uint32_t session_max_players() const { return joiner_ ? joiner_->session_max_players() : 0; }
 	const std::string &server_name() const;
 	const std::string &mission_name() const;
 	const std::string &map_file() const;

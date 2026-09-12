@@ -60,7 +60,8 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		var candidate_pos: Vector2 = camera.unproject_position(chest)
 		if not rect.has_point(candidate_pos):
 			continue
-		var pick := DebugEntityPicker.pick_with_camera(sim, camera, candidate_pos, "probe")
+		var pick := DebugEntityPicker.pick_with_camera(
+				sim, camera, candidate_pos, "probe", null)
 		if pick.hit and pick.entity_handle == row.get_wire_handle():
 			target = row
 			screen_pos = candidate_pos
@@ -94,7 +95,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	# Leg 2: the crosshair pick (Shift+F6's seam): whatever the centre ray
 	# meets is what the window must select.
 	dev_tools.select_entity(-1)
-	var centre_pick := DebugEntityPicker.pick_at_crosshair(sim, camera)
+	var centre_pick := DebugEntityPicker.pick_at_crosshair(sim, camera, null)
 	var centre_handle := centre_pick.entity_handle if centre_pick.hit else -1
 	main_game.pick_at_crosshair()
 	await ctx.wait_frames(2)

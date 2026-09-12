@@ -355,7 +355,19 @@ private:
             result.kids.push_back(std::move(edge));
             reset();
         };
+        // The lookahead outlives the loop: retail computes it per token
+        // (the boundary keyword included) and the boundary/EOF drain below
+        // compares every frame against the last value.
+        int lookahead = 0;
         while (!at_end()) {
+            const bool signed_word = is_op("-") && !pending.empty();
+            size_t after = pos_ + 1;
+            if (signed_word && after < toks_.size() && toks_[after].kind == TokKind::Word &&
+                    toks_[after].line == cur().line && toks_[after].col == cur().col + 1) ++after;
+            const Token &next = toks_[after < toks_.size() ? after : toks_.size() - 1];
+            const bool next_symbol = next.kind == TokKind::Operator && !is_word_operator(next.lowered);
+            lookahead = next_symbol && !(next.text == "-" && !pending.empty())
+                    ? precedence(next.lowered) : 0;
             const bool boundary = cur().kind == TokKind::Keyword || cur().kind == TokKind::LBracket ||
                     (cur().kind == TokKind::Word && pos_ + 1 < toks_.size() && toks_[pos_ + 1].text == "=");
             if (boundary) {
@@ -364,14 +376,6 @@ private:
                 if (pending.empty()) store_assignment();
                 break;
             }
-            const bool signed_word = is_op("-") && !pending.empty();
-            size_t after = pos_ + 1;
-            if (signed_word && after < toks_.size() && toks_[after].kind == TokKind::Word &&
-                    toks_[after].line == cur().line && toks_[after].col == cur().col + 1) ++after;
-            const Token &next = toks_[after < toks_.size() ? after : toks_.size() - 1];
-            const bool next_symbol = next.kind == TokKind::Operator && !is_word_operator(next.lowered);
-            const int lookahead = next_symbol && !(next.text == "-" && !pending.empty())
-                    ? precedence(next.lowered) : 0;
             if (!push && !pending.empty() && lookahead > level) save(true);
 
             if (cur().kind == TokKind::LParen) {
@@ -427,6 +431,15 @@ private:
             const Frame frame = std::move(frames.back());
             frames.pop_back();
             if (!frame.automatic) warn("Open Paren");
+            // A frame whose stored precedence is BELOW the lookahead is
+            // dropped WITHOUT its POP and the rest of the drain is abandoned:
+            // retail jumps straight back to the tokenizer head. Malformed
+            // input only (an operator right after the keyword / at EOF).
+            // [orig: Script_Compile — the keyword drains @0x4f4226..0x4f4231
+            //  / @0x4f4818..0x4f4823 and the EOF drain @0x4f559f..0x4f55aa:
+            //  `cmp cl,[esp+esi+precStack]; ja loc_4F32E0` ahead of the
+            //  `add eax,7000000h` POP emit @0x4f55b7..0x4f55c4]
+            if (lookahead > frame.level) break;
             pop(frame);
         }
         store_assignment();

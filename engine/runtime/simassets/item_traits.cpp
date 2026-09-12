@@ -233,9 +233,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             // [orig: Entity_InitFromItemDef @0x49E550]
             e->destroy_timer = def->destroy_timing_ticks[0];
             e->destroy_timer_initialized = true;
-            // [orig: squib init sub_448CE0 @0x448CE0]
-            if (strutil::iequals(def->move_function, "squib")) {
-                e->squib.motor = true;
+            // The move-function row selects only the update callback, the
+            // squib motor [orig: the "squib" row @0x82AC88 of the 12-byte move
+            // table @0x82AC40 -> Entity_ProcessProjectileTravel @0x448D50].
+            if (strutil::iequals(def->move_function, "squib")) e->squib.motor = true;
+            // The +0x160/+0x26C/+0x2B0/+0x2C8 init is the ai_function class
+            // row's second slot, run through def+0x148 whatever the move
+            // function [orig: sub_448CE0 @0x448CE0, row @0x813120 +12;
+            //  Entity_LookupRenderCallbacks stores it @0x407E36].
+            if (strutil::iequals(def->ai_function, "squib")) {
                 e->equipped_adm_index = 0;
                 e->squib.spread_q16 = static_cast<int32_t>(def->door_type);
                 if (def->primary_weapon[0]) {

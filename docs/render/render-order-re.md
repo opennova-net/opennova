@@ -611,9 +611,21 @@ the far-Z setter despite its older decal-bias label. The source is the raw
 Q16 Env_FogDistCurrent. [orig: Render_ProcessMainSceneFrame @ 0x5CA0F0,
 load/add/call @ 0x5CA4BA/0x5CA4C1/0x5CA4D0; sub_58A8D0 @ 0x58A8D0]
 
-Both far-water-side entity waves in a thermal type-three frame receive the
-flat 0.25 lighting lane. The object shader applies the per-instance value;
-the normal lane is restored afterwards, and type-five/FP exclusions remain.
-Native render_order and the object-shader golden pin the pass assignment.
+In a vehicle-seat thermal frame (Terrain_RenderSceneWithReflection's fourth
+argument, `Player_IsVehicleSeatHasFlag4` pushed by Render_ProcessMainSceneFrame
+@ 0x5CA8E3; every other caller pushes 0) both water-side BySide entity waves,
+the far side @ 0x5C951F (before the water surface) and the camera side
+@ 0x5C9600 (after it), run under
+CTerrainRenderer_BuildLightingShaderConstants(1) @ 0x5C9511 / @ 0x5C95F8 and
+receive the flat 0.25 lighting lane for ItemDef type-3 (person) entities;
+Build(0) @ 0x5C9534 / @ 0x5C9616 restores the normal lane. The wave-side gate
+is BySide's own (`test ebp,ebp` @ 0x5C7E01: isNearPass 1 draws only the
+entities below the water, 0 only those above), so the first wave with
+edx = camera-above is the far side and the second with edi = camera-below is
+the camera side, matching the record's ladder (sky, far-water-side, water,
+camera-side). The object shader applies
+the per-instance value; type-five/FP exclusions remain. Native render_order
+and the object-shader golden pin the pass assignment.
 [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5C8090;
-Render_ProcessMainSceneFrame @ 0x5CA0F0]
+Terrain_RenderSceneWithReflection @ 0x5C93A0; Render_ProcessMainSceneFrame
+@ 0x5CA0F0]

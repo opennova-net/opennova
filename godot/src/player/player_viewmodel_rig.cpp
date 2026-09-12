@@ -12,11 +12,11 @@
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
-#include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include <runtime/world/player_present.h>
+#include <runtime/world/player_view.h>
 
 using namespace godot;
 
@@ -36,6 +36,7 @@ PlayerViewmodelRig::PlayerViewmodelRig() {
 	rot_ = Vector3(0.0f, Simulation::viewmodel_rig_yaw_deg(), 0.0f);
 	rot_bias_def_ = Simulation::viewmodel_fallback_rot_bias_deg();
 	renderfov_h_deg_ = Simulation::weapon_render_fov_h_deg_default();
+	world_fov_h_deg_ = opennova::world::kPlayerCameraFovHDeg;
 }
 
 void PlayerViewmodelRig::set_fp_gun_visible(bool p_visible) {
@@ -162,40 +163,28 @@ void PlayerViewmodelRig::clear_viewmodel() {
 
 // The witnessed FP projection, fed to the object shaders as one global: the
 // gun draws INSIDE the beauty pass (retail's "viewmodel first" into the same
-// backbuffer) through the weapon renderfov -- a HORIZONTAL fov in degrees,
-// converted to the vertical through the live aspect [orig:
-// Render_SetViewAndProjectionMatrices @0x58d900 fovY = 2*atan(tan(fovX/2)/aspect)]
-// -- with the near plane swapped to 0.05 [orig: Render_SwapProjectionNearZ
+// backbuffer) through the weapon renderfov -- a HORIZONTAL fov in degrees --
+// with the near plane swapped to 0.05 [orig: Render_SwapProjectionNearZ
 // @0x4dee29] and the depth range clamped to the nearest tenth [orig:
-// Render_SetViewportDepth01 @0x58a7b0]. Both frusta share the viewport
-// aspect, so the shader needs only the focal ratio between the renderfov
-// projection and the live beauty projection
-// (shaders/viewmodel_pass.gdshaderinc applies it per flagged instance).
+// Render_SetViewportDepth01 @0x58a7b0]. The renderfov and world frusta share
+// the frame's vertical scale (the FP pass pushes the world pass's scaleY
+// [orig: Render_SetViewAndProjectionMatrices @0x58d900, the FP call
+// @0x4dee7f]), so the shader needs only the focal ratio between them: the
+// engine's world::viewmodel_focal_ratio, the ratio of the horizontal
+// half-tangents on both axes whatever the aspect mode or surface -- which is
+// why the feed reads no camera projection (while the presenter's stretched
+// target draws, the gameplay camera carries only a culling superset;
+// LocalPlayerPresenter view_projection). shaders/viewmodel_pass.gdshaderinc
+// applies it per flagged instance.
 void PlayerViewmodelRig::update_viewmodel_projection() {
 	Camera3D *cam = camera();
 	if (cam == nullptr || !cam->is_inside_tree()) {
 		return;
 	}
-	Viewport *viewport = cam->get_viewport();
-	if (viewport == nullptr) {
-		return;
-	}
-	const Vector2 size = viewport->get_visible_rect().size;
-	if (size.x <= 0.0f || size.y <= 0.0f) {
-		return;
-	}
-	const float aspect = size.x / size.y;
 	const float near = static_cast<float>(Simulation::viewmodel_pass_near_z());
-	const Ref<Simulation> projection_sim = sim();
-    const float fov_fp_v = Simulation::fov_vertical_from_horizontal(renderfov_h_deg_, aspect,
-        projection_sim.is_valid() ? projection_sim->get_local_player_aspect_mode() : -1);
-	const Projection beauty = cam->get_camera_projection();
-	if (Math::is_zero_approx(beauty.columns[1][1])) {
-		return;
-	}
 	const float far = static_cast<float>(cam->get_far());
-	const Projection fp = Projection::create_perspective(fov_fp_v, aspect, near, far);
-	const Vector4 feed(static_cast<float>(fp.columns[1][1] / beauty.columns[1][1]), near, far, 1.0f);
+	const float focal_ratio = opennova::world::viewmodel_focal_ratio(world_fov_h_deg_, renderfov_h_deg_);
+	const Vector4 feed(focal_ratio, near, far, 1.0f);
 	if (feed == projection_feed_) {
 		return;
 	}
@@ -210,6 +199,9 @@ void PlayerViewmodelRig::update_viewmodel(const Ref<PlayerLocalView> &p_view,
 	Camera3D *cam = camera();
 	if (node == nullptr || cam == nullptr) {
 		return;
+	}
+	if (p_view.is_valid()) {
+		world_fov_h_deg_ = p_view->get_fov_h_deg();
 	}
 	// The engine draws the FP model with the RAW VIEW MATRIX as its world
 	// transform, i.e. the model lives in VIEW space [orig:

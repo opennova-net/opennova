@@ -17,6 +17,8 @@
 #include "env/mission_environment.h"
 #include "env/weather.h"
 #include "object/object_shader_cache.h"
+#include "player/local_player_presenter.h"
+#include "world/game_world.h"
 
 #include <runtime/renderer/render_order.h>
 #include <runtime/terrain/quadtree.h> // water_pass_active (retail's g_WaterActive)
@@ -589,15 +591,21 @@ void Water::advance_frame(double p_delta) {
 		_sync_render_activity();
 		return;
 	}
+	// The camera the world is drawn through: while the local view presenter's
+	// aspect-mode target is live the surface shows the TARGET's pixels
+	// stretched over it (LocalPlayerPresenter::view_projection), so the strip
+	// march and the mirror register to the target camera and its viewport;
+	// the surface camera then carries only the frustum's culling superset.
+	Camera3D *view_cam = _view_camera(cam);
 	// Camera3D's public render transform includes h_offset/v_offset;
 	// global_position does not. Classify and march from the same effective
-	// eye the main viewport actually renders.
-	const Vector3 cam_pos = cam->get_camera_transform().get_origin();
+	// eye the drawing viewport actually renders.
+	const Vector3 cam_pos = view_cam->get_camera_transform().get_origin();
 
 	// env #30: refresh the mirror camera before this frame's strip rebuild —
 	// the SubViewport renders ahead of the main view, like the witnessed
 	// prerender.
-	_update_reflection_camera(cam);
+	_update_reflection_camera(view_cam);
 
 	// Regenerate the animated noise pair once per rendered water frame;
 	// unlike the fixed-62 Hz weather clock, this is explicitly render-driven.
@@ -649,15 +657,33 @@ void Water::advance_frame(double p_delta) {
 		water_material_->set_shader_parameter("u_water_murk", murk);
 	}
 
-	_rebuild_strip_mesh(cam, cam_pos, murk, fog_end, uv_state, lit, env_data);
+	_rebuild_strip_mesh(view_cam, cam_pos, murk, fog_end, uv_state, lit, env_data);
 	_sync_render_activity();
 }
 
-// Mirrors the live camera about the water plane into the reflection
+// The world (this node's parent) registers its local view presenter
+// (GameWorld::local_view_presenter); a standalone water node has none and
+// draws through its own viewport's camera.
+Camera3D *Water::_view_camera(Camera3D *p_surface_cam) const {
+	GameWorld *world = Object::cast_to<GameWorld>(get_parent());
+	LocalPlayerPresenter *presenter = world != nullptr ? world->local_view_presenter() : nullptr;
+	if (presenter == nullptr) {
+		return p_surface_cam;
+	}
+	Camera3D *through = presenter->projection_camera();
+	if (through == nullptr || !through->is_inside_tree() ||
+			presenter->projection_viewport() == nullptr) {
+		return p_surface_cam;
+	}
+	return through;
+}
+
+// Mirrors the drawing camera about the water plane into the reflection
 // SubViewport. The witnessed mirror form, side-dependent collection filter,
 // and horizontal-preserving square projection live in
-// environment/water_mirror.h; this leg extracts the source camera, installs
-// the typed record, and pushes the UV registration scale.
+// environment/water_mirror.h; this leg extracts the source camera (its
+// viewport is the one it draws: the surface, or the live aspect-mode
+// target), installs the typed record, and pushes the UV registration scale.
 void Water::_update_reflection_camera(Camera3D *p_cam) {
 	if (reflection_viewport_ == nullptr || reflection_camera_ == nullptr) {
 		return;
@@ -794,7 +820,9 @@ void Water::_rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
 		pass_fog_end = p_env_data->get_fog_end_underwater();
 	}
 	// The adjusted camera transform includes Camera3D h/v offsets, keeping
-	// the screen-marched row coordinates registered to the actual main view.
+	// the screen-marched row coordinates registered to the view that draws
+	// the strip (the surface, or the live aspect-mode target whose pixels
+	// the blit stretches over it).
 	water_core_->strip_set_view(p_cam->get_camera_transform(),
 			p_cam->get_camera_projection(), vp_size, pass_fog_end);
 	// The typed focused-Q3 WaterNightVision producer reuses this live strip;

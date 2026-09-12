@@ -230,6 +230,19 @@ bool latched_key_edge(bool down, bool active, bool &was_down);
 // on a client, so playing unconditionally there IS the gate.
 inline constexpr const char *kWeaponSwitchDenySoundset = "DRY_CLAYSATCH";
 
+// --- the scope-zero click -------------------------------------------------------
+
+// A changed scope zero (the zero-step keys) clicks the "GF_SCOPE_ZERO" trigger
+// set through the same non-positional interface play [orig:
+// Player_AdjustWeaponZoomLevel @0x4dbd47..0x4dbd50 ->
+// Sound_PlayInterfaceTriggerSet(dword_24E08B8) @0x527be0; the name->handle row
+// is entry 2 of the @0x82F590 resolver table (@0x82f5d8 -> 0x24e08b8,
+// DialogSystem_Init @0x5275e0)]. The play's is_mp_session_peer gate (@0x527beb)
+// holds by construction: the request runs only over a live local player,
+// which a dedicated host never has. The sim raises it as an Interface
+// ScriptSoundEvent on world.out.script_sounds, the shell's ui_soundset channel.
+inline constexpr const char *kScopeZeroSoundset = "GF_SCOPE_ZERO";
+
 // --- the equipped weapon.def precedence -----------------------------------------
 
 // Which weapon.def row drives the FP viewmodel: the armory-equipped (or

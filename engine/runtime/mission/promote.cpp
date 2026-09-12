@@ -608,7 +608,7 @@ bool admit_record(const bms::Entity &record, const World &world,
     if (record.type_id == 5305 && (session || world.rules.teammates_disabled)) return false;
     // Both thresholds are signed bytes. The lower-bound flag rejects every
     // offline load; the upper-bound comparison applies only in a session.
-    // [orig: Entity_SpawnFromBMSRecord @0x40ea76..0x40eb21]
+    // [orig: Entity_SpawnFromBMSRecord @0x40ea76..0x40eb1c]
     const uint32_t flags = record.bmsi_attributes;
     if ((flags & 0x10u) && (!session || opts.player_limit < static_cast<int8_t>(record.no_less_than))) return false;
     if ((flags & 0x20u) && session && opts.player_limit > static_cast<int8_t>(record.no_more_than)) return false;
@@ -824,11 +824,32 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     std::vector<EntityHandle> promoted_item_handles;
     uint32_t spawn_phase_counter = 0; // dword_A77638, reset per load [orig: @0x40f5c0 area]
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {
+        // Pool 0's used count is the ACCEPTED record count while every
+        // accepted record still lands at its record index, so with k
+        // rejected organics the accepted records at the last k indices sit
+        // above `used`: never ticked, never resolved by net id, and
+        // overwritten once the player allocator has filled the in-window
+        // holes and extends the pool. Pools 1..3 set `used` to the full
+        // record count and keep their holes addressable.
+        // [orig: Mission_LoadBMSFile @0x40fb0d..0x40fb34 — Pool_GetEntry(0,
+        //  record index), `add edi,ebp` on a spawn success, Pool_SetUsed(0,
+        //  edi) vs the record-count Pool_SetUsed @0x40f9db/@0x40fa4a/@0x40faba;
+        //  the `used` walks: Entity_UpdateAllEntities @0x4c243b,
+        //  EntityPool_FindByNetId @0x4f0a2d, Pool_AllocEntry @0x442230]
+        std::vector<char> admitted(vec.size());
+        uint32_t used_window = static_cast<uint32_t>(vec.size());
+        if (kind == EntityKind::Organic) used_window = 0;
+        for (size_t i = 0; i < vec.size(); ++i) {
+            admitted[i] = admit_record(vec[i], world, opts) ? 1 : 0;
+            if (kind == EntityKind::Organic && admitted[i]) ++used_window;
+        }
         uint32_t idx = 0;
         for (const bms::Entity &record : vec) {
             uint32_t origin = spawn_origin_pack(static_cast<uint32_t>(kind), idx);
+            const bool admit = admitted[idx] != 0;
             ++idx;
-            if (!admit_record(record, world, opts)) { ++r.dropped; continue; }
+            if (!admit) { ++r.dropped; continue; }
+            if (idx > used_window) { ++r.dropped; continue; } // record index >= used
             bms::Entity e = record;
             if (e.type_id == 5305) e.type_id = 4999 + kBmsTeammateClass;
             Entity seed = make_seed(e, kind, static_cast<uint16_t>(e.id), origin);

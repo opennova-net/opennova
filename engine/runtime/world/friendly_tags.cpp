@@ -40,6 +40,12 @@ void push_tag(World &world, const Entity &e, const PlayerSlotFacts *slot,
     // @0x5a3c1c..0x5a3c27]; our registry mirrors the kill's `|= 6` in both
     // the flag word and `alive` [orig: @0x43fbf6].
     src.dead = !e.alive || (e.flags & kEntityFlagDead) != 0;
+    // The radio-request icon's per-tag fold: the +885 latch, then the
+    // carrier walk clears it [orig: `cmp byte ptr [ebx+375h], 0; jz`
+    // @0x5a3bfe; Entity_FindChildByDefType(entity, 1, 1) @0x5a3c0e;
+    // `xor ebp, ebp` @0x5a3c1a].
+    src.radio_request = e.radio_request != 0 &&
+            !friendly_tag_aboard_vehicle(world, e.ground_target);
     if (slot != nullptr) {
         src.has_slot = true;
         src.revive_seconds = slot->revive_seconds;
@@ -66,6 +72,28 @@ bool pass_gates(uint8_t team, const Entity &local,
 }
 
 } // namespace
+
+bool friendly_tag_aboard_vehicle(const World &world, EntityHandle first) {
+    // [orig: Entity_FindChildByDefType @0x43bea0 — child = groundEntity
+    //  @0x43bea4; the itemDef NULL stop @0x43bec5 precedes the iteration
+    //  bound @0x43beca; `def->type == 1` @0x43becf (findFirst: the first hit
+    //  returns); child = child->groundEntity @0x43bed7]
+    const Entity *link = world.registry.get(first);
+    for (int iteration = 1; link != nullptr; ++iteration) {
+        if (!link->has_item_def) return false;
+        if (iteration >= 20) return false;
+        if (link->item_type == 1) return true;
+        link = world.registry.get(link->ground_target);
+    }
+    return false;
+}
+
+bool friendly_tag_radio_request_viewer(const Entity &local) {
+    // [orig: HUD_DrawEntityLabel @0x5a3bba..0x5a3be8 — var_DC = 1 when
+    //  playerEntity+0x168 is 2 (@0x5a3bd1) or 5 (@0x5a3bd6), or its own
+    //  +885 latch is set (@0x5a3bdf); the mount word is our SeatType]
+    return is_vehicle_control_seat(local.mount_type) || local.radio_request != 0;
+}
 
 void collect_friendly_tags(World &world, const Entity &local,
                            std::vector<FriendlyTagSource> &out,

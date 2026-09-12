@@ -121,8 +121,7 @@ static const ActionDef k_catalog[] = {
     {110, "CycleSpectatorMode", "Cycle Spectator Mode", ActionClass::Spectator, 0x20, 0x00, 0x04000800, 0, 0x10, 0x0, 0, 0, 2},
     {111, "IncSpectatorTarget", "Spectator Target +", ActionClass::Spectator, 0x00, 0x00, 0x04000800, 0, 0x1, 0x0, 0, 0, 2},
     // [orig: row 112 @0x8188E8 — code 502, mode 2 (death screen), class 13, no
-    //  keys; its default is the RIGHT mouse button (+24 mask 0x2), which the
-    //  shell's mouse-default port does not carry yet (D-CTRL-1)]
+    //  keys; its default is the RIGHT mouse button (+24 mask 0x2)]
     {112, "DecSpectatorTarget", "Spectator Target -", ActionClass::Spectator, 0x00, 0x00, 0x04000800, 0, 0x2, 0x0, 0, 0, 2},
 };
 

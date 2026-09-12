@@ -73,7 +73,7 @@ func _init() -> void:
 	player_name = "Player"  ## the host's own callsign (rides ClientAuth like any player's)
 	expansion = ""     ## g_ExpansionName: what the process actually mounted; "" for base JO
 	integrity_profile = ""  ## explicit registered retail corpus; empty = no host-side CRC validation
-	max_players = DEFAULT_MAX_PLAYERS  ## lobby-advertised player cap
+	max_players = DEFAULT_MAX_PLAYERS  ## session-list-advertised player cap
 	spectator_slots = 0
 	spectator_password = ""
 	game_type = GAME_TYPE_COOP  ## the numeric session g_GameType [orig: @ 0x24D2128]

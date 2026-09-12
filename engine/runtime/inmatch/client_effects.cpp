@@ -3,6 +3,7 @@
 #include <runtime/world/world.h>
 #include <runtime/world/infantry_sound.h>
 #include <runtime/world/radio_call.h>
+#include <algorithm>
 #include <cstring>
 #include <cmath>
 #include <variant>
@@ -12,6 +13,15 @@ namespace {
 // Remote organic rows deliberately have no World twin. Project the receive
 // context from the canonical row; the local avatar may have a different native
 // handle from its wire identity. HostClient can use its existing world entity.
+// A pool-1..3 handle resolves to its materialized twin FIRST: retail reads the
+// real pool row behind the handle, and the explosion sound leg consumes that
+// row's +0x26C damage ammo (the 0x21 source is the credited lastAttacker or
+// null, never the exploding item), which the row snapshot does not carry.
+// [orig: NapiNPClientMsg_HandleSpawnEffect @0x430B10, pool resolve @0x430bec;
+//  Entity_SpawnExplosionEffects @0x4399C0, +0x26C read @0x439a12 ->
+//  Sound_PlayWithDistanceAttenuation @0x439a28; the two 0x21 senders
+//  Entity_HandleDeathEvent @0x407233 (lastAttacker) and
+//  Entity_HandleDeathOnAuthority @0x407d0e (null)]
 bool sound_actor(const ClientRuntime &runtime, const world::World &world,
         uint16_t handle, world::Entity &out) {
     const auto native_handle = runtime.has_self_handle() && handle == runtime.self_handle()
@@ -19,6 +29,8 @@ bool sound_actor(const ClientRuntime &runtime, const world::World &world,
     if (native_handle == world.cached.local_player) {
         if (const auto *local = world.registry.get(native_handle)) { out = *local; return true; }
     }
+    if (native_handle.pool() >= 1 && native_handle.pool() <= 3)
+        if (const auto *twin = world.registry.get(native_handle)) { out = *twin; return true; }
     if (const auto *row = runtime.state().find(handle)) {
         out.handle = world::EntityHandle{row->handle};
         out.item_id = row->type_id;
@@ -46,9 +58,17 @@ bool sound_actor(const ClientRuntime &runtime, const world::World &world,
 }
 
 // Context flag 7: active capture entry, inside its cylinder, with a visible
-// minimap slot. [orig: find_nearest_proximity_entity @0x5380C0, caller @0x5BF918]
+// minimap slot. The NEAREST qualifying entry (strict < on the truncated 2D
+// distance) decides, and its Q16 coverage ((radius - dist) << 16) / radius is
+// what the caller tests, zero on the radius itself.
+// [orig: find_nearest_proximity_entity @0x5380C0 (nearest store @0x5381C6,
+//  coverage tail @0x5381F8..0x538225); caller build_shader_pass_name @0x5BF5D0 -
+//  push 7 @0x5BF918, call @0x5BF925, consumed only by the 0x10010 arm
+//  @0x5BF9D4..0x5BF9DE]
 bool in_active_radio_zone(const world::World &world, const world::Entity &speaker,
         const ClientRuntime &runtime) {
+    int32_t best = 0x40000000;
+    const world::Entity *nearest = nullptr;
     for (const auto &pair : runtime.zone_states()) {
         const auto &entry = pair.second.entry;
         if (!(entry.window_active || entry.value_active) ||
@@ -57,17 +77,27 @@ bool in_active_radio_zone(const world::World &world, const world::Entity &speake
         if (!zone) continue;
         const double dx = double(world::to_fixed(zone->position.x)) - world::to_fixed(speaker.position.x);
         const double dy = double(world::to_fixed(zone->position.y)) - world::to_fixed(speaker.position.y);
+        // The x87 length is clamped at flt_7C19E0 (0x7FFF0000) before ftol.
+        const int32_t dist = int32_t(std::min(std::sqrt(dx*dx+dy*dy), 2147418112.0));
         const int32_t radius = int32_t(zone->zone_radius) << 16;
-        if (std::sqrt(dx*dx+dy*dy) > radius ||
+        if (dist > radius ||
                 std::abs(double(world::to_fixed(zone->position.z)) - world::to_fixed(speaker.position.z)) > radius/2) continue;
         const auto matches = [&](const auto &slot) {
             return slot.active && slot.handle == pair.first &&
                 (!(zone->item_attrib & 0x40000u) || !zone->zone_number || (slot.flags & 0xC0u));
         };
-        for (const auto &slot : runtime.state().minimap.transient) if (matches(slot)) return true;
-        for (const auto &slot : runtime.state().minimap.special) if (matches(slot)) return true;
+        bool visible = false;
+        for (const auto &slot : runtime.state().minimap.transient) if (matches(slot)) visible = true;
+        for (const auto &slot : runtime.state().minimap.special) if (matches(slot)) visible = true;
+        if (!visible || dist >= best) continue;
+        best = dist;
+        nearest = zone;
     }
-    return false;
+    if (!nearest) return false;
+    const int32_t radius = int32_t(nearest->zone_radius) << 16;
+    // radius == 0: retail's idiv faults; the bounded port reports no coverage.
+    if (best > radius || radius == 0) return false;
+    return ((int64_t(radius - best) << 16) / radius) != 0;
 }
 }
 
@@ -75,7 +105,13 @@ void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
     for (auto &row : state().entities) {
         if (row.cls != EntityClass::Player || (row.state_flags & 1u) != 0 ||
                 (has_self_handle() && row.handle == self_handle())) continue;
-        const auto *parent = world.registry.get(world::EntityHandle{row.carrier_handle});
+        // The prone clear reads the +0x16C MOUNT parent's def, never the ground
+        // link the wire carrier also names; mount_bone is the row's mounted test
+        // (the gate's Health(+0x11E) > 0 leg is the dead-row skip above).
+        // [orig: Entity_UpdateInfantryPlayerBody parentEntity gate
+        //  @0x4B41A2..0x4B41C0; prone clear @0x4B4709..0x4B471B]
+        const auto *parent = row.mount_bone != 0
+                ? world.registry.get(world::EntityHandle{row.carrier_handle}) : nullptr;
         const int32_t pos[3] = {row.x, row.y, row.z};
         world::emit_stance_change_sound(world, row.handle, pos, row.stance_sound_state,
                 row.net_stance_bits, row.rm_entity_flags, parent != nullptr && parent->has_item_def);

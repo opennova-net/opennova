@@ -515,6 +515,14 @@ struct SessionRules {
     // [orig: @0x46B1B9..0x46B1DB; @0x48F6A0..0x48F71E; @0x4941BE].
     // run_logic_tick stamps it once so every callback sees the tick's role.
     bool logic_authority = true;
+    // The outer loop's catch-up flag: true on the last logic tick of a frame's
+    // batch (less than one 16 ms tick of backlog left after this quantum),
+    // false while catching up. The session stamps it per tick; a bare kernel
+    // keeps true. Gates the fire-loop emitter and the local lock tone.
+    // [orig: dword_24E0E80, Game_MainLoop @0x52ba21..0x52ba3a; readers
+    //  WeaponAction_ProcessFrame @0x5412a7, Entity_UpdateInfantryPlayerBody
+    //  @0x4b5229]
+    bool last_tick_of_batch = true;
     bool ignore_weapon_ammo_cost = false; // dword_24C1930 bit 0x100
     bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
     // Projectile_UpdatePhysics clamps the radius to 0.1u only for an
@@ -523,6 +531,15 @@ struct SessionRules {
     bool projectile_authority = true;
     bool fat_bullets = false;
     bool one_shot_kill = false; // MP-only g_OneShotKill; ignored offline
+    // The mpattrib rules word's 0x10000 bit: in session the scope-zero -1
+    // (auto rangefinder) floor needs it, hence the name. Hosts stamp it from their config's
+    // mpattrib value, joiners from the S2C 0x64 fixed block's +44 word
+    // [orig: `test g_rules_flags,10000h` @0x4dbd15 in Player_AdjustWeaponZoomLevel;
+    // g_rules_flags @0x24D1E34 = mpattrib]. Retail's mp_allowsniperscopezoom
+    // option never reaches this word (it feeds the 0x08 flags bit 16 that
+    // WeaponSlot_InitFromDef @0x53ef17 reads), so the bit is live only when a
+    // host cfg carries it in mpattrib.
+    bool auto_scope_zero = false;
     // Multiplayer blast damage to Building ItemDefs is disabled unless the
     // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.
     // [orig: g_destroy_buildings gate in Entity_ApplyWeaponDamage

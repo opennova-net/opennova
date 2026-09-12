@@ -136,6 +136,11 @@ private:
 	void _apply_environment_water_height();
 	void _push_water_split_height();
 	void _sync_render_activity();
+	// The camera drawing the world this frame: the world's local view
+	// presenter's aspect-mode target camera while that target is live (its
+	// viewport is the target the blit stretches over the surface), else the
+	// surface camera `p_surface_cam`.
+	Camera3D *_view_camera(Camera3D *p_surface_cam) const;
 	void _update_reflection_camera(Camera3D *p_cam);
 	void _install_reflection_decode();
 	void _release_reflection_decode();

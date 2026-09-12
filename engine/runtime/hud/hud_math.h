@@ -235,6 +235,14 @@ uint32_t friendly_tag_revive_pulse(uint32_t argb, int frame_counter);
 // gray; read @0x5a3deb / @0x5a3e77].
 inline constexpr uint32_t kFriendlyTagDownedLightBlue = 0xFF80A0FFu;
 inline constexpr uint32_t kFriendlyTagDownedGray = 0xFFA0A0A0u;
+// The radio-request icon beside a tag: TSDicon strip cell 0x17 in table[3]
+// light blue at FORCED full alpha, a half-size fontH*0.5 square centered on
+// (x, y) [orig: HUD_DrawEntityLabel `push 17h` @0x5a4189/@0x5a42b7/@0x5a43d0
+// -> HUD_DrawRotatedIconQuad @0x599630 (corners x -/+ size, y -/+ size
+// @0x599670..0x5996c2; `color | 0xFF000000` @0x5996ef); the palette+0Ch
+// read @0x5a417e; the same cell is the map blip icon 23 of
+// draw_entity_labels_and_markers @0x5a49e0].
+inline constexpr uint8_t kFriendlyTagRadioRequestIcon = 0x17;
 
 // The unnamed-entity fallback: a literal '^' + the compiled-in 36-name table
 // indexed by the pool-encoded entity id [orig: @0x5a4047..0x5a40cd;

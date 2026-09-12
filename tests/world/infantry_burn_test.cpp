@@ -1,5 +1,5 @@
 // Burn duration, availability, and damage/selection integration.
-// [orig: 0x4AF4A0, 0x4B70DE, 0x4BBF8F, 0x4EB1D2]
+// [orig: 0x4AF4A0, 0x4B70D9, 0x4BBF8F, 0x4EB1D2]
 #include <runtime/world/infantry_burn.h>
 #include <runtime/world/world.h>
 #include <cstdio>

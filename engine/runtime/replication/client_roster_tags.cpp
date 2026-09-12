@@ -1,6 +1,7 @@
 #include <runtime/replication/client_roster_tags.h>
 
 #include <runtime/world/friendly_tag_gates.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -13,7 +14,8 @@ void collect_roster_tags(const ClientState &state, uint16_t self_handle,
                          uint8_t local_team, bool death_screen,
                          uint32_t game_type,
                          std::vector<world::FriendlyTagSource> &out,
-                         const RosterTagMaxHealth &max_health) {
+                         const RosterTagMaxHealth &max_health,
+                         const world::World *carrier_world) {
 	for (const ClientRosterSlot &slot : state.roster) {
 		// slot+0x0D active, slot+0x24 entity [orig: @0x5a453b/@0x5a454e].
 		if (!slot.bound || slot.entity_slot < 0) continue;
@@ -65,6 +67,14 @@ void collect_roster_tags(const ClientState &state, uint16_t self_handle,
 		src.has_slot = true;
 		src.revive_seconds = slot.downed_revive_seconds;
 		src.medic_request = slot.medic_request_active;
+		// The radio-request fold [orig: `cmp byte ptr [ebx+375h], 0` @0x5a3bfe;
+		// Entity_FindChildByDefType(entity, 1, 1) @0x5a3c0e]: the row's +885
+		// latch, cleared by a vehicle twin in the carrier walk from the row's
+		// echoed +0x28 (mount wins over ground @0x4c0a08).
+		src.radio_request = row->radio_request != 0 &&
+				!(carrier_world != nullptr &&
+						world::friendly_tag_aboard_vehicle(*carrier_world,
+								world::EntityHandle{row->carrier_handle}));
 		out.push_back(std::move(src));
 	}
 }

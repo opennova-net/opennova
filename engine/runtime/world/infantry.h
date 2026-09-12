@@ -255,6 +255,18 @@ public:
                                  int32_t &phase_ticks, RootMotionFrame &out) {
         return advance(adm_id, state_id, phase_ticks, out);
     }
+    // advance_variant with the armed-wrap park: `armed_boundary` is the tick the
+    // consumer's deferred promotion is armed on (its clip_boundary_after for a
+    // loop; -1 = unarmed). A LOOPING clip whose incremented playhead lands on it
+    // samples the parked clip END (0.99999), not the wrapped start, so the
+    // boundary tick shows the last frame and the promoted state's frame 0 lands
+    // on the next tick. The default ignores the park for providers without the
+    // retail channel clock. [orig: AnimChannel_AdvancePlayback 0x40000 test
+    // @0x40B193, wrap @0x40B199, re-park @0x40B1A2..0x40B1B1]
+    virtual bool advance_armed(int adm_id, int state_id, int variant, int32_t &phase_ticks,
+                               int32_t /*armed_boundary*/, RootMotionFrame &out) {
+        return advance_variant(adm_id, state_id, variant, phase_ticks, out);
+    }
     // Advance a stable primary plus the current target and return their blended
     // output. The default composes already-quantized RootMotionFrames for test and
     // headless providers. Asset-backed providers may override this to blend raw
@@ -578,7 +590,7 @@ struct InfantryState {
     // alive + not prone [orig: @0x4b7dbf/@0x4b7dd6; Flags&0x100020 legs unmodeled].
     // Consumers: prone roll anims 41/42, the aim-overlay lean term, and the FP camera
     // roll = torsoRoll + lean/4 [orig: @0x437fcd].
-    // [orig: Player_PackInputStateToEntity @0x4df6e5..0x4df7a1]
+    // [orig: Player_PackInputStateToEntity @0x4df6e3..0x4df7a0]
     bool free_look = false;
     uint16_t view_input_bits = 0; // MoveOrder 0x1000..0x8000, local only
     bool lean_left = false;

@@ -752,8 +752,15 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				const CollisionHuskPieceInfo &info = hs->second;
 				if (t->husk_section_count == 0 && info.sections > 0)
 					t->husk_section_count = info.sections;
+                // The section-piece render pivot walks the PRIMARY husk's COBJ
+                // list: a spawned section never carries +0x38 huskFinalModel
+                // (Entity_SpawnSectionEntity's memset template @0x440322 stores
+                // only [13] = +0x34 huskModel @0x440343), so the +0x38 ?: +0x34
+                // pick lands on +0x34; the final husk stands in only where
+                // retail would dereference a null +0x34.
+                // [orig: Entity_BuildDeathSectionTransforms @0x492B46 / @0x492B4D]
                 if (t->husk_section_origins_q16.empty()) {
-                    const Threedi3di3 *piece = final_husk_name.empty() ? first_husk_m3 : final_husk_m3;
+                    const Threedi3di3 *piece = first_husk_m3 != nullptr ? first_husk_m3 : final_husk_m3;
                     if (piece && piece->collision) {
                         for (size_t i = 0; i < piece->collision->object_count; ++i) {
                             const auto &p = piece->collision->objects[i].offset;

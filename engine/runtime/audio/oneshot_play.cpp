@@ -135,7 +135,7 @@ int64_t listener_distance_q16(const float world_pos[3], const float listener_pos
 
 OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 		const float world_pos[3], const float listener_pos[3], bool has_listener,
-		int64_t source_bms_id, OcclusionFn occl, void *occl_ctx,
+		int64_t source_bms_id, uint32_t sound_id, OcclusionFn occl, void *occl_ctx,
 		SoundSelector &selector) {
 	OneshotPlan plan;
 	if (!loc.valid() || loc.set < 0 || static_cast<size_t>(loc.set) >= bank.multis.size()) {
@@ -165,7 +165,9 @@ OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 			}
 		}
 	}
-    return plan_oneshot_at_distance(bank, loc, dist_q16, selector, has_listener);
+    plan = plan_oneshot_at_distance(bank, loc, dist_q16, selector, has_listener);
+    plan.sound_id = sound_id;
+    return plan;
 }
 
 OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &loc,

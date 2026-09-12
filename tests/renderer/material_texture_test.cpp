@@ -20,7 +20,9 @@ std::vector<uint8_t> rgba_from_bgra_hex(const char *text) {
 
 // Synthetic images executed by the retail x86 kernel (all pixel math intact).
 // Kernel SHA256 0be6f2d7022549d57ccb3955007c20bef9b31f35aa7accf3886551be24e702a6.
-// [orig: Texture_ApplyNormalMapFilter @0x58BD90..0x58C06F]
+// [orig: load_texture_as_normalmap @0x58C985..0x58CAED (the live type-4/5
+// kernel); Texture_ApplyNormalMapFilter @0x58BD90..0x58C06C (its uncalled
+// instruction-for-instruction twin)]
 int main() {
     expect(normal_material_filename("brick.TGA", false, true) == "brick.dds", "packed normals prefer the DDS sibling");
     expect(normal_material_filename("brick.TGA", true, true) == "brick.TGA", "loose TGA override wins");
@@ -85,6 +87,19 @@ int main() {
 	expect(material_texture_transform(3, "Body.tga", true) == MaterialTextureTransform::Checkerboard &&
 			material_texture_transform(0, "Missing.tga", false) == MaterialTextureTransform::Checkerboard,
 			"unsupported rows and failed loads bind the checkerboard");
+	// One result test for every row (test eax,eax @0x5B17F0 -> checkerboard
+	// @0x5B17F4): a normal row whose source yields no readable image is a
+	// failed load, never a null the material would replace with the flat normal.
+	expect(material_texture_transform(5, "Body.tga", false) == MaterialTextureTransform::Checkerboard &&
+			material_texture_transform(4, "Body.MDT", false) == MaterialTextureTransform::Checkerboard,
+			"unreadable normal rows bind the checkerboard, not a null");
+	// The dedicated-loader legs stay raw loads (their retail loaders are
+	// unported): jpt_5B1737 cases 6/7/16/17/18.
+	const uint8_t raw_load_types[] = {6, 7, 16, 17, 18};
+	for (const uint8_t type : raw_load_types) {
+		expect(material_texture_transform(type, "Body.tga", true) == MaterialTextureTransform::Unchanged,
+				"dedicated-loader rows raw-load until their loaders are ported");
+	}
 	const auto checker = missing_material_texture_rgba();
 	expect(checker.size() == 128 * 128 * 4, "fallback dimensions");
 	for (size_t i = 0; i < checker.size(); i += 4) {

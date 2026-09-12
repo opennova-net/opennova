@@ -101,6 +101,10 @@ struct TickInput {
 	// The renderer viewport height a listen host wraps its S2C 0x68 cursor
 	// against (0 = headless / no renderer, the seam left unset).
 	int32_t viewport_height = 0;
+	// True on the last logic tick of this frame's batch, false while the bank
+	// catches up: the outer loop's "<16 ms of backlog left" flag the fire-loop
+	// emitter and the lock tone read (World::rules.last_tick_of_batch).
+	bool last_tick_of_batch = true;
 };
 
 enum class TickStatus : uint8_t {

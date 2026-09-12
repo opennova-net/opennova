@@ -164,6 +164,17 @@ world::EntityHandle MissionKernel::spawn_item_piece(const world::Entity &seed) {
     piece.alive = seed.alive;
     piece.uniform_scale_q16 = seed.uniform_scale_q16;
     piece.death_motion = seed.death_motion;
+    // The retail template is a memset clone that pins its callbacks to the
+    // floating-physics pair; every other def-derived class selector stays
+    // zero, so the parent's door/squib/sway functions never reach a piece.
+    // [orig: Entity_SpawnSectionEntity @0x440322 memset; callbacks pinned
+    //  @0x440365 / @0x440370; Entity_CloneFromTemplateByType @0x4398A0 copies
+    //  the 0x2B4 bytes verbatim @0x43997D]
+    piece.door_event = false;
+    piece.door_motion = false;
+    piece.door_count = 0;
+    piece.squib.motor = false;
+    piece.render_sway = false;
     ensure_collision_instance(world, handle);
     collision.refresh_after_registry_change(world);
     return handle;

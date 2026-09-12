@@ -11,14 +11,17 @@
 
 #include <formats/def/def.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/ammo_table.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/collision.h>
 #include <cstring>
+#include <runtime/world/player_present.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_fsm.h>
+#include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
 #include <runtime/world/weapon_scope_zero.h>
 
@@ -664,9 +667,124 @@ void test_target_lock_cadence_and_audio() {
     CHECK(lw.w.out.sound_emitters.drain().empty());
 }
 
+// The zero-step request keys the -1 floor on the session's sniper-zoom RULE
+// bit, never the game type [orig: Player_AdjustWeaponZoomLevel
+// @0x4dbd0c..0x4dbd2e], clicks GF_SCOPE_ZERO only on a change
+// [orig: @0x4dbd47..0x4dbd50], moves the look pitch by the elevation delta and
+// recomputes the zero-yaw term [orig: @0x4dbd91..0x4dbde3].
+void test_scope_zero_request_keys_on_the_rule_bit_and_clicks() {
+    LocalWorld lw;
+    LocalPlayer local(lw.w);
+    local.weapon.active = true;
+    // ForceScoped in first person: the CanFire verdict holds.
+    local.weapon.def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_FORCESCOPED);
+    local.weapon.def.scope_zero.max_steps = 10;
+    local.weapon.def.scope_zero.step_metres = 100;
+    local.weapon.def.scope_zero.elevation[1] = 500;
+    local.weapon.slot.scope_zero = 1;
+    local.weapon.slot.zero_pitch = 500;
+    MatchRules team;
+    team.game_type = 0x10000u; // a team game admits nothing by itself
+    lw.w.match.configure(team);
+    lw.w.rules.session_open = true;
+    lw.w.rules.auto_scope_zero = false;
+    CHECK(local.request_scope_zero(-1));
+    CHECK(local.weapon.slot.scope_zero == 0);
+    CHECK(local.input.look_pitch == -500);
+    CHECK(lw.w.out.script_sounds.size() == 1);
+    CHECK(lw.w.out.script_sounds[0].name == kScopeZeroSoundset);
+    CHECK(lw.w.out.script_sounds[0].kind == ScriptSoundEvent::Kind::Interface);
+    CHECK(!local.request_scope_zero(-1)); // the 0 floor in session without the rule
+    CHECK(local.weapon.slot.scope_zero == 0);
+    CHECK(lw.w.out.script_sounds.size() == 1); // no click without a change
+    lw.w.rules.auto_scope_zero = true;
+    CHECK(local.request_scope_zero(-1));
+    CHECK(local.weapon.slot.scope_zero == -1);
+    CHECK(lw.w.out.script_sounds.size() == 2);
+    CHECK(local.weapon.slot.zero_yaw == 0); // no parallax key
+    local.weapon.def.scope_zero.paralax_distance_q16 = -(2 << 16);
+    CHECK(local.request_scope_zero(1));
+    CHECK(local.weapon.slot.scope_zero == 0);
+    // atan(2 / the 100 m floor), negated for a negative parallax: the adjust's
+    // own leg, which the install below never takes.
+    CHECK(local.weapon.slot.zero_yaw == 13669483);
+}
+
+// The slot install seeds the zero-yaw term (MountSlot+8) from the seeded step,
+// outside the flags & 3 elevation gate and with the parallax sign kept
+// [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b]; an inventory-restored
+// step recomputes it the same way.
+void test_scope_zero_install_seeds_the_yaw_term() {
+    LocalWorld lw;
+    WeaponTableEntry row;
+    row.valid = true;
+    row.name = "paralax_weapon";
+    row.category = 3;
+    row.action_fsm.scope_zero.max_steps = 10;
+    row.action_fsm.scope_zero.step_metres = 100;
+    row.action_fsm.scope_zero.default_metres = 300;
+    row.action_fsm.scope_zero.paralax_distance_q16 = -(2 << 16);
+    lw.w.tables.weapons.entries.push_back(row);
+    LocalPlayerWeapon weapon;
+    WeaponInstallData data;
+    data.name = row.name;
+    PlayerViewState view;
+    local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
+    CHECK(weapon.slot.scope_zero == 3);
+    CHECK(weapon.slot.zero_pitch == 0);      // flags & 3 clear: no elevation
+    CHECK(weapon.slot.zero_yaw == -4557034); // atan(-2 / 300), sign kept
+    WeaponInventory inv;
+    inv.reset(lw.w.tables.weapons);
+    inv.equipped_combo = 3 * 65;
+    inv.slot(inv.equipped_combo)->adm_index =
+        static_cast<int16_t>(lw.w.tables.weapons.entries.size() - 1);
+    inv.slot(inv.equipped_combo)->scope_zero = -1;
+    LocalPlayerWeapon restored;
+    local_weapon_install(lw.w, restored, data, false, false, &inv, view);
+    CHECK(restored.slot.scope_zero == -1);
+    CHECK(restored.slot.zero_yaw == -13669483); // the 100 m floor, sign kept
+}
+
+// The zero-yaw term [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b]: atan2
+// of the parallax height over the zero distance (floored at 100 m) in BAM.
+void test_scope_zero_yaw_term() {
+    WeaponScopeZero zero;
+    zero.max_steps = 10; zero.step_metres = 100;
+    CHECK(weapon_scope_zero_yaw(zero, 3) == 0); // no parallax key
+    zero.paralax_distance_q16 = 2 << 16;
+    CHECK(weapon_scope_zero_yaw(zero, 3) == 4557034);   // atan(2 / 300)
+    CHECK(weapon_scope_zero_yaw(zero, -1) == 13669483); // the 100 m floor
+    zero.paralax_distance_q16 = -(2 << 16);
+    CHECK(weapon_scope_zero_yaw(zero, 3) == -4557034); // the init leg keeps the sign
+}
+
+// The bake's +0xF0 max-range output [orig: @0x54530f..0x545338; store
+// @0x5453f8]: the range at the lifetime's expiry tick, else at the first tick
+// below the ammo's min-stable speed, over every solve.
+void test_scope_zero_bake_max_range() {
+    AmmoTableEntry ammo;
+    ammo.velocity = 620; // 10 units per tick
+    WeaponScopeZero zero;
+    zero.max_steps = 1; zero.step_metres = 100;
+    weapon_scope_zero_bake(zero, ammo);
+    CHECK(zero.max_range_q16 == 0); // no lifetime, never below stable
+    ammo.max_age_ticks = 1;
+    weapon_scope_zero_bake(zero, ammo);
+    // One tick of the flattest solve: its angle ends a few BAM above zero,
+    // where the Q22 cosine truncates one LSB under 1.0 (retail fcos + ftol
+    // @0x54520f..0x545217 agree), so the range is one LSB under the speed.
+    CHECK(zero.max_range_q16 == 655359);
+    ammo.max_age_ticks = 0;
+    ammo.min_stable_velocity = 100000;
+    weapon_scope_zero_bake(zero, ammo);
+    CHECK(zero.max_range_q16 == 655359); // below stable on the first tick
+}
+
 int main() {
     test_target_lock_cadence_and_audio();
     {
+        // The adjust clamp's -1 floor: offline, or in session with the
+        // sniper-zoom rule bit; the 0 floor in session without it.
         WeaponScopeZero zero;
         zero.max_steps = 10; zero.step_metres = 100; zero.default_metres = 300;
         CHECK(weapon_scope_zero_initial(zero) == 3);
@@ -677,6 +795,10 @@ int main() {
         zero.min_steps = 2;
         CHECK(weapon_scope_zero_adjust(zero, 2, -1, false, false) == 2);
     }
+    test_scope_zero_request_keys_on_the_rule_bit_and_clicks();
+    test_scope_zero_install_seeds_the_yaw_term();
+    test_scope_zero_yaw_term();
+    test_scope_zero_bake_max_range();
     test_scope_toggle_refuses_inactive_weapon();
     test_scope_up_refused_while_moving_on_scoped_weapon();
     test_inset_scope_refused_under_nvg();

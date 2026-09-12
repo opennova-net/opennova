@@ -1,5 +1,7 @@
 #include <runtime/world/sound_emitter_mailbox.h>
 
+#include <runtime/audio/ambient_mixer.h>
+
 #include <algorithm>
 #include <utility>
 
@@ -26,8 +28,12 @@ int admission_priority(const SoundEmitterEvent &event) {
 }
 
 bool expired_at(const SoundEmitterEvent &event, uint32_t current_tick) {
+    // The same 16-bit keep-alive word the mixer slot stores and reads unsigned
+    // [orig: SoundEmitter_RegisterSetLayers @0x528471; SoundEmitter_UpdateAndMixTop8
+    // @0x528529..0x52854D], so a sign-extended kick lifetime outlives the mailbox
+    // exactly as long as it outlives the slot.
     const uint32_t lifetime =
-            static_cast<uint32_t>(std::max<int32_t>(1, event.lifetime_ticks));
+            static_cast<uint32_t>(audio::emitter_lifetime_word(event.lifetime_ticks));
     return current_tick - event.emitted_tick > lifetime;
 }
 

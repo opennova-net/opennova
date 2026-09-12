@@ -525,7 +525,7 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
         ? world->weather.core.scalar_channels.camera_fov_fp : 80 << 16;
     const int32_t zoom = sighted || scoped ? local_player_scope_zoom(w, *active_slot) : 1;
     out.fov_h_deg = player_view_fov_h_deg(v, current_fov, scoped, sighted, zoom);
-    out.scope_zero_word = active_slot->scope_zero;
+    out.scope_zero_word = active_slot != nullptr ? active_slot->scope_zero : 0;
     out.scope_zero_max = w.def.scope_zero.max_steps;
     out.scope_zero_step = w.def.scope_zero.step_metres;
     out.scope_zero_default = w.def.scope_zero.default_metres;

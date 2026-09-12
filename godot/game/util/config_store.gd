@@ -14,6 +14,15 @@ static func read(path: String, section: String, key: String, default: Variant) -
 	return config.get_value(section, key, default)
 
 
+## Whether the file exists and carries `key` in `section` (a present key with
+## any value, so callers can tell "unset" from a stored sentinel).
+static func has_key(path: String, section: String, key: String) -> bool:
+	var config := ConfigFile.new()
+	if config.load(path) != OK:
+		return false
+	return config.has_section_key(section, key)
+
+
 ## Load-modify-save one key, preserving everything else in the file.
 static func write(path: String, section: String, key: String, value: Variant) -> void:
 	var config := ConfigFile.new()

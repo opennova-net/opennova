@@ -26,6 +26,9 @@ MaterialTextureTransform material_texture_transform(
 		uint8_t type, std::string_view name, bool loaded) {
 	if (!loaded || type == 3 || (type >= 9 && type <= 15) || type > 18)
 		return MaterialTextureTransform::Checkerboard;
+	// Types 6/7/16/17/18 raw-load here: their dedicated retail loaders
+	// (jpt_5B1737 cases @0x5B179A / @0x5B17B7 / @0x5B17D4 / @0x5B17DD /
+	// @0x5B17E6) are unported; see material_texture.h.
 	if (type != 4 && type != 5) return MaterialTextureTransform::Unchanged;
 	const std::string upper = strutil::to_upper(name);
 	if (upper.find(".MDT") != std::string::npos) return MaterialTextureTransform::Unchanged;
@@ -34,8 +37,9 @@ MaterialTextureTransform material_texture_transform(
 	return MaterialTextureTransform::Checkerboard;
 }
 
-// [orig: Texture_ApplyNormalMapFilter @0x58BD90;
-// load_texture_as_normalmap @0x58C985..0x58CAED]
+// [orig: load_texture_as_normalmap @0x58C985..0x58CAED (the live type-4/5
+// kernel); Texture_ApplyNormalMapFilter @0x58BD90..0x58C06C (its uncalled
+// twin)]
 std::vector<uint8_t> normal_map_from_height_rgba(const uint8_t *rgba,
 		uint32_t width, uint32_t height, float scale,
 		uint8_t height_channel, uint8_t alpha_channel) {

@@ -520,3 +520,67 @@ func test_water_material_has_no_far_discard_uniforms() -> void:
 			"u_fog_type retired: water fog rides the per-row spec-alpha factor")
 	assert_not_null(water.get_water_material().get_shader_parameter("u_underwater_view"),
 			"u_underwater_view must be fed by the strip rebuild")
+
+
+func test_strip_and_mirror_register_to_the_live_aspect_mode_target() -> void:
+	# While the local player presenter draws an aspect mode through its
+	# stretched target (LocalPlayerPresenter.view_projection: the target camera
+	# at the horizontal fov over a viewport of the SELECTED ratio, blitted over
+	# the whole surface), THAT camera draws the water into THAT viewport: the
+	# strip march and the mirror register to the target's projection and
+	# pixels. The surface camera then carries only the frustum's culling
+	# superset, whose mirror would open the horizontal field past the frame's
+	# and register the reflection V to the surface ratio, not the selected one.
+	var world := WorldFixture.boot_minimal(self)
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	camera.current = true
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no projection target can be live")
+		return
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, camera, null, ControlsModel.new())
+	# Retail's stock mode 0 (4:3) unless the surface is 4:3 itself, then 16:9.
+	var surface_ratio := size.y / size.x
+	var mode := 0 if absf(surface_ratio - 0.75) > 0.001 else 2
+	var selected := 0.75 if mode == 0 else 0.5625
+	var sim := world.get_sim()
+	sim.set_local_player_aspect_mode(mode)
+	for i in 2:
+		var frame_input := presenter.before_world_tick(TICK, false, true)
+		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+		presenter.after_world_tick()
+	var through: Camera3D = presenter.projection_camera()
+	assert_not_null(through, "a mode off the surface ratio draws through a target")
+	if through == null:
+		presenter.teardown()
+		return
+	var water: Water = world.get_water_node()
+	water.set_mission_water_height_override(7.0)
+	water.set_visible_terrain_bounds(false, 0.0, 0.0)
+	water.advance_frame(TICK)
+	assert_almost_eq(water.get_reflection_camera().fov, 80.0, 0.001,
+			"the mirror preserves the TARGET camera's horizontal fov (the frame's "
+			+ "policy 80), never the surface camera's culling superset")
+	var uv_scale: Vector2 = water.get_water_material().get_shader_parameter(
+			"u_reflection_uv_scale")
+	# The target is sized to whole pixels, so the ratio carries one rounding.
+	assert_almost_eq(uv_scale.y, selected, 0.002,
+			"reflection V converts from the TARGET's projection (the selected ratio) "
+			+ "to the square RTT")
+
+	# Back to the surface's own ratio: the target goes away and the surface
+	# camera draws the water again.
+	sim.set_local_player_aspect_mode(-1)
+	var native_input := presenter.before_world_tick(TICK, false, true)
+	world.tick(camera.global_position, camera.global_transform, TICK, native_input)
+	presenter.after_world_tick()
+	assert_null(presenter.projection_viewport(), "a native mode releases the target")
+	water.set_visible_terrain_bounds(false, 0.0, 0.0)
+	water.advance_frame(TICK)
+	uv_scale = water.get_water_material().get_shader_parameter("u_reflection_uv_scale")
+	assert_almost_eq(uv_scale.y, surface_ratio, 0.0001,
+			"a native mode registers the reflection to the surface's own ratio again")
+	presenter.teardown()

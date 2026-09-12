@@ -5,8 +5,10 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref.hpp>
+#include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object_id.hpp>
+#include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -27,6 +29,8 @@
 #include "simulation/player_aim_overlay.h"
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
+
+#include <runtime/world/player_view.h>
 
 namespace godot {
 
@@ -154,6 +158,26 @@ public:
 	// The 3P gun; a SIBLING of the avatar (see LocalPlayerVisuals).
 	ObjectModel *held_weapon() const;
 	Camera3D *camera() const;
+	// THE FRAME'S PROJECTION over the surface (the engine's world::view_projection
+	// for the session aspect mode): the horizontal fov is the policy fov in
+	// every mode and the vertical half-extent follows the SELECTED ratio, so a
+	// mode whose ratio differs from the surface's draws non-square pixels.
+	// Godot couples a Camera3D's two fovs through its viewport aspect, so such
+	// a mode renders the world through a SubViewport target of the selected
+	// aspect (its camera at the horizontal fov, KEEP_WIDTH) that a full-surface
+	// blit stretches onto the window -- the retail anamorphic fill; a native or
+	// matched mode draws the surface directly. Anything that projects world
+	// points onto the surface (HUD labels, tags, picks) must read THIS
+	// projection: while the target is live the gameplay camera only carries a
+	// CULLING SUPERSET of the frustum (the cullers that read it must never
+	// clip what the target draws).
+	Projection view_projection() const;
+	// The camera drawing the world while the stretched target is live (null
+	// when the surface draws directly), and that target.
+	Camera3D *projection_camera() const;
+	SubViewport *projection_viewport() const;
+	// The vertical stretch of the frame onto the surface (1 = none).
+	float projection_scale_y() const { return projection_scale_y_; }
 	// The FP viewmodel owner (tests and probes inspect the projection feed and
 	// sweep the placement tunables through it).
 	Ref<PlayerViewmodelRig> viewmodel_rig() const { return viewmodel_rig_; }
@@ -229,6 +253,7 @@ public:
 
 protected:
 	static void _bind_methods();
+	void _notification(int p_what);
 
 private:
 	void refresh_camera_mode();
@@ -245,6 +270,8 @@ private:
 	static void set_model_lighting_context(ObjectModel *p_model, bool p_interior, float p_transfer,
 			float p_effect_scale);
 	void update_scope_camera();
+	void update_view_projection(const opennova::world::ViewProjection &p_projection);
+	void release_view_projection();
 	void update_avatar(const Vector3 &p_pos);
 	GameplayCamera *fly_camera() const;
 
@@ -261,6 +288,15 @@ private:
 	Ref<LocalPlayerVisuals> visuals_;
 	Ref<PlayerLocalView> view_; // the sim's per-tick view snapshot (null = no sim)
 	float camera_saved_fov_ = -1.0f;
+	int camera_saved_keep_aspect_ = -1;
+	// The stretched-mode target (view_projection): the SubViewport, its camera,
+	// the blit CanvasLayer, and the surface viewport whose own 3D draw it
+	// replaced while live.
+	ObjectID projection_viewport_id_;
+	ObjectID projection_camera_id_;
+	ObjectID projection_blit_layer_id_;
+	ObjectID projection_surface_id_;
+	float projection_scale_y_ = 1.0f;
 	bool debug_force_viewmodel_ = false;
 	bool debug_body_in_first_person_ = false;
 	bool debug_third_person_ = false;

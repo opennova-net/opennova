@@ -283,8 +283,10 @@ public:
 	// The phase-3 0x0A objective block has no on-wire discriminator. apply()
 	// learns the shared g_GameType from S2C 0x08 field 3 / 0x7B `extra`;
 	// replay/bootstrap callers may also seed it explicitly before a midstream 0x0A.
-	void set_game_type(uint32_t game_type) { game_type_ = game_type; }
+	void set_game_type(uint32_t game_type) { game_type_ = game_type; game_type_known_ = true; }
 	uint32_t game_type() const { return game_type_; }
+	// True once a folded 0x08 / 0x7B (or set_game_type) wrote the word.
+	bool game_type_known() const { return game_type_known_; }
 
 	// The 0x1D header-form discriminator's session half: retail reads
 	// g_napi_np_ctx.is_in_session; a joiner is always in-session, while the
@@ -396,6 +398,7 @@ private:
 	std::size_t unknown_tags_ = 0;
 	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;
+	bool game_type_known_ = false;
 	bool mp_session_ = false;
 	bool authority_recipient_ = false;
 	uint16_t viewer_handle_ = 0xFFFF;

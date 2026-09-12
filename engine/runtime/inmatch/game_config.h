@@ -37,9 +37,11 @@ inline constexpr std::size_t kMaxFrameUpdateBodyBytes =
 		kProtocolMessageLen16Bytes;
 static_assert(kMaxFrameUpdateBodyBytes == 1278);
 
-// The lobby player-cap ceiling: retail clamps the advertised max_players to
-// 1..65 (the 64-player roster + the host) before storing game_settings +0xC0.
-// [orig: the 1..65 clamp on game_settings +0xC0 — see GameConfig::max_players]
+// The advertised player-cap ceiling: a dialog cap above 65 publishes 65 (the
+// test is on the PRE-increment cap, so a dedicated 65 publishes 66); there is
+// no lower clamp. The dialog itself caps its edit at 64.
+// [orig: apply_session_settings_to_globals @0x551b43..0x551b48 -> game_settings
+//  +0xC0; HostDialog_ReadSettings @0x555c25..0x555c2d — see host_player_slot_limit]
 inline constexpr uint32_t kMaxPlayersCap = 65;
 
 // The session family that selects retail's default send divider. `Automatic`
@@ -80,7 +82,7 @@ struct GameConfig {
 	int32_t time_of_day_continuity = 0;
 	// (retail game_settings +0x80 internet_address, +0xC4 use_lineup_queue and
 	//  +0xC8 lineup_queue_size have no reader here and are not modelled.)
-	uint32_t max_players = 1;                   // [orig game_settings +0xC0] clamped 1..kMaxPlayersCap
+	uint32_t max_players = 1;                   // [orig game_settings +0xC0] host_player_slot_limit's published cap (0..66)
 
 	// g_GameType @0x24D2128 — the ONE gametype global. Read by the 0x08 block dword[3], the 0x7B/0x60
 	// reply bodies, the BuildFlags team-gate (game_settings.game_type copy, equal in a live session),
@@ -100,6 +102,12 @@ struct GameConfig {
 	static constexpr uint32_t kMpAttribNoFriendlyFire = 0x200;
 	static constexpr uint32_t kMpAttribNoFriendlyTag = 0x400;
 	static constexpr uint32_t kMpAttribClaymorePref = 0x8000;
+	// Read only by the scope-zero -1 floor [orig: `test g_rules_flags,10000h`
+	// @0x4dbd15 in Player_AdjustWeaponZoomLevel]. No retail writer sets it:
+	// mp_allowsniperscopezoom feeds the 0x08 flags dword bit 16 (byte_A821F0,
+	// read by WeaponSlot_InitFromDef @0x53ef17) and never this word, so the
+	// bit is live only when a host cfg carries it in its mpattrib value.
+	static constexpr uint32_t kMpAttribAutoScopeZero = 0x10000;
 	// [orig game_settings +0xD0; the cfg default `mov g_mpattrib_flags,3A02h`
 	//  @0x54d406 in Config_SetDefaults = 14850. The captured 14854 carried the
 	//  TEAM_CHOOSE spin's bit 0x4 persisted on in that install's game.cfg; a

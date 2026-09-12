@@ -138,7 +138,10 @@ public:
 	// @0x528e20). One-shot volume snapshots the listener distance at fire time, and
 	// the set's cull range gates the fire entirely [orig: Sound_Play3DPositional
 	// @ 0x527cb0; cull @ 0x527cd1].
-	bool fire_soundset(const String &p_name, const Vector3 &p_world_pos, int p_source_bms_id = 0);
+	// `p_sound_id` is the sim's own-channel reuse key for the source
+	// (audio::oneshot_sound_id, carried on ReadyFireSound); 0 = no identity.
+	bool fire_soundset(const String &p_name, const Vector3 &p_world_pos, int p_source_bms_id = 0,
+			int p_sound_id = 0);
 	// A non-positional interface one-shot: the engine's zero-position play used by
 	// the weapon-switch/equip deny click -- a 24-byte emitter with header 0x10000,
 	// zeroed position, and the interface volume option, routed straight into the
@@ -153,7 +156,7 @@ public:
 	// Entity_PlaySound3D_FullVolume @ 0x528e20 -- emitter volume 255], with an
 	// shares the finite one-shot pool with the other positional triggers.
 	bool slot_soundset(const String &p_name, const Vector3 &p_world_pos,
-			int p_source_bms_id = 0);
+			int p_source_bms_id = 0, int p_sound_id = 0);
 	// Enqueue a mission dialog by its PlayWavList id (param1): the engine's
 	// resolution (runtime/audio/dialog_queue resolve_dialog_sets) then the
 	// serialized queue, pumped here by spawning one voice at a time. Returns
@@ -212,6 +215,7 @@ protected:
 
 private:
 	Ref<Simulation> _simulation() const;
+	static int _oneshot_sound_id(int p_source_bms_id, int p_sound_id);
 	bool _record_fire(const String &p_set_name, const Vector3 &p_world_pos, int p_source_bms_id,
 			bool p_slot, bool p_played);
     void _play_listener_relative(const String &p_name, int32_t p_distance_q16,

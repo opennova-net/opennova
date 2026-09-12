@@ -327,6 +327,16 @@ struct HudMapPass {
 // direction == 0 restores the spawn value (Player_InitPlayer semantics).
 int32_t spinmap_zoom_step(int32_t zoom_q16, int direction);
 
+// One TSDicon strip cell's UV rect (30 square cells, half-texel insets from
+// the loaded strip's physical size) and the MODULATE2X diffuse fold the strip
+// renderer's texture stage implies -- shared by the map blips and the
+// friendly-tag radio-request icon, which both submit through
+// Render_DrawIconStripCell_Debug [orig: render_tiled_image_strip @0x67b540;
+// Render_DrawIconStripCell_Debug @0x67bae0].
+void hud_icon_strip_cell_uv(const HudMinimapInput &input, uint8_t icon,
+		float &u0, float &v0, float &u1, float &v1);
+uint32_t hud_icon_strip_modulate2x_color(uint32_t argb);
+
 // Mission-space point to the heading-up map. Returns false when outside the
 // circular clip; clamp_to_edge pins the point onto its circumference.
 bool project_spinmap_point(const HudMinimapInput &input, int32_t world_x,

@@ -52,8 +52,8 @@ public:
 
     // Both jitter draws consume the same stream as member selection; additions
     // wrap at DWORD width and each signed Q16 multiplication truncates separately.
-    // [orig: SoundBank_PlayTriggerEntries @0x75CE85..0x75CF17;
-    // SoundBank_SelectTriggerEntryFromBank @0x75C07F..0x75C128]
+    // [orig: SoundBank_PlayTriggerEntries @0x75CE81..0x75CF14;
+    // SoundBank_SelectTriggerEntryFromBank @0x75C089..0x75C113]
     uint32_t compose_pitch(uint32_t set_base, uint32_t set_range,
             uint32_t member_base, uint32_t member_range,
             uint32_t emitter_pitch = 0x10000u);

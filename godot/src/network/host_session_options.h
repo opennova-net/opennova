@@ -165,6 +165,9 @@ public:
 	Dictionary to_json_value() const;
 	static PackedStringArray dialog_controls();
 	bool apply_dialog_control(const String &p_control, const String &p_value);
+	// The populate inverse: what the host screen shows for a control from this
+	// request (engine host_dialog_value).
+	String dialog_value(const String &p_control) const;
 	Ref<HostSessionOptions> duplicate_options() const;
 };
 

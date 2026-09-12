@@ -35,7 +35,7 @@ void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
         // @0x4b7e8c-0x4b7f06], so omitting it made a joiner's jump invisible.
         ent->net_move_input = static_cast<uint8_t>((inf.player_move_dir_index & 7) |
                                                    (inf.player_moving ? 8 : 0) |
-                                                   (inf.free_look ? 0x10 : 0) |
+                                                   (inf.free_look ? Entity::kMoveOrderFreeLook : 0) |
                                                    (inf.jump_held ? Entity::kMoveOrderJump : 0) |
                                                    (inf.lean_left ? 0x40 : 0) |
                                                    (inf.lean_right ? 0x80 : 0));

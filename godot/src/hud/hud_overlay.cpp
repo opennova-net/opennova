@@ -224,6 +224,8 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_friendly_tags", "shown", "camera_xform",
 								  "camera_projection", "fog_distance_units", "sim"),
 			&HudOverlay::set_friendly_tags);
+	ClassDB::bind_method(D_METHOD("set_radio_request_icon_viewer", "viewer"),
+			&HudOverlay::set_radio_request_icon_viewer);
 	ClassDB::bind_method(D_METHOD("set_end_round_overlay", "shown", "top", "bottom",
 								  "texts", "ys"),
 			&HudOverlay::set_end_round_overlay);
@@ -1208,6 +1210,9 @@ void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xfo
 			tag.has_slot = t.has_slot;
 			tag.medic_request = t.medic_request;
 			tag.revive_seconds = t.revive_seconds;
+			// The radio-request icon's per-tag fold (the gather carries the
+			// witness); the viewer gate is set_radio_request_icon_viewer's.
+			tag.radio_request = t.radio_request;
 			state_.friendly_tags.push_back(tag);
 		}
 	}
@@ -1275,6 +1280,11 @@ void HudOverlay::set_friendly_tag_env(float p_fog_distance_units,
 	const int32_t fog_q16 = opennova::io::float_to_fp16_16_sat(p_fog_distance_units);
 	state_.fog_dist_q16 = fog_q16 > 0 ? fog_q16 : INT32_MAX;
 	state_.speaking_level255 = p_speaking_level255;
+}
+
+void HudOverlay::set_radio_request_icon_viewer(bool p_viewer) {
+	state_.radio_request_icon_viewer = p_viewer;
+	queue_redraw();
 }
 
 Ref<Texture2D> HudOverlay::get_minimap_water_mask() const {

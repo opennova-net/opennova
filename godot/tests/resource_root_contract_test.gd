@@ -621,9 +621,16 @@ func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> 
 	assert_not_null(packed)
 	assert_eq(packed.get_image().get_pixel(0, 0), Color8(127, 127, 255, 121))
 	assert_eq(resources.load_material_texture("ready.mdt", 4).get_image().get_pixel(0, 0), Color8(50, 70, 121, 128))
+	# A missing MDT is the port's BOUNDED fallback, not the witnessed retail
+	# result: retail walks the null-data kernel for the absent file (jz
+	# @0x58c586), D3DX corrects the 0x0 request to 1x1 (@0x690a2b / @0x690a37)
+	# and the nonzero handle skips the checkerboard (@0x5b17f2), binding a
+	# never-filled 1x1 texture that ADR 0003 does not reproduce.
 	var missing: Texture2D = resources.load_material_texture("brick.mdt", 4)
-	assert_eq(missing.get_width(), 128, "A missing MDT never aliases the existing TGA or DDS.")
-	assert_eq(missing.get_image().get_pixel(0, 0), Color8(48, 48, 48))
+	assert_eq(missing.get_width(), 128,
+			"A missing MDT never aliases the existing TGA or DDS; the port binds its bounded checkerboard fallback.")
+	assert_eq(missing.get_image().get_pixel(0, 0), Color8(48, 48, 48),
+			"the missing-MDT fallback is the port's checkerboard, not retail's unfilled 1x1 texture")
 	assert_eq(resources.mount_runtime(root, "", true), OK)
 	var loose: Texture2D = resources.load_material_texture("brick.tga", 4)
 	assert_eq(loose.get_image().get_pixel(0, 0), Color8(127, 127, 255, 233))

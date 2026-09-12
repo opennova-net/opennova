@@ -12,18 +12,30 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		SessionConfig config;
 		if (decode_session_config(body.data(), body.size(), config)) {
 			game_type_ = static_cast<uint32_t>(config.fields[3]);
-			state_.permanent_death = (config.bitflags & 0x8000u) != 0;
-			state_.spectators_allowed = (config.bitflags & 0x2000u) != 0;
+			game_type_known_ = true;
+			const bool permanent_death = (config.bitflags & 0x8000u) != 0;
+			const bool spectators_allowed = (config.bitflags & 0x2000u) != 0;
+			// The deploy screen projects both flags from the LIVE state, so a
+			// flip moves the revision like every other decoded-state write
+			// (edge-triggered, like the roster and entity-team folds).
+			if (state_.permanent_death != permanent_death ||
+					state_.spectators_allowed != spectators_allowed) {
+				state_.permanent_death = permanent_death;
+				state_.spectators_allowed = spectators_allowed;
+				state_.mark_changed();
+			}
 		} else
 			++malformed_bodies_;
 		break;
 	}
 	case s2c::FULL_PLAYER_INFO: { // extra = shared g_GameType
 		FullPlayerInfo info;
-		if (decode_full_player_info(body.data(), body.size(), info))
+		if (decode_full_player_info(body.data(), body.size(), info)) {
 			game_type_ = info.extra;
-		else
+			game_type_known_ = true;
+		} else {
 			++malformed_bodies_;
+		}
 		break;
 	}
 	case s2c::PER_FRAME_UPDATE:
@@ -40,12 +52,16 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		break;
 	}
 	case s2c::TRACKED_PLAYER_VOICE: {
-        if (!mp_session_) break;
-        TrackedPlayerVoice command;
-        if (!decode_tracked_player_voice(body.data(), body.size(), command)) ++malformed_bodies_;
-        pending_effect_commands_.push_back(command);
-        break;
-    }
+		// Retail defaults each absent field and still dispatches, so the
+		// decoder cannot fail and nothing counts as malformed here.
+		// [orig: NapiNPClientMsg_HandleEntityDeath @0x430C50 - defaults
+		//  @0x430c8a / @0x430c9c / @0x430cc6]
+		if (!mp_session_) break;
+		TrackedPlayerVoice command;
+		decode_tracked_player_voice(body.data(), body.size(), command);
+		pending_effect_commands_.push_back(command);
+		break;
+	}
 	case s2c::WEAPON_RESTRICTIONS:
 		apply_weapon_restrictions(body);
 		break;

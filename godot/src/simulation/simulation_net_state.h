@@ -58,7 +58,7 @@ struct SimulationNetState {
 	// the LAN HostRole is installed by ensure_session_role at the next load
 	// (the pre-G13 host_listen_ latch; is_host_listening() reads it meanwhile).
 	bool lan_host_pending = false;
-	uint32_t host_max_players = 16; // the lobby-advertised player cap; clamped host-side to the witnessed 1..65 [orig +0xC0]
+	uint32_t host_max_players = 16; // the lobby-advertised player cap as host_player_slot_limit publishes it (0..66) [orig +0xC0]
 	// The mission's raw terrain-tile (.til) file bytes, fed from the Godot shell
 	// (which owns the resource root) before load; copied into the host ctx's
 	// terrain_til_data at bring-up so the initial-state burst streams the S2C

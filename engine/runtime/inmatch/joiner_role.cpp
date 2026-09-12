@@ -5,6 +5,7 @@
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/client_replica_emplaced.h>
 #include <runtime/inmatch/client_weapon_replay.h>
+#include <runtime/inmatch/game_config.h>
 
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/charattr_challenge.h>
@@ -585,6 +586,12 @@ void JoinerRole::pump() {
 	lp.apply_player_input_pre_tick(); // input latches stay live through the phase
 	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
     world.rules.cease_fire = rt.state().cease_fire;
+    // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_rules_flags
+    // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
+    // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
+    world.rules.session_open = true;
+    world.rules.auto_scope_zero =
+            (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;
     materializer_.fill_minefield_actors(rt.state(), self_wire_handle_, world.minefields.remote_actors);
 	// The tick's own phases land on the SIM_WORLD_* rows inside run_logic_tick.
 	world.run_logic_tick(

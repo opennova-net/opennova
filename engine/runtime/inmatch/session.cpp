@@ -204,7 +204,13 @@ FrameOutcome Session::run_ticks(int32_t due, const FrameInput &input) {
 	const int64_t tick_start = now_us();
 	bool consume_one_shots = true;
 	for (int32_t i = 0; i < due; ++i) {
-		TickOutcome tick = run_one_tick(merged_tick_input(input, consume_one_shots));
+		TickInput tick_input = merged_tick_input(input, consume_one_shots);
+		// [orig: Game_MainLoop @0x52ba21..0x52ba3a -- dword_24E0E80 = 1 when
+		//  less than one 16 ms tick of backlog remains after this quantum, 0
+		//  while catching up (and always 0 under g_cineFixedStepMode, which
+		//  the port does not model)]
+		tick_input.last_tick_of_batch = i + 1 == due;
+		TickOutcome tick = run_one_tick(tick_input);
 		if (tick.terminal()) {
 			out.status = tick.status == TickStatus::SessionLost
 					? FrameStatus::SessionLost : FrameStatus::Fatal;
@@ -235,6 +241,7 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 		out.error = {SessionErrorCode::TickFailed, "no role is bound to the session"};
 		return out;
 	}
+	role_->kernel()->world.rules.last_tick_of_batch = input.last_tick_of_batch;
 	role_->apply_input(input);
 	const int64_t tick_start = now_us();
 	role_->run_tick(input);

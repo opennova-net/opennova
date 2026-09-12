@@ -381,10 +381,11 @@ std::vector<uint8_t> JoinerConnection::start() {
 	advertised_expansion_.clear();
 	game_type_ = 0;
 	mp_attributes_ = 0;
+	session_max_players_ = 0;
 	mission_metadata_transfer_id_ = 0;
 	mission_metadata_total_size_ = 0;
-	mission_metadata_mp_bytes_.fill(0);
-	mission_metadata_mp_byte_mask_ = 0;
+	mission_metadata_fixed_bytes_.fill(0);
+	mission_metadata_fixed_byte_mask_ = 0;
 	last_error_.clear();
 	host_disconnect_reason_.clear();
 	in_match_session_established_ = false;
@@ -906,10 +907,15 @@ void JoinerConnection::retain_server_info_chunk(const FileTransferChunk &chunk) 
 
 void JoinerConnection::retain_mission_metadata_chunk(
 		const FileTransferChunk &chunk) {
-	constexpr uint32_t kMpAttributesOffset = 44;
-	constexpr uint32_t kMpAttributesSize = 4;
+	// The fixed block's dwords at 36 (the published player cap) and 44
+	// (mpattrib) ride one retained [36, 48) window, so either dword still
+	// assembles when a chunk boundary splits it.
+	constexpr uint32_t kFixedWindowOffset = 36;
+	constexpr uint32_t kFixedWindowSize = 12;
+	constexpr uint16_t kMaxPlayersMask = 0x000Fu; // window bytes 0..3 = offset 36
+	constexpr uint16_t kMpAttributesMask = 0x0F00u; // window bytes 8..11 = offset 44
 	const uint64_t chunk_end = uint64_t(chunk.chunk_offset) + chunk.chunk_size;
-	if (chunk.total_size < kMpAttributesOffset + kMpAttributesSize ||
+	if (chunk.total_size < kFixedWindowOffset + kFixedWindowSize ||
 			chunk.chunk_offset > chunk.total_size ||
 			chunk_end > chunk.total_size)
 		return;
@@ -920,23 +926,27 @@ void JoinerConnection::retain_mission_metadata_chunk(
 	if (new_transfer || chunk.chunk_offset == 0) {
 		mission_metadata_transfer_id_ = chunk.transfer_id;
 		mission_metadata_total_size_ = chunk.total_size;
-		mission_metadata_mp_bytes_.fill(0);
-		mission_metadata_mp_byte_mask_ = 0;
+		mission_metadata_fixed_bytes_.fill(0);
+		mission_metadata_fixed_byte_mask_ = 0;
 	}
 
-	for (uint32_t i = 0; i < kMpAttributesSize; ++i) {
-		const uint32_t absolute = kMpAttributesOffset + i;
+	for (uint32_t i = 0; i < kFixedWindowSize; ++i) {
+		const uint32_t absolute = kFixedWindowOffset + i;
 		if (absolute < chunk.chunk_offset || absolute >= chunk_end) continue;
-		mission_metadata_mp_bytes_[i] =
+		mission_metadata_fixed_bytes_[i] =
 				chunk.chunk_data[absolute - chunk.chunk_offset];
-		mission_metadata_mp_byte_mask_ |= static_cast<uint8_t>(1u << i);
+		mission_metadata_fixed_byte_mask_ |= static_cast<uint16_t>(1u << i);
 	}
-	if (mission_metadata_mp_byte_mask_ == 0x0Fu) {
-		mp_attributes_ = static_cast<uint32_t>(mission_metadata_mp_bytes_[0]) |
-				(static_cast<uint32_t>(mission_metadata_mp_bytes_[1]) << 8) |
-				(static_cast<uint32_t>(mission_metadata_mp_bytes_[2]) << 16) |
-				(static_cast<uint32_t>(mission_metadata_mp_bytes_[3]) << 24);
-	}
+	const auto window_dword = [&](std::size_t at) {
+		return static_cast<uint32_t>(mission_metadata_fixed_bytes_[at]) |
+				(static_cast<uint32_t>(mission_metadata_fixed_bytes_[at + 1]) << 8) |
+				(static_cast<uint32_t>(mission_metadata_fixed_bytes_[at + 2]) << 16) |
+				(static_cast<uint32_t>(mission_metadata_fixed_bytes_[at + 3]) << 24);
+	};
+	if ((mission_metadata_fixed_byte_mask_ & kMaxPlayersMask) == kMaxPlayersMask)
+		session_max_players_ = window_dword(0);
+	if ((mission_metadata_fixed_byte_mask_ & kMpAttributesMask) == kMpAttributesMask)
+		mp_attributes_ = window_dword(8);
 }
 
 void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollResult &out) {
@@ -2283,10 +2293,11 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	spawn_.item_type_id = self_type;
 	game_type_ = game_type;
 	mp_attributes_ = 0;
+	session_max_players_ = 0;
 	mission_metadata_transfer_id_ = 0;
 	mission_metadata_total_size_ = 0;
-	mission_metadata_mp_bytes_.fill(0);
-	mission_metadata_mp_byte_mask_ = 0;
+	mission_metadata_fixed_bytes_.fill(0);
+	mission_metadata_fixed_byte_mask_ = 0;
 	mission_header_bytes_.clear();
 	reset_terrain_load();
 	class_allow_mask_ = 0x03FFu;

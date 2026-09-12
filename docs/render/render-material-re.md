@@ -598,7 +598,7 @@ REN-4 session (the shader/TSS grill):
 | --- | --- | --- |
 | DOT3 request types 4/5 | MATCHING on supported decoded images | Native texture preprocessing golden bytes |
 | Terrain detail coefficients | MATCHING | terrain_texture_preprocess, signed gradients and preserved alpha |
-| Missing/unsupported texture fallback | MATCHING device resource | resource_root_contract_test, native checkerboard bytes |
+| Missing/unsupported texture fallback | MATCHING for types 0-5/8 and the default cases (3, 9..15, >18); types 6/7/16/17/18 raw-load (dedicated retail loaders unported); the missing-MDT case is the port's bounded checkerboard, not retail's result | resource_root_contract_test, native checkerboard bytes; jpt_5B1737 cases `@ 0x5B179A` / `@ 0x5B17B7` / `@ 0x5B17D4` / `@ 0x5B17DD` / `@ 0x5B17E6`; the missing-MDT walk `jz @ 0x58C586` then D3DX 0-to-1 `@ 0x690A2B` / `@ 0x690A37` then the nonzero-handle skip `@ 0x5B17F2` |
 
 Object DOT3 conversion reads alpha as height, uses 1/64 slopes and summed
 unit-Z terms, wraps with dimension-minus-one masks, copies source blue into output alpha,
@@ -614,3 +614,25 @@ coordinate bit-2 values chooses byte 0x50 or 0x30. The VFS-backed resolver handl
 missing data and unsupported types 3, 9..15 and >18 with this resource; cache
 epoch teardown releases its device handles with the rest of the texture cache.
 [orig: Render_CreateCheckerboardTexture @ 0x5B1600]
+
+Two caveats on that table row (2026-09-11 review). First, the dispatcher's
+second switch (`movzx edx, byte ptr [ecx+11h]` @ 0x5B1723, `jmp jpt_5B1737`
+@ 0x5B1737) has five dedicated-loader legs the port raw-loads as the decoded
+texture: case 6 @ 0x5B179A (`sub_58A580`, environment-map build), case 7
+@ 0x5B17B7 (`sub_58CE10`, the `:AO:N` alpha-overlay variant), case 16
+@ 0x5B17D4 (`sub_58F350`, chunk normal map), case 17 @ 0x5B17DD (`sub_58F470`,
+height map to normal) and case 18 @ 0x5B17E6 (`load_tga_alpha_overlay_texture`);
+whether shipped JO `.3di` rows carry those types is unchecked. Second, a
+missing `.MDT` is not a retail checkerboard: `load_texture_as_normalmap`'s
+absent-file leg jumps into the null-data kernel walk (`jz` @ 0x58C586) with
+zero dimensions, the pixel loop is skipped (`jle` @ 0x58C901), and
+`GTexture_FindOrCreateFromData` (call @ 0x58CB56) succeeds because the
+statically linked D3DX corrects the 0x0 request to 1x1
+(`D3DXTex_ValidateAndAdjustTextureParams` @ 0x690A2B / @ 0x690A37), so the
+dispatcher's single result test (`test eax,eax` @ 0x5B17F0, `jnz` @ 0x5B17F2)
+sees a nonzero handle and retail binds a never-filled 1x1 managed texture.
+The port keeps the checkerboard as its bounded fallback for that row (an
+unfilled device texture is garbage under ADR 0003); whether that carve-out is
+registered as a class-D entry is the maintainer's call.
+[orig: sub_5B16F0 @ 0x5B16F0; load_texture_as_normalmap @ 0x58C480;
+GTexture_CreateFromPixelData_0 @ 0x6876C0]

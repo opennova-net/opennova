@@ -408,6 +408,49 @@ func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
 	assert_eq(options.num_teams, 4)
 
 
+func test_joiner_full_bms_load_admits_against_the_joined_session_player_cap() -> void:
+	# A record flagged "no less than N players" (bmsi attribute bit 0x10) admits
+	# only once the session's player limit reaches N. The joiner's own full-BMS
+	# load (tools and direct joins) must gate on the cap the HOST published in
+	# its pre-load burst (the S2C 0x64 session block), not on the joiner's
+	# untouched host-screen default of 1, or the two peers promote different
+	# worlds from the same document.
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	mission.add_entity(3, 0x14BF, Vector3(0, 0, 0), Vector3.ZERO) # KIND_ORGANIC, Generic Soldier
+	mission.add_entity(3, 0x14BF, Vector3(10, 0, 0), Vector3.ZERO)
+	mission.add_entity(3, 0x14BF, Vector3(20, 0, 0), Vector3.ZERO)
+	assert_true(mission.set_entity_property_int(3, 2, "ai_flags", 0x10))
+	assert_true(mission.set_entity_property_int(3, 2, "no_less_than", 3))
+
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	assert_eq(host.get_spawned_count(), 3,
+			"the host's cap of 4 admits the three-player-minimum organic")
+
+	var joiner := Simulation.new()
+	assert_true(joiner.enable_join("127.0.0.1", host.get_host_listen_port(), "CapJoiner"))
+	joiner.set_join_world_ready(false)
+	# Retail authenticates and drains the pre-load burst (the 0x60/0x64
+	# transfers, the player list, the terminal 0x11) before it builds a world.
+	var preloaded := false
+	for _i in range(600):
+		joiner.poll_join_preload()
+		host.step()
+		if joiner.is_join_preload_ready():
+			preloaded = true
+			break
+		OS.delay_msec(2)
+	assert_true(preloaded, "the joiner drained the pre-load burst on the live socket")
+	assert_true(joiner.load_from_mission_data(mission))
+	assert_eq(joiner.get_spawned_count(), 3,
+			"the joiner admits the same organic against the host's published cap of 4")
+
+
 func test_host_integrity_profile_is_explicit_and_roundtrips() -> void:
 	var sim := Simulation.new()
 	assert_eq(sim.get_host_session_config().integrity_profile, "",

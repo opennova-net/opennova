@@ -255,7 +255,7 @@ uint32_t validate_join_request(
 		if (ascii_case_equal(name, "EXP")) expansion = value.substr(0, 31);
 		else if (ascii_case_equal(name, "VERSIONCRCSTRING")) version_crc = value.substr(0, 511);
 	}
-	// [orig: Server_ValidatePlayerJoinRequest @0x5122ff..0x512349]
+	// [orig: Server_ValidatePlayerJoinRequest @0x5122fc..0x512349]
 	if (expansion != config.expansion) return 47;
 	if (!config.expansion.empty() &&
 	    static_cast<int32_t>(std::strtol(version_crc.c_str(), nullptr, 10)) !=
@@ -1214,7 +1214,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// The JOIN handler latches the spectator request before validation;
 				// the local loopback bypasses the complete remote validator.
 				// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0;
-				// Server_ValidatePlayerJoinRequest @0x512135]
+				// Server_ValidatePlayerJoinRequest @0x5121ab..0x5121af -> @0x512a76 (conn+0x2E set = accept unvalidated)]
 				if (conn.type != NapiNPConnection::kTypeClientSide) {
 					conn.link.spectator = conn.join_spectator_request != 0;
 					uint32_t reject_dpc = validate_join_environment(conn.join_environment);

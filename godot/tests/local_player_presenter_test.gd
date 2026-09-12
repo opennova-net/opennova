@@ -579,6 +579,99 @@ func test_camera_stamps_the_sim_composed_pose_and_policy_fov() -> void:
 			"teardown restores the camera's original fov")
 
 
+func test_aspect_mode_draws_through_a_target_of_the_selected_ratio() -> void:
+	# The frame's projection keeps the policy HORIZONTAL fov across the real
+	# width in every aspect mode; the vertical half-extent follows the
+	# SELECTED ratio (docs/mnu/menu-re.md, 16x9DISPLAY; engine
+	# world::view_projection). A mode off the surface's ratio therefore draws
+	# through a target of the selected aspect stretched onto the surface,
+	# never through a widened camera fov.
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no projection can be pinned")
+		return
+	var surface_ratio := size.y / size.x
+	# Retail's stock mode 0 (4:3) unless the surface is 4:3 itself, then 16:9.
+	var mode := 0 if absf(surface_ratio - 0.75) > 0.001 else 2
+	var selected := 0.75 if mode == 0 else 0.5625
+	var stretch := selected / surface_ratio
+	var half_h := tan(deg_to_rad(40.0))
+	sim.set_local_player_aspect_mode(mode)
+	_frame(world, presenter, camera, 2)
+	var view := world.local_player_view()
+	assert_almost_eq(view.fov_h_deg, 80.0, 0.001, "the unscoped policy fov is 80")
+
+	assert_almost_eq(presenter.projection_scale_y(), stretch, 0.001,
+			"the frame stretches selected/(h/w) onto the surface")
+	var target: SubViewport = presenter.projection_viewport()
+	assert_not_null(target, "a mode off the surface ratio draws through a target")
+	var through: Camera3D = presenter.projection_camera()
+	assert_not_null(through, "the target has its own drawing camera")
+	if target == null or through == null:
+		return
+	var expected_size := Vector2i(int(size.x), roundi(size.x * selected))
+	if stretch < 1.0:
+		expected_size = Vector2i(roundi(size.y / selected), int(size.y))
+	assert_eq(target.size, expected_size,
+			"the target has the selected aspect and never undersamples the surface")
+	assert_almost_eq(through.fov, 80.0, 0.001, "the target camera keeps the horizontal fov")
+	assert_eq(through.keep_aspect, Camera3D.KEEP_WIDTH)
+	assert_true(through.global_transform.is_equal_approx(camera.global_transform),
+			"the target camera mirrors the gameplay pose")
+	assert_true(camera.get_viewport().disable_3d,
+			"the surface's own 3D draw yields to the blitted target")
+	var projection: Projection = presenter.view_projection()
+	assert_almost_eq(projection.x.x, 1.0 / half_h, 0.001,
+			"proj[0][0] = cot(fov_h/2) across the real width")
+	# The target is an integer-sized viewport, so its ratio meets the selected
+	# one to within a pixel (a 64x64 headless surface rounds 85.3 to 85).
+	var target_ratio := float(target.size.y) / float(target.size.x)
+	assert_true(absf(target_ratio - selected) <= 1.0 / float(target.size.x),
+			"the target ratio is the selected ratio within one pixel")
+	assert_almost_eq(projection.y.y, 1.0 / (half_h * target_ratio), 0.001,
+			"proj[1][1] = 1/(tan(fov_h/2)*ratio) across the target height")
+	# The gameplay camera carries the culling superset: the vertical fov of the
+	# selected ratio under the surface's wider horizontal when the selected
+	# ratio is the taller, else the horizontal fov under the surface's taller
+	# vertical.
+	if stretch > 1.0:
+		assert_eq(camera.keep_aspect, Camera3D.KEEP_HEIGHT)
+		assert_almost_eq(camera.fov,
+				Simulation.fov_vertical_from_horizontal(80.0, size.x / size.y, mode), 0.001,
+				"the gameplay camera keeps the selected vertical fov")
+	else:
+		assert_eq(camera.keep_aspect, Camera3D.KEEP_WIDTH)
+		assert_almost_eq(camera.fov, 80.0, 0.001, "the gameplay camera keeps the horizontal fov")
+	# The FP fold's focal ratio is the ratio of the two horizontal
+	# half-tangents, whatever the surface: sweep the renderfov tunable to 60.
+	var rig: PlayerViewmodelRig = presenter.viewmodel_rig()
+	rig.set_player_viewmodel_renderfov_h_deg(60.0)
+	_frame(world, presenter, camera, 1)
+	if rig.projection_feed() == Vector4.ZERO:
+		pending("no FP viewmodel built, so no projection feed to pin")
+	else:
+		assert_almost_eq(rig.projection_feed().x, half_h / tan(deg_to_rad(30.0)), 0.001,
+				"the renderfov focal ratio is aspect-invariant")
+
+	# Back to the surface's own ratio: the target goes away and the surface
+	# draws directly through the shared conversion.
+	sim.set_local_player_aspect_mode(-1)
+	_frame(world, presenter, camera, 1)
+	assert_null(presenter.projection_viewport(), "a native mode releases the target")
+	assert_almost_eq(presenter.projection_scale_y(), 1.0, 0.0001)
+	assert_false(camera.get_viewport().disable_3d, "the surface draws its own 3D again")
+	assert_eq(camera.keep_aspect, Camera3D.KEEP_HEIGHT)
+	assert_almost_eq(camera.fov,
+			Simulation.fov_vertical_from_horizontal(view.fov_h_deg, size.x / size.y), 0.001,
+			"the native camera fov is the shared conversion at the surface aspect")
+
+
 func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_models() -> void:
 	# Retail draws the local body/held weapon separately from the near-Z first-person
 	# overlay [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. The hidden

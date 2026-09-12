@@ -432,7 +432,7 @@ void AmbientMixer::register_emitter(uint64_t source_spawn_id, int32_t lane,
             return; // fixed table full: later layers drop like retail
         }
         s->lane = lane;
-        s->lifetime = lifetime_ticks;
+        s->lifetime = emitter_lifetime_word(lifetime_ticks);
         s->vol_byte = vol_byte;
         s->pitch_q16 = pitch_q16;
         s->range_q16 = -1;

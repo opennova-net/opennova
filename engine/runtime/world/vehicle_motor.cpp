@@ -348,7 +348,7 @@ void stage_player_vehicle_input(
     // -[136] >> 1 (1/2) [orig: @0x48bb89].
     const int reverse_shift = traits.family == VehicleFamily::Bike ? 3 : 1;
     // An active bike launch retains the heading/throttle chosen above.
-    // [orig: Entity_UpdateLightVehiclePhysics @ 0x484C9D..0x484CBD]
+    // [orig: Entity_UpdateLightVehiclePhysics @ 0x484C9C..0x484CBD]
     if (traits.family == VehicleFamily::Bike &&
             ((veh.flags & kEntityFlagInAir) || m.wheelie_request || m.wheelie_active))
         return;
@@ -641,7 +641,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
         // `rawAccel = (target - speed + 16) >> 5`; the clamp tree @0x48C3D0..0x48C46C)].
         const int32_t raw_accel = (target_speed - m.speed + 16) >> 5;
         // The held wheelie below 0x4000 adds to the retained acceleration.
-        // [orig: Entity_UpdateLightVehiclePhysics @ 0x4853A1..0x4853E3]
+        // [orig: Entity_UpdateLightVehiclePhysics @ 0x4853A1..0x4853DF]
         m.speed_accel = traits.family == VehicleFamily::Bike &&
                 m.wheelie_active && m.wheelie_request && m.speed < 16384
                 ? io::bam_add(m.speed_accel, 25) : raw_accel;

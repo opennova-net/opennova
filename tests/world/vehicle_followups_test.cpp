@@ -9,6 +9,8 @@
 #include <runtime/world/vehicle_suspension.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/destruction.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/terrain_query/height_field.h>
 #include <algorithm>
 #include <cmath>
@@ -232,6 +234,53 @@ void bike_axle_and_release() {
     CHECK(c.veh.bike_launch_direction[2] == 46340);
 }
 
+// The not-crashed off-contact bike normalizes the PLANAR forward row when no
+// wheelie is active, so a pitched bike keeps its full planar speed
+// [orig: Entity_UpdateLightVehiclePhysics +3DE gate @0x4863DA; planar
+// normalize @0x48645D..0x4864AB; X/Y stores @0x486572..0x486578].
+void bike_off_contact_planar_forward() {
+    Rig r;
+    auto t = r.traits(VehicleFamily::Bike);
+    auto &v = r.entity();
+    auto &m = v.veh;
+    m.wheelie_active = 0;
+    m.speed = 10000;
+    m.grounded = false;
+    m.contact_solved_once = true;
+    m.air_pitch_bam = 0x20000000; // 45 degrees: |forward.xy| = cos 45
+    m.slide_z = -777;
+    // The pitch must tilt the forward row, or a 3-D normalize would pass too.
+    const auto basis = detail::vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+    CHECK(std::abs(basis.q22.m[8] >> 6) > 20000);
+    detail::vehicle_traction_velocity(r.world, v, t, m.cmd_speed);
+    const double planar = std::sqrt(double(m.vel_x) * m.vel_x + double(m.vel_y) * m.vel_y);
+    CHECK(std::abs(planar - 10000.0) <= 2.0);
+    CHECK(m.slide_z == -777);
+}
+
+// Entity_RespawnVehicle re-seeds the +0x1B0 destroy timer from def+0x1A4
+// [orig: @0x46007C..0x460082]; the infantry/marker spawn reset does not.
+void vehicle_respawn_reseeds_destroy_timer() {
+    Rig r;
+    ItemDeathTraits traits;
+    traits.destroy_timing_ticks[0] = 777;
+    r.world.tables.item_death_traits.set(1291, traits);
+    auto &v = r.entity();
+    v.destroy_timer = 5;
+    v.destroy_timer_initialized = false;
+    r.world.vehicles.respawn(v);
+    CHECK(v.destroy_timer == 777);
+    CHECK(v.destroy_timer_initialized);
+    // Entity_ResetToSpawnState @0x4B9610 writes no +0x1B0: the organic reset
+    // leaves the timer alone even when the def carries a timing word.
+    auto &d = *r.world.registry.get(r.driver);
+    d.item_id = 1291;
+    d.destroy_timer = 5;
+    d.destroy_timer_initialized = true;
+    entity_reset_to_spawn_state(r.world, r.world.ai, d);
+    CHECK(d.destroy_timer == 5);
+}
+
 void crashed_upright_depth_precedes_springs() {
     for (auto family : {VehicleFamily::Ground, VehicleFamily::Tank,
             VehicleFamily::Bike, VehicleFamily::Helicopter}) {
@@ -260,5 +309,7 @@ int main() {
     wheelie_vertical_cap_and_catchup();
     bike_axle_and_release();
     crashed_upright_depth_precedes_springs();
+    bike_off_contact_planar_forward();
+    vehicle_respawn_reseeds_destroy_timer();
     return failures ? 1 : 0;
 }

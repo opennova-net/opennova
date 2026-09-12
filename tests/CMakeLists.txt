@@ -390,6 +390,14 @@ target_include_directories(oneshot_play_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(oneshot_play_test PRIVATE cxx_std_17)
 add_test(NAME audio_oneshot_play COMMAND oneshot_play_test)
 
+# The presenting-peer gate inside the fire-sound plays and the own-channel key
+# the ready rows carry (world/fire_sound.h; sibling of world/fire_sound_test).
+add_executable(fire_sound_peer_gate_test audio/fire_sound_peer_gate_test.cpp)
+target_link_libraries(fire_sound_peer_gate_test PRIVATE opennova_runtime)
+target_include_directories(fire_sound_peer_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(fire_sound_peer_gate_test PRIVATE cxx_std_17)
+add_test(NAME audio_fire_sound_peer_gate COMMAND fire_sound_peer_gate_test)
+
 # The serialized dialog queue, the PlayWavList dialog-id resolution through
 # the co-named .DBF and the WAC scripted-voice channel reset, pushed down from
 # the Godot mission audio (godot/src/audio/mission_audio; ADR 0043 slice G7).
@@ -400,15 +408,15 @@ target_compile_features(dialog_queue_test PRIVATE cxx_std_17)
 add_test(NAME audio_dialog_queue COMMAND dialog_queue_test)
 
 # SndProf.def sound-profile parse + lookup (asset-gated retail spot check via JO_ASSETS).
-add_executable(infantry_stance_sound_test world/infantry_stance_sound_test.cpp)
-target_link_libraries(infantry_stance_sound_test PRIVATE opennova_runtime)
-add_test(NAME infantry_stance_sound COMMAND infantry_stance_sound_test)
-
 add_executable(sound_profile_test audio/sound_profile_test.cpp)
 target_link_libraries(sound_profile_test PRIVATE opennova_runtime)
 target_include_directories(sound_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(sound_profile_test PRIVATE cxx_std_17)
 add_test(NAME sound_profile COMMAND sound_profile_test)
+
+add_executable(infantry_stance_sound_test world/infantry_stance_sound_test.cpp)
+target_link_libraries(infantry_stance_sound_test PRIVATE opennova_runtime)
+add_test(NAME infantry_stance_sound COMMAND infantry_stance_sound_test)
 
 # PFF tests
 add_executable(pff_unit_test pff/pff_unit_test.cpp)
@@ -1471,6 +1479,15 @@ target_include_directories(charattr_flags_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(charattr_flags_test PRIVATE cxx_std_17)
 add_test(NAME charattr_flags COMMAND charattr_flags_test)
 
+# The friendly-tag radio-request feeds: the per-tag +885 latch folded with the
+# Entity_FindChildByDefType carrier walk, and the local player's viewer gate
+# [orig: HUD_DrawEntityLabel @0x5a3bba..0x5a3c1a; Entity_FindChildByDefType @0x43bea0].
+add_executable(friendly_tags_test world/friendly_tags_test.cpp)
+target_link_libraries(friendly_tags_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(friendly_tags_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(friendly_tags_test PRIVATE cxx_std_17)
+add_test(NAME friendly_tags COMMAND friendly_tags_test)
+
 # The player-chat lane (S2C 0x14) fold + the HUD channel table.
 add_executable(client_replica_chat_test netsim/client_replica_chat_test.cpp)
 target_link_libraries(client_replica_chat_test PRIVATE opennova_net opennova_runtime)
@@ -1519,15 +1536,15 @@ add_test(NAME npc_weapons COMMAND npc_weapons_test)
 # destructible death chain (husk flags + events + the kz chain blast), the
 # death-piece pool, and the dead-item settle (world/destruction.h;
 # docs/world/world-wac-ai-re.md §24).
-add_executable(item_events_test world/item_events_test.cpp)
-target_link_libraries(item_events_test PRIVATE opennova_runtime)
-add_test(NAME item_events COMMAND item_events_test)
-
 add_executable(destruction_test world/destruction_test.cpp)
 target_link_libraries(destruction_test PRIVATE opennova_runtime)
 target_include_directories(destruction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(destruction_test PRIVATE cxx_std_17)
 add_test(NAME destruction COMMAND destruction_test)
+
+add_executable(item_events_test world/item_events_test.cpp)
+target_link_libraries(item_events_test PRIVATE opennova_runtime)
+add_test(NAME item_events COMMAND item_events_test)
 
 # The collision sweep's death-trait mining (simassets/collision_resolve ->
 # world::ItemDeathTraits): the first husk's KZ / DEAD banks, the huskFinal-only
@@ -1538,6 +1555,12 @@ target_link_libraries(item_death_traits_resolve_test PRIVATE opennova_runtime op
 target_include_directories(item_death_traits_resolve_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(item_death_traits_resolve_test PRIVATE cxx_std_17)
 add_test(NAME item_death_traits_resolve COMMAND item_death_traits_resolve_test)
+
+add_executable(husk_section_origins_test world/husk_section_origins_test.cpp)
+target_link_libraries(husk_section_origins_test PRIVATE opennova_runtime opennova_base)
+target_include_directories(husk_section_origins_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(husk_section_origins_test PRIVATE cxx_std_17)
+add_test(NAME husk_section_origins COMMAND husk_section_origins_test)
 
 # Asset-gated (OPENNOVA_JO_ASSETS fixtures): the RoundSim debug trail over the
 # shipped ammo.def — a grenadehe dies by its fuse, never by an impact.
@@ -1569,10 +1592,6 @@ add_test(NAME ground_height COMMAND ground_height_test)
 # gates, alert/wounded gait selection + availability fallbacks, one-shot route
 # lifecycle, flag-table commit rules, gravity/landing/fall damage, slope slide —
 # each against the witnessed constants, over synthetic clips + height fields.
-add_executable(infantry_burn_test world/infantry_burn_test.cpp)
-target_link_libraries(infantry_burn_test PRIVATE opennova_runtime)
-add_test(NAME infantry_burn COMMAND infantry_burn_test)
-
 add_executable(infantry_test world/infantry_test.cpp)
 target_link_libraries(infantry_test PRIVATE opennova_runtime opennova_test_rig)
 target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1586,6 +1605,10 @@ if(MSVC)
     target_link_options(infantry_test PRIVATE "/STACK:16777216")
 endif()
 add_test(NAME infantry COMMAND infantry_test)
+
+add_executable(infantry_burn_test world/infantry_burn_test.cpp)
+target_link_libraries(infantry_burn_test PRIVATE opennova_runtime)
+add_test(NAME infantry_burn COMMAND infantry_burn_test)
 
 add_executable(infantry_terrain_test world/infantry_terrain_test.cpp)
 target_link_libraries(infantry_terrain_test PRIVATE opennova_runtime)
@@ -1746,6 +1769,12 @@ target_link_libraries(local_player_view_test PRIVATE opennova_runtime)
 target_include_directories(local_player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(local_player_view_test PRIVATE cxx_std_17)
 add_test(NAME local_player_view COMMAND local_player_view_test)
+
+add_executable(local_player_targeting_test world/local_player_targeting_test.cpp)
+target_link_libraries(local_player_targeting_test PRIVATE opennova_runtime)
+target_include_directories(local_player_targeting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(local_player_targeting_test PRIVATE cxx_std_17)
+add_test(NAME local_player_targeting COMMAND local_player_targeting_test)
 
 # The attach-command seat-selection mirror (world/vehicle_attach.h
 # predict_seat_selection) and the shared weight table.
@@ -2620,14 +2649,14 @@ add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extract
 # npruntime tests — the IDA-faithful in-match NAPI NP runtime (the named server/client
 # state machines + frame loop). Server-first (the plan's P0..P8).
 # P0/P1: the in-process listen-server bring-up state writes (§5.0).
+add_executable(npruntime_server_session_test npruntime/server_session_test.cpp)
+target_link_libraries(npruntime_server_session_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_server_session COMMAND npruntime_server_session_test)
+
 add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
 target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
-
-add_executable(npruntime_server_session_test npruntime/server_session_test.cpp)
-target_link_libraries(npruntime_server_session_test PRIVATE opennova_runtime)
-add_test(NAME npruntime_server_session COMMAND npruntime_server_session_test)
 
 # P3: the World-driven host-side spawn pipeline (Server_InitNewRoundState ->
 # ProcessPendingPlayerSpawns -> Server_BuildPlayerInfoAndAdd) — spawns the pool-0 player in World,
@@ -2673,13 +2702,13 @@ add_test(NAME npruntime_weapon_table COMMAND npruntime_weapon_table_test)
 # D-NET-168 / D-NET-176 / D-NET-177: the S2C 0x50 team-assign re-latch + 0x2F re-submit, the
 # C2S 0x32 -> S2C 0x5D empty-slot sweep (entity removal) vs the bookkeeping-only 0x46 bit15, and
 # the in-match session-loss surface [orig: @0x431910 / @0x51a600 + @0x429730 / @0x4ca4a0 -> @0x4c63d0].
-add_executable(npruntime_item_state_net_test npruntime/item_state_net_test.cpp)
-target_link_libraries(npruntime_item_state_net_test PRIVATE opennova_runtime)
-add_test(NAME npruntime_item_state_net COMMAND npruntime_item_state_net_test)
-
 add_executable(npruntime_entity_lifecycle_net_test npruntime/entity_lifecycle_net_test.cpp)
 target_link_libraries(npruntime_entity_lifecycle_net_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_entity_lifecycle_net COMMAND npruntime_entity_lifecycle_net_test)
+
+add_executable(npruntime_item_state_net_test npruntime/item_state_net_test.cpp)
+target_link_libraries(npruntime_item_state_net_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_item_state_net COMMAND npruntime_item_state_net_test)
 
 # D-NET-142: the C2S 0x25 reload-request relay — dispatch broadcasts S2C 0x49 onto every in-match
 # connection's transport (requester included) [orig: @0x514DF0 -> SendFiltered @0x4C87E0]; §5.58.

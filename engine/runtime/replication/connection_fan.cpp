@@ -1031,7 +1031,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	const PlayerReplicationState anchor = anchor_for_owned_entity(*owned);
     // The retail temporary global is restored after this recipient's write.
     // Keep that budget local so one peer's NAK cannot affect another peer.
-    // [orig: Server_SendEntityStateToPlayer @0x517c58..0x517c9d; halving @0x517c62]
+    // [orig: Server_SendEntityStateToPlayer @0x517c58..0x517c9a; halving @0x517c62]
     const std::size_t frame_budget = static_cast<std::size_t>(g_entity_send_budget) >>
         ((conn.nak_backoff_pending || static_cast<int32_t>(conn.receive_silence_ms) > 2000) ? 1 : 0);
     conn.nak_backoff_pending = false;

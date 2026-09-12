@@ -159,13 +159,17 @@ struct PosedDamageRig : HeapWorldFixture {
     Entity *target_entity() { return world.registry.get(target); }
     AmmoTableEntry &ammo() { return world.tables.ammo.entries[0]; }
 
-    void fire_and_tick() {
+    void fire() {
         RoundSpawnParams params;
         params.owner = shooter;
         params.shooter_handle = shooter.packed;
         params.origin = {0.0f, 0.0f, 0.9f};
         params.ammo_index = 0;
         CHECK(world.round_sim.spawn(world, params) >= 0);
+    }
+
+    void fire_and_tick() {
+        fire();
         world.round_sim.tick(world, nullptr);
     }
 };
@@ -589,6 +593,31 @@ void test_body_armor_energy_and_impact_row() {
         r.world.rules.one_shot_kill = true;
         r.fire_and_tick();
         CHECK(r.world.round_sim.hits[0].damage == 2000); // early rule bypass
+    }
+}
+
+// Every type-3 hit runs the (1, 35) drag leg after the armor arms, armored
+// or not; a non-person target returns before it and keeps its velocity.
+// [orig: Weapon_CalcImpactDamage @0x4ecb96 (type-3 gate), @0x4ecc38..0x4ecc42]
+void test_person_hit_applies_the_surface_drag_leg() {
+    for (const int item_type : {3, 5}) {
+        PosedDamageRig r(4);
+        r.target_entity()->item_type = item_type;
+        r.ammo().drag_fp16 = 0x10000; // a live coefficient; no body armor
+        r.fire();
+        const Vec3 spawn_vel = r.world.round_sim.rounds[0].vel;
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.hits.size() == 1);
+        FixedVec3 expected{to_fixed(spawn_vel.x), to_fixed(spawn_vel.y), to_fixed(spawn_vel.z)};
+        if (item_type == 3) projectile_apply_person_hit_drag(expected, r.ammo());
+        const Vec3 stored = r.world.round_sim.rounds[0].vel;
+        CHECK(stored.x == static_cast<float>(from_fixed(expected.x)));
+        CHECK(stored.z == static_cast<float>(from_fixed(expected.z)));
+        if (item_type == 3) {
+            CHECK(expected.x > 0 && expected.x < to_fixed(spawn_vel.x));
+        } else {
+            CHECK(stored.x == spawn_vel.x);
+        }
     }
 }
 
@@ -2275,6 +2304,7 @@ int main() {
     test_item_type_zone_domain_and_attrib_0200_sections();
     test_shooter_damage_class_runs_after_zone_truncation();
     test_body_armor_energy_and_impact_row();
+    test_person_hit_applies_the_surface_drag_leg();
     test_network_oneshot_authority_and_session_gate();
     test_visual_only_rounds_have_no_gameplay_consequences();
     test_visual_person_proxy_keeps_wire_identity_out_of_authority();

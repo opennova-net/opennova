@@ -387,6 +387,15 @@ struct HudFriendlyTag {
 	bool has_slot = false;
 	uint8_t revive_seconds = 0;
 	bool medic_request = false;
+	// The entity's S2C 0x6D radio-request latch (entity+885, event 6 -> 1)
+	// folded with the carrier test: `+885 != 0 && !Entity_FindChildByDefType
+	// (entity, 1, 1)` -- an entity aboard a def-type-1 carrier shows no icon
+	// [orig: HUD_DrawEntityLabel `cmp byte ptr [ebx+375h], 0` @0x5a3bfe,
+	//  the child walk @0x5a3c0e, `xor ebp, ebp` @0x5a3c1a; the writer
+	//  NapiNPClientMsg_HandleEntityDeath @0x430C50]. Drawn as the
+	//  kFriendlyTagRadioRequestIcon cell only under
+	//  HudFrameState::radio_request_icon_viewer.
+	bool radio_request = false;
 };
 
 struct HudMessageLine {
@@ -608,6 +617,12 @@ struct HudFrameState {
 	int friendly_tag_mode = 2;
 	int32_t fog_dist_q16 = INT32_MAX;
 	int speaking_level255 = 0;
+	// The radio-request icon's VIEWER gate: the local player's mount state
+	// (+0x168) is a Controller (2) or Driver (5) seat, or the local player
+	// carries its own +885 latch [orig: HUD_DrawEntityLabel @0x5a3bba..
+	// 0x5a3be8 -- `mov ecx, [eax+168h]; cmp ecx, 2; ...; cmp ecx, 5`
+	// @0x5a3bcb..0x5a3bd9, `cmp byte ptr [eax+375h], 0` @0x5a3bdf].
+	bool radio_request_icon_viewer = false;
 	// The HUD color scheme index (0 white / 1 green / 2 hudpos hud_textcolor /
 	// 3 light blue / 4 yellow / 5 salmon). Selects the master overlay color the
 	// text elements draw with and the friendly-tag good-tier source [orig:
@@ -736,9 +751,20 @@ public:
 	// @0x5b9d70 walks slots 16..1 of both rings @0x5b9e8a..0x5b9f1a].
 	const std::vector<HudMessageLine> &chat_lines() const { return chat_lines_; }
 	void reset_runtime_state();
-    // Respawn clears overlay clocks, retaining the chat/system rings and
-    // previous stance/ammo values. [orig: HUD_ResetAllOverlayBuffers @0x59dd40]
-    void reset_overlay_buffers();
+	// Respawn clears the overlay clocks, retaining the chat/system rings and
+	// the previous stance/ammo values [orig: HUD_ResetAllOverlayBuffers
+	// @0x59dd40]. Of that routine the compiler holds state for exactly two
+	// words: stance_.stamp is dword_2723D38 and flash_stamp_ is dword_2723D48
+	// (cleared @0x59dd8f / @0x59dd89), the stamp stores of
+	// HUD_DrawStanceIndicator @0x599f98 and draw_hud_ammo_indicator @0x599aca;
+	// their prev/cur bytes (byte_2723D3C/D3D @0x599f8c/@0x599f92,
+	// byte_2723D4C @0x599ac5) are retained as in retail. The rest of the
+	// routine has no compiler-side state: the damage-direction ring
+	// unk_2722B40 (memset @0x59dd4e), the radar blip table unk_2721F40 +
+	// dword_2721EEC/EF0 (@0x59dd5e..0x59dd6a), the layer visibility call
+	// @0x59dd75, the sub_59A9E0 pair dword_2723EA8/EAC (@0x59dd7d/@0x59dd83)
+	// and the target-overlay stamp dword_2723D58 (@0x59dd95).
+	void reset_overlay_buffers();
 
 	const HudDrawList &compile(const HudFrameState &state, float surface_w,
 			float surface_h);
