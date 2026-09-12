@@ -319,6 +319,11 @@ int main(int argc, char **argv) {
 	//     overridden) g_GameType, the fresh-host rule defaults, the flag
 	//     overrides, and the optional loose score.ini overlay. ---
 	inmatch::HostConfig host_cfg;
+	// The mounted game directory: a loose _NSTMOUT.TXT beside the mission's
+	// resources overrides the session reap timeout / outbound pool the way
+	// retail's CNapiNetwork_Init reads it from the game directory
+	// (session_timeout_config.h).
+	host_cfg.game_root = resource_root.string();
 	host_cfg.config.server_name = "OpenNova nw-server";
 	host_cfg.config.max_players = 16;
 	host_cfg.config.mission_name = kernel.mission.get_mission_name();

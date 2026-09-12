@@ -108,6 +108,8 @@ Dictionary HostSessionOptions::to_json_value() const {
 	out["max_score"] = get_max_score();
 	out["koth_delta"] = get_koth_delta();
 	out["flag_return_ticks"] = get_flag_return_ticks();
+	out["flag_reset_seconds"] = get_flag_reset_seconds();
+	out["armory_reuse_time"] = get_armory_reuse_time();
 	out["capture_duration_seconds"] = get_capture_duration_seconds();
 	out["capture_speed_setting"] = get_capture_speed_setting();
 	out["spawn_wave_time_base"] = get_spawn_wave_time_base();
@@ -207,6 +209,8 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::INT, max_score)
 	HOST_SESSION_PROPERTY(Variant::INT, koth_delta)
 	HOST_SESSION_PROPERTY(Variant::INT, flag_return_ticks)
+	HOST_SESSION_PROPERTY(Variant::INT, flag_reset_seconds)
+	HOST_SESSION_PROPERTY(Variant::INT, armory_reuse_time)
 	HOST_SESSION_PROPERTY(Variant::INT, capture_duration_seconds)
 	HOST_SESSION_PROPERTY(Variant::INT, capture_speed_setting)
 	HOST_SESSION_PROPERTY(Variant::INT, spawn_wave_time_base)

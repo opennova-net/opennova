@@ -2211,6 +2211,106 @@ static void test_aircraft_combat_mover_pins() {
 	}
 }
 
+// The pool-1 visit's think countdown (entity+684, Entity::spawn_phase): the
+// class event callback runs only while the pre-decrement word is <= 0, the
+// machine re-arms it to brain[7] after the update and zeroes it on a committed
+// transition, and every visit subtracts one at its tail — a brain thinks once
+// every brain[7] visits, on the visit after any transition, on clients too.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0 gate @0x4B8E1B / decrement @0x4B8EA0;
+//  EntityAI_ProcessVehicleStateMachine @0x458568 / @0x4585B4;
+//  EntityAI_ProcessInfantryStateMachine @0x458363 / @0x4583B0]
+void test_vehicle_brain_think_countdown() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    AiSystem &sys = w.ai;
+    sys.is_authority = true;
+    // The think visit also refreshes the entity's own blink/indoors state
+    // (Entity_BuildProximityList @0x4B3DC0 = refresh_blink, the call @0x4B8E25);
+    // a silent visit leaves it alone.
+    CollisionWorld cw;
+    sys.collision = &cw;
+    AiEntity &e = *sys.at(sys.attach(h));
+    e.has_physics = false; // no alert edge
+    e.health = 100;
+    e.brain.f[AiBrain::kCurState] = kAiGroundPretty;  // row 22: a live tick returns at once
+    e.brain.f[AiBrain::kPendState] = kAiGroundPretty;
+    e.brain.f[AiBrain::kStep] = 16;                   // the class init's step
+    Entity &ent = *w.registry.get(h);
+    ent.spawn_phase = 3;                              // the class init's 0..15 stagger
+    ent.flags |= kEntityFlagIndoors;
+    TickContext ctx{};
+    ctx.world = &w;
+    ctx.is_authority = true;
+    const int32_t tick0 = e.brain.f[AiBrain::kTick];
+
+    // Three visits with a positive countdown: no think, the word counts 3 -> 0.
+    for (int i = 0; i < 3; ++i) sys.tick(w, ctx);
+    CHECK(e.brain.f[AiBrain::kTick] == tick0);
+    CHECK(ent.spawn_phase == 0);
+    CHECK((ent.flags & kEntityFlagIndoors) != 0); // no blink refresh on a silent visit
+    // The visit that reads 0 thinks, re-arms to brain[7] and then counts down.
+    sys.tick(w, ctx);
+    CHECK(e.brain.f[AiBrain::kTick] == tick0 + 1);
+    CHECK(ent.spawn_phase == 15);
+    CHECK((ent.flags & kEntityFlagIndoors) == 0); // the think visit's refresh_blink
+    // Fifteen more visits stay silent (15 .. 1 -> 0); the sixteenth thinks:
+    // the period is brain[7] visits.
+    for (int i = 0; i < 15; ++i) sys.tick(w, ctx);
+    CHECK(e.brain.f[AiBrain::kTick] == tick0 + 1);
+    CHECK(ent.spawn_phase == 0);
+    sys.tick(w, ctx);
+    CHECK(e.brain.f[AiBrain::kTick] == tick0 + 2);
+    CHECK(ent.spawn_phase == 15);
+
+    // A committed transition zeroes the word, so the next visit thinks at once
+    // (the enter's own step, 16 for row 19, then re-arms it).
+    e.brain.f[AiBrain::kPendState] = kAiGroundFormation;
+    sys.apply_transition(e, w);
+    CHECK(e.brain.f[AiBrain::kCurState] == kAiGroundFormation);
+    CHECK(ent.spawn_phase == 0);
+    sys.tick(w, ctx);
+    CHECK(e.brain.f[AiBrain::kTick] == tick0 + 3);
+    CHECK(e.brain.f[AiBrain::kStep] == 16);
+    CHECK(ent.spawn_phase == 15);
+
+    // A client re-arms the word after its (gated) update just the same.
+    sys.is_authority = false;
+    ctx.is_authority = false;
+    ent.spawn_phase = 0;
+    sys.tick(w, ctx);
+    CHECK(e.brain.f[AiBrain::kTick] == tick0 + 4);
+    CHECK(ent.spawn_phase == 15);
+    sys.is_authority = true;
+    ctx.is_authority = true;
+
+    sys.collision = nullptr;
+
+    // A brain outside pool 1 has no pool-1 visit and keeps the every-tick think;
+    // the machine's re-arm still lands (an unconditional store, entity+684 =
+    // brain[7] @0x458363 / @0x458568) and nothing counts it down (the decrement
+    // @0x4B8EA0 is the pool-1 visit's), so the word parks at the step.
+    Entity organic;
+    organic.kind = EntityKind::Organic;
+    organic.health = 100;
+    const EntityHandle oh = w.registry.spawn(0, organic);
+    AiEntity &o = *sys.at(sys.attach(oh));
+    o.has_physics = false;
+    o.health = 100;
+    o.brain.f[AiBrain::kCurState] = kAiGroundPretty;
+    o.brain.f[AiBrain::kPendState] = kAiGroundPretty;
+    o.brain.f[AiBrain::kStep] = 16;
+    const int32_t otick0 = o.brain.f[AiBrain::kTick];
+    for (int i = 0; i < 3; ++i) sys.tick(w, ctx);
+    CHECK(o.brain.f[AiBrain::kTick] == otick0 + 3);
+    CHECK(w.registry.get(oh)->spawn_phase == 16);
+}
+
 int main() {
     // ---- struct layout (byte-exact strides) ----
     CHECK(sizeof(AiBrain) == 812);
@@ -3573,6 +3673,7 @@ int main() {
     }
 
     test_vehicle_death_rows();
+    test_vehicle_brain_think_countdown();
     test_fire_pass_uses_embedder_fed_muzzle();
     test_weapon_fire_origin_fallback_chain();
     test_los_endpoints_use_muzzle_stamp();

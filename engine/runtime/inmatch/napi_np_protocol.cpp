@@ -16,6 +16,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h> // to_fixed
+#include <runtime/world/spawn_select.h> // SpawnWaveList::remove_player (the disconnect leg)
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
@@ -144,15 +145,27 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 	// countdown delayed them up to period-1 pumps versus the golden timing.
 	node.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(
 			ctx.config.effective_send_holdoff_ticks());
+	// The cs_dir template copy: the reap window and the outbound pool bound this node lives
+	// under (120000 / 1200 unless the host's `_NSTMOUT.TXT` changed them).
+	// [orig: CNapiNPConnection_Create @0x62acb0 copies proto+0xE44/+0xE80 (`rep movsd ecx=0Fh`
+	//  @0x62ae7b/@0x62aeb8); NapiNPMessage_Create reads msg_out_max off the node @0x628048]
+	node.timeouts = ctx.np_protocol.connection_template;
+	node.seq = make_jo_game_session_sequencing(1, 0, node.timeouts.msg_out_max);
 	ctx.np_protocol.connection_list.push_back(std::move(node));
 	return ctx.np_protocol.connection_list.back();
 }
 
-// The one player/session teardown path shared by keyed goodbye, receive timeout, owner eviction, and
-// same-address replacement. The original runs Server_HandlePlayerDisconnect before destroying the
-// NapiNPConnection node; a bare list erase leaks the entity and roster identity.
-// [orig: Server_HandlePlayerDisconnect @0x51B5C0 -> CNapiNPConnection_Destroy @0x62A4B0]
-bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
+// The one player/session teardown path shared by keyed goodbye, receive timeout, pending
+// disconnect, StopServer, owner eviction, and same-address replacement. The original's Destroy runs
+// TeardownActiveConnection: the disconnect-packet burst to the departing peer FIRST, then the
+// removal callback (Server_HandlePlayerDisconnect) before the node is cleared; a bare list erase
+// leaks the entity and roster identity. `goodbye_out` receives the burst (null = no wire output:
+// the owner's dead-endpoint eviction and the D-NET-171 silent admission legs).
+// [orig: CNapiNPConnection_Destroy @0x62A4B0 -> CNapiNPConnection_TeardownActiveConnection
+//  @0x6253C0 (the burst @0x6253ef..0x625424 precedes the callback @0x625426..0x625438) ->
+//  Server_HandlePlayerDisconnect @0x51B5C0]
+bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
+		std::vector<std::vector<uint8_t>> *goodbye_out) {
 	auto &list = ctx.np_protocol.connection_list;
 	auto it = list.end();
 	for (auto candidate = list.begin(); candidate != list.end(); ++candidate) {
@@ -162,6 +175,13 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 		}
 	}
 	if (it == list.end()) return false;
+
+	if (goodbye_out != nullptr) {
+		std::vector<std::vector<uint8_t>> burst = host_goodbye_burst(ctx, *it);
+		goodbye_out->insert(goodbye_out->end(),
+				std::make_move_iterator(burst.begin()),
+				std::make_move_iterator(burst.end()));
+	}
 
 	const bool had_player = it->type == NapiNPConnection::kTypeServerSide &&
 			(it->link.owned_entity.valid() || it->phase >= ConnectionPhase::PlayerAdded);
@@ -174,6 +194,14 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 				freed_pool0_entity ? static_cast<uint16_t>(owned_entity.slot()) : uint16_t{0};
 		if (ctx.world != nullptr && owned_entity.valid()) {
 			ctx.world->match.remove_player(*ctx.world, owned_entity);
+			// The leaver drops out of every spawn-wave row it was queued in, before the
+			// entity is removed: a stale row entry would restart that row's countdown
+			// on release and, because pool-0 slots are reused, force-deploy the slot's
+			// next occupant at the leaver's zone. The had_player gate above excludes
+			// spectator-only connections exactly as retail's slot+5 arm returns early.
+			// [orig: Server_HandlePlayerDisconnect @0x51B5C0 -> SpawnWaveList_RemovePlayer
+			//  @0x52A410, the call @0x51b809 (before Server_RemoveEntityAndNotify @0x51b82e)]
+			ctx.world->zones.spawn_waves.remove_player(owned_entity);
 			ctx.world->vehicles.detach(owned_entity);
 			// The player's brain (player_spawn attaches one) is freed with the row so
 			// the next pool-0 spawn into this slot starts brainless.
@@ -265,6 +293,20 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	// @0x62acb0 -> SendSessionInit @0x620ef0].
 	reply.client_cs = jointoperations_client_cs_fields();
 	reply.server_cs = jointoperations_server_cs_fields();
+	// SendSessionInit emits the host's LIVE cs_dir blocks verbatim, so a `_NSTMOUT.TXT`
+	// override of timeout_ms (field 0) / msg_out_max (field 11) reaches the joiner here —
+	// its HandleServerJoinResponse overlays these onto its own template. -1 rides as
+	// 0xFFFFFFFF. [orig: CNapiNPConnection_SendSessionInit @0x620ef0; CNapiNetwork_Init
+	//  stores @0x4caa81/@0x4cab20/@0x4cab54/@0x4cabf0]
+	const SessionTimeoutConfig &tmpl = ctx.np_protocol.connection_template;
+	for (std::vector<CsField> *block : {&reply.client_cs, &reply.server_cs}) {
+		for (CsField &field : *block) {
+			if (field.field_index == 0)
+				field.value = static_cast<uint32_t>(tmpl.timeout_ms);
+			else if (field.field_index == 11)
+				field.value = static_cast<uint32_t>(tmpl.msg_out_max);
+		}
+	}
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply));
 }
 
@@ -547,8 +589,9 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// decrypt and the join would silently stall. [orig: conn_state == 1 &&
 		// session_keys.client_id == CI && session_keys.remote_key == CK ->
 		// CNapiNPConnection_SendSessionInit @0x620ef0 (re-emits the same 0x82), return 1]
+		// The retransmit leg touches no receive clock: only an in-order session packet or
+		// a ping stamps conn+0x5E8 [orig: HandleClientJoin @0x62bee6..0x62bef1].
 		if (existing->client_ci == auth.ci && existing->client_ck == auth.ck) {
-			existing->receive_inactive_ms = 0;
 			out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, *existing));
 			// A retry normally means the original ServerAuth/settings pair was lost. Reconstruct the
 			// retained first session packet under sequence 1 rather than minting a new sequence.
@@ -559,9 +602,12 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			}
 			return;
 		}
-		// A different client (CI/CK) reusing an already-joined addr: drop the stale node and recreate
-		// fresh below. [orig: CNapiNPConnection_Destroy then CNapiNPConnection_Create]
-		if (teardown_connection(ctx, peer)) {
+		// A different client (CI/CK) reusing an already-joined addr: destroy the stale node and
+		// recreate fresh below. The old occupant's 0x86 burst (its latched record, normally
+		// none => zero TLVs) goes to the same endpoint keyed by the OLD CK; the replacement's
+		// own key check drops it. [orig: HandleClientJoin @0x62befb CNapiNPConnection_Destroy
+		//  then CNapiNPConnection_Create]
+		if (teardown_connection(ctx, peer, &out.outbound)) {
 			// The socket owner must release the old UdpSessionTransport/announce latch before the
 			// replacement reaches world streaming. The new node is created below, so this event is
 			// owner cleanup only (it must not erase by address again).
@@ -730,11 +776,15 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	                            body.size(), hdr, messages, &admission)) {
 		return;
 	}
-	// A quiet deframe drop may still return true for a stale packet addressed to another
-	// receiver-local SK. It is not activity on this connection. Once the local key matches,
-	// deframe has also authenticated/decrypted the packet; valid duplicates/future packets may
-	// refresh the receive clock even when they do not advance semantic admission.
-	if (hdr.session_id == conn.server_sk) conn.receive_inactive_ms = 0;
+	// The reap clock is stamped ONLY when the packet is delivered in order: retail's
+	// HandleSessionPacket reaches ParseMessages (which writes conn+0x5E8 before its message loop,
+	// so a zero-message keepalive counts) solely for seq == recv_ack_seq+1 or the in-order drain
+	// that closes a gap; a stale packet for another receiver-local SK, seq 0, a duplicate and a
+	// future packet all return without touching it.
+	// [orig: HandleSessionPacket @0x626A00 — in-order leg @0x626beb..0x626bfc -> ParseMessages
+	//  @0x625BC0 stamp @0x625d54; seq 0 @0x626bcc / duplicate @0x626c03 / future @0x626c0c..0x626c3a
+	//  stamp nothing]
+	if (admission.admitted) conn.receive_inactive_ms = 0;
 
 	// The header's ack_count is the peer's "last of YOUR seqs I received" — the confirm side of the
 	// initial-state backlog throttle (retail clients carry it on every 0x43, including game-message-
@@ -834,8 +884,9 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		if (conn.host_disconnect_sent) return;
 		// The remaining silent legs are not modeled (D-NET-171). Release the
 		// pending node immediately: an out-of-order or malformed admission
-		// must not retain capacity or become an entity.
-		if (teardown_connection(ctx, peer)) {
+		// must not retain capacity or become an entity. No wire output: retail
+		// keeps this node and sends nothing on these legs.
+		if (teardown_connection(ctx, peer, nullptr)) {
 			HostAcceptEvent ev;
 			ev.kind = HostAcceptEvent::Kind::PeerGoodbye;
 			ev.peer = peer;
@@ -892,7 +943,8 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			body.data(), body.size(), conn->server_sk, requested)) {
 		return;
 	}
-	conn->receive_inactive_ms = 0;
+	// A resend list is not receive activity: the handler reads GetTickCount and discards it,
+	// leaving the reap clock alone [orig: NapiNP_HandleResendList @0x623800 @0x62395f].
 	// The backoff callback (cb_server_6 = sub_4C62A0 -> entity+89876 = 1, the
 	// next 0x0A budget halving) is latched only by a NONZERO requested dword; a
 	// zero-only "send next" list or a key-only body arms nothing.
@@ -941,7 +993,17 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// A delayed goodbye from the prior occupant of this endpoint must not destroy its replacement.
 	// [orig: CNapiNPConnection_SendDisconnectPacket @0x61F2A0 / Nwu_HandleClientGoodbye @0x624250]
 	if (receiver_local_key != conn->server_sk) return;
-	if (!teardown_connection(ctx, peer)) return;
+	// The client's record (DC/DP1/DP2/DSTR/DPC/DDSTR; DS read and discarded) is latched with the
+	// PEER's role 2 if nothing is latched yet, then RequestDisconnect -> the destroy echoes it
+	// back in the 0x86 burst. An empty TLV run (ReadTLV fails first) still latches zeros.
+	// [orig: Nwu_HandleDisconnect @0x623CE0 — TLV walk @0x623eb2..0x623fbd, the type-1 record
+	//  {[1]=2 @0x624005, DC/DP1/DP2 @0x62400d..0x624015, DSTR->128 @0x624019, DPC @0x624090,
+	//  DDSTR->32 @0x624097}, latch @0x6240a8..0x6240ba, RequestDisconnect @0x6240c4]
+	DisconnectEvent received;
+	(void)parse_disconnect_event(body.data() + 4, body.size() - 4, received);
+	latch_disconnect_event(*conn, make_disconnect_event(2, received.dc, received.dp1,
+			received.dp2, received.dstr, received.dpc, received.ddstr));
+	if (!teardown_connection(ctx, peer, &out.outbound)) return;
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerGoodbye;
 	ev.peer = peer;
@@ -1024,7 +1086,14 @@ std::vector<TickOut> tick_connections(
 	std::vector<TickOut> out;
 	// Pump the JO receive timeout before any spawn/burst work. Collect keys first because the complete
 	// teardown erases vector nodes and may broadcast roster removal through surviving transports.
-	std::vector<PeerAddr> timed_out;
+	// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 state 1 — `timeout_ms < 0 -> skip`
+	//  @0x62934c, elapsed = now - conn+0x5E8 @0x62935c, `elapsed > timeout_ms` @0x629362, the
+	//  record {role, DC 3, DP1 elapsed, DP2 timeout, "", 0, "NP.C:PT:SERTMOUT"} @0x6293b7..0x6293e6
+	//  latched-if-invalid @0x6293f4..0x629406, RequestDisconnect @0x62940a -> pending_disconnect
+	//  @0x61e107; NapiNPProtocol_Pump @0x62A650 then destroys every pending node after its
+	//  per-connection pump @0x62a6fd..0x62a793, latching {1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"}
+	//  only when nothing else was @0x62a72f..0x62a788]
+	std::vector<PeerAddr> destroy_pending;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide || conn.phase < ConnectionPhase::Joined) continue;
 		if (elapsed_ms > 0) {
@@ -1036,18 +1105,28 @@ std::vector<TickOut> tick_connections(
 							? total
 							: std::numeric_limits<uint32_t>::max());
 		}
-		if (conn.receive_inactive_ms > JO_GAME_SESSION_TIMEOUT_MS)
-			timed_out.push_back(conn.peer);
+		if (conn.timeouts.timeout_ms >= 0 &&
+		    conn.receive_inactive_ms > static_cast<uint32_t>(conn.timeouts.timeout_ms)) {
+			latch_disconnect_event(conn, make_disconnect_event(1, 3, conn.receive_inactive_ms,
+					static_cast<uint32_t>(conn.timeouts.timeout_ms), "", 0,
+					"NP.C:PT:SERTMOUT"));
+			conn.pending_disconnect = true;
+		}
+		if (conn.pending_disconnect) {
+			latch_disconnect_event(conn,
+					make_disconnect_event(1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"));
+			destroy_pending.push_back(conn.peer);
+		}
 	}
-	for (const PeerAddr &peer : timed_out) {
-		if (!teardown_connection(ctx, peer)) continue;
-		TickOut timeout;
-		timeout.peer = peer;
+	for (const PeerAddr &peer : destroy_pending) {
+		TickOut destroyed;
+		destroyed.peer = peer;
+		if (!teardown_connection(ctx, peer, &destroyed.outbound)) continue;
 		HostAcceptEvent event;
 		event.kind = HostAcceptEvent::Kind::PeerGoodbye;
 		event.peer = peer;
-		timeout.events.push_back(std::move(event));
-		out.push_back(std::move(timeout));
+		destroyed.events.push_back(std::move(event));
+		out.push_back(std::move(destroyed));
 	}
 
 	auto append_active_probe = [](NapiNPConnection &conn, TickOut &to) {
@@ -1256,8 +1335,32 @@ bool bind_connection_player(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t 
 	return bind_session_reply_player(*conn, player_name, player_slot, entity_handle);
 }
 
+std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
+		const NapiNPConnection &conn) {
+	// SendDisconnectPacket's gates: an ACTIVE server-side node (conn_flag0, i.e. the 0x42 was
+	// accepted and the CK is known) on a host that is still running; a client-side node would
+	// select 0x46 instead and is never torn down through this host path.
+	// [orig: @0x61f30b conn_flag0; @0x61f329 `!is_server || host_running`; @0x61f367 opcode 0x86]
+	if (conn.type != NapiNPConnection::kTypeServerSide || conn.phase < ConnectionPhase::Joined ||
+	    conn.client_ck == 0 || ctx.np_protocol.host_running == 0) {
+		return {};
+	}
+	const DisconnectEvent record =
+			conn.disconnect_event_valid ? conn.disconnect_event : DisconnectEvent{};
+	std::vector<uint8_t> datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(conn.client_ck, record));
+	// `n = clamp(recv_max_per_tick, 0, 32)` sends while each SendTo succeeds
+	// [orig: TeardownActiveConnection @0x6253ef..0x625424].
+	return std::vector<std::vector<uint8_t>>(disconnect_burst_count(), std::move(datagram));
+}
+
+bool destroy_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
+		std::vector<std::vector<uint8_t>> *goodbye_out) {
+	return teardown_connection(ctx, peer, goodbye_out);
+}
+
 bool drop_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
-	return teardown_connection(ctx, peer);
+	return teardown_connection(ctx, peer, nullptr);
 }
 
 std::size_t connection_count(const NapiNPServerCtx &ctx) {

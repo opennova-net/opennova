@@ -103,6 +103,17 @@ std::string trigger_sub_type_name(int main_type, int sub_type) {
 				case bms::PlayerTriggerType::PlayerFirstPerson: return "PlayerFirstPerson";
 				case bms::PlayerTriggerType::PlayerThirdPerson: return "PlayerThirdPerson";
 				case bms::PlayerTriggerType::PlayerCockpitView: return "PlayerCockpitView";
+				case bms::PlayerTriggerType::PlayerInputBit10: return "PlayerInputBit10";
+				case bms::PlayerTriggerType::PlayerInputBit11: return "PlayerInputBit11";
+				case bms::PlayerTriggerType::PlayerInputBit12: return "PlayerInputBit12";
+				case bms::PlayerTriggerType::PlayerInputBit13: return "PlayerInputBit13";
+				case bms::PlayerTriggerType::PlayerLookByteBit0Clear: return "PlayerLookByteBit0Clear";
+				case bms::PlayerTriggerType::PlayerLookByteBit0Set: return "PlayerLookByteBit0Set";
+				case bms::PlayerTriggerType::PlayerInputBit29: return "PlayerInputBit29";
+				case bms::PlayerTriggerType::PlayerInputBit14: return "PlayerInputBit14";
+				case bms::PlayerTriggerType::PlayerInputBit15: return "PlayerInputBit15";
+				case bms::PlayerTriggerType::PlayerInputBitIndex: return "PlayerInputBitIndex";
+				case bms::PlayerTriggerType::PlayerInputBitIndexPlus15: return "PlayerInputBitIndexPlus15";
 				case bms::PlayerTriggerType::PlayerDialogDone: return "PlayerDialogDone";
 				case bms::PlayerTriggerType::PlayerDialogFinished: return "PlayerDialogFinished";
 				case bms::PlayerTriggerType::PlayerAwol: return "PlayerAwol";
@@ -153,6 +164,7 @@ std::string action_type_name(int value) {
 		case bms::ActionType::SingleChangeGroup: return "SingleChangeGroup";
 		case bms::ActionType::SingleTeleportAction: return "SingleTeleportAction";
 		case bms::ActionType::ParticleEffectAction: return "ParticleEffectAction";
+		case bms::ActionType::SpecialSubType: return "SpecialSubType";
 		case bms::ActionType::GroupOpenDoorAction: return "GroupOpenDoorAction";
 		case bms::ActionType::GroupCloseDoorAction: return "GroupCloseDoorAction";
 		case bms::ActionType::GroupResetHasVisited: return "GroupResetHasVisited";

@@ -54,15 +54,18 @@ inline constexpr uint16_t kMouseWheelDown = 0x800;
 // MedicReq row's record @0x553f0b]. Distinct from the Options table's
 // KeyBinding_FormatBindingString (format_binding in controls.h): this one has
 // three arms in the witnessed order — (1) a slot with BOTH a key and a
-// modifier walks the two slots joining with " or " and prefixing "Ctrl - " /
-// "Shift - " per slot; (2) a slot with a key and NO modifier RESETS the
-// buffer and prints the first slot's key behind whichever modifier either
-// slot carries (Ctrl / Alt / Shift); (3) a mouse button RESETS the buffer
-// to "<mod>-" for the mouse modifier (sprintf, not strcat @0x496f79), then
-// appends " or " when a keyboard slot exists, then "Mouse 1/2/3"
-// or "Mouse Whl Up/Dn"; finally " *" when the record's flag word carries
-// 0x200. The localized "Keys" table falls back to the marker-stripped names
-// key_name() already produces.
+// modifier walks the two slots joining with the "OR" separator and prefixing
+// "Ctrl-" / "Shift-" per slot; (2) a slot with a key and NO modifier RESETS
+// the buffer and prints the LAST RESOLVED slot's key (the primary is resolved
+// up front, then every keyed slot arm 1 visits, so the secondary when both
+// are keyed) behind whichever modifier either slot carries (Ctrl / Alt /
+// Shift); (3) a mouse button RESETS the buffer to "<mod>-" for the mouse
+// modifier (sprintf, not strcat @0x496f79), then appends the separator when a
+// keyboard slot exists, then "Mouse 1/2/3" or "Mouse Whl Up/Dn"; finally
+// " *" when the record's flag word carries 0x200. Every prefix, separator
+// and name is a "Keys" table lookup (key_strings.h: the shipped keyhelp.bin
+// yields "Ctrl-9 or Space"; with no table installed the fallbacks render
+// marker-stripped, "Ctrl - 9 or Space").
 struct BindingRecord;
 std::string format_display_string(const BindingRecord &rec, bool flagged = false);
 

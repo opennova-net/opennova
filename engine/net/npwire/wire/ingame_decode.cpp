@@ -329,8 +329,12 @@ bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out) {
 	out.flags = c.u8();
 	out.player_count = c.u8();
 	if (!c.ok) return false;
-	out.players.reserve(out.player_count);
-	for (unsigned i = 0; i < out.player_count; ++i) {
+	// The retail parser's 252-row table clamp: `total = count > 0xFC ? 252 : count`
+	// [orig: NapiNPClientMsg_PlayerList @0x42FAE0, @0x42fb3a..0x42fb3c]; the team
+	// table then parses from wherever the row loop stopped.
+	const unsigned rows = out.player_count > 0xFCu ? 252u : unsigned(out.player_count);
+	out.players.reserve(rows);
+	for (unsigned i = 0; i < rows; ++i) {
 		PlayerListRow r;
 		r.slot_id = c.u8();
 		r.status_flags = c.u16();
@@ -375,7 +379,7 @@ bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
 		return (c.p == c.end);
 	}
 	out.entity_slot_id = c.u8();
-	// Source order: name, clan, id, team, type|subtype, 0x20, 0x1000, 0x40, 0x80, quality, entityRef.
+	// Source order: name, clan, id, team, type|subtype, 0x20, 0x1000, 0x40, 0x80, quality, account netId.
 	if (m & kPlayerSyncHasName) out.name = c.cstr();
 	if (m & kPlayerSyncHasTeamString) out.clan = c.cstr();
 	if (m & kPlayerSyncHasVehicleName) out.id_label = c.cstr();
@@ -386,7 +390,7 @@ bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
 	if (m & kPlayerSyncHasSquad) out.field_0040 = c.u8();
 	if (m & kPlayerSyncHasSide) out.field_0080 = c.u8();
 	if (m & kPlayerSyncHasQuality) out.quality = c.u8();
-	if (m & kPlayerSyncHasVehicleTimer) out.entity_ref = c.u32();
+	if (m & kPlayerSyncHasAccountId) out.account_id = c.u32();  // -> slot dword 15 @0x431736
 	return (c.p == c.end);
 }
 
@@ -1013,9 +1017,10 @@ bool decode_kill_record(const uint8_t *body, size_t len, KillRecord &out,
 	return true;
 }
 
-// S2C 0x4E batch despawn/kill. [orig: NapiNPClientMsg_HandleBatchKill @ 0x431870]
-// The handler kills every u16 slot after the count word up to the buffer end
-// (the leading `count` is echoed in the C2S 0x28 reply, not a read limit).
+// S2C 0x4E — one join-window kill-list page. [orig: NapiNPClientMsg_HandleBatchKill
+// @ 0x431870] The handler kills every u16 slot after the leading word up to the
+// buffer end (@0x4318a5..0x4318c2); the leading word is the host's resume index,
+// echoed as the C2S 0x28 continuation's `start` (@0x4318ee), never a read limit.
 bool decode_batch_kill(const uint8_t *body, size_t len, BatchKillBatch &out) {
 	out = BatchKillBatch{};
 	Cursor c{body, body + len, true};
@@ -1227,14 +1232,17 @@ bool decode_empty_slots_request(const uint8_t * /*body*/, size_t /*len*/, size_t
 	return true;
 }
 
-// C2S 0x28 weapon-loadout request. [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550]
+// C2S 0x28 join-window kill-list request: [u32 windowMin][u32 windowMax][u16 start]
+// (the IDB's "weapon loadout" field names are kept for the consumers).
+// [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550 — reads
+//  @0x51a592 / @0x51a5a1 / @0x51a5b0, page builder call @0x51a5c0]
 bool decode_burst_loadout_request(const uint8_t *body, size_t len,
                                   BurstLoadoutRequest &out, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};
-	out.loadout_filter = c.u32();
-	out.flags          = c.u32();
-	out.extra          = c.u16();
+	out.loadout_filter = c.u32();  // windowMin
+	out.flags          = c.u32();  // windowMax
+	out.extra          = c.u16();  // start (resume index)
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 10;
@@ -1965,6 +1973,106 @@ bool decode_loadout_submit(const uint8_t *body, size_t len, LoadoutSubmit &out) 
 }
 
 // [orig: NapiNPClientMsg_HandleSpawnEffect @0x430B10]
+// S2C 0x37 / C2S 0x1A door-row action — the one 5-byte body. Each field reads 0
+// when the body runs short (client @0x431265 / @0x431275 / @0x431288; server
+// @0x514b61 / @0x514b72 / @0x514b8c), so a short body decodes zero-filled and
+// returns false — `number` 0 is dropped by every receiver's gate regardless.
+// [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250;
+//  NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+bool decode_door_slot_action(const uint8_t *body, size_t len,
+                             DoorSlotAction &out, size_t &consumed) {
+	out = DoorSlotAction{};
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	if (c.p + 2 <= c.end) out.entity_handle = c.u16();
+	if (c.p + 2 <= c.end) out.state = c.i16();
+	if (c.p + 1 <= c.end) out.number = c.u8();
+	consumed = size_t(c.p - body);
+	return consumed == 5;
+}
+
+// S2C 0x6A clan-roster update. [orig: NapiNPClientMsg_HandlePlayerJoinLeave @0x432510]
+bool decode_clan_roster_update(const uint8_t *body, size_t len, ClanRosterUpdate &out) {
+	out = ClanRosterUpdate{};
+	Cursor c{body, body + len, true};
+	if (c.p + 1 <= c.end) out.action = c.u8();                 // @0x43254b (0 on an empty body @0x432547)
+	if (out.action == kClanRosterRemove) {
+		if (c.p + 4 <= c.end) out.account_id = c.u32();        // @0x432570 (0 when short @0x43256c)
+		return c.ok && c.p == c.end;
+	}
+	if (out.action != kClanRosterAdd && out.action != kClanRosterWalkReply)
+		return false;                                          // any other action returns untouched @0x4325a1
+	if (c.p + 4 <= c.end) out.account_id = c.u32();            // @0x4325b1 (left 0 when short)
+	// The name copy keeps <= 64 chars, stopping at NUL or the body end
+	// (@0x4325bc..0x4325db); the tag then starts past the FULL name's NUL
+	// (@0x4325ea, clamped to the body end @0x4325f6) and keeps <= 8 chars
+	// (@0x4325fc..0x43261b). An unterminated name is where retail's strlen
+	// leaves the body: the partial name stands, the tag is empty, and this
+	// decoder reports the body unclean.
+	out.name = c.cstr();
+	if (out.name.size() > kClanRosterNameChars) out.name.resize(kClanRosterNameChars);
+	if (!c.ok) return false;
+	out.tag = c.cstr();
+	if (out.tag.size() > kClanRosterTagChars) out.tag.resize(kClanRosterTagChars);
+	return c.ok && c.p == c.end;
+}
+
+// C2S 0x4E clan-roster walk request. [orig: NapiNPServerMsg_HandleMinimapSlotRequest
+// @0x511210 — the u32 read @0x51124b, 0 when short @0x511247]
+bool decode_clan_roster_walk_request(const uint8_t *body, size_t len,
+                                     ClanRosterWalkRequest &out, size_t &consumed) {
+	out = ClanRosterWalkRequest{};
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	if (c.p + 4 <= c.end) out.after_account_id = c.u32();
+	consumed = size_t(c.p - body);
+	return consumed == 4;
+}
+
+// S2C 0x70 vehicle-spawn availability list. [orig: NapiNPClientMsg_HandleWeaponLoadoutList
+// @0x429a30 — leading byte @0x429a53 (0 when empty @0x429a4f), the row loop ends when
+// fewer than two bytes remain @0x429a6a or on the 0 word @0x429a74, and each missing
+// row byte reads 0 @0x429a7d / @0x429a8c]
+bool decode_vehicle_spawn_availability(const uint8_t *body, size_t len,
+                                       VehicleSpawnAvailabilityList &out) {
+	out = VehicleSpawnAvailabilityList{};
+	Cursor c{body, body + len, true};
+	out.leading_byte = (c.p + 1 <= c.end) ? c.u8() : uint8_t(0);
+	while (c.p + 2 <= c.end) {
+		VehicleSpawnAvailabilityRow row;
+		row.type_id = c.u16();
+		if (row.type_id == 0) {
+			out.terminated = true;
+			break;
+		}
+		if (c.p + 1 <= c.end) row.available = c.u8();
+		if (c.p + 1 <= c.end) row.max_count = c.u8();
+		out.rows.push_back(row);
+	}
+	return c.ok && out.terminated && c.p == c.end;
+}
+
+// C2S 0x42 vehicle-spawn availability request: the host reads no fields.
+// [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930]
+bool decode_vehicle_spawn_availability_request(const uint8_t * /*body*/, size_t /*len*/,
+                                               size_t &consumed) {
+	consumed = 0;
+	return true;
+}
+
+// C2S 0x40 vehicle-spawn request. [orig: NapiNPServerMsg_HandleVehicleSpawnRequest
+// @0x51C4C0 — handle @0x51c51b (0 when short @0x51c517), type index @0x51c52a (0 when short)]
+bool decode_vehicle_spawn_request(const uint8_t *body, size_t len,
+                                  VehicleSpawnRequest &out, size_t &consumed) {
+	out = VehicleSpawnRequest{};
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	if (c.p + 2 <= c.end) out.source_handle = c.u16();
+	if (c.p + 1 <= c.end) out.type_index = c.u8();
+	consumed = size_t(c.p - body);
+	return consumed == 3;
+}
+
 bool decode_explosion_effect(const uint8_t *body, size_t len, ExplosionEffectRecord &out) {
     io::ByteReader reader(body,len);
     out.type=reader.read_u8(); out.count=reader.read_u8(); out.source=reader.read_u16();

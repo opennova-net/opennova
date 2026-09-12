@@ -29,6 +29,7 @@ namespace opennova {
 //   0x82 — ServerJoin  (S2C response to 0x42)
 //   0x83 — ProtocolMessage (S2C, payload is a stream of containers)
 //   0x84 — ServerResendList (S2C)
+//   0x86 — ServerGoodBye (S2C; the host-initiated teardown burst)
 
 inline constexpr const char *SESSION_NWU_KEY =
 		"asdfj2349857qu23rija;sdlvzx09caweklrj1234hldfj";
@@ -48,5 +49,12 @@ inline constexpr uint8_t SESSION_OPCODE_SERVER_HELLO = 0x81;
 inline constexpr uint8_t SESSION_OPCODE_SERVER_AUTH = 0x82;
 inline constexpr uint8_t SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE = 0x83;
 inline constexpr uint8_t SESSION_OPCODE_SERVER_RESEND_LIST = 0x84;
+// The host-initiated teardown burst: the same disconnect-record body as the
+// C2S 0x46 ClientGoodBye, keyed by the CLIENT's key (CK). Dispatched by the
+// retail client's opcode table entry 12 -> Nwu_HandleServerGoodbye.
+// [orig: g_np_opcode_handlers @0x849D90 entry 12 -> Nwu_HandleServerGoodbye
+//  @0x624310; writer opcode select CNapiNPConnection_SendDisconnectPacket
+//  @0x61f367 (0x86 when is_server, 0x46 @0x61f37b when is_client)]
+inline constexpr uint8_t SESSION_OPCODE_SERVER_GOODBYE = 0x86;
 
 } // namespace opennova

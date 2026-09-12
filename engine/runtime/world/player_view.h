@@ -178,10 +178,29 @@ inline void camera_shake_decay(CameraShakeState &st) {
 }
 
 struct PlayerViewState {
-    bool scope_engaged = false;   // [orig: g_scopeEngaged @ 0x82CE94]
-    int32_t scope_step = 0;       // 0 (hip) .. ease_steps (sighted), of the CURRENT ease
-    int32_t ease_steps = kScopeEaseSteps; // latched per toggle [orig: the Setup steps arg]
-    bool scope_hipfire = true;    // [orig: g_scopeHipfire @ 0x82CE98, init/reset 1]
+    // THE ADS SCOPE TRI-STATE plus the FP camera interp projected onto the
+    // hip..tpos line. `scope_engaged` is the TARGET the promoter reads,
+    // `scope_settled` the PROMOTED "scoped" byte every CanFire/crosshair/card
+    // consumer keys on, `scope_hipfire` the latch every interp Setup stores
+    // beside its target: the toggle and the PackInput legs target the hip
+    // exactly when they store 1 and tpos when they store 0, so the latch IS
+    // the interp's target pose [orig: g_scopeEngaged @0x82CE94;
+    // g_weaponScopeActive @0xB76478; g_scopeHipfire @0x82CE98, init/reset 1;
+    // the paired Setup/latch stores @0x4df1c3/@0x4df212, @0x4df36e/@0x4df373,
+    // @0x4df567/@0x4df56c, @0x4df5d1/@0x4df5d6, @0x4df636/@0x4df63b].
+    bool scope_engaged = false;
+    bool scope_settled = false;
+    bool scope_hipfire = true;
+    // The interp's current pose along hip (0) .. tpos (ease_steps) and the
+    // steps left over that delta [orig: g_fpCameraInterp @0x82CE40 -- the
+    // current pose +28..48, the target +52..72, the per-step velocity
+    // delta / steps +4..24 subtracted per step]. Integral while an ease runs
+    // endpoint to endpoint (one step per tick); fractional once a running
+    // raise is re-targeted at the hip from its own pose (@0x4df548). The
+    // ease is active while the pose has not reached the latch's target.
+    float scope_step = 0.0f;
+    int32_t ease_steps = kScopeEaseSteps; // the Setup step count of the current ease
+    int32_t scope_ease_remaining = 0;
     bool move_held = false;       // [orig: the movement-held latch g_movementKeyHeld @ 0xB7653B]
     // THE CAMERA MODE, two words. `third_person_selected` is the user's
     // preference — the chase byte the view actions write, 1 from the session
@@ -279,42 +298,90 @@ void player_view_resolve_mode(PlayerViewState &v);
 //  @ 0x49c0ea / @ 0x49c100]
 void player_view_set_third_person_selected(PlayerViewState &v, bool selected);
 
-// One 62.5 Hz tick: resolve the camera mode, step the scope ease toward the
-// engaged target and chase the third-person anchor toward `eye` (mission
-// space). Entering third person seeds the anchor at the eye [orig:
-// Camera_SetTrackedEntity @ 0x4391d0 resets the track on change]; leaving
-// invalidates it. In a control seat the anchor chases the carrier position
-// lifted max(1.0, 0.375 r) instead, a sixteenth per tick horizontally and a
-// thirty-second vertically in 16.16 [orig: ThirdPersonCamera_Update — the
-// lift @0x437B1F..0x437B4B, the ease @0x437C56..0x437C79].
+// One 62.5 Hz tick: resolve the camera mode, step the scope-camera interp one
+// step toward the latch's target and promote the settled byte when it lands
+// [orig: Player_UpdatePerFrame @0x4de4c9..0x4de4f7 -- Player_StepFpViewBiasInterp,
+// then g_weaponScopeActive = (g_scopeEngaged != 0) once the interp reports
+// done; the landing step IS the completion here, where retail's stepper
+// reports done on the call after the six velocities snapped], and chase the
+// third-person anchor toward `eye` (mission space). Entering third person
+// seeds the anchor at the eye [orig: Camera_SetTrackedEntity @ 0x4391d0
+// resets the track on change]; leaving invalidates it. In a control seat the
+// anchor chases the carrier position lifted max(1.0, 0.375 r) instead, a
+// sixteenth per tick horizontally and a thirty-second vertically in 16.16
+// [orig: ThirdPersonCamera_Update — the lift @0x437B1F..0x437B4B, the ease
+// @0x437C56..0x437C79].
 void player_view_tick(PlayerViewState &v, const float eye[3]);
 
-// Whether the scope-camera interp is mid-ease. Every scope toggle is REFUSED
-// while it runs [orig: the !g_fpCameraInterp.activeFlag gate @ 0x4df177].
+// Whether the scope-camera interp is mid-ease: the pose has not reached the
+// latch's target. Every scope toggle is REFUSED while it runs [orig: the
+// !g_fpCameraInterp.activeFlag gate @ 0x4df177].
 bool player_view_scope_ease_active(const PlayerViewState &v);
 
-// The witnessed toggle: latch this ease's step count (engage: 15, or 7 for
-// Inset weapons; disengage: the same, or 1 on the hipfire-return leg), seed the
-// step at the departing endpoint, and flip the target. Returns false (state
-// untouched) when refused mid-ease. [orig: Player_ToggleWeaponScope
-// @ 0x4df1b3..0x4df373 — the Setup calls + the g_scopeHipfire writes]
+// The PROMOTED scope byte [orig: g_weaponScopeActive @0xB76478]: set only by
+// the settle promoter (= the engaged target when the interp lands @0x4de4f7)
+// and by the mount stamp, cleared by both toggle branches (@0x4df20c /
+// @0x4df31d) and by the auto-re-raise (@0x4df609). It holds through the
+// settled drop-with-memory ease (@0x4df5ae) and NOT through a raise, so it is
+// no function of engaged + active. The port never stamps it without the
+// engaged target (the ForceScoped mount stamp @0x4dfb31 rides CanFire's
+// force override instead), so a settled read without the target is a stale
+// external reset and reads false.
+inline bool player_view_scope_settled(const PlayerViewState &v) {
+    return v.scope_settled && v.scope_engaged;
+}
+
+// The scope tri-state + interp reset to the disengaged hip: target off,
+// promoted byte off, hipfire latch on, the interp idle at the hip
+// [orig: Player_ResetCameraAndMovementState @0x4DE1F0; the mount's
+// bias zero @0x4dfbcf]. Every reset site must run this one (the tri-state
+// carries more than the four legacy fields).
+void player_view_scope_reset(PlayerViewState &v);
+
+// Whether a scope request for `engaged` has anything to do: false when that
+// target is already reached or in flight. The one exception is the engaged
+// target latched at an IDLE hip without the promoted byte (a raise reversed on
+// its first frame -- the zero-delta re-target deactivates the interp outright
+// @0x4de0fe..0x4de11b and the promoter never runs): retail's toggle branches on
+// the promoted byte (@0x4df17f), so its engage branch re-raises that state.
+bool player_view_scope_request_pending(const PlayerViewState &v, bool engaged);
+
+// The witnessed toggle: the mid-ease refusal, then per branch the promoted
+// byte clear, the interp Setup (engage: 15 steps, or 7 for Inset weapons,
+// from the hip copy to tpos; disengage: the same, or 1 on the hipfire-return
+// leg, from tpos to the hip copy -- an idle interp sources the def pose, not
+// the camera, so a hip-parked raise snaps to tpos for its one return step),
+// the target flip and the hipfire latch store. Returns false (state untouched)
+// when refused mid-ease; true for a no-op request. [orig: Player_ToggleWeaponScope
+// @0x4df177; disengage @0x4df1b3..0x4df212; engage @0x4df31d..0x4df373]
 bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon);
 
 // The eased hip->sighted blend, 0..1 in 1/15ths.
 float player_view_scope_fraction(const PlayerViewState &v);
 
-// The per-tick movement input and its settled-scope leg [orig:
-// Player_PackInputStateToEntity @ 0x4df450]. Latches `move_held` (any of the
-// four movement-direction keys [orig: g_movementKeyHeld set @ 0x4df4bb, cleared
-// @ 0x4df4f9]) and returns true when the SETTLED-at-scope auto-unscope must
-// fire: movement while fully sighted on a Scoped (flags 1) weapon routes
-// through the normal scope toggle [orig: g_weaponScopeActive && Def->Flags & 1
-// -> Player_ToggleWeaponScope, the call @ 0x4df4ec from the gate @ 0x4df4c9] — the caller runs its
-// standard disengage, and the toggle's own ForceScoped pin applies there.
-// The mid-ease reversal and the auto-re-raise legs (@ 0x4df548 / @ 0x4df5ae /
-// @ 0x4df607) are witnessed-deferred: they keep g_scopeEngaged latched while
-// easing to the hip, which needs the explicit engaged/active/hipfire tri-state
-// (net-re section 5.62 follow-up).
+// The per-frame movement input pack and its scope legs, in retail order
+// [orig: Player_PackInputStateToEntity @0x4df450]. Latches `move_held` (any of
+// the four movement-direction keys [orig: g_movementKeyHeld set @0x4df4bb,
+// cleared @0x4df4f9]) and returns true when the SETTLED-at-scope unscope must
+// fire: movement while PROMOTED on a Scoped (flags 1) weapon routes through
+// the normal scope toggle [orig: g_weaponScopeActive && Def->Flags & 1 ->
+// Player_ToggleWeaponScope, the call @0x4df4ec from the gate @0x4df4c9] -- the
+// caller runs its standard disengage, and the toggle's own ForceScoped pin
+// applies there. Otherwise, on a Scoped def [orig: the entitySlotPtr block
+// @0x4df500..0x4df63b], the three interp legs run here:
+//   (a) moving while the RAISE runs (interp active, hipfire 0): the interp is
+//       re-targeted at the hip FROM ITS OWN POSE over 15 steps and hipfire is
+//       set -- the engaged target stays latched, so the promoter later promotes
+//       "scoped" at the hip [orig: @0x4df548..0x4df56c];
+//   (b) moving while settled with hipfire 0 on a def without ForceScoped or
+//       Emplaced (0x20000080): a 15-step tpos -> hip ease with hipfire set, the
+//       promoted byte KEPT [orig: @0x4df57c..0x4df58e, @0x4df5ae..0x4df5d6];
+//   (c) not moving, settled, idle with hipfire 1, no 0x20000080: the promoted
+//       byte drops, the target is set, a 15-step hip -> tpos ease starts and
+//       hipfire clears -- the auto re-raise [orig: LABEL_33 @0x4df607..0x4df63b].
+// After the step-1 toggle every leg is a no-op (the toggle leaves the interp
+// active with hipfire 1, or pinned), so they are only evaluated when it does
+// not fire; retail's ordering is thereby preserved without the caller's help.
 bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flags);
 
 // Whether a scope-UP toggle is refused by the movement-held latch: engaging a

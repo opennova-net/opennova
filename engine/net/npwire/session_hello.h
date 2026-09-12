@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -183,15 +184,6 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 // (the original "real NW never sends ServerAuth" bug — RE doc NW-S2).
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg);
 
-// C2S 0x46 ClientGoodBye body: [u32 remote session key][DS][DC][DP1][DP2][DSTR][DPC][DDSTR].
-// The key dword is validated by the receiver against its local session key; the TLVs carry the
-// sender's disconnect-event stats and a cleanly-leaving client ships them zeroed with empty
-// strings (retail's receiver discards DS and re-derives the role locally; the rest feed logs).
-// The NWU crypt over bytes [1..] rides the ordinary nw_encode_outbound wrap.
-// [orig: CNapiNPConnection_SendDisconnectPacket @0x61f2a0 (builder);
-//  Nwu_HandleDisconnect @0x623ce0 (receiver key check + lenient TLV walk)]
-std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key);
-
 // The CONNECTION-DESCRIPTION record — the transport's own disconnect event carried as an INNER
 // protocol message instead of a session opcode: high/settings flag set, low tag 3, i.e. full tag
 // 0x103. Both directions route it through the same high-bit msginfo table, so a host sends the
@@ -219,12 +211,61 @@ struct DisconnectEvent {
 	std::string ddstr;  // event tag (retail keeps the first 32 bytes)
 };
 
+// The retail NapiNPDisconnectEvent stores DSTR in `char message[128]` and DDSTR
+// in `char extra[32]`, each filled by Napi_CopyString(dst, src, N), which copies
+// at most N-1 characters and always NUL-terminates — so a LATCHED record carries
+// at most 127 / 31 characters. Every latch site applies this cap; the wire
+// writers serialize the latched strings verbatim (strlen + 1).
+// [orig: Napi_CopyString @0x617e10; the 128/32 copies at Nwu_HandleDisconnect
+//  @0x624019/@0x624097, HandleDescriptionPacket @0x621cca.., PumpStateMachine
+//  @0x6293b7.., NapiNPProtocol_StopServer @0x62a8db/@0x62a8f6]
+inline constexpr std::size_t kDisconnectEventDstrChars = 127;
+inline constexpr std::size_t kDisconnectEventDdstrChars = 31;
+
+// Build one disconnect record with the latch-side string caps applied.
+inline DisconnectEvent make_disconnect_event(uint32_t ds, uint32_t dc, uint32_t dp1,
+		uint32_t dp2, std::string_view dstr, uint32_t dpc, std::string_view ddstr) {
+	DisconnectEvent event;
+	event.ds = ds;
+	event.dc = dc;
+	event.dp1 = dp1;
+	event.dp2 = dp2;
+	event.dstr.assign(dstr.substr(0, kDisconnectEventDstrChars));
+	event.dpc = dpc;
+	event.ddstr.assign(ddstr.substr(0, kDisconnectEventDdstrChars));
+	return event;
+}
+
 // Serialize the seven-field connection-description body in retail's exact
 // DS/DC/DP1/DP2/DSTR/DPC/DDSTR order. Unlike C2S 0x46 ClientGoodBye this is an
 // INNER H:0x03 payload and therefore has no leading session-key dword.
 // [orig: NapiNPDataTransfer_SendDescription @0x628c80]
 std::vector<uint8_t> connection_description_to_bytes(
 		const DisconnectEvent &event);
+
+// The SESSION-OPCODE disconnect packet body shared by C2S 0x46 ClientGoodBye and S2C 0x86
+// ServerGoodBye: [u32 peer key][DS][DC][DP1][DP2][DSTR][DPC][DDSTR]. The key dword is the
+// RECEIVER's local key (a client sends the host's SK, the host sends the client's CK) and is the
+// only thing the receiver validates; the TLVs are the sender's latched disconnect record, written
+// unconditionally (DSTR/DDSTR ship their NUL even when empty). The NWU crypt over bytes [1..] rides
+// the ordinary nw_encode_outbound wrap.
+// [orig: CNapiNPConnection_SendDisconnectPacket @0x61f2a0 — key dword @0x61f3af, the seven
+//  TLVs @0x61f3d0..0x61f4aa, NWU encrypt @0x61f4cd; receiver Nwu_HandleDisconnect @0x623ce0
+//  (key check @0x623e74 + lenient TLV walk @0x623eb2..0x623fbd)]
+std::vector<uint8_t> disconnect_packet_body_to_bytes(uint32_t peer_key,
+		const DisconnectEvent &event);
+
+// C2S 0x46 ClientGoodBye: `remote_session_key` = the host's SK, `event` = the client's latched
+// record (a user leave latches {2, 2, 0, 0, "I.C:CIDEMIS", 0, ""}; a host punt/goodbye is echoed).
+std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key,
+		const DisconnectEvent &event);
+// The zero-record form: only the NOVAWORLDUDP lobby ClientSession, whose leave record is
+// unwitnessed, still ships all-zero stats with empty strings.
+std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key);
+
+// S2C 0x86 ServerGoodBye: `client_ck` = the departing client's CK (its local key), `event` =
+// the host-side latched record (SERTMOUT reap, STOP, MSGCRE, the echoed client goodbye, ...).
+std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const DisconnectEvent &event);
 
 // Parse a connection-description body (the inner message payload, already SCRK-decrypted). Unknown
 // names are skipped by their length and field order is not assumed, matching the retail walk.

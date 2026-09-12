@@ -121,11 +121,16 @@ public:
 	// @ 0x580a80 — the friendly-tag line metric is the '0' glyph's height].
 	float char_height(uint8_t byte, float scale_y) const;
 
-	// One glyph's pixel width WITHOUT the spacing pad — the per-character
-	// extent the chat wrapper walks with [orig: CGameFont_GetCharExtent
-	// @0x674dc0, read as charSize[0] by HUD_WordWrapText @0x5809db]. Bytes the font
-	// does not carry measure 0.
-	int char_width(uint8_t byte, float scale_x) const;
+	// One glyph's pixel extent WITH the spacing pad, rounded — the
+	// per-character extent the chat wrapper walks with:
+	// floor(((u1 - u0) * 256 + glyph_spacing - 1) * (800 / design_width) + 0.5)
+	// (scale_x multiplied into the design fold; the original takes no scale).
+	// Bytes below 0x20 measure 0; a tab measures `tab_width` when nonzero
+	// (retail's per-font tab width, this+0x168) and the SPACE glyph otherwise
+	// [orig: CGameFont_GetCharExtent @0x674dc0 — tab @0x674dd8, control bytes
+	//  @0x674e55, the fold @0x674de4..0x674e25; read as charSize[0] by
+	//  HUD_WordWrapText @0x5809db, which adds +1 per byte on top @0x5809e4].
+	int char_width(uint8_t byte, float scale_x, int tab_width = 0) const;
 
 private:
 	struct Cursor;

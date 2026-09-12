@@ -11,6 +11,7 @@
 
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_session.h>
@@ -18,6 +19,7 @@
 #include <runtime/inmatch/server_tick.h>
 
 #include <net/npwire/idatagram_socket.h>
+#include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/udp_session_transport.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
@@ -206,11 +208,14 @@ struct CaptureDatagramSocket final : opennova::IDatagramSocket {
 	}
 };
 
+// The retail 0x46 burst echoes the connection's LATCHED record: a host punt's fields with
+// the local role 2, a host 0x86's fields with the peer role 1, the user leave's CIDEMIS.
+// [orig: SendDisconnectPacket @0x61f3b1..0x61f4aa reads conn->disconnect_event]
 bool check_client_goodbye_burst(
 		const std::vector<std::vector<uint8_t>> &burst,
-		uint32_t server_key, const char *message) {
+		uint32_t server_key, const DisconnectEvent &expected, const char *message) {
 	if (!expect(burst.size() == 4, message)) return false;
-	const std::vector<uint8_t> expected_body = client_goodbye_to_bytes(server_key);
+	const std::vector<uint8_t> expected_body = client_goodbye_to_bytes(server_key, expected);
 	for (std::size_t i = 0; i < burst.size(); ++i) {
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;
@@ -323,7 +328,9 @@ bool check_captured_punt_closes_a_joiner_parked_at_the_deploy_screen() {
 			joiner.handle_datagram(kick.data(), kick.size());
 	if (!expect(result.queued_send_messages.empty() &&
 				check_client_goodbye_burst(result.outbound, kServerKey,
-						"a host description triggers retail's four-packet goodbye burst"),
+						make_disconnect_event(2, 2, 0, 0, "t35", 33, "LogPuntEvent"),
+						"a host description triggers retail's four-packet goodbye burst "
+						"echoing the punt record with the local role"),
 			"a closed session emits only its transport-level goodbye burst"))
 		return false;
 	const std::string reason = joiner.session_loss_reason();
@@ -421,6 +428,7 @@ bool check_runtime_host_close_bypasses_holdoff_and_discards_queued_traffic() {
 			client.Client_ProcessNetworkFrame(3);
 	if (!expect(client.session_lost() &&
 				check_client_goodbye_burst(close_frame, kServerKey,
+						make_disconnect_event(2, 2, 0, 0, "t35", 33, "LogPuntEvent"),
 						"terminal host close bypasses holdoff with exactly four goodbyes"),
 			"the close frame emits only retail's immediate transport teardown"))
 		return false;
@@ -455,6 +463,7 @@ bool check_initial_settings_and_close_emit_only_goodbyes() {
 			joiner.handle_datagram(close.data(), close.size());
 	if (!expect(joiner.session_lost() &&
 				check_client_goodbye_burst(result.outbound, kServerKey,
+						make_disconnect_event(2, 2, 0, 0, "t35", 33, "LogPuntEvent"),
 						"settings plus close emits exactly four goodbyes"),
 			"the terminal description replaces same-packet admission traffic"))
 		return false;
@@ -593,7 +602,14 @@ bool check_host_control_punt(uint32_t charattr_silence,
 						std::string::npos,
 			"the actual host packet closes the joiner with the numeric cause"))
 		return false;
-	if (!check_client_goodbye_burst(receive.outbound, kServerKey,
+	// The joiner's burst echoes the record it latched from the description with
+	// ITS local role: DS 2, the other six fields verbatim. The wire DS never
+	// round-trips. [orig: HandleDescriptionPacket @0x621ae0 builds the record with
+	//  the local role @0x621cca.., latch @0x621d3c; SendDisconnectPacket @0x61f3b1
+	//  emits conn->disconnect_event.role as DS]
+	DisconnectEvent echoed = expected;
+	echoed.ds = 2;
+	if (!check_client_goodbye_burst(receive.outbound, kServerKey, echoed,
 			"the actual host packet triggers the keyed goodbye burst"))
 		return false;
 
@@ -654,6 +670,13 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 			"staged-close fixture retains one replayable S2C record"))
 		return false;
 	conn.host_disconnect_sent = true;
+	// The staged punt latched its record when the description was admitted (the
+	// port's SendChatMessage latch rides send_session_batches); this fixture never
+	// runs that pump, so it installs the same record by hand.
+	// [orig: CNapiNPConnection_SendChatMessage @0x4c7ff2..0x4c8004]
+	const DisconnectEvent punt =
+			make_disconnect_event(1, 2, 0, 0, "t35", 33, "LogPuntEvent");
+	inmatch::latch_disconnect_event(conn, punt);
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 
 	auto ignored = [](const inmatch::HandleResult &result) {
@@ -759,12 +782,30 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 			client_goodbye_to_bytes(kServerKey));
 	const inmatch::HandleResult close = inmatch::handle_server_datagram(
 			ctx, peer, keyed_goodbye.data(), keyed_goodbye.size(), 9);
-	return expect(close.outbound.empty() &&
+	// The keyed 0x46 finds the punt record already latched (first cause wins) and
+	// destroys the node: four identical 0x86 keyed by the client CK echoing that
+	// record, then the owner cleanup event and no other traffic.
+	// [orig: Nwu_HandleDisconnect latch-if-!valid @0x6240a8..0x6240ba ->
+	//  RequestDisconnect @0x6240c4; Destroy @0x62A4B0 -> TeardownActiveConnection
+	//  burst @0x6253ef..0x625424; SendDisconnectPacket @0x61f3b1..0x61f4aa]
+	if (!expect(close.outbound.size() == 4 &&
 				close.deferred_session_replies.empty() &&
 				close.events.size() == 1 &&
 				close.events[0].kind == inmatch::HostAcceptEvent::Kind::PeerGoodbye &&
 				ctx.np_protocol.connection_list.empty(),
-			"only the correctly keyed ClientGoodbye completes staged teardown");
+			"only the correctly keyed ClientGoodbye completes staged teardown"))
+		return false;
+	const std::vector<uint8_t> expected_body = server_goodbye_to_bytes(kClientKey, punt);
+	for (const std::vector<uint8_t> &datagram : close.outbound) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!expect(nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
+					opcode == SESSION_OPCODE_SERVER_GOODBYE && body == expected_body &&
+					datagram == close.outbound.front(),
+				"the staged teardown's 0x86 burst echoes the punt record keyed by the client CK"))
+			return false;
+	}
+	return true;
 }
 
 // Retail's description builder queues H:0x03 with the owner-only 0x10 flag,
@@ -831,7 +872,7 @@ bool check_host_description_bypasses_saturated_message_capacity() {
 	std::vector<uint8_t> session_body;
 	ProtocolPacketHeader header;
 	std::vector<ProtocolMessage> messages;
-	return expect(nw_decode_inbound(
+	if (!expect(nw_decode_inbound(
 				socket.sent[0].data(), socket.sent[0].size(),
 				opcode, session_body) &&
 				opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
@@ -842,7 +883,331 @@ bool check_host_description_bypasses_saturated_message_capacity() {
 				messages[0].full_tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION &&
 				messages[0].flags.raw == kDescriptionFlags &&
 				messages[0].payload == kCapturedPunt,
-			"capacity bypass changes no terminal description wire bytes");
+			"capacity bypass changes no terminal description wire bytes"))
+		return false;
+	// The rejected ordinary node was retail's pool overflow: {1, 4, count, max, "",
+	// 0, "NP.C:MSGCRE"} latched (count = 1 retained + 0 admitted + 1, max = 1) and the
+	// connection asked to disconnect; the NEXT protocol pump destroys it — the 0x86
+	// burst carrying that record, then the node erase. [orig: NapiNPMessage_Create
+	//  @0x6280c0..0x628112; NapiNPProtocol_Pump @0x62a6fd -> Destroy @0x62a793]
+	if (!expect(live.pending_disconnect && live.disconnect_event_valid &&
+				live.disconnect_event.dc == 4 && live.disconnect_event.dp1 == 2 &&
+				live.disconnect_event.dp2 == 1 &&
+				live.disconnect_event.ddstr == "NP.C:MSGCRE",
+			"the over-cap ordinary node latches the MSGCRE record and requests disconnect"))
+		return false;
+	inmatch::host_session_pump(owner, socket);
+	if (!expect(socket.sent.size() == 5 && owner.ctx.np_protocol.connection_list.empty(),
+			"the next pump destroys the overflowed connection with a four-datagram burst"))
+		return false;
+	const std::vector<uint8_t> expected_body = server_goodbye_to_bytes(kClientKey,
+			make_disconnect_event(1, 4, 2, 1, "", 0, "NP.C:MSGCRE"));
+	for (std::size_t i = 1; i < 5; ++i) {
+		std::vector<uint8_t> body;
+		if (!expect(nw_decode_inbound(socket.sent[i].data(), socket.sent[i].size(),
+					opcode, body) && opcode == SESSION_OPCODE_SERVER_GOODBYE &&
+					body == expected_body && socket.sent_to[i] == peer &&
+					socket.sent[i] == socket.sent[1],
+				"every 0x86 of the overflow burst carries the MSGCRE record keyed by the CK"))
+			return false;
+	}
+	return true;
+}
+
+// Retail's pool overflow at the witnessed 1,200-record bound, host side: at 1,199 retained
+// records the first queued node is admitted and built, the second is dropped and disconnects
+// the connection — the next pump sends 4x 0x86 {1, 4, 1201, 1200, "", 0, "NP.C:MSGCRE"} and
+// tears it down. [orig: NapiNPMessage_Create @0x627FC0 count @0x628062..0x62806b; cap 0x4B0
+//  @0x4cab20/@0x4cabf0]
+bool check_host_pool_overflow_disconnects_with_msgcre() {
+	inmatch::HostOwner owner;
+	owner.ctx.is_authority = 1;
+	owner.ctx.is_in_session = 1;
+	owner.ctx.np_protocol.host_running = 1;
+	const PeerAddr peer{0x0100007Fu, 34048};
+
+	replication::UdpSessionTransport transport(
+			replication::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection conn;
+	conn.peer = peer;
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.admission_stage = inmatch::GameAdmissionStage::Complete;
+	conn.burst.spawned = true;
+	conn.spawned_announced = true;
+	conn.client_ck = kClientKey;
+	conn.server_sk = kServerKey;
+	conn.server_scrk = kServerScrk;
+	conn.link.mode = replication::TransportMode::Client;
+	conn.link.transport = &transport;
+	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
+	conn.seq = inmatch::make_jo_game_session_sequencing(2, 0);
+	conn.seq.retained_outbound[1] = std::vector<ProtocolMessage>(
+			JO_SESSION_OUTBOUND_MESSAGE_MAX - 1, make_protocol_message(0x60, {}));
+	conn.seq.retained_outbound_message_count = JO_SESSION_OUTBOUND_MESSAGE_MAX - 1;
+	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
+	owner.pending_session_messages[peer] = {
+			make_protocol_message(0x61, {0xA1}),
+			make_protocol_message(0x62, {0xB2}),
+	};
+
+	CaptureDatagramSocket socket;
+	inmatch::host_session_pump(owner, socket);
+	auto &live = owner.ctx.np_protocol.connection_list.front();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> session_body;
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(socket.sent.size() == 1 &&
+				nw_decode_inbound(socket.sent[0].data(), socket.sent[0].size(),
+						opcode, session_body) &&
+				opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
+				decode_protocol_packet_plaintext(session_body.data(),
+						session_body.size(), kServerScrk, header, messages) &&
+				messages.size() == 1 && messages[0].tag == 0x61 &&
+				live.seq.retained_outbound_message_count ==
+						JO_SESSION_OUTBOUND_MESSAGE_MAX,
+			"the admitted 1,200th node is built and sent in the same boundary"))
+		return false;
+	if (!expect(live.pending_disconnect && live.disconnect_event_valid &&
+				live.disconnect_event.ds == 1 && live.disconnect_event.dc == 4 &&
+				live.disconnect_event.dp1 == JO_SESSION_OUTBOUND_MESSAGE_MAX + 1 &&
+				live.disconnect_event.dp2 == JO_SESSION_OUTBOUND_MESSAGE_MAX &&
+				live.disconnect_event.dstr.empty() && live.disconnect_event.dpc == 0 &&
+				live.disconnect_event.ddstr == "NP.C:MSGCRE",
+			"the 1,201st node latches the retail MSGCRE record"))
+		return false;
+	inmatch::host_session_pump(owner, socket);
+	if (!expect(socket.sent.size() == 5 && owner.ctx.np_protocol.connection_list.empty(),
+			"the next pump bursts and tears the overflowed connection down"))
+		return false;
+	const std::vector<uint8_t> expected_body = server_goodbye_to_bytes(kClientKey,
+			make_disconnect_event(1, 4, JO_SESSION_OUTBOUND_MESSAGE_MAX + 1,
+					JO_SESSION_OUTBOUND_MESSAGE_MAX, "", 0, "NP.C:MSGCRE"));
+	for (std::size_t i = 1; i < 5; ++i) {
+		std::vector<uint8_t> body;
+		if (!expect(nw_decode_inbound(socket.sent[i].data(), socket.sent[i].size(),
+					opcode, body) && opcode == SESSION_OPCODE_SERVER_GOODBYE &&
+					body == expected_body,
+				"the overflow burst is four identical MSGCRE 0x86 datagrams"))
+			return false;
+	}
+	return true;
+}
+
+// The same overflow on the joiner (retail state 5): RequestDisconnect tears the connection
+// down inline — the 0x46 burst carries {2, 4, 1201, 1200, "", 0, "NP.C:MSGCRE"}, nothing
+// queued in that boundary is built, and the session is terminal.
+// [orig: NapiNPMessage_Create @0x628112 -> RequestDisconnect @0x61e0fa SetState(6) ->
+//  TeardownActiveConnection @0x62549e..0x6254d3]
+bool check_joiner_pool_overflow_disconnects_with_msgcre() {
+	inmatch::JoinerConnection joiner("OverflowJoiner");
+	seed_joiner(joiner);
+	std::vector<ProtocolMessage> retained(
+			JO_SESSION_OUTBOUND_MESSAGE_MAX - 1, make_protocol_message(0x60, {}));
+	if (!expect(!joiner.frame_messages(retained).empty() &&
+				joiner.retained_outbound_depth() == JO_SESSION_OUTBOUND_MESSAGE_MAX - 1,
+			"overflow fixture retains 1,199 reliable nodes"))
+		return false;
+	joiner.complete_send_flush();
+	const inmatch::JoinerConnection::FrameMessagesResult framed =
+			joiner.frame_messages_detailed({
+					make_protocol_message(0x61, {0xA1}),
+					make_protocol_message(0x62, {0xB2}),
+			});
+	const DisconnectEvent expected = make_disconnect_event(2, 4,
+			JO_SESSION_OUTBOUND_MESSAGE_MAX + 1, JO_SESSION_OUTBOUND_MESSAGE_MAX, "", 0,
+			"NP.C:MSGCRE");
+	if (!expect(!framed.frame_failed && framed.framed_count == 0 &&
+				check_client_goodbye_burst(framed.datagrams, kServerKey, expected,
+						"the over-cap node yields only the four-datagram MSGCRE goodbye burst"),
+			"the joiner overflow builds nothing but the teardown burst"))
+		return false;
+	if (!expect(joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
+				joiner.session_lost() &&
+				joiner.session_loss_reason().find("NP.C:MSGCRE") != std::string::npos &&
+				joiner.has_disconnect_event() && joiner.last_disconnect_event().dc == 4 &&
+				joiner.last_disconnect_event().dp1 == JO_SESSION_OUTBOUND_MESSAGE_MAX + 1,
+			"the joiner overflow is terminal with the MSGCRE record latched"))
+		return false;
+	return expect(joiner.disconnect().empty() &&
+				joiner.frame_inner(c2s::KEEPALIVE, {0, 0, 0, 0}).empty() &&
+				joiner.retained_outbound_depth() == JO_SESSION_OUTBOUND_MESSAGE_MAX - 1,
+			"the burst is one-shot and the terminal connection frames nothing more");
+}
+
+// S2C 0x86 SERVER_GOODBYE: the host's teardown burst. Keyed by OUR CK (a mismatch or a body
+// too short for the key is dropped silently), the record is latched with the peer role 1,
+// the 0x46 burst echoes it back and the session is terminal with the host's reason; a second
+// 0x86 after the loss and one delivered before the connection is active do nothing.
+// [orig: Nwu_HandleServerGoodbye @0x624310 -> Nwu_HandleDisconnect(type 2) @0x623CE0 — key
+//  @0x623e74, active gate @0x623df2, the type-2 record @0x624065, latch @0x6240a8, RequestDisconnect
+//  @0x6240c4 -> TeardownActiveConnection @0x62549e..0x6254e7]
+bool check_server_goodbye_closes_the_joiner() {
+	const DisconnectEvent stop = make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP");
+	inmatch::JoinerConnection joiner("GoodbyeTarget");
+	seed_joiner(joiner);
+
+	const std::vector<uint8_t> wrong_key = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(kClientKey ^ 1u, stop));
+	inmatch::JoinerConnection::PollResult result =
+			joiner.handle_datagram(wrong_key.data(), wrong_key.size());
+	if (!expect(result.outbound.empty() && !joiner.session_lost() &&
+				joiner.phase() == inmatch::JoinerConnection::Phase::InMatch,
+			"a 0x86 keyed by another client's CK is ignored"))
+		return false;
+	const std::vector<uint8_t> short_body = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, {0x44, 0x33});
+	result = joiner.handle_datagram(short_body.data(), short_body.size());
+	if (!expect(result.outbound.empty() && !joiner.session_lost(),
+			"a 0x86 too short to carry the key is ignored"))
+		return false;
+
+	const std::vector<uint8_t> goodbye = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(kClientKey, stop));
+	result = joiner.handle_datagram(goodbye.data(), goodbye.size());
+	if (!expect(result.queued_send_messages.empty() &&
+				check_client_goodbye_burst(result.outbound, kServerKey, stop,
+						"a keyed 0x86 draws the four-packet 0x46 burst echoing its record"),
+			"the 0x86 teardown emits only the goodbye burst"))
+		return false;
+	if (!expect(joiner.session_lost() &&
+				joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
+				joiner.has_disconnect_event() && joiner.last_disconnect_event().ds == 1 &&
+				joiner.last_disconnect_event().dc == 9 &&
+				joiner.last_disconnect_event().ddstr == "NP.C:SH:STOP" &&
+				joiner.session_loss_reason().find("NP.C:SH:STOP") != std::string::npos &&
+				joiner.session_loss_reason().find("class 9") != std::string::npos,
+			"the 0x86 record is latched with the peer role and named in the loss reason"))
+		return false;
+	result = joiner.handle_datagram(goodbye.data(), goodbye.size());
+	if (!expect(result.outbound.empty() && joiner.disconnect().empty(),
+			"a second 0x86 after the loss emits nothing"))
+		return false;
+
+	// The record's strings are capped at the latch (Napi_CopyString 128 / 32).
+	inmatch::JoinerConnection capped("CappedTarget");
+	seed_joiner(capped);
+	const DisconnectEvent long_record = make_disconnect_event(1, 3, 120001, 120000,
+			std::string(200, 'x'), 0, std::string(40, 'y'));
+	DisconnectEvent uncapped = long_record;
+	uncapped.dstr = std::string(200, 'x');
+	uncapped.ddstr = std::string(40, 'y');
+	const std::vector<uint8_t> long_goodbye = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(kClientKey, uncapped));
+	result = capped.handle_datagram(long_goodbye.data(), long_goodbye.size());
+	if (!expect(capped.session_lost() && capped.last_disconnect_event().dstr.size() == 127 &&
+				capped.last_disconnect_event().ddstr.size() == 31 &&
+				check_client_goodbye_burst(result.outbound, kServerKey, long_record,
+						"the echoed record carries the latch-capped strings"),
+			"DSTR/DDSTR are capped at 127/31 characters when latched"))
+		return false;
+
+	// An empty TLV run after the key still disconnects, with a zero record (role 1).
+	inmatch::JoinerConnection zeros("ZeroRecordTarget");
+	seed_joiner(zeros);
+	const std::vector<uint8_t> bare = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, u32_value(kClientKey));
+	result = zeros.handle_datagram(bare.data(), bare.size());
+	if (!expect(zeros.session_lost() && zeros.last_disconnect_event().dc == 0 &&
+				check_client_goodbye_burst(result.outbound, kServerKey,
+						make_disconnect_event(1, 0, 0, 0, "", 0, ""),
+						"a key-only 0x86 still tears down with a zero record"),
+			"an empty record run disconnects with zero fields"))
+		return false;
+
+	// Before the accepted 0x82 there is no active connection to close.
+	inmatch::JoinerConnection early("HelloPhaseTarget");
+	(void)early.start();
+	const std::vector<uint8_t> premature = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(early.client_key(), stop));
+	result = early.handle_datagram(premature.data(), premature.size());
+	return expect(result.outbound.empty() && !early.session_lost() &&
+				early.phase() == inmatch::JoinerConnection::Phase::Hello,
+			"a 0x86 before the connection is active is ignored");
+}
+
+// The host's mission exit: the round-reset 0x25 to every in-match remote, then the StopServer
+// walk — {1, 9, 0, 0, "", 0, "NP.C:SH:STOP"} latched and the node Destroyed while host_running
+// is still set, so every connection gets the four-datagram 0x86 burst carrying that record, and
+// only afterwards is host_running cleared. [orig: NapiNPProtocol_StopServer @0x62A820 — the
+//  record @0x62a8c3..0x62a8f6, latch @0x62a904..0x62a919, Destroy @0x62a924, host_running = 0
+//  @0x62a95c; SendDisconnectPacket's host_running gate @0x61f329]
+bool check_host_close_bursts_stop_to_every_connection() {
+	inmatch::HostRole role;
+	inmatch::HostOwner &owner = role.state.host_owner;
+	owner.ctx.is_authority = 1;
+	owner.ctx.is_in_session = 1;
+	owner.ctx.np_protocol.host_running = 1;
+
+	replication::UdpSessionTransport first_transport(
+			replication::UdpSessionTransport::Role::Host);
+	replication::UdpSessionTransport second_transport(
+			replication::UdpSessionTransport::Role::Host);
+	const PeerAddr first_peer{0x0100007Fu, 34049};
+	const PeerAddr second_peer{0x0100007Fu, 34050};
+	for (int i = 0; i < 2; ++i) {
+		inmatch::NapiNPConnection conn;
+		conn.peer = i == 0 ? first_peer : second_peer;
+		conn.type = 1;
+		conn.phase = inmatch::ConnectionPhase::InMatch;
+		conn.admission_stage = inmatch::GameAdmissionStage::Complete;
+		conn.burst.spawned = true;
+		conn.burst.sync_state = 5;
+		conn.spawned_announced = true;
+		conn.client_ck = kClientKey + static_cast<uint32_t>(i);
+		conn.server_sk = kServerKey;
+		conn.server_scrk = kServerScrk;
+		conn.client_scrk = kClientScrk;
+		conn.link.mode = replication::TransportMode::Client;
+		conn.link.transport = i == 0 ? &first_transport : &second_transport;
+		owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
+	}
+
+	CaptureDatagramSocket socket;
+	role.set_socket(&socket);
+	role.close();
+	// Per connection: one 0x83 carrying the 0x25, then the four 0x86 STOP datagrams.
+	if (!expect(socket.sent.size() == 10 && owner.ctx.np_protocol.connection_list.empty() &&
+				owner.ctx.np_protocol.host_running == 0,
+			"close sends 0x25 + four 0x86 to each of two connections, erases them and stops the host"))
+		return false;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> session_body;
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	for (int i = 0; i < 2; ++i) {
+		const PeerAddr &peer = i == 0 ? first_peer : second_peer;
+		const std::vector<uint8_t> &reset = socket.sent[static_cast<std::size_t>(i)];
+		messages.clear();
+		if (!expect(socket.sent_to[static_cast<std::size_t>(i)] == peer &&
+					nw_decode_inbound(reset.data(), reset.size(), opcode, session_body) &&
+					opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
+					decode_protocol_packet_plaintext(session_body.data(),
+							session_body.size(), kServerScrk, header, messages) &&
+					messages.size() == 1 && messages[0].tag == s2c::GAME_RESET &&
+					messages[0].payload.empty(),
+				"each in-match remote first receives the empty round-reset 0x25"))
+			return false;
+	}
+	const DisconnectEvent stop = make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP");
+	for (int i = 0; i < 2; ++i) {
+		const PeerAddr &peer = i == 0 ? first_peer : second_peer;
+		const std::vector<uint8_t> expected_body = server_goodbye_to_bytes(
+				kClientKey + static_cast<uint32_t>(i), stop);
+		const std::size_t first = 2u + static_cast<std::size_t>(i) * 4u;
+		for (std::size_t j = first; j < first + 4; ++j) {
+			std::vector<uint8_t> body;
+			if (!expect(socket.sent_to[j] == peer &&
+						nw_decode_inbound(socket.sent[j].data(), socket.sent[j].size(),
+								opcode, body) &&
+						opcode == SESSION_OPCODE_SERVER_GOODBYE && body == expected_body &&
+						socket.sent[j] == socket.sent[first],
+					"each connection's STOP burst is four identical 0x86 keyed by its own CK"))
+				return false;
+		}
+	}
+	return true;
 }
 
 bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
@@ -1038,6 +1403,116 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 				datagram.tag == hightag::DESCRIPTION_PACKET &&
 				datagram.body == connection_description_to_bytes(expected),
 			"the first non-permanent tick over 360 emits exact t7");
+}
+
+// The type-6 producer: the 1 Hz violation sweep. With the MaxFriendlyKills limit L,
+// `L < 0 || teamKills <= L` routes to the suicide arm (punt when suicides > 9), else
+// the team-kill arm punts outright; the listen host's own slot is exempt and the
+// description latch keeps a second sweep silent.
+// [orig: Server_CheckPlayerViolations @0x51abd0 — slot +5 gate @0x51aca2, TK gate
+//  @0x51acc2, suicide gate @0x51ad00, punts @0x51ad17/@0x51acd9; caller
+//  Server_TickUpdate @0x51df5f]
+bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_kills,
+		int32_t suicides, bool host_own, bool expect_punt, const char *label) {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx,
+			host_own ? inmatch::ConnectionMode::HostClient : inmatch::ConnectionMode::HostOnly);
+	ctx.is_in_session = 1;
+	ctx.network_quality_broadcast_countdown = 100;
+	ctx.config.max_friendly_kills = max_friendly_kills;
+
+	opennova::world::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	opennova::world::AiSystem &ai = world.ai;
+	const opennova::world::EntityHandle player = host_own
+			? opennova::world::spawn_player(world, opennova::world::PlayerSpawn{})
+			: opennova::world::spawn_remote_player(world, opennova::world::PlayerSpawn{});
+	if (!expect(player.valid(), "violation fixture spawned its player")) return false;
+	world.match.upsert_player({player, 0, "Violator"});
+	opennova::world::MatchPlayer *stats = world.match.player(player);
+	if (!expect(stats != nullptr, "violation fixture registered its roster row")) return false;
+	stats->stats[opennova::world::MatchStats::kTeamKills] = team_kills;
+	stats->stats[opennova::world::MatchStats::kSuicides] = suicides;
+	ctx.world = &world;
+
+	replication::UdpSessionTransport transport(
+			replication::UdpSessionTransport::Role::Host);
+	replication::LoopbackChannel loopback;
+	inmatch::NapiNPConnection conn;
+	conn.peer = {0x0100007Fu, 34066};
+	conn.type = host_own ? inmatch::NapiNPConnection::kTypeClientSide
+	                     : inmatch::NapiNPConnection::kTypeServerSide;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.s2c_send_boundary_open = false;
+	conn.link.mode = host_own ? replication::TransportMode::Loopback
+	                          : replication::TransportMode::Client;
+	if (host_own)
+		conn.link.transport = &loopback;
+	else
+		conn.link.transport = &transport;
+	conn.link.owned_entity = player;
+	conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
+	conn.reply.minimap_initial_scan_pending = false;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
+
+	// The zero-armed periodic second fires on the first host tick.
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(world.match.periodic_second(), "the first host tick is a periodic second"))
+		return false;
+	auto descriptions = [&]() {
+		std::vector<replication::Datagram> out;
+		replication::Datagram datagram;
+		if (host_own) {
+			while (loopback.client_recv(datagram))
+				if (datagram.tag == hightag::DESCRIPTION_PACKET) out.push_back(datagram);
+		} else {
+			while (transport.pop_outbound(datagram))
+				if (datagram.tag == hightag::DESCRIPTION_PACKET) out.push_back(datagram);
+		}
+		return out;
+	};
+	const std::vector<replication::Datagram> first = descriptions();
+	if (!expect_punt) {
+		if (!expect(first.empty() && !live.host_disconnect_sent, label)) return false;
+	} else {
+		DisconnectEvent expected;
+		expected.ds = 1;
+		expected.dc = 2;
+		expected.dstr = "t6";
+		expected.dpc = 33;
+		expected.ddstr = "LogPuntEvent";
+		if (!expect(live.host_disconnect_sent && live.host_disconnect_mismatch_type == 6 &&
+					first.size() == 1 && first[0].reliable &&
+					first[0].protocol_flags_raw == kDescriptionFlags &&
+					first[0].body == connection_description_to_bytes(expected),
+				label))
+			return false;
+	}
+	// A second sweep never repeats the record.
+	for (int i = 0; i < 62; ++i) inmatch::Server_TickUpdate(ctx);
+	return expect(descriptions().empty(), "a later sweep stays silent behind the first-event latch");
+}
+
+bool check_violation_sweep_type6_arms() {
+	bool ok = true;
+	ok = check_violation_sweep_emits_type6(3, 4, 0, false, true,
+			"team kills over MaxFriendlyKills emit the exact t6 record") && ok;
+	ok = check_violation_sweep_emits_type6(3, 3, 0, false, false,
+			"team kills at the limit do not punt") && ok;
+	ok = check_violation_sweep_emits_type6(3, 0, 10, false, true,
+			"ten suicides emit the exact t6 record") && ok;
+	ok = check_violation_sweep_emits_type6(3, 0, 9, false, false,
+			"nine suicides do not punt") && ok;
+	ok = check_violation_sweep_emits_type6(-1, 50, 0, false, false,
+			"a negative MaxFriendlyKills disables the team-kill arm") && ok;
+	ok = check_violation_sweep_emits_type6(-1, 0, 10, false, true,
+			"a negative MaxFriendlyKills keeps the suicide arm") && ok;
+	ok = check_violation_sweep_emits_type6(3, 4, 10, true, false,
+			"the listen host's own slot is never punted") && ok;
+	return ok;
 }
 
 bool reply_body(const inmatch::JoinerConnection::PollResult &result, uint8_t tag,
@@ -1320,8 +1795,13 @@ int main() {
 	ok = check_host_control_punts_are_ordered_before_the_countdown() && ok;
 	ok = check_staged_host_disconnect_accepts_only_keyed_goodbye() && ok;
 	ok = check_host_description_bypasses_saturated_message_capacity() && ok;
+	ok = check_host_pool_overflow_disconnects_with_msgcre() && ok;
+	ok = check_joiner_pool_overflow_disconnects_with_msgcre() && ok;
+	ok = check_server_goodbye_closes_the_joiner() && ok;
+	ok = check_host_close_bursts_stop_to_every_connection() && ok;
 	ok = check_join_deploy_idle_punt_uses_state6_elapsed_time() && ok;
 	ok = check_dead_player_punt_uses_a_consecutive_state6_counter() && ok;
+	ok = check_violation_sweep_type6_arms() && ok;
 	ok = check_crc_challenges_are_not_answered() && ok;
 	ok = check_join_rejection_retains_the_raw_reject_record() && ok;
 	ok = check_pv2_mismatch_reports_an_incompatible_version() && ok;

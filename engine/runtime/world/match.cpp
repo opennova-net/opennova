@@ -169,17 +169,38 @@ std::vector<MatchScoreField> make_default_score_fields(uint32_t game_type) {
     return {};
 }
 
+// The trailing matrix row count of the frozen board: 0 for a non-team type,
+// 3 for a team type, 5 for four-team TDM and for Team KOTH / FlagBall at any
+// configured team count (rows 3 and 4 of a two-team TKOTH/FlagBall are the
+// zero team records). The live 0x16 board's active_team_count is a separate
+// rule. [orig: Server_BuildEndOfRoundScoreboard @0x509259..0x50929C (ecx
+// 0/3/5), the store @0x5092B8, the trailing count byte @0x509581]
 uint8_t scoreboard_team_row_count(const MatchRules &rules) {
-    const uint8_t teams = gt::active_team_count(rules.game_type, rules.team_count);
-    return teams == 0 ? 0 : static_cast<uint8_t>(teams + 1);
+    if (!gt::is_team(rules.game_type))
+        return 0;
+    return (rules.team_count == 4 && rules.game_type == gt::kTeamDeathmatch) ||
+                   rules.game_type == gt::kTeamKingOfTheHill ||
+                   rules.game_type == gt::kFlagBall
+               ? uint8_t{5}
+               : uint8_t{3};
 }
 
-void sort_scoreboard_players(std::vector<MatchResultPlayer> &players) {
+// Player_ComputeScore's pair-list value: raw points for a team type, the
+// game-type primary (ScoreRules_GetPrimaryScoreField) otherwise.
+// [orig: Player_ComputeScore @0x500AD0..0x500ADF]
+int32_t scoreboard_sort_key(const MatchResultPlayer &row, uint32_t game_type) {
+    return gt::is_team(game_type) ? row.stats[MatchStats::kPoints] : row.primary_score;
+}
+
+void sort_scoreboard_players(std::vector<MatchResultPlayer> &players, uint32_t game_type) {
     // Server_BuildEndOfRoundScoreboard first scans player slots in numeric
-    // order, then sorts the {raw points, player} pairs with this exact
-    // descending Knuth-gap shell sort. Row order is wire-visible through the
-    // recipient index in S2C 0x1D.
-    // [orig: slot scan @0x508F30; CPairList_ShellSortByValue @0x526CF0]
+    // order, pairs each with Player_ComputeScore's value, then sorts the
+    // pairs with this exact descending Knuth-gap shell sort. Row order is
+    // wire-visible through the recipient index in S2C 0x1D and the top three
+    // rows of its non-team form.
+    // [orig: slot scan @0x508F30; Player_ComputeScore @0x509043;
+    // CPairList_AddEntry @0x50905F; CPairList_ShellSortByValue @0x50907F /
+    // @0x526CF0]
     std::sort(players.begin(), players.end(),
               [](const MatchResultPlayer &a, const MatchResultPlayer &b) {
                   return a.identity.slot < b.identity.slot;
@@ -191,9 +212,9 @@ void sort_scoreboard_players(std::vector<MatchResultPlayer> &players) {
     for (; gap > 0; gap /= 3) {
         for (size_t i = gap; i < count; ++i) {
             MatchResultPlayer insert = std::move(players[i]);
-            const int32_t key = insert.stats[MatchStats::kPoints];
+            const int32_t key = scoreboard_sort_key(insert, game_type);
             size_t j = i;
-            while (j >= gap && players[j - gap].stats[MatchStats::kPoints] < key) {
+            while (j >= gap && scoreboard_sort_key(players[j - gap], game_type) < key) {
                 players[j] = std::move(players[j - gap]);
                 j -= gap;
             }
@@ -425,6 +446,11 @@ void Match::remove_player(World &world, EntityHandle entity) {
         std::remove_if(players_.begin(), players_.end(),
                        [&](const MatchPlayer &p) { return p.identity.entity == entity; }),
         players_.end());
+}
+
+void Match::set_player_spectator(EntityHandle entity, bool spectator) {
+    if (MatchPlayer *row = player(entity))
+        row->spectator = spectator;
 }
 
 const MatchPlayer *Match::player(EntityHandle entity) const {
@@ -781,6 +807,52 @@ void Match::drop_carried_object(World &world, EntityHandle player_handle) {
                                 flag->ground_target,
                                 false,
                                 static_cast<uint16_t>(flag->item_id)});
+}
+
+bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
+    // [orig: Entity_SyncPositionFromDefinition @0x43A9B0]. The authored pose is
+    // the carry state's home (aiRuntime f0_7[4..6]); the yaw term of retail's
+    // equality test (f0_7[7]) never differs here because nothing in this sim
+    // rotates a flag, so position alone decides it.
+    Entity *flag = world.registry.get(flag_handle);
+    CarryObjectiveState *state = carry_state(world, flag_handle);
+    if (flag == nullptr || state == nullptr)
+        return false;
+    const int32_t x = to_fixed(flag->position.x);
+    const int32_t y = to_fixed(flag->position.y);
+    const int32_t z = to_fixed(flag->position.z);
+    const int32_t home_x = to_fixed(state->home.x);
+    const int32_t home_y = to_fixed(state->home.y);
+    const int32_t home_z = to_fixed(state->home.z);
+    if (x == home_x && y == home_y && z == home_z)
+        return false; // [orig: @0x43a9f8 — already at the definition pose]
+    const int64_t dx = int64_t{x} - home_x;
+    const int64_t dy = int64_t{y} - home_y;
+    const int64_t dz = int64_t{z} - home_z;
+    const bool near_home =
+        static_cast<int64_t>(std::sqrt(static_cast<long double>(dx * dx + dy * dy))) < 0x20000 &&
+        (dz < 0 ? -dz : dz) < 0x20000; // [orig: @0x43aa3b / @0x43aa4d]
+    if (!near_home) {
+        // The snap: position back to the definition pose; the ground link is
+        // re-resolved by a downward raycast in retail (@0x43ab22) — this port
+        // clears it like the timeout return does, no raycast seam here.
+        flag->position = state->home;                 // [orig: @0x43aa7d..0x43aa96]
+        flag->ground_target = EntityHandle{};
+    }
+    // Both paths publish the 19-B 0x2F state and nothing else (no 0x1E, no
+    // scoring): the FlagDrop-shaped record is the feed-less lane.
+    // [orig: Server_SendDestructibleDeathPacket @0x43aa6b / @0x43ab40]
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagDrop,
+                                EntityHandle{},
+                                flag_handle,
+                                flag->position,
+                                flag->position,
+                                static_cast<uint8_t>(flag->flags),
+                                flag->primary_occupant,
+                                flag->ground_target,
+                                false,
+                                static_cast<uint16_t>(flag->item_id)});
+    return !near_home;
 }
 
 void Match::record_death(World &world, EntityHandle victim_handle,
@@ -1277,10 +1349,18 @@ int32_t Match::team_objective_ticks(const World &world, uint8_t team) const {
         total, std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max()));
 }
 
-int32_t Match::team_primary_score(const World &world, uint8_t team) const {
+int32_t Match::team_primary_score(uint8_t team) const {
+    // Both board builders pass TeamRecord+0x150 (unknown_040[272]), the hill
+    // hold timer, as the KOTH family's external score; the per-second fold
+    // of the players' slot ticks lands in the neighbouring +0x148 word and is
+    // not what either board reads.
+    // [orig: Server_BuildAndBroadcastScoreboard @0x50DB92..@0x50DCCE;
+    // Server_BuildEndOfRoundScoreboard @0x508FA7/@0x508FB8;
+    // Game_AccumulateTeamScores @0x508DAD/@0x508DC2 (the +0x150 timer),
+    // @0x508E0A (the +0x148 fold)]
     if (team >= teams_.size())
         return 0;
-    return primary_score(teams_[team], team_objective_ticks(world, team));
+    return primary_score(teams_[team], team_hold_ticks_[team]);
 }
 
 MatchLiveScoreboard Match::live_scoreboard(World &world) {
@@ -1291,7 +1371,7 @@ MatchLiveScoreboard Match::live_scoreboard(World &world) {
     // bytes instead. [orig: Server_BuildAndBroadcastScoreboard @0x50D960]
     out.timed_score_mode = rules_.game_type == gt::kKingOfTheHill;
     for (uint8_t team = 1; team <= out.team_count; ++team) {
-        out.teams[team].primary_score = team_primary_score(world, team);
+        out.teams[team].primary_score = team_primary_score(team);
         out.teams[team].points = teams_[team][MatchStats::kPoints];
     }
 
@@ -1573,6 +1653,7 @@ bool Match::finish(int32_t winner_team, const World &world) {
     result_.winner_team = winner_team;
     result_.score_fields = rules_.score_fields;
     result_.team_stats = teams_;
+    result_.team_hold_ticks = team_hold_ticks_;
     result_.team_row_count = scoreboard_team_row_count(rules_);
     if (rules_.game_type == gt::kAdvanceAndSecure ||
         rules_.game_type == gt::kConquerAndControl) {
@@ -1586,10 +1667,9 @@ bool Match::finish(int32_t winner_team, const World &world) {
                 ++result_.team_scores[1];
         }
     } else {
-        result_.team_scores[0] = team_primary_score(world, 1);
-        result_.team_scores[1] = team_primary_score(world, 2);
+        result_.team_scores[0] = team_primary_score(1);
+        result_.team_scores[1] = team_primary_score(2);
     }
-    result_.draw = result_.team_scores[0] == result_.team_scores[1];
     result_.players.reserve(players_.size());
     for (const MatchPlayer &player : players_) {
         const Entity *entity = world.registry.get(player.identity.entity);
@@ -1602,7 +1682,60 @@ bool Match::finish(int32_t winner_team, const World &world) {
             primary_score(player),
         });
     }
-    sort_scoreboard_players(result_.players);
+    sort_scoreboard_players(result_.players, rules_.game_type);
+
+    if (gt::is_team(rules_.game_type)) {
+        // [orig: Server_BuildEndOfRoundScoreboard @0x5092AD]
+        result_.draw = result_.team_scores[0] == result_.team_scores[1];
+        return true;
+    }
+
+    // Non-team draw: the slot scan keeps the largest sort key seen from zero;
+    // the row walk clears the draw flag for any row whose primary is below
+    // it; a lone row with a positive score is not a draw either. For a
+    // non-team type the sort key IS the primary.
+    // [orig: Server_BuildEndOfRoundScoreboard — max @0x509053..0x509055, v47
+    // = 1 @0x50909D, the per-row clear @0x50920E..0x509210, the single-row
+    // clear @0x50926A..0x50926C, g_endround_draw_flag @0x509270/@0x5092B2]
+    int32_t max_key = 0;
+    for (const MatchResultPlayer &row : result_.players)
+        max_key = std::max(max_key, row.primary_score);
+    bool all_tied = true;
+    for (const MatchResultPlayer &row : result_.players) {
+        if (row.primary_score < max_key)
+            all_tied = false;
+    }
+    if (result_.players.size() == 1 && max_key > 0)
+        all_tied = false;
+    result_.draw = all_tied;
+
+    // Non-team winner: unless the board is a draw or its first two rows tie
+    // (row 1 reads zero from the memset table when only one row exists),
+    // every state-6 slot whose sort key equals row 0's primary receives
+    // event 21 -> RecordEvent(34, 2) -> raw field 35 = 2. The scorer refuses
+    // a spectator-flagged slot and a slot without an entity.
+    // [orig: Server_ProcessRoundEnd — isDrawOrNonTeam @0x5165A3..0x5165C3
+    // over dword_24C1AD4/dword_24C1BB8 (rows 0/1 entry+0x40), the compare
+    // @0x5167E2..0x5167F2, GameEvent_ProcessScoring(gt, entity, 21, 0, 2)
+    // @0x5167F6..0x5167FD; the memset @0x508F3F; case 21 @0x52FF20..0x52FF34;
+    // the spectator early-out @0x52F6FA; CPlayerStats_RecordEvent case 34
+    // @0x52C8E0]
+    const int32_t row0_primary =
+        result_.players.empty() ? 0 : result_.players[0].primary_score;
+    const int32_t row1_primary =
+        result_.players.size() > 1 ? result_.players[1].primary_score : 0;
+    if (result_.draw || row1_primary == row0_primary)
+        return true;
+    for (MatchResultPlayer &row : result_.players) {
+        if (row.primary_score != row0_primary)
+            continue;
+        MatchPlayer *match_player = player(row.identity.entity);
+        if (match_player == nullptr || match_player->spectator ||
+            world.registry.get(row.identity.entity) == nullptr)
+            continue;
+        match_player->stats[MatchStats::kRoundMarker] = 2;
+        row.stats[MatchStats::kRoundMarker] = 2;
+    }
     return true;
 }
 

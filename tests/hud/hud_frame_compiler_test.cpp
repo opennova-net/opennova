@@ -2038,11 +2038,38 @@ void test_spinmap_medic_marker(const fnt_font_t *font) {
 	}
 }
 
-// The chat wrap + display-buffer slots: the test font's glyphs are 8 px and
-// the walk adds 9 per character; a 44 px box breaks "aaaa bbbb cccc" after
-// the first word, and the remainder (walked from 2 * 8 = 16) finds no space
-// before overflowing, so it stays whole. The first segment is a continuation
-// slot with timer 0; the last carries the 930 life.
+// The per-character extent the chat wrapper walks with: the glyph's u-extent
+// plus the (glyph_spacing - 1) pad, rounded with floor(x + 0.5); tabs ride the
+// caller's tab width or the SPACE glyph; control bytes measure 0
+// [orig: CGameFont_GetCharExtent @0x674dc0 — the fold @0x674de4..0x674e25,
+//  tab @0x674dd8, control bytes @0x674e55].
+void test_char_extent(const fnt_font_t *font) {
+	GameFont gf;
+	gf.set_font(font);
+	// 8 px glyphs, spacing 2: floor((8 + 1) * 1 + 0.5) = 9.
+	CHECK(gf.char_width('a', 1.0f) == 9, "spacing 2: the extent carries the +1 pad");
+	CHECK(gf.char_width(' ', 1.0f) == 9, "the space glyph measures the same");
+	CHECK(gf.char_width('\t', 1.0f) == 9, "a tab with no tab width is the SPACE glyph");
+	CHECK(gf.char_width('\t', 1.0f, 7) == 7, "a tab is the font's tab width when it carries one");
+	CHECK(gf.char_width(0x1F, 1.0f) == 0 && gf.char_width('\n', 1.0f) == 0,
+			"bytes below 0x20 measure 0");
+	// Spacing -3 (Gunpl22b): floor((8 - 4) * 1 + 0.5) = floor(4.5) = 4.
+	fnt_font_t tight = *font;
+	tight.glyph_spacing = -3;
+	GameFont gt;
+	gt.set_font(&tight);
+	CHECK(gt.char_width('a', 1.0f) == 4, "spacing -3: the negative pad folds in before the floor");
+	// Spacing 0 (Serpen24): floor((8 - 1) + 0.5) = 7.
+	tight.glyph_spacing = 0;
+	CHECK(gt.char_width('a', 1.0f) == 7, "spacing 0: the pad is -1");
+}
+
+// The chat wrap + display-buffer slots: the test font's glyphs are 8 px with
+// spacing 2, so the extent is 9 and the walk adds 10 per character; a 44 px
+// box breaks "aaaa bbbb cccc" after the first word, and the remainder
+// (walked from 2 * 9 = 18) finds no space before overflowing, so it stays
+// whole. The first segment is a continuation slot with timer 0; the last
+// carries the 930 life.
 // [orig: HUD_WordWrapText @0x580980; Chat_AddMessageChannel1 @0x4985d0]
 void test_chat_wrap_slots(const fnt_font_t *font) {
 	GameFont gf;
@@ -2058,6 +2085,27 @@ void test_chat_wrap_slots(const fnt_font_t *font) {
 	std::string no_space = "aaaaaaaaaa";
 	CHECK(opennova::hud::chat_wrap_text(gf, 1.0f, no_space, 44, 0) == 1,
 			"no space before the overflow means no break");
+	// Spacing-sensitive: at 10 px per character a 45 px box overflows on the
+	// first "b" (x = 50) and breaks at the FIRST space; the old pad-less 9 px
+	// walk sat at exactly 45 after "aa bb" and broke one word later. Every
+	// remainder walks from 18, so "bb" and "cc" break the same way and
+	// "dd ee" (measured 44 < 18 + 45) fits.
+	std::string words = "aa bb cc dd ee";
+	CHECK(opennova::hud::chat_wrap_text(gf, 1.0f, words, 45, 0) == 4,
+			"the padded extent breaks a word earlier than the pad-less walk");
+	CHECK(words[2] == 0 && words[5] == 0 && words[8] == 0,
+			"the three breaks land on the first three spaces");
+	// Spacing -3: extent 4, walk 5 per character; the same 45 px box holds
+	// "aa bb cc " (x = 45 on that space, not over) and overflows on the first
+	// "d" (50), breaking at the space after "cc"; "dd ee" then fits.
+	fnt_font_t tight = *font;
+	tight.glyph_spacing = -3;
+	GameFont gt;
+	gt.set_font(&tight);
+	std::string tight_words = "aa bb cc dd ee";
+	CHECK(opennova::hud::chat_wrap_text(gt, 1.0f, tight_words, 45, 0) == 2,
+			"a tighter font wraps later");
+	CHECK(tight_words[8] == 0, "the break follows 'cc'");
 
 	HudFrameCompiler compiler;
 	HudLayout layout;
@@ -2134,6 +2182,7 @@ int main() {
 	test_chat_feed_loop(&font);
 	test_lfp_panel_element(&font);
 	test_spinmap_medic_marker(&font);
+	test_char_extent(&font);
 	test_chat_wrap_slots(&font);
 	fnt_free(&font);
 	if (failures != 0) {

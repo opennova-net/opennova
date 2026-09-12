@@ -149,13 +149,34 @@ bool connection_spawned(const NapiNPServerCtx &ctx, const PeerAddr &peer);
 bool bind_connection_player(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t player_slot,
                             uint16_t entity_handle);
 
-// Owner-initiated eviction of `peer`'s connection node — the recv-timeout / dead-endpoint path where
-// no 0x46 ClientGoodbye ever arrives (a crashed or half-open peer would otherwise leak its
-// connection_list node and keep getting per-frame 0x0A framed to a dead address). Mirrors
-// handle_client_goodbye's complete player/entity/roster teardown without emitting
-// an event — the owner already knows it is dropping. The owner is responsible for releasing its own
-// (non-owning) transport for that peer. Returns true if a node was dropped. [orig: the timeout sweep
-// under NapiNPProtocol_DrainTimers feeds Nwu_HandleClientGoodbye @0x624250 -> Nwu_HandleDisconnect @0x623ce0 the same teardown.]
+// The S2C 0x86 SERVER_GOODBYE burst for `conn`: up to cs_dir0.recv_max_per_tick (4, clamped
+// 0..32) identical datagrams carrying [le32 client CK][the connection's latched disconnect
+// record, zeros when none is latched], NWU-encrypted like every session opcode. Empty for a
+// node that never completed the 0x42 (no CK), a client-side node, or a host that is no longer
+// running — SendDisconnectPacket's own gates. The unwitnessed proto+0x1F4 no-op gate (zero at
+// NapiNPProtocol_Create @0x625840; its setter was not located) is not modeled.
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 — count clamp @0x6253ef..0x625403,
+//  send loop @0x625406..0x625424; CNapiNPConnection_SendDisconnectPacket @0x61F2A0 — conn_flag0
+//  gate @0x61f30b, `!is_server || host_running` @0x61f329, opcode 0x86 @0x61f367, the peer key
+//  (CK) @0x61f3af, the record TLVs @0x61f3d0..0x61f4aa; recv_max_per_tick = 4 @0x4cab60]
+std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
+		const NapiNPConnection &conn);
+
+// The host-initiated destroy of `peer`'s node: the 0x86 burst above is appended to `goodbye_out`
+// (when non-null) BEFORE the player/entity/roster teardown and the node erase — retail sends the
+// burst, then fires the removal callback, then clears keys and queues. Producers: the receive reap
+// (SERTMOUT), the pending-disconnect pump, StopServer, same-endpoint replacement, a received 0x46
+// (its record echoed back). The owner is responsible for releasing its own (non-owning) transport
+// for that peer and for shipping the datagrams. Returns true if a node was dropped.
+// [orig: CNapiNPConnection_Destroy @0x62A4B0 -> TeardownActiveConnection @0x6253C0 (burst
+//  @0x6253ef, removal callback @0x625426, keys/queues cleared @0x625535..0x625574) ->
+//  Server_HandlePlayerDisconnect @0x51B5C0]
+bool destroy_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
+		std::vector<std::vector<uint8_t>> *goodbye_out);
+
+// Owner-side eviction of `peer`'s node with NO wire output — the socket owner's dead-endpoint
+// release (the transport already knows the address is gone). Same complete player/entity/roster
+// teardown as destroy_connection, no burst, no event. Returns true if a node was dropped.
 bool drop_connection(NapiNPServerCtx &ctx, const PeerAddr &peer);
 
 std::size_t connection_count(const NapiNPServerCtx &ctx);

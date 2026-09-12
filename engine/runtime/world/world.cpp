@@ -342,44 +342,61 @@ void World::process_round_end(int32_t winning_team) {
     // (DialogAudio_PlayNextChunkOrStop(0) @0x51694b) + Dialog_ResetAll + park the
     // mission music, then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390:
     // <mission>.cne if present, else a static camera; the flyaway + jo_Epil.tga
-    // score screen) + end music track 1; anything else -> the LOSE cine
-    // (Cine_StartPlayback @0x577840 letterbox/fade + the jo_Epil2.tga MISSION FAILED
-    // screen) + end track 2 (MusicCtx_SelectEndTrack @0x672fd0). All host
-    // presentation: the effect carries the winner, the host selects the flow.
-    out.effects.push({"round_end", winning_team, 0, 0, 0, std::string()});
+    // score screen) + MusicCtx_SelectEndTrack(1) @0x51696b; anything else -> the
+    // LOSE cine (Cine_StartPlayback @0x577840 letterbox/fade + the jo_Epil2.tga
+    // MISSION FAILED screen) + MusicCtx_SelectEndTrack(2) @0x51698f. The end
+    // track is the value the gamemus MessageHandler receives through the VM's
+    // restart frame (mus_vm_signal: sub_672E50 @0x672e95; retail gamemus.bin
+    // dispatches 1 -> Missionwin, 2 -> Missionlose); the gamemus context is
+    // open in SP (Game_StartMission @0x525581 opens it on the is_client bit,
+    // which mode 3 single player carries). All host presentation: the effect
+    // carries the winner (a) and the end track (b); the shell selects the flow
+    // and, in SP only, signals the track after the cine starts.
+    const int32_t end_track = winning_team == 1 ? 1 : 2;
+    out.effects.push({"round_end", winning_team, end_track, 0, 0, std::string()});
 }
 
-// Count alive members per commandGroup over the actor pools; group 0 is
-// forced to zero [orig: EntityPool_RecountByType @ 0x40e7e0 /
-// EntityPool_RecountLiveByGroup @ 0x40e8d0 — !(flags & 2) && health > 0].
-static void count_groups(const EntityRegistry &registry,
-                         int32_t (&counts)[TriggerRelations::kGroups]) {
-    std::vector<EntityHandle> members;
-    for (int g = 1; g < TriggerRelations::kGroups; ++g) {
-        members.clear();
-        registry.by_group(static_cast<uint8_t>(g), members);
-        int32_t alive = 0;
-        for (EntityHandle h : members) {
-            const Entity *e = registry.get(h);
-            if (e && e->alive && e->health > 0) ++alive;
-        }
-        counts[g] = alive;
-    }
-    counts[0] = 0;
-}
+// The two group recounts walk pools 2, 0 and 1 in that order (the three
+// pools both retail tallies visit); pools 3 and 4 never count.
+static constexpr int kGroupRecountPools[] = {2, 0, 1};
 
+// Tally every populated row of the three pools by its command group, with
+// NO flags/health test, force group 0 to zero, then copy live = initial for
+// every group [orig: EntityPool_RecountByType @0x40E7E0: the zero loop
+// @0x40e7f0/@0x40e7f7, the tallies @0x40e834 (pool 2) / @0x40e867 (pool 0) /
+// @0x40e89a (pool 1), initial[0]=0 @0x40e8a7, the live=initial copy
+// @0x40e8b1..0x40e8c4].
 void World::recount_group_initials() {
     int32_t counts[TriggerRelations::kGroups] = {};
-    count_groups(registry, counts);
+    for (int pool : kGroupRecountPools) {
+        registry.for_each_in_pool(pool, [&](const Entity &e) {
+            if (e.group_id < TriggerRelations::kGroups) ++counts[e.group_id];
+        });
+    }
+    counts[0] = 0;
     for (int g = 0; g < TriggerRelations::kGroups; ++g) {
         script.relations.group(g).initial_count = counts[g];
         script.relations.group(g).live_count = counts[g];
     }
 }
 
+// The live rescan: only rows that are not dead (Flags & 2 clear) and hold
+// health > 0 count; group 0 forced to zero. Every death writer sets the dead
+// flag on engine_flags, so the flag word is the predicate, not the `alive`
+// latch. [orig: EntityPool_RecountLiveByGroup @0x40E8D0: the predicate
+// @0x40e926 (pool 2) / @0x40e96c (pool 0) / @0x40e9b6 (pool 1), live[0]=0
+// @0x40e9d5]
 void World::recount_group_live() {
     int32_t counts[TriggerRelations::kGroups] = {};
-    count_groups(registry, counts);
+    for (int pool : kGroupRecountPools) {
+        registry.for_each_in_pool(pool, [&](const Entity &e) {
+            if (e.group_id >= TriggerRelations::kGroups) return;
+            if (((e.flags | e.engine_flags) & kEntityFlagDead) != 0) return;
+            if (e.health <= 0) return;
+            ++counts[e.group_id];
+        });
+    }
+    counts[0] = 0;
     for (int g = 0; g < TriggerRelations::kGroups; ++g)
         script.relations.group(g).live_count = counts[g];
 }

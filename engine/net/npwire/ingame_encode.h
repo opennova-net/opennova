@@ -260,7 +260,7 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 // tag=0x46 PLAYER-SYNC — the inverse of decode_player_sync (PlayerSync). Flag-driven slot-state record:
 // [u8 slot][u16 fieldFlags][u8 entitySlot] then the bit-gated fields in the witnessed order (name 0x1 /
 // clan 0x2 / vehicle-name 0x10 / team 0x4 / class 0x8 / vehicle-score 0x20 / late-join 0x1000 / squad
-// 0x40 / side 0x80 / quality 0x400 / vehicle-timer 0x800). [orig: NetPacket_SerializePlayerSync0x46
+// 0x40 / side 0x80 / quality 0x400 / account netId 0x800). [orig: NetPacket_SerializePlayerSync0x46
 // @0x505e80; client NapiNPClientMsg_PlayerSync @0x431370]. Per-field slot-state modeling
 // (score/squad/side/timer) is the remaining D-NET-127 nicety; the wire SHAPE is faithful and
 // round-trips through decode_player_sync.
@@ -455,5 +455,53 @@ inline constexpr char kWaterCrossAirborneEffect[] = "SURFACE_WTR"; // entered fr
 
 
 std::vector<uint8_t> encode_explosion_effect(const ExplosionEffectRecord &event);
+
+// S2C 0x4E KILL-LIST PAGE — the inverse of decode_batch_kill: `[u16 resume][u16 slot]×N`.
+// The host builder appends the page's slots after a reserved leading word and then
+// stores the iterator's current slot (0xFFFF = exhausted) into it, so a walk that
+// finds nothing is the bare `FF FF`. Sent reliable (msgClass 1), send_mask 160, to
+// the requester, only when the body is non-empty (an exhausted-at-start walk or a
+// suspended spawn phase yields nothing). [orig: collect_valid_weapon_slots @0x516000
+// (slot append @0x5160a9, resume store @0x5160d7);
+// NapiNPServerMsg_HandleWeaponLoadoutRequest @0x51A550 (send @0x51a5f4)]
+std::vector<uint8_t> encode_batch_kill(const BatchKillBatch &page);
+
+// C2S 0x28 KILL-WINDOW REQUEST — the inverse of decode_burst_loadout_request (10 B):
+// `[u32 windowMin][u32 windowMax][u16 start]`. [orig: the 0x0F reply-burst sender
+// @0x42e5d3..0x42e5f7 and the 0x4E continuation @0x4318db..0x4318ff]
+std::vector<uint8_t> encode_burst_loadout_request(const BurstLoadoutRequest &request);
+
+// S2C 0x6A CLAN-ROSTER — the inverse of decode_clan_roster_update: `[u8 action]
+// [u32 accountNetId]` and, for actions 1/3, `[cstr name][cstr tag]` (strlen+1 each,
+// from the node's char[65] / char[9] buffers, so at most 64 / 8 chars). Any other
+// action serializes to an EMPTY body: retail's serializer returns 0 and the caller
+// does not send. [orig: serialize_minimap_slot @0x5073B0 — type byte @0x5073dd,
+//  id @0x50741a / @0x5073fb, name @0x507440, tag @0x507470, the 0-return @0x507408]
+std::vector<uint8_t> encode_clan_roster_update(const ClanRosterUpdate &update);
+
+// C2S 0x4E CLAN-ROSTER WALK — `[u32 afterNetId]`, the inverse of
+// decode_clan_roster_walk_request. [orig: the kick @0x42e1c9..0x42e1d9 ({0});
+//  the action-3 continuation @0x43265c..0x43266c]
+std::vector<uint8_t> encode_clan_roster_walk_request(const ClanRosterWalkRequest &request);
+
+// S2C 0x37 / C2S 0x1A DOOR-SLOT ACTION — `[u16 handle][u16 state][u8 number]` (5 B),
+// the inverse of decode_door_slot_action for both directions. [orig: the inline
+// authority writer @0x50fa15..0x50fa3a; NetPacket_WriteShortShortByte @0x42B2B0
+// (the client request); NetPacket_WriteTwoShortsAndByte @0x505E00 (the host reply)]
+std::vector<uint8_t> encode_door_slot_action(const DoorSlotAction &action);
+
+// S2C 0x70 VEHICLE-SPAWN AVAILABILITY — the inverse of decode_vehicle_spawn_availability:
+// the constant leading byte 3, one `[u16 typeId][u8 avail][u8 max]` per row, then the
+// `u16 0` terminator. The avail/max ladder is the host's, computed from its EntityLimit
+// table (see the decoder note); this encoder writes the rows handed to it.
+// [orig: serialize_weapon_overlay_slots_0 @0x5105A0 — 3 @0x5105c3, rows
+//  @0x510660..0x510681, terminator @0x5106b8]
+std::vector<uint8_t> encode_vehicle_spawn_availability(const VehicleSpawnAvailabilityList &list);
+
+// C2S 0x40 VEHICLE-SPAWN REQUEST — `[u16 sourceHandle][u8 typeIndex]` (3 B), the inverse
+// of decode_vehicle_spawn_request. The retail sender is the vehicle.mnu pick (unported);
+// the layout is the host reader's. [orig: NapiNPServerMsg_HandleVehicleSpawnRequest
+// @0x51C4C0 reads @0x51c515..0x51c52a]
+std::vector<uint8_t> encode_vehicle_spawn_request(const VehicleSpawnRequest &request);
 
 } // namespace opennova

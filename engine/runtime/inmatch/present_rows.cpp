@@ -260,6 +260,9 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		float *r = w + static_cast<size_t>(i) * PF_STRIDE;
 		const replication::ClientEntityState &es = cs.entities[i];
 		initialize_client_replica_present_row(r);
+		// A wire-only row has no corpse timer: it reads the org0 skin callback's
+		// live DEATH value (world::death_ctrl_register_value's 0xFFFF).
+		r[PF_DEATH_CTRL] = 65535.0f;
 
 		// Self-filter (joiner): the host SNAPs our own entity (wire handle H) and streams
 		// it back in 0x0A; we draw our local player L via LocalPlayerPresenter, so drop the wire
@@ -315,6 +318,12 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
             r[PF_HUSK] = (ent->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
             for (int phase = 0; phase < 6; ++phase)
                 r[PF_OBJECT_DESTROY + phase] = float(ent->destroy_phases_q16[phase]);
+			// The org0 skin callback's DEATH register off the authoritative
+			// organic row's dead flag + corpse timer [orig: BoneCallback_org0_Skin
+			// @0x4e3669..0x4e368e].
+			if (ent->kind == EntityKind::Organic)
+				r[PF_DEATH_CTRL] = static_cast<float>(death_ctrl_register_value(
+						((ent->flags | ent->engine_flags) & kEntityFlagDead) != 0, ent->corpse_timer));
 			// The authority owns the exact MoveOrder stance latch (bits 8/9 of
 			// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
 			// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md). The compact
@@ -514,6 +523,18 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
                 r[PF_HUSK] = (local->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
                 for (int phase = 0; phase < 6; ++phase)
                     r[PF_OBJECT_DESTROY + phase] = float(local->destroy_phases_q16[phase]);
+                // The door records advance on every peer (the per-frame entity
+                // update calls the door tick at the pool-2 loop exit with no
+                // authority test) and the door render/bone callbacks copy each
+                // row's Q16 phase onto the CTRL bus from DOOR_00 for every drawn
+                // door entity, so a joiner publishes its own DoorSystem rows
+                // (ticked + contact-driven locally) exactly as the authority
+                // collector does; write_phases self-gates on door_motion.
+                // [orig: Entity_UpdateAllEntities @0x4c2100 (the site @0x4C2307,
+                //  loop exit @0x4c2278); build_bone_transforms @0x4E3070 (the
+                //  loop @0x4e312a..0x4e3145); BoneCallback_AnimatedBones_World
+                //  @0x4E3180 (@0x4e3201..0x4e3218)]
+                write_present_doors(r, i, kernel.world, *local, door_phases);
             }
             const auto *item = local ? kernel.world.tables.item_death_traits.get(local->item_id) : nullptr;
             if (local && static_cast<uint16_t>(local->item_id) == es.type_id &&
@@ -638,6 +659,13 @@ static void write_world_present_row(const PresentRowsContext &context,
     r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
     for (int phase = 0; phase < 6; ++phase)
         r[PF_OBJECT_DESTROY + phase] = float(e.destroy_phases_q16[phase]);
+	// The org0 skin bone-callback's DEATH register (CTRL ordinal 6): the corpse
+	// fade off the authoritative organic row's dead flag + corpse timer; every
+	// other row reads retail's live 0xFFFF [orig: BoneCallback_org0_Skin
+	// @0x4e3669..0x4e368e; see docs/world/world-wac-ai-re.md].
+	r[PF_DEATH_CTRL] = static_cast<float>(e.kind == EntityKind::Organic
+			? death_ctrl_register_value(((e.flags | e.engine_flags) & kEntityFlagDead) != 0, e.corpse_timer)
+			: 0xFFFF);
 	// The authority owns the exact MoveOrder stance latch (bits 8/9 of
 	// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
 	// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).

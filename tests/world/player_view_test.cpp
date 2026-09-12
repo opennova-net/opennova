@@ -28,20 +28,57 @@ namespace {
 void test_scope_ease_is_fifteen_ticks_exactly() {
     PlayerViewState v;
     const float eye[3] = {0, 0, 0};
-    v.scope_engaged = true;
+    CHECK(player_view_set_engaged(v, true, false));
     for (int i = 1; i <= kScopeEaseSteps; ++i) {
+        // The promoted byte holds off until the landing step
+        // [orig: the promoter @0x4de4f7 after the interp reports done].
+        CHECK(!player_view_scope_settled(v));
         player_view_tick(v, eye);
         CHECK(v.scope_step == i);
     }
     CHECK(player_view_scope_fraction(v) == 1.0f);
+    CHECK(player_view_scope_settled(v));
+    CHECK(!player_view_scope_ease_active(v));
     player_view_tick(v, eye); // saturates, never overshoots
     CHECK(v.scope_step == kScopeEaseSteps);
-    v.scope_engaged = false;
+    CHECK(player_view_scope_settled(v));
+    CHECK(player_view_set_engaged(v, false, false));
+    CHECK(!player_view_scope_settled(v)); // cleared at the toggle @0x4df20c
     for (int i = kScopeEaseSteps - 1; i >= 0; --i) {
         player_view_tick(v, eye);
         CHECK(v.scope_step == i);
     }
     CHECK(player_view_scope_fraction(v) == 0.0f);
+    CHECK(!player_view_scope_settled(v)); // the promoter mirrors the OFF target
+    CHECK(!player_view_scope_ease_active(v));
+}
+
+// The tri-state reset, and the legacy four-field reset the two external sites
+// still write: the promoted byte never outlives its target, so a stale
+// `scope_settled` reads false and the next tick clears it.
+void test_scope_reset_and_stale_settled_byte() {
+    PlayerViewState v;
+    const float eye[3] = {0, 0, 0};
+    CHECK(player_view_set_engaged(v, true, false));
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
+    CHECK(player_view_scope_settled(v));
+    player_view_scope_reset(v);
+    CHECK(!v.scope_engaged && !v.scope_settled && v.scope_hipfire);
+    CHECK(v.scope_step == 0 && v.ease_steps == kScopeEaseSteps && v.scope_ease_remaining == 0);
+    CHECK(!player_view_scope_ease_active(v));
+
+    CHECK(player_view_set_engaged(v, true, false));
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
+    CHECK(v.scope_settled);
+    v.scope_engaged = false; // the legacy reset tuple (local_player / player_weapon)
+    v.scope_step = 0;
+    v.ease_steps = kScopeEaseSteps;
+    v.scope_hipfire = true;
+    CHECK(!player_view_scope_settled(v));
+    CHECK(!player_view_scope_ease_active(v));
+    CHECK(!player_view_move_input(v, true, 1)); // no phantom unscope on a stale byte
+    player_view_tick(v, eye);
+    CHECK(!v.scope_settled);
 }
 
 // The review's fps case: the SAME simulated time must produce the SAME state no
@@ -52,12 +89,12 @@ void test_equal_ticks_equal_state_regardless_of_frame_grouping() {
     const float eye[3] = {100.0f, -40.0f, 12.0f};
 
     PlayerViewState per_frame;       // "60 fps": one tick per render frame
-    per_frame.scope_engaged = true;
+    CHECK(player_view_set_engaged(per_frame, true, false));
     per_frame.debug_third_person_on_foot = true;  // on-foot 3P = the debug override
     for (int i = 0; i < 24; ++i) player_view_tick(per_frame, eye);
 
     PlayerViewState bursty;          // "uneven fps": frames of 4/0/3/0/1... ticks
-    bursty.scope_engaged = true;
+    CHECK(player_view_set_engaged(bursty, true, false));
     bursty.debug_third_person_on_foot = true;
     const int frames[] = {4, 0, 3, 0, 1, 7, 0, 0, 2, 5, 0, 2};
     int total = 0;
@@ -372,7 +409,7 @@ void test_view_bias_blend() {
     float out[3];
     player_view_bias_units(v, pos, tpos, out);
     CHECK(out[0] == pos[0] && out[1] == pos[1] && out[2] == pos[2]);
-    v.scope_engaged = true;
+    CHECK(player_view_set_engaged(v, true, false));
     for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
     player_view_bias_units(v, pos, tpos, out);
     CHECK(out[0] == tpos[0] && out[1] == tpos[1] && out[2] == tpos[2]);
@@ -454,8 +491,9 @@ void test_toggle_latch_refusal_and_inset() {
 
 void test_unscope_on_move_and_up_refusal() {
     // The movement-held latch legs [orig: Player_PackInputStateToEntity @ 0x4df450]:
-    // g_movementKeyHeld blocks scope-UP on Scoped weapons (@ 0x4df29c) and, while SETTLED
-    // at scope on a Scoped (flags 1) weapon, forces the toggle (@ 0x4df4c9..0x4df4ec).
+    // g_movementKeyHeld blocks scope-UP on Scoped weapons (@ 0x4df29c) and, while
+    // PROMOTED at scope on a Scoped (flags 1) weapon, forces the toggle
+    // (@ 0x4df4c9..0x4df4ec).
     const int32_t kScoped = 1;         // weapon.def flags: Scoped
     const int32_t kSighted = 2;        // Sighted (no auto-unscope leg of its own)
     PlayerViewState v;
@@ -471,17 +509,19 @@ void test_unscope_on_move_and_up_refusal() {
     CHECK(!v.move_held);
     CHECK(!player_view_scope_up_blocked(v, kScoped));
 
-    // Raise and settle the scope; mid-ease movement does NOT fire the settled leg
-    // (the mid-ease reversal is the witnessed-deferred tri-state follow-up).
+    // Raise and settle the scope; a Sighted def's raise ignores movement (no
+    // entitySlotPtr leg without Flags & 1 @0x4df52c).
     CHECK(player_view_set_engaged(v, true, false));
     player_view_tick(v, eye);
     CHECK(player_view_scope_ease_active(v));
-    CHECK(!player_view_move_input(v, true, kScoped));
-    CHECK(!player_view_move_input(v, false, kScoped));
+    CHECK(!player_view_move_input(v, true, kSighted));
+    CHECK(player_view_scope_ease_active(v) && !v.scope_hipfire);
+    CHECK(!player_view_move_input(v, false, kSighted));
     for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
     CHECK(!player_view_scope_ease_active(v));
+    CHECK(player_view_scope_settled(v));
 
-    // Settled + movement: the auto-unscope fires, Scoped weapons only
+    // Promoted + movement: the auto-unscope fires, Scoped weapons only
     // [orig: g_weaponScopeActive && Def->Flags & 1 @ 0x4df4c9..0x4df4ea].
     CHECK(!player_view_move_input(v, true, kSighted));
     CHECK(player_view_move_input(v, true, kScoped));
@@ -490,9 +530,108 @@ void test_unscope_on_move_and_up_refusal() {
     CHECK(player_view_set_engaged(v, false, false));
     CHECK(v.ease_steps == kScopeEaseSteps);
     CHECK(v.scope_hipfire);
+    CHECK(!player_view_scope_settled(v));
 }
 
-bool near_eq(float a, float b, float eps = 0.0005f) {
+bool near_eq(float a, float b, float eps = 0.0005f);
+
+// The three interp legs of the movement pack on a Scoped def
+// [orig: Player_PackInputStateToEntity @0x4df500..0x4df63b].
+void test_move_reversal_and_auto_re_raise() {
+    const int32_t kScoped = 1;
+    const float eye[3] = {0, 0, 0};
+
+    // (a) a movement key during the raise: the interp re-targets the hip FROM
+    // ITS OWN POSE over a fresh 15 steps, the engaged target stays latched,
+    // and the promoter then promotes "scoped" at the hip
+    // [orig: @0x4df548..0x4df56c; CNetPlayerInterp_Setup @0x4de006..0x4de01a].
+    PlayerViewState v;
+    CHECK(player_view_set_engaged(v, true, false));
+    for (int i = 0; i < 5; ++i) player_view_tick(v, eye);
+    CHECK(v.scope_step == 5);
+    CHECK(!player_view_move_input(v, true, kScoped)); // no toggle: not promoted
+    CHECK(v.scope_engaged && !player_view_scope_settled(v));
+    CHECK(v.scope_hipfire && player_view_scope_ease_active(v));
+    CHECK(v.ease_steps == kScopeEaseSteps && v.scope_ease_remaining == kScopeEaseSteps);
+    CHECK(near_eq(player_view_scope_fraction(v), 5.0f / 15.0f));
+    // A further move frame changes nothing (hipfire already set).
+    CHECK(!player_view_move_input(v, true, kScoped));
+    CHECK(v.scope_ease_remaining == kScopeEaseSteps);
+    for (int i = 1; i <= kScopeEaseSteps; ++i) {
+        player_view_tick(v, eye);
+        CHECK(near_eq(player_view_scope_fraction(v),
+                      (5.0f / 15.0f) * static_cast<float>(kScopeEaseSteps - i) / 15.0f));
+    }
+    CHECK(player_view_scope_fraction(v) == 0.0f);
+    CHECK(!player_view_scope_ease_active(v));
+    CHECK(v.scope_engaged && player_view_scope_settled(v)); // promoted at the hip
+    // Still moving: the step-1 toggle now fires; the caller's disengage takes the
+    // 1-step hipfire-return leg (sourced at tpos, as retail's idle Setup does).
+    CHECK(player_view_move_input(v, true, kScoped));
+    CHECK(player_view_set_engaged(v, false, false));
+    CHECK(v.ease_steps == kScopeEaseStepsHipfire && v.scope_step == 1);
+    CHECK(!v.scope_engaged && !player_view_scope_settled(v));
+    player_view_tick(v, eye);
+    CHECK(player_view_scope_fraction(v) == 0.0f && !player_view_scope_ease_active(v));
+
+    // (c) the release re-raise: promoted at the hip with hipfire set, the key
+    // up drops the promoted byte, keeps the target and starts the 15-step
+    // hip -> tpos ease with hipfire cleared [orig: @0x4df607..0x4df63b].
+    PlayerViewState r;
+    CHECK(player_view_set_engaged(r, true, false));
+    player_view_tick(r, eye);
+    CHECK(!player_view_move_input(r, true, kScoped)); // (a)
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(r, eye);
+    CHECK(player_view_scope_settled(r) && r.scope_hipfire);
+    CHECK(!player_view_move_input(r, false, kScoped)); // (c)
+    CHECK(r.scope_engaged && !player_view_scope_settled(r) && !r.scope_hipfire);
+    CHECK(player_view_scope_ease_active(r) && r.ease_steps == kScopeEaseSteps);
+    CHECK(player_view_scope_fraction(r) == 0.0f);
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(r, eye);
+    CHECK(player_view_scope_fraction(r) == 1.0f);
+    CHECK(player_view_scope_settled(r));
+    // Every toggle is refused while (c) runs, like any ease [orig: @0x4df177].
+    PlayerViewState mid = r;
+    CHECK(!player_view_move_input(mid, false, kScoped)); // idle promoted at tpos: nothing
+    CHECK(!player_view_scope_request_pending(mid, true)); // the reached target: a no-op
+    CHECK(player_view_set_engaged(mid, true, false));
+
+    // The pinned defs (ForceScoped 0x20000000 / Emplaced 0x80): (a) still
+    // reverses (it precedes the flags re-read @0x4df57c) but LABEL_33's own
+    // term refuses the re-raise, so the sight parks promoted at the hip
+    // [orig: @0x4df58e -> @0x4df607 with the 0x20000080 term].
+    const int32_t kEmplacedScoped = kScoped | 0x80;
+    PlayerViewState p;
+    CHECK(player_view_set_engaged(p, true, false));
+    player_view_tick(p, eye);
+    CHECK(!player_view_move_input(p, true, kEmplacedScoped));
+    CHECK(p.scope_hipfire && player_view_scope_ease_active(p));
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(p, eye);
+    CHECK(player_view_scope_settled(p) && player_view_scope_fraction(p) == 0.0f);
+    CHECK(!player_view_move_input(p, false, kEmplacedScoped));
+    CHECK(p.scope_hipfire && !player_view_scope_ease_active(p) && player_view_scope_settled(p));
+
+    // The reversed-on-the-first-frame quirk: a move frame before the first
+    // tick re-targets a zero delta, which deactivates the interp outright
+    // without a promotion [orig: CNetPlayerInterp_Setup @0x4de0fe..0x4de11b;
+    // the promoter only runs behind a step @0x4de4c7]. The target stays
+    // latched, unpromoted, and the next toggle press RE-RAISES it (the
+    // promoted-byte branch @0x4df17f).
+    PlayerViewState q;
+    CHECK(player_view_set_engaged(q, true, false));
+    CHECK(!player_view_move_input(q, true, kScoped));
+    CHECK(q.scope_engaged && !player_view_scope_settled(q) && q.scope_hipfire);
+    CHECK(!player_view_scope_ease_active(q));
+    player_view_tick(q, eye);
+    CHECK(!player_view_scope_settled(q)); // no promotion without a step
+    CHECK(!player_view_move_input(q, false, kScoped)); // (c) needs the promoted byte
+    CHECK(!player_view_scope_ease_active(q));
+    CHECK(player_view_scope_request_pending(q, true));
+    CHECK(player_view_set_engaged(q, true, false));
+    CHECK(player_view_scope_ease_active(q) && !q.scope_hipfire);
+}
+
+bool near_eq(float a, float b, float eps) {
     return std::fabs(a - b) <= eps;
 }
 
@@ -1051,6 +1190,8 @@ int main() {
     test_input_dispatch_gates();
     test_toggle_latch_refusal_and_inset();
     test_unscope_on_move_and_up_refusal();
+    test_move_reversal_and_auto_re_raise();
+    test_scope_reset_and_stale_settled_byte();
     test_tp_effective_distance_march();
     test_compose_camera_first_person();
     test_compose_camera_terrain_floor();

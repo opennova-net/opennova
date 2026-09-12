@@ -614,6 +614,11 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
         world.item_emitters.bind_scene(std::move(effects), true);
 	}
 	// Mission WAC scripts [orig: WacScript_InitAndLoad]; absent files skip.
+	// The load clears V0..V255 only: the declared half of the mission bank
+	// (carried into a rebuilt kernel by the embedder, ScriptVarStore::
+	// carry_declared_from) and the globals are not touched here.
+	// [orig: WacScript_InitAndLoad memset(dword_C6B240, 0, 0x400) @0x4f95ee]
+	world.script.vars.clear_numbered_mission_vars();
 	std::string wac_blocked_error; // strict mode's fatal diagnostic, if any
 	if (has_files && options.wac) {
 		step("wac");

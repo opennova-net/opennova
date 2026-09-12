@@ -27,6 +27,9 @@ struct FpViewmodelSpec {
 	std::string gun;
 	// The selected character's arms graphic; empty = no arms submit.
 	std::string arms;
+	// The clip set. Empty for a RESOLVED def with no animadm (retail loads no
+	// anim map and draws the rig at the root matrix); the bring-up adm rides
+	// only the no-def path.
 	std::string adm;
 	// False when the mount is emplaced (Flags 0x80) or no character arms
 	// resolved — retail submits no arms in either case.
@@ -102,7 +105,9 @@ inline int viewmodel_team_byte(int team) {
 }
 
 // The no-definition BRING-UP fallback (ours, not retail): before any def
-// resolves, the AK set keeps the FP pipeline exercisable.
+// resolves, the AK set keeps the FP pipeline exercisable. A resolved def never
+// rides it: its empty animadm is no clip set, as retail's empty-name
+// AnimMap_LoadAdmFile return leaves no anim map.
 inline constexpr const char *kBringupFallbackModel = "ak47_1st";
 // The matching weapon.def entry name the shell resolves until first equip.
 inline constexpr const char *kBringupFallbackWeapon = "WPN_AK47AUTO";

@@ -388,7 +388,9 @@ std::vector<uint8_t> JoinerConnection::start() {
 	mission_metadata_fixed_byte_mask_ = 0;
 	last_error_.clear();
 	host_disconnect_reason_.clear();
-	in_match_session_established_ = false;
+	last_disconnect_event_ = DisconnectEvent{};
+	disconnect_event_set_ = false;
+	conn_.timeouts = SessionTimeoutConfig{}; // the template; the accepted 0x82 overlays it
 	silence_timeout_latched_ = false;
 	phase_ = Phase::Hello;
 	// Arm the receive clock at connect: the reap window is measured from the moment
@@ -542,21 +544,42 @@ JoinerConnection::FrameMessagesResult JoinerConnection::frame_messages_detailed(
 		packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
 		return true;
 	};
-	// Plan/admit the semantic prefix before framing. An encoding failure must
-	// leave the entire admitted suffix with its caller, including later nodes.
+	// Plan/admit the nodes before framing, per physical node in queue order like
+	// NapiNPMessage_Create (a SplitAtLength piece goes through Create too). An
+	// encoding failure must leave the entire admitted suffix with its caller,
+	// including later nodes. The FIRST non-exempt node that does not fit is the
+	// pool overflow: the node is dropped, {2, 4, count, max, "", 0, "NP.C:MSGCRE"}
+	// latches (first cause wins) and RequestDisconnect on a client-side (state 5)
+	// connection tears it down INLINE — SetState(6) sends the 0x46 burst carrying
+	// that record and the session is terminal, so nothing queued this boundary
+	// (admitted or not) is built.
+	// [orig: NapiNPMessage_Create @0x627FC0 — exemption @0x628031, `msg_out_max >= 0`
+	//  @0x628048, count @0x628062..0x62806b, the record @0x628099..0x6280eb,
+	//  latch @0x6280f9..0x62810a, RequestDisconnect @0x628112 -> @0x61e0fa
+	//  SetState(6) -> TeardownActiveConnection @0x62549e..0x6254d3;
+	//  SplitAtLength @0x62838f]
 	std::vector<std::vector<ProtocolMessage>> planned;
 	std::size_t planned_packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
+	const std::size_t occupied = conn_.seq.retained_outbound_message_count +
+			conn_.seq.transient_outbound_message_count;
+	std::size_t admitted_nodes = 0;
 	for (const ProtocolMessage &message : messages) {
 		auto pieces = split_protocol_message_to_fill(message, max_packet_bytes, planned_packet_bytes);
-		const std::size_t charged = static_cast<std::size_t>(std::count_if(pieces.begin(), pieces.end(),
-				[](const ProtocolMessage &piece) { return !piece.capacity_exempt; }));
-		if (charged > available) {
-			// A split cannot strand a FIRST fragment. Keep this semantic unit
-			// for the next boundary if ACKs must first free its extra nodes.
-			if (pieces.size() > 1) { ++result.admitted_count; result.frame_failed = true; }
-			break;
+		for (const ProtocolMessage &piece : pieces) {
+			if (piece.capacity_exempt) continue;
+			if (available == 0) {
+				latch_disconnect_event(make_disconnect_event(2, 4,
+						static_cast<uint32_t>(occupied + admitted_nodes + 1),
+						static_cast<uint32_t>(conn_.seq.outbound_message_limit),
+						"", 0, "NP.C:MSGCRE"), 2);
+				result.datagrams = disconnect();
+				result.framed_count = 0;
+				fail("NP.C:MSGCRE");
+				return result;
+			}
+			--available;
+			++admitted_nodes;
 		}
-		available -= charged;
 		++result.admitted_count;
 		planned.push_back(std::move(pieces));
 	}
@@ -665,13 +688,11 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 	if (!nw_decode_inbound(raw, len, opcode, body)) {
 		return out; // bad envelope — drop quietly, don't kill the session
 	}
-	// Receive activity for the connection reap clock: retail's transport stamps it
-	// for any datagram that passes the envelope check, and reaps the peer after
-	// cs_dir0.timeout_ms of silence. [orig: CNapiNetwork_Init @0x4ca4a0 stores
-	// timeout_ms = 120000 @0x4caa81/@0x4cab54 -> CNapiNetwork_OnDisconnectedFromServer
-	// @0x4c63d0]
-	last_receive_ms_ = monotonic_milliseconds_();
-	receive_clock_armed_ = true;
+	// The reap clock is NOT a per-datagram stamp: only an in-order admitted 0x83 (inside
+	// on_server_session) refreshes it, exactly retail's ParseMessages-only write; a 0x84
+	// resend list, a stale/other-key 0x83 and every ignored opcode leave it alone.
+	// [orig: HandleSessionPacket @0x626A00 in-order leg -> ParseMessages @0x625d54;
+	//  NapiNP_HandleResendList @0x62395f discards its GetTickCount; 0x81/0x82 stamp nothing]
 	switch (opcode) {
 	case SESSION_OPCODE_SERVER_HELLO:
 		if (phase_ == Phase::Hello) on_server_hello(body, out);
@@ -685,6 +706,13 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 	case SESSION_OPCODE_SERVER_RESEND_LIST:
 		if (phase_ == Phase::Driving || phase_ == Phase::InMatch)
 			on_server_resend_list(body, out);
+		break;
+	case SESSION_OPCODE_SERVER_GOODBYE:
+		// Dispatched only for an ACTIVE connection (retail: `is_response && !conn_flag0` drops
+		// it; our Driving/InMatch phases are the accepted-0x82 state 5).
+		// [orig: g_np_opcode_handlers @0x849D90 entry 12 -> Nwu_HandleServerGoodbye @0x624310
+		//  -> Nwu_HandleDisconnect(type 2) @0x623CE0, the active gate @0x623df2]
+		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_goodbye(body, out);
 		break;
 	default:
 		break; // server-only / unexpected opcodes are non-fatal
@@ -770,7 +798,26 @@ void JoinerConnection::on_server_auth(
 	                              // client stores it on its own NapiNPConnection (+0x18,
 	                              // NapiNP_GetLocalConnectionId @0x4c6d40) and echoes it in the 0x48
 	                              // client-ack so the host stamps it into our 0x0C ownerConnectionId]
+	// The host's CS block overlays this connection's cs_dir0 template: CLIENT-direction
+	// (byte 1) entries land in cs_dir0, the block PumpStateMachine's reap and
+	// NapiNPMessage_Create's pool bound read, so a host `_NSTMOUT.TXT` override (or a
+	// NEVER -1) reaches us as CS field 0 / field 11. Fields the 0x82 omits keep the template.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 — the template seed @0x6299ae, the
+	//  CS overlay @0x629b4c..0x629b75, the copy onto the connection @0x629d72/@0x629d89]
+	for (const CsField &field : sa.client_cs) {
+		if (field.field_index == 0)
+			conn_.timeouts.timeout_ms = static_cast<int32_t>(field.value);
+		else if (field.field_index == 11)
+			conn_.timeouts.msg_out_max = static_cast<int32_t>(field.value);
+	}
+	conn_.seq.outbound_message_limit = outbound_message_limit_for(conn_.timeouts.msg_out_max);
 	phase_ = Phase::Driving;
+	// State-5 entry initializes the reap clock: the 120 s window runs from the accepted
+	// 0x82 onward, through every join stage, with no gameplay gate.
+	// [orig: @0x629eac conn_state = 5 -> CNapiNPConnection_OnStateChange @0x626060, the
+	//  conn+0x5E8 store @0x62612f; PumpStateMachine case 5 @0x6295a2..0x62961c]
+	last_receive_ms_ = monotonic_milliseconds_();
+	receive_clock_armed_ = true;
 	handshake_retry_datagram_.clear();
 	handshake_retry_clock_armed_ = false;
 	session_ack_pending_ = false;
@@ -961,6 +1008,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	}
 	if (admission.admitted) {
 		acknowledge_session_packets(conn_.seq, admission.max_ack_count);
+		// The reap clock: stamped by ParseMessages, which only an in-order packet (or the
+		// drain that closes a gap) reaches; a zero-message keepalive counts. Duplicates,
+		// futures and stale receiver keys return earlier and stamp nothing.
+		// [orig: HandleSessionPacket @0x626beb..0x626bfc -> ParseMessages @0x625d54;
+		//  dup @0x626c03 / future @0x626c0c..0x626c3a / seq 0 @0x626bcc]
+		last_receive_ms_ = monotonic_milliseconds_();
+		receive_clock_armed_ = true;
 	}
 	bool received_settings = false;
 	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
@@ -1066,7 +1120,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		if (has_self_handle_) {
 			const bool entered_in_match = phase_ != Phase::InMatch;
 			phase_ = Phase::InMatch;
-			in_match_session_established_ = true;
 			// Multiple release conditions can fold into one datagram. Preserve an
 			// earlier name-match/release edge instead of overwriting it with a later
 			// idempotent UI-completion call.
@@ -1139,6 +1192,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				// metadata discovered earlier in the same physical packet must not
 				// precede or survive the terminal goodbye burst.
 				out = PollResult{};
+				// The received record is latched with the LOCAL role (2) before the
+				// burst so the 0x46 echoes the host's punt field for field.
+				// [orig: HandleDescriptionPacket builds the record with the local role
+				//  @0x621cca.., latches if !valid @0x621d3c..0x621d4d]
+				latch_disconnect_event(event, 2);
 				std::vector<std::vector<uint8_t>> goodbye = disconnect();
 				out.outbound.insert(out.outbound.end(),
 						std::make_move_iterator(goodbye.begin()),
@@ -1377,7 +1435,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					// spawn-zone pick remains pending; preserve that UI stage here.
 					if (deployment_reply_seen_ && phase_ != Phase::InMatch) {
 						phase_ = Phase::InMatch;
-						in_match_session_established_ = true;
 						out.reached_in_match = true;
 					}
 				}
@@ -2315,7 +2372,6 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	last_receive_ms_ = monotonic_milliseconds_();
 	receive_clock_armed_ = true;
 	phase_ = Phase::InMatch;
-	in_match_session_established_ = true;
 	silence_timeout_latched_ = false;
 }
 
@@ -2323,142 +2379,6 @@ uint64_t JoinerConnection::milliseconds_since_last_receive() const {
 	if (!receive_clock_armed_) return 0;
 	const uint64_t now = monotonic_milliseconds_();
 	return now >= last_receive_ms_ ? now - last_receive_ms_ : 0;
-}
-
-// The host closed the session on its own terms (docs/net/novaworld-net-re.md §5.64 — the punt
-// families and the captured bytes). Retail's receiver stores the event only when its
-// slot is still empty, so the FIRST record wins and a repeat cannot restate the cause, then it
-// leaves the active state. The receive path queues the ordinary four-packet keyed goodbye burst
-// before Phase::Error becomes terminal; pump() then stops producing keepalives, the deployment
-// sub-state clears so a parked deploy screen stops taking clicks, and the owner's next session-loss
-// read carries the decoded reason.
-// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0 — the store gate @0x621d3c, the
-//  pending-disconnect transition @0x621d53..0x621d6b ->
-//  CNapiNPConnection_TeardownActiveConnection @0x6253c0]
-void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
-	if (!host_disconnect_reason_.empty()) return;
-	last_disconnect_event_ = event;
-	disconnect_event_set_ = true;
-	io::logf(io::LogLevel::kWarn,
-			"np joiner: host description punt: dc=%u dpc=%u ddstr='%s' dstr='%s' (stage: %s)",
-			static_cast<unsigned>(event.dc), static_cast<unsigned>(event.dpc),
-			event.ddstr.c_str(), event.dstr.c_str(), post_auth_stage_name());
-	// The client's exit-reason switch keys on DPC and only runs for the DC == 2 family; both
-	// therefore belong in the reason, alongside the sender's own tag and text (for the
-	// witnessed deploy-screen idle punt: DPC 33, DC 2, "LogPuntEvent", "t35").
-	// [orig: the DC gate @0x4c6563 and the DPC switch @0x4c6569]
-	// The game-layer join gate answers its spectator failures through this
-	// same record with empty strings — DPC 14 disabled / 15 full / 16 bad
-	// password. [orig: Server_ValidatePlayerJoinRequest @0x512100 via
-	// CNapiNPConnection_SendChatMessage @0x4c7ef0]
-	if (event.dc == 2) {
-		switch (event.dpc) {
-		case 14:
-			host_disconnect_reason_ = "Spectators are disabled on this server";
-			fail(host_disconnect_reason_);
-			return;
-		case 15:
-			host_disconnect_reason_ = "The spectator slots are full";
-			fail(host_disconnect_reason_);
-			return;
-		case 16:
-			host_disconnect_reason_ = "The spectator password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		default:
-			break;
-		}
-	}
-	host_disconnect_reason_ = "the host closed the session (reason " +
-			std::to_string(event.dpc) + ", class " + std::to_string(event.dc) + ")";
-	if (!event.ddstr.empty()) host_disconnect_reason_ += ": " + event.ddstr;
-	if (!event.dstr.empty()) host_disconnect_reason_ += " " + event.dstr;
-	fail(host_disconnect_reason_);
-}
-
-// [orig: the cs_dir0/cs_dir1 timeout_ms = 120000 reap installed by CNapiNetwork_Init
-//  @0x4ca4a0 -> CNapiNetwork_OnDisconnectedFromServer @0x4c63d0, which clears the
-//  session strings and maps the disconnect code onto g_mission_exit_reason]
-bool JoinerConnection::session_lost() const {
-	// An explicit close is terminal at any stage; the silence reap is the
-	// established-session fallback for a host that vanishes without sending one.
-	if (!host_disconnect_reason_.empty() || silence_timeout_latched_) return true;
-	if (!in_match_session_established_ || !receive_clock_armed_ ||
-	    (phase_ != Phase::Driving && phase_ != Phase::InMatch)) {
-		return false;
-	}
-	return milliseconds_since_last_receive() > JO_GAME_SESSION_TIMEOUT_MS;
-}
-
-bool JoinerConnection::poll_session_loss() {
-	if (!session_lost()) return false;
-	if (phase_ != Phase::Error) {
-		const std::string reason = session_loss_reason();
-		silence_timeout_latched_ = true;
-		fail(reason);
-	}
-	return true;
-}
-
-std::string JoinerConnection::session_loss_reason() const {
-	if (!host_disconnect_reason_.empty()) return host_disconnect_reason_;
-	if (!session_lost()) return {};
-	// Retail maps THIRTEEN distinct disconnect codes onto distinct exit reasons
-	// (@0x4c63d0); this is the one cause with no code on the wire at all — silence
-	// past the reap window (D-NET-177).
-	return "lost connection to the host (no traffic for " +
-	       std::to_string(JO_GAME_SESSION_TIMEOUT_MS / 1000u) + " seconds)";
-}
-
-const char *JoinerConnection::post_auth_stage_name() const {
-	switch (post_auth_stage_) {
-	case PostAuthStage::Inactive: return "inactive";
-	case PostAuthStage::AwaitServerSettings: return "awaiting the host's initial settings";
-	case PostAuthStage::AwaitJoinAck: return "awaiting the JOIN acknowledgement";
-	case PostAuthStage::AwaitPaddingProbe: return "awaiting the join probe";
-	case PostAuthStage::AwaitGameStart: return "awaiting the game-start flag";
-	case PostAuthStage::AwaitServerInfo: return "awaiting the server-info transfer";
-	case PostAuthStage::AwaitMissionData: return "awaiting the mission-data transfer";
-	case PostAuthStage::AwaitPlayerList: return "awaiting the player list";
-	case PostAuthStage::AwaitInitialSyncTail: return "awaiting the pre-world sync tail";
-	case PostAuthStage::AwaitWorldStreamEnd: return "awaiting the world stream";
-	case PostAuthStage::AwaitDeployment: return "awaiting the loadout grants";
-	case PostAuthStage::AwaitDeployPick: return "awaiting the player's deployment pick";
-	case PostAuthStage::AwaitDeployRelease: return "awaiting the deployment release";
-	case PostAuthStage::Complete: return "complete";
-	}
-	return "unknown";
-}
-
-// The retail teardown of an active (or still-connecting) client connection sends a burst of
-// disconnect packets so a lossy LAN still hears the leave, then clears the key material. The
-// burst size is cs_dir0.recv_max_per_tick clamped to [0, 32] — 4 for the JOINTOPERATIONS
-// template. Without this leg the host's only teardown trigger never fires from our client and
-// every leave leaks an admitted peer plus its spawned player.
-// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 (burst loop @0x6253ef..0x625424);
-//  CNapiNPConnection_SendDisconnectPacket @0x61f2a0; CNapiNetwork_Init @0x4ca4a0 stores
-//  recv_max_per_tick = 4 @0x4cab60]
-std::vector<std::vector<uint8_t>> JoinerConnection::disconnect() {
-	if (goodbye_sent_ || conn_.server_sk == 0) return {};
-	goodbye_sent_ = true;
-	constexpr int kDisconnectSendCount = 4; // JO cs_dir0.recv_max_per_tick
-	std::vector<uint8_t> datagram = nw_encode_outbound(
-			SESSION_OPCODE_CLIENT_GOODBYE, client_goodbye_to_bytes(conn_.server_sk));
-	return std::vector<std::vector<uint8_t>>(
-			static_cast<std::size_t>(kDisconnectSendCount), std::move(datagram));
-}
-
-void JoinerConnection::fail(std::string reason) {
-	io::logf(io::LogLevel::kWarn, "np joiner: session failed (stage: %s): %s",
-			post_auth_stage_name(), reason.c_str());
-	last_error_ = std::move(reason);
-	handshake_retry_datagram_.clear();
-	handshake_retry_clock_armed_ = false;
-	post_auth_stage_ = PostAuthStage::Inactive;
-	session_last_send_ms_ = 0;
-	session_send_clock_armed_ = false;
-	session_ack_pending_ = false;
-	phase_ = Phase::Error;
 }
 
 } // namespace opennova::inmatch

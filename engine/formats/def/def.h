@@ -452,6 +452,22 @@ typedef struct DefWeaponDef {
         @ 0x544e4e, atof @ 0x544e64, `fmul dbl_7D0958` @ 0x544e69, ftol @ 0x544e72,
         the store @ 0x544e80] */
     int scope_paralax_distance_fp16; /* +0x8C */
+    /* 'scope_max_mag <max> [<initial>]' second value and 'scope_min_mag <min>': the
+       scope ZOOM range the +/-2 zoom step walks. Both atol'd ints like the first
+       value (+0x90, kept in the float `scope_max_mag` above). +0x94 is the slot's
+       INITIAL zoom: WeaponSlot_InitFromDef seeds MountSlot+0xC from it and clamps
+       it into [floor, max] (floor = scope_min_mag, or the max under the class-6
+       sniper lock), so an absent second value (0) starts every scope at its floor.
+       +0x98 is the zoom floor, record default 2. Shipped JOX rows: WPN_EMP50BD
+       `8 8` (the one row that also authors `scope_min_mag 2`), WPN_M1TURRET /
+       WPN_T80TURRET `10 2`; every other row carries the max alone.
+       [orig: WeaponDefs_ParseLineCallback 'scope_max_mag' @ 0x544f08 -> +0x90
+        @ 0x544f29 / +0x94 @ 0x544f44, 'scope_min_mag' @ 0x544f4f -> +0x98
+        @ 0x544f7a; AdmDef_InitEntryDefaults def[38] = 2 @ 0x53ff73; consumers
+        WeaponSlot_InitFromDef @ 0x53ef2d..0x53ef44, Player_AdjustWeaponElevation
+        @ 0x4dbe29..0x4dbe57, Player_MountWeaponSlot @ 0x4dfad3..0x4dfb16] */
+    int scope_max_mag_arg2;    /* +0x94, the slot's initial zoom; 0 = absent */
+    int scope_min_mag;         /* +0x98, the zoom floor; default 2 */
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {
@@ -521,7 +537,7 @@ typedef struct DefItemEmplacementAttachment {
 } DefItemEmplacementAttachment;
 
 /* DefItemDef.attrib bits — items.def `attrib:` tokens (ItemDefAttrib, +0x54).
- * NOT witnessed (stay raw at use sites): 0x8000, 0x80000000.
+ * NOT witnessed (stays raw at use sites): 0x80000000.
  * [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md:147-155;
  * def_scan.cpp's item_attrib_table initializes from these] */
 inline constexpr uint32_t DEF_ITEM_ATTRIB_MOVECB = 0x00000001u;
@@ -539,6 +555,12 @@ inline constexpr uint32_t DEF_ITEM_ATTRIB_TIRE = 0x00000800u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_FASTROPE = 0x00001000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_TAKEABLE = 0x00002000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_EASY = 0x00004000u;
+/* items.def token "S&D" (case-insensitive whole token; the tokenizer keeps the '&'):
+   the S&D/A&D objective target, counted per team by the round census and immune to
+   same-team blast damage. The IDB types the token string as off_7C84E8; its bytes
+   are 53 26 44 00. [orig: ItemDef_ParseProperty @0x4a084e..0x4a086d, token @0x7C84E8;
+   census reset_round_counters @0x516d3d/@0x516d89] */
+inline constexpr uint32_t DEF_ITEM_ATTRIB_SD = 0x00008000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_4TEAM = 0x00010000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_CHANGETEAM = 0x00020000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB_SPAWNPOINT = 0x00040000u;
@@ -859,6 +881,11 @@ typedef struct DefItemDef {
     int32_t door_max_angle_bam;
     char door_open_sound[25];
     char door_close_sound[25];
+    /* items.def attrib token `Parent` -> ItemDef+0x548 (a byte, not an attrib bit):
+       the gunner-attachment gate the vehicle class inits test before
+       Entity_SetupGunnerAttachments (VehicleTraits::attrib_parent). Appended
+       (layout stability). [orig: ItemDef_ParseProperty @0x4a0cd6..0x4a0ce2] */
+    unsigned char attrib_parent;
 } DefItemDef;
 
 typedef struct DefItemsFile {

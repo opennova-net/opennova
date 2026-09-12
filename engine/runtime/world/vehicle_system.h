@@ -118,9 +118,11 @@ public:
     // gun's LOS endpoint is its carrier (def attrib 0x20 ->
     // groundEntity) with the reject legs in place. Regressions: vehicle_mount_test.
     bool find_nearest_free_seat(const Entity &player, VehicleSeatSelection &out, bool armory_mode, const VehicleOccupancySource *source = nullptr);
-    // The toggle's seat candidate, in the witnessed search order: an unmounted
-    // player standing on a seat-bearing ground target takes that carrier's best
-    // seat first; otherwise the nearest-free-seat scan above (seats mode).
+    // The toggle's seat candidate, the witnessed two arms: an unmounted player
+    // carrying the queued Co-op mount latch (Flags 0x200) reports the best free
+    // seat of its groundEntity carrier or nothing; otherwise the
+    // nearest-free-seat scan above (seats mode). [orig: Entity_TryEnterNearestVehicle
+    // @0x4368CF..0x43691A]
     bool find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source = nullptr);
     // The floating seat/armory label list for the local player, a structural translation of
     // the selection half of [orig: draw_vehicle_seat_and_armory_labels @0x5a3290]:
@@ -139,11 +141,11 @@ public:
     void collect_attach_labels(const Entity &player, bool armory_mode, bool can_fire, std::vector<AttachLabel> &out, AttachLabelScanStats *stats = nullptr, const VehicleOccupancySource *source = nullptr);
     // The use-key mount toggle [orig: Entity_ToggleVehicleMount @0x436950 +
     // Entity_TryEnterNearestVehicle @0x4368c0]:
-    //  - unmounted, standing ON a seat-bearing carrier (our generic ground_target
-    //    stands in for the Flags 0x200 deck latch; this is unrelated to CL) -> best free seat
-    //    on the carrier
-    //    [orig: Entity_FindBestSeatSlot @0x4351f0];
-    //  - unmounted otherwise -> the nearest-seat scan;
+    //  - unmounted with the queued Co-op spawn-marker mount latch (Flags 0x200,
+    //    kEntityFlagQueuedMount; the org2 body update consumes it) -> the best
+    //    free seat of the groundEntity carrier, or nothing (no scan)
+    //    [orig: @0x4368cf -> Entity_FindBestSeatSlot @0x4351f0; @0x436903];
+    //  - unmounted otherwise (deck standers included) -> the nearest-seat scan;
     //  - mounted -> a seat in scan reach swaps [orig: @0x4369ac], else detach.
     // The weapon-busy gate (EquippedSlot currentAction @0x436958) and the WAC no-dismount
     // global (dword_C6EADC @0x43698b) are the caller's/session's concern (D-AI-11).
@@ -277,7 +279,15 @@ public:
     // the original zero-argument movement-sound call.
 	void stop_ground_sound(Entity &vehicle, int32_t water_clearance_q16 = 0);
 	void update_traction_sound(Entity &vehicle, const VehicleTraits &traits);
+	// The lights edge (slot 24) then the claimant start/stop edge — the ground
+	// tail's adjacent pair [orig: @0x46F8C3..0x46F99C; cveh @0x48D34E..0x48D429].
 	void update_engine_sound(Entity &vehicle, const VehicleTraits &traits);
+	// The claimant start/stop edge alone: slot 30 when the +0x170 claimant's eye
+	// sits above the water plane, the all-zero fold plus slot 31 (hull +0x18000)
+	// when the claimant leaves. The selector-zero boat runs it at its HEAD, inside
+	// the PlayerControl block before the authority split, with its lights edge
+	// at the tail [orig: Entity_ProcessAirVehiclePhysics @0x470055..0x4700EB].
+	void update_claimant_engine_sound(Entity &vehicle, const VehicleTraits &traits);
 	void play_contact_sound(Entity &vehicle, const VehicleTraits &traits, int slot);
 	void update_rotor_sound(Entity &vehicle, const VehicleTraits &traits);
 	void play_rotor_start_sound(Entity &vehicle, const VehicleTraits &traits);
@@ -289,12 +299,26 @@ public:
 	// (seeding the rate from the shared PRNG when a non-player-control item needs
 	// a roll — the seed path is the ONLY PRNG consumer here, and it draws exactly
 	// once per unoccupied tick for such an item). Ground advances wheel phase
-	// from speed; aircraft has no wheel-phase write. A WATERCRAFT runs no rotor machine at
-	// all — its mover Entity_UpdateWatercraftPhysics @0x48D480 calls neither
-	// @0x4928B0 nor @0x48FA70 — only the wheel phase.
+	// from speed; aircraft has no wheel-phase write. The FULL watercraft mover
+	// (physics != 0) runs no rotor machine at all — Entity_UpdateWatercraftPhysics
+	// @0x48D480 calls neither @0x4928B0 nor @0x48FA70 — only the wheel phase; the
+	// SELECTOR-ZERO boat mover @0x46FA00 runs the ground machine from its
+	// PlayerControl block @0x4700F5 (rotor_machine_tick alone: its wheel phase is
+	// the mover's own cmd-driven step, no +0x2B8 write sits in that block).
 	// `occupied` is the engine-running latch, Entity::primary_occupant (the +0x170
 	// occupantEntity read @0x4928E8); `player_control` is the item's attrib 0x40.
 	void part_anim_tick(Entity &veh, const VehicleTraits &traits);
+	// The rotor spin machine alone (the @0x4928B0 / @0x48FA70 call), without
+	// the wheel-phase step part_anim_tick adds.
+	void rotor_machine_tick(Entity &veh, const VehicleTraits &traits);
+	// Gunner attachments (vehicle_lifecycle.cpp): the class init's same-refNum
+	// pool-1 peer list + 'agun' userpoint assignment for an items.def `Parent`
+	// vehicle (VehicleTraits::attrib_parent), stored in the brain's +576/+580
+	// block, and the per-tick follow that the installed +0x1C4 callback runs
+	// after the saved motor. [orig: Entity_SetupGunnerAttachments @0x468100;
+	//  Entity_UpdateAttachedChildren @0x45D550]
+	void setup_gunner_attachments(Entity &vehicle);
+	void update_attached_children(Entity &vehicle);
 	// Shared mover-head health cadence [orig: cveh @0x48AFFD, cbik @0x4840DD,
 	// ctan @0x488BAD, cbot @0x48D561, CHel/cpln @0x4903F4].
 	void tick_health(Entity &veh, const VehicleTraits &traits);

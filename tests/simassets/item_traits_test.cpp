@@ -288,6 +288,7 @@ int main() {
     tank->bob = 219;
     tank->flip = 220;
     tank->scale_q16 = 0x18000;
+    tank->attrib_parent = 1; // the `Parent` byte (ItemDef+0x548)
     std::strcpy(tank->particlefxw3.effect, "fx_sml_wk");
     std::strcpy(tank->particlefxw3.userpoint, "FX00");
     std::strcpy(tank->particlefxw4.effect, "fx_sml_wk_f");
@@ -302,7 +303,7 @@ int main() {
     std::strcpy(rifle->sound_profile_female, "SP_TestFemale");
     rifle->attrib |= DEF_ITEM_ATTRIB_LEAVECORPSE;
     bunker->attrib |= DEF_ITEM_ATTRIB_CHANGETEAM | DEF_ITEM_ATTRIB_SPAWNPOINT |
-            DEF_ITEM_ATTRIB_NODIE | 0x8000u; // 0x8000 = the unwitnessed team-protect bit
+            DEF_ITEM_ATTRIB_NODIE | DEF_ITEM_ATTRIB_SD; // S&D = the objective target's team-protect
     bunker->attrib2 |= DEF_ITEM_ATTRIB2_STATICDEATH;
     bunker->unit_type = 5;
     bunker->kz = 6.5f;
@@ -501,6 +502,7 @@ int main() {
         CHECK(vt->family == VehicleFamily::Tank);
 		CHECK(vt->render_family == VehicleRenderFamily::Ground); // render cveh, move ctank
 		CHECK(vt->player_control);
+		CHECK(vt->attrib_parent); // the Parent byte feeds the gunner-attachment gate
 		CHECK(!vt->amphibian);
         CHECK(vt->sound_profile == "SP_Tank");
         CHECK(vt->sound_loops[0] == "LP_TANK");
@@ -515,6 +517,7 @@ int main() {
     if (apc_vt != nullptr) {
         CHECK(apc_vt->family == VehicleFamily::Ground);
         CHECK(apc_vt->amphibian); // catv arms the pad water-support forces
+        CHECK(!apc_vt->attrib_parent);
     }
     // CHel rows legitimately omit the ground physics selector and still land
     // (direct air mover); the case-folded fourcc accepts mixed-case CHelScout.

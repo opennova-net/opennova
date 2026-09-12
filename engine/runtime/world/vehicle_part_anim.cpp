@@ -49,17 +49,21 @@ void VehicleSystem::slew_turret(Entity &veh, int32_t step) {
 	}
 }
 
-void VehicleSystem::part_anim_tick(Entity &veh, const VehicleTraits &traits) {
+void VehicleSystem::rotor_machine_tick(Entity &veh, const VehicleTraits &traits) {
     World &world = world_;
 	Entity::VehicleMotorState &m = veh.veh;
-	// A WATERCRAFT runs neither machine: Entity_UpdateWatercraftPhysics
+	// The FULL watercraft mover runs neither machine: Entity_UpdateWatercraftPhysics
 	// @0x48D480..0x48EF74 has no call to @0x4928B0 or @0x48FA70 (the ground
-	// machine's callers are the infantry, air, light, mounted-infantry, tank
-	// and ground movers @0x46F99E/@0x4700F5/@0x4869EA/@0x4889F5/@0x48AE3D/
-	// @0x48D42B; the helo twin's only caller is @0x4905A6) — so a boat never
-	// draws the rotor roll from the shared stream; only its wheel phase
-	// advances @0x48E9F0..0x48E9F9.
-	const RotorMachine machine = traits.family == VehicleFamily::Watercraft
+	// machine's callers are the selector-zero ground and boat movers, the light,
+	// mounted-infantry, tank and ground movers @0x46F99E/@0x4700F5/@0x4869EA/
+	// @0x4889F5/@0x48AE3D/@0x48D42B; the helo twin's only caller is @0x4905A6)
+	// — so a physics-keyed boat never draws the rotor roll from the shared
+	// stream. The SELECTOR-ZERO boat mover @0x46FA00 does call the ground machine
+	// (inside its PlayerControl block @0x4700F5), selected like every other
+	// mover by the brain's profile type (d_lcac is `type GROUND`): the hovercraft
+	// fan is a HELO_TAILROTOR consumer on that machine.
+	const RotorMachine machine =
+			traits.family == VehicleFamily::Watercraft && traits.physics != 0
 			? RotorMachine::None
 			: machine_for(world, veh, traits);
 	if (machine != RotorMachine::None) {
@@ -84,7 +88,11 @@ void VehicleSystem::part_anim_tick(Entity &veh, const VehicleTraits &traits) {
 			update_rotor_sound(veh, traits);
 		}
 	}
+}
 
+void VehicleSystem::part_anim_tick(Entity &veh, const VehicleTraits &traits) {
+	Entity::VehicleMotorState &m = veh.veh;
+	rotor_machine_tick(veh, traits);
 	// Boat phase is command-driven; ground/bike wheelspin runs before contacts
 	// in vehicle_wheel_traction_tick [orig: @0x48C4C5..0x48C4D0].
 	if (traits.family == VehicleFamily::Watercraft)

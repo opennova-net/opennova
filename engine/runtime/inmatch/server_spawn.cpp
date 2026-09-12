@@ -328,15 +328,26 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	if (!is_host_own && world.zones.has_spawn_zone()) {
 		conn.link.respawn_pending = true;
 		if (!conn.link.spectator) {
-			if (world::Entity *pe = world.registry.get(h)) {
-				pe->flags |= 1u;
-				pe->damage_state = 620;
-			}
+			if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
 		}
-		// The join-time respawn countdown (entity+292 = 620 ticks) is display/wave state the
-		// 0x6E status reports; with default host wave options the deploy is pick-driven, so
-		// only the pending flag is modeled (tracked, §5.61).
 	}
+	// Every created player entity starts under the 620-tick spawn protection
+	// (entity+292): the round-init creation stores 620 for every active slot and
+	// the join stores it unconditionally after the 0x0F send (a bot slot +96483
+	// stores 0; our roster has none). It is host-own and spawn-zone independent.
+	// The per-tick arm in Server_TickUpdate counts it down in a live MP session,
+	// zeroes it outside one, and holds a spectator at -1 (the unwitnessed +97538
+	// latch our spectator bit stands in for, D-NET-217; the join's own -1 store
+	// @0x51a7b3 is overwritten by that same 620 and restored by the arm).
+	// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 @0x516bba;
+	//  Server_OnPlayerJoin @0x51A680 @0x51a882 (620), @0x51a878 (bot 0)]
+	if (world::Entity *pe = world.registry.get(h)) pe->damage_state = 620;
+	// The join writes the whole +89912 state byte: bit 1 (the pre-round loadout
+	// latch) iff the pre-round timer runs, and zeroes the +356 armory cooldown on
+	// the first state-6 entry. [orig: Server_OnPlayerJoin @0x51a6d3/@0x51a6e2
+	//  (byte = 1, or 3 while g_preround_delay_timer); slot[89] = 0 @0x51a752]
+	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0;
+	conn.link.armory_reuse_seconds = 0;
 	if (conn.link.spectator) {
 		// Retail still creates a player entity for a spectator, but leaves it
 		// hidden and permanently damage-disabled while S2C 0x75 drives the
@@ -381,6 +392,10 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	match_player.slot = *player_slot;
 	match_player.name = resolved_name;
 	world.match.upsert_player(match_player);
+	// The roster row mirrors the slot's spectator latch (+100567) so the
+	// end-round winner award skips a spectator-flagged top scorer
+	// [orig: Server_PlayerAdd @0x51CD83].
+	world.match.set_player_spectator(h, conn.link.spectator);
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	if (!is_host_own) {
@@ -439,6 +454,9 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 				player->team != 0 ? player->team : conn.assigned_team;
 		if (current_team != 0) conn.spectator_restore_team = current_team;
 		conn.link.spectator = true;
+		// [orig: Server_KillPlayerAndNotify @0x519E76 — the runtime convert
+		//  writes the same slot latch the roster row mirrors]
+		world.match.set_player_spectator(conn.link.owned_entity, true);
 		conn.assigned_team = 0;
 		conn.assigned_team_valid = true;
 		player->team = 0;
@@ -458,6 +476,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	}
 
 	conn.link.spectator = false;
+	world.match.set_player_spectator(conn.link.owned_entity, false);
 	conn.link.respawn_pending = false;
 	uint8_t team = conn.spectator_restore_team;
 	if (team == 0) team = 1;
@@ -481,6 +500,13 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	player->health = player->health_max > 0 ? player->health_max : 100;
 	player->alive = true;
 	world::entity_reset_to_spawn_state(*player);
+	// The deploy leg's spawn protection: 620 authority ticks for a non-bot slot
+	// whose revive latch (+89932) is clear; the reset itself never writes +292.
+	// Neither the bot slot nor the medic-revive deploy exists in our roster, so
+	// the two 0-stores are unreachable here.
+	// [orig: Server_ProcessPlayerDeath @0x517740 — 620 @0x517937/@0x517952/
+	//  @0x517960; 0 @0x51790a (bot) / @0x51791c (revive latch)]
+	player->damage_state = 620;
 	if (ai != nullptr) {
 		const int32_t pos[3] = {
 				world::to_fixed(player->position.x),

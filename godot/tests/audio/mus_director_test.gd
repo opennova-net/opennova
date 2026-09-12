@@ -101,3 +101,31 @@ func test_stopped_playback_releases_its_bank_after_the_mixer_drains() -> void:
 	await wait_until(func(): return bank_ref.get_ref() == null, 2.0)
 	assert_null(bank_ref.get_ref(), "a stopped stream releases the bank on the mixer cleanup pass")
 	assert_false(dir.has_pending_playback(), "the shutdown barrier clears after playback destruction")
+
+
+# The SP round-end tail's end track reaches the loaded script through the
+# director's signal_end_track (the engine's mus_vm_signal: the MessageHandler
+# restart frame MusicCtx_SelectEndTrack steps). The seam reports the engine's
+# codes: -1 with no script loaded, -2 when the loaded script carries no handler
+# (the compiled synth fixture: mus_compile emits none; retail gamemus.bin
+# dispatches 1 -> Missionwin, 2 -> Missionlose, pinned by the mus_vm ctest),
+# and the frame runs on a stopped VM as well as a running one.
+func test_signal_end_track_reports_the_restart_frame_codes() -> void:
+	var dir := MusicDirector.new()
+	dir.auto_start = false
+	add_child_autofree(dir)
+	assert_eq(dir.signal_end_track(1), -1, "no script loaded: the frame is refused")
+	var script := MusicScript.new()
+	script.load_from_path(SCRIPT_FIXTURE)
+	dir.load_mus_script(script)
+	dir.start()
+	assert_eq(dir.vm_state(), 1, "RUNNING after start")
+	var sections: Array = []
+	dir.section_entered.connect(func(name): sections.append(String(name)))
+	assert_eq(dir.signal_end_track(2), -2, "the handler-less fixture refuses the frame")
+	assert_eq(sections.size(), 0, "no handler, no section transition")
+	assert_eq(dir.vm_state(), 1, "the refused frame leaves the VM running")
+	dir.stop()
+	assert_eq(dir.signal_end_track(1), -2,
+			"a stopped VM with a loaded script still takes the frame (the handler decides)")
+	assert_eq(dir.vm_state(), 0, "the frame never restarts the embedder state")

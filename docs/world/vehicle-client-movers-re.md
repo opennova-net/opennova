@@ -25,9 +25,9 @@ correction — proposed in PR #640, pending maintainer ratification at merge.
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| Full and selector-zero motors; amphibious dispatch | Ported for authority and prediction (open: the selector-zero boat part-spin call, D-NET-161 (d)) | Sections 11, 16, 26, 30 through 31; vehicle_motor, aircraft_client_motor, watercraft_client_motor |
+| Full and selector-zero motors; amphibious dispatch | Ported for authority and prediction (the selector-zero boat's PlayerControl block, its claimant edge and part-spin call, ported 2026-09-12; the former D-NET-161 (d)) | Sections 11, 16, 26, 30 through 31; vehicle_motor, aircraft_client_motor, watercraft_client_motor, vehicle_part_anim |
 | Model contacts, springs, traction, chassis and carrier motion | Ported; #645 crash-height, bike axle and wheelie corrections included | Sections 12 through 15, 19 through 20, 22 through 23, 27, 38; collision, vehicle_suspension, vehicle_followups, vehicle_mount |
-| Occupancy, AI, death and respawn state | Ported (open: the pool-3 deck-marker localization, the ground-height tap ray kinds, the `entity+684` mirror, the emplacement brain dispatch — D-NET-161 (b), (e), (f), (g)) | Sections 17 through 18, 24 through 27; ai, destruction, vehicle_mount, mission_mount |
+| Occupancy, AI, death and respawn state | Ported (the `entity+684` think countdown ported 2026-09-12, the former D-NET-161 (f); open: the pool-3 deck-marker localization, the ground-height tap ray kinds, the emplacement brain dispatch: D-NET-161 (b), (e), (g); the gunner-attachment runtime of section 26.2 awaits its three data hooks) | Sections 17 through 18, 24 through 27; ai, destruction, vehicle_mount, mission_mount, vehicle_attachments |
 | Wheel/track/turret/gear and mounted-body animation; HUD state | Ported through renderer-owned channels and existing HUD snapshot | Sections 11, 14, 21; vehicle_part_anim, netsim_present_rows, simulation and attachment GUT suites |
 | Ground/boat/aircraft sound and contact edges | Ported (open: the tank fold's extra-effect argument and the sound-ready gate, D-SND-17) | Sections 11 through 13, 29, 31 through 33; vehicle_motor, ambient_mixer, mission_audio |
 | Wreck bone banks, W1 through W4 trails, rotor wash, foliage sway and water rings | Ported | Sections 28 through 29, 32; destruction, vehicle_part_anim, vehicle_trail_present_pass, shader_resource_contract |
@@ -4635,8 +4635,29 @@ accepts `pend` 16 or 21..23 `@0x458576..0x458586` (vs 7 or 13..15
 `@0x458375..0x458382`); the spawn AIEvent channel word is 0 (`xor ebx,ebx
 @0x4583cd`, store `@0x45851a`) vs 9 (`@0x458312`). The death event (4) writes
 channel 9 in both (`@0x4582c8`/`@0x4584d4`). Both mirror the brain step into
-`entity+684` after the tick `@0x458568` and zero it on a transition `@0x4585b4`
-— not modeled (D-NET-161 (f)). Ported 2026-09-08 as
+`entity+684` after the tick `@0x458568` and zero it on a committed transition
+`@0x4585b4` (the air twin `@0x458363` / `@0x4583b0`). That word is the pool-1
+visit's think countdown: `Entity_UpdatePool1Slot @0x4B8DD0` runs the class
+event callback (the machine) only when the PRE-decrement word is <= 0
+(`cmp [esi+2ACh],0; jg` `@0x4B8E1B..0x4B8E22`), after
+`Entity_BuildProximityList @0x4B3DC0` (`@0x4B8E25`), then the +0x1C4 motor
+every visit (`@0x4B8E53`), and subtracts one at its tail (`@0x4B8EA0`); the
+class init seeds brain[7] = 16 (`@0x468915`) and `+684 = dword_B21F80++ mod 16`
+(`@0x46891C..0x468945`, helo twin `@0x468645..0x468669`). A brain therefore
+thinks every brain[7] visits (16 with step 16), on the visit after any
+transition, with a 0..15 spawn stagger; `AI_BeginUpdate @0x457B40` (no direct
+caller; id 4 of `g_AIMoveStepFnTable @0x8153D8`) keeps its port semantics and
+merely moves onto the think visits. Ported 2026-09-12 (the former D-NET-161
+(f)): the gate, re-arm, zero and decrement in `AiSystem::tick` /
+`apply_transition` over `Entity::spawn_phase` (the same +0x2AC dword the org2
+body think reads; the item callbacks read it as `class_think_ticks`), seeds in
+`promote.cpp` / `teammate_spawn.cpp`; `ai::test_vehicle_brain_think_countdown`.
+The per-think `Entity_BuildProximityList` call is the port's
+`CollisionWorld::refresh_blink` (the entity's own blink/indoors refresh, run on
+the think visit ahead of the callback; the per-source candidate slices are the
+separate 17-tick `Entity_BuildProximityListsFromPools @0x4B8EB0` rebuild); the earlier
+`vehicle_mount::test_helo_ai_flight` exact-orbit pin (414.44) retired to a
+band with the every-tick think. Ported 2026-09-08 as
 `AiSystem::process_vehicle_state_machine` / `process_infantry_state_machine`
 over one `StateMachineGates` table (`ai::test_vehicle_class_state_machine_gates`).
 
@@ -4673,6 +4694,65 @@ then jumps to the epilogue `@0x4b9f9b`. Reimpl (2026-09-08): `AiSystem::release`
 (`ai::test_dead_vehicle_despawn_frees_brain`). Sites deliberately without a
 release (no brain by construction): placed devices, minefields, flags,
 `promote.cpp` (attach frees a stale brain itself).
+
+### 26.2 Gunner attachments: the same-refNum peer list on the 'agun' points
+
+Both class initializers test the def byte `ItemDef+0x548` after the enter
+handler (`cmp byte ptr [edx+548h],0` `@0x46895A`, call `@0x468964`; the helo
+twin `@0x468688..0x468692`) and call `Entity_SetupGunnerAttachments @0x468100`.
+The byte is the items.def attrib token `Parent` (`ItemDef_ParseProperty
+@0x49EB00` attrib arm; jo-c kong.c 193609..193611 `stricmp(arg,"Parent")` ->
+`particleEffects[720] = 1`, 0x278 + 720 = 0x548). The setup walks
+`g_pool_list[1]` in slot order (`@0x468130..0x468173`): every OTHER entity
+whose refNum byte `+533` equals this entity's nonzero refNum lands in
+`brain+580+8*i` (+4 = the entity, sixteen at most `@0x468173`); with any peer
+it saves the current `+0x1C4` update callback into `brain[143]` (`@0x468183`),
+installs `Entity_UpdateAttachedChildren @0x45D550` as `+0x1C4` (`@0x468189`)
+and writes the count into `brain+576` (`@0x468193`; the word the machine's
+no-target idle gate reads, so an attachment carrier never idles); it then
+collects up to sixteen model userpoints whose name starts `agun` (`strnicmp`
+4, `@0x4681BB..0x4681D9`, 48-byte rows, name +32), transforms each by the
+entity's affine fixed-point matrix (the scale variant when anim data or an
+item scale is present `@0x468200`, else `Math_BuildFixedPointMatrixFromEulerAngles`
+`@0x46823E`; `Math_FixedPointTransformPoint22` `@0x468288`) and assigns them
+greedily in child slot order (`@0x4682C1..0x4683AB`): per child the nearest
+unconsumed point by `sqrt(dz^2 + dy^2 + dx^2)` in double, clamped at
+2147418100.0, truncated and compared unsigned against -1 (`@0x468365`), the
+point pointer stored `@0x468389` and zeroed `@0x46838B`.
+`Entity_UpdateAttachedChildren` runs the saved callback first (`@0x45D573`),
+gates on the count (`@0x45D578`), rebuilds the parent matrix (`@0x45D599` /
+`@0x45D5BE` / `@0x45D5D1`) and, per child with a point, writes `+4..+24` = the
+parent position and eulers (`@0x45D5FF..0x45D61D`) then `+4/+8/+12` = the
+point's local position through the matrix (`@0x45D641..0x45D663`, translation
+included) and the six velocity dwords `+152..+172` = the parent's velocityX /
+velocityY / slideDecay / modelPtr0..2 unless `+286 <= 0` or `Flags & 6`, then
+zero (`@0x45D65B..0x45D6CA`). The vehicle DYING enter kills that list under the
+same `+1352` byte (`@0x467B6E..0x467BBB`: `+286 > 0` -> health 0, hit-record
+attacker cleared, `deathCallback(child, 1, 0)`). `Entity_ApplyCommand` case
+0x28 (AINODEPATH) overwrites `+0x1C4` and so drops the follow, which is retail.
+
+Reimpl (2026-09-12): the runtime half is `VehicleSystem::setup_gunner_attachments`
+/ `update_attached_children` (vehicle_lifecycle.cpp; the brain block
+`AiBrain::kAttachCount` = +576 / `kAttachSlots` = +580, the point stored as
+index+1 into `VehicleTraits::agun_points`, the child as handle+1), run from
+`initialize_mission_vehicles` (every pool-1 record resident, before the first
+mover tick) and after the mover in `tick_motors` (both air and ground/water
+branches; `motor_suspended` and the installed death callback skip the mover
+and the follow alike); `h_enter_vehicle_dying` kills the list under
+`VehicleTraits::attrib_parent`. Regressions: `vehicle_attachments` (peer walk,
+16 cap, greedy assignment, follow, velocity zeroing, brain mirrors, the motor
+chain, the dying kill, the `Parent` gate). Fed by retail data since 2026-09-12:
+the items.def parser's attrib arm maps the `Parent` token onto
+`DefItemDef::attrib_parent` (`def_items.cpp`, `@0x4a0cd6..0x4a0ce2`), the
+items.def traits sweep (`simassets/item_traits.cpp`) copies it into
+`VehicleTraits::attrib_parent`, and the collision resolve
+(`simassets/collision_resolve.cpp`, beside the `flare_points` fill) fills
+`agun_points` from the model's first sixteen `agun*` userpoints (`strnicmp` 4;
+`def_parse_item_attrib` + `simassets_item_traits` ctests). The addeweap emplacement
+children keep the earlier stand-in kill in `h_enter_vehicle_dying` (a
+different list; retail kills only the refNum peers) because
+`destruction_test::test_vehicle_death_kills_authored_children` pins it; the
+`world.cpp` orphan cascade already retires those children on carrier death.
 
 ## 27. Recoil, impact, landing and crew death
 
@@ -4895,10 +4975,25 @@ positive-only lean arm. The submerged-driver cut (`CameraOffset.z + Z <=
 Env_WaterHeightFixed` → the AI leg) exists on the ground selector-zero mover too
 (`Entity_ProcessInfantryPhysics @0x46E100 @0x46EA2E..0x46EA3A`) and on cveh
 (`@0x48B9A0..0x48B9AC`), not only the boat (`@0x48DFD3..0x48DFDF`) — the
-`!boat ||` guard was dropped 2026-09-08. The selector-zero boat's part-spin call
-inside its attrib-0x40 block (`@0x47004B..0x4700F5`) is not reached by the
-reimpl (`part_anim_tick` forces the Watercraft machine off; presentation-only,
-D-NET-161 (d)).
+`!boat ||` guard was dropped 2026-09-08. The selector-zero boat's PlayerControl
+block sits at the HEAD of `@0x46FA00`, before the authority split `@0x470109`:
+`test byte [itemDef+54h],40h` `@0x47004B`, the claimant start/stop edge
+(`+0x170` claimant `@0x470055`, the `brain+0x318` bit-0 latch
+`@0x470063..0x47006F`, slot 30 on the claimant eye above `Env_WaterHeightFixed`
+`@0x470075..0x4700EB`, the all-zero movement fold plus slot 31 on the hull
+`+0x18000` when the claimant leaves `@0x4700AB..0x4700EB`), then
+`Entity_UpdatePartSpinAccumulator @0x4700F5` — the GROUND machine, selected by
+the brain's profile type (JOX `Drivable LCAC` 101296 and `Drivable Indo Landing
+Craft` 101200: cbot rows with no physics key, PlayerControl, `d_lcac.aip`
+`type GROUND`; DLCAC1.3di consumes HELO_TAILROTOR, the fan). The full
+watercraft mover `@0x48D480` has no such call (`xrefs_to 0x4928B0`: `@0x46F99E`,
+`@0x4700F5`, `@0x4869EA`, `@0x4889F5`, `@0x48AE3D`, `@0x48D42B`). Ported
+2026-09-12 (the former D-NET-161 (d)): `tick_simple_motor`'s boat form runs
+`update_claimant_engine_sound` + `rotor_machine_tick` after its controller
+resolve for the authority and the prediction call; the machine exclusion keys
+on the physics-keyed full mover, not the family; the lights leg stays in the
+tail (`vehicle_part_anim::test_selector_zero_boat_runs_the_ground_machine`,
+`vehicle_motor::test_selector_zero_sound_tails`).
 
 Sound tails (witnessed and ported 2026-09-08;
 `vehicle_motor::test_selector_zero_sound_tails`): the ground twin's tail
@@ -5036,6 +5131,25 @@ ctests `vehicle_mount`, `buggy_01tr`; GUT `vehicle_emplacement_alignment_test`
 (the teleport looks down at the ctrlx point). Label rays retain their separate
 sector-query endpoint exclusions; the label list's own 4.0 u radius has no
 cone, only its nearest-scan bracket does.
+
+`Entity_TryEnterNearestVehicle @0x4368C0` has exactly two arms, keyed on
+`Flags & 0x200` alone (`@0x4368CF`): with the bit set,
+`Entity_FindBestSeatSlot(player, groundEntity)` (`@0x4368E0`) and, with no
+target, `return 0` (`@0x436903`) — no scan; with it clear,
+`Entity_FindNearestSeatOrArmory` (`@0x43691A`). Either hit feeds
+`Entity_RequestVehicleAttach` (`@0x4368EF`, `return 1` `@0x436907`). The bit is
+the queued Co-op spawn-marker mount, not a deck latch: its one writer is
+`Server_PositionPlayerForSpawn @0x50D44D` (the no-pick team-2 marker arm
+`@0x50D442`, together with `+364`/`+384` = the marker's parent
+`@0x50D454`/`@0x50D45A`), its one consumer `Entity_UpdateInfantryPlayerBody
+@0x4B424A..0x4B4272` (restore `+0x28` from `+0x180` when null, toggle with the
+bit still set, then clear it). Standing on a truck bed therefore boards the
+looked-at seat through the scan, never the priority seat. Corrected 2026-09-12
+(`vehicle_attach.cpp` `player_toggle_mount` / `find_mount_toggle_candidate`,
+`kEntityFlagQueuedMount`; `vehicle_mount::test_toggle_deck_best_seat`): the
+earlier port keyed the FindBestSeatSlot arm on "the groundEntity has seats" and
+fell through to the scan, which handed a deck stander the driver seat and let a
+queued mount on a full carrier board a neighbour.
 
 The writable WAC `seatbelt` value at `0xC6EADC` blocks mounted local-player
 USE in both local and joiner request paths. Forced script detach and numbered

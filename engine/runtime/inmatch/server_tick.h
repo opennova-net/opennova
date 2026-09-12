@@ -71,6 +71,15 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 // connection_list; the parallel NetSystem-as-ISystem owner was removed at P8.
 void Server_TickUpdate(NapiNPServerCtx &ctx);
 
+// Recompute every in-match player's kit weight from its live rows: the listen
+// host's own player from its local inventory, a remote player from its
+// granted combos + live clips over the authority pool table. The last
+// statement of the periodic-second block and the tail of every accepted
+// LOADOUT_SUBMIT. [orig: recalculate_all_player_scores @0x5014E0; callers
+// Server_TickUpdate @0x51e1ab, NapiNPServerMsg_HandlePlayerLoadout @0x515f9d]
+void Server_RecalculateAllPlayerKitWeights(
+		std::vector<NapiNPConnection> &roster, world::World &world);
+
 // Re-arm every connection's ONE-SHOT minimap initial scan (the pool-2
 // non-spawn-point sweep emit_minimap_overlay_state runs once per client
 // epoch, then leaves to the SpawnPoint refresh + the 14-tick pool-1 phase

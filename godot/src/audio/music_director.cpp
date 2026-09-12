@@ -57,6 +57,7 @@ void MusicDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_var", "var_index", "value"), &MusicDirector::set_var);
 	ClassDB::bind_method(D_METHOD("vm_state"), &MusicDirector::vm_state);
 	ClassDB::bind_method(D_METHOD("last_error"), &MusicDirector::last_error);
+	ClassDB::bind_method(D_METHOD("signal_end_track", "value"), &MusicDirector::signal_end_track);
 
 	// Witnessed music-driving policy (engine audio/music_policy.h re-exports).
 	BIND_CONSTANT(MENU_MUSIC_VAR_SLOT);
@@ -113,6 +114,14 @@ Ref<MusicPairNames> MusicDirector::resolve_game_music_pair(const String &p_expan
 // --- Property setters / getters ----------------------------------------
 
 void MusicDirector::load_mus_script(const Ref<MusicScript> &p_script) {
+	// The VM borrows a pointer into the MusicScript resource (mus_vm_load_script);
+	// swapping or dropping the script must clear that borrow first, or a later
+	// signal_end_track / advance reads a freed program.
+	if (_vm != nullptr && (p_script.is_null() || p_script != _script)) {
+		mus_vm_unload_script(_vm);
+		_vm_running = false;
+		_active_play = nullptr;
+	}
 	_script = p_script;
 }
 
@@ -274,6 +283,18 @@ void MusicDirector::jump_to_section(const StringName &p_section_name) {
 		return;
 	}
 	mus_vm_jump_to_section(_vm, String(p_section_name).utf8().get_data());
+}
+
+int MusicDirector::signal_end_track(int p_value) {
+	// The gamemus MessageHandler's restart frame (engine mus_vm_signal, the
+	// step MusicCtx_SelectEndTrack runs): the value lands on the data stack
+	// and the handler dispatches it. The director's pacing gate is untouched:
+	// the handler's setstate takes effect at once and the sting's first `play`
+	// fires on the next paced advance, after the sounding track ends.
+	if (_vm == nullptr) {
+		return -1;
+	}
+	return mus_vm_signal(_vm, (int32_t)p_value);
 }
 
 int MusicDirector::get_var(int p_var_index) const {

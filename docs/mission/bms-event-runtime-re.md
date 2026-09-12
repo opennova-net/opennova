@@ -73,6 +73,66 @@ flag byte: bit1 = OR, bit2 = XOR, default AND. Ours: `evaluate_chain` — byte-e
 - The kong comment "3=dialog" on 0x453620 is wrong (it reads the event table); comment
   fix proposed in §5.
 - Cat-7 input triggers consume bits transactionally: `g_InputActionBits (dword_B3B738)`
+  is mirrored into `dword_AE06F8` at chain-eval entry (@0x45405a, before the
+  trigger-count test), bit-toggled on match (@0x453bab; the shared leg @0x453ba5
+  tests the LIVE word and returns 1 @0x453bb1), and committed back to the live
+  word right before the dispatch loop at BOTH fire sites (@0x454c8b immediate,
+  @0x454cfa delayed, so a delayed fire commits whatever the mirror holds at
+  expiry). Every predicate of a chain runs (no short-circuit), so two subs on
+  one bit toggle it back. **PORTED 2026-09-12** (`world.script.input_action_bits`
+  / `input_action_mirror`; `evaluate_chain` seeds, `fire` commits). The cat-7
+  table @0x453b7e: 18 = local player's AiSlot behavior word & 0x200 (Berserk,
+  @0x453b99); masks 19:0x4000000 20:0x8000000 21:0x10000000 22:0x400 23:0x800
+  24:0x1000 25:0x2000 28:0x20000000 29:0x4000 30:0x8000, 32:`1 << p1` (@0x453ceb),
+  33:`1 << (byte@trigger+12 + 15)` (@0x453cfd); 26/27 = `(byte_27234FC & 1) == 0 / != 0`
+  (@0x453cb5/@0x453cc4); 34 = `Dialog_ExistsByIndex(p1) == 0` (@0x453d1b); 35 =
+  `sub_44E220(p1)` (@0x453d20); 36 AWOL; 37 = `EventTrigger_AnySatchelInArea`
+  (@0x453bc8); 38-41 the mount subs. The word's ONLY setters are
+  `Input_HandleActionBinding` cases 400 (|= 0x4000000 view1st), 401
+  (|= 0x10000000 viewwithgun), 402 (|= 0x8000000 viewchase), 412 (the toggle:
+  third person set -> clear it, set cockpit; else clear cockpit, set third
+  person), 405/406 (|= 0x10/0x40 orbit yaw), 407/408 (|= 0x100/0x4 orbit
+  pitch), 409/410 (|= 0x80/0x200 chase zoom) @0x49c073..0x49c253,
+  `Input_ProcessFrame` @0x49d52b (`&= ~0x50` every frame), BMS action 28 sub 38
+  (`= 0`, `EventAction_HandleSpecialTypes @0x4535c2`) and the two commits; the
+  0x400/0x800/0x1000/0x2000/0x4000/0x8000/0x20000000 masks (subs 22-25/28-30)
+  therefore read false in retail as well. Producers on our side: the view
+  selection seam (`Simulation::set_local_player_third_person_selected`,
+  authority only: viewchase |= 0x8000000 / view1st |= 0x4000000; it cannot
+  tell viewwithgun 401 or the 412 toggle apart from the selection they resolve
+  to; GUT `simulation_test.gd`); the orbit/zoom sites (405-410) are not wired
+  yet (the word is per-kernel state, where retail's BSS word persists across
+  loads until consumed). **Residue (D-EVT-3):**
+  subs 26/27 stay false -- `byte_27234FC` bit 0 has no writer reachable by xref
+  (readers: the pair, `HUD_DrawLookModeLabel @0x594100` bit 0x20, the lock
+  reticle @0x594580 bits 0/0x40).
+- Sub 34/35 read the dialog registry of `Dialog_Register @0x44d980` (called from
+  `Dialog_PlayByIndex @0x527ae0` -> `Dialog_PlayByName @0x44d9f0` only when
+  "dlg%03i" exists in the loaded bank): the name is appended to the history
+  list `dword_A89600` (count `dword_A895F8`, saturating at 255 @0x44d99c/@0x44d9a3
+  so slot 255 is overwritten and never scanned) and inserted into the first
+  free of the 16 active slots `dword_A8A248` (count `dword_A8A244`; a full table
+  skips the insert @0x44d9c8). `Dialog_UpdatePlayback @0x44e470` frees the entry
+  when its last line finishes (`Dialog_FreeByName @0x44db40` clears the slot and
+  compacts, @0x44dc07..0x44dc18); `Dialog_ResetAll @0x44dc90` clears both
+  tables (callers `Game_InitNewRound @0x422741/@0x4227ac`, the SP round-end
+  tail @0x516953, the cine starts). Sub 34 = absent from the active table
+  (`Dialog_ExistsByIndex @0x44e170`); sub 35 = in the history AND absent from
+  the active table (`sub_44E220`: history miss -> 0 @0x44e291, active hit -> 0
+  @0x44e313, else 1 @0x44e2f5). **PORTED 2026-09-12** as
+  `world::ScriptDialogRegistry` (`world.script.dialog`, reset by the BMS
+  on_load); the producer is the shell's dialog playback (register on a resolved
+  play, finished on the dialog's last line, a wave-2 hook through the engine's
+  `DialogQueue`).
+- Sub 37 `EventTrigger_AnySatchelInArea @0x547160`: record = zone index
+  param1 (rewritten by the load-time resolver) into the 32-byte area table
+  `unk_A32D10`; x +4/+8 and y +12/+16 always, z +20/+24 only when the record's
+  flag byte +28 has bit 2 (else -0x40000000..0x40000000); every pool-1 row with
+  +28 nonzero whose ammo def (+620 into `g_ammoDefTable`, 276-byte rows) is
+  `g_ammo_satchel` and whose position +4/+8/+12 satisfies the inclusive
+  compares -> 1. **PORTED 2026-09-12** over `ThrowableSim::devices` (the placed
+  satchels), their registry rows and the registered area bounds.
+||||||| a460d0c6c
   is mirrored into `dword_AE06F8` at chain-eval entry (@0x45405a), bit-toggled on match
   (@0x453bab), and committed back before action dispatch (@0x454c8b/@0x454cfa).
   Unmodeled (input categories return false), D-EVT-3.
@@ -277,8 +337,12 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   acquisition/fire-time SEES+TARGETED quads LANDED 2026-07-16 with D-AI-3 —
   `AiSystem::apply_engage_relations`, live at the state-16/17 engage and
   infantry perception sites — the older "ride the combat pass" clause here
-  was stale; corrected 2026-08-12.) Cat 7's input/view family
-  rides its owning subsystems. Cat 5 "SecondTimeThrough" = the raw session load-parity word
+  was stale; corrected 2026-08-12.) **Cat 7 PORTED 2026-09-12** (§1.4): the
+  Berserk read (18), the input-bit family (19-25, 28-30, 32, 33) with the
+  mirror seed at chain entry and the commit at both fire sites, the dialog
+  registry pair (34/35), the satchel-in-area scan (37); the never-set masks
+  22-25/28-30 read false as in retail. The ONE residue of this row: subs 26/27
+  (`byte_27234FC` bit 0, writer unwitnessed) stay false. Cat 5 "SecondTimeThrough" = the raw session load-parity word
   (`dword_815174`: static image value 1, XOR'd once per BMS load at the end of
   `EventTrigger_LoadAllData @0x454029`, read raw @0x453b24 — first session
   load reads 0, restart 1; save-persisted @0x4acee1/@0x4ad1ab, unported: no
@@ -321,8 +385,8 @@ group 0 forced to count 0):
 | field | base addr | maintained by |
 |---|---|---|
 | alert dword (0=green 1=yellow 2=red) | `0xA33FA4` | setters @0x40d5f0/=0, @0x40d610/=1, @0x40d630/=2 (all three kong names are misnomers); ChangeGroupAI subs 5→red 6→green 22→yellow (`Entity_HandleAlertCommand @0x43cff7`); AI death/damage → red (@0x465f9e, @0x4073ea, @0x465984) |
-| initial count | `0xA33FA8` | `EntityPool_RecountByType @0x40e7e0` — pools 2,0,1 by entity+284; called ONCE from `Game_StartMission @0x525b8b` right after the pre pass |
-| live count | `0xA33FAC` | `EntityPool_RecountLiveByGroup` full rescan (`!(flags&2) && health>0`), once per **62 ticks** in Server_TickUpdate (timer @0x51db6d, reload 0x3E @0x51db93, call @0x51dc02) and after the two group-reassign actions (@0x43c671, @0x43d75f) |
+| initial count | `0xA33FA8` | `EntityPool_RecountByType @0x40e7e0` — pools 2,0,1 by entity+284, EVERY used row with no flags/health test (@0x40e834/@0x40e867/@0x40e89a), initial[0]=0 (@0x40e8a7), then live = initial for all 64 groups (@0x40e8b1..0x40e8c4); called ONCE from `Game_StartMission @0x525b8b` right after the pre pass. Port matches since 2026-09-12 (`World::recount_group_initials`; the earlier port filtered dead/hp<=0 rows and walked pools 3/4) |
+| live count | `0xA33FAC` | `EntityPool_RecountLiveByGroup` full rescan over the same three pools (`!(flags&2) && health>0` @0x40e926/@0x40e96c/@0x40e9b6, live[0]=0 @0x40e9d5), once per **62 ticks** in Server_TickUpdate (timer @0x51db6d, reload 0x3E @0x51db93, call @0x51dc02; `Server_InitNewRoundState` zeroes the timer @0x51ca98 so the round's first tick rescans) and after the two group-reassign actions (@0x43c671, @0x43d75f). Port matches (`World::recount_group_live`, the dead flag word + health predicate) |
 
 **Twelve sticky relation bitmatrices** (single key = DcbId +0x7C, the authored
 SSN; group key = commandGroup):
@@ -874,19 +938,21 @@ MedicAssisting, sub3 Evacuating. No params.
 
 | sub | name | engine | p1 |
 |---|---|---|---|
-| 18 | PlayerBerserk | weap-state & 0x200 | — |
-| 19/20/21 | FirstPerson/ThirdPerson/Cockpit | view bits 0x4000000/0x8000000/0x10000000 in `dword_B3B738` | — |
-| 22–30 | (unnamed in our enum) | fixed view/state bits | — |
-| 32 | (unnamed) | `1 << p1` | BIT index |
-| 33 | (unnamed) | `1 << (byte@12 + 15)` | BIT index |
-| 34 | PlayerDialogDone | `Dialog_ExistsByIndex(p1)==0` | DIALOG |
-| 35 | PlayerDialogFinished | `sub_44E220(p1)` | DIALOG |
+| 18 | PlayerBerserk | local player's AiSlot behavior word & 0x200 (@0x453b99) | — |
+| 19/20/21 | FirstPerson/ThirdPerson/Cockpit | view bits 0x4000000/0x8000000/0x10000000 in `dword_B3B738`, consumed through the mirror (§1.4) | — |
+| 22/23/24/25 | PlayerInputBit10/11/12/13 | bits 0x400/0x800/0x1000/0x2000: no setter in the image, false in retail | — |
+| 26/27 | PlayerLookByteBit0Clear/Set | `(byte_27234FC & 1) == 0` / `!= 0`: writer unwitnessed, false here (D-EVT-3 residue) | — |
+| 28/29/30 | PlayerInputBit29/14/15 | bits 0x20000000/0x4000/0x8000: no setter, false in retail | — |
+| 32 | PlayerInputBitIndex | `1 << p1` (shift count masked to 5 bits) | BIT index |
+| 33 | PlayerInputBitIndexPlus15 | `1 << (byte@12 + 15)` (the low byte of p1) | BIT index |
+| 34 | PlayerDialogDone | `Dialog_ExistsByIndex(p1)==0`: absent from the active dialog table | DIALOG |
+| 35 | PlayerDialogFinished | `sub_44E220(p1)`: registered in the history AND absent from the active table | DIALOG |
 | 36 | PlayerAwol | `Entity_GetPlayerAwolCounter() >= p1` | SECONDS outside mission area |
-| 37 | PlayerSatchel | `EventTrigger_AnySatchelInArea(block)` | AREA (per dfx2med §8) |
+| 37 | PlayerSatchel | `EventTrigger_AnySatchelInArea(block)`: a placed satchel inside the zone box (z only when the record constrains it) | AREA (per dfx2med §8) |
 | 38/39/40/41 | AttachedToSsn/OnSsn/DrivingSsn/OnGun | `FindByNetId(p1)` → vehicle/mount check | ENTITY |
 
-The engine handles player sub-types 22–30, 32, 33 that our enum does not name; they
-display as raw values and round-trip.
+Every sub 18-41 (31 excepted; absent from the jump table) is named in `bms.h` and
+evaluated in `event_runtime.cpp` since 2026-09-12.
 
 ### 7.5 Actions (`EventAction_Dispatch @0x4542e0`)
 
@@ -915,7 +981,7 @@ display as raw values and round-trip.
 | 25 | SingleChangeGroup | `Entity_SetNetIdByParentRef(p1,p2)` | ENTITY | GROUP | — | — |
 | 26 | SingleTeleportAction | `EventAction_TeleportEntityToSpawn(p1)` | ENTITY | teleport-target | — | — |
 | 27 | ParticleEffectAction | `EventAction_SpawnParticleEffect (ex sub_4540E0)(p1)` | target WP_NUMBER | — | — | All matching pool-3 ItemDef 6088 markers; entity+692/gen_string effect name, zero direction, store without releasing previous group. Shared typed particle consumer; entity+460 lifetime sharing remains D-PTL-26. |
-| 28 | (special) | `EventAction_HandleSpecialTypes(block)` | — | — | — | — (editor marks 28/29 unused) |
+| 28 | SpecialSubType | `EventAction_HandleSpecialTypes(block) @0x4535a0`: sub 37 `RenderState_SetLayerVisibilityByIndex(block, p1)` @0x4535d5, sub 38 `g_InputActionBits = 0` @0x4535c2 (ported), sub 39 `dword_AE0718 = (p1 == 0)` @0x4535bc | sub 37/39: value | — | — | 37/38/39 (editor marks 28/29 unused) |
 | 30 | GroupOpenDoorAction | `Entity_KillDestructiblesByTeam(p1)` (dmg-transition 7) | GROUP/team | — | — | — |
 | 31 | GroupCloseDoorAction | `Entity_KillDestructiblesByOwner(p1)` | owner ref | — | — | — |
 | 32 | GroupResetHasVisited | `EventTrigger_ClearSlotB(p1)` | GROUP | — | — | — |

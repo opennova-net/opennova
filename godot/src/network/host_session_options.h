@@ -91,6 +91,12 @@ public:
 	HOST_SESSION_INT(max_score, max_score)
 	HOST_SESSION_INT(koth_delta, koth_delta)
 	HOST_SESSION_INT(flag_return_ticks, flag_return_ticks)
+	// The flag CARRY limit in seconds (CTF / FlagBall / Flag Me: the carrier is
+	// killed and the flag snaps home) and the armory-reuse cooldown an accepted
+	// C2S 0x2F seeds; the engine defaults (420 / 30) are retail's, so only a
+	// host cfg override needs them.
+	HOST_SESSION_INT(flag_reset_seconds, flag_reset_seconds)
+	HOST_SESSION_INT(armory_reuse_time, armory_reuse_time)
 	HOST_SESSION_INT(capture_duration_seconds, capture_duration_seconds)
 	HOST_SESSION_INT(capture_speed_setting, capture_speed_setting)
 	HOST_SESSION_INT(spawn_wave_time_base, spawn_wave_time_base)

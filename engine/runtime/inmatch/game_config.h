@@ -145,6 +145,21 @@ struct GameConfig {
 	uint32_t max_score = 0;           // [orig g_kill_limit @0x24D2138] SET `MaxScore`
 	uint32_t koth_delta = 5;          // [orig dword_24D2148] cfg `koth_delta`
 	uint32_t flag_return_ticks = 210; // [orig g_FlagReturnTime_2 @0x24D2174]
+	// The flag CARRY limit in periodic seconds (CTF / FlagBall / Flag Me): a
+	// carrier holding a flag this long drops it, the flag snaps home, and the
+	// carrier is killed. The IDB global name is a misnomer; the config field is
+	// the sibling of flagReturnTime above.
+	// [orig g_GameConfigState.flagResetTime_420 -> g_weapon_violation_limit
+	//  @0x24D2178 via apply_session_settings_to_globals @0x551d0a; default
+	//  Config_SetDefaults @0x54D400; consumer Server_CheckPlayerViolations
+	//  @0x51ac75]
+	int32_t flag_reset_seconds = 420;
+	// The armory-reuse cooldown seeded into playerSlot+356 by an accepted C2S
+	// 0x2F. cfg key `armory_reuse_time`; admin `ArmoryTimer`.
+	// [orig g_GameConfigState.armoryReuseTime_A38 @0x25510F0; default
+	//  Config_SetDefaults @0x54d485; Config_ParseSettingsLine @0x54f939;
+	//  NapiNPServerMsg_HandlePlayerLoadout @0x515ba6]
+	uint32_t armory_reuse_time = 30;
 	int32_t capture_duration_seconds = 15; // [orig g_capture_duration @0x24D2248] `TakeoverTime`
 	int32_t capture_speed_setting = 1;     // [orig g_capture_speed_setting @0x24D2254]
 	int32_t spawn_wave_time_base = 0;      // [orig g_spawn_wave_time_base @0x24D224C]

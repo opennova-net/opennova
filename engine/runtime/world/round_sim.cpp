@@ -165,14 +165,19 @@ void push_round_debug(RoundSim &sim, const RoundDebugEvent &event) {
         ++sim.debug_trail_count;
 }
 
-// The kill-time body roll: a torso-stack hit (bone < 5) on a not-yet-dead body
-// tips the corpse ~8 deg toward the shot — front quadrant positive, rear
-// negative. The store is bodyRoll (entity+0x94), our AiEntity::roll — the same
-// field the slope pass then chases toward the ground slope for a grounded
-// corpse (infantry_slope_pass conform leg), which is what settles the tipped
-// body onto the terrain. [orig: gate @0x40755e; +0x05B05B00 @0x407564;
-// -0x05B05B00 @0x407575]
-void apply_death_body_roll(AiEntity *body, int32_t bone, int quadrant) {
+// The hit-time body roll: EVERY projectile hit on a torso-stack bone (bone < 5)
+// of a not-yet-dead body tips it ~8 deg toward the shot — front quadrant
+// positive, rear negative — lethal or not, whatever the damage number, on both
+// peers (the class callback runs after the authority-gated subtraction with
+// damage 0 on a joiner). The store is bodyRoll (entity+0x94), our
+// AiEntity::roll — the field the slope pass then chases toward the ground
+// slope (infantry_slope_pass conform leg) and the torso roll chases in turn
+// (fp_roll = torso_roll + lean/4), so a living body visibly flinches and
+// settles back while a corpse tips onto the terrain.
+// [orig: Entity_HandleDamageTrigger gate @0x40755e; +0x05B05B00 @0x407564;
+//  -0x05B05B00 @0x407575; Entity_HandleDamageAndTriggerZones gate @0x4078c6;
+//  @0x4078cc / @0x407918]
+void apply_hit_body_roll(AiEntity *body, int32_t bone, int quadrant) {
     if (body == nullptr || bone >= 5) return;
     if (quadrant == 0) {
         body->roll = 0x05B05B00;
@@ -1260,15 +1265,29 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
         const bool peer_item_hit = !world.rules.logic_authority &&
                 r.consequence_mode == RoundConsequenceMode::VisualOnly && target &&
                 target->kind != EntityKind::Organic && !target->is_ai_capable;
-        if ((authoritative || peer_item_hit) && target != nullptr && target->has_item_def &&
-            !not_armed && ammo != nullptr) {
+        const bool damage_target_is_person = target != nullptr &&
+            (target->item_type == 3 ||
+             (target->item_type == 0 && target->kind == EntityKind::Organic));
+        // A non-authority in-session peer runs the SAME hit path with
+        // Weapon_CalcImpactDamage's forced zero [orig: @0x4ec933..0x4ec93a]:
+        // no health, hits, or deaths, but the person class callback still
+        // fires (@0x4e820e) and stages the death anim / tips the body on the
+        // joiner too. Only a person with a World entity reaches this leg on a
+        // joiner (the wire person proxies never resolve to geometry_entity,
+        // collision_trace.cpp), i.e. the joiner's own body.
+        const bool peer_person_hit = world.rules.mp_session &&
+                !world.rules.projectile_authority && damage_target_is_person;
+        if ((authoritative || peer_item_hit || peer_person_hit) && target != nullptr &&
+            target->has_item_def && !not_armed && ammo != nullptr) {
             const Entity *shooter = world.registry.get(r.owner);
-            // Weapon_CalcImpactDamage writes the critical/headshot cause bit
-            // into its caller-owned event flags, not GamePlayerEntity::Flags.
-            // OneShotKill returns before the zone branch and therefore carries
-            // no critical bit even when the ray crossed a critical section.
-            // [orig: Weapon_CalcImpactDamage @0x4EC920;
-            // GameEvent_PlayerDeath @0x516DD0 reads entity+44 bit 0x800]
+            // Weapon_CalcImpactDamage latches the critical/headshot cause bit on
+            // the ENTITY (+44 bit 0x800) for every authoritative hit, lethal or
+            // not. OneShotKill returns before the zone branch (no bit even when
+            // the ray crossed a critical section), and the in-session
+            // non-authority return precedes it too, so a joiner never latches.
+            // [orig: Weapon_CalcImpactDamage @0x4ec933 / @0x4ec942; the latches
+            //  @0x4ec994 (seat leg) / @0x4ec9c6 (zone table);
+            //  GameEvent_PlayerDeath @0x516DD0 reads entity+44 bit 0x800]
             const bool critical_hit =
                 !(world.rules.mp_session && world.rules.one_shot_kill) &&
                 impact_is_critical(*target, collision.hit_zone,
@@ -1276,6 +1295,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
                                                 collision.bone_index, *target, shooter,
                                                 r.ammo_index, world);
+            if (authoritative && critical_hit) target->cause_flags |= 0x800u;
             r.vel = vec_from_fixed(velocity_q16);
             if ((target->engine_flags & kEntityFlagIndestructible) != 0 ||
                 target->armor_impact == -1 ||
@@ -1287,89 +1307,139 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             if ((target->item_attrib & kItemAttribNoDie) != 0 &&
                 damage >= target->health)
                 damage = target->health - 1;
-            if (!authoritative) {
+            const bool target_was_alive =
+                target->health > 0 && target->alive &&
+                (target->flags & kEntityFlagDead) == 0 &&
+                (target->engine_flags & kEntityFlagDead) == 0;
+            // The class callbacks return first on a body already flagged dead;
+            // the killing hit itself passes (the edge latches the bit later).
+            // [orig: Entity_HandleDamageAndTriggerZones @0x40772f]
+            const bool target_not_dead =
+                ((target->flags | target->engine_flags) & kEntityFlagDead) == 0;
+            if (!authoritative && !peer_person_hit) {
                 // The hit callback executes on both peers; only the health
                 // subtraction and gameplay kill fan below require authority.
                 // [orig: Projectile_ProcessDamageOnTarget @ 0x4E7FB0]
                 destruction_notify_item_damage(world, *target, 1,
                         {collision.section_index, damage, r.yaw_bam, r.pitch_bam, r.roll_bam});
-            } else if (damage != 0) {
-                const bool target_was_alive =
-                    target->health > 0 && target->alive &&
-                    (target->flags & kEntityFlagDead) == 0 &&
-                    (target->engine_flags & kEntityFlagDead) == 0;
-                if (shooter != nullptr) {
-                    auto &rel = world.script.relations;
-                    const int sg = shooter->group_id, ss = shooter->net_id;
-                    const int vg = target->group_id, vs = target->net_id;
-                    rel.set_group_group(TriggerRelations::kShot, sg, vg);
-                    rel.set_single_group(TriggerRelations::kShot, ss, vg);
-                    rel.set_group_single(TriggerRelations::kShot, sg, vs);
-                    rel.set_single_single(TriggerRelations::kShot, ss, vs);
-                }
+            } else {
+                if (authoritative && damage != 0) {
+                    if (shooter != nullptr) {
+                        auto &rel = world.script.relations;
+                        const int sg = shooter->group_id, ss = shooter->net_id;
+                        const int vg = target->group_id, vs = target->net_id;
+                        rel.set_group_group(TriggerRelations::kShot, sg, vg);
+                        rel.set_single_group(TriggerRelations::kShot, ss, vg);
+                        rel.set_group_single(TriggerRelations::kShot, sg, vs);
+                        rel.set_single_single(TriggerRelations::kShot, ss, vs);
+                    }
 
-                // The original writes the subtraction back through a signed 16-bit
-                // entity+286 field. Preserve its modulo-2^16 wrap explicitly.
-                target->health = retail_signed_i16(
-                    static_cast<int64_t>(target->health) - static_cast<int64_t>(damage));
-                hits.push_back(RoundHit{damage_entity, r.owner, damage,
-                                        primary_section, secondary_section});
-                const bool damage_target_is_person =
-                    target->item_type == 3 ||
-                    (target->item_type == 0 &&
-                     target->kind == EntityKind::Organic);
+                    // The original writes the subtraction back through a signed 16-bit
+                    // entity+286 field. Preserve its modulo-2^16 wrap explicitly.
+                    target->health = retail_signed_i16(
+                        static_cast<int64_t>(target->health) - static_cast<int64_t>(damage));
+                    hits.push_back(RoundHit{damage_entity, r.owner, damage,
+                                            primary_section, secondary_section});
+                    if (damage_target_is_person) {
+                        // [orig: Entity_HandleDamageTrigger @0x4074BA; twin @0x407822]
+                        apply_infantry_burn(world, *target, ammo->secondary_anim, r.pos, r.owner);
+                    }
+                    if (!damage_target_is_person) {
+                        target->last_attacker = r.owner;
+                        // deathCallback(entity, 1, 0): nonlethal item damage is
+                        // observable, while lethal damage enters the husk chain.
+                        destruction_notify_item_damage(world, *target, 1,
+                                {collision.section_index, damage, r.yaw_bam, r.pitch_bam, r.roll_bam});
+                    }
+                }
                 if (damage_target_is_person) {
-                    // [orig: Entity_HandleDamageTrigger @0x4074BA; twin @0x407822]
-                    apply_infantry_burn(world, *target, ammo->secondary_anim, r.pos, r.owner);
-                }
-                if (!damage_target_is_person) {
-                    target->last_attacker = r.owner;
-                    // deathCallback(entity, 1, 0): nonlethal item damage is
-                    // observable, while lethal damage enters the husk chain.
-                    destruction_notify_item_damage(world, *target, 1,
-                            {collision.section_index, damage, r.yaw_bam, r.pitch_bam, r.roll_bam});
-                }
-                if (target->health <= 0) {
+                    // Every hit stamps lastAttacker (+0x178) / the ammo def on
+                    // the victim before the callback, on both peers, unless the
+                    // def carries attrib 0x20 [orig: Projectile_ProcessDamageOnTarget
+                    // @0x4e81e7..0x4e81f9]. A never-hit body keeps an empty
+                    // slot, which the death edge's fallback also restores.
+                    if ((target->item_attrib & kItemAttribEweap) == 0)
+                        target->last_attacker = r.owner;
+                    // The person class callback, event 1 with a projectile:
+                    // EVERY hit (lethal or not, damage 0 included) selects the
+                    // death anim from the hit bone + attack quadrant into +0x2C0
+                    // and tips the body on a torso-stack bone; a later kill
+                    // that stamps nothing (script/WAC) plays this hit's clip.
+                    // The roll, the mask switch, and the anim selector all
+                    // consume the SAME hit-record bone (hitRecord[14]);
+                    // death_section is our preserved copy of that record field.
+                    // [orig: Entity_HandleDamageTrigger @0x407478 quadrant,
+                    //  @0x407483 select, @0x40755e / @0x4075f6 gates;
+                    //  Entity_HandleDamageAndTriggerZones @0x4077e0 / @0x4077eb
+                    //  / @0x4078c6]
                     const int32_t heading_bam =
                         bam_heading_from_mission_yaw_deg(target->yaw);
                     const int quadrant =
                         death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
-                    if (damage_target_is_person) {
-                        const int32_t death_section =
-                            primary_section >= 0 ? primary_section : 1;
+                    const int32_t death_section =
+                        primary_section >= 0 ? primary_section : 1;
+                    if (target_not_dead) {
                         target->death_anim_state =
                             compute_death_anim_state(death_section, quadrant,
                                                      death_cause::kBullet);
-                        // The roll, the mask switch, and the anim selector all
-                        // consume the SAME hit-record bone (hitRecord[14]);
-                        // death_section is our preserved copy of that record
-                        // field. [orig: @0x40755e / @0x4075f6 / @0x407483]
                         AiEntity *victim_body = world.ai.for_handle(target->handle);
-                        if (target_was_alive) {
-                            apply_death_body_roll(
-                                victim_body, death_section, quadrant);
-                        }
+                        apply_hit_body_roll(victim_body, death_section, quadrant);
+                        // The plyr callback re-arms the player body's 64-tick
+                        // think cadence on every event it handles.
+                        // [orig: Entity_HandleDamageAndTriggerZones @0x407b5e / @0x407c71]
+                        if (((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0)
+                            target->spawn_phase = 64;
+                    }
+                    if (authoritative && damage != 0 && target->health <= 0) {
+                        // A lethal player-flag hit counts on the ROUND; past the
+                        // first kill the victim takes the same-projectile cause
+                        // bit 0x100 before the death is reported.
+                        // [orig: Projectile_ProcessDamageOnTarget @0x4e8112 lethal
+                        //  gate, @0x4e8159 Flags&0x100, @0x4e8169..0x4e816b]
+                        if (target_was_alive &&
+                            ((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0 &&
+                            ++r.player_kills > 1)
+                            target->cause_flags |= 0x100u;
                         try_spawn_dismemberment_piece(
                             world, *target, velocity_q16,
                             death_section, target->death_anim_state,
                             target_was_alive);
-                    }
-                    world.script.relations.group(target->group_id).alert =
-                        TriggerRelations::kAlertRed;
+                        world.script.relations.group(target->group_id).alert =
+                            TriggerRelations::kAlertRed;
 
-                    RoundDeath d;
-                    d.victim = damage_entity;
-                    d.killer = r.owner;
-                    d.victim_handle = damage_entity.packed;
-                    d.killer_handle = r.shooter_handle;
-                    d.adm_index = r.adm_index;
-                    d.ammo_index = r.ammo_index;
-                    if (critical_hit) d.event_flags |= 0x800u;
-                    deaths.push_back(d);
+                        RoundDeath d;
+                        d.victim = damage_entity;
+                        d.killer = r.owner;
+                        d.victim_handle = damage_entity.packed;
+                        d.killer_handle = r.shooter_handle;
+                        d.adm_index = r.adm_index;
+                        d.ammo_index = r.ammo_index;
+                        // GameEvent_PlayerDeath reads the victim's entity+44
+                        // cause bits at the death edge [orig: @0x516f4d /
+                        // @0x517188..0x517206]; the sim snapshots them here.
+                        d.event_flags = target->cause_flags & 0xF00u;
+                        deaths.push_back(d);
+                    }
+                } else if (authoritative && damage != 0) {
+                    if (target->health <= 0) {
+                        world.script.relations.group(target->group_id).alert =
+                            TriggerRelations::kAlertRed;
+
+                        RoundDeath d;
+                        d.victim = damage_entity;
+                        d.killer = r.owner;
+                        d.victim_handle = damage_entity.packed;
+                        d.killer_handle = r.shooter_handle;
+                        d.adm_index = r.adm_index;
+                        d.ammo_index = r.ammo_index;
+                        d.event_flags = target->cause_flags & 0xF00u;
+                        deaths.push_back(d);
+                    }
+                } else if (authoritative && target->kind != EntityKind::Organic &&
+                           !target->is_ai_capable) {
+                    destruction_notify_item_damage(world, *target, 1,
+                            {collision.section_index, 0, r.yaw_bam, r.pitch_bam, r.roll_bam});
                 }
-            } else if (target->kind != EntityKind::Organic && !target->is_ai_capable) {
-                destruction_notify_item_damage(world, *target, 1,
-                        {collision.section_index, 0, r.yaw_bam, r.pitch_bam, r.roll_bam});
             }
         }
 

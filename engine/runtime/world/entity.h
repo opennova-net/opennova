@@ -221,6 +221,14 @@ inline constexpr uint32_t kEntityFlagMounted = 0x40;          // carried/mounted
                                                               // [orig: @0x494752; guard @0x4bf5a5-family]
 inline constexpr uint32_t kEntityFlagPlayer = 0x100;          // the wire Player class bit; gates held-weapon draws
                                                               // [orig: §5.10b class; draw gate @0x4e5073-family]
+inline constexpr uint32_t kEntityFlagQueuedMount = 0x200;     // the queued Co-op spawn-marker mount: set with
+                                                              // +0x16C/+0x180 = the marker's parent by the no-pick
+                                                              // team-2 marker arm, consumed (toggle, then cleared)
+                                                              // by the first org2 body update; the toggle's
+                                                              // FindBestSeatSlot(groundEntity) arm keys on it
+                                                              // [orig: Server_PositionPlayerForSpawn @0x50D44D;
+                                                              //  Entity_UpdateInfantryPlayerBody @0x4B424A..0x4B4272;
+                                                              //  Entity_TryEnterNearestVehicle @0x4368CF]
 inline constexpr uint32_t kEntityFlagReflective = 0x400;      // BMS Reflective(1<<23) [orig: @0x40e9f0]
 inline constexpr uint32_t kEntityFlagVehicleLoadoutZone = 0x800;  // type-11 volume touch
 inline constexpr uint32_t kEntityFlagInAir = 0x2000;          // airborne/swimming [orig: grounded selector @0x4b78ab]
@@ -518,7 +526,32 @@ struct Entity {
     // Optional control-point link read by the org1 respawn/hidden gates.
     // [orig: entity+0x354; Entity_UpdateInfantryAI @0x4B99DB/0x4B9FA0]
     EntityHandle npc_respawn_zone;
-    int32_t spawn_phase = 0; // entity+0x2AC; organic helper=63, vehicle AI cycles 0..15
+    // entity+0x2AC. Organic helper = 63, vehicle AI cycles 0..15, and the PLAYER
+    // body's think cadence: the org2 body update fires the plyr class callback
+    // (event 0) whenever it is <= 0 and decrements it every tick; the callback
+    // re-arms it to 64 on every event that passes its dead return (hit, blast,
+    // think). [orig: Entity_UpdateInfantryPlayerBody @0x4b4bc9..0x4b4be9;
+    // Entity_HandleDamageAndTriggerZones @0x407b5e / @0x407c71]
+    // The same dword is a pool-1 VEHICLE BRAIN's think countdown: the pool-1
+    // visit runs the class event callback (the brain machine) only while it is
+    // <= 0 and decrements it every visit; the machine re-arms it to brain[7]
+    // after each update and zeroes it on a committed transition; the class init
+    // seeds the 0..15 stagger (World::vehicle_ai_spawn_phase). Item class
+    // callbacks read the slot as `class_think_ticks` above.
+    // [orig: Entity_UpdatePool1Slot @0x4B8E1B / @0x4B8EA0;
+    //  EntityAI_ProcessVehicleStateMachine @0x458568 / @0x4585B4;
+    //  Entity_InitVehicleAIFromDef @0x46891C..0x468945]
+    int32_t spawn_phase = 0;
+    // The kill-cause bits of the retail entity+0x2C dword (bits 8..11), latched at
+    // HIT time and read at the death edge by GameEvent_PlayerDeath: 0x800 the
+    // critical/head-zone hit [orig: Weapon_CalcImpactDamage @0x4ec994 / @0x4ec9c6],
+    // 0x100 the same-projectile multi-kill [orig: Projectile_ProcessDamageOnTarget
+    // @0x4e8169..0x4e816b], 0x400 the kind-1 melee applier (D-ITEM-6 residual, no
+    // producer here). The plyr class callback clears bits 8..11 on every event
+    // outside {1,3,4,5} (the 64-tick think and the blast) [orig: @0x407b4d..0x407b4f];
+    // the consumer clears the bit it reports [orig: GameEvent_PlayerDeath @0x5171ca /
+    // @0x5171e8 / @0x517206]. RoundDeath::event_flags snapshots the 0xF00 mask.
+    uint32_t cause_flags = 0;
     int32_t spawn_heading = 0; // BAM32, entity+0x330 [orig: @0x4B965C]
     uint32_t spawn_flags = 0;  // entity+0x334, excludes dead [orig: @0x4B9662]
     // items.def 'deathtime' in ticks ((62*v or 496) + 62 at parse [orig:

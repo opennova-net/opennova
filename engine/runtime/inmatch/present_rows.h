@@ -69,7 +69,10 @@ using DoorPhaseTable = std::vector<int32_t>;
 // each), the self echo left at its zero defaults, then one appended pool row
 // per locally allocated item fragment (item_section_piece without a decoded
 // row), written by the same per-entity writer the world path runs; only those
-// fragment rows touch `lifecycle`. Does NOT consume the animation pulses: the
+// fragment rows touch `lifecycle`. A decoded row whose materialized local
+// entity carries door motion publishes that entity's own DoorSystem phases
+// on `door_phases` (retail runs the door records and their CTRL publisher on
+// every peer). Does NOT consume the animation pulses: the
 // caller clears them (ClientState::clear_anim_pulses) once the rows are handed
 // on, so each transition pulse dispatches exactly one presented frame.
 void build_client_replica_present_rows(const PresentRowsContext &context,

@@ -156,6 +156,23 @@ int compute_death_anim_state(int bone_index, int quadrant, int cause);
 // - 0x60000000) >> 30; atan2 scale 683565275.5764316 = 2^32/2pi]
 int death_quadrant_from_round(int32_t victim_heading_bam, float round_vel_x, float round_vel_y);
 
+// The plyr class callback's non-hit events (0 = the body update's 64-tick think,
+// 2 = the blast applier's notify): a live player body clears the kill-cause bits
+// 8..11 of entity+0x2C (Entity::cause_flags) and re-arms the think cadence
+// (Entity::spawn_phase = 64); a body already flagged dead returns first. The hit
+// event (1) only re-arms — RoundSim's person leg does that inline.
+// [orig: Entity_HandleDamageAndTriggerZones @0x40772f (Flags&2 return);
+//  @0x407b4d..0x407b4f (damageType not in {4,1,3,5} -> +0x2C &= 0xFFFFF0FF);
+//  @0x407b5e / @0x407c71 (spawnPhase = 64)]
+void player_body_class_think(Entity &body);
+
+// The org0 skin bone-callback's DEATH register (CTRL ordinal 6, the corpse fade):
+// a dead body ramps 0xFFFF -> 0 over the 186 ticks its move timer (entity+0x148,
+// Entity::corpse_timer) spends between 248 and 62, then holds 0 for its last 62
+// ticks; a live body, or a corpse still above 248, reads 0xFFFF.
+// [orig: BoneCallback_org0_Skin @0x4e3669..0x4e368e]
+int32_t death_ctrl_register_value(bool dead, int32_t corpse_timer);
+
 // Map the selected infantry state to the present-pass BodyAnim slot. Directional
 // walk blocks all render through the same canonical walk slot.
 inline int32_t body_anim_slot_from_state(int state) {

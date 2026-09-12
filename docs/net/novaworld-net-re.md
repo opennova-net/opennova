@@ -29,7 +29,7 @@ per-game message sets:
 |---|---|---|
 | 4 — message sets | Selected by the `PN` field at CLIENT_HELLO. `PN=NOVAWORLDUDP` → container-based browser/session services (ClientHostRequest, ClientPlayRequest, ServerVerifyResult, ...; §3). `PN="JointOperations"` etc. → in-match TLV game traffic dispatched via the NAPI msginfo tables (§4). | `engine/net/novaworld` (service) / `engine/runtime/inmatch` (game session) |
 | 3 — session + framing | Per-(ip,port) session state (`CK`, `SK`, `SCRK`, fragment buffers); the opcode `0x43`/`0x83` protocol-message envelope (flags/len/seq/frag). | `engine/net/napi` |
-| 2 — NWU wire framing | 4-byte LSB CRC32 header; 1-byte opcode `0x41` HELLO / `0x42` JOIN / `0x43` SESSION / `0x46` GOODBYE (server replies `0x81`/`0x82`/`0x83`/`0x86`); NWU stream-cipher payload encryption. | `engine/net/novacrypto` + `engine/net/napi` |
+| 2 — NWU wire framing | 4-byte LSB CRC32 header; 1-byte opcode `0x41` HELLO / `0x42` JOIN / `0x43` SESSION / `0x44` RESEND LIST / `0x46` CLIENT GOODBYE (server replies `0x81`/`0x82`/`0x83`/`0x84`, and `0x86` SERVER GOODBYE is the host-initiated teardown burst, §5.64.1); NWU stream-cipher payload encryption. | `engine/net/novacrypto` + `engine/net/napi` |
 | 1 — UDP sockets | Owned by the app, not a lib. | server app / Godot client |
 
 *(The "Reimpl home" column records the pre-NET-2 homes; the in-game wire codec, NWU session framing, and capture/replay chain now live in `engine/net/npwire` — ADR 0019.)*
@@ -349,8 +349,8 @@ sweep; blank = not yet characterized.
 | 0x16 | 0x42FAE0 | `_0x016` | PLAYER-LIST — full layout verified §5.20 (controlled capture 2026-06-17) |
 | 0x17 | 0x4226F0 | `_0x017` | |
 | 0x18 | 0x433780 | `FullEntitySpawn` | reply to C2S 0x0F: destroy + FULL single-entity rebuild (itemDef/models/playerClass/minimap/anim registration). Absent from healthy sessions (self-heal, §5.46) — the early "does not fire" note meant nothing needed healing, not an inert path. Field map §5.46 (decoded) |
-| 0x19 | 0x425E80 | `_0x019` | spawn-ack timestamp [u32] → `dword_A82360` — the requester-only reply to C2S 0x0A spawn-menu request (§5.52a; emitted @0x513260 via NetPacket_WriteTimestampB) |
-| 0x1A | 0x425EB0 | `_0x01A` | sets `dword_A82364` (WaitForGameStart return-0 unlock) |
+| 0x19 | 0x425E80 | `_0x019` | spawn-ack timestamp [u32] → `dword_A82360` — the requester-only reply to C2S 0x0A spawn-menu request (§5.52a; emitted @0x513260 via NetPacket_WriteTimestampB); the value is also the kill-window MIN the client echoes in every C2S 0x28 (the 0x0F burst @0x42e5d3 and the 0x4E continuation @0x4318db) |
+| 0x1A | 0x425EB0 | `_0x01A` | sets `dword_A82364` (WaitForGameStart return-0 unlock): a u32 `GetTickCount` (NetPacket_WriteTimestamp @0x5046c0), zeroed at NapiClient_WaitForGameStart entry @0x42cc51; the 0x4E-continuation C2S 0x28 carries it as the kill-window MAX (@0x4318e8) |
 | 0x1B | 0x426080 | `_0x01B` | |
 | 0x1C | 0x4227F0 | `_0x01C` | empty stub |
 | 0x1D | 0x430840 | `_0x01D` | **spawn-success gate**: sets `dword_24C1928=1` before any payload parse when `is_authority==0` (§5.2). The payload is the END-ROUND BOARD HEADER (`EndRoundScoreboard_SerializeHeader @0x505280`, sent per slot from `Server_ProcessRoundEnd @0x516839`; draw flag `@0x430ac1`, `g_netPlayerCount = 0` `@0x430ac6`), and on an MP peer the handler KICKS the stat-board pull by queueing C2S 0x2B `[u16 0]` `@0x430ad5..0x430b03` (§5.68). **Consumer PORTED 2026-08-24**: the overlay ladder `draw_endround_stats_overlay @0x5b7cd0` (`hud/end_round_overlay.h`, `HudFrameCompiler::element_end_round_overlay`, `EndRoundPresenter`). **Both header forms decode (2026-08-24)**: the non-team FORM (`in_session && !(GameType & 0x10000)` `@0x43086c..0x430883`) carries three C-STRING names + three i16 primary scores in place of the winner/team-score words; the client parses them into 32-byte staging `byte_A81B40/60/80` (at most 31 chars kept, the cursor advancing by the sender's full string) + `dword_A81BA0/A4/A8` `@0x430889..0x4309af`, then commits via `Napi_CopyString(dst, 32)` into board rows 0..2 `@0x430a70..0x430abb` — `decode_end_round_header(..., non_team_form)` mirrors the pick, and the DM/KOTH name arms of the ladder render from `EndRoundHeader.player_names/player_scores` |
@@ -371,7 +371,7 @@ sweep; blank = not yet characterized.
 | 0x2C | 0x427E10 | `_MissionMapNames` | session + mission-file names (NOT chat — that note was wrong): [cstr sessionName → byte_A82378][cstr bmsFile → g_map_file_name]; bumps g_loading_progress ≥ 1. Field map §5.51 (decoded) |
 | 0x2D | 0x427E90 | `_0x02D` | |
 | 0x2E | 0x427F80 | `_0x02E` | |
-| 0x2F | 0x430E10 | `_0x02F` | **objective/entity parent-state update** (decoded + bidirectionally ported 2026-08-22): exact 19-B body `[u16 handle][u8 FlagsLow][i32 x][i32 y][i32 z][u16 occupantOrCarrier][u16 groundOrRider]`; the client applies the record only to the three flag ItemDefs 4091/4093/4095 (`@0x430F06..0x430F19`; any other handle is ignored) and writes the low Flags byte, position, and both topology handles. `Server_SendDestructibleDeathPacket @0x50D900` calls `serialize_entity_with_parent_and_target @0x505810` and sends with mask `0x80` (listen host included). Flag pickup/drop/save/non-CTF capture use this record; CTF capture instead calls `Server_RemoveEntityAndNotify @0x50A270`, whose 0x12 mask is `0x90` (listen host excluded). |
+| 0x2F | 0x430E10 | `_0x02F` | **objective/entity parent-state update** (decoded + bidirectionally ported 2026-08-22): exact 19-B body `[u16 handle][u8 FlagsLow][i32 x][i32 y][i32 z][u16 occupantOrCarrier][u16 groundOrRider]`; the client applies the record only to the three flag ItemDefs 4091/4093/4095 (`@0x430F06..0x430F19`; any other handle is ignored) and writes the low Flags byte, position, and both topology handles. `Server_SendDestructibleDeathPacket @0x50D900` calls `serialize_entity_with_parent_and_target @0x505810` and sends with mask `0x80` (listen host included). Flag pickup/drop/save/non-CTF capture use this record; CTF capture instead calls `Server_RemoveEntityAndNotify @0x50A270`, whose 0x12 mask is `0x90` (listen host excluded). **Periodic producer (ported 2026-09-12):** `sub_517B20 @0x517B20`, called once per 62-tick periodic second from `Server_TickUpdate @0x51df64` (after `Server_CheckPlayerViolations @0x51df5f`, before `SpawnWaveList_Tick @0x51df6e`; authority-gated only `@0x517b27`, not on is_in_session, the round-over latch or the pre-round timer), walks pool 1 in slot order counting rows with a non-null itemDef `@0x517b55` whose id is 4091/4093/4095 `@0x517b57..0x517b6d`, and when the running index equals the static cursor `dword_24C10D4` `@0x517b71` sends that entity through the same `Server_SendDestructibleDeathPacket` (mask 0x80, states 6/7, host included; alive/dead never tested), increments the cursor `@0x517b81` and returns; a walk that sends nothing resets it `@0x517b90`. With N flags every flag's full state is re-broadcast once per N+1 seconds regardless of events. Reimpl: `refresh_next_flag_state` in `server_tick.cpp` over `World::flag_refresh_cursor`; `npruntime_server_tick_maintenance` pins the A/B/silent/A cadence, the carried attach and the post-round continuation. |
 | 0x30 | 0x431170 | `_HandleChecksumRequest` | entity-checksum request `[u8 entityId][u16 checksum]` → reply **C2S 0x20** (NOT 0x21; §5.35), 5 B `[u8 id][u32 challenge ^ source]`; reply builder + literal-42 arm §5.65 (silent by default; exact named-corpus sources only, D-NET-181) |
 | 0x31 | 0x4311E0 | `_0x031` | ammo-definition CRC request `[u8 ammoIndex][u16 xorKey]` (3 B) → reply **C2S 0x21**, 9 B `[u8 index][u32 xorKey^crc][u32 echoed key]`; field map + reply builder §5.65 (silent by default; exact named-corpus sources only, D-NET-181) |
 | 0x32 | 0x428060 | `_0x032` | |
@@ -379,7 +379,7 @@ sweep; blank = not yet characterized.
 | 0x34 | 0x4283A0 | `_PlaySoundByName` | PLAY-SOUND [u8 flag][cstr profileName][flag==1: 3×i16 pos <<16]; flag 0 = flat, 1 = positioned 3D full-volume (kong name "GotoTeleport" was a misnomer, renamed). Field map §5.50 (decoded) |
 | 0x35 | 0x4261A0 | `_0x035` | |
 | 0x36 | 0x426120 | `_0x036` | |
-| 0x37 | 0x431250 | `_0x037` | |
+| 0x37 | 0x431250 | `_HandleWeaponSlotAction` (misnomer: door rows) | DOOR-SLOT ACTION `[u16 handle][i16 state][u8 number]` (5 B, each short read 0): row = door_slot (entity+0x2B8) + number − 1; gate itemDef && row > −1 && number != 0 && number <= (int8)itemDef+0x890 (@0x4312f8); row.state = state (@0x431307); state 0 snaps the phase to 0 (@0x43131f), state 2 to 0x10000 (@0x431316), 1/3 leave it to FadeEffect_UpdateAll. Senders: `Server_SendWeaponSlotActionPacket @0x50F9A0` (mask 0x90; the state word is row (door_slot + n − 1)'s state, 0 when n > count, unguarded for n == 0) on every row completion (FadeEffect_UpdateAll @0x44e982, 1-based row number) and for EVERY selected section of a door command (Entity_ProcessSectionDamageTransition @0x43f462, 0-based idx, transition or not), plus the requester-only reply to C2S 0x1A (@0x514c74, mask 0x30). Codec `decode_door_slot_action` / `encode_door_slot_action` (2026-09-12); the runtime consumers are D-DOOR-1 (world-wac-ai-re.md §33.14) |
 | 0x38 | 0x4260B0 | `_0x038` | |
 | 0x39 | 0x42E6D0 | `_0x039` | anti-cheat charattr CHARACTER-row CRC challenge `[u32 seed]` → C2S 0x1C (§5.34) |
 | 0x3A | 0x422680 | `_0x03A` | MEDIC-REVIVING (empty body, witnessed 2026-09-10): the recipient's `+0x1E0` "a medic is reviving me" word <- 1, `dword_B764BC` <- 255, the default progress bar, the player ambient sound. The latch hides the DEATH screen's MEDIC/CALLMEDIC statics (`!entity+0x1E0` @0x553ec5) and blocks a second medic (`GameEvent_HandleMedicInteraction @0x4E6790`); cleared by `Game_InitNewRound @0x422740` (the local respawn) and mission start @0x524360; the host stamps the victim in the revive sender @0x517CD0. Ported: `ClientState::local_medic_reviving` -> the deploy statics feed |
@@ -398,7 +398,7 @@ sweep; blank = not yet characterized.
 | 0x49 | 0x42C0A0 | `_0x049` | weapon-reload `[u16 handle][u16 reloadParam]` → WeaponSlot_ReloadAmmo (the IDB misnomer `handle_camera_sync_packet_0x049` renamed 2026-08-15 → `NapiNPClientMsg_WeaponReload_0x049`; §5.35) |
 | 0x4C | 0x428570 | `_0x04C` | target-assignment list (squad/AI orders) |
 | 0x4D | 0x4317B0 | `_HandleSpawnSlot` | reads u8 slot; local slot → tip event; otherwise client replies C2S 0x22+0x23; reads `dword_24C1928` as a skip-tip-if-already-spawned guard (never writes it) |
-| 0x4E | 0x431870 | `_HandleBatchKill` (Kong: `_HandleBatchSpawn`) | u16 count + per-slot u16; calls `Entity_KillBySlotId` (kill, not spawn), then replies C2S 0x28 |
+| 0x4E | 0x431870 | `_HandleBatchKill` (Kong: `_HandleBatchSpawn`) | one PAGE of the join-window KILL LIST `[u16 resume][u16 slot]×N` to the body end: the leading word is the host iterator's resume index (0xFFFF = exhausted; the handler calls it `count` and never uses it as a bound, @0x43188a), every following slot dies via `Entity_KillBySlotId(slot, 0, 1)` (@0x4318a5..0x4318c2), and when at least one slot followed the client queues the C2S 0x28 continuation `{dword_A82360, dword_A82364, resume}` (@0x4318db..0x4318ff) so the host serves the next page; a bare `FF FF` returns with no reply (@0x431904). Host page builder `collect_valid_weapon_slots @0x516000` (§5.33): pools 0..2 from `start`, predicate `NetSync_IsEntityEligibleInWindow @0x507AA0`, <= 33 slots per page. Codec `decode_batch_kill` / `encode_batch_kill` (2026-09-12) |
 | 0x4F | 0x4286C0 | `_0x04F` | |
 | 0x50 | 0x431910 | `_TeamAssign` | **TEAM ASSIGN — decoded + PORTED 2026-07-25** (`decode_team_assign`). Body (6 B): `[u16 entityHandle][u8 team][u16 netId][u8 animSlot]`; a SHORT body defaults each remaining field to 0. The trailing two fields are the target's IDENTITY, not squad state — the former `spawnPointId`/`squadLeader` names were guesses and are RETIRED 2026-07-25: the producer writes `entity+0x15C` (the packed character / minimap id) and `entity+0x374` (the character selector), and ZEROES both for a non-player behind the `Flags & 0x100` gate `@0x506b3d` (live arms `@0x506b51`/`@0x506b6b`) [orig: `write_entity_handle_packet @0x506ad0`]; the consumer stores them straight back (`@0x431b46` netId, `@0x431b3a` animSlot). Gates: `handle != 0xFFFF`, `(handle & 0xF000) < 0x5000`, `slot < pool capacity`. Legs, in order: (1) entity == local player → `byte_A85B48 = team` @0x4319db — **the SAME latch the S2C `0x04` tail byte writes**, so this message is the SECOND of the latch's three writers (D-NET-168); (2) if NOT authority → `entity->Team = team` @0x4319ee, for ANY pool 0..4 entity; (3) the player-slot team byte mirrors it (slot+14, @0x431a0b); (4) if `entity->Flags & 0x100` (a player) AND entity == local player: retail re-selects the per-side profile (team 1/3 → side A block, else side B), refreshes `restrictionData`, and **RE-SENDS ONE C2S `0x2F`** via `NetPacket_SendLoadoutSubmit` @0x431a9e with the NEW team, the per-side profile class, and slot **195 raw** (the pre-`Player_InitPlayer` form — NOT the live `g_currentWeaponSlot`), then C2S `0x22`/`0x23` acks (@0x431acb..0x431b05), `Player_InitPlayer(1)` @0x431b14 and the netId/animSlot identity restore (@0x431b3a..0x431b91). PORTED: legs 1, 2 and the leg-4 `0x2F` re-submission (slot 195 raw). DEFERRED with witnesses (D-NET-168): the leg-4 per-side profile CLASS reselect @0x431a35..0x431a9a (we hold ONE applied kit), the `0x22`/`0x23` acks, `Player_InitPlayer`, the identity restore, and leg 3 (we keep no client-side player-slot team byte). Producer: also the ZONE-FLIP broadcast — `Server_ChangeEntityTeam @0x518D70` (ex-`Server_ChangePlayerTeam`; retargets ANY entity incl. capture zones/spawn objects, §5.61) |
 | 0x51 | 0x431BB0 | `_HandlePlayerSpawn` | TEAM-CHANGE confirm — FIELD-PARSED (8 B): [u16 ackSeed][u16 handle][u8 team→+354][u16 packedCharId→NetId @0x431cad][u8→+884]; acks C2S 0x29 (ackSeed+1 @0x431c99) + REBINDS CharacterEntity @0x431cf3 (§5.59, D-NET-148); retail sends it only for pending team changes |
@@ -424,13 +424,13 @@ sweep; blank = not yet characterized.
 | 0x66 | 0x42D4C0 | `_HandleWeaponRestrictions` | count + (slot, restriction) pairs |
 | 0x67 | 0x42D570 | `_0x067` | |
 | 0x68 | 0x42DAA0 | `_0x068` | loaded-model snapshot page request `[u32 startIdx]` → C2S 0x3D (§5.34; “entity-index” is the retired provisional name) |
-| 0x6A | 0x432510 | `_0x06A` | |
+| 0x6A | 0x432510 | `_HandlePlayerJoinLeave` | CLAN ROSTER (non-authority only): `[u8 action][u32 accountNetId]` + for actions 1 (add) / 3 (walk reply) `[cstr name][cstr tag]`; the reader keeps <= 64 name / <= 8 tag chars, stopping at NUL or the body end, but skips to the FULL name's NUL before the tag (@0x4325bc..0x43261b); action 2 removes the node (sub_52B330 @0x432578); 1/3 upsert via `CLinkedList_FindOrCreateByNetId @0x52B540` (node +12 netId, +16 name[65], +81 tag[9]); every action then runs `PlayerSlotTable_UpdateAllDisplayNames @0x434A00` → `PlayerSlot_SetName @0x4348F0`, which copies the tag of the node matching the slot's account id (slot dword 15 = the 0x46 field-0x0800 u32, §5.21) into slot dword 8, the 8-char third string of the 0x16 Tab row (@0x42fd85, the highlighted column @0x423ddf). Action 3 additionally queues C2S 0x4E `{netId}` (@0x43266c) to page the walk. Serializer `serialize_minimap_slot @0x5073B0` (type 2 = 5 B id-only). Senders: `Server_PlayerAdd` first slot of an account `{1, id, name, tag}` mask 4112 (@0x51ceef); `Server_HandlePlayerDisconnect` last slot `{2, id}` mask 4112 (@0x51b7eb); the C2S 0x4E reply `{3, ...}` mask 32. LAN accounts have netId 0: no node, no 0x6A. Codec `decode_clan_roster_update` / `encode_clan_roster_update` (2026-09-12); the client map/tag column and the host emits are the D-NET-149 DEFERRED residue |
 | 0x6B | 0x425520 | `_0x06B` | minimap overlay batch `[u8 count]`+count×12B, fully consumed: handle + wire s16 pos + lifetime_s + type + ring height (§5.35) |
 | 0x6C | 0x428FC0 | `_0x06C` | zone presence count (3 B): [u16 zoneHandle][u8 count 1..32] — players inside an active timed capture, emitted on change (`CaptureCtx_UpdateActiveCaptureRate @0x53B600` → `NetPacket_WriteZonePresenceCount @0x506DE0`). **Fold-only closure 2026-08-24**: the client writes ONLY `dword_A85BA0` (the RATE of the nearest-tracked-window cluster `dword_A85B88..A85BA0`) when the handle matches `dword_A85B88` `@0x42902d..0x429038`; the 0x53 handler seeds the cluster (`@0x428bE8..0x428d60`: same entity + same modeB keeps `progress`, a changed modeB re-seeds `progress = target = 62*start`, `limit = 62*end`, `rate = byte`, `start >= end` zeroes the cluster but progress; a different entity is adopted only when at least as near and within 0x140000 = 20.0 u `@0x428cf5`); `Client_ProcessNetworkFrame @0x42c2eb..0x42c347` advances `progress += rate` per frame with the clamp `progress <= target` when `rate > 0` (so a 1..32 count never moves a progress parked at target) and `progress >= 0` when `rate < 0`, and resets the cluster (rate 1) when `target == limit`. An exhaustive immediate scan (`9C 5B A8 00` / `94 5B A8 00` / `98 5B A8 00` over 0x400000..0x7A0000) finds NO reader of progress/target/limit outside the two handlers and the pump: there is no presentation consumer in retail — the capture bar reads the 0x0A phase-0 `word_A85B7C`, and the ZoneTimerList 13-DWORD entry the LFP HUD reads is a different structure. Reimpl: `ClientRuntime::TrackedCaptureWindow` (adopt / re-rate / per-frame pump, ctest `npruntime_client_runtime`). §5.61 |
 | 0x6D | 0x430C50 | `_HandleEntityDeath` | |
 | 0x6E | 0x429880 | `_0x06E` | spawn-wave / deploy-screen status (§5.31's "squad roster"): `[u8 groupCount]` + per group `{u16 zoneHandle, u16 zoneIdx, u8 queuedCount, u16 waveCountdown, u16 members[]}` — sent on wave-queue join + 1 Hz to dead/deploying players (`NetPacket_WriteSpawnWaveStatus @0x507490`). Client map **§5.31**, producer §5.61 |
 | 0x6F | 0x428D60 | `_ZoneTimerValue` | ZONE-TIMER VALUE (15 B; NOT cinematic camera — that label was wrong): [u16 zoneHandle][u8 team][i32 control 16.16 (0..1.0)][i32 limit=0x10000][i16 delta][u8 friendlies→+544][u8 enemies→+545], ×62 into g_zone_timer_list; the SECURE channel — server emits every 1 Hz pass per numbered zone (`Server_UpdateCaptureZoneEntities @0x519690` → `NetPacket_WriteZoneTimerValue @0x506E70`). Client map §5.49, producer §5.61 |
-| 0x70 | 0x429A30 | `_0x070` | |
+| 0x70 | 0x429A30 | `_HandleWeaponLoadoutList` (misnomer: vehicle spawn list) | VEHICLE-SPAWN AVAILABILITY, the requester-only reply to C2S 0x42 (mask 32): `[u8 3]` then per EntityLimit row `[u16 typeId][u8 avail][u8 max]` until `u16 0` (0xFF/0xFF = unlimited). The client stores the leading byte in `dword_A81BB4` (@0x429a5a, unused as a bound) and fills a 12-B-stride table @0xA81BC0 `{typeId, itemDef*, avail, max}` until the 0 word or fewer than two bytes remain, missing row bytes reading 0 (@0x429a6a..0x429ab9); `dword_A821B8` = parsed count, `dword_A81BB0` = 1 (list ready). Writer `serialize_weapon_overlay_slots_0 @0x5105A0` walks the host's 128×292-B EntityLimit table (`EntityLimit_InitTable @0x509A70` seeds 23 rows at mission start; `EntityLimit_SetEntry @0x500E50`): per row unlimited-vehicles (`dword_24D1E38`) → 0xFF/0xFF; max == −1 && initial == −1 → 0xFF/0xFF; initial == −1 → max 0xFF, avail = (u8)max − `Server_CountEntitiesByTypeAndTeam @0x510460`; else max = limit[team], avail = (max == −1) ? max : min((u8)max − count, max), unsigned (@0x5105ff..0x510651). Codec `decode_vehicle_spawn_availability` / `encode_vehicle_spawn_availability` (2026-09-12); the joiner's vehicle.mnu consumer is the D-HUD-14 residue |
 | 0x71 | 0x425600 | `_0x071` | |
 | 0x72 | 0x425710 | `_0x072` | |
 | 0x73 | 0x425770 | `_0x073` | |
@@ -482,7 +482,7 @@ This is what a reimplemented server must **handle**.
 | 0x17 | 0x514850 | |
 | 0x18 | 0x51A020 | |
 | 0x19 | 0x514250 | |
-| 0x1A | 0x514B20 | |
+| 0x1A | 0x514B20 | DOOR-SLOT REQUEST (`NapiNPServerMsg_HandleVoteUpdate`, a misnomer): `[u16 handle][i16 value][u8 number]` (5 B, short reads 0), the non-authority's per-section door command from `NetPacket_SendWeaponSwitch @0x42D0C0` (queued reliable for every selected section, gated row > −1 && idx != 0 && idx <= count @0x42d0f9). Host: authority + sender player + its entity (@0x514b31/@0x514b40), pool lookup (pool < 5, slot < capacity), the same gate (@0x514bf2..0x514c08), then row.state 0/3 → 1 iff value == 1 (@0x514c33), 1/2 → value iff number == 3 (the SECTION number, not the state, @0x514c2a); reply S2C 0x37 `{handle, row.state, number}` to the requester, mask 0x30 (@0x514c46..0x514c74). Codec `decode_door_slot_action` / `encode_door_slot_action` (2026-09-12); consumers = D-DOOR-1 |
 | 0x1B | 0x501D90 | |
 | 0x1C | 0x501D40 | charattr CHARACTER-row CRC reply (to S2C 0x39, §5.34) |
 | 0x1D | 0x501C60 | STANCE CHANGE `[i16 stanceCode]` — the crouch/prone replication leg (witness 2026-07-03). Authority-gated; subject = the SENDER connection's player (conn+352 → +192 → entity). Codes are the stance-TRANSITION anim ids: 169 → `MoveOrder = (MoveOrder & ~0x300) \| 0x200` (crouch), 170 → `\| 0x100` (prone), 172 → `& ~0x300` (stand); subject == local player additionally re-latches `dword_B76484/dword_B76480`. Feeds the body-anim stance bases (§5.10 off-14) + the recipient's own 0x0A tail echo (§5.9). [orig: `NapiNPServerMsg_HandleStanceChange @ 0x501C60`] |
@@ -494,7 +494,7 @@ This is what a reimplemented server must **handle**.
 | 0x25 | 0x514DF0 | weapon-reload request (mid-game) — note the direction asymmetry vs S2C 0x25 (§5.3) |
 | 0x26 | 0x502390 | VEHICLE-ATTACH request — server overwrites wire word0 with the requester's OWN handle (anti-spoof) → Entity_ProcessVehicleAttach(vehicle/seat words) |
 | 0x27 | 0x4FC980 | VEHICLE-DETACH request: [u16 handle] → Entity_DetachFromVehicle(entity, entity+364) |
-| 0x28 | 0x51A550 | weapon-loadout request `[u32 loadoutFilter][u32 flags][u16 extra]` → host replies S2C 0x4E (§5.33); 0x0F reply-burst member |
+| 0x28 | 0x51A550 | join-window KILL-LIST request (`NapiNPServerMsg_HandleWeaponLoadoutRequest`, a misnomer) `[u32 windowMin][u32 windowMax][u16 start]` (10 B, short reads 0): the 0x0F reply-burst member `{dword_A82360 (S2C 0x19), dword_A82368 (the 0x0F session tick), 0}` (@0x42e5d3..0x42e5f7) and the S2C 0x4E continuation `{dword_A82360, dword_A82364 (S2C 0x1A), the page's resume word}` (@0x4318db..0x4318ff). Host → ONE S2C 0x4E page from `start`, or nothing (§5.33). Codec `decode_burst_loadout_request` / `encode_burst_loadout_request` (2026-09-12) |
 | 0x29 | 0x514F10 | team/spawn ack `[u16 team_change_index]` (client 0x51-apply sends team+1 @0x431c99; also sent at deploy/team pick) → S2C 0x51 ONLY for a pending `g_team_change_entity_list @0xC947C8` entry via write_entity_packet @0x506bb0; a plain join-deploy 0x29 draws NO reply (§5.59, D-NET-148; the old "entity-packet request → always 0x51" reading was wrong) |
 | 0x2B | 0x514FE0 | STAT-BOARD CHUNK REQUEST `[u16 offset]` (IDB name `NapiNPServerMsg_HandleReplayDataRequest` is a misnomer — it serves the end-of-round board): authority-only, replies to the REQUESTER alone (`send_mask 0x20`) with S2C 0x56 `[u16 streamLen][u16 offset][≤200 B]` cut from the server's board stream `stru_C947D8` by `NetPacket_WriteReplayStreamChunk @0x506F60` (also misnamed; the 200 clamp `@0x506fb9`, an out-of-range offset returns 0 bytes `@0x506fa0`). The stream is filled by `Server_BuildEndOfRoundScoreboard @0x508F30` from `Server_ProcessRoundEnd @0x5164f0` (the call `@0x516590`); no server path pushes 0x56 unrequested. §5.68 |
 | 0x2C | 0x515070 | RTT ping/pong consumed `[u32 ts][u8 echoFlag]` (§5.34); ⇄ S2C 0x57 [HandlePingResponse, enforces min/max ping] |
@@ -515,9 +515,9 @@ This is what a reimplemented server must **handle**.
 | 0x3D | 0x500EC0 | loaded-model snapshot page reply (to S2C 0x68, §5.34; formerly mislabeled entity-index list) |
 | 0x3E | 0x500E10 | |
 | 0x3F | 0x518F10 | |
-| 0x40 | 0x51C4C0 | VEHICLE-SPAWN request (`NapiNPServerMsg_HandleVehicleSpawnRequest`): [u16 sourceHandle][u8 typeIndex]; gates itemDef+2772 bit + team + availability; spawns at the source model's `boat`/`helo` userpoint (else z+2.0) and broadcasts S2C 0x18 (mask 0x90) for the spawned entity + every pool-1 entity sharing refNum(+0x215). §5.46 |
+| 0x40 | 0x51C4C0 | VEHICLE-SPAWN request (`NapiNPServerMsg_HandleVehicleSpawnRequest`): [u16 sourceHandle][u8 typeIndex]; gates itemDef+2772 bit + team + availability; spawns at the source model's `boat`/`helo` userpoint (else z+2.0) and broadcasts S2C 0x18 (mask 0x90) for the spawned entity + every pool-1 entity sharing refNum(+0x215). §5.46. Full gate order (@0x51c4d4..0x51c5f6): requester not spectator (player+100567 == 0), each short read 0, handle != 0xFFFF, typeIndex < `dword_B4835C`, `g_ItemGroups[typeIndex].itemId` != 0, pool < 5 and slot < capacity, source has an item def, `(1 << typeIndex) & def+2772`, source team 0 or == player team, then `dword_24D1E38` (unlimited) or the EntityLimit gate `sub_5104C0(itemId, team, 1)`; `Entity_SpawnDeployable @0x51c2b0` sets Flags |= 0x1000, the bit `Server_CountEntitiesByTypeAndTeam` counts. Codec `decode_vehicle_spawn_request` / `encode_vehicle_spawn_request` (2026-09-12); the host handler and the joiner's vehicle.mnu pick are unported |
 | 0x41 | 0x510540 | |
-| 0x42 | 0x510930 | |
+| 0x42 | 0x510930 | VEHICLE-SPAWN AVAILABILITY request (`NapiNPServerMsg_SendWeaponSlotStates`): no fields read; authority + sender connection (+352) + its player (+192) → `serialize_weapon_overlay_slots_0 @0x5105A0` → S2C 0x70 to the requester only, mask 32 (@0x51095c..0x510989). Codec `decode_vehicle_spawn_availability_request` (2026-09-12); the retail sender is the unported vehicle.mnu screen |
 | 0x43 | 0x510990 | |
 | 0x44 | 0x510AE0 | |
 | 0x45 | 0x510C00 | |
@@ -528,7 +528,7 @@ This is what a reimplemented server must **handle**.
 | 0x4B | 0x510DC0 | |
 | 0x4C | 0x5111B0 | client quality/state byte `[u8 value]` (host clamps 0..4, sets the player's connection-quality); field map §5.33 (decoded) |
 | 0x4D | 0x518F70 | |
-| 0x4E | 0x511210 | client reply when the S2C 0x05 flag byte is non-zero |
+| 0x4E | 0x511210 | CLAN-ROSTER WALK (`NapiNPServerMsg_HandleMinimapSlotRequest`): `[u32 afterNetId]` (short reads 0, @0x511245): `{0}` is the kick the client sends when the S2C 0x05 flag byte is non-zero, after freeing its roster list (`NapiNPClientMsg_HandleGameStart @0x42E180`, @0x42e1b3/@0x42e1d9); `{netId}` is the continuation each S2C 0x6A action 3 re-queues (@0x43266c). Host: authority + sender player; `sub_52B190` picks the smallest node id strictly greater than the value → `serialize_minimap_slot(3)` → S2C 0x6A to the requester, mask 32 (@0x51126c..0x51129e); no such node → silence (a LAN roster has none, so the golden frame-17 `{0,0,0,0}` draws no reply). Codec `decode_clan_roster_walk_request` / `encode_clan_roster_walk_request` (2026-09-12) |
 | 0x4F | 0x514A40 | |
 | 0x50 | 0x5112B0 | |
 | 0x51 | 0x51C840 | |
@@ -558,7 +558,10 @@ This is what a reimplemented server must **handle**.
   was a conflation of *opcode* with *msg_id*: the S2C `g_np_msginfo_client` table tops out at
   msg_id `0x83` (123 entries + sentinel) and the C2S `g_np_msginfo_server` at `0x51` (72 + sentinel);
   `0x86`/`0x87` exist only as session *opcodes* (`Nwu_HandleServerGoodbye`/`Probe`, above), not
-  message ids. No dead client-table entries.
+  message ids. No dead client-table entries. **2026-09-12:** `0x86` is now on both sides of the
+  reimpl — `SESSION_OPCODE_SERVER_GOODBYE`, the host's `host_goodbye_burst` writer and the
+  joiner's `on_server_goodbye` receive leg (§5.64.1); `0x45`/`0x85` ping and `0x47`/`0x87`
+  probe remain unmodeled.
 - Phase B (full C2S decompile sweep): 0x47 / 0x48 / 0x06 / 0x21 / 0x0C-extended landed
   (§5.10, §5.16, §5.17, plus the 0x47/0x48 entries above) against the 3-player loopback
   pcap. The then-remaining candidates have since landed: 0x22 / 0x23 / 0x28 (§5.33),
@@ -1052,7 +1055,11 @@ queued AND nothing retained, the pump still force-builds a packet once
 established connection only when elapsed receive silence is strictly GREATER THAN
 `cs_dir0.timeout_ms` = **120000** ms (both stored by `CNapiNetwork_Init @ 0x4ca4a0`), so equality
 remains healthy. The transport state remains established while gameplay death/redeployment returns
-the UI/runtime to its driving phase; that presentation transition does not suspend the reap.
+the UI/runtime to its driving phase; that presentation transition does not suspend the reap. The
+reap runs from state-5 entry (the accepted 0x82) with no gameplay gate, its clock is stamped only
+by an in-order delivered session packet (or a ping), and a loose `_NSTMOUT.TXT` in the host's game
+directory rewrites `timeout_ms` (NEVER / negative = -1, disabled; N = N seconds) for both the host's
+own reap and, through the 0x82 CS block, every joiner's (§5.64.1).
 A client that only transmits while deployed — no per-frame `0x0C`, no housekeeping — therefore
 survives on this leg alone; omitting it drops the session after ~2 minutes of quiet (the live
 retail-host symptom fixed 2026-07-24). OpenNova's joiner ports the empty leg; the host side is
@@ -3364,6 +3371,11 @@ row_count × { [u8 slot_id][u16 statusFlags LE][u16 score1 LE][u16 score2 LE][u8
 - **The second row u16 is a STATUS BITFIELD, not a ping** (2026-07-28 correction): it lands at scoreboard record+0x36 `[orig: @0x42fdb4]` and its only reader bit-tests it to append the row's glyph suffix `[orig: the read @0x423f1f + the thirteen bit tests @0x423f23-0x4240e0]`; the parser ZEROES it when `g_scoreboardStatusSuffixEnabled` (set by the server's `SU <n>` text command `[orig: @0x429f71]`) is clear `[orig: @0x42fbfb]` — the serializer has the per-recipient twin gate `slot+96481` `[orig: @0x504bd6]` — which a latency value never would be.
 - **The fourth row u16 is score2 = accumulated points/EXP, not deaths** (2026-08-06 correction): `stats[29]` `[orig: encoder @0x50D960 via CPlayerStats_GetFieldPlusOne (ex CRenderState_GetFieldByIndex)(stats, 0x1C); sole writer CPlayerStats_RecordEvent case 28 @0x52C8E0; the accessor reads the raw dword index+1 @0x52d7d6, so field 0x1C IS the case-28 dword]`. Deaths is `stats[7]` (the case-6 counter `[orig: @0x52c9e8]`) and is absent from 0x16 entirely. The retail CLIENT never reads score2 — the SERVER sorts team-mode rows by it `[orig: Player_ComputeScore @0x500A80]`. `score1` is the mode's primary stat `[orig: ScoreRules_GetPrimaryScoreField (ex sub_52C850) @0x52C850]` and is the ONLY score the Tab list draws `[orig: the sole read @0x423E76 in HUD_DrawKillList @0x423A30]`.
 - **Folded on the client since 2026-08-19**: `replication::ClientReplicaPipeline::apply_player_list` / `apply_player_sync` keep the board and its connection-slot roster in `ClientState`, reproducing the witnessed parser shape: every well-formed 0x16 applies UNCONDITIONALLY (retail zeroes `g_scoreboard_row_count` before the row loop and parses the team table + trailer even for a zero-row list `[orig: @0x42fb46]` — an empty update yields an empty board; the drawer skips the row walk at zero `[orig: @0x423c46]`), rows for roster-unknown slots DROP (`[orig: @0x42fc05]`; the C2S 0x22 retry send is a D-HUD-24 residual), and name/clan join INTO the row at apply time exactly where retail copies them into its 56-B records `[orig: @0x42fd4c..0x42fd8f]` — so a later 0x46 removal (which deactivates and wipes the slot via `PlayerSlot_ClearAndUnlink @0x434730`; a re-bind re-inits every field `@0x4346c0`) never blanks rows already on the board. An accepted row also refreshes the slot's team and its live entity's team `[orig: @0x42fc7c/@0x42fc88]`. Rows are kept in WIRE ORDER; the client never re-sorts `[orig: the record walk in HUD_DrawKillList @0x423A30]`. (The 2026-08-19 draft's “an empty 0x16 never clobbers” / “a removal keeps the name binding” rules were refuted the same day against @0x42fb46/@0x434730.)
+- **The 252-row clamp** (ported 2026-09-12): the parser runs `total = count > 0xFC ? 252 : count`
+  rows `[orig: @0x42fb3a..0x42fb3c]` and reads the team table from wherever the row loop stopped,
+  so a >252-row list misparses on retail too. `decode_player_list` loops min(count, 252) rows and
+  keeps the wire byte in `player_count`; no retail or OpenNova host emits more than 252 rows (our
+  server-info cap is min(max_players, 251)), so the clamp is reachable only from a non-retail host.
 - **Byte 0 is a FLAGS byte, not max_players** (2026-07-03 correction): bit0 = team-mode, bit1 =
   timed-scores → `g_scoreboard_flags @ 0xA823B8` (renamed 2026-07-03 from the bare dword label).
   The writer sets bit0 iff its computed team count is nonzero and sets bit1 only
@@ -3422,7 +3434,7 @@ then present fields IN SOURCE ORDER (NON-numeric — 0x10 before 0x04, 0x1000 be
   0x0040 u8 → slot+48
   0x0080 u8 → slot+49
   0x0400 u8 quality (clamp 4)
-  0x0800 u32 entityRef
+  0x0800 u32 accountNetId → slot dword 15 (+60) @0x431736, then PlayerSlot_SetName @0x43173d
 bit 0x4000 (no body byte) → client queues a C2S 0x22 ack
 ```
 
@@ -3438,6 +3450,34 @@ bit 0x4000 (no body byte) → client queues a C2S 0x22 ack
   and either Auto Medic is enabled or the explicit request latch is set; otherwise it writes zero
   `[orig: NetPacket_SerializePlayerSync0x46 @0x505E80]`. This resolves the probe's 0x77→0x00
   countdown and removes the former class/subtype interpretation.
+- **The 1 Hz team-mode producer of that field (witnessed + ported 2026-09-12).** The 0x77→0x00
+  countdown the probe recorded IS `Server_TickUpdate @0x51E2D0..0x51E378`: inside the
+  is_in_session block, when `g_GameType & 0x10000`, `g_weapon_resend_timer @0xC947A0` (its only
+  three refs) fires when zero or when a positive value decrements to zero (`@0x51e2db..0x51e2e9`),
+  reloads 62 (`@0x51e307`), and walks every slot with byte+4 (NOT state-gated) and an entity:
+  `(i16)entity+286 <= 0 && (entity+36 & 2) && (entity+44 & 0xC00) == 0` (`@0x51e333` — the
+  0x400 knife / 0x800 headshot cause bits; `Weapon_CalcImpactDamage @0x4EC920` writes 0x800
+  for head zones 0xD/0xE `@0x4ec9c6` and for seat types 2/3/6/7 on attrib-0x200 vehicles
+  `@0x4ec994`) → `NetPacket_SerializePlayerSync0x46(buf, 4096, slot, 8)` (`@0x51e352`; the
+  form-8 body `[u8 slot+20][u16 0x0008][u8 pool-0 entity index][u8 downedState]`) sent with
+  mask 0x180 (`@0x51e357`: 0x80 = slot state 6/7 AND 0x100 = slot byte+416 == the victim's
+  team byte `@0x51e36d`; host included, bots excluded), `SendFiltered(0x46, 1, 1)` `@0x51e373`.
+  Every dead revivable player is therefore re-published to its own team once per second,
+  self/environment deaths included (downedState 0 or the request bit alone). REIMPL:
+  `emit_team_downed_resend` in `server_tick.cpp` over `World::team_downed_resend_countdown`
+  and the per-connection `death_cause_revivable` latch (set from the victim entity's live
+  `cause_flags` (+0x2C) in the death transaction, read ahead of the classifier's reported-bit
+  clear `@0x516f4d`, cleared at deploy); `npruntime_server_tick_maintenance` pins the
+  zero-armed first send, the 62-tick cadence, the team filter, the 5-B form and the headshot /
+  non-team silences.
+- **Field 0x0800 is the NovaWorld ACCOUNT netId, not an "entityRef" / vehicle timer** (2026-09-12
+  correction): the serializer reads the slot connection's `napi_player_data +420` (the join
+  record's account id, the same dword `Server_PlayerAdd @0x51cdf0` keys the clan roster on) and
+  writes 0 without a connection `[orig: NetPacket_SerializePlayerSync0x46 @0x506257 / @0x506246]`;
+  the client stores it in slot dword 15 (+60) and immediately re-derives the slot's clan-roster
+  TAG (slot dword 8, the highlighted third column of the 0x16 Tab row) from the S2C 0x6A node list
+  `[orig: @0x431736 → PlayerSlot_SetName @0x43173d]`. LAN accounts carry 0. Codec field
+  `PlayerSync::account_id` / `kPlayerSyncHasAccountId`.
 
 ### Cross-note — pool-0 organic spawn path (controlled capture 2026-06-17)
 
@@ -3731,10 +3771,18 @@ invokes the entity's death callback) — so the first word is the **victim** slo
 attacker. The handler is defensive: it reads the victim if ≥2 B are present and the attacker if a
 further 2 B follow, then always kills.
 
-**S2C 0x4E — batch despawn/kill.** `[u16 count][count × u16 slot]`. [orig:
-`NapiNPClientMsg_HandleBatchKill @ 0x431870`] — Kong labeled it "HandleBatchSpawn", but it kills every u16 slot
-after the count word via `Entity_KillBySlotId(slot, 0, 1)` up to the buffer end (the leading
-`count` is echoed in the reply, not a read limit), then queues the C2S `0x28` ack.
+**S2C 0x4E: one page of the join-window kill list.** `[u16 resume][u16 slot]×N` to the body
+end. [orig: `NapiNPClientMsg_HandleBatchKill @ 0x431870`]. Kong labeled it "HandleBatchSpawn", but
+it kills every u16 slot after the leading word via `Entity_KillBySlotId(slot, 0, 1)` up to the
+buffer end (@0x4318a5..0x4318c2). The leading word is the HOST ITERATOR'S RESUME INDEX (0xFFFF when
+exhausted; the handler names it `count` and never uses it as a read limit): when at least one slot
+followed, the client queues the C2S `0x28` continuation `{dword_A82360, dword_A82364, resume}`
+(@0x4318db..0x4318ff) and the host serves the next page from that index; a bare `FF FF` (a walk
+that started valid and found nothing) returns with no reply (@0x431904). The host side is the §5.33
+page builder (`collect_valid_weapon_slots @0x516000`: pools 0..2 from `start`, the
+`NetSync_IsEntityEligibleInWindow @0x507AA0` predicate, <= 33 slots per page). Codec
+`decode_batch_kill` / `encode_batch_kill` (2026-09-12); the client apply + continuation and the host
+walk are runtime consumers still to port (the event-driven 0x26 stream is separate).
 
 ### 5.27 Replay event + environment streams (tooling, 2026-06-17)
 
@@ -4007,7 +4055,7 @@ world-state reply burst, the 0x46 `0x4000`-ack, the 0x4D spawn-slot). Field-mapp
 |---|---|---|---|
 | `0x22` | `[u8 slot][u16 fieldFlags]` (3 B) | S2C `0x46` player-sync for `slot` with `fieldFlags` | `NapiNPServerMsg_0x022 @ 0x514C90` |
 | `0x23` | empty (0 B) | S2C `0x4C` visible-players snapshot | `@ 0x514D50` |
-| `0x28` | `[u32 loadoutFilter][u32 flags][u16 extra]` (10 B) | S2C `0x4E` | `NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550` |
+| `0x28` | `[u32 windowMin][u32 windowMax][u16 start]` (10 B; the IDB's "loadoutFilter/flags/extra" reading, corrected 2026-09-12) | ONE S2C `0x4E` kill-list page, or nothing | `NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550` |
 | `0x29` | `[u16 bufferIndex]` (2 B) | S2C `0x51` entity packet | `NapiNPServerMsg_0x029 @ 0x514F10` |
 | `0x4C` | `[u8 value]` (1 B; server clamps 0..4) | — (sets player connection-quality) | `NapiNPServerMsg_0x04C @ 0x5111B0` |
 
@@ -4058,8 +4106,32 @@ Every witnessed record binds a player slot to its own live entity and only in-wo
 (the idle host is absent from the LAN samples); our host lists every admitted player with a bound
 entity. The exact server-side selection inside `NapiNPServerMsg_0x023 @ 0x514D50` is a RESIDUAL
 witness (undecompiled). The `0x4E` reply to the join-burst `0x28` is the 2-byte sentinel `FF FF`
-(count `0xFFFF`, no slots) in all three retail goldens — real kill batches ride the event-driven
-despawn stream (D-NET-66), and a non-sentinel reply form on this path is unwitnessed. Both replies
+(resume `0xFFFF`, no slots) in all three retail goldens — no entity died inside the join window
+there; real kill batches otherwise ride the event-driven despawn stream (D-NET-66).
+
+**The 0x28 → 0x4E walk, witnessed in the binary (2026-09-12).** The request is the join-window
+KILL-LIST query, not a loadout: `[u32 windowMin][u32 windowMax][u16 start]`, each short read 0
+(@0x51a58e/@0x51a59d/@0x51a5ac). The 0x0F reply-burst member carries `{dword_A82360 (the S2C 0x19
+value), dword_A82368 (the 0x0F body's leading session tick), 0}` (@0x42e5d3..0x42e5f7); every
+non-empty 0x4E page makes the client queue the continuation `{dword_A82360, dword_A82364 (the S2C
+0x1A value, zeroed at `NapiClient_WaitForGameStart` entry @0x42cc51), the page's resume word}`
+(@0x4318db..0x4318ff). Host: `collect_valid_weapon_slots @0x516000` returns 0 bytes, NO reply,
+when `g_net_spawn_suspended || g_spawn_success_gate` (@0x51602e) or when the iterator starts
+exhausted (@0x516057); otherwise `weapon_loadout_iterator_begin @0x501680` walks pool categories
+0, 1, 2 (`category = start >> 12`, `index = start & 0xFFF`; index >= `Pool_GetUsedCount` advances
+0 → 0x1000 → 0x2000; category > 2 → 0xFFFF), appends every slot passing
+`NetSync_IsEntityEligibleInWindow @0x507AA0`: a valid handle (pool < 5, slot < capacity), entity
+non-null, `entity+560` (the `GetTickCount` stamp `Server_SendEntityStatePacket @0x509D70` writes on
+each state change) in `[windowMin, windowMax]`, `entity+28` and `+32` non-null, `!(Flags & 0x100)`
+(not a player), and (`Flags & 2` || `Flags & 4` || i16 health(+286) <= 0), while `count <= 32`
+(so <= 33 per page, @0x5160d1), then stores the iterator's current slot into the leading word
+(@0x5160d7) and the handler sends the page reliable, mask 160, to the requester only when the body
+is non-empty (@0x51a5d1..0x51a5f4). All three clocks are `GetTickCount` ms in retail (0x19 via
+NetPacket_WriteTimestampB, 0x1A via NetPacket_WriteTimestamp @0x5046c0, the +560 stamp); a host
+port must stamp the entity with the same clock it writes into 0x19/0x1A. Codecs
+`decode_batch_kill` / `encode_batch_kill` and `decode_burst_loadout_request` /
+`encode_burst_loadout_request` are landed; the client apply + continuation, the 0x1A value
+retention and the host walk are the runtime consumers still to port. Both replies
 were hard-required steady state in `nw_golden_diff` (no longer `kStateConditionedGaps`)
 until that capture-gated harness retired with the capture root (ca1cef465, 2026-08-29).
 
@@ -7312,7 +7384,25 @@ validation, both header bytes read SIGNED (`char`):
   @ 0x502550`).
 - a **NONZERO class outside 5..9 takes the SAME abort** (`@ 0x5158b1` → `@ 0x515fa5`) — as does an
   in-range class that arrives outside the armory window (`player[89] <= 0 || g_preround_delay_timer`
-  `@ 0x5158d0`, unmodeled here). The in-range path then runs the `g_hostClassAllowMask @ 0x24D59FC`
+  `@ 0x5158d0`). `player[89]` is the playerSlot+356 ARMORY-REUSE COOLDOWN (seconds): the
+  accept re-arms it from `g_GameConfigState.armoryReuseTime_A38 @0x25510F0` (cfg key
+  `armory_reuse_time`, default 30 `Config_SetDefaults @0x54d485`, admin `ArmoryTimer`) unless
+  playerSlot+89912 bit 1 — the PRE-ROUND LOADOUT LATCH — is set, then clears that bit
+  (`@0x515b96..0x515bb3`; class 0 seeds too). The latch is written with the whole state byte
+  at join (`Server_OnPlayerJoin @0x51a6d3` = 1, `@0x51a6e2` = 3 while `g_preround_delay_timer`;
+  +356 = 0 `@0x51a752`) and at every deploy (`Server_ProcessPlayerDeath @0x517803/@0x517812`;
+  +356 = 0 `@0x517900`); `Server_TickUpdate`'s periodic-second slot loop decrements a positive
+  +356 and clamps a negative one to 0 (`@0x51e00b..0x51e022`). A second gate runs BEFORE the
+  body is parsed (`@0x51581c..0x51583e`): a slot in net game state 10 (joined) whose latch is
+  clear, whose entity Flags(+36) carries neither DEAD 0x2 nor ARMORY-ZONE 0x400000, with no
+  pre-round timer, is answered with its current slot list — a deployed, alive player re-arms
+  only inside an armory volume, a dead one from the death screen, everyone during pre-round.
+  A null/entity-less/spectator (+100567) slot returns with NO reply at all. REIMPL 2026-09-12:
+  `GameConfig::armory_reuse_time` (a host cfg override rides `HostSessionOptions::armory_reuse_time`
+  into `Simulation::configure_host_session`), `Connection::armory_reuse_seconds` / `preround_loadout_latch`,
+  both gates and the seed/clear in the LOADOUT_SUBMIT case, the join/deploy zeroing, the
+  `tick_respawn_holds` decrement (`npruntime_server_tick_maintenance`); the spectator empty
+  grant (retail: no reply) is the pre-existing residual. The in-range path then runs the `g_hostClassAllowMask @ 0x24D59FC`
   remap (masked-off → first allowed), and ONLY that path's tail coerces a still-out-of-range value
   to **8** (`@ 0x515913`) — the same default our §5.23/§5.46 playerClass clamp mirrors.
 - **class 0** is NOT an abort: it skips the gate entirely, falls to the `type_mask = 0` default
@@ -7951,7 +8041,15 @@ vehicle section paths, kill credit via `Score_ProcessKillEvent`.
   carrier”); entity+44 bit 0x100 → event 32, the same-bullet/multiple-kill branch
   (`STRCND36`; its `rand() >> 8` value is only 0..127 and division by 21845 makes the
   nominal 33/34 variants unreachable at this producer, `@0x51718A..0x5171C7`); bit
-  0x800 → headshot/critical `10..12`; bit 0x400 → knife `13..15`; last AmmoDef equal to
+  0x800 → headshot/critical `10..12`; bit 0x400 → knife `13..15` (the three bits are
+  latched on the VICTIM ENTITY at hit time — 0x800 by `Weapon_CalcImpactDamage
+  @0x4ec994/@0x4ec9c6` on every authoritative hit, lethal or not, 0x100 by
+  `Projectile_ProcessDamageOnTarget @0x4e8169..0x4e816b` past a round's first player
+  kill, 0x400 by the kind-1 melee applier `@0x4e6740` — cleared per bit here when
+  reported and wholesale by the plyr callback's 64-tick think `@0x407b4d..0x407b4f`,
+  which every hit re-arms; so the 0x1E family and the 0x54 window change whenever a
+  player is finished off within 64 body ticks of a non-lethal critical hit. PORTED
+  2026-09-12 as `Entity::cause_flags`, world-wac-ai-re §19.2a); last AmmoDef equal to
   the `AMMO_60MM_MORTAR` slot resolved by `AmmoDef_LoadAll @ 0x40B0B0` → 49; standard
   `4..6`; non-player killer 22. With no killer, playerSlot+460 above `4*20` selects
   drowned event 26 (`STRCND29`); otherwise entity+44 bit 0x200 selects crash event 23
@@ -8288,7 +8386,11 @@ index only, §4 row). A dead player also gets a private 0x1E event **0x3A (58)**
 to spectators at join, §5.0e), then `find_spawn_entity_for_team
 @ 0x4FC810` picks an owned zone on the frontier (enemy-capturable, or the team's own
 frontier number) with control ≥ 1.0 — i.e. AS auto-deploy = "the front line"; gametype
-0x50010 returns without spawning. A real handle resolves via `Server_ResolveSpawnTargetHandle
+0x50010 returns without spawning (`if (requestedHandle != -2) goto LABEL_28; if (g_GameType ==
+0x50010) return;` `@0x519bc8..0x519bd4`, BEFORE `find_spawn_entity_for_team @0x519bde` — no
+deploy, no wave queue, no reply; REIMPL 2026-09-12: the RESPAWN_REQUEST case breaks on
+`kConquerAndControl` ahead of the frontier resolve, `npruntime_server_tick_maintenance` pins
+the C&C silence against the A&S deploy). A real handle resolves via `Server_ResolveSpawnTargetHandle
 @ 0x4FE110` (pools 0/1/2 only, def attrib `0x40000` required, team must match — or the
 player be teamless): pool 0 covers MOBILE spawn vehicles. Gates, in order: not already
 pending (`+89932` = the revive latch), `+364 == 0` — **note this one is on the
@@ -8304,6 +8406,15 @@ zone number is zero or whose control is at least `0x10000`. The helper/global na
 misleading: neither path counts living players. The
 requester must be dead (`entity+36 & 2`) or respawn-flagged (`+89912 & 0x10`)
 (@ 0x519cc7 — the dead-or-pending gate).
+**Handle 0 / an absent body** (witnessed 2026-09-12): a short body reads handle 0
+`@0x519b42..0x519b48`; 0 is neither 0xFFFE nor -1, so it reaches `LABEL_28 @0x519c58`, passes
+the +89932/+364 checks and resolves through `Server_ResolveSpawnTargetHandle(entity, 0)`
+`@0x519c81` — pool 0 index 0 through the ordinary attrib-0x40000/team test — which a
+player/person entity fails, so the handler returns without deploying `@0x519c88`. Only 0xFFFF
+is the no-target (Default Spawn) pick; a stock client never sends 0 (its default row param
+0 maps to 0xFFFF). REIMPL 2026-09-12: the case routes every pick but 0xFFFF/0xFFFE through
+`resolve_spawn_target`, so 0 and the empty body are rejected exactly like any unresolvable
+handle (`npruntime_server_tick_maintenance`).
 
 **The post-death respawn HOLD, and why a first pick is expected to be dropped (witness
 2026-07-26).** Immediately after the dead-or-pending gate the handler silently returns
@@ -8352,7 +8463,10 @@ picker UI's lifetime is a per-frame SERVER signal, not a one-shot:
    entity-dead flags). Slot state (+32) goes 6 (in-game) immediately — 0x0A flows to a
    deploy-screen client; **deploy is a PLAYER flag, not slot-state 9** (resolves the
    D-NET-134 confusion). `Server_PositionPlayerForSpawn` pre-places the entity (the deploy
-   camera anchor), respawn timer +292 = 620 ticks; then 0x42 → first 0x0A → 0x0F → 0x4D
+   camera anchor), the entity+292 SPAWN PROTECTION = 620 authority ticks (`@0x51a882`,
+   unconditional after the 0x0F send; a bot slot +96483 stores 0 `@0x51a878`; the
+   spectator branch's -1 `@0x51a7b3` is overwritten by it and restored to -1 only by the
+   per-tick +97538 arm — see the countdown below); then 0x42 → first 0x0A → 0x0F → 0x4D
    `[u8 playerIndex]` → the random seed.
 2. **Hold** — every 0x0A's `flags1` bit1 = `slot+89912 & 0x10` (§5.9 flags1 row; the writer
    also ORs the entity's hidden bit0 each frame → the golden pre-deploy record byte13
@@ -8470,8 +8584,13 @@ zone whose dedicated interval is zero falls back to the base interval. Retail's 
 **base 0, numbered zone 10 seconds**, not “waves off” `[orig: Config_SetDefaults @ 0x54D030
 writes dword_2550B7C=0 / dword_2550B80=10]`
 `[orig: SpawnWaveList_BuildFromMission @ 0x52A920]`. A 0x0E pick lands in the zone's group
-(`SpawnWaveList_TryQueuePlayer @ 0x52A490` — dedupes, caps 8, evicts the player from other
-groups) → the player gets S2C 0x6E and WAITS (its countdown word is `countdown + index × interval`
+(`SpawnWaveList_TryQueuePlayer @ 0x52A490` — the walk visits EVERY row: a row for another
+zone runs `CIntList_RemoveById(row, slot)` `@0x52a4f8` UNCONDITIONALLY, whatever the picked
+row decides; the picked row yields 0 on a team mismatch, 0 on a duplicate (the player STAYS
+in that row `@0x52a4ca`), 0 at eight members `@0x52a4e6`, 1 on the append `@0x52a4ec..0x52a4f3`
+— so a failed pick (a full row, an unnumbered other-team zone) still dequeues the player
+everywhere and it must re-pick; ported 2026-09-12, `npruntime_server_tick_maintenance`) → the
+player gets S2C 0x6E and WAITS (its countdown word is `countdown + index × interval`
 for a member, `countdown + count × interval` for anyone else — `SpawnWaveList_GetEntryInfo @ 0x52A700`
 → `SpawnWaveEntry_MemberEta @ 0x52A2E0` / `SpawnWaveEntry_TailEta @ 0x52A610`); if no group exists for the zone the deploy is
 immediate. The 1 Hz `SpawnWaveList_Tick @ 0x52A550` → `SpawnWaveList_TickEntry @ 0x52A330`
@@ -8509,8 +8628,43 @@ co-op additionally falls back to any team-matching numbered `0x40000` entity. `+
 (revive) overrides everything with the saved body position. The deploy itself is
 `Server_ProcessPlayerDeath @ 0x517740` — death and deploy are ONE routine (arg2 = killer
 handle on death, spawn-target handle on deploy): detach, position, `Entity_ResetToSpawnState
-@ 0x4B9610`, respawn timer `+292 = 620` ticks, loadout + 0x1D list, seed 0x61 (mode 1), the
-0x1E 0x3A hint, optional seat board.
+@ 0x4B9610` (which never writes +0x124: no `[esi+124h]` store in the routine), then the
+SPAWN PROTECTION store `+292 = 620` (`@0x517937/@0x517952/@0x517960` for a non-bot slot whose
+revive latch +89932 is clear; 0 `@0x51790a` for a bot slot / `@0x51791c` under the revive
+latch), loadout + 0x1D list, seed 0x61 (mode 1), the 0x1E 0x3A hint, optional seat board.
+
+**The +292 spawn protection (witnessed 2026-09-12, ported the same day).** entity+292
+(`Entity::damage_state`) is seeded 620 at THREE points: the round-init entity creation for
+every active slot (`Server_InitAllPlayerEntitiesForRound @0x516AA0 @0x516bba`), the join
+(above) and every deploy (above). Per authority tick `Server_UpdateAllActivePlayerSlots
+@0x518820` (call `@0x51D88B`, BEFORE the recv pump `@0x51D895`) runs, for every active slot
+(byte+4, punt latch +89896 clear) in state 6 with an entity, under
+`!g_spawn_success_gate && !g_preround_delay_timer` `@0x51888c`: in session, slot byte
++97538 (a permanent damage-disabled latch, read only here and at the fire clear; its writer
+is unwitnessed — our spectator bit stands in, D-NET-217) → -1 `@0x5188ac`, else a positive
+value decrements `@0x5188b8..0x5188c5`; outside a session → 0 `@0x51889c` (SP never carries
+protection). The protection is ALSO cancelled by the player's first validated fire:
+`Server_ClientFiredRound @0x50BAA0 @0x50c736..0x50c75d` `if (is_in_session && is_authority
+&& slot entity && +292 != 0 && !slot[97538]) +292 = 0`, reached for remote players via
+C2S 0x06 (`NapiNPServerMsg_0x006 @0x513704`) AND for the listen host's own player through
+`Entity_FireWeaponAndSendPacket @0x42BD80`'s authority leg (`@0x42be03..0x42bf34`,
+fire_cmd[0] = the local slot). Consumer: `Projectile_ProcessDamageOnTarget @0x4E7FB0`
+zeroes the damage while +292 != 0 (`@0x4e8032..0x4e803d`) and arms the kill/score leg
+only at +292 == 0 (`@0x4e8112`). Net effect: every MP (re)deploy grants 10 s of
+invulnerability, paused during pre-round and after round end, ended by the first shot.
+Reimpl: creation seed in `Server_BuildPlayerInfoAndAdd`, deploy seed in
+`Server_ReleasePlayerDeployment` and the spectator-restore deploy, the per-tick arm
+`tick_spawn_protection` in `server_tick.cpp` (the SP discriminator is
+`world.rules.mp_session`), the remote fire clear in the C2S 0x06 case and the listen host's own
+clear in the local fire commit (`world/player_weapon.cpp`, the roster row standing in for
+the slot's spectator latch; `local_player_view_test`). Adjacent and
+NOT this mechanism: `route_round_deaths` stores -1 at every ordinary death, which retail
+does only on the administrative kill `Server_KillPlayerAndNotify @0x519E00` and the
+spectator paths — overwritten at the next deploy, so corpse damage differs by that sentinel
+only. Absent roster features (no divergence): the bot slot +96483 and the medic-revive
+deploy latch +89932 (both 0-stores unreachable). Pinned by `npruntime_server_tick_maintenance`
+(creation/deploy seeds, decrement, pre-round/round-over freezes, SP zero, spectator -1, the
+validated-fire clear and the rejected-fire non-clear) and `npruntime_server_spawn`.
 
 **The 1 Hz capture block** — all of it inside `Server_TickUpdate @ 0x51D7E0`'s
 `g_periodic_second_timer = 62` block (`@ 0x51DF50..0x51DF8C`), so every capture/secure rate
@@ -8777,7 +8931,10 @@ IndexOf@0x43B990}` over `g_spawn_zone_list/count`); `CMap_SetupSpawnCamera @ 0x5
 @ 0x501120` → `calculate_capture_zone_control_delta`; `Server_ChangePlayerTeam @ 0x518D70`
 → `Server_ChangeEntityTeam` (it retargets ANY entity — zones included); `Server_EnforceZoneEntityTeams` →
 `Server_EnforceZoneEntityTeams`; the `stru_24E0E48` helpers → `SpawnWaveList_{TickEntry
-@0x52A330 (ex-update_death_queue_node), RemovePlayer@0x52A410, TryQueuePlayer@0x52A490,
+@0x52A330 (ex-update_death_queue_node), RemovePlayer@0x52A410 (callers: the medic request
+`@0x515412`, the respawn pick, and the disconnect teardown `Server_HandlePlayerDisconnect
+@0x51B5C0` non-spectator arm `@0x51b809`, before `Server_RemoveEntityAndNotify @0x51b82e` —
+ported into `teardown_connection` 2026-09-12), TryQueuePlayer@0x52A490,
 HasEntryForZone@0x52A520, Tick@0x52A550, ResetOnZoneTeamChange@0x52A5B0,
 GetEntryInfo@0x52A700, CountEntriesForTeam@0x52A7E0, BuildFromMission@0x52A920
 (ex-collect_weapon_overlay_entities), AppendEntry@0x52AB60}`; the capture-ctx helpers →
@@ -9309,8 +9466,30 @@ aliased onto Underwater's 0x4 — replaced with the full two-dword table
 - Sighted-weapon FOV: engaged FP = `80 / Player_GetClampedWeaponElevation
   @ 0x4dc6b0` — the slot's ADJUSTABLE zoom (`MountSlot.Elevation`), seeded to
   `Def->MaxElevation` (scope_max_mag) on first use and clamped [0, max]; 3P or
-  disengaged = 80 (`g_cameraFovDeg = 0x500000`). Port note: our 80/scope_max_mag
-  equals the seeded default; the zoom-adjust input is an open tail.
+  disengaged = 80 (`g_cameraFovDeg = 0x500000`). The zoom STEP writer is
+  `Player_AdjustWeaponElevation @0x4dbdf0` (the weapon-cycle actions' scope leg,
+  see the switch-chain block below): `Player_CanFireWeapon` + EquippedSlot + Def
+  gates (`@0x4dbdfc..0x4dbe0e`), next = slot+0xC + delta, floor = Def+0x98
+  `scope_min_mag` (or Def+0x90 when playerClass == 6 && Def+0 category == 3 &&
+  `!byte_A821F0`, the session's allowSniperScopeZoom: zeroed outside a session
+  `@0x552284`, the host config's value on the authority `@0x5522b9`, and on a
+  joiner bit 16 of the S2C 0x08 flags dword `NapiNPClientMsg_HandleSessionConfig
+  @0x428392` -- the same bit the 0x08 serializer emits from the option), cap
+  Def+0x90 (`@0x4dbe47..0x4dbe57`), a changed value clicks
+  `Sound_PlayInterfaceTriggerSet(dword_24E08B4)` `@0x4dbe64` (resolver-table
+  entry 1 `@0x82f5b4` -> the "GF_SCOPE" set) and the slot stores it either way
+  (`@0x4dbe6c`). `Player_MountWeaponSlot @0x4dfacf..0x4dfb16` clamps slot+0xC
+  into [that floor, max] on a Scoped (`Flags & 1`) def with max != 0. Port:
+  the leaf `local_player_adjust_scope_zoom` / `local_player_scope_zoom_floor`,
+  the dispatcher leg `local_player_weapon_cycle_route` (cases 0xD4/0xD6) and the
+  mount clamp `local_player_scope_zoom_mount_clamp` (world/local_player_view.h,
+  ctest `local_player_view`), the def fields `DefWeaponDef::scope_min_mag` /
+  `scope_max_mag_arg2` (formats/def, ctest `def_parse_weapons`) and the session
+  bit `World::rules.allow_sniper_scope_zoom`; the remaining wiring is the
+  `Simulation::request_local_player_weapon_cycle` call into the route, the
+  `local_weapon_install` call into the clamp (both need `scope_min_mag` carried
+  through `WeaponInstallData` / `LocalPlayerWeapon`), the host/joiner stamps of
+  the rules bit, and the `WeaponSlot_InitFromDef` zoom seed below (D-WPN-9).
 - The engage leg replicates C2S 0x1D (type 169) when seat-flag 0x40000 allows,
   and seat-flag 0x10000 zeroes the pitch.
 
@@ -9387,14 +9566,44 @@ port); (b) **scope-UP refusal while moving** — `g_movementKeyHeld && (flags & 
 -> return` `@ 0x4df29c`. PORTED: `player_view_move_input` /
 `player_view_scope_up_blocked` + the `Simulation` wiring; the prior
 "@ 0x4df0a2" site note was the FP-viewmodel render epilogue (corrected).
-WITNESSED-DEFERRED (the tri-state follow-up): the mid-UP-ease movement reversal
-(`@ 0x4df548` — ease back to hip, `g_scopeEngaged` stays latched), the settled
-drop-with-memory (`@ 0x4df5ae`, masked by `flags & 0x20000080`), and the
-auto-re-raise on key release (`@ 0x4df607`) — all keep `engaged` latched while
-away from the scope, which needs the explicit engaged/active/hipfire tri-state
-our derived `scope_card_active` cannot represent. Related new witness: weapons
+PORTED 2026-09-12 (the tri-state): `PlayerViewState` now carries the three
+retail bytes explicitly -- `scope_engaged` (`g_scopeEngaged @0x82CE94`, the
+interp's TARGET), `scope_settled` (`g_weaponScopeActive @0xB76478`, the
+PROMOTED byte every CanFire/crosshair/card consumer reads through
+`player_view_scope_settled`) and `scope_hipfire` (`g_scopeHipfire @0x82CE98`)
+-- plus the FP camera interp (`g_fpCameraInterp @0x82CE40`) projected onto the
+hip..tpos line (`scope_step` / `scope_ease_remaining`). The latch IS the
+interp's target: every `CNetPlayerInterp_Setup` in the toggle and the movement
+pack stores `g_scopeHipfire = 1` beside a hip target and `0` beside a tpos
+target (`@0x4df1c3/@0x4df212`, `@0x4df36e/@0x4df373`, `@0x4df567/@0x4df56c`,
+`@0x4df5d1/@0x4df5d6`, `@0x4df636/@0x4df63b`), so "active" = the pose has not
+reached the latch's target. `Player_PackInputStateToEntity @0x4df500..0x4df63b`
+runs, on a Scoped (`Flags & 1`) def after the `@0x4df4c9` promoted-unscope:
+(a) moving while the raise runs (`activeFlag && !g_scopeHipfire @0x4df548`)
+re-targets the interp at the hip FROM ITS OWN POSE over 15 steps
+(`CNetPlayerInterp_Setup @0x4de006..0x4de01a` sources an active interp's
+current pose) and sets hipfire, the target staying latched so the promoter
+(`@0x4de4f7`, `g_weaponScopeActive = (g_scopeEngaged != 0)` once the interp
+reports done) promotes "scoped" at the hip; (b) moving while promoted with
+hipfire 0 on a def without `0x20000080` (`@0x4df57c..0x4df5d6`) eases tpos ->
+hip with the promoted byte KEPT; (c) not moving, promoted, idle with hipfire 1,
+no `0x20000080` (`LABEL_33 @0x4df607..0x4df63b`) drops the promoted byte, keeps
+the target, eases hip -> tpos and clears hipfire (the auto re-raise). A move
+frame before the raise's first step re-targets a zero delta, which deactivates
+the interp outright with no promotion (`@0x4de0fe..0x4de11b`): the target
+stays latched unpromoted and the next toggle press RE-RAISES it, because the
+toggle branches on the promoted byte (`@0x4df17f`), not the target. Port
+notes: the landing step is the completion here where retail's stepper reports
+done on the call after the six velocities snapped (one frame earlier, net-re
+timing tests unchanged); leg (b) is reachable only behind a refused
+`@0x4df4ec` toggle (entity `Flags & 0xA000`, parentSlot 2/5, Inset under
+NVG), which the movement caller does not yet model; the `local_player` /
+`player_weapon` reset sites (new round, mount, clear) run
+`player_view_scope_reset` and their derived reads are
+`player_view_scope_settled` (`local_player_view_test`). Related witness: weapons
 with **HandGunUp (0x4000000)** auto-follow player flag 0x4000 raise/lower when
-the ease is idle (`@ 0x4de444..0x4de4b7`; the player-flag writer is unwalked).
+the ease is idle (`@ 0x4de444..0x4de4b7`; the player-flag writer is unwalked)
+-- still deferred under D-WPN-9.
 
 **The weapon-particle timing grill (2026-07-15, the "are effects firing at the right
 time" round).** Byte-verified the whole action-effect timing chain and found the port
@@ -9616,8 +9825,9 @@ remains unwalked);
 the `*_map` scope function variants;
 the `g_FpWeaponViewFlags` option bits beyond bit 0; the `word_B7C670` transition write vs the §5.16 shot-seq;
 remote-entity action sounds/effects (the `@ 0x541a83` leg) once remote slots pump;
-the RoundData_SpawnRound 0x2000000 test site; the slot Elevation zoom-adjust input;
-the scope tri-state (engaged/active/hipfire) for the movement reversal legs; the
+the RoundData_SpawnRound 0x2000000 test site; the slot Elevation zoom-step wiring
+(the `scope_min_mag` def field, the 212/214 route and the mount-time clamp -- the
+`Player_AdjustWeaponElevation` leaf is ported as `local_player_adjust_scope_zoom`); the
 HandGunUp auto-follow (player flag 0x4000 writer); the emplaced-gun overheat glow port
 (the heat window leg above); the kick sound-layer port (`SoundEmitter_RegisterSetLayers`);
 the Barrett/REVVY visual A/B outside the now-closed action-slot suppression question
@@ -9728,8 +9938,35 @@ one per-entity array keyed by a build-time ammo-class registry (D-WPN-24).
 - `Player_CycleWeaponSlot @ 0x4dfe70` — next/previous (input cases 212/214, ±1) over ALL
   780 combos with wraparound; EVERY candidate needs the ammo score (no weapon_class
   exemption `@ 0x4dff39`); reaching the start again returns silently (no deny). Cases
-  212/214 dual-purpose to `Player_AdjustWeaponElevation(±2)` when manning a can-fire
-  elevatable gun; 222/223 = `Player_AdjustWeaponZoomLevel(±1)`.
+  212/214 (`Input_HandleActionBinding_0 @0x4e130c..0x4e13ae`, corrected 2026-09-12)
+  first return on `g_binocularsViewActive || g_fireChargeStartTick`, then become a
+  SCOPE ZOOM STEP instead of a cycle -- `Player_AdjustWeaponElevation(212: +2, 214: -2)`
+  (`@0x4e1396` / `@0x4e13d7`, its only callers) -- when the equipped def's
+  `scope_min_mag` (+0x98) != `scope_max_mag` (+0x90) and `Player_CanFireWeapon()`
+  (the optical-view gate: promoted scope or vehicle-gunner scope, first person, not
+  moving, not submerged) holds; case 215 zooms +2 / -2 by its fifth argument;
+  222/223 = `Player_AdjustWeaponZoomLevel(±1)`. The def keys
+  (`WeaponDefs_ParseLineCallback`): `scope_max_mag <max> [<initial>]` -> +0x90
+  `@0x544f29`, +0x94 `@0x544f44` (both atol; the second value is the slot's
+  INITIAL zoom: `WeaponSlot_InitFromDef @0x53ef2d..0x53ef44` seeds MountSlot+0xC
+  from Def+0x94 and clamps it into [floor, Def+0x90], the floor being Def+0x98 or
+  Def+0x90 for playerClass 6 on a category-3 def when the sniper-zoom bit is
+  clear -- in an MP session `byte_A821F0`, offline the config's own
+  `allowSniperScopeZoom_5EC` `@0x53ef0a..0x53ef27` -- so an absent second value
+  (0) starts every scope at its floor); `scope_min_mag <min>` -> +0x98
+  `@0x544f7a`, record default 2 (`AdmDef_InitEntryDefaults @0x53ff73`). Shipped
+  JOX weapon.def authors scope_max_mag 2 (x45), 10 (x6, two as `10 2`:
+  WPN_M1TURRET / WPN_T80TURRET), 12 (x2), 16 (x1), `8 8` (x1, WPN_EMP50BD, the one
+  row that also authors `scope_min_mag 2`), so those optics step 2..max in retail
+  from a 2x start (WPN_EMP50BD from 8x). Port: the leaf
+  `local_player_adjust_scope_zoom`, the dispatcher leg
+  `local_player_weapon_cycle_route`, the mount clamp
+  `local_player_scope_zoom_mount_clamp` and the def fields (`DefWeaponDef::
+  scope_min_mag` / `scope_max_mag_arg2`, ctest `def_parse_weapons`) are landed;
+  the calls into the route and the clamp, the rules-bit stamps and the
+  `WeaponSlot_InitFromDef` seed (a per-inventory-slot zoom the port's
+  `WeaponInventorySlot` does not carry yet; the mount clamp reproduces it for
+  every shipped row but WPN_EMP50BD's `8 8`) are the open wiring (D-WPN-9).
 
 **The mount + commit.** `Player_MountWeaponSlot @ 0x4dfa40`: stamps `g_pendingWeaponSlot
 @ 0xB75FD0`, queues SWITCHRANK on the equipped slot when the new def shares its category
@@ -9980,10 +10217,12 @@ loop admits this ONE settings-flagged record ahead of the settings skip, gated o
 tag AND on the body decoding as a description; `on_host_disconnect()` latches the first event
 only, composes a player-facing reason from DPC/DC/DDSTR/DSTR, and fails the connection to
 `Phase::Error`, so `session_lost()` is true at ANY phase. For a host that vanishes without an
-explicit close, D-NET-177's receive-silence fallback remains armed after the game session has been
-established in BOTH `Phase::InMatch` and the `Phase::Driving` reused during death/redeployment;
-pre-establishment driving remains exempt. Its comparison is retail's strict
-`elapsed > 120000 ms`: equality is healthy and 120001 ms reports loss. Host surfacing:
+explicit close, D-NET-177's receive-silence fallback runs from the accepted 0x82 (retail
+state 5) onward with no gameplay gate — the join stages, the world stream, the deploy screen
+and the in-match phases alike (corrected 2026-09-12; the earlier "pre-establishment driving is
+exempt" described the reimpl, not retail). Its comparison is retail's strict
+`elapsed > timeout_ms` (120000 ms unless the host's `_NSTMOUT.TXT` changed it; < 0 disables):
+equality is healthy and 120001 ms reports loss. Host surfacing:
 `Simulation::is_session_lost()` is the bound state test (the reason string is presentation,
 not state); `DeployScreenPresenter` checks it before the deployment-release edge and calls
 `teardown()` instead of emitting `closed` — the punt clears the same pick-pending flag a release
@@ -10004,8 +10243,133 @@ ticks, reset by a live tick and suppressed by permanent-death mode). Receipt que
 template's four identical keyed client-goodbye datagrams before becoming terminal, so the host
 immediately tears down the peer/entity and duplicate copies are harmless. `npruntime_host_punt`
 pins the wire image, first-event precedence, every strict boundary, and the end-to-end teardown.
-Only type 6 remains open: its source is two unmodeled `CRenderState` violation fields (3/5), and
-the port does not synthesize them from unrelated state.
+**Type 6 (ported 2026-09-12; D-NET-182 CLOSED):** the producer is the 1 Hz violation sweep
+`Server_CheckPlayerViolations @0x51ABD0` (sole caller: the periodic-second block of
+`Server_TickUpdate @0x51df5f`, right after `Server_CheckWinConditions @0x51df5a`; in session
+only `@0x51abd9`; per slot byte+4 && entity && state 6 `@0x51ac0d`). Its two "CRenderState"
+fields are the ordinary CPlayerStats counters read through `CPlayerStats_GetFieldPlusOne
+@0x52D7D0`: field(3)+1 = `MatchStats::kTeamKills` and field(5)+1 = `MatchStats::kSuicides`.
+For every slot with byte+5 (the host's own slot) clear and byte+96483 (bot) clear `@0x51aca2`,
+with L = `dword_24D2244` = the MaxFriendlyKills config (`allowableFriendlyKills_5E0`,
+`apply_session_settings_to_globals @0x551ca4`, default 3): `if (L < 0 || teamKills <= L)
+{ if (suicides > 9 && !slot[22474] && !dword_B4C698) { Server_WritePuntLog(slot, "#S>9");
+punt 6 @0x51ad17 } } else if (!slot[22474] && !dword_B4C698) punt 6 @0x51acd9`. The same
+sweep carries the FLAG CARRY LIMIT: in `g_GameType` 0x10004 (CTF) / 0x10008 (FlagBall) / 8
+(Flag Me) `@0x51ac2c` the slot dword +89872 counts consecutive seconds `entity->mountedChild`'s
+itemDef id is 4093/4091/4095 (else resets `@0x51ac63`); at `>= g_weapon_violation_limit`
+`@0x51ac75` (an IDB misnomer for `g_GameConfigState.flagResetTime_420`, default 420,
+`@0x551d0a`; the compare is signed, so a limit <= 0 fires every second for every slot) the
+counter resets, `Entity_DropCarriedObject @0x439DF0` drops the child beside the carrier (its
+0x2F), `Entity_SyncPositionFromDefinition @0x43A9B0` re-syncs the flag to its authored pose
+(a second 0x2F; NO 0x1E return event, NO scoring) and the carrier's Health(+286) = -1
+`@0x51ac94` (the ordinary entity death path then kills it). REIMPL: `check_player_violations`
+in `server_tick.cpp` (`GameConfig::flag_reset_seconds` -- a host cfg override rides
+`HostSessionOptions::flag_reset_seconds` into `Simulation::configure_host_session` -- `Connection::flag_carry_seconds`,
+`Match::sync_flag_to_authored_pose`, the breath-kill death transaction, `stage_host_punt(6)`);
+the host-local punt log line and the global punts-off switch `dword_B4C698` are not wire
+state and are not modeled. `npruntime_host_punt` pins the exact t6 record for both arms, the
+at-limit and nine-suicide silences, the negative-limit disable and the host-own exemption;
+`npruntime_server_tick_maintenance` pins the carry-limit drop/home 0x2F pair, the missing
+0x1E and the carrier death (CTF) against a silent TDM.
+
+#### 5.64.1 The `0x86` SERVER_GOODBYE burst and the disconnect record (jo-c cross-check, 2026-09-12)
+
+**The one teardown.** Every host-side destroy of an ACTIVE (state 1) connection and every
+client-side destroy of its active (state 5) connection runs
+`CNapiNPConnection_TeardownActiveConnection @ 0x6253C0`: `n = clamp(conn+0x180, 0, 32)` where
+`+0x180` is `cs_dir0.recv_max_per_tick` (= **4** for JOINTOPERATIONS, `CNapiNetwork_Init
+@ 0x4cab60`) `@ 0x6253ef..0x625403`, then `SendDisconnectPacket` up to `n` times while it returns
+>= 0 `@ 0x625406..0x625424` (state 1) / `@ 0x62549e..0x6254d3` (state 5), THEN the removal
+callback (`proto+0x2D8` -> `Server_HandlePlayerDisconnect` on the host `@ 0x625426..0x625438`;
+`conn+0xC4` -> `CNapiNetwork_OnDisconnectedFromServer @ 0x4C63D0` on the client
+`@ 0x6254d5..0x6254e7`), then `conn_flag0 = 0`, the keys cleared (`+0xCC`/`+0x10C` memset 0x40)
+and the DSP queues `@ 0x625535..0x625574`.
+
+**The packet.** `CNapiNPConnection_SendDisconnectPacket @ 0x61F2A0` requires `conn_flag0`
+`@ 0x61f30b` and `!is_server || proto->host_running` `@ 0x61f329` (`proto+0x1F4`, zero at
+`NapiNPProtocol_Create @ 0x625840`, additionally no-ops it `@ 0x61f316`; its setter was not
+located in this pass and is not modeled). Opcode **`0x86` when `is_server`** `@ 0x61f367`, `0x46`
+when `is_client` `@ 0x61f37b`. Body: the RECEIVER's key dword raw — `session_keys.remote_key`
+`@ 0x61f3af`, i.e. the client's CK on a host (stored from its 0x42 `@ 0x62bf7f`) and the host's SK
+on a client — then the connection's latched `NapiNPDisconnectEvent` (`+0x654`) as seven TLVs
+`DS`(role) `DC` `DP1` `DP2` `DSTR`(strlen+1) `DPC` `DDSTR`(strlen+1) `@ 0x61f3d0..0x61f4aa`, NWU
+encrypted with the session literal `@ 0x61f4cd`. The receiver validates only the key
+(`Nwu_HandleDisconnect @ 0x623CE0`, `@ 0x623e74`); an unlatched record serializes as zeros.
+
+**The record and its producers (first latch wins — every site is `if (!valid) { copy; valid = 1 }`).**
+`{DS role, DC, DP1, DP2, DSTR[128], DPC, DDSTR[32]}`, strings via `Napi_CopyString` (at most
+127 / 31 characters):
+
+| Producer | Record | Witness |
+|---|---|---|
+| host receive reap (state 1, `elapsed > cs_dir0.timeout_ms`, skipped when `< 0`) | `{1, 3, elapsed, timeout, "", 0, "NP.C:PT:SERTMOUT"}` then `RequestDisconnect` -> `pending_disconnect` | `PumpStateMachine @ 0x6292E0` `@ 0x62934c..0x629406`, `@ 0x62940a` -> `@ 0x61e107` |
+| client receive reap (state 5) | `{2, 3, elapsed, timeout, "", 0, "NP.C:PT:CLNTTMOUT"}` then `SetState(6)` | `@ 0x6295a2..0x62961c` -> `@ 0x61e0fa` |
+| `NapiNPProtocol_StopServer` | `{1, 9, 0, 0, "", 0, "NP.C:SH:STOP"}` then `Destroy`, `host_running` cleared only AFTER the loop | `@ 0x62A820` `@ 0x62a8c3..0x62a924`, `@ 0x62a95c` |
+| pool overflow (`NapiNPMessage_Create`, any non-flag-0x10 node when `count+1 > msg_out_max >= 0`, `msg_out_overflow_log` = 1) | `{role, 4, count, max, "", 0, "NP.C:MSGCRE"}`, the node dropped, `RequestDisconnect` | `@ 0x627FC0` `@ 0x628031..0x628112` |
+| the pending-disconnect pump | `{1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"}` only if nothing latched, then `Destroy` — AFTER that connection's `PumpFlags` send build, so the boundary's admitted nodes ship first | `NapiNPProtocol_Pump @ 0x62A650` `@ 0x62a6f8..0x62a793` |
+| a received `0x46`/`0x86`/`H:0x03` | the peer's DC/DP1/DP2/DSTR/DPC/DDSTR (DS discarded) with the PEER role for the session opcodes (2 on a host, 1 on a client) and the LOCAL role for the description record | `Nwu_HandleDisconnect @ 0x62400d..0x6240ba` (`[1]=2` type 1 `@ 0x624005`, `[1]=1` type 2 `@ 0x624065`); `HandleDescriptionPacket @ 0x621cca..0x621d4d` |
+| the user leave | `{role, 2, 0, 0, <tag>, 0, ""}` — `"I.C:CIDEMIS"` from the in-match leave action; `"N.C:SWWAD[1]:%d"` / `"N.C:SWWAD[2]:%d"` from `CNapiGameSession_FullDestroy`; `"N.C:CSSAC"` from `CreateServerConnection`; `"HWMPRE:CJSIFAIL"` / `"prejoin"` from `UI_JoinSelectedSession` | `CNapiNetwork_DisconnectActiveConnection @ 0x4C9140` `@ 0x4c91ef..0x4c923e`; callers `@ 0x49af42`, `@ 0x4c96db`/`@ 0x4c970d`, `@ 0x4c9d77`, `@ 0x569e4a`/`@ 0x569ed0` |
+| same-endpoint join replacement | whatever was latched (normally nothing => zeros) — the old node is `Destroy`ed, so the burst goes to the shared endpoint keyed by the OLD CK and the replacement's key check drops it | `HandleClientJoin @ 0x62befb`; a callback-REJECTED join latches `{1, 5/6, ...}` but the node is state 0, so no burst `@ 0x62c248` |
+
+**The receive leg.** `g_np_opcode_handlers @ 0x849D90` entry 12 = `{0xC, 0x86, ..,
+Nwu_HandleServerGoodbye @ 0x624310}`, a thunk into `Nwu_HandleDisconnect(type 2)`. Gates
+`@ 0x623df2`: a connection for (type, addr, port), active (`conn_flag0`) on the replay pass, not
+`drop_packets`, `len <= 0x10000`; NWU decrypt `@ 0x623e19`; the leading dword must equal the
+LOCAL key `@ 0x623e74` (a body shorter than the key reads 0 and fails the same compare); the
+TLV walk `@ 0x623eb2..0x623fbd` reads DC/DP1/DP2/DSTR(512)/DPC/DDSTR(512) in any order and
+proceeds with zeros when `ReadTLV` fails first; the record is latched (128/32 caps) and
+`RequestDisconnect` runs. On a client that is `SetState(6)` -> the teardown above: **4x `0x46`
+echoing the latched record**, then `OnDisconnectedFromServer` maps DC/DPC to the exit reason. On
+a host it is `pending_disconnect` -> the next `Pump` -> `Destroy` -> **4x `0x86` echoing the
+client's record**.
+
+**The reap clock those reaps read** is `conn+0x5E8`, initialized at state-1/5 entry
+(`OnStateChange @ 0x62612f`) and re-stamped ONLY by `ParseMessages @ 0x625d54` — reached solely
+for `seq == recv_ack_seq+1` or the in-order drain that closes a gap (`HandleSessionPacket
+@ 0x626beb..0x626bfc`; a zero-message keepalive stamps because the write precedes the message
+loop) — and by `Nwu_HandlePing @ 0x623c56`. Seq 0 (`@ 0x626bcc`), a duplicate (`@ 0x626c03`), a
+future packet (`@ 0x626c0c..0x626c3a`), a resend list (`HandleResendList` discards its
+`GetTickCount` `@ 0x62395f`), a retransmitted 0x42 (`@ 0x62bee6..0x62bef1`) and every other
+opcode leave it alone. Ping (`0x45`/`0x85`) stays unmodeled on both sides.
+
+**`_NSTMOUT.TXT`.** `CNapiNetwork_Init @ 0x4CA4A0` seeds `timeout_ms = 120000` `@ 0x4ca9d7`
+and `msg_out_max = 1200` `@ 0x4ca9dc`, then `Napi_FileExists("_NSTMOUT.TXT") @ 0x4ca9e1`
+(`FindFirstFileA` on the bare CWD-relative name — a loose file, never a PFF entry) and
+`Napi_ReadFileAlloc @ 0x4ca9fc`: a case-insensitive `NEVER` prefix `@ 0x4caa13` sets BOTH to -1
+`@ 0x4caa1f/@ 0x4caa22`; otherwise `atol` `@ 0x4caa2b`, `>= 0` -> `timeout_ms = 1000*sec`
+`@ 0x4caa44` (`msg_out_max` untouched; `"0"` is a zero-millisecond reap), `< 0` -> both -1
+`@ 0x4caa37/@ 0x4caa3a`. Stored into `cs_dir1` `@ 0x4caa81/@ 0x4cab20` and `cs_dir0`
+`@ 0x4cab54/@ 0x4cabf0`, copied onto every node at `Create` (`@ 0x62ae7b/@ 0x62aeb8`), emitted
+verbatim in the 0x82 CS block (`SendSessionInit @ 0x620ef0`), and OVERLAID onto a joiner's own
+template by `NapiNP_HandleServerJoinResponse @ 0x629840` (`CS` direction 1 -> `cs_dir0_copy`,
+0 -> `cs_dir1_copy` `@ 0x629b4c..0x629b75`; copied `@ 0x629d72/@ 0x629d89`) — so the host's file
+governs the joiner's reap and pool too. Every consumer guards on `< 0` / `>= 0`.
+
+**Reimpl (2026-09-12).** `SESSION_OPCODE_SERVER_GOODBYE`; `disconnect_packet_body_to_bytes` /
+`client_goodbye_to_bytes(key, event)` / `server_goodbye_to_bytes` (one writer, `session_hello`);
+`NapiNPConnection::{disconnect_event, disconnect_event_valid, pending_disconnect, timeouts}` +
+`latch_disconnect_event` (`napi_np_connection.h`); `host_goodbye_burst` / `destroy_connection`
+(`napi_np_protocol`) — the burst precedes the player teardown inside `teardown_connection`, whose
+producers are the reap (SERTMOUT + PDESTME-if-empty on the pending pump in `tick_connections`),
+the `0x46` echo (`handle_client_goodbye` parses and latches the client's record), the join
+replacement, `HostRole::close` (STOP, the burst over the socket, `host_running` cleared after the
+walk; the former reliable `H:0x03` STOP substitute is gone) and the MSGCRE overflow in
+`send_session_batches` (per-node admission; the fragment-group hold leg is gone). Joiner:
+`on_server_goodbye`, `latch_disconnect_event(event, role)`, `disconnect()` from the latched record
+(CIDEMIS default), the MSGCRE inline teardown in `frame_messages_detailed`, the reap from the
+accepted 0x82 with the admitted-only stamp and the CLNTTMOUT latch, the 0x82 CS overlay.
+`SessionTimeoutConfig` / `parse_nstmout` / `load_session_timeout_config`
+(`session_timeout_config.h`); the host template on `NapiNPProtocol::connection_template`, loaded
+from `HostConfig::game_root` (the Godot host stamps it from the `HostSessionOptions` game root the
+mission root sets to the mounted resource root, `Simulation::configure_host_session`; `apps/nw_server`
+from its mounted resource root), advertised by `make_server_auth_datagram`. Pinned by
+`npruntime_handshake_server` (the 0x46 echo burst, the SERTMOUT burst and the stamp set, the
+replacement burst, the spawn-wave removal, NEVER), `npruntime_host_punt` (the 0x86 receive leg and
+its negatives, the punt echo, both MSGCRE overflows, the STOP burst) and
+`npruntime_handshake_timeout_override` (the parser, the CS overlay, the reap from acceptance).
+Not modeled: the client's silence reap does not yet send its own CLNTTMOUT `0x46` burst (the
+record is latched; a later `disconnect()` carries it), and the host-side `LogPlayerRemoved`
+log line.
 
 ### 5.65 S2C `0x30` / `0x31` — the anti-cheat challenge pair, and the client reply builders (2026-07-26)
 
@@ -10521,7 +10885,7 @@ zeroed board):
 | player_count | u8 (`movzx`) | `@0x431ec6` |
 | players[player_count] | see below | stride 57 dwords in `g_scorePlayerStats @0x24C1AD0` |
 | team_row_count | **i8** (`movsx` `@0x432159`) | trailing matrix rows; skipped when ≤ 0 `@0x432166` |
-| team_rows[team_row_count][field_count] | i16 | `@0x432195`, row stride 34 dwords at `dword_24CFB08` |
+| team_rows[team_row_count][field_count] | i16 | `@0x432195`, row stride 34 dwords at `dword_24CFB08`. The CLIENT reads `field_count` (the declared ACTIVE count) words per row `@0x432174..0x4321a4`; the SERVER writes `g_scoreTeamCount` (the CONFIGURED count) words per row `@0x5095a0..0x5095cc`, so rows after row 0 misalign on a retail client whenever a configured column is inactive (see "Configured columns and ordering" below) |
 
 Per player row: `[u8 slot][cstr name][cstr clan][cstr tag][u8 team][u8 playerClass]`
 then seven i16 in WIRE order `kills, deaths, assists, score, captures, flags,
@@ -10565,15 +10929,83 @@ the ordered `{fieldId, enabled}` rows for each mode, then a VERSION 40
 file order. TDM defaults to 14 configured fields, A&S to 16, and the waypoint
 co-op family to 7. Every ID is resolved by the exact
 `CPlayerStats_GetFieldByIndex` switch. The producer computes all configured
-values but emits a column only when at least one player value is nonzero;
+values but DECLARES a column, and writes it in the player rows, only when at
+least one player value is nonzero (the active-flag scan `@0x509398..0x5093db`,
+the count byte `@0x5093eb`, the per-row `Block[]` gate `@0x509534`);
 disabled fields take part in that activity test and retain their raw enabled
-byte when emitted. Team games append three matrix rows, or five for the
-witnessed four-team TDM/TKOTH/FlagBall family. Players are first collected in
-slot order and then sorted descending by raw points with retail's Knuth-gap
-shell sort; the recipient index in 0x1D addresses that frozen order. `[orig:
-GameType_CreateDefaultSettings @0x52DD00; ScoreConfig_LoadFile @0x52D8A0;
-CPlayerStats_GetFieldByIndex @0x52D630; Server_BuildEndOfRoundScoreboard
-@0x508F30; CPairList_ShellSortByValue @0x526CF0]`
+byte when emitted. Players are first collected in slot order and then sorted
+descending with retail's Knuth-gap shell sort; the recipient index in 0x1D
+addresses that frozen order. `[orig: GameType_CreateDefaultSettings @0x52DD00;
+ScoreConfig_LoadFile @0x52D8A0; CPlayerStats_GetFieldByIndex @0x52D630;
+Server_BuildEndOfRoundScoreboard @0x508F30; CPairList_ShellSortByValue
+@0x526CF0]`
+
+**The matrix, the order key, the draw and the winner marker (re-grilled
+2026-09-12, superseding the "raw points" and "three or five for the four-team
+family" wording above).**
+- *Row count* `[orig: Server_BuildEndOfRoundScoreboard @0x509259..0x50929c]`:
+  0 for a non-team type; for a team type 3, or 5 when `(g_num_teams_config ==
+  4 && g_GameType == 0x10000) || g_GameType == 0x10001 || g_GameType ==
+  0x10008`, so a two-team Team KOTH or FlagBall still writes five rows (rows
+  3 and 4 are the zero `g_TeamRecords[3..4]`); the count lands in
+  `dword_24CFB04` `@0x5092b8` and is the trailing byte `@0x509581`.
+  `world::scoreboard_team_row_count`; the live 0x16 board's
+  `active_team_count` is a different rule (`@0x50db41..0x50db72`).
+- *Matrix width* `[orig: @0x5092d0..0x509327 (fill), @0x5095a0..0x5095cc
+  (write)]`: every row carries `g_scoreTeamCount` CONFIGURED words with no
+  `Block[]` test, while the declared count byte is the ACTIVE count. The retail
+  client `NapiNPClientMsg_0x056` stores the declared byte into
+  `g_scoreTeamCount` (`movsx @0x431e69`, store `@0x431e75`) and reads that many
+  words per player row AND per team row (`@0x432174..0x4321a4`), so retail's
+  own client misaligns rows after row 0 whenever `N_active < N_config`.
+  `load_scoring_table_for_game_type @0x52D300` runs at the start of EVERY build
+  (`@0x508fe5`: `g_scoreTeamCount = 0 @0x52d307`, reload from the score config
+  `@0x52d3f8..0x52d42c`), so a listen host's own client parse never narrows a
+  later build (an earlier "narrowed table" reading is REFUTED). Ported:
+  `build_end_round_stats` fills every team row over every configured column
+  and `encode_end_round_stats` writes each row's full width; the decoder keeps
+  the retail client's declared-count read, so opennova<->opennova rows after
+  row 0 misparse exactly as retail<->retail (nothing presents `team_rows`).
+- *Column id 5 of the matrix* `[orig: @0x5092e5..0x5092e7]` reads
+  `TeamRecord+0x150` (`unknown_040[272]`) directly; every other id goes through
+  `CPlayerStats_GetFieldByIndex(team+4, id)` `@0x5092f3`. That word is the
+  team's hill HOLD TIMER (`Game_AccumulateTeamScores @0x508D70`: `++` with a
+  holder `@0x508dad`, `-= min(hold, koth_delta)` without `@0x508db2..0x508dc2`)
+  and is ALSO the third argument both board builders pass to
+  `ScoreRules_GetPrimaryScoreField` for the team scores (`@0x508fa7/@0x508fb8`
+  here; `@0x50db92..@0x50dcce` in `Server_BuildAndBroadcastScoreboard`), i.e.
+  the KOTH family's team primary. The per-second fold of the players' slot
+  ticks (`slot+94380`) lands in the neighbouring `+0x148` (`unknown_040[264]`)
+  `@0x508e0a` and is read by neither board. Ported: `Match::team_primary_score`
+  and `MatchResult::team_hold_ticks` carry the hold timer (the earlier port
+  summed the players' ticks, which differs once two holders share the hill).
+- *Order key* `[orig: Player_ComputeScore @0x500AD0..0x500ADF; the pairing
+  @0x509043..0x50905f; CPairList_ShellSortByValue @0x50907f]`: the pair value
+  is `(g_GameType & 0x10000) ? CPlayerStats_GetFieldPlusOne(stats, 0x1C)`
+  (raw[29], points) `: ScoreRules_GetPrimaryScoreField(stats, g_GameType,
+  slot+94380)` (the game-type primary: DM kills, KOTH hill ticks, the flag
+  family's captures, ...). Non-team boards are therefore ordered by the
+  primary, which the 0x1D non-team form's top three rows and the 0x56 row order
+  both expose. Ported (`sort_scoreboard_players(players, game_type)`).
+- *Draw byte* `[orig: @0x509053..0x509055, @0x50909d, @0x50920e..0x509210,
+  @0x50926a..0x50926c, @0x5092ad, @0x5092b2]`: team type ->
+  `g_scoreTeamScore0 == g_scoreTeamScore1`; non-team -> the slot scan keeps
+  `max` = the largest pair value seen from 0, `v47 = 1`, the row walk clears it
+  for any row whose `entry+0x40` primary `< max`, then `if (rowCount == 1 && max
+  > 0) v47 = 0`; `g_endround_draw_flag = v47`. Ported (`MatchResult::draw`).
+- *Winner marker* `[orig: Server_ProcessRoundEnd @0x5165a3..0x5165c3,
+  @0x5167e2..0x5167fd]`: `isDrawOrNonTeam = draw || (!team && row1.primary ==
+  row0.primary)` over `dword_24C1BB8`/`dword_24C1AD4` (rows 1/0 `entry+0x40`;
+  row 1 reads 0 from the `memset @0x508f3f` when only one row exists); then per
+  active state-6 slot, non-team: `if (!isDrawOrNonTeam && slot+94388 ==
+  row0.primary) GameEvent_ProcessScoring(gt, entity, 21, 0, 2)` (`push 2 / push
+  ebx(0) / push 15h`) -> case 21 `@0x52ff20..0x52ff34` ->
+  `CPlayerStats_RecordEvent(34, 2)` -> `stats[35] = 2` (an assignment, case 34
+  of `@0x52C8E0`). The scorer refuses a spectator-flagged slot (`slot+100567`
+  `@0x52f6fa`) and a slot without an entity. Team types award the winning
+  team's slots at `@0x516565` before the build and again `@0x5167fd`
+  (idempotent). Field 35 is on neither wire form. Ported (`Match::finish`;
+  `MatchPlayer::spectator` mirrors the latch).
 
 Flag Me is the intentional exception: its selector is row 12 while these
 tables stop at row 11, so it has no configured FIELD columns and ordinary
@@ -10630,8 +11062,9 @@ completed 2026-08-23):** `engine/net/npwire` owns strict codecs for
 the 0x1D header, 0x2B request, 0x56 envelope, and reassembled board;
 `npruntime/end_round_protocol` translates only the immutable semantic result
 into the witnessed producer order. The default/`score.ini` field schema,
-default VAR score values, active-column filtering, field accessor, raw-point
-player ordering, fixed source-string caps, authority announcement,
+default VAR score values, active-column filtering, field accessor, the
+`Player_ComputeScore` player ordering (points for a team type, the game-type
+primary otherwise), fixed source-string caps, authority announcement,
 requester-only 200-byte service (including silence for an offset past the
 board), automatic client pull, offset fold, game-state transition, and exact
 linger phase are live and covered end-to-end for every competitive mode and
@@ -10691,7 +11124,15 @@ Roster (retail `Jointops.exe`):
   @0x4c4fa0`, `_GetDisconnectReasonString @0x4c7000` (fills `disconnect_reason_buf` +0x1270),
   `_DisconnectActiveConnection @0x4c9140` (builds a `NapiNPDisconnectEvent` on `napi_conn` then
   `[orig: CNapiNPConnection_RequestDisconnect @ 0x61e0f0]`; was Kong `SendPunkBusterChat` — a misnomer,
-  there is no chat path, only a disconnect-with-reason).
+  there is no chat path, only a disconnect-with-reason). **The record it latches (if none is
+  latched)** is `{role, DC=2, DP1=0, DP2=0, DSTR=<caller tag, 128>, DPC=0, DDSTR=""}`
+  `@0x4c91cf..0x4c923e`; its callers and tags: the in-match leave action `"I.C:CIDEMIS"`
+  (`Input_HandleActionBinding` case 3 `@0x49af38..0x49af42`, after `g_mission_exit_reason = 1`
+  `@0x49af26`), `CNapiGameSession_FullDestroy` `sprintf("N.C:SWWAD[1]:%d", reason)` `@0x4c96c4`
+  / `"N.C:SWWAD[2]:%d"` `@0x4c96f8`, `CreateServerConnection` `"N.C:CSSAC"` `@0x4c9d70`,
+  `UI_JoinSelectedSession` `"HWMPRE:CJSIFAIL"` `@0x569e34` / `"prejoin"` `@0x569eba`. The
+  0x46 burst serializes it verbatim (§5.64.1); the reimpl's `JoinerConnection::disconnect()`
+  latches the CIDEMIS record when nothing else is.
 - **Callbacks (`__cdecl`, ctx as first arg):** `_ValidateJoinRequest @0x4c61b0`, `_OnConnectedToServer
   @0x4c62e0` (writes `active_connection_id` +0x1190), `_OnDisconnectedFromServer @0x4c63d0` (writes
   `disconnect_event_buf`), `_CheckPlayerTimeouts @0x4c8ad0`. `_OnSessionDiscovered @0x4c8470` and
@@ -11029,7 +11470,8 @@ route into `g_napi_np_ctx.game_settings` (§6.4) via `CAITask_SetName @0x402bd0`
 | `PuntVote`/`VotePercent`/`VoteNumPlayersReq` | `g_votekick_enabled @ 0x24D226C` / `g_votekick_percent @ 0x24D2274` (float) / `g_votekick_min_players @ 0x24D2270` | |
 | `ChangeTeamInterval`/`Penalty`/`Delay` | `0x24D2280` / `0x24D2284` / `g_capture_duration @ 0x24D2248` | |
 | `DoMinPingCheck`/`MinPing`/`DoMaxPingCheck`/`MaxPing` | `0x24D21B0`/`0x24D21AC`/`0x24D21B8`/`0x24D21B4` | |
-| `FatBullets`/`OneShotKill`/`ArmoryTimer` | `0x24D21A0`/`0x24D219C`/`g_ArmoryTimer @ 0x25510F0` | |
+| `FatBullets`/`OneShotKill`/`ArmoryTimer` | `0x24D21A0`/`0x24D219C`/`g_ArmoryTimer @ 0x25510F0` | `ArmoryTimer` = `armoryReuseTime_A38` (cfg `armory_reuse_time`, default 30): the seconds an accepted C2S 0x2F arms into playerSlot+356 (§5.56); `GameConfig::armory_reuse_time` |
+| `flagResetTime` (no SET verb) | `g_GameConfigState.flagResetTime_420` → `g_weapon_violation_limit @ 0x24D2178` | the FLAG CARRY LIMIT in periodic seconds (default 420, `Config_SetDefaults @0x54D400`; copied `@0x551d0a`); consumer `Server_CheckPlayerViolations @0x51ac75` (§5.64); `GameConfig::flag_reset_seconds`. `MaxFriendlyKills` (`dword_24D2244`, default 3) is the same sweep's team-kill limit; `GameConfig::max_friendly_kills` |
 | `Tracers` | `g_rules_flags & 0x1` (inverted) | flag bit |
 | `ChangeTeam` | `g_rules_flags & 0x4` | flag bit |
 | `FriendlyFire` | `g_rules_flags & 0x200` (inverted) | flag bit |
@@ -11708,7 +12150,7 @@ subset) function-by-function against the kong IDB. Scope and verdicts:
 
 | System | Reimpl | Verdict | Key witness |
 |---|---|---|---|
-| SessionSequencing/SessionCrypto framing | `frame_session_packet`/`deframe_session_packet` (`engine/net/npwire/protocol_message.{h,cpp}`) | **PARTIAL — framing, contiguous gate, and LAN loss recovery matching** | `CNapiNPConnection_SendSessionPacket @ 0x61edd0` stamps `[remote_key][seq][ack][u8 0]`; `CNapiNPConnection_ParseMessages @0x625bc0` admits only the contiguous frontier and prunes retained records by admitted ACK; `BuildMissingSeqList @0x6234b0` / `SendMissingSeqList @0x623560` emit client `0x44` or server `0x84` only after the receive pump drains; `NapiNP_HandleResendList @0x623800` validates the local key and rebuilds retained message records under the requested old sequence with the sender's current ACK. OpenNova now mirrors those paths in both directions, including the ordinary `0x43`/`0x83` receiver-local session-key gate, 16-sequence request cap, 100-packet future queue, same-batch reorder suppression, resend-list key validation, zero sentinel, and ACK retirement. LAN retention uses the witnessed `msg_out_max=0x4b0` override (`CNapiNetwork_Init @0x4cab20/@0x4cabf0`; combined-count guard in `NapiNPMessage_Create @0x627fc0`). The ordered gate and retention are explicit owner opt-ins. Generic lobby `ClientSession`/`NwUdpListener`, which have no witnessed `0x44`/`0x84` owner, now use a no-queue high-water policy: a strictly newer packet crosses a gap so permanent loss cannot deadlock the lobby, while sequence zero, stale packets, and duplicates are suppressed without ACK regression. Remaining tail: retail's independent wall-time retained-record expiry and overflow-triggered disconnect policy are not modeled. |
+| SessionSequencing/SessionCrypto framing | `frame_session_packet`/`deframe_session_packet` (`engine/net/npwire/protocol_message.{h,cpp}`) | **PARTIAL — framing, contiguous gate, and LAN loss recovery matching** | `CNapiNPConnection_SendSessionPacket @ 0x61edd0` stamps `[remote_key][seq][ack][u8 0]`; `CNapiNPConnection_ParseMessages @0x625bc0` admits only the contiguous frontier and prunes retained records by admitted ACK; `BuildMissingSeqList @0x6234b0` / `SendMissingSeqList @0x623560` emit client `0x44` or server `0x84` only after the receive pump drains; `NapiNP_HandleResendList @0x623800` validates the local key and rebuilds retained message records under the requested old sequence with the sender's current ACK. OpenNova now mirrors those paths in both directions, including the ordinary `0x43`/`0x83` receiver-local session-key gate, 16-sequence request cap, 100-packet future queue, same-batch reorder suppression, resend-list key validation, zero sentinel, and ACK retirement. LAN retention uses the witnessed `msg_out_max=0x4b0` override (`CNapiNetwork_Init @0x4cab20/@0x4cabf0`; combined-count guard in `NapiNPMessage_Create @0x627fc0`). The ordered gate and retention are explicit owner opt-ins. Generic lobby `ClientSession`/`NwUdpListener`, which have no witnessed `0x44`/`0x84` owner, now use a no-queue high-water policy: a strictly newer packet crosses a gap so permanent loss cannot deadlock the lobby, while sequence zero, stale packets, and duplicates are suppressed without ACK regression. The overflow-triggered disconnect (MSGCRE latch + 0x86/0x46 teardown burst) landed 2026-09-12 (§5.64.1). Remaining tail: retail's independent wall-time retained-record expiry is not modeled. |
 | `inmatch::slice_batch_pages` chunker | `engine/runtime/inmatch/batch_chunker.h` | **MATCHING (byte boundary)** — D-NET-135 fixed 2026-07-20 | budget 650 with per-pool margin, guard AFTER each record: 0x0C `+100 > 650` (`serialize_entity_states_to_buffer @ 0x5030a0` @0x50340d), 0x20 `+30 > 650` (`@ 0x503460` @0x503694), 0x10 `+40 > 650` (`serialize_pool2_static_to_buffer @ 0x5042F0`), 0x0D `+110 > 650` (`serialize_entity_pool_to_packet_0 @ 0x503940`). Phase order 0x10→0x0D→0x0C→0x20→0x45 confirmed (`Server_SendInitialGameStateToPlayer @ 0x51bba0` state-4 cases 1..5). |
 | Retail-join player record (minimap flags / net_id / playerClass) | `build_pool0_organic_batch` (`engine/runtime/replication/entity_wire_bridge.cpp`) | flags bit 0x100 + playerClass clamp **matching**; bit 0x01 model **divergent** (D-NET-136); net_id encoding **divergent-tolerable** (D-NET-137) | `Server_PlayerAdd @ 0x51cbc0` (`entity+36 \|= 1` @0x51d0da per-entity, remote adds only; class [5,9]-else-8 clamp @0x51d102; entity+120 = event+76 = connection_id @0x51d068); packer `lookup_entity_slot_and_pack_entry @ 0x57ad40` (@0x57ae47); decoder `MinimapSlot_FindByPackedId @ 0x57a270` (renamed from `sub_57A270`); client self-heal `NapiNPClientMsg_0x00C @ 0x42eadb`. |
 | 0x22→0x46 ack-walk | `dispatch_session_replies case 0x22` + `encode_player_sync`/`_removal` | **FIXED to echo** (was server-computed) | §5.33 update: echo @ 0x505f05, client walk-terminator @ `NapiNPClientMsg_PlayerSync @ 0x431370` tail (`slot+1 < g_max_player_slots`, re-request `0x5CF7`); removal = 3-B early return @ 0x505f37; `Server_PlayerAdd` broadcast fieldFlags 0x1CF7 (`push 7415` @0x51d2bf). `cstr_fixed` misnomer → `cstr_capped` (strings are strlen+1 on the wire). |
@@ -11795,7 +12237,7 @@ in [divergence-ledger.md](../divergence-ledger.md).
 - **D-NET-6** [HIGH, FIXED] LEN8(0x20)/LEN16(0x40) parse precedence inverted — retail tests LEN8 FIRST. [orig: CNapiNPConnection_ParseMessages @ 0x625bc0]
 - **D-NET-7** [MED, FIXED] reassembly clears the buffer on the FIRST fragment (`(flags&6)==4`) before appending — implemented in `reassemble_protocol_payload` (`protocol_message.cpp`, verified 2026-06-27; carries a regression-history note vs an earlier `frag_first && !frag_end` rewrite). [orig: CNapiNPConnection_DispatchMessage @ 0x622570 / NapiBuffer_SetLength @ 0x634220]
 - **D-NET-8** [LOW, FIXED 2026-06-27] truncated inner stream: the original substitutes 0 for missing fields and still dispatches the final partial message (read from its zero-padded 64 KB buffer), then stops — it does not bail. `parse_protocol_messages` (`protocol_message.cpp`) now emits the partial message (payload = available bytes zero-padded to the claimed length) on a truncated LEN8/LEN16/SKIP/body field instead of dropping it; valid packets are unaffected. Test: `protocol_message` `check_truncated_message_is_dispatched_zero_padded`. [orig: CNapiNPConnection_ParseMessages @ 0x625bc0]
-- **D-NET-164** [HIGH, PARTIAL — contiguous gate + LAN NACK/resend PORTED 2026-07-23; per-message one-send + finite-flush parity 2026-08-02] Retail validates the receiver-local key before reading session sequence state, then dispatches only across the contiguous inbound frontier. The LAN/game-session opt-in consumes stale/exact duplicates without redispatch, queues future packets (cap 100), and drains them in order when a gap closes. A future packet latches a missing check; the host and joiner resolve it only after their receive FIFO drains, so seq 3 then seq 2 in one batch sends no needless NACK, while a surviving gap emits one direction-correct `0x84`/`0x44`. The body is the peer-local key followed by up to sixteen missing-sequence dwords — a BUILDER cap: `SendMissingSeqList` passes max 16 into `BuildMissingSeqList @0x6234b0` (`missing_seq_buf[16]` @0x62367a), while the RECEIVER validates its own key then walks every dword present up to the 0x10000 size guard (`buf+size-4` loop @0x623917..0x6239da) — the reimpl decoder deliberately mirrors the uncapped receiver. A requested sequence of ZERO is live retail behavior, not a dead sentinel: the handler substitutes `out_packet_seq+1` (@0x6239a4), sends that fresh next-sequence packet, and advances `out_packet_seq` when it minted one (@0x6239c9..0x6239e3). Senders retain reliable message records by assigned sequence and reconstruct a requested packet with its old sequence plus the current ACK; only ACKs from packets admitted through the contiguous gate retire records. Per-message delivery metadata preserves retail's `userParam=1` one-send records in both game directions, including transient joiner C2S `0x0C`/`0x2C`/`0x3D`; a mixed packet is sent intact once and later reconstructs only its reliable siblings. The distinct C2S `0x4C` `userParam=310` lifetime is also exact: all packets built in one open boundary share C, nodes prune at C, then `connection+0x64C` advances once; held frames do not age them, and a node stamped at C expires at C+309. LAN/game connections opt into the directly witnessed 1200-record cap (`CNapiNetwork_Init` loads `ebp = 0x4B0` @0x4ca9dc and stores it to both connection-config profiles @0x4cab20/@0x4cabf0; `NapiNPMessage_Create @0x627fc0` checks pending + retained + 1). Admission is per node before MTU packetization: retained records plus every transient record already framed in the same OPEN boundary consume capacity, the first available prefix is sent, and only the cap-rejected tail is dropped. A real encode/frame failure instead leaves the admitted-but-unframed owner-queue suffix for retry. Generic lobby `ClientSession` and `NwUdpListener` remain recovery/retention-disabled because no NOVAWORLDUDP NACK owner is witnessed, but they no longer directly redispatch arbitrary order: their shared no-queue high-water gate admits newer sequences across a permanent loss and suppresses zero/stale/duplicate traffic. Regressions cover receiver-key mismatch, both true-loss game directions, malformed/key-mismatched requests, current-ACK reconstruction, ACK retirement, same-batch reorder suppression, lobby late/duplicate/permanent-loss behavior, the standalone JO listener's real socket-drain NACK, queue bounds, exact 1199+2 prefix admission, transient counting across MTU splits, and encode-failure owner-queue preservation (`npruntime_session_resend`, `novaworld_protocol_message`, `npruntime_client_runtime`, `npruntime_server_session`, `nw_host_register_e2e`). **Residual:** the independent wall-time message deadline and retail's overflow-disconnect side effect remain unported; the exact LAN count bound is enforced. [orig: NapiNPProtocol_HandleSessionPacket @0x626b72 / CNapiNPConnection_ParseMessages @0x625bc0 / BuildMissingSeqList @0x6234b0 / SendMissingSeqList @0x623560 / NapiNP_HandleResendList @0x623800 / CNapiNPConnection_BuildOutgoingPackets @0x628430]
+- **D-NET-164** [HIGH, PARTIAL — contiguous gate + LAN NACK/resend PORTED 2026-07-23; per-message one-send + finite-flush parity 2026-08-02] Retail validates the receiver-local key before reading session sequence state, then dispatches only across the contiguous inbound frontier. The LAN/game-session opt-in consumes stale/exact duplicates without redispatch, queues future packets (cap 100), and drains them in order when a gap closes. A future packet latches a missing check; the host and joiner resolve it only after their receive FIFO drains, so seq 3 then seq 2 in one batch sends no needless NACK, while a surviving gap emits one direction-correct `0x84`/`0x44`. The body is the peer-local key followed by up to sixteen missing-sequence dwords — a BUILDER cap: `SendMissingSeqList` passes max 16 into `BuildMissingSeqList @0x6234b0` (`missing_seq_buf[16]` @0x62367a), while the RECEIVER validates its own key then walks every dword present up to the 0x10000 size guard (`buf+size-4` loop @0x623917..0x6239da) — the reimpl decoder deliberately mirrors the uncapped receiver. A requested sequence of ZERO is live retail behavior, not a dead sentinel: the handler substitutes `out_packet_seq+1` (@0x6239a4), sends that fresh next-sequence packet, and advances `out_packet_seq` when it minted one (@0x6239c9..0x6239e3). Senders retain reliable message records by assigned sequence and reconstruct a requested packet with its old sequence plus the current ACK; only ACKs from packets admitted through the contiguous gate retire records. Per-message delivery metadata preserves retail's `userParam=1` one-send records in both game directions, including transient joiner C2S `0x0C`/`0x2C`/`0x3D`; a mixed packet is sent intact once and later reconstructs only its reliable siblings. The distinct C2S `0x4C` `userParam=310` lifetime is also exact: all packets built in one open boundary share C, nodes prune at C, then `connection+0x64C` advances once; held frames do not age them, and a node stamped at C expires at C+309. LAN/game connections opt into the directly witnessed 1200-record cap (`CNapiNetwork_Init` loads `ebp = 0x4B0` @0x4ca9dc and stores it to both connection-config profiles @0x4cab20/@0x4cabf0; `NapiNPMessage_Create @0x627fc0` checks pending + retained + 1). Admission is per node before MTU packetization: retained records plus every transient record already framed in the same OPEN boundary consume capacity, the first available prefix is sent, and only the cap-rejected tail is dropped. A real encode/frame failure instead leaves the admitted-but-unframed owner-queue suffix for retry. Generic lobby `ClientSession` and `NwUdpListener` remain recovery/retention-disabled because no NOVAWORLDUDP NACK owner is witnessed, but they no longer directly redispatch arbitrary order: their shared no-queue high-water gate admits newer sequences across a permanent loss and suppresses zero/stale/duplicate traffic. Regressions cover receiver-key mismatch, both true-loss game directions, malformed/key-mismatched requests, current-ACK reconstruction, ACK retirement, same-batch reorder suppression, lobby late/duplicate/permanent-loss behavior, the standalone JO listener's real socket-drain NACK, queue bounds, exact 1199+2 prefix admission, transient counting across MTU splits, and encode-failure owner-queue preservation (`npruntime_session_resend`, `novaworld_protocol_message`, `npruntime_client_runtime`, `npruntime_server_session`, `nw_host_register_e2e`). **Overflow disconnect (FIXED 2026-09-12, jo-c cross-check):** the cap is no longer drop-and-continue. Admission is per physical node in queue order (a SplitAtLength piece goes through Create too), and the FIRST non-exempt node that does not fit latches `{role, 4, count, max, "", 0, "NP.C:MSGCRE"}` (first cause wins) and requests the disconnect: a host node is destroyed on the next protocol pump (4x `0x86` carrying the record, after the boundary's admitted nodes shipped), a joiner tears down inline (4x `0x46`, nothing else built, terminal). The fragment-group HOLD leg is gone — retail never defers for capacity. A negative `msg_out_max` (the `_NSTMOUT.TXT` NEVER form) is unbounded. §5.64.1. [orig: NapiNPMessage_Create @0x627FC0 @0x628031..0x628112; CNapiNPConnection_RequestDisconnect @0x61E0F0; NapiNPProtocol_Pump @0x62a6f8..0x62a793; TeardownActiveConnection @0x6253C0] Pinned by `npruntime_host_punt` (both roles at 1199+2 and at a saturated limit of 1). **Residual:** the independent wall-time message deadline remains unported; the exact LAN count bound is enforced. [orig: NapiNPProtocol_HandleSessionPacket @0x626b72 / CNapiNPConnection_ParseMessages @0x625bc0 / BuildMissingSeqList @0x6234b0 / SendMissingSeqList @0x623560 / NapiNP_HandleResendList @0x623800 / CNapiNPConnection_BuildOutgoingPackets @0x628430]
   **D-NET-164 fragment-admission refinement (FIXED 2026-08-03):** the
   first-N prefix rule above applies to ordinary one-node semantic messages.
   When one semantic message expands into FIRST/MID/FINAL physical records, its
@@ -12687,7 +13129,7 @@ dated history below
 records earlier port boundaries; current coverage is the vehicle record's
 verdict table.
 
-**D-NET-161** [OPEN — narrowed 2026-09-08 at the PR #640 review: the ledger row lists the unported residuals (a)..(h) with addresses; the PR #640 port summary and the historical ground-core account follow] **The host
+**D-NET-161** [OPEN — narrowed 2026-09-08 at the PR #640 review: the ledger row lists the unported residuals (a)..(h) with addresses; (a) ported 2026-09-11, (d) the selector-zero boat's PlayerControl block and (f) the `entity+684` think countdown ported 2026-09-12 (vehicle-client-movers-re §26.1 / §31); the PR #640 port summary and the historical ground-core account follow] **The host
 never simulated vehicles** — the whole v33 "second model + can't drive" defect (see the
 §5.13 drive-authority subsection for the witness). Ported: the items.def physics-property
 block (engine/formats/def, scaled at parse per `ItemDef_ParsePhysicsProperty @ 0x49d870` — turn rates
@@ -13016,6 +13458,15 @@ deploy bundle, ours rides join — noted, not chased); diff-vs-golden gaps uncha
 sub-block = D-NET-134 deferred; `player.animRatio` zero = the tracked body-motor off-15
 channel-ratio item; parked-vehicle euler/flags zero = session content — nothing was driven
 in v28).]
+**Host-side pool tail narrowed 2026-09-12:** the accepted C2S 0x2F now rebuilds the
+connection's weapon-slot rows (`weapon_slots[combo] = {adm, drawn clip}` from the grant's
+`WeaponSlots_RecalculateAmmoFromCapacity` pass) instead of the lazy full-clip seed on first
+fire, and the 0x25 relay's host-side refill runs `WeaponSlot_ReloadAmmo`'s pool half (refund
+the remaining clip into `ammo_pools[class]` capped, draw a clip clamped by that pool) so pool +
+clip is conserved — the input the kit-weight recompute sums. Still open under this row: the
+sub-variant rows/pools of a remote kit (the 0x0F image carries only the main-weapon classes,
+so the remote weight omits the differing-class sub term) and the ammobucket (adm+220 belt)
+pools.
 **The host had NO dispatch case for C2S 0x06 (client fired round) — every shot a retail
 joiner fired was silently dropped: no ammo authority, no fire echo, other observers saw
 nothing (retail-join v26: 51 C 0x06 uplinks, zero host response; client prediction hid the
@@ -13207,13 +13658,23 @@ slot (fieldFlags 0x1CF7 @ 0x51b8ad → the 0x8000 REMOVAL record @ 0x505ecb..0x5
   in-match peers, advances the roster generation, and erases the connection node.
 
 The client leave remains the retail four-datagram burst from
-`JoinerConnection::disconnect()`: `[u32 remote session key]` plus zeroed
-`DS/DC/DP1/DP2/DSTR/DPC/DDSTR` TLVs, shipped from ESC/watchdog/menu/free teardown
+`JoinerConnection::disconnect()`: `[u32 remote session key]` plus the connection's LATCHED
+`DS/DC/DP1/DP2/DSTR/DPC/DDSTR` record — `{2, 2, 0, 0, "I.C:CIDEMIS", 0, ""}` for a user leave,
+the echoed host record for a punt/goodbye (2026-09-12; formerly always zeros), shipped from
+ESC/watchdog/menu/free teardown
 [orig: `CNapiNPConnection_TeardownActiveConnection @0x6253c0` →
 `SendDisconnectPacket @0x61f2a0`; receiver `Nwu_HandleDisconnect @0x623ce0`].
-`npruntime_handshake_server` pins keyed goodbye, same-address replacement, slot reuse,
-wrong-key timeout non-activity, and the 120001-ms reap. DEFERRED: the 0x32/0x6A
-broadcasts and team spawn-token return.
+**2026-09-12 (jo-c cross-check, §5.64.1):** the host side of the same teardown now sends
+retail's 4x `0x86` SERVER_GOODBYE burst to the departing peer BEFORE the player teardown —
+echoing the client's own record on a `0x46`, `NP.C:PT:SERTMOUT` on the reap, `NP.C:SH:STOP`
+on the host's close (which no longer substitutes a reliable `H:0x03` record), `NP.C:MSGCRE`
+on a pool overflow, and the old occupant's record on a same-endpoint replacement — and the
+teardown also runs `SpawnWaveList_RemovePlayer` for the leaver (`@0x51b809`), so a queued
+dead player who disconnects neither restarts his row's countdown nor bequeaths his queue slot
+to the next occupant of the reused pool-0 slot. `npruntime_handshake_server` pins keyed
+goodbye (+ its echo burst), same-address replacement (+ the old occupant's burst), slot reuse,
+the reap clock's exact stamp set, the 120001-ms reap (+ the SERTMOUT burst) and the spawn-wave
+removal. DEFERRED: the 0x32/0x6A broadcasts and team spawn-token return.
 
 **D-NET-148** [reimpl divergence, FIXED 2026-07-02] **The host replied an invented,
 unconditional S2C 0x51 "spawn-confirm" (packed char id 0) to the joiner's deploy-time C2S
@@ -13307,9 +13768,9 @@ golden 0x28 on the wire; diff_0a header health = 150 matches golden.
 De-tabled ledger rows without a prior §8 entry (transplanted verbatim 2026-08-06):
 - **D-NET-131** [FIXED 2026-07-24] `start_host_session` selects mode 1 / `HostOnly` when `serve_and_play=false`, creates no type-2 loopback and therefore no phantom local player; serve-and-play retains mode 3. (Backfilled from the ledger prose closure, 2026-08-06.)
 - **D-NET-135** [FIXED 2026-07-20] The four world pools use retail's 650-B post-write guards with margins 0x10=40, 0x0D=110, 0x0C=100, 0x20=30; the crossing record remains in the page, while 0x45 tiles retain their separate 650-B pre-write cap; pinned by `npruntime_batch_chunker` with the production path covered by `npruntime_initial_state_burst`. (Backfilled from the ledger prose closure, 2026-08-06.)
-- **D-NET-173** [FIXED 2026-08-04] The HOST side of retail's EMPTY send interval is ported: the per-connection flush arms a "last framed anything" clock (any batch, pre-framed settings/resend, or minted packet stamps it), and with nothing queued AND nothing retained the boundary mints the header-only sequence once strictly more than `idle_send_interval_ms` (30000) elapses, so a stock client parked pre-deploy never reaches its 120 s reap. The ACTIVE retained-records probe (10000) was already ported in `tick_connections`; the joiner legs were ported 2026-07-24. Pinned by `npruntime_server_session` (`check_host_idle_send_interval_keepalive`: quiet through exactly 30 s, one header-only mint, re-armed clock, and the retained path left to the ACTIVE probe). [orig: `CNapiNPConnection_PumpSendIntervals @0x628FD0` empty_interval leg @0x629041..0x629067; `idle_send_interval_ms` stored @0x4caab5/@0x4cab88 by `CNapiNetwork_Init @0x4ca4a0`; reap `timeout_ms` = 120000 @0x4caa81/@0x4cab54]
+- **D-NET-173** [FIXED 2026-08-04] The HOST side of retail's EMPTY send interval is ported: the per-connection flush arms a "last framed anything" clock (any batch, pre-framed settings/resend, or minted packet stamps it), and with nothing queued AND nothing retained the boundary mints the header-only sequence once strictly more than `idle_send_interval_ms` (30000) elapses, so a stock client parked pre-deploy never reaches its 120 s reap. The ACTIVE retained-records probe (10000) was already ported in `tick_connections`; the joiner legs were ported 2026-07-24. Pinned by `npruntime_server_session` (`check_host_idle_send_interval_keepalive`: quiet through exactly 30 s, one header-only mint, re-armed clock, and the retained path left to the ACTIVE probe). [orig: `CNapiNPConnection_PumpSendIntervals @0x628FD0` empty_interval leg @0x629041..0x629067; `idle_send_interval_ms` stored @0x4caab5/@0x4cab88 by `CNapiNetwork_Init @0x4ca4a0`; reap `timeout_ms` = 120000 @0x4caa81/@0x4cab54] **2026-09-12:** the reap `timeout_ms` is the `SessionTimeoutConfig` template (host `NapiNPProtocol::connection_template`, per node `NapiNPConnection::timeouts`), overridable by the game directory's loose `_NSTMOUT.TXT` (`parse_nstmout`: NEVER / negative = -1 disables the reap AND the pool bound, N = N seconds) and advertised in the 0x82 CS block so a joiner runs under the host's values (§5.64.1; `npruntime_handshake_timeout_override`).
 - **D-NET-176** [FIXED 2026-07-25 (three deltas noted)] The ENTITY-REMOVAL fold was entirely missing: a peer that left (or any entity the host freed) kept its decoded `ClientState` row forever, so its wire-present node AND its wire person collision proxy stayed in the world as a permanent ghost blocker (`replace_wire_collision_proxies` deliberately ignores `seen_this_frame`). Ported from the witness chain: C2S `0x32` is now queued in the joiner's S2C `0x0F` world-state-load reply burst (`NapiNPClientMsg_0x00F @0x42e647`); the host answers it authority-gated and round-gated with S2C `0x5D` to the REQUESTER ONLY, body = `[u16 pool0Index]` for every empty pool-0 entry (`NapiNPServerMsg_SendEmptySlots @0x51a600`, builder `@0x5160f0`); the joiner destroys each listed RAW pool-0 index, erasing the row and its attachment tree (`NapiNPClientMsg_DestroyEntityList @0x429730` -> `Entity_Destroy` + `PlayerSlot_FindByType` -> `PlayerSlot_ClearAndUnlink @0x434730`). S2C `0x46` bit15 is now decoded too and clears roster BOOKKEEPING ONLY — the entity is never destroyed on that leg (`@0x431411..0x43144c`; the entity-field wipes `@0x431437` are dead code because `entitySlotPtr` is null). Three tracked deltas: (a) our host ALSO pushes the same witnessed sweep bytes at leave-time teardown instead of waiting to be asked — the probe3 capture shows `0x5D` coinciding with disconnects, consistent with a sweep, but the only witnessed TRIGGER is the `0x32` request, so this is a plausible-not-witnessed trigger relocation; since 2026-08-24 the same teardown also drops the leaver's carried flag through `Match::remove_player`, the relocated trigger for `Entity_Destroy @0x43E8B1..0x43E8B8 → Entity_DropCarriedObject @0x439DF0`; (b) the host's pool-0 walk stops at the highest OCCUPIED slot rather than the pool's full entry count (slots above the high-water mark were never streamed to any client; pool capacities themselves are the witnessed per-pool table since D-NET-207); (c) the other three members of the `0x0F` reply burst (`0x28`/`0x29`/`0x2D`) are still unsent
-- **D-NET-177** [FIXED 2026-07-26; established-redeploy/strict-boundary hardening 2026-08-02 (the 13-code exit-reason map residual)] A session loss was never surfaced: a host that closed or went silent left the joiner parked in a dead world with no feedback (the 60 s admission watchdog only covers the pre-match legs). BOTH witnessed causes are now detected. (1) The host's EXPLICIT close — retail's punt, carried as the connection-description record (settings/high-table flag + low tag 3 = full tag `0x103`, net-re §5.64). `parse_disconnect_event` decodes its `DS`/`DC`/`DP1`/`DP2`/`DSTR`/`DPC`/`DDSTR` TLV run field-for-field against the 80 captured bytes of a live retail six-minute deploy-screen idle kick, and `JoinerConnection::on_host_disconnect` latches the FIRST event only (retail's store-if-invalid slot `@0x621d3c`) and fails the connection to `Phase::Error`, so the loss is terminal at ANY phase rather than in-match only. (2) Once the game session is established, host silence strictly EXCEEDING `JO_GAME_SESSION_TIMEOUT_MS` (120000 ms) is the fallback when the host vanishes without sending a close. Exactly 120000 ms remains healthy; 120001 ms reaps. That established-session gate remains armed while death/redeployment temporarily returns the joiner from `Phase::InMatch` to `Phase::Driving`, so a host crash cannot strand the deploy screen; a pre-establishment `Driving` phase is still exempt. `Simulation::is_session_lost()` is the bound STATE test beside `get_session_loss_reason()` (string-emptiness is not a state test, ADR 0017); `DeployScreenPresenter` checks it before the deployment-release edge and calls its existing `teardown()` — the punt clears the same pick-pending flag a release does, so the screen used to emit `closed`, the shell's "the player spawned" edge, and re-captured the mouse over a dead world; `GameWorld` emits `session_lost(reason)` once per session; `main_game` routes both causes through one `_abort_to_menu(stage, reason)` leg instead of logging every kick as "mission load failed". Retail's shape is mission-exit-with-reason and no in-world dialog, which this reproduces: the captured DPC 33 hits no `g_mission_exit_reason` row and falls to `Input_QueueEvent(3) @0x4c67a4` -> `g_mission_exit_reason = 1` (`Input_HandleActionBinding` case 3 `@0x49af2c`) -> the plain teardown + `"MainMenu"` push `@0x568654`. Pinned by `npruntime_host_punt`, `npruntime_entity_lifecycle_net` (strict boundary plus redeployment), and `godot/tests/net/host_punt_surfacing_test.gd`. RESIDUAL: we render the decoded `DPC`/`DC`/`DDSTR`/`DSTR` as ONE reason string and do not model retail's code->exit-reason table — codes 35..46/49 -> reasons 7/9..19, whose strings come from `gameerr.bin` `"MPGameDisconnectCodes"` with `[[$]]` replaced by DSTR (`CNapiNetwork_GetDisconnectReasonString @0x4c7000`); code 34 -> `Input_QueueEvent(36)`; default -> `Input_QueueEvent(3)`. The punt families witnessed so far all take the default arm we reproduce, so the gap bites only for those thirteen coded reasons
+- **D-NET-177** [FIXED 2026-07-26; established-redeploy/strict-boundary hardening 2026-08-02 (the 13-code exit-reason map residual)] A session loss was never surfaced: a host that closed or went silent left the joiner parked in a dead world with no feedback (the 60 s admission watchdog only covers the pre-match legs). BOTH witnessed causes are now detected. (1) The host's EXPLICIT close — retail's punt, carried as the connection-description record (settings/high-table flag + low tag 3 = full tag `0x103`, net-re §5.64). `parse_disconnect_event` decodes its `DS`/`DC`/`DP1`/`DP2`/`DSTR`/`DPC`/`DDSTR` TLV run field-for-field against the 80 captured bytes of a live retail six-minute deploy-screen idle kick, and `JoinerConnection::on_host_disconnect` latches the FIRST event only (retail's store-if-invalid slot `@0x621d3c`) and fails the connection to `Phase::Error`, so the loss is terminal at ANY phase rather than in-match only. (2) Once the game session is established, host silence strictly EXCEEDING `JO_GAME_SESSION_TIMEOUT_MS` (120000 ms) is the fallback when the host vanishes without sending a close. Exactly 120000 ms remains healthy; 120001 ms reaps. That gate remains armed while death/redeployment temporarily returns the joiner from `Phase::InMatch` to `Phase::Driving`, so a host crash cannot strand the deploy screen. **2026-09-12 correction (jo-c cross-check, §5.64.1):** the earlier "a pre-establishment `Driving` phase is still exempt" described the reimpl, not retail — retail's client reap runs from state-5 entry (the accepted 0x82, `NapiNP_HandleServerJoinResponse @0x629eac` -> `OnStateChange @0x62612f`) with no gameplay gate, so the join stages, the world stream and the pre-first-spawn deploy screen reap after 120 s exactly like the in-match phase; `in_match_session_established_` is gone. The clock is stamped ONLY by an in-order admitted 0x83 (retail `ParseMessages @0x625d54`; a zero-message keepalive counts) — not by 0x84 resend lists, stale/duplicate/future 0x83s or the 0x81/0x82 legs — and the window is the connection's `timeouts.timeout_ms` (the host-advertised CS field 0; `< 0` disables). The explicit close now has TWO carriers, both terminal and both answered with the 4x `0x46` burst echoing the latched record: the `H:0x03` description and the session opcode `0x86` SERVER_GOODBYE (`on_server_goodbye`: keyed by our CK, active phases only). The silence reap latches `{2, 3, elapsed, timeout, "", 0, "NP.C:PT:CLNTTMOUT"}`; sending that burst on the reap itself is not yet modeled. `Simulation::is_session_lost()` is the bound STATE test beside `get_session_loss_reason()` (string-emptiness is not a state test, ADR 0017); `DeployScreenPresenter` checks it before the deployment-release edge and calls its existing `teardown()` — the punt clears the same pick-pending flag a release does, so the screen used to emit `closed`, the shell's "the player spawned" edge, and re-captured the mouse over a dead world; `GameWorld` emits `session_lost(reason)` once per session; `main_game` routes both causes through one `_abort_to_menu(stage, reason)` leg instead of logging every kick as "mission load failed". Retail's shape is mission-exit-with-reason and no in-world dialog, which this reproduces: the captured DPC 33 hits no `g_mission_exit_reason` row and falls to `Input_QueueEvent(3) @0x4c67a4` -> `g_mission_exit_reason = 1` (`Input_HandleActionBinding` case 3 `@0x49af2c`) -> the plain teardown + `"MainMenu"` push `@0x568654`. Pinned by `npruntime_host_punt`, `npruntime_entity_lifecycle_net` (strict boundary plus redeployment), and `godot/tests/net/host_punt_surfacing_test.gd`. RESIDUAL: we render the decoded `DPC`/`DC`/`DDSTR`/`DSTR` as ONE reason string and do not model retail's code->exit-reason table — codes 35..46/49 -> reasons 7/9..19, whose strings come from `gameerr.bin` `"MPGameDisconnectCodes"` with `[[$]]` replaced by DSTR (`CNapiNetwork_GetDisconnectReasonString @0x4c7000`); code 34 -> `Input_QueueEvent(36)`; default -> `Input_QueueEvent(3)`. The punt families witnessed so far all take the default arm we reproduce, so the gap bites only for those thirteen coded reasons
 - **D-NET-178** [FIXED 2026-07-25 (client-side enforcement only; the two host gates remain unenforceable)] A joiner mounted its resource root from the LOCAL persisted expansion setting and never from the host's, while still echoing the host's `ServerHello.SUS2` in its C2S JOIN `EXP` TLV — so both host gates passed while the two sides held different data. That is corrupting because the ADM weapon index space is expansion-scoped: `weapon.def` rows take ADM slots in pure file order [orig: `WeaponDefs_ParseLineCallback @0x5436e1` -> `AdmDef_FindFreeSlot @0x53FC50`], and the shipped JO:CA files diverge at the SEVENTH `weapon` row — base `resource.pff` has 72 rows starting `...WPN_357`, `WPN_M4AUTO`; `expansion/jox01` has 94 and inserts `WPN_MK23`, `WPN_GLOCK17` at that point. Every wire ADM index from ADM slot 7 on then names a different weapon on each side, in BOTH directions (expansion host vs base joiner AND base host vs expansion joiner), and on every channel that carries one: the joiner's own C2S `0x2F` kit, the host's S2C `0x5A` grant, and each round event's `adm_index` — witnessed live against a retail host as a wrong spawn loadout plus remote grenades drawn as rockets. RETAIL's own mechanism, all IDA-verified: `UI_JoinSelectedSession @0x5699d0` copies the SELECTED SESSION RECORD's expansion (`session_node+1104`) into the pending name `@0x569afa` and calls `Expansion_SwitchTo @0x5688c0` PRE-CONNECT `@0x569b02` — ONE global mount, re-derived wholesale (`PFF_CloseAllOpenArchives @0x4a4380` + `PFF_OpenAllArchives @0x4a4310`, `WeaponDef_LoadAll`, `PlayerProfile_LoadAllFromDisk`, `SoundProfile_LoadAll`, `ItemDefs_LoadAndValidate`, entity-def callback reinit) — then IGNORES the return: a missing `expansion\<name>\<name>.pff` fails the `@0x568914` gate, leaves `g_ExpansionName` unchanged, and retail CONNECTS ANYWAY on its own data set, so retail itself reproduces the ADM corruption above. It then sends its ACTIVE `g_ExpansionName` in the JOIN `EXP` TLV `@0x569dc4` and leaves rejection to the HOST's EXP compare (`Server_ValidatePlayerJoinRequest @0x512100`, DC=2 / DPC=47). Fixed here by running that same switch against the authoritative expansion in S2C `0x7B` (net-re §5.32 field 7) during the joiner preload, BEFORE the exact S2C `0x0B` header is promoted into a world and before `weapon.def`, `items.def`, or any header-named terrain/environment/tile/model asset is resolved: `inmatch::decide_join_expansion` (`engine/runtime/inmatch/join_session_policy.cpp`; native since S10b 2026-08-07, formerly the GDScript `JoinExpansionDecision` (ex `JoinExpansionDecision`)) decides keep/remount/fail from host expansion x mounted expansion x installed set, and `NetSessionDrive._reconcile_join_expansion` (the world's net-session drive, `godot/game/world/net_session_drive.gd`) executes it by switching THE ONE LIVE MOUNT IN PLACE — `ResourceRoot::mount_runtime` on the same object the menu shell, the loading screen and `GameWorld` share, which replaces the archive set rather than layering onto it and bumps the cache epoch plus clears the texture-resolver caches, so every holder moves with it. The switch is gated on the new public `ResourceRoot::is_runtime_mount()`: only a runtime mount layers expansions at all, so a plain-directory/tooling/fixture root stands down with a warning instead of being replaced. THREE deltas from retail: (a) the switch is RELOCATED POST-HANDSHAKE — a LAN joiner has no browse-row session record, so the host expansion arrives as S2C `0x7B` field 7 rather than `session_node+1104`; on LAN both are fed by the same `0x81` ServerHello `SUS2`, so only the MOMENT differs; (b) we echo `SUS2` in the JOIN `EXP` TLV, so the host's own compare always passes and the enforcement is entirely OUR preload's in-place remount plus local abort — a host observes join-then-disconnect where a retail host would have rejected pre-join; (c) a host expansion that is NOT INSTALLED aborts the join with a reason naming it and what is installed, where retail's no-op switch connects regardless — a deliberate divergence, cited at the source. `opennova::Vfs::mount_game` falls back to base-game mounting for an unknown expansion and still returns success, so the mount is verified rather than assumed: `Vfs::mounted_expansion()` (through `ResourceIndex` to `ResourceRoot::get_expansion`) now reports what ACTUALLY layered instead of echoing the request, and the silent fallback fails the join instead of quietly reproducing the divergence. RESIDUAL: the JOIN still echoes `ServerHello.SUS2` before anything has verified we can mount it, and `VERSIONCRCSTRING` stays `"0"` (D-NET-166), so neither of the host's own gates can catch a mismatched client — our preload check is the only thing that does, which also means an OpenNova HOST cannot reject a mismatched retail joiner. The switch is STICKY on both sides (retail's `g_ExpansionName` is a global): after a join the shell's root stays on the host's expansion while `ResourceDirSettings` still reports the persisted local choice, so the Mods screen can disagree with the live mount until the player picks again — the join leg deliberately does not persist. Pinned by `join_expansion_reconcile_test.gd` (in-place switch of the injected shell root, uninstalled-expansion abort, loose-root stand-down), the `npruntime_join_session_policy` ctest + `net_session_policy_test.gd` (the decision cases — host x mounted x installed, case/whitespace folding, on-disk spelling, the composed not-installed reason; successors of the deleted GDScript `join_expansion_reconcile_test.gd`), `resource_root_contract_test.gd` (`test_runtime_remount_in_place_switches_expansion`, `test_is_runtime_mount_discriminates_runtime_from_editor_mounts`) and the in-place re-scan block in the `resource_index` ctest
 - **D-NET-183** [FIXED + LIVE-VERIFIED 2026-07-26 against a stock retail 1.7.5.7 co-op host (revx02/CP08.BMS, `.scratch/golden/opennova-joiner-profile-kit-verified.pcapng`): our joiner submitted `team=1 class=9` with the profile's blue class-9 page `{1 KNIFE, 16 M16BURST, 3 colt45, 93 AT4, 83 GRENADEFB, 85 GRENADESM, 88 GRENADEHE_1}` and the host granted all seven, zero drops, returning `avatarClass=9` in pool-slot order. `WPN_AT4` (`charfilter engineer`, mask 16) surviving is the load-bearing observation — under the old hardcoded class 8 it would have been dropped exactly as `WPN_SR25` was. All 15 subsequent C2S `0x06` carried `adm=16`, the granted M16, where the defect shipped `adm=1` (knife) on every shot. The submit PAIR also came out `weaponSlot=195` then `200` (category 3 rank 5), the first live confirmation that our second submit tracks `g_currentWeaponSlot` [orig: @0x525c2e] — the earlier retail↔retail golden could not distinguish this because every primary in it sat at category 3 rank 0, whose pool slot IS 195. Full ctest 291/291 + full GUT 250 scripts/2713 tests/2711 pass/0 fail + all five lints. RESIDUAL, still with NO live coverage: the S2C `0x50` side-flip leg (no reassignment occurred in either capture)] Our multiplayer C2S `0x2F` sourced its kit from the JOINED MISSION's `.bms` loadout chunk and paired it with a HARDCODED `player_class = 8`, two values produced by code paths that never consulted each other. Retail does neither (net-re §5.66): `[orig: Mission_LoadBMSFile @0x40F4E0]` `fseek`s past BOTH the loadout and item-availability chunks whenever `is_in_session` (`@0x40f694`/`@0x40f6b2`/`@0x40f6e1`), and `[orig: Game_StartMission @0x525793..0x525836]` instead copies the player profile's per-SIDE, per-CLASS 2048-byte kit page over `restrictionData` and submits it with **that same page's class byte** — one integer selects both, which is why a stock kit is class-appropriate by construction. Witnessed live: a stock rifleman joiner on revx02/CP08.BMS submitted its blue class-8 profile page `{WPN_KNIFE, WPN_M14_AimPoint, WPN_colt45, WPN_SATCHEL_CHARGE, WPN_GRENADEFB, WPN_GRENADEHE, WPN_GRENADESM}` and had all seven granted, while CP08.BMS's own authored kit is a SNIPER kit led by `WPN_SR25` (`.scratch/golden/retail-coop-playerinfo-join.pcapng`). CONSEQUENCE, observed against a live retail co-op host: we submitted the mission's sniper kit as class 8, `WPN_SR25` (revx02 ADM 60, `charfilter sniper` = mask 2) failed the host's `(type_mask & admEntry[+124])` test with `type_mask` 8 (`[orig: NapiNPServerMsg_HandlePlayerLoadout @0x515790` test `@0x515A36]`), the grant came back without a category-3 weapon, and our own `weapon_select_slot(195)` global-scan fallback landed on the knife at combo 65 — so the host correctly rendered a knife and a knife swing while our first-person view still showed the SR-25. Also subsumes the blue-only `WPN_KNIFE` (ADM 1, `teamfilter blue`) being submitted on red teams: retail's red pages carry `WPN_KNIFE2` (ADM 2) as DATA, so the pairing is automatic once the page is the source. The port adds `engine/formats/playersav` for `weapon.sav` (expansion-scoped, `[orig: PlayerProfile_LoadAllFromDisk @0x54f4d0]`; format in net-re §5.66) with `[orig: PlayerProfile_InitDefaults @0x54bb40]`'s shipped defaults as the fallback, gates the `.bms` promote on a net session, and re-picks the page on the S2C `0x50` team re-latch (`[orig: NapiNPClientMsg_TeamAssign @0x431a35..0x431a9e]`, closing that half of D-NET-168's deferral). NOT ported, deliberately: any submit-time `charfilter`/`teamfilter` filter — retail's builder has none (`[orig: NetPacket_SendLoadoutSubmit @0x42CDC0]`), and its editor filters only the three selectable PLAYER_INFO slots (`[orig: populate_weapon_slot_lists @0x560430]`), so a page's grenade/knife tail can legitimately carry an entry the host drops. ONE-BUFFER RULE, the trap this port set for itself and then closed: retail has exactly ONE kit buffer — `Game_StartMission` copies the page into `restrictionData`, `Player_InitPlayer` builds the LOCAL display list from that same buffer, and `NetPacket_SendLoadoutSubmit` serializes it — so sourcing the wire from the profile while the local slot pool still came from `spawn_kit_` would have re-created the identical class of defect mirrored (we would tell the host one kit and hold another, and the armory ACCEPT re-send would have shipped the profile page over the kit just accepted). `seed_session_kit_from_profile` therefore copies the page INTO `spawn_kit_` (our `restrictionData`) at catalog load and again on the S2C `0x50` side flip, and the submit serializes the resident buffer. Pinned by `playersav_weapon_sav` (whose corpus leg re-serializes the maintainer's real 337996-byte `weapon.sav` BYTE-IDENTICALLY from the parsed model, ADR 0003 demonstrated rather than asserted) and the `npruntime` side-kit resubmit cases
 - **D-NET-185** [FIXED 2026-07-26] Our joiner's per-frame C2S `0x0C` extended uplink never carried the entity Flags byte: `replication::build_player_uplink` filled the carrier handle, pose, movement-input byte and equipped ADM index and left `PlayerExtendedUplink::state_flags_byte` at its `0` default, where the original serializes the RAW `entity+0x24` low byte verbatim between the movement-input byte and the analog triplet [orig: `NetPacket_SerializePlayerState` case 3 @ 0x4c1b17 `mov cl, [edi+24h]`]. That byte is the ONLY wire carrier for ADS/scope: there is no scope message and no scoped anim id on the wire, because every observer re-derives the third-person weapon-channel pose locally from this flag plus the ADM index. The host REPLACES bits 2-4 of its copy of the sender's Flags from it (`flags ^= (flags ^ wire) & 0x1C` [orig: @ 0x4c1e4d], a replace and not an xor-delta), re-broadcasts its copy raw in every S2C `0x0A` player compact record [orig: @ 0x4c0c7d], and each observer's own body updater selects the scoped hold variants off bit `0x10` — designator 54→55, P90 56→57, MP7 58→59, javelin 60→61, and rifles to idle_3 49 [orig: `Entity_UpdateInfantryPlayerBody` @ 0x4b5deb]. CONSEQUENCE, reported live: our joiner set the bit locally (`Simulation::apply_player_input_pre_tick` folds `scope_engaged` into `entity->flags` bit `0x10`) and its own first-person view scoped correctly, but the host's copy of our Flags stayed permanently unscoped, so NO other player — retail or opennova — ever saw the joiner aim down sights. The receive and re-broadcast halves were already correct (`snapshot_of` writes the same low byte unmasked); only the joiner's send was missing. RESIDUAL, tracked under D-INF-11's remote/NPC weapon-channel line: our own client still does not DERIVE or present the upper-body weapon channel for any non-local player, so a remote player's scoped hold pose (rifles -> idle_3 49; hold kinds 5-8 -> 55/57/59/61) is invisible on our screens even when that player — retail or opennova — is correctly transmitting bit 0x10. Retail runs the selector for every non-hidden player entity on every client, driven entirely by wire-supplied inputs (the Flags byte plus the ADM index at entity+0x2B0), which is exactly why no scoped anim id needs to cross the wire. Shipping the byte RAW is the witnessed shape — the original does not mask on the write side and the receiver already does — so the same field also restores the NVG (`0x4`) and binocular (`0x8`) bits. Pinned by `netsim_build_player_uplink::run_field_mapping` (raw unmasked byte incl. an out-of-mask bit) and `run_scope_flag_reaches_host` (scope raises AND lowers the host's bit through the real replace-bits apply, then survives into the S2C re-broadcast)

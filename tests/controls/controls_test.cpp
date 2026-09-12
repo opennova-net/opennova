@@ -8,12 +8,40 @@
 #include <set>
 #include <string>
 
+#include <formats/rtxt/rtxt.h>
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/controls.h>
+#include <runtime/controls/key_strings.h>
 
 namespace {
 
 using namespace opennova::controls;
+
+// The shipped keyhelp.bin "Keys" section as decoded from the retail
+// localres.pff (docs/interface/rtxt-strings-re.md), rebuilt synthetically:
+// the prefixes, separator, unknown-key label and the names the tests touch.
+opennova::rtxt::File make_shipped_keys_table() {
+  opennova::rtxt::File f;
+  const char *pairs[][2] = {
+      {"Ctrl-", "Ctrl-"},         {"Shift-", "Shift-"},
+      {"Alt-", "Alt-"},           {"OR", " or "},
+      {"KEY", "Key"},             {"PRINT", "Print Screen"},
+      {"SNAPSHOT", "Snapshot"},   {"LBUTTON", "Mouse 1"},
+      {"RBUTTON", "Mouse 2"},     {"MBUTTON", "Mouse 3"},
+      {"MWHLUP", "Mouse Whl Up"}, {"MWHLDN", "Mouse Whl Dn"},
+      {"HANGUL", "Hangul"},       {"PADENTER", "Numpad Enter"},
+      {"OEM_CLEAR", "OEM_CLEAR"}, {"CONTROL", "Ctrl"},
+      {"SPACE", "Space"},         {"UP", "Up"},
+      {"ESCAPE", "Esc"},          {"NUMPAD0", "Numpad 0"},
+      {"F1", "F1"},               {"F4", "F4"},
+  };
+  for (const auto &pair : pairs) {
+    f.entries.push_back({pair[0], pair[1], {0, 0}, 0});
+  }
+  f.sections = {{"Keys", static_cast<uint32_t>(f.entries.size())}};
+  f.build_lookup();
+  return f;
+}
 
 #define CHECK(cond, msg)                                      \
   do {                                                        \
@@ -97,7 +125,46 @@ bool test_class_names() {
   return true;
 }
 
-// VK -> display name. [orig: KeyBinding_GetKeyNameAndDisplayName @ 0x494c60]
+// No "Keys" table installed: every lookup returns its fallback, the "XX"
+// untranslated marker stripped (this port's convention; retail shows the raw
+// literal only when its gametext global is null, which a working install
+// never reaches) [orig: KeyHelp_GetStringWithFallback @0x51ed40].
+bool test_key_strings_fallback() {
+  clear_key_strings();
+  CHECK(!has_key_strings(), "no table installed");
+  CHECK(key_string("Ctrl-", "XXCtrl - ") == "Ctrl - ", "the Ctrl fallback, marker stripped");
+  CHECK(key_string("OR", " XXor ") == " or ", "the OR fallback");
+  CHECK(key_string("KEY", "KEY") == "KEY", "a marker-less fallback is verbatim");
+  CHECK(key_name(0x2A) == "Print Screen", "0x2A falls back to the XXPrint Screen literal");
+  CHECK(key_name(0) == "KEY 0", "vk 0 takes the default arm over the raw KEY label");
+  CHECK(key_name(0xE2) == "KEY 226", "an unlisted VK is '<label> <vk>'");
+  CHECK(format_binding(0x57, 0x26, 17, 0) == "Ctrl - W or Up",
+        "the Options row renders the stripped fallbacks");
+  BindingRecord rec;
+  rec.primary = 0x39;
+  rec.primary_mod = 17;
+  rec.mouse_mask = 2;
+  CHECK(format_display_string(rec) == "Ctrl - 9 or mouse 2",
+        "the mouse arm's literal is the lowercase XXmouse 2");
+  return true;
+}
+
+// The shipped table installed: the retail text wins over every fallback
+// [orig: KeyHelp_GetStringWithFallback @0x51ed40 -> the keyhelp.bin "Keys"
+// section]. Every later test runs over this table.
+bool test_key_strings_table() {
+  set_key_strings(make_shipped_keys_table());
+  CHECK(has_key_strings(), "table installed");
+  CHECK(key_string("Ctrl-", "XXCtrl - ") == "Ctrl-", "the shipped Ctrl- prefix");
+  CHECK(key_string("shift-", "XXShift - ") == "Shift-", "case-insensitive key match");
+  CHECK(key_string("OR", " XXor ") == " or ", "the shipped separator");
+  CHECK(key_string("KEY", "KEY") == "Key", "the shipped unknown-key label");
+  CHECK(key_string("NOSUCHKEY", "XXFallback") == "Fallback", "a miss still falls back");
+  return true;
+}
+
+// VK -> (binding name, display fallback) and the localized label
+// [orig: KeyBinding_GetKeyNameAndDisplayName @ 0x494c60].
 bool test_key_names() {
   CHECK(key_name(0x57) == "W", "letter W");
   CHECK(key_name(0x31) == "1", "digit 1");
@@ -109,22 +176,42 @@ bool test_key_names() {
   CHECK(key_name(0x60) == "Numpad 0", "numpad 0");
   CHECK(key_name(0x1B) == "Esc", "escape");
   CHECK(key_name(0x52) == "R", "letter R");
-  CHECK(key_name(0).empty(), "vk 0 is empty");
+  CHECK(key_name(0x2A) == "Print Screen", "0x2A is PRINT -> the shipped 'Print Screen'");
+  CHECK(key_name(0x2C) == "Snapshot", "0x2C is SNAPSHOT");
+  CHECK(key_name(0x15) == "Hangul", "0x15 HANGUL (the IME arm)");
+  CHECK(key_name(0xFE) == "OEM_CLEAR", "0xFE OEM_CLEAR (the legacy arm)");
+  CHECK(key_name(0x10D) == "Numpad Enter", "269 PADENTER");
+  CHECK(key_name(0xDB) == "[" && key_name(0xDD) == "]", "the bracket VKs");
+  // The default arm: "<KEY label> <vk>" for every unlisted VK, vk 0 included
+  // [orig: @0x496269..0x49629f].
+  CHECK(key_name(0) == "Key 0", "vk 0 is 'Key 0'");
+  CHECK(key_name(0xE2) == "Key 226", "VK_OEM_102 is 'Key 226'");
+  const KeyNames mouse = key_binding_names(0x01);
+  CHECK(mouse.binding == "LBUTTON" && mouse.display == "XXMouse 1",
+        "the pair the switch writes for VK 1");
+  const KeyNames letter = key_binding_names(0x57);
+  CHECK(letter.binding == "W" && letter.display == "W", "a printable VK is itself in both");
+  const KeyNames unknown = key_binding_names(0xE2);
+  CHECK(unknown.binding == "Key 226" && unknown.display == "Key 226",
+        "the default arm writes the label to both names");
   return true;
 }
 
-// Binding format: primary alone, primary + secondary joined by " or ", unbound empty.
-// [orig: KeyBinding_FormatBindingString @ 0x559a10]
+// Binding format: primary alone, primary + secondary joined by the separator,
+// unbound empty. [orig: KeyBinding_FormatBindingString @ 0x559a10]
 bool test_format_binding() {
   CHECK(format_binding(0x57, 0x26) == "W or Up", "two-slot join");
   CHECK(format_binding(0x52, 0x00) == "R", "single key");
   CHECK(format_binding(0x00, 0x00).empty(), "unbound empty");
   // Modifier-word prefixes [orig: KeyBinding_FormatBindingString @ 0x559a10 —
-  // word 17 "Ctrl-", word 16 "Shift-"].
-  CHECK(format_binding(0x57, 0x26, 17, 0) == "Ctrl - W or Up",
+  // word 17 "Ctrl-", word 16 "Shift-" through the "Keys" table].
+  CHECK(format_binding(0x57, 0x26, 17, 0) == "Ctrl-W or Up",
         "slot-1 Ctrl prefix");
-  CHECK(format_binding(0x57, 0x26, 0, 16) == "W or Shift - Up",
+  CHECK(format_binding(0x57, 0x26, 0, 16) == "W or Shift-Up",
         "slot-2 Shift prefix");
+  // The separator rides the slot INDEX (@0x559a4d), so an empty primary
+  // behind a keyed secondary leads with it, as written.
+  CHECK(format_binding(0x00, 0x26) == " or Up", "slot 1 always leads with the separator");
   return true;
 }
 
@@ -250,7 +337,7 @@ bool test_binding_set_assignment() {
   r = set.record(fwd);
   CHECK(r->primary == 0x59 && r->primary_mod == 17,
         "Ctrl-held-alone records modifier 17");
-  CHECK(set.control_text(fwd, Device::Keyboard).rfind("Ctrl - Y", 0) == 0,
+  CHECK(set.control_text(fwd, Device::Keyboard).rfind("Ctrl-Y", 0) == 0,
         "the Ctrl- prefix renders");
   CHECK(set.assign_key(fwd, 0x59, true, true, false, false),
         "Ctrl+Shift+Y assigns");
@@ -298,7 +385,7 @@ bool test_binding_set_assignment() {
         "the default seat1 record is the Ctrl+1 chord");
   CHECK(set.record(knife)->primary == 0x31 && set.record(knife)->primary_mod == 0,
         "the default Knife record is a bare 1");
-  CHECK(set.control_text(seat1, Device::Keyboard).rfind("Ctrl - 1", 0) == 0,
+  CHECK(set.control_text(seat1, Device::Keyboard).rfind("Ctrl-1", 0) == 0,
         "the Options table shows the seat chord");
 
   // Live rows mirror the static build and consume edits.
@@ -323,22 +410,40 @@ bool test_binding_set_assignment() {
 // The in-game display formatter the death screen's "call a medic" hint uses
 // [orig: KeyBinding_FormatDisplayString @0x496bd0]: the three arms in their
 // witnessed order, the " or " joiner, the per-slot Ctrl/Shift prefixes, the
-// modifier-less reset, the mouse names, and the " *" flag suffix.
+// modifier-less reset over the LAST resolved key, the mouse names, and the
+// " *" flag suffix -- every string through the shipped "Keys" table.
 bool test_format_display_string() {
   BindingRecord rec;
   rec.primary = 0x39;  // '9' — the MedicReq catalog default
   CHECK(format_display_string(rec) == "9", "a bare key prints its name");
   rec.primary_mod = 17;
-  CHECK(format_display_string(rec) == "Ctrl - 9",
-        "a modified slot walks arm 1 with the Ctrl prefix");
+  CHECK(format_display_string(rec) == "Ctrl-9",
+        "a modified slot walks arm 1 with the shipped Ctrl- prefix");
   rec.secondary = 0x20;
-  CHECK(format_display_string(rec) == "Ctrl - 9",
-        "arm 2 resets the buffer for the modifier-less second slot and "
-        "prints the FIRST key behind either slot's modifier");
+  // Arm 1 renders "Ctrl-9 or Space" and leaves the keyName scratch holding
+  // the LAST keyed slot (Space, @0x496ca7); arm 2 then resets the buffer for
+  // the modifier-less second slot and appends that scratch behind either
+  // slot's modifier (@0x496f01) -- never the primary.
+  CHECK(format_display_string(rec) == "Ctrl-Space",
+        "arm 2 prints the last resolved key behind either slot's modifier");
   rec.primary_mod = 0;
   rec.secondary_mod = 16;
-  CHECK(format_display_string(rec) == "Shift - 9",
-        "either slot's Shift lands in front of the first key");
+  CHECK(format_display_string(rec) == "Shift-Space",
+        "either slot's Shift lands in front of the last resolved key");
+  // A rebinding-reachable record (BindingSet::assign_key: Ctrl+A fills the
+  // primary, a later bare B the secondary).
+  BindingRecord mixed;
+  mixed.primary = 0x41;
+  mixed.primary_mod = 17;
+  mixed.secondary = 0x42;
+  CHECK(format_display_string(mixed) == "Ctrl-B",
+        "Ctrl+A primary + bare B secondary displays Ctrl-B");
+  // An empty primary: the up-front resolve (@0x496c07) of VK 0 yields the
+  // default-arm label, and arm 2 appends it for the keyed secondary.
+  BindingRecord empty_primary;
+  empty_primary.secondary = 0x42;
+  CHECK(format_display_string(empty_primary) == "Key 0",
+        "primary 0 + bare secondary prints the 'Key 0' label");
   rec.secondary = 0;
   rec.secondary_mod = 0;
   rec.mouse_mask = 2;
@@ -483,6 +588,10 @@ int main() {
 
   RUN_TEST(test_catalog_defaults);
   RUN_TEST(test_class_names);
+  // The fallback case runs FIRST (no table); the table test installs the
+  // shipped "Keys" strings every later test formats through.
+  RUN_TEST(test_key_strings_fallback);
+  RUN_TEST(test_key_strings_table);
   RUN_TEST(test_key_names);
   RUN_TEST(test_format_binding);
   RUN_TEST(test_build_rows_keyboard);

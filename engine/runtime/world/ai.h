@@ -188,7 +188,20 @@ struct AiBrain {
         kWorkHeading = 132,// working target heading [byte +528]
         kWorkPitch = 133,  // working target pitch [byte +532]
         kWorkRoll = 134,   // working target roll [byte +536]
-        kGuard = 144,      // guards kNoTargetIdle [byte +576]
+        kGuard = 144,      // guards kNoTargetIdle [byte +576] — the gunner-attachment COUNT:
+                           // a vehicle carrying attached children never idles
+        // ---- the gunner-attachment block (Entity_SetupGunnerAttachments @0x468100) ----
+        // +576 = the attached-child count (kGuard above), then 16 pairs at +580+8*i:
+        // pair[0] = the assigned 'agun' userpoint (retail: the model row pointer;
+        // here index+1 into VehicleTraits::agun_points, 0 = none), pair[1] = the
+        // child (retail: the entity pointer; here EntityHandle.packed + 1, the
+        // kTargetSlot rebase). Read every tick by Entity_UpdateAttachedChildren
+        // @0x45D550 and by the vehicle DYING enter's child-kill loop
+        // @0x467B6E..0x467BBB. [orig: the walk stores @0x468168, count @0x468193,
+        //  the bone stores @0x468389]
+        kAttachCount = 144,
+        kAttachSlots = 145, // +580; 16 x {bone, child} = f[145..176]
+        kAttachSlotMax = 16,
         kBoneFlag = 196,   // bone-tracking flag (byte +784)
     };
 

@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -89,10 +90,16 @@ static void tick_no_net(opennova::mission::MissionKernel &kernel) {
 	role.run_tick(opennova::inmatch::TickInput{});
 }
 
+// Every kernel below lives on the heap: sizeof(MissionKernel) is ~270 KB (the
+// World inside it alone ~230 KB, with the 512-dword script var bank and the
+// per-entity/brain records), the carry block holds three of them live at once,
+// and MSVC does not reliably overlap main()'s block-scoped locals, so stack
+// kernels overflow the 1 MB default stack (STATUS_STACK_OVERFLOW in main).
 int main() {
 	// --- the ordering guards ---------------------------------------------------
 	{
-		ms::MissionKernel kernel;
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
 		ms::KernelBootOptions options;
 		std::string error;
 		CHECK(!kernel.boot(options, error));
@@ -102,7 +109,8 @@ int main() {
 		CHECK(!kernel.restore_baseline());
 	}
 	{
-		ms::MissionKernel kernel;
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
 		std::string error;
 		CHECK(!kernel.open("./definitely/not/a/mounted/root", "nowhere.bms", error));
 		CHECK(!error.empty());
@@ -112,7 +120,8 @@ int main() {
 	{
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if never() then set(v1,1) endif\n";
-		ms::MissionKernel kernel;
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		std::string error;
@@ -172,7 +181,8 @@ int main() {
 	{
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if never() then bogus_command(1) endif\n";
-		ms::MissionKernel kernel;
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options; // lenient
 		std::string error;
@@ -184,7 +194,8 @@ int main() {
 	{
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if never() then bogus_command(1) endif\n";
-		ms::MissionKernel kernel;
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.wac_strict_diagnostics = true;
@@ -198,7 +209,8 @@ int main() {
 	// No script at all is the valid BMS-only mission under both policies.
 	{
 		std::map<std::string, std::string> files;
-		ms::MissionKernel kernel;
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.wac_strict_diagnostics = true;
@@ -207,10 +219,55 @@ int main() {
 		CHECK(!kernel.wac_loaded);
 	}
 
+	// --- the declared-variable carry across kernels -------------------------------
+	// Retail's compiler-declared VAR/ARRAY slots (0xC6B640 + 4n, n = declaration
+	// order) are never zeroed by any load path: WacScript_InitAndLoad clears
+	// V0..V255 only (memset 0x400 @0x4f95ee) and Script_Compile's declaration
+	// arm stores name/address/type without writing the slot (@0x4f3812..
+	// 0x4f3964). A rebuilt kernel carries that half (the embedder's
+	// reset_world seam: ScriptVarStore::carry_declared_from) so a restart or
+	// the next mission reads slot n at the previous run's value while V#
+	// restart at zero.
+	{
+		std::map<std::string, std::string> files;
+		files["synth.wac"] = "var a\ninc(a)\nv1 = a\n";
+		auto first_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &first = *first_box;
+		first.open_document(synthetic_mission(), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		std::string error;
+		CHECK(first.boot(options, error));
+		CHECK(first.wac_loaded);
+		CHECK(first.world.script.vars.get_mission(1) == 1);   // the eager execution ran once
+		CHECK(first.world.script.vars.get_mission(256) == 1); // `a` is slot 0 of the declared half
+
+		auto second_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &second = *second_box;
+		second.world.script.vars.carry_declared_from(first.world.script.vars);
+		CHECK(second.world.script.vars.get_mission(256) == 1);
+		CHECK(second.world.script.vars.get_mission(1) == 0); // V# start at zero
+		second.open_document(synthetic_mission(), "synth", source_over(&files));
+		CHECK(second.boot(options, error));
+		CHECK(second.world.script.vars.get_mission(1) == 2);   // inc over the carried slot
+		CHECK(second.world.script.vars.get_mission(256) == 2);
+
+		// A different program whose first declaration is another name reads
+		// the SAME slot: the carry is by index, not by name.
+		std::map<std::string, std::string> other;
+		other["synth.wac"] = "var b\nv2 = b\n";
+		auto third_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &third = *third_box;
+		third.world.script.vars.carry_declared_from(second.world.script.vars);
+		third.open_document(synthetic_mission(), "synth", source_over(&other));
+		CHECK(third.boot(options, error));
+		CHECK(third.world.script.vars.get_mission(2) == 2);
+	}
+
 	// --- the no-terrain path -----------------------------------------------------
 	{
 		std::map<std::string, std::string> files;
-		ms::MissionKernel kernel;
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.collision = false;

@@ -351,21 +351,34 @@ std::vector<uint8_t> connection_description_to_bytes(
 	return buf;
 }
 
-std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key) {
+// [orig: CNapiNPConnection_SendDisconnectPacket @0x61f2a0]: the receiver-local key dword raw
+// @0x61f3af, then the latched record's seven TLVs in DS/DC/DP1/DP2/DSTR/DPC/DDSTR order
+// @0x61f3d0..0x61f4aa — the same writer serves 0x46 (is_client) and 0x86 (is_server); only the
+// opcode differs (@0x61f367/@0x61f37b).
+std::vector<uint8_t> disconnect_packet_body_to_bytes(uint32_t peer_key,
+		const DisconnectEvent &event) {
 	std::vector<uint8_t> buf;
-	buf.reserve(64);
-	buf.push_back(static_cast<uint8_t>(remote_session_key & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((remote_session_key >> 8) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((remote_session_key >> 16) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((remote_session_key >> 24) & 0xFFu));
-	append_u32_field(buf, "DS", 0);  // role — the receiver discards it and re-derives locally
-	append_u32_field(buf, "DC", 0);  // reason code: 0 = ordinary leave
-	append_u32_field(buf, "DP1", 0);
-	append_u32_field(buf, "DP2", 0);
-	append_string_field(buf, "DSTR", std::string());
-	append_u32_field(buf, "DPC", 0);
-	append_string_field(buf, "DDSTR", std::string());
+	buf.reserve(96);
+	buf.push_back(static_cast<uint8_t>(peer_key & 0xFFu));
+	buf.push_back(static_cast<uint8_t>((peer_key >> 8) & 0xFFu));
+	buf.push_back(static_cast<uint8_t>((peer_key >> 16) & 0xFFu));
+	buf.push_back(static_cast<uint8_t>((peer_key >> 24) & 0xFFu));
+	const std::vector<uint8_t> record = connection_description_to_bytes(event);
+	buf.insert(buf.end(), record.begin(), record.end());
 	return buf;
+}
+
+std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key,
+		const DisconnectEvent &event) {
+	return disconnect_packet_body_to_bytes(remote_session_key, event);
+}
+
+std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key) {
+	return disconnect_packet_body_to_bytes(remote_session_key, DisconnectEvent{});
+}
+
+std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const DisconnectEvent &event) {
+	return disconnect_packet_body_to_bytes(client_ck, event);
 }
 
 // [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0]. The retail walk reads name-keyed

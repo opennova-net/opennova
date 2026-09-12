@@ -381,6 +381,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("entity_card_by_ai_index", "index"), &Simulation::entity_card_by_ai_index);
 	ClassDB::bind_method(D_METHOD("entity_card_by_net_id", "net_id"), &Simulation::entity_card_by_net_id);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &Simulation::debug_set_entity_health);
+	ClassDB::bind_method(D_METHOD("debug_input_action_bits"), &Simulation::debug_input_action_bits);
 	ClassDB::bind_method(D_METHOD("debug_crew_vehicle", "occupant_ssn", "vehicle_ssn"),
 	                     &Simulation::debug_crew_vehicle);
 	ClassDB::bind_method(D_METHOD("set_local_player_eye_offset", "offset", "valid"),
@@ -509,6 +510,10 @@ void Simulation::_bind_methods() {
 	                              "distance_q16", "source_bms_id"),
 	                     &Simulation::sound_occlusion_distance_q16, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &Simulation::local_player_in_armory_zone);
+	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"),
+	                     &Simulation::local_player_in_vehicle_loadout_zone);
+	ClassDB::bind_method(D_METHOD("local_player_vehicle_zone_team_matches"),
+	                     &Simulation::local_player_vehicle_zone_team_matches);
 	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &Simulation::local_player_toggle_mount);
 	ClassDB::bind_method(D_METHOD("local_player_select_seat", "index"), &Simulation::local_player_select_seat);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "kit", "player_class"),

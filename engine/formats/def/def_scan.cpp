@@ -278,7 +278,8 @@ const FlagEntry *lookup_flag(const char *name, size_t len) {
 
 /* items.def `attrib:` tokens -> ItemDefAttrib (+0x54) bits. Token names lowercased (the
    parser lowercases before compare). Full witnessed map: docs/world/itemdef-re.md:147-155.
-   [orig: ItemDef_ParseProperty @0x49eb00] */
+   `Door` also defaults the door count and `Parent` is a byte, not a bit: both side
+   effects live in def_items.cpp's attrib arm. [orig: ItemDef_ParseProperty @0x49eb00] */
 static const FlagEntry item_attrib_table[] = {
     {"movecb",       6, DEF_ITEM_ATTRIB_MOVECB},
     {"powerup",      7, DEF_ITEM_ATTRIB_POWERUP},
@@ -295,6 +296,7 @@ static const FlagEntry item_attrib_table[] = {
     {"fastrope",     8, DEF_ITEM_ATTRIB_FASTROPE},
     {"takeable",     8, DEF_ITEM_ATTRIB_TAKEABLE},
     {"easy",         4, DEF_ITEM_ATTRIB_EASY},
+    {"s&d",          3, DEF_ITEM_ATTRIB_SD},      /* the S&D/A&D objective target [orig: @0x4a084e..0x4a086d] */
     {"4team",        5, DEF_ITEM_ATTRIB_4TEAM},
     {"changeteam",   10, DEF_ITEM_ATTRIB_CHANGETEAM},
     {"spawnpoint",   10, DEF_ITEM_ATTRIB_SPAWNPOINT},

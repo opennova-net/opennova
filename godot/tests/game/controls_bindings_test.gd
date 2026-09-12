@@ -13,6 +13,10 @@ func before_each() -> void:
 	_had_cfg = FileAccess.file_exists(ControlsBindings.CONFIG_PATH)
 	_saved_cfg = FileAccess.get_file_as_bytes(ControlsBindings.CONFIG_PATH) \
 			if _had_cfg else PackedByteArray()
+	# The display labels below are the no-table fallback ("Ctrl - "): a shell
+	# booted earlier in the run may have installed keyhelp.bin as the engine's
+	# process-wide "Keys" table (which renders "Ctrl-"), so pin the fallback.
+	RtxtStringFile.clear_key_strings()
 
 
 func after_each() -> void:

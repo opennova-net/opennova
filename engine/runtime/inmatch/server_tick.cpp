@@ -8,10 +8,13 @@
 #include <cstdint>
 #include <vector>
 
+#include <base/gameprofile/game_type.h>        // the CTF / FlagBall / Flag Me carry-limit modes
+#include <net/npwire/ingame_decode.h>          // kPlayerSyncHasDownedState (the 0x46 resend form)
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h> // per-player 0x61 tick-seed roll
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/replication_model.h>      // PlayerReplicationState (the 0x46 resend input)
 #include <net/npwire/session_hello.h>
 #include <runtime/replication/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <runtime/replication/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
@@ -20,9 +23,11 @@
 #include <runtime/world/collision.h>           // stable replication LOS view epoch
 #include <runtime/world/geom.h>                // to_fixed
 #include <runtime/world/infantry.h>            // drown death animation selection
+#include <runtime/world/local_player.h>        // the listen host's live inventory (kit weight)
 #include <runtime/world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
 #include <runtime/world/spawn_select.h>         // sorted SpawnZoneList index for capture events
 #include <runtime/world/vehicle_motor.h>       // VehicleTraits (the 0x40 vehicle-blip icons)
+#include <runtime/world/weapon_inventory.h>    // weapon_inventory_loadout_weight_fp16
 #include <runtime/world/world.h>               // World::run_logic_tick
 #include <runtime/world/zone_capture.h>        // the 1 Hz AS capture pass (slice 2)
 
@@ -75,28 +80,39 @@ constexpr uint32_t kRetailBreathSeconds = 20;
 constexpr uint32_t kBreathSampleLimit = 4u * kRetailBreathSeconds;
 
 // Classify the one S2C 0x1E record before Match drops the victim's carried
-// objective. The original reads the transient entity+44 cause word in this
-// priority order and consumes it inline. In particular, 4091/4093/4095 are
-// carried flag ItemDefs (STRCND22 "killed flag carrier"), 0x800 is the
+// objective. The original reads the LIVE entity+44 cause word (Entity::
+// cause_flags, latched at hit time — a second same-tick critical pellet
+// counts) in this priority order and clears the one bit it reports in place;
+// the RoundDeath snapshot is not consulted here. In particular, 4091/4093/4095
+// are carried flag ItemDefs (STRCND22 "killed flag carrier"), 0x800 is the
 // STRCND08 headshot family, and AMMO_60MM_MORTAR selects STRCND47.
 // The 0x100 branch really is a retail quirk: its CRT rand() is shifted to a
 // 0..127 word and then divided by 21845, so this producer always emits 32 even
 // though the client retains strings for 33/34.
 // [orig: GameEvent_PlayerDeath @0x516DD0, classifier @0x5170E0..0x51724A;
+// the entity+44 reads @0x517180 / @0x517311; the reported-bit clears
+// @0x5171ca (0x5171b4) / @0x5171e8 / @0x517206 / @0x517325;
 // the GameEvent_BuildPayload call @0x517362 (0x51737b is the payload-length
 // store that follows it)]
 PlayerDeathFeed classify_player_death(
 		world::World &world, const world::RoundDeath &death,
-		const world::Entity *victim_entity,
+		world::Entity *victim_entity,
 		const world::Entity *killer_entity,
 		uint32_t underwater_breath_samples) {
 	PlayerDeathFeed out;
 	const uint8_t victim_index = pool0_index_byte(death.victim_handle);
+	const uint32_t cause =
+			victim_entity != nullptr ? victim_entity->cause_flags : 0u;
+	auto clear_cause = [victim_entity](uint32_t bit) {
+		if (victim_entity != nullptr) victim_entity->cause_flags &= ~bit;
+	};
 	if (killer_entity == nullptr) {
-		if (underwater_breath_samples > kBreathSampleLimit)
+		if (underwater_breath_samples > kBreathSampleLimit) {
 			out.event_type = 26;
-		else if ((death.event_flags & 0x200u) != 0u)
+		} else if ((cause & 0x200u) != 0u) {
 			out.event_type = 23;
+			clear_cause(0x200u); // [orig: @0x517325]
+		}
 		out.attacker = victim_index;
 		return out;
 	}
@@ -135,16 +151,19 @@ PlayerDeathFeed classify_player_death(
 	if (victim_entity != nullptr &&
 			is_retail_flag_type(world, victim_entity->mounted_child)) {
 		out.event_type = 24;
-	} else if ((death.event_flags & 0x100u) != 0u) {
+	} else if ((cause & 0x100u) != 0u) {
 		// The roll still consumes one CRT draw before its narrowed quotient
 		// lands on 32, so the draw order of the shared stream stays
 		// structural. [orig: rand @0x51718A; imul/sar @0x51719A..0x5171A9]
 		(void)world.crt_rand.next();
 		out.event_type = 32;
-	} else if ((death.event_flags & 0x800u) != 0u) {
+		clear_cause(0x100u); // [orig: @0x5171ca / @0x5171b4]
+	} else if ((cause & 0x800u) != 0u) {
 		out.event_type = death_family_variant(world, 10);
-	} else if ((death.event_flags & 0x400u) != 0u) {
+		clear_cause(0x800u); // [orig: @0x5171e8]
+	} else if ((cause & 0x400u) != 0u) {
 		out.event_type = death_family_variant(world, 13);
+		clear_cause(0x400u); // [orig: @0x517206]
 	} else {
 		const world::AmmoTableEntry *ammo =
 				world.tables.ammo.by_index(death.ammo_index);
@@ -194,6 +213,9 @@ void tick_player_breath(NapiNPServerCtx &ctx, world::World &world) {
 		world::RoundDeath death;
 		death.victim = player->handle;
 		death.victim_handle = player->handle.packed;
+		// The snapshot every RoundDeath producer stamps; the host classifier
+		// itself reads the live entity word (see classify_player_death).
+		death.event_flags = player->cause_flags & 0xF00u;
 		world.round_sim.deaths.push_back(death);
 	}
 }
@@ -549,10 +571,15 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
-		const world::Entity *victim_entity = world.registry.get(d.victim);
+		world::Entity *victim_entity = world.registry.get(d.victim);
 		const world::Entity *killer_entity = world.registry.get(d.killer);
 		const bool victim_is_player = victim_entity != nullptr &&
 				(victim_entity->flags & world::kEntityFlagPlayer) != 0u;
+		// The revive-window and resend gates read the victim's live entity+44
+		// cause word BEFORE the classifier clears the bit it reports.
+		// [orig: GameEvent_PlayerDeath @0x516f4d precedes the ladder @0x517180]
+		const uint32_t victim_cause_bits =
+				victim_entity != nullptr ? victim_entity->cause_flags : 0u;
 		NapiNPConnection *victim_connection = nullptr;
 		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 			if (!c.link.owned_entity.valid() ||
@@ -593,10 +620,17 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 			// [orig: GameEvent_PlayerDeath @0x516DD0: playerSlot+368]
 			victim_connection->link.downed_revive_seconds =
 					d.killer.valid() && d.killer != d.victim &&
-					(d.event_flags & 0xC00u) == 0u
+					(victim_cause_bits & 0xC00u) == 0u
 							? 120u
 							: 0u;
 			victim_connection->link.medic_request_active = false;
+			// The team-mode 1 Hz 0x46 downed resend reads only the cause bits,
+			// never the killer: self/environment deaths ARE resent (with a zero or
+			// request-only downed byte). [orig: Server_TickUpdate @0x51e333 tests
+			//  `(entity+44 & 0xC00) == 0`; the 0x800 writer is Weapon_CalcImpactDamage
+			//  @0x4ec9c6/@0x4ec994]
+			victim_connection->link.death_cause_revivable =
+					(victim_cause_bits & 0xC00u) == 0u;
 		}
 
 		if (ctx.is_in_session) {
@@ -904,12 +938,239 @@ void release_expired_local_respawns(NapiNPServerCtx &ctx, world::World &world) {
 void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 	if (!world.match.periodic_second()) return;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		// The +356 armory-reuse cooldown rides the same per-slot pass: a positive
+		// value counts down, a negative one clamps to zero.
+		// [orig: Server_TickUpdate @0x51e00b..0x51e022]
+		if (conn.link.armory_reuse_seconds > 0)
+			--conn.link.armory_reuse_seconds;
+		else if (conn.link.armory_reuse_seconds < 0)
+			conn.link.armory_reuse_seconds = 0;
 		if (conn.link.respawn_delay_seconds != 0)
 			--conn.link.respawn_delay_seconds;
 		if (conn.link.spawn_target_hold_seconds != 0)
 			--conn.link.spawn_target_hold_seconds;
 		if (conn.link.downed_revive_seconds != 0)
 			--conn.link.downed_revive_seconds;
+	}
+}
+
+// The 620-tick spawn-protection arm of the per-player maintenance walk: for
+// every active state-6 slot with an entity, while the round is live and no
+// pre-round timer runs — a live MP session holds a spectator (the +97538
+// latch our spectator bit stands in for, D-NET-217) at -1 and counts a positive
+// entity+292 down by one; outside a session (SP) it is zeroed every tick, so SP
+// never carries protection. Runs before the receive pump, so a deploy admitted
+// this tick keeps its full 620.
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 — gate @0x51888c
+//  (!g_spawn_success_gate && !g_preround_delay_timer), non-session zero
+//  @0x51889c, latch -1 @0x5188ac, decrement @0x5188b8..0x5188c5; caller
+//  Server_TickUpdate @0x51d88b ahead of the recv pump @0x51d895]
+void tick_spawn_protection(NapiNPServerCtx &ctx, world::World &world) {
+	if (world.match.outcome().ended || world.preround_delay_seconds != 0) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn) || !conn.link.owned_entity.valid()) continue;
+		world::Entity *player = world.registry.get(conn.link.owned_entity);
+		if (player == nullptr) continue;
+		if (world.rules.mp_session) {
+			if (conn.link.spectator)
+				player->damage_state = -1;
+			else if (player->damage_state > 0)
+				--player->damage_state;
+		} else {
+			player->damage_state = 0;
+		}
+	}
+}
+
+// EntityPool_ClearDirtyFlags: strip the priority-target mark (Flags 0x4000)
+// from every used row of pools 0 and 1 — no alive/flags test, pools 2..4
+// untouched. Both portable views of the Flags dword carry the bit because
+// both writers set it (ai_combat.cpp / infantry_combat.cpp).
+// [orig: EntityPool_ClearDirtyFlags @0x508E30 — pool 0 loop @0x508e59, pool 1
+//  loop @0x508e79, `&= ~0x4000`]
+void clear_priority_target_marks(world::World &world) {
+	for (const int pool : {0, 1}) {
+		const size_t capacity = world.registry.pool_capacity(pool);
+		for (size_t slot = 0; slot < capacity; ++slot) {
+			world::Entity *e = world.registry.get(
+					world::EntityHandle::make(pool, static_cast<int>(slot)));
+			if (e == nullptr) continue;
+			e->flags &= ~world::kEntityFlagPriorityTarget;
+			e->engine_flags &= ~world::kEntityFlagPriorityTarget;
+		}
+	}
+}
+
+// The 1 Hz violation sweep, in session only, per active state-6 slot with an
+// entity. (a) In CTF / FlagBall / Flag Me the slot counts consecutive seconds
+// its entity's mountedChild is a 4091/4093/4095 flag (else the counter resets);
+// at the host's carry limit the counter resets, the carried object is dropped
+// beside the carrier (its 0x2F drop state), the flag is re-synced to its
+// authored pose (a second feed-less 0x2F), and the carrier's Health is set to
+// -1 so the ordinary death transaction kills it — no 0x1E return event, no
+// scoring. The compare is signed, so a limit <= 0 fires every second for every
+// slot exactly as retail would. (b) Every remote slot (the host's own slot byte
+// +5 and bots +96483 are excluded; bots do not exist here): with the
+// MaxFriendlyKills limit L, `L < 0 || teamKills <= L` routes to the suicide arm
+// (`suicides > 9` -> punt t6), else the team-kill arm punts t6. The host-local
+// punt log line ("#S>9") and the global punts-off switch dword_B4C698 are not
+// wire state and are not modeled; stage_host_punt already carries the
+// first-event latch (slot dword +89896).
+// [orig: Server_CheckPlayerViolations @0x51ABD0 — in-session @0x51abd9, slot
+//  gates @0x51abf6/@0x51abff/@0x51ac0d, game types @0x51ac2c, counter
+//  @0x51ac5a/@0x51ac63, limit @0x51ac75, drop/sync/health @0x51ac84/@0x51ac8a/
+//  @0x51ac94, slot +5/+96483 @0x51aca2, TK gate @0x51acc2, suicide gate
+//  @0x51ad00, punts @0x51ad17/@0x51acd9; the sole caller is the periodic-second
+//  block of Server_TickUpdate @0x51df5f]
+void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
+	if (!ctx.is_in_session) return;
+	const uint32_t gt = world.match.rules().game_type;
+	const bool carry_limited = gt == game_type::kCaptureTheFlag ||
+			gt == game_type::kFlagBall || gt == game_type::kFlagMe;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!is_in_match(conn) || !conn.link.owned_entity.valid()) continue;
+		world::Entity *player = world.registry.get(conn.link.owned_entity);
+		if (player == nullptr) continue;
+		if (carry_limited) {
+			const world::Entity *child = world.registry.get(player->mounted_child);
+			const bool carrying = child != nullptr && child->has_item_def &&
+					(child->item_id == 4093 || child->item_id == 4091 ||
+					 child->item_id == 4095);
+			if (carrying)
+				++conn.link.flag_carry_seconds;
+			else
+				conn.link.flag_carry_seconds = 0;
+			if (static_cast<int32_t>(conn.link.flag_carry_seconds) >=
+					ctx.config.flag_reset_seconds) {
+				conn.link.flag_carry_seconds = 0;
+				const world::EntityHandle flag = player->mounted_child;
+				world.match.drop_carried_object(world, player->handle);
+				world.match.sync_flag_to_authored_pose(world, flag);
+				// Health = -1; a body that is still alive enters the same death
+				// transaction the breath kill uses (the retail entity death path
+				// picks the store up on its next update; an already-dead body only
+				// keeps the store).
+				const bool was_alive = player->alive && player->health > 0 &&
+						((player->flags | player->engine_flags) &
+								world::kEntityFlagDead) == 0u;
+				player->health = -1;
+				if (was_alive) {
+					world::RoundDeath death;
+					death.victim = player->handle;
+					death.victim_handle = player->handle.packed;
+					death.event_flags = player->cause_flags & 0xF00u;
+					world.round_sim.deaths.push_back(death);
+				}
+			}
+		}
+		if (conn.link.mode == replication::TransportMode::Loopback) continue;
+		const world::MatchPlayer *stats = world.match.player(player->handle);
+		if (stats == nullptr) continue;
+		const int32_t limit = ctx.config.max_friendly_kills;
+		if (limit < 0 || stats->stats[world::MatchStats::kTeamKills] <= limit) {
+			if (stats->stats[world::MatchStats::kSuicides] > 9)
+				stage_host_punt(conn, 6);
+		} else {
+			stage_host_punt(conn, 6);
+		}
+	}
+}
+
+// The 1 Hz round-robin flag-state refresh: walk pool 1 in slot order counting
+// live-def entities whose ItemDef id is 4091/4093/4095; the one whose running
+// index equals the cursor is re-broadcast through the same 19-B 0x2F sender
+// the event path uses (mask 0x80: every state-6/7 slot, listen host included),
+// the cursor advances, and the walk stops. A walk that sends nothing resets
+// the cursor, so with N flags every flag's state is re-sent once per N+1
+// seconds. Authority-gated only: not on is_in_session, the round-over latch or
+// the pre-round timer, and the alive/dead bits are never tested.
+// [orig: sub_517B20 @0x517B20 — authority @0x517b27, def @0x517b55, ids
+//  @0x517b57..0x517b6d, cursor compare @0x517b71, ++ @0x517b81, reset
+//  @0x517b90; sender Server_SendDestructibleDeathPacket @0x50D900 (mask 0x80
+//  @0x50d922, SendFiltered(0x2F) @0x50d95a) -> serialize_entity_with_parent_and_target
+//  @0x505810; caller Server_TickUpdate @0x51df64]
+void refresh_next_flag_state(NapiNPServerCtx &ctx, world::World &world) {
+	if (!ctx.is_authority) return;
+	uint32_t index = 0;
+	bool sent = false;
+	world.registry.for_each_in_pool(1, [&](const world::Entity &e) {
+		if (sent || !e.has_item_def) return;
+		if (e.item_id != 4091 && e.item_id != 4093 && e.item_id != 4095) return;
+		if (index != world.flag_refresh_cursor) {
+			++index;
+			return;
+		}
+		ObjectiveEntityState state;
+		state.entity_handle = e.handle.packed;
+		state.flags_byte = static_cast<uint8_t>(e.flags);
+		state.pos_x = world::to_fixed(e.position.x);
+		state.pos_y = world::to_fixed(e.position.y);
+		state.pos_z = world::to_fixed(e.position.z);
+		state.attach_handle = e.primary_occupant.packed;
+		state.ground_handle = e.ground_target.packed;
+		const std::vector<uint8_t> body = encode_objective_entity_state(state);
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!active_player_recipient(conn)) continue;
+			conn.link.transport->host_send(s2c::OBJECTIVE_ENTITY_STATE, body);
+		}
+		++world.flag_refresh_cursor;
+		sent = true;
+	});
+	if (!sent) world.flag_refresh_cursor = 0;
+}
+
+// The team-mode downed-state resend: in session, when the game type carries the
+// team bit, a 62-tick countdown (fires when zero or when a positive value
+// decrements to zero, then reloads 62) walks every active slot with an entity
+// and, for each one whose entity is dead (Health <= 0 and Flags 0x2) of a
+// revivable cause, sends the 0x46 field-0x0008 form — [u8 slot][u16 0x0008]
+// [u8 pool-0 index][u8 downedState] — to every state-6/7 slot on the victim's
+// team, the listen host included. downedState is the dead-and-(auto-medic or
+// requested) packing of the revive window and the request bit, else 0.
+// Retail's SendFiltered(0x46, msgClass 1, userParam 1) maps to this port's
+// transient send, as the 0x57 pong and the 0x16 list do.
+// [orig: Server_TickUpdate @0x51E2D0..0x51E378 — team test @0x51e2d0, timer
+//  @0x51e2db..0x51e307, predicate @0x51e333, form 8 @0x51e352, mask 0x180
+//  @0x51e357, team filter @0x51e36d, send @0x51e373;
+//  NetPacket_SerializePlayerSync0x46 @0x505E80 downedState @0x5060e6..0x506131;
+//  NapiNPServer_SendFiltered @0x4C87E0 masks 0x80/0x100 @0x4c8948/@0x4c8964]
+void emit_team_downed_resend(NapiNPServerCtx &ctx, world::World &world) {
+	if (!ctx.is_in_session ||
+			(world.match.rules().game_type & game_type::kTeamBit) == 0u)
+		return;
+	bool fire = world.team_downed_resend_countdown == 0;
+	if (world.team_downed_resend_countdown > 0)
+		fire = --world.team_downed_resend_countdown == 0;
+	if (!fire) return;
+	world.team_downed_resend_countdown = 62;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.phase < ConnectionPhase::PlayerAdded ||
+				conn.phase >= ConnectionPhase::Goodbye ||
+				!conn.link.owned_entity.valid())
+			continue;
+		const world::Entity *victim = world.registry.get(conn.link.owned_entity);
+		if (victim == nullptr || victim->health > 0 ||
+				((victim->flags | victim->engine_flags) & world::kEntityFlagDead) == 0u ||
+				!conn.link.death_cause_revivable)
+			continue;
+		PlayerReplicationState rep;
+		rep.player_slot = conn.reply.player_slot;
+		rep.entity_handle = conn.link.owned_entity.packed;
+		rep.team = victim->team;
+		if (conn.link.auto_medic_enabled || conn.link.medic_request_active)
+			rep.downed_state = static_cast<uint8_t>(
+					(conn.link.downed_revive_seconds & 0x7Fu) |
+					(conn.link.medic_request_active ? 0x80u : 0u));
+		const std::vector<uint8_t> body =
+				encode_player_sync(rep, kPlayerSyncHasDownedState);
+		for (NapiNPConnection &recipient : ctx.np_protocol.connection_list) {
+			if (!active_player_recipient(recipient)) continue;
+			const world::Entity *member =
+					world.registry.get(recipient.link.owned_entity);
+			if (member == nullptr || member->team != victim->team) continue;
+			recipient.link.transport->host_send(
+					s2c::PLAYER_SYNC, body, /*reliable=*/false);
+		}
 	}
 }
 
@@ -1273,6 +1534,61 @@ void Server_RearmMinimapInitialScan(NapiNPServerCtx &ctx) {
 	}
 }
 
+// The kit-weight recompute (the IDB's misnamed recalculate_all_player_scores):
+// for every active slot with an entity — no state gate — walk the host-side
+// weapon-slot rows summing weaponweight + WeaponSlot_GetTotalClips (the LIVE
+// pool + loaded-clip count) x clipweight, plus the first sub-variant of a
+// different ammo class at the main clipweight, and store the 16.16 sum into
+// entity+892 (the run-promotion band input). The listen host's own player rows
+// ARE its local inventory (LocalPlayerLoadout::weight_fp16 mirrors into its
+// body every tick); a remote player's rows are the granted combos with their
+// live clips over the authority pool table, stamped straight onto the body
+// the host already runs player_body_select for. Called once per periodic
+// second and after every accepted loadout. The sub-variant rows of a remote
+// kit are not modeled host-side (their pools never reach the 0x0F image), so
+// a remote weight omits the differing-class sub term; that is the D-NET-152
+// shared-pool tail, not a second mechanism.
+// [orig: recalculate_all_player_scores @0x5014E0 — slot walk @0x5014f9..0x501604,
+//  byte+4 @0x501502, weaponweight @0x501538, WeaponSlot_GetTotalClips @0x501546
+//  (-> @0x5425F0), clipweight @0x501564, sub-variant loop @0x501568..0x5015cf,
+//  skip @0x5015d1, store entity+892 @0x5015f7; callers Server_TickUpdate
+//  @0x51e1ab and NapiNPServerMsg_HandlePlayerLoadout @0x515f9d]
+void Server_RecalculateAllPlayerKitWeights(
+		std::vector<NapiNPConnection> &roster, world::World &world) {
+	const world::WeaponTable &table = world.tables.weapons;
+	if (table.empty()) return;
+	for (NapiNPConnection &conn : roster) {
+		if (conn.phase < ConnectionPhase::PlayerAdded ||
+				conn.phase >= ConnectionPhase::Goodbye ||
+				!conn.link.owned_entity.valid())
+			continue;
+		if (world.cached.local_player.valid() &&
+				conn.link.owned_entity == world.cached.local_player) {
+			world::LocalPlayer *local = world.local_player_state;
+			if (local == nullptr || !local->inventory_valid) continue;
+			local->loadout.weight_fp16 =
+					world::weapon_inventory_loadout_weight_fp16(table, local->inventory);
+			continue;
+		}
+		world::AiEntity *body = world.ai.for_handle(conn.link.owned_entity);
+		if (body == nullptr) continue;
+		world::WeaponInventory inventory;
+		inventory.reset(table);
+		for (const auto &[combo, row] : conn.weapon_slots) {
+			world::WeaponInventorySlot *slot = inventory.slot(combo);
+			if (slot == nullptr) continue;
+			slot->adm_index = row.adm_index;
+			slot->clip = row.clip;
+		}
+		const size_t pool_count =
+				std::min(inventory.pools.size(), conn.reply.ammo_pools.size());
+		for (size_t i = 0; i < pool_count; ++i)
+			inventory.pools[i] = conn.reply.ammo_pools[i];
+		body->inf.loadout_weight_fp16 =
+				world::weapon_inventory_loadout_weight_fp16(table, inventory);
+	}
+}
+
 void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// A joiner is a pure non-authority client (its frame is P5's Client_ProcessNetworkFrame); the
 	// pre-World P2 unit-test path has no simulation to drive. Either way: no host frame. The host
@@ -1292,6 +1608,26 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// tested, so the 1 -> 0 transition frame remains frozen.
 	// [orig: entity gate @0x51D8BD; decrement @0x51DC20..0x51DC33]
 	const bool preround_active = world.preround_delay_seconds != 0;
+
+	// (0) The head-of-function timers, ahead of the per-player walk and the
+	// receive pump. The 744-tick priority-target sweep is unconditional: zero-armed
+	// per mission, it fires when the countdown is (or decrements to) zero, strips
+	// Flags 0x4000 off pools 0/1 and reloads 744 — the only decay for pool-1
+	// shooters and for rows that never scan again.
+	// [orig: Server_TickUpdate @0x51d82b..0x51d840 -> EntityPool_ClearDirtyFlags
+	//  @0x508E30; no is_in_session gate]
+	{
+		bool sweep = world.priority_target_clear_countdown == 0;
+		if (world.priority_target_clear_countdown != 0)
+			sweep = --world.priority_target_clear_countdown == 0;
+		if (sweep) {
+			clear_priority_target_marks(world);
+			world.priority_target_clear_countdown = 744;
+		}
+	}
+	// Then the spawn-protection arm of the per-player maintenance walk
+	// [orig: Server_UpdateAllActivePlayerSlots @0x518820, called @0x51d88b].
+	tick_spawn_protection(ctx, world);
 
 	// (1) net-before-logic: drain each in-match connection's queued C2S 0x0C and read-apply (SNAP).
 	// burst.spawned marks an in-match connection — a mid-burst peer is still receiving its §5.2a
@@ -1476,6 +1812,15 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// Server_TickUpdate @0x51D7E0 — reload 62 @0x51db93 — calls
 	// Server_CheckWinConditions @0x51AD40 (the call @0x51df5a) once per second].
 	if (periodic_second) check_win_conditions(ctx, world);
+	// Retail's next two periodic-second callees, in order: the violation sweep
+	// (flag carry limit, MaxFriendlyKills / suicide punts) and the round-robin
+	// 0x2F flag refresh, both ahead of the spawn-wave release.
+	// [orig: Server_TickUpdate @0x51df5f Server_CheckPlayerViolations,
+	//  @0x51df64 sub_517B20, then @0x51df6e SpawnWaveList_Tick]
+	if (periodic_second) {
+		check_player_violations(ctx, world);
+		refresh_next_flag_state(ctx, world);
+	}
 	tick_respawn_holds(ctx, world);
 	announce_round_end(ctx, world);
 
@@ -1721,6 +2066,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 						/*reliable=*/false);
 		}
 	}
+
+	// The last statement of retail's periodic-second block: every player's kit
+	// weight is recomputed from its live rows [orig: Server_TickUpdate @0x51e1ab
+	// -> recalculate_all_player_scores @0x5014E0].
+	if (periodic_second)
+		Server_RecalculateAllPlayerKitWeights(ctx.np_protocol.connection_list, world);
+
+	// The in-session team-mode downed-state resend, on its own 62-tick countdown
+	// [orig: Server_TickUpdate @0x51E2D0..0x51E378].
+	emit_team_downed_resend(ctx, world);
 
 	// (2d) Water-surface crossings: S2C 0x34 to every ALIVE in-match player, one
 	// message per crossing the motor recorded this tick. Retail fans the splash

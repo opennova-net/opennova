@@ -140,10 +140,13 @@ int main() {
 			inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, false),
 			"authority returns a spectator to play")) return 1;
 	w::Entity *restored = world.registry.get(joiner_handle);
+	// Leaving spectator mode is a deploy: the reset never touches entity+292 and
+	// the deploy leg re-seeds the 620-tick spawn protection
+	// [orig: Server_ProcessPlayerDeath @0x517937].
 	if (!expect(
 			!joiner_conn.link.spectator && restored != nullptr &&
 			restored->team == 1 && (restored->flags & 1u) == 0 &&
-			restored->damage_state == 0 && restored->alive &&
+			restored->damage_state == 620 && restored->alive &&
 			restored->position.x == 123.0f &&
 			restored->position.y == 456.0f &&
 			spectator_ai->team == 1,

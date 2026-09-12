@@ -467,10 +467,22 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
                 target.health = before - damage;
             else
                 target.health = 0;
-            target.death_anim_state = compute_death_anim_state(1, quadrant, cause);
+            // The staging needs applied damage as well as a live body (the
+            // `damage <= 0` return above already guarantees it here)
+            // [orig: Entity_ApplyWeaponDamage @0x4e6aee].
+            if (damage > 0)
+                target.death_anim_state = compute_death_anim_state(1, quadrant, cause);
             // The processed hit feeds the AI reaction stamps, like a round hit
             // [orig: the deathCallback(2) notify @ 0x4e6b72].
             world.round_sim.hits.push_back(RoundHit{target.handle, attacker, damage});
+            // That notify is the class callback with event 2: on a live PLAYER
+            // body the plyr callback clears the kill-cause bits 8..11 (a
+            // latched head-shot bit does not survive a blast, so a blast kill
+            // routes as an ordinary death) and re-arms the 64-tick think
+            // [orig: Entity_HandleDamageAndTriggerZones @0x40772f dead return;
+            //  @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm].
+            if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
+                player_body_class_think(target);
             if (target.health <= 0 && before > 0) {
                 world.script.relations.group(target.group_id).alert = TriggerRelations::kAlertRed;
                 RoundDeath d;

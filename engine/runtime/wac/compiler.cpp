@@ -298,7 +298,9 @@ private:
             const std::string_view name = group_prefix ? std::string_view(t).substr(2) : t;
             int group = env_.registry ? env_.registry->script_group_index(name)
                     : world::EntityRegistry::default_script_group_index(name);
-            if (group < 0) { warn(line, "unknown group '" + std::string(name) + "'"); group = 0; }
+            // The miss is retail's first-error 'Unknown Group' with the pool
+            // slot holding 0 [orig: @0x4f30fc -> @0x4f310a].
+            if (group < 0) { warn(line, "Unknown Group '" + std::string(name) + "'"); group = 0; }
             return encode_operand(OperandKind::Pool, push_pool(group));
         }
 
@@ -668,12 +670,23 @@ private:
                 prog_.diagnostics.push_back({s.call.line, 0, "NEXT requires a DO block", true});
             uint32_t group = 1;
             if (s.block_kind == "gloop") {
+                // The operand resolves with expectedType 12: a token naming no
+                // group is the non-fatal first-error 'Unknown Group' and the
+                // pool slot holding 0, so the loop selects record 0 (the empty
+                // group) and the script still runs. A token an earlier resolver
+                // table claims (a declared variable, an event, a named value)
+                // is ORed in as the dword behind that address at compile time;
+                // the port takes group 0 for it, under D-WAC-6.
+                // [orig: WacScript_ResolveParameter group leg @0x4f30a0..0x4f30fc
+                //  -> pool slot 0 @0x4f310a; the `or [gloopPatch], [eax]`
+                //  @0x4f368a..0x4f3693; VM opcode 0xA @0x4f5b11 selects record 0]
                 const uint32_t ref = resolve(s.block_argument, ParamType::Group, s.call.line);
-                if (operand_kind(ref) != OperandKind::Pool) {
-                    prog_.diagnostics.push_back({s.call.line, 0, "GLOOP requires a constant group", true});
-                    return;
+                if (operand_kind(ref) == OperandKind::Pool) {
+                    group = static_cast<uint32_t>(prog_.operands[operand_index(ref)]);
+                } else {
+                    warn(s.call.line, "Unknown Group '" + s.block_argument.text + "'");
+                    group = 0;
                 }
-                group = static_cast<uint32_t>(prog_.operands[operand_index(ref)]);
             }
             // [orig: Script_Compile @0x4F31F0; PLOOP/GLOOP emit 0xA then 9]
             emit(encode_instr(Op::GroupIter, group));

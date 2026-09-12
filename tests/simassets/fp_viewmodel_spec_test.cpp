@@ -37,13 +37,15 @@ int main() {
 				"fpModel + character arms + animadm resolve verbatim");
 	}
 	// No character arms -> no arms submit (retail draws nothing @0x4df064 /
-	// @0x4df06b; there is no weapon.def arms field to fall back on); missing
-	// animadm rides the bring-up adm.
+	// @0x4df06b; there is no weapon.def arms field to fall back on). A resolved
+	// def's empty animadm loads NO anim map (AnimMap_LoadAdmFile @0x40cca1):
+	// no clip set, never the bring-up adm (the root-matrix pose
+	// @0x4def88..0x4defcf is the renderer's own).
 	{
 		const FpViewmodelSpec s = fp_viewmodel_spec(true, "spas12_1st", "", "", 0);
 		check(s.arms.empty() && !s.show_arms,
 				"no resolved character arms submits no arms");
-		check(s.adm == "ak47_1st", "missing animadm rides the bring-up adm");
+		check(s.adm.empty(), "a resolved def's empty animadm sets no clip");
 	}
 	// A resolved def with no fpModel submits NO gun (empty, not a fallback).
 	{

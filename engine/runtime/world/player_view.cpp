@@ -45,16 +45,77 @@ void player_view_set_third_person_selected(PlayerViewState &v, bool selected) {
     player_view_resolve_mode(v);
 }
 
+namespace {
+
+// The interp's target pose along the hip..tpos line, read back from the
+// hipfire latch (player_view.h: every Setup stores the latch beside its
+// target, hip <-> 1 and tpos <-> 0).
+float scope_target_step(const PlayerViewState &v) {
+    return v.scope_hipfire ? 0.0f : static_cast<float>(v.ease_steps);
+}
+
+// CNetPlayerInterp_Setup @0x4ddfd0, projected onto the line: an ACTIVE interp
+// sources from its own current pose (@0x4de006..0x4de01a), an idle one from
+// the caller's pose (@0x4de01f..0x4de033); the per-step velocity is
+// delta / steps (@0x4de142..0x4de15a), carried here as the step count left
+// over the current delta (the same poses per step, an exact landing). A zero
+// delta against an active interp whose counter is spent deactivates it outright
+// (@0x4de0fe..0x4de11b) -- here the pose already sits on the latch's target,
+// so the ease simply reads idle -- and against an idle one arms `steps`
+// zero-velocity frames (@0x4de0d8..0x4de0f8), unreachable on this line where
+// every idle Setup spans the two endpoints. The caller stores the hipfire latch
+// (the target) right after, as every retail site does.
+void scope_interp_setup(PlayerViewState &v, int32_t steps, float idle_source_fraction) {
+    const float from =
+        player_view_scope_ease_active(v) ? player_view_scope_fraction(v) : idle_source_fraction;
+    v.ease_steps = steps;
+    v.scope_step = from * static_cast<float>(steps);
+    v.scope_ease_remaining = steps;
+}
+
+// Player_StepFpViewBiasInterp @0x4ddd20, one step: the pose moves one velocity
+// toward the target and snaps onto it once within a velocity of it
+// (@0x4dddc4..0x4ddf3f). Returns true on the landing step.
+bool scope_interp_step(PlayerViewState &v) {
+    const float target = scope_target_step(v);
+    if (v.scope_step == target) return false;
+    if (v.scope_ease_remaining > 1) {
+        v.scope_step = target + (v.scope_step - target) *
+                                    static_cast<float>(v.scope_ease_remaining - 1) /
+                                    static_cast<float>(v.scope_ease_remaining);
+        --v.scope_ease_remaining;
+        return false;
+    }
+    v.scope_step = target;
+    v.scope_ease_remaining = 0;
+    return true;
+}
+
+} // namespace
+
+void player_view_scope_reset(PlayerViewState &v) {
+    v.scope_engaged = false;
+    v.scope_settled = false;
+    v.scope_hipfire = true;
+    v.ease_steps = kScopeEaseSteps;
+    v.scope_step = 0.0f;
+    v.scope_ease_remaining = 0;
+}
+
 void player_view_tick(PlayerViewState &v, const float eye[3]) {
     // The mode first: the arbiter precedes the camera work every frame
     // [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2, ahead of the view build].
     player_view_resolve_mode(v);
-    // The scope-camera ease, one step per tick toward the engaged target within
-    // the ease length this toggle latched. [orig: CNetPlayerInterp steps —
-    // 15 @ 0x4df36e / 7 Inset @ 0x4df355 / 1 hipfire-return @ 0x4df1c3]
-    v.scope_step += v.scope_engaged ? 1 : -1;
-    if (v.scope_step < 0) v.scope_step = 0;
-    if (v.scope_step > v.ease_steps) v.scope_step = v.ease_steps;
+    // The promoted byte never outlives its target in this port (player_view.h
+    // player_view_scope_settled): a reset that wrote only the legacy fields
+    // (the local_player / player_weapon reset sites) is completed here.
+    if (!v.scope_engaged) v.scope_settled = false;
+    // The scope-camera interp, one step per tick toward the latch's target,
+    // then THE SETTLE PROMOTER on the landing step [orig: Player_UpdatePerFrame
+    // @0x4de4c9 Player_StepFpViewBiasInterp -> @0x4de4f7 g_weaponScopeActive =
+    // (g_scopeEngaged != 0) once the interp reports done -- the step after the
+    // six velocities snapped; the landing step is that completion here].
+    if (scope_interp_step(v)) v.scope_settled = v.scope_engaged;
 
     if (v.third_person) {
         if (!v.tp_anchor_valid) {
@@ -112,30 +173,42 @@ float player_view_scope_fraction(const PlayerViewState &v) {
 }
 
 bool player_view_scope_ease_active(const PlayerViewState &v) {
-    // Mid-ease = the step has not reached the engaged target's endpoint.
+    // Mid-ease = the pose has not reached the latch's target.
     // [orig: g_fpCameraInterp.activeFlag, tested @ 0x4df177]
-    return v.scope_engaged ? (v.scope_step < v.ease_steps) : (v.scope_step > 0);
+    return v.scope_step != scope_target_step(v);
+}
+
+bool player_view_scope_request_pending(const PlayerViewState &v, bool engaged) {
+    if (engaged != v.scope_engaged) return true;
+    // The reversed-at-hip quirk: the target latched, the interp idle, nothing
+    // promoted -- retail's promoted-byte branch @0x4df17f takes the engage leg.
+    return engaged && !player_view_scope_settled(v) && !player_view_scope_ease_active(v);
 }
 
 bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon) {
-    if (engaged == v.scope_engaged) return true;
+    if (!player_view_scope_request_pending(v, engaged)) return true;
     // Every toggle is refused while the previous ease still runs.
     // [orig: the !activeFlag gate @ 0x4df177 — both directions]
     if (player_view_scope_ease_active(v)) return false;
     const int32_t full = inset_weapon ? kScopeEaseStepsInset : kScopeEaseSteps;
     if (engaged) {
-        // [orig: Setup 15 @ 0x4df36e / 7 @ 0x4df355; g_scopeHipfire = 0 @ 0x4df373]
-        v.ease_steps = full;
-        v.scope_step = 0;
+        // [orig: g_weaponScopeActive = 0 @0x4df31d; g_scopeEngaged = 1 @0x4df323;
+        //  Setup 7 @0x4df355 / 15 @0x4df36e from the hip copy (+0x10C) to tpos
+        //  (+0x124); g_scopeHipfire = 0 @0x4df373]
+        v.scope_settled = false;
+        v.scope_engaged = true;
+        scope_interp_setup(v, full, 0.0f);
         v.scope_hipfire = false;
     } else {
-        // [orig: Setup 1 @ 0x4df1c3 (hipfire return) / 7 @ 0x4df1e8 / 15 @ 0x4df201;
-        //  g_scopeHipfire = 1 @ 0x4df212]
-        v.ease_steps = v.scope_hipfire ? kScopeEaseStepsHipfire : full;
-        v.scope_step = v.ease_steps;
+        // [orig: Setup 1 @0x4df1c3 (hipfire return) / 7 @0x4df1e8 / 15 @0x4df201
+        //  from tpos to the hip copy; g_scopeEngaged = 0 @0x4df206;
+        //  g_weaponScopeActive = 0 @0x4df20c; g_scopeHipfire = 1 @0x4df212]
+        const int32_t steps = v.scope_hipfire ? kScopeEaseStepsHipfire : full;
+        scope_interp_setup(v, steps, 1.0f);
+        v.scope_engaged = false;
+        v.scope_settled = false;
         v.scope_hipfire = true;
     }
-    v.scope_engaged = engaged;
     return true;
 }
 
@@ -143,12 +216,50 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
     // [orig: Player_PackInputStateToEntity @ 0x4df450 — g_movementKeyHeld = 1 while any
     //  of the four direction keys is down @ 0x4df4bb, = 0 otherwise @ 0x4df4f9]
     v.move_held = move_held;
-    if (!move_held) return false;
-    // Settled at scope on a Scoped (flags 1) weapon: movement forces the full
+    const bool scoped_def = (def_flags & 1) != 0;
+    // Promoted at scope on a Scoped (flags 1) weapon: movement forces the full
     // unscope through the normal toggle [orig: g_weaponScopeActive gate
-    // @ 0x4df4c9 (only ever 1 once the ease completed — the @ 0x4de4f7 promoter)
-    // && Def->Flags & 1 @ 0x4df4ea -> Player_ToggleWeaponScope @ 0x4df4ec].
-    return (def_flags & 1) != 0 && v.scope_engaged && !player_view_scope_ease_active(v);
+    // @ 0x4df4c9 && Def->Flags & 1 @ 0x4df4ea -> Player_ToggleWeaponScope
+    // @ 0x4df4ec]. The caller runs it; the legs below are no-ops after it.
+    if (move_held && scoped_def && player_view_scope_settled(v)) return true;
+    // The entitySlotPtr block: only a Scoped def has the three legs
+    // [orig: Def @0x4df50e, Flags & 1 @0x4df52c].
+    if (!scoped_def) return false;
+    constexpr int32_t kPinnedFlags = 0x20000080; // ForceScoped | Emplaced
+    if (move_held) {
+        // (a) the running raise reverses toward the hip from its own pose
+        // [orig: activeFlag && !g_scopeHipfire @0x4df548 -> Setup(15, pos,
+        //  hip copy) @0x4df567; g_scopeHipfire = 1 @0x4df56c].
+        if (player_view_scope_ease_active(v) && !v.scope_hipfire) {
+            scope_interp_setup(v, kScopeEaseSteps, 0.0f);
+            v.scope_hipfire = true;
+        }
+        // The pinned defs skip to LABEL_33, whose own term refuses them
+        // [orig: @0x4df57c..0x4df58e].
+        if ((def_flags & kPinnedFlags) != 0) return false;
+        // (b) settled drop with the promoted byte kept
+        // [orig: g_weaponScopeActive && !activeFlag && !g_scopeHipfire @0x4df5ae
+        //  -> Setup(15, tpos, hip copy) @0x4df5d1; g_scopeHipfire = 1 @0x4df5d6].
+        if (player_view_scope_settled(v) && !player_view_scope_ease_active(v) &&
+            !v.scope_hipfire) {
+            scope_interp_setup(v, kScopeEaseSteps, 1.0f);
+            v.scope_hipfire = true;
+        }
+        return false;
+    }
+    // (c) LABEL_33: the auto re-raise on key release
+    // [orig: g_weaponScopeActive && !activeFlag && g_scopeHipfire &&
+    //  !(flags & 0x20000080) @0x4df607 -> g_weaponScopeActive = 0 @0x4df609;
+    //  g_scopeEngaged = 1 @0x4df60f; Setup(15, hip copy, tpos) @0x4df636;
+    //  g_scopeHipfire = 0 @0x4df63b].
+    if (player_view_scope_settled(v) && !player_view_scope_ease_active(v) && v.scope_hipfire &&
+        (def_flags & kPinnedFlags) == 0) {
+        v.scope_settled = false;
+        v.scope_engaged = true;
+        scope_interp_setup(v, kScopeEaseSteps, 0.0f);
+        v.scope_hipfire = false;
+    }
+    return false;
 }
 
 bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags) {

@@ -211,6 +211,39 @@ bool reply_has_tag(const std::vector<ProtocolMessage> &msgs, uint8_t tag) {
 	return false;
 }
 
+bool disconnect_event_equals(const DisconnectEvent &a, const DisconnectEvent &b) {
+	return a.ds == b.ds && a.dc == b.dc && a.dp1 == b.dp1 && a.dp2 == b.dp2 &&
+	       a.dstr == b.dstr && a.dpc == b.dpc && a.ddstr == b.ddstr;
+}
+
+// The host's teardown burst: `burst[first .. first+4)` must be four identical 0x86
+// SERVER_GOODBYE datagrams whose NWU-decoded body is [le32 client_ck] followed by the seven
+// disconnect-record TLVs decoding to `expected`. [orig: TeardownActiveConnection @0x6253C0 ->
+// SendDisconnectPacket @0x61F2A0; recv_max_per_tick = 4 @0x4cab60]
+bool check_server_goodbye_burst(const std::vector<std::vector<uint8_t>> &burst,
+		std::size_t first, uint32_t client_ck, const DisconnectEvent &expected,
+		const char *message) {
+	if (!expect(burst.size() >= first + 4, message)) return false;
+	for (std::size_t i = first; i < first + 4; ++i) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		DisconnectEvent decoded;
+		if (!expect(nw_decode_inbound(burst[i].data(), burst[i].size(), opcode, body) &&
+		                    opcode == SESSION_OPCODE_SERVER_GOODBYE && body.size() >= 4 &&
+		                    le32(body.data()) == client_ck && burst[i] == burst[first],
+		            "every 0x86 in the burst is the identical datagram keyed by the client CK"))
+			return false;
+		(void)parse_disconnect_event(body.data() + 4, body.size() - 4, decoded);
+		if (!expect(disconnect_event_equals(decoded, expected),
+		            "the 0x86 body carries the connection's latched disconnect record"))
+			return false;
+		if (!expect(body == server_goodbye_to_bytes(client_ck, expected),
+		            "the 0x86 body is the from-scratch disconnect-packet writer's bytes"))
+			return false;
+	}
+	return true;
+}
+
 // Complete the 0x41/0x42 handshake for `peer` and recover the server SCRK so the test can decode the
 // encrypted 0x83 replies.
 bool handshake(inmatch::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_view client_scrk,
@@ -902,19 +935,35 @@ bool run_goodbye_despawns_player_entity() {
 	            "connection binds the live world entity")) return false;
 
 	// The goodbye carries the receiver-local server key. Empty, truncated, wrong-key, and stale
-	// prior-session packets must not tear down the live connection.
+	// prior-session packets must not tear down the live connection, and none of them draws
+	// the host's 0x86 burst.
 	auto malformed_bye = craft(SESSION_OPCODE_CLIENT_GOODBYE, {});
-	inmatch::handle_server_datagram(ctx, peer, malformed_bye.data(), malformed_bye.size(), 398);
-	if (!expect(w.registry.get(h) != nullptr && inmatch::connection_count(ctx) == 1,
+	auto malformed_result = inmatch::handle_server_datagram(
+			ctx, peer, malformed_bye.data(), malformed_bye.size(), 398);
+	if (!expect(w.registry.get(h) != nullptr && inmatch::connection_count(ctx) == 1 &&
+	                    malformed_result.outbound.empty(),
 	            "empty goodbye body is ignored")) return false;
 	auto wrong_bye = craft(
 			SESSION_OPCODE_CLIENT_GOODBYE, client_goodbye_to_bytes(server_sk ^ 0x01010101u));
-	inmatch::handle_server_datagram(ctx, peer, wrong_bye.data(), wrong_bye.size(), 399);
-	if (!expect(w.registry.get(h) != nullptr && inmatch::connection_count(ctx) == 1,
+	auto wrong_result = inmatch::handle_server_datagram(
+			ctx, peer, wrong_bye.data(), wrong_bye.size(), 399);
+	if (!expect(w.registry.get(h) != nullptr && inmatch::connection_count(ctx) == 1 &&
+	                    wrong_result.outbound.empty(),
 	            "wrong receiver-local goodbye key is ignored")) return false;
 
-	auto bye = craft(SESSION_OPCODE_CLIENT_GOODBYE, client_goodbye_to_bytes(server_sk));
-	inmatch::handle_server_datagram(ctx, peer, bye.data(), bye.size(), 400);
+	// The retail client's leave record {2, 2, 0, 0, "I.C:CIDEMIS", 0, ""}: the host latches
+	// it with the peer role 2 and its answering 0x86 burst echoes it field for field.
+	// [orig: Nwu_HandleDisconnect @0x62400d..0x6240ba; TeardownActiveConnection @0x6253ef]
+	const DisconnectEvent leave = make_disconnect_event(2, 2, 0, 0, "I.C:CIDEMIS", 0, "");
+	auto bye = craft(SESSION_OPCODE_CLIENT_GOODBYE, client_goodbye_to_bytes(server_sk, leave));
+	auto bye_result = inmatch::handle_server_datagram(ctx, peer, bye.data(), bye.size(), 400);
+	if (!expect(bye_result.outbound.size() == 4 &&
+	                    check_server_goodbye_burst(bye_result.outbound, 0, 0xC0FFEE01u, leave,
+	                            "a keyed goodbye is answered by four 0x86 echoing its record"),
+	            "the goodbye reply is exactly the 0x86 burst")) return false;
+	if (!expect(bye_result.events.size() == 1 &&
+	                    bye_result.events[0].kind == inmatch::HostAcceptEvent::Kind::PeerGoodbye,
+	            "the goodbye surfaces owner cleanup")) return false;
 
 	if (!expect(w.registry.get(h) == nullptr,
 	            "goodbye despawns the owned world entity (D-NET-149)")) return false;
@@ -976,6 +1025,21 @@ bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
 
 	if (!expect(!result.outbound.empty() && inmatch::connection_count(ctx) == 1,
 	            "replacement endpoint is admitted as one fresh connection")) return false;
+	// The old node is Destroyed first: its 0x86 burst (nothing latched => a zero record) goes
+	// to the shared endpoint keyed by the OLD CK, ahead of the replacement's 0x82; the new
+	// joiner's own key check drops it. [orig: HandleClientJoin @0x62befb Destroy -> Create]
+	if (!expect(result.outbound.size() >= 5 &&
+	                    check_server_goodbye_burst(result.outbound, 0, 0xC0FFEE11u,
+	                            DisconnectEvent{},
+	                            "endpoint replacement bursts 0x86 to the old occupant"),
+	            "the old occupant's burst precedes the replacement's admission")) return false;
+	{
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		if (!expect(nw_decode_inbound(result.outbound[4].data(), result.outbound[4].size(),
+		                    op, body) && op == SESSION_OPCODE_SERVER_AUTH,
+		            "the replacement's 0x82 follows the old occupant's burst")) return false;
+	}
 	if (!expect(w.registry.get(old_entity) == nullptr,
 	            "endpoint replacement despawns the old authoritative entity")) return false;
 	if (!expect(
@@ -1043,16 +1107,75 @@ bool run_inactive_peer_is_reaped() {
 				"wrong receiver-local 0x43 does not reset the inactivity clock")) {
 		return false;
 	}
+	// The reap clock is stamped ONLY by an in-order delivered session packet (retail's
+	// ParseMessages, reached solely for seq == ack+1 or the gap-closing drain) or a ping:
+	// a duplicate of an admitted 0x43, a future 0x43, a valid 0x44 resend list and a
+	// retransmitted identical 0x42 all leave it alone; an in-order zero-message 0x43 resets it.
+	// [orig: HandleSessionPacket @0x626A00 dup @0x626c03 / future @0x626c0c..0x626c3a;
+	//  NapiNP_HandleResendList @0x62395f; HandleClientJoin @0x62bee6..0x62bef1;
+	//  ParseMessages @0x625d54]
+	const auto &live = ctx.np_protocol.connection_list.front();
+	const uint32_t admitted_seq = live.seq.last_inbound_seq; // the handshake's last C2S seq
+	auto duplicate = craft_session(scrk, server_sk, admitted_seq, {});
+	inmatch::handle_server_datagram(ctx, peer, duplicate.data(), duplicate.size(), 6);
+	if (!expect(live.receive_inactive_ms == 119999,
+	            "a duplicate of an already-admitted 0x43 does not reset the inactivity clock"))
+		return false;
+	auto future = craft_session(scrk, server_sk, admitted_seq + 2, {});
+	inmatch::handle_server_datagram(ctx, peer, future.data(), future.size(), 6);
+	if (!expect(live.receive_inactive_ms == 119999 && live.seq.queued_inbound.size() == 1,
+	            "a queued future 0x43 does not reset the inactivity clock"))
+		return false;
+	std::vector<uint8_t> resend_body;
+	if (!expect(encode_session_resend_list(server_sk, {1}, resend_body),
+	            "idle-reap fixture encodes a keyed 0x44")) return false;
+	auto resend = craft(SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(resend_body));
+	auto resend_result = inmatch::handle_server_datagram(
+			ctx, peer, resend.data(), resend.size(), 6);
+	if (!expect(!resend_result.outbound.empty() && live.receive_inactive_ms == 119999,
+	            "a valid 0x44 resend list is answered but does not reset the inactivity clock"))
+		return false;
+	{
+		ClientAuth retransmit = make_valid_client_auth(
+				1, 0xC0FFEE33u, kHostKey, "TestJoiner", scrk);
+		auto retransmit_dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(retransmit));
+		auto retransmit_result = inmatch::handle_server_datagram(
+				ctx, peer, retransmit_dg.data(), retransmit_dg.size(), 6);
+		if (!expect(!retransmit_result.outbound.empty() && inmatch::connection_count(ctx) == 1 &&
+		                    ctx.np_protocol.connection_list.front().receive_inactive_ms == 119999,
+		            "a retransmitted identical 0x42 re-sends the 0x82 but does not reset the clock"))
+			return false;
+	}
+	auto in_order = craft_session(scrk, server_sk, admitted_seq + 1, {});
+	inmatch::handle_server_datagram(ctx, peer, in_order.data(), in_order.size(), 6);
+	if (!expect(ctx.np_protocol.connection_list.front().receive_inactive_ms == 0 &&
+	                    ctx.np_protocol.connection_list.front().seq.queued_inbound.empty(),
+	            "an in-order zero-message 0x43 resets the inactivity clock (and drains the gap)"))
+		return false;
+	ctx.np_protocol.connection_list.front().receive_inactive_ms = 119999;
 
 	const std::vector<inmatch::TickOut> outs =
 			inmatch::tick_connections(ctx, /*elapsed_ms=*/2, /*now_tick=*/7);
 	bool saw_goodbye = false;
-	for (const inmatch::TickOut &out : outs)
+	bool saw_burst = false;
+	for (const inmatch::TickOut &out : outs) {
 		for (const inmatch::HostAcceptEvent &event : out.events)
 			if (event.kind == inmatch::HostAcceptEvent::Kind::PeerGoodbye &&
 			    event.peer == peer)
 				saw_goodbye = true;
+		// The reap latches {1, 3, elapsed, timeout, "", 0, "NP.C:PT:SERTMOUT"} and the
+		// destroy bursts it to the dead endpoint before the player teardown.
+		// [orig: PumpStateMachine @0x6293b7..0x6293e6 -> RequestDisconnect @0x62940a;
+		//  NapiNPProtocol_Pump @0x62a793 -> Destroy -> TeardownActiveConnection @0x6253ef]
+		if (out.peer == peer && out.outbound.size() == 4 &&
+		    check_server_goodbye_burst(out.outbound, 0, 0xC0FFEE33u,
+		            make_disconnect_event(1, 3, 120001, 120000, "", 0, "NP.C:PT:SERTMOUT"),
+		            "the reap bursts four 0x86 carrying the SERTMOUT record"))
+			saw_burst = true;
+	}
 	if (!expect(saw_goodbye, "inactivity reap surfaces owner cleanup for the dead endpoint"))
+		return false;
+	if (!expect(saw_burst, "inactivity reap sends the 0x86 SERTMOUT burst to the dead endpoint"))
 		return false;
 	if (!expect(inmatch::connection_count(ctx) == 0,
 	            "120000 ms inactive peer is removed from the connection list")) return false;
@@ -1061,6 +1184,118 @@ bool run_inactive_peer_is_reaped() {
 	return expect(
 			test_emplacement_is_released(w, emplacement),
 			"inactivity reap releases the emplaced-gun seat and control latches");
+}
+
+// The disconnect teardown drops the leaver from every spawn-wave row it was queued in, before
+// the entity goes: a stale row entry would restart that row's countdown on release and, because
+// pool-0 slots are reused, force-deploy the slot's next occupant at the leaver's zone.
+// [orig: Server_HandlePlayerDisconnect @0x51B5C0 -> SpawnWaveList_RemovePlayer @0x52A410 @0x51b809]
+bool run_disconnect_removes_leaver_from_spawn_waves() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+	world::World w;
+	w.registry.configure_pool(0, 8);
+	w.registry.configure_pool(2, 8);
+	world::Entity player;
+	player.kind = world::EntityKind::Organic;
+	player.team = 1;
+	player.alive = false;
+	player.health = 0;
+	player.health_max = 100;
+	const world::EntityHandle h = w.registry.spawn(0, player);
+	world::Entity zone;
+	zone.kind = world::EntityKind::Item;
+	zone.team = 1;
+	zone.alive = true;
+	zone.is_spawn_point = true;
+	zone.zone_number = 1;
+	zone.zone_control = 0x10000;
+	const world::EntityHandle zone_handle = w.registry.spawn(2, zone);
+	w.zones.spawn_waves.build_from_mission(w, 0, 2);
+	if (!expect(h.valid() && w.zones.spawn_waves.has_entry(zone_handle),
+	            "spawn-wave fixture builds one numbered-zone row")) return false;
+	ctx.world = &w;
+
+	const PeerAddr peer{0x0100007Fu, 30730};
+	const std::string client_scrk = "WAVECLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
+	std::string server_scrk;
+	uint32_t server_sk = 0;
+	if (!handshake(ctx, peer, client_scrk, 0xC0FFEE44u, server_scrk, &server_sk)) return false;
+	if (!expect(inmatch::bind_connection_player(ctx, peer, 1, h.packed),
+	            "spawn-wave fixture binds the player entity")) return false;
+	if (!expect(w.zones.spawn_waves.try_queue(w, zone_handle, h) &&
+	                    w.zones.spawn_waves.entries()[0].queued.size() == 1 &&
+	                    w.zones.spawn_waves.entries()[0].queued[0] == h,
+	            "the player queues into the zone's spawn-wave row")) return false;
+
+	auto bye = craft(SESSION_OPCODE_CLIENT_GOODBYE, client_goodbye_to_bytes(server_sk));
+	inmatch::handle_server_datagram(ctx, peer, bye.data(), bye.size(), 400);
+	if (!expect(inmatch::connection_count(ctx) == 0 && w.registry.get(h) == nullptr,
+	            "the goodbye tears the player down")) return false;
+	for (const world::SpawnWaveEntry &entry : w.zones.spawn_waves.entries()) {
+		if (!expect(std::find(entry.queued.begin(), entry.queued.end(), h) == entry.queued.end(),
+		            "the leaver is removed from every spawn-wave row")) return false;
+	}
+	// The freed pool-0 slot's next occupant does not inherit the queue position.
+	const world::EntityHandle reused = w.registry.spawn(0, player);
+	if (!expect(reused.valid() && reused.slot() == h.slot(),
+	            "the registry reuses the freed pool-0 slot")) return false;
+	return expect(w.zones.spawn_waves.entries()[0].queued.empty() &&
+	                      w.zones.spawn_waves.tick(w).empty(),
+	              "a later occupant of the slot is not released by the stale row entry");
+}
+
+// A `_NSTMOUT.TXT` NEVER on the host sets the connection template to -1/-1: the 0x82 advertises
+// both (CS field 0 / field 11 as 0xFFFFFFFF), the created node copies them, the receive reap
+// never fires and the outbound pool is unbounded. [orig: CNapiNetwork_Init @0x4caa13..0x4caa22
+//  -> cs_dir stores @0x4caa81/@0x4cab20/@0x4cab54/@0x4cabf0; SendSessionInit @0x620ef0 emits the
+//  live blocks; PumpStateMachine `timeout_ms < 0 -> skip` @0x62934c; NapiNPMessage_Create
+//  `msg_out_max >= 0` @0x628048]
+bool run_never_template_disables_reap_and_is_advertised() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+	inmatch::parse_nstmout("never please", ctx.np_protocol.connection_template);
+	if (!expect(ctx.np_protocol.connection_template.timeout_ms == -1 &&
+	                    ctx.np_protocol.connection_template.msg_out_max == -1,
+	            "NEVER sets both template values to -1")) return false;
+
+	const PeerAddr peer{0x0100007Fu, 30740};
+	const std::string client_scrk = "NEVRCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
+	ClientHello hello = make_jointoperations_client_hello(1);
+	auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+	(void)inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
+	ClientAuth auth = make_valid_client_auth(1, 0xC0FFEE55u, kHostKey, "TestJoiner", client_scrk);
+	auto adg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+	auto ra = inmatch::handle_server_datagram(ctx, peer, adg.data(), adg.size(), 2);
+	uint8_t op = 0;
+	std::vector<uint8_t> body;
+	ServerAuth sa;
+	if (!expect(!ra.outbound.empty() &&
+	                    nw_decode_inbound(ra.outbound[0].data(), ra.outbound[0].size(), op, body) &&
+	                    op == SESSION_OPCODE_SERVER_AUTH && parse_server_auth(body.data(), body.size(), sa),
+	            "NEVER host still admits the join")) return false;
+	bool saw_timeout = false, saw_pool = false;
+	for (const std::vector<CsField> *block : {&sa.client_cs, &sa.server_cs}) {
+		for (const CsField &field : *block) {
+			if (field.field_index == 0) saw_timeout = field.value == 0xFFFFFFFFu;
+			if (field.field_index == 11) saw_pool = field.value == 0xFFFFFFFFu;
+		}
+	}
+	if (!expect(saw_timeout && saw_pool,
+	            "the 0x82 CS block advertises the -1 timeout and pool bound in both directions"))
+		return false;
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+	if (!expect(conn.timeouts.timeout_ms == -1 && conn.timeouts.msg_out_max == -1 &&
+	                    conn.seq.outbound_message_limit == 0,
+	            "the created node copies the template and runs an unbounded pool")) return false;
+	conn.receive_inactive_ms = 10u * 60u * 1000u;
+	const std::vector<inmatch::TickOut> outs = inmatch::tick_connections(ctx, 2, 7);
+	for (const inmatch::TickOut &out : outs)
+		for (const inmatch::HostAcceptEvent &event : out.events)
+			if (!expect(event.kind != inmatch::HostAcceptEvent::Kind::PeerGoodbye,
+			            "a -1 timeout never reaps")) return false;
+	return expect(inmatch::connection_count(ctx) == 1,
+	              "the silent peer survives ten minutes under a NEVER template");
 }
 
 bool run_game_environment_and_admission_fsm_are_enforced() {
@@ -2337,6 +2572,12 @@ bool run_capacity_rejects_when_full() {
 bool run_loadout_resolve_with_armory() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+	// Every accepted 0x2F re-arms the player's armory-reuse cooldown (playerSlot+356 =
+	// armoryReuseTime) and a later nonzero-class submit is refused until it expires, so a
+	// host that lets this joiner resubmit back to back runs with ArmoryTimer 0.
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout — the accept store @0x515ba6, the
+	//  `slot[89] <= 0 || preround` gate @0x5158d0 -> the re-send @0x515fa5]
+	ctx.config.armory_reuse_time = 0;
 
 	// The armory: the shipped weapon.def from the reference fixture set -> the
 	// witnessed table (null@0 + file order). A SKIP-LEG retail leg without it.
@@ -2569,6 +2810,10 @@ bool run_loadout_envelope_gates() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::GameConfig settings;
 	settings.max_players = 8;
+	// ArmoryTimer 0: the accepted grants below re-arm playerSlot+356 with 0, so the
+	// next submit is judged by the envelope alone rather than refused by the cooldown.
+	// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x5158d0 / @0x515ba6]
+	settings.armory_reuse_time = 0;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey,
 	                        nullptr, settings);
 	world::World world;
@@ -3073,6 +3318,8 @@ int main() {
 	ok = run_goodbye_despawns_player_entity() && ok;
 	ok = run_same_endpoint_reconnect_fully_tears_down_old_session() && ok;
 	ok = run_inactive_peer_is_reaped() && ok;
+	ok = run_disconnect_removes_leaver_from_spawn_waves() && ok;
+	ok = run_never_template_disables_reap_and_is_advertised() && ok;
 	ok = run_game_environment_and_admission_fsm_are_enforced() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
 	ok = run_expansion_join_reasons_and_tlv_order() && ok;

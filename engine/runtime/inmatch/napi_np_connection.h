@@ -8,8 +8,10 @@
 #include <string>
 
 #include <runtime/replication/connection.h>             // replication::Connection, replication::TransportMode
+#include <runtime/inmatch/session_timeout_config.h>     // SessionTimeoutConfig (the cs_dir template copy)
 #include <net/npwire/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
 #include <net/npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
+#include <net/npwire/session_hello.h>    // opennova::DisconnectEvent (the latched disconnect record)
 
 namespace opennova::inmatch {
 
@@ -44,17 +46,36 @@ inline constexpr std::size_t JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX =
 		JO_SESSION_OUTBOUND_MESSAGE_MAX;
 
 // Both JO game-session direction profiles reap a connection after 120000 ms without receive
-// activity. The client keepalive interval is deliberately shorter (30000 ms).
+// activity. The client keepalive interval is deliberately shorter (30000 ms). This is the
+// DEFAULT of SessionTimeoutConfig::timeout_ms; a loose `_NSTMOUT.TXT` overrides it at init.
 // [orig: CNapiNetwork_Init @0x4caa81/@0x4cab54]
 inline constexpr uint32_t JO_GAME_SESSION_TIMEOUT_MS = 120000;
 
+// cs_dir0.recv_max_per_tick (CS field 1) = 4 for the JOINTOPERATIONS template; the teardown of an
+// active connection sends its disconnect packet up to this many times, clamped to [0, 32].
+// [orig: CNapiNetwork_Init @0x4cab60; CNapiNPConnection_TeardownActiveConnection @0x6253C0 —
+//  the clamp @0x6253ef..0x625403 and the send loop @0x625406..0x625424 (state 1),
+//  @0x62549e..0x6254d3 (state 5)]
+inline constexpr uint32_t JO_GAME_SESSION_RECV_MAX_PER_TICK = 4;
+inline constexpr std::size_t disconnect_burst_count() {
+	return JO_GAME_SESSION_RECV_MAX_PER_TICK > 32u ? 32u : JO_GAME_SESSION_RECV_MAX_PER_TICK;
+}
+
+// A negative cs_dir msg_out_max (the `_NSTMOUT.TXT` NEVER form) is unbounded: NapiNPMessage_Create
+// only checks the pool when `msg_out_max >= 0` [orig: @0x628048], and zero is
+// session_outbound_message_prefix_count's unbounded sentinel.
+inline std::size_t outbound_message_limit_for(int32_t msg_out_max) {
+	return msg_out_max < 0 ? std::size_t{0} : static_cast<std::size_t>(msg_out_max);
+}
+
 inline SessionSequencing make_jo_game_session_sequencing(
-		uint32_t next_outbound_seq = 1, uint32_t last_inbound_seq = 0) {
+		uint32_t next_outbound_seq = 1, uint32_t last_inbound_seq = 0,
+		int32_t msg_out_max = static_cast<int32_t>(JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX)) {
 	SessionSequencing sequencing;
 	sequencing.next_outbound_seq = next_outbound_seq;
 	sequencing.last_inbound_seq = last_inbound_seq;
 	sequencing.ordered_recovery_enabled = true;
-	sequencing.outbound_message_limit = JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX;
+	sequencing.outbound_message_limit = outbound_message_limit_for(msg_out_max);
 	return sequencing;
 }
 
@@ -472,8 +493,32 @@ struct NapiNPConnection {
 	ProtocolReassemblyState c2s_reassembly{};
 	uint32_t active_send_elapsed_ms = 0; // retained-message active-send interval; reset by every
 	                                     // framed S2C packet, ticked by tick_connections
-	uint32_t receive_inactive_ms = 0;     // elapsed since the last cryptographically receiver-valid
-	                                     // packet; the 120 s timeout sweep resets it on activity
+	uint32_t receive_inactive_ms = 0;     // elapsed since the last IN-ORDER admitted session packet
+	                                     // (a zero-message keepalive counts; duplicates, futures,
+	                                     // resend lists and every other opcode do not) — retail's
+	                                     // conn+0x5E8 reap clock, stamped only by ParseMessages
+	                                     // and HandlePing [orig: CNapiNPConnection_ParseMessages
+	                                     // @0x625d54; Nwu_HandlePing @0x623c56; read by
+	                                     // PumpStateMachine @0x62935c]
+	// The cs_dir0 template values copied onto this node at create (the reap window and the
+	// outbound-message pool bound); the host's template is NapiNPProtocol::connection_template.
+	// [orig: CNapiNPConnection_Create @0x62acb0 copies proto+0xE44/+0xE80 (`rep movsd ecx=0Fh`
+	//  @0x62ae7b/@0x62aeb8); a client overlays the host's 0x82 CS block on top,
+	//  NapiNP_HandleServerJoinResponse @0x629b4c..0x629b75 -> @0x629d72/@0x629d89]
+	SessionTimeoutConfig timeouts{};
+	// The connection's disconnect record — the NapiNPDisconnectEvent at +0x654 whose `valid`
+	// gate makes the FIRST latch win. SendDisconnectPacket serializes it into the 0x46/0x86
+	// teardown burst; producers are the receive reap (SERTMOUT/CLNTTMOUT), StopServer (STOP),
+	// the pool overflow (MSGCRE), the pending-disconnect pump (PDESTME), a received goodbye or
+	// description record (echoed back), and a user leave (CIDEMIS). latch_disconnect_event below.
+	// [orig: the store-if-!valid gates @0x6293f4..0x629406 / @0x62a904..0x62a919 /
+	//  @0x6280f9..0x62810a / @0x62a770..0x62a788 / @0x6240a8..0x6240ba / @0x621d3c..0x621d4d]
+	DisconnectEvent disconnect_event{};
+	bool disconnect_event_valid = false;
+	// RequestDisconnect on a server-side (state 1) connection: the next protocol pump destroys
+	// the node — the 0x86 burst then the player teardown — instead of tearing down inline.
+	// [orig: CNapiNPConnection_RequestDisconnect @0x61e107 -> NapiNPProtocol_Pump @0x62a6fd]
+	bool pending_disconnect = false;
 	uint32_t peer_acked_seq = 0;   // highest hdr.ack_count the peer has echoed = the last of OUR 0x83
 	                               // seqs it confirmed. Drives the initial-state backlog throttle: the
 	                               // original stalls both burst tracks while the connection's
@@ -515,6 +560,22 @@ struct NapiNPConnection {
 	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)
 	std::map<uint16_t, WeaponSlotState> weapon_slots;
 };
+
+// Store `event` as the connection's disconnect record only while none is latched — retail's
+// `if (!conn->disconnect_event.valid) { copy; valid = 1; }` at every producer, so the FIRST
+// cause of a teardown is the one its burst carries. The strings are capped like the 128/32-byte
+// record fields (make_disconnect_event already applies the cap; a caller-built event gets it
+// here). Returns true when this call latched.
+// [orig: PumpStateMachine @0x6293f4..0x629406; NapiNPProtocol_StopServer @0x62a904..0x62a919;
+//  NapiNPMessage_Create @0x6280f9..0x62810a; NapiNPProtocol_Pump @0x62a770..0x62a788;
+//  Nwu_HandleDisconnect @0x6240a8..0x6240ba; HandleDescriptionPacket @0x621d3c..0x621d4d]
+inline bool latch_disconnect_event(NapiNPConnection &conn, const DisconnectEvent &event) {
+	if (conn.disconnect_event_valid) return false;
+	conn.disconnect_event = make_disconnect_event(event.ds, event.dc, event.dp1, event.dp2,
+			event.dstr, event.dpc, event.ddstr);
+	conn.disconnect_event_valid = true;
+	return true;
+}
 
 inline uint32_t clamp_send_holdoff_ticks(uint32_t ticks) {
 	return ticks < 255u ? ticks : 255u;

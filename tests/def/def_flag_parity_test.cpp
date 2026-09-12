@@ -3,7 +3,8 @@
 // def_scan.cpp / def_ammo.cpp initialize from the same macros, so this file +
 // the parse tests together prove name<->bit<->token integrity.
 // Witnesses: weapon table [orig: @0x830bf0], item attrib tables
-// [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md:147-160],
+// [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md, the
+// ItemDefAttrib / ItemDefAttrib2 enums],
 // ammo table [orig: @0x813500].
 #include <formats/def/def.h>
 
@@ -76,6 +77,9 @@ static_assert(DEF_ITEM_ATTRIB_TIRE == 0x00000800u);
 static_assert(DEF_ITEM_ATTRIB_FASTROPE == 0x00001000u);
 static_assert(DEF_ITEM_ATTRIB_TAKEABLE == 0x00002000u);
 static_assert(DEF_ITEM_ATTRIB_EASY == 0x00004000u);
+// The "S&D" token (the S&D/A&D objective target) [orig: ItemDef_ParseProperty
+// @0x4a084e..0x4a086d, token string @0x7C84E8].
+static_assert(DEF_ITEM_ATTRIB_SD == 0x00008000u);
 static_assert(DEF_ITEM_ATTRIB_4TEAM == 0x00010000u);
 static_assert(DEF_ITEM_ATTRIB_CHANGETEAM == 0x00020000u);
 static_assert(DEF_ITEM_ATTRIB_SPAWNPOINT == 0x00040000u);
@@ -155,7 +159,7 @@ int main() {
 			DEF_ITEM_ATTRIB_EWEAP | DEF_ITEM_ATTRIB_PLAYERCONTROL | DEF_ITEM_ATTRIB_DOOR |
 			DEF_ITEM_ATTRIB_NOTARGET | DEF_ITEM_ATTRIB_LANDABLE | DEF_ITEM_ATTRIB_MISSILE |
 			DEF_ITEM_ATTRIB_TIRE | DEF_ITEM_ATTRIB_FASTROPE | DEF_ITEM_ATTRIB_TAKEABLE |
-			DEF_ITEM_ATTRIB_EASY | DEF_ITEM_ATTRIB_4TEAM | DEF_ITEM_ATTRIB_CHANGETEAM |
+			DEF_ITEM_ATTRIB_EASY | DEF_ITEM_ATTRIB_SD | DEF_ITEM_ATTRIB_4TEAM | DEF_ITEM_ATTRIB_CHANGETEAM |
 			DEF_ITEM_ATTRIB_SPAWNPOINT | DEF_ITEM_ATTRIB_ARMORY | DEF_ITEM_ATTRIB_AIDATA |
 			DEF_ITEM_ATTRIB_LEAVECORPSE | DEF_ITEM_ATTRIB_NODISMEMBER | DEF_ITEM_ATTRIB_NOWEAPON |
 			DEF_ITEM_ATTRIB_REFLECT | DEF_ITEM_ATTRIB_NOSHADOW | DEF_ITEM_ATTRIB_CONCAVE |
@@ -166,7 +170,9 @@ int main() {
 			DEF_ITEM_ATTRIB2_STATICDEATH | DEF_ITEM_ATTRIB2_ONTURRET | DEF_ITEM_ATTRIB2_HASTURRET |
 			DEF_ITEM_ATTRIB2_ISTURRET | DEF_ITEM_ATTRIB2_FARP | DEF_ITEM_ATTRIB2_LANDMINE;
 
-	CHECK(def_item_attrib_keyword_count() == 29);
+	// 30 witnessed attrib tokens: the 29 earlier rows plus "S&D" (0x8000)
+	// [orig: ItemDef_ParseProperty @0x4a084e..0x4a086d].
+	CHECK(def_item_attrib_keyword_count() == 30);
 	CHECK(def_item_attrib2_keyword_count() == 13);
 	uint32_t seen = 0;
 	for (int i = 0; i < def_item_attrib_keyword_count(); ++i) {
@@ -187,7 +193,7 @@ int main() {
 	}
 	CHECK(seen == attrib2_all);
 	CHECK(def_item_attrib_keyword(-1) == NULL && def_item_attrib_keyword_bit(-1) == 0);
-	CHECK(def_item_attrib_keyword(29) == NULL && def_item_attrib_keyword_bit(29) == 0);
+	CHECK(def_item_attrib_keyword(30) == NULL && def_item_attrib_keyword_bit(30) == 0);
 	CHECK(def_item_attrib2_keyword(13) == NULL && def_item_attrib2_keyword_bit(13) == 0);
 	// The parser's spelling is what the accessor hands out.
 	bool nodismember_named = false;

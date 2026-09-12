@@ -160,6 +160,8 @@ bool test_replica_rows_project_the_decoded_state_and_keep_the_pulses() {
 			"a header-only joiner's row carries no authored identity") && ok;
 	ok = expect(runtime.state().entities[1].anim_state_pulse == 1,
 			"the builder leaves the transition pulses for the caller to consume") && ok;
+	ok = expect(first[w::PF_DEATH_CTRL] == 65535.0f,
+			"a wire-only row carries no corpse timer: the live DEATH value") && ok;
 	return ok;
 }
 
@@ -232,6 +234,57 @@ bool test_door_phases_reach_present_rows() {
 	return ok;
 }
 
+// The joiner projection: the materialized local row behind a decoded handle
+// is a real DoorSystem row (ticked and contact-driven on every peer), and its
+// Q16 phases ride the same PF_DOOR_COUNT + side table the authority's
+// collector builds (D-DOOR-4).
+bool test_joiner_door_phases_reach_present_rows() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(2, 2);
+	im::ClientRuntime runtime("DoorRows");
+	w::Entity *e = spawn_pool_row(kernel, 2, 0, 1998);
+	if (!expect(e != nullptr, "joiner door row spawns")) return false;
+	e->door_motion = e->door_event = true;
+	e->door_count = 1;
+	// Half-open per tick: one tick lands mid-motion, the second clamps open.
+	kernel.world.doors.initialize(*e, 32768, 0);
+	kernel.world.doors.command(kernel.world, *e, 7);
+	kernel.world.doors.tick(kernel.world);
+	opennova::replication::ClientEntityState decoded;
+	decoded.handle = e->handle.packed;
+	decoded.type_id = 1998;
+	decoded.cls = opennova::EntityClass::NoNetworkCallback;
+	runtime.state().upsert(decoded.handle) = decoded;
+	const im::PresentRowsContext context{ kernel, &runtime, true };
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	if (!expect(rows.size() == w::PF_STRIDE, "one joiner door row")) return false;
+	bool ok = expect(row_at(rows, 0)[w::PF_DOOR_COUNT] == 1 &&
+					 doors == im::DoorPhaseTable{ 0, 1, 32768 },
+			"a joiner's local door row publishes its mid-motion phase exactly (row 0, one phase)");
+	kernel.world.doors.tick(kernel.world);
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_DOOR_COUNT] == 1 &&
+					 doors == im::DoorPhaseTable{ 0, 1, 65536 },
+				 "the fully open 65536 rides the joiner's side table exactly") &&
+			ok;
+	// The decoded row is only this local row's door source when the types agree.
+	runtime.state().upsert(decoded.handle).type_id = 1999;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_DOOR_COUNT] == 0 && doors.empty(),
+				 "a type-mismatched local row publishes no door entry") &&
+			ok;
+	runtime.state().upsert(decoded.handle).type_id = 1998;
+	e->door_motion = false;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_DOOR_COUNT] == 0 && doors.empty(),
+				 "a missing door movement callback releases phase ownership on the joiner") &&
+			ok;
+	return ok;
+}
+
 bool test_joiner_palm_source_and_local_fragment() {
     opennova::mission::MissionKernel kernel;
     kernel.world.registry.configure_pool(2, 4);
@@ -292,13 +345,54 @@ bool test_joiner_palm_source_and_local_fragment() {
     ok = expect(rows.size() == w::PF_STRIDE, "retired fragment leaves the present rows") && ok;
     return ok;
 }
+// The org0 skin bone-callback's DEATH register rides the authoritative organic
+// row (world::death_ctrl_register_value): live 0xFFFF, the 186-tick ramp once
+// dead, 0 for the last 62 ticks; a non-organic row reads the live value.
+bool test_death_ctrl_register_reaches_present_rows() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(0, 4);
+	kernel.world.registry.configure_pool(1, 4);
+	w::Entity *body = spawn_pool_row(kernel, 0, 1, 1337);
+	w::Entity *vehicle = spawn_pool_row(kernel, 1, 2, 1291);
+	if (!expect(body != nullptr && vehicle != nullptr, "the organic and vehicle rows spawn"))
+		return false;
+	body->kind = w::EntityKind::Organic;
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	const auto death_of = [&](int32_t type_id) -> float {
+		for (size_t i = 0; i * w::PF_STRIDE < rows.size(); ++i)
+			if (static_cast<int32_t>(row_at(rows, i)[w::PF_TYPE_ID]) == type_id)
+				return row_at(rows, i)[w::PF_DEATH_CTRL];
+		return -1.0f;
+	};
+	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	if (!expect(rows.size() == 2 * w::PF_STRIDE, "one row per live pool slot")) return false;
+	bool ok = expect(death_of(1337) == 65535.0f, "a live body reads 0xFFFF");
+	ok = expect(death_of(1291) == 65535.0f, "a vehicle row reads the live value") && ok;
+	body->flags |= w::kEntityFlagDead;
+	body->corpse_timer = 300;
+	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	ok = expect(death_of(1337) == 65535.0f, "a corpse still above 248 reads 0xFFFF") && ok;
+	body->corpse_timer = 100;
+	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	ok = expect(static_cast<int>(death_of(1337)) == (38 << 16) / 186,
+			"a corpse at timer 100 reads (38 << 16) / 186") && ok;
+	body->corpse_timer = 10;
+	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	ok = expect(death_of(1337) == 0.0f, "the last 62 ticks hold 0") && ok;
+	return ok;
+}
+
 int main() {
     test_joiner_palm_source_and_local_fragment();
     test_door_phases_reach_present_rows();
+    test_joiner_door_phases_reach_present_rows();
 	test_vehicle_suspension_reaches_present_rows();
 	bool ok = true;
 	ok = test_world_rows_carry_the_authoritative_record() && ok;
 	ok = test_replica_rows_project_the_decoded_state_and_keep_the_pulses() && ok;
+	ok = test_death_ctrl_register_reaches_present_rows() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;

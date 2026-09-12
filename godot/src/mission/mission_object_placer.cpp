@@ -13,6 +13,7 @@
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 
+#include <runtime/anim/adm_fallback.h> // the default.adm substitution every spawn applies
 #include <runtime/renderer/object_lod.h>
 #include <runtime/simassets/model_builders.h>
 #include <runtime/world/entity.h>
@@ -1558,7 +1559,16 @@ void MissionObjectPlacer::_configure_item_lighting(ObjectModel *p_model,
 Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 		const String &p_adm_name, const PackedVector3Array &p_bone_origins,
 		const PackedInt32Array &p_bone_parents) {
-	const String cache_key = p_adm_name + String("#") +
+	// A def-named .adm the mounted roots do not carry loads default.adm in its
+	// place, and the cache keys the RESOLVED name (AnimMap_LoadAdmFile's
+	// FileSystem_FileExists miss -> "default.adm" substitution ahead of
+	// AnimMap_FindByName; engine anim/adm_fallback.h). A present-but-broken
+	// file still fails below, as retail's parse error path does.
+	const String adm_name = String::utf8(
+			opennova::anim::adm_name_or_default(p_adm_name.utf8().get_data(),
+					resource_root_.is_valid() && resource_root_->has_file(p_adm_name))
+					.c_str());
+	const String cache_key = adm_name + String("#") +
 			String::num_int64(Variant(p_bone_origins).hash()) + String("#") +
 			String::num_int64(Variant(p_bone_parents).hash());
 	const Ref<SkeletalAnim> *cached = skeletal_cache_.getptr(cache_key);
@@ -1567,7 +1577,7 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	}
 	Ref<SkeletalAnim> skeletal;
 	skeletal.instantiate();
-	if (!skeletal->load_from_resource_root(resource_root_, p_adm_name,
+	if (!skeletal->load_from_resource_root(resource_root_, adm_name,
 				p_bone_origins, p_bone_parents)) {
 		skeletal.unref();
 	}

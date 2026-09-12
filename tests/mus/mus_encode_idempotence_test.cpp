@@ -6,9 +6,10 @@
    NOT achievable: byte-identity to the ORIGINAL shipped .bin. The shipped
    SCR0/MU01 files carry debug info the runtime decode path does
    not capture and mus_encode_file does not reproduce -- the section-name
-   blob, the 256-byte source path, the string section, and aux tables A/B
-   (MusChunkHeader fields debug_info_offset / string_section_offset /
-   aux_table_*; see mus.h). So encode(compile(decompile(original))) is a
+   blob, the 256-byte source path and the string section (MusChunkHeader
+   fields debug_info_offset / string_section_offset; see mus.h); the +0x40
+   MessageHandler pointer survives a parse but the compiler never emits one,
+   so a recompiled chunk carries 0 there. So encode(compile(decompile(original))) is a
    smaller, canonical form (e.g. jo_gamemus 2521 -> ~1121 bytes), first
    diverging around offset 20 (the chunk-table / debug-info region). A gate
    worded "recompile == original file bytes" would therefore FAIL and

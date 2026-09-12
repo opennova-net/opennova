@@ -510,6 +510,11 @@ private:
 	// the local-player profile state. The session, its role, the kernel and
 	// the live runtime pointer stay here, on the class that is the embedder.
 	SimulationNetState net_;
+	// The install root the hosted session's loose _NSTMOUT.TXT reap/pool
+	// override is read from at bring-up (HostConfig::game_root, engine
+	// session_timeout_config.h): the HostSessionOptions game_root the mission
+	// root stamps from the mounted resource root. Empty = no override lookup.
+	std::string host_game_root_;
 	SimulationAssetState assets_;
 	opennova::world::ScriptVoiceChannel::SetResolver voice_set_resolver_;
 	SimulationPresentState present_;
@@ -766,6 +771,10 @@ private:
 	// (simulation_player_view.cpp).
 	void reset_local_player_view_effects();
 	void refresh_local_player_view_effects();
+	// The BMS input-action word (world::ScriptState::input_action_bits, the
+	// cat-7 player-trigger evaluator's LIVE word) as the view-action producers
+	// have written it; 0 without a kernel. A test seam over the engine state.
+	int debug_input_action_bits() const;
 	// The dead-player map-mode clear, run once per advanced tick (witness at
 	// hud::HudMapControl::on_local_player_dead).
 	void tick_hud_map_death_gate();
@@ -2324,6 +2333,12 @@ public:
 
 	// Loadout-zone gates for the host's armory key (engine: formats/def/def.h).
 	bool local_player_in_armory_zone() const;
+	// The USE key's vehicle-loadout arm (engine: runtime/world/local_player_view.h):
+	// the unmounted local player's type-11 volume touch, and the bay's team gate
+	// (the ground entity's team 0 or the player's own; a free-standing player
+	// reads team 0 = open). False without a kernel.
+	bool local_player_in_vehicle_loadout_zone() const;
+	bool local_player_vehicle_zone_team_matches() const;
 
 	// The USE-ITEM mount toggle: weapon-busy gate + the witnessed toggle
 	// (deck best-seat / nearest-seat scan / seat-swap-or-detach). Returns true when a

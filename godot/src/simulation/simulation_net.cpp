@@ -79,6 +79,10 @@ opennova::inmatch::HostBringup Simulation::host_bringup() {
 	bringup.host_cfg.config = host_config;
 	bringup.host_cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
 	bringup.host_cfg.serve_and_play = serve_and_play;
+	// The loose _NSTMOUT.TXT reap/pool override under the install root
+	// (engine session_timeout_config.h; the CNapiNetwork_Init read). Empty
+	// keeps the 120000 ms / 1200-record template.
+	bringup.host_cfg.game_root = host_game_root_;
 	if (net_.local_character_vars_set) {
 		bringup.host_cfg.local_character_vars = net_.local_character_vars;
 	}
@@ -390,6 +394,9 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 						std::string(p_options->get_game_root().utf8().get_data()),
 						config.expansion);
 	}
+	// The same install root feeds the host bring-up's loose _NSTMOUT.TXT
+	// session-timeout override (HostConfig::game_root).
+	host_game_root_ = std::string(p_options->get_game_root().utf8().get_data());
 	{
 		const String requested = p_options->get_integrity_profile().strip_edges();
 		const std::string id(requested.utf8().get_data());
@@ -405,6 +412,9 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	config.game_type = in.game_type;
 	config.mp_attributes = in.mp_attributes;
 	config.class_allow_mask = in.class_allow_mask;
+	// The armory-reuse cooldown an accepted C2S 0x2F seeds (cfg `armory_reuse_time`,
+	// admin `ArmoryTimer`; the engine default 30 is retail's).
+	config.armory_reuse_time = in.armory_reuse_time;
 	config.respawn_time = in.respawn_time;
 	config.time_limit_minutes = in.time_limit_minutes;
 	config.replay_enabled = in.replay_enabled;
@@ -413,6 +423,9 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	config.max_score = in.max_score;
 	config.koth_delta = in.koth_delta;
 	config.flag_return_ticks = in.flag_return_ticks;
+	// The flag CARRY limit Server_CheckPlayerViolations enforces (cfg
+	// `flag_reset_seconds`; the engine default 420 is retail's).
+	config.flag_reset_seconds = in.flag_reset_seconds;
 	config.capture_duration_seconds = in.capture_duration_seconds;
 	config.capture_speed_setting = in.capture_speed_setting;
 	config.spawn_wave_time_base = in.spawn_wave_time_base;

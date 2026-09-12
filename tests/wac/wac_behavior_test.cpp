@@ -1033,13 +1033,22 @@ static void test_player_group_loops_and_handle_aliases() {
         "v10 = SSN_500\n"
         "ssnname(v10, \"aliased\")\n",
         env);
-    CHECK(program.ok() && program.diagnostics.empty());
+    // `gloop(G_blueai)` is retail's Unknown Group leg: the `(` is the group
+    // token, the loop runs over group 0 (empty) and the error is non-fatal
+    // [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter
+    //  @0x4f30fc -> pool slot 0 @0x4f310a].
+    CHECK(program.ok());
+    bool unknown_group = false;
+    for (const Diagnostic &d : program.diagnostics)
+        if (!d.error && d.message.find("Unknown Group") != std::string::npos) unknown_group = true;
+    CHECK(unknown_group);
     WacVm vm; vm.load(program); vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 10); // reverse pool order: handles 1,0
     CHECK(w.script.vars.get_mission(2) == 1);
     CHECK(w.script.vars.get_mission(3) == first.packed);
     CHECK(w.script.vars.get_mission(4) == 3);
-    CHECK(w.script.vars.get_mission(5) == 1 && w.script.vars.get_mission(6) == 1);
+    CHECK(w.script.vars.get_mission(5) == 0); // the parenthesised form iterates group 0
+    CHECK(w.script.vars.get_mission(6) == 1); // the bare form after the error still runs
     CHECK(w.script.vars.get_mission(7) == 0);
     CHECK(w.script.vars.get_mission(8) == 514); // authored order reversed: 5,1,4
     CHECK(w.script.vars.get_mission(9) == first.packed);

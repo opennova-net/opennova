@@ -109,6 +109,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | 0x268/0x26c | `defaultRes`/`defaultResDup` | u32 | sound-profile slot handles |
 | 0x270 | `foliageDebrisRef` | u32 | `cactdeb`/`palmdeb`/… |
 | 0x278 | `particleEffects` | char[723] | the per-item effect table, decomposed 2026-07-13 (`ItemDef_ParseProperty @ 0x49eb00` key sites `@ 0x4a13ad..0x4a179d`): slot A `particlefx` {effect 0x278, userpoint 0x298}; slot B `particlefxs` {0x2ae, 0x2ee, secondary 0x2ce}; slots C–F `particlefxw1..4` {0x304/0x344/0x324; 0x35a/0x39a/0x37a; 0x3ae/0x3ce (no secondary); 0x3e2/0x402 (no secondary)}; effect-only `particledeath` 0x416, `particleh2odeath` 0x44a, `particlefire` 0x47e, `particleother` 0x4b2, `particlespawn` 0x506, `particlefinale` 0x4e4. Resolved at mission start (`resolve_item_materials_and_spawn_bone_trails @ 0x522ee0`): handles/masks pack just AHEAD of each name block (slot A handle 0x274 + mask 0x276; slot B +48/+50/+52 relative to the name base; death/fire/other mask the HUSK's fixed `Dead`/`Fire`/`Other` points); userpoint→mask = `ItemDef_GetBoneMaskByName @ 0x49ea40` (exact stricmp, first 16 points). Parsed by `engine/formats/def` (`DefItemParticleFx`); slot A is ported by D-PTL-15 and the watercraft W3/W4 live route by D-PTL-25 |
+| 0x548 | `parent` (the tail of the 0x278 blob, `particleEffects[720]`) | u8 | the items.def attrib token `Parent` (`ItemDef_ParseProperty @ 0x49eb00` attrib arm; jo-c kong.c 193609..193611): the class initializers test it after the enter handler (`@ 0x46895a` / `@ 0x468688`) and call `Entity_SetupGunnerAttachments @ 0x468100`, which rides the vehicle's same-refNum pool-1 peers on its `agun*` userpoints; the vehicle DYING enter kills that list under the same byte (`@ 0x467b6e`). Witnessed 2026-09-12 (vehicle-client-movers-re §26.2); parsed the same day into `DefItemDef::attrib_parent` (`def_items.cpp` attrib arm, `@ 0x4a0cd6..0x4a0ce2`) and copied into `VehicleTraits::attrib_parent` by the items.def traits sweep (`simassets/item_traits.cpp`); the `agun*` points ride `VehicleTraits::agun_points` from the collision resolve (`simassets/collision_resolve.cpp`) |
 | 0x54b–0x60b | `primaryWeapon`/`ammo*`(×4)/`launchups*`(×3) | char[32]/char[16] | weapon-loadout strings |
 | 0x61b | `weaponUserpoints` | char[12][16] | the twelve weapon userpoint NAMES `weaplbup, weaplmup, weaplcup, weaprbup, weaprmup, weaprcup, weaplbup2 .. weaprcup2` (`ItemDef_ParseProperty @ 0x4a0ff2..0x4a1301`): b = fire origin, m = flash anchor, c = casing anchor; r/l/r2/l2 = weapon slots 0/1/2/3 (`Entity_InitBoneReferences @ 0x441470`; world-wac-ai-re §21.5) — `DefItemDef::weapon_userpoints` |
 | 0x6db–0x76b | `soundDeath`/`doorOpenSound`/`doorCloseSound`/`dawnShot`/`dayShot`/`duskShot`/`nightShot` | char[24] | sound names |
@@ -116,7 +117,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | 0x82b–0x863 | `soundFlags`/`soundLoopId[7]`/`doorOpenSoundId`/`doorCloseSoundId`/`shotSoundId[4]`/`deathSoundId` | u8/u32 | resolved sound ids |
 | 0x864/0x868 | `defaultResPlus64`/`…Dup` | u32 | sound-profile + 64 |
 | 0x86c | `phraseSet` | i32 | `phrase_set` via `atol`; mounted target definition config consumed at `Entity_BuildBoneTransformMatrices @0x4b1884`. Key absence is distinct from an authored value of 0 in the reimplementation |
-| 0x890–0x8a0 | `deathTime`/`clipsize`/`doorType`/`openRate`/`maxAngle` | i32/float | polymorphic: `clipsize`@0x894 is the door-item `door_dir` slot reused |
+| 0x890–0x8a0 | `deathTime`/`clipsize`/`doorType`/`openRate`/`maxAngle` | i32/float | polymorphic: `clipsize`@0x894 is the door-item `door_dir` slot reused; the low byte of 0x890 is the door count (`num_doors`), which the `attrib: Door` token defaults to 1 when it is still 0 (`@ 0x4a0cb0..0x4a0cb9`; an authored `num_doors` wins in either order) — `DefItemDef::deathtime_ticks` low byte |
 | 0x8d8–0x948 | physics block (`minAI`,`mass`,`torque`,`spring`,`flip`,…) | i32 | `ItemDef_ParsePhysicsProperty` |
 | 0x8fc / 0x900 / 0x904 / 0x918 | `spring` / `springComp` / `shock` / `topHeavy` | i32 | raw `atol` `[orig: ItemDef_ParsePhysicsProperty @0x49d870 — spring @0x49db86, spring_comp @0x49dbfe, shock @0x49dc3a, top_heavy @0x49dbc2]`; defaults spring 0, spring_comp 20 `@0x49e496`; per-family clamps spring [0,10], spring_comp [0,100] with `travel = (100 − spring_comp) · 0xFFFF` `@0x476190/@0x47c51f`; `shock` is clamped [0,10] IN PLACE inside both oscillators `@0x45d18f..0x45d1a2` / `@0x45d2b3..0x45d2d2` (no caller-side clamp); `top_heavy` has NO runtime consumer (parser, allocator default, debug editor only — dead). Parsed 2026-08-21 into `DefItemDef` (+ both Python FFI mirrors and the native-stride pins) and `VehicleTraits` — vehicle-client-movers-re §7.3 |
 | 0xa74 | `hudImage` | char[32] | `hud_image` |
@@ -158,12 +159,22 @@ The caller sets `entity->ItemTypeIndex` (`+28`, from
 **`ItemDefAttrib` (`+0x54`, bitmask)** — `Movecb 0x1`, `Powerup 0x2`,
 `NoMoveShoot 0x4`, `NoTool 0x8`, `Snap 0x10`, `EWeap 0x20`, `PlayerControl
 0x40`, `Door 0x80`, `NoTarget 0x100`, `Landable 0x200`, `Missile 0x400`, `Tire
-0x800`, `FastRope 0x1000`, `Takeable 0x2000`, `Easy 0x4000`, `4Team 0x10000`,
+0x800`, `FastRope 0x1000`, `Takeable 0x2000`, `Easy 0x4000`, `S&D 0x8000` (the
+S&D/A&D objective target: `ItemDef_ParseProperty @ 0x4a084e..0x4a086d` compares the
+whole token case-insensitively against the string at `0x7C84E8` = `53 26 44 00`, which
+the IDB mis-types as `off_7C84E8`; consumers `reset_round_counters @ 0x516d3d /
+@ 0x516d89` count the pool-1/2 carriers per team byte +354 into the S&D target counts,
+and the blast applier's same-team gate (jo-c 261654) makes them immune to friendly
+blast — `DEF_ITEM_ATTRIB_SD`, `ItemDeathTraits::team_protect`), `4Team 0x10000`,
 `ChangeTeam 0x20000`, `SpawnPoint 0x40000`, `Armory 0x80000`, **`Aidata
 0x100000`** (the §5.6 AI-class flag), `LeaveCorpse 0x400000`, `NoDismember
 0x800000`, `NoWeapon 0x1000000`, `Reflect 0x2000000`, `NoShadow 0x4000000`,
 `Concave 0x8000000`, `NoScar 0x10000000`, `NoHud 0x20000000`, `NoDie
-0x40000000`.
+0x40000000`. Two tokens have side effects beyond a bit: `Door` (0x80) also
+defaults the door count (the low byte of +0x890) to 1 when it is still 0
+`@ 0x4a0cb0..0x4a0cb9`; `Parent` sets no bit at all — it writes the byte +0x548 = 1
+`@ 0x4a0cd6..0x4a0ce2` (`DefItemDef::attrib_parent`). Both parsed 2026-09-12
+(`def_parse_item_attrib` ctest).
 
 **`ItemDefAttrib2` (`+0x58`, bitmask)** — `VehicleBay 0x1`, `AutoInheritTeam
 0x2`, `VehicleSpawn 0x4`, `DynamicShadow 0x10`, `StaticShadow 0x20`,

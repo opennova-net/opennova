@@ -371,11 +371,15 @@ void VehicleSystem::update_traction_sound(Entity &vehicle, const VehicleTraits &
 // selector-zero ground mover shares this tail verbatim (lights bit 2 -> slot
 // 24, claimant bit 0 -> slot 30 on the occupant eye above water, the
 // all-zero fold plus slot 31 on the hull +0x18000 when the claimant leaves);
-// the selector-zero boat has only the lights leg (tick_simple_motor).
+// the selector-zero boat runs the claimant edge at its HEAD (inside the
+// PlayerControl block, before the authority split) and only the lights leg
+// in its tail (tick_simple_motor).
 // [orig: Entity_UpdateVehiclePhysics @0x48AF00, tail @0x48D34E..0x48D429;
 // Entity_UpdateWatercraftPhysics @0x48D480, edge @0x48DAD1..0x48DB6B;
 // Entity_ProcessInfantryPhysics @0x46E100 (IDB misnomer, the selector-zero
-// ground mover) lights @0x46F8C3..0x46F8FC, claimant edge @0x46F8FC..0x46F99C]
+// ground mover) lights @0x46F8C3..0x46F8FC, claimant edge @0x46F8FC..0x46F99C;
+// Entity_ProcessAirVehiclePhysics @0x46FA00 (the selector-zero boat) claimant
+// edge @0x470055..0x4700EB, lights @0x4714EA..0x471523]
 void VehicleSystem::update_engine_sound(Entity &vehicle, const VehicleTraits &traits) {
 	if (vehicle_family_uses_direct_air_mover(traits.family))
 		return;
@@ -386,8 +390,15 @@ void VehicleSystem::update_engine_sound(Entity &vehicle, const VehicleTraits &tr
 			emit_profile_oneshot(world_, vehicle, profile, traits, audio::kSlotAudio1);
 		vehicle.veh.light_sound_latched = lights;
 	}
+	update_claimant_engine_sound(vehicle, traits);
+}
+
+void VehicleSystem::update_claimant_engine_sound(Entity &vehicle, const VehicleTraits &traits) {
+	if (vehicle_family_uses_direct_air_mover(traits.family))
+		return;
 	if (!traits.player_control)
 		return;
+	const auto *profile = profile_for(world_, traits);
 	const Entity *occupant = world_.registry.get(vehicle.primary_occupant);
 	if (occupant != nullptr) {
 		if (!vehicle.veh.engine_sound_latched) {

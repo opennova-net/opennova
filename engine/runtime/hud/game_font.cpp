@@ -58,15 +58,34 @@ float GameFont::char_height(uint8_t byte, float scale_y) const {
 			fnt_design_scale(font_->design_width) * scale_y;
 }
 
-int GameFont::char_width(uint8_t byte, float scale_x) const {
-	// [orig: CGameFont_GetCharExtent @0x674dc0 — the glyph's u-extent on the
-	//  256-wide page, through the same design/scale fold the measurer uses]
+int GameFont::char_width(uint8_t byte, float scale_x, int tab_width) const {
+	// [orig: CGameFont_GetCharExtent @0x674dc0] in the witnessed order: a tab
+	// is the font's tab width when it carries one, else the SPACE glyph
+	// (@0x674dd8); any other byte below 0x20 is 0 (@0x674e55); otherwise
+	// fld u1; fsub u0; fmul 256.0; fiadd glyph_spacing; fsub 1.0;
+	// fmul (800 / design_width); fadd 0.5; floor (@0x674de4..0x674e25) — the
+	// (glyph_spacing - 1) pad INCLUDED, unlike the measurer's final width.
+	if (font_ == nullptr) {
+		return 0;
+	}
+	if (byte == '\t') {
+		if (tab_width != 0) {
+			return tab_width;
+		}
+		byte = ' ';
+	}
+	if (byte < 0x20) {
+		return 0;
+	}
 	const fnt_glyph_t *glyph = glyph_for_byte(byte);
 	if (glyph == nullptr) {
 		return 0;
 	}
-	return static_cast<int>((glyph->uv.u1 - glyph->uv.u0) * 256.0f *
-			fnt_design_scale(font_->design_width) * scale_x);
+	const float pad = static_cast<float>(font_->glyph_spacing - 1);
+	return static_cast<int>(std::floor(
+			((glyph->uv.u1 - glyph->uv.u0) * 256.0f + pad) *
+					fnt_design_scale(font_->design_width) * scale_x +
+			0.5f));
 }
 
 float GameFont::line_height(float scale_y) const {

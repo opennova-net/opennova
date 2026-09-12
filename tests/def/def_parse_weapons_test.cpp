@@ -908,6 +908,61 @@ int main(void) {
         if (!ok) { fprintf(stderr, "FAIL: weapon-level sound names\n"); return 1; }
     }
 
+    /* The scope zoom range keys [orig: WeaponDefs_ParseLineCallback 'scope_max_mag'
+       @ 0x544f08 -> +0x90 @ 0x544f29 / +0x94 @ 0x544f44, 'scope_min_mag' @ 0x544f4f
+       -> +0x98 @ 0x544f7a; AdmDef_InitEntryDefaults def[38] = 2 @ 0x53ff73]: atol'd
+       ints, the second scope_max_mag value (the slot's initial zoom) 0 when the row
+       carries one value, scope_min_mag 2 when the key is absent. The first three
+       rows are the shipped JOX forms verbatim (WPN_M1TURRET `10<tab>2`, WPN_EMP50BD
+       `8 8` + `scope_min_mag 2`, the common `2`). */
+    {
+        static const char kScopeDef[] =
+            "weapon \"WPN_ZOOM_TURRET\"\n"
+            "\tscope_max_mag\t10\t2\n"
+            "end\n"
+            "weapon \"WPN_ZOOM_EMP\"\n"
+            "\tscope_max_mag\t8 8\n"
+            "\tscope_min_mag\t2\n"
+            "end\n"
+            "weapon \"WPN_ZOOM_PLAIN\"\n"
+            "\tscope_max_mag\t2\n"
+            "end\n"
+            "weapon \"WPN_ZOOM_FLOOR\"\n"
+            "\tscope_max_mag\t16\n"
+            "\tscope_min_mag\t4\n"
+            "end\n"
+            "weapon \"WPN_ZOOM_NONE\"\n"
+            "\tclipsize 30\n"
+            "end\n";
+        struct { float max; int arg2; int min; } expect[5] = {
+            { 10.0f, 2, 2 }, { 8.0f, 8, 2 }, { 2.0f, 0, 2 }, { 16.0f, 0, 4 }, { 0.0f, 0, 2 },
+        };
+        DefWeaponsFile zf;
+        memset(&zf, 0, sizeof(zf));
+        if (def_parse_weapons_memory((const unsigned char *)kScopeDef, sizeof(kScopeDef) - 1, &zf) != 0 ||
+            zf.count != 5) {
+            fprintf(stderr, "FAIL: scope zoom inline parse failed (count=%zu)\n", zf.count);
+            def_free_weapons(&zf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        for (size_t i = 0; i < 5; ++i) {
+            if (fabsf(zf.entries[i].scope_max_mag - expect[i].max) > FEPS ||
+                zf.entries[i].scope_max_mag_arg2 != expect[i].arg2 ||
+                zf.entries[i].scope_min_mag != expect[i].min) {
+                fprintf(stderr, "FAIL: %s scope_max_mag %.1f/%d scope_min_mag %d, expected %.1f/%d/%d\n",
+                        zf.entries[i].weapon_name, zf.entries[i].scope_max_mag,
+                        zf.entries[i].scope_max_mag_arg2, zf.entries[i].scope_min_mag,
+                        expect[i].max, expect[i].arg2, expect[i].min);
+                def_free_weapons(&zf);
+                def_free_weapons(&wf);
+                return 1;
+            }
+        }
+        def_free_weapons(&zf);
+        printf("scope_max_mag arg2 + scope_min_mag OK\n");
+    }
+
     def_free_weapons(&wf);
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def (the shipped weapon table)");

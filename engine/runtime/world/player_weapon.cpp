@@ -592,12 +592,10 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.action_end_serial = 0;
 	w.action_finished = -1;
 	w.fire_held = w.fire_pressed = w.reload_pressed = false;
-	// A fresh mount starts at the hip with the interp cleared and the hipfire
-	// latch reset [orig: Player_MountWeaponSlot zeroes the view biases @ 0x4dfbcf].
-	view.scope_engaged = false;
-	view.scope_step = 0;
-	view.ease_steps = kScopeEaseSteps;
-	view.scope_hipfire = true;
+	// A fresh mount starts at the hip: the scope tri-state and its interp reset
+	// through the one reset every reset site runs [orig: Player_MountWeaponSlot
+	// zeroes the view biases @ 0x4dfbcf].
+	player_view_scope_reset(view);
 	// A cross-category non-ForceScoped mount resets the target, not its current.
 	// [orig: Player_MountWeaponSlot @0x4DFB44..0x4DFB66]
 	const int old_index = world.tables.weapons.index_of(w.def_name.c_str());
@@ -627,10 +625,7 @@ void local_weapon_clear(LocalPlayerWeapon &w, PlayerViewState &view) {
 	w.clip_rings.clear();
 	w.anim_variant = 0;
 	w.anim_advance_ticks = 0;
-	view.scope_engaged = false;
-	view.scope_step = 0;
-	view.ease_steps = kScopeEaseSteps;
-	view.scope_hipfire = true;
+	player_view_scope_reset(view);
 	w.attack_kind = 0;
 	w.run_anim = 0;
 	w.force_crouch = false;
@@ -893,8 +888,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// requested-engagement bit. Player_UpdatePerFrame runs before the weapon
 	// pump in retail and only promotes g_weaponScopeActive after the ease has
 	// completed [orig: promoter @ 0x4de4f7; weapon pump @ 0x526786].
-	in.scope_active =
-			view.scope_engaged && !player_view_scope_ease_active(view);
+	in.scope_active = player_view_scope_settled(view);
 	in.instant_emplaced_switch = local_usegun_switch_is_instant(world, w);
 	// The heat window is a deadline against the logic tick, not a stored level.
 	// [orig: current_tick @ 0x24C1968]
@@ -993,8 +987,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// finish leg. Records themselves stay in logic-tick order until the shell drains.
 	if (has_presentation_event) {
 		pending.world_position = local_player_mission_position(world);
-		pending.scope_settled =
-				view.scope_engaged && !player_view_scope_ease_active(view);
+		pending.scope_settled = player_view_scope_settled(view);
 		pending.third_person = view.third_person;
 		const Entity *local = world.registry.get(world.cached.local_player);
 		pending.vehicle_attack_context =
@@ -1081,8 +1074,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 						((clip_before_consume & 0x3u) << 4u) | 0x02u);
 				const bool vehicle_attack_context =
 						mount_blocks_weapon_channel(*shooter);
-				const bool scope_settled = view.scope_engaged &&
-						!player_view_scope_ease_active(view);
+				const bool scope_settled = player_view_scope_settled(view);
 				// The ordinary on-foot hip-fire leg is exact: retail passes
 				// Weapon_GetScopeZoomLevel(false, 12), which returns 12, and the
 				// server's bit-6-clearing composite preserves it. The predicate
@@ -1099,6 +1091,18 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// speed [orig: WeaponAction_Fire arg 6 <- MountSlot+0x5C ->
 				// descriptor +20 @ 0x4ec5bb; deserializer restore @ 0x42f769].
 				round_event.slot_byte = w.pending_throw_charge;
+				// The validated fire ends the shooter's spawn protection. The listen
+				// host's own fire takes the C2S 0x06 case's clear through
+				// Entity_FireWeaponAndSendPacket's authority leg: in an MP session a
+				// non-spectator slot's nonzero entity+292 goes to 0 ahead of the ring
+				// append (the roster row mirrors the slot's spectator latch).
+				// [orig: Entity_FireWeaponAndSendPacket @0x42BD80 authority leg
+				//  @0x42be03..0x42bf34 -> Server_ClientFiredRound @0x50c736..0x50c75d]
+				if (io.is_authority && world.rules.mp_session &&
+						shooter->damage_state != 0) {
+					const MatchPlayer *row = world.match.player(world.cached.local_player);
+					if (row == nullptr || !row->spectator) shooter->damage_state = 0;
+				}
 				if (io.is_authority) world.out.rounds.add(round_event);
 
 				RoundSpawnParams round;

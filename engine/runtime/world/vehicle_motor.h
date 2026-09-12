@@ -184,6 +184,15 @@ struct VehicleTraits {
 	std::string skid_effect, skid_snow_effect, skid_userpoint;
 	std::vector<VehicleEffectPoint> skid_points;
 	std::vector<VehicleEffectPoint> flare_points; // first 16 FLARE-prefix model points
+	// items.def attrib token `Parent` (ItemDef+0x548): the class init collects
+	// this vehicle's same-refNum pool-1 peers and rides them on its 'agun'
+	// userpoints [orig: ItemDef_ParseProperty @0x49EB00 attrib arm -> +0x548;
+	//  Entity_InitVehicleAIFromDef @0x46895A..0x468964]. Fed by the items.def
+	// traits sweep; the first 16 'agun'-prefix userpoint locals (strnicmp 4,
+	// model-local 16.16) are `agun_points`, filled with the other model points
+	// at collision resolve [orig: Entity_SetupGunnerAttachments @0x4681AA..0x4681D9].
+	bool attrib_parent = false;
+	std::vector<VehicleEffectPoint> agun_points;
 	VehicleTrailDefinition trails[4];
 	VehicleEffectPoint trail_points[16];
 	uint8_t trail_point_count = 0;

@@ -915,6 +915,302 @@ static void test_player_mount_trigger_dispatch() {
     }
 }
 
+// Cat-7 input subs [orig: EventTrigger_EvaluateCondition @0x453b7e, the shared
+// leg @0x453ba5..0x453bb1]: the LIVE word is tested, the matched bit toggles in
+// the chain mirror (seeded from the live word at every chain entry, EvaluateChain
+// @0x45405a) and the mirror is committed back to the live word only when the
+// event fires (UpdateEntry @0x454c8b / @0x454cfa).
+static void test_player_input_bit_triggers() {
+    struct Case { int sub; uint32_t bit; };
+    const Case view_bits[] = {
+        {static_cast<int>(bms::PlayerTriggerType::PlayerFirstPerson), 0x4000000u},
+        {static_cast<int>(bms::PlayerTriggerType::PlayerThirdPerson), 0x8000000u},
+        {static_cast<int>(bms::PlayerTriggerType::PlayerCockpitView), 0x10000000u},
+        {static_cast<int>(bms::PlayerTriggerType::PlayerInputBitIndex), 0x4000000u}, // p1 = 26
+        {static_cast<int>(bms::PlayerTriggerType::PlayerInputBitIndexPlus15), 0x4000000u}, // p1 = 11
+    };
+    for (const Case &c : view_bits) {
+        World w;
+        w.cached.humans = 1;
+        w.registry.configure_pool(0, 4);
+        mission::BmsEventSystem sys;
+        const int p1 = c.sub == static_cast<int>(bms::PlayerTriggerType::PlayerInputBitIndex) ? 26
+                     : c.sub == static_cast<int>(bms::PlayerTriggerType::PlayerInputBitIndexPlus15) ? 11 : 0;
+        load_probe(sys, make_trigger(bms::TriggerMainType::Player, c.sub, p1));
+        w.add_system(&sys);
+        w.load_systems();
+        w.script.input_action_bits = 0x10u; // an unrelated bit only
+        tick_n(w, kPass);
+        CHECK(w.script.vars.get_mission(9) == 0);
+        CHECK(w.script.input_action_bits == 0x10u);
+        w.script.input_action_bits |= c.bit;
+        tick_n(w, kCycle); // the next evaluation of this entry
+        CHECK(w.script.vars.get_mission(9) == 1);
+        CHECK(w.script.input_action_bits == 0x10u); // consumed on fire; the other bit stays
+    }
+
+    // Evaluation alone toggles the MIRROR; the live word keeps the bit until a
+    // fire commits. A second predicate on the same bit in one chain toggles it
+    // back (the retail xor), so that bit is NOT consumed.
+    {
+        World w;
+        w.cached.humans = 1;
+        w.registry.configure_pool(0, 4);
+        mission::BmsEventSystem sys;
+        sys.load({}, {}, {});
+        w.add_system(&sys);
+        w.load_systems();
+        const bms::Trigger first = make_trigger(bms::TriggerMainType::Player,
+                static_cast<int>(bms::PlayerTriggerType::PlayerFirstPerson));
+        w.script.input_action_bits = 0x4000000u;
+        w.script.input_action_mirror = w.script.input_action_bits;
+        CHECK(sys.evaluate_trigger_for_test(w, first));
+        CHECK(w.script.input_action_bits == 0x4000000u);
+        CHECK(w.script.input_action_mirror == 0);
+        CHECK(sys.evaluate_trigger_for_test(w, first));
+        CHECK(w.script.input_action_mirror == 0x4000000u);
+    }
+
+    // No short-circuit: an OR chain whose first term already decides still
+    // runs the second predicate, so BOTH bits are consumed when it fires.
+    {
+        World w;
+        w.cached.humans = 1;
+        w.registry.configure_pool(0, 4);
+        bms::Trigger a = make_trigger(bms::TriggerMainType::Player,
+                static_cast<int>(bms::PlayerTriggerType::PlayerFirstPerson));
+        a.condition_flags = bms::Trigger::kConditionOr; // joins the NEXT trigger with OR
+        const bms::Trigger b = make_trigger(bms::TriggerMainType::Player,
+                static_cast<int>(bms::PlayerTriggerType::PlayerThirdPerson));
+        bms::Event e{};
+        e.trigger_index = 0;
+        e.trigger_count = 2;
+        e.action_index = 0;
+        e.action_count = 1;
+        mission::BmsEventSystem sys;
+        sys.load({e}, {a, b}, {misvar(bms::MissionVariableActionSubType::Set, 9, 1)});
+        w.add_system(&sys);
+        w.load_systems();
+        w.script.input_action_bits = 0x4000000u | 0x8000000u;
+        tick_n(w, kPass);
+        CHECK(w.script.vars.get_mission(9) == 1);
+        CHECK(w.script.input_action_bits == 0);
+    }
+    // An AND chain that fails leaves the live word untouched even though its
+    // matched predicate toggled the mirror.
+    {
+        World w;
+        w.cached.humans = 1;
+        w.registry.configure_pool(0, 4);
+        const bms::Trigger a = make_trigger(bms::TriggerMainType::Player,
+                static_cast<int>(bms::PlayerTriggerType::PlayerFirstPerson));
+        const bms::Trigger b = make_trigger(bms::TriggerMainType::Player,
+                static_cast<int>(bms::PlayerTriggerType::PlayerThirdPerson));
+        bms::Event e{};
+        e.trigger_index = 0;
+        e.trigger_count = 2;
+        e.action_index = 0;
+        e.action_count = 1;
+        mission::BmsEventSystem sys;
+        sys.load({e}, {a, b}, {misvar(bms::MissionVariableActionSubType::Set, 9, 1)});
+        w.add_system(&sys);
+        w.load_systems();
+        w.script.input_action_bits = 0x8000000u; // only the second term's bit
+        tick_n(w, kPass);
+        CHECK(w.script.vars.get_mission(9) == 0);
+        CHECK(w.script.input_action_bits == 0x8000000u);
+        CHECK(w.script.input_action_mirror == 0);
+    }
+
+    // The delayed fire commits at expiry: the mirror captured when the chain
+    // passed, so a bit that arrived meanwhile is dropped by the commit
+    // [orig: @0x454cfa].
+    {
+        World w;
+        w.cached.humans = 1;
+        w.registry.configure_pool(0, 4);
+        bms::Event e{};
+        e.trigger_index = 0;
+        e.trigger_count = 1;
+        e.action_index = 0;
+        e.action_count = 1;
+        e.delay = 1; // 64 units: one processing pass of this entry
+        mission::BmsEventSystem sys;
+        sys.load({e}, {make_trigger(bms::TriggerMainType::Player,
+                static_cast<int>(bms::PlayerTriggerType::PlayerFirstPerson))},
+                {misvar(bms::MissionVariableActionSubType::Set, 9, 1)});
+        w.add_system(&sys);
+        w.load_systems();
+        w.script.input_action_bits = 0x4000000u | 0x10u;
+        tick_n(w, kPass); // the chain passes and arms the delay
+        CHECK(w.script.vars.get_mission(9) == 0);
+        CHECK(w.script.input_action_bits == (0x4000000u | 0x10u)); // not committed yet
+        w.script.input_action_bits |= 0x20u; // arrives before expiry
+        tick_n(w, kCycle);
+        CHECK(w.script.vars.get_mission(9) == 1);
+        CHECK(w.script.input_action_bits == 0x10u); // the captured mirror, 0x20 dropped
+    }
+
+    // The never-set masks (22-25, 28-30) follow the same leg, but nothing in the
+    // image sets those bits: with every producer-reachable bit set they read
+    // false, and only a forced word makes them true.
+    {
+        World w;
+        w.cached.humans = 1;
+        w.registry.configure_pool(0, 4);
+        mission::BmsEventSystem sys;
+        sys.load({}, {}, {});
+        w.add_system(&sys);
+        w.load_systems();
+        const uint32_t settable = 0x4u | 0x10u | 0x40u | 0x80u | 0x100u | 0x200u |
+                                  0x4000000u | 0x8000000u | 0x10000000u;
+        for (int sub : {22, 23, 24, 25, 28, 29, 30}) {
+            w.script.input_action_bits = settable;
+            w.script.input_action_mirror = settable;
+            CHECK(!sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, sub)));
+            w.script.input_action_bits = 0xFFFFFFFFu;
+            w.script.input_action_mirror = 0xFFFFFFFFu;
+            CHECK(sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, sub)));
+        }
+        // The look-byte pair stays false (the bit-0 writer is unwitnessed).
+        CHECK(!sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, 26)));
+        CHECK(!sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player, 27)));
+        // BMS action 28 sub 38 zeroes the word [orig: EventAction_HandleSpecialTypes @0x4535c2].
+        bms::Action clear{};
+        clear.action_type = bms::ActionType::SpecialSubType;
+        clear.action_sub_type = 38;
+        sys.dispatch_action_for_test(w, clear);
+        CHECK(w.script.input_action_bits == 0);
+        CHECK(w.diagnostics.empty());
+    }
+}
+
+// Sub 18 reads the local player's AiSlot behavior word bit 0x200 (Berserk)
+// [orig: @0x453b99].
+static void test_player_berserk_trigger() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+    world::Entity pl{};
+    pl.alive = true;
+    world::EntityHandle ph = w.registry.spawn(0, pl);
+    w.cached.local_player = ph;
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+    const bms::Trigger berserk = make_trigger(bms::TriggerMainType::Player,
+            static_cast<int>(bms::PlayerTriggerType::PlayerBerserk));
+    CHECK(!sys.evaluate_trigger_for_test(w, berserk)); // no brain
+    w.ai.attach(ph);
+    CHECK(!sys.evaluate_trigger_for_test(w, berserk));
+    w.ai.for_handle(ph)->slot.f[world::AiSlot::kBehaviorFlags] |= 0x200;
+    CHECK(sys.evaluate_trigger_for_test(w, berserk));
+    w.ai.for_handle(ph)->slot.f[world::AiSlot::kBehaviorFlags] &= ~0x200;
+    CHECK(!sys.evaluate_trigger_for_test(w, berserk));
+}
+
+// Subs 34/35 over the dialog registry: DONE = absent from the active table
+// [orig: Dialog_ExistsByIndex @0x44e170 == 0], FINISHED = in the registered
+// history AND absent from the active table [orig: sub_44E220 @0x44e220].
+static void test_player_dialog_triggers() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+    const bms::Trigger done = make_trigger(bms::TriggerMainType::Player,
+            static_cast<int>(bms::PlayerTriggerType::PlayerDialogDone), 7);
+    const bms::Trigger finished = make_trigger(bms::TriggerMainType::Player,
+            static_cast<int>(bms::PlayerTriggerType::PlayerDialogFinished), 7);
+    CHECK(sys.evaluate_trigger_for_test(w, done));      // never played: not active
+    CHECK(!sys.evaluate_trigger_for_test(w, finished)); // never registered
+    w.script.dialog.register_started(7);                // Dialog_Register
+    CHECK(!sys.evaluate_trigger_for_test(w, done));
+    CHECK(!sys.evaluate_trigger_for_test(w, finished));
+    w.script.dialog.register_started(8);                // another dialog behind it
+    w.script.dialog.finished(7);                        // Dialog_FreeByName
+    CHECK(sys.evaluate_trigger_for_test(w, done));
+    CHECK(sys.evaluate_trigger_for_test(w, finished));
+    CHECK(w.script.dialog.active_exists(8));            // compaction kept the other
+    w.script.dialog.reset();                            // Dialog_ResetAll
+    CHECK(sys.evaluate_trigger_for_test(w, done));
+    CHECK(!sys.evaluate_trigger_for_test(w, finished));
+    // The history count saturates at 255: registration 256 lands in slot 255,
+    // which the scan never reaches [orig: @0x44d99c/@0x44d9a3, scan @0x44e28e].
+    for (int i = 1; i <= 255; ++i) w.script.dialog.register_started(1000 + i);
+    CHECK(w.script.dialog.registered(1255));
+    w.script.dialog.register_started(2000);
+    CHECK(!w.script.dialog.registered(2000));
+    CHECK(w.script.dialog.active_count == world::ScriptDialogRegistry::kActiveCapacity);
+    // A mission load clears both tables [orig: Game_InitNewRound -> Dialog_ResetAll].
+    w.load_systems();
+    CHECK(!sys.evaluate_trigger_for_test(w, finished));
+    CHECK(w.script.dialog.history_count == 0 && w.script.dialog.active_count == 0);
+}
+
+// Sub 37: any placed device with satchel ammo whose registry position lies
+// inside the area's x/y box and, when the record constrains z, its z range
+// [orig: EventTrigger_AnySatchelInArea @0x547160].
+static void test_player_satchel_in_area_trigger() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 8);
+    w.tables.ammo.entries.resize(4);
+    w.tables.ammo.entries[1].name = "grenadehe";
+    w.tables.ammo.entries[1].valid = true;
+    w.tables.ammo.entries[3].name = "satchel";
+    w.tables.ammo.entries[3].valid = true;
+    world::Aabb any_z;
+    any_z.min = {0.0f, 0.0f, bms::AreaTrigger::kUnboundedZMin};
+    any_z.max = {100.0f, 100.0f, bms::AreaTrigger::kUnboundedZMax};
+    world::Aabb constrained_z = any_z;
+    constrained_z.min.z = 0.0f;
+    constrained_z.max.z = 10.0f;
+    const int area_any = w.registry.register_area("", any_z, true);
+    const int area_z = w.registry.register_area("", constrained_z, true);
+    world::Entity dev{};
+    dev.alive = true;
+    dev.position = {50.0f, 50.0f, 500.0f};
+    world::EntityHandle dh = w.registry.spawn(1, dev);
+    world::PlacedDevice placed;
+    placed.active = true;
+    placed.entity = dh;
+    placed.entity_spawn_id = w.registry.get(dh)->registry_spawn_id;
+    placed.ammo_index = 3;
+    w.throwables.devices.push_back(placed);
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+    const bms::Trigger in_any = make_trigger(bms::TriggerMainType::Player,
+            static_cast<int>(bms::PlayerTriggerType::PlayerSatchel), area_any);
+    const bms::Trigger in_z = make_trigger(bms::TriggerMainType::Player,
+            static_cast<int>(bms::PlayerTriggerType::PlayerSatchel), area_z);
+    CHECK(sys.evaluate_trigger_for_test(w, in_any));
+    CHECK(!sys.evaluate_trigger_for_test(w, in_z)); // z 500 outside 0..10
+    w.registry.get(dh)->position.z = 5.0f;
+    CHECK(sys.evaluate_trigger_for_test(w, in_z));
+    w.registry.get(dh)->position.x = 100.0f; // inclusive edge
+    CHECK(sys.evaluate_trigger_for_test(w, in_z));
+    w.registry.get(dh)->position.x = 100.5f;
+    CHECK(!sys.evaluate_trigger_for_test(w, in_any));
+    w.registry.get(dh)->position.x = 50.0f;
+    w.throwables.devices[0].ammo_index = 1; // a grenade is not a satchel
+    CHECK(!sys.evaluate_trigger_for_test(w, in_any));
+    w.throwables.devices[0].ammo_index = 3;
+    w.throwables.devices[0].active = false;
+    CHECK(!sys.evaluate_trigger_for_test(w, in_any));
+    w.throwables.devices[0].active = true;
+    w.registry.despawn(dh); // the row is gone: the populated-row gate
+    CHECK(!sys.evaluate_trigger_for_test(w, in_any));
+    CHECK(!sys.evaluate_trigger_for_test(w, make_trigger(bms::TriggerMainType::Player,
+            static_cast<int>(bms::PlayerTriggerType::PlayerSatchel), 99))); // no such area
+}
+
 // The post pass is an embedder-called one-shot sweep, never periodic (D-EVT-4)
 // [orig: UpdateAllWithFlag4 @0x454e00, one call per teardown/restart]. Normal
 // ticks must never touch a PostMission-flag entry.
@@ -954,6 +1250,7 @@ static void test_trigger_relations_group_records() {
     World w;
     w.cached.humans = 1;
     w.registry.configure_pool(0, 16);
+    w.registry.configure_pool(4, 4);
     world::Entity seed{};
     seed.alive = true;
     seed.group_id = 3;
@@ -961,20 +1258,47 @@ static void test_trigger_relations_group_records() {
         seed.net_id = static_cast<uint16_t>(10 + i);
         w.registry.spawn(0, seed);
     }
+    // The initial recount tallies EVERY populated row of pools 2/0/1 by its
+    // group id with no dead/health test [orig: EntityPool_RecountByType
+    // @0x40e7e0, tallies @0x40e834/@0x40e867/@0x40e89a]: a dead row and a
+    // zero-health row count; a pool-4 row never does.
+    seed.net_id = 13;
+    seed.engine_flags |= world::kEntityFlagDead; // killed by the pre-mission pass
+    w.registry.spawn(0, seed);
+    seed.engine_flags = 0;
+    seed.net_id = 14;
+    seed.health = 0; // an authored hp-0 row
+    w.registry.spawn(0, seed);
+    seed.health = 100;
+    seed.net_id = 15;
+    w.registry.spawn(4, seed); // static-prop pool: outside the recount walk
     mission::BmsEventSystem sys;
     sys.load({}, {}, {});
     w.add_system(&sys);
     w.load_systems();
 
     // Initial counts land on the pre-mission pass, ordered after the pre
-    // sweep [orig: Game_StartMission @ 0x525b86 -> @ 0x525b8b].
+    // sweep [orig: Game_StartMission @ 0x525b86 -> @ 0x525b8b]; live is the
+    // copy of the unfiltered initial [orig: @0x40e8b1..0x40e8c4].
     w.run_logic_tick(true, opennova::world::TickPhase::PreMission);
-    CHECK(w.script.relations.group(3).initial_count == 3);
+    CHECK(w.script.relations.group(3).initial_count == 5);
+    CHECK(w.script.relations.group(3).live_count == 5);
+
+    // The first gameplay tick rescans (the timer starts at zero, as retail's
+    // round init leaves it): only rows that are not dead and hold health > 0
+    // count [orig: EntityPool_RecountLiveByGroup @0x40e8d0, predicate
+    // @0x40e926/@0x40e96c/@0x40e9b6].
+    w.run_logic_tick(true);
+    CHECK(w.script.relations.group(3).initial_count == 5);
     CHECK(w.script.relations.group(3).live_count == 3);
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupHasLostMoreUnits, 3, 2)));
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupIntact, 3)));
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupHasMoreUnits, 3, 3)));
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAlive, 3)));
 
     // A kill reads STALE until the 62-tick live rescan — retail cadence
     // [orig: timer reload 0x3E @ 0x51db93 -> EntityPool_RecountLiveByGroup].
-    bms::Trigger lost = group_trigger(bms::GroupTriggerType::GroupHasLostMoreUnits, 3, 1);
+    bms::Trigger lost = group_trigger(bms::GroupTriggerType::GroupHasLostMoreUnits, 3, 3);
     w.commands.kill_ssn(10);
     CHECK(!sys.evaluate_trigger_for_test(w, lost));
     tick_n(w, 62);
@@ -1934,6 +2258,10 @@ int main() {
     test_teammate_triggers();
     test_player_awol_counter_and_trigger();
     test_player_mount_trigger_dispatch();
+    test_player_input_bit_triggers();
+    test_player_berserk_trigger();
+    test_player_dialog_triggers();
+    test_player_satchel_in_area_trigger();
     test_post_pass_is_a_one_shot();
     test_trigger_relations_group_records();
     test_trigger_relations_matrices_and_visited();

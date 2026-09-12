@@ -864,8 +864,22 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 size_t k = tok[ti].len < sizeof(lo) - 1 ? tok[ti].len : sizeof(lo) - 1;
                 to_lower_buf(lo, tok[ti].s, k);
                 int b = lookup_item_attrib(lo, k);
-                if (b) { current.attrib |= (unsigned)b; }
-                else { int b2 = lookup_item_attrib2(lo, k); if (b2) current.attrib2 |= (unsigned)b2; }
+                if (b) {
+                    current.attrib |= (unsigned)b;
+                    /* `Door` also defaults the door count (the low byte of the
+                       polymorphic +0x890 dword, num_doors) to 1 when it is still 0;
+                       an authored num_doors before or after keeps its count.
+                       [orig: @0x4a0cb0..0x4a0cb9] */
+                    if (b == (int)DEF_ITEM_ATTRIB_DOOR && (current.deathtime_ticks & 0xFF) == 0)
+                        current.deathtime_ticks |= 1;
+                } else if (k == 6 && memcmp(lo, "parent", 6) == 0) {
+                    /* `Parent` is a byte, not a bit: ItemDef+0x548, the gunner-attachment
+                       gate (VehicleTraits::attrib_parent). [orig: @0x4a0cd6..0x4a0ce2] */
+                    current.attrib_parent = 1;
+                } else {
+                    int b2 = lookup_item_attrib2(lo, k);
+                    if (b2) current.attrib2 |= (unsigned)b2;
+                }
             }
             parsed = 1;
         /* Per-item particle-effect keys, matched in the original's chain order
