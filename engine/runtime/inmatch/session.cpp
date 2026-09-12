@@ -29,6 +29,8 @@ void Role::apply_input(const TickInput &input) {
 	const world::PlayerInput &movement = spectating ? no_movement : input.player.movement;
 	kernel.local.set_movement_keys(movement.forward, movement.back, movement.left,
 			movement.right, movement.lean_left, movement.lean_right, movement.jump);
+    kernel.local.set_view_keys(movement.free_look, movement.look_up,
+            movement.look_down, movement.turn_left, movement.turn_right);
 	if (!spectating && (input.player.look_delta_x != 0.0f || input.player.look_delta_y != 0.0f))
 		kernel.local.look(input.player.look_delta_x, input.player.look_delta_y);
 	kernel.local.set_weapon_input(

@@ -1,3 +1,5 @@
+#include <runtime/world/weapon_fire_gate.h>
+#include <runtime/world/fire_sound.h>
 #include <runtime/world/ai.h>
 #include <runtime/devtools/tick_profile.h>
 
@@ -508,32 +510,6 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         collision->local_player = world.cached.local_player; // blink accumulation target
         collision->build_tick_tables(world);
     }
-    // The static pools' stagger think: retail visits one eighth of pool 2
-    // per tick (start tick & 7, stride 8), decrements each visited static's
-    // age by 8 and, at or below zero, runs its blink/indoors refresh and
-    // resets the age to 62 — the only place a placed static's indoors state
-    // moves (a destroyed enclosing building shows up here, not at a query).
-    // Our registry keeps retail's pool-2 statics as pool 2 (buildings/items)
-    // and pool 3 (markers), so both walk the same cohort cadence.
-    // [orig: Entity_UpdateAllEntities @0x4c2100 pool-2 loop @0x4c225a..0x4c22fa:
-    //  age -= 8 @0x4c22c9, Entity_BuildProximityList @0x4c229c, reset 62 @0x4c22ba]
-    if (collision_active) {
-        const int cohort = static_cast<int>(ctx.logic_tick & 7u);
-        for (int pool = 2; pool <= 3; ++pool) {
-            world.registry.for_each_in_pool(pool, [&](const Entity &row) {
-                if ((row.handle.slot() & 7) != cohort) return;
-                Entity *ent = world.registry.get(row.handle);
-                if (ent == nullptr) return;
-                if (ent->static_think_age > 0) {
-                    ent->static_think_age -= 8;
-                    return;
-                }
-                collision->refresh_blink(world, *ent);
-                if (ent->door_event) world.doors.command(world, *ent, 0);
-                else ent->static_think_age = 62;
-            });
-        }
-    }
     lap.mark(devtools::Slot::SIM_AI_COLLISION);
     // The loop runs on a JOINER (client, !is_authority) too: tick_infantry's §5.38
     // entity==g_local_player branch (line below, no authority guard) motor-sims the
@@ -629,6 +605,8 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
 }
 
 void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
+    // The joiner's canonical borrowers are pumped by its replica pass.
+    if (world.rules.mp_session && !world.rules.projectile_authority) return;
     mounted_weapon_handles_.clear();
     world.registry.for_each([&](const Entity &entity) {
         if (entity.handle.pool() == 1 && entity.primary_weapon_owner.valid())
@@ -667,9 +645,11 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
         // sit on the emplaced guns that actually author heat, so this is the path
         // that overheats in practice. [orig: current_tick @ 0x24C1968]
         inputs.current_tick = static_cast<int32_t>(logic_tick);
+        weapon_fire_environment_inputs(world, *owner, inputs);
         WeaponFsmEvents weapon_events;
         weapon_fsm_tick(weapon->action_fsm, mount->primary_weapon_slot,
                         inputs, weapon_events);
+        weapon_sound_publish(world, *owner, weapon->action_fsm, weapon_events);
         if (!weapon_events.fired || !is_authority) continue;
 
         // The slot owner is the gunner, while its def/ammo live on the parent.

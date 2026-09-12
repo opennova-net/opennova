@@ -1,5 +1,6 @@
 #include <runtime/world/match.h>
 #include <base/io/tick_rate.h>
+#include <base/io/bam.h>
 
 #include <algorithm>
 #include <cmath>
@@ -566,7 +567,7 @@ void Match::ensure_objective_census(const World &world) {
 
 Match::CarryObjectiveState *Match::carry_state(World &world, EntityHandle objective) {
     Entity *entity = world.registry.get(objective);
-    if (entity == nullptr || !is_flag(entity->item_id))
+    if (entity == nullptr)
         return nullptr;
     auto found = std::find_if(carry_objectives_.begin(), carry_objectives_.end(),
                               [&](const CarryObjectiveState &state) {
@@ -729,13 +730,22 @@ void Match::record_target_destroyed(const World &world, EntityHandle target_hand
     const Entity *target = world.registry.get(target_handle);
     const Entity *attacker_entity = world.registry.get(attacker_handle);
     MatchPlayer *attacker = player(attacker_handle);
-    if (target == nullptr || attacker_entity == nullptr || attacker == nullptr ||
+    if (target == nullptr || attacker_entity == nullptr ||
         (target->item_attrib & kItemAttribObjectiveTarget) == 0)
         return;
-    // Scorer event 11 increments raw stats[14] and applies table[87], i.e.
-    // status VAR index 13. [orig: GameEvent_ProcessScoring @0x52F550]
-    add_event(*attacker, MatchStats::kTargetsDestroyed, score_value(13));
-    add_team_event(attacker_entity->team, MatchStats::kTargetsDestroyed, score_value(13));
+    // [orig: GameEvent_ProcessScoring @0x52F550, event 11]
+    const int32_t bonus = score_value(13);
+    if (attacker) {
+        add_event(*attacker, MatchStats::kTargetsDestroyed, bonus);
+        const Entity *carrier = world.registry.get(attacker_entity->primary_occupant);
+        for (int hop=1; carrier && hop<=2; ++hop) {
+            if (bonus > 0) if (MatchPlayer *driver=player(carrier->handle))
+                add_event(*driver, MatchStats::kSharedPointAwards, bonus >> hop);
+            carrier=world.registry.get(carrier->primary_occupant);
+        }
+    }
+    if ((rules_.game_type & 0x10000u) != 0)
+        add_team_event(attacker_entity->team, MatchStats::kTargetsDestroyed, bonus);
 }
 
 void Match::drop_carried_object(World &world, EntityHandle player_handle) {
@@ -778,7 +788,8 @@ void Match::record_death(World &world, EntityHandle victim_handle,
     const Entity *victim_entity = world.registry.get(victim_handle);
     if (victim_entity == nullptr)
         return;
-    if ((victim_entity->item_attrib & kItemAttribObjectiveTarget) != 0)
+    if ((victim_entity->item_attrib & kItemAttribObjectiveTarget) != 0 &&
+            !victim_entity->objective_death_scored)
         record_target_destroyed(world, victim_handle, killer_handle);
 
     MatchPlayer *victim = player(victim_handle);
@@ -1056,27 +1067,55 @@ void Match::update_objective_proximity(const World &world) {
     }
 }
 
-void Match::update_flag_objectives(World &world, bool advance_return_timers) {
+// [orig: Entity_UpdateIdleCheck @0x408430]
+void Match::tick_flag_event(World &world, Entity &flag) {
+    if (!world.rules.logic_authority) {
+        flag.class_think_ticks = 0x1000000;
+        return;
+    }
+    CarryObjectiveState *state = carry_state(world, flag.handle);
+    if (state == nullptr) return;
+    const int32_t x = int32_t(flag.position.x * 65536);
+    const int32_t y = int32_t(flag.position.y * 65536);
+    const int32_t dx = io::bam_sub(x, int32_t(state->home.x * 65536));
+    const int32_t dy = io::bam_sub(y, int32_t(state->home.y * 65536));
+    const int32_t dz = io::bam_sub(int32_t(flag.position.z * 65536), int32_t(state->home.z * 65536));
+    const bool near_home = std::sqrt(double(dx) * dx + double(dy) * dy) < 131072.0 &&
+            io::bam_abs(dz) < 131072;
+    const bool idle = x == state->previous_x_q16 && y == state->previous_y_q16 &&
+            !near_home && !flag.primary_occupant.valid();
+    const Entity *ground = world.registry.get(flag.ground_target);
+    if ((ground != nullptr && !near_home && (!ground->has_item_def || ground->item_type == 1)) ||
+            idle) {
+        state->return_ticks = io::bam_sub(state->return_ticks, 1);
+    } else {
+        state->return_ticks = rules_.flag_return_ticks < 5 ? 210 : int32_t(rules_.flag_return_ticks);
+    }
+    if (state->return_ticks <= 0) {
+        const EntityHandle handle = flag.handle;
+        world.registry.for_each_in_pool(0, [&](const Entity &body) {
+            if (body.mounted_child == handle) drop_carried_object(world, body.handle);
+        });
+        return_flag_home(world, handle, MatchGameplayEventKind::FlagReturn);
+        state = carry_state(world, handle);
+    }
+    state->previous_x_q16 = int32_t(flag.position.x * 65536);
+    state->previous_y_q16 = int32_t(flag.position.y * 65536);
+    const Entity *occupant = world.registry.get(flag.primary_occupant);
+    const Entity *local = world.registry.get(world.cached.local_player);
+    if (occupant != nullptr && local != nullptr && local->team == flag.team) {
+        flag.position.x = occupant->position.x;
+        flag.position.y = occupant->position.y;
+    }
+    flag.class_think_ticks = 62;
+}
+
+void Match::update_flag_objectives(World &world) {
     // The retail collision dispatcher keys only on the objective item ID. It
     // has no game-type gate, which is observable in C&C's combined flag/zone
     // score schema. [orig: Entity_ProcessWaypointInteraction @0x4AD820;
     // GameType_CreateDefaultSettings @0x52DD00]
     ensure_objective_census(world);
-
-    // Dropped flags count down to their authored home. A carried flag keeps
-    // the timer armed but does not consume it.
-    std::vector<EntityHandle> returns;
-    for (CarryObjectiveState &state : carry_objectives_) {
-        Entity *flag = world.registry.get(state.objective);
-        if (flag == nullptr || flag->registry_spawn_id != state.spawn_id ||
-            flag->primary_occupant.valid() || state.return_ticks <= 0 ||
-            !advance_return_timers)
-            continue;
-        if (--state.return_ticks <= 0)
-            returns.push_back(state.objective);
-    }
-    for (EntityHandle flag : returns)
-        return_flag_home(world, flag, MatchGameplayEventKind::FlagReturn);
 
     if (world.collision == nullptr)
         return;
@@ -1170,12 +1209,12 @@ void Match::update_flag_objectives(World &world, bool advance_return_timers) {
 void Match::advance_tick(World &world, TickPhase phase) {
     // The shared periodic service starts armed at zero, executes immediately,
     // then reloads 62 and decrements-before-testing on later simulation ticks.
-    // It is the ONE one-second countdown: KOTH accumulation, dropped-flag
-    // return callbacks, and every host-side 1 Hz leg read this frame's verdict
+    // KOTH accumulation and host-side 1 Hz services read this frame's verdict.
+    // Flags use their own class countdown. The host reads the shared verdict
     // through periodic_second(). The countdown keeps running after the round
     // ends because the host's linger-phase legs still ride it.
     // [orig: g_periodic_second_timer in Server_TickUpdate @0x51D7E0;
-    // Server_UpdateCaptureZoneProximity @0x5086A0; flag callback @0x408430]
+    // Server_UpdateCaptureZoneProximity @0x5086A0]
     if (periodic_second_timer_ > 0)
         --periodic_second_timer_;
     periodic_second_fired_ = periodic_second_timer_ == 0;
@@ -1188,7 +1227,7 @@ void Match::advance_tick(World &world, TickPhase phase) {
         update_objective_proximity(world);
     if (phase != TickPhase::Gameplay)
         return;
-    update_flag_objectives(world, periodic_second_fired_);
+    update_flag_objectives(world);
     if (remaining_ticks_ > 0)
         --remaining_ticks_;
 }

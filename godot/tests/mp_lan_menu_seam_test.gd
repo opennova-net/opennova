@@ -214,8 +214,8 @@ func test_start_game_defaults() -> void:
 			"a filled rotation arms START_GAME")
 	_press(driver, "START_GAME")
 	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
-	assert_eq(config.server_name, "COOPGAME", "blank name -> default")
-	assert_eq(config.max_players, 4, "blank cap -> default 4")
+	assert_eq(config.server_name, "", "an existing blank name field is read verbatim")
+	assert_eq(config.max_players, 0, "blank edit reads zero before the live slot clamp")
 	assert_eq(config.spectator_slots, 0,
 			"unchecked ALLOW_SPECTATORS disables spectator admission")
 	assert_eq(config.spectator_password, "")
@@ -383,6 +383,65 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 			"the typed host request forwards a map-specific Soldier Class policy")
 
 
+func test_host_rule_controls_reach_native_session_configuration() -> void:
+	var body := ""
+	var edits := {"SERVER_PASSWORD": "secret", "SERVER_MESSAGE": "Squad night",
+			"DELAY": "7", "RESPAWN": "8", "TIME": "45", "MAX_KOTH": "0",
+			"KILL_LIMIT": "500", "MAX_SCORE": "500", "TAKEOVER_TIME": "20",
+			"MAX_PLAYERS": "99"}
+	for control in edits:
+		body += _wnd("edit", control, 10)
+	for control in ["TEAM_FF", "FRIENDLY_TAG", "FF_WARNING", "TEAM_CHOOSE",
+			"CLAYMORE_PREF", "TRACERS", "LFP_TAKEOVER", "SERVERTYPE"]:
+		body += _wnd("spinlist", control, 40,
+				'<ITEMS><ITEM value="0">ZERO</ITEM><ITEM value="1">ONE</ITEM></ITEMS>')
+	body += _wnd("spinlist", "GAME_LOCATION", 70,
+			'<ITEMS><ITEM value="32">US</ITEM></ITEMS>')
+	var screen := _host_screen_xml().replace(_wnd("edit", "MAX_PLAYERS", 34), "")
+	screen = screen.replace("</WINDOW></SCREEN>", body + "</WINDOW></SCREEN>")
+	var driver := MenuDriverFixture.driver_over(self, _doc_from_xml(screen), "jo_mp.mnu")
+	var mp := MpMenuCompanion.new()
+	watch_signals(mp)
+	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	for control in edits:
+		driver.set_widget_text(driver.widget_id(control), edits[control])
+	for control in ["TEAM_CHOOSE", "CLAYMORE_PREF", "LFP_TAKEOVER", "SERVERTYPE"]:
+		driver.select_row(driver.widget_id(control), 1)
+	mp.seed_host_pool([_pool_row("alpha.bms")])
+	driver.select_row(driver.widget_id("MISSION_LIST"), 0)
+	_press(driver, "ADD_MISSIONS")
+	_press(driver, "START_GAME")
+	assert_signal_emitted(mp, "lan_host_start_requested")
+	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
+	var options := config.to_session_options()
+	assert_ne(options, config, "the emitted session request is an independent copy")
+	assert_eq(options.server_password, "secret")
+	assert_eq(options.country, "US", "location stores the item name rather than its numeric value")
+	assert_eq(options.custom_text, "Squad night")
+	assert_eq(options.start_delay, 7)
+	assert_eq(options.respawn_timeout, 8)
+	assert_eq(options.respawn_time, 45, "TIME feeds the round-time global")
+	assert_eq(options.time_limit_minutes, 0x2222222)
+	assert_eq(options.score_limit, 65000)
+	assert_eq(options.max_score, 65000)
+	assert_eq(options.capture_duration_seconds, 20)
+	assert_eq(options.capture_speed_setting, 1)
+	assert_eq(options.mp_attributes & 0x860D, 0x860D)
+	assert_eq(options.max_players, 64, "the dialog clamps at 64")
+	assert_false(options.serve_and_play)
+	var sim := Simulation.new()
+	sim.configure_host_session(options)
+	var live := sim.get_host_session_config()
+	assert_eq(live.server_password, "secret", "the password reaches host admission")
+	assert_eq(live.max_players, 64, "readback retains the requested player cap")
+	assert_eq(live.player_slot_limit, 65, "dedicated hosting adds the reserved slot")
+	sim.configure_host_session(live)
+	assert_eq(sim.get_host_session_config().player_slot_limit, 65,
+			"applying readback does not add a second reserved slot")
+	assert_eq(live.score_limit, 65000)
+	assert_eq(live.mp_attributes, options.mp_attributes)
+
+
 func test_lan_join_emits_selected_server() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
@@ -391,6 +450,7 @@ func test_lan_join_emits_selected_server() -> void:
 	# The browse result arrives the way the live session delivers it: the
 	# injected LanSession's servers_changed signal.
 	var session := LanSession.new()
+	autofree(session)
 	mp.set_lan_session(session)
 	var biggy := LanServerRow.make("biggy", "192.168.1.10", 32768)
 	biggy.server_flags = JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD

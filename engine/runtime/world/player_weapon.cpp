@@ -1,3 +1,5 @@
+#include <runtime/world/weapon_fire_gate.h>
+#include <runtime/world/fire_sound.h>
 // The local player's equipped-weapon cluster — moved verbatim from the shell
 // binding (S7a, ADR 0028). The pump order, the UseGun borrow, PowerThrow, the
 // install bake, and the presentation-event assembly are unchanged; the two
@@ -473,13 +475,23 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.def.auto_fire = (flags & weapon_flag::kAuto) != 0; // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0]
 	w.def.burst3 = (flags & weapon_flag::kBurst) != 0;   // [orig: WeaponAction_Fire @ 0x542c8a]
 	w.def.flags = flags;              // raw mask: the scope gate + fov policy read it
-	w.def.flags2 = data.flags2;       // Inset (0x200) picks the 7-step ease
+	w.def.flags2 = data.flags2;
+	w.def.ammo_cost = data.ammo_cost;
+	std::snprintf(w.def.soundfireloop, sizeof(w.def.soundfireloop), "%s", data.soundfireloop.c_str());
+	std::snprintf(w.def.soundtrailoff, sizeof(w.def.soundtrailoff), "%s", data.soundtrailoff.c_str());
+	std::snprintf(w.def.soundhead, sizeof(w.def.soundhead), "%s", data.soundhead.c_str());
+	std::snprintf(w.def.soundlockedtone, sizeof(w.def.soundlockedtone), "%s", data.soundlockedtone.c_str());
+       // Inset (0x200) picks the 7-step ease
 	// The heat model [orig: WeaponDef +0x36C/+0x370/+0x374]. Absent keys leave 0,
 	// which disables the model exactly as the original's zero-init does.
 	w.def.heat_per_shot = data.heat_per_shot;
 	w.def.heat_decay_per_tick = data.heat_decay_per_tick;
 	w.def.heat_glow_threshold = data.heat_glow_threshold;
 	w.scope_max_mag = data.scope_max_mag;
+    w.def.scope_zero = data.scope_zero;
+    const int installed = world.tables.weapons.index_of(data.name.c_str());
+    if (installed >= 0)
+        w.def.scope_zero = world.tables.weapons.entries[installed].action_fsm.scope_zero;
 	// The 3P fire attack-stamp kind [orig: weapon.def attack_anim -> the AdmDefs record
 	// +0xA8; world-wac-ai-re.md §14.8.4]. The sibling special_hold (+0xA4) is NOT cached
 	// here: the body updater re-reads it from the ADM table by the posed entity's own
@@ -516,6 +528,9 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 			 w.slot.current == weapon_action::kSwitchTo);
 	if (!preserve_slot_state) {
 		w.slot = WeaponSlotState{};
+        w.slot.scope_zero = weapon_scope_zero_initial(w.def.scope_zero);
+        if ((flags & 3) != 0)
+            w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, w.slot.scope_zero);
 		// Ammo comes from the slot pool when the installed def IS the equipped
 		// inventory slot: clip = the slot's loaded rounds, reserve = the def's
 		// ammo-class pool [orig: MountSlot+0x10 +
@@ -528,6 +543,8 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 					: nullptr;
 			if (def != nullptr && strutil::iequals(data.name, def->name)) {
 				w.slot.clip = eq->clip;
+                w.slot.scope_zero = eq->scope_zero;
+                w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, eq->scope_zero);
 				w.slot.reserve =
 						weapon_pool_get(*inventory, def->ammo_class_id);
 				ammo_from_inventory = true;
@@ -884,9 +901,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// [orig: WeaponAction_ProcessFrame @ 0x540e60, the gate @ 0x54101c]
 	in.submerged = player != nullptr && world.env.water_z != 0 &&
 			to_fixed(player->position.z) <= world.env.water_z;
+	if (player != nullptr) weapon_fire_environment_inputs(world, *player, in);
 	if (!accept_weapon_input) active_slot.refire_queued = false;
 	WeaponFsmEvents ev;
 	weapon_fsm_tick(w.def, active_slot, in, ev);
+	if (player != nullptr) weapon_sound_publish(world, *player, w.def, ev);
 	// A release whose fire request the FSM refused must not leave the charge
 	// latched for a later unrelated shot — the charge byte is consumed by the
 	// very fire it triggers [orig: descriptor +20 consume @ 0x4ec5bb].
@@ -1012,6 +1031,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				} else {
 					origin.z += 1.0f;
 				}
+				const FixedVec3 fire_origin{to_fixed(origin.x), to_fixed(origin.y), to_fixed(origin.z)};
+				const bool accepted = !io.is_authority ||
+						(weapon_fire_owner_status(world, *shooter, adm, false) == 0 &&
+						 weapon_fire_origin_status(world, *shooter, *adm, fire_origin, false) == 0);
+				if (accepted) {
 				// The round bearing frame IS the engine heading frame: RoundSim's
 				// (cos, sin) mission-axis mapping is wire-validated on the 0x06 yaw
 				// BAM (round_sim.cpp spawn, D-NET-153), and the retail spawner runs
@@ -1116,6 +1140,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					io.fired.shooter_pose[2] = p->pos[2];
 					io.fired.shooter_pose[3] = p->heading;
 					io.fired.shooter_pose[4] = p->pitch;
+				}
 				}
 				w.pending_throw_charge = 0;
 			}
@@ -1248,10 +1273,20 @@ WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
 	data.animadm = row.animadm;
 	data.flags = row.flags;
 	data.flags2 = row.flags2;
+	data.ammo_cost = row.ammo_class_count;
+	data.soundfireloop = row.soundfireloop;
+	data.soundtrailoff = row.soundtrailoff;
+	data.soundhead = row.soundhead;
+	data.soundlockedtone = row.soundlockedtone;
+
 	data.heat_per_shot = row.heat_per_shot;
 	data.heat_decay_per_tick = row.heat_decay_per_tick;
 	data.heat_glow_threshold = row.heat_glow_threshold;
 	data.scope_max_mag = row.scope_max_mag;
+    data.scope_zero.max_steps = row.scope_max_zero_steps;
+    data.scope_zero.min_steps = row.scope_zero_extra;
+    data.scope_zero.step_metres = row.scope_zero_step;
+    data.scope_zero.default_metres = row.scope_zero_default;
 	data.attack_anim = row.attack_anim;
 	data.run_anim = row.run_anim;
 	data.clipsize = row.clipsize;

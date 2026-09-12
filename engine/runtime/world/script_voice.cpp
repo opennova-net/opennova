@@ -16,6 +16,8 @@ bool ScriptVoiceChannel::start(World &world, const std::string &filename,
     state_.anchor = anchor;
     state_.portrait = portrait;
     state_.max_distance = max_distance;
+    state_.pitch_q16 = 0x10000u;
+    state_.volume = 210;
     world.out.effects.push({"dialog_wav", 0, 0, 0, 0, filename});
     std::vector<uint8_t> bytes;
     auto decoded = std::make_shared<lwf::WavPcm>();
@@ -29,6 +31,17 @@ bool ScriptVoiceChannel::start(World &world, const std::string &filename,
     // including SSNwave(local,...). Radio and wave both take this path.
     // [orig: @0x4ECC90..0x4ECC96]
     if (anchor == world.cached.local_player) state_.max_distance = 100 * 65536;
+    return true;
+}
+
+bool ScriptVoiceChannel::radio_set(World &world, const std::string &name, EntityHandle speaker) {
+    if (!world.rules.mp_session || !ready() || !resolve_set_ ||
+            !world.registry.get(world.cached.local_player)) return false;
+    const auto selected = resolve_set_(name, world.cached.sound_listener_view_flags);
+    if (!selected) return false;
+    if (!start(world, selected->filename, world.cached.local_player, speaker,
+            selected->max_distance)) return false;
+    state_.volume = selected->volume;
     return true;
 }
 
@@ -97,11 +110,11 @@ ScriptVoiceChannel::Frame ScriptVoiceChannel::frame(World &world, Vec3 listener)
         // saturation as the common spatial-audio path.
         distance = length > 2147418112.0 ? 2147418112 : static_cast<int32_t>(length);
     }
-    // User voice volume remains on the host's Voice bus. The channel's 210
+    // User voice volume remains on the host's Voice bus. The channel's selected
     // gain and the existing retail distance curve are applied exactly once.
     // [orig: @0x4ED688; Audio_UpdateAmbientStream @0x4EDB22]
     out.volume = audio::calc_distance_volume(distance, state_.max_distance,
-            (210 * 255 + 128) >> 8, 255);
+            (state_.volume * 255 + 128) >> 8, 255);
     return out;
 }
 

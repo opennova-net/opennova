@@ -75,7 +75,7 @@ struct Harness {
 		kernel->world.registry.configure_pool(0, 16);
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
-		role.create_runtime("BridgeJoiner", inmatch::JoinRole::Player, "");
+		role.create_runtime("BridgeJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };
 		role.kit_seams.push = [] {};

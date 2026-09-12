@@ -6,6 +6,7 @@
 
 #include <runtime/simassets/item_traits.h>
 #include <runtime/simassets/sim_model_cache.h>
+#include <runtime/audio/oneshot_play.h>
 #include <formats/mission/mission.h>
 #include <runtime/mission/placement_traits.h>
 #include <base/io/fixed.h>
@@ -28,6 +29,45 @@ using namespace opennova::def;
 namespace opennova::simassets {
 
 namespace {
+
+// [orig: ItemDef_ResolveAllResources @0x49E5F0: primary profile, female
+// profile, then explicit SHOT names. Explicit names replace only the sound;
+// profile timing uses its already-Q16 words verbatim, without another x62.]
+void bind_regional_sounds(world::World &world, const DefItemDef &def,
+                         world::ItemDeathTraits &traits) {
+    const auto *sets = world.tables.sound_sets;
+    for (int region = 0; region < 4; ++region) {
+        auto &shot = traits.regional_sounds[region];
+        shot.name.clear();
+        traits.regional_loops[region].clear();
+        shot.base_ticks = def.shot_delay_ticks[region][0];
+        shot.range_ticks = def.shot_delay_ticks[region][1];
+    }
+    for (const char *profile_name : {def.sound_profile, def.sound_profile_female}) {
+        if (*profile_name == 0) continue;
+        const auto *profile = world.tables.sound_profiles.find(profile_name);
+        if (profile == nullptr || sets == nullptr) continue;
+        for (int region = 0; region < 4; ++region) {
+            if (sets->has(profile->set_names[region]))
+                traits.regional_loops[region] = profile->set_names[region];
+            const int slot = audio::kSlotShotDawn + region;
+            if (!sets->has(profile->set_names[slot])) continue;
+            auto &shot = traits.regional_sounds[region];
+            shot.name = profile->set_names[slot];
+            shot.base_ticks = profile->param2_q16[slot];
+            shot.range_ticks = profile->param3_q16[slot];
+        }
+    }
+    const char *names[] = {def.dawnshot, def.dayshot, def.duskshot, def.nightshot};
+    for (int region = 0; region < 4; ++region) {
+        if (def.soundloops[region][0])
+            traits.regional_loops[region] = sets && sets->has(def.soundloops[region]) ?
+                    def.soundloops[region] : "";
+        if (*names[region] == 0) continue;
+        traits.regional_sounds[region].name =
+                sets != nullptr && sets->has(names[region]) ? names[region] : "";
+    }
+}
 
 // Last-wins by-id view over the parsed file: duplicate definition ids
 // overwrite earlier rows — the same load-order semantics the binding's
@@ -189,6 +229,30 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // above. [orig: ItemDef_ParseProperty @0x49fa6c; consumer
         // Entity_UpdateInfantryAI @0x4b9c97; world-wac-ai-re §19]
         e->deathtime_ticks = def != nullptr ? def->deathtime_ticks : 0;
+        if (def != nullptr && !e->destroy_timer_initialized) {
+            // [orig: Entity_InitFromItemDef @0x49E550]
+            e->destroy_timer = def->destroy_timing_ticks[0];
+            e->destroy_timer_initialized = true;
+            // [orig: squib init sub_448CE0 @0x448CE0]
+            if (strutil::iequals(def->move_function, "squib")) {
+                e->squib.motor = true;
+                e->equipped_adm_index = 0;
+                e->squib.spread_q16 = static_cast<int32_t>(def->door_type);
+                if (def->primary_weapon[0]) {
+                    e->equipped_adm_index = world.tables.weapons.index_of(def->primary_weapon);
+                    const auto *weapon = world.tables.weapons.by_index(e->equipped_adm_index);
+                    if (weapon) e->squib.ammo_index = e->squib.damage_ammo_index =
+                            std::max(0, int(weapon->ammo_index));
+                }
+            }
+            if (strutil::iequals(def->move_function, "upfx"))
+                e->death_motion = world::DeathMotionMode::BuildingEffects;
+            else if (strutil::iequals(def->move_function, "psec"))
+                e->death_motion = world::DeathMotionMode::PalmPiece;
+        }
+        if (def && (strutil::iequals(def->ai_function, "palm") ||
+                strutil::iequals(def->ai_function, "psec")))
+            e->palm_sections = true;
         e->door_event = def != nullptr && fourcc_prefix(def->ai_function) == "door";
         e->door_motion = def != nullptr && fourcc_prefix(def->move_function) == "door";
         if (def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_DOOR) != 0 &&
@@ -218,6 +282,13 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 def != nullptr) {
             world::ItemDeathTraits t;
             t.death_class = world::item_death_class_from_tag(def->ai_function);
+            bind_regional_sounds(world, *def, t);
+            std::copy(std::begin(def->destroy_timing_ticks), std::end(def->destroy_timing_ticks),
+                    std::begin(t.destroy_timing_ticks));
+            t.physics = def->physics;
+            t.squib_distance_q16 = def->clipsize;
+            t.squib_ammo = def->ammo_marker3;
+            t.particlefx = def->particlefx.effect;
             t.unit_type = def->unit_type;
             t.kz = def->kz;
             t.armor_impact = def->armor_impact;
@@ -515,6 +586,14 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items,
         }
     }
     return armed;
+}
+
+void resolve_item_event_sounds(world::World &world, const DefItemsFile &items) {
+    const auto by_id = index_items(items);
+    for (auto &row : world.tables.item_death_traits.rows) {
+        const auto it = by_id.find(row.first + mission::kItemIdOffset);
+        if (it != by_id.end()) bind_regional_sounds(world, *it->second, row.second);
+    }
 }
 
 } // namespace opennova::simassets

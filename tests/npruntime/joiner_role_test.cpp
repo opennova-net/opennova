@@ -15,6 +15,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/client_replica_present.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/replication/connection_fan.h>
@@ -119,7 +120,7 @@ struct Harness {
 		kernel->world.registry.configure_pool(0, 16);
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
-		role.create_runtime("BridgeJoiner", inmatch::JoinRole::Player, "");
+		role.create_runtime("BridgeJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [this] { seams.push_back("loadout"); };
 		role.kit_seams.reseed_on_side_change = [this] {
 			seams.push_back("reseed");
@@ -832,9 +833,136 @@ bool run_received_loadout_policy_and_sounds() {
             "a received sound is not replayed on the next frame");
 }
 
+
+// Drive the production joiner frame: rendering can read a channel repeatedly
+// without integrating another slew, and an NPC's own view follows its tether.
+bool run_replica_turret_channel() {
+ Harness h;
+ h.role.poll_preload();
+ auto &state = h.role.runtime->state();
+ mission::ItemSeatSpec spec;
+ spec.type_id = 123;
+ spec.item_attrib2 = def::DEF_ITEM_ATTRIB2_ISTURRET;
+ w::Seat seat;
+ seat.type = w::SeatType::Gunner;
+ seat.bone_index = 1;
+ spec.seats.push_back(seat);
+ h.kernel->seat_specs.push_back(spec);
+ auto &mount = state.upsert(0x1000);
+ mount.type_id = 123;
+ mount.cls = EntityClass::NoNetworkCallback;
+ mount.heading_known = true;
+ mount.heading_bam = 0;
+ auto &gunner = state.upsert(2);
+ gunner.cls = EntityClass::Player;
+ gunner.carrier_handle = 0x1000;
+ gunner.mount_bone = 1;
+ gunner.heading_bam = 0x55555555;
+ gunner.pitch_bam = 0x10000000;
+ h.role.run_tick(h.input);
+ auto *gun = state.find(0x1000);
+ if (!expect(gun != nullptr && gun->emplaced_controls_valid &&
+   gun->emplaced_gun_yaw_word == -147 && gun->emplaced_gun_pitch_word == -147,
+   "remote turret advances one retail slew on each axis")) return false;
+ if (!expect(state.find(2)->heading_bam == 0x55555555,
+   "remote Player gunner skips local and NPC tethers")) return false;
+ w::EmplacedWeaponControls first, second;
+ inmatch::emplaced_weapon_controls_for_client(*gun, first);
+ inmatch::emplaced_weapon_controls_for_client(*gun, second);
+ if (!expect(first.gun_yaw == second.gun_yaw && gun->emplaced_gun_yaw_word == -147,
+   "repeated presentation reads do not advance the turret")) return false;
+ h.role.run_tick(h.input);
+ if (!expect(state.find(0x1000)->emplaced_gun_yaw_word == -294,
+   "second tick integrates from the stored high word")) return false;
+ state.find(0x1000)->emplaced_gun_yaw_word = 0;
+ state.find(2)->cls = EntityClass::Infantry;
+ state.find(2)->heading_bam = 0x55555555;
+ h.role.run_tick(h.input);
+ if (!expect(state.find(2)->heading_bam == 0x2D7AD80,
+   "NPC gunner yaw is written back at the four-degree tether")) return false;
+ // Immediate gun, authored 45-degree window: word and gunner look both pin.
+ h.kernel->seat_specs[0].item_attrib2 = 0;
+ h.kernel->seat_specs[0].turret_yaw_range_bam = 0x20000000;
+ state.find(2)->heading_bam = 0x55555555;
+ state.find(2)->pitch_bam = 0;
+ state.find(2)->recoil_pitch = 0x4000000;
+ h.role.run_tick(h.input);
+ if (!expect(state.find(0x1000)->emplaced_gun_yaw_word == -8192 &&
+   (state.find(2)->heading_bam == 0x20400000 || state.find(2)->heading_bam == 0x1FC00000),
+   "weapon window pins the barrel and writes back occupant look")) return false;
+ if (!expect(state.find(0x1000)->emplaced_gun_pitch_word == -1024,
+   "gun pitch consumes recoil before the body decay")) return false;
+ state.find(2)->carrier_handle = 0xFFFF;
+ h.role.run_tick(h.input);
+ return expect(!state.find(0x1000)->emplaced_controls_valid,
+   "dismount clears presentation validity");
+}
+
+
+bool run_local_replica_turret_channel() {
+ Harness h;
+ auto &world = h.kernel->world;
+ world.registry.configure_pool(1,4);
+ world.add_system(&world.ai);
+ world.load_systems();
+ h.role.poll_preload();
+ constexpr uint16_t self_handle = 5;
+ h.role.runtime->seed_session(kSessionId,kClientKey,kClientScrk,kServerScrk,
+   1,0,self_handle,w::kPlayerInfantryTypeId);
+ h.role.run_tick(h.input);
+ auto *local = h.kernel->local.player();
+ if (!expect(local != nullptr,"local turret fixture has L")) return false;
+ w::Entity gun;
+ gun.kind = w::EntityKind::Item;
+ gun.item_id = 123;
+ gun.spawn_origin = 1u << 24;
+ gun.yaw = 90;
+ gun.item_attrib2 = def::DEF_ITEM_ATTRIB2_ISTURRET;
+ gun.health = 100;
+ gun.team = local->team;
+ w::Seat seat;
+ seat.type = w::SeatType::Gunner;
+ seat.bone_index = 1;
+ seat.source_name = "UseGun";
+ gun.seats.push_back(seat);
+ const auto handle = world.registry.spawn(1,gun);
+ mission::ItemSeatSpec spec;
+ spec.type_id = 123;
+ spec.item_attrib2 = gun.item_attrib2;
+ spec.seats = gun.seats;
+ h.kernel->seat_specs.push_back(spec);
+ auto &state = h.role.runtime->state();
+ auto &row = state.upsert(handle.packed);
+ row.type_id = 123;
+ row.cls = EntityClass::NoNetworkCallback;
+ row.heading_known = true;
+ row.heading_bam = 0;
+ auto &self = state.upsert(self_handle);
+ self.cls = EntityClass::Player;
+ self.carrier_handle = handle.packed;
+ self.mount_bone = 1;
+ self.state_flags = w::kEntityFlagMounted;
+ self.state_flags_known = true;
+ h.role.run_tick(h.input);
+ local = h.kernel->local.player();
+ if (!expect(local->mounted && local->mount_type == w::SeatType::Gunner,
+   "confirmed UseGun mounts local L")) return false;
+ world.registry.get(handle)->emplaced_gun_yaw_word = 0;
+ h.kernel->local.input.look_heading = 0x55555555;
+ h.role.run_tick(h.input);
+ const auto *mount = state.find(handle.packed);
+ if (!expect(mount && mount->emplaced_gun_yaw_word == -147 &&
+   world.registry.get(handle)->emplaced_gun_yaw_word == -147,
+   "local joiner publishes exactly one slew from the world body")) return false;
+ return expect(h.kernel->local.input.look_heading == 0x3FFF7FC0,
+   "local joiner input is tethered within ninety degrees of the gun");
+}
+
 } // namespace
 
 int main() {
+	if (!run_local_replica_turret_channel()) return 1;
+	if (!run_replica_turret_channel()) return 1;
 	if (!run_received_loadout_policy_and_sounds()) return 1;
 	bool ok = true;
 	ok &= run_pre_match_frame();

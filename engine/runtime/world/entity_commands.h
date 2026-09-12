@@ -168,7 +168,10 @@ public:
     // [orig: WacCmd_SsnWounded @0x4F1B80] Unsigned health <=
     // the signed max-health half reinterpreted as u16.
     bool ssn_wounded(EntityTarget ssn) const;
-    bool ssn_in_area(EntityTarget ssn, int area_id) const;
+    // BMS area predicates: all matching rows in pools 0/1, rather than the
+    // general first-match SSN resolver used by bound WAC commands.
+    bool ssn_in_area(int32_t ssn, int area_id) const;
+    bool group_in_area(int32_t group, int area_id) const;
     bool ssn_in_script_area(EntityTarget target, int32_t zone_id, bool three_dimensional) const;
     bool ssn_at_location(EntityTarget target, int32_t location) const;
     void update_local_location(EntityHandle player);

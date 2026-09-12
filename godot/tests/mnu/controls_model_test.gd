@@ -158,3 +158,20 @@ func test_vk_godot_key_round_trip_sweep() -> void:
 		if cells[2] != "":
 			assert_false(cells[2].contains("#"),
 					"%s displays through the table (no raw #VK fallback)" % cells[1])
+
+
+func test_static_mouse_and_joystick_defaults_survive_profile_round_trip() -> void:
+	var model := ControlsModel.new()
+	var blob := model.save_blob()
+	assert_eq(blob["Prone"][4], 0x10)
+	assert_eq(blob["ScopeZeroDec"][4], 0x800)
+	assert_eq(blob["ScopeZeroDec"][6], 17)
+	assert_eq(blob["ScopeZeroInc"][4], 0x400)
+	assert_eq(blob["FreeLook"][4], 2)
+	var restored := ControlsModel.new()
+	restored.load_blob(blob)
+	assert_eq(restored.save_blob(), blob)
+	assert_eq(restored.mouse_event_token(MOUSE_BUTTON_WHEEL_UP), "cycleweaponP")
+	_press(KEY_CTRL, true)
+	assert_eq(restored.mouse_event_token(MOUSE_BUTTON_WHEEL_UP), "ScopeZeroInc")
+	_press(KEY_CTRL, false)

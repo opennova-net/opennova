@@ -185,6 +185,16 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
             current.velocity = parse_int_n(v, vl);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "heat_det_range", 14)) {
+            // [orig: AmmoDef_ParseProperty @0x40a2d0, heat_det_range]
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            current.heat_det_range = static_cast<int16_t>(parse_fixed16_digits_n(v, vl) >> 16);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "boresight_maxang", 16)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+            current.boresight_maxang = static_cast<int32_t>(11930464u *
+                static_cast<uint32_t>(parse_int_n(v, vl)));
+            parsed = 1;
         } else if (lower_starts_with(lower, ll, "min_damage", 10)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
             current.min_damage = parse_int_n(v, vl);
@@ -200,6 +210,14 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
         } else if (lower_starts_with(lower, ll, "penetration_kz", 14)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
             current.penetration_kz = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "armor_density", 13)) {
+            // [orig: AmmoDef_ParseProperty @0x40ac29..0x40ac74]
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            Token tok[3];
+            const int count = tokenize(v, vl, tok, 3);
+            for (int c = 0; c < count; ++c)
+                current.armor_density[c] = parse_int_n(tok[c].s, tok[c].len);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "secondary_anim", 14)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);

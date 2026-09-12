@@ -374,7 +374,7 @@ consumed by the death edge's `is_local_player` branch.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-10 | slots 43/44 (ChuteFlap/FreeFall) refire every body tick; the reimpl bank declines to RESTART the set while its previous voice still plays (`play_oneshot_3d` exclusive key) | the refires land in a finite channel pool and steal their own channels — audibly one continuous rush | reimpl voice model (AudioStreamPlayer3D per fire); audibly equivalent, no 62-voice pileup — PERMANENT 2026-08-29 (ADR 0022 register) |
+| D-SND-10 | FIXED 2026-09-11: chute/freefall refires use the finite 26-channel allocator; exclusive-voice shortcut removed | Retail refires obey normal channel stealing | Supersedes the 2026-08-29 permanent mechanism choice; oneshot_play and sound_runtime_test |
 | D-SND-11 | FIXED 2026-08-13: the pick reads the live `Entity::ground_target` — the `entity+0x28 groundEntity` link the collision resolve's ground probe stores unconditionally every tick (null on a miss) — and the terrain-cache fallback (no collision world) clears it, mirroring the probe's null store. The never-set `InfantryState::standing_on_entity` mirror is deleted | `entity+0x28 groundEntity` (written by the ground probes, `Entity_RaycastGroundHeightAndObject @ 0x414320` — the unconditional `+0x28` store `@ 0x414370`; the resolver call `@ 0x525fd0`) selects `SS*FootOBJ` when standing on an entity; the sound block runs BEFORE the tick's resolve in both bodies (org1 `@ 0x4bf23e` precedes the resolve tail `@ 0x4bf7b8`), so the read is last tick's link — matched | a single generic OBJ pair, no per-object material (a wooden dock plays the walker's `SS*FootOBJ` — retail behavior); ctest `slot_sound` (`test_foot_obj_pick`: pick, water>OBJ>snow order, fallback staleness clear) |
 | D-SND-12 | FIXED 2026-08-15: both items.def profiles resolve, and player slot sounds choose the female profile when the reset-stable `CharacterTraitsTable` marks the entity's packed avatar id female; unknown ids and NPCs stay on primary | the character entity's female byte picks def+2152 `@ 0x52831c` | `AvatarDatabase` projects packed character id + `combo.head.sex` through `Simulation::set_character_avatar_database`; `slot_sound` pins female selection, unknown fallback, and the NPC packed-id collision guard, while `avatars_data_test` pins the retail projection |
 | D-SND-13 | SndProf.def parses per mission load off the mission resource root | one boot-time load + expansion reloads | same file, same table; no observable difference — PERMANENT 2026-08-29 (ADR 0022 register) |
@@ -844,3 +844,52 @@ semantics, and the global bank-slot order are all engine-witnessed and implement
 - follow-up: rename the `engine/formats/lwf` `Multi.target_id` field and its
   wrappers to the witnessed one-shot-cull-range meaning. The retired ONED sound
   workspace exposed it as "(id N)"; no current ONED UI exposes the field.
+
+
+## Flag-event delayed voice follow-up (2026-09-11)
+
+Event 19–21 cues and fixed FLAG_* trigger names now use the native sound
+queue. Its shared 128 pending slots carry the flags-mask-2 delayed interface
+form; a separate 32-entry table suppresses each resolved voice for 3720
+ticks before a 62-tick allocation. The IDB progress-bar/effect/entity-tracking
+names on this path describe audio calls. See
+[the HUD follow-up record](../interface/hud-re.md#645-follow-ups-flag-feed-announcement-banner-and-death-instructions-2026-09-11)
+for branches, corrected names, and validation.
+[orig: NetPacket_HandleGameEvent @0x426270; HUD_DrawDefaultProgressBar
+@0x527E60; Server_TrackEntityInTable @0x527B30;
+EffectSlot_AllocateAndInit @0x527C30; Sound_TickPendingSlots @0x529310]
+
+
+The #645 client sound receive paths resolve remote organic context from
+ClientState; those rows intentionally have no native World twin. Local events
+map the wire self handle to the local avatar. Flag cues and radio text/voice,
+request latches and tracking therefore work for replica-only speakers as well
+as HostClient's world entities. The native `npruntime_client_runtime` test runs
+both host/world and replica-only receive cases. Weapon loop lifetimes now remain
+signed through the shared sound mailbox and the Godot mixer binding; see the
+[weapon replay record](../net/novaworld-net-re.md#645-weapon-sound-replay-follow-up-2026-09-11).
+
+## One-shot and weapon follow-up (2026-09-11)
+
+The native one-shot allocator models 26 physical channels (12 reserved and
+14 general), the priority-two replacement rule, and set/member pitch
+jitter draws before attenuation. The ROL3 stream starts at 0x2B0749C1 and
+advances even when authored jitter is zero. Default master/category volume
+is 192. Repeated chute/freefall plays use this finite allocator; D-SND-10's
+former exclusive-voice choice is no longer implemented.
+[orig: SoundBank_PlayTriggerEntries @ 0x75CCD0;
+audio_find_and_open_channel @ 0x766E80]
+
+Weapon head/fireloop/trailoff and Finish's kick gate are ported. Loop lifetime
+is the sign-extended kick byte; ownerless slots still decay but cannot emit
+head/tail/loop. Held receive replay and carrier ownership are detailed in
+net-re's weapon-replay section. S2C 0x3A queues local medic kit/voice cues;
+0x6D retains independent chat/voice mute decisions and request state,
+including canonical replica-only speakers. Feed 19/20/21 uses its witnessed
+immediate sound and delayed interface-voice tables.
+[orig: ActionSlot_FinishActivePhase @ 0x53F7B0;
+WeaponAction_ProcessFrame @ 0x540E60; NapiNPClientMsg_0x03A @ 0x422680;
+NapiNPClientMsg_HandleEntityDeath @ 0x430C50]
+
+Validation: oneshot_play, fire_sound, weapon_fsm, npruntime_client_runtime,
+npruntime_client_message_dispatch, and focused sound/presenter GUT cases.

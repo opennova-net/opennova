@@ -270,6 +270,8 @@ class Match {
     // Entity destruction drops a carried objective without removing the
     // player's score/roster record. [orig: Entity_DropCarriedObject @0x439DF0]
     void drop_carried_object(World &world, EntityHandle player);
+    // Per-flag class callback (+0x2AC), independent of the server's 1 Hz clock.
+    void tick_flag_event(World &world, Entity &flag);
     const MatchPlayer *player(EntityHandle entity) const;
     MatchPlayer *player(EntityHandle entity);
     const std::vector<MatchPlayer> &players() const { return players_; }
@@ -340,6 +342,8 @@ class Match {
         uint64_t spawn_id = 0;
         Vec3 home;
         int32_t return_ticks = 0;
+        int32_t previous_x_q16 = 0;
+        int32_t previous_y_q16 = 0;
     };
 
     void share_experience(const World &world, MatchPlayer &recipient, int32_t amount);
@@ -355,7 +359,7 @@ class Match {
     void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
                           EntityHandle actor = EntityHandle{});
     void update_objective_proximity(const World &world);
-    void update_flag_objectives(World &world, bool advance_return_timers);
+    void update_flag_objectives(World &world);
     int32_t team_objective_ticks(const World &world, uint8_t team) const;
 
     MatchRules rules_;

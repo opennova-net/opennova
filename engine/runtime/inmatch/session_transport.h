@@ -21,6 +21,9 @@ struct Datagram {
 	// Owner-side message-pool exemption. This survives semantic transport queues
 	// but is never represented by identity framing or ProtocolMessage wire bits.
 	bool capacity_exempt = false;
+	// Zero retains a reliable record until ACK; a nonzero value expires it
+	// after this many completed send flushes, including its first send.
+	uint32_t retention_flushes = 0;
 };
 
 // The byte transport between the authoritative host and one client, abstracted so the
@@ -41,7 +44,7 @@ public:
 	virtual void host_send(
 			uint8_t tag, std::vector<uint8_t> body, bool reliable = true,
 			uint8_t protocol_flags_raw = 0,
-			bool capacity_exempt = false) = 0;
+			bool capacity_exempt = false, uint32_t retention_flushes = 0) = 0;
 	// client -> host (the C2S 0x0C input uplink).
 	virtual void client_send(uint8_t tag, std::vector<uint8_t> body) = 0;
 

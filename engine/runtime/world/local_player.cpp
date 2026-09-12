@@ -105,6 +105,30 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	w::local_player_view_refresh(&world, view);
 }
 
+bool LocalPlayer::request_scope_zero(int delta) {
+    if (!weapon.active || !local_player_can_fire()) return false;
+    WeaponSlotState &slot = *active_local_weapon_slot(world_, weapon);
+    const int16_t next = weapon_scope_zero_adjust(weapon.def.scope_zero, slot.scope_zero,
+        delta, world_.rules.session_open, (world_.match.rules().game_type & 0x10000u) != 0);
+    if (next == slot.scope_zero) return false;
+    slot.scope_zero = next;
+    if (!weapon.usegun_slot_active && inventory_valid) {
+        if (WeaponInventorySlot *entry = inventory.slot(inventory.equipped_combo)) entry->scope_zero = next;
+    }
+    const int32_t offset = weapon_scope_zero_pitch(weapon.def.scope_zero, next);
+    input.look_pitch = io::bam_add(input.look_pitch, io::bam_sub(offset, slot.zero_pitch));
+    slot.zero_pitch = offset;
+    return true;
+}
+
+void LocalPlayer::set_view_keys(bool free_look, bool up, bool down, bool left, bool right) {
+    input.free_look = free_look;
+    input.look_up = up;
+    input.look_down = down;
+    input.turn_left = left;
+    input.turn_right = right;
+}
+
 bool LocalPlayer::request_stance(int stance) {
 	World &world = world_;
 	if (stance < 0 || stance > 2) return false;
@@ -325,6 +349,11 @@ void LocalPlayer::apply_player_input_pre_tick() {
 	w::AiEntity *p = world.ai.for_handle(world.cached.local_player);
 	if (p == nullptr) return;
 	w::local_player_view_refresh(&world, view);
+    // [orig: Entity_ApplyFreeLookRotation @0x4ae090, called by the local
+    // body before aim/camera updates]. Both pitch limits follow body slope.
+    if ((world.logic_tick & 1u) != 0)
+        player_look_keys(input.look_heading, input.look_pitch, input.turn_left,
+        input.turn_right, input.look_up, input.look_down, input.prone, p->body_pitch);
 	w::apply_player_body_input(*p, w::pack_player_body_input(input));
 	if (w::Entity *entity = world.registry.get(p->handle))
 		entity->analog_throttle = input.analog_throttle;
@@ -375,6 +404,45 @@ void LocalPlayer::run_local_player_post_tick() {
 void LocalPlayer::tick_view() {
 	World &world = world_;
 	w::local_player_view_tick(&world, weapon, view, view_tracker, view_session_inputs);
+    update_aim_target();
+}
+
+void LocalPlayer::reset_for_new_round() {
+    Entity *local = player();
+    if (local == nullptr) return;
+    // [orig: Game_InitNewRound @0x422740; Camera_ResetToLocalPlayer @0x4a3d30]
+    view.binoculars_requested = false;
+    view.binoculars_raised = false;
+    view.binoculars_view_active = false;
+    view.scope_engaged = false;
+    view.scope_step = 0;
+    view.scope_hipfire = true;
+    hud_map_control.mode = 0;
+    stance_latch_ = 0;
+    input.crouch = input.prone = false;
+    weapon.power_throw_start_tick = 0;
+    view.shake.counter = 0;
+    world_.weather.core.hit_dim.intensity = 0;
+    world_.weather.core.hit_dim.fade_rate = 0;
+    view.camera_mode = 0;
+    view.third_person = false;
+    view.tp_anchor_valid = true;
+    for (int axis = 0; axis < 3; ++axis) {
+        const float pos = axis == 0 ? local->position.x :
+                axis == 1 ? local->position.y : local->position.z;
+        view.tp_anchor[axis] = pos;
+        view.tp_anchor_q16[axis] = to_fixed(pos);
+        view.lookahead_q16[axis] = 0;
+    }
+    world_.cached.sound_listener_view_flags = 2;
+    world_.script.waypoints.reset_selection(world_.registry, *local, world_.match.rules().game_type);
+    input.look_heading = bam_heading_from_mission_yaw_deg(local->yaw);
+    // Dialog and HUD buffers belong to the presenting device; one ordered
+    // effect carries the reset without discarding unrelated mission events.
+    Effect reset;
+    reset.kind = "local_round_reset";
+    world_.out.effects.push(std::move(reset));
+    ++round_reset_revision;
 }
 
 void LocalPlayer::reset_local_player_input_to_player_facing() {

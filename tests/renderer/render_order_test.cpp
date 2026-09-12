@@ -94,6 +94,12 @@ int main() {
 	CHECK(transparent_rung_for(TransparentQueue::AboveWater, false) == kRungAlphaFarSide);
 	CHECK(transparent_rung_for(TransparentQueue::BelowWater, false) == kRungAlphaCameraSide);
 
+	CHECK(entity_uses_thermal_wave(3));
+	CHECK(!entity_uses_thermal_wave(1));
+	CHECK(!entity_uses_thermal_wave(5));
+	CHECK(scene_far_plane(1000.9f) == 1001.0f);
+	CHECK(scene_far_plane(1000.0f) == 1001.0f);
+
 	if (failures != 0) {
 		std::printf("renderer_render_order: %d failure(s)\n", failures);
 		return 1;

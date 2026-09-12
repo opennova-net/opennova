@@ -862,6 +862,28 @@ bool run_0a_vehicle_budget_round_robin() {
 	// never exercised against a record body).
 	if (!expect(view_vehicles == kVehicles + 1,
 	            "view holds all pool-1 spawns as Vehicle class (0x0D-learned)")) return false;
+    conns[0].nak_backoff_pending = true;
+    nw::FrameUpdate reduced, recovered, boundary, silent, other;
+    if (!pump_frame(reduced)) return false;
+    if (!expect(reduced.records.size() < 15 && !conns[0].nak_backoff_pending,
+        "NAK halves one packet then consumes its flag")) return false;
+    if (!pump_frame(recovered)) return false;
+    if (!expect(recovered.records.size() > 20, "next healthy packet restores the full budget")) return false;
+    conns[0].receive_silence_ms = 2000;
+    if (!pump_frame(boundary)) return false;
+    if (!expect(boundary.records.size() > 20, "exactly two seconds does not halve the budget")) return false;
+    conns[0].receive_silence_ms = 2001;
+    if (!pump_frame(silent)) return false;
+    if (!expect(silent.records.size() < 15, "more than two seconds halves the budget")) return false;
+    ns::LoopbackChannel other_channel;
+    ns::Connection other_connection{&other_channel, ns::TransportMode::Loopback, host_h, 0};
+    ns::emit_connection_s2c(world, other_connection, ns::snapshot_world(world), 0);
+    ns::Datagram other_datagram;
+    if (!expect(other_channel.client_recv(other_datagram) && other_datagram.body.size() >= 600,
+        "a silent peer does not lower another peer's budget")) return false;
+    conns[0].receive_silence_ms = 0;
+    if (!pump_frame(recovered)) return false;
+    if (!expect(recovered.records.size() > 20, "received traffic restores the full budget")) return false;
 	std::printf("PASS 0a_vehicle_budget_round_robin\n");
 	return true;
 }

@@ -38,4 +38,15 @@ void player_look_apply(int32_t &yaw_bam, int32_t &pitch_bam, const PlayerLookSet
     if (pitch_bam < kLookPitchMin) pitch_bam = kLookPitchMin;
 }
 
+void player_look_keys(int32_t &yaw, int32_t &pitch, bool left, bool right,
+    bool up, bool down, bool prone, int32_t body_pitch) {
+    if (left) yaw = io::bam_add(yaw, 0x1FFFFFF);
+    if (right) yaw = io::bam_sub(yaw, 0x1FFFFFF);
+    if (up) pitch = io::bam_add(pitch, 0x1FFFFFF);
+    if (down) pitch = io::bam_sub(pitch, 0x1FFFFFF);
+    const int32_t limit = prone ? kLookPitchProneMax : kLookPitchMax;
+    if (io::bam_sub(pitch, body_pitch) > limit) pitch = io::bam_add(body_pitch, limit);
+    if (io::bam_sub(pitch, body_pitch) < -limit) pitch = io::bam_sub(body_pitch, limit);
+}
+
 } // namespace opennova::world

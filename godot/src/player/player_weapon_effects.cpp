@@ -532,11 +532,10 @@ void PlayerWeaponEffects::play_viewmodel_clip(const String &p_key, int p_variant
 	if (owner == nullptr) {
 		return;
 	}
-	const double seconds = static_cast<double>(std::max(p_advance_ticks, 0)) * Simulation::tick_dt();
 	const TypedArray<ObjectModel> parts = owner->vm_parts();
 	for (int64_t i = 0; i < parts.size(); ++i) {
 		if (ObjectModel *visual = Object::cast_to<ObjectModel>(static_cast<Object *>(parts[i]))) {
-			visual->play_body_clip_variant_at_time(p_key, p_variant, seconds);
+			visual->play_body_clip_variant_at_tick(p_key, p_variant, p_advance_ticks);
 		}
 	}
 }

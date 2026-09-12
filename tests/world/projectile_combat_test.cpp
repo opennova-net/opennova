@@ -522,6 +522,76 @@ void test_shooter_damage_class_runs_after_zone_truncation() {
     }
 }
 
+
+void test_body_armor_energy_and_impact_row() {
+    {
+        PosedDamageRig r(4);
+        r.target_entity()->carry_flags = 8;
+        r.ammo().armor_density[0] = 100;
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.size() == 1);
+        if (!r.world.round_sim.hits.empty())
+            CHECK(r.world.round_sim.hits[0].damage == 491);
+        // First loss: sqrt(620^2 - 200000000/875) -> 394 m/s.
+        // Quantizing back to Q16/tick gives 393 for damage, then x1.25 -> 491.
+        // The second loss consumes the remaining energy.
+        CHECK(r.world.round_sim.rounds[0].vel.x == 0.0f);
+        CHECK(r.world.round_sim.impacts.size() == 2);
+        if (r.world.round_sim.impacts.size() == 2) {
+            CHECK(r.world.round_sim.impacts[0].effect_tag == 24);
+            CHECK(r.world.round_sim.impacts[0].present_effect);
+            CHECK(r.world.round_sim.impacts[0].source_order <
+                  r.world.round_sim.impacts[1].source_order);
+        }
+    }
+    for (uint8_t damage_class = 0; damage_class < 3; ++damage_class) {
+        PosedDamageRig r(0);
+        r.target_entity()->carry_flags = 8;
+        r.shooter_entity()->ammo_damage_class = {damage_class};
+        r.ammo().armor_density[0] = r.ammo().armor_density[1] =
+                r.ammo().armor_density[2] = 1000;
+        r.ammo().armor_density[damage_class] = 0;
+        r.fire_and_tick();
+        const int damage[] = {775, 697, 852};
+        CHECK(r.world.round_sim.hits.size() == 1);
+        if (!r.world.round_sim.hits.empty())
+            CHECK(r.world.round_sim.hits[0].damage == damage[damage_class]);
+    }
+    for (int section : {4, 5, 13}) {
+        PosedDamageRig r(section);
+        r.target_entity()->carry_flags = 8;
+        r.ammo().armor_density[0] = 1000; // stops a torso round entirely
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits.empty() == (section == 4));
+        CHECK(r.world.round_sim.impacts.size() == (section == 4 ? 2u : 1u));
+    }
+    {
+        PosedDamageRig r(4);
+        r.ammo().armor_density[0] = 1000; // no equipped armor
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits[0].damage == 775);
+        CHECK(r.world.round_sim.impacts.size() == 1);
+    }
+    {
+        PosedDamageRig r(2);
+        r.target_entity()->carry_flags = 8;
+        r.target_entity()->item_attrib = 0x200;
+        r.ammo().armor_density[0] = 1000;
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits[0].damage == 3720); // Landable section domain
+    }
+    {
+        PosedDamageRig r(0);
+        r.target_entity()->carry_flags = 8;
+        r.ammo().armor_density[0] = 1000;
+        r.world.rules.mp_session = true;
+        r.world.rules.projectile_authority = true;
+        r.world.rules.one_shot_kill = true;
+        r.fire_and_tick();
+        CHECK(r.world.round_sim.hits[0].damage == 2000); // early rule bypass
+    }
+}
+
 void test_network_oneshot_authority_and_session_gate() {
     {
         Rig r;
@@ -2137,7 +2207,66 @@ static void test_move_effect_ballistic_leg_ignores_the_water_plane() {
     CHECK(r.move_effect_live); // and never released by the plane
 }
 
+static void test_projectile_stamps_burn_before_death_dispatch() {
+    PosedDamageRig rig(0);
+    rig.world.ai.attach(rig.target);
+    auto &inf = rig.world.ai.for_handle(rig.target)->inf;
+    rig.target_entity()->engine_flags |= kEntityFlagPlayer;
+    rig.ammo().secondary_anim = 2;
+    rig.ammo().max_damage = 10;
+    rig.fire_and_tick();
+    CHECK(!rig.world.round_sim.hits.empty());
+    CHECK(inf.burn_state == 2 && inf.idle_counter == 1);
+}
+
+void test_item_callbacks_receive_geometric_section_on_both_peers() {
+    for (bool authority : {true, false}) {
+        HeapWorldFixture fixture; auto &world = fixture.world;
+        world.registry.configure_pool(0, 4); world.registry.configure_pool(2, 4);
+        world.rules.mp_session = true; world.rules.logic_authority = authority;
+        world.rules.projectile_authority = authority;
+        Entity shooter; shooter.kind = EntityKind::Organic; shooter.item_type = 3;
+        const auto owner = world.registry.spawn(0, shooter);
+        Entity seed; seed.kind = EntityKind::Building; seed.item_type = 5;
+        seed.item_id = 812; seed.has_item_def = true; seed.health = 500;
+        seed.position = {4,0,0}; seed.yaw = 90;
+        const auto h = world.registry.spawn(2, seed);
+        auto &target = *world.registry.get(h);
+        if (!authority) target.item_section_damage[2] = 15;
+        ItemDeathTraits traits; traits.death_class = authority ? ItemDeathClass::kPalm : ItemDeathClass::kTower;
+        traits.husk_sub_part_count = 4;
+        world.tables.item_death_traits.set(812, traits);
+        auto model = knife_person_face_model(7);
+        const auto section = model.sections[0];
+        model.sections.assign(3, {}); model.sections[2] = section;
+        CollisionWorld collision;
+        const int id = collision.add_model(std::move(model));
+        collision.assign_entity(h, id); collision.build_tick_tables(world);
+        world.collision = &collision;
+        AmmoTableEntry ammo; ammo.name = "BULLET"; ammo.valid = true;
+        ammo.velocity = 620; ammo.max_age_ticks = 20; ammo.weight_in_grains = 875; ammo.max_damage = 25;
+        world.tables.ammo.entries.push_back(ammo);
+        RoundSpawnParams shot; shot.owner = owner; shot.shooter_handle = owner.packed;
+        shot.origin = {0,0,1}; shot.ammo_index = 0;
+        CHECK(world.round_sim.spawn(world, shot, authority ? RoundConsequenceMode::Authoritative :
+                RoundConsequenceMode::VisualOnly) >= 0);
+        world.round_sim.tick(world, nullptr, &collision);
+        CHECK(world.round_sim.impacts.size() == 1);
+        if (authority) {
+            CHECK(target.palm_damage[1] > 0 && target.palm_damage[0] == 0);
+            CHECK(target.health < 500);
+        } else {
+            // Retail returns zero damage on MP peers but still invokes the
+            // callback, whose existing counter can trigger another piece.
+            CHECK(target.item_section_damage[2] == 15 && (target.engine_flags & 4) != 0);
+            CHECK(target.class_think_ticks == 32);
+            CHECK(target.health == 500 && world.round_sim.hits.empty() && world.round_sim.deaths.empty());
+        }
+    }
+}
 int main() {
+    test_item_callbacks_receive_geometric_section_on_both_peers();
+    test_projectile_stamps_burn_before_death_dispatch();
     test_arming_dud_and_armed_damage();
     test_missing_item_def_consumes_round_without_damage();
     test_damage_uses_retail_signed_wrap_and_ftol_cap();
@@ -2145,6 +2274,7 @@ int main() {
     test_posed_head_zone_multiplier();
     test_item_type_zone_domain_and_attrib_0200_sections();
     test_shooter_damage_class_runs_after_zone_truncation();
+    test_body_armor_energy_and_impact_row();
     test_network_oneshot_authority_and_session_gate();
     test_visual_only_rounds_have_no_gameplay_consequences();
     test_visual_person_proxy_keeps_wire_identity_out_of_authority();

@@ -6,10 +6,10 @@ namespace opennova::replication {
 
 void LoopbackChannel::host_send(
 		uint8_t tag, std::vector<uint8_t> body, bool reliable,
-		uint8_t protocol_flags_raw, bool capacity_exempt) {
+		uint8_t protocol_flags_raw, bool capacity_exempt, uint32_t retention_flushes) {
 	s2c_.push_back(
 			Datagram{tag, std::move(body), reliable, protocol_flags_raw,
-					capacity_exempt});
+					capacity_exempt, retention_flushes});
 }
 
 void LoopbackChannel::client_send(uint8_t tag, std::vector<uint8_t> body) {

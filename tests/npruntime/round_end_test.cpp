@@ -914,6 +914,9 @@ void test_flag_timeout_wire_transaction() {
 	w::Entity red_flag;
 	red_flag.kind = w::EntityKind::Item;
 	red_flag.item_id = 4093;
+	w::ItemDeathTraits flag_traits;
+	flag_traits.death_class = w::ItemDeathClass::kFlag;
+	world.tables.item_death_traits.set(red_flag.item_id, flag_traits);
 	red_flag.has_item_def = true;
 	red_flag.item_attrib = w::kItemAttribMoveCallback;
 	red_flag.position = flag_position;
@@ -934,6 +937,8 @@ void test_flag_timeout_wire_transaction() {
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.config.game_type = rules.game_type;
+	// Keep the dead remote slot active past the ordinary 360-tick redeploy punt.
+	ctx.config.permanent_death = true;
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &remote_wire, ns::TransportMode::Client, blue, true));
 	ctx.np_protocol.connection_list.push_back(
@@ -953,8 +958,13 @@ void test_flag_timeout_wire_transaction() {
 	remote_wire.clear();
 	host_wire.clear();
 
-	for (int tick = 0; tick < 330; ++tick)
+	// The first post-drop visit observes the changed XY and re-arms five
+	// seconds. Thereafter the flag callback expires on its 62-tick cadence.
+	for (int tick = 0; tick < 370; ++tick)
 		inmatch::Server_TickUpdate(ctx);
+	expect(world.registry.get(flag)->position.x != 5.0f,
+			"the flag stays dropped until the sixth class visit after pickup");
+	inmatch::Server_TickUpdate(ctx);
 
 	auto saw_exact_return = [&](ns::LoopbackChannel &channel) {
 		bool saw_event = false;

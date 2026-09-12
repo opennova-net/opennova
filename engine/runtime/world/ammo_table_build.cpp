@@ -17,6 +17,8 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 		e.valid = true;
 		e.flags = d.flags;
 		e.velocity = d.velocity;
+		e.heat_det_range = static_cast<int16_t>(d.heat_det_range);
+		e.boresight_maxang = d.boresight_maxang;
 		e.max_age_ticks = d.max_age_ticks;
 		e.arm_age_ticks = d.arm_age_ticks;
 		// 16.16 file values -> float mission units (the sim works in floats; the parse
@@ -35,6 +37,7 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 		e.kztype = d.kztype;
 		e.kz_damage = d.kz_damage;
 		e.weight_in_grains = d.weight_in_grains;
+		for (int c = 0; c < 3; ++c) e.armor_density[c] = d.armor_density[c];
 		e.min_stable_velocity = d.min_stable_velocity;
 		e.tumble_error_fp16 = d.tumble_error_fp16;
 		e.min_damage = d.min_damage;
@@ -95,6 +98,9 @@ void resolve_weapon_round_types(world::WeaponTable &weapons, const world::AmmoTa
 			continue;
 		}
 		e.ammo_index = static_cast<int16_t>(ammo.index_of(e.round_type.c_str()));
+        if (e.ammo_index >= 0 && ((e.flags & 1) != 0 ||
+            ((e.flags & 3) != 0 && e.action_fsm.scope_zero.max_steps != 0)))
+            weapon_scope_zero_bake(e.action_fsm.scope_zero, ammo.entries[e.ammo_index]);
 	}
 }
 

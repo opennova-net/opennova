@@ -53,7 +53,9 @@ int32_t bam_from_radians(double radians) {
 } // namespace
 
 MissionKernel::MissionKernel() : local(world) {
+    world.local_player_state = &local;
     world.teammate_spawner = this;
+    world.item_piece_spawner = this;
 	occlusion.bind_focal_wind_random(&world.prng16_c_state);
 	// The kernel pumps the local player's slot itself (run_local_player_post_tick
 	// with the live trigger/reload/scope inputs), so the world's global local.weapon
@@ -67,6 +69,8 @@ MissionKernel::~MissionKernel() {
 	// The systems and providers the world points at outlive nothing: drop the
 	// non-owning links before the members tear down in reverse order.
 	world.teammate_spawner = nullptr;
+    world.item_piece_spawner = nullptr;
+    world.local_player_state = nullptr;
 	world.collision = nullptr;
 	world.pose_provider = nullptr;
 	world.tables.terrain = nullptr;
@@ -118,6 +122,13 @@ void MissionKernel::open_document(bms::File mission_doc,
 	opened_ = true;
 	files_ = std::move(files);
 	world.script.voice.set_file_reader(files_.read_file);
+	world.tables.voice_macros = {};
+	if (files_.read_file) {
+		std::vector<uint8_t> bytes;
+		std::string error;
+		if (files_.read_file("vmacros.bin", bytes))
+			rtxt::parse(bytes.data(), bytes.size(), world.tables.voice_macros, error);
+	}
 	if (items_ok) {
 		def_free_items(&items);
 		items = DefItemsFile{};
@@ -279,8 +290,18 @@ MissionKernel::ai_profile_defaults_fn() const {
 	};
 }
 
-bool MissionKernel::load_mission_into_world() {
+bool MissionKernel::load_mission_into_world(const KernelBootOptions &options) {
 	PromoteOptions opts;
+	opts.player_limit = options.player_limit;
+	opts.team_count = options.team_count;
+	opts.game_type = options.game_type;
+	if (items_table() != nullptr) {
+		opts.item_attributes = [this](int32_t type_id) {
+			const auto *def = simassets::find_item_def(*items_table(),
+					static_cast<int>(type_id) + static_cast<int>(kItemIdOffset));
+			return def != nullptr ? def->attrib : 0u;
+		};
+	}
 	opts.item_seat_specs = seat_specs;
 	opts.ai_profiles = ai_profiles;
 	opts.ai_profile_defaults = ai_profile_defaults_fn();
@@ -466,10 +487,17 @@ bool MissionKernel::load_ammo_table(const BootFileSource &files,
 }
 
 bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
+	mission_start_pending = false;
+	have_baseline = false;
+	have_wac_baseline = false;
 	if (!opened_) {
 		error = "open() / open_document() first";
 		return false;
 	}
+    // [orig: SinglePlayer_StartMission @0x561af0 / host setup precede
+    // Game_StartMission @0x524360 and Mission_LoadBMSFile @0x40f4e0]
+    world.rules.mp_session = options.mp_session || options.joiner;
+    world.rules.projectile_authority = !options.joiner;
 	// The sim's own model source, wired before the seat step runs (S16).
 	models.set_index(asset_index());
 	collision_pose.set_resource_index(asset_index());
@@ -545,7 +573,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// runs). (The shell re-stamps its presentation/PANM clock right after the
 	// boot — the load reset cleared it; an order-free scalar, not a boot step.)
 	step("load_mission");
-	if (!load_mission_into_world()) {
+	if (!load_mission_into_world(options)) {
 		error = "mission boot aborted (load failed)";
 		return false;
 	}
@@ -554,9 +582,6 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("terrain");
 		wire_terrain();
 	}
-	// (SndProf.def -> the footstep/foley/landing/scream slot table
-	// [orig: SoundProfile_LoadAll @ 0x527490 from Game_InitSubsystems] is the
-	// presentation-owning embedder's, layered onto the world after the boot.)
 	// The infantry clip set (.adm -> .bad root-motion tracks).
 	if (has_files) {
 		step("infantry_anim");
@@ -569,8 +594,17 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// the boot (Simulation::compile_and_set_wac) binds the same names.
 	if (has_files) {
 		step("script_catalogs");
-		wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
-		wac::load_script_effect_catalog(files_, script_effect_catalog);
+        wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
+        world.tables.sound_sets = &script_sound_catalog;
+        std::vector<uint8_t> profile_bytes;
+        if (files_.read_file("SndProf.def", profile_bytes))
+            world.tables.sound_profiles.parse(
+                    reinterpret_cast<const char *>(profile_bytes.data()), profile_bytes.size());
+        particle::EffectSceneConfig effects_config;
+        wac::load_script_effect_catalog(files_, script_effect_catalog, &effects_config);
+        auto effects = std::make_shared<particle::EffectScene>();
+        effects->open(effects_config);
+        world.item_emitters.bind_scene(std::move(effects), true);
 	}
 	// Mission WAC scripts [orig: WacScript_InitAndLoad]; absent files skip.
 	std::string wac_blocked_error; // strict mode's fatal diagnostic, if any
@@ -661,17 +695,15 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	world.registry.for_each_in_pool(0, [&](const w::Entity &row) {
 		w::initialize_organic_ai(world, *world.registry.get(row.handle));
 	});
-	step("premission");
-	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
-	w::count_mission_units(world);
-	capture_baseline();
-	// Retail grounds parked PlayerControl hulls, runs their first callback,
-	// then captures the support-relative respawn pose. [orig: @0x525F80..0x526071]
-	world.vehicles.initialize_mission_vehicles();
-	world.vehicles.build_spawn_markers();
-	// WacScript_InitAndLoad executes the freshly loaded bytecode once before
-	// the world ticks.
-	if (wac_loaded && !options.defer_initial_wac) wac.execute_initial(world);
+    // Only authority runs the PreMission whole-list pass. A joiner can
+    // carry a full BMS in a tool session without replaying its actions.
+    // [orig: Game_StartMission @0x525b86, g_napi_np_ctx.is_authority gate]
+    if (!options.joiner) {
+        step("premission");
+        world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
+    }
+	mission_start_pending = true;
+	if (!options.defer_mission_start) complete_mission_start();
 	return true;
 }
 
@@ -693,9 +725,22 @@ void MissionKernel::tick_weather() {
 	if (weather_render != nullptr) weather_render->weather_render_tick(world.weather);
 }
 
-void MissionKernel::settle_weather_mission_start() {
+bool MissionKernel::complete_mission_start() {
+	if (!mission_start_pending) return false;
+	// The environment has been seeded before this boundary. Initial WAC can
+	// change its targets and entity poses before the 255-tick settle and the
+	// first vehicle callback captures the respawn pose.
+	// [orig: Game_StartMission @0x525CB8..0x526095]
+	if (world.rules.projectile_authority) wac.execute_initial(world);
 	world.weather.mission_start_init();
 	for (int i = 0; i < 255; ++i) tick_weather();
+	w::count_mission_units(world);
+	world.vehicles.build_spawn_markers();
+	if (world.rules.projectile_authority)
+		world.vehicles.initialize_mission_vehicles();
+	capture_baseline();
+	mission_start_pending = false;
+	return true;
 }
 
 namespace {

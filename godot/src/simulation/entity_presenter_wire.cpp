@@ -1,3 +1,4 @@
+#include <runtime/renderer/render_order.h>
 #include "simulation/entity_presenter.h"
 #include "object/model_user_point.h"
 #include "util/axes.h"
@@ -223,6 +224,8 @@ void EntityPresenter::apply_lighting_context(int p_handle) {
 				context->interior_lerp, context->light_transfer);
 	}
 	if (ObjectModel *weapon = held_weapon_node(p_handle)) {
+		const ObjectModel *body = resolve_wire_handle(p_handle);
+		weapon->set_thermal_entity_wave(body != nullptr && body->get_thermal_entity_wave());
 		weapon->set_entity_lighting_context(context->effect_scale,
 				context->interior_lerp, context->light_transfer);
 	}
@@ -436,6 +439,9 @@ void EntityPresenter::present_wire_snapshot(const PackedFloat32Array &p_snap,
 			ref->set_runtime_type_id(type_id);
 			ref->set_character_id(character_id);
 			node->set_entity_ref(ref);
+			const Ref<ItemDatabase> item_db = placer_->get_item_db();
+			node->set_thermal_entity_wave(item_db.is_valid() &&
+					opennova::renderer::entity_uses_thermal_wave(item_db->get_item_type(visual_item_id)));
 			nodes_[handle] = node->get_instance_id();
 			apply_lighting_context(handle);
 			++stat_spawned_;
@@ -769,7 +775,18 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		present_wire_row_body_sounds(row, snap);
 		return;
 	}
+    if (wfield_i(p, base, Simulation::PF_HUSK) != 0) {
+        opennova::world::HuskSwapEvent husk;
+        husk.net_id = wfield_i(p, base, Simulation::PF_NET_ID);
+        husk.wire_handle = uint16_t(row.handle);
+        husk.bms_id = wfield_i(p, base, Simulation::PF_BMS_ID);
+        husk.spawn_origin = opennova::world::spawn_origin_pack(
+                wfield_i(p, base, Simulation::PF_KIND), wfield_i(p, base, Simulation::PF_INDEX));
+        husk.item_id = wfield_i(p, base, Simulation::PF_TYPE_ID);
+        destruction_->apply_husk_swap(husk);
+    }
 	stamp_match_terrain(model, p, base);
+        stamp_destroy_phases(model, p, base);
 	const int32_t respawn_revision =
 			wfield_i(p, base, Simulation::PF_RESPAWN_REVISION);
 	const int32_t *seen_revision = wire_respawn_revisions_.getptr(row.handle);

@@ -16,7 +16,7 @@ namespace opennova::world {
 class EntityRegistry;
 }
 
-namespace opennova::particle { class EffectCatalogNames; }
+namespace opennova::particle { class EffectCatalogNames; struct EffectSceneConfig; }
 namespace opennova::audio { class SoundSetIndex; }
 
 namespace opennova::wac {
@@ -51,9 +51,9 @@ void load_script_sound_sets(const mission::BootFileSource &files,
 
 // The effect NAMES the mounted .ptl files plus the regional .ptu/.ptg table
 // define, in the effect world's load order (first registration wins)
-// [orig: CEffectSystem_Init @0x5F6070]. Names only: the shell's EffectWorld
-// owns the one runtime scene.
+// [orig: CEffectSystem_Init @0x5F6070]. Native hosts can also retain the
+// parsed documents to run callback-owned effects without a renderer.
 void load_script_effect_catalog(const mission::BootFileSource &files,
-        particle::EffectCatalogNames &effects);
+        particle::EffectCatalogNames &effects, particle::EffectSceneConfig *scene = nullptr);
 
 } // namespace opennova::wac

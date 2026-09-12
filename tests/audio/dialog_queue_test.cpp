@@ -90,6 +90,12 @@ int test_queue_advances_only_when_the_channel_frees() {
 	TEST_EXPECT(!queue.take_next(next));
 	queue.line_started();
 	queue.enqueue({ "SynR103" });
+    queue.discard_pending();
+    TEST_EXPECT(queue.line_active() && queue.pending() == 0);
+    queue.enqueue({ "after respawn" });
+    TEST_EXPECT(!queue.take_next(next));
+    queue.line_finished();
+    TEST_EXPECT(queue.take_next(next) && next == "after respawn");
 	queue.clear();
 	TEST_EXPECT(!queue.line_active() && queue.pending() == 0);
 	TEST_EXPECT(!queue.take_next(next));

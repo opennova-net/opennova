@@ -210,11 +210,10 @@ func test_tracer_smoke_style_lands_on_the_alpha_surface() -> void:
 	presenter.teardown()
 
 
-func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
+func test_slot_sounds_play_immediately() -> void:
 	# Body slot sounds (footsteps/foley/landing/screams) have NO propagation-delay
 	# leg — they play the tick they drain [orig: Entity_PlaySound3D_FullVolume
-	# @ 0x528e20 direct]. Slots 43/44 carry the per-(handle,slot) exclusive key
-	# (the D-SND-10 refire fold); everything else passes an empty key.
+	# @ 0x528e20 direct]. Every fire goes through the finite channel pool.
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var audio := _staged_audio(container)
@@ -230,12 +229,10 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 	assert_eq(fired.size(), 2, "empty set name is the id-0 no-op")
 	if fired.size() == 2:
 		assert_eq(fired[0].set_name, "FSP_DIRT_L")
-		assert_eq(fired[0].exclusive_key, "")
 		assert_true(fired[0].slot, "body slot rows ride the slot_soundset leg")
 		assert_true(fired[0].played, "the footstep plays the tick it drains")
 		assert_eq(fired[0].position, Vector3(400, 0, 0))
 		assert_eq(fired[1].set_name, "FREEFALL")
-		assert_eq(fired[1].exclusive_key, "3:44")
 		assert_true(fired[1].played)
 	assert_eq(_voices(container).size(), 2, "each named slot row spawned one positional voice")
 	assert_eq(presenter.get_fire_present_stats().sounds, 2,

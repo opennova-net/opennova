@@ -96,6 +96,10 @@ bool VehicleSystem::prepare_weapon_slot(Entity &vehicle) {
     if (vehicle.primary_weapon_slot_adm != adm) {
         vehicle.primary_weapon_slot = WeaponSlotState{};
         vehicle.primary_weapon_slot_adm = adm;
+        vehicle.primary_weapon_slot.scope_zero = weapon_scope_zero_initial(weapon->action_fsm.scope_zero);
+        if ((weapon->flags & 3) != 0)
+            vehicle.primary_weapon_slot.zero_pitch = weapon_scope_zero_pitch(
+                weapon->action_fsm.scope_zero, vehicle.primary_weapon_slot.scope_zero);
         if (weapon->clipsize < 0) {
             vehicle.primary_weapon_slot.clip = -1;
         } else {

@@ -233,6 +233,7 @@ struct WeaponSlotState {
 // state lives in `burst` above (driven by Server_SendInitialGameStateToPlayer); this carries only the
 // reactive request→reply bookkeeping. [orig: per-player fields the NapiNPServerMsg_* handlers touch]
 struct SessionReplyState {
+	uint32_t rtt_request_countdown = 0; // player slot +89816, Server_TickUpdate @0x51D7E0
 	bool loadout_synced = false;        // 0x2F WEAPON-LOADOUT request seen (set on the 0x5A reply)
 	// Authority-side per-ammo-class pool table (serverPlayer+88664), written in
 	// full by S2C 0x0F after loadout acceptance. Indices are the weapon table's
@@ -354,6 +355,17 @@ struct SessionReplyState {
 //
 // This unifies the two per-peer representations the old code split apart: HostSessionAccept's
 // PeerState (handshake/SCRK/seq) and replication::Connection (transport + owned_entity + send_mask).
+// The ClientAuth CU values loaded by NapiNetConfig_LoadFromConnTags; retained
+// until the game-layer JOIN invokes Server_ValidatePlayerJoinRequest.
+// [orig: @0x4c7260 -> @0x512100]
+struct ClientGameEnvironment {
+	int32_t bt = 0;
+	int32_t vn = 0;
+	int32_t bn = 0;
+	int32_t mbn = 0;
+	int32_t sopd = 0;
+};
+
 struct NapiNPConnection {
 	// The slot's SCORE and the cached copy the S2C 0x81 change gate compares against.
 	// Retail keeps both on the per-slot stats object: the score is field id 28
@@ -441,6 +453,7 @@ struct NapiNPConnection {
 	// link.spectator from the request and validates the password there.
 	// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 (JSR -> ci1, JSPP);
 	// the entry+55 latch in NapiNPServer_HandlePlayerJoinMessage @0x512aa0]
+	ClientGameEnvironment join_environment;
 	uint8_t join_spectator_request = 0;
 	std::string join_spectator_password;
 	// The team restored when the portable player-slot spectator bit is cleared.

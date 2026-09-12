@@ -85,10 +85,12 @@ public:
 		SPAWN_STATUS_MISSING_OWNER = 5,
 		SPAWN_STATUS_GROUP_CAPACITY_REACHED = 6,
 		SPAWN_STATUS_EMITTER_CAPACITY_REACHED = 7,
+        SPAWN_STATUS_DISABLED = 8,
 	};
 
 private:
-	opennova::particle::EffectScene scene_;
+	std::shared_ptr<opennova::particle::EffectScene> scene_ =
+            std::make_shared<opennova::particle::EffectScene>();
 	mutable opennova::particle::ParticleFrameSnapshot last_frame_;
 	mutable bool snapshot_dirty_ = true;
 
@@ -146,7 +148,8 @@ public:
 	// active owner tokens and the debug snapshot (particle::EffectScene::
 	// live_counts / active_owner_tokens / inspect) without a Variant round
 	// trip. Not bound to Godot.
-	const opennova::particle::EffectScene &native_scene() const { return scene_; }
+	const opennova::particle::EffectScene &native_scene() const { return *scene_; }
+    std::shared_ptr<opennova::particle::EffectScene> shared_native_scene() const { return scene_; }
 };
 
 } // namespace godot

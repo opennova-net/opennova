@@ -46,6 +46,7 @@ public:
 	bool is_listener_valid() const;
 	void set_movement(bool p_forward, bool p_back, bool p_left, bool p_right,
 			bool p_lean_left, bool p_lean_right, bool p_jump);
+	void set_view_keys(bool p_free_look, bool p_up, bool p_down, bool p_left, bool p_right);
 	void set_look_delta(const Vector2 &p_delta);
 	Vector2 get_look_delta() const;
 	void set_weapon_input(bool p_fire_held, bool p_fire_pressed,

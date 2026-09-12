@@ -21,6 +21,9 @@ namespace opennova::world {
 
 class World;
 
+struct Entity;
+struct WeaponFsmDef;
+struct WeaponFsmEvents;
 struct RoundSpawnParams; // world/round_sim.h
 
 // The wire round-event arm bits, mirrored from the npwire decoder constants
@@ -34,8 +37,8 @@ inline constexpr uint8_t kAdmIndexed = 0x02;
 } // namespace round_event_flag
 
 // One pending propagation-delayed fire sound — the 24-B retail slot. The
-// flag-2 slots of the original pool are the dialog-trigger variant
-// [orig: @ 0x52932e], not ported here; sound-set duplicate repeats
+// flag-2 slots of the original pool are delayed interface trigger sets
+// [orig: @ 0x52932e]; sound-set duplicate repeats
 // (ActionDef dupes through the same pool @ 0x401148/@ 0x40118b) are a tracked
 // deferral — the JOX weapon.def authors none.
 struct PendingFireSound {
@@ -43,6 +46,7 @@ struct PendingFireSound {
     std::string set_name;   // retail stores the resolved soundDef pointer
     Vec3 pos{};             // the fire-time play position, mission units
     int32_t countdown = 0;  // ticks until play [orig: slot+4 @ 0x527c8e]
+    bool interface_set = false; // flags mask 2: play as a 2D interface trigger set
     // Occlusion source identity, carried through the delay. Retail's delayed
     // play passes a NULL entity [orig: @ 0x52937b]; our audio bank keys
     // occlusion by BMS id, so the shipped port keeps the source through the
@@ -54,6 +58,7 @@ struct PendingFireSound {
 // The set's max-range cull runs at PLAY time in our audio bank vs fire time
 // in retail (soundDef+72 @ 0x528ec6) — the tracked D-AI-8 delta.
 struct ReadyFireSound {
+    bool interface_set = false;
     std::string set_name;
     Vec3 pos{};
     int32_t source_bms_id = 0;
@@ -99,6 +104,12 @@ public:
     void play_immediate(const char *set_name, const Vec3 &pos,
                         int32_t source_bms_id);
 
+    // Shared 32-entry trigger suppression table plus the ordinary 128-slot
+    // pending pool. Reservation survives a full pending pool, as in retail.
+    // [orig: Server_TrackEntityInTable @ 0x527B30; EffectSlot_AllocateAndInit @ 0x527C30]
+    void play_throttled_interface(const char *set_name, const Vec3 &pos,
+                                  int32_t delay_ticks, int32_t suppression_ticks);
+
     // The per-tick countdown [orig: Sound_TickPendingSlots @ 0x529310:
     // countdown-- reaching zero plays at the RECORDED position]. Runs at the
     // head of World::run_logic_tick — retail drains after the client network
@@ -118,13 +129,20 @@ public:
 
 private:
     void push_ready(const char *set_name, const Vec3 &pos,
-                    int32_t source_bms_id);
+                    int32_t source_bms_id, bool interface_set = false);
 
+    struct TriggerHold { std::string name; int32_t countdown = 0; };
+    std::array<TriggerHold, 32> trigger_holds_{};
     std::array<PendingFireSound, kSlotCount> slots_{};
     std::vector<ReadyFireSound> ready_;
     Vec3 listener_{};
     bool listener_valid_ = false;
 };
+
+// Flag/objective events carry both immediate cues and delayed interface voice.
+// [orig: NetPacket_HandleGameEvent @ 0x426270, cases 19..21]
+void play_flag_event_sound(World &world, uint8_t event, const Entity &actor,
+        const Entity &local, uint32_t game_type, int16_t x, int16_t y);
 
 // The per-spawn fire-sound dispatch, called beside the FireEvent record — the
 // inline-presentation moment of the original. The local player's own fire
@@ -134,5 +152,8 @@ private:
 // — ammo arm sound @ 0x42f5dc, adm arm action rows @ 0x42f777/@ 0x42f785 and
 // @ 0x42f98f/@ 0x42f9d0]
 void fire_sound_on_spawn(World &world, const RoundSpawnParams &params);
+
+void weapon_sound_publish(World &world, const Entity &owner,
+                          const WeaponFsmDef &def, const WeaponFsmEvents &events);
 
 } // namespace opennova::world

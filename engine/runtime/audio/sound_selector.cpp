@@ -34,6 +34,17 @@ uint32_t SoundSelector::scaled_random(uint32_t count) {
     return (count * (rng_ & 0xFFu)) >> 8;
 }
 
+uint32_t SoundSelector::compose_pitch(uint32_t set_base, uint32_t set_range,
+        uint32_t member_base, uint32_t member_range, uint32_t emitter_pitch) {
+    const uint32_t set = set_base + scaled_random(set_range);
+    const uint32_t member = member_base + scaled_random(member_range);
+    const auto multiply = [](uint32_t a, uint32_t b) {
+        return static_cast<uint32_t>(static_cast<uint64_t>(
+                static_cast<int64_t>(static_cast<int32_t>(a)) * static_cast<int32_t>(b)) >> 16);
+    };
+    return multiply(multiply(member, set), emitter_pitch ? emitter_pitch : 0x10000u);
+}
+
 // Structural translation of the engine's per-layer member pick
 // [orig: SoundBank_PlayTriggerEntries @ 0x75cd5c..0x75ce16]:
 //   if (flags & 0x10)      -> sequential: play cursor, advance, wrap to 0;

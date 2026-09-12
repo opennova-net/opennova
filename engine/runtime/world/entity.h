@@ -164,6 +164,11 @@ enum class DeathMotionMode : uint8_t {
     Static = 3,
     PiecePhysics = 4,
     PiecePitchSettle = 5,
+    CraneFalling = 6, // @0x43FB30; also runs before the paired section dies
+    BuildingEffects = 7, // upfx @0x4A92E0
+    PalmPiece = 8, // psec @0x53BE10
+    SectionFalling = 9, // towr @0x4A8340
+    SectionSettled = 10, // @0x4A8220
 };
 
 // Minimal live-entity state the scripting evaluators read and mutate. This is a
@@ -303,12 +308,10 @@ struct Entity {
     // fixed pool slots; this host-only serial distinguishes two entities that
     // occupied the same slot, even when all authored/net fields are identical.
     uint64_t registry_spawn_id = 0;
-    // The static pools' think age: every stagger visit (one cohort of eight
-    // per tick) subtracts 8; at or below zero the blink/indoors refresh runs
-    // and the age resets to 62 (a 72-tick period). Zero at spawn so the
-    // first visit refreshes immediately. [orig: entity+0x2AC in the pool-2
-    // walk of Entity_UpdateAllEntities @ 0x4c2299..0x4c22ba]
-    int32_t static_think_age = 0;
+    // Item class callback countdown, retail entity+0x2AC. Pool 1 subtracts
+    // one after its callback; pool 2/3 positive clocks subtract 8/64 at their
+    // matching slot cohort, and expired clocks run without a trailing subtract.
+    int32_t class_think_ticks = 0;
 
     // The owning connection's ConnectionId/dcb (GamePlayerEntity entity+0x78). The joining client's
     // self-scan matches it against its own ConnectionId; a host/dedicated-server reserves dcb 0. This
@@ -449,6 +452,9 @@ struct Entity {
     // Per-player replicated damage class, indexed by AmmoDef file index. C2S
     // loadout entry byte 4 writes it; 1 = x0.9, 2 = x1.1, other = x1.
     std::vector<uint8_t> ammo_damage_class;
+    // Loadout-derived entity+44 bits 8 (armor) and 16 (parachute).
+    // [orig: WeaponSlotTable_LoadAllFromDefs @0x541503..0x5415ba]
+    uint32_t carry_flags = 0;
     int32_t health = 100;     // signed i16 retail storage carried sign-extended; <=0 -> dead
     // items.def hp (itemDef+0x17C healthMax), stamped by the host's item-traits sweep
     // (0 = unresolved). The original spawns entities at Health = healthMax
@@ -537,6 +543,8 @@ struct Entity {
     // @0x43c390 (+0x374 write @0x43c522); Server_PlayerAdd @0x51cbc0 (@0x51d0b1);
     // Server_InitAllPlayerEntitiesForRound @0x516aa0 (@0x516b8e); net-re §5.23 D-NET-146]
     uint8_t anim_slot = 0;
+    uint8_t radio_request = 0; // entity+885 [orig: @0x430C50]
+    uint8_t radio_request_seconds = 0; // entity+886
     // Players only: the wire NetId (entity+0x15C) = the minimap/character-slot id, picked per
     // assigned team from the joiner's CI0/CI1 join vars (low u16 of the atol). 0 = unassigned
     // (the encoder falls back to its D-NET-137 shim). Non-players serialize Entity::net_id
@@ -564,6 +572,9 @@ struct Entity {
     // remote peers; mirrored from the packed local input for the host's own player (bits 0-2 =
     // 8-way move_direction_index, bit 3 = moving [orig: Player_PackInputStateToEntity @0x4df68f]).
     uint8_t net_move_input = 0;
+    // The upper look/turn bits never fit the uplink's movement byte. They
+    // remain local inputs [orig: Player_PackInputStateToEntity @0x4df742].
+    uint16_t local_view_input = 0;
     // MoveOrder bits 8-9 (entity+0x12C >> 8): bit0 = prone (0x100), bit1 = crouch (0x200). The
     // stance the server-side body-anim selection consumes for THIS player [orig:
     // Entity_UpdateInfantryPlayerBody @0x4b4165-0x4b4181 reads MoveOrder&0x300]. A remote player's
@@ -634,6 +645,34 @@ struct Entity {
     // The death tick (entity+0x1AC, first write wins) [orig:
     // Entity_ProcessDestructibleDeath @ 0x43fc0c / AI_TransitionToDestroyed_Vehicle].
     uint32_t death_tick = 0;
+    // Squib callback/motor aliases of entity+0x270/+0x2A0..+0x30C.
+    int32_t script_next_ssn = 0;
+    struct SquibState {
+        bool motor = false;
+        int32_t ammo_index = 0; // signed word +0x160 (presentation)
+        int32_t damage_ammo_index = 0; // dword +0x26C
+        int32_t spread_q16 = 0;
+        int32_t remaining = 0;
+        int32_t interval = 0;
+        uint32_t last_tick = 0;
+        int32_t next_ssn = 0;
+        FixedVec3 center, origin, step, direction;
+    } squib;
+    bool item_section_piece = false; // locally allocated class fragment
+    bool palm_sections = false; // palm/psec model callback @0x53BF10
+    int32_t palm_state = 0; // entity+0x270
+    std::array<uint8_t, 256> item_section_damage{}; // byte accumulator, @0x4406A0
+    int32_t section_pitch_rate = 0; // +0x2C8; settle reuses it as distance
+    int32_t section_pitch_accel = 0; // +0x2C4; settle reuses it as limit
+    bool section_bounced = false; // +0x155
+    int32_t palm_damage[2] = {}; // entity+0x274/+0x278
+    int32_t collapse_step = 0; // bld2/cran currentSpeed (+0x29C), steps 0..64
+    std::array<int32_t, 6> destroy_phases_q16{};
+    double destroy_progress = 0.0;
+    uint32_t last_state_sent_ms = 0; // entity+560; authority 0x26 send clock
+    bool objective_death_scored = false;
+    int32_t destroy_timer = 0; // entity+0x1B0 initial fade delay
+    bool destroy_timer_initialized = false;
     // Hidden/dismembered skeletal sections (entity+0x134): a set bit removes
     // the matching ordinal bone from person collision and presentation.
     // Distinct from spawned_piece_mask at +0x138.
@@ -1070,7 +1109,10 @@ struct Entity {
         uint8_t fresh_2f1 = 0;       // +0x2F1 — 1 after Entity_RespawnVehicle
         uint8_t settled_2f2 = 0;     // +0x2F2 — settled upright (the sleep path)
         uint8_t wreck_2fc = 0;       // +0x2FC — wreck-settled / bike fall latch
-        uint8_t has_been_driven = 0; // +0x3DE — the bike's driven byte
+        uint8_t wheelie_request = 0; // +0x3DD, cleared at the light mover tail
+        uint8_t wheelie_active = 0; // +0x3DE, retained through the launch
+        int32_t bike_ground_contact_ticks = 0; // +0x2F4, both-wheel contact run
+        int32_t bike_launch_direction[3] = {}; // +0x3E0..0x3E8, Q16
         uint32_t airborne_stamp_2f8 = 0; // +0x2F8 — the client crash window's stamp
         float susp_rate_pick = 0.0f; // the one-shot 1.75/1.25 disable-rate pick
         // The driverless stuck counter [orig: entity+0x148 moveTimer — ++ per

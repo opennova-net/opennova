@@ -37,7 +37,7 @@ static void stage_air_vehicle_input(World &world, Entity &veh, Entity &occ,
 		const VehicleTraits &traits, int32_t ground, int32_t pz) {
 	Entity::VehicleMotorState &m = veh.veh;
 	const uint32_t move_order = static_cast<uint32_t>(occ.net_move_input) |
-			(static_cast<uint32_t>(occ.net_stance_bits) << 8);
+			(static_cast<uint32_t>(occ.net_stance_bits) << 8) | occ.local_view_input;
 	const int analog_sum = int(occ.net_analog_x) + occ.net_analog_y +
                            occ.net_analog_z;
     const int32_t fs = traits.player_speed; // itemDef+0x8E8 — the air speed slot

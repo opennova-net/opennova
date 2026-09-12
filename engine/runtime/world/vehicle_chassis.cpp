@@ -343,7 +343,7 @@ void vehicle_apply_chassis(World &world, Entity &e, CollisionMatrix &matrix) {
 // all seven probes: the slow inverted path also reads spine slots 4 and 6.
 // [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140;
 // Entity_ComputeSuspensionAndOrientation @0x4698A0]
-void vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], const bool *contacts,
+bool vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], const bool *contacts,
 		PlatFit &out, int32_t px, int32_t py, int32_t pz, bool tank) {
 	auto &m = e.veh;
 	CollisionMatrix matrix = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22;
@@ -446,6 +446,7 @@ void vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], cons
 	out.pitch_bam = angles[1];
 	out.roll_bam = angles[2];
 	out.fwd_z = double(matrix.m[8]) / 4194304.0;
+	return fit;
 }
 // The boat's two buoyancy/ground calls always pass waterContact=1 and a
 // null contact array. Its capsize threshold and slow inverted force differ

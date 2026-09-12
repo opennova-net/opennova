@@ -16,12 +16,47 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
+#include <runtime/particle/effect_scene.h>
 #include <string>
 #include <vector>
 
 #include <formats/threedi/threedi_3di3.h>
 
 namespace opennova::world {
+
+class World;
+struct Entity;
+struct ItemDeathTraits;
+
+// The emit class owns a live group at entity+0x1CC. The scene is shared with
+// the embedder's particle renderer; its ordinary fixed-tick advance reaps groups.
+// [orig: entity_spawn_bone_trail_effect @ 0x43F8F0;
+// Entity_ClearOwnerSessionIfMatches @ 0x453580]
+class ItemEmitterSystem {
+public:
+    ItemEmitterSystem() = default;
+    ~ItemEmitterSystem() { reset(); }
+    ItemEmitterSystem(ItemEmitterSystem &&) noexcept = default;
+    ItemEmitterSystem &operator=(ItemEmitterSystem &&other) noexcept;
+    ItemEmitterSystem(const ItemEmitterSystem &) = delete;
+    ItemEmitterSystem &operator=(const ItemEmitterSystem &) = delete;
+    void bind_scene(std::shared_ptr<particle::EffectScene> scene, bool owns_clock = false);
+    void event(World &world, Entity &entity, const ItemDeathTraits &traits, int phase);
+    void sync_owners(World &world);
+    void reset();
+private:
+    struct Binding {
+        uint16_t handle = 0xFFFF;
+        uint64_t lifetime = 0;
+        particle::EffectGroupId group;
+        particle::EffectOwnerToken owner;
+    };
+    std::shared_ptr<particle::EffectScene> scene_;
+    std::vector<Binding> bindings_;
+    uint64_t next_owner_ = 1;
+    bool owns_clock_ = false;
+};
 
 // The original walks entity pools 1-3 with distinct attrib masks; `kind` is
 // the imported mission kind (EntityKind: Marker=0, Item=1, Building=2,

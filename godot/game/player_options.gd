@@ -20,6 +20,7 @@ const PLAYER_SECTION := "player"
 const CROSSHAIR_STYLE_KEY := "crosshair_style"
 const CROSSHAIR_COLOR_KEY := "crosshair_color"
 const CROSSHAIR_SPREAD_KEY := "crosshair_spread"
+const ASPECT_MODE_KEY := "display_16x9"
 
 # The slider ranges are the engine's witnessed Options ranges
 # (options_policy.h kOptionsScrollRanges through MenuFrame), read by control
@@ -28,9 +29,8 @@ const SOUND_FX_VOLUME_CONTROL := "SOUNDFXVOLUME"
 const DIALOG_VOLUME_CONTROL := "DIALOGVOLUME"
 const MUSIC_VOLUME_CONTROL := "MUSICVOLUME"
 const MOUSE_SENSITIVITY_CONTROL := "MOUSE_SENSITIVITY"
-# The starting values are not witnessed profile defaults (retail's live in
-# the player profile, not game.cfg): full volume and mid sensitivity.
-const DEFAULT_VOLUME := 255
+# Initial channel volumes come from the engine configuration defaults.
+const DEFAULT_VOLUME := SoundSelector.DEFAULT_CHANNEL_VOLUME
 const DEFAULT_MOUSE_SENSITIVITY := 128
 # One home for the crosshair art range, colour default / mask and spread
 # default: the native HudOverlay binding over the engine's HudLayout
@@ -56,6 +56,7 @@ class State extends RefCounted:
 	var crosshair_style: int
 	var crosshair_color: int
 	var crosshair_spread: bool
+	var aspect_mode: int
 
 	func _init(p_sound_fx_volume := DEFAULT_VOLUME,
 			p_dialog_volume := DEFAULT_VOLUME,
@@ -64,7 +65,8 @@ class State extends RefCounted:
 			p_invert_mouse := false,
 			p_crosshair_style := DEFAULT_CROSSHAIR_STYLE,
 			p_crosshair_color := DEFAULT_CROSSHAIR_COLOR,
-			p_crosshair_spread := DEFAULT_CROSSHAIR_SPREAD) -> void:
+			p_crosshair_spread := DEFAULT_CROSSHAIR_SPREAD,
+			p_aspect_mode := -1) -> void:
 		sound_fx_volume = p_sound_fx_volume
 		dialog_volume = p_dialog_volume
 		music_volume = p_music_volume
@@ -73,11 +75,12 @@ class State extends RefCounted:
 		crosshair_style = p_crosshair_style
 		crosshair_color = p_crosshair_color
 		crosshair_spread = p_crosshair_spread
+		aspect_mode = p_aspect_mode
 
 	func copy() -> State:
 		return State.new(sound_fx_volume, dialog_volume, music_volume,
 				mouse_sensitivity, invert_mouse, crosshair_style,
-				crosshair_color, crosshair_spread)
+				crosshair_color, crosshair_spread, aspect_mode)
 
 
 signal changed(state: State)
@@ -120,6 +123,7 @@ func update(state: State) -> void:
 				_state.crosshair_color)
 		config.set_value(PLAYER_SECTION, CROSSHAIR_SPREAD_KEY,
 				_state.crosshair_spread)
+		config.set_value(PLAYER_SECTION, ASPECT_MODE_KEY, _state.aspect_mode)
 	)
 	apply()
 	changed.emit(current())
@@ -139,6 +143,7 @@ func apply(simulation: Simulation = null) -> void:
 ## with a running Simulation pushes (update() already applied the audio).
 func apply_mouse(simulation: Simulation) -> void:
 	if simulation != null:
+		simulation.set_local_player_aspect_mode(_state.aspect_mode)
 		simulation.set_local_player_mouse(
 				_state.mouse_sensitivity, _state.invert_mouse)
 
@@ -160,7 +165,8 @@ func _load_state() -> State:
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
 					CROSSHAIR_COLOR_KEY, DEFAULT_CROSSHAIR_COLOR)),
 			bool(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
-					CROSSHAIR_SPREAD_KEY, DEFAULT_CROSSHAIR_SPREAD))))
+					CROSSHAIR_SPREAD_KEY, DEFAULT_CROSSHAIR_SPREAD)),
+			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, ASPECT_MODE_KEY, -1))))
 
 
 static func _normalized(state: State) -> State:
@@ -173,7 +179,7 @@ static func _normalized(state: State) -> State:
 			clampi(state.crosshair_style,
 					MIN_CROSSHAIR_STYLE, MAX_CROSSHAIR_STYLE),
 			state.crosshair_color & CROSSHAIR_COLOR_MASK,
-			state.crosshair_spread)
+			state.crosshair_spread, state.aspect_mode)
 
 
 # Clamp to the engine's witnessed range for an Options slider, by control

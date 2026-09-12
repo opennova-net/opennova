@@ -76,6 +76,11 @@ void turn_contact_direction(
 bool vehicle_traction_acceleration(
 		World &world, Entity &vehicle, const VehicleTraits &traits, int32_t target_speed) {
 	auto &m = vehicle.veh;
+    if (traits.family == VehicleFamily::Bike && m.crashed) {
+        if (m.speed > 0) m.speed_accel = io::bam_sub(0, traits.deceleration);
+        if (m.speed < 0) m.speed_accel = traits.deceleration;
+        return true;
+    }
 	if (!vehicle_has_contact_direction(m))
 		return false;
 	if (traits.family == VehicleFamily::Tank) {
@@ -185,10 +190,19 @@ void vehicle_traction_velocity(
 			// into Z only while the nose points down [orig: `jz loc_48CF97`
 			// @0x48CE6E; the store @0x48CF97..0x48D003 with `cmp var_110, 0;
 			// jge` @0x48CFD9]; the tank holds every register [orig: `jz
-			// loc_48A828` @0x48A6AD]. The bike's arm @0x4863DA..0x48657E drives
-			// a stored launch vector (+0x3E0..+0x3E8 under +0x3DE) this state
-			// does not carry, so it holds here.
-			if (!tank && !bike)
+			// loc_48A828` @0x48A6AD]. The bike's off-contact arm writes X/Y only.
+            // [orig: Entity_UpdateLightVehiclePhysics @ 0x4863DA..0x48657E]
+            if (bike) {
+                const int32_t *source = m.wheelie_active ? m.bike_launch_direction : forward;
+                const int64_t raw[3] = {source[0], source[1], source[2]};
+                int32_t direction[3];
+                q16_normalize(raw, direction);
+                velocity_from_direction(m, direction, m.speed, false);
+                if (m.slip_started_tick != 0 &&
+                        int32_t(world.logic_tick - m.slip_started_tick) <= bam_mul_wrap(5, traits.tire_slip))
+                    m.slip_started_tick = world.logic_tick;
+                else clear_direction(m);
+            } else if (!tank)
 				velocity_from_direction(m, forward, m.speed, forward[2] < 0);
 			return;
 		}
@@ -267,8 +281,18 @@ void vehicle_traction_velocity(
 	}
 	if (m.handbrake_latched != 0 && m.speed != 0 && vehicle_has_contact_direction(m)) {
 		velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
+        if (bike) m.wheelie_active = 0; // [orig: @ 0x4859E0]
 		return;
 	}
+    if (bike && m.handbrake_latched == 0 && m.wheelie_active) {
+        // [orig: Entity_UpdateLightVehiclePhysics @ 0x486052..0x486149]
+        const int64_t raw[3] = {m.bike_launch_direction[0],
+                m.bike_launch_direction[1], m.bike_launch_direction[2]};
+        int32_t direction[3];
+        q16_normalize(raw, direction);
+        velocity_from_direction(m, direction, m.speed, m.crashed == 0);
+        return;
+    }
 	if (!vehicle_has_contact_direction(m)) {
 		clear_direction(m);
 		velocity_from_direction(m, forward, m.speed, m.crashed == 0);

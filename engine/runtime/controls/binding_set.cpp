@@ -39,6 +39,7 @@ std::string format_display_string(const BindingRecord &rec, bool flagged) {
   // mouse modifier word (retail entry word 16); the button names ride the
   // same "Keys" fallbacks.
   if (rec.mouse_mask != 0) {
+    if (rec.mouse_mod != 0) out += key_name(rec.mouse_mod) + "-";
     if (keys[0] != 0 || keys[1] != 0) out += " or ";
     switch (rec.mouse_mask) {
       case 1: out += "Mouse 1"; break;
@@ -101,6 +102,10 @@ void BindingSet::restore_defaults() {
     // from the flags word @0x8159AC): Ctrl+1..Ctrl+0 for the seat rows,
     // Ctrl+T for gtalk, ... [orig: seat1 flags @0x8160D8, modifier @0x8160F4].
     records_[i].primary_mod = static_cast<uint16_t>(cat[i].default_mod);
+    records_[i].mouse_mask = cat[i].default_mouse;
+    records_[i].mouse_mod = cat[i].default_mouse_mod;
+    records_[i].joy_button = cat[i].default_joy;
+    records_[i].joy_mod = cat[i].default_joy_mod;
   }
 }
 
@@ -240,6 +245,71 @@ std::vector<ControlRow> BindingSet::build_rows(Device device) const {
     rows.push_back(row);
   }
   return rows;
+}
+
+uint8_t joystick_pov_mask(int32_t angle) {
+  if (static_cast<uint16_t>(angle) == 0xffffu) return 0;
+  if (angle <= 2200) return 1;
+  if (angle <= 6800) return 9;
+  if (angle <= 11200) return 8;
+  if (angle <= 15000) return 10;
+  if (angle <= 20200) return 2;
+  if (angle <= 24800) return 6;
+  if (angle <= 29200) return 4;
+  if (angle <= 33800) return 5;
+  return 1;
+}
+
+bool BindingSet::pressed_joystick(int index,
+    const std::function<bool(int)> &button_down,
+    const std::array<int32_t, 4> &pov_angles, bool dead) const {
+  const BindingRecord *r = record(index);
+  std::size_t count = 0;
+  const ActionDef *cat = catalog(&count);
+  if (r == nullptr || (cat[index].modes & (dead ? 2u : 1u)) == 0) return false;
+  const auto held = [&](uint8_t one_based) {
+    if (one_based == 0) return false;
+    if (one_based <= 128) return button_down(one_based - 1);
+    const int bit = one_based - 129;
+    return bit < 16 && (joystick_pov_mask(pov_angles[bit / 4]) & (1u << (bit % 4))) != 0;
+  };
+  return held(r->joy_button) && (r->joy_mod == 0 || held(r->joy_mod));
+}
+
+bool BindingSet::pressed_mouse(int index, uint16_t held_mask,
+    const std::function<bool(int)> &key_down, bool dead) const {
+  const BindingRecord *r = record(index);
+  std::size_t count = 0;
+  const ActionDef *cat = catalog(&count);
+  if (r == nullptr || (cat[index].modes & (dead ? 2u : 1u)) == 0) return false;
+  if ((cat[index].flags & 4u) != 0)
+    return (r->mouse_mask & held_mask) != 0 &&
+        (r->mouse_mod == 0 || key_down(r->mouse_mod));
+  // Event rows use the same priority walk on the held button, leaving the
+  // caller to edge-detect it. Wheel events call mouse_event_action directly.
+  for (uint16_t mask : {kMouseLeft, kMouseRight, kMouseMiddle})
+    if ((held_mask & mask) != 0 && mouse_event_action(mask, key_down, dead) == index)
+      return true;
+  return false;
+}
+
+int BindingSet::mouse_event_action(uint16_t mask,
+    const std::function<bool(int)> &key_down, bool dead) const {
+  std::size_t count = 0;
+  const ActionDef *cat = catalog(&count);
+  for (bool modified : {true, false}) {
+    for (std::size_t i = 0; i < records_.size(); ++i) {
+      const BindingRecord &r = records_[i];
+      if ((cat[i].flags & 4u) != 0 || (cat[i].modes & (dead ? 2u : 1u)) == 0 ||
+          r.mouse_mask != mask || mask == 0) continue;
+      const bool has_mod = r.primary_mod || r.secondary_mod || r.mouse_mod;
+      if (has_mod != modified) continue;
+      if (!modified || (r.primary_mod && key_down(r.primary_mod)) ||
+          (r.secondary_mod && key_down(r.secondary_mod)) ||
+          (r.mouse_mod && key_down(r.mouse_mod))) return static_cast<int>(i);
+    }
+  }
+  return -1;
 }
 
 int BindingSet::action_index_for_row(int row) const {

@@ -171,9 +171,6 @@ void FiredSoundset::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_source_bms_id"), &FiredSoundset::get_source_bms_id);
 	ClassDB::bind_method(D_METHOD("set_source_bms_id", "value"), &FiredSoundset::set_source_bms_id);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "source_bms_id"), "set_source_bms_id", "get_source_bms_id");
-	ClassDB::bind_method(D_METHOD("get_exclusive_key"), &FiredSoundset::get_exclusive_key);
-	ClassDB::bind_method(D_METHOD("set_exclusive_key", "value"), &FiredSoundset::set_exclusive_key);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "exclusive_key"), "set_exclusive_key", "get_exclusive_key");
 	ClassDB::bind_method(D_METHOD("is_slot"), &FiredSoundset::is_slot);
 	ClassDB::bind_method(D_METHOD("set_slot", "value"), &FiredSoundset::set_slot);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "slot"), "set_slot", "is_slot");

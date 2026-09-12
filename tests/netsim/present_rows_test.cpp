@@ -140,7 +140,8 @@ bool test_replica_rows_project_the_decoded_state_and_keep_the_pulses() {
 	const im::PresentRowsContext context{kernel, &runtime, true};
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
-	im::build_client_replica_present_rows(context, rows, doors);
+	im::PoolPresentLifecycleMap lifecycle;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
 	bool ok = expect(rows.size() == 2 * w::PF_STRIDE, "one row per decoded replica");
 	ok = expect(doors.empty(), "a joiner's decoded rows carry no door entries") && ok;
 	if (!ok) return false;
@@ -231,7 +232,62 @@ bool test_door_phases_reach_present_rows() {
 	return ok;
 }
 
+bool test_joiner_palm_source_and_local_fragment() {
+    opennova::mission::MissionKernel kernel;
+    kernel.world.registry.configure_pool(2, 4);
+    im::ClientRuntime runtime("PalmRows");
+    auto *source = spawn_pool_row(kernel, 2, 0, 812);
+    source->kind = w::EntityKind::Building;
+    source->palm_sections = true; source->palm_state = 2; source->section_mask = 0;
+    source->pitch = source->roll = 0; source->yaw = 90;
+    opennova::replication::ClientEntityState decoded;
+    decoded.handle = source->handle.packed;
+    decoded.type_id = 812;
+    decoded.cls = opennova::EntityClass::NoNetworkCallback;
+    runtime.state().upsert(decoded.handle) = decoded;
+    w::Entity piece;
+    piece.kind = w::EntityKind::Building; piece.item_id = 900;
+    piece.position = {10, 20, 7}; piece.yaw = 90;
+    piece.palm_sections = true; piece.item_section_piece = true; piece.palm_state = 17;
+    piece.alive = false;
+    const auto h = kernel.world.registry.spawn(2, piece);
+    w::ItemDeathTraits traits;
+    traits.model_pivots_q16 = {{{0, 0, 2*65536}}, {{0, 0, 4*65536}}};
+    kernel.world.tables.item_death_traits.set(900, traits);
+    im::PresentRowsContext context{kernel, &runtime, true};
+    im::PoolPresentLifecycleMap lifecycle;
+    std::vector<float> rows; im::DoorPhaseTable doors;
+    im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+    bool ok = expect(rows.size() == 2 * w::PF_STRIDE, "joiner presents its local fragment");
+    if (!ok) return false;
+    ok = expect(row_at(rows, 0)[w::PF_SECTION_MASK_LO] == 0x1C &&
+            row_at(rows, 0)[w::PF_ALIVE] == 1, "source uses its partial section state") && ok;
+    ok = expect(row_at(rows, 1)[w::PF_WIRE_HANDLE] == h.packed &&
+            row_at(rows, 1)[w::PF_POS_Y] == 3 &&
+            row_at(rows, 1)[w::PF_SECTION_MASK_LO] == 0x3B,
+            "fragment retains its CXLT pivot and one visible section") && ok;
+    source->palm_sections = false;
+    source->engine_flags |= w::kEntityFlagHusk;
+    source->spawned_piece_mask = 12;
+    source->destroy_phases_q16 = {123,456,789,1024,32768,65536};
+    traits.death_class = w::ItemDeathClass::kTower;
+    kernel.world.tables.item_death_traits.set(812, traits);
+    kernel.world.registry.get(h)->engine_flags |= w::kEntityFlagHusk;
+    im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+    ok = expect(row_at(rows, 0)[w::PF_HUSK] == 1 &&
+            row_at(rows, 0)[w::PF_SECTION_MASK_LO] == 12 &&
+            row_at(rows, 1)[w::PF_HUSK] == 1,
+            "joiner keeps partial tower masks and a fragment born as a husk") && ok;
+    ok = expect(row_at(rows, 0)[w::PF_OBJECT_DESTROY] == 123 &&
+            row_at(rows, 0)[w::PF_OBJECT_DESTROY05] == 65536,
+            "joiner publishes exact native destruction CTRL words") && ok;
+    kernel.world.registry.despawn(h);
+    im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+    ok = expect(rows.size() == w::PF_STRIDE, "retired fragment leaves the present rows") && ok;
+    return ok;
+}
 int main() {
+    test_joiner_palm_source_and_local_fragment();
     test_door_phases_reach_present_rows();
 	test_vehicle_suspension_reaches_present_rows();
 	bool ok = true;

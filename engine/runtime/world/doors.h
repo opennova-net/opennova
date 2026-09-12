@@ -24,6 +24,8 @@ public:
     };
     void initialize(Entity &, int32_t step, int32_t max_angle);
     const Slot *slot(const Entity &, int section) const;
+    // target event's raw base+section read; unallocated global slots are zero.
+    bool target_section_closed(const Entity &, int section) const;
     void tick(World &);
     void command(World &, Entity &, int event, uint32_t touch_mask = 0);
     bool group_open(const World &, int32_t group) const;

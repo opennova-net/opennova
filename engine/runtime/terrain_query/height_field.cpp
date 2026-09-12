@@ -38,7 +38,7 @@ float height_field_height_world(const TerrainHeightField &f, float world_x, floa
 	if (!f.valid()) return 0.0f;
 
 	const CoordsResult<float> r =
-	        coords_world_to_source<float>(f.layout, world_x, world_z, coords_runtime_options());
+	        coords_world_to_source<float>(f.layout, world_x, world_z, coords_runtime_options(f.wrap_x, f.wrap_z));
 	if (!r.valid) return 0.0f;
 
 	const int hm_size = f.dim;
@@ -52,7 +52,7 @@ float height_field_height_world_bilinear(const TerrainHeightField &f, float worl
 	if (!f.valid()) return 0.0f;
 
 	const CoordsResult<float> r =
-	        coords_world_to_source<float>(f.layout, world_x, world_z, coords_runtime_options());
+	        coords_world_to_source<float>(f.layout, world_x, world_z, coords_runtime_options(f.wrap_x, f.wrap_z));
 	if (!r.valid) return 0.0f;
 
 	const int hm_size = f.dim;
@@ -100,7 +100,7 @@ TerrainSurfaceNormal height_field_surface_normal_world(
 	if (!f.valid()) return {};
 	const CoordsResult<float> r =
 			coords_world_to_source<float>(
-					f.layout, world_x, world_z, coords_runtime_options());
+					f.layout, world_x, world_z, coords_runtime_options(f.wrap_x, f.wrap_z));
 	if (!r.valid) return {};
 
 	const int cell_x = static_cast<int>(std::floor(r.source_x));

@@ -602,3 +602,18 @@ logged in [render-material-re.md](render-material-re.md).
   models vs placed entities) rides the world-record's population map.
 - The MATCHTERRAIN sub-pass ENTITY gate (`entity+300 & 0x300`) — which item
   flags those bits are (the consumer side is closed); world-record scope.
+
+## Projection and thermal-wave follow-up (2026-09-11)
+
+The main projection far plane uses floor(raw fog distance)+1. Retail reads
+the signed high word at 0x26C681E, adds one, and passes it to sub_58A8D0,
+the far-Z setter despite its older decal-bias label. The source is the raw
+Q16 Env_FogDistCurrent. [orig: Render_ProcessMainSceneFrame @ 0x5CA0F0,
+load/add/call @ 0x5CA4BA/0x5CA4C1/0x5CA4D0; sub_58A8D0 @ 0x58A8D0]
+
+Both far-water-side entity waves in a thermal type-three frame receive the
+flat 0.25 lighting lane. The object shader applies the per-instance value;
+the normal lane is restored afterwards, and type-five/FP exclusions remain.
+Native render_order and the object-shader golden pin the pass assignment.
+[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5C8090;
+Render_ProcessMainSceneFrame @ 0x5CA0F0]

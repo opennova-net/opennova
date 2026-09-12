@@ -29,13 +29,13 @@ namespace opennova::inmatch {
 // The bidirectional game-session packet ceiling installed by the witnessed
 // settings update. A large 0x0A uses a LEN16 message envelope (flags, tag,
 // u16 length), so its body must leave room for both that envelope and the
-// thirteen-byte sequenced connection header.
+// sequenced connection header, opcode, and four-byte NAPI envelope.
 inline constexpr std::size_t kGameSessionMaxPacketBytes = 1300;
 inline constexpr std::size_t kProtocolMessageLen16Bytes = 4;
 inline constexpr std::size_t kMaxFrameUpdateBodyBytes =
-		kGameSessionMaxPacketBytes - PROTOCOL_PACKET_HEADER_SIZE -
+		kGameSessionMaxPacketBytes - PROTOCOL_DATAGRAM_OVERHEAD -
 		kProtocolMessageLen16Bytes;
-static_assert(kMaxFrameUpdateBodyBytes == 1283);
+static_assert(kMaxFrameUpdateBodyBytes == 1278);
 
 // The lobby player-cap ceiling: retail clamps the advertised max_players to
 // 1..65 (the 64-player roster + the host) before storing game_settings +0xC0.
@@ -69,6 +69,15 @@ struct GameConfig {
 	// @0x4c61b0]
 	int32_t spectator_slots = 0;
 	std::string spectator_password;             // [orig SPECTATOR_PW; BuildFlags |0x4000]
+	// Host-dialog configuration retained for the session. Readback and defaults:
+	// [orig: HostDialog_ReadSettings @ 0x555940; Config_SetDefaults @ 0x54d400]
+	std::string country;
+	int32_t server_punkbuster = 0;
+	int32_t server_lan_only = 0;
+	int32_t connection_speed = 5;
+	int32_t max_friendly_kills = 3;
+	bool allow_ai = true;
+	int32_t time_of_day_continuity = 0;
 	// (retail game_settings +0x80 internet_address, +0xC4 use_lineup_queue and
 	//  +0xC8 lineup_queue_size have no reader here and are not modelled.)
 	uint32_t max_players = 1;                   // [orig game_settings +0xC0] clamped 1..kMaxPlayersCap

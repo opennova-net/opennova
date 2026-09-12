@@ -102,6 +102,7 @@ private:
 	opennova::IDatagramSocket *socket_ = nullptr;
 	replication::ClientReplicaPipeline::ItemClassResolver item_class_resolver_;
 	int64_t last_net_us_ = 0;
+    uint64_t local_round_reset_seen_ = 0;
 };
 
 } // namespace opennova::inmatch

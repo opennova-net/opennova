@@ -163,17 +163,17 @@ void test_game_event_classification() {
 // own/verbose gate, the suppression set, the camp slot reuse and team suffix,
 // the runtime-keyed drop, and the STRCND48 bonus name.
 void test_feed_event_rows() {
-    const auto roster = [](uint8_t index) -> std::string {
+    const auto roster = [](uint8_t index) -> FeedActor {
         switch (index) {
-            case 0: return "Carol";
-            case 3: return "Alice";
-            case 7: return "Bob";
-            default: return std::string();
+            case 0: return {"Carol", 0};
+            case 3: return {"Alice", 0};
+            case 7: return {"Bob", 0};
+            default: return {};
         }
     };
     const auto fold = [&](std::vector<FeedEventInput> events, uint16_t self, bool verbose) {
         std::vector<FeedRow> rows;
-        feed_event_rows(events.data(), events.size(), self, verbose, roster, rows);
+        feed_event_rows(events.data(), events.size(), {self, verbose, 0}, roster, rows);
         return rows;
     };
 
@@ -224,6 +224,63 @@ void test_feed_event_rows() {
     }
 }
 
+void test_runtime_keyed_events_and_announcement() {
+    FeedContext context{3, false, 65540};
+    FeedActorLookup roster = [](uint8_t i) { return FeedActor{"Actor", i}; };
+    const auto fold = [&](uint8_t type, uint8_t team, int16_t count = 0) {
+        const FeedEventInput event{type, team, 7, 3, 0, count};
+        std::vector<FeedRow> out;
+        feed_event_rows(&event, 1, context, roster, out);
+        return out;
+    };
+    const char *pickup[] = {"", "STRCND14", "STRCND13", "STRCND25", "STRCND26"};
+    for (uint8_t team = 1; team <= 4; ++team) {
+        const auto rows = fold(19, team);
+        CHECK(rows.size() == 1 && rows[0].key == pickup[team]);
+        CHECK(rows[0].color == kFeedColorWhite && !rows[0].announce);
+        CHECK(rows[0].extra.empty());
+    }
+    CHECK(fold(19, 0).empty());
+    CHECK(fold(20, 1)[0].key == "STRCND16");
+    CHECK(fold(20, 2)[0].key == "STRCND15");
+    CHECK(fold(20, 3).empty());
+    CHECK(fold(21, 1)[0].key == "STRCND18");
+    CHECK(fold(21, 2)[0].key == "STRCND17");
+    CHECK(fold(21, 4).empty());
+    context.game_type = 8;
+    CHECK(fold(19, 0)[0].key == "STRCND49");
+    CHECK(fold(20, 0)[0].key == "STRCND27");
+    CHECK(fold(21, 0)[0].key == "STRCND50");
+    context.game_type = 65544;
+    const uint32_t colors[] = {kFeedColorWhite, kFeedColorBlue, kFeedColorRed, 0xFFFFFF00, 0xFFFF027F};
+    for (uint8_t team = 0; team <= 4; ++team) {
+        const auto rows = fold(20, team);
+        CHECK(rows[0].key == "STRCND27" && rows[0].color == colors[team]);
+    }
+    for (int16_t count : {int16_t(-2), int16_t(0), int16_t(1), int16_t(5)}) {
+        const auto award = fold(46, 1, count);
+        CHECK(award.size() == 1 && award[0].key == (count <= 1 ? "STRCND_SSKB1" : "STRCND_SSKBX"));
+        CHECK(feed_format_row(award[0], "$A earned $B.", "Unknown", "", "") ==
+                "Actor earned " + std::to_string(count) + ".");
+        const auto own = fold(47, 1, count);
+        CHECK(own.size() == 1 && own[0].key == (count <= 1 ? "STRCND_YRSSKB1" : "STRCND_YRSSKBX"));
+        CHECK(feed_format_row(own[0], "$A $B", "Unknown", "", "") == std::to_string(count) + " ");
+        CHECK(!own[0].announce && own[0].color == kFeedColorMedic);
+    }
+    CHECK(fold(4, 3)[0].announce);
+    CHECK(fold(38, 3)[0].announce == false);
+    KillAnnouncement announcement;
+    announcement.record("kill", 100);
+    CHECK(announcement.visible(286) && !announcement.visible(287));
+    announcement.expire(287);
+    CHECK(announcement.tick == 0 && announcement.text == "kill");
+    announcement.record(std::string(300, 'x'), 0xFFFFFFF0u);
+    CHECK(announcement.text.size() == 255 && announcement.visible(170));
+    CHECK(!announcement.visible(171));
+    announcement.record("at zero", 0);
+    CHECK(!announcement.visible(1));
+}
+
 // The inline-markup stripper [orig: Chat_StripHtmlTags @0x4983f0]: every
 // '<'..'>' span dropped, an unterminated '<' tail dropped with it.
 void test_strip_inline_tags() {
@@ -248,6 +305,7 @@ int main() {
     test_camp_keys_and_line();
     test_game_event_classification();
     test_feed_event_rows();
+    test_runtime_keyed_events_and_announcement();
     if (failures == 0) std::printf("feed_format_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

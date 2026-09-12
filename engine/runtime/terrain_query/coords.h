@@ -47,10 +47,12 @@ struct CoordsOptions {
 	bool bounds_reject = false;  // reject out-of-extent, or use runtime & 0xF wrap
 	bool clamp_sector_id = false; // clamp to [0,4], or keep the runtime raw id
 	bool clamp_local = false;    // clamp to [0, 512 - 0.001], or keep runtime raw offset
+	bool wrap_x = true;
+	bool wrap_z = true;
 };
 
-inline CoordsOptions coords_runtime_options() {
-	return CoordsOptions{false, false, false};
+inline CoordsOptions coords_runtime_options(bool wrap_x = true, bool wrap_z = true) {
+	return CoordsOptions{false, false, false, wrap_x, wrap_z};
 }
 
 inline CoordsOptions coords_editor_options() {
@@ -203,8 +205,12 @@ inline CoordsSectorResolve coords_resolve_sector(const SectorLayout &layout, int
 		cell_x = grid_x;
 		cell_z = grid_z;
 	} else {
-		cell_x = grid_x & (COORDS_SECTOR_GRID_DIM - 1);
-		cell_z = grid_z & (COORDS_SECTOR_GRID_DIM - 1);
+		// Clamp the GRID cell only; preserve the caller's 512-unit local offset.
+		// Non-wrapping terrain uses the padded 16-cell extent, not authored rows.
+		// [orig: Terrain_GetHeightAtPosition @0x606720;
+		// Terrain_SampleHeightBilinear @0x6067B0]
+		cell_x = opts.wrap_x ? grid_x & 15 : coords_clampi(grid_x, 0, 15);
+		cell_z = opts.wrap_z ? grid_z & 15 : coords_clampi(grid_z, 0, 15);
 	}
 
 	int sector_id = layout.sector_grid[cell_z * COORDS_SECTOR_GRID_DIM + cell_x];

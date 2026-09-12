@@ -25,7 +25,7 @@ struct SoundEmitterEvent {
     uint32_t emitted_tick = 0;    // post-producer world clock; preserves catch-up chronology
     uint8_t lane = 0;             // original slot-type byte (vehicle: 0/10/20)
     uint8_t slot = 0;             // authored SoundProfileSlot, for observability
-    uint16_t lifetime_ticks = 0;
+    int32_t lifetime_ticks = 0; // the weapon kick byte is sign-extended
     int32_t pitch_q16 = 0;
     uint16_t volume_q8_8 = 0;     // high byte is the emitter volume consumed by the mixer
     bool source_only = false;

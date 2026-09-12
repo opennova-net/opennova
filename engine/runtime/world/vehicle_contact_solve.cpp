@@ -138,13 +138,26 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	vehicle_crash_state(world, veh, traits, contacts, basis.q22.m[10] >> 6);
 	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 
+	// Save the pre-spring penetration. Upright live hulls leave the -1 sentinel.
+	// [orig: Entity_ProcessAircraftContactPhysics @ 0x47EF10]
+	int32_t crash_depth = -1;
+	if (m.crashed || basis.q22.m[10] < 0 || m.settle_2f0)
+		for (int i = 0; i < 7; ++i) crash_depth = std::max(crash_depth, d[i]);
+
 	// ---- §6.10 branch select: any PAD depth = grounded.
 	const bool pad_contact = d[0] > 0 || d[1] > 0 || d[2] > 0 || d[3] > 0;
     if (!pad_contact) {
 		// Airborne marks the flag; the park and wreck latches decide whether to retain the
 		// vertical pose.
 		// Witness sites: [orig: @0x480ED5]
-		veh.flags |= kEntityFlagInAir;
+		// [orig: Entity_ProcessAircraftContactPhysics @ 0x47EF10]
+		if ((m.crashed && m.byte_2ef) || m.settle_2f0) {
+			int32_t depth = -1;
+			if (m.crashed || basis.q22.m[10] < 0)
+				for (int i = 0; i < 7; ++i) depth = std::max(depth, d[i]);
+			pz = io::bam_add(pz, depth);
+			veh.flags &= ~kEntityFlagInAir;
+		} else veh.flags |= kEntityFlagInAir;
 		int32_t corners[4][3];
 		const int32_t hx = half_h >> 1, hy = half_w >> 1;
 		const int32_t local[4][3] = { { hx, -hy, 0 }, { hx, hy, 0 }, { -hx, -hy, 0 },
@@ -191,20 +204,18 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	m.air_roll_bam = fit.roll_bam;
 	if (m.crashed != 0)
 		m.yaw_bam = fit.yaw_bam;
-	if (basis.up[2] > 0.0) {
+	if (m.crashed == 0 && m.settle_2f0 == 0 && basis.up[2] > 0.0) {
 		// Upright non-parked: slideDecay clamped toward the ground, then
         // Z = the solver chassis Z [orig: @0x481834..0x481849] — the wheeled
         // solver's form: the average of the ABOVE-ZERO corners only,
         // rise-clamped +0x2000/tick (blockers §3.3 @0x46C822..0x46C894).
-        if (m.slide_z > 0) m.slide_z = 0;
+        if (!m.settle_2f0 && m.slide_z > 0) m.slide_z = 0;
         int32_t new_z = fit.positive_z_avg;
         if (new_z > pz + 0x2000) new_z = pz + 0x2000;
         pz = new_z;
 	} else {
 		// Inverted: lift by the max penetration [orig: @0x4814C0..0x4814C4].
-        int32_t maxd = 0;
-        for (int i = 0; i < 7; ++i) maxd = std::max(maxd, d[i]);
-        pz += maxd;
+		pz = io::bam_add(pz, crash_depth);
 	}
 	const int32_t up_z16 = basis.q22.m[10] >> 6;
 	// [orig: @0x4814CE..0x4817EA] contact sink clear, then replicated
@@ -409,6 +420,10 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	up_z16 = basis.q22.m[10] >> 6;
 	m.grounded = m.grounded && !m.crashed && !m.settle_2f0 && !m.wreck_2fc;
+	// [orig: Entity_ProcessTrackedVehiclePhysics @ 0x47E09F..0x47E107]
+	int32_t crash_depth = -1;
+	if (m.crashed || up_z16 < 0 || m.settle_2f0)
+		for (int i = 0; i < 7; ++i) crash_depth = std::max(crash_depth, d[i]);
 	int32_t corner_adj[4] = { 0, 0, 0, 0 };
 
 	// ---- solve select: the no-pad branch [orig: the all-zero pad test
@@ -497,13 +512,13 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	veh.pitch = static_cast<int16_t>(std::lround(double(m.air_pitch_bam) * kDegreesPerBam));
 	veh.roll = static_cast<int16_t>(std::lround(
             double(m.air_roll_bam) * kDegreesPerBam));
-    if (up_z16 > 0) {
+    if (m.crashed == 0 && up_z16 > 0) {
         // Upright: slideDecay clamped toward the ground, then Z = the solver
         // chassis Z — the wheeled solver's positive-corner average,
         // rise-clamped +0x2000/tick [orig: the Z select @0x47ECAC..0x47ECBB;
         // solver Z @0x46C822..0x46C894 in Entity_ProcessWheeledVehicleSuspension
         // @0x46B140, call @0x47EC4D].
-        if (m.slide_z > 0) m.slide_z = 0;
+        if (!m.settle_2f0 && m.slide_z > 0) m.slide_z = 0;
         int32_t new_z = fit.positive_z_avg;
         if (new_z > pz + 0x2000) new_z = pz + 0x2000;
         pz = new_z;
@@ -511,9 +526,7 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
         // Inverted: lift by the max penetration over all seven probes
         // [orig: `Position.Z += maxGroundHeight` @0x47ECE2 with the
         // @0x47E09F..0x47E107 scan].
-        int32_t maxd = 0;
-        for (int i = 0; i < 7; ++i) maxd = std::max(maxd, d[i]);
-        pz += maxd;
+		pz = io::bam_add(pz, crash_depth);
     }
     // The crash latch arms inside the wheel-solver call [orig: @0x47EC4D ->
     // @0x46B1A6..0x46B213]; the pads back in contact then reset the sinks
@@ -750,6 +763,14 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 		m.contact_solved_once = true;
 		m.plat_airborne_ticks = (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
 	};
+	// Preserve depths before the wheel springs absorb penetration.
+	// [orig: Entity_ProcessWheeledVehiclePhysics @ 0x477FF4..0x478014;
+	// retained-depth selection @0x478D15]
+	int32_t crash_depth = -1;
+	if (m.crashed || up_z16 < 0 || m.settle_2f0)
+		for (int i = 0; i < 13; ++i) crash_depth = std::max(crash_depth, d[i]);
+	int32_t wheel_depth = -1;
+	for (int i = 0; i < 4; ++i) wheel_depth = std::max(wheel_depth, d[i]);
 	// Positive terrain gap arms the per-wheel landing impulse while the
 	// current amplitude is still small. [orig: @0x478643..0x478706]
 	for (int k = 0; k < 4; ++k) {
@@ -822,7 +843,7 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 		}
 	}
     PlatFit fit;
-	vehicle_suspension_fit(world, veh, c, crash_contacts, fit, px, py, pz, true);
+	const bool fitted = vehicle_suspension_fit(world, veh, c, crash_contacts, fit, px, py, pz, true);
 	// Conform writes pitch and roll, and adopts yaw in the crashed/latched arms.
 	// Witness sites: [orig: @0x478AB1, @0x478AD8]
 	m.air_pitch_bam = fit.pitch_bam;
@@ -832,21 +853,20 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 	veh.pitch = static_cast<int16_t>(std::lround(double(m.air_pitch_bam) * kDegreesPerBam));
 	veh.roll = static_cast<int16_t>(std::lround(
             double(m.air_roll_bam) * kDegreesPerBam));
-    if (up_z16 > 0) {
+    if (m.crashed == 0 && up_z16 > 0) {
 		// An upright hull adopts the spring-resolved chassis Z; parked application retains the
 		// family crash and latch gates.
 		// Witness sites: [orig: @0x4698A0, @0x46AF54, @0x46AFE1, @0x478BE3, @0x478C06]
-		const int32_t new_z = fit.positive_z_avg;
-		m.slide_z += new_z - pz;
-        if (m.slide_z > 0) m.slide_z = 0;
-        pz = new_z;
+		if (fitted) {
+			const int32_t new_z = fit.positive_z_avg;
+			m.slide_z = io::bam_add(m.slide_z, io::bam_sub(new_z, pz));
+			if (m.slide_z > 0) m.slide_z = 0;
+			pz = new_z;
+		} else pz = io::bam_add(pz, wheel_depth);
     } else {
-        // Inverted: lift by the max penetration over all thirteen probes
-        // [orig: the crashed/inverted `Position.Z += v300` @0x478D06 with the
-        // gated all-13 scan @0x477FF4..0x478014].
-        int32_t maxd = 0;
-        for (int i = 0; i < 13; ++i) maxd = std::max(maxd, d[i]);
-        pz += maxd;
+		// Crashed/inverted hulls use the saved depth, even when still upright.
+		// [orig: Entity_ProcessWheeledVehiclePhysics @ 0x475DE0]
+		pz = io::bam_add(pz, crash_depth);
     }
     // The crash latch arms inside the suspension call [orig: @0x4698A0's seed
     // @0x469933..0x46999E]; the tail clears the per-tick request [orig:
@@ -877,6 +897,75 @@ int32_t q22_mul_trunc(int32_t a, int32_t b) {
     return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
 }
 
+// Square footprint: the lower axle, then its copy lifted by half the model height.
+// [orig: Entity_ComputeBoundingQuad @ 0x45B6E0]
+static void light_bounding_quad(const VehicleTraits &traits, const VehicleEulerBasis &basis,
+        int32_t x, int32_t y, int32_t z, int32_t out[4][3]) {
+    const int32_t radius = (traits.box_z_hi - traits.box_z_lo) / 2 - 16384;
+    const int32_t half_length = ((traits.foot_x_hi - radius) - (traits.foot_x_lo + radius)) / 2;
+    const int32_t height = io::bam_abs(io::bam_sub(traits.box_z_hi, traits.box_z_lo)) / 2;
+    const int32_t pos[3] = {x, y, z};
+    for (int k = 0; k < 3; ++k) {
+        const int32_t forward = q16_mul_rhu(half_length, basis.q22.m[4*k] >> 6);
+        const int32_t lift = q16_mul_rhu(height, basis.q22.m[4*k+2] >> 6);
+        out[0][k] = io::bam_add(pos[k], forward);
+        out[1][k] = io::bam_sub(pos[k], forward);
+        out[2][k] = io::bam_add(out[1][k], lift);
+        out[3][k] = io::bam_add(out[0][k], lift);
+    }
+}
+
+// Preserve SIDE, rebuild UP from axle x side, then forward from side x up.
+// Column helpers and the cross-product operands, not Hex-Rays local names,
+// determine the axes. [orig: Entity_UpdateVehicleChassisOrientation @ 0x468A50;
+// Math_FixedPointCrossProduct @ 0x6134A0; CWnd_HitTest @ 0x6137D0]
+static CollisionMatrix light_axle_frame(const int32_t corners[4][3], const CollisionMatrix &old) {
+    const int64_t axle[3] = {int64_t(corners[0][0]) - corners[1][0],
+            int64_t(corners[0][1]) - corners[1][1], int64_t(corners[0][2]) - corners[1][2]};
+    const int32_t side[3] = {old.m[1] >> 6, old.m[5] >> 6, old.m[9] >> 6};
+    int32_t forward[3], up[3];
+    int64_t cross[3];
+    q16_normalize(axle, forward);
+    q16_cross(forward, side, cross);
+    q16_normalize(cross, up);
+    q16_cross(side, up, cross);
+    q16_normalize(cross, forward);
+    CollisionMatrix fitted = old;
+    for (int k = 0; k < 3; ++k) {
+        fitted.m[4*k] = bam_shl_wrap(forward[k], 6);
+        fitted.m[4*k+1] = bam_shl_wrap(side[k], 6);
+        fitted.m[4*k+2] = bam_shl_wrap(up[k], 6);
+    }
+    return fitted;
+}
+
+static void light_apply_frame(World &world, Entity &entity, CollisionMatrix matrix, bool write_yaw) {
+    if (!entity.veh.crashed) vehicle_apply_lean(entity, matrix);
+    vehicle_apply_chassis(world, entity, matrix);
+    int32_t angles[3];
+    collision_matrix_to_euler(matrix, angles);
+    auto &m = entity.veh;
+    m.air_pitch_bam = angles[1]; m.air_roll_bam = angles[2];
+    if (write_yaw) m.yaw_bam = angles[0];
+    entity.pitch = static_cast<int16_t>(std::lround(double(angles[1]) * kDegreesPerBam));
+    entity.roll = static_cast<int16_t>(std::lround(double(angles[2]) * kDegreesPerBam));
+}
+
+// Normalize displacement, replace its X/Y with the original forward row, normalize again.
+// [orig: Entity_ProcessLightVehiclePhysics @ 0x47BF01..0x47C03B]
+static void light_capture_launch(Entity &entity, const VehicleEulerBasis &basis,
+        int32_t x, int32_t y, int32_t z) {
+    const int32_t fallback[3] = {to_fixed(entity.position.x), to_fixed(entity.position.y),
+            to_fixed(entity.position.z)};
+    const int32_t *previous = entity.saved_live_valid ? entity.saved_live_pos : fallback;
+    const int64_t displacement[3] = {
+        io::bam_sub(x, previous[0]), io::bam_sub(y, previous[1]), io::bam_sub(z, previous[2])};
+    int32_t direction[3];
+    q16_normalize(displacement, direction);
+    const int64_t raw[3] = {basis.q22.m[0] >> 6, basis.q22.m[4] >> 6, direction[2]};
+    q16_normalize(raw, entity.veh.bike_launch_direction);
+}
+
 // The fallen-bike arm inside Entity_UpdateVehicleChassisOrientation
 // [orig: @0x468B62..0x468D83]. Once the crashed/override pair is active,
 // simultaneous front-wheel, rear-wheel and center-spine contact at low speed
@@ -892,23 +981,12 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
 	if (!m.crashed)
 		return false;
 	CollisionMatrix matrix = basis.q22;
-	const int32_t radius = io::bam_sub(traits.box_y_hi, traits.box_y_lo) >> 2;
-	const int32_t half_len = io::bam_sub(io::bam_sub(traits.foot_x_hi, radius),
-									 io::bam_add(traits.foot_x_lo, radius)) /
-			2;
-	const int32_t height = io::bam_abs(io::bam_sub(traits.box_z_hi, traits.box_z_lo)) / 2;
-	const int32_t pos[3] = { px, py, pz };
-	int32_t corners[4][3], up[3], side[3];
-	for (int k = 0; k < 3; ++k) {
-		up[k] = matrix.m[4 * k + 2] >> 6;
-		side[k] = matrix.m[4 * k + 1] >> 6;
-		const int32_t forward = q16_mul_rhu(half_len, matrix.m[4 * k] >> 6);
-		const int32_t lift = q16_mul_rhu(height, up[k]);
-		corners[0][k] = io::bam_add(pos[k], forward);
-		corners[1][k] = io::bam_sub(pos[k], forward);
-		corners[2][k] = io::bam_add(corners[1][k], lift);
-		corners[3][k] = io::bam_add(corners[0][k], lift);
-	}
+    int32_t corners[4][3], up[3], side[3];
+    light_bounding_quad(traits, basis, px, py, pz, corners);
+    for (int k = 0; k < 3; ++k) {
+        up[k] = matrix.m[4*k+2] >> 6;
+        side[k] = matrix.m[4*k+1] >> 6;
+    }
 	if ((veh.flags & kEntityFlagInAir) == 0) {
 		corners[0][2] = io::bam_add(corners[0][2], io::bam_add(d[0], corner_adjust[0]));
 		corners[1][2] = io::bam_add(corners[1][2], io::bam_add(d[1], corner_adjust[1]));
@@ -922,7 +1000,7 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
 		vehicle_apply_chassis(world, veh, matrix);
 	};
 	if (!m.byte_2ef) {
-		if (m.has_been_driven) {
+		if (m.wheelie_active) {
 			force(0, 5000, up);
 			force(3, 5000, up);
 		}
@@ -932,7 +1010,8 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
 		const int32_t rate = speed <= 256 ? 4000 : 5000;
 		const bool both = (d[0] > 250 && d[1] > 250) || d[4] > 0;
 		if (both)
-			m.has_been_driven = 0;
+			m.wheelie_active = 0;
+		// [orig: Entity_UpdateVehicleChassisOrientation contact/speed gate @0x468BC1]
 		const bool low_contact = d[0] > 0 && d[1] > 0 && d[4] > 0 && speed < 8192;
 		if (low_contact && !m.wreck_2fc) {
 			vehicle_clear_chassis(m);
@@ -941,7 +1020,7 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
 				m.part_spin.speed = kBikeFallSeedBam;
 		}
 		if (d[5] > 5000)
-			m.has_been_driven = 0;
+			m.wheelie_active = 0;
 		if (m.wreck_2fc) {
 			const auto rotation = vehicle_euler_basis(0, m.part_spin.speed, 0).q22;
 			CollisionMatrix result;
@@ -956,7 +1035,7 @@ bool light_fall_over_tick(World &world, Entity &veh, const VehicleTraits &traits
 			m.part_spin.speed = io::bam_sub(m.part_spin.speed, kBikeFallAccelerationBam);
 		} else {
 			vehicle_clear_chassis(m);
-			if (m.has_been_driven && !both) {
+			if (m.wheelie_active && !both) {
 				force(0, rate, up);
 				force(3, rate, up);
 				apply();
@@ -1167,6 +1246,34 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 	// ---- solve select [orig: the `!d_front && !d_rear` split @0x47A985].
 	int32_t up_z16 = static_cast<int32_t>(basis.up[2] * io::kFp16OneD);
 	const int32_t side_z16 = static_cast<int32_t>(basis.side[2] * io::kFp16OneD);
+    // [orig: Entity_ProcessLightVehiclePhysics @ 0x479600]
+    int32_t crash_depth = -1;
+    if (m.crashed || up_z16 < 0 || m.settle_2f0)
+        for (int i = 0; i < 5; ++i) crash_depth = std::max(crash_depth, d[i]);
+    // The contact gate reads the previous rear-contact run; its tail increments later.
+    // [orig: Entity_ProcessLightVehiclePhysics @ 0x47A90B..0x47A94E]
+    m.grounded = up_z16 > 4096 && io::bam_abs(side_z16) < 40960 &&
+            d[1] != 0 && m.crashed == 0 && io::bam_abs(m.light_rear_contact_ticks) > 1;
+    if (m.grounded)
+        m.bike_ground_contact_ticks = d[0] != 0 ? io::bam_add(m.bike_ground_contact_ticks, 1) : 0;
+    if (!m.crashed) {
+        if (m.wheelie_active && m.wheelie_request) {
+            // Two upward force records on the front pair, rate 50, mode 3.
+            // [orig: Entity_ProcessLightVehiclePhysics @ 0x47B1BC..0x47B25E]
+            int32_t corners[4][3];
+            light_bounding_quad(traits, basis, px, py, pz, corners);
+            if (!m.chassis_contact_active) {
+                for (int i : {0, 3}) {
+                    auto &force = m.chassis_forces[i];
+                    if (force.rate <= 0) {
+                        for (int k = 0; k < 3; ++k) force.direction[k] = basis.q22.m[4*k+2] >> 6;
+                        force.rate = 50; force.scratch = 3;
+                    }
+                }
+            }
+            vehicle_clear_chassis_forces(veh, corners, 1);
+        } else vehicle_clear_chassis(m);
+    }
 	// ---- the suspension spring leg's bike legs (vehicle_suspension.h): the
     // live crash test over the spine probes [orig: @0x47B32D..0x47B375] and
     // the +100 front/rear sink growth with no latch terms [orig: @0x47AB36..
@@ -1198,15 +1305,25 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 		m.grounded = false;
         world.vehicles.suspension_airborne_loop(veh, traits, 2, kSinkGrowthBike,
                                          corner_adj);
+        if ((m.crashed && m.byte_2ef) || m.settle_2f0) {
+            int32_t depth = -1;
+            if (m.crashed || up_z16 < 0)
+                for (int i = 0; i < 5; ++i) depth = std::max(depth, d[i]);
+            pz = io::bam_add(pz, depth);
+        }
         veh.flags |= kEntityFlagInAir;
         const bool just_armed =
                 world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
-		if (!just_armed &&
-				light_fall_over_tick(world, veh, traits, basis, d, px, py, pz, corner_adj)) {
-			int32_t maxd = 0;
-			for (int i = 0; i < 5; ++i) maxd = std::max(maxd, d[i]);
-            pz += maxd;
-		}
+        const bool falling = !just_armed &&
+                light_fall_over_tick(world, veh, traits, basis, d, px, py, pz, corner_adj);
+        if (!falling) {
+            int32_t corners[4][3];
+            light_bounding_quad(traits, basis, px, py, pz, corners);
+            corners[0][2] = io::bam_add(corners[0][2], corner_adj[0]);
+            corners[1][2] = io::bam_add(corners[1][2], corner_adj[1]);
+            light_apply_frame(world, veh, just_armed ? basis.q22 : light_axle_frame(corners, basis.q22), true);
+        }
+        light_capture_launch(veh, basis, px, py, pz);
 		vehicle_suspension_tick_tail(veh, traits);
 		vehicle_contact_downhill_tail(veh, pz);
 		m.contact_solved_once = true;
@@ -1214,6 +1331,20 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 
 		return;
 	}
+    // Both wheels settle a released launch after the contact run reaches ten.
+    // [orig: Entity_ProcessLightVehiclePhysics @ 0x47B5FD..0x47B63F]
+    if (!m.crashed && d[0] && d[1] && m.bike_ground_contact_ticks >= 10 &&
+            !m.wheelie_request && m.wheelie_active) {
+        m.wheelie_active = 0;
+        vehicle_clear_chassis(m);
+    }
+    if (m.wheelie_active && !m.crashed &&
+            (up_z16 < 0 || (io::bam_abs(m.slide_z) > 20480 && (basis.q22.m[8] >> 6) > (io::kFp16OneInt / 2))))
+        m.crash_request = 1;
+    // A fast nose-down landing can also arm a crash outside wheelie mode.
+    // [orig: Entity_ProcessLightVehiclePhysics @ 0x479600]
+    if (!m.crashed && io::bam_abs(m.slide_z) > 16384 && (basis.q22.m[8] >> 6) < -(io::kFp16OneInt / 2))
+        m.crash_request = 1;
 	if (d[1] != 0)
 		vehicle_capture_contact_direction(veh, basis);
 	// ---- wheel contact: the 2-corner axle fit [orig: the grounded arm of
@@ -1247,61 +1378,23 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
             world.vehicles.suspension_arm(veh, /*eject_occupants=*/true);
 	const bool falling = !just_armed &&
 			light_fall_over_tick(world, veh, traits, basis, d, px, py, pz, corner_adj);
-	// fwd = the normalized axle line; right = normalize(old_up x fwd); up =
-	// fwd x right — roll continuity against the previous up row
-	// [orig: the cross/normalize chain @0x468BC1..0x468CE1]; then the
-	// standard substitute Euler pair (the same convention plat_fit_corners
-	// uses; Math_FixedPointMatrixToEulerAngles @0x613310 interior = the
-	// shared pending witness).
-	if (!just_armed && !falling) {
-        const int64_t axle[3] = {int64_t(cf[0]) - cr[0], int64_t(cf[1]) - cr[1],
-                                 int64_t(cf[2]) - cr[2]};
-        int32_t fwd[3];
-        q16_normalize(axle, fwd);
-        const int32_t old_up[3] = {
-            static_cast<int32_t>(basis.up[0] * io::kFp16OneD),
-            static_cast<int32_t>(basis.up[1] * io::kFp16OneD),
-            static_cast<int32_t>(basis.up[2] * io::kFp16OneD)};
-        int64_t raw[3];
-        q16_cross(old_up, fwd, raw);
-        int32_t right[3];
-        q16_normalize(raw, right);
-        q16_cross(fwd, right, raw);
-        int32_t up[3];
-        q16_normalize(raw, up);
-		int32_t fit_yaw;
-		CollisionMatrix fitted;
-		for (int row = 0; row < 3; ++row) {
-			fitted.m[4 * row] = bam_shl_wrap(fwd[row], 6);
-			fitted.m[4 * row + 1] = bam_shl_wrap(right[row], 6);
-			fitted.m[4 * row + 2] = bam_shl_wrap(up[row], 6);
-		}
-		vehicle_apply_lean(veh, fitted);
-		vehicle_apply_chassis(world, veh, fitted);
-		int32_t angles[3];
-		collision_matrix_to_euler(fitted, angles);
-		fit_yaw = angles[0];
-		m.air_pitch_bam = angles[1];
-		m.air_roll_bam = angles[2];
-		if (m.crashed != 0)
-			m.yaw_bam = fit_yaw;
-		veh.pitch = static_cast<int16_t>(std::lround(double(m.air_pitch_bam) * kDegreesPerBam));
-		veh.roll = static_cast<int16_t>(std::lround(
-                double(m.air_roll_bam) * kDegreesPerBam));
+    if (!falling) {
+        int32_t corners[4][3] = {};
+        std::copy_n(cf, 3, corners[0]); std::copy_n(cr, 3, corners[1]);
+        light_apply_frame(world, veh, just_armed ? basis.q22 : light_axle_frame(corners, basis.q22),
+                m.crashed || m.wheelie_active || up_z16 < 0);
     }
     // Z select: crashed/no-up/parked ride the latch machine; the live leg
     // clamps slideDecay non-positive and adopts the fit Z — the mean of the
     // two lifted wheel corners [orig: `slideDecay = min(slideDecay, 0);
     // Position.Z = out.z` @0x47AF52..0x47AF60; out.z = (c0.z + c1.z) * 0.5
     // via flt_7C3B94].
-    if (m.crashed == 0 && up_z16 > 0) {
+    if (m.crashed == 0 && m.settle_2f0 == 0 && up_z16 > 0) {
         if (m.slide_z > 0) m.slide_z = 0;
         pz = static_cast<int32_t>(
                 (int64_t(cf[2]) + cr[2]) / 2);
     } else {
-        int32_t maxd = 0;
-        for (int i = 0; i < 5; ++i) maxd = std::max(maxd, d[i]);
-        pz += maxd;
+        pz = io::bam_add(pz, crash_depth);
     }
     // Both-wheel landing absorbs half the fall [orig: `if (d0 && d1 &&
     // slideDecay < 0) slideDecay -= slideDecay >> 1` @0x47B0F1..0x47B103].
@@ -1312,8 +1405,8 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     // run longer than one tick [orig: the +1 @0x47B739-region, reset in the
     // both-wheels-off branch; `|entity[1].pad_040[8]| <= 1` kills the byte].
     if (d[1] != 0) m.light_rear_contact_ticks += 1;
-    m.grounded = up_z16 > 4096 && std::abs(side_z16) < 40960 &&
-                 d[1] != 0 && m.light_rear_contact_ticks > 1;
+    if (m.crashed) m.grounded = false;
+    light_capture_launch(veh, basis, px, py, pz);
 
 	// The crash latch armed at the chassis-call site above (the bike seed
 	// ejects its riders) [orig: @0x468B00..0x468B3B]. Wheels back in contact

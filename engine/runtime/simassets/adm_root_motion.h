@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <runtime/world/infantry.h>
+#include <runtime/anim/clip_timeline.h>
 
 namespace opennova {
 class ResourceIndex;
@@ -30,9 +31,9 @@ namespace opennova::simassets {
 //   vertical     = lerp(vel[1]) * 32768 (normally replaced by the motor's
 //                  blended capsule-bottom history delta), events = trigger,
 //   capsule_bottom = lerp(bottom) * 65536 (the absolute ground-settle floor).
-// The playhead is a half-frame counter (one sim tick = half a clip frame — the
-// 2:1 tick:frame cadence the *32768 scale bakes in), wrapping on looped clips
-// and clamping just below the end otherwise
+// The playhead counts simulation ticks. The normalized channel advances by
+// fps/(62*frame_count); the root-motion *32768 scale is independent of that
+// clock. Loops wrap; stopped one-shots retain extents but zero XYZ/trigger.
 // [orig: AnimChannel_AdvancePlayback @0x40b140].
 class AdmRootMotion : public opennova::world::IRootMotionSource {
 public:
@@ -64,6 +65,8 @@ public:
 	// served entry; frame_count read @0x40b25d runs on that clip].
 	int32_t clip_length_ticks(int adm_id, int state_id, int variant) const override;
 	bool clip_loops(int adm_id, int state_id) const override;
+	int32_t clip_boundary_after(int adm_id, int state_id, int32_t phase_ticks,
+	                            int variant = 0) const override;
 
 	// THE CROSSED-FRAME TRIGGER SCAN — the authored event words a body crossed
 	// between two playhead positions, in order, one entry per authored clip
@@ -109,6 +112,7 @@ private:
 		std::vector<float> top;      // capsule_top: origin->head (capsule extent)
 		std::vector<uint32_t> trigger;
 		int32_t frame_count = 0;
+		anim::ClipTimeline clock;
 		bool loop = false;
 	};
 
@@ -125,7 +129,7 @@ private:
 	// Variant wraps modulo the ring size, so a stale cursor from a shorter row on
 	// another rig still resolves; missing states bind RESET's ring.
 	const Track *resolve_track(int adm_id, int state_id, int variant = 0) const;
-	static int32_t position_of(const Track &track, int32_t phase_ticks);
+	static double position_of(const Track &track, int32_t phase_ticks);
 	static float sample(const Track &track, const std::vector<float> &channel,
 	                    int32_t phase_ticks);
 	static uint32_t sample_trigger(const Track &track, int32_t phase_ticks);

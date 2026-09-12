@@ -254,6 +254,9 @@ void ObjectShaderCache::configure_material_for_key(
 	const Ref<Shader> shader = get_shader_for_key(key);
 	ERR_FAIL_COND_MSG(shader.is_null(), "Object shader resource is unavailable");
 	material->set_shader(shader);
+	material->set_shader_parameter("u_thermal_wave_draw",
+			opennova::renderer::decode_object_shader_blend(static_cast<uint32_t>(key)) ==
+				opennova::renderer::ObjectBlendMode::Opaque);
 	const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
 			opennova::renderer::describe_object_shader_pipeline(static_cast<uint32_t>(key));
 	if (pipeline.technique ==

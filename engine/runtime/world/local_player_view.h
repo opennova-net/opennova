@@ -172,6 +172,11 @@ void local_player_set_eye_offset(World *world, const float offset_mission[3],
 //  @0x5ca299..0x5ca304; Camera_ComputeThirdPersonView @0x437d10 — the
 //  MOUNTED local eye leg @0x4b6908 re-anchored to the live position]
 struct LocalPlayerViewFrame {
+    int16_t scope_zero_word = 0;
+    int32_t scope_zero_max = 0;
+    int32_t scope_zero_step = 0;
+    int32_t scope_zero_default = 0;
+    int32_t aim_range_q16 = 0;
     bool scope_engaged = false;
     bool binoculars_requested = false;
     bool binoculars_raised = false;

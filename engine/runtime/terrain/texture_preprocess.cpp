@@ -72,21 +72,21 @@ Rgba8Image build_detail_coefficient_map(const Rgba8Image &detailmap) {
 
 			// The source is packed A8R8G8B8 in retail, so its low byte is the
 			// authored blue channel. Both axes wrap by dimension-1 masks.
-			// [orig: Texture_GenerateNormalMap @ 0x58c225..0x58c3d9]
+			// [orig: Texture_GenerateNormalMap @ 0x58c225..0x58c3d9;
+			// bump scale 1/32 @0x7DBFAC]
 			const double nx = scale *
 				(blue_at((x - 1) & x_mask, y) - blue_at((x + 1) & x_mask, y));
 			const double ny = scale *
 				(blue_at(x, (y - 1) & y_mask) - blue_at(x, (y + 1) & y_mask));
-			// Retail normalizes the paired one-sided diffs against the fld1
-			// unit Z kept on the FPU stack, not 2.0.
-			// [orig: Texture_GenerateNormalMap @ 0x58c1fa (fld1), 0x58c26d..
-			// 0x58c2b0 (paired diffs x bumpScale = 1/32 @ 0x7DBFAC)]
-			constexpr double nz = 1.0;
+			// Each one-sided cross product contributes unit Z; the two are
+			// added before normalization. [orig: Texture_GenerateNormalMap
+			// @0x58C070, fld1 @0x58C1FA, fadd st(3) @0x58C305]
+			constexpr double nz = 2.0;
 			const double inv_length = 1.0 / std::sqrt(nx * nx + ny * ny + nz * nz);
 
 			const size_t dst = (static_cast<size_t>(y) * detailmap.width + x) * 4;
 			result.pixels[dst] = encode_coefficient(nx * inv_length);
-			result.pixels[dst + 1] = encode_coefficient(ny * inv_length);
+			result.pixels[dst + 1] = encode_coefficient(static_cast<float>(ny * inv_length));
 			result.pixels[dst + 2] = encode_coefficient(nz * inv_length);
 			result.pixels[dst + 3] = detailmap.pixels[dst + 3];
 		}

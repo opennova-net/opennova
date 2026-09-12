@@ -531,6 +531,13 @@ bool Vfs::has_mounted_archive() const {
     return impl_->primary != nullptr || !impl_->secondaries.empty();
 }
 
+bool Vfs::prefers_loose_file(const std::string &name) const {
+    if (impl_->session_mount_mode == VfsMountMode::Packed) return false;
+    ResolvedEntry resolved;
+    return impl_->find_retail(name, VfsLookupPolicy::ForceLooseFirst, resolved) &&
+        resolved.source == VfsSource::LooseDir;
+}
+
 bool Vfs::has_file(const std::string &name) const {
     return impl_->find(name) != nullptr;
 }

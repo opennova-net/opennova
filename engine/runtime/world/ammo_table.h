@@ -121,6 +121,9 @@ struct AmmoTableEntry {
     int32_t spread_count = 0;       // +48 shotgun/claymore pellet count
     int32_t kztype = 0;             // word +44: kill-zone class 0..7 [orig: table @0x8133E0]
     int32_t kz_damage = 0;          // word +46
+    int16_t heat_det_range = 0;     // +100, heat seeker range in world units
+    int32_t boresight_maxang = 0;    // +88, heat seeker cone in BAM
+    int32_t armor_density[3] = {}; // armor energy loss by shooter ammo class
     int32_t weight_in_grains = 0;   // +184 — the kinetic damage mass term [orig: @0x4ecb1a]
     int32_t min_stable_velocity = 0; // +176 speed-table index threshold
     int32_t tumble_error_fp16 = 0;  // +180; exact kick size, random frame still deferred

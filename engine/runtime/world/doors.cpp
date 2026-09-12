@@ -37,6 +37,13 @@ const DoorSystem::Slot *DoorSystem::slot(const Entity &entity, int section) cons
     return &value;
 }
 
+// [orig: target @0x43F89A..0x43F8B2; unlike ordinary door lookup, no first-bone subtraction]
+bool DoorSystem::target_section_closed(const Entity &entity, int section) const {
+    const int index = int(entity.door_slot) + section;
+    if (index < 0 || index >= kCapacity) return false;
+    return size_t(index) >= slots_.size() || slots_[size_t(index)].state == 0;
+}
+
 // [orig: FadeEffect_UpdateAll @0x44E920]
 void DoorSystem::tick(World &world) {
     for (Slot &value : slots_) {
@@ -92,7 +99,7 @@ void DoorSystem::command(World &world, Entity &entity, int event, uint32_t touch
             }
         }
     }
-    entity.static_think_age = 1920;
+    entity.class_think_ticks = 1920;
 }
 
 // [orig: WacCmd_DoorOpen @0x4F70A0 -> @0x43F340]

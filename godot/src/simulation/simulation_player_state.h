@@ -1,21 +1,15 @@
 // The Simulation's local-player shell state that outlives the kernel (ADR
 // 0043 d9): the player's weapon profile record (weapon.sav, player-scoped —
 // the kernel's loadout aggregate is mission-scoped), the resident-kit seed
-// cursor and the 0x2F push latch, the HUD map-control state machine, and the
+// cursor and the 0x2F push latch, and the
 // F3 Weapon window's held-trigger latch. Plain data with no behavior.
 #pragma once
 
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
-#include <runtime/hud/hud_minimap.h>      // HudMapControl
 
 namespace godot {
 
 struct SimulationPlayerState {
-	// The M-cycle map mode + the two radar zooms — the engine-side state
-	// machine carries the retail lifecycle (cycle, zoom routing, spawn
-	// reset, the dead-player clear); Simulation only routes requests and
-	// tick edges into it (witness at hud::HudMapControl).
-	opennova::hud::HudMapControl hud_map_control;
 	// The ACTIVE player weapon profile record — retail's g_charSelClass slot: two
 	// side blocks (blue/red), each carrying the class byte that selects both the wire
 	// class and one of five 2048-byte kit pages, plus the single-player page.

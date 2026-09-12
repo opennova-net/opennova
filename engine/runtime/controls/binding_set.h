@@ -11,12 +11,12 @@
 //  @ 0x55c780; profile copy @ 0x559d50; PlayerProfile_SaveToFiles @ 0x54be00].
 //
 // This port keeps the same slot semantics over the static catalog. Keyboard
-// defaults are the byte-exact catalog values; the mouse/joystick runtime
-// default arrays are still the D-CTRL-1 RE hunt, so their defaults are
-// unbound. Joystick capture is not wired (no joystick runtime yet).
+// defaults and the mouse/joystick words come from the static catalog.
+// Joystick capture is not wired; authored button defaults can be polled.
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -26,6 +26,12 @@
 #include <runtime/controls/controls.h>
 
 namespace opennova::controls {
+
+// DirectInput POV angle in hundredths of a degree -> up/down/left/right
+// bits. 0xffff (including -1) is the centered/disconnected sentinel.
+// [orig: Joystick_MapAxisToBitfield @0x764c10, fed dev->pov by @0x7653c0]
+uint8_t joystick_pov_mask(int32_t angle);
+
 
 // Mouse capture masks [orig: the capture callback's event->mask map
 // @ 0x55c78b..0x55c7d5].
@@ -65,7 +71,9 @@ struct BindingRecord {
   uint16_t primary_mod = 0;    // slot-1 modifier VK (17 Ctrl / 16 Shift / 0)
   uint16_t secondary_mod = 0;  // slot-2 modifier VK
   uint16_t mouse_mask = 0;     // kMouse* mask (0 = unbound)
-  uint8_t joy_button = 0;      // button index + 1 (0 = unbound)
+  uint16_t mouse_mod = 0;      // mouse modifier VK
+  uint8_t joy_mod = 0;         // joystick modifier button
+  uint8_t joy_button = 0;      // 1-based button, or POV-hat direction 0x81..0x90
 };
 
 // Whether a VK rides Windows' extended-key lParam bit (bit 24), which the
@@ -137,6 +145,21 @@ class BindingSet {
   //  the fallback @0x49d42f..0x49d437); fallback @0x49d3ba..0x49d488 (both
   //  modifier words zero @0x49d3c1.., key match, fire @0x49d488)]
   int pressed_key(int index, const std::function<bool(int)> &key_down) const;
+
+  // Held mouse rows are polled independently. Event rows dispatch the FIRST
+  // eligible match, modified rows before unmodified, in catalog order.
+  // [orig: Input_ProcessMouseAxisBindings @0x499680;
+  //  process_input_bindings @0x4dda50; Input_InitBindings @0x499ab0]
+  bool pressed_mouse(int index, uint16_t held_mask,
+      const std::function<bool(int)> &key_down, bool dead = false) const;
+  int mouse_event_action(uint16_t mask,
+      const std::function<bool(int)> &key_down, bool dead = false) const;
+
+  // Buttons 1..128 followed by four four-bit POV hats. The caller retains
+  // event edges; held action rows can repeat each tick.
+  // [orig: Input_TryTriggerJoystickButton @0x497b30]
+  bool pressed_joystick(int index, const std::function<bool(int)> &button_down,
+      const std::array<int32_t, 4> &pov_angles, bool dead = false) const;
 
   std::size_t size() const { return records_.size(); }
   const BindingRecord *record(int index) const;

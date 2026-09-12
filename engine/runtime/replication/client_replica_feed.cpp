@@ -92,6 +92,8 @@ void ClientReplicaPipeline::apply_game_event(const std::vector<uint8_t> &body) {
 		ev.aux_index = 0xFF;
 	}
 
+	if (rec.event_type >= 19 && rec.event_type <= 21)
+		pending_effect_commands_.push_back(rec);
 	pending_game_events_.push_back(ev);
 }
 
@@ -113,9 +115,9 @@ void ClientReplicaPipeline::apply_chat_broadcast(const std::vector<uint8_t> &bod
 	pending_chat_lines_.push_back(std::move(line));
 }
 
-std::vector<PlaySoundCommand> ClientReplicaPipeline::drain_sound_commands() {
-	std::vector<PlaySoundCommand> result;
-	result.swap(pending_sound_commands_);
+std::vector<ClientEffectCommand> ClientReplicaPipeline::drain_effect_commands() {
+	std::vector<ClientEffectCommand> result;
+	result.swap(pending_effect_commands_);
 	return result;
 }
 

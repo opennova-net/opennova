@@ -21,7 +21,7 @@
 #include <cmath>
 #include <cstdlib>
 
-// The bike's has-been-driven byte (+0x3DE) is cleared by the FALLEN-bike arm of
+// The bike's retained wheelie byte (+0x3DE) is cleared by the FALLEN-bike arm of
 // Entity_UpdateVehicleChassisOrientation @0x468A50 (the `mov [esi+3DEh], bl`
 // @0x468BB1 under `[ebp+8] > 250 && [ebp+14h] > 250 || [ebp+38h] > 0`, ported in
 // vehicle_contact_solve.cpp's light solve), NOT by the crash seed
@@ -66,7 +66,7 @@ void store_osc(Entity::VehicleMotorState::WheelOsc &w, const ConformOscillator &
 //  0x47e32c airborne]: the corner target drops by the sink beyond one growth
 //  step, and a drop past -5000 while falling marks the hard landing.
 void catch_up(Entity::VehicleMotorState &m, int k, int32_t growth, bool grounded,
-              const bool contact[4], int32_t corner_adj[4], bool tank = false) {
+              const bool contact[4], int32_t corner_adj[4], bool tank = false, bool bike = false) {
 	int32_t c = m.plat_acc[k] - growth;
 	if (grounded && tank) {
 		// The tank's grounded twin skips the WHOLE block — the pair clear
@@ -82,11 +82,13 @@ void catch_up(Entity::VehicleMotorState &m, int k, int32_t growth, bool grounded
 	}
 	c = -c;
 	// `entity+0x60 > 0` is the override freeze (never set here); k < 4 always.
-	corner_adj[k] += c;
+    // [orig: Entity_ProcessLightVehiclePhysics @ 0x47B4AA, 0x47B992]
+    if (!bike || !m.wheelie_request) corner_adj[k] += c;
 	if (grounded) {
 		// A same-side pad pair in contact clears the marker instead
 		// [orig: @0x47e9f6..0x47ea12].
-		if ((contact[0] && contact[3]) || (contact[1] && contact[2])) {
+		if (bike ? (contact[0] && contact[1]) :
+                ((contact[0] && contact[3]) || (contact[1] && contact[2]))) {
 			m.landing_2ee = 0;
 			return;
 		}
@@ -170,7 +172,7 @@ void vehicle_suspension_bike_crash_test(Entity &veh, bool front_contact,
 	// [orig: Entity_ProcessLightVehiclePhysics @0x47b32d..0x47b375]
 	Entity::VehicleMotorState &m = veh.veh;
 	if (m.crashed != 0) return;
-	if (!front_contact && !rear_contact && m.has_been_driven != 0 && any_spine_contact)
+	if (!front_contact && !rear_contact && m.wheelie_active != 0 && any_spine_contact)
 		m.crash_request = 1;
 }
 
@@ -201,7 +203,8 @@ void VehicleSystem::suspension_grounded_loop(Entity &veh, const VehicleTraits &t
 		// [orig: @0x47e9a1..0x47e9bc].
 		if (!contact[k] && m.crash_request == 0) {
 			if (m.crashed != 0) continue;
-			catch_up(m, k, growth, /*grounded=*/true, contact, corner_adj);
+			catch_up(m, k, growth, /*grounded=*/true, contact, corner_adj,
+                    false, traits.family == VehicleFamily::Bike);
 		}
 		if (m.crashed != 0) continue; // [orig: @0x47ea33..0x47ea3a]
 		ConformOscillator osc = load_osc(m.wheel_osc[k]);
@@ -269,7 +272,8 @@ void VehicleSystem::suspension_airborne_loop(Entity &veh, const VehicleTraits &t
 		}
 		store_osc(m.wheel_osc[k], osc);
 		if (m.crashed == 0 && m.crash_request == 0)
-			catch_up(m, k, growth, /*grounded=*/false, no_contact, corner_adj);
+			catch_up(m, k, growth, /*grounded=*/false, no_contact, corner_adj,
+                    false, traits.family == VehicleFamily::Bike);
 	}
 }
 

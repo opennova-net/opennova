@@ -857,8 +857,8 @@ void test_demolition_flag_and_flagball_gameplay() {
     world->registry.despawn(blue_flag);
     world->registry.despawn(blue_bay);
 
-    // FlagReturnTime is counted by the same one-second entity service (the
-    // flag callback rearms itself at spawnPhase 62), not once per sim tick.
+    // FlagReturnTime uses the flag's pool-1 class clock. A moved flag first
+    // rearms its return counter; subsequent idle callbacks consume it.
     // [orig: flag update callback @0x408430; g_FlagReturnTime_2 @0x24D2174]
     MatchRules timed_return;
     timed_return.game_type = gt::kFlagBall;
@@ -872,20 +872,28 @@ void test_demolition_flag_and_flagball_gameplay() {
     blue_entity->position = {10.0f, 0.0f, 0.0f};
     const EntityHandle timed_flag =
         objective(*world, 4095, 0, {10.0f, 0.0f, 0.0f});
+    ItemDeathTraits flag_traits;
+    flag_traits.death_class = ItemDeathClass::kFlag;
+    world->tables.item_death_traits.set(4095, flag_traits);
     contacts.bind(timed_flag);
     contacts.touch(*world, blue, timed_flag);
     world->match.advance_tick(*world); // immediate service + per-tick pickup
     CHECK(blue_entity->mounted_child == timed_flag);
+    destruction_notify_item_damage(*world, *world->registry.get(timed_flag), 0);
+    world->registry.get(timed_flag)->class_think_ticks = 0;
     blue_entity->position = {0.0f, 0.0f, 0.0f};
     world->match.record_death(*world, blue);
     blue_entity->alive = false;
     blue_entity->flags |= kEntityFlagDead;
     CHECK(world->registry.get(timed_flag)->position.x == 0.0f);
-    for (int i = 0; i < 4 * 62; ++i)
+    for (int i = 0; i < 5 * 62; ++i) {
+        world->logic_tick = i;
+        tick_item_event_pool(*world, 1);
         world->match.advance_tick(*world);
+    }
     CHECK(world->registry.get(timed_flag)->position.x == 0.0f);
-    for (int i = 0; i < 62; ++i)
-        world->match.advance_tick(*world);
+    world->logic_tick = 5 * 62;
+    tick_item_event_pool(*world, 1);
     CHECK(world->registry.get(timed_flag)->position.x == 10.0f);
     world->registry.despawn(timed_flag);
 

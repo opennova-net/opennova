@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/world/local_player_view.h>
+#include <runtime/hud/sight_overlay.h>
 
 namespace godot {
 
@@ -25,6 +26,16 @@ protected:
 public:
 	void assign(const opennova::world::LocalPlayerViewFrame &p_value) { value_ = p_value; }
 
+    int get_sight_slide_multiplier() const {
+        opennova::hud::ScopeZeroInputs in;
+        in.slot_zero_word = value_.scope_zero_word;
+        in.scope_max_zero_steps = value_.scope_zero_max;
+        in.scope_zero_step = value_.scope_zero_step;
+        in.scope_zero_default = value_.scope_zero_default;
+        in.rangefinder_q16 = value_.aim_range_q16;
+        return opennova::hud::sight_slide_multiplier(in);
+    }
+    int get_aim_range_units() const { return value_.aim_range_q16 / 65536; }
 	bool get_scope_engaged() const { return value_.scope_engaged; }
 	bool get_mounted() const { return value_.mounted; }
 	// The RESOLVED camera mode (0 first person, 1 the chase, 4 the death lerp),

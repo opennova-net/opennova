@@ -186,7 +186,9 @@ void PlayerViewmodelRig::update_viewmodel_projection() {
 	}
 	const float aspect = size.x / size.y;
 	const float near = static_cast<float>(Simulation::viewmodel_pass_near_z());
-	const float fov_fp_v = Simulation::fov_vertical_from_horizontal(renderfov_h_deg_, aspect);
+	const Ref<Simulation> projection_sim = sim();
+    const float fov_fp_v = Simulation::fov_vertical_from_horizontal(renderfov_h_deg_, aspect,
+        projection_sim.is_valid() ? projection_sim->get_local_player_aspect_mode() : -1);
 	const Projection beauty = cam->get_camera_projection();
 	if (Math::is_zero_approx(beauty.columns[1][1])) {
 		return;

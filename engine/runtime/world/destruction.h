@@ -70,9 +70,8 @@ struct DeathEffectBank {
 //  the pool-1 think gate @0x4b8e1b, the pool-2 cohort gate @0x4c2291]
 enum class ItemDeathClass : uint8_t {
 	// Rows built without a def (hand-built tests) and the class rows whose
-	// event callback is not ported yet (bld2 @0x43EEE0, towr @0x4406A0, emit
-	// @0x43F8F0, brrl, bldg, cran, door, target, palm, flag, envs, squib,
-	// ele0, the throwable rows, and the organic/vehicle rows that never
+	// event callback is dispatched by another system (the throwable rows
+	// and the organic/vehicle rows that never
 	// reach this notify): the pre-dispatch body, i.e. the tree callback.
 	kUnwitnessed = 0,
 	kNull, // "null" @0x813000 (and psec @0x813288, pwrp @0x813360, the
@@ -83,16 +82,63 @@ enum class ItemDeathClass : uint8_t {
 	kGnl2, // "gnl2" @0x8130F0 -> Entity_HandleDeathEvent @0x4070F0
 	kTree, // "tree" @0x813258 -> Entity_HandleDestructibleDeathEvent @0x440210
 	kEwep, // "ewep" @0x813090 -> Entity_UpdateChildAttachment @0x4409A0
+    kBarrel, // brrl @0x407CC0
+    kBuilding, // bldg @0x43EE60
+    kElevator, // ele0 @0x4A20D0
+    kDoor, // door @0x43F370
+    kTarget, // target @0x43F880
+    kEnvironmentSound, // envs @0x408290
+    kFlag, // flag @0x408430
+    kCollapsingBuilding, // bld2 @0x43EEE0
+    kEmitter, // emit @0x43F8F0
+    kCrane, // cran @0x43FC70
+    kPalm, // palm @0x53C4C0
+    kTower, // towr @0x4406A0
+    kSquib, // squib @0x449810
 };
 
 // The class row for an items.def ai_function tag — the retail table walk
 // (whole-string, case-insensitive; a miss and the empty tag are the null row).
 ItemDeathClass item_death_class_from_tag(const char *ai_function);
 
+struct RegionalItemSound {
+    std::string name; // empty when the loaded banks do not resolve this slot
+    int32_t base_ticks = 0;
+    int32_t range_ticks = 0;
+};
+
 struct ItemDeathTraits {
     // The event/death callback row (item_death_class_from_tag on the def's
     // ai_function) — destruction_notify_item_damage dispatches on it.
     ItemDeathClass death_class = ItemDeathClass::kUnwitnessed;
+    // Intact MODEL/CMDL carriers used by building class callbacks.
+    bool model_loaded = false;
+    bool model_bounds_loaded = false;
+    std::vector<std::array<int32_t, 3>> model_section_origins_q16; // COBJ+56/60/64
+    std::vector<int32_t> model_section_heights_q16; // COBJ+88 minus +84
+    std::vector<std::array<int32_t, 3>> husk_section_origins_q16; // final ?: primary COBJ
+    std::vector<std::array<int32_t, 3>> model_pivots_q16; // CMDL+116 / CXLT
+    int32_t model_radius_q16 = 0; // GPM+20 / GHDR+24
+    int32_t model_section0_min_z_q16 = 0;
+    int32_t model_section0_max_z_q16 = 0;
+    int32_t destroy_timing_ticks[3] = {};
+    int32_t physics = 0;
+    int32_t squib_distance_q16 = 0;
+    std::string squib_ammo;
+    bool primary_husk_loaded = false;
+    int32_t model_radius_xy_q16 = 0;
+    int32_t model_radius_z_q16 = 0;
+    int32_t model_min_q16[3] = {};
+    int32_t model_max_q16[3] = {};
+    std::string graphic_name;
+    std::string particlefx;
+    bool has_particlefx_point = false;
+    int32_t particlefx_point_q16[3] = {};
+    int32_t particlefx_direction_q16[3] = {};
+    std::array<RegionalItemSound, 4> regional_sounds;
+    std::array<std::string, 4> regional_loops;
+    bool has_sound_point = false;
+    Vec3 sound_point; // intact-model SOUND userpoint, mission-local axes
     bool static_death = false;  // attrib2 & 0x100; generic death motion freezes
     int32_t unit_type = 0;      // def+0x196 — the death-dispatch row key
     float kz = 0.0f;            // def+0x198 — death-blast radius (units); 0 = none
@@ -462,14 +508,44 @@ public:
 // husk), null @0x406FF0 (never dies). Phase mirrors the witnessed callback
 // param (1 bullet hit, 2 explosion hit, 4 net kill); the authority legs run
 // under rules.logic_authority, a client acts on phase 4 only.
-void destruction_notify_item_damage(World &world, Entity &target, int phase);
+struct ItemExplosionEvent {
+    uint16_t source = 0xFFFF;
+    uint8_t count = 0;
+    FixedVec3 position;
+    int32_t heading = 0;
+};
+void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &position,
+        int32_t heading, int count, bool broadcast = true);
+struct EntityRemoveEvent { uint16_t handle = 0xFFFF; };
+struct ItemStateEvent {
+    uint16_t handle = 0xFFFF;
+    int16_t section = 0;
+};
+// Class callbacks enqueue the section payload at their original send sites.
+// [orig: Server_SendEntityStatePacket @ 0x509D70]
+void emit_item_state(World &world, Entity &target, int32_t section);
+void update_item_destroy_fade(World &world, Entity &entity);
+void update_item_ambient_sound(World &world, const Entity &entity);
+void squib_event(World &world, Entity &entity, int phase);
+void tick_squib(World &world, Entity &entity);
 
-// The pool think walks' cb(entity, 0, 0) on the +0x2AC expiry, for the class
-// rows whose death arms a countdown with a body of its own: the gnrc Flags&2
-// leg four ticks after death and the gnl2 one 32 ticks after. Once per logic
-// tick on the authority [orig: Entity_UpdatePool1Slot @0x4b8dd0 gate
-// @0x4b8e1b..0x4b8e3c + decrement @0x4b8ea0].
-void destruction_tick_class_death_think(World &world);
+struct ItemHitContext {
+    int32_t section = 0; // hitRecord[14]
+    int32_t damage = 0; // hitRecord[12], tower reads its low byte
+    int32_t heading = 0, pitch = 0, roll = 0; // hitRecord[3..5]
+};
+// The 0x26 route's health clear and Dead guard before callback phase four.
+// [orig: Entity_KillBySlotId @ 0x42BCE0]
+void apply_item_state_event(World &world, Entity &target, int16_t section);
+
+void destruction_notify_item_damage(World &world, Entity &target, int phase,
+        ItemHitContext hit = {});
+
+// The per-pool cb(entity, 0, 0) clock: pool 1 every tick and trailing -1,
+// pool 2 at slot&7 with positive-clock -8, pool 3 at slot&63 with -64.
+// Both peers run class callbacks; each callback owns its authority gates.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_UpdateAllEntities @0x4C2100]
+void tick_item_event_pool(World &world, int pool);
 
 // The tree-class destruction [orig: Entity_ProcessDestructibleDeath @ 0x43fbc0 +
 // the Entity_InitDeathSounds presentation leg]: Flags |= 6 (dead + husk swap),
@@ -502,9 +578,12 @@ void entity_process_falling_death(World &world, Entity &entity,
 // Entity_UpdateStaticDeathPhysics @ 0x494230 (buildings) /
 // Entity_UpdateFallingDeathPhysics @ 0x493f70 (vehicles, incl. the landing kz
 // blast)]. This includes AI-capable pool-1 entities after death dispatch.
-void destruction_tick_dead_items(World &world,
-                                 const terrain::TerrainHeightField *terrain,
-                                 float water_height, DestructionEvents &events);
+// Returns true when a class-specific update owns this row.
+bool tick_item_class_motion(World &world, Entity &entity,
+        const terrain::TerrainHeightField *terrain);
+
+void tick_item_death_motion(World &world, Entity &entity,
+        const terrain::TerrainHeightField *terrain, float water_height, DestructionEvents &events);
 
 // Bullet-vs-item damage gates, shared by RoundSim's item leg [orig:
 // Projectile_ProcessDamageOnTarget @ 0x4e7fb0]: indestructible flag, armor

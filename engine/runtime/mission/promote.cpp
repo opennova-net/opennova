@@ -247,6 +247,9 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
 	s.group_id = e.group_id;
 	s.waypoint_id = e.waypoint_id;
     s.wp_number = e.wp_number;
+    // [orig: Entity_SpawnFromBMSRecord @0x40E9F0, entity+672]
+    s.script_next_ssn = (e.type_id == 6005 || e.type_id == 6006) ?
+            e.ttool_index : e.next_ssn;
     if (e.type_id == kParticleEffectMarkerTypeId) {
         size_t length = 0;
         while (length < 31 && e.gen_string[length] != '\0') ++length;
@@ -591,6 +594,37 @@ ItemAttachmentSpawns spawn_item_attachments(World &world, const std::vector<Enti
     return result;
 }
 
+namespace {
+
+// The record is temporary: retail remaps a 5305 teammate before the item lookup.
+// Its class selector has one runtime writer, the settings copy of the constant
+// default 1. [orig: Config_SetDefaults @0x54d400; apply_session_settings_to_globals
+// @0x551a2a; Entity_SpawnFromBMSRecord @0x40ea5c]
+constexpr int32_t kBmsTeammateClass = 1;
+
+bool admit_record(const bms::Entity &record, const World &world,
+        const PromoteOptions &opts) {
+    const bool session = world.rules.mp_session;
+    if (record.type_id == 5305 && (session || world.rules.teammates_disabled)) return false;
+    // Both thresholds are signed bytes. The lower-bound flag rejects every
+    // offline load; the upper-bound comparison applies only in a session.
+    // [orig: Entity_SpawnFromBMSRecord @0x40ea76..0x40eb21]
+    const uint32_t flags = record.bmsi_attributes;
+    if ((flags & 0x10u) && (!session || opts.player_limit < static_cast<int8_t>(record.no_less_than))) return false;
+    if ((flags & 0x20u) && session && opts.player_limit > static_cast<int8_t>(record.no_more_than)) return false;
+    if ((flags & 0x40u) && session) return false;
+    if ((flags & 0x80u) && !session) return false;
+    const int32_t type_id = record.type_id == 5305 ? 4999 + kBmsTeammateClass : record.type_id;
+    const uint32_t attrib = opts.item_attributes ? opts.item_attributes(type_id) : 0u;
+    if ((attrib & 0x10000u) != 0) {
+        return session && opts.team_count == 4 &&
+                (opts.game_type == 0x10000u || opts.game_type == 0x10001u || opts.game_type == 0x10008u);
+    }
+    return opts.team_count == 4 || (record.team != 3 && record.team != 4);
+}
+
+} // namespace
+
 PromoteResult promote_mission(const bms::File &m, World &world,
                               const PromoteOptions &opts) {
     AiSystem &ai = world.ai;
@@ -614,7 +648,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     //  entity+80 == 2043 -> dword_2723EB4]
     world.tables.map_grid_origin_present = false;
     for (const bms::Entity &mk : m.markers) {
-        if (mk.type_id == 2043 && !world.tables.map_grid_origin_present) {
+        if (mk.type_id == 2043 && !world.tables.map_grid_origin_present && admit_record(mk, world, opts)) {
             world.tables.map_grid_origin_present = true;
             world.tables.map_grid_origin_x = mk.x;
             world.tables.map_grid_origin_y = mk.y;
@@ -622,6 +656,10 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     }
     for (const bms::Entity &mk : m.markers) {
         NavEntry n;
+        if (!admit_record(mk, world, opts)) {
+            ai.nav.nodes.push_back(n); // preserve the zeroed pool-3 slot's index
+            continue;
+        }
         // Arrival radius from the marker's wp_distance, default 0.5u. [orig:
         // Entity_SpawnFromBMSRecord @0x40e9f0 item 6005: entity dword[0] =
         // wp_distance ? wp_distance<<16 : 0x8000]
@@ -686,6 +724,11 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             const bms::Entity &mk = m.markers[static_cast<size_t>(idx)];
             WaypointEntry e;
             e.node = idx;
+            if (!admit_record(mk, world, opts)) {
+                e.radius = 0;
+                world.script.waypoints.entries.push_back(e);
+                continue;
+            }
             e.x = mk.x;
             e.y = mk.y;
             e.z = mk.z;
@@ -782,10 +825,14 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     uint32_t spawn_phase_counter = 0; // dword_A77638, reset per load [orig: @0x40f5c0 area]
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {
         uint32_t idx = 0;
-        for (const bms::Entity &e : vec) {
+        for (const bms::Entity &record : vec) {
             uint32_t origin = spawn_origin_pack(static_cast<uint32_t>(kind), idx);
             ++idx;
+            if (!admit_record(record, world, opts)) { ++r.dropped; continue; }
+            bms::Entity e = record;
+            if (e.type_id == 5305) e.type_id = 4999 + kBmsTeammateClass;
             Entity seed = make_seed(e, kind, static_cast<uint16_t>(e.id), origin);
+            if (record.type_id == 5305) seed.player_class = kBmsTeammateClass;
             // The authored display name: name_index 0 = none; the resolver maps
             // the index through the mission RTXT [PeopleNames] STRNAME%03i entry
             // and the copy truncates at the retail 15 chars [orig:
@@ -822,7 +869,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
                 // mov [esi+2ACh],ecx; add dword_A77638,0Bh` @0x40ec8c..0x40ecb8;
                 // the counter resets per load]. Vehicles re-stamp their own
                 // 0..15 phase below.
-                spawned->static_think_age = static_cast<int32_t>(spawn_phase_counter % 60u);
+                spawned->class_think_ticks = static_cast<int32_t>(spawn_phase_counter % 60u);
                 spawn_phase_counter += 11u;
             }
             const bool ai_capable =

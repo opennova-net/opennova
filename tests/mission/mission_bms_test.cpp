@@ -117,6 +117,7 @@ int main() {
 	// The editable properties, one named field at a time (the same clamp rules
 	// the retired bulk setter applied).
 	const int ai_flags = static_cast<int>(opennova::bms::BmsiAttributeFlags::Blind) |
+                         static_cast<int>(opennova::bms::BmsiAttributeFlags::MultiplayerOnly) |
 	                     static_cast<int>(opennova::bms::BmsiAttributeFlags::NoShadow);
 	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "group", 7, error));
 	TEST_EXPECT(set_entity_property_int(document, EntityKind::Item, 0, "waypoint_id", 3, error));
@@ -969,6 +970,59 @@ int main() {
 		write_u16_le(bytes, offsetof(opennova::bms::Header, secondary_chunk_len), 0xFFFF);
 		opennova::bms::File chunk_reparsed;
 		TEST_EXPECT(!opennova::bms::parse(bytes.data(), bytes.size(), chunk_reparsed, err));
+	}
+
+	// [orig: AIProfile_SanitizeConfigData @ 0x40cfe0] The sanitizer walks records,
+	// preserves the first three strings and accepts nonzero atoi prefixes verbatim.
+	// A missing fourth field leaves the following name unconsumed.
+	{
+		const auto parse_loadout = [&](const std::vector<std::string> &fields,
+		                               opennova::bms::File &parsed) {
+			std::vector<uint8_t> chunk;
+			for (const std::string &field : fields) {
+				chunk.insert(chunk.end(), field.begin(), field.end());
+				chunk.push_back(0);
+			}
+			chunk.push_back(0);
+			std::vector<uint8_t> bytes = original;
+			const auto begin = bytes.begin() + opennova::bms::kHeaderSize;
+			bytes.erase(begin, begin + original_loadout_len);
+			bytes.insert(bytes.begin() + opennova::bms::kHeaderSize, chunk.begin(), chunk.end());
+			write_u16_le(bytes, offsetof(opennova::bms::Header, weapon_loadout_chunk_len),
+			             static_cast<uint16_t>(chunk.size()));
+			std::string err;
+			return opennova::bms::parse(bytes.data(), bytes.size(), parsed, err);
+		};
+		opennova::bms::File parsed;
+		TEST_EXPECT(parse_loadout({"CUSTOM_KIT", "abc", "4suffix", "2damage",
+		                           "WPN_EMPTY", "", "-ammo", "+0.5",
+		                           "WPN_THREE", "-1", "0",
+		                           "WPN_LAST", "WPN_ammo", "", "--"}, parsed));
+		const auto &kit = parsed.loadout.entries;
+		TEST_EXPECT(kit.size() == 4);
+		TEST_EXPECT(kit[0].name == "CUSTOM_KIT" && kit[0].ammo_primary == "abc" &&
+		            kit[0].ammo_secondary == "4suffix" && kit[0].flags == "2damage");
+		TEST_EXPECT(kit[1].ammo_primary.empty() && kit[1].ammo_secondary == "-ammo" &&
+		            kit[1].flags == "+0.5");
+		TEST_EXPECT(kit[2].name == "WPN_THREE" && kit[2].flags == "-1");
+		TEST_EXPECT(kit[3].name == "WPN_LAST" && kit[3].ammo_primary == "WPN_ammo" &&
+		            kit[3].ammo_secondary.empty() && kit[3].flags == "--");
+		std::vector<uint8_t> canonical;
+		std::string err;
+		TEST_EXPECT(opennova::bms::write(parsed, canonical, err));
+		opennova::bms::File round_trip;
+		TEST_EXPECT(opennova::bms::parse(canonical.data(), canonical.size(), round_trip, err));
+		TEST_EXPECT(opennova::bms::equal(parsed, round_trip));
+		TEST_EXPECT(parse_loadout({"LAST_THREE", "+", "-1"}, parsed));
+		TEST_EXPECT(parsed.loadout.entries.size() == 1 && parsed.loadout.entries[0].flags == "-1");
+		TEST_EXPECT(parse_loadout({"WPN_FIRST", "0", "1", "0suffix", "2", "3", "4"}, parsed));
+		TEST_EXPECT(parsed.loadout.entries.size() == 2 && parsed.loadout.entries[0].flags == "-1" &&
+		            parsed.loadout.entries[1].name == "0suffix");
+		TEST_EXPECT(parse_loadout({"WPN_SHORT"}, parsed));
+		TEST_EXPECT(parsed.loadout.entries.size() == 1 &&
+		            parsed.loadout.entries[0].ammo_primary.empty() &&
+		            parsed.loadout.entries[0].ammo_secondary.empty() &&
+		            parsed.loadout.entries[0].flags == "-1");
 	}
 
 	// --- Modeling policy: the loader sanitizes the loadout chunk into canonical four-string

@@ -235,6 +235,16 @@ void DestructionPresenter::restore_intact(const String &key) {
 	husked_.erase(key);
 }
 
+ObjectModel *DestructionPresenter::visual_model(ObjectModel *model) const {
+    if (model == nullptr || model->get_entity_ref().is_null()) return model;
+    const Ref<EntityRef> ref = model->get_entity_ref();
+    const String key = identity_key(ref->get_bms_id(), opennova::world::spawn_origin_pack(
+            ref->get_origin_kind() >= 0 ? ref->get_origin_kind() : ref->get_kind(), ref->get_index()), ref->get_wire_handle());
+    const ObjectID *id = husked_.getptr(key);
+    ObjectModel *husk = id ? Object::cast_to<ObjectModel>(live_node3d(*id)) : nullptr;
+    return husk ? husk : model;
+}
+
 void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk) {
 	const int bms_id = p_husk.bms_id;
 	const int64_t spawn_origin = static_cast<int64_t>(p_husk.spawn_origin);
@@ -277,6 +287,8 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 			return;
 		}
 		model->set_name("HuskModel");
+        if (intact_model != nullptr)
+            model->set_section_visibility_mask(intact_model->get_section_visibility_mask());
 		set_husk_static_shadow(model, individual_casts_static_shadow);
 		// The reflect flag belongs to the entity, not its current graphic. The
 		// individual branch must preserve it just like the batched carve branch
@@ -311,10 +323,9 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 		return;
 	}
 	if (uses_dynamic_husk_identity(bms_id, spawn_origin, wire_handle)) {
-		// The dynamic row may already have retired or failed model resolution.
-		// There is no safe static fallback: bms_id zero is a valid authored key.
-		husked_[husk_key] = ObjectID();
-		++stat_no_husk_;
+		// A budgeted cold row can build its node later. Its retained PF_HUSK
+        // pick retries then; do not cache this temporary resolution miss.
+        ++stat_no_husk_;
 		return;
 	}
 	// Batched static (world-wac-ai-re §24.6): carve the instance, graft at its
@@ -648,7 +659,7 @@ void DestructionPresenter::unregister_effect_anchor(const Variant &p_key) {
 // The wreck-fire registry prune: drop entries whose node died. The random
 // crackle itself rolls in the SIM on the engine PRNG stream, per logic tick,
 // and arrives as an ordinary transient effect + distance-delay-gated sound
-// (S12b; world/destruction destruction_tick_dead_items
+// (S12b; world/destruction tick_item_death_motion
 // [orig: Entity_UpdateDeadWreckEffects @ 0x493140]).
 void DestructionPresenter::tick_wreck_fires() {
 	if (burning_.is_empty()) {

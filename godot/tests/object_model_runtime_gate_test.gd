@@ -619,3 +619,18 @@ func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
 	model.advance_runtime_frame(0.5)
 	assert_ne(part.transform, poison,
 			"the submitted frame re-derives transforms from the absolute clock")
+
+
+func test_missing_material_texture_uses_the_retail_checkerboard() -> void:
+	var model := _spy_model()
+	var materials := model.get_surface_materials()
+	assert_gt(materials.size(), 0)
+	var texture: Texture2D = materials[0].get_shader_parameter("u_diffuse")
+	assert_not_null(texture)
+	if texture == null:
+		return
+	assert_eq(texture.get_size(), Vector2(128, 128))
+	var image := texture.get_image()
+	assert_eq(image.get_pixel(0, 0), Color8(48, 48, 48, 255))
+	assert_eq(image.get_pixel(4, 0), Color8(80, 80, 80, 255))
+	assert_eq(image.get_pixel(4, 4), Color8(48, 48, 48, 255))

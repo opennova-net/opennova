@@ -285,16 +285,19 @@ int check_S_61_tick_seed() {
 	return 0;
 }
 
-// S2C 0x26 — kill record: [u16 victim][u16 attacker].
+// S2C 0x26 — class state: [u16 entity][i16 hit section].
 int check_S_26_kill() {
 	LE w;
 	w.u16(0x1003);   // victim slot
-	w.u16(0x1004);   // attacker
+	w.u16(0xFFFF);   // section -1
 	KillRecord rec;
 	size_t consumed = 0;
 	EXPECT(decode_kill_record(w.b.data(), w.b.size(), rec, consumed));
 	EXPECT(consumed == 4);
 	EXPECT(rec.victim_slot == 0x1003);
+    EXPECT(rec.section == -1);
+    EXPECT(decode_kill_record(w.b.data(), 2, rec, consumed));
+    EXPECT(consumed == 2 && rec.section == 0);
 	cover('S', 0x26);
 	return 0;
 }
@@ -1526,8 +1529,35 @@ int check_C_32_empty_slots_request() {
 	return 0;
 }
 
-// S2C 0x3A — medic-reviving: the handler reads no bytes; any body length is
-// accepted, as retail ignores it. [orig: NapiNPClientMsg_0x03A @0x422680]
+// [orig: NapiNPClientMsg_HandleSpawnEffect @0x430B10]
+int check_S_21_explosion_effect() {
+    const uint8_t bytes[] = {0, 10, 0xFF, 0xFF,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0x40};
+    ExplosionEffectRecord out;
+    EXPECT(decode_explosion_effect(bytes, sizeof(bytes), out));
+    EXPECT(out.count == 10 && out.source == 0xFFFF && out.x == 0 &&
+        out.y == 0 && out.z == 65536 && out.heading == 0x4000);
+    EXPECT(encode_explosion_effect(out) == std::vector<uint8_t>(bytes, bytes + sizeof(bytes)));
+    EXPECT(decode_explosion_effect(bytes, 3, out));
+    EXPECT(out.count == 10 && out.source == 0 && out.z == 0 && out.heading == 0);
+    cover('S', 0x21);
+    return 0;
+}
+
+// [orig: NapiNPClientMsg_HandleEntityDeath @0x430C50]
+int check_S_6D_tracked_player_voice() {
+    const uint8_t bytes[] = {6, 31, 0xFF, 0xFF};
+    TrackedPlayerVoice out;
+    EXPECT(decode_tracked_player_voice(bytes, sizeof(bytes), out));
+    EXPECT(out.event == 6 && out.player_index == 31 && out.location == -1);
+    EXPECT(decode_tracked_player_voice(bytes, 3, out));
+    EXPECT(out.event == 6 && out.player_index == 31 && out.location == 0);
+    EXPECT(decode_tracked_player_voice(nullptr, 0, out));
+    EXPECT(out.event == 0 && out.player_index == 0 && out.location == 0);
+    cover('S', 0x6D);
+    return 0;
+}
+// S2C 0x3A reads no bytes. [orig: NapiNPClientMsg_0x03A @0x422680]
 int check_S_3A_medic_reviving() {
 	EXPECT(decode_medic_reviving(nullptr, 0));
 	const uint8_t junk[3] = {1, 2, 3};
@@ -1625,6 +1655,8 @@ int main() {
 	if (check_S_5D_destroy_list()) return 1;
 	if (check_C_32_empty_slots_request()) return 1;
 	if (check_S_3A_medic_reviving()) return 1;
+    if (check_S_6D_tracked_player_voice()) return 1;
+    if (check_S_21_explosion_effect()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

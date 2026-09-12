@@ -13,6 +13,9 @@
 namespace opennova::audio {
 
 inline constexpr int32_t kVolumeByteMax = 255;
+// Music, SFX, dialogue and rotor channels share this initial profile value.
+// [orig: Config_SetDefaults @0x54d030]
+inline constexpr int32_t kDefaultChannelVolume = 192;
 inline constexpr double kVolumeSilentDb = -80.0;
 // The linear floor that maps onto kVolumeSilentDb: log(1e-4) * kDbPerLogE == -80.
 inline constexpr double kVolumeLinearFloor = 0.0001;

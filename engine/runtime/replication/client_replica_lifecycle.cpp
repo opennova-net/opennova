@@ -92,10 +92,11 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
 // Deferred gameplay notifications belong to the current slot lifetime. A later
 // destroy/repair must not apply them to the newly materialized replacement.
 void ClientReplicaPipeline::discard_entity_notifications(uint16_t handle) {
-	pending_entity_deaths_.erase(std::remove_if(pending_entity_deaths_.begin(),
-			pending_entity_deaths_.end(), [handle](const EntityDeathRecord &event) {
-				return event.entity_handle == handle;
-			}), pending_entity_deaths_.end());
+    pending_effect_commands_.erase(std::remove_if(pending_effect_commands_.begin(),
+            pending_effect_commands_.end(), [handle](const ClientEffectCommand &command) {
+                const auto *death = std::get_if<EntityDeathEvent>(&command);
+                return death && death->entity_handle == handle;
+            }), pending_effect_commands_.end());
 	pending_weapon_reloads_.erase(std::remove_if(pending_weapon_reloads_.begin(),
 			pending_weapon_reloads_.end(), [handle](const WeaponReload &event) {
 				return event.entity_handle == handle;

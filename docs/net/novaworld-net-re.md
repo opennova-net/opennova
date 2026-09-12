@@ -4752,7 +4752,7 @@ a live retail join at 7%. The host now streams ALL four pools paged in the witne
    `netsim_world_stream_extractors`). Pool-1 (`0x0D`) is now streamed, AI-trailer crash fixed (D-NET-97).
 2. **Remote body phase + acceptance arbitration — FIXED for the received compact channel
    2026-07-21.** Both compact organic forms carry the body-state byte. The player form additionally
-   carries the authority's elapsed half-frame tick byte (off 15); the infantry form intentionally
+   carries the authority's elapsed playback-tick byte (off 15); the infantry form intentionally
    does not. A newly accepted player state seeds that elapsed tick once and then free-runs locally;
    repeated same-state packets do not rescrub the clip, and infantry no longer pins to frame zero.
    `ObjectModel` owns the retail current/pending channel: current flags `0x04` queue an incoming
@@ -7822,6 +7822,21 @@ ported; that PRNG/frame producer remains open. The separate
 `Projectile_ApplyDragDeceleration @ 0x4E5CD0` is the impact-energy loss using ammo weight and the
 surface-specific `armor_density` fields.
 
+The body-armor branch is ported (PR #645 follow-up, 2026-09-11). For a type-3
+person outside the landable/seat zone domain, hit zones 0..4 and carry flag 8
+select density +204, +208, or +212 from the shooter's per-ammo class (default,
+1, or 2). Weapon_CalcImpactDamage @0x4EC920 calls the energy helper both before
+damage calculation and after min/max clamping. This double call is deliberate.
+The helper wraps 62 times the Q16 speed, shifts by 16, caps only above 1219,
+and subtracts (wrapped 2*density)*1,000,000/weight from squared speed. A
+nonpositive result stops the round; otherwise the truncated square root returns
+to per-tick Q16 speed and scales the normalized direction with +0x8000 rounding.
+Carry flag 0x10 selects impact row 24 when the pre-impact lifetime is positive;
+IgnoreKill still controls the suppressed impact path. The projectile_combat
+regressions cover density-class selection, torso versus other zones, stopping,
+and the impact-row/lifetime gates. Atmospheric drag remains the separate helper
+described above.
+
 **Entity impact** (`Projectile_HandleEntityImpact @ 0x4E9390`): a child rolls to exactly
 one vehicle parent when its item attribute has 0x20, the child is not type 1, and that
 parent is type 1 (`@0x4e94e0`); the ARMING gate — elapsed ticks (projectile+676
@@ -7874,9 +7889,9 @@ Retail authority applies `health -= damage` (`@0x4e8127`); a kill calls
 target (entity Flags & 0x100) also receives the projectile+688 multi-hit count, shooter
 slot at target+442, owner at +376, and damage callback event 4. The ordinary bullet port
 implements the collision, calculation, target gates, health/death staging, and impact
-presentation; its separate peer callback/global-record tail, full scoring integration,
-`armor_density` impact-energy path, and projectile-triggered explosive/AoE integration
-remain distinct follow-ups.
+presentation, including the body-armor energy path. Its separate peer
+callback/global-record tail, full scoring integration, and projectile-triggered
+explosive/AoE integration remain distinct follow-ups.
 
 **The `ammo.def` table** (`AmmoDef_LoadAll @ 0x40B0B0`, `Game_StartMission @0x52548a` —
 the file is literally `ammo.def`, same encrypted-ASCII `File_ParseASCIIFile` key
@@ -8085,8 +8100,7 @@ occupant, remaining-health, and NoDie gates.
 Remaining data/integration gaps are explicit: threshold-crossing `tumble_error` still
 needs the retail PRNG and local frame; non-throwable `useownmove` classes still need their
 ammo-specific callbacks/guidance (the witnessed grenade/satchel/claymore motors are
-ported under D-THROW); `Projectile_ApplyDragDeceleration` still needs the `armor_density` impact-energy
-path; explosive/AoE, bounce, and shell physics remain separate; production animated
+ported under D-THROW); explosive/AoE, bounce, and shell physics remain separate; production animated
 organic section matrices are not yet published, so persons can use the bounded torso
 fallback; and `LiveRound` still exposes float position/velocity carriers around the Q16
 tick, losing low fixed bits at sufficiently large magnitudes. Spawn-time weapon spread,
@@ -8778,6 +8792,36 @@ WriteZoneTimerValue@0x506E70 (0x6F), WriteSpawnWaveStatus@0x507490 (0x6E)}`;
 `g_spawn_wave_time_base/zone @ 0x24D224C/50`, `g_capture_speed_setting @ 0x24D2254`,
 `g_respawn_requires_team_dead @ 0x24D2260`. Entry comments on the 15 core functions.
 
+#### Local deployment reset (2026-09-11)
+
+`Server_ProcessPlayerDeath @0x5178aa` calls `Game_InitNewRound @0x422740`
+when the deployed body is the local player, after the body reset and before
+loadout rebuild. This is a deployment hook, not a rendered dead-to-alive edge.
+`Server_ReleasePlayerDeployment` now invokes the kernel's bound `LocalPlayer`
+synchronously; remote deployments leave that state alone. The joiner invokes the
+same local reset after its authoritative respawn snap.
+
+The represented reset clears binoculars/scope, stance latches, map mode, charged
+throw start, the shake counter, hit-dim intensity/fade, and the current waypoint.
+`Camera_ResetToLocalPlayer @0x4a3d30` resets the camera anchor/lookahead and the
+local yaw follows the spawned body. NVG/gain, physical held keys/look pitch, map
+zoom and the shake IIR accumulators survive. `SpawnPoint_FindNearestEnemyBasePoint
+@0x4dd290` refreshes only game types 65540/65544 with more than one waypoint:
+skip missing definitions/Flags bit 0, select item 4091 for team 2 or 4093 for
+team 1, choose the nearest XY distance, retaining the first on ties. Its distance
+caps at the witnessed `flt_7C19E0 = 2147418112` before truncation.
+
+The local client clears its medic-reviving latch and gameplay hold. An ordered
+`local_round_reset` presentation effect clears waiting dialog lines while the
+physical current line finishes (`Dialog_ResetAll @0x44dc90` has no sound stop),
+and resets the represented HUD overlay clocks. Chat/system history is retained:
+`HUD_ResetAllOverlayBuffers @0x59dd40` resets directional/radar buffers and
+stance/ammo/target timestamps, not the chat rings. The unrepresented red/white/
+revive screen-flash counters and directional/radar storage are not invented by
+this reset port. `host_role`, `waypoint_track`, `audio_dialog_queue`, and
+`hud_frame_compiler` regressions pass; Godot player view, minimap, mission audio,
+and HUD tests pass.
+
 ### 5.62 The FP weapon action FSM — weapon.def ACTION rows → the 12-state pump (2026-07-09)
 
 How the equipped weapon animates and sequences: the weapon.def ACTION rows bind into a
@@ -8984,11 +9028,10 @@ to the retail 62.5 Hz clip duration. `npruntime_weapon_table_test` pins the comm
 `soldier` `anim_idle` clip at 18 ticks plus the intentional assetless zero fallback.
 
 **Divergences** (ledger D-WPN-1..15): the FUNCTION registry unported (std-only in all
-shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
-busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
+shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire and Finish gates are now ported (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
 weapon-switch machinery seams (D-WPN-5); local-player + occupied mounted-parent pump,
-with general non-local/unmounted coverage still open (D-WPN-6); interim
+with remote borrowed/hot-slot receive coverage now ported and authority personal-slot coverage still open (D-WPN-6); interim
 ammo seed clipsize/startrounds (D-WPN-7); FSM↔net integration now carries joiner C2S 0x06
 fire, the payload-addressed C2S 0x25 → S2C 0x49 reload round-trip, and decoded S2C tag-2
 events into a visual-only client `RoundSim`; authority/SP fire continues to append the primary
@@ -9091,8 +9134,8 @@ the channel (`AnimChannel_InitFromData(.., rate 4096, phase 0.0)` inside
 it ONE dispatch per pump tick only while the action's COUNTER is nonzero and the
 action row resolved an anim (`ActionSlot_BeginActivePhase @ 0x53f8d2..0x53f8de` —
 the counter gate; anim-less rows like the shipped RECOILs freeze the channel). The
-port free-runs clips at wall clock: at 62.5 Hz the witnessed advance is ~one
-half-frame per tick (2 x 30 fps ~= 62.5), so the rates agree; the freeze during
+port now uses the shared float32 channel clock fps/(62*frames); the old
+half-frame-per-tick claim was incorrect (2026-09-11); the freeze during
 anim-less/expired actions is the recorded divergence tail (rides D-WPN-6's
 presentation family).
 
@@ -9152,9 +9195,10 @@ sound fields and the engine plays them at different phase edges:
   +0x340` from keys `soundfireloop`/`soundtrailoff`/`soundhead`/`soundlockedtone`
   (`WeaponDefs_ParseLineCallback @ 0x5444c8..0x544578`), resolved post-parse into ids
   `+0x294/+0x298/+0x29C/+0x2A0` (`WeaponDef_ResolveAllReferences @ 0x54042c..0x540482`).
-  The fire handler plays `+0x294` only when `kickIntensity == 0` (volley start)
+  The fire handler plays `+0x29C` only when `kickIntensity == 0` (volley start)
   `@ 0x542ccc..0x542ce9`. **Zero uses in JOX+REVX weapon.def** — the leg is data-dead
-  for our SKUs (witnessed, unported; the `sub_527AD0(+8)` read after the fire begin is
+  for those corpus snapshots (the four names and receive/pump paths are now ported;
+  see the #645 weapon sound replay follow-up below). The `sub_527AD0(+8)` read after the fire begin is
   a discarded pure read `set+72 << 16` — no audible effect).
 - **Effect (particle) routing** — the local player's begins route through
   `ActionSlot_ExecuteActionTick @ 0x541a70`: only FIRE (`slot+44 == 2`) can take the
@@ -9394,7 +9438,7 @@ the window expires, or underwater. Corpus: the emplaced .50s/miniguns/DShK/turre
 the emplaced-gun barrel glow is a §8-class follow-up (extends D-WPN-4's heat family).
 (5) The kick sound-layer leg (`dword_24E0E80` gate: `Def.kickEffectId` + the decaying
 kick intensity → `SoundEmitter_RegisterSetLayers @ 0x54132a`, per tick while kick > 0) —
-an unported AUDIO seam, noted with D-WPN-3's sound family. (6) **D-WPN-18** [reimpl
+ported in the #645 weapon sound replay follow-up below, including its signed-byte lifetime. (6) **D-WPN-18** [reimpl
 divergence, FIXED 2026-07-15]: the LOCAL fire leg fed `RoundSim` a `(90 − heading)`
 mission-yaw bearing where the round bearing frame IS the engine heading frame
 (`RoundSim`'s `(cos, sin)` mission-axis mapping is wire-validated on the 0x06 yaw BAM —
@@ -12755,9 +12799,11 @@ client tick gate cur 21/23 `@ 0x458545..0x45854d`, client commit pend 16 or 21..
 collective + the pilot yaw follow of the burn spiral (`@ 0x4904A6..0x4904D0`), the
 spawn-parent `+0x264` anchor (`Game_StartMission @ 0x525F80..0x526071`),
 death/respawn, the movement-sound tails and the rotor/wreck presentation.
-Residuals witnessed at the review and NOT ported (the ledger row is
-authoritative): (a) the bike's not-crashed off-contact launch-vector arm
-`@ 0x4863DA..0x48657E`; (b) the pool-3 spawn-marker deck localization
+The #645 follow-up closes (a), the bike's not-crashed off-contact launch-vector
+arm, with the saved-pose producer and wheelie state machine; see
+[vehicle record section 38](../world/vehicle-client-movers-re.md#38-crash-height-bike-axle-and-wheelie-follow-ups-from-645).
+The remaining review residuals (the ledger row is authoritative) are:
+(b) the pool-3 spawn-marker deck localization
 `Game_StartMission @ 0x525E6D..0x525F58`; (c) the flare C2S 0x06 off28 target
 (retail: the vehicle's `aiRuntime[3]`, `Weapon_FireProcess @ 0x53f6f6..0x53f70a` —
 §5.16); (d) the selector-zero boat's part-spin call `@ 0x47004B..0x4700F5`; (e)
@@ -13284,7 +13330,7 @@ De-tabled ledger rows without a prior §8 entry (transplanted verbatim 2026-08-0
 - **D-NET-210** [LOW, FIXED 2026-08-10] LAN host bind scan ported: the authority arm feeds `{mplanserverportmin/max/delta, random=0}` into the socket open, `(max-min+1)/step` tries first at min, stepping by delta. [orig: CNapiNetwork_OpenTransportSocket @ 0x4c6a40 -> NapiUdpSocket_CreateAndBind @ 0x62d2a0; clamp NapiSocket_ClampBufferParams @ 0x62e180] Live-proven with two hosts on one machine. Residue: our joiner binds an OS-assigned port where retail's client arm scans its own authored quad — behavior-neutral against stock peers.
 
 `round_sim.cpp` + `def_ammo.cpp` — the D-WPN projectile family (§5.60; the ledger tabled these first, transplanted here 2026-08-25):
-- **D-WPN-25** [OPEN, bounded residuals] The ordinary stock-ballistic path matches the recovered pre-force sweep, 167-Q16 gravity, aerodynamic drag table/rounding/water/stability gates, live pre-arm dud substitution, MP authority/OneShotKill, exact signed-wrap kinetic arithmetic, shooter class, one carrier hop, ItemDef/impact-armor/dead/NoDie gates, person/seat zones plus their critical flag, and vehicle occupant reduction. Dud substitution is no longer an impact-row-only approximation: the active logical child preserves owner/kinematics/elapsed age from the witnessed 692-B prefix copy, starts at contact under the resolved dud ammo/max-age, and does not inherit the +692 trail slot. Its distinct retail pool-3 identity, same-frame allocator visitation, and copied fields absent from `LiveRound` remain bounded structural gaps; the in-slot projection first advances next tick. Other residuals: randomized threshold-crossing tumble needs the retail PRNG/local frame; the remaining non-throwable `useownmove` classes need their callbacks/guidance (the witnessed `nade`/`schl`/`clym` motors are ported and tracked by D-THROW); impact-energy `armor_density` deceleration, explosive/AoE, bounce, and shell physics are separate; production animated COBJ poses are not published; peer callback globals are not modeled separately from impact presentation; float `LiveRound` carriers can lose Q16 low bits at large magnitudes; the one-hop damage rollup and the Gunner `ray[19]` exclusion read our ground/carrier reference where retail reads the item's +40 attach parent; and the `water_z != 0` guards on the ordinary stall/underwater-drag legs are reimpl-model gates retail lacks (retail compares `Env_WaterHeightFixed` raw, semantics of its no-water value unwitnessed; the separate throwable no-water sentinel is fixed under world-wac-ai-re §27).
+- **D-WPN-25** [OPEN, bounded residuals] The ordinary stock-ballistic path matches the recovered pre-force sweep, 167-Q16 gravity, aerodynamic drag table/rounding/water/stability gates, live pre-arm dud substitution, MP authority/OneShotKill, exact signed-wrap kinetic arithmetic, shooter class, one carrier hop, ItemDef/impact-armor/dead/NoDie gates, person/seat zones plus their critical flag, and vehicle occupant reduction. Dud substitution is no longer an impact-row-only approximation: the active logical child preserves owner/kinematics/elapsed age from the witnessed 692-B prefix copy, starts at contact under the resolved dud ammo/max-age, and does not inherit the +692 trail slot. Its distinct retail pool-3 identity, same-frame allocator visitation, and copied fields absent from `LiveRound` remain bounded structural gaps; the in-slot projection first advances next tick. Other residuals: randomized threshold-crossing tumble needs the retail PRNG/local frame; the remaining non-throwable `useownmove` classes need their callbacks/guidance (the witnessed `nade`/`schl`/`clym` motors are ported and tracked by D-THROW); explosive/AoE, bounce, and shell physics are separate; production animated COBJ poses are not published; peer callback globals are not modeled separately from impact presentation; float `LiveRound` carriers can lose Q16 low bits at large magnitudes; the one-hop damage rollup and the Gunner `ray[19]` exclusion read our ground/carrier reference where retail reads the item's +40 attach parent; and the `water_z != 0` guards on the ordinary stall/underwater-drag legs are reimpl-model gates retail lacks (retail compares `Env_WaterHeightFixed` raw, semantics of its no-water value unwitnessed; the separate throwable no-water sentinel is fixed under world-wac-ai-re §27).
 - **D-WPN-30** [FIXED 2026-08-12] Every ammo.def fixed-point key parses through the witnessed digit walker `parse_fixed16_digits_n` — the round-half-up local helper is deleted. The IDA sweep pinned all seven callers to `Math_ParseFixedPoint16 @0x6131f0` (`error @0x40aaf6`, `drag @0x40aac8`, `bullet_radius @0x40a865`, `kz_minradius @0x40acfe`, `kz_maxradius @0x40ad2c`, `tumble_error @0x40ab24`, `light_move @0x40af3a`, all in `AmmoDef_ParseProperty @0x40a2d0`; `max_age`/`arm_age` via `sub_40A0F0 @0x40a0f0`). Corpus diff over the retail JO ammo.def + the byte-exact fixture: 1038 key values, 8 one-LSB shifts (`bullet_radius 0.005715/0.00277`, `drag 0.292`), zero signed forms (the walker's leading-`-`-yields-0 leg is inert on retail data). ctest `def_parse_ammo` pins the "0.07" -> 4587 divergent form on every migrated key plus both corpus-shifting decimals.
 
 ## IDB type-sync session (2026-07-30)
@@ -13344,3 +13390,104 @@ See [the witness, regressions, and remaining gaps](retail-message-dispatch-audit
   its C2S acknowledgement, 0x3B form reply, 0x7D metrics exchange, and the wider
   squad/admin/profile/integrity handlers. Inventory completeness does not close
   this runtime work. The linked audit identifies the newly cataloged entries.
+
+
+## #645 weapon sound replay follow-up (2026-09-11)
+
+The four weapon-level sounds are now parsed and published by the native weapon
+pump. `soundhead` is the resolved `WeaponDef+668` (+0x29C), `soundfireloop` is
++660 (+0x294), `soundtrailoff` is +664, and `soundlockedtone` is +672. The earlier
+paragraph's identification of +0x294 as the head was wrong. The fire handler's
+head gate is kick==0. The pump decrements the byte, clears it and plays the tail
+when the result is zero or current action is idle (except reload), and requires
+a non-null slot owner for that clear/play. A non-idle loop registration passes
+the **signed** kick byte as its lifetime, with unity pitch and volume 0xFFFF.
+The mailbox and Godot transport preserve that signed lifetime.
+[orig: WeaponAction_Fire @0x542B10; WeaponAction_ProcessFrame @0x540E60]
+
+Direct network replay has a different kick rule from ordinary FIRE. Each
+`ActionSlot_ExecuteAction` while current==2 adds counter + recoil delay-start +
+delay-end + 4, wraps to a byte, caps only signed values greater than 20, and
+adds another 62 in held phase 64. On-foot replay stamps current=2/phase=64 and
+executes both FIRE and RECOIL rows without changing current between them; the
+usual zero-counter result is 82. A missing EquippedSlot uses a temporary
+zeroed 100-byte slot, so its kick does not persist. The equipped-ADM display
+byte does not establish an owned inventory. The receive handler changes the
+existing slot definition to the wire ADM only in this on-foot branch.
+[orig: ActionSlot_ExecuteAction @0x4020A0; NetPacket_DeserializeRoundEvent @0x42F270;
+NapiNPClientMsg_0x00C @0x42E730]
+
+Mounted replay first validates the parent seat and the magazine-selected muzzle
+byte `(flags >> 4) & 3`. A zero byte skips both actions while still spawning the
+round. It executes the wire ADM's FIRE row with current=2, then its RECOIL row
+with current=next=3, and finally stores current=next=0. Kick/head and heat read
+the selected slot's own definition. Its counter is retained. The following
+pump can therefore play the trail-off immediately. The client uses the exact
+materialized carrier slot, including the validated designated-G hull route;
+remote organic rows remain in ClientState. The global pass pumps each borrowed
+slot once in pool-0 order, then unoccupied hot pool-1 slots. The local input
+pump owns its own selected slot.
+[orig: Entity_AttachToUseGunSlot @0x546B80; Entity_AttachToVehicleSlot @0x4946D0;
+Entity_DetachFromVehicle @0x4355F0; NetPacket_SerializePlayerState @0x4C09C0;
+Entity_GetWeaponSlots @0x5460E0; WeaponAction_ProcessAllEntities @0x542690]
+
+Validation: native `weapon_fsm`, `fire_sound`, and `inmatch_joiner_role` pass.
+Focused cases cover temporary contexts, byte/sign arithmetic, ownerless decay,
+wire-vs-slot definitions, muzzle rejection without rejecting the round,
+replica-only organic borrowers, designated-G selection, preserved counters,
+heat stamping, and exactly one trail-off. `dupsound` remains the separately
+recorded data-dead action-row repeat seam; the weapon-level sound rework does
+not change that disposition. Missing model/seat/definition bindings remain
+asset-resolution boundaries rather than fabricated retail state.
+
+### Item explosion and state receive order (2026-09-11)
+
+S2C 0x21 is an 18-byte type/count/source/XYZ/heading record: two bytes,
+one unsigned handle word, three signed Q16 dwords, and a signed heading high
+word. Every absent field defaults independently without advancing the cursor;
+even an empty body dispatches type zero. Type zero runs the shared item
+explosion only on a nonauthority client. Type two's separate debris effect
+remains outside this class port. [orig: serialize_entity_event_to_buffer
+@ 0x5055A0; NapiNPClientMsg_HandleSpawnEffect @ 0x430B10]
+
+WorldOutbox::entity_events retains callback order across explosions, class
+state and removals. The host fans each with mask 0x90: active remote states 6/7,
+including dead players, reliable class one, lifetime zero. The client folds
+0x13/0x26 death callbacks and 0x21/sound effects into one ClientEffectCommand
+queue. ClientRuntime::apply_received_effects runs it against materialized
+item rows; slot-lifetime replacement discards old death notifications.
+Npruntime_item_state_net checks byte-exact barrel packets, signed section -1,
+short defaults, recipient gates, and ordering through the real server tick and
+client runtime. [orig: Server_SendEntityStatePacket @ 0x509D70;
+Server_BroadcastExplosionEffect @ 0x508450;
+Server_RemoveEntityAndNotify @ 0x50A270; Entity_KillBySlotId @ 0x42BCE0]
+
+### Host fire rejection follow-up (2026-09-11)
+
+Dead-player (-10), unmounted emplaced (-12/-18), missing definition (-3),
+zero-index special ammo/Medic (-14), and direct-origin (-17) decisions are
+ported in weapon_fire_gate and host dispatch. The ordinary C2S constructor
+selects action replay, which returns before direct-origin validation.
+CanFire's alleged busy-child leg is the friendly-FARP ground-chain test;
+water, swimming, negative clip and no-clip ammo-cost rules share the
+portable FSM predicate. [orig: Server_ClientFiredRound @ 0x50BAA0;
+WeaponSlot_CanFire @ 0x541BA0; Entity_FindChildByDefType @ 0x43BEA0;
+sub_44A2B0 @ 0x44A2B0]
+
+The suggested -16 normal-fire rejection is refuted for shipped FIRE handlers.
+The server sets counter=0, phase=64 and current=2, then invokes FIRE. The
+standard handler skips its phase-one recheck, fires and hardcodes next=3;
+Finish receives that same next value from the stack. The subsequent next==5
+check cannot reject this shot. The JOX corpus has 93 explicit FIRE rows:
+91 name wpn_std_fire and two receive the default. The function registry permits
+custom cross-bound handlers; that pre-existing D-WPN-1 boundary remains open.
+[orig: Anim_InitActions @ 0x541FA0; ActionDef_ParseScriptLine @ 0x4023C0;
+WeaponAction_Fire @ 0x542B10; ActionSlot_FinishActivePhase @ 0x53F7B0]
+
+### Updated follow-up dispositions (2026-09-11)
+
+| ID | Status | Scope |
+| --- | --- | --- |
+| D-WPN-3 | FIXED | FARP/ground-chain, water/swimming, clip and ammo cost gates plus Finish fire-loop kick condition are ported. |
+| D-WPN-6 | OPEN, narrowed | Pure joiners pump remote borrowed slots and unoccupied hot pool-one slots once. The authority's general personal-slot coverage is separate from this receive replay port. |
+| D-NET-171 | OPEN, narrowed | The 0x42 password, key, app/version, index/CU, and identity checks now use the appropriate rejection replies, as do represented game-layer admission settings. Side/squad password inputs (D-NET-167) and cookie/PunkBuster prerequisites remain wider admission work. |

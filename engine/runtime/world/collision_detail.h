@@ -30,9 +30,9 @@ constexpr double kBamPerRadian = 683565275.5764316;
 constexpr double kNegBamPerRadian = -683565275.5764316;
 // [orig: dbl_7C3608 = 2*pi/2^32 — radians per BAM32]
 constexpr double kRadianPerBam = 1.4629180792671596e-9;
-// [orig: flt_7C19E0 = 2147352576.0 — every sqrt is min-clamped to this before
+// [orig: flt_7C19E0 = 2147418112.0 — every sqrt is min-clamped to this before
 // _ftol2_sse so the int cast can't overflow]
-constexpr double kFtolClamp = 2147352576.0;
+constexpr double kFtolClamp = 2147418112.0;
 
 inline int32_t sqrt_ftol(double squared_len) {
     double len = std::sqrt(squared_len);

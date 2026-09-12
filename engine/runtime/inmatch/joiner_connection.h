@@ -230,10 +230,10 @@ public:
 	};
 	FrameMessagesResult frame_messages_detailed(
 			const std::vector<ProtocolMessage> &messages,
-			std::size_t max_packet_body_bytes = 1300);
+			std::size_t max_packet_bytes = 1300);
 	std::vector<std::vector<uint8_t>> frame_messages(
 			const std::vector<ProtocolMessage> &messages,
-			std::size_t max_packet_body_bytes = 1300);
+			std::size_t max_packet_bytes = 1300);
 
 	// Deterministic golden replay: force the in-match connection state so frame_c2s_uplink
 	// reproduces a CAPTURED C2S 0x0C datagram byte-for-byte (the ROADMAP "Determinism" seed-inject).
@@ -308,9 +308,11 @@ public:
 	// Select the retail game-session join role before start(). Player leaves the
 	// legacy ClientAuth byte stream unchanged; Spectator emits JSR=1 and the
 	// optional JSPP password.
-	void set_join_request(JoinRole role, std::string spectator_password) {
+	void set_join_request(JoinRole role, std::string spectator_password,
+			std::string server_password) {
 		join_role_ = role;
 		spectator_password_ = std::move(spectator_password);
+		server_password_ = std::move(server_password);
 	}
 
 	// The install root the JOIN VERSIONCRCSTRING checksum is computed from
@@ -647,6 +649,8 @@ private:
 	std::string player_name_;
 	JoinRole join_role_ = JoinRole::Player;
 	std::string spectator_password_;
+	std::string server_password_;
+	bool server_password_required_ = false;
 	bool spectator_mode_ = false;
 	Phase phase_ = Phase::Idle;
 

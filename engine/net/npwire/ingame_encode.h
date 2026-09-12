@@ -454,4 +454,6 @@ inline constexpr char kWaterCrossWadeEffect[] = "BODYWATER1";      // entered gr
 inline constexpr char kWaterCrossAirborneEffect[] = "SURFACE_WTR"; // entered from the air
 
 
+std::vector<uint8_t> encode_explosion_effect(const ExplosionEffectRecord &event);
+
 } // namespace opennova

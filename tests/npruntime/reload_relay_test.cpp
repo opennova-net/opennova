@@ -29,6 +29,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include "conn_fixture.h"
@@ -59,26 +60,22 @@ using conn_fixture::make_conn;
 bool pops_one_relayed_49(ns::ISessionTransport &t, bool udp_raw,
                          uint16_t expected_handle, uint16_t expected_combo,
                          const char *who) {
-	uint8_t tag = 0;
-	std::vector<uint8_t> body;
+	ns::Datagram dg;
 	if (udp_raw) {
 		auto &udp = static_cast<ns::UdpSessionTransport &>(t);
-		std::vector<uint8_t> raw;
-		if (!expect(udp.pop_outbound(raw), "an S2C datagram was staged")) return false;
-		if (!expect(raw.size() == 5, "staged datagram is tag + 4-B body")) return false;
-		tag = raw[0];
-		body.assign(raw.begin() + 1, raw.end());
-		if (!expect(!udp.pop_outbound(raw), "exactly one staged S2C datagram")) return false;
-	} else {
-		ns::Datagram dg;
-		if (!expect(t.client_recv(dg), "an S2C datagram was staged (loopback)")) return false;
-		tag = dg.tag;
-		body = dg.body;
+		if (!expect(udp.pop_outbound(dg), "an S2C datagram was staged")) return false;
 		ns::Datagram extra;
-		if (!expect(!t.client_recv(extra), "exactly one staged S2C datagram (loopback)"))
-			return false;
+		if (!expect(!udp.pop_outbound(extra), "exactly one staged S2C datagram")) return false;
+	} else {
+		if (!expect(t.client_recv(dg), "an S2C datagram was staged (loopback)")) return false;
+		ns::Datagram extra;
+		if (!expect(!t.client_recv(extra), "exactly one staged S2C datagram (loopback)")) return false;
 	}
-	if (!expect(tag == 0x49, "staged tag is S2C 0x49")) return false;
+	if (!expect(dg.tag == 0x49 && dg.body.size() == 4, "staged S2C 0x49 has a four-byte body")) return false;
+	const bool requester = std::strcmp(who, "requester") == 0;
+	if (!expect(dg.reliable && dg.retention_flushes == (requester ? 0u : 1u),
+			"requester reload waits for ACK; other recipients expire on the first flush")) return false;
+	const std::vector<uint8_t> &body = dg.body;
 	WeaponReload r;
 	size_t consumed = 0;
 	if (!expect(decode_weapon_reload(body.data(), body.size(), r, consumed) && consumed == 4,

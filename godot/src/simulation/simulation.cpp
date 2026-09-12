@@ -146,7 +146,7 @@ void Simulation::reset_world() {
 	// Round init clears the map mode and the zooms return to the spawn
 	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
 	// Player_InitPlayer lifecycle).
-	player_.hud_map_control.reset_spawn();
+	kernel_->local.hud_map_control.reset_spawn();
 	apply_character_traits_to_world();
 	// The fresh World's per-class ATTRIBUTES words (the medic plate / map
 	// marker feed) come from the retained charattr table [orig: the
@@ -224,13 +224,8 @@ void Simulation::_release_weather_owner() {
 	}
 }
 
-bool Simulation::settle_weather_mission_start() {
-	// Both roles run the initializer + settle (Game_StartMission is the
-	// shared client/host path); only the WAC execution before it is the
-	// authority's.
-	if (!world_installed_ || kernel_ == nullptr) return false;
-	kernel_->settle_weather_mission_start();
-	return true;
+bool Simulation::complete_mission_start() {
+	return world_installed_ && kernel_ != nullptr && kernel_->complete_mission_start();
 }
 
 const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitation_frame(
@@ -409,10 +404,15 @@ void Simulation::apply_terrain_to_ai() {
 // header — not re-applied here.)
 void Simulation::apply_sound_state_to_world() {
 	if (!kernel_) return;
-	kernel_->world.tables.sound_profiles.clear();
-	if (!assets_.sndprof_text.empty())
-		kernel_->world.tables.sound_profiles.parse(reinterpret_cast<const char *>(assets_.sndprof_text.data()),
-		                             assets_.sndprof_text.size());
+	kernel_->world.script.voice.set_set_resolver(voice_set_resolver_);
+    if (assets_.sound_profiles_override) {
+        kernel_->world.tables.sound_profiles.clear();
+        if (!assets_.sndprof_text.empty())
+            kernel_->world.tables.sound_profiles.parse(
+                    reinterpret_cast<const char *>(assets_.sndprof_text.data()), assets_.sndprof_text.size());
+    }
+    if (const auto *items = kernel_->items_table())
+        opennova::simassets::resolve_item_event_sounds(kernel_->world, *items);
 	kernel_->world.env.water_z = assets_.env_water_z_q16;
 	kernel_->sync_water_plane();
 }
@@ -435,6 +435,7 @@ void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
 }
 
 void Simulation::set_sound_profiles(const PackedByteArray &p_sndprof_text) {
+    assets_.sound_profiles_override = true;
 	assets_.sndprof_text.assign(p_sndprof_text.ptr(), p_sndprof_text.ptr() + p_sndprof_text.size());
 	apply_sound_state_to_world();
 }
@@ -496,7 +497,7 @@ void Simulation::finish_kernel_boot() {
 	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults
 	// (witness at hud::HudMapControl::set_mission_map_zoom — the
 	// Player_InitPlayer derivation off the BMS header float).
-	player_.hud_map_control.set_mission_map_zoom(kernel_->mission.header.map_zoom);
+	kernel_->local.hud_map_control.set_mission_map_zoom(kernel_->mission.header.map_zoom);
 	// The score row keys off the mission's game-mode bit, so re-resolve it now
 	// that the flags are known (the config may load before OR after the boot).
 	refresh_score_rules();
@@ -637,6 +638,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	ms::KernelBootOptions options;
 	options.playable = p_playable;
 	options.joiner = is_joiner();
+    options.mp_session = is_host_listening() || is_joiner();
 	// The shell owns the terrain field's parsed-document entry (the store the
 	// setter above built, or none): the kernel never loads one from files here.
 	options.terrain = false;
@@ -644,9 +646,11 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	// This full world boot finishes at Weather::run_mission_start_boundary,
 	// after the environment seed. Running WAC here would lose weather writes
 	// when that boundary seeds the core, then refuse its already-run script.
-	options.defer_initial_wac = true;
+	options.defer_mission_start = true;
 	options.wac_basename = std::string(p_wac_basename.utf8().get_data());
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
+	options.player_limit = static_cast<int32_t>(net_.host_session_config.max_players);
+	options.team_count = net_.host_session_config.num_teams;
 	options.infantry_adm = p_infantry_adm.is_empty()
 			? std::string(ms::kDefaultInfantryAdm)
 			: std::string(p_infantry_adm.utf8().get_data());
@@ -696,13 +700,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	if (p_mission.is_null()) return false;
 	if (!begin_session_load()) return false;
-	// An item database installed ahead of the load (resolve_item_traits before
-	// the mission, the tool/test order) is consumed once: the booted rows are
-	// swept after the boot, so the definition traits (has_item_def,
-	// item_attrib) come only from the items.def sweep. Deliberately unlike the
-	// file-fed overload, the table is NOT installed ahead of the boot: a tool
-	// or test world boots its bare promote path without the trait-gated boot
-	// steps (collision items, AI weapons) that a mounted install supplies.
+	// An item table supplied before the load participates in admission and
+	// definition callbacks, just as it does for a file-fed mission.
 	const Ref<ItemDatabase> pending_item_db = pending_item_traits_db_;
 	pending_item_traits_db_.unref();
 	reset_world();
@@ -711,14 +710,21 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	// Only the production 616-byte S2C header needs wire-time materialization.
 	kernel_->wire_header_world = p_mission->is_wire_header_only();
 	// The editor's live, in-memory mission (unsaved edits included) adopts
-	// into the kernel with NO file source: the file-fed boot steps skip and
-	// this stays the bare promote + systems + role bring-up path.
+	// into the kernel with no file source; definition tables remain available
+	// to the native admission and initialization steps.
 	kernel_->open_document(p_mission->native_file(),
 			std::string(), opennova::mission::BootFileSource{});
+	if (pending_item_db.is_valid()) {
+		assets_.item_traits_db = pending_item_db;
+		kernel_->set_items_table(&pending_item_db->native_items());
+	}
 	opennova::mission::KernelBootOptions options;
 	options.playable = false; // callers spawn explicitly (or the listen bring-up auto-spawns)
 	options.joiner = is_joiner();
+    options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
+	options.player_limit = static_cast<int32_t>(net_.host_session_config.max_players);
+	options.team_count = net_.host_session_config.num_teams;
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
 	if (!kernel_->boot(options, boot_error)) {
@@ -740,7 +746,10 @@ void Simulation::build_demo_mission() {
 	opennova::mission::KernelBootOptions options;
 	options.playable = false;
 	options.joiner = is_joiner();
+    options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
+	options.player_limit = static_cast<int32_t>(net_.host_session_config.max_players);
+	options.team_count = net_.host_session_config.num_teams;
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
 	if (!kernel_->boot(options, boot_error)) {
@@ -823,16 +832,6 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 	}
 	kernel_->wac.set_program(assets_.wac_program->native_program());
 	return true;
-}
-
-bool Simulation::run_mission_start_wac() {
-	if (!world_installed_ || is_joiner()) return false;
-	return kernel_->wac.execute_initial(kernel_->world);
-}
-
-void Simulation::seal_mission_start_baseline() {
-	if (!world_installed_ || is_joiner()) return;
-	kernel_->capture_baseline();
 }
 
 void Simulation::set_runtime_profiling_enabled(bool p_enabled) {

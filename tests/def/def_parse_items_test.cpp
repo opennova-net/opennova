@@ -446,7 +446,32 @@ static int test_vehicle_spawn_lists() {
 	return ok ? 0 : 1;
 }
 
+static int test_regional_sound_delays() {
+    const char text[] =
+        "begin Env\n id 1\n dawnshot Bird 1.25 -0.125\n dayshot Day 0.016129032258 2\n"
+        " duskshot Evening 3.9 4.1\n nightshot Night 0 5.5\n end\n"
+        "begin Emit\n id 2\n dawnshot Bird 9 8\n particletesttime 0.5 0.25\n"
+        " destroy_timing 1.5 0.016129032258 -0.25\n end\n";
+    DefItemsFile items{};
+    if (def_parse_items_memory(reinterpret_cast<const unsigned char *>(text),
+            sizeof(text) - 1, &items) != 0 || items.count != 2) return 1;
+    const auto &first = items.entries[0];
+    const auto &second = items.entries[1];
+    const bool ok = first.shot_delay_ticks[0][0] == 77 && first.shot_delay_ticks[0][1] == -7 &&
+            first.shot_delay_ticks[1][0] == 0 && first.shot_delay_ticks[1][1] == 124 &&
+            first.shot_delay_ticks[2][0] == 241 && first.shot_delay_ticks[2][1] == 254 &&
+            first.shot_delay_ticks[3][0] == 0 && first.shot_delay_ticks[3][1] == 341 &&
+            second.shot_delay_ticks[0][0] == 31 && second.shot_delay_ticks[0][1] == 15 &&
+            strcmp(second.dawnshot, "Bird") == 0 &&
+            second.destroy_timing_ticks[0] == 93 && second.destroy_timing_ticks[1] == 0 &&
+            second.destroy_timing_ticks[2] == -15;
+    if (!ok) fprintf(stderr, "FAIL regional sound delay parser\n");
+    def_free_items(&items);
+    return ok ? 0 : 1;
+}
+
 int main(void) {
+    if (test_regional_sound_delays() != 0) return 1;
 	if (test_vehicle_spawn_lists() != 0)
 		return 1;
 	if (test_item_def_allocator_defaults() != 0) {

@@ -54,6 +54,8 @@ global uniform vec3 opennova_sun_direction;
 // RenderBatchCtx_StoreLightingConstants @ 0x5d89e0 (ctx+116 light,
 // +144 sky, +160 ground, +176 floor, +192 ceiling); the gain is
 // Render_LightScaleRGB bound per draw by apply_shader_parameters @ 0x58db80]
+global uniform bool opennova_thermal_view;
+uniform bool u_thermal_wave_draw = true;
 global uniform vec3 opennova_light_block_dir;
 global uniform vec3 opennova_light_block_dir_color;
 global uniform vec3 opennova_light_block_hemi_sky;
@@ -205,12 +207,18 @@ bool obj_entity_interior() {
 	return u_entity_light.y > 0.5;
 }
 
+bool obj_thermal_wave() {
+	return opennova_thermal_view && u_entity_light.w > 0.5 && u_thermal_wave_draw;
+}
+
 vec3 obj_dir_light_color() {
+	if (obj_thermal_wave()) return vec3(0.0);
 	vec3 scaled = opennova_light_block_dir_color * u_entity_light.x;
 	return obj_entity_interior() ? scaled * u_entity_light.z : scaled;
 }
 
 vec3 obj_hemi_sky_color() {
+	if (obj_thermal_wave()) return vec3(0.25);
 	return obj_entity_interior()
 			? mix(opennova_light_block_ceiling, opennova_light_block_hemi_sky,
 					u_entity_light.z)
@@ -218,6 +226,7 @@ vec3 obj_hemi_sky_color() {
 }
 
 vec3 obj_hemi_ground_color() {
+	if (obj_thermal_wave()) return vec3(0.25);
 	return obj_entity_interior()
 			? mix(opennova_light_block_floor, opennova_light_block_hemi_ground,
 					u_entity_light.z)

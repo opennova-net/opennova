@@ -45,7 +45,9 @@ struct Fixture {
 
 static void test_sound_handles_raw_operands_and_retry() {
     Fixture f;
-    f.script("v1=SS_TONE\nv2=163841\nv3=-257\n"
+    // A leading minus folds into the previous accumulator in retail; start
+    // from zero to author the negative raw operand this sound case exercises.
+    f.script("v1=SS_TONE\nv2=163841\nv3=0-257\n"
              "sound(v1,v2,v3) store(v4)\nsound(12,2.5,128) store(v5)\n"
              "v6=0\nsound(v6,1,0) store(v7)\n");
     CHECK(f.world.script.vars.get_mission(1) == 1);

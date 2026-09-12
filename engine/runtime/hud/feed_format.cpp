@@ -67,11 +67,14 @@ const char *game_event_strcnd_key(uint8_t t) {
 }
 
 void feed_event_rows(const FeedEventInput *events, std::size_t count,
-                     uint16_t self_handle, bool mp_verbose,
-                     const FeedNameLookup &name_of, std::vector<FeedRow> &out) {
-	const auto name = [&name_of](uint8_t index) -> std::string {
-		return index == 0xFF ? std::string() : name_of(index);
+                     const FeedContext &context,
+                     const FeedActorLookup &actor_of, std::vector<FeedRow> &out) {
+	const uint16_t self_handle = context.self_handle;
+	const bool mp_verbose = context.mp_verbose;
+	const auto actor = [&actor_of](uint8_t index) -> FeedActor {
+		return index == 0xFF ? FeedActor{} : actor_of(index);
 	};
+	const auto name = [&actor](uint8_t index) { return actor(index).name; };
 	for (std::size_t i = 0; i < count; ++i) {
 		const FeedEventInput &ev = events[i];
 		if (feed_event_suppressed(ev.event_type)) continue;
@@ -86,13 +89,40 @@ void feed_event_rows(const FeedEventInput *events, std::size_t count,
 		const std::string camp_key =
 				camp ? feed_camp_key(ev.event_type, ev.victim_index) : std::string();
 		if (camp && camp_key.empty()) continue;   // team outside 1/2 draws nothing
+		const uint8_t team = camp ? ev.victim_index : actor(ev.attacker_index).team;
 		const char *key = camp ? camp_key.c_str() : game_event_strcnd_key(ev.event_type);
-		if (key == nullptr) continue;   // team/gametype-keyed at runtime — not ported
+		// [orig: NetPacket_HandleGameEvent @ 0x426270, cases 19/20/21/46/47]
+		switch (ev.event_type) {
+		case 19:
+			if (context.game_type == 8) key = "STRCND49";
+			else if (team == 1) key = "STRCND14";
+			else if (team == 2) key = "STRCND13";
+			else if (team == 3) key = "STRCND25";
+			else if (team == 4) key = "STRCND26";
+			break;
+		case 20:
+			if (context.game_type == 8 || context.game_type == 65544) key = "STRCND27";
+			else if (team == 1) key = "STRCND16";
+			else if (team == 2) key = "STRCND15";
+			break;
+		case 21:
+			if (context.game_type == 8) key = "STRCND50";
+			else if (team == 1) key = "STRCND18";
+			else if (team == 2) key = "STRCND17";
+			break;
+		case 46: key = ev.pos_x <= 1 ? "STRCND_SSKB1" : "STRCND_SSKBX"; break;
+		case 47: key = ev.pos_x <= 1 ? "STRCND_YRSSKB1" : "STRCND_YRSSKBX"; break;
+		default: break;
+		}
+		if (key == nullptr) continue;
 		FeedRow row;
 		row.event_type = ev.event_type;
 		row.kind = ev.kind;
 		row.camp = camp;
 		row.own = own;
+		row.announce = own && ((ev.event_type >= 1 && ev.event_type <= 18) ||
+				(ev.event_type >= 22 && ev.event_type <= 26) ||
+				(ev.event_type >= 32 && ev.event_type <= 34) || ev.event_type == 49);
 		row.key = key;
 		if (camp) {
 			// The camp template's %s takes the WPNames string of the level
@@ -110,9 +140,52 @@ void feed_event_rows(const FeedEventInput *events, std::size_t count,
 				row.extra = name(ev.aux_index);
 			}
 		}
-		row.color = feed_event_color(ev.event_type, own, camp ? ev.victim_index : 0);
+		if (ev.event_type >= 19 && ev.event_type <= 21) {
+			row.victim.clear();
+			row.extra.clear();
+		}
+		if (ev.event_type == 46 || ev.event_type == 47) {
+			row.extra.clear();
+			row.victim_is_value = true;
+			if (ev.event_type == 46) row.victim = std::to_string(ev.pos_x);
+			else {
+				row.attacker_is_value = true;
+				row.attacker = std::to_string(ev.pos_x);
+				row.victim.clear();
+			}
+		}
+		row.color = feed_event_color(ev.event_type, own, team);
+		if (ev.event_type == 20 && context.game_type == 65544) {
+			switch (team) {
+			case 1: row.color = kFeedColorBlue; break;
+			case 2: row.color = kFeedColorRed; break;
+			case 3: row.color = 0xFFFFFF00u; break;
+			case 4: row.color = 0xFFFF027Fu; break;
+			default: break;
+			}
+		}
 		out.push_back(std::move(row));
 	}
+}
+
+std::string feed_format_row(const FeedRow &row, const std::string &tmpl,
+        const std::string &unknown, const std::string &bonus_tmpl, const std::string &wpname) {
+	if (row.camp) return feed_format_camp_line(tmpl, wpname);
+	return feed_format_line(tmpl,
+			row.attacker.empty() && !row.attacker_is_value ? unknown : row.attacker,
+			row.victim.empty() && !row.victim_is_value ? unknown : row.victim,
+			row.extra, bonus_tmpl);
+}
+
+void KillAnnouncement::record(const std::string &line, uint32_t now) {
+	text = line.substr(0, 255);
+	tick = now;
+}
+bool KillAnnouncement::visible(uint32_t now) const {
+	return tick != 0 && !text.empty() && static_cast<int32_t>(now - tick) <= 186;
+}
+void KillAnnouncement::expire(uint32_t now) {
+	if (tick != 0 && !text.empty() && static_cast<int32_t>(now - tick) > 186) tick = 0;
 }
 
 bool feed_event_suppressed(uint8_t event_type) {

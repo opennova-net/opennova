@@ -1,3 +1,4 @@
+#include <base/io/byte_reader.h>
 #include <net/npwire/ingame_decode.h>
 
 #include <net/npwire/wire_handle.h>
@@ -999,15 +1000,15 @@ bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
 
 // S2C 0x26 entity kill replication. [orig: NapiNPClientMsg_0x026 @ 0x42EC30]
 // The handler is defensive: it reads the victim slot if 2 B are present and the
-// attacker if a further 2 B are present, then always kills. We mirror that —
-// victim is required, attacker is read when present.
+// hit section if a further 2 B are present. A missing section is zero; this
+// decoder retains its explicit rejection of a missing entity word.
 bool decode_kill_record(const uint8_t *body, size_t len, KillRecord &out,
                         size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};
 	out.victim_slot = c.u16();
 	if (!c.ok) return false;
-	if (c.p + 2 <= c.end) out.attacker = c.u16();
+	out.section = c.p + 2 <= c.end ? static_cast<int16_t>(c.u16()) : 0;
 	consumed = size_t(c.p - body);
 	return true;
 }
@@ -1722,6 +1723,16 @@ bool decode_zone_presence_count(const uint8_t *body, size_t len,
 
 // §5.50 S2C 0x34 — [orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0]. The
 // position block exists on the wire only when flag == 1.
+bool decode_tracked_player_voice(const uint8_t *body, size_t len, TrackedPlayerVoice &out) {
+    io::ByteReader reader(body, len);
+    out.event = reader.read_u8();
+    out.player_index = reader.read_u8();
+    out.location = reader.read_i16();
+    // Retail defaults each absent field independently and still dispatches.
+    // [orig: NapiNPClientMsg_HandleEntityDeath @ 0x430C50]
+    return true;
+}
+
 bool decode_play_sound(const uint8_t *body, size_t len, PlaySoundCommand &out) {
 	out = PlaySoundCommand{};
 	Cursor c{body, body + len, true};
@@ -1949,6 +1960,15 @@ bool decode_loadout_submit(const uint8_t *body, size_t len, LoadoutSubmit &out) 
 		if (c.ok) out.entries.push_back(e);
 	}
 	return c.ok && out.terminated;
+}
+
+// [orig: NapiNPClientMsg_HandleSpawnEffect @0x430B10]
+bool decode_explosion_effect(const uint8_t *body, size_t len, ExplosionEffectRecord &out) {
+    io::ByteReader reader(body,len);
+    out.type=reader.read_u8(); out.count=reader.read_u8(); out.source=reader.read_u16();
+    out.x=reader.read_i32(); out.y=reader.read_i32(); out.z=reader.read_i32();
+    out.heading=reader.read_i16();
+    return true; // independent absent-field defaults, then dispatch
 }
 
 } // namespace opennova

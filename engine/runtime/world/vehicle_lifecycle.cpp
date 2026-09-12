@@ -242,7 +242,7 @@ void VehicleSystem::tick_dead(Entity &e, AiEntity &ai) {
 		// pool-1 spawn reusing this slot must not inherit a state-23 brain.
 		// [orig: Server_RemoveEntityAndNotify @0x467ede -> Entity_Destroy @0x43e810,
 		//  brain memset @0x43e995]
-		world_.out.entity_removals.push_back(e.handle.packed);
+		world_.out.entity_events.push_back(EntityRemoveEvent{e.handle.packed});
 		world_.commands.remove_ssn(e.handle);
 		return;
 	}

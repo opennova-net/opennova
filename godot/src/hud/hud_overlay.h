@@ -102,6 +102,7 @@ public:
 	// A mission triggered-text line for the message feed, stamped at the last
 	// set ticks (the engine ring owns life/stagger policy).
 	void push_message(const String &p_text);
+    void reset_overlay_buffers();
 	void push_feed_line(const String &p_text, int64_t p_argb);
 
 	// Typed per-frame state (the presenter rebuilds these each tick; the
@@ -218,6 +219,8 @@ public:
 	// player init); the `dotsize` action cycles it (the engine's
 	// next_sight_scale_index, <runtime/hud/sight_overlay.h>). The cycle
 	// returns the new index.
+    void set_kill_announcement(const String &text, int64_t tick);
+    void set_aspect_mode(int mode) { state_.aspect_mode = mode; queue_redraw(); }
 	int cycle_sight_scale();
 	int get_sight_scale_index() const;
 	// Per-frame environment feed: the fog cull distance in world units (<= 0

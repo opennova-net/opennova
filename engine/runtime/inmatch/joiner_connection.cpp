@@ -339,6 +339,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	client_key_ = make_random_session_u32();
 	if (client_key_ == 0) client_key_ = 1;
 	server_hk_ = 0;
+	server_password_required_ = false;
 	conn_.server_sk = 0;
 	conn_.server_scrk.clear();
 	conn_.seq = make_jo_game_session_sequencing();
@@ -410,6 +411,8 @@ std::vector<uint8_t> JoinerConnection::build_client_hello() {
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	ClientAuth auth = make_jointoperations_client_auth(
 			client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
+	// [orig: CNapiNPConnection_SendClientJoin @0x61fe20, SF & 1 gates PW]
+	if (server_password_required_) auth.pw = server_password_;
 	// Lifecycle trace (kInfo -> MCP log ring): the APPID join token (decoded .joi
 	// CK) on this ClientAuth. "0" on a NovaWorld join means the CK never arrived.
 	io::logf(io::LogLevel::kInfo,
@@ -518,56 +521,65 @@ std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolM
 }
 
 JoinerConnection::FrameMessagesResult JoinerConnection::frame_messages_detailed(
-		const std::vector<ProtocolMessage> &messages,
-		std::size_t max_packet_body_bytes) {
+		const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes) {
 	FrameMessagesResult result;
 	if (poll_session_loss() || phase_ == Phase::Error) return result;
-	result.admitted_count = session_outbound_message_prefix_count(
-			conn_.seq, messages.size());
-	if (result.admitted_count == 0) return result;
-	if (max_packet_body_bytes <= PROTOCOL_PACKET_HEADER_SIZE) {
-		result.frame_failed = true;
-		return result;
-	}
+	if (max_packet_bytes <= PROTOCOL_DATAGRAM_OVERHEAD) { result.frame_failed = true; return result; }
+	max_packet_bytes = std::max<std::size_t>(26, max_packet_bytes);
+	std::size_t available = session_outbound_message_prefix_count(conn_.seq,
+			std::numeric_limits<std::size_t>::max());
 	std::vector<ProtocolMessage> packet;
-	std::size_t packet_bytes = PROTOCOL_PACKET_HEADER_SIZE;
+	std::size_t packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
+	std::size_t completed_in_packet = 0;
 	auto flush = [&] {
 		if (packet.empty()) return true;
 		std::vector<uint8_t> datagram = frame_session(packet);
 		if (datagram.empty()) return false;
-		result.framed_count += packet.size();
+		result.framed_count += completed_in_packet;
 		result.datagrams.push_back(std::move(datagram));
-		packet.clear();
-		packet_bytes = PROTOCOL_PACKET_HEADER_SIZE;
+		packet.clear(); completed_in_packet = 0;
+		packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
 		return true;
 	};
-	for (std::size_t i = 0; i < result.admitted_count; ++i) {
-		const ProtocolMessage &message = messages[i];
-		std::vector<uint8_t> encoded;
-		if (!encode_protocol_messages({message}, encoded)) {
-			(void)flush();
-			result.frame_failed = true;
-			return result;
+	// Plan/admit the semantic prefix before framing. An encoding failure must
+	// leave the entire admitted suffix with its caller, including later nodes.
+	std::vector<std::vector<ProtocolMessage>> planned;
+	std::size_t planned_packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
+	for (const ProtocolMessage &message : messages) {
+		auto pieces = split_protocol_message_to_fill(message, max_packet_bytes, planned_packet_bytes);
+		const std::size_t charged = static_cast<std::size_t>(std::count_if(pieces.begin(), pieces.end(),
+				[](const ProtocolMessage &piece) { return !piece.capacity_exempt; }));
+		if (charged > available) {
+			// A split cannot strand a FIRST fragment. Keep this semantic unit
+			// for the next boundary if ACKs must first free its extra nodes.
+			if (pieces.size() > 1) { ++result.admitted_count; result.frame_failed = true; }
+			break;
 		}
-		if (!packet.empty() &&
-				packet_bytes + encoded.size() > max_packet_body_bytes &&
-				!flush()) {
-			result.frame_failed = true;
-			return result;
+		available -= charged;
+		++result.admitted_count;
+		planned.push_back(std::move(pieces));
+	}
+	for (auto &pieces : planned) {
+		for (std::size_t i = 0; i < pieces.size(); ++i) {
+			std::vector<uint8_t> encoded;
+			if (!append_protocol_message(encoded, pieces[i])) {
+				(void)flush(); result.frame_failed = true; return result;
+			}
+			if (packet_bytes + encoded.size() > max_packet_bytes && !flush()) {
+				result.frame_failed = true; return result;
+			}
+			packet.push_back(std::move(pieces[i]));
+			packet_bytes += encoded.size();
+			if (i + 1 == pieces.size()) ++completed_in_packet;
 		}
-		// A single oversized semantic record is left intact. Fragmentation belongs at the
-		// ProtocolMessage producer seam; splitting its payload here would change its flags.
-		packet.push_back(message);
-		packet_bytes += encoded.size();
 	}
 	if (!flush()) result.frame_failed = true;
 	return result;
 }
 
 std::vector<std::vector<uint8_t>> JoinerConnection::frame_messages(
-		const std::vector<ProtocolMessage> &messages,
-		std::size_t max_packet_body_bytes) {
-	return frame_messages_detailed(messages, max_packet_body_bytes).datagrams;
+		const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes) {
+	return frame_messages_detailed(messages, max_packet_bytes).datagrams;
 }
 
 ProtocolMessage JoinerConnection::make_loaded_model_page_reply(
@@ -689,6 +701,7 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	// phase-correct stale/spoofed 0x81 from another handshake must not advance this connection.
 	if (sh.ci != client_index_) return;
 	server_hk_ = sh.hk;          // echo this in ClientAuth.hk
+	server_password_required_ = (sh.sf & 1u) != 0;
 	// The host's ADVERTISED expansion: learned here and echoed in the C2S JOIN EXP TLV below,
 	// nothing more (this member has no accessor). The value the resource-root preload
 	// reconciles against before the world loads is the AUTHORITATIVE S2C 0x7B expansion
@@ -1890,6 +1903,8 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 			}
+        } else if (m.tag == s2c::EXPLOSION_EFFECT) {
+            out.inbound_gameplay.emplace_back(m.tag,m.payload);
 		} else if (m.tag == s2c::KILL_SYNC) {
 			// S2C 0x26 KILL SYNC — the second death route (the destructible
 			// deathCallback's own authority resend among its senders); the

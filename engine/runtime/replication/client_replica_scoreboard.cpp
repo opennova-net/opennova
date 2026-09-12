@@ -74,6 +74,7 @@ void ClientReplicaPipeline::apply_player_list(const std::vector<uint8_t> &body) 
 	sb.in_game_count = list.in_game_count;
 	sb.spectator_count = list.spectator_count;
 	sb.rows.clear();
+	sb.alive_player_count = 0;
 	sb.rows.reserve(list.players.size());
 	for (const PlayerListRow &r : list.players) {
 		ClientRosterSlot &slot = state_.roster[r.slot_id];
@@ -102,6 +103,11 @@ void ClientReplicaPipeline::apply_player_list(const std::vector<uint8_t> &body) 
 		row.clan = slot.clan;
 		slot.team = row.team;
 		apply_team_to_entity(state_, slot, row.team);
+		if (state_.permanent_death && !row.spectator && slot.entity_slot >= 0) {
+			const auto *entity = state_.find(static_cast<uint16_t>(slot.entity_slot));
+			// Missing entity bindings are the safe boundary of the retail null dereference.
+			if (entity && (entity->state_flags & 2u) == 0) ++sb.alive_player_count;
+		}
 		sb.rows.push_back(std::move(row));
 	}
 	sb.team_count = list.team_count;  // [orig: g_scoreboard_team_count @0x42fdda]

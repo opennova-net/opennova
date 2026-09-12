@@ -222,6 +222,7 @@ WeaponFillResult weapon_inventory_load_from_display(
         // [orig: WeaponSlot_InitFromDef @ 0x53EE70 — fresh slot state, clip 0]
         slot->adm_index = static_cast<int16_t>(adm);
         slot->clip = 0;
+        slot->scope_zero = weapon_scope_zero_initial(def->action_fsm.scope_zero);
     }
     return result;
 }

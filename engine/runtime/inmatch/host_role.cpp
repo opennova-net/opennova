@@ -58,6 +58,7 @@ void HostRole::set_item_class_resolver(
 void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_play) {
 	mission::MissionKernel &kernel = *kernel_;
 	state.client_runtime.reset();
+    local_round_reset_seen_ = kernel.local.round_reset_revision;
 	state.host_loop = replication::LoopbackChannel{};
 	state.host_owner = inmatch::HostOwner{};
 	state.host_owner.serve_and_play = serve_and_play;
@@ -206,6 +207,10 @@ void HostRole::run_tick(const TickInput &input) {
 	kernel.local.apply_player_input_pre_tick();
 	inmatch::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
 			nullptr, nullptr);
+    if (local_round_reset_seen_ != kernel.local.round_reset_revision) {
+        local_round_reset_seen_ = kernel.local.round_reset_revision;
+        if (state.client_runtime) state.client_runtime->reset_local_round_state();
+    }
 	// The weather tick follows the server tick's entity update [orig:
 	// Game_ProcessMainFrame @ 0x52674b -> @ 0x526774]; the next frame's 0x0A
 	// fan projects the advanced weather.
@@ -230,7 +235,7 @@ void HostRole::run_tick(const TickInput &input) {
 	const int64_t net_start = static_cast<int64_t>(io::perf_now_us());
 	if (state.client_runtime) {
 		state.client_runtime->Client_ProcessNetworkFrame(now);
-		state.client_runtime->apply_received_sounds(kernel.world);
+		state.client_runtime->apply_received_effects(kernel.world);
 	}
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;
 	if (kernel.world.profile != nullptr)

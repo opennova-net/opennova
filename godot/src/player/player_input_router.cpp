@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
+#include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/global_constants.hpp>
 
 #include <cmath>
@@ -110,6 +111,9 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		read_input_state(forward, back, left, right, lean_left, lean_right, jump);
 	}
 	frame_input->set_movement(forward, back, left, right, lean_left, lean_right, jump);
+    frame_input->set_view_keys(p_gameplay_input_active && pressed("FreeLook"),
+        p_gameplay_input_active && pressed("look_up"), p_gameplay_input_active && pressed("look_down"),
+        p_gameplay_input_active && pressed("turn_left"), p_gameplay_input_active && pressed("turn_right"));
 	frame_input->set_look_delta(p_gameplay_input_active ? look_delta_ : Vector2());
 	look_delta_ = Vector2();
 	if (tick_sim.is_valid()) {
@@ -155,7 +159,7 @@ void PlayerInputRouter::sample_weapon_input(const Ref<MissionFrameInput> &p_fram
 	Input *input = Input::get_singleton();
 	const bool captured = p_gameplay_input_active &&
 			input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED;
-	const bool fire_held = captured && input->is_mouse_button_pressed(MOUSE_BUTTON_LEFT);
+	const bool fire_held = captured && pressed("attack_1");
 	const bool fire_edge = fire_held && !fire_was_held_;
 	fire_was_held_ = fire_held;
 	const bool reload_down = captured && pressed("magazine");
@@ -164,7 +168,7 @@ void PlayerInputRouter::sample_weapon_input(const Ref<MissionFrameInput> &p_fram
 	// The RMB scope request shadows the configurable `scope` row (catalog row
 	// 105): the raw button is read, not the binding (ported verbatim; a
 	// tracked divergence follow-up).
-	const bool scope_down = captured && input->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT);
+	const bool scope_down = captured && pressed("scope");
 	if (scope_down && !scope_was_down_ && weapon_sim.is_valid()) {
 		weapon_sim->request_local_player_scope_toggle();
 	}
@@ -323,6 +327,16 @@ void PlayerInputRouter::sample_use_item(bool p_active) {
 //  Input_HandleActionBinding_0 @0x4e060b..0x4e0624 -> CRenderState_SetLayerVisibility
 //  @0x59B0F0]
 void PlayerInputRouter::sample_hud_input(bool p_active) {
+    static const char *stance_tokens[] = {"Stand", "Crouch", "Prone"};
+    for (int i = 0; i < 3; ++i)
+        if (event_row_edge(stance_tokens[i], p_active, stance_was_down_[i])) request_stance(i);
+    const Ref<Simulation> zero_sim = sim();
+    if (zero_sim.is_valid()) {
+        if (event_row_edge("ScopeZeroDec", p_active, scope_zero_was_down_[0]))
+            zero_sim->request_local_player_scope_zero(-1);
+        if (event_row_edge("ScopeZeroInc", p_active, scope_zero_was_down_[1]))
+            zero_sim->request_local_player_scope_zero(1);
+    }
 	// The down-edge latches ride the RAW key state (the engine's
 	// latched_key_edge, world/player_present.h, carries the retail scan's
 	// witness): a key held across an armory/F3 window must NOT re-fire when
@@ -403,20 +417,6 @@ bool PlayerInputRouter::handle_key_input(const Ref<InputEvent> &p_event, bool p_
 		}
 		return true;
 	}
-	// The stance ids' witness lives at the engine home, engine/runtime/world
-	// infantry.h InfantryState::Stance (bound as Simulation.STANCE_*).
-	if (key->get_keycode() == KEY_Z) {
-		request_stance(Simulation::STANCE_PRONE); // [orig: case 170 sends 0xAA]
-		return true;
-	}
-	if (key->get_keycode() == KEY_X) {
-		request_stance(Simulation::STANCE_CROUCH); // [orig: case 169 sends 0xA9]
-		return true;
-	}
-	if (key->get_keycode() == KEY_C) {
-		request_stance(Simulation::STANCE_STAND); // [orig: case 172 sends 0xAC]
-		return true;
-	}
 	return false;
 }
 
@@ -436,6 +436,23 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
 	if (!p_active || owner == nullptr || !owner->has_player()) {
 		return false;
 	}
+    InputEventMouseButton *button = Object::cast_to<InputEventMouseButton>(p_event.ptr());
+    if (button != nullptr && button->is_pressed() && controls_.is_valid() &&
+        (button->get_button_index() == MOUSE_BUTTON_WHEEL_UP ||
+         button->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN)) {
+        const String token = controls_->mouse_event_token(button->get_button_index());
+        const Ref<Simulation> event_sim = sim();
+        if (event_sim.is_null()) return false;
+        if (token == "cycleweaponP") event_sim->request_local_player_weapon_cycle(-1);
+        else if (token == "cycleweaponN") event_sim->request_local_player_weapon_cycle(1);
+        else if (token == "ScopeZeroDec") event_sim->request_local_player_scope_zero(-1);
+        else if (token == "ScopeZeroInc") event_sim->request_local_player_scope_zero(1);
+        else if (token == "Prone") request_stance(Simulation::STANCE_PRONE);
+        else if (token == "Crouch") request_stance(Simulation::STANCE_CROUCH);
+        else if (token == "Stand") request_stance(Simulation::STANCE_STAND);
+        else return false;
+        return true;
+    }
 	InputEventMouseMotion *motion = Object::cast_to<InputEventMouseMotion>(p_event.ptr());
 	if (motion == nullptr) {
 		return false;
@@ -448,6 +465,8 @@ void PlayerInputRouter::reset() {
 	fire_was_held_ = false;
 	reload_was_down_ = false;
 	scope_was_down_ = false;
+    for (bool &held : stance_was_down_) held = false;
+    for (bool &held : scope_zero_was_down_) held = false;
 	look_delta_ = Vector2();
 }
 

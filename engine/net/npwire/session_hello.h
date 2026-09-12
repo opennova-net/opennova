@@ -165,6 +165,7 @@ struct ClientAuth {
 	uint32_t hk = 0;   // Host Key (echo from ServerHello; checked == proto+1332)
 	uint32_t ck = 0;   // Client Key (client-generated)
 	std::string na;    // gate/game identifier (e.g. "jop:cus2"); must be non-empty
+	std::string pw;    // optional server password, distinct from the spectator JSPP CU
 	uint32_t sip = 0;  // Source IP (retail omits the tag when 0)
 	uint32_t spn = 0;  // Source Port Number (retail omits the tag when 0)
 	std::string scrk;  // Client-side Session CRypto Key
@@ -176,7 +177,7 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 // Serialize a ClientAuth to flat-TLV bytes (inverse of parse_client_auth).
 // Field order mirrors retail's 0x42 builder NapiNPConnection_SendClientHello
 // @ 0x61fe20: the identity block NVS/CO/AP/BDAT/PN/PG/PV1/PV2 FIRST, then
-// CI/HK/CK/NA, SIP/SPN (each omitted when 0, as retail does), the CU blobs,
+// CI/HK/CK/NA/PW, SIP/SPN (each omitted when 0, as retail does), the CU blobs,
 // and SCRK last. The identity block is MANDATORY: the real NovaWorld server
 // validates it in HandleClientJoin @ 0x62B750 and drops the join without it
 // (the original "real NW never sends ServerAuth" bug — RE doc NW-S2).

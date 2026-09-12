@@ -254,7 +254,7 @@ func _stat(p: Object, key: String) -> int:
 func _clip_time(model: ObjectModel, key: String, phase_ticks: int) -> float:
 	var fps: float = model.get_skeletal_anim().get_clip_fps(key)
 	assert_gt(fps, 0.0, "fixture clip %s carries a frame rate" % key)
-	return float(phase_ticks) / (2.0 * fps)
+	return model.get_skeletal_anim().get_clip_phase_seconds(key, phase_ticks)
 
 
 func test_door_phases_preserve_endpoints_and_release_only_their_owner() -> void:

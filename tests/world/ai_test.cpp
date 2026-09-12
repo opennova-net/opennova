@@ -1993,7 +1993,7 @@ static void test_dead_vehicle_despawn_frees_brain() {
 	ctx.is_authority = true;
 	w.ai.tick(w, ctx);
 	CHECK(w.registry.get(h) == nullptr);
-	CHECK(w.out.entity_removals.size() == 1);
+	CHECK(w.out.entity_events.size() == 1);
 	CHECK(w.ai.for_handle(h) == nullptr);
 	CHECK(w.ai.count() == 1 && w.ai.at(0)->brain.f[AiBrain::kOwner] == 0);
 	// The next pool-1 spawn lands in the freed registry slot, brainless; ticking
@@ -2008,7 +2008,7 @@ static void test_dead_vehicle_despawn_frees_brain() {
 	CHECK(w.ai.for_handle(h2) == nullptr);
 	w.ai.tick(w, ctx);
 	CHECK(w.registry.get(h2) != nullptr);
-	CHECK(w.out.entity_removals.size() == 1);
+	CHECK(w.out.entity_events.size() == 1);
 	// A fresh brain reuses the freed AI slot instead of growing the array.
 	CHECK(w.ai.attach(h2) == 0);
 	CHECK(w.ai.count() == 1 && w.ai.for_handle(h2) == w.ai.at(0));

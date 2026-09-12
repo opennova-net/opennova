@@ -188,32 +188,42 @@ inline int32_t emplaced_clamp_symmetric(int32_t value, int32_t bound) {
 // inf.target_heading / inf.look_pitch); `occupant` is its registry row (the
 // Player-class bit). Writes the gunner's heading on the IsTurret tethers.
 // [orig: Entity_UpdateChildAttachment @0x4409A0, occupant leg @0x440a1c..0x440b58]
-inline void tick_emplaced_gun_words(Entity &mount, const Entity &occupant,
-		AiEntity &gunner) {
-	const int32_t gun_yaw = emplaced_gun_frame_heading(mount);
-	const int32_t gun_pitch = emplaced_gun_frame_pitch(mount);
+struct EmplacedGunChannel {
+ int16_t yaw = 0;
+ int16_t pitch = 0;
+};
+struct EmplacedGunnerLook {
+ int32_t heading = 0;
+ int32_t pitch = 0;
+ int32_t recoil_pitch = 0;
+ bool is_local_player = false;
+ bool is_player = false;
+};
+
+inline void advance_emplaced_gun_channel(EmplacedGunChannel &channel,
+		EmplacedGunnerLook &gunner, int32_t gun_yaw, int32_t gun_pitch, bool is_turret) {
 	using opennova::io::bam_add;
 	using opennova::io::bam_sub;
-	if ((mount.item_attrib2 & opennova::def::DEF_ITEM_ATTRIB2_ISTURRET) == 0) {
+	if (!is_turret) {
 		// The immediate path: the words follow the occupant's look this tick,
 		// pitch less the occupant's recoil accumulator (entity+0x380).
 		// [orig: @0x440a36 jz -> @0x440b39..0x440b58; `sub ecx,[edx+380h]`
 		//  @0x440b4c]
-		mount.emplaced_gun_yaw_word =
+		channel.yaw =
 				emplaced_bam_word(bam_sub(gun_yaw, gunner.heading));
-		mount.emplaced_gun_pitch_word = emplaced_bam_word(
-				bam_sub(bam_sub(gun_pitch, gunner.inf.recoil_pitch), gunner.pitch));
+		channel.pitch = emplaced_bam_word(
+				bam_sub(bam_sub(gun_pitch, gunner.recoil_pitch), gunner.pitch));
 		return;
 	}
 	// The IsTurret path. edi/ebx = the previous words as rounded BAM32;
 	// eax = gun.Yaw - edi - occ.Yaw; ecx = gun.Pitch - occ.Pitch - ebx.
 	// [orig: @0x440a43..0x440a74]
-	const int32_t prev_yaw = emplaced_word_bam_rounded(mount.emplaced_gun_yaw_word);
+	const int32_t prev_yaw = emplaced_word_bam_rounded(channel.yaw);
 	const int32_t prev_pitch =
-			emplaced_word_bam_rounded(mount.emplaced_gun_pitch_word);
+			emplaced_word_bam_rounded(channel.pitch);
 	int32_t yaw_step = bam_sub(bam_sub(gun_yaw, prev_yaw), gunner.heading);
 	int32_t pitch_step = bam_sub(bam_sub(gun_pitch, gunner.pitch), prev_pitch);
-	if (gunner.inf.is_local_player) {
+	if (gunner.is_local_player) {
 		// The local player's own yaw is pulled back to within +-90 deg of the
 		// turret and the look-yaw global mirrors it. [orig: `cmp edx,
 		// g_local_player_entity` @0x440a76; clamp @0x440a7e..0x440a93;
@@ -221,9 +231,8 @@ inline void tick_emplaced_gun_words(Entity &mount, const Entity &occupant,
 		// g_LocalPlayerLookYaw = occ.Yaw @0x440aa8]
 		yaw_step = emplaced_clamp_symmetric(yaw_step, kEmplacedLocalGunnerYawTether);
 		gunner.heading = bam_sub(bam_sub(gun_yaw, yaw_step), prev_yaw);
-		gunner.inf.target_heading = gunner.heading;
 	}
-	if (((occupant.flags | occupant.engine_flags) & kEntityFlagPlayer) == 0) {
+	if (!gunner.is_player) {
 		// A non-Player occupant (an NPC gunner) is tethered to +-4 deg; a
 		// remote Player skips both tethers. [orig: `test [edx+24h],100h`
 		// @0x440ab4 jnz; clamp @0x440abd..0x440ad2; store @0x440ad7..0x440ade]
@@ -236,9 +245,21 @@ inline void tick_emplaced_gun_words(Entity &mount, const Entity &occupant,
 	// [orig: @0x440ae1..0x440b13; @0x440b1e..0x440b23; @0x440b2a..0x440b58]
 	yaw_step = emplaced_clamp_symmetric(yaw_step, kEmplacedTurretSlewPerTick);
 	pitch_step = emplaced_clamp_symmetric(pitch_step, kEmplacedTurretSlewPerTick);
-	mount.emplaced_gun_yaw_word = emplaced_bam_word(bam_add(yaw_step, prev_yaw));
-	mount.emplaced_gun_pitch_word = emplaced_bam_word(
-			bam_add(bam_sub(pitch_step, gunner.inf.recoil_pitch), prev_pitch));
+	channel.yaw = emplaced_bam_word(bam_add(yaw_step, prev_yaw));
+	channel.pitch = emplaced_bam_word(
+			bam_add(bam_sub(pitch_step, gunner.recoil_pitch), prev_pitch));
+}
+
+inline void tick_emplaced_gun_words(Entity &mount, const Entity &occupant, AiEntity &gunner) {
+ EmplacedGunChannel channel{mount.emplaced_gun_yaw_word, mount.emplaced_gun_pitch_word};
+ EmplacedGunnerLook look{gunner.heading, gunner.pitch, gunner.inf.recoil_pitch,
+  gunner.inf.is_local_player, ((occupant.flags | occupant.engine_flags) & kEntityFlagPlayer) != 0};
+ advance_emplaced_gun_channel(channel, look, emplaced_gun_frame_heading(mount),
+  emplaced_gun_frame_pitch(mount), (mount.item_attrib2 & opennova::def::DEF_ITEM_ATTRIB2_ISTURRET) != 0);
+ mount.emplaced_gun_yaw_word = channel.yaw;
+ mount.emplaced_gun_pitch_word = channel.pitch;
+ gunner.heading = look.heading;
+ if (gunner.inf.is_local_player) gunner.inf.target_heading = look.heading;
 }
 
 // The consumer's window leg: clamp the stored words to the seat/weapon window
@@ -257,18 +278,10 @@ inline void tick_emplaced_gun_words(Entity &mount, const Entity &occupant,
 //  occ.Yaw when local @0x44126c/@0x441277; pitch: clamp @0x44128c, on 1:
 //  word @0x4412a4, occ.Pitch = gun.Pitch - clamped @0x44129c/@0x4412b1/
 //  @0x4412b3 (no look global for pitch — the entity Pitch IS the look)]
-inline void clamp_emplaced_gun_words_to_window(const World &world,
-		Entity &mount, AiEntity &gunner) {
-	int32_t yaw = emplaced_word_bam(mount.emplaced_gun_yaw_word);
-	int32_t pitch = emplaced_word_bam(mount.emplaced_gun_pitch_word);
-	const TurretWindow window = select_turret_window(
-			mount.emplacement_down_limit_bam,
-			mount.emplacement_up_limit_bam,
-			mount.emplacement_right_limit_bam,
-			mount.emplacement_left_limit_bam,
-			mount.primary_weapon_slot_adm != kAdmSlotNone
-					? world.tables.weapons.by_index(mount.primary_weapon_slot_adm)
-					: nullptr);
+inline void clamp_emplaced_gun_channel(EmplacedGunChannel &channel,
+ EmplacedGunnerLook &gunner, int32_t gun_yaw, int32_t gun_pitch, const TurretWindow &window) {
+ int32_t yaw = emplaced_word_bam(channel.yaw);
+ int32_t pitch = emplaced_word_bam(channel.pitch);
 	bool yaw_clamped = false;
 	bool pitch_clamped = false;
 	if (window.per_seat) {
@@ -285,19 +298,36 @@ inline void clamp_emplaced_gun_words_to_window(const World &world,
 					window.pitch_lower);
 	}
 	if (yaw_clamped) {
-		mount.emplaced_gun_yaw_word = emplaced_bam_word(yaw);
-		gunner.heading = opennova::io::bam_sub(emplaced_gun_frame_heading(mount), yaw);
-		if (gunner.inf.is_local_player)
-			gunner.inf.target_heading = gunner.heading;
+		channel.yaw = emplaced_bam_word(yaw);
+		gunner.heading = opennova::io::bam_sub(gun_yaw, yaw);
 	}
 	if (pitch_clamped) {
-		mount.emplaced_gun_pitch_word = emplaced_bam_word(pitch);
-		gunner.pitch = opennova::io::bam_sub(emplaced_gun_frame_pitch(mount), pitch);
-		// Our split of retail's one entity Pitch: the local look pitch lives
-		// in the input-owned mirror, so the occupant store lands there too.
-		if (gunner.inf.is_local_player)
-			gunner.inf.look_pitch = gunner.pitch;
+		channel.pitch = emplaced_bam_word(pitch);
+		gunner.pitch = opennova::io::bam_sub(gun_pitch, pitch);
 	}
+}
+
+inline void clamp_emplaced_gun_words_to_window(const World &world, Entity &mount, AiEntity &gunner) {
+	const TurretWindow window = select_turret_window(
+			mount.emplacement_down_limit_bam,
+			mount.emplacement_up_limit_bam,
+			mount.emplacement_right_limit_bam,
+			mount.emplacement_left_limit_bam,
+			mount.primary_weapon_slot_adm != kAdmSlotNone
+					? world.tables.weapons.by_index(mount.primary_weapon_slot_adm)
+					: nullptr);
+ EmplacedGunChannel channel{mount.emplaced_gun_yaw_word, mount.emplaced_gun_pitch_word};
+ EmplacedGunnerLook look{gunner.heading, gunner.pitch};
+ clamp_emplaced_gun_channel(channel, look, emplaced_gun_frame_heading(mount),
+  emplaced_gun_frame_pitch(mount), window);
+ mount.emplaced_gun_yaw_word = channel.yaw;
+ mount.emplaced_gun_pitch_word = channel.pitch;
+ gunner.heading = look.heading;
+ gunner.pitch = look.pitch;
+ if (gunner.inf.is_local_player) {
+  gunner.inf.target_heading = look.heading;
+  gunner.inf.look_pitch = look.pitch;
+ }
 }
 
 // The parent-brain publication: an addeweap child whose anchor userpoint

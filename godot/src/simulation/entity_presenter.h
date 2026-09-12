@@ -471,6 +471,7 @@ private:
 	// Stance bits gate the MATCHTERRAIN tier (Terrain_RenderSectorEntitiesBySide
 	// @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
 	static void stamp_match_terrain(ObjectModel *model, const float *p, int base);
+    void stamp_destroy_phases(ObjectModel *model, const float *p, int base);
 	// The mounted right-hand collapse rides its own packed field, edge-gated
 	// to the value change; true when the model was written.
 	static bool stamp_right_hand_collapsed(ObjectModel *model, const float *p,
@@ -487,7 +488,7 @@ private:
 	// call for buildings, and an unconditional release here would stomp its
 	// applied mask after a plan rebuild. One release when a previously owned
 	// row stops publishing.
-	static void stamp_section_mask(ObjectModel *model, const float *p, int base,
+	void stamp_section_mask(ObjectModel *model, const float *p, int base,
 			int64_t &last_mask);
 	// All four semantic CTRL writers over one typed model (the wire walk's
 	// per-row bundle).

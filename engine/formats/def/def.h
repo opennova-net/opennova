@@ -68,10 +68,13 @@ inline constexpr int DEF_AMMO_KZ_SLASH = 7;
 typedef struct DefAmmoDef {
     char name[64];
     int velocity;            /* +4, integer units/s [orig: 'velocity' branch @0x40a2d0] */
+    int heat_det_range;      /* +100, signed world-unit word */
+    int boresight_maxang;    /* +88, BAM cone */
     int min_damage;          /* +188 */
     int max_damage;          /* +192 */
     int penetration_impact;  /* +196 — must reach the target itemDef+400 armor threshold */
     int penetration_kz;      /* +200 */
+    int armor_density[3];    /* +204/+208/+212, indexed by shooter ammo class */
     int secondary_anim;      /* byte +224: 'secondary_anim' (atol narrowed at bake) */
     int kz_physics;          /* byte +225: 'kz_physics' (atol narrowed at bake) */
     int recoil[3];           /* bytes +227..229 */
@@ -285,6 +288,13 @@ typedef struct DefWeaponDef {
     char weapon_class[32];
     char round_type[64];
     char animadm[128];
+    /* Weapon-level sound-set names, resolved by SoundSet lookup at presentation.
+       [orig: WeaponDefs_ParseLineCallback @0x5444c8..0x544578] */
+    char soundfireloop[128];
+    char soundtrailoff[128];
+    char soundhead[128];
+    char vmacrotoken[17]; // weapon +0x2D8, contextual radio key
+    char soundlockedtone[128];
     char launch_user_point[64];
     char gfx1[128];
     char gfx1a[128];
@@ -579,6 +589,10 @@ typedef struct DefItemDef {
     char dawnshot[128];
     char duskshot[128];
     char dayshot[128];
+    // Dawn/day/dusk/night base and random-range countdowns, in native ticks.
+    // particletesttime aliases the dawn pair. [orig: ItemDef_ParseProperty @0x49EB00]
+    int32_t shot_delay_ticks[4][2];
+    int32_t destroy_timing_ticks[3]; // destroy_timing: initial delay, duration, section stagger
     /* §5.10b dispatch tags. ai_function on the player is `plyr` (witnessed
        on items.def id 105305 = wire 0x14B9, matching the orig SerializePlayerState
        callback), so ai_function is the field that drives ItemDef+356 lookup. */

@@ -136,3 +136,21 @@ All existing ledger IDs — this record mints none:
 - `.adm` write parity is canonical-form by design; if a byte-exact need ever
   appears (none known — no tool round-trips hand-edited `.adm`s), it becomes
   a writer-policy ADR, not a parser change.
+
+## Playback clock follow-up (2026-09-11)
+
+| Component | Verdict | Evidence |
+| --- | --- | --- |
+| Normalized channel timeline and terminal sample | MATCHING | anim_sample, simassets_adm_playback, simassets_adm_root_motion, mission_infantry_anim; skeletal_anim_test GUT |
+| FP viewmodel timeline divisor | MATCHING | player_viewmodel_rig.cpp and shared native timeline |
+| Automatic action delay conversion | MATCHING, separate clock | npruntime_weapon_table and weapon_fsm fixtures retain 62.5 plus one |
+
+ClipTimeline advances a float32 channel by the stored float32
+fps/(62*frame_count) delta. It compares the extended-precision sum before
+storing, subtracts one once at a loop seam, and parks one-shots at 0.99999.
+Sparse checkpoints preserve repeated-addition rounding during independent
+playheads and seeks. The root-motion terminal sample clears XYZ and trigger
+while retaining the capsule. The FP viewmodel uses divisor 62 for this channel;
+automatic ACTION milliseconds retain their separate 62.5-tick conversion.
+[orig: AnimChannel_InitFromData @ 0x410560, delta store @ 0x41058E;
+AnimChannel_AdvancePlayback @ 0x40B140, add @ 0x40B153]

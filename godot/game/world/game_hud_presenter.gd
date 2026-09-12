@@ -30,6 +30,7 @@ var _ui_parent: Node = null
 # teardown so the next mission build uses the same process-lifetime choice.
 var _crosshair_style := HudOverlay.MIN_CROSSHAIR_STYLE
 var _crosshair_color: int = PlayerOptions.DEFAULT_CROSSHAIR_COLOR
+var _aspect_mode := -1
 var _crosshair_spread: bool = PlayerOptions.DEFAULT_CROSSHAIR_SPREAD
 
 # The HUD's message ring has 40 physical slots; keep no more pre-HUD messages
@@ -212,6 +213,12 @@ func _on_minimap_water_changed(mask: ImageTexture) -> void:
 
 ## The USER crosshair options; cache each even before the lazy HUD exists,
 ## then apply it immediately to an existing HUD.
+func set_aspect_mode(mode: int) -> void:
+	_aspect_mode = mode
+	if _game_hud != null:
+		_game_hud.set_aspect_mode(mode)
+
+
 func set_crosshair_style(style: int) -> void:
 	_crosshair_style = clampi(style, HudOverlay.MIN_CROSSHAIR_STYLE,
 			HudOverlay.MAX_CROSSHAIR_STYLE)
@@ -283,6 +290,7 @@ func ensure_game_hud() -> void:
 	_game_hud.set_crosshair_style(_crosshair_style)
 	_game_hud.set_crosshair_color(_crosshair_color)
 	_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
+	_game_hud.set_aspect_mode(_aspect_mode)
 	_game_hud.configure(hudpos, root)
 	_hud_pos = hudpos
 	# TerrainData owns the TRN 16x16 sector routing table and the colormap
@@ -435,13 +443,13 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var lv: PlayerLocalView = _world.local_player_view()
 	if lv != null:
 		scope_card = lv.scope_card_active
+		_sight_slide_multiplier = lv.sight_slide_multiplier
+		binocular_range = lv.aim_range_units
 		fov_deg = lv.fov_h_deg
 		binoculars_view_active = lv.binoculars_view_active
 		nvg_visible = lv.nvg_visible
 		nvg_gain = lv.nvg_gain
 		vehicle_attack_context = lv.vehicle_attack_context
-	if binoculars_view_active and _player_presenter != null:
-		binocular_range = int(_player_presenter.aim_range_units())
 
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	_apply_attach_labels()
@@ -557,6 +565,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
 	_flush_feed_events()
+	_game_hud.set_kill_announcement(sim.get_kill_announcement_text(), sim.get_kill_announcement_tick(_hud_ticks()))
 	_score_fanfare.update(sim, _world)
 	_message_log.update(_game_hud, sim, ControlsBindings.pressed("OldMessages"),
 			hud_keys_chorded, gameplay_input_active)
@@ -706,7 +715,10 @@ func apply_mission_effects(effects: Array) -> void:
 		if e == null:
 			continue
 		var kind := e.kind
-		if kind == "text":
+		if kind == "local_round_reset":
+			if _game_hud != null:
+				_game_hud.reset_overlay_buffers()
+		elif kind == "text":
 			var t := e.text
 			if not t.is_empty():
 				_hud_objective = t
@@ -1104,32 +1116,20 @@ func _flush_feed_events() -> void:
 		var tmpl := Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CANNED_MSG, row.get_key(), "")
 		if tmpl.is_empty():
 			continue
-		var line := ""
-		# The compose form is the engine's decision (the camp discriminant
-		# rides the row), not an inference from which fields are filled.
+		var wpname := ""
 		if row.is_camp():
-			# Camp line: the template's %s takes the level's WPNames string
-			# [orig: sprintf @0x427327/@0x42736B].
-			var wpname := Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_WPNAMES,
+			wpname = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_WPNAMES,
 					row.get_wpname_key(), "")
-			line = sim.format_feed_camp_line(tmpl, wpname)
-		else:
-			var attacker := row.get_attacker()
-			var victim := row.get_victim()
-			# The bonus re-compose rides STRCND48 ("%s - Bonus for %s") when
-			# the aux actor is the local player [orig: the sprintf @0x422CA2].
-			var extra := row.get_extra()
-			var bonus_tmpl := ""
-			if not extra.is_empty():
-				bonus_tmpl = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CANNED_MSG,
-						"STRCND48", "")
-			line = sim.format_feed_line(tmpl,
-					attacker if not attacker.is_empty() else unknown,
-					victim if not victim.is_empty() else unknown,
-					extra, bonus_tmpl)
+		var bonus_tmpl := ""
+		if not row.get_extra().is_empty():
+			bonus_tmpl = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_CANNED_MSG,
+					"STRCND48", "")
+		var line := row.format_line(tmpl, unknown, bonus_tmpl, wpname)
 		if line.is_empty():
 			continue
 		_game_hud.push_feed_line(line, row.get_color())
+		if row.is_announcement():
+			sim.retain_feed_announcement(line, _hud_ticks())
 
 
 func _flush_pending_hud_messages() -> void:

@@ -6,6 +6,7 @@
 // world_device_frame.gd (slice G10).
 
 #include "world/game_world.h"
+#include <runtime/renderer/render_order.h>
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
@@ -667,6 +668,9 @@ void GameWorld::render_water_frame() {
 void GameWorld::apply_scene_environment_frame() {
 	if (env_ == nullptr) {
 		return;
+	}
+	if (Camera3D *cam = render_camera()) {
+		cam->set_far(opennova::renderer::scene_far_plane(env_->get_fog_distance()));
 	}
 	// The device leg only samples: the strict-vs-inclusive waterline
 	// comparison semantics live in the engine behind apply_render_eye.

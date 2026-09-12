@@ -57,6 +57,15 @@ const std::string &empty_runtime_string() {
 
 } // namespace
 
+void ClientRuntime::reset_local_round_state() {
+    // [orig: Game_InitNewRound @0x4227ce..0x4227dc]
+    deployed_ = true;
+    if (view_.state().local_medic_reviving) {
+        view_.state().local_medic_reviving = false;
+        view_.state().mark_changed();
+    }
+}
+
 ClientRuntime::ClientRuntime(std::string player_name)
 		: role_(Role::Joiner),
 		  joiner_(std::make_unique<JoinerConnection>(std::move(player_name))) {
@@ -370,9 +379,8 @@ std::vector<uint8_t> ClientRuntime::start() {
 	view_.drain_round_events();
 	view_.drain_game_events();
 	view_.drain_weapon_reloads();
-	view_.drain_entity_deaths();
 	view_.drain_script_remote_commands();
-	view_.drain_sound_commands();
+	view_.drain_effect_commands();
 	view_.set_game_type(0);
 	view_.set_mp_session(true); // a joiner is in-session by definition
 	return joiner_->start();
@@ -509,31 +517,7 @@ std::vector<replication::ClientGameEvent> ClientRuntime::drain_game_events() {
 	return view_.drain_game_events();
 }
 
-// [orig: NapiNPClientMsg_PlaySoundByName @0x4283A0]
-void ClientRuntime::apply_received_sounds(world::World &world) {
-	for (const PlaySoundCommand &command : view_.drain_sound_commands()) {
-		if (command.flag == 0) {
-			world::ScriptSoundEvent event;
-			event.name = command.sound_name;
-			event.kind = world::ScriptSoundEvent::Kind::Interface;
-			world.out.script_sounds.push_back(std::move(event));
-		} else {
-			world::SoundSlotEvent event;
-			// LWF sound-set keys contain at most 24 bytes. An overlong name
-			// cannot resolve; truncating it could play a different valid set.
-			if (command.sound_name.size() >= sizeof(event.set_name)) continue;
-			std::memcpy(event.set_name, command.sound_name.data(), command.sound_name.size());
-			event.pos[0] = int32_t{command.pos_x} * 65536;
-			event.pos[1] = int32_t{command.pos_y} * 65536;
-			event.pos[2] = int32_t{command.pos_z} * 65536;
-			world.out.slot_sounds.push_back(event);
-		}
-	}
-}
 
-std::vector<EntityDeathRecord> ClientRuntime::drain_entity_deaths() {
-	return view_.drain_entity_deaths();
-}
 
 std::vector<ScriptRemoteCommand> ClientRuntime::drain_script_remote_commands() {
 	return view_.drain_script_remote_commands();
@@ -650,7 +634,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// Deaths too: the authority's own damage pass ran the death chain
 		// (and its 0x13 broadcast skips the loopback — mask 0x90 NOT_HOST).
 		view_.drain_weapon_reloads();
-		view_.drain_entity_deaths();
 	} else {
 		// A remote joiner: framed datagrams. JoinerConnection decodes the 0x83 SESSION envelope and
 		// surfaces the inner bodies, which we fold via ClientReplicaPipeline::apply (the single remote-wire
@@ -838,6 +821,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// The remote arms dip rides the same body tick as the lean integrator.
 	// [orig: lean @0x4b5c97 and dip @0x4b5cab, both inside Entity_UpdateInfantryPlayerBody]
 	if (!preround_active) view_.tick_arms_dip();
+	// [orig: Entity_UpdateAllEntities @0x4C2221 -> sub_590950]
+	if (!preround_active && view_.state().radio_target.ticks_remaining)
+		--view_.state().radio_target.ticks_remaining;
 
 	// The per-class between-update mover: one step per 62.5 Hz tick after the
 	// recv fold (retail order: net frame first, entity movers after). No-op on

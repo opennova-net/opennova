@@ -129,7 +129,7 @@ void project_client_replica_present_row(
 			? *context.item_seat_specs : kNoSeatSpecs;
 
 	world::EmplacedWeaponControls emplaced;
-	if (emplaced_weapon_controls_for_client(entity, state, seat_specs, emplaced))
+	if (emplaced_weapon_controls_for_client(entity, emplaced))
 		write_present_emplaced_controls(row, emplaced);
 
 	anim::AimOverlayInputs inputs;

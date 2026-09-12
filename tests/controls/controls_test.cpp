@@ -177,7 +177,8 @@ bool test_build_rows_other_devices() {
   const std::vector<ControlRow> mouse = build_rows(Device::Mouse);
   CHECK(kb.size() == mouse.size(), "same action set across devices");
   for (const ControlRow &r : mouse) {
-    CHECK(r.control.empty(), "mouse controls blank for now");
+    if (r.action == "Prone") CHECK(r.control == "Middle", "middle button defaults to prone");
+    if (r.action == "Cycle Weapon Prev") CHECK(r.control == "Mouse Whl Up", "wheel default");
   }
   return true;
 }
@@ -185,6 +186,25 @@ bool test_build_rows_other_devices() {
 // The live-record assignment semantics [orig: KeyBinding_HandleKeyAssignment
 // @ 0x55bb20; CLEAR_KEY @ 0x55bfd0; DEFAULTS @ 0x55bd90; mouse capture
 // @ 0x55c780].
+bool test_mouse_dispatch() {
+  BindingSet set;
+  bool ctrl = false;
+  auto held = [&ctrl](int vk) { return ctrl && vk == 17; };
+  auto token = [&set](const char *name) { return set.index_of_token(name); };
+  CHECK(set.mouse_event_action(kMouseWheelUp, held) == token("cycleweaponP"), "bare wheel cycles");
+  CHECK(set.mouse_event_action(kMouseWheelDown, held) == token("cycleweaponN"), "bare reverse wheel cycles");
+  ctrl = true;
+  CHECK(set.mouse_event_action(kMouseWheelUp, held) == token("ScopeZeroInc"), "Ctrl wheel increments zero only");
+  CHECK(set.mouse_event_action(kMouseWheelDown, held) == token("ScopeZeroDec"), "Ctrl wheel decrements zero only");
+  CHECK(set.mouse_event_action(kMouseRight, held) == token("scope"), "RMB event toggles scope");
+  CHECK(set.pressed_mouse(token("FreeLook"), kMouseRight, held), "RMB held also supplies free look");
+  CHECK(!set.pressed_mouse(token("FreeLook"), 0, held), "release clears free look");
+  CHECK(set.mouse_event_action(kMouseLeft, held, true) == token("IncSpectatorTarget"), "death mode skips fire");
+  CHECK(set.record(token("look_up"))->joy_button == 0x81, "static joystick axis copied");
+  CHECK(set.record(token("attack_1"))->joy_button == 1, "static joystick fire button copied");
+  return true;
+}
+
 bool test_binding_set_assignment() {
   BindingSet set;
   const int fwd = set.index_of_token("move_forward");
@@ -378,6 +398,34 @@ bool test_pressed_key_two_passes() {
   return true;
 }
 
+bool test_joystick_pov_dispatch() {
+  BindingSet bindings;
+  const std::array<int, 8> boundaries{2200, 6800, 11200, 15000, 20200, 24800, 29200, 33800};
+  const std::array<uint8_t, 9> masks{1, 9, 8, 10, 2, 6, 4, 5, 1};
+  for (size_t i = 0; i < boundaries.size(); ++i) {
+    CHECK(joystick_pov_mask(boundaries[i]) == masks[i], "inclusive POV sector boundary");
+    CHECK(joystick_pov_mask(boundaries[i] + 1) == masks[i + 1], "next POV sector");
+  }
+  CHECK(joystick_pov_mask(-1) == 0 && joystick_pov_mask(65535) == 0, "POV center sentinel");
+  std::array<int32_t, 4> hats{4500, -1, -1, -1};
+  const auto no_buttons = [](int) { return false; };
+  CHECK(bindings.pressed_joystick(bindings.index_of_token("look_up"), no_buttons, hats), "default up POV");
+  CHECK(bindings.pressed_joystick(bindings.index_of_token("turn_right"), no_buttons, hats), "diagonal also turns right");
+  CHECK(!bindings.pressed_joystick(bindings.index_of_token("look_down"), no_buttons, hats), "opposite POV stays released");
+  hats[0] = -1;
+  CHECK(!bindings.pressed_joystick(bindings.index_of_token("look_up"), no_buttons, hats), "center releases held action");
+  const int up = bindings.index_of_token("look_up");
+  BindingRecord row = *bindings.record(up);
+  row.joy_button = 0x85;
+  bindings.set_record(up, row);
+  hats[1] = 0;
+  CHECK(bindings.pressed_joystick(up, no_buttons, hats), "second hat keeps its own four-bit bank");
+  row.joy_button = 128;
+  bindings.set_record(up, row);
+  CHECK(bindings.pressed_joystick(up, [](int index) { return index == 127; }, hats), "last ordinary button is 128");
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -400,6 +448,8 @@ int main() {
   RUN_TEST(test_format_binding);
   RUN_TEST(test_build_rows_keyboard);
   RUN_TEST(test_build_rows_other_devices);
+  RUN_TEST(test_mouse_dispatch);
+  RUN_TEST(test_joystick_pov_dispatch);
   RUN_TEST(test_binding_set_assignment);
   RUN_TEST(test_format_display_string);
   RUN_TEST(test_pressed_key_two_passes);

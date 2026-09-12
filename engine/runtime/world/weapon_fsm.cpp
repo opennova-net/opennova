@@ -73,29 +73,31 @@ void copy_str128(char (&dst)[128], const char *src) {
 // Recoil kick accumulation, capped at 20 (signed-char compare in the original).
 // [orig: @ 0x53f7f0..0x53f805 / @ 0x542cf1..0x542d0f]
 void kick_add(WeaponSlotState &slot, int32_t amount) {
-    int32_t v = static_cast<int32_t>(slot.kick) + amount;
-    if (v > 20) v = 20;
-    if (v < 0) v = 0;
-    slot.kick = static_cast<uint8_t>(v);
+    slot.kick = static_cast<uint8_t>(uint32_t(slot.kick) + uint32_t(amount));
+    if (static_cast<int8_t>(slot.kick) > 20) slot.kick = 20;
+}
+
+void add_shot_heat(const WeaponFsmDef &def, WeaponSlotState &slot, int32_t current_tick) {
+    if (def.heat_per_shot != 0 && def.heat_decay_per_tick > 0) {
+        if (slot.heat_window_end_tick < current_tick)
+            slot.heat_window_end_tick = current_tick; // [orig: @ 0x542fa0]
+        slot.heat_window_end_tick +=
+                def.heat_per_shot / def.heat_decay_per_tick + 1; // [orig: @ 0x542fb4]
+        // The ceiling clamp: past it the window is re-stamped to a fixed overrun, so
+        // a held trigger cannot bank heat beyond one lockout's worth.
+        // [orig: @ 0x542fc4 — the compare is > kCeiling-1, i.e. >= kCeiling]
+        if (weapon_slot_accumulated_heat(def, slot, current_tick) >
+            weapon_heat::kCeiling - 1)
+            slot.heat_window_end_tick =
+                    current_tick +
+                    weapon_heat::kCeiling / def.heat_decay_per_tick + 1; // [orig: @ 0x542fdc]
+    }
 }
 
 bool has_rounds(const WeaponFsmDef &def, const WeaponSlotState &slot) {
     // Infinite-clip weapons (the def clip field == -1 paths [orig: @ 0x542deb /
     // @ 0x54296c]) always pass; otherwise the magazine u16.
     return def.clip_capacity < 0 || slot.clip > 0;
-}
-
-// The witnessed ammo gate the fire handler re-checks on its entry tick. On an empty
-// magazine it WRITES the queued next action itself: RECOIL(3) when the carried reserve
-// has rounds (routing the empty trigger into the recoil arbiter's auto-reload
-// decision), else EMPTYIDLE(1) [orig: WeaponSlot_CanFire @ 0x541ba0, the empty leg
-// @ 0x541c8b..0x541cb9]. The busy-weapon-child, underwater-fire, and score-lock legs
-// need entity/env state this port does not model yet (divergence D-WPN-3).
-bool can_fire_ammo(const WeaponFsmDef &def, WeaponSlotState &slot) {
-    if (def.clip_capacity < 0) return true; // no clip tracking (knife/thrown legs)
-    if (slot.clip > 0) return true;
-    slot.next = slot.reserve > 0 ? weapon_action::kRecoil : weapon_action::kEmptyIdle;
-    return false;
 }
 
 // The begin-active shim shared by every handler's tick path: the first tick after a
@@ -138,10 +140,9 @@ void begin_active(const WeaponFsmAction &desc, WeaponSlotState &slot,
 
 // [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 (desc, slot, entity, nextAction)]:
 // counter = delayEnd, nextAction = the passed value, the END-leg sound (ACTIVE only),
-// the ACTIVE->DONE kick bump (skipped for RELOAD), phase = DONE. The original gates the
-// kick on the weapon's fire-sound id being set (Def+0x294) — every shipped weapon
-// carries one (D-WPN-3).
-void finish_active(const WeaponFsmAction &desc, WeaponSlotState &slot, int32_t next,
+// the ACTIVE->DONE kick bump (skipped for RELOAD), phase = DONE. The kick
+// requires the weapon-level soundfireloop (Def+0x294).
+void finish_active(const WeaponFsmDef &def, const WeaponFsmAction &desc, WeaponSlotState &slot, int32_t next,
                    WeaponFsmEvents &out) {
     const bool was_active = slot.phase == weapon_phase::kActive;
     slot.counter = desc.delay_end;
@@ -153,7 +154,7 @@ void finish_active(const WeaponFsmAction &desc, WeaponSlotState &slot, int32_t n
         //  plays ActionDef+12); the shim's dupsound repeat loop (+44 count / +48
         //  interval) is data-dead in the JOX/REVX corpora]
         out.action_finished = desc.id;
-        if (slot.current != weapon_action::kReload)
+        if (def.soundfireloop[0] != 0 && slot.current != weapon_action::kReload)
             kick_add(slot, desc.delay_start + desc.delay_end + slot.counter + 10);
     }
     slot.phase = weapon_phase::kDone;
@@ -242,12 +243,13 @@ void handler_emptyidle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
 // chain to RECOIL, and the kick bump sized by the recoil action.
 void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                   WeaponSlotState &slot, const WeaponFsmInputs &in, WeaponFsmEvents &out) {
-    if (slot.phase == weapon_phase::kEntered && !can_fire_ammo(def, slot)) {
+    if (!in.owner_present) return; // [orig: WeaponAction_Fire @0x542B10]
+    if (slot.phase == weapon_phase::kEntered && !weapon_fsm_can_fire(def, slot, in)) {
         // The abort adopts whatever CanFire queued (RECOIL toward auto-reload, or
         // EMPTYIDLE) — the [esi+30h] read happens AFTER the CanFire call. Phase is
         // still 1 here, so the finish plays no end-leg sound.
         // [orig: @ 0x542b44..0x542b5e]
-        finish_active(desc, slot, slot.next, out);
+        finish_active(def, desc, slot, slot.next, out);
         slot.counter = 0;
         return;
     }
@@ -265,10 +267,11 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     slot.next = weapon_action::kRecoil; // [orig: @ 0x542c9e — hardcoded]
     begin_active(desc, slot, in, out);  // [orig: ExecuteActionTick @ 0x542cb4 runs the
                                         //  same phase-1 play on the fire desc]
+    out.head_started = slot.kick == 0 && def.soundhead[0] != 0;
     const WeaponFsmAction &recoil = def.actions[weapon_action::kRecoil];
     // [orig: @ 0x542cf1..0x542d0f — recoil ds + de + counter + 10, cap 20]
     kick_add(slot, recoil.delay_start + recoil.delay_end + slot.counter + 10);
-    finish_active(desc, slot, slot.next, out); // [orig: @ 0x542d13 push [esi+30h] — keeps
+    finish_active(def, desc, slot, slot.next, out); // [orig: @ 0x542d13 push [esi+30h] — keeps
                                                //  3; the finish plays the fire row's
                                                //  soundsetend = the per-shot gunshot]
 }
@@ -316,20 +319,7 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     // authors that, and reproducing a hardware exception is not parity — treat a zero
     // decay as no heat model.
     // [orig: @ 0x542f8b..0x542fdc]
-    if (def.heat_per_shot != 0 && def.heat_decay_per_tick > 0) {
-        if (slot.heat_window_end_tick < in.current_tick)
-            slot.heat_window_end_tick = in.current_tick; // [orig: @ 0x542fa0]
-        slot.heat_window_end_tick +=
-                def.heat_per_shot / def.heat_decay_per_tick + 1; // [orig: @ 0x542fb4]
-        // The ceiling clamp: past it the window is re-stamped to a fixed overrun, so
-        // a held trigger cannot bank heat beyond one lockout's worth.
-        // [orig: @ 0x542fc4 — the compare is > kCeiling-1, i.e. >= kCeiling]
-        if (weapon_slot_accumulated_heat(def, slot, in.current_tick) >
-            weapon_heat::kCeiling - 1)
-            slot.heat_window_end_tick =
-                    in.current_tick +
-                    weapon_heat::kCeiling / def.heat_decay_per_tick + 1; // [orig: @ 0x542fdc]
-    }
+    add_shot_heat(def, slot, in.current_tick);
     // (the overheat glow emitter — actionTable[11] muzzle FX @ 0x54109e..0x54122c —
     //  is an embedder effect seam, D-WPN-28)
     if (!in.is_local) { // [orig: @ 0x542fe9 -> LABEL_59]
@@ -388,7 +378,7 @@ void handler_reload(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     }
     begin_active(desc, slot, in, out); // [orig: ExecuteActionTick @ 0x543150]
     if (slot.counter == 0 && slot.phase != weapon_phase::kDone) {
-        finish_active(desc, slot, weapon_action::kIdle, out); // [orig: @ 0x54316e push 0]
+        finish_active(def, desc, slot, weapon_action::kIdle, out); // [orig: @ 0x54316e push 0]
         slot.burst = 0; // [orig: @ 0x543176]
     }
 }
@@ -749,6 +739,47 @@ void weapon_fsm_try_queue_switch_to(WeaponSlotState &slot) {
         slot.next = weapon_action::kIdle;
 }
 
+
+// [orig: WeaponSlot_CanFire @0x541ba0..0x541d15]
+bool weapon_fsm_can_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
+                         const WeaponFsmInputs &in) {
+    if (in.protected_carrier) return false;
+    if (((def.flags & weapon_flag::kFireWhileSwimming) == 0 &&
+            (in.drowning || in.head_submerged)) ||
+            ((def.flags & weapon_flag::kUnderwater) == 0 && in.head_submerged)) {
+        slot.next = weapon_action::kEmptyIdle;
+        return false;
+    }
+    if (def.clip_capacity != -1) {
+        if (static_cast<int16_t>(slot.clip) != 0) return true;
+        slot.next = slot.reserve != 0 ? weapon_action::kRecoil : weapon_action::kEmptyIdle;
+        return false;
+    }
+    // [orig: WeaponSlot_CanFire infinite-clip pool gate @0x541C8B..0x541CB9]
+    if (!in.ignore_ammo_cost && slot.reserve >= 0 && slot.reserve < def.ammo_cost) {
+        slot.next = weapon_action::kEmptyIdle;
+        return false;
+    }
+    return true;
+}
+
+// [orig: ActionSlot_ExecuteAction @0x4020A0]
+void weapon_fsm_replay_action(const WeaponFsmDef &def, WeaponSlotState &slot,
+        int32_t current_tick, WeaponFsmEvents &out) {
+    out = {};
+    if (slot.current == weapon_action::kFire) {
+        out.head_started = slot.kick == 0 && def.soundhead[0] != 0;
+        const auto &recoil = def.actions[weapon_action::kRecoil];
+        const uint32_t bump = uint32_t(slot.counter) + uint32_t(recoil.delay_start) +
+                uint32_t(recoil.delay_end) + 4u;
+        kick_add(slot, static_cast<int32_t>(bump));
+        if (slot.phase == weapon_phase::kHeld)
+            slot.kick = static_cast<uint8_t>(uint32_t(slot.kick) + 62u);
+    } else if (slot.current == weapon_action::kRecoil) {
+        add_shot_heat(def, slot, current_tick);
+    }
+}
+
 void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
                      const WeaponFsmInputs &in, WeaponFsmEvents &out) {
     out = WeaponFsmEvents{};
@@ -770,9 +801,14 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
     if (slot.kick != 0) {
         --slot.kick;
         if ((slot.kick == 0 || slot.current == weapon_action::kIdle) &&
-            slot.current != weapon_action::kReload)
+            slot.current != weapon_action::kReload && in.owner_present) {
             slot.kick = 0;
+            out.trailoff_started = def.soundtrailoff[0] != 0;
+        }
     }
+    if (in.owner_present && slot.kick != 0 && slot.current != weapon_action::kIdle &&
+            def.soundfireloop[0] != 0)
+        out.fireloop_lifetime_ticks = static_cast<int8_t>(slot.kick);
 
     // The heat window [orig: @ 0x540fed..0x541262]. A live window either denies the
     // next shot or, once it lapses (or the owner submerges with a def that is not

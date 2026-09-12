@@ -47,7 +47,7 @@ int32_t CollisionWorld::resolve_vehicle_probes(World &world, Entity &source,
 		const int32_t hull_pos[3], const int32_t (*probes)[3], const int32_t *radii, int count,
 		int32_t soft, int32_t hard, VehicleProbeForce *forces, EntityHandle &hit_entity) {
 	hit_entity = {};
-	source.engine_flags &= ~0x40u; // auxiliary contact flag, not the carrier Flags bit
+	source.carry_flags &= ~0x40u; // auxiliary contact flag, not the carrier Flags bit
 	if (count <= 0)
 		return 0;
 	int32_t candidate_count = 0;
@@ -125,7 +125,7 @@ int32_t CollisionWorld::resolve_vehicle_probes(World &world, Entity &source,
 			if (!collision_contact_force(*target, q, blink, ladder, contact))
 				continue;
 			if ((contact.flags & 0x800u) != 0)
-				source.engine_flags |= 0x40u;
+				source.carry_flags |= 0x40u;
 			if ((other->item_attrib & 1u) != 0)
 				continue; // callback-only target
 			const int32_t x = contact.force[0], y = contact.force[1], z = contact.force[2];

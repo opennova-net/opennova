@@ -67,6 +67,7 @@ struct ItemSeatSpec {
     // true; false means the production metadata source was absent.
     bool mount_config_valid = false;
     int32_t mount_config = 0;
+    uint32_t item_attrib2 = 0; // includes the IsTurret gun-channel gate
     std::vector<world::Seat> seats;
     // "armory*" userpoint locals (the embedder feeds them only for items.def Armory-attrib
     // 0x80000 items) + the ewep 'primary_weapon' link — the attach-label sources.
@@ -85,6 +86,13 @@ struct ItemSeatSpec {
 };
 
 struct PromoteOptions {
+    // Load-time admission uses the configured player limit, not live occupants.
+    // [orig: Entity_SpawnFromBMSRecord @0x40ea86; Server_InitNewRoundState @0x51c976]
+    int32_t player_limit = 1;
+    uint8_t team_count = 2;
+    uint32_t game_type = 0;
+    std::function<uint32_t(int32_t type_id)> item_attributes;
+
     // NavEntry f[0] (arrival/advance threshold) for markers whose authored wp_distance is 0.
     // [orig: Entity_SpawnFromBMSRecord @0x40e9f0 item 6005 defaults the radius to 0x8000
     // (0.5u); an authored wp_distance is used directly (<<16).]

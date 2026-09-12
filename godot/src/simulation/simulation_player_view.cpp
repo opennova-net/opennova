@@ -8,6 +8,7 @@
 
 #include <net/npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
 #include <runtime/world/local_player_view.h>
+#include <runtime/renderer/aspect_ratio.h>
 #include <runtime/simassets/fp_viewmodel_spec.h>
 #include <runtime/world/presentation_frame.h>
 
@@ -21,6 +22,18 @@ void Simulation::reset_local_player_view_effects() {
 
 void Simulation::refresh_local_player_view_effects() {
 	opennova::world::local_player_view_refresh(&kernel_->world, kernel_->local.view);
+}
+
+void Simulation::set_local_player_aspect_mode(int p_mode) {
+    if (kernel_) kernel_->local.aspect_mode = p_mode;
+}
+
+int Simulation::get_local_player_aspect_mode() const {
+    return kernel_ ? kernel_->local.aspect_mode : -1;
+}
+
+bool Simulation::request_local_player_scope_zero(int p_delta) {
+    return kernel_ != nullptr && kernel_->local.request_scope_zero(p_delta);
 }
 
 bool Simulation::request_local_player_scope_toggle() {
@@ -125,8 +138,9 @@ Vector3 Simulation::local_player_viewmodel_bias_view_units(
 	return Vector3(out[0], out[1], out[2]);
 }
 
-float Simulation::fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect) {
-	return opennova::world::fov_vertical_from_horizontal_deg(p_fov_h_deg, p_aspect);
+float Simulation::fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect, int p_mode) {
+    const float selected = opennova::renderer::aspect_height_over_width(p_mode, p_aspect, 1.0f);
+    return opennova::world::fov_vertical_from_horizontal_deg(p_fov_h_deg, 1.0f / selected);
 }
 
 Vector3 Simulation::presentation_forward(float p_yaw_deg, float p_pitch_deg) {

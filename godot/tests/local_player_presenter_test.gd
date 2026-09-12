@@ -63,7 +63,7 @@ func after_all() -> void:
 func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	# A key a failed assertion left down must not leak into the next case.
-	for keycode in [KEY_SHIFT, KEY_CTRL, KEY_7]:
+	for keycode in [KEY_SHIFT, KEY_CTRL, KEY_7, KEY_Z, KEY_X, KEY_C]:
 		_hold(keycode, false)
 
 
@@ -225,7 +225,7 @@ func _bare_world() -> GameWorld:
 func _attach_presenter(world: GameWorld, camera: Camera3D) -> LocalPlayerPresenter:
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup(world, camera)
+	presenter.setup(world, camera, null, ControlsModel.new())
 	presenter.set_input_override(_move_intent())
 	return presenter
 
@@ -401,9 +401,10 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 	assert_eq(int(sim.get_local_player_stance()), 0, "the spawned player stands")
 
 	for pair in [[KEY_Z, 2], [KEY_X, 1], [KEY_C, 0]]:
-		assert_true(presenter.handle_key_input(_key(pair[0]), true),
-				"stance key is consumed")
+		_hold(pair[0], true)
 		_frame(world, presenter, camera, 3)
+		_hold(pair[0], false)
+		_frame(world, presenter, camera)
 		assert_eq(int(sim.get_local_player_stance()), int(pair[1]),
 				"the sim grants the requested stance for key %d" % pair[0])
 
@@ -730,7 +731,7 @@ func test_shared_presenter_teardown_releases_captured_mouse() -> void:
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(presenter)
-	presenter.setup(world, camera)
+	presenter.setup(world, camera, null, ControlsModel.new())
 
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	presenter.teardown()
@@ -982,11 +983,8 @@ func _assert_fire_mode_change_frames(ticks_per_frame: int) -> void:
 			assert_eq(String(part.get_active_body_clip()), clip,
 					"frame %d renders the current weapon animation" % frame)
 			var animation := part.get_skeletal_anim()
-			var length := animation.get_clip_length(clip, view.anim_variant)
-			var phase := float(view.anim_advance_ticks) * TICK
-			if length > 0.0:
-				phase = fposmod(phase, length) if animation.is_clip_looping(clip, view.anim_variant) \
-						else minf(phase, length)
+			var phase: float = animation.get_clip_phase_seconds(
+					clip, view.anim_advance_ticks, view.anim_variant)
 			assert_almost_eq(part.get_animation_time(), phase, 0.00001,
 					"frame %d preserves the simulation animation phase" % frame)
 		previous_model = model

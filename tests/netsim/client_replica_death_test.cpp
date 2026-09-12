@@ -125,7 +125,10 @@ void test_deploy_overlay_follows_the_host() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;
 	CHECK(!view.state().deploy_overlay_active);
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x02));
+	CHECK(view.state().deploy_check_secured_spawn && !view.state().deploy_overlay_active);
 	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
+	CHECK(!view.state().deploy_check_secured_spawn);
 	CHECK(view.state().deploy_overlay_active);
 	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x00));
 	CHECK(!view.state().deploy_overlay_active);

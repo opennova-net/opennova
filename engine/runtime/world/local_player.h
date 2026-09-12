@@ -7,6 +7,7 @@
 // spawn entries) and reaches this state as `local`.
 #pragma once
 
+#include <runtime/hud/hud_minimap.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_input.h>
@@ -39,8 +40,11 @@ public:
     WeaponInventory inventory;
     bool inventory_valid = false;
     PlayerViewState view;
+    hud::HudMapControl hud_map_control;
+    uint64_t round_reset_revision = 0;
     LocalPlayerViewTracker view_tracker;
     PlayerLookSettings look_settings;
+    int aspect_mode = -1; // session video setting; survives player reinitialization
     // What the view arbiter reads from the embedder's session (death screen,
     // end-round, the death-camera target): a live embedder refreshes this
     // before each session frame; the bare kernel keeps the no-session default.
@@ -70,6 +74,8 @@ public:
     // @0x4df4c9..0x4df4ec; the ForceScoped pin @0x4df12d]
     void set_movement_keys(bool forward, bool back, bool left, bool right,
             bool lean_left, bool lean_right, bool jump);
+    bool request_scope_zero(int delta);
+    void set_view_keys(bool free_look, bool up, bool down, bool left, bool right);
     // Stance SELECT request (0 stand / 1 crouch / 2 prone): mutual exclusion
     // at apply, REFUSED while the equipped weapon has ForceCrouch or the
     // player sits in the UseGun seat. Returns whether the latch changed.
@@ -143,9 +149,14 @@ public:
     // WeaponAction_ProcessAllEntities call). The joiner frame runs it between
     // its heading fold and its own weapon pump.
     void tick_view();
+    void update_aim_target();
     // Reset the frame-input state and seed the look heading from the (auto-)
     // spawned local player's facing — the session bring-up's tail.
     void reset_local_player_input_to_player_facing();
+    // The local deployment reset, after the body snap and before kit rebuild.
+    // Retains NVG, camera-shake filters, map zoom, and physical held keys.
+    // [orig: Game_InitNewRound @0x422740]
+    void reset_for_new_round();
     // The same reset with an explicit heading (the joiner's spawn/redeploy
     // edges hand the authoritative facing in).
     void reset_local_player_input(int32_t look_heading_bam);

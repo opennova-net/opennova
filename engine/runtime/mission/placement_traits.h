@@ -95,6 +95,16 @@ inline bool uses_submodel_renderer(std::string_view tag) {
     return strutil::iequals(tag.substr(0, 4), "lndm");
 }
 
+// Section callbacks own a per-entity model mask and pivot. A static batch
+// cannot publish those independently for each instance.
+// [orig: TerrainTile_TransformPointFromSector @ 0x53BDB0;
+// Entity_BuildDeathSectionTransforms @ 0x492AF0]
+inline bool uses_section_renderer(std::string_view tag) {
+    const auto key = tag.substr(0, 4);
+    return strutil::iequals(key, "palm") || strutil::iequals(key, "psec") ||
+            strutil::iequals(key, "towr");
+}
+
 inline bool needs_individual_node(int item_type, uint32_t attrib2, bool has_anim_def,
 		bool has_occlusion_records) {
 	if (item_type == kItemTypePerson)

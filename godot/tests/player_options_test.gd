@@ -43,9 +43,9 @@ func after_each() -> void:
 func test_defaults_and_current_snapshot_are_detached() -> void:
 	var options := PlayerOptions.new()
 	var state := options.current()
-	assert_eq(state.sound_fx_volume, 255)
-	assert_eq(state.dialog_volume, 255)
-	assert_eq(state.music_volume, 255)
+	assert_eq(state.sound_fx_volume, 192)
+	assert_eq(state.dialog_volume, 192)
+	assert_eq(state.music_volume, 192)
 	assert_eq(state.mouse_sensitivity, 128)
 	assert_false(state.invert_mouse)
 	assert_eq(state.crosshair_style, 0)
@@ -55,7 +55,7 @@ func test_defaults_and_current_snapshot_are_detached() -> void:
 
 	state.sound_fx_volume = 12
 	state.crosshair_style = 9
-	assert_eq(options.current().sound_fx_volume, 255,
+	assert_eq(options.current().sound_fx_volume, 192,
 			"editing a snapshot cannot mutate the owner")
 	assert_eq(options.current().crosshair_style, 0)
 

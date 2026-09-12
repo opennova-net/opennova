@@ -29,6 +29,9 @@ public:
 	bool emit_standard(int32_t center_x_q16, int32_t center_y_q16,
 			int scorch_id, uint32_t tick);
 
+    bool emit_sized(int32_t center_x_q16, int32_t center_y_q16,
+            int scorch_id, int32_t half_extent_q16, uint32_t tick);
+
 	const std::vector<TerrainScorchEvent> &pending() const noexcept {
 		return pending_;
 	}

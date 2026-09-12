@@ -17,6 +17,7 @@
 #include <runtime/world/spawn_select.h>
 
 #include <algorithm>
+#include <cstdio>
 
 using namespace godot;
 
@@ -50,7 +51,7 @@ void Simulation::set_server_text(const String &p_medic_request_format) {
 		opennova::inmatch::set_server_text(*ctx, std::move(text));
 }
 
-Ref<DeployStatus> Simulation::get_deploy_status() {
+Ref<DeployStatus> Simulation::get_deploy_status(const Ref<RtxtStringFile> &p_gametext) {
 	// The DEATH screen's STATIC facts for THIS client [orig: the client
 	// globals UI_UpdateDeathScreenContent @0x5536a0 reads — dword_A85B5C /
 	// A85B60 / A85B68 from the 0x0A sub-block 0, word_A85BC0 + entity+538/548
@@ -105,34 +106,60 @@ Ref<DeployStatus> Simulation::get_deploy_status() {
 	v.statics = statics;
 	v.medic_cooldown_ticks = kernel_ ? static_cast<int>(kernel_->local.medic_request_cooldown_ticks) : 0;
 	v.medic_request_serial = kernel_ ? static_cast<int>(kernel_->local.medic_request_serial) : 0;
+
+    const auto text = [&p_gametext](const char *section, const char *key, const char *fallback) {
+        if (p_gametext.is_valid() && p_gametext->has_string_in_section(section, key))
+            return std::string(p_gametext->get_string_in_section(section, key).utf8().get_data());
+        return std::string(fallback);
+    };
+    opennova::world::DeployInstructionsInput instructions;
+    instructions.dead = local_player_dead();
+    const auto *player = kernel_ ? kernel_->local.player() : nullptr;
+    if (player) {
+        instructions.team = player->team;
+        instructions.player_name = player->display_name;
+    }
+    if (runtime_) {
+        const auto &cs = runtime_->state();
+        instructions.game_type = runtime_->game_type();
+        instructions.permanent_death = cs.permanent_death;
+        instructions.spectators_allowed = cs.spectators_allowed;
+        instructions.check_secured_spawn = cs.deploy_check_secured_spawn;
+        instructions.kill_announcement = cs.kill_announcement.text;
+        instructions.round_ticks = cs.round_time_remaining_ticks;
+        instructions.alive_players = cs.scoreboard.alive_player_count;
+        const auto &roster = cs.roster[runtime_->local_player_slot()];
+        if (roster.bound) {
+            instructions.player_name = roster.name;
+            instructions.clan = roster.clan;
+        }
+        if (is_joiner()) instructions.team = runtime_->assigned_team();
+        if (kernel_) {
+            const auto &reg = deploy_zone_registry();
+            instructions.has_spawn_zones = !reg.empty();
+            for (const auto handle : reg.entries) {
+                const auto *zone = kernel_->world.registry.get(handle);
+                if (!zone) continue;
+                const auto found = runtime_->zone_states().find(handle.packed);
+                if (found == runtime_->zone_states().end()) continue;
+                const auto *replica = cs.find(handle.packed);
+                const auto team = replica && replica->team_known ? replica->team : zone->team;
+                const auto &entry = found->second.entry;
+                if (team == instructions.team && entry.value_target >= entry.value_limit)
+                    instructions.has_full_team_spawn = true;
+            }
+        }
+    }
+    v.instructions = opennova::world::build_deploy_instructions(instructions, text);
+    char zone_key[32];
+    std::snprintf(zone_key, sizeof zone_key, "STRWPNAME%03d", line.zone_index + 1);
+    v.respawn_text = opennova::world::deploy_status_text(line,
+            text("Overlays", "STROVER_PENALTYTIMER", "Respawn penalty"),
+            text("WPNames", zone_key, "Spawn Point"));
 	Ref<DeployStatus> out;
 	out.instantiate();
 	out->assign(v);
 	return out;
-}
-
-String Simulation::get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext) {
-	// The STATIC_RESPAWN_MSG1 text: the engine's three sprintf arms over the
-	// status line get_deploy_status computes, with the gametext strings
-	// resolved here (GameText_GetString("Overlays", "STROVER_PENALTYTIMER") /
-	// ("WPNames", "STRWPNAME%03d") @0x5536a0, their shipped fallbacks).
-	const Ref<DeployStatus> status = get_deploy_status();
-	const opennova::world::DeployStatusLine &line = status->value().line;
-	auto game_text = [&p_gametext](const char *section, const String &key, const char *fallback) {
-		if (!p_gametext.is_null() && p_gametext->has_string_in_section(section, StringName(key)))
-			return p_gametext->get_string_in_section(section, StringName(key));
-		return String(fallback);
-	};
-	const String penalty_label = game_text("Overlays", "STROVER_PENALTYTIMER", "Respawn penalty");
-	String zone_name;
-	if (line.kind == opennova::world::DeployStatusLine::Kind::Wave && line.numbered) {
-		// "STRWPNAME%03d" over index + 1 (the key form deploy_screen_feed.h witnesses).
-		zone_name = game_text("WPNames",
-				String("STRWPNAME") + String::num_int64(line.zone_index + 1).pad_zeros(3),
-				"Spawn Point");
-	}
-	return String::utf8(opennova::world::deploy_status_text(line,
-			penalty_label.utf8().get_data(), zone_name.utf8().get_data()).c_str());
 }
 
 TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_default_key,

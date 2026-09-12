@@ -72,7 +72,7 @@ public:
 	// rebuilds an as-yet unstarted joiner (bring_up) rebuilds it the same way.
 	// The shell installs its tables on the new runtime after.
 	ClientRuntime &create_runtime(const std::string &player_name, JoinRole join_role,
-			const std::string &spectator_password);
+			const std::string &spectator_password, const std::string &server_password);
 	void bind(mission::MissionKernel &kernel) override;
 	bool bring_up() override;
 
@@ -238,6 +238,7 @@ private:
 	std::string player_name_;
 	JoinRole join_role_ = JoinRole::Player;
 	std::string spectator_password_;
+	std::string server_password_;
 	bool started_ = false;       // ClientHello emitted (Idle -> Hello)
 	bool local_spawned_ = false; // L spawned at reached_in_match (one-shot guard)
 	bool wire_world_static_initialized_ = false;

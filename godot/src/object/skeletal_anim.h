@@ -165,6 +165,7 @@ public:
 	PackedFloat32Array get_clip_variant_lengths(const String &p_key) const;
 	int get_clip_frame_count(const String &p_key, int p_variant = 0) const;
 	float get_clip_fps(const String &p_key, int p_variant = 0) const;
+	double get_clip_phase_seconds(const String &p_key, int p_ticks, int p_variant = 0) const;
 	float get_clip_length(const String &p_key, int p_variant = 0) const;  // seconds
 	bool is_clip_looping(const String &p_key, int p_variant = 0) const;
 

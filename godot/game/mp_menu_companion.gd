@@ -303,24 +303,23 @@ func _on_host_start() -> void:
 
 
 # Read the host request off the loaded document by control name. Unread controls
-# (rules tab, weapon restrictions, server location) still render. MissionRoot
+# (weapon restrictions) still render. MissionRoot
 # derives the wire game type from the selected mission; the record's Co-op value
 # remains the fallback for explicit callers that do not request auto derivation.
 func _read_host_config() -> HostSessionConfig:
 	var config := HostSessionConfig.new()
-	var server_name := _edit_text("GAME_NAME", "")
-	if not server_name.is_empty():
-		config.server_name = server_name
-	var max_text := _edit_text("MAX_PLAYERS", "")
-	config.max_players = clampi(int(max_text) if max_text.is_valid_int() else 4, 1, 99)
-	# Retail's host dialog stores ALLOW_SPECTATORS as -1 when checked and 0
-	# when unchecked. A separate positive limit remains available to typed/CLI
-	# producers, but the retail menu itself exposes the shared-capacity mode.
-	# The witnessed reader lives engine-side (GameConfig.spectator_slots,
-	# docs/net/novaworld-net-re.md section 5.0e).
-	config.spectator_slots = -1 if _is_checked("ALLOW_SPECTATORS") else 0
-	config.spectator_password = _edit_text("SPECTATOR_PW", "").substr(
-			0, HostSessionConfig.SPECTATOR_PASSWORD_MAX_LENGTH)
+	for control in HostSessionOptions.dialog_controls():
+		var id := _id(control)
+		if id < 0:
+			continue
+		var value := _driver.get_widget_text(id)
+		match _driver.widget_kind_of(id):
+			MnuDocument.TYPE_SPINLIST:
+				value = _driver.item_text(id, _driver.selected_row(id)) \
+						if control == "GAME_LOCATION" else _driver.spin_value_attr(id)
+			MnuDocument.TYPE_CHECKBOX:
+				value = "1" if _driver.is_widget_checked(id) else "0"
+		config.apply_dialog_control(control, value)
 	config.missions = _selected_missions()
 	if config.missions.size() > 0:
 		config.mission = config.missions[0]
@@ -331,16 +330,7 @@ func _read_host_config() -> HostSessionConfig:
 	# Retail's game-name field is the expansion currently mounted by the game,
 	# and is empty for the base game. Never substitute a captured expansion id.
 	config.expansion = _root.get_expansion() if _root != null else ""
-	config.dedicated = _is_dedicated()  # serve-and-play (false, default) vs dedicated (no local player)
 	return config
-
-
-# Serve-and-play (default) vs dedicated: a DEDICATED host runs the listen server but spawns NO local
-# player. mp.mnu's host screen carries this as the SERVERTYPE spinlist [orig: host dialog server-type
-# read, UI_HandleHostSessionStart @0x556d00]: HG_SERVEPLAY value="0" (serve-and-play) vs HG_SERVEONLY
-# value="1" (dedicated). We read the item's value attr (not its localized label). Absent/0 -> serve-and-play.
-func _is_dedicated() -> bool:
-	return _spin_attr("SERVERTYPE", "0") == "1"
 
 
 # The rotation's mission FILE names, in table order (the table cells carry

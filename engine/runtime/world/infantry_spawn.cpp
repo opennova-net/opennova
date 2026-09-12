@@ -174,6 +174,13 @@ void initialize_organic_ai(World &world, Entity &entity) {
 }
 
 void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
+    entity.destroy_phases_q16.fill(0);
+    entity.destroy_progress = 0;
+    entity.objective_death_scored = false;
+    if (const auto *traits = world.tables.item_death_traits.get(entity.item_id)) {
+        entity.destroy_timer = traits->destroy_timing_ticks[0];
+        entity.destroy_timer_initialized = true;
+    }
     const Vec3 origin = entity.position;
     const int32_t heading = bam_heading_from_mission_yaw_deg(entity.yaw);
     const uint32_t flags = entity.flags | entity.engine_flags;
@@ -346,7 +353,7 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
     release_corpse_effect(world, entity);
     entity.hidden = true;
     const EntityHandle handle = entity.handle;
-    world.out.entity_removals.push_back(handle.packed);
+    world.out.entity_events.push_back(EntityRemoveEvent{handle.packed});
     world.commands.remove_ssn(handle);
     if (ai.collision != nullptr) ai.collision->refresh_after_registry_change(world);
     return NpcCorpseStep::Removed;

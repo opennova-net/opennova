@@ -33,7 +33,7 @@
 //   +0x2F8  airborne_stamp_2f8  the client crash window's airborne tick stamp
 //   +0x2FC  wreck_2fc           wreck-settled / bike fall-over latch; the light
 //                               chassis helper uses +0x460 as its angular rate
-//   +0x3DE  has_been_driven     the bike's "has been driven" byte
+//   +0x3DE  wheelie_active      the bike's retained launch mode
 //
 // THE TICK, in the witnessed order inside each family contact solve:
 //   1. crash tests   — raise crash_request under the family's conditions

@@ -284,8 +284,12 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	            "host ignores a resend-list body shorter than its key"))
 		return false;
 
+    if (!expect(!ctx.np_protocol.connection_list[0].link.nak_backoff_pending,
+        "invalid resend lists do not back off replication")) return false;
 	const inmatch::HandleResult resend = inmatch::handle_server_datagram(
 			ctx, kPeer, gap_nacks[0].data(), gap_nacks[0].size(), 5);
+    if (!expect(ctx.np_protocol.connection_list[0].link.nak_backoff_pending,
+        "valid NAK arms the recipient backoff")) return false;
 	if (!expect(resend.outbound.size() == 1,
 	            "valid client 0x44 makes the host emit one reconstructed packet"))
 		return false;

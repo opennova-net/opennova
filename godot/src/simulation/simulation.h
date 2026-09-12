@@ -307,6 +307,13 @@ public:
 		PF_FOCAL_SWAY_Y = opennova::world::PF_FOCAL_SWAY_Y,
 		PF_FOCAL_SWAY_Z = opennova::world::PF_FOCAL_SWAY_Z,
 		PF_DOOR_COUNT = opennova::world::PF_DOOR_COUNT,
+        PF_HUSK = opennova::world::PF_HUSK,
+        PF_OBJECT_DESTROY = opennova::world::PF_OBJECT_DESTROY,
+        PF_OBJECT_DESTROY01 = opennova::world::PF_OBJECT_DESTROY01,
+        PF_OBJECT_DESTROY02 = opennova::world::PF_OBJECT_DESTROY02,
+        PF_OBJECT_DESTROY03 = opennova::world::PF_OBJECT_DESTROY03,
+        PF_OBJECT_DESTROY04 = opennova::world::PF_OBJECT_DESTROY04,
+        PF_OBJECT_DESTROY05 = opennova::world::PF_OBJECT_DESTROY05,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 
@@ -504,6 +511,7 @@ private:
 	// the live runtime pointer stay here, on the class that is the embedder.
 	SimulationNetState net_;
 	SimulationAssetState assets_;
+	opennova::world::ScriptVoiceChannel::SetResolver voice_set_resolver_;
 	SimulationPresentState present_;
 	SimulationPlayerState player_;
 	using PresentRowIdentity = SimulationPresentState::PresentRowIdentity;
@@ -856,10 +864,8 @@ public:
 	// (null detaches); remembered so the World's death releases the owner's
 	// pointer before the environment can read a freed WeatherState.
 	void set_weather_render_owner(Weather *p_owner);
-	// The authority's mission-start boundary after the eager WAC execution:
-	// currents snap to targets, clamps install, 255 full ticks settle (retail
-	// Environment_MissionStartInit @ 0x57f1e0). False for a joiner / no world.
-	bool settle_weather_mission_start();
+	// Complete the native mission-start boundary after the weather seed.
+	bool complete_mission_start();
 	// The precipitation drop pool's per-render update + compile for a camera
 	// (renderer/precipitation_frame.h carries the cites): the compiled frame the
 	// Precipitation node streams (drops, five floats per vertex, color, snow);
@@ -1012,7 +1018,8 @@ public:
 	// loading the mission; a sim is host XOR joiner; false when the socket can't be dialed.
 	// `join_role` 1 = the retail spectator role (ClientAuth JSR=1 + optional JSPP).
 	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name,
-			int p_join_role = 0, const String &p_spectator_password = String());
+			int p_join_role = 0, const String &p_spectator_password = String(),
+			const String &p_server_password = String());
 	bool is_joiner() const { return session_.kind() == opennova::inmatch::RoleKind::Joiner; }
 	// Placed identities retired since the last take (the slot vanished or was
 	// re-typed): the mission root hides their placed representation.
@@ -1211,10 +1218,7 @@ public:
 			const String &p_default_home, const Dictionary &p_zone_names);
 	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
 	// wave line, the psp/medic show gates, and the medic-call cooldown.
-	Ref<DeployStatus> get_deploy_status();
-	// The STATIC_RESPAWN_MSG1 text of the current status line, resolved
-	// through the gametext table (the engine's deploy_status_text); "" when the static is hidden.
-	String get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext);
+	Ref<DeployStatus> get_deploy_status(const Ref<RtxtStringFile> &p_gametext);
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
 	// (engine: runtime/inmatch/client_runtime.h)
@@ -1432,6 +1436,9 @@ public:
 	// and queues the scopeup/scopedown FSM states. Returns whether it toggled.
 	// (engine: runtime/world/local_player_view.cpp)
 	bool request_local_player_scope_toggle();
+    void set_local_player_aspect_mode(int p_mode);
+    int get_local_player_aspect_mode() const;
+	bool request_local_player_scope_zero(int p_delta);
 	// Retail action 26 (default B): toggles the persistent binocular request.
 	// The effective raised/view bits are derived each tick from movement, life,
 	// round-end, and camera mode. Returns the new requested state; false also
@@ -1459,7 +1466,7 @@ public:
 	Ref<PlayerLocalView> get_local_player_view() const;
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
 	// ONE conversion both cameras use (engine: runtime/world/player_view.cpp).
-	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);
+	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect, int p_mode = -1);
 	// The presentation frame's view forward for mission-euler angles, the aim
 	// ray's far point and the binocular rangefinder readout — the engine's
 	// world/presentation_frame.h (no presenter spells the swizzle).
@@ -1517,6 +1524,7 @@ public:
 	void drain_round_impact_rows(std::vector<opennova::world::RoundImpactPresentation> &r_rows);
     void drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events);
     std::vector<std::string> script_effect_names() const;
+    void bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene);
 	TypedArray<RoundImpactRow> drain_round_impacts();
 	// Destructively drain permanent terrain-cache scorch insertions (mission
 	// 16.16 bounds; the consumer folds mission (x,y) to terrain/Godot (x,z)).
@@ -1530,6 +1538,9 @@ public:
 	// resolves each row's keys against gametext and calls the format helpers
 	// below.
 	TypedArray<FeedRow> drain_feed_events();
+	void retain_feed_announcement(const String &text, int64_t tick);
+	String get_kill_announcement_text() const;
+	int64_t get_kill_announcement_tick(int64_t now);
 	// The folded Tab board's HEADER (netsim ClientScoreboard counts + the
 	// session strings): known/team_mode/timed, the witnessed players count
 	// (accepted rows minus the spectator trailer, replication::scoreboard_header),
@@ -1701,12 +1712,6 @@ public:
 	// carries the diagnostics. (C++-only; the compile surface and the installed
 	// program's execution are pinned by the wac_program_surface ctest.)
 	bool compile_and_set_wac(const PackedStringArray &p_sources);
-	// Retail executes the freshly installed WAC once before the 255-tick
-	// environment settle. Host/standalone authority only; idempotent per load.
-	bool run_mission_start_wac();
-	// Replace the early post-BMS restore point with the fully settled play-start
-	// state, including WAC temporal/RNG state.
-	void seal_mission_start_baseline();
 	// Last-frame microsecond counters for the runtime hot path. Allocates only when queried.
 	Dictionary get_runtime_perf_counters() const;
 	// One opt-in seam for native sim/net/present/occlusion timings and
@@ -1806,6 +1811,7 @@ public:
 	// Typed audio presentation/acknowledgement seam; WAC owns the channel state.
 	opennova::world::ScriptVoiceChannel::Frame script_voice_frame(const Vector3 &p_listener);
 	void finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip);
+	void set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver);
 	bool play_script_wave(const String &p_filename);
 	TypedArray<SoundEmitterRow> drain_sound_emitters();
 

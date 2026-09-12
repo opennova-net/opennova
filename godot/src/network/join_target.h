@@ -30,6 +30,7 @@ public:
 	};
 	// The ServerHello P2 flag bits the LAN row carries (LanServerRow.server_flags).
 	enum ServerFlag {
+		FLAG_SERVER_PASSWORD = 0x8,
 		FLAG_ALLOW_SPECTATORS = 0x2000,
 		FLAG_SPECTATOR_PASSWORD = 0x4000,
 	};
@@ -54,6 +55,7 @@ public:
 	// state: the authoritative value arrives post-auth in the 0x7B record.
 	JOIN_TARGET_TEXT(server_name)
 	JOIN_TARGET_TEXT(spectator_password)
+	JOIN_TARGET_TEXT(server_password)
 #undef JOIN_TARGET_TEXT
 
 	int get_port() const { return port_; }
@@ -74,6 +76,9 @@ public:
 	bool get_role_explicit() const { return role_explicit_; }
 	void set_role_explicit(bool p_value) { role_explicit_ = p_value; }
 
+	bool server_password_required() const {
+		return server_flags_ >= 0 && (server_flags_ & FLAG_SERVER_PASSWORD) != 0;
+	}
 	bool allows_spectators() const {
 		return server_flags_ >= 0 && (server_flags_ & FLAG_ALLOW_SPECTATORS) != 0;
 	}
@@ -103,6 +108,7 @@ private:
 	int server_flags_ = -1;
 	int join_role_ = ROLE_PLAYER;
 	String spectator_password_;
+	String server_password_;
 	bool role_explicit_ = false;
 };
 

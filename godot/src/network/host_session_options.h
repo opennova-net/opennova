@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/ref_counted.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -51,6 +52,10 @@ public:
 	String get_##m_name() const;                  \
 	void set_##m_name(const String &p_value);
 	HOST_SESSION_TEXT(server_name)
+	HOST_SESSION_TEXT(server_password)
+	HOST_SESSION_TEXT(side_a_password)
+	HOST_SESSION_TEXT(side_b_password)
+	HOST_SESSION_TEXT(country)
 	HOST_SESSION_TEXT(mission_name)
 	HOST_SESSION_TEXT(mission_file)
 	HOST_SESSION_TEXT(custom_text)
@@ -68,6 +73,12 @@ public:
 	// Retail's signed spectator setting: 0 disables, -1 shares max_players, a
 	// positive value adds that many spectator-only slots.
 	HOST_SESSION_INT(spectator_slots, spectator_slots)
+	HOST_SESSION_INT(server_punkbuster, server_punkbuster)
+	HOST_SESSION_INT(server_lan_only, server_lan_only)
+	HOST_SESSION_INT(connection_speed, connection_speed)
+	HOST_SESSION_INT(max_friendly_kills, max_friendly_kills)
+	HOST_SESSION_INT(allow_ai, allow_ai)
+	HOST_SESSION_INT(time_of_day_continuity, time_of_day_continuity)
 	// The g_GameType code word (NetProtocol.GAME_TYPE_*).
 	HOST_SESSION_INT(game_type, game_type)
 	HOST_SESSION_INT(mp_attributes, mp_attributes)
@@ -121,6 +132,8 @@ public:
 	void set_bind_port(int p_port) { bind_port_ = p_port; }
 	int get_max_players() const { return max_players_; }
 	void set_max_players(int p_value) { max_players_ = p_value; }
+	// The resolved native limit includes a dedicated host's reserved slot.
+	int get_player_slot_limit() const;
 	bool get_serve_and_play() const { return serve_and_play_; }
 	void set_serve_and_play(bool p_value) { serve_and_play_ = p_value; }
 	// Derive g_GameType from the loaded mission's attrib mode at load
@@ -150,6 +163,9 @@ public:
 	// The MCP status boundary's JSON shape (one key per live-session field;
 	// the request-only fields above stay out of it).
 	Dictionary to_json_value() const;
+	static PackedStringArray dialog_controls();
+	bool apply_dialog_control(const String &p_control, const String &p_value);
+	Ref<HostSessionOptions> duplicate_options() const;
 };
 
 } // namespace godot

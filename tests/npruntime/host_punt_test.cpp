@@ -998,6 +998,8 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 	live.reply.dead_live_ticks = 359;
 	inmatch::Server_TickUpdate(ctx);
 	replication::Datagram datagram;
+	if (!expect(transport.pop_outbound(datagram) && datagram.tag == s2c::RTT_ECHO,
+			"the first state-6 tick emits its periodic RTT echo")) return false;
 	if (!expect(live.reply.dead_live_ticks == 360 &&
 				!live.host_disconnect_sent && !transport.pop_outbound(datagram),
 			"exactly 360 consecutive dead ticks does not emit t7"))

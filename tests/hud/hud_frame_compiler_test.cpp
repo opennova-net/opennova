@@ -2007,10 +2007,34 @@ void test_chat_wrap_slots(const fnt_font_t *font) {
 	plain.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	plain.push_chat_line("aaaa bbbb cccc", 0xFFFFFFFFu, 0);
 	CHECK(plain.chat_lines().size() == 1, "no box, no wrap");
+    plain.reset_overlay_buffers();
+    CHECK(plain.chat_lines().size() == 1 && plain.chat_lines()[0].text == "aaaa bbbb cccc",
+            "respawn overlay reset retains chat history");
+}
+
+// The banner belongs to the later panel pass and survives gameplay declutter.
+void test_kill_announcement(const fnt_font_t *font) {
+    HudFrameCompiler compiler;
+    compiler.configure(HudLayout{}, font);
+    compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+    HudFrameState state;
+    state.hud_detail_level = 3;
+    state.kill_announcement.record("abc", 100);
+    state.ticks = 286;
+    const auto &list = compiler.compile(state, 1024, 768);
+    CHECK(list.glyphs.size() == 3, "banner remains visible at age 186");
+    if (!list.glyphs.empty()) {
+        CHECK(list.glyphs[0].color == 0xFFFFFFFFu, "banner uses full white");
+        CHECK(std::abs(list.glyphs[0].x_top_left - 498.5f) < 0.01f, "banner centers its 26px text at 512 with the raster half-pixel offset");
+        CHECK(std::abs(list.glyphs[0].y_top - 29.5f) < 0.01f, "banner uses design y 30 with the raster half-pixel offset");
+    }
+    state.ticks = 287;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "banner expires after age 186");
 }
 
 int main() {
 	fnt_font_t font = make_font();
+	test_kill_announcement(&font);
 	test_measure_advance_and_trailing_pad(&font);
 	test_layout_pages_bold_underline(&font);
 	test_format_tags(&font);

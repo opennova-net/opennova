@@ -6,6 +6,7 @@
 // script-double eval fallbacks are gone.
 
 #include "object/object_model.h"
+#include <base/io/tick_rate.h>
 #include "object/model_user_point.h"
 
 #include <godot_cpp/core/math.hpp>
@@ -137,6 +138,14 @@ void ObjectModel::play_body_clip_variant(const String &p_key, int p_variant) {
 
 // Pose a selected clip variant at an authoritative time; render-frame
 // _process(delta) never advances the playhead afterwards.
+void ObjectModel::play_body_clip_variant_at_tick(const String &p_key,
+		int p_variant, int p_ticks) {
+	if (skeletal_.is_valid()) {
+		play_body_clip_variant_at_time(p_key, p_variant,
+				skeletal_->get_clip_phase_seconds(p_key, p_ticks, p_variant));
+	}
+}
+
 void ObjectModel::play_body_clip_variant_at_time(const String &p_key,
 		int p_variant, double p_seconds) {
 	for (ObjectModel *linked : live_presentation_links()) {
@@ -162,7 +171,7 @@ void ObjectModel::play_body_clip_variant_at_time(const String &p_key,
 }
 
 // Pose a main-body clip at the authoritative infantry motor playhead. IDA's
-// AnimMap phase advances in half-frame ticks: seconds = ticks / (2 * clip_fps).
+// AnimMap phase counts simulation ticks; clip timelines retain retail rounding.
 void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->play_body_clip_at(p_key, p_phase_ticks);
@@ -182,11 +191,7 @@ void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks) {
 	const String previous_key = anim_key_;
 	const double previous_time = anim_time_;
 	const bool previous_external = anim_external_phase_;
-	const float fps = skeletal_->get_clip_fps(key);
-	double seconds = 0.0;
-	if (fps > 0.0f) {
-		seconds = double(MAX(p_phase_ticks, 0)) / (2.0 * fps);
-	}
+	const double seconds = clip_phase_seconds(key, p_phase_ticks);
 	const bool same_external = previous_external && key == previous_key &&
 			Math::is_equal_approx(previous_time, seconds);
 	anim_key_ = key;
@@ -256,7 +261,7 @@ void ObjectModel::pose_body_blend_at_times(const String &p_source_key,
 	advance_body_animation(0.0);
 }
 
-// Seed a main-body clip from retail half-frame ticks, pose it immediately, and
+// Seed a main-body clip from simulation ticks, pose it immediately, and
 // leave it free-running.
 void ObjectModel::play_body_clip_seeded(const String &p_key, int p_phase_ticks) {
 	for (ObjectModel *linked : live_presentation_links()) {
@@ -393,7 +398,7 @@ int ObjectModel::body_phase_ticks(const String &p_key, double p_seconds) const {
 	if (fps <= 0.0f) {
 		return 0;
 	}
-	return MAX(static_cast<int>(Math::floor(p_seconds * 2.0 * fps + 0.000001)), 0);
+	return MAX(static_cast<int>(Math::floor(p_seconds * opennova::io::kTicksPerSecondInt + 0.5)), 0);
 }
 
 void ObjectModel::start_remote_body_blend(const String &p_target_key,
@@ -449,7 +454,8 @@ bool ObjectModel::advance_remote_body_blend_tick(int p_state_id) {
 		return false;
 	}
 	remote_blend_source_phase_ticks_ += 1;
-	remote_blend_source_time_ += clip_half_tick_seconds(remote_blend_source_key_);
+	remote_blend_source_time_ = clip_phase_seconds(
+			remote_blend_source_key_, remote_blend_source_phase_ticks_);
 	remote_blend_target_phase_ticks_ += 1;
 	remote_blend_weight_ =
 			MIN(f32(double(remote_blend_weight_) + double(remote_blend_step_)), 1.0f);
@@ -588,13 +594,7 @@ String ObjectModel::resolve_body_clip_key(const String &p_key) const {
 }
 
 double ObjectModel::clip_phase_seconds(const String &p_key, int p_phase_ticks) const {
-	const float fps = skeletal_->get_clip_fps(p_key);
-	return fps > 0.0f ? double(MAX(p_phase_ticks, 0)) / (2.0 * fps) : 0.0;
-}
-
-double ObjectModel::clip_half_tick_seconds(const String &p_key) const {
-	const float fps = skeletal_->get_clip_fps(p_key);
-	return fps > 0.0f ? 1.0 / (2.0 * double(fps)) : 0.0;
+	return skeletal_->get_clip_phase_seconds(p_key, p_phase_ticks);
 }
 
 void ObjectModel::clear_body_blend() {
@@ -957,19 +957,10 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 	double wpn_time = 0.0;
 	double wpn_prev_time = 0.0;
 	if (use_overlay && !wpn_key_.is_empty()) {
-		// Weapon-channel playhead: half-frame ticks -> seconds, the
-		// play_body_clip_at convention. The outgoing clip converts against ITS
-		// OWN fps — the two channels keep independent playheads through the blend.
-		const float wfps = skeletal_->get_clip_fps(wpn_key_, wpn_variant_);
-		if (wfps > 0.0f) {
-			wpn_time = double(MAX(wpn_phase_ticks_, 0)) / (2.0 * wfps);
-		}
-		if (!wpn_prev_key_.is_empty()) {
-			const float pfps = skeletal_->get_clip_fps(wpn_prev_key_, wpn_prev_variant_);
-			if (pfps > 0.0f) {
-				wpn_prev_time = double(MAX(wpn_prev_phase_ticks_, 0)) / (2.0 * pfps);
-			}
-		}
+		wpn_time = skeletal_->get_clip_phase_seconds(wpn_key_, wpn_phase_ticks_, wpn_variant_);
+		if (!wpn_prev_key_.is_empty())
+			wpn_prev_time = skeletal_->get_clip_phase_seconds(
+					wpn_prev_key_, wpn_prev_phase_ticks_, wpn_prev_variant_);
 	}
 	static const PackedInt32Array empty_classes;
 	const Basis *overlay_deltas = use_overlay ? aim_overlay_deltas_.data() : nullptr;

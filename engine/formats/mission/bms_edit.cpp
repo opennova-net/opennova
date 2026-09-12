@@ -41,7 +41,8 @@ constexpr uint32_t kKnownAiAttributeMask =
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::Guarding) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::RemoveIfLessThan) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::RemoveIfMoreThan) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::Multiplayer) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::SinglePlayerOnly) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::MultiplayerOnly) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::Berserk) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::FlyingOrganic) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::Coward) |

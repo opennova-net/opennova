@@ -28,6 +28,15 @@ static int failures = 0;
 
 namespace {
 
+void tick_dead_items(World &world, const TerrainHeightField *terrain,
+                     float water_height, DestructionEvents &events) {
+    for (int pool = 1; pool <= 2; ++pool) {
+        world.registry.for_each_in_pool(pool, [&](const Entity &row) {
+            tick_item_death_motion(world, *world.registry.get(row.handle), terrain, water_height, events);
+        });
+    }
+}
+
 // A minimal ammo table: [0] null, [1] a grenade-style kz round, then the two
 // named landing blasts resolved by the retail post-death callbacks.
 void seed_ammo(World &w) {
@@ -1276,7 +1285,7 @@ void test_dead_item_settle() {
     // No terrain -> ground at -1e9: it keeps falling, gravity accumulating
     // [orig: slideDecay -= 334 @0x493fe5].
     const int32_t sz0 = e->veh.slide_z;
-    destruction_tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
     CHECK(e->veh.slide_z == sz0 - 334);
     CHECK(e->position.z < 5.0f);
 }
@@ -1303,7 +1312,7 @@ void test_generic_staticdeath_freezes() {
     e->veh.vel_y = -32768;
     e->veh.slide_z = -65536;
     const Vec3 before = e->position;
-    destruction_tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
     CHECK(std::abs(e->position.x - before.x) < 1.0e-6f);
     CHECK(std::abs(e->position.y - before.y) < 1.0e-6f);
     CHECK(std::abs(e->position.z - before.z) < 1.0e-6f);
@@ -1394,7 +1403,7 @@ void test_specialized_piece_physics_callback() {
             ? 0
             : 0x02D82D82;
     crt_srand(1);
-    destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
 
     CHECK(w.destruction_rng.state == expected_rng.state);
     CHECK(piece->veh.air_pitch_bam == expected_pitch);
@@ -1445,7 +1454,7 @@ void test_specialized_piece_physics_callback() {
     while (piece->death_motion == DeathMotionMode::PiecePitchSettle &&
            settle_ticks < 12) {
         const int32_t before = piece->veh.air_pitch_bam;
-        destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
         ++settle_ticks;
         if (piece->death_motion == DeathMotionMode::PiecePitchSettle) {
             const int32_t moved = std::abs(before - piece->veh.air_pitch_bam);
@@ -1486,7 +1495,7 @@ void test_specialized_piece_physics_callback() {
     DestructionRng ordered_expected = ordered.destruction_rng;
     const uint16_t ordered_angle_roll = ordered_expected.next16();
 	const uint32_t fire_state_before = ordered.prng16_c_state; // independent retail PRNG_C
-	destruction_tick_dead_items(ordered, nullptr, -1.0e9f, ordered.out.destruction);
+	tick_dead_items(ordered, nullptr, -1.0e9f, ordered.out.destruction);
 	CHECK(ordered.destruction_rng.state == ordered_expected.state);
 	CHECK(ordered.prng16_c_state != fire_state_before);
 	CHECK(ordered_piece->veh.yaw_bam == ((ordered_angle_roll & 1u) != 0 ? 0 : 0x02D82D82));
@@ -1496,7 +1505,7 @@ void test_specialized_piece_physics_callback() {
     ordered_piece->veh.air_pitch_bam = 0;
     ordered_piece->veh.air_pitch_rate = 0;
     const uint32_t equal_pitch_rng = ordered.destruction_rng.state;
-    destruction_tick_dead_items(
+    tick_dead_items(
             ordered, nullptr, -1.0e9f, ordered.out.destruction);
     CHECK(ordered_piece->death_motion == DeathMotionMode::Generic);
     CHECK(ordered.destruction_rng.state == equal_pitch_rng);
@@ -1524,7 +1533,7 @@ void test_specialized_piece_physics_callback() {
     submerged->veh.air_pitch_rate = 0x01000000;
     submerged->veh.air_roll_rate = -0x01000000;
     const uint32_t wet_rng_before = wet.destruction_rng.state;
-    destruction_tick_dead_items(wet, nullptr, 0.0f, wet.out.destruction);
+    tick_dead_items(wet, nullptr, 0.0f, wet.out.destruction);
     CHECK(wet.destruction_rng.state == wet_rng_before);
     CHECK(submerged->death_motion == DeathMotionMode::PiecePhysics);
     CHECK(submerged->veh.vel_x == 32768);
@@ -1577,7 +1586,7 @@ void test_specialized_piece_physics_callback() {
     client_piece->veh.slide_z = -65536;
     CollisionWorld client_collision;
     attach_wreck_shells(client, client_collision, client_h, -2.0, -1.0);
-    destruction_tick_dead_items(
+    tick_dead_items(
             client, &ramp.field, -1.0e9f, client.out.destruction);
     CHECK(client_piece->death_motion == DeathMotionMode::PiecePitchSettle);
     CHECK(client_piece->veh.air_pitch_rate > 0);
@@ -1616,7 +1625,7 @@ void test_specialized_piece_physics_callback() {
     // lands; the husk-floor cases above start below their raised target.
     for (int tick = 0; tick < 16 &&
             bare_piece->death_motion == DeathMotionMode::PiecePhysics; ++tick) {
-        destruction_tick_dead_items(bare, &flat.field, -1.0e9f, bare.out.destruction);
+        tick_dead_items(bare, &flat.field, -1.0e9f, bare.out.destruction);
     }
     CHECK(bare_piece->death_motion == DeathMotionMode::PiecePitchSettle);
     // ground = avg 0 - 0, then the -0x8000 landing offset.
@@ -1661,7 +1670,7 @@ void test_dead_item_landing_split() {
     t.particlefinale = "Effect_VehDrtPuftrk";
     Entity *item = drop(700, t);
     const Vec3 item_before = item->position;
-    destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
     CHECK(std::abs(item->position.x - item_before.x) < 1.0e-6f);
     CHECK(std::abs(item->position.y - item_before.y) < 1.0e-6f);
     CHECK(std::abs(item->position.z - item_before.z) < 1.0e-6f);
@@ -1682,7 +1691,7 @@ void test_dead_item_landing_split() {
     tv.unit_type = 1;
     tv.particlefinale = "Effect_VehDrtPuftrk";
     Entity *wreck = drop(701, tv);
-    destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
     const float routed_new_z = ground + 0.5f +
             static_cast<float>(-65536 - 334) / 65536.0f;
     CHECK(std::abs(wreck->position.z - routed_new_z) < 1.0e-3f);
@@ -1727,7 +1736,7 @@ void test_dead_item_landing_split() {
     const size_t authority_blasts = w.explosions.queue.size();
     w.rules.logic_authority = false;
     Entity *client_wreck = drop(702, tv);
-    destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
     CHECK(client_wreck->death_motion == DeathMotionMode::Generic);
     CHECK(w.explosions.queue.size() == authority_blasts);
 }
@@ -1771,7 +1780,7 @@ void test_static_dead_item_settle() {
         sliding->veh.vel_x = 65536;
         sliding->veh.vel_y = 0;
         sliding->veh.slide_z = 0;
-        destruction_tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
         CHECK(std::abs(sliding->position.x - (x0 + 1.0f)) < 1.0e-6f);
         CHECK(sliding->veh.vel_x == 63569);
         CHECK(sliding->veh.slide_z == 0);
@@ -1782,7 +1791,7 @@ void test_static_dead_item_settle() {
         stopping->veh.vel_x = 8;
         stopping->veh.vel_y = -8;
         stopping->veh.slide_z = 0;
-        destruction_tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
         CHECK(stopping->veh.vel_x == 0);
         CHECK(stopping->veh.vel_y == 0);
         CHECK(stopping->veh.slide_z == -167);
@@ -1793,13 +1802,13 @@ void test_static_dead_item_settle() {
         landing->veh.vel_x = 0;
         landing->veh.vel_y = 0;
         landing->veh.slide_z = -65536;
-        destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
         CHECK(std::abs(landing->position.z - ground) < 1.0e-3f);
         CHECK(landing->veh.vel_x == 0);
         CHECK(landing->veh.vel_y == 0);
         CHECK(landing->veh.slide_z == -65536 - 167);
         CHECK(landing->death_motion == DeathMotionMode::Generic);
-        destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
         CHECK(std::abs(landing->position.z - ground) < 1.0e-3f);
         CHECK(landing->veh.slide_z == 0);
     }
@@ -1811,13 +1820,13 @@ void test_static_dead_item_settle() {
     ai_static->veh.vel_x = 0;
     ai_static->veh.vel_y = 0;
     ai_static->veh.slide_z = 0;
-    destruction_tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
     CHECK(ai_static->veh.slide_z == -167);
 
     Entity *below_sliding = spawn_static(5, Vec3{50.0f, 8.0f, ground - 1.0f});
     below_sliding->veh.vel_x = 65536;
     below_sliding->veh.slide_z = 0;
-    destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
     CHECK(below_sliding->death_motion == DeathMotionMode::Static);
     CHECK(std::abs(below_sliding->position.z - (ground - 1.0f)) < 1.0e-6f);
 
@@ -1826,27 +1835,27 @@ void test_static_dead_item_settle() {
     // and only values above 10 move the landing line down by 25 units.
     Entity *water_below = spawn_static(5, Vec3{60.0f, 8.0f, ground + 5.0f});
     water_below->veh.vel_x = 65536;
-    destruction_tick_dead_items(
+    tick_dead_items(
             w, &flat.field, ground - 1.0f, w.out.destruction);
     CHECK(water_below->death_motion == DeathMotionMode::Generic);
     CHECK(std::abs(water_below->position.z - ground) < 1.0e-3f);
 
     Entity *at_ten = spawn_static(5, Vec3{64.0f, 8.0f, ground - 20.0f});
-    destruction_tick_dead_items(
+    tick_dead_items(
             w, &flat.field, ground + 10.0f, w.out.destruction);
     CHECK(at_ten->death_motion == DeathMotionMode::Generic);
     CHECK(std::abs(at_ten->position.z - ground) < 1.0e-3f);
 
     Entity *deep_water_hold = spawn_static(
             5, Vec3{68.0f, 8.0f, ground - 20.0f});
-    destruction_tick_dead_items(
+    tick_dead_items(
             w, &flat.field, ground + 11.0f, w.out.destruction);
     CHECK(deep_water_hold->death_motion == DeathMotionMode::Static);
     CHECK(std::abs(deep_water_hold->position.z - (ground - 20.0f)) < 1.0e-3f);
 
     Entity *deep_water_land = spawn_static(
             5, Vec3{72.0f, 8.0f, ground - 26.0f});
-    destruction_tick_dead_items(
+    tick_dead_items(
             w, &flat.field, ground + 11.0f, w.out.destruction);
     CHECK(deep_water_land->death_motion == DeathMotionMode::Generic);
     CHECK(std::abs(deep_water_land->position.z - ground) < 1.0e-3f);
@@ -1877,7 +1886,7 @@ void test_dead_item_water_splash() {
     e->alive = false;
     e->death_motion = DeathMotionMode::Generic;
     e->veh.slide_z = -8 * 65536; // 8 u/tick: the bound top crosses in one tick
-    destruction_tick_dead_items(w, &flat.field, water, w.out.destruction);
+    tick_dead_items(w, &flat.field, water, w.out.destruction);
     bool splashed = false;
     for (const DestructionSoundEvent &s : w.out.destruction.sounds)
         if (s.sound == "IMP_DEBLRG_WATER") splashed = true;
@@ -1897,7 +1906,7 @@ void test_dead_item_water_splash() {
     routed_e->veh.slide_z = -8 * 65536;
     routed_e->veh.vel_x = 65536;
     routed_e->veh.vel_y = -32768;
-    destruction_tick_dead_items(w, &flat.field, water, w.out.destruction);
+    tick_dead_items(w, &flat.field, water, w.out.destruction);
     splashed = false;
     for (const DestructionSoundEvent &s : w.out.destruction.sounds) {
         if (s.sound != "IMP_DEBLRG_WATER") continue;
@@ -1926,7 +1935,7 @@ void test_dead_item_water_splash() {
 	routed_e->position = seed.position;
 	routed_e->veh.slide_z = -8 * 65536;
 	w.out.destruction.clear();
-	destruction_tick_dead_items(w, &flat.field, water, w.out.destruction);
+	tick_dead_items(w, &flat.field, water, w.out.destruction);
 	CHECK(w.out.destruction.sounds.size() == 1);
 	CHECK(w.out.destruction.sounds[0].sound == "WRECK_WATER");
 	CHECK(w.out.destruction.sounds[0].pos.x == seed.position.x);
@@ -1963,7 +1972,7 @@ void test_death_dispatch_flag_routing() {
     Entity *falling = dispatch(712, 1, true);
     CHECK((falling->engine_flags & 0x20000u) != 0);
     falling->veh.slide_z = -65536;
-    destruction_tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+    tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
     CHECK((falling->engine_flags & 0x20000u) == 0);
 }
 
@@ -2269,7 +2278,7 @@ void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
 
     int ticks_to_first = 0;
     for (int i = 0; i < 20000 && w.out.destruction.crackles == 0; ++i) {
-        destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+        tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
         ++ticks_to_first;
     }
     CHECK(w.out.destruction.crackles > 0);
@@ -2299,7 +2308,7 @@ void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
     e2->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
     e2->alive = false;
     for (int i = 0; i < ticks_to_first + 100; ++i)
-        destruction_tick_dead_items(w2, &flat.field, -1.0e9f, w2.out.destruction);
+        tick_dead_items(w2, &flat.field, -1.0e9f, w2.out.destruction);
     CHECK(w2.out.destruction.crackles == 0);
 
     // Underwater: the draw is consumed BEFORE the water gate — the stream
@@ -2317,7 +2326,7 @@ void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
     e3->alive = false;
 	const uint32_t state_before = w3.prng16_c_state;
 	for (int i = 0; i < 64; ++i)
-		destruction_tick_dead_items(w3, &flat.field, 100.0f, w3.out.destruction);
+		tick_dead_items(w3, &flat.field, 100.0f, w3.out.destruction);
     CHECK(w3.out.destruction.crackles == 0);
 	CHECK(w3.prng16_c_state != state_before);
 }
@@ -2348,7 +2357,7 @@ void test_generic_wreck_zero_velocity_and_inverted_rest() {
 	seed.death_motion = DeathMotionMode::Generic;
 	auto h = w.registry.spawn(1, seed);
 	Entity &e = *w.registry.get(h);
-	destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+	tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
 	CHECK(e.veh.slide_z == -334);
 	CHECK(e.position.z < seed.position.z); // zero velocity does not suppress gravity
 	ItemDeathTraits t;
@@ -2360,12 +2369,12 @@ void test_generic_wreck_zero_velocity_and_inverted_rest() {
 	e.veh.yaw_seeded = false;
 	e.veh.slide_z = -65536;
 	e.veh.vel_x = 65536;
-	destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+	tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
 	CHECK(e.position.x == 8 && e.position.z == ground + 1);
 	CHECK(e.roll == 180 && e.veh.slide_z == 0 && e.veh.vel_x == 65536);
 	e.roll = 0;
 	e.veh.slide_z = -65536;
-	destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
+	tick_dead_items(w, &flat.field, -1.0e9f, w.out.destruction);
 	CHECK(e.position.x == 9 && e.position.z < ground + 1); // upright lower bound permits this step
 }
 
@@ -2447,11 +2456,11 @@ static void test_vehicle_respawn_lifecycle() {
 	w.ai.is_authority = false;
 	w.rules.vehicle_respawns = false;
 	w.vehicles.tick_dead(e, ai);
-	CHECK(w.registry.get(h) != nullptr && w.out.entity_removals.empty());
+	CHECK(w.registry.get(h) != nullptr && w.out.entity_events.empty());
 	w.ai.is_authority = true;
 	w.vehicles.tick_dead(e, ai);
-	CHECK(w.registry.get(h) == nullptr && w.out.entity_removals.size() == 1);
-	CHECK(w.out.entity_removals[0] == h.packed);
+	CHECK(w.registry.get(h) == nullptr && w.out.entity_events.size() == 1);
+	CHECK(std::get<EntityRemoveEvent>(w.out.entity_events[0]).handle == h.packed);
 }
 
 static void test_vehicle_death_kills_authored_children() {
@@ -2816,7 +2825,7 @@ void test_gnrl_death_is_husk_sound_and_one_effect() {
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
 	w.logic_tick = 140;
-	destruction_tick_class_death_think(w);
+	tick_item_event_pool(w, h.pool());
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(w.explosions.queue.empty());
 }
@@ -2858,7 +2867,7 @@ void test_gnrl_client_kill_leg() {
 // and kz blast — then the 0x26 resend and Flags |= 4.
 // [orig: sub_407020 — @0x4070b2..0x4070e2 (Flags |= 2, +0x2AC = 4), the
 //  Flags&2 leg @0x407072..0x4070a6; Entity_UpdatePool1Slot @0x4b8e1b gate]
-void test_gnrc_death_lands_husk_four_ticks_later() {
+void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	auto w_heap = std::make_unique<World>();
 	World &w = *w_heap;
 	seed_ammo(w);
@@ -2880,14 +2889,14 @@ void test_gnrc_death_lands_husk_four_ticks_later() {
 	CHECK(w.explosions.queue.empty());
 	CHECK(count_active_pieces(w) == 0);
 
-	// The countdown: nothing until the fourth tick after the death tick.
-	for (uint32_t t = 200; t < 204; ++t) {
+	// Pool 2 subtracts 8 on its first visit, then runs the expired clock on the next.
+	for (uint32_t t = 200; t < 208; ++t) {
 		w.logic_tick = t;
-		destruction_tick_class_death_think(w);
+		tick_item_event_pool(w, h.pool());
 		CHECK((b->engine_flags & kEntityFlagHusk) == 0);
 	}
-	w.logic_tick = 204;
-	destruction_tick_class_death_think(w);
+	w.logic_tick = 208;
+	tick_item_event_pool(w, h.pool());
 	CHECK((b->engine_flags & kEntityFlagHusk) != 0);
 	CHECK(w.out.destruction.husk_swaps.size() == 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
@@ -2903,7 +2912,7 @@ void test_gnrc_death_lands_husk_four_ticks_later() {
 	// Idempotent afterwards: the later think re-arms and the husked notify
 	// meets its gate.
 	w.logic_tick = 240;
-	destruction_tick_class_death_think(w);
+	tick_item_event_pool(w, h.pool());
 	destruction_notify_item_damage(w, *b, 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
 	CHECK(w.explosions.queue.size() == 1);
@@ -2935,9 +2944,9 @@ void test_gnrc_client_kill_runs_death_transforms_at_once() {
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
 	CHECK(w.explosions.queue.size() == 1);
 	CHECK(count_active_pieces(w) == 3);
-	// The think tick is authority-only and finds nothing pending anyway.
+	// Client callbacks run too; the completed husk remains inert.
 	w.logic_tick = 60;
-	destruction_tick_class_death_think(w);
+	tick_item_event_pool(w, h.pool());
 	CHECK(w.out.destruction.items_destroyed == 1);
 }
 
@@ -3086,7 +3095,7 @@ void test_null_class_never_dies() {
 //  @0x407279..0x4072dd (+0x2AC = 0x20), the Flags&2 leg @0x4071ef..0x40725f
 //  -> Server_BroadcastExplosionEffect @0x508450 -> Entity_SpawnExplosionEffects
 //  @0x4399c0 (@0x4399e3 effect, @0x439a06 queue push)]
-void test_gnl2_death_detonates_thirty_two_ticks_later() {
+void test_gnl2_death_detonates_after_pool_countdown(int pool, uint32_t expiry) {
 	auto w_heap = std::make_unique<World>();
 	World &w = *w_heap;
 	seed_ammo(w);
@@ -3099,13 +3108,13 @@ void test_gnl2_death_detonates_thirty_two_ticks_later() {
 	he.kz_minradius = 1.0f;
 	he.kz_maxradius = 6.0f;
 	w.registry.configure_pool(0, 4);
-	w.registry.configure_pool(1, 8);
+	w.registry.configure_pool(pool, 8);
 	w.logic_tick = 300;
 	Entity attacker_seed;
 	attacker_seed.kind = EntityKind::Organic;
 	attacker_seed.health = 100;
 	const EntityHandle attacker = w.registry.spawn(0, attacker_seed);
-	const EntityHandle h = spawn_prop(w, 1, 500, 50);
+	const EntityHandle h = spawn_prop(w, pool, 500, 50);
 	w.tables.item_death_traits.set(500, class_traits(ItemDeathClass::kGnl2));
 	Entity *b = w.registry.get(h);
 	b->last_attacker = attacker;
@@ -3120,13 +3129,13 @@ void test_gnl2_death_detonates_thirty_two_ticks_later() {
 	CHECK(w.out.destruction.husk_swaps.empty());
 	CHECK(w.explosions.queue.empty());
 
-	for (uint32_t t = 300; t < 332; ++t) {
+	for (uint32_t t = 300; t < expiry; ++t) {
 		w.logic_tick = t;
-		destruction_tick_class_death_think(w);
+		tick_item_event_pool(w, h.pool());
 		CHECK((b->engine_flags & kEntityFlagHusk) == 0);
 	}
-	w.logic_tick = 332;
-	destruction_tick_class_death_think(w);
+	w.logic_tick = expiry;
+	tick_item_event_pool(w, h.pool());
 	CHECK((b->engine_flags & kEntityFlagHusk) != 0);
 	CHECK(w.out.destruction.husk_swaps.size() == 1);
 	CHECK(w.out.destruction.items_destroyed == 1);
@@ -3143,7 +3152,7 @@ void test_gnl2_death_detonates_thirty_two_ticks_later() {
 	}
 	// No death sound replay and no second detonation.
 	w.logic_tick = 400;
-	destruction_tick_class_death_think(w);
+	tick_item_event_pool(w, h.pool());
 	destruction_notify_item_damage(w, *b, 2);
 	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
 	CHECK(count_effect(w, "Effect_AirExp", 0) == 1);
@@ -3230,12 +3239,13 @@ int main() {
     test_mounted_blast_protection_follows_seat_type();
 	test_gnrl_death_is_husk_sound_and_one_effect();
 	test_gnrl_client_kill_leg();
-	test_gnrc_death_lands_husk_four_ticks_later();
+	test_gnrc_death_lands_husk_on_pool2_cohort();
 	test_gnrc_client_kill_runs_death_transforms_at_once();
 	test_ewep_death_dismounts_gunner_before_husk();
 	test_ewep_client_kill_keeps_gunner_mounted();
 	test_null_class_never_dies();
-	test_gnl2_death_detonates_thirty_two_ticks_later();
+	test_gnl2_death_detonates_after_pool_countdown(1, 332);
+	test_gnl2_death_detonates_after_pool_countdown(2, 336);
 	test_unwitnessed_class_keeps_tree_body();
 	test_death_effect_banks_and_water_crossings();
 	test_aircraft_landing_and_navigation_states();

@@ -20,7 +20,7 @@ const KEY := "records"
 ## would pin those rows to bare digits over the seeded defaults. Pre-1.0 there
 ## is no migration: an unstamped or mismatched blob is dropped.
 const SCHEMA_KEY := "schema"
-const SCHEMA := 1
+const SCHEMA := 2
 
 static var _model: ControlsModel = null
 

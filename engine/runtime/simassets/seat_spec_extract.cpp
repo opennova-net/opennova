@@ -265,6 +265,7 @@ void extract_item_seat_specs(const DefItemsFile &items,
 		if (def == nullptr) continue; // item_not_found
 		mission::ItemSeatSpec spec;
 		spec.type_id = type_id;
+		spec.item_attrib2 = def->attrib2;
 		// Mounted gunner overlay selection reads the TARGET item definition's
 		// phrase_set dword at +0x86c; presence is carried independently
 		// because zero is a witnessed retail configuration.

@@ -430,6 +430,10 @@ void Simulation::drain_terrain_scorches(
 	kernel_->world.out.terrain_scorches.clear_pending();
 }
 
+void Simulation::bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene) {
+    kernel_->world.item_emitters.bind_scene(std::move(scene));
+}
+
 std::vector<std::string> Simulation::script_effect_names() const {
     return world_installed_ ? kernel_->script_effect_catalog.interned_names() : std::vector<std::string>{};
 }
@@ -1189,7 +1193,7 @@ PackedFloat32Array Simulation::get_present_snapshot() const {
 		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner()};
 		if (is_joiner()) {
 			opennova::inmatch::build_client_replica_present_rows(
-					context, present_.rows_scratch, present_.door_phases_scratch);
+					context, present_.pool_lifecycle, present_.rows_scratch, present_.door_phases_scratch);
 			// Consume-once: each transition pulse dispatches exactly one presented
 			// frame (the rows copied any live pulse into PF_ANIM_STATE_PULSE).
 			runtime_->state().clear_anim_pulses();

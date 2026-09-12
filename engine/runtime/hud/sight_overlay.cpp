@@ -4,6 +4,7 @@
 
 #include <runtime/hud/sight_overlay.h>
 #include <runtime/hud/hud_math.h>
+#include <runtime/renderer/aspect_ratio.h>
 
 namespace opennova::hud {
 
@@ -52,9 +53,9 @@ SightRect sight_row_rect(const SightRowSpec &row, int sight_scale_index,
 	return out;
 }
 
-SightViewportRect sight_rect_to_viewport(const SightRect &rect, float width, float height) {
+SightViewportRect sight_rect_to_viewport(const SightRect &rect, float width, float height, int aspect_mode) {
 	if (width <= 0.0f || height <= 0.0f) return {};
-	const float aspect = height / width;
+	const float aspect = renderer::aspect_height_over_width(aspect_mode, width, height);
 	const float correction = 3.0f / (4.0f * aspect);
 	const float center_y = height * 0.5f;
 	SightViewportRect out;

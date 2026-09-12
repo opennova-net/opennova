@@ -167,6 +167,7 @@ struct LocalPlayerWeapon {
     int32_t action_finished = -1;
 
     float scope_max_mag = 0.0f;
+    int32_t aim_range_q16 = 0;
     int32_t attack_kind = 0;
     int32_t run_anim = 0;
     bool force_crouch = false;
@@ -196,6 +197,13 @@ struct LocalPlayerWeapon {
 // The plain install payload: weapon_install_data_from_def fills the row half
 // from the retained weapon.def parse; the feeder adds the clip rings.
 struct WeaponInstallData {
+    WeaponScopeZero scope_zero;
+    int32_t ammo_cost = 0;
+    std::string soundfireloop;
+    std::string soundtrailoff;
+    std::string soundhead;
+    std::string soundlockedtone;
+
     std::string name;
     std::string animadm;
     int32_t flags = 0;

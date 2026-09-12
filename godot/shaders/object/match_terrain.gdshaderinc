@@ -6,7 +6,7 @@
 bool obj_match_terrain_replaces_normal(out vec3 terrain_color) {
 	terrain_color = vec3(0.0);
 	#ifdef OBJ_MATCHTERRAIN_SKINNED_STANCE
-	if (!u_match_terrain_enabled || !u_has_match_terrain_cache ||
+	if (opennova_thermal_view || !u_match_terrain_enabled || !u_has_match_terrain_cache ||
 			!u_match_terrain_page_ready) {
 		return false;
 	}

@@ -151,14 +151,15 @@ public:
 	// A body slot sound (footstep/foley/landing/scream) from the sim's per-tick
 	// drain: the same full-volume positional one-shot as fire_soundset [orig:
 	// Entity_PlaySound3D_FullVolume @ 0x528e20 -- emitter volume 255], with an
-	// optional exclusive key for the every-tick refire slots (chute flap/freefall).
+	// shares the finite one-shot pool with the other positional triggers.
 	bool slot_soundset(const String &p_name, const Vector3 &p_world_pos,
-			const String &p_exclusive_key = String(), int p_source_bms_id = 0);
+			int p_source_bms_id = 0);
 	// Enqueue a mission dialog by its PlayWavList id (param1): the engine's
 	// resolution (runtime/audio/dialog_queue resolve_dialog_sets) then the
 	// serialized queue, pumped here by spawning one voice at a time. Returns
 	// true if the id resolved to at least one playable set.
 	bool play_dialog(int p_wav_id);
+    void reset_dialog_queue() { dialog_queue_.discard_pending(); }
 	// Resolve-only (no playback) for tests/diagnostics: the first set name a dialog id
 	// maps to that the loaded banks actually contain, or "" if none.
 	String resolve_dialog_set(int p_wav_id);
@@ -212,7 +213,7 @@ protected:
 private:
 	Ref<Simulation> _simulation() const;
 	bool _record_fire(const String &p_set_name, const Vector3 &p_world_pos, int p_source_bms_id,
-			const String &p_exclusive_key, bool p_slot, bool p_played);
+			bool p_slot, bool p_played);
     void _play_listener_relative(const String &p_name, int32_t p_distance_q16,
             int32_t p_bearing, const Transform3D &p_camera_xform);
 	void _attach_under(Node3D *p_container);
@@ -222,6 +223,7 @@ private:
 	AudioStreamPlayer *_dialog_voice_node() const;
 	AudioStreamPlayer *_wac_voice_node() const;
 	void _on_script_voice_finished(int64_t p_serial, int64_t p_player_id);
+	void _install_voice_resolver();
 	void _stop_script_voice(bool p_report_finished);
 	Ref<AudioStreamWAV> _resolve_wav(const String &p_filename);
 	Ref<AudioStreamWAV> _resolve_candidate_stream(const Ref<AmbientLayer> &p_descriptor);

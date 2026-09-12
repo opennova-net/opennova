@@ -12,8 +12,10 @@
 // follow-up). See docs/audio/lwf-dbf-sound-re.md.
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -71,6 +73,16 @@ std::vector<uint32_t> layer_members(const lwf::File &bank, const lwf::Playlist &
 int32_t pick_layer_member(const lwf::File &bank, const SetLocation &loc,
 		int32_t layer_index, uint32_t playlist_index, SoundSelector &selector);
 
+// The first resolved member of a radio set, selected only after channel zero
+// is found idle. [orig: Audio_StartAmbientSoundForPlayer @0x4ECE30]
+struct RadioVoice {
+    std::string filename;
+    int32_t volume = 255;
+    int32_t max_distance = 0;
+};
+std::optional<RadioVoice> select_radio_voice(const lwf::File &bank,
+        const SetLocation &loc, SoundSelector &selector, uint8_t listener_view_flags);
+
 // Q16 listener distance the way the shell measured it: the float length of
 // the offset, scaled by the 16.16 one and truncated.
 int64_t listener_distance_q16(const float world_pos[3], const float listener_pos[3]);
@@ -82,6 +94,23 @@ struct OneshotVoice {
 	uint32_t playlist = 0;
 	uint32_t sndparm = 0;
 	int32_t vol255 = 255;
+	uint32_t pitch_q16 = 0x10000u;
+};
+
+// Retail has 26 physical channels. The generic one-shot allocator scans
+// channels 12..25; the first twelve belong to voice/music/ambient owners.
+// [orig: audio_find_and_open_channel @0x766E80; AudioChannel_Open @0x7668F0]
+inline constexpr size_t kAudioChannelCount = 26;
+inline constexpr size_t kFirstOneshotChannel = 12;
+class OneshotChannelPool {
+public:
+	// First strictly lower score wins; ties retain slot order. Incoming gain
+	// must exceed half the selected channel's six-byte gain sum.
+	int acquire(uint64_t wave, uint8_t volume, uint32_t sound_id = 0);
+	void release(size_t channel);
+private:
+	struct Channel { uint64_t wave = 0; uint32_t sound_id = 0; uint8_t volume = 0; };
+	std::array<Channel, kAudioChannelCount> channels_{};
 };
 
 struct OneshotPlan {

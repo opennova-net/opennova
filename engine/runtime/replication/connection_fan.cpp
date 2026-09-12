@@ -439,9 +439,8 @@ PlayerReplicationState anchor_for_owned_entity(const world::Entity &entity) {
 // g_entity_send_budget @0xC8FC50: the per-frame 0x0A byte cap, INCLUDING the header
 // bytes (the original measures packet[3]-packet[0] where the header is already
 // written). Default 600, set in Server_InitNewRoundState @0x51ca7c; runtime-writable
-// via the BANDWIDTH server command (100-1600). The new/stale-recipient halving
-// (budget >>= 1 iff slot+89876 congestion flag or connection uptime > 2000
-// [orig: @0x517c62]) is deferred — no congestion-callback model yet.
+// via the BANDWIDTH server command (100-1600). Per-recipient backoff is
+// applied to a local budget in emit_connection_s2c.
 int g_entity_send_budget = 600;
 
 // word_26C681E — the environment's draw/view distance in world units, read by the
@@ -510,7 +509,8 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
                                                       const std::vector<GameEntitySnapshot> &entities,
                                                       const PlayerReplicationState &anchor,
                                                       std::size_t header_bytes,
-                                                      std::size_t hard_frame_limit) {
+                                                      std::size_t hard_frame_limit,
+                                                      std::size_t frame_budget) {
 	devtools::ProfileLap lap(w.profile);
 	// 1. Age sweep [orig: @0x50e60f, saturating +1 over both pools' age arrays].
 	for (uint8_t &a : conn.s2c_entity_age) {
@@ -752,7 +752,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 				(static_cast<uint32_t>(s.snap->euler_z) + 0x800000u) >> 24);
 		conn.s2c_entity_speed[idx] = s.snap->tick_speed_q6;
 		written += record_bytes;
-		if (written >= std::size_t(g_entity_send_budget)) break; // [orig: @0x50f34b]
+		if (written >= frame_budget) break; // [orig: @0x50f34b]
 	}
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_BUDGET);
 	return selected;
@@ -1029,6 +1029,13 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	// recipient entity before ++playerSlot+100566 @0x517BE8]
 	conn.owned_entity_spawn_id = owned->registry_spawn_id;
 	const PlayerReplicationState anchor = anchor_for_owned_entity(*owned);
+    // The retail temporary global is restored after this recipient's write.
+    // Keep that budget local so one peer's NAK cannot affect another peer.
+    // [orig: Server_SendEntityStateToPlayer @0x517c58..0x517c9d; halving @0x517c62]
+    const std::size_t frame_budget = static_cast<std::size_t>(g_entity_send_budget) >>
+        ((conn.nak_backoff_pending || static_cast<int32_t>(conn.receive_silence_ms) > 2000) ? 1 : 0);
+    conn.nak_backoff_pending = false;
+
 
 	// Advance the per-connection 0x0A sub-block phase and select this frame's header sub-block
 	// [orig: ++playerSlot+100566 then NetPacket_WritePlayerState writes it as flags2, phase&3 =
@@ -1140,7 +1147,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	std::vector<RoundEventRecord> rounds =
 			select_round_events(
 					w, conn, anchor,
-					std::size_t(g_entity_send_budget) - header_bytes,
+					frame_budget > header_bytes ? frame_budget - header_bytes : 0,
 					hard_event_bytes);
 	std::size_t rounds_bytes = 0;
 	for (const RoundEventRecord &r : rounds)
@@ -1149,7 +1156,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	const std::vector<GameEntitySnapshot> selected =
 			select_frame_entities(
 					w, conn, ents, anchor, header_bytes + rounds_bytes,
-					max_frame_body_bytes);
+					max_frame_body_bytes, frame_budget);
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITIES);
 
 	std::vector<uint8_t> frame = build_0a_frame(

@@ -51,126 +51,13 @@ inline MissionEulerDeg mission_euler_from_overlay(
 }
 
 inline bool emplaced_weapon_controls_for_client(
-		const replication::ClientEntityState &mount,
-		const replication::ClientState &state,
-		const std::vector<mission::ItemSeatSpec> &specs,
-		world::EmplacedWeaponControls &out) {
-	out = world::EmplacedWeaponControls{};
-	const mission::ItemSeatSpec *spec =
-			simassets::item_seat_spec_for_type(specs, mount.type_id);
-	if (spec == nullptr) return false;
-
-	for (const replication::ClientEntityState &occupant : state.entities) {
-		if (occupant.carrier_handle != mount.handle ||
-				occupant.mount_bone == 0 ||
-				(occupant.cls != EntityClass::Player &&
-				 occupant.cls != EntityClass::Infantry))
-			continue;
-		const world::Seat *seat = nullptr;
-		for (const world::Seat &candidate : spec->seats) {
-			if (candidate.bone_index == occupant.mount_bone) {
-				seat = &candidate;
-				break;
-			}
-		}
-		if (seat == nullptr || seat->type != world::SeatType::Gunner)
-			continue;
-
-		// ClientReplicaPipeline has already composed mounted yaw into world heading and
-		// reconstructed an infantry gunner's live entity pitch from the compact
-		// aim target using retail's one-eighth chase. Root headings read the
-		// row's live BAM (chased on a joiner — §5.38e; full euler precision for
-		// vehicles).
-		const int32_t parent_heading = mount.heading_bam;
-		const int32_t occupant_heading = occupant.heading_bam;
-		const int32_t occupant_pitch =
-				occupant.cls == EntityClass::Player
-				? static_cast<int32_t>(
-						static_cast<uint32_t>(occupant.pitch_byte) << 24)
-				: occupant.pitch_bam;
-		// The immediate producer of the gun words, over the replica: yaw =
-		// gun - occupant; pitch = gun - occupant.recoilPitch - occupant, the
-		// recoil being the row's reconstructed entity+0x380 (stamped from the
-		// received round event, decayed by the local body pass). The replica
-		// carries neither the stored +0x322/+0x324 words nor the mount's
-		// ItemDefAttrib2, so the IsTurret slew/tether leg and the window
-		// clamp's occupant write-back (both authority-side in
-		// world/mount_controls.h) are not mirrored here: a joiner presents a
-		// remote IsTurret turret at the occupant's aim, not the slewed word.
-		// [orig: Entity_UpdateChildAttachment @0x4409A0 immediate path
-		//  @0x440b39..0x440b58 — `sub ecx,[edx+380h]` @0x440b4c]
-		int32_t yaw_delta = io::bam_sub(parent_heading, occupant_heading);
-		int32_t pitch_delta = io::bam_sub(
-				io::bam_sub(mount.pitch_bam, occupant.recoil_pitch), occupant_pitch);
-		// The per-seat authored window wins first — the CARRIER's addeweap arc
-		// for this attach point, matched by the mount row's streamed carrier +
-		// bone (the same key the seat match above uses). Any nonzero value
-		// selects the quartet verbatim; all-zero falls to the weapon-def
-		// window below. [orig: Entity_GetWeaponTurretLimits @0x540d70 per-seat
-		// leg @0x540db5..0x540e27 — carrierDef+540/556/572/588[seat]]
-		const mission::ItemEmplacementAttachmentSpec *arc = nullptr;
-		if (mount.carrier_handle != world::EntityHandle::kInvalid) {
-			for (const replication::ClientEntityState &carrier : state.entities) {
-				if (carrier.handle != mount.carrier_handle) continue;
-				if (const mission::ItemSeatSpec *carrier_spec =
-						simassets::item_seat_spec_for_type(specs, carrier.type_id)) {
-					for (const mission::ItemEmplacementAttachmentSpec
-							&candidate :
-							carrier_spec->emplacement_attachments) {
-						if (candidate.anchor_found &&
-								candidate.anchor.bone_index ==
-										mount.mount_bone &&
-								(candidate.down_limit_bam |
-								 candidate.up_limit_bam |
-								 candidate.right_limit_bam |
-								 candidate.left_limit_bam) != 0) {
-							arc = &candidate;
-							break;
-						}
-					}
-				}
-				break;
-			}
-		}
-		// A retail joiner never presents a barrel outside the arc even when
-		// the mount's streamed base heading is stale relative to its gunner:
-		// the phase pins at the arc edge (live 00TRg witness 2026-08-04 — gun
-		// 0x100c streamed its spawn heading 140 deg while its gunner aimed
-		// 314 deg; unclamped, the "180 tripod" model wrapped the barrel
-		// visibly wrong).
-		// [orig: the per-update clamp @0x441228..0x44128c via Math_ClampAngleToBounds]
-		const world::TurretWindow window =
-				world::select_turret_window_bam(
-						arc != nullptr ? arc->down_limit_bam : 0,
-						arc != nullptr ? arc->up_limit_bam : 0,
-						arc != nullptr ? arc->right_limit_bam : 0,
-						arc != nullptr ? arc->left_limit_bam : 0,
-						spec->turret_yaw_range_bam,
-						spec->turret_pitch_max_bam,
-						spec->turret_pitch_min_bam);
-		if (window.per_seat) {
-			world::emplaced_clamp_turret_bam(yaw_delta, window.yaw_upper,
-					window.yaw_lower);
-			world::emplaced_clamp_turret_bam(pitch_delta, window.pitch_upper,
-					window.pitch_lower);
-		} else {
-			// weapon.def fallback (stamped onto the spec from the primary
-			// weapon's rows).
-			if (window.yaw_upper != 0)
-				world::emplaced_clamp_turret_bam(yaw_delta, window.yaw_upper,
-						window.yaw_lower);
-			if (window.pitch_upper != 0 || window.pitch_lower != 0)
-				world::emplaced_clamp_turret_bam(pitch_delta,
-						window.pitch_upper, window.pitch_lower);
-		}
-		out.valid = true;
-		out.gun_yaw = static_cast<uint16_t>(
-				static_cast<uint32_t>(yaw_delta) >> 16);
-		out.gun_pitch = static_cast<uint16_t>(
-				static_cast<uint32_t>(pitch_delta) >> 16);
-		return true;
-	}
-	return false;
+  const replication::ClientEntityState &mount, world::EmplacedWeaponControls &out) {
+ out = world::EmplacedWeaponControls{};
+ if (!mount.emplaced_controls_valid) return false;
+ out.valid = true;
+ out.gun_yaw = static_cast<uint16_t>(mount.emplaced_gun_yaw_word);
+ out.gun_pitch = static_cast<uint16_t>(mount.emplaced_gun_pitch_word);
+ return true;
 }
 
 inline void write_present_emplaced_controls(

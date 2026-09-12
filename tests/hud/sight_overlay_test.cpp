@@ -7,6 +7,7 @@
 #include <runtime/hud/sight_overlay.h>
 
 #include <cstdio>
+#include <cmath>
 
 namespace {
 
@@ -37,6 +38,17 @@ hud::SightRowSpec box(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
 } // namespace
 
 int main() {
+    const hud::SightRect card{384, 256, 640, 512};
+    const auto four_three = hud::sight_rect_to_viewport(card, 1920, 1080, 0);
+    const auto wide = hud::sight_rect_to_viewport(card, 1920, 1080, 2);
+    const auto native = hud::sight_rect_to_viewport(card, 1920, 1080);
+    const auto sixteen_ten = hud::sight_rect_to_viewport(card, 1920, 1080, 1);
+    const auto mode_three = hud::sight_rect_to_viewport(card, 1920, 1080, 3);
+    expect(four_three.y1 == 360.0f && four_three.y2 == 720.0f, "4:3 preserves rounded Y");
+    expect(wide.y1 == 300.0f && wide.y2 == 780.0f, "16:9 selects .5625");
+    expect(wide.y1 == native.y1, "native selects the actual viewport ratio");
+    expect(std::abs(sixteen_ten.y1 - 315.0f) < .001f, "16:10 selects .60000002");
+    expect(std::abs(mode_three.y1 - 324.0f) < .001f, "mode 3 uses the retail .625 literal");
 	// The per-player index: default 1, +1 while the sum stays (signed) below
 	// 3, else 0 — so 1 -> 2 -> 0 -> 1, and a negative index climbs.
 	expect(hud::kSightScaleIndexDefault == 1, "the player-init default is 1");

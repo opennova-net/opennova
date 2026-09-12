@@ -587,3 +587,44 @@ func _write_pff(path: String, entries: Array) -> void:
 # fixtures such as a DDS); normalize to bytes so both forms work.
 func _norm(path: String) -> String:
 	return path.replace("\\", "/").to_lower()
+
+
+func _normal_test_tga(blue: int) -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(18 + 64)
+	bytes[2] = 2
+	bytes.encode_u16(12, 4)
+	bytes.encode_u16(14, 4)
+	bytes[16] = 32
+	bytes[17] = 40
+	for i in range(16):
+		bytes[18 + i * 4] = blue
+		bytes[19 + i * 4] = 70
+		bytes[20 + i * 4] = 90
+		bytes[21 + i * 4] = 128
+	return bytes
+
+
+func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> void:
+	var root := _make_flat_root("normal_sources")
+	var source := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	source.fill(Color8(50, 70, 121, 128))
+	_write_pff(root.path_join("resource.pff"), [
+		{"name": "brick.dds", "bytes": source.save_dds_to_buffer()},
+		{"name": "brick.tga", "bytes": _normal_test_tga(61)},
+		{"name": "ready.mdt", "bytes": source.save_dds_to_buffer()},
+	])
+	_write_bytes(root.path_join("brick.tga"), _normal_test_tga(233))
+	var resources := ResourceRoot.new()
+	assert_eq(resources.mount_runtime(root, "", false), OK)
+	var packed: Texture2D = resources.load_material_texture("brick.tga", 4)
+	assert_not_null(packed)
+	assert_eq(packed.get_image().get_pixel(0, 0), Color8(127, 127, 255, 121))
+	assert_eq(resources.load_material_texture("ready.mdt", 4).get_image().get_pixel(0, 0), Color8(50, 70, 121, 128))
+	var missing: Texture2D = resources.load_material_texture("brick.mdt", 4)
+	assert_eq(missing.get_width(), 128, "A missing MDT never aliases the existing TGA or DDS.")
+	assert_eq(missing.get_image().get_pixel(0, 0), Color8(48, 48, 48))
+	assert_eq(resources.mount_runtime(root, "", true), OK)
+	var loose: Texture2D = resources.load_material_texture("brick.tga", 4)
+	assert_eq(loose.get_image().get_pixel(0, 0), Color8(127, 127, 255, 233))
+	resources.clear()

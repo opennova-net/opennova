@@ -64,6 +64,7 @@ public:
 
 	bool has_clip(const std::string &key) const;
 	float clip_fps(const std::string &key, int variant = 0) const;
+	double clip_seconds_at_tick(const std::string &key, int32_t ticks, int variant = 0) const;
 
 	// The raw stage evaluations, public for diagnostics/tests: a plain clip
 	// sample (bind-pose fallback on unknown/empty keys) and the retail-window

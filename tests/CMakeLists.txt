@@ -400,6 +400,10 @@ target_compile_features(dialog_queue_test PRIVATE cxx_std_17)
 add_test(NAME audio_dialog_queue COMMAND dialog_queue_test)
 
 # SndProf.def sound-profile parse + lookup (asset-gated retail spot check via JO_ASSETS).
+add_executable(infantry_stance_sound_test world/infantry_stance_sound_test.cpp)
+target_link_libraries(infantry_stance_sound_test PRIVATE opennova_runtime)
+add_test(NAME infantry_stance_sound COMMAND infantry_stance_sound_test)
+
 add_executable(sound_profile_test audio/sound_profile_test.cpp)
 target_link_libraries(sound_profile_test PRIVATE opennova_runtime)
 target_include_directories(sound_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -788,6 +792,11 @@ target_link_libraries(simassets_adm_root_motion_test PRIVATE opennova_runtime)
 target_include_directories(simassets_adm_root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME simassets_adm_root_motion COMMAND simassets_adm_root_motion_test)
 
+add_executable(simassets_adm_playback_test simassets/adm_playback_test.cpp)
+target_link_libraries(simassets_adm_playback_test PRIVATE opennova_runtime)
+target_include_directories(simassets_adm_playback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME simassets_adm_playback COMMAND simassets_adm_playback_test)
+
 add_executable(simassets_adm_clip_index_test simassets/adm_clip_index_test.cpp)
 target_link_libraries(simassets_adm_clip_index_test PRIVATE opennova_runtime)
 target_include_directories(simassets_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -813,7 +822,7 @@ target_include_directories(simassets_seat_spec_extract_test PRIVATE ${CMAKE_CURR
 add_test(NAME simassets_seat_spec_extract COMMAND simassets_seat_spec_extract_test)
 
 # Object renderer/shader tests
-foreach(test device_fog environment_cube foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval
+foreach(test device_fog environment_cube foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
         particle_atlas_contract particle_frame_compiler_contract render_order
         q3_frame render_slot_shadow
         state_vectors tracer_frame precipitation_frame)
@@ -1510,6 +1519,10 @@ add_test(NAME npc_weapons COMMAND npc_weapons_test)
 # destructible death chain (husk flags + events + the kz chain blast), the
 # death-piece pool, and the dead-item settle (world/destruction.h;
 # docs/world/world-wac-ai-re.md §24).
+add_executable(item_events_test world/item_events_test.cpp)
+target_link_libraries(item_events_test PRIVATE opennova_runtime)
+add_test(NAME item_events COMMAND item_events_test)
+
 add_executable(destruction_test world/destruction_test.cpp)
 target_link_libraries(destruction_test PRIVATE opennova_runtime)
 target_include_directories(destruction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1556,6 +1569,10 @@ add_test(NAME ground_height COMMAND ground_height_test)
 # gates, alert/wounded gait selection + availability fallbacks, one-shot route
 # lifecycle, flag-table commit rules, gravity/landing/fall damage, slope slide —
 # each against the witnessed constants, over synthetic clips + height fields.
+add_executable(infantry_burn_test world/infantry_burn_test.cpp)
+target_link_libraries(infantry_burn_test PRIVATE opennova_runtime)
+add_test(NAME infantry_burn COMMAND infantry_burn_test)
+
 add_executable(infantry_test world/infantry_test.cpp)
 target_link_libraries(infantry_test PRIVATE opennova_runtime opennova_test_rig)
 target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1878,6 +1895,10 @@ target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(vehicle_motor_test PRIVATE cxx_std_17)
 add_test(NAME vehicle_motor COMMAND vehicle_motor_test)
 
+add_executable(vehicle_followups_test world/vehicle_followups_test.cpp)
+target_link_libraries(vehicle_followups_test PRIVATE opennova_runtime)
+add_test(NAME vehicle_followups COMMAND vehicle_followups_test)
+
 # The joiner-side watercraft prediction (D-NET-196 B-facet): fast-boat glide
 # beyond the chase-only sustain limit, coast-down, and the steer chain.
 add_executable(watercraft_client_motor_test world/watercraft_client_motor_test.cpp)
@@ -2110,6 +2131,10 @@ add_executable(gate_response_test novaworld/gate_response_test.cpp)
 target_link_libraries(gate_response_test PRIVATE opennova_net)
 target_include_directories(gate_response_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gate_response COMMAND gate_response_test)
+
+add_executable(gate_metrics_test novaworld/gate_metrics_test.cpp)
+target_link_libraries(gate_metrics_test PRIVATE opennova_net)
+add_test(NAME gate_metrics COMMAND gate_metrics_test)
 
 add_executable(gate_probe_test novaworld/gate_probe_test.cpp)
 target_link_libraries(gate_probe_test PRIVATE opennova_net)
@@ -2595,6 +2620,11 @@ add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extract
 # npruntime tests — the IDA-faithful in-match NAPI NP runtime (the named server/client
 # state machines + frame loop). Server-first (the plan's P0..P8).
 # P0/P1: the in-process listen-server bring-up state writes (§5.0).
+add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
+target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
+
 add_executable(npruntime_server_session_test npruntime/server_session_test.cpp)
 target_link_libraries(npruntime_server_session_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_server_session COMMAND npruntime_server_session_test)
@@ -2643,6 +2673,10 @@ add_test(NAME npruntime_weapon_table COMMAND npruntime_weapon_table_test)
 # D-NET-168 / D-NET-176 / D-NET-177: the S2C 0x50 team-assign re-latch + 0x2F re-submit, the
 # C2S 0x32 -> S2C 0x5D empty-slot sweep (entity removal) vs the bookkeeping-only 0x46 bit15, and
 # the in-match session-loss surface [orig: @0x431910 / @0x51a600 + @0x429730 / @0x4ca4a0 -> @0x4c63d0].
+add_executable(npruntime_item_state_net_test npruntime/item_state_net_test.cpp)
+target_link_libraries(npruntime_item_state_net_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_item_state_net COMMAND npruntime_item_state_net_test)
+
 add_executable(npruntime_entity_lifecycle_net_test npruntime/entity_lifecycle_net_test.cpp)
 target_link_libraries(npruntime_entity_lifecycle_net_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_entity_lifecycle_net COMMAND npruntime_entity_lifecycle_net_test)
@@ -2830,3 +2864,7 @@ target_include_directories(minefield_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(minefield_replica_test netsim/minefield_replica_test.cpp)
 target_link_libraries(minefield_replica_test PRIVATE opennova_runtime)
 add_test(NAME minefield_replica COMMAND minefield_replica_test)
+
+add_executable(squib_test world/squib_test.cpp)
+target_link_libraries(squib_test PRIVATE opennova_runtime)
+add_test(NAME squib COMMAND squib_test)

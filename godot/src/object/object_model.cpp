@@ -70,6 +70,7 @@ bool EnvLightValues::equals(const Ref<EnvLightValues> &p_other) const {
 			ceiling.is_equal_approx(o.ceiling) &&
 			floor_color.is_equal_approx(o.floor_color) &&
 			gain.is_equal_approx(o.gain) && fog_enabled == o.fog_enabled &&
+			thermal_view == o.thermal_view &&
 			fog_color.is_equal_approx(o.fog_color) &&
 			Math::is_equal_approx(fog_start, o.fog_start) &&
 			Math::is_equal_approx(fog_end, o.fog_end) && fog_type == o.fog_type;
@@ -433,6 +434,12 @@ void ObjectModel::apply_presentation_layer_below(Node *p_root) {
 	}
 }
 
+void ObjectModel::set_thermal_entity_wave(bool p_enabled) {
+	if (thermal_entity_wave_ == p_enabled) return;
+	thermal_entity_wave_ = p_enabled;
+	stamp_entity_lighting_instances();
+}
+
 void ObjectModel::set_entity_lighting_context(float p_effect_scale,
 		bool p_interior_lerp, float p_interior_daylight) {
 	const float next_effect = CLAMP(p_effect_scale, 0.0f, 1.0f);
@@ -477,7 +484,7 @@ void ObjectModel::stamp_entity_lighting_instances() {
 	const Vector4 entity = interior_section_lighting_
 			? Vector4(1.0f, 0.0f, 1.0f, 0.0f)
 			: Vector4(lighting_effect_scale_, interior_lerp_ ? 1.0f : 0.0f,
-					interior_daylight_, 0.0f);
+					interior_daylight_, thermal_entity_wave_ ? 1.0f : 0.0f);
 	const Vector4 section(1.0f, 1.0f, interior_section_daylight_, 0.0f);
 	const auto apply_to = [&](Node *p_parent, const Vector4 &p_value) {
 		if (p_parent == nullptr) {

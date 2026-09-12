@@ -74,17 +74,16 @@ struct SightViewportRect {
 	float y2 = 0.0f;
 };
 
-// The native-aspect card scales Y about half the viewport height by
-// 3 / (4 * height/width), after both corners pass the virtual-coordinate scaler.
+// The card scales Y about half the viewport height by 3/(4*selected_ratio),
+// after both corners pass the virtual-coordinate scaler. Other modes use H/W.
 // [orig: draw_weapon_sight_overlays @0x4dd0ad..0x4dd0f7;
 // Render_SetAspectRatioMode @0x58d8c9..0x58d8d9 native mode]
-SightViewportRect sight_rect_to_viewport(const SightRect &rect, float width, float height);
+SightViewportRect sight_rect_to_viewport(const SightRect &rect, float width, float height, int aspect_mode = -1);
 
 // ---------------------------------------------------------------------------
 // The SLIDE multiplier — retail's scope-zero system as the drawer samples it
 // [orig: @0x4dcf4c..0x4dcffc]. The parsed scope_max_zero fields supply the
-// default-zero path. Manual zero selection and the rangefinder stash remain
-// unwired; the evaluator accepts their typed inputs. With every def field
+// default-zero path; the native player supplies manual zero and range. With every def field
 // and the zero word at 0, the multiplier is 0, the plain rect.
 
 struct ScopeZeroInputs {
@@ -102,7 +101,7 @@ struct ScopeZeroInputs {
 	int32_t scope_zero_step = 0;      // WeaponDef+0x9C
 	int32_t scope_zero_default = 0;   // WeaponDef+0xA0
 	// dword_B76808, Q16 world units: the aim ray's hit distance from the
-	// player body, restamped per body tick [orig: Entity_UpdateInfantryPlayerBody
+	// player body, restamped every sixteen body ticks [orig: Entity_UpdateInfantryPlayerBody
 	// @0x4b5056..0x4b50ad], seeded with WeaponDef+0xA0 when a Flags &
 	// 0x20000000 weapon mounts [orig: Player_MountWeaponSlot @0x4dfb3b..0x4dfb44].
 	int32_t rangefinder_q16 = 0;

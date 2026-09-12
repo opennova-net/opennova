@@ -49,6 +49,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/lobby_vars.cpp
     # novaworld gate leg — first-contact + account entry: novaworld_gate
     # probe/response, registration URL cipher, HTTP login flow, GSB browser data
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/gate_metrics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/gate_probe.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/gate_response.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/registration_url.cpp

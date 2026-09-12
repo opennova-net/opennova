@@ -158,9 +158,86 @@ void test_status_text() {
 	CHECK(deploy_status_text(line, "", "") == "C:  <cFF4040>30");
 }
 
+
+void test_instruction_branches() {
+    const DeployTextLookup keys = [](const char *, const char *key, const char *fallback) {
+        return *fallback ? std::string(fallback) : std::string(key);
+    };
+    DeployInstructionsInput in;
+    in.player_name = "Ace";
+    in.clan = "TAG";
+    auto v = build_deploy_instructions(in, keys);
+    CHECK(v.show_first && v.show_second && v.replace_first);
+    CHECK(v.first_text == "Welcome to the game, Ace<ch>TAG<co>!");
+    CHECK(v.second_text == "STROVER_SPECTATORSPAWN");
+    in.team = 1;
+    in.game_type = 0x10000;
+    v = build_deploy_instructions(in, keys);
+    CHECK(v.first_text == "Ace<ch>TAG<co>, you have joined the !Joint Ops Team.");
+    CHECK(v.second_text == "STROVER_RESPAWN3");
+    in.team = 2;
+    CHECK(build_deploy_instructions(in, keys).first_text ==
+            "Ace<ch>TAG<co>, you have joined the !Rebel Team.");
+    in.team = 3;
+    CHECK(build_deploy_instructions(in, keys).first_text ==
+            "Ace<ch>TAG<co>, you have joined the Unknown.");
+    in.dead = true;
+    in.kill_announcement = "Ace was killed.";
+    v = build_deploy_instructions(in, keys);
+    CHECK(v.first_text == in.kill_announcement);
+    in.has_spawn_zones = true;
+    in.has_full_team_spawn = true;
+    v = build_deploy_instructions(in, keys);
+    CHECK(v.show_second && v.replace_first); // full entry alone is insufficient
+    CHECK(v.second_text == "STROVER_RESPAWN1");
+    in.check_secured_spawn = true;
+    v = build_deploy_instructions(in, keys);
+    CHECK(v.show_first && !v.show_second && !v.replace_first);
+    CHECK(v.second_text == "STROVER_RESPAWN1"); // RESPawn2 is overwritten
+    in.game_type = 0x10020;
+    v = build_deploy_instructions(in, keys);
+    CHECK(!v.show_first && !v.show_second && !v.replace_first);
+    in.has_full_team_spawn = false;
+    in.has_spawn_zones = false;
+    v = build_deploy_instructions(in, keys);
+    CHECK(!v.show_first && v.show_second && v.first_text == in.kill_announcement);
+    CHECK(v.second_text == "STROVER_RESPAWN5");
+    in.dead = false;
+    CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN4");
+    in.dead = true;
+    in.game_type = 0x30020;
+    CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN4");
+    in.team = 0;
+    CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_SPECTATORSPAWN");
+
+    in.permanent_death = true;
+    in.round_ticks = (3600 + 2 * 60 + 3) * 62 + 61;
+    in.alive_players = 7;
+    v = build_deploy_instructions(in, keys);
+    CHECK(v.permanent_death && v.show_first && v.show_second && v.replace_first);
+    CHECK(v.first_text == "STROVER_PERMANENTDEATH");
+    CHECK(v.second_text == "STROVER_NORESPAWN");
+    CHECK(v.show_round_status && v.round_text == "STROVER50 <cFF4040>1:02:03");
+    CHECK(v.remaining_players_text == "STRCLI25 <cFF4040>7");
+    in.spectators_allowed = true;
+    in.round_ticks = -1;
+    v = build_deploy_instructions(in, keys);
+    CHECK(v.second_text == "STROVER_SPECTATORSPAWN" && !v.show_round_status);
+    in.round_ticks = 0;
+    CHECK(build_deploy_instructions(in, keys).round_text == "STROVER50 <cFF4040>0:00:00");
+    in.dead = false;
+    CHECK(!build_deploy_instructions(in, keys).permanent_death);
+    in.player_name = std::string(254, 'X');
+    in.clan = "long";
+    in.game_type = 0;
+    CHECK(build_deploy_instructions(in, keys).first_text == "Welcome to the game, " +
+            std::string(254, 'X') + "<!");
+}
+
 } // namespace
 
 int main() {
+	test_instruction_branches();
 	test_status_text();
 	test_rows_sort_and_occupants();
 	test_unsecured_zone_occupants_land_after_row_zero();

@@ -99,6 +99,9 @@ func _seed_player_options() -> void:
 	if color_id >= 0 and _driver.widget_kind_of(color_id) == MnuDocument.TYPE_SPINLIST:
 		_driver.select_row_by_value(color_id, str(state.crosshair_color), false)
 	_set_checked("XHAIR_SPREAD", state.crosshair_spread)
+	var aspect_id := _driver.widget_id("16x9DISPLAY")
+	if aspect_id >= 0 and _driver.widget_kind_of(aspect_id) == MnuDocument.TYPE_SPINLIST:
+		_driver.select_row_by_value(aspect_id, str(state.aspect_mode), false)
 
 
 func _seed_scroll(control_name: String, value: int) -> void:
@@ -164,6 +167,11 @@ func _on_widget_value_changed(widget_name: String, kind: String,
 		"XHAIR_APPEARANCE":
 			if kind != "spinlist": return
 			state.crosshair_style = index
+		"16X9DISPLAY":
+			if kind != "spinlist": return
+			var aspect_id := _driver.widget_id("16x9DISPLAY")
+			if aspect_id < 0: return
+			state.aspect_mode = int(_driver.item_value(aspect_id, index))
 		"XHAIR_COLOR":
 			# Retail persists the selected item's `value=` attribute (the
 			# decimal RGB the shipped rows author), not the row index or the

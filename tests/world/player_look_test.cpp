@@ -100,6 +100,16 @@ int main() {
         CHECK(yaw > 0); // wrapped across the seam, x86 wrap semantics
     }
 
+    {
+        int32_t yaw = 0, pitch = 0;
+        player_look_keys(yaw, pitch, true, false, true, false, false, 0);
+        CHECK(yaw == 0x1FFFFFF && pitch == 0x1FFFFFF);
+        player_look_keys(yaw, pitch, true, true, true, true, false, 0);
+        CHECK(yaw == 0x1FFFFFF && pitch == 0x1FFFFFF);
+        pitch = -kLookPitchMax;
+        player_look_keys(yaw, pitch, false, false, false, true, true, 0x1000000);
+        CHECK(pitch == 0x1000000 - kLookPitchProneMax);
+    }
     if (failures == 0) std::printf("player_look_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

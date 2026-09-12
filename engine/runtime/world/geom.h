@@ -10,6 +10,12 @@
 
 namespace opennova::world {
 
+struct FixedVec3 {
+    int32_t x = 0, y = 0, z = 0;
+
+    constexpr int32_t operator[](int i) const { return i == 0 ? x : (i == 1 ? y : z); }
+};
+
 // 16.16 fixed-point <-> float/int. Matches WacScript_ResolveParameter scaling and
 // bms.h's 1/65536 convention.
 inline constexpr int32_t to_fixed(double v) { return static_cast<int32_t>(v * 65536.0); }

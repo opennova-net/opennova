@@ -1214,6 +1214,8 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	            "host simulation remains full-rate while S2C is held")) return false;
 
 	std::vector<opennova::ProtocolMessage> messages;
+	opennova::ProtocolReassemblyState reassembly;
+	bool saw_frame_split = false;
 	// BuildOutgoingPackets may place the small 0x79 beside 0x0A or start a
 	// second physical packet when the large frame consumes the 1300-byte cap;
 	// both packets still belong to this ONE logical PumpFlags boundary.
@@ -1226,8 +1228,8 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 		                    raw.data(), raw.size(), opcode, session_body) &&
 		                    opcode == opennova::SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
 		            "held host boundary decodes as S2C session packet(s)")) return false;
-		if (!expect(session_body.size() <= opennova::inmatch::kGameSessionMaxPacketBytes,
-		            "every session body obeys the installed 1300-byte ceiling")) return false;
+		if (!expect(raw.size() <= opennova::inmatch::kGameSessionMaxPacketBytes,
+		            "every complete datagram obeys the installed 1300-byte ceiling")) return false;
 		opennova::ProtocolPacketHeader header;
 		std::vector<opennova::ProtocolMessage> packet_messages;
 		if (!expect(opennova::decode_protocol_packet_plaintext(
@@ -1235,18 +1237,26 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 		                    owner.ctx.np_protocol.connection_list.front().server_scrk,
 		                    header, packet_messages),
 		            "held host session packet decrypts")) return false;
-		messages.insert(messages.end(),
-		                std::make_move_iterator(packet_messages.begin()),
-		                std::make_move_iterator(packet_messages.end()));
+		for (auto &message : packet_messages) {
+			saw_frame_split |= message.tag == opennova::s2c::PER_FRAME_UPDATE &&
+					message.flags.frag_cont;
+			std::vector<uint8_t> payload;
+			if (opennova::reassemble_protocol_payload(reassembly, message, payload)) {
+				message.payload = std::move(payload);
+				messages.push_back(std::move(message));
+			}
+		}
 	}
-	if (!expect(messages.size() == 2 &&
+	if (!expect(messages.size() == 3 &&
+	                    messages[2].tag == opennova::s2c::RTT_ECHO &&
 	                    messages[0].tag == opennova::s2c::NETWORK_QUALITY &&
 	                    messages[0].payload == std::vector<uint8_t>({0x01}) &&
 	                    messages[1].tag == opennova::s2c::PER_FRAME_UPDATE &&
 	                    messages[1].payload.size() > 1200 &&
 	                    messages[1].payload.size() <=
 	                            opennova::inmatch::kMaxFrameUpdateBodyBytes,
-	            "round-reset 0x79 and one fresh 0x0A fit the envelope-aware cap")) return false;
+	            "round-reset quality, one fresh frame, and the due RTT request fit the packet cap")) return false;
+	if (!expect(saw_frame_split, "host splits the frame to fill space behind quality")) return false;
 
 	opennova::inmatch::host_session_pump(owner, socket);
 	return expect(socket.sent.size() == boundary_packet_count &&
@@ -1555,9 +1565,9 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 	for (const auto &[sequence, retained] : remote.seq.retained_outbound) {
 		(void)sequence;
 		if (!expect(retained.size() == 1 &&
-		                    retained.front().retention_flushes == 310 &&
-		                    retained.front().retention_deadline_flush == 309,
-		            "every retained fragment preserves the semantic finite lifetime"))
+		                    retained.front().retention_flushes == 0 &&
+		                    retained.front().retention_deadline_flush == 0,
+		            "splitting clears finite expiry on both fragments for ACK-based retention"))
 			return false;
 	}
 
@@ -3648,10 +3658,59 @@ bool check_preround_delay_phase_boundary() {
 	              "gameplay resumes on the frame after countdown expiry");
 }
 
+bool check_periodic_rtt_waits_for_send_boundary_and_retains_62_flushes() {
+	using namespace opennova;
+	world::World world;
+	world.registry.configure_pool(0, 4);
+	world::PlayerSpawn spawn;
+	const auto player = world::spawn_remote_player(world, spawn);
+	inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1; ctx.is_in_session = 1; ctx.world = &world;
+	replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection conn;
+	conn.type = 1; conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true; conn.link.owned_entity = player;
+	conn.link.transport = &transport;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+	auto &peer = ctx.np_protocol.connection_list[0];
+	auto drain = [&] {
+		std::vector<replication::Datagram> result;
+		replication::Datagram dg;
+		while (transport.pop_outbound(dg)) if (dg.tag == s2c::RTT_ECHO) result.push_back(std::move(dg));
+		return result;
+	};
+	inmatch::Server_TickUpdate(ctx);
+	auto first = drain();
+	if (!expect(first.size() == 1 && first[0].reliable && first[0].retention_flushes == 62,
+			"initial state-6 RTT request has a 62-flush reliable lifetime")) return false;
+	RttSample sample; size_t consumed = 0;
+	if (!expect(decode_rtt_sample(first[0].body.data(), first[0].body.size(), sample, consumed) &&
+			sample.echo_flag == 1 && sample.timestamp == inmatch::host_milliseconds_for_logic_tick(world.logic_tick),
+			"periodic RTT requests carry the host clock and echo flag 1")) return false;
+	for (int i = 1; i < 62; ++i) { inmatch::Server_TickUpdate(ctx); if (!expect(drain().empty(), "RTT waits 62 ticks")) return false; }
+	peer.s2c_send_holdoff_countdown = 2;
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(drain().empty() && peer.reply.rtt_request_countdown == 0,
+			"due RTT waits at zero while the connection boundary is closed")) return false;
+	peer.s2c_send_holdoff_countdown = 0;
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(drain().size() == 1 && peer.reply.rtt_request_countdown == 62,
+			"opening the boundary sends the due request once")) return false;
+	peer.burst.spawned = false;
+	peer.reply.rtt_request_countdown = 1;
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(drain().empty() && peer.reply.rtt_request_countdown == 0,
+			"a non-state-6 slot ages the cooldown without emitting")) return false;
+	peer.burst.spawned = true;
+	inmatch::Server_TickUpdate(ctx);
+	return expect(drain().size() == 1, "returning to state 6 releases the due request");
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
+	ok = check_periodic_rtt_waits_for_send_boundary_and_retains_62_flushes() && ok;
 	ok = check_scoreboard_message_is_transient() && ok;
 	ok = check_scoreboard_projects_every_retail_mode_shape() && ok;
 	ok = check_connection_mode_table() && ok;

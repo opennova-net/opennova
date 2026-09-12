@@ -122,7 +122,7 @@ int main() {
 		CHECK(kernel.have_wac_baseline);
 		// The boot's own baseline is the post-PreMission point; the embedders
 		// re-seal it once the spawn and the eager WAC have settled (the
-		// shell's seal_mission_start_baseline). Seal here, then mutate.
+		// kernel's complete_mission_start). Seal here, then mutate.
 		tick_no_net(kernel);
 		kernel.capture_baseline();
 		const w::Vec3 spawn_pos = kernel.local.player_position();

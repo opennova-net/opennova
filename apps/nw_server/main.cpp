@@ -416,6 +416,9 @@ int main(int argc, char **argv) {
 	boot_options.wac_strict_diagnostics = true;
 	boot_options.terrain_til_bytes = &terrain_til_bytes;
 	boot_options.game_type = host_cfg.config.game_type;
+	boot_options.player_limit = static_cast<int32_t>(host_cfg.config.max_players);
+	boot_options.team_count = host_cfg.config.num_teams;
+	boot_options.mp_session = true;
 	boot_options.bringup_net_session = [&] {
 		role.bring_up_dedicated(host_cfg);
 	};
@@ -436,10 +439,6 @@ int main(int argc, char **argv) {
 			kernel.wac_loaded ? "loaded" : "absent (BMS-only)",
 			resource_root.string().c_str());
 
-	// Retail order: the eager WAC execution (the boot's tail) precedes
-	// environment mission-start initialization and the 255 complete weather
-	// ticks that settle before any client can observe phase 2.
-	kernel.settle_weather_mission_start();
 	// The per-join ctx feeds the bring-up left to the embedder: the S2C 0x45
 	// terrain-tile source and the "Server" gametext table.
 	host.host_owner.ctx.terrain_til_data = std::move(terrain_til_bytes);

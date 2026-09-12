@@ -67,9 +67,9 @@ namespace opennova::mission {
 struct KernelBootOptions {
 	bool playable = true;   // spawn the authoritative side's own player after load
 	bool wac = true;        // game.wac / server.wac / <mission>.wac when present
-	// A world presenter prepares weather after boot, then runs execute_initial
-	// before the mission-start settle. Bare native boots execute it here.
-	bool defer_initial_wac = false;
+	// A world presenter seeds weather after boot, then completes mission start.
+	// Native boots with their weather already seeded finish here.
+	bool defer_mission_start = false;
 	// EVERY WAC diagnostic is fatal and fails the boot (the dedicated golden
 	// host's policy — running a partial script is a known wire-parity
 	// failure). false = the game's lenient policy: only a compile FAILURE
@@ -91,11 +91,15 @@ struct KernelBootOptions {
 	// name-match inside the joiner pump — the joiner ROLE stays with the
 	// embedder, ADR 0042 d3; this only gates the boot's spawn step).
 	bool joiner = false;
+    // Session globals must be available before BMS record admission.
+    bool mp_session = false;
 	// The session g_GameType word the spawn-marker select filters on. The
 	// embedder derives it (game_type::for_mission_mode over the mission
 	// header's mode bit — npwire's mapping) so this kernel stays below net/;
 	// 0 is the SP fallback arm.
 	uint32_t game_type = 0;
+	int32_t player_limit = 1;
+	uint8_t team_count = 2;
 	std::string infantry_adm = kDefaultInfantryAdm;
 	// The <name>.wac mission layer when it differs from the mission file's own
 	// basename (the shell's loose-mission seam); empty = mission_basename.
@@ -112,7 +116,7 @@ struct KernelBootOptions {
 	std::function<void()> bringup_net_session;
 };
 
-class MissionKernel : public world::IPoseProvider, public world::ITeammateSpawner {
+class MissionKernel : public world::IPoseProvider, public world::ITeammateSpawner, public world::IItemPieceSpawner {
 public:
 	MissionKernel();
 	~MissionKernel() override;
@@ -218,7 +222,9 @@ public:
 	// Environment_MissionStartInit @ 0x57f1e0 then the 255 complete weather
 	// ticks @ 0x57f878..0x57f880]: the currents snap to the just-authored
 	// targets, the recovered clamps install, and 255 full ticks settle.
-	void settle_weather_mission_start();
+	// Then count units, initialize authoritative vehicles and seal the restore
+	// point. Returns false if this load already completed the boundary.
+	bool complete_mission_start();
 	// The precipitation pool's per-render update for a camera at (x, y, z)
 	// mission 16.16: the wrap into the camera volume and the re-floor of every
 	// wrapped drop on terrain / water / the first entity under it
@@ -334,6 +340,7 @@ public:
 	size_t text_size = 0;
 	world::World::Snapshot baseline;
 	bool have_baseline = false;
+	bool mission_start_pending = false;
 	wac::WacSystem::RuntimeState wac_baseline;
 	bool have_wac_baseline = false;
 
@@ -387,6 +394,7 @@ public:
 	void wire_collision();
 
 	world::EntityHandle spawn_teammate(const world::TeammateSpawn &request) override;
+    world::EntityHandle spawn_item_piece(const world::Entity &seed) override;
 
 	// world::IPoseProvider: the seat leg is the kernel's own; the muzzle and
 	// userpoint legs ride collision_pose (the sim-clock skeleton / PANM pose).
@@ -410,7 +418,7 @@ public:
 
 private:
 	std::function<PromoteOptions::AiProfileDefaults(int32_t)> ai_profile_defaults_fn() const;
-	bool load_mission_into_world();
+	bool load_mission_into_world(const KernelBootOptions &options);
 	void register_mission_systems();
 	// The live asset source: the embedder's installed index, else the kernel's
 	// own open() mount, else null (nothing to resolve against).

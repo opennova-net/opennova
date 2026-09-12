@@ -11,6 +11,7 @@ add_library(opennova_runtime STATIC
     # anim — skeletal sampling + the aim overlay (.adm parse: engine/formats/adm)
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/aim_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/anim_sample.cpp
+    anim/clip_timeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/skeletal_pose.cpp
     # audio — mixers, bank chain, envs markers, selectors, profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_mixer.cpp
@@ -87,6 +88,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_texture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_shader_template.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_lod.cpp
@@ -166,6 +168,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/occlusion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/iris_march.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_slope.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_burn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_attention.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_detour.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/teammate_operations.cpp
@@ -198,6 +202,10 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/item_events.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/item_squib.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_squib.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/item_sections.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/death_effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction_motion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ground_conform.cpp
@@ -246,8 +254,12 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/script_projectiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/script_effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/script_sounds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/radio_call.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/script_voice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_fsm.cpp
+    world/weapon_fire_gate.cpp
+    world/weapon_scope_zero.cpp
+    world/local_player_targeting.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/wire_body_sound.cpp    # the wire-fed remote body's footstep/foley consume
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_inventory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/zone_capture.cpp
@@ -264,6 +276,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_guided.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_pipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_dispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_script_commands.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_placed_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_scoreboard.cpp
@@ -280,11 +293,15 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/character_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/charattr_challenge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_card.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_emplaced.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_present_projection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/present_rows.cpp            # the PF_* row collectors, both roles (ADR 0043 G3)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_effects.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_weapon_replay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_challenge_profile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp

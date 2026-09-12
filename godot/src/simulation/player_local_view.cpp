@@ -48,6 +48,8 @@ void PlayerLocalView::_bind_methods() {
 	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, scope_fraction)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, suppress_view_bias)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, scope_card_active)
+    PLAYER_LOCAL_VIEW_FIELD(Variant::INT, sight_slide_multiplier)
+    PLAYER_LOCAL_VIEW_FIELD(Variant::INT, aim_range_units)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, binoculars_requested)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, binoculars_raised)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, binoculars_view_active)

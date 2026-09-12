@@ -118,6 +118,8 @@ private:
 	bool radar_out_was_down_ = false;
 	bool radar_in_was_down_ = false;
 	bool map_toggle_was_down_ = false;
+    bool stance_was_down_[3] = {};
+    bool scope_zero_was_down_[2] = {};
 };
 
 } // namespace godot

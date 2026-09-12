@@ -14,11 +14,34 @@
 #include <runtime/terrain_query/height_field.h>
 
 #include <runtime/world/ai.h>
+#include <runtime/world/infantry_sound.h>
 #include <runtime/world/world.h>
 #include <cstdint>
 #include <string>
 
 namespace opennova::world {
+
+// The player's stance latch is independent of clip selection and anim-event
+// foley. Changing to the unnamed combined state still updates the latch.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B7034..0x4B70A6;
+//  global sound rows TO_CROUCH/TO_PRONE/TO_STAND @0x82FFB0/0x82FFD4/0x82FFF8]
+void emit_stance_change_sound(World &world, uint16_t source, const int32_t pos[3],
+        uint8_t &previous, uint8_t stance_bits, uint32_t flags, bool parent_has_definition) {
+    const bool prone = (stance_bits & 1u) != 0 &&
+            (flags & 0x10A040u) == 0 && !parent_has_definition;
+    const uint8_t current = static_cast<uint8_t>(((stance_bits >> 1) & 1u) + (prone ? 2 : 0));
+    if (current == previous) return;
+    previous = current;
+    const char *name = current == 0 ? "TO_STAND" : current == 1 ? "TO_CROUCH" :
+                       current == 2 ? "TO_PRONE" : nullptr;
+    if (name == nullptr) return;
+    SoundSlotEvent sound;
+    sound.source_handle = source;
+    for (int axis = 0; axis < 3; ++axis) sound.pos[axis] = pos[axis];
+    std::snprintf(sound.set_name, sizeof(sound.set_name), "%s", name);
+    world.out.slot_sounds.push_back(sound);
+}
+
 
 void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const int32_t pos[3]) {
     if (slot < 0 || slot >= audio::kSoundProfileSlotCount) return;

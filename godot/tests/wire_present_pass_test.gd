@@ -965,7 +965,7 @@ func test_host_current_body_state_is_posed_without_remote_rearbitration() -> voi
 	assert_eq(model.get_active_body_clip(), "anim_idle",
 			"host current state keeps the authoritative direct-phase pose path")
 	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_idle")
-	assert_almost_eq(model.get_animation_time(), 11.0 / (2.0 * fps), 0.0001,
+	assert_almost_eq(model.get_animation_time(), model.get_skeletal_anim().get_clip_phase_seconds("anim_idle", 11), 0.0001,
 			"the sim phase poses the clip directly")
 	assert_false(model.remote_body_needs_fixed_tick(),
 			"host current state is not submitted to the receive-side request channel")
@@ -994,7 +994,7 @@ func test_host_current_body_state_uses_authoritative_blend_tuple() -> void:
 			"host-loopback consumes authority rather than reconstructing a blend")
 	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_idle")
 	assert_almost_eq(model.get_body_blend_source_time(),
-			18.0 / (2.0 * fps), 0.0001)
+			model.get_skeletal_anim().get_clip_phase_seconds("anim_idle", 18), 0.0001)
 	assert_almost_eq(model.get_body_blend_weight(), 0.3, 0.000001)
 
 
@@ -1321,6 +1321,35 @@ func test_wire_model_applies_and_clears_the_remote_weapon_channel() -> void:
 # its gfx3 through the ADM-indexed table.
 # [orig: BoneCallback_org0_World draw 5, precondition @0x4e3c97; gate
 #  Entity_CanFireWeapon @0x4dcb10]
+func test_person_body_and_late_held_weapon_share_the_thermal_wave_lane() -> void:
+	var sim := _sim()
+	assert_eq(sim.load_weapon_table(_flat_root(), "weapon.def"), OK)
+	var p := _wire_pass(sim, _placer(), _container())
+	var snap := Snapshot.new()
+	snap.entities = [{
+		"type_id": TYPE_RIFLEMAN,
+		"handle": 0x0004,
+		"anim_state": 43,
+		"held_weapon_adm": 0,
+	}]
+	_present(p, snap)
+	var body: ObjectModel = p.resolve_wire_handle(0x0004)
+	assert_not_null(body)
+	p.set_entity_lighting_context(0x0004, 0.3, true, 0.4)
+	var expected := Vector4(0.3, 1.0, 0.4, 1.0)
+	_assert_entity_light(body, expected, "person surfaces carry the thermal wave alongside ordinary lighting")
+	snap.entities[0]["held_weapon_adm"] = 1
+	_present(p, snap)
+	var weapon: ObjectModel = p.held_weapon_node(0x0004)
+	assert_not_null(weapon)
+	_assert_entity_light(weapon, expected, "a weapon built later inherits the person wave")
+	p.set_entity_lighting_context(0x0004, 0.8, false, 0.0)
+	_present(p, snap)
+	expected = Vector4(0.8, 0.0, 0.0, 1.0)
+	_assert_entity_light(body, expected, "a daylight update preserves the person's wave")
+	_assert_entity_light(weapon, expected, "the held model preserves that same wave")
+
+
 func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	var sim := _sim()
 	assert_eq(sim.load_weapon_table(_flat_root(), "weapon.def"), OK,

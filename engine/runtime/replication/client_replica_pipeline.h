@@ -6,6 +6,7 @@
 #include <optional>
 #include <unordered_map>
 #include <vector>
+#include <variant>
 
 #include <net/npwire/ingame_decode.h> // EntityClass + WeaponReload (a per-family decode-header split candidate)
 
@@ -26,6 +27,18 @@ namespace opennova::replication {
 // them into a ClientState via the witnessed ingame_decode codec. This is the "local
 // client decodes them via engine/net/novaworld/ingame_decode" half of the SP in-process
 // listen server (ADR 0011). The same ClientState feeds the Godot present pass.
+struct MedicVoiceRequest {};
+// The two wire routes share health clearing but write different state before
+// invoking the class callback. Keep the route through the native-world fold.
+struct EntityDeathEvent {
+    uint16_t entity_handle = 0xFFFF;
+    int16_t death_anim_state_id = 0;
+    int16_t hit_section = 0;
+    bool item_state = false;
+};
+using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
+        TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent>;
+
 class ClientReplicaPipeline {
 public:
 	using ItemClassResolution = std::optional<EntityClass>;
@@ -227,21 +240,14 @@ public:
 	// routes each line by the HUD channel table and posts it to its ring.
 	std::vector<ClientChatLine> drain_chat_lines();
 	std::vector<WeaponReload> drain_weapon_reloads();
-	std::vector<PlaySoundCommand> drain_sound_commands();
+	std::vector<ClientEffectCommand> drain_effect_commands();
+	void post_chat_line(ClientChatLine line) { pending_chat_lines_.push_back(std::move(line)); }
 	// S2C 0x23 WAC remote commands the fold accepted this frame; the embedding
 	// role runs each registry row's handler (wac::run_remote_command) against
 	// its world. A non-authority endpoint only: the retail handler returns
 	// before decoding on the authority. [orig: GameMode_DispatchRemoteCommand
 	// @0x4F81E0 — `!is_authority` @0x4f8249]
 	std::vector<ScriptRemoteCommand> drain_script_remote_commands();
-	// S2C 0x13 entity-death notifies folded by apply(): the row's health drops to
-	// zero and the record is surfaced once so the embedding sim can run the
-	// class death callback on its world twin (a destructible's husk/explosion
-	// chain — reason 4, the net kill).
-	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
-	//  +0x2C0 deathAnimStateId = the sign-extended word1 (movsx @0x42eb8d,
-	//  store @0x42ebdf), deathCallback(entity, 4, 0) @0x42ebf5]
-	std::vector<EntityDeathRecord> drain_entity_deaths();
 
 	// Install the items.def-derived per-type classifier — the table the retail client
 	// itself dispatches 0x0A records through (each type's serialize callback, seeded
@@ -309,7 +315,7 @@ private:
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
 	// Entity_KillBySlotId @0x42BCE0]
-	void apply_entity_death(uint16_t handle_packed, int16_t death_anim_state_id);
+	void apply_entity_death(uint16_t handle_packed, int16_t value, bool item_state = false);
 	void apply_capture_zone_overlay(const std::vector<uint8_t> &body);
 	void apply_minimap_overlay_batch(const std::vector<uint8_t> &body);
 	// The death-screen folds live together in client_replica_death.cpp;
@@ -383,9 +389,8 @@ private:
 	std::vector<ClientGameEvent> pending_game_events_;
 	std::vector<ClientChatLine> pending_chat_lines_;
 	std::vector<WeaponReload> pending_weapon_reloads_;
-	std::vector<PlaySoundCommand> pending_sound_commands_;
+	std::vector<ClientEffectCommand> pending_effect_commands_;
 	std::vector<ScriptRemoteCommand> pending_script_remote_commands_;
-	std::vector<EntityDeathRecord> pending_entity_deaths_;
 	// Survives row deletion until this pipeline is destroyed.
 	std::unordered_map<uint16_t, uint32_t> spawn_revisions_;
 	std::size_t unknown_tags_ = 0;

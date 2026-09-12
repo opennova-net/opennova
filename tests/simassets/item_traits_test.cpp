@@ -442,8 +442,7 @@ int main() {
     // stricmp walk of g_EntityClassEventCallbackTable @0x813000 does: a
     // mixed-case tag matches, the absent tag / a tag without a row (the
     // shipped "gnr1" typo) / the callback-less nade row resolve the null row
-    // (0x406FF0, never dies), and a row whose callback is unported (bld2
-    // @0x43EEE0) keeps the pre-dispatch tree body. [orig:
+    // (0x406FF0, never dies), and bld2 resolves its collapse callback. [orig:
     // Entity_LookupRenderCallbacks @0x407dc0; EntityDef_InitAllCallbacks @0x4a5aa9]
     const auto class_of = [&](int32_t id) {
         const ItemDeathTraits *t = w.tables.item_death_traits.get(id);
@@ -455,7 +454,7 @@ int main() {
     CHECK(class_of(542) == ItemDeathClass::kGnl2);
     CHECK(class_of(543) == ItemDeathClass::kEwep);
     CHECK(class_of(544) == ItemDeathClass::kTree);
-    CHECK(class_of(545) == ItemDeathClass::kUnwitnessed); // bld2: unported row
+    CHECK(class_of(545) == ItemDeathClass::kCollapsingBuilding);
     CHECK(class_of(546) == ItemDeathClass::kNull);        // "gnr1": no row
     CHECK(class_of(520) == ItemDeathClass::kNull);        // the bunker authors no tag
     CHECK(class_of(530) == ItemDeathClass::kNull);        // nor the bush
@@ -468,8 +467,8 @@ int main() {
     CHECK(item_death_class_from_tag("Tree") == ItemDeathClass::kTree);
     CHECK(item_death_class_from_tag("EWEP") == ItemDeathClass::kEwep);
     CHECK(item_death_class_from_tag("gnrcx") == ItemDeathClass::kNull);  // whole-string, not a prefix
-    CHECK(item_death_class_from_tag("towr") == ItemDeathClass::kUnwitnessed);
-    CHECK(item_death_class_from_tag("emit") == ItemDeathClass::kUnwitnessed);
+    CHECK(item_death_class_from_tag("towr") == ItemDeathClass::kTower);
+    CHECK(item_death_class_from_tag("emit") == ItemDeathClass::kEmitter);
 
     // ---- the vehicle-trait table: every slot's sentinel in its own field ----
     const VehicleTraits *vt = w.vehicles.traits.get(500);

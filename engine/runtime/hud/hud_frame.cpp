@@ -85,6 +85,12 @@ void HudFrameCompiler::update_layout(const HudLayout &layout) {
 	layout_ = layout;
 }
 
+void HudFrameCompiler::reset_overlay_buffers() {
+    stance_.stamp = 0;
+    flash_stamp_ = 0;
+    draw_list_ = HudDrawList{};
+}
+
 void HudFrameCompiler::reset_runtime_state() {
 	stance_ = StanceFade{};
 	flash_prev_rounds_ = -1;
@@ -332,6 +338,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// suppress the corner map at this level.
 	if (state.hud_detail_level >= 3) {
 		element_spinmap(state, surface_w, surface_h);
+		element_kill_announcement(state, surface_w, surface_h);
 		return draw_list_;
 	}
 
@@ -386,6 +393,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	element_message_log(state, surface_w, surface_h);
 	element_scoreboard(state, surface_w, surface_h);
 	element_end_round_overlay(state, surface_w, surface_h);
+	element_kill_announcement(state, surface_w, surface_h);
 	return draw_list_;
 }
 
@@ -509,7 +517,7 @@ void HudFrameCompiler::element_sights_card(const HudFrameState &state,
 		spec.slide_frames = r.slide_frames;
 		const SightRect rect = sight_row_rect(spec, state.sight_scale_index,
 				state.sight_slide_multiplier);
-		const SightViewportRect screen = sight_rect_to_viewport(rect, w, h);
+		const SightViewportRect screen = sight_rect_to_viewport(rect, w, h, state.aspect_mode);
 		emit_rect(screen.x1, screen.y1, screen.x2, screen.y2, 0xFFFFFFFFu, true,
 				kHudTexSightsBase + static_cast<int32_t>(row), r.additive);
 	}
@@ -1296,6 +1304,20 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 			emit_bare_count();
 		}
 	}
+	++draw_list_.elements_drawn;
+}
+
+// The panel pass draws this after its other windows, independently of gameplay declutter.
+// [orig: HUD_DrawOverlayPanels @ 0x5C0060; HUD_DrawKillAnnounceBanner @ 0x59DC90]
+void HudFrameCompiler::element_kill_announcement(const HudFrameState &state, float w, float h) {
+	if (!state.kill_announcement.visible(static_cast<uint32_t>(state.ticks))) return;
+	const bool large = label_font_large_.font() != nullptr;
+	const GameFont &font = large ? label_font_large_ : font_;
+	if (font.font() == nullptr) return;
+	const float scale = large ? label_large_scale_ : 1.0f;
+	const auto run = font.layout(state.kill_announcement.text.c_str(), sx(512.0f, w),
+			sy(30.0f, h), scale, scale, kFontAlignCenter, 0xFFFFFFFFu);
+	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(), run.quads.end());
 	++draw_list_.elements_drawn;
 }
 

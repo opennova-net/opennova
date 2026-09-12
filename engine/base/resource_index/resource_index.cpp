@@ -310,6 +310,10 @@ void ResourceIndex::set_scr_policy(int scr_policy) {
 	impl_->vfs.set_scr_policy(scr_policy);
 }
 
+bool ResourceIndex::prefers_loose_file(const std::string &name) const {
+    return impl_->vfs.prefers_loose_file(name);
+}
+
 bool ResourceIndex::has_file(const std::string &name) const {
 	return impl_->vfs.has_file(name);
 }

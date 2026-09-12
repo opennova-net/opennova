@@ -1029,12 +1029,12 @@ bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
 //  gate PlayerSlot_IsActive @0x4fc760]
 bool decode_tick_seed(const uint8_t *body, size_t len, uint32_t &out);
 
-// S2C 0x26 — entity kill replication. Fixed 4 B `[u16 victim_slot][u16 attacker]`.
-// [orig: NapiNPClientMsg_0x026 @ 0x42EC30 → Entity_KillBySlotId(victim, attacker, 0)
-//  @ 0x42BCE0 — arg0 is the DYING entity, arg1 the killer]. Client-only.
+// S2C 0x26 — item class-state replication: [u16 entity][i16 hit section].
+// Word one is stored in the hit record before class callback phase four.
+// [orig: NapiNPClientMsg_0x026 @ 0x42EC30 -> Entity_KillBySlotId @ 0x42BCE0]
 struct KillRecord {
 	uint16_t victim_slot = 0xFFFF;  // (pool<<12)|slot of the entity that dies
-	uint16_t attacker = 0xFFFF;     // killer handle / id recorded on the hit
+	int16_t section = 0;           // hitRecord[14]; a missing second word reads zero
 };
 bool decode_kill_record(const uint8_t *body, size_t len, KillRecord &out,
                         size_t &consumed);
@@ -1956,6 +1956,15 @@ bool decode_zone_presence_count(const uint8_t *body, size_t len,
 // flag != 1. Gated is_mp_session_peer. The IDB name "GotoTeleport" was a
 // misnomer. [orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0 →
 //  SoundBank_FindSetByNameAnyBank @ 0x5274F0 / Entity_PlaySound3D_FullVolume @ 0x528E20]
+// S2C 0x6D: event, raw pool-0 index, signed location-name index.
+// [orig: NapiNPClientMsg_HandleEntityDeath @0x430C50]
+struct TrackedPlayerVoice {
+    uint8_t event = 0;
+    uint8_t player_index = 0;
+    int16_t location = 0;
+};
+bool decode_tracked_player_voice(const uint8_t *body, size_t len, TrackedPlayerVoice &out);
+
 struct PlaySoundCommand {
 	uint8_t     flag = 0;      // 0 = flat play, 1 = positioned 3D
 	std::string sound_name;    // sound-profile name (cstr)
@@ -2209,5 +2218,14 @@ struct LoadoutSubmit {
 	bool     terminated = false;    // saw the 0xFF terminator
 };
 bool decode_loadout_submit(const uint8_t *body, size_t len, LoadoutSubmit &out);
+
+struct ExplosionEffectRecord {
+    uint8_t type = 0;
+    uint8_t count = 0;
+    uint16_t source = 0;
+    int32_t x = 0, y = 0, z = 0;
+    int16_t heading = 0;
+};
+bool decode_explosion_effect(const uint8_t *body, size_t len, ExplosionEffectRecord &out);
 
 } // namespace opennova

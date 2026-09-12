@@ -171,6 +171,7 @@ enum class EffectSpawnStatus : std::uint8_t {
 	MissingOwner = 5,
 	GroupCapacityReached = 6,
 	EmitterCapacityReached = 7,
+    Disabled = 8,
 };
 
 struct EffectSpawnReceipt {
@@ -332,6 +333,7 @@ public:
     std::vector<std::string> interned_names() const;
 
 	EffectSpawnReceipt spawn(const EffectSpawnRequest &request);
+    void set_spawn_enabled(bool enabled) { spawn_enabled_ = enabled; }
 	void apply_owner_poses(const std::vector<EffectOwnerPoseUpdate> &updates);
 	// Unique live FollowOwner tokens in deterministic group order. This narrow
 	// query avoids constructing the particle-bounds debug snapshot on hot paths.
@@ -355,6 +357,8 @@ public:
 	//  @0x5E59A0 reports its last child dead]
 	bool trigger_group_children(EffectGroupId group, const Vec3 &position,
 			const Vec3 &forward, std::uint16_t force_zone);
+	// True until the last child is reaped, including detached groups draining particles.
+	bool contains_group(EffectGroupId group) const;
 	void detach(EffectGroupId group);
 	void detach_slot(EffectSlotToken slot);
 
@@ -380,6 +384,7 @@ public:
 private:
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
+    bool spawn_enabled_ = true;
 };
 
 } // namespace opennova::particle

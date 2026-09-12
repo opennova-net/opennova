@@ -40,6 +40,9 @@ using ItemWireClassFn = std::function<uint8_t(int definition_id)>;
 void resolve_item_traits(world::World &world, const opennova::def::DefItemsFile &items,
                          const ItemWireClassFn &wire_class, world::EntityHandle only = {});
 
+// Rebind item SHOT slots after loading the bank/profile catalogs.
+void resolve_item_event_sounds(world::World &world, const def::DefItemsFile &items);
+
 // Resolve the organic's four ammo bytes and three launch userpoints, seed its
 // clipsize magazine, and bind body sound profiles and SM weapon ammo. Call after
 // mission tables/models are available, or with only for a newly spawned body.

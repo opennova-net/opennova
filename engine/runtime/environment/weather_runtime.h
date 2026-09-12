@@ -85,7 +85,7 @@ public:
 	// The standalone 255-tick settle after the seed [orig:
 	// Environment_MissionStartInit @ 0x57f1e0 + @ 0x57f878..0x57f880]. A
 	// mission's settle runs in the kernel (MissionKernel::
-	// settle_weather_mission_start) through the render hook.
+	// complete_mission_start) through the render hook.
 	void prewarm_mission_start(EnvironmentState *env);
 
 	// --- the ticks -----------------------------------------------------------

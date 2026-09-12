@@ -615,11 +615,7 @@ class IPoseProvider; // runtime/world/pose_provider.h: the embedder's live pose 
 // Fixed-point terrain/entity arbitration lives here; arming, armor, health,
 // scoring, and effects remain consequences owned by RoundSim.
 // ---------------------------------------------------------------------------
-struct FixedVec3 {
-    int32_t x = 0, y = 0, z = 0;
 
-    constexpr int32_t operator[](int i) const { return i == 0 ? x : (i == 1 ? y : z); }
-};
 
 // One items.def + model-header collision initialization result, shared by
 // locally materialized entities and decoded wire rows. Values already include
@@ -1008,6 +1004,13 @@ public:
     // material; the caller maps it to the effect row (person material 1 =
     // flesh). [orig: Weapon_RaycastAndSpawnImpact @0x4e8460 ->
     // Projectile_RaycastProximitySlots @0x4e5340 slot types 0/2/1]
+    // [orig: physics_raycast_entity_pools_and_update @0x539580]
+    ProjectileHit trace_aim(const World &world, const ProjectileTrace &trace) const;
+    // Squib uses the general TYPE-1 solid / whole-person sphere query.
+    // [orig: Entity_ProcessProjectileTravel @0x448D50 -> sub_539530 @0x539530]
+    ProjectileHit trace_squib(World &world, EntityHandle source,
+            const FixedVec3 &start, const FixedVec3 &end);
+
     ProjectileHit trace_knife_impact(const World &world,
                                      const ProjectileTrace &trace) const;
 
@@ -1595,7 +1598,7 @@ private:
     uint64_t last_los_sector_candidates_ = 0;
     ProjectileHit trace_projectile_impl(const World &world,
                                         const ProjectileTrace &trace,
-                                        bool person_faces_only) const;
+                                        bool person_faces_only, bool aim = false) const;
 
     bool trace_profile_enabled_ = false;
     mutable TraceProfile trace_profile_;

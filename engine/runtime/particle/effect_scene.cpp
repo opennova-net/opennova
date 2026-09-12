@@ -585,6 +585,7 @@ std::vector<std::string> EffectScene::interned_names() const {
 }
 
 EffectSpawnReceipt EffectScene::spawn(const EffectSpawnRequest &request) {
+    if (!spawn_enabled_) return {EffectSpawnStatus::Disabled, {}, {}};
     if (request.admission == EffectAdmission::StoreOwned) {
         if (!request.slot) return impl_->rejected(request.effect, EffectSpawnStatus::MissingSlot);
         // The overwritten group keeps running; its eventual death must not
@@ -866,6 +867,10 @@ bool EffectScene::trigger_group_children(EffectGroupId group_id, const Vec3 &pos
 		emitter_spawn_one_at(record.emitter, position, forward, force_zone, nullptr);
 	}
 	return true;
+}
+
+bool EffectScene::contains_group(EffectGroupId group) const {
+	return impl_->find_group(group) != nullptr;
 }
 
 void EffectScene::detach(EffectGroupId group_id) {

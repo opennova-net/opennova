@@ -865,6 +865,20 @@ int EntityPresenter::emplaced_apply(Object *node,
 
 // --- The per-row legs both walks share ---------------------------------------
 
+void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base) {
+    model = destruction_->visual_model(model);
+    static const String owner("present:destruction");
+    static const String registers[] = {"OBJECT_DESTROY", "OBJECT_DESTROY01", "OBJECT_DESTROY02",
+            "OBJECT_DESTROY03", "OBJECT_DESTROY04", "OBJECT_DESTROY05"};
+    model->begin_ctrl_update();
+    for (int i = 0; i < 6; ++i) {
+        const int32_t phase = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
+        if (phase != 0) model->set_ctrl_override(owner, registers[i], phase);
+        else model->clear_ctrl_override(owner, registers[i]);
+    }
+    model->end_ctrl_update();
+}
+
 void EntityPresenter::stamp_match_terrain(ObjectModel *model, const float *p,
 		int base) {
 	model->set_match_terrain_enabled(
@@ -906,6 +920,7 @@ bool EntityPresenter::aim_payload_changed(const float *p, int base,
 
 void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 		int base, int64_t &last_mask) {
+    model = destruction_->visual_model(model);
 	if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
 		const uint32_t hidden_mask =
 				static_cast<uint32_t>(field_i(
@@ -998,6 +1013,7 @@ void EntityPresenter::release_part_anim_outputs() {
 		// The ordinal DOOR_xx bus has no fixed register set: release whatever
 		// this writer owns instead of probing all 30 names.
 		model->clear_ctrl_overrides_owned(names().owner_doors);
+        model->clear_ctrl_overrides_owned("present:destruction");
 		model->end_ctrl_update();
 	}
 }
@@ -1078,6 +1094,7 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 			++p_profile->rows;
 		}
 		stamp_match_terrain(model, p, base);
+        stamp_destroy_phases(model, p, base);
 		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
 			// Compare the six packed source floats before constructing either
 			// the placement Basis or Transform3D.

@@ -50,7 +50,6 @@ struct VideoQualityControl {
     const char *semantic_value;
 };
 inline constexpr VideoQualityControl kVideoQualityControls[] = {
-    {"16x9DISPLAY", "1"},
     {"TERRAINPOLY", "3"},
     {"TERRAINTEX", "3"},
     {"OBJECTPOLY", "3"},

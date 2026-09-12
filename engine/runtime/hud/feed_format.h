@@ -171,6 +171,7 @@ struct FeedEventInput {
 	uint8_t victim_index = 0xFF;
 	uint8_t aux_index = 0xFF;
 	uint8_t kind = 0;
+	int16_t pos_x = 0; // 46/47 carry the signed bonus count here.
 };
 
 // One feed row — everything the presenter needs to post the line: the compose
@@ -183,6 +184,9 @@ struct FeedRow {
 	uint8_t kind = 0;    // GameEventKind
 	bool camp = false;
 	bool own = false;
+	bool announce = false;
+	bool attacker_is_value = false;
+	bool victim_is_value = false;
 	std::string key;
 	std::string attacker;    // empty on camp rows
 	std::string victim;      // empty on camp rows
@@ -193,7 +197,16 @@ struct FeedRow {
 
 // The roster lookup a row resolves actor names through: a wire index (a pool-0
 // INDEX) -> display name, "" when unknown. Never called for 0xFF.
-using FeedNameLookup = std::function<std::string(uint8_t)>;
+struct FeedActor {
+	std::string name;
+	uint8_t team = 0;
+};
+using FeedActorLookup = std::function<FeedActor(uint8_t)>;
+struct FeedContext {
+	uint16_t self_handle = 0xFFFF;
+	bool mp_verbose = kMpVerboseDefault;
+	uint32_t game_type = 0;
+};
 
 // Fold this frame's game events into feed rows — one per line the original
 // posts to its message feed. `self_handle` is the local player's entity
@@ -204,8 +217,23 @@ using FeedNameLookup = std::function<std::string(uint8_t)>;
 // [orig: NetPacket_HandleGameEvent @0x426270 — the LFP result set formats and
 //  returns @0x42702E-@0x42716D; 58 posts to the tip system only @0x427202]
 void feed_event_rows(const FeedEventInput *events, std::size_t count,
-                     uint16_t self_handle, bool mp_verbose,
-                     const FeedNameLookup &name_of, std::vector<FeedRow> &out);
+                     const FeedContext &context,
+                     const FeedActorLookup &actor_of, std::vector<FeedRow> &out);
+
+// Resolve empty actor names without substituting "Unknown" for numeric/empty values.
+// [orig: HUD_FormatKillEventMessage @ 0x422DA0; sub_422D00 @ 0x422D00]
+std::string feed_format_row(const FeedRow &, const std::string &tmpl,
+        const std::string &unknown, const std::string &bonus_tmpl, const std::string &wpname);
+
+// Retained involved-event line; expiry clears its clock but preserves the death-screen text.
+// [orig: NetPacket_HandleGameEvent @ 0x427B8B; HUD_DrawKillAnnounceBanner @ 0x59DC90]
+struct KillAnnouncement {
+	std::string text;
+	uint32_t tick = 0;
+	void record(const std::string &line, uint32_t now);
+	bool visible(uint32_t now) const;
+	void expire(uint32_t now);
+};
 
 // Strip retail's inline text markup (`<cRRGGBB>` colour, `<b>` bold — every
 // `<...>` run) from a string: the byte walk that drops each '<'..'>' span and

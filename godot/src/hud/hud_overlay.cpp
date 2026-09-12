@@ -178,6 +178,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_weapon);
 	ClassDB::bind_method(D_METHOD("clear_weapon"), &HudOverlay::clear_weapon);
 	ClassDB::bind_method(D_METHOD("push_message", "text"), &HudOverlay::push_message);
+	ClassDB::bind_method(D_METHOD("set_kill_announcement", "text", "tick"), &HudOverlay::set_kill_announcement);
+    ClassDB::bind_method(D_METHOD("reset_overlay_buffers"), &HudOverlay::reset_overlay_buffers);
 	ClassDB::bind_method(D_METHOD("push_feed_line", "text", "argb"),
 			&HudOverlay::push_feed_line);
 	ClassDB::bind_method(D_METHOD("set_player_state", "ticks", "health_fraction", "stance", "fov_deg"),
@@ -241,6 +243,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::get_hud_detail_level);
 	ClassDB::bind_method(D_METHOD("set_showhud_flags", "flags"),
 			&HudOverlay::set_showhud_flags);
+    ClassDB::bind_method(D_METHOD("set_aspect_mode", "mode"), &HudOverlay::set_aspect_mode);
 	ClassDB::bind_method(D_METHOD("cycle_sight_scale"), &HudOverlay::cycle_sight_scale);
 	ClassDB::bind_method(D_METHOD("get_sight_scale_index"),
 			&HudOverlay::get_sight_scale_index);
@@ -799,6 +802,17 @@ void HudOverlay::clear_weapon() {
 	state_.weapon = opennova::hud::HudWeaponState{};
 	textures_[opennova::hud::kHudTexClipGfx] = Ref<Texture2D>();
 	textures_[opennova::hud::kHudTexRoundGfx] = Ref<Texture2D>();
+	queue_redraw();
+}
+
+void HudOverlay::reset_overlay_buffers() {
+    compiler_.reset_overlay_buffers();
+    queue_redraw();
+}
+
+void HudOverlay::set_kill_announcement(const String &text, int64_t tick) {
+	state_.kill_announcement.text = text.utf8().get_data();
+	state_.kill_announcement.tick = static_cast<uint32_t>(tick);
 	queue_redraw();
 }
 

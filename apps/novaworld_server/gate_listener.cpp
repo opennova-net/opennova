@@ -6,6 +6,7 @@
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/gate_probe.h>
+#include <net/novaworld/gate_metrics.h>
 #include <net/novaworld/unknown_tracker.h>
 
 #include <chrono>
@@ -154,7 +155,7 @@ void GateListener::run_loop() {
 		return;
 	}
 
-	uint8_t rx[2048];
+	uint8_t rx[65535];
 	while (!stop_requested_.load()) {
 		opennova::net::Endpoint from{};
 		const int n = opennova::net::udp_recv_from(socket.get(), rx, sizeof(rx),
@@ -175,6 +176,12 @@ void GateListener::run_loop() {
 			continue;
 		}
 		plain.resize(inner_len);
+		GateMetricsReport metrics;
+		if (gate_metrics_decode(plain.data(), plain.size(), metrics)) {
+			std::printf("[gate] metrics block=%s fields=%zu\n",
+				metrics.block.c_str(), metrics.fields.size());
+			continue;
+		}
 
 		// Decrypt with NWU + GATE_NWU_KEY ("GATEAPI") to recover the tag.
 		// (Names are swapped vs onnet — see memory
