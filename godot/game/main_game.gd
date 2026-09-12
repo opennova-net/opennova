@@ -934,6 +934,11 @@ func _on_world_loaded() -> void:
 	_on_dev_tools_open_changed(is_dev_tools_open())
 	var sim := _world.get_sim()
 	_player_options.apply(sim)
+	# Every mission start re-seeds the live HUD declutter level from the
+	# persisted config value (retail's session-settings apply), so a death
+	# screen's forced blank HUD ends with the mission it happened in.
+	if _hud_presenter != null:
+		_hud_presenter.reapply_persisted_hud_detail()
 	# The F3 engine-fact windows read and mutate through this Simulation from
 	# here until unload (ADR 0042 d6): DevTools holds it in C++ (the stats-board
 	# pattern) and does the record push / request drain with no GDScript relay.

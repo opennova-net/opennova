@@ -1,15 +1,26 @@
-// P2 round outcome on the retail data: the 04TR training mission's witnessed
-// lose flow, the sim half (the shell half — the MISSION FAILED screen and ESC
-// to the menu — is godot/tests/game/main_game_lifecycle_test.gd):
+// P2 round outcome on the retail data: a training mission's witnessed lose
+// flow, the sim half (the shell half — the MISSION FAILED screen and ESC to
+// the menu — is godot/tests/game/main_game_lifecycle_test.gd). One executable,
+// one ctest per mission (`--bms <name>`): 04TR's WAC carries both team legs,
+// 00TRa's only `if true(bluekills) then Lose(1)` (`--victim-team 1`; the first
+// mission's authored friendly-fire failure, playthrough gate 8 of
+// docs/world/npc-mission-completion.md):
 //
 //   kill a green/blue PERSON with real player rounds (the local weapon pump
 //   -> RoundSim damage/death chain) ->
 //   * the kill tally lands in the sim (greenkills/bluekills, the WAC builtin
 //     source) [orig: Score_TallyKillByLocalPlayer @0x4fd160],
-//   * 04TR.WAC's `true(greenkills) -> Lose(0)` / `true(bluekills) -> Lose(1)`
-//     fires [orig: WacAction_Lose @0x4ed3f0]: the "lose" effect carries the
-//     witnessed Misc gametext key and the round ends winner 2
+//   * the mission WAC's `true(greenkills) -> Lose(0)` / `true(bluekills) ->
+//     Lose(1)` fires [orig: WacAction_Lose @0x4ed3f0]: the "lose" effect
+//     carries the witnessed Misc gametext key and the round ends winner 2
 //     [orig: Server_ProcessRoundEnd @0x5164f0].
+//
+// REPORT MODE: `lose_flow_test --bms 00TRa.bms --events` boots the mission and
+// prints its BMS event table — every event's triggers and actions by name, the
+// Triggered Text each OutputText resolves to through the mission's own .bin,
+// the area-trigger zones, and which events the PreMission pass fired at boot
+// [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0] — the authored-sequence
+// reference the mission_playthrough probe's gates are read against.
 //
 // The kill is STAGED, never strayed into. The player is teleported onto open
 // ground a few units from the locked victim, at a bearing where the engine's
@@ -30,12 +41,16 @@
 // retail's airborne Flags mirror [orig: Entity_UpdateInfantryAI @0x4b9910 —
 // the terrain slide block's Flags & 0x90A000 gate @0x4ba89b skips an
 // airborne body], which shifted one squad's timing by a few ticks.
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying 04TR.bms).
+// Gated on OPENNOVA_JO_DIR (a retail JO install carrying the mission).
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
+#include <formats/rtxt/rtxt.h>
+
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <set>
 #include <string>
 #include <vector>
@@ -79,15 +94,19 @@ struct Victim {
 };
 
 // Nearest live pool-0 person NPC, preferring a LOSE-triggering team (green 0,
-// then blue 1). The round sim's entity hits scan pool 0 only.
-Victim pick_victim(testrig::RetailMissionRig &rig, const std::set<uint16_t> &blacklist) {
+// then blue 1), or only `required_team` when the mission's WAC carries a
+// single leg. The round sim's entity hits scan pool 0 only.
+Victim pick_victim(testrig::RetailMissionRig &rig, const std::set<uint16_t> &blacklist, int required_team) {
 	Victim best;
 	const w::Vec3 player = rig.local.player_position();
 	for (int i = 0; i < rig.world.ai.count(); ++i) {
 		w::AiEntity *e = rig.world.ai.at(i);
 		if (e == nullptr || !e->inf.active || blacklist.count(e->handle.packed)) continue;
+		if (required_team >= 0 && e->team != required_team) continue;
 		w::Entity *ent = rig.world.registry.get(e->handle);
-		if (ent == nullptr || !ent->alive || ent->mounted || ent->handle.pool() != 0) continue;
+		// A seated person stays a target: the rounds reach an occupant through
+		// the vehicle (00TRa's two friendlies are the trucks' drivers).
+		if (ent == nullptr || !ent->alive || ent->handle.pool() != 0) continue;
 		if ((ent->engine_flags & kIndestructibleFlag) != 0) continue; // scripted, rounds never damage it
 		const float d = testrig::distance(testrig::ai_position(*e), player);
 		if (d < 0.5f) continue;
@@ -183,7 +202,13 @@ LineOfFire line_of_fire(testrig::RetailMissionRig &rig, const w::Vec3 &origin, c
 	fixed3(torso, t);
 	fixed3(beyond, b);
 	const w::EntityHandle player = rig.world.cached.local_player;
-	lof.los_clear = rig.world.collision->raycast_clear(rig.world, o, t, player, victim);
+	// A seated victim sits inside its mount's hull: the LOS leg is judged
+	// against everything but that hull (the round's own hit resolves the
+	// occupant through it), so the mount is not a blocker here.
+	const w::Entity *victim_entity = rig.world.registry.get(victim);
+	const bool seated = victim_entity != nullptr && victim_entity->mounted && victim_entity->mount_target.valid();
+	lof.los_clear = seated ? rig.world.collision->raycast_clear(rig.world, o, t, victim_entity->mount_target, victim)
+	                       : rig.world.collision->raycast_clear(rig.world, o, t, player, victim);
 	w::PersonSectionHit hit;
 	lof.reaches_victim = rig.world.collision->raycast_person_sections(rig.world, victim, o, b, 0, hit);
 	for (int i = 0; i < rig.world.ai.count(); ++i) {
@@ -260,25 +285,238 @@ bool scan_stops(const testrig::RetailMissionRig &rig, uint32_t fire_tick, w::Ent
 		if (ev.shooter != rig.world.cached.local_player.packed || ev.tick < fire_tick) continue;
 		if (newest.tick < fire_tick || ev.tick > newest.tick) newest = ev;
 		if (ev.kind == w::RoundDebugEvent::kOrganic && ev.entity == victim.packed) on_victim = true;
+		// A seated victim: the round stops on the mount (the occupant leg
+		// resolves the damage through it).
+		if (const w::Entity *ve = rig.world.registry.get(victim); ve != nullptr && ve->mounted &&
+				ve->mount_target.valid() && ev.entity == ve->mount_target.packed)
+			on_victim = true;
 	}
 	return on_victim;
 }
 
+// --- the event-table report ---------------------------------------------------------
+
+const char *trigger_main_name(int v) {
+	switch (v) {
+	case 1: return "Group";
+	case 2: return "Single";
+	case 3: return "Event";
+	case 4: return "MissionVariable";
+	case 5: return "SecondTimeThrough";
+	case 6: return "Teammate";
+	case 7: return "Player";
+	}
+	return "?";
+}
+
+// The Group and Single subtype ladders share their numbering (bms.h).
+const char *group_or_single_sub_name(int v) {
+	switch (v) {
+	case 0: return "Null";
+	case 1: return "SeesGroup";
+	case 2: return "HasTargetedGroup";
+	case 3: return "AtRedAlert";
+	case 4: return "Destroyed";
+	case 5: return "Alive";
+	case 6: return "HasLostMoreUnits";
+	case 7: return "AtWaypoint";
+	case 9: return "Intact";
+	case 10: return "IsWithinArea";
+	case 11: return "HoldingGroup";
+	case 12: return "HasMoreUnits";
+	case 13: return "HasShotGroup";
+	case 14: return "AtYellowAlert";
+	case 15: return "HasTargetedSingle";
+	case 16: return "SeesSingle";
+	case 17: return "HasShotSingle";
+	case 42: return "OnTopOf";
+	case 43: return "FartherThan";
+	case 44: return "HasNoLOS";
+	case 45: return "DoesNotSeeOrFarther";
+	}
+	return "?";
+}
+
+const char *player_sub_name(int v) {
+	switch (v) {
+	case 18: return "Berserk";
+	case 19: return "FirstPerson";
+	case 20: return "ThirdPerson";
+	case 21: return "CockpitView";
+	case 34: return "DialogDone";
+	case 35: return "DialogFinished";
+	case 36: return "Awol";
+	case 37: return "Satchel";
+	case 38: return "AttachedToSsn";
+	case 39: return "OnSsn";
+	case 40: return "DrivingSsn";
+	case 41: return "OnGun";
+	}
+	return "?";
+}
+
+const char *misvar_sub_name(int v) {
+	switch (v) {
+	case 1: return "==";
+	case 2: return "<";
+	case 3: return ">";
+	case 4: return "<=";
+	case 5: return ">=";
+	}
+	return "?";
+}
+
+const char *trigger_sub_name(int main, int sub) {
+	switch (main) {
+	case 1:
+	case 2: return group_or_single_sub_name(sub);
+	case 4: return misvar_sub_name(sub);
+	case 6: return sub == 1 ? "IsEnabled" : sub == 2 ? "MedicAssisting" : sub == 3 ? "Evacuating" : "?";
+	case 7: return player_sub_name(sub);
+	}
+	return "";
+}
+
+const char *action_name(int v) {
+	switch (v) {
+	case 0: return "Null";
+	case 1: return "RedirectGroupTo";
+	case 2: return "KillGroup";
+	case 3: return "ChangeGroupAI";
+	case 4: return "VaporizeGroup";
+	case 5: return "MisvarChange";
+	case 6: return "OutputText";
+	case 7: return "PlayWavList";
+	case 8: return "BlueWin";
+	case 9: return "RedWin";
+	case 10: return "GreenWin";
+	case 11: return "GroupVelocity";
+	case 12: return "AreaAiRed";
+	case 13: return "AreaAiBlue";
+	case 14: return "SubGoalWon";
+	case 15: return "SubGoalLost";
+	case 16: return "ChangeGTeamAction";
+	case 17: return "ChangeGroupAction";
+	case 18: return "GroupTeleportAction";
+	case 19: return "RedirectSingleTo";
+	case 20: return "KillSingle";
+	case 21: return "ChangeSingleAI";
+	case 22: return "VaporizeSingle";
+	case 23: return "SingleVelocity";
+	case 24: return "ChangeSteamAction";
+	case 25: return "SingleChangeGroup";
+	case 26: return "SingleTeleportAction";
+	case 27: return "ParticleEffectAction";
+	case 30: return "GroupOpenDoorAction";
+	case 31: return "GroupCloseDoorAction";
+	case 32: return "GroupResetHasVisited";
+	case 33: return "SingleResetHasVisited";
+	case 34: return "ResetEvent";
+	case 35: return "ShowWinSubgoal";
+	case 36: return "ShowLoseSubgoal";
+	case 37: return "AttachToEmplaced";
+	case 38: return "SetLightState";
+	case 39: return "Teammates";
+	case 40: return "ShowWaypoints";
+	case 41: return "ExecuteWac";
+	case 42: return "SsnTargetSsnPri";
+	case 43: return "SsnTargetSsnExc";
+	case 44: return "SsnTargetGroupPri";
+	case 45: return "SsnTargetGroupExc";
+	case 46: return "GroupTargetSsnPri";
+	case 47: return "GroupTargetSsnExc";
+	case 48: return "GroupTargetGroupPri";
+	case 49: return "GroupTargetGroupExc";
+	}
+	return "?";
+}
+
+// The mission's own string table (<mission>.bin beside the .bms in the mounted
+// root), for the Triggered Text an OutputText action shows
+// [orig: HUD_DisplayTriggeredText @0x51f190 reads "Triggered Text" ID%03i].
+bool load_mission_strings(const testrig::RetailMissionRig &rig, const std::string &bms, rtxt::File &out) {
+	std::string bin = bms;
+	const size_t dot = bin.rfind('.');
+	if (dot != std::string::npos) bin.erase(dot);
+	bin += ".bin";
+	std::vector<uint8_t> bytes;
+	if (!rig.index.read_file(bin, bytes)) return false;
+	std::string error;
+	return rtxt::parse(bytes.data(), bytes.size(), out, error);
+}
+
+void print_event_table(testrig::RetailMissionRig &rig, const std::string &bms) {
+	const bms::File &m = rig.mission;
+	rtxt::File strings;
+	const bool have_strings = load_mission_strings(rig, bms, strings);
+	std::printf("--- %s: %zu events, %zu triggers, %zu actions, %zu area triggers (strings %s) ---\n", bms.c_str(),
+			m.events.size(), m.triggers.size(), m.actions.size(), m.area_triggers.size(),
+			have_strings ? "loaded" : "MISSING");
+	for (size_t ei = 0; ei < m.events.size(); ++ei) {
+		const bms::Event &ev = m.events[ei];
+		const uint32_t flags = static_cast<uint32_t>(ev.flags);
+		std::printf("event %-3zu flags=0x%x%s%s%s delay=%d reset=%d fired=%d\n", ei, flags,
+				(flags & 1u) ? " repeat" : "", (flags & 2u) ? " pre" : "", (flags & 4u) ? " post" : "",
+				ev.delay >> 22, ev.reset_after >> 22, rig.events.event_fired(ei) ? 1 : 0);
+		for (int k = 0; k < int(ev.trigger_count); ++k) {
+			const size_t tx = size_t(ev.trigger_index) + size_t(k);
+			if (tx >= m.triggers.size()) continue;
+			const bms::Trigger &t = m.triggers[tx];
+			const int main = int(t.main_type);
+			std::printf("    if  %s.%s(%d) p=(%d, %d, %d, %d)%s%s\n", trigger_main_name(main),
+					trigger_sub_name(main, t.sub_type), t.sub_type, t.param1, t.param2, t.param3, t.param4,
+					t.is_negated() ? " NOT" : "", k + 1 < int(ev.trigger_count) ? (t.is_or() ? " or" : t.is_xor() ? " xor" : " and") : "");
+		}
+		for (int k = 0; k < int(ev.action_count); ++k) {
+			const size_t ax = size_t(ev.action_index) + size_t(k);
+			if (ax >= m.actions.size()) continue;
+			const bms::Action &ac = m.actions[ax];
+			const int type = int(ac.action_type);
+			std::printf("    do  %s(%d) sub=%d p=(%d, %d, %d, %d)", action_name(type), type, ac.action_sub_type,
+					ac.param1, ac.param2, ac.param3, ac.param4);
+			if (type == 6 && have_strings) {
+				char key[16];
+				std::snprintf(key, sizeof(key), "ID%03d", ac.param1);
+				std::printf("  \"%s\"", strings.get_in_section("Triggered Text", key).c_str());
+			}
+			std::printf("\n");
+		}
+	}
+	for (size_t bi = 0; bi < m.area_triggers.size(); ++bi) {
+		const bms::AreaTrigger &bb = m.area_triggers[bi];
+		std::printf("area %-3zu id=%-4d x[%8.1f..%8.1f] y[%8.1f..%8.1f] z[%8.1f..%8.1f]%s\n", bi, bb.id,
+				bb.get_x_min(), bb.get_x_max(), bb.get_y_min(), bb.get_y_max(), bb.get_z_min(), bb.get_z_max(),
+				bb.is_active() ? " MISSION_AREA" : "");
+	}
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	std::string bms = "04TR.bms";
+	int victim_team = -1;
+	bool events_only = false;
+	for (int i = 1; i < argc; ++i) {
+		if (std::strcmp(argv[i], "--bms") == 0 && i + 1 < argc) bms = argv[++i];
+		else if (std::strcmp(argv[i], "--victim-team") == 0 && i + 1 < argc) victim_team = std::atoi(argv[++i]);
+		else if (std::strcmp(argv[i], "--events") == 0) events_only = true;
+	}
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 04TR.bms)");
+			"OPENNOVA_JO_DIR (a retail JO install carrying the training missions)");
 	testrig::RetailMissionRig rig;
 	std::string error;
-	if (!rig.open(install, "04TR.bms", error)) return retail::skip(error.c_str());
+	if (!rig.open(install, bms, error)) return retail::skip(error.c_str());
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "04TR boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
+	if (events_only) {
+		print_event_table(rig, bms);
+		return 0;
+	}
 	if (!expect(rig.local.has_local_player(), "the host's own player spawned")) return 1;
-	if (!expect(rig.wac_loaded, "04TR's WAC compiled and installed")) return 1;
+	if (!expect(rig.wac_loaded, "the mission's WAC compiled and installed")) return 1;
 	if (!expect(rig.install_weapon("WPN_M4AUTO"), "WPN_M4AUTO installs")) return 1;
 	if (!expect(!rig.world.match.outcome().ended, "the round has not ended at spawn")) return 1;
 	if (!expect(rig.world.collision != nullptr, "the collision world is up")) return 1;
@@ -308,9 +546,18 @@ int main() {
 				: team == 1 ? ks.bluekills_by_player : ks.enemy_kills_by_player;
 	};
 	while (run.seconds() < kMaxMissionSeconds && !killed) {
-		const Victim npc = pick_victim(rig, blacklist);
+		const Victim npc = pick_victim(rig, blacklist, victim_team);
 		if (npc.ai == nullptr) {
-			run.tick(kTicksPerSecond);
+			// Every candidate is retired for now: a mission with few lose-team
+			// people (00TRa has two, one of them the seated instructor) gets its
+			// retired victims back after a pause — they walk, and a line of fire
+			// a truck hull blocked opens again.
+			run.tick(kTicksPerSecond * 10);
+			if (!blacklist.empty()) {
+				std::printf("lose-flow: t=%ds every candidate retired — revisiting %zu of them\n", run.seconds(),
+						blacklist.size());
+				blacklist.clear();
+			}
 			continue;
 		}
 		const w::EntityHandle target = npc.ai->handle;
@@ -419,15 +666,28 @@ int main() {
 		}
 	}
 	if (!expect(ended, "the round ended after killing a lose-team person")) return 1;
+	// The SP epilog: the lose cine raises the end-of-round screen within two
+	// frames and the script never runs again, so the WAC's `Lose` (its chat line
+	// and banner) lands exactly once however long the screen stays up
+	// [orig: the WAC tick gate @0x51d8bd on g_epilog_screen_active, raised by
+	//  the lose screen build @0x57450c].
+	run.tick(kTicksPerSecond * 4);
+	int lose_count = 0, round_end_count = 0;
 	bool saw_lose = false, saw_round_end = false;
 	for (const w::Effect &e : run.seen) {
+		if (e.kind == "lose") ++lose_count;
+		if (e.kind == "round_end") ++round_end_count;
 		if (e.kind == "lose" && e.str == expected_key) saw_lose = true;
 		if (e.kind == "round_end" && e.a == 2) saw_round_end = true;
 	}
 	expect(saw_lose, "the lose effect carries the witnessed Misc gametext key");
 	expect(saw_round_end, "the round_end host effect names winner 2");
+	std::printf("lose-flow: %d lose / %d round_end effect(s) over the four seconds after the end\n", lose_count,
+			round_end_count);
+	expect(lose_count == 1, "the WAC Lose ran exactly once: the SP end screen halts the script");
+	expect(round_end_count == 1, "the round ended exactly once");
 	if (failures == 0)
-		std::printf("lose_flow_04tr: team-%d person kill -> %s -> Lose -> round end (winner 2) in %d mission seconds\n",
-				target_team, green ? "greenkills" : "bluekills", run.seconds());
+		std::printf("lose_flow %s: team-%d person kill -> %s -> Lose -> round end (winner 2) in %d mission seconds\n",
+				bms.c_str(), target_team, green ? "greenkills" : "bluekills", run.seconds());
 	return failures == 0 ? 0 : 1;
 }

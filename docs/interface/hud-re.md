@@ -128,10 +128,22 @@ each frame); the draw code reads both.
 
 ## HUD declutter — `huddetail` / `HUDDECLUT_*` (witnessed + ported 2026-08-15)
 
-The per-element visibility system behind the flag table above. State: the
-persisted config int `hud_detail` (0..3, cfg cell `@0x24D20BC`, parse
-`@0x550339`, default 0 `@0x54d3d8`, apply `@0x55154d`, saved `@0x54c80d`) and
-the 24 hudpos mask bytes `byte_2723CE0[24]`. Rule:
+The per-element visibility system behind the flag table above. State: TWO
+level cells plus the 24 hudpos mask bytes `byte_2723CE0[24]`. The persisted
+config value `hud_detail` (0..3) lives in the config struct
+(`g_GameConfigState.hudDetail_518`: parse `@0x550339`, default 0 `@0x54d3d8`,
+written to `game.cfg` by `Game_SaveConfig @0x54c80d`); the LIVE layer level is
+`layerIndex @0x24D20BC`, written by the mission-start apply
+`apply_session_settings_to_globals @0x55154d` (config -> live, called from
+`Game_StartMission @0x524662`, `SinglePlayer_StartMission @0x561c28` and the
+session create/join paths), by the `huddetail` cycle `@0x4e060b..14` and by
+the death force `@0x42e412` — neither of the last two touches the config
+struct, so a cycled or death-forced level ends with its mission and the
+config value alone survives a restart. (Corrected 2026-09-12 during the 00TRa
+playthrough acceptance: this record had folded both cells into one "persisted
+cfg cell", and the port persisted every live write, which left the HUD blank
+in every mission after a death screen; `game_hud_presenter.gd` now keeps the
+two states and re-seeds the live level at every world load.) Rule:
 `visible[slot] = ((1 << hud_detail) & mask[slot]) != 0`, rebuilt into
 `dword_2723C80[24]` by `CRenderState_SetLayerVisibility @0x59B0F0` on every
 mask or level change.
@@ -156,8 +168,9 @@ mask or level change.
 - **Level 3 blanks the ENTIRE gameplay overlay pass** `@0x5a80c4` — nothing
   draws. The "death exception" arm inside that gate is a structural no-op:
   its callee's own `level < 2` guard can never pass at level 3.
-- **Forced levels** — death forces level 3 `@0x42e410..1c`; the HUD reset
-  re-applies the persisted level `@0x59dd75`.
+- **Forced levels** — death forces the live level to 3 `@0x42e410..1c`; the
+  HUD reset re-applies the LIVE level `@0x59dd75`; the persisted config value
+  returns only through the next mission start's settings apply `@0x55154d`.
 - **`showhud`** (code 14, unbound by default) cycles `g_FpWeaponViewFlags =
   (v + 1) & 3` `@0x4e0561`: bit 0 = the FP gun, bit 1 = ONLY the
   FP-weapon+spinmap sub-pass `@0x5a8635`. The whole-overlay master gate is

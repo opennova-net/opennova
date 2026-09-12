@@ -2771,13 +2771,23 @@ foreach(port
         world/rock_collision_00trg world/ai_corpse world/ai_threat
         world/ai_muzzle_pose
         world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
-        mission/native_assets_00trg mission/lose_flow_04tr mission/buggy_01tr
+        mission/native_assets_00trg mission/buggy_01tr
         mission/watercraft_02tr)
     get_filename_component(port_name ${port} NAME)
     add_executable(${port_name}_test ${port}_test.cpp)
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
     opennova_add_gated_test(${port_name} COMMAND ${port_name}_test)
 endforeach()
+
+# The witnessed SP lose flow on the retail data, one executable per training
+# mission's WAC: 04TR carries both team legs, 00TRa only `true(bluekills) ->
+# Lose(1)` (the first mission's friendly-fire failure, the playthrough gate 8
+# of docs/world/npc-mission-completion.md). `--events` prints the mission's
+# BMS event table instead (the playthrough's authored-sequence reference).
+add_executable(lose_flow_test mission/lose_flow_test.cpp)
+target_link_libraries(lose_flow_test PRIVATE opennova_test_rig)
+opennova_add_gated_test(lose_flow_04tr COMMAND lose_flow_test --bms 04TR.bms)
+opennova_add_gated_test(lose_flow_00tra COMMAND lose_flow_test --bms 00TRa.bms --victim-team 1)
 
 # The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
 # each mounts the retail data through ResourceIndex itself and is Skipped
