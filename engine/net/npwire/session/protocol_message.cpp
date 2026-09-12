@@ -128,6 +128,14 @@ std::vector<ProtocolMessage> split_protocol_message_to_fill(
 			out.reliable = true;
 			return out;
 		};
+		// Retail clears struct bit 2 (wire CONT) on the tail @0x62839b and ORs
+		// bit 2 into the head @0x628412, and its split input never carries CONT:
+		// BuildOutgoingPackets @0x6284ee splits the queue HEAD and dequeues it in
+		// the same pass, so the input is a fresh record or an END-only tail --
+		// for both, the flags below equal retail's. The tail inherits CONT here
+		// only for our own re-queued FIRST/MID pieces (host_session.cpp), whose
+		// later pieces still follow; a FINAL there would strand the receiver's
+		// reassembly buffer. [orig: NapiNPMessage_SplitAtLength @0x628350]
 		ProtocolMessage head = piece(0, count, true, rest.flags.frag_end);
 		ProtocolMessage tail = piece(count, rest.payload.size(), rest.flags.frag_cont, true);
 		pieces.push_back(std::move(head));

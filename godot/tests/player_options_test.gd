@@ -52,6 +52,9 @@ func test_defaults_and_current_snapshot_are_detached() -> void:
 	assert_eq(state.crosshair_color, 0xFFFFFF,
 			"the retail default crosshair colour is white")
 	assert_true(state.crosshair_spread, "the retail default spread is on")
+	assert_eq(state.aspect_mode,
+			PlayerOptions.fresh_profile_aspect_mode(PlayerOptions.desktop_size()),
+			"a fresh profile seeds the cfg word from the desktop ratio, as the first launch's video test does")
 
 	state.sound_fx_volume = 12
 	state.crosshair_style = 9
@@ -128,6 +131,44 @@ func test_load_normalizes_corrupt_persisted_values() -> void:
 	assert_eq(state.crosshair_style, 0)
 	assert_eq(state.crosshair_color, 0x123456,
 			"an out-of-range colour masks down to its RGB")
+
+
+func test_native_aspect_mode_persists_as_the_cfg_word() -> void:
+	# Any value outside 0..3 is retail's "the surface's own ratio": a cfg-only
+	# choice with no authored spin row, kept verbatim rather than clamped.
+	var options := PlayerOptions.new()
+	var state := options.current()
+	state.aspect_mode = -1
+	options.update(state)
+	assert_eq(PlayerOptions.new().current().aspect_mode, -1)
+	var config := ConfigFile.new()
+	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
+	assert_eq(int(config.get_value("player", "display_16x9", 0)), -1)
+
+
+func test_fresh_profile_seeds_the_aspect_word_from_the_desktop_once() -> void:
+	# Retail's first-launch video test writes display_16x9 from the primary
+	# desktop's ratio -- 1 (the widescreen row) past 1.34, else 0 -- and saves
+	# the config, so the desktop is sampled once. Headless has no desktop to
+	# vary: both branches go through the seed helper with explicit sizes.
+	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1024, 768)), 0)
+	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1280, 1024)), 0)
+	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1366, 1024)), 0,
+			"1.334 stays under the 1.34 line")
+	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1920, 1200)), 1)
+	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1920, 1080)), 1)
+	var seeded := PlayerOptions.fresh_profile_aspect_mode(PlayerOptions.desktop_size())
+	assert_eq(PlayerOptions.new().current().aspect_mode, seeded,
+			"a fresh profile carries the desktop's verdict")
+	var config := ConfigFile.new()
+	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK,
+			"the seed persists at once, as the video test's config save does")
+	assert_eq(int(config.get_value("player", "display_16x9", -9)), seeded)
+	# Persisted, the word is read back and the desktop never re-sampled: a
+	# profile carrying the other row keeps it.
+	ConfigStore.write(PlayerOptions.CONFIG_PATH, "player", "display_16x9", 1 - seeded)
+	assert_eq(PlayerOptions.new().current().aspect_mode, 1 - seeded,
+			"a saved word wins over the desktop")
 
 
 func test_update_maps_each_audio_option_to_its_runtime_buses() -> void:

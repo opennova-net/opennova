@@ -531,6 +531,10 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
         w.slot.scope_zero = weapon_scope_zero_initial(w.def.scope_zero);
         if ((flags & 3) != 0)
             w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, w.slot.scope_zero);
+        // The zero-yaw term (MountSlot+8) from the seeded step: outside the
+        // flags & 3 gate, and never negated at the install [orig:
+        // WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b].
+        w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, w.slot.scope_zero);
 		// Ammo comes from the slot pool when the installed def IS the equipped
 		// inventory slot: clip = the slot's loaded rounds, reserve = the def's
 		// ammo-class pool [orig: MountSlot+0x10 +
@@ -545,6 +549,7 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 				w.slot.clip = eq->clip;
                 w.slot.scope_zero = eq->scope_zero;
                 w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, eq->scope_zero);
+                w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, eq->scope_zero);
 				w.slot.reserve =
 						weapon_pool_get(*inventory, def->ammo_class_id);
 				ammo_from_inventory = true;
@@ -1287,6 +1292,7 @@ WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
     data.scope_zero.min_steps = row.scope_zero_extra;
     data.scope_zero.step_metres = row.scope_zero_step;
     data.scope_zero.default_metres = row.scope_zero_default;
+    data.scope_zero.paralax_distance_q16 = row.scope_paralax_distance_fp16;
 	data.attack_anim = row.attack_anim;
 	data.run_anim = row.run_anim;
 	data.clipsize = row.clipsize;

@@ -165,9 +165,7 @@ void PlayerInputRouter::sample_weapon_input(const Ref<MissionFrameInput> &p_fram
 	const bool reload_down = captured && pressed("magazine");
 	const bool reload_edge = reload_down && !reload_was_down_;
 	reload_was_down_ = reload_down;
-	// The RMB scope request shadows the configurable `scope` row (catalog row
-	// 105): the raw button is read, not the binding (ported verbatim; a
-	// tracked divergence follow-up).
+	// The scope request reads the configurable `scope` row (catalog row 105).
 	const bool scope_down = captured && pressed("scope");
 	if (scope_down && !scope_was_down_ && weapon_sim.is_valid()) {
 		weapon_sim->request_local_player_scope_toggle();
@@ -374,10 +372,10 @@ void PlayerInputRouter::sample_hud_input(bool p_active) {
 // the ForceCrouch refusal (the C2S 0x1D semantics). [orig: input cases
 // 170/169/172 @0x4e0df3/@0x4e0d77/@0x4e0e3e ->
 // NapiNPServerMsg_HandleStanceChange @0x501c60]
-// The keys below read RAW keycodes rather than the binding table's rows
-// (binocular action 26 / NVG action 41 / gain actions 56/57 / the stance rows
-// 9/10/11): ported verbatim from the GDScript router, a tracked divergence
-// follow-up.
+// The stance rows 9/10/11 are polled through the binding table (sample_hud_input).
+// The keys below still read RAW keycodes rather than the binding table's rows
+// (binocular action 26 / NVG action 41 / gain actions 56/57): ported verbatim
+// from the GDScript router, a tracked divergence follow-up.
 bool PlayerInputRouter::handle_key_input(const Ref<InputEvent> &p_event, bool p_active) {
 	LocalPlayerPresenter *owner = presenter();
 	if (!p_active || owner == nullptr || !owner->has_player()) {

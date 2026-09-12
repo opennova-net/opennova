@@ -172,12 +172,59 @@ var _selected_pool_rows := PackedInt32Array()  # table row -> _host_pool index
 
 
 func _wire_host_settings() -> void:
+	_seed_host_controls()
 	if _driver.has_widget("MISSION_LIST"):
 		seed_host_pool(MissionCatalog.rows(_root))
 	_connect_pressed("ADD_MISSIONS", _on_add_missions)
 	_connect_pressed("REMOVE_MISSIONS", _on_remove_missions)
 	_connect_pressed("START_GAME", _on_host_start)
 	_sync_start_gate()
+
+
+# The host screen opens seeded from the host configuration, the populate step
+# the retail dialog init runs before the mission pool: the engine's
+# host_dialog_value (HostSessionOptions.dialog_value) is the inverse of the
+# START read. Edits take the text, spins select the item whose authored
+# value= matches, GAME_LOCATION the item whose name shares the country's
+# first three characters, checkboxes the nonzero value. Without a persisted
+# game.cfg the seed is the record's defaults, with the session name the
+# Menu/UNTITLED gametext the retail config defaults copy in. A user-cleared
+# edit is still read verbatim at START.
+func _seed_host_controls() -> void:
+	var defaults := HostSessionConfig.new()
+	defaults.server_name = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_MENU,
+			"UNTITLED", defaults.server_name)
+	for control in HostSessionOptions.dialog_controls():
+		var id := _id(control)
+		if id < 0:
+			continue
+		var value: String = defaults.dialog_value(control)
+		if control == "SERVER_PUNKBUSTER":
+			# No pb\pbcl.dll ships with OpenNova; the populate selects 0 and
+			# disables the spin whenever that file is absent.
+			value = "0"
+			_driver.set_widget_disabled(id, true)
+		match _driver.widget_kind_of(id):
+			MnuDocument.TYPE_SPINLIST:
+				if control == "GAME_LOCATION":
+					_select_location(id, value)
+				else:
+					_driver.select_row_by_value(id, value, false)
+			MnuDocument.TYPE_CHECKBOX:
+				_driver.set_widget_checked(id, value != "0")
+			_:
+				_driver.set_widget_text(id, value)
+
+
+# GAME_LOCATION selects the first item whose name matches the country's first
+# three characters case-insensitively (a 3-character strnicmp); an empty
+# country matches no named item and leaves the authored selection.
+func _select_location(id: int, country: String) -> void:
+	var prefix := country.substr(0, 3)
+	for row in range(_driver.item_count(id)):
+		if _driver.item_text(id, row).substr(0, 3).nocasecmp_to(prefix) == 0:
+			_driver.select_row(id, row, false)
+			return
 
 
 ## The host screen's available-mission pool (MissionCatalogRow array). The wire

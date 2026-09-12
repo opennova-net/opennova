@@ -206,6 +206,9 @@ private:
 	Vector3 rot_;
 	Vector3 rot_bias_def_;
 	float renderfov_h_deg_ = 80.0f;
+	// The world pass's horizontal fov of the last view snapshot (the policy
+	// fov the feed's focal ratio is taken against; the base 80 until one lands).
+	float world_fov_h_deg_ = 80.0f;
 
 	ObjectID world_id_;
 	ObjectID presenter_id_;

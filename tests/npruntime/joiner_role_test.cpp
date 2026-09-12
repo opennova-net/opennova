@@ -958,6 +958,26 @@ bool run_local_replica_turret_channel() {
    "local joiner input is tethered within ninety degrees of the gun");
 }
 
+// Every in-match pump stamps World::rules from the joiner's session: the
+// session opens, and auto_scope_zero follows bit 0x10000 of the S2C
+// 0x64 +44 mpattrib word (g_rules_flags @0x24D1E34, the
+// Player_AdjustWeaponZoomLevel test @0x4dbd15). The runtime view carries
+// that word once the 0x64 transfer lands; here it is set on the view.
+bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowed) {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.runtime->view().set_mp_attributes(mp_attributes);
+	w::World &world = h.kernel->world;
+	if (!expect(!world.rules.session_open && !world.rules.auto_scope_zero,
+			"rules stamp: a bare kernel starts out of session")) return false;
+	h.role.run_tick(h.input);
+	if (!expect(world.rules.session_open, "rules stamp: the pump opens the session")) return false;
+	return expect(world.rules.auto_scope_zero == zoom_allowed,
+			"rules stamp: auto_scope_zero follows mpattrib bit 0x10000");
+}
+
 } // namespace
 
 int main() {
@@ -979,6 +999,8 @@ int main() {
 	ok &= run_confirmed_vehicle_drive(0, true);
 	ok &= run_confirmed_vehicle_drive(0, true, true);
 	ok &= run_flare_descriptor_carries_the_pilot_handheld();
+	ok &= run_rules_stamp_from_mp_attributes(0x10000u, true);
+	ok &= run_rules_stamp_from_mp_attributes(0x3A02u, false);
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

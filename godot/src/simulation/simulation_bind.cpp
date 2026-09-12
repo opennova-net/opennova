@@ -130,6 +130,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_join_expansion_version_root", "game_root"),
 			&Simulation::set_join_expansion_version_root);
 	ClassDB::bind_method(D_METHOD("is_joiner"), &Simulation::is_joiner);
+	ClassDB::bind_method(D_METHOD("local_player_radio_request_icon_viewer"),
+			&Simulation::local_player_radio_request_icon_viewer);
 	ClassDB::bind_method(D_METHOD("get_streamed_placement_records"),
 			&Simulation::get_streamed_placement_records);
 	ClassDB::bind_method(D_METHOD("take_retired_placement_ids"),
@@ -292,6 +294,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_local_player_debug_third_person", "enabled"), &Simulation::set_local_player_debug_third_person);
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &Simulation::get_local_player_view);
 	ClassDB::bind_static_method("Simulation", D_METHOD("fov_vertical_from_horizontal", "fov_h_deg", "aspect", "mode"), &Simulation::fov_vertical_from_horizontal, DEFVAL(-1));
+	ClassDB::bind_static_method("Simulation", D_METHOD("fresh_profile_aspect_mode", "width", "height"), &Simulation::fresh_profile_aspect_mode);
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &Simulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);

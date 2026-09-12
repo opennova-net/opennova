@@ -343,6 +343,7 @@ world::WeaponTable build_weapon_table(
         e.action_fsm.scope_zero.min_steps = d.scope_zero_extra;
         e.action_fsm.scope_zero.step_metres = d.scope_zero_step;
         e.action_fsm.scope_zero.default_metres = d.scope_zero_default;
+        e.action_fsm.scope_zero.paralax_distance_q16 = d.scope_paralax_distance_fp16;
 		e.action_fsm.flags2 = d.flags2;
 		e.action_fsm.ammo_cost = d.ammo_class_count;
 		std::memcpy(e.action_fsm.soundfireloop, d.soundfireloop, sizeof(d.soundfireloop));

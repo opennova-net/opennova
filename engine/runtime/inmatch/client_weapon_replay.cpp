@@ -117,6 +117,7 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         input.is_authority = false;
         input.current_tick = static_cast<int32_t>(world.logic_tick);
         input.submerged = world.env.water_z != 0 && world::to_fixed(owner.position.z) <= world.env.water_z;
+        input.last_tick_of_batch = world.rules.last_tick_of_batch;
         world::WeaponFsmEvents events;
         world::weapon_fsm_tick(def->action_fsm, slot, input, events);
         world::weapon_sound_publish(world, owner, def->action_fsm, events);

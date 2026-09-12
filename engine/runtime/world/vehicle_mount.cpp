@@ -96,10 +96,20 @@ bool VehicleSystem::prepare_weapon_slot(Entity &vehicle) {
     if (vehicle.primary_weapon_slot_adm != adm) {
         vehicle.primary_weapon_slot = WeaponSlotState{};
         vehicle.primary_weapon_slot_adm = adm;
+        // Scope zero seed and elevation under flags & 3 [orig:
+        //  WeaponSlot_InitFromEntityDef @0x5466C0 -> WeaponSlot_InitFromDef
+        //  @0x53EE70 (call @0x54670A): +0x60 = def+0xA0 / def+0x9C
+        //  @0x53EEB2..0x53EECB; +0x04 = def[+0x3B0 + 4*step] under def+8 & 3
+        //  @0x53EEDA..0x53EEEC; +0x08 = atan2(def+0x8C, step * def+0x9C << 16
+        //  floored at 100 m) outside that gate, never negated here
+        //  @0x53EF4F..0x53EF8B]; the clip/reserve words from def+0x58/+0x5C
+        //  @0x54670F..0x546733.
         vehicle.primary_weapon_slot.scope_zero = weapon_scope_zero_initial(weapon->action_fsm.scope_zero);
         if ((weapon->flags & 3) != 0)
             vehicle.primary_weapon_slot.zero_pitch = weapon_scope_zero_pitch(
                 weapon->action_fsm.scope_zero, vehicle.primary_weapon_slot.scope_zero);
+        vehicle.primary_weapon_slot.zero_yaw = weapon_scope_zero_yaw(
+            weapon->action_fsm.scope_zero, vehicle.primary_weapon_slot.scope_zero);
         if (weapon->clipsize < 0) {
             vehicle.primary_weapon_slot.clip = -1;
         } else {

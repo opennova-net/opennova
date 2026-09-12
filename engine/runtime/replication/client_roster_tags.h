@@ -33,12 +33,19 @@ using RosterTagMaxHealth = std::function<int32_t(uint16_t type_id)>;
 // @0x5a39eb), a resolved def [orig: @0x5a39fb], team 0 / local team / death
 // screen [orig: @0x5a4552..0x5a456b], `g_GameType || death screen`
 // [orig: @0x5a456d..0x5a457d]. Each source carries the slot's revive
-// countdown and medic-request latch (slot+0x10 / slot+0x2C) and the row's
-// dead bit (state_flags & 2 — the `Flags & 2` latch @0x5a3c1c).
+// countdown and medic-request latch (slot+0x10 / slot+0x2C), the row's
+// dead bit (state_flags & 2 — the `Flags & 2` latch @0x5a3c1c) and the
+// radio-request fold: the row's +885 latch (receive event 0x6D) cleared by
+// a def-type-1 carrier in the groundEntity walk [orig: @0x5a3bfe..0x5a3c1a].
+// The walk runs over `carrier_world`'s materialized twins (the joiner's
+// pool-1..3 rows, keyed by the wire handle) from the decoded row's
+// carrier_handle — the remote's +0x28 as the player compact echoes it
+// (mount wins over ground @0x4c0a08); null = no twins, the latch alone.
 void collect_roster_tags(const ClientState &state, uint16_t self_handle,
                          uint8_t local_team, bool death_screen,
                          uint32_t game_type,
                          std::vector<world::FriendlyTagSource> &out,
-                         const RosterTagMaxHealth &max_health = {});
+                         const RosterTagMaxHealth &max_health,
+                         const world::World *carrier_world);
 
 } // namespace opennova::replication

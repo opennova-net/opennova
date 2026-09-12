@@ -19,6 +19,7 @@
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -588,8 +589,14 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		reject_client_join(auth, peer, 14, 2, out);
 		return;
 	}
+	// The ban compares the datagram's UDP source (conn+0x30, stored from the
+	// packet address at create), never the client-reported SIP TLV (conn+0x38 /
+	// session_keys+0x158, stored @0x62bf91/@0x62bf85 and read by nothing here).
+	// g_banned_id_list packs a.b.c.d as a | b<<8 | c<<16 | d<<24 -- PeerAddr::ip.
+	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c6203..0x4c6217 reads conn+0x30 =
+	//  the datagram source stored @0x62bf28; BanList_ParseIPEntry @0x4fd5c9]
 	if (ctx.is_in_session && std::find(ctx.banned_join_addresses.begin(),
-	            ctx.banned_join_addresses.end(), auth.sip) != ctx.banned_join_addresses.end()) {
+	            ctx.banned_join_addresses.end(), peer.ip) != ctx.banned_join_addresses.end()) {
 		reject_client_join(auth, peer, 14, 3, out);
 		return;
 	}
@@ -886,7 +893,16 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		return;
 	}
 	conn->receive_inactive_ms = 0;
-    conn->link.nak_backoff_pending = true;
+	// The backoff callback (cb_server_6 = sub_4C62A0 -> entity+89876 = 1, the
+	// next 0x0A budget halving) is latched only by a NONZERO requested dword; a
+	// zero-only "send next" list or a key-only body arms nothing.
+	// [orig: NapiNP_HandleResendList @0x6239aa sets the latch on the nonzero
+	//  path only; @0x6239ef gates the callback on it; @0x623974 returns before
+	//  the loop on a key-only body]
+	if (std::any_of(requested.begin(), requested.end(),
+			[](uint32_t sequence) { return sequence != 0; })) {
+		conn->link.nak_backoff_pending = true;
+	}
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
 				? conn->seq.next_outbound_seq

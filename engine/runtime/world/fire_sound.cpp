@@ -13,25 +13,34 @@
 namespace opennova::world {
 
 void FireSoundQueue::push_ready(const char *set_name, const Vec3 &pos,
-                                int32_t source_bms_id, bool interface_set) {
+                                int32_t source_bms_id, uint32_t sound_id,
+                                bool interface_set) {
     if (set_name == nullptr || set_name[0] == '\0') return;
+    // The peer gate lives INSIDE the play: a host with no stamped listener
+    // (dedicated) readies nothing, whichever leg asked [orig: the
+    // is_mp_session_peer test at the head of Sound_Play3DPositional
+    // @ 0x527cb3, which every Entity_PlaySound3D_FullVolume call reaches].
+    if (!listener_valid_) return;
     if (ready_.size() >= kMaxReady) return;
     ReadyFireSound sound;
     sound.interface_set = interface_set;
     sound.set_name = set_name;
     sound.pos = pos;
     sound.source_bms_id = source_bms_id;
+    sound.sound_id = sound_id;
     ready_.push_back(std::move(sound));
 }
 
 void FireSoundQueue::play_immediate(const char *set_name, const Vec3 &pos,
-                                    int32_t source_bms_id) {
-    push_ready(set_name, pos, source_bms_id);
+                                    int32_t source_bms_id, uint16_t source_handle) {
+    push_ready(set_name, pos, source_bms_id,
+               audio::oneshot_sound_id(source_handle, source_bms_id));
 }
 
 void FireSoundQueue::play_with_distance_delay(const char *set_name,
                                               const Vec3 &pos,
-                                              int32_t source_bms_id) {
+                                              int32_t source_bms_id,
+                                              uint16_t source_handle) {
     if (set_name == nullptr || set_name[0] == '\0') return;
     // The peer gate lives INSIDE the witnessed function: a host with no
     // stamped listener (dedicated) plays nothing [orig: the
@@ -68,7 +77,10 @@ void FireSoundQueue::play_with_distance_delay(const char *set_name,
         // is dropped [orig: @ 0x527c47].
         return;
     }
-    push_ready(set_name, pos, source_bms_id);
+    // The near leg forwards the entity into the full-volume play [orig:
+    // @ 0x528f07]; the delayed slot above stored none.
+    push_ready(set_name, pos, source_bms_id,
+               audio::oneshot_sound_id(source_handle, source_bms_id));
 }
 
 
@@ -111,9 +123,10 @@ void FireSoundQueue::tick() {
         slot.countdown = static_cast<int32_t>(static_cast<uint32_t>(old) - 1u);
         if (old != 1) continue;
         // Flags bit2 plays as an interface set on a presenting peer. Positional
-        // slots use the recorded position. [orig: Sound_TickPendingSlots @ 0x529310]
-        if (!slot.interface_set || listener_valid_)
-            push_ready(slot.set_name.c_str(), slot.pos, slot.source_bms_id, slot.interface_set);
+        // slots use the recorded position and play with a NULL entity: no
+        // own-channel key [orig: Sound_TickPendingSlots @ 0x529310, the NULL
+        // entity @ 0x52937b]. push_ready carries the peer gate for both.
+        push_ready(slot.set_name.c_str(), slot.pos, slot.source_bms_id, 0, slot.interface_set);
         slot.active = false;
         slot.set_name.clear();
     }
@@ -207,9 +220,11 @@ void weapon_sound_publish(World &world, const Entity &owner,
                           const WeaponFsmDef &def, const WeaponFsmEvents &events) {
     if (!world.out.fire_sounds.listener_valid()) return;
     if (events.head_started)
-        world.out.fire_sounds.play_immediate(def.soundhead, owner.position, owner.bms_id);
+        world.out.fire_sounds.play_immediate(def.soundhead, owner.position, owner.bms_id,
+                                             owner.handle.packed);
     if (events.trailoff_started)
-        world.out.fire_sounds.play_immediate(def.soundtrailoff, owner.position, owner.bms_id);
+        world.out.fire_sounds.play_immediate(def.soundtrailoff, owner.position, owner.bms_id,
+                                             owner.handle.packed);
     if (events.fireloop_lifetime_ticks == 0) return;
     const Entity *source = &owner;
     if (owner.mount_type == SeatType::Gunner) {
@@ -231,8 +246,11 @@ void weapon_sound_publish(World &world, const Entity &owner,
 
 void fire_sound_on_spawn(World &world, const RoundSpawnParams &params) {
     FireSoundQueue &queue = world.out.fire_sounds;
-    // A host with no stamped listener presents nothing — the dedicated-server
-    // gate [orig: is_mp_session_peer @ 0x528e57].
+    // The dedicated-server gate is NOT here: retail tests is_mp_session_peer
+    // inside the plays (Sound_Play3DPositional @ 0x527cb3,
+    // Sound_PlayWithDistanceAttenuation @ 0x528e57), so a listener-less host
+    // still runs the adm arm's kick/heat replay below and push_ready readies
+    // nothing.
     // The local player's own fire keeps its action-slot presentation; the
     // shell self-filtered exactly this case before the move.
     // [orig: ActionSlot_ExecuteActionTick @ 0x541A70 routing]
@@ -277,11 +295,12 @@ void fire_sound_on_spawn(World &world, const RoundSpawnParams &params) {
             if (mounted && row_id == weapon_action::kRecoil)
                 slot.current = slot.next = weapon_action::kRecoil;
             const WeaponFsmAction &row = def->action_fsm.actions[row_id];
-            queue.play_immediate(row.soundset, pos, source_bms_id);
-            queue.play_immediate(row.soundsetend, pos, source_bms_id);
+            queue.play_immediate(row.soundset, pos, source_bms_id, params.owner.packed);
+            queue.play_immediate(row.soundsetend, pos, source_bms_id, params.owner.packed);
             WeaponFsmEvents events;
             weapon_fsm_replay_action(slot_def, slot, static_cast<int32_t>(world.logic_tick), events);
-            if (events.head_started) queue.play_immediate(slot_def.soundhead, pos, source_bms_id);
+            if (events.head_started)
+                queue.play_immediate(slot_def.soundhead, pos, source_bms_id, params.owner.packed);
         }
         if (mounted) slot.current = slot.next = weapon_action::kIdle;
         return;
@@ -294,7 +313,7 @@ void fire_sound_on_spawn(World &world, const RoundSpawnParams &params) {
     const AmmoTableEntry *ammo = world.tables.ammo.by_index(params.ammo_index);
     if (ammo == nullptr || ammo->ai_launch_set.empty()) return;
     queue.play_with_distance_delay(ammo->ai_launch_set.c_str(), params.origin,
-            source_bms_id);
+            source_bms_id, params.owner.packed);
 }
 
 } // namespace opennova::world

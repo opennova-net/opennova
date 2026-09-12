@@ -58,7 +58,7 @@ const std::string &empty_runtime_string() {
 } // namespace
 
 void ClientRuntime::reset_local_round_state() {
-    // [orig: Game_InitNewRound @0x4227ce..0x4227dc]
+    // [orig: Game_InitNewRound @0x4227ce..0x4227d4]
     deployed_ = true;
     if (view_.state().local_medic_reviving) {
         view_.state().local_medic_reviving = false;

@@ -69,7 +69,7 @@ opennova::inmatch::HostBringup Simulation::host_bringup() {
 	if (is_host_listening()) {
 		host_config = net_.host_session_config; // mission/player/spawn + game_type/mp_attributes from the UI
 		if (host_config.server_name.empty()) host_config.server_name = "OpenNova LAN Host";
-		host_config.max_players = net_.host_max_players; // the UI player cap (configure_host_session clamped 1..65)
+		host_config.max_players = net_.host_max_players; // the UI player cap as configure_host_session published it (host_player_slot_limit)
 	} else {
 		host_config.server_name = "SINGLEPLAYERGAME";
 		host_config.max_players = 1;
@@ -441,7 +441,8 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	config.spawn_z = in.spawn_z;
 	config.spawn_names = in.spawn_names;
 	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
-	// loopback fold at bring-up; max_players is the lobby-advertised cap, clamped to the witnessed 1..65.
+	// loopback fold at bring-up; max_players is the session-list-advertised cap as the engine's
+	// host_player_slot_limit publishes it (the dedicated slot added, the 65 ceiling, no lower clamp).
 	net_.host_serve_and_play = p_options->get_serve_and_play();
 	net_.host_max_players = opennova::inmatch::host_player_slot_limit(
 			p_options->get_max_players(), net_.host_serve_and_play);

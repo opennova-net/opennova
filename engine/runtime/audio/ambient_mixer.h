@@ -58,6 +58,18 @@ int32_t oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,
                              int64_t falloff_q16, int32_t member_vol,
                              int32_t clamp_vol);
 
+// The entity-attached keep-alive as the slot stores it: the registration copies
+// the caller's lifetime into a 16-bit slot word and the mix reads it back
+// UNSIGNED, so the weapon path's sign-extended kick byte (0x80 and up) registers
+// a 65408..65535-tick loop, not a dead one; only a word of exactly 0 at a
+// non-fresh mix entry retires the slot [orig: SoundEmitter_RegisterSetLayers
+// @0x52846D..0x528471 (movzx word store); SoundEmitter_UpdateAndMixTop8
+// @0x528529 movzx load, @0x52852D zero test, @0x52853C..0x52854D unsigned
+// delta compare and decrement].
+inline constexpr int32_t emitter_lifetime_word(int32_t lifetime_ticks) {
+    return static_cast<int32_t>(static_cast<uint16_t>(lifetime_ticks));
+}
+
 // The emitter volume byte for a region crossfade blend: the rounded register word's
 // high byte, with 0xFFFF as the full-blend sentinel — net (0xFFFF * blend_q16 +
 // 0x8000) >> 24 [orig: Entity_UpdateEnvSoundEmitter @ 0x4a81c6; the mix reads slot
@@ -142,6 +154,7 @@ public:
     // for exactly that source+lane [orig: SoundEmitter_RegisterSetLayers @ 0x528340;
     // SoundEmitter_ClearByEntityAndSlot @ 0x527a50]. `volume_q8_8` is the original
     // registration word; its high byte feeds the member-volume curve.
+    // `lifetime_ticks` lands as the retail 16-bit word (emitter_lifetime_word).
     // A source pose belongs to the entity rather than to one lane. Updating it
     // moves every still-live lane without extending any lane's keep-alive.
     void update_emitter_source(uint64_t source_spawn_id, const float pos[3],

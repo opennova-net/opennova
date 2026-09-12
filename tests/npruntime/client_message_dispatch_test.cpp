@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <string>
+#include <variant>
 #include <vector>
 
 using namespace opennova;
@@ -211,10 +212,50 @@ bool listen_client_sound_gates_and_consumption() {
     return true;
 }
 
+// The 0x08 flag pair is projected from the LIVE state (the deploy screen), so
+// a flip moves ClientState.revision like every other decoded-state write, and
+// a repeat of the same flags does not. Deliveries are compared as deltas so a
+// per-frame bump elsewhere cannot mask the edge.
+bool session_config_flag_flips_move_the_state_revision() {
+    FramedClient wire;
+    std::vector<uint8_t> config(51, 0);
+    CHECK(wire.deliver({make_protocol_message(s2c::SESSION_CONFIG, config)})); // warm-up frame
+    const auto before = wire.client.view().revision();
+    CHECK(wire.deliver({make_protocol_message(s2c::SESSION_CONFIG, config)}));
+    const auto same = wire.client.view().revision();
+    CHECK(!wire.client.state().permanent_death && !wire.client.state().spectators_allowed);
+    config[48] = 0xA0; // bitflags 0x8000 permanent death | 0x2000 spectators
+    CHECK(wire.deliver({make_protocol_message(s2c::SESSION_CONFIG, config)}));
+    const auto flipped = wire.client.view().revision();
+    CHECK(wire.client.state().permanent_death && wire.client.state().spectators_allowed);
+    CHECK(flipped - same == (same - before) + 1);
+    CHECK(wire.deliver({make_protocol_message(s2c::SESSION_CONFIG, config)}));
+    CHECK(wire.client.view().revision() - flipped == same - before);
+    return true;
+}
+
+// A 0x6D body defaults each absent field and still dispatches (the decoder
+// cannot fail), so a short body never counts as malformed.
+// [orig: NapiNPClientMsg_HandleEntityDeath @0x430C50]
+bool tracked_player_voice_defaults_absent_fields_and_dispatches() {
+    FramedClient wire;
+    wire.client.view().set_mp_session(true);
+    const auto malformed = wire.client.view().malformed_bodies();
+    CHECK(wire.deliver({make_protocol_message(s2c::TRACKED_PLAYER_VOICE, std::vector<uint8_t>{9})}));
+    CHECK(wire.client.view().malformed_bodies() == malformed);
+    const auto commands = wire.client.view().drain_effect_commands();
+    CHECK(commands.size() == 1);
+    const auto *voice = std::get_if<TrackedPlayerVoice>(&commands[0]);
+    CHECK(voice != nullptr && voice->event == 9 && voice->player_index == 0 && voice->location == 0);
+    return true;
+}
+
 } // namespace
 
 int main() {
     bool ok = session_config_does_not_reinterpret_earlier_messages();
+    ok = session_config_flag_flips_move_the_state_revision() && ok;
+    ok = tracked_player_voice_defaults_absent_fields_and_dispatches() && ok;
     ok = ceasefire_and_chat_reach_client_in_wire_order() && ok;
     ok = full_entity_repair_replaces_the_native_lifetime() && ok;
     ok = repair_after_empty_slot_has_a_new_generation() && ok;

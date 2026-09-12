@@ -150,6 +150,11 @@ bool HostSessionOptions::apply_dialog_control(const String &p_control, const Str
 			serve_and_play_, to_std(p_control), to_std(p_value));
 }
 
+String HostSessionOptions::dialog_value(const String &p_control) const {
+	return to_gd(opennova::inmatch::host_dialog_value(config_, max_players_,
+			serve_and_play_, to_std(p_control)));
+}
+
 Ref<HostSessionOptions> HostSessionOptions::duplicate_options() const {
 	Ref<HostSessionOptions> copy;
 	copy.instantiate();
@@ -236,6 +241,7 @@ void HostSessionOptions::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("to_json_value"), &HostSessionOptions::to_json_value);
 	ClassDB::bind_static_method("HostSessionOptions", D_METHOD("dialog_controls"), &HostSessionOptions::dialog_controls);
 	ClassDB::bind_method(D_METHOD("apply_dialog_control", "control", "value"), &HostSessionOptions::apply_dialog_control);
+	ClassDB::bind_method(D_METHOD("dialog_value", "control"), &HostSessionOptions::dialog_value);
 	ClassDB::bind_method(D_METHOD("duplicate_options"), &HostSessionOptions::duplicate_options);
 	ClassDB::bind_method(D_METHOD("get_player_slot_limit"), &HostSessionOptions::get_player_slot_limit);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "player_slot_limit"), "", "get_player_slot_limit");

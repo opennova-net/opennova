@@ -6,13 +6,13 @@
 
 namespace opennova::anim {
 
-// [orig: AnimChannel_InitFromData @0x410560, delta store @0x41058E]
+// [orig: AnimChannel_InitFromData @0x410560, delta store @0x4105BA]
 ClipTimeline::ClipTimeline(uint32_t fps, uint32_t frames, bool loop)
 	: fps_(fps), frames_(frames), loop_(loop),
 	  delta_(frames ? static_cast<float>(double(fps) / io::kTicksPerSecondInt / frames)
 	                : 0.0f) {}
 
-// [orig: AnimChannel_AdvancePlayback @0x40B140, clock add @0x40B153]
+// [orig: AnimChannel_AdvancePlayback @0x40B140, clock add @0x40B156, compare @0x40B15E]
 bool ClipTimeline::step(float &time) const {
 	// Compare the x87 sum before the float store rounds it. Loop subtraction
 	// also precedes the store; a one-shot parks and retains its capsule.
@@ -44,6 +44,13 @@ float ClipTimeline::normalized_at(int32_t ticks) const {
 	float time = checkpoints_[static_cast<size_t>(block)];
 	for (int32_t i = block * kCheckpointTicks; i < ticks; ++i) step(time);
 	return time;
+}
+
+// [orig: AnimChannel_AdvancePlayback @0x40B193..0x40B1B1 -- the loop wrap
+// overwritten by the 0.99999 park when the end-notify is armed]
+float ClipTimeline::normalized_at(int32_t ticks, int32_t armed_boundary) const {
+	if (loop_ && delta_ > 0.0f && armed_boundary >= 0 && ticks == armed_boundary) return kPark;
+	return normalized_at(ticks);
 }
 
 double ClipTimeline::frame_at(int32_t ticks) const {

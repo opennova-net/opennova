@@ -13484,10 +13484,110 @@ custom cross-bound handlers; that pre-existing D-WPN-1 boundary remains open.
 [orig: Anim_InitActions @ 0x541FA0; ActionDef_ParseScriptLine @ 0x4023C0;
 WeaponAction_Fire @ 0x542B10; ActionSlot_FinishActivePhase @ 0x53F7B0]
 
+### Host admission, session split, and telemetry witnesses (2026-09-11)
+
+The 0x42 ClientAuth server gates answer a CR=0 0x82 in a fixed order after
+the silent NVS/PN/PG/PV1 identity envelope: HK mismatch JFC 3, server
+password 4, PV2 7, empty NA 5, the protocol's reject-new-connections byte
+(+0x1F7) 6, and the CU chunk bounds checked during the TLV walk (a chunk of
+2048 bytes or more 9, a 65th chunk 10). The validate callback then rejects
+with family 14: join lock reason 2, ban reason 3, full 4, or 5 when
+spectator-only slots exist. The ban operand is the connection's UDP source
+(conn+0x30), stored from the datagram address at connection create; the SIP
+TLV lands in conn+0x38 and session_keys+0x158 and is compared by nothing.
+Ban entries use the LE octet packing a | b<<8 | c<<16 | d<<24, so
+PeerAddr::ip compares directly. Reimpl: handle_client_join (the ladder, then
+join_locked and banned_join_addresses against peer.ip).
+[orig: NapiNPProtocol_HandleClientJoin @0x62b750 (3 @0x62bde0, 4 @0x62be2d,
+7 @0x62be55, 5 @0x62be88, 6 @0x62be8f, 9 @0x62c344, 10 @0x62c359, the source
+store @0x62bf28, the SIP stores @0x62bf85/@0x62bf91);
+CNapiNetwork_ValidateJoinRequest @0x4c61b0 (14/2 @0x4c61da, the conn+0x30
+compare @0x4c6203..0x4c6217, 14/3 @0x4c625a); BanList_ParseIPEntry @0x4fd5c9]
+
+The host dialog reads every edit with a bare strtol and clamps MAX_PLAYERS at
+64 only; the session apply publishes cap (+1 dedicated) with a 65 ceiling
+tested on the pre-increment cap for networkConnectType 1, the only value that
+field ever holds, so a blank cap publishes 0 (1 dedicated) and a dedicated 65
+publishes 66. Before the screen shows, the dialog init populates every host
+control from the config: GAME_NAME, SERVER_PASSWORD, SERVER_MESSAGE, BLUE_PW,
+RED_PW and SPECTATOR_PW by SetText; the numeric edits by SetIntValue
+(MAX_PLAYERS clamped to 64 first, its widget max set to 64); the spins by
+SelectItemByValue, with TEAM_FF, FRIENDLY_TAG, FF_WARNING and TRACERS
+inverted from mp_attributes bits 0x200/0x400/0x8/0x1, TEAM_CHOOSE and
+CLAYMORE_PREF direct from 0x4/0x8000, ALLOW_SPECTATORS as maxSpectators != 0,
+GAME_LOCATION the first item whose name shares the country's first three
+characters case-insensitively, and SERVER_PUNKBUSTER 0 plus disabled without
+pb\pbcl.dll. Config_SetDefaults seeds the name from the Menu/UNTITLED
+gametext ("!Untitled"), clamps maxPlayers to 1..64, and sets connection
+speed 5 and allowable friendly kills 3. Reimpl: host_player_slot_limit,
+host_dialog_value (HostSessionOptions.dialog_value), the MpMenuCompanion
+host-control seed.
+[orig: HostDialog_ReadSettings @0x555940 (CEditWnd_GetIntValue @0x6575d0;
+the 64 clamp @0x555c25..0x555c2d); apply_session_settings_to_globals
+@0x551b26..0x551b48; UI_PopulateHostSettingsFromConfig @0x555fe0 (name
+@0x556015, GAME_LOCATION @0x5560fc, PunkBuster @0x556157/@0x556160,
+MAX_PLAYERS @0x556328/@0x556358/@0x55635f, TEAM_FF @0x5563e1,
+ALLOW_SPECTATORS @0x55651a), called from init_host_settings_dialog
+@0x5589c7; Config_SetDefaults @0x54d030 (name @0x54d1a1, maxPlayers
+@0x54d0a1..0x54d0b0, networkConnectType @0x54d1d4, nwiSpType @0x54d234,
+allowableFriendlyKills @0x54d2ee)]
+
+SplitAtLength creates the tail with struct bit 4 (wire END), clears bit 2
+(wire CONT) on it, ORs bit 2 into the head, and zeroes both expiry parameters
+of the original so every piece retains until ACK. Its only caller splits the
+queue head and dequeues it in the same pass, so the split input never
+carries CONT. The packet charge for the shortened head keeps the ORIGINAL
+length-field size even when the wire form shrinks to LEN8. Reimpl:
+split_protocol_message_to_fill; the tail keeps CONT only for the port's own
+re-queued FIRST/MID runs.
+[orig: NapiNPMessage_SplitAtLength @0x628350 (tail @0x62839b, head
+@0x628412, params @0x628419/@0x62841c); CNapiNPConnection_BuildOutgoingPackets
+@0x6284ee (the charge @0x6285c2)]
+
+The resend receiver latches its callback only when a requested dword is
+nonzero; a zero-only list still mints the next fresh packet, and a body with
+fewer than four bytes after the key returns before the loop. The server
+callback sets entity+89876, the byte the next 0x0A budget halving reads.
+Reimpl: nak_backoff_pending.
+[orig: NapiNP_HandleResendList @0x623800 (the latch @0x6239aa, the gate
+@0x6239ef, the early return @0x623974); sub_4C62A0 @0x4c62b8]
+
+Server_TickUpdate decrements each player slot's +89816 countdown while it is
+positive and, when it is zero for a slot in state 6 while in session with the
+spawn gate clear, resets it to 62 and sends S2C 0x57 carrying GetTickCount
+with lifetime 62 and mask 2 to that player. Reimpl: rtt_request_countdown.
+[orig: Server_TickUpdate @0x51e3bb..0x51e450]
+
+Retention lifetimes: the medic request 0x14 is sent twice with lifetime 310
+(the medic-filtered broadcast, then the mask 0x20 requester copy); the
+reload 0x49 is sent with mask 0xC0 lifetime 1, then mask 0x20 lifetime 0.
+[orig: Server_BroadcastMedicRequest @0x5154c8..0x51550b;
+NapiNPServerMsg_HandleReloadRequest @0x514ea2..0x514ee3]
+
+Six reporters build METPROTOCOL 1 text blocks and encrypt strlen bytes (no
+NUL) with Crypto_EncryptBuffer under the key "1010101", the NapiNP cipher
+chain with multiplier 0x04B05731, before CNapiNetwork_SendUDPPacket to the
+gate: SERVER, PLAYER, ID, SERVERMISSION, PLAYERMISSION, and PING. PLAYER's
+whole locale block, both GLANG/GTZB pairs, is gated on g_is_dedicated_server
+alone. PING runs from the join state machine only while the gate reply's
+METPING minutes are positive: LABEL, GCC, GV, the dedicated-only
+COUNTRYNAME/LANG/TZB, then per sorted ping entry a bare `\tENTRY` row,
+`\t\tBIP1..BIP4` and `\t\tMS` rows, and `\tENDENTRY`, appended only while the
+buffer is under 0x8000 bytes. Reimpl: gate_metrics_decode (entries) and the
+novaworld_server gate listener log; the service advertises no METPING, so
+PING stays latent.
+[orig: Score_RecordEvent @0x4FA4B0; Server_SendPlayerMetricsToGate @0x4FAA30
+(@0x4fae5f); Server_SendMetricsToGate @0x4FB0A0; Server_SendMissionMetrics
+@0x4FB3A0; Server_SendPlayerMissionMetrics @0x4FB8F0;
+Server_SendPingMetricsToGate @0x511BF0 (rows @0x511f20..0x512040, cipher
+@0x5120ab, send @0x5120ce); Crypto_EncryptBuffer @0x437510;
+CNapiGateManager_ProcessResponse @0x4cf297;
+MultiPlayer_JoinSessionStateMachine @0x56a50b]
+
 ### Updated follow-up dispositions (2026-09-11)
 
 | ID | Status | Scope |
 | --- | --- | --- |
-| D-WPN-3 | FIXED | FARP/ground-chain, water/swimming, clip and ammo cost gates plus Finish fire-loop kick condition are ported. |
+| D-WPN-3 | FIXED | FARP/ground-chain, water/swimming, clip and ammo cost gates plus Finish fire-loop kick condition are ported; the clip gate's def+0xDC bucket-pool read (`@0x541c6d..0x541c89` -> `sub_5405F0`) is folded into `slot.clip` and rides D-WPN-2. |
 | D-WPN-6 | OPEN, narrowed | Pure joiners pump remote borrowed slots and unoccupied hot pool-one slots once. The authority's general personal-slot coverage is separate from this receive replay port. |
-| D-NET-171 | OPEN, narrowed | The 0x42 password, key, app/version, index/CU, and identity checks now use the appropriate rejection replies, as do represented game-layer admission settings. Side/squad password inputs (D-NET-167) and cookie/PunkBuster prerequisites remain wider admission work. |
+| D-NET-171 | OPEN, narrowed | The 0x42 password, key, app/version, index/CU, and identity checks now use the appropriate rejection replies, as do represented game-layer admission settings; the ladder, the validate callback's 14/2 lock and 14/3 source-address ban, and the split/resend/retention witnesses are recorded in the host admission section above. Side/squad password inputs (D-NET-167) and cookie/PunkBuster prerequisites remain wider admission work. |

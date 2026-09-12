@@ -178,8 +178,8 @@ void GateListener::run_loop() {
 		plain.resize(inner_len);
 		GateMetricsReport metrics;
 		if (gate_metrics_decode(plain.data(), plain.size(), metrics)) {
-			std::printf("[gate] metrics block=%s fields=%zu\n",
-				metrics.block.c_str(), metrics.fields.size());
+			std::printf("[gate] metrics block=%s fields=%zu entries=%zu\n",
+				metrics.block.c_str(), metrics.fields.size(), metrics.entries.size());
 			continue;
 		}
 

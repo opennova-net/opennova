@@ -1467,6 +1467,10 @@ public:
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
 	// ONE conversion both cameras use (engine: runtime/world/player_view.cpp).
 	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect, int p_mode = -1);
+	// The first launch's seed of the aspect mode (the display_16x9 cfg word)
+	// from the primary desktop's size: 1 past the 1.34 ratio line, else 0
+	// (engine: runtime/renderer/aspect_ratio.h).
+	static int fresh_profile_aspect_mode(int p_width, int p_height);
 	// The presentation frame's view forward for mission-euler angles, the aim
 	// ray's far point and the binocular rangefinder readout — the engine's
 	// world/presentation_frame.h (no presenter spells the swizzle).
@@ -2342,6 +2346,9 @@ public:
 	// projects and feeds the compiler's element natively. NOT ClassDB-bound.
 	// False without a kernel or a local player.
 	bool fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const;
+	// The radio-request icon's viewer gate over the local player (world::
+	// friendly_tag_radio_request_viewer): a driver/controller seat or an own latch.
+	bool local_player_radio_request_icon_viewer() const;
 
 	// Parse weapon.def from the resource root and install the armory table on the sim world
 	// (world::World::weapons) — the server-side source for the 0x2F/0x5A loadout service, the

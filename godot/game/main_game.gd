@@ -461,7 +461,7 @@ func is_dev_tools_open() -> bool:
 ## debug pick list (selecting it in the F3 Entities window), with a brief toast.
 func pick_at_crosshair() -> void:
 	_pick_session.pick_at_crosshair(_world.get_sim() if _world != null else null,
-			_camera, _hud if _hud != null else self)
+			_camera, _player_presenter, _hud if _hud != null else self)
 
 
 ## F11. ImGui multi-viewport must already be off at the NewFrame that first

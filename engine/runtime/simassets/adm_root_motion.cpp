@@ -60,7 +60,10 @@ int AdmRootMotion::parse_adm(const opennova::ResourceIndex *index,
 		if (index->read_file(bad_name, bytes) && !bytes.empty() &&
 		    bad_parse_buffer(bytes.data(), bytes.size(), &bf) == 0) {
 			// Fence-post: frame_count+1 root records [orig: 0x40b230 lerps rec[i]..rec[i+1]].
-			if (bf.fps > 0 && bf.frame_count > 0 && bf.num_events == static_cast<size_t>(bf.frame_count) + 1) {
+			// No fps gate: the channel delta is fps/62/frames with no fps test, so an
+			// fps of 0 is a channel frozen at frame 0 with live capsule extents, not a
+			// missing clip [orig: AnimChannel_InitFromData @0x41058E..0x4105BA].
+			if (bf.frame_count > 0 && bf.num_events == static_cast<size_t>(bf.frame_count) + 1) {
 				t.frame_count = static_cast<int32_t>(bf.frame_count);
 				t.loop = (bf.flags & 0x1u) != 0;
 				t.clock = anim::ClipTimeline(bf.fps, bf.frame_count, t.loop);
@@ -195,13 +198,16 @@ int AdmRootMotion::variant_count(int adm_id, int state_id) const {
 	return it->second.empty() ? 1 : static_cast<int>(it->second.size());
 }
 
-double AdmRootMotion::position_of(const Track &track, int32_t phase_ticks) {
-	return std::clamp(track.clock.frame_at(phase_ticks), 0.0, double(track.frame_count));
+double AdmRootMotion::position_of(const Track &track, int32_t phase_ticks,
+                                  int32_t armed_boundary) {
+	const double frame = double(track.clock.normalized_at(phase_ticks, armed_boundary)) *
+	                     track.frame_count;
+	return std::clamp(frame, 0.0, double(track.frame_count));
 }
 
 float AdmRootMotion::sample(const Track &track, const std::vector<float> &channel,
-                            int32_t phase_ticks) {
-	const double position = position_of(track, phase_ticks);
+                            int32_t phase_ticks, int32_t armed_boundary) {
+	const double position = position_of(track, phase_ticks, armed_boundary);
 	const size_t frame = std::min(static_cast<size_t>(position),
 	                             static_cast<size_t>(track.frame_count - 1));
 	const double fraction = position - frame;
@@ -210,9 +216,10 @@ float AdmRootMotion::sample(const Track &track, const std::vector<float> &channe
 	                          channel[frame + 1] * fraction);
 }
 
-uint32_t AdmRootMotion::sample_trigger(const Track &track, int32_t phase_ticks) {
+uint32_t AdmRootMotion::sample_trigger(const Track &track, int32_t phase_ticks,
+                                       int32_t armed_boundary) {
 	if (track.clock.stopped_at(phase_ticks)) return 0;
-	return track.trigger[static_cast<size_t>(position_of(track, phase_ticks))];
+	return track.trigger[static_cast<size_t>(position_of(track, phase_ticks, armed_boundary))];
 }
 
 int AdmRootMotion::scan_triggers(int adm_id, int state_id, int32_t from_phase,
@@ -255,6 +262,12 @@ bool AdmRootMotion::advance(int adm_id, int state_id, int32_t &phase_ticks,
 bool AdmRootMotion::advance_variant(int adm_id, int state_id, int variant,
                                     int32_t &phase_ticks,
                                     opennova::world::RootMotionFrame &out) {
+	return advance_armed(adm_id, state_id, variant, phase_ticks, -1, out);
+}
+
+bool AdmRootMotion::advance_armed(int adm_id, int state_id, int variant,
+                                  int32_t &phase_ticks, int32_t armed_boundary,
+                                  opennova::world::RootMotionFrame &out) {
 	const Track *track = resolve_track(adm_id, state_id, variant);
 	if (track == nullptr) {
 		return false;
@@ -262,26 +275,28 @@ bool AdmRootMotion::advance_variant(int adm_id, int state_id, int variant,
 	++phase_ticks;
 
 	// Retail normalized playhead, wrapped (loop) or parked just below the end
-	// [orig: AnimChannel_AdvancePlayback parks t at 0.99999 on one-shot clip end].
+	// [orig: AnimChannel_AdvancePlayback parks t at 0.99999 on one-shot clip end
+	// @0x40B17C..0x40B185, and on an ARMED loop wrap @0x40B1A2..0x40B1B1 -- the
+	// latter without the 0x10000 stop, so its XYZ and trigger still sample].
 	out = opennova::world::RootMotionFrame{};
 	if (!track->clock.stopped_at(phase_ticks)) {
-		out.dx = static_cast<int32_t>(sample(*track, track->fwd, phase_ticks) * 32768.0f);
-		out.dy = static_cast<int32_t>(sample(*track, track->lat, phase_ticks) * 32768.0f);
+		out.dx = static_cast<int32_t>(sample(*track, track->fwd, phase_ticks, armed_boundary) * 32768.0f);
+		out.dy = static_cast<int32_t>(sample(*track, track->lat, phase_ticks, armed_boundary) * 32768.0f);
 		// Raw vertical fallback. The motor overwrites this with blended-bottom history
 		// whenever anim_slot[19] is live; reset-state families clear that history first.
-		out.dz = static_cast<int32_t>(sample(*track, track->vert, phase_ticks) * 32768.0f);
+		out.dz = static_cast<int32_t>(sample(*track, track->vert, phase_ticks, armed_boundary) * 32768.0f);
 	}
 	// Absolute capsule extents for THIS frame — the on-foot ground settle floors pos[2] to
 	// ground + capsule_bottom (origin->feet) [orig: AnimMap_UpdateEntity @0x40b82f
 	// out_transform[3]=bottom*65536, out_transform[4]=top*65536+0x2000; consumed by
 	// tick_infantry's ground clamp — docs/world/world-wac-ai-re.md D-INF-6].
 	out.capsule_bottom =
-			static_cast<int32_t>(sample(*track, track->bottom, phase_ticks) * 65536.0f);
+			static_cast<int32_t>(sample(*track, track->bottom, phase_ticks, armed_boundary) * 65536.0f);
 	out.capsule_top =
-			static_cast<int32_t>(sample(*track, track->top, phase_ticks) * 65536.0f) + 0x2000;
+			static_cast<int32_t>(sample(*track, track->top, phase_ticks, armed_boundary) * 65536.0f) + 0x2000;
 	// Event bits from the lower keyframe of the current position [orig: trigger unlerped;
 	// consumers sample on alternating ticks, so the per-frame repeat is faithful].
-	out.events = sample_trigger(*track, phase_ticks);
+	out.events = sample_trigger(*track, phase_ticks, armed_boundary);
 	return true;
 }
 

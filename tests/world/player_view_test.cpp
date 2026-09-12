@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <runtime/renderer/aspect_ratio.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/player_view.h>
@@ -298,6 +299,69 @@ void test_fov_vertical_conversion() {
     // Wider view -> smaller vertical fov, monotonically.
     CHECK(fov_vertical_from_horizontal_deg(80.0f, 16.0f / 9.0f) <
           fov_vertical_from_horizontal_deg(80.0f, 4.0f / 3.0f));
+}
+
+// [orig: Render_SetAspectRatioMode @0x58d8a7 -> Render_SetViewAndProjectionMatrices
+//  @0x58d971..0x58d9de] The frame's projection keeps the HORIZONTAL fov across the
+// real surface in every mode; the vertical half-extent follows the SELECTED
+// ratio; the pass is the aspect-1/selected perspective stretched selected/(h/w)
+// onto the surface. (Pre-fix the shell widened the horizontal fov instead.)
+void test_view_projection_retail_stretch() {
+    // Mode 0 (4:3) on a 16:9 surface -- retail's stock profile on a wide monitor.
+    const ViewProjection wide = view_projection(80.0f, 0, 1920, 1080);
+    CHECK(wide.fov_h_deg == 80.0f);
+    CHECK(std::fabs(wide.fov_v_deg - 64.36644f) < 1e-3f); // the 4:3 vertical, not 16:9's
+    CHECK(std::fabs(wide.aspect - 4.0f / 3.0f) < 1e-5f);
+    CHECK(std::fabs(wide.scale_y - 0.75f / 0.5625f) < 1e-5f);
+    CHECK(wide.target_w == 1920 && wide.target_h == 1440); // width kept, height grown
+    // Mode 1 (16:10) on 1920x1200: scaleY 0.96 and the catalog's 53.4468 degrees.
+    const ViewProjection tall = view_projection(80.0f, 1, 1920, 1200);
+    CHECK(std::fabs(tall.scale_y - 0.96f) < 1e-5f);
+    CHECK(std::fabs(tall.fov_v_deg - 53.4468f) < 1e-3f);
+    CHECK(tall.target_w == 2000 && tall.target_h == 1200); // height kept, width grown
+    // Mode 2 (16:9) on a 16:9 surface and the native mode: no stretch, the
+    // surface itself, the vertical fov of the surface's own aspect.
+    const ViewProjection matched = view_projection(80.0f, 2, 1920, 1080);
+    CHECK(matched.scale_y == 1.0f);
+    CHECK(matched.target_w == 1920 && matched.target_h == 1080);
+    CHECK(std::fabs(matched.fov_v_deg - fov_vertical_from_horizontal_deg(80.0f, 16.0f / 9.0f)) < 1e-5f);
+    const ViewProjection native = view_projection(80.0f, -1, 1920, 1080);
+    CHECK(native.scale_y == 1.0f && native.fov_v_deg == matched.fov_v_deg);
+    CHECK(std::fabs(native.aspect - 16.0f / 9.0f) < 1e-5f);
+    // The scoped fov rides the same projection (80/zoom horizontal, mode 0 vertical).
+    const ViewProjection scoped = view_projection(20.0f, 0, 1920, 1080);
+    CHECK(scoped.fov_h_deg == 20.0f);
+    CHECK(std::fabs(scoped.fov_v_deg - 15.0668f) < 1e-3f);
+    // A sizeless surface degrades to the identity aspect.
+    const ViewProjection none = view_projection(80.0f, 0, 0, 0);
+    CHECK(none.scale_y == 1.0f && none.fov_v_deg == 80.0f);
+
+    // The FP viewmodel pass shares scaleY [orig: @0x4dee7f / @0x58f6b0]: the
+    // focal ratio is the ratio of the horizontal half-tangents, aspect-invariant.
+    CHECK(viewmodel_focal_ratio(80.0f, 80.0f) == 1.0f);
+    CHECK(std::fabs(viewmodel_focal_ratio(80.0f, 60.0f) - 1.45330f) < 1e-4f);
+    CHECK(std::fabs(viewmodel_focal_ratio(20.0f, 80.0f) - 0.21014f) < 1e-4f);
+    CHECK(viewmodel_focal_ratio(80.0f, 0.0f) == 1.0f);
+}
+
+// [orig: Game_RunVideoTestDialog @0x53ed3e..0x53ed6b] The first launch's video
+// test seeds the cfg's display_16x9 word from the primary desktop: 1 (the
+// widescreen row) when width / height exceeds the single-precision 1.34, else 0,
+// as the strict x87 compare -- the same word a saved profile then reads back.
+void test_fresh_profile_aspect_seed() {
+    using opennova::renderer::fresh_profile_aspect_mode;
+    CHECK(fresh_profile_aspect_mode(1024, 768) == 0);  // 4:3
+    CHECK(fresh_profile_aspect_mode(1280, 1024) == 0); // 5:4
+    CHECK(fresh_profile_aspect_mode(1920, 1080) == 1); // 16:9
+    CHECK(fresh_profile_aspect_mode(1920, 1200) == 1); // 16:10
+    CHECK(fresh_profile_aspect_mode(1366, 1024) == 0); // 1.334: under the line
+    CHECK(fresh_profile_aspect_mode(1340, 1000) == 0); // 1.34 exactly: not past it
+    CHECK(fresh_profile_aspect_mode(1341, 1000) == 1); // the first ratio past it
+    // The literal is flt_7D15AC, single precision (1.34000003...): a quotient
+    // between the double 1.34 and it stays under the line.
+    CHECK(fresh_profile_aspect_mode(134000001, 100000000) == 0);
+    // The jnp form drops an unordered compare to 0: a sizeless surface.
+    CHECK(fresh_profile_aspect_mode(0, 0) == 0);
 }
 
 void test_view_bias_blend() {
@@ -981,6 +1045,8 @@ int main() {
     test_binoculars_effective_state_and_fov();
     test_nvg_toggle_gain_and_first_person_visibility();
     test_fov_vertical_conversion();
+    test_view_projection_retail_stretch();
+    test_fresh_profile_aspect_seed();
     test_view_bias_blend();
     test_input_dispatch_gates();
     test_toggle_latch_refusal_and_inset();

@@ -596,10 +596,17 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("script_catalogs");
         wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
         world.tables.sound_sets = &script_sound_catalog;
-        std::vector<uint8_t> profile_bytes;
-        if (files_.read_file("SndProf.def", profile_bytes))
-            world.tables.sound_profiles.parse(
-                    reinterpret_cast<const char *>(profile_bytes.data()), profile_bytes.size());
+        // SndProf.def -> the footstep/foley/landing/scream slot table. The
+        // parse appends, so it runs only over an EMPTY table: a table the
+        // embedder filled before the boot (Simulation::set_sound_profiles,
+        // the tests/tools override) wins. [orig: SoundProfile_LoadAll
+        // @0x527490 from Game_InitSubsystems]
+        if (world.tables.sound_profiles.empty()) {
+            std::vector<uint8_t> profile_bytes;
+            if (files_.read_file("SndProf.def", profile_bytes))
+                world.tables.sound_profiles.parse(
+                        reinterpret_cast<const char *>(profile_bytes.data()), profile_bytes.size());
+        }
         particle::EffectSceneConfig effects_config;
         wac::load_script_effect_catalog(files_, script_effect_catalog, &effects_config);
         auto effects = std::make_shared<particle::EffectScene>();

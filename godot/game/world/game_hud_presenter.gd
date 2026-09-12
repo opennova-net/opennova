@@ -24,7 +24,7 @@ const HudTextTables := preload("res://game/world/hud_text_tables.gd")
 const LfpPanelPresenterScript := preload("res://game/world/lfp_panel_presenter.gd")
 
 var _world: GameWorld = null
-var _player_presenter: LocalPlayerPresenter = null  # reserved for the weapon-round anchors
+var _player_presenter: LocalPlayerPresenter = null  # the aim point + the frame's projection
 var _ui_parent: Node = null
 # PlayerOptions seeds this before the lazy native HUD exists; it survives
 # teardown so the next mission build uses the same process-lifetime choice.
@@ -644,10 +644,23 @@ func _resolve_waypoint_name(name_id: int) -> String:
 	return name
 
 
+# The projection the HUD projects world points through (the attach labels, the
+# friendly tags): the local player presenter's frame projection -- while an
+# aspect mode draws through its stretched target, the target camera's, whose
+# pixels the blit stretches over the surface the overlay draws on; the play
+# camera then carries only a CULLING SUPERSET of the frustum and would land a
+# label off on one axis (LocalPlayerPresenter.view_projection) -- else the
+# play camera's own. Public as the ADR 0018 read seam.
+func hud_view_projection(camera: Camera3D) -> Projection:
+	if _player_presenter != null and _player_presenter.camera() != null:
+		return _player_presenter.view_projection()
+	return camera.get_camera_projection()
+
+
 # The floating attach labels: the sim's selection (distance/LOS/occupancy/nearest,
-# armory-zone mode) projected through the play camera to overlay pixels with the
-# resolved label text — the overlay's own fill (HudOverlay.set_attach_labels
-# carries the witness); no camera clears the labels.
+# armory-zone mode) projected through the frame's projection (hud_view_projection)
+# to overlay pixels with the resolved label text — the overlay's own fill
+# (HudOverlay.set_attach_labels carries the witness); no camera clears the labels.
 func _apply_attach_labels() -> void:
 	if _game_hud == null:
 		return
@@ -657,7 +670,7 @@ func _apply_attach_labels() -> void:
 	if camera == null:
 		_game_hud.set_attach_labels(Transform3D.IDENTITY, Projection.IDENTITY, null, null)
 		return
-	_game_hud.set_attach_labels(camera.global_transform, camera.get_camera_projection(),
+	_game_hud.set_attach_labels(camera.global_transform, hud_view_projection(camera),
 			Strings.get_table(Strings.TABLE_GAMETEXT), sim)
 
 
@@ -669,9 +682,9 @@ func get_game_hud() -> HudOverlay:
 
 
 # The overhead friendly tags (D-HUD-20): the sim's pool-0 gather projected
-# through the play camera with the environment's live fog distance — the
-# overlay's own fill (HudOverlay.set_friendly_tags carries the witness); no
-# camera clears the tags.
+# through the frame's projection (hud_view_projection) with the environment's
+# live fog distance — the overlay's own fill (HudOverlay.set_friendly_tags
+# carries the witness); no camera clears the tags.
 func _apply_friendly_tags() -> void:
 	if _game_hud == null:
 		return
@@ -686,9 +699,11 @@ func _apply_friendly_tags() -> void:
 	if camera == null:
 		_game_hud.set_friendly_tags(false, Transform3D.IDENTITY, Projection.IDENTITY,
 				fog_distance, null)
+		_game_hud.set_radio_request_icon_viewer(false)
 		return
-	_game_hud.set_friendly_tags(true, camera.global_transform, camera.get_camera_projection(),
+	_game_hud.set_friendly_tags(true, camera.global_transform, hud_view_projection(camera),
 			fog_distance, sim)
+	_game_hud.set_radio_request_icon_viewer(sim.local_player_radio_request_icon_viewer())
 
 
 # The weapon's HUD display name: the raw weapon id resolved in the gametext table's

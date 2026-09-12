@@ -17,6 +17,15 @@ public:
 		return fps_ == fps && frames_ == frames && loop_ == loop;
 	}
 	float normalized_at(int32_t ticks) const;
+	// The armed-wrap park: with the end-notify armed (flag 0x40000) a loop wraps
+	// and is re-parked at 0.99999 in the SAME tick, latching 0x20000 but never
+	// the 0x10000 stop, so the boundary tick samples the clip end
+	// (rec[frames-1]..rec[frames], trigger[frames-1]) and the consumer promotes
+	// its deferred state on the next tick. `armed_boundary` is the tick
+	// boundary_after() reported; -1 = unarmed. One-shots park on their own end
+	// regardless. [orig: AnimChannel_AdvancePlayback @0x40B193 (0x40000 test),
+	// wrap @0x40B199, re-park @0x40B1A2..0x40B1B1 (0x20000 | flt_7C327C)]
+	float normalized_at(int32_t ticks, int32_t armed_boundary) const;
 	double frame_at(int32_t ticks) const;
 	double seconds_at(int32_t ticks) const;
 	bool stopped_at(int32_t ticks) const;

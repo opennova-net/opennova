@@ -116,7 +116,9 @@ struct ItemDeathTraits {
     bool model_bounds_loaded = false;
     std::vector<std::array<int32_t, 3>> model_section_origins_q16; // COBJ+56/60/64
     std::vector<int32_t> model_section_heights_q16; // COBJ+88 minus +84
-    std::vector<std::array<int32_t, 3>> husk_section_origins_q16; // final ?: primary COBJ
+    // Primary husk COBJ (entity+0x34: the section clone never carries +0x38,
+    // Entity_SpawnSectionEntity @0x4402D0 / @0x492B46).
+    std::vector<std::array<int32_t, 3>> husk_section_origins_q16;
     std::vector<std::array<int32_t, 3>> model_pivots_q16; // CMDL+116 / CXLT
     int32_t model_radius_q16 = 0; // GPM+20 / GHDR+24
     int32_t model_section0_min_z_q16 = 0;

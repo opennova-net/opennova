@@ -10,10 +10,20 @@
 
 namespace opennova::world {
 namespace {
-// The heat-seeker arm of the shared target query, contexts 6 and 11. LOS
-// follows the bounded, stable score sort; the query disables it during scan.
-// [orig: Entity_SpawnWeaponEffect @0x545840; Entity_FindTargets @0x53a610;
-// Entity_ValidateWeaponTarget @0x53a400; Weapon_CalcDamageByType @0x539140]
+// The heat-seeker arm of the shared target query, contexts 6 and 11: the
+// pool-0 and pool-1 legs. LOS follows the bounded, stable score sort; the
+// query disables it during scan. NOT ported: the ctx-flag 0x200 projectile-
+// list leg (the 128-entry {entity, ttl} ring sub_4E70F0 keeps, fed by the
+// shell-bounce update and released at round death, walked through the same
+// validator/score with the MP case-11 Entity_IsShellProjectile deflection
+// roll) -- its feeders, the shell-bounce ring, are absent from the port, so
+// live rounds such as flares never enter the candidate list here.
+// [orig: Entity_SpawnWeaponEffect @0x545840 (ctx flags 0x662 @0x54591b);
+// Entity_FindTargets @0x53a610 -- the pool legs ported, the 0x200 ring leg
+// @0x53acf7..0x53ade0 not; ring sub_4E70F0 @0x4e70f0, feeders
+// Entity_UpdateShellBounce @0x443e69 / Projectile_ReleaseEffects @0x4e82ea,
+// case-11 deflection arm @0x539385..0x539415; Entity_ValidateWeaponTarget
+// @0x53a400; Weapon_CalcDamageByType @0x539140]
 EntityHandle heat_target(World &world, const Entity &owner, const AiEntity &body,
                          const AmmoTableEntry &ammo) {
     const Entity *occupant = world.registry.get(owner.primary_occupant);
@@ -77,7 +87,7 @@ EntityHandle heat_target(World &world, const Entity &owner, const AiEntity &body
 
 // Aim/range acquisition runs every sixteen ticks. The locked tone is refreshed
 // every tick, from the held target flag, including ticks between acquisitions.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b4e9f..0x4b5216;
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b4e9b..0x4b5215;
 // Entity_BuildCameraFromWeaponView @0x4b0f30]
 void LocalPlayer::update_aim_target() {
     Entity *e = player();
@@ -91,6 +101,26 @@ void LocalPlayer::update_aim_target() {
         int32_t yaw = body->heading;
         int32_t pitch = io::bam_add(body->pitch, body->inf.recoil_pitch);
         int32_t roll = body->roll;
+        // The weapon-view offsets: the scope-zero elevation comes back OUT of
+        // the ray while the weapon can fire (offsetY = -MountSlot+4, else 0);
+        // a raised binocular view substitutes its yaw/pitch wander for both.
+        // The on-foot seed (Position + CameraOffset, Yaw / Pitch + pitchBlend)
+        // is the origin/pitch above. Residual: the mounted seeds (parentSlot 3
+        // -> the gunner bone @0x4b4f35 / @0x4dc789; seat 2 on a mountable gun
+        // @0x4dc7e5), the seat-flag 0x10000 turret clamp @0x4dc8a3..0x4dc8ef
+        // and the ammo-flag 0x2000000 aimPoint override @0x4dc91a..0x4dc92c.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4b4ea7..0x4b4ee0
+        //  (Player_CanFireWeapon @0x4b4ea7; offsetY @0x4b4eb0..0x4b4ebd; the
+        //  binocular pair @0x4b4ec8..0x4b4ed6); Entity_BuildCameraFromWeaponView
+        //  @0x4b0f52 (yaw += offsetX) / @0x4b0f56 (pitch += offsetY);
+        //  Entity_CalcWeaponFirePosition no-parent arm @0x4dc847..0x4dc880]
+        const bool can_fire = local_player_can_fire();
+        if (view.binoculars_view_active) {
+            yaw = io::bam_sub(yaw, bam_from_degrees_wrapped(view_tracker.binocular_yaw_offset_deg));
+            pitch = io::bam_add(pitch, bam_from_degrees_wrapped(view_tracker.binocular_pitch_offset_deg));
+        } else if (can_fire) {
+            pitch = io::bam_sub(pitch, active_local_weapon_slot(world_, weapon)->zero_pitch);
+        }
         if (view.camera_mode != 0 || !weapon.active) {
             LocalPlayerViewFrame frame;
             local_player_view_frame(&world_, weapon, view, view_tracker, frame);
@@ -128,12 +158,19 @@ void LocalPlayer::update_aim_target() {
                         candidate->position.y - e->position.y, candidate->position.z - e->position.z};
                     const float distance = std::sqrt(d.x*d.x+d.y*d.y+d.z*d.z);
                     if (distance >= 75.0f && distance <= 1500.0f) {
+                        // A mountable gun (Entity_IsMountableGun: itemdef && type
+                        // != 1 && attrib & 0x20) redirects to its groundEntity,
+                        // and the lock stores the REDIRECTED entity.
+                        // [orig: Entity_IsMountableGun @0x434240 -> groundEntity
+                        //  @0x4b51bd..0x4b51c9; the type switch @0x4b51d0, the
+                        //  cases 1,2,6-8,10 store @0x4b51e6..0x4b51e9]
                         const Entity *typed = candidate;
-                        if (candidate->item_type != 1 && (candidate->item_attrib & 0x20u) != 0) {
+                        if (candidate->has_item_def && candidate->item_type != 1 &&
+                                (candidate->item_attrib & kItemAttribEweap) != 0) {
                             if (const Entity *parent = world_.registry.get(candidate->ground_target)) typed = parent;
                         }
                         switch (typed->item_type) {
-                            case 1: case 2: case 6: case 7: case 8: case 10: target = candidate->handle; break;
+                            case 1: case 2: case 6: case 7: case 8: case 10: target = typed->handle; break;
                         }
                     }
                 }
@@ -150,7 +187,11 @@ void LocalPlayer::update_aim_target() {
         if (allowed && body->inf.combat_target.valid()) body->slot.f[2] |= 1;
         else body->slot.f[2] = -2;
     }
-    if (!view_session_inputs.death_screen_active && weapon.active &&
+    // The tone registers only on a frame's last logic tick: the catch-up gate
+    // precedes the death-screen and local-player tests.
+    // [orig: dword_24E0E80 @0x4b5229; Game_MainLoop @0x52ba32..0x52ba3a]
+    if (world_.rules.last_tick_of_batch &&
+        !view_session_inputs.death_screen_active && weapon.active &&
         (body->slot.f[2] & 1) != 0 && weapon.def.soundlockedtone[0] &&
         world_.out.fire_sounds.listener_valid()) {
         SoundEmitterEvent event;

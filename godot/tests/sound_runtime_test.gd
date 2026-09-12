@@ -449,3 +449,78 @@ func test_oneshots_share_fourteen_unreserved_channels_and_apply_pitch() -> void:
 		if child is AudioStreamPlayer3D and not child.is_queued_for_deletion():
 			live += 1
 	assert_eq(live, 14, "channels 0 through 11 remain reserved in the 26-channel device")
+
+
+func test_entity_refire_retakes_its_own_channel() -> void:
+	# Retail keys the open call on the source entity: a channel already playing
+	# the same wave for the same entity scores zero and is retaken, so a body
+	# re-firing a wave restarts its own voice instead of stealing the quietest
+	# other channel (docs/audio/lwf-dbf-sound-re.md D-SND-10).
+	var samples := PackedByteArray()
+	samples.resize(22050 * 2 * 5)
+	var root := _real_root({
+		"quiet.wav": _build_wav(samples, 1, 22050, 16),
+		"loud.wav": _build_wav(samples, 1, 22050, 16),
+	})
+	var quiet := _profile_with_set("QUIET", "quiet.wav")
+	quiet.set_layer_field(0, 0, "falloff_radius", 200)
+	quiet.set_member_field(0, 0, 0, "volume", 10)
+	var loud := _profile_with_set("LOUD", "loud.wav")
+	loud.set_layer_field(0, 0, "falloff_radius", 200)
+	loud.set_member_field(0, 0, 0, "volume", 100)
+	var bank = SoundBank.create(root)
+	bank.add_bank(quiet)
+	bank.add_bank(loud)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	# Thirteen id-less quiet voices and entity 5's loud one fill the fourteen
+	# general channels.
+	for _i in range(13):
+		assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "QUIET", StringName(), Vector3.ZERO))
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "LOUD", StringName(), Vector3.ZERO, 0, 5))
+	var first_quiet := parent.get_child(0) as AudioStreamPlayer3D
+	var first_loud := parent.get_child(13) as AudioStreamPlayer3D
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "LOUD", StringName(), Vector3.ZERO, 0, 5))
+	assert_true(first_loud.is_queued_for_deletion(), "entity 5's refire retakes its own channel")
+	assert_false(first_quiet.is_queued_for_deletion(), "the quietest other voice survives the refire")
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "LOUD", StringName(), Vector3.ZERO))
+	assert_true(first_quiet.is_queued_for_deletion(), "an id-less fire steals the quietest channel instead")
+
+
+func test_dialog_line_plays_at_member_pitch_without_draws() -> void:
+	# The dialog module resolves its line to one wave entry and plays it at the
+	# fixed dialog frequency; it never enters the trigger-set player, so a set's
+	# authored pitch jitter neither shifts the line nor consumes the shared ROL3
+	# stream (docs/audio/lwf-dbf-sound-re.md, Dialog_LoadAudioClip).
+	var samples := PackedByteArray()
+	samples.resize(22050 * 2 * 5)
+	var root := _real_root({
+		"line.wav": _build_wav(samples, 1, 22050, 16),
+		"pool.wav": _build_wav(samples, 1, 22050, 16),
+	})
+	var line := _profile_with_set("LINE", "line.wav")
+	line.set_set_field(0, "pitch_base", 98304)
+	line.set_set_field(0, "pitch_random_range", 32768)
+	line.set_layer_field(0, 0, "selection_mode", LwfData.SELECTION_SEQUENTIAL)
+	line.set_member_field(0, 0, 0, "rand_pitch", 0.125)
+	var pool := _profile_with_set("POOL", "pool.wav")
+	pool.set_set_field(0, "pitch_base", 98304)
+	pool.set_set_field(0, "pitch_random_range", 32768)
+	pool.set_member_field(0, 0, 0, "rand_pitch", 0.125)
+	var bank = SoundBank.create(root)
+	bank.add_bank(line)
+	bank.add_bank(pool)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var voice: AudioStreamPlayer = bank.spawn_oneshot_2d(parent, "LINE", StringName())
+	assert_not_null(voice)
+	if voice == null:
+		return
+	assert_almost_eq(voice.pitch_scale, 1.0, 0.00001,
+			"the line plays at the member's base pitch, unjittered")
+	# The next trigger-set fire sees the untouched stream: the pinned fresh-bank
+	# pitch of the fourteen-channel test above, not the value two draws later.
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "POOL", StringName(), Vector3.ZERO))
+	var fire := parent.get_child(parent.get_child_count() - 1) as AudioStreamPlayer3D
+	assert_almost_eq(fire.pitch_scale, 110686.0 / 65536.0, 0.00001,
+			"the dialog spawn consumed no ROL3 draws")

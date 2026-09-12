@@ -179,8 +179,11 @@ void ItemEmitterSystem::event(World &world, Entity &entity,
         break;
     }
     // The draw precedes the point/effect allocation checks, even on a miss.
+    // It is one step of the inline dword_31BFBB8 rotate LCG (the owner of the
+    // throwable fan stream), not PRNG_Next16 [orig: @0x43F999; the delay
+    // store @0x43F9BF].
     const auto &delay = traits.regional_sounds[0];
-    const uint64_t product = uint64_t(int64_t(delay.range_ticks)) * world.next_prng16() + 0x8000u;
+    const uint64_t product = uint64_t(int64_t(delay.range_ticks)) * world.throwables.fan_prng() + 0x8000u;
     entity.class_think_ticks = io::bam_add(delay.base_ticks, int32_t(uint32_t(product >> 16)));
     if (!scene_ || !traits.has_particlefx_point || traits.particlefx.empty()) return;
     particle::EffectSpawnRequest request;
@@ -244,7 +247,7 @@ void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &p
     }
     if (const auto *ammo=world.tables.ammo.by_index(sound_ammo))
         world.out.fire_sounds.play_with_distance_delay(ammo->impact_effects[5].sound.c_str(),
-                pos, source ? source->bms_id : 0);
+                pos, source ? source->bms_id : 0, source ? source->handle.packed : uint16_t(0xFFFF));
     if (!world.rules.mp_session) {
         const int half=std::min(count,8)>>1;
         for (int i=0;i<2*half;++i) {

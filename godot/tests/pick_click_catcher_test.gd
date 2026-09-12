@@ -23,14 +23,14 @@ func _make_catcher(list: DebugPickList) -> Dictionary:
 	var camera := Camera3D.new()
 	viewport.add_child(camera)
 	camera.current = true
-	# The catcher needs only its view plus a viewport.
+	# The catcher needs only its view plus a viewport (a bare camera: no presenter).
 	var view := SimView.new()
 	view.sim_value = Simulation.new()
 	autofree(view.sim_value)
 	var catcher := PickClickCatcher.new()
 	viewport.add_child(catcher)
-	catcher.setup(view, list)
-	return {"catcher": catcher, "view": view, "viewport": viewport}
+	catcher.setup(view, null, list)
+	return {"catcher": catcher, "view": view, "viewport": viewport, "camera": camera}
 
 
 func test_left_press_ray_picks_through_the_live_sim() -> void:
@@ -38,6 +38,7 @@ func test_left_press_ray_picks_through_the_live_sim() -> void:
 	var made := _make_catcher(list)
 	var catcher: PickClickCatcher = made["catcher"]
 	var viewport: SubViewport = made["viewport"]
+	var camera: Camera3D = made["camera"]
 
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
@@ -47,8 +48,9 @@ func test_left_press_ray_picks_through_the_live_sim() -> void:
 
 	assert_true(viewport.is_input_handled(),
 			"the click ray-picked through the sim and consumed the event")
-	assert_eq(catcher.last_pick_position, Vector2(160, 120),
-			"the ray starts from the event's own viewport-local position")
+	assert_not_null(catcher.last_pick, "the sim answered the click's card")
+	assert_eq(catcher.last_pick.ray_dir_godot, camera.project_ray_normal(Vector2(160, 120)),
+			"the ray starts from the event's own viewport-local position, in the bare camera's pixels")
 	assert_eq(list.get_picks().size(), 0,
 			"a worldless sim answers an honest miss, which the list rejects")
 
@@ -67,7 +69,7 @@ func test_double_click_repeat_is_ignored() -> void:
 	catcher.handle_click(repeat)
 
 	assert_false(viewport.is_input_handled(), "the second press of a double-click never re-picks")
-	assert_eq(catcher.last_pick_position, Vector2.INF, "no ray ran")
+	assert_null(catcher.last_pick, "no ray ran")
 
 
 func test_other_input_is_ignored() -> void:
@@ -112,7 +114,7 @@ func test_picker_stamps_provenance_and_replayable_ray() -> void:
 	add_child_autofree(camera)
 	camera.current = true
 	var pick := DebugEntityPicker.pick_with_camera(
-			sim, camera, Vector2(10, 10), "mouse_click")
+			sim, camera, Vector2(10, 10), "mouse_click", null)
 	assert_not_null(pick, "the sim always answers the stable card")
 	assert_eq(pick.source, "mouse_click",
 			"the card records its input provenance")

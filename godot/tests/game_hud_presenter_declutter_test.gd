@@ -208,3 +208,84 @@ func test_kill_banner_retains_text_after_expiry() -> void:
 	assert_eq(sim.get_kill_announcement_text(), "XYZ",
 			"expiration retains the death-screen text")
 	presenter.set_hud_detail_level(start)
+
+
+func test_world_points_project_through_the_presenter_view_projection() -> void:
+	# The HUD's world-point consumers (the attach labels, the friendly tags)
+	# and the crosshair-toast pick ray read the FRAME's projection, never the
+	# gameplay camera's: while an aspect mode draws through the presenter's
+	# stretched target the gameplay camera carries only a CULLING SUPERSET of
+	# the frustum (LocalPlayerPresenter.view_projection), so its projection
+	# lands a label off on one axis, and its ray misses on one axis.
+	var world := WorldFixture.boot_minimal(self)
+	var surface := SubViewport.new()
+	surface.size = Vector2i(1024, 600)
+	add_child_autofree(surface)
+	var camera := Camera3D.new()
+	surface.add_child(camera)
+	camera.current = true
+	var player: LocalPlayerPresenter = add_child_autofree(LocalPlayerPresenter.new())
+	player.setup(world, camera, null, ControlsModel.new())
+	var presenter: GameHudPresenter = add_child_autofree(GameHudPresenter.new())
+	presenter.setup(world, player, null)
+	# The stock 4:3 mode over the wider 1024x600 surface: the frame keeps the
+	# policy 80 horizontal across the width and stretches 0.75/(600/1024).
+	world.get_sim().set_local_player_aspect_mode(0)
+	var dt := Simulation.tick_dt()
+	for i in 2:
+		var frame_input := player.before_world_tick(dt, false, true)
+		world.tick(camera.global_position, camera.global_transform, dt, frame_input)
+		player.after_world_tick()
+	var through: Camera3D = player.projection_camera()
+	var target: SubViewport = player.projection_viewport()
+	assert_not_null(through, "the 4:3 mode over a 1024x600 surface draws through a target")
+	if through == null or target == null:
+		player.teardown()
+		return
+
+	var projection := presenter.hud_view_projection(camera)
+	assert_almost_eq(projection.x.x, 1.0 / tan(deg_to_rad(40.0)), 0.001,
+			"proj[0][0] = cot(fov_h/2) across the real width: the frame's projection")
+	assert_almost_eq(projection.y.y, 1.0 / (tan(deg_to_rad(40.0)) * 0.75), 0.001,
+			"proj[1][1] follows the SELECTED ratio")
+	assert_false(is_equal_approx(camera.get_camera_projection().x.x, projection.x.x),
+			"the gameplay camera carries only the culling superset, which the HUD never projects through")
+
+	# The pick ray rides the same frame: a surface point maps into the
+	# target's pixels by the blit stretch (target size / surface size) and the
+	# ray leaves the target camera there.
+	assert_eq(DebugEntityPicker.view_camera(camera, player), through,
+			"the pick ray is built through the target camera while the mode is live")
+	var surface_point := Vector2(256.0, 150.0)
+	var target_point := DebugEntityPicker.view_point(camera, surface_point, player)
+	assert_almost_eq(target_point,
+			Vector2(surface_point.x * float(target.size.x) / 1024.0,
+					surface_point.y * float(target.size.y) / 600.0),
+			Vector2(0.001, 0.001), "the surface point scales into the target's pixels")
+	var pick := DebugEntityPicker.pick_with_camera(world.get_sim(), camera, surface_point,
+			"mouse_click", player)
+	assert_not_null(pick, "the sim always answers the stable card")
+	assert_eq(pick.ray_dir_godot, through.project_ray_normal(target_point),
+			"the card's replayable ray is the target camera's at the stretched point")
+	assert_eq(DebugEntityPicker.view_point(camera, surface_point, null), surface_point,
+			"a bare camera picks in its own pixels")
+
+	# The production click picker rides the same recipe: a tools-open click at
+	# a surface point builds its ray through the target camera at the
+	# stretched point, never through the gameplay camera's culling superset.
+	var catcher := PickClickCatcher.new()
+	surface.add_child(catcher)
+	catcher.setup(world.world_view(), player, DebugPickList.new())
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = surface_point
+	catcher.handle_click(click)
+	assert_not_null(catcher.last_pick, "the click ran its ray")
+	assert_eq(catcher.last_pick.ray_dir_godot, through.project_ray_normal(target_point),
+			"a click at a surface point projects through the target camera at the stretched point")
+	assert_ne(catcher.last_pick.ray_dir_godot, camera.project_ray_normal(surface_point),
+			"...never through the gameplay camera, whose ray misses on one axis")
+	player.teardown()
+	assert_eq(presenter.hud_view_projection(camera).x.x, camera.get_camera_projection().x.x,
+			"without a live target the HUD projects through the camera's own projection")

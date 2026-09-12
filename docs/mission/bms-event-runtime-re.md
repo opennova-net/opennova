@@ -5,13 +5,13 @@ Scope: the BMS event evaluator (`engine/runtime/mission/event_runtime.{h,cpp}`),
 promotion (`engine/runtime/mission/promote.{h,cpp}`), and the system tick order/cadence
 (`engine/runtime/mission/mission_kernel.cpp` (`finish_load`), `engine/runtime/wac/wac_system.h`, `engine/runtime/world/world.{h,cpp}`).
 
-**Verdict: MATCHING**, with the tracked deviations below, including the malformed-loadout boundary D-EVT-7. Every behavioral
+**Verdict: MATCHING**, with the tracked deviations below, including the malformed-loadout boundary D-EVT-7 (proposed PERMANENT, class D, pending ratification). Every behavioral
 claim in this record is tied to a retail witness; addresses are cited inline.
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
 | Placement admission (2026-09-11) | MATCHING (read-only grill) | `Entity_SpawnFromBMSRecord @ 0x40e9f0`; `mission_promote`, `mission_kernel`, `mission_bms`; section 6.4a |
-| Loadout record sanitizer (2026-09-11) | MATCHING for bounded records; malformed-tail divergence D-EVT-7 | `AIProfile_SanitizeConfigData @ 0x40cfe0`; `mission_bms`, `mission_corpus` (116/116 canonical reparse); section 6.3a |
+| Loadout record sanitizer (2026-09-11) | MATCHING for bounded records; malformed-tail boundary D-EVT-7 (proposed PERMANENT class D) | `AIProfile_SanitizeConfigData @ 0x40cfe0`; `mission_bms`, `mission_corpus` (116/116 canonical reparse); section 6.3a |
 
 ## 1. The original system
 
@@ -582,7 +582,7 @@ bytes or its overflowing 2048-byte temporary buffer. The three shipped chunks
 in ASP_G8a, ASR_C2A and TKR_G3A with broken separators now retain the witnessed
 record order instead of searching for embedded weapon names. Canonical reparse
 is stable across all 116 locally available missions; this is not a byte-equality
-claim for malformed input. **D-EVT-7 (OPEN)** records that boundary: bounded
+claim for malformed input. **D-EVT-7 (proposed PERMANENT, class D: a never-reproduce of retail's out-of-buffer reads, pending maintainer ratification)** records that boundary: bounded
 missing-string reads and preservation of oversized typed records differ from
 retail's out-of-buffer reads and final 2048-byte copy cap. No unsafe retail
 execution behavior is claimed by the parser tests.
@@ -628,11 +628,20 @@ are **signed**. [orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]
 
 The parser/editor now accept the `0x80` bit and name both SP/MP bits correctly.
 `PromoteOptions` carries player/team/game settings and ItemDef attributes before
-promotion. Rejected records retain their fixed pool slots as holes and consume
-no spawn-stagger value; marker/waypoint indexing remains authored-index based.
-The local and native host boot paths pass their resolved settings before loading.
+promotion. Rejected records consume no spawn-stagger value and every accepted
+record lands at its record index. Pools 1..3 set their used count to the full
+record count, so their rejected records stay as holes; pool 0 sets its used
+count to the ACCEPTED count, so the organics at the last k record indices
+(k = rejected pool-0 records) sit outside the used window: never ticked
+(Entity_UpdateAllEntities @ 0x4c243b), never found by net id
+(EntityPool_FindByNetId @ 0x4f0a2d), and overwritten once Pool_AllocEntry has
+filled the in-window holes and extends the pool (@ 0x442280..0x44228b). An
+accepted organic between two holes stays live. Marker/waypoint indexing remains
+authored-index based. The local and native host boot paths pass their resolved
+settings before loading.
 [orig: Entity_SpawnFromBMSRecord @ 0x40e9f0;
-Mission_LoadBMSFile @ 0x40f4e0]
+Mission_LoadBMSFile @ 0x40f4e0, pool-0 loop @ 0x40fb0d..0x40fb34,
+pools 1..3 Pool_SetUsed @ 0x40f9db/@ 0x40fa4a/@ 0x40faba]
 
 The host menu caps its requested player count at 64; dedicated hosting adds the
 reserved host slot. The resulting network limit is also fed into admission.

@@ -490,8 +490,27 @@ int main(void) {
             def_free_weapons(&wf);
             return 1;
         }
+        /* The parallax key [orig: 'scope_paralax_distance' @ 0x544e4e..0x544e80]:
+           atof * 65535.0 then ftol. The M1 turret authors `.814` -> 53345, the T80
+           turret `-.574` -> -37617; the M4 and the M203 carry no key. */
+        const DefWeaponDef *m1 = NULL;
+        const DefWeaponDef *t80 = NULL;
+        for (size_t i = 0; i < wf.count; ++i) {
+            if (strcmp(wf.entries[i].weapon_name, "WPN_M1TURRET") == 0) m1 = &wf.entries[i];
+            if (strcmp(wf.entries[i].weapon_name, "WPN_T80TURRET") == 0) t80 = &wf.entries[i];
+        }
+        if (!m1 || !t80 || m1->scope_paralax_distance_fp16 != 53345 ||
+            t80->scope_paralax_distance_fp16 != -37617 ||
+            m4->scope_paralax_distance_fp16 != 0 || m203->scope_paralax_distance_fp16 != 0) {
+            fprintf(stderr, "FAIL: scope_paralax_distance: m1=%d t80=%d m4=%d m203=%d\n",
+                    m1 ? m1->scope_paralax_distance_fp16 : -1,
+                    t80 ? t80->scope_paralax_distance_fp16 : -1,
+                    m4->scope_paralax_distance_fp16, m203->scope_paralax_distance_fp16);
+            def_free_weapons(&wf);
+            return 1;
+        }
     }
-    printf("scope_max_zero + the M203 slide row OK\n");
+    printf("scope_max_zero + scope_paralax_distance + the M203 slide row OK\n");
     }  /* retail leg */
     {
         /* WeaponDef_CreateBlendNamedMaterial recognizes all six tokens at
@@ -542,7 +561,10 @@ int main(void) {
         /* The scope-zero table's token forms [orig: 'scope_max_zero'
            @ 0x544e8b..0x544efd]: three values store +0x84/+0x9C/+0xA0; a fourth stores
            +0x88 only when the line carries four (`cmp dword ptr [esi],4; jle`
-           @ 0x544edf counts the key); an absent key leaves the entry memset's zeros. */
+           @ 0x544edf counts the key); an absent key leaves the entry memset's zeros.
+           The parallax key [orig: 'scope_paralax_distance' @ 0x544e4e..0x544e80]:
+           a case-insensitive match (stricmp), atof * 65535.0 then ftol, so `2.0`
+           stores 131070 and `-.5` truncates -32767.5 toward zero to -32767. */
         static const char kZeroDef[] =
             "weapon \"WPN_ZERO_FOUR\"\n"
             "\tscope_max_zero 10 100 200 1\n"
@@ -551,12 +573,19 @@ int main(void) {
             "\tscope_max_zero  1 300 300\n"
             "end\n"
             "weapon \"WPN_ZERO_NONE\"\n"
+            "end\n"
+            "weapon \"WPN_ZERO_PARALAX\"\n"
+            "\tscope_max_zero 10 100 300 1\n"
+            "\tScope_Paralax_Distance\t\t2.0\n"
+            "end\n"
+            "weapon \"WPN_ZERO_PARALAX_NEG\"\n"
+            "\tscope_paralax_distance -.5\n"
             "end\n";
         DefWeaponsFile zf;
         memset(&zf, 0, sizeof(zf));
         if (def_parse_weapons_memory((const unsigned char *)kZeroDef,
                                      sizeof(kZeroDef) - 1, &zf) != 0 ||
-            zf.count != 3) {
+            zf.count != 5) {
             fprintf(stderr, "FAIL: scope_max_zero inline parse failed\n");
             def_free_weapons(&zf);
             def_free_weapons(&wf);
@@ -565,6 +594,24 @@ int main(void) {
         const DefWeaponDef *four = &zf.entries[0];
         const DefWeaponDef *three = &zf.entries[1];
         const DefWeaponDef *none = &zf.entries[2];
+        const DefWeaponDef *paralax = &zf.entries[3];
+        const DefWeaponDef *paralax_neg = &zf.entries[4];
+        if (paralax->scope_paralax_distance_fp16 != 131070 ||
+            paralax->scope_max_zero_steps != 10 || paralax->scope_zero_default != 300 ||
+            paralax_neg->scope_paralax_distance_fp16 != -32767 ||
+            four->scope_paralax_distance_fp16 != 0 || three->scope_paralax_distance_fp16 != 0 ||
+            none->scope_paralax_distance_fp16 != 0) {
+            fprintf(stderr,
+                    "FAIL: scope_paralax_distance forms: paralax=%d (%d/%d) neg=%d "
+                    "four=%d three=%d none=%d\n",
+                    paralax->scope_paralax_distance_fp16, paralax->scope_max_zero_steps,
+                    paralax->scope_zero_default, paralax_neg->scope_paralax_distance_fp16,
+                    four->scope_paralax_distance_fp16, three->scope_paralax_distance_fp16,
+                    none->scope_paralax_distance_fp16);
+            def_free_weapons(&zf);
+            def_free_weapons(&wf);
+            return 1;
+        }
         if (four->scope_max_zero_steps != 10 || four->scope_zero_step != 100 ||
             four->scope_zero_default != 200 || four->scope_zero_extra != 1 ||
             three->scope_max_zero_steps != 1 || three->scope_zero_step != 300 ||

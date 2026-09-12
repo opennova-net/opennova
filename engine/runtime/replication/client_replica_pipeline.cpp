@@ -621,6 +621,9 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 				? es.net_anim_ratio
 				: 0;
 		es.net_anim_ratio_live = false;
+		// A deferred state armed against the previous clip re-arms on the new
+		// clip: the park is only ever the playing clip's own wrap.
+		es.net_anim_pending_boundary = -1;
 		es.rm_blend_weight = 0.0f;
 		es.rm_blend_step =
 				(world::infantry_anim_flags(blend_key_state) & 0x400u) != 0
@@ -665,7 +668,12 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	bool have = false;
 	if (es.rm_blend_weight >= 1.0f) {
 		int32_t phase = es.rm_phase;
-		have = src.advance(es.rm_adm_id, es.rm_state, phase, frame);
+		// With a deferral armed, the boundary tick samples the parked clip end
+		// (the promote above read the latch first) [orig: AnimChannel_AdvancePlayback
+		// @0x40B193..0x40B1B1; AnimMap_UpdateEntity advance @0x40B7FE].
+		have = src.advance_armed(es.rm_adm_id, es.rm_state, 0, phase,
+		                         es.net_anim_pending != 0 ? es.net_anim_pending_boundary : -1,
+		                         frame);
 		es.rm_phase = phase;
 	} else {
 		es.rm_blend_weight += es.rm_blend_step;

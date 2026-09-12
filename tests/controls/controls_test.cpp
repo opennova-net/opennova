@@ -272,6 +272,21 @@ bool test_binding_set_assignment() {
   CHECK(set.control_text(fwd, Device::Mouse) == "Right", "mouse control text");
   set.clear(fwd, Device::Mouse);
   CHECK(set.record(fwd)->mouse_mask == 0, "mouse clear");
+  // CLEAR_KEY zeroes the modifier word with the binding [orig: sub_55BFD0
+  // @0x55c046/@0x55c04d mouse, @0x55c030/@0x55c036 joystick]: a cleared
+  // ScopeZeroDec mouse column no longer Ctrl-gates the next capture.
+  const int dec = set.index_of_token("ScopeZeroDec");
+  CHECK(dec >= 0 && set.record(dec)->mouse_mod == 17, "ScopeZeroDec ships Ctrl-gated");
+  set.clear(dec, Device::Mouse);
+  CHECK(set.record(dec)->mouse_mask == 0 && set.record(dec)->mouse_mod == 0,
+        "mouse clear zeroes the mask AND the modifier");
+  BindingRecord joy = *set.record(dec);
+  joy.joy_button = 7;
+  joy.joy_mod = 2;
+  CHECK(set.set_record(dec, joy), "a joystick-modified record installs");
+  set.clear(dec, Device::Joystick);
+  CHECK(set.record(dec)->joy_button == 0 && set.record(dec)->joy_mod == 0,
+        "joystick clear zeroes the button AND the modifier");
   set.restore_defaults();
   r = set.record(fwd);
   CHECK(r->primary == default_primary && r->secondary == default_secondary,
@@ -334,6 +349,20 @@ bool test_format_display_string() {
   rec.mouse_mask = 2048;
   CHECK(format_display_string(rec, true) == "Mouse Whl Dn *",
         "the 0x200 flag appends ' *'");
+  // The mouse modifier RESETS the buffer (sprintf "%s-" @0x496f79), so the
+  // keyed text before it is discarded: the static ScopeZeroDec/Inc rows
+  // (VK 0xDE + Ctrl-wheel) render "Ctrl- or Mouse Whl Dn/Up", never the
+  // apostrophe [orig: KeyBinding_FormatDisplayString @0x496f34..0x496fd4].
+  BindingSet set;
+  const int dec = set.index_of_token("ScopeZeroDec");
+  const int inc = set.index_of_token("ScopeZeroInc");
+  CHECK(dec >= 0 && inc >= 0, "the scope-zero rows exist");
+  CHECK(set.record(dec)->mouse_mod == 17 && set.record(inc)->mouse_mod == 17,
+        "the scope-zero rows carry the static Ctrl mouse modifier");
+  CHECK(format_display_string(*set.record(dec)) == "Ctrl- or Mouse Whl Dn",
+        "ScopeZeroDec: the mouse modifier resets the keyed text");
+  CHECK(format_display_string(*set.record(inc)) == "Ctrl- or Mouse Whl Up",
+        "ScopeZeroInc: the reset also discards arm 1's 'Ctrl - ' prefix");
   return true;
 }
 
@@ -423,6 +452,16 @@ bool test_joystick_pov_dispatch() {
   row.joy_button = 128;
   bindings.set_record(up, row);
   CHECK(bindings.pressed_joystick(up, [](int index) { return index == 127; }, hats), "last ordinary button is 128");
+  // A joystick-modifier row fires on its button alone: retail's fallback
+  // pass tests no modifier [orig: Input_ProcessToggleBindings @0x499594..
+  // 0x4995c8; Input_TryTriggerJoystickButton @0x497b30 reads only +26].
+  row.joy_button = 5;
+  row.joy_mod = 2;
+  bindings.set_record(up, row);
+  CHECK(bindings.pressed_joystick(up, [](int index) { return index == 4; }, hats),
+      "a modified row fires with its modifier button up");
+  CHECK(!bindings.pressed_joystick(up, [](int index) { return index == 1; }, hats),
+      "the modifier alone never fires the row");
   return true;
 }
 

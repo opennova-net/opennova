@@ -8,6 +8,7 @@
 
 #include <base/io/bam.h>
 
+#include <runtime/renderer/aspect_ratio.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/geom.h>
@@ -223,6 +224,49 @@ float fov_vertical_from_horizontal_deg(float fov_h_deg, float aspect) {
     const float half_h = fov_h_deg * 0.5f * 3.14159265358979323846f / 180.0f;
     const float half_v = std::atan(std::tan(half_h) / aspect);
     return half_v * 2.0f * 180.0f / 3.14159265358979323846f;
+}
+
+ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
+                               int surface_h) {
+    // [orig: Render_SetViewAndProjectionMatrices @0x58d900 -- viewportWidth =
+    //  w * 1.0 @0x58d971, viewportHeight = h * flt_8409E8 @0x58d985, halfV =
+    //  atan(tan(fov_h/2) * (vh / vw)) @0x58d9b2, aspect = vw / vh @0x58d9be;
+    //  flt_8409E8 = selected / (h/w) from Render_SetAspectRatioMode @0x58d8a7]
+    ViewProjection out;
+    out.fov_h_deg = fov_h_deg;
+    out.fov_v_deg = fov_h_deg;
+    out.target_w = surface_w;
+    out.target_h = surface_h;
+    if (surface_w <= 0 || surface_h <= 0) return out;
+    const float w = static_cast<float>(surface_w);
+    const float h = static_cast<float>(surface_h);
+    const float selected = renderer::aspect_height_over_width(aspect_mode, w, h);
+    out.scale_y = renderer::aspect_viewport_scale_y(aspect_mode, w, h);
+    // vh / vw = (h * scale_y) / w = selected, so the pass is the perspective of
+    // aspect 1 / selected, whatever the surface.
+    out.aspect = 1.0f / selected;
+    out.fov_v_deg = fov_vertical_from_horizontal_deg(fov_h_deg, out.aspect);
+    if (std::fabs(out.scale_y - 1.0f) <= 1e-5f) {
+        out.scale_y = 1.0f; // the surface's own ratio: no stretch, no resample
+    } else if (out.scale_y > 1.0f) {
+        // Taller than the surface: keep its width, grow the height.
+        out.target_h = static_cast<int>(std::lround(w * selected));
+    } else {
+        // Wider than the surface: keep its height, grow the width.
+        out.target_w = static_cast<int>(std::lround(h / selected));
+    }
+    return out;
+}
+
+float viewmodel_focal_ratio(float world_fov_h_deg, float renderfov_h_deg) {
+    // [orig: the two Render_SetViewAndProjectionMatrices calls share scaleY --
+    //  the FP pass @0x4dee7f (renderfov) and Render_SetViewProjectionWithDefaults
+    //  @0x58f6b0 (the world fov) -- so proj[1][1]_fp / proj[1][1]_world =
+    //  tan(fov_h/2) / tan(renderfov/2), and proj[0][0] the same]
+    constexpr float kHalfDegToRad = 0.5f * 3.14159265358979323846f / 180.0f;
+    const float fp = std::tan(renderfov_h_deg * kHalfDegToRad);
+    if (fp <= 0.0f) return 1.0f;
+    return std::tan(world_fov_h_deg * kHalfDegToRad) / fp;
 }
 
 void player_view_bias_units(const PlayerViewState &v, const float pos[3],

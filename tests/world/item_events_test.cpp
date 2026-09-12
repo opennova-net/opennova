@@ -2,7 +2,9 @@
 #include <runtime/world/destruction.h>
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <runtime/audio/oneshot_play.h>
+#include <runtime/mission/mission_kernel.h>
 #include <runtime/simassets/item_traits.h>
 #include <cstring>
 using namespace opennova::world;
@@ -26,15 +28,20 @@ int test_regional_sound() {
     auto &e = *w.registry.get(h);
     auto *traits = w.tables.item_death_traits.get_mutable(10);
     w.env.time_of_day = 12 * 65536;
+    // The re-arm draw steps the inline dword_31BFBB8 LCG (the throwable fan
+    // stream); PRNG_Next16's dword_31BFBB0 never moves here.
     const uint32_t seed = w.prng16_state;
+    const uint32_t fan = w.throwables.fan_prng_state;
     destruction_notify_item_damage(w, e, 0);
-    CHECK(w.prng16_state == seed && w.out.slot_sounds.empty());
+    CHECK(w.throwables.fan_prng_state == fan && w.out.slot_sounds.empty());
     traits->regional_sounds[0] = {"Bird", 99, 0};
     traits->regional_sounds[1] = {"", 12, 65536};
     destruction_notify_item_damage(w, e, 1);
-    CHECK(w.prng16_state == seed);
+    CHECK(w.throwables.fan_prng_state == fan);
     destruction_notify_item_damage(w, e, 0); // Other-region sound still consumes one draw.
-    CHECK(e.class_think_ticks == 12 + int(w.prng16_state & 65535));
+    CHECK(w.throwables.fan_prng_state != fan);
+    CHECK(e.class_think_ticks == 12 + int(w.throwables.fan_prng_state & 65535));
+    CHECK(w.prng16_state == seed);
     CHECK(w.out.slot_sounds.empty());
     traits->has_sound_point = true;
     traits->sound_point = {0, 0, 2};
@@ -49,11 +56,16 @@ int test_regional_sound() {
     CHECK(e.class_think_ticks == 99 && w.out.slot_sounds.size() == 1);
     CHECK(w.out.slot_sounds[0].pos[2] == 7 * 65536);
     CHECK(std::strcmp(w.out.slot_sounds[0].set_name, "Bird") == 0);
+    // The SOUND point rides the scaled entity orientation matrix.
+    e.uniform_scale_q16 = 2 * 65536;
+    destruction_notify_item_damage(w, e, 0);
+    CHECK(w.out.slot_sounds.size() == 2 && w.out.slot_sounds[1].pos[2] == 9 * 65536);
+    CHECK(w.prng16_state == seed);
     const auto staggered = spawn(w, 2, 11, ItemDeathClass::kEnvironmentSound);
     w.tables.item_death_traits.get_mutable(11)->regional_sounds[0] = {"Bird", 99, 0};
     w.env.time_of_day = 4 * 65536;
     destruction_notify_item_damage(w, *w.registry.get(staggered), 0);
-    CHECK(w.out.slot_sounds.size() == 2); // Handle low nibble moves the boundary.
+    CHECK(w.out.slot_sounds.size() == 3); // Handle low nibble moves the boundary.
 
     opennova::lwf::File bank;
     for (const char *name : {"Male", "Female", "Explicit"}) {
@@ -209,11 +221,15 @@ int test_crane_pair_and_fade() {
     base.health = 0;
     destruction_notify_item_damage(w, base, 1);
     CHECK(half.death_motion == DeathMotionMode::CraneFalling && half.health > 0);
-    // The half moves every tick, including outside its callback cohort.
-    for (int tick = 2; tick <= 5; ++tick) {
+    // The pool-2 update callback runs only on the slot's cohort visit (slot 1:
+    // tick & 7 == 1), so the half steps once per eight ticks, never per tick.
+    for (int tick = 2; tick <= 33; ++tick) {
         w.logic_tick = tick;
         tick_item_event_pool(w, 2);
-        if (tick == 2) CHECK(half.position.z == 11 && half.veh.slide_z == -65536);
+        if (tick == 8) CHECK(half.position.z == 12 && half.veh.slide_z == 0);
+        if (tick == 9) CHECK(half.position.z == 11 && half.veh.slide_z == -65536);
+        if (tick == 16) CHECK(half.position.z == 11 && half.veh.slide_z == -65536);
+        if (tick == 17) CHECK(half.position.z == 9 && half.veh.slide_z == -2 * 65536);
     }
     CHECK(half.position.z == 3 && half.health == -1);
     CHECK(half.death_motion == DeathMotionMode::BuildingEffects);
@@ -222,7 +238,7 @@ int test_crane_pair_and_fade() {
     base.collapse_step = 8;
     base.death_tick = 0;
     destruction_notify_item_damage(w, base, 0);
-    CHECK(base.death_tick == 5 && w.out.terrain_scorches.record_count() == 0);
+    CHECK(base.death_tick == 33 && w.out.terrain_scorches.record_count() == 0);
     // upfx's late blasts wait for the delay and all five fade phases.
     half.engine_flags = kEntityFlagDead | kEntityFlagHusk;
     half.item_type = 5;
@@ -288,11 +304,15 @@ int test_emitter_lifetime() {
     config.documents[0].file.effects.push_back({"Puff", {"Smoke"}});
     scene->open(config);
     w.item_emitters.bind_scene(scene);
-    const uint32_t before = w.prng16_state;
+    // The re-arm draw steps the inline dword_31BFBB8 LCG (the throwable fan
+    // stream); PRNG_Next16's dword_31BFBB0 never moves here.
+    const uint32_t before = w.throwables.fan_prng_state;
+    const uint32_t shared = w.prng16_state;
     destruction_notify_item_damage(w, entity, 1);
-    CHECK(w.prng16_state == before && scene->live_counts().group_count == 0);
+    CHECK(w.throwables.fan_prng_state == before && scene->live_counts().group_count == 0);
     destruction_notify_item_damage(w, entity, 0);
-    CHECK(entity.class_think_ticks == 40 && w.prng16_state != before);
+    CHECK(entity.class_think_ticks == 40 && w.throwables.fan_prng_state != before);
+    CHECK(w.prng16_state == shared);
     const auto group = scene->inspect(false).groups.front();
     CHECK(group.pose.position.x == 14 && group.pose.position.y == 30 && group.pose.position.z == -20);
     CHECK(group.binding == p::EffectBinding::FollowOwner);
@@ -300,9 +320,9 @@ int test_emitter_lifetime() {
     w.item_emitters.sync_owners(w);
     CHECK(scene->inspect(false).groups.front().pose.position.x == 19);
     // A still-live group is stopped, gets the 15-tick gap, and consumes no RNG.
-    const uint32_t after_spawn = w.prng16_state;
+    const uint32_t after_spawn = w.throwables.fan_prng_state;
     destruction_notify_item_damage(w, entity, 0);
-    CHECK(entity.class_think_ticks == 15 && w.prng16_state == after_spawn);
+    CHECK(entity.class_think_ticks == 15 && w.throwables.fan_prng_state == after_spawn);
     CHECK(scene->inspect(false).groups.front().detached);
     // A naturally completed group clears ownership before the next callback.
     scene->reset_runtime_state();
@@ -406,6 +426,7 @@ int test_tower_sections() {
     t->particlefinale = "Dust"; t->particledeath = "Smoke";
     destruction_notify_item_damage(w, e, 1, {1,14});
     CHECK(e.health == 100 && e.item_section_damage[1] == 14 && spawner.pieces.empty());
+    CHECK(e.item_section_damage.bytes.size() == 2); // the bank grows to the written section
     destruction_notify_item_damage(w, e, 1, {2,15});
     CHECK(spawner.pieces.size() == 1 && e.spawned_piece_mask == 12);
     auto &piece = *w.registry.get(spawner.pieces[0]);
@@ -436,6 +457,15 @@ int test_tower_sections() {
     CHECK(piece.death_motion == DeathMotionMode::SectionSettled && piece.section_pitch_rate == 8*65536);
     tick_item_death_motion(w, piece, nullptr, 0, w.out.destruction);
     CHECK(piece.death_motion == DeathMotionMode::None);
+    // Every contact/settle effect is the def+0x412 particledeath handle, never
+    // particlefinale: bottom contact, top contact, the settle loop and the two
+    // settled-clock visits above.
+    size_t smoke = 0;
+    for (const auto &effect : w.out.destruction.effects) {
+        CHECK(effect.effect != "Dust");
+        smoke += effect.effect == "Smoke";
+    }
+    CHECK(smoke == 5);
     w.rules.logic_authority = false;
     const auto client_h = spawn(w, 2, 51, ItemDeathClass::kTower);
     w.tables.item_death_traits.set(51, *w.tables.item_death_traits.get(50));
@@ -447,6 +477,48 @@ int test_tower_sections() {
     client.engine_flags = kEntityFlagDead;
     destruction_notify_item_damage(w, client, 1, {2,11}); // client hits precede Dead guard
     CHECK(client.item_section_damage[2] == 15 && spawner.pieces.size() == 3);
+    // Both legs bound the section by the def's int8 section count: a section
+    // past it neither grows the bank nor accumulates (D-ITEM-7).
+    destruction_notify_item_damage(w, client, 1, {5,20});
+    CHECK(client.item_section_damage.read(5) == 0 && client.item_section_damage.bytes.size() == 3);
+    CHECK(client.class_think_ticks == 32 && spawner.pieces.size() == 3);
+    return 0;
+}
+
+// A section piece is the memset template clone: the parent def's door, squib
+// and sway selectors never reach it, only the piece's own callbacks and models.
+int test_piece_spawn_clears_class_selectors() {
+    const char definitions[] = "begin Tower\n id 105050\n type building\n ai_function door\n"
+            " move_function squib\n render_function sway\n num_doors 2\n first_door 1\n"
+            " open_rate 2\n max_angle 90\n hp 100\n end\n";
+    opennova::def::DefItemsFile items{};
+    CHECK(opennova::def::def_parse_items_memory(
+            reinterpret_cast<const unsigned char *>(definitions), sizeof(definitions)-1, &items) == 0);
+    opennova::mission::MissionKernel kernel;
+    kernel.open_document(opennova::bms::File{}, "piece", {});
+    kernel.set_items_table(&items);
+    opennova::mission::KernelBootOptions options;
+    options.playable = false;
+    options.wac = false;
+    options.collision = false;
+    options.seat_specs = false;
+    options.terrain = false;
+    std::string error;
+    CHECK(kernel.boot(options, error));
+    Entity seed;
+    seed.kind = EntityKind::Building; seed.item_id = 5050; seed.item_type = 5;
+    seed.health = 20; seed.engine_flags = 6; seed.alive = false;
+    seed.item_section_piece = true;
+    seed.death_motion = DeathMotionMode::SectionFalling;
+    const auto handle = kernel.spawn_item_piece(seed);
+    CHECK(handle.valid());
+    const Entity &piece = *kernel.world.registry.get(handle);
+    CHECK(piece.has_item_def && piece.item_type == 5 && piece.health == 20);
+    CHECK(piece.engine_flags == 6 && !piece.alive);
+    CHECK(piece.death_motion == DeathMotionMode::SectionFalling);
+    CHECK(!piece.door_event && !piece.door_motion && piece.door_count == 0);
+    CHECK(!piece.squib.motor && !piece.render_sway);
+    opennova::def::def_free_items(&items);
     return 0;
 }
 
@@ -520,7 +592,10 @@ int test_class_scoring_and_explosion_draws() {
     const int points = w.match.player(attacker)->stats[MatchStats::kPoints];
     CHECK(points > 0);
     CHECK(w.match.player(driver)->stats[MatchStats::kPoints] == points/2);
-    CHECK(w.match.player(parent_driver)->stats[MatchStats::kPoints] == points/4);
+    // The second link takes event 11's direct bonus>>2 AND the nested
+    // (bonus>>1)>>1 from the first link's event-28 recursion
+    // [orig: @0x52faff + CPlayerStats_RecordEvent case 28 @0x52cb50].
+    CHECK(w.match.player(parent_driver)->stats[MatchStats::kPoints] == ((points >> 1) >> 1) + (points >> 2));
     w.match.record_death(w,target.handle,attacker);
     CHECK(w.match.player(attacker)->stats[MatchStats::kTargetsDestroyed] == 1);
     CHECK(w.out.entity_events.size() == 1);
@@ -540,6 +615,7 @@ int test_class_scoring_and_explosion_draws() {
 int main() {
     if (test_destroy_phases_and_ambient() || test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;
+    if (test_piece_spawn_clears_class_selectors() != 0) return 1;
     if (test_palm_sections() != 0) return 1;
     if (test_emitter_lifetime() != 0) return 1;
     if (test_crane_pair_and_fade() != 0) return 1;
@@ -591,6 +667,8 @@ int main() {
     victim.has_item_def = true;
     victim.item_type = 3;
     victim.position = {2, 2, 1};
+    const auto unnumbered = w.registry.spawn(0, victim); // +0x1C ItemTypeIndex zero: skipped
+    victim.item_id = 9;
     const auto person = w.registry.spawn(0, victim);
     victim.damage_state = 1;
     const auto protected_person = w.registry.spawn(0, victim);
@@ -601,6 +679,7 @@ int main() {
     const auto crushable_building = w.registry.spawn(2, victim); // pool 2 ignores damage_state
     b.health = 0;
     destruction_notify_item_damage(w, b, 1);
+    CHECK(w.registry.get(unnumbered)->health == 100);
     CHECK(w.registry.get(person)->health == 0);
     CHECK(w.registry.get(protected_person)->health == 100);
     CHECK(w.registry.get(item)->health == 0);

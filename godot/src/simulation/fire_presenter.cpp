@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/renderer/tracer_frame.h>
 
 #include "audio/mission_audio.h"
@@ -127,8 +128,9 @@ void FirePresenter::present() {
 // [orig: the odd/even-tick consumers call Entity_PlaySound3D_FullVolume
 // @ 0x528e20 directly]. The local player's own body sounds DO play (retail
 // plays your own steps; only fire has an action-slot presentation to defer to).
-// Slots 43/44 (chute flap / freefall) refire every body tick by design; the
-// repeated fires compete for the same finite audio channel pool.
+// Slots 43/44 (chute flap / freefall) refire by design; a body re-firing the
+// same wave retakes its own channel through the sim's own-channel key
+// (audio::oneshot_sound_id over the packed source handle).
 void FirePresenter::present_slot_sounds(const std::vector<opennova::world::SoundSlotEvent> &p_events) {
 	if (p_events.empty()) {
 		return;
@@ -146,7 +148,9 @@ void FirePresenter::present_slot_sounds(const std::vector<opennova::world::Sound
 				static_cast<float>(ev.pos[2]) / 65536.0f,
 				static_cast<float>(-ev.pos[1]) / 65536.0f);
         const int source_id = sim() ? sim()->sound_source_bms_id(ev.source_handle) : 0;
-		if (audio_node->slot_soundset(String(ev.set_name), pos, source_id)) {
+        const int sound_id = static_cast<int>(
+                opennova::audio::oneshot_sound_id(ev.source_handle, source_id));
+		if (audio_node->slot_soundset(String(ev.set_name), pos, source_id, sound_id)) {
 			++stat_sounds_;
 		}
 	}
@@ -258,7 +262,7 @@ void FirePresenter::present_fire_sounds(const std::vector<opennova::world::Ready
 	for (const opennova::world::ReadyFireSound &row : p_sounds) {
 		if (row.interface_set) audio_node->ui_soundset(String::utf8(row.set_name.c_str()));
 		else audio_node->fire_soundset(String::utf8(row.set_name.c_str()), mission_to_godot(row.pos),
-				row.source_bms_id);
+				row.source_bms_id, static_cast<int>(row.sound_id));
 		++stat_sounds_;
 	}
 }

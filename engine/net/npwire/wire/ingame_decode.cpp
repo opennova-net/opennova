@@ -1721,18 +1721,20 @@ bool decode_zone_presence_count(const uint8_t *body, size_t len,
 	return c.ok;
 }
 
-// §5.50 S2C 0x34 — [orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0]. The
-// position block exists on the wire only when flag == 1.
+// S2C 0x6D — the contextual radio call. Retail defaults each absent field
+// independently (event @0x430c8a, player index @0x430c9c, location word
+// @0x430cbb) and still dispatches, so this decoder never fails.
+// [orig: NapiNPClientMsg_HandleEntityDeath @ 0x430C50]
 bool decode_tracked_player_voice(const uint8_t *body, size_t len, TrackedPlayerVoice &out) {
     io::ByteReader reader(body, len);
     out.event = reader.read_u8();
     out.player_index = reader.read_u8();
     out.location = reader.read_i16();
-    // Retail defaults each absent field independently and still dispatches.
-    // [orig: NapiNPClientMsg_HandleEntityDeath @ 0x430C50]
     return true;
 }
 
+// §5.50 S2C 0x34 — [orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0]. The
+// position block exists on the wire only when flag == 1.
 bool decode_play_sound(const uint8_t *body, size_t len, PlaySoundCommand &out) {
 	out = PlaySoundCommand{};
 	Cursor c{body, body + len, true};

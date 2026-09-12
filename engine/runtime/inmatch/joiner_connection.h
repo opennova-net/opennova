@@ -576,6 +576,14 @@ public:
 	// Authoritative mission-session attributes retained from the fixed 180-byte
 	// S2C 0x64 block (little-endian dword at offset 44).
 	uint32_t mp_attributes() const { return mp_attributes_; }
+	// The joined session's published player cap, the same block's dword at
+	// offset 36: the host writes it from its own BMS admission limit [orig:
+	// Client_BuildMissionDataRequestBlock @0x51e89f <- dword_24D211C, the limit
+	// Entity_SpawnFromBMSRecord @0x40ea86 admits against; a dedicated host
+	// publishes one less @0x51e8ab]. 0 until the transfer completes. Retail
+	// joiners never admit, so only an embedder's own full-BMS load reads it
+	// (Simulation's stamp_admission_limits).
+	uint32_t session_max_players() const { return session_max_players_; }
 	const std::string &server_name() const { return server_name_; }
 	const std::string &mission_name() const { return mission_name_; }
 	const std::string &map_file() const { return map_file_; }
@@ -738,13 +746,16 @@ private:
 	SelfSpawn spawn_;
 	uint32_t game_type_ = 0;    // authoritative g_GameType learned from S2C 0x08 field 3 / 0x7B extra
 	uint32_t mp_attributes_ = 0; // S2C 0x64 fixed session block, offset 44
+	uint32_t session_max_players_ = 0; // S2C 0x64 fixed session block, offset 36
 	uint32_t mission_metadata_transfer_id_ = 0;
 	uint32_t mission_metadata_total_size_ = 0;
 	uint32_t server_info_transfer_id_ = 0;
 	std::vector<uint8_t> server_info_bytes_;
 	uint16_t exp_fanfare_ = 0;
-	std::array<uint8_t, 4> mission_metadata_mp_bytes_{};
-	uint8_t mission_metadata_mp_byte_mask_ = 0;
+	// The 0x64 block's [36, 48) window (the player-cap, game-type and mpattrib
+	// dwords) assembled across chunk boundaries; mask bit i = byte i received.
+	std::array<uint8_t, 12> mission_metadata_fixed_bytes_{};
+	uint16_t mission_metadata_fixed_byte_mask_ = 0;
 	std::string server_name_;   // authoritative S2C 0x7B field 3
 	std::string mission_name_;  // authoritative S2C 0x7B field 4 (title or waypoint filename)
 	std::string map_file_;      // authoritative S2C 0x7B field 5

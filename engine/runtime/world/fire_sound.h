@@ -62,6 +62,10 @@ struct ReadyFireSound {
     std::string set_name;
     Vec3 pos{};
     int32_t source_bms_id = 0;
+    // The own-channel reuse key (audio::oneshot_sound_id) of the source entity
+    // the immediate plays hand to the open; 0 on the delayed-slot plays, whose
+    // retail tick passes a NULL entity [orig: Sound_TickPendingSlots @ 0x52937b].
+    uint32_t sound_id = 0;
 };
 
 class FireSoundQueue {
@@ -81,8 +85,10 @@ public:
 
     // The presenting shell stamps the listener (the camera position, mission
     // frame) each frame before the tick batch [orig: listener_pos
-    // @ 0x24D6630]. Never stamped on a dedicated host — every leg then stays
-    // off, the witnessed is_mp_session_peer gate [orig: @ 0x528e57].
+    // @ 0x24D6630]. Never stamped on a dedicated host — every PLAY then stays
+    // off (the gate sits inside the plays: Sound_PlayWithDistanceAttenuation
+    // @ 0x528e57, Sound_Play3DPositional @ 0x527cb3) while the action-row
+    // replay around them still runs.
     void set_listener(const Vec3 &pos) {
         listener_ = pos;
         listener_valid_ = true;
@@ -96,13 +102,19 @@ public:
     // countdown (62 * dist / 330) >> 2 (integer division; a full pool drops
     // the sound [orig: @ 0x527c47]; a zero countdown seeds 1 [orig:
     // @ 0x527c94]); nearer plays this present.
+    // `source_handle` is the packed source EntityHandle (0xFFFF = none): with
+    // `source_bms_id` it keys the near play's own-channel reuse
+    // (audio::oneshot_sound_id) — the entity the near leg forwards [orig:
+    // @ 0x528f07]; the delayed slot carries none.
     void play_with_distance_delay(const char *set_name, const Vec3 &pos,
-                                  int32_t source_bms_id);
+                                  int32_t source_bms_id,
+                                  uint16_t source_handle = 0xFFFF);
 
     // Immediate positional play — the action-row legs
-    // [orig: Entity_PlaySound3D_FullVolume @ 0x528e20].
+    // [orig: Entity_PlaySound3D_FullVolume @ 0x528e20, the entity forwarded
+    // as the open's sound_id @ 0x528e3c].
     void play_immediate(const char *set_name, const Vec3 &pos,
-                        int32_t source_bms_id);
+                        int32_t source_bms_id, uint16_t source_handle = 0xFFFF);
 
     // Shared 32-entry trigger suppression table plus the ordinary 128-slot
     // pending pool. Reservation survives a full pending pool, as in retail.
@@ -128,8 +140,11 @@ public:
     int pending_count() const;
 
 private:
+    // Every ready row passes the presenting-peer gate here [orig:
+    // Sound_Play3DPositional @ 0x527cb3 is_mp_session_peer].
     void push_ready(const char *set_name, const Vec3 &pos,
-                    int32_t source_bms_id, bool interface_set = false);
+                    int32_t source_bms_id, uint32_t sound_id,
+                    bool interface_set = false);
 
     struct TriggerHold { std::string name; int32_t countdown = 0; };
     std::array<TriggerHold, 32> trigger_holds_{};

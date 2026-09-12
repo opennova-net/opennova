@@ -174,13 +174,16 @@ void initialize_organic_ai(World &world, Entity &entity) {
 }
 
 void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
+    // Port-side invariants, not retail words: Entity_ResetToSpawnState
+    // @0x4B9610 writes no fade/destroy state. destroy_phases_q16 /
+    // destroy_progress are derived values update_item_destroy_fade zeroes and
+    // recomputes every call, and objective_death_scored is this port's
+    // once-per-life scoring latch (retail sub_50C840 re-dispatches on the def
+    // flag alone). The +0x1B0 destroy timer is NOT re-seeded here -- retail's
+    // only re-seed is Entity_RespawnVehicle (VehicleSystem::respawn).
     entity.destroy_phases_q16.fill(0);
     entity.destroy_progress = 0;
     entity.objective_death_scored = false;
-    if (const auto *traits = world.tables.item_death_traits.get(entity.item_id)) {
-        entity.destroy_timer = traits->destroy_timing_ticks[0];
-        entity.destroy_timer_initialized = true;
-    }
     const Vec3 origin = entity.position;
     const int32_t heading = bam_heading_from_mission_yaw_deg(entity.yaw);
     const uint32_t flags = entity.flags | entity.engine_flags;

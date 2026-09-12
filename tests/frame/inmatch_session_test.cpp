@@ -21,6 +21,7 @@ bool expect(bool condition, const char *message) {
 struct TickProbe final : Role {
 	opennova::mission::MissionKernel kernel;
 	std::vector<TickInput> inputs;
+	std::vector<bool> rules_batch_flags; // World::rules.last_tick_of_batch as the tick saw it
 	int32_t logic_tick = 100;
 	int reset_calls = 0;
 	int close_calls = 0;
@@ -31,6 +32,7 @@ struct TickProbe final : Role {
 	RoleKind kind() const override { return probe_kind; }
 	void run_tick(const TickInput &input) override {
 		inputs.push_back(input);
+		rules_batch_flags.push_back(kernel.world.rules.last_tick_of_batch);
 		if (next_status == TickStatus::Ran) kernel.world.logic_tick = static_cast<uint32_t>(++logic_tick);
 	}
 	bool session_lost(SessionError &error) const override {
@@ -106,6 +108,16 @@ int main() {
 				target.inputs[1].player.look_delta_x == 0.0f &&
 				target.inputs[1].player.movement.forward,
 				"later catch-up ticks reuse held state without edges")) return 1;
+		// dword_24E0E80: 0 while catching up, 1 on the batch's last tick, and
+		// World::rules carries the copy before the role's tick runs.
+		bool batch_flags_ok = target.rules_batch_flags.size() == target.inputs.size();
+		for (size_t i = 0; batch_flags_ok && i < target.inputs.size(); ++i) {
+			const bool last = i + 1 == target.inputs.size();
+			batch_flags_ok = target.inputs[i].last_tick_of_batch == last &&
+					target.rules_batch_flags[i] == last;
+		}
+		if (!expect(batch_flags_ok,
+				"only the batch's last tick carries last_tick_of_batch")) return 1;
 	}
 
 	// A zero-tick frame retains edge input until a tick actually runs.
@@ -174,6 +186,9 @@ int main() {
 		if (!expect(session.drive_one().ticks_run() == 1 &&
 				session.last_perf().ticks == 1,
 				"external network drive records one tick")) return 1;
+		if (!expect(target.inputs.size() == 1 && target.inputs[0].last_tick_of_batch &&
+				target.rules_batch_flags[0],
+				"a one-tick drive is its own batch end")) return 1;
 		if (!expect(session.step_once().status == FrameStatus::NotRunning,
 				"network role rejects manual step")) return 1;
 		if (!expect(session.last_perf().ticks == 0,

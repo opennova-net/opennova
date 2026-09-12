@@ -41,15 +41,19 @@ func is_click_active() -> bool:
 	return _click_active
 
 
-## Shift+F6: pick whatever the crosshair is on, with a brief on-screen toast.
-func pick_at_crosshair(sim: Simulation, camera: Camera3D, toast_mount: Node) -> void:
-	flow.pick_at_crosshair(sim, camera, list, toast_mount)
+## Shift+F6: pick whatever the crosshair is on, with a brief on-screen toast;
+## `presenter` is the presenter the surface draws through (the shell's).
+func pick_at_crosshair(sim: Simulation, camera: Camera3D,
+		presenter: LocalPlayerPresenter, toast_mount: Node) -> void:
+	flow.pick_at_crosshair(sim, camera, presenter, list, toast_mount)
 
 
 ## While the dev tools are open (mouse released), a world click ray-picks the
-## entity under the cursor into the pick list. The catcher lives under the
-## world so it sees clicks in the world viewport's coordinates; the old one
-## detaches before its deferred destruction so the name stays stable.
+## entity under the cursor into the pick list, through the presenter the
+## world draws through (its local view presenter, bound by the shell before
+## any catcher exists). The catcher lives under the world so it sees clicks in
+## the world viewport's coordinates; the old one detaches before its deferred
+## destruction so the name stays stable.
 func _set_click_catcher(world: GameWorld, enabled: bool) -> void:
 	var existing: Node = world.get_node_or_null(NodePath(PICK_CATCHER_NAME))
 	if existing != null:
@@ -60,4 +64,4 @@ func _set_click_catcher(world: GameWorld, enabled: bool) -> void:
 	var catcher := PickClickCatcher.new()
 	catcher.name = PICK_CATCHER_NAME
 	world.add_child(catcher)
-	catcher.setup(world.world_view(), list)
+	catcher.setup(world.world_view(), world.local_view_presenter(), list)

@@ -513,6 +513,15 @@ uint32_t pulse_color(uint32_t argb, int ticks) {
 
 } // namespace
 
+void hud_icon_strip_cell_uv(const HudMinimapInput &input, uint8_t icon,
+		float &u0, float &v0, float &u1, float &v1) {
+	marker_uv(input, icon, u0, v0, u1, v1);
+}
+
+uint32_t hud_icon_strip_modulate2x_color(uint32_t argb) {
+	return marker_modulate2x_color(argb);
+}
+
 int32_t spinmap_zoom_step(int32_t zoom_q16, int direction) {
 	// direction 0 never reaches here: HudMapControl::zoom_step owns the reset
 	// (the mission-scaled spawn zoom), so a constant-default branch would be

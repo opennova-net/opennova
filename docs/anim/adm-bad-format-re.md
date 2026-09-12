@@ -152,5 +152,26 @@ Sparse checkpoints preserve repeated-addition rounding during independent
 playheads and seeks. The root-motion terminal sample clears XYZ and trigger
 while retaining the capsule. The FP viewmodel uses divisor 62 for this channel;
 automatic ACTION milliseconds retain their separate 62.5-tick conversion.
-[orig: AnimChannel_InitFromData @ 0x410560, delta store @ 0x41058E;
-AnimChannel_AdvancePlayback @ 0x40B140, add @ 0x40B153]
+No fps test guards the delta: an fps of 0 is a channel frozen at frame 0 with
+live capsule extents, and the port keeps such a clip rather than dropping it.
+[orig: AnimChannel_InitFromData @ 0x410560, delta store @ 0x4105BA (fps load
+@ 0x41058E, no test); AnimChannel_AdvancePlayback @ 0x40B140, add @ 0x40B156,
+compare @ 0x40B15E]
+
+The loop seam differs once an end-notify is armed. AnimMap arms flag 0x40000
+on the channel every tick a deferred state waits and promotes on the latched
+0x20000 BEFORE the advance and the keyframe sample. AnimChannel_AdvancePlayback
+then wraps the time and, with 0x40000 set, overwrites it with the 0.99999 park
+and latches 0x20000 without the 0x10000 stop, so the wrap tick samples the clip
+end (rec[frames-1]..rec[frames], trigger[frames-1]) and the promoted clip's
+frame 0 lands on the next tick. `ClipTimeline::normalized_at(ticks,
+armed_boundary)` and `AdmRootMotion::advance_armed` carry that park (ctest
+`simassets_adm_playback`), and both consumers take it through the
+`IRootMotionSource::advance_armed` seam: the local primary channel arms its
+step-3b promotion clock (`clip_length_ticks`, the clip's first end) and the
+replica channel arms its lazily computed `net_anim_pending_boundary`; each
+promotes on the next tick.
+[orig: AnimMap_UpdateEntity pending check @ 0x40B77B..0x40B7E1 (promote
+@ 0x40B795 / @ 0x40B7C3, arm @ 0x40B7AD / @ 0x40B7DB), advance @ 0x40B7FE,
+sample @ 0x40B82A; AnimChannel_AdvancePlayback @ 0x40B193 (0x40000 test), wrap
+@ 0x40B199, park @ 0x40B1A2..0x40B1B1]

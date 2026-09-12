@@ -8,7 +8,9 @@
 #include <cstring>
 #include <string>
 
+#include <runtime/world/weapon_fire_gate.h>
 #include <runtime/world/weapon_fsm.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 namespace wa = opennova::world::weapon_action;
@@ -1216,6 +1218,95 @@ void test_received_action_kick_and_signed_loop_lifetime() {
     CHECK(slot.heat_window_end_tick == 111 && slot.kick == 198);
 }
 
+// The fire-loop emitter waits for the frame's last logic tick: while the bank
+// catches up the kick still decays but nothing registers.
+// [orig: WeaponAction_ProcessFrame @0x5412a7; Game_MainLoop @0x52ba32..0x52ba3a]
+void test_fireloop_emitter_waits_for_the_last_catch_up_tick() {
+    WeaponFsmDef def;
+    std::strcpy(def.soundfireloop, "LOOP");
+    def.clip_capacity = -1;
+    WeaponSlotState slot;
+    slot.current = slot.next = wa::kFire;
+    slot.phase = weapon_phase::kDone;
+    slot.counter = 6;
+    slot.kick = 20;
+    WeaponFsmInputs input;
+    input.is_local = false;
+    input.current_tick = 100;
+    input.last_tick_of_batch = false;
+    WeaponFsmEvents event;
+    weapon_fsm_tick(def, slot, input, event);
+    CHECK(slot.kick == 19 && event.fireloop_lifetime_ticks == 0);
+    input.last_tick_of_batch = true;
+    weapon_fsm_tick(def, slot, input, event);
+    CHECK(slot.kick == 18 && event.fireloop_lifetime_ticks == 18);
+}
+
+// A gunner on an attached, parent-routed mountable gun measures its fire
+// origin against twice the type-1 EWEAP hull's bound radius; without the
+// redirect bit, or on a mount that is not a mountable gun, the turret's own
+// doubled radius stands.
+// [orig: Server_ClientFiredRound @0x50c43e..0x50c475; Entity_IsMountableGun @0x434240]
+void test_gunner_origin_limit_follows_the_redirected_hull() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    Entity hull;
+    hull.kind = EntityKind::Item;
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.item_attrib = kItemAttribEweap;
+    hull.bound_radius = 20.0f;
+    const EntityHandle hull_handle = world.registry.spawn(1, hull);
+    Entity turret;
+    turret.kind = EntityKind::Item;
+    turret.has_item_def = true;
+    turret.item_type = 5;
+    turret.item_attrib = kItemAttribEweap;
+    turret.emplacement_attachment_flags = 2;
+    turret.bound_radius = 2.0f;
+    turret.ground_target = hull_handle;
+    turret.primary_weapon_slot.redirect_to_parent_slot = true;
+    const EntityHandle turret_handle = world.registry.spawn(1, turret);
+    Entity gunner;
+    gunner.kind = EntityKind::Organic;
+    gunner.flags = kEntityFlagPlayer;
+    gunner.mount_target = turret_handle;
+    gunner.mount_type = SeatType::Gunner;
+    const Entity &owner = *world.registry.get(world.registry.spawn(0, gunner));
+    WeaponTableEntry weapon;
+    const FixedVec3 origin{10 * 65536, 0, 0}; // 10 u: past 2 x 2 u, within 2 x 20 u
+    CHECK(weapon_fire_origin_status(world, owner, weapon, origin, false) == 0);
+    Entity *mount = world.registry.get(turret_handle);
+    mount->primary_weapon_slot.redirect_to_parent_slot = false;
+    CHECK(weapon_fire_origin_status(world, owner, weapon, origin, false) == -17);
+    mount->primary_weapon_slot.redirect_to_parent_slot = true;
+    mount->item_type = 1; // not a mountable gun: the hull leg is skipped
+    CHECK(weapon_fire_origin_status(world, owner, weapon, origin, false) == -17);
+}
+
+// A vehicle's primary slot seeds the zero-yaw term (MountSlot+8) from its
+// seeded step, outside the flags & 3 elevation gate and with the parallax sign
+// kept [orig: WeaponSlot_InitFromEntityDef @0x5466c0 -> WeaponSlot_InitFromDef
+// @0x53ef4f..0x53ef8b].
+void test_vehicle_slot_install_seeds_the_zero_yaw() {
+    World world;
+    world.tables.weapons.entries.resize(2);
+    WeaponTableEntry &weapon = world.tables.weapons.entries[1];
+    weapon.name = "WPN_PARALAX_TURRET";
+    weapon.valid = true;
+    weapon.action_fsm.scope_zero.max_steps = 10;
+    weapon.action_fsm.scope_zero.step_metres = 100;
+    weapon.action_fsm.scope_zero.default_metres = 300;
+    weapon.action_fsm.scope_zero.paralax_distance_q16 = -(2 << 16);
+    Entity mount;
+    mount.primary_weapon = weapon.name;
+    CHECK(world.vehicles.prepare_weapon_slot(mount));
+    CHECK(mount.primary_weapon_slot.scope_zero == 3);
+    CHECK(mount.primary_weapon_slot.zero_pitch == 0);      // flags & 3 clear
+    CHECK(mount.primary_weapon_slot.zero_yaw == -4557034); // atan(-2 / 300), sign kept
+}
+
 int main() {
     test_received_action_kick_and_signed_loop_lifetime();
     test_ticks_from_ms();
@@ -1253,6 +1344,9 @@ int main() {
     test_heat_ceiling_clamps_the_window();
     test_no_heat_model_never_stamps_a_window();
     test_submerging_clears_the_heat_window();
+    test_fireloop_emitter_waits_for_the_last_catch_up_tick();
+    test_gunner_origin_limit_follows_the_redirected_hull();
+    test_vehicle_slot_install_seeds_the_zero_yaw();
     if (failures == 0) std::printf("weapon_fsm_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

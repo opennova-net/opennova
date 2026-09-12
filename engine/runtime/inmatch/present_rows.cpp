@@ -231,6 +231,14 @@ double pool_present_yaw_deg(const Entity &e, const AiEntity *ae, EntityClass cls
 	return static_cast<double>(e.yaw);
 }
 
+// One pool row from the authoritative record: the body every host/SP world
+// row and the joiner's appended fragment rows share (defined below the two
+// collectors).
+static void write_world_present_row(const PresentRowsContext &context,
+		const Entity *local_player, bool first_person_usegun, const Entity &e,
+		int row_index, PoolPresentLifecycleMap &lifecycle, float *r,
+		DoorPhaseTable &door_phases);
+
 void build_client_replica_present_rows(const PresentRowsContext &context,
         PoolPresentLifecycleMap &lifecycle, std::vector<float> &out, DoorPhaseTable &door_phases) {
 	out.clear();
@@ -523,27 +531,21 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
         }
     }
     // A callback allocates its fragment directly into the local pool. It has
-    // no independent spawn message to wait for. Use the ordinary pool writer
-    // and append only these locally created rows; keep decoded organics on
-    // their receive-side animation path.
+    // no independent spawn message to wait for. Append only these locally
+    // created rows through the ordinary pool-row writer (a fragment publishes
+    // no door entry); keep decoded organics on their receive-side animation
+    // path. Only the fragment rows touch the shared lifecycle map.
     // [orig: Entity_CloneFromTemplateByType @ 0x4398A0;
     // collect_visible_entities_for_terrain @ 0x5C8C60]
-    bool local_pieces = false;
+    if (!joiner) return;
+    DoorPhaseTable unused_doors;
     kernel.world.registry.for_each([&](const Entity &entity) {
-        if (entity.item_section_piece && cs.find(entity.handle.packed) == nullptr)
-            local_pieces = true;
+        if (!entity.item_section_piece || cs.find(entity.handle.packed) != nullptr) return;
+        const int row_index = static_cast<int>(out.size() / PF_STRIDE);
+        out.resize(out.size() + PF_STRIDE, 0.0f);
+        write_world_present_row(context, local_player, first_person_usegun, entity, row_index,
+                lifecycle, out.data() + static_cast<size_t>(row_index) * PF_STRIDE, unused_doors);
     });
-    if (joiner && local_pieces) {
-        std::vector<float> native;
-        DoorPhaseTable unused_doors;
-        build_world_present_rows(context, lifecycle, native, unused_doors);
-        for (size_t offset = 0; offset < native.size(); offset += PF_STRIDE) {
-            const auto handle = EntityHandle{uint16_t(native[offset + PF_WIRE_HANDLE])};
-            const Entity *entity = kernel.world.registry.get(handle);
-            if (entity && entity->item_section_piece && cs.find(handle.packed) == nullptr)
-                out.insert(out.end(), native.begin() + offset, native.begin() + offset + PF_STRIDE);
-        }
-    }
 }
 
 void build_world_present_rows(const PresentRowsContext &context,
@@ -568,176 +570,185 @@ void build_world_present_rows(const PresentRowsContext &context,
 	int i = 0;
 	w.registry.for_each([&](const Entity &e) {
 		const int row_index = i++;
-		float *r = rows + static_cast<size_t>(row_index) * PF_STRIDE;
-		const EntityHandle h = e.handle;
-		const EntityClass cls = replication::entity_class_of(e);
-		const AiEntity *ae = w.ai.for_handle(h);
-		initialize_client_replica_present_row(r);
-
-		// Wire identity + lifecycle, exactly what project_client_replica_present_row
-		// derives for a decoded row, sourced from the authoritative record.
-		r[PF_TYPE_ID] = static_cast<float>(static_cast<uint16_t>(e.item_id));
-		r[PF_WIRE_HANDLE] = static_cast<float>(h.packed);
-		// The groundEntity/mount link the footstep slot reads (mount wins over
-		// ground — retail: NetPacket_SerializePlayerState op1 @0x4c0a08, see
-		// docs/net/novaworld-net-re.md); -1 = free-standing.
-		const uint16_t carrier = e.mounted && e.mount_target.valid()
-				? e.mount_target.packed
-				: (e.ground_target.valid() ? e.ground_target.packed : EntityHandle::kInvalid);
-		r[PF_CARRIER_HANDLE] = carrier != EntityHandle::kInvalid
-				? static_cast<float>(carrier) : -1.0f;
-		if (cls == EntityClass::Player) {
-			// A player's wire net_id IS its packed character id (entity+0x15C).
-			r[PF_CHARACTER_ID] = static_cast<float>(replication::player_wire_net_id(e));
-		}
-        const Vec3 render_position = item_section_render_position(w, e);
-		r[PF_POS_X] = render_position.x;
-		r[PF_POS_Y] = render_position.z;
-		r[PF_POS_Z] = -render_position.y;
-		r[PF_PITCH_DEG] = static_cast<float>(e.pitch);
-		r[PF_YAW_DEG] = static_cast<float>(pool_present_yaw_deg(e, ae, cls));
-		r[PF_ROLL_DEG] = static_cast<float>(e.roll);
-		// The decoded fold bumps a row's respawn revision on every dead->alive
-		// edge of its wire state byte (organic bit 1; vehicle wrecks flag 4).
-		// Mirror that edge from the authoritative flags so WirePresentPass
-		// re-seeds the same way on the host.
-		{
-			const uint8_t dead_bit = cls == EntityClass::Vehicle
-					? replication::kVehicleFlagDeadPose
-					: static_cast<uint8_t>(kEntityFlagDead);
-			const bool dead = (e.flags & dead_bit) != 0u;
-			PoolPresentLifecycle &life = lifecycle[h.packed];
-			if (life.registry_spawn_id != e.registry_spawn_id) {
-				life.registry_spawn_id = e.registry_spawn_id;
-				life.dead_known = false;
-			}
-			if (life.dead_known && life.dead && !dead) ++life.respawn_revision;
-			life.dead_known = true;
-			life.dead = dead;
-			r[PF_RESPAWN_REVISION] = static_cast<float>(life.respawn_revision);
-		}
-		r[PF_KIND] = static_cast<float>(e.spawn_origin >> 24);
-		r[PF_INDEX] = static_cast<float>(spawn_origin_index(e.spawn_origin));
-		r[PF_BMS_ID] = static_cast<float>(e.bms_id);
-		r[PF_NET_ID] = static_cast<float>(e.net_id);
-		r[PF_BODY_ANIM_SLOT] = static_cast<float>(e.body_anim_slot);
-		r[PF_HIDDEN] = e.hidden ? 1.0f : 0.0f;
-		r[PF_ALIVE] = e.alive ? 1.0f : 0.0f;
-        r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
-        for (int phase = 0; phase < 6; ++phase)
-            r[PF_OBJECT_DESTROY + phase] = float(e.destroy_phases_q16[phase]);
-		// The authority owns the exact MoveOrder stance latch (bits 8/9 of
-		// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
-		// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
-		r[PF_STANCE_BITS] = static_cast<float>(e.net_stance_bits & 0x03u);
-		write_present_section_mask(r, item_hidden_sections(e));
-		write_present_doors(r, row_index, w, e, door_phases);
-		r[PF_RIGHT_HAND_COLLAPSED] =
-				simassets::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
-		// The cveh render callback publishes directly from the live entity
-		// motor fields [orig: Entity_CacheVehicleHUDStats @0x4929B0, stores
-		// @0x4929D7 / @0x4929F1; see docs/world/vehicle-client-movers-re.md].
-		write_present_vehicle_motion_controls(r, w, e);
-		// Only a carrier in the witnessed live UseGun attachment relation
-		// publishes its inline MountSlot's HEAT_GLOW, including owned cold zero.
-		// [orig: attachment call @0x546518; HUD_CacheWeaponSlotInfo stores
-		//  @0x440969 / @0x440991; see docs/world/world-wac-ai-re.md]
-		write_present_world_model_heat_glow(r, w, e);
-		// The local first-person UseGun parent cull is a render verdict of THIS
-		// machine's own mount state [orig: Entity_RenderVehicleModel @0x4407d0
-		// predicate @0x4407f6..0x44084c, sole submit @0x440918; see
-		// docs/world/world-wac-ai-re.md].
-		if (first_person_usegun && local_player->mount_target == h &&
-				local_view_suppresses_mount(kernel, h, e.primary_weapon_slot_adm))
-			r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
-		// Two retail callbacks write this three-register family. The sector
-		// renderer publishes TEX_TEAM for every placed pool-1/2/3 model that
-		// reaches its model callback. The generic-world callback publishes the
-		// same TEX_TEAM plus TEAMSWING for a nonzero packed zone byte, and writes
-		// LFP only when the client-side shared timer-list entry exists.
-		// [orig: render_sector_entity @0x5C424F..0x5C425F;
-		//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB; see docs/world/world-wac-ai-re.md]
-		const bool sector_model_row = h.pool() >= 1 && h.pool() <= 3;
-		const bool zone_ctrl = e.zone_number != 0 &&
-				zone_chain_zone_info_byte(w.zones.chain, e) != 0;
-		const int32_t signed_team = e.team < 0x80u
-				? static_cast<int32_t>(e.team)
-				: static_cast<int32_t>(e.team) - 0x100;
-		if (sector_model_row || zone_ctrl) {
-			r[PF_TEX_TEAM_VALID] = 1.0f;
-			r[PF_TEX_TEAM] = static_cast<float>(signed_team);
-		}
-		if (zone_ctrl) {
-			r[PF_ZONE_CTRL_VALID] = 1.0f;
-			const int32_t team_swing = e.team == 1u ? 0 : (e.team == 2u ? 0x10000 : 0x8000);
-			r[PF_TEAMSWING] = static_cast<float>(team_swing);
-			int32_t camp_percent = 0;
-			if (context.runtime != nullptr &&
-					context.runtime->lfp_cam_percent(h.packed, camp_percent)) {
-				r[PF_LFP_CAMPPERCENT_VALID] = 1.0f;
-				r[PF_LFP_CAMPPERCENT] = static_cast<float>(camp_percent);
-			}
-		}
-		EmplacedWeaponControls emplaced;
-		if (emplaced_weapon_controls_for(w, e, emplaced))
-			write_present_emplaced_controls(r, emplaced);
-		if (ae == nullptr) return;
-		for (int slot = 0; slot < 2; ++slot) {
-			// HUD_CacheEntityDisplayInfo copies comp[113/114] as raw
-			// signed dwords. Do not normalize wrapping zero-time states.
-			// [orig: HUD_CacheEntityDisplayInfo stores @0x4A3E2D/@0x4A3E38;
-			//  see docs/world/world-wac-ai-re.md]
-			const int32_t phase = ae->brain.f[AiBrain::kPartAnimPhase0 + slot];
-			const bool publish = slot != 0 || (e.item_attrib & 0x1000u) == 0;
-			uint32_t phase_bits;
-			std::memcpy(&phase_bits, &phase, sizeof(phase_bits));
-			// The float snapshot transports both 16-bit words as exact
-			// integers. ACTIVE zero means unpublished; otherwise it is
-			// high16+1.
-			r[PF_PHASE1 + slot * 2] = static_cast<float>(phase_bits & 0xFFFFu);
-			r[PF_ACTIVE1 + slot * 2] = publish
-					? static_cast<float>((phase_bits >> 16) + 1u)
-					: 0.0f;
-		}
-		if (!ae->inf.active) return;
-		r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
-		r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
-		if (ae->inf.body_blend_active()) {
-			r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
-			r[PF_ANIM_SOURCE_PHASE_TICKS] =
-					static_cast<float>(ae->inf.anim_prev_clip_phase);
-			r[PF_ANIM_BLEND_WEIGHT] = ae->inf.anim_blend_weight;
-		}
-		// The upper-body weapon channel this body derived for itself; the gate
-		// is the §14.8.6 consumer test and engine_flags bit 0x100 is the "is a
-		// player" mirror of entity+0x24 (NPCs carry no hold ladder).
-		if (infantry_weapon_channel_visible(
-					ae->inf, (e.engine_flags & kEntityFlagPlayer) != 0,
-					simassets::mount_blocks_weapon_channel(e))) {
-			r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.wpn_state);
-			r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
-			r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
-			if (ae->inf.weapon_blend_active()) {
-				r[PF_WPN_SOURCE_STATE] = static_cast<float>(ae->inf.wpn_prev);
-				r[PF_WPN_SOURCE_PHASE_TICKS] =
-						static_cast<float>(ae->inf.wpn_prev_clip_phase);
-				r[PF_WPN_BLEND_WEIGHT] = ae->inf.wpn_blend_weight;
-				r[PF_WPN_SOURCE_VARIANT] =
-						static_cast<float>(ae->inf.wpn_prev_variant);
-			}
-		}
-		const anim::AimOverlayInputs inputs = simassets::aim_overlay_inputs_for(*ae, e);
-		anim::AimOverlayAngles angles[anim::kOverlayClassCount];
-		anim::compute_aim_overlay_angles(inputs, angles);
-		write_present_overlay(r, angles);
-		// This body's third-person gun. Player rows only: retail's composition
-		// gate is the Flags 0x100 player classifier.
-		if ((e.engine_flags & kEntityFlagPlayer) != 0) {
-			write_present_held_weapon(
-					r, e.equipped_adm_index, (e.flags & kEntityFlagDead) != 0, inputs,
-					ae->inf.wpn_state);
-		}
+		write_world_present_row(context, local_player, first_person_usegun, e, row_index,
+				lifecycle, rows + static_cast<size_t>(row_index) * PF_STRIDE, door_phases);
 	});
+}
+
+static void write_world_present_row(const PresentRowsContext &context,
+		const Entity *local_player, bool first_person_usegun, const Entity &e,
+		int row_index, PoolPresentLifecycleMap &lifecycle, float *r,
+		DoorPhaseTable &door_phases) {
+	mission::MissionKernel &kernel = context.kernel;
+	const World &w = kernel.world;
+	const EntityHandle h = e.handle;
+	const EntityClass cls = replication::entity_class_of(e);
+	const AiEntity *ae = w.ai.for_handle(h);
+	initialize_client_replica_present_row(r);
+
+	// Wire identity + lifecycle, exactly what project_client_replica_present_row
+	// derives for a decoded row, sourced from the authoritative record.
+	r[PF_TYPE_ID] = static_cast<float>(static_cast<uint16_t>(e.item_id));
+	r[PF_WIRE_HANDLE] = static_cast<float>(h.packed);
+	// The groundEntity/mount link the footstep slot reads (mount wins over
+	// ground — retail: NetPacket_SerializePlayerState op1 @0x4c0a08, see
+	// docs/net/novaworld-net-re.md); -1 = free-standing.
+	const uint16_t carrier = e.mounted && e.mount_target.valid()
+			? e.mount_target.packed
+			: (e.ground_target.valid() ? e.ground_target.packed : EntityHandle::kInvalid);
+	r[PF_CARRIER_HANDLE] = carrier != EntityHandle::kInvalid
+			? static_cast<float>(carrier) : -1.0f;
+	if (cls == EntityClass::Player) {
+		// A player's wire net_id IS its packed character id (entity+0x15C).
+		r[PF_CHARACTER_ID] = static_cast<float>(replication::player_wire_net_id(e));
+	}
+    const Vec3 render_position = item_section_render_position(w, e);
+	r[PF_POS_X] = render_position.x;
+	r[PF_POS_Y] = render_position.z;
+	r[PF_POS_Z] = -render_position.y;
+	r[PF_PITCH_DEG] = static_cast<float>(e.pitch);
+	r[PF_YAW_DEG] = static_cast<float>(pool_present_yaw_deg(e, ae, cls));
+	r[PF_ROLL_DEG] = static_cast<float>(e.roll);
+	// The decoded fold bumps a row's respawn revision on every dead->alive
+	// edge of its wire state byte (organic bit 1; vehicle wrecks flag 4).
+	// Mirror that edge from the authoritative flags so WirePresentPass
+	// re-seeds the same way on the host.
+	{
+		const uint8_t dead_bit = cls == EntityClass::Vehicle
+				? replication::kVehicleFlagDeadPose
+				: static_cast<uint8_t>(kEntityFlagDead);
+		const bool dead = (e.flags & dead_bit) != 0u;
+		PoolPresentLifecycle &life = lifecycle[h.packed];
+		if (life.registry_spawn_id != e.registry_spawn_id) {
+			life.registry_spawn_id = e.registry_spawn_id;
+			life.dead_known = false;
+		}
+		if (life.dead_known && life.dead && !dead) ++life.respawn_revision;
+		life.dead_known = true;
+		life.dead = dead;
+		r[PF_RESPAWN_REVISION] = static_cast<float>(life.respawn_revision);
+	}
+	r[PF_KIND] = static_cast<float>(e.spawn_origin >> 24);
+	r[PF_INDEX] = static_cast<float>(spawn_origin_index(e.spawn_origin));
+	r[PF_BMS_ID] = static_cast<float>(e.bms_id);
+	r[PF_NET_ID] = static_cast<float>(e.net_id);
+	r[PF_BODY_ANIM_SLOT] = static_cast<float>(e.body_anim_slot);
+	r[PF_HIDDEN] = e.hidden ? 1.0f : 0.0f;
+	r[PF_ALIVE] = e.alive ? 1.0f : 0.0f;
+    r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+    for (int phase = 0; phase < 6; ++phase)
+        r[PF_OBJECT_DESTROY + phase] = float(e.destroy_phases_q16[phase]);
+	// The authority owns the exact MoveOrder stance latch (bits 8/9 of
+	// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
+	// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
+	r[PF_STANCE_BITS] = static_cast<float>(e.net_stance_bits & 0x03u);
+	write_present_section_mask(r, item_hidden_sections(e));
+	write_present_doors(r, row_index, w, e, door_phases);
+	r[PF_RIGHT_HAND_COLLAPSED] =
+			simassets::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
+	// The cveh render callback publishes directly from the live entity
+	// motor fields [orig: Entity_CacheVehicleHUDStats @0x4929B0, stores
+	// @0x4929D7 / @0x4929F1; see docs/world/vehicle-client-movers-re.md].
+	write_present_vehicle_motion_controls(r, w, e);
+	// Only a carrier in the witnessed live UseGun attachment relation
+	// publishes its inline MountSlot's HEAT_GLOW, including owned cold zero.
+	// [orig: attachment call @0x546518; HUD_CacheWeaponSlotInfo stores
+	//  @0x440969 / @0x440991; see docs/world/world-wac-ai-re.md]
+	write_present_world_model_heat_glow(r, w, e);
+	// The local first-person UseGun parent cull is a render verdict of THIS
+	// machine's own mount state [orig: Entity_RenderVehicleModel @0x4407d0
+	// predicate @0x4407f6..0x44084c, sole submit @0x440918; see
+	// docs/world/world-wac-ai-re.md].
+	if (first_person_usegun && local_player->mount_target == h &&
+			local_view_suppresses_mount(kernel, h, e.primary_weapon_slot_adm))
+		r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
+	// Two retail callbacks write this three-register family. The sector
+	// renderer publishes TEX_TEAM for every placed pool-1/2/3 model that
+	// reaches its model callback. The generic-world callback publishes the
+	// same TEX_TEAM plus TEAMSWING for a nonzero packed zone byte, and writes
+	// LFP only when the client-side shared timer-list entry exists.
+	// [orig: render_sector_entity @0x5C424F..0x5C425F;
+	//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB; see docs/world/world-wac-ai-re.md]
+	const bool sector_model_row = h.pool() >= 1 && h.pool() <= 3;
+	const bool zone_ctrl = e.zone_number != 0 &&
+			zone_chain_zone_info_byte(w.zones.chain, e) != 0;
+	const int32_t signed_team = e.team < 0x80u
+			? static_cast<int32_t>(e.team)
+			: static_cast<int32_t>(e.team) - 0x100;
+	if (sector_model_row || zone_ctrl) {
+		r[PF_TEX_TEAM_VALID] = 1.0f;
+		r[PF_TEX_TEAM] = static_cast<float>(signed_team);
+	}
+	if (zone_ctrl) {
+		r[PF_ZONE_CTRL_VALID] = 1.0f;
+		const int32_t team_swing = e.team == 1u ? 0 : (e.team == 2u ? 0x10000 : 0x8000);
+		r[PF_TEAMSWING] = static_cast<float>(team_swing);
+		int32_t camp_percent = 0;
+		if (context.runtime != nullptr &&
+				context.runtime->lfp_cam_percent(h.packed, camp_percent)) {
+			r[PF_LFP_CAMPPERCENT_VALID] = 1.0f;
+			r[PF_LFP_CAMPPERCENT] = static_cast<float>(camp_percent);
+		}
+	}
+	EmplacedWeaponControls emplaced;
+	if (emplaced_weapon_controls_for(w, e, emplaced))
+		write_present_emplaced_controls(r, emplaced);
+	if (ae == nullptr) return;
+	for (int slot = 0; slot < 2; ++slot) {
+		// HUD_CacheEntityDisplayInfo copies comp[113/114] as raw
+		// signed dwords. Do not normalize wrapping zero-time states.
+		// [orig: HUD_CacheEntityDisplayInfo stores @0x4A3E2D/@0x4A3E38;
+		//  see docs/world/world-wac-ai-re.md]
+		const int32_t phase = ae->brain.f[AiBrain::kPartAnimPhase0 + slot];
+		const bool publish = slot != 0 || (e.item_attrib & 0x1000u) == 0;
+		uint32_t phase_bits;
+		std::memcpy(&phase_bits, &phase, sizeof(phase_bits));
+		// The float snapshot transports both 16-bit words as exact
+		// integers. ACTIVE zero means unpublished; otherwise it is
+		// high16+1.
+		r[PF_PHASE1 + slot * 2] = static_cast<float>(phase_bits & 0xFFFFu);
+		r[PF_ACTIVE1 + slot * 2] = publish
+				? static_cast<float>((phase_bits >> 16) + 1u)
+				: 0.0f;
+	}
+	if (!ae->inf.active) return;
+	r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
+	r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
+	if (ae->inf.body_blend_active()) {
+		r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
+		r[PF_ANIM_SOURCE_PHASE_TICKS] =
+				static_cast<float>(ae->inf.anim_prev_clip_phase);
+		r[PF_ANIM_BLEND_WEIGHT] = ae->inf.anim_blend_weight;
+	}
+	// The upper-body weapon channel this body derived for itself; the gate
+	// is the §14.8.6 consumer test and engine_flags bit 0x100 is the "is a
+	// player" mirror of entity+0x24 (NPCs carry no hold ladder).
+	if (infantry_weapon_channel_visible(
+				ae->inf, (e.engine_flags & kEntityFlagPlayer) != 0,
+				simassets::mount_blocks_weapon_channel(e))) {
+		r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.wpn_state);
+		r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
+		r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
+		if (ae->inf.weapon_blend_active()) {
+			r[PF_WPN_SOURCE_STATE] = static_cast<float>(ae->inf.wpn_prev);
+			r[PF_WPN_SOURCE_PHASE_TICKS] =
+					static_cast<float>(ae->inf.wpn_prev_clip_phase);
+			r[PF_WPN_BLEND_WEIGHT] = ae->inf.wpn_blend_weight;
+			r[PF_WPN_SOURCE_VARIANT] =
+					static_cast<float>(ae->inf.wpn_prev_variant);
+		}
+	}
+	const anim::AimOverlayInputs inputs = simassets::aim_overlay_inputs_for(*ae, e);
+	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
+	anim::compute_aim_overlay_angles(inputs, angles);
+	write_present_overlay(r, angles);
+	// This body's third-person gun. Player rows only: retail's composition
+	// gate is the Flags 0x100 player classifier.
+	if ((e.engine_flags & kEntityFlagPlayer) != 0) {
+		write_present_held_weapon(
+				r, e.equipped_adm_index, (e.flags & kEntityFlagDead) != 0, inputs,
+				ae->inf.wpn_state);
+	}
 }
 
 } // namespace opennova::inmatch

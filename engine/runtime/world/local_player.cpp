@@ -5,6 +5,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/mount_controls.h>
+#include <runtime/world/player_present.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/vehicle_attach.h>
@@ -105,12 +106,22 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	w::local_player_view_refresh(&world, view);
 }
 
+// [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0 -- the CanFire, equipped-slot
+//  and zero-table gates @0x4dbcc3..0x4dbcf7, then the clamp, the click, the
+//  pitch delta and the yaw term]
 bool LocalPlayer::request_scope_zero(int delta) {
     if (!weapon.active || !local_player_can_fire()) return false;
     WeaponSlotState &slot = *active_local_weapon_slot(world_, weapon);
     const int16_t next = weapon_scope_zero_adjust(weapon.def.scope_zero, slot.scope_zero,
-        delta, world_.rules.session_open, (world_.match.rules().game_type & 0x10000u) != 0);
+        delta, world_.rules.session_open, world_.rules.auto_scope_zero);
     if (next == slot.scope_zero) return false;
+    // A changed zero clicks the GF_SCOPE_ZERO interface set (player_present.h
+    // carries the witnesses); the shell plays Interface script sounds 2D
+    // [orig: @0x4dbd47..0x4dbd50 -> Sound_PlayInterfaceTriggerSet @0x527be0].
+    ScriptSoundEvent click;
+    click.name = kScopeZeroSoundset;
+    click.kind = ScriptSoundEvent::Kind::Interface;
+    world_.out.script_sounds.push_back(std::move(click));
     slot.scope_zero = next;
     if (!weapon.usegun_slot_active && inventory_valid) {
         if (WeaponInventorySlot *entry = inventory.slot(inventory.equipped_combo)) entry->scope_zero = next;
@@ -118,6 +129,10 @@ bool LocalPlayer::request_scope_zero(int delta) {
     const int32_t offset = weapon_scope_zero_pitch(weapon.def.scope_zero, next);
     input.look_pitch = io::bam_add(input.look_pitch, io::bam_sub(offset, slot.zero_pitch));
     slot.zero_pitch = offset;
+    // The zero-yaw partner (MountSlot+8), negated here for a negative parallax
+    // [orig: @0x4dbd91..0x4dbde3 -- the negate @0x4dbddf..0x4dbde3].
+    slot.zero_yaw = weapon_scope_zero_yaw(weapon.def.scope_zero, next);
+    if (weapon.def.scope_zero.paralax_distance_q16 < 0) slot.zero_yaw = -slot.zero_yaw;
     return true;
 }
 

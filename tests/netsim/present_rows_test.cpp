@@ -266,6 +266,12 @@ bool test_joiner_palm_source_and_local_fragment() {
             row_at(rows, 1)[w::PF_POS_Y] == 3 &&
             row_at(rows, 1)[w::PF_SECTION_MASK_LO] == 0x3B,
             "fragment retains its CXLT pivot and one visible section") && ok;
+    // Only the fragment rides the pool-row writer: the decoded source keeps
+    // its wire lifecycle and never enters the shared pool lifecycle map.
+    ok = expect(lifecycle.find(h.packed) != lifecycle.end() &&
+            lifecycle.find(source->handle.packed) == lifecycle.end() &&
+            doors.empty(),
+            "joiner fragment append touches only the fragment's lifecycle entry") && ok;
     source->palm_sections = false;
     source->engine_flags |= w::kEntityFlagHusk;
     source->spawned_piece_mask = 12;

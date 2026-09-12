@@ -751,11 +751,22 @@ bool weapon_fsm_can_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
         return false;
     }
     if (def.clip_capacity != -1) {
+        // `slot.clip` stands in for retail's shared pool[128 + ammobucket]: a
+        // def with an ammobucket (+0xDC) scores its bucket through sub_5405F0
+        // (the local table @0xB761E8 = g_localAmmoPools + 0x200, or the
+        // authority's conn+89176[bucket]) and the consume decrements the same
+        // entry; only a bucket-less def reads the MountSlot+0x10 word itself.
+        // The Gunner/EWEAP legs resolve to the pumped mount slot's own +0x10
+        // word and the Controller refusal rides player_weapon.cpp's seat
+        // block, so folding the bucket into the clip is identical while no
+        // two carried weapons share a bucket (the single-class model, D-WPN-2).
+        // [orig: @0x541c6d..0x541c89 -> sub_5405F0 @0x5405f0 (mount word via
+        //  sub_5461A0 @0x5461a0); consume @0x5408b5..0x5408fc]
         if (static_cast<int16_t>(slot.clip) != 0) return true;
         slot.next = slot.reserve != 0 ? weapon_action::kRecoil : weapon_action::kEmptyIdle;
         return false;
     }
-    // [orig: WeaponSlot_CanFire infinite-clip pool gate @0x541C8B..0x541CB9]
+    // [orig: WeaponSlot_CanFire infinite-clip pool gate @0x541cba..0x541d08]
     if (!in.ignore_ammo_cost && slot.reserve >= 0 && slot.reserve < def.ammo_cost) {
         slot.next = weapon_action::kEmptyIdle;
         return false;
@@ -806,8 +817,11 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
             out.trailoff_started = def.soundtrailoff[0] != 0;
         }
     }
-    if (in.owner_present && slot.kick != 0 && slot.current != weapon_action::kIdle &&
-            def.soundfireloop[0] != 0)
+    // The fire-loop emitter registers only on a frame's last logic tick: the
+    // catch-up gate precedes the owner/kick/def tests.
+    // [orig: WeaponAction_ProcessFrame @0x5412a7; Game_MainLoop @0x52ba32..0x52ba3a]
+    if (in.last_tick_of_batch && in.owner_present && slot.kick != 0 &&
+            slot.current != weapon_action::kIdle && def.soundfireloop[0] != 0)
         out.fireloop_lifetime_ticks = static_cast<int8_t>(slot.kick);
 
     // The heat window [orig: @ 0x540fed..0x541262]. A live window either denies the

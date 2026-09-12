@@ -42,8 +42,9 @@ void SoundBank::_bind_methods() {
 			&SoundBank::spawn_ambient);
 	ClassDB::bind_method(
 			D_METHOD("play_oneshot_3d", "parent", "world_pos", "name", "bus", "listener_pos",
-					"source_bms_id"),
-			&SoundBank::play_oneshot_3d, DEFVAL(Vector3(INFINITY, INFINITY, INFINITY)), DEFVAL(0));
+					"source_bms_id", "sound_id"),
+			&SoundBank::play_oneshot_3d, DEFVAL(Vector3(INFINITY, INFINITY, INFINITY)), DEFVAL(0),
+			DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("spawn_oneshot_2d", "parent", "name", "bus"),
 			&SoundBank::spawn_oneshot_2d);
 	ClassDB::bind_static_method("SoundBank", D_METHOD("effective_base_pitch", "base_pitch"),
@@ -219,7 +220,7 @@ int64_t SoundBank::occlusion_trampoline(void *p_ctx, const float p_listener[3],
 }
 
 bool SoundBank::play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
-		const StringName &p_bus, const Vector3 &p_listener_pos, int p_source_bms_id) {
+		const StringName &p_bus, const Vector3 &p_listener_pos, int p_source_bms_id, int p_sound_id) {
 	const opennova::audio::SetLocation loc = _find_set(p_name);
 	if (!loc.valid() || p_parent == nullptr) {
 		return false;
@@ -237,7 +238,7 @@ bool SoundBank::play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, co
 	ctx.override = &occlusion_override_;
 	const bool has_provider = ctx.sim != nullptr || occlusion_override_.is_valid();
 	const opennova::audio::OneshotPlan plan = opennova::audio::plan_oneshot_3d(bank, loc, world,
-			listener, has_listener, p_source_bms_id,
+			listener, has_listener, p_source_bms_id, static_cast<uint32_t>(p_sound_id),
 			has_provider ? &SoundBank::occlusion_trampoline : nullptr, &ctx, selector_);
     return _play_oneshot_plan(p_parent, p_world_pos, bank, plan, p_bus);
 }
@@ -303,8 +304,10 @@ bool SoundBank::_play_oneshot_plan(Node *p_parent, const Vector3 &p_world_pos,
 		if (stream.is_null()) {
 			continue;
 		}
+		// The plan's own-channel key: the same wave for the same source retakes
+		// its live channel (stopped below) instead of stealing another.
 		const int slot = oneshot_pool_.acquire(stream->get_instance_id(),
-				static_cast<uint8_t>(voice.vol255));
+				static_cast<uint8_t>(voice.vol255), p_plan.sound_id);
 		if (slot < 0) continue;
 		stop_oneshot(Object::cast_to<Node>(ObjectDB::get_instance(oneshots_[slot])));
 		const double pitch = opennova::lwf::pitch_from_q16(voice.pitch_q16);
@@ -368,9 +371,12 @@ AudioStreamPlayer *SoundBank::spawn_oneshot_2d(Node *p_parent, const String &p_n
 		if (p_bus != StringName() && AudioServer::get_singleton()->get_bus_index(p_bus) >= 0) {
 			player->set_bus(p_bus);
 		}
-		player->set_pitch_scale(effective_base_pitch(opennova::lwf::pitch_from_q16(
-				selector_.compose_pitch(set.pitch_base, set.pitch_random_range,
-						member.pitch_scaled, member.random_pitch_scaled))));
+		// Dialog never enters the trigger-set player: the engine resolves the line
+		// to one wave entry by name and plays it at the dialog module's fixed
+		// frequency, with no set/member pitch composition and none of its two
+		// ROL3 draws; the per-layer member pick above still draws for random
+		// layers (docs/audio/lwf-dbf-sound-re.md, Dialog_LoadAudioClip).
+		player->set_pitch_scale(effective_base_pitch(_member_base_pitch(member)));
 		player->set_volume_db(volume_db_from_255(static_cast<int>(member.volume)));
 		player->set_stream(stream);
 		p_parent->add_child(player);

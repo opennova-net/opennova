@@ -35,11 +35,14 @@ std::string format_display_string(const BindingRecord &rec, bool flagged) {
     if (mods[0] == 16 || mods[1] == 16) out += "Shift - ";
     out += key_name(keys[0]);
   }
-  // Arm 3: the mouse slot [orig: @0x496d6f..0x496e70]. Our record keeps no
-  // mouse modifier word (retail entry word 16); the button names ride the
-  // same "Keys" fallbacks.
+  // Arm 3: the mouse slot [orig: @0x496d6f..0x496e70]. The mouse modifier
+  // (entry word 16) RESETS the buffer with "<mod>-" -- retail sprintf's it
+  // over the keyed text [orig: mask test @0x496f34, modifier load @0x496f3f,
+  // sprintf "%s-" @0x496f79] -- then " or " joins a keyed slot
+  // [orig: strcat @0x496fd4]; the button names ride the same "Keys"
+  // fallbacks.
   if (rec.mouse_mask != 0) {
-    if (rec.mouse_mod != 0) out += key_name(rec.mouse_mod) + "-";
+    if (rec.mouse_mod != 0) out = key_name(rec.mouse_mod) + "-";
     if (keys[0] != 0 || keys[1] != 0) out += " or ";
     switch (rec.mouse_mask) {
       case 1: out += "Mouse 1"; break;
@@ -192,11 +195,17 @@ void BindingSet::clear(int index, Device device) {
       r.primary_mod = 0;
       r.secondary_mod = 0;
       break;
+    // CLEAR_KEY zeroes the device's binding AND its modifier word together
+    // [orig: sub_55BFD0 @0x55c046/@0x55c04d (mouse mask + modifier),
+    //  @0x55c030/@0x55c036 (joystick button + modifier); field map
+    //  UI_BuildKeyBindingLoadoutTable @0x559ebe..0x559ef3].
     case Device::Mouse:
       r.mouse_mask = 0;
+      r.mouse_mod = 0;
       break;
     case Device::Joystick:
       r.joy_button = 0;
+      r.joy_mod = 0;
       break;
   }
 }
@@ -273,7 +282,8 @@ bool BindingSet::pressed_joystick(int index,
     const int bit = one_based - 129;
     return bit < 16 && (joystick_pov_mask(pov_angles[bit / 4]) & (1u << (bit % 4))) != 0;
   };
-  return held(r->joy_button) && (r->joy_mod == 0 || held(r->joy_mod));
+  // The joystick modifier (+34) never gates the fire: see the header.
+  return held(r->joy_button);
 }
 
 bool BindingSet::pressed_mouse(int index, uint16_t held_mask,

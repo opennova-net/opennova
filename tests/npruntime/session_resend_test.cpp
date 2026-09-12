@@ -476,6 +476,65 @@ bool check_multi_sequence_resend_request_reconstructs_each() {
 	return true;
 }
 
+// The recipient backoff latch (cb_server_6 -> slot+89876) is armed only by a
+// NONZERO requested dword [orig: NapiNP_HandleResendList @0x6239aa; the
+// callback gate @0x6239ef; the key-only early return @0x623974]. A zero-only
+// "send next" list still mints the next fresh packet, and a key-only body is
+// accepted but sends nothing; neither halves the next 0x0A budget.
+bool check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() {
+	inmatch::NapiNPServerCtx ctx;
+	seed_host(ctx);
+	std::vector<uint8_t> framed;
+	if (!expect(inmatch::frame_in_match_s2c(ctx, kPeer, 0x49, {0xE1}, framed) &&
+	                    inmatch::frame_in_match_s2c(ctx, kPeer, 0x49, {0xE2}, framed),
+	            "host frames and retains two S2C packets"))
+		return false;
+	auto conn = [&]() -> inmatch::NapiNPConnection & {
+		return ctx.np_protocol.connection_list[0];
+	};
+	const uint32_t next_before = conn().seq.next_outbound_seq;
+
+	const std::vector<uint8_t> zero_only = make_resend_datagram(
+			SESSION_OPCODE_CLIENT_RESEND_LIST, kServerKey, {0});
+	const inmatch::HandleResult minted = inmatch::handle_server_datagram(
+			ctx, kPeer, zero_only.data(), zero_only.size(), 3);
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(minted.outbound.size() == 1 &&
+	                    decode_session_datagram(
+			minted.outbound[0], SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
+			kServerScrk, header, messages) &&
+	                    header.seq_num == next_before && messages.empty() &&
+	                    conn().seq.next_outbound_seq == next_before + 1,
+	            "a zero-only 0x44 mints the next fresh sequence"))
+		return false;
+	if (!expect(!conn().link.nak_backoff_pending,
+	            "a zero-only resend list does not arm the recipient backoff"))
+		return false;
+
+	std::vector<uint8_t> key_only;
+	if (!expect(encode_session_resend_list(kServerKey, {}, key_only),
+	            "encode a key-only resend body"))
+		return false;
+	const std::vector<uint8_t> key_only_datagram =
+			nw_encode_outbound(SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(key_only));
+	if (!expect(inmatch::handle_server_datagram(
+			ctx, kPeer, key_only_datagram.data(), key_only_datagram.size(), 4)
+			                    .outbound.empty() &&
+	                    !conn().link.nak_backoff_pending,
+	            "a key-only resend body sends nothing and does not arm the backoff"))
+		return false;
+
+	const std::vector<uint8_t> real = make_resend_datagram(
+			SESSION_OPCODE_CLIENT_RESEND_LIST, kServerKey, {0, 2});
+	if (!expect(inmatch::handle_server_datagram(
+			ctx, kPeer, real.data(), real.size(), 5).outbound.size() == 2 &&
+	                    conn().link.nak_backoff_pending,
+	            "a list with one nonzero requested sequence arms the backoff"))
+		return false;
+	return true;
+}
+
 // C2S uses the same connection-local FIRST/MID/FINAL assembly as S2C. A
 // physical FIRST record is not a gameplay message: only the completed payload
 // at FINAL may cross the host's public in-match event seam.
@@ -538,6 +597,7 @@ int main() {
 	ok = check_s2c_loss_requests_0x44_and_host_reconstructs() && ok;
 	ok = check_c2s_loss_requests_0x84_and_joiner_reconstructs() && ok;
 	ok = check_multi_sequence_resend_request_reconstructs_each() && ok;
+	ok = check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() && ok;
 	ok = check_c2s_fragments_dispatch_once_after_final() && ok;
 	return ok ? 0 : 1;
 }

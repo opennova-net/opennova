@@ -12,8 +12,14 @@
 #include "simulation/simulation.h"
 #include "terrain/terrain_data.h"
 
+#include <godot_cpp/classes/camera_attributes.hpp>
+#include <godot_cpp/classes/canvas_layer.hpp>
+#include <godot_cpp/classes/compositor.hpp>
+#include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
+#include <godot_cpp/classes/texture_rect.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/basis.hpp>
@@ -29,6 +35,64 @@ namespace {
 
 const Vector3 kNoSample(INFINITY, INFINITY, INFINITY);
 const Vector2 kNoProjection(INFINITY, INFINITY);
+// The stretched-mode blit sits beneath the root canvas and every HUD/menu
+// layer: it is the world picture those layers (the screen-reading view
+// effects included) draw over.
+constexpr int kViewProjectionBlitLayer = -1;
+// Ratios within this of the surface's own draw the surface directly.
+constexpr float kViewProjectionUnstretched = 0.0001f;
+
+// The target renders the world the surface used to: mirror the surface's 3D
+// quality settings onto it (a runtime SubViewport starts from the project
+// defaults, which the surface may have been retuned away from).
+void mirror_viewport_quality(Viewport *p_surface, SubViewport *p_target) {
+	if (p_target->get_msaa_3d() != p_surface->get_msaa_3d()) {
+		p_target->set_msaa_3d(p_surface->get_msaa_3d());
+	}
+	if (p_target->get_screen_space_aa() != p_surface->get_screen_space_aa()) {
+		p_target->set_screen_space_aa(p_surface->get_screen_space_aa());
+	}
+	if (p_target->is_using_taa() != p_surface->is_using_taa()) {
+		p_target->set_use_taa(p_surface->is_using_taa());
+	}
+	if (p_target->is_using_debanding() != p_surface->is_using_debanding()) {
+		p_target->set_use_debanding(p_surface->is_using_debanding());
+	}
+	if (p_target->is_using_occlusion_culling() != p_surface->is_using_occlusion_culling()) {
+		p_target->set_use_occlusion_culling(p_surface->is_using_occlusion_culling());
+	}
+	if (p_target->get_mesh_lod_threshold() != p_surface->get_mesh_lod_threshold()) {
+		p_target->set_mesh_lod_threshold(p_surface->get_mesh_lod_threshold());
+	}
+	if (p_target->get_scaling_3d_mode() != p_surface->get_scaling_3d_mode()) {
+		p_target->set_scaling_3d_mode(p_surface->get_scaling_3d_mode());
+	}
+	if (p_target->get_scaling_3d_scale() != p_surface->get_scaling_3d_scale()) {
+		p_target->set_scaling_3d_scale(p_surface->get_scaling_3d_scale());
+	}
+	if (p_target->get_fsr_sharpness() != p_surface->get_fsr_sharpness()) {
+		p_target->set_fsr_sharpness(p_surface->get_fsr_sharpness());
+	}
+	if (p_target->get_texture_mipmap_bias() != p_surface->get_texture_mipmap_bias()) {
+		p_target->set_texture_mipmap_bias(p_surface->get_texture_mipmap_bias());
+	}
+	if (p_target->get_anisotropic_filtering_level() != p_surface->get_anisotropic_filtering_level()) {
+		p_target->set_anisotropic_filtering_level(p_surface->get_anisotropic_filtering_level());
+	}
+	if (p_target->get_positional_shadow_atlas_size() != p_surface->get_positional_shadow_atlas_size()) {
+		p_target->set_positional_shadow_atlas_size(p_surface->get_positional_shadow_atlas_size());
+	}
+	if (p_target->get_positional_shadow_atlas_16_bits() != p_surface->get_positional_shadow_atlas_16_bits()) {
+		p_target->set_positional_shadow_atlas_16_bits(p_surface->get_positional_shadow_atlas_16_bits());
+	}
+	for (int quadrant = 0; quadrant < 4; ++quadrant) {
+		if (p_target->get_positional_shadow_atlas_quadrant_subdiv(quadrant) !=
+				p_surface->get_positional_shadow_atlas_quadrant_subdiv(quadrant)) {
+			p_target->set_positional_shadow_atlas_quadrant_subdiv(quadrant,
+					p_surface->get_positional_shadow_atlas_quadrant_subdiv(quadrant));
+		}
+	}
+}
 
 // The thermal view feed, the NVG feed's sibling: the sim's two resolved gates
 // (world::LocalPlayerViewFrame) onto the world's environment, resolved the way
@@ -66,6 +130,22 @@ Node *LocalPlayerPresenter::world() const {
 
 Camera3D *LocalPlayerPresenter::camera() const {
 	return Object::cast_to<Camera3D>(ObjectDB::get_instance(camera_id_));
+}
+
+Camera3D *LocalPlayerPresenter::projection_camera() const {
+	return Object::cast_to<Camera3D>(ObjectDB::get_instance(projection_camera_id_));
+}
+
+SubViewport *LocalPlayerPresenter::projection_viewport() const {
+	return Object::cast_to<SubViewport>(ObjectDB::get_instance(projection_viewport_id_));
+}
+
+Projection LocalPlayerPresenter::view_projection() const {
+	if (Camera3D *through = projection_camera()) {
+		return through->get_camera_projection();
+	}
+	Camera3D *cam = camera();
+	return cam != nullptr ? cam->get_camera_projection() : Projection();
 }
 
 GameplayCamera *LocalPlayerPresenter::fly_camera() const {
@@ -108,6 +188,7 @@ void LocalPlayerPresenter::setup(Node *p_world, Camera3D *p_camera, GameplayCame
 	weapon_effects_->setup(p_world, this);
 	input_router_.setup(p_world, this, p_controls);
 	camera_saved_fov_ = p_camera != nullptr ? static_cast<float>(p_camera->get_fov()) : -1.0f;
+	camera_saved_keep_aspect_ = p_camera != nullptr ? static_cast<int>(p_camera->get_keep_aspect_mode()) : -1;
 	camera_saved_cull_mask_ = p_camera != nullptr ? static_cast<int64_t>(p_camera->get_cull_mask()) : -1;
 	// The player camera never draws the FP body layer: retail renders no local
 	// body in first person, and the water mirror never draws persons either
@@ -162,7 +243,11 @@ void LocalPlayerPresenter::teardown() {
 		if (camera_saved_fov_ > 0.0f) {
 			cam->set_fov(camera_saved_fov_);
 		}
+		if (camera_saved_keep_aspect_ >= 0) {
+			cam->set_keep_aspect_mode(static_cast<Camera3D::KeepAspect>(camera_saved_keep_aspect_));
+		}
 	}
+	camera_saved_keep_aspect_ = -1;
 	if (weapon_effects_.is_valid()) {
 		weapon_effects_->teardown();
 	}
@@ -399,9 +484,13 @@ void LocalPlayerPresenter::clear_models() {
 	}
 	avatar_id_ = ObjectID();
 	viewmodel_rig_->clear_viewmodel();
+	release_view_projection();
 	Camera3D *cam = camera();
 	if (cam != nullptr && camera_saved_fov_ > 0.0f) {
 		cam->set_fov(camera_saved_fov_);
+	}
+	if (cam != nullptr && camera_saved_keep_aspect_ >= 0) {
+		cam->set_keep_aspect_mode(static_cast<Camera3D::KeepAspect>(camera_saved_keep_aspect_));
 	}
 }
 
@@ -433,10 +522,27 @@ Vector2 LocalPlayerPresenter::aim_screen_point() const {
 	const Ref<Simulation> aim_sim = sim();
 	const Vector3 eye = eye_position(aim_sim.is_valid() ? aim_sim->get_local_player_position() : Vector3());
 	const Vector3 target = Simulation::aim_ray_endpoint(eye, angles.x, angles.y);
-	if (cam->is_position_behind(target)) {
+	// Through the frame's projection (view_projection): the stretched target's
+	// camera while it is live -- its pixels reach the surface through the
+	// blit's stretch -- else the surface camera.
+	Camera3D *through = projection_camera();
+	SubViewport *target_viewport = projection_viewport();
+	Viewport *surface = cam->get_viewport();
+	if (through == nullptr || target_viewport == nullptr || surface == nullptr) {
+		through = cam;
+	}
+	if (through->is_position_behind(target)) {
 		return kNoProjection;
 	}
-	return cam->unproject_position(target);
+	Vector2 point = through->unproject_position(target);
+	if (through != cam) {
+		const Vector2 target_size = Vector2(target_viewport->get_size());
+		const Vector2 surface_size = surface->get_visible_rect().size;
+		if (target_size.x > 0.0f && target_size.y > 0.0f) {
+			point = Vector2(point.x * surface_size.x / target_size.x, point.y * surface_size.y / target_size.y);
+		}
+	}
+	return point;
 }
 
 int LocalPlayerPresenter::aim_range_units() const {
@@ -691,9 +797,15 @@ void LocalPlayerPresenter::set_model_lighting_context(ObjectModel *p_model, bool
 // The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted
 // defs, eased by the 15-tick interp, suppressed in third person --
 // engine/runtime/world player_view [orig: g_cameraFovDeg @0x26C6848;
-// Player_ToggleWeaponScope @0x4df401; @0x4df3fa]); this presenter converts
-// horizontal -> vertical through the live aspect via the ONE shared
-// conversion [orig: @0x58d900].
+// Player_ToggleWeaponScope @0x4df401; @0x4df3fa]); the frame's projection over
+// the surface -- the mode-invariant horizontal fov, the vertical half-extent
+// of the SELECTED ratio -- is the engine's world::view_projection [orig:
+// @0x58d900]. The gameplay camera carries that frustum's CULLING SUPERSET: the
+// frustum itself when the selected ratio is the surface's, otherwise the
+// vertical fov under the surface's wider horizontal (a selected ratio taller
+// than the surface) or the horizontal fov under the surface's taller vertical
+// -- the terrain, foliage, particle and water-strip legs read this camera and
+// must never clip what the projection target draws.
 void LocalPlayerPresenter::update_scope_camera() {
 	Camera3D *cam = camera();
 	if (cam == nullptr || view_.is_null()) {
@@ -708,14 +820,126 @@ void LocalPlayerPresenter::update_scope_camera() {
 		return;
 	}
 	const Ref<Simulation> projection_sim = sim();
-    cam->set_fov(Simulation::fov_vertical_from_horizontal(view_->get_fov_h_deg(), size.x / size.y,
-        projection_sim.is_valid() ? projection_sim->get_local_player_aspect_mode() : -1));
+	const opennova::world::ViewProjection projection = opennova::world::view_projection(
+			view_->get_fov_h_deg(),
+			projection_sim.is_valid() ? projection_sim->get_local_player_aspect_mode() : -1,
+			static_cast<int>(size.x), static_cast<int>(size.y));
+	if (projection.scale_y < 1.0f) {
+		cam->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
+		cam->set_fov(projection.fov_h_deg);
+	} else {
+		cam->set_keep_aspect_mode(Camera3D::KEEP_HEIGHT);
+		cam->set_fov(projection.fov_v_deg);
+	}
 	// The world pass's near plane is 0.2 u every frame (retail re-pins it
 	// beside the FOV; the far plane is floor(fog)+1, which rides the fog
 	// owner) — Godot's 0.05 default rendered surfaces retail clips.
 	// (engine witness: render-order-re.md, the Render_ProcessMainSceneFrame
 	// per-frame depth pins)
 	cam->set_near(0.2f);
+	update_view_projection(projection);
+}
+
+// The stretched-mode target (view_projection): a SubViewport of the selected
+// aspect under this presenter, sharing the surface's World3D, its own camera
+// mirroring the gameplay camera at the mode-invariant horizontal fov, and a
+// CanvasLayer beneath the root canvas blitting the target over the whole
+// surface (whose own 3D draw is switched off meanwhile). Built on the first
+// stretched frame, sized and mirrored every frame, released when the mode
+// returns to the surface's ratio or the player goes away.
+void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewProjection &p_projection) {
+	Camera3D *cam = camera();
+	Viewport *surface = cam != nullptr ? cam->get_viewport() : nullptr;
+	if (surface == nullptr || !is_inside_tree() ||
+			Math::abs(p_projection.scale_y - 1.0f) < kViewProjectionUnstretched) {
+		release_view_projection();
+		return;
+	}
+	SubViewport *target = projection_viewport();
+	Camera3D *through = projection_camera();
+	if (target == nullptr || through == nullptr) {
+		release_view_projection();
+		target = memnew(SubViewport);
+		target->set_name("ViewProjectionTarget");
+		target->set_update_mode(SubViewport::UPDATE_ALWAYS);
+		target->set_clear_mode(SubViewport::CLEAR_MODE_ALWAYS);
+		target->set_disable_input(true);
+		add_child(target);
+		through = memnew(Camera3D);
+		through->set_name("ViewProjectionCamera");
+		through->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
+		target->add_child(through);
+		through->make_current();
+		CanvasLayer *blit_layer = memnew(CanvasLayer);
+		blit_layer->set_name("ViewProjectionBlit");
+		blit_layer->set_layer(kViewProjectionBlitLayer);
+		add_child(blit_layer);
+		TextureRect *blit = memnew(TextureRect);
+		blit->set_name("ViewProjectionImage");
+		blit->set_texture(target->get_texture());
+		blit->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
+		blit->set_stretch_mode(TextureRect::STRETCH_SCALE);
+		blit->set_texture_filter(CanvasItem::TEXTURE_FILTER_LINEAR);
+		blit->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+		blit->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+		blit_layer->add_child(blit);
+		projection_viewport_id_ = ObjectID(target->get_instance_id());
+		projection_camera_id_ = ObjectID(through->get_instance_id());
+		projection_blit_layer_id_ = ObjectID(blit_layer->get_instance_id());
+	}
+	const Vector2i target_size(p_projection.target_w, p_projection.target_h);
+	if (target->get_size() != target_size) {
+		target->set_size(target_size);
+	}
+	mirror_viewport_quality(surface, target);
+	// The gameplay pose and everything of the camera but the frustum.
+	through->set_global_transform(cam->get_global_transform());
+	through->set_fov(p_projection.fov_h_deg);
+	through->set_near(cam->get_near());
+	through->set_far(cam->get_far());
+	through->set_cull_mask(cam->get_cull_mask());
+	through->set_h_offset(cam->get_h_offset());
+	through->set_v_offset(cam->get_v_offset());
+	if (through->get_environment() != cam->get_environment()) {
+		through->set_environment(cam->get_environment());
+	}
+	if (through->get_attributes() != cam->get_attributes()) {
+		through->set_attributes(cam->get_attributes());
+	}
+	if (through->get_compositor() != cam->get_compositor()) {
+		through->set_compositor(cam->get_compositor());
+	}
+	if (!surface->is_3d_disabled()) {
+		surface->set_disable_3d(true);
+		projection_surface_id_ = ObjectID(surface->get_instance_id());
+	}
+	projection_scale_y_ = p_projection.scale_y;
+}
+
+// Leaving the tree without a teardown (the shell freeing the presenter, a
+// test's autofree) hands the surface its own 3D draw back: the target and
+// the blit go with this node, the surface flag would not.
+void LocalPlayerPresenter::_notification(int p_what) {
+	if (p_what == NOTIFICATION_EXIT_TREE) {
+		release_view_projection();
+	}
+}
+
+void LocalPlayerPresenter::release_view_projection() {
+	if (Viewport *surface = Object::cast_to<Viewport>(ObjectDB::get_instance(projection_surface_id_))) {
+		surface->set_disable_3d(false);
+	}
+	projection_surface_id_ = ObjectID();
+	if (Node *blit_layer = Object::cast_to<Node>(ObjectDB::get_instance(projection_blit_layer_id_))) {
+		blit_layer->queue_free();
+	}
+	if (Node *target = Object::cast_to<Node>(ObjectDB::get_instance(projection_viewport_id_))) {
+		target->queue_free();
+	}
+	projection_blit_layer_id_ = ObjectID();
+	projection_viewport_id_ = ObjectID();
+	projection_camera_id_ = ObjectID();
+	projection_scale_y_ = 1.0f;
 }
 
 void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
@@ -836,6 +1060,10 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("viewmodel"), &LocalPlayerPresenter::viewmodel);
 	ClassDB::bind_method(D_METHOD("held_weapon"), &LocalPlayerPresenter::held_weapon);
 	ClassDB::bind_method(D_METHOD("camera"), &LocalPlayerPresenter::camera);
+	ClassDB::bind_method(D_METHOD("view_projection"), &LocalPlayerPresenter::view_projection);
+	ClassDB::bind_method(D_METHOD("projection_camera"), &LocalPlayerPresenter::projection_camera);
+	ClassDB::bind_method(D_METHOD("projection_viewport"), &LocalPlayerPresenter::projection_viewport);
+	ClassDB::bind_method(D_METHOD("projection_scale_y"), &LocalPlayerPresenter::projection_scale_y);
 	ClassDB::bind_method(D_METHOD("viewmodel_rig"), &LocalPlayerPresenter::viewmodel_rig);
 	ClassDB::bind_method(D_METHOD("set_viewmodel_capture_hidden", "hidden"),
 			&LocalPlayerPresenter::set_viewmodel_capture_hidden);

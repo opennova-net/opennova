@@ -764,8 +764,12 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 		m.plat_airborne_ticks = (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
 	};
 	// Preserve depths before the wheel springs absorb penetration.
-	// [orig: Entity_ProcessWheeledVehiclePhysics @ 0x477FF4..0x478014;
-	// retained-depth selection @0x478D15]
+	// [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 -- crash depth:
+	//  seed @0x478391, gate (+2EC || up.z < 0 || +2F0) @0x4783BA..0x4783D1,
+	//  13-record max (stride 0Ch, bound 9Ch) @0x4783D5..0x4783EC, consumer
+	//  Position.Z += @0x479311..0x479318; wheel depth: seed @0x478B69/
+	//  @0x478B72, four-record max @0x478D0E..0x478D4D, consumers
+	//  @0x479075..0x479079 / @0x4791D9..0x4791DD (the failed-fit arms)]
 	int32_t crash_depth = -1;
 	if (m.crashed || up_z16 < 0 || m.settle_2f0)
 		for (int i = 0; i < 13; ++i) crash_depth = std::max(crash_depth, d[i]);
@@ -901,7 +905,9 @@ int32_t q22_mul_trunc(int32_t a, int32_t b) {
 // [orig: Entity_ComputeBoundingQuad @ 0x45B6E0]
 static void light_bounding_quad(const VehicleTraits &traits, const VehicleEulerBasis &basis,
         int32_t x, int32_t y, int32_t z, int32_t out[4][3]) {
-    const int32_t radius = (traits.box_z_hi - traits.box_z_lo) / 2 - 16384;
+    // [orig: Entity_ProcessLightVehiclePhysics `sub ebp, ebx; sar ebp, 1;
+    //  add ebp, 0FFFFC000h` @0x479946..0x479954]
+    const int32_t radius = ((traits.box_z_hi - traits.box_z_lo) >> 1) - 0x4000;
     const int32_t half_length = ((traits.foot_x_hi - radius) - (traits.foot_x_lo + radius)) / 2;
     const int32_t height = io::bam_abs(io::bam_sub(traits.box_z_hi, traits.box_z_lo)) / 2;
     const int32_t pos[3] = {x, y, z};
@@ -952,7 +958,7 @@ static void light_apply_frame(World &world, Entity &entity, CollisionMatrix matr
 }
 
 // Normalize displacement, replace its X/Y with the original forward row, normalize again.
-// [orig: Entity_ProcessLightVehiclePhysics @ 0x47BF01..0x47C03B]
+// [orig: Entity_ProcessLightVehiclePhysics @ 0x47BF00..0x47C03B]
 static void light_capture_launch(Entity &entity, const VehicleEulerBasis &basis,
         int32_t x, int32_t y, int32_t z) {
     const int32_t fallback[3] = {to_fixed(entity.position.x), to_fixed(entity.position.y),
@@ -1251,7 +1257,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     if (m.crashed || up_z16 < 0 || m.settle_2f0)
         for (int i = 0; i < 5; ++i) crash_depth = std::max(crash_depth, d[i]);
     // The contact gate reads the previous rear-contact run; its tail increments later.
-    // [orig: Entity_ProcessLightVehiclePhysics @ 0x47A90B..0x47A94E]
+    // [orig: Entity_ProcessLightVehiclePhysics @ 0x47A909..0x47A94E]
     m.grounded = up_z16 > 4096 && io::bam_abs(side_z16) < 40960 &&
             d[1] != 0 && m.crashed == 0 && io::bam_abs(m.light_rear_contact_ticks) > 1;
     if (m.grounded)
@@ -1338,12 +1344,15 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         m.wheelie_active = 0;
         vehicle_clear_chassis(m);
     }
+    // [orig: Entity_ProcessLightVehiclePhysics `cmp eax, 5000h` / `cmp ebx,
+    //  8000h` @0x47B6B9..0x47B6C0]
     if (m.wheelie_active && !m.crashed &&
-            (up_z16 < 0 || (io::bam_abs(m.slide_z) > 20480 && (basis.q22.m[8] >> 6) > (io::kFp16OneInt / 2))))
+            (up_z16 < 0 || (io::bam_abs(m.slide_z) > 0x5000 && (basis.q22.m[8] >> 6) > 0x8000)))
         m.crash_request = 1;
     // A fast nose-down landing can also arm a crash outside wheelie mode.
-    // [orig: Entity_ProcessLightVehiclePhysics @ 0x479600]
-    if (!m.crashed && io::bam_abs(m.slide_z) > 16384 && (basis.q22.m[8] >> 6) < -(io::kFp16OneInt / 2))
+    // [orig: Entity_ProcessLightVehiclePhysics `cmp eax, 4000h` / `cmp ebx,
+    //  0FFFF8000h` @0x47B6E3..0x47B6EA]
+    if (!m.crashed && io::bam_abs(m.slide_z) > 0x4000 && (basis.q22.m[8] >> 6) < -0x8000)
         m.crash_request = 1;
 	if (d[1] != 0)
 		vehicle_capture_contact_direction(veh, basis);

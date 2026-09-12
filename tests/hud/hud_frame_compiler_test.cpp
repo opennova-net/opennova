@@ -7,6 +7,7 @@
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_message_log.h>
+#include <runtime/world/friendly_tags.h> // the viewer gate's feed
 
 #include <algorithm>
 #include <cmath>
@@ -1117,7 +1118,82 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 		CHECK(medic.quads[0].x1 - medic.quads[0].x0 == 8.0f,
 				"the plate is a fontH/2 square");
 	}
+	// The radio-request icon [orig: HUD_DrawEntityLabel `test ebp; cmp
+	// var_DC` @0x5a4270..0x5a427d -> HUD_DrawRotatedIconQuad @0x599630]:
+	// the tag's +885 fold AND the viewer gate; TSDicon cell 0x17 at forced
+	// full alpha, a fontH/2 half-size square centered at (x - fontH/2, top_y)
+	// after x -= fontH/2 + textW/2 -- and the plate reads that shifted x.
+	state.friendly_tags[0].radio_request = true;
+	const HudDrawList &no_viewer = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(no_viewer.quads.size() == 3,
+			"the icon needs the viewer gate (a control seat or its own request)");
+	// The viewer gate's feed (world/friendly_tags.h carries the witness): the
+	// local player's seat word in {Controller, Driver}, or its own +885 latch.
+	opennova::world::Entity viewer;
+	viewer.mount_type = opennova::world::SeatType::Passenger;
+	state.radio_request_icon_viewer =
+			opennova::world::friendly_tag_radio_request_viewer(viewer);
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).quads.size() == 3,
+			"a passenger seat without its own request draws no icon");
+	viewer.mount_type = opennova::world::SeatType::Driver;
+	state.radio_request_icon_viewer =
+			opennova::world::friendly_tag_radio_request_viewer(viewer);
+	CHECK(state.radio_request_icon_viewer, "a driver seat arms the viewer gate");
+	const HudDrawList &with_icon = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(with_icon.quads.size() == 4, "the icon draws before the medic plate");
+	if (with_icon.quads.size() == 4) {
+		const opennova::hud::HudQuad &icon = with_icon.quads[0];
+		CHECK(icon.texture == opennova::hud::kHudTexMapIcons,
+				"the icon is a TSDicon strip cell");
+		// center x = 200 - 8 - 49 - 8 = 135, center y = top 92, half-size 8.
+		CHECK(icon.x0 == 127.0f && icon.x1 == 143.0f && icon.y0 == 84.0f &&
+						icon.y1 == 100.0f,
+				"the icon centers a fontH/2 left of the shifted x at the text top");
+		CHECK(icon.color == opennova::hud::hud_icon_strip_modulate2x_color(
+								  0xFF000000u |
+								  (opennova::hud::kFriendlyTagDownedLightBlue & 0xFFFFFFu)),
+				"table[3] light blue at forced full alpha through the strip fold");
+		float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
+		opennova::hud::hud_icon_strip_cell_uv(state.minimap,
+				opennova::hud::kFriendlyTagRadioRequestIcon, u0, v0, u1, v1);
+		CHECK(icon.v0 == v0 && icon.v1 == v1, "the icon samples cell 0x17");
+		// The plate slides left by the icon's fontH/2 + textW/2 = 57.
+		CHECK(with_icon.quads[1].x0 == 134.5f - 57.0f &&
+						with_icon.quads[1].y0 == 91.5f,
+				"the medic plate reads the icon-shifted x");
+	}
 	state.friendly_tags[0].medic = false;
+	const HudDrawList &icon_alone = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(icon_alone.quads.size() == 1 && icon_alone.quads[0].x0 == 127.0f,
+			"without the plate the icon keeps its spot");
+	// BRIEF: the icon centers at (x - fontH/2, y - fontH/2); a medic tag
+	// pre-shifts it a further fontH/2 left and moves the bare count +fontH/2
+	// [orig: @0x5a4165..0x5a41bc].
+	state.friendly_tag_mode = 3;
+	state.friendly_tags[0].has_slot = true;
+	state.friendly_tags[0].revive_seconds = 87;
+	state.friendly_tags[0].dead = true;
+	const HudDrawList &brief_icon = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(brief_icon.quads.size() == 1 && brief_icon.quads[0].x0 == 184.0f &&
+					brief_icon.quads[0].x1 == 200.0f && brief_icon.quads[0].y0 == 84.0f,
+			"BRIEF centers the icon a fontH/2 left of and above the point");
+	const float count_x = brief_icon.glyphs.empty() ? 0.0f : brief_icon.glyphs[0].x_top_left;
+	state.friendly_tags[0].medic = true;
+	const HudDrawList &brief_medic = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(brief_medic.quads.size() == 1 && brief_medic.quads[0].x0 == 176.0f,
+			"a medic tag pre-shifts the BRIEF icon a fontH/2 further left");
+	CHECK(brief_medic.glyphs.size() == 2 &&
+					brief_medic.glyphs[0].x_top_left == count_x + 8.0f,
+			"the bare count follows the +fontH/2 net shift");
+	state.friendly_tags[0].medic = false;
+	state.friendly_tags[0].dead = false;
+	state.friendly_tags[0].has_slot = false;
+	state.friendly_tags[0].revive_seconds = 0;
+	state.friendly_tag_mode = 2;
+	state.friendly_tags[0].radio_request = false;
+	state.radio_request_icon_viewer = false;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).quads.empty(),
+			"clearing the latch removes the icon");
 
 	// The DOWNED legs of the bad tier [orig: @0x5a3dc9..0x5a3e85]: dead with
 	// a slot inside its revive window -> table[3] light blue, the name text

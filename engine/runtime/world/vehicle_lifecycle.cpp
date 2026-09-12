@@ -186,6 +186,13 @@ void VehicleSystem::respawn(Entity &e) {
 	world_.out.destruction.husk_swaps.push_back(intact);
 	vehicle_suspension_respawn(m);
 	detail::vehicle_clear_chassis(m);
+	// The +0x1B0 destroy timer re-seeds from def+0x1A4 (the same source as
+	// the Entity_InitFromItemDef seed) [orig: Entity_RespawnVehicle `mov eax,
+	//  [edx+1A4h]; mov [esi+1B0h], eax` @0x46007C..0x460082].
+	if (const auto *traits = world_.tables.item_death_traits.get(e.item_id)) {
+		e.destroy_timer = traits->destroy_timing_ticks[0];
+		e.destroy_timer_initialized = true;
+	}
 	if ((e.item_attrib & kItemAttribPlayerControl) != 0) {
 		e.primary_occupant = {};
 		for (auto &seat : e.seats)

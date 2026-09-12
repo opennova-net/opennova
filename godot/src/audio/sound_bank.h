@@ -105,10 +105,12 @@ public:
 	// oneshot_play plan (cull, occlusion, per-layer pick and fire-time volume)
 	// over `listener_pos`, then one auto-freeing player per planned voice whose
 	// wave resolves. Pass Vector3.INF to play distance-flat (menu / tests).
-	// Returns true if anything played.
+	// Returns true if anything played. `p_sound_id` is the engine's own-channel
+	// reuse key (audio::oneshot_sound_id): a channel already playing the same
+	// wave for the same key is retaken; 0 plays with no identity.
 	bool play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
 			const StringName &p_bus, const Vector3 &p_listener_pos = Vector3(INFINITY, INFINITY, INFINITY),
-			int p_source_bms_id = 0);
+			int p_source_bms_id = 0, int p_sound_id = 0);
     // Direct WAC/weather trigger: explicit distance controls layer gain; the
     // position only supplies Godot's panner (D-SND-8). No 3D cull or occlusion.
     bool play_oneshot_at_distance(Node3D *p_parent, const Vector3 &p_pan_position,

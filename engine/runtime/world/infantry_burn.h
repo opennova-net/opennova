@@ -1,5 +1,5 @@
 // Infantry hit-reaction state from ammo.secondary_anim (+224).
-// [orig: Entity_ApplyCollisionForce @0x4AF4A0; org1 @0x4BBF8F; org2 @0x4B70DE]
+// [orig: Entity_ApplyCollisionForce @0x4AF4A0; org1 @0x4BBF8F; org2 @0x4B70D9]
 #pragma once
 #include <cstdint>
 namespace opennova::world {

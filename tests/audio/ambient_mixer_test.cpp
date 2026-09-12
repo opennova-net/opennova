@@ -7,6 +7,7 @@
 // @ 0x4a8080], tick-unit keep-alives, and the per-frame live-slot mix
 // [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0].
 #include <runtime/audio/ambient_mixer.h>
+#include <runtime/world/sound_emitter_mailbox.h>
 #include "common/test_expect.h"
 
 #include <cmath>
@@ -18,6 +19,7 @@ using opennova::audio::AmbientMixer;
 using opennova::audio::calc_distance_volume;
 using opennova::audio::crossfade_volume_byte;
 using opennova::audio::emitter_layer_volume;
+using opennova::audio::emitter_lifetime_word;
 using opennova::audio::oneshot_layer_volume;
 using opennova::audio::time_of_day_region;
 
@@ -461,6 +463,46 @@ int main() {
         mx.advance_seconds(0.2f); // 12.5 ticks: every cohort visited
         TEST_EXPECT(mx.live_slot_count() == 1);
         TEST_EXPECT(mx.clock_tick() == 12);
+    }
+
+    // --- The keep-alive is the retail 16-bit slot word read UNSIGNED: a
+    //     sign-extended kick byte registers a 65535-tick loop, not a dead one;
+    //     only a word of exactly zero retires the slot, and a zero pitch still
+    //     clears. The mailbox retires its intent on the same word.
+    //     [orig: SoundEmitter_RegisterSetLayers @ 0x528471;
+    //      SoundEmitter_UpdateAndMixTop8 @ 0x528529..0x52854D] ---
+    {
+        TEST_EXPECT(emitter_lifetime_word(-1) == 65535);
+        TEST_EXPECT(emitter_lifetime_word(-128) == 65408);
+        TEST_EXPECT(emitter_lifetime_word(30) == 30);
+        TEST_EXPECT(emitter_lifetime_word(0) == 0);
+        AmbientMixer mx;
+        const float pos[3] = {10.0f, 0.0f, 0.0f};
+        AmbientMixer::LayerDesc loop;
+        loop.candidate_id = 40;
+        loop.falloff_u = 200;
+        mx.register_emitter(7, 0, pos, 77, -1, 0x10000, 0xFFFF, {loop});
+        TEST_EXPECT(mx.mix(kOrigin).size() == 1);
+        mx.advance_to_tick(200);
+        TEST_EXPECT(mx.mix(kOrigin).size() == 1);
+        TEST_EXPECT(mx.mix(kOrigin).size() == 1);
+        TEST_EXPECT(mx.live_slot_count() == 1);
+        mx.register_emitter(7, 0, pos, 77, -1, 0, 0xFFFF, {loop});
+        TEST_EXPECT(mx.mix(kOrigin).empty());
+
+        opennova::world::SoundEmitterMailbox box;
+        opennova::world::SoundEmitterEvent intent;
+        intent.source_spawn_id = 7;
+        intent.emitted_tick = 0;
+        intent.lifetime_ticks = -1;
+        intent.pitch_q16 = 0x10000;
+        intent.volume_q8_8 = 0xFFFF;
+        intent.set_name = "LOOP";
+        TEST_EXPECT(box.publish(intent));
+        box.prune(1000);
+        TEST_EXPECT(box.size() == 1);
+        box.prune(65536);
+        TEST_EXPECT(box.empty());
     }
 
     return 0;

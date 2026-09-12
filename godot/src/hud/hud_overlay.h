@@ -188,6 +188,11 @@ public:
 	void set_friendly_tags(bool p_shown, const Transform3D &p_camera_xform,
 			const Projection &p_camera_projection, float p_fog_distance_units,
 			const Ref<Simulation> &p_sim);
+	// The radio-request icon's viewer gate, a per-frame local-player fact
+	// (engine world::friendly_tag_radio_request_viewer: a Controller/Driver
+	// seat or the player's own S2C 0x6D latch); the compiler ANDs it with
+	// each tag's own fold before drawing the icon cell.
+	void set_radio_request_icon_viewer(bool p_viewer);
 	// The friendly-tags mode (hud_math.h FriendlyTagMode carries the
 	// witness): OFF / FARBRIEF (text under 300 m) / FULL (text always) / BRIEF (tick marks).
 	enum FriendlyTagMode {

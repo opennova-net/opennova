@@ -573,7 +573,7 @@ struct Entity {
     // 8-way move_direction_index, bit 3 = moving [orig: Player_PackInputStateToEntity @0x4df68f]).
     uint8_t net_move_input = 0;
     // The upper look/turn bits never fit the uplink's movement byte. They
-    // remain local inputs [orig: Player_PackInputStateToEntity @0x4df742].
+    // remain local inputs [orig: Player_PackInputStateToEntity @0x4df741].
     uint16_t local_view_input = 0;
     // MoveOrder bits 8-9 (entity+0x12C >> 8): bit0 = prone (0x100), bit1 = crouch (0x200). The
     // stance the server-side body-anim selection consumes for THIS player [orig:
@@ -661,7 +661,23 @@ struct Entity {
     bool item_section_piece = false; // locally allocated class fragment
     bool palm_sections = false; // palm/psec model callback @0x53BF10
     int32_t palm_state = 0; // entity+0x270
-    std::array<uint8_t, 256> item_section_damage{}; // byte accumulator, @0x4406A0
+    // The per-section damage bytes at entity+0x2BA+section. Retail indexes
+    // them unchecked; this bank grows on first write (the caller bounds the
+    // section by the def's int8 huskSubPartCount, the authority bound
+    // @0x440722) so the thousands of pooled rows that never take section
+    // damage carry no bytes, and an unwritten section reads zero.
+    // [orig: Entity_UpdateSectionDamage @0x4406A0: the byte add @0x4406C7 /
+    //  @0x44072B, the completion scan @0x440768]
+    struct SectionDamageBank {
+        std::vector<uint8_t> bytes;
+        uint8_t &operator[](int section) {
+            if (size_t(section) >= bytes.size()) bytes.resize(size_t(section) + 1);
+            return bytes[size_t(section)];
+        }
+        uint8_t read(int section) const {
+            return size_t(section) < bytes.size() ? bytes[size_t(section)] : uint8_t(0);
+        }
+    } item_section_damage;
     int32_t section_pitch_rate = 0; // +0x2C8; settle reuses it as distance
     int32_t section_pitch_accel = 0; // +0x2C4; settle reuses it as limit
     bool section_bounced = false; // +0x155

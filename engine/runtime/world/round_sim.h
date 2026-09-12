@@ -73,9 +73,15 @@ class World;
 
 struct AmmoTableEntry; // world/ammo_table.h
 // Shared by live flight and the retail ballistic scope-table solver.
-// [orig: Entity_ApplyDragAndBounceForce @0x4e5ed0]
+// [orig: Entity_ApplyDragAndBounceForce @0x4e5ec0, the (proj, 1, 0) flight
+//  call @0x4eaa64]
 void projectile_apply_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     int32_t position_z_q16, int32_t water_z_q16);
+// The person-hit leg every type-3 impact runs after the armor deceleration:
+// the same force with surface multiplier 35 (no water/air leg).
+// [orig: Weapon_CalcImpactDamage @0x4ecc38..0x4ecc42 ->
+//  Entity_ApplyDragAndBounceForce(proj, 1, 35) @0x4e604e..0x4e6097]
+void projectile_apply_person_hit_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo);
 
 enum class ThrowClass : uint8_t; // world/throwables.h
 

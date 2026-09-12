@@ -86,7 +86,10 @@ void catch_up(Entity::VehicleMotorState &m, int k, int32_t growth, bool grounded
     if (!bike || !m.wheelie_request) corner_adj[k] += c;
 	if (grounded) {
 		// A same-side pad pair in contact clears the marker instead
-		// [orig: @0x47e9f6..0x47ea12].
+		// [orig: @0x47e9f6..0x47ea12; the bike's pair clear
+		//  Entity_ProcessLightVehiclePhysics @0x479600 -- `cmp var_250, edx;
+		//  jz; cmp var_24C, edx; jz; mov [esi+2EEh], dl` (dl == 0)
+		//  @0x47B977..0x47B986 inside the two-wheel loop @0x47B930..0x47BB7D].
 		if (bike ? (contact[0] && contact[1]) :
                 ((contact[0] && contact[3]) || (contact[1] && contact[2]))) {
 			m.landing_2ee = 0;

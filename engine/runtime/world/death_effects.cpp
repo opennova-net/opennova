@@ -120,7 +120,7 @@ void update_dead_wreck_effects(World &world, Entity &e, const ItemDeathTraits *t
 		const bool masked = (fire.mask & (1u << slot)) != 0;
 		if (masked && world.next_prng16_c() < kFireCrackleThreshold && position.z >= water) {
 			events.effects.push_back({ kFireCrackleEffect, position, { 0, 0, 1 } });
-			world.out.fire_sounds.play_with_distance_delay(kFireCrackleSound, e.position, e.bms_id);
+			world.out.fire_sounds.play_with_distance_delay(kFireCrackleSound, e.position, e.bms_id, e.handle.packed);
 			++events.crackles;
 		}
 		if ((e.death_effect_active[1] & (1u << slot)) != 0) {

@@ -30,7 +30,7 @@ void apply_infantry_burn(World &world, Entity &target, uint8_t hit_type,
     inf.combat_move_timer = ((same_group ? 2 : 48) * multiplier) >> 2;
 }
 
-// [orig: org1 @0x4BBF8F; org2 @0x4B70DE]
+// [orig: org1 @0x4BBF8F; org2 @0x4B70D9]
 int select_infantry_burn(InfantryState &inf, const IRootMotionSource *motion,
         bool player, uint32_t tick) {
     int selected = player ? inf.anim_state : 0;

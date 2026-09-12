@@ -246,9 +246,18 @@ bool Simulation::fill_friendly_tags(std::vector<opennova::world::FriendlyTagSour
 		opennova::replication::collect_roster_tags(runtime_->state(),
 				runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFFu,
 				runtime_->assigned_team(), ctx.death_screen, ctx.game_type, tags,
-				[player_hp](uint16_t) { return player_hp; });
+				[player_hp](uint16_t) { return player_hp; }, &kernel_->world);
 	}
 	return true;
+}
+
+bool Simulation::local_player_radio_request_icon_viewer() const {
+	if (!kernel_) {
+		return false;
+	}
+	const opennova::world::Entity *local =
+			kernel_->world.registry.get(kernel_->world.cached.local_player);
+	return local != nullptr && opennova::world::friendly_tag_radio_request_viewer(*local);
 }
 
 // --- the local player's loadout: slot pool, spawn kit, map rules -----------------------

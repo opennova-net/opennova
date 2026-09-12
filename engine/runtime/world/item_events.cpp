@@ -33,24 +33,29 @@ void regional_sound_event(World &world, Entity &entity, int phase) {
         SoundSlotEvent sound;
         sound.source_handle = entity.handle.packed;
         sound.slot = static_cast<uint8_t>(audio::kSlotShotDawn + region);
-        int32_t offset[3] = {};
+        int32_t pos[3] = {int32_t(entity.position.x * 65536),
+                int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
         if (traits->has_sound_point) {
+            // The SOUND userpoint rides the cached entity orientation matrix
+            // (entity+0xB4), which carries the def scale on its rotation
+            // diagonal: the same placement matrix the ambient leg uses.
+            // [orig: Math_FixedPointTransformPoint22(entity->orientationMatrix,
+            //  userpoint, bonePos) @0x4083A9]
             const int32_t local[] = {int32_t(traits->sound_point.x * 65536),
                     int32_t(traits->sound_point.y * 65536), int32_t(traits->sound_point.z * 65536)};
-            const int32_t origin[3] = {};
-            const CollisionMatrix orientation = collision_matrix_from_euler(
-                    bam_heading_from_mission_yaw_deg(entity.yaw),
-                    bam_from_degrees_wrapped(entity.pitch), bam_from_degrees_wrapped(entity.roll), origin);
-            orientation.rotate_point(local, offset);
+            entity_placement_matrix(entity).transform_point(local, pos);
         }
-        sound.pos[0] = io::bam_add(int32_t(entity.position.x * 65536), offset[0]);
-        sound.pos[1] = io::bam_add(int32_t(entity.position.y * 65536), offset[1]);
-        sound.pos[2] = io::bam_add(int32_t(entity.position.z * 65536), offset[2]);
+        sound.pos[0] = pos[0];
+        sound.pos[1] = pos[1];
+        sound.pos[2] = pos[2];
         std::strncpy(sound.set_name, shot.name.c_str(), 24);
         world.out.slot_sounds.push_back(sound);
     }
     // This draw still occurs when only a different region resolves a sound.
-    const uint64_t product = uint64_t(int64_t(shot.range_ticks)) * world.next_prng16() + 0x8000u;
+    // It is one step of the inline dword_31BFBB8 rotate LCG (the owner of the
+    // throwable fan stream), not PRNG_Next16 on dword_31BFBB0
+    // [orig: @0x4083F0; the delay sum @0x40840D].
+    const uint64_t product = uint64_t(int64_t(shot.range_ticks)) * world.throwables.fan_prng() + 0x8000u;
     entity.class_think_ticks = io::bam_add(shot.base_ticks, int32_t(uint32_t(product >> 16)));
 }
 
@@ -569,6 +574,10 @@ void building_event(World &world, Entity &target) {
     }
     for (int pool = 0; pool <= 2; ++pool) {
         world.registry.for_each_in_pool(pool, [&](const Entity &row) {
+            // The +0x1C ItemTypeIndex gate precedes the bounds test in every
+            // pool [orig: Entity_ClearHealthInBounds @0x509E89 / @0x509EE9 /
+            //  @0x509F55].
+            if (row.item_id == 0) return;
             if (pool == 0 && row.damage_state != 0) return;
             if (pool == 2 && row.has_item_def && row.item_type == 5) return;
             const int32_t p[3] = {int32_t(row.position.x * 65536),
@@ -662,7 +671,7 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
 	// vehicles die through their state machine (rows 21/23), not here.
 	if (target.kind == EntityKind::Organic || target.is_ai_capable) return;
     if (target.item_section_piece && !target.palm_sections) {
-        target.class_think_ticks = 0x1000000; // clone event callback is null @0x440344
+        target.class_think_ticks = 0x1000000; // clone event callback is the Null row sub_406FF0 @0x440365
         return;
     }
 	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
@@ -785,8 +794,13 @@ bool tick_item_class_motion(World &world, Entity &entity,
     return true;
 }
 
-// [orig: pool 1 @0x4B8E1B/@0x4B8EA0; pools 2/3 @0x4C2291/@0x4C2330;
-// pool-2 decrement by eight @0x4C22C9 and loop end @0x4C22FA]
+// [orig: pool 1 @0x4B8E1B/@0x4B8EA0 (Entity_UpdatePool1Slot @0x4B8DD0, every
+// tick); pools 2/3 in Entity_UpdateAllEntities: the slot cohort tick&7 /
+// tick&0x3F (@0x4C225A / @0x4C2322), the +0x2AC clock @0x4C2291/@0x4C2369 with
+// its decrement by eight @0x4C22C9 / by 64 @0x4C2382, and the entity+0x1C4
+// update callback INSIDE the same 8-/64-stepped walk, the call eax @0x4C22E7 /
+// @0x4C2393 (the pool-2 emitter update @0x4C22FA follows it), so wreck motion
+// advances once per cohort visit, never per tick]
 void tick_item_event_pool(World &world, int pool) {
     if (pool < 1 || pool > 3) return;
     const uint32_t stride = pool == 1 ? 1u : pool == 2 ? 8u : 64u;
@@ -797,8 +811,8 @@ void tick_item_event_pool(World &world, int pool) {
         Entity *entity = world.registry.get(handle);
         if (entity == nullptr) continue;
         const uint64_t lifetime = entity->registry_spawn_id;
-        const bool event_visit = !entity->is_ai_capable && !entity->minefield.think &&
-                (slot & (stride - 1)) == (world.logic_tick & (stride - 1));
+        const bool cohort = (slot & (stride - 1)) == (world.logic_tick & (stride - 1));
+        const bool event_visit = !entity->is_ai_capable && !entity->minefield.think && cohort;
         if (event_visit) {
             if (entity->class_think_ticks <= 0) {
                 if (pool == 2 && world.ai.collision != nullptr)
@@ -814,6 +828,13 @@ void tick_item_event_pool(World &world, int pool) {
         if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
         if (event_visit && pool == 1)
             entity->class_think_ticks = io::bam_sub(entity->class_think_ticks, 1);
+        // The renderer recomputes the fade timers every frame it draws a
+        // husked entity, independent of the update cohort; the presenter
+        // reads the sim's copy [orig: render_sector_entity @0x5C4200].
+        update_item_destroy_fade(world, *entity);
+        // The update callback: every tick in pool 1, the pure slot cohort in
+        // pools 2/3 [orig: @0x4C22E7 / @0x4C2393].
+        if (pool != 1 && !cohort) continue;
         if (entity->squib.motor) {
             tick_squib(world, *entity);
             continue;

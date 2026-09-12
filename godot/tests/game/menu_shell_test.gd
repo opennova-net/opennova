@@ -550,6 +550,44 @@ func test_aspect_spinlist_restores_and_persists_the_selected_mode() -> void:
 	_rm_runtime_dir(dir)
 
 
+func test_fresh_profile_seeds_the_aspect_row_from_the_desktop_ratio() -> void:
+	# A fresh profile carries the first launch's video-test verdict: the cfg
+	# word seeded from the primary desktop's ratio (1 past 1.34, else 0) and
+	# saved at once (docs/mnu/menu-re.md, the 16x9DISPLAY paragraph), so the
+	# fresh spin sits on that authored row and the simulation projects it.
+	# Headless has no desktop to vary: both rows are reached through the seed
+	# helper with explicit sizes, the live seed checked against the sampled
+	# desktop's verdict.
+	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1024, 768)), 0,
+			"a 4:3 desktop seeds the 4:3 row")
+	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1920, 1080)), 1,
+			"a widescreen desktop seeds the widescreen row")
+	var seeded := PlayerOptions.fresh_profile_aspect_mode(PlayerOptions.desktop_size())
+	var options := PlayerOptions.new()
+	assert_eq(options.current().aspect_mode, seeded,
+			"a fresh profile seeds the desktop's verdict")
+	var dir := _make_runtime_dir()
+	var shell = _make_runtime_shell(dir, options)
+	if shell == null:
+		pass_test("runtime resource root unavailable in this environment")
+		_rm_runtime_dir(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	var spin := driver.widget_id("16x9DISPLAY")
+	assert_gte(spin, 0)
+	assert_eq(driver.spin_value_attr(spin), str(seeded),
+			"the fresh spin seeds the desktop's row")
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var sim := Simulation.new()
+	assert_true(sim.load_from_mission_data(mission))
+	options.apply(sim)
+	assert_eq(sim.get_local_player_aspect_mode(), seeded,
+			"the seeded mode reaches the projection without a saved profile")
+	shell.get_resource_root().clear()
+	_rm_runtime_dir(dir)
+
+
 func test_crosshair_color_and_spread_use_shared_options_and_persist() -> void:
 	var config := ConfigFile.new()
 	config.set_value("player", "crosshair_spread", false)

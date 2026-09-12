@@ -1528,12 +1528,17 @@ bool run_client_join_rejects_match_retail() {
 	bad.cu.assign(65, std::vector<uint8_t>{1});
 	if (!rejected(bad, 10)) return false;
 	ctx.join_locked = true;
-	ctx.banned_join_addresses.push_back(0x88776655u);
-	auth.sip = 0x88776655u;
+	ctx.banned_join_addresses.push_back(peer.ip);
 	if (!rejected(auth, 14, 2)) return false;
 	ctx.join_locked = false;
-	if (!rejected(auth, 14, 3)) return false;
+	// The ban operand is the datagram source (conn+0x30), never the reported
+	// SIP: an omitted or forged SIP cannot evade it.
 	auth.sip = 0;
+	if (!rejected(auth, 14, 3)) return false;
+	auth.sip = 0x88776655u;
+	if (!rejected(auth, 14, 3)) return false;
+	// A banned value that only matches the reported SIP admits the join.
+	ctx.banned_join_addresses.assign(1, 0x88776655u);
 	if (!expect(inmatch::connection_count(ctx) == 0, "rejected joins allocate no connection")) return false;
 	const auto accepted = send(auth);
 	if (!expect(accepted.outbound.size() == 2 && inmatch::connection_count(ctx) == 1,

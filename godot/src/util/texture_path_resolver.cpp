@@ -376,7 +376,12 @@ godot::Ref<godot::Texture2D> prepare_material_texture(
 		pixels = missing_material_texture_rgba();
 	} else {
 		godot::Ref<godot::Image> image = source->get_image();
-		if (image.is_null()) return {};
+		// One contract for every failed row: retail tests the loader result
+		// once (test eax,eax @0x5b17f0; jnz @0x5b17f2) and binds the
+		// checkerboard @0x5b17f4..0x5b1800 for any zero, so a texture whose
+		// image cannot be read routes as a failed load, never as a null the
+		// material would replace with the flat normal.
+		if (image.is_null()) return prepare_material_texture({}, name, type);
 		if (image->is_compressed()) image->decompress();
 		image->convert(godot::Image::FORMAT_RGBA8);
 		const godot::PackedByteArray rgba = image->get_data();

@@ -141,8 +141,12 @@ bool tick_tower_section(World &world, Entity &entity) {
         bottom_contact = true; pos[2] = ground;
     }
     entity.position = {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
+    // Every InitFloatingPhysics contact/settle effect is the interned def+0x412
+    // handle: particledeath, the word the SectionSettled leg above reads too.
+    // [orig: submit_effect_descriptor(.., word def+0x412) @0x4A84B8 (bottom),
+    //  @0x4A8565 (top), @0x4A8880 (the settle loop)]
     if (bottom_contact && !(old_flags & 1))
-        section_effect(world, traits->particlefinale, entity.position);
+        section_effect(world, traits->particledeath, entity.position);
     const int32_t local[3] = {0, 0, height};
     int32_t end[3];
     entity_placement_matrix(entity).transform_point(local, end);
@@ -151,7 +155,7 @@ bool tick_tower_section(World &world, Entity &entity) {
     bool top_contact = false;
     if (end[2] < end_ground) {
         end[2] = end_ground;
-        section_effect(world, traits->particlefinale,
+        section_effect(world, traits->particledeath,
                 {end[0] / 65536.0f, end[1] / 65536.0f, end[2] / 65536.0f});
         if (bottom_contact) {
             fit_section_to_ground(entity, end, end_ground);
@@ -174,7 +178,7 @@ bool tick_tower_section(World &world, Entity &entity) {
             for (int32_t step = height >> 1; step > 0; step -= 0x40000) {
                 const int32_t point[3] = {0, 0, step};
                 matrix.transform_point(point, end);
-                section_effect(world, traits->particlefinale,
+                section_effect(world, traits->particledeath,
                         {end[0] / 65536.0f, end[1] / 65536.0f, end[2] / 65536.0f});
             }
             entity.death_motion = DeathMotionMode::SectionSettled;
@@ -257,11 +261,15 @@ void palm_dead(World &world, Entity &entity) {
 bool tower_item_event(World &world, Entity &entity, int phase, ItemHitContext hit) {
     const auto *traits = world.tables.item_death_traits.get(entity.item_id);
     if (!traits) return false;
+    const int count = static_cast<int8_t>(traits->husk_sub_part_count);
     const auto add_damage = [&] {
-        // The unchecked retail index can overwrite adjacent entity fields.
-        // Keep malformed sections outside this owned bank inert (D-ITEM-7).
-        if (hit.section <= 0 || hit.section >= int(entity.item_section_damage.size())) return;
-        auto &damage = entity.item_section_damage[hit.section];
+        // Retail's client leg bounds only section > 0 (@0x4406C2) and its
+        // unchecked +0x2BA byte index can overwrite adjacent entity fields;
+        // both legs take the authority bound `section > (char)huskSubPartCount`
+        // (@0x440722) so a malformed section stays inert in this owned bank
+        // (D-ITEM-7).
+        if (hit.section <= 0 || hit.section > count) return;
+        uint8_t &damage = entity.item_section_damage[hit.section];
         damage = uint8_t(damage + uint8_t(hit.damage));
         if (damage > 14) {
             spawn_tower_section(world, entity, *traits, hit.section, hit);
@@ -274,7 +282,6 @@ bool tower_item_event(World &world, Entity &entity, int phase, ItemHitContext hi
     if (entity.engine_flags & kEntityFlagDead) {
         entity.class_think_ticks = 1024; return false;
     }
-    const int count = static_cast<int8_t>(traits->husk_sub_part_count);
     if (phase == 1) {
         if (hit.section > count) { entity.class_think_ticks = 32; return false; }
         add_damage();
@@ -282,7 +289,7 @@ bool tower_item_event(World &world, Entity &entity, int phase, ItemHitContext hi
     int section = count - 1;
     bool complete = count == 1;
     if (section > 0) {
-        while (section > 0 && entity.item_section_damage[section] >= 14) --section;
+        while (section > 0 && entity.item_section_damage.read(section) >= 14) --section;
         complete = section == 0;
     }
     if (complete) {

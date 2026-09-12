@@ -92,13 +92,66 @@ bool apply_host_dialog_control(GameConfig& config, int32_t& player_limit,
     return true;
 }
 
+std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
+                              bool serve_and_play, std::string_view control) {
+    // The populate step that seeds the MULTI_PLAYER_HOST screen from the
+    // config before it shows: text edits by SetText, numeric edits by
+    // SetIntValue, spins by SelectItemByValue. MAX_PLAYERS is clamped to 64
+    // first; the four inverted flag spins show the bit CLEAR as 1; the 500-point
+    // and nonpositive-KOTH sentinels map back to their dialog numbers (the read
+    // side folds the apply's substitution into the config, see above).
+    // [orig: UI_PopulateHostSettingsFromConfig @0x555fe0 -- GAME_NAME @0x556015,
+    // SERVERTYPE @0x55608b, GAME_LOCATION strnicmp(country, item, 3) @0x5560fc,
+    // CONNECTIONSPEED @0x556187, MAX_PLAYERS clamp @0x556328 + SetIntValue
+    // @0x556358, TEAM_FF (flags & 0x200) == 0 @0x5563e1, ALLOW_SPECTATORS
+    // maxSpectators != 0 @0x55651a, TOD_CONTINUITY @0x5565e3]
+    if (control == "GAME_NAME") return config.server_name;
+    if (control == "SERVER_PASSWORD") return config.server_password;
+    if (control == "SERVER_MESSAGE") return config.custom_text;
+    if (control == "BLUE_PW") return config.side_a_password;
+    if (control == "RED_PW") return config.side_b_password;
+    if (control == "SPECTATOR_PW") return config.spectator_password;
+    if (control == "GAME_LOCATION") return config.country;
+    const auto number = [](int64_t value) { return std::to_string(value); };
+    for (const FlagControl& flag : kFlagControls) {
+        if (control != flag.control) continue;
+        return number(((config.mp_attributes & flag.bit) != 0) != flag.inverted ? 1 : 0);
+    }
+    if (control == "SERVERTYPE") return number(serve_and_play ? 0 : 1);
+    if (control == "SERVER_PUNKBUSTER") return number(config.server_punkbuster);
+    if (control == "SERVER_LANONLY") return number(config.server_lan_only);
+    if (control == "CONNECTIONSPEED") return number(config.connection_speed);
+    if (control == "REPLAY") return number(config.replay_enabled);
+    if (control == "DELAY") return number(config.start_delay);
+    if (control == "RESPAWN") return number(config.respawn_timeout);
+    if (control == "TIME") return number(config.respawn_time);
+    if (control == "KILL_LIMIT") return number(config.score_limit == 65000u ? 500 : config.score_limit);
+    if (control == "MAX_SCORE") return number(config.max_score == 65000u ? 500 : config.max_score);
+    if (control == "MAX_KOTH") return number(config.time_limit_minutes == 0x2222222u ? 0 : config.time_limit_minutes);
+    if (control == "MAX_PLAYERS") return number(std::min(player_limit, 64));
+    if (control == "MAX_FF_KILLS") return number(config.max_friendly_kills);
+    if (control == "TAKEOVER_TIME") return number(config.capture_duration_seconds);
+    if (control == "LFP_TAKEOVER") return number(config.capture_speed_setting);
+    if (control == "ALLOW_SPECTATORS") return number(config.spectator_slots != 0 ? 1 : 0);
+    if (control == "ALLOW_AI") return number(config.allow_ai ? 1 : 0);
+    if (control == "TOD_CONTINUITY") return number(config.time_of_day_continuity);
+    return std::string();
+}
+
 uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play) {
     // Dedicated hosting reserves the extra host slot before publishing the
-    // network limit. The same live count gates BMS placements.
-    // [orig: apply_session_settings_to_globals @ 0x551500;
+    // network limit; the 65 ceiling tests the PRE-increment cap (a dedicated
+    // 65 publishes 66) and applies only for networkConnectType 1, which has no
+    // writer other than its default 1. There is no lower clamp: a blank cap
+    // publishes 0 (1 dedicated). The same live count gates BMS placements.
+    // [orig: apply_session_settings_to_globals @0x551b26..0x551b48;
+    // Config_SetDefaults @0x54d1d4 (networkConnectType_480 = 1);
     // Server_InitNewRoundState @ 0x51c8e0]
-    const int64_t total = static_cast<int64_t>(player_limit) + (serve_and_play ? 0 : 1);
-    return static_cast<uint32_t>(std::clamp<int64_t>(total, 1, kMaxPlayersCap));
+    int64_t total = static_cast<int64_t>(player_limit) + (serve_and_play ? 0 : 1);
+    if (player_limit > static_cast<int32_t>(kMaxPlayersCap)) total = kMaxPlayersCap;
+    // GameConfig::max_players is unsigned: retail's signed `count >= max`
+    // @0x4c623f rejects every join for a negative cap, exactly as 0 does.
+    return static_cast<uint32_t>(std::max<int64_t>(total, 0));
 }
 
 } // namespace opennova::inmatch

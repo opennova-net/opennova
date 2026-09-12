@@ -1223,16 +1223,52 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 		// @0x5a4407..0x5a441b (bar)].
 		const bool show_count = tag.dead && tag.has_slot && tag.revive_seconds != 0;
 		// The tick and bar forms draw the bare count centered one fontH ABOVE
-		// the projected point in the tag color [orig: sprintf("%ld") @0x5a41f0 /
-		// @0x5a4428 -> HUD_DrawTextHalfBrightF(x, y - fontH) @0x5a4453].
-		auto emit_bare_count = [&]() {
+		// the projected point in the tag color, at the x the icon arm below
+		// may have shifted [orig: sprintf("%ld") @0x5a41f0 / @0x5a4428 ->
+		// HUD_DrawTextHalfBrightF(x, y - fontH) @0x5a4453].
+		auto emit_bare_count = [&](float x) {
 			if (!show_count) return;
 			const std::string count = std::to_string(tag.revive_seconds);
-			const GameFontRun run = lf.layout(count.c_str(), tag.screen_x,
+			const GameFontRun run = lf.layout(count.c_str(), x,
 					tag.screen_y - font_h, ls, ls, kFontAlignCenter,
 					half_bright_keep_alpha(argb));
 			draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 					run.quads.end());
+		};
+		// The radio-request icon arm, gated on the tag's +885 fold AND the
+		// viewer gate [orig: HUD_DrawEntityLabel `test ebp, ebp; jz` +
+		// `cmp var_DC, 0; jz` @0x5a415a..0x5a4163 (tick), @0x5a4270..0x5a427d
+		// (text), @0x5a43a0..0x5a43a9 (bar)]: the TSDicon cell 0x17 in table[3]
+		// light blue at forced full alpha, half-size fontH*0.5 centered on
+		// (cx, cy) [orig: HUD_DrawRotatedIconQuad @0x599630]. The strip
+		// renderer's MODULATE2X stage folds into the diffuse as for the map
+		// blips [orig: Render_DrawIconStripCell_Debug @0x67bae0].
+		const bool request_icon = tag.radio_request && state.radio_request_icon_viewer;
+		const float half_h = font_h * 0.5f;
+		auto emit_request_icon = [&](float cx, float cy) {
+			HudQuad icon;
+			icon.x0 = cx - half_h;
+			icon.y0 = cy - half_h;
+			icon.x1 = cx + half_h;
+			icon.y1 = cy + half_h;
+			hud_icon_strip_cell_uv(state.minimap, kFriendlyTagRadioRequestIcon,
+					icon.u0, icon.v0, icon.u1, icon.v1);
+			icon.color = hud_icon_strip_modulate2x_color(
+					0xFF000000u | (kFriendlyTagDownedLightBlue & 0xFFFFFFu));
+			icon.texture = kHudTexMapIcons;
+			draw_list_.quads.push_back(icon);
+		};
+		// The tick/bar forms: a medic tag pre-shifts x by -fontH/2, the icon
+		// centers at (x - fontH/2, y - fontH/2), then a medic tag shifts x by
+		// +fontH for the count [orig: @0x5a4165..0x5a41bc (tick) /
+		// @0x5a43ab..0x5a4403 (bar): `cdq; sub; sar 1; neg; add axis`,
+		// `fisubr axis` / `fild cosVal; fsub` at the icon, `add axis, ebx`].
+		auto tick_form_icon_x = [&](float x) {
+			if (!request_icon) return x;
+			if (tag.medic) x -= half_h;
+			emit_request_icon(x - half_h, tag.screen_y - half_h);
+			if (tag.medic) x += font_h;
+			return x;
 		};
 
 		// A slot entry with an empty callsign draws the bar form
@@ -1247,7 +1283,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				bar.x1 = tag.screen_x;
 				bar.y1 = tag.screen_y + font_h;
 				draw_list_.lines.push_back(bar);
-				emit_bare_count();
+				emit_bare_count(tick_form_icon_x(tag.screen_x));
 				continue;
 			}
 			// '^' + the compiled-in name table [orig: @ 0x5a4047..0x5a40cd].
@@ -1269,17 +1305,30 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 					half_bright_keep_alpha(argb));
 			draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 					run.quads.end());
+			int text_w = 0;
+			int text_h = 0;
+			if (request_icon || tag.medic)
+				lf.measure(label.c_str(), ls, ls, &text_w, &text_h);
+			// The text form's icon: x shifts by -(fontH/2 + textW/2) and STAYS
+			// shifted for the plate below; the icon centers at (x - fontH/2,
+			// top_y) [orig: @0x5a4288..0x5a42ee -- `sar 1; neg; sar ecx, 1;
+			//  sub; add axis` @0x5a429b..0x5a42aa, `fild cosVal; fsub; fiadd
+			//  fontH/2` @0x5a42cb..0x5a42da, `fisubr axis` @0x5a42e2].
+			float plate_x = tag.screen_x;
+			if (request_icon) {
+				plate_x += -half_h - static_cast<float>(text_w) * 0.5f;
+				emit_request_icon(plate_x - half_h, top_y);
+			}
 			if (tag.medic) {
 				// The red-cross-on-white medic plate, a fontH/2 square left of
-				// the text at the tag alpha [orig: rect @ 0x5a4309..0x5a436c ->
-				// HUD_DrawMedicCrossQuad @ 0x59bcb0]. The quad itself is the
-				// shared primitive in hud/hud_medic_cross.h (the map medic marker
-				// and the help icons draw the same routine): the white field,
-				// then the two red bars, in the witnessed order.
-				int text_w = 0;
-				int text_h = 0;
-				lf.measure(label.c_str(), ls, ls, &text_w, &text_h);
-				const float x0 = tag.screen_x -
+				// the text at the tag alpha, measured from the (possibly
+				// icon-shifted) x [orig: rect @ 0x5a4309..0x5a436c reading
+				// `axis` @0x5a430e -> HUD_DrawMedicCrossQuad @ 0x59bcb0]. The
+				// quad itself is the shared primitive in hud/hud_medic_cross.h
+				// (the map medic marker and the help icons draw the same
+				// routine): the white field, then the two red bars, in the
+				// witnessed order.
+				const float x0 = plate_x -
 						(static_cast<float>(text_w) * 0.5f + font_h) - 0.5f;
 				const float y0 = top_y - 0.5f;
 				const float x1 = x0 + font_h * 0.5f;
@@ -1301,7 +1350,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				seg.y1 = tag.screen_y + half;
 				draw_list_.lines.push_back(seg);
 			}
-			emit_bare_count();
+			emit_bare_count(tick_form_icon_x(tag.screen_x));
 		}
 	}
 	++draw_list_.elements_drawn;

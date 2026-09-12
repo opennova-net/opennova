@@ -24,7 +24,9 @@
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <runtime/audio/ambient_mixer.h>
 #include <runtime/audio/bank_chain.h>
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/mission/placement_traits.h>
 
@@ -85,11 +87,11 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_perf_counters"), &MissionAudio::get_perf_counters);
 	ClassDB::bind_method(D_METHOD("get_bank"), &MissionAudio::get_bank);
 	ClassDB::bind_method(D_METHOD("apply_sound_emitters", "events"), &MissionAudio::apply_sound_emitters);
-	ClassDB::bind_method(D_METHOD("fire_soundset", "name", "world_pos", "source_bms_id"),
-			&MissionAudio::fire_soundset, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("fire_soundset", "name", "world_pos", "source_bms_id", "sound_id"),
+			&MissionAudio::fire_soundset, DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("ui_soundset", "name"), &MissionAudio::ui_soundset);
-	ClassDB::bind_method(D_METHOD("slot_soundset", "name", "world_pos", "source_bms_id"),
-			&MissionAudio::slot_soundset, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("slot_soundset", "name", "world_pos", "source_bms_id", "sound_id"),
+			&MissionAudio::slot_soundset, DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("play_dialog", "wav_id"), &MissionAudio::play_dialog);
 	ClassDB::bind_method(D_METHOD("resolve_dialog_set", "wav_id"), &MissionAudio::resolve_dialog_set);
 	ClassDB::bind_method(D_METHOD("play_wac_wave", "filename"), &MissionAudio::play_wac_wave);
@@ -493,13 +495,26 @@ void MissionAudio::reset_oneshot_playback() {
     recent_fires_.clear();
 }
 
-bool MissionAudio::fire_soundset(const String &p_name, const Vector3 &p_world_pos, int p_source_bms_id) {
+// The local player's own action-slot presentation arrives as source -1 with no
+// key (player_weapon_effects); it keys on that marker so its re-fires restart
+// their own voice like every other entity's. Everything else keeps the key the
+// sim stamped (0 = no identity: the delayed slots, destruction, script plays).
+int MissionAudio::_oneshot_sound_id(int p_source_bms_id, int p_sound_id) {
+	if (p_sound_id != 0 || p_source_bms_id != -1) {
+		return p_sound_id;
+	}
+	return static_cast<int>(opennova::audio::oneshot_sound_id(
+			opennova::audio::kNoSourceHandle, p_source_bms_id));
+}
+
+bool MissionAudio::fire_soundset(const String &p_name, const Vector3 &p_world_pos, int p_source_bms_id,
+		int p_sound_id) {
 	if (bank_.is_null() || !root_attached_) {
 		return _record_fire(p_name, p_world_pos, p_source_bms_id, false, false);
 	}
 	return _record_fire(p_name, p_world_pos, p_source_bms_id, false,
 			bank_->play_oneshot_3d(this, p_world_pos, p_name, StringName(kSfxBus), last_camera_pos_,
-					p_source_bms_id));
+					p_source_bms_id, _oneshot_sound_id(p_source_bms_id, p_sound_id)));
 }
 
 bool MissionAudio::ui_soundset(const String &p_name) {
@@ -510,13 +525,13 @@ bool MissionAudio::ui_soundset(const String &p_name) {
 }
 
 bool MissionAudio::slot_soundset(const String &p_name, const Vector3 &p_world_pos,
-        int p_source_bms_id) {
+        int p_source_bms_id, int p_sound_id) {
     if (bank_.is_null() || !root_attached_) {
         return _record_fire(p_name, p_world_pos, p_source_bms_id, true, false);
     }
     return _record_fire(p_name, p_world_pos, p_source_bms_id, true,
             bank_->play_oneshot_3d(this, p_world_pos, p_name, StringName(kSfxBus), last_camera_pos_,
-                    p_source_bms_id));
+                    p_source_bms_id, _oneshot_sound_id(p_source_bms_id, p_sound_id)));
 }
 
 bool MissionAudio::play_dialog(int p_wav_id) {
@@ -1036,7 +1051,10 @@ void MissionAudio::_flush_sound_emitters(int64_t p_final_tick) {
 		// positional presentation drain.
 		const Vector3 pos = mission_to_godot(event.pos);
 		const int source_bms_id = static_cast<int>(event.source_bms_id);
-		const int lifetime = event.lifetime_ticks;
+		// The retail 16-bit slot word the mixer keeps (a sign-extended kick byte
+		// is a long loop, not a dead one); the expiry bookkeeping below counts
+		// the same word.
+		const int lifetime = opennova::audio::emitter_lifetime_word(event.lifetime_ticks);
 		const int pitch_q16 = static_cast<int>(event.pitch_q16);
 		const int volume_q8_8 = static_cast<int>(event.volume_q8_8);
 		if (event.source_only) {

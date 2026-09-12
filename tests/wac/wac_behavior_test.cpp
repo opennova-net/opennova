@@ -8,6 +8,7 @@
 #include <runtime/mission/event_runtime.h>
 #include <formats/wac/bytecode.h>
 #include <formats/wac/command.h>
+#include <formats/wac/parser.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/ai.h>
 #include <runtime/audio/oneshot_play.h>
@@ -1802,6 +1803,23 @@ static void test_bms_event_query_reads_active_during_delay() {
     CHECK(w.script.vars.get_mission(1) == 0);
 }
 
+// A boundary keyword followed by an operator (`then -5`) drops an open auto
+// frame whose precedence sits below that operator's WITHOUT emitting its POP
+// and abandons the drain; the same expression before a plain action still
+// pops the AND. Malformed input only. [orig: Script_Compile @0x4f4226..0x4f4231]
+static void test_boundary_lookahead_drops_an_outranked_frame() {
+    const auto pops_in_condition = [](const char *source) {
+        const opennova::wac::ParseResult parsed = opennova::wac::parse(source);
+        if (parsed.statements.empty()) return -1;
+        int pops = 0;
+        for (const opennova::wac::Expr &step : parsed.statements[0].cond.kids)
+            if (step.kind == opennova::wac::Expr::Pop) ++pops;
+        return pops;
+    };
+    CHECK(pops_in_condition("if never() and 1 + 2 then set(v1,1) endif\n") == 1);
+    CHECK(pops_in_condition("if never() and 1 + 2 then -5 endif\n") == 0);
+}
+
 int main() {
     test_player_values_cache_at_bytecode_entry();
     test_outcome_cache_changes_on_next_execution();
@@ -1826,6 +1844,7 @@ int main() {
     test_ssn_rider_query_bounds_parent_depth_and_pool();
     test_arithmetic_assignment_and_retail_expression_order();
     test_auto_parentheses_and_minus_token_context();
+    test_boundary_lookahead_drops_an_outranked_frame();
     test_named_event_reset_and_declared_variables();
     test_empty_server_holds_script_divider_after_boot();
     test_nested_conditions_and_accumulator_lifetime();

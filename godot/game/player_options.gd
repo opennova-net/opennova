@@ -41,6 +41,14 @@ const DEFAULT_CROSSHAIR_STYLE := 0
 const CROSSHAIR_COLOR_MASK := HudOverlay.CROSSHAIR_COLOR_MASK
 const DEFAULT_CROSSHAIR_COLOR := HudOverlay.DEFAULT_CROSSHAIR_COLOR
 const DEFAULT_CROSSHAIR_SPREAD := HudOverlay.DEFAULT_CROSSHAIR_SPREAD != 0
+# The aspect mode persists as retail's `display_16x9` cfg word: the render
+# aspect-mode index (0 = 4:3, 1 = 16:10, 2 = 16:9, 3 = 5:4; any other value =
+# the surface's own ratio, a cfg-only choice no authored spin row carries). The
+# 0 is only the pre-seed placeholder (the config defaults' memset): a fresh
+# profile seeds the word from the primary desktop's ratio ONCE and persists
+# it, as retail's first-launch video test does (fresh_profile_aspect_mode;
+# docs/mnu/menu-re.md, the 16x9DISPLAY paragraph).
+const DEFAULT_ASPECT_MODE := 0
 
 const SOUND_FX_BUSES := [&"SFX", &"Ambient"]
 const DIALOG_BUS := &"Voice"
@@ -66,7 +74,7 @@ class State extends RefCounted:
 			p_crosshair_style := DEFAULT_CROSSHAIR_STYLE,
 			p_crosshair_color := DEFAULT_CROSSHAIR_COLOR,
 			p_crosshair_spread := DEFAULT_CROSSHAIR_SPREAD,
-			p_aspect_mode := -1) -> void:
+			p_aspect_mode := DEFAULT_ASPECT_MODE) -> void:
 		sound_fx_volume = p_sound_fx_volume
 		dialog_volume = p_dialog_volume
 		music_volume = p_music_volume
@@ -148,6 +156,20 @@ func apply_mouse(simulation: Simulation) -> void:
 				_state.mouse_sensitivity, _state.invert_mouse)
 
 
+## The aspect mode a fresh profile seeds. Retail's first launch runs the video
+## test, which writes the cfg word from the primary desktop's ratio -- 1 (the
+## spin's widescreen row) past 1.34, else 0 -- and saves the config at once, so
+## the desktop is sampled once and a later window or monitor never re-seeds it.
+## The rule is the engine's (renderer/aspect_ratio.h); this is its device feed.
+static func fresh_profile_aspect_mode(desktop: Vector2i) -> int:
+	return Simulation.fresh_profile_aspect_mode(desktop.x, desktop.y)
+
+
+## The primary desktop's size: retail's SM_CXSCREEN / SM_CYSCREEN sample.
+static func desktop_size() -> Vector2i:
+	return DisplayServer.screen_get_size(DisplayServer.SCREEN_PRIMARY)
+
+
 func _load_state() -> State:
 	return _normalized(State.new(
 			int(ConfigStore.read(CONFIG_PATH, AUDIO_SECTION,
@@ -166,7 +188,20 @@ func _load_state() -> State:
 					CROSSHAIR_COLOR_KEY, DEFAULT_CROSSHAIR_COLOR)),
 			bool(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
 					CROSSHAIR_SPREAD_KEY, DEFAULT_CROSSHAIR_SPREAD)),
-			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, ASPECT_MODE_KEY, -1))))
+			_load_aspect_mode()))
+
+
+# The persisted cfg word, or the one-time desktop seed a fresh profile writes
+# before anything reads it (retail saves the whole config right after the
+# video test decides the word).
+static func _load_aspect_mode() -> int:
+	# Any stored word (the native -1 included) wins; only an absent key seeds.
+	if ConfigStore.has_key(CONFIG_PATH, PLAYER_SECTION, ASPECT_MODE_KEY):
+		return int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
+				ASPECT_MODE_KEY, DEFAULT_ASPECT_MODE))
+	var seeded := fresh_profile_aspect_mode(desktop_size())
+	ConfigStore.write(CONFIG_PATH, PLAYER_SECTION, ASPECT_MODE_KEY, seeded)
+	return seeded
 
 
 static func _normalized(state: State) -> State:

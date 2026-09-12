@@ -117,8 +117,11 @@ struct NapiNPServerCtx {
 	// The ONE consolidated server-state config (ADR 0013 / §6.9): §6.4 identity + the §6.9 rule globals
 	// (S2C 0x08) + the §5.1 reactive-reply mission/player/spawn. Merged from the former game_settings +
 	// rules + session_config. Seeded by create_session (see server_session.h).
-	// Live admission controls. The IP ban compares the 0x42-reported SIP.
-	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0]
+	// Live admission controls. The IP ban compares the connection's UDP source
+	// address (conn+0x30, the datagram source stored @0x62bf28), never the
+	// client-reported SIP; entries use PeerAddr::ip's LE octet packing (the
+	// same as BanList_ParseIPEntry @0x4fd5c9).
+	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, the compare @0x4c6210]
 	bool join_locked = false;
 	std::vector<uint32_t> banned_join_addresses;
 	GameConfig config;             // [orig g_napi_np_ctx.game_settings @+0xE68 + the scattered g_* rule globals]

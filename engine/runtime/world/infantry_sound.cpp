@@ -23,7 +23,10 @@ namespace opennova::world {
 
 // The player's stance latch is independent of clip selection and anim-event
 // foley. Changing to the unnamed combined state still updates the latch.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4B7034..0x4B70A6;
+// parent_has_definition is the +0x16C MOUNT parent's ItemDef (parentEntity
+// gate @0x4B41A2..0x4B41C0, prone clear @0x4B4709..0x4B471B), never the
+// +0x28 ground link.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B703D..0x4B709D;
 //  global sound rows TO_CROUCH/TO_PRONE/TO_STAND @0x82FFB0/0x82FFD4/0x82FFF8]
 void emit_stance_change_sound(World &world, uint16_t source, const int32_t pos[3],
         uint8_t &previous, uint8_t stance_bits, uint32_t flags, bool parent_has_definition) {

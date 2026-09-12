@@ -443,6 +443,15 @@ typedef struct DefWeaponDef {
     int scope_zero_step;       /* +0x9C */
     int scope_zero_default;    /* +0xA0 */
     int scope_zero_extra;      /* +0x88, the optional fourth value */
+    /* 'scope_paralax_distance <metres>': the sight's parallax height, atof *
+       65535.0 (dbl_7D0958 -- 65535, not 65536) then ftol -> +0x8C; 0 = key absent
+       (the entry memset). The zero-yaw term atan2(+0x8C, zero distance) reads it
+       at the slot install and the zero adjust (runtime/world/weapon_scope_zero.h).
+       Shipped JOX rows: the M1 turret `.814`, the T80 turret `-.574`.
+       [orig: WeaponDefs_ParseLineCallback @ 0x544e4e..0x544e80 — the key compare
+        @ 0x544e4e, atof @ 0x544e64, `fmul dbl_7D0958` @ 0x544e69, ftol @ 0x544e72,
+        the store @ 0x544e80] */
+    int scope_paralax_distance_fp16; /* +0x8C */
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

@@ -124,10 +124,10 @@ int test_zero_range_fires_only_at_the_exact_source() {
 	const SetLocation loc = index.find("POINT_ONLY");
 
 	const float one_unit[3] = { 1.0f, 0.0f, 0.0f };
-	const OneshotPlan far = plan_oneshot_3d(b.file, loc, one_unit, kOrigin, true, 0,
+	const OneshotPlan far = plan_oneshot_3d(b.file, loc, one_unit, kOrigin, true, 0, 0,
 			nullptr, nullptr, selector);
 	TEST_EXPECT(!far.in_range && far.voices.empty());
-	const OneshotPlan at = plan_oneshot_3d(b.file, loc, kOrigin, kOrigin, true, 0,
+	const OneshotPlan at = plan_oneshot_3d(b.file, loc, kOrigin, kOrigin, true, 0, 0,
 			nullptr, nullptr, selector);
 	TEST_EXPECT(at.in_range && at.voices.size() == 1);
 	return 0;
@@ -147,9 +147,10 @@ int test_occlusion_inflates_the_fire_distance() {
 	probe.inflated_q16 = 100LL << 16;
 	const float source[3] = { 50.0f, 0.0f, 0.0f };
 	const OneshotPlan plan = plan_oneshot_3d(b.file, index.find("occluded"), source,
-			kOrigin, true, 321, &OcclusionProbe::fn, &probe, selector);
+			kOrigin, true, 321, 7, &OcclusionProbe::fn, &probe, selector);
 	TEST_EXPECT(probe.calls == 1);
 	TEST_EXPECT(probe.last_source == 321);
+	TEST_EXPECT(plan.sound_id == 7); // the own-channel key rides the plan
 	TEST_EXPECT(plan.in_range);
 	TEST_EXPECT(plan.dist_q16 == (100LL << 16));
 	TEST_EXPECT(plan.voices.size() == 1);
@@ -173,7 +174,7 @@ int test_occlusion_recheck_rejects_the_inflated_distance() {
 	probe.inflated_q16 = 130LL << 16;
 	const float source[3] = { 100.0f, 0.0f, 0.0f };
 	const OneshotPlan plan = plan_oneshot_3d(b.file, index.find("OCCLUDED_CULL"), source,
-			kOrigin, true, 0, &OcclusionProbe::fn, &probe, selector);
+			kOrigin, true, 0, 0, &OcclusionProbe::fn, &probe, selector);
 	TEST_EXPECT(probe.calls == 1);
 	TEST_EXPECT(!plan.in_range && plan.voices.empty());
 	return 0;
@@ -190,7 +191,7 @@ int test_no_listener_plays_the_member_volume_flat() {
 	OcclusionProbe probe;
 	const float source[3] = { 500.0f, 0.0f, 0.0f };
 	const OneshotPlan plan = plan_oneshot_3d(b.file, index.find("FLAT"), source, kOrigin,
-			false, 0, &OcclusionProbe::fn, &probe, selector);
+			false, 0, 0, &OcclusionProbe::fn, &probe, selector);
 	TEST_EXPECT(probe.calls == 0);
 	TEST_EXPECT(plan.in_range && plan.dist_q16 == 0);
 	TEST_EXPECT(plan.voices.size() == 1 && plan.voices[0].vol255 == 100);
@@ -214,13 +215,13 @@ int test_silent_layers_drop_and_every_layer_picks() {
 	const SetLocation loc = index.find("two");
 
 	const float far[3] = { 100.0f, 0.0f, 0.0f };
-	const OneshotPlan first = plan_oneshot_3d(b.file, loc, far, kOrigin, true, 0, nullptr,
+	const OneshotPlan first = plan_oneshot_3d(b.file, loc, far, kOrigin, true, 0, 0, nullptr,
 			nullptr, selector);
 	TEST_EXPECT(first.in_range);
 	TEST_EXPECT(first.voices.size() == 1);
 	TEST_EXPECT(first.voices[0].layer == 1 && first.voices[0].sndparm == bm);
 
-	const OneshotPlan second = plan_oneshot_3d(b.file, loc, kOrigin, kOrigin, true, 0,
+	const OneshotPlan second = plan_oneshot_3d(b.file, loc, kOrigin, kOrigin, true, 0, 0,
 			nullptr, nullptr, selector);
 	TEST_EXPECT(second.voices.size() == 2);
 	TEST_EXPECT(second.voices[0].layer == 0 && second.voices[0].sndparm == a1);
@@ -240,7 +241,7 @@ int test_direct_distance_skips_set_cull_but_retains_layer_gain_and_selection() {
     const auto loc = index.find("DIRECT");
     const float far[3] = {100, 0, 0};
     OcclusionProbe probe;
-    const auto positional = plan_oneshot_3d(b.file, loc, far, kOrigin, true, 0,
+    const auto positional = plan_oneshot_3d(b.file, loc, far, kOrigin, true, 0, 0,
             &OcclusionProbe::fn, &probe, selector);
     TEST_EXPECT(!positional.in_range && probe.calls == 0);
     const auto direct = plan_oneshot_at_distance(b.file, loc, 100LL << 16, selector);
@@ -309,6 +310,29 @@ int test_pitch_draws_and_channel_pool() {
 	TEST_EXPECT(keyed.acquire(1234, 250, 9) == 12);
 	TEST_EXPECT(keyed.acquire(1234, 1, 9) == 12); // same wave + nonzero id forces score zero
 	TEST_EXPECT(keyed.acquire(1234, 1, 10) == 13);
+	// An entity re-firing its wave while a quieter voice is live retakes its
+	// OWN channel; an id-less refire of the same wave opens a new one instead
+	// [orig: audio_find_and_open_channel @0x766F46 / @0x766F8E].
+	OneshotChannelPool own;
+	TEST_EXPECT(own.acquire(500, 10) == 12);
+	TEST_EXPECT(own.acquire(777, 100, 5) == 13);
+	TEST_EXPECT(own.acquire(777, 100, 5) == 13);
+	TEST_EXPECT(own.acquire(777, 100, 0) == 14);
+	return 0;
+}
+
+// The per-entity key is nonzero for EVERY entity (pool 0 slot 0 packs to 0),
+// the handle wins over the BMS id, the handle-less fallback never aliases a
+// handle, and "no source" is 0 (the retail NULL entity).
+int test_sound_id_is_nonzero_per_entity() {
+	TEST_EXPECT(oneshot_sound_id(0, 0) != 0);
+	TEST_EXPECT(oneshot_sound_id(0, 0) != oneshot_sound_id(1, 0));
+	TEST_EXPECT(oneshot_sound_id(0x1005, 41) == oneshot_sound_id(0x1005, 99));
+	TEST_EXPECT(oneshot_sound_id(kNoSourceHandle, 41) != 0);
+	TEST_EXPECT(oneshot_sound_id(kNoSourceHandle, 41) != oneshot_sound_id(0x0029, 0));
+	TEST_EXPECT(oneshot_sound_id(kNoSourceHandle, -1) != 0);
+	TEST_EXPECT(oneshot_sound_id(kNoSourceHandle, -1) != oneshot_sound_id(kNoSourceHandle, 41));
+	TEST_EXPECT(oneshot_sound_id(kNoSourceHandle, 0) == 0);
 	return 0;
 }
 
@@ -333,6 +357,7 @@ int test_radio_selection_keeps_unity_pitch_and_gates_view_layers() {
 
 int main() {
 	int failed = test_radio_selection_keeps_unity_pitch_and_gates_view_layers();
+	failed |= test_sound_id_is_nonzero_per_entity();
 	failed |= test_index_is_case_insensitive_and_first_bank_wins();
 	failed |= test_pitch_draws_and_channel_pool();
 	failed |= test_distance_and_cull_range();

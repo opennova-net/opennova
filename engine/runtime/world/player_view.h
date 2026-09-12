@@ -366,6 +366,44 @@ float player_view_fov_h_deg(const PlayerViewState &v, int32_t current_fov_q16,
 //  fovY = 2*atan(tan(fovX/2) / aspect)]
 float fov_vertical_from_horizontal_deg(float fov_h_deg, float aspect);
 
+// THE FRAME'S PROJECTION for one pass over the real surface [orig:
+// Render_SetViewAndProjectionMatrices @0x58d900 -- viewportWidth = w * scaleX
+// @0x58d971, viewportHeight = h * scaleY @0x58d985, halfV = atan(tan(fov_h/2)
+// * (vh / vw)) @0x58d9b2, aspect = vw / vh @0x58d9be ->
+// D3DXMatrixPerspectiveFovLH(2 * halfV, aspect, near, far) @0x58d9de]. With
+// scaleX = 1 and scaleY = flt_8409E8 = selected / (h/w) (renderer/aspect_ratio.h
+// aspect_viewport_scale_y) that is proj[0][0] = cot(fov_h/2) across the REAL
+// width and proj[1][1] = 1 / (tan(fov_h/2) * selected) across the REAL height:
+// the horizontal fov never moves with the mode and the vertical half-extent
+// follows the SELECTED ratio, not the surface's -- non-square pixels whenever
+// the two differ (mode 0 on a 16:9 surface compresses the picture to 0.75 of
+// its height, the classic wide stretch). Equivalently: the frustum a target of
+// aspect 1/selected renders natively, stretched by scale_y onto the surface. A
+// shell whose camera couples the two fovs through its viewport aspect
+// reproduces the pass by rendering through such a target and blitting it
+// full-surface; `target_w/h` is that target, the surface itself at scale 1 and
+// otherwise never below the surface on either axis (the resampled axis is
+// super-, never under-sampled).
+struct ViewProjection {
+    float fov_h_deg = 0.0f; // the horizontal fov, mode-invariant
+    float fov_v_deg = 0.0f; // 2 * atan(tan(fov_h/2) * selected)
+    float aspect = 1.0f;    // vw / vh = 1 / selected
+    float scale_y = 1.0f;   // flt_8409E8: the vertical stretch onto the surface
+    int target_w = 0;
+    int target_h = 0;
+};
+ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
+                               int surface_h);
+
+// The first-person viewmodel pass differs from the world pass only in its
+// horizontal fov (the weapon renderfov): both push scaleX = 1 and the same
+// flt_8409E8 as scaleY, so the focal ratio between the two frusta is the ratio
+// of the horizontal half-tangents on BOTH axes, whatever the mode or surface
+// [orig: the FP pass @0x4dee5a..0x4dee7f (fovDegrees = WeaponDef+0x148, the
+//  caller's scaleY -- flt_8409E8 via Player_RenderViewModelIfAlive @0x4e0154);
+//  the world pass Render_SetViewProjectionWithDefaults @0x58f6b0].
+float viewmodel_focal_ratio(float world_fov_h_deg, float renderfov_h_deg);
+
 // The eased first-person view bias in RAW weapon.def units: `pos` (hip) blended
 // toward `tpos` (sighted) by the scope fraction. The original's camera adds the
 // def `pos` (+0xF4) plus the scope interp's bias, which the stepper publishes as

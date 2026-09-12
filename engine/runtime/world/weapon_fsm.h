@@ -208,6 +208,7 @@ struct WeaponSlotState {
     int32_t scope_zoom = 0;
     int16_t scope_zero = 0; // MountSlot+0x60
     int32_t zero_pitch = 0; // MountSlot+4
+    int32_t zero_yaw = 0;   // MountSlot+8, the zero-yaw term (weapon_scope_zero.h)
     int32_t current = weapon_action::kIdle;
     int32_t next = weapon_action::kIdle;
     int32_t prev = weapon_action::kIdle;
@@ -302,6 +303,11 @@ struct WeaponFsmInputs {
     bool drowning = false;
     bool protected_carrier = false;
     bool ignore_ammo_cost = false;
+    // The outer loop's catch-up flag: true on the last logic tick of a frame's
+    // batch, false while the bank catches up. Gates the fire-loop emitter; a
+    // bare pump (no session) keeps it true.
+    // [orig: dword_24E0E80, Game_MainLoop @0x52ba32..0x52ba3a; read @0x5412a7]
+    bool last_tick_of_batch = true;
 };
 
 // Per-tick outputs for the host. anim events carry the .adm clip key to start on the

@@ -20,6 +20,16 @@ namespace opennova::def {
 /* Weapons Parsing                                                           */
 /* ========================================================================= */
 
+/* CRT atof on a token span: the double the retail parse multiplies before its
+   ftol, kept unnarrowed (parse_float_n rounds through a float). */
+static double parse_double_n(const char *s, size_t len) {
+    char buf[64];
+    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+    memcpy(buf, s, len);
+    buf[len] = '\0';
+    return strtod(buf, NULL);
+}
+
 /* Shared buffer parser for weapon.def, used by both the path and memory entry points. */
 static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out) {
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
@@ -369,6 +379,15 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "soundlockedtone", 15)) {
                 consume_value_str(trimmed, tlen, 15, cw.soundlockedtone, sizeof(cw.soundlockedtone));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "scope_paralax_distance", 22)) {
+                /* The sight's parallax height: atof * 65535.0 (dbl_7D0958), ftol
+                   -> +0x8C, the zero-yaw atan2's numerator; see def.h.
+                   [orig: WeaponDefs_ParseLineCallback @ 0x544e4e..0x544e80 — atof
+                    @ 0x544e64, the multiply @ 0x544e69, ftol @ 0x544e72, the store
+                    @ 0x544e80] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 22, &vl);
+                cw.scope_paralax_distance_fp16 = (int)(parse_double_n(v, vl) * 65535.0);
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "scope_max_zero", 14)) {
                 /* The scope-zero table: atol x3 in order -> +0x84 / +0x9C / +0xA0,

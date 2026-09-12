@@ -50,9 +50,13 @@ func test_click_policy_latches_on_the_edge_and_follows_a_new_world() -> void:
 	# Out of the tree: a bare GameWorld's _ready wants its scene siblings, and
 	# the catcher install needs only the world node as a parent.
 	var world: GameWorld = autofree(GameWorld.new())
+	var presenter: LocalPlayerPresenter = autofree(LocalPlayerPresenter.new())
+	world.set_local_view_presenter(presenter)
 	session.sync_click_policy(world, true)
 	var first := _catcher(world)
 	assert_not_null(first, "the edge installs the catcher under the world")
+	assert_eq(first.presenter(), presenter,
+			"the catcher picks through the world's local view presenter")
 	session.sync_click_policy(world, true)
 	assert_eq(_catcher(world), first, "a repeat is a no-op")
 	assert_true(session.is_click_active())

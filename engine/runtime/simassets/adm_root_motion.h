@@ -33,8 +33,9 @@ namespace opennova::simassets {
 //   capsule_bottom = lerp(bottom) * 65536 (the absolute ground-settle floor).
 // The playhead counts simulation ticks. The normalized channel advances by
 // fps/(62*frame_count); the root-motion *32768 scale is independent of that
-// clock. Loops wrap; stopped one-shots retain extents but zero XYZ/trigger.
-// [orig: AnimChannel_AdvancePlayback @0x40b140].
+// clock. Loops wrap; stopped one-shots retain extents but zero XYZ/trigger; a
+// loop holding a deferred state parks its armed boundary tick at the clip end
+// (advance_armed). [orig: AnimChannel_AdvancePlayback @0x40b140].
 class AdmRootMotion : public opennova::world::IRootMotionSource {
 public:
 	// Register a model's .adm (e.g. "E_STAND.adm", "US01.adm") through `index`
@@ -55,6 +56,17 @@ public:
 	int variant_count(int adm_id, int state_id) const override;
 	bool advance_variant(int adm_id, int state_id, int variant, int32_t &phase_ticks,
 	                     opennova::world::RootMotionFrame &out) override;
+	// advance_variant with the armed-wrap park: when the incremented playhead
+	// lands on `armed_boundary` (the tick clip_boundary_after reported for a
+	// looping clip holding a deferred state) the sample is the parked clip end
+	// (rec[frames-1]..rec[frames] at 0.99999, trigger[frames-1], XYZ live), not
+	// the wrapped start; -1 = unarmed. AnimMap checks the latched end flag BEFORE
+	// the advance and the sample, so the promoted retarget lands on the next
+	// tick [orig: AnimChannel_AdvancePlayback @0x40B193..0x40B1B1;
+	// AnimMap_UpdateEntity pending check @0x40B77B..0x40B7E1, advance @0x40B7FE,
+	// sample @0x40B82A].
+	bool advance_armed(int adm_id, int state_id, int variant, int32_t &phase_ticks,
+	                   int32_t armed_boundary, opennova::world::RootMotionFrame &out) override;
 	bool advance_blended(int adm_id,
 	                     int primary_state, int32_t &primary_phase_ticks,
 	                     int target_state, int32_t &target_phase_ticks,
@@ -129,10 +141,12 @@ private:
 	// Variant wraps modulo the ring size, so a stale cursor from a shorter row on
 	// another rig still resolves; missing states bind RESET's ring.
 	const Track *resolve_track(int adm_id, int state_id, int variant = 0) const;
-	static double position_of(const Track &track, int32_t phase_ticks);
+	static double position_of(const Track &track, int32_t phase_ticks,
+	                          int32_t armed_boundary = -1);
 	static float sample(const Track &track, const std::vector<float> &channel,
-	                    int32_t phase_ticks);
-	static uint32_t sample_trigger(const Track &track, int32_t phase_ticks);
+	                    int32_t phase_ticks, int32_t armed_boundary = -1);
+	static uint32_t sample_trigger(const Track &track, int32_t phase_ticks,
+	                               int32_t armed_boundary = -1);
 
 	std::vector<ClipSet> sets_;
 	std::unordered_map<std::string, int> by_name_; // lowercased .adm name -> adm_id

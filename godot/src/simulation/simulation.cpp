@@ -21,6 +21,34 @@ using namespace sim_internal;
 
 namespace {
 
+// The BMS admission limits (promote.cpp's player_limit/team_count gates). A
+// listen host admits against the SAME player cap its bring-up advertises
+// (net.host_max_players, the configure_host_session clamp), so the promoted
+// set and the advertised slot count cannot diverge; the no-net world keeps
+// the session config's value (admission ignores it outside a session). A
+// joiner's legacy full-BMS load (tools and direct joins; the production
+// joiner boots a wire-header-only mission with nothing to admit) takes the
+// joined session's values once its pre-load burst has delivered them: the
+// cap the host published in its S2C 0x64 session block (the host's own
+// host_max_players, so two OpenNova peers admit the same set; a retail
+// dedicated host publishes its cap while admitting against cap+1) and the replicated
+// scoreboard team count; else the host-equivalent defaults. Retail joiners
+// never promote the .bms (admission is host-only), so the joiner leg is a
+// port decision with no binary witness.
+void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
+		const godot::SimulationNetState &net, bool host_listening,
+		const opennova::inmatch::ClientRuntime *joined) {
+	options.player_limit = host_listening
+			? static_cast<int32_t>(net.host_max_players)
+			: static_cast<int32_t>(net.host_session_config.max_players);
+	options.team_count = net.host_session_config.num_teams;
+	if (!options.joiner || joined == nullptr) return;
+	if (joined->session_max_players() != 0)
+		options.player_limit = static_cast<int32_t>(joined->session_max_players());
+	if (joined->state().scoreboard.team_count != 0)
+		options.team_count = joined->state().scoreboard.team_count;
+}
+
 // Build the same synthetic patrol mission the C++ promote_test uses: 3 markers forming a
 // path, one looping waypoint record (channel 1), 2 organics on that route, 1 building.
 opennova::bms::File make_demo_mission() {
@@ -623,17 +651,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 				p_terrain->get_trn().tilestrip, assets_.tile_surface_table.data());
 	}
 	apply_terrain_to_ai();
-	// SndProf.def -> the footstep/foley/landing/scream slot table: the kernel
-	// leaves the sound-profile chain to the presentation-owning embedder.
-	if (files.valid() && files.has_file("SndProf.def")) {
-		std::vector<uint8_t> text;
-		if (files.read_file("SndProf.def", text)) {
-			PackedByteArray bytes;
-			bytes.resize(static_cast<int64_t>(text.size()));
-			if (!text.empty()) std::memcpy(bytes.ptrw(), text.data(), text.size());
-			set_sound_profiles(bytes);
-		}
-	}
+	// SndProf.def is the kernel's script_catalogs step (it parses only over an
+	// empty table, so a set_sound_profiles override applied above still wins).
 
 	ms::KernelBootOptions options;
 	options.playable = p_playable;
@@ -649,8 +668,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	options.defer_mission_start = true;
 	options.wac_basename = std::string(p_wac_basename.utf8().get_data());
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
-	options.player_limit = static_cast<int32_t>(net_.host_session_config.max_players);
-	options.team_count = net_.host_session_config.num_teams;
+	stamp_admission_limits(options, net_, is_host_listening(),
+			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.infantry_adm = p_infantry_adm.is_empty()
 			? std::string(ms::kDefaultInfantryAdm)
 			: std::string(p_infantry_adm.utf8().get_data());
@@ -723,8 +742,8 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	options.joiner = is_joiner();
     options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
-	options.player_limit = static_cast<int32_t>(net_.host_session_config.max_players);
-	options.team_count = net_.host_session_config.num_teams;
+	stamp_admission_limits(options, net_, is_host_listening(),
+			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
 	if (!kernel_->boot(options, boot_error)) {
@@ -748,8 +767,8 @@ void Simulation::build_demo_mission() {
 	options.joiner = is_joiner();
     options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
-	options.player_limit = static_cast<int32_t>(net_.host_session_config.max_players);
-	options.team_count = net_.host_session_config.num_teams;
+	stamp_admission_limits(options, net_, is_host_listening(),
+			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
 	if (!kernel_->boot(options, boot_error)) {

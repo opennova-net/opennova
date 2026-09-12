@@ -231,6 +231,7 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 	}
 	presentation_links_.push_back(link);
 	p_model->set_match_terrain_enabled(match_terrain_enabled_);
+	p_model->set_thermal_entity_wave(thermal_entity_wave_);
 }
 
 
@@ -434,10 +435,19 @@ void ObjectModel::apply_presentation_layer_below(Node *p_root) {
 	}
 }
 
+// The composed avatar is ONE retail entity submission: the head and the body
+// draw inside the same Terrain_RenderSectorEntitiesBySide iteration (the head
+// submit @0x5c7ffc, the body submit @0x5c8020) under the lighting block the
+// frame set once around that wave (CTerrainRenderer_BuildLightingShaderConstants(1)
+// @0x5c9511 / @0x5c95f8), so the wave lane stamped here reaches every linked
+// part; add_presentation_link seeds a part linked after the flag was set.
 void ObjectModel::set_thermal_entity_wave(bool p_enabled) {
 	if (thermal_entity_wave_ == p_enabled) return;
 	thermal_entity_wave_ = p_enabled;
 	stamp_entity_lighting_instances();
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_thermal_entity_wave(p_enabled);
+	}
 }
 
 void ObjectModel::set_entity_lighting_context(float p_effect_scale,
