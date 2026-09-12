@@ -5,8 +5,13 @@ Scope: the BMS event evaluator (`engine/runtime/mission/event_runtime.{h,cpp}`),
 promotion (`engine/runtime/mission/promote.{h,cpp}`), and the system tick order/cadence
 (`engine/runtime/mission/mission_kernel.cpp` (`finish_load`), `engine/runtime/wac/wac_system.h`, `engine/runtime/world/world.{h,cpp}`).
 
-**Verdict: MATCHING**, with the tracked deviations D-EVT-1..4 below. Every behavioral
-claim in this record was read from the decompilation this session; addresses cited inline.
+**Verdict: MATCHING**, with the tracked deviations below, including the malformed-loadout boundary D-EVT-7. Every behavioral
+claim in this record is tied to a retail witness; addresses are cited inline.
+
+| Component | Verdict | Evidence |
+| --- | --- | --- |
+| Placement admission (2026-09-11) | MATCHING (read-only grill) | `Entity_SpawnFromBMSRecord @ 0x40e9f0`; `mission_promote`, `mission_kernel`, `mission_bms`; section 6.4a |
+| Loadout record sanitizer (2026-09-11) | MATCHING for bounded records; malformed-tail divergence D-EVT-7 | `AIProfile_SanitizeConfigData @ 0x40cfe0`; `mission_bms`, `mission_corpus` (116/116 canonical reparse); section 6.3a |
 
 ## 1. The original system
 
@@ -554,6 +559,34 @@ Fixed counts (groups 64, layers 32, waypoints 128) match our
 | +0x244 | NOT a chunk length (never used as a seek) | `bonus_expiration` | 10 |
 | +0x246 | second-chunk len (`word_A76416`, always seeked past) | `unknown8` | 0 |
 
+### 6.3a Loadout sanitizer (2026-09-11)
+
+The loadout chunk contains NUL-separated records. Retail copies the first three
+strings (weapon name, primary ammo, secondary ammo) verbatim and tests only the
+fourth. A nonzero `atol` result accepts that entire fourth string, including any
+suffix. Otherwise, after skipping one leading sign, any alphabetic character
+makes it a missing field: retail inserts `"-1"` and leaves the candidate unconsumed
+as the next record's name. Empty also inserts `"-1"` without consuming it; other
+zero-valued strings without letters, including punctuation, remain verbatim.
+There is no `WPN_` search or ammo-string numeric normalization.
+[orig: AIProfile_SanitizeConfigData @ 0x40cfe0]
+
+`engine/formats/mission/bms.cpp` implements this record walk. The SP loader then
+filters names against weapon availability and falls back to the knife when no
+weapon survives; MP skips both loadout chunks. These are distinct operations.
+[orig: Mission_LoadBMSFile @ 0x40f4e0]
+
+The format parser bounds reads to the chunk. Incomplete trailing fields become
+empty strings; it does not reproduce retail's access to uninitialized stack
+bytes or its overflowing 2048-byte temporary buffer. The three shipped chunks
+in ASP_G8a, ASR_C2A and TKR_G3A with broken separators now retain the witnessed
+record order instead of searching for embedded weapon names. Canonical reparse
+is stable across all 116 locally available missions; this is not a byte-equality
+claim for malformed input. **D-EVT-7 (OPEN)** records that boundary: bounded
+missing-string reads and preservation of oversized typed records differ from
+retail's out-of-buffer reads and final 2048-byte copy cap. No unsafe retail
+execution behavior is claimed by the parser tests.
+
 ### 6.4 Entity record 0xAC (`Entity_SpawnFromBMSRecord @0x40e9f0`)
 
 Byte-correct vs our `parse_entity`; round-trip proven. Verdict: format MATCHING; the
@@ -576,6 +609,36 @@ AI/runtime semantics below are doc refinements, not parser changes.
 | +79 | waypoint enable | → aiData+148 |
 | +80 | firing angle | `(b<<8)/360` |
 | +120 | gen_string[36] | type 6088: first 31 bytes = parking-spot name (strncpy 0x1F). Bytes 153/154/155 of the record are runtime sub-fields inside it (153 entity-table index; 155 invincible → entityData+538). Our fixed-string IO preserves all 36 bytes verbatim |
+
+### 6.4a Placement admission (2026-09-11)
+
+Admission precedes allocation/trait promotion. Its player count is the configured
+session limit, not the number of connected occupants. The two threshold bytes
+are **signed**. [orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]
+
+| Placement condition | Admission |
+| --- | --- |
+| Type 5305 teammate | Offline with teammates enabled only; remap to `4999 + selected_class` and seed that class (retail's witnessed default is 1) |
+| BMS bit `0x10` | Session required and player limit at least signed byte +75 |
+| BMS bit `0x20` | Reject in a session when player limit exceeds signed byte +74 |
+| BMS bit `0x40` | Single-player only |
+| BMS bit `0x80` | Multiplayer only |
+| ItemDef attribute `0x10000` | Session with four teams and game type `0x10000`, `0x10001` or `0x10008` only |
+| Other ItemDefs, record team 3 or 4 | Four configured teams required |
+
+The parser/editor now accept the `0x80` bit and name both SP/MP bits correctly.
+`PromoteOptions` carries player/team/game settings and ItemDef attributes before
+promotion. Rejected records retain their fixed pool slots as holes and consume
+no spawn-stagger value; marker/waypoint indexing remains authored-index based.
+The local and native host boot paths pass their resolved settings before loading.
+[orig: Entity_SpawnFromBMSRecord @ 0x40e9f0;
+Mission_LoadBMSFile @ 0x40f4e0]
+
+The host menu caps its requested player count at 64; dedicated hosting adds the
+reserved host slot. The resulting network limit is also fed into admission.
+[orig: HostDialog_ReadSettings @ 0x555940;
+apply_session_settings_to_globals @ 0x551500;
+Server_InitNewRoundState @ 0x51c8e0]
 
 ### 6.5 Load-time fixups (runtime-only; disk bytes unchanged)
 
@@ -608,6 +671,34 @@ degrees unchanged, so round-trip remains unaffected.
 
 ### 6.7 Load orchestration
 
+Re-witnessed 2026-09-11: the session globals precede BMS admission. The native
+`KernelBootOptions::mp_session` now reaches promotion before any row is filtered;
+a joiner implies multiplayer. Godot's three boot entries and the dedicated host
+pass the mode explicitly. The authority-only `EventTrigger_UpdateAllWithFlag2`
+call in `Game_StartMission @0x525b86` follows definition/organic initialization.
+The kernel now skips that pass for joiners, including tool sessions carrying a
+complete BMS. `mission_kernel_test` pins both the early SP/MP filter and the
+absence of a joiner PreMission effect; lifecycle and host-role regressions pass.
+An item table supplied to the in-memory Godot load is installed before promotion,
+so that path uses the same item admission gates and definition callbacks.
+
+After the environment seed, `MissionKernel::complete_mission_start` owns initial
+authority WAC execution, the 255 weather ticks, unit recount, spawn marker
+construction, authority vehicle initialization and the final restore snapshot.
+The Godot weather owner defers that boundary until its environment is ready;
+the dedicated host and native boots complete it directly. A boundary runs once
+per successful load. Vehicle support-relative spawn poses therefore include
+initial-script edits, and restoring the mission does not return to a snapshot
+taken before WAC or vehicle initialization. `mission_kernel` exercises an
+initial WAC teleport, its saved vehicle spawn pose, restoration and repeated
+completion calls. [orig: Game_StartMission @ 0x525CB8..0x526095;
+Environment_MissionStartInit @ 0x57F1E0]
+
+The IDB name `EventTrigger_ResetAllSlots @ 0x4513B0` is misleading: that late
+startup call clears eight helicopter lift slots and their count. It does not
+clear the BMS event-fired latches; the port preserves the PreMission history.
+
+
 `Game_StartMission @0x524360` drives the load: `BMS_LoadAndValidateHeader` ×3
 (@0x524774/@0x524adb/@0x524f66), then `Mission_LoadBMSFile` ×2 (@0x524b5d/@0x524ffa),
 plus terrain/net/HUD. Doc-only; we do not mirror the call shape.
@@ -628,6 +719,23 @@ Action record as `dword[8]`: `[0]` reserved0, `[1]` action_type, `[2]`
 action_sub_type, **`[3..6]` param1..param4**, `[7]` reserved1 (reserved0/1 unused).
 Event byte +23 is likewise never read → reserved; byte +20 is the runtime latch
 (§1.1), 0 on disk.
+
+### 7.2a Area predicates (2026-09-11)
+
+**MATCHING for the represented pools and authored identities.**
+`Entity_IsBmsRefInTriggerBounds @0x43e510` scans every row in pools 0 and 1 for a
+nonzero raw SSN and inclusive XYZ bounds. It does not stop at an out-of-bounds
+duplicate or exclude dead rows. `Entity_IsTeamInTriggerBounds @0x43c730` compares
+the command-group word (not the entity team): group zero returns false, pool 0
+excludes Flags bit 0, and pool 1 has no death-flag gate. Neither reads a separate
+alive latch. Bounds use the promoted area; unconstrained Z spans +/-16384 units.
+
+`EntityCommands` now owns these two dedicated scans. Event dispatch preserves
+the raw parameter instead of wrapping it through uint16/uint8. The existing
+D-NET-112 SP representation still aliases SSN 10000 to the cached socketless
+local body whose `net_id` is zero; that alias is a port boundary, not a branch in
+43e510. `event_runtime_bms` pins duplicate SSNs, inclusive edges, the pool-specific
+flag rules, excluded pools, zero/wide parameters, and the SP-only alias.
 
 ### 7.2 Param kinds
 

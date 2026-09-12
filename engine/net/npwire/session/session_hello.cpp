@@ -172,8 +172,7 @@ bool matches_jointoperations_identity(const ClientAuth &auth) {
 	return str_case_equal(auth.nvs, expected.nvs) &&
 			is_jointoperations_protocol_name(auth.pn) &&
 			auth.pg_present && auth.pg == expected.pg &&
-			str_case_equal(auth.pv1, expected.pv1) &&
-			str_case_equal(auth.pv2, expected.pv2);
+			str_case_equal(auth.pv1, expected.pv1);
 }
 
 bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
@@ -287,12 +286,13 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		else if (name == "CI")   out.ci   = read_u32_le(value, size);
 		else if (name == "HK")   out.hk   = read_u32_le(value, size);
 		else if (name == "CK")   out.ck   = read_u32_le(value, size);
-		else if (name == "NA")   out.na   = strip_nul(value, size);
+		else if (name == "NA")   out.na   = strip_nul(value, size).substr(0, 63);
+		else if (str_case_equal(name, "PW")) out.pw = strip_nul(value, size).substr(0, 511);
 		else if (name == "SIP")  out.sip  = read_u32_le(value, size);
 		else if (name == "SPN")  out.spn  = read_u32_le(value, size);
 		else if (name == "SCRK") out.scrk = strip_nul(value, size);
 		else if (name == "CU")   out.cu.emplace_back(value, value + size);
-		// Unknown tags (DE/PV3/PW/NF/DCNT/RCNT/etc.) intentionally ignored.
+		// Unknown tags (DE/PV3/NF/DCNT/RCNT/etc.) intentionally ignored.
 		pos = next;
 	}
 	// Minimum sanity: CK should be nonzero for a valid ClientAuth.
@@ -323,6 +323,7 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	if (msg.hk) append_u32_field(buf, "HK", msg.hk);
 	if (msg.ck) append_u32_field(buf, "CK", msg.ck);
 	if (!msg.na.empty()) append_string_field(buf, "NA", msg.na);
+	if (!msg.pw.empty()) append_string_field(buf, "PW", msg.pw);
 	if (msg.sip) append_u32_field(buf, "SIP", msg.sip);
 	if (msg.spn) append_u32_field(buf, "SPN", msg.spn);
 	for (const auto &blob : msg.cu) {

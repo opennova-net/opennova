@@ -66,6 +66,7 @@ struct SimulationAssetState {
 	std::array<uint8_t, 256> tile_surface_table{};
 	// SndProf.def text + water plane held for (re)application on reset_world.
 	std::vector<uint8_t> sndprof_text;
+    bool sound_profiles_override = false;
 	int32_t env_water_z_q16 = 0;
 	// The packed Avatars.def character-sex registry the portable sound-profile
 	// selector reads; retained across reset_world.

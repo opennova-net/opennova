@@ -1,3 +1,4 @@
+#include <runtime/renderer/material_texture.h>
 #include "resource_index/resource_root.h"
 #include "util/data_format.h"
 
@@ -56,6 +57,7 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_file", "name", "policy"), &ResourceRoot::has_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("read_file", "name", "policy"), &ResourceRoot::read_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("load_texture", "name", "policy"), &ResourceRoot::load_texture, DEFVAL(LOOKUP_SESSION_DEFAULT));
+	ClassDB::bind_method(D_METHOD("load_material_texture", "name", "type"), &ResourceRoot::load_material_texture);
 	ClassDB::bind_method(D_METHOD("load_font", "name"), &ResourceRoot::load_font);
 	ClassDB::bind_method(D_METHOD("list_missing_boot_resources"), &ResourceRoot::list_missing_boot_resources);
 	ClassDB::bind_method(D_METHOD("boot_resource_failure_text", "name"), &ResourceRoot::boot_resource_failure_text);
@@ -501,6 +503,25 @@ Ref<Texture2D> ResourceRoot::load_texture(const String &name, LookupPolicy polic
 	}
 	texture_cache_.emplace(cache_key, result);
 	return result;
+}
+
+Ref<Texture2D> ResourceRoot::load_material_texture(const String &name, uint8_t type) const {
+    if (type != 4 && type != 5)
+        return opennova::prepare_material_texture(load_texture(name), name, type);
+    const String dds = name.get_basename() + ".dds";
+    const std::string native_name(name.utf8().get_data());
+    const std::string selected = opennova::renderer::normal_material_filename(native_name,
+            index_.prefers_loose_file(native_name), has_file(dds));
+    const String source_name = String::utf8(selected.c_str());
+    const std::string key = "normal-source:" + selected;
+    const uint64_t epoch = opennova::cache_epoch();
+    if (texture_cache_epoch_ != epoch) { texture_cache_.clear(); texture_cache_epoch_ = epoch; }
+    auto cached = texture_cache_.find(key);
+    if (cached == texture_cache_.end()) {
+        const auto source = opennova::load_texture_from_bytes(source_name, read_file(source_name));
+        cached = texture_cache_.emplace(key, source).first;
+    }
+    return opennova::prepare_material_texture(cached->second, name, type);
 }
 
 Ref<Resource> ResourceRoot::load_font(const String &name) const {

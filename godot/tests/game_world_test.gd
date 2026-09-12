@@ -143,6 +143,9 @@ func _fx_item_row(row: Dictionary) -> String:
 	var attribs := String(row.get("attribs", ""))
 	if not attribs.is_empty():
 		text += "  attrib: %s\r\n" % attribs
+	var ai_function := String(row.get("ai_function", ""))
+	if not ai_function.is_empty():
+		text += "  ai_function %s\r\n  particletesttime 0.25 0\r\n" % ai_function
 	var effect := String(row.get("effect", ""))
 	if not effect.is_empty():
 		text += "  particlefx %s %s\r\n" % [effect, String(row.get("userpoint", ""))]
@@ -1030,6 +1033,8 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	assert_ne(mission_clear, idle_clear,
 			"the loaded mission replaces the scene-authored frame clear")
 	var terrain_material: ShaderMaterial = terrain.get_terrain_material()
+	assert_almost_eq(camera.far, floorf(env.get_fog_distance()) + 1.0, 0.001,
+			"the active scene camera clips at the current fog distance rounded down plus one")
 	var dry_terrain_fog_color: Vector3 = terrain_material.get_shader_parameter("u_fog_color")
 	var dry_terrain_fog_end := float(terrain_material.get_shader_parameter("u_fog_end"))
 	var dry_terrain_fog_type := int(terrain_material.get_shader_parameter("u_fog_type"))
@@ -3260,3 +3265,40 @@ func test_world_owns_the_occlusion_culling_switch() -> void:
 	world.unload()
 	assert_false(viewport.use_occlusion_culling,
 			"unload switches the consumer off for the next mission")
+
+
+func test_emit_callback_uses_live_particle_groups_on_fixed_ticks() -> void:
+	var root_dir := _stage_item_fx_fixture("emit_callback", [
+		{"id": 108077, "graphic": FX_GUN_GRAPHIC, "attribs": "Powerup",
+			"ai_function": "emit", "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
+	])
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
+			func(mission: MissionData) -> void:
+				mission.add_entity(MissionData.KIND_BUILDING, 108077,
+						Vector3(10, 20, 30), Vector3(0, 90, 0))), OK)
+	var effects := world.get_effect_world()
+	assert_eq(effects.live_group_count(), 0, "powerup skips the independent load-time attachment")
+	world.get_runtime().play()
+	var first_group := 0
+	var stopped := false
+	var restarted := false
+	for _tick in range(160):
+		world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
+		for group: EffectGroupReport in effects.get_debug_group_report(true):
+			if group.name != FX_PERSISTENT_EFFECT:
+				continue
+			if first_group == 0:
+				first_group = group.id
+				assert_eq(group.binding, EffectScene.BINDING_FOLLOW_OWNER)
+				assert_gt(group.transform.origin.x, 9.0, "the native group uses the placed model's userpoint")
+			if group.id == first_group and group.detached:
+				stopped = true
+			if group.id != first_group and not group.detached:
+				restarted = true
+		if restarted:
+			break
+	assert_gt(first_group, 0, "the class callback creates a group in the renderer's scene")
+	assert_true(stopped, "the next callback stops its existing group")
+	assert_true(restarted, "the callback rearms after the 15-tick gap")
+	world.unload()

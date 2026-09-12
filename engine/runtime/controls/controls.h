@@ -81,6 +81,14 @@ struct ActionDef {
   //  @0x49d3ba..0x49d488 (fallback); seat1's row @0x8160D8 +24 = 0x11].
   // Rows that omit the field aggregate-initialize it to 0.
   int default_mod = 0;
+  // Static row +24/+26/+32/+34: mouse mask, joystick binding (1-based
+  // button or 0x81..0x84 direction), mouse modifier VK, joystick modifier.
+  // [orig: KeyBinding_BuildFilteredTable @0x54c2b0]
+  uint16_t default_mouse = 0;
+  uint8_t default_joy = 0;
+  uint16_t default_mouse_mod = 0;
+  uint8_t default_joy_mod = 0;
+  uint32_t modes = 3; // +8: alive bit 1, death-screen bit 2 [orig: @0x497ea0]
 };
 
 // The full static catalog (pointer + element count).

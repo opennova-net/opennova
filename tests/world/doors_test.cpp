@@ -107,7 +107,7 @@ static void test_motion_contact_sound_restart() {
     CHECK(w.doors.slot(e, 0)->state == 0 && w.doors.slot(e, 1)->state == 1);
     CHECK(w.out.slot_sounds.size() == 1);
     CHECK(pivot.last == 2 && w.out.slot_sounds[0].pos[0] == 12 * 65536);
-    CHECK(e.static_think_age == 1920);
+    CHECK(e.class_think_ticks == 1920);
     w.doors.command(w, e, 6, 2); // opening touches do not restart/replay
     CHECK(w.out.slot_sounds.size() == 1);
     w.doors.command(w, e, 7);

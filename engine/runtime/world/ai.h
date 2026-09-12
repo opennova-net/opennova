@@ -1125,7 +1125,7 @@ public:
     // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396; swim @0x4b73c0-0x4b7452
     //  (the 8-case jumptable @0x4b7411: 0 -> 37, 1/2 -> 38, 3..5 -> 40, 6/7 -> 39,
     //  default 36 @0x4b7448); 4th-tick gate @0x4b70ce]
-    void player_body_select(AiEntity &e, World &world, uint32_t entity_flags);
+    void player_body_select(AiEntity &e, World &world, uint32_t entity_flags, uint32_t logic_tick);
     // The lean-angle producer, every body tick: decay lean -= (lean+8)>>4, then the
     // on-foot ramp -0x3000000 (left) / +0x3000000 (right) per held lean bit, gated
     // alive + not prone + not latched on a ladder (entity_flags carries the retail
@@ -1200,7 +1200,7 @@ public:
     // 60-deg live / 48-deg dead slide threshold, roll write skipped during 41/42).
     // [orig: Entity_UpdateInfantryAI @0x4ba10f-0x4ba34c;
     //  Entity_UpdateInfantryPlayerBody @0x4b6d95-0x4b6ff4]
-    void infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t key);
+    void infantry_slope_pass(AiEntity &e, World &world, uint32_t logic_tick, uint32_t key);
 
     const StateRow &row(int32_t state) const;
 

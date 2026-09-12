@@ -105,10 +105,11 @@ private:
                 out.call.line = cur().line;
                 advance();
                 advance();
-                out.cond = parse_expr();
+                out.cond = parse_expr(&out.assignment_target);
             } else {
                 out.cond = parse_expr();
-                if (out.cond.kind == Expr::Leaf && out.cond.call.name != kOperandMarker) {
+                if (out.cond.kind == Expr::Leaf && out.cond.call.name != kOperandMarker &&
+                        out.cond.op.empty() && !out.cond.negate && !out.cond.push) {
                     out.kind = Stmt::Action;
                     out.call = out.cond.call;
                 } else out.kind = Stmt::Expression;
@@ -279,14 +280,18 @@ private:
 
     bool parse_arg(Arg &out) {
         if (is_op("-")) {
+            // [orig: Script_Compile @0x4F31F0] With a pending operator or
+            // parameter, '-' begins a word. Whitespace ends that word:
+            // -V1 resolves numerically to zero; '- V1' is two parameters.
+            const Token minus = cur();
+            out.text = "-";
             advance();
-            if (cur().kind == TokKind::Word) {
-                out.text = cur().text;
-                out.negate = true;
+            if (cur().kind == TokKind::Word && cur().line == minus.line &&
+                    cur().col == minus.col + 1) {
+                out.text += cur().text;
                 advance();
-                return true;
             }
-            return false;
+            return true;
         }
         if (cur().kind == TokKind::String) {
             out.text = cur().text;
@@ -313,99 +318,122 @@ private:
         return 0;
     }
 
-    Expr parse_expr(int minimum = 1) {
-        Expr left = parse_unary();
-        while (cur().kind == TokKind::Operator && precedence(cur().lowered) >= minimum) {
-            const std::string op = cur().lowered;
-            const int level = precedence(op);
-            advance();
-            Expr expression;
-            expression.kind = Expr::Binary;
-            expression.op = op;
-            expression.kids.push_back(std::move(left));
-            expression.kids.push_back(parse_expr(level + 1));
-            left = std::move(expression);
-        }
-        return left;
-    }
-
-    Expr parse_unary() {
-        if (is_op("not") || is_op("!")) {
-            advance();
-            Expr child = parse_unary();
-            Expr e;
-            e.kind = Expr::Not;
-            e.kids.push_back(std::move(child));
-            return e;
-        }
-        return parse_primary();
-    }
-    Expr parse_primary() {
-        if (is_op("-")) {
-            Expr e;
-            e.call.name = kOperandMarker;
-            e.call.line = cur().line;
-            Arg a;
-            if (parse_arg(a)) e.call.args.push_back(std::move(a));
-            else error("expected a value after '-'");
-            return e;
-        }
-        if (cur().kind == TokKind::LParen) {
-            advance();
-            Expr e;
-            e.kind = Expr::Group;
-            e.kids.push_back(parse_expr());
-            if (cur().kind == TokKind::RParen) advance(); else warn("expected ')'");
-            return e;
-        }
-        if (cur().kind == TokKind::Word) {
-            // Command call if it's a registered keyword or directly followed by '('.
-            bool is_cmd = wac_find_command(cur().text) != nullptr;
-            bool paren_next = (pos_ + 1 < toks_.size() && toks_[pos_ + 1].kind == TokKind::LParen);
-            Expr e;
-            e.kind = Expr::Leaf;
-            if (is_cmd || paren_next) {
-                e.call = parse_call();
-            } else {
-                // bare operand -> truthiness leaf
-                e.call.name = kOperandMarker;
-                e.call.line = cur().line;
-                Arg a;
-                a.text = cur().text;
-                e.call.args.push_back(std::move(a));
-                advance();
+    // [orig: Script_Compile @0x4F31F0]
+    // The lookahead is tokenized with the CURRENT pending operator. Calls
+    // clear that operator before their parameters are read, and parameters
+    // suppress auto parentheses. A falling precedence does not pop a frame.
+    Expr parse_expr(const Arg *assignment = nullptr) {
+        struct Frame { std::string op; bool negate; int level; bool automatic; };
+        std::vector<Frame> frames;
+        Expr result;
+        result.kind = Expr::Sequence;
+        std::string pending;
+        bool negate = false;
+        bool push = false;
+        int level = 0;
+        bool assigned = false;
+        auto store_assignment = [&] {
+            if (!assignment || !assigned) return;
+            Expr edge;
+            edge.kind = Expr::Store;
+            edge.call.line = cur().line;
+            edge.call.args.push_back(*assignment);
+            result.kids.push_back(std::move(edge));
+            assignment = nullptr;
+        };
+        auto reset = [&] { pending.clear(); negate = false; push = false; level = 0; };
+        auto save = [&](bool automatic) {
+            if (frames.size() >= 16) warn(automatic ? "Auto Paren nesting too deep" : "Paren nesting too deep");
+            frames.push_back({pending, negate, level, automatic});
+            if (!pending.empty() || negate) { reset(); push = true; }
+        };
+        auto pop = [&](const Frame &frame) {
+            Expr edge;
+            edge.kind = Expr::Pop;
+            edge.op = frame.op;
+            edge.negate = frame.negate;
+            result.kids.push_back(std::move(edge));
+            reset();
+        };
+        while (!at_end()) {
+            const bool boundary = cur().kind == TokKind::Keyword || cur().kind == TokKind::LBracket ||
+                    (cur().kind == TokKind::Word && pos_ + 1 < toks_.size() && toks_[pos_ + 1].text == "=");
+            if (boundary) {
+                // Retail commits a pending variable before the boundary's
+                // auto-paren drain. EOF instead drains before the final store.
+                if (pending.empty()) store_assignment();
+                break;
             }
-            return e;
+            const bool signed_word = is_op("-") && !pending.empty();
+            size_t after = pos_ + 1;
+            if (signed_word && after < toks_.size() && toks_[after].kind == TokKind::Word &&
+                    toks_[after].line == cur().line && toks_[after].col == cur().col + 1) ++after;
+            const Token &next = toks_[after < toks_.size() ? after : toks_.size() - 1];
+            const bool next_symbol = next.kind == TokKind::Operator && !is_word_operator(next.lowered);
+            const int lookahead = next_symbol && !(next.text == "-" && !pending.empty())
+                    ? precedence(next.lowered) : 0;
+            if (!push && !pending.empty() && lookahead > level) save(true);
+
+            if (cur().kind == TokKind::LParen) {
+                save(false);
+                advance();
+                continue;
+            }
+            if (cur().kind == TokKind::RParen) {
+                advance();
+                if (frames.empty()) { warn("Unexpected )"); continue; }
+                Frame frame = std::move(frames.back());
+                frames.pop_back();
+                if (!frame.op.empty() || frame.negate) {
+                    if (lookahead <= frame.level) pop(frame);
+                    else { frame.automatic = true; frames.push_back(std::move(frame)); }
+                }
+                continue;
+            }
+            if (!signed_word && cur().kind == TokKind::Operator) {
+                if (is_op("not") || is_op("!")) {
+                    if (negate) warn("Unexpected NOT");
+                    else negate = true;
+                } else if (precedence(cur().lowered)) {
+                    if (!pending.empty() || negate) warn("Unexpected " + cur().text);
+                    else { pending = cur().lowered; level = precedence(pending); }
+                } else warn("Unexpected " + cur().text);
+                advance();
+                continue;
+            }
+            // [orig: Script_Compile @0x4F4019..0x4F404B] This runs AFTER
+            // auto/explicit grouping cleared the operator, even before the
+            // first grouped call. The assignment can therefore store early.
+            if (pending.empty()) store_assignment();
+            Expr leaf;
+            leaf.op = pending;
+            leaf.negate = negate;
+            leaf.push = push;
+            leaf.call.line = cur().line;
+            if (cur().kind == TokKind::Word &&
+                    (wac_find_command(cur().text) || next.kind == TokKind::LParen)) {
+                leaf.call = parse_call();
+            } else {
+                leaf.call.name = kOperandMarker;
+                Arg arg;
+                if (!parse_arg(arg)) { advance(); continue; }
+                leaf.call.args.push_back(std::move(arg));
+            }
+            result.kids.push_back(std::move(leaf));
+            assigned = true;
+            reset();
         }
-        if (cur().kind == TokKind::String) {
-            Expr e;
-            e.kind = Expr::Leaf;
-            e.call.name = kOperandMarker;
-            Arg a;
-            a.text = cur().text;
-            a.is_string = true;
-            e.call.args.push_back(std::move(a));
-            advance();
-            return e;
+        while (!frames.empty()) {
+            const Frame frame = std::move(frames.back());
+            frames.pop_back();
+            if (!frame.automatic) warn("Open Paren");
+            pop(frame);
         }
-        // Empty / unexpected leaf — emit a neutral operand "0".
-        Expr e;
-        e.kind = Expr::Leaf;
-        e.call.name = kOperandMarker;
-        Arg a;
-        a.text = "0";
-        e.call.args.push_back(std::move(a));
-        if (!at_end() && cur().kind != TokKind::Keyword) advance();
-        return e;
+        store_assignment();
+        if (result.kids.size() == 1) return std::move(result.kids.front());
+        return result;
     }
 
-    static bool expr_as_operand(const Expr &e, Arg &out) {
-        if (e.kind == Expr::Leaf && e.call.name == kOperandMarker && !e.call.args.empty()) {
-            out = e.call.args[0];
-            return true;
-        }
-        return false;
-    }
 };
 
 } // namespace

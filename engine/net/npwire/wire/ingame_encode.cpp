@@ -1107,4 +1107,13 @@ std::vector<uint8_t> encode_team_assign(const TeamAssign &assign) {
 	return out;
 }
 
+// [orig: serialize_entity_event_to_buffer @0x5055A0]
+std::vector<uint8_t> encode_explosion_effect(const ExplosionEffectRecord &event) {
+    std::vector<uint8_t> out;
+    Writer w{out}; w.u8(event.type); w.u8(event.count); w.u16(event.source);
+    w.u32(uint32_t(event.x)); w.u32(uint32_t(event.y)); w.u32(uint32_t(event.z));
+    w.u16(uint16_t(event.heading));
+    return out;
+}
+
 } // namespace opennova

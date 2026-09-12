@@ -764,8 +764,12 @@ bool run_bike_wreck_falls_under_gravity() {
 	                 "contact enables the crashed bike's orientation override");
 	ok &= expect(veh->veh.wreck_2fc != 0,
 	                 "wheel-and-spine contact latches the bike fall-over state");
-	ok &= expect(veh->veh.speed == 0,
-	             "drive speed reaches rest without putting the crashed bike to sleep");
+	// At speed zero the off-contact crashed leg adds deceleration, then halves
+	// the speed. A zero direction still produces no planar movement.
+	// [orig: Entity_UpdateLightVehiclePhysics @ 0x4862FC..0x48630D]
+	ok &= expect(veh->veh.speed == r.traits.deceleration / 2 &&
+	                     veh->veh.vel_x == 0 && veh->veh.vel_y == 0,
+	             "crashed rest retains the scalar coast step with zero planar velocity");
 	ok &= expect(max_pitch_delta > 20 * 11930464,
 	             "rotational gravity carries the tipped bike toward the ground");
 	return ok;

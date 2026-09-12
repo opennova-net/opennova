@@ -1,6 +1,7 @@
 #include <runtime/simassets/adm_root_motion.h>
 
 #include <utility>
+#include <algorithm>
 
 #include <formats/adm/adm.h>
 #include <formats/bad/bad.h>
@@ -59,9 +60,10 @@ int AdmRootMotion::parse_adm(const opennova::ResourceIndex *index,
 		if (index->read_file(bad_name, bytes) && !bytes.empty() &&
 		    bad_parse_buffer(bytes.data(), bytes.size(), &bf) == 0) {
 			// Fence-post: frame_count+1 root records [orig: 0x40b230 lerps rec[i]..rec[i+1]].
-			if (bf.frame_count > 0 && bf.num_events == static_cast<size_t>(bf.frame_count) + 1) {
+			if (bf.fps > 0 && bf.frame_count > 0 && bf.num_events == static_cast<size_t>(bf.frame_count) + 1) {
 				t.frame_count = static_cast<int32_t>(bf.frame_count);
 				t.loop = (bf.flags & 0x1u) != 0;
+				t.clock = anim::ClipTimeline(bf.fps, bf.frame_count, t.loop);
 				const size_t n = bf.num_events;
 				t.fwd.resize(n);
 				t.lat.resize(n);
@@ -193,25 +195,24 @@ int AdmRootMotion::variant_count(int adm_id, int state_id) const {
 	return it->second.empty() ? 1 : static_cast<int>(it->second.size());
 }
 
-int32_t AdmRootMotion::position_of(const Track &track, int32_t phase_ticks) {
-	const int32_t total_half = track.frame_count * 2;
-	if (track.loop) {
-		phase_ticks %= total_half;
-		return phase_ticks < 0 ? phase_ticks + total_half : phase_ticks;
-	}
-	return phase_ticks >= total_half ? total_half - 1 : (phase_ticks < 0 ? 0 : phase_ticks);
+double AdmRootMotion::position_of(const Track &track, int32_t phase_ticks) {
+	return std::clamp(track.clock.frame_at(phase_ticks), 0.0, double(track.frame_count));
 }
 
 float AdmRootMotion::sample(const Track &track, const std::vector<float> &channel,
                             int32_t phase_ticks) {
-	const int32_t position = position_of(track, phase_ticks);
-	const size_t frame = static_cast<size_t>(position >> 1);
-	return (position & 1) ? (channel[frame] + channel[frame + 1]) * 0.5f
-	                      : channel[frame];
+	const double position = position_of(track, phase_ticks);
+	const size_t frame = std::min(static_cast<size_t>(position),
+	                             static_cast<size_t>(track.frame_count - 1));
+	const double fraction = position - frame;
+	// x87 interpolates in extended precision and spills one float result.
+	return static_cast<float>(channel[frame] * (1.0 - fraction) +
+	                          channel[frame + 1] * fraction);
 }
 
 uint32_t AdmRootMotion::sample_trigger(const Track &track, int32_t phase_ticks) {
-	return track.trigger[static_cast<size_t>(position_of(track, phase_ticks) >> 1)];
+	if (track.clock.stopped_at(phase_ticks)) return 0;
+	return track.trigger[static_cast<size_t>(position_of(track, phase_ticks))];
 }
 
 int AdmRootMotion::scan_triggers(int adm_id, int state_id, int32_t from_phase,
@@ -221,15 +222,16 @@ int AdmRootMotion::scan_triggers(int adm_id, int state_id, int32_t from_phase,
 	const Track *track = resolve_track(adm_id, state_id, variant);
 	if (track == nullptr || track->trigger.empty()) return 0;
 	int written = 0;
-	// Walk the half-frame playhead one tick at a time and emit the authored
+	// Walk the simulation playhead one tick at a time and emit the authored
 	// word each time the FRAME index changes (or on the first step, which is
 	// the frame the playhead just entered). A non-looping clip clamps just
 	// below its end, so the walk terminates there.
 	int32_t prev_frame = from_phase < 0
 			? -1
-			: (position_of(*track, from_phase) >> 1);
+			: static_cast<int32_t>(position_of(*track, from_phase));
 	for (int32_t phase = from_phase + 1; phase <= to_phase; ++phase) {
-		const int32_t frame = position_of(*track, phase) >> 1;
+		if (track->clock.stopped_at(phase)) break;
+		const int32_t frame = static_cast<int32_t>(position_of(*track, phase));
 		if (frame == prev_frame) continue;
 		prev_frame = frame;
 		out[written++] = track->trigger[static_cast<size_t>(frame)];
@@ -259,14 +261,16 @@ bool AdmRootMotion::advance_variant(int adm_id, int state_id, int variant,
 	}
 	++phase_ticks;
 
-	// Half-frame playhead positions, wrapped (loop) or clamped just below the end
+	// Retail normalized playhead, wrapped (loop) or parked just below the end
 	// [orig: AnimChannel_AdvancePlayback parks t at 0.99999 on one-shot clip end].
 	out = opennova::world::RootMotionFrame{};
-	out.dx = static_cast<int32_t>(sample(*track, track->fwd, phase_ticks) * 32768.0f);
-	out.dy = static_cast<int32_t>(sample(*track, track->lat, phase_ticks) * 32768.0f);
-	// Raw vertical fallback. The motor overwrites this with blended-bottom history
-	// whenever anim_slot[19] is live; reset-state families clear that history first.
-	out.dz = static_cast<int32_t>(sample(*track, track->vert, phase_ticks) * 32768.0f);
+	if (!track->clock.stopped_at(phase_ticks)) {
+		out.dx = static_cast<int32_t>(sample(*track, track->fwd, phase_ticks) * 32768.0f);
+		out.dy = static_cast<int32_t>(sample(*track, track->lat, phase_ticks) * 32768.0f);
+		// Raw vertical fallback. The motor overwrites this with blended-bottom history
+		// whenever anim_slot[19] is live; reset-state families clear that history first.
+		out.dz = static_cast<int32_t>(sample(*track, track->vert, phase_ticks) * 32768.0f);
+	}
 	// Absolute capsule extents for THIS frame — the on-foot ground settle floors pos[2] to
 	// ground + capsule_bottom (origin->feet) [orig: AnimMap_UpdateEntity @0x40b82f
 	// out_transform[3]=bottom*65536, out_transform[4]=top*65536+0x2000; consumed by
@@ -299,9 +303,11 @@ bool AdmRootMotion::advance_blended(
 	++target_phase_ticks;
 	const float primary_weight = 1.0f - target_weight;
 	auto blend = [&](const std::vector<float> &primary_channel,
-	                 const std::vector<float> &target_channel) {
-		const float primary_value = sample(*primary, primary_channel, primary_phase_ticks);
-		const float target_value = sample(*target, target_channel, target_phase_ticks);
+	                 const std::vector<float> &target_channel, bool motion = false) {
+		const float primary_value = motion && primary->clock.stopped_at(primary_phase_ticks)
+				? 0.0f : sample(*primary, primary_channel, primary_phase_ticks);
+		const float target_value = motion && target->clock.stopped_at(target_phase_ticks)
+				? 0.0f : sample(*target, target_channel, target_phase_ticks);
 		// The original x87 path keeps both products and the sum live, then spills one
 		// float32 result. Products of float32 inputs are exact in double, so this
 		// reproduces that single-rounding boundary on modern SSE builds.
@@ -311,9 +317,9 @@ bool AdmRootMotion::advance_blended(
 	};
 
 	out = opennova::world::RootMotionFrame{};
-	out.dx = static_cast<int32_t>(blend(primary->fwd, target->fwd) * 32768.0f);
-	out.dy = static_cast<int32_t>(blend(primary->lat, target->lat) * 32768.0f);
-	out.dz = static_cast<int32_t>(blend(primary->vert, target->vert) * 32768.0f);
+	out.dx = static_cast<int32_t>(blend(primary->fwd, target->fwd, true) * 32768.0f);
+	out.dy = static_cast<int32_t>(blend(primary->lat, target->lat, true) * 32768.0f);
+	out.dz = static_cast<int32_t>(blend(primary->vert, target->vert, true) * 32768.0f);
 	out.capsule_bottom =
 			static_cast<int32_t>(blend(primary->bottom, target->bottom) * 65536.0f);
 	out.capsule_top =
@@ -324,10 +330,16 @@ bool AdmRootMotion::advance_blended(
 
 int32_t AdmRootMotion::clip_length_ticks(int adm_id, int state_id,
                                          int variant) const {
-	// Half-frame ticks, the advance() playhead convention (frame_count * 2). -1 when the
+	// Simulation ticks through the first normalized-time end boundary. -1 when the
 	// state has no track — the weapon channel's deferred promotion then never length-fires.
 	const Track *track = resolve_track(adm_id, state_id, variant);
-	return track != nullptr ? track->frame_count * 2 : -1;
+	return track != nullptr ? track->clock.length_ticks() : -1;
+}
+
+int32_t AdmRootMotion::clip_boundary_after(int adm_id, int state_id,
+                                             int32_t phase_ticks, int variant) const {
+	const Track *track = resolve_track(adm_id, state_id, variant);
+	return track ? track->clock.boundary_after(phase_ticks) : -1;
 }
 
 bool AdmRootMotion::clip_loops(int adm_id, int state_id) const {

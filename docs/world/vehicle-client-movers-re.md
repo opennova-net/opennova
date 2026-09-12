@@ -26,7 +26,7 @@ correction — proposed in PR #640, pending maintainer ratification at merge.
 | Component | Verdict | Evidence |
 | --- | --- | --- |
 | Full and selector-zero motors; amphibious dispatch | Ported for authority and prediction (open: the selector-zero boat part-spin call, D-NET-161 (d)) | Sections 11, 16, 26, 30 through 31; vehicle_motor, aircraft_client_motor, watercraft_client_motor |
-| Model contacts, springs, traction, chassis and carrier motion | Ported (open: the bike not-crashed off-contact launch-vector arm, D-NET-161 (a)) | Sections 12 through 15, 19 through 20, 22 through 23, 27; collision, vehicle_suspension, vehicle_mount |
+| Model contacts, springs, traction, chassis and carrier motion | Ported; #645 crash-height, bike axle and wheelie corrections included | Sections 12 through 15, 19 through 20, 22 through 23, 27, 38; collision, vehicle_suspension, vehicle_followups, vehicle_mount |
 | Occupancy, AI, death and respawn state | Ported (open: the pool-3 deck-marker localization, the ground-height tap ray kinds, the `entity+684` mirror, the emplacement brain dispatch — D-NET-161 (b), (e), (f), (g)) | Sections 17 through 18, 24 through 27; ai, destruction, vehicle_mount, mission_mount |
 | Wheel/track/turret/gear and mounted-body animation; HUD state | Ported through renderer-owned channels and existing HUD snapshot | Sections 11, 14, 21; vehicle_part_anim, netsim_present_rows, simulation and attachment GUT suites |
 | Ground/boat/aircraft sound and contact edges | Ported (open: the tank fold's extra-effect argument and the sound-ready gate, D-SND-17) | Sections 11 through 13, 29, 31 through 33; vehicle_motor, ambient_mixer, mission_audio |
@@ -3652,7 +3652,7 @@ Z):
    `Entity_ComputeSuspensionAndOrientation` @ 0x4698A0 (the third §4-family
    instance; positive-only corner average + fidiv by the positive count
    @ 0x46AF54..0x46AFE1, the same MAIN_FIT core as `plat_fit_corners`).
-   Inverted: `Position.Z += max` over ALL 13 d's [orig: @ 0x478D06 with the
+   Inverted: select the retained maximum over ALL 13 d's [orig: @ 0x478D15 with the
    gated scan @ 0x477FF4..0x478014]; the upside no-wheel-contact arm lifts by
    the max over the SEVEN contact slots [orig: @ 0x47843E..0x478540].
 6. **The corner quad lifts by the four WHEEL d's only** (belly/spine d's feed
@@ -5131,3 +5131,71 @@ large unsupported vertical movement for ground/water families.
 
 The corrected windowed LCAC run travels 47.14 horizontal units, turns and brakes;
 its height remains near the authored 13.5-unit water plane and rising shore.
+
+
+### 38. Crash height, bike axle and wheelie follow-ups from #645
+
+The contact solvers retain a maximum penetration **before** the spring loop,
+initialized to -1 and populated while crashed, inverted or settling. A
+crashed hull uses that depth even when its up axis is positive. The ground
+family still accepts fitted Z while upright and settling, without the
+ordinary upward-velocity clamp; aircraft and bikes use penetration in their
+settled arms. Tanks distinguish a successful orientation fit from a retained
+chassis frame: the latter uses maximum wheel penetration. Airborne aircraft
+and bikes also retain their crashed/settled body-contact Z adjustments.
+[orig: Entity_ProcessTrackedVehiclePhysics @ 0x47C1C0;
+Entity_ProcessWheeledVehiclePhysics @ 0x475DE0;
+Entity_ProcessAircraftContactPhysics @ 0x47EF10;
+Entity_ProcessLightVehiclePhysics @ 0x479600]
+
+The bike axle solver normalizes the front-minus-rear corner vector, retains
+the old **side** axis, derives up by forward × side, and rebuilds forward by
+side × up. The square bounding quad uses the height-derived wheel radius to
+inset its length. The old implementation confused the retained side axis with
+up and could rotate an otherwise unchanged frame.
+[orig: Entity_UpdateVehicleChassisOrientation @ 0x468A50;
+Entity_ComputeBoundingQuad @ 0x45B6E0; Math_FixedPointCrossProduct @ 0x6134A0]
+
+Bike +0x3DD is the per-tick wheelie request; +0x3DE retains the active mode.
+Flags 0x20 and speed >4096 set both. While requested and active below speed
+16384, acceleration grows by 25 instead of using the ordinary servo.
+Airborne/requested/active bikes skip the eight-way key-heading adjustment.
+The brake requires contact timer +0x2F4 >0 and an inactive wheelie, independent
+of the definition's hand-brake field. The upward cap 16384 applies when
+inactive or airborne, before gravity 250; it does not cap a supported wheelie.
+[orig: Entity_UpdateLightVehiclePhysics @ 0x483FE0]
+
+The request applies upward rate-50 force records to square-quad corners 0 and
+3 and suppresses the two wheel catch-up lifts while preserving landing
+bookkeeping. Releasing the request clears active mode once both wheels have
+contact and the retained contact timer reaches ten. The fallen-frame helper
+and the accepted brake-velocity arm also clear active mode. Tail processing
+clears only the request.
+[orig: Entity_ProcessLightVehiclePhysics @ 0x479600;
+Entity_UpdateVehicleChassisOrientation @ 0x468A50;
+Entity_UpdateLightVehiclePhysics @ 0x4859E0]
+
+The +0x3E0 launch vector normalizes displacement from **saved live pose**,
+replaces X/Y with the pre-solve forward axis, then normalizes again. Active
+supported travel consumes all three components; the not-crashed off-contact
+arm writes X/Y and retains vertical velocity. This closes D-NET-161 (a).
+[orig: Entity_ProcessLightVehiclePhysics @ 0x47BF01..0x47C03B;
+Entity_UpdateLightVehiclePhysics @ 0x486052..0x48657E]
+
+Validation: native `vehicle_followups`, `vehicle_motor`, and
+`vehicle_suspension` pass. Regressions cover request/active lifetime,
+acceleration, brake eligibility, heading gates, vertical cap, catch-up,
+release at ten contacts, banked axle fitting, saved-pose launch capture, and
+upright crashed penetration across all four contact families. No IDB changes
+were made.
+
+
+Witness-address corrections from the PR #645 follow-up review (2026-09-11):
+0x478D06 is inside the conditional jump beginning at 0x478D05, not a Z-add
+instruction; the retained-depth comparison begins at 0x478D15. Likewise,
+0x468CE1 is inside the contact comparison at 0x468CDF, and the old
+0x468BC1..0x468CE1 “cross/normalize” label actually covers fallen-bike
+contact and suspension handling. The 0x468BC1 witness now sits at that contact
+gate. The 0x48524C store arms wheelie-active (+0x3DE), alongside the request
+byte at 0x485245. The citation census retires the two mid-instruction addresses
+0x478D06 and 0x468CE1; no translated behavior was deleted.

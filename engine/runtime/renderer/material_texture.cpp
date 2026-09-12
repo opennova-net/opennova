@@ -1,0 +1,83 @@
+#include "material_texture.h"
+
+#include <base/io/strutil.h>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <string>
+
+namespace opennova::renderer {
+
+// [orig: load_texture_as_normalmap @0x58C480]
+std::string normal_material_filename(std::string_view name,
+        bool loose_tga_preferred, bool dds_exists) {
+    const std::string upper = strutil::to_upper(name);
+    std::string result(name);
+    if (upper.find(".MDT") == std::string::npos && upper.find(".TGA") != std::string::npos &&
+            !loose_tga_preferred && dds_exists) {
+        result.resize(result.find_last_of('.'));
+        result += ".dds";
+    }
+    return result;
+}
+
+// [orig: sub_5B16F0 @0x5B16F0]
+MaterialTextureTransform material_texture_transform(
+		uint8_t type, std::string_view name, bool loaded) {
+	if (!loaded || type == 3 || (type >= 9 && type <= 15) || type > 18)
+		return MaterialTextureTransform::Checkerboard;
+	if (type != 4 && type != 5) return MaterialTextureTransform::Unchanged;
+	const std::string upper = strutil::to_upper(name);
+	if (upper.find(".MDT") != std::string::npos) return MaterialTextureTransform::Unchanged;
+	if (upper.find(".TGA") != std::string::npos) return MaterialTextureTransform::NormalFromAlpha;
+	// The object dispatcher passes an empty alternate PCX path.
+	return MaterialTextureTransform::Checkerboard;
+}
+
+// [orig: Texture_ApplyNormalMapFilter @0x58BD90;
+// load_texture_as_normalmap @0x58C985..0x58CAED]
+std::vector<uint8_t> normal_map_from_height_rgba(const uint8_t *rgba,
+		uint32_t width, uint32_t height, float scale,
+		uint8_t height_channel, uint8_t alpha_channel) {
+	if (!rgba || !width || !height || height_channel > 3 || alpha_channel > 3 ||
+			width > std::numeric_limits<size_t>::max() / height / 4) return {};
+	std::vector<uint8_t> result(static_cast<size_t>(width) * height * 4);
+	auto encode = [](double value) {
+		return static_cast<uint8_t>(std::clamp(static_cast<int>((value + 1.0) * 127.5), 0, 255));
+	};
+	for (uint32_t y = 0; y < height; ++y) {
+		for (uint32_t x = 0; x < width; ++x) {
+			auto sample = [&](uint32_t sx, uint32_t sy) {
+				return static_cast<double>(rgba[(static_cast<size_t>(sy) * width + sx) * 4 + height_channel]);
+			};
+			const double center = sample(x, y);
+			const double nx = -(sample((x + 1) & (width - 1), y) - center) * scale
+					- (center - sample((x - 1) & (width - 1), y)) * scale;
+			const double ny = -static_cast<float>((sample(x, (y - 1) & (height - 1)) - center) * scale)
+					- (center - sample(x, (y + 1) & (height - 1))) * scale;
+			const double inverse_length = 1.0 / std::sqrt(nx * nx + ny * ny + 4.0);
+			const size_t offset = (static_cast<size_t>(y) * width + x) * 4;
+			result[offset] = encode(nx * inverse_length);
+			result[offset + 1] = encode(static_cast<float>(-ny * inverse_length));
+			result[offset + 2] = encode(2.0 * inverse_length);
+			result[offset + 3] = rgba[offset + alpha_channel];
+		}
+	}
+	return result;
+}
+
+// [orig: Render_CreateCheckerboardTexture @0x5B1600]
+std::vector<uint8_t> missing_material_texture_rgba() {
+	std::vector<uint8_t> result(kMissingMaterialTextureSide * kMissingMaterialTextureSide * 4);
+	for (uint32_t y = 0; y < kMissingMaterialTextureSide; ++y) {
+		for (uint32_t x = 0; x < kMissingMaterialTextureSide; ++x) {
+			const size_t offset = (y * kMissingMaterialTextureSide + x) * 4;
+			const uint8_t gray = ((x ^ y) & 4) ? 0x50 : 0x30;
+			result[offset] = result[offset + 1] = result[offset + 2] = gray;
+			result[offset + 3] = 0xFF;
+		}
+	}
+	return result;
+}
+
+} // namespace opennova::renderer

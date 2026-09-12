@@ -120,8 +120,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("admit_test_remote_peer", "position", "yaw_deg", "team"), &Simulation::admit_test_remote_peer);
 	ClassDB::bind_method(
 			D_METHOD("enable_join", "host_ip", "port", "player_name",
-					"join_role", "spectator_password"),
-			&Simulation::enable_join, DEFVAL(0), DEFVAL(String()));
+					"join_role", "spectator_password", "server_password"),
+			&Simulation::enable_join, DEFVAL(0), DEFVAL(String()), DEFVAL(String()));
 	ClassDB::bind_method(
 			D_METHOD("is_local_spectator"), &Simulation::is_local_spectator);
 	ClassDB::bind_method(
@@ -190,9 +190,7 @@ void Simulation::_bind_methods() {
 	                     &Simulation::send_deployment_pick);
 	ClassDB::bind_method(D_METHOD("get_deploy_list_rows", "default_key", "default_home", "zone_names"),
 	                     &Simulation::get_deploy_list_rows);
-	ClassDB::bind_method(D_METHOD("get_deploy_status"), &Simulation::get_deploy_status);
-	ClassDB::bind_method(D_METHOD("get_deploy_status_text", "gametext"),
-	                     &Simulation::get_deploy_status_text);
+	ClassDB::bind_method(D_METHOD("get_deploy_status", "gametext"), &Simulation::get_deploy_status);
 	ClassDB::bind_method(D_METHOD("request_local_player_medic"),
 	                     &Simulation::request_local_player_medic);
 	ClassDB::bind_method(D_METHOD("local_medic_request_cooldown_ticks"),
@@ -279,6 +277,9 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_local_player_first_person_model_available"),
 			&Simulation::is_local_player_first_person_model_available);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon_input", "fire_held", "fire_pressed", "reload_pressed"), &Simulation::set_local_player_weapon_input);
+    ClassDB::bind_method(D_METHOD("set_local_player_aspect_mode", "mode"), &Simulation::set_local_player_aspect_mode);
+    ClassDB::bind_method(D_METHOD("get_local_player_aspect_mode"), &Simulation::get_local_player_aspect_mode);
+    ClassDB::bind_method(D_METHOD("request_local_player_scope_zero", "delta"), &Simulation::request_local_player_scope_zero);
 	ClassDB::bind_method(D_METHOD("request_local_player_scope_toggle"), &Simulation::request_local_player_scope_toggle);
 	ClassDB::bind_method(D_METHOD("request_local_player_binoculars_toggle"),
 			&Simulation::request_local_player_binoculars_toggle);
@@ -290,11 +291,14 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_local_player_third_person_selected", "selected"), &Simulation::set_local_player_third_person_selected);
 	ClassDB::bind_method(D_METHOD("set_local_player_debug_third_person", "enabled"), &Simulation::set_local_player_debug_third_person);
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &Simulation::get_local_player_view);
-	ClassDB::bind_static_method("Simulation", D_METHOD("fov_vertical_from_horizontal", "fov_h_deg", "aspect"), &Simulation::fov_vertical_from_horizontal);
+	ClassDB::bind_static_method("Simulation", D_METHOD("fov_vertical_from_horizontal", "fov_h_deg", "aspect", "mode"), &Simulation::fov_vertical_from_horizontal, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &Simulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);
 	ClassDB::bind_method(D_METHOD("drain_feed_events"), &Simulation::drain_feed_events);
+	ClassDB::bind_method(D_METHOD("retain_feed_announcement", "text", "tick"), &Simulation::retain_feed_announcement);
+	ClassDB::bind_method(D_METHOD("get_kill_announcement_text"), &Simulation::get_kill_announcement_text);
+	ClassDB::bind_method(D_METHOD("get_kill_announcement_tick", "now"), &Simulation::get_kill_announcement_tick);
 	ClassDB::bind_method(D_METHOD("drain_chat_lines"), &Simulation::drain_chat_lines);
 	ClassDB::bind_method(D_METHOD("get_vehicle_panel_view"),
 			&Simulation::get_vehicle_panel_view);
@@ -330,9 +334,7 @@ void Simulation::_bind_methods() {
 			&Simulation::set_sound_profiles);
 	ClassDB::bind_method(D_METHOD("set_water_z", "water_y"), &Simulation::set_water_z);
 	ClassDB::bind_method(D_METHOD("drain_sound_emitters"), &Simulation::drain_sound_emitters);
-	ClassDB::bind_method(D_METHOD("run_mission_start_wac"), &Simulation::run_mission_start_wac);
-	ClassDB::bind_method(D_METHOD("seal_mission_start_baseline"),
-			&Simulation::seal_mission_start_baseline);
+	ClassDB::bind_method(D_METHOD("complete_mission_start"), &Simulation::complete_mission_start);
 	ClassDB::bind_method(D_METHOD("get_runtime_perf_counters"), &Simulation::get_runtime_perf_counters);
 	ClassDB::bind_method(D_METHOD("set_runtime_profiling_enabled", "enabled"),
 			&Simulation::set_runtime_profiling_enabled);
@@ -717,6 +719,13 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_FOCAL_SWAY_Y);
 	BIND_ENUM_CONSTANT(PF_FOCAL_SWAY_Z);
 	BIND_ENUM_CONSTANT(PF_DOOR_COUNT);
+    BIND_ENUM_CONSTANT(PF_HUSK);
+    BIND_ENUM_CONSTANT(PF_OBJECT_DESTROY);
+    BIND_ENUM_CONSTANT(PF_OBJECT_DESTROY01);
+    BIND_ENUM_CONSTANT(PF_OBJECT_DESTROY02);
+    BIND_ENUM_CONSTANT(PF_OBJECT_DESTROY03);
+    BIND_ENUM_CONSTANT(PF_OBJECT_DESTROY04);
+    BIND_ENUM_CONSTANT(PF_OBJECT_DESTROY05);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);

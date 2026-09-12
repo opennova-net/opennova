@@ -805,26 +805,84 @@ static void test_arithmetic_assignment_and_retail_expression_order() {
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 1);
-    CHECK(w.script.vars.get_mission(1) == 14);
-    CHECK(w.script.vars.get_mission(2) == -14); // new result 6 minus saved byte 20
+    CHECK(w.script.vars.get_mission(1) == 2); // auto-paren clears the operator and commits count early
+    CHECK(w.script.vars.get_mission(2) == 20); // same early store before the auto-paren push
     CHECK(w.script.vars.get_mission(3) == 54);
-    CHECK(w.script.vars.get_mission(4) == 50); // saved 300 narrows to 44
+    CHECK(w.script.vars.get_mission(4) == 300); // explicit group also clears the pending operator
     CHECK(w.script.vars.get_mission(5) == 64); // equal precedence folds left to right
-    CHECK(w.script.vars.get_mission(6) == -4);
+    CHECK(w.script.vars.get_mission(6) == 4); // next assignment stores before the leading SUB pop
     CHECK(w.script.vars.get_mission(7) == 1);
     CHECK(w.script.vars.get_mission(8) == 0); // AND and OR have equal precedence
     CHECK(w.script.vars.get_mission(9) == 0); // grouped compare tests 9 < 5
     CHECK(w.script.vars.get_mission(10) == 1);
     CHECK(w.script.vars.get_mission(11) == 0); // NOT negates the saved 1
-    CHECK(w.script.vars.get_mission(12) == 2); // parentheses separate NOT from ADD's pop
-    CHECK(w.script.vars.get_mission(14) == 46); // parentheses around one value still push
-    CHECK(w.script.vars.get_mission(15) == 81); // power also folds the grouped result first
+    CHECK(w.script.vars.get_mission(12) == 1); // stored before the inner grouped call
+    CHECK(w.script.vars.get_mission(14) == 300); // stored before the explicit group
+    CHECK(w.script.vars.get_mission(15) == 2); // the final accumulator is 81, the early store is 2
     CHECK(w.diagnostics.empty());
 
     sys.set_program(compile_source("v1 = 5 / 0\ninc(v13)\n", {}));
     run(w, sys, 1);
     CHECK(!w.diagnostics.empty());
     CHECK(w.script.vars.get_mission(13) == 0); // malformed arithmetic stops this pass
+}
+
+// [orig: Script_Compile @0x4F31F0; WacScript_ResolveParameter @0x4F2920]
+// These deliberately differ from ordinary arithmetic. Pin execution AND the
+// stack edge on the leading-minus case (retail 40/14/07:12 high-byte words).
+static void test_auto_parentheses_and_minus_token_context() {
+    struct Case { const char *source; int32_t expected; };
+    const Case cases[] = {
+        {"load(64) v1 = -9", 55},
+        {"load(64) v1 = -9 / 2", -60},
+        {"load(64) v1 = load(-9) / 2", -4},
+        {"v1 = 1 + -9", -8},
+        {"v1 = 7 + -V2", 7}, // -V2 is an atof literal, not a negated variable
+        {"v1 = 1 + load(2) * 3", 9}, // command parameters suppress auto-paren
+        {"v1 = 1 + load 2 * 3", 9},
+        {"v1 = 1 + (load(2)) * 3", 1}, // group clears the operator and stores the old result
+        {"v1 = 10 * 2 ^ 3 + 4", 10}, // early store on auto-paren
+        {"v1 = 1 + 2 * 3 < 10", 1},
+        {"v1 = 1 + 2 * 3 load(8)", 1}, // store precedes the auto-paren push
+        {"load(64) v1 = -9 / 2 v2 = 0", 4}, // next assignment also precedes the pop
+        {"load(- 9) v1 = result", 9}, // '-' and '9' are separate tokens
+        {"v2 = 9 v1 = -V2", 0}, // leading '-' is SUB, with the old accumulator 9
+    };
+    for (const Case &c : cases) {
+        BehaviorWorld w;
+        WacSystem sys;
+        Program p = compile_source(c.source, {});
+        CHECK(p.ok());
+        CHECK(p.diagnostics.empty());
+        sys.set_program(std::move(p));
+        w.add_system(&sys);
+        w.load_systems();
+        run(w, sys, 1);
+        if (w.script.vars.get_mission(1) != c.expected) std::printf("expression: %s got %d expected %d\n", c.source, w.script.vars.get_mission(1), c.expected);
+        CHECK(w.script.vars.get_mission(1) == c.expected);
+    }
+    const Case accumulator_cases[] = {
+        {"1 + load(2) * 3", 9},
+        {"1 + (load(2)) * 3", 7},
+        {"10 * 2 ^ 3 + 4", 120},
+        {"1 + 2 * 3 < 10", 2},
+        {"1 + 2 * 3 load(8)", 9},
+        {"300 + (2 * 3)", 50}, // saved 300 narrows to a byte
+        {"2 ^ (3 ^ 2)", 81}, // POP reverses power operands
+    };
+    for (const Case &c : accumulator_cases) {
+        BehaviorWorld w;
+        WacVm vm;
+        const Program p = compile_source(c.source, {});
+        CHECK(p.ok() && p.diagnostics.empty());
+        vm.load(p); vm.execute(w);
+        CHECK(vm.accumulator() == c.expected);
+    }
+    const Program p = compile_source("load(64) v1 = -9 / 2", {});
+    CHECK(p.code.size() >= 9);
+    CHECK(p.code[2] >> 24 == 0x40); // push + load(9)
+    CHECK(p.code[4] >> 24 == 0x14); // divide by 2
+    CHECK(p.code[6] == 0x07000012); // fold saved byte with SUB
 }
 
 static void test_npc_wac_health_names_and_boarding_consumer() {
@@ -1767,6 +1825,7 @@ int main() {
     test_npc_wac_health_names_and_boarding_consumer();
     test_ssn_rider_query_bounds_parent_depth_and_pool();
     test_arithmetic_assignment_and_retail_expression_order();
+    test_auto_parentheses_and_minus_token_context();
     test_named_event_reset_and_declared_variables();
     test_empty_server_holds_script_divider_after_boot();
     test_nested_conditions_and_accumulator_lifetime();

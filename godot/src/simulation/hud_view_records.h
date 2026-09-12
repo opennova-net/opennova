@@ -255,6 +255,18 @@ public:
 	void assign(const opennova::world::DeployScreenStatus &p_value) { value_ = p_value; }
 	const opennova::world::DeployScreenStatus &value() const { return value_; }
 
+
+    bool get_permanent_death() const { return value_.instructions.permanent_death; }
+    bool get_show_instruction() const { return value_.instructions.show_first; }
+    bool get_show_instruction2() const { return value_.instructions.show_second; }
+    bool get_replace_instruction() const { return value_.instructions.replace_first; }
+    String get_instruction_text() const { return String::utf8(value_.instructions.first_text.c_str()); }
+    String get_instruction2_text() const { return String::utf8(value_.instructions.second_text.c_str()); }
+    bool get_show_round_status() const { return value_.instructions.show_round_status; }
+    String get_round_text() const { return String::utf8(value_.instructions.round_text.c_str()); }
+    String get_remaining_players_text() const { return String::utf8(value_.instructions.remaining_players_text.c_str()); }
+    String get_respawn_text() const { return String::utf8(value_.respawn_text.c_str()); }
+
 	int get_penalty_seconds() const { return value_.penalty_seconds; }
 	int get_revive_seconds() const { return value_.revive_seconds; }
 	int get_hold_seconds() const { return value_.hold_seconds; }

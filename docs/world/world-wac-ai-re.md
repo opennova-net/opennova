@@ -272,8 +272,13 @@ Everything below was decompiled and read this session (pseudocode dumps:
    This selector is what keeps the standing FP camera LEVEL on hillsides: Roll decays,
    `torsoRoll(+0x2DC)` chases Roll (§ camera), `fp_roll = torsoRoll + lean/4 @0x437fe6`
    stays 0 (D-INF-19 fix log). Port: `AiSystem::infantry_slope_pass`
-   (`engine/runtime/world/infantry.cpp`), pinned by the `test_slope_*` cases in
-   `tests/world/infantry_test.cpp`.
+   (`engine/runtime/world/infantry_slope.cpp`), pinned by the `test_slope_*` cases in
+   `tests/world/infantry_test.cpp`. The probes now use the body's candidate models
+   through `CollisionWorld::raycast_ground`, including a regression on a pitched
+   solid model over flat terrain. The terrain-only embedder fallback applies only
+   when no collision world is installed. [orig: Entity_RaycastGroundHeight @ 0x4142C0
+   -> raycast_entity_collision @ 0x413760; org1 probes @ 0x4BA1A8,
+   org2 probes @ 0x4B6E41]
 5. Inter-entity separation + 8-direction avoidance raycasts + combat maneuver modes
    (1/2/5/7/8/12) — **RE'd to address level, detail pass pending** (dump lines ~1080–1290, 3000–4550).
    The swim/float details are done: §29.1 (both motors, byte-witnessed). Avoidance
@@ -2986,6 +2991,37 @@ Swim/wash/wounded overlays as §3.5; anims 27–29 `wash_*` when
 `Terrain_FindNearestAmbientSoundSource(pos, 15u)` hits. Anim commit uses the §3.4
 flag-table arbitration (bit 2 locked → pending; bit 5 + target not bit 0 → pending).
 
+### 17.3b Burn reactions (2026-09-11 follow-up)
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Hit producer and org1/org2 burn selection | MATCHING (behavioral proof) | `infantry_burn`, `infantry`, `projectile_combat`; `engine/runtime/world/infantry_burn.cpp` |
+
+Ammo `secondary_anim` (+224) stamps the live body's byte +0x368. Player-class
+bodies receive moveTimer 1. NPCs receive 1/2 for the attacker's same command group,
+36/48 otherwise; the shorter duration uses the signed wrapped absolute bearing
+error below `0x3FFFFFC0`. Flags&2 blocks the store; zero hit type is inert.
+The projectile callback invokes this before death dispatch; the blast invokes it
+inside its range/visibility gates before the damage callback's armor rejection.
+[orig: Entity_ApplyCollisionForce @ 0x4AF4A0; Entity_HandleDamageTrigger @ 0x4074BA;
+Entity_HandleDamageAndTriggerZones @ 0x407822; Projectile_ProcessExplosionQueue
+@ 0x4EB1D2] Retail assumes a valid attacker for the NPC group lookup; ownerless
+embedder events use the ordinary duration.
+
+The org2 four-tick selection chooses authored clips 111..114 for byte values 1..4.
+An absent clip preserves the selected animation and burn byte. Every sixteenth
+logic tick, a nonzero timer decrements; a timer already zero clears the byte.
+That clearing pass still bypasses movement, lean and swim selection, reaching the
+shared player animation arbiter. [orig: Entity_UpdateInfantryPlayerBody
+@ 0x4B40E0, burn block @ 0x4B70DE..0x4B7180]
+
+The org1 sixteen-tick think instead clears the byte immediately when the matching
+clip is absent. Its burn timer decrements once per think. A byte that remains
+nonzero bypasses the entire normal behavior, aim and gait block, including its
+additional timer decrements and script animation override, and reaches the common
+animation arbiter at LABEL_754. Perception still precedes burn selection.
+[orig: Entity_UpdateInfantryAI @ 0x4B9910, burn block @ 0x4BBF8F..0x4BC047]
+
 ### 17.4 The fire chain — `.bad` anim events pull the trigger
 
 The `.bad` event record's **trigger word** (lerped per frame by `AnimMap_UpdateEntity
@@ -3037,6 +3073,18 @@ def+0x5EB/+0x5FB/+0x60B resolve into one-based userpoint bytes
 recorded in §33.35.
 
 ### 17.4b The sound legs — footsteps, foley, landing, screams (witnessed + ported 2026-07-17)
+
+Stance transitions have their own player-body sound state (+0x304), independently
+of clip foley. Crouch contributes 1 and effective prone contributes 2; a changed
+state selects `TO_STAND` (0), `TO_CROUCH` (1), or `TO_PRONE` (2). State 3 updates
+the latch without a sound. Prone is suppressed by Flags&0x10A040 or a parent
+with an item definition. Native authoritative/local bodies and remote joiner
+Player rows publish this through `emit_stance_change_sound`; `infantry_stance_sound`
+pins transitions, repeats, prone suppression, and the joiner's full tick.
+[orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0; MoveOrder gates @ 0x4B416C;
+stance sound dispatch @ 0x4B7034..0x4B70A6; sound globals @ 0x24E09D0,
+@ 0x24E09D4, @ 0x24E09D8, named by table rows @ 0x82FFB0..0x82FFF8]
+
 
 The trigger word's SOUND consumers, fully witnessed in both bodies and ported
 (`AiSystem::infantry_anim_sound_pass` / `emit_slot_sound` -> `World::out.slot_sounds`
@@ -5291,15 +5339,12 @@ blast damage leg `@ 0x4e6f84..0x4e6f93` and `cb(entity, 4, 0)` from S2C 0x13
   and the explosion queue's blast-center store is gated on this callback
   `@ 0x4eb53f`.
 
-Ported 2026-09-10: `world::ItemDeathClass` (`item_traits.cpp` stamps it from
-`DefItemDef::ai_function` at trait build), `destruction_notify_item_damage` dispatches
-on it, `destruction_tick_class_death_think` runs the gnrc/gnl2 countdown expiries
-(death tick + 4 / + 32; the pool-2 cohort quantization of the countdown is not
-modelled), and unwitnessed rows (bld2 `@ 0x43EEE0`, towr `@ 0x4406A0`, emit, brrl,
-bldg, cran, target, palm, flag, envs, squib, ele0) still run the tree body. Our tree
-body also runs `Entity_InitDeathSounds` after the debris, which retail's `@ 0x43FBC0`
-does not call (pre-existing; reached by no shipped JOX item). The gnl2 attacker-weapon
-sound and SP shrapnel legs are unported.
+The portable owner is `world/item_events.cpp`: the class table, direct damage
+dispatch, and pool-specific event clocks. The additional class bodies and
+resource binding are described in §24.3a; squib, shared destruction phases, scoring, and explosion replication are covered in §24.3b.
+The tree body also runs `Entity_InitDeathSounds` after debris, which retail's
+`@ 0x43FBC0` does not call (reached by no shipped JOX item). The gnl2
+attacker-weapon sound and SP shrapnel legs remain unported.
 
 `Entity_HandleDestructibleDeathEvent @ 0x440210` (the destructible-class
 deathCallback, the `tree` row): phase 0 = the ambient time-of-day shot leg
@@ -5369,6 +5414,279 @@ destruction present pass for joiners. Named deferrals: the pool-0 organic
 local-player camera-lerp/scope leg, vehicle (is_ai_capable) victims (their
 death rides the rows-21/23 state machine, §19.6), and the 0x26 itemType-1
 flags-bit0 strip (our fold passes no flags).
+
+### 24.3a Class clocks, regional shots, barrels, buildings, flags, and targets
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Pool 1/2/3 countdown visits and trailing decrement | MATCHING (behavioral proof) | `item_events`, `destruction`; [orig: Entity_UpdatePool1Slot @ 0x4B8DD0; Entity_UpdateAllEntities @ 0x4C2100] |
+| `brrl`, `bldg`, `bld2`, `ele0`, `door`, `target` callback state and effects | MATCHING (behavioral proof); independent state-packet/scoring work remains | `item_events`, `doors`, `destruction` |
+| `envs` and tree regional SHOT selection, delay parsing and bank resolution | MATCHING (behavioral proof) | `item_events`, `def_parse_items`, `simassets_item_traits`, `mission_kernel` |
+| `flag` idle/home/ground/rider return callback | MATCHING (behavioral proof) | `item_events`, `match`; [orig: Entity_UpdateIdleCheck @ 0x408430] |
+
+**Clock ownership.** The item callback's entity+0x2AC is a signed countdown,
+represented by `Entity::class_think_ticks`. Pool 1 checks the old value, invokes
+phase 0 at <=0, and subtracts one even from a freshly rearmed clock. Pool 2
+visits slots with `slot & 7 == tick & 7`: a positive clock subtracts eight,
+otherwise the callback executes without a trailing decrement. Pool 3 uses the
+same branches with a 64-slot cohort and subtracts 64. Wreck motion follows each
+entity's callback and runs outside the cohort gate. The death-piece pool runs
+before the explosion queue. Thus a gnrc clock of four written at tick 200 for
+pool-2 slot zero fires at 208; a gnl2 clock of 32 written at tick 300 fires at
+332 in pool 1 and 336 in pool-2 slot zero. Organic/vehicle AI clocks and the
+minefield clocks retain their own represented owners.
+[orig: pool-1 gates @ 0x4B8E1B / 0x4B8EA0; pool-2/3 gates @ 0x4C2291 / 0x4C2330;
+DeathPiece_TickAll call @ 0x4C221C; Projectile_ProcessExplosionQueue call @ 0x4C223F]
+
+**Regional sounds.** Phase zero requires at least one resolved SHOT set. Add
+`(packedHandle & 15) << 11` to time-of-day Q16, with signed wrapping, then use
+strict intervals (4,10), (10,17), and (17,21); every other value selects night.
+Exact boundaries therefore select night. The first intact-model SOUND
+userpoint supplies position when its one-based byte resolves; otherwise use the
+entity origin. After attempting the selected sound, consume one PRNG16 draw
+even when only another region has a resolved sound. Store the base delay plus
+the low dword of `(range * random16 + 0x8000) >> 16`.
+[orig: Entity_SpawnRegionalEffect @ 0x408290; Entity_CalcTimeOfDayRegion @ 0x408110;
+Entity_InitFromModel @ 0x40DC30]
+
+`dawnshot/dayshot/duskshot/nightshot` parse a 24-byte name plus two doubles
+multiplied by **62.0**, truncated through the x87 signed-i64 low-dword store.
+`particletesttime` writes the same dawn delay pair. Resolved primary-profile
+slots 11..14 replace sound and timing; the female profile runs second. Profile
+timing is copied verbatim from its Q16 parameter words. Explicit SHOT names run
+last and replace only sound identity, including replacing an inherited sound
+with silence on a lookup miss. MissionKernel loads the bank catalog and
+SndProf.def before item-trait binding; device-side profile overrides rebind the
+same native traits.
+[orig: ItemDef_ParseProperty @ 0x49EB00, dbl_7C88C0; ItemDef_ResolveAllResources @ 0x49E5F0]
+
+**Barrel and building callbacks.** `brrl` is authority-only: living HP>0
+rearms 1920; fresh death clears scars, sets Dead without Husk, and rearms ten.
+Its next expired call emits Effect_AirExp, queues the ownerless kz_M406HE blast,
+and removes the entity. `bldg` rearms 1024 on clients or an already-dead row.
+An authority death clears health in its inclusive XYZ bounds, clears scars,
+and sets Dead|Husk. Pool 0 skips nonzero damage-state rows, pool 1 skips none,
+and pool 2 skips rows with an item definition of type 5. Its GPM+24/+28 radius
+fields remain zero in the 3DI3 load path; they are distinct from the CMDL
+radii. The loader clears raw+4..+E7, stores GHDR radius at raw+24, and its
+wrapper returns raw+4 (GPM+20 contains the GHDR radius).
+[orig: Entity_HandleDeathOnAuthority @ 0x407CC0; bldg callback @ 0x43EE60;
+Entity_ClearHealthInBounds @ 0x509E60; ThreediGp_LoadFromFile @ 0x5B5780;
+GPM_LoadRenderModel @ 0x5B5000; model wrapper @ 0x5B6160]
+
+`bld2` requires a loaded model and CMDL. A fresh authority death queues the
+organic and item KZ blasts, sets Dead|Husk, and arms 16 with collapse step zero.
+The following 64 callback visits arm eight and increment the step. Step zero
+emits the particledeath perimeter: at least two steps per edge, six-unit
+spacing, raw CMDL XY bounds at local Z zero, full Euler transform without
+entity scale. At step >=8, an absent death stamp is set and scorch kind 7 is
+inserted with the GHDR/GPM+20 model radius as its explicit half extent
+(the four-argument call at 0x43F1E3..0x43F1F1). Retail also invalidates its baked terrain-item cache over the bounds;
+the current renderer has no corresponding cache. After step 64 the callback
+arms 62. Phase four stamps death immediately and enters the same step sequence.
+[orig: Entity_ProcessCraneDestruction @ 0x43EEE0; CVertexBuffer_RemoveFromList @ 0x605C10]
+
+**Crane pairing and fade.** `cran` shares that collapse sequence but arms 1860
+while alive. If attachParent is empty, it finds the first pool-2 opposite
+scrane/scrane2 graphic at exactly equal Q16 XY and links both halves. Death of
+scrane installs 0x43FB30 on its partner. Each tick that motor subtracts one Q16
+unit from vertical velocity and integrates Z, even while the half is alive.
+Its floor is terrain plus abs(parent COBJ-0 minZ) minus abs(maxZ). Contact
+clamps Z, sets health -1 and the class clock zero, and installs **0x4A92E0**;
+it preserves the downward velocity. Crane collapse passes scorch kind **zero**,
+so it emits no scorch and consumes no CRT random draw.
+[orig: crane callback @ 0x43FC70; Entity_ApplyGravityAndGroundCheck @ 0x43FB30;
+scorch call @ 0x440087..0x440095; sized scorch switch @ 0x606180]
+
+0x4A92E0 is the `upfx` move-function row, despite its water-physics IDB name.
+For physics zero and a husked entity it advances the initial destroy delay,
+then the five-phase fade clock. `destroy_timing` parses three double-valued
+seconds tokens times 62, truncated to integers. Delay expiry clears that
+counter and restamps the death tick. Zero duration/stagger use 50/25 ticks;
+overall completion is elapsed / (duration + 4*stagger). On authority, type 5
+queues its organic/item KZ blasts once (subtype bit 0x80), at completion or
+immediately when the primary husk model is absent. The callback's replicated
+state send and the renderer's five intermediate fade words remain separate
+consumers; the native tests establish the motion and late-blast clock.
+[orig: Entity_UpdateWaterPhysicsAndEffects @ 0x4A92E0;
+compute_lod_fade_timers @ 0x5C3F40; move-function row @ 0x82AC40]
+
+**Emitter callback.** `emit` runs only phase zero with a loaded graphic and
+item definition. A still-live owned particle group is released, ownership
+cleared, and the class clock set to 15 without a random draw. Otherwise it
+always consumes one PRNG16 draw and uses the dawn SHOT delay pair, then spawns
+one type-2 attached effect at the first masked particlefx userpoint. There is
+no origin fallback on this callback. Natural group completion clears ownership
+before the next callback. The ordinary mission-start particlefx attachment
+walk is independent of this class callback.
+[orig: entity_spawn_bone_trail_effect @ 0x43F8F0;
+Entity_ClearOwnerSessionIfMatches @ 0x453580]
+
+`world::ItemEmitterSystem` uses the actual portable EffectScene group lifetime.
+Native mission kernels load its catalog and advance it; Godot binds the same
+scene used by its renderer and retains its existing per-fixed-tick particle
+advance. Owner records carry registry lifetimes so deleting or reusing a slot
+releases the old group. No display-frame lifetime mirror drives the class
+clock. Tests cover stop/no-draw, natural expiry, scaled attachment, owner motion
+and deletion, alongside the native scene contract and mission boot.
+
+**Flag, door, and target callbacks.** `flag` owns a 62 countdown on authority
+and 0x1000000 on clients; HP does not drive death. A flag is near home only when
+XY distance and absolute Z difference are both strictly less than two units.
+Away from home it consumes its return counter when idle without a rider, or
+when grounded on an entity with no definition or type 1. Otherwise it reloads
+210 for configured values below five, else the configured value. Expiry drops
+all pool-0 carriers pointing to it and restores its authored home. It saves
+current XY, then copies a rider's XY only when the local player shares the
+flag's team; Z is preserved. This clock is independent of the host's periodic
+score service. `ele0` simply writes 62. `door` forwards the phase to DoorSystem.
+`target` phase one admits hit sections 1..30, checks the global door slot at
+`base + section`, and if closed writes `1 << ((section-firstBone) & 31)`
+before command six; its other phases forward directly.
+[orig: Entity_UpdateIdleCheck @ 0x408430; sub_4A20D0 @ 0x4A20D0;
+Entity_ProcessSectionDamageTransition @ 0x43F370; target callback @ 0x43F880]
+
+**Section classes (2026-09-11).** Palm accumulates signed damage separately for
+sections 0/1/3/4 and 2/5. The threshold is strictly greater than 100. The first
+group transitions 0→1 with fragment type 16 or 2→1 with type 32; the second
+transitions 0→2 with type 17. The PUSH operands at 0x53C41B/52/7C prove these
+values: Hex-Rays incorrectly shows the ECX value 1 as the fragment argument.
+Item 900 is cloned into pool 2 with 20 HP, Flags 2, unit scale and zero pitch/roll.
+Its position is the source's unscaled Euler transform of CXLT pivot 0 (16/32)
+or 1 (17); its heading is copied. PRNG B is reseeded from pool index, fragment
+type and snapped XY before three velocity draws. The psec motor uses gravity
+167, terrain+0.25, quarter-speed bounce, the type-17 heading spin, and the other
+types' pitch rise. The source/fragment section masks and negative-pivot render
+translation are shared by native collision and presentation; joiners also draw
+locally allocated fragments absent from the spawn stream.
+[orig: WeaponOverlay_HandleDamage @ 0x53C4C0; sub_53C3E0 @ 0x53C3E0;
+spawn_projectile_from_tile @ 0x53C1C0; TerrainTile_TransformPointFromSector @ 0x53BDB0;
+update_entity_physics_step @ 0x53BE10; CTerrainMap_BuildSectorTransformMatrices @ 0x53BF10]
+
+Tower counters are bytes: low-byte damage wraps, a value greater than 14 spawns
+a section, but completion checks sections 1..signed-husk-count−1 against 14.
+Incomplete towers restore 100 HP; complete towers set Dead, zero HP, clock 1024
+and send section −1. The client phase-one branch precedes the Dead guard. Section
+clones retain the source item/models and scale, start with Flags 6/20 HP, hide
+lower and already detached sections, and run the separate 0x4A8340 motor. Its
+spin, pitch acceleration, two endpoint contacts, half-unit gravity, eighth-speed
+vertical bounce and final 0x4A8220 effect clock are ported. Spawn pivots come from
+intact COBJ, while the death renderer pivots around the first surviving section
+of the final-husk-or-primary-husk COBJ.
+[orig: Entity_UpdateSectionDamage @ 0x4406A0; Entity_SpawnSectionEntity @ 0x4402D0;
+Entity_CloneFromTemplateByType @ 0x4398A0; Entity_InitFloatingPhysics @ 0x4A8340;
+Entity_UpdateFloatingPhysics @ 0x4A8220; Entity_BuildDeathSectionTransforms @ 0x492AF0]
+
+Bullet callbacks now receive the COBJ section and incoming Euler words, including
+zero-damage calls. MP clients still calculate zero impact damage, as retail does,
+but execute the class callback. The 0x26 word is a signed hit section, distinct
+from 0x13's death-animation word: the receive path clears HP before its Dead guard
+and calls phase four without overwriting the animation or attacker. Authority
+class sends and 0x12 removals reach active remote players including dead players,
+with reliable/life-zero packets and drained outboxes.
+[orig: Projectile_ProcessDamageOnTarget @ 0x4E7FB0; Weapon_CalcImpactDamage @ 0x4EC920;
+NapiNPClientMsg_EntityStateUpdate @ 0x42EC30; Entity_KillBySlotId @ 0x42BCE0;
+Server_SendEntityStatePacket @ 0x509D70]
+
+**Class boundaries.** Squib and the shared state, scoring, fade, ambient, and
+explosion legs are ported (§24.3b). The tower final dust helper tags each
+world-space group with the entity, but discards the returned handle: it neither
+stores +0x1CC nor follows/releases with the entity. The transient path matches
+that behavior (0x4A82E7/0x4A8325 -> 0x5F6FE0 -> 0x5F6DF0; destructor 0x5E3460).
+Malformed source models/section indices are bounded: absent palm pivots suppress
+fragment allocation, and tower indices beyond its owned 256-byte counter bank or
+loaded COBJ count are inert. Retail dereferences these unchecked (D-ITEM-7).
+[orig: Entity_UpdateSectionDamage @ 0x4406A0; WeaponOverlay_HandleDamage @ 0x53C4C0;
+entity_spawn_bone_trail_effect @ 0x43F8F0; crane callback @ 0x43FC70;
+Entity_ApplyGravityAndGroundCheck @ 0x43FB30; Entity_UpdateWaterPhysicsAndEffects @ 0x4A92E0;
+squib callback @ 0x449810]
+
+### 24.3b Squib and shared class effects (2026-09-11)
+
+Portable owners: world/item_squib.cpp, world/collision_squib.cpp,
+world/item_events.cpp, world/item_effects.cpp, and the shared damage
+consequence in RoundSim. The binary is retail Jointops.exe, IDB
+Jointops.exe.kong.i64; no IDB edits were needed.
+
+| Component | Verdict | Evidence |
+| --- | --- | --- |
+| Squib initialization and repeated rays | MATCHING on valid authored targets | squib: actual KILL command, clone, timing, chaining, person query and damage |
+| Class scoring and explosion protocol | MATCHING | item_events, npruntime_item_state_net, npruntime_entity_lifecycle_net, match |
+| Six destruction CTRL phases | MATCHING | item_events, netsim_present_rows; Godot's presenter copies the native words |
+| Shared ambient registration | MATCHING on resolved sound sets | item_events: time-region set, anchor, volume and lifetime |
+| Malformed target/model and freed-row behavior | BOUNDED, D-ITEM-7 | Guards below deliberately avoid invalid retail memory access |
+
+**Squib producer.** Phase four clears the death-animation/chain word and sends
+state before resolving the target. It scans pool three in slot order for the
+requested SSN. Ammo_marker3 is the def's byte at +0x58B; it is not
+ammo_closeattack. A marker with that ammo keeps its own SSN as the next target,
+otherwise its next-SSN field is used. Sqb_distance is a Q16 step length,
+sqb_rate becomes trunc(62/rate) ticks, and sqb_error is a Q16 spread.
+Distance/step yields N; a short segment still uses N=1 and zero step.
+The normalized perpendicular direction and composed Q22 rotations preserve the
+retail trigonometric constant 1.4629627251502471e-9. Midpoint minus twice the
+distance along that direction is the sound center. The center (+0x2E0..+0x2E8)
+and moving ray origin (+0x2EC..+0x2F4) are separate triples. A valid marker ammo
+clones into pool one and stamps the current tick; the parked source remains.
+[orig: Entity_InitArcMovement @ 0x449810]
+
+**Squib motor.** A zero death tick is inert. Elapsed intervals catch up in one
+visit. Each interval casts a 100-unit segment, advances the origin by its fixed
+step, then post-decrements N, producing N+1 queries. Spread reads the shared fan
+PRNG state without advancing it. This uses the general terrain/water/person/TYPE1
+convex-model query. Pool-zero distance ties replace; pools two/one require a
+strict improvement. Person contacts retain zero material/section metadata and
+reject a same-team sphere less than three units away. Only a person hit invokes
+the shared projectile damage consequence. Presentation and damage ammo remain
+distinct. Other contacts only spawn the selected impact effect. Nonfinal steps
+play the FIRE row's end sound (or ammo launch set); completion destroys the clone
+and kills the chained SSN, or plays trail-off if no chain exists. The loop
+registers for ten ticks at the sound center.
+[orig: Entity_ProcessProjectileTravel @ 0x448D50;
+Projectile_ProcessDamageOnTarget @ 0x4E7FB0]
+
+**Shared death side effects.** The session-and-authority helper sends 0x26,
+then records objective event 11 for attrib 0x8000. It increments target kills,
+adds score-table entry 13, shares positive points by halves over two occupant
+links, and updates the attacking team in team modes. Ordinary death accounting
+does not score that edge twice. Buildings and cranes have a direct 0x26 send
+before this helper, so both packets are retained. Each state send stamps the
+monotonic-millisecond field corresponding to entity+0x560.
+[orig: sub_50C840 @ 0x50C840; GameEvent_ProcessScoring @ 0x52F550;
+Server_SendEntityStatePacket @ 0x509D70; building calls @ 0x43F2D5/0x43F2E2;
+crane calls @ 0x440179/0x440186]
+
+Compute_lod_fade_timers zeroes six registers, waits out the entity delay and
+resets its origin tick, then evaluates overall elapsed/(duration+4*step) and
+five staggered (elapsed-i*step)/duration phases, clamped to Q16 0..65536.
+Zero authored duration/step select 50/25. These feed OBJECT_DESTROY and
+OBJECT_DESTROY01..05 in native collision/pose evaluation and both Godot entity
+walks, including a linked husk first materialized after death. The upfx motor
+retains subtype-0x20 one-time state and subtype-0x80 late-blast gates. Live upfx
+rows use the time-region sound profile, handle-nibble stagger, SOUND userpoint
+or bounding-box center, same-set blend suppression, and type lifetimes
+31/72/62/10. [orig: compute_lod_fade_timers @ 0x5C3F40;
+Entity_UpdateWaterPhysicsAndEffects @ 0x4A92E0;
+Entity_UpdateEnvSoundEmitter @ 0x4A8080]
+
+**Explosion ordering.** Gnl2 requests count 60 at its raised position; barrels
+request count 10 before removal. The 0x21 packet retains the requested byte,
+although local effects cap the count at eight. Local effects create AirExp,
+queue kz_M406HE on authority, and select row-five sound from source+0x26C
+(or ammo zero). Infantry advanced-ammo and placed-device carriers supply
+that field when applicable. Single player consumes three fan-PRNG draws for
+each of two half-count hemispheres. The purported extra shrapnel is refuted in
+this image: Weapon_SpawnSingleProjectile immediately returns on its zero-filled
+A2ECF4 pointer; an image-wide direct/address-literal scan found only the two
+reads. Its caller still consumes all draws. [orig: Entity_HandleDeathEvent
+@ 0x4070F0, count push @ 0x407216; Entity_HandleDeathOnAuthority @ 0x407CC0,
+count push @ 0x407CEF; Server_BroadcastExplosionEffect @ 0x508450;
+Entity_SpawnExplosionEffects @ 0x4399C0; Weapon_SpawnSingleProjectile @ 0x4EBE80]
+
+D-ITEM-7 retains explicit invalid-data boundaries: missing squib targets or
+nonpositive rate/distance park safely; the motor stops when its clone is freed
+instead of continuing through reused pool memory. Missing palm pivots, invalid
+tower sections, and malformed zero phase denominators remain inert.
 
 ### 24.4 The unitType death dispatch + death pieces
 
@@ -5635,7 +5953,7 @@ the FFI structs.
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs: organic knockback (`Entity_ApplyCollisionForce`), the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
-| D-ITEM-7 | FIXED 2026-09-10: the death callback is dispatched by the items.def `ai_function` class row (`g_EntityClassEventCallbackTable @ 0x813000` via `Entity_LookupRenderCallbacks @ 0x407dc0`; gnrc/gnrl/gnl2/ewep/tree/null bodies ported, see §24.3). The old premise "destructibles author no ai/move function" was false: JOX ITEMS.DEF authors 74 gnrc, 37 gnrl and 0 tree rows, so every shipped destructible took the tree body (section debris + kz_OrganicBlast) instead of its own | deathCallback (+0x1C8) authored per def class | residual: the unwitnessed rows (bld2, towr, emit, brrl, bldg, cran, target, palm, flag, envs, squib, ele0) still run the tree body; the pool-2 cohort quantization of the +0x2AC countdown, the gnl2 attacker-weapon sound and SP shrapnel are unported |
+| D-ITEM-7 | FIXED: all #645 deferred item classes, cohort clocks, shared fade/ambient/scoring and ordered 0x21/0x26/0x12 effects are ported (§24.3a/b) | The class table selects event and motor; gnl2/barrel retain requested explosion counts and SP PRNG history | Invalid target/model/section data is bounded as documented in §24.3b; the uninitialized SP shrapnel pointer is refuted |
 | D-ITEM-8 | The crane/water-tower special death (the "scrane" pool walk + the double kz queue `@ 0x43fc70`) and `Entity_ProcessCraneDestruction @ 0x43eee0` are unported; the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are unported | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
 | D-ITEM-9 | The Falling/Generic wreck callbacks and unitType-3's four short slope rays ground on TERRAIN only. Falling/Generic use sec0 z extents synthesized from LOD-0 primitive bounds (upright leg only); PiecePhysics uses the husk-flag pick — the husk collision shell's floor for a husked piece (the section-AABB union stands in for the CMDL header z-lo), `box_z_lo` otherwise. Static's separate terrain/water thresholds are ported as described in §24.5 | `Entity_RaycastGroundHeightAndObject @0x414320` (Falling/Generic, terrain + objects, mask 0x200000); `Entity_RaycastGroundHeight @0x4142c0` x4 from `Entity_CalcSlopeForces @0x4b0b00`; section-row +84/+88 extents `@0x461e23-0x461e4b` | a wreck dying on a roof can sink to terrain below; port the object-return leg for both query shapes and verify the generic runtime section-row fields against the render-model builder |
 | D-ITEM-10 | `dword_2C25C64` is resolved and both routed/specialized water crossings now emit `Effect_MedSplash`; fallback sounds are ported (`IMP_DEBLRG_WATER` / `IMP_VCL_DROP`, and specialized `EXPLO_HELO_WATER` / `EXPLO_VEHCL_LG`). The def per-item landing (+140) and water (+156) sound slots remain unmodeled | `@0x4940c6-0x494100 / @0x49417c-0x4941af`; specialized twins `@0x48f547..0x48f588 / @0x48f726..0x48f759` | items authoring custom impact sounds still play the matching fallback; splash visuals now route through the ordinary destruction-effect presenter |
@@ -6314,10 +6632,20 @@ at the head of the gunner tick. The later carrier/rider positioning pass uses
 second time. The write-backs land in heading/pitch and, for a local player,
 `inf.target_heading`/`inf.look_pitch`. Ctest `emplaced_gun_channel` exercises full
 world ticks (0x93 then 0x126 high-word yaw for both standalone and attached guns)
-and production parent-weapon lookup, including zero-limit locks. The joiner twin
-(`inmatch/client_replica_present.h`) subtracts the row's reconstructed recoil pitch but
-carries no stored words or IsTurret bit, so a remote IsTurret turret presents at the
-occupant's aim on a joiner.
+and production parent-weapon lookup, including zero-limit locks.
+
+The joiner now retains the same two words in `ClientEntityState`.
+`inmatch/client_replica_emplaced.cpp` runs the shared producer and window clamp
+once in the joiner frame; item seat metadata carries the IsTurret definition bit.
+A remote Player skips the two yaw tethers, an NPC receives the four-degree
+write-back, and local L receives the ninety-degree tether through its existing
+world body. L's result is copied to its wire presentation without another slew.
+Remote recoil decays after the gun has consumed it. Presentation only reads the
+retained words; an empty seat disables that presentation channel while preserving
+its words for the next occupant. `inmatch_joiner_role` pins consecutive -147/-294
+high words, remote Player/NPC/local L behavior, the authored window, recoil before
+decay, repeated presentation reads, and dismount. [orig:
+Entity_UpdateChildAttachment @ 0x4409A0; Entity_UpdateTransformAndTurret @ 0x440CA0]
 
 The semantic CTRL names are EWEAP_GUNYAW @ 0x83e3c8 and
 EWEAP_GUNPITCH @ 0x83e3e8. They are not PLAYPARTANIM channels. The global
@@ -6435,9 +6763,10 @@ order, so a gunner visibly leaves the emplacement pose and plays its selected de
 
 ### 26.8 Remaining divergence and regression map
 
-D-WPN-6 is narrowed, not closed. Mounted parent slots now participate in the global
-post-entity action phase, but other non-local pool-0 equipped slots and eligible unmounted
-pool-1 weapons still need the general pump coverage described by the original row.
+D-WPN-6 remains open for the authority's non-local personal pool-0 slots and
+general unoccupied slot coverage. Pure joiners now replay canonical remote
+borrowers and pump unoccupied hot pool-1 slots once per tick; mounted authority
+slots already participate in the post-entity action phase.
 
 D-WPN-26 is closed (2026-08-15). The production builder now accepts the mounted
 `ResourceIndex`, resolves each weapon ADM, and builds a definition-local `AdmClipIndex`
@@ -6970,11 +7299,9 @@ death hook).
 ### 27.9 Open follow-ups
 
 1. The +388 fourth exclusion slot on thrown rounds (D-ITEM-11 shares it).
-2. The `squib` class pair (`Entity_InitArcMovement @ 0x449810` fn1 /
-   `Entity_ProcessProjectileTravel @ 0x448D50` motor) — unwalked.
-3. `Weapon_FireProcess @ 0x53f5b0` internals (the AI/scripted fire helper the
+2. `Weapon_FireProcess @ 0x53f5b0` internals (the AI/scripted fire helper the
    landmine uses) — skimmed only.
-4. The AI grenade-throw think (body anims 159–162 exist, §8/§14 tables) — the
+3. The AI grenade-throw think (body anims 159–162 exist, §8/§14 tables) — the
    AI never throws in our port yet.
 
 ### 27.10 IDB write-backs (2026-07-20 session, saved)
@@ -7556,37 +7883,20 @@ item-type test, so the fix is a no-op here and the rig's output is
 byte-identical across it. Ported regardless: an unwitnessed gate is a defect
 even when it is inert, and the next mission need not be so forgiving.
 
-### 31.4 One divergence, real but inert here
+### 31.4 Fixed pool slots and placement admission
 
-Retail assigns pool-1 slot `j` = the BMS record index directly
-(`Pool_GetEntry(1, j)`) and `Entity_SpawnFromBMSRecord` can early-return on
-its team filter **while still consuming the slot**, so retail's pool carries
-holes and `used` counts records rather than live entities. Our registry
-compacts to the first free slot.
+Retail assigns each BMS record directly to its authored pool index, leaving a
+hole when admission fails. Pool 0's used count counts successful spawns; pools
+1–3 retain the record count. Fixed-slot assignment was ported 2026-08-25; the
+admission gates were ported 2026-09-11.
+[orig: Mission_LoadBMSFile @ 0x40f4e0;
+Entity_SpawnFromBMSRecord @ 0x40e9f0]
 
-This is inert for the movement chain: compaction is monotonic, so relative
-update order is preserved, and the brake's per-neighbour multiply is
-commutative within a tick. It is live for anything that keys on the slot
-INDEX rather than on order.
-
-2026-08-25 (post-merge tidy): the slot assignment is ported —
-`promote_mission` spawns record i at pool slot i (`spawn_at`, overwriting a
-live occupant the way the fixed pool entry would), for every pool loop
-[`Mission_LoadBMSFile @ 0x40F4E0` — pool 1 `@ 0x40f9bb..0x40f9c6`, pool 2
-`@ 0x40fa28..0x40fa34`, pool 3 `@ 0x40fa98..0x40faa4`, pool 0 `@ 0x40fb0d..
-0x40fb19`; `promote_test`]. Note the pool-0 loop's `Pool_SetUsed` counts
-SUCCESSFUL spawns (`@ 0x40fb21..0x40fb34`) where pools 1-3 store the record
-count. What remains is the FILTER that makes the holes:
-`Entity_SpawnFromBMSRecord @ 0x40e9f0` returns without spawning for the BMS
-RemoveIfLessThan / RemoveIfMoreThan / MP-only / SP-only attribs against the
-session player count `@ 0x40ea8e..0x40eac2`, for an itemDef attrib 0x10000 item
-outside a 4-team TDM / TKOTH / FlagBall session `@ 0x40eade..0x40eb05`, and for a
-team-3/4 record when `g_num_teams_config != 4` `@ 0x40eb23..0x40eb2e`. Our
-promote spawns every record, so both the holes and the entities retail never
-spawns are the open surface; that filter is a spawn port of its own (it needs
-the session player count, the in-session bit and the team count at promote
-time) and is recorded for sign-off in the 2026-08-25 tidy PR rather than
-minted here.
+The gates use the configured player limit with signed threshold bytes, SP/MP
+placement bits, the four-team ItemDef/record-team checks and the offline teammate
+remap. `mission_promote` pins both admitted records and untouched slot holes;
+`mission_kernel` pins the boot seam. Full gate table and parser bit definitions:
+[bms-event-runtime-re section 6.4a](../mission/bms-event-runtime-re.md#64a-placement-admission-2026-09-11).
 
 ### 31.5 What this leaves
 
@@ -8276,7 +8586,7 @@ and closes the actual Iblock01 render part.
 | ID | Open divergence | Retail witness | Consequence / next owner |
 |----|-----------------|----------------|--------------------------|
 | D-DOOR-1 | Door network request/update messages and late-join state are not connected | C2S 0x1A [orig: NetPacket_SendWeaponSwitch @0x42D0C0; NapiNPServerMsg_HandleVoteUpdate @0x514B20] (kong misnomers); S2C 0x37 [orig: Server_SendWeaponSlotActionPacket @0x50F9A0]; initial static decode [orig: NapiNPClientMsg_0x010 @0x433400] | SP and local door states advance, but remote door synchronization is incomplete. Preserve the witnessed zero-based command versus one-based completion packet quirk when porting. |
-| D-DOOR-2 | The separate ai_function target projectile callback is not implemented by DoorSystem | the target projectile callback [orig: @0x43F880..0x43F8EB] | Shoot-to-open targets need the hit-section event-1 producer and its slot-index quirk; ordinary ai_function door commands/contact are implemented. |
+| D-DOOR-2 | FIXED: item-event dispatch carries the projectile hit section and runs the global-slot check plus command six | target callback [orig: @ 0x43F880] | `item_events` pins the base+section read and section-firstBone touch mask; `doors` pins the shared transitions. |
 | D-DOOR-3 | Exhausted/stale global slot reads are safely rejected; arbitrary alias-authored counts beyond 30 are not published beyond the declared phase span | allocator [orig: FadeEffect_AllocateSlot @0x44E890]; raw signed bytes and unchecked bus writes [orig: Entity_ProcessSectionDamageTransition @0x43F370; build_bone_transforms @0x4E3070] | Normal authored definitions retain their state and phases. Retail out-of-bounds memory behavior is not emulated. Cross-entity allocation order and rebind behavior need a wire witness before claiming full lifecycle parity. |
 | D-DOOR-4 | A joiner's decoded present rows carry no door phases (the collector reaches the door writer only for host-owned rows), so a joiner renders no door motion | Retail runs the door records on every peer: [orig: FadeEffect_UpdateAll @0x44E920] from [orig: Entity_UpdateAllEntities @0x4c2100 (the site @0x4C2307)], contact event 6 on authority and client | OPEN (route the joiner's local DoorSystem phases through the guarded local-row path) |
 

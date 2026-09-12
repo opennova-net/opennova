@@ -2470,21 +2470,21 @@ void test_slope_pass_org1_selector_and_chase() {
     // pitch slope 45056<<14 clamped to 656175520, over the 0x22222200 threshold ->
     // slide back 2048; body_pitch chases an eighth-step; the X-only ramp has no roll.
     e->inf.anim_state = anim_state::kWalkProneForward;
-    ai.infantry_slope_pass(*e, 0, 0);
+    ai.infantry_slope_pass(*e, w, 0, 0);
     CHECK(e->body_pitch == (656175520 + 4) >> 3);
     CHECK(e->roll == 0);
     CHECK(e->inf.vel[0] == -2048 && e->inf.vel[1] == 0);
 
     // org1 cadence: off-phase key -> untouched.
     const int32_t held = e->body_pitch;
-    ai.infantry_slope_pass(*e, 0, 3);
+    ai.infantry_slope_pass(*e, w, 0, 3);
     CHECK(e->body_pitch == held);
 
     // Standing (43, flags 0x048): NOT conform -> both fields decay 1/16, no slide.
     e->inf.anim_state = anim_state::kIdle;
     e->inf.vel[0] = 0;
     e->roll = 0x01000000;
-    ai.infantry_slope_pass(*e, 0, 0);
+    ai.infantry_slope_pass(*e, w, 0, 0);
     CHECK(e->body_pitch == held - ((held + 8) >> 4));
     CHECK(e->roll == 0x01000000 - ((0x01000000 + 8) >> 4));
     CHECK(e->inf.vel[0] == 0);
@@ -2494,12 +2494,12 @@ void test_slope_pass_org1_selector_and_chase() {
     e->health = 0;
     e->body_pitch = 0;
     e->inf.vel[0] = 0;
-    ai.infantry_slope_pass(*e, 0, 0);
+    ai.infantry_slope_pass(*e, w, 0, 0);
     CHECK(e->body_pitch == (656175520 + 4) >> 3);
     CHECK(e->inf.vel[0] == -2048);
     const int32_t at_death = e->body_pitch;
     e->inf.airborne = true;
-    ai.infantry_slope_pass(*e, 0, 0);
+    ai.infantry_slope_pass(*e, w, 0, 0);
     CHECK(e->body_pitch == at_death);
     CHECK(e->inf.vel[0] == -2048);
 }
@@ -2694,7 +2694,7 @@ void test_new_remote_player_death_keeps_the_entity_until_deploy() {
         CHECK((corpse->flags & kEntityFlagDead) != 0);
     }
     CHECK(w.ai.for_handle(handle) != nullptr);
-    CHECK(w.out.entity_removals.empty());
+    CHECK(w.out.entity_events.empty());
 }
 
 void test_npc_respawn_counts_and_spawn_reset() {
@@ -2716,12 +2716,12 @@ void test_npc_respawn_counts_and_spawn_reset() {
     CHECK(r.entity().position.x == 12.0f && r.entity().position.y == 3.0f);
     CHECK(r.entity().yaw == 30 && r.entity().flags == 0x400u);
     CHECK(r.body().inf.magazine == 19 && r.body().inf.anim_state == 153);
-    CHECK(r.storage->out.entity_removals.empty());
+    CHECK(r.storage->out.entity_events.empty());
     r.kill();
     r.tick(4, 7);
     CHECK(r.storage->registry.get(r.handle) == nullptr);
     CHECK(r.storage->ai.for_handle(r.handle) == nullptr);
-    CHECK(r.storage->out.entity_removals.size() == 1);
+    CHECK(r.storage->out.entity_events.size() == 1);
 
     for (int16_t count : {int16_t(100), int16_t(32767)}) {
         NpcRespawnRig endless;
@@ -3934,26 +3934,26 @@ static void test_downwash_query_and_body_selection() {
     CHECK(body.inf.anim_state == anim_state::kAttack);
 
     reset();
-    world.ai.player_body_select(body, world, 0);
+    world.ai.player_body_select(body, world, 0, 0);
     CHECK(body.inf.anim_state == anim_state::kWashIdle);
     body.inf.clip_phase = 17000;
-    world.ai.player_body_select(body, world, 0);
+    world.ai.player_body_select(body, world, 0, 0);
     CHECK(body.inf.anim_state == anim_state::kWashIdle && body.inf.clip_phase == 17000);
     reset();
     body.inf.player_moving = true;
     body.inf.wpn_run_anim = -2;
-    world.ai.player_body_select(body, world, 0);
+    world.ai.player_body_select(body, world, 0, 0);
     CHECK(body.inf.anim_state == anim_state::kWashWalk);
     reset();
     body.inf.player_moving = true;
-    world.ai.player_body_select(body, world, 0);
+    world.ai.player_body_select(body, world, 0, 0);
     CHECK(body.inf.anim_state == anim_state::kRun3); // player has no wash_run substitution
     reset();
     body.inf.anim_state = anim_state::kRollLeft;
     CHECK((infantry_anim_flags(body.inf.anim_state) & 4) != 0);
     body.inf.player_moving = true;
     body.inf.wpn_run_anim = -2;
-    world.ai.player_body_select(body, world, 0);
+    world.ai.player_body_select(body, world, 0, 0);
     CHECK(body.inf.anim_state == anim_state::kRollLeft && body.inf.anim_pending == 1);
     reset();
     body.inf.anim_state = anim_state::kRollLeft;
@@ -3962,7 +3962,7 @@ static void test_downwash_query_and_body_selection() {
     world.ai.infantry_select(body, world);
     CHECK(body.inf.anim_state == anim_state::kRollLeft && body.inf.anim_pending == 28);
     reset();
-    world.ai.player_body_select(body, world, kEntityFlagDrowning);
+    world.ai.player_body_select(body, world, kEntityFlagDrowning, 0);
     CHECK(body.inf.anim_state == anim_state::kSwimIdle && body.inf.anim_pending == 0);
 
     const EntityHandle second = world.registry.spawn(1, seed);
@@ -4011,13 +4011,13 @@ static void test_reselecting_current_state_arbitrates_player_but_skips_org1() {
     CHECK((infantry_anim_flags(anim_state::kRollLeft) & 0x4u) != 0);
     body.inf.stance = InfantryState::Stance::kProne;
     body.inf.lean_left = true;
-    world.ai.player_body_select(body, world, 0);
+    world.ai.player_body_select(body, world, 0, 0);
     CHECK(body.inf.anim_state == anim_state::kRollLeft);
     CHECK(body.inf.anim_pending == anim_state::kRollLeft);
     // Player, unlocked current (43: flags 0x48): the middle leg clears the queued 45.
     reset(anim_state::kIdle, anim_state::kIdleCrouch);
     CHECK((infantry_anim_flags(anim_state::kIdle) & 0x24u) == 0);
-    world.ai.player_body_select(body, world, 0);
+    world.ai.player_body_select(body, world, 0, 0);
     CHECK(body.inf.anim_state == anim_state::kIdle && body.inf.anim_pending == 0);
     CHECK(body.inf.clip_phase == 0); // no channel restart on the unchanged state
     // Org1, the same idle re-selection: the equality skip keeps the queued 45.
@@ -4435,14 +4435,70 @@ static void test_npc_corpse_expiry_runs_the_shared_destroy() {
     r.tick(1, 6);
     CHECK(w.registry.get(r.handle) == nullptr);
     CHECK(w.ai.for_handle(r.handle) == nullptr);
-    CHECK(w.out.entity_removals.size() == 1);
+    CHECK(w.out.entity_events.size() == 1);
     CHECK(w.ai.for_handle(carrier)->brain.f[AiBrain::kPriorityTarget] == 0);
     CHECK(w.ai.for_handle(carrier)->brain.f[AiBrain::kDamageInfo] == 0);
     CHECK(!w.out.scars.world_ring().slots[3].live);
     CHECK(!w.out.scars.world_ring().slots[3].owner.valid());
 }
 
+
+void test_slope_probes_include_candidate_models() {
+ Field flat([](int) { return static_cast<uint16_t>(0); });
+ World world;
+ world.registry.configure_pool(0,4);
+ world.registry.configure_pool(2,4);
+ Entity solid;
+ solid.kind = EntityKind::Building;
+ solid.item_id = 164;
+ solid.has_item_def = true;
+ solid.item_type = 1;
+ solid.bound_radius = 4.0f;
+ solid.position = {10,10,0};
+ solid.yaw = 90;
+ solid.pitch = 15;
+ const auto support = world.registry.spawn(2,solid);
+ Entity person;
+ person.kind = EntityKind::Organic;
+ person.position = {10,10,3};
+ person.item_id = 5305;
+ person.item_type = 3;
+ person.has_item_def = true;
+ person.bound_radius = 1.0f;
+ const auto source = world.registry.spawn(0,person);
+ CollisionWorld collision;
+ collision.terrain = &flat.field;
+ world.collision = &collision;
+ collision.assign_entity(support,collision.add_model(hurt_box_model(1)));
+ AiSystem ai;
+ ai.terrain = &flat.field;
+ ai.collision = &collision;
+ auto *e = ai.at(ai.attach(source));
+ e->inf.active = true;
+ e->inf.is_local_player = true;
+ e->inf.anim_state = anim_state::kIdleProne;
+ e->health = 100;
+ e->heading = 0;
+ e->pos[0] = 10 * 65536;
+ e->pos[1] = 10 * 65536;
+ e->pos[2] = 3 * 65536;
+ for (int i=0;i<17;++i) collision.build_tick_tables(world);
+ const int32_t front = collision.raycast_ground(world,source,e->pos,22528,0,0x4000,0x20000,nullptr);
+ const int32_t rear = collision.raycast_ground(world,source,e->pos,-22528,0,0x4000,0x20000,nullptr);
+ CHECK(front != rear && front > 65536 && rear > 65536);
+ ai.infantry_slope_pass(*e,world,0,0);
+ CHECK(e->body_pitch != 0);
+ const auto held = e->body_pitch;
+ ai.infantry_slope_pass(*e,world,1,1);
+ CHECK(e->body_pitch == held); // player probes only on even ticks
+ ai.collision = nullptr;
+ e->body_pitch = 0;
+ ai.infantry_slope_pass(*e,world,2,2);
+ CHECK(e->body_pitch == 0); // the flat height field alone has no slope
+}
+
 int main() {
+    test_slope_probes_include_candidate_models();
     test_downwash_query_and_body_selection();
     test_reselecting_current_state_arbitrates_player_but_skips_org1();
     test_aimed_think_clears_stale_detour_state();

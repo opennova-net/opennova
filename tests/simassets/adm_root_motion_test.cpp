@@ -76,7 +76,7 @@ int main() {
     // An unregistered set has nothing.
     TEST_EXPECT(source.clip_length_ticks(7, 0, 0) == -1);
 
-    // advance(): the playhead half-frame convention — phase increments by one
+    // advance(): the simulation-tick playhead convention — phase increments by one
     // per call, frames carry capsule extents (top gets the +0x2000 bias).
     int32_t phase = -1;
     RootMotionFrame frame{};
@@ -213,8 +213,8 @@ int main() {
         // (the scan is a pure function of the span, so the caller advances
         // from_phase; this pins that a zero-width span yields nothing).
         TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 0, words, 8, 0) == 0);
-        // Two half-frame ticks cross exactly one frame boundary.
-        const int one = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 2, words, 8, 0);
+        // At 30 fps, the third 62 Hz tick crosses the first frame boundary.
+        const int one = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 3, words, 8, 0);
         TEST_EXPECT(one == 1);
         // A wide span reports every frame it crossed, bounded by max_out.
         const int many = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 64, words, 8, 0);

@@ -74,6 +74,37 @@ bool near_equal(float a, float b, float tolerance) { return std::fabs(a - b) <= 
 // here (L spawns on the name-match inside the joiner frame); a rootless boot
 // keeps only the root-free steps.
 static void run_boot_trace_gates() {
+    for (bool joiner : {false, true}) {
+        bms::File mission{};
+        auto sp_only = item(164, 0, 0, 0);
+        sp_only.id = 71;
+        sp_only.bmsi_attributes = 0x40;
+        auto mp_only = sp_only;
+        mp_only.id = 72;
+        mp_only.bmsi_attributes = 0x80;
+        mission.items = {sp_only, mp_only};
+        bms::Event event{};
+        event.flags = bms::EventFlags::PreMission;
+        event.action_count = 1;
+        mission.events.push_back(event);
+        bms::Action action{};
+        action.action_type = bms::ActionType::OutputText;
+        action.param1 = 12;
+        mission.actions.push_back(action);
+        ms::MissionKernel kernel;
+        kernel.open_document(mission, "boot-gates", {});
+        ms::KernelBootOptions options;
+        options.playable = false;
+        options.mp_session = true;
+        options.joiner = joiner;
+        std::string error;
+        CHECK(kernel.boot(options, error));
+        CHECK(kernel.world.rules.mp_session);
+        CHECK(kernel.world.registry.by_net_id(71) == nullptr);
+        CHECK(kernel.world.registry.by_net_id(72) != nullptr);
+        CHECK(kernel.world.out.effects.count("text") == (joiner ? 0u : 1u));
+    }
+
 	std::map<std::string, std::string> files;
 	{
 		bms::File m{};
@@ -86,8 +117,7 @@ static void run_boot_trace_gates() {
 		CHECK(kernel.boot(options, error));
 		const std::vector<std::string> expected = {
 				"ai_profiles", "mission_text", "load_mission", "infantry_anim",
-				"script_catalogs", "wac", "weapon_table", "ammo_table", "organic_init",
-				"premission"};
+				"script_catalogs", "wac", "weapon_table", "ammo_table", "organic_init"};
 		CHECK(kernel.boot_trace == expected);
 		CHECK(!kernel.local.has_local_player());
 	}
@@ -121,18 +151,18 @@ static void test_initial_wac_waits_for_the_weather_owner_once() {
     kernel.open_document(bms::File{}, "synth", source_over(&files));
     ms::KernelBootOptions options;
     options.playable = false;
-    options.defer_initial_wac = true;
+    options.defer_mission_start = true;
     std::string error;
     CHECK(kernel.boot(options, error));
     CHECK(kernel.wac.runs() == 0);
     CHECK(kernel.world.script.vars.get_mission(1) == 0);
     kernel.world.weather.seed(w::WeatherSeed{});
-    CHECK(kernel.wac.execute_initial(kernel.world));
-    CHECK(!kernel.wac.execute_initial(kernel.world));
-    kernel.settle_weather_mission_start();
+    CHECK(!kernel.have_baseline);
+    CHECK(kernel.complete_mission_start());
+    CHECK(!kernel.complete_mission_start());
     CHECK(kernel.world.script.vars.get_mission(1) == 1);
     CHECK(kernel.world.weather.core.scalar_channels.camera_fov_fp == (40 << 16));
-    kernel.capture_baseline();
+    CHECK(kernel.have_baseline);
     kernel.world.weather.command_fov(120);
     kernel.tick_weather();
     CHECK(kernel.restore_baseline());
@@ -142,7 +172,46 @@ static void test_initial_wac_waits_for_the_weather_owner_once() {
     CHECK(!kernel.wac.execute_initial(kernel.world));
 }
 
+
+static void test_vehicle_spawn_pose_is_captured_after_initial_wac() {
+ std::map<std::string, std::string> files;
+ files["synth.wac"] = "if never then teleport(7,42) endif\n";
+ ms::MissionKernel kernel;
+ bms::File mission{};
+ mission.items.push_back(item(164, 1 << 16, 2 << 16, 0));
+ kernel.open_document(std::move(mission), "synth", source_over(&files));
+ ms::KernelBootOptions options;
+ options.playable = false;
+ options.defer_mission_start = true;
+ std::string error;
+ CHECK(kernel.boot(options,error));
+ const auto vehicle = w::EntityHandle::make(1,0);
+ auto *hull = kernel.world.registry.get(vehicle);
+ CHECK(hull != nullptr);
+ if (hull == nullptr) return;
+ hull->group_id = 7;
+ w::VehicleTraits traits;
+ traits.player_control = true;
+ kernel.world.vehicles.traits.set(hull->item_id,traits);
+ kernel.world.registry.configure_pool(3,4);
+ w::Entity marker;
+ marker.item_id = 6088;
+ marker.wp_number = 42;
+ marker.position = {100,200,30};
+ kernel.world.registry.spawn(3,marker);
+ CHECK(!hull->veh.spawn_pose_valid);
+ CHECK(kernel.complete_mission_start());
+ hull = kernel.world.registry.get(vehicle);
+ CHECK(hull->position.x == 100 && hull->position.y == 200);
+ CHECK(hull->veh.spawn_pose_valid && hull->veh.spawn_pose[0] == 100 * 65536);
+ hull->position.x = 300;
+ CHECK(kernel.restore_baseline());
+ hull = kernel.world.registry.get(vehicle);
+ CHECK(hull->position.x == 100 && hull->veh.spawn_pose[0] == 100 * 65536);
+}
+
 int main() {
+	test_vehicle_spawn_pose_is_captured_after_initial_wac();
 	test_initial_wac_waits_for_the_weather_owner_once();
 	// The synthetic mission: two placed entities plus one (empty) BMS event,
 	// and a mission-named WAC layer in the in-memory source.

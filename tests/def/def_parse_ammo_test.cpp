@@ -386,6 +386,20 @@ int main(void) {
         def_free_ammo(&pin);
     }
 
+
+    {
+        static const char text[] = "ammo ARMOR\n armor_density 125, 250, -3\nend\n";
+        DefAmmoFile parsed{};
+        if (def_parse_ammo_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text)-1,
+                                  &parsed) != 0 || parsed.count != 1)
+            return 1;
+        const auto &row = parsed.entries[0];
+        const bool correct = row.armor_density[0] == 125 &&
+                row.armor_density[1] == 250 && row.armor_density[2] == -3;
+        def_free_ammo(&parsed);
+        if (!correct) { fprintf(stderr, "FAIL: armor_density class columns\n"); return 1; }
+    }
+
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/ammo.def (the shipped ammo table)");
     printf("PASS: ammo parsing OK\n");

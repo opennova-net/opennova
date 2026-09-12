@@ -751,7 +751,7 @@ func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
 	var fps: float = sk.get_clip_fps("anim_walk_forward")
 	assert_gt(fps, 0.0, "fixture clip has a valid fps")
 	var phase_ticks := 5
-	var expected_time := float(phase_ticks) / (2.0 * fps)
+	var expected_time: float = sk.get_clip_phase_seconds("anim_walk_forward", phase_ticks)
 
 	model.call("play_body_clip_at", "anim_walk_forward", phase_ticks)
 	var skeleton: Skeleton3D = model.get_skeleton()
@@ -762,7 +762,7 @@ func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
 	model.advance_body_animation(0.5)
 
 	assert_almost_eq(model.get_animation_time(), expected_time, 0.001,
-		"IDA half-frame phase ticks map to skeleton pose seconds")
+		"retail normalized phase ticks map to skeleton pose seconds")
 	assert_true(skeleton.get_bone_pose_position(0).is_equal_approx(pinned_pose),
 		"externally phased playback does not free-run between sim snapshots")
 
@@ -773,11 +773,11 @@ func test_play_body_clip_seeded_consumes_ticks_then_free_runs() -> void:
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
 	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_walk_forward")
-	var expected := 5.0 / (2.0 * fps)
+	var expected: float = model.get_skeletal_anim().get_clip_phase_seconds("anim_walk_forward", 5)
 
 	model.play_body_clip_seeded("anim_walk_forward", 5)
 	assert_almost_eq(model.get_animation_time(), expected, 0.001,
-		"the accepted player transition consumes its half-frame tick seed")
+		"the accepted player transition consumes its retail playback tick seed")
 	model.advance_body_animation(0.05)
 	assert_false(is_equal_approx(model.get_animation_time(), expected),
 		"a seeded remote clip advances locally on the very next render frame")
@@ -932,7 +932,7 @@ func test_remote_body_exit_gate_accepts_only_incoming_flag_one() -> void:
 	assert_eq(model.get_active_body_clip(), "anim_idle",
 		"an incoming state without flag 0x1 queues behind an exit-gated clip")
 	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_run_forward")
-	var expected := 6.0 / (2.0 * fps)
+	var expected: float = model.get_skeletal_anim().get_clip_phase_seconds("anim_run_forward", 6)
 	model.apply_remote_body_state(1, "anim_run_forward", interrupt_flags, 6)
 	assert_eq(model.get_active_body_clip(), "anim_run_forward",
 		"incoming flag 0x1 interrupts an exit-gated current state")

@@ -238,7 +238,7 @@ Ref<SoundEmitterRow> SoundEmitterRow::make(int64_t p_source_spawn_id, int p_hand
 	v.emitted_tick = static_cast<uint32_t>(p_emitted_tick);
 	v.lane = static_cast<uint8_t>(p_lane);
 	v.slot = static_cast<uint8_t>(p_slot);
-	v.lifetime_ticks = static_cast<uint16_t>(p_lifetime);
+	v.lifetime_ticks = p_lifetime;
 	v.pitch_q16 = p_pitch_q16;
 	v.volume_q8_8 = static_cast<uint16_t>(p_volume_q8_8);
 	v.source_only = p_source_only;

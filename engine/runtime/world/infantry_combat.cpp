@@ -9,6 +9,7 @@
 #include <base/io/fixed.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/infantry_burn.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/world.h>
 
@@ -209,6 +210,13 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         // The own priority-target mark decays each scan; firing re-arms it.
         // [orig: Flags &= ~0x4000 @0x4bbfa4]
         if (Entity *se = world.registry.get(e.handle)) se->engine_flags &= ~kEntityFlagPriorityTarget;
+    }
+
+    // [orig: @0x4BBF8F..0x4BC047] The nonzero burn branch skips the
+    // ENTIRE behavior/aim/gait block, reaching animation arbitration at LABEL_754.
+    if (inf.burn_state != 0) {
+        selected_state = select_infantry_burn(inf, root_motion, false, key);
+        if (inf.burn_state != 0) return selected_state;
     }
 
     // Behavior and aim share the 16-tick think gate. [orig: §17.3/§17.5]

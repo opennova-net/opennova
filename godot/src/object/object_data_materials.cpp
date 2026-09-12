@@ -240,10 +240,11 @@ Ref<Texture2D> ObjectData::load_material_texture(int p_material_index, int p_tex
 		return Ref<Texture2D>();
 	}
 
-	const String texture_name = from_native(material.textures[p_texture_index].name);
+	const auto &row = material.textures[p_texture_index];
+	const String texture_name = from_native(row.name);
 	return resource_root.is_valid()
-			? resource_root->load_texture(texture_name)
-			: opennova::load_texture_from_dir(source_dir, texture_name);
+			? resource_root->load_material_texture(texture_name, row.type)
+			: opennova::load_material_texture_from_dir(source_dir, texture_name, row.type);
 }
 
 Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const {

@@ -43,4 +43,9 @@ struct PlayerLookSettings {
 void player_look_apply(int32_t &yaw_bam, int32_t &pitch_bam, const PlayerLookSettings &s,
                        int32_t dx_px, int32_t dy_px, int32_t scoped_zoom, bool prone);
 
+// Held look/turn keys advance 0x1FFFFFF BAM per tick and clamp relative to
+// body slope. [orig: Entity_ApplyFreeLookRotation @0x4ae090]
+void player_look_keys(int32_t &yaw, int32_t &pitch, bool left, bool right,
+    bool up, bool down, bool prone, int32_t body_pitch);
+
 } // namespace opennova::world

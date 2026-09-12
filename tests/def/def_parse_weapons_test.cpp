@@ -843,6 +843,24 @@ int main(void) {
         printf("nested-action refusal + delay alias OK\n");
     }
 
+
+    {
+        const char text[] =
+                "weapon TEST_SOUNDS\n"
+                " soundhead MINI_HEAD\n soundfireloop MINI_LOOP\n"
+                " soundtrailoff MINI_TAIL\n soundlockedtone TARGET_LOCK\nend\n";
+        DefWeaponsFile parsed{};
+        if (def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(text),
+                sizeof(text) - 1, &parsed) != 0 || parsed.count != 1) return 1;
+        const DefWeaponDef &w = parsed.entries[0];
+        const bool ok = strcmp(w.soundhead, "MINI_HEAD") == 0 &&
+                strcmp(w.soundfireloop, "MINI_LOOP") == 0 &&
+                strcmp(w.soundtrailoff, "MINI_TAIL") == 0 &&
+                strcmp(w.soundlockedtone, "TARGET_LOCK") == 0;
+        def_free_weapons(&parsed);
+        if (!ok) { fprintf(stderr, "FAIL: weapon-level sound names\n"); return 1; }
+    }
+
     def_free_weapons(&wf);
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def (the shipped weapon table)");

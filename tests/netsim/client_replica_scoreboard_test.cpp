@@ -449,9 +449,44 @@ void test_malformed_body_is_rejected() {
 	CHECK(!view.state().scoreboard.known);
 }
 
+
+void test_permanent_death_live_count() {
+    ClientReplicaPipeline view;
+    std::vector<uint8_t> config(51, 0);
+    config[48] = 0xA0; // trailing 0x8000 permanent-death + 0x2000 spectators
+    view.apply(s2c::SESSION_CONFIG, config);
+    CHECK(view.state().permanent_death && view.state().spectators_allowed);
+    view.apply(s2c::PLAYER_SYNC, make_sync_name(1, "Alive", 5));
+    view.apply(s2c::PLAYER_SYNC, make_sync_name(2, "Dead", 6));
+    view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "Spectator", 7));
+    view.apply(s2c::PLAYER_SYNC, make_sync_name(4, "UnboundEntity", 8));
+    for (uint16_t handle : {5, 6, 7}) {
+        ClientEntityState entity;
+        entity.handle = handle;
+        entity.state_flags = handle == 6 ? 2 : 0;
+        view.state().entities.push_back(entity);
+    }
+    const auto list = make_list(0, {{1, 0, 0, 0, 2}, {2, 0, 0, 0, 2},
+            {3, 0, 0, 0, 1}, {4, 0, 0, 0, 2}, {5, 0, 0, 0, 2}}, 4, 1);
+    view.apply(s2c::PLAYER_LIST, list);
+    CHECK(view.state().scoreboard.alive_player_count == 1);
+    CHECK(view.state().scoreboard.rows.size() == 4);
+    view.state().entities.front().state_flags = 2;
+    CHECK(view.state().scoreboard.alive_player_count == 1); // retained until the next list
+    view.apply(s2c::PLAYER_LIST, list);
+    CHECK(view.state().scoreboard.alive_player_count == 0);
+    view.state().entities.front().state_flags = 0;
+    config[48] = 0;
+    view.apply(s2c::SESSION_CONFIG, config);
+    CHECK(!view.state().permanent_death && !view.state().spectators_allowed);
+    view.apply(s2c::PLAYER_LIST, list);
+    CHECK(view.state().scoreboard.alive_player_count == 0);
+}
+
 } // namespace
 
 int main() {
+	test_permanent_death_live_count();
 	test_row_fields_and_flags();
 	test_spectator_bit();
 	test_empty_update_clears_board();

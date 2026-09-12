@@ -112,6 +112,7 @@ std::vector<std::string> weapon_kit_expand_display_list(
 struct WeaponInventorySlot {
     int16_t adm_index = -1;
     int32_t clip = 0;
+    int16_t scope_zero = 0;
 };
 
 struct WeaponInventory {

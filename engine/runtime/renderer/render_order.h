@@ -18,6 +18,17 @@
 
 namespace opennova::renderer {
 
+// Person entities (ItemDef type 3) enter the two BySide waves. The queued
+// alpha draws flush after the world block is restored; the opaque draws use
+// the flat block. Held models inherit their owner's wave.
+// [orig: collect_visible_entities_for_terrain @0x5C8C60;
+// Terrain_RenderSceneWithReflection @0x5C9511..0x5C9616]
+inline bool entity_uses_thermal_wave(int item_type) { return item_type == 3; }
+
+// The main scene pins this after applying FOV, independent of camera mode.
+// [orig: Render_ProcessMainSceneFrame @0x5CA0F0]
+float scene_far_plane(float fog_distance);
+
 // The six technique classes, batch-selected per entry (flag bits 4-6) and
 // mapped to the material def's cached pass blocks at draw time
 // [orig: CRenderBatchQueue_FlushBatches @ 0x5d9ff3: NORMAL +600,

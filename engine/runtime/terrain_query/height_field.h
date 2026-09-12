@@ -35,7 +35,7 @@ struct TerrainHeightField {
 	// Sits here, next to `dim`, so it lands in that member's tail padding: this is a
 	// by-value POD copied into deep stack frames and it must not grow.
 	CoordsQuadrantLocks locks{};
-	// Global .trn wrap flags for the fixed-point gradient query. Together with
+	// Global .trn wrap flags for height and gradient queries. Together with
 	// the two lock bytes these still occupy the original four padding bytes.
 	// [orig: PolyTrn_LoadTerrainConfig @0x60E4B1..0x60E4CB]
 	bool wrap_x = false;

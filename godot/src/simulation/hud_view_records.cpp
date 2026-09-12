@@ -194,6 +194,17 @@ void EndRoundRow::_bind_methods() {
 // --- DeployStatus -----------------------------------------------------------
 
 void DeployStatus::_bind_methods() {
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, permanent_death)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, show_instruction)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, show_instruction2)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, replace_instruction)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::STRING, instruction_text)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::STRING, instruction2_text)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, show_round_status)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::STRING, round_text)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::STRING, remaining_players_text)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::STRING, respawn_text)
+
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::INT, penalty_seconds)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::INT, revive_seconds)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::INT, hold_seconds)

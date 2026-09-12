@@ -67,6 +67,10 @@ struct Connection {
 	// `phase & 3` selects the header sub-block (0 weapon / 1 server-status / 2 env / 3 gametype),
 	// while `phase & 0xF == 8` gates the mounted-weapon ammo block. emit_connection_s2c advances it.
 	uint8_t s2c_phase = 0;
+    // One-frame NAK backoff; silence keeps reducing each frame until receive.
+    // [orig: sub_4C62A0 @0x4c62a0; Server_SendEntityStateToPlayer @0x517c58]
+    bool nak_backoff_pending = false;
+    uint32_t receive_silence_ms = 0;
 
 	// Per-connection entity AGE bytes for the 0x0A priority loop — the reimpl of the original's
 	// per-player-slot age arrays: pool-0 ages at slot+89978 (256 B), pool-1 at slot+90234 (+256)

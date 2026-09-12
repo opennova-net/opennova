@@ -179,8 +179,34 @@ static void test_retry_restarts_channel_without_accepting_old_completion() {
     CHECK(!f.world.script.voice.snapshot().anchor.valid());
 }
 
+static void test_radio_sets_share_channel_zero_and_keep_unity_pitch() {
+    Fixture f;
+    f.world.rules.mp_session = true;
+    int selections = 0;
+    f.world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+            -> std::optional<ScriptVoiceChannel::SetSelection> {
+        ++selections;
+        if (name != "MEDIC_VOICE") return std::nullopt;
+        return ScriptVoiceChannel::SetSelection{"tone.wav", 180, 0};
+    });
+    CHECK(f.world.script.voice.radio_set(f.world, "MEDIC_VOICE", f.speaker));
+    const auto frame = f.world.script.voice.frame(f.world, {});
+    CHECK(frame.local && frame.state.portrait == f.speaker);
+    CHECK(frame.state.pitch_q16 == 65536 && frame.state.volume == 180);
+    CHECK(!f.world.script.voice.radio_set(f.world, "MEDIC_VOICE", f.local));
+    CHECK(selections == 1); // busy gate precedes the shared random selection
+    f.world.script.voice.finish(frame.serial, frame.state.clip.get());
+    CHECK(f.world.script.voice.radio_set(f.world, "MEDIC_VOICE", f.local));
+    CHECK(selections == 2);
+    f.world.script.voice.reset();
+    f.world.rules.mp_session = false;
+    CHECK(!f.world.script.voice.radio_set(f.world, "MEDIC_VOICE", f.local));
+    CHECK(selections == 2);
+}
+
 int main() {
     test_wave_ready_and_physical_completion();
+    test_radio_sets_share_channel_zero_and_keep_unity_pitch();
     test_failed_replacement_invalidates_before_loading();
     test_spatial_speaker_and_radio_anchor();
     test_invalid_speaker_does_not_interrupt_and_dead_anchor_stops();

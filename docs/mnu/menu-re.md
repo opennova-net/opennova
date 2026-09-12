@@ -1548,6 +1548,25 @@ custom cursor carrying the claim's retail texture; the compiled software
 cursor stays off in the game shell (drawing both showed a trailing second
 cursor).
 
+### Joystick POV dispatch (2026-09-11)
+
+The catalog's `look_up=0x81`, `look_down=0x82`, `turn_left=0x83`, and
+`turn_right=0x84` are **POV-hat bits**, not analog-axis bindings.
+`Joystick_UpdateInputBitfield @0x7653c0` copies 128 buttons, then calls
+`Joystick_MapAxisToBitfield @0x764c10` for four POV angles at bit offsets
+128/132/136/140. `Input_TryTriggerJoystickButton @0x497b30` reads the one-based
+binding byte from that combined bitmap. The angle bins end inclusively at
+2200/6800/11200/15000/20200/24800/29200/33800 hundredths of a degree; masks in
+up/down/left/right order are 1/9/8/10/2/6/4/5, then 1. Low word 0xffff clears
+the hat. Diagonals therefore fire both authored held actions.
+
+`BindingSet::pressed_joystick` now reads ordinary buttons and all four native
+POV banks. Godot supplies its first hat from D-pad buttons; extra hats remain
+absent because its mapped gamepad API exposes one D-pad. Native `controls_unit`
+pins every sector boundary, neutral release, the four default actions, a second
+hat, and ordinary button 128. This does not claim the independent six analog
+axis channels or joystick remap capture are implemented.
+
 ## Controls key-remap flow `[orig: UI_ControlsRemapArmHandler @ 0x55d560; the capture pump @ 0x55c67c]`
 
 The OPTIONS scene registers per-widget callbacks (`@ 0x55d737..0x55d827`):
@@ -2119,3 +2138,53 @@ g_hostClassAllowMask`; `WeaponLoadout_ApplyFromBuffer` param 3 ->
   offline play too: our runtime hosts a listen session even for SP (ADR 0009),
   and the offline loadout flow wants the choice. The in-session filter masks,
   sorted rows, and ACCEPT class apply are unchanged.
+
+## Host dialog rules and explicit aspect selection (2026-09-11)
+
+| Component | Verdict | Evidence |
+| --- | --- | --- |
+| Host dialog readback and live-rule sentinels | MATCHING (read-only grill) | `HostDialog_ReadSettings @ 0x555940`, `apply_session_settings_to_globals @ 0x551500`; `npruntime_host_settings`; GUT `mp_lan_menu_seam_test` |
+| Aspect control selection and persistence | MATCHING (read-only grill) | `UI_SyncRenderSettingsToWidgets @ 0x55a140`; GUT `menu_shell_test` restores the authored semantic value, persists a change and applies it to the simulation |
+
+`engine/runtime/inmatch/host_settings.cpp` owns the host control names, integer
+readback, bit polarity and cfg-to-runtime conversions. `MpMenuCompanion` samples
+the loaded controls into `HostSessionConfig`, now derived from the native
+`HostSessionOptions`; the mission request copies that native record. Missing
+widgets leave defaults intact. Present blank edit fields are read verbatim;
+integer fields use signed 32-bit `strtol` semantics, including numeric prefixes.
+[orig: HostDialog_ReadSettings @ 0x555940;
+CEditWnd_GetIntValue @ 0x6575d0]
+
+| Control | Live setting |
+| --- | --- |
+| `DELAY` / `RESPAWN` / `TIME` | Start delay / respawn timeout / round time (`g_respawn_time`) |
+| `MAX_KOTH` | KOTH limit (`g_time_limit_minutes`); nonpositive becomes `0x2222222` |
+| `KILL_LIMIT` / `MAX_SCORE` | Score / flag-score limit; exactly 500 becomes 65000 |
+| `TAKEOVER_TIME` / `LFP_TAKEOVER` | Capture duration / capture speed |
+| `TEAM_FF`, `FRIENDLY_TAG`, `FF_WARNING`, `TRACERS` | Inverted attribute bits `0x200`, `0x400`, `0x8`, `0x1` |
+| `TEAM_CHOOSE`, `CLAYMORE_PREF` | Direct attribute bits `0x4`, `0x8000` |
+| `ALLOW_SPECTATORS` | Off clears the signed limit; on changes zero to -1 while preserving an existing positive limit |
+
+[orig: HostDialog_ReadSettings @ 0x555940;
+apply_session_settings_to_globals @ 0x551500]
+
+Name/message/password reads use capacities 32/128/17 bytes. `GAME_LOCATION`
+reads the selected item's name (for example `US`), not its numeric value.
+`MAX_PLAYERS` caps the dialog request at 64; dedicated hosting reserves one extra
+slot in the live network limit. The server password reaches the 0x42 admission
+check, and the two side passwords and spectator password remain separate.
+[orig: CStaticWnd_GetLabelText @ 0x657570;
+CSpinListWnd_GetSelectedName @ 0x64bb20;
+HostDialog_ReadSettings @ 0x555940;
+Server_InitNewRoundState @ 0x51c8e0]
+
+Readback also retains connection speed, LAN-only, PunkBuster, allowed friendly
+kills, AI enable and time-of-day continuity. This verdict covers the host dialog
+and session configuration, not an implementation claim for those downstream
+services or the remaining side-password join validators (D-NET-171).
+
+The `16x9DISPLAY` spin is interactive and restores/persists the selected item's
+`value=` attribute. It is removed from the table of fixed renderer-quality
+choices; the other quality controls remain governed by that table. The shared
+player-options state feeds the same aspect mode to camera and sights projection.
+[orig: UI_SyncRenderSettingsToWidgets @ 0x55a140]

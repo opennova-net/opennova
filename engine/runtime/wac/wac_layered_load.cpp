@@ -32,8 +32,9 @@ void load_script_sound_sets(const mission::BootFileSource &files,
 }
 
 void load_script_effect_catalog(const mission::BootFileSource &files,
-        particle::EffectCatalogNames &effects) {
+        particle::EffectCatalogNames &effects, particle::EffectSceneConfig *scene) {
     effects.clear();
+    if (scene != nullptr) scene->documents.clear();
     if (!files.valid() || !files.list_files) return;
     // The effect world's mounted PTL + regional table load order.
     // [orig: CEffectSystem_Init @0x5F6070]
@@ -44,8 +45,10 @@ void load_script_effect_catalog(const mission::BootFileSource &files,
             particle::ParticleFile document;
             particle::ParseError parse_error;
             if (files.read_file(name, bytes) && particle::load_particles_from_buffer(
-                    reinterpret_cast<const char *>(bytes.data()), bytes.size(), document, parse_error))
+                    reinterpret_cast<const char *>(bytes.data()), bytes.size(), document, parse_error)) {
                 effects.add_document(document);
+                if (scene != nullptr) scene->documents.push_back({name, std::move(document)});
+            }
         }
     }
 }

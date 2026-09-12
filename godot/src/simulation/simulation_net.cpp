@@ -2,6 +2,7 @@
 // bring-up + host pump, the LAN joiner pump family + wire proxies/events, the
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/simulation_internal.h"
+#include <runtime/inmatch/host_settings.h>
 #include "network/udp_pump_datagram_socket.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
@@ -366,6 +367,16 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	config.custom_text = in.custom_text;
 	config.player_name = in.player_name;
 	config.expansion = in.expansion;
+	config.server_password = in.server_password;
+	config.side_a_password = in.side_a_password;
+	config.side_b_password = in.side_b_password;
+	config.country = in.country;
+	config.server_punkbuster = in.server_punkbuster;
+	config.server_lan_only = in.server_lan_only;
+	config.connection_speed = in.connection_speed;
+	config.max_friendly_kills = in.max_friendly_kills;
+	config.allow_ai = in.allow_ai;
+	config.time_of_day_continuity = in.time_of_day_continuity;
 	config.spectator_password = in.spectator_password;
 	config.spectator_slots = std::max(in.spectator_slots, -1);
 	// D-NET-166: the host's g_expansion_checksum analog. When the caller names
@@ -432,8 +443,9 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
 	// loopback fold at bring-up; max_players is the lobby-advertised cap, clamped to the witnessed 1..65.
 	net_.host_serve_and_play = p_options->get_serve_and_play();
-	net_.host_max_players = static_cast<uint32_t>(std::clamp(p_options->get_max_players(), 1,
-			static_cast<int>(opennova::inmatch::kMaxPlayersCap)));
+	net_.host_max_players = opennova::inmatch::host_player_slot_limit(
+			p_options->get_max_players(), net_.host_serve_and_play);
+	config.max_players = net_.host_max_players;
 	net_.host_session_config = std::move(config);
 	if (kernel_ && is_host_listening()) {
 		kernel_->world.rules.fat_bullets = net_.host_session_config.fat_bullets;
@@ -448,7 +460,10 @@ Ref<HostSessionOptions> Simulation::get_host_session_config() const {
 	out.instantiate();
 	out->assign_config(net_.host_session_config);
 	out->set_bind_port(net_.host_bind_port);
-	out->set_max_players(static_cast<int>(net_.host_max_players));
+	// Return a request that can be applied again without adding the reserved
+	// dedicated slot a second time. player_slot_limit exposes the live limit.
+	out->set_max_players(static_cast<int>(net_.host_max_players) -
+			(net_.host_serve_and_play ? 0 : 1));
 	out->set_serve_and_play(net_.host_serve_and_play);
 	return out;
 }
@@ -515,7 +530,7 @@ void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 
 bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		const String &p_player_name, int p_join_role,
-		const String &p_spectator_password) {
+		const String &p_spectator_password, const String &p_server_password) {
 	// P7: the joiner is a non-authority inmatch::ClientRuntime (Joiner role) built per-load by the boot's role hook;
 	// it owns the connect-leg state machine + the S2C->ClientState fold internally. Here we only dial
 	// the socket + store the player name (the ClientAuth.NA the host echoes for the name-match). Leave
@@ -541,7 +556,8 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 			p_join_role == static_cast<int>(opennova::inmatch::JoinRole::Spectator)
 					? opennova::inmatch::JoinRole::Spectator
 					: opennova::inmatch::JoinRole::Player,
-			std::string(p_spectator_password.utf8().get_data()));
+			std::string(p_spectator_password.utf8().get_data()),
+			std::string(p_server_password.utf8().get_data()));
 	install_charattr_challenge_table();
 	install_character_join_vars();
 	install_join_integrity_profile();
@@ -1018,19 +1034,20 @@ TypedArray<FeedRow> Simulation::drain_feed_events() {
 	opennova::replication::ClientState &cs = runtime_->state();
 	const uint16_t self_handle =
 			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;
-	const auto name_of = [&cs](uint8_t index) -> std::string {
-		const opennova::replication::ClientEntityState *e =
-				cs.find(static_cast<uint16_t>(index));
-		return e != nullptr ? e->name : std::string();
+	const auto actor_of = [&cs](uint8_t index) -> opennova::hud::FeedActor {
+		const auto *e = cs.find(static_cast<uint16_t>(index));
+		return e != nullptr ? opennova::hud::FeedActor{e->name, e->team}
+		                    : opennova::hud::FeedActor{};
 	};
 	std::vector<opennova::hud::FeedEventInput> inputs;
 	for (const opennova::replication::ClientGameEvent &ev : runtime_->drain_game_events()) {
 		inputs.push_back({ ev.event_type, ev.attacker_index, ev.victim_index,
-				ev.aux_index, ev.kind });
+				ev.aux_index, ev.kind, ev.pos_x });
 	}
 	std::vector<opennova::hud::FeedRow> rows;
-	opennova::hud::feed_event_rows(inputs.data(), inputs.size(), self_handle,
-			opennova::hud::kMpVerboseDefault, name_of, rows);
+	const opennova::hud::FeedContext context{
+		self_handle, opennova::hud::kMpVerboseDefault, runtime_->game_type()};
+	opennova::hud::feed_event_rows(inputs.data(), inputs.size(), context, actor_of, rows);
 	for (const opennova::hud::FeedRow &row : rows) {
 		Ref<FeedRow> r;
 		r.instantiate();
@@ -1038,6 +1055,20 @@ TypedArray<FeedRow> Simulation::drain_feed_events() {
 		out.push_back(r);
 	}
 	return out;
+}
+
+void Simulation::retain_feed_announcement(const String &text, int64_t tick) {
+	if (runtime_) runtime_->state().kill_announcement.record(
+			text.utf8().get_data(), static_cast<uint32_t>(tick));
+}
+String Simulation::get_kill_announcement_text() const {
+	return runtime_ ? String::utf8(runtime_->state().kill_announcement.text.c_str()) : String();
+}
+int64_t Simulation::get_kill_announcement_tick(int64_t now) {
+	if (!runtime_) return 0;
+	auto &announcement = runtime_->state().kill_announcement;
+	announcement.expire(static_cast<uint32_t>(now));
+	return announcement.tick;
 }
 
 String Simulation::format_feed_line(const String &p_template, const String &p_attacker,

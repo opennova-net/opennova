@@ -183,3 +183,28 @@ func test_shared_key_fires_huddetail_not_hudcolor() -> void:
 			"the test leaves the persisted level where it started")
 	assert_eq(presenter.hud_color_index(), color_start,
 			"the test leaves the persisted scheme where it started")
+
+
+func test_kill_banner_retains_text_after_expiry() -> void:
+	_staged_dir = HudFixture.stage_root(true)
+	var world := WorldFixture.boot_minimal(self, _staged_dir)
+	var presenter := HudFixture.presenter_over(self, world)
+	var hud := presenter.get_game_hud()
+	var sim := world.get_sim()
+	var start := presenter.hud_detail_level()
+	presenter.set_hud_detail_level(3)
+	presenter.tick(false)
+	var baseline: int = hud.get_draw_list_stats().glyphs
+	var now := Simulation.ticks_from_ms(Time.get_ticks_msec())
+	sim.retain_feed_announcement("ABC", now)
+	presenter.tick(false)
+	assert_eq(hud.get_draw_list_stats().glyphs, baseline + 3,
+			"the banner is drawn through the presenter even at detail 3")
+	now = Simulation.ticks_from_ms(Time.get_ticks_msec())
+	sim.retain_feed_announcement("XYZ", now - 187)
+	presenter.tick(false)
+	assert_eq(hud.get_draw_list_stats().glyphs, baseline,
+			"the presenter expires the banner using the HUD clock")
+	assert_eq(sim.get_kill_announcement_text(), "XYZ",
+			"expiration retains the death-screen text")
+	presenter.set_hud_detail_level(start)

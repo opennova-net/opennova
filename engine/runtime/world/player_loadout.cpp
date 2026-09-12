@@ -114,6 +114,7 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     // The loadout weight the next 0x5A apply would stamp into entity+0x37C
     // [orig: Terrain_AccumulateSectorScores @0x425220 via @0x4296f9].
     loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory);
+    if (e != nullptr) e->carry_flags = (e->carry_flags & ~0x18u) | inventory.carry_flags;
     inventory_valid = true;
     weapon.switch_in_flight = false;
     weapon.switch_deferred_action = -1;

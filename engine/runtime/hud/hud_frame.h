@@ -9,6 +9,7 @@
 // Witness record: docs/interface/hud-re.md; per-element policy math lives in
 // hud/hud_math.h and stays the single source.
 
+#include <runtime/hud/feed_format.h>
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_declutter.h>
 #include <runtime/hud/hud_math.h>
@@ -542,6 +543,7 @@ struct HudFrameState {
 	// [orig: g_showMessageLog @0x24C18C0; the title @0x5b9e54].
 	bool message_log_shown = false;
 	std::string message_log_title;
+	KillAnnouncement kill_announcement;
 	// THE AAS ZONE STATUS PANEL (hud/hud_lfp_panel.h owns its policy).
 	HudLfpPanelState lfp_panel;
 	float health_fraction = 1.0f;
@@ -576,6 +578,7 @@ struct HudFrameState {
 	// multiplier (sight_overlay.h sight_slide_multiplier; 0 until the
 	// scope-zero state has a port).
 	int sight_scale_index = kSightScaleIndexDefault;
+    int aspect_mode = -1;
 	int32_t sight_slide_multiplier = 0;
 	HudWaypointState waypoint;
 	std::vector<HudObjectiveRow> objectives;
@@ -733,6 +736,9 @@ public:
 	// @0x5b9d70 walks slots 16..1 of both rings @0x5b9e8a..0x5b9f1a].
 	const std::vector<HudMessageLine> &chat_lines() const { return chat_lines_; }
 	void reset_runtime_state();
+    // Respawn clears overlay clocks, retaining the chat/system rings and
+    // previous stance/ammo values. [orig: HUD_ResetAllOverlayBuffers @0x59dd40]
+    void reset_overlay_buffers();
 
 	const HudDrawList &compile(const HudFrameState &state, float surface_w,
 			float surface_h);
@@ -789,6 +795,7 @@ private:
 	void element_lfp_panel(const HudFrameState &state, float w, float h);
 	void element_scoreboard(const HudFrameState &state, float w, float h);
 	void element_end_round_overlay(const HudFrameState &state, float w, float h);
+	void element_kill_announcement(const HudFrameState &state, float w, float h);
 	void element_end_round_statistics(const HudFrameState &state, float w,
 			float h);
 	void element_vehicle_panel(const HudFrameState &state, float w, float h);

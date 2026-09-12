@@ -222,6 +222,17 @@ enum PresentField : int {
 	// exact signed dwords including phase 65536, following retail's ordinal
 	// bus beyond DOOR_15 when authored), so only door-bearing rows pay for it.
 	PF_DOOR_COUNT,
+    // A retained model pick also covers fragments born with Flags & 4 and
+    // dynamic rows whose model is built after their death event was drained.
+    // [orig: Entity_RaycastCollisionModel @ 0x413086]
+    PF_HUSK,
+    // Six Q16 CTRL words evaluated by the native destruction clock.
+    PF_OBJECT_DESTROY,
+    PF_OBJECT_DESTROY01,
+    PF_OBJECT_DESTROY02,
+    PF_OBJECT_DESTROY03,
+    PF_OBJECT_DESTROY04,
+    PF_OBJECT_DESTROY05,
 	PF_STRIDE
 };
 

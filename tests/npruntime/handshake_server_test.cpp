@@ -1067,53 +1067,37 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	const std::string scrk =
 			"FSMCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
 
-	// The 1.7.5.7 host validates these NapiNetConfig values before allocating a
-	// connection. They are binary literals, not negotiable host settings.
-	{
+	// These literals are checked at game JOIN, after the NP connection exists.
+	struct BadField { const char *name; const char *value; uint32_t reason; };
+	for (const BadField bad : {
+			BadField{"BN", "0", 2}, {"VN", "3", 3}, {"MBN", "20042001", 4},
+			{"SOPD", "179", 8}, {"BT", "1", 6}, {"BT", "2", 7}, {"", "", 2}}) {
 		inmatch::NapiNPServerCtx ctx;
-		inmatch::test::bring_up_host(
-				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
-		struct BadField {
-			const char *name;
-			const char *value;
-		};
-		for (const BadField bad : {
-					BadField{"BN", "0"},
-					BadField{"VN", "3"},
-					BadField{"MBN", "20042001"},
-					BadField{"SOPD", "179"},
-					BadField{"BT", "1"},
-				}) {
-			ClientAuth auth = make_valid_client_auth(
-					1, 0xA0000000u, kHostKey, "BadEnvironment", scrk);
-			// LoadFromConnTags is an ordered overwrite; the final duplicate is
-			// the value Server_ValidatePlayerJoinRequest observes.
-			auth.cu.push_back(make_client_cu_chunk(2, bad.name, bad.value));
-			const PeerAddr peer{
-					0x0100007Fu,
-					static_cast<uint16_t>(31300 + (bad.name[0] + bad.name[1]))};
-			auto dg = craft(
-					SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
-			auto result = inmatch::handle_server_datagram(
-					ctx, peer, dg.data(), dg.size(), 1);
-			if (!expect(
-						result.outbound.empty() && inmatch::connection_count(ctx) == 0,
-						"invalid retail game-environment literal is rejected before allocation")) {
-				return false;
-			}
-		}
-
-		ClientAuth missing = make_jointoperations_client_auth(
-				1, 0xA0000001u, kHostKey, "MissingEnvironment", scrk);
-		auto dg = craft(
-				SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(missing));
-		auto result = inmatch::handle_server_datagram(
-				ctx, PeerAddr{0x0100007Fu, 31320}, dg.data(), dg.size(), 2);
-		if (!expect(
-					result.outbound.empty() && inmatch::connection_count(ctx) == 0,
-					"missing required game-environment literals is rejected before allocation")) {
-			return false;
-		}
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey);
+		ClientAuth auth = make_valid_client_auth(1, 0xA0000000u,
+				kHostKey, "BadEnvironment", scrk);
+		if (*bad.name) auth.cu.push_back(make_client_cu_chunk(2, bad.name, bad.value));
+		else auth.cu.clear();
+		const PeerAddr peer{0x0100007Fu, 31300};
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		auto result = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		if (!expect(result.outbound.size() == 2 && inmatch::connection_count(ctx) == 1,
+				"CU compatibility values do not reject the 0x42 handshake")) return false;
+		replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
+		auto &conn = ctx.np_protocol.connection_list.front();
+		conn.link.transport = &transport;
+		dg = craft_session(scrk, conn.server_sk, 1,
+				{make_protocol_message(0x00, retail_join_request(ctx.config.expansion))});
+		result = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 2);
+		replication::Datagram staged;
+		DisconnectEvent event;
+		if (!expect(result.outbound.empty() && inmatch::connection_count(ctx) == 1 &&
+				conn.admission_stage == inmatch::GameAdmissionStage::Rejected &&
+				transport.pop_outbound(staged) && parse_disconnect_event(staged.body.data(), staged.body.size(), event) &&
+				event.ds == 1 && event.dc == 2 && event.dpc == bad.reason,
+				"game JOIN retains the connection and stages the exact compatibility DPC")) return false;
+		conn.link.transport = nullptr;
 	}
 
 	// A form post cannot skip the JOIN request. The protocol violation tears
@@ -1395,9 +1379,44 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	return true;
 }
 
+bool run_expansion_join_reasons_and_tlv_order() {
+	inmatch::GameConfig config;
+	config.expansion = "jox01";
+	config.expansion_version_checksum = 55;
+	auto drive = [&](std::vector<uint8_t> payload, uint32_t reason) {
+		std::vector<inmatch::NapiNPConnection> roster(1);
+		auto &conn = roster.front();
+		conn.type = inmatch::NapiNPConnection::kTypeServerSide;
+		conn.admission_stage = inmatch::GameAdmissionStage::AwaitJoinRequest;
+		conn.join_environment = {0, 2, 1, 20042002, 180};
+		replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
+		conn.link.transport = &transport;
+		auto replies = inmatch::dispatch_session_replies(config, conn,
+				{make_protocol_message(0x00, std::move(payload))}, 1, roster, nullptr);
+		conn.link.transport = nullptr;
+		if (reason == 0) return expect(replies.size() == 1 && replies[0].tag == 0,
+				"ordered JOIN fields acknowledge the final compatible expansion and CRC");
+		replication::Datagram staged;
+		DisconnectEvent event;
+		return expect(replies.empty() && transport.pop_outbound(staged) &&
+				parse_disconnect_event(staged.body.data(), staged.body.size(), event) &&
+				event.dpc == reason && event.ds == 1 && event.dc == 2,
+				"expansion mismatch returns its exact game-layer rejection description");
+	};
+	if (!drive(retail_join_request("wrong", "wrong"), 47)) return false;
+	if (!drive(retail_join_request("jox01", "0"), 48)) return false;
+	if (!drive(retail_join_request("jox01", "55"), 0)) return false;
+	std::vector<uint8_t> ordered = retail_join_request("wrong", "1");
+	const auto last = retail_join_request("jox01", "55suffix");
+	ordered.insert(ordered.end(), last.begin(), last.end());
+	ordered.insert(ordered.end(), {'C', 'D', 0, 3, 0, 4, 5, 6}); // unknown binary value
+	ordered.insert(ordered.end(), {'s', 'h', 'o', 'r', 't'}); // stop, retain preceding fields
+	return drive(std::move(ordered), 0);
+}
+
 bool run_non_jo_peer_is_ignored() {
 	// The join legs validate the complete retail JO identity + HK echo (the @0x6213b0/@0x62b750
-	// gates). Any mismatched version field is silently dropped with no reply and no connection.
+	// gates). The four identity fields fail silently; server-side rejects have their own test.
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 31000};
@@ -1452,23 +1471,88 @@ bool run_non_jo_peer_is_ignored() {
 		auth = make_valid_client_auth(1, 0xDEADBEEFu, kHostKey, "TestJoiner", scrk);
 		auth.pv1 = "wrong";
 		if (!reject_auth(auth, 8, "wrong-PV1 0x42 is dropped")) return false;
-		auth = make_valid_client_auth(1, 0xDEADBEEFu, kHostKey, "TestJoiner", scrk);
-		auth.pv2 = "wrong";
-		if (!reject_auth(auth, 9, "wrong-PV2 0x42 is dropped")) return false;
-		auth = make_valid_client_auth(1, 0xDEADBEEFu, kHostKey, "", scrk);
-		if (!reject_auth(auth, 10, "empty-NA 0x42 is dropped")) return false;
-	}
-	// (c) JO ClientAuth with the WRONG host key -> dropped (HK echo gate).
-	{
-		auto dg = craft_auth("JOINTOPERATIONS", kHostKey ^ 0x1u, 0xDEADBEEFu, scrk);
-		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 11);
-		if (!expect(r.outbound.empty(), "wrong-HK 0x42 produces no ServerAuth")) return false;
-		if (!expect(inmatch::connection_count(ctx) == 0, "wrong-HK 0x42 registers no connection")) return false;
 	}
 	return true;
 }
 
 // A live handshake against a host that was NOT brought up (host_running == 0) is rejected.
+bool run_client_join_rejects_match_retail() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	config.server_password = "Secret";
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+			inmatch::SocketMode::Lan, kHostKey, nullptr, config);
+	const PeerAddr peer{0x0100007Fu, 31340};
+	ClientAuth auth = make_valid_client_auth(1, 0x98761234u, kHostKey,
+			"PasswordJoiner", "CLIENTPASSWORDSCRK");
+	auth.pw = "sEcReT";
+	auto send = [&](const ClientAuth &request) {
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(request));
+		return inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+	};
+	auto rejected = [&](const ClientAuth &request, uint32_t family, uint32_t reason = 0) {
+		auto result = send(request);
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ServerAuth reply;
+		return expect(result.outbound.size() == 1 &&
+				nw_decode_inbound(result.outbound[0].data(), result.outbound[0].size(), opcode, body) &&
+				opcode == SESSION_OPCODE_SERVER_AUTH &&
+				parse_server_auth(body.data(), body.size(), reply) && reply.cr == 0 &&
+				reply.ci == request.ci && reply.ck == request.ck &&
+				reply.jfc == family && reply.jfp == reason && reply.sk == 0 && reply.scrk.empty(),
+				"rejected 0x42 returns the retail family/reason and echoes client identity");
+	};
+	ClientAuth bad = auth;
+	bad.hk ^= 1;
+	bad.pw.clear();
+	if (!rejected(bad, 3)) return false; // HK precedes password.
+	bad = auth;
+	bad.pw.clear();
+	bad.pv2 = "wrong";
+	if (!rejected(bad, 4)) return false; // Password precedes PV2.
+	bad = auth;
+	bad.pv2 = "wrong";
+	bad.na.clear();
+	if (!rejected(bad, 7)) return false; // PV2 precedes name.
+	bad = auth;
+	bad.na.clear();
+	ctx.np_protocol.reject_new_connections = true;
+	if (!rejected(bad, 5) || !rejected(auth, 6)) return false;
+	ctx.np_protocol.reject_new_connections = false;
+	bad = auth;
+	bad.cu = {std::vector<uint8_t>(2048)};
+	bad.pn.clear();
+	if (!rejected(bad, 9)) return false; // CU bounds precede identity.
+	bad.cu.assign(65, std::vector<uint8_t>{1});
+	if (!rejected(bad, 10)) return false;
+	ctx.join_locked = true;
+	ctx.banned_join_addresses.push_back(0x88776655u);
+	auth.sip = 0x88776655u;
+	if (!rejected(auth, 14, 2)) return false;
+	ctx.join_locked = false;
+	if (!rejected(auth, 14, 3)) return false;
+	auth.sip = 0;
+	if (!expect(inmatch::connection_count(ctx) == 0, "rejected joins allocate no connection")) return false;
+	const auto accepted = send(auth);
+	if (!expect(accepted.outbound.size() == 2 && inmatch::connection_count(ctx) == 1,
+			"case-insensitive server password admits the join")) return false;
+	const uint32_t saved_key = ctx.np_protocol.connection_list.front().server_sk;
+	bad = auth;
+	bad.ci += 1;
+	bad.pw = "wrong";
+	if (!rejected(bad, 4)) return false;
+	if (!expect(inmatch::connection_count(ctx) == 1 &&
+			ctx.np_protocol.connection_list.front().server_sk == saved_key,
+			"failed password cannot tear down a live same-address connection")) return false;
+	ctx.join_locked = true;
+	const auto retry = send(auth);
+	return expect(retry.outbound.size() == 2 &&
+			ctx.np_protocol.connection_list.front().server_sk == saved_key,
+			"an authenticated retry precedes the callback lock and retains its keys");
+}
+
 bool run_handshake_rejected_when_host_down() {
 	inmatch::NapiNPServerCtx ctx;
 	if (!expect(ctx.np_protocol.host_running == 0, "host not running before create_session")) return false;
@@ -2128,6 +2212,7 @@ bool run_spectator_admission_codes_match_retail() {
 		conn.type = inmatch::NapiNPConnection::kTypeServerSide;
 		conn.phase = inmatch::ConnectionPhase::Joined;
 		conn.admission_stage = inmatch::GameAdmissionStage::AwaitJoinRequest;
+		conn.join_environment = {0, 2, 1, 20042002, 180};
 		conn.join_spectator_request = spectator_request;
 		conn.join_spectator_password = std::move(password);
 		return conn;
@@ -2985,6 +3070,8 @@ int main() {
 	ok = run_inactive_peer_is_reaped() && ok;
 	ok = run_game_environment_and_admission_fsm_are_enforced() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
+	ok = run_expansion_join_reasons_and_tlv_order() && ok;
+	ok = run_client_join_rejects_match_retail() && ok;
 	ok = run_handshake_rejected_when_host_down() && ok;
 	ok = run_lan_discovery_metadata_is_live_and_stateless() && ok;
 	ok = run_listen_host_lifecycle() && ok;

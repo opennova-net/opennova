@@ -62,6 +62,7 @@ enum class SocketMode : uint32_t {
 // [orig: g_napi_np_ctx.np_protocol @+0xE5C] NapiNPProtocol (§6.5) — the host state block reached
 // from the singleton. Only the fields the in-match runtime needs now are modeled; offsets cited.
 struct NapiNPProtocol {
+	bool reject_new_connections = false; // [orig +0x1F7, JFC6 @0x62be8f]
 	uint32_t server_flags = 0;          // [orig +0x500] P1 TLV (server config flag word)
 	uint32_t build_flags = 0;           // [orig +0x504] P2 TLV (CNapiServerConfig_BuildFlags)
 	uint32_t max_players = 1;           // [orig +0x524] MP TLV; clamped 1..251
@@ -116,6 +117,10 @@ struct NapiNPServerCtx {
 	// The ONE consolidated server-state config (ADR 0013 / §6.9): §6.4 identity + the §6.9 rule globals
 	// (S2C 0x08) + the §5.1 reactive-reply mission/player/spawn. Merged from the former game_settings +
 	// rules + session_config. Seeded by create_session (see server_session.h).
+	// Live admission controls. The IP ban compares the 0x42-reported SIP.
+	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0]
+	bool join_locked = false;
+	std::vector<uint32_t> banned_join_addresses;
 	GameConfig config;             // [orig g_napi_np_ctx.game_settings @+0xE68 + the scattered g_* rule globals]
 	NapiNPProtocol np_protocol;    // [orig +0xE5C] (pointer in the original; embedded here)
 

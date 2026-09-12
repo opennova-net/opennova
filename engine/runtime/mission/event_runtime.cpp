@@ -158,7 +158,7 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                 case bms::SingleTriggerType::SingleAlive:
                     return cmds.ssn_alive(static_cast<uint16_t>(t.param1));
                 case bms::SingleTriggerType::SingleIsWithinArea:
-                    return cmds.ssn_in_area(static_cast<uint16_t>(t.param1), t.param2);
+                    return cmds.ssn_in_area(t.param1, t.param2);
                 // The 2026-08-13 grill closed the rest of the cat-2 switch
                 // (record §3b): every helper's RAW sense is positive — the
                 // negated flavor of these enum names is authoring-display
@@ -254,20 +254,9 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     // Visited matrix B: row = group, cell = list p2, bit = p3
                     // [orig: 0xAD86F8; record §3a sub 7].
                     return rel.group_visited(t.param1, t.param2, t.param3);
-                case bms::GroupTriggerType::GroupIsWithinArea: {
-                    // Any live member inside zone p2 [orig: @ 0x453763 ->
-                    // Entity_IsTeamInTriggerBounds @ 0x43c730].
-                    const opennova::world::Area *a = w.registry.area(t.param2);
-                    if (a == nullptr) return false;
-                    std::vector<opennova::world::EntityHandle> members;
-                    w.registry.by_group(static_cast<uint8_t>(t.param1), members);
-                    for (opennova::world::EntityHandle h : members) {
-                        const opennova::world::Entity *e = w.registry.get(h);
-                        if (e != nullptr && e->alive && a->bounds.contains(e->position))
-                            return true;
-                    }
-                    return false;
-                }
+                case bms::GroupTriggerType::GroupIsWithinArea:
+                    // [orig: group-area trigger dispatch @0x453763]
+                    return cmds.group_in_area(t.param1, t.param2);
                 case bms::GroupTriggerType::GroupHoldingGroup:
                     // Any pool-0 member of group p1 carrying an object of
                     // group p2 via the mounted_child link. Match owns the

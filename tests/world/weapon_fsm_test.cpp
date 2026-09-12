@@ -1103,8 +1103,124 @@ void test_submerging_clears_the_heat_window() {
     CHECK(s2.heat_window_end_tick == 500); // the window survives
 }
 
+
+void test_weapon_level_sound_and_kick_gate() {
+    for (bool with_loop : {false, true}) {
+        WeaponFsmDef def = make_ak_def();
+        def.actions[wa::kFire].delay_end = 0;
+        if (with_loop) std::snprintf(def.soundfireloop, sizeof(def.soundfireloop), "mini_start");
+        std::snprintf(def.soundhead, sizeof(def.soundhead), "mini_head");
+        std::snprintf(def.soundtrailoff, sizeof(def.soundtrailoff), "mini_end");
+        WeaponSlotState slot = make_ak_slot();
+        WeaponFsmInputs in;
+        WeaponFsmEvents out;
+        in.fire_pressed = true;
+        weapon_fsm_tick(def, slot, in, out);
+        CHECK(out.fired);
+        CHECK(out.head_started);
+        CHECK(slot.kick == (with_loop ? 20 : 10));
+        in.fire_pressed = false;
+        weapon_fsm_tick(def, slot, in, out);
+        CHECK(!out.head_started);
+        CHECK(out.fireloop_lifetime_ticks == (with_loop ? 19 : 0));
+        slot.current = wa::kIdle;
+        weapon_fsm_tick(def, slot, in, out);
+        CHECK(out.trailoff_started);
+        CHECK(out.fireloop_lifetime_ticks == 0);
+        CHECK(slot.kick == 0);
+        weapon_fsm_tick(def, slot, in, out);
+        CHECK(!out.trailoff_started);
+    }
+}
+
+
+void test_can_fire_owner_and_pool_gates() {
+    WeaponFsmDef def = make_ak_def();
+    WeaponSlotState slot = make_ak_slot();
+    WeaponFsmInputs in;
+    in.head_submerged = true;
+    CHECK(!weapon_fsm_can_fire(def, slot, in));
+    CHECK(slot.next == wa::kEmptyIdle);
+    def.flags |= weapon_flag::kUnderwater;
+    CHECK(!weapon_fsm_can_fire(def, slot, in)); // swimming and underwater are separate gates
+    def.flags |= weapon_flag::kFireWhileSwimming;
+    CHECK(weapon_fsm_can_fire(def, slot, in));
+    in.head_submerged = false;
+    in.drowning = true;
+    def.flags = weapon_flag::kUnderwater;
+    CHECK(!weapon_fsm_can_fire(def, slot, in));
+    in.drowning = false;
+    in.protected_carrier = true;
+    slot.next = wa::kReload;
+    CHECK(!weapon_fsm_can_fire(def, slot, in));
+    CHECK(slot.next == wa::kReload); // the early carrier return does not rewrite next
+    in.protected_carrier = false;
+    slot.clip = -1;
+    CHECK(weapon_fsm_can_fire(def, slot, in));
+    slot.clip = 0;
+    slot.reserve = -1;
+    CHECK(!weapon_fsm_can_fire(def, slot, in));
+    CHECK(slot.next == wa::kRecoil);
+    def.clip_capacity = -1;
+    def.ammo_cost = 2;
+    CHECK(weapon_fsm_can_fire(def, slot, in)); // negative pool sentinel
+    slot.reserve = 1;
+    CHECK(!weapon_fsm_can_fire(def, slot, in));
+    slot.reserve = 2;
+    CHECK(weapon_fsm_can_fire(def, slot, in));
+    slot.reserve = 0;
+    in.ignore_ammo_cost = true;
+    CHECK(weapon_fsm_can_fire(def, slot, in));
+}
+
+void test_received_action_kick_and_signed_loop_lifetime() {
+    WeaponFsmDef def;
+    std::strcpy(def.soundhead, "HEAD");
+    std::strcpy(def.soundfireloop, "LOOP");
+    std::strcpy(def.soundtrailoff, "TAIL");
+    def.clip_capacity = -1;
+    def.heat_per_shot = 100;
+    def.heat_decay_per_tick = 10;
+    WeaponSlotState slot;
+    slot.current = wa::kFire;
+    slot.next = wa::kIdle;
+    slot.phase = weapon_phase::kHeld;
+    WeaponFsmEvents event;
+    weapon_fsm_replay_action(def, slot, 100, event);
+    CHECK(event.head_started && slot.kick == 66);
+    weapon_fsm_replay_action(def, slot, 100, event);
+    CHECK(!event.head_started && slot.kick == 82);
+    CHECK(slot.current == wa::kFire && slot.next == wa::kIdle &&
+            slot.phase == weapon_phase::kHeld && slot.heat_window_end_tick == 0);
+    WeaponFsmInputs input;
+    input.is_local = false;
+    input.current_tick = 100;
+    weapon_fsm_tick(def, slot, input, event);
+    CHECK(event.fireloop_lifetime_ticks == 81 && !event.fired && slot.current == wa::kIdle);
+    weapon_fsm_tick(def, slot, input, event);
+    CHECK(event.trailoff_started && slot.kick == 0 && event.fireloop_lifetime_ticks == 0);
+
+    slot = {};
+    slot.current = slot.next = wa::kFire;
+    slot.phase = weapon_phase::kDone;
+    slot.counter = 3;
+    slot.kick = 200;
+    weapon_fsm_tick(def, slot, input, event);
+    CHECK(slot.kick == 199 && event.fireloop_lifetime_ticks == -57);
+    input.owner_present = false;
+    slot.current = wa::kIdle;
+    weapon_fsm_tick(def, slot, input, event);
+    CHECK(slot.kick == 198 && !event.trailoff_started && event.fireloop_lifetime_ticks == 0);
+    slot.current = wa::kRecoil;
+    weapon_fsm_replay_action(def, slot, 100, event);
+    CHECK(slot.heat_window_end_tick == 111 && slot.kick == 198);
+}
+
 int main() {
+    test_received_action_kick_and_signed_loop_lifetime();
     test_ticks_from_ms();
+    test_can_fire_owner_and_pool_gates();
+    test_weapon_level_sound_and_kick_gate();
     test_sights_card_eligibility();
     test_bake();
     test_bake_ring_read_multiplicity();

@@ -42,7 +42,7 @@ public:
 	void host_send(uint8_t tag, std::vector<uint8_t> body,
 			bool reliable = true,
 			uint8_t protocol_flags_raw = 0,
-			bool capacity_exempt = false) override; // -> outbound (S2C)
+			bool capacity_exempt = false, uint32_t retention_flushes = 0) override; // -> outbound (S2C)
 	void client_send(uint8_t tag, std::vector<uint8_t> body) override; // -> outbound (C2S)
 	bool host_recv(Datagram &out) override;   // <- inbound (C2S, host endpoint)
 	bool client_recv(Datagram &out) override; // <- inbound (S2C, client endpoint)

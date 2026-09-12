@@ -211,7 +211,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		if (needs_join_connection && join_target.is_valid() && !sim_->enable_join(
 				join_target->get_host_ip(), join_target->get_port(),
 				join_target->get_player_name(), join_target->get_join_role(),
-				join_target->get_spectator_password())) {
+				join_target->get_spectator_password(), join_target->get_server_password())) {
 			UtilityFunctions::push_warning(vformat(
 					"MissionRoot: could not dial co-op host %s:%d — joiner disabled.",
 					join_target->get_host_ip(), join_target->get_port()));

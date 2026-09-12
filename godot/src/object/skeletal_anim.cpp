@@ -467,6 +467,12 @@ int SkeletalAnim::get_clip_frame_count(const String &p_key, int p_variant) const
 	return c != nullptr ? static_cast<int>(c->clip.frame_count) : 0;
 }
 
+double SkeletalAnim::get_clip_phase_seconds(const String &p_key, int p_ticks,
+                                              int p_variant) const {
+	const LoadedClip *c = find_clip_variant(p_key, p_variant);
+	return c ? c->clip.playback().seconds_at(p_ticks) : 0.0;
+}
+
 float SkeletalAnim::get_clip_fps(const String &p_key, int p_variant) const {
 	const LoadedClip *c = find_clip_variant(p_key, p_variant);
 	return c != nullptr ? static_cast<float>(c->clip.fps) : 0.0f;
@@ -855,6 +861,8 @@ void SkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_clip_variant_count", "key"), &SkeletalAnim::get_clip_variant_count);
 	ClassDB::bind_method(D_METHOD("get_clip_variant_lengths", "key"), &SkeletalAnim::get_clip_variant_lengths);
 	ClassDB::bind_method(D_METHOD("get_clip_frame_count", "key", "variant"), &SkeletalAnim::get_clip_frame_count, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_clip_phase_seconds", "key", "ticks", "variant"),
+			&SkeletalAnim::get_clip_phase_seconds, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_clip_fps", "key", "variant"), &SkeletalAnim::get_clip_fps, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_clip_length", "key", "variant"), &SkeletalAnim::get_clip_length, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("is_clip_looping", "key", "variant"), &SkeletalAnim::is_clip_looping, DEFVAL(0));

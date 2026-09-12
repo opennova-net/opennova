@@ -1,4 +1,5 @@
 #include "network/host_session_options.h"
+#include <runtime/inmatch/host_settings.h>
 
 using namespace godot;
 
@@ -15,6 +16,10 @@ std::string to_std(const String &s) { return std::string(s.utf8().get_data()); }
 		config_.m_name = to_std(p_value);                                               \
 	}
 HOST_SESSION_TEXT_IMPL(server_name)
+HOST_SESSION_TEXT_IMPL(server_password)
+HOST_SESSION_TEXT_IMPL(side_a_password)
+HOST_SESSION_TEXT_IMPL(side_b_password)
+HOST_SESSION_TEXT_IMPL(country)
 HOST_SESSION_TEXT_IMPL(mission_name)
 HOST_SESSION_TEXT_IMPL(mission_file)
 HOST_SESSION_TEXT_IMPL(custom_text)
@@ -129,12 +134,55 @@ Dictionary HostSessionOptions::to_json_value() const {
 	return out;
 }
 
+int HostSessionOptions::get_player_slot_limit() const {
+	return static_cast<int>(opennova::inmatch::host_player_slot_limit(max_players_, serve_and_play_));
+}
+
+PackedStringArray HostSessionOptions::dialog_controls() {
+	PackedStringArray result;
+	for (const auto name : opennova::inmatch::host_dialog_controls())
+		result.push_back(String::utf8(name.data(), static_cast<int64_t>(name.size())));
+	return result;
+}
+
+bool HostSessionOptions::apply_dialog_control(const String &p_control, const String &p_value) {
+	return opennova::inmatch::apply_host_dialog_control(config_, max_players_,
+			serve_and_play_, to_std(p_control), to_std(p_value));
+}
+
+Ref<HostSessionOptions> HostSessionOptions::duplicate_options() const {
+	Ref<HostSessionOptions> copy;
+	copy.instantiate();
+	copy->config_ = config_;
+	copy->bind_port_ = bind_port_;
+	copy->max_players_ = max_players_;
+	copy->serve_and_play_ = serve_and_play_;
+	copy->game_type_auto_ = game_type_auto_;
+	copy->game_root_ = game_root_;
+	copy->dir_ = dir_;
+	copy->nw_gate_host_ = nw_gate_host_;
+	copy->nw_gate_port_ = nw_gate_port_;
+	copy->region_ = region_;
+	copy->advertise_ = advertise_;
+	return copy;
+}
+
 void HostSessionOptions::_bind_methods() {
 #define HOST_SESSION_PROPERTY(m_variant, m_name)                                                    \
 	ClassDB::bind_method(D_METHOD("get_" #m_name), &HostSessionOptions::get_##m_name);              \
 	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &HostSessionOptions::set_##m_name);     \
 	ADD_PROPERTY(PropertyInfo(m_variant, #m_name), "set_" #m_name, "get_" #m_name);
 	HOST_SESSION_PROPERTY(Variant::STRING, server_name)
+	HOST_SESSION_PROPERTY(Variant::STRING, server_password)
+	HOST_SESSION_PROPERTY(Variant::STRING, side_a_password)
+	HOST_SESSION_PROPERTY(Variant::STRING, side_b_password)
+	HOST_SESSION_PROPERTY(Variant::STRING, country)
+	HOST_SESSION_PROPERTY(Variant::INT, server_punkbuster)
+	HOST_SESSION_PROPERTY(Variant::INT, server_lan_only)
+	HOST_SESSION_PROPERTY(Variant::INT, connection_speed)
+	HOST_SESSION_PROPERTY(Variant::INT, max_friendly_kills)
+	HOST_SESSION_PROPERTY(Variant::INT, allow_ai)
+	HOST_SESSION_PROPERTY(Variant::INT, time_of_day_continuity)
 	HOST_SESSION_PROPERTY(Variant::STRING, mission_name)
 	HOST_SESSION_PROPERTY(Variant::STRING, mission_file)
 	HOST_SESSION_PROPERTY(Variant::STRING, custom_text)
@@ -186,4 +234,9 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::STRING, advertise)
 #undef HOST_SESSION_PROPERTY
 	ClassDB::bind_method(D_METHOD("to_json_value"), &HostSessionOptions::to_json_value);
+	ClassDB::bind_static_method("HostSessionOptions", D_METHOD("dialog_controls"), &HostSessionOptions::dialog_controls);
+	ClassDB::bind_method(D_METHOD("apply_dialog_control", "control", "value"), &HostSessionOptions::apply_dialog_control);
+	ClassDB::bind_method(D_METHOD("duplicate_options"), &HostSessionOptions::duplicate_options);
+	ClassDB::bind_method(D_METHOD("get_player_slot_limit"), &HostSessionOptions::get_player_slot_limit);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "player_slot_limit"), "", "get_player_slot_limit");
 }

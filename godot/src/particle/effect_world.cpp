@@ -53,6 +53,7 @@ AABB godot_aabb(const opennova::renderer::ParticleAabb &bounds) {
 EffectWorld::EffectWorld() {
 	scene_.instantiate();
 	load_report_ = scene_->open(TypedArray<ParticleFile>());
+    scene_->shared_native_scene()->set_spawn_enabled(!particles_disabled_);
 }
 
 void EffectWorld::_notification(int p_what) {
@@ -134,6 +135,7 @@ int EffectWorld::interned_count() const {
 
 void EffectWorld::set_particles_hidden(bool p_hidden) {
 	particles_disabled_ = p_hidden;
+    scene_->shared_native_scene()->set_spawn_enabled(!p_hidden);
 	set_visible(!p_hidden);
 	_ensure_renderer()->set_hidden(p_hidden);
 }
@@ -204,6 +206,7 @@ void EffectWorld::load_particle_file(const Ref<ParticleFile> &p_file) {
 void EffectWorld::_open_files() {
 	scene_.instantiate();
 	load_report_ = scene_->open(files_);
+    scene_->shared_native_scene()->set_spawn_enabled(!particles_disabled_);
 	ParticleRenderer *renderer = _ensure_renderer();
 	renderer->set_scene(scene_);
 	renderer->set_texture_provider(texture_provider_);
@@ -228,6 +231,7 @@ void EffectWorld::clear_world() {
 	}
 	scene_.instantiate();
 	load_report_ = scene_->open(TypedArray<ParticleFile>());
+    scene_->shared_native_scene()->set_spawn_enabled(!particles_disabled_);
 	ParticleRenderer *renderer = _ensure_renderer();
 	renderer->set_scene(scene_);
 	renderer->set_texture_provider(texture_provider_);
@@ -512,6 +516,10 @@ bool EffectWorld::spawn_effect_by_handle(int64_t p_handle, const Vector3 &p_posi
 			EffectSpawnRequest::make(p_handle, forward_pose(p_position, p_orientation));
 	request->set_kill_plane_y(water_height_);
 	return scene_->spawn(request)->get_spawned();
+}
+
+std::shared_ptr<opennova::particle::EffectScene> EffectWorld::shared_native_scene() const {
+    return scene_->shared_native_scene();
 }
 
 void EffectWorld::stop_group(int64_t p_group_id) {

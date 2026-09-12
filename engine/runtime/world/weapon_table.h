@@ -42,8 +42,8 @@ struct WeaponTableEntry {
     int16_t ammo_class_count = 0;
     int16_t ammo_bucket = 0;        // [orig: @0x544045]
     // The fired round: `round_type "AMMO_X"`, resolved to an AmmoTable index at load —
-    // the original stores the resolved index pair at adm+84 (RoundData_AddRound reads
-    // adm dword 21) [orig: §5.60; resolve = AmmoDef_LookupByName]. -1 = unresolved.
+    // the original stores the resolved ammo index at adm+4
+    // (adm+84 is statid) [orig: §5.60; resolve = AmmoDef_LookupByName]. -1 = unresolved.
     std::string round_type;
     int16_t ammo_index = -1;
     // The floating attach-label text key (emplaced guns/turrets). The original resolves
@@ -52,6 +52,7 @@ struct WeaponTableEntry {
     // the STROVER_USEGUN default label. [orig: @0x544d6c parse; consumer
     // draw_vehicle_seat_and_armory_labels @0x5a3538]
     std::string attach_text_id;
+    std::string voice_macro_token; // [orig: WeaponDefs_ParseLineCallback @0x543C29]
     // The two FLAGS dwords [orig: AdmDef+8 / AdmDef+12; token table @0x830bf0].
     // The switch/select paths read: flags bit 0x8000000 = the binoculars slot marker
     // [orig: WeaponSlotTable_LoadAllFromDefs tail @0x54165a]; flags2 bit 1 = NoSelect

@@ -124,7 +124,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	join_preload_sim_->set_join_cd_cookie(p_target->get_cd_cookie());
 	if (!join_preload_sim_->enable_join(p_target->get_host_ip(), p_target->get_port(),
 				p_target->get_player_name(), p_target->get_join_role(),
-				p_target->get_spectator_password())) {
+				p_target->get_spectator_password(), p_target->get_server_password())) {
 		join_preload_sim_.unref();
 		clear_pending_session();
 		world_->emit_signal(kSignalLoadFailed, "join: could not open the LAN session socket");

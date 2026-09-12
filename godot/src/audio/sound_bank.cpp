@@ -42,9 +42,8 @@ void SoundBank::_bind_methods() {
 			&SoundBank::spawn_ambient);
 	ClassDB::bind_method(
 			D_METHOD("play_oneshot_3d", "parent", "world_pos", "name", "bus", "listener_pos",
-					"source_bms_id", "exclusive_key"),
-			&SoundBank::play_oneshot_3d, DEFVAL(Vector3(INFINITY, INFINITY, INFINITY)), DEFVAL(0),
-			DEFVAL(String()));
+					"source_bms_id"),
+			&SoundBank::play_oneshot_3d, DEFVAL(Vector3(INFINITY, INFINITY, INFINITY)), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("spawn_oneshot_2d", "parent", "name", "bus"),
 			&SoundBank::spawn_oneshot_2d);
 	ClassDB::bind_static_method("SoundBank", D_METHOD("effective_base_pitch", "base_pitch"),
@@ -220,25 +219,10 @@ int64_t SoundBank::occlusion_trampoline(void *p_ctx, const float p_listener[3],
 }
 
 bool SoundBank::play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
-		const StringName &p_bus, const Vector3 &p_listener_pos, int p_source_bms_id,
-		const String &p_exclusive_key) {
+		const StringName &p_bus, const Vector3 &p_listener_pos, int p_source_bms_id) {
 	const opennova::audio::SetLocation loc = _find_set(p_name);
 	if (!loc.valid() || p_parent == nullptr) {
 		return false;
-	}
-	// Exclusive one-shots: a non-empty key declines to RESTART the set while its
-	// previous voice still plays. Reimpl stand-in for the engine folding every-tick
-	// refires (chute flap / freefall retrigger each body tick) into its finite
-	// channel pool -- audibly one continuous sound either way (audio doc D-SND-10).
-	if (!p_exclusive_key.is_empty()) {
-		// A queue_freed voice may still sit in the table: resolve before typing.
-		const ObjectID *prev_id = exclusive_.getptr(p_exclusive_key);
-		if (prev_id != nullptr) {
-			AudioStreamPlayer3D *prev = Object::cast_to<AudioStreamPlayer3D>(ObjectDB::get_instance(*prev_id));
-			if (prev != nullptr && prev->is_playing()) {
-				return false;
-			}
-		}
 	}
 	const opennova::lwf::File &bank = _bank_at(loc);
 	const bool has_listener = p_listener_pos.is_finite();
@@ -255,7 +239,7 @@ bool SoundBank::play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, co
 	const opennova::audio::OneshotPlan plan = opennova::audio::plan_oneshot_3d(bank, loc, world,
 			listener, has_listener, p_source_bms_id,
 			has_provider ? &SoundBank::occlusion_trampoline : nullptr, &ctx, selector_);
-    return _play_oneshot_plan(p_parent, p_world_pos, bank, plan, p_bus, p_exclusive_key);
+    return _play_oneshot_plan(p_parent, p_world_pos, bank, plan, p_bus);
 }
 
 bool SoundBank::play_oneshot_at_distance(Node3D *p_parent, const Vector3 &p_pan_position,
@@ -269,16 +253,28 @@ bool SoundBank::play_oneshot_at_distance(Node3D *p_parent, const Vector3 &p_pan_
     return _play_oneshot_plan(p_parent, p_pan_position, bank, plan, p_bus);
 }
 
+namespace {
+bool oneshot_is_playing(Object *object) {
+	if (auto *voice = Object::cast_to<AudioStreamPlayer3D>(object)) return voice->is_playing();
+	if (auto *voice = Object::cast_to<AudioStreamPlayer>(object)) return voice->is_playing();
+	return false;
+}
+void stop_oneshot(Node *node) {
+	if (auto *voice = Object::cast_to<AudioStreamPlayer3D>(node)) voice->stop();
+	if (auto *voice = Object::cast_to<AudioStreamPlayer>(node)) voice->stop();
+	if (node) node->queue_free();
+}
+} // namespace
+
 void SoundBank::reset_oneshots(Node3D *p_parent) {
-    oneshots_.erase(std::remove_if(oneshots_.begin(), oneshots_.end(), [&](ObjectID id) {
-        auto *player = Object::cast_to<AudioStreamPlayer3D>(ObjectDB::get_instance(id));
-        if (player == nullptr || player->is_queued_for_deletion()) return true;
-        if (p_parent == nullptr || player->get_parent() != p_parent) return false;
-        player->stop();
-        player->queue_free();
-        return true;
-    }), oneshots_.end());
-    exclusive_.clear();
+    for (size_t slot = 0; slot < oneshots_.size(); ++slot) {
+        auto *player = Object::cast_to<Node>(ObjectDB::get_instance(oneshots_[slot]));
+        if (player && !player->is_queued_for_deletion() &&
+                (!p_parent || player->get_parent() != p_parent)) continue;
+        if (player && !player->is_queued_for_deletion()) stop_oneshot(player);
+        oneshots_[slot] = ObjectID();
+        oneshot_pool_.release(slot);
+    }
     // The per-layer selection state (playlist record cursor +2, anchor +12,
     // cycle bit 0x100) survives a round restart: Game_RestartRoundSP @0x5263A0
     // re-enters Game_StartMission, whose bank loop (Game_StartMission @0x52544A
@@ -287,16 +283,19 @@ void SoundBank::reset_oneshots(Node3D *p_parent) {
     // -> sub_527890 frees the banks. The selector therefore keeps its cursors.
 }
 
-bool SoundBank::_play_oneshot_plan(Node3D *p_parent, const Vector3 &p_world_pos,
+bool SoundBank::_play_oneshot_plan(Node *p_parent, const Vector3 &p_world_pos,
         const opennova::lwf::File &p_bank, const opennova::audio::OneshotPlan &p_plan,
-        const StringName &p_bus, const String &p_exclusive_key) {
+        const StringName &p_bus, bool p_interface) {
     if (!p_plan.in_range) {
         return false;
     }
-    oneshots_.erase(std::remove_if(oneshots_.begin(), oneshots_.end(), [](ObjectID id) {
-        const auto *player = Object::cast_to<AudioStreamPlayer3D>(ObjectDB::get_instance(id));
-        return player == nullptr || player->is_queued_for_deletion();
-    }), oneshots_.end());
+    for (size_t slot = 0; slot < oneshots_.size(); ++slot) {
+        auto *player = Object::cast_to<Node>(ObjectDB::get_instance(oneshots_[slot]));
+        if (!player || player->is_queued_for_deletion() || !oneshot_is_playing(player)) {
+            oneshot_pool_.release(slot);
+            oneshots_[slot] = ObjectID();
+        }
+    }
     bool played = false;
     for (const opennova::audio::OneshotVoice &voice : p_plan.voices) {
         const opennova::lwf::Sndparm &member = p_bank.sndparms[voice.sndparm];
@@ -304,19 +303,41 @@ bool SoundBank::_play_oneshot_plan(Node3D *p_parent, const Vector3 &p_world_pos,
 		if (stream.is_null()) {
 			continue;
 		}
-		AudioStreamPlayer3D *player = _make_player(stream, _member_base_pitch(member), p_bus, false,
-				voice.vol255);
-		player->set_position(p_world_pos);
-        oneshots_.push_back(ObjectID(player->get_instance_id()));
-		p_parent->add_child(player);
-		player->connect("finished", Callable(player, "queue_free"));
-		player->play();
-		if (!p_exclusive_key.is_empty() && !played) {
-			exclusive_[p_exclusive_key] = ObjectID(player->get_instance_id()); // first layer's voice gates the refire
+		const int slot = oneshot_pool_.acquire(stream->get_instance_id(),
+				static_cast<uint8_t>(voice.vol255));
+		if (slot < 0) continue;
+		stop_oneshot(Object::cast_to<Node>(ObjectDB::get_instance(oneshots_[slot])));
+		const double pitch = opennova::lwf::pitch_from_q16(voice.pitch_q16);
+		if (p_interface) {
+			auto *player = memnew(AudioStreamPlayer);
+			player->set_stream(stream);
+			player->set_pitch_scale(effective_base_pitch(pitch));
+			player->set_volume_db(volume_db_from_255(voice.vol255));
+			if (p_bus != StringName() && AudioServer::get_singleton()->get_bus_index(p_bus) >= 0)
+				player->set_bus(p_bus);
+			oneshots_[slot] = ObjectID(player->get_instance_id());
+			p_parent->add_child(player);
+			player->connect("finished", Callable(player, "queue_free"));
+			player->play();
+		} else {
+			AudioStreamPlayer3D *player = _make_player(stream, pitch, p_bus, false, voice.vol255);
+			player->set_position(p_world_pos);
+			oneshots_[slot] = ObjectID(player->get_instance_id());
+			p_parent->add_child(player);
+			player->connect("finished", Callable(player, "queue_free"));
+			player->play();
 		}
 		played = true;
 	}
 	return played;
+}
+
+bool SoundBank::play_interface_oneshot(Node *parent, const String &name, const StringName &bus) {
+	const auto loc = _find_set(name);
+	if (!loc.valid() || !parent) return false;
+	const auto &bank = _bank_at(loc);
+	const auto plan = opennova::audio::plan_oneshot_at_distance(bank, loc, 0, selector_);
+	return _play_oneshot_plan(parent, {}, bank, plan, bus, true);
 }
 
 AudioStreamPlayer *SoundBank::spawn_oneshot_2d(Node *p_parent, const String &p_name,
@@ -347,7 +368,9 @@ AudioStreamPlayer *SoundBank::spawn_oneshot_2d(Node *p_parent, const String &p_n
 		if (p_bus != StringName() && AudioServer::get_singleton()->get_bus_index(p_bus) >= 0) {
 			player->set_bus(p_bus);
 		}
-		player->set_pitch_scale(effective_base_pitch(_member_base_pitch(member)));
+		player->set_pitch_scale(effective_base_pitch(opennova::lwf::pitch_from_q16(
+				selector_.compose_pitch(set.pitch_base, set.pitch_random_range,
+						member.pitch_scaled, member.random_pitch_scaled))));
 		player->set_volume_db(volume_db_from_255(static_cast<int>(member.volume)));
 		player->set_stream(stream);
 		p_parent->add_child(player);
@@ -355,6 +378,14 @@ AudioStreamPlayer *SoundBank::spawn_oneshot_2d(Node *p_parent, const String &p_n
 		return player;
 	}
 	return nullptr;
+}
+
+std::optional<opennova::world::ScriptVoiceChannel::SetSelection>
+SoundBank::select_radio_set(const std::string &name, uint8_t listener_view_flags) {
+	const auto loc = index_.find(name);
+	if (!loc.valid()) return std::nullopt;
+	const auto &bank = _bank_at(loc);
+	return opennova::audio::select_radio_voice(bank, loc, selector_, listener_view_flags);
 }
 
 // --- Internals ---

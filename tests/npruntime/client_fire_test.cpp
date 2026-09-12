@@ -1,3 +1,4 @@
+#include <runtime/world/weapon_fire_gate.h>
 // D-NET-152 — the C2S 0x06 client-fired-round pipeline. The dispatch case must validate the
 // shooter (anti-spoof vs the connection's own entity [orig: @0x51358d]), enforce the clip for
 // armory-known primary fire ("NO AMMO!" reject [orig: @0x50c15c]; decrement [orig:
@@ -270,13 +271,13 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	rifle.category = 3;
 	rifle.rank = 2;
 	rifle.clipsize = 30;
-	rifle.ammo_index = 0;
+	rifle.ammo_index = 1;
 	rifle.valid = true;
-	world.tables.ammo.entries.resize(1);
-	world.tables.ammo.entries[0].name = "REMOTE_POWER_THROW";
-	world.tables.ammo.entries[0].velocity = 620;
-	world.tables.ammo.entries[0].max_age_ticks = 248;
-	world.tables.ammo.entries[0].valid = true;
+	world.tables.ammo.entries.resize(2);
+	world.tables.ammo.entries[1].name = "REMOTE_POWER_THROW";
+	world.tables.ammo.entries[1].velocity = 620;
+	world.tables.ammo.entries[1].max_age_ticks = 248;
+	world.tables.ammo.entries[1].valid = true;
 
 	const PeerAddr peer{0x0100007Fu, 30123};
 	const std::string client_scrk = "CLIENT-REPLAY-SCRK";
@@ -422,7 +423,95 @@ bool check_retail_fire_admission() {
 
 } // namespace
 
+
+bool check_fire_owner_environment_and_origin() {
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    const auto shooter = w::spawn_remote_player(world, player_spawn(1));
+    auto *player = world.registry.get(shooter);
+    world.tables.weapons.entries.resize(2);
+    auto &weapon = world.tables.weapons.entries[1];
+    weapon.valid = true;
+    weapon.clipsize = 4;
+    weapon.category = 1;
+    weapon.ammo_index = 1;
+    weapon.ammo_class_id = 1;
+    ns::UdpSessionTransport udp(ns::UdpSessionTransport::Role::Host);
+    std::vector<inmatch::NapiNPConnection> roster;
+    roster.push_back(make_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
+    auto shoot = [&] {
+        dispatch_fire(roster[0], roster, world,
+                fire_body(shooter.packed, 2, 1, 100 * 65536, 0, 0, 0, 0, 0xFFFF, 1, 0, 0));
+    };
+    player->flags |= 2;
+    shoot();
+    if (!expect(world.out.rounds.count == 0, "dead player cannot fire")) return false;
+    player->flags &= ~2u;
+    weapon.flags = w::weapon_flag::kEmplaced;
+    shoot();
+    if (!expect(world.out.rounds.count == 0, "unmounted emplaced fire rejected")) return false;
+    weapon.flags = 0;
+    world.env.water_z = player->eye_offset_z + 1;
+    shoot();
+    if (!expect(world.out.rounds.count == 0, "submerged head rejects before spending")) return false;
+    world.env.water_z = 0;
+    weapon.clipsize = -1;
+    weapon.ammo_class_count = 2;
+    roster[0].reply.ammo_pools[1] = 1;
+    shoot();
+    if (!expect(world.out.rounds.count == 0, "no-clip weapon still needs its ammo cost")) return false;
+    roster[0].reply.ammo_pools[1] = 2;
+    shoot();
+    if (!expect(world.out.rounds.count == 1, "client action replay skips the distance gate")) return false;
+    // The server's real CanFire path follows groundEntity into a carried
+    // vehicle and its friendly FARP; it does not reject arbitrary busy children.
+    w::Entity farp;
+    farp.has_item_def = true;
+    farp.item_attrib2 = 0x2000;
+    farp.team = 1;
+    const auto farp_handle = world.registry.spawn(1, farp);
+    w::Entity carrier;
+    carrier.has_item_def = true;
+    carrier.item_type = 1;
+    carrier.carry_flags = 0x40;
+    carrier.team = 1;
+    carrier.ground_target = farp_handle;
+    const auto carrier_handle = world.registry.spawn(1, carrier);
+    player->ground_target = carrier_handle;
+    shoot();
+    if (!expect(world.out.rounds.count == 1, "friendly FARP rejects the C2S fire before spending")) return false;
+    player->ground_target = {};
+    weapon.ammo_index = 0;
+    shoot();
+    if (!expect(world.out.rounds.count == 1, "retail zero-index ammo requires Medic attribute")) return false;
+    world.tables.class_attribute_flags[(player->player_class - 1) & 15] = 8;
+    shoot();
+    if (!expect(world.out.rounds.count == 2, "Medic passes the zero-index ammo gate")) return false;
+
+    const w::FixedVec3 inside{2 * 65536, 0, 2 * 65536};
+    const w::FixedVec3 outside{2 * 65536 + 1, 0, 0};
+    if (!expect(w::weapon_fire_origin_status(world, *player, weapon, inside, false) == 0,
+                "on-foot horizontal and vertical limits are independent and inclusive")) return false;
+    if (!expect(w::weapon_fire_origin_status(world, *player, weapon, outside, false) == -17,
+                "direct fire rejects one Q16 unit beyond two meters")) return false;
+    weapon.flags = 0x200;
+    if (!expect(w::weapon_fire_origin_status(world, *player, weapon, outside, false) == 0,
+                "authored range exemption skips direct-fire distance validation")) return false;
+    weapon.flags = 0;
+    w::Entity mount;
+    mount.bound_radius = 4.0f;
+    const auto mounted = world.registry.spawn(1, mount);
+    player->mount_target = mounted;
+    player->mount_type = w::SeatType::Gunner;
+    const w::FixedVec3 diagonal{6 * 65536, 0, 6 * 65536};
+    if (!expect(w::weapon_fire_origin_status(world, *player, weapon, diagonal, false) == -17,
+                "gunner validates three-dimensional distance against twice the bound")) return false;
+    return true;
+}
+
 int main() {
+	if (!check_fire_owner_environment_and_origin()) return 1;
 	if (!check_retail_fire_admission()) return 1;
 	if (!check_mounted_slot_select_fire_and_reload()) return 1;
 	if (!check_duplicate_c2s_session_does_not_refire()) return 1;
@@ -444,7 +533,7 @@ int main() {
 		rifle.category = 3;
 		rifle.rank = 2;
 		rifle.clipsize = 30;
-		rifle.ammo_index = 0;
+		rifle.ammo_index = 1;
 		rifle.valid = true;
 		w::WeaponTableEntry &knife = world.tables.weapons.entries[7];
 		knife.name = "WPN_TESTKNIFE";
@@ -453,11 +542,11 @@ int main() {
 		knife.clipsize = -1;
 		knife.valid = true;
 	}
-	world.tables.ammo.entries.resize(1);
-	world.tables.ammo.entries[0].name = "REMOTE_POWER_THROW";
-	world.tables.ammo.entries[0].velocity = 620;
-	world.tables.ammo.entries[0].max_age_ticks = 248;
-	world.tables.ammo.entries[0].valid = true;
+	world.tables.ammo.entries.resize(2);
+	world.tables.ammo.entries[1].name = "REMOTE_POWER_THROW";
+	world.tables.ammo.entries[1].velocity = 620;
+	world.tables.ammo.entries[1].max_age_ticks = 248;
+	world.tables.ammo.entries[1].valid = true;
 
 	ns::LoopbackChannel loop;
 	ns::UdpSessionTransport udp_b(ns::UdpSessionTransport::Role::Host);

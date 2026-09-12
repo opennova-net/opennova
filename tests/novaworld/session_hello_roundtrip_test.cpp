@@ -163,6 +163,7 @@ int test_client_auth_roundtrip() {
 	src.hk   = 0x0FE0E112u;
 	src.ck   = 0xDEADBEEFu;
 	src.na   = "jop:cus2";
+	src.pw   = "a server password";
 	src.sip  = 0x7F000001u;
 	src.spn  = 32768;
 	src.scrk = "abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXY";
@@ -178,6 +179,7 @@ int test_client_auth_roundtrip() {
 	TEST_EXPECT(round.hk   == src.hk);
 	TEST_EXPECT(round.ck   == src.ck);
 	TEST_EXPECT(round.na   == src.na);
+	TEST_EXPECT(round.pw   == src.pw);
 	TEST_EXPECT(round.sip  == src.sip);
 	TEST_EXPECT(round.spn  == src.spn);
 	TEST_EXPECT(round.scrk == src.scrk);

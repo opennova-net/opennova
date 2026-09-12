@@ -326,6 +326,12 @@ bool AdmSkeletalClips::has_clip(const std::string &key) const {
 	return find_clip(key) != nullptr;
 }
 
+double AdmSkeletalClips::clip_seconds_at_tick(const std::string &key,
+                                               int32_t ticks, int variant) const {
+	const LoadedClip *clip = find_clip_variant(key, variant);
+	return clip ? clip->clip.playback().seconds_at(ticks) : 0.0;
+}
+
 float AdmSkeletalClips::clip_fps(const std::string &key, int variant) const {
 	const LoadedClip *c = find_clip_variant(key, variant);
 	return c != nullptr ? static_cast<float>(c->clip.fps) : 0.0f;

@@ -26,7 +26,8 @@ constexpr uint32_t kKnownBmsiAttributeMask =
     static_cast<uint32_t>(BmsiAttributeFlags::Guarding) |
     static_cast<uint32_t>(BmsiAttributeFlags::RemoveIfLessThan) |
     static_cast<uint32_t>(BmsiAttributeFlags::RemoveIfMoreThan) |
-    static_cast<uint32_t>(BmsiAttributeFlags::Multiplayer) |
+    static_cast<uint32_t>(BmsiAttributeFlags::SinglePlayerOnly) |
+    static_cast<uint32_t>(BmsiAttributeFlags::MultiplayerOnly) |
     static_cast<uint32_t>(BmsiAttributeFlags::Berserk) |
     static_cast<uint32_t>(BmsiAttributeFlags::FlyingOrganic) |
     static_cast<uint32_t>(BmsiAttributeFlags::Coward) |
@@ -598,98 +599,49 @@ bool contains_nul(const std::string& value) {
 
 bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_t>& out, std::string& error);
 
-size_t find_nul(const std::vector<uint8_t>& raw, size_t pos, size_t limit) {
-    while (pos < limit && raw[pos] != 0) {
-        ++pos;
-    }
-    return pos;
-}
-
-size_t loadout_parse_limit(const std::vector<uint8_t>& raw) {
-    if (raw.empty() || raw[0] == 0) {
-        return 0;
-    }
-    for (size_t i = 0; i + 1 < raw.size(); ++i) {
-        if (raw[i] == 0 && raw[i + 1] == 0) {
-            return i;
-        }
-    }
-    return raw.size();
-}
-
-bool is_loadout_name_at(const std::vector<uint8_t>& raw, size_t pos, size_t limit) {
-    return pos + 4 <= limit && raw[pos] == 'W' && raw[pos + 1] == 'P' &&
-           raw[pos + 2] == 'N' && raw[pos + 3] == '_';
-}
-
-std::string loadout_string_at(const std::vector<uint8_t>& raw, size_t pos, size_t limit) {
-    const size_t end = find_nul(raw, pos, limit);
-    return std::string(reinterpret_cast<const char*>(raw.data() + pos), end - pos);
-}
-
-std::string sanitize_loadout_value(const std::string& value) {
-    if (value.empty()) {
-        return "-1";
-    }
-    size_t pos = 0;
-    if (value[pos] == '-' || value[pos] == '+') {
-        ++pos;
-    }
-    const size_t digits_start = pos;
-    while (pos < value.size() && value[pos] >= '0' && value[pos] <= '9') {
-        ++pos;
-    }
-    if (pos == digits_start) {
-        return "-1";
-    }
-    return value.substr(0, pos);
-}
-
-std::string loadout_value_after(const std::vector<uint8_t>& raw, size_t& pos, size_t limit) {
-    if (pos >= limit) {
-        return "-1";
-    }
-    const std::string value = loadout_string_at(raw, pos, limit);
-    pos = find_nul(raw, pos, limit);
-    if (pos < limit) {
-        ++pos;
-    }
-    return sanitize_loadout_value(value);
-}
-
-bool parse_weapon_loadout_chunk(const std::vector<uint8_t>& raw, WeaponLoadout& out, std::string& error) {
-    out.entries.clear();
-    if (raw.empty()) {
-        return true;
-    }
-
-    const size_t limit = loadout_parse_limit(raw);
-    if (limit == 0) {
-        return true;
-    }
-    for (size_t pos = 0; pos < limit; ++pos) {
-        if (!is_loadout_name_at(raw, pos, limit)) {
-            continue;
-        }
-        const size_t name_end = find_nul(raw, pos, limit);
-        if (name_end == limit) {
-            error = "BMS weapon loadout chunk has an unterminated weapon name";
-            return false;
-        }
-        WeaponLoadoutRecord entry;
-        entry.name = loadout_string_at(raw, pos, limit);
-        size_t value_pos = name_end + 1;
-        entry.ammo_primary = loadout_value_after(raw, value_pos, limit);
-        entry.ammo_secondary = loadout_value_after(raw, value_pos, limit);
-        entry.flags = loadout_value_after(raw, value_pos, limit);
-        out.entries.push_back(std::move(entry));
-        pos = name_end;
-    }
-    if (out.entries.empty()) {
-        error = "BMS weapon loadout chunk has no weapon names";
-        return false;
+// The first three strings are opaque. Only a missing fourth string is repaired;
+// an alphabetic, zero-valued candidate remains the next record's name.
+// [orig: AIProfile_SanitizeConfigData @ 0x40cfe0]
+bool loadout_has_fourth_field(const std::string& value) {
+    if (value.empty()) return false;
+    if (std::strtol(value.c_str(), nullptr, 10) != 0) return true;
+    size_t pos = (value[0] == '-' || value[0] == '+') ? 1 : 0;
+    for (; pos < value.size(); ++pos) {
+        const unsigned char c = static_cast<unsigned char>(value[pos]);
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) return false;
     }
     return true;
+}
+
+void parse_weapon_loadout_chunk(const std::vector<uint8_t>& raw, WeaponLoadout& out) {
+    out.entries.clear();
+    // A damaged chunk can end inside a record (three shipped missions do).
+    // Bound those reads to this chunk: missing string bytes read as NUL, like
+    // the other format fields, instead of retail's read beyond raw_loadout.
+    // Documented boundary: docs/mission/bms-event-runtime-re.md (D-EVT-7).
+    const auto read_field = [&](size_t& cursor) {
+        const size_t start = cursor;
+        while (cursor < raw.size() && raw[cursor] != 0) ++cursor;
+        std::string value(reinterpret_cast<const char*>(raw.data() + start), cursor - start);
+        if (cursor < raw.size()) ++cursor;
+        return value;
+    };
+    size_t pos = 0;
+    while (pos < raw.size() && raw[pos] != 0) {
+        WeaponLoadoutRecord entry;
+        entry.name = read_field(pos);
+        entry.ammo_primary = read_field(pos);
+        entry.ammo_secondary = read_field(pos);
+        size_t next = pos;
+        std::string fourth = read_field(next);
+        if (loadout_has_fourth_field(fourth)) {
+            entry.flags = std::move(fourth);
+            pos = next;
+        } else {
+            entry.flags = "-1";
+        }
+        out.entries.push_back(std::move(entry));
+    }
 }
 
 bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_t>& out, std::string& error) {
@@ -824,9 +776,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     if (!count_fits(r, out.header.weapon_loadout_chunk_len, 1, "weapon loadout chunk", error)) return false;
     std::vector<uint8_t> loadout_chunk;
     r.read_bytes(loadout_chunk, out.header.weapon_loadout_chunk_len);
-    if (!parse_weapon_loadout_chunk(loadout_chunk, out.loadout, error)) {
-        return false;
-    }
+    parse_weapon_loadout_chunk(loadout_chunk, out.loadout);
     if (!write_weapon_loadout_chunk(out.loadout, loadout_chunk, error)) {
         return false;
     }

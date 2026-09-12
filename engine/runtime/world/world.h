@@ -13,6 +13,7 @@
 #include <runtime/world/mission_diagnostics.h>
 #include <string>
 #include <vector>
+#include <variant>
 
 #include <runtime/audio/sound_profile.h>
 #include <base/io/crt_rand.h>
@@ -25,6 +26,7 @@
 #include <runtime/world/teammate_operations.h>
 #include <runtime/world/script_events.h>
 #include <runtime/world/script_effects.h>
+#include <runtime/world/item_effects.h>
 #include <runtime/world/script_remote_command.h>
 #include <runtime/world/script_sounds.h>
 #include <runtime/world/script_squad.h>
@@ -45,6 +47,7 @@
 #include <runtime/world/sound_emitter_mailbox.h>
 #include <runtime/world/weather_state.h>
 #include <runtime/world/spawn_select.h>
+#include <runtime/world/item_sections.h>
 #include <runtime/world/terrain_scorch_events.h>
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/world/var_store.h>
@@ -58,15 +61,19 @@
 #include <runtime/world/waypoint_track.h>
 #include <runtime/world/weapon_table.h>
 #include <runtime/world/zone_capture.h>
+#include <formats/rtxt/rtxt.h>
 #include <runtime/world/zone_chain.h>
 
 namespace opennova::terrain {
 struct TerrainHeightField;
 }
 
+namespace opennova::audio { class SoundSetIndex; }
+
 namespace opennova::world {
 
 class CollisionWorld;
+class LocalPlayer;
 
 // One sound-profile slot fire (footstep, foley, landing, death scream),
 // already resolved to the profile's authored sound-set name. The host present
@@ -158,6 +165,7 @@ private:
 // Transient player identity and frame data. WAC refreshes local_health only
 // at bytecode entry [orig: WacScript_CacheLocalPlayerState @0x4F5780].
 struct CachedFrameState {
+    uint8_t sound_listener_view_flags = 6; // startup; camera 0 -> 2, other -> 4 [orig: @0x43924A]
     EntityHandle local_player;
     // The shell-fed posed head-bone world position for the local player
     // (mission units) — the embedder-feeds-back seam the exact eye-offset
@@ -417,6 +425,7 @@ struct PlayerTemplate {
 // The per-mission tables the embedder feeds once (the def files, the terrain
 // samplers, the Player template) and the mission header facts.
 struct MissionTables {
+    rtxt::File voice_macros; // vmacros.bin, section macrotext [orig: @0x5B7170]
     // The weapon.def armory table (empty until the host feeds it — Simulation::
     // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink
     // equipped-weapon gate, and the player-spawn WPN_M4AUTO default. (D-NET-141/143)
@@ -442,6 +451,8 @@ struct MissionTables {
     // [orig: SoundProfile_LoadAll @ 0x527490; the infantry consumers
     // @ 0x4bf15c-0x4bf2b0 (org1) / @ 0x4b76e0-0x4b78a8 (org2)]
     audio::SoundProfileTable sound_profiles;
+    // MissionKernel owns this immutable bank catalog for the world's lifetime.
+    const audio::SoundSetIndex *sound_sets = nullptr;
     CharacterTraitsTable character_traits;
     // charattr.def: each CHARACTER row's tokenized ATTRIBUTES dword (AutoScope 1,
     // SpreadBonus 2, KnifeBonus 4, Medic 8, WaterGirl 0x20), indexed by the
@@ -504,6 +515,7 @@ struct SessionRules {
     // [orig: @0x46B1B9..0x46B1DB; @0x48F6A0..0x48F71E; @0x4941BE].
     // run_logic_tick stamps it once so every callback sees the tick's role.
     bool logic_authority = true;
+    bool ignore_weapon_ammo_cost = false; // dword_24C1930 bit 0x100
     bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
     // Projectile_UpdatePhysics clamps the radius to 0.1u only for an
     // authoritative multiplayer FatBullets trace owned by a remote player.
@@ -538,12 +550,12 @@ struct SessionRules {
 // destruction, scars, scorches, the sound queues). Nothing in the sim reads
 // an outbox back; the drains clear them.
 struct WorldOutbox {
-    // Rows the sim destroyed this tick that the net layer must announce with
-    // S2C 0x12 [orig: Server_RemoveEntityAndNotify @0x50A270 writes the handle,
-    // send_mask 0x90 (alive + not-host), msgClass 1, then destroys the row]. The
-    // world cannot send, so it records the packed handle here and the server tick
-    // drains it. Cleared by the drain; a client-side World never fills it.
-    std::vector<uint16_t> entity_removals;
+    // Preserve the callback's send order across 0x21 explosions, 0x26 state,
+    // and 0x12 removal. The host drains this once, excluding its loopback.
+    // [orig: Entity_HandleDeathEvent @ 0x4070F0; Entity_HandleDeathOnAuthority @ 0x407CC0;
+    // Server_SendEntityStatePacket @ 0x509D70; Server_RemoveEntityAndNotify @ 0x50A270]
+    using EntityNetworkEvent = std::variant<ItemStateEvent, ItemExplosionEvent, EntityRemoveEvent>;
+    std::vector<EntityNetworkEvent> entity_events;
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
     // netsim emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
@@ -608,6 +620,9 @@ public:
     // decoder writes its targets back.
     WeatherState weather;
     CachedFrameState cached;
+    // Non-owning local state, bound by the mission kernel for synchronous
+    // deployment resets; bare authoritative worlds need no local view.
+    LocalPlayer *local_player_state = nullptr;
     EntityCommands commands;
     // The AI/motor system: every brain plus the infantry and vehicle motors.
     // Owned here so the command layer, the sims, the wire and the tools reach
@@ -701,9 +716,11 @@ public:
     FacialSystem facials;
     TeammateOperations teammates;
     int32_t vehicle_ai_spawn_phase = 0; // [orig: dword_B21F80]
+    IItemPieceSpawner *item_piece_spawner = nullptr; // non-owning mission asset factory
     ITeammateSpawner *teammate_spawner = nullptr; // non-owning mission asset factory
     DeathPieceSim death_pieces;
     DestructionRng destruction_rng;
+    ItemEmitterSystem item_emitters;
 
     // The authoritative session rules/stats/outcome + the SP kill-stat buckets.
     // Multiplayer and WAC/BMS outcomes share Match's one double-run latch.

@@ -1329,7 +1329,7 @@ void print_tag_1e(const std::vector<uint8_t> &body) {
 	            int(r.pos_x), int(r.pos_y), key ? " key=" : "", key ? key : "");
 }
 
-// S2C 0x26 entity kill replication.
+// S2C 0x26 item-state replication; the second word is a signed hit section.
 void print_tag_26(const std::vector<uint8_t> &body) {
 	KillRecord r;
 	size_t consumed = 0;
@@ -1337,8 +1337,8 @@ void print_tag_26(const std::vector<uint8_t> &body) {
 		std::printf("        [0x26] kill decode failed (len=%zu)\n", body.size());
 		return;
 	}
-	std::printf("        [0x26] KILL victim=%s attacker=%s\n",
-	            handle_str(r.victim_slot).c_str(), handle_str(r.attacker).c_str());
+	std::printf("        [0x26] ITEM_STATE victim=%s hit_section=%d\n",
+	            handle_str(r.victim_slot).c_str(), int(r.section));
 }
 
 // S2C 0x4E batch despawn/kill.

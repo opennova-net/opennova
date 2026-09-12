@@ -28,6 +28,8 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/dir_table.h>
 #include <runtime/world/infantry_ladder.h>
+#include <runtime/world/infantry_sound.h>
+#include <runtime/world/infantry_burn.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/player_view.h> // player_view_floor_eye_to_terrain (the on-foot local eye leg)
@@ -95,16 +97,6 @@ constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4b80f0 `2048`]
 // at the one shared local/remote eligibility seam.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b7ea0-0x4b7ebd]
 constexpr uint32_t kPlayerJumpBlockedFlags = 0x1A002u;
-// Slope-pass constants. org1 (NPC): shifted small-angle slopes clamped +-656175520
-// with the fixed 0x22222200 slide threshold [orig: @0x4ba1a8-0x4ba34c]. org2 (player):
-// true atan2 slopes over the probe separations (45056 fore-aft / 11264 lateral, 16.16)
-// with a 60-deg live / 48-deg dead threshold [orig: @0x4b6e41-0x4b6ff4; dbl_7C9BE8 /
-// dbl_7C9BE0; thresholds @0x4b6ee5-0x4b6ef7].
-constexpr int32_t kSlopeClamp = 656175520;
-constexpr int32_t kSlideThreshold = 572662272;      // 0x22222200 (48 deg); org2 dead
-constexpr int32_t kSlideThresholdLive = 715827840;  // 0x2AAAAA80 (60 deg); org2 alive
-constexpr double kSlopeAtanFwdBase = 45056.0;       // [orig: dbl_7C9BE8]
-constexpr double kSlopeAtanLatBase = 11264.0;       // [orig: dbl_7C9BE0]
 // [orig: turn-in-place gates; dump 2940-2952]
 constexpr int32_t kTurnStopGate = 536870880;  // > 45 deg -> state 147 (stop)
 constexpr int32_t kTurnWalkGate = 357913920;  // > 30 deg -> state 1 (walk turn)
@@ -743,8 +735,17 @@ void infantry_rain_ambient(World &world, const Entity &ent) {
 }
 
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396]
-void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_flags) {
+void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_flags,
+        uint32_t logic_tick) {
     InfantryState &inf = e.inf;
+    // Burn selection bypasses the ordinary movement/swim/lean selector, including
+    // the pass that clears the timer. [orig: @0x4B70DE..0x4B7180 -> LABEL_654]
+    if (inf.burn_state != 0) {
+        const int target = select_infantry_burn(inf, root_motion, true, logic_tick);
+        commit_player_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion,
+                world.rotor_wash.nearby_zone(e.pos, 983040) != 0);
+        return;
+    }
     auto has = [&](int s) {
         return root_motion != nullptr && root_motion->has_clip(inf.adm_id, s);
     };
@@ -972,141 +973,6 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
 }
 
 // ----------------------------------------------------------------------------
-// The slope pass — see the ai.h declaration. Both original updaters carry the same
-// three-way conform selector in front of the probes; everything non-conforming
-// DECAYS body_pitch/roll back to level, and the slide impulse only exists inside
-// the conform branch (a live standing soldier neither slope-leans nor slides).
-// [orig: org1 Entity_UpdateInfantryAI @0x4ba10f (selector) -> @0x4ba1a8 (probes) ->
-//  @0x4ba320 (chase) / @0x4ba133 (decay), every 8th tick;
-//  org2 Entity_UpdateInfantryPlayerBody @0x4b6d95 (selector) -> @0x4b6de4 (tick&1
-//  probe gate) -> @0x4b6e41 (probes) -> @0x4b6fc1 (chase) / @0x4b6dbd (decay)]
-// Witness + fix log: docs/world/world-wac-ai-re.md §3.5 item 4 (D-INF-19).
-// ----------------------------------------------------------------------------
-void AiSystem::infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t key) {
-    if (terrain == nullptr) return;
-    InfantryState &inf = e.inf;
-    // The org1/org2 split is load-bearing: org2 is the PLAYER-BODY updater's leg
-    // (in the original it runs for every player-class body; our motor only ever
-    // simulates the local one — remote peers net-snap and skip the motor, D-NET-89),
-    // org1 is the NPC/AI updater's leg. The selector is witnessed identical in both,
-    // but the cadence, slope math, chase rates, thresholds, and slide impulses are
-    // NOT interchangeable — never collapse the legs.
-    const bool org2 = inf.is_local_player;
-    if (!org2 && (key & 7u) != 0) return; // org1 runs on the entity's 8-tick phase
-
-    // Dead + in-air takes the corpse-tumble branch instead of the slope pass in both
-    // originals (bodyPitch/roll/yaw spin ramps) — unported; the death-fall mover owns
-    // the drop today. [orig: org1 @0x4ba0b2-0x4ba107; org2 @0x4b6ccb-0x4b6d90]
-    const bool dead = e.health <= 0;
-    if (dead && inf.airborne) return;
-
-    // The conform selector [orig: @0x4ba10f / @0x4b6d95]: entity-def attrib 0x200,
-    // an anim state with flag bit 2 (prone crawls 19-26, rolls 41/42, prone idle 48,
-    // draggers 137-139), or a grounded corpse. The original's dead leg also requires
-    // !(Flags & 0x10A000) — the swim/parachute flag legs, unmodeled here.
-    const bool conform = (e.def_attrib & kItemAttribLandable) != 0 ||
-                         (infantry_anim_flags(inf.anim_state) & 2u) != 0 || dead;
-    if (!conform) {
-        // Ease back to level, 1/16-step (org1: every 8th tick; org2: every tick).
-        // [orig: @0x4ba133-0x4ba152 / @0x4b6dbd-0x4b6ddc]
-        e.body_pitch -= (e.body_pitch + 8) >> 4;
-        e.roll -= (e.roll + 8) >> 4;
-        return;
-    }
-    // org2 probes/chases every 2nd tick and HOLDS between (the decay above is the
-    // only every-tick leg). [orig: test tickCounter,1 @0x4b6de4]
-    if (org2 && (logic_tick & 1u) != 0) return;
-
-    // Probe ground at an offset of the entity. [orig: Entity_RaycastGroundHeight (ex sub_4142C0) @0x4142c0 — heightmap
-    // raycast at (x+dx, y+dy) in a [z+0x4000, z+0x4000-0x20000] window; we sample the
-    // height field at the offset position (same surface for terrain)]
-    auto probe = [&](int32_t dx, int32_t dy) -> int32_t {
-        int32_t p[3] = {e.pos[0] + dx, e.pos[1] + dy, e.pos[2]};
-        GroundClearance clearance = ground_clearance;
-        clearance.has_physics = e.has_physics;
-        clearance.use_dead = dead;
-        return calc_average_ground_height(*terrain, p, 0, clearance);
-    };
-
-    int32_t c, s;
-    quantized_dir(e.heading, c, s);
-    // [orig: dir scaled 22528>>22 along heading; perpendicular probes at quarter offset]
-    const int32_t fx = static_cast<int32_t>((22528LL * c) >> 22);
-    const int32_t fy = static_cast<int32_t>((22528LL * s) >> 22);
-    const int32_t h_ahead = probe(fx, fy);
-    const int32_t h_behind = probe(-fx, -fy);
-    const int32_t lx = -(fy >> 2), ly = fx >> 2;
-    const int32_t h_left = probe(lx, ly);
-    const int32_t h_right = probe(-lx, -ly);
-    if (h_ahead == INT32_MIN || h_behind == INT32_MIN || h_left == INT32_MIN ||
-        h_right == INT32_MIN)
-        return; // off the height field
-
-    int32_t pitch_slope, roll_slope, threshold;
-    if (org2) {
-        // True slope angles: ftol(atan2(dh, separation) * 2^32/2pi), the x87 fpatan
-        // pair truncated to BAM. [orig: @0x4b6e68/@0x4b6ec8 fild/fpatan/fmul/_ftol2]
-        pitch_slope = static_cast<int32_t>(
-            std::atan2(static_cast<double>(h_ahead - h_behind), kSlopeAtanFwdBase) *
-            kBamPerRadian);
-        roll_slope = static_cast<int32_t>(
-            std::atan2(static_cast<double>(h_left - h_right), kSlopeAtanLatBase) *
-            kBamPerRadian);
-        threshold = dead ? kSlideThreshold : kSlideThresholdLive; // [orig: @0x4b6ee5]
-    } else {
-        // Small-angle approximation, clamped. [orig: @0x4ba1cd <<14 / @0x4ba22b <<16]
-        pitch_slope = static_cast<int32_t>(std::min<int64_t>(
-            std::max<int64_t>((static_cast<int64_t>(h_ahead) - h_behind) << 14,
-                              -kSlopeClamp),
-            kSlopeClamp));
-        roll_slope = static_cast<int32_t>(std::min<int64_t>(
-            std::max<int64_t>((static_cast<int64_t>(h_left) - h_right) << 16,
-                              -kSlopeClamp),
-            kSlopeClamp));
-        threshold = kSlideThreshold;
-    }
-
-    // Slide on steep ground: velocity gains dir<<11>>22 (org1, per 8-tick pass) or
-    // dir<<9>>22 (org2, per 2-tick pass), along/against the facing for pitch and
-    // perpendicular for roll. [orig: @0x4ba24c-0x4ba2fe <<11; @0x4b6f01-0x4b6fa3 <<9]
-    const int shift = org2 ? 9 : 11;
-    const int32_t slide_x = static_cast<int32_t>((static_cast<int64_t>(c) << shift) >> 22);
-    const int32_t slide_y = static_cast<int32_t>((static_cast<int64_t>(s) << shift) >> 22);
-    if (pitch_slope > threshold) {        // uphill ahead -> slide back
-        inf.vel[0] -= slide_x;
-        inf.vel[1] -= slide_y;
-    } else if (pitch_slope < -threshold) { // downhill ahead -> slide forward
-        inf.vel[0] += slide_x;
-        inf.vel[1] += slide_y;
-    }
-    if (roll_slope > threshold) {          // high on the left -> slide right
-        inf.vel[0] += slide_y;
-        inf.vel[1] -= slide_x;
-    } else if (roll_slope < -threshold) {  // high on the right -> slide left
-        inf.vel[0] -= slide_y;
-        inf.vel[1] += slide_x;
-    }
-
-    // The conform chase. org1: eighth-step on both fields; dead NPCs also aim along
-    // the slope (aimPitch = slope, aimHeading = targetHeading, aimFlag = 0 on the
-    // 8th tick while Flags & 2 [orig: @0x4ba307..0x4ba319] — not ported here; the
-    // drag block's aimFlag clear lives in infantry_escort.cpp). org2: quarter-step;
-    // a corpse additionally tips its LOOK pitch eighth-step, and the roll write is
-    // skipped while a combat roll 41/42 plays (the torso-roll ramp owns those ticks).
-    // [orig: @0x4ba320-0x4ba34c / @0x4b6fa9-0x4b6ff4]
-    if (org2) {
-        if (dead) e.pitch += (pitch_slope - e.pitch + 4) >> 3;
-        e.body_pitch += (pitch_slope - e.body_pitch + 2) >> 2;
-        if (inf.anim_state != anim_state::kRollLeft &&
-            inf.anim_state != anim_state::kRollRight)
-            e.roll += (roll_slope - e.roll + 2) >> 2;
-    } else {
-        e.body_pitch += (pitch_slope - e.body_pitch + 4) >> 3;
-        e.roll += (roll_slope - e.roll + 4) >> 3;
-    }
-}
-
-// ----------------------------------------------------------------------------
 // The per-tick motor. [orig: Entity_UpdateInfantryAI @0x4b9910]
 // ----------------------------------------------------------------------------
 // The resolver's player predicate is the entity's wire Player class bit, for
@@ -1229,6 +1095,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         weight_inputs.clipweight_fp16 = held->clipweight_fp16;
     }
     infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
+    if (!npc_body && (tick_flags & 1u) == 0) {
+        const Entity *parent = tick_entity != nullptr && tick_entity->mounted
+                ? world.registry.get(tick_entity->mount_target) : nullptr;
+        const uint8_t stance_bits = e.inf.stance == InfantryState::Stance::kProne ? 1 :
+                e.inf.stance == InfantryState::Stance::kCrouch ? 2 : 0;
+        emit_stance_change_sound(world, e.handle.packed, e.pos, e.inf.stance_sound_state,
+                stance_bits, tick_flags, parent != nullptr && parent->has_item_def);
+    }
 
     // A remote player's locomotion source is its C2S pose snapshot, so do not
     // run the NPC/local-input movement core over it. The authority still runs
@@ -1412,7 +1286,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 ((ent->flags | ent->engine_flags) & kEntityFlagLadderContact) != 0;
         if ((logic_tick & 3u) == 0 && !inf.airborne && !carried) {
             if (!ladder_latched) {
-                player_body_select(e, world, ent != nullptr ? (ent->flags | ent->engine_flags) : 0u);
+                player_body_select(e, world, ent != nullptr ? (ent->flags | ent->engine_flags) : 0u, logic_tick);
             } else if (inf.player_moving) {
                 inf.idle_counter = 0;
             } else if (inf.stance == InfantryState::Stance::kStand) {
@@ -1446,34 +1320,41 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     world.profile, devtools::Slot::SIM_AI_INFANTRY_COMBAT);
             combat_state = infantry_combat_think(e, world, key);
         }
-        // The debug/script override is after combat and before attachment and
-        // gait selection. It bypasses the current animation's lock, preserving
-        // pending until the ordinary arbiter changes it. Org2 never reads it.
-        // [orig: Entity_UpdateInfantryAI @0x4BD256..0x4BD271]
-        if (npc_body && world.script.forced_animation != 0) {
-            combat_state = world.script.forced_animation;
-            inf.store_body_animation(combat_state);
-            inf.move_mode = 0;
-            inf.target_dist = 0;
-        }
-        // On a ladder the NPC's gait selection is suppressed — the org1
-        // on-ladder block after the resolve owns states 32-35 (the same-tick
-        // overwrite mapping as the player selection skip above; retail also
-        // zeroes a speed local our selector has no carrier for).
-        // [orig: @ 0x4bd18d — moveMode + the speed local zeroed on Flags 0x100000]
-        if (tick_entity != nullptr &&
-            ((tick_entity->flags | tick_entity->engine_flags) &
-             kEntityFlagLadderContact) != 0) {
-            inf.move_mode = 0;
-            inf.target_dist = 0;
-            inf.path_state = 0;
-        }
+        if (inf.burn_state != 0) {
+            // The live burn branch reaches the common arbiter directly.
+            // [orig: Entity_UpdateInfantryAI @0x4B9910, LABEL_754]
+            const int target = combat_state > 0 ? combat_state : anim_state::kIdle;
+            commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion);
+        } else {
+            // The debug/script override is after combat and before attachment and
+            // gait selection. It bypasses the current animation's lock, preserving
+            // pending until the ordinary arbiter changes it. Org2 never reads it.
+            // [orig: Entity_UpdateInfantryAI @0x4BD256..0x4BD271]
+            if (npc_body && world.script.forced_animation != 0) {
+                combat_state = world.script.forced_animation;
+                inf.store_body_animation(combat_state);
+                inf.move_mode = 0;
+                inf.target_dist = 0;
+            }
+            // On a ladder the NPC's gait selection is suppressed — the org1
+            // on-ladder block after the resolve owns states 32-35 (the same-tick
+            // overwrite mapping as the player selection skip above; retail also
+            // zeroes a speed local our selector has no carrier for).
+            // [orig: @ 0x4bd18d — moveMode + the speed local zeroed on Flags 0x100000]
+            if (tick_entity != nullptr &&
+                ((tick_entity->flags | tick_entity->engine_flags) &
+                 kEntityFlagLadderContact) != 0) {
+                inf.move_mode = 0;
+                inf.target_dist = 0;
+                inf.path_state = 0;
+            }
 		else if (!attachment.parent.valid()) {
 			infantry_select(e, world, combat_state);
 			if (inf.board_anim >= 0 && inf.move_mode == 0 &&
 					(tick_entity == nullptr || !tick_entity->mounted))
 				inf.begin_body_transition(inf.board_anim);
 		}
+        }
 	}
 
     // 2c. The on-ladder override + player dismounts (org2; EVERY tick — the
@@ -1885,7 +1766,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // 6. The slope pass: conform-or-decay body_pitch/roll + the steep-ground slide.
     // Cadence lives inside (org1 every 8th tick on `key`; org2 decay every tick,
     // probes every 2nd on the logic tick). [orig: @0x4ba10f block / @0x4b6d95 block]
-    infantry_slope_pass(e, logic_tick, key);
+    infantry_slope_pass(e, world, logic_tick, key);
 
     // Horizontal slide decay. NPC (org1): (7v+4)>>3 with an abs<=8 deadzone, every state. Player
     // (org2): the selector is Flags & 0x2000 = IN-AIR (entity.h already names it

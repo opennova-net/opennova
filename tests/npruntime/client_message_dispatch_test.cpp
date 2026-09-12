@@ -175,10 +175,10 @@ bool repair_after_empty_slot_has_a_new_generation() {
     EntityDeathRecord death;
     death.entity_handle = spawn.slot_id;
     CHECK(wire.deliver({make_protocol_message(s2c::ENTITY_DEATH, std::vector<uint8_t>{7, 0x10, 0, 0}), repair()}));
-    CHECK(wire.client.drain_entity_deaths().empty());
+    CHECK(wire.client.view().drain_effect_commands().empty());
     // A death after the replacement still belongs to the new lifetime.
     CHECK(wire.deliver({repair(), make_protocol_message(s2c::ENTITY_DEATH, std::vector<uint8_t>{7, 0x10, 0, 0})}));
-    CHECK(wire.client.drain_entity_deaths().size() == 1);
+    CHECK(wire.client.view().drain_effect_commands().size() == 1);
     return true;
 }
 
@@ -191,7 +191,7 @@ bool listen_client_sound_gates_and_consumption() {
     auto send = [&] {
         loop.host_send(s2c::PLAY_SOUND, encode_play_sound(command));
         client.Client_ProcessNetworkFrame(1);
-        client.apply_received_sounds(world);
+        client.apply_received_effects(world);
     };
     send();
     CHECK(world.out.script_sounds.empty()); // retail's multiplayer-session gate
@@ -199,14 +199,14 @@ bool listen_client_sound_gates_and_consumption() {
     send();
     CHECK(world.out.script_sounds.size() == 1);
     CHECK(world.out.script_sounds[0].kind == world::ScriptSoundEvent::Kind::Interface);
-    client.apply_received_sounds(world);
+    client.apply_received_effects(world);
     CHECK(world.out.script_sounds.size() == 1);
     command.flag = 2;
     send();
     CHECK(world.out.script_sounds.size() == 1 && world.out.slot_sounds.empty());
     loop.host_send(s2c::PLAY_SOUND, {0, 'x'}); // missing terminator
     client.Client_ProcessNetworkFrame(2);
-    client.apply_received_sounds(world);
+    client.apply_received_effects(world);
     CHECK(world.out.script_sounds.size() == 1);
     return true;
 }

@@ -88,8 +88,8 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("fire_soundset", "name", "world_pos", "source_bms_id"),
 			&MissionAudio::fire_soundset, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("ui_soundset", "name"), &MissionAudio::ui_soundset);
-	ClassDB::bind_method(D_METHOD("slot_soundset", "name", "world_pos", "exclusive_key", "source_bms_id"),
-			&MissionAudio::slot_soundset, DEFVAL(String()), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("slot_soundset", "name", "world_pos", "source_bms_id"),
+			&MissionAudio::slot_soundset, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("play_dialog", "wav_id"), &MissionAudio::play_dialog);
 	ClassDB::bind_method(D_METHOD("resolve_dialog_set", "wav_id"), &MissionAudio::resolve_dialog_set);
 	ClassDB::bind_method(D_METHOD("play_wac_wave", "filename"), &MissionAudio::play_wac_wave);
@@ -126,13 +126,12 @@ Ref<Simulation> MissionAudio::_simulation() const {
 }
 
 bool MissionAudio::_record_fire(const String &p_set_name, const Vector3 &p_world_pos, int p_source_bms_id,
-		const String &p_exclusive_key, bool p_slot, bool p_played) {
+		bool p_slot, bool p_played) {
 	Ref<FiredSoundset> fired;
 	fired.instantiate();
 	fired->set_set_name(p_set_name);
 	fired->set_position(p_world_pos);
 	fired->set_source_bms_id(p_source_bms_id);
-	fired->set_exclusive_key(p_exclusive_key);
 	fired->set_slot(p_slot);
 	fired->set_played(p_played);
 	recent_fires_.push_back(fired);
@@ -202,6 +201,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	dynamic_emitter_states_.clear();
 
 	bank_ = SoundBank::create(resource_root_);
+	_install_voice_resolver();
 	bank_->set_occlusion_provider(_simulation());
 	bank_->set_occlusion_override(occlusion_override_);
 	const String mission_base = p_mission_name.get_file().get_basename();
@@ -481,7 +481,7 @@ void MissionAudio::_play_listener_relative(const String &p_name, int32_t p_dista
     const Vector3 direction = forward.rotated(Vector3(0, 1, 0),
             static_cast<real_t>(static_cast<double>(bearing) * Math_TAU / kBearingBam8Turn));
     const Vector3 position = p_camera_xform.origin + direction;
-    _record_fire(p_name, position, 0, String(), false,
+    _record_fire(p_name, position, 0, false,
             bank_->play_oneshot_at_distance(this, position, p_name, StringName(kSfxBus),
                     p_distance_q16));
 }
@@ -495,9 +495,9 @@ void MissionAudio::reset_oneshot_playback() {
 
 bool MissionAudio::fire_soundset(const String &p_name, const Vector3 &p_world_pos, int p_source_bms_id) {
 	if (bank_.is_null() || !root_attached_) {
-		return _record_fire(p_name, p_world_pos, p_source_bms_id, String(), false, false);
+		return _record_fire(p_name, p_world_pos, p_source_bms_id, false, false);
 	}
-	return _record_fire(p_name, p_world_pos, p_source_bms_id, String(), false,
+	return _record_fire(p_name, p_world_pos, p_source_bms_id, false,
 			bank_->play_oneshot_3d(this, p_world_pos, p_name, StringName(kSfxBus), last_camera_pos_,
 					p_source_bms_id));
 }
@@ -506,17 +506,17 @@ bool MissionAudio::ui_soundset(const String &p_name) {
 	if (bank_.is_null() || !root_attached_) {
 		return false;
 	}
-	return bank_->spawn_oneshot_2d(this, p_name, StringName(kSfxBus)) != nullptr;
+	return bank_->play_interface_oneshot(this, p_name, StringName(kSfxBus));
 }
 
 bool MissionAudio::slot_soundset(const String &p_name, const Vector3 &p_world_pos,
-        const String &p_exclusive_key, int p_source_bms_id) {
+        int p_source_bms_id) {
     if (bank_.is_null() || !root_attached_) {
-        return _record_fire(p_name, p_world_pos, p_source_bms_id, p_exclusive_key, true, false);
+        return _record_fire(p_name, p_world_pos, p_source_bms_id, true, false);
     }
-    return _record_fire(p_name, p_world_pos, p_source_bms_id, p_exclusive_key, true,
+    return _record_fire(p_name, p_world_pos, p_source_bms_id, true,
             bank_->play_oneshot_3d(this, p_world_pos, p_name, StringName(kSfxBus), last_camera_pos_,
-                    p_source_bms_id, p_exclusive_key));
+                    p_source_bms_id));
 }
 
 bool MissionAudio::play_dialog(int p_wav_id) {
@@ -657,7 +657,10 @@ void MissionAudio::advance_ticks(int64_t p_logic_tick) {
 }
 
 void MissionAudio::set_simulation(const Ref<Simulation> &p_sim) {
+	const Ref<Simulation> previous = _simulation();
+	if (previous.is_valid() && previous != p_sim) previous->set_script_voice_resolver({});
 	simulation_id_ = p_sim.is_valid() ? ObjectID(p_sim->get_instance_id()) : ObjectID();
+	_install_voice_resolver();
 	if (bank_.is_valid()) {
 		bank_->set_occlusion_provider(p_sim);
 	}
@@ -943,6 +946,7 @@ void MissionAudio::teardown() {
 	world_driven_ticks_ = false;
 	world_driven_tick_offset_ = 0;
 	bank_.unref();
+	_install_voice_resolver();
 }
 
 // --- Internals ---
@@ -1032,7 +1036,7 @@ void MissionAudio::_flush_sound_emitters(int64_t p_final_tick) {
 		// positional presentation drain.
 		const Vector3 pos = mission_to_godot(event.pos);
 		const int source_bms_id = static_cast<int>(event.source_bms_id);
-		const int lifetime = MAX(1, static_cast<int>(event.lifetime_ticks));
+		const int lifetime = event.lifetime_ticks;
 		const int pitch_q16 = static_cast<int>(event.pitch_q16);
 		const int volume_q8_8 = static_cast<int>(event.volume_q8_8);
 		if (event.source_only) {

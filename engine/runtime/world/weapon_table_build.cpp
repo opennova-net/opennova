@@ -290,6 +290,7 @@ world::WeaponTable build_weapon_table(
 		e.ammo_bucket = static_cast<int16_t>(d.ammobucket);
 		e.round_type = d.round_type; // resolved to an AmmoTable index by
 		                             // resolve_weapon_round_types (§5.60)
+		e.voice_macro_token = d.vmacrotoken;
 		e.attach_text_id = d.attach_text_id; // the attach-label Overlays key [orig: +0x3A0]
 		e.flags = d.flags;
 		e.flags2 = d.flags2;
@@ -338,7 +339,17 @@ world::WeaponTable build_weapon_table(
 		e.action_fsm.burst3 = (d.flags & DEF_WEAPON_FLAG_BURST) != 0;
 		e.action_fsm.clip_capacity = e.clipsize;
 		e.action_fsm.flags = d.flags;
+        e.action_fsm.scope_zero.max_steps = d.scope_max_zero_steps;
+        e.action_fsm.scope_zero.min_steps = d.scope_zero_extra;
+        e.action_fsm.scope_zero.step_metres = d.scope_zero_step;
+        e.action_fsm.scope_zero.default_metres = d.scope_zero_default;
 		e.action_fsm.flags2 = d.flags2;
+		e.action_fsm.ammo_cost = d.ammo_class_count;
+		std::memcpy(e.action_fsm.soundfireloop, d.soundfireloop, sizeof(d.soundfireloop));
+		std::memcpy(e.action_fsm.soundtrailoff, d.soundtrailoff, sizeof(d.soundtrailoff));
+		std::memcpy(e.action_fsm.soundhead, d.soundhead, sizeof(d.soundhead));
+		std::memcpy(e.action_fsm.soundlockedtone, d.soundlockedtone, sizeof(d.soundlockedtone));
+
 		// The heat model, already in the original's pre-divided 16.16 units
 		// [orig: WeaponDef +0x36C/+0x370/+0x374].
 		e.action_fsm.heat_per_shot = d.heat_per_shot;

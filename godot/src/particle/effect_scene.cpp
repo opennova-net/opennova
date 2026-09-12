@@ -156,7 +156,7 @@ EffectScene::EffectScene() = default;
 void EffectScene::_materialize_snapshot() const {
 	if (!snapshot_dirty_)
 		return;
-	scene_.write_snapshot(last_frame_);
+	scene_->write_snapshot(last_frame_);
 	snapshot_dirty_ = false;
 }
 
@@ -224,7 +224,7 @@ Ref<EffectLoadReport> EffectScene::open(
 		config.documents.push_back(std::move(document));
 	}
 
-	const opennova::particle::EffectLoadReport report = scene_.open(config);
+	const opennova::particle::EffectLoadReport report = scene_->open(config);
 	advance_in_place(0.0);
 	Ref<godot::EffectLoadReport> result;
 	result.instantiate();
@@ -235,19 +235,19 @@ Ref<EffectLoadReport> EffectScene::open(
 
 void EffectScene::spawn_script_effect(const opennova::world::ScriptEffectEvent &event,
         int64_t slot, int64_t owner, uint32_t age_ticks, float water_height) {
-    opennova::particle::spawn_script_effect(scene_, event,
+    opennova::particle::spawn_script_effect(*scene_, event,
             {token_from_godot(slot)}, {token_from_godot(owner)}, age_ticks, water_height);
     snapshot_dirty_ = true;
 }
 
 int64_t EffectScene::intern(const String &p_effect_name) {
 	const opennova::particle::EffectHandle handle =
-			scene_.intern(p_effect_name.utf8().get_data());
+			scene_->intern(p_effect_name.utf8().get_data());
 	return static_cast<int64_t>(handle.value);
 }
 
 String EffectScene::effect_name(int64_t p_effect_handle) const {
-	return to_gd(scene_.effect_name(
+	return to_gd(scene_->effect_name(
 			opennova::particle::EffectHandle{
 				handle_from_godot(p_effect_handle)
 			}));
@@ -300,7 +300,7 @@ Ref<EffectSpawnReceipt> EffectScene::spawn(const Ref<EffectSpawnRequest> &p_requ
 	request.kill_plane =
 			static_cast<opennova::particle::EffectKillPlane>(kill_plane);
 	request.kill_plane_y = p_request->get_kill_plane_y();
-	const opennova::particle::EffectSpawnReceipt receipt = scene_.spawn(request);
+	const opennova::particle::EffectSpawnReceipt receipt = scene_->spawn(request);
 	if (receipt.spawned()) {
 		advance_in_place(0.0);
 	}
@@ -323,7 +323,7 @@ void EffectOwnerPoseBatch::add_absent(int64_t p_owner_token) {
 }
 
 void EffectScene::apply_owner_poses_in_place(const EffectOwnerPoseBatch &p_batch) {
-	scene_.apply_owner_poses(p_batch.updates());
+	scene_->apply_owner_poses(p_batch.updates());
 	snapshot_dirty_ = true;
 }
 
@@ -334,7 +334,7 @@ void EffectScene::apply_owner_poses(const EffectOwnerPoseBatch &p_batch) {
 
 PackedInt64Array EffectScene::get_active_owner_tokens() const {
 	const std::vector<opennova::particle::EffectOwnerToken> tokens =
-			scene_.active_owner_tokens();
+			scene_->active_owner_tokens();
 	PackedInt64Array result;
 	result.resize(static_cast<int64_t>(tokens.size()));
 	for (std::size_t i = 0; i < tokens.size(); ++i) {
@@ -344,14 +344,14 @@ PackedInt64Array EffectScene::get_active_owner_tokens() const {
 }
 
 void EffectScene::detach(int64_t p_group_id) {
-	scene_.detach(opennova::particle::EffectGroupId{
+	scene_->detach(opennova::particle::EffectGroupId{
 		token_from_godot(p_group_id)
 	});
 	advance_in_place(0.0);
 }
 
 void EffectScene::detach_slot(int64_t p_slot_token) {
-	scene_.detach_slot(opennova::particle::EffectSlotToken{
+	scene_->detach_slot(opennova::particle::EffectSlotToken{
 		token_from_godot(p_slot_token)
 	});
 	advance_in_place(0.0);
@@ -359,7 +359,7 @@ void EffectScene::detach_slot(int64_t p_slot_token) {
 
 bool EffectScene::set_group_parameters(int64_t p_group_id, float p_rate_control,
 		float p_offset_control) {
-	const bool changed = scene_.set_group_parameters(
+	const bool changed = scene_->set_group_parameters(
 			opennova::particle::EffectGroupId{ token_from_godot(p_group_id) },
 			p_rate_control, p_offset_control);
 	if (changed) {
@@ -370,7 +370,7 @@ bool EffectScene::set_group_parameters(int64_t p_group_id, float p_rate_control,
 
 bool EffectScene::trigger_group_children(int64_t p_group_id, const Vector3 &p_position,
 		const Vector3 &p_forward, int p_force_zone) {
-	const bool triggered = scene_.trigger_group_children(
+	const bool triggered = scene_->trigger_group_children(
 			opennova::particle::EffectGroupId{ token_from_godot(p_group_id) },
 			opennova::particle::Vec3{ float(p_position.x), float(p_position.y),
 					float(p_position.z) },
@@ -384,7 +384,7 @@ bool EffectScene::trigger_group_children(int64_t p_group_id, const Vector3 &p_po
 }
 
 void EffectScene::reset_runtime_state() {
-	scene_.reset_runtime_state();
+	scene_->reset_runtime_state();
 	snapshot_dirty_ = true;
 }
 
@@ -397,7 +397,7 @@ void EffectScene::advance_with_forces(
 	opennova::particle::EffectAdvanceRequest request;
 	request.delta_seconds = static_cast<float>(p_delta_seconds);
 	request.forces = forces;
-	scene_.advance_simulation(request);
+	scene_->advance_simulation(request);
 	snapshot_dirty_ = true;
 }
 

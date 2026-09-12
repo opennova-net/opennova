@@ -245,7 +245,6 @@ class FiredSoundset : public RefCounted {
 	String set_name_;
 	Vector3 position_;
 	int source_bms_id_ = 0;
-	String exclusive_key_; // the every-tick refire slot key (slot sounds only)
 	bool slot_ = false;    // slot_soundset (true) vs fire_soundset (false)
 	bool played_ = false;  // the bank found the set and spawned a player
 
@@ -259,8 +258,6 @@ public:
 	void set_position(const Vector3 &p_value) { position_ = p_value; }
 	int get_source_bms_id() const { return source_bms_id_; }
 	void set_source_bms_id(int p_value) { source_bms_id_ = p_value; }
-	String get_exclusive_key() const { return exclusive_key_; }
-	void set_exclusive_key(const String &p_value) { exclusive_key_ = p_value; }
 	bool is_slot() const { return slot_; }
 	void set_slot(bool p_value) { slot_ = p_value; }
 	bool is_played() const { return played_; }

@@ -333,6 +333,8 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
         // the debug override) before the effective modes read the mode.
         v.mount = MountedCameraInput();
         player_view_resolve_mode(v);
+        if (world != nullptr)
+            world->cached.sound_listener_view_flags = v.camera_mode == 0 ? 2 : 4;
         player_view_update_effective_modes(v, false,
                                            world != nullptr && world->match.outcome().ended);
         v.tp_anchor_valid = false;
@@ -391,6 +393,7 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
     t.camera_local_dead_seen = v.local_dead;
     const int mode_before = v.camera_mode;
     player_view_resolve_mode(v);
+    world->cached.sound_listener_view_flags = v.camera_mode == 0 ? 2 : 4;
     if (v.camera_mode == 4 && mode_before != 4) enter_death_camera(*world, *e, v, s);
     local_player_view_refresh(world, v);
     // The per-tick movement delta the FP motion lead samples per render frame
@@ -522,6 +525,11 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
         ? world->weather.core.scalar_channels.camera_fov_fp : 80 << 16;
     const int32_t zoom = sighted || scoped ? local_player_scope_zoom(w, *active_slot) : 1;
     out.fov_h_deg = player_view_fov_h_deg(v, current_fov, scoped, sighted, zoom);
+    out.scope_zero_word = active_slot->scope_zero;
+    out.scope_zero_max = w.def.scope_zero.max_steps;
+    out.scope_zero_step = w.def.scope_zero.step_metres;
+    out.scope_zero_default = w.def.scope_zero.default_metres;
+    out.aim_range_q16 = w.aim_range_q16;
     out.tp_anchor[0] = v.tp_anchor[0];
     out.tp_anchor[1] = v.tp_anchor[1];
     out.tp_anchor[2] = v.tp_anchor[2];

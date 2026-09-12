@@ -99,3 +99,37 @@ func test_unprotected_spectator_host_omits_password_field_and_cancel_closes() ->
 	if cancel != null:
 		cancel.pressed.emit()
 	assert_false(target.role_explicit)
+
+
+func test_server_password_prompt_is_independent_of_spectator_access() -> void:
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	var target := _target(JoinTarget.FLAG_SERVER_PASSWORD)
+	controller.join_lan_server(target)
+	var prompt := layer.get_node_or_null("JoinRolePrompt")
+	assert_not_null(prompt)
+	if prompt == null:
+		return
+	var password := prompt.find_child("ServerPassword", true, false) as LineEdit
+	assert_not_null(password)
+	if password != null:
+		assert_true(password.secret)
+	assert_null(prompt.find_child("SpectatorPassword", true, false))
+	var spectator := prompt.find_child("JoinAsSpectator", true, false) as Button
+	assert_false(spectator.visible)
+	assert_false(target.role_explicit)
+
+
+func test_both_passwords_have_distinct_controls() -> void:
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	var target := _target(JoinTarget.FLAG_SERVER_PASSWORD
+			| JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD)
+	controller.join_lan_server(target)
+	var prompt := layer.get_node_or_null("JoinRolePrompt")
+	assert_not_null(prompt)
+	if prompt != null:
+		assert_not_null(prompt.find_child("ServerPassword", true, false))
+		assert_not_null(prompt.find_child("SpectatorPassword", true, false))

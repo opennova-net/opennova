@@ -282,9 +282,59 @@ int test_member_pick_skips_dangling_indices() {
 
 } // namespace
 
+int test_pitch_draws_and_channel_pool() {
+	BankBuilder bank;
+	const auto member = bank.member(255, 255);
+	bank.file.sndparms[member].random_pitch_scaled = 8192;
+	const auto layer = bank.layer(200, 0, 0, {member});
+	bank.set("PITCH", 200, {layer});
+	bank.file.multis[0].pitch_base = 98304;
+	bank.file.multis[0].pitch_random_range = 32768;
+	SoundSelector selector;
+	const auto plan = plan_oneshot_at_distance(bank.file, {0, 0}, 0, selector);
+	TEST_EXPECT(plan.voices.size() == 1 && plan.voices[0].pitch_q16 == 110686u);
+	TEST_EXPECT(selector.select(99, 256, kRandom) == 229);
+	SoundSelector zero_ranges;
+	TEST_EXPECT(zero_ranges.compose_pitch(65536, 0, 65536, 0) == 65536u);
+	TEST_EXPECT(zero_ranges.select(99, 256, kRandom) == 249);
+	OneshotChannelPool pool;
+	for (int slot = 12; slot < 26; ++slot)
+		TEST_EXPECT(pool.acquire(100 + slot, 200) == slot);
+	TEST_EXPECT(pool.acquire(999, 100) == -1); // exactly half cannot steal
+	TEST_EXPECT(pool.acquire(999, 101) == 12); // strictly louder than half can
+	TEST_EXPECT(pool.acquire(999, 0) == -1);
+	pool.release(20);
+	TEST_EXPECT(pool.acquire(1000, 1) == 20); // idle outranks a quieter live slot
+	OneshotChannelPool keyed;
+	TEST_EXPECT(keyed.acquire(1234, 250, 9) == 12);
+	TEST_EXPECT(keyed.acquire(1234, 1, 9) == 12); // same wave + nonzero id forces score zero
+	TEST_EXPECT(keyed.acquire(1234, 1, 10) == 13);
+	return 0;
+}
+
+int test_radio_selection_keeps_unity_pitch_and_gates_view_layers() {
+    BankBuilder b;
+    const auto first = b.member(180, 0);
+    const auto third = b.member(220, 0);
+    const auto fp = b.layer(50, 0, 2, {first});
+    const auto tp = b.layer(80, 0, 4, {third});
+    const int set = b.set("radio", 0, {fp, tp});
+    b.file.multis[set].pitch_base = 98304;
+    b.file.multis[set].pitch_random_range = 32768;
+    SoundSelector selector;
+    const auto selected = select_radio_voice(b.file, {0, set}, selector, 4);
+    TEST_EXPECT(selected && selected->volume == 220 && selected->max_distance == 80 * 65536);
+    TEST_EXPECT(selector.select(99, 256, kRandom) == 3); // one pick, no pitch draws
+    b.file.multis[set].set_flags = 1;
+    b.file.playlists[tp].flags |= 0x20;
+    TEST_EXPECT(!select_radio_voice(b.file, {0, set}, selector, 4));
+    return 0;
+}
+
 int main() {
-	int failed = 0;
+	int failed = test_radio_selection_keeps_unity_pitch_and_gates_view_layers();
 	failed |= test_index_is_case_insensitive_and_first_bank_wins();
+	failed |= test_pitch_draws_and_channel_pool();
 	failed |= test_distance_and_cull_range();
 	failed |= test_zero_range_fires_only_at_the_exact_source();
 	failed |= test_occlusion_inflates_the_fire_distance();

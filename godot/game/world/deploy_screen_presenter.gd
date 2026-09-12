@@ -262,6 +262,10 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 func _populate_spawn_list(sim: Simulation) -> void:
 	if _driver == null:
 		return
+	var status := sim.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT))
+	_apply_statics(status)
+	if status.permanent_death:
+		return
 	var list_id := _driver.widget_id(SPAWN_LIST)
 	if list_id < 0:
 		return
@@ -300,7 +304,6 @@ func _populate_spawn_list(sim: Simulation) -> void:
 			if _spawn_rows[row].param == keep_param:
 				_driver.select_row(list_id, row, false)
 				break
-	_apply_statics(sim)
 
 
 # Retail's inline text markup (<cRRGGBB> colour, <b> bold) the compiled list
@@ -333,8 +336,25 @@ func _hide_team_service_buttons() -> void:
 #    local revive window runs and the player is not in a seat —
 #    "<STROVER_MEDICTIMER>  <cFF4040><n>" and STROVER_CALLMEDIC formatted with
 #    the MedicReq binding's display string (KeyBinding_FormatDisplayString).
-func _apply_statics(sim: Simulation) -> void:
-	var status := sim.get_deploy_status()
+func _apply_statics(status: DeployStatus) -> void:
+	var instruction_id := _driver.widget_id("STATIC_INSTRUCTIONS_MSG")
+	var instruction2_id := _driver.widget_id("STATIC_INSTRUCTIONS2_MSG")
+	if instruction_id >= 0 and instruction2_id >= 0:
+		_driver.set_widget_shown(instruction_id, status.show_instruction)
+		_driver.set_widget_shown(instruction2_id, status.show_instruction2)
+		if status.replace_instruction:
+			_driver.set_widget_text(instruction_id, status.instruction_text)
+		_driver.set_widget_text(instruction2_id, status.instruction2_text)
+	if status.permanent_death:
+		var round_id := _driver.widget_id("STATIC_RESPAWN_MSG1")
+		var remaining_id := _driver.widget_id("STATIC_PSPRESPAWN_MSG1")
+		if round_id >= 0 and remaining_id >= 0:
+			_driver.set_widget_shown(round_id, status.show_round_status)
+			_driver.set_widget_shown(remaining_id, status.show_round_status)
+			if status.show_round_status:
+				_driver.set_widget_text(round_id, status.round_text)
+				_driver.set_widget_text(remaining_id, status.remaining_players_text)
+		return
 	var title_id := _driver.widget_id("STATIC_LIST_TITLE")
 	if title_id >= 0:
 		_driver.set_widget_shown(title_id, true)
@@ -346,7 +366,7 @@ func _apply_statics(sim: Simulation) -> void:
 			# The three sprintf arms are the engine's deploy_status_text
 			# (world/deploy_screen_feed.h), resolved through gametext by the sim.
 			_driver.set_widget_text(respawn_id,
-					sim.get_deploy_status_text(Strings.get_table(Strings.TABLE_GAMETEXT)))
+					status.respawn_text)
 	var psp_id := _driver.widget_id("STATIC_PSPRESPAWN_MSG1")
 	if psp_id >= 0:
 		var show_psp := status.show_psp_respawn

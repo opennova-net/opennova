@@ -32,6 +32,9 @@ public:
 	bool is_camp() const { return value_.camp; }
 	// The "Canned Msg" template key.
 	String get_key() const;
+	bool is_announcement() const { return value_.announce; }
+	String format_line(const String &tmpl, const String &unknown,
+			const String &bonus, const String &wpname) const;
 	String get_attacker() const;
 	String get_victim() const;
 	// The bonus-credited aux actor's name, only when that is the local player

@@ -355,6 +355,21 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
                 cw.scope_max_mag = parse_float_n(v, vl);
                 parsed = 1;
+            } else if (lower_match_key(lower, ll, "soundfireloop", 13)) {
+                consume_value_str(trimmed, tlen, 13, cw.soundfireloop, sizeof(cw.soundfireloop));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "soundtrailoff", 13)) {
+                consume_value_str(trimmed, tlen, 13, cw.soundtrailoff, sizeof(cw.soundtrailoff));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "vmacrotoken", 11)) {
+                consume_value_str(trimmed, tlen, 11, cw.vmacrotoken, sizeof(cw.vmacrotoken));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "soundhead", 9)) {
+                consume_value_str(trimmed, tlen, 9, cw.soundhead, sizeof(cw.soundhead));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "soundlockedtone", 15)) {
+                consume_value_str(trimmed, tlen, 15, cw.soundlockedtone, sizeof(cw.soundlockedtone));
+                parsed = 1;
             } else if (lower_match_key(lower, ll, "scope_max_zero", 14)) {
                 /* The scope-zero table: atol x3 in order -> +0x84 / +0x9C / +0xA0,
                    plus an optional fourth value -> +0x88, stored only when the line

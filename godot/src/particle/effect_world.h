@@ -170,6 +170,7 @@ public:
 			const Vector3 &p_position, const Vector3 &p_orientation = Vector3());
 	bool spawn_effect_by_handle(int64_t p_handle, const Vector3 &p_position,
 			const Vector3 &p_orientation = Vector3());
+    std::shared_ptr<opennova::particle::EffectScene> shared_native_scene() const;
 	void stop_group(int64_t p_group_id);
 	// The rotor-wash re-trigger: every child emitter of a live group spawns
 	// one particle at `p_position` along `p_forward`, bound to `p_force_zone`

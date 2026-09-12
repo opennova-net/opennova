@@ -18,3 +18,8 @@ void Simulation::finish_script_voice(uint64_t p_serial, const opennova::lwf::Wav
 bool Simulation::play_script_wave(const String &p_filename) {
     return kernel_->world.script.voice.wave(kernel_->world, p_filename.utf8().get_data()) == 0;
 }
+
+void Simulation::set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver) {
+    voice_set_resolver_ = std::move(p_resolver);
+    kernel_->world.script.voice.set_set_resolver(voice_set_resolver_);
+}

@@ -624,7 +624,7 @@ bool run_empty_slot_sweep_retires_the_row() {
 
 // The host notifies every non-player death as S2C 0x13 [u16 handle][i16 killer].
 // The connection surfaces the validated body, the replica fold zeroes the row's
-// health, and drain_entity_deaths hands the record to the embedding sim exactly
+// health, and drain_effect_commands hands the record to the embedding sim exactly
 // once, so it can run the class death callback (reason 4 — the husk/explosion
 // chain) on the world twin. Regression: 0x13 used to be dropped at the
 // connection's tag chain — a joiner never saw a destructible die.
@@ -662,7 +662,7 @@ bool run_entity_death_notify_reaches_the_sim() {
 	if (!expect(before != nullptr && !before->health_known,
 			"0x13: the streamed static row exists, health unwitnessed"))
 		return false;
-	if (!expect(client.drain_entity_deaths().empty(),
+	if (!expect(client.view().drain_effect_commands().empty(),
 			"0x13: no death surfaced before the notify"))
 		return false;
 
@@ -681,12 +681,12 @@ bool run_entity_death_notify_reaches_the_sim() {
 	if (!expect(after != nullptr && after->health_known && after->health_word == 0,
 			"0x13: the fold zeroes the row's health (retail Health = 0)"))
 		return false;
-	const std::vector<EntityDeathRecord> deaths = client.drain_entity_deaths();
-	if (!expect(deaths.size() == 1 && deaths[0].entity_handle == kBarrel &&
-				deaths[0].death_anim_state_id == 3,
+	const auto deaths = client.view().drain_effect_commands();
+	if (!expect(deaths.size() == 1 && std::get<ns::EntityDeathEvent>(deaths[0]).entity_handle == kBarrel &&
+				std::get<ns::EntityDeathEvent>(deaths[0]).death_anim_state_id == 3,
 			"0x13: exactly one death record reaches the sim drain"))
 		return false;
-	if (!expect(client.drain_entity_deaths().empty(),
+	if (!expect(client.view().drain_effect_commands().empty(),
 			"0x13: the drain is consume-once"))
 		return false;
 
@@ -696,16 +696,18 @@ bool run_entity_death_notify_reaches_the_sim() {
 	std::vector<uint8_t> body26;
 	body26.push_back(static_cast<uint8_t>(kBarrel & 0xFFu));
 	body26.push_back(static_cast<uint8_t>(kBarrel >> 8));
-	body26.push_back(0x07); // attacker
-	body26.push_back(0x00);
+	body26.push_back(0xFF); // section -1
+
+	body26.push_back(0xFF);
 	const std::vector<uint8_t> dg26 = frame_server_session(
 			server_tx, {make_protocol_message(0x26, body26)});
 	client.receive(dg26.data(), dg26.size());
 	(void)client.Client_ProcessNetworkFrame(3);
-	const std::vector<EntityDeathRecord> kills = client.drain_entity_deaths();
-	return expect(kills.size() == 1 && kills[0].entity_handle == kBarrel &&
-				kills[0].death_anim_state_id == 7,
-			"0x26: the kill-sync route reaches the same sim drain");
+	const auto kills = client.view().drain_effect_commands();
+	return expect(kills.size() == 1 && std::get<ns::EntityDeathEvent>(kills[0]).entity_handle == kBarrel &&
+				std::get<ns::EntityDeathEvent>(kills[0]).item_state && std::get<ns::EntityDeathEvent>(kills[0]).hit_section == -1 &&
+                std::get<ns::EntityDeathEvent>(kills[0]).death_anim_state_id == 0,
+			"0x26: the signed hit section reaches the native class-state route");
 }
 
 // S2C 0x46 bit15: bookkeeping only. The entity row must SURVIVE.

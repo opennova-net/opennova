@@ -144,4 +144,28 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     return handle;
 }
 
+// Clone the class callback's template, then bind its own definition and model.
+// [orig: Entity_CloneFromTemplateByType @ 0x4398A0]
+world::EntityHandle MissionKernel::spawn_item_piece(const world::Entity &seed) {
+    const auto *table = items_table();
+    const auto *def = table ? simassets::find_item_def(*table, seed.item_id + kItemIdOffset) : nullptr;
+    if (!def || seed.item_id == 0) return {};
+    const int pool = def->type == 3 ? 0 :
+            (def->type == 1 || def->type == 6) ? 1 :
+            (def->type == 2 || def->type == 5) ? 2 : -1;
+    if (pool < 0) return {};
+    const auto handle = world.registry.spawn(pool, seed);
+    if (!handle.valid()) return {};
+    simassets::resolve_item_traits(world, *table, item_wire_class_, handle);
+    // Template values win over definition initialization for these fields.
+    auto &piece = *world.registry.get(handle);
+    piece.health = seed.health;
+    piece.engine_flags = seed.engine_flags;
+    piece.alive = seed.alive;
+    piece.uniform_scale_q16 = seed.uniform_scale_q16;
+    piece.death_motion = seed.death_motion;
+    ensure_collision_instance(world, handle);
+    collision.refresh_after_registry_change(world);
+    return handle;
+}
 } // namespace opennova::mission

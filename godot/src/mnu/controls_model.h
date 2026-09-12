@@ -63,6 +63,7 @@ public:
 	// impulse-only and never sample). The one gameplay-sampler entry point —
 	// samples Godot Input here at the device seam.
 	bool is_token_pressed(const String &p_token) const;
+	String mouse_event_token(int p_button) const;
 	// The VK (0 = none) of the keyboard slot firing the token RIGHT NOW under
 	// those same two passes — the sampler's seam for rules that look at WHICH
 	// key fired (the USE hold's digit swallow). Mouse-mask holds report 0.

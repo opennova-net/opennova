@@ -3,6 +3,8 @@
 // 0028) with the shell's hook table folded into the role (ADR 0043 slice E8b).
 // See joiner_role.h for the ownership split; every phase keeps its witnesses.
 #include <runtime/inmatch/joiner_role.h>
+#include <runtime/inmatch/client_replica_emplaced.h>
+#include <runtime/inmatch/client_weapon_replay.h>
 
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/charattr_challenge.h>
@@ -48,13 +50,14 @@ namespace opennova::inmatch {
 JoinerRole::JoinerRole(KitSeams seams) : kit_seams(std::move(seams)) {}
 
 ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRole join_role,
-		const std::string &spectator_password) {
+		const std::string &spectator_password, const std::string &server_password) {
 	player_name_ = player_name;
 	join_role_ = join_role;
 	spectator_password_ = spectator_password;
+	server_password_ = server_password;
 	runtime = std::make_unique<ClientRuntime>(player_name);
 	runtime->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
-	runtime->set_join_request(join_role, spectator_password);
+	runtime->set_join_request(join_role, spectator_password, server_password);
 	return *runtime;
 }
 
@@ -73,7 +76,7 @@ void JoinerRole::bind(mission::MissionKernel &kernel) {
 bool JoinerRole::bring_up() {
 	const bool rebuild = !started_ || !runtime;
 	if (rebuild) {
-		create_runtime(player_name_, join_role_, spectator_password_);
+		create_runtime(player_name_, join_role_, spectator_password_, server_password_);
 		reset_for_runtime_rebuild();
 	}
 	runtime->set_world_ready(true);
@@ -573,6 +576,7 @@ void JoinerRole::pump() {
 	// them here is the retail recv-before-actions boundary, not presentation work.
 	refresh_wire_collision_proxies();
 	lap.mark(devtools::Slot::SIM_CLIENT_PROXIES);
+	sync_replica_weapon_slots(rt.state(), world, self_wire_handle_);
 	apply_gameplay_events();
 	apply_weather_sample();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
@@ -614,6 +618,11 @@ void JoinerRole::pump() {
 	// The weather tick follows the entity update on a client exactly as on
 	// the host [orig: Game_ProcessMainFrame @ 0x52674b -> @ 0x526774].
 	kernel.tick_weather();
+	if (!preround_active) {
+		rt.tick_remote_stance_sounds(world);
+		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle_);
+		rt.tick_remote_recoil();
+	}
 	lp.sync_local_mounted_input_heading();
 	// What the view arbiter reads from the session (death screen, end round,
 	// the death camera): the joiner samples it AFTER this frame's recv fold,
@@ -628,6 +637,7 @@ void JoinerRole::pump() {
 	// round short.
 	// [orig: WeaponAction_ProcessAllEntities @ 0x526786]
 	if (local_spawned_) {
+		tick_replica_weapon_slots(rt.state(), world);
 		tick_local_weapon();
 		lp.tick_medic_cooldown(rt.local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	}
@@ -1176,6 +1186,8 @@ void JoinerRole::apply_authoritative_health() {
 					// The embedder clears its device-input latches, seeds the
 					// look heading, and rebuilds the respawn loadout.
 					lp.reset_local_player_input(heading);
+                    lp.reset_for_new_round();
+                    rt.reset_local_round_state();
 					if (kit_seams.respawn) kit_seams.respawn();
 					redeploy_release_pending_ = false;
 					redeploy_health_updates_at_release_ = 0;
@@ -1647,34 +1659,7 @@ void JoinerRole::apply_gameplay_events() {
 	world::World &world = kernel.world;
 	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
-	rt.apply_received_sounds(world);
-	// S2C 0x13 entity-death notifies: run the class death callback on the world
-	// twin — retail's client zeroes Health and invokes deathCallback(entity, 4, 0),
-	// which for a destructible item IS the local husk-swap + death-explosion
-	// chain (the visual client's only live channel for another peer destroying a
-	// static; the 0x10/0x20 load batches never re-stream after load). Pool-0
-	// organics have no materialized world twin here — their death presentation
-	// rides the compact dead bit — and destruction_notify_item_damage's own
-	// gates keep AI-driven vehicles on their state-machine death path, exactly
-	// like the authority side.
-	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
-	//  deathAnimStateId store @0x42ebdf, cb(entity, 4, 0) @0x42ebf5;
-	//  cb == Entity_HandleDestructibleDeathEvent @0x440210 for destructibles]
-	for (const EntityDeathRecord &death : rt.drain_entity_deaths()) {
-		const world::EntityHandle handle{death.entity_handle};
-		if (handle.pool() < 1 || handle.pool() > 3) continue;
-		world::Entity *victim = materializer_.owned(world, handle);
-		if (victim == nullptr) continue;
-		victim->health = 0;
-		victim->alive = false;
-		// The wire word is the victim's +0x2C0 death-anim slot; retail stores
-		// it sign-extended into that same field before the callback (the
-		// field the 0x0A dead-record park also targets, D-NET-209).
-		// [orig: movsx @0x42eb8d, store @0x42ebdf]
-		victim->death_anim_state = death.death_anim_state_id;
-		victim->last_attacker = world::EntityHandle{};
-		world::destruction_notify_item_damage(world, *victim, 4);
-	}
+	rt.apply_received_effects(world);
 
 	// S2C 0x23 replicated WAC commands: run the registry row's handler here
 	// with the operands the wire carried — the same body the host VM ran for a
@@ -1767,6 +1752,7 @@ void JoinerRole::apply_gameplay_events() {
 					(shooter_row->state_flags &
 					 world::kEntityFlagScopeRaised) != 0;
 			source.recoil_pitch = &shooter_row->recoil_pitch;
+			replica_weapon_action_source(*shooter_row, world, ev.flags, source);
 			round.source_state = &source;
 			// The adm-arm action sounds play at the SHOOTER's position, and a
 			// decoded remote shooter has no local entity — supply its row
@@ -1793,8 +1779,7 @@ void JoinerRole::apply_gameplay_events() {
 		// the shooter's EYE — Position + CameraOffset), it executes the addressed
 		// def's action rows at the weapon's own userpoint instead.
 		// [orig: @0x42f521 / @0x42f6ce]
-		round.wire_round_flags = static_cast<uint8_t>(ev.flags &
-				(kRoundEventFlagAltFire | kRoundEventFlagAdmIndexed));
+		round.wire_round_flags = ev.flags;
 		world.round_sim.spawn(
 				world, round, world::RoundConsequenceMode::VisualOnly);
 	}
@@ -1854,10 +1839,7 @@ void JoinerRole::apply_gameplay_events() {
 			player->inf.reload_anim_ticks = 80;
 	}
 
-	// Decoded shots above stamp the peer accumulator first; retail's client body
-	// update then decays it in this same frame. Locally predicted fire is pumped
-	// later, after the local World body tick, so it begins decaying next frame.
-	rt.tick_remote_recoil();
+	// The frame decays remote recoil after the emplacement channels consume it.
 }
 
 void JoinerRole::reset_for_join() {

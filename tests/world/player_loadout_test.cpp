@@ -141,6 +141,21 @@ void test_class_latch_survives_kit_reset() {
     CHECK(r.inventory_valid);
 }
 
+
+void test_armor_carry_bit_follows_accepted_loadout() {
+    Rig r;
+    r.world.registry.configure_pool(0, 1);
+    r.world.cached.local_player = r.world.registry.spawn(0, Entity{});
+    Entity *player = r.world.registry.get(r.world.cached.local_player);
+    r.world.tables.weapons.entries[r.m4].flags |= weapon_flag::kArmor;
+    CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, false));
+    CHECK((player->carry_flags & 8) != 0);
+    CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, kit_of("WPN_KNIFE"), 8, false));
+    CHECK((player->carry_flags & 8) == 0);
+}
+
 } // namespace
 
 // The armory open-time class policy [orig: Armory_ResolveSelectedClass
@@ -183,6 +198,7 @@ int main() {
     test_promotion_applies_availability_then_filters_kit();
     test_accept_requested_ammo_and_banned_validation();
     test_class_latch_survives_kit_reset();
+    test_armor_carry_bit_follows_accepted_loadout();
     test_armory_class_policy();
     test_player_info_menu_policy();
     if (failures == 0) std::printf("player_loadout_test: all passed\n");

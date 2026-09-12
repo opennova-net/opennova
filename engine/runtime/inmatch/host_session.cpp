@@ -73,63 +73,6 @@ SessionStartup make_session_startup(const HostConfig &cfg) {
 	return startup;
 }
 
-// Split one semantic message into the retail protocol's FIRST/MID/FINAL
-// fragment records when its encoded form cannot fit the installed session
-// packet ceiling. The receiver's reassemble_protocol_payload joins these back
-// into one dispatch, so producer semantics and ordering stay unchanged.
-std::vector<ProtocolMessage> envelope_protocol_message(
-		const ProtocolMessage &message) {
-	std::vector<uint8_t> encoded;
-	if (append_protocol_message(encoded, message) &&
-			PROTOCOL_PACKET_HEADER_SIZE + encoded.size() <=
-					kGameSessionMaxPacketBytes)
-		return {message};
-
-	const std::size_t skip_bytes = message.flags.skip1
-			? 1u
-			: (message.flags.skip2 ? 2u : 0u);
-	const std::size_t max_payload =
-			kGameSessionMaxPacketBytes - PROTOCOL_PACKET_HEADER_SIZE -
-			kProtocolMessageLen16Bytes - skip_bytes;
-	// Preserve dispatch-table and skip metadata; length/fragment state belongs
-	// to each newly emitted physical record.
-	constexpr uint8_t kSemanticFlagMask =
-			PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_SKIP1 |
-			PROTOCOL_MSG_FLAG_SKIP2 | 0x01u;
-	const uint8_t base_flags = message.flags.raw & kSemanticFlagMask;
-
-	std::vector<ProtocolMessage> out;
-	for (std::size_t offset = 0; offset < message.payload.size();) {
-		const std::size_t count = std::min(
-				max_payload, message.payload.size() - offset);
-		const bool first = offset == 0;
-		const bool final = offset + count == message.payload.size();
-		uint8_t fragment_flags = 0;
-		if (!final)
-			fragment_flags = first
-					? PROTOCOL_MSG_FLAG_FRAG_CONT
-					: static_cast<uint8_t>(PROTOCOL_MSG_FLAG_FRAG_CONT |
-							PROTOCOL_MSG_FLAG_FRAG_END);
-		else if (!first)
-			fragment_flags = PROTOCOL_MSG_FLAG_FRAG_END;
-		ProtocolMessage fragment = make_protocol_message(
-				message.tag,
-				std::vector<uint8_t>(message.payload.begin() + offset,
-						message.payload.begin() + offset + count),
-				static_cast<uint8_t>(base_flags | PROTOCOL_MSG_FLAG_LEN16 |
-						fragment_flags));
-		fragment.skip_bytes = message.skip_bytes;
-		fragment.reliable = message.reliable;
-		fragment.capacity_exempt = message.capacity_exempt;
-		fragment.retention_flushes = message.retention_flushes;
-		fragment.retention_deadline_flush =
-				message.retention_deadline_flush;
-		out.push_back(std::move(fragment));
-		offset += count;
-	}
-	return out;
-}
-
 std::vector<ProtocolMessage> send_session_batches(
 		HostOwner &owner, opennova::IDatagramSocket &sock,
 		NapiNPConnection &connection, std::vector<ProtocolMessage> messages) {
@@ -154,6 +97,7 @@ std::vector<ProtocolMessage> send_session_batches(
 	std::size_t available_nodes = session_outbound_message_prefix_count(
 			connection.seq, std::numeric_limits<std::size_t>::max());
 	bool ordinary_tail_rejected = false;
+	std::size_t planned_packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
 	for (std::size_t semantic_index = 0;
 	     semantic_index < messages.size(); ++semantic_index) {
 		// A pre-enveloped FIRST/MID/FINAL run re-queued by an earlier failed
@@ -179,10 +123,12 @@ std::vector<ProtocolMessage> send_session_batches(
 			}
 		}
 		std::vector<ProtocolMessage> pieces;
+		std::size_t unit_packet_bytes = planned_packet_bytes;
 		for (std::size_t piece_index = semantic_index;
 				piece_index <= unit_end; ++piece_index) {
 			std::vector<ProtocolMessage> sub =
-					envelope_protocol_message(messages[piece_index]);
+					split_protocol_message_to_fill(messages[piece_index],
+							kGameSessionMaxPacketBytes, unit_packet_bytes);
 			pieces.insert(pieces.end(),
 					std::make_move_iterator(sub.begin()),
 					std::make_move_iterator(sub.end()));
@@ -215,6 +161,7 @@ std::vector<ProtocolMessage> send_session_batches(
 			continue;
 		}
 		available_nodes -= charged_nodes;
+		planned_packet_bytes = unit_packet_bytes;
 		enveloped.insert(enveloped.end(),
 				std::make_move_iterator(pieces.begin()),
 				std::make_move_iterator(pieces.end()));
@@ -237,7 +184,7 @@ std::vector<ProtocolMessage> send_session_batches(
 			return append_capacity_retry(std::vector<ProtocolMessage>(
 					enveloped.begin() + i, enveloped.end()));
 		}
-		if (PROTOCOL_PACKET_HEADER_SIZE + candidate.size() >
+		if (PROTOCOL_DATAGRAM_OVERHEAD + candidate.size() >
 				kGameSessionMaxPacketBytes) {
 			if (!flush()) {
 				batch.insert(batch.end(), enveloped.begin() + i, enveloped.end());
@@ -502,6 +449,7 @@ static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &so
 						staged.protocol_flags_raw);
 				message.reliable = staged.reliable;
 				message.capacity_exempt = staged.capacity_exempt;
+				message.retention_flushes = staged.retention_flushes;
 				pending_session_messages[c.peer].push_back(std::move(message));
 			}
 		}

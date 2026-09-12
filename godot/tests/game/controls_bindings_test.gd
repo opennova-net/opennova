@@ -29,7 +29,7 @@ func after_each() -> void:
 func _write_stale_seat_blob(stamped: bool) -> void:
 	var config := ConfigFile.new()
 	config.set_value(ControlsBindings.SECTION, ControlsBindings.KEY,
-			{"seat1": PackedInt32Array([49, 0, 0, 0, 0, 0])})
+			{"seat1": PackedInt32Array([49, 0, 0, 0, 0, 0, 0, 0])})
 	if stamped:
 		config.set_value(ControlsBindings.SECTION, ControlsBindings.SCHEMA_KEY,
 				ControlsBindings.SCHEMA)
@@ -74,7 +74,7 @@ func test_persist_stamps_the_file() -> void:
 			ControlsBindings.SCHEMA, "the stamp lands beside the records")
 	var blob: Dictionary = config.get_value(ControlsBindings.SECTION, ControlsBindings.KEY, {})
 	var seat1: PackedInt32Array = blob.get("seat1", PackedInt32Array())
-	assert_eq(seat1.size(), 6, "the seat1 record persists")
+	assert_eq(seat1.size(), 8, "the seat1 record persists")
 	assert_eq(seat1[2], 17, "the persisted seat1 carries the Ctrl modifier")
 	var fresh := ControlsModel.new()
 	assert_true(ControlsBindings.load_saved_records(fresh), "the stamped file round-trips")

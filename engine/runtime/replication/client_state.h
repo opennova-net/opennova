@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <runtime/hud/feed_format.h>
 #include <net/npwire/entity_class.h> // EntityClass
 #include <net/npwire/ingame_decode.h> // EndRoundStats (the 0x56 board)
 #include <runtime/world/guided_missile_flight.h> // the stng pursuit integrator (D-NET-64)
@@ -32,6 +33,7 @@ struct ClientRosterSlot {
 	                          // refreshes it too [orig: @0x42fc7c]
 	uint8_t downed_revive_seconds = 0; // 0x0008 / S2C 0x54 low seven bits
 	bool medic_request_active = false; // 0x0008 / S2C 0x54 bit seven
+	uint8_t radio_mute_flags = 0; // local preferences: bit0 voice, bit1 chat [orig: @0x430C50]
 	uint8_t quality = 0;      // 0x0400, clamped 4 [orig: @0x43170d] — the connection-icon band
 	int16_t entity_slot = -1; // pool-0 slot this connection drives; -1 = none
 	                          // [orig: the no-entity -1 store @0x431489]
@@ -85,6 +87,10 @@ struct ClientScoreboard {
 	                          // [orig: @0x50dd54]
 	uint8_t in_game_count = 0;
 	uint8_t spectator_count = 0;
+	// Despite the IDB name g_scoreboardDeadRowCount, this counts live,
+	// nonspectating entities only, at 0x16 parse time in permanent-death mode.
+	// [orig: NapiNPClientMsg_PlayerList @ 0x42FAE0, increment @ 0x42FD2A]
+	int alive_player_count = 0;
 	std::vector<ClientScoreboardRow> rows;
 	std::vector<ClientScoreboardTeam> teams;  // T0 neutral + one per team
 	// The team-table count byte — the host serializes it from its configured
@@ -224,6 +230,9 @@ struct ClientEntityState {
 	int16_t net_anim_current = -1;
 	int16_t net_anim_pending = 0;
 	uint8_t net_stance_bits = 0; // retained MoveOrder bits 8/9, rebit on player receive
+	uint8_t stance_sound_state = 0; // player body entity+0x304
+	uint8_t radio_request = 0; // entity+885, receive event 0x6D
+	uint8_t radio_request_seconds = 0; // entity+886
 	// The pending promotion boundary in the growing rm_phase convention,
 	// armed by the tick when a pending is present (retail: the deferral ORs
 	// 0x40000 into the channel each tick and AnimChannel_AdvancePlayback
@@ -241,6 +250,8 @@ struct ClientEntityState {
 	// pose — so this byte, not any replicated anim id, is how an observer knows what a
 	// remote player is holding. 0xFF = none. [orig: client store @0x4c11f2]
 	uint8_t equipped_adm_index = 0xFF;
+	// Runtime borrow, never a wire field; on-foot remote slots are null.
+	uint16_t weapon_slot_handle = 0xFFFF;
 	// BMS team (1=Blue/2=Red) from every world-stream record that carries
 	// entity+354 (pool-0 0x0C, pool-1 0x0D, pool-2 0x10, pool-3 0x20).
 	// A decoded flag-gated zero is assigned too; 0xFF means no team-bearing
@@ -319,6 +330,10 @@ struct ClientEntityState {
 	// stance-indexed ammo impulse after calculating that shot's spread; the
 	// client body pass decays it later in the same frame.
 	int32_t recoil_pitch = 0;
+	// Client-owned +0x322/+0x324 gun channel, advanced by the joiner tick.
+	int16_t emplaced_gun_yaw_word = 0;
+	int16_t emplaced_gun_pitch_word = 0;
+	bool emplaced_controls_valid = false;
 	// Pool-1 0x0D entity+368 relationship. The spawn positions are absolute;
 	// ClientReplicaPipeline captures this row's rigid carrier-local pose after the
 	// whole batch is present, then recomposes it from the followed carrier's live
@@ -716,6 +731,12 @@ struct ClientState {
 	std::array<int32_t, 255> weapon_availability{};
 	uint64_t weapon_availability_revision = 0;
 	bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
+	hud::KillAnnouncement kill_announcement;
+	// [orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]
+	bool permanent_death = false;
+	bool spectators_allowed = false;
+	// [orig: NapiNPClientMsg_0x00F @ 0x42E200, byte_A860DD]
+	bool deploy_check_secured_spawn = false;
 	// The joiner's copy of the round clock, in 62 Hz ticks (-1 = untimed),
 	// folded from the 0x0A sub-block-1 timer snapshot: 62 x the wire's whole
 	// seconds, or -1 when the wire value is negative. Feeds the end-round
@@ -813,6 +834,13 @@ struct ClientState {
 	ClientSpawnWaveStatus spawn_waves;
 	ClientDeathCameraTarget death_camera;
 	std::array<ClientRosterSlot, 256> roster{};
+	std::vector<std::string> location_names;
+	struct RadioTarget {
+		uint16_t handle = 0xFFFF;
+		uint32_t ticks_remaining = 0;
+		int32_t position[3] = {};
+		bool friendly = false;
+	} radio_target;
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;
 

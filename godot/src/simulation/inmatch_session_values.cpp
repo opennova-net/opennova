@@ -19,6 +19,8 @@ void MissionFrameInput::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_movement", "forward", "back", "left",
 			"right", "lean_left", "lean_right", "jump"),
 			&MissionFrameInput::set_movement);
+    ClassDB::bind_method(D_METHOD("set_view_keys", "free_look", "up", "down", "left", "right"),
+            &MissionFrameInput::set_view_keys);
 	ClassDB::bind_method(D_METHOD("set_look_delta", "delta"),
 			&MissionFrameInput::set_look_delta);
 	ClassDB::bind_method(D_METHOD("get_look_delta"),
@@ -77,6 +79,16 @@ void MissionFrameInput::set_movement(bool p_forward, bool p_back, bool p_left,
 	movement.lean_left = p_lean_left;
 	movement.lean_right = p_lean_right;
 	movement.jump = p_jump;
+}
+
+void MissionFrameInput::set_view_keys(bool p_free_look, bool p_up, bool p_down,
+        bool p_left, bool p_right) {
+    auto &movement = value_.player.movement;
+    movement.free_look = p_free_look;
+    movement.look_up = p_up;
+    movement.look_down = p_down;
+    movement.turn_left = p_left;
+    movement.turn_right = p_right;
 }
 
 void MissionFrameInput::set_look_delta(const Vector2 &p_delta) {

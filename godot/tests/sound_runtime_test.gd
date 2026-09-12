@@ -422,3 +422,30 @@ func _build_wav(samples: PackedByteArray, channels: int, rate: int, bits: int) -
 	buf.put_u32(data_size)
 	buf.put_data(samples)
 	return buf.data_array
+
+
+func test_oneshots_share_fourteen_unreserved_channels_and_apply_pitch() -> void:
+	var samples := PackedByteArray()
+	samples.resize(22050 * 2 * 5)
+	var root := _real_root({"pool.wav": _build_wav(samples, 1, 22050, 16)})
+	var profile := _profile_with_set("POOL", "pool.wav")
+	profile.set_set_field(0, "pitch_base", 98304)
+	profile.set_set_field(0, "pitch_random_range", 32768)
+	profile.set_member_field(0, 0, 0, "base_pitch", 1.0)
+	profile.set_member_field(0, 0, 0, "rand_pitch", 0.125)
+	var bank = SoundBank.create(root)
+	bank.add_bank(profile)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	for _i in range(14):
+		assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "POOL", StringName(), Vector3.ZERO))
+	var first := parent.get_child(0) as AudioStreamPlayer3D
+	assert_almost_eq(first.pitch_scale, 110686.0 / 65536.0, 0.00001,
+			"set and member pitch jitter reach the physical voice")
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "POOL", StringName(), Vector3.ZERO))
+	assert_true(first.is_queued_for_deletion(), "the fifteenth voice steals the first tied slot")
+	var live := 0
+	for child in parent.get_children():
+		if child is AudioStreamPlayer3D and not child.is_queued_for_deletion():
+			live += 1
+	assert_eq(live, 14, "channels 0 through 11 remain reserved in the 26-channel device")

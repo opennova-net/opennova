@@ -343,7 +343,7 @@ void Simulation::respawn_local_player_loadout() {
 	// The respawn edge also returns the map state to its spawn defaults
 	// (witness at hud::HudMapControl — Game_InitRespawnState +
 	// Player_InitPlayer zoom seeds).
-	player_.hud_map_control.reset_spawn();
+	kernel_->local.hud_map_control.reset_spawn();
 }
 
 void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {

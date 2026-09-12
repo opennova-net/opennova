@@ -9,11 +9,10 @@
 namespace opennova::wac {
 
 // A function-call argument: a primary operand (variable, literal, symbolic
-// reference, or string), with an optional unary minus folded in.
+// reference, or string). A signed literal keeps its minus in the lexeme.
 struct Arg {
     std::string text;     // raw operand lexeme (the resolver parses it)
     bool is_string = false;
-    bool negate = false;  // unary minus on a numeric literal
 };
 
 // A command invocation (condition or action). `name` is looked up in the
@@ -25,14 +24,16 @@ struct Call {
     uint32_t source_index = 0;
 };
 
-// A boolean / condition expression: leaves are calls; combinators are the WAC
-// boolean operators. Comparison operators between bare operands are lowered to
-// the corresponding registry call (== -> eq, < -> lt, ...) by the parser.
+// Expression calls retain the retail accumulator operations and stack edges.
+// Auto parentheses remain open until a closing parenthesis or statement boundary;
+// they are not a conventional precedence tree.
 struct Expr {
-    enum Kind { Leaf, Not, And, Or, Xor, Binary, Group } kind = Leaf;
-    std::string op;           // Binary's authored operator
-    Call call;                 // Leaf
-    std::vector<Expr> kids;    // Not (1 child), And/Or/Xor (2+)
+    enum Kind { Leaf, Sequence, Pop, Store } kind = Leaf;
+    std::string op;            // accumulator fold, empty for a plain call
+    bool negate = false;      // NOT on a call result or saved stack byte
+    bool push = false;        // save the accumulator byte before this call
+    Call call;                // Leaf
+    std::vector<Expr> kids;    // Sequence
 };
 
 struct Stmt;

@@ -337,7 +337,7 @@ void test_bike_crash_test_and_eject() {
 
 	vehicle_suspension_bike_crash_test(veh, false, false, true);
 	CHECK(veh.veh.crash_request == 0, "a never-driven bike does not request");
-	veh.veh.has_been_driven = 1;
+	veh.veh.wheelie_active = 1;
 	vehicle_suspension_bike_crash_test(veh, true, false, true);
 	CHECK(veh.veh.crash_request == 0, "a wheel on the ground: no request");
 	vehicle_suspension_bike_crash_test(veh, false, false, false);
@@ -349,7 +349,7 @@ void test_bike_crash_test_and_eject() {
 	CHECK(!veh.seats[0].occupant.valid() && !veh.primary_occupant.valid(),
 			"the bike seed ejects its rider");
 	CHECK(!w.registry.get(dh)->mounted, "the rider is dismounted");
-	CHECK(veh.veh.has_been_driven == 1, "the contact fall keeps its driven force until it lands");
+	CHECK(veh.veh.wheelie_active == 1, "the contact fall keeps its driven force until it lands");
 }
 
 // Sink growth: off-ground pads only, gated on the latch bytes for the

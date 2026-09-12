@@ -128,7 +128,7 @@ void FirePresenter::present() {
 // @ 0x528e20 directly]. The local player's own body sounds DO play (retail
 // plays your own steps; only fire has an action-slot presentation to defer to).
 // Slots 43/44 (chute flap / freefall) refire every body tick by design; the
-// exclusive key folds the refires into one continuous voice (D-SND-10).
+// repeated fires compete for the same finite audio channel pool.
 void FirePresenter::present_slot_sounds(const std::vector<opennova::world::SoundSlotEvent> &p_events) {
 	if (p_events.empty()) {
 		return;
@@ -141,18 +141,12 @@ void FirePresenter::present_slot_sounds(const std::vector<opennova::world::Sound
 		if (ev.set_name[0] == '\0') {
 			continue;
 		}
-		const int slot = static_cast<int>(ev.slot);
-		const int handle = static_cast<int>(ev.source_handle);
-		String key;
-		if (slot == SLOT_CHUTE_FLAP || slot == SLOT_FREEFALL) {
-			key = vformat("%d:%d", handle, slot);
-		}
 		// Mission-frame 16.16 -> godot (x, z, -y), the fire drain's mapping.
 		const Vector3 pos(static_cast<float>(ev.pos[0]) / 65536.0f,
 				static_cast<float>(ev.pos[2]) / 65536.0f,
 				static_cast<float>(-ev.pos[1]) / 65536.0f);
         const int source_id = sim() ? sim()->sound_source_bms_id(ev.source_handle) : 0;
-		if (audio_node->slot_soundset(String(ev.set_name), pos, key, source_id)) {
+		if (audio_node->slot_soundset(String(ev.set_name), pos, source_id)) {
 			++stat_sounds_;
 		}
 	}
@@ -262,7 +256,8 @@ void FirePresenter::present_fire_sounds(const std::vector<opennova::world::Ready
 		return;
 	}
 	for (const opennova::world::ReadyFireSound &row : p_sounds) {
-		audio_node->fire_soundset(String::utf8(row.set_name.c_str()), mission_to_godot(row.pos),
+		if (row.interface_set) audio_node->ui_soundset(String::utf8(row.set_name.c_str()));
+		else audio_node->fire_soundset(String::utf8(row.set_name.c_str()), mission_to_godot(row.pos),
 				row.source_bms_id);
 		++stat_sounds_;
 	}

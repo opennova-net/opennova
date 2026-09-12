@@ -6,9 +6,9 @@
 // WAC compiler binds FX literals to at compile time
 // [orig: CEffectWorld_InternEffectHandle @0x5F7310 -> CEffectWorld_FindEffectDefByName
 //  @0x5E34F0; an unknown name clones stockeffect under the requested name].
-// MissionKernel keeps one of these so the compiler never opens a second
-// EffectScene (group/emitter pools) just to bind names; the shell's EffectWorld
-// re-interns every name by string, so the two intern orders need not match.
+// The compiler binds names without opening a scene. MissionKernel also runs
+// callback-owned groups for native hosts; a renderer can replace that scene.
+// EffectWorld re-interns names by string, so intern orders need not match.
 
 #include <runtime/particle/effect_scene.h> // EffectHandle, ParticleFile
 

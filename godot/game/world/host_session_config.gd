@@ -1,5 +1,5 @@
 class_name HostSessionConfig
-extends RefCounted
+extends HostSessionOptions
 
 ## Typed record for a hosted co-op game-session request (ADR 0017): what the player chose
 ## on a host screen, carried menu -> shell -> GameWorld.load_mission_as_host -> the mission
@@ -57,65 +57,54 @@ const SPECTATOR_PASSWORD_MAX_LENGTH := 17
 const CHANNEL_LAN := "LAN"
 const CHANNEL_NOVAWORLD := "NovaWorld"
 
+# The native base owns session fields and host-dialog readback policy.
+# Rotation selection and the menu's mission filter belong to this shell.
 var mission := ""       ## the .bms to load (host screens put the rotation's first pick here)
-var missions: Array[String] = []  ## the SELECTED_MISSIONS rotation (rotation advance is future work)
-var dir := ""           ## resource-dir override (dev/tests); empty = the persisted directory
-var server_name := "COOPGAME"
-var player_name := "Player"  ## the host's own callsign (rides ClientAuth like any player's)
-var expansion := ""     ## g_ExpansionName: what the process actually mounted; "" for base JO
-var integrity_profile := ""  ## explicit registered retail corpus; empty = no host-side CRC validation
-var max_players := DEFAULT_MAX_PLAYERS  ## lobby-advertised player cap
-## Retail's signed spectator setting: 0 disables, -1 shares max_players, and a
-## positive value adds that many spectator-only slots.
-var spectator_slots := 0
-var spectator_password := ""
-var game_type := GAME_TYPE_COOP  ## the numeric session g_GameType [orig: @ 0x24D2128]
-## Enabled Soldier Class ids; the no-restriction mask's engine home is
-## engine/runtime/world player_loadout.h [orig: g_hostClassAllowMask @ 0x24D59FC].
-var class_allow_mask := WeaponDatabase.CLASS_ALLOW_ALL
-var game_type_auto := false  ## derive g_GameType from the loaded mission's attrib mode
+var missions: Array[String] = []
 var game_type_attr := ""  ## the GAME_TYPE spin's raw value attr (HG_COOP=2, ...), for later
-var channel := CHANNEL_LAN
-## Retail g_LanMode: authority LAN send divider 1..4 -> 12/6/4/3 ticks.
-## Invalid values fall back to retail mode 2; the shipped/default mode is 1.
-var lan_mode := 1
-var bind_port := DEFAULT_LAN_PORT
-var dedicated := false  ## dedicated host: the listen server runs with NO local player
-## Retail host default; the witness [orig: g_sessionvar_custom_text @ 0x522123]
-## lives at the engine home, engine/net/npwire game_type.h kCustomTextDefault.
-var custom_text := NetProtocol.custom_text_default()
-# NovaWorld gate registration (CHANNEL_NOVAWORLD): where GameWorld registers the browsable
-# listen host. An empty gate host means pure LAN — nothing is registered.
-var nw_gate_host := ""
-var nw_gate_port := DEFAULT_GATE_PORT
-var region := "us"
-var advertise := ""     ## explicit advertised-IP override for the gate row
+var dedicated: bool:
+	get: return not serve_and_play
+	set(value): serve_and_play = not value
 
-# Retail's Config_SetDefaults rule baseline, also witnessed in 00TRg's S2C 0x08
-# block. The engine home is engine/net/npwire game_type.h game_rules::kDefault*;
-# these ride the typed request so every host producer shares one rule baseline.
-var respawn_time := NetProtocol.DEFAULT_RESPAWN_TIME
-var time_limit_minutes := NetProtocol.DEFAULT_TIME_LIMIT_MINUTES
-var replay_enabled := NetProtocol.DEFAULT_REPLAY_ENABLED
-var max_team_lives := NetProtocol.DEFAULT_MAX_TEAM_LIVES
-var score_limit := NetProtocol.DEFAULT_SCORE_LIMIT
-var max_score := NetProtocol.DEFAULT_MAX_SCORE
-var koth_delta := NetProtocol.DEFAULT_KOTH_DELTA
-var flag_return_ticks := NetProtocol.DEFAULT_FLAG_RETURN_TICKS
-var capture_duration_seconds := NetProtocol.DEFAULT_CAPTURE_DURATION_SECONDS
-var capture_speed_setting := NetProtocol.DEFAULT_CAPTURE_SPEED_SETTING
-var spawn_wave_time_base := NetProtocol.DEFAULT_SPAWN_WAVE_TIME_BASE
-var spawn_wave_time_zone := NetProtocol.DEFAULT_SPAWN_WAVE_TIME_ZONE
-## Retail cfg `nodefaultspawnpoints`: when enabled, Default Spawn is available
-## only when this team has no unnumbered or fully controlled numbered zone.
-## [orig: Server_ProcessClientRequestRespawn @0x519C8E;
-## Entity_HasAliveEntityOfTeam @0x4FC7B0]
-var default_spawn_requires_no_team_zone := NetProtocol.DEFAULT_SPAWN_REQUIRES_NO_TEAM_ZONE
-var num_teams := NetProtocol.DEFAULT_NUM_TEAMS
-var respawn_timeout := NetProtocol.DEFAULT_RESPAWN_TIMEOUT
-var start_delay := NetProtocol.DEFAULT_START_DELAY
-var destroy_buildings := NetProtocol.DEFAULT_DESTROY_BUILDINGS
-var death_messages := NetProtocol.DEFAULT_DEATH_MESSAGES
+
+func _init() -> void:
+	dir = ""           ## resource-dir override (dev/tests); empty = the persisted directory
+	server_name = "COOPGAME"
+	player_name = "Player"  ## the host's own callsign (rides ClientAuth like any player's)
+	expansion = ""     ## g_ExpansionName: what the process actually mounted; "" for base JO
+	integrity_profile = ""  ## explicit registered retail corpus; empty = no host-side CRC validation
+	max_players = DEFAULT_MAX_PLAYERS  ## lobby-advertised player cap
+	spectator_slots = 0
+	spectator_password = ""
+	game_type = GAME_TYPE_COOP  ## the numeric session g_GameType [orig: @ 0x24D2128]
+	class_allow_mask = WeaponDatabase.CLASS_ALLOW_ALL
+	game_type_auto = false  ## derive g_GameType from the loaded mission's attrib mode
+	channel = CHANNEL_LAN
+	lan_mode = 1
+	bind_port = DEFAULT_LAN_PORT
+	custom_text = NetProtocol.custom_text_default()
+	nw_gate_host = ""
+	nw_gate_port = DEFAULT_GATE_PORT
+	region = "us"
+	advertise = ""     ## explicit advertised-IP override for the gate row
+	respawn_time = NetProtocol.DEFAULT_RESPAWN_TIME
+	time_limit_minutes = NetProtocol.DEFAULT_TIME_LIMIT_MINUTES
+	replay_enabled = NetProtocol.DEFAULT_REPLAY_ENABLED
+	max_team_lives = NetProtocol.DEFAULT_MAX_TEAM_LIVES
+	score_limit = NetProtocol.DEFAULT_SCORE_LIMIT
+	max_score = NetProtocol.DEFAULT_MAX_SCORE
+	koth_delta = NetProtocol.DEFAULT_KOTH_DELTA
+	flag_return_ticks = NetProtocol.DEFAULT_FLAG_RETURN_TICKS
+	capture_duration_seconds = NetProtocol.DEFAULT_CAPTURE_DURATION_SECONDS
+	capture_speed_setting = NetProtocol.DEFAULT_CAPTURE_SPEED_SETTING
+	spawn_wave_time_base = NetProtocol.DEFAULT_SPAWN_WAVE_TIME_BASE
+	spawn_wave_time_zone = NetProtocol.DEFAULT_SPAWN_WAVE_TIME_ZONE
+	default_spawn_requires_no_team_zone = NetProtocol.DEFAULT_SPAWN_REQUIRES_NO_TEAM_ZONE
+	num_teams = NetProtocol.DEFAULT_NUM_TEAMS
+	respawn_timeout = NetProtocol.DEFAULT_RESPAWN_TIMEOUT
+	start_delay = NetProtocol.DEFAULT_START_DELAY
+	destroy_buildings = NetProtocol.DEFAULT_DESTROY_BUILDINGS
+	death_messages = NetProtocol.DEFAULT_DEATH_MESSAGES
 
 
 ## Retail's mission-attrib -> g_GameType table — the engine home is
@@ -133,48 +122,7 @@ static func game_type_for_mission_mode(mode: int) -> int:
 ## and stamps the mission-derived identity (mission_name / mission_file /
 ## spawn_names / game_root) on top before handing it to the sim.
 func to_session_options() -> HostSessionOptions:
-	var options := HostSessionOptions.new()
-	# The load-side identity the world's host entry consumes (the .bms the
-	# rotation's first pick names, the dev/test dir override) and the NovaWorld
-	# gate registration the session drive performs for the NovaWorld channel.
+	var options := duplicate_options()
 	options.mission_file = mission if not mission.is_empty() \
 			else (missions[0] if not missions.is_empty() else "")
-	options.dir = dir
-	options.nw_gate_host = nw_gate_host
-	options.nw_gate_port = nw_gate_port
-	options.region = region
-	options.advertise = advertise
-	options.server_name = server_name
-	options.player_name = player_name
-	options.custom_text = custom_text
-	options.expansion = expansion
-	options.integrity_profile = integrity_profile
-	options.game_type = game_type
-	options.game_type_auto = game_type_auto
-	options.class_allow_mask = class_allow_mask
-	options.channel = channel
-	options.lan_mode = lan_mode
-	options.bind_port = bind_port
-	options.max_players = max_players
-	options.spectator_slots = spectator_slots
-	options.spectator_password = spectator_password
-	options.serve_and_play = not dedicated
-	options.respawn_time = respawn_time
-	options.time_limit_minutes = time_limit_minutes
-	options.replay_enabled = replay_enabled
-	options.max_team_lives = max_team_lives
-	options.score_limit = score_limit
-	options.max_score = max_score
-	options.koth_delta = koth_delta
-	options.flag_return_ticks = flag_return_ticks
-	options.capture_duration_seconds = capture_duration_seconds
-	options.capture_speed_setting = capture_speed_setting
-	options.spawn_wave_time_base = spawn_wave_time_base
-	options.spawn_wave_time_zone = spawn_wave_time_zone
-	options.default_spawn_requires_no_team_zone = default_spawn_requires_no_team_zone
-	options.num_teams = num_teams
-	options.respawn_timeout = respawn_timeout
-	options.start_delay = start_delay
-	options.destroy_buildings = destroy_buildings
-	options.death_messages = death_messages
 	return options

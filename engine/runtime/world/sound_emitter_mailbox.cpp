@@ -27,7 +27,7 @@ int admission_priority(const SoundEmitterEvent &event) {
 
 bool expired_at(const SoundEmitterEvent &event, uint32_t current_tick) {
     const uint32_t lifetime =
-            std::max<uint32_t>(1, event.lifetime_ticks);
+            static_cast<uint32_t>(std::max<int32_t>(1, event.lifetime_ticks));
     return current_tick - event.emitted_tick > lifetime;
 }
 

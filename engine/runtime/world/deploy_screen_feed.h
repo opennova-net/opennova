@@ -130,6 +130,42 @@ struct DeployStaticsVisibility {
 DeployStaticsVisibility deploy_statics_visibility(const DeployStaticsInput &in);
 
 
+
+// Both instruction widgets and the permanent-death status pair. A secured
+// spawn leaves the first widget's prior text intact and hides the second;
+// the later RESPawn1 assignment overwrites the intermediate RESPawn2 text.
+// [orig: UI_UpdateDeathScreenContent @ 0x5536A0; sub_43B910 @ 0x43B910]
+struct DeployInstructionsInput {
+    uint32_t game_type = 0;
+    uint8_t team = 0;
+    bool dead = false;
+    bool permanent_death = false;
+    bool spectators_allowed = false;
+    bool check_secured_spawn = false; // S2C 0x0F game_flags bit1
+    bool has_spawn_zones = false;
+    bool has_full_team_spawn = false; // actual timer entry[9] >= entry[10]
+    std::string player_name;
+    std::string clan;
+    std::string kill_announcement;
+    int32_t round_ticks = -1;
+    int alive_players = 0;
+};
+struct DeployInstructions {
+    bool permanent_death = false;
+    bool show_first = false;
+    bool show_second = false;
+    bool replace_first = true;
+    std::string first_text;
+    std::string second_text;
+    bool show_round_status = false;
+    std::string round_text;
+    std::string remaining_players_text;
+};
+using DeployTextLookup = std::function<std::string(
+        const char *section, const char *key, const char *fallback)>;
+DeployInstructions build_deploy_instructions(
+        const DeployInstructionsInput &in, const DeployTextLookup &lookup);
+
 // The DEATH screen's STATIC facts for one client as one value the embedder
 // fills (its Godot record wraps it by value, ADR 0043 d10): the sub-block-0
 // timers, the queued status line, the psp/medic show gates and the medic-call
@@ -141,6 +177,8 @@ struct DeployScreenStatus {
     int hold_seconds = 0;
     DeployStatusLine line;
     DeployStaticsVisibility statics;
+    DeployInstructions instructions;
+    std::string respawn_text;
     int medic_cooldown_ticks = 0;
     int medic_request_serial = 0;
 };

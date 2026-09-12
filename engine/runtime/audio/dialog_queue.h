@@ -53,6 +53,9 @@ public:
 	// Mission teardown / repeated setup: nothing queued or active crosses
 	// missions.
 	void clear();
+    // Dialog_ResetAll clears waiting lines; the physical voice keeps playing.
+    // [orig: @0x44dc90]
+    void discard_pending() { pending_.clear(); }
 
 private:
 	std::deque<std::string> pending_;

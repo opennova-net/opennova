@@ -65,13 +65,13 @@ double pool_present_yaw_deg(const world::Entity &e, const world::AiEntity *ae,
 // count (0 = no entry); the signed phase dwords ride exactly.
 using DoorPhaseTable = std::vector<int32_t>;
 
-// The joiner's rows: one per decoded ClientState entity (PF_STRIDE floats
+// The joiner's rows: decoded ClientState entities plus locally spawned item fragments (PF_STRIDE floats
 // each), the self echo left at its zero defaults. Does NOT consume the
 // animation pulses: the caller clears them (ClientState::clear_anim_pulses)
 // once the rows are handed on, so each transition pulse dispatches exactly
 // one presented frame.
 void build_client_replica_present_rows(const PresentRowsContext &context,
-		std::vector<float> &out, DoorPhaseTable &door_phases);
+        PoolPresentLifecycleMap &lifecycle, std::vector<float> &out, DoorPhaseTable &door_phases);
 
 // The host/SP rows: one per live registry slot, in registry order.
 void build_world_present_rows(const PresentRowsContext &context,

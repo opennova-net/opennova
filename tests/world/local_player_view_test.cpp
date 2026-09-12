@@ -13,10 +13,14 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/local_player_view.h>
+#include <runtime/world/local_player.h>
+#include <runtime/world/collision.h>
+#include <cstring>
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
+#include <runtime/world/weapon_scope_zero.h>
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -619,7 +623,60 @@ void test_local_weapon_input_block_mirrors_the_pump_gate() {
     CHECK(local_weapon_input_block_name(LocalWeaponInputBlock::kSeat)[0] != '\0');
 }
 
+void test_target_lock_cadence_and_audio() {
+    LocalWorld lw;
+    CollisionWorld collision;
+    lw.w.collision = &collision;
+    lw.ai.attach(lw.local);
+    AiEntity &body = *lw.ai.for_handle(lw.local);
+    body.pos[0] = 10 << 16; body.pos[1] = 20 << 16; body.pos[2] = 3 << 16;
+    body.team = 1; lw.entity().team = 1;
+    LocalPlayer local(lw.w);
+    local.weapon.active = true;
+    local.weapon.def_name = "LOCK";
+    std::strcpy(local.weapon.def.soundlockedtone, "LOCKED");
+    lw.w.tables.weapons.entries.resize(2);
+    auto &def = lw.w.tables.weapons.entries[1];
+    def.name = "LOCK"; def.valid = true; def.ammo_index = 1;
+    lw.w.tables.ammo.entries.resize(2);
+    auto &ammo = lw.w.tables.ammo.entries[1];
+    ammo.valid = true; ammo.heat_det_range = 3000; ammo.boresight_maxang = 11930464 * 20;
+    Entity target;
+    target.item_id = 2; target.item_type = 1; target.health = 100; target.alive = true;
+    target.team = 2; target.heat_sig = 500; target.position = {110, 20, 3};
+    const EntityHandle h = lw.w.registry.spawn(0, target);
+    lw.w.out.fire_sounds.set_listener({10, 20, 3});
+    lw.w.logic_tick = 16;
+    local.update_aim_target();
+    CHECK(body.inf.combat_target == h);
+    CHECK((body.slot.f[2] & 1) != 0);
+    auto events = lw.w.out.sound_emitters.drain();
+    CHECK(events.size() == 1 && events[0].set_name == "LOCKED");
+    CHECK(events[0].lane == 100 && events[0].lifetime_ticks == 20);
+    lw.w.registry.get(h)->team = 1;
+    lw.w.logic_tick = 17;
+    local.update_aim_target();
+    CHECK(body.inf.combat_target == h);
+    CHECK(lw.w.out.sound_emitters.drain().size() == 1);
+    lw.w.logic_tick = 32;
+    local.update_aim_target();
+    CHECK(!body.inf.combat_target.valid() && body.slot.f[2] == -2);
+    CHECK(lw.w.out.sound_emitters.drain().empty());
+}
+
 int main() {
+    test_target_lock_cadence_and_audio();
+    {
+        WeaponScopeZero zero;
+        zero.max_steps = 10; zero.step_metres = 100; zero.default_metres = 300;
+        CHECK(weapon_scope_zero_initial(zero) == 3);
+        CHECK(weapon_scope_zero_adjust(zero, 0, -1, false, false) == -1);
+        CHECK(weapon_scope_zero_adjust(zero, 0, -1, true, false) == 0);
+        CHECK(weapon_scope_zero_adjust(zero, 0, -1, true, true) == -1);
+        CHECK(weapon_scope_zero_adjust(zero, 10, 1, true, true) == 10);
+        zero.min_steps = 2;
+        CHECK(weapon_scope_zero_adjust(zero, 2, -1, false, false) == 2);
+    }
     test_scope_toggle_refuses_inactive_weapon();
     test_scope_up_refused_while_moving_on_scoped_weapon();
     test_inset_scope_refused_under_nvg();

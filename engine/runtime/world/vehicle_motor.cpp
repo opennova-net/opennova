@@ -253,7 +253,7 @@ void stage_player_vehicle_input(
 		World &world, Entity &veh, Entity &occ, const VehicleTraits &traits) {
 	Entity::VehicleMotorState &m = veh.veh;
 	uint32_t move_order = static_cast<uint32_t>(occ.net_move_input) |
-			(static_cast<uint32_t>(occ.net_stance_bits) << 8);
+			(static_cast<uint32_t>(occ.net_stance_bits) << 8) | occ.local_view_input;
 	int dir = static_cast<int>(move_order & 7u);
     bool moving = ((move_order >> 3) & 1u) != 0;
     const int32_t analog_sum = static_cast<int32_t>(occ.net_analog_x) +
@@ -347,6 +347,11 @@ void stage_player_vehicle_input(
     // [orig: @0x484d0f, 0x484d2b, 0x484d50] where the ground core commands
     // -[136] >> 1 (1/2) [orig: @0x48bb89].
     const int reverse_shift = traits.family == VehicleFamily::Bike ? 3 : 1;
+    // An active bike launch retains the heading/throttle chosen above.
+    // [orig: Entity_UpdateLightVehiclePhysics @ 0x484C9D..0x484CBD]
+    if (traits.family == VehicleFamily::Bike &&
+            ((veh.flags & kEntityFlagInAir) || m.wheelie_request || m.wheelie_active))
+        return;
     switch (dir) {
         case 1:
             m.steer_target_bam = io::bam_add(m.yaw_bam, m.steer_ramp_bam);
@@ -530,13 +535,22 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
     // handbrake IS the lean-right key while driving. (Re-homed 2026-09-10 from
     // inside the player_control gate, jo-c cross-check.)
     if (traits.family != VehicleFamily::Tank) {
-        if (occ != nullptr && (veh.flags & 0x8u) != 0 && traits.hand_brake != 0)
+        const bool brake_enabled = traits.family == VehicleFamily::Bike
+                ? m.wheelie_active == 0 && m.bike_ground_contact_ticks > 0
+                : traits.hand_brake != 0;
+        if (occ != nullptr && (veh.flags & 0x8u) != 0 && brake_enabled)
             m.handbrake_latched = 1;
         else
             m.handbrake_latched = 0;
         if (m.handbrake_latched != 0) m.cmd_speed = 0;
     }
-    if (m.crashed != 0) m.cmd_speed = 0;
+    // Both bytes arm before steering and acceleration, outside the input-role gate.
+    // [orig: Entity_UpdateLightVehiclePhysics @ 0x485233..0x485269;
+    // wheelie-active byte store @0x48524C]
+    if (traits.family == VehicleFamily::Bike && (veh.flags & 0x20u) && m.speed > 4096)
+        m.wheelie_request = m.wheelie_active = 1;
+    if (m.crashed != 0 && (traits.family != VehicleFamily::Bike || m.byte_2ef))
+        m.cmd_speed = 0;
 
     // ------------------------------------------------------------- steering chase
     // Turn rate blends DOWN with speed: eff = (turnRate - minRate) * clamp01(1 -
@@ -626,7 +640,11 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
         // Entity_UpdateVehiclePhysics @0x48AF00 (site @0x48C1FC..0x48C215
         // `rawAccel = (target - speed + 16) >> 5`; the clamp tree @0x48C3D0..0x48C46C)].
         const int32_t raw_accel = (target_speed - m.speed + 16) >> 5;
-        m.speed_accel = raw_accel;
+        // The held wheelie below 0x4000 adds to the retained acceleration.
+        // [orig: Entity_UpdateLightVehiclePhysics @ 0x4853A1..0x4853E3]
+        m.speed_accel = traits.family == VehicleFamily::Bike &&
+                m.wheelie_active && m.wheelie_request && m.speed < 16384
+                ? io::bam_add(m.speed_accel, 25) : raw_accel;
 		m.skid_effects_requested = false;
 		if (detail::vehicle_traction_acceleration(world, veh, traits, target_speed)) {
 			// The retained contact frame owns the skid acceleration.
@@ -716,16 +734,11 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 		detail::vehicle_emit_skid_effects(world, veh, traits);
 		detail::vehicle_sample_trails(world, veh, traits, target_speed);
 		if (traits.family == VehicleFamily::Bike) {
-			// Bike-only vertical up-cap; the airborne input latch that can lift
-			// it is input-side, so the client-run form caps unconditionally
-			// [orig: vZ = min(vZ, 0x4000) @0x48659b..0x48659d].
-			if (m.slide_z > 0x4000) m.slide_z = 0x4000;
+            // Grounded wheelies retain upward launch velocity.
+            // [orig: Entity_UpdateLightVehiclePhysics @ 0x48657E..0x48659D]
+            if ((!m.wheelie_active || (veh.flags & kEntityFlagInAir)) && m.slide_z > 0x4000)
+                m.slide_z = 0x4000;
             m.slide_z -= kGravityStepBike; // [orig: @0x4865a6 `slideDecay -= 250`]
-            // The bike's "has been driven" byte: a leaning bike (Flags 0x20)
-            // above 0x1000 speed marks itself driven; the light solve's crash
-            // test over the spine probes reads it (vehicle_suspension.h)
-            // [orig: Entity_UpdateLightVehiclePhysics @0x48524c].
-            if ((veh.flags & 0x20u) != 0 && m.speed > 0x1000) m.has_been_driven = 1;
 		} else if (traits.family == VehicleFamily::Tank) {
 			// The tank shares the 250 step with the bike — no up-cap
 			// [orig: `slideDecay += -250` @0x48a82c in
@@ -863,6 +876,8 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, const V
 	// rotor machine, so it never draws that machine's PRNG roll.
 	if (traits.player_control)
 		world.vehicles.part_anim_tick(veh, traits);
+    if (traits.family == VehicleFamily::Bike)
+        m.wheelie_request = 0; // [orig: Entity_UpdateLightVehiclePhysics @ 0x4869F9]
 }
 
 namespace {

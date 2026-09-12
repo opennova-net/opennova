@@ -13,6 +13,8 @@
 // clip-duration callback; the bake produces the runtime table exactly as the original does.
 #pragma once
 
+#include <runtime/world/weapon_scope_zero.h>
+
 #include <cstddef>
 #include <cstdint>
 
@@ -51,6 +53,7 @@ enum : int32_t {
     kArmor = 0x00001000,      // carry-weight class [orig: @0x5415aa]
     kForceCrouch = 0x00040000,
     kUseSpreadTwo = 0x00400000,
+    kFireWhileSwimming = 0x01000000,
     kNoCardSwitch = 0x02000000,
     kForceScoped = 0x20000000,
 };
@@ -126,6 +129,12 @@ struct WeaponFsmAction {
 // [orig: WeaponAction_Fire burst block @ 0x542c8a].
 struct WeaponFsmDef {
     WeaponFsmAction actions[weapon_action::kCount];
+    WeaponScopeZero scope_zero;
+    char soundfireloop[128] = {};
+    char soundtrailoff[128] = {};
+    char soundhead[128] = {};
+    char soundlockedtone[128] = {};
+    int32_t ammo_cost = 0; // WeaponDef+224, ammoclass units
     bool auto_fire = false;
     bool burst3 = false;
     int32_t clip_capacity = 0; // rounds per clip; < 0 = infinite (the def+0x58 == -1 paths)
@@ -197,6 +206,8 @@ struct WeaponSlotState {
     // Current integer magnification; zero lazily selects the definition's max.
     // [orig: MountSlot+0x0C; Player_GetClampedWeaponElevation @0x4DC6B0]
     int32_t scope_zoom = 0;
+    int16_t scope_zero = 0; // MountSlot+0x60
+    int32_t zero_pitch = 0; // MountSlot+4
     int32_t current = weapon_action::kIdle;
     int32_t next = weapon_action::kIdle;
     int32_t prev = weapon_action::kIdle;
@@ -268,6 +279,7 @@ struct WeaponFsmInputs {
                                 // chain, never a per-tick re-request
                                 // [orig: Input_IsBindingActive(149) @ 0x542e7f]
     bool reload_pressed = false; // the reload-key edge (case 0xD3 gates applied by caller)
+    bool owner_present = true; // MountSlot+36; ownerless embedded slots still cool down
     bool is_local = true;        // owner == g_local_player_entity paths
     bool is_authority = true;    // listen-host/SP: reload requests apply immediately
     bool auto_reload = true;     // [orig: g_autoReloadEnabled @ 0x24D2118]
@@ -286,6 +298,10 @@ struct WeaponFsmInputs {
     // `env.water_z` (player_weapon.cpp).
     // [orig: the Env_WaterHeightFixed compare @ 0x54101c -> the clear @ 0x54125f]
     bool submerged = false;
+    bool head_submerged = false;
+    bool drowning = false;
+    bool protected_carrier = false;
+    bool ignore_ammo_cost = false;
 };
 
 // Per-tick outputs for the host. anim events carry the .adm clip key to start on the
@@ -331,6 +347,9 @@ struct WeaponFsmEvents {
                                    // [orig: WeaponAction_Recoil @ 0x542dd0 — gate
                                    //  @ 0x542efa (ActionDef+16 && currentAction==3 &&
                                    //  g_FpWeaponViewFlags&1), spawn @ 0x542f64]
+    bool head_started = false;
+    bool trailoff_started = false;
+    int32_t fireloop_lifetime_ticks = 0; // signed kick byte, sign-extended by the original
     bool fired = false;            // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
     int32_t fired_clip_before_consume = 0; // MountSlot+0x10 low u16 sampled for the
                                            // fire-mode high bits BEFORE ammo consume
@@ -341,6 +360,17 @@ struct WeaponFsmEvents {
     bool unscope = false;          // g_weaponScopeActive = 0 writes (one-shot/empty paths)
     bool rescope = false;          // the pump's rescope-after-reload block [orig: @ 0x54139e]
 };
+
+// Apply the kick/heat legs of one direct receive-side action. The caller owns
+// the row's immediate sound/effect legs and the held-mode/current-action stores.
+// [orig: ActionSlot_ExecuteAction @0x4020A0]
+void weapon_fsm_replay_action(const WeaponFsmDef &def, WeaponSlotState &slot,
+        int32_t current_tick, WeaponFsmEvents &out);
+
+// Fire refusal may queue EMPTYIDLE or RECOIL; a protected carrier keeps next intact.
+// [orig: WeaponSlot_CanFire @0x541ba0]
+bool weapon_fsm_can_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
+                         const WeaponFsmInputs &in);
 
 // Request writers (the input-dispatcher sites).
 // [orig: WeaponSlot_RequestFire @ 0x53efa0] AUTO (Flags&0x100): current {0,3,9,10} ->

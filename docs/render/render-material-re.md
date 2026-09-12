@@ -591,3 +591,26 @@ REN-4 session (the shader/TSS grill):
   non-`#UV` MT material, so invisible today — witness the stage-1 TSS
   TEXTURETRANSFORMFLAGS if a `#UV`+`_MT` artifact surfaces (noted at the
   D-RMAT-10 port, 2026-07-07).
+
+## Texture preprocessing follow-up (2026-09-11)
+
+| Component | Verdict | Evidence |
+| --- | --- | --- |
+| DOT3 request types 4/5 | MATCHING on supported decoded images | Native texture preprocessing golden bytes |
+| Terrain detail coefficients | MATCHING | terrain_texture_preprocess, signed gradients and preserved alpha |
+| Missing/unsupported texture fallback | MATCHING device resource | resource_root_contract_test, native checkerboard bytes |
+
+Object DOT3 conversion reads alpha as height, uses 1/64 slopes and summed
+unit-Z terms, wraps with dimension-minus-one masks, copies source blue into output alpha,
+and retains the green-channel float store before byte encoding. Already
+converted BMDT follows the existing pass-through. Terrain detail conversion is
+distinct: source blue, scale 1/32, two unit-Z cross products added before
+normalization. The previous terrain Z=1 comment was an x87-stack misread;
+fadd st(3) proves Z=2. [orig: Texture_ApplyNormalMapFilter @ 0x58BD90;
+Texture_GenerateNormalMap @ 0x58C070, add @ 0x58C305]
+
+The fallback is the 128-square opaque grey checkerboard: XOR of the two
+coordinate bit-2 values chooses byte 0x50 or 0x30. The VFS-backed resolver handles
+missing data and unsupported types 3, 9..15 and >18 with this resource; cache
+epoch teardown releases its device handles with the rest of the texture cache.
+[orig: Render_CreateCheckerboardTexture @ 0x5B1600]

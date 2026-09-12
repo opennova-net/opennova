@@ -147,10 +147,10 @@ bool resolve_client_eweap_attachment_pose(
 
 	// Remote generic PLAYPARTANIM phases are not in ClientEntityState. Do not
 	// synthesize them from timing or repurpose a wire field. EWEAP is the one safe
-	// articulated family: the decoded mounted gunner already determines both
-	// semantic controls through the witnessed parent-minus-occupant relationship.
+	// articulated family: the joiner tick retains both semantic controls after
+	// the shared slew, gunner tether and authored window clamp.
 	EmplacedWeaponControls emplaced;
-	if (!emplaced_weapon_controls_for_client(*parent, state, specs, emplaced))
+	if (!emplaced_weapon_controls_for_client(*parent, emplaced))
 		return false;
 	const Threedi3di3 &model = *model_ptr;
 	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr)
@@ -232,7 +232,7 @@ double pool_present_yaw_deg(const Entity &e, const AiEntity *ae, EntityClass cls
 }
 
 void build_client_replica_present_rows(const PresentRowsContext &context,
-		std::vector<float> &out, DoorPhaseTable &door_phases) {
+        PoolPresentLifecycleMap &lifecycle, std::vector<float> &out, DoorPhaseTable &door_phases) {
 	out.clear();
 	if (context.runtime == nullptr) return;
 	mission::MissionKernel &kernel = context.kernel;
@@ -304,13 +304,16 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
+            r[PF_HUSK] = (ent->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+            for (int phase = 0; phase < 6; ++phase)
+                r[PF_OBJECT_DESTROY + phase] = float(ent->destroy_phases_q16[phase]);
 			// The authority owns the exact MoveOrder stance latch (bits 8/9 of
 			// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
 			// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md). The compact
 			// projection above reconstructs this from animation flags for joiners;
 			// host/SP must prefer the source byte used by retail's gate.
 			r[PF_STANCE_BITS] = static_cast<float>(ent->net_stance_bits & 0x03u);
-			write_present_section_mask(r, ent->section_mask);
+			write_present_section_mask(r, item_hidden_sections(*ent));
 			write_present_doors(r, i, kernel.world, *ent, door_phases);
 			r[PF_RIGHT_HAND_COLLAPSED] =
 					simassets::mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
@@ -494,7 +497,53 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				}
 			}
 		}
-	}
+        // These class callbacks mutate the peer's own model sections/pose.
+        // Their 0x26 payload is not a compact-transform update.
+        // [orig: palm @ 0x53C4C0; cran @ 0x43FC70]
+        if (joiner) {
+            const Entity *local = kernel.world.registry.get(h);
+            if (local && static_cast<uint16_t>(local->item_id) == es.type_id) {
+                r[PF_HUSK] = (local->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+                for (int phase = 0; phase < 6; ++phase)
+                    r[PF_OBJECT_DESTROY + phase] = float(local->destroy_phases_q16[phase]);
+            }
+            const auto *item = local ? kernel.world.tables.item_death_traits.get(local->item_id) : nullptr;
+            if (local && static_cast<uint16_t>(local->item_id) == es.type_id &&
+                    (local->palm_sections || local->item_section_piece ||
+                     (item && item->death_class == ItemDeathClass::kTower) ||
+                     local->death_motion == DeathMotionMode::CraneFalling ||
+                     local->death_motion == DeathMotionMode::BuildingEffects)) {
+                const Vec3 pos = item_section_render_position(kernel.world, *local);
+                r[PF_POS_X] = pos.x; r[PF_POS_Y] = pos.z; r[PF_POS_Z] = -pos.y;
+                r[PF_YAW_DEG] = local->yaw;
+                r[PF_PITCH_DEG] = local->pitch; r[PF_ROLL_DEG] = local->roll;
+                r[PF_ALIVE] = local->alive ? 1.0f : 0.0f;
+                write_present_section_mask(r, item_hidden_sections(*local));
+            }
+        }
+    }
+    // A callback allocates its fragment directly into the local pool. It has
+    // no independent spawn message to wait for. Use the ordinary pool writer
+    // and append only these locally created rows; keep decoded organics on
+    // their receive-side animation path.
+    // [orig: Entity_CloneFromTemplateByType @ 0x4398A0;
+    // collect_visible_entities_for_terrain @ 0x5C8C60]
+    bool local_pieces = false;
+    kernel.world.registry.for_each([&](const Entity &entity) {
+        if (entity.item_section_piece && cs.find(entity.handle.packed) == nullptr)
+            local_pieces = true;
+    });
+    if (joiner && local_pieces) {
+        std::vector<float> native;
+        DoorPhaseTable unused_doors;
+        build_world_present_rows(context, lifecycle, native, unused_doors);
+        for (size_t offset = 0; offset < native.size(); offset += PF_STRIDE) {
+            const auto handle = EntityHandle{uint16_t(native[offset + PF_WIRE_HANDLE])};
+            const Entity *entity = kernel.world.registry.get(handle);
+            if (entity && entity->item_section_piece && cs.find(handle.packed) == nullptr)
+                out.insert(out.end(), native.begin() + offset, native.begin() + offset + PF_STRIDE);
+        }
+    }
 }
 
 void build_world_present_rows(const PresentRowsContext &context,
@@ -541,9 +590,10 @@ void build_world_present_rows(const PresentRowsContext &context,
 			// A player's wire net_id IS its packed character id (entity+0x15C).
 			r[PF_CHARACTER_ID] = static_cast<float>(replication::player_wire_net_id(e));
 		}
-		r[PF_POS_X] = e.position.x;
-		r[PF_POS_Y] = e.position.z;
-		r[PF_POS_Z] = -e.position.y;
+        const Vec3 render_position = item_section_render_position(w, e);
+		r[PF_POS_X] = render_position.x;
+		r[PF_POS_Y] = render_position.z;
+		r[PF_POS_Z] = -render_position.y;
 		r[PF_PITCH_DEG] = static_cast<float>(e.pitch);
 		r[PF_YAW_DEG] = static_cast<float>(pool_present_yaw_deg(e, ae, cls));
 		r[PF_ROLL_DEG] = static_cast<float>(e.roll);
@@ -573,11 +623,14 @@ void build_world_present_rows(const PresentRowsContext &context,
 		r[PF_BODY_ANIM_SLOT] = static_cast<float>(e.body_anim_slot);
 		r[PF_HIDDEN] = e.hidden ? 1.0f : 0.0f;
 		r[PF_ALIVE] = e.alive ? 1.0f : 0.0f;
+        r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+        for (int phase = 0; phase < 6; ++phase)
+            r[PF_OBJECT_DESTROY + phase] = float(e.destroy_phases_q16[phase]);
 		// The authority owns the exact MoveOrder stance latch (bits 8/9 of
 		// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
 		// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
 		r[PF_STANCE_BITS] = static_cast<float>(e.net_stance_bits & 0x03u);
-		write_present_section_mask(r, e.section_mask);
+		write_present_section_mask(r, item_hidden_sections(e));
 		write_present_doors(r, row_index, w, e, door_phases);
 		r[PF_RIGHT_HAND_COLLAPSED] =
 				simassets::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;

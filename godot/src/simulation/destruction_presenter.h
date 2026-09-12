@@ -98,6 +98,9 @@ public:
 	void reset_runtime_state();
 	// Once per present, after the sim advanced (beside the fire pass).
 	void present();
+    // Retained rows can arrive before or after the transient death drain.
+    void apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk);
+    ObjectModel *visual_model(ObjectModel *p_entity_model) const;
 	// The pure-data presentation leg (the present_snapshot precedent): production
 	// present() drains the typed sim; tests feed the same event/piece rows.
 	void present_drained(const opennova::world::DestructionEvents &p_events,
@@ -158,7 +161,6 @@ private:
 	EffectLightDirector *lights() const;
 	Node3D *resolve_entity_node(int p_bms_id, int64_t p_spawn_origin, int p_wire_handle) const;
 	void restore_intact(const String &p_key);
-	void apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk);
 	static bool node_has_static_shadow_caster(Node *p_root);
 	static void set_husk_static_shadow(ObjectModel *p_model, bool p_enabled);
 	Variant present_transform_for_identity(int p_bms_id, int64_t p_spawn_origin) const;

@@ -15,6 +15,11 @@ PlayerBodyInput pack_player_body_input(const PlayerInput &in) {
     body.stance = in.prone ? InfantryState::Stance::kProne
                 : (in.crouch ? InfantryState::Stance::kCrouch : InfantryState::Stance::kStand);
     body.jump = in.jump;
+    body.free_look = in.free_look;
+    body.look_up = in.look_up;
+    body.look_down = in.look_down;
+    body.turn_left = in.turn_left;
+    body.turn_right = in.turn_right;
     // [orig: Player_PackInputStateToEntity @0x4df450] F/B/L/R bits collapse to an
     // 8-way move_direction_index plus a moving bit. There is no heading offset here.
     using B = PlayerBodyInput;
@@ -83,6 +88,10 @@ void apply_player_body_input(AiEntity &e, const PlayerBodyInput &body) {
     // prone (0x100) before crouch (0x200). [orig: 0x4b59ce / 0x4b5b13]
     inf.stance = body.stance;
     if (body.jump) inf.jump_requested = true;
+    inf.free_look = body.free_look;
+    inf.view_input_bits = (body.turn_left ? 0x1000 : 0) |
+        (body.turn_right ? 0x2000 : 0) | (body.look_up ? 0x4000 : 0) |
+        (body.look_down ? 0x8000 : 0);
     inf.jump_held = body.jump; // the level bit the wire mirror reads (0x20)
     inf.player_moving = body.moving;
     inf.player_move_dir_index = body.move_dir_index;

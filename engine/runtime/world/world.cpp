@@ -208,7 +208,10 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
         throwables.events.clear();
         throwables.tick(*this, ai.collision, tables.terrain);
     }
-    if (gameplay) minefields.tick_pool(*this, 1);
+    if (gameplay) {
+        tick_item_event_pool(*this, 1);
+        minefields.tick_pool(*this, 1);
+    }
     // The precipitation fall: while it rains every drop slot lowers by the
     // kind's per-tick amount, once per ENTITY update — retail runs it inside
     // Entity_UpdateAllEntities after the pool-1 walk and before
@@ -251,11 +254,10 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
         // The explosion-queue drain runs once per frame after the projectile
         // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the
         // damage callbacks push (the kz death chain) land next tick, exactly like
-        // the original's post-reset writes. Dead non-AI items then settle
-        // [orig: the Entity_UpdateStaticDeathPhysics / _UpdateFallingDeathPhysics
-        // update callbacks] and the death-piece pool advances
+        // the original's post-reset writes. The death-piece pool advances
+        // first; each item's death motion runs beside its class callback.
         // [orig: DeathPiece_TickAll @0x57b900].
-        // Retail runs all three UNGATED on every peer — the shared per-frame
+        // Retail runs these UNGATED on every peer — the shared per-frame
         // entity update calls them on clients too, which is how a joiner's
         // 0x13/0x26-triggered death chain detonates its kz blasts and flies its
         // pieces locally. The MP visual client (the round pool's predicate
@@ -269,21 +271,18 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
         // [orig: Env_WaterHeightFixed @0x26c6454].
         const float water_z =
                 env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
+        death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
         explosions.process(*this, ai.collision, tables.terrain,
                            water_z, out.destruction);
-        // The class event callbacks' think expiry — the gnrc/gnl2 second
-        // death legs their +0x2AC countdown arms [orig: the pool-1 walk's
-        // cb(entity, 0, 0) @0x4b8e1b..0x4b8e3c]. Ahead of the settle so a
-        // husk that lands this tick settles from this tick on.
-        destruction_tick_class_death_think(*this);
-        destruction_tick_dead_items(*this, tables.terrain, water_z, out.destruction);
-        death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
     }
     if (gameplay) {
+        tick_item_event_pool(*this, 2);
         minefields.tick_pool(*this, 2);
         doors.tick(*this); // [orig: Entity_UpdateAllEntities @0x4C2307]
+        tick_item_event_pool(*this, 3);
         minefields.tick_pool(*this, 3);
     }
+    item_emitters.sync_owners(*this);
     lap.mark(devtools::Slot::SIM_WORLD_DESTRUCTION);
     // The waypoint current-selection pass, from the local player's position (the
     // original runs it in the client frame beside the player update; our SP host
@@ -461,9 +460,11 @@ void World::restore(const Snapshot &s) {
     throwables.reset();
     death_pieces.reset();
     destruction_rng.reset();
+    item_emitters.reset();
     out.scars.reset();
     out.terrain_scorches.reset();
     out.destruction = DestructionEvents{};
+    out.entity_events.clear();
     // The baseline copy above restores the configured rules, roster, clock,
     // stats, and outcome together. This matters for SP-as-listen-server: its
     // host player and game type already exist when the play-start snapshot is

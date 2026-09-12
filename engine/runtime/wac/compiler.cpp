@@ -378,7 +378,6 @@ private:
         const bool ssn_prefix = bare && starts_with_ci(t, "SSN_");
         if (ssn_prefix || type == ParamType::Ssn) {
             int32_t net = bare ? std::atoi(t.c_str() + (ssn_prefix ? 4 : 0)) : 0;
-            if (arg.negate) net = -net;
             return ssn_operand(net, line);
         }
 
@@ -410,12 +409,11 @@ private:
         }
 
         // HH:MM time literal.
-        if (bare && t.find(':') != std::string::npos && std::isdigit(static_cast<unsigned char>(t[0]))) {
+        if (bare && t.find(':') != std::string::npos && (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '-')) {
             int colon = static_cast<int>(t.find(':'));
             int h = std::atoi(t.substr(0, colon).c_str());
             int m = std::atoi(t.c_str() + colon + 1);
             int32_t v = h * 60 + m;
-            if (arg.negate) v = -v;
             return encode_operand(OperandKind::Pool, push_pool(v));
         }
 
@@ -427,7 +425,6 @@ private:
         // and are never rescaled at a distance-typed call site.
         if (bare && !t.empty() && (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '.' || t[0] == '-')) {
             double d = std::atof(t.c_str());
-            if (arg.negate) d = -d;
             const int suffix = std::toupper(static_cast<unsigned char>(t.back()));
             if (suffix == 'F') d *= 21501.0;
             else if (suffix == 'M' || type == ParamType::Distance) d *= 65536.0;
@@ -529,9 +526,9 @@ private:
     }
 
     static Op expression_fold(const Expr &e) {
-        if (e.kind == Expr::And || e.op == "and" || e.op == "&&") return Op::FoldAnd;
-        if (e.kind == Expr::Or || e.op == "or" || e.op == "||") return Op::FoldOr;
-        if (e.kind == Expr::Xor || e.op == "xor" || e.op == "!=" || e.op == "<>" || e.op == "~=") return Op::FoldNe;
+        if (e.op == "and" || e.op == "&&") return Op::FoldAnd;
+        if (e.op == "or" || e.op == "||") return Op::FoldOr;
+        if (e.op == "xor" || e.op == "!=" || e.op == "<>" || e.op == "~=") return Op::FoldNe;
         if (e.op == "+") return Op::FoldAdd;
         if (e.op == "-") return Op::FoldSub;
         if (e.op == "*") return Op::FoldMul;
@@ -546,30 +543,21 @@ private:
         return Op::Call;
     }
 
-    void compile_cond(const Expr &e, Op fold) {
-        if (e.kind == Expr::Leaf) {
-            emit_call(e.call, fold, false);
-            return;
-        }
-        if (e.kind == Expr::Not && !e.kids.empty() && e.kids[0].kind == Expr::Leaf) {
-            emit_call(e.kids[0].call, fold, true);
-            return;
-        }
-        if (e.kids.empty()) return;
-        const size_t first = prog_.code.size();
-        compile_cond(e.kids[0], Op::Call);
-        const bool negate_group = e.kind == Expr::Not;
-        if (!negate_group) {
-            const Op inner = expression_fold(e);
-            for (size_t i = 1; i < e.kids.size(); ++i) compile_cond(e.kids[i], inner);
-        }
-        if ((fold != Op::Call || negate_group) && first < prog_.code.size()) {
-            // Retail folds the saved byte INTO the new accumulator. For a
-            // grouped RHS this reverses subtraction/comparison operands. NOT
-            // is part of the pop operand and negates that saved byte.
+    void compile_cond(const Expr &e, Op = Op::Call) {
+        if (e.kind == Expr::Sequence) {
+            for (const Expr &step : e.kids) compile_cond(step);
+        } else if (e.kind == Expr::Store) {
+            emit(encode_instr(Op::StoreVar, 0));
+            emit(resolve(e.call.args[0], ParamType::Variable, e.call.line));
+        } else if (e.kind == Expr::Pop) {
             // [orig: Script_Compile @0x4F31F0; VM @0x4F5BDF]
-            prog_.code[first] |= kPushBit;
-            emit(encode_instr(Op::PopExpr, static_cast<uint32_t>(fold) | (negate_group ? 0x80u : 0)));
+            // Pop folds the saved BYTE into the new result, reversing the
+            // operands of subtraction/division/comparison. NOT negates it.
+            emit(encode_instr(Op::PopExpr, static_cast<uint32_t>(expression_fold(e)) | (e.negate ? 0x80u : 0)));
+        } else {
+            const size_t first = prog_.code.size();
+            emit_call(e.call, expression_fold(e), e.negate);
+            if (e.push && first < prog_.code.size()) prog_.code[first] |= kPushBit;
         }
     }
 
@@ -626,10 +614,6 @@ private:
             compile_run(s);
         } else if (s.kind == Stmt::Assignment || s.kind == Stmt::Expression) {
             compile_cond(s.cond, Op::Call);
-            if (s.kind == Stmt::Assignment) {
-                emit(encode_instr(Op::StoreVar, 0));
-                emit(resolve(s.assignment_target, ParamType::Variable, s.call.line));
-            }
         }
     }
 

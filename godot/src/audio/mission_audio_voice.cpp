@@ -9,6 +9,17 @@
 
 using namespace godot;
 
+void MissionAudio::_install_voice_resolver() {
+    const Ref<Simulation> sim = _simulation();
+    if (sim.is_null()) return;
+    const ObjectID bank_id = bank_.is_valid() ? ObjectID(bank_->get_instance_id()) : ObjectID();
+    sim->set_script_voice_resolver([bank_id](const std::string &name, uint8_t listener_view_flags)
+            -> std::optional<opennova::world::ScriptVoiceChannel::SetSelection> {
+        auto *bank = Object::cast_to<SoundBank>(ObjectDB::get_instance(bank_id));
+        return bank ? bank->select_radio_set(name, listener_view_flags) : std::nullopt;
+    });
+}
+
 void MissionAudio::_stop_script_voice(bool p_report_finished) {
     if (p_report_finished) {
         const Ref<Simulation> sim = _simulation();
@@ -49,10 +60,14 @@ void MissionAudio::sync_script_voice() {
         if (frame.local) {
             auto *voice = memnew(AudioStreamPlayer);
             voice->set_stream(stream);
+            voice->set_pitch_scale(SoundBank::effective_base_pitch(
+                    opennova::lwf::pitch_from_q16(frame.state.pitch_q16)));
             node = voice;
         } else {
             auto *voice = memnew(AudioStreamPlayer3D);
             voice->set_stream(stream);
+            voice->set_pitch_scale(SoundBank::effective_base_pitch(
+                    opennova::lwf::pitch_from_q16(frame.state.pitch_q16)));
             voice->set_attenuation_model(AudioStreamPlayer3D::ATTENUATION_DISABLED);
             voice->set_max_distance(0.0);
             voice->set_doppler_tracking(AudioStreamPlayer3D::DOPPLER_TRACKING_DISABLED);

@@ -65,12 +65,17 @@ struct TerrainHeightField;
 namespace opennova::world {
 
 struct FixedVec3;
+struct ProjectileHit;
 
 class CollisionWorld;
 
 class World;
 
 struct AmmoTableEntry; // world/ammo_table.h
+// Shared by live flight and the retail ballistic scope-table solver.
+// [orig: Entity_ApplyDragAndBounceForce @0x4e5ed0]
+void projectile_apply_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
+    int32_t position_z_q16, int32_t water_z_q16);
 
 enum class ThrowClass : uint8_t; // world/throwables.h
 
@@ -150,6 +155,12 @@ struct RoundSourceState {
     bool underwater = false;
     int32_t *recoil_pitch = nullptr;              // entity+0x380
     const int32_t *weapon_weight_spread = nullptr; // entity+0x384
+    // Direct ADM action replay borrows the carrier's live slot. An on-foot
+    // peer without EquippedSlot uses the receive handler's temporary slot.
+    WeaponSlotState *action_slot = nullptr;
+    const WeaponFsmDef *action_slot_def = nullptr;
+    bool mounted_action = false;
+    bool action_allowed = true;
 };
 
 // The witnessed below-water EYE projection, shared by the round-source
@@ -512,6 +523,9 @@ public:
     // finally a headless fallback query world.
     void tick(World &world, const terrain::TerrainHeightField *terrain,
               CollisionWorld *collision = nullptr);
+
+    void process_damage_hit(World &world, LiveRound &round,
+            const ProjectileHit &hit, FixedVec3 &velocity_q16);
 
     // Mission restart discards all transient projectile/presentation state.
     void reset() noexcept;

@@ -1,3 +1,4 @@
+#include <runtime/world/weapon_fire_gate.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 
 
@@ -19,6 +20,7 @@
 #include <net/npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
 #include <runtime/world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
+#include <runtime/world/local_player.h>
 #include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
 #include <runtime/world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
 #include <runtime/world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
@@ -218,59 +220,47 @@ bool read_join_string_tlv(const std::vector<uint8_t> &payload, std::size_t &offs
 	const uint16_t value_size = static_cast<uint16_t>(
 			payload[offset] | (static_cast<uint16_t>(payload[offset + 1]) << 8));
 	offset += 2;
-	if (value_size == 0 || offset + value_size > payload.size() ||
-	    payload[offset + value_size - 1] != 0) {
-		return false;
-	}
-	// String-valued join fields have one terminal NUL and no embedded NULs.
-	if (std::find(
-				payload.begin() + static_cast<std::ptrdiff_t>(offset),
-				payload.begin() + static_cast<std::ptrdiff_t>(
-						offset + value_size - 1),
-				uint8_t{0}) !=
-	    payload.begin() + static_cast<std::ptrdiff_t>(
-				offset + value_size - 1)) {
-		return false;
-	}
-	value.assign(
-			reinterpret_cast<const char *>(payload.data() + offset),
-			value_size - 1);
+	if (offset + value_size > payload.size()) return false;
+	const auto begin = payload.begin() + static_cast<std::ptrdiff_t>(offset);
+	const auto end = begin + value_size;
+	value.assign(begin, std::find(begin, end, uint8_t{0}));
 	offset += value_size;
 	return true;
 }
 
-bool validates_join_request(
+// Literal patch/account gates precede the expansion and spectator legs.
+// Missing CU fields retain zero and fail here, after the NP handshake.
+// [orig: Server_ValidatePlayerJoinRequest @0x512100]
+uint32_t validate_join_environment(const ClientGameEnvironment &env) {
+	if (env.bn != 1) return 2;
+	if (env.vn != 2) return 3;
+	if (env.mbn != 20042002) return 4;
+	if (env.bt == 1) return 6;
+	if (env.bt == 2) return 7;
+	if (env.sopd != 180) return 8;
+	return 0;
+}
+
+uint32_t validate_join_request(
 		const GameConfig &config, const std::vector<uint8_t> &payload) {
 	std::size_t offset = 0;
-	bool saw_expansion = false;
-	bool saw_version_crc = false;
+	std::string expansion;
+	std::string version_crc;
+	// The TLV walk accepts unknown fields, uses the last matching value, and
+	// stops at its first short field. String copies stop at the first NUL.
+	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0]
 	while (offset < payload.size()) {
-		std::string name;
-		std::string value;
-		if (!read_join_string_tlv(payload, offset, name, value)) return false;
-		if (name == "EXP" && !saw_expansion && !config.expansion.empty() &&
-		    value == config.expansion) {
-			saw_expansion = true;
-		} else if (name == "VERSIONCRCSTRING" && !saw_version_crc) {
-			// Retail compares atol(value) against its own g_expansion_checksum ONLY
-			// while an expansion is active; a base-game host stores the TLV without
-			// looking at it [orig: Server_ValidatePlayerJoinRequest — the
-			// g_ExpansionName[0] gate @0x51231e, the atol compare @0x512331, reject
-			// DPC=48 @0x512341]. The checksum is CRC-32/MPEG-2 of the loose
-			// expansion/<name>/version.txt, formatted "%ld" by the client — signed
-			// decimal, so strtol matches retail's 32-bit atol on real inputs.
-			if (!config.expansion.empty() &&
-			    static_cast<int32_t>(std::strtol(value.c_str(), nullptr, 10)) !=
-			            config.expansion_version_checksum) {
-				return false;
-			}
-			saw_version_crc = true;
-		} else {
-			return false;
-		}
+		std::string name, value;
+		if (!read_join_string_tlv(payload, offset, name, value) || name.empty()) break;
+		if (ascii_case_equal(name, "EXP")) expansion = value.substr(0, 31);
+		else if (ascii_case_equal(name, "VERSIONCRCSTRING")) version_crc = value.substr(0, 511);
 	}
-	return saw_version_crc &&
-	       (config.expansion.empty() ? !saw_expansion : saw_expansion);
+	// [orig: Server_ValidatePlayerJoinRequest @0x5122ff..0x512349]
+	if (expansion != config.expansion) return 47;
+	if (!config.expansion.empty() &&
+	    static_cast<int32_t>(std::strtol(version_crc.c_str(), nullptr, 10)) !=
+	            config.expansion_version_checksum) return 48;
+	return 0;
 }
 
 bool validates_padding_echo(
@@ -574,6 +564,7 @@ struct GrantedWeaponLoadout {
 	// request walk overwrites this table in request order, so the last accepted
 	// weapon using an ammo type controls every granted slot that uses that ammo.
 	std::vector<std::pair<int16_t, uint8_t>> ammo_damage_classes;
+	uint32_t carry_flags = 0;
 };
 
 uint8_t normalized_damage_class(uint8_t value) {
@@ -653,6 +644,8 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 			if (we == nullptr) continue; // the AdmDef_GetEntryByIndex fail leg
 			if (!world::loadout_entry_permitted(*we, req.team, reply.avatar_class))
 				continue; // team/char mask filter [orig: @0x502716]
+			if (we->flags & world::weapon_flag::kArmor) grant.carry_flags |= 8u;
+			if (we->flags2 & 2) grant.carry_flags |= 0x10u;
 			if (we->ammo_class_id >= 0 && we->ammo_class_id < 128) {
 				int32_t pool = e.ammo_primary != 0xFF
 						? std::min<int32_t>(e.ammo_primary, we->maxclips) *
@@ -1099,6 +1092,9 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 				world::bam_heading_from_mission_yaw_deg(player->yaw),
 				player->health);
 	}
+	// [orig: Server_ProcessPlayerDeath @0x5178aa]
+    if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
+        world.local_player_state->reset_for_new_round();
 	conn.discard_pre_deploy_uplinks = true;
 	conn.link.respawn_pending = false;
 	conn.link.respawn_delay_seconds = 0;
@@ -1211,21 +1207,26 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 
 		switch (conn.admission_stage) {
 			case GameAdmissionStage::AwaitJoinRequest: {
-				if (admission_message->tag != 0x00 ||
-				    !validates_join_request(config, admission_message->payload)) {
+				if (admission_message->tag != 0x00) {
 					conn.admission_stage = GameAdmissionStage::Rejected;
 					return {};
 				}
-				// The spectator legs run here, at the game-layer join gate,
-				// after the expansion/CRC checks — the same position they hold
-				// inside Server_ValidatePlayerJoinRequest. A failure answers
-				// the witnessed DPC 14/15/16 description punt, not a 0x82.
-				if (const uint32_t reject_dpc =
-							validate_spectator_join(config, conn, roster);
-				    reject_dpc != 0) {
-					(void)stage_join_gate_reject(conn, reject_dpc);
-					conn.admission_stage = GameAdmissionStage::Rejected;
-					return {};
+				// The JOIN handler latches the spectator request before validation;
+				// the local loopback bypasses the complete remote validator.
+				// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0;
+				// Server_ValidatePlayerJoinRequest @0x512135]
+				if (conn.type != NapiNPConnection::kTypeClientSide) {
+					conn.link.spectator = conn.join_spectator_request != 0;
+					uint32_t reject_dpc = validate_join_environment(conn.join_environment);
+					if (reject_dpc == 0)
+						reject_dpc = validate_join_request(config, admission_message->payload);
+					if (reject_dpc == 0)
+						reject_dpc = validate_spectator_join(config, conn, roster);
+					if (reject_dpc != 0) {
+						(void)stage_join_gate_reject(conn, reject_dpc);
+						conn.admission_stage = GameAdmissionStage::Rejected;
+						return {};
+					}
 				}
 				replies.push_back(make_protocol_message(s2c::INIT, {}));
 				conn.admission_stage = GameAdmissionStage::AwaitFormPost;
@@ -1355,10 +1356,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							!is_medic_recipient(candidate, *world, requester->team))
 						continue;
 					candidate.link.transport->host_send(
-							s2c::CHAT_BROADCAST, chat_body);
+							s2c::CHAT_BROADCAST, chat_body, true, 0, false, 310);
 				}
-				replies.push_back(make_protocol_message(
-						s2c::CHAT_BROADCAST, chat_body));
+				// [orig: Server_BroadcastMedicRequest @0x5154AC..0x51550B]
+				ProtocolMessage own_chat = make_protocol_message(s2c::CHAT_BROADCAST, chat_body);
+				own_chat.retention_flushes = 310;
+				replies.push_back(std::move(own_chat));
 				conn.link.medic_request_active = true;
 				// The help call: the requester's body-model composite
 				// "<prefix>_MEDIC_REQUEST", positioned at the requester, to
@@ -1639,6 +1642,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world != nullptr && conn.link.owned_entity.valid()) {
 					if (world::Entity *pe = world->registry.get(conn.link.owned_entity)) {
 						pe->player_class = grant.reply.avatar_class;
+						pe->carry_flags = (pe->carry_flags & ~0x18u) | grant.carry_flags;
 						// The fourth accepted byte is copied to the player-slot table at
 						// [ammoDef.index]. Weapon_CalcImpactDamage later interprets 1 as
 						// x0.9 and 2 as x1.1 for person targets.
@@ -1971,6 +1975,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (!Server_AcceptsPlayerFireTick(conn, fr.current_tick, world->logic_tick,
 						config.effective_send_holdoff_ticks())) break;
 
+				if (((shooter->flags | shooter->engine_flags) & 0x102u) == 0x102u) break;
 				const bool alt_fire = (fr.fire_flags & 0x01) != 0; // [orig: @0x50bb0d]
 				// ADM + ammo authority — armory-fed hosts only (a table-less host accepts,
 				// mirroring the 0x5A echo fallback, D-NET-141). Alt fire skips the adm lookup,
@@ -1978,6 +1983,20 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (!world->tables.weapons.empty() && !alt_fire) {
 					const world::WeaponTableEntry *adm = world->tables.weapons.by_index(fr.adm_index);
 					if (adm == nullptr) break; // [orig: "Tried to fire NULL wpn, %i" @0x50bb49]
+
+                    if (world::weapon_fire_owner_status(*world, *shooter, adm, false) != 0)
+                        break;
+                    world::WeaponFsmInputs fire_inputs;
+                    world::weapon_fire_environment_inputs(*world, *shooter, fire_inputs);
+                    world::WeaponFsmDef fire_def = adm->action_fsm;
+                    fire_def.flags = adm->flags;
+                    fire_def.clip_capacity = adm->clipsize;
+                    fire_def.ammo_cost = adm->ammo_class_count;
+                    world::WeaponSlotState fire_slot;
+                    const int pool = adm->ammo_class_id;
+                    fire_slot.reserve = pool >= 0 && pool < 128 ? st.ammo_pools[pool] : 0;
+                    fire_slot.clip = 1; // the real mounted/personal clip is checked below
+                    if (!world::weapon_fsm_can_fire(fire_def, fire_slot, fire_inputs)) break;
 					if (adm->clipsize != -1) {
 						world::WeaponSlotState *mounted_slot = nullptr;
 						uint8_t mounted_adm = 0xFF;
@@ -2003,7 +2022,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 								break;
 						}
 						if (mounted_slot != nullptr) {
-							if (mounted_slot->clip <= 0) break;
+							if (static_cast<int16_t>(mounted_slot->clip) == 0) break;
 							--mounted_slot->clip;
 						} else {
 							const uint16_t combo =
@@ -2013,7 +2032,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 								slot.adm_index = fr.adm_index;
 								slot.clip = adm->clipsize;
 							}
-							if (slot.clip <= 0) break;
+							if (slot.clip == 0) break;
 							--slot.clip;
 						}
 					}
@@ -2051,7 +2070,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// The authoritative round spawns SYNCHRONOUSLY with the ring append
 				// [orig: RoundData_AddRound @0x4fdb40 inline-calls RoundData_SpawnRound
 				// @0x4ec0d0 — the ring is only the tag-2 fan-out log; §5.60]. Ammo = the
-				// adm's load-time-resolved round_type (adm+84 pair in the original); an
+				// adm's load-time-resolved round_type (+4; +84 is the stat id); an
 				// armory- or ammo-less host skips the sim (fire still echoes).
 				if (!world->tables.ammo.empty()) {
 					const world::WeaponTableEntry *fire_adm =
@@ -2123,7 +2142,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				for (NapiNPConnection &c : roster) {
 					if (!is_in_match(c) || c.link.transport == nullptr) continue;
 					c.link.transport->host_send(
-							s2c::WEAPON_RELOAD, body, /*reliable=*/false);
+							s2c::WEAPON_RELOAD, body, /*reliable=*/true, 0, false,
+							&c == &conn ? 0u : 1u);
 				}
 				// The 3P RELOAD POSE for a remote requester. Retail's host, unlike a pure
 				// client, does run the refill on its own copy of the peer, and that stamps

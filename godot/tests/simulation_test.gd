@@ -2613,12 +2613,15 @@ end
 	assert_not_null(started,
 			"command-125 controller mount emits the occupied-item lifecycle edge")
 	var expected_vehicle_handle := -1
+	var carrier_position := Vector3.INF
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
 	for base in range(0, snapshot.size(), stride):
 		if int(snapshot[base + Simulation.PF_TYPE_ID]) == 1294:
 			expected_vehicle_handle = int(
 					snapshot[base + Simulation.PF_WIRE_HANDLE])
+			carrier_position = Vector3(snapshot[base + Simulation.PF_POS_X],
+					snapshot[base + Simulation.PF_POS_Y], snapshot[base + Simulation.PF_POS_Z])
 			break
 	assert_gte(expected_vehicle_handle, 0)
 	var idle: SoundEmitterRow = null
@@ -2644,7 +2647,7 @@ end
 	assert_false(idle.source_only)
 	assert_eq(idle.slot, 0)
 	assert_eq(idle.soundset, "V_TRUCK_ILP")
-	assert_lt(idle.pos.distance_to(Vector3(10, 0, 0)), 0.001,
+	assert_lt(idle.pos.distance_to(carrier_position), 0.001,
 			"the emitter tracks the carrier across the boarding ticks")
 	assert_eq(started.wire_handle, expected_vehicle_handle,
 			"binding names the packed identity used by dynamic presentation")
@@ -2662,7 +2665,8 @@ end
 	# The mounted origin is the model's authored ctrlx13 point through the
 	# placer's entity transform — the same identity the render side applies.
 	var expected_ctrl := MissionObjectPlacer.entity_transform(
-			Vector3(10, 0, 0), Vector3.ZERO) * ctrl_point
+			Vector3(carrier_position.x, -carrier_position.z, carrier_position.y),
+			Vector3.ZERO) * ctrl_point
 	assert_lt(pos.distance_to(expected_ctrl), 0.001,
 		"command-125 soldier uses the IDA-priority ctrlx seat, converted to Godot axes")
 	assert_almost_eq(sim.get_entity_yaw_deg(soldier_idx), 0.0, 0.01,
@@ -2725,7 +2729,8 @@ end
 	assert_lte(absf(wrapf(sim.get_entity_yaw_deg(rider_idx) - rider_body_yaw, -180.0, 180.0)),
 			90.01, "independent passenger gaze stays within the mounted body arc")
 	var expected_rider := MissionObjectPlacer.entity_transform(
-			Vector3(10, 0, 0), Vector3.ZERO) * passenger_point
+			Vector3(carrier_position.x, -carrier_position.z, carrier_position.y),
+			Vector3.ZERO) * passenger_point
 	assert_lt(sim.get_entity_position(rider_idx).distance_to(expected_rider), 0.001)
 	assert_eq(rider_card.get_anim_state(), 76)
 	assert_eq(rider_card.get_anim_key(), "anim_sit")

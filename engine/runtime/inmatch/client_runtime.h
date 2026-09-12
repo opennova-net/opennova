@@ -97,6 +97,8 @@ public:
 	// The literal dword_81474C state. Every valid S2C 0x5A opens it, including
 	// an unrelated loadout echo while dead; that alone cannot resume gameplay.
 	bool gameplay_gate_open() const { return deployed_; }
+    // Local Game_InitNewRound clears the medic latch and gameplay hold.
+    void reset_local_round_state();
 	// Monotonic receive-side deployment-release edge. It advances when initial
 	// establishment becomes applicable (even if deploy UI remains pending), and
 	// again on an ACK-qualified post-pick release. Unrelated valid 0x5A grants
@@ -218,13 +220,12 @@ public:
 	// sentence against its roster + string table [orig: 0x426270 -> 0x422DA0].
 	std::vector<replication::ClientGameEvent> drain_game_events();
 	std::vector<WeaponReload> drain_reload_notifications();
-	// S2C 0x13 death notifies the recv fold surfaced this frame. The embedding
-	// sim runs the class death callback on each world twin (reason 4 — the net
-	// kill; a destructible's husk/explosion chain).
+	// Consume sounds, explosions, and class death/state callbacks in receive
+	// order. Pure joiners apply death callbacks to the world twin; listen
+	// clients retain the authority's already-applied gameplay state.
 	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — cb(entity, 4, 0) @0x42ebf5]
-	std::vector<EntityDeathRecord> drain_entity_deaths();
-	// Both remote and listen clients consume the same one-shot sound commands.
-	void apply_received_sounds(world::World &world);
+	void apply_received_effects(world::World &world);
+	void tick_remote_stance_sounds(world::World &world);
 	// S2C 0x23 WAC remote commands the recv fold surfaced this frame; the
 	// joiner role runs each registry row's handler against its world.
 	std::vector<ScriptRemoteCommand> drain_script_remote_commands();
@@ -255,9 +256,11 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		if (joiner_) joiner_->set_character_join_vars(vars);
 	}
-	void set_join_request(JoinRole role, std::string spectator_password) {
+	void set_join_request(JoinRole role, std::string spectator_password,
+			std::string server_password) {
 		if (joiner_) {
-			joiner_->set_join_request(role, std::move(spectator_password));
+			joiner_->set_join_request(role, std::move(spectator_password),
+					std::move(server_password));
 		}
 	}
 	bool is_spectator() const {

@@ -52,6 +52,7 @@ public:
 	          VfsArchiveDiscovery discovery = VfsArchiveDiscovery::ScanAll);
 	void clear();
 	bool has_mounted_archive() const;
+	bool prefers_loose_file(const std::string &name) const;
 
 	// Choose how read_file keys SCR payloads (forwards to the underlying Vfs). Pass a
 	// gameprofile ScrPolicy / VfsScrPolicy value; defaults to version-detect and persists

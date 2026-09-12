@@ -860,3 +860,64 @@ func test_vehicle_respawn_restores_intact_model_and_releases_damage_effects() ->
 	assert_false(anchors.has_effect_anchor(key))
 	assert_false(fx.has_owner_binding(key))
 	presenter.teardown()
+
+
+func test_retained_husk_pick_retries_and_updates_only_the_husk_section_mask() -> void:
+	var sim := Simulation.new()
+	var placer := _husk_placer()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var index := EntityIndex.new()
+	var presenter := _make_presenter(sim, container, index, placer, _item_db,
+			ItemEffectDirector.new(), null)
+	presenter.setup_wire(sim, placer, container, index)
+	# The death drain can precede the cold model build.
+	presenter.present_destruction_drained(DestructionDrain.make([
+			HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x2001)]), [])
+	assert_true(_husk_models(container).is_empty())
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(HUSK_MODEL_3DI)), OK)
+	var intact := ObjectModel.new()
+	container.add_child(intact)
+	intact.set_object_data(data)
+	var ref := EntityRef.make(2, 16777215, 0, BUGGY_ITEM_ID + 100000, 0x2001)
+	ref.origin_kind = 255
+	ref.runtime_type_id = BUGGY_ITEM_ID
+	intact.entity_ref = ref
+	presenter.register_wire_node(0x2001, intact)
+	var row := PackedFloat32Array()
+	row.resize(Simulation.PF_STRIDE)
+	row[Simulation.PF_TYPE_ID] = BUGGY_ITEM_ID
+	row[Simulation.PF_WIRE_HANDLE] = 0x2001
+	row[Simulation.PF_KIND] = 255
+	row[Simulation.PF_INDEX] = 16777215
+	row[Simulation.PF_HUSK] = 1
+	row[Simulation.PF_OBJECT_DESTROY] = 32768
+	row[Simulation.PF_OBJECT_DESTROY05] = 123
+	row[Simulation.PF_SECTION_MASK_VALID] = 1
+	row[Simulation.PF_SECTION_MASK_LO] = 1
+	row[Simulation.PF_ANIM_STATE] = -1
+	row[Simulation.PF_WPN_ANIM_STATE] = -1
+	row[Simulation.PF_POS_Y] = 3
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	var husks := _husk_models(container)
+	assert_eq(husks.size(), 1, 'the retained pick recovers the earlier model-resolution miss')
+	if husks.size() == 1:
+		var husk := husks[0] as ObjectModel
+		assert_eq(husk.get_ctrl_values().get('OBJECT_DESTROY'), 32768)
+		assert_eq(husk.get_ctrl_values().get('OBJECT_DESTROY05'), 123)
+		var husk_parts := husk.get_render_part_nodes()
+		assert_false((husk_parts[0] as Node3D).visible)
+		assert_true((husk_parts[1] as Node3D).visible)
+		row[Simulation.PF_SECTION_MASK_LO] = 2
+		row[Simulation.PF_POS_Y] = 5
+		presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+		assert_eq(_husk_models(container).size(), 1, 'repeated rows retain one model')
+		assert_true((husk_parts[0] as Node3D).visible)
+		assert_false((husk_parts[1] as Node3D).visible)
+		assert_eq(husk.global_position.y, 5.0)
+		var parts := intact.get_render_part_nodes()
+		assert_false(parts.is_empty())
+		for part in parts.values():
+			assert_false((part as Node3D).visible, 'mask changes leave the intact model hidden')
+	presenter.teardown()

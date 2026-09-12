@@ -194,7 +194,8 @@ int main() {
 				{make_protocol_message(c2s::MEDIC_REQUEST,
 						encode_medic_request(request))},
 				world.logic_tick, roster, &world, inputs);
-		expect(own.size() == 1 && own[0].tag == s2c::CHAT_BROADCAST,
+		expect(own.size() == 1 && own[0].tag == s2c::CHAT_BROADCAST &&
+                own[0].reliable && own[0].retention_flushes == 310,
 				"the requester gets the chat line back");
 		const auto medic_rows = drain(medic_wire);
 		const auto medic_downed = bodies_of(medic_rows, s2c::PLAYER_DOWNED_STATE);

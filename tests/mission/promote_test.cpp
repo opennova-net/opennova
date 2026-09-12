@@ -598,7 +598,101 @@ static void test_script_spatial_tables_are_promoted_and_replaced() {
     CHECK(w->registry.script_group_index("humans") == 1);
 }
 
+static void test_bms_admission_preserves_holes_and_signed_thresholds() {
+    bms::File file;
+    file.items.resize(9);
+    for (size_t i = 0; i < file.items.size(); ++i) {
+        file.items[i].type_id = 200 + static_cast<int32_t>(i);
+        file.items[i].id = 100 + static_cast<int32_t>(i);
+        file.items[i].team = 1;
+    }
+    file.items[1].bmsi_attributes = 0x10;
+    file.items[1].no_less_than = 8;
+    file.items[2].bmsi_attributes = 0x20;
+    file.items[2].no_more_than = 8;
+    file.items[3].bmsi_attributes = 0x40;
+    file.items[4].bmsi_attributes = 0x80;
+    file.items[5].team = 3;
+    file.items[7].bmsi_attributes = 0x10;
+    file.items[7].no_less_than = 255; // signed -1
+    file.items[8].bmsi_attributes = 0x20;
+    file.items[8].no_more_than = 255; // signed -1
+    file.organics.resize(2);
+    file.organics[0].type_id = 5305;
+    file.organics[0].id = 201;
+    file.organics[1].type_id = 5001;
+    file.organics[1].id = 202;
+    struct Case {
+        bool session;
+        int32_t limit;
+        uint8_t teams;
+        uint32_t game_type;
+        std::array<bool, 9> admitted;
+    };
+    for (const auto &c : {
+            Case{false, 8, 2, 0, {true,false,true,true,false,false,false,false,true}},
+            Case{true, 8, 2, 0x10000, {true,true,true,false,true,false,false,true,false}},
+            Case{true, 7, 4, 0x10001, {true,false,true,false,true,true,true,true,false}},
+            Case{true, 9, 4, 0x10008, {true,true,false,false,true,true,true,true,false}},
+            Case{true, 8, 4, 0x10004, {true,true,true,false,true,true,false,true,false}}}) {
+        auto world = std::make_unique<World>();
+        world->rules.mp_session = c.session;
+        mission::PromoteOptions options;
+        options.player_limit = c.limit;
+        options.team_count = c.teams;
+        options.game_type = c.game_type;
+        options.item_attributes = [](int32_t type) { return type == 206 ? 0x10000u : 0u; };
+        const auto result = mission::promote_mission(file, *world, options);
+        int accepted = c.session ? 1 : 2;
+        for (size_t i = 0; i < c.admitted.size(); ++i) {
+            const Entity *row = world->registry.get(EntityHandle::make(1, static_cast<int>(i)));
+            CHECK((row != nullptr) == c.admitted[i]);
+            if (row) {
+                CHECK(row->net_id == 100 + i);
+                ++accepted;
+            }
+        }
+        CHECK(result.spawned == accepted);
+        CHECK(result.dropped == static_cast<int>(file.items.size() + file.organics.size()) - accepted);
+        const Entity *teammate = world->registry.get(EntityHandle::make(0, 0));
+        CHECK((teammate != nullptr) == !c.session);
+        if (teammate) {
+            CHECK(teammate->item_id == 5000);
+            CHECK(teammate->player_class == 1);
+        }
+        const Entity *next = world->registry.get(EntityHandle::make(0, 1));
+        CHECK(next != nullptr && next->net_id == 202);
+        CHECK(file.organics[0].type_id == 5305); // the document remains authored
+    }
+    auto world = std::make_unique<World>();
+    world->rules.teammates_disabled = true;
+    mission::promote_mission(file, *world);
+    CHECK(world->registry.get(EntityHandle::make(0, 0)) == nullptr);
+}
+
+static void test_bms_admission_zeros_rejected_marker_projections() {
+    bms::File file;
+    file.markers.resize(2);
+    file.markers[0].type_id = 2043;
+    file.markers[0].bmsi_attributes = 0x80;
+    file.markers[0].x = 100;
+    file.markers[1].type_id = 2043;
+    file.markers[1].x = 200;
+    auto world = std::make_unique<World>();
+    const auto result = mission::promote_mission(file, *world);
+    CHECK(result.spawned == 1 && result.dropped == 1);
+    CHECK(world->registry.get(EntityHandle::make(3, 0)) == nullptr);
+    CHECK(world->registry.get(EntityHandle::make(3, 1)) != nullptr);
+    CHECK(world->tables.map_grid_origin_present && world->tables.map_grid_origin_x == 200);
+    CHECK(world->ai.nav.nodes.size() == 2);
+    CHECK(world->ai.nav.nodes[0].f[0] == 0 && world->ai.nav.nodes[0].f[1] == 0);
+    CHECK(world->ai.nav.nodes[1].f[1] == 200);
+    CHECK(world->registry.get(EntityHandle::make(3, 1))->class_think_ticks == 0);
+}
+
 int main() {
+    test_bms_admission_preserves_holes_and_signed_thresholds();
+    test_bms_admission_zeros_rejected_marker_projections();
     test_script_spatial_tables_are_promoted_and_replaced();
     // A synthetic mission: 3 markers forming a path, 1 looping waypoint record (channel 0),
     // 2 organics on that route (teams 1/2), 1 building.

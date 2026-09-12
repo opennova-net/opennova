@@ -1,3 +1,4 @@
+#include <runtime/renderer/render_order.h>
 #include "mission/mission_object_placer.h"
 
 #include <formats/mission/mission.h> // the entity read the native place() walks
@@ -1086,6 +1087,8 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 		ref->set_team(int(a.get("team", -1)));
 		ref->set_position(a.get("position", Vector3()));
 		ref->set_item_id(item_id);
+		model->set_thermal_entity_wave(opennova::renderer::entity_uses_thermal_wave(
+				item_db_->get_item_type(item_id)));
 		ref->set_graphic(graphic);
 		ref->set_attrib2(int64_t(item_db_->get_attrib2(item_id)));
 		model->set_entity_ref(ref);
@@ -1401,6 +1404,10 @@ bool MissionObjectPlacer::_needs_individual_node(int p_item_id) {
 	if (opennova::mission::uses_submodel_renderer(
 				item_db_->get_render_function(p_item_id).utf8().get_data()))
 		return true;
+    if (opennova::mission::uses_section_renderer(item_db_->get_ai_function(p_item_id).utf8().get_data()) ||
+            opennova::mission::uses_section_renderer(item_db_->get_move_function(p_item_id).utf8().get_data()) ||
+            opennova::mission::uses_section_renderer(item_db_->get_render_function(p_item_id).utf8().get_data()))
+        return true;
 	const bool has_anim_def = !item_db_->get_anim_def(p_item_id).is_empty();
 	if (opennova::mission::needs_individual_node(item_type, item_db_->get_attrib2(p_item_id),
 				has_anim_def, false)) {

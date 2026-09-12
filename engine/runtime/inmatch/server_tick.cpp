@@ -893,7 +893,7 @@ void release_expired_local_respawns(NapiNPServerCtx &ctx, world::World &world) {
 		for (ProtocolMessage &message : deployment)
 			conn.link.transport->host_send(
 					message.tag, std::move(message.payload), message.reliable,
-					message.flags.raw, message.capacity_exempt);
+					message.flags.raw, message.capacity_exempt, message.retention_flushes);
 	}
 }
 
@@ -974,6 +974,26 @@ void emit_requester_score_refreshes(NapiNPServerCtx &ctx,
 		conn.link.transport->host_send(
 				s2c::SCORE_DELTA_SOUND, std::move(body),
 				/*reliable=*/true);
+	}
+}
+
+// [orig: Server_TickUpdate @0x51D7E0] The player-slot
+// cooldown advances even while the connection's send boundary is closed.
+// State 6, an open boundary, and a live round admit one reliable 62-flush
+// RTT request. Death/deploy do not reset or suppress this clock.
+void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world) {
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.phase < ConnectionPhase::PlayerAdded ||
+				conn.phase >= ConnectionPhase::Goodbye || conn.host_disconnect_sent) continue;
+		if (conn.reply.rtt_request_countdown > 0) --conn.reply.rtt_request_countdown;
+		if (!ctx.is_in_session || world.match.outcome().ended ||
+				!is_in_match(conn) || conn.link.transport == nullptr ||
+				conn.s2c_send_holdoff_countdown != 0 || conn.reply.rtt_request_countdown != 0) continue;
+		conn.reply.rtt_request_countdown = 62;
+		std::vector<uint8_t> body;
+		put_u32le(body, host_milliseconds_for_logic_tick(world.logic_tick));
+		body.push_back(1);
+		conn.link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
 	}
 }
 
@@ -1334,6 +1354,39 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			/*is_authority=*/true,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
+    // Item callbacks' state packets and authoritative removals: mask 0x90
+    // includes active remote slots regardless of health, excluding the local host.
+    // [orig: Server_SendEntityStatePacket @0x509D70;
+    // Server_RemoveEntityAndNotify @0x50A270 -> NapiNPServer_SendFiltered @0x4C87E0]
+    if (ctx.is_in_session) {
+        for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+            if (!active_player_recipient(conn) ||
+                    conn.link.mode == replication::TransportMode::Loopback) continue;
+            for (const auto &event : world.out.entity_events) {
+                if (const auto *state = std::get_if<world::ItemStateEvent>(&event)) {
+                    std::vector<uint8_t> body;
+                    put_u16le(body, state->handle);
+                    put_u16le(body, static_cast<uint16_t>(state->section));
+                    conn.link.transport->host_send(s2c::KILL_SYNC, body, true, 0);
+                } else if (const auto *effect = std::get_if<world::ItemExplosionEvent>(&event)) {
+                    ExplosionEffectRecord record;
+                    record.count = effect->count;
+                    record.source = effect->source;
+                    record.x = effect->position.x;
+                    record.y = effect->position.y;
+                    record.z = effect->position.z;
+                    record.heading = int16_t(uint32_t(effect->heading) >> 16);
+                    conn.link.transport->host_send(s2c::EXPLOSION_EFFECT,
+                            encode_explosion_effect(record), true, 0);
+                } else if (const auto *removal = std::get_if<world::EntityRemoveEvent>(&event)) {
+                    std::vector<uint8_t> body;
+                    put_u16le(body, removal->handle);
+                    conn.link.transport->host_send(s2c::ENTITY_REMOVE, body, true, 0);
+                }
+            }
+        }
+    }
+    world.out.entity_events.clear();
 	// WAC punts are connection descriptions, not gameplay damage or chat.
 	// The original slot wrapper ignores departed/retired slots; the live
 	// connection owner likewise rejects stale allocations and loopback nodes.
@@ -1446,7 +1499,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 					conn.link.transport->host_send(
 							message.tag, std::move(message.payload),
 							message.reliable, message.flags.raw,
-							message.capacity_exempt);
+							message.capacity_exempt, message.retention_flushes);
 				break;
 			}
 		}
@@ -1765,6 +1818,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
 			const devtools::ProfileScope fan_scope(
 					world.profile, devtools::Slot::SIM_REPLICATION_FAN);
+            conn.link.receive_silence_ms = conn.receive_inactive_ms;
 			replication::emit_connection_s2c(
 					world, conn.link, ents, ctx.config.game_type,
 					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0);
@@ -1782,6 +1836,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		--ctx.round_end_linger_ticks;
 		if (ctx.round_end_linger_ticks == 0) ctx.is_in_session = 0;
 	}
+	emit_periodic_rtt(ctx, world);
 	lap.mark(devtools::Slot::SIM_SERVER_REPLICATION);
 
 	// (4) flush is implicit: host_send staged each 0x0A on its transport. The loopback's local client

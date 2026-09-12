@@ -718,8 +718,41 @@ bool check_session_retransmit_retention_and_current_ack() {
 	return true;
 }
 
+// [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430;
+// NapiNPMessage_SplitAtLength @0x628350; WriteMessageRecord @0x61DA90]
+bool check_split_fills_partial_packet_and_clears_expiry() {
+	using namespace opennova;
+	size_t cursor = PROTOCOL_DATAGRAM_OVERHEAD;
+	const auto prefix = split_protocol_message_to_fill(make_protocol_message(0x60, std::vector<uint8_t>(10, 1)), 48, cursor);
+	if (!expect(prefix.size() == 1 && cursor == 31, "first record uses 13 bytes after the 18-byte packet overhead")) return false;
+	ProtocolMessage original = make_protocol_message(0x61, std::vector<uint8_t>(20, 2));
+	original.reliable = false; original.retention_flushes = 310;
+	const auto pieces = split_protocol_message_to_fill(original, 48, cursor);
+	if (!expect(pieces.size() == 2 && pieces[0].payload.size() == 14 && pieces[1].payload.size() == 6 && cursor == 27,
+			"a message that fits alone splits 14/6 to fill the preceding packet")) return false;
+	if (!expect(pieces[0].flags.raw == 0x24 && pieces[1].flags.raw == 0x22,
+			"the two short records encode LEN8 FIRST/FINAL flags")) return false;
+	for (const auto &piece : pieces) if (!expect(piece.reliable && piece.retention_flushes == 0,
+			"split records retain until ACK even when their original was transient or finite")) return false;
+	ProtocolReassemblyState state; std::vector<uint8_t> body;
+	if (!expect(!reassemble_protocol_payload(state, pieces[0], body) &&
+			reassemble_protocol_payload(state, pieces[1], body) && body == original.payload,
+			"split-to-fill dispatches one complete original payload")) return false;
+	cursor = 1200;
+	const auto narrowed = split_protocol_message_to_fill(make_protocol_message(0x62, std::vector<uint8_t>(300, 3)), 1300, cursor);
+	if (!expect(narrowed.size() == 2 && narrowed[0].payload.size() == 96 && narrowed[0].flags.len8 && cursor == 225,
+			"the original four-byte prefix charge survives when the split head's wire length narrows")) return false;
+	std::vector<uint8_t> encoded; append_protocol_message(encoded, narrowed[0]);
+	if (!expect(encoded.size() == 99, "LEN16-to-LEN8 narrowing leaves one unused byte at the packet end")) return false;
+	cursor = 47;
+	const auto deferred = split_protocol_message_to_fill(make_protocol_message(0x63, {1,2,3}), 48, cursor);
+	return expect(deferred.size() == 1 && !deferred[0].flags.frag_cont && cursor == 24,
+			"without room for a prefix and one byte, the entire record moves to the next packet");
+}
+
 int main() {
 	bool ok = true;
+	ok = check_split_fills_partial_packet_and_clears_expiry() && ok;
 	ok = check_session_retransmit_retention_and_current_ack() && ok;
 	ok = check_session_resend_list_wire_and_gap_selection() && ok;
 	ok = check_session_packet_frame_deframe() && ok;

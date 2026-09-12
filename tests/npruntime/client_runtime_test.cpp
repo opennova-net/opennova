@@ -1,3 +1,4 @@
+#include <runtime/world/radio_call.h>
 // P5 — inmatch::ClientRuntime (the headless Client_ProcessNetworkFrame role), always-on:
 //
 //  (A) Full in-process round-trip — client_runtime <-> the REAL np server legs <-> Server_TickUpdate
@@ -236,9 +237,10 @@ bool matches_client_header(const ProtocolPacketHeader &header,
 }
 
 bool build_joiner_client_auth(inmatch::JoinRole role,
-		std::string password, ClientAuth &out) {
+		std::string password, ClientAuth &out,
+		std::string server_password = {}, bool password_required = false) {
 	inmatch::JoinerConnection joiner("SpectatorWire");
-	joiner.set_join_request(role, std::move(password));
+	joiner.set_join_request(role, std::move(password), std::move(server_password));
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -252,6 +254,7 @@ bool build_joiner_client_auth(inmatch::JoinRole role,
 	ServerHello server_hello =
 			build_server_hello(hello, 0x7F000001u, 32768);
 	server_hello.hk = 0xAABBCCDDu;
+	server_hello.sf = password_required ? 1u : 0u;
 	const std::vector<uint8_t> reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
@@ -281,6 +284,14 @@ bool auth_has_cu(const ClientAuth &auth,
 }
 
 bool run_spectator_clientauth_and_state_latch() {
+	ClientAuth protected_join;
+	for (const auto role : {inmatch::JoinRole::Player, inmatch::JoinRole::Spectator}) {
+		if (!expect(build_joiner_client_auth(role, "watch", protected_join, "Secret", true) &&
+				protected_join.pw == "Secret", "SF=1 publishes the server PW for either role")) return false;
+		if (!expect(build_joiner_client_auth(role, "watch", protected_join, "Secret", false) &&
+				protected_join.pw.empty(), "unprotected servers receive no stored PW")) return false;
+	}
+
 	ClientAuth player;
 	if (!expect(build_joiner_client_auth(
 				inmatch::JoinRole::Player, "", player),
@@ -5321,7 +5332,7 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 			0xAABBCCDDu, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	ProtocolMessage invalid = make_protocol_message(
-			0x64, std::vector<uint8_t>(0x10000u, 0xCC), 0x20);
+			0x64, std::vector<uint8_t>(256u, 0xCC), 0x20);
 	const inmatch::JoinerConnection::FrameMessagesResult failed =
 			failing_joiner.frame_messages_detailed({
 					make_protocol_message(0x65, {0x01}),
@@ -5361,8 +5372,213 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 			"MTU-split transient queue admits exactly the first 1,200 nodes");
 }
 
+// [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430;
+// NapiNPMessage_SplitAtLength @0x628350]
+bool run_joiner_splits_to_fill_remaining_packet_space() {
+	const std::string client_scrk = "CLIENTSPLITFILL0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+	const std::string server_scrk = "SERVERSPLITFILL0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+	inmatch::JoinerConnection joiner("SplitFill");
+	joiner.seed_in_match(0x12345678u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	auto first = make_protocol_message(0x60, std::vector<uint8_t>(10, 0xA1));
+	auto second = make_protocol_message(0x61, std::vector<uint8_t>(20, 0xB2));
+	second.reliable = false;
+	second.retention_flushes = 1;
+	const auto framed = joiner.frame_messages_detailed({first, second}, 48);
+	if (!expect(!framed.frame_failed && framed.framed_count == 2 &&
+			framed.datagrams.size() == 2 && framed.datagrams[0].size() == 48,
+			"joiner fills first datagram instead of deferring a record that fits alone")) return false;
+	ProtocolReassemblyState reassembly;
+	std::vector<std::vector<uint8_t>> bodies;
+	std::vector<ProtocolMessage> records;
+	for (const auto &datagram : framed.datagrams) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> packet;
+		if (!decode_client_session(datagram, client_scrk, header, packet)) return false;
+		for (const auto &message : packet) {
+			records.push_back(message);
+			std::vector<uint8_t> payload;
+			if (reassemble_protocol_payload(reassembly, message, payload))
+				bodies.push_back(std::move(payload));
+		}
+	}
+	if (!expect(records.size() == 3 && records[1].payload.size() == 14 &&
+			records[1].flags.frag_cont && records[2].payload.size() == 6 &&
+			records[2].flags.frag_end && bodies.size() == 2 &&
+			bodies[0] == first.payload && bodies[1] == second.payload,
+			"split prefix and continuation reassemble in semantic order")) return false;
+	joiner.complete_send_flush();
+	joiner.complete_send_flush();
+	return expect(joiner.retained_outbound_depth() == 3,
+			"splitting a transient record retains both pieces until acknowledgement");
+}
+
+
+bool run_flag_event_audio_and_feed_drain_independently() {
+    inmatch::ClientRuntime runtime("FlagAudio");
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    w::Entity person;
+    person.item_id = 11; person.has_item_def = true; person.team = 1;
+    world.cached.local_player = world.registry.spawn(0, person);
+    const auto remote = w::EntityHandle::make(0, 1);
+    runtime.view().apply(s2c::ENTITY_SPAWN_BATCH,
+            make_organic_spawn(remote.packed, "Remote", 12*65536, 34*65536, 5*65536, 0, 1, 1));
+    world.out.fire_sounds.set_listener({});
+    opennova::lwf::File bank;
+    for (const char *name : {"FLAG_PU_P", "FLAG_SV_OT", "FLAG_VXSV_OT"}) {
+        opennova::lwf::Multi set; set.name = name; bank.multis.push_back(set);
+    }
+    opennova::audio::SoundSetIndex sets;
+    sets.add_bank(0, bank); world.tables.sound_sets = &sets;
+    runtime.view().apply(s2c::GAME_EVENT, {20, 0, 255, 255, 0, 0, 0, 0});
+    runtime.view().apply(s2c::GAME_EVENT, {21, uint8_t(remote.slot()), 255, 255, 0xFE, 0xFF, 3, 0});
+    if (!expect(runtime.drain_game_events().size() == 2,
+            "text feed drains independently of flag audio")) return false;
+    runtime.apply_received_effects(world);
+    auto ready = world.out.fire_sounds.drain();
+    if (!expect(world.out.script_sounds.size() == 1 &&
+            world.out.script_sounds[0].name == "FLAG_PU_P" &&
+            ready.size() == 1 && ready[0].set_name == "FLAG_SV_OT" &&
+            ready[0].pos.x == -2 && ready[0].pos.y == 3 &&
+            world.out.fire_sounds.pending_count() == 1,
+            "ordered decoded events reach local and remote sound routes")) return false;
+    runtime.apply_received_effects(world);
+    if (!expect(world.out.script_sounds.size() == 1 && world.out.fire_sounds.drain().empty(),
+            "flag audio consumes each receive edge once")) return false;
+    for (int i = 0; i < 62; ++i) world.out.fire_sounds.tick();
+    ready = world.out.fire_sounds.drain();
+    return expect(ready.size() == 1 && ready[0].set_name == "FLAG_VXSV_OT" && ready[0].interface_set,
+            "flag voice uses the shared pending slot after 62 ticks");
+}
+
+bool run_medic_reviving_plays_both_receive_cues() {
+	inmatch::ClientRuntime runtime("MedicAudio");
+	runtime.view().set_mp_session(true);
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::Entity person;
+	person.position = {12.0f, 34.0f, 5.0f};
+	person.item_id = 11; person.has_item_def = true;
+	world.cached.local_player = world.registry.spawn(0, person);
+	world.rules.mp_session = true;
+	std::vector<std::string> voices;
+	world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+			-> std::optional<w::ScriptVoiceChannel::SetSelection> {
+		voices.push_back(name); return std::nullopt;
+	});
+	runtime.view().apply(s2c::MEDIC_REVIVING, {});
+	runtime.apply_received_effects(world);
+	if (!expect(world.out.slot_sounds.size() == 1 && voices == std::vector<std::string>{"MEDIC_VOICE"},
+			"0x3A produces positional kit audio and the medic radio voice")) return false;
+	const auto &kit = world.out.slot_sounds.front();
+	if (!expect(std::string(kit.set_name) == "MEDIC_KIT_USE" && kit.pos[0] == 12 * 65536 &&
+			kit.pos[1] == 34 * 65536 && kit.pos[2] == 5 * 65536,
+			"revive kit sound uses the local body's current position")) return false;
+	runtime.apply_received_effects(world);
+	if (!expect(voices.size() == 1, "sound drain is consumed once")) return false;
+	runtime.view().apply(s2c::MEDIC_REVIVING, {});
+	runtime.apply_received_effects(world);
+	return expect(voices.size() == 2 && world.out.slot_sounds.size() == 2,
+			"a new revive message attempts both cues even while already latched");
+}
+
+bool run_radio_events_preserve_order_chat_and_mute_state(bool replica_only) {
+    inmatch::ClientRuntime runtime("RadioAudio");
+    runtime.view().set_mp_session(true);
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    w::Entity person;
+    person.item_id = 11; person.has_item_def = true; person.team = 1;
+    world.cached.local_player = world.registry.spawn(0, person);
+    person.position = {12.0f, 34.0f, 5.0f};
+    const auto remote = replica_only ? w::EntityHandle::make(0, 1) : world.registry.spawn(0, person);
+    if (replica_only)
+        runtime.view().apply(s2c::ENTITY_SPAWN_BATCH,
+                make_organic_spawn(remote.packed, "Medic", 12*65536, 34*65536, 5*65536, 0, 1, 1));
+    const auto request = [&]() {
+        return replica_only ? runtime.state().find(remote.packed)->radio_request :
+                world.registry.get(remote)->radio_request;
+    };
+    world.rules.mp_session = true;
+    auto &roster = runtime.view().state().roster[3];
+    roster.bound = true; roster.entity_slot = int16_t(remote.slot()); roster.name = "Medic";
+    runtime.view().state().location_names = {"Hill"};
+    world.tables.voice_macros.sections.push_back({"macrotext", 1});
+    world.tables.voice_macros.entries.push_back({"RAD_6", "Need a lift", {}, 0});
+    std::vector<std::string> voices;
+    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+            -> std::optional<w::ScriptVoiceChannel::SetSelection> {
+        voices.push_back(name); return std::nullopt;
+    });
+    const std::vector<uint8_t> body{6, uint8_t(remote.slot()), 0, 0};
+    runtime.view().apply(s2c::TRACKED_PLAYER_VOICE, body);
+    runtime.view().apply(s2c::MEDIC_REVIVING, {});
+    runtime.apply_received_effects(world);
+    if (!expect(voices == std::vector<std::string>{"BM1_RAD_6", "MEDIC_VOICE"},
+            "radio and revive sounds keep packet receive order")) return false;
+    const auto lines = runtime.view().drain_chat_lines();
+    if (!expect(lines.size() == 1 && lines[0].text == "Medic:[Hill]: Need a lift" &&
+            lines[0].channel == 2 && lines[0].sender_slot == remote.slot(),
+            "radio chat resolves macrotext and the 0x0F location-name table")) return false;
+    if (!expect(request() == 1 &&
+            runtime.state().radio_target.handle == remote.packed &&
+            runtime.state().radio_target.ticks_remaining == 1860,
+            "event six arms the ride request and 30-second tracking target")) return false;
+    roster.radio_mute_flags = 1;
+    runtime.view().apply(s2c::TRACKED_PLAYER_VOICE, {7, uint8_t(remote.slot()), 255, 255});
+    runtime.apply_received_effects(world);
+    if (!expect(voices.size() == 2 && request() == 1 &&
+            runtime.view().drain_chat_lines()[0].text == "Medic: RAD_7",
+            "voice mute gates the request latch, independently of chat")) return false;
+    roster.radio_mute_flags = 2;
+    runtime.view().apply(s2c::TRACKED_PLAYER_VOICE, {7, uint8_t(remote.slot()), 255, 255});
+    runtime.apply_received_effects(world);
+    return expect(voices.back() == "BM1_RAD_7" && runtime.view().drain_chat_lines().empty() &&
+            request() == 0, "chat mute permits radio playback");
+}
+
+bool run_contextual_radio_keys_match_retail() {
+    w::World world;
+    world.registry.configure_pool(1, 4);
+    w::Entity speaker; speaker.player_class = 5;
+    if (!expect(w::radio_call_key(world, speaker, 9, 3, 0x30020, false) == "BM1_RAD_MEDIC1",
+            "on-foot contextual call resolves the body and class")) return false;
+    if (!expect(w::radio_call_key(world, speaker, 10, 6, 0x10004, false) == "RAD_MP_CTF2",
+            "mode context precedes class context")) return false;
+    world.registry.configure_pool(3, 1);
+    w::Entity zone; zone.item_id = 6006; zone.has_item_def = true; zone.bound_radius = 100.0f;
+    const auto zone_handle = world.registry.spawn(3, zone);
+    if (!expect(w::radio_call_key(world, speaker, 9, 6, 0x10001, false) == "RAD_MP_TKTH1",
+            "an interior neutral zone supplies the hill context")) return false;
+    speaker.position.x = 99.5;
+    if (!expect(w::radio_call_key(world, speaker, 9, 6, 0x10001, false) == "RAD_MEDIC1",
+            "a sub-one-percent coverage ring falls back to the class context")) return false;
+    speaker.position.x = 0;
+    world.registry.get(zone_handle)->bound_radius = 500.0f;
+    if (!expect(w::radio_call_key(world, speaker, 9, 6, 0x10001, false) == "RAD_MEDIC1",
+            "coverage percentage multiplies in signed 32 bits before dividing")) return false;
+    world.registry.get(zone_handle)->bound_radius = 200.0f;
+    speaker.position.x = 199.5;
+    if (!expect(w::radio_call_key(world, speaker, 9, 6, 0x10001, false) == "RAD_MP_TKTH1",
+            "overflowed squared distance preserves the x87 integer-indefinite shift")) return false;
+    w::Entity hull; hull.item_id = 100; hull.has_item_def = true; hull.item_unit_type = 12;
+    speaker.mount_target = world.registry.spawn(1, hull);
+    speaker.mount_type = w::SeatType::Passenger;
+    if (!expect(w::radio_call_key(world, speaker, 9, 3, 0, false) == "BM1_RAD_WL_1",
+            "dirt-bike passenger radio suffix is remapped")) return false;
+    auto *mount = world.registry.get(speaker.mount_target);
+    mount->item_unit_type = 2;
+    speaker.mount_type = w::SeatType::Driver;
+    return expect(w::radio_call_key(world, speaker, 10, 3, 0, false) == "BM1_RAD_WL_2",
+            "tank driver's second radio uses the wheeled-vehicle remap");
+}
+
 int main() {
-	const bool ok = run_charattr_challenge_table_matches_retail() &&
+	const bool ok = run_radio_events_preserve_order_chat_and_mute_state(false) &&
+                    run_radio_events_preserve_order_chat_and_mute_state(true) &&
+                    run_contextual_radio_keys_match_retail() &&
+                    run_charattr_challenge_table_matches_retail() &&
 	                run_spectator_clientauth_and_state_latch() &&
 	                run_seeded_objective_layout_hint() &&
 	                run_challenge_diagnostics_pass_through_the_runtime() &&
@@ -5392,6 +5608,8 @@ int main() {
 	                run_host_pump_hook_observes_remote_before_first_tick() &&
 	                run_periodic_request_quartet_is_answered() &&
 	                run_reverse_rtt_probe_is_echoed() &&
+	                run_medic_reviving_plays_both_receive_cues() &&
+                    run_flag_event_audio_and_feed_drain_independently() &&
 	                run_direct_uplink_framing_is_transient() &&
 	                run_network_spawn_does_not_mutate_loaded_model_snapshot() &&
 	                run_split_batch_keeps_deployment_pick_ack_causal() &&
@@ -5418,6 +5636,7 @@ int main() {
 	                run_padding_echo_retail_clamp(/*requested_len=*/300, /*expected_body=*/300) &&
 	                run_padding_echo_retail_clamp(/*requested_len=*/2000, /*expected_body=*/512) &&
 	                run_joiner_admits_exact_retail_message_prefix() &&
+	                run_joiner_splits_to_fill_remaining_packet_space() &&
 	                run_joiner_goodbye_tears_down_host();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

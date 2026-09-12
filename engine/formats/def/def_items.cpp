@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
@@ -27,7 +28,7 @@ namespace opennova::def {
    (unset), and 7 is unused. [orig: ItemDef_ParseProperty @ 0x49eb00;
    docs/world/itemdef-re.md D-ITEMDEF-1] */
 // x87 _ftol2_sse stores the low dword of a truncated signed i64.
-static int32_t door_integer(double value) {
+static int32_t retail_integer(double value) {
     if (!std::isfinite(value) || value < -9223372036854775808.0 ||
             value >= 9223372036854775808.0) return 0;
     return static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(value)));
@@ -147,7 +148,23 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
 
         int parsed = 0;
 
-        if (lower_match_key(lower, ll, "num_doors", 9) ||
+        if (lower_match_key(lower, ll, "sqb_rate", 8) ||
+                lower_match_key(lower, ll, "sqb_distance", 12) ||
+                lower_match_key(lower, ll, "sqb_error", 9)) {
+            // These share the door/death fields, including last-write order.
+            // [orig: ItemDef_ParseProperty @0x49EB00, squib arms @0x49F06F]
+            const bool rate = lower_match_key(lower, ll, "sqb_rate", 8);
+            const bool distance = lower_match_key(lower, ll, "sqb_distance", 12);
+            size_t vl;
+            const char *v = consume_value_span(trimmed, tlen, rate ? 8 : distance ? 12 : 9, &vl);
+            char value[128];
+            safe_copy(value, sizeof(value), v, vl);
+            const double number = atof(value);
+            if (rate) current.deathtime_ticks = retail_integer(62.0 / number);
+            else if (distance) current.clipsize = retail_integer(number * 65536.0);
+            else current.door_type = static_cast<uint32_t>(retail_integer(number * 65536.0));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "num_doors", 9) ||
                 lower_match_key(lower, ll, "first_door", 10)) {
             const bool first = lower_match_key(lower, ll, "first_door", 10);
             size_t vl; const char *v = consume_value_span(trimmed, tlen, first ? 10 : 9, &vl);
@@ -180,8 +197,8 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             char value[128];
             safe_copy(value, sizeof(value), v, vl);
             const double number = atof(value);
-            if (rate) current.door_open_rate_q16 = door_integer(65536.0 / (number * 62.0));
-            else current.door_max_angle_bam = door_integer(number * (1.0 / 360.0) * 4294967295.0);
+            if (rate) current.door_open_rate_q16 = retail_integer(65536.0 / (number * 62.0));
+            else current.door_max_angle_bam = retail_integer(number * (1.0 / 360.0) * 4294967295.0);
             parsed = 1;
         } else if (lower_match_key(lower, ll, "door_open_sound_id", 18) ||
                 lower_match_key(lower, ll, "door_close_sound_id", 19)) {
@@ -283,34 +300,40 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 consume_value_str(trimmed, tlen, 11, current.soundloops[idx], sizeof(current.soundloops[idx]));
                 parsed = 1;
             }
-		} else if (lower_match_key(lower, ll, "nightshot", 9)) {
-			size_t vl;
-			const char *v = consume_value_span(trimmed, tlen, 9, &vl);
-			/* Extract first token only */
-            size_t end = 0;
-            while (end < vl && !isspace((unsigned char)v[end])) ++end;
-            safe_copy(current.nightshot, sizeof(current.nightshot), v, end);
+        } else if (lower_match_key(lower, ll, "destroy_timing", 14)) {
+            size_t vl;
+            const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            Token values[3] = {};
+            const int n = tokenize(v, vl, values, 3);
+            for (int column = 0; column < 3; ++column) {
+                const double seconds = column < n
+                        ? atof(std::string(values[column].s, values[column].len).c_str()) : 0.0;
+                current.destroy_timing_ticks[column] = retail_integer(seconds * 62.0);
+            }
             parsed = 1;
-		} else if (lower_match_key(lower, ll, "dawnshot", 8)) {
-			size_t vl;
-			const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-			size_t end = 0;
-            while (end < vl && !isspace((unsigned char)v[end])) ++end;
-            safe_copy(current.dawnshot, sizeof(current.dawnshot), v, end);
-            parsed = 1;
-		} else if (lower_match_key(lower, ll, "duskshot", 8)) {
-			size_t vl;
-			const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-			size_t end = 0;
-            while (end < vl && !isspace((unsigned char)v[end])) ++end;
-            safe_copy(current.duskshot, sizeof(current.duskshot), v, end);
-            parsed = 1;
-		} else if (lower_match_key(lower, ll, "dayshot", 7)) {
-			size_t vl;
-			const char *v = consume_value_span(trimmed, tlen, 7, &vl);
-			size_t end = 0;
-            while (end < vl && !isspace((unsigned char)v[end])) ++end;
-            safe_copy(current.dayshot, sizeof(current.dayshot), v, end);
+        } else if (lower_match_key(lower, ll, "dawnshot", 8) ||
+                   lower_match_key(lower, ll, "dayshot", 7) ||
+                   lower_match_key(lower, ll, "duskshot", 8) ||
+                   lower_match_key(lower, ll, "nightshot", 9) ||
+                   lower_match_key(lower, ll, "particletesttime", 16)) {
+            const bool particle_time = lower[0] == 'p';
+            const int region = lower[0] == 'n' ? 3 : lower[1] == 'u' ? 2 :
+                    lower[2] == 'y' ? 1 : 0;
+            const size_t key_len = particle_time ? 16 : region == 3 ? 9 : region == 1 ? 7 : 8;
+            size_t vl;
+            const char *v = consume_value_span(trimmed, tlen, key_len, &vl);
+            Token values[3] = {};
+            const int n = tokenize(v, vl, values, 3);
+            if (!particle_time && n > 0) {
+                char *names[] = {current.dawnshot, current.dayshot, current.duskshot, current.nightshot};
+                safe_copy(names[region], 25, values[0].s, values[0].len);
+            }
+            for (int column = 0; column < 2; ++column) {
+                const int token = column + (particle_time ? 0 : 1);
+                const double seconds = token < n
+                        ? atof(std::string(values[token].s, values[token].len).c_str()) : 0.0;
+                current.shot_delay_ticks[region][column] = retail_integer(seconds * 62.0);
+            }
             parsed = 1;
 		} else if (lower_match_key(lower, ll, "ai_function", 11)) {
 			consume_value_str(trimmed, tlen, 11, current.ai_function, sizeof(current.ai_function));

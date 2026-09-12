@@ -324,7 +324,7 @@ inline void vehicle_axes_to_euler(const int32_t forward[3], const int32_t side[3
 }
 
 void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matrix = nullptr);
-void vehicle_suspension_fit(World &, Entity &, int32_t corners[4][3], const bool *contacts,
+bool vehicle_suspension_fit(World &, Entity &, int32_t corners[4][3], const bool *contacts,
 		PlatFit &, int32_t px, int32_t py, int32_t pz, bool tank = false);
 void vehicle_boat_suspension_fit(World &, Entity &, const VehicleTraits &, int32_t corners[4][3],
 		PlatFit &, int32_t px, int32_t py, int32_t pz);

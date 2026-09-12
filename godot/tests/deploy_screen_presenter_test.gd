@@ -509,7 +509,7 @@ func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
 	# lists the player (no status line, no hold), while the other-player kill
 	# opened the 120-second revive window -> the MEDIC pair shows, the
 	# RESPAWN/PSPRESPAWN pair stays hidden, the list title shows.
-	var status: DeployStatus = pair.joiner.get_deploy_status()
+	var status: DeployStatus = pair.joiner.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT))
 	assert_eq(status.queued_kind, 0, "no penalty or wave line")
 	assert_true(status.show_medic,
 			"the open revive window shows the medic pair")
@@ -577,3 +577,25 @@ func test_a_reopened_death_screen_repicks_and_the_release_closes_it() -> void:
 	# One `closed` from the manual death-edge close above, one from the release.
 	assert_signal_emit_count(presenter, "closed", 2,
 			"the release hands gameplay input back through `closed`")
+
+
+func test_instruction_widgets_follow_retained_death_text() -> void:
+	var pair := _join_pair_with_pending_pick()
+	pair.joiner.retain_feed_announcement("DeployJoiner was killed.", 1)
+	assert_eq(pair.joiner.get_kill_announcement_tick(188), 0)
+	var presenter := _make_presenter(pair.joiner)
+	assert_true(presenter.open())
+	var driver := presenter.get_menu_driver()
+	var first := driver.widget_id("STATIC_INSTRUCTIONS_MSG")
+	var second := driver.widget_id("STATIC_INSTRUCTIONS2_MSG")
+	assert_gte(first, 0)
+	assert_gte(second, 0)
+	assert_false(driver.is_widget_shown(first), "AAS hides the first instruction")
+	var status: DeployStatus = pair.joiner.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT))
+	assert_eq(driver.is_widget_shown(second), status.show_instruction2)
+	assert_eq(driver.get_widget_text(second), Strings.get_table(Strings.TABLE_GAMETEXT)
+			.get_string_in_section("Overlays", "STROVER_RESPAWN1"),
+			"the registered spawn zone selects RESPawn1")
+	if status.replace_instruction:
+		assert_eq(driver.get_widget_text(first), "DeployJoiner was killed.",
+				"the hidden instruction retains the expired kill message")

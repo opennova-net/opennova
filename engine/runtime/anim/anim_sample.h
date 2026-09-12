@@ -38,6 +38,8 @@
 
 #pragma once
 
+#include <runtime/anim/clip_timeline.h>
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -86,6 +88,13 @@ struct Clip {
     std::vector<std::vector<BoneSample>> frames;
 
     bool loops() const { return (flags & 0x01u) != 0; }
+    const ClipTimeline &playback() const {
+        if (!timeline.matches(fps, frame_count, loops()))
+            timeline = ClipTimeline(fps, frame_count, loops());
+        return timeline;
+    }
+    mutable ClipTimeline timeline;
+
     size_t bone_count() const { return bones.size(); }
 };
 

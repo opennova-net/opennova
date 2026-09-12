@@ -191,6 +191,18 @@ struct ProtocolReassemblyState {
 ProtocolMessage make_protocol_message(uint8_t tag, std::vector<uint8_t> payload,
                                       uint8_t flags_raw = 0);
 
+// Retail packet accounting includes the four-byte NAPI envelope, opcode,
+// and thirteen-byte session header. Cursor starts here for each packet.
+inline constexpr size_t PROTOCOL_DATAGRAM_OVERHEAD = 18;
+
+// Split at the current packet's remaining space, then at fresh packet limits.
+// Advances packet_bytes (including the overhead above); max_packet_bytes is
+// the complete datagram ceiling. Split pieces retain until ACK, even when the
+// original record had a finite lifetime. [orig: BuildOutgoingPackets @0x628430;
+// NapiNPMessage_SplitAtLength @0x628350]
+std::vector<ProtocolMessage> split_protocol_message_to_fill(
+        const ProtocolMessage &message, size_t max_packet_bytes, size_t &packet_bytes);
+
 // Decode the 13-byte outer header from the first 13 bytes of the
 // (outer-NWU-decrypted) packet body. Returns false on short input.
 bool parse_protocol_packet_header(const uint8_t *data, size_t len,

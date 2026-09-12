@@ -103,13 +103,13 @@ int main() {
 	bool ok = true;
 
 	// The generator reads authored BLUE, wraps both axes with a power-of-two
-	// mask, uses scale 1/32 and the retail fld1 unit Z, truncates (n+1)*127.5,
+	// mask, uses scale 1/32 and the sum of two unit-Z vectors, truncates (n+1)*127.5,
 	// and preserves alpha. [orig: Texture_GenerateNormalMap @ 0x58c1fa]
 	const std::vector<uint8_t> expected_coefficient = {
-		156,242,173,17,  98,242,173,18,  98,242,173,19, 156,242,173,20,
-		156, 12,173,21,  98, 12,173,22,  98, 12,173,23, 156, 12,173,24,
-		156, 12,173,25,  98, 12,173,26,  98, 12,173,27, 156, 12,173,28,
-		156,242,173,29,  98,242,173,30,  98,242,173,31, 156,242,173,32,
+		151,225,205,17, 103,225,205,18, 103,225,205,19, 151,225,205,20,
+		151,29,205,21, 103,29,205,22, 103,29,205,23, 151,29,205,24,
+		151,29,205,25, 103,29,205,26, 103,29,205,27, 151,29,205,28,
+		151,225,205,29, 103,225,205,30, 103,225,205,31, 151,225,205,32,
 	};
 	ok &= expect_pixels(build_detail_coefficient_map(make_directional_detailmap()),
 			4, 4, expected_coefficient,

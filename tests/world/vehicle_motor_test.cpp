@@ -1709,6 +1709,7 @@ void test_handbrake_skid_and_grip_recovery() {
 		m.yaw_seeded = true;
 		m.yaw_bam = m.steer_target_bam = 0;
 		m.speed = m.cmd_speed = 20000;
+		m.bike_ground_contact_ticks = 10;
 		m.contact_direction[1] = 65536;
 		v.flags |= 8;
 		r.w.logic_tick = 100;

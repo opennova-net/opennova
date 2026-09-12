@@ -1228,6 +1228,8 @@ void GameWorld::start_effect_world() {
 		effect_world->set_particles_hidden(true);
 	}
 	const int count = effect_world->load_from_resource_root(resource_root_);
+    if (const Ref<Simulation> sim = get_sim(); sim.is_valid())
+        sim->bind_item_effect_scene(effect_world->shared_native_scene());
 	if (water_ != nullptr) {
 		effect_world->set_water_plane(water_->get_water_height(), water_->get_reflection_camera());
 		// The sim-side water plane (env.water_z): the footstep water pick, the

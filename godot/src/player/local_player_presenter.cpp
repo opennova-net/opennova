@@ -669,6 +669,8 @@ void LocalPlayerPresenter::update_model_lighting_context() {
 	}
 	const opennova::world::LocalPlayerLightingContext context =
 			opennova::world::local_player_lighting_context(interior_item_id, transfer, body_scale);
+	if (avatar()) avatar()->set_thermal_entity_wave(true);
+	if (held_weapon()) held_weapon()->set_thermal_entity_wave(true);
 	set_model_lighting_context(avatar(), context.interior, context.light_transfer, context.body_effect_scale);
 	set_model_lighting_context(held_weapon(), context.interior, context.light_transfer,
 			context.body_effect_scale);
@@ -705,7 +707,9 @@ void LocalPlayerPresenter::update_scope_camera() {
 	if (size.x <= 0.0f || size.y <= 0.0f) {
 		return;
 	}
-	cam->set_fov(Simulation::fov_vertical_from_horizontal(view_->get_fov_h_deg(), size.x / size.y));
+	const Ref<Simulation> projection_sim = sim();
+    cam->set_fov(Simulation::fov_vertical_from_horizontal(view_->get_fov_h_deg(), size.x / size.y,
+        projection_sim.is_valid() ? projection_sim->get_local_player_aspect_mode() : -1));
 	// The world pass's near plane is 0.2 u every frame (retail re-pins it
 	// beside the FOV; the far plane is floor(fog)+1, which rides the fog
 	// owner) — Godot's 0.05 default rendered surfaces retail clips.

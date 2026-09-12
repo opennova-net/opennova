@@ -1392,6 +1392,65 @@ static void test_zone_refs_resolve_by_id() {
     CHECK(w.match.outcome().winner_team == 2);
 }
 
+// BMS area helpers use their own pool scans, not the WAC SSN resolver.
+// [orig: Entity_IsBmsRefInTriggerBounds @ 0x43e510;
+// Entity_IsTeamInTriggerBounds @ 0x43c730]
+static void test_area_trigger_pool_and_identity_rules() {
+    World w;
+    for (int pool = 0; pool < 4; ++pool) w.registry.configure_pool(pool, 4);
+    world::Aabb box{{0.0f, 0.0f, -2.0f}, {10.0f, 10.0f, 2.0f}};
+    w.registry.register_area("zone", box, true, 17);
+    world::Entity outside{};
+    outside.net_id = 71;
+    outside.group_id = 3;
+    outside.position = {11.0f, 5.0f, 0.0f};
+    w.registry.spawn(0, outside);
+    world::Entity inside = outside;
+    inside.position = {10.0f, 10.0f, 2.0f}; // inclusive XYZ edges
+    inside.alive = false;
+    inside.flags |= 1u;
+    const auto item = w.registry.spawn(1, inside);
+    mission::BmsEventSystem sys;
+    bms::Trigger single{};
+    single.main_type = bms::TriggerMainType::Single;
+    single.sub_type = static_cast<int32_t>(bms::SingleTriggerType::SingleIsWithinArea);
+    single.param1 = 71;
+    single.param2 = 0;
+    CHECK(sys.evaluate_trigger_for_test(w, single)); // duplicate + dead item
+    bms::Trigger group = single;
+    group.main_type = bms::TriggerMainType::Group;
+    group.sub_type = static_cast<int32_t>(bms::GroupTriggerType::GroupIsWithinArea);
+    group.param1 = 3;
+    CHECK(sys.evaluate_trigger_for_test(w, group)); // pool-1 death flag is ignored
+    w.registry.despawn(item);
+    const auto person = w.registry.spawn(0, inside);
+    CHECK(sys.evaluate_trigger_for_test(w, single)); // singles ignore the flag in both pools
+    CHECK(!sys.evaluate_trigger_for_test(w, group));
+    w.registry.get(person)->flags &= ~1u;
+    CHECK(sys.evaluate_trigger_for_test(w, group));
+    w.registry.despawn(person);
+    w.registry.spawn(2, inside);
+    w.registry.spawn(3, inside);
+    CHECK(!sys.evaluate_trigger_for_test(w, single));
+    CHECK(!sys.evaluate_trigger_for_test(w, group));
+    inside.net_id = 0;
+    inside.group_id = 0;
+    const auto local = w.registry.spawn(0, inside);
+    w.cached.local_player = local;
+    single.param1 = 0;
+    group.param1 = 0;
+    CHECK(!sys.evaluate_trigger_for_test(w, single));
+    CHECK(!sys.evaluate_trigger_for_test(w, group));
+    single.param1 = 10000;
+    CHECK(sys.evaluate_trigger_for_test(w, single)); // SP representation alias
+    w.rules.mp_session = true;
+    CHECK(!sys.evaluate_trigger_for_test(w, single)); // no MP local-player substitution
+    single.param1 = 0x10047; // must not wrap to SSN 71
+    CHECK(!sys.evaluate_trigger_for_test(w, single));
+    group.param1 = 259; // must not wrap to group 3
+    CHECK(!sys.evaluate_trigger_for_test(w, group));
+}
+
 // A dangling zone id NEUTERS the trigger (main/sub zeroed, flags kept): the
 // negated not-in-area chain then reads false->negate->true, firing the event —
 // exactly the original's dangling-ref behavior. [orig: @0x45309e/@0x4530b9]
@@ -1883,6 +1942,7 @@ int main() {
     test_holding_triggers();
     test_single_distance_los_chain();
     test_zone_refs_resolve_by_id();
+    test_area_trigger_pool_and_identity_rules();
     test_dangling_zone_ref_neuters_trigger();
     test_bluewin_ends_round();
     std::printf(failures ? "EVENT RUNTIME TESTS FAILED (%d)\n" : "event runtime tests passed\n", failures);

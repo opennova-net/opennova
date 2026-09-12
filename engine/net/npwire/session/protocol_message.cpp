@@ -88,6 +88,56 @@ ProtocolMessage make_protocol_message(uint8_t tag, std::vector<uint8_t> payload,
 	return msg;
 }
 
+std::vector<ProtocolMessage> split_protocol_message_to_fill(
+        const ProtocolMessage &message, size_t max_packet_bytes, size_t &packet_bytes) {
+	max_packet_bytes = std::max<size_t>(26, max_packet_bytes);
+	if (packet_bytes < PROTOCOL_DATAGRAM_OVERHEAD || packet_bytes >= max_packet_bytes)
+		packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
+	std::vector<ProtocolMessage> pieces;
+	ProtocolMessage rest = message;
+	for (;;) {
+		std::vector<uint8_t> encoded;
+		const bool encodable = append_protocol_message(encoded, rest);
+		if (!encodable && rest.payload.size() <= 0xFFFFu) {
+			pieces.push_back(std::move(rest)); // preserve an invalid record for the owner's failure path
+			return pieces;
+		}
+		const size_t prefix = encodable ? encoded.size() - rest.payload.size()
+				: 4u + rest.skip_bytes.size();
+		const size_t free = max_packet_bytes - packet_bytes;
+		if (prefix + rest.payload.size() <= free) {
+			packet_bytes += prefix + rest.payload.size();
+			pieces.push_back(std::move(rest));
+			return pieces;
+		}
+		if (free <= prefix) { packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD; continue; }
+		const size_t count = free - prefix;
+		const uint8_t flags = rest.flags.raw & ~(PROTOCOL_MSG_FLAG_LEN8 |
+				PROTOCOL_MSG_FLAG_LEN16 | PROTOCOL_MSG_FLAG_FRAG_CONT | PROTOCOL_MSG_FLAG_FRAG_END);
+		auto piece = [&](size_t begin, size_t end, bool more, bool continuation) {
+			std::vector<uint8_t> payload(rest.payload.begin() + begin, rest.payload.begin() + end);
+			const uint8_t length = payload.empty() ? 0 : payload.size() <= 255
+					? PROTOCOL_MSG_FLAG_LEN8 : PROTOCOL_MSG_FLAG_LEN16;
+			ProtocolMessage out = make_protocol_message(rest.tag, std::move(payload),
+					flags | length | (more ? PROTOCOL_MSG_FLAG_FRAG_CONT : 0) |
+					(continuation ? PROTOCOL_MSG_FLAG_FRAG_END : 0));
+			out.skip_bytes = rest.skip_bytes;
+			out.capacity_exempt = rest.capacity_exempt;
+			// SplitAtLength zeroes both original expiry parameters and creates
+			// the remainder with zero expiry. Every piece is retransmittable.
+			out.reliable = true;
+			return out;
+		};
+		ProtocolMessage head = piece(0, count, true, rest.flags.frag_end);
+		ProtocolMessage tail = piece(count, rest.payload.size(), rest.flags.frag_cont, true);
+		pieces.push_back(std::move(head));
+		rest = std::move(tail);
+		// Retail retains the ORIGINAL prefix charge for the shortened head,
+		// even if its wire LEN16 becomes LEN8. This packet is now full.
+		packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
+	}
+}
+
 // 13-byte session header per NapiNPProtocol_HandleSessionPacket @
 // 0x626A00 + NapiNPConnection_ParseMessages @ 0x625BC0:
 //   bytes 0..3 = session_id (matches conn->session_keys.local_key)

@@ -19,6 +19,9 @@
 
 namespace opennova::world {
 
+class EntityRegistry;
+struct Entity;
+
 // One route marker, mirroring the pool-3 marker entity fields the waypoint
 // system reads. [orig: Entity_SpawnFromBMSRecord @ 0x40f0aa seeds them from the
 // BMS record: radius = wp_distance<<16 (default 0x8000 = 0.5 u), name id =
@@ -61,6 +64,14 @@ public:
     // follow-up, D-HUD-16). Player position in 16.16 fixed mission space.
     // [orig: Player_UpdatePerFrame @ 0x4de5f7..0x4de72c]
     void tick_advance(int32_t player_x_fixed, int32_t player_y_fixed);
+    // [orig: Game_InitNewRound @0x422740 ->
+    // SpawnPoint_FindNearestEnemyBasePoint @0x4dd290]
+    void reset_selection(const EntityRegistry &registry, const Entity &local,
+                         uint32_t game_type);
+    // A flag event keeps the prior selection if the scan finds no candidate.
+    // [orig: SpawnPoint_FindNearestEnemyBasePoint @ 0x4DD290]
+    void select_nearest_enemy_base(const EntityRegistry &registry, const Entity &local,
+                                  uint32_t game_type);
 
     // A fired BMS event completes every entry linked to it, chaining backward
     // through chain_back-flagged predecessors, then skips current past done

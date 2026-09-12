@@ -1,8 +1,40 @@
 #include <runtime/world/waypoint_track.h>
 
 #include <cstdlib>
+#include <algorithm>
+#include <cmath>
+#include <runtime/world/entity_registry.h>
 
 namespace opennova::world {
+
+void WaypointTrack::reset_selection(const EntityRegistry &registry,
+                                    const Entity &local, uint32_t game_type) {
+    current = -1;
+    select_nearest_enemy_base(registry, local, game_type);
+}
+
+void WaypointTrack::select_nearest_enemy_base(const EntityRegistry &registry,
+        const Entity &local, uint32_t game_type) {
+    if ((game_type != 65540 && game_type != 65544) || entries.size() <= 1) return;
+    int32_t nearest = INT32_MAX;
+    for (size_t index = 0; index < entries.size(); ++index) {
+        const Entity *marker = registry.get(EntityHandle::make(3, entries[index].node));
+        if (marker == nullptr || !marker->has_item_def || (marker->flags & 1u) != 0) continue;
+        if ((local.team == 2 && marker->item_id != 4091) ||
+                (local.team == 1 && marker->item_id != 4093)) continue;
+        const int32_t dx = static_cast<int32_t>(static_cast<uint32_t>(to_fixed(local.position.x)) -
+                static_cast<uint32_t>(to_fixed(marker->position.x)));
+        const int32_t dy = static_cast<int32_t>(static_cast<uint32_t>(to_fixed(local.position.y)) -
+                static_cast<uint32_t>(to_fixed(marker->position.y)));
+        // The x87 distance caps at flt_7C19E0 (0x7fff0000), then truncates.
+        const double length = std::sqrt(double(dx) * dx + double(dy) * dy);
+        const int32_t distance = static_cast<int32_t>(std::min(length, 2147418112.0));
+        if (distance < nearest) {
+            nearest = distance;
+            current = static_cast<int32_t>(index);
+        }
+    }
+}
 
 // [orig: Player_UpdatePerFrame @ 0x4de5f7..0x4de72c — the waypoint-gametype leg.
 //  The weapon-restriction gate (SpawnPoint_CheckWeaponRestrictions @ 0x4dbe80)

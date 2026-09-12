@@ -145,35 +145,35 @@ int Simulation::request_hud_radar_zoom(int p_direction) {
 	// The engine control routes the step to the big-map pair while a mode
 	// is up (witness at hud::HudMapControl::zoom_step).
 	const int step = p_direction < 0 ? -1 : (p_direction > 0 ? 1 : 0);
-	return player_.hud_map_control.zoom_step(step);
+	return kernel_->local.hud_map_control.zoom_step(step);
 }
 
 int Simulation::get_hud_radar_zoom_q16() const {
-	return player_.hud_map_control.zoom_q16;
+	return kernel_->local.hud_map_control.zoom_q16;
 }
 
 int Simulation::request_hud_map_cycle() {
 	// The map_toggle action's three-state cycle (witness at
 	// hud::HudMapControl::cycle).
-	return player_.hud_map_control.cycle();
+	return kernel_->local.hud_map_control.cycle();
 }
 
 int Simulation::get_hud_map_mode() const {
-	return player_.hud_map_control.mode;
+	return kernel_->local.hud_map_control.mode;
 }
 
 int Simulation::get_hud_big_zoom_q16() const {
-	return player_.hud_map_control.big_zoom_q16;
+	return kernel_->local.hud_map_control.big_zoom_q16;
 }
 
 void Simulation::tick_hud_map_death_gate() {
 	// The render gate zeroes the mode whenever the local player is dead;
 	// respawn re-opens nothing — only the M key does (witness at
 	// hud::HudMapControl::on_local_player_dead).
-	if (player_.hud_map_control.mode == 0) return;
+	if (kernel_->local.hud_map_control.mode == 0) return;
 	// The joiner reads its recipient-specific 0x0A health tail, the authority
 	// its entity flags — the one local_player_dead() seam.
-	if (local_player_dead()) player_.hud_map_control.on_local_player_dead();
+	if (local_player_dead()) kernel_->local.hud_map_control.on_local_player_dead();
 }
 
 bool Simulation::get_hud_map_flip_180() const {

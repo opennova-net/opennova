@@ -18,6 +18,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/infantry_burn.h>
 #include <runtime/world/round_move_effect.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/weapon_table.h>
@@ -517,6 +518,31 @@ bool impact_is_critical(const Entity &target, int32_t hit_zone,
         : hit_zone_is_critical(hit_zone);
 }
 
+// Armor removes kinetic energy, independently of atmospheric drag.
+// [orig: Projectile_ApplyDragDeceleration @0x4e5cd0]
+void apply_armor_deceleration(FixedVec3 &velocity, const AmmoTableEntry &ammo,
+                             int32_t density) {
+    int32_t speed = arithmetic_shift_right_16(
+            wrapped_signed_product(fixed_magnitude(velocity), io::kTicksPerSecondInt));
+    speed = std::min(speed, 1219);
+    const double energy = double(wrapped_signed_product(speed, speed)) -
+            double(wrapped_signed_product(density, 2)) * 1000000.0 / ammo.weight_in_grains;
+    const int32_t new_speed = energy > 0.0
+            ? wrapped_signed_product(static_cast<int32_t>(std::sqrt(energy)), 65536) /
+                    io::kTicksPerSecondInt
+            : 0;
+    const double length = std::sqrt(double(velocity.x) * velocity.x +
+            double(velocity.y) * velocity.y + double(velocity.z) * velocity.z);
+    if (length == 0.0 || new_speed == 0) {
+        velocity = {};
+        return;
+    }
+    const double normalize = 65536.0 / length;
+    velocity.x = retail_q16_mul_rhu(new_speed, static_cast<int32_t>(velocity.x * normalize));
+    velocity.y = retail_q16_mul_rhu(new_speed, static_cast<int32_t>(velocity.y * normalize));
+    velocity.z = retail_q16_mul_rhu(new_speed, static_cast<int32_t>(velocity.z * normalize));
+}
+
 // The kinetic damage number [orig: Weapon_CalcImpactDamage @ 0x4EC920]. `vel` is
 // units/tick; the original wraps 62 * |vel|_16.16 as signed 32-bit, shifts it by 16,
 // applies only an upper clamp of 1219 (@0x4ecad6), then wraps the signed speed*weight
@@ -525,7 +551,7 @@ bool impact_is_critical(const Entity &target, int32_t hit_zone,
 // replicated from the loadout's per-ammo class table), floors at min_damage
 // (@0x4ecb3a), and caps at max_damage when > 0 (@0x4ecb42). Multiplayer authority and
 // OneShotKill are explicit inputs, including the non-authority zero return @0x4ec933.
-int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
+int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
                            int32_t hit_zone, int32_t hit_bone, const Entity &target,
                            const Entity *shooter, int32_t ammo_index,
                            const World &world) {
@@ -533,6 +559,16 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
         if (!world.rules.projectile_authority) return 0;
         if (world.rules.one_shot_kill) return 2000;
     }
+    uint8_t damage_class = 0;
+    if (shooter != nullptr && ammo_index >= 0 &&
+        static_cast<size_t>(ammo_index) < shooter->ammo_damage_class.size())
+        damage_class = shooter->ammo_damage_class[static_cast<size_t>(ammo_index)];
+    const bool body_armor = target.item_type == 3 &&
+            (target.item_attrib & kItemAttribLandable) == 0 &&
+            hit_zone >= 0 && hit_zone <= 4 && (target.carry_flags & 8u) != 0;
+    const int armor_class = damage_class == 1 || damage_class == 2 ? damage_class : 0;
+    if (body_armor)
+        apply_armor_deceleration(velocity_q16, ammo, ammo.armor_density[armor_class]);
     int32_t speed_scaled = arithmetic_shift_right_16(
         wrapped_signed_product(fixed_magnitude(velocity_q16), io::kTicksPerSecondInt));
     if (speed_scaled >= 1219) speed_scaled = 1219;
@@ -552,10 +588,6 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
         }
         damage = static_cast<int32_t>(static_cast<double>(damage) * zone_scale);
 
-        uint8_t damage_class = 0;
-        if (shooter != nullptr && ammo_index >= 0 &&
-            static_cast<size_t>(ammo_index) < shooter->ammo_damage_class.size())
-            damage_class = shooter->ammo_damage_class[static_cast<size_t>(ammo_index)];
         if (damage_class == 1)
             damage = static_cast<int32_t>(static_cast<double>(damage) *
                                           static_cast<double>(0.9f));
@@ -565,6 +597,8 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
     }
     if (damage <= ammo.min_damage) damage = ammo.min_damage;
     if (ammo.max_damage > 0 && damage >= ammo.max_damage) damage = ammo.max_damage;
+    if (body_armor)
+        apply_armor_deceleration(velocity_q16, ammo, ammo.armor_density[armor_class]);
     return damage;
 }
 
@@ -724,6 +758,11 @@ bool entity_eye_below_water(const World &world, int32_t body_z_q16,
                             int32_t eye_offset_z) {
     return world.env.water_z != 0 &&
            body_z_q16 + eye_offset_z < world.env.water_z;
+}
+
+void projectile_apply_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
+    int32_t position_z_q16, int32_t water_z_q16) {
+    apply_aerodynamic_drag(velocity, ammo, position_z_q16, water_z_q16);
 }
 
 void RoundSim::reset() noexcept {
@@ -1148,6 +1187,169 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
     return first_slot;
 }
 
+
+// Shared direct-hit consequence. Squib rays call the same helper as bullets.
+// [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0]
+void RoundSim::process_damage_hit(World &world, LiveRound &r,
+        const ProjectileHit &collision, FixedVec3 &velocity_q16) {
+    const bool authoritative = r.consequence_mode == RoundConsequenceMode::Authoritative &&
+            (!world.rules.mp_session || world.rules.projectile_authority);
+    const bool not_armed = false;
+    const auto *ammo = world.tables.ammo.by_index(r.ammo_index);
+    EntityHandle damage_entity = collision.geometry_entity;
+    Entity *target = world.registry.get(damage_entity);
+    if (target && target->item_type != 1 && (target->item_attrib & kItemAttribEweap)) {
+        Entity *parent = world.registry.get(target->ground_target);
+        if (parent && parent->item_type == 1) { target = parent; damage_entity = parent->handle; }
+    }
+		// Entity Health/healthMax (+286 and its template mirror) and ItemDef armor
+		// (+0x190/+0x192) are signed WORDs in retail. Entity intentionally exposes
+		// int32_t carriers to the rest of OpenNova, so enforce the storage width at
+		// this consequence boundary before any signed comparisons are made.
+		if (authoritative && target != nullptr) {
+            target->health = retail_signed_i16(target->health);
+            target->health_max = retail_signed_i16(target->health_max);
+            target->armor_impact = retail_signed_i16(target->armor_impact);
+            // Runtime armor_kz is the compatibility alias for canonical
+            // ItemDef +0x192 blast armor.
+            target->armor_kz = retail_signed_i16(target->armor_kz);
+        }
+
+        const bool person_collision =
+            collision.hit_class == ProjectileHitClass::Person;
+        const bool organic_fallback =
+            person_collision && collision.bone_index < 0;
+        const int16_t primary_section = person_collision
+            ? static_cast<int16_t>(organic_fallback ? 1 : collision.bone_index)
+            : static_cast<int16_t>(-1);
+        const int16_t secondary_section = person_collision
+            ? static_cast<int16_t>(organic_fallback
+                  ? 1
+                  : (collision.hit_zone >= 0 ? collision.hit_zone
+                                             : collision.bone_index))
+            : static_cast<int16_t>(-1);
+
+        // Projectile_ProcessDamageOnTarget returns before damage calculation when
+        // target->ItemDef is null.  Geometry still consumed the round above, so
+        // the physical impact remains observable even though no hit is recorded.
+        const bool peer_item_hit = !world.rules.logic_authority &&
+                r.consequence_mode == RoundConsequenceMode::VisualOnly && target &&
+                target->kind != EntityKind::Organic && !target->is_ai_capable;
+        if ((authoritative || peer_item_hit) && target != nullptr && target->has_item_def &&
+            !not_armed && ammo != nullptr) {
+            const Entity *shooter = world.registry.get(r.owner);
+            // Weapon_CalcImpactDamage writes the critical/headshot cause bit
+            // into its caller-owned event flags, not GamePlayerEntity::Flags.
+            // OneShotKill returns before the zone branch and therefore carries
+            // no critical bit even when the ray crossed a critical section.
+            // [orig: Weapon_CalcImpactDamage @0x4EC920;
+            // GameEvent_PlayerDeath @0x516DD0 reads entity+44 bit 0x800]
+            const bool critical_hit =
+                !(world.rules.mp_session && world.rules.one_shot_kill) &&
+                impact_is_critical(*target, collision.hit_zone,
+                                   collision.bone_index);
+            int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
+                                                collision.bone_index, *target, shooter,
+                                                r.ammo_index, world);
+            r.vel = vec_from_fixed(velocity_q16);
+            if ((target->engine_flags & kEntityFlagIndestructible) != 0 ||
+                target->armor_impact == -1 ||
+                ammo->penetration_impact < target->armor_impact ||
+                target->damage_state != 0)
+                damage = 0;
+            damage = apply_vehicle_occupant_scale(world, *target, damage);
+            if (damage > target->health) damage = target->health;
+            if ((target->item_attrib & kItemAttribNoDie) != 0 &&
+                damage >= target->health)
+                damage = target->health - 1;
+            if (!authoritative) {
+                // The hit callback executes on both peers; only the health
+                // subtraction and gameplay kill fan below require authority.
+                // [orig: Projectile_ProcessDamageOnTarget @ 0x4E7FB0]
+                destruction_notify_item_damage(world, *target, 1,
+                        {collision.section_index, damage, r.yaw_bam, r.pitch_bam, r.roll_bam});
+            } else if (damage != 0) {
+                const bool target_was_alive =
+                    target->health > 0 && target->alive &&
+                    (target->flags & kEntityFlagDead) == 0 &&
+                    (target->engine_flags & kEntityFlagDead) == 0;
+                if (shooter != nullptr) {
+                    auto &rel = world.script.relations;
+                    const int sg = shooter->group_id, ss = shooter->net_id;
+                    const int vg = target->group_id, vs = target->net_id;
+                    rel.set_group_group(TriggerRelations::kShot, sg, vg);
+                    rel.set_single_group(TriggerRelations::kShot, ss, vg);
+                    rel.set_group_single(TriggerRelations::kShot, sg, vs);
+                    rel.set_single_single(TriggerRelations::kShot, ss, vs);
+                }
+
+                // The original writes the subtraction back through a signed 16-bit
+                // entity+286 field. Preserve its modulo-2^16 wrap explicitly.
+                target->health = retail_signed_i16(
+                    static_cast<int64_t>(target->health) - static_cast<int64_t>(damage));
+                hits.push_back(RoundHit{damage_entity, r.owner, damage,
+                                        primary_section, secondary_section});
+                const bool damage_target_is_person =
+                    target->item_type == 3 ||
+                    (target->item_type == 0 &&
+                     target->kind == EntityKind::Organic);
+                if (damage_target_is_person) {
+                    // [orig: Entity_HandleDamageTrigger @0x4074BA; twin @0x407822]
+                    apply_infantry_burn(world, *target, ammo->secondary_anim, r.pos, r.owner);
+                }
+                if (!damage_target_is_person) {
+                    target->last_attacker = r.owner;
+                    // deathCallback(entity, 1, 0): nonlethal item damage is
+                    // observable, while lethal damage enters the husk chain.
+                    destruction_notify_item_damage(world, *target, 1,
+                            {collision.section_index, damage, r.yaw_bam, r.pitch_bam, r.roll_bam});
+                }
+                if (target->health <= 0) {
+                    const int32_t heading_bam =
+                        bam_heading_from_mission_yaw_deg(target->yaw);
+                    const int quadrant =
+                        death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
+                    if (damage_target_is_person) {
+                        const int32_t death_section =
+                            primary_section >= 0 ? primary_section : 1;
+                        target->death_anim_state =
+                            compute_death_anim_state(death_section, quadrant,
+                                                     death_cause::kBullet);
+                        // The roll, the mask switch, and the anim selector all
+                        // consume the SAME hit-record bone (hitRecord[14]);
+                        // death_section is our preserved copy of that record
+                        // field. [orig: @0x40755e / @0x4075f6 / @0x407483]
+                        AiEntity *victim_body = world.ai.for_handle(target->handle);
+                        if (target_was_alive) {
+                            apply_death_body_roll(
+                                victim_body, death_section, quadrant);
+                        }
+                        try_spawn_dismemberment_piece(
+                            world, *target, velocity_q16,
+                            death_section, target->death_anim_state,
+                            target_was_alive);
+                    }
+                    world.script.relations.group(target->group_id).alert =
+                        TriggerRelations::kAlertRed;
+
+                    RoundDeath d;
+                    d.victim = damage_entity;
+                    d.killer = r.owner;
+                    d.victim_handle = damage_entity.packed;
+                    d.killer_handle = r.shooter_handle;
+                    d.adm_index = r.adm_index;
+                    d.ammo_index = r.ammo_index;
+                    if (critical_hit) d.event_flags |= 0x800u;
+                    deaths.push_back(d);
+                }
+            } else if (target->kind != EntityKind::Organic && !target->is_ai_capable) {
+                destruction_notify_item_damage(world, *target, 1,
+                        {collision.section_index, 0, r.yaw_bam, r.pitch_bam, r.roll_bam});
+            }
+        }
+
+}
+
 void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     CollisionWorld *collision) {
     // Keep the shared query seam synchronized even on an idle round tick; a
@@ -1431,19 +1633,6 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
 			world.vehicles.projectile_impact(*target, ammo->weight_in_grains, incoming, hit);
 		}
 
-		// Entity Health/healthMax (+286 and its template mirror) and ItemDef armor
-		// (+0x190/+0x192) are signed WORDs in retail. Entity intentionally exposes
-		// int32_t carriers to the rest of OpenNova, so enforce the storage width at
-		// this consequence boundary before any signed comparisons are made.
-		if (authoritative && target != nullptr) {
-            target->health = retail_signed_i16(target->health);
-            target->health_max = retail_signed_i16(target->health_max);
-            target->armor_impact = retail_signed_i16(target->armor_impact);
-            // Runtime armor_kz is the compatibility alias for canonical
-            // ItemDef +0x192 blast armor.
-            target->armor_kz = retail_signed_i16(target->armor_kz);
-        }
-
         const bool person_collision =
             collision.hit_class == ProjectileHitClass::Person;
         const bool organic_fallback =
@@ -1458,106 +1647,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                                              : collision.bone_index))
             : static_cast<int16_t>(-1);
 
-        // Projectile_ProcessDamageOnTarget returns before damage calculation when
-        // target->ItemDef is null.  Geometry still consumed the round above, so
-        // the physical impact remains observable even though no hit is recorded.
-        if (authoritative && target != nullptr && target->has_item_def &&
-            !not_armed && ammo != nullptr) {
-            const Entity *shooter = world.registry.get(r.owner);
-            // Weapon_CalcImpactDamage writes the critical/headshot cause bit
-            // into its caller-owned event flags, not GamePlayerEntity::Flags.
-            // OneShotKill returns before the zone branch and therefore carries
-            // no critical bit even when the ray crossed a critical section.
-            // [orig: Weapon_CalcImpactDamage @0x4EC920;
-            // GameEvent_PlayerDeath @0x516DD0 reads entity+44 bit 0x800]
-            const bool critical_hit =
-                !(world.rules.mp_session && world.rules.one_shot_kill) &&
-                impact_is_critical(*target, collision.hit_zone,
-                                   collision.bone_index);
-            int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
-                                                collision.bone_index, *target, shooter,
-                                                r.ammo_index, world);
-            if ((target->engine_flags & kEntityFlagIndestructible) != 0 ||
-                target->armor_impact == -1 ||
-                ammo->penetration_impact < target->armor_impact ||
-                target->damage_state != 0)
-                damage = 0;
-            damage = apply_vehicle_occupant_scale(world, *target, damage);
-            if (damage > target->health) damage = target->health;
-            if ((target->item_attrib & kItemAttribNoDie) != 0 &&
-                damage >= target->health)
-                damage = target->health - 1;
-            if (damage != 0) {
-                const bool target_was_alive =
-                    target->health > 0 && target->alive &&
-                    (target->flags & kEntityFlagDead) == 0 &&
-                    (target->engine_flags & kEntityFlagDead) == 0;
-                if (shooter != nullptr) {
-                    auto &rel = world.script.relations;
-                    const int sg = shooter->group_id, ss = shooter->net_id;
-                    const int vg = target->group_id, vs = target->net_id;
-                    rel.set_group_group(TriggerRelations::kShot, sg, vg);
-                    rel.set_single_group(TriggerRelations::kShot, ss, vg);
-                    rel.set_group_single(TriggerRelations::kShot, sg, vs);
-                    rel.set_single_single(TriggerRelations::kShot, ss, vs);
-                }
-
-                // The original writes the subtraction back through a signed 16-bit
-                // entity+286 field. Preserve its modulo-2^16 wrap explicitly.
-                target->health = retail_signed_i16(
-                    static_cast<int64_t>(target->health) - static_cast<int64_t>(damage));
-                hits.push_back(RoundHit{damage_entity, r.owner, damage,
-                                        primary_section, secondary_section});
-                const bool damage_target_is_person =
-                    target->item_type == 3 ||
-                    (target->item_type == 0 &&
-                     target->kind == EntityKind::Organic);
-                if (!damage_target_is_person) {
-                    target->last_attacker = r.owner;
-                    // deathCallback(entity, 1, 0): nonlethal item damage is
-                    // observable, while lethal damage enters the husk chain.
-                    destruction_notify_item_damage(world, *target, 1);
-                }
-                if (target->health <= 0) {
-                    const int32_t heading_bam =
-                        bam_heading_from_mission_yaw_deg(target->yaw);
-                    const int quadrant =
-                        death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
-                    if (damage_target_is_person) {
-                        const int32_t death_section =
-                            primary_section >= 0 ? primary_section : 1;
-                        target->death_anim_state =
-                            compute_death_anim_state(death_section, quadrant,
-                                                     death_cause::kBullet);
-                        // The roll, the mask switch, and the anim selector all
-                        // consume the SAME hit-record bone (hitRecord[14]);
-                        // death_section is our preserved copy of that record
-                        // field. [orig: @0x40755e / @0x4075f6 / @0x407483]
-                        AiEntity *victim_body = world.ai.for_handle(target->handle);
-                        if (target_was_alive) {
-                            apply_death_body_roll(
-                                victim_body, death_section, quadrant);
-                        }
-                        try_spawn_dismemberment_piece(
-                            world, *target, velocity_q16,
-                            death_section, target->death_anim_state,
-                            target_was_alive);
-                    }
-                    world.script.relations.group(target->group_id).alert =
-                        TriggerRelations::kAlertRed;
-
-                    RoundDeath d;
-                    d.victim = damage_entity;
-                    d.killer = r.owner;
-                    d.victim_handle = damage_entity.packed;
-                    d.killer_handle = r.shooter_handle;
-                    d.adm_index = r.adm_index;
-                    d.ammo_index = r.ammo_index;
-                    if (critical_hit) d.event_flags |= 0x800u;
-                    deaths.push_back(d);
-                }
-            }
-        }
+        if (!not_armed) process_damage_hit(world, r, collision, velocity_q16);
 
         RoundImpact imp;
         imp.position = impact_position;
@@ -1659,6 +1749,19 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             imp.effect_tag = 4; // generic object without material data
         }
         imp.tick = world.logic_tick;
+        // Armor is an additional row before the ordinary person effect. Its
+        // gate is independent of the dead/local/squad suppression below.
+        // [orig: Projectile_HandleTerrainImpact_0 @0x4e99f8..0x4e9a38]
+        if (person_collision && !submerged_stall && impact_target != nullptr &&
+                collision.hit_zone >= 0 && collision.hit_zone <= 4 &&
+                (impact_target->carry_flags & 8u) != 0) {
+            RoundImpact armor = imp;
+            armor.effect_tag = 24;
+            armor.present_effect = true;
+            armor.present_sound = true;
+            armor.source_order = next_impact_order++;
+            if (impacts.size() < kMaxPendingImpacts) impacts.push_back(armor);
+        }
         imp.source_order = next_impact_order++;
         if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
 

@@ -517,23 +517,15 @@ bool SimPoseProvider::eval_entity_pose(world::World &world,
 	const std::string primary_key =
 			resolve_primary_key(opennova::world::infantry_anim_key(r_ai->inf.anim_state));
 	if (primary_key.empty()) return false;
-	const float primary_fps = rig->clip_fps(primary_key, 0);
-	const double primary_seconds = primary_fps > 0.0f
-			? static_cast<double>(std::max(r_ai->inf.clip_phase, 0)) /
-					(2.0 * primary_fps)
-			: 0.0;
+	const double primary_seconds =
+			rig->clip_seconds_at_tick(primary_key, r_ai->inf.clip_phase);
 	std::string source_key;
 	double source_seconds = 0.0;
 	const bool primary_blend = r_ai->inf.body_blend_active();
 	if (primary_blend) {
 		source_key = resolve_primary_key(
 				opennova::world::infantry_anim_key(r_ai->inf.anim_prev));
-		const float source_fps = rig->clip_fps(source_key, 0);
-		if (source_fps > 0.0f)
-			source_seconds =
-					static_cast<double>(
-							std::max(r_ai->inf.anim_prev_clip_phase, 0)) /
-					(2.0 * source_fps);
+		source_seconds = rig->clip_seconds_at_tick(source_key, r_ai->inf.anim_prev_clip_phase);
 	}
 
 	r_inputs = aim_overlay_inputs_for(*r_ai, *r_entity);
@@ -559,12 +551,8 @@ bool SimPoseProvider::eval_entity_pose(world::World &world,
 					mount_blocks_weapon_channel(*r_entity))) {
 		weapon_key = opennova::world::infantry_anim_key(r_ai->inf.wpn_state);
 		weapon_variant = r_ai->inf.wpn_variant;
-		const float weapon_fps = rig->clip_fps(weapon_key, weapon_variant);
-		if (weapon_fps > 0.0f)
-			weapon_seconds =
-					static_cast<double>(
-							std::max(r_ai->inf.wpn_clip_phase, 0)) /
-					(2.0 * weapon_fps);
+		weapon_seconds = rig->clip_seconds_at_tick(
+				weapon_key, r_ai->inf.wpn_clip_phase, weapon_variant);
 		// The secondary channel's own cross-fade rides into the authoritative pose
 		// exactly as it does into presentation, so hitboxes and the drawn body
 		// agree through the window [orig: the shared AnimMap_UpdateEntity re-init].
@@ -572,12 +560,8 @@ bool SimPoseProvider::eval_entity_pose(world::World &world,
 			weapon_prev_key = opennova::world::infantry_anim_key(r_ai->inf.wpn_prev);
 			weapon_prev_variant = r_ai->inf.wpn_prev_variant;
 			weapon_blend = r_ai->inf.wpn_blend_weight;
-			const float prev_fps = rig->clip_fps(weapon_prev_key, weapon_prev_variant);
-			if (prev_fps > 0.0f)
-				weapon_prev_seconds =
-						static_cast<double>(
-								std::max(r_ai->inf.wpn_prev_clip_phase, 0)) /
-						(2.0 * prev_fps);
+			weapon_prev_seconds = rig->clip_seconds_at_tick(
+					weapon_prev_key, r_ai->inf.wpn_prev_clip_phase, weapon_prev_variant);
 		}
 	}
 
@@ -671,7 +655,10 @@ bool SimPoseProvider::panm_part_matrices(world::World &world,
 	// values are indistinguishable on the bus, exactly like the binding's
 	// Dictionary translation.
 	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
-	const world::Entity *e = world.registry.get(entity);
+    const world::Entity *e = world.registry.get(entity);
+    if (e != nullptr)
+        for (int phase = 0; phase < 6; ++phase)
+            ctrl_values[THREEDI_CTRL_OBJECT_DESTROY + phase] = e->destroy_phases_q16[phase];
 	world::AiEntity *ai_entity =
 			world.ai.for_handle(entity);
 	// PLAYPARTANIM publishes its two phase accumulators to the fixed retail

@@ -265,7 +265,6 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	assert_true(shell.open_menu("options.mnu", ""), "Options fixture opens")
 	var driver: MenuDriver = shell.get_driver()
 	var expected := {
-		"16x9DISPLAY": "1",
 		"TERRAINPOLY": "3",
 		"TERRAINTEX": "3",
 		"OBJECTPOLY": "3",
@@ -517,6 +516,36 @@ func test_crosshair_spinlist_uses_shared_options_and_persists_immediately() -> v
 	assert_eq(PlayerOptions.new().current().crosshair_style, 18,
 			"the selection persists through the shared owner")
 	assert_signal_emit_count(options, "changed", 1)
+	shell.get_resource_root().clear()
+	_rm_runtime_dir(dir)
+
+
+func test_aspect_spinlist_restores_and_persists_the_selected_mode() -> void:
+	var options := PlayerOptions.new()
+	var state := options.current()
+	state.aspect_mode = 1
+	options.update(state)
+	var dir := _make_runtime_dir()
+	var shell = _make_runtime_shell(dir, options)
+	if shell == null:
+		pass_test("runtime resource root unavailable in this environment")
+		_rm_runtime_dir(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	var spin := driver.widget_id("16x9DISPLAY")
+	assert_gte(spin, 0)
+	assert_false(driver.is_widget_disabled(spin), "aspect selection is interactive")
+	assert_eq(driver.spin_value_attr(spin), "1")
+	driver.select_row_by_value(spin, "0")
+	assert_eq(options.current().aspect_mode, 0)
+	assert_eq(PlayerOptions.new().current().aspect_mode, 0)
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var sim := Simulation.new()
+	assert_true(sim.load_from_mission_data(mission))
+	options.apply(sim)
+	assert_eq(sim.get_local_player_aspect_mode(), 0,
+			"the selected mode reaches camera and sights projection state")
 	shell.get_resource_root().clear()
 	_rm_runtime_dir(dir)
 

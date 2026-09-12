@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include <runtime/world/waypoint_track.h>
+#include <runtime/world/entity_registry.h>
 
 using namespace opennova::world;
 
@@ -24,6 +25,40 @@ static WaypointEntry wp(int32_t x_units, int32_t y_units, int32_t radius_units) 
 }
 
 int main() {
+    {
+        EntityRegistry registry;
+        registry.configure_pool(3, 4);
+        WaypointTrack track;
+        for (int i = 0; i < 4; ++i) {
+            Entity marker;
+            marker.item_id = i == 0 ? 4091 : 4093;
+            marker.has_item_def = true;
+            marker.position = {float(i + 1), 0, 50};
+            CHECK(registry.spawn_at(EntityHandle::make(3, i), marker).valid());
+            WaypointEntry entry;
+            entry.node = i;
+            track.entries.push_back(entry);
+        }
+        Entity local;
+        local.team = 1;
+        track.reset_selection(registry, local, 65540);
+        CHECK(track.current == 1); // nearest enemy item, Z ignored
+        registry.get(EntityHandle::make(3, 1))->flags |= 1;
+        track.reset_selection(registry, local, 65544);
+        CHECK(track.current == 2); // hidden/captured flag skipped
+        registry.get(EntityHandle::make(3, 2))->has_item_def = false;
+        track.reset_selection(registry, local, 65544);
+        CHECK(track.current == 3);
+        local.team = 2;
+        track.reset_selection(registry, local, 65540);
+        CHECK(track.current == 0);
+        track.reset_selection(registry, local, 0x30020);
+        CHECK(track.current == -1);
+        track.entries.resize(1);
+        track.reset_selection(registry, local, 65540);
+        CHECK(track.current == -1); // count must exceed one
+    }
+
     // --- proximity advance: the NL approx distance (max + min/2) vs radius ---
     {
         WaypointTrack t;

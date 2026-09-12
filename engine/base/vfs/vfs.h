@@ -97,6 +97,8 @@ public:
 
     // True when at least one primary or secondary archive opened successfully.
     bool has_mounted_archive() const;
+    // Whether the current session allows this exact loose query to win.
+    bool prefers_loose_file(const std::string &name) const;
 
     // Choose how read_file keys SCR payloads. Pass a VfsScrPolicy / gameprofile ScrPolicy value
     // (they share ordinals). Defaults to version-detect; persists across mounts. The game-aware

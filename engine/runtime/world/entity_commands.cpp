@@ -168,8 +168,14 @@ bool EntityCommands::order_boarding(EntityTarget source_ssn, EntityTarget target
 bool EntityCommands::kill_ssn(EntityTarget ssn) {
     Entity *e = world_.registry.get(resolve_target(ssn));
     if (!e) return false;
-    e->alive = false;
     e->health = 0;
+    if (e->kind != EntityKind::Organic && !e->is_ai_capable) {
+        // Pool 3 uses phase 4; the other pools use phase 1.
+        // [orig: Entity_KillByNetId @0x43DBD0]
+        destruction_notify_item_damage(world_, *e, e->handle.pool() == 3 ? 4 : 1, {0, 0});
+    } else {
+        e->alive = false;
+    }
     return true;
 }
 
@@ -630,11 +636,41 @@ bool EntityCommands::ssn_wounded(EntityTarget ssn) const {
     return health <= half;
 
 }
-bool EntityCommands::ssn_in_area(EntityTarget ssn, int area_id) const {
-    const Entity *e = world_.registry.get(resolve_target(ssn));
-    const Area *a = world_.registry.area(area_id);
-    if (!e || !a) return false;
-    return a->bounds.contains(e->position);
+bool EntityCommands::ssn_in_area(int32_t ssn, int area_id) const {
+    // No death/item gate and no early exit on an out-of-bounds duplicate.
+    // [orig: Entity_IsBmsRefInTriggerBounds @ 0x43e510]
+    const Area *area = world_.registry.area(area_id);
+    if (ssn == 0 || area == nullptr) return false;
+    for (int pool = 0; pool <= 1; ++pool) {
+        for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
+            const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world_.registry.get(handle);
+            if (entity == nullptr) continue;
+            // The SP listen-host model retains its existing script-player
+            // alias: its socketless local body carries net_id 0 (D-NET-112).
+            const bool local_alias = !world_.rules.mp_session && ssn == kLocalPlayerSsn &&
+                    handle == world_.cached.local_player && entity->net_id == 0;
+            if ((entity->net_id == ssn || local_alias) && area->bounds.contains(entity->position))
+                return true;
+        }
+    }
+    return false;
+}
+
+bool EntityCommands::group_in_area(int32_t group, int area_id) const {
+    // Only pool 0 checks Flags bit 0; a destroyed pool-1 item still counts.
+    // [orig: Entity_IsTeamInTriggerBounds @ 0x43c730]
+    const Area *area = world_.registry.area(area_id);
+    if (group == 0 || area == nullptr) return false;
+    for (int pool = 0; pool <= 1; ++pool) {
+        for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
+            const Entity *entity = world_.registry.get(EntityHandle::make(pool, static_cast<int>(slot)));
+            if (entity == nullptr || static_cast<int16_t>(entity->group_id) != group) continue;
+            if (pool == 0 && ((entity->flags | entity->engine_flags) & 1u) != 0) continue;
+            if (area->bounds.contains(entity->position)) return true;
+        }
+    }
+    return false;
 }
 
 bool EntityCommands::ssn_in_script_area(EntityTarget target, int32_t zone_id,

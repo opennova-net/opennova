@@ -133,4 +133,74 @@ DeployStaticsVisibility deploy_statics_visibility(const DeployStaticsInput &in) 
     return v;
 }
 
+
+DeployInstructions build_deploy_instructions(
+        const DeployInstructionsInput &in, const DeployTextLookup &lookup) {
+    // [orig: UI_UpdateDeathScreenContent @ 0x5536A0]
+    const auto text = [&lookup](const char *key, const char *fallback = "") {
+        return lookup ? lookup("Overlays", key, fallback) : std::string(fallback);
+    };
+    DeployInstructions out;
+    out.permanent_death = in.permanent_death && in.dead;
+    if (out.permanent_death) {
+        out.show_first = out.show_second = true;
+        out.first_text = text("STROVER_PERMANENTDEATH");
+        out.second_text = text(in.spectators_allowed
+                ? "STROVER_SPECTATORSPAWN" : "STROVER_NORESPAWN");
+        out.show_round_status = in.round_ticks >= 0;
+        if (out.show_round_status) {
+            const int seconds = in.round_ticks / 62;
+            char clock[48];
+            std::snprintf(clock, sizeof clock, " <cFF4040>%i:%02i:%02i",
+                    seconds / 3600, seconds / 60 % 60, seconds % 60);
+            out.round_text = text("STROVER50") + clock;
+            const std::string label = lookup ? lookup("Client", "STRCLI25", "") : "";
+            out.remaining_players_text = label + " <cFF4040>" + std::to_string(in.alive_players);
+        }
+        return out;
+    }
+    const bool assault = (in.game_type & 0xFFFDFFFFu) == 0x10020u;
+    const bool full_spawn = in.check_secured_spawn && in.has_full_team_spawn;
+    out.show_first = !assault;
+    out.show_second = !full_spawn;
+    out.replace_first = !full_spawn;
+    if (!full_spawn) {
+        if (in.dead) {
+            out.first_text = in.kill_announcement;
+        } else {
+            std::string name = in.player_name.substr(0, 255);
+            if (!in.clan.empty()) name = (name + "<ch>" + in.clan + "<co>").substr(0, 255);
+            const bool team_join = (in.game_type & 0x10000u) != 0 &&
+                    (in.game_type & 0x20000u) == 0 && in.team != 0;
+            const std::string format = team_join
+                    ? text("STROVER_INITIALSPAWN", "%s, you have joined the %s.")
+                    : text("STROVER_WELCOMESPAWN", "Welcome to the game, %s!");
+            std::string team = "Unknown";
+            if (in.team == 1) team = text("STROVER_BLUETEAM", "!Joint Ops Team");
+            else if (in.team == 2) team = text("STROVER_REDTEAM", "!Rebel Team");
+            // Resolve the authored string arguments without interpreting markup
+            // or any format characters inside the player/clan names.
+            unsigned argument = 0;
+            for (size_t i = 0; i < format.size(); ++i) {
+                if (format[i] == '%' && i + 1 < format.size() && format[i + 1] == 's') {
+                    out.first_text += argument++ == 0 ? name : team;
+                    ++i;
+                } else if (format[i] == '%' && i + 1 < format.size() && format[i + 1] == '%') {
+                    out.first_text += '%';
+                    ++i;
+                } else out.first_text += format[i];
+            }
+        }
+    }
+    const char *key = "STROVER_RESPAWN1";
+    if (!in.has_spawn_zones) {
+        if (in.team == 0) key = "STROVER_SPECTATORSPAWN";
+        else if (!assault) key = "STROVER_RESPAWN3";
+        else key = (in.game_type & 0x20000u) != 0 || !in.dead
+                ? "STROVER_RESPAWN4" : "STROVER_RESPAWN5";
+    }
+    out.second_text = text(key);
+    return out;
+}
+
 } // namespace opennova::world

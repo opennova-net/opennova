@@ -78,10 +78,24 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // [orig: model+168 callback; BoneCallback_Simple @ 0x4e2600;
     // Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 advances matrix+64 and
     // COBJ+108 in lockstep.]
-    bool live_pose = instance->section_matrices.size() == m->sections.size();
+    if (e->item_section_piece && !e->palm_sections) {
+        const Vec3 render_pos = item_section_render_position(world, *e);
+        world_mat.m[3] = int32_t(render_pos.x * 65536);
+        world_mat.m[7] = int32_t(render_pos.y * 65536);
+        world_mat.m[11] = int32_t(render_pos.z * 65536);
+    }
+    if (e->palm_sections) {
+        const Vec3 render_pos = item_section_render_position(world, *e);
+        const int32_t pos[3] = {int32_t(render_pos.x * 65536),
+                int32_t(render_pos.y * 65536), int32_t(render_pos.z * 65536)};
+        world_mat = collision_matrix_from_euler(heading,
+                bam_from_degrees_wrapped(e->pitch), bam_from_degrees_wrapped(e->roll), pos);
+    }
+    bool live_pose = !e->palm_sections && !e->item_section_piece &&
+            instance->section_matrices.size() == m->sections.size();
     if (live_pose) {
         mats = instance->section_matrices;
-    } else if (pose_provider_ != nullptr) {
+    } else if (!e->palm_sections && !e->item_section_piece && pose_provider_ != nullptr) {
         mats.clear();
         live_pose = pose_provider_->build_section_matrices(
                 const_cast<World &>(world), h, model_id, world_mat, *m, mats) &&
@@ -89,13 +103,15 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     }
     if (!live_pose)
         mats.assign(m->sections.size(), world_mat);
-    if (using_husk && e->spawned_piece_mask != 0) {
+    const uint32_t hidden_sections = (e->palm_sections ? item_hidden_sections(*e) : 0) |
+            (using_husk ? e->spawned_piece_mask : 0);
+    if (hidden_sections != 0) {
         // Sections that launched as death pieces no longer belong to the wreck.
         // The retail piece mask wraps section indices at 32, and collision's
         // existing matrix+60 low-bit gate removes the section from every walk.
         for (size_t si = 0; si < mats.size(); ++si) {
             const uint32_t bit = 1u << (static_cast<uint32_t>(si) & 31u);
-            if ((e->spawned_piece_mask & bit) != 0) mats[si].m[15] |= 1;
+            if ((hidden_sections & bit) != 0) mats[si].m[15] |= 1;
         }
     }
     scratch.model = m;
@@ -375,6 +391,10 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     return hit;
 }
 
+ProjectileHit CollisionWorld::trace_aim(const World &world, const ProjectileTrace &trace) const {
+    return trace_projectile_impl(world, trace, false, true);
+}
+
 ProjectileHit CollisionWorld::trace_knife_impact(
         const World &world, const ProjectileTrace &trace) const {
     const ProjectileHit hit = trace_projectile_impl(world, trace, true);
@@ -422,7 +442,7 @@ int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source
 
 ProjectileHit CollisionWorld::trace_projectile_impl(
         const World &world, const ProjectileTrace &trace,
-        bool person_faces_only) const {
+        bool person_faces_only, bool aim) const {
     // [orig: Projectile_UpdatePhysics @0x4e9d70] Candidate passes are ordered
     // terrain, water, static CFAC, dynamic CFAC, then person bone proxies.
     // A later pass replaces only when strictly closer.
@@ -749,7 +769,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 const_cast<CollisionWorld *>(this)->ensure_entity_instance(
                     const_cast<World &>(world), h);
                 target = trace_target_view(world, h);
-                if (target == nullptr && !person_faces_only) {
+                if (target == nullptr && !person_faces_only && !aim) {
                     throw std::logic_error(
                         "CollisionWorld::trace_projectile: pool-1 item has no live collision model");
                 }
@@ -768,7 +788,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 // the bounded sphere compatibility used by ordinary bullets.
                 // [orig: Weapon_RaycastAndSpawnImpact @0x4e8460;
                 // Physics_RaycastAgainstBoneCollision @0x4e4cb0]
-                if (person_faces_only) continue;
+                if (person_faces_only || aim) continue;
                 const int32_t center[3] = {to_fixed(entity->position.x),
                                            to_fixed(entity->position.y),
                                            to_fixed(entity->position.z)};
@@ -852,6 +872,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     if (trace.include_wire_proxies && !wire_dynamic_proxies_.empty()) {
         CollisionPolygonHit table_hit;
         bool table_found = false;
+        EntityHandle table_entity;
         for (const WireDynamicCollisionProxy &proxy : wire_dynamic_proxies_) {
             // Self-site immunity: the shooter's own wire slot (a decoded
             // vehicle/item shooter never clips itself) and the mounted
@@ -859,6 +880,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             // — the ray[17..20] exclusion-set analog [orig: the four-slot
             // compare before Physics_RaycastAgainstBoneCollision @ 0x4e5572].
             if (proxy.wire_handle == trace.shooter_wire_handle) continue;
+            if (aim && proxy.registry_twin == trace.owner) continue;
             if (proxy.wire_handle == trace.shooter_carrier_wire_handle) continue;
             const float sc[3] = {
                 static_cast<float>(proxy.position_q16.x) / io::kFp16One,
@@ -1029,7 +1051,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         };
         eh.position_q16 = FixedVec3{impact[0], impact[1], impact[2]};
         eh.surface_type = 19;
-        consider(eh, hit_distance);
+        consider(eh, hit_distance, aim);
     };
 
     // The motor sweep's pools-2/1-only contract: no person leg at all, local
@@ -1203,6 +1225,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         }
 
         if (live_pose_available && !person_hit) continue;
+        if (!live_pose_available && aim) continue;
         if (!live_pose_available &&
             !trace_torso_fallback(
                 FixedVec3{to_fixed(e->position.x), to_fixed(e->position.y),

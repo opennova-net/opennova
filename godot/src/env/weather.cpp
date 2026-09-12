@@ -316,13 +316,7 @@ void Weather::run_mission_start_boundary(Object *p_sim, int p_start_time_q8_8,
 	// The authority's eager WAC execution precedes the initializer; both
 	// roles then settle 255 complete ticks (the kernel calls this node's
 	// render legs each tick) (retail Game_StartMission @ 0x525cb8 -> @ 0x57f878).
-	if (!sim->is_joiner()) {
-		sim->run_mission_start_wac();
-	}
-	sim->settle_weather_mission_start();
-	if (!sim->is_joiner()) {
-		sim->seal_mission_start_baseline();
-	}
+	sim->complete_mission_start();
 	_post_runtime(env);
 }
 

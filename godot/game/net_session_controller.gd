@@ -20,6 +20,7 @@ var _menu_key_input_before_novaworld := false
 var _novaworld_menu_state_captured := false
 var _join_role_prompt: Control
 var _join_role_password: LineEdit
+var _join_server_password: LineEdit
 var _join_role_target: JoinTarget
 var _spectator_probe: LanSession
 var _spectator_probe_target: JoinTarget
@@ -134,13 +135,13 @@ func join_lan_server(target: JoinTarget) -> void:
 		target.integrity_profile = LaunchFlags.integrity_profile().strip_edges()
 	_cancel_spectator_probe()
 	_dismiss_join_role_prompt()
-	if target.role_explicit:
+	if target.role_explicit and (not target.server_password_required() or not target.server_password.is_empty()):
 		_start_lan_join(target)
 		return
 	if target.server_flags < 0:
 		_begin_spectator_preflight(target)
 		return
-	if target.allows_spectators():
+	if target.allows_spectators() or target.server_password_required():
 		_show_join_role_prompt(target)
 		return
 	_start_lan_join(target)
@@ -236,7 +237,7 @@ func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
 		if target.game_type < 0:
 			target.game_type = row.gametype
 	_cancel_spectator_probe()
-	if target.allows_spectators():
+	if target.allows_spectators() or target.server_password_required():
 		_show_join_role_prompt(target)
 	else:
 		_start_lan_join(target)
@@ -293,11 +294,20 @@ func _show_join_role_prompt(target: JoinTarget) -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 	var question := Label.new()
-	question.text = "Would you like to join as a player or spectator?"
+	question.text = ("Would you like to join as a player or spectator?"
+			if target.allows_spectators() else "Enter the server password.")
 	question.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(question)
 
-	if target.spectator_password_required():
+	if target.server_password_required():
+		_join_server_password = LineEdit.new()
+		_join_server_password.name = "ServerPassword"
+		_join_server_password.placeholder_text = "Server password"
+		_join_server_password.secret = true
+		_join_server_password.text = target.server_password
+		box.add_child(_join_server_password)
+
+	if target.allows_spectators() and target.spectator_password_required():
 		_join_role_password = LineEdit.new()
 		_join_role_password.name = "SpectatorPassword"
 		_join_role_password.placeholder_text = "Spectator password"
@@ -311,7 +321,7 @@ func _show_join_role_prompt(target: JoinTarget) -> void:
 	box.add_child(choices)
 	var player_button := Button.new()
 	player_button.name = "JoinAsPlayer"
-	player_button.text = "Player"
+	player_button.text = "Player" if target.allows_spectators() else "Join"
 	player_button.pressed.connect(_choose_join_role.bind(JoinTarget.ROLE_PLAYER))
 	choices.add_child(player_button)
 	var spectator_button := Button.new()
@@ -319,6 +329,7 @@ func _show_join_role_prompt(target: JoinTarget) -> void:
 	spectator_button.text = "Spectator"
 	spectator_button.pressed.connect(_choose_join_role.bind(JoinTarget.ROLE_SPECTATOR))
 	choices.add_child(spectator_button)
+	spectator_button.visible = target.allows_spectators()
 	var cancel_button := Button.new()
 	cancel_button.name = "CancelJoin"
 	cancel_button.text = "Cancel"
@@ -327,13 +338,18 @@ func _show_join_role_prompt(target: JoinTarget) -> void:
 
 	var mount := _panel_layer if _panel_layer != null else self
 	mount.add_child(overlay)
-	player_button.grab_focus()
+	if _join_server_password != null:
+		_join_server_password.grab_focus()
+	else:
+		player_button.grab_focus()
 
 
 func _choose_join_role(role: int) -> void:
 	var target := _join_role_target
 	if target == null:
 		return
+	if _join_server_password != null:
+		target.server_password = _join_server_password.text
 	target.join_role = role
 	target.role_explicit = true
 	target.spectator_password = (
@@ -355,6 +371,7 @@ func _dismiss_join_role_prompt() -> void:
 		_join_role_prompt.queue_free()
 	_join_role_prompt = null
 	_join_role_password = null
+	_join_server_password = null
 	_join_role_target = null
 
 

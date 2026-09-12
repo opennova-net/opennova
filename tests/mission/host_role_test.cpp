@@ -11,6 +11,8 @@
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/world/angle.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_encode.h>
@@ -224,7 +226,8 @@ int main() {
 		inmatch::ListenHostState &host = role.state;
 		kernel.open_document(synthetic_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
-		options.playable = false; // a dedicated host has no player of its own
+		options.playable = false;
+        options.mp_session = true; // a dedicated host has no player of its own
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
@@ -264,6 +267,79 @@ int main() {
 		CHECK(host.host_loop.c2s_pending() == 0);
 		CHECK(!kernel.local.has_local_player());
 	}
+
+    // The shared deployment transaction resets local view state immediately,
+    // even when the host never presents an intervening dead frame.
+    {
+        ms::MissionKernel kernel;
+        inmatch::HostRole role;
+        role.bind(kernel);
+        kernel.open_document(synthetic_mission(), "respawn", source_over(&files));
+        ms::KernelBootOptions options;
+        options.game_type = mission_game_type(kernel.mission);
+        options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+        std::string error;
+        CHECK(kernel.boot(options, error));
+        auto &lp = kernel.local;
+        auto &owner = role.state.host_owner;
+        auto &conn = owner.ctx.np_protocol.connection_list.front();
+        CHECK(lp.request_stance(2));
+        lp.input.look_pitch = 12345;
+        lp.input.forward = true;
+        lp.view.binoculars_requested = lp.view.binoculars_raised = true;
+        lp.view.binoculars_view_active = true;
+        lp.view.scope_engaged = true;
+        lp.view.scope_step = 15;
+        lp.view.nvg_active = true;
+        lp.view.nvg_gain = 7;
+        lp.view.shake = {30, 111, 222, 333};
+        lp.view.camera_mode = 4;
+        lp.view.lookahead_q16[0] = 700;
+        lp.hud_map_control.mode = 3;
+        lp.hud_map_control.zoom_q16 = 32768;
+        lp.hud_map_control.big_zoom_q16 = 262144;
+        lp.weapon.power_throw_start_tick = 99;
+        kernel.world.weather.core.hit_dim.arm(true, false);
+        kernel.world.script.waypoints.current = 3;
+        role.state.client_runtime->state().local_medic_reviving = true;
+        const auto revision = lp.round_reset_revision;
+        const auto resets = kernel.world.out.effects.count("local_round_reset");
+        lp.player()->alive = false;
+        lp.player()->health = 0;
+        lp.player()->flags |= w::kEntityFlagDead;
+        const auto replies = inmatch::Server_ReleasePlayerDeployment(
+                owner.ctx.config, conn, kernel.world, {});
+        CHECK(!replies.empty());
+        CHECK(lp.player()->alive && lp.player()->health > 0);
+        CHECK(lp.round_reset_revision == revision + 1);
+        CHECK(kernel.world.out.effects.count("local_round_reset") == resets + 1);
+        CHECK(!lp.view.binoculars_requested && !lp.view.binoculars_raised &&
+                !lp.view.binoculars_view_active && !lp.view.scope_engaged);
+        CHECK(lp.stance_latch() == 0 && !lp.input.prone && !lp.input.crouch);
+        CHECK(lp.input.look_heading == w::bam_heading_from_mission_yaw_deg(lp.player()->yaw));
+        CHECK(lp.input.look_pitch == 12345 && lp.input.forward);
+        CHECK(lp.view.shake.counter == 0 && lp.view.shake.roll == 111 &&
+                lp.view.shake.pitch == 222 && lp.view.shake.yaw == 333);
+        CHECK(lp.view.nvg_active && lp.view.nvg_gain == 7);
+        CHECK(lp.view.camera_mode == 0 && lp.view.tp_anchor_valid && lp.view.lookahead_q16[0] == 0);
+        CHECK(lp.hud_map_control.mode == 0 && lp.hud_map_control.zoom_q16 == 32768 &&
+                lp.hud_map_control.big_zoom_q16 == 262144);
+        CHECK(lp.weapon.power_throw_start_tick == 0);
+        CHECK(kernel.world.weather.core.hit_dim.intensity == 0 &&
+                kernel.world.weather.core.hit_dim.fade_rate == 0);
+        CHECK(kernel.world.script.waypoints.current == -1);
+        role.run_tick(tick_input(0));
+        CHECK(!role.state.client_runtime->state().local_medic_reviving);
+        CHECK(lp.round_reset_revision == revision + 1);
+
+        // A remote player's deployment cannot reset the local camera or map.
+        inmatch::NapiNPConnection remote;
+        remote.link.owned_entity = w::EntityHandle::make(0, 0);
+        CHECK(remote.link.owned_entity != kernel.world.cached.local_player);
+        lp.hud_map_control.mode = 2;
+        inmatch::Server_ReleasePlayerDeployment(owner.ctx.config, remote, kernel.world, {});
+        CHECK(lp.hud_map_control.mode == 2 && lp.round_reset_revision == revision + 1);
+    }
 
 	if (failures == 0) std::printf("host_role: all checks passed\n");
 	return failures == 0 ? 0 : 1;

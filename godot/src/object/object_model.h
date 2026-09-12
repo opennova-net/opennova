@@ -73,6 +73,7 @@ public:
 	Vector3 floor_color;
 	Vector3 gain;
 	bool fog_enabled = false;
+	bool thermal_view = false;
 	Vector3 fog_color;
 	float fog_start = 0.0f;
 	float fog_end = 0.0f;
@@ -375,6 +376,7 @@ private:
 	bool is_playing_ = true;
 	AABB model_bounds_;
 	float lighting_effect_scale_ = 1.0f;
+	bool thermal_entity_wave_ = false;
 	bool interior_lerp_ = false;
 	float interior_daylight_ = 0.0f;
 	bool interior_section_lighting_ = false;
@@ -593,7 +595,6 @@ private:
 	void set_body_playhead(double p_seconds);
 	String resolve_body_clip_key(const String &p_key) const;
 	double clip_phase_seconds(const String &p_key, int p_phase_ticks) const;
-	double clip_half_tick_seconds(const String &p_key) const;
 	void clear_body_blend();
 	void reset_body_pose();
 	String resolve_anim_channel_register(int p_slot) const;
@@ -610,7 +611,6 @@ private:
 			Ref<ShaderMaterial> &r_postmultiply);
 	void collect_anim_frames(int p_material_index);
 	Ref<Texture2D> load_texture_name(const String &p_texture_name);
-	static Color hash_color_for_index(int p_index);
 	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
 	// One shader parameter written to a material and, when the material
 	// carries the postmultiply pass, to its proxy as well.
@@ -676,6 +676,8 @@ public:
 	// The entity identity this model presents; null for models that are no
 	// placed or wire-spawned entity (viewmodels, husk grafts, helpers).
 	void set_entity_ref(const Ref<EntityRef> &p_ref) { entity_ref_ = p_ref; }
+	void set_thermal_entity_wave(bool p_enabled);
+	bool get_thermal_entity_wave() const { return thermal_entity_wave_; }
 	Ref<EntityRef> get_entity_ref() const { return entity_ref_; }
 	void set_presentation_layer(PresentationLayer p_layer);
 	void set_shadow_caster_enabled(bool p_enabled);
@@ -883,6 +885,7 @@ public:
 	void set_muzzle_point_name(const String &p_name);
 	void play_body_clip(const String &p_key);
 	void play_body_clip_variant(const String &p_key, int p_variant);
+	void play_body_clip_variant_at_tick(const String &p_key, int p_variant, int p_ticks);
 	void play_body_clip_variant_at_time(const String &p_key, int p_variant,
 			double p_seconds);
 	void play_body_clip_at(const String &p_key, int p_phase_ticks);

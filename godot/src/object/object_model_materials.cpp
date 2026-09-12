@@ -12,6 +12,7 @@
 
 #include "object/object_shader_cache.h"
 #include "render/frame_fx.h"
+#include "util/texture_path_resolver.h"
 
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/object_shader_template.h>
@@ -22,12 +23,6 @@ using namespace opennova::threedi;
 
 namespace godot {
 
-namespace {
-
-// index_hue.gd: golden-ratio conjugate hue spread.
-constexpr double kPhiConjugate = 0.618033988749895;
-
-} // namespace
 
 void ObjectModel::set_material_and_auxiliary_parameter(
 		const Ref<ShaderMaterial> &p_material,
@@ -162,7 +157,7 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index, int p_materi
 		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse", diffuse);
 	} else {
 		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse",
-				solid_colour_texture(hash_color_for_index(p_material_index)));
+				opennova::prepare_material_texture({}, {}, 0));
 	}
 	if (detail.is_valid()) {
 		material->set_shader_parameter("u_detail", detail);
@@ -230,11 +225,6 @@ Ref<Texture2D> ObjectModel::load_texture_name(const String &p_texture_name) {
 		return Ref<Texture2D>();
 	}
 	return object_data_->load_texture_name(p_texture_name);
-}
-
-Color ObjectModel::hash_color_for_index(int p_index) {
-	const double h = Math::fposmod(double(p_index) * kPhiConjugate, 1.0);
-	return Color::from_hsv(static_cast<float>(h), 0.35f, 0.85f);
 }
 
 Ref<ImageTexture> ObjectModel::solid_colour_texture(const Color &p_color) {

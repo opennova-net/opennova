@@ -1,8 +1,11 @@
 #include <runtime/renderer/render_order.h>
 
 #include <cstring>
+#include <cmath>
 
 namespace opennova::renderer {
+
+float scene_far_plane(float fog_distance) { return std::floor(fog_distance) + 1.0f; }
 
 TechniqueClass technique_class_for_submit(uint32_t stack_default_flags,
                                           uint32_t submit_flags) {

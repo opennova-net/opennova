@@ -89,6 +89,10 @@ opennova_light_block_dir={
 "type": "vec3",
 "value": Vector3(-0.4082, -0.8165, -0.4082)
 }
+opennova_thermal_view={
+"type": "bool",
+"value": false
+}
 opennova_light_block_dir_color={
 "type": "vec3",
 "value": Vector3(0.66667, 0.66667, 0.6549)

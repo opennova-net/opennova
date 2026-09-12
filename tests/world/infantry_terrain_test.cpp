@@ -45,6 +45,33 @@ struct Field {
     }
 };
 
+void test_height_sector_clamp() {
+    Field f;
+    f.sectors.fill(0);
+    f.sectors[0] = 1;
+    f.sectors[15] = 2;
+    f.sectors[15 * 16] = 3;
+    f.sectors[255] = 4;
+    for (int y = 0; y < 1024; ++y)
+        for (int x = 0; x < 1024; ++x)
+            f.at(x, y) = static_cast<uint16_t>((1 + (x >= 512) * 2 + (y >= 512)) * 256);
+    const auto check = [&](float x, float y, float expected) {
+        CHECK(terrain::height_field_height_world(f.field, x, y) == expected);
+        CHECK(terrain::height_field_height_world_bilinear(f.field, x, y) == expected);
+    };
+    f.field.layout.sector_count = f.field.layout.sector_rows = 1;
+    for (int q = 0; q < 4; ++q) f.field.locks.set(q, true, true);
+    check(-512.25f, 0.25f, 1.0f);
+    check(8192.25f, 0.25f, 2.0f);
+    check(0.25f, -512.25f, 1.0f);
+    check(0.25f, 8192.25f, 3.0f);
+    f.field.wrap_x = f.field.wrap_z = true;
+    check(-0.25f, 0.25f, 2.0f);
+    check(8192.25f, 0.25f, 1.0f);
+    check(0.25f, -0.25f, 3.0f);
+    check(0.25f, 8192.25f, 1.0f);
+}
+
 void test_raw_gradient() {
     Field f;
     f.gradient(10, 20, 789, -110);
@@ -345,6 +372,7 @@ void test_slope_arms_route_detour_before_think() {
 } // namespace
 
 int main() {
+    test_height_sector_clamp();
     test_raw_gradient();
     test_quadrants_and_seams();
     test_sector_edges();

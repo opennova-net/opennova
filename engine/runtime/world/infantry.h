@@ -264,7 +264,7 @@ public:
                                  int target_state, int32_t &target_phase_ticks,
                                  float target_weight, RootMotionFrame &out);
     // Clip length for a state's track, in the phase-tick convention advance() uses
-    // (half-frame ticks), or -1 when the state has no track. The weapon channel's
+    // (simulation ticks), or -1 when the state has no track. The weapon channel's
     // deferred-state promotion fires when the playhead reaches this — the original's
     // clip-end channel flag [orig: the 0x20000 end-flag promotion in
     // AnimMap_UpdateEntity @ 0x40b77b; witness world-wac-ai-re.md §14.8.1].
@@ -282,6 +282,15 @@ public:
     // one-shot promotes at its end. Default false suits providers whose clips
     // are one-shots (the weapon channel's existing consumers).
     virtual bool clip_loops(int /*adm_id*/, int /*state_id*/) const { return false; }
+    // Next loop wrap, or the one-shot end. Concrete clip sources preserve
+    // fractional loop remainders; simple providers retain integer periods.
+    virtual int32_t clip_boundary_after(int adm_id, int state_id, int32_t phase_ticks,
+                                        int variant = 0) const {
+        const int32_t length = clip_length_ticks(adm_id, state_id, variant);
+        return length > 0 && clip_loops(adm_id, state_id)
+                ? (phase_ticks / length + 1) * length : length;
+    }
+
 };
 
 struct InfantryState {
@@ -421,6 +430,8 @@ struct InfantryState {
         leg_target[0] = leg_target[1] = heading;
         vel[0] = vel[1] = vel[2] = 0;
         stance = Stance::kStand;
+        stance_sound_state = 0;
+        burn_state = 0;
         // `airborne` is deliberately NOT reset: it mirrors the registry word's
         // 0x2000, and retail's respawn writers never touch that bit -- the
         // reset zeroes the velocities and clears bit 1 only [orig:
@@ -567,6 +578,9 @@ struct InfantryState {
     // alive + not prone [orig: @0x4b7dbf/@0x4b7dd6; Flags&0x100020 legs unmodeled].
     // Consumers: prone roll anims 41/42, the aim-overlay lean term, and the FP camera
     // roll = torsoRoll + lean/4 [orig: @0x437fcd].
+    // [orig: Player_PackInputStateToEntity @0x4df6e5..0x4df7a1]
+    bool free_look = false;
+    uint16_t view_input_bits = 0; // MoveOrder 0x1000..0x8000, local only
     bool lean_left = false;
     bool lean_right = false;
     int32_t lean_angle = 0;
@@ -653,6 +667,8 @@ struct InfantryState {
     // [orig: entity+0x12C prone bit 0x100, crouch bit 0x200; player body @0x4b40e0]
     enum class Stance : uint8_t { kStand = 0, kCrouch = 1, kProne = 2 };
     Stance stance = Stance::kStand;
+    uint8_t burn_state = 0; // entity+0x368: ammo secondary_anim, states 111..114
+    uint8_t stance_sound_state = 0; // entity+0x304, independent of clip selection
     bool airborne = false;
     bool jump_requested = false;
     // The HELD jump-key level for the wire mirror: retail's packer writes the

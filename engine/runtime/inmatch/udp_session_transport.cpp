@@ -18,15 +18,16 @@ bool UdpSessionTransport::unframe(const std::vector<uint8_t> &raw, Datagram &out
 	out.reliable = true;
 	out.protocol_flags_raw = 0;
 	out.capacity_exempt = false;
+	out.retention_flushes = 0;
 	return true;
 }
 
 void UdpSessionTransport::host_send(
 		uint8_t tag, std::vector<uint8_t> body, bool reliable,
-		uint8_t protocol_flags_raw, bool capacity_exempt) {
+		uint8_t protocol_flags_raw, bool capacity_exempt, uint32_t retention_flushes) {
 	outbound_.push_back(
 			Datagram{tag, std::move(body), reliable, protocol_flags_raw,
-					capacity_exempt});
+					capacity_exempt, retention_flushes});
 }
 
 void UdpSessionTransport::client_send(uint8_t tag, std::vector<uint8_t> body) {

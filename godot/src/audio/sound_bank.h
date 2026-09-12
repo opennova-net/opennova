@@ -23,6 +23,7 @@
 
 #include <formats/lwf/lwf.h>
 #include <runtime/audio/oneshot_play.h>
+#include <runtime/world/script_voice.h>
 #include <runtime/audio/sound_selector.h>
 #include <runtime/audio/volume_law.h>
 
@@ -107,7 +108,7 @@ public:
 	// Returns true if anything played.
 	bool play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
 			const StringName &p_bus, const Vector3 &p_listener_pos = Vector3(INFINITY, INFINITY, INFINITY),
-			int p_source_bms_id = 0, const String &p_exclusive_key = String());
+			int p_source_bms_id = 0);
     // Direct WAC/weather trigger: explicit distance controls layer gain; the
     // position only supplies Godot's panner (D-SND-8). No 3D cull or occlusion.
     bool play_oneshot_at_distance(Node3D *p_parent, const Vector3 &p_pan_position,
@@ -126,6 +127,11 @@ public:
 	// serialized dialog queue (the engine plays one dialog audio channel at a time:
 	// Dialog_UpdatePlayback @ 0x44e470 only advances when the active channel frees).
 	// Returns null if the set is unknown or no member resolves to audio.
+	// Typed native bank service used by the mission's shared voice channel.
+	std::optional<opennova::world::ScriptVoiceChannel::SetSelection>
+			select_radio_set(const std::string &name, uint8_t listener_view_flags);
+
+	bool play_interface_oneshot(Node *p_parent, const String &p_name, const StringName &p_bus);
 	AudioStreamPlayer *spawn_oneshot_2d(Node *p_parent, const String &p_name, const StringName &p_bus);
 
 	// An LWF member's / layer descriptor's base pitch as the player plays it: an
@@ -187,9 +193,9 @@ private:
 	static double _member_base_pitch(const opennova::lwf::Sndparm &p_member);
 	AudioStreamPlayer3D *_make_player(const Ref<AudioStreamWAV> &p_stream, double p_base_pitch,
 			const StringName &p_bus, bool p_loop, int p_vol255);
-    bool _play_oneshot_plan(Node3D *p_parent, const Vector3 &p_world_pos,
+    bool _play_oneshot_plan(Node *p_parent, const Vector3 &p_world_pos,
             const opennova::lwf::File &p_bank, const opennova::audio::OneshotPlan &p_plan,
-            const StringName &p_bus, const String &p_exclusive_key = String());
+            const StringName &p_bus, bool p_interface = false);
 	Ref<AudioStreamWAV> _resolve_stream(const String &p_wav_path);
 	static int64_t _stream_frames(const Ref<AudioStreamWAV> &p_stream);
 
@@ -205,13 +211,10 @@ private:
 	opennova::audio::SoundSelector selector_;
 	// wav basename(lower) -> AudioStreamWAV (or null if it failed to resolve/decode)
 	HashMap<String, Ref<AudioStreamWAV>> wav_cache_;
-	// exclusive_key -> the gating voice of an exclusive one-shot (see
-	// play_oneshot_3d); entries go stale harmlessly (resolved through ObjectDB
-	// before use).
-	HashMap<String, ObjectID> exclusive_;
-    // Auto-freeing 3D voices owned by this bank. ObjectID protects against
-    // parent teardown and slot reuse without storing metadata on the nodes.
-    std::vector<ObjectID> oneshots_;
+	// The engine selects slots; the adapter releases completed voices and
+	// stops the previous player when a slot is stolen.
+	opennova::audio::OneshotChannelPool oneshot_pool_;
+	std::array<ObjectID, opennova::audio::kAudioChannelCount> oneshots_{};
 };
 
 } // namespace godot

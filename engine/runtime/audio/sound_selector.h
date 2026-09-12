@@ -41,15 +41,22 @@ SelectionMode selection_mode_for_flags(uint32_t playlist_flags);
 
 // Per-(bank,set,layer) member selection. State (sequence cursor / cycle anchor) is kept per key,
 // so one selector instance backs a whole loaded bank set. The RNG is one shared stream across all
-// keys, exactly like the engine's global @ 0x85A3DC. Caveat: the engine interleaves volume/pitch
-// jitter draws on the same stream during playback; the reimpl does not reproduce those draws, so
-// long-run streams diverge from a real game session even though the algorithm and seed match.
+// keys, exactly like the engine's global @ 0x85A3DC. Playback interleaves the set
+// and member pitch draws through compose_pitch, even when their ranges are zero.
 class SoundSelector {
 public:
     // Pick a member index in [0, member_count) for the layer identified by `key`, or -1 when the
     // layer is empty. `mode` is a SelectionMode; unknown values behave like kRandom, matching the
     // engine's "no selection flags -> random" default [orig: @ 0x75cdfc].
     int select(uint64_t key, int member_count, int mode);
+
+    // Both jitter draws consume the same stream as member selection; additions
+    // wrap at DWORD width and each signed Q16 multiplication truncates separately.
+    // [orig: SoundBank_PlayTriggerEntries @0x75CE85..0x75CF17;
+    // SoundBank_SelectTriggerEntryFromBank @0x75C07F..0x75C128]
+    uint32_t compose_pitch(uint32_t set_base, uint32_t set_range,
+            uint32_t member_base, uint32_t member_range,
+            uint32_t emitter_pitch = 0x10000u);
 
     // Drop all per-key state (sequence cursors + cycle anchors). This is the bank REPLACEMENT
     // reset (a resource-root swap reloads every bank into fresh playlist records), never a

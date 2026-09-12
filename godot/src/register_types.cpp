@@ -1,4 +1,5 @@
 #include "./register_types.h"
+#include "util/texture_path_resolver.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/class_db.hpp>
@@ -497,6 +498,7 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	SlotShadow::cleanup_statics();
 	Q3SourceRegistry::cleanup_statics();
 	ObjectData::clear_static_caches();
+	opennova::clear_texture_resolver_caches();
 }
 
 extern "C" {

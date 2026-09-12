@@ -52,14 +52,6 @@ bool str_case_equal(const std::string &a, const char *b) {
 	return i == a.size() && b[i] == '\0';
 }
 
-struct ParsedClientGameEnvironment {
-	long bt = 0;
-	long vn = 0;
-	long bn = 0;
-	long mbn = 0;
-	long sopd = 0;
-};
-
 struct ParsedClientJoinRole {
 	bool spectator = false;
 	std::string spectator_password;
@@ -91,8 +83,8 @@ ParsedClientJoinRole parse_client_join_role(const ClientAuth &auth) {
 	return parsed;
 }
 
-ParsedClientGameEnvironment parse_client_game_environment(const ClientAuth &auth) {
-	ParsedClientGameEnvironment parsed;
+ClientGameEnvironment parse_client_game_environment(const ClientAuth &auth) {
+	ClientGameEnvironment parsed;
 	for (const auto &blob : auth.cu) {
 		uint8_t cu_type = 0;
 		std::string cu_name;
@@ -119,21 +111,6 @@ ParsedClientGameEnvironment parse_client_game_environment(const ClientAuth &auth
 		}
 	}
 	return parsed;
-}
-
-bool validates_jointoperations_game_environment(const ParsedClientGameEnvironment &parsed) {
-	// These are literals embedded in the 1.7.5.7 server, not host-selected configuration. Missing
-	// type-2 tags retain NapiNetConfig's zero initialization and therefore fail the nonzero checks.
-	// BT is an account state: only 1 and 2 are the witnessed ban rejects. VERSIONSTRING, DB,
-	// COUNTRYCODE and TZB are stored/display-only and deliberately do not participate in this gate.
-	// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 ->
-	// Server_ValidatePlayerJoinRequest @0x512100, DC=2/3/4/6/7/8]
-	return parsed.bn == 1 &&
-	       parsed.vn == 2 &&
-	       parsed.mbn == 20042002 &&
-	       parsed.sopd == 180 &&
-	       parsed.bt != 1 &&
-	       parsed.bt != 2;
 }
 
 // Stable "a.b.c.d:port" label — the connection's session_id (NapiNPConnection.session_id). PeerAddr.ip
@@ -503,6 +480,8 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// game-server fields from live host state without registering the source as
 	// a peer; only a validated 0x42 creates the connection node.
 	reply.sn = ctx.config.server_name;
+	// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204b0, SF]
+	reply.sf = ctx.config.server_password.empty() ? 0u : 1u;
 	reply.p1 = ctx.config.game_type;
 	// Retail advertises the same session BuildFlags value here and in the
 	// trailing dword of S2C 0x08. create_session snapshots that live semantic
@@ -517,7 +496,7 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	reply.sus2 = ctx.config.expansion;
 	// R1: advertise our real host key (seed-injected via SessionStartup) rather than
 	// build_server_hello's placeholder default, when one is set. The retail 0x81 carries host_key.
-	if (ctx.np_protocol.host_key != 0) reply.hk = ctx.np_protocol.host_key;
+	reply.hk = ctx.np_protocol.host_key;
 	out.outbound.push_back(
 			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply)));
 }
@@ -528,24 +507,32 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
                         const std::vector<uint8_t> &body, HandleResult &out) {
 	ClientAuth auth;
 	if (!parse_client_auth(body.data(), body.size(), auth)) return;
-	// Validate the identity envelope before admitting it. These envelope failures are silent:
-	// no ServerAuth and no node. The original re-runs the SAME identity gate as Hello on the
-	// 0x42 and additionally checks the HK echo against the host key, dropping the join (return 0)
-	// otherwise. Role/capacity/password failures below instead send retail's CR=0 ServerAuth.
-	// [orig:
-	// NapiNPProtocol_HandleClientJoin @0x62b750 — NVS/PN/PG/PV1/PV2 + non-empty NA + HK]
-	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return; // host not started
-	if (!matches_jointoperations_identity(auth) || auth.na.empty()) return; // not a retail JO game join
-	// HK echo: the joiner must echo the host key it learned in ServerHello.hk. Checked only when the
-	// host has a key set (a deterministic 0 seed means "unchecked", matching P1's pass-in startup).
-	if (ctx.np_protocol.host_key != 0 && auth.hk != ctx.np_protocol.host_key) return; // wrong host key
-	const ParsedClientGameEnvironment game_environment =
-			parse_client_game_environment(auth);
-	if (!validates_jointoperations_game_environment(game_environment)) {
-		// Retail would send its draw-overlay disconnect class/reason. That packet is not modeled;
-		// fail closed before replacement teardown, capacity accounting, or node allocation.
+	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return;
+	// CU bounds are checked during the retail TLV walk, before its envelope.
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750]
+	for (size_t i = 0; i < auth.cu.size(); ++i) {
+		if (auth.cu[i].size() >= 2048 || i >= 64) {
+			reject_client_join(auth, peer, auth.cu[i].size() >= 2048 ? 9u : 10u, 0, out);
+			return;
+		}
+	}
+	// Only the NVS/PN/PG/PV1 envelope is silent. The subsequent server-side
+	// gates answer a CR=0 ServerAuth, in this order, before retry/replacement.
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750, gates @0x62bdf2]
+	if (!matches_jointoperations_identity(auth)) return;
+	uint32_t reject = 0;
+	if (auth.hk != ctx.np_protocol.host_key) reject = 3;
+	else if (!ctx.config.server_password.empty() &&
+	         !str_case_equal(auth.pw, ctx.config.server_password.c_str())) reject = 4;
+	else if (!str_case_equal(auth.pv2, "16")) reject = 7;
+	else if (auth.na.empty()) reject = 5;
+	else if (ctx.np_protocol.reject_new_connections) reject = 6;
+	if (reject != 0) {
+		reject_client_join(auth, peer, reject, 0, out);
 		return;
 	}
+	const ClientGameEnvironment game_environment =
+			parse_client_game_environment(auth);
 	const ParsedClientJoinRole join_role = parse_client_join_role(auth);
 
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750] The stateless 0x41 leaves
@@ -597,6 +584,15 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// (@0x4c624c). Spectator-specific validation (codes 14/15/16) is NOT this
 	// leg: it runs at the game-layer 0x00 join message and punts through the
 	// connection-description record (server_message_dispatch.cpp).
+	if (ctx.is_in_session && ctx.join_locked) {
+		reject_client_join(auth, peer, 14, 2, out);
+		return;
+	}
+	if (ctx.is_in_session && std::find(ctx.banned_join_addresses.begin(),
+	            ctx.banned_join_addresses.end(), auth.sip) != ctx.banned_join_addresses.end()) {
+		reject_client_join(auth, peer, 14, 3, out);
+		return;
+	}
 	const uint32_t occupied = occupied_player_count(ctx);
 	if (occupied >= ctx.config.total_player_slot_capacity()) {
 		reject_client_join(auth, peer, 14,
@@ -610,6 +606,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// two-step shape so the roster/0x16/0x75 state cannot flip before the
 	// witnessed latch point. [orig: NapiNetConfig_LoadFromConnTags @0x4c7260;
 	// the entry+55 latch @0x512aa0]
+	conn.join_environment = game_environment;
 	conn.join_spectator_request = join_role.spectator ? 1 : 0;
 	conn.join_spectator_password = join_role.spectator_password;
 	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
@@ -889,6 +886,7 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		return;
 	}
 	conn->receive_inactive_ms = 0;
+    conn->link.nak_backoff_pending = true;
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
 				? conn->seq.next_outbound_seq

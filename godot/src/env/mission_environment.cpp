@@ -383,6 +383,7 @@ void MissionEnvironment::_write_lighting_block_globals(
 	// publish for every fogged consumer; the object family only needs the
 	// enable, which a loaded world always carries.
 	rs->global_shader_parameter_set("opennova_fog_enabled", v.fog_enabled);
+	rs->global_shader_parameter_set("opennova_thermal_view", v.thermal_view);
 	lighting_block_writer_ = this;
 }
 
@@ -440,6 +441,7 @@ Ref<EnvLightValues> MissionEnvironment::_build_light_values() const {
 	v->floor_color = to_vector3(out.floor_color);
 	v->gain = to_vector3(out.gain);
 	v->fog_enabled = out.fog_enabled;
+	v->thermal_view = state_.thermal_view();
 	v->fog_color = to_vector3(out.fog_color);
 	v->fog_start = out.fog_start;
 	v->fog_end = out.fog_end;
