@@ -116,27 +116,32 @@ void ClientReplicaPipeline::apply_entity_routed(const std::vector<uint8_t> &body
 			// Entity_IsShellProjectile @0x4E4040].
 			m->lock_target = (group == GuidedFieldGroup::Pos) ? 0xFFFF
 			                                                  : rec.target_slot;
-			if (rec.pos_x || rec.pos_y || rec.pos_z) {
-				m->steer[0] = rec.pos_x;
-				m->steer[1] = rec.pos_y;
-				m->steer[2] = rec.pos_z;
-				m->has_steer = true;
-				if (!m->flight_seeded) {
-					// Launch pose: the shooter's folded position, lifted to
-					// shoulder height, aimed at the first steer point.
-					const ClientEntityState *sh = state_.find(m->shooter);
-					if (sh != nullptr) {
-						m->flight.pos[0] = sh->x;
-						m->flight.pos[1] = sh->y;
-						m->flight.pos[2] = sh->z + kLaunchLiftQ16;
-					} else {
-						m->flight.pos[0] = rec.pos_x;
-						m->flight.pos[1] = rec.pos_y;
-						m->flight.pos[2] = rec.pos_z;
-					}
-					world::GuidedFlight::aim_at(m->flight, m->steer);
-					m->flight_seeded = true;
+			// The read side stores every coordinate it decodes into
+			// entity+700/704/708 unconditionally, zero included (a short
+			// body stores 0 and flags the context); there is no all-zero
+			// skip, so an origin steer point is a real steer point.
+			// [orig: Entity_SerializeGuidedMissileState @0x447C50, read-full
+			//  group 3 @0x447EEB/@0x447F08/@0x447F2E, group 4 @0x4480E5/
+			//  @0x448102/@0x448129, group 5 @0x448151/@0x44816E/@0x448195]
+			m->steer[0] = rec.pos_x;
+			m->steer[1] = rec.pos_y;
+			m->steer[2] = rec.pos_z;
+			m->has_steer = true;
+			if (!m->flight_seeded) {
+				// Launch pose: the shooter's folded position, lifted to
+				// shoulder height, aimed at the first steer point.
+				const ClientEntityState *sh = state_.find(m->shooter);
+				if (sh != nullptr) {
+					m->flight.pos[0] = sh->x;
+					m->flight.pos[1] = sh->y;
+					m->flight.pos[2] = sh->z + kLaunchLiftQ16;
+				} else {
+					m->flight.pos[0] = rec.pos_x;
+					m->flight.pos[1] = rec.pos_y;
+					m->flight.pos[2] = rec.pos_z;
 				}
+				world::GuidedFlight::aim_at(m->flight, m->steer);
+				m->flight_seeded = true;
 			}
 			break;
 		default:

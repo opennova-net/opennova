@@ -37,12 +37,18 @@ struct ObjectProjectionSphere {
 // Ordinary entities use the CMDL AABB midpoint and max-minus-center diagonal.
 // A nonzero runtime scale overrides the definition scale; either applies once
 // to the center and radius before the unscaled entity pose transforms them.
-// [orig: Entity_ComputeBoundingSphere @ 0x5C69A0, scale selection @ 0x5C69C4,
+// The live producer (entity init) zeroes the center FIRST for eweap powerups
+// (type 6 with attrib 0x20), so their halves are the clamped maxima
+// themselves; the recompute path keeps the midpoint form.
+// [orig: Entity_InitFromModel @ 0x40df06..0x40dfac (zero-center leg
+// @ 0x40df06..0x40df16), scale @ 0x40dfd0..0x40e03c;
+// Entity_ComputeBoundingSphere @ 0x5C69A0, scale selection @ 0x5C69C4,
 // midpoint/diagonal @ 0x5C6A3B..0x5C6AC2, scale @ 0x5C6ACE..0x5C6B52]
 ObjectProjectionSphere object_projection_sphere_from_bounds_q16(
     const std::array<int32_t, 3> &minimum,
     const std::array<int32_t, 3> &maximum,
-    int32_t runtime_scale_q16 = 0, int32_t definition_scale_q16 = 0);
+    int32_t runtime_scale_q16 = 0, int32_t definition_scale_q16 = 0,
+    bool zero_center = false);
 
 // Apply the entity scale to an already-derived local sphere; zero is unscaled.
 ObjectProjectionSphere scale_object_projection_sphere_q16(

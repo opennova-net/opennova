@@ -7,7 +7,7 @@
 // per tick [orig: ThirdPersonCamera_Update @ 0x437c8d], and the scoped fov is
 // 80 / zoom for sighted weapons, suppressed in third person
 // [orig: Player_ToggleWeaponScope @ 0x4df401 / the g_camera_mode check
-// @ 0x4df3fa; base fov g_cameraFovDeg @ 0x26C6848 default 0x500000 = 80 deg].
+// @ 0x4df3fa; base fov g_cameraFovTargetQ16 @ 0x26C6848 default 0x500000 = 80 deg].
 //
 // Hosted, the simulation ticks camera lag and the ADS pose at world cadence.
 // The optical render query can rewrite the shared FOV target, as in retail;
@@ -33,7 +33,7 @@ namespace opennova::world {
 constexpr int32_t kScopeEaseSteps = 15;
 constexpr int32_t kScopeEaseStepsInset = 7;
 constexpr int32_t kScopeEaseStepsHipfire = 1;
-// [orig: g_cameraFovDeg @ 0x26C6848 default 0x500000 = 80.0 horizontal degrees]
+// [orig: g_cameraFovTargetQ16 @ 0x26C6848 default 0x500000 = 80.0 horizontal degrees]
 constexpr float kPlayerCameraFovHDeg = 80.0f;
 // [orig: binocular camera fov constant in Player_UpdateFirstPersonCamera]
 constexpr float kBinocularCameraFovHDeg = 20.0f;
@@ -201,8 +201,8 @@ void player_view_bias_interp_setup(PlayerViewBiasInterp &interp, uint32_t steps,
 void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip);
 
 struct PlayerViewState {
-    // THE ADS SCOPE TRI-STATE plus the FP camera interp projected onto the
-    // hip..tpos line. `scope_engaged` is the TARGET the promoter reads,
+    // THE ADS SCOPE TRI-STATE beside the FP camera interp below.
+    // `scope_engaged` is the TARGET the promoter reads,
     // `scope_settled` the PROMOTED "scoped" byte every CanFire/crosshair/card
     // consumer keys on, `scope_hipfire` the latch every interp Setup stores
     // beside its target: the toggle and the PackInput legs target the hip
@@ -214,19 +214,14 @@ struct PlayerViewState {
     bool scope_engaged = false;
     bool scope_settled = false;
     bool scope_hipfire = true;
-    // The interp's current pose along hip (0) .. tpos (ease_steps) and the
-    // steps left over that delta [orig: g_fpCameraInterp @0x82CE40 -- the
-    // current pose +28..48, the target +52..72, the per-step velocity
-    // delta / steps +4..24 subtracted per step]. Integral while an ease runs
-    // endpoint to endpoint (one step per tick); fractional once a running
-    // raise is re-targeted at the hip from its own pose (@0x4df548). The
-    // ease is active while the pose has not reached the latch's target.
-    float scope_step = 0.0f;
-    int32_t ease_steps = kScopeEaseSteps; // the Setup step count of the current ease
-    int32_t scope_ease_remaining = 0;
-    // The authored pose interpolator feeds the viewmodel's rotation. The
-    // scalar above still controls optical admission and position blending;
-    // its data-independent completion is tracked separately as D-WPN-39.
+    // THE FP CAMERA INTERP ITSELF [orig: g_fpCameraInterp @0x82CE40 -- the
+    // per-step velocity +4..24, the current pose +28..48, the target +52..72,
+    // the counter +0, entitySlotPtr +76, activeFlag +80]: the two authored
+    // endpoints (WeaponDef +0x10C hip copy / +0x124 tpos) and the six-lane
+    // interpolator every Setup targets. Its `active` latch IS the ease gate
+    // the toggle tests, its completion IS what the settle promoter waits
+    // for, and its published biases ARE the camera's position/rotation
+    // offsets; there is no separate scalar clock.
     PlayerViewPose weapon_hip_pose;
     PlayerViewPose weapon_ads_pose;
     PlayerViewBiasInterp weapon_pose_interp;
@@ -328,12 +323,15 @@ void player_view_resolve_mode(PlayerViewState &v);
 //  @ 0x49c0ea / @ 0x49c100]
 void player_view_set_third_person_selected(PlayerViewState &v, bool selected);
 
-// One 62.5 Hz tick: resolve the camera mode, step the scope-camera interp one
-// step toward the latch's target and promote the settled byte when it lands
-// [orig: Player_UpdatePerFrame @0x4de4c9..0x4de4f7 -- Player_StepFpViewBiasInterp,
-// then g_weaponScopeActive = (g_scopeEngaged != 0) once the interp reports
-// done; the landing step IS the completion here, where retail's stepper
-// reports done on the call after the six velocities snapped], and chase the
+// One 62.5 Hz tick: resolve the camera mode, step the six-lane scope-camera
+// interp toward its target and promote the settled byte on the tick its
+// active latch drops [orig: Player_UpdatePerFrame -- the step runs only
+// behind an active interp @0x4de4c7 -> Player_StepFpViewBiasInterp @0x4de4c9,
+// then `if (!activeFlag)` @0x4de4d9 -> g_weaponScopeActive = (g_scopeEngaged
+// != 0) @0x4de4f7; the stepper reports done on the call AFTER the last
+// moving lane snapped, so a 15-step authored ease promotes on tick 16, and
+// an unbound slot (null entitySlotPtr/Def) deactivates on its first step
+// @0x4DDD2B..0x4DDDBC and promotes at once], and chase the
 // third-person anchor toward `eye` (mission space). Entering third person
 // seeds the anchor at the eye [orig: Camera_SetTrackedEntity @ 0x4391d0
 // resets the track on change]; leaving invalidates it. In a control seat the
@@ -343,9 +341,9 @@ void player_view_set_third_person_selected(PlayerViewState &v, bool selected);
 // @0x437C56..0x437C79].
 void player_view_tick(PlayerViewState &v, const float eye[3]);
 
-// Whether the scope-camera interp is mid-ease: the pose has not reached the
-// latch's target. Every scope toggle is REFUSED while it runs [orig: the
-// !g_fpCameraInterp.activeFlag gate @ 0x4df177].
+// Whether the scope-camera interp is mid-ease: its active latch, which holds
+// one call past the last lane snap. Every scope toggle is REFUSED while it
+// runs [orig: the !g_fpCameraInterp.activeFlag gate @ 0x4df177].
 bool player_view_scope_ease_active(const PlayerViewState &v);
 
 // The PROMOTED scope byte [orig: g_weaponScopeActive @0xB76478]: set only by
@@ -392,7 +390,12 @@ bool player_view_scope_request_pending(const PlayerViewState &v, bool engaged);
 // @0x4df177; disengage @0x4df1b3..0x4df212; engage @0x4df31d..0x4df373]
 bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon);
 
-// The eased hip->sighted blend, 0..1 in 1/15ths.
+// A DERIVED hip (0) .. tpos (1) progress readout for probes and tests; retail
+// has no such scalar (its consumers read the promoted byte and the published
+// biases). Idle: the latch's target (hipfire 1 -> 0, else 1). Active: the
+// progress of the first lane with an authored hip..ADS span (position lanes,
+// then rotation), clamped to [0, 1]; a zero-span ease reports its SOURCE
+// (hipfire 1 -> 1, else 0) until it lands. Never a gameplay input.
 float player_view_scope_fraction(const PlayerViewState &v);
 
 // The per-frame movement input pack and its scope legs, in retail order
@@ -507,29 +510,29 @@ ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
 //  the world pass Render_SetViewProjectionWithDefaults @0x58f6b0].
 float viewmodel_focal_ratio(float world_fov_h_deg, float renderfov_h_deg);
 
-// The eased first-person view bias in RAW weapon.def units: `pos` (hip) blended
-// toward `tpos` (sighted) by the scope fraction. The original's camera adds the
-// def `pos` (+0xF4) plus the scope interp's bias, which the stepper publishes as
-// interp_current - the hip copy at +0x10C while the interp eases from that copy
-// to the tpos at +0x124 -- zero at hip, tpos - pos at full ADS [orig:
-// Player_UpdateFirstPersonCamera @ 0x4dd380; Player_StepFpViewBiasInterp
-// @ 0x4ddf53..0x4ddfc3; the interp setup @ 0x4df36e]. (The camera's
-// `Flags & 2` leg is the dead/round-end camera, not ADS; unported.)
-void player_view_bias_units(const PlayerViewState &v, const float pos[3],
-                            const float tpos[3], float out[3]);
+// The first-person view position in RAW weapon.def units: the def `pos`
+// (+0xF4) plus the interp's PUBLISHED position bias (g_view_pos_bias_x/y/z,
+// the truncating ftol of interp_current - the hip copy at +0x10C, in the
+// def's *256 Q16 scale) brought back to file units over kWeaponDefPosScale.
+// Zero bias at the hip, tpos - pos once the lanes snap; no float blend and no
+// tpos input, the ADS endpoint lives in the bound pose. [orig:
+// Player_UpdateFirstPersonCamera @ 0x4dd380 -- ftol(Bone +0xF4) @0x4dd479..
+// 0x4dd490 then + g_view_pos_bias_x/y/z @0x4dd4ce..0x4dd4da; Player_StepFpViewBiasInterp publication
+// @ 0x4ddf53..0x4ddfc3]. (The camera's `Flags & 2` leg is the dead/round-end
+// camera, not ADS; unported.)
+void player_view_bias_units(const PlayerViewState &v, const float pos[3], float out[3]);
 
-// The eased view bias in VIEW-FRAME world units (X=forward, Y=left, Z=up —
-// the witnessed def/view frame; the aim ray's far point is {+1000, 0, 0}
-// through the same transform @ 0x592a0f): the raw blend over
-// kWeaponDefPosScale; while the NoCardSwitch reload rule suppresses the bias
-// the ADS half drops for the frame (the hip offset — the ported reading of
-// retail's skipped camera-bias add). The presenting shell maps view axes onto
-// its camera frame and parents the viewmodel — node work only.
+// The view bias in VIEW-FRAME world units (X=forward, Y=left, Z=up — the
+// witnessed def/view frame; the aim ray's far point is {+1000, 0, 0} through
+// the same transform @ 0x592a0f): the raw position over kWeaponDefPosScale;
+// while the NoCardSwitch reload rule suppresses the bias the published half
+// drops for the frame (the hip offset — the ported reading of retail's
+// skipped camera-bias add). The presenting shell maps view axes onto its
+// camera frame and parents the viewmodel — node work only.
 // [orig: Player_UpdateFirstPersonCamera @ 0x4dd380 — the view-local rotate
 //  @ 0x4dd5d8; the suppress skip @ 0x4dd439/@ 0x4dd4cc]
 void player_view_bias_view_units(const PlayerViewState &v, bool suppress_bias,
-                                 const float pos[3], const float tpos[3],
-                                 float out[3]);
+                                 const float pos[3], float out[3]);
 
 // The FP camera's recoil pitch: TWICE the live accumulator, camera-only —
 // third-person orbit, projectile aim, and the HUD anchor keep the base pitch.

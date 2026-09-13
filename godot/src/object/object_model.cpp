@@ -690,17 +690,23 @@ void ObjectModel::refresh_entity_projection_sphere() {
 		entity_projection_sphere_ = opennova::renderer::person_projection_sphere_q16(
 				entity_bound_radius_q16_, parachute_deployed_, parachute_projection_radius_q16_);
 	} else {
+		// A loaded document without a collision block yields a valid
+		// zero-radius sphere (the projector's sub-pixel cull); only a
+		// document-less preview stays invalid for the geometry fallback.
 		entity_projection_sphere_ = object_data_.is_valid()
 				? opennova::simassets::collision_projection_sphere_from_3di(
-						object_data_->native_model(), entity_uniform_scale_q16_)
+						object_data_->native_model(), entity_uniform_scale_q16_, 0,
+						entity_projection_zero_center_)
 				: opennova::renderer::ObjectProjectionSphere{};
 	}
 }
 
-void ObjectModel::configure_entity_projection(bool p_person, int32_t p_parachute_radius_q16) {
+void ObjectModel::configure_entity_projection(bool p_person, int32_t p_parachute_radius_q16,
+		bool p_zero_center) {
 	entity_projection_person_ = p_person;
 	entity_projection_override_ = false;
 	parachute_projection_radius_q16_ = p_parachute_radius_q16;
+	entity_projection_zero_center_ = p_zero_center;
 	refresh_entity_projection_sphere();
 }
 

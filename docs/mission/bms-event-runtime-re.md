@@ -821,9 +821,12 @@ Environment_MissionStartInit @ 0x57F1E0]
 
 **D-EVT-8 FIXED (2026-09-13): numbered-variable startup reset ordering.**
 The numbered-variable reset follows the complete PreMission pass, including for
-missions without WAC files. `Game_StartMission` runs PreMission at `0x525B86`
-before `WacScript_InitAndLoad` at `0x525CB3`; that initializer compiles its layers,
-clears exactly 0x400 bytes at `0x4F95EE`, then executes the initial VM at `0x4F976B`.
+missions without WAC files. `Game_StartMission` runs PreMission (the
+`EventTrigger_UpdateAllWithFlag2` call at `0x525B86`, authority-gated at `0x525B78`)
+before its `WacScript_InitAndLoad` call at `0x525CB3`; that initializer compiles its
+layers, clears exactly 0x400 bytes at `0x4F95EE`, executes the initial VM at
+`0x4F976B` and increments `wac_var_ticks` at `0x4F9770` [orig: Game_StartMission
+@0x525B86, @0x525CB3; WacScript_InitAndLoad @0x4F95EE, @0x4F976B, @0x4F9770].
 PreMission actions can therefore communicate through numbered variables during
 the pass, but those writes are absent from the initial WAC input and the saved
 play-start baseline. Declared V256+ slots and globals survive this reset. The
@@ -1364,12 +1367,10 @@ type-6088 structural teleport/effect markers are a different list.
 The queued ChangeAI half of the same parity round is recorded in
 [`world-wac-ai-re.md` §32](../world/world-wac-ai-re.md).
 
-PR #649 integration review (2026-09-13, D-WAC-7): a bare Simulation has no
-host roster to publish `humans`. Empty-script startup now correctly advances
-its clock to one and gates subsequent BMS/WAC passes. Seven Godot fixtures
-that previously relied on a perpetually zero empty-script clock now install
-an authored `set(ticks,-1)` program for their event/collision tests. A separate
-regression proves the empty startup blocks events and the authored clock write
-admits both schedulers. `simulation_test.gd` passes all 97 tests with the
-reference asset fixtures enabled; the live GameWorld startup path is also
+Empty-script startup (2026-09-13, D-WAC-7): a bare Simulation has no host
+roster to publish `humans`. Empty-script startup advances the shared clock to
+one and gates the subsequent BMS/WAC passes, so a standalone Godot fixture that
+needs event or collision ticks installs an authored `set(ticks,-1)` program.
+`simulation_test.gd` covers the empty startup blocking events and the authored
+clock write admitting both schedulers; the live GameWorld startup path is
 covered by the music-director integration tests.

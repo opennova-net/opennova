@@ -368,6 +368,34 @@ OcclusionModel one_room_window(uint8_t type = kOccRecWindow) {
 }
 
 // ---------------------------------------------------------------------------
+// The native visibility bound sphere. [orig: Entity_ComputeBoundingSphere
+// @ 0x5c69a0 — the odd-width midpoint keeps the positive-side half (radius 7,
+// not 5, for these bounds: halves {4,5,3}), a nonzero scale multiplies center
+// and radius with the +0x8000 rule (@ 0x5c6ac8..0x5c6b52), and the unset-bound
+// sentinels clamp to a zero center with 0x40000000 halves (@ 0x5c6a02..0x5c6a39)]
+void test_bound_sphere() {
+    CollisionModel cm;
+    cm.min[0] = -3; cm.min[1] = -2; cm.min[2] = 10;
+    cm.max[0] = 4;  cm.max[1] = 7;  cm.max[2] = 15;
+    int32_t c[3] = {0, 0, 0};
+    int32_t r = 0;
+    OcclusionWorld::bound_sphere_fixed(cm, c, r, 0);
+    CHECK(c[0] == 0 && c[1] == 2 && c[2] == 12);
+    CHECK(r == 7);
+    OcclusionWorld::bound_sphere_fixed(cm, c, r, 0x18000); // 1.5x
+    CHECK(c[0] == 0 && c[1] == 3 && c[2] == 18);
+    CHECK(r == 11);
+
+    CollisionModel unset;
+    for (int axis = 0; axis < 3; ++axis) {
+        unset.min[axis] = 0x40000000;
+        unset.max[axis] = -0x40000000;
+    }
+    OcclusionWorld::bound_sphere_fixed(unset, c, r, 0);
+    CHECK(c[0] == 0 && c[1] == 0 && c[2] == 0);
+    CHECK(r == 1859775393); // sqrt(3) * 2^30, truncated
+}
+
 void test_render_math() {
     // The fixed->float swizzle. [orig: Math_FixedPointToFloat3_YNegated @ 0x611210]
     const int32_t p[3] = {fx(3.0), fx(5.0), fx(7.0)};
@@ -957,6 +985,7 @@ void test_building_visibility_feed_word() {
 } // namespace
 
 int main() {
+    test_bound_sphere();
     test_render_math();
     test_weld_and_flags();
     test_tilted_pose_weld();

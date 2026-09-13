@@ -68,6 +68,16 @@ struct LocalViewSessionInputs {
 // Reset the view effects for a fresh local player: binoculars down, NVG per
 // the mission's StartWithNVGOn attribute, gain at the floor, the scope
 // restore latch cleared; then the effective modes are refreshed.
+// The category-handle / UseGun camera reset, shared by the admitted category
+// request, the UseGun attach staging and the session-level view reset: the
+// interp reset (player_view_weapon_switch_reset), the equipped-slot rebind
+// (iff its def is optical, Flags & 3), the fov target back to 80 degrees, and
+// the two binocular clears. `world` may be null (no fov channel to write).
+// [orig: Player_ResetCameraAndMovementState @0x4DE1F0: fov @0x4de202, the
+//  rebind @0x4de287..0x4de2a7, g_binocularsViewActive = 0 @0x4de2ad,
+//  g_binocularsToggle = 0 @0x4de2b3]
+void local_player_camera_reset(World *world, const LocalPlayerWeapon &w, PlayerViewState &v);
+
 void local_player_view_reset(World *world, LocalPlayerWeapon &w,
                              PlayerViewState &v, LocalPlayerViewTracker &t);
 
@@ -311,16 +321,16 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w,
 void local_player_viewmodel_rotation_bias(World *world, const LocalPlayerWeapon &w,
                                          const PlayerViewState &v, int32_t out_bam[3]);
 
-// The eased FP viewmodel view-offset in VIEW-FRAME world units (X=forward,
-// Y=left, Z=up): the raw weapon.def `pos`/`tpos` blend over the /256 scale with
-// the NoCardSwitch reload suppression applied, plus the per-frame motion lead
-// and the 4:3 framing drop. Advances the motion-lead tracker.
+// The FP viewmodel view-offset in VIEW-FRAME world units (X=forward, Y=left,
+// Z=up): the raw weapon.def `pos` plus the interp's published position bias
+// over the /256 scale with the NoCardSwitch reload suppression applied, plus
+// the per-frame motion lead and the 4:3 framing drop. Advances the
+// motion-lead tracker. (The ADS endpoint is the bound pose, not an input.)
 // [orig: Player_UpdateFirstPersonCamera @0x4dd380 — lead @0x4dd4f2..0x4dd56c,
 //  narrow-aspect drop @0x4dd571]
 void local_player_viewmodel_bias(World *world, const LocalPlayerWeapon &w,
                                  const PlayerViewState &v, LocalPlayerViewTracker &t,
                                  const float pos_raw_units[3],
-                                 const float tpos_raw_units[3],
                                  int viewport_w, int viewport_h, float out[3]);
 
 } // namespace opennova::world

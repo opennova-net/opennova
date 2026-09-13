@@ -69,7 +69,14 @@ int main() {
     // integer range; poisoned float fields must not replace the source words.
     {
         Threedi3di3 model{};
-        TEST_EXPECT(!collision_projection_sphere_from_3di(model).valid);
+        // No collision block: retail never stamps entity+0x1FC/+0x208, and
+        // the collector projects those zero spawn words as radius zero.
+        // [orig: Entity_InitFromModel @0x40de97; Entity_ComputeBoundingSphere @0x5c69be]
+        const auto unstamped = collision_projection_sphere_from_3di(model);
+        TEST_EXPECT(unstamped.valid && unstamped.radius_q16 == 0);
+        TEST_EXPECT(unstamped.center_q16[0] == 0 && unstamped.center_q16[1] == 0 &&
+                unstamped.center_q16[2] == 0);
+        TEST_EXPECT(collision_projection_sphere_from_3di(model, 0x18000, 0, true).radius_q16 == 0);
         ThreediCollisionModel collision{};
         model.collision = &collision;
         collision.model_data.has_bbox_fp16 = 1;
@@ -86,6 +93,37 @@ int main() {
         TEST_EXPECT(scaled.radius_q16 == 11);
         TEST_EXPECT(scaled.center_q16[0] == 0x03000006);
         TEST_EXPECT(scaled.center_q16[1] == 2 && scaled.center_q16[2] == 18);
+    }
+
+    // The eweap-powerup leg (type 6 with attrib 0x20): the entity init zeroes
+    // the center first, so the halves are the maxima themselves and the
+    // collision center and the projection sphere share one predicate.
+    // [orig: Entity_InitFromModel @0x40df06..0x40df16, halves @0x40df66..0x40df76,
+    //  radius @0x40dfac, scale @0x40dfd0..0x40e03c]
+    {
+        TEST_EXPECT(item_def_zero_bbox_center(6, 0x20u));
+        TEST_EXPECT(item_def_zero_bbox_center(6, 0x21u));
+        TEST_EXPECT(!item_def_zero_bbox_center(6, 0x10u));
+        TEST_EXPECT(!item_def_zero_bbox_center(2, 0x20u));
+        TEST_EXPECT(!item_def_zero_bbox_center(1, 0x20u));
+        Threedi3di3 model{};
+        ThreediCollisionModel collision{};
+        model.collision = &collision;
+        collision.model_data.has_bbox_fp16 = 1;
+        const int32_t exact[] = {-3, -2, 10, 4, 7, 15};
+        for (int i = 0; i < 6; ++i) collision.model_data.bbox_fp16[i] = exact[i];
+        const auto midpoint = collision_projection_sphere_from_3di(model);
+        TEST_EXPECT(midpoint.radius_q16 == 7);
+        TEST_EXPECT(midpoint.center_q16[0] == 0 && midpoint.center_q16[1] == 2 &&
+                midpoint.center_q16[2] == 12);
+        const auto zeroed = collision_projection_sphere_from_3di(model, 0, 0, true);
+        TEST_EXPECT(zeroed.valid && zeroed.radius_q16 == 17); // sqrt(16 + 49 + 225)
+        TEST_EXPECT(zeroed.center_q16[0] == 0 && zeroed.center_q16[1] == 0 &&
+                zeroed.center_q16[2] == 0);
+        const auto zeroed_scaled = collision_projection_sphere_from_3di(model, 0x18000, 0, true);
+        TEST_EXPECT(zeroed_scaled.radius_q16 == 26); // (17 * 0x18000 + 0x8000) >> 16
+        TEST_EXPECT(zeroed_scaled.center_q16[0] == 0 && zeroed_scaled.center_q16[1] == 0 &&
+                zeroed_scaled.center_q16[2] == 0);
     }
 
     // --- bird: the face-only witness (18 CFAC over 9 sections, 0 BVOL) ------

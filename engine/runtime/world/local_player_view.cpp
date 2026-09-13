@@ -102,15 +102,22 @@ bool suppress_view_bias(const LocalPlayerWeapon &w, const WeaponSlotState *slot,
 
 } // namespace
 
-void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
-                             LocalPlayerViewTracker &t) {
+void local_player_camera_reset(World *world, const LocalPlayerWeapon &w, PlayerViewState &v) {
     // [orig: Player_ResetCameraAndMovementState @0x4DE1F0]
     player_view_weapon_switch_reset(v);
-    v.weapon_pose_bound = w.active && (w.def.flags & 3) != 0;
+    v.weapon_pose_bound = w.active && (w.def.flags & 3) != 0; // @0x4de287..0x4de2a7
     if (world != nullptr) world->weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
-    v.binoculars_requested = false;
+    v.binoculars_view_active = false; // @0x4de2ad
+    v.binoculars_requested = false;   // @0x4de2b3
+}
+
+void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
+                             LocalPlayerViewTracker &t) {
+    local_player_camera_reset(world, w, v);
+    // The raised pose is re-derived from the cleared toggle every tick
+    // [orig: Player_UpdatePerFrame @0x4de388]; drop it and the seeded aim
+    // displacement with the request here.
     v.binoculars_raised = false;
-    v.binoculars_view_active = false;
     t.binocular_yaw_offset_deg = 0.0f;
     t.binocular_pitch_offset_deg = 0.0f;
     v.nvg_gain = kNvgGainMin;
@@ -752,12 +759,12 @@ void local_player_viewmodel_rotation_bias(World *world, const LocalPlayerWeapon 
 
 void local_player_viewmodel_bias(World *world, const LocalPlayerWeapon &w,
                                  const PlayerViewState &v, LocalPlayerViewTracker &t,
-                                 const float pos_raw_units[3], const float tpos_raw_units[3],
+                                 const float pos_raw_units[3],
                                  int viewport_w, int viewport_h, float out[3]) {
     const WeaponSlotState *active_slot =
         world != nullptr ? active_local_weapon_slot(*world, w) : nullptr;
     player_view_bias_view_units(v, suppress_view_bias(w, active_slot, local_entity(world)),
-                                pos_raw_units, tpos_raw_units, out);
+                                pos_raw_units, out);
     // The per-frame motion lead: the witnessed pre-rotation add takes the
     // world-delta components RAW onto the view-frame lanes (no frame
     // conversion) [orig: Player_UpdateFirstPersonCamera @0x4dd549..0x4dd56c,

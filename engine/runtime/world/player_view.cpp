@@ -145,46 +145,15 @@ void player_view_set_third_person_selected(PlayerViewState &v, bool selected) {
 
 namespace {
 
-// The interp's target pose along the hip..tpos line, read back from the
-// hipfire latch (player_view.h: every Setup stores the latch beside its
-// target, hip <-> 1 and tpos <-> 0).
-float scope_target_step(const PlayerViewState &v) {
-    return v.scope_hipfire ? 0.0f : static_cast<float>(v.ease_steps);
-}
-
-// Existing scalar projection for optical admission and position blending.
-// It approximates a fixed 7/15/1-step hip..ADS line; D-WPN-39 tracks its
-// completion/rounding difference from the exact six-lane pose below. Every
-// transition feeds the authored interpolator before changing the hip latch.
+// CNetPlayerInterp_Setup(&g_fpCameraInterp, steps, idle_source, target) on
+// the bound def's two poses: the caller names retail's source and destination
+// pointers (the hip copy +0x10C or the tpos +0x124); an active interp sources
+// from its own pose regardless. The caller stores the hipfire latch beside it.
 // [orig: CNetPlayerInterp_Setup @0x4DDFD0; caller latch stores @0x4DF373]
-void scope_interp_setup(PlayerViewState &v, int32_t steps, float idle_source_fraction,
-                        bool target_hip) {
+void scope_interp_setup(PlayerViewState &v, int32_t steps, const PlayerViewPose &idle_source,
+                        const PlayerViewPose &target) {
     player_view_bias_interp_setup(v.weapon_pose_interp, static_cast<uint32_t>(steps),
-            idle_source_fraction == 0.0f ? v.weapon_hip_pose : v.weapon_ads_pose,
-            target_hip ? v.weapon_hip_pose : v.weapon_ads_pose);
-    const float from =
-        player_view_scope_ease_active(v) ? player_view_scope_fraction(v) : idle_source_fraction;
-    v.ease_steps = steps;
-    v.scope_step = from * static_cast<float>(steps);
-    v.scope_ease_remaining = steps;
-}
-
-// Scalar admission clock, retained for D-WPN-39. The exact pose step above
-// preserves the separate lane snaps and the following completion call from
-// [orig: Player_StepFpViewBiasInterp @0x4DDD20].
-bool scope_interp_step(PlayerViewState &v) {
-    const float target = scope_target_step(v);
-    if (v.scope_step == target) return false;
-    if (v.scope_ease_remaining > 1) {
-        v.scope_step = target + (v.scope_step - target) *
-                                    static_cast<float>(v.scope_ease_remaining - 1) /
-                                    static_cast<float>(v.scope_ease_remaining);
-        --v.scope_ease_remaining;
-        return false;
-    }
-    v.scope_step = target;
-    v.scope_ease_remaining = 0;
-    return true;
+                                  idle_source, target);
 }
 
 } // namespace
@@ -193,9 +162,6 @@ void player_view_scope_reset(PlayerViewState &v) {
     v.scope_engaged = false;
     v.scope_settled = false;
     v.scope_hipfire = true;
-    v.ease_steps = kScopeEaseSteps;
-    v.scope_step = 0.0f;
-    v.scope_ease_remaining = 0;
     v.weapon_pose_interp = {};
     v.weapon_pose_bound = false;
 }
@@ -203,9 +169,6 @@ void player_view_scope_reset(PlayerViewState &v) {
 void player_view_weapon_switch_reset(PlayerViewState &v) {
     v.scope_engaged = false;
     v.scope_hipfire = true;
-    v.ease_steps = kScopeEaseSteps;
-    v.scope_step = 0.0f;
-    v.scope_ease_remaining = 0;
     PlayerViewBiasInterp &interp = v.weapon_pose_interp;
     for (int i = 0; i < 3; ++i) {
         interp.velocity.position_q16[i] = 0.0f;
@@ -228,8 +191,10 @@ void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_c
     }
     v.weapon_pose_bound = (flags & (3 | 0x04000000)) != 0;
     if ((flags & 3) != 0 && v.scope_settled) {
+        // [orig: g_scopeEngaged = 1 @0x4dfc5b; Setup(1, +0x10C hip, +0x124 tpos)
+        //  @0x4dfc7d; g_scopeHipfire = 0 @0x4dfc83]
         v.scope_engaged = true;
-        scope_interp_setup(v, 1, 0.0f, false);
+        scope_interp_setup(v, 1, v.weapon_hip_pose, v.weapon_ads_pose);
         v.scope_hipfire = false;
     }
 }
@@ -238,16 +203,20 @@ void player_view_tick(PlayerViewState &v, const float eye[3]) {
     // The mode first: the arbiter precedes the camera work every frame
     // [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2, ahead of the view build].
     player_view_resolve_mode(v);
-    // The scope-camera interp, one step per tick toward the latch's target,
-    // then THE SETTLE PROMOTER on the landing step [orig: Player_UpdatePerFrame
-    // @0x4de4c9 Player_StepFpViewBiasInterp -> @0x4de4f7 g_weaponScopeActive =
-    // (g_scopeEngaged != 0) once the interp reports done]. This scalar
-    // clock's earlier promotion is retained explicitly under D-WPN-39.
-    if (scope_interp_step(v)) v.scope_settled = v.scope_engaged;
-    if (v.weapon_pose_bound)
-        player_view_bias_interp_step(v.weapon_pose_interp, v.weapon_hip_pose);
-    else
-        v.weapon_pose_interp.active = false; // null slot/Def @0x4DDD2B..0x4DDDBC
+    // The scope-camera interp steps only while active, then THE SETTLE
+    // PROMOTER fires on the call that drops the latch [orig: Player_UpdatePerFrame
+    // -- `if (!activeFlag) goto done` @0x4de4c7; Player_StepFpViewBiasInterp
+    // @0x4de4c9; `if (!activeFlag)` @0x4de4d9 -> g_weaponScopeActive =
+    // (g_scopeEngaged != 0) @0x4de4f7]. The stepper itself deactivates on the
+    // call after the last moving lane snapped, or at once for an unbound slot
+    // [orig: Player_StepFpViewBiasInterp null slot/Def @0x4DDD2B..0x4DDDBC].
+    if (v.weapon_pose_interp.active) {
+        if (v.weapon_pose_bound)
+            player_view_bias_interp_step(v.weapon_pose_interp, v.weapon_hip_pose);
+        else
+            v.weapon_pose_interp.active = false;
+        if (!v.weapon_pose_interp.active) v.scope_settled = v.scope_engaged;
+    }
 
     if (v.third_person) {
         if (!v.tp_anchor_valid) {
@@ -300,14 +269,31 @@ void player_view_tick(PlayerViewState &v, const float eye[3]) {
 }
 
 float player_view_scope_fraction(const PlayerViewState &v) {
-    if (v.ease_steps <= 0) return v.scope_engaged ? 1.0f : 0.0f;
-    return static_cast<float>(v.scope_step) / static_cast<float>(v.ease_steps);
+    // Derived readout (player_view.h): no retail counterpart.
+    const PlayerViewBiasInterp &interp = v.weapon_pose_interp;
+    if (!interp.active) return v.scope_hipfire ? 0.0f : 1.0f;
+    const auto clamp01 = [](double f) { return static_cast<float>(f < 0.0 ? 0.0 : f > 1.0 ? 1.0 : f); };
+    for (int i = 0; i < 3; ++i) {
+        const double span = static_cast<double>(v.weapon_ads_pose.position_q16[i]) -
+                            v.weapon_hip_pose.position_q16[i];
+        if (span == 0.0) continue;
+        return clamp01((static_cast<double>(interp.current.position_q16[i]) -
+                        v.weapon_hip_pose.position_q16[i]) / span);
+    }
+    for (int i = 0; i < 3; ++i) {
+        const int32_t span = io::bam_sub(static_cast<int32_t>(v.weapon_ads_pose.rotation_bam[i]),
+                                         static_cast<int32_t>(v.weapon_hip_pose.rotation_bam[i]));
+        if (span == 0) continue;
+        const int32_t progress = io::bam_sub(static_cast<int32_t>(interp.current.rotation_bam[i]),
+                                             static_cast<int32_t>(v.weapon_hip_pose.rotation_bam[i]));
+        return clamp01(static_cast<double>(progress) / static_cast<double>(span));
+    }
+    return v.scope_hipfire ? 1.0f : 0.0f; // a zero-span ease sits at its source
 }
 
 bool player_view_scope_ease_active(const PlayerViewState &v) {
-    // Mid-ease = the pose has not reached the latch's target.
     // [orig: g_fpCameraInterp.activeFlag, tested @ 0x4df177]
-    return v.scope_step != scope_target_step(v);
+    return v.weapon_pose_interp.active;
 }
 
 bool player_view_scope_request_pending(const PlayerViewState &v, bool engaged) {
@@ -329,14 +315,14 @@ bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon
         //  (+0x124); g_scopeHipfire = 0 @0x4df373]
         v.scope_settled = false;
         v.scope_engaged = true;
-        scope_interp_setup(v, full, 0.0f, false);
+        scope_interp_setup(v, full, v.weapon_hip_pose, v.weapon_ads_pose);
         v.scope_hipfire = false;
     } else {
         // [orig: Setup 1 @0x4df1c3 (hipfire return) / 7 @0x4df1e8 / 15 @0x4df201
         //  from tpos to the hip copy; g_scopeEngaged = 0 @0x4df206;
         //  g_weaponScopeActive = 0 @0x4df20c; g_scopeHipfire = 1 @0x4df212]
         const int32_t steps = v.scope_hipfire ? kScopeEaseStepsHipfire : full;
-        scope_interp_setup(v, steps, 1.0f, true);
+        scope_interp_setup(v, steps, v.weapon_ads_pose, v.weapon_hip_pose);
         v.scope_engaged = false;
         v.scope_settled = false;
         v.scope_hipfire = true;
@@ -363,7 +349,7 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
         // [orig: activeFlag && !g_scopeHipfire @0x4df548 -> Setup(15, pos,
         //  hip copy) @0x4df567; g_scopeHipfire = 1 @0x4df56c].
         if (player_view_scope_ease_active(v) && !v.scope_hipfire) {
-            scope_interp_setup(v, kScopeEaseSteps, 0.0f, true);
+            scope_interp_setup(v, kScopeEaseSteps, v.weapon_hip_pose, v.weapon_hip_pose);
             v.scope_hipfire = true;
         }
         // The pinned defs skip to LABEL_33, whose own term refuses them
@@ -374,7 +360,7 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
         //  -> Setup(15, tpos, hip copy) @0x4df5d1; g_scopeHipfire = 1 @0x4df5d6].
         if (player_view_scope_settled(v) && !player_view_scope_ease_active(v) &&
             !v.scope_hipfire) {
-            scope_interp_setup(v, kScopeEaseSteps, 1.0f, true);
+            scope_interp_setup(v, kScopeEaseSteps, v.weapon_ads_pose, v.weapon_hip_pose);
             v.scope_hipfire = true;
         }
         return false;
@@ -388,7 +374,7 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
         (def_flags & kPinnedFlags) == 0) {
         v.scope_settled = false;
         v.scope_engaged = true;
-        scope_interp_setup(v, kScopeEaseSteps, 0.0f, false);
+        scope_interp_setup(v, kScopeEaseSteps, v.weapon_hip_pose, v.weapon_ads_pose);
         v.scope_hipfire = false;
     }
     return false;
@@ -512,24 +498,25 @@ float viewmodel_focal_ratio(float world_fov_h_deg, float renderfov_h_deg) {
     return std::tan(world_fov_h_deg * kHalfDegToRad) / fp;
 }
 
-void player_view_bias_units(const PlayerViewState &v, const float pos[3],
-                            const float tpos[3], float out[3]) {
-    const float f = player_view_scope_fraction(v);
-    for (int i = 0; i < 3; ++i) out[i] = pos[i] + (tpos[i] - pos[i]) * f;
+void player_view_bias_units(const PlayerViewState &v, const float pos[3], float out[3]) {
+    // The published Q16 bias (interp_current - hip copy, truncated) is in the
+    // def's *256 scale; back in file units that is bias / 256.
+    for (int i = 0; i < 3; ++i)
+        out[i] = pos[i] + static_cast<float>(v.weapon_pose_interp.position_bias_q16[i]) /
+                                  kWeaponDefPosScale;
 }
 
 void player_view_bias_view_units(const PlayerViewState &v, bool suppress_bias,
-                                 const float pos[3], const float tpos[3],
-                                 float out[3]) {
+                                 const float pos[3], float out[3]) {
     if (suppress_bias) {
-        // The NoCardSwitch reload rule drops the ADS half for the frame
+        // The NoCardSwitch reload rule drops the published bias for the frame
         // (instant, not eased) — the presented viewmodel returns to the hip
         // offset, the ported reading of retail's skipped camera-bias add
         // [orig: @ 0x4dd439/@ 0x4dd4cc].
         for (int i = 0; i < 3; ++i) out[i] = pos[i] / kWeaponDefPosScale;
         return;
     }
-    player_view_bias_units(v, pos, tpos, out);
+    player_view_bias_units(v, pos, out);
     for (int i = 0; i < 3; ++i) out[i] /= kWeaponDefPosScale;
 }
 

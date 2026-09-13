@@ -1,6 +1,7 @@
 // TerrainFrameCompiler (ADR 0033 R2) — the engine-owned terrain frame: scene
 // snapshot invariants, the sector-window walk, front-to-back order, the shared
-// emission budget, the LOD-family fallback, the foliage detail-cell handoff,
+// emission budget, the LOD-family fallback, the foliage detail-cell handoff
+// (and its node-distance gate),
 // and the engine-side MVP/frustum path.
 #include <runtime/terrain/terrain_frame.h>
 #include <runtime/renderer/foliage_frame.h>
@@ -270,6 +271,84 @@ int test_full_terrain_budget_preserves_foliage_frustum_and_distance_gates() {
 	return 0;
 }
 
+int test_foliage_handoff_requires_the_traversal_node_distance_gate() {
+	// Retail hands a node to the collector only when its raw traversal
+	// distance (X/Z clamped to the node box, Y to the node center) less the
+	// fixed 16.0 is within 42: nodes beyond 58 units never reach the
+	// collector, however near their own 16u cells are. Flat sectors zero the
+	// node center Y, so their node distance is the camera height itself.
+	// [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, 16.0 @ 0x608D46,
+	// flat center @ 0x608A50, handoff gate @ 0x60906B..0x609078]
+	const auto view_at = [](float cam_y, bool skip_empty) {
+		opennova::TerrainViewInput view;
+		view.skip_empty_sectors = skip_empty;
+		view.cam_x = view.cam_z = 32.0f;
+		view.cam_y = cam_y;
+		identity(view.view);
+		identity(view.proj);
+		view.config.no_frustum = true;
+		view.config.force_leaves = true;
+		return view;
+	};
+	opennova::TerrainFrameCompiler compiler;
+
+	// Authored: the camera stands inside a 64u leaf whose height range is
+	// [0,127] (one 127-unit sample among zeros), so the node distance is
+	// |63.5 - cam_y| while most of its 16u cells sit at height 0.
+	{
+		opennova::CptFile cpt;
+		cpt.depth_buffer.assign(1024 * 1024, 0);
+		// Mip max = (0x7F00 + 127) >> 7 = 254 -> 127.0; min stays 0.
+		cpt.depth_buffer[40 * 1024 + 40] = 0x7F00;
+		auto tile = make_tile(0, 0);
+		give_lod0_list(tile);
+		cpt.tiles.push_back(std::move(tile));
+		opennova::TrnConfig routing;
+		routing.origin_x = routing.origin_y = -2;
+		routing.sector_grid[2][2] = 1;
+		const auto scene = opennova::build_terrain_scene_snapshot(cpt, routing);
+		if (!expect(scene.valid(), "the mixed-height node fixture builds")) return 1;
+		const auto &far_center = compiler.compile(scene, view_at(0.0f, true));
+		if (!expect(far_center.patches.size() == 1 && !far_center.patches[0].zero_height &&
+				far_center.detail_cells.empty(),
+				"a node 63.5 units from the camera is drawn but never handed to the "
+				"collector, despite its height-0 cells directly under the camera")) return 1;
+		if (!expect(!compiler.compile(scene, view_at(5.5f, true)).detail_cells.empty(),
+				"node distance 58.0 (58 - 16 <= 42) still hands off")) return 1;
+		if (!expect(compiler.compile(scene, view_at(5.0f, true)).detail_cells.empty(),
+				"node distance 58.5 does not hand off")) return 1;
+		if (!expect(!compiler.compile(scene, view_at(30.0f, true)).detail_cells.empty(),
+				"a node inside 58 units hands off and its near cells collect")) return 1;
+	}
+
+	// Flat: every sector is empty. Quadrant 1's raw heights are 64 (the
+	// collector's cell centers) while the flat traversal center is 0.
+	{
+		opennova::CptFile cpt;
+		cpt.depth_buffer.assign(1024 * 1024, 0x4000); // 64.0 world units
+		auto tile = make_tile(0, 0);
+		give_lod0_list(tile);
+		cpt.tiles.push_back(std::move(tile));
+		opennova::TrnConfig all_empty;
+		all_empty.origin_x = all_empty.origin_y = -2;
+		const auto scene = opennova::build_terrain_scene_snapshot(cpt, all_empty);
+		if (!expect(scene.valid(), "the all-empty fixture builds")) return 1;
+		const auto &high = compiler.compile(scene, view_at(64.0f, false));
+		if (!expect(high.patches.size() == 121 && high.detail_cells.empty(),
+				"a flat sector under a camera at 64 (node distance 64 > 58) draws but "
+				"never hands off, though its raw quadrant-1 cells sit at the camera height")) return 1;
+		for (const auto &draw : high.patches)
+			if (!expect(draw.zero_height, "an all-empty grid draws only the flat fallback")) return 1;
+		const auto &low = compiler.compile(scene, view_at(50.0f, false));
+		if (!expect(!low.detail_cells.empty(),
+				"a flat sector under a camera at 50 hands off and its cells collect")) return 1;
+		for (const auto &cell : low.detail_cells)
+			if (!expect((cell.key & 0x80000000u) != 0u,
+					"flat handoffs keep their flagged keys")) return 1;
+	}
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -279,6 +358,7 @@ int main() {
 	if (test_foliage_handoff_is_independent_of_terrain_budget() != 0) return 1;
 	if (test_flat_terrain_keys_reach_empty_foliage_cache_entries() != 0) return 1;
 	if (test_full_terrain_budget_preserves_foliage_frustum_and_distance_gates() != 0) return 1;
+	if (test_foliage_handoff_requires_the_traversal_node_distance_gate() != 0) return 1;
 
 	// --- Scene: three quadrant-0 leaf tiles with distinct LOD-0 payloads ----
 	opennova::CptFile cpt = make_cpt_base();

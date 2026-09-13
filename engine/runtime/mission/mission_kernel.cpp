@@ -741,8 +741,10 @@ bool MissionKernel::complete_mission_start() {
 	// then WAC initialization clears V0..V255 before its first execution.
 	// This reset also runs without script files; declared V256+ and globals
 	// retain their values. Keep it behind the once-per-load boundary guard.
-	// [orig: Game_StartMission PreMission @0x525B86 -> WacScript_InitAndLoad
-	// @0x525CB3; numbered reset @0x4F95EE, initial VM @0x4F976B]
+	// [orig: Game_StartMission @0x525B86 (the EventTrigger_UpdateAllWithFlag2
+	// call, authority-gated @0x525B78) -> Game_StartMission @0x525CB3 (the
+	// WacScript_InitAndLoad call); WacScript_InitAndLoad @0x4F95EE (V0..V255
+	// memset), @0x4F976B (initial execute), @0x4F9770 (++wac_var_ticks)]
 	world.script.vars.clear_numbered_mission_vars();
 	// The environment has been seeded before this boundary. Initial WAC can
 	// change its targets and entity poses before the 255-tick settle and the
@@ -864,7 +866,7 @@ bool MissionKernel::restore_baseline() {
 	// switch resets the FOV target to 80 [orig: Player_InitPlayer @0x525BBC ->
 	// Player_SwitchToWeaponByHandle @0x4E19A1 -> Player_ResetCameraAndMovementState
 	// @0x4DE202] BEFORE Environment_SnapStateToTargets @0x525CAE re-seeds it from
-	// the .env default (@0x57D2BB) and WacScript_InitAndLoad @0x525CB3 re-applies
+	// the .env default (@0x57D2BB) and the WacScript_InitAndLoad call @0x525CB3 re-applies
 	// the script's fov (WacCmd_Fov @0x4EDEA7), so the post-restart target is the
 	// authored value. The sealed baseline already holds that post-init target:
 	// restoring it after the reset stands in for the re-run (the port restores

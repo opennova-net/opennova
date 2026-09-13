@@ -231,3 +231,21 @@ func test_runtime_uses_shared_tile_overlay_composition() -> void:
 	assert_eq(material.get_shader_parameter("u_tile_overlay_tint"),
 		environment.get_tile_overlay_tint(),
 		"The environment binding must apply the retail tile tint in runtime.")
+
+
+func test_flat_fallback_rides_a_layer_the_mirror_excludes_and_the_beauty_camera_admits() -> void:
+	# The witnessed water-mirror prerender skips empty sectors whenever the
+	# mission has water, while the live beauty view draws them
+	# (docs/terrain/terrain-re.md, "Empty-sector flat fallback"). The flat
+	# draws therefore ride their own visual layer alone, like the foliage
+	# blanket: excluded by the mirror mask, admitted by the beauty camera.
+	var flat: int = Water.VISUAL_LAYER_TERRAIN_FLAT_FALLBACK
+	assert_ne(flat, 0, "the flat fallback owns a visual layer bit")
+	assert_eq(flat & (flat - 1), 0, "exactly one bit")
+	assert_eq(flat & (Water.VISUAL_LAYER_WORLD | Water.VISUAL_LAYER_TERRAIN_FOLIAGE
+			| Water.VISUAL_LAYER_WORLD_NO_MIRROR), 0,
+			"the flat bit aliases neither the world, foliage nor no-mirror layers")
+	assert_eq(Water.REFLECTION_CULL_MASK & flat, 0,
+			"the water mirror excludes the flat fallback above and below water")
+	assert_ne(FrameFx.kBeautyCameraMask & flat, 0,
+			"the beauty camera admits the flat fallback")

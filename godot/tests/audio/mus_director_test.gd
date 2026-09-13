@@ -165,8 +165,11 @@ func test_wac_binds_live_music_globals_and_keeps_its_compile_time_context() -> v
 	director.set_var(7, 22)
 	for _tick in range(62):
 		sim.step()
-	assert_eq(sim.get_mission_variable(1), 55, "the repeated pass still reads the retired context")
-	assert_eq(director.get_var(7), 22, "compiled operands still address the retired context")
+	# Reimpl-defined: retail frees the context block on stop and reallocates on
+	# open, leaving a compiled WAC operand dangling (mus-sbf-re.md, WAC access
+	# to music globals); the reimpl keeps the retired block alive instead.
+	assert_eq(sim.get_mission_variable(1), 55, "reimpl-defined: the repeated pass still reads the retired context")
+	assert_eq(director.get_var(7), 22, "reimpl-defined: compiled operands still address the retired context")
 	assert_true(sim.compile_and_set_wac(PackedStringArray(["set(v1,m7) set(m7,88)"])))
 	for _tick in range(62):
 		sim.step()

@@ -25,7 +25,8 @@ constexpr float kObjectLodReferenceWidth = 640.0f;
 ObjectProjectionSphere object_projection_sphere_from_bounds_q16(
     const std::array<int32_t, 3> &minimum,
     const std::array<int32_t, 3> &maximum,
-    int32_t runtime_scale_q16, int32_t definition_scale_q16) {
+    int32_t runtime_scale_q16, int32_t definition_scale_q16,
+    bool zero_center) {
   ObjectProjectionSphere sphere;
   sphere.valid = true;
   double squared_radius = 0.0;
@@ -34,7 +35,10 @@ ObjectProjectionSphere object_projection_sphere_from_bounds_q16(
     const int32_t high = std::max(maximum[axis], int32_t{-0x40000000});
     const int32_t difference = static_cast<int32_t>(
         static_cast<uint32_t>(high) - static_cast<uint32_t>(low));
-    sphere.center_q16[axis] = static_cast<int32_t>(
+    // The eweap-powerup leg stores a zero center before the halves are
+    // measured, so each half is the clamped maximum itself.
+    // [orig: Entity_InitFromModel @ 0x40df06..0x40df16, halves @ 0x40df66..0x40df76]
+    sphere.center_q16[axis] = zero_center ? 0 : static_cast<int32_t>(
         static_cast<uint32_t>(low) + static_cast<uint32_t>(difference >> 1));
     // Odd fixed-point widths use the larger, positive-side half. Computing
     // length from difference >> 1 would lose one word on each odd axis.

@@ -243,7 +243,7 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 	}
 	shape.bound_radius_q16 = entity_bound_radius_q16(bound);
 
-	if (!(def->type == 6 && (def->attrib & 0x20u) != 0)) {
+	if (!item_def_zero_bbox_center(def->type, def->attrib)) {
 		const std::array<int32_t, 3> &center = state.center_by_graphic[key];
 		int32_t scaled[3] = {center[0], center[1], center[2]};
 		if (shape.uniform_scale_q16 != 0) {
@@ -818,7 +818,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		// effective scale as the entity matrix, with retail's +0x8000 rule.
 		// [orig: Entity_InitFromModel @0x40defc..0x40df4a]
 		const std::array<int32_t, 3> &bc = state.center_by_graphic[key];
-		if (!(def->type == 6 && (def->attrib & 0x20u) != 0)) {
+		if (!item_def_zero_bbox_center(def->type, def->attrib)) {
 			int32_t scaled[3] = {bc[0], bc[1], bc[2]};
 			if (e->uniform_scale_q16 != 0) {
 				for (int axis = 0; axis < 3; ++axis) {

@@ -160,7 +160,13 @@ OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &l
 // play, no per-frame update]; `has_listener` false plans distance-flat (menu /
 // tests). Every view-admitted layer picks its member (advancing the selector) even when the
 // shell later fails to resolve its wave, so the pick stream matches a full
-// fire. `occl` may be null (an unoccluded fire). `sound_id` is the own-channel
+// fire. Residual (D-SND-19, documented, not ported): retail performs the two
+// ROL3 pitch draws (set jitter, member jitter) only when the picked member's
+// wave handle is non-null [orig: SoundBank_PlayTriggerEntries @0x75CE1A (the
+// `if (*sample_entry)` guard); the draws @0x75CE81 / @0x75CEBA]; the planner
+// always draws them, because the wave is resolved later by the shell. Shipped
+// banks resolve every wave, so the RNG stream matches on real data.
+// `occl` may be null (an unoccluded fire). `sound_id` is the own-channel
 // reuse key (oneshot_sound_id) the plan carries to the allocator.
 OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 		const float world_pos[3], const float listener_pos[3], bool has_listener,

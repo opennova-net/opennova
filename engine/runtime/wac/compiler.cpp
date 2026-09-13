@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -266,11 +267,17 @@ private:
                                       : encode_operand(OperandKind::Builtin, static_cast<uint32_t>(Builtin::Scratch));
         }
         // Only the first character after V must be a digit. atol consumes its
-        // decimal prefix; declared names above still take precedence.
+        // decimal prefix; declared names above still take precedence. Retail's
+        // 32-bit CRT atol saturates an overlong suffix to LONG_MAX/LONG_MIN, so
+        // the >= 256 clamp still lands on V255: parse wide and clamp to the
+        // int32 range first so an LP64 host cannot wrap it to a small index.
         // [orig: @0x4F2AA9..0x4F2AB8; signed clamp @0x4F2AC0/@0x4F2AF4]
         if (bare && t.size() > 1 && (t[0] == 'V' || t[0] == 'v') &&
                 std::isdigit(static_cast<unsigned char>(t[1]))) {
-            int32_t idx = static_cast<int32_t>(std::atol(t.c_str() + 1));
+            long long wide = std::strtoll(t.c_str() + 1, nullptr, 10);
+            if (wide > INT32_MAX) wide = INT32_MAX;
+            if (wide < INT32_MIN) wide = INT32_MIN;
+            int32_t idx = static_cast<int32_t>(wide);
             if (idx >= 256) { warn(line, "V# too big"); idx = 255; }
             return encode_operand(OperandKind::MissionVar, idx);
         }

@@ -1869,8 +1869,8 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id) {
 	return s;
 }
 
-// A 1-record S2C 0x0C organic-spawn body the joiner matches the owner ID (the owner's PeerSpawned reaction,
-// mirroring Simulation).
+// A 1-record S2C 0x0C organic-spawn body the joiner self-identifies from by its owner
+// connection ID (the owner's PeerSpawned reaction, mirroring Simulation).
 std::vector<uint8_t> make_organic_spawn(uint16_t slot_id, const std::string &name, int32_t x,
                                         int32_t y, int32_t z, int32_t orient, uint8_t team,
                                         uint16_t net_id, uint8_t anim_slot, uint32_t owner) {
@@ -5726,8 +5726,59 @@ bool run_radio_zone_context_uses_the_nearest_entry_coverage() {
             "inside the nearest entry the A&S context applies");
 }
 
+// D-NET-64 zero-write leg: retail's read side stores every decoded coordinate
+// into entity+700/704/708 unconditionally, zero included, so an origin steer
+// point (a group-5 decoy at 0/0/0, or a group-3 lock whose steer point is the
+// origin) is a real steer point that seeds and re-aims the flight. The port
+// used to skip all-zero writes. Drives ClientReplicaPipeline::apply(0x44, ...)
+// through the public 0x44 fold with the 5-B §5.36 sub-header + the real §5.15 encoder.
+// [orig: Entity_SerializeGuidedMissileState @0x447C50 read-full groups 3/4/5]
+bool run_guided_zero_steer_point_is_stored() {
+	ns::ClientReplicaPipeline view([](uint16_t) { return EntityClass::Player; });
+	auto make_routed = [](uint16_t shooter, int16_t net_id, GuidedFieldGroup group,
+			const GuidedRecord &rec) {
+		const auto id = static_cast<uint16_t>(net_id);
+		std::vector<uint8_t> body{static_cast<uint8_t>(shooter), static_cast<uint8_t>(shooter >> 8),
+				static_cast<uint8_t>(id), static_cast<uint8_t>(id >> 8),
+				static_cast<uint8_t>(group)};
+		const std::vector<uint8_t> payload =
+				encode_guided_field_group(GuidedMode::WriteFull, group, rec);
+		body.insert(body.end(), payload.begin(), payload.end());
+		return body;
+	};
+	GuidedRecord origin;
+	origin.target_slot = 0xFFFF;
+	origin.pos_x = origin.pos_y = origin.pos_z = 0;
+	view.apply(0x44, make_routed(0x0002, 5, GuidedFieldGroup::Pos, origin));
+	const ns::ClientGuidedMissile *m = nullptr;
+	for (const ns::ClientGuidedMissile &g : view.state().guided)
+		if (g.active && g.net_id == 5) m = &g;
+	if (!expect(m != nullptr, "guided: the group-5 record created the missile row")) return false;
+	if (!expect(m->has_steer && m->steer[0] == 0 && m->steer[1] == 0 && m->steer[2] == 0 &&
+					m->flight_seeded && m->lock_target == 0xFFFF,
+			"guided: an all-zero group-5 steer point is stored and seeds the flight")) return false;
+	// A non-zero lock moves the steer point; a following zero lock moves it
+	// back to the origin instead of leaving the stale point in place.
+	GuidedRecord lock;
+	lock.target_slot = 0x1003;
+	lock.pos_x = 0x10000;
+	lock.pos_y = 0x20000;
+	lock.pos_z = 0x30000;
+	view.apply(0x44, make_routed(0x0002, 5, GuidedFieldGroup::TargetPos, lock));
+	if (!expect(m->steer[0] == 0x10000 && m->steer[1] == 0x20000 && m->steer[2] == 0x30000 &&
+					m->lock_target == 0x1003,
+			"guided: a non-zero group-3 lock stores its steer point and target")) return false;
+	GuidedRecord zero_lock = lock;
+	zero_lock.pos_x = zero_lock.pos_y = zero_lock.pos_z = 0;
+	view.apply(0x44, make_routed(0x0002, 5, GuidedFieldGroup::TargetPos, zero_lock));
+	return expect(m->steer[0] == 0 && m->steer[1] == 0 && m->steer[2] == 0 &&
+					m->lock_target == 0x1003 && m->has_steer,
+			"guided: a zero group-3 steer point overwrites the previous point (retail stores zeros)");
+}
+
 int main() {
-	const bool ok = run_radio_events_preserve_order_chat_and_mute_state(false) &&
+	const bool ok = run_guided_zero_steer_point_is_stored() &&
+	                run_radio_events_preserve_order_chat_and_mute_state(false) &&
                     run_radio_events_preserve_order_chat_and_mute_state(true) &&
                     run_contextual_radio_keys_match_retail() &&
                     run_charattr_challenge_table_matches_retail() &&

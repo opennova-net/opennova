@@ -108,7 +108,10 @@ void test_inset_scope_refused_under_nvg() {
     v.nvg_active = false;
     CHECK(local_player_scope_toggle(lw.w, w, v, slot));
     CHECK(v.scope_engaged);
-    CHECK(v.ease_steps == kScopeEaseStepsInset); // the Inset ease latch
+    // The Inset step count: this poseless fixture's idle zero-delta Setup arms
+    // the counter with it [orig: Setup 7 @0x4df355; the zero branch
+    // @0x4DE0CC..0x4DE11F].
+    CHECK(v.weapon_pose_interp.remaining == static_cast<uint32_t>(kScopeEaseStepsInset));
 }
 
 void test_mid_ease_toggle_refused_then_forcescoped_pins_the_sight() {
@@ -325,7 +328,7 @@ void test_scope_fov_target_and_render_queries_share_weather_state() {
     CHECK(frame.scope_card_active && frame.fov_h_deg == 40.0f);
     CHECK(channels.camera_fov_target_fp == (55 << 16));
     local_player_view_reset(&lw.w, weapon, view, tracker);
-    CHECK(!view.scope_engaged && view.scope_step == 0);
+    CHECK(!view.scope_engaged && !view.weapon_pose_interp.active);
     CHECK(channels.camera_fov_fp == (60 << 16));
     CHECK(channels.camera_fov_target_fp == (80 << 16));
 }
@@ -610,20 +613,26 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     PlayerViewState view;
     LocalPlayerViewTracker tracker;
     LocalPlayerViewFrame frame;
+    // Raw file units; the sight sits 240 / -240 / 480 from the hip so the *256
+    // Q16 spans (61440 / -61440 / 122880) divide by 15 into exact 4096 steps.
     const float hip[3] = {256.0f, 512.0f, 768.0f};
-    const float sight[3] = {512.0f, -256.0f, 1024.0f};
+    const float sight[3] = {496.0f, 272.0f, 1248.0f};
+    view.weapon_pose_bound = true;
+    for (int i = 0; i < 3; ++i) {
+        view.weapon_hip_pose.position_q16[i] = hip[i] * 256.0f;
+        view.weapon_ads_pose.position_q16[i] = sight[i] * 256.0f;
+    }
     const float eye[3] = {};
     const auto check_bias = [&](float x, float y, float z) {
         float bias[3];
-        local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, sight,
-                                    1920, 1080, bias);
+        local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, 1920, 1080, bias);
         CHECK(std::abs(bias[0] - x) < 0.000001f);
         CHECK(std::abs(bias[1] - y) < 0.000001f);
         CHECK(std::abs(bias[2] - z) < 0.000001f);
     };
     CHECK(local_player_scope_toggle(lw.w, weapon, view, weapon.slot));
     for (int i = 0; i < 3; ++i) player_view_tick(view, eye);
-    check_bias(1.2f, 1.4f, 3.2f); // three of the fifteen raise steps
+    check_bias(1.1875f, 1.8125f, 3.375f); // three of the fifteen raise steps: 3 * 4096 Q16
 
     // The jump publishes 0x2000 immediately. Its upward velocity is not the
     // gate: the same flag continues to suppress bias while the body falls.
@@ -632,11 +641,13 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     body.inf.airborne = true;
     body.inf.vel[2] = 0x1600;
     local_player_view_frame(&lw.w, weapon, view, tracker, frame);
-    CHECK(frame.suppress_view_bias && view.scope_engaged && view.scope_step == 3.0f);
+    CHECK(frame.suppress_view_bias && view.scope_engaged);
+    CHECK(view.weapon_pose_interp.position_bias_q16[0] == 3 * 4096);
     check_bias(1.0f, 2.0f, 3.0f);
     body.inf.vel[2] = -0x1600;
     for (int i = 0; i < 5; ++i) player_view_tick(view, eye);
-    CHECK(view.scope_step == 8.0f && view.scope_ease_remaining == 7);
+    CHECK(view.weapon_pose_interp.position_bias_q16[0] == 8 * 4096);
+    CHECK(player_view_scope_ease_active(view));
     check_bias(1.0f, 2.0f, 3.0f);
 
     // Landing exposes the current interpolated pose, not a new fifteen-step
@@ -646,8 +657,10 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     body.inf.airborne = false;
     body.inf.vel[2] = 0;
     local_player_view_frame(&lw.w, weapon, view, tracker, frame);
-    CHECK(!frame.suppress_view_bias && view.scope_step == 8.0f);
-    check_bias(1.0f + 8.0f / 15.0f, 0.4f, 3.0f + 8.0f / 15.0f);
+    CHECK(!frame.suppress_view_bias && view.weapon_pose_interp.position_bias_q16[0] == 8 * 4096);
+    // 8 of 15 steps: 8 * 4096 / 65536 = 0.5 u on the 240-unit x/y lanes and
+    // 8 * 8192 / 65536 = 1.0 u on the 480-unit z lane (each lane eases its own span).
+    check_bias(1.5f, 1.5f, 4.0f);
 
     // Falling during the remaining ease also leaves the promoter running.
     // Cover the second registry flag carrier independently.
@@ -663,7 +676,7 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     body.inf.vel[2] = 0;
     local_player_view_frame(&lw.w, weapon, view, tracker, frame);
     CHECK(frame.scope_card_active && !frame.suppress_view_bias);
-    check_bias(2.0f, -1.0f, 4.0f);
+    check_bias(1.9375f, 1.0625f, 4.875f); // the snapped sight: 496 / 272 / 1248 over 256
 
     // Only the ADS contribution drops: the independently clamped motion lead
     // and 4:3 framing drop still follow the hip offset on an airborne frame.
@@ -672,7 +685,7 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     tracker.tick_delta[1] = -1.0f;
     tracker.tick_delta[2] = 4.0f;
     float bias[3];
-    local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, sight, 800, 600, bias);
+    local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, 800, 600, bias);
     CHECK(bias[0] == 1.0f - 1024.0f / 65536.0f);
     CHECK(bias[1] == 2.0f + 1024.0f / 65536.0f);
     CHECK(bias[2] == 3.0f - (4096.0f + 1280.0f) / 65536.0f);
@@ -710,7 +723,14 @@ void test_airborne_bias_is_separate_from_reload_and_force_scope_admission() {
                 (c.no_card ? weapon_flag::kNoCardSwitch : 0u) |
                 (c.force ? DEF_WEAPON_FLAG_FORCESCOPED : 0u));
         weapon.slot.current = c.reload ? weapon_action::kReload : weapon_action::kIdle;
+        const float hip[3] = {256.0f, 512.0f, 768.0f};
+        const float sight[3] = {512.0f, -256.0f, 1024.0f};
         PlayerViewState view;
+        view.weapon_pose_bound = true;
+        for (int i = 0; i < 3; ++i) {
+            view.weapon_hip_pose.position_q16[i] = hip[i] * 256.0f;
+            view.weapon_ads_pose.position_q16[i] = sight[i] * 256.0f;
+        }
         CHECK(player_view_set_engaged(view, true, false));
         settle_ease(view);
         LocalPlayerViewTracker tracker;
@@ -718,12 +738,11 @@ void test_airborne_bias_is_separate_from_reload_and_force_scope_admission() {
         local_player_view_frame(&lw.w, weapon, view, tracker, frame);
         CHECK(frame.suppress_view_bias == c.suppressed);
         CHECK(local_player_scope_view_visible(lw.w, weapon, view) == c.optical);
-        CHECK(view.scope_engaged && view.scope_settled && view.scope_step == 15.0f);
-        const float hip[3] = {256.0f, 512.0f, 768.0f};
-        const float sight[3] = {512.0f, -256.0f, 1024.0f};
+        CHECK(view.scope_engaged && view.scope_settled && !view.weapon_pose_interp.active);
         float bias[3];
-        local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, sight,
-                                    1920, 1080, bias);
+        local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, 1920, 1080, bias);
+        // The snapped lanes publish exactly (sight - hip) * 256, so the
+        // unsuppressed offset is the sight over 256 to the float.
         for (int i = 0; i < 3; ++i) {
             CHECK(bias[i] == (c.suppressed ? hip[i] : sight[i]) / 256.0f);
         }

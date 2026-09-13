@@ -1003,7 +1003,10 @@ int Simulation::get_joiner_phase() const {
 }
 
 int Simulation::get_joiner_self_handle() const {
-	return joiner_role_ != nullptr ? static_cast<int>(joiner_role_->self_wire_handle()) : 0;
+	// 0 means unbound at this seam (the GDScript consumers poll `> 0`); the role itself
+	// reports EntityHandle::kInvalid while the identity is not bound.
+	return joiner_role_ != nullptr && joiner_role_->has_self_wire_handle()
+			? static_cast<int>(joiner_role_->self_wire_handle()) : 0;
 }
 
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 — the leave sends a burst of

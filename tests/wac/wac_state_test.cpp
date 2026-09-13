@@ -215,7 +215,14 @@ static void test_music_operands_bind_the_actual_context_at_compilation() {
     vm.load(scratch_read); vm.execute(f.world);
     CHECK(f.value(3) == 0); // scratch resets at execution entry
 
-    // Restarting the context does not silently rebind an already-compiled operand.
+    // Restarting the context does not silently rebind an already-compiled operand
+    // (retail stores the raw pointer at compile time). What that stale operand
+    // points at is REIMPL-DEFINED from here on: retail frees the block on stop
+    // and reallocates on open, leaving a dangling pointer [orig:
+    // AudioVM_FreeSoundBuffer @0x672E1D; ScriptInstance_Init @0x672F8B]; the
+    // reimpl keeps the retired block alive as a memory-safety decision
+    // (mus-sbf-re.md, WAC access to music globals). Unreachable in the retail
+    // mission flow.
     const auto retired = active.music_globals;
     mus_vm_unload_script(audio.get());
     CHECK(!mus_vm_globals(audio.get()));
@@ -229,7 +236,7 @@ static void test_music_operands_bind_the_actual_context_at_compilation() {
     vm.load(replacement); vm.execute(f.world);
     CHECK(f.value(4) == 22 && mus_vm_get_var(audio.get(), 7) == 88);
     audio.reset();
-    vm.execute(f.world); // a compiled binding safely retains its retired storage
+    vm.execute(f.world); // reimpl-defined: the retired storage outlives its VM
     CHECK(f.value(4) == 88);
     mus_script_free(&script);
 }

@@ -289,7 +289,7 @@ int main() {
         lp.view.binoculars_requested = lp.view.binoculars_raised = true;
         lp.view.binoculars_view_active = true;
         lp.view.scope_engaged = true;
-        lp.view.scope_step = 15;
+        lp.view.scope_settled = true;
         lp.view.nvg_active = true;
         lp.view.nvg_gain = 7;
         lp.view.shake = {30, 111, 222, 333};
@@ -314,7 +314,8 @@ int main() {
         CHECK(lp.round_reset_revision == revision + 1);
         CHECK(kernel.world.out.effects.count("local_round_reset") == resets + 1);
         CHECK(!lp.view.binoculars_requested && !lp.view.binoculars_raised &&
-                !lp.view.binoculars_view_active && !lp.view.scope_engaged);
+                !lp.view.binoculars_view_active && !lp.view.scope_engaged &&
+                !lp.view.scope_settled);
         CHECK(lp.stance_latch() == 0 && !lp.input.prone && !lp.input.crouch);
         CHECK(lp.input.look_heading == w::bam_heading_from_mission_yaw_deg(lp.player()->yaw));
         CHECK(lp.input.look_pitch == 12345 && lp.input.forward);

@@ -171,32 +171,84 @@ void test_authored_pose_def_promotes_parser_precision_and_wrapping_bam() {
     def_free_weapons(&parsed);
 }
 
-void test_scope_ease_is_fifteen_ticks_exactly() {
+// A bound optical slot with distinct authored poses: position lane 0 spans
+// 315 Q16 (15 * 21 = 7 * 45) and rotation lane 0 spans 0x06900000 (15 *
+// 0x700000 = 7 * 0xF00000), so every production ease length divides exactly
+// and each lane snaps on its last step. The raise's rotation lane snaps on
+// tick 1 (the unsigned-velocity quirk); the position lane paces the ease.
+PlayerViewState bound_view() {
     PlayerViewState v;
+    v.weapon_pose_bound = true;
+    v.weapon_ads_pose = {{315.0f, 0.0f, 0.0f}, {0x06900000u, 0u, 0u}};
+    return v;
+}
+
+// The promoter fires on the tick the interp's active latch drops: the lanes
+// snap on the fifteenth step and the stepper reports done on the SIXTEENTH
+// call [orig: Player_StepFpViewBiasInterp @0x4DDD47..0x4DDDC3 (the all-zero
+// velocity return clears active only on the call after the snaps);
+// Player_UpdatePerFrame promoter @0x4de4d9..0x4de4f7].
+void test_scope_ease_settles_on_the_call_after_the_last_snap() {
+    PlayerViewState v = bound_view();
     const float eye[3] = {0, 0, 0};
     CHECK(player_view_set_engaged(v, true, false));
+    CHECK(v.weapon_pose_interp.velocity.position_q16[0] == -21.0f); // (hip - tpos) / 15
     for (int i = 1; i <= kScopeEaseSteps; ++i) {
-        // The promoted byte holds off until the landing step
-        // [orig: the promoter @0x4de4f7 after the interp reports done].
         CHECK(!player_view_scope_settled(v));
         player_view_tick(v, eye);
-        CHECK(v.scope_step == i);
+        CHECK(v.weapon_pose_interp.current.position_q16[0] == 21.0f * static_cast<float>(i));
+        CHECK(v.weapon_pose_interp.position_bias_q16[0] == 21 * i);
     }
-    CHECK(player_view_scope_fraction(v) == 1.0f);
-    CHECK(player_view_scope_settled(v));
+    CHECK(player_view_scope_ease_active(v)); // the lanes landed; the latch holds
+    CHECK(!player_view_scope_settled(v));
+    player_view_tick(v, eye);
     CHECK(!player_view_scope_ease_active(v));
-    player_view_tick(v, eye); // saturates, never overshoots
-    CHECK(v.scope_step == kScopeEaseSteps);
     CHECK(player_view_scope_settled(v));
+    CHECK(player_view_scope_fraction(v) == 1.0f);
+    player_view_tick(v, eye); // idle: nothing steps, nothing re-promotes
+    CHECK(player_view_scope_settled(v) && !player_view_scope_ease_active(v));
+    CHECK(v.weapon_pose_interp.position_bias_q16[0] == 315);
     CHECK(player_view_set_engaged(v, false, false));
     CHECK(!player_view_scope_settled(v)); // cleared at the toggle @0x4df20c
+    CHECK(v.weapon_pose_interp.velocity.position_q16[0] == 21.0f); // tpos -> hip
     for (int i = kScopeEaseSteps - 1; i >= 0; --i) {
         player_view_tick(v, eye);
-        CHECK(v.scope_step == i);
+        CHECK(v.weapon_pose_interp.current.position_q16[0] == 21.0f * static_cast<float>(i));
     }
-    CHECK(player_view_scope_fraction(v) == 0.0f);
-    CHECK(!player_view_scope_settled(v)); // the promoter mirrors the OFF target
+    CHECK(player_view_scope_ease_active(v));
+    player_view_tick(v, eye);
     CHECK(!player_view_scope_ease_active(v));
+    CHECK(!player_view_scope_settled(v)); // the promoter mirrors the OFF target
+    CHECK(player_view_scope_fraction(v) == 0.0f);
+}
+
+// A bound def whose hip and tpos coincide: the idle zero-delta Setup arms the
+// counter instead of velocities, and the stepper clears active when that
+// counter spends, on the FIFTEENTH call; an unbound slot deactivates on its
+// first step and promotes at once [orig: CNetPlayerInterp_Setup
+// @0x4DE0CC..0x4DE11F; Player_StepFpViewBiasInterp counter @0x4DDD3C..0x4DDD45,
+// all-zero return @0x4DDD47..0x4DDDC3, null slot/Def @0x4DDD2B..0x4DDDBC].
+void test_zero_span_ease_promotes_when_its_counter_spends() {
+    PlayerViewState v;
+    v.weapon_pose_bound = true;
+    const float eye[3] = {0, 0, 0};
+    CHECK(player_view_set_engaged(v, true, false));
+    CHECK(v.weapon_pose_interp.remaining == static_cast<uint32_t>(kScopeEaseSteps));
+    CHECK(player_view_scope_ease_active(v));
+    for (int i = 1; i < kScopeEaseSteps; ++i) {
+        player_view_tick(v, eye);
+        CHECK(player_view_scope_ease_active(v) && !player_view_scope_settled(v));
+        CHECK(player_view_scope_fraction(v) == 0.0f); // a zero-span raise reports its source
+    }
+    player_view_tick(v, eye);
+    CHECK(!player_view_scope_ease_active(v) && player_view_scope_settled(v));
+    CHECK(player_view_scope_fraction(v) == 1.0f);
+
+    PlayerViewState unbound;
+    CHECK(player_view_set_engaged(unbound, true, false));
+    CHECK(player_view_scope_ease_active(unbound));
+    player_view_tick(unbound, eye);
+    CHECK(!player_view_scope_ease_active(unbound) && player_view_scope_settled(unbound));
 }
 
 // The promoted byte is independent of the target. A category-key camera
@@ -245,12 +297,12 @@ void test_scope_reset_preserves_original_switch_bookkeeping() {
 void test_equal_ticks_equal_state_regardless_of_frame_grouping() {
     const float eye[3] = {100.0f, -40.0f, 12.0f};
 
-    PlayerViewState per_frame;       // "60 fps": one tick per render frame
+    PlayerViewState per_frame = bound_view(); // "60 fps": one tick per render frame
     CHECK(player_view_set_engaged(per_frame, true, false));
     per_frame.debug_third_person_on_foot = true;  // on-foot 3P = the debug override
     for (int i = 0; i < 24; ++i) player_view_tick(per_frame, eye);
 
-    PlayerViewState bursty;          // "uneven fps": frames of 4/0/3/0/1... ticks
+    PlayerViewState bursty = bound_view();    // "uneven fps": frames of 4/0/3/0/1... ticks
     CHECK(player_view_set_engaged(bursty, true, false));
     bursty.debug_third_person_on_foot = true;
     const int frames[] = {4, 0, 3, 0, 1, 7, 0, 0, 2, 5, 0, 2};
@@ -260,7 +312,14 @@ void test_equal_ticks_equal_state_regardless_of_frame_grouping() {
         total += n;
     }
     CHECK(total == 24);
-    CHECK(per_frame.scope_step == bursty.scope_step);
+    CHECK(per_frame.scope_settled && bursty.scope_settled);
+    CHECK(per_frame.weapon_pose_interp.active == bursty.weapon_pose_interp.active);
+    for (int i = 0; i < 3; ++i) {
+        CHECK(per_frame.weapon_pose_interp.current.position_q16[i] ==
+              bursty.weapon_pose_interp.current.position_q16[i]);
+        CHECK(per_frame.weapon_pose_interp.position_bias_q16[i] ==
+              bursty.weapon_pose_interp.position_bias_q16[i]);
+    }
     CHECK(per_frame.tp_anchor_valid && bursty.tp_anchor_valid);
     for (int i = 0; i < 3; ++i) CHECK(per_frame.tp_anchor[i] == bursty.tp_anchor[i]);
 }
@@ -563,13 +622,28 @@ void test_view_bias_blend() {
     const float eye[3] = {0, 0, 0};
     const float pos[3] = {-19.46f, 21.19f, -161.31f};   // JOX WPN_AK47AUTO pos
     const float tpos[3] = {-62.33f, 29.19f, -152.56f};  // ... and tpos
+    // The bound poses are the def's *256 Q16 copies of those file values
+    // (weapon_install_data_from_def).
+    v.weapon_pose_bound = true;
+    for (int i = 0; i < 3; ++i) {
+        v.weapon_hip_pose.position_q16[i] = pos[i] * 256.0f;
+        v.weapon_ads_pose.position_q16[i] = tpos[i] * 256.0f;
+    }
     float out[3];
-    player_view_bias_units(v, pos, tpos, out);
+    player_view_bias_units(v, pos, out);
     CHECK(out[0] == pos[0] && out[1] == pos[1] && out[2] == pos[2]);
     CHECK(player_view_set_engaged(v, true, false));
     for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
-    player_view_bias_units(v, pos, tpos, out);
-    CHECK(out[0] == tpos[0] && out[1] == tpos[1] && out[2] == tpos[2]);
+    // Every lane has snapped to tpos by its fifteenth step (a lane whose
+    // fourteenth remainder rounds under its velocity snaps one call early);
+    // the published bias is the truncating ftol of (tpos - pos) * 256, so the
+    // position lands within one 1/256 file unit of tpos, never on a float blend.
+    player_view_bias_units(v, pos, out);
+    for (int i = 0; i < 3; ++i) CHECK(std::fabs(out[i] - tpos[i]) < 1.0f / 256.0f);
+    player_view_tick(v, eye);
+    CHECK(!player_view_scope_ease_active(v) && player_view_scope_settled(v));
+    player_view_bias_units(v, pos, out);
+    for (int i = 0; i < 3; ++i) CHECK(std::fabs(out[i] - tpos[i]) < 1.0f / 256.0f);
 }
 
 void test_input_dispatch_gates() {
@@ -616,34 +690,34 @@ void test_toggle_latch_refusal_and_inset() {
     // The witnessed toggle protocol [orig: Player_ToggleWeaponScope — the
     // !activeFlag refusal @ 0x4df177; Setup 15 @ 0x4df36e / 7 Inset @ 0x4df355 /
     // 1 hipfire-return @ 0x4df1c3; g_scopeHipfire writes @ 0x4df212/@ 0x4df373].
-    PlayerViewState v;
+    PlayerViewState v = bound_view();
     const float eye[3] = {0, 0, 0};
     CHECK(v.scope_hipfire); // [orig: g_scopeHipfire init 1]
     CHECK(player_view_set_engaged(v, true, false));
-    CHECK(v.ease_steps == kScopeEaseSteps);
+    CHECK(v.weapon_pose_interp.velocity.position_q16[0] == -21.0f); // 15 steps, hip -> tpos
     CHECK(!v.scope_hipfire);
     player_view_tick(v, eye);
     CHECK(player_view_scope_ease_active(v));
     CHECK(!player_view_set_engaged(v, false, false)); // refused mid-ease
     CHECK(v.scope_engaged);
-    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye); // the 16th call reports done
     CHECK(!player_view_scope_ease_active(v));
     CHECK(player_view_set_engaged(v, false, false)); // full disengage ease (not hipfire)
-    CHECK(v.ease_steps == kScopeEaseSteps);
-    CHECK(v.scope_step == kScopeEaseSteps);
+    CHECK(v.weapon_pose_interp.velocity.position_q16[0] == 21.0f); // 15 steps, tpos -> hip
+    CHECK(v.weapon_pose_interp.current.position_q16[0] == 315.0f);
     CHECK(v.scope_hipfire);
-    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
-    CHECK(player_view_scope_fraction(v) == 0.0f);
+    for (int i = 0; i <= kScopeEaseSteps; ++i) player_view_tick(v, eye);
+    CHECK(player_view_scope_fraction(v) == 0.0f && !player_view_scope_ease_active(v));
 
     // Inset weapons (flags2 0x200 — the REVX PointAim MGs / emplaced guns) latch
     // the 7-step ease both ways.
-    PlayerViewState vi;
+    PlayerViewState vi = bound_view();
     CHECK(player_view_set_engaged(vi, true, true));
-    CHECK(vi.ease_steps == kScopeEaseStepsInset);
-    for (int i = 0; i < kScopeEaseStepsInset; ++i) player_view_tick(vi, eye);
-    CHECK(player_view_scope_fraction(vi) == 1.0f);
+    CHECK(vi.weapon_pose_interp.velocity.position_q16[0] == -45.0f); // 315 / 7
+    for (int i = 0; i <= kScopeEaseStepsInset; ++i) player_view_tick(vi, eye);
+    CHECK(player_view_scope_fraction(vi) == 1.0f && !player_view_scope_ease_active(vi));
     CHECK(player_view_set_engaged(vi, false, true));
-    CHECK(vi.ease_steps == kScopeEaseStepsInset);
+    CHECK(vi.weapon_pose_interp.velocity.position_q16[0] == 45.0f);
 }
 
 void test_unscope_on_move_and_up_refusal() {
@@ -653,7 +727,7 @@ void test_unscope_on_move_and_up_refusal() {
     // (@ 0x4df4c9..0x4df4ec).
     const int32_t kScoped = 1;         // weapon.def flags: Scoped
     const int32_t kSighted = 2;        // Sighted (no auto-unscope leg of its own)
-    PlayerViewState v;
+    PlayerViewState v = bound_view();
     const float eye[3] = {0, 0, 0};
 
     // Movement alone never fires the leg from the hip.
@@ -674,7 +748,7 @@ void test_unscope_on_move_and_up_refusal() {
     CHECK(!player_view_move_input(v, true, kSighted));
     CHECK(player_view_scope_ease_active(v) && !v.scope_hipfire);
     CHECK(!player_view_move_input(v, false, kSighted));
-    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye); // 16 calls in all
     CHECK(!player_view_scope_ease_active(v));
     CHECK(player_view_scope_settled(v));
 
@@ -685,7 +759,7 @@ void test_unscope_on_move_and_up_refusal() {
     // The caller then runs the standard disengage (the full 15-step return —
     // hipfire was cleared at the raise).
     CHECK(player_view_set_engaged(v, false, false));
-    CHECK(v.ease_steps == kScopeEaseSteps);
+    CHECK(v.weapon_pose_interp.velocity.position_q16[0] == 21.0f); // 315 / 15
     CHECK(v.scope_hipfire);
     CHECK(!player_view_scope_settled(v));
 }
@@ -702,49 +776,60 @@ void test_move_reversal_and_auto_re_raise() {
     // ITS OWN POSE over a fresh 15 steps, the engaged target stays latched,
     // and the promoter then promotes "scoped" at the hip
     // [orig: @0x4df548..0x4df56c; CNetPlayerInterp_Setup @0x4de006..0x4de01a].
-    PlayerViewState v;
+    // Five ticks of the raise put the position lane at 105 (5 * 21), so the
+    // reversal's fresh 15-step velocity is an exact 7 and the lanes snap on
+    // the fifteenth step of the return, done on the sixteenth call.
+    PlayerViewState v = bound_view();
     CHECK(player_view_set_engaged(v, true, false));
     for (int i = 0; i < 5; ++i) player_view_tick(v, eye);
-    CHECK(v.scope_step == 5);
+    CHECK(v.weapon_pose_interp.current.position_q16[0] == 105.0f);
     CHECK(!player_view_move_input(v, true, kScoped)); // no toggle: not promoted
     CHECK(v.scope_engaged && !player_view_scope_settled(v));
     CHECK(v.scope_hipfire && player_view_scope_ease_active(v));
-    CHECK(v.ease_steps == kScopeEaseSteps && v.scope_ease_remaining == kScopeEaseSteps);
-    CHECK(near_eq(player_view_scope_fraction(v), 5.0f / 15.0f));
+    CHECK(v.weapon_pose_interp.velocity.position_q16[0] == 7.0f); // from its own pose
+    CHECK(v.weapon_pose_interp.velocity.rotation_bam[0] == 0x00700000u);
+    CHECK(near_eq(player_view_scope_fraction(v), 105.0f / 315.0f));
     // A further move frame changes nothing (hipfire already set).
     CHECK(!player_view_move_input(v, true, kScoped));
-    CHECK(v.scope_ease_remaining == kScopeEaseSteps);
+    CHECK(v.weapon_pose_interp.velocity.position_q16[0] == 7.0f);
     for (int i = 1; i <= kScopeEaseSteps; ++i) {
         player_view_tick(v, eye);
-        CHECK(near_eq(player_view_scope_fraction(v),
-                      (5.0f / 15.0f) * static_cast<float>(kScopeEaseSteps - i) / 15.0f));
+        CHECK(v.weapon_pose_interp.current.position_q16[0] ==
+              7.0f * static_cast<float>(kScopeEaseSteps - i));
+        CHECK(!player_view_scope_settled(v));
     }
+    player_view_tick(v, eye);
     CHECK(player_view_scope_fraction(v) == 0.0f);
     CHECK(!player_view_scope_ease_active(v));
     CHECK(v.scope_engaged && player_view_scope_settled(v)); // promoted at the hip
     // Still moving: the step-1 toggle now fires; the caller's disengage takes the
-    // 1-step hipfire-return leg (sourced at tpos, as retail's idle Setup does).
+    // 1-step hipfire-return leg (sourced at tpos, as retail's idle Setup does),
+    // whose single step snaps every lane and whose next call reports done.
     CHECK(player_view_move_input(v, true, kScoped));
     CHECK(player_view_set_engaged(v, false, false));
-    CHECK(v.ease_steps == kScopeEaseStepsHipfire && v.scope_step == 1);
+    CHECK(v.weapon_pose_interp.velocity.position_q16[0] == 315.0f); // 315 / 1
+    CHECK(v.weapon_pose_interp.current.position_q16[0] == 315.0f);   // idle Setup: tpos
     CHECK(!v.scope_engaged && !player_view_scope_settled(v));
+    player_view_tick(v, eye);
+    CHECK(v.weapon_pose_interp.current.position_q16[0] == 0.0f && player_view_scope_ease_active(v));
     player_view_tick(v, eye);
     CHECK(player_view_scope_fraction(v) == 0.0f && !player_view_scope_ease_active(v));
 
     // (c) the release re-raise: promoted at the hip with hipfire set, the key
     // up drops the promoted byte, keeps the target and starts the 15-step
     // hip -> tpos ease with hipfire cleared [orig: @0x4df607..0x4df63b].
-    PlayerViewState r;
+    PlayerViewState r = bound_view();
     CHECK(player_view_set_engaged(r, true, false));
-    player_view_tick(r, eye);
+    for (int i = 0; i < 5; ++i) player_view_tick(r, eye);
     CHECK(!player_view_move_input(r, true, kScoped)); // (a)
-    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(r, eye);
-    CHECK(player_view_scope_settled(r) && r.scope_hipfire);
+    for (int i = 0; i <= kScopeEaseSteps; ++i) player_view_tick(r, eye);
+    CHECK(player_view_scope_settled(r) && r.scope_hipfire && !player_view_scope_ease_active(r));
     CHECK(!player_view_move_input(r, false, kScoped)); // (c)
     CHECK(r.scope_engaged && !player_view_scope_settled(r) && !r.scope_hipfire);
-    CHECK(player_view_scope_ease_active(r) && r.ease_steps == kScopeEaseSteps);
+    CHECK(player_view_scope_ease_active(r));
+    CHECK(r.weapon_pose_interp.velocity.position_q16[0] == -21.0f); // hip -> tpos, 15 steps
     CHECK(player_view_scope_fraction(r) == 0.0f);
-    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(r, eye);
+    for (int i = 0; i <= kScopeEaseSteps; ++i) player_view_tick(r, eye);
     CHECK(player_view_scope_fraction(r) == 1.0f);
     CHECK(player_view_scope_settled(r));
     // Every toggle is refused while (c) runs, like any ease [orig: @0x4df177].
@@ -758,24 +843,26 @@ void test_move_reversal_and_auto_re_raise() {
     // term refuses the re-raise, so the sight parks promoted at the hip
     // [orig: @0x4df58e -> @0x4df607 with the 0x20000080 term].
     const int32_t kEmplacedScoped = kScoped | 0x80;
-    PlayerViewState p;
+    PlayerViewState p = bound_view();
     CHECK(player_view_set_engaged(p, true, false));
-    player_view_tick(p, eye);
+    for (int i = 0; i < 5; ++i) player_view_tick(p, eye);
     CHECK(!player_view_move_input(p, true, kEmplacedScoped));
     CHECK(p.scope_hipfire && player_view_scope_ease_active(p));
-    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(p, eye);
+    for (int i = 0; i <= kScopeEaseSteps; ++i) player_view_tick(p, eye);
     CHECK(player_view_scope_settled(p) && player_view_scope_fraction(p) == 0.0f);
     CHECK(!player_view_move_input(p, false, kEmplacedScoped));
     CHECK(p.scope_hipfire && !player_view_scope_ease_active(p) && player_view_scope_settled(p));
 
     // The reversed-on-the-first-frame quirk: a move frame before the first
-    // tick re-targets a zero delta, which deactivates the interp outright
-    // without a promotion [orig: CNetPlayerInterp_Setup @0x4de0fe..0x4de11b;
-    // the promoter only runs behind a step @0x4de4c7]. The target stays
-    // latched, unpromoted, and the next toggle press RE-RAISES it (the
-    // promoted-byte branch @0x4df17f).
-    PlayerViewState q;
+    // tick re-targets a zero delta on an active interp whose counter is spent
+    // (a nonzero-delta Setup never armed it), which deactivates the interp
+    // outright without a promotion [orig: CNetPlayerInterp_Setup
+    // @0x4de0fe..0x4de11b; the promoter only runs behind a step @0x4de4c7].
+    // The target stays latched, unpromoted, and the next toggle press
+    // RE-RAISES it (the promoted-byte branch @0x4df17f).
+    PlayerViewState q = bound_view();
     CHECK(player_view_set_engaged(q, true, false));
+    CHECK(q.weapon_pose_interp.remaining == 0u);
     CHECK(!player_view_move_input(q, true, kScoped));
     CHECK(q.scope_engaged && !player_view_scope_settled(q) && q.scope_hipfire);
     CHECK(!player_view_scope_ease_active(q));
@@ -1108,22 +1195,27 @@ void test_tick_mounted_anchor_ease() {
     CHECK(near_eq(v.tp_anchor[0], 0.75f, 0.0001f));
 }
 
-// The view-frame bias: raw def units / 256 on the eased blend; the
-// NoCardSwitch reload suppression drops the ADS half (the hip offset).
+// The view-frame bias: (raw def pos + the published Q16 bias / 256) / 256;
+// the NoCardSwitch reload suppression drops the published half (the hip
+// offset).
 void test_bias_view_units() {
     PlayerViewState v;
     const float pos[3] = {-19.46f, 21.19f, -161.31f};
     const float tpos[3] = {-62.33f, 29.19f, -152.56f};
     float out[3];
-    player_view_bias_view_units(v, false, pos, tpos, out);
+    player_view_bias_view_units(v, false, pos, out);
     CHECK(near_eq(out[0], -19.46f / 256.0f));
     CHECK(near_eq(out[2], -161.31f / 256.0f));
-    // Fully sighted, then suppressed: the tpos blend collapses to the hip pos.
-    v.scope_engaged = true;
-    v.scope_step = v.ease_steps;
-    player_view_bias_view_units(v, false, pos, tpos, out);
+    // Fully sighted: the stepper published ftol((tpos - pos) * 256) per lane
+    // [orig: Player_StepFpViewBiasInterp @0x4ddf53..0x4ddf85]; then suppressed.
+    v.scope_engaged = v.scope_settled = true;
+    for (int i = 0; i < 3; ++i)
+        v.weapon_pose_interp.position_bias_q16[i] =
+            static_cast<int32_t>((tpos[i] - pos[i]) * 256.0f);
+    player_view_bias_view_units(v, false, pos, out);
     CHECK(near_eq(out[0], -62.33f / 256.0f));
-    player_view_bias_view_units(v, true, pos, tpos, out);
+    CHECK(near_eq(out[1], 29.19f / 256.0f));
+    player_view_bias_view_units(v, true, pos, out);
     CHECK(near_eq(out[0], -19.46f / 256.0f));
     CHECK(near_eq(out[1], 21.19f / 256.0f));
 }
@@ -1336,7 +1428,8 @@ int main() {
     test_authored_pose_interp_matches_original_six_lane_traces();
     test_authored_pose_interp_keeps_original_snap_and_completion_rules();
     test_authored_pose_def_promotes_parser_precision_and_wrapping_bam();
-    test_scope_ease_is_fifteen_ticks_exactly();
+    test_scope_ease_settles_on_the_call_after_the_last_snap();
+    test_zero_span_ease_promotes_when_its_counter_spends();
     test_equal_ticks_equal_state_regardless_of_frame_grouping();
     test_anchor_chase_quarter_step_and_seeding();
     test_mode_arbiter();

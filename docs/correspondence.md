@@ -24,12 +24,12 @@ original slice scope.
 
 | Reimplementation surface | Original reference | Contract and verdict | Owning record |
 |---|---|---|---|
-| Guided replica reducer/tick | `NetPacket_DispatchToEntityByNetId @0x4D6960`; `Entity_SerializeGuidedMissileState @0x447C50`; `Entity_UpdateGuidedMissile_0 @0x446060` | **divergent**: update admission/lifecycle, explicit zero writes and current locked-target aim point; D-NET-64 widened | [net record](net/novaworld-net-re.md#jo-c-source-cross-check-2026-09-13) |
+| Guided replica reducer/tick | `NetPacket_DispatchToEntityByNetId @0x4D6960`; `Entity_SerializeGuidedMissileState @0x447C50`; `Entity_UpdateGuidedMissile_0 @0x446060` | **divergent**: update admission/lifecycle and the current locked-target aim point (the explicit zero-write leg ported 2026-09-13); D-NET-64 narrowed to those residuals | [net record](net/novaworld-net-re.md#jo-c-source-cross-check-2026-09-13) |
 | Inventory/FSM clip owner | `sub_5405F0 @0x5405F0`; `sub_540670 @0x540670`; `WeaponSlot_ReloadAmmo @0x541720` | **divergent**: original shared clip buckets still fold into slot.clip; carried class pools already implemented (D-WPN-2) | [net record](net/novaworld-net-re.md#jo-c-source-cross-check-2026-09-13) |
 | Material texture preprocessing | `sub_5B16F0 @0x5B16F0`, dispatch sites `0x5B179A`/`0x5B17B7`/`0x5B17D4`/`0x5B17DD`/`0x5B17E6` | **divergent**: five dedicated loader branches raw-load; kernels and corpus reachability still need research (D-RMAT-12) | [material record](render/render-material-re.md#texture-preprocessing-follow-up-2026-09-11) |
 | Particle simulation | `CParticleEmitter_SpawnParticle @0x5E7640`; `CParticleEmitter_SpawnNewParticle @0x5F35B0` | **divergent**: child scheduling, per-particle ORBIT rate and subframe context; collision consumer **unknown** (D-PTL-27..30) | [particle catalog](particles/ptl-format-re.md#9-divergence-catalog-d-ptl) |
-| MissionAudio reverb | `sub_766460 @0x766460`; coefficient table `0x7BF400`; mixer block `0x7BDCF0` | **divergent** selector/room-size policy; full DSP/index-zero **unknown** (D-SND-18) | [sound record](audio/lwf-dbf-sound-re.md#the-reverb-bed-witnessed-2026-08-28-not-ported) |
-| Mission save/restore | jo-c layout names `SaveFile_ReadAndValidateHeader @0x4ACDF0`, `SaveFile_SerializeEntityToRecord @0x4AB130`, `SaveFile_ApplyEntityRecord @0x4ABB00` | **unported**; complete schema, references, pool flags and live restoration **unknown** (D-SAVE-1) | [savegame record](mission/savegame-re.md) |
+| MissionAudio reverb | `sub_766460 @0x766460` is the reverb-index setter (a two-instruction global store, `dword_3346FA0 = index`, called once per player tick from `Entity_UpdateInfantryPlayerBody @0x4B633F`); `0x7BF400` (20-row coefficient table) and `0x7BDCF0` (mixer block) are data tables, not functions; the DSP owner is unknown | **divergent** selector/room-size policy; full DSP/index-zero **unknown** (D-SND-18) | [sound record](audio/lwf-dbf-sound-re.md#the-reverb-bed-witnessed-2026-08-28-not-ported) |
+| Mission save/restore | `SaveFile_ReadAndValidateHeader @0x4ACDF0`, `SaveFile_SerializeEntityToRecord @0x4AB130`, `SaveFile_ApplyEntityRecord @0x4ABB00`, `SaveFile_ReadEntityPoolFlags @0x4A9DB0`, `SaveFile_WriteEntityPoolFlags @0x4AAA30` | **unported**; complete schema, references, pool flags and live restoration **unknown** (D-SAVE-1) | [savegame record](mission/savegame-re.md) |
 
 ## 1. Per-system parity matrix
 
@@ -1180,7 +1180,7 @@ Death presentation (engine-research 2026-07-16 session 5; world-wac-ai-re §19; 
 | `Player_InitPlayer` | `0x4e15f0` | local-player init; sig fixed → `int(int isRestore)` (3 phantom params dropped); resolves self-ID, loads weapon slots, sets camera offset | disasm; §5.41 / §5.2a | confirm-only |
 | `Server_PlayerAdd` (was `player_ServerAdd`) | `0x51cbc0` | server player-slot manager; writes `entity+0x78` (`ownerConnectionId`) `= joinEvent+76` | disasm; §5.41 (string "server_PlayerAdd()") | confirm-only |
 | `PlayerClass_InitEntity` (was `Player_InitLocalPlayer`) | `0x4b1060` | `"plyr"` entity-class init callback (sole xref = class table @0x813054) | disasm; §5.41 | confirm-only |
-| `Player_ToggleWeaponScope` | `0x4df0c0` | scope/ADS toggle: drives `g_scopeEngaged@0x82CE94` (mirrored → `g_weaponScopeActive@0xB76478`), `g_cameraFovDeg@0x26C6848`, `g_fpCameraInterp@0x82CE40` | disasm; §5.41 | confirm-only |
+| `Player_ToggleWeaponScope` | `0x4df0c0` | scope/ADS toggle: drives `g_scopeEngaged@0x82CE94` (mirrored → `g_weaponScopeActive@0xB76478`), `g_cameraFovTargetQ16@0x26C6848`, `g_fpCameraInterp@0x82CE40` | disasm; §5.41 | confirm-only |
 | `Player_CanFireWeapon` | `0x5cf780` | complete equipped/alive, seat, camera/binocular, reload-card, promoted Scoped/Sighted/SWITCHFROM, movement/air/water, and ForceScoped verdict; consumed by crosshair row and attach-label nearest-only selection | disasm; §5.41 + hud-re D-HUD-9/11 | ported (`LocalPlayer::local_player_can_fire`, `engine/runtime/mission/mission_kernel.cpp` — `Simulation` forwards to it; shared body/HUD stamp + live attach-label query) |
 | `Player_GetClampedWeaponElevation` (was `…GetCurrentWeaponAmmoCapacity`) | `0x4dc6b0` | clamps `MountSlot.Elevation`→`WeaponDef.MaxElevation` (zoom level, not ammo) | disasm; §5.41 | confirm-only |
 | `Camera_ResetToLocalPlayer` (was `Player_ResetTerrainPosition`) | `0x4a3d30` | camera reset tracking the local player (not terrain) | disasm; §5.41 | confirm-only |
@@ -1516,67 +1516,24 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 | round_sim.cpp / ammo_table | Weapon_CalcImpactDamage / Projectile_ApplyDragDeceleration | 0x4EC920 / 0x4E5CD0 | Density selection, two energy-loss calls and impact row 24 | projectile_combat | Matching |
 | client_replica_dispatch.cpp / client_effects.cpp | Client protocol message handlers | 0x42EB50 / 0x430B10 | Ordered death/state/explosion/audio consumption | npruntime_entity_lifecycle_net; npruntime_item_state_net | Matching |
 
-
-### One-shot listener-view admission (2026-09-13)
+### 2026-09-13 parity rows
 
 | Reimplementation | Original | Address | Verdict / evidence |
 |---|---|---|---|
 | `audio::plan_oneshot_at_distance` and `plan_oneshot_3d` | `SoundBank_PlayTriggerEntries` | `0x75CCD0` (gate `0x75CD54`) | matching for listener-view admission before member/pitch draws; D-SND-19, `audio_oneshot_play`, live Simulation/SoundBank GUT regression |
-
-### Scoped stability drift (2026-09-13)
-
-| Reimplementation | Original | Address | Verdict / evidence |
-|---|---|---|---|
-| `LocalPlayer::apply_scoped_aim_drift` / DEF stability parser | `Entity_UpdateInfantryPlayerBody` scoped oscillator / weapon DEF parser | `0x4B5966..0x4B5C97` / `0x544118..0x544169` | matching bounded drift path; D-WPN-36, original executable golden sequences and `local_player_view`, `def_parse_weapons`, `npruntime_weapon_table` |
-
-### Empty-sector terrain fallback (2026-09-13)
-
-| Reimplementation | Original | Address | Verdict / evidence |
-|---|---|---|---|
+| `LocalPlayer::apply_scoped_aim_drift` / DEF stability parser | `Entity_UpdateInfantryPlayerBody` scoped oscillator / weapon DEF parser | `0x4B5966..0x4B5C97` / `0x544118..0x544169` | matching bounded drift path (heading/leg/pitch clamps precede the drift, `0x4B49E9..0x4B4BC6` then `0x4B5C78..0x4B5C91`); D-WPN-36, original executable golden sequences and `local_player_view`, `def_parse_weapons`, `npruntime_weapon_table` |
 | Terrain frame, flat mesh and page composition / shader | `PolyTrn_RenderFrame`, `decode_terrain_tile_vertices`, `PolyTrn_RenderTile`, `terrain_tile_cache_lookup` | `0x60EAC0`, `0x602AA0`, `0x60DA70`, `0x604140` | matching bounded flat fallback; D-TERRAIN-12, terrain frame/cache/composer tests and Godot shader contract |
-
-### Shared WAC clock and empty startup (2026-09-13)
-
-| Reimplementation | Original | Address | Verdict / evidence |
-|---|---|---|---|
 | `WacSystem::prepare_tick`, `World::run_logic_tick`, `wac_layered_load` | shared main-frame gate / `WacScript_InitAndLoad` / `WacScript_AdvanceTick` | `0x4F91F0`, `0x4F9770`, `0x4F81D3` | matching mutable clock, one admitted frame and empty startup; D-WAC-7, `mission_kernel`, `event_runtime_bms`, `wac_program_surface` |
-
-### Airborne ADS bias admission (2026-09-13)
-
-| Reimplementation | Original | Address | Verdict / evidence |
-|---|---|---|---|
-| `local_player_view` camera bias predicate | first-person bias consumers | `0x4DD40D..0x4DD414`, `0x4DD49F..0x4DD4A6` | matching existing position consumer and gate; D-WPN-37, native mid-transition airborne/landing regressions; rotational interpolation subsequently implemented under D-WPN-38 (§14.11); D-WPN-39/40 retain separate timing residuals |
-
-### WAC auto DWORD (2026-09-13)
-
-| Reimplementation | Original | Address | Verdict / evidence |
-|---|---|---|---|
+| `MissionKernel` PreMission, then the numbered-variable reset, then initial WAC | `Game_StartMission` / `WacScript_InitAndLoad` | `0x525B86`, `0x525CB3` / `0x4F95EE` | matching reset order, absent scripts included; D-EVT-8, `mission_kernel` |
+| `event_runtime` signed action count | `EventTrigger_UpdateEntry` immediate / delayed loops | `0x454C92..0x454CAB`, `0x454D01..0x454D13` | matching: 1..127 execute, 0 and 128..255 execute none, bookkeeping and linked spawns preserved; D-EVT-9, `event_runtime_bms` |
+| `local_player_view` camera bias predicate | first-person bias consumers | `0x4DD40D..0x4DD414`, `0x4DD49F..0x4DD4A6` | matching existing position consumer and gate; D-WPN-37, native mid-transition airborne/landing regressions; rotation under D-WPN-38 and the optical/position clock under D-WPN-39 (§14.11) closed the same day; D-WPN-40 retains the pending-slot timing residual |
+| `player_view` six-lane interp + `local_player_view` rotation bias | `Player_StepFpViewBiasInterp` / `Player_UpdateFirstPersonCamera` | `0x4DDD2B..0x4DDFC3` / `0x4DD43B..0x4DD456` | matching authored ADS rotation on the actual rig (wrapping, airborne/reload suppression, direct-mount continuation, forced-scope equip); D-WPN-38, `player_view`, `local_player_view`, `player_viewmodel_rotation_test.gd` |
+| `player_view` settle promoter, toggle ease gate, presented position | `Player_UpdatePerFrame` / `Player_ToggleWeaponScope` gate / `Player_UpdateFirstPersonCamera` | `0x4DE4C7..0x4DE4F7` / `0x4DF177` / `0x4DD479..0x4DD4DA` | matching: promotion on the call after the last lane snap, truncating Q16 position bias over the def `pos`; D-WPN-39 (minted and closed), `player_view`, `local_player_view` |
 | `WacVm::bind_auto_handle`, AutoItem read/write and runtime state | `WacCmd_Set`, entry cache and group stores | `0x4ED520`, `0x4F5814`, `0x4F58A2`, `0x4F5B7E`, `0x4F5BAF`, `0x4F5BD2` | matching full DWORD and low-word updates; D-WAC-8, `wac_state` |
-
-PR #649 adversarial correction (2026-09-13, D-WPN-36): local heading/leg/pitch clamps precede scoped drift. The body-tick limit and PRNG regressions are recorded in [world §14.9](world/world-wac-ai-re.md).
-
-2026-09-13 D-WAC-9: Numbered V operands accept decimal prefixes while declared names retain precedence and indices clamp at 255. The [D-WAC-9 domain record](world/world-wac-ai-re.md) carries original addresses and the corresponding implementation. Native `wac_behavior` prefix, boundary and shadowing regressions pass.
-
-2026-09-13 D-EVT-9: BMS action counts use the original signed byte at execution; counts 128–255 skip actions while preserving event bookkeeping and linked spawns. The [D-EVT-9 domain record](mission/bms-event-runtime-re.md) carries original addresses and the corresponding implementation. Native `event_runtime_bms` immediate/delayed, truncated-slice and unsigned-trigger regressions pass.
-
-2026-09-13 D-FOLIAGE-13: Foliage collection survives saturation of the 224-entry main terrain list while retaining its own visibility, distance and 128-cell limits. The [D-FOLIAGE-13 domain record](foliage/foliage-re.md) carries original addresses and the corresponding implementation. Native `terrain_frame_compiler` and `terrain_foliage_detail_collector` regressions pass, alongside eight original-executable capacity combinations.
-
-2026-09-13, D-AI-13: Vehicle avoidance uses the original quantized footprint cosine and truncating bearing, preserving ordered neighbor braking and carrier exclusions. See [D-AI-13 evidence](world/world-wac-ai-re.md). Native `vehicle_mount` regressions pass for ground and boat callers, half-bin boundaries and compounded braking.
-
-2026-09-13, D-WAC-10: WAC M# operands bind the live music context at compilation and share its actual byte globals; missing contexts alias scratch. Game music opens before initial WAC compilation. See [D-WAC-10 evidence](world/world-wac-ai-re.md) and [music globals](audio/mus-sbf-re.md). Native MUS/WAC and mission-kernel tests pass; Godot music-director integration passes 8/8, including startup, reload and weak-provider lifetime.
-
-PR #649 integration review (2026-09-13, D-WAC-7): standalone event fixtures explicitly admit script ticks; a new empty-startup gate regression and all 97 Simulation GUT tests pass with reference assets. See the [mission runtime record](mission/bms-event-runtime-re.md).
-
-2026-09-13, D-WPN-38: Authored ADS rotation reaches the actual first-person rig through retained six-lane interpolation, including angle wrapping, airborne/reload suppression, direct-mount continuation and forced-scope equip. See [world §14.11](world/world-wac-ai-re.md). Scalar optical/position completion remains OPEN as D-WPN-39; pending-slot view timing remains OPEN as D-WPN-40.
-
-PR #649 adversarial correction (2026-09-13, D-FOLIAGE-13): flat cells retain their high-bit keys and consume original collector/cache budgets while generating no geometry; only leaf cells take the raw-height distance test. Native collector, terrain-frame and foliage-cache regressions cover mixed-height subtrees, 127/128 limits and authored/flat cache replacement. See [foliage evidence](foliage/foliage-re.md).
-
-2026-09-13, D-RLIT-4 entity-query correction: Entity lighting queries use the initialized entity origin/radius cube, a 63-candidate object limit, and per-material group selection. First-person parts, heads, held weapons and husks inherit the correct entity query and ownership. See [lighting evidence](render/render-lighting-re.md). Native selector/model-builder suites and Godot per-model, first-person, placement, destruction and effect-world regressions pass.
-
-PR #649 lighting review (2026-09-13): object selection retains the first 63 overlapping candidates before sorting and group filtering; general/terrain queries retain 64. Witnesses now live with the native query contract. See the [lighting record](render/render-lighting-re.md).
-
-PR #649 documentation review (2026-09-13): D-WPN-38 supersedes the earlier unported-rotation note; D-WPN-39/40 retain optical/position and pending-slot timing work. D-WAC-11 records the proposed class-D invalid M# index guard, with valid context binding fixed by D-WAC-10. See the [world record](world/world-wac-ai-re.md).
-
-PR #649 digest validation (2026-09-13, D-WAC-10): removing the detached zeroed music bank changes only the synthetic hash input shape; restoring those words exactly recovers the old digest. The corrected golden and determinism checks pass. See [world §33.15a](world/world-wac-ai-re.md).
-
-2026-09-13, D-RORD-12: Render LOD projection uses exact CMDL bounds, the rotated entity-local midpoint and full positive-side half-diagonal, scaled once. Persons use the entity radius or type-185 parachute radius; avatar parts share projection and husks retain the primary sphere. See [render projection evidence](render/render-order-re.md). Native and eight Godot integration cases pass. Separate native visibility arithmetic remains OPEN as [D-OCC-16](render/render-occlusion-re.md); [D-INF-20](world/world-wac-ai-re.md) retains deployment/physics, marker authoring and server flag emission.
+| `wac::compiler` numbered V operands | `WacScript_ResolveParameter` declared-name lookup / digit parse / clamp | `0x4F2970..0x4F2A3C` / `0x4F2AA9..0x4F2AB8` / `0x4F2AC0`, `0x4F2AF4` | matching decimal prefix, declared-name precedence, clamp at V255; D-WAC-9, `wac_behavior` |
+| `wac::compiler` M# context binding + `mus_vm` shared globals | `WacScript_ResolveParameter` / `sub_671FD0` / `Game_StartMission` music open | `0x4F2A17..0x4F2A34` / `0x672689..0x67268D` / `0x525589` (before `0x525CB3`) | matching live-context binding at compilation and shared byte globals, missing contexts alias scratch, music opens before the initial compile; the out-of-range M# guard is a portable-input note inside the row; D-WAC-10, native MUS/WAC/mission-kernel tests and the Godot music-director suite |
+| `ai_waypoints` vehicle avoidance | `Entity_UpdateVehiclePhysics` / `Entity_UpdateAircraftPhysics` avoid-brake legs | `0x48BE98`, `0x48BEC9` / `0x4917E6` | matching quantized footprint cosine and truncating bearing, ordered neighbor braking, carrier exclusions; D-AI-13, `vehicle_mount` |
+| `foliage_detail_collector` + `quadtree` handoff | `Terrain_CollectNearFoliagePatches` | `0x603E60` (`0x603F63`) | matching collection independent of the 224-entry main list, node-distance and 128-cell limits, flat cells budgeted without geometry; D-FOLIAGE-14 (minted and closed), `terrain_frame_compiler`, `terrain_foliage_detail_collector` |
+| `EntityLightQuery` / `light_scene` object query | `setup_terrain_effect_for_entity` / `Terrain_RenderSectorEntitiesBySide` / `Light_SelectAndEnableForDraw` | `0x5C74A0` / `0x5C7F9A..0x5C8020` / `0x5ABA7F..0x5ABA8D` | matching entity origin/radius cube, 63 object candidates (general/terrain 64), per-material group selection; D-RLIT-11 (minted and closed), native selector/model-builder suites and Godot per-model/first-person/placement/destruction/effect-world regressions |
+| `object_lod` projection sphere | `Model_SelectRlodLevel` / `Entity_ComputeBoundingSphere` | `0x5C3B20` / `0x5C69A0` | matching exact CMDL bounds, rotated entity-local midpoint, positive-side half-diagonal scaled once, person radius or type-185 parachute radius; D-RORD-12, native sphere/model-builder/present-row regressions and eight Godot cases |
+| `OcclusionWorld::bound_sphere_fixed` | `Entity_ComputeBoundingSphere` | `0x5C69A0` (`0x5C6A02..0x5C6B52`) | matching midpoint, positive-side halves, unset-bound clamps and the Q16 scale leg; D-OCC-16 (minted and closed), `occlusion_test` |

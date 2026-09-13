@@ -147,17 +147,18 @@ Vector3 Simulation::local_player_viewmodel_rotation_bias_deg() const {
 			bias[2] * degrees_per_bam);
 }
 
-// The eased FP viewmodel view-offset in VIEW-FRAME world units (X=forward,
-// Y=left, Z=up); the rig maps view axes onto its camera frame and parents the
-// node (world/player_view.h, S8).
+// The FP viewmodel view-offset in VIEW-FRAME world units (X=forward, Y=left,
+// Z=up); the rig maps view axes onto its camera frame and parents the node
+// (world/player_view.h, S8). The ADS endpoint is the bound pose in the sim,
+// so `p_tpos_raw_units` is not consumed; it stays on the binding only until
+// the Simulation seam drops it.
 Vector3 Simulation::local_player_viewmodel_bias_view_units(
-		const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units,
+		const Vector3 &p_pos_raw_units, const Vector3 &,
 		int p_viewport_w, int p_viewport_h) {
 	const float pos[3] = {p_pos_raw_units.x, p_pos_raw_units.y, p_pos_raw_units.z};
-	const float tpos[3] = {p_tpos_raw_units.x, p_tpos_raw_units.y, p_tpos_raw_units.z};
 	float out[3];
 	opennova::world::local_player_viewmodel_bias(&kernel_->world, kernel_->local.weapon, kernel_->local.view,
-			kernel_->local.view_tracker, pos, tpos, p_viewport_w, p_viewport_h, out);
+			kernel_->local.view_tracker, pos, p_viewport_w, p_viewport_h, out);
 	return Vector3(out[0], out[1], out[2]);
 }
 

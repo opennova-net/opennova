@@ -41,11 +41,23 @@ struct EntityBoundRadiusInputs {
 };
 int32_t entity_bound_radius_q16(const EntityBoundRadiusInputs &inputs);
 
+// Entity init zeroes the bbox center (entity+0x1FC) for eweap powerups
+// (type 6 with attrib 0x20) before it measures the sphere, so their halves
+// are the clamped CMDL maxima. The collision center and the render
+// projection sphere both consume this one predicate.
+// [orig: Entity_InitFromModel @ 0x40df06..0x40df16]
+constexpr bool item_def_zero_bbox_center(int item_type, uint32_t attrib) noexcept {
+	return item_type == 6 && (attrib & opennova::world::kItemAttribEweap) != 0u;
+}
+
 // Ordinary entity projection uses the collision BLOCK's CMDL bounds even
-// when it has no usable collision geometry. Missing blocks leave it unstamped.
+// when it has no usable collision geometry. A loaded model without that
+// block keeps retail's zero spawn words (entity+0x1FC/+0x208 = 0): a valid
+// sphere of radius zero, which the projector culls below one pixel.
 opennova::renderer::ObjectProjectionSphere collision_projection_sphere_from_3di(
     const opennova::threedi::Threedi3di3 &model,
-    int32_t runtime_scale_q16 = 0, int32_t definition_scale_q16 = 0);
+    int32_t runtime_scale_q16 = 0, int32_t definition_scale_q16 = 0,
+    bool zero_center = false);
 
 // Build the runtime occlusion model from the parsed OCCL tables
 // [orig: load_occlusion_model_data @ 0x5b4a00].

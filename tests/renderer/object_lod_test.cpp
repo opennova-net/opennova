@@ -48,6 +48,17 @@ int main() {
       {-3, -2, 10}, {4, 7, 15}, 0, 131072);
   CHECK((definition_scaled.center_q16 == std::array<int32_t, 3>{0, 4, 24}));
   CHECK(definition_scaled.radius_q16 == 14);
+  // The eweap-powerup leg zeroes the center before measuring, so the halves
+  // are the maxima {4,7,15}: sqrt(290) -> 17, then the same RHU scale.
+  // [orig: Entity_InitFromModel @0x40df06..0x40df16, @0x40df66..0x40dfac]
+  const auto zero_centered = object_projection_sphere_from_bounds_q16(
+      {-3, -2, 10}, {4, 7, 15}, 0, 0, true);
+  CHECK((zero_centered.center_q16 == std::array<int32_t, 3>{0, 0, 0}));
+  CHECK(zero_centered.radius_q16 == 17);
+  const auto zero_centered_scaled = object_projection_sphere_from_bounds_q16(
+      {-3, -2, 10}, {4, 7, 15}, 98304, 131072, true);
+  CHECK((zero_centered_scaled.center_q16 == std::array<int32_t, 3>{0, 0, 0}));
+  CHECK(zero_centered_scaled.radius_q16 == 26);
   const auto inverted = object_projection_sphere_from_bounds_q16(
       {0x40000000, 0x40000000, 0x40000000},
       {-0x40000000, -0x40000000, -0x40000000});

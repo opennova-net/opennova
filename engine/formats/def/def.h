@@ -313,8 +313,11 @@ typedef struct DefWeaponDef {
     float error[6];
     // The first three authored pose columns are view-position units. Rotation
     // columns retain the parser's Q16 degrees before rounded BAM promotion.
-    // [orig: WeaponDef_ParseProperty pos @0x544614..0x5446D8;
-    //  tpos @0x54475B..0x544825; Math_ParseFixedPoint16 @0x6131F0]
+    // A short line (fewer than six values) stores nothing: the original warns
+    // "too few params" and returns before the first store.
+    // [orig: WeaponDefs_ParseLineCallback @0x543680: pos gate @0x5445EE, pos
+    //  @0x544614..0x5446D8; tpos gate @0x544735, tpos @0x54475B..0x544825;
+    //  Math_ParseFixedPoint16 @0x6131F0]
     float pos[3];
     int32_t pos_rotation_deg_q16[3];
     float tpos[3];
@@ -344,7 +347,7 @@ typedef struct DefWeaponDef {
     /* ADS zoom magnification ('scope_max_mag'; the JOX AK-47 ships 2). The scoped
        camera FOV divides the 80-degree default by the clamped zoom
        [orig: Player_ToggleWeaponScope @ 0x4df401 -> 80.0 / Player_GetClampedWeaponElevation
-       @ 0x4dc6b0; g_cameraFovDeg @ 0x26C6848]. 0 = key absent. */
+       @ 0x4dc6b0; g_cameraFovTargetQ16 @ 0x26C6848]. 0 = key absent. */
     float scope_max_mag;
     /* Third-person body-channel kinds, plain integers, 0 = key absent (rifle).
        special_hold (record +0xA4, read @ 0x4b5dba): 1..8 selects the body hold-pose
