@@ -620,7 +620,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     Guarded by `test_slope_standing_camera_stays_level` / `test_slope_prone_body_conforms_org2`
     / `test_slope_pass_org1_selector_and_chase` + the motor-level standing case in
     `tests/world/infantry_test.cpp`.
-  - **D-INF-20** the parachute system is unmodeled (Flags 0x20 = parachute deployed).
+  - **D-INF-20** parachute deployment and physics remain unmodeled (Flags 0x20 = deployed).
     Witnessed legs (§22): auto-deploy on the authority when alive, `vel_z ≤ −14336`, and
     aux `+0x2C & 0x10` [orig: `@0x4b7aef-0x4b7afa`]; the in-air anim while set: org2 adds
     0x10 to its straight 31 stamp (the `(Flags&0x20)?0x10:0 + 0x1F` trick
@@ -631,10 +631,21 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     gravity skips while drowning/platform but NOT while parachuting — the descent physics
     live in the `@0x4b7b18+` swim/parachute block (unread). A second waiting consumer since
     2026-08-26: the airborne steer's DOUBLED chute arm [orig: `@0x4b7920..0x4b793d`]
-    (D-INF-9 entry). Ours never sets the flag; the player's jump and fall stamp 31
-    (NPC falls keep the clip, as witnessed). The 2026-09-01 teleport re-grill confirmed the
-    single-teleport marker copy is a genuine flag PRODUCER once modeled: a pool-0 target
-    inherits the marker's 0x20 [orig: `@0x43e0a0`].
+    (D-INF-9 entry). The earlier claim that no ported path can set this flag was too
+    broad: `client_replica_lifecycle` retains the raw flags from an incoming original
+    full-spawn 0x18 record for players and infantry; `coop_marker_pose`,
+    `apply_spawn_point_latches` and the single-teleport branch already copy a preexisting
+    marker bit (`[orig: Entity_ApplyCommand @ 0x43E0A0]`). Fresh BMS seed promotion does
+    not author a chute attribute, and our server's `player_wire_flags` still emits only
+    player/own/dead bits, so those copy paths do not prove a fresh local mission starts
+    with a chute. The current-state render consumer is **FIXED 2026-09-13 (D-RORD-12)**:
+    `PF_PARACHUTE_DEPLOYED` reaches both presenters, and the person projection substitutes
+    the type-185 model header radius (`[orig: Entity_PreloadSpecialItems @ 0x43C220;
+    collect_visible_entities_for_terrain @ 0x5C8DF3..0x5C8E21]`). Native
+    `netsim_present_rows` covers received player/infantry records and authority flags;
+    GUT `object_projection_lod_test` covers live set/clear and unscaled parachute radius.
+    Deployment, descent/steer/animation behavior, initial marker authoring and our own
+    server's flag publication remain open.
   - **D-INF-21** the "!Poof!" ghost mode is deliberately unported: `g_localPlayerPoofMode
     @ 0xA82298` (renamed this session, ex `dword_A82298`) is toggled by a net-message
     handler that debug-prints `!Poof!` [orig: `@0x42d450` — the IDB's

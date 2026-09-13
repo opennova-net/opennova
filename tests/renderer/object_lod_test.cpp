@@ -28,6 +28,36 @@ int main() {
   using opennova::renderer::project_bound_sphere_radius_q16;
   using opennova::renderer::select_object_lod;
 
+  // Full retail Entity_ComputeBoundingSphere execution @0x5C69A0 supplied
+  // these literal midpoint/radius and scale-precedence witnesses.
+  using opennova::renderer::object_projection_sphere_from_bounds_q16;
+  using opennova::renderer::person_projection_sphere_q16;
+  const auto offset = object_projection_sphere_from_bounds_q16(
+      {-131072, 65536, 196608}, {393216, 327680, 589824});
+  CHECK(offset.valid);
+  CHECK((offset.center_q16 == std::array<int32_t, 3>{131072, 196608, 393216}));
+  CHECK(offset.radius_q16 == 352922);
+  const auto odd = object_projection_sphere_from_bounds_q16({-3, -2, 10}, {4, 7, 15});
+  CHECK((odd.center_q16 == std::array<int32_t, 3>{0, 2, 12}));
+  CHECK(odd.radius_q16 == 7); // max-center uses {4,5,3}, not floor halves {3,4,2}.
+  const auto runtime_scaled = object_projection_sphere_from_bounds_q16(
+      {-3, -2, 10}, {4, 7, 15}, 98304, 131072);
+  CHECK((runtime_scaled.center_q16 == std::array<int32_t, 3>{0, 3, 18}));
+  CHECK(runtime_scaled.radius_q16 == 11);
+  const auto definition_scaled = object_projection_sphere_from_bounds_q16(
+      {-3, -2, 10}, {4, 7, 15}, 0, 131072);
+  CHECK((definition_scaled.center_q16 == std::array<int32_t, 3>{0, 4, 24}));
+  CHECK(definition_scaled.radius_q16 == 14);
+  const auto inverted = object_projection_sphere_from_bounds_q16(
+      {0x40000000, 0x40000000, 0x40000000},
+      {-0x40000000, -0x40000000, -0x40000000});
+  CHECK((inverted.center_q16 == std::array<int32_t, 3>{0, 0, 0}));
+  CHECK(inverted.radius_q16 == 1859775393);
+  const auto person = person_projection_sphere_q16(0x19002);
+  CHECK(person.valid && person.radius_q16 == 0x19002);
+  CHECK((person.center_q16 == std::array<int32_t, 3>{0, 0, 0}));
+  CHECK(person_projection_sphere_q16(0x19002, true, 0x78000).radius_q16 == 0x78000);
+
   // Retail's runtime table is ordered fine/near -> coarse/far. The first
   // threshold is unused; selection begins at threshold[1]. The selector's
   // input is the projected screen radius in Q16.16, not world distance.

@@ -35,6 +35,7 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 
 #include <array>
+#include <runtime/renderer/object_lod.h>
 #include <cstdint>
 #include <vector>
 
@@ -370,6 +371,17 @@ private:
 	void apply_focal_sway();
 	bool rigid_parts_ = false;
 	ObjectID authored_lod_owner_;
+	ObjectID authored_lod_projection_owner_;
+	opennova::renderer::ObjectProjectionSphere entity_projection_sphere_;
+	bool entity_projection_person_ = false;
+	bool entity_projection_override_ = false;
+	int32_t entity_projection_scale_q16_ = 0;
+	bool parachute_deployed_ = false;
+	int32_t parachute_projection_radius_q16_ = 0;
+	void refresh_entity_projection_sphere();
+	uint64_t lod_projection_frame_ = 0;
+	int32_t lod_projected_radius_q16_ = 0;
+	bool lod_projection_visible_ = false;
 	bool authored_occluders_enabled_ = false;
 	std::vector<int32_t> authored_lod_thresholds_q16_;
 	std::vector<bool> authored_lod_available_;
@@ -804,6 +816,17 @@ public:
     void set_geometry_visible(bool p_visible);
     void set_rigid_parts(bool p_rigid);
 	ObjectModel *get_authored_lod_owner() const;
+	// A composed avatar shares its entity projection while each part retains
+	// its own threshold table. This differs from an attachment's level owner.
+	void set_authored_lod_projection_owner(ObjectModel *p_owner);
+	ObjectModel *get_authored_lod_projection_owner() const;
+	void configure_entity_projection(bool p_person, int32_t p_parachute_radius_q16);
+	void set_parachute_deployed(bool p_deployed);
+	// A carved static becomes a live husk visual while retaining the primary
+	// entity's already-derived local sphere and the scale of its pose matrix.
+	void set_entity_projection_override(
+			const opennova::renderer::ObjectProjectionSphere &p_sphere,
+			int32_t p_entity_scale_q16);
 	// The retained surface slots (one MeshInstance3D each, sized to the
 	// largest retained level) and the submesh count of one level (0 for a
 	// level the build did not retain): the typed read-back the tests pin the

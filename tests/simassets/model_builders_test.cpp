@@ -64,6 +64,30 @@ int main() {
         TEST_EXPECT(entity_bound_radius_q16(input) == 0x1000);
     }
 
+    // The projection sphere reads exact CMDL bounds, independently of GHDR
+    // and usable collision geometry. These words exceed float's exact Q16
+    // integer range; poisoned float fields must not replace the source words.
+    {
+        Threedi3di3 model{};
+        TEST_EXPECT(!collision_projection_sphere_from_3di(model).valid);
+        ThreediCollisionModel collision{};
+        model.collision = &collision;
+        collision.model_data.has_bbox_fp16 = 1;
+        const int32_t exact[] = {0x02000001, -3, 10, 0x02000008, 6, 15};
+        for (int i = 0; i < 6; ++i) {
+            collision.model_data.bbox_fp16[i] = exact[i];
+            collision.model_data.bbox[i] = -100.0f;
+        }
+        const auto sphere = collision_projection_sphere_from_3di(model);
+        TEST_EXPECT(sphere.valid && sphere.radius_q16 == 7);
+        TEST_EXPECT(sphere.center_q16[0] == 0x02000004);
+        TEST_EXPECT(sphere.center_q16[1] == 1 && sphere.center_q16[2] == 12);
+        const auto scaled = collision_projection_sphere_from_3di(model, 0, 0x18000);
+        TEST_EXPECT(scaled.radius_q16 == 11);
+        TEST_EXPECT(scaled.center_q16[0] == 0x03000006);
+        TEST_EXPECT(scaled.center_q16[1] == 2 && scaled.center_q16[2] == 18);
+    }
+
     // --- bird: the face-only witness (18 CFAC over 9 sections, 0 BVOL) ------
     {
         Threedi3di3 model{};
@@ -76,6 +100,12 @@ int main() {
         TEST_EXPECT(cm.sections.size() == 9);
         TEST_EXPECT(model_is_skinned(model, 0));
         TEST_EXPECT(model_has_collision(model));
+        TEST_EXPECT(model.collision->model_data.has_bbox_fp16 == 1);
+        for (int i = 0; i < 6; ++i) {
+            TEST_EXPECT(static_cast<float>(model.collision->model_data.bbox_fp16[i]) / 65536.0f ==
+                    model.collision->model_data.bbox[i]);
+        }
+        TEST_EXPECT(collision_projection_sphere_from_3di(model).valid);
         TEST_EXPECT(model.header.has_header);
         TEST_EXPECT(model.header.max_radius_fp16 > 0);
         // Production files carry GHDR's exact Q16 radius, and that carrier is

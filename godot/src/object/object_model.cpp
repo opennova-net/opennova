@@ -28,6 +28,7 @@
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
 #include <runtime/renderer/object_lod.h>
+#include <runtime/simassets/model_builders.h>
 #include <runtime/renderer/render_order.h>
 
 using namespace opennova::threedi;
@@ -169,6 +170,7 @@ void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
 		object_data_->disconnect("object_changed", changed);
 	}
 	object_data_ = p_data;
+	refresh_entity_projection_sphere();
 	reset_remote_body_state();
 	part_anims_.clear();
 	part_anim_tick_accum_s_ = 0.0;
@@ -274,6 +276,7 @@ bool ObjectModel::is_slot_shadow_person() const {
 void ObjectModel::set_entity_uniform_scale_q16(int64_t p_scale_q16) {
 	entity_uniform_scale_q16_ = static_cast<int32_t>(
 			static_cast<uint32_t>(p_scale_q16));
+	refresh_entity_projection_sphere();
 }
 
 int64_t ObjectModel::get_entity_uniform_scale_q16() const {
@@ -303,6 +306,7 @@ void ObjectModel::set_bound_radii_q16(int32_t p_model_sphere, int32_t p_entity_b
 	}
 	model_sphere_radius_ = sphere;
 	entity_bound_radius_q16_ = bound;
+	if (entity_projection_person_) refresh_entity_projection_sphere();
 }
 
 float ObjectModel::get_model_sphere_radius() const {
@@ -668,6 +672,52 @@ ObjectModel *ObjectModel::get_authored_lod_owner() const {
 			ObjectDB::get_instance(authored_lod_owner_));
 }
 
+void ObjectModel::set_authored_lod_projection_owner(ObjectModel *p_owner) {
+	authored_lod_projection_owner_ = p_owner != nullptr && p_owner != this
+			? p_owner->get_instance_id() : ObjectID();
+}
+
+ObjectModel *ObjectModel::get_authored_lod_projection_owner() const {
+	return authored_lod_projection_owner_.is_valid()
+			? Object::cast_to<ObjectModel>(ObjectDB::get_instance(authored_lod_projection_owner_))
+			: nullptr;
+}
+
+void ObjectModel::refresh_entity_projection_sphere() {
+	if (entity_projection_override_) return;
+	entity_projection_scale_q16_ = entity_uniform_scale_q16_;
+	if (entity_projection_person_) {
+		entity_projection_sphere_ = opennova::renderer::person_projection_sphere_q16(
+				entity_bound_radius_q16_, parachute_deployed_, parachute_projection_radius_q16_);
+	} else {
+		entity_projection_sphere_ = object_data_.is_valid()
+				? opennova::simassets::collision_projection_sphere_from_3di(
+						object_data_->native_model(), entity_uniform_scale_q16_)
+				: opennova::renderer::ObjectProjectionSphere{};
+	}
+}
+
+void ObjectModel::configure_entity_projection(bool p_person, int32_t p_parachute_radius_q16) {
+	entity_projection_person_ = p_person;
+	entity_projection_override_ = false;
+	parachute_projection_radius_q16_ = p_parachute_radius_q16;
+	refresh_entity_projection_sphere();
+}
+
+void ObjectModel::set_parachute_deployed(bool p_deployed) {
+	if (parachute_deployed_ == p_deployed) return;
+	parachute_deployed_ = p_deployed;
+	if (entity_projection_person_) refresh_entity_projection_sphere();
+}
+
+void ObjectModel::set_entity_projection_override(
+		const opennova::renderer::ObjectProjectionSphere &p_sphere,
+		int32_t p_entity_scale_q16) {
+	entity_projection_override_ = true;
+	entity_projection_sphere_ = p_sphere;
+	entity_projection_scale_q16_ = p_entity_scale_q16;
+}
+
 void ObjectModel::set_authored_lod_enabled(bool p_enabled) {
 	if (authored_lod_enabled_ == p_enabled) {
 		return;
@@ -953,6 +1003,8 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 	// crossings allocates nothing once warm.
 	static LocalVector<LodSwitch> &switches = *memnew(LocalVector<LodSwitch>);
 	switches.clear();
+	static uint64_t projection_frame = 0;
+	++projection_frame;
 	// Attachments take their owner's level after the owners' own selections
 	// have been applied (renderer::attachment_lod_index).
 	static LocalVector<ObjectModel *> &attachments =
@@ -966,19 +1018,30 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 			attachments.push_back(model);
 			continue;
 		}
-		const Transform3D world = model->get_global_transform();
-		const float source_radius =
-				model->model_sphere_radius_ > 0.0f
-				? model->model_sphere_radius_
-				: model->model_bounds_.get_longest_axis_size() * 0.5f;
-		const float radius =
-				source_radius * ObjectLodFrame::uniform_scale(world.basis);
-		int32_t projected_q16 = 0;
-		// A model outside the frustum keeps its level: retail never reaches the
-		// selector for an entity its collector rejected.
-		if (!frame.project(world.origin, radius, projected_q16)) {
-			continue;
+		ObjectModel *source = model->get_authored_lod_projection_owner();
+		if (source == nullptr) source = model;
+		if (source->lod_projection_frame_ != projection_frame) {
+			source->lod_projection_frame_ = projection_frame;
+			const Transform3D world = source->get_global_transform();
+			const auto &sphere = source->entity_projection_sphere_;
+			if (sphere.valid) {
+				const Vector3 center = ObjectLodFrame::projection_center(
+						world, sphere, source->entity_projection_scale_q16_);
+				source->lod_projection_visible_ = frame.project_q16(center,
+						sphere.radius_q16, source->lod_projected_radius_q16_);
+			} else {
+				// Document-less previews have no entity collision-bound producer.
+				const float radius = (source->model_sphere_radius_ > 0.0f
+						? source->model_sphere_radius_
+						: source->model_bounds_.get_longest_axis_size() * 0.5f) *
+						ObjectLodFrame::uniform_scale(world.basis);
+				source->lod_projection_visible_ = frame.project(
+						world.origin, radius, source->lod_projected_radius_q16_);
+			}
 		}
+		// A rejected entity never reaches any part's threshold selector.
+		if (!source->lod_projection_visible_) continue;
+		const int32_t projected_q16 = source->lod_projected_radius_q16_;
 		const opennova::renderer::ObjectLodSelection selection =
 				opennova::renderer::select_object_lod(
 						model->authored_lod_thresholds_q16_, projected_q16,
@@ -1919,6 +1982,10 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_authored_lod_enabled);
 	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner", "exact"),
             &ObjectModel::set_authored_lod_owner, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("set_authored_lod_projection_owner", "owner"),
+			&ObjectModel::set_authored_lod_projection_owner);
+	ClassDB::bind_method(D_METHOD("get_authored_lod_projection_owner"),
+			&ObjectModel::get_authored_lod_projection_owner);
     ClassDB::bind_method(D_METHOD("set_geometry_visible", "visible"), &ObjectModel::set_geometry_visible);
     ClassDB::bind_method(D_METHOD("set_rigid_parts", "rigid"), &ObjectModel::set_rigid_parts);
 	ClassDB::bind_method(D_METHOD("get_authored_lod_owner"),

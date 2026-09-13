@@ -240,6 +240,10 @@ enum PresentField : int {
     // a corpse timer) publishes it too.
     // [orig: BoneCallback_org0_Skin @0x4e3669..0x4e368e]
     PF_DEATH_CTRL,
+    // Existing person Flags 0x20 selects the special item-185 projection
+    // radius. This carries received/copy-propagated state; it does not invent
+    // the still-unported parachute deployment physics.
+    PF_PARACHUTE_DEPLOYED,
 	PF_STRIDE
 };
 

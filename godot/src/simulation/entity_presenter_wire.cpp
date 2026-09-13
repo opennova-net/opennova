@@ -786,6 +786,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
         husk.item_id = wfield_i(p, base, Simulation::PF_TYPE_ID);
         destruction_->apply_husk_swap(husk);
     }
+	model->set_parachute_deployed(wfield_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
 	stamp_match_terrain(model, p, base);
         stamp_destroy_phases(model, p, base);
 	const int32_t respawn_revision =

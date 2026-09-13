@@ -45,6 +45,21 @@ float ObjectLodFrame::uniform_scale(const Basis &p_basis) {
 			p_basis.get_column(1).length(), p_basis.get_column(2).length() });
 }
 
+Vector3 ObjectLodFrame::projection_center(const Transform3D &p_transform,
+		const opennova::renderer::ObjectProjectionSphere &p_sphere,
+		int32_t p_entity_scale_q16) {
+	const auto &center = p_sphere.center_q16;
+	const Vector3 local(static_cast<float>(center[1]) / 65536.0f,
+			static_cast<float>(center[2]) / 65536.0f,
+			static_cast<float>(center[0]) / 65536.0f);
+	Basis pose = p_transform.basis;
+	if (p_entity_scale_q16 != 0) {
+		const float inverse_scale = 65536.0f / static_cast<float>(p_entity_scale_q16);
+		pose = pose.scaled(Vector3(inverse_scale, inverse_scale, inverse_scale));
+	}
+	return p_transform.origin + pose.xform(local);
+}
+
 bool ObjectLodFrame::sphere_in_frustum(const Vector3 &p_center,
 		float p_radius) const {
 	if (!valid) {
@@ -68,12 +83,18 @@ bool ObjectLodFrame::sphere_in_frustum(const Vector3 &p_center,
 
 bool ObjectLodFrame::project(const Vector3 &p_center, float p_radius,
 		int32_t &r_radius_q16) const {
-	if (!sphere_in_frustum(p_center, p_radius)) {
+	return project_q16(p_center, opennova::io::float_to_fp16_16_round_sat(p_radius),
+			r_radius_q16);
+}
+
+bool ObjectLodFrame::project_q16(const Vector3 &p_center, int32_t p_radius_q16,
+		int32_t &r_projected_q16) const {
+	if (!sphere_in_frustum(p_center, static_cast<float>(p_radius_q16) / 65536.0f)) {
 		return false;
 	}
 	const float depth = (p_center - origin).dot(forward);
-	r_radius_q16 = opennova::renderer::project_bound_sphere_radius_q16(
-			opennova::io::float_to_fp16_16_round_sat(p_radius), opennova::io::float_to_fp16_16_round_sat(depth), focal_pixels);
+	r_projected_q16 = opennova::renderer::project_bound_sphere_radius_q16(
+			p_radius_q16, opennova::io::float_to_fp16_16_round_sat(depth), focal_pixels);
 	return true;
 }
 

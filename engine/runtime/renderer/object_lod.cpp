@@ -1,4 +1,5 @@
 #include <runtime/renderer/object_lod.h>
+#include <runtime/world/entity.h>
 
 #include <algorithm>
 #include <cmath>
@@ -20,6 +21,55 @@ constexpr float kObjectLodDetail3Quality = 2.0f;
 constexpr float kObjectLodReferenceWidth = 640.0f;
 
 } // namespace
+
+ObjectProjectionSphere object_projection_sphere_from_bounds_q16(
+    const std::array<int32_t, 3> &minimum,
+    const std::array<int32_t, 3> &maximum,
+    int32_t runtime_scale_q16, int32_t definition_scale_q16) {
+  ObjectProjectionSphere sphere;
+  sphere.valid = true;
+  double squared_radius = 0.0;
+  for (int axis = 0; axis < 3; ++axis) {
+    const int32_t low = std::min(minimum[axis], int32_t{0x40000000});
+    const int32_t high = std::max(maximum[axis], int32_t{-0x40000000});
+    const int32_t difference = static_cast<int32_t>(
+        static_cast<uint32_t>(high) - static_cast<uint32_t>(low));
+    sphere.center_q16[axis] = static_cast<int32_t>(
+        static_cast<uint32_t>(low) + static_cast<uint32_t>(difference >> 1));
+    // Odd fixed-point widths use the larger, positive-side half. Computing
+    // length from difference >> 1 would lose one word on each odd axis.
+    const int32_t half = static_cast<int32_t>(
+        static_cast<uint32_t>(high) -
+        static_cast<uint32_t>(sphere.center_q16[axis]));
+    squared_radius += static_cast<double>(half) * half;
+  }
+  sphere.radius_q16 = static_cast<int32_t>(
+      std::min(std::sqrt(squared_radius), 2147418112.0));
+  const int32_t scale = runtime_scale_q16 != 0
+                           ? runtime_scale_q16 : definition_scale_q16;
+  return scale_object_projection_sphere_q16(sphere, scale);
+}
+
+ObjectProjectionSphere scale_object_projection_sphere_q16(
+    ObjectProjectionSphere sphere, int32_t scale_q16) {
+  if (sphere.valid && scale_q16 != 0) {
+    for (int32_t &center : sphere.center_q16)
+      center = opennova::world::retail_q16_mul_rhu(center, scale_q16);
+    sphere.radius_q16 =
+        opennova::world::retail_q16_mul_rhu(sphere.radius_q16, scale_q16);
+  }
+  return sphere;
+}
+
+ObjectProjectionSphere person_projection_sphere_q16(
+    int32_t entity_bound_radius_q16, bool parachute_deployed,
+    int32_t parachute_model_radius_q16) {
+  ObjectProjectionSphere sphere;
+  sphere.valid = true;
+  sphere.radius_q16 = parachute_deployed
+                         ? parachute_model_radius_q16 : entity_bound_radius_q16;
+  return sphere;
+}
 
 // [orig: Model_SelectRlodLevel @ 0x5c3b20 — the threshold walk and the
 //  coarsest-slot back-off; the fraction it also stores (@ 0x5c3bb3/0x5c3bc2

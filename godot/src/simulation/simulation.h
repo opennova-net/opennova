@@ -316,6 +316,7 @@ public:
         PF_OBJECT_DESTROY03 = opennova::world::PF_OBJECT_DESTROY03,
         PF_OBJECT_DESTROY04 = opennova::world::PF_OBJECT_DESTROY04,
         PF_OBJECT_DESTROY05 = opennova::world::PF_OBJECT_DESTROY05,
+		PF_PARACHUTE_DEPLOYED = opennova::world::PF_PARACHUTE_DEPLOYED,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 

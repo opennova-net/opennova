@@ -202,6 +202,22 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 	return true;
 }
 
+opennova::renderer::ObjectProjectionSphere collision_projection_sphere_from_3di(
+    const Threedi3di3 &model, int32_t runtime_scale_q16,
+    int32_t definition_scale_q16) {
+  if (model.collision == nullptr) return {};
+  const auto &bounds = model.collision->model_data;
+  std::array<int32_t, 3> minimum{}, maximum{};
+  for (int axis = 0; axis < 3; ++axis) {
+    minimum[axis] = bounds.has_bbox_fp16 ? bounds.bbox_fp16[axis]
+        : io::float_to_fp16_16_round_sat(bounds.bbox[axis]);
+    maximum[axis] = bounds.has_bbox_fp16 ? bounds.bbox_fp16[axis + 3]
+        : io::float_to_fp16_16_round_sat(bounds.bbox[axis + 3]);
+  }
+  return opennova::renderer::object_projection_sphere_from_bounds_q16(
+      minimum, maximum, runtime_scale_q16, definition_scale_q16);
+}
+
 // The model bound-sphere radius. Production files use GHDR's exact Q16 value;
 // only headerless in-memory fixtures derive it from LOD-0 part spheres (and,
 // for degenerate fixture models, strip boxes).

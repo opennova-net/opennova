@@ -1169,6 +1169,7 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 		// values, so the next submitted frame re-applies exactly what changed
 		// while the row was out (set legs are per-submission re-asserts;
 		// falling edges latched in the publish state still clear).
+		model->set_parachute_deployed(field_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
 		const bool submitted = present_visible &&
 				!model->is_occlusion_hidden() &&
 				model->is_on_screen();

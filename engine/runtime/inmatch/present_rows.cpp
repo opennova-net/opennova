@@ -330,6 +330,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			// projection above reconstructs this from animation flags for joiners;
 			// host/SP must prefer the source byte used by retail's gate.
 			r[PF_STANCE_BITS] = static_cast<float>(ent->net_stance_bits & 0x03u);
+			r[PF_PARACHUTE_DEPLOYED] =
+					((ent->flags | ent->engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
 			write_present_section_mask(r, item_hidden_sections(*ent));
 			write_present_doors(r, i, kernel.world, *ent, door_phases);
 			r[PF_RIGHT_HAND_COLLAPSED] =
@@ -670,6 +672,8 @@ static void write_world_present_row(const PresentRowsContext &context,
 	// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
 	// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
 	r[PF_STANCE_BITS] = static_cast<float>(e.net_stance_bits & 0x03u);
+	r[PF_PARACHUTE_DEPLOYED] =
+			((e.flags | e.engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
 	write_present_section_mask(r, item_hidden_sections(e));
 	write_present_doors(r, row_index, w, e, door_phases);
 	r[PF_RIGHT_HAND_COLLAPSED] =

@@ -1,6 +1,7 @@
 #include <runtime/inmatch/client_replica_present_projection.h>
 
 #include <runtime/inmatch/client_replica_present.h>
+#include <runtime/world/entity.h>
 
 #include <algorithm>
 
@@ -56,6 +57,10 @@ void project_client_replica_present_row(
 				((anim_flags & world::kAnimStanceFlagProne) != 0 ? 1u : 0u) |
 				((anim_flags & world::kAnimStanceFlagCrouched) != 0 ? 2u : 0u);
 		row[world::PF_STANCE_BITS] = static_cast<float>(stance_bits);
+	}
+	if (entity.cls == EntityClass::Player || entity.cls == EntityClass::Infantry) {
+		row[world::PF_PARACHUTE_DEPLOYED] =
+				(entity.rm_entity_flags & world::kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
 	}
 	// Decoded wire position is mission (x,y,z) 16.16 -> present (x, z, -y)
 	// world units, the SAME remap the AI-pool present uses. On a joiner the
