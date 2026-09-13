@@ -299,6 +299,8 @@ world::WeaponTable build_weapon_table(
 		e.error_up_theta_fp16 = d.error_up_theta_fp16;
 		e.weaponweight_fp16 = d.weaponweight_fp16;
 		e.clipweight_fp16 = d.clipweight_fp16;
+		for (int stance = 0; stance < 3; ++stance)
+			e.stability_fp16[stance] = d.stability_fp16[stance];
 		// The 3P body-channel triple — see the WeaponTableEntry contract. The motor
 		// resolves these per ENTITY from its own equipped index, so they must live on
 		// the table rather than on a local-player scalar.

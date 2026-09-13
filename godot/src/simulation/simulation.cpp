@@ -145,11 +145,11 @@ void Simulation::reset_world() {
 	// sim asset caches, the local-player weapon/loadout/view state and the
 	// terrain field store all reset inside it. Retail reloads its model cache
 	// per mission too, so the parse-once caches dying here is faithful.
-	// Four pieces deliberately SURVIVE the swap, as they survived reset_world
+	// The retained pieces SURVIVE the swap, as they survived reset_world
 	// before the kernel: the seat/mount table (it installs before mission
 	// promotion — the wire-header join prewarms it pre-load), its graphic
-	// sources, the player's mouse settings, and the declared half of the
-	// script's mission-variable bank (the retail bank is process-global and
+	// sources, the player's mouse settings and scoped aim oscillators, and
+	// the declared half of the script's mission-variable bank (the retail bank is process-global and
 	// no load path zeroes the compiler-declared slots, so a restart or the
 	// next mission reads slot n at the previous run's value; V# and G# start
 	// at zero per load, ScriptVarStore::carry_declared_from).
@@ -163,7 +163,10 @@ void Simulation::reset_world() {
 		kept_look_settings = kernel_->local.look_settings;
 		kept_script_vars = kernel_->world.script.vars;
 	}
-	kernel_ = std::make_unique<opennova::mission::MissionKernel>();
+	auto next_kernel = std::make_unique<opennova::mission::MissionKernel>();
+	if (kernel_ != nullptr)
+		next_kernel->local.carry_scoped_aim_drift_from(kernel_->local);
+	kernel_ = std::move(next_kernel);
 	role_->bind(*kernel_);
 	kernel_->seat_specs = std::move(kept_seat_specs);
 	kernel_->mounted_graphics = std::move(kept_mounted_graphics);

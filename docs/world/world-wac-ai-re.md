@@ -2017,6 +2017,74 @@ gate refresh), `0x4e064c` (the case-26 toggle), `0x7bef3e` (the output power met
 `0x4b17f0` (the pitch kick resolved), `0x401f00` (control-registers-only fire side
 effect).
 
+## 14.9 Scoped weapon stability and persistent aim drift (2026-09-13)
+
+`LocalPlayer::apply_scoped_aim_drift`, called by the infantry body pass after
+weapon-weight decay, ports the local-only block in
+[orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, @0x4B5966..0x4B5C97].
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Weapon stability definition and runtime table | MATCHING | `def_parse_weapons` and `npruntime_weapon_table` cover absent-key defaults and all three authored Q16 columns |
+| Scoped/binocular drift | MATCHING (behavioral proof) | `local_player_view` checks original-machine golden sequences and the body → persistent input → camera/fired-round path |
+
+The `stability` key supplies prone, crouch and standing Q16 multipliers at
+AdmDef+0x158/+0x15C/+0x160. **All three default to `0x10000`**; missing keys do
+not disable sway. The parser uses `Math_ParseFixedPoint16`, not float rounding
+[orig: AdmDef_InitEntryDefaults @ 0x53FEF0, stores @0x53FF61/@0x53FF67/@0x53FF6D;
+WeaponDefs_ParseLineCallback @ 0x543680, key @0x544118, stores
+@0x544139/@0x54414E/@0x544169; Math_ParseFixedPoint16 @ 0x6131F0]. OpenNova's
+weapon DEF interface has no serializer; this correction adds the typed parser
+and runtime carriers and consumes them directly.
+
+The body gate requires the local player and either the promoted scope bit with
+parentSlot other than 3, or active binocular optics. The binocular body-pose flag
+alone does not qualify. The raw world tick chooses refreshes: yaw every 186 ticks,
+pitch every 62, with yaw's PRNG draw first on a shared boundary. Each refresh
+flips that axis's direction and samples its magnitude: prone or binoculars
+`random % 8000 + 3000`, crouch `random % 15000 + 5000`, standing
+`random % 20000 + 10000`. The corresponding stability multiplier is applied
+with signed multiply, `+0x8000`, and the low dword after a 16-bit right shift.
+The yaw step is the result arithmetic-shifted by 6; pitch applies stability
+**again** after that shift [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0,
+yaw @0x4B5992..0x4B5AC8, pitch @0x4B5AC8..0x4B5C20].
+
+Each axis changes its drift by that step only while the old drift is inside the
+selected bound; crossing the bound is not clamped. The resulting drift is added
+to actual entity Pitch/Yaw every eligible tick, and yaw also updates the local
+look accumulator. Scope/weapon/spawn transitions retain the two axis states;
+each axis zeroes its drift only when it observes changed MoveOrder stance bits
+at its own refresh boundary. Their BSS initial values are zero, and fresh IDA
+xrefs identify no other direct writers to `0xA860F8..0xA86118`
+[orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, reset tests @0x4B59BA/@0x4B5AFF,
+advance and aim stores @0x4B5C20..0x4B5C91]. The native motor's input staging
+requires updating `target_heading` and `look_pitch` alongside entity aim so its
+later assignments and post-tick input fold preserve those additions.
+`LocalPlayer::carry_scoped_aim_drift_from` transfers only the two axis records
+when `Simulation::reset_world` replaces its kernel. Mission input and the PRNG
+retain their existing reset behavior, and simultaneous Simulation instances do
+not share these formerly process-global values.
+
+The independent oracle executed the original block and its unmodified
+`PRNG_Next16` on the retail executable with SHA256
+`b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac`.
+Seed `0x1A10101A` and zero initial aim/globals produce tick-0 standing yaw/pitch
+`-214/-408`; after ticks 0–186 inclusive they produce `-2155681/-1988018`.
+The regression samples seven 187-tick runs (three stances with default and
+distinct 0.5/2/1.5 multipliers, plus zero stability), PRNG consumption, interrupted
+scope, gunner/binocular gates and
+independent stance resets. It also exercises the real AI tick's preceding recoil
+draw, the next input copy, camera composition, and a generated fire descriptor.
+A kernel-replacement regression copies the retained axes into a new local player
+and checks continuation while an independent local player stays at zero.
+This bounded integer witness is not a full retail playthrough comparison.
+
+| ID | Status | Summary |
+|---|---|---|
+| D-WPN-36 | FIXED 2026-09-13 | Scoped stability was absent despite retail's enabled defaults. The DEF/runtime triplet and the local body-pass oscillator now drive persistent aim with retail phase, stance, arithmetic and PRNG order; `def_parse_weapons`, `npruntime_weapon_table`, and `local_player_view` cover the correction. |
+
+No IDB edits were made for this slice.
+
 ## 15. World-object collision + blink boxes (engine-research 2026-07-09; re-grilled 2026-07-11)
 
 The runtime consumers of the `.3di` collision block (CDTA: CMDL/BVOL/BPLN/COBJ —

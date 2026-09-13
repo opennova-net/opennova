@@ -145,6 +145,13 @@ public:
     // Pack the frame input onto the local player's body before the logic tick
     // (the view-flag stamps ride along); no local player = no-op.
     void apply_player_input_pre_tick();
+    // The body-pass scoped/binocular drift, after weight dispersion and before
+    // upper-body decay. Writes persistent aim, including the next input fold.
+    // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, block @0x4B5966..0x4B5C97]
+    void apply_scoped_aim_drift(AiEntity &body, uint32_t logic_tick);
+    // Preserve the retail process-global oscillators across a kernel replacement.
+    // Other local input, weapon and view state still belongs to the new mission.
+    void carry_scoped_aim_drift_from(const LocalPlayer &previous);
     // The post-tick local pumps in retail order: the sim-wrote-the-view fold,
     // the per-frame view promoter, then the equipped-slot FSM pump.
     void run_local_player_post_tick();
@@ -176,6 +183,18 @@ private:
     // The sim-owned stance latch (0 stand, 1 crouch, 2 prone).
     int stance_latch_ = 0;
     bool medic_dead_edge_seen_ = false;
+    // These process globals have no round, weapon, scope-toggle or player-spawn
+    // reset writer. Each axis resets its drift only when it observes a changed
+    // stance at its own period boundary. [orig: 0xA860F8..0xA86118]
+    struct ScopedAimAxis {
+        int32_t drift = 0;
+        int32_t step = 0;
+        int32_t limit = 0;
+        uint16_t stance_bits = 0;
+        bool decreasing = false;
+    };
+    ScopedAimAxis scope_yaw_;
+    ScopedAimAxis scope_pitch_;
 };
 
 } // namespace opennova::world

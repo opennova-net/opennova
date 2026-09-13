@@ -352,6 +352,67 @@ void LocalPlayer::sync_local_mounted_input_heading() {
 	if (body->inf.look_pitch != input.look_pitch) input.look_pitch = body->inf.look_pitch;
 }
 
+// [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, block @0x4B5966..0x4B5C97]
+void LocalPlayer::apply_scoped_aim_drift(AiEntity &body, uint32_t logic_tick) {
+	World &world = world_;
+	if (body.handle != world.cached.local_player) return;
+	const Entity *entity = world.registry.get(body.handle);
+	if (entity == nullptr) return;
+	const bool binoculars = view.binoculars_view_active;
+	const bool gunner = entity->mount_type == SeatType::Gunner;
+	if ((!player_view_scope_settled(view) || gunner) && !binoculars) return;
+
+	const uint16_t stance_bits = body.inf.stance == InfantryState::Stance::kProne ? 0x100 :
+			body.inf.stance == InfantryState::Stance::kCrouch ? 0x200 : 0;
+	const int stance = (stance_bits & 0x100) != 0 || binoculars ? 0 :
+			(stance_bits & 0x200) != 0 ? 1 : 2;
+	const WeaponTableEntry *held = world.tables.weapons.by_index(entity->equipped_adm_index);
+	const int32_t stability = held != nullptr ? held->stability_fp16[stance] : 0x10000;
+	// imul/add/adc/shrd keeps the low 32 bits after the rounded Q16 product,
+	// including negative/custom values. Pitch intentionally multiplies twice.
+	const auto multiply = [](int32_t value, int32_t factor) {
+		const int64_t product = static_cast<int64_t>(value) * factor + 0x8000;
+		return static_cast<int32_t>(static_cast<uint64_t>(product) >> 16);
+	};
+	const auto refresh = [&](ScopedAimAxis &axis, bool pitch) {
+		if (axis.stance_bits != stance_bits) axis.drift = 0;
+		const int32_t random = world.next_prng16();
+		const int32_t amplitude = stance == 0 ? random % 8000 + 3000 :
+				stance == 1 ? random % 15000 + 5000 : random % 20000 + 10000;
+		axis.limit = multiply(amplitude, stability);
+		axis.step = io::bam_sar(axis.limit, 6);
+		if (pitch) axis.step = multiply(axis.step, stability);
+		axis.decreasing = !axis.decreasing;
+		axis.stance_bits = stance_bits;
+	};
+	// Raw, unstaggered world ticks; enabling the view does not restart either
+	// period. Draw yaw before pitch on their common boundary.
+	if (logic_tick % 186u == 0) refresh(scope_yaw_, false);
+	if (logic_tick % 62u == 0) refresh(scope_pitch_, true);
+	const auto advance = [](ScopedAimAxis &axis) {
+		if (axis.decreasing) {
+			if (axis.drift > io::bam_sub(0, axis.limit))
+				axis.drift = io::bam_sub(axis.drift, axis.step);
+		} else if (axis.drift < axis.limit) {
+			axis.drift = io::bam_add(axis.drift, axis.step);
+		}
+	};
+	advance(scope_pitch_);
+	advance(scope_yaw_);
+	body.pitch = io::bam_add(body.pitch, scope_pitch_.drift);
+	body.heading = io::bam_add(body.heading, scope_yaw_.drift);
+	// The native motor stages input separately from the entity. Keep both
+	// copies current so its later aim assignment and post-tick input fold
+	// preserve retail's entity Pitch/Yaw and g_LocalPlayerLookYaw additions.
+	body.inf.look_pitch = io::bam_add(body.inf.look_pitch, scope_pitch_.drift);
+	body.inf.target_heading = io::bam_add(body.inf.target_heading, scope_yaw_.drift);
+}
+
+void LocalPlayer::carry_scoped_aim_drift_from(const LocalPlayer &previous) {
+	scope_yaw_ = previous.scope_yaw_;
+	scope_pitch_ = previous.scope_pitch_;
+}
+
 void LocalPlayer::apply_player_input_pre_tick() {
 	World &world = world_;
 	if (!world.cached.local_player.valid()) return;

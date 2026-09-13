@@ -278,3 +278,5 @@ The [2026-09-13 jo-c sweep](jo-c-parity-audit-2026-09-13.md) reconciles the acti
 backlog, identifies additional source discrepancies, and orders the next fixes.
 Its source/oracle confidence levels are separate from the earlier IDA grills and
 runtime acceptance results linked above.
+
+Scoped-aim parity (2026-09-13): the local body pass applies the stance-scaled, fixed-point scope/binocular oscillator and carries its phase across mission-kernel replacement; [world §14.9](world/world-wac-ai-re.md#149-scoped-weapon-stability-and-persistent-aim-drift-2026-09-13), D-WPN-36.

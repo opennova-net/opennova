@@ -1522,3 +1522,9 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 | Reimplementation | Original | Address | Verdict / evidence |
 |---|---|---|---|
 | `audio::plan_oneshot_at_distance` and `plan_oneshot_3d` | `SoundBank_PlayTriggerEntries` | `0x75CCD0` (gate `0x75CD54`) | matching for listener-view admission before member/pitch draws; D-SND-19, `audio_oneshot_play`, live Simulation/SoundBank GUT regression |
+
+### Scoped stability drift (2026-09-13)
+
+| Reimplementation | Original | Address | Verdict / evidence |
+|---|---|---|---|
+| `LocalPlayer::apply_scoped_aim_drift` / DEF stability parser | `Infantry_TickMovement` scoped oscillator / weapon DEF parser | `0x4B5966..0x4B5C97` / `0x544118..0x544169` | matching bounded drift path; D-WPN-36, original executable golden sequences and `local_player_view`, `def_parse_weapons`, `npruntime_weapon_table` |

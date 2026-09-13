@@ -83,6 +83,26 @@ static int live_weapon_oracle(const std::string &install, const std::string &exp
 }
 
 int main(void) {
+    // Authored/default stability survives DEF -> runtime-table promotion.
+    {
+        static const char kStability[] =
+            "weapon \"WPN_DEFAULT_STABILITY\"\nend\n"
+            "weapon \"WPN_CUSTOM_STABILITY\"\nstability 0.5, 2, 1.5\nend\n";
+        DefWeaponsFile parsed{};
+        CHECK(def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kStability),
+                sizeof(kStability) - 1, &parsed) == 0);
+        const world::WeaponTable table = world::build_weapon_table(parsed);
+        const int expected[2][3] = {{65536,65536,65536}, {32768,131072,98304}};
+        for (int row = 1; row <= 2; ++row) {
+            const world::WeaponTableEntry *weapon = table.by_index(row);
+            CHECK(weapon != nullptr);
+            if (weapon != nullptr)
+                for (int stance = 0; stance < 3; ++stance)
+                    CHECK(weapon->stability_fp16[stance] == expected[row - 1][stance]);
+        }
+        def_free_weapons(&parsed);
+    }
+
 	if (const std::string install = retail::install(); !install.empty()) {
 		if (live_weapon_oracle(install, std::string()) != 0) return 1;
 		for (const std::string &expansion : retail::expansions())
