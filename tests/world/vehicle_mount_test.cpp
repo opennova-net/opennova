@@ -1693,6 +1693,90 @@ void test_ai_drive_avoid_brake() {
     CHECK(cmd2.cmd_speed == cmd0.cmd_speed);
 }
 
+// Quantized footprint cosine and truncating FPATAN through the complete AI
+// command staging, shared by ground/boat. Bounds and positions are exact Q16.
+// [orig: ground @0x48BE86..0x48BF06; boat @0x48E577..0x48E756]
+void test_ai_drive_avoid_quantized_footprints() {
+    struct Case { int32_t x, y, other_yaw; bool brakes; };
+    const Case cases[] = {
+        // distance 554569; retail threshold 554643, full-angle cosine 554566.
+        {546144, 96300, 1193046471, true},
+        // Half-bin at 90 degrees: thresholds 557056 -> 558061.
+        {557500, 0, -1071644673, false},
+        {557500, 0, -1071644672, true},
+        {557500, 0, -1071644671, true},
+        // Half-bin at zero: thresholds 720896 -> 720892.
+        {720894, 0, -2145386497, true},
+        {720894, 0, -2145386496, false},
+        {720894, 0, -2145386495, false},
+        // Bearing -2028195171.7175 truncates to -2028195171. Rounding to
+        // -2028195172 selects the next bin and falsely brakes: distance
+        // 554644 exceeds the true threshold 554643 (rounded threshold 555648).
+        {546220, 96300, -952356196, false},
+    };
+    for (bool boat : {false, true}) {
+        Rig r(30.0f);
+        VehicleTraits traits = truck_traits();
+        traits.player_speed = traits.water_speed = 65536;
+        r.w.vehicles.traits.set(r.veh().item_id, traits);
+        r.veh().position = {0.0f, 0.0f, 0.0f};
+        r.veh().bound_radius = 5.0f; // 327680 Q16
+        r.veh().veh.yaw_bam = 0;
+        r.veh().veh.yaw_seeded = true;
+        const int ai_index = r.sys.attach(r.veh_h);
+        AiBrain &brain = r.sys.at(ai_index)->brain;
+        brain.f[AiBrain::kCurState] = 16;
+        brain.f[AiBrain::kPendState] = 16;
+        brain.f[AiBrain::kOutSpeed] = 65536;
+        brain.f[AiBrain::kWpType] = 0;
+        brain.f[AiBrain::kWpBearing] = 0;
+        brain.f[AiBrain::kAnimFlag] = 0;
+        Entity driver;
+        driver.kind = EntityKind::Organic;
+        driver.item_id = 2072;
+        driver.health = 150;
+        driver.alive = true;
+        const EntityHandle driver_handle = r.w.registry.spawn(0, driver);
+        CHECK(r.w.vehicles.process_attach(driver_handle, r.veh_h, 1));
+        const Entity *controller = r.w.vehicles.resolve_controller(r.veh());
+        CHECK(controller != nullptr);
+        const auto speed = [&]() {
+            VehicleDriveCmd command;
+            if (boat) r.sys.watercraft_ai_drive(r.w, r.veh(), controller, traits, command);
+            else r.sys.vehicle_ai_drive(r.w, r.veh(), controller, traits, command);
+            CHECK(command.ai_drive);
+            return command.cmd_speed;
+        };
+        CHECK(speed() == 65536);
+        Entity obstacle;
+        obstacle.kind = EntityKind::Item;
+        obstacle.item_id = 999;
+        obstacle.bound_radius = 5.0f;
+        obstacle.veh.yaw_seeded = true;
+        const EntityHandle other = r.w.registry.spawn(1, obstacle);
+        for (const Case &c : cases) {
+            Entity &neighbor = *r.w.registry.get(other);
+            neighbor.position = {static_cast<float>(c.x) / 65536.0f,
+                                 static_cast<float>(c.y) / 65536.0f, 0.0f};
+            neighbor.veh.yaw_bam = c.other_yaw;
+            // net id 11, frame 0: one brake maps 65536 to 0x4000+11.
+            CHECK(speed() == (c.brakes ? 16395 : 65536));
+        }
+        Entity &neighbor = *r.w.registry.get(other);
+        neighbor.position = {546144.0f / 65536.0f, 96300.0f / 65536.0f, 0.0f};
+        neighbor.veh.yaw_bam = 1193046471;
+        const EntityHandle second = r.w.registry.spawn(1, neighbor);
+        CHECK(speed() == 4102); // both overlapping neighbors compound the brake
+        neighbor.ground_target = r.veh_h;
+        CHECK(speed() == 16395); // neighbor carried by self is excluded
+        neighbor.ground_target = {};
+        r.veh().ground_target = other;
+        CHECK(speed() == 16395); // self carried by neighbor is excluded too
+        r.w.registry.get(second)->ground_target = r.veh_h;
+        CHECK(speed() == 65536); // both carrier links excluded, no false brake
+    }
+}
+
 // A driverless hull's stuck escalation [orig: AI_CheckVehicleStuckState
 // @0x465290]: the count climbs once per parked tick; on the authority every
 // 16th count past 32 a live pool-0 body within (radii + 12 u) resets it; past
@@ -2780,6 +2864,7 @@ int main() {
     test_prepare_vehicle_weapon_slot_after_armory_load();
     test_ai_drive_leg();
     test_ai_drive_avoid_brake();
+    test_ai_drive_avoid_quantized_footprints();
     test_stuck_check();
     test_min_ai_crew_clamp();
     test_handbrake_latch();

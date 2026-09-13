@@ -7,6 +7,7 @@
 // AI/parked input staging.
 
 #include <runtime/world/angle.h>
+#include <runtime/world/dir_table.h>
 #include <algorithm>
 #include <cmath>
 
@@ -207,9 +208,9 @@ void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
     }
 }
 
-// The 1024-entry engine cos table at 2^22, computed form (the D-INF-4
-// equivalence) [orig: off_849934, idx = (bam + 0x200000) >> 22].
-static int32_t avoid_cos22(int32_t bam) {
+// Aircraft steering uses full-angle x87 FCOS, independently of the vehicle
+// footprint table below. [orig: Entity_UpdateAircraftPhysics @0x4917E6]
+static int32_t flight_cos22(int32_t bam) {
     const double a = static_cast<double>(bam) * io::kRadiansPerBam;
     return static_cast<int32_t>(std::cos(a) * io::kQ22One);
 }
@@ -267,26 +268,34 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         if (dist > reach) continue;
         // Bearing other->self in BAM [orig: fpatan(dy, dx) x 2^32/2pi
         // (dbl @0x7C19D8) @0x48be7a-0x48be89].
-        const int32_t ang = static_cast<int32_t>(
-                std::llround(std::atan2(fdy, fdx) * 683565275.5764316));
+        // _ftol2_sse truncates toward zero. The widened conversion also
+        // preserves +pi's 0x80000000 word without an out-of-range float cast.
+        const int32_t ang = static_cast<int32_t>(static_cast<uint32_t>(
+                static_cast<int64_t>(std::atan2(fdy, fdx) * 683565275.5764316)));
         // Directional footprints: r/2 + (r/2)*|cos(yaw - ang)| — an end-on
         // vehicle projects its full bound along the axis, side-on half
         // [orig: the 1024-entry cos table off_849934 @0x48be8f-0x48bef1].
         const int32_t oyaw = o->veh.yaw_seeded
                 ? o->veh.yaw_bam
                 : bam_heading_from_mission_yaw_deg(static_cast<double>(o->yaw));
+        int32_t other_cos22, self_cos22, unused_sin22;
+        // Add half a bin, then take the unsigned top ten bits before loading
+        // off_849934; continuous cosine changes the overlap/brake threshold.
+        // [orig: other @0x48BE98..0x48BEA0; self @0x48BEC9..0x48BEDB]
+        quantized_dir(io::bam_sub(oyaw, ang), other_cos22, unused_sin22);
+        quantized_dir(io::bam_sub(heading, ang), self_cos22, unused_sin22);
         const int32_t other_r =
                 static_cast<int32_t>((static_cast<int64_t>(ob >> 1) *
-                                      iabs32(avoid_cos22(oyaw - ang))) >> 22) +
+                                      iabs32(other_cos22)) >> 22) +
                 (ob >> 1);
         const int32_t self_r =
                 static_cast<int32_t>((static_cast<int64_t>(self_bound >> 1) *
-                                      iabs32(avoid_cos22(heading - ang))) >> 22) +
+                                      iabs32(self_cos22)) >> 22) +
                 (self_bound >> 1);
         if (dist > self_r + other_r + 0x10000) continue; // [orig: @0x48bef8]
         // Dead-ahead gate: the other within ~30 deg of the nose
         // [orig: |Yaw - ang - 0x7FFFFF80| <= 357913920 @0x48bf05-0x48bf0f].
-        if (iabs32(heading - ang - 0x7FFFFF80) > 357913920) continue;
+        if (iabs32(io::bam_sub(io::bam_sub(heading, ang), 0x7FFFFF80)) > 357913920) continue;
         // The brake factor ((id + (frame << 8)) & 0x7FFF) + 0x4000 — keyed
         // off DcbId + the global frame counter dword_24C1948 (our net id +
         // logic tick stand in) [orig: @0x48bf17-0x48bf26].
@@ -811,7 +820,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         m.net_climb = climb;
         // The heading error's trig at 2^22 [orig: @0x4917d4..0x491821].
         const int32_t err = bearing - m.yaw_bam;
-        const int32_t c22 = avoid_cos22(err);
+        const int32_t c22 = flight_cos22(err);
         const int32_t s22 = avoid_sin22(err);
         // Beyond 6 u planar, a zero command seeds the 132-scaled cyclic pair
         // from the heading error [orig: @0x4917f3..0x491834 — only a ZERO

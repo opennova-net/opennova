@@ -1524,3 +1524,5 @@ Closed 2026-09-13: **D-WAC-9** -> `FIXED` — Numbered V operands accept decimal
 Closed 2026-09-13: **D-EVT-9** -> `FIXED` — BMS action counts use the original signed byte at execution; counts 128–255 skip actions while preserving event bookkeeping and linked spawns. mission/bms-event-runtime-re.md; Native `event_runtime_bms` immediate/delayed, truncated-slice and unsigned-trigger regressions pass.
 
 Closed 2026-09-13: **D-FOLIAGE-13** -> `FIXED` — Foliage collection survives saturation of the 224-entry main terrain list while retaining its own visibility, distance and 128-cell limits. foliage/foliage-re.md; Native `terrain_frame_compiler` and `terrain_foliage_detail_collector` regressions pass, alongside eight original-executable capacity combinations.
+
+Closed 2026-09-13: **D-AI-13** -> `FIXED` — Vehicle avoidance uses the original quantized footprint cosine and truncating bearing, preserving ordered neighbor braking and carrier exclusions. See [D-AI-13 evidence](world/world-wac-ai-re.md). Native `vehicle_mount` regressions pass for ground and boat callers, half-bin boundaries and compounded braking.

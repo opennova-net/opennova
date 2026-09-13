@@ -5162,6 +5162,33 @@ convoys drove full-speed into parked neighbors and the (ported) hull contact
 DEFLECTED them off their routes — braking behind obstacles, not deflection, is
 the retail path-follow behavior. ctest `vehicle_mount`
 (`test_ai_drive_avoid_brake` — exact factor ahead, no damp behind).
+**D-AI-13 FIXED (2026-09-13): avoidance footprint quantization and bearing truncation.**
+The prior footprint implementation evaluated continuous cosine and rounded the
+FPATAN bearing, despite the original table citation. Retail truncates the bearing
+through `_ftol2_sse` at `0x48BE86`, then reads each footprint cosine from
+`off_849934[((uint32_t)(yaw - bearing + 0x200000)) >> 22]`: other-entity index/load
+at `0x48BE98..0x48BEA0`, self index/load at `0x48BEC9..0x48BEDB`. The shared
+`vehicle_avoid_brake` now uses `quantized_dir` for both reads and truncates the
+bearing while preserving its wrapped half-turn word. The ground and boat callers
+retain the same ordered pool scan, compounded brake factor and carrier exclusions.
+The adjacent boat slip FSIN and aircraft steering FSIN/FCOS are full-angle x87
+operations; their computations remain separate (`0x48E43D`, `0x4917DB/0x4917E6`).
+
+The distinction changes a real brake verdict. With both bounds 327680 Q16, self
+yaw zero, neighbor position `{546144,96300,0}` Q16 and yaw 1193046471 BAM, distance
+554569 exceeds the old continuous-cosine threshold 554566 but is inside retail's
+554643 threshold. `vehicle_mount` exercises the actual ground and boat AI command
+staging at that boundary, at both sides of the zero/quarter-turn half-bin ties,
+and at a bearing where truncation and rounding select different bins. Two
+neighbors compound 65536 -> 16395 -> 4102 at net ID 11/frame zero; both carrier
+link directions preserve their exclusions. The original vehicle body is retained
+in jo-c's `app/reconstruction_vehicle_native.inc` (`0x48AF00..0x48D462`, byte-span
+SHA-256 `c2dd9ee383d6f1383fe1022970db410e709fe3553c444dcfe623d83039e3d9ed`),
+and these instruction sites were checked read-only in the Jointops.exe IDB.
+This corrects the earlier geometry-matching claim in section 31.2; that section's
+historical live-convoy measurements predate this fix.
+
+
 2026-09-01: the rest of leg 3 is ported — the wait-for-boarders stop (the
 existing `vehicle_waits_for_boarders` helper, now on the ground and boat AI
 legs), the minAI crew clamp (`AiSystem::apply_min_ai_crew_clamp` over
@@ -8274,7 +8301,7 @@ Every link from nav node to wheel was then witnessed:
 | Node advance + arrival halve | `AI_UpdateWaypointMovement @0x457BD0` | matching register for register, both halve branches, write order |
 | Commanded-speed cap | `@0x48bc23-0x48bc48` | matching |
 | Pool-1 avoid brake, factor | `@0x48bf17-0x48bf26` | matching; measured f in [0.251, 0.748], mean 0.4989 against the witnessed [0.25, 0.75] |
-| Avoid brake, trigger geometry | `@0x48bdf2..0x48bf0f` | matching: reach, doubled z, directional footprints, the ~30 degree dead-ahead test |
+| Avoid brake, trigger geometry | `@0x48bdf2..0x48bf20` | corrected 2026-09-13 (D-AI-13, section 23.3): quantized footprint cosine and truncating bearing; reach, doubled z, carrier exclusions and the dead-ahead gate retain their witnessed behavior |
 | Bound-radius derivation | `Entity_InitFromModel @0x40dc30` | matching, including the `max` against the husk radius and the `+0x1000` pad |
 | Speed approach + recovery | `@0x48AF00` interior | matching: `cos^2(Pitch)` target, `(target - speed + 16) >> 5`, the `deceleration >> 1` clamp, the `<48` stop snap and the zero-delta snap |
 | itemDef accel/decel parse | `@0x49da84` | matching; verified at runtime that the parsed values reach the loaded traits |
