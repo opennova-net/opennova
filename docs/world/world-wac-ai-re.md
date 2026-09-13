@@ -10287,3 +10287,14 @@ test_remote_command_fanout_reaches_owner_and_remotes), script_remote_command
 (netsim host VM -> encode -> joiner pipeline -> shared handler), nw_ingame_encode
 (byte layout, 250 cap, short-body zero-fill), nw_message_coverage (Decoded drift
 guard) and nw_codec_identity (committed vector script_remote_command_ssnwave).
+
+## Cold-spawn-deferred wreck presentation (catalog repair, 2026-09-13)
+
+The ledger retained D-ITEM-22's original G4b null-husk-latch finding after its fix
+landed in `9b24601587` on 2026-09-11. This audit restores its missing domain entry
+and retires the stale open row using the landed implementation and regression.
+No new runtime change or fresh GUT execution is claimed.
+
+| ID | Divergence | Evidence / acceptance | Disposition |
+|---|---|---|---|
+| D-ITEM-22 | A dynamic wreck whose body was deferred by the cold-spawn budget used to retain a null husk permanently. | `DestructionPresenter::apply_husk_swap` now returns without caching the temporary miss; the retained PF_HUSK presentation retries after wire-node registration. Existing `godot/tests/destruction_present_pass_test.gd::test_retained_husk_pick_retries_and_updates_only_the_husk_section_mask` exercises the early miss, later body materialization, one husk across repeated snapshots, mask updates and live pose. | **FIXED** in `9b24601587` (2026-09-11); stale ledger entry retired by the 2026-09-13 source audit. The existing GUT regression was read, not re-run here. |

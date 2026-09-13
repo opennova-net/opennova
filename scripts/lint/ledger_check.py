@@ -57,6 +57,7 @@ DOMAIN_ORDER: list[tuple[str, str]] = [
     ("HUD", "UI (menu/ctrl/sound/playerinfo/HUD)"),
     ("LOADSCR", "UI (menu/ctrl/sound/playerinfo/HUD)"),
     ("MIS", "Mission `.mis`"),
+    ("SAVE", "Mission savegames"),
     ("3DILW", "LW `.3di`"),
     ("PTL", "Particles `.ptl`"),
     ("3DI", "3DI `.3di` (GP)"),

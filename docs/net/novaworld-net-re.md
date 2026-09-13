@@ -14052,3 +14052,51 @@ MultiPlayer_JoinSessionStateMachine @0x56a50b]
 | D-WPN-3 | FIXED | FARP/ground-chain, water/swimming, clip and ammo cost gates plus Finish fire-loop kick condition are ported; the clip gate's def+0xDC bucket-pool read (`@0x541c6d..0x541c89` -> `sub_5405F0`) is folded into `slot.clip` and rides D-WPN-2. |
 | D-WPN-6 | OPEN, narrowed | Pure joiners pump remote borrowed slots and unoccupied hot pool-one slots once. The authority's general personal-slot coverage is separate from this receive replay port. |
 | D-NET-171 | OPEN, narrowed | The 0x42 password, key, app/version, index/CU, and identity checks now use the appropriate rejection replies, as do represented game-layer admission settings; the ladder, the validate callback's 14/2 lock and 14/3 source-address ban, and the split/resend/retention witnesses are recorded in the host admission section above. Side/squad password inputs (D-NET-167) and cookie/PunkBuster prerequisites remain wider admission work. |
+
+## JO-C source cross-check (2026-09-13)
+
+The [dated audit](../jo-c-parity-audit-2026-09-13.md) pins the reference and
+separates inspected source contracts from live verification. No new IDA grill or
+packet capture was made here, and existing closure evidence remains scoped as
+recorded above.
+
+**D-NET-64 has additional runtime residuals.**
+`client_replica_guided.cpp` can allocate a missile from an update record and revive
+a terminated row on later coordinate data. The original dispatch looks up the
+net id and requires an active entity with its class serializer; updates do not
+synthesize that lifecycle. The lookup is by net id, not shooter id.
+[orig: NetPacket_DispatchToEntityByNetId @0x4D6960]
+
+The reducer's nonzero-XYZ guard also drops explicit all-zero coordinate writes.
+The serializer reads those fields unconditionally for groups 3 and 5 (group 5
+also clears the lock), while the original motor gives the zero vector its own
+straight-flight path. Preserving a previous target is different from preserving
+that sentinel. The replica tick uses stored steer coordinates and never resolves
+the locked entity's current aim point. Ammo-specific launch/motor/seeker behavior
+and normal entity-model/trail ownership remain to be connected.
+[orig: Entity_SerializeGuidedMissileState @0x447C50;
+Entity_UpdateGuidedMissile_0 @0x446060]
+
+Existing `nw_ingame_guided`, `guided_missile_flight` and the client runtime guided
+lane do not establish these lifecycle, zero-write or moving-target properties.
+Add cases at the production reducer/world seam before changing them: update before
+spawn, update after termination, slot reuse, explicit zero coordinates and moving
+locked target, followed by an actual missile-family fire-to-termination scenario.
+
+**D-WPN-2 is a shared-bucket residual, not a missing ammo-class pool system.**
+`WeaponInventory` already owns class pools; `player_weapon.cpp` and server reload
+dispatch transfer/refund class units. The remaining original def+0xDC bucket
+selection/read/write (`sub_5405F0 @0x5405F0`, `sub_540670 @0x540670`) is folded into
+`slot.clip`. Trace this owner through reload, recoil/fire eligibility, total clips,
+weight, mounted/borrowed slots and HUD. Do not reimplement the class-pool subsystem.
+The original reload and total-clips consumers are `WeaponSlot_ReloadAmmo @0x541720`
+and `WeaponSlot_GetTotalClips @0x5425F0`; carried class pools are distinct
+(`Entity_GetScoreValueBySlotType @0x5406E0`).
+
+**D-WPN-9 needs caller completion, not another zoom-step helper.**
+`scope_min_mag` is parsed, and `simulation_player_weapon.cpp` routes actions 212/214
+through the active weapon's limits. The mount clamp helper is defined in
+`local_player_view.cpp` with no caller. Action 215, the remaining scope/refusal
+conditions and network/session legs retain their existing open scope. Recheck all
+active dispatch arms against `Player_AdjustWeaponElevation @0x4DBDF0` and the
+`0x4E130C..0x4E13AE` / `0x4DFAD3..0x4DFB16` sites before closure.
