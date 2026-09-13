@@ -142,6 +142,20 @@ int main() {
 				"NW/NE/SW/SE recursion must visit the northwest leaf first");
 	}
 
+	// Once full, another eligible handoff must leave every existing key and
+	// distance intact. The near list and far-key list each compare their own
+	// 128-entry count in retail. [orig: Terrain_CollectNearFoliagePatches
+	// @ 0x603E60, capacity gates @ 0x603F98 and @ 0x603FF1]
+	const auto full = patches;
+	opennova::collect_foliage_detail_patches(
+			ranged, 1, 0, 0, 16, 32, 16, 24.0f, 10.0f, 40.0f, patches);
+	ok &= expect(patches.size() == 128, "an already-full foliage list remains capped at 128");
+	if (patches.size() == full.size()) {
+		for (size_t i = 0; i < full.size(); ++i)
+			ok &= expect_patch(patches[i], full[i].key, full[i].distance,
+					"an already-full list preserves its key order and distance values");
+	}
+
 	// Subtree handoff [orig: Terrain_TraverseQuadtreeNode @ 0x60905c..0x60907c]:
 	// a frustum-surviving emitted node hands only ITS rect to the collector.
 	// The 16u cell containing the camera collects alone with distance 0.

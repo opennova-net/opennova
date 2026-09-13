@@ -360,7 +360,7 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 			const float sector_ox = static_cast<float>(sx * 512);
 			const float sector_oz = static_cast<float>(sz * 512);
 
-			const size_t sector_patch_begin = visible_.size();
+			foliage_handoffs_.clear();
 			// Retail walks each routed sector twice per frame: the
 			// bounds-tracking pass at view setup, then the draw pass.
 			track_visible_bounds(scene.quad_nodes, scene.l1_children[child],
@@ -369,7 +369,8 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 			traverse_quadtree(scene.quad_nodes, scene.tile_meshes,
 					scene.l1_children[child], frustum,
 					view.cam_x, view.cam_y, view.cam_z,
-					sector_ox, sector_oz, view.config, visible_, stats, zero_height);
+					sector_ox, sector_oz, view.config, visible_, stats, zero_height,
+					&foliage_handoffs_);
 			++draw_list_.debug.sectors_walked;
 
 			// Detail foliage collection is NOT a radial walk: retail's
@@ -379,12 +380,12 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 			// far-slot pool's working set stays below its 16-bit-index
 			// capacity (over-collection thrashed the witnessed LRU into
 			// per-frame cell blink; D-FOLIAGE-13)
-			// [orig: Terrain_TraverseQuadtreeNode handoff
-			// @ 0x60905c..0x60907c -> Terrain_CollectNearFoliagePatches
-			// @ 0x603e60]. The collector re-tests every cell's clamped
-			// AABB against the 42u limit, so the handoff is a broad phase.
-			for (size_t pi = sector_patch_begin; pi < visible_.size(); ++pi) {
-				const VisiblePatch &vp = visible_[pi];
+			// [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, handoff
+			// @ 0x60905C..0x60907C -> Terrain_CollectNearFoliagePatches
+			// @ 0x603E60]. The main 224-entry append limit does not guard
+			// this handoff. The collector re-tests every cell's clamped
+			// AABB against 42u and owns its separate 128-entry capacity.
+			for (const VisiblePatch &vp : foliage_handoffs_) {
 				if (vp.lod_level < 3 || vp.tile_index < 0 ||
 						vp.tile_index >= static_cast<int>(scene.tile_meshes.size())) {
 					continue;

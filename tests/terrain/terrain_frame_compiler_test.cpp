@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 namespace {
 
@@ -85,11 +86,131 @@ void look_at(float m[16], V3 eye, V3 target, V3 up) {
 	m[3] = 0.0f;    m[7] = 0.0f;    m[11] = 0.0f;    m[15] = 1.0f;
 }
 
+void add_quadrant_tiles(opennova::CptFile &cpt, int source_x, int count) {
+	for (int i = 0; i < count; ++i) {
+		auto tile = make_tile(static_cast<uint16_t>(source_x + (i % 8) * 64),
+				static_cast<uint16_t>((i / 8) * 64));
+		give_lod0_list(tile);
+		cpt.tiles.push_back(std::move(tile));
+	}
+}
+
+bool same_detail_cells(const std::vector<opennova::FoliageDetailPatch> &a,
+		const std::vector<opennova::FoliageDetailPatch> &b) {
+	if (a.size() != b.size()) return false;
+	for (size_t i = 0; i < a.size(); ++i) {
+		if (a[i].key != b[i].key || a[i].distance != b[i].distance) return false;
+	}
+	return true;
+}
+
+int test_foliage_handoff_is_independent_of_terrain_budget() {
+	// Three full earlier sectors and one 31/32-tile sector leave exactly
+	// 223/224 main draws before the nearby sector. Its NW leaf is the next
+	// emission. The remaining nearby cells must survive either boundary.
+	// [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, cap bypass @ 0x608FBC
+	// -> 0x609012, independent foliage handoff @ 0x60905C..0x60907C]
+	for (int preceding = 223; preceding <= 224; ++preceding) {
+		auto cpt = make_cpt_base();
+		add_quadrant_tiles(cpt, 0, 64);
+		add_quadrant_tiles(cpt, 512, preceding - 192);
+		opennova::TrnConfig routing;
+		routing.origin_x = routing.origin_y = -4;
+		for (int sx = -2; sx <= 0; ++sx) routing.sector_grid[4][sx + 4] = 1;
+		routing.sector_grid[4][5] = 3;
+		routing.sector_grid[5][5] = 1;
+		opennova::TrnConfig nearby_only;
+		nearby_only.origin_x = nearby_only.origin_y = -4;
+		nearby_only.sector_grid[5][5] = 1;
+		const auto dense = opennova::build_terrain_scene_snapshot(cpt, routing);
+		const auto control = opennova::build_terrain_scene_snapshot(cpt, nearby_only);
+		opennova::TerrainViewInput view;
+		view.skip_empty_sectors = true;
+		view.cam_x = view.cam_z = 544.0f;
+		view.cam_y = 10.0f;
+		identity(view.view);
+		identity(view.proj);
+		view.config.no_frustum = true;
+		view.config.force_leaves = true;
+		opennova::TerrainFrameCompiler compiler;
+		const auto expected = compiler.compile(control, view).detail_cells;
+		if (!expect(expected.size() == 24,
+				"the nearby control has 24 in-range cells across several terrain leaves")) return 1;
+		const auto &limited = compiler.compile(dense, view);
+		if (!expect(limited.debug.sectors_walked == 5 && limited.patches.size() == 224 &&
+				limited.debug.traversal.budget_drops == preceding + 64 - 224,
+				"223/224 earlier emissions saturate only the main terrain draw list")) return 1;
+		int retained_nearby = 0;
+		for (const auto &draw : limited.patches)
+			if (draw.sector_x == 1 && draw.sector_z == 1) ++retained_nearby;
+		if (!expect(retained_nearby == 224 - preceding,
+				"the main append accepts its last slot at 223 and rejects the next at 224")) return 1;
+		if (!expect(same_detail_cells(limited.detail_cells, expected),
+				"foliage preserves every nearby key and its order after the main list fills")) return 1;
+
+		// The default includes flat empty sectors. They can fill the main
+		// list before any authored sector, but cannot starve its foliage.
+		view.skip_empty_sectors = false;
+		const auto &with_empty = compiler.compile(dense, view);
+		if (!expect(with_empty.patches.size() == 224 &&
+				same_detail_cells(with_empty.detail_cells, expected),
+				"default empty-sector fallback does not consume the foliage budget")) return 1;
+		for (const auto &draw : with_empty.patches)
+			if (!expect(draw.zero_height,
+					"earlier empty sectors fill all retained main slots in this fixture")) return 1;
+	}
+	return 0;
+}
+
+int test_full_terrain_budget_preserves_foliage_frustum_and_distance_gates() {
+	auto cpt = make_cpt_base();
+	add_quadrant_tiles(cpt, 0, 64);
+	opennova::TrnConfig routing;
+	routing.origin_x = routing.origin_y = -4;
+	// Five distant sectors supply 320 visible terrain emissions before the
+	// nearby sector. All are in front of a wide camera, beyond foliage range.
+	for (int sx = -2; sx <= 2; ++sx) routing.sector_grid[4][sx + 4] = 1;
+	routing.sector_grid[5][5] = 1;
+	opennova::TrnConfig nearby_only;
+	nearby_only.origin_x = nearby_only.origin_y = -4;
+	nearby_only.sector_grid[5][5] = 1;
+	const auto dense = opennova::build_terrain_scene_snapshot(cpt, routing);
+	const auto control = opennova::build_terrain_scene_snapshot(cpt, nearby_only);
+	opennova::TerrainViewInput view;
+	view.skip_empty_sectors = true;
+	view.cam_x = view.cam_z = 896.0f;
+	view.cam_y = 10.0f;
+	view.config.force_leaves = true;
+	look_at(view.view, {896.0f, 10.0f, 896.0f},
+			{896.0f, 10.0f, 895.0f}, {0.0f, 1.0f, 0.0f});
+	perspective_gl(view.proj, 1.5707963268f, 8.0f, 0.1f, 5000.0f);
+	opennova::TerrainFrameCompiler compiler;
+	const auto expected = compiler.compile(control, view).detail_cells;
+	if (!expect(!expected.empty(), "the forward nearby foliage wedge is visible")) return 1;
+	const auto &limited = compiler.compile(dense, view);
+	if (!expect(limited.patches.size() == 224 && limited.debug.traversal.budget_drops > 0,
+			"earlier visible distant sectors exhaust the main terrain cap")) return 1;
+	for (const auto &draw : limited.patches)
+		if (!expect(draw.sector_z == 0,
+				"the nearby sector contributes foliage after every main slot is spent")) return 1;
+	if (!expect(same_detail_cells(limited.detail_cells, expected),
+			"budget-independent foliage keeps the same frustum wedge and traversal order")) return 1;
+	for (const auto &cell : limited.detail_cells) {
+		if (!expect(cell.distance <= opennova::kFoliageDetailDistanceLimit &&
+				(cell.key & 0x7fffu) <= 896u,
+				"the independent handoff adds no far or wholly behind-camera cells")) return 1;
+	}
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	using opennova::TerrainFrameCompiler;
 	using opennova::TerrainViewInput;
+
+	if (test_foliage_handoff_is_independent_of_terrain_budget() != 0) return 1;
+	if (test_full_terrain_budget_preserves_foliage_frustum_and_distance_gates() != 0) return 1;
 
 	// --- Scene: three quadrant-0 leaf tiles with distinct LOD-0 payloads ----
 	opennova::CptFile cpt = make_cpt_base();

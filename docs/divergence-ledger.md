@@ -1522,3 +1522,5 @@ PR #649 adversarial correction (2026-09-13, D-WPN-36): local heading/leg/pitch c
 Closed 2026-09-13: **D-WAC-9** -> `FIXED` — Numbered V operands accept decimal prefixes while declared names retain precedence and indices clamp at 255. world/world-wac-ai-re.md; Native `wac_behavior` prefix, boundary and shadowing regressions pass.
 
 Closed 2026-09-13: **D-EVT-9** -> `FIXED` — BMS action counts use the original signed byte at execution; counts 128–255 skip actions while preserving event bookkeeping and linked spawns. mission/bms-event-runtime-re.md; Native `event_runtime_bms` immediate/delayed, truncated-slice and unsigned-trigger regressions pass.
+
+Closed 2026-09-13: **D-FOLIAGE-13** -> `FIXED` — Foliage collection survives saturation of the 224-entry main terrain list while retaining its own visibility, distance and 128-cell limits. foliage/foliage-re.md; Native `terrain_frame_compiler` and `terrain_foliage_detail_collector` regressions pass, alongside eight original-executable capacity combinations.

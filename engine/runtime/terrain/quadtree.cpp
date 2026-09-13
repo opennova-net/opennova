@@ -151,7 +151,8 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
                        float sector_ox, float sector_oz,
                        const TraversalConfig& config,
                        std::vector<VisiblePatch>& out_patches,
-                       TraversalStats& stats, bool zero_height) {
+                       TraversalStats& stats, bool zero_height,
+                       std::vector<VisiblePatch>* out_foliage_handoffs) {
 	if (node_idx < 0 || node_idx >= (int)quad_nodes.size()) return;
 	stats.nodes_visited++;
 	const QuadNode& node = quad_nodes[node_idx];
@@ -239,11 +240,19 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 
 	if (emit_here) {
 		if (node.tile_index >= 0) {
+			const VisiblePatch patch{
+				node.tile_index, compute_lod_sub(), node.lod_level,
+				dist, sector_ox, sector_oz, zero_height
+			};
+			// Exhausting terrain draws does not end the foliage handoff. Keep
+			// the same frustum/LOD decision; the collector retains its own
+			// distance and capacity gates. [orig: Terrain_TraverseQuadtreeNode
+			// @ 0x608A00, cap bypass @ 0x608FBC -> 0x609012,
+			// foliage gate/call @ 0x60905C..0x60907C]
+			if (out_foliage_handoffs != nullptr && node.lod_level >= 3)
+				out_foliage_handoffs->push_back(patch);
 			if (out_patches.size() < 224) {
-				out_patches.push_back({
-					node.tile_index, compute_lod_sub(), node.lod_level,
-					dist, sector_ox, sector_oz, zero_height
-				});
+				out_patches.push_back(patch);
 				if (node.is_leaf) stats.leaf_emits++; else stats.nonleaf_emits++;
 				if (dist < stats.dist_min) stats.dist_min = dist;
 				if (dist > stats.dist_max) stats.dist_max = dist;
@@ -256,7 +265,7 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 			traverse_quadtree(quad_nodes, tile_meshes, node.children[i],
 			                  frustum, cam_x, cam_y, cam_z,
 			                  sector_ox, sector_oz, config, out_patches, stats,
-			                  zero_height);
+			                  zero_height, out_foliage_handoffs);
 		}
 	}
 }

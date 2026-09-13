@@ -181,6 +181,9 @@ public:
 private:
 	TerrainDrawList draw_list_;
 	std::vector<VisiblePatch> visible_;
+	// Per-sector handoffs from the same traversal decisions, independent of
+	// retained terrain draws. The cell collector owns its distance/128 cap.
+	std::vector<VisiblePatch> foliage_handoffs_;
 	uint64_t compile_index_ = 0;
 };
 

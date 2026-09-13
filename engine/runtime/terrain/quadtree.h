@@ -104,7 +104,11 @@ int terrain_lod_family(int lod_sub) noexcept;
 float node_distance(const float aabb_min[3], const float aabb_max[3],
                     const float center[3], float px, float py, float pz);
 
-// Recursive quadtree traversal with frustum culling and LOD.
+// Recursive quadtree traversal with frustum culling and LOD. The optional
+// foliage handoff keeps every eligible emitted node independently of the
+// 224-entry terrain draw cap; the cell collector applies its own 128 cap.
+// [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, main cap @ 0x608FBC,
+// foliage handoff @ 0x60905C..0x60907C]
 void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
                        const std::vector<TileMesh>& tile_meshes,
                        int node_idx,
@@ -114,7 +118,8 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
                        const TraversalConfig& config,
                        std::vector<VisiblePatch>& out_patches,
                        TraversalStats& stats,
-                       bool zero_height = false);
+                       bool zero_height = false,
+                       std::vector<VisiblePatch>* out_foliage_handoffs = nullptr);
 
 // The frustum-surviving world AABB of one sector's quadtree: retail's
 // trackBounds traversal ignores the distance emit heuristic, subdivides every
