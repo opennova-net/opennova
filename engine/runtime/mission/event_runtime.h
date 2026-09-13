@@ -26,6 +26,8 @@ namespace opennova::mission {
 struct ScriptedEvent {
     bms::Event event{};
     std::vector<bms::Trigger> triggers;
+    // Bounded raw-byte slice; dispatch separately sign-extends event.action_count.
+    // Trigger counts keep the full unsigned range. [orig: @0x454C92/@0x454D01]
     std::vector<bms::Action> actions;
     // Live timer words. Units: the on-disk reload values are authored_value << 6,
     // decremented 64 per processing pass — for normal events (processed once per

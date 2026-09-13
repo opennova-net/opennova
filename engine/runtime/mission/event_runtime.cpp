@@ -696,7 +696,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
 }
 
 void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
-    // [orig: the dispatch loops @0x454ca6/@0x454d0e — every action entry in order.]
+    // [orig: the dispatch loops @0x454ca6/@0x454d0e: signed byte count, in order.]
     // The input-bit consume: the chain mirror (the live word with every
     // matched bit toggled off) is committed back to the live word right
     // before the actions run, at BOTH dispatch sites -- the immediate fire
@@ -704,8 +704,15 @@ void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
     // expiry [orig: @0x454c8b immediate, @0x454cfa delayed].
     w.script.input_action_bits = w.script.input_action_mirror;
     const int32_t event = static_cast<int32_t>(&se - events_.data());
-    for (size_t index = 0; index < se.actions.size(); ++index)
-        dispatch_action(w, se.actions[index], event, se.event.action_index + static_cast<int32_t>(index));
+    // The raw file byte is signed only at dispatch: 128..255 execute no
+    // actions, while the input consume, linked-spawn hook and timers still run.
+    // Spell the sign extension without implementation-defined uint8 -> int8.
+    // [orig: immediate @0x454C92/@0x454CAB; delayed @0x454D01/@0x454D13]
+    const int action_count = se.event.action_count < 128
+            ? se.event.action_count : static_cast<int>(se.event.action_count) - 256;
+    for (int index = 0;
+            index < action_count && static_cast<size_t>(index) < se.actions.size(); ++index)
+        dispatch_action(w, se.actions[index], event, se.event.action_index + index);
     // The waypoint completion hook: a fired event completes every route marker
     // linked to its index (the original computes the index from the record's
     // position in g_Events; events_ mirrors that array order).

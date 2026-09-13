@@ -33,13 +33,13 @@ event record IS the runtime record:
 | +18 | u16 | activation-delay reload = authored_value << 6 |
 | +20 | u8  | active latch |
 | +21 | u8  | trigger count |
-| +22 | u8  | action count |
+| +22 | u8  | raw action count; dispatch reads signed i8 |
 | +23 | u8  | reserved |
 
 ### 1.2 Per-event update — `EventTrigger_UpdateEntry @0x454c30`
 
 - If the activation countdown (+16) is nonzero: decrement by 64; on expiry (signed
-  16-bit `<= 0` test @0x454cef) clamp to 0, dispatch every action (32-byte stride loop
+  16-bit `<= 0` test @0x454cef) clamp to 0, dispatch the signed action count (32-byte stride loop
   @0x454d0e), call the spawn-point fire hook (§1.5). Then FALL THROUGH to the cooldown
   decrement — both timers tick in one call.
 - Else if the cooldown (+12) is zero and the latch (+20) is clear: evaluate the trigger
@@ -54,6 +54,28 @@ event record IS the runtime record:
   value is tested as SIGNED int16 (@0x454cef/@0x454d40). Reload values ≥ 513<<6 wrap
   negative on the first decrement and expire immediately. Replicated, and pinned by
   `test_activation_delay_signed_wrap`.
+
+**D-EVT-9 FIXED (2026-09-13): signed action-count dispatch.** The event's
+on-disk `+22` byte remains unsigned in the format model and in bounded slice
+loading. Both execution paths interpret it as signed: the immediate loop uses
+`cmp byte/+jle` at `0x454C92/0x454C95` and `movsx` at `0x454CAB`; delayed expiry
+uses the corresponding `0x454D01/0x454D04` and `0x454D13` instructions. Counts
+1..127 execute that many actions; 0 and 128..255 execute none. The input-word
+consume precedes the count test, and `EventTrigger_MarkLinkedSpawnPoints` follows
+the loop even when no actions ran (`0x454CBD` / `0x454D25`). Active latching,
+activation delay and repeat cooldown follow their normal paths. This signed
+interpretation does not apply to the separate trigger-count byte at `+21`.
+
+`BmsEventSystem::fire` now performs the signed interpretation at its shared
+immediate/delayed dispatch boundary, retaining the portable action-slice bounds.
+`event_runtime` exercises 0/1/127/128/255 through public World ticks in both paths,
+checking action effects, input consumption, latch/cooldown state and linked
+waypoint completion. It also covers a truncated 127-action slice without unsafe
+reads and unsigned 128/255-trigger chains whose final condition rejects firing.
+The original instruction body is retained in jo-c's
+`app/reconstruction_mission_logic_native.inc` (`0x454C30..0x454D4D`, byte-span
+SHA-256 `028dc37d3ad6066cf960eb0a82cd960f7824ae728012a4112be394280c48abb0`)
+and was cross-checked read-only against the Jointops.exe IDB instructions.
 
 ### 1.3 Trigger chain — `@0x454050` (was sub_454050; rename proposed §5)
 
