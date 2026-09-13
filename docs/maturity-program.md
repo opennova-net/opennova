@@ -731,3 +731,9 @@ native owners; the device adapter retains a citation for numbered-key dispatch.
    become tracked class-C rows via ADR 0022's register, never silent
    tolerance bumps; CI hard-gates on T1 only (visual tiers are local
    attestations, immune to GPU nondeterminism).
+
+2026-09-13 (PR #649): moved the new entity-lighting caller witnesses from
+Godot comments into the native `EntityLightQuery` contract and linked the
+binding comments to that owner. The original addresses are retained;
+`godot_orig_cites` tightens from 1023 to 1021. Enforced ratchet and citation
+census checks pass; this change does not raise any baseline.

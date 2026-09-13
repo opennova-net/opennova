@@ -84,7 +84,7 @@ void collect_entity_light_models(ObjectModel *model, std::vector<ObjectModel *> 
 	out.push_back(model);
 	// Avatar heads and individual husks are separate render models beneath
 	// one entity. Retail queries before these submits, never from their poses.
-	// [orig: Terrain_RenderSectorEntitiesBySide @0x5C7FA5..0x5C8020]
+	// The native EntityLightQuery contract owns this shared source.
 	for (int i = 0; i < model->get_child_count(); ++i)
 		if (ObjectModel *part = Object::cast_to<ObjectModel>(model->get_child(i)))
 			collect_entity_light_models(part, out);

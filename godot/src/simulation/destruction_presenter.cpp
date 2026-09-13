@@ -371,7 +371,7 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 	graft->set_transform(placed_transform);
 	// Changing the rendered graphic does not reinitialize entity+0. Carry the
 	// static entity query and identity into its new live-model representation.
-	// [orig: Entity_InitFromModel @0x40E062..0x40E076; husk draw @0x413086]
+	// The native EntityLightQuery contract retains the original query on swaps.
 	const TypedArray<StaticEffectSource> light_sources = placer_->get_static_item_effect_sources();
 	for (int64_t i = 0; i < light_sources.size(); ++i) {
 		const Ref<StaticEffectSource> source = light_sources[i];
