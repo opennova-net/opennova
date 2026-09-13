@@ -6,7 +6,7 @@
 //        handshake (0x41/0x42) via ClientRuntime.start()/receive()/Client_ProcessNetworkFrame()
 //        -> the spawn-gate burst (driven from the per-frame client role) -> PeerSpawned
 //        -> the owner binds the joiner connection's transport + streams a NAMED organic-spawn
-//        -> client name-matches + receives the deployment release -> InMatch (learns wire handle H)
+//        -> client matches the owner ID + receives the deployment release -> InMatch (learns wire handle H)
 //        -> each frame: ClientRuntime emits a framed C2S 0x0C -> handle_server_datagram surfaces
 //           PeerC2SInMatch -> apply_in_match_c2s deliver_c2s's it onto the connection's transport
 //           -> Server_TickUpdate drains+SNAPs the entity + fans an S2C 0x0A
@@ -75,7 +75,7 @@ namespace w = opennova::world;
 std::vector<uint8_t> make_organic_spawn(
 		uint16_t slot_id, const std::string &name, int32_t x,
 		int32_t y, int32_t z, int32_t orient, uint8_t team,
-		uint16_t net_id, uint8_t anim_slot = 0);
+		uint16_t net_id, uint8_t anim_slot = 0, uint32_t owner = 0);
 
 bool expect(bool cond, const char *msg) {
 	if (cond) return true;
@@ -1368,7 +1368,7 @@ bool run_retail_post_auth_prelude() {
 					0x0C,
 					make_organic_spawn(
 							kRetailSelfHandle, "RetailPrelude",
-							0x10000, 0x20000, 0x30000, 0, 1, 7))});
+							0x10000, 0x20000, 0x30000, 0, 1, 7, 0, kConnectionId))});
 	const inmatch::JoinerConnection::PollResult self_spawn_result =
 			joiner.handle_datagram(
 					self_spawn_datagram.data(), self_spawn_datagram.size());
@@ -1376,7 +1376,7 @@ bool run_retail_post_auth_prelude() {
 				joiner.has_self_handle() &&
 				joiner.self_handle() == kRetailSelfHandle &&
 				!joiner.in_match(),
-			"self name-match remains hidden before the retail deployment release")) {
+			"self owner-ID match remains hidden before the retail deployment release")) {
 		return false;
 	}
 
@@ -1858,17 +1858,19 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id) {
 	return s;
 }
 
-// A 1-record S2C 0x0C organic-spawn body the joiner name-matches (the owner's PeerSpawned reaction,
+// A 1-record S2C 0x0C organic-spawn body the joiner matches the owner ID (the owner's PeerSpawned reaction,
 // mirroring Simulation).
 std::vector<uint8_t> make_organic_spawn(uint16_t slot_id, const std::string &name, int32_t x,
                                         int32_t y, int32_t z, int32_t orient, uint8_t team,
-                                        uint16_t net_id, uint8_t anim_slot) {
+                                        uint16_t net_id, uint8_t anim_slot, uint32_t owner) {
 	OrganicSpawnBatch batch;
 	batch.entity_count = 1;
 	OrganicSpawnRecord rec;
 	rec.slot_id = slot_id;
 	rec.has_body = true;
 	rec.item_type_id = 0x14B9;
+	rec.owner_connection_id = owner;
+	rec.minimap_flags = owner ? 0x100 : 0;
 	rec.entity_name = name;
 	rec.pos_x = x;
 	rec.pos_y = y;
@@ -2125,7 +2127,7 @@ bool run_roundtrip() {
 	if (!expect(resumed_same_session, "world-ready resumes the same authenticated session")) return false;
 
 	// --- 3) Owner's PeerSpawned reaction: bind the connection's transport (the pipeline already bound
-	//        owned_entity) + stream a NAMED organic-spawn so the client name-matches. ---
+	//        owned_entity) + stream a NAMED organic-spawn so the client matches the owner ID. ---
 	ns::UdpSessionTransport udp_host(ns::UdpSessionTransport::Role::Host);
 	w::EntityHandle Hh{};
 	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
@@ -2156,12 +2158,12 @@ bool run_roundtrip() {
 	{
 		std::vector<uint8_t> body = make_organic_spawn(
 				Hh.packed, spawn_name, sx, sy, sz, 0x40000000, 2,
-				je0->minimap_net_id, je0->anim_slot);
+				je0->minimap_net_id, je0->anim_slot, je0->owner_connection_id);
 		std::vector<uint8_t> sdg;
 		if (!expect(inmatch::frame_in_match_s2c(ctx, peer, 0x0C, body, sdg), "host frames the named 0x0C"))
 			return false;
 		client.receive(sdg.data(), sdg.size());
-		// The name-match and the post-0x0E deploy release may arrive on adjacent
+		// The owner-ID match and the post-0x0E deploy release may arrive on adjacent
 		// receive drains. The runtime contract requires the owner to ship every
 		// returned datagram; discarding one would manufacture a sequence hole.
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
@@ -2172,15 +2174,15 @@ bool run_roundtrip() {
 			pump_host(std::move(d));
 	}
 	if (!expect(client.in_match() && client.self_handle() == Hh.packed,
-	            "client reached InMatch after name-match plus deploy release; H == the host wire handle")) return false;
+	            "client reached InMatch after owner-ID match plus deploy release; H == the host wire handle")) return false;
 	if (!expect(
 			client.spawn_pose().anim_slot == je0->anim_slot &&
 					client.spawn_pose().net_id == je0->minimap_net_id,
-			"the name-matched self spawn retains the host-stamped character selector and id"))
+			"the owner-ID matched self spawn retains the host-stamped character selector and id"))
 		return false;
 	if (!expect(client.view().game_type() == host_config.game_type,
 	            "joiner learned authoritative g_GameType before live 0x0A frames")) return false;
-	if (!expect(client.deployed(), "client is deployed after name-match plus the applicable 0x5A release")) return false;
+	if (!expect(client.deployed(), "client is deployed after owner-ID match plus the applicable 0x5A release")) return false;
 
 	// --- 4) In-match per-frame loop: client 0x0C -> apply_in_match_c2s -> Server_TickUpdate -> 0x0A fold ---
 	PlayerExtendedUplink up;
@@ -2593,7 +2595,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	{
 		std::vector<uint8_t> named = make_organic_spawn(
 				Hh.packed, spawn_name, w::to_fixed(50.0), w::to_fixed(60.0),
-				w::to_fixed(1.0), 0x40000000, 1, je0 ? je0->net_id : 0);
+				w::to_fixed(1.0), 0x40000000, 1, je0 ? je0->net_id : 0, 0, je0 ? je0->owner_connection_id : 0);
 		std::vector<uint8_t> sdg;
 		if (!expect(inmatch::frame_in_match_s2c(ctx, peer, 0x0C, named, sdg),
 				"zones: host frames the named 0x0C")) {

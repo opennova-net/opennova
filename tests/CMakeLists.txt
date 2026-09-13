@@ -2839,6 +2839,11 @@ add_test(NAME npruntime_lan_probe_client COMMAND npruntime_lan_probe_client_test
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)
 # plus the host-as-client D-NET-121/122 anchor/fold path. No capture needed.
+# Authenticated connection identity, including duplicate names and slot reuse.
+add_executable(npruntime_joiner_identity_test npruntime/joiner_identity_test.cpp)
+target_link_libraries(npruntime_joiner_identity_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_joiner_identity COMMAND npruntime_joiner_identity_test)
+
 add_executable(npruntime_client_runtime_test npruntime/client_runtime_test.cpp)
 target_link_libraries(npruntime_client_runtime_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_client_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}) # common/null_datagram_socket.h

@@ -539,7 +539,7 @@ void print_organic_record(int index, const OrganicSpawnRecord &r) {
 		return;
 	}
 	std::printf("        record %d slot=%s type=%s name=%-12s pos=(%.1f, %.1f, %.1f) "
-	            "yaw=%.2f\xc2\xb0(0x%08x) team=0x%02x parent=%s eFlags(+0x78)=0x%08x "
+	            "yaw=%.2f\xc2\xb0(0x%08x) team=0x%02x parent=%s owner(+0x78)=0x%08x "
 	            "miniFlags(+36)=0x%04x%s net=0x%04x anim_slot=%u(+0x374) player_class=%u(+0x294) ai_state=%u\n",
 	            index, handle_str(r.slot_id).c_str(),
 	            type_str(r.item_type_id).c_str(),
@@ -547,8 +547,8 @@ void print_organic_record(int index, const OrganicSpawnRecord &r) {
 	            fp16(r.pos_z),
 	            double(uint32_t(r.orientation)) / 4294967296.0 * 360.0,
 	            uint32_t(r.orientation), r.team, handle_str(r.parent_handle).c_str(),
-	            r.entity_flags, r.minimap_flags,
-	            (r.minimap_flags & 0x100) ? " [LOCAL0x100]" : "", r.net_id,
+	            r.owner_connection_id, r.minimap_flags,
+	            (r.minimap_flags & 0x100) ? " [PLAYER0x100]" : "", r.net_id,
 	            unsigned(r.anim_slot), unsigned(r.player_class), unsigned(r.ai_state));
 }
 

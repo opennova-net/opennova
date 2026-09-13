@@ -431,7 +431,7 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 		}
 
 		rec.item_type_id = c.u16();
-		rec.entity_flags = c.u32();
+		rec.owner_connection_id = c.u32();
 		rec.entity_name = c.cstr();
 		rec.minimap_flags = c.u16();
 		rec.pos_x = int32_t(c.u32());

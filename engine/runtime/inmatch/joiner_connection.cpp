@@ -22,7 +22,7 @@
 #include <vector>
 
 // Verbatim port of novaworld::JoinerSession (the client mirror), with SCRK/seq/ack stored on the
-// type-2 NapiNPConnection conn_. The D.0 name-match in on_server_session is copied byte-for-byte.
+// type-2 NapiNPConnection conn_. Self-identification reads the authenticated connection owner in on_server_session.
 namespace opennova::inmatch {
 
 namespace {
@@ -406,7 +406,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 std::vector<uint8_t> JoinerConnection::build_client_hello() {
 	// The browse and connect legs use the same retail JO identity. The callsign
 	// belongs in ClientAuth.NA (not CO) and is later echoed into the organic-spawn
-	// name-match record by the host.
+	// named organic record by the host.
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
 	                          client_hello_to_bytes(make_jointoperations_client_hello(client_index_)));
 }
@@ -1121,7 +1121,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			const bool entered_in_match = phase_ != Phase::InMatch;
 			phase_ = Phase::InMatch;
 			// Multiple release conditions can fold into one datagram. Preserve an
-			// earlier name-match/release edge instead of overwriting it with a later
+			// earlier owner-ID match/release edge instead of overwriting it with a later
 			// idempotent UI-completion call.
 			out.reached_in_match =
 					out.reached_in_match || entered_in_match || release_edge;
@@ -1398,28 +1398,22 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		} else if (m.tag == s2c::TERRAIN_LOAD) {
 			retain_terrain_load_page(m.payload);
 		} else if (m.tag == s2c::ENTITY_SPAWN_BATCH) {
-			// S2C 0x0C organic-spawn batch — the self name-match (§5.23). ALSO surface the whole
-			// batch to the ClientReplicaPipeline (below) so every other organic upserts too.
+			// The spawn's entity+120 is the connection ID, not entity flags. The
+			// local player is a pool-0 player whose owner matches ServerAuth.MI.
+			// [orig: NapiNPClientMsg_0x00C @0x42E864; Player_FindLocalPlayerEntity
+			// @0x4E0090; NapiNP_GetLocalConnectionId @0x4C6D40]
 			OrganicSpawnBatch batch;
 			if (decode_organic_spawn_batch(m.payload.data(), m.payload.size(), batch)) {
 				for (const OrganicSpawnRecord &rec : batch.records) {
-					if (!rec.has_body || rec.entity_name != player_name_) continue;
-					if (has_self_handle_ && rec.slot_id != self_handle_) {
-						// Name-match self-ID (D.0, §5.23) cannot disambiguate two live players
-						// sharing a callsign — the 0x0C record carries no connection id, and
-						// adopting either handle may uplink against the other player's entity.
-						// Pre-release this is fatal ambiguity; once in-match our handle is
-						// latched and a later same-name spawn (another player joining with our
-						// callsign) must not re-bind us. The faithful numeric self-ID (dcb ->
-						// player table, Player_FindLocalPlayerEntity @0x4e0090 via 0x4D/0x46
-						// §5.21) is the tracked burn-down path (D-NET-169).
-						if (phase_ != Phase::InMatch) {
-							fail("duplicate callsign '" + player_name_ +
-							     "' in session (self-identification is name-match; pick a unique callsign)");
-							return;
-						}
-						continue;
+					const bool is_self = rec.has_body && (rec.slot_id & 0xF000u) == 0 &&
+							(rec.minimap_flags & 0x100u) != 0 &&
+							rec.owner_connection_id == conn_.connection_id;
+					if (has_self_handle_ && rec.slot_id == self_handle_ && !is_self) {
+						has_self_handle_ = false;
+						self_handle_ = 0;
+						spawn_ = {};
 					}
+					if (!is_self) continue;
 					self_handle_ = rec.slot_id; // the wire handle H (pool<<12|slot)
 					has_self_handle_ = true;
 					spawn_.pos_x = rec.pos_x;
@@ -1536,8 +1530,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_destroy_entity_list(
 					m.payload.data(), m.payload.size(), destroy_list)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				for (uint16_t index : destroy_list.pool0_indices)
+				for (uint16_t index : destroy_list.pool0_indices) {
 					out.destroyed_pool0_slots.push_back(index);
+					if (has_self_handle_ && self_handle_ == index) {
+						has_self_handle_ = false;
+						self_handle_ = 0;
+						spawn_ = {};
+					}
+				}
 			}
 		} else if (m.tag == s2c::PLAYER_SYNC) {
 			// S2C 0x46 PLAYER-SYNC. Bit 15 (0x8000) is the roster REMOVAL form: no

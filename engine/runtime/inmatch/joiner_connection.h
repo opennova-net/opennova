@@ -39,7 +39,7 @@
 //   <- S2C 0x02                       : send witnessed 256-byte C2S 0x02 response
 //   <- S2C 0x05/0x60/0x64/0x16       : reactively complete admission and file-transfer requests
 //   <- S2C 0x11                       : ACK terminal pre-world sync; hold 0x0A until world ready
-//   <- S2C 0x0C organic-spawn (0x83)  : name-match self and retain wire handle H
+//   <- S2C 0x0C organic-spawn (0x83)  : owner-ID match self and retain wire handle H
 //   <- S2C 0x1A                       : send the 0x2F/0x2F/0x0B loadout/status bundle (the
 //                                       binding's kit via set_loadout_kit, else the capture default)
 //   <- initial S2C 0x5A grant pair    : open gameplay once H is known; if zones, keep deploy UI pending
@@ -47,15 +47,13 @@
 //   <- ACK-qualified post-pick 0x5A   : reopen the 0x0E-armed gameplay hold; complete deploy UI
 //   frame_c2s_uplink(H, ...)          : per-frame C2S 0x0C player uplink
 //
-// SELF-IDENTIFICATION = NAME-MATCH (D.0, docs/net §5.23): the host streams the joiner's admitted
-// pool-0 player entity (type 0x14B9) as a named S2C 0x0C organic-spawn record whose entity_name is
-// the joiner's player name. The joiner matches it against its own name and adopts record.slot_id as
-// its wire handle H (the value it stamps in its C2S 0x0C sub-header so the host's
-// apply_player_intent resolves the right peer). The joiner sends NO C2S 0x0C before it knows H.
-//
-// [orig: NapiNPClientMsg_0x00C @0x42E730 (self name-match), NapiNPClientMsg_0x00F @0x42E200
-//  (world-state-load), the joiner C2S in-match burst from the host_and_join_lan capture]. No socket
-// I/O lives here — the owner pumps bytes.
+// Self-identification uses ServerAuth.MI, the authenticated connection ID (dcb).
+// S2C 0x0C carries that ID in entity+120. A pool-0 player (Flags & 0x100) owned
+// by this connection supplies the wire handle H used by the C2S player uplink.
+// Callsigns and roster indices are independent of ownership. No uplink is sent
+// until both H and the deployment release are known.
+// [orig: Player_FindLocalPlayerEntity @0x4E0090; NapiNPClientMsg_0x00C @0x42E730;
+// NapiNP_GetLocalConnectionId @0x4C6D40]. The owner pumps bytes; no socket I/O here.
 namespace opennova::inmatch {
 
 // The server-info VarList walk for EXP_FANFARE (u16, 0 when absent)
@@ -172,7 +170,7 @@ public:
 	};
 
 	// `player_name` is the on-wire game ClientAuth.NA callsign and the local key the joiner
-	// name-matches against. ClientHello.CO remains retail's company identity.
+	// owner-ID matches against. ClientHello.CO remains retail's company identity.
 	explicit JoinerConnection(std::string player_name);
 	// Injectable monotonic wall clock for deterministic hosts/tests. Production uses steady_clock.
 	JoinerConnection(std::string player_name, MonotonicMilliseconds monotonic_milliseconds);
@@ -762,7 +760,7 @@ private:
 	bool world_state_completion_sent_ = false;
 
 	bool has_self_handle_ = false;
-	uint16_t self_handle_ = 0;  // wire handle H, learned via the name-match (pool<<12|slot)
+	uint16_t self_handle_ = 0;  // wire handle H, learned via the owning connection ID (pool<<12|slot)
 	SelfSpawn spawn_;
 	uint32_t game_type_ = 0;    // authoritative g_GameType learned from S2C 0x08 field 3 / 0x7B extra
 	uint32_t mp_attributes_ = 0; // S2C 0x64 fixed session block, offset 44

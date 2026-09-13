@@ -375,8 +375,8 @@ func _dismiss_join_role_prompt() -> void:
 	_join_role_target = null
 
 
-## The local player's callsign — rides the game ClientAuth.NA (the host echoes it back so we
-## self-identify by name-match, which makes a duplicate callsign unjoinable — D-NET-169).
+## The local player's display callsign, carried by game ClientAuth.NA.
+## Connection IDs independently identify the local player.
 ## PlayerProfile is the single source: the persisted per-machine default, or the
 ## `--callsign` launch flag for the two-instance demo.
 func resolve_player_callsign() -> String:

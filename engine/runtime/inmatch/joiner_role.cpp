@@ -1014,7 +1014,7 @@ void JoinerRole::materialize_replica_world() {
 
 // On the in-match edge (detected by the recv-fold): learn H + spawn L at the host-advertised
 // pose. L is the joiner's OWN motor-driven pool-0 entity (publishes cached.local_player); H is the
-// wire identity the host knows us by — the two stay distinct, reconciled by the name-match (§5.38b).
+// wire identity the host knows us by — the two stay distinct, reconciled by the owner-ID match (§5.38b).
 void JoinerRole::spawn_and_arm_local_player() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;

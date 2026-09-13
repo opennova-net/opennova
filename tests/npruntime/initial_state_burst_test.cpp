@@ -283,7 +283,7 @@ int main_impl() {
 		            "0x0C body decodes")) return 1;
 		bool host_dcb = false;
 		for (const auto &r : batch.records)
-			if (r.item_type_id == 0x14B9 && r.entity_flags == inmatch::kHostPlayerDcb) host_dcb = true;
+			if (r.item_type_id == 0x14B9 && r.owner_connection_id == inmatch::kHostPlayerDcb) host_dcb = true;
 		if (!expect(host_dcb, "0x0C carries the host player (0x14B9) with entity+0x78 == dcb 2")) return 1;
 	}
 

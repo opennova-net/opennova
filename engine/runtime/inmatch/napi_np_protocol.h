@@ -26,7 +26,7 @@
 // old PeerState). The 0x43 reactive §5.1 replies are produced by the gameplay-message dispatcher
 // (server_message_dispatch.h, dispatch_session_replies) over ctx.config + the node's reply
 // state (P8 — the retired ctx.game_runtime / GameServerRuntime); the one-shot world-stream/spawn burst
-// is Server_SendInitialGameStateToPlayer over conn.burst. The F3 dcb-timing fix and the D.0 name-match
+// is Server_SendInitialGameStateToPlayer over conn.burst. The F3 dcb-timing fix and the D.0 owner-ID match
 // are ported VERBATIM. Wire bytes stay byte-exact.
 //
 // [orig: NapiNPProtocol_HandleSessionPacket @0x626A00; CNapiNPConnection_ParseMessages @0x625BC0;
@@ -80,7 +80,7 @@ struct HostAcceptEvent {
 	std::string peer_name;                     // valid for PeerEnteredWorldStreaming / PeerSpawned:
 	                                           // the joiner's game ClientAuth.NA callsign, streamed
 	                                           // back as the S2C 0x0C organic entity_name so the
-	                                           // joiner name-matches.
+	                                           // joiner matches the owner ID of.
 	std::vector<ProtocolMessage> in_match_c2s; // valid when kind == PeerC2SInMatch
 };
 
