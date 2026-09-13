@@ -154,6 +154,11 @@ void World::run_logic_tick(bool is_authority, TickPhase phase) {
     ctx.logic_tick = logic_tick;
     ctx.is_authority = is_authority;
     ctx.phase = phase;
+    for (ISystem *s : systems_) s->prepare_tick(*this);
+    // Retail admits WAC and the BMS quarter pass through one outer condition.
+    // Writes to ticks/humans during WAC take effect on the next admission.
+    // [orig: Server_TickUpdate @0x51D8BD..0x51D8F4]
+    ctx.script_admitted = script_may_advance();
     const bool pre_mission = phase == TickPhase::PreMission;
     const bool gameplay = phase == TickPhase::Gameplay;
     rules.logic_authority = is_authority;

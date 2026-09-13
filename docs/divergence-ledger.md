@@ -1510,3 +1510,5 @@ Closed 2026-09-11: **D-ITEM-7** -> `FIXED`: all #645 class callbacks and shared 
 Closed 2026-09-13: **D-WPN-36** -> `FIXED` — DEF stance stability and the local-body scoped/binocular aim oscillator now preserve the original phase, fixed-point arithmetic, PRNG order, and process-lifetime carry. Witness `@0x4B5966..0x4B5C97`; domain record world/world-wac-ai-re.md §14.9 and native DEF/table/view regressions.
 
 Closed 2026-09-13: **D-TERRAIN-12** -> `FIXED` — ordinary views render empty sectors through flat quadrant-1 topology, original zero primary/blend coordinates, independent detail/noise, canonical LOD-0 page composition and origin-sector borrowing. Witnesses and native/Godot coverage: terrain/terrain-re.md, empty-sector fallback section.
+
+Closed 2026-09-13: **D-WAC-7** -> `FIXED` — WAC/BMS admission uses the mutable VM time word and one decision per logic tick; empty programs execute startup maintenance, and restore/live replacement immediately publish the clock. Witnesses and integration regressions: mission/bms-event-runtime-re.md.

@@ -540,7 +540,7 @@ void Simulation::finish_kernel_boot() {
 	// that the flags are known (the config may load before OR after the boot).
 	refresh_score_rules();
 	if (!kernel_->wac_loaded && assets_.wac_program && assets_.wac_program->is_ok())
-		kernel_->wac.set_program(assets_.wac_program->native_program());
+		kernel_->wac.set_program(assets_.wac_program->native_program(), kernel_->world);
 }
 
 // The kernel boot's bringup_net_session hook: the active role's own bring-up
@@ -827,9 +827,9 @@ void Simulation::set_wac_program(std::shared_ptr<WacProgram> p_program) {
 		return; // the next kernel boot applies it (finish_kernel_boot)
 	}
 	if (assets_.wac_program && assets_.wac_program->is_ok()) {
-		kernel_->wac.set_program(assets_.wac_program->native_program());
+		kernel_->wac.set_program(assets_.wac_program->native_program(), kernel_->world);
 	} else {
-		kernel_->wac.set_program(opennova::wac::Program());
+		kernel_->wac.set_program(opennova::wac::Program(), kernel_->world);
 	}
 }
 
@@ -859,7 +859,7 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 	if (!assets_.wac_program->is_ok()) {
 		return false;
 	}
-	kernel_->wac.set_program(assets_.wac_program->native_program());
+	kernel_->wac.set_program(assets_.wac_program->native_program(), kernel_->world);
 	return true;
 }
 

@@ -1880,6 +1880,48 @@ static void test_empty_host_holds_the_script() {
     CHECK(w2.script_may_advance());
 }
 
+// The retail outer condition admits both script systems before WAC executes.
+// A mutable ticks word (including -1 + 1 wrap) is not the diagnostic run count.
+static void test_wac_and_bms_share_admission_before_clock_or_human_writes() {
+    for (bool change_clock : {false, true}) {
+        World w;
+        w.registry.configure_pool(0, 8);
+        w.cached.humans = change_clock ? 0 : 1;
+        wac::WacSystem script;
+        const std::string source = change_clock
+                ? "inc(v1) set(ticks,-1) if eq(v1,8) then set(ticks,4) endif\n"
+                : "inc(v1) if eq(v1,8) then set(humans,0) endif\n";
+        script.set_program(wac::compile_source(source, {}));
+        mission::BmsEventSystem events;
+        std::vector<bms::Event> rows(4, simple_event(bms::EventFlags::None, 0));
+        for (bms::Event &row : rows) row.trigger_count = 1;
+        bms::Trigger trigger{};
+        trigger.main_type = bms::TriggerMainType::MissionVariable;
+        trigger.sub_type = static_cast<int32_t>(
+                bms::MissionVariableTriggerType::MissionVariableIsEqual);
+        trigger.param1 = 1;
+        trigger.param2 = 8;
+        events.load(rows, {trigger}, {output_text(23)});
+        w.add_system(&script);
+        w.add_system(&events);
+        w.load_systems();
+        // At tick 496 the eighth WAC execution coincides with a BMS quarter.
+        tick_n(w, 8 * wac::WacSystem::kTicksPerExecution - 1);
+        CHECK(script.runs() == 7);
+        CHECK(w.out.effects.count("text") == 0);
+        if (change_clock) CHECK(script.vm().time() == 0 && w.cached.wac_ticks == 0);
+        tick_n(w, 1);
+        CHECK(script.runs() == 8);
+        CHECK(w.cached.wac_ticks == (change_clock ? 5 : 8));
+        CHECK(w.cached.humans == 0);
+        CHECK(w.out.effects.count("text") == 1); // same admitted tick completes
+        CHECK(!w.script_may_advance());
+        tick_n(w, 128);
+        CHECK(script.runs() == 8);
+        CHECK(w.out.effects.count("text") == 1); // next admissions hold
+    }
+}
+
 static void test_change_ai_command_family() {
     World w;
     w.registry.configure_pool(0, 8);
@@ -2232,6 +2274,7 @@ static void test_bms_target_selectors_and_retail_noops() {
 }
 
 int main() {
+    test_wac_and_bms_share_admission_before_clock_or_human_writes();
     test_bms_target_selectors_and_retail_noops();
     test_change_ai_command_family();
     test_structural_bms_actions();

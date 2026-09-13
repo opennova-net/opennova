@@ -795,7 +795,9 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
     // `wac_var_humans || !wac_var_ticks` — see World::script_may_advance. The
     // pre-mission pass above is deliberately OUTSIDE it, matching retail, where
     // that pass runs from Game_StartMission rather than the server tick.
-    if (!w.script_may_advance()) return;
+    const bool admitted = ctx.script_admitted.has_value()
+            ? *ctx.script_admitted : w.script_may_advance();
+    if (!admitted) return;
 
     // Normal events (neither flag): every 16th tick process ONE QUARTER of the
     // list, round-robin — each entry is evaluated once per 64 ticks, which is why

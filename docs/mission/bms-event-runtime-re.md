@@ -193,8 +193,8 @@ callback; `current_tick @0x24c1968` increments once per call):
 1. `Server_TickUpdate @0x51d7e0` (authority only):
    - `WacScript_AdvanceTick @0x51d8bf` — the **WAC executor**: 14-instruction wrapper that gates
      on `dword_C6EB28` (script disable), counts `dword_C6EAD4` up to **0x3E (62)**
-     (@0x4f81b1), then runs `WacScript_ExecuteBytecode` once and increments the run
-     counter `dword_C6EAD8` (@0x4f81d3). One VM execution per 62 ticks.
+     (@0x4f81b1), then runs `WacScript_ExecuteBytecode` once and increments the mutable
+     clock `dword_C6EAD8` (@0x4f81d3). One VM execution per 62 admitted ticks.
    - every 16th tick (`++dword_C8D808 > 15`): the **normal-event quarter pass**
      `@0x454d50` (kong-misnamed "Entity_SetStateWreckage") — processes ¼ of the event
      list (entries with `(flags & 6) == 0`), cursor `dword_AE06FC` cycling 0..3. Each
@@ -204,6 +204,23 @@ callback; `current_tick @0x24c1968` increments once per call):
    infantry motor's 2/8/16-tick stagger lives inside it).
 
 So the authoritative order is **WAC → BMS events → AI**, each with its own divider.
+The WAC and BMS stages share one admission decision at `0x51D8BD`: no pre-round
+hold, `(humans || !ticks)`, and no epilog screen. WAC can write both named values;
+those writes do not revoke the BMS quarter already admitted by the outer branch.
+They affect the next tick's decision. The clock at `0xC6EAD8` is writable, so
+`set(ticks,-1)` followed by the wrapper's increment wraps it to zero and permits
+an empty host to advance again. A separate count of completed executions cannot
+stand in for this gate.
+
+The 2026-09-13 follow-up makes `WacVm::time()` the authoritative clock and keeps
+`WacSystem::runs()` diagnostic only. Before the system loop, `prepare_tick`
+publishes the derived world view and `World` freezes one decision in
+`TickContext::script_admitted`; WAC and BMS reuse it. Focused direct system calls
+compute admission when the context supplies none. Startup execution, runtime
+restore, and live program replacement publish immediately, so callers never need
+an extra gameplay tick to observe the clock. The VM runtime snapshot contains
+that clock once; the world cache is a derived projection.
+
 PreMission events (`flags & 2`) run via `EventTrigger_UpdateAllWithFlag2 @0x454dc0`
 (whole list per call) from the mission-start context (call site 0x525b86); PostMission
 events (`flags & 4`) via `UpdateAllWithFlag4 @0x454e00` from the debrief/video contexts
@@ -227,8 +244,8 @@ yet witnessed (D-EVT-4).
 | `event_runtime`: three passes — pre (flag&2, whole list), post (flag&4, whole list, runtime-set phase), normal (16-tick gate + quarter cursor) | @0x454dc0/@0x454e00/@0x454d50/@0x51d7e0 |
 | `event_runtime`: cat-3 Event trigger reads the latch window (`active && delay elapsed`), exposed as `event_fired()`; Simulation `has_event_fired` rerouted | @0x453a75 |
 | `event_runtime`: ResetEvent clears only the latch | @0x454974 |
-| `wac_system`: the 62-tick divider moved INSIDE WacSystem (accum `dword_C6EAD4`, pause `dword_C6EB28`, run counter `dword_C6EAD8`); skips the pre-mission pass | @0x4f81a0..@0x4f81d3 |
-| `wac/vm`: WAC time base = completed executions (`time_`, [orig: dword_C6EAD8]) for `past`/`ontick`/`elapse`/Ticks — decoupled from the engine tick | @0x4f81d3 |
+| `wac_system`: the 62-tick divider lives in WacSystem (accum `dword_C6EAD4`, pause `dword_C6EB28`); publishes the mutable VM clock and shares admission with BMS; skips the pre-mission pass | @0x4f81a0..@0x4f81d3 |
+| `wac/vm`: mutable WAC time base (`time_`, [orig: dword_C6EAD8]) for `past`/`ontick`/`elapse`/Ticks; incremented after execution and writable through Ticks | @0x4f81d3 |
 | `world`: `TickService` REMOVED (its 62:1 reducer gated the whole world tick — wrong layer; the original divides per system). `World::logic_tick` = the 62 Hz engine tick (`current_tick @0x24c1968`) | @0x5263f0 |
 | `promote`: SSN = authored record id verbatim (PromoteOptions.first_ssn removed); spawn order items→buildings→markers→organics; markers spawn into pool 3 | @0x40e9f0/@0x40f4e0/@0x4f0a20 |
 | the system registration (`MissionKernel::finish_load`, formerly `mission_systems.h`): grill-gate comment replaced with the witnessed order | @0x5263f0 |
@@ -574,7 +591,7 @@ Comment fixes:
 - 0x454c30: struct comment — +12/+14 = repeat cooldown live/reload, +16/+18 = activation
   delay live/reload, +21 = trigger_count; flags bit1/bit2 = pre/post PASS selectors.
 - Reverse links: on 0x454c30/0x454050/0x453620/0x4542e0/0x454d50 → opennova
-  `engine/runtime/mission/event_runtime.cpp`; on 0x4f81a0 → `engine/runtime/wac/wac_system.h`;
+  `engine/runtime/mission/event_runtime.cpp`; on 0x4f81a0 → `engine/runtime/wac/wac_system.cpp`;
   on 0x40f4e0/0x40e9f0 → `engine/runtime/mission/promote.cpp`.
 
 ---
@@ -793,6 +810,24 @@ completion boundary; deferred completion and repeated completion calls preserve
 the same once-per-load behavior. `mission_kernel` covers ordered PreMission
 writes, rootless and missing-WAC boots, the V0/V255 boundaries, declared-slot carry,
 initial WAC reads, and baseline restoration.
+
+Absent WAC layers still install the compiler's terminator-only program, including
+rootless BMS boots. Retail writes the final terminator before the variable reset
+and initial VM call (`WacScript_InitAndLoad @0x4F91F0`, reset `0x4F95EE`, initial
+execution `0x4F976B`), then increments
+`wac_var_ticks` at `0x4F9770`; an empty script therefore still executes entry/exit
+maintenance and leaves the clock at one. An empty host's BMS pump must hold from
+its first gameplay tick. The explicit `KernelBootOptions::wac = false` tool option
+retains the unloaded-program behavior. `mission_kernel` covers missing, rootless,
+empty-source and disabled boots, immediate restored-clock visibility, and the
+restored divider. `event_runtime` aligns a WAC execution with a BMS quarter and
+checks that writes to ticks or humans preserve that tick's admission;
+`wac_program_surface` covers the empty VM epilog, direct-call admission, mutable
+clock wraparound, restore, and live replacement.
+
+| ID | Status | Summary |
+|---|---|---|
+| D-WAC-7 | FIXED 2026-09-13 | The mutable VM time word is the single WAC/BMS admission clock; one decision is retained for a whole logic tick. Empty scripts execute startup maintenance, and restore/live replacement immediately republish the clock. Original `WacScript_InitAndLoad @0x4F91F0`, `WacScript_AdvanceTick @0x4F81D3`, and the shared frame gate; mission/kernel and WAC integration regressions cover the correction. |
 
 The IDB name `EventTrigger_ResetAllSlots @ 0x4513B0` is misleading: that late
 startup call clears eight helicopter lift slots and their count. It does not
@@ -1203,7 +1238,7 @@ correspondence made explicit.
 | `EventTrigger_EvaluateCondition @0x453620` | `engine/runtime/mission/event_runtime.cpp` |
 | `EventAction_Dispatch @0x4542e0` | `engine/runtime/mission/event_runtime.cpp` |
 | `@0x454d50` (quarter pass) | `engine/runtime/mission/event_runtime.cpp` |
-| `WacScript_AdvanceTick @0x4f81a0` | `engine/runtime/wac/wac_system.h` |
+| `WacScript_AdvanceTick @0x4f81a0` | `engine/runtime/wac/wac_system.cpp` |
 | `Mission_LoadBMSFile @0x40f4e0` | `engine/runtime/mission/promote.cpp` |
 | `Entity_SpawnFromBMSRecord @0x40e9f0` | `engine/runtime/mission/promote.cpp` |
 | `EntityPool_FindByNetId @0x4f0a20` | engine/runtime/world entity registry (`EntityRegistry::find_by_net_id`) |

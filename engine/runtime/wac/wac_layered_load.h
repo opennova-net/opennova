@@ -22,7 +22,7 @@ namespace opennova::audio { class SoundSetIndex; }
 namespace opennova::wac {
 
 enum class WacLayeredLoadStatus {
-	kAbsent,  // no layer exists: the valid BMS-only mission (no error)
+	kAbsent,  // no layer exists: an empty program is installed for the BMS-only mission
 	kLoaded,  // compiled and installed on the WacSystem
 	kBlocked, // diagnostics blocked the load; `error` says why, scripts stay off
 };

@@ -59,7 +59,13 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		bool strict_diagnostics, std::string &error, particle::EffectCatalogNames *effect_catalog,
         const audio::SoundSetIndex *sound_catalog) {
 	error.clear();
-	if (!files.valid()) return WacLayeredLoadStatus::kAbsent;
+	if (!files.valid()) {
+        // Even without source files retail installs a terminator, executes the
+        // VM entry/exit, and increments the mutable clock at startup.
+        // [orig: WacScript_InitAndLoad @0x4F91F0 -> @0x4F976B/@0x4F9770]
+        system.set_program(compile_program({}, {}));
+        return WacLayeredLoadStatus::kAbsent;
+    }
 	// The original layering, absent files skipped in order
 	// [orig: WacScript_InitAndLoad @0x4f91f0].
 	std::vector<std::string> sources;
@@ -99,7 +105,6 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
     particle::EffectCatalogNames temporary_effects;
     if (!effect_catalog) load_script_effect_catalog(files, temporary_effects);
     env.effects = effect_catalog ? effect_catalog : &temporary_effects;
-    if (sources.empty()) return WacLayeredLoadStatus::kAbsent;
 	Program program = compile_program(sources, env);
 	// ok() is false only when a diagnostic carries error=true, so the strict
 	// arm's "every diagnostic is fatal" test subsumes it.
@@ -117,7 +122,7 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		return WacLayeredLoadStatus::kBlocked;
 	}
 	system.set_program(std::move(program));
-	return WacLayeredLoadStatus::kLoaded;
+	return sources.empty() ? WacLayeredLoadStatus::kAbsent : WacLayeredLoadStatus::kLoaded;
 }
 
 } // namespace opennova::wac

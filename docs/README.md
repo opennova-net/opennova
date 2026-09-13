@@ -161,3 +161,5 @@ The active parity slice covers the deferred gameplay, wire, controls, sound, and
 Scoped-aim parity (2026-09-13): [world §14.9](world/world-wac-ai-re.md#149-scoped-weapon-stability-and-persistent-aim-drift-2026-09-13) records the DEF stability triplet and persistent local-body drift correction (D-WPN-36).
 
 Empty-sector terrain parity (2026-09-13): [terrain fallback record](terrain/terrain-re.md#empty-sector-flat-fallback-2026-09-13-d-terrain-12) covers zero-height quadrant-1 draws, their texture stages, and the shared flat page (D-TERRAIN-12).
+
+WAC clock parity (2026-09-13): [mission event runtime](mission/bms-event-runtime-re.md) records the shared mutable clock, once-per-tick admission, empty-script startup, and immediate restore projection (D-WAC-7).
