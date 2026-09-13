@@ -95,6 +95,8 @@ static func stage_sound_bank(root_dir: String, set_names: PackedStringArray,
 		# world publishes its listener.
 		lwf.set_set_field(set_i, "target_id", falloff_radius)
 		var layer_i := lwf.add_layer(set_i)
+		lwf.set_layer_field(set_i, layer_i, "internal", true)
+		lwf.set_layer_field(set_i, layer_i, "external", true)
 		lwf.set_layer_field(set_i, layer_i, "falloff_radius", falloff_radius)
 		var member_i := lwf.add_member(set_i, layer_i)
 		lwf.set_member_field(set_i, layer_i, member_i, "wav_path", "tone.wav")

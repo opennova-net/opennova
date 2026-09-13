@@ -1515,3 +1515,10 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 | scene_far_plane | Render_ProcessMainSceneFrame / sub_58A8D0 | 0x5CA0F0 / 0x58A8D0 | Signed fog high word plus one | render_order | Matching |
 | round_sim.cpp / ammo_table | Weapon_CalcImpactDamage / Projectile_ApplyDragDeceleration | 0x4EC920 / 0x4E5CD0 | Density selection, two energy-loss calls and impact row 24 | projectile_combat | Matching |
 | client_replica_dispatch.cpp / client_effects.cpp | Client protocol message handlers | 0x42EB50 / 0x430B10 | Ordered death/state/explosion/audio consumption | npruntime_entity_lifecycle_net; npruntime_item_state_net | Matching |
+
+
+### One-shot listener-view admission (2026-09-13)
+
+| Reimplementation | Original | Address | Verdict / evidence |
+|---|---|---|---|
+| `audio::plan_oneshot_at_distance` and `plan_oneshot_3d` | `SoundBank_PlayTriggerEntries` | `0x75CCD0` (gate `0x75CD54`) | matching for listener-view admission before member/pitch draws; D-SND-19, `audio_oneshot_play`, live Simulation/SoundBank GUT regression |

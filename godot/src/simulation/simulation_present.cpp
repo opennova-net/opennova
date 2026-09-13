@@ -554,6 +554,10 @@ static_assert(opennova::world::round_event_flag::kAdmIndexed ==
 				opennova::kRoundEventFlagAdmIndexed,
 		"round_event_flag::kAdmIndexed must match the npwire decoder bit");
 
+uint8_t Simulation::sound_listener_view_flags() const {
+	return kernel_->world.cached.sound_listener_view_flags;
+}
+
 // The presenting shell's listener stamp — the camera position, once per frame
 // before the tick batch, feeding the sim's fire-sound distance gate
 // [orig: listener_pos @ 0x24D6630; world/fire_sound.h]. Never called on a
