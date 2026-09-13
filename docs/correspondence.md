@@ -1545,7 +1545,7 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 
 | Reimplementation | Original | Address | Verdict / evidence |
 |---|---|---|---|
-| `local_player_view` camera bias predicate | first-person bias consumers | `0x4DD40D..0x4DD414`, `0x4DD49F..0x4DD4A6` | matching existing position consumer and gate; D-WPN-37, native mid-transition airborne/landing regressions; rotational interpolation remains a separate correction |
+| `local_player_view` camera bias predicate | first-person bias consumers | `0x4DD40D..0x4DD414`, `0x4DD49F..0x4DD4A6` | matching existing position consumer and gate; D-WPN-37, native mid-transition airborne/landing regressions; rotational interpolation subsequently implemented under D-WPN-38 (§14.11); D-WPN-39/40 retain separate timing residuals |
 
 ### WAC auto DWORD (2026-09-13)
 
@@ -1574,3 +1574,5 @@ PR #649 adversarial correction (2026-09-13, D-FOLIAGE-13): flat cells retain the
 2026-09-13, D-RLIT-4 entity-query correction: Entity lighting queries use the initialized entity origin/radius cube, a 63-candidate object limit, and per-material group selection. First-person parts, heads, held weapons and husks inherit the correct entity query and ownership. See [lighting evidence](render/render-lighting-re.md). Native selector/model-builder suites and Godot per-model, first-person, placement, destruction and effect-world regressions pass.
 
 PR #649 lighting review (2026-09-13): object selection retains the first 63 overlapping candidates before sorting and group filtering; general/terrain queries retain 64. Witnesses now live with the native query contract. See the [lighting record](render/render-lighting-re.md).
+
+PR #649 documentation review (2026-09-13): D-WPN-38 supersedes the earlier unported-rotation note; D-WPN-39/40 retain optical/position and pending-slot timing work. D-WAC-11 records the proposed class-D invalid M# index guard, with valid context binding fixed by D-WAC-10. See the [world record](world/world-wac-ai-re.md).

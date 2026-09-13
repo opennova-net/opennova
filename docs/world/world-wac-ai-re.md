@@ -9345,7 +9345,12 @@ client, consistent with the corrected D-MUS-SPGATE witness. A context reload cre
 compiled programs retain their original store safely until those programs die,
 rather than following a replacement context or borrowing freed memory. The
 portable MUS allocation bounds raw indices to its 68-byte globals area; retail's
-unchecked out-of-range addresses are not reproduced.
+unchecked out-of-range addresses are not reproduced. This bounded invalid-input
+residual is **D-WAC-11, OPEN (proposed class D)**: M17 and larger indices read
+zero and drop writes in the portable store, while the original resolver returns
+unchecked addresses beyond the active context's 68-byte globals allocation.
+Retain the safe guard; permanent classification awaits maintainer ratification.
+This does not change D-WAC-10's valid-index, compile-time context binding closure.
 
 The independent original-executable witness with active Var7=99 produced
 V1=99, V2=55 and actual Var7=55 for `set(v1,m7) set(m7,55) set(v2,m7)`;
@@ -10578,6 +10583,7 @@ declined entry falls back to an OPEN class-D row.
 | D-WAC-8 | Player/Item/auto retain a mutable DWORD in live VM state and runtime snapshots; cache/group refreshes replace only LOWORD and entity consumers explicitly narrow | [orig: WacCmd_Set @0x4ED520; WacScript_CacheLocalPlayerState @0x4F5814/@0x4F58A2; WacScript_ExecuteBytecode word stores @0x4F5B7E/@0x4F5BAF/@0x4F5BD2] (§33.15) | FIXED 2026-09-13 (uint16 truncation removed; wac_state regressions) |
 | D-WAC-9 | V references parse a decimal prefix after the first-digit check; declared names win first, and numeric indices >=256 warn and clamp to V255 | [orig: WacScript_ResolveParameter declared-name lookup @0x4F2970..0x4F2A3C; digit/atol @0x4F2AA9..0x4F2AB8; signed clamp @0x4F2AC0/@0x4F2AF4] (§33.4) | FIXED 2026-09-13 (all-digits rejection removed; wac_behavior regressions) |
 | D-WAC-10 | M# operands bind the actual audio context at compilation; missing contexts share the VM scratch slot | [orig: WacScript_ResolveParameter @0x4F2A17..0x4F2A34; sub_671FD0 @0x671FD0; Game_StartMission @0x525589 before @0x525CB3] (§33.15a) | FIXED 2026-09-13; native WAC/MUS and mission-start regressions plus live Godot context coverage |
+| D-WAC-11 | Out-of-range M# access is guarded to the 68-byte MUS globals store (indices 0–16); invalid reads return zero and writes are ignored | [orig: WacScript_ResolveParameter @0x4F2A17..0x4F2A34; sub_671FD0 @0x671FD0] (§33.15a) | OPEN (proposed class D invalid-input guard; retain safe access pending permanent classification) |
 | D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
 | D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
 | D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |
