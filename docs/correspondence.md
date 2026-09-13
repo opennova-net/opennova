@@ -1540,3 +1540,9 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 | Reimplementation | Original | Address | Verdict / evidence |
 |---|---|---|---|
 | `WacSystem::prepare_tick`, `World::run_logic_tick`, `wac_layered_load` | shared main-frame gate / `WacScript_InitAndLoad` / `WacScript_AdvanceTick` | `0x4F91F0`, `0x4F9770`, `0x4F81D3` | matching mutable clock, one admitted frame and empty startup; D-WAC-7, `mission_kernel`, `event_runtime_bms`, `wac_program_surface` |
+
+### Airborne ADS bias admission (2026-09-13)
+
+| Reimplementation | Original | Address | Verdict / evidence |
+|---|---|---|---|
+| `local_player_view` camera bias predicate | first-person bias consumers | `0x4DD40D..0x4DD414`, `0x4DD49F..0x4DD4A6` | matching existing position consumer and gate; D-WPN-37, native mid-transition airborne/landing regressions; rotational interpolation remains a separate correction |

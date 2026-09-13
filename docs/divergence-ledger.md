@@ -1512,3 +1512,5 @@ Closed 2026-09-13: **D-WPN-36** -> `FIXED` — DEF stance stability and the loca
 Closed 2026-09-13: **D-TERRAIN-12** -> `FIXED` — ordinary views render empty sectors through flat quadrant-1 topology, original zero primary/blend coordinates, independent detail/noise, canonical LOD-0 page composition and origin-sector borrowing. Witnesses and native/Godot coverage: terrain/terrain-re.md, empty-sector fallback section.
 
 Closed 2026-09-13: **D-WAC-7** -> `FIXED` — WAC/BMS admission uses the mutable VM time word and one decision per logic tick; empty programs execute startup maintenance, and restore/live replacement immediately publish the clock. Witnesses and integration regressions: mission/bms-event-runtime-re.md.
+
+Closed 2026-09-13: **D-WPN-37** -> `FIXED` — Airborne players suppress authored first-person ADS position bias while scope interpolation continues; reload, NoCardSwitch and ForceScoped keep their existing optical policy. Actual position consumption and the separate unported rotational path are documented in world/world-wac-ai-re.md §14.10; `local_player_view` covers jump, fall, landing and reload gates.

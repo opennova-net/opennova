@@ -2085,6 +2085,57 @@ This bounded integer witness is not a full retail playthrough comparison.
 
 No IDB edits were made for this slice.
 
+## 14.10 Airborne first-person view-bias suppression (2026-09-13)
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Airborne/reload bias predicate and presented position | MATCHING (bounded behavioral proof) | `local_player_view` checks the actual position-bias API through jump/fall flags, mid-ease landing, completed easing, reload/NoCardSwitch/ForceScoped combinations, motion lead and narrow-aspect framing |
+| Scope admission and interpolation state | MATCHING within the existing path | The camera predicate is separated from the reload-only optical gate; the tests retain ForceScoped admission while airborne and keep the scope target, promoter and ease advancing |
+| Authored ADS rotation presentation | NOT COVERED by this correction | The native frame reports the same suppression decision, but the current rig carries only the authored hip rotation; the missing rotational interpolation requires its own implementation and rendered-transform regression |
+
+`Player_UpdateFirstPersonCamera` skips both interpolated bias additions when
+entity Flags has bit `0x2000`. The rotation branch tests it at
+`0x4DD40D/0x4DD414`; the position branch repeats the test at
+`0x4DD49F/0x4DD4A6`. Both then admit the bias only if the equipped slot is not
+reloading a weapon without `NoCardSwitch`. That attribute exempts the reload
+branch alone: an airborne NoCardSwitch weapon still uses its base pose.
+`ForceScoped` does not override either camera skip [orig:
+Player_UpdateFirstPersonCamera @ 0x4DD380, reload skips
+@0x4DD439/@0x4DD4CC, rotation add @0x4DD43B..0x4DD456, position add
+@0x4DD4CE..0x4DD4DA]. The old decompilation comment calling `0x2000` a turret
+seat is incorrect; the local jump sets it [orig:
+Entity_UpdateInfantryPlayerBody @ 0x4B40E0, @0x4B7EDB..0x4B7EEF].
+
+OpenNova had shared a reload-only helper between the camera and optical-view
+admission, omitting the camera's airborne condition. `local_player_view.cpp`
+now retains a reload-only predicate for the optical query and adds the live
+entity flag to the camera predicate. Both registry flag carriers are read
+because they represent the original single Flags word. The bias API selects
+the hip position immediately while suppressed; it does not reset or retarget
+the scope interpolation. Landing therefore resumes its current pose, including
+an ease that completed during the fall. Motion lead and the aspect-dependent
+Z drop remain after the bias selection. The optical query retains its own
+ForceScoped override [orig: Player_CanFireWeapon @ 0x5CF780,
+reload query @0x5CF7BE and forced admission @0x5CF845].
+
+Independent probes executed the original rotation and position skip blocks
+from retail SHA256
+`b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac`
+without replacing engine calls. With base `(10,20,30)` and bias
+`(100,200,300)`, ordinary and grounded NoCardSwitch reload cases produced
+`(110,220,330)` in both blocks; airborne, ordinary reload, airborne ForceScoped,
+and airborne NoCardSwitch reload cases produced `(10,20,30)`. Bit `0x8000`
+alone did not suppress either bias. These are branch witnesses, not a claim
+that the current rig already reproduces the original rotational interpolation.
+The original six-column path is documented in
+[net RE section 5.40](../net/novaworld-net-re.md).
+
+| ID | Status | Summary |
+|---|---|---|
+| D-WPN-37 | FIXED 2026-09-13 (existing position path) | Airborne first-person viewmodel position retained the ADS bias. The camera predicate now reads `0x2000` independently of its reload exception, keeps the scope ease running, and preserves the separate ForceScoped optical rule. `local_player_view` checks actual output positions and transition behavior; authored ADS rotation is explicitly outside this closure. |
+
+No IDB edits were made for this slice.
+
 ## 15. World-object collision + blink boxes (engine-research 2026-07-09; re-grilled 2026-07-11)
 
 The runtime consumers of the `.3di` collision block (CDTA: CMDL/BVOL/BPLN/COBJ —
