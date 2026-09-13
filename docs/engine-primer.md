@@ -290,3 +290,5 @@ WAC/BMS timing (2026-09-13): both schedulers use the mutable WAC time word and o
 2026-09-13, D-WAC-8: The Player/Item/auto slot retains all 32 bits; cache and group refreshes replace only its low-word entity handle. [World §33.15](world/world-wac-ai-re.md) records the original word stores and passing `wac_state` regressions.
 
 PR #649 adversarial correction (2026-09-13, D-WPN-36): local heading/leg/pitch clamps precede scoped drift. The body-tick limit and PRNG regressions are recorded in [world §14.9](world/world-wac-ai-re.md).
+
+2026-09-13, D-WAC-9: Numbered V operands accept decimal prefixes while declared names retain precedence and indices clamp at 255. See [D-WAC-9 evidence](world/world-wac-ai-re.md). Native `wac_behavior` prefix, boundary and shadowing regressions pass.

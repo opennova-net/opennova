@@ -8568,6 +8568,18 @@ bank, starting at 0xC6B640. The resolver's direct V# syntax is limited to
 same scalar resolver path in this retail build; it is not an indexed container.
 Names are copied to an 18-character field.
 
+**D-WAC-9, fixed 2026-09-13:** numbered V references require only a digit
+immediately after V; the remainder is parsed as a decimal prefix by `atol`
+[orig: WacScript_ResolveParameter @0x4F2AA9..0x4F2AB8]. Thus `v12suffix` and
+`V012_more` both address V12. The signed `>=256` comparison at `0x4F2AC0` reports
+`V# too big` and clamps to 255 at `0x4F2AF4`, including suffixed tokens. Declared
+names are resolved first, case-insensitively (`0x4F2970..0x4F2A3C`), so a declared
+`v256shadow` refers to its declared slot without taking the numeric clamp. The
+portable compiler previously required every trailing character to be a digit;
+it now uses the witnessed first-digit check and decimal-prefix conversion.
+`wac_behavior` covers suffixes, case, leading zeros, V255/V256, declared-name
+shadowing, and unresolved tokens with no first digit.
+
 The three banks and their load-time lifetime (2026-09-12): V0..V255 at
 0xC6B240, the declared slots at 0xC6B640 + 4n (n = declaration order in that
 compile, `dword_C6B240[256..511]`) and G0..G255 at 0xC6BA40. [orig:
@@ -10369,6 +10381,7 @@ declined entry falls back to an OPEN class-D row.
 | D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends what [orig: WacScript_ResolveParameter @0x4f2920] stored: the SoundSet operand is the trigger-entry pointer from [orig: SoundBank_FindTriggerByName @0x75be90] via [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (`*(bank+56) + 84*index`, a host-process address; the site @0x4f2fe2), the Fx operand is the 1-based index into the effect world's global intern pool [orig: CEffectWorld_InternEffectHandle @0x5F7310] in first-intern order (the site @0x4f3067); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: the Fx half needs the intern order reproduced, the SoundSet half is inherently host-local; the decoder bounds are class-D portable boundaries) |
 | D-WAC-6 | An unresolved FX/FACE/SOUNDSET/ANIM/AMMO literal or a RUN/LOOP/NEXT structural error blocks the mission's script (`wac_layered_load` kBlocked); a GLOOP operand that is not a group name is the non-fatal `Unknown Group` and group 0 as in retail (2026-09-12), except that an operand an earlier resolver table claims (a declared variable, an event, a named value) also takes group 0 where retail ORs in the dword behind that address | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0/-1/0xFFFF (§33.15); unknown commands and unresolved arguments are non-fatal on both sides; the GLOOP operand resolve [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter @0x4f30fc/@0x4f310a] | OPEN (low: only malformed authored scripts differ; the GLOOP unknown-group leg is FIXED 2026-09-12) |
 | D-WAC-8 | Player/Item/auto retain a mutable DWORD in live VM state and runtime snapshots; cache/group refreshes replace only LOWORD and entity consumers explicitly narrow | [orig: WacCmd_Set @0x4ED520; WacScript_CacheLocalPlayerState @0x4F5814/@0x4F58A2; WacScript_ExecuteBytecode word stores @0x4F5B7E/@0x4F5BAF/@0x4F5BD2] (§33.15) | FIXED 2026-09-13 (uint16 truncation removed; wac_state regressions) |
+| D-WAC-9 | V references parse a decimal prefix after the first-digit check; declared names win first, and numeric indices >=256 warn and clamp to V255 | [orig: WacScript_ResolveParameter declared-name lookup @0x4F2970..0x4F2A3C; digit/atol @0x4F2AA9..0x4F2AB8; signed clamp @0x4F2AC0/@0x4F2AF4] (§33.4) | FIXED 2026-09-13 (all-digits rejection removed; wac_behavior regressions) |
 | D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
 | D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
 | D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |
