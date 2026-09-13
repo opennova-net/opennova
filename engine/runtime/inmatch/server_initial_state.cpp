@@ -421,7 +421,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case InitialStateBurst::kStreamPool0Organics: { // 0x0C pool-0 organics (carry entity+0x78 dcb for the joiner name-match) [orig: serialize_entity_states_to_buffer @0x5030a0]
+		case InitialStateBurst::kStreamPool0Organics: { // 0x0C pool-0 organics (carry entity+0x78 dcb for the joiner owner-ID match) [orig: serialize_entity_states_to_buffer @0x5030a0]
 			// Pass THIS joiner's owned entity so ONLY its own record gets minimap_flags bit 0x01
 			// (recipient's-own marker); the host player + other peers get 0x0100 (retail same-map parity).
 			const opennova::OrganicSpawnBatch full =

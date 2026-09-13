@@ -417,7 +417,7 @@ public:
 	JoinerConnection::Phase phase() const {
 		return joiner_ ? joiner_->phase() : JoinerConnection::Phase::Idle;
 	}
-	// The host-advertised self-spawn pose learned at the name-match — full precision (not the lossy
+	// The host-advertised self-spawn pose learned at the owner-ID match — full precision (not the lossy
 	// ClientState position), so the binding spawns its local player L from it. Joiner-only; valid once
 	// in_match() (the caller gates on that). Mirrors the self_handle() passthrough.
 	const JoinerConnection::SelfSpawn &spawn_pose() const { return joiner_->spawn_pose(); }

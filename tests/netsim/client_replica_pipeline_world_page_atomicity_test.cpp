@@ -75,7 +75,7 @@ nw::OrganicSpawnRecord organic_record(
 	rec.slot_id = handle;
 	rec.has_body = true;
 	rec.item_type_id = type_id;
-	rec.entity_flags = 0x01020304u;
+	rec.owner_connection_id = 0x01020304u;
 	rec.entity_name = name;
 	rec.minimap_flags = 0x0100u;
 	rec.pos_x = 0x00110000;

@@ -759,7 +759,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			// WeaponLoadout_ApplyFromBuffer clears dword_81474C for EVERY valid
 			// S2C 0x5A. That is distinct from the causal spawn release below.
 			if (pr.gameplay_release_applied || pr.reached_in_match) deployed_ = true;
-			// The name-match may precede loadout by dozens of world-stream packets. Retail only
+			// The owner-ID match may precede loadout by dozens of world-stream packets. Retail only
 			// opens its authoritative spawn latch after H and the applicable deployment release meet.
 			if (pr.reached_in_match) {
 				++deployment_release_revision_;

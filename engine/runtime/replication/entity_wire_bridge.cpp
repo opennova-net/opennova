@@ -353,7 +353,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 		rec.slot_id = e.handle.packed;                 // the wire handle (pool<<12|slot)
 		rec.has_body = true;
 		rec.item_type_id = static_cast<uint16_t>(e.item_id);
-		rec.entity_flags = e.owner_connection_id;      // entity+0x78: the owning connection's dcb,
+		rec.owner_connection_id = e.owner_connection_id; // entity+0x78: the owning connection's dcb,
 		                                               // stamped at spawn (host loopback / joiner ack).
 		                                               // [orig: Server_PlayerAdd @0x51cbc0; D-NET-92/101]
 		rec.entity_name = e.name;

@@ -93,6 +93,7 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		es.name = rec.entity_name;
 		es.net_id = rec.net_id;
 		es.spawn_tag = s2c::ENTITY_SPAWN_BATCH;
+		es.spawn_owner_connection_id = rec.owner_connection_id;
 		es.x = rec.pos_x;
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;

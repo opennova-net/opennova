@@ -329,7 +329,7 @@ struct OrganicSpawnRecord {
 	bool     has_body = false;   // u8 != 0; 0 ⇒ empty spawn, record ends after this byte
 
 	uint16_t item_type_id = 0;   // entity+28 (ItemList_FindIndexByTypeId → Entity_InitFromItemDef)
-	uint32_t entity_flags = 0;   // entity+120 (0x78)
+	uint32_t owner_connection_id = 0; // entity+120 (0x78); authenticated connection dcb
 	std::string entity_name;     // cstring → entity+244 (Name[16], capped)
 	uint16_t minimap_flags = 0;  // entity+36 (Flags 0x24); bit 0x100 = minimap-register
 

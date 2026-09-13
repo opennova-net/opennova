@@ -288,7 +288,7 @@ std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch) 
 		w.u8(rec.has_body ? 1 : 0);
 		if (!rec.has_body) continue; // empty spawn ends after the has_body byte (@ 0x42e813)
 		w.u16(rec.item_type_id);
-		w.u32(rec.entity_flags);
+		w.u32(rec.owner_connection_id);
 		w.cstr(rec.entity_name);
 		w.u16(rec.minimap_flags);
 		w.u32(uint32_t(rec.pos_x));

@@ -3,7 +3,7 @@
 // from the connection dcb, for BOTH the host's own type-2 loopback (-> spawn_player, publishes
 // cached.local_player at the host dcb 2) and a remote type-1 joiner (-> spawn_remote_player at its
 // own dcb, host's local player untouched). End-to-end: build_pool0_organic_batch then carries the
-// real dcb at OrganicSpawnRecord::entity_flags (the §1 wiring), the F3 self-match field.
+// real dcb at OrganicSpawnRecord::owner_connection_id (the §1 wiring), the F3 self-match field.
 
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -179,11 +179,11 @@ int main() {
 	const opennova::OrganicSpawnBatch batch = ns::build_pool0_organic_batch(world);
 	bool saw_host = false, saw_joiner = false;
 	for (const opennova::OrganicSpawnRecord &r : batch.records) {
-		if (r.entity_flags == inmatch::kHostPlayerDcb) saw_host = true;
-		if (r.entity_flags == inmatch::kFirstJoinerDcb) saw_joiner = true;
+		if (r.owner_connection_id == inmatch::kHostPlayerDcb) saw_host = true;
+		if (r.owner_connection_id == inmatch::kFirstJoinerDcb) saw_joiner = true;
 	}
 	if (!expect(saw_host && saw_joiner,
-	            "build_pool0_organic_batch stamps entity_flags from owner_connection_id (host 2 + joiner 3)")) return 1;
+	            "build_pool0_organic_batch stamps owner_connection_id from owner_connection_id (host 2 + joiner 3)")) return 1;
 
 	// [D-NET-112] Players carry no SSN (net_id 0); they are distinguished by their distinct
 	// ownerConnectionId (dcb), the faithful identity. (The old high-band net-id allocator is gone.)
@@ -458,9 +458,9 @@ int main() {
 		const opennova::OrganicSpawnBatch cbatch = ns::build_pool0_organic_batch(cw);
 		bool host_rec_ok = false, join_rec_ok = false;
 		for (const opennova::OrganicSpawnRecord &r : cbatch.records) {
-			if (r.entity_flags == inmatch::kHostPlayerDcb)
+			if (r.owner_connection_id == inmatch::kHostPlayerDcb)
 				host_rec_ok = (r.anim_slot == 3 && r.net_id == 0x0400);
-			if (r.entity_flags == inmatch::kFirstJoinerDcb)
+			if (r.owner_connection_id == inmatch::kFirstJoinerDcb)
 				join_rec_ok = (r.anim_slot == 4 && r.net_id == 0x8207 && r.player_class == 5);
 		}
 		if (!expect(host_rec_ok, "0x0C host record echoes the selected local character")) return 1;
@@ -483,7 +483,7 @@ int main() {
 		if (!expect(cbare->player_class == 8, "var-less joiner: playerClass defaults 8 in-session")) return 1;
 		const opennova::OrganicSpawnBatch bbatch = ns::build_pool0_organic_batch(cw);
 		for (const opennova::OrganicSpawnRecord &r : bbatch.records) {
-			if (r.entity_flags == inmatch::kFirstJoinerDcb + 1) {
+			if (r.owner_connection_id == inmatch::kFirstJoinerDcb + 1) {
 				if (!expect(r.net_id != 0, "var-less joiner netId falls back to the encoder shim")) return 1;
 			}
 		}
