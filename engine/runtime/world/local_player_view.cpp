@@ -80,15 +80,24 @@ void enter_death_camera(World &world, const Entity &e, PlayerViewState &v,
     v.death_cam.start_tick = start_tick;
 }
 
-// The NoCardSwitch reload rule: while the equipped slot is mid-RELOAD on a
-// weapon WITHOUT NoCardSwitch (flags 0x2000000), the FP camera drops the ADS
-// view bias for the frame. [orig: Player_UpdateFirstPersonCamera @0x4dd439/
-// @0x4dd4cc; the same predicate is Player_IsReloadingCardSwitchWeapon
-// @0x4dcdd0 (ex kong "Player_IsDriverInVehicle"), whose one caller refuses
-// fire @0x5cf7be]
-bool suppress_view_bias(const LocalPlayerWeapon &w, const WeaponSlotState *slot) {
+// The reload-only predicate also gates optical-view admission. NoCardSwitch
+// exempts this reload leg; it does not exempt the camera's airborne leg.
+// [orig: Player_IsReloadingCardSwitchWeapon @0x4dcdd0; optical gate @0x5cf7be;
+// Player_UpdateFirstPersonCamera @0x4dd439/@0x4dd4cc]
+bool reloading_card_switch_weapon(const LocalPlayerWeapon &w, const WeaponSlotState *slot) {
     return w.active && slot != nullptr && slot->current == weapon_action::kReload &&
            (w.def.flags & weapon_flag::kNoCardSwitch) == 0;
+}
+
+bool suppress_view_bias(const LocalPlayerWeapon &w, const WeaponSlotState *slot,
+                        const Entity *player) {
+    // Skip the interpolated bias without changing the scope's target or ease.
+    // ForceScoped affects optical admission, not either camera-bias skip.
+    // [orig: Player_UpdateFirstPersonCamera @0x4dd380, rotation @0x4dd40d/0x4dd414,
+    // position @0x4dd49f/0x4dd4a6]
+    return (player != nullptr &&
+            ((player->flags | player->engine_flags) & kEntityFlagInAir) != 0) ||
+           reloading_card_switch_weapon(w, slot);
 }
 
 } // namespace
@@ -300,7 +309,7 @@ bool scope_view_visible(World &world, const LocalPlayerWeapon &w, const PlayerVi
         return false;
     const bool force = (w.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0;
     const bool no_card = (w.def.flags & weapon_flag::kNoCardSwitch) != 0 && !force;
-    if (suppress_view_bias(w, &slot) && !no_card) return false;
+    if (reloading_card_switch_weapon(w, &slot) && !no_card) return false;
     // The PROMOTED byte [orig: Player_IsEquippedWeaponScoped reads
     // g_weaponScopeActive], never the target or the ease.
     const bool active = player_view_scope_settled(v);
@@ -604,7 +613,7 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     // upper-body weapon channel; passenger seats do not.
     out.vehicle_attack_context = local != nullptr && mount_blocks_weapon_channel(*local);
     out.scope_fraction = player_view_scope_fraction(v);
-    out.suppress_view_bias = suppress_view_bias(w, active_slot);
+    out.suppress_view_bias = suppress_view_bias(w, active_slot, local);
     // On the supported on-foot first-person path, the standard SIGHTS card
     // replaces the FP viewmodel once ADS settles. Scoped and Sighted are
     // asymmetric selectors; NoCardSwitch clears both unless ForceScoped
@@ -735,8 +744,8 @@ void local_player_viewmodel_bias(World *world, const LocalPlayerWeapon &w,
                                  int viewport_w, int viewport_h, float out[3]) {
     const WeaponSlotState *active_slot =
         world != nullptr ? active_local_weapon_slot(*world, w) : nullptr;
-    player_view_bias_view_units(v, suppress_view_bias(w, active_slot), pos_raw_units,
-                                tpos_raw_units, out);
+    player_view_bias_view_units(v, suppress_view_bias(w, active_slot, local_entity(world)),
+                                pos_raw_units, tpos_raw_units, out);
     // The per-frame motion lead: the witnessed pre-rotation add takes the
     // world-delta components RAW onto the view-frame lanes (no frame
     // conversion) [orig: Player_UpdateFirstPersonCamera @0x4dd549..0x4dd56c,

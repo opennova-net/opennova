@@ -537,6 +537,136 @@ void test_frame_reads_the_state_and_the_card_selector() {
     CHECK(f.fov_h_deg == kBinocularCameraFovHDeg);
 }
 
+// The camera's airborne skip is independent of the ongoing scope interp.
+// [orig: Player_UpdateFirstPersonCamera @0x4dd40d/0x4dd414 and @0x4dd49f/0x4dd4a6]
+void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
+    LocalWorld lw;
+    lw.ai.attach(lw.local);
+    AiEntity &body = *lw.ai.for_handle(lw.local);
+    LocalPlayerWeapon weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
+    PlayerViewState view;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    const float hip[3] = {256.0f, 512.0f, 768.0f};
+    const float sight[3] = {512.0f, -256.0f, 1024.0f};
+    const float eye[3] = {};
+    const auto check_bias = [&](float x, float y, float z) {
+        float bias[3];
+        local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, sight,
+                                    1920, 1080, bias);
+        CHECK(std::abs(bias[0] - x) < 0.000001f);
+        CHECK(std::abs(bias[1] - y) < 0.000001f);
+        CHECK(std::abs(bias[2] - z) < 0.000001f);
+    };
+    CHECK(local_player_scope_toggle(lw.w, weapon, view, weapon.slot));
+    for (int i = 0; i < 3; ++i) player_view_tick(view, eye);
+    check_bias(1.2f, 1.4f, 3.2f); // three of the fifteen raise steps
+
+    // The jump publishes 0x2000 immediately. Its upward velocity is not the
+    // gate: the same flag continues to suppress bias while the body falls.
+    lw.entity().flags |= kEntityFlagInAir;
+    lw.entity().engine_flags |= kEntityFlagInAir;
+    body.inf.airborne = true;
+    body.inf.vel[2] = 0x1600;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.suppress_view_bias && view.scope_engaged && view.scope_step == 3.0f);
+    check_bias(1.0f, 2.0f, 3.0f);
+    body.inf.vel[2] = -0x1600;
+    for (int i = 0; i < 5; ++i) player_view_tick(view, eye);
+    CHECK(view.scope_step == 8.0f && view.scope_ease_remaining == 7);
+    check_bias(1.0f, 2.0f, 3.0f);
+
+    // Landing exposes the current interpolated pose, not a new fifteen-step
+    // raise and not the stale pose from the jump's first rendered frame.
+    lw.entity().flags &= ~kEntityFlagInAir;
+    lw.entity().engine_flags &= ~kEntityFlagInAir;
+    body.inf.airborne = false;
+    body.inf.vel[2] = 0;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(!frame.suppress_view_bias && view.scope_step == 8.0f);
+    check_bias(1.0f + 8.0f / 15.0f, 0.4f, 3.0f + 8.0f / 15.0f);
+
+    // Falling during the remaining ease also leaves the promoter running.
+    // Cover the second registry flag carrier independently.
+    lw.entity().engine_flags |= kEntityFlagInAir;
+    body.inf.airborne = true;
+    body.inf.vel[2] = -0x1600;
+    settle_ease(view);
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.scope_settled && frame.suppress_view_bias && !frame.scope_card_active);
+    check_bias(1.0f, 2.0f, 3.0f);
+    lw.entity().engine_flags &= ~kEntityFlagInAir;
+    body.inf.airborne = false;
+    body.inf.vel[2] = 0;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.scope_card_active && !frame.suppress_view_bias);
+    check_bias(2.0f, -1.0f, 4.0f);
+
+    // Only the ADS contribution drops: the independently clamped motion lead
+    // and 4:3 framing drop still follow the hip offset on an airborne frame.
+    lw.entity().flags |= kEntityFlagInAir;
+    tracker.tick_delta[0] = 1.0f;
+    tracker.tick_delta[1] = -1.0f;
+    tracker.tick_delta[2] = 4.0f;
+    float bias[3];
+    local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, sight, 800, 600, bias);
+    CHECK(bias[0] == 1.0f - 1024.0f / 65536.0f);
+    CHECK(bias[1] == 2.0f + 1024.0f / 65536.0f);
+    CHECK(bias[2] == 3.0f - (4096.0f + 1280.0f) / 65536.0f);
+}
+
+void test_airborne_bias_is_separate_from_reload_and_force_scope_admission() {
+    // Original-machine probes of both skip blocks produce base (10,20,30)
+    // while suppressed, otherwise base+bias (110,220,330). NoCardSwitch
+    // exempts RELOAD only; ForceScoped does not exempt either bias skip.
+    // Optical admission has its own ForceScoped override @0x5cf845.
+    struct Case {
+        uint32_t body_flags;
+        bool reload;
+        bool no_card;
+        bool force;
+        bool suppressed;
+        bool optical;
+    };
+    const Case cases[] = {
+        {0, false, false, false, false, true},
+        {kEntityFlagInAir, false, false, false, true, false},
+        {0, true, false, false, true, false},
+        {0, true, true, false, false, true},
+        {kEntityFlagInAir, true, true, false, true, false},
+        {kEntityFlagInAir, false, false, true, true, true},
+        {kEntityFlagInAir, true, false, true, true, false},
+        {kEntityFlagInAir, true, true, true, true, true},
+        {0, true, true, true, false, true},
+        {kEntityFlagDrowning, false, false, false, false, true},
+    };
+    for (const Case &c : cases) {
+        LocalWorld lw;
+        lw.entity().flags |= c.body_flags;
+        LocalPlayerWeapon weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED |
+                (c.no_card ? weapon_flag::kNoCardSwitch : 0u) |
+                (c.force ? DEF_WEAPON_FLAG_FORCESCOPED : 0u));
+        weapon.slot.current = c.reload ? weapon_action::kReload : weapon_action::kIdle;
+        PlayerViewState view;
+        CHECK(player_view_set_engaged(view, true, false));
+        settle_ease(view);
+        LocalPlayerViewTracker tracker;
+        LocalPlayerViewFrame frame;
+        local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+        CHECK(frame.suppress_view_bias == c.suppressed);
+        CHECK(local_player_scope_view_visible(lw.w, weapon, view) == c.optical);
+        CHECK(view.scope_engaged && view.scope_settled && view.scope_step == 15.0f);
+        const float hip[3] = {256.0f, 512.0f, 768.0f};
+        const float sight[3] = {512.0f, -256.0f, 1024.0f};
+        float bias[3];
+        local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, sight,
+                                    1920, 1080, bias);
+        for (int i = 0; i < 3; ++i) {
+            CHECK(bias[i] == (c.suppressed ? hip[i] : sight[i]) / 256.0f);
+        }
+    }
+}
+
 // The frame leg's shake branch selection [orig: Render_ProcessMainSceneFrame
 //  @0x5ca34d -> Camera_ComputeThirdPersonView; the mode-0 IIR block
 //  @0x43803c..0x4380df vs the stateless mode>=1 chain @0x438939..0x4389e5]:
@@ -1251,6 +1381,8 @@ int main() {
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();
+    test_airborne_view_bias_keeps_interp_and_resumes_on_landing();
+    test_airborne_bias_is_separate_from_reload_and_force_scope_admission();
     test_scope_fov_target_and_render_queries_share_weather_state();
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();

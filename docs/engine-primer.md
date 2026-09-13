@@ -284,3 +284,5 @@ Scoped-aim parity (2026-09-13): the local body pass applies the stance-scaled, f
 Empty terrain sectors (2026-09-13): ordinary views traverse quadrant 1 at zero height, retain source tracked bounds, collapse primary/blend coordinates, and share the original LOD-0 cache identity. See [terrain fallback record](terrain/terrain-re.md#empty-sector-flat-fallback-2026-09-13-d-terrain-12), D-TERRAIN-12.
 
 WAC/BMS timing (2026-09-13): both schedulers use the mutable WAC time word and one admission decision per logic tick. A terminator-only program still executes at startup. See [mission event runtime](mission/bms-event-runtime-re.md), D-WAC-7.
+
+2026-09-13, D-WPN-37: Airborne players suppress authored first-person ADS position bias while scope interpolation continues; reload, NoCardSwitch and ForceScoped keep their existing optical policy. See [world §14.10](world/world-wac-ai-re.md). Native `local_player_view` regressions pass.

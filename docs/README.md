@@ -163,3 +163,5 @@ Scoped-aim parity (2026-09-13): [world §14.9](world/world-wac-ai-re.md#149-scop
 Empty-sector terrain parity (2026-09-13): [terrain fallback record](terrain/terrain-re.md#empty-sector-flat-fallback-2026-09-13-d-terrain-12) covers zero-height quadrant-1 draws, their texture stages, and the shared flat page (D-TERRAIN-12).
 
 WAC clock parity (2026-09-13): [mission event runtime](mission/bms-event-runtime-re.md) records the shared mutable clock, once-per-tick admission, empty-script startup, and immediate restore projection (D-WAC-7).
+
+2026-09-13, D-WPN-37: Airborne players suppress authored first-person ADS position bias while scope interpolation continues; reload, NoCardSwitch and ForceScoped keep their existing optical policy. See [world §14.10](world/world-wac-ai-re.md). Native `local_player_view` regressions pass.
