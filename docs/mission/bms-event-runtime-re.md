@@ -1363,3 +1363,13 @@ type-6088 structural teleport/effect markers are a different list.
 
 The queued ChangeAI half of the same parity round is recorded in
 [`world-wac-ai-re.md` §32](../world/world-wac-ai-re.md).
+
+PR #649 integration review (2026-09-13, D-WAC-7): a bare Simulation has no
+host roster to publish `humans`. Empty-script startup now correctly advances
+its clock to one and gates subsequent BMS/WAC passes. Seven Godot fixtures
+that previously relied on a perpetually zero empty-script clock now install
+an authored `set(ticks,-1)` program for their event/collision tests. A separate
+regression proves the empty startup blocks events and the authored clock write
+admits both schedulers. `simulation_test.gd` passes all 97 tests with the
+reference asset fixtures enabled; the live GameWorld startup path is also
+covered by the music-director integration tests.

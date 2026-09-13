@@ -4013,6 +4013,30 @@ func test_transport_uses_session_state() -> void:
 	assert_true(sim.resume_session())
 	assert_true(sim.is_playing(), "resume enters the Running session state")
 
+# Standalone fixtures have no host roster publishing humans. Keep the actual
+# WAC/BMS clock gate open through an authored write while testing live events.
+func _admit_standalone_script_ticks(sim: Simulation) -> void:
+	assert_true(sim.compile_and_set_wac(PackedStringArray(["set(ticks,-1)"])))
+
+
+func test_empty_script_startup_closes_admission_without_humans() -> void:
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_not_null(md.add_event(0, 0, 0))
+	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 77)))
+	var sim := Simulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	for _tick in range(32):
+		sim.step()
+	assert_false(sim.has_event_fired(0), "empty startup advanced the shared clock to one")
+	assert_true(sim.drain_effects().is_empty(), "no humans: normal BMS events remain gated")
+	_admit_standalone_script_ticks(sim)
+	for _tick in range(80):
+		sim.step()
+	assert_true(sim.has_event_fired(0), "the authored clock write admits both schedulers")
+	assert_eq(sim.drain_effects().size(), 1)
+
+
 func test_bms_event_fires_through_binding() -> void:
 	# The capability consolidation adds: a BMS event evaluates through the SAME binding that
 	# runs the AI (the editor preview used to walk AI but never fire events). Build an
@@ -4025,6 +4049,7 @@ func test_bms_event_fires_through_binding() -> void:
 
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md), "loaded the scripted mission")
+	_admit_standalone_script_ticks(sim)
 	assert_eq(sim.get_event_count(), 1, "one BMS event registered in the runtime")
 
 	# A normal event's first processing pass is the 16th tick (the faithful quarter-list
@@ -4080,6 +4105,7 @@ func test_fired_events_snapshot_matches_scalar() -> void:
 	assert_not_null(md.add_event_action(0, MissionEventAction.make(6, 0, 77)))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
+	_admit_standalone_script_ticks(sim)
 
 	var before: PackedByteArray = sim.get_fired_events_snapshot()
 	assert_eq(before.size(), sim.get_event_count(), "one flag per event")
@@ -4670,6 +4696,7 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 			FileAccess.get_file_as_bytes(fixture_res_path), "Armory", "ctrlx00"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5006]))
 	assert_true(sim.load_from_mission_data(md))
+	_admit_standalone_script_ticks(sim)
 	sim.resolve_item_traits(item_db)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	var before_rows: Array = sim.get_hitbox_debug().entities
@@ -4730,6 +4757,7 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 			FileAccess.get_file_as_bytes(SYN_ARMRY_SPECIAL1_SLIDE), "Armory", "ctrlx00"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5004]))
 	assert_true(sim.load_from_mission_data(md))
+	_admit_standalone_script_ticks(sim)
 	assert_eq(sim.get_entity_count(), 1)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	var before_debug: Array = sim.get_hitbox_debug().entities
@@ -4953,6 +4981,7 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
+	_admit_standalone_script_ticks(sim)
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 0,
 			"US02 records one unresolved attempt on slot 0")
@@ -5001,6 +5030,7 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
+	_admit_standalone_script_ticks(sim)
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	assert_true(sim.has_collision_instance(bms_id))
@@ -5138,6 +5168,7 @@ func test_scripted_remove_frees_the_ai_entity_with_its_registry_slot() -> void:
 	assert_not_null(md.add_event_action(0, MissionEventAction.make(22, 0, ssn)))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
+	_admit_standalone_script_ticks(sim)
 	assert_eq(sim.get_entity_effect_state_for_ssn(ssn).size(), Simulation.EFFECT_STATE_COUNT,
 			"the effect lookup sees the live registry slot before VaporizeSingle")
 	for _i in range(16):
