@@ -96,7 +96,7 @@ std::array<float, 2> TerrainTilePageProjection::project(
 
 std::optional<TerrainTilePageProjection>
 TerrainTileCompositionCache::page_projection(
-		const TerrainTilePageKey &page) noexcept {
+		const TerrainTilePageKey &page, bool zero_primary_uv) noexcept {
 	const int span = page_world_span(page.page_lod_level);
 	if (span <= 0) return std::nullopt;
 	const int64_t origin_x = static_cast<int64_t>(page.sector_origin_x) +
@@ -106,7 +106,8 @@ TerrainTileCompositionCache::page_projection(
 	return TerrainTilePageProjection{
 			static_cast<float>(origin_x),
 			static_cast<float>(origin_z),
-			1.0f / static_cast<float>(span),
+			// [orig: decode_terrain_tile_vertices @ 0x602AA0, UV stores @ 0x602DCC..0x602DCF]
+			zero_primary_uv ? 0.0f : 1.0f / static_cast<float>(span),
 			static_cast<float>(span),
 	};
 }
@@ -377,6 +378,9 @@ std::optional<TerrainTilePageBinding> TerrainTileCompositionCache::best_ready(
 				slot.page.sector_origin_z != point.sector_origin_z) {
 			continue;
 		}
+		// The flat page can pass this probe at its canonical sector origin.
+		// Retail masks the packed coordinate without rejecting its high bit.
+		// [orig: terrain_tile_cache_lookup @ 0x604140, probe @ 0x6041A4..0x6041E1]
 		const int span = page_world_span(slot.page.page_lod_level);
 		const double minimum_x = static_cast<double>(slot.page.sector_origin_x) +
 				static_cast<double>(slot.page.page_local_x);

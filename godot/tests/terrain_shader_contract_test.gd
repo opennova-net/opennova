@@ -105,6 +105,28 @@ func test_detail_uv_uses_the_retail_512_unit_source_grid() -> void:
 		"The underwater stage-3 swap must use the retail 8/512 coordinate.")
 
 
+func test_flat_sector_zeros_blendmap_transform_without_collapsing_detail() -> void:
+	# Flat transform 8 zeros stage 2's blend UVs. Stage 1 UV1 and stage 3's
+	# independent transform 9 retain spatial detail, including water noise.
+	# [orig: render_terrain_sector_batch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0;
+	# PolyTrn_InitTextures @ 0x60AAA0, stage 2/3 binds @ 0x60C400..0x60C411]
+	var shared := _compact(_source("res://shaders/terrain_lighting.gdshaderinc"))
+	var runtime := _compact(_source("res://shaders/terrain.gdshader"))
+	assert_true(runtime.contains(
+		"vec2source_uv=u_instance_zero_height?vec2(0.0):v_colormap_uv;"),
+		"Flat terrain collapses its source and blend coordinates; ordinary terrain keeps its UVs.")
+	assert_true(runtime.contains(
+		"terrain_surface_color_from_colormap(colormap,v_colormap_uv,v_detail_uv,source_uv,u_instance_source_quadrant)"),
+		"Both ready and cold pages use the separate blend input with live detail coordinates.")
+	assert_true(shared.contains(
+		"vec2blend_uv=clamp_retail_quadrant_uv(blendmap_uv,quadrant,textureSize(u_blendmap,0));"),
+		"The stage-2 blend sampler consumes its own coordinate stream.")
+	assert_true(shared.contains("sample_retail_detail_mips(u_detail_c1,detail_uv)") and
+		shared.contains("u_detail2,retail_detail_uv_from_atlas(colormap_uv,u_detail2_density)") and
+		shared.contains("texture(u_water_noise,retail_detail_uv_from_atlas(colormap_uv,8.0))"),
+		"Stage 1 detail and stage 3 detail/noise retain their spatial coordinates in flat mode.")
+
+
 func test_splat_modulation_is_the_second_detail_dp3() -> void:
 	# The ps.1.4 splat's stage-3 dp3 input is the authored second detail pair
 	# at its own density; maps without one run PS14Splat with no such stage.

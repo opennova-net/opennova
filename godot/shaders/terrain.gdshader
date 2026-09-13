@@ -22,6 +22,7 @@ instance uniform float u_instance_lod : hint_range(0.0, 7.0) = 0.0;
 instance uniform float u_instance_sector_x = 0.0;
 instance uniform float u_instance_sector_z = 0.0;
 instance uniform vec2 u_instance_source_quadrant = vec2(0.0);
+instance uniform bool u_instance_zero_height = false;
 instance uniform bool u_instance_tile_cache_ready = false;
 instance uniform float u_instance_tile_cache_layer = 0.0;
 // Exact max-quality retail c7/c8 reduction: world origin X/Z, inverse world
@@ -79,6 +80,10 @@ vec3 sector_color(float sx, float sz) {
 }
 
 void fragment() {
+	// The flat mode zeros stage 2's blend transform as well as the primary
+	// source coordinates. The independent detail/noise stream stays live.
+	// [orig: render_terrain_sector_batch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0]
+	vec2 source_uv = u_instance_zero_height ? vec2(0.0) : v_colormap_uv;
 	vec4 colormap;
 	if (u_has_tile_cache && u_instance_tile_cache_ready) {
 		vec2 page_uv = (v_world_pos.xz -
@@ -89,15 +94,19 @@ void fragment() {
 		colormap = texture(u_tile_cache,
 			vec3(page_uv, u_instance_tile_cache_layer));
 	} else {
+		// The native flat-page producer samples the source corner and skips
+		// mission overlays. Keep that fallback while the page is still cold.
 		vec2 sampled_colormap_uv = clamp_retail_quadrant_uv(
-			v_colormap_uv, u_instance_source_quadrant, textureSize(u_colormap, 0));
+			source_uv, u_instance_source_quadrant, textureSize(u_colormap, 0));
 		colormap = retail_bare_terrain_tile(
 			texture(u_colormap, sampled_colormap_uv).rgb, v_world_normal,
-			v_colormap_uv, u_instance_source_quadrant);
-		colormap = compose_retail_tile_overlay(colormap, v_world_pos);
+			source_uv, u_instance_source_quadrant);
+		if (!u_instance_zero_height) {
+			colormap = compose_retail_tile_overlay(colormap, v_world_pos);
+		}
 	}
 	vec3 result = terrain_surface_color_from_colormap(
-		colormap, v_colormap_uv, v_detail_uv, u_instance_source_quadrant);
+		colormap, v_colormap_uv, v_detail_uv, source_uv, u_instance_source_quadrant);
 
 	// The pool lights' additive re-draws, summed before the fog so each pool
 	// fades with distance like the batch it re-draws (the per-light pass's own

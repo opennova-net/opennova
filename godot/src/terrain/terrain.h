@@ -57,6 +57,7 @@ private:
 	// Per-tile: one single-surface ArrayMesh per LOD level
 	struct TileInfo {
 		Ref<ArrayMesh> lod_meshes[8];
+		Ref<ArrayMesh> flat_lod_meshes[8];
 	};
 	std::vector<TileInfo> tile_infos;
 
@@ -81,6 +82,7 @@ private:
 	bool patch_uniforms_stamped[PATCH_POOL_SIZE] = {};
 	Vector2 last_quadrant[PATCH_POOL_SIZE];
 	bool last_page_ready[PATCH_POOL_SIZE] = {};
+	bool last_zero_height[PATCH_POOL_SIZE] = {};
 	float last_page_layer[PATCH_POOL_SIZE] = {};
 	Vector4 last_page_projection[PATCH_POOL_SIZE];
 	int patches_active = 0;
@@ -165,8 +167,6 @@ private:
 	static void _strip_to_list(const std::vector<uint16_t>& strip,
 	                           PackedInt32Array& out);
 
-	Vector3 _heightmap_normal(const std::vector<uint16_t>& depth, int gx, int gz,
-	                          const opennova::terrain::CoordsTaps& taps) const;
 
 protected:
 	static void _bind_methods();

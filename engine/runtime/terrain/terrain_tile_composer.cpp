@@ -157,6 +157,10 @@ Rgba8Image compose_terrain_tile_page(
 		return output;
 	}
 
+	// The flat page uses the single source texel at UV (0,0) at both base
+	// and DOT3 stages; its .til loop is suppressed, scorches remain ordered.
+	// [orig: PolyTrn_RenderTile @ 0x60DC08..0x60DC16, .til gate @ 0x60DDA7]
+	const bool flat_page = job.target.page.page_lod_level == 0;
 	const int dimension = job.layout.texture_dimension;
 	const float world_per_texel =
 			static_cast<float>(job.layout.world_span) / dimension;
@@ -172,8 +176,8 @@ Rgba8Image compose_terrain_tile_page(
 
 	for (int y = 0; y < dimension; ++y) {
 		for (int x = 0; x < dimension; ++x) {
-			const float page_x = (static_cast<float>(x) + 0.5f) * world_per_texel;
-			const float page_z = (static_cast<float>(y) + 0.5f) * world_per_texel;
+			const float page_x = flat_page ? 0.0f : (static_cast<float>(x) + 0.5f) * world_per_texel;
+			const float page_z = flat_page ? 0.0f : (static_cast<float>(y) + 0.5f) * world_per_texel;
 			const RgbaF colormap = sample_source_quadrant(*sources.colormap,
 					static_cast<float>(job.source_origin_x) + page_x,
 					static_cast<float>(job.source_origin_z) + page_z,
@@ -206,7 +210,7 @@ Rgba8Image compose_terrain_tile_page(
 
 	const float page_max_x = world_origin_x + job.layout.world_span;
 	const float page_max_z = world_origin_z + job.layout.world_span;
-	if (sources.tile_info != nullptr && sources.tilestrip != nullptr &&
+	if (!flat_page && sources.tile_info != nullptr && sources.tilestrip != nullptr &&
 			sources.tilestrip->is_valid()) {
 	for (const TilOverlayEntry &entry : sources.tile_info->entries) {
 		const float entry_x = til_world_x_from_fixed(entry.x_fixed);

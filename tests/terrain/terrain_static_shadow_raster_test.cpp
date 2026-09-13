@@ -380,7 +380,7 @@ bool test_retail_world_to_page_projection() {
 		return false;
 	}
 
-	projection.page.page_lod_level = 0;
+	projection.page.page_lod_level = 5;
 	return expect(!project_terrain_static_shadow_vertex(
 			projection, world, raster),
 			"invalid page identity rejects projection without guessed dimensions");

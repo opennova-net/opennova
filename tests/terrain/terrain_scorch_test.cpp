@@ -286,10 +286,10 @@ bool test_registry_buckets_stamp_and_generation() {
 			"clear advances the generation and empties every page walk")) {
 		return false;
 	}
-	const opennova::TerrainTilePageKey unroutable{0, 0, 0, 0, 0};
+	const opennova::TerrainTilePageKey unroutable{0, 0, 0, 0, 5};
 	return expect(!registry.stamp(unroutable).valid &&
 			!registry.plan(unroutable).valid,
-			"a page level outside 1..4 cannot be routed");
+			"a page level outside 0..4 cannot be routed");
 }
 
 bool test_ordered_page_composition() {

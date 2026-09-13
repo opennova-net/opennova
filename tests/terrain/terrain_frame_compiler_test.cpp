@@ -142,6 +142,7 @@ int main() {
 	// --- Compile, culling disabled: order, fallback, handoff ---------------
 	TerrainFrameCompiler compiler;
 	TerrainViewInput view;
+	view.skip_empty_sectors = true;
 	view.cam_x = 32.0f;
 	view.cam_y = 10.0f;
 	view.cam_z = 32.0f;
@@ -211,6 +212,7 @@ int main() {
 	// --- Compile with the engine-side MVP/frustum path ----------------------
 	{
 		TerrainViewInput fv;
+		fv.skip_empty_sectors = true;
 		fv.cam_x = 32.0f;
 		fv.cam_y = 40.0f;
 		fv.cam_z = -20.0f;
@@ -257,6 +259,113 @@ int main() {
 				"the tracked height range spans the visible tile heights")) return 1;
 	}
 
+	// --- Empty sectors: topology reuse, independent geometry/UV/cache mode --
+	// [orig: PolyTrn_RenderFrame @ 0x60EAC0, routing @ 0x60EC94..0x60ECBD;
+	// decode_terrain_tile_vertices @ 0x602AA0, zero stores @ 0x602DC7..0x602DCF]
+	{
+		opennova::CptFile fallback_cpt = make_cpt_base();
+		opennova::CptTile tile = make_tile(0, 0);
+		tile.tile_size = 512;
+		tile.vertex_indices = {0, 0, 512, 0, 0, 512, 512, 512};
+		give_lod0_list(tile);
+		fallback_cpt.tiles.push_back(tile);
+		fallback_cpt.depth_buffer[512] = 4096;
+		fallback_cpt.depth_buffer[512 * 1024] = 6144;
+		fallback_cpt.depth_buffer[512 * 1024 + 512] = 8192;
+		opennova::TerrainSceneSnapshot fallback_scene =
+				opennova::build_terrain_scene_snapshot(fallback_cpt, trn);
+		TerrainViewInput fallback_view;
+		fallback_view.cam_x = fallback_view.cam_z = 32.0f;
+		fallback_view.cam_y = 12.0f;
+		fallback_view.config.no_frustum = true;
+		const auto &mixed = compiler.compile(fallback_scene, fallback_view);
+		if (!expect(mixed.debug.sectors_walked == 121 && mixed.patches.size() == 121,
+				"ordinary main view walks empty and authored sectors across the 11x11 window")) return 1;
+		int normal_count = 0;
+		int flat_count = 0;
+		opennova::TerrainTileCompositionCache pages;
+		int flat_layer = -1;
+		for (const auto &patch : mixed.patches) {
+			if (!expect(patch.tile_index == 0,
+					"empty sectors reuse the existing first-quadrant mesh topology")) return 1;
+			const auto vertices = opennova::build_terrain_tile_vertices(
+					fallback_cpt, trn, patch.tile_index, patch.zero_height);
+			if (!expect(vertices.size() == 4, "both variants retain the CPT vertex count")) return 1;
+			const auto request = opennova::terrain_tile_composition_request(patch);
+			const auto decision = pages.request(request);
+			if (!expect(decision.has_value(), "both mesh modes produce a cache request")) return 1;
+			if (patch.zero_height) {
+				++flat_count;
+				for (const auto &vertex : vertices) {
+					if (!expect(vertex.position[1] == 0.0f,
+							"flat variant never inherits nonzero source heights")) return 1;
+				}
+				if (!expect(vertices[3].position[0] == 512.0f &&
+						vertices[3].position[2] == 512.0f &&
+						vertices[3].atlas_uv == std::array<float, 2>{0.5f, 0.5f},
+						"flat positions preserve the footprint and secondary detail UVs")) return 1;
+				if (flat_layer < 0) flat_layer = decision->binding.layer;
+				if (!expect(decision->binding.layer == flat_layer &&
+						request.page.page_lod_level == 0 && request.tile_index == -1 &&
+						request.page.sector_origin_x == 0 && request.page.sector_origin_z == 0,
+						"all empty sectors share one canonical flat cache page")) return 1;
+				const auto uv = opennova::TerrainTileCompositionCache::page_projection(
+						request.page, patch.zero_height);
+				if (!expect(uv.has_value() && uv->project(patch.sector_ox + 512.0f,
+						patch.sector_oz + 512.0f) == std::array<float, 2>{0.0f, 0.0f},
+						"the submitted flat primary UV remains zero at every world-sector origin")) return 1;
+			} else {
+				++normal_count;
+				if (!expect(vertices[0].position[1] == 8.0f && vertices[3].position[1] == 32.0f,
+						"authored sector retains the nonflat source geometry")) return 1;
+			}
+		}
+		if (!expect(normal_count == 1 && flat_count == 120,
+				"adjacent authored and empty sectors keep distinct mesh modes")) return 1;
+		opennova::TerrainPatchDraw other_flat;
+		other_flat.zero_height = true;
+		other_flat.tile_index = 77;
+		other_flat.page_lod_level = 4;
+		other_flat.local_page_x = other_flat.source_page_x = 128;
+		other_flat.sector_x = -7;
+		other_flat.sector_z = 9;
+		const auto other_page = pages.request(
+				opennova::terrain_tile_composition_request(other_flat));
+		if (!expect(other_page.has_value() && !other_page->job.has_value() &&
+				other_page->binding.layer == flat_layer,
+				"different flat mesh tiles and LODs cannot split the shared page identity")) return 1;
+
+		TerrainViewInput low_view;
+		identity(low_view.view);
+		identity(low_view.proj);
+		low_view.config.no_nearfar = true;
+		const auto &low_window = compiler.compile(fallback_scene, low_view);
+		if (!expect(!low_window.patches.empty(),
+				"a frustum around zero height retains flat fallback geometry")) return 1;
+		for (const auto &patch : low_window.patches) {
+			if (!expect(patch.zero_height,
+					"the zero-height frustum rejects elevated source terrain but admits its flat variant")) return 1;
+		}
+		if (!expect(low_window.visible_bounds.valid && low_window.visible_bounds.min[1] >= 8.0f,
+				"flat culling does not replace retail's raw tracked height stores")) return 1;
+		fallback_view.skip_empty_sectors = true;
+		if (!expect(compiler.compile(fallback_scene, fallback_view).patches.size() == 1,
+				"explicit skip policy leaves only the authored sector")) return 1;
+		fallback_scene.sector_grid[2][2] = 0;
+		if (!expect(compiler.compile(fallback_scene, fallback_view).patches.empty(),
+				"all-empty sector grid with skip enabled emits nothing")) return 1;
+		fallback_view.skip_empty_sectors = false;
+		fallback_view.water_height = 4.0f;
+		fallback_view.cam_y = 2.0f;
+		const auto &underwater = compiler.compile(fallback_scene, fallback_view);
+		if (!expect(underwater.patches.size() == 121 && underwater.below_water &&
+				underwater.visible_bounds.valid && underwater.visible_bounds.min[1] >= 8.0f,
+				"all-empty fallback survives underwater and retains retail's raw tracked bounds")) return 1;
+		fallback_view.cam_y = 6.0f;
+		if (!expect(!compiler.compile(fallback_scene, fallback_view).below_water,
+				"flat fallback above water retains ordinary view classification")) return 1;
+	}
+
 	// --- The shared emission budget across routed sectors -------------------
 	{
 		opennova::CptFile big = make_cpt_base();
@@ -280,6 +389,7 @@ int main() {
 		if (!expect(dense.valid(), "dense snapshot builds")) return 1;
 
 		TerrainViewInput dv;
+		dv.skip_empty_sectors = true;
 		dv.cam_x = 256.0f;
 		dv.cam_y = 10.0f;
 		dv.cam_z = 256.0f;

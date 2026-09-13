@@ -280,3 +280,5 @@ Its source/oracle confidence levels are separate from the earlier IDA grills and
 runtime acceptance results linked above.
 
 Scoped-aim parity (2026-09-13): the local body pass applies the stance-scaled, fixed-point scope/binocular oscillator and carries its phase across mission-kernel replacement; [world §14.9](world/world-wac-ai-re.md#149-scoped-weapon-stability-and-persistent-aim-drift-2026-09-13), D-WPN-36.
+
+Empty terrain sectors (2026-09-13): ordinary views traverse quadrant 1 at zero height, retain source tracked bounds, collapse primary/blend coordinates, and share the original LOD-0 cache identity. See [terrain fallback record](terrain/terrain-re.md#empty-sector-flat-fallback-2026-09-13-d-terrain-12), D-TERRAIN-12.

@@ -75,13 +75,45 @@ int main() {
 			"c7/c8 projection maps page edges and interior without an axis swap")) {
 		return 1;
 	}
-	if (!expect(!TerrainTileCompositionCache::page_projection(
+	if (!expect(TerrainTileCompositionCache::page_projection(
 			TerrainTilePageKey{0, 0, 0, 0, 0}).has_value() &&
 			!TerrainTileCompositionCache::page_projection(
 			TerrainTilePageKey{0, 0, 0, 0, 5}).has_value(),
-			"only active-quality retail page levels expose projection state")) {
+			"flat and ordinary active-quality retail page levels expose projection state")) {
 		return 1;
 	}
+
+	// The flat record's high bit does not exclude it from the retail spatial
+	// probe. Its canonical (0,0) sector identity still rejects other sectors,
+	// and borrowers use the ordinary LOD-0 projection rather than terrain's
+	// zero primary UVs. [orig: terrain_tile_cache_lookup @ 0x604140,
+	// probe @ 0x6041A4..0x6041E1, projection @ 0x604215..0x604292]
+	TerrainTileCompositionCache flat_cache;
+	flat_cache.begin_frame(1000);
+	const TerrainTileCompositionRequest flat_request;
+	const auto flat_pending = flat_cache.request(flat_request);
+	const opennova::TerrainTileResidentPoint flat_point{0, 0, 16.0f, 16.0f};
+	if (!expect(flat_pending && flat_pending->job &&
+			!flat_cache.best_ready(flat_point).has_value(),
+			"a pending flat page is not borrowable before publication")) return 1;
+	if (!expect(flat_cache.publish(*flat_pending->job),
+			"the canonical flat page publishes")) return 1;
+	const auto flat_borrowed = flat_cache.best_ready(flat_point);
+	if (!expect(flat_borrowed && flat_borrowed->page.page_lod_level == 0 &&
+			flat_borrowed->layer == flat_pending->binding.layer,
+			"the origin sector can borrow the ready canonical flat page")) return 1;
+	const auto flat_projection = TerrainTileCompositionCache::page_projection(
+			flat_borrowed->page);
+	if (!expect(flat_projection && flat_projection->world_span == 1024.0f &&
+			flat_projection->inverse_world_span == 1.0f / 1024.0f &&
+			flat_projection->project(16.0f, 16.0f) ==
+				std::array<float, 2>{1.0f / 64.0f, 1.0f / 64.0f},
+			"flat page borrowers retain the ordinary geometric projection")) return 1;
+	if (!expect(!flat_cache.best_ready(
+				opennova::TerrainTileResidentPoint{512, 0, 528.0f, 16.0f}).has_value() &&
+			!flat_cache.best_ready(
+				opennova::TerrainTileResidentPoint{0, 512, 16.0f, 528.0f}).has_value(),
+			"the flat page cannot be borrowed from a different routed sector")) return 1;
 
 	// A repeated source page at two routed world-sector origins is two cache
 	// identities. The compose job retains the exact atlas source selected by

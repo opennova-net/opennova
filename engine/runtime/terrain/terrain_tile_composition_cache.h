@@ -19,7 +19,7 @@ struct TerrainTilePageKey {
 	int32_t sector_origin_z = 0;
 	int32_t page_local_x = 0; // exact origin inside the routed 512u sector
 	int32_t page_local_z = 0;
-	uint8_t page_lod_level = 0; // 1..4 => 512, 256, 128, 64u
+	uint8_t page_lod_level = 0; // 0 = shared flat page; 1..4 => 512, 256, 128, 64u
 };
 
 struct TerrainTileContentStamp {
@@ -138,15 +138,18 @@ public:
 	// [orig: span = 1024 >> lodLevel @ 0x60dbf6/0x60dd87 in
 	// PolyTrn_RenderTile.]
 	static constexpr int page_world_span(uint8_t page_lod_level) noexcept {
-		return page_lod_level >= 1 && page_lod_level <= 4
+		return page_lod_level <= 4
 				? 1024 >> page_lod_level
 				: 0;
 	}
 
-	// Returns the sole max-quality page projection. The retail failed-vertex-
+	// Returns the max-quality page projection. Terrain's flat mesh decoder
+	// zeros primary UVs; zero_primary_uv reduces that stream to a zero scale,
+	// while shadow/other geometric projections keep the full page extent.
+	// The retail failed-vertex-
 	// shader fallback that used inverse-view rows is deliberately not exposed.
 	static std::optional<TerrainTilePageProjection> page_projection(
-			const TerrainTilePageKey &page) noexcept;
+			const TerrainTilePageKey &page, bool zero_primary_uv = false) noexcept;
 
 	// Starts the binding lifetime for one deferred render frame. Repeating the
 	// same id is idempotent; a different id releases the prior frame's pins.
@@ -155,7 +158,7 @@ public:
 	// miss returns null rather than invalidating an earlier draw binding.
 	void begin_frame(uint64_t frame_id) noexcept;
 
-	// Returns null only for a page level outside 1..4. A returned job reserves
+	// Returns null for a page level outside 0..4 (0 is the shared flat page). A returned job reserves
 	// its layer/generation until publish(); repeated requests while that job is
 	// pending return the same not-ready binding without duplicating the job.
 	// Exact hits and successful best_ready() lookups refresh strict LRU age.

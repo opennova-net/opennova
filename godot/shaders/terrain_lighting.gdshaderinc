@@ -235,9 +235,13 @@ vec4 compose_retail_tile_overlay(vec4 colormap, vec3 world_pos) {
 // layer those on top. Colormap/detail UVs come from the caller's geometry
 // (runtime: baked patch mesh; editor: sculpted heightmap mesh).
 vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
-		vec2 detail_uv, vec2 quadrant) {
+		vec2 detail_uv, vec2 blendmap_uv, vec2 quadrant) {
+	// Stage 2 has its own transform: flat sectors collapse only this input,
+	// while stages 1 and 3 keep their independent detail/noise coordinates.
+	// [orig: render_terrain_sector_batch @ 0x6092A0, transform 8 @ 0x60973A..0x6097A0;
+	// PolyTrn_InitTextures @ 0x60AAA0, stage 2/3 binds @ 0x60C400..0x60C411]
 	vec2 blend_uv = clamp_retail_quadrant_uv(
-		colormap_uv, quadrant, textureSize(u_blendmap, 0));
+		blendmap_uv, quadrant, textureSize(u_blendmap, 0));
 	vec3 blend = texture(u_blendmap, blend_uv).rgb;
 	vec3 c1 = sample_retail_detail_mips(u_detail_c1, detail_uv).rgb;
 	vec3 c2 = sample_retail_detail_mips(u_detail_c2, detail_uv).rgb;

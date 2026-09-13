@@ -41,6 +41,67 @@ int converted_index_count(const CptTileLOD &lod, std::vector<uint32_t> &scratch)
 
 } // namespace
 
+// The unpacked CPT vertices use the same coordinates and locked height taps
+// as the original decoder. Normals are device metadata for the existing debug
+// and cold-cache shader path; retail's packed vertices have no normal channel.
+// [orig: decode_terrain_tile_vertices @ 0x602AA0, zero-height store @ 0x602DC9]
+std::vector<TerrainTileVertex> build_terrain_tile_vertices(
+		const CptFile &cpt, const TrnConfig &trn, int tile_index, bool zero_height) {
+	constexpr int atlas_size = 1024;
+	if (tile_index < 0 || tile_index >= static_cast<int>(cpt.tiles.size()) ||
+			cpt.depth_buffer.size() != atlas_size * atlas_size) return {};
+	const CptTile &tile = cpt.tiles[tile_index];
+	if (tile.vertex_indices.size() < static_cast<size_t>(tile.vertex_count) * 2u)
+		return {};
+	const terrain::CoordsTaps taps = terrain::coords_taps_for_quadrant(
+			locks_from_trn(trn), tile.tile_x & 0x200, tile.tile_y & 0x200, atlas_size);
+	std::vector<TerrainTileVertex> vertices(tile.vertex_count);
+	constexpr float height_scale = 1.0f / 256.0f;
+	for (int vi = 0; vi < tile.vertex_count; ++vi) {
+		const int rel_x = tile.vertex_indices[vi * 2];
+		const int rel_z = tile.vertex_indices[vi * 2 + 1];
+		const int source_x = tile.tile_x + rel_x;
+		const int source_z = tile.tile_y + rel_z;
+		const int hx = taps.x(source_x);
+		const int hz = taps.z(source_z);
+		TerrainTileVertex &vertex = vertices[vi];
+		vertex.position = {
+				static_cast<float>((tile.tile_x & 0x1ff) + rel_x),
+				zero_height ? 0.0f : cpt.depth_buffer[hz * atlas_size + hx] * height_scale,
+				static_cast<float>((tile.tile_y & 0x1ff) + rel_z)};
+		// The secondary detail stream is not zeroed by the high-bit flag.
+		vertex.atlas_uv = {source_x / 1024.0f, source_z / 1024.0f};
+		if (zero_height) {
+			vertex.normal = {0.0f, 1.0f, 0.0f};
+		} else {
+			const float left = cpt.depth_buffer[hz * atlas_size + taps.x(hx - 1)] * height_scale;
+			const float right = cpt.depth_buffer[hz * atlas_size + taps.x(hx + 1)] * height_scale;
+			const float down = cpt.depth_buffer[taps.z(hz - 1) * atlas_size + hx] * height_scale;
+			const float up = cpt.depth_buffer[taps.z(hz + 1) * atlas_size + hx] * height_scale;
+			const float dx = left - right;
+			const float dz = down - up;
+			const float length = std::sqrt(dx * dx + 4.0f + dz * dz);
+			vertex.normal = {dx / length, 2.0f / length, dz / length};
+		}
+	}
+	return vertices;
+}
+
+// [orig: PolyTrn_RenderTile @ 0x60DA70, flat-key canonicalization @ 0x60DA98..0x60DAA8]
+TerrainTileCompositionRequest terrain_tile_composition_request(
+		const TerrainPatchDraw &draw, TerrainTileContentStamp content) {
+	TerrainTileCompositionRequest request;
+	request.content = content;
+	if (draw.zero_height) return request; // LOD 0, zero coordinates, no mesh identity
+	request.page = {draw.sector_x * 512, draw.sector_z * 512,
+			draw.local_page_x, draw.local_page_z,
+			static_cast<uint8_t>(draw.page_lod_level)};
+	request.tile_index = draw.tile_index;
+	request.source_origin_x = draw.source_page_x;
+	request.source_origin_z = draw.source_page_z;
+	return request;
+}
+
 TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
                                                   const TrnConfig &trn) {
 	TerrainSceneSnapshot scene;
@@ -280,12 +341,15 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 			if ((gz & mask_z) != 0) gz = (gz < 0) ? 0 : 0xFF;
 
 			const int sector_id = scene.sector_grid[gz & 0xF][gx & 0xF];
-			if (sector_id <= 0) {
-				continue;
-			}
+			// The empty-sector branch reuses quadrant 1 topology with the
+			// packed key's high bit; view +100 is its only skip policy.
+			// [orig: PolyTrn_RenderFrame @ 0x60EAC0, routing @ 0x60EC94..0x60ECBD;
+			// terrain_render_visible_sectors @ 0x6090C0, routing @ 0x609238..0x609263]
+			const bool zero_height = sector_id == 0;
+			if (zero_height && view.skip_empty_sectors) continue;
 
 			int child = -1;
-			if (sector_id == 1) child = 0;
+			if (sector_id == 1 || zero_height) child = 0;
 			else if (sector_id == 3) child = 1;
 			else if (sector_id == 2) child = 2;
 			else if (sector_id == 4) child = 3;
@@ -301,11 +365,11 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 			// bounds-tracking pass at view setup, then the draw pass.
 			track_visible_bounds(scene.quad_nodes, scene.l1_children[child],
 					frustum, sector_ox, sector_oz, view.config,
-					draw_list_.visible_bounds);
+					draw_list_.visible_bounds, zero_height);
 			traverse_quadtree(scene.quad_nodes, scene.tile_meshes,
 					scene.l1_children[child], frustum,
 					view.cam_x, view.cam_y, view.cam_z,
-					sector_ox, sector_oz, view.config, visible_, stats);
+					sector_ox, sector_oz, view.config, visible_, stats, zero_height);
 			++draw_list_.debug.sectors_walked;
 
 			// Detail foliage collection is NOT a radial walk: retail's
@@ -374,6 +438,7 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 		TerrainPatchDraw draw;
 		draw.tile_index = vp.tile_index;
 		draw.lod_family = lod;
+		draw.zero_height = vp.zero_height;
 		draw.page_lod_level = vp.lod_level;
 		draw.sector_x = static_cast<int32_t>(std::lround(vp.sector_ox / 512.0f));
 		draw.sector_z = static_cast<int32_t>(std::lround(vp.sector_oz / 512.0f));

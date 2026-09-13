@@ -16,7 +16,9 @@
 
 #include <runtime/terrain/foliage_detail_collector.h>
 #include <runtime/terrain/quadtree.h>
+#include <runtime/terrain/terrain_tile_composition_cache.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -24,6 +26,17 @@ namespace opennova {
 
 struct CptFile;
 struct TrnConfig;
+
+// Device-ready vertex data. Atlas UVs feed retail's independent detail stream;
+// the primary page coordinates are supplied by page_projection at submission.
+struct TerrainTileVertex {
+	std::array<float, 3> position{};
+	std::array<float, 3> normal{};
+	std::array<float, 2> atlas_uv{};
+};
+
+std::vector<TerrainTileVertex> build_terrain_tile_vertices(
+		const CptFile &cpt, const TrnConfig &trn, int tile_index, bool zero_height);
 
 // Per-tile draw constants derived once at snapshot build. The quadrant bits
 // feed the shader's source-quadrant select; deriving them here removes the
@@ -76,6 +89,9 @@ struct TerrainViewInput {
 	// Live water height in world units; 0 = no water this mission (the retail
 	// Env_WaterHeightFixed == 0 sentinel). Feeds the below-water terrain flag.
 	float water_height = 0.0f;
+	// Retail view +100: the ordinary main view includes the flat fallback.
+	// [orig: PolyTrn_RenderFrame @ 0x60EAC0, gate @ 0x60ECB0]
+	bool skip_empty_sectors = false;
 	TraversalConfig config{};
 };
 
@@ -100,7 +116,15 @@ struct TerrainPatchDraw {
 	float distance = 0.0f;
 	uint8_t quadrant_x = 0;
 	uint8_t quadrant_z = 0;
+	// The packed retail tile key's high bit. It changes geometry and primary
+	// UVs without changing the source topology or the secondary detail UVs.
+	bool zero_height = false;
 };
+
+// A flat draw uses retail's one shared LOD-0 page, independently of its mesh
+// tile and world-sector origin. Ordinary pages retain their routed identity.
+TerrainTileCompositionRequest terrain_tile_composition_request(
+		const TerrainPatchDraw &draw, TerrainTileContentStamp content = {});
 
 // Value-based diagnostics for F3 and structural tests (no Dictionary at the
 // seam). lod_distribution is over emitted patches with the fallback resolved;

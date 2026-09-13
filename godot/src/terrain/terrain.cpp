@@ -501,7 +501,8 @@ void Terrain::render_frame() {
 	for (int i = 0; i < count; i++) {
 		const opennova::TerrainPatchDraw &draw = draw_list.patches[i];
 		const auto& ti = tile_infos[draw.tile_index];
-		const Ref<ArrayMesh> &mesh = ti.lod_meshes[draw.lod_family];
+		const Ref<ArrayMesh> &mesh = draw.zero_height
+				? ti.flat_lod_meshes[draw.lod_family] : ti.lod_meshes[draw.lod_family];
 		if (mesh.is_null()) {
 			// The compiler resolved the family against the same index counts
 			// the mesh build used; a null here means the two went out of sync.
@@ -529,6 +530,11 @@ void Terrain::render_frame() {
 		// Per-instance uniforms: written on change only (the mesh/transform
 		// gates above already work that way).
 		const bool fresh = !patch_uniforms_stamped[i];
+		if (fresh || draw.zero_height != last_zero_height[i]) {
+			rs->instance_geometry_set_shader_parameter(
+					patch_instances[i], "u_instance_zero_height", draw.zero_height);
+			last_zero_height[i] = draw.zero_height;
+		}
 		const Vector2 quadrant(static_cast<float>(draw.quadrant_x),
 				static_cast<float>(draw.quadrant_z));
 		if (fresh || quadrant != last_quadrant[i]) {
@@ -542,7 +548,8 @@ void Terrain::render_frame() {
 					draw, page_tile_tint, page_light_direction);
 		const std::optional<opennova::TerrainTilePageProjection> projection =
 				page.ready
-						? opennova::TerrainTileCompositionCache::page_projection(page.page)
+						? opennova::TerrainTileCompositionCache::page_projection(
+								page.page, draw.zero_height)
 						: std::nullopt;
 		const bool ready = projection.has_value();
 		if (fresh || ready != last_page_ready[i]) {
@@ -837,29 +844,6 @@ void Terrain::_strip_to_list(const std::vector<uint16_t>& strip,
 }
 
 // ---------------------------------------------------------------------------
-// Normal from heightmap gradient
-// ---------------------------------------------------------------------------
-
-Vector3 Terrain::_heightmap_normal(const std::vector<uint16_t>& depth, int gx, int gz,
-                                       const opennova::terrain::CoordsTaps& taps) const {
-	const int size = 1024;
-	const float scale = 1.0f / 256.0f;
-	// Same lock policy as the vertex heights: a gradient tap at the quadrant edge
-	// wraps inside it rather than reading the neighbouring quadrant's shoreline,
-	// which would tilt the seam row's normals into a false cliff face.
-	int x0 = taps.x(gx - 1);
-	int x1 = taps.x(gx + 1);
-	int z0 = taps.z(gz - 1);
-	int z1 = taps.z(gz + 1);
-	float hL = depth[gz * size + x0] * scale;
-	float hR = depth[gz * size + x1] * scale;
-	float hD = depth[z0 * size + gx] * scale;
-	float hU = depth[z1 * size + gx] * scale;
-	Vector3 n(hL - hR, 2.0f, hD - hU);
-	return n.normalized();
-}
-
-// ---------------------------------------------------------------------------
 // Terrain shader — loaded from res://shaders/terrain.gdshader
 // ---------------------------------------------------------------------------
 
@@ -1063,10 +1047,6 @@ bool Terrain::_build_terrain() {
 		);
 		return false;
 	}
-	const float height_scale = 1.0f / 256.0f;
-	const opennova::terrain::CoordsQuadrantLocks quadrant_locks =
-		opennova::terrain::coords_locks_from(terrain_data->get_trn());
-
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
 	terrain_material->set_shader(terrain_shader);
@@ -1092,81 +1072,69 @@ bool Terrain::_build_terrain() {
 		const auto& tile = cpt.tiles[ti];
 		auto& info = tile_infos[ti];
 
-		// Build vertex data
-		PackedVector3Array positions;
-		PackedVector3Array normals;
-		PackedVector2Array uvs;
-		positions.resize(tile.vertex_count);
-		normals.resize(tile.vertex_count);
-		uvs.resize(tile.vertex_count);
-
-		int local_base_x = tile.tile_x & 0x1FF;
-		int local_base_z = tile.tile_y & 0x1FF;
-
-		// The tile's own quadrant decides the lock policy for every one of its
-		// vertices; a tile whose last row/column lands on the quadrant boundary is
-		// exactly the case the .trn locks exist for.
-		// [orig: sub_402D20 @0x402D20 (jodemo.exe) — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200)., see docs/terrain/terrain-re.md]
-		const opennova::terrain::CoordsTaps taps =
-			opennova::terrain::coords_taps_for_quadrant(
-				quadrant_locks, tile.tile_x & 0x200, tile.tile_y & 0x200, hm_size);
-
-		for (int vi = 0; vi < tile.vertex_count; vi++) {
-			uint16_t rel_x = tile.vertex_indices[vi * 2 + 0];
-			uint16_t rel_y = tile.vertex_indices[vi * 2 + 1];
-
-			int wx = tile.tile_x + rel_x;
-			int wz = tile.tile_y + rel_y;
-			int hx = taps.x(wx);
-			int hz = taps.z(wz);
-			float hy = cpt.depth_buffer[hz * hm_size + hx] * height_scale;
-
-			float lx = static_cast<float>(local_base_x + rel_x);
-			float lz = static_cast<float>(local_base_z + rel_y);
-
-			positions.set(vi, Vector3(lx, hy, lz));
-			normals.set(vi, _heightmap_normal(cpt.depth_buffer, hx, hz, taps));
-			uvs.set(vi, Vector2(static_cast<float>(wx) / 1024.0f,
-			                    static_cast<float>(wz) / 1024.0f));
-		}
-
-		total_verts += tile.vertex_count;
-
-		// Create one ArrayMesh per LOD level (single surface each)
-		for (int lod = 0; lod < 8; lod++) {
-			const auto& src_lod = tile.lods[lod];
-
-			PackedInt32Array indices;
-			if (src_lod.is_strip) {
-				_strip_to_list(src_lod.indices, indices);
-			} else {
-				// Swap first two indices per triangle (CW -> CCW for Godot)
-				for (size_t i = 0; i + 2 < src_lod.indices.size(); i += 3) {
-					indices.push_back(src_lod.indices[i + 1]);
-					indices.push_back(src_lod.indices[i]);
-					indices.push_back(src_lod.indices[i + 2]);
-				}
+		// The engine produces both vertex variants; this loop only uploads
+		// the selected positions, normals and unchanged detail atlas UVs.
+		// Only quadrant 1 can be the empty-sector fallback topology.
+		const int variants = tile.tile_x < 512 && tile.tile_y < 512 ? 2 : 1;
+		for (int variant = 0; variant < variants; ++variant) {
+			const std::vector<opennova::TerrainTileVertex> vertices =
+					opennova::build_terrain_tile_vertices(cpt, terrain_data->get_trn(),
+							static_cast<int>(ti), variant != 0);
+			if (vertices.size() != tile.vertex_count) return false;
+			PackedVector3Array positions;
+			PackedVector3Array normals;
+			PackedVector2Array uvs;
+			positions.resize(tile.vertex_count);
+			normals.resize(tile.vertex_count);
+			uvs.resize(tile.vertex_count);
+			for (int vi = 0; vi < tile.vertex_count; ++vi) {
+				const opennova::TerrainTileVertex &vertex = vertices[vi];
+				positions.set(vi, Vector3(
+						vertex.position[0], vertex.position[1], vertex.position[2]));
+				normals.set(vi, Vector3(
+						vertex.normal[0], vertex.normal[1], vertex.normal[2]));
+				uvs.set(vi, Vector2(vertex.atlas_uv[0], vertex.atlas_uv[1]));
 			}
 
-			// The <3 gate matches the snapshot's per-LOD index counts, so the
-			// compiler's family fallback and this mesh set agree by
-			// construction (both derive from the same converted counts).
-			if (indices.size() < 3) continue;
+			total_verts += tile.vertex_count;
 
-			total_indices += indices.size();
+			// Create one ArrayMesh per LOD level (single surface each)
+			for (int lod = 0; lod < 8; lod++) {
+				const auto& src_lod = tile.lods[lod];
 
-			Array arrays;
-			arrays.resize(Mesh::ARRAY_MAX);
-			arrays[Mesh::ARRAY_VERTEX] = positions;
-			arrays[Mesh::ARRAY_NORMAL] = normals;
-			arrays[Mesh::ARRAY_TEX_UV] = uvs;
-			arrays[Mesh::ARRAY_INDEX] = indices;
+				PackedInt32Array indices;
+				if (src_lod.is_strip) {
+					_strip_to_list(src_lod.indices, indices);
+				} else {
+					// Swap first two indices per triangle (CW -> CCW for Godot)
+					for (size_t i = 0; i + 2 < src_lod.indices.size(); i += 3) {
+						indices.push_back(src_lod.indices[i + 1]);
+						indices.push_back(src_lod.indices[i]);
+						indices.push_back(src_lod.indices[i + 2]);
+					}
+				}
 
-			Ref<ArrayMesh> lod_mesh;
-			lod_mesh.instantiate();
-			lod_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-			lod_mesh->surface_set_material(0, terrain_material);
-			info.lod_meshes[lod] = lod_mesh;
+				// The <3 gate matches the snapshot's per-LOD index counts, so the
+				// compiler's family fallback and this mesh set agree by
+				// construction (both derive from the same converted counts).
+				if (indices.size() < 3) continue;
+
+				total_indices += indices.size();
+
+				Array arrays;
+				arrays.resize(Mesh::ARRAY_MAX);
+				arrays[Mesh::ARRAY_VERTEX] = positions;
+				arrays[Mesh::ARRAY_NORMAL] = normals;
+				arrays[Mesh::ARRAY_TEX_UV] = uvs;
+				arrays[Mesh::ARRAY_INDEX] = indices;
+
+				Ref<ArrayMesh> lod_mesh;
+				lod_mesh.instantiate();
+				lod_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+				lod_mesh->surface_set_material(0, terrain_material);
+				if (variant == 0) info.lod_meshes[lod] = lod_mesh;
+				else info.flat_lod_meshes[lod] = lod_mesh;
+			}
 		}
 	}
 
