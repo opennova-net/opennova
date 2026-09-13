@@ -37,7 +37,8 @@ struct FoliageDetailPatch {
 // node's sector-local rect: (0, 0, 512) collects the whole sector, a 64u
 // leaf collects its own cells. node_size must be a power of two in
 // [16, 512]. Collection order and the 128-entry capacity apply to the whole
-// in/out vector.
+// in/out vector. Sector 0 uses quadrant 1's raw mip heights and sets key
+// bit 31: flat cells occupy list/cache slots but generate no foliage geometry.
 void collect_foliage_detail_patches(
 		const Mipchain &mipchain,
 		int sector_id,

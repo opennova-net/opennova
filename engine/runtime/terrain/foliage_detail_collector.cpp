@@ -18,6 +18,7 @@ constexpr size_t kPatchCapacity = kFoliageDetailPatchCapacity;
 
 bool sector_atlas_origin(int sector_id, int &atlas_x, int &atlas_z) {
 	switch (sector_id) {
+		case 0: // Flat sectors retain quadrant 1's raw node heights.
 		case 1:
 			atlas_x = 0;
 			atlas_z = 0;
@@ -55,11 +56,13 @@ public:
 			float p_camera_x,
 			float p_camera_y,
 			float p_camera_z,
+			uint32_t p_key_flags,
 			std::vector<FoliageDetailPatch> &p_patches)
 		: mipchain(p_mipchain),
 		  camera_x(p_camera_x),
 		  camera_y(p_camera_y),
 		  camera_z(p_camera_z),
+		  key_flags(p_key_flags),
 		  patches(p_patches) {}
 
 	void collect(int atlas_x, int atlas_z, int world_x, int world_z,
@@ -72,12 +75,32 @@ private:
 	float camera_x;
 	float camera_y;
 	float camera_z;
+	uint32_t key_flags;
 	std::vector<FoliageDetailPatch> &patches;
 
 	void collect_node(int atlas_x, int atlas_z,
 			int world_x, int world_z,
 			int size, int mip_level) {
 		if (patches.size() >= kPatchCapacity) {
+			return;
+		}
+
+		// Retail descends every nonleaf before testing distance. An ancestor's
+		// mixed-height center can be far from an in-range leaf's own center.
+		// [orig: Terrain_CollectNearFoliagePatches @ 0x603E60,
+		// nonleaf walk @ 0x603E67..0x603E8F; leaf gate @ 0x603F63]
+		if (size != kDetailCellSize) {
+			const int child_size = size / 2;
+			const int child_level = mip_level + 1;
+			// Recovered child order: northwest, northeast, southwest, southeast.
+			collect_node(atlas_x, atlas_z,
+					world_x, world_z, child_size, child_level);
+			collect_node(atlas_x + child_size, atlas_z,
+					world_x + child_size, world_z, child_size, child_level);
+			collect_node(atlas_x, atlas_z + child_size,
+					world_x, world_z + child_size, child_size, child_level);
+			collect_node(atlas_x + child_size, atlas_z + child_size,
+					world_x + child_size, world_z + child_size, child_size, child_level);
 			return;
 		}
 
@@ -103,25 +126,10 @@ private:
 			return;
 		}
 
-		if (size == kDetailCellSize) {
-			const uint32_t x_left = static_cast<uint32_t>(world_x) & 0x7fffu;
-			const uint32_t z_top =
-					static_cast<uint32_t>(world_z + kDetailCellSize) & 0x7fffu;
-			patches.push_back({(x_left << 16) | z_top, distance});
-			return;
-		}
-
-		const int child_size = size / 2;
-		const int child_level = mip_level + 1;
-		// Recovered child order: northwest, northeast, southwest, southeast.
-		collect_node(atlas_x, atlas_z,
-				world_x, world_z, child_size, child_level);
-		collect_node(atlas_x + child_size, atlas_z,
-				world_x + child_size, world_z, child_size, child_level);
-		collect_node(atlas_x, atlas_z + child_size,
-				world_x, world_z + child_size, child_size, child_level);
-		collect_node(atlas_x + child_size, atlas_z + child_size,
-				world_x + child_size, world_z + child_size, child_size, child_level);
+		const uint32_t x_left = static_cast<uint32_t>(world_x) & 0x7fffu;
+		const uint32_t z_top =
+				static_cast<uint32_t>(world_z + kDetailCellSize) & 0x7fffu;
+		patches.push_back({key_flags | (x_left << 16) | z_top, distance});
 	}
 };
 
@@ -172,8 +180,14 @@ void collect_foliage_detail_patches(
 		return;
 	}
 
+	// The flat flag survives collection and consumes the same 128-entry
+	// budget. Distance still uses raw node +52, before the generator turns
+	// flagged keys into empty cache entries. [orig: terrain_render_visible_sectors
+	// @ 0x6090C0, flag @ 0x60924A; Terrain_CollectNearFoliagePatches
+	// @ 0x603E60, raw center @ 0x603F46, packed flag @ 0x603F7E..0x603F8A]
+	const uint32_t key_flags = sector_id == 0 ? 0x80000000u : 0u;
 	DetailPatchCollector collector(
-			mipchain, camera_x, camera_y, camera_z, patches);
+			mipchain, camera_x, camera_y, camera_z, key_flags, patches);
 	collector.collect(atlas_x + node_local_x, atlas_z + node_local_z,
 			world_origin_x + node_local_x, world_origin_z + node_local_z,
 			node_size, mip_level);

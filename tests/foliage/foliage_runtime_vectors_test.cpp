@@ -175,10 +175,10 @@ bool detail_vectors_and_gates() {
 	            "distance 33 switches to the primary low alpha-test pass")) return false;
 	if (!expect(runtime.render_frame(one_detail(42.01f), world).detail.empty(),
 	            "detail cells beyond 42 units are rejected")) return false;
-	auto invalid = one_detail(10.0f);
-	invalid.detail_cells[0].key |= 0x80000000u;
-	if (!expect(runtime.render_frame(invalid, world).detail.empty(),
-	            "detail key bit 31 is the retail invalid sentinel")) return false;
+	auto flat = one_detail(10.0f);
+	flat.detail_cells[0].key |= 0x80000000u;
+	if (!expect(runtime.render_frame(flat, world).detail.empty(),
+	            "flat-sector detail keys generate no geometry")) return false;
 	return true;
 }
 
@@ -413,6 +413,46 @@ bool detail_capacity_and_eviction() {
 	                third.detail[0].cache_revision ==
 	                    second.detail_generated[0].revision,
 	            "replacement detail geometry appears one render later")) return false;
+	return true;
+}
+
+bool flat_detail_keys_retain_empty_cache_entries() {
+	Runtime runtime;
+	auto request = one_detail(10.0f);
+	request.slots[0].source_vertex_count = 1820; // One resident slot.
+	auto world = world_with_foliage_mask(0x1u);
+	const uint32_t authored_key = request.detail_cells[0].key;
+	runtime.render_frame(request, world);
+	if (!expect(runtime.render_frame(request, world).detail.size() == 72,
+	            "the authored control warms a drawable resident")) return false;
+
+	int samples = 0;
+	world.detail_foliage_mask_at = [&samples](int32_t, int32_t) { ++samples; return 1u; };
+	world.height_at = [&samples](float, float) { ++samples; return 0.0f; };
+	world.path_blocked = [&samples](float, float, float) { ++samples; return false; };
+	request.detail_cells[0].key |= 0x80000000u;
+	const uint32_t flat_key = request.detail_cells[0].key;
+	const auto flat = runtime.render_frame(request, world);
+	if (!expect(flat.detail.empty() && flat.detail_evicted.size() == 1 &&
+	                flat.detail_evicted[0].key == authored_key &&
+	                flat.detail_generated.size() == 1 &&
+	                flat.detail_generated[0].key == flat_key &&
+	                runtime.get_stats().detail.residents == 1 && samples == 0,
+	            "a flat key evicts the authored resident and generates an empty unsampled entry")) return false;
+	const auto repeat = runtime.render_frame(request, world);
+	if (!expect(repeat.detail.empty() && repeat.detail_generated.empty() &&
+	                repeat.detail_evicted.empty() && runtime.get_stats().detail.hits == 1 &&
+	                runtime.get_stats().detail.regenerations == 0 && samples == 0,
+	            "a repeated flat key hits its resident without sampling or drawing")) return false;
+
+	request.detail_cells[0].key = authored_key;
+	const auto restored = runtime.render_frame(request, world);
+	if (!expect(restored.detail.empty() && restored.detail_evicted.size() == 1 &&
+	                restored.detail_evicted[0].key == flat_key &&
+	                restored.detail_generated.size() == 1 && samples > 0,
+	            "returning to authored terrain must evict the empty flat resident and regenerate")) return false;
+	if (!expect(runtime.render_frame(request, world).detail.size() == 72,
+	            "the authored replacement draws only on the following render")) return false;
 	return true;
 }
 
@@ -1060,6 +1100,7 @@ int main() {
 	if (!tier_specific_foliage_sampler_routing()) return 1;
 	if (!detail_cache_temporal_semantics()) return 1;
 	if (!detail_capacity_and_eviction()) return 1;
+	if (!flat_detail_keys_retain_empty_cache_entries()) return 1;
 	if (!model_cache_phase_negative_and_identity()) return 1;
 	if (!overlapping_model_cells_refresh_once_per_frame()) return 1;
 	if (!model_key_lookup_work_is_bounded_by_cell_visits()) return 1;

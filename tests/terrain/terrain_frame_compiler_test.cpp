@@ -3,6 +3,7 @@
 // emission budget, the LOD-family fallback, the foliage detail-cell handoff,
 // and the engine-side MVP/frustum path.
 #include <runtime/terrain/terrain_frame.h>
+#include <runtime/renderer/foliage_frame.h>
 
 #include <formats/cpt/cpt.h>
 #include <formats/trn/trn.h>
@@ -148,17 +149,83 @@ int test_foliage_handoff_is_independent_of_terrain_budget() {
 		if (!expect(same_detail_cells(limited.detail_cells, expected),
 				"foliage preserves every nearby key and its order after the main list fills")) return 1;
 
-		// The default includes flat empty sectors. They can fill the main
-		// list before any authored sector, but cannot starve its foliage.
+		// Default flat sectors fill the main list first and consume their own
+		// foliage slots. This fixture stays below 128, so the nearby authored
+		// keys survive alongside the additional flagged cells in source order.
 		view.skip_empty_sectors = false;
 		const auto &with_empty = compiler.compile(dense, view);
+		std::vector<opennova::FoliageDetailPatch> authored_cells;
+		for (const auto &cell : with_empty.detail_cells)
+			if ((cell.key & 0x80000000u) == 0u) authored_cells.push_back(cell);
 		if (!expect(with_empty.patches.size() == 224 &&
-				same_detail_cells(with_empty.detail_cells, expected),
-				"default empty-sector fallback does not consume the foliage budget")) return 1;
+				with_empty.detail_cells.size() > authored_cells.size() &&
+				with_empty.detail_cells.size() <= opennova::kFoliageDetailPatchCapacity &&
+				same_detail_cells(authored_cells, expected),
+				"default fallback adds flagged foliage keys independently of the full main list")) return 1;
 		for (const auto &draw : with_empty.patches)
 			if (!expect(draw.zero_height,
 					"earlier empty sectors fill all retained main slots in this fixture")) return 1;
 	}
+	return 0;
+}
+
+int test_flat_terrain_keys_reach_empty_foliage_cache_entries() {
+	auto cpt = make_cpt_base();
+	add_quadrant_tiles(cpt, 0, 64);
+	opennova::TrnConfig routing;
+	routing.origin_x = routing.origin_y = -4;
+	const auto scene = opennova::build_terrain_scene_snapshot(cpt, routing);
+	opennova::TerrainViewInput terrain_view;
+	terrain_view.cam_x = terrain_view.cam_z = 256.0f;
+	terrain_view.cam_y = 10.0f;
+	identity(terrain_view.view);
+	identity(terrain_view.proj);
+	terrain_view.config.no_frustum = true;
+	terrain_view.config.force_leaves = true;
+	opennova::TerrainFrameCompiler terrain;
+	const auto &terrain_draws = terrain.compile(scene, terrain_view);
+	if (!expect(!terrain_draws.detail_cells.empty(),
+			"default empty sectors produce real foliage collector keys")) return 1;
+
+	opennova::renderer::FoliageViewInput foliage_view;
+	foliage_view.no_frustum = true;
+	for (const auto &cell : terrain_draws.detail_cells) {
+		if (!expect((cell.key & 0x80000000u) != 0u,
+				"all-empty terrain preserves the flat flag through frame compilation")) return 1;
+		foliage_view.detail_cells.push_back({cell.key, cell.distance});
+	}
+	std::array<opennova::foliage::RuntimeSlot, opennova::FOLIAGE_MAX_DEFS> slots{};
+	slots[0].enabled = true;
+	slots[0].model_radius = 2.0f;
+	slots[0].source_vertex_count = 3;
+	std::array<opennova::renderer::FoliageSlotGeometry, opennova::FOLIAGE_MAX_DEFS> geometry{};
+	geometry[0].valid = true;
+	geometry[0].vertices = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 0}, {0, 1, 0, 0, 1}};
+	geometry[0].indices = {0, 1, 2};
+	opennova::renderer::FoliageFrameCompiler foliage;
+	foliage.configure_slots(slots, geometry);
+	int samples = 0;
+	opennova::foliage::WorldSamplers world;
+	world.detail_foliage_mask_at = [&samples](int32_t, int32_t) { ++samples; return 1u; };
+	world.model_foliage_mask_at = world.detail_foliage_mask_at;
+	world.height_at = [&samples](float, float) { ++samples; return 8.0f; };
+	world.path_blocked = [&samples](float, float, float) { ++samples; return false; };
+	opennova::renderer::FoliageExpansionSamplers expansion;
+	expansion.terrain_uv_at = [&samples](float, float, float &u, float &v) {
+		++samples; u = v = 0.5f; return true;
+	};
+	for (int frame = 0; frame < 2; ++frame) {
+		const auto &draws = foliage.compile(foliage_view, world, expansion);
+		const auto &stats = draws.debug.runtime.detail;
+		if (!expect(draws.vertices.empty() && draws.indices.empty() &&
+				draws.mesh_builds.empty() && draws.commands.empty() && samples == 0 &&
+				stats.residents == foliage_view.detail_cells.size() &&
+				(frame == 0 ? stats.regenerations : stats.hits) == foliage_view.detail_cells.size(),
+				"flat terrain keys retain empty foliage cache residents without sampling or drawing")) return 1;
+	}
+	terrain_view.skip_empty_sectors = true;
+	if (!expect(terrain.compile(scene, terrain_view).detail_cells.empty(),
+			"skip-empty view suppresses both flat terrain and its foliage keys")) return 1;
 	return 0;
 }
 
@@ -210,6 +277,7 @@ int main() {
 	using opennova::TerrainViewInput;
 
 	if (test_foliage_handoff_is_independent_of_terrain_budget() != 0) return 1;
+	if (test_flat_terrain_keys_reach_empty_foliage_cache_entries() != 0) return 1;
 	if (test_full_terrain_budget_preserves_foliage_frustum_and_distance_gates() != 0) return 1;
 
 	// --- Scene: three quadrant-0 leaf tiles with distinct LOD-0 payloads ----
