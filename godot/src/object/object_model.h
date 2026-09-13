@@ -388,8 +388,9 @@ private:
 	// composes the same scale instead of overwriting it with a pose transform.
 	int32_t entity_uniform_scale_q16_ = 0;
 	float model_sphere_radius_ = 0.0f;  // gpm[5]; 0 = unstamped
-	float entity_bound_radius_ = 0.0f;  // entity+0; 0 = none (no collision block)
+	int32_t entity_bound_radius_q16_ = 0;  // entity+0; 0 = none (no collision block)
 	ObjectID slot_shadow_capture_with_;
+	ObjectID entity_light_owner_;
 	String slot_shadow_decal_texture_;
 	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
@@ -708,12 +709,18 @@ public:
 	// @0x5d7835 reads gpm[5]; see docs/render/render-lighting-re.md]. A model
 	// sphere of 0 = unstamped (SlotShadow falls back to the render bounds).
 	void set_shadow_bound_radii(float p_model_sphere, float p_entity_bound);
+	void set_bound_radii_q16(int32_t p_model_sphere, int32_t p_entity_bound);
+	int32_t get_entity_bound_radius_q16() const { return entity_bound_radius_q16_; }
 	float get_model_sphere_radius() const;
 	float get_entity_bound_radius() const;
 	// Capture-with link: this model renders into ANOTHER caster's slot
 	// (retail renders held weapons and mounted/standing children inside the
 	// parent entity's slot RT — the RenderSlot_RenderEntityAndChildren
 	// child walk); it never takes a slot of its own.
+	// Attached render models share their entity lighting query and groups,
+	// independently of their posed model origins. [orig: @0x5C7FA5..0x5C8020]
+	void set_entity_light_owner(ObjectModel *p_owner);
+	ObjectModel *get_entity_light_owner() const;
 	void set_slot_shadow_capture_with(ObjectModel *p_owner);
 	ObjectModel *get_slot_shadow_capture_with() const;
 	void set_slot_shadow_decal(const String &p_texture, const Vector4 &p_dims);
@@ -724,8 +731,8 @@ public:
 			float p_interior_daylight);
 	void set_interior_section_light_transfer(float p_daylight);
 	AABB get_model_bounds() const { return model_bounds_; }
-	// The model bounds in world space — the per-draw light query box
-	// (retail queries per draw context, see docs/render/render-lighting-re.md).
+	// The rendered model bounds in world space (geometry diagnostics/culling).
+	// Lighting uses the entity origin and get_entity_bound_radius_q16 instead.
 	AABB get_world_bounds() const;
 	struct PointLightDrawPart {
 		int32_t robj_index = 0;

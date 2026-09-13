@@ -89,6 +89,7 @@ public:
 	// getters mint fresh records from these so no consumer holds the
 	// placer's own row.
 	struct StaticEffectSourceRow {
+		int32_t entity_bound_radius_q16 = 0;
 		int kind = -1;
 		int entity_index = -1;
 		int bms_id = 0;
@@ -389,6 +390,8 @@ private:
 	bool _placement_is_mirror_reflected(uint32_t p_entity_attrib,
 			int p_item_id) const;
 	int32_t _item_model_scale_q16(int p_item_id) const;
+	int32_t _item_entity_bound_radius_q16(int p_item_id,
+			const Ref<ObjectData> &p_data);
 	Transform3D _entity_transform_for_item(const Vector3 &p_position,
 			const Vector3 &p_rotation_deg, int p_item_id) const;
 	void _configure_item_scale(ObjectModel *p_model, int p_item_id) const;

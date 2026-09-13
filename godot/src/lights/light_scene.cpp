@@ -73,17 +73,21 @@ std::array<int32_t, 3> mission_fixed_from_godot(const Vector3 &world) {
 	};
 }
 
-void stamp_draw_bounds(const AABB &world_bounds,
-		opennova::renderer::LightDrawContext &draw) {
-	const std::array<int32_t, 3> min_fixed = mission_fixed_from_godot(
-			world_bounds.position);
-	const std::array<int32_t, 3> max_fixed = mission_fixed_from_godot(
-			world_bounds.position + world_bounds.size);
-	for (int axis = 0; axis < 3; ++axis) {
-		// The godot->mission fold negates one axis; re-order per axis.
-		draw.aabb_min_fixed[axis] = MIN(min_fixed[axis], max_fixed[axis]);
-		draw.aabb_max_fixed[axis] = MAX(min_fixed[axis], max_fixed[axis]);
-	}
+opennova::renderer::LightDrawContext entity_draw_context(
+		const Vector3 &position, int32_t bound_radius_q16) {
+	return opennova::renderer::entity_light_draw_context({
+			mission_fixed_from_godot(position), bound_radius_q16});
+}
+
+void collect_entity_light_models(ObjectModel *model, std::vector<ObjectModel *> &out) {
+	if (!model->is_visible_in_tree()) return;
+	out.push_back(model);
+	// Avatar heads and individual husks are separate render models beneath
+	// one entity. Retail queries before these submits, never from their poses.
+	// [orig: Terrain_RenderSectorEntitiesBySide @0x5C7FA5..0x5C8020]
+	for (int i = 0; i < model->get_child_count(); ++i)
+		if (ObjectModel *part = Object::cast_to<ObjectModel>(model->get_child(i)))
+			collect_entity_light_models(part, out);
 }
 
 void fill_flicker(opennova::renderer::LightFlickerInputs &flicker, int p_time_ms,
@@ -407,7 +411,9 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 		const PackedInt64Array &p_interior_owners,
 		const PackedInt32Array &p_interior_sections,
 		const PackedByteArray &p_robj_scoped,
-		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather) {
+		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
+		const PackedVector3Array &p_entity_positions,
+		const PackedInt32Array &p_entity_bound_radii_q16) {
 	// The shared objects-target select inputs (object_select_inputs).
 	const ObjectSelectInputs sel = object_select_inputs(p_time_ms, p_weather, p_ambient_scale);
 	const opennova::renderer::LightFlickerInputs &flicker = sel.flicker;
@@ -432,7 +438,6 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 		if (model == nullptr) {
 			continue;
 		}
-		++filtered_models;
 		// Owners are parallel to the INPUT array, not the filtered draw list.
 		const uint64_t owner_entity = i < p_owner_entities.size()
 				? static_cast<uint64_t>(
@@ -445,48 +450,58 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 		const int32_t interior_section = i < p_interior_sections.size()
 				? static_cast<int32_t>(p_interior_sections[i])
 				: 0;
+		ObjectModel *entity_model = model->get_entity_light_owner();
+		if (entity_model == nullptr) entity_model = model;
+		const bool explicit_query = i < p_entity_positions.size() &&
+				i < p_entity_bound_radii_q16.size();
+		const auto entity_draw = entity_draw_context(
+				explicit_query ? p_entity_positions[i] : entity_model->get_global_position(),
+				explicit_query ? p_entity_bound_radii_q16[i] : entity_model->get_entity_bound_radius_q16());
 		const bool robj_scoped = i < p_robj_scoped.size() &&
 				p_robj_scoped[i] != 0;
-		if (robj_scoped) {
-			any_robj_scoped = true;
-			std::vector<ObjectModel::PointLightDrawPart> parts;
-			model->collect_point_light_draw_parts(parts);
-			// A rigid building has one row per visible ROBJ. Retain a section-0
-			// fallback for malformed/skinned building data so it never falls back
-			// to the broader entity-owner admission rule.
-			if (parts.empty()) {
-				parts.push_back(ObjectModel::PointLightDrawPart{
-						0, model->get_world_bounds()});
+		std::vector<ObjectModel *> entity_models;
+		collect_entity_light_models(model, entity_models);
+		for (ObjectModel *part_model : entity_models) {
+			++filtered_models;
+			if (robj_scoped) {
+				any_robj_scoped = true;
+				std::vector<ObjectModel::PointLightDrawPart> parts;
+				part_model->collect_point_light_draw_parts(parts);
+				// A rigid building has one row per visible ROBJ. Retain a section-0
+				// fallback for malformed/skinned building data so it never falls back
+				// to the broader entity-owner admission rule.
+				if (parts.empty()) {
+					parts.push_back(ObjectModel::PointLightDrawPart{
+							0, part_model->get_world_bounds()});
+				}
+				for (const ObjectModel::PointLightDrawPart &part : parts) {
+					auto draw = entity_draw;
+					// A building draw declares itself as interior section zero, then
+					// the model collector re-scopes the OWNER section per ROBJ. The
+					// group gate falls back from interior section zero to this value.
+					// [orig: Terrain_RenderSectorModels @0x5c5e07;
+					// collect_render_objects_for_batch @0x5d8ff7, see
+					// docs/render/render-lighting-re.md]
+					draw.groups.owner_group_entity = 0;
+					draw.groups.owner_group_section = part.robj_index;
+					draw.groups.interior_group_entity = owner_entity;
+					draw.groups.interior_group_section = 0;
+					draws.push_back(draw);
+					targets.push_back(DrawTarget{
+							part_model, part.robj_index, true});
+				}
+				continue;
 			}
-			for (const ObjectModel::PointLightDrawPart &part : parts) {
-				opennova::renderer::LightDrawContext draw;
-				stamp_draw_bounds(part.world_bounds, draw);
-				// A building draw declares itself as interior section zero, then
-				// the model collector re-scopes the OWNER section per ROBJ. The
-				// group gate falls back from interior section zero to this value.
-				// [orig: Terrain_RenderSectorModels @0x5c5e07;
-				// collect_render_objects_for_batch @0x5d8ff7, see
-				// docs/render/render-lighting-re.md]
-				draw.groups.owner_group_entity = 0;
-				draw.groups.owner_group_section = part.robj_index;
-				draw.groups.interior_group_entity = owner_entity;
-				draw.groups.interior_group_section = 0;
-				draws.push_back(draw);
-				targets.push_back(DrawTarget{
-						model, part.robj_index, true});
-			}
-			continue;
-		}
 
-		opennova::renderer::LightDrawContext draw;
-		stamp_draw_bounds(model->get_world_bounds(), draw);
-		draw.groups.owner_group_entity = owner_entity;
-		// The interior group: the building this model currently stands inside
-		// plus that blink volume's section. Zero = outdoors.
-		draw.groups.interior_group_entity = interior_owner;
-		draw.groups.interior_group_section = interior_section;
-		draws.push_back(draw);
-		targets.push_back(DrawTarget{model, 0, false});
+			auto draw = entity_draw;
+			draw.groups.owner_group_entity = owner_entity;
+			// The interior group: the building this model currently stands inside
+			// plus that blink volume's section. Zero = outdoors.
+			draw.groups.interior_group_entity = interior_owner;
+			draw.groups.interior_group_section = interior_section;
+			draws.push_back(draw);
+			targets.push_back(DrawTarget{part_model, 0, false});
+		}
 	}
 	std::vector<opennova::renderer::LightDrawSelection> selections(draws.size());
 	scene_.select_for_draws(draws.data(), draws.size(), options, ambient,
@@ -525,7 +540,8 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 }
 
 int LightScene::render_static_frame(
-		const PackedVector3Array &p_bounds_position_size,
+		const PackedVector3Array &p_entity_positions,
+		const PackedInt32Array &p_entity_bound_radii_q16,
 		const PackedInt64Array &p_owner_entities,
 		const PackedInt32Array &p_owner_sections,
 		const PackedInt64Array &p_interior_owners,
@@ -539,7 +555,7 @@ int LightScene::render_static_frame(
 	// Cache those selected handles; live fade/RGB-gen/weather/ambient color is
 	// still reevaluated below every frame for the handful of lit rows. A carved
 	// entity remains a zero row rather than shifting later atlas identities.
-	const int64_t row_count = p_bounds_position_size.size() / 2;
+	const int64_t row_count = p_entity_positions.size();
 	static_row_count_ = static_cast<int>(row_count);
 	opennova::renderer::LightFlickerInputs flicker;
 	fill_flicker(flicker, p_time_ms, p_weather);
@@ -568,9 +584,9 @@ int LightScene::render_static_frame(
 			if (row >= p_active.size() || p_active[row] == 0) {
 				continue;
 			}
-			opennova::renderer::LightDrawContext draw;
-			stamp_draw_bounds(AABB(p_bounds_position_size[row * 2],
-					p_bounds_position_size[row * 2 + 1]), draw);
+			auto draw = entity_draw_context(p_entity_positions[row],
+					row < p_entity_bound_radii_q16.size()
+							? p_entity_bound_radii_q16[row] : 0);
 			draw.groups.owner_group_entity = row < p_owner_entities.size()
 					? static_cast<uint64_t>(
 							static_cast<int64_t>(p_owner_entities[row]))
@@ -1163,10 +1179,11 @@ void LightScene::_bind_methods() {
 			&LightScene::census_frame);
 	ClassDB::bind_method(D_METHOD("render_model_frame", "models",
 			"owner_entities", "interior_owners", "interior_sections",
-			"robj_scoped", "ambient_scale", "time_ms", "weather"),
-			&LightScene::render_model_frame);
+			"robj_scoped", "ambient_scale", "time_ms", "weather",
+			"entity_positions", "entity_bound_radii_q16"),
+			&LightScene::render_model_frame, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()));
 	ClassDB::bind_method(D_METHOD("render_static_frame",
-			"bounds_position_size", "owner_entities", "owner_sections",
+			"entity_positions", "entity_bound_radii_q16", "owner_entities", "owner_sections",
 			"interior_owners", "interior_sections", "active",
 			"ambient_scale", "time_ms", "weather", "rows_revision"),
 			&LightScene::render_static_frame, DEFVAL(-1));

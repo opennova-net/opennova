@@ -46,6 +46,19 @@ opennova::renderer::LightSpawnParams barrel_params(int32_t x_fixed, int32_t y_fi
 int main() {
     using namespace opennova::renderer;
 
+    // The entity query stays centered on position, independent of any
+    // geometry/ROBJ box. Every axis uses the same initialized radius.
+    {
+        const auto draw = entity_light_draw_context({{10 << 16, -(20 << 16), 30 << 16}, 16 << 16});
+        expect(draw.aabb_min_fixed == std::array<int32_t, 3>{-(6 << 16), -(36 << 16), 14 << 16},
+               "entity light cube subtracts boundRadius on every mission axis");
+        expect(draw.aabb_max_fixed == std::array<int32_t, 3>{26 << 16, -(4 << 16), 46 << 16},
+               "entity light cube adds boundRadius on every mission axis");
+        const auto point = entity_light_draw_context({{123, -456, 789}, 0});
+        expect(point.aabb_min_fixed == point.aabb_max_fixed,
+               "an entity without a collision block queries its position with zero radius");
+    }
+
     // Spawn: retail handle form, first-free reuse, no stale resurrection.
     {
         LightScene scene;
@@ -544,6 +557,35 @@ int main() {
                "capacity reuse rejects the stale generation");
     }
 
+    // The object caller pre-increments overlap count before testing <64,
+    // so candidate 64 never joins its sorted list. General/terrain query keeps64.
+    // [orig: Light_SelectAndEnableForDraw @0x5ABA7F..0x5ABA8D]
+    for (bool indexed : {false, true}) {
+        LightScene scene;
+        scene.set_select_index_enabled(indexed);
+        for (int i = 0; i < 62; ++i) scene.spawn(barrel_params((8 + i) << 16, 0, 0));
+        const LightHandle sixty_third = scene.spawn(barrel_params(1 << 16, 0, 0));
+        const LightHandle sixty_fourth = scene.spawn(barrel_params(0, 0, 0));
+        const LightDrawContext draw = entity_light_draw_context({{0, 0, 0}, 100 << 16});
+        LightDrawSelection selected;
+        LightSelectionOptions options;
+        options.target = LightSelectionTarget::Objects;
+        scene.select_for_draws(&draw, 1, options, {1, 1, 1}, {}, true, &selected);
+        expect(selected.count == 3 && selected.lights[0].handle == sixty_third,
+               "object draws sort only their first 63 overlaps");
+        for (size_t i = 0; i < selected.count; ++i)
+            expect(!(selected.lights[i].handle == sixty_fourth),
+                   "the closest 64th overlapping light is absent from object draws");
+        options.target = LightSelectionTarget::Terrain;
+        scene.select_for_draws(&draw, 1, options, {1, 1, 1}, {}, true, &selected);
+        expect(selected.count == 3 && selected.lights[0].handle == sixty_fourth,
+               "terrain/general draw queries preserve their independent 64-candidate cap");
+        std::array<LightHandle, LightScene::kQueryLimit> general{};
+        expect(scene.query(draw.aabb_min_fixed, draw.aabb_max_fixed, general) == 64 &&
+                       general[0] == sixty_fourth,
+               "the general query still includes and sorts candidate 64");
+    }
+
     // select_for_draws: per-draw owner isolation over one snapshot
     // [orig: the per-draw collect @ 0x5aa250 gated by Light_PassesActiveGroups
     // @ 0x5a9120 with that draw's owner/interior groups].
@@ -652,6 +694,26 @@ int main() {
         const LightHandle w1 = scene.spawn(barrel_params(1 << 16, 0, 0));
         const LightHandle w2 = scene.spawn(barrel_params(2 << 16, 0, 0));
         const LightHandle w4 = scene.spawn(barrel_params(4 << 16, 0, 0));
+        scene.spawn(barrel_params(5 << 16, 0, 0));
+        const auto entity_draw = entity_light_draw_context({{0, 0, 0}, 16 << 16});
+        std::array<LightDrawContext, 2> draws{entity_draw, entity_draw};
+        for (size_t d = 0; d < draws.size(); ++d) {
+            draws[d].groups.interior_group_entity = 500;
+            draws[d].groups.owner_group_section = static_cast<int32_t>(d + 1);
+        }
+        std::array<LightDrawSelection, 2> out{};
+        LightSelectionOptions options;
+        options.target = LightSelectionTarget::Objects;
+        options.admit_owned_unscoped = false;
+        const std::array<float, 3> ambient = {1.0f, 1.0f, 1.0f};
+        scene.select_for_draws(draws.data(), draws.size(), options, ambient,
+                               LightFlickerInputs{}, false, out.data());
+        for (const auto &selection : out) {
+            expect(selection.count == 3 && selection.lights[0].handle == w1 &&
+                           selection.lights[1].handle == w2 && selection.lights[2].handle == w4,
+                   "four unowned candidates produce the same ordered three across ROBJ groups");
+        }
+
         LightSpawnParams sec1 = barrel_params(3 << 16, 0, 0);
         sec1.has_gen = false;
         sec1.owner_entity = 500;
@@ -661,23 +723,8 @@ int main() {
         sec2.owner_section = 2;
         const LightHandle owned2 = scene.spawn(sec2);
 
-        // The building's entity box (position 0, boundRadius 16) stamped on
-        // BOTH ROBJ draws; interior group = the building at section 0, owner
-        // group = (0, robjIndex) — the Terrain_RenderSectorModels shape.
-        std::array<LightDrawContext, 2> draws{};
-        for (size_t d = 0; d < draws.size(); ++d) {
-            draws[d].aabb_min_fixed = {-(16 << 16), -(16 << 16), -(16 << 16)};
-            draws[d].aabb_max_fixed = {16 << 16, 16 << 16, 16 << 16};
-            draws[d].groups.interior_group_entity = 500;
-            draws[d].groups.interior_group_section = 0;
-            draws[d].groups.owner_group_entity = 0;
-            draws[d].groups.owner_group_section = static_cast<int32_t>(d + 1);
-        }
-        std::array<LightDrawSelection, 2> out{};
-        LightSelectionOptions options;
-        options.target = LightSelectionTarget::Objects;
-        options.admit_owned_unscoped = false;
-        const std::array<float, 3> ambient = {1.0f, 1.0f, 1.0f};
+        // The same cube/ordered candidates are re-gated for each ROBJ;
+        // section-owned lights compete before the final three-light cap.
         scene.select_for_draws(draws.data(), draws.size(), options, ambient,
                                LightFlickerInputs{}, false, out.data());
         expect(out[0].count == 3 && out[1].count == 3,
@@ -970,9 +1017,9 @@ int main() {
 
     // The select_for_draws cell index is a pure broadphase: for every draw the
     // indexed enumeration must admit the same slots in the same order as the
-    // reference linear scan (the witnessed first-64 slot-order truncation is
+    // reference linear scan (the witnessed object first-63 truncation is
     // semantics, not an implementation detail). Fuzzed scenes: a dense
-    // cluster that overflows the 64-cap, spread lights, hidden slots, owner
+    // cluster that overflows the object cap, spread lights, hidden slots, owner
     // groups, oversize radii, moving slots across revisions, and draws far
     // outside the populated region.
     {

@@ -386,6 +386,14 @@ struct LightDrawContext {
 	LightActiveGroups groups{};
 };
 
+// One entity's query source. Render-object bounds/poses never change this
+// cube; only the active groups vary between that entity's split draws.
+struct EntityLightQuery {
+	std::array<int32_t, 3> position_fixed{};
+	int32_t bound_radius_fixed = 0;
+};
+LightDrawContext entity_light_draw_context(const EntityLightQuery &entity);
+
 struct LightDrawSelection {
 	std::array<SelectedLight, kLightSelectLimit> lights{};
 	size_t count = 0;
@@ -394,7 +402,8 @@ struct LightDrawSelection {
 class LightScene {
 public:
 	static constexpr size_t kCapacity = 4096;   // [orig: @ 0x5a8db1]
-	static constexpr size_t kQueryLimit = 64;   // [orig: @ 0x5aa384]
+	static constexpr size_t kQueryLimit = 64;   // terrain/general query [orig: @0x5AA384]
+	static constexpr size_t kObjectQueryLimit = 63; // pre-increment limit [orig: @0x5ABA7F..0x5ABA8D]
 	static constexpr size_t kSelectLimit = kLightSelectLimit; // the 3-cap [orig: @ 0x5d9229]
 
 	// The witnessed transient spawners' constants (the pool comment above).
@@ -462,15 +471,15 @@ public:
 			std::array<SelectedLight, kSelectLimit> &out) const;
 
 	// The witnessed per-draw pass: for each draw context run the capped
-	// slot-order collect (first 64, then nearest sort — the exact
-	// @ 0x5aa250 shape) against a one-pass snapshot of the live pool, then
+	// slot-order collect (objects first 63, general first 64, then nearest sort — the exact
+	// @0x5AB9D0 / @0x5AA250 shapes) against a one-pass snapshot of the live pool, then
 	// the group-gated first-3 select with that draw's groups. The snapshot
 	// carries only the collection inputs (retail's flag-bit-2 skip); target
 	// disables stay a select-stage gate exactly as retail applies them.
 	// Broadphase toggle for select_for_draws: the cell index gathers a
 	// superset of each draw's overlap candidates, re-sorts them into slot
 	// order, and runs the identical exact test — the accepted ordered list
-	// (and so the witnessed first-64 truncation) is bit-identical to the
+	// (and so the witnessed caller-specific truncation) is bit-identical to the
 	// linear scan the toggle falls back to. The linear path stays as the
 	// equivalence-test reference.
 	void set_select_index_enabled(bool enabled) {

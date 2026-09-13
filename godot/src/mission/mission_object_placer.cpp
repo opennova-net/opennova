@@ -1454,6 +1454,27 @@ bool MissionObjectPlacer::_has_occlusion_records(int p_item_id) {
 	return has_occ;
 }
 
+int32_t MissionObjectPlacer::_item_entity_bound_radius_q16(int p_item_id,
+		const Ref<ObjectData> &p_data) {
+	if (p_data.is_null() || item_db_.is_null()) return 0;
+	const auto &model = p_data->native_model();
+	opennova::simassets::EntityBoundRadiusInputs inputs;
+	inputs.model_radius_q16 = opennova::simassets::model_bound_radius_q16_from_3di(model);
+	inputs.uniform_scale_q16 = _item_model_scale_q16(p_item_id);
+	inputs.has_collision_block = model.collision != nullptr;
+	const String husk = item_db_->get_husk(p_item_id);
+	if (inputs.has_collision_block && !husk.is_empty()) {
+		const Ref<ObjectData> husk_data = _load_object_data(husk);
+		if (husk_data.is_valid()) {
+			inputs.has_first_husk = true;
+			inputs.first_husk_radius_q16 =
+					opennova::simassets::model_bound_radius_q16_from_3di(
+							husk_data->native_model());
+		}
+	}
+	return opennova::simassets::entity_bound_radius_q16(inputs);
+}
+
 void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 		int p_item_id) {
 	if (p_model == nullptr || item_db_.is_null()) {
@@ -1472,56 +1493,15 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	// see docs/render/render-lighting-re.md].
 	p_model->set_slot_shadow_person(
 			item_db_->get_item_type(p_item_id) == ItemDatabase::TYPE_PERSON);
-	// The two radii the shadow slot reads. The MODEL SPHERE is the .3di
-	// header's origin sphere (gpm[5]) — the silhouette capture extent and the
-	// depth clip size from it. The ENTITY BOUND (entity+0) is that sphere
-	// raised to the first husk stage's sphere and padded + 0x1000, written
-	// only when the graphic carries a collision block — the slot lod/patch
-	// and the light query size from it [orig: Entity_InitFromModel
-	// @0x40dc30 — the gpm[44] collision-block gate, the scaled base-model
-	// bound, the unscaled husk max, and the +0x1000 pad].
+	// The same native entity-bound producer supplies live and batched draws.
+	// The model sphere remains the separate silhouette capture extent.
 	const String graphic = _graphic_for(p_item_id);
 	if (!graphic.is_empty()) {
 		const Ref<ObjectData> data = _load_object_data(graphic);
 		if (data.is_valid()) {
-			// 0 for a document without LOD 0 (nothing loaded): stays unstamped.
-			const float model_sphere =
-					opennova::simassets::model_bound_radius_from_3di(
-							data->native_model());
-			if (model_sphere > 0.0f) {
-				float entity_bound = 0.0f;
-				if (data->has_collision()) {
-					int32_t bound_q16 = static_cast<int32_t>(Math::round(
-							static_cast<double>(model_sphere) * 65536.0));
-					const int32_t scale_q16 = _item_model_scale_q16(p_item_id);
-					if (scale_q16 != 0) {
-						bound_q16 = opennova::world::retail_q16_mul_rhu(
-								bound_q16, scale_q16);
-					}
-					String husk = item_db_->get_husk(p_item_id);
-					if (husk.is_empty()) {
-						husk = item_db_->get_huskfinal(p_item_id);
-					}
-					if (!husk.is_empty()) {
-						const Ref<ObjectData> husk_data = _load_object_data(husk);
-						if (husk_data.is_valid()) {
-							const float husk_bound =
-									opennova::simassets::model_bound_radius_from_3di(
-											husk_data->native_model());
-							const int32_t husk_bound_q16 = static_cast<int32_t>(
-									Math::round(static_cast<double>(husk_bound) * 65536.0));
-							bound_q16 = MAX(bound_q16, husk_bound_q16);
-						}
-					}
-					// The +0x1000 pad on the entity bound (Entity_InitFromModel @0x40dc30 -
-					// docs/render/render-lighting-re.md).
-					if (bound_q16 > 0) {
-						entity_bound = static_cast<float>(bound_q16 + 0x1000) /
-								65536.0f;
-					}
-				}
-				p_model->set_shadow_bound_radii(model_sphere, entity_bound);
-			}
+			p_model->set_bound_radii_q16(
+					opennova::simassets::model_bound_radius_q16_from_3di(data->native_model()),
+					_item_entity_bound_radius_q16(p_item_id, data));
 		}
 	}
 	String decal_texture;

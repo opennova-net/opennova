@@ -3,6 +3,7 @@
 // witnesses ride with them.
 #include <runtime/simassets/model_builders.h>
 #include <base/io/fixed.h>
+#include <runtime/world/entity.h>
 
 #include <algorithm>
 #include <cmath>
@@ -235,6 +236,19 @@ int32_t model_bound_radius_q16_from_3di(const Threedi3di3 &model) {
 
 float model_bound_radius_from_3di(const Threedi3di3 &model) {
 	return static_cast<float>(model_bound_radius_q16_from_3di(model)) / io::kFp16One;
+}
+
+int32_t entity_bound_radius_q16(const EntityBoundRadiusInputs &inputs) {
+	// [orig: Entity_InitFromModel @0x40dc30: CDTA gate @0x40de8f,
+	// scaled base @0x40e052, signed first-husk max @0x40e062..0x40e06f,
+	// and unconditional +0x1000 padding @0x40e076]
+	if (!inputs.has_collision_block) return 0;
+	int32_t radius = inputs.model_radius_q16;
+	if (inputs.uniform_scale_q16 != 0)
+		radius = world::retail_q16_mul_rhu(radius, inputs.uniform_scale_q16);
+	if (inputs.has_first_husk)
+		radius = std::max(radius, inputs.first_husk_radius_q16);
+	return static_cast<int32_t>(static_cast<uint32_t>(radius) + 0x1000u);
 }
 
 // Build the runtime occlusion model from the parsed OCCL tables — the 60 B

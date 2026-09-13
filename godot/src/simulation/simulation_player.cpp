@@ -4,6 +4,7 @@
 #include "simulation/simulation_internal.h"
 
 #include <formats/mission/bms.h>
+#include <base/io/fixed.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/music_vars.h>
 #include <runtime/world/player_view.h>
@@ -113,6 +114,15 @@ Vector3 Simulation::get_local_player_position() const {
 	if (!e) return Vector3();
 	// mission (x,y,z) -> Godot (x, z, -y).
 	return Vector3(e->position.x, e->position.z, -e->position.y);
+}
+
+bool Simulation::local_player_light_query(Vector3 &r_position, int32_t &r_radius_q16) const {
+	const opennova::world::Entity *entity = kernel_
+			? kernel_->world.registry.get(kernel_->world.cached.local_player) : nullptr;
+	if (entity == nullptr) return false;
+	r_position = Vector3(entity->position.x, entity->position.z, -entity->position.y);
+	r_radius_q16 = opennova::io::float_to_fp16_16_round_sat(entity->bound_radius);
+	return true;
 }
 
 Vector3 Simulation::get_local_player_eye_offset() const {

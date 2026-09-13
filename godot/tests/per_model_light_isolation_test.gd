@@ -344,12 +344,10 @@ func test_static_rows_pack_owner_isolated_selections_and_clear_in_place() -> voi
 	assert_gt(scene.spawn_glow(GlowSpawn.make(Vector3(0.0, 1.0, 0.0), 8.0, Color.WHITE)), 0)
 	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.25, 1.0, 0.0), 8.0)
 			.attached(2, 101)), 0)
-	var bounds := PackedVector3Array([
-		Vector3(-1.0, 0.0, -1.0), Vector3(2.0, 2.0, 2.0),
-		Vector3(-1.0, 0.0, -1.0), Vector3(2.0, 2.0, 2.0),
-		Vector3(-1.0, 0.0, -1.0), Vector3(2.0, 2.0, 2.0),
+	var positions := PackedVector3Array([
+		Vector3(0.0, 1.0, 0.0), Vector3(0.0, 1.0, 0.0), Vector3(0.0, 1.0, 0.0),
 	])
-	assert_eq(scene.render_static_frame(bounds,
+	assert_eq(scene.render_static_frame(positions, PackedInt32Array([65536, 65536, 65536]),
 			PackedInt64Array([101, 202, 101]),
 			PackedInt32Array([2, 0, 2]),
 			PackedInt64Array([0, 0, 0]),
@@ -402,11 +400,8 @@ func test_static_building_rows_rescope_owned_lights_per_robj() -> void:
 	for section in [2, 4]:
 		assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(float(section), 1.0, 0.0), 100.0)
 				.attached(section, owner)), 0)
-	var bounds := PackedVector3Array([
-		Vector3(-10.0, -10.0, -10.0), Vector3(20.0, 20.0, 20.0),
-		Vector3(-10.0, -10.0, -10.0), Vector3(20.0, 20.0, 20.0),
-	])
-	assert_eq(scene.render_static_frame(bounds,
+	var positions := PackedVector3Array([Vector3.ZERO, Vector3.ZERO])
+	assert_eq(scene.render_static_frame(positions, PackedInt32Array([10 << 16, 10 << 16]),
 			PackedInt64Array([0, 0]), PackedInt32Array([2, 4]),
 			PackedInt64Array([owner, owner]), PackedInt32Array([0, 0]),
 			PackedByteArray([1, 1]), Vector3.ONE, 0, null), 2)
@@ -529,3 +524,188 @@ func test_building_owned_lights_are_selected_per_robj() -> void:
 				"ROBJ %d receives only its section-owned light" % section)
 	assert_eq(scene.get_report().owner_isolation,
 			"per_robj_buildings")
+
+
+func test_separated_building_parts_share_entity_cube_candidates() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var building := _multi_part_model(container)
+	building.position = Vector3(11.0, 13.0, -17.0)
+	building.set_shadow_bound_radii(16.0, 16.0625)
+	var parts: Dictionary = building.get_render_part_nodes()
+	# These public ROBJ transforms represent independently animated parts.
+	# Their distant boxes must not become the light query or its sort center.
+	(parts[2] as Node3D).position = Vector3(-40.0, 0.0, 0.0)
+	(parts[4] as Node3D).position = Vector3(40.0, 0.0, 0.0)
+	var origin := building.global_position
+	var scene := LightScene.new()
+	var owner := building.get_instance_id()
+	var models: Array[Node3D] = [building]
+	for distance in [6.0, 1.0, 4.0, 2.0]:
+		assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
+				origin + Vector3(distance, 0.0, 0.0), 0.25)), 0)
+	assert_eq(scene.render_model_frame(models, PackedInt64Array([owner]),
+			PackedInt64Array([0]), PackedInt32Array([0]),
+			PackedByteArray([1]), Vector3.ONE, 0, null), 1)
+	for section in range(5):
+		var surface := _part_surface(building, section)
+		assert_not_null(surface)
+		if surface == null:
+			continue
+		assert_eq(float(surface.get_instance_shader_parameter("u_point_light_count")), 3.0)
+		for slot in range(3):
+			var posr: Vector4 = surface.get_instance_shader_parameter("u_point_light_posr_%d" % slot)
+			assert_almost_eq(posr.x, origin.x + [1.0, 2.0, 4.0][slot], 0.001,
+					"ROBJ %d shares the entity's ordered three of four world lights" % section)
+	# The per-section gate runs before the three-light cap. A nearer light for
+	# the OTHER ROBJ cannot consume the current ROBJ's third slot.
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
+			origin + Vector3(2.5, 0.0, 0.0), 0.25).attached(2, owner)), 0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
+			origin + Vector3(3.0, 0.0, 0.0), 0.25).attached(4, owner)), 0)
+	assert_eq(scene.render_model_frame(models, PackedInt64Array([owner]),
+			PackedInt64Array([0]), PackedInt32Array([0]),
+			PackedByteArray([1]), Vector3.ONE, 0, null), 1)
+	for section in range(5):
+		var surface := _part_surface(building, section)
+		if surface == null:
+			continue
+		var third: Vector4 = surface.get_instance_shader_parameter("u_point_light_posr_2")
+		var expected := 2.5 if section == 2 else (3.0 if section == 4 else 4.0)
+		assert_almost_eq(third.x, origin.x + expected, 0.001,
+				"ROBJ %d filters section ownership before taking the third light" % section)
+
+
+func test_ordinary_model_uses_initialized_radius_instead_of_geometry_bounds() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var model := _placed_model(container, Vector3(-9.0, 5.0, 12.0))
+	model.set_shadow_bound_radii(1.0, 2048.0)
+	var scene := LightScene.new()
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
+			model.global_position + Vector3(1500.0, 0.0, 0.0), 0.25)), 0)
+	var models: Array[Node3D] = [model]
+	assert_eq(scene.render_model_frame(models, PackedInt64Array([0]),
+			PackedInt64Array([0]), PackedInt32Array([0]),
+			PackedByteArray([0]), Vector3.ONE, 0, null), 1,
+			"the entity-bound cube admits a candidate beyond the small render geometry")
+	model.set_shadow_bound_radii(1.0, 0.0)
+	assert_eq(scene.render_model_frame(models, PackedInt64Array([0]),
+			PackedInt64Array([0]), PackedInt32Array([0]),
+			PackedByteArray([0]), Vector3.ONE, 0, null), 0,
+			"zero entity radius queries only the origin and clears the old selection")
+
+
+func test_static_director_rows_share_entity_cube_and_keep_section_filters() -> void:
+	var source := StaticEffectSource.new()
+	source.kind = MissionData.KIND_BUILDING
+	source.source_index = 0
+	source.object_data = _fixture_object_data("house.3di")
+	source.world_transform = Transform3D(Basis.IDENTITY, Vector3(101.0, 3.0, -205.0))
+	source.entity_bound_radius_q16 = (16 << 16) + 0x1000
+	var rows: Array[StaticLightDrawSource] = []
+	for section in [2, 4]:
+		var row := StaticLightDrawSource.new()
+		row.atlas_row = rows.size()
+		row.source_index = 0
+		row.kind = MissionData.KIND_BUILDING
+		row.robj_index = section
+		row.world_bounds = AABB(source.world_transform.origin +
+				Vector3(-40.0 if section == 2 else 40.0, 0.0, 0.0), Vector3.ONE)
+		rows.append(row)
+	var director := EffectLightDirector.new()
+	director.setup(null, func() -> Array: return [source], func() -> Array: return rows)
+	director.reattach()
+	var scene := director.scene()
+	var origin := source.world_transform.origin
+	for distance in [6.0, 1.0, 4.0, 2.0]:
+		assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
+				origin + Vector3(distance, 0.0, 0.0), 0.25)), 0)
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	camera.position = origin + Vector3(0.0, 0.0, 8.0)
+	director.render_frame(camera)
+	var atlas := _static_light_atlas(scene)
+	if atlas == null:
+		return
+	for row in range(2):
+		assert_almost_eq(atlas.get_pixel(0, row).r, 3.0, 0.001)
+		for slot in range(3):
+			assert_almost_eq(atlas.get_pixel(1 + slot * 2, row).r,
+					origin.x + [1.0, 2.0, 4.0][slot], 0.001,
+					"static ROBJ rows use the source entity cube, not descriptor geometry")
+	var owner := LightScene.owner_id_for_static_source(0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
+			origin + Vector3(2.5, 0.0, 0.0), 0.25).attached(2, owner)), 0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
+			origin + Vector3(3.0, 0.0, 0.0), 0.25).attached(4, owner)), 0)
+	director.render_frame(camera)
+	atlas = _static_light_atlas(scene)
+	assert_almost_eq(atlas.get_pixel(5, 0).r, origin.x + 2.5, 0.001)
+	assert_almost_eq(atlas.get_pixel(5, 1).r, origin.x + 3.0, 0.001,
+			"a rejected section-2 candidate does not consume section 4's third slot")
+	var selected_bytes := atlas.get_data()
+	director.render_frame(camera)
+	assert_eq(_static_light_atlas(scene).get_data(), selected_bytes,
+			"cached handle reselect preserves both per-section selections")
+
+
+func test_head_and_held_model_use_the_owner_entity_query_and_groups() -> void:
+	var world := WorldFixture.make_world(self)
+	var root := MissionRoot.new()
+	root.name = "MissionRoot"
+	world.add_child(root)
+	var container := Node3D.new()
+	container.name = "MissionObjects"
+	root.add_child(container)
+	var body := _placed_model(container, Vector3(20, 0, 0))
+	body.entity_ref = EntityRef.make(MissionData.KIND_ORGANIC, 0, 0, 0, 77)
+	body.set_shadow_bound_radii(1.0, 4.0)
+	var head := _placed_model(body, Vector3(40, 0, 0))
+	var held := _placed_model(container, Vector3(80, 0, 0))
+	held.set_entity_light_owner(body)
+	assert_eq(EffectLightDirector.owner_id_for_node(held), LightScene.owner_id_for_wire(77))
+	var director := EffectLightDirector.new()
+	director.setup(world, Callable(), Callable())
+	var light_pos := body.global_position + Vector3(3, 0, 0)
+	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(light_pos, 0.1)
+			.attached(0, LightScene.owner_id_for_wire(77))), 0)
+	# A tempting light at the posed held model's origin is outside the entity cube.
+	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(held.global_position, 0.1)), 0)
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	camera.position = Vector3(20, 0, 8)
+	director.render_frame(camera)
+	for model: ObjectModel in [body, head, held]:
+		var surface := _surface_instance(model)
+		assert_eq(float(surface.get_instance_shader_parameter("u_point_light_count")), 1.0)
+		var posr: Vector4 = surface.get_instance_shader_parameter("u_point_light_posr_0")
+		assert_almost_eq(posr.x, light_pos.x, 0.001,
+				"the same entity cube and owner filter reach every model of the entity")
+	body.position.x += 100.0
+	director.render_frame(camera)
+	for model: ObjectModel in [body, head, held]:
+		assert_eq(float(_surface_instance(model).get_instance_shader_parameter(
+				"u_point_light_count")), 0.0,
+				"a moved owner updates every query even while the held pose stays unchanged")
+
+
+func test_nested_replacement_gets_the_entity_selection_after_the_root_was_lit() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var entity := _placed_model(container, Vector3.ZERO)
+	entity.set_shadow_bound_radii(1.0, 4.0)
+	var scene := LightScene.new()
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(3, 0, 0), 0.1)), 0)
+	var models: Array[Node3D] = [entity]
+	scene.render_model_frame(models, PackedInt64Array([0]), PackedInt64Array([0]),
+			PackedInt32Array([0]), PackedByteArray([0]), Vector3.ONE, 0, null)
+	var replacement := _placed_model(entity, Vector3(40, 0, 0))
+	for child in entity.get_children():
+		if child is Node3D and child != replacement:
+			child.hide()
+	scene.render_model_frame(models, PackedInt64Array([0]), PackedInt64Array([0]),
+			PackedInt32Array([0]), PackedByteArray([0]), Vector3.ONE, 0, null)
+	assert_eq(float(_surface_instance(replacement).get_instance_shader_parameter(
+			"u_point_light_count")), 1.0,
+			"a newly grafted husk receives the existing entity selection without a root rebuild")

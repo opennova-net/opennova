@@ -31,7 +31,8 @@ namespace godot {
 	X(entity_index, -1)                    \
 	X(bms_id, 0)                           \
 	X(item_id, 0)                          \
-	X(source_index, -1)
+	X(source_index, -1)                    \
+	X(entity_bound_radius_q16, 0)
 
 class StaticEffectSource : public RefCounted {
 	GDCLASS(StaticEffectSource, RefCounted)

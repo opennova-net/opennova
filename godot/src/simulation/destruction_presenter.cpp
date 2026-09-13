@@ -12,6 +12,7 @@
 #include <string>
 
 #include <runtime/world/present_passes.h>
+#include <runtime/simassets/model_builders.h>
 
 #include "audio/mission_audio.h"
 #include "lights/effect_light_director.h"
@@ -368,6 +369,21 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 	husk_restore_[husk_key] = restore;
 	graft->set_name(vformat("HuskModel_%d", bms_id));
 	graft->set_transform(placed_transform);
+	// Changing the rendered graphic does not reinitialize entity+0. Carry the
+	// static entity query and identity into its new live-model representation.
+	// [orig: Entity_InitFromModel @0x40E062..0x40E076; husk draw @0x413086]
+	const TypedArray<StaticEffectSource> light_sources = placer_->get_static_item_effect_sources();
+	for (int64_t i = 0; i < light_sources.size(); ++i) {
+		const Ref<StaticEffectSource> source = light_sources[i];
+		if (source.is_null() || source->get_bms_id() != bms_id) continue;
+		graft->set_bound_radii_q16(
+				opennova::simassets::model_bound_radius_q16_from_3di(
+						graft->get_object_data()->native_model()),
+				source->get_entity_bound_radius_q16());
+		graft->set_entity_ref(EntityRef::make(source->get_kind(), source->get_entity_index(),
+				bms_id, source->get_item_id(), -1));
+		break;
+	}
 	set_husk_static_shadow(graft, batched_casts_static_shadow);
 	// Retail's husk swap keeps the entity's reflect flag: the mirror
 	// collectors keep filtering on entity+36 & 0x400, which destruction never

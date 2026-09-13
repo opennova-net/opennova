@@ -37,6 +37,7 @@ TypedArray<StaticEffectSource> MissionObjectPlacer::get_static_item_effect_sourc
 		record->set_graphic(row.graphic);
 		record->set_world_transform(row.world_transform);
 		record->set_object_data(row.object_data);
+		record->set_entity_bound_radius_q16(row.entity_bound_radius_q16);
 		out.push_back(record);
 	}
 	return out;
@@ -221,6 +222,7 @@ int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
 	row.graphic = p_graphic;
 	row.world_transform = p_xform;
 	row.object_data = data;
+	row.entity_bound_radius_q16 = _item_entity_bound_radius_q16(p_item_id, data);
 	const int source_index = static_item_effect_sources_.size();
 	static_item_effect_sources_.push_back(row);
 	return source_index;
