@@ -113,6 +113,9 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState
 
 void local_player_view_refresh(World *world, PlayerViewState &v) {
     const Entity *local = local_entity(world);
+    // Camera changes also update layer admission on frames without a body tick.
+    // [orig: Camera_SetTrackedEntity @0x4391D0 -> sub_75BE80 @0x75BE80]
+    if (local != nullptr) world->cached.sound_listener_view_flags = v.camera_mode == 0 ? 2 : 4;
     const bool alive = local != nullptr && local->alive && local->health > 0;
     const bool round_ended = world != nullptr && world->match.outcome().ended;
     player_view_update_effective_modes(v, alive, round_ended);
@@ -501,7 +504,6 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
     t.camera_local_dead_seen = v.local_dead;
     const int mode_before = v.camera_mode;
     player_view_resolve_mode(v);
-    world->cached.sound_listener_view_flags = v.camera_mode == 0 ? 2 : 4;
     if (v.camera_mode == 4 && mode_before != 4) enter_death_camera(*world, *e, v, s);
     local_player_view_refresh(world, v);
     // The per-tick movement delta the FP motion lead samples per render frame

@@ -662,11 +662,14 @@ The one-shot path (`Sound_Play3DPositional @ 0x527cb0` -> `SoundBank_PlayTrigger
   its CURRENT bearing each frame (@ 0x528af1-0x528ba4) — volume stays fire-time
   (corrects the earlier "vol/pan once at fire" note; Godot's spatial panner gives our 3D
   one-shots the same live pan);
-- a per-layer view gate (`listenerViewFlags & layer_flags & 6`, plus `Multi.set_flags`
-  bit0 requiring layer flag 0x20 to match the listener view bit, @ 0x75cd54) filters
-  which layers fire — unported, and data-inert for JO: of 6464 JOX layers, 0 lack both
-  view bits and only 8 are view-dependent (4 internal-only + 4 external-only, vehicle
-  scope); 0 sets carry set_flags bit0;
+- the per-layer view gate (`listenerViewFlags & layer_flags & 6`, plus `Multi.set_flags`
+  bit0 requiring layer flag 0x20 to match the listener view bit, @ 0x75CD54) filters
+  layers before member selection or pitch draws. PORTED 2026-09-13 (D-SND-19).
+  The former "data-inert" claim was incorrect: the shipped JOx01 bank carries
+  internal/external GS_TANK fire-end layers and internal-only GF_TANK_RL reload,
+  referenced by the M1 and T80 turret definitions. The native planner receives
+  the live simulation view for positional, explicit-distance and interface fires;
+  isolated/menu banks use the neutral mask 6;
 - the set pitch compose `(member_pitch * (set_base + set_jitter)) >> 16` (@ 0x75ce9e..)
   is unity across ALL 5950 JOX sets (pitch_base 0xFFFF/0x10000, jitter 0 everywhere), so
   the reimpl's member-only pitch is data-exact.
@@ -711,6 +714,7 @@ slots / crossfade), and the `dialog_vs_ambient` probe's bed-vs-dialog gate
 | D-SND-8 | master fade ramp, underwater vol/pan halving, options SFX volume, and the bearing-byte pan map to reimpl territory (Ambient bus volume, Godot's spatial panner); doppler (emitter/listener velocity feed) unported | `g_SoundMasterFadeQ24 @ 0x85A3E4` (255/256 steady), `g_SoundListenerUnderwater @ 0x33429A8` halving @ 0x75ca7d, `g_SoundVolumeOption @ 0x24D20CC` per channel write, atan2 bearing pan @ 0x5289c0, `calculate_3d_sound_attenuation @ 0x527f60` doppler | reimpl playback/bus routing (not grillable address-by-address); the underwater duck and doppler are candidates once an underwater/vehicle pass needs them. |
 | D-SND-16 | **PORTED 2026-07-28** (`engine/runtime/audio` `AmbientMixer` + the `AmbientMixer` binding): marker eval/registration runs on the logic-tick clock through the witnessed `tick & 7` cohort walk (each placed marker every 8th tick), layers register into a faithful 767-slot transient table with TICK-unit keep-alives (marker default 10; vol-0 register clears), and the per-render-frame call is only the live-slot mix — lazy range cache, axis+euclid cull, one lazy LOS per raw-audible marker, member-0 two-radius volume, loudest-first ranking. `MissionAudio` keeps stream resolution, decode-failure fallback, and the eight persistent voices (D-SND-6/8); a diagnostic host with no ticking runtime can free-run an autonomous 62.5 Hz eval clock (the weather world-driven/autonomous split). The curve statics (`calc_distance_volume`/`emitter_layer_volume`/`crossfade_volume_byte`/`time_of_day_region`) moved to engine/runtime/audio; the GDScript seams delegate | registration and mix on split clocks (§driver cadence): the pool-2 `tick & 7` stagger @ 0x4c225a (attached emitters per tick), tick-unit lifetimes, the per-frame render-lane mix @ 0x521341 | evidence: `ambient_mixer` ctest (curve integer pins, cohort stagger, tick-lifetime expiry/revisit, region-flip overlap, same-set suppress, occlusion-once, ranking, vol-0 clear, autonomous clock); GUT `mission_audio_test.gd` / `sound_runtime_test.gd` on the new seam. Measured A/B (ASH_I5A spawn, 143 markers, 10 s windows, same box): the world tick's audio leg 1.19 ms -> 0.21 ms avg per frame (p95 1.41 -> 0.29 ms); frame wall 10.4 -> 8.8 ms. Reimpl residues: candidate-id tie-break for deterministic membership (retail ties by slot order), the range cull compares reimpl-float axes (Q16 at the curve boundary), and min-only layers cull like retail (zero JOX layers are min-only). Was: the full marker x layer eval every render frame in GDScript — the measured 1.2-1.5 ms/frame F3 "Audio" row. |
 | D-SND-18 | `_apply_reverb` derives Godot room size from the mission id at setup; the live player region selector and retail mixer coefficients/DSP are unported | Per-player userpoint > building > mission selection in `Entity_UpdateInfantryPlayerBody @0x4B40E0` (call `@0x4B633F`); `sub_766460 @0x766460` selects a 24-byte row at `0x7BF400`; stock rows have identical coefficients (§The reverb bed) | **OPEN + NEEDS-RE** — selector/room-size mismatch confirmed; index-zero and mixer DSP still require a witness before porting (2026-09-13). |
+| D-SND-19 | **FIXED 2026-09-13:** one-shot planning filters layers by the live listener view before member selection and pitch randomness | `SoundBank_PlayTriggerEntries @ 0x75CCD0`, view gate `@0x75CD54`; internal/external bits 2/4 and optional set-bit0 / layer-bit0x20 match | `audio_oneshot_play` covers neutral/absent view bits, special set gating, suppressed cursor/RNG state, and shipped GS_TANK/GF_TANK_RL; GUT `sound_runtime_test` verifies live Simulation view changes through SoundBank |
 
 **IDB changes (2026-07-10 session):** renamed `Entity_SpawnBoneEffect -> Entity_UpdateEnvSoundEmitter @ 0x4a8080`,
 `Entity_CalcTerrainRegion -> Entity_CalcTimeOfDayRegion @ 0x408110`, `Env_GetTimeOfDayHoursQ16 ->
@@ -822,10 +826,10 @@ semantics, and the global bank-slot order are all engine-witnessed and implement
   curve statics included) with `MissionAudio` reduced to stream resolution +
   the persistent voice binds — D-SND-16 PORTED (the `ambient_mixer` ctest and the
   GUT audio suites pin it).
-- one-shot view gating and set-pitch compose (witnessed 2026-07-11, unported,
-  data-inert): the `& 6` view-flag gate and `set_flags` bit0 filter fires on 8 of 6464
-  JOX layers (vehicle-view scope) and 0 sets; the set pitch compose is unity across all
-  5950 JOX sets. Port when a vehicle/view pass needs them.
+- one-shot view gating is ported (D-SND-19): rejected layers consume neither
+  member-selection state nor pitch randomness, while view-admitted layers still
+  select before distance silence or wave-resolution failure. Set/member pitch
+  composition already uses the shared selector stream, including zero-range draws.
 - unknown: the `nightshot`/`duskshot`/`dawnshot` one-shot marker consumer (parse
   @ 0x49fdee witnessed; the runtime path is unwalked — such markers are silent in ours).
 - unknown: the menu-side bank collection semantics and `.pwf` packed-wave banks (no JO assets
@@ -914,3 +918,26 @@ NapiNPClientMsg_0x03A @ 0x422680; NapiNPClientMsg_HandleEntityDeath @ 0x430C50]
 
 Validation: oneshot_play, fire_sound, weapon_fsm, npruntime_client_runtime,
 npruntime_client_message_dispatch, and focused sound/presenter GUT cases.
+
+
+### One-shot listener-view admission (2026-09-13)
+
+The layer gate is an audible shipped-data path. A scan of the 22 root LWF banks
+found 3,232 layers in 2,975 sets; four view-dependent layers are in JOx01.LWF.
+GS_TANK has a common layer plus separate external/internal firing tails;
+GF_TANK_RL is internal-only. Both are referenced by the M1 and T80 weapon
+entries. The one-shot planner now applies the original gate before either the
+per-layer selector or the shared pitch draws. A flags-zero layer is silent,
+even when playback is distance-flat. Radio selection reuses the same predicate.
+[orig: SoundBank_PlayTriggerEntries @ 0x75CCD0, gate @0x75CD54]
+
+`SoundBank` obtains the view from its live Simulation provider at each fire;
+this is the same weakly held provider used for occlusion. The native getter
+reads `World::cached.sound_listener_view_flags`, which the local view producer
+stamps as 2 for first person and 4 for external modes, including camera refreshes
+without a simulation tick (`Camera_SetTrackedEntity @0x4391D0`). A missing provider
+uses the original neutral initial mask 6. There is no separate device-owned
+view cache. Playback channels, attenuation and panning remain their existing
+owners. `audio_oneshot_play` covers the native planner and an asset-gated tank
+bank leg; `sound_runtime_test` covers a real Simulation changing view between
+fires. IDB changes during this fix: none.

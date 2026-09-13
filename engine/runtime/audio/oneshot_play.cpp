@@ -95,6 +95,16 @@ int32_t pick_layer_member(const lwf::File &bank, const SetLocation &loc,
 	return idx;
 }
 
+namespace {
+// Admission precedes member selection and both pitch draws, including for
+// interface/distance-flat plays. [orig: SoundBank_PlayTriggerEntries @0x75CD54]
+bool layer_matches_listener_view(const lwf::Multi &set, const lwf::Playlist &layer,
+        uint8_t listener_view_flags) {
+    return (listener_view_flags & layer.flags & 6u) != 0 &&
+            (!(set.set_flags & 1u) || ((listener_view_flags ^ layer.flags) & 0x20u) == 0);
+}
+}
+
 std::optional<RadioVoice> select_radio_voice(const lwf::File &bank,
         const SetLocation &loc, SoundSelector &selector, uint8_t listener_view_flags) {
     if (!loc.valid() || loc.set < 0 || static_cast<size_t>(loc.set) >= bank.multis.size())
@@ -102,9 +112,7 @@ std::optional<RadioVoice> select_radio_voice(const lwf::File &bank,
 	const auto &set = bank.multis[static_cast<size_t>(loc.set)];
 	const auto layers = set_layers(bank, set);
 	for (size_t li = 0; li < layers.size(); ++li) {
-		const uint32_t flags = bank.playlists[layers[li]].flags;
-		if (!(listener_view_flags & flags & 6u) ||
-				((set.set_flags & 1u) && ((listener_view_flags ^ flags) & 0x20u))) continue;
+		if (!layer_matches_listener_view(set, bank.playlists[layers[li]], listener_view_flags)) continue;
 		const int ordinal = pick_layer_member(bank, loc,
 				static_cast<int32_t>(li), layers[li], selector);
 		if (ordinal < 0) continue;
@@ -136,7 +144,7 @@ int64_t listener_distance_q16(const float world_pos[3], const float listener_pos
 OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 		const float world_pos[3], const float listener_pos[3], bool has_listener,
 		int64_t source_bms_id, uint32_t sound_id, OcclusionFn occl, void *occl_ctx,
-		SoundSelector &selector) {
+		SoundSelector &selector, uint8_t listener_view_flags) {
 	OneshotPlan plan;
 	if (!loc.valid() || loc.set < 0 || static_cast<size_t>(loc.set) >= bank.multis.size()) {
 		return plan;
@@ -165,13 +173,13 @@ OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 			}
 		}
 	}
-    plan = plan_oneshot_at_distance(bank, loc, dist_q16, selector, has_listener);
+    plan = plan_oneshot_at_distance(bank, loc, dist_q16, selector, listener_view_flags, has_listener);
     plan.sound_id = sound_id;
     return plan;
 }
 
 OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &loc,
-        int64_t dist_q16, SoundSelector &selector, bool attenuate) {
+        int64_t dist_q16, SoundSelector &selector, uint8_t listener_view_flags, bool attenuate) {
     OneshotPlan plan;
     if (!loc.valid() || loc.set < 0 || static_cast<size_t>(loc.set) >= bank.multis.size()) {
         return plan;
@@ -182,6 +190,7 @@ OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &l
 	const std::vector<uint32_t> layers = set_layers(bank, set);
 	for (size_t li = 0; li < layers.size(); ++li) {
 		const lwf::Playlist &layer = bank.playlists[layers[li]];
+		if (!layer_matches_listener_view(set, layer, listener_view_flags)) continue;
 		const int32_t member = pick_layer_member(bank, loc, static_cast<int32_t>(li),
 				layers[li], selector);
 		if (member < 0) {

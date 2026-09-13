@@ -219,6 +219,11 @@ int64_t SoundBank::occlusion_trampoline(void *p_ctx, const float p_listener[3],
 	return p_dist_q16;
 }
 
+uint8_t SoundBank::listener_view_flags() const {
+    const auto *sim = Object::cast_to<Simulation>(ObjectDB::get_instance(occlusion_provider_id_));
+    return sim != nullptr ? sim->sound_listener_view_flags() : 6;
+}
+
 bool SoundBank::play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
 		const StringName &p_bus, const Vector3 &p_listener_pos, int p_source_bms_id, int p_sound_id) {
 	const opennova::audio::SetLocation loc = _find_set(p_name);
@@ -239,7 +244,7 @@ bool SoundBank::play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, co
 	const bool has_provider = ctx.sim != nullptr || occlusion_override_.is_valid();
 	const opennova::audio::OneshotPlan plan = opennova::audio::plan_oneshot_3d(bank, loc, world,
 			listener, has_listener, p_source_bms_id, static_cast<uint32_t>(p_sound_id),
-			has_provider ? &SoundBank::occlusion_trampoline : nullptr, &ctx, selector_);
+			has_provider ? &SoundBank::occlusion_trampoline : nullptr, &ctx, selector_, listener_view_flags());
     return _play_oneshot_plan(p_parent, p_world_pos, bank, plan, p_bus);
 }
 
@@ -250,7 +255,7 @@ bool SoundBank::play_oneshot_at_distance(Node3D *p_parent, const Vector3 &p_pan_
         return false;
     }
     const opennova::lwf::File &bank = _bank_at(loc);
-    const auto plan = opennova::audio::plan_oneshot_at_distance(bank, loc, p_dist_q16, selector_);
+    const auto plan = opennova::audio::plan_oneshot_at_distance(bank, loc, p_dist_q16, selector_, listener_view_flags());
     return _play_oneshot_plan(p_parent, p_pan_position, bank, plan, p_bus);
 }
 
@@ -339,7 +344,7 @@ bool SoundBank::play_interface_oneshot(Node *parent, const String &name, const S
 	const auto loc = _find_set(name);
 	if (!loc.valid() || !parent) return false;
 	const auto &bank = _bank_at(loc);
-	const auto plan = opennova::audio::plan_oneshot_at_distance(bank, loc, 0, selector_);
+	const auto plan = opennova::audio::plan_oneshot_at_distance(bank, loc, 0, selector_, listener_view_flags());
 	return _play_oneshot_plan(parent, {}, bank, plan, bus, true);
 }
 

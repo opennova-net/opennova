@@ -1777,6 +1777,7 @@ public:
 	// the ready one-shots each present (NOT ClassDB-bound; the fire pass reads
 	// the engine rows). (engine: runtime/world/collision.h)
 	void set_sound_listener(const Vector3 &p_listener_godot);
+	uint8_t sound_listener_view_flags() const;
 	void drain_fire_sounds(std::vector<opennova::world::ReadyFireSound> &r_sounds);
 
 	// The eased FP viewmodel view-offset in VIEW-FRAME world units (X=fwd,

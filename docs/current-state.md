@@ -135,6 +135,9 @@ to an implementation phase; use the ledger for subsequent status changes.
 The mission startup reset now follows the complete PreMission pass (D-EVT-8);
 [bms-event-runtime-re](mission/bms-event-runtime-re.md) records the ordering and regression.
 
+One-shot sound layers now follow the live listener view before selection and pitch
+randomness (D-SND-19; [sound record](audio/lwf-dbf-sound-re.md)).
+
 Each domain's next step is named in its own record, not centrally:
 
 | Domain | Open rows live in | The record that names the next step |

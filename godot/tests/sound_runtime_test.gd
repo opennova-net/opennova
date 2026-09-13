@@ -61,6 +61,8 @@ func _profile_with_set(set_name: String, wav: String) -> LwfData:
 	var si := d.add_set()
 	d.set_set_field(si, "name", set_name)
 	var li := d.add_layer(si)
+	d.set_layer_field(si, li, "internal", true)
+	d.set_layer_field(si, li, "external", true)
 	var mi := d.add_member(si, li)
 	d.set_member_field(si, li, mi, "wav_path", wav)
 	return d
@@ -524,3 +526,30 @@ func test_dialog_line_plays_at_member_pitch_without_draws() -> void:
 	var fire := parent.get_child(parent.get_child_count() - 1) as AudioStreamPlayer3D
 	assert_almost_eq(fire.pitch_scale, 110686.0 / 65536.0, 0.00001,
 			"the dialog spawn consumed no ROL3 draws")
+
+
+func test_oneshot_layers_follow_the_live_simulation_view() -> void:
+	var samples := PackedByteArray()
+	samples.resize(32)
+	var root := _real_root({"view.wav": _build_wav(samples, 1, 22050, 16)})
+	var profile := _profile_with_set("INTERNAL_ONLY", "view.wav")
+	profile.set_layer_field(0, 0, "external", false)
+	var bank := SoundBank.create(root)
+	bank.add_bank(profile)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var sim := Simulation.new()
+	sim.build_demo_mission()
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	bank.set_occlusion_provider(sim)
+	sim.set_local_player_debug_third_person(false)
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "INTERNAL_ONLY", &"SFX"),
+			"internal layers are admitted in first person, including distance-flat fires")
+	sim.set_local_player_debug_third_person(true)
+	assert_false(bank.play_oneshot_3d(parent, Vector3.ZERO, "INTERNAL_ONLY", &"SFX"),
+			"the next fire reads the live external view and creates no voice")
+	sim.set_local_player_debug_third_person(false)
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "INTERNAL_ONLY", &"SFX"))
+	bank.set_occlusion_provider(null)
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "INTERNAL_ONLY", &"SFX"),
+			"an isolated menu bank retains the neutral both-views listener")

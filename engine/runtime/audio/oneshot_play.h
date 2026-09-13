@@ -150,20 +150,21 @@ struct OneshotPlan {
 // [orig: Sound_PlayTriggerSetScaled @0x527B90 -> SoundBank_PlayTriggerEntries
 // @0x75CCD0]. The optional flat arm preserves menu playback without a listener.
 OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &loc,
-        int64_t dist_q16, SoundSelector &selector, bool attenuate = true);
+        int64_t dist_q16, SoundSelector &selector, uint8_t listener_view_flags,
+        bool attenuate = true);
 
 // Plan a one-shot fire of the set at `loc` at a world position (PlayWavList /
 // event actions). Volume is computed ONCE at fire time from the witnessed
 // distance model when the listener is known [orig: Sound_Play3DPositional
 // @ 0x527cb0 -> SoundBank_PlayTriggerEntries @ 0x75ccd0 compute vol/pan at
 // play, no per-frame update]; `has_listener` false plans distance-flat (menu /
-// tests). Every layer picks its member (advancing the selector) even when the
+// tests). Every view-admitted layer picks its member (advancing the selector) even when the
 // shell later fails to resolve its wave, so the pick stream matches a full
 // fire. `occl` may be null (an unoccluded fire). `sound_id` is the own-channel
 // reuse key (oneshot_sound_id) the plan carries to the allocator.
 OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 		const float world_pos[3], const float listener_pos[3], bool has_listener,
 		int64_t source_bms_id, uint32_t sound_id, OcclusionFn occl, void *occl_ctx,
-		SoundSelector &selector);
+		SoundSelector &selector, uint8_t listener_view_flags);
 
 } // namespace opennova::audio

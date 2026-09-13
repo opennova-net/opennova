@@ -8,6 +8,10 @@
 #include <runtime/audio/oneshot_play.h>
 
 #include "common/test_expect.h"
+#include "common/retail_paths.h"
+
+#include <fstream>
+#include <iterator>
 
 #include <string>
 #include <vector>
@@ -116,7 +120,7 @@ int test_distance_and_cull_range() {
 int test_zero_range_fires_only_at_the_exact_source() {
 	BankBuilder b;
 	const uint32_t m = b.member(255, 255);
-	const uint32_t l = b.layer(200, 0, 0, { m });
+	const uint32_t l = b.layer(200, 0, 6, { m });
 	b.set("POINT_ONLY", 0, { l });
 	SoundSetIndex index;
 	index.add_bank(0, b.file);
@@ -125,10 +129,10 @@ int test_zero_range_fires_only_at_the_exact_source() {
 
 	const float one_unit[3] = { 1.0f, 0.0f, 0.0f };
 	const OneshotPlan far = plan_oneshot_3d(b.file, loc, one_unit, kOrigin, true, 0, 0,
-			nullptr, nullptr, selector);
+			nullptr, nullptr, selector, 6);
 	TEST_EXPECT(!far.in_range && far.voices.empty());
 	const OneshotPlan at = plan_oneshot_3d(b.file, loc, kOrigin, kOrigin, true, 0, 0,
-			nullptr, nullptr, selector);
+			nullptr, nullptr, selector, 6);
 	TEST_EXPECT(at.in_range && at.voices.size() == 1);
 	return 0;
 }
@@ -138,7 +142,7 @@ int test_occlusion_inflates_the_fire_distance() {
 	// falloff that is the pinned half-range volume byte 63.
 	BankBuilder b;
 	const uint32_t m = b.member(255, 255);
-	const uint32_t l = b.layer(200, 0, 0, { m });
+	const uint32_t l = b.layer(200, 0, 6, { m });
 	b.set("OCCLUDED", 200, { l });
 	SoundSetIndex index;
 	index.add_bank(0, b.file);
@@ -147,7 +151,7 @@ int test_occlusion_inflates_the_fire_distance() {
 	probe.inflated_q16 = 100LL << 16;
 	const float source[3] = { 50.0f, 0.0f, 0.0f };
 	const OneshotPlan plan = plan_oneshot_3d(b.file, index.find("occluded"), source,
-			kOrigin, true, 321, 7, &OcclusionProbe::fn, &probe, selector);
+			kOrigin, true, 321, 7, &OcclusionProbe::fn, &probe, selector, 6);
 	TEST_EXPECT(probe.calls == 1);
 	TEST_EXPECT(probe.last_source == 321);
 	TEST_EXPECT(plan.sound_id == 7); // the own-channel key rides the plan
@@ -165,7 +169,7 @@ int test_occlusion_recheck_rejects_the_inflated_distance() {
 	// the post-LOS range recheck rejects the fire after one query.
 	BankBuilder b;
 	const uint32_t m = b.member(255, 255);
-	const uint32_t l = b.layer(200, 0, 0, { m });
+	const uint32_t l = b.layer(200, 0, 6, { m });
 	b.set("OCCLUDED_CULL", 120, { l });
 	SoundSetIndex index;
 	index.add_bank(0, b.file);
@@ -174,7 +178,7 @@ int test_occlusion_recheck_rejects_the_inflated_distance() {
 	probe.inflated_q16 = 130LL << 16;
 	const float source[3] = { 100.0f, 0.0f, 0.0f };
 	const OneshotPlan plan = plan_oneshot_3d(b.file, index.find("OCCLUDED_CULL"), source,
-			kOrigin, true, 0, 0, &OcclusionProbe::fn, &probe, selector);
+			kOrigin, true, 0, 0, &OcclusionProbe::fn, &probe, selector, 6);
 	TEST_EXPECT(probe.calls == 1);
 	TEST_EXPECT(!plan.in_range && plan.voices.empty());
 	return 0;
@@ -183,7 +187,7 @@ int test_occlusion_recheck_rejects_the_inflated_distance() {
 int test_no_listener_plays_the_member_volume_flat() {
 	BankBuilder b;
 	const uint32_t quiet = b.member(100, 255);
-	const uint32_t l = b.layer(200, 0, 0, { quiet });
+	const uint32_t l = b.layer(200, 0, 6, { quiet });
 	b.set("FLAT", 0, { l });
 	SoundSetIndex index;
 	index.add_bank(0, b.file);
@@ -191,7 +195,7 @@ int test_no_listener_plays_the_member_volume_flat() {
 	OcclusionProbe probe;
 	const float source[3] = { 500.0f, 0.0f, 0.0f };
 	const OneshotPlan plan = plan_oneshot_3d(b.file, index.find("FLAT"), source, kOrigin,
-			false, 0, 0, &OcclusionProbe::fn, &probe, selector);
+			false, 0, 0, &OcclusionProbe::fn, &probe, selector, 6);
 	TEST_EXPECT(probe.calls == 0);
 	TEST_EXPECT(plan.in_range && plan.dist_q16 == 0);
 	TEST_EXPECT(plan.voices.size() == 1 && plan.voices[0].vol255 == 100);
@@ -206,8 +210,8 @@ int test_silent_layers_drop_and_every_layer_picks() {
 	const uint32_t a0 = b.member(255, 255);
 	const uint32_t a1 = b.member(200, 255);
 	const uint32_t bm = b.member(255, 255);
-	const uint32_t near = b.layer(50, 0, lwf::kFlagSequential, { a0, a1 });
-	const uint32_t wide = b.layer(2000, 0, 0, { bm });
+	const uint32_t near = b.layer(50, 0, lwf::kFlagSequential | 6u, { a0, a1 });
+	const uint32_t wide = b.layer(2000, 0, 6, { bm });
 	b.set("TWO", 5000, { near, wide });
 	SoundSetIndex index;
 	index.add_bank(0, b.file);
@@ -216,13 +220,13 @@ int test_silent_layers_drop_and_every_layer_picks() {
 
 	const float far[3] = { 100.0f, 0.0f, 0.0f };
 	const OneshotPlan first = plan_oneshot_3d(b.file, loc, far, kOrigin, true, 0, 0, nullptr,
-			nullptr, selector);
+			nullptr, selector, 6);
 	TEST_EXPECT(first.in_range);
 	TEST_EXPECT(first.voices.size() == 1);
 	TEST_EXPECT(first.voices[0].layer == 1 && first.voices[0].sndparm == bm);
 
 	const OneshotPlan second = plan_oneshot_3d(b.file, loc, kOrigin, kOrigin, true, 0, 0,
-			nullptr, nullptr, selector);
+			nullptr, nullptr, selector, 6);
 	TEST_EXPECT(second.voices.size() == 2);
 	TEST_EXPECT(second.voices[0].layer == 0 && second.voices[0].sndparm == a1);
 	TEST_EXPECT(second.voices[1].layer == 1 && second.voices[1].sndparm == bm);
@@ -233,8 +237,8 @@ int test_direct_distance_skips_set_cull_but_retains_layer_gain_and_selection() {
     BankBuilder b;
     const uint32_t a = b.member(255, 255);
     const uint32_t next = b.member(120, 255);
-    const uint32_t first = b.layer(200, 0, lwf::kFlagSequential, {a, next});
-    const uint32_t second = b.layer(50, 0, 0, {a});
+    const uint32_t first = b.layer(200, 0, lwf::kFlagSequential | 6u, {a, next});
+    const uint32_t second = b.layer(50, 0, 6, {a});
     b.set("DIRECT", 1, {first, second});
     SoundSetIndex index; index.add_bank(0, b.file);
     SoundSelector selector;
@@ -242,19 +246,19 @@ int test_direct_distance_skips_set_cull_but_retains_layer_gain_and_selection() {
     const float far[3] = {100, 0, 0};
     OcclusionProbe probe;
     const auto positional = plan_oneshot_3d(b.file, loc, far, kOrigin, true, 0, 0,
-            &OcclusionProbe::fn, &probe, selector);
+            &OcclusionProbe::fn, &probe, selector, 6);
     TEST_EXPECT(!positional.in_range && probe.calls == 0);
-    const auto direct = plan_oneshot_at_distance(b.file, loc, 100LL << 16, selector);
+    const auto direct = plan_oneshot_at_distance(b.file, loc, 100LL << 16, selector, 6);
     TEST_EXPECT(direct.in_range && direct.dist_q16 == (100LL << 16));
     TEST_EXPECT(direct.voices.size() == 1);
     TEST_EXPECT(direct.voices[0].sndparm == a && direct.voices[0].vol255 == 63);
     // A culled positional fire did not consume the cursor. Direct fires do,
     // including layers whose own distance law makes them silent.
-    const auto nearby = plan_oneshot_at_distance(b.file, loc, 0, selector);
+    const auto nearby = plan_oneshot_at_distance(b.file, loc, 0, selector, 6);
     TEST_EXPECT(nearby.voices.size() == 2);
     TEST_EXPECT(nearby.voices[0].sndparm == next);
-    TEST_EXPECT(!plan_oneshot_at_distance(b.file, {}, 0, selector).in_range);
-    TEST_EXPECT(plan_oneshot_at_distance(b.file, loc, 200LL << 16, selector).voices.empty());
+    TEST_EXPECT(!plan_oneshot_at_distance(b.file, {}, 0, selector, 6).in_range);
+    TEST_EXPECT(plan_oneshot_at_distance(b.file, loc, 200LL << 16, selector, 6).voices.empty());
     return 0;
 }
 
@@ -264,7 +268,7 @@ int test_member_pick_skips_dangling_indices() {
 	BankBuilder b;
 	const uint32_t m0 = b.member(255, 255);
 	const uint32_t m1 = b.member(255, 255);
-	const uint32_t l = b.layer(200, 0, lwf::kFlagSequential, { m0, 99, m1 });
+	const uint32_t l = b.layer(200, 0, lwf::kFlagSequential | 6u, { m0, 99, m1 });
 	b.set("DANGLING", 0, { l, 77 });
 	SoundSetIndex index;
 	index.add_bank(0, b.file);
@@ -276,7 +280,7 @@ int test_member_pick_skips_dangling_indices() {
 	TEST_EXPECT(pick_layer_member(b.file, loc, 0, l, selector) == 1);
 	TEST_EXPECT(pick_layer_member(b.file, loc, 0, l, selector) == 0);
 	TEST_EXPECT(pick_layer_member(b.file, loc, 0, 77, selector) == -1);
-	const uint32_t empty = b.layer(200, 0, 0, {});
+	const uint32_t empty = b.layer(200, 0, 6, {});
 	TEST_EXPECT(pick_layer_member(b.file, loc, 1, empty, selector) == -1);
 	return 0;
 }
@@ -287,12 +291,12 @@ int test_pitch_draws_and_channel_pool() {
 	BankBuilder bank;
 	const auto member = bank.member(255, 255);
 	bank.file.sndparms[member].random_pitch_scaled = 8192;
-	const auto layer = bank.layer(200, 0, 0, {member});
+	const auto layer = bank.layer(200, 0, 6, {member});
 	bank.set("PITCH", 200, {layer});
 	bank.file.multis[0].pitch_base = 98304;
 	bank.file.multis[0].pitch_random_range = 32768;
 	SoundSelector selector;
-	const auto plan = plan_oneshot_at_distance(bank.file, {0, 0}, 0, selector);
+	const auto plan = plan_oneshot_at_distance(bank.file, {0, 0}, 0, selector, 6);
 	TEST_EXPECT(plan.voices.size() == 1 && plan.voices[0].pitch_q16 == 110686u);
 	TEST_EXPECT(selector.select(99, 256, kRandom) == 229);
 	SoundSelector zero_ranges;
@@ -355,8 +359,91 @@ int test_radio_selection_keeps_unity_pitch_and_gates_view_layers() {
     return 0;
 }
 
+int test_view_gate_precedes_selection_and_pitch() {
+    BankBuilder b;
+    const auto a = b.member(255, 255);
+    const auto next = b.member(255, 255);
+    const auto internal = b.layer(200, 0, 2u | lwf::kFlagSequential, {a, next});
+    const auto external = b.layer(200, 0, 4, {a});
+    const auto both = b.layer(200, 0, 6, {a});
+    const auto neither = b.layer(200, 0, 0, {a});
+    const int set = b.set("views", 200, {internal, external, both, neither});
+    SoundSelector selector;
+    const auto out = plan_oneshot_at_distance(b.file, {0, set}, 0, selector, 4);
+    TEST_EXPECT(out.voices.size() == 2);
+    TEST_EXPECT(out.voices[0].layer == 1 && out.voices[1].layer == 2);
+    const auto in = plan_oneshot_3d(b.file, {0, set}, kOrigin, kOrigin, true,
+            0, 0, nullptr, nullptr, selector, 2);
+    TEST_EXPECT(in.voices.size() == 2);
+    TEST_EXPECT(in.voices[0].layer == 0 && in.voices[0].sndparm == a);
+    TEST_EXPECT(in.voices[1].layer == 2);
+    // The excluded internal layer retained its sequence cursor. All rejected
+    // layers retain the shared RNG as well, even for distance-flat playback.
+    SoundSelector rejected, untouched;
+    const auto silent = plan_oneshot_at_distance(b.file, {0, set}, 0, rejected, 0, false);
+    TEST_EXPECT(silent.in_range && silent.voices.empty());
+    TEST_EXPECT(rejected.select(99, 256, kRandom) == untouched.select(99, 256, kRandom));
+    SoundSelector neutral;
+    TEST_EXPECT(plan_oneshot_at_distance(b.file, {0, set}, 0, neutral, 6).voices.size() == 3);
+    return 0;
+}
+
+int test_set_view_bit_gate_and_rejected_pitch_rng() {
+    BankBuilder b;
+    const auto member = b.member(255, 255);
+    b.file.sndparms[member].random_pitch_scaled = 12345;
+    const auto ordinary = b.layer(200, 0, 4, {member});
+    const auto flagged = b.layer(200, 0, 0x24, {member});
+    const int set = b.set("set_gate", 200, {ordinary, flagged});
+    b.file.multis[set].set_flags = 1;
+    b.file.multis[set].pitch_random_range = 23456;
+    SoundSelector plain, flagged_selector, one_layer;
+    const auto p = plan_oneshot_at_distance(b.file, {0, set}, 0, plain, 4);
+    const auto f = plan_oneshot_at_distance(b.file, {0, set}, 0, flagged_selector, 0x24);
+    TEST_EXPECT(p.voices.size() == 1 && p.voices[0].layer == 0);
+    TEST_EXPECT(f.voices.size() == 1 && f.voices[0].layer == 1);
+    TEST_EXPECT(p.voices[0].pitch_q16 == f.voices[0].pitch_q16);
+    b.file.multis[set].playlist_indices = {ordinary};
+    const auto reference = plan_oneshot_at_distance(b.file, {0, set}, 0, one_layer, 4);
+    TEST_EXPECT(reference.voices[0].pitch_q16 == p.voices[0].pitch_q16);
+    const auto expected_next = one_layer.select(99, 256, kRandom);
+    TEST_EXPECT(plain.select(99, 256, kRandom) == expected_next);
+    TEST_EXPECT(flagged_selector.select(99, 256, kRandom) == expected_next);
+    return 0;
+}
+
+int test_retail_tank_sets_select_view_layers() {
+    const auto path = retail::asset_file("JOx01.LWF");
+    if (path.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS/JOx01.LWF (tank fire/reload view layers)");
+        return 0;
+    }
+    std::ifstream input(path, std::ios::binary);
+    TEST_EXPECT(input.good());
+    const std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+    lwf::File bank;
+    std::string error;
+    TEST_EXPECT(lwf::parse_lwf_buffer(bytes.data(), bytes.size(), bank, error));
+    SoundSetIndex index;
+    index.add_bank(0, bank);
+    const auto fire = index.find("GS_TANK"), reload = index.find("GF_TANK_RL");
+    TEST_EXPECT(fire.valid() && reload.valid());
+    SoundSelector selector;
+    const auto internal = plan_oneshot_at_distance(bank, fire, 0, selector, 2);
+    const auto external = plan_oneshot_at_distance(bank, fire, 0, selector, 4);
+    TEST_EXPECT(internal.voices.size() == 2 && external.voices.size() == 2);
+    TEST_EXPECT(internal.voices[0].layer == 0 && internal.voices[1].layer == 2);
+    TEST_EXPECT(external.voices[0].layer == 0 && external.voices[1].layer == 1);
+    TEST_EXPECT(plan_oneshot_at_distance(bank, reload, 0, selector, 2).voices.size() == 1);
+    TEST_EXPECT(plan_oneshot_at_distance(bank, reload, 0, selector, 4).voices.empty());
+    return 0;
+}
+
 int main() {
 	int failed = test_radio_selection_keeps_unity_pitch_and_gates_view_layers();
+    failed |= test_view_gate_precedes_selection_and_pitch();
+    failed |= test_set_view_bit_gate_and_rejected_pitch_rng();
+    failed |= test_retail_tank_sets_select_view_layers();
 	failed |= test_sound_id_is_nonzero_per_entity();
 	failed |= test_index_is_case_insensitive_and_first_bank_wins();
 	failed |= test_pitch_draws_and_channel_pool();

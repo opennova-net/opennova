@@ -179,6 +179,7 @@ protected:
 	static void _bind_methods();
 
 private:
+	uint8_t listener_view_flags() const;
 	// The per-fire occlusion seam the engine plan calls: the Simulation when one
 	// is set, else the test override, resolved fresh per fire.
 	struct FireContext {
