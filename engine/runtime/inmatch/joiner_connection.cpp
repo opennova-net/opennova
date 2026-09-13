@@ -341,6 +341,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	server_hk_ = 0;
 	server_password_required_ = false;
 	conn_.server_sk = 0;
+	conn_.connection_id = 0;
 	conn_.server_scrk.clear();
 	conn_.seq = make_jo_game_session_sequencing();
 	handshake_retry_clock_armed_ = false;
@@ -1002,6 +1003,39 @@ void JoinerConnection::retain_mission_metadata_chunk(
 		mp_attributes_ = window_dword(8);
 }
 
+void JoinerConnection::retire_self_handle(uint16_t handle) {
+	if (!has_self_handle_ || self_handle_ != handle) return;
+	has_self_handle_ = false;
+	self_handle_ = 0;
+	spawn_ = {};
+}
+
+void JoinerConnection::apply_self_spawn(uint16_t handle, bool has_body, uint32_t owner,
+		uint16_t flags, const SelfSpawn &spawn, PollResult &out) {
+	// A replay seed may supply H without authenticating a connection ID. An
+	// unowned row (owner 0) cannot establish numeric identity in that case.
+	if (conn_.connection_id == 0) {
+		if (!has_body) retire_self_handle(handle);
+		return;
+	}
+	// Retail scans only the used pool-0 player entries for the local dcb.
+	// [orig: Player_FindLocalPlayerEntity @0x4E0090]
+	const bool is_self = has_body &&
+			handle < world::retail_pool_capacity(0) && (flags & 0x100u) != 0 &&
+			owner == conn_.connection_id;
+	if (!is_self) {
+		retire_self_handle(handle);
+		return;
+	}
+	self_handle_ = handle;
+	has_self_handle_ = true;
+	spawn_ = spawn;
+	if (deployment_reply_seen_ && phase_ != Phase::InMatch) {
+		phase_ = Phase::InMatch;
+		out.reached_in_match = true;
+	}
+}
+
 void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollResult &out) {
 	// Joiner recv: decrypt inbound 0x83 with the server's SCRK; deframe latches conn_.seq.last_inbound_seq.
 	ProtocolPacketHeader hdr;
@@ -1409,35 +1443,45 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// [orig: NapiNPClientMsg_0x00C @0x42E864; Player_FindLocalPlayerEntity
 			// @0x4E0090; NapiNP_GetLocalConnectionId @0x4C6D40]
 			OrganicSpawnBatch batch;
-			if (decode_organic_spawn_batch(m.payload.data(), m.payload.size(), batch)) {
-				for (const OrganicSpawnRecord &rec : batch.records) {
-					const bool is_self = rec.has_body && (rec.slot_id & 0xF000u) == 0 &&
-							(rec.minimap_flags & 0x100u) != 0 &&
-							rec.owner_connection_id == conn_.connection_id;
-					if (has_self_handle_ && rec.slot_id == self_handle_ && !is_self) {
-						has_self_handle_ = false;
-						self_handle_ = 0;
-						spawn_ = {};
-					}
-					if (!is_self) continue;
-					self_handle_ = rec.slot_id; // the wire handle H (pool<<12|slot)
-					has_self_handle_ = true;
-					spawn_.pos_x = rec.pos_x;
-					spawn_.pos_y = rec.pos_y;
-					spawn_.pos_z = rec.pos_z;
-					spawn_.orientation = rec.orientation;
-					spawn_.team = rec.team;
-					spawn_.item_type_id = rec.item_type_id;
-					spawn_.anim_slot = rec.anim_slot;
-					spawn_.net_id = rec.net_id;
-					// Retail learns H independently of the uplink hold and deploy-screen
-					// stage. An initial 0x5A may already have opened gameplay while a
-					// spawn-zone pick remains pending; preserve that UI stage here.
-					if (deployment_reply_seen_ && phase_ != Phase::InMatch) {
-						phase_ = Phase::InMatch;
-						out.reached_in_match = true;
-					}
-				}
+			if (!decode_organic_spawn_batch(m.payload.data(), m.payload.size(), batch) &&
+					batch.last_record_partial && !batch.records.empty())
+				batch.records.pop_back();
+			// Match the replica fold: complete records survive a malformed tail.
+			for (const OrganicSpawnRecord &rec : batch.records) {
+				// The original stops the page at the first out-of-capacity slot.
+				// [orig: NapiNPClientMsg_0x00C @0x42E7CE]
+				if ((rec.slot_id & 0x0FFFu) >= world::retail_pool_capacity(rec.slot_id >> 12))
+					break;
+				SelfSpawn spawn;
+				spawn.pos_x = rec.pos_x;
+				spawn.pos_y = rec.pos_y;
+				spawn.pos_z = rec.pos_z;
+				spawn.orientation = rec.orientation;
+				spawn.team = rec.team;
+				spawn.item_type_id = rec.item_type_id;
+				spawn.anim_slot = rec.anim_slot;
+				spawn.net_id = rec.net_id;
+				apply_self_spawn(rec.slot_id, rec.has_body, rec.owner_connection_id,
+						rec.minimap_flags, spawn, out);
+			}
+			out.inbound_world.emplace_back(m.tag, m.payload);
+		} else if (m.tag == s2c::FULL_ENTITY_SPAWN) {
+			// A repair destroys and rebuilds this slot, even for the same type.
+			// Ownership can disappear or move here without another organic page.
+			// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780]
+			FullEntitySpawnRecord rec;
+			if (decode_full_entity_spawn(m.payload.data(), m.payload.size(), rec)) {
+				SelfSpawn spawn;
+				spawn.pos_x = rec.pos_x;
+				spawn.pos_y = rec.pos_y;
+				spawn.pos_z = rec.pos_z;
+				spawn.orientation = static_cast<int32_t>(uint32_t(rec.heading_hi) << 16);
+				spawn.team = rec.team;
+				spawn.item_type_id = rec.item_type_id;
+				spawn.anim_slot = rec.anim_slot;
+				spawn.net_id = rec.net_id;
+				apply_self_spawn(rec.slot_id, rec.item_type != 0, rec.entity_flags,
+						rec.minimap_flags, spawn, out);
 			}
 			out.inbound_world.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::POOL_SPAWN || m.tag == s2c::STATIC_ENTITY_BATCH || m.tag == s2c::POOL3_SYNC) {
@@ -1538,11 +1582,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				for (uint16_t index : destroy_list.pool0_indices) {
 					out.destroyed_pool0_slots.push_back(index);
-					if (has_self_handle_ && self_handle_ == index) {
-						has_self_handle_ = false;
-						self_handle_ = 0;
-						spawn_ = {};
-					}
+					retire_self_handle(index);
 				}
 			}
 		} else if (m.tag == s2c::PLAYER_SYNC) {
@@ -1909,6 +1949,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.data(), m.payload.size(), removal, consumed) &&
 					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				retire_self_handle(removal.entity_handle);
 			}
 		} else if (m.tag == s2c::OBJECTIVE_ENTITY_STATE) {
 			ObjectiveEntityState state;

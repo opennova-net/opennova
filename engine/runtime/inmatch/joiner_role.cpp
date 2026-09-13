@@ -327,13 +327,13 @@ void JoinerRole::tick_local_weapon() {
 	io.view = &lp.view;
 	io.inventory = lp.inventory_valid ? &lp.inventory : nullptr;
 	io.is_authority = false;
-	io.self_wire_handle = self_wire_handle_;
+	io.self_wire_handle = self_wire_handle();
 	// The joiner's OWN predicted round runs the wire-proxy walk with the
 	// local mount exclusion dead, so resolve the carrier gate from the self
 	// wire row like any decoded remote round — otherwise a mounted joiner's
 	// fire stops on its own vehicle's proxy.
 	io.carrier_exclusion = [this]() {
-		return wire_carrier_exclusion_for(runtime->state(), self_wire_handle_,
+		return wire_carrier_exclusion_for(runtime->state(), self_wire_handle(),
 				kernel_->seat_specs);
 	};
 	world::local_weapon_pump_tick(kernel.world, lp.weapon, io);
@@ -351,7 +351,7 @@ void JoinerRole::tick_local_weapon() {
 		if (pilot == nullptr)
 			continue;
 		params.shot_seq = ++lp.weapon.round_sequence;
-		params.shooter_handle = self_wire_handle_;
+		params.shooter_handle = self_wire_handle();
 		params.shooter_carrier_handle = io.carrier_exclusion();
 		kernel.world.round_sim.spawn(kernel.world, params, world::RoundConsequenceMode::VisualOnly);
 		world::LocalWeaponFiredWire fired;
@@ -398,7 +398,7 @@ void JoinerRole::tick_local_weapon() {
 		// stamps its own currentTick when accepting it.
 		// [orig: @0x42A62F/@0x42A6A1..0x42A890]
 		opennova::ClientFiredRound fire;
-		fire.shooter_handle = self_wire_handle_;
+		fire.shooter_handle = self_wire_handle();
 		fire.fire_flags = fired.round.mode_flags;
 		fire.adm_index = fired.adm_index;
 		fire.target_handle = 0xFFFF;
@@ -579,7 +579,7 @@ void JoinerRole::pump() {
 	// them here is the retail recv-before-actions boundary, not presentation work.
 	refresh_wire_collision_proxies();
 	lap.mark(devtools::Slot::SIM_CLIENT_PROXIES);
-	sync_replica_weapon_slots(rt.state(), world, self_wire_handle_);
+	sync_replica_weapon_slots(rt.state(), world, self_wire_handle());
 	apply_gameplay_events();
 	apply_weather_sample();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
@@ -594,7 +594,7 @@ void JoinerRole::pump() {
     world.rules.session_open = true;
     world.rules.auto_scope_zero =
             (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;
-    materializer_.fill_minefield_actors(rt.state(), self_wire_handle_, world.minefields.remote_actors);
+    materializer_.fill_minefield_actors(rt.state(), self_wire_handle(), world.minefields.remote_actors);
 	// The tick's own phases land on the SIM_WORLD_* rows inside run_logic_tick.
 	world.run_logic_tick(
 			/*is_authority=*/false,
@@ -629,7 +629,7 @@ void JoinerRole::pump() {
 	kernel.tick_weather();
 	if (!preround_active) {
 		rt.tick_remote_stance_sounds(world);
-		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle_);
+		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle());
 		rt.tick_remote_recoil();
 	}
 	lp.sync_local_mounted_input_heading();
@@ -1022,8 +1022,7 @@ void JoinerRole::spawn_and_arm_local_player() {
 	world::World &world = kernel.world;
 	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
-	if (rt.in_match() && !local_spawned_) {
-		self_wire_handle_ = rt.self_handle();
+	if (rt.in_match() && rt.has_self_handle() && !local_spawned_) {
 		const JoinerConnection::SelfSpawn &sp = rt.spawn_pose();
 		const world::PlayerSpawn spawn = spawn_from_self(sp);
 		const world::EntityHandle h = world::spawn_player(world, spawn);
@@ -1866,7 +1865,6 @@ void JoinerRole::reset_for_join() {
 	mounted_ammo_revision_seen_ = 0;
 	redeploy_release_pending_ = false;
 	redeploy_health_updates_at_release_ = 0;
-	self_wire_handle_ = 0;
 	last_gap_depth_ = 0;
 	last_frontier_seq_ = 0;
 	last_records_applied_ = 0;
