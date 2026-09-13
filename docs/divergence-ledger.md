@@ -1528,3 +1528,5 @@ Closed 2026-09-13: **D-FOLIAGE-13** -> `FIXED` — Foliage collection survives s
 Closed 2026-09-13: **D-AI-13** -> `FIXED` — Vehicle avoidance uses the original quantized footprint cosine and truncating bearing, preserving ordered neighbor braking and carrier exclusions. See [D-AI-13 evidence](world/world-wac-ai-re.md). Native `vehicle_mount` regressions pass for ground and boat callers, half-bin boundaries and compounded braking.
 
 Closed 2026-09-13: **D-WAC-10** -> `FIXED` — WAC M# operands bind the live music context at compilation and share its actual byte globals; missing contexts alias scratch. Game music opens before initial WAC compilation. See [D-WAC-10 evidence](world/world-wac-ai-re.md) and [music globals](audio/mus-sbf-re.md). Native MUS/WAC and mission-kernel tests pass; Godot music-director integration passes 8/8, including startup, reload and weak-provider lifetime.
+
+PR #649 integration review (2026-09-13, D-WAC-7): standalone event fixtures explicitly admit script ticks; a new empty-startup gate regression and all 97 Simulation GUT tests pass with reference assets. See the [mission runtime record](mission/bms-event-runtime-re.md).
