@@ -9360,6 +9360,11 @@ compile-time binding across unload/restart, and safe retired storage.
 `mission_kernel` exercises both active and inactive bindings at initial WAC
 execution. Godot music-director tests cover the live compile path, weak-provider
 lifetime, and real GameWorld startup ordering.
+The synthetic `tick_digest` now omits the deleted 16-word detached music bank:
+its 240-tick chain is `18f8080dd8fcdb68`. Reintroducing just those zero DWORDs
+into each of the 241 samples exactly recovers the previous `e33cefc459163b68`,
+proving the hash change is the removed serialization padding rather than a
+change to entity, AI, RNG or real script state in that mission.
 
 
 ### 33.16 Infantry obstacle detours and common think ordering
