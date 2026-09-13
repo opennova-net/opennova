@@ -83,6 +83,23 @@ int main() {
 			ranged, 1, 0, 0, 0, 0, 512,  24.0f, 52.125f, 40.0f, patches);
 	ok &= expect(patches.empty(), "distance above 42 must be rejected");
 
+	// Flat fallback retains quadrant 1's raw node +52 center for the 42u
+	// gate, and carries bit 31 into both collector lists. A zero Y center
+	// would reject this boundary witness. [orig: Terrain_CollectNearFoliagePatches
+	// @ 0x603E60, raw center @ 0x603F46, packed flag @ 0x603F7E..0x603F8A]
+	patches.clear();
+	opennova::collect_foliage_detail_patches(
+			ranged, 0, 0, 0, 0, 0, 512, 24.0f, 52.0f, 40.0f, patches);
+	ok &= expect(patches.size() == 1, "flat fallback uses the raw quadrant-one height center");
+	if (patches.size() == 1) {
+		ok &= expect_patch(patches[0], 0x80100030u, 42.0f,
+				"flat fallback retains its high flag in the accepted world key");
+	}
+	patches.clear();
+	opennova::collect_foliage_detail_patches(
+			ranged, 0, 0, 0, 0, 0, 512, 24.0f, 52.125f, 40.0f, patches);
+	ok &= expect(patches.empty(), "flat fallback still rejects raw-center distance above 42");
+
 	patches.clear();
 	opennova::collect_foliage_detail_patches(
 			ranged, 1, 0, 0, 0, 0, 512,  -42.0f, 10.0f, 8.0f, patches);
@@ -91,6 +108,38 @@ int main() {
 	if (patches.size() == 1) {
 		ok &= expect_patch(patches[0], 0x00000010u, 42.0f,
 				"horizontal clamp must retain the first 16u cell at the threshold");
+	}
+
+	// Only leaves take the distance test: every ancestor of this low 16u
+	// cell has y=[0,127], whose center is 63.5 units above the camera. Pruning
+	// an ancestor would lose the distance-zero cell. All other leaves remain
+	// too high to collect, including when the sector carries the flat flag.
+	// [orig: Terrain_CollectNearFoliagePatches @ 0x603E60,
+	// unconditional nonleaf descent @ 0x603E67..0x603E8F]
+	const uint8_t high_height[4] = {254, 254, 254, 254};
+	opennova::Mipchain mixed_heights;
+	make_quadrant_mipchain(mixed_heights, high_height, high_height);
+	for (int level = 0; level < 6; ++level) {
+		mixed_heights.levels[level][0] = 0;
+		mixed_heights.levels[level][1] = 254;
+	}
+	mixed_heights.levels[6][0] = 0;
+	mixed_heights.levels[6][1] = 0;
+	const int subtree_sizes[] = {512, 64, 32};
+	for (int sector_id = 0; sector_id <= 1; ++sector_id) {
+		for (const int subtree_size : subtree_sizes) {
+			patches.clear();
+			opennova::collect_foliage_detail_patches(
+					mixed_heights, sector_id, 0, 0, 0, 0, subtree_size,
+					8.0f, 0.0f, 8.0f, patches);
+			ok &= expect(patches.size() == 1,
+					"a mixed-height ancestor must not hide its in-range low leaf");
+			if (patches.size() == 1) {
+				const uint32_t key = sector_id == 0 ? 0x80000010u : 0x00000010u;
+				ok &= expect_patch(patches[0], key, 0.0f,
+						"leaf-only distance selection retains authored and flat keys");
+			}
+		}
 	}
 
 	// Each sector ID selects one 512u atlas quadrant. The camera is exactly
@@ -156,6 +205,21 @@ int main() {
 					"an already-full list preserves its key order and distance values");
 	}
 
+	// A flat key takes the final slot just like an authored key. The following
+	// authored handoff cannot reclaim it merely because its geometry is empty.
+	patches.assign(127, opennova::FoliageDetailPatch{0x12345678u, -1.0f});
+	opennova::collect_foliage_detail_patches(
+			ranged, 0, 0, 0, 16, 32, 16, 24.0f, 10.0f, 40.0f, patches);
+	ok &= expect(patches.size() == 128, "flat keys consume the final foliage-list slot");
+	if (patches.size() == 128) {
+		ok &= expect_patch(patches.back(), 0x80100030u, 0.0f,
+				"the 128th flat key keeps its flag and distance");
+	}
+	opennova::collect_foliage_detail_patches(
+			ranged, 1, 0, 0, 32, 32, 16, 40.0f, 10.0f, 40.0f, patches);
+	ok &= expect(patches.size() == 128 && patches.back().key == 0x80100030u,
+			"a flat entry at capacity prevents later authored cells from entering");
+
 	// Subtree handoff [orig: Terrain_TraverseQuadtreeNode @ 0x60905c..0x60907c]:
 	// a frustum-surviving emitted node hands only ITS rect to the collector.
 	// The 16u cell containing the camera collects alone with distance 0.
@@ -173,7 +237,7 @@ int main() {
 	opennova::collect_foliage_detail_patches(
 			ranged, 1, 0, 0, 448, 448, 64, 24.0f, 10.0f, 40.0f, patches);
 	ok &= expect(patches.empty(),
-			"a far subtree must prune on its own clamped-AABB distance");
+			"a far subtree contributes no in-range leaves");
 
 	patches.clear();
 	opennova::collect_foliage_detail_patches(

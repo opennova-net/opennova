@@ -197,6 +197,11 @@ std::vector<DetailInstance> generate_detail_cell(
 	// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
 	// Terrain_CollectNearFoliagePatches @ 0x603e60]
 	std::vector<DetailInstance> result;
+	// Flat-sector keys remain ordinary cache residents, but their generator
+	// writes zero index/vertex counts before any placement or terrain sample.
+	// [orig: generate_foliage_instances_0 @ 0x5FFDD0, flag gate @ 0x5FFE05,
+	// zero counts @ 0x5FFE10..0x5FFE16; Foliage_UpdateFarCellSlots @ 0x601B30]
+	if ((cell_key & 0x80000000u) != 0u) return result;
 	uint32_t state = seed_for_key(cell_key);
 	for (int index = 0; index < kCandidates; ++index) {
 		const Candidate candidate = next_candidate(cell_key, index, state);
@@ -474,8 +479,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 	stats_.terrain_scene_counter = terrain_scene_counter_;
 
 	const auto detail_cell_is_visible = [](const DetailCell &cell) {
-		return (cell.key & 0x80000000u) == 0u &&
-		       cell.camera_distance <= kDetailLimit;
+		return cell.camera_distance <= kDetailLimit;
 	};
 	const auto find_detail_index = [](const auto &entries, uint32_t key) {
 		for (size_t index = 0; index < entries.size(); ++index) {

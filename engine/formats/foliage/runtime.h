@@ -44,7 +44,8 @@ struct RuntimeSlot {
 
 struct DetailCell {
 	// Exact retail packed cell key. It is both the deterministic seed and the
-	// encoded 16-unit cell origin: HIGH15=X, LOW15=Z-top; bit 31 is invalid.
+	// encoded 16-unit cell origin: HIGH15=X, LOW15=Z-top; bit 31 marks a
+	// flat sector. Its key consumes a cache slot but generates empty geometry.
 	uint32_t key = 0;
 	float camera_distance = 0.0f;
 };
