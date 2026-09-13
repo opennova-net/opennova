@@ -211,3 +211,5 @@ HUD follow-ups from #645 now include runtime flag/SSKB keys, flag-event audio, t
 2026-09-13 WAC clock correction (D-WAC-7): script writes, startup execution, baseline restoration, and live program replacement update the same clock used by WAC/BMS admission. The logic tick freezes its decision before either scheduler executes; diagnostic run counts no longer overwrite it. Missing/empty scripts follow the original startup epilog. Native mission, event and VM integration regressions pass.
 
 2026-09-13, D-WPN-37: Airborne players suppress authored first-person ADS position bias while scope interpolation continues; reload, NoCardSwitch and ForceScoped keep their existing optical policy. See [world §14.10](world/world-wac-ai-re.md). Native `local_player_view` regressions pass.
+
+2026-09-13, D-WAC-8: The Player/Item/auto slot retains all 32 bits; cache and group refreshes replace only its low-word entity handle. [World §33.15](world/world-wac-ai-re.md) records the original word stores and passing `wac_state` regressions.

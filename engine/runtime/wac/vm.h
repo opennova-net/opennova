@@ -44,7 +44,7 @@ public:
 		int current_event = 0;
 		uint32_t time = 0;
         std::vector<uint16_t> entity_bindings;
-        uint16_t auto_item = 0xFFFF;
+        uint32_t auto_item = 0xFFFF;
 	};
 
     // Bind a compiled program (sizes the per-event state). Resets temporal state.
@@ -81,12 +81,16 @@ private:
     uint32_t time_ = 0; // [orig: wac_var_ticks]
     uint64_t dispatch_count_ = 0;
     std::vector<uint16_t> entity_bindings_;
-    uint16_t auto_item_ = 0xFFFF;
+    uint32_t auto_item_ = 0xFFFF; // mutable DWORD; entity selection changes only LOWORD
     int32_t cached_mana_ = 0;
     int32_t cached_game_over_ = 0, cached_win_ = 0, cached_lose_ = 0;
     int32_t cached_tod_ = 0;
     int32_t scratch_ = 0; // the unresolved-parameter sink, zeroed at entry [orig: dword_C6EAEC]
     void cache_player_state(opennova::world::World &);
+    void bind_auto_handle(uint16_t handle) {
+        // [orig: cache @0x4F5814/@0x4F58A2; group @0x4F5B7E/@0x4F5BAF/@0x4F5BD2]
+        auto_item_ = (auto_item_ & 0xFFFF0000u) | handle;
+    }
     std::vector<std::vector<world::EntityHandle>> groups_;
 
     int32_t read(opennova::world::World &w, uint32_t ref) const;

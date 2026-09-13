@@ -124,7 +124,7 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
         }
         case OperandKind::Builtin: {
             switch (static_cast<Builtin>(operand_index(ref))) {
-                case Builtin::AutoItem: return auto_item_;
+                case Builtin::AutoItem: return static_cast<int32_t>(auto_item_);
                 case Builtin::SquadSSN: return w.script.squad_events.selected_ssn;
                 case Builtin::SquadWho: return w.script.squad_events.selected_who;
                 case Builtin::RandomResult: return w.script.wac_values.random_result;
@@ -169,7 +169,7 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) {
             // through to every row. [orig: WacScript_ResolveParameter
             // @0x4f2a92..0x4f2a9f -> the table @0x82EEF0]
             switch (static_cast<Builtin>(operand_index(ref))) {
-                case Builtin::AutoItem: auto_item_ = static_cast<uint16_t>(v); break;
+                case Builtin::AutoItem: auto_item_ = static_cast<uint32_t>(v); break; // [orig: WacCmd_Set @0x4ED520]
                 case Builtin::SquadSSN: w.script.squad_events.selected_ssn = v; break;
                 case Builtin::SquadWho: w.script.squad_events.selected_who = v; break;
                 case Builtin::RandomResult: w.script.wac_values.random_result = v; break;
@@ -490,7 +490,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "GroupMax")) return cmds.set_group_engage_max(A(0), A(1));
     if (ieq(n, "GroupAtt")) return cmds.set_group_attack_max(A(0), A(1));
     if (ieq(n, "pisteam")) {
-        const world::Entity *entity = w.registry.get(world::EntityHandle{auto_item_});
+        const world::Entity *entity = w.registry.get(world::EntityHandle{static_cast<uint16_t>(auto_item_)});
         return entity != nullptr && static_cast<int8_t>(entity->team) == A(0);
     }
     // The selected entity must own an active player slot. A Player flag,
@@ -506,7 +506,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         return 0;
     }
     if (ieq(n, "piskills")) {
-        const world::EntityHandle handle{auto_item_};
+        const world::EntityHandle handle{static_cast<uint16_t>(auto_item_)};
         const world::MatchPlayer *player = w.match.player(handle);
         return w.registry.get(handle) != nullptr && player != nullptr &&
                 player->stats[world::MatchStats::kEnemyKills] >= A(0);
@@ -516,7 +516,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         // player-slot fields; the portable model rejects them (D-WAC-2).
         // [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0]
         const int32_t index = A(0);
-        const world::EntityHandle handle{auto_item_};
+        const world::EntityHandle handle{static_cast<uint16_t>(auto_item_)};
         world::MatchPlayer *player = w.match.player(handle);
         if (index < 0 || index > 16 || w.registry.get(handle) == nullptr || player == nullptr)
             return 0;
@@ -525,7 +525,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     }
     if (ieq(n, "AddExp")) return w.match.add_experience(w, H(0), A(1));
     if (ieq(n, "ppunt") || ieq(n, "pkillpunt"))
-        return w.match.request_player_punt(w, world::EntityHandle{auto_item_},
+        return w.match.request_player_punt(w, world::EntityHandle{static_cast<uint16_t>(auto_item_)},
                                            ieq(n, "pkillpunt"));
     if (ieq(n, "Gsetaccuracy"))
         return cmds.set_group_accuracy(A(0), A(1), A(2));
@@ -666,7 +666,7 @@ int32_t WacVm::replicate(opennova::world::World &w, int cmd, const CommandDef &d
         // handle must name a pool below 5 and a slot inside it, not be the
         // local player, and own an active player slot (Entity_ValidatePtr).
         // [@0x4f5df9..0x4f5e8b; Entity_ValidatePtr @0x500910]
-        const world::EntityHandle target{auto_item_};
+        const world::EntityHandle target{static_cast<uint16_t>(auto_item_)};
         if (target.valid() && target.pool() < world::EntityRegistry::kPoolCount &&
                 w.registry.get(target) != nullptr && target != w.cached.local_player &&
                 w.match.player(target) != nullptr) {
@@ -709,7 +709,7 @@ void WacVm::cache_player_state(opennova::world::World &w) {
     const world::Entity *player = w.registry.get(w.cached.local_player);
     w.cached.local_health = player != nullptr ? world::retail_signed_i16(player->health) : 0;
     cached_mana_ = player != nullptr ? player->mana : 0;
-    auto_item_ = player != nullptr ? player->handle.packed : 0xFFFF;
+    bind_auto_handle(player != nullptr ? player->handle.packed : uint16_t(0xFFFF));
 }
 
 void WacVm::execute(opennova::world::World &w) {
@@ -848,11 +848,11 @@ void WacVm::execute(opennova::world::World &w) {
             case Op::LocalPlayer:
                 // [orig: WacScript_ExecuteBytecode @0x4F58B0, opcodes 9/10]
                 if (--group_remaining >= 0) {
-                    auto_item_ = groups_[group_index][group_remaining].packed;
+                    bind_auto_handle(groups_[group_index][group_remaining].packed);
                     ++ip;
                 } else {
                     group_remaining = 0;
-                    auto_item_ = w.cached.local_player.packed;
+                    bind_auto_handle(w.cached.local_player.packed);
                     ip = operand;
                 }
                 break;

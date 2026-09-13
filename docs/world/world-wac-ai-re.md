@@ -8728,8 +8728,8 @@ Entity_UpdateInfantryAI @0x4B9910] were saved.
 iteration (opcode 9) and a backward jump for PLOOP/GLOOP. The VM [orig:
 WacScript_ExecuteBytecode @0x4F58B0] visits the member array in reverse order
 and restores the local player handle when exhausted. Nested player/group loops
-are rejected. Player, Item and auto refer to the same mutable 16-bit packed
-handle.
+are rejected. Player, Item and auto refer to the same mutable 32-bit word;
+only its low 16 bits select the packed entity handle (§33.15, D-WAC-8).
 
 [orig: WacScript_InitAndLoad @0x4F91F0] prepares the seven reserved named
 groups: emptygroup, humans, blueplayers, redplayers, ai, blueai and redai. The
@@ -9031,12 +9031,25 @@ and closes the actual Iblock01 render part.
 
 ### 33.15 WAC execution-entry caches and BMS event queries
 
+**D-WAC-8, fixed 2026-09-13:** Player/Item/auto alias the mutable DWORD at
+`0xC6EC3C`. The generic setter writes all 32 bits [orig: WacCmd_Set @0x4ED520],
+so `set(auto,196609) set(v1,auto)` must preserve 196609 (0x00030001), and signed
+assignments retain their entire bit pattern. The execution-entry cache writes
+only LOWORD at `0x4F5814` (local player) or `0x4F58A2` (no player). Group iteration
+also writes only a word: member select `0x4F5BD2`, exhausted-loop local restore
+`0x4F5B7E`, and absent-player restore `0x4F5BAF`. Upper bits authored by the script
+survive all those refreshes. Entity and targeted-player consumers narrow only
+when constructing the packed handle. `WacVm` and its runtime snapshot now retain
+the DWORD; `wac_state` covers full-width aliases, a signed assignment, low-word
+entity selection, missing-player refresh, group entry/exit and restored upper
+bits. The former uint16 storage incorrectly discarded every authored upper word.
+
 [orig: WacScript_CacheLocalPlayerState @0x4F5780] is called by [orig:
 WacScript_ExecuteBytecode @0x4f58b0 (the site @0x4F58F4)], not by the 62.5 Hz
 world tick. Each bytecode execution snapshots signed-word player health and mana
 (armor at entity +0x288), time of day divided by 279620 into minutes, and the
-current winner flags. Missing players yield zero health/mana and auto handle
-0xFFFF. Writes or gameplay changes during that execution do not refresh the
+current winner flags. Missing players yield zero health/mana and auto's low-word
+handle 0xFFFF; the upper word survives. Writes or gameplay changes during that execution do not refresh the
 other cached values. The next bytecode execution does.
 
 The 24-entry named-value table at `0x82EEF0` contains mutable pointers.
@@ -10348,6 +10361,7 @@ declined entry falls back to an OPEN class-D row.
 | D-WAC-4 | `set(night, v)` (and add/sub/inc/dec/store on the `night` row) is dropped; the night phase is derived from the clock on every read (`WeatherState::is_night_phase`) | The `night` row @0x82EEF0 resolves to the Env dword @0x26C645C, which holds a script write until [orig: Environment_ComputeTimeOfDayColors @0x57DE40 (the store @0x57deae)] rewrites it on the next TOD computation; [orig: Environment_GetLightDirectionFloat @0x57D870 (the read @0x57d873)] reads it meanwhile (§33.15) | OPEN (low: observable only as `set(night,1) set(v1,night)` -> 1 in retail vs the derived phase here until the light-direction getters consume a script-written word) |
 | D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends what [orig: WacScript_ResolveParameter @0x4f2920] stored: the SoundSet operand is the trigger-entry pointer from [orig: SoundBank_FindTriggerByName @0x75be90] via [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (`*(bank+56) + 84*index`, a host-process address; the site @0x4f2fe2), the Fx operand is the 1-based index into the effect world's global intern pool [orig: CEffectWorld_InternEffectHandle @0x5F7310] in first-intern order (the site @0x4f3067); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: the Fx half needs the intern order reproduced, the SoundSet half is inherently host-local; the decoder bounds are class-D portable boundaries) |
 | D-WAC-6 | An unresolved FX/FACE/SOUNDSET/ANIM/AMMO literal or a RUN/LOOP/NEXT structural error blocks the mission's script (`wac_layered_load` kBlocked); a GLOOP operand that is not a group name is the non-fatal `Unknown Group` and group 0 as in retail (2026-09-12), except that an operand an earlier resolver table claims (a declared variable, an event, a named value) also takes group 0 where retail ORs in the dword behind that address | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0/-1/0xFFFF (§33.15); unknown commands and unresolved arguments are non-fatal on both sides; the GLOOP operand resolve [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter @0x4f30fc/@0x4f310a] | OPEN (low: only malformed authored scripts differ; the GLOOP unknown-group leg is FIXED 2026-09-12) |
+| D-WAC-8 | Player/Item/auto retain a mutable DWORD in live VM state and runtime snapshots; cache/group refreshes replace only LOWORD and entity consumers explicitly narrow | [orig: WacCmd_Set @0x4ED520; WacScript_CacheLocalPlayerState @0x4F5814/@0x4F58A2; WacScript_ExecuteBytecode word stores @0x4F5B7E/@0x4F5BAF/@0x4F5BD2] (§33.15) | FIXED 2026-09-13 (uint16 truncation removed; wac_state regressions) |
 | D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
 | D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
 | D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |

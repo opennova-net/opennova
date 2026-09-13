@@ -128,7 +128,7 @@ enum class Builtin : uint32_t {
     SquadWho = 21, // selected squad-event raw payload @0xC60DC4
     RandomResult = 22, // RND, the last random() result @0xC6B23C
     CurTOD = 19, // cached minute on the 8.24 clock [orig: @0x4F579E]
-    AutoItem = 18, // Player/Item/auto share the low-word entity handle @0xC6EC3C
+    AutoItem = 18, // Player/Item/auto share a mutable DWORD with a low-word handle @0xC6EC3C
 	Ticks = 0, // seconds-equivalent: logic tick counter [orig: wac_var_ticks @0xC6EAD8]
 	Result = 1, // accumulator / last return value [orig: wac_var_result @0xC6EB24]
 	Health = 2, // local player health [orig: wac_var_health @0xC6EB00]
