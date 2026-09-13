@@ -169,8 +169,8 @@ public:
 		std::vector<uint8_t> cleared_player_slots;
 	};
 
-	// `player_name` is the on-wire game ClientAuth.NA callsign and the local key the joiner
-	// owner-ID matches against. ClientHello.CO remains retail's company identity.
+	// `player_name` is the displayed game ClientAuth.NA callsign; numeric connection
+	// ownership identifies the local player. ClientHello.CO is the company identity.
 	explicit JoinerConnection(std::string player_name);
 	// Injectable monotonic wall clock for deterministic hosts/tests. Production uses steady_clock.
 	JoinerConnection(std::string player_name, MonotonicMilliseconds monotonic_milliseconds);
@@ -654,6 +654,9 @@ private:
 	void on_server_hello(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_auth(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_session(const std::vector<uint8_t> &body, PollResult &out);
+	void retire_self_handle(uint16_t handle);
+	void apply_self_spawn(uint16_t handle, bool has_body, uint32_t owner,
+			uint16_t flags, const SelfSpawn &spawn, PollResult &out);
 	void on_server_resend_list(const std::vector<uint8_t> &body, PollResult &out);
 	// S2C 0x86 SERVER_GOODBYE: the host's teardown burst — keyed by OUR CK, its record latched
 	// with the peer role 1, answered with the 0x46 burst, then terminal like a description punt.

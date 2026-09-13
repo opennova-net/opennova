@@ -14124,3 +14124,25 @@ FID/JSP field interpretations are superseded by these direct witnesses.
 
 IDA update: appended implementation/doc backlinks at `0x4E0090`, `0x4C3650`,
 `0x512100` and `0x4FE310`, then saved the active IDB. No symbols or types were renamed.
+
+
+### PR #649 adversarial review: self-identity lifetime
+
+Review of the first identity commit found that the cached binding survived S2C
+`0x12` removal and `0x18` full repair/replacement. The joiner also rejected an
+entire malformed `0x0C` page while its replica fold kept complete prefix records,
+and `JoinerRole` cached the initial H for firing after the runtime changed it.
+Six framed regressions failed on the reviewed revision.
+
+The connection now applies one numeric identity predicate to organic and full
+spawns, retires it on either removal channel or empty replacement, and retains
+complete organic prefixes while stopping at the original pool-capacity guard.
+Capture-seeded H remains explicit when no connection ID was authenticated;
+owner zero cannot infer a new identity. The role reads the runtime's current H
+for weapon, carrier and presentation consumers instead of storing another copy.
+`npruntime_joiner_identity`, `inmatch_joiner_role` and `npruntime_client_runtime`
+cover removal/rebinding, full repair, truncated pages, pool bounds and replay.
+[orig: Player_FindLocalPlayerEntity @ 0x4E0090;
+NapiNPClientMsg_0x00C @ 0x42E7CE;
+NapiNPClientMsg_FullEntitySpawn @ 0x433780;
+Server_RemoveEntityAndNotify @ 0x50A270]

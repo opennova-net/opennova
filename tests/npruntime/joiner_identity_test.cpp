@@ -93,8 +93,68 @@ bool run_identity() {
 	spawn(13, connection_id, 0x100, "SharedCallsign");
 	spawn(13, 0, 0, "", false);
 	if (!expect(!joiner.has_self_handle(), "empty organic record retires self identity")) return false;
+	bool lifecycle_ok = true;
+	spawn(14, connection_id, 0x100, "Local");
+	receive(s2c::ENTITY_REMOVE, {14, 0});
+	lifecycle_ok = expect(!joiner.has_self_handle(),
+			"single-entity removal retires the local binding") && lifecycle_ok;
+
+	FullEntitySpawnRecord repair;
+	repair.slot_id = 15;
+	repair.item_type = 3;
+	repair.item_type_id = 0x14B9;
+	repair.entity_flags = connection_id;
+	repair.minimap_flags = 0x100;
+	repair.entity_name = "RepairedLocal";
+	receive(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(repair));
+	lifecycle_ok = expect(joiner.has_self_handle() && joiner.self_handle() == 15,
+			"full repair binds an owned player without a new organic page") && lifecycle_ok;
+	spawn(15, connection_id, 0x100, "Local");
+	repair.entity_flags = connection_id + 1;
+	receive(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(repair));
+	lifecycle_ok = expect(!joiner.has_self_handle(),
+			"full repair replacing the owner retires the binding") && lifecycle_ok;
+	spawn(15, connection_id, 0x100, "Local");
+	repair.item_type = 0;
+	receive(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(repair));
+	lifecycle_ok = expect(!joiner.has_self_handle(),
+			"empty full repair retires the binding") && lifecycle_ok;
+
+	OrganicSpawnBatch partial;
+	OrganicSpawnRecord first;
+	first.slot_id = 16;
+	first.has_body = true;
+	first.item_type_id = 0x14B9;
+	first.owner_connection_id = connection_id;
+	first.minimap_flags = 0x100;
+	partial.records = {first, first};
+	partial.records.back().slot_id = 17;
+	partial.entity_count = 2;
+	auto truncated = encode_organic_spawn_batch(partial);
+	truncated.pop_back();
+	receive(s2c::ENTITY_SPAWN_BATCH, std::move(truncated));
+	lifecycle_ok = expect(joiner.has_self_handle() && joiner.self_handle() == 16,
+			"complete organic prefix updates identity but incomplete tail cannot") && lifecycle_ok;
+	spawn(0x0FFEu, connection_id, 0x100, "OutOfPoolBounds");
+	lifecycle_ok = expect(joiner.has_self_handle() && joiner.self_handle() == 16,
+			"out-of-capacity player handles cannot replace identity") && lifecycle_ok;
+	partial.records = {first, first};
+	partial.records.front().slot_id = 0x0FFEu;
+	partial.records.back().slot_id = 17;
+	receive(s2c::ENTITY_SPAWN_BATCH, encode_organic_spawn_batch(partial));
+	lifecycle_ok = expect(joiner.self_handle() == 16,
+			"an out-of-capacity slot stops identity processing for the rest of the page") && lifecycle_ok;
 	joiner.start();
-	return expect(!joiner.has_self_handle() && !joiner.in_match(), "new session resets identity");
+	lifecycle_ok = expect(!joiner.has_self_handle() && !joiner.in_match(),
+			"new session resets identity") && lifecycle_ok;
+	joiner.seed_in_match(server_auth.sk, auth.ck, auth.scrk, server_scrk,
+			1, 0, 18, 0x14B9, 0);
+	seq = inmatch::make_jo_game_session_sequencing();
+	spawn(19, 0, 0x100, "UnknownOwner");
+	spawn(18, 0, 0x100, "CapturedLocal");
+	return expect(joiner.has_self_handle() && joiner.self_handle() == 18,
+			"an unauthenticated replay retains its explicit handle, never infers owner zero") &&
+			lifecycle_ok;
 }
 } // namespace
 

@@ -118,7 +118,9 @@ public:
 
 	bool started() const { return started_; }
 	bool local_spawned() const { return local_spawned_; }
-	uint16_t self_wire_handle() const { return self_wire_handle_; }
+	uint16_t self_wire_handle() const {
+		return local_spawned_ && runtime && runtime->has_self_handle() ? runtime->self_handle() : 0;
+	}
 	int flat_seconds() const { return flat_seconds_; }
 	bool freeze_suspected() const { return freeze_suspected_; }
 	// The ~1 Hz tripwire sampled this tick (one-shot: the observer's print).
@@ -152,7 +154,6 @@ public:
 		weapon_availability_revision_seen_ = 0;
 		redeploy_release_pending_ = false;
 		redeploy_health_updates_at_release_ = 0;
-		self_wire_handle_ = 0;
 	}
 	// finish_load's direct-load branch rebuilt a fresh ClientRuntime: the hello
 	// re-arms and the receive-side cursors restart with it.
@@ -261,9 +262,6 @@ private:
 	uint32_t mounted_ammo_revision_seen_ = 0;
 	bool redeploy_release_pending_ = false;
 	uint32_t redeploy_health_updates_at_release_ = 0;
-	// H is stamped in C2S 0x0C and used by the present self-filter. Zero is a
-	// valid handle; runtime.has_self_handle() carries validity independently.
-	uint16_t self_wire_handle_ = 0;
 	uint32_t now_tick_ = 0;
 	// The staged replica-peer table's identity (source pointer, count, pump
 	// tick): the resolver lambda re-copies it only when one of them changes.

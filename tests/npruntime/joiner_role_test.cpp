@@ -208,6 +208,33 @@ bool run_in_match_spawn_edge() {
 	return expect(h.kernel->world.cached.local_player == L, "frame 2: no re-spawn");
 }
 
+// The runtime owns H across removal and repair; every weapon and presenter
+// consumer must follow it after the first local spawn instead of caching H.
+bool run_self_handle_lifecycle() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, 5, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	const w::EntityHandle local = h.kernel->world.cached.local_player;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> body;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::ENTITY_REMOVE, {5, 0})}, body);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input);
+	if (!expect(!h.role.runtime->has_self_handle() && h.role.self_wire_handle() == 0,
+			"role stops using the retired runtime identity")) return false;
+	// The replay/session seed is also a public identity replacement seam.
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, 7, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	return expect(h.role.self_wire_handle() == 7 &&
+			h.kernel->world.cached.local_player == local,
+			"role follows replacement identity without duplicating its local motor entity");
+}
+
 // reset_for_join re-arms the per-session latches for a fresh dial.
 bool run_reset_for_join() {
 	Harness h;
@@ -988,6 +1015,7 @@ int main() {
 	ok &= run_pre_match_frame();
 	ok &= run_preload_frame();
 	ok &= run_in_match_spawn_edge();
+	ok &= run_self_handle_lifecycle();
 	ok &= run_spawn_stamps_equipped_adm_from_midframe_grant();
 	ok &= run_reset_for_join();
 	ok &= run_remote_vehicle_occupancy();
