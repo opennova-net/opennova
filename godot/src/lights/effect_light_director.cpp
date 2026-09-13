@@ -604,7 +604,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 		}
 		frame_models_.push_back(part);
 		// Both first-person submits inherit the query made for the player,
-		// before viewmodel camera offsets. [orig: @0x4DEEA9..0x4DEEB0]
+		// before viewmodel camera offsets (native EntityLightQuery contract).
 		frame_entity_positions_.push_back(has_local_query ? local_entity_position : part->get_global_position());
 		frame_entity_bound_radii_q16_.push_back(has_local_query ? local_entity_radius_q16 : part->get_entity_bound_radius_q16());
 		frame_owners_.push_back(p_viewmodel_wire_handle >= 0

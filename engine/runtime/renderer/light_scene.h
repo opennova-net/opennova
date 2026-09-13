@@ -388,6 +388,13 @@ struct LightDrawContext {
 
 // One entity's query source. Render-object bounds/poses never change this
 // cube; only the active groups vary between that entity's split draws.
+// All render parts of an entity share this source before their posed submits:
+// [orig: Terrain_RenderSectorEntitiesBySide @0x5C7FA5..0x5C8020]. First-person
+// arms/gun use the local player's query before applying camera-relative poses
+// [orig: Player_RenderFirstPersonViewModel @0x4DEEA9..0x4DEEB0]. A graphic-only
+// husk swap retains the initialized entity radius and ownership instead of
+// deriving them from the replacement mesh [orig: Entity_InitFromModel
+// @0x40E062..0x40E076; husk draw @0x413086]. Embedders preserve these inputs.
 struct EntityLightQuery {
 	std::array<int32_t, 3> position_fixed{};
 	int32_t bound_radius_fixed = 0;

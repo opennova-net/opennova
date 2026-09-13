@@ -718,7 +718,7 @@ public:
 	// parent entity's slot RT — the RenderSlot_RenderEntityAndChildren
 	// child walk); it never takes a slot of its own.
 	// Attached render models share their entity lighting query and groups,
-	// independently of their posed model origins. [orig: @0x5C7FA5..0x5C8020]
+	// independently of their posed model origins (native EntityLightQuery).
 	void set_entity_light_owner(ObjectModel *p_owner);
 	ObjectModel *get_entity_light_owner() const;
 	void set_slot_shadow_capture_with(ObjectModel *p_owner);
