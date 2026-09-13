@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include <runtime/simassets/model_builders.h>
+#include <base/io/fixed.h>
 
 #include "mission/mission_object_placer_keys.h"
 
@@ -315,6 +316,17 @@ Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 	return rec->xform;
 }
 
+bool MissionObjectPlacer::inherit_static_entity_projection(int p_bms_id,
+		ObjectModel *p_model) const {
+	const DestructionInstance *record = destruction_instances_.getptr(p_bms_id);
+	if (p_model == nullptr || record == nullptr || record->lod_instance < 0 ||
+			record->lod_instance >= static_lod_instances_.size()) return false;
+	const StaticLodInstance &instance = static_lod_instances_[record->lod_instance];
+	p_model->set_entity_projection_override(
+			instance.local_projection_sphere, instance.entity_scale_q16);
+	return true;
+}
+
 // Restore a carved static at the level last selected for it; the next
 // update_static_lods re-evaluates the instance against the camera like any
 // other. Repeated reset calls are safe (false when the instance was not
@@ -582,11 +594,14 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 		}
 	}
 	if (p_lod_profile.has("sphere_radius")) {
-		profile.sphere_radius = float(p_lod_profile.get("sphere_radius", 0.0));
+		const auto q16 = opennova::io::float_to_fp16_16_round_sat;
+		const Vector3 center = p_lod_profile.get("sphere_center", Vector3());
+		profile.projection_sphere.center_q16 = {q16(center.z), q16(center.x), q16(center.y)};
+		profile.projection_sphere.radius_q16 = q16(double(p_lod_profile.get("sphere_radius", 0.0)));
+		profile.projection_sphere.valid = true;
 	} else if (p_data->has_document()) {
-		profile.sphere_radius =
-				opennova::simassets::model_bound_radius_from_3di(
-						p_data->native_model());
+		profile.projection_sphere =
+				opennova::simassets::collision_projection_sphere_from_3di(p_data->native_model());
 	}
 	_complete_static_lod_profile(profile, retained);
 	object_data_cache_[p_graphic] = p_data;

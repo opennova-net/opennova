@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -21,6 +22,39 @@ inline constexpr int32_t kObjectLodBehindEyeRadiusQ16 = 0x10000000;
 // The highest shipped object-detail profile (the frame scale's fixed-quality
 // leg). [orig: Terrain_RenderSceneWithReflection @ 0x5c944c]
 inline constexpr int kObjectLodDetailLevelMax = 3;
+// The special item preloaded for the person flag-0x20 radius substitution.
+// [orig: Entity_PreloadSpecialItems @ 0x43C220]
+inline constexpr int kParachuteProjectionTypeId = 185;
+
+// Entity-local sphere consumed by the visibility projector, in the source
+// model's fixed-point axes. It is distinct from GHDR's origin-centered radius.
+struct ObjectProjectionSphere {
+  std::array<int32_t, 3> center_q16{};
+  int32_t radius_q16 = 0;
+  bool valid = false;
+};
+
+// Ordinary entities use the CMDL AABB midpoint and max-minus-center diagonal.
+// A nonzero runtime scale overrides the definition scale; either applies once
+// to the center and radius before the unscaled entity pose transforms them.
+// [orig: Entity_ComputeBoundingSphere @ 0x5C69A0, scale selection @ 0x5C69C4,
+// midpoint/diagonal @ 0x5C6A3B..0x5C6AC2, scale @ 0x5C6ACE..0x5C6B52]
+ObjectProjectionSphere object_projection_sphere_from_bounds_q16(
+    const std::array<int32_t, 3> &minimum,
+    const std::array<int32_t, 3> &maximum,
+    int32_t runtime_scale_q16 = 0, int32_t definition_scale_q16 = 0);
+
+// Apply the entity scale to an already-derived local sphere; zero is unscaled.
+ObjectProjectionSphere scale_object_projection_sphere_q16(
+    ObjectProjectionSphere sphere, int32_t scale_q16);
+
+// Infantry project the entity position and entity+0 bound radius. A deployed
+// parachute substitutes its own model radius; head/body share this one sphere.
+// [orig: collect_visible_entities_for_terrain @ 0x5C8C60,
+// person radius @ 0x5C8DF3..0x5C8E10, entity-position transform @ 0x5C8E21]
+ObjectProjectionSphere person_projection_sphere_q16(
+    int32_t entity_bound_radius_q16, bool parachute_deployed = false,
+    int32_t parachute_model_radius_q16 = 0);
 
 struct ObjectLodSelection {
   int lod_index = -1;

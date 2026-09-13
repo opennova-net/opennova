@@ -198,6 +198,7 @@ public:
 	// The level currently live for a placed static entity (-1 = below the
 	// sub-pixel floor or no level available, -2 = not a retained static).
 	int get_static_instance_lod(int p_bms_id) const;
+	bool inherit_static_entity_projection(int p_bms_id, ObjectModel *p_model) const;
 	// The names of the visible populations that currently carry a live row
 	// for the entity (empty when carved, culled or unknown). Headless Godot
 	// stores no MultiMesh instance data, so tests pin the placer's own row
@@ -302,8 +303,8 @@ public:
 	// (including asset-free tests). Each batch row may carry "lod_index"
 	// (default 0); `lod_profile` may carry "thresholds_q16"
 	// (PackedInt32Array, fine to coarse, one row per level) and
-	// "sphere_radius" (the model bound sphere); absent entries derive from
-	// the object's document, else from the level-0 geometry.
+	// "sphere_radius" with optional "sphere_center" (Godot model-local);
+	// absent entries derive from CMDL, else from the level-0 geometry.
 	bool register_resolved_static_graphic(const String &p_graphic,
 			const Ref<ObjectData> &p_data, const Array &p_batches,
 			const Dictionary &p_lod_profile = Dictionary());
@@ -335,7 +336,7 @@ private:
 	struct StaticLodProfile {
 		std::vector<int32_t> thresholds_q16;
 		std::vector<bool> available;
-		float sphere_radius = 0.0f;
+		opennova::renderer::ObjectProjectionSphere projection_sphere;
 	};
 	// One emitted MultiMesh population: capacity = the slot list it was
 	// emitted over, live rows packed [0, live) (visible_instance_count) in
@@ -372,7 +373,9 @@ private:
 		int profile = -1;
 		int bms_id = 0;
 		Vector3 origin;
-		float radius = 0.0f;
+		int32_t radius_q16 = 0;
+		opennova::renderer::ObjectProjectionSphere local_projection_sphere;
+		int32_t entity_scale_q16 = 0;
 		int active_lod = 0; // -1 = below the sub-pixel floor / none available
 		bool carved = false;
 		Vector<StaticLodBinding> bindings;

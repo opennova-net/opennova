@@ -15,6 +15,7 @@
 
 #include <runtime/anim/adm_fallback.h> // the default.adm substitution every spawn applies
 #include <runtime/renderer/object_lod.h>
+#include <base/io/fixed.h>
 #include <runtime/simassets/model_builders.h>
 #include <runtime/world/entity.h>
 
@@ -709,9 +710,8 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 				light_draw_rows[static_light_draw_key(i, robj_index)] = row;
 			}
 		}
-		// One retained instance per slot: the world bound sphere the projector
-		// consumes (the profile's model sphere under the entity's uniform
-		// scale) and, filled by the populations below, every slot it occupies.
+		// One retained instance per entity: scale the native collision sphere
+		// once, place its offset center, and retain every population it occupies.
 		Vector<int> lod_rows;
 		lod_rows.resize(instance_count);
 		{
@@ -720,9 +720,15 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 				StaticLodInstance retained;
 				retained.profile = profile_row;
 				retained.bms_id = i < group.bms_ids.size() ? group.bms_ids[i] : 0;
-				retained.origin = group.xforms[i].origin;
-				retained.radius = profile.sphere_radius *
-						ObjectLodFrame::uniform_scale(group.xforms[i].basis);
+				const int item_id = i < group.item_ids.size() ? group.item_ids[i] : 0;
+				const int32_t scale_q16 = _item_model_scale_q16(item_id);
+				const auto sphere = opennova::renderer::scale_object_projection_sphere_q16(
+						profile.projection_sphere, scale_q16);
+				retained.origin = ObjectLodFrame::projection_center(
+						group.xforms[i], sphere, scale_q16);
+				retained.radius_q16 = sphere.radius_q16;
+				retained.local_projection_sphere = sphere;
+				retained.entity_scale_q16 = scale_q16;
 				static_lod_instances_.push_back(retained);
 				lod_rows.write[i] = static_lod_instances_.size() - 1;
 			}
@@ -1279,6 +1285,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 			"player_avatar:head_camo");
 	head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 	_configure_item_shadow(head, item_id);
+	head->set_authored_lod_projection_owner(body);
 	// The head follows every body presentation call (one entity, one
 	// skeleton, one CTRL bus) except the per-part camo triplet.
 	body->add_presentation_link(head,
@@ -1499,9 +1506,22 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	if (!graphic.is_empty()) {
 		const Ref<ObjectData> data = _load_object_data(graphic);
 		if (data.is_valid()) {
+			const int32_t entity_radius = _item_entity_bound_radius_q16(p_item_id, data);
 			p_model->set_bound_radii_q16(
 					opennova::simassets::model_bound_radius_q16_from_3di(data->native_model()),
-					_item_entity_bound_radius_q16(p_item_id, data));
+					entity_radius);
+			const bool person = item_db_->get_item_type(p_item_id) == ItemDatabase::TYPE_PERSON;
+			int32_t parachute_radius = 0;
+			if (person) {
+				const String chute_graphic = _graphic_for(opennova::mission::kItemIdOffset +
+						opennova::renderer::kParachuteProjectionTypeId);
+				if (!chute_graphic.is_empty()) {
+					const Ref<ObjectData> chute = _load_object_data(chute_graphic);
+					if (chute.is_valid()) parachute_radius =
+							opennova::simassets::model_bound_radius_q16_from_3di(chute->native_model());
+				}
+			}
+			p_model->configure_entity_projection(person, parachute_radius);
 		}
 	}
 	String decal_texture;
@@ -1633,10 +1653,8 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 			for (int lod = 0; lod < lod_count; ++lod) {
 				profile.thresholds_q16.push_back(native_model.lods[lod].lod_threshold);
 			}
-			// The .3di header's origin sphere (gpm[5]), the same source the
-			// individual model's shadow radii and RLOD evaluation use.
-			profile.sphere_radius =
-					opennova::simassets::model_bound_radius_from_3di(native_model);
+			profile.projection_sphere =
+					opennova::simassets::collision_projection_sphere_from_3di(native_model);
 		}
 		p_tree_parent->remove_child(model);
 		memdelete(model);
@@ -1660,8 +1678,7 @@ MissionObjectPlacer::_static_lod_profile_for(const String &p_graphic) const {
 
 // Fill what the harvest or the registration seam left implicit: one
 // threshold row per harvested level, which levels carry geometry, and the
-// level-0 geometry bounds as the sphere fallback (the same fallback
-// ObjectModel uses for a document without a header sphere).
+// level-0 geometry bounds as the sphere fallback when no CMDL was supplied.
 void MissionObjectPlacer::_complete_static_lod_profile(
 		StaticLodProfile &r_profile, const Vector<StaticBatch> &p_batches) {
 	std::size_t level_count = 1;
@@ -1680,9 +1697,7 @@ void MissionObjectPlacer::_complete_static_lod_profile(
 			r_profile.available[static_cast<std::size_t>(batch.lod_index)] = true;
 		}
 	}
-	if (r_profile.sphere_radius > 0.0f) {
-		return;
-	}
+	if (r_profile.projection_sphere.valid) return;
 	AABB bounds;
 	bool has_bounds = false;
 	for (const StaticBatch &batch : p_batches) {
@@ -1693,8 +1708,13 @@ void MissionObjectPlacer::_complete_static_lod_profile(
 		bounds = has_bounds ? bounds.merge(surface_bounds) : surface_bounds;
 		has_bounds = true;
 	}
-	r_profile.sphere_radius =
-			has_bounds ? bounds.get_longest_axis_size() * 0.5f : 0.0f;
+	if (has_bounds) {
+		const Vector3 end = bounds.get_end();
+		const auto q16 = opennova::io::float_to_fp16_16_round_sat;
+		r_profile.projection_sphere = opennova::renderer::object_projection_sphere_from_bounds_q16(
+				{q16(bounds.position.z), q16(bounds.position.x), q16(bounds.position.y)},
+				{q16(end.z), q16(end.x), q16(end.y)});
+	}
 }
 
 // [engine: renderer::project_bound_sphere_radius_q16, the sub-pixel floor
@@ -1729,7 +1749,7 @@ int MissionObjectPlacer::update_static_lods(
 			continue;
 		}
 		int32_t radius_q16 = 0;
-		if (!frame.project(instance.origin, instance.radius, radius_q16)) {
+		if (!frame.project_q16(instance.origin, instance.radius_q16, radius_q16)) {
 			continue;
 		}
 		int next_lod = -1;

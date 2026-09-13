@@ -248,6 +248,8 @@ static inline void threedi_user_point_direction(const ThreediUserPoint *up, floa
 
 typedef struct ThreediCollisionModelData {
     float bbox[6];                // {minX, minY, minZ, maxX, maxY, maxZ}
+    int32_t bbox_fp16[6];         // exact CMDL words for entity projection bounds
+    int has_bbox_fp16;            // 1 when CMDL was parsed; hand-built models may use bbox
     float radii[3];               // {max_radius, max_radius_xy, max_radius_z}
     int32_t num_vertices;
     int32_t num_normals;

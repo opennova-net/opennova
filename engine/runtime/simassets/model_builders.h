@@ -10,6 +10,7 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
+#include <runtime/renderer/object_lod.h>
 
 namespace opennova::simassets {
 
@@ -39,6 +40,12 @@ struct EntityBoundRadiusInputs {
 	bool has_first_husk = false;
 };
 int32_t entity_bound_radius_q16(const EntityBoundRadiusInputs &inputs);
+
+// Ordinary entity projection uses the collision BLOCK's CMDL bounds even
+// when it has no usable collision geometry. Missing blocks leave it unstamped.
+opennova::renderer::ObjectProjectionSphere collision_projection_sphere_from_3di(
+    const opennova::threedi::Threedi3di3 &model,
+    int32_t runtime_scale_q16 = 0, int32_t definition_scale_q16 = 0);
 
 // Build the runtime occlusion model from the parsed OCCL tables
 // [orig: load_occlusion_model_data @ 0x5b4a00].

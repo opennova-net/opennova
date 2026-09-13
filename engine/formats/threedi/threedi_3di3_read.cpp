@@ -488,8 +488,11 @@ static int parse_cmdl(const ThreediChunk *chunk, ThreediCollisionModelData *out)
     }
     assert(chunk->data_len == 64);
     // bbox {minX, minY, minZ, maxX, maxY, maxZ}, radii, 7 counts.
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < 6; ++i) {
+        out->bbox_fp16[i] = read_s32_le(chunk->data + i * 4);
         out->bbox[i] = read_fp_16_16(chunk->data + i * 4);
+    }
+    out->has_bbox_fp16 = 1;
     out->radii[0] = read_fp_16_16(chunk->data + 24);  // max_radius
     out->radii[1] = read_fp_16_16(chunk->data + 28);  // max_radius_xy
     out->radii[2] = read_fp_16_16(chunk->data + 32);  // max_radius_z

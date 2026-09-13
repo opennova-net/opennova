@@ -288,6 +288,7 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 			return;
 		}
 		model->set_name("HuskModel");
+		if (intact_model != nullptr) model->set_authored_lod_projection_owner(intact_model);
         if (intact_model != nullptr)
             model->set_section_visibility_mask(intact_model->get_section_visibility_mask());
 		set_husk_static_shadow(model, individual_casts_static_shadow);
@@ -369,6 +370,7 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 	husk_restore_[husk_key] = restore;
 	graft->set_name(vformat("HuskModel_%d", bms_id));
 	graft->set_transform(placed_transform);
+	placer_->inherit_static_entity_projection(bms_id, graft);
 	// Changing the rendered graphic does not reinitialize entity+0. Carry the
 	// static entity query and identity into its new live-model representation.
 	// The native EntityLightQuery contract retains the original query on swaps.

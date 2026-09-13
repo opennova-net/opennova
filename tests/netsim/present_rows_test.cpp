@@ -95,6 +95,23 @@ bool test_world_rows_carry_the_authoritative_record() {
 	ok = expect(r[w::PF_LOCAL_VIEW_SUPPRESSED] == 0.0f, "no local mount: nothing is culled") && ok;
 	ok = expect(static_cast<int>(r[w::PF_RESPAWN_REVISION]) == 0, "a fresh row starts at revision 0") && ok;
 
+	// The presentation flag mirrors either authoritative flag store, including
+	// existing spawn/teleport copies of a previously set parachute bit.
+	ok = expect(r[w::PF_PARACHUTE_DEPLOYED] == 0.0f, "ordinary person has no parachute radius override") && ok;
+	e->engine_flags |= w::kEntityFlagParachute;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_PARACHUTE_DEPLOYED] == 1.0f,
+			"the engine flag reaches the person projection row") && ok;
+	e->engine_flags &= ~w::kEntityFlagParachute;
+	e->flags |= w::kEntityFlagParachute;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_PARACHUTE_DEPLOYED] == 1.0f,
+			"the organic low-byte flag also reaches the projection row") && ok;
+	e->flags &= ~w::kEntityFlagParachute;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_PARACHUTE_DEPLOYED] == 0.0f,
+			"clearing both stores removes the radius override") && ok;
+
 	// The dead->alive edge of the authoritative flags bumps the revision once;
 	// a re-spawned slot (new registry_spawn_id) forgets the old edge state.
 	e->flags |= w::kEntityFlagDead;
@@ -123,6 +140,39 @@ nw::OrganicSpawnRecord organic_record(uint16_t slot, uint16_t type_id) {
 // The joiner path: one row per decoded replica through the canonical
 // projection, the self echo left blank, the transition pulses left for the
 // caller to consume.
+bool test_full_spawn_parachute_state_reaches_player_and_infantry_rows() {
+	for (const bool player : {false, true}) {
+		opennova::mission::MissionKernel kernel;
+		im::ClientRuntime runtime("ParachuteProjection");
+		opennova::replication::ClientReplicaPipeline pipeline;
+		nw::FullEntitySpawnRecord record;
+		record.slot_id = 0x0010u;
+		record.item_type = 3;
+		record.item_type_id = 0x1410u;
+		record.minimap_flags = 0x20u | (player ? 0x100u : 0u);
+		pipeline.apply(nw::s2c::FULL_ENTITY_SPAWN, nw::encode_full_entity_spawn(record));
+		runtime.state() = pipeline.state();
+		if (!expect(runtime.state().entities.size() == 1,
+				"a full-slot person record creates its received state")) return false;
+		if (!expect(runtime.state().entities[0].cls ==
+				(player ? nw::EntityClass::Player : nw::EntityClass::Infantry),
+				"full-slot flags distinguish players from NPC infantry")) return false;
+		const im::PresentRowsContext context{kernel, &runtime, true};
+		std::vector<float> rows;
+		im::DoorPhaseTable doors;
+		im::PoolPresentLifecycleMap lifecycle;
+		im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+		if (!expect(rows.size() == w::PF_STRIDE &&
+				row_at(rows, 0)[w::PF_PARACHUTE_DEPLOYED] == 1.0f,
+				"received parachute state reaches both player and NPC projection rows")) return false;
+		runtime.state().entities[0].rm_entity_flags &= ~w::kEntityFlagParachute;
+		im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+		if (!expect(row_at(rows, 0)[w::PF_PARACHUTE_DEPLOYED] == 0.0f,
+				"a received-state clear removes the projection override")) return false;
+	}
+	return true;
+}
+
 bool test_replica_rows_project_the_decoded_state_and_keep_the_pulses() {
 	opennova::mission::MissionKernel kernel;
 	im::ClientRuntime runtime("PresentRows");
@@ -391,6 +441,7 @@ int main() {
 	test_vehicle_suspension_reaches_present_rows();
 	bool ok = true;
 	ok = test_world_rows_carry_the_authoritative_record() && ok;
+	ok = test_full_spawn_parachute_state_reaches_player_and_infantry_rows() && ok;
 	ok = test_replica_rows_project_the_decoded_state_and_keep_the_pulses() && ok;
 	ok = test_death_ctrl_register_reaches_present_rows() && ok;
 	if (!ok || failures != 0) {

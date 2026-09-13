@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <runtime/renderer/object_lod.h>
 
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -38,6 +39,13 @@ struct ObjectLodFrame {
 	// sphere radius is multiplied by.
 	static float uniform_scale(const Basis &p_basis);
 
+	// CMDL coordinates are source model axes: (x,y,z) maps to Godot (y,z,x).
+	// The native sphere already includes the authored scale, so remove that
+	// scale from the presentation basis before placing its offset center.
+	static Vector3 projection_center(const Transform3D &p_transform,
+			const opennova::renderer::ObjectProjectionSphere &p_sphere,
+			int32_t p_entity_scale_q16);
+
 	// Whether a world bound sphere touches the view frustum (the near/side
 	// plane rejection alone, no projection): project()'s own first step.
 	bool sphere_in_frustum(const Vector3 &p_center, float p_radius) const;
@@ -48,6 +56,8 @@ struct ObjectLodFrame {
 	// inside reports the witnessed behind-eye radius).
 	bool project(const Vector3 &p_center, float p_radius,
 			int32_t &r_radius_q16) const;
+	bool project_q16(const Vector3 &p_center, int32_t p_radius_q16,
+			int32_t &r_projected_q16) const;
 };
 
 } // namespace godot
