@@ -1552,3 +1552,5 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 | Reimplementation | Original | Address | Verdict / evidence |
 |---|---|---|---|
 | `WacVm::bind_auto_handle`, AutoItem read/write and runtime state | `WacCmd_Set`, entry cache and group stores | `0x4ED520`, `0x4F5814`, `0x4F58A2`, `0x4F5B7E`, `0x4F5BAF`, `0x4F5BD2` | matching full DWORD and low-word updates; D-WAC-8, `wac_state` |
+
+PR #649 adversarial correction (2026-09-13, D-WPN-36): local heading/leg/pitch clamps precede scoped drift. The body-tick limit and PRNG regressions are recorded in [world §14.9](world/world-wac-ai-re.md).

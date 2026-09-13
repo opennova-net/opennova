@@ -2020,7 +2020,7 @@ effect).
 ## 14.9 Scoped weapon stability and persistent aim drift (2026-09-13)
 
 `LocalPlayer::apply_scoped_aim_drift`, called by the infantry body pass after
-weapon-weight decay, ports the local-only block in
+weapon-weight decay and the local heading/leg/pitch clamps, ports the local-only block in
 [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, @0x4B5966..0x4B5C97].
 
 | Component | Verdict | Evidence |
@@ -2084,6 +2084,13 @@ This bounded integer witness is not a full retail playthrough comparison.
 | D-WPN-36 | FIXED 2026-09-13 | Scoped stability was absent despite retail's enabled defaults. The DEF/runtime triplet and the local body-pass oscillator now drive persistent aim with retail phase, stance, arithmetic and PRNG order; `def_parse_weapons`, `npruntime_weapon_table`, and `local_player_view` cover the correction. |
 
 No IDB edits were made for this slice.
+
+
+Adversarial review of PR #649 corrected the portable phase order: ladder yaw,
+leg chase/replant and pitch clamps run before applying drift, as in retail
+`@0x4B49E9..0x4B4BC6` followed by `@0x4B5C78..0x4B5C91`. Actual body-tick
+regressions retain drift beyond the pitch/ladder limit and keep leg targets at
+the pre-drift heading, while checking the unchanged three-draw PRNG sequence.
 
 ## 14.10 Airborne first-person view-bias suppression (2026-09-13)
 
