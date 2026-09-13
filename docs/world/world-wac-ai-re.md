@@ -2098,7 +2098,7 @@ the pre-drift heading, while checking the unchanged three-draw PRNG sequence.
 |---|---|---|
 | Airborne/reload bias predicate and presented position | MATCHING (bounded behavioral proof) | `local_player_view` checks the actual position-bias API through jump/fall flags, mid-ease landing, completed easing, reload/NoCardSwitch/ForceScoped combinations, motion lead and narrow-aspect framing |
 | Scope admission and interpolation state | MATCHING within the existing path | The camera predicate is separated from the reload-only optical gate; the tests retain ForceScoped admission while airborne and keep the scope target, promoter and ease advancing |
-| Authored ADS rotation presentation | NOT COVERED by this correction | The native frame reports the same suppression decision, but the current rig carries only the authored hip rotation; the missing rotational interpolation requires its own implementation and rendered-transform regression |
+| Authored ADS rotation presentation | Covered separately by D-WPN-38, §14.11 | The same gate now suppresses the retained authored rotation bias consumed by the actual rig; D-WPN-37 remains the bounded position-gate closure |
 
 `Player_UpdateFirstPersonCamera` skips both interpolated bias additions when
 entity Flags has bit `0x2000`. The rotation branch tests it at
@@ -2132,14 +2132,145 @@ without replacing engine calls. With base `(10,20,30)` and bias
 `(100,200,300)`, ordinary and grounded NoCardSwitch reload cases produced
 `(110,220,330)` in both blocks; airborne, ordinary reload, airborne ForceScoped,
 and airborne NoCardSwitch reload cases produced `(10,20,30)`. Bit `0x8000`
-alone did not suppress either bias. These are branch witnesses, not a claim
-that the current rig already reproduces the original rotational interpolation.
+alone did not suppress either bias. These branch witnesses establish the
+predicate; §14.11 separately establishes the rotational interpolation and rig consumer.
 The original six-column path is documented in
 [net RE section 5.40](../net/novaworld-net-re.md).
 
 | ID | Status | Summary |
 |---|---|---|
 | D-WPN-37 | FIXED 2026-09-13 (existing position path) | Airborne first-person viewmodel position retained the ADS bias. The camera predicate now reads `0x2000` independently of its reload exception, keeps the scope ease running, and preserves the separate ForceScoped optical rule. `local_player_view` checks actual output positions and transition behavior; authored ADS rotation is explicitly outside this closure. |
+
+No IDB edits were made for this slice.
+
+## 14.11 Authored first-person ADS rotation (2026-09-13)
+
+The previous rig always built its bias basis from the three hip rotation
+columns. Although the DEF parser retained six `tpos` floats and the native
+scope state exposed a scalar fraction, the last three `tpos` columns never
+reached an actual viewmodel rotation consumer. The earlier description in
+[net RE §5.40](../net/novaworld-net-re.md) documented the original six-column
+path; it did not prove that this consumer existed in OpenNova.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| DEF rotation and install promotion | MATCHING (bounded integer witness) | `player_view` checks decimal-token Q16 values and exact rounded BAM words across 180/360 degrees; `def_parse_weapons` retains the retail M4 parse leg |
+| Authored six-lane interpolation | MATCHING (bounded machine witness) | `player_view` fingerprints seven original setup/20-tick traces, including all float position words, unsigned BAM lanes, velocity, active/counter state and published biases |
+| Rotation gate and actual rig consumer | MATCHING (bounded behavioral proof) | `local_player_view` exercises installed poses, airborne/reload/NoCardSwitch/ForceScoped gates and rebaking; `player_viewmodel_rotation_test.gd` observes the real rig basis and rotated offset through normal world/presenter setup, jump/landing and a forced-scope spawn without a toggle |
+| Mount/reset lifecycle | MATCHING at the install boundary; pending-slot timing OPEN, D-WPN-40 | Direct installs retain interpolation; category requests and UseGun attach reset before commit; same-category/ForceScoped installs schedule the original one-step ADS setup |
+| Optical completion and presented position interpolation | OPEN, D-WPN-39 | Existing scalar admission/position consumers remain independent of the retained six-lane state; original completion depends on authored data and position publication truncates to Q16 integers |
+
+The DEF parser keeps XYZ as authored position units and the three angle
+columns as Q16 degrees from `Math_ParseFixedPoint16`. The install promotion
+multiplies XYZ by 256 into retail's float Q16 pose. Each angle is multiplied
+by `0x0B60B60`, adds `0x8000` to the 64-bit product, and stores the low dword
+after shifting right by 16. This preserves the actual rounded conversion,
+including `360 -> 0xFFFFFF00`, rather than treating degrees/360 as an exact
+turn conversion. The digit parser has no signed-number prefix: `-0.1`
+produces zero. Examples around the seam are `179.99999 -> 11796479 ->
+0x7FFFFECA`, `180.00001 -> 11796481 -> 0x80000036`, and `359.99999 ->
+23592959 -> 0xFFFFFE4A` [orig: Math_ParseFixedPoint16 @ 0x6131F0;
+WeaponDef_ParseProperty, pos @0x544614..0x5446D8, hip-copy stores
+@0x5446DB..0x544717, tpos @0x54475B..0x544825].
+
+`CNetPlayerInterp_Setup` copies the target's six lanes. An active interpolation
+sources from its own current pose; an idle one uses the caller's pose. XYZ
+velocity is the floating difference times `1/steps`. Rotation subtraction is
+modulo 2^32: a delta at most `0x7FFFFF80` becomes unsigned `delta/steps`; a
+larger delta becomes the negation of `(0xFFFFFFFF-delta)/steps`. This uses a
+one's-complement magnitude and a threshold below INT32_MAX, not ordinary
+signed shortest-arc division. A nonzero setup preserves the existing
+remaining counter. Only an idle all-zero setup arms that counter with the
+requested steps and zero velocities, without copying its source. An active
+all-zero setup deactivates only when the old counter is already spent
+[orig: CNetPlayerInterp_Setup @ 0x4DDFD0, source selection
+@0x4DE004..0x4DE041, zero branch @0x4DE0CC..0x4DE11F, velocity/activation
+@0x4DE122..0x4DE1EB].
+
+The stepper first decrements a nonzero counter. If all six velocities are
+zero, it clears active only when the counter is spent and returns without
+publishing a new bias. Otherwise it subtracts each velocity and snaps when
+the velocity magnitude is **strictly greater** than the remaining distance.
+The XYZ comparison uses the unrounded subtraction still on the x87 stack,
+even though it has already stored a narrowed current float. All rotation
+operands, including velocity, convert as **unsigned** values; a negative
+modular velocity therefore has a large magnitude and can snap its lane on
+the first tick. Rotations are not a symmetric degree lerp. The published
+position is truncating `ftol(current-hip)`; the published rotation is the
+wrapping integer difference [orig: Player_StepFpViewBiasInterp @ 0x4DDD20,
+zero-velocity branch @0x4DDD47..0x4DDDC3, XYZ @0x4DDDC4..0x4DDE35,
+rotation @0x4DDE37..0x4DDF3F, publication @0x4DDF42..0x4DDFC3].
+
+The native view owns the two authored poses and this retained interpolator.
+The existing toggle and movement transitions feed all five setup sites,
+using the original 7/15/1-step selection. Mount and camera reset are separate:
+
+- A direct mount retains current, velocity, target, counter and active state,
+  and clears only the six published biases. Same-category mounts retain the
+  promoted scope byte; ForceScoped sets it, and a cross-category nonforced
+  mount clears it. When flags & 3 and promotion are set, mount schedules
+  `Setup(1, hip, ADS)` without stepping; a first forced equip therefore reaches
+  its authored rotation on its first view tick without a user scope toggle
+  [orig: Player_MountWeaponSlot @0x4DFA40, promotion @0x4DFB31..0x4DFB66,
+  bias clears @0x4DFBCF..0x4DFBE8, setup @0x4DFC7D]. A nonoptical def without
+  flag `0x04000000` unbinds the pose, and the next active step deactivates it
+  without changing its lanes [orig: @0x4DFC98..0x4DFC9A; @0x4DDD2B..0x4DDDBC].
+- A category-handle request resets after its gates but before selection, even
+  when the remaining walk denies the request. Cycling and direct equip do not
+  reset; UseGun attach does [orig: Player_SwitchToWeaponByHandle @0x4E0223;
+  Player_CycleWeaponSlot @0x4DFE70; Player_EquipWeaponByEntity @0x4E0370;
+  pickup @0x4E03D0; Entity_AttachToUseGunSlot @0x546B80]. The reset clears
+  position current/target/velocity, copies retained angle velocity to current,
+  clears active and the engaged target, and sets hipfire. It preserves the
+  angle velocity/target, remaining counter, promoted byte and published biases
+  [orig: Player_ResetCameraAndMovementState @0x4DE1F0..0x4DE281]. The native
+  outcome carries this request-time reset independently of its mount/deny kind.
+- A same-weapon clip rebake is a rendering refresh and preserves the live state.
+
+The render query applies §14.10's airborne/reload gate to the additive BAM
+rotation bias without stopping interpolation. Simulation only converts that
+bias to degree components. The actual rig adds it to the hip cant, maps the
+existing axes, and uses the resulting basis for **both** model orientation and
+the view-local position. Camera restamping retains that composition [orig:
+Player_UpdateFirstPersonCamera @0x4DD380, rotation add @0x4DD43B..0x4DD456,
+bias matrix build @0x4DD469, position transform @0x4DD5D8]. The Godot transform
+is floating point; these tests do not claim a pixel-identical Q22 rendering
+result.
+
+**D-WPN-40 remains open:** retail mounts the target's
+view state while the outgoing weapon is still selected (`g_pendingWeaponSlot`
+@0x4DFB16 and `g_fpCameraInterp.entitySlotPtr` @0x4DFC4B). Here the outcome
+queues the outgoing action and the target pose binds at `local_weapon_install`
+after commit/presentation install. Request-time camera reset is now independent
+of that delay, but completing pending-target view timing requires feeding its
+authored poses before the install boundary; no matching claim covers that
+interval.
+
+The independent oracle executed the full original setup and step functions,
+including their real CRT conversion calls, from retail SHA256
+`b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac`.
+No engine calls were replaced. The ordinary fixture starts XYZ `(256,512,768)`
+and BAM `(0x10000000,0x10000000,0xF0000000)`, targeting XYZ
+`(512,-256,1024)` and BAM `(0x08000000,0x20000000,0x10000000)` in 15 steps.
+The first tick produces yaw `0x0F777778`, immediately snaps the other two
+rotation lanes, and publishes XYZ bias `(17,-51,17)`. Position lanes X/Y snap
+on tick 14, Z and yaw on tick 15, and active clears on tick 16. The test also
+covers seven-step/inset, one-step/hipfire, the exact wrap threshold, tiny
+deltas that truncate to zero velocity, idle zero-delta, and an active
+reversal after three ticks with deliberately unrelated caller source data.
+A separate execution of original reset @0x4DE1F0 used counter 37, nonzero
+position triples, angle velocities `(0x11111111,0x80000001,0xFFFFFFFF)`, and
+biases `(11,12,13,14,15,16)`: it retained that counter, both angle velocity and
+target triples, the promoted byte and every bias, copied angle velocity to
+current, and cleared only the position triples and active/engaged state.
+Native mount/cycle/category regressions check continuation and publication
+at the actual installation and request boundaries.
+
+| ID | Status | Summary |
+|---|---|---|
+| D-WPN-38 | FIXED 2026-09-13 | Authored ADS rotation had no consumer. Q16 angle parsing, full-pose install data and the retained original six-lane interpolator now publish the gated rotation bias to the actual rig's basis and rotated offset. Native machine traces and real synthetic-world rig tests cover interpolation, wrapping, suppression, direct-mount continuation, request reset and forced-scope equip. |
+| D-WPN-39 | OPEN | Optical admission and position presentation still use `scope_step/ease_steps`, always completing on their nominal 7/15/1 clock and continuously blending float XYZ. Retail waits for all six velocities to snap and a later zero-velocity call, then promotes scope at `Player_UpdatePerFrame @0x4DE4C9..0x4DE4F7`; position uses the published truncating Q16 bias. The 15-step fixture above completes at tick 16, whereas current optical admission promotes at tick 15. Route these existing consumers through the now-retained pose state and add authored-data completion, interruption and real position-output regressions as a separate fix. |
+| D-WPN-40 | OPEN | Retail binds the pending target's view pose during `Player_MountWeaponSlot @0x4DFB16/0x4DFC4B/0x4DFC7D`, before the outgoing action commits. OpenNova resets the view at admitted category-request time but binds the target's pose at the later `local_weapon_install` boundary. Feed the pending def's authored poses into native mount staging, preserve the outgoing weapon FSM, and test category/cycle/UseGun timing across request, outgoing action, commit and presentation rebake. This is distinct from D-WPN-39's optical/position interpolation clock. |
 
 No IDB edits were made for this slice.
 
@@ -5187,7 +5318,6 @@ SHA-256 `c2dd9ee383d6f1383fe1022970db410e709fe3553c444dcfe623d83039e3d9ed`),
 and these instruction sites were checked read-only in the Jointops.exe IDB.
 This corrects the earlier geometry-matching claim in section 31.2; that section's
 historical live-convoy measurements predate this fix.
-
 
 2026-09-01: the rest of leg 3 is ported — the wait-for-boarders stop (the
 existing `vehicle_waits_for_boarders` helper, now on the ground and boat AI

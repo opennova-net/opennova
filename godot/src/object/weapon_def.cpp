@@ -3,6 +3,7 @@
 #include "util/string_convert.h"
 
 #include <runtime/hud/sight_overlay.h>
+#include <base/io/fixed.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -19,14 +20,29 @@ void set_text(char (&p_field)[N], const String &p_value) {
 	std::snprintf(p_field, N, "%s", opennova::to_std(p_value).c_str());
 }
 
-PackedFloat32Array six(const float *p_values) {
+PackedFloat32Array six(const float values[6]) {
 	PackedFloat32Array out;
-	for (int k = 0; k < 6; ++k) out.push_back(p_values[k]);
+	for (int k = 0; k < 6; ++k) out.push_back(values[k]);
 	return out;
 }
 
-void set_six(float *p_values, const PackedFloat32Array &p_from) {
-	for (int k = 0; k < 6; ++k) p_values[k] = k < p_from.size() ? p_from[k] : 0.0f;
+void set_six(float values[6], const PackedFloat32Array &from) {
+	for (int k = 0; k < 6; ++k) values[k] = k < from.size() ? from[k] : 0.0f;
+}
+
+PackedFloat32Array pose_columns(const float position[3], const int32_t rotation[3]) {
+	PackedFloat32Array out;
+	for (int k = 0; k < 3; ++k) out.push_back(position[k]);
+	for (int k = 0; k < 3; ++k)
+		out.push_back(static_cast<float>(rotation[k] / opennova::io::kFp16OneD));
+	return out;
+}
+
+void set_pose_columns(float position[3], int32_t rotation[3], const PackedFloat32Array &from) {
+	for (int k = 0; k < 3; ++k) position[k] = k < from.size() ? from[k] : 0.0f;
+	for (int k = 0; k < 3; ++k)
+		rotation[k] = k + 3 < from.size()
+				? opennova::io::float_to_fp16_16_sat(from[k + 3]) : 0;
 }
 
 } // namespace
@@ -193,10 +209,10 @@ WEAPON_DEF_TEXT(hudclipgfx_texture, hudclipgfx_texture)
 WEAPON_DEF_TEXT(hudrndgfx_texture, hudrndgfx_texture)
 #undef WEAPON_DEF_TEXT
 
-PackedFloat32Array WeaponDef::get_pos() const { return six(value_.pos); }
-void WeaponDef::set_pos(const PackedFloat32Array &p_value) { set_six(value_.pos, p_value); }
-PackedFloat32Array WeaponDef::get_tpos() const { return six(value_.tpos); }
-void WeaponDef::set_tpos(const PackedFloat32Array &p_value) { set_six(value_.tpos, p_value); }
+PackedFloat32Array WeaponDef::get_pos() const { return pose_columns(value_.pos, value_.pos_rotation_deg_q16); }
+void WeaponDef::set_pos(const PackedFloat32Array &p_value) { set_pose_columns(value_.pos, value_.pos_rotation_deg_q16, p_value); }
+PackedFloat32Array WeaponDef::get_tpos() const { return pose_columns(value_.tpos, value_.tpos_rotation_deg_q16); }
+void WeaponDef::set_tpos(const PackedFloat32Array &p_value) { set_pose_columns(value_.tpos, value_.tpos_rotation_deg_q16, p_value); }
 PackedFloat32Array WeaponDef::get_error() const { return six(value_.error); }
 void WeaponDef::set_error(const PackedFloat32Array &p_value) { set_six(value_.error, p_value); }
 
@@ -205,7 +221,9 @@ Vector3 WeaponDef::get_pos_units() const {
 }
 
 Vector3 WeaponDef::get_rot_bias_deg() const {
-	return Vector3(value_.pos[3], value_.pos[4], value_.pos[5]);
+	return Vector3(value_.pos_rotation_deg_q16[0] / opennova::io::kFp16OneD,
+			value_.pos_rotation_deg_q16[1] / opennova::io::kFp16OneD,
+			value_.pos_rotation_deg_q16[2] / opennova::io::kFp16OneD);
 }
 
 Vector3 WeaponDef::get_tpos_units() const {

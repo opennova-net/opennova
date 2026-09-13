@@ -177,6 +177,29 @@ inline void camera_shake_decay(CameraShakeState &st) {
 	else st.counter -= kShakeDecayPerTick;
 }
 
+// Retail's six-lane first-person pose: three float Q16 position values and
+// three wrapping BAM words, not six interchangeable scalar angles.
+// [orig: WeaponDef +0x10C / +0x124; CNetPlayerInterp_Setup @0x4DDFD0]
+struct PlayerViewPose {
+    float position_q16[3] = {};
+    uint32_t rotation_bam[3] = {};
+};
+
+struct PlayerViewBiasInterp {
+    PlayerViewPose current;
+    PlayerViewPose target;
+    PlayerViewPose velocity;
+    uint32_t remaining = 0;
+    bool active = false;
+    int32_t position_bias_q16[3] = {};
+    int32_t rotation_bias_bam[3] = {};
+};
+
+void player_view_bias_interp_setup(PlayerViewBiasInterp &interp, uint32_t steps,
+                                  const PlayerViewPose &idle_source,
+                                  const PlayerViewPose &target);
+void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip);
+
 struct PlayerViewState {
     // THE ADS SCOPE TRI-STATE plus the FP camera interp projected onto the
     // hip..tpos line. `scope_engaged` is the TARGET the promoter reads,
@@ -201,6 +224,13 @@ struct PlayerViewState {
     float scope_step = 0.0f;
     int32_t ease_steps = kScopeEaseSteps; // the Setup step count of the current ease
     int32_t scope_ease_remaining = 0;
+    // The authored pose interpolator feeds the viewmodel's rotation. The
+    // scalar above still controls optical admission and position blending;
+    // its data-independent completion is tracked separately as D-WPN-39.
+    PlayerViewPose weapon_hip_pose;
+    PlayerViewPose weapon_ads_pose;
+    PlayerViewBiasInterp weapon_pose_interp;
+    bool weapon_pose_bound = false; // fpCameraInterp.entitySlotPtr + its non-null Def
     bool move_held = false;       // [orig: the movement-held latch g_movementKeyHeld @ 0xB7653B]
     // THE CAMERA MODE, two words. `third_person_selected` is the user's
     // preference — the chase byte the view actions write, 1 from the session
@@ -323,20 +353,26 @@ bool player_view_scope_ease_active(const PlayerViewState &v);
 // and by the mount stamp, cleared by both toggle branches (@0x4df20c /
 // @0x4df31d) and by the auto-re-raise (@0x4df609). It holds through the
 // settled drop-with-memory ease (@0x4df5ae) and NOT through a raise, so it is
-// no function of engaged + active. The port never stamps it without the
-// engaged target (the ForceScoped mount stamp @0x4dfb31 rides CanFire's
-// force override instead), so a settled read without the target is a stale
-// external reset and reads false.
+// no function of engaged + active. The camera reset clears only the target;
+// a same-category mount retains this byte, and ForceScoped stamps it itself.
+// [orig: reset @0x4DE275; mount @0x4DFB31..0x4DFB66]
 inline bool player_view_scope_settled(const PlayerViewState &v) {
-    return v.scope_settled && v.scope_engaged;
+    return v.scope_settled;
 }
 
-// The scope tri-state + interp reset to the disengaged hip: target off,
-// promoted byte off, hipfire latch on, the interp idle at the hip
-// [orig: Player_ResetCameraAndMovementState @0x4DE1F0; the mount's
-// bias zero @0x4dfbcf]. Every reset site must run this one (the tri-state
-// carries more than the four legacy fields).
+// Discard the scope state when no held weapon/round remains. A weapon mount
+// and the category-key camera reset have separate, narrower writes below.
 void player_view_scope_reset(PlayerViewState &v);
+// Category-handle/UseGun reset: retain the promoted byte, angle velocities,
+// angle targets, counter and published biases. Clear the position lanes and
+// copy angle velocity into current, then deactivate the interpolator.
+// [orig: Player_ResetCameraAndMovementState @0x4DE1F0..0x4DE281]
+void player_view_weapon_switch_reset(PlayerViewState &v);
+// A direct mount clears only the published biases. Same-category mounts keep
+// the promoted byte; ForceScoped sets it; an optical promoted mount sets up a
+// one-step transition to the new def's ADS pose without stepping it here.
+// [orig: Player_MountWeaponSlot @0x4DFB31..0x4DFC9A]
+void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed);
 
 // Whether a scope request for `engaged` has anything to do: false when that
 // target is already reached or in flight. The one exception is the engaged

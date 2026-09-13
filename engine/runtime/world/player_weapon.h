@@ -197,6 +197,8 @@ struct LocalPlayerWeapon {
 // The plain install payload: weapon_install_data_from_def fills the row half
 // from the retained weapon.def parse; the feeder adds the clip rings.
 struct WeaponInstallData {
+    PlayerViewPose view_hip_pose;
+    PlayerViewPose view_ads_pose;
     WeaponScopeZero scope_zero;
     int32_t ammo_cost = 0;
     std::string soundfireloop;
@@ -276,14 +278,15 @@ bool local_usegun_switch_is_instant(const World &world,
 void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
                                       bool same_category);
 void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w);
-void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w);
+void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
+                                         PlayerViewState &view);
 
 // The pending -> equipped commit and the shared switch-outcome routing.
 void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
                                   WeaponInventory *inventory);
 void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
                                   WeaponInventory *inventory,
-                                  const WeaponSwitchOutcome &out);
+                                  const WeaponSwitchOutcome &out, PlayerViewState &view);
 
 // Ring reads: serve the head then advance (the consuming duration read the
 // bake performs, and the play latch the anim events record).

@@ -1306,7 +1306,7 @@ void JoinerRole::sync_authoritative_mount() {
 		// mounted input heading for the new relation.
 		on_mount_changed();
 	}
-	world::sync_local_usegun_weapon_transition(world, lp.weapon);
+	world::sync_local_usegun_weapon_transition(world, lp.weapon, lp.view);
 }
 
 // Fold the latest complete phase-8 mounted-ammo sample into the exact

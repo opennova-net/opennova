@@ -539,6 +539,69 @@ void test_frame_reads_the_state_and_the_card_selector() {
 
 // The camera's airborne skip is independent of the ongoing scope interp.
 // [orig: Player_UpdateFirstPersonCamera @0x4dd40d/0x4dd414 and @0x4dd49f/0x4dd4a6]
+void test_authored_rotation_bias_continues_through_air_reload_and_rebake() {
+    LocalWorld lw;
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    WeaponInstallData data;
+    data.name = "AUTHORED_ROTATION";
+    data.flags = DEF_WEAPON_FLAG_SIGHTED;
+    data.view_hip_pose = {{256, 512, 768}, {0x10000000u, 0x10000000u, 0xF0000000u}};
+    data.view_ads_pose = {{512, -256, 1024}, {0x08000000u, 0x20000000u, 0x10000000u}};
+    local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
+    CHECK(local_player_scope_toggle(lw.w, weapon, view, weapon.slot));
+    const float eye[3] = {};
+    for (int i = 0; i < 3; ++i) player_view_tick(view, eye);
+    int32_t out[3];
+    local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
+    CHECK(static_cast<uint32_t>(out[0]) == 0xFE666668u);
+    CHECK(static_cast<uint32_t>(out[1]) == 0x10000000u);
+    CHECK(static_cast<uint32_t>(out[2]) == 0x20000000u);
+
+    lw.entity().flags |= kEntityFlagInAir;
+    local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
+    CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0);
+    for (int i = 0; i < 4; ++i) player_view_tick(view, eye);
+    CHECK(view.weapon_pose_interp.current.rotation_bam[0] == 0x0C444448u);
+    CHECK(view.scope_engaged); // suppression neither cancels nor resets ADS
+    lw.entity().flags &= ~kEntityFlagInAir;
+    lw.entity().engine_flags |= kEntityFlagInAir;
+    local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
+    CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0);
+
+    // ForceScoped and NoCardSwitch never bypass the airborne camera gate.
+    weapon.def.flags |= DEF_WEAPON_FLAG_FORCESCOPED | DEF_WEAPON_FLAG_NOCARDSWITCH;
+    weapon.slot.current = weapon_action::kReload;
+    local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
+    CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0);
+    lw.entity().engine_flags &= ~kEntityFlagInAir;
+    local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
+    CHECK(static_cast<uint32_t>(out[0]) == 0xFC444448u);
+    CHECK(out[1] == 0x10000000 && out[2] == 0x20000000);
+    weapon.def.flags &= ~DEF_WEAPON_FLAG_NOCARDSWITCH;
+    local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
+    CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0);
+    for (int i = 0; i < 10; ++i) player_view_tick(view, eye);
+    weapon.slot.current = weapon_action::kIdle;
+    local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
+    CHECK(static_cast<uint32_t>(out[0]) == 0xF8000000u);
+    CHECK(out[1] == 0x10000000 && out[2] == 0x20000000);
+
+    // Render-side clip rebaking the same installed weapon preserves the
+    // current authored pose. A real new mount resets the published bias.
+    local_weapon_install(lw.w, weapon, data, false, true, nullptr, view);
+    local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
+    CHECK(static_cast<uint32_t>(out[0]) == 0xF8000000u);
+    data.name = "NEW_ROTATION_MOUNT";
+    local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
+    local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
+    CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0);
+    CHECK(view.weapon_pose_interp.active); // promoted same-category mount sets up one step
+    player_view_tick(view, eye);
+    local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
+    CHECK(static_cast<uint32_t>(out[0]) == 0xF8000000u);
+}
+
 void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     LocalWorld lw;
     lw.ai.attach(lw.local);
@@ -1081,28 +1144,139 @@ void test_scope_zero_bake_max_range() {
     CHECK(zero.max_range_q16 == 655359); // below stable on the first tick
 }
 
-// Every mount and clear resets the scope tri-state through the one reset
-// (player_view_scope_reset): a promoted sight never survives a weapon change,
-// and the interp parks idle at the hip.
-// [orig: Player_MountWeaponSlot zeroes the view biases @ 0x4dfbcf]
-void test_install_and_clear_reset_the_scope_tri_state() {
+// Direct mounts retain the current pose and velocities. Published bias alone
+// clears, then the next step uses the newly bound def's hip reference.
+void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
     LocalWorld lw;
-    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
+    for (int i = 0; i < 3; ++i) {
+        WeaponTableEntry row;
+        row.valid = true;
+        row.name = "POSE_" + std::to_string(i);
+        row.category = i == 2 ? 2 : 1;
+        row.rank = i;
+        row.weapon_class_slot = 1;
+        lw.w.tables.weapons.entries.push_back(row);
+    }
+    LocalPlayerWeapon w;
     PlayerViewState v;
-    CHECK(player_view_set_engaged(v, true, false));
-    settle_ease(v);
-    CHECK(player_view_scope_settled(v) && !v.scope_hipfire);
     WeaponInstallData data;
-    data.name = "WPN_RESET";
+    data.name = "POSE_0";
+    data.flags = DEF_WEAPON_FLAG_SIGHTED;
+    data.view_hip_pose = {{256, 512, 768}, {0x10000000u, 0x10000000u, 0xF0000000u}};
+    data.view_ads_pose = {{512, -256, 1024}, {0x08000000u, 0x20000000u, 0x10000000u}};
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
-    CHECK(!v.scope_engaged && !v.scope_settled && v.scope_hipfire);
-    CHECK(!player_view_scope_ease_active(v) && player_view_scope_fraction(v) == 0.0f);
-    CHECK(player_view_set_engaged(v, true, false));
+    CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+    const float eye[3] = {};
+    for (int i = 0; i < 3; ++i) player_view_tick(v, eye);
+    const PlayerViewBiasInterp before = v.weapon_pose_interp;
+    data.name = "POSE_1";
+    data.view_hip_pose = {{10, 20, 30}, {0x02000000u, 0x03000000u, 0x04000000u}};
+    local_weapon_install(lw.w, w, data, false, false, nullptr, v);
+    CHECK(v.weapon_pose_interp.active && !v.scope_settled && v.scope_engaged);
+    for (int i = 0; i < 3; ++i) {
+        CHECK(v.weapon_pose_interp.current.position_q16[i] == before.current.position_q16[i]);
+        CHECK(v.weapon_pose_interp.current.rotation_bam[i] == before.current.rotation_bam[i]);
+        CHECK(v.weapon_pose_interp.velocity.position_q16[i] == before.velocity.position_q16[i]);
+        CHECK(v.weapon_pose_interp.velocity.rotation_bam[i] == before.velocity.rotation_bam[i]);
+        CHECK(v.weapon_pose_interp.position_bias_q16[i] == 0 &&
+              v.weapon_pose_interp.rotation_bias_bam[i] == 0);
+    }
+    CHECK(v.weapon_pose_interp.remaining == before.remaining);
+    player_view_tick(v, eye);
+    int32_t out[3];
+    local_player_viewmodel_rotation_bias(&lw.w, w, v, out);
+    CHECK(static_cast<uint32_t>(out[0]) == 0x0BDDDDE0u);
+    CHECK(out[1] == 0x1D000000 && out[2] == 0x0C000000);
+
+    // A same-category promoted mount preserves the promoted byte and schedules
+    // Setup(1, hip, ADS). A cross-category nonforced mount clears only promotion.
     settle_ease(v);
     CHECK(player_view_scope_settled(v));
+    data.name = "POSE_0";
+    local_weapon_install(lw.w, w, data, false, false, nullptr, v);
+    CHECK(player_view_scope_settled(v) && v.weapon_pose_interp.active);
+    CHECK(v.weapon_pose_interp.current.rotation_bam[0] == 0x02000000u);
+    CHECK(v.weapon_pose_interp.rotation_bias_bam[0] == 0);
+    data.name = "POSE_2";
+    local_weapon_install(lw.w, w, data, false, false, nullptr, v);
+    CHECK(!player_view_scope_settled(v) && v.weapon_pose_interp.active);
+    CHECK(v.weapon_pose_interp.current.rotation_bam[0] == 0x02000000u);
+
+    // Actual install with ForceScoped promotes without a user toggle and uses
+    // the original one-step setup, not a fabricated already-published pose.
+    local_weapon_clear(w, v);
+    data.flags = DEF_WEAPON_FLAG_SIGHTED | DEF_WEAPON_FLAG_FORCESCOPED;
+    data.view_hip_pose = {};
+    data.view_ads_pose = {{0, 0, 0}, {0x10000000u, 0x20000000u, 0x30000000u}};
+    local_weapon_install(lw.w, w, data, false, false, nullptr, v);
+    CHECK(v.scope_engaged && player_view_scope_settled(v) && !v.scope_hipfire);
+    CHECK(v.weapon_pose_interp.active && v.weapon_pose_interp.rotation_bias_bam[0] == 0);
+    CHECK(!local_player_scope_toggle(lw.w, w, v, w.slot)); // forced sight stays pinned
+    player_view_tick(v, eye);
+    local_player_viewmodel_rotation_bias(&lw.w, w, v, out);
+    CHECK(out[0] == 0x10000000 && out[1] == 0x20000000 && out[2] == 0x30000000);
+    player_view_tick(v, eye);
+    CHECK(!v.weapon_pose_interp.active);
+    // A nonoptical mount unbinds the slot and clears activity on the next step,
+    // retaining the six bookkeeping lanes. [orig: @0x4DDD2B..0x4DDDBC]
+    data.flags = 0;
+    local_weapon_install(lw.w, w, data, false, false, nullptr, v);
+    CHECK(!v.weapon_pose_bound);
     local_weapon_clear(w, v);
     CHECK(!v.scope_engaged && !v.scope_settled && v.scope_hipfire);
-    CHECK(!player_view_scope_ease_active(v));
+}
+
+void test_category_request_resets_before_commit_while_cycle_retains_pose() {
+    LocalWorld lw;
+    lw.w.tables.weapons.entries.resize(3);
+    for (int i = 1; i <= 2; ++i) {
+        auto &row = lw.w.tables.weapons.entries[i];
+        row.valid = true;
+        row.name = "REQUEST_" + std::to_string(i);
+        row.category = 1;
+        row.rank = i - 1;
+        row.weapon_class_slot = 1;
+    }
+    WeaponInventory inventory;
+    inventory.reset(lw.w.tables.weapons);
+    inventory.equipped_combo = 65;
+    inventory.slots[65].adm_index = 1;
+    inventory.slots[66].adm_index = 2;
+    inventory.slots[65].clip = inventory.slots[66].clip = 1;
+    LocalPlayerWeapon w;
+    WeaponInstallData data;
+    data.name = "REQUEST_1";
+    data.flags = DEF_WEAPON_FLAG_SIGHTED;
+    data.view_hip_pose.rotation_bam[0] = 0x10000000u;
+    data.view_ads_pose.rotation_bam[0] = 0x08000000u;
+    PlayerViewState v;
+    local_weapon_install(lw.w, w, data, false, false, &inventory, v);
+    CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+    const float eye[3] = {};
+    player_view_tick(v, eye);
+    const uint32_t current = v.weapon_pose_interp.current.rotation_bam[0];
+    const uint32_t velocity = v.weapon_pose_interp.velocity.rotation_bam[0];
+    const int32_t published = v.weapon_pose_interp.rotation_bias_bam[0];
+    const auto cycle = weapon_cycle_slot(lw.w.tables.weapons, inventory, 1,
+                                         local_weapon_switch_gates(lw.w, w, &inventory));
+    CHECK(cycle.kind == WeaponSwitchOutcome::kMount && !cycle.reset_view);
+    handle_weapon_switch_outcome(lw.w, w, &inventory, cycle, v);
+    CHECK(v.weapon_pose_interp.active && v.weapon_pose_interp.current.rotation_bam[0] == current);
+    w.slot.current = weapon_action::kIdle;
+    const auto category = weapon_switch_to_handle(lw.w.tables.weapons, inventory, 65,
+                                                  local_weapon_switch_gates(lw.w, w, &inventory));
+    CHECK(category.kind == WeaponSwitchOutcome::kMount && category.reset_view);
+    handle_weapon_switch_outcome(lw.w, w, &inventory, category, v);
+    CHECK(w.switch_in_flight && inventory.equipped_combo == 65); // action has not committed
+    CHECK(!v.weapon_pose_interp.active && !v.scope_engaged && v.scope_hipfire);
+    CHECK(v.weapon_pose_interp.current.rotation_bam[0] == velocity);
+    CHECK(v.weapon_pose_interp.rotation_bias_bam[0] == published); // reset is not mount bias clear
+    const auto denied = weapon_switch_to_handle(lw.w.tables.weapons, inventory, 11 * 65,
+                                                local_weapon_switch_gates(lw.w, w, &inventory));
+    CHECK(denied.kind == WeaponSwitchOutcome::kDeny && denied.reset_view);
+    WeaponSwitchGates blocked;
+    blocked.seat_blocked = true;
+    CHECK(!weapon_switch_to_handle(lw.w.tables.weapons, inventory, 65, blocked).reset_view);
 }
 
 // The listen host's OWN validated fire ends its spawn protection the way the
@@ -1429,6 +1603,7 @@ int main() {
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();
+    test_authored_rotation_bias_continues_through_air_reload_and_rebake();
     test_airborne_view_bias_keeps_interp_and_resumes_on_landing();
     test_airborne_bias_is_separate_from_reload_and_force_scope_admission();
     test_scope_fov_target_and_render_queries_share_weather_state();
@@ -1441,7 +1616,8 @@ int main() {
     test_weapon_trace_records_one_sample_per_pump_tick();
     test_weapon_trace_samples_since_is_incremental();
     test_local_weapon_input_block_mirrors_the_pump_gate();
-    test_install_and_clear_reset_the_scope_tri_state();
+    test_direct_mount_retains_running_pose_and_forced_mount_targets_ads();
+    test_category_request_resets_before_commit_while_cycle_retains_pose();
     test_host_own_fire_ends_spawn_protection();
     if (failures == 0) std::printf("local_player_view_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

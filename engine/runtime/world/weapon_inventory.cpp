@@ -434,8 +434,7 @@ WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
                        (a == 3 && eq->category != group);
         if (blocked) return out;
     }
-    // (The original zeroes g_fireChargeStartTick and resets the camera here — sim-side
-    //  presentation, handled by the caller on a mount outcome.)
+    out.reset_view = true; // reset precedes selection, even on a later deny @0x4E0223
     if (eq == nullptr) {
         if (!weapon_select_slot(table, inv, handle, /*commit_equip=*/true) &&
             !weapon_select_slot(table, inv, -1, /*commit_equip=*/true))

@@ -92,7 +92,7 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
 // The standalone/tool-world apply of a validated selection: the same
 // transition the authoritative compact seat_type 1/2 echo performs.
 void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
-                                          const MountSlotSelectRequest &req);
+                                          const MountSlotSelectRequest &req, PlayerViewState &v);
 
 // The ordinary scope toggle, in the witnessed order: the dispatcher gates
 // (no toggle during RELOAD/SWITCHFROM, def flags), the movement-held refusal
@@ -304,6 +304,12 @@ struct LocalPlayerViewFrame {
 void local_player_view_frame(World *world, LocalPlayerWeapon &w,
                              const PlayerViewState &v, const LocalPlayerViewTracker &t,
                              LocalPlayerViewFrame &out);
+
+// The authored pose interpolation's additive rotation bias. The same airborne
+// and reload gate as the position leg selects zero while interpolation keeps
+// advancing. [orig: Player_UpdateFirstPersonCamera @0x4DD40D..0x4DD456]
+void local_player_viewmodel_rotation_bias(World *world, const LocalPlayerWeapon &w,
+                                         const PlayerViewState &v, int32_t out_bam[3]);
 
 // The eased FP viewmodel view-offset in VIEW-FRAME world units (X=forward,
 // Y=left, Z=up): the raw weapon.def `pos`/`tpos` blend over the /256 scale with

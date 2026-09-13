@@ -262,9 +262,12 @@ void PlayerViewmodelRig::place_viewmodel_at_camera() {
 	if (node == nullptr || cam == nullptr) {
 		return;
 	}
-	// The def cant as camera euler radians: the engine's axis map
-	// (simassets/fp_viewmodel_spec.h viewmodel_bias_euler_rad).
-	const Basis bias = Basis::from_euler(Simulation::viewmodel_bias_euler_rad(rot_bias_def_));
+	// The def cant plus the native authored ADS rotation; one basis rotates
+	// both the model and its view-local offset. The rig only maps axes.
+	const Ref<Simulation> bias_sim = sim();
+	Vector3 rotation = rot_bias_def_;
+	if (bias_sim.is_valid()) rotation += bias_sim->local_player_viewmodel_rotation_bias_deg();
+	const Basis bias = Basis::from_euler(Simulation::viewmodel_bias_euler_rad(rotation));
 	const Basis vm_basis = bias * Basis::from_euler(Vector3(
 			Math::deg_to_rad(rot_.x), Math::deg_to_rad(rot_.y), Math::deg_to_rad(rot_.z)));
 	// The ADS pos -> tpos blend, the /256 scale, and the NoCardSwitch reload
@@ -275,7 +278,6 @@ void PlayerViewmodelRig::place_viewmodel_at_camera() {
 	// [orig: Player_UpdateFirstPersonCamera @0x4dd380 adds Bone(+0xF4) + the
 	//  interp bias; the interp CNetPlayerInterp_Setup @0x4df36e runs +0x10C ->
 	//  +0x124]
-	const Ref<Simulation> bias_sim = sim();
 	Vector3 view_offset = viewmodel_offset(pos_units_);
 	if (bias_sim.is_valid()) {
 		// Sampling the viewport size is this rig's device work; the

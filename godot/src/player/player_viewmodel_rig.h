@@ -48,7 +48,8 @@ class Simulation;
 // path eases `pos` -> `tpos` (the scope interp runs from the hip copy at
 // WeaponDef+0x10C to the tpos at +0x124 and publishes the difference as the
 // view bias [orig: Player_StepFpViewBiasInterp @0x4ddf53..0x4ddfc3]),
-// carried here by the sim's scope fraction. (The `Flags & 2` leg of the
+// rotation carried by the sim's authored pose interpolator; position still
+// uses its scalar fraction (D-WPN-39). (The `Flags & 2` leg of the
 // camera is the DEAD/round-end camera, not ADS.) The view fields flow from
 // the mounted root's weapon.def (apply_viewmodel_def <-
 // LocalPlayerVisuals.local_player_viewmodel_def, the fixed default weapon

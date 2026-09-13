@@ -55,7 +55,7 @@ bool Simulation::request_local_player_scope_toggle() {
 					opennova::encode_mounted_weapon_slot_selection(selection));
 			return true;
 		}
-		opennova::world::local_player_apply_mount_slot_select(kernel_->world, kernel_->local.weapon, req);
+		opennova::world::local_player_apply_mount_slot_select(kernel_->world, kernel_->local.weapon, req, kernel_->local.view);
 		return true;
 	}
 	opennova::world::WeaponSlotState *active_slot = active_local_weapon_slot();
@@ -136,6 +136,15 @@ Ref<PlayerLocalView> Simulation::get_local_player_view() const {
 	out.instantiate();
 	out->assign(kernel_->local.view_frame());
 	return out;
+}
+
+Vector3 Simulation::local_player_viewmodel_rotation_bias_deg() const {
+	int32_t bias[3];
+	opennova::world::local_player_viewmodel_rotation_bias(&kernel_->world,
+			kernel_->local.weapon, kernel_->local.view, bias);
+	constexpr double degrees_per_bam = 360.0 / 4294967296.0;
+	return Vector3(bias[0] * degrees_per_bam, bias[1] * degrees_per_bam,
+			bias[2] * degrees_per_bam);
 }
 
 // The eased FP viewmodel view-offset in VIEW-FRAME world units (X=forward,

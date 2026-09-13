@@ -207,7 +207,8 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	}
 }
 
-void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
+void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
+                                         PlayerViewState &view) {
 	if (!world.cached.local_player.valid()) return;
 	Entity *player = world.registry.get(world.cached.local_player);
 	if (player == nullptr) return;
@@ -240,6 +241,11 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 				from->category == to->category;
 	};
 	const auto stage_parent = [&](Entity &p_mount, uint8_t target_adm) {
+        // UseGun's local attach resets before its direct mount; a detach does not
+        // take this leg. [orig: Entity_AttachToUseGunSlot @0x546B80]
+        player_view_weapon_switch_reset(view);
+        view.weapon_pose_bound = w.active && (w.def.flags & 3) != 0;
+        world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
 		if (!w.usegun_slot_active)
 			w.usegun_saved_adm = player->pre_use_gun_equipped_adm_index;
 		w.usegun_pending_mount = p_mount.handle;
@@ -339,7 +345,16 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 }
 
 void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
-		WeaponInventory *inventory, const WeaponSwitchOutcome &out) {
+		WeaponInventory *inventory, const WeaponSwitchOutcome &out, PlayerViewState &view) {
+    if (out.reset_view) {
+        // Category requests reset at the admitted walk, before the outgoing
+        // action completes. Cycling never sets this flag. [orig: @0x4E0223]
+        player_view_weapon_switch_reset(view);
+        view.weapon_pose_bound = w.active && (w.def.flags & 3) != 0;
+        world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
+        view.binoculars_requested = false;
+        view.binoculars_view_active = false;
+    }
 	switch (out.kind) {
 		case WeaponSwitchOutcome::kDeny: {
 			// [orig: Sound_PlayInterfaceTriggerSet(dword_24E08C4) @ 0x4e0354]
@@ -488,6 +503,8 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.def.heat_decay_per_tick = data.heat_decay_per_tick;
 	w.def.heat_glow_threshold = data.heat_glow_threshold;
 	w.scope_max_mag = data.scope_max_mag;
+    view.weapon_hip_pose = data.view_hip_pose;
+    view.weapon_ads_pose = data.view_ads_pose;
     w.def.scope_zero = data.scope_zero;
     const int installed = world.tables.weapons.index_of(data.name.c_str());
     if (installed >= 0)
@@ -592,19 +609,16 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.action_end_serial = 0;
 	w.action_finished = -1;
 	w.fire_held = w.fire_pressed = w.reload_pressed = false;
-	// A fresh mount starts at the hip: the scope tri-state and its interp reset
-	// through the one reset every reset site runs [orig: Player_MountWeaponSlot
-	// zeroes the view biases @ 0x4dfbcf].
-	player_view_scope_reset(view);
 	// A cross-category non-ForceScoped mount resets the target, not its current.
 	// [orig: Player_MountWeaponSlot @0x4DFB44..0x4DFB66]
 	const int old_index = world.tables.weapons.index_of(w.def_name.c_str());
 	const int new_index = world.tables.weapons.index_of(data.name.c_str());
-	if (old_index >= 0 && new_index >= 0 &&
-			(data.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0 &&
-			world.tables.weapons.entries[old_index].category !=
-			world.tables.weapons.entries[new_index].category)
-		world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
+    const bool category_changed = old_index >= 0 && new_index >= 0 &&
+            world.tables.weapons.entries[old_index].category !=
+            world.tables.weapons.entries[new_index].category;
+    if (category_changed && (data.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0)
+        world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
+    player_view_weapon_mount(view, data.flags, category_changed);
 	w.def_name = data.name;
 	w.active = true;
 }
@@ -798,7 +812,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	io.reload = LocalWeaponReloadWire{};
 	if (io.view == nullptr || !world.cached.local_player.valid()) return;
 	PlayerViewState &view = *io.view;
-	sync_local_usegun_weapon_transition(world, w);
+	sync_local_usegun_weapon_transition(world, w, view);
 	if (!w.active) return;
 	WeaponSlotState &active_slot = *active_local_weapon_slot(world, w);
 	const Entity *player = world.registry.get(world.cached.local_player);
@@ -1248,7 +1262,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 								eq_def->switchcategory *
 										weapon_combo::kRanksPerCategory,
 								local_weapon_switch_gates(world, w,
-										io.inventory)));
+										io.inventory)), view);
 			}
 		}
 		// A queued manual switch commits at the outgoing SWITCHFROM/SWITCHRANK
@@ -1292,6 +1306,22 @@ WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
 	data.heat_decay_per_tick = row.heat_decay_per_tick;
 	data.heat_glow_threshold = row.heat_glow_threshold;
 	data.scope_max_mag = row.scope_max_mag;
+    for (int i = 0; i < 3; ++i) {
+        // The parser's float position is authored units * 256; rotation is
+        // Q16 degrees * 0x0B60B60, rounded by add/adc 0x8000 before SHRD.
+        // [orig: WeaponDef_ParseProperty @0x544614..0x5446D8 /
+        //  @0x54475B..0x544825]
+        data.view_hip_pose.position_q16[i] = row.pos[i] * 256.0f;
+        data.view_ads_pose.position_q16[i] = row.tpos[i] * 256.0f;
+        const auto rotation_bam = [](int32_t degrees_q16) {
+            const int64_t product = static_cast<int64_t>(degrees_q16) * 0x0B60B60 + 0x8000;
+            // Logical shift followed by a low-word store reproduces SHRD,
+            // including negative products, without a signed right shift.
+            return static_cast<uint32_t>(static_cast<uint64_t>(product) >> 16);
+        };
+        data.view_hip_pose.rotation_bam[i] = rotation_bam(row.pos_rotation_deg_q16[i]);
+        data.view_ads_pose.rotation_bam[i] = rotation_bam(row.tpos_rotation_deg_q16[i]);
+    }
     data.scope_zero.max_steps = row.scope_max_zero_steps;
     data.scope_zero.min_steps = row.scope_zero_extra;
     data.scope_zero.step_metres = row.scope_zero_step;
