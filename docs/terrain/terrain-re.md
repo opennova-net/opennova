@@ -52,6 +52,75 @@ now-landed records: [tiles/til-re.md](../tiles/til-re.md) (PAR-R3),
 live top-tier terrain shader has no terrain-tint multiplier
 ([env/env-tod-re.md](../env/env-tod-re.md) #19).
 
+## Empty-sector flat fallback (2026-09-13, D-TERRAIN-12)
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Empty-sector routing, geometry and primary UVs | MATCHING (bounded behavioral proof) | `terrain_frame_compiler` covers mixed and all-empty grids, both skip policies, nonflat source geometry, zero primary UVs, shared page identity, and above/below-water classification; retail instruction witnesses below. |
+| Flat page base/DOT3 source and mission-overlay gate | MATCHING (bounded behavioral proof) | `terrain_tile_composer` checks every output texel against a distinct source-corner color/normal with an overlapping opaque `.til` entry; `terrain_tile_composition_cache` covers the LOD-0 projection and origin-sector borrower. |
+| Flat stage-2 blend transform and independent detail/noise | MATCHING (instruction witness; shader contract) | `terrain_shader_contract_test.gd` pins the collapsed blend coordinate independently of the live stage-1 detail and stage-3 detail/noise coordinates. Full-scene pixel equivalence remains unverified. |
+| Godot mesh upload and shader parameter application | host code / not grillable | `Terrain` uploads the native vertex variants, selects the flat mesh by draw-list flag, and applies the native zero-primary-UV projection. |
+
+A zero entry in the 16x16 `.trn` sector grid is not an unconditional hole.
+Both the main draw collector and the visible-bounds collector select quadrant
+1's existing quadtree with packed tile-key bit `0x80000000`, unless the view's
+word at byte offset `+100` requests skipping empty sectors. The ordinary main
+view writes this word to zero. The 11x11 sector window therefore continues to
+supply flat geometry beyond the authored land instead of exposing the scene
+clear. Witnesses: [orig: PolyTrn_RenderFrame @ 0x60EAC0, routing
+@ 0x60EC94..0x60ECBD]; [orig: terrain_render_visible_sectors @ 0x6090C0,
+routing @ 0x609238..0x609263]; [orig: terrain_setup_view_and_lighting
+@ 0x60FE40, zeroed view words @ 0x60FEBA]; [orig: sub_60FF50 @ 0x60FF50].
+
+Flat mode zeros the traversal center Y and the AABB test's Y extent while
+retaining the source node's radius. The vertex decoder zeros position Y and
+both primary texture coordinates, preserving X/Z topology and the independent
+secondary detail stream. The tracked-bounds accumulator still reads the raw
+source node height range: changing that range to zero would introduce another
+behavior difference. Witnesses: [orig: Terrain_TraverseQuadtreeNode @ 0x608A00,
+flat center @ 0x608A50 and raw tracked heights @ 0x608E04..0x608E5F];
+[orig: Terrain_TestAABBOutsideFrustumPlane @ 0x6086C0, flat Y/extent
+@ 0x6086DF/0x608772]; [orig: decode_terrain_tile_vertices @ 0x602AA0,
+zero stores @ 0x602DC9..0x602DCF].
+
+The sector batch also collapses the stage-2 blend-map transform: flat mode
+zeros transform 8 except its homogeneous bottom-right element, so splat
+weights sample the source corner. Stage-1 detail coordinates remain live,
+and stage 3 keeps the separate transform 9 for authored detail2 or underwater
+noise. The shader passes a distinct blend coordinate so collapsing the
+weights does not collapse those detail inputs. Ordinary/editor draws retain
+the existing coordinates through the flat flag's false default. Witnesses:
+[orig: render_terrain_sector_batch @ 0x6092A0, flat transform
+@ 0x60973A..0x609750, publication @ 0x609799..0x6097A0];
+[orig: PolyTrn_InitTextures @ 0x60AAA0, stage-2/3 binds
+@ 0x60C400..0x60C411 and @ 0x60C483..0x60C494].
+
+`PolyTrn_RenderTile` canonicalizes every flagged request to one shared page:
+LOD 0, zero coordinates/origins, with the high-bit identity retained. Base
+colormap and heightfield-normal DOT3 sample source UV `(0,0)` across the page.
+The mission `.til` loop is skipped; the following scorch and static-projection
+paths retain their ordinary order. OpenNova reserves page LOD 0 for this flat
+identity and keeps its geometric 1024-unit projection separate from terrain's
+zero primary texture-coordinate projection. Spatial object/foliage borrowing
+can select the ready flat page in its canonical origin sector `(0,0)`; the
+ordinary sector-origin comparison rejects other routed sectors. The retail
+lookup masks packed coordinates without rejecting the high bit, and a flat
+borrower receives the ordinary `1/1024` projection rather than the terrain
+mesh's zero UVs. Witnesses: [orig: PolyTrn_RenderTile @ 0x60DA70,
+canonicalization @ 0x60DA98..0x60DAA8, zero source UVs
+@ 0x60DC08..0x60DC16, `.til` gate @ 0x60DDA7];
+[orig: terrain_tile_cache_lookup @ 0x604140, masked-coordinate and sector
+checks @ 0x6041A4..0x6041E1, projection @ 0x604215..0x604292].
+
+Original-machine routing probes used the verified retail executable SHA-256
+`b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac`:
+an all-zero grid produced 121 traversal calls with view `+100=0` and zero
+calls with `+100=1`. The jo-c oracle fixture's `skip_empty` label writes `+96`,
+so these probes explicitly wrote `+100`; its host preview was not used as a
+visual oracle. IDA reads used `Jointops.exe.kong.i64` at image base `0x400000`.
+No IDB changes were made. Full-scene retail pixel equivalence and the broader
+D-TERRAIN-7 composition lifecycle remain separate verification work.
+
 ## The TPM1 tile-mesh format (.tml/.tms — TrnGen.exe witness map)
 
 The tile-mesh container the bake writes and the CPT export re-reads. Reimpl (historical,
@@ -897,7 +966,9 @@ as `terrain_raycast_los_clear` on the occlusion slice (the AI LOS
 | D-TERRAIN-10 | A | **FIXED (2026-07-14)** | **Terrain light-vector coordinate basis**: EnvFile preserves the direct retail getter tuple `g`, not Godot/world XYZ. Retail's D3DCOLOR pack writes GPU diffuse RGB `(g2,g0,g1)`, matching normal-map RGB `(grid X slope, grid Y slope, up)`; the old reimpl `(x,z,y)` pack swapped the horizontal DOT3 axes. Terrain and analytic foliage now pack `(z,x,y)`. Flat 06:00/12:00/18:00 checks could not distinguish the swap, so a non-flat 08:00 oracle pins light bytes `(231,83,187)` and slope alphas `0.8987774/0.0794002` [`orig: Environment_GetLightDirectionFloat @ 0x57d870; Terrain_GenerateNormalMap pack @ 0x603470..0x6034eb; PolyTrn light pack @ 0x60e201..0x60e331; PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e`]. |
 | D-TERRAIN-11 | A | **FIXED (2026-08-17)** | **Terrain detail coordinate scale**: retail constructs mesh UV1 as `source × polytrn_detaildensity / 512`; OpenNova had multiplied normalized 1024-atlas UV by density, halving every detail frequency. Runtime mesh UVs, authored detail2, and the underwater stage-3 swap now share the exact source-grid conversion. Deterministic 00TRa A/B probes select 2× with the existing axis at high correlation and reject the UV-swap alternative [`orig: parser @ 0x60f993..0x60f9b3; config load @ 0x60e634..0x60e63b; density/512 write @ 0x6029a0..0x6029aa; UV1 @ 0x602db5..0x602dbe; stage-3 transforms @ 0x609786..0x609810`]. GUT `terrain_shader_contract_test` pins the surviving consumers. |
 
-The completed passes close D-TERRAIN-5/6/8/10/11 and bound D-TERRAIN-7.
+| D-TERRAIN-12 | A | **FIXED (2026-09-13)** | **Missing empty-sector flat fallback**: zero sector-grid entries now traverse quadrant 1 unless view `+100` skips them. The draw carries the high-bit mode through flat mesh selection and zero primary/blend UVs while preserving independent detail/noise coordinates and raw tracked source heights. Every flat draw shares the canonical LOD-0 page, whose base/DOT3 source is UV zero and whose `.til` overlay loop is suppressed; the origin sector can borrow it with the ordinary geometric projection. `terrain_frame_compiler`, `terrain_tile_composer`, `terrain_tile_composition_cache`, and the Godot terrain shader contract pin the bounded behavior. [orig: PolyTrn_RenderFrame @ 0x60EAC0; terrain_render_visible_sectors @ 0x6090C0; decode_terrain_tile_vertices @ 0x602AA0; PolyTrn_RenderTile @ 0x60DA70]. |
+
+The completed passes close D-TERRAIN-5/6/8/10/11/12 and bound D-TERRAIN-7.
 The terrain data path remains the byte-identical TrnGen port; the pending grill
 below is documentation depth around CDEP/traversal plus those two gaps.
 

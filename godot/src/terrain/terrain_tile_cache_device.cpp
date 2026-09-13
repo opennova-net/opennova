@@ -953,15 +953,8 @@ opennova::TerrainTilePageBinding TerrainTileCacheDevice::request(
 	opennova::terrain::TerrainTilePageSourceView sources =
 			source_snapshot->view({}, {}, nullptr);
 
-	opennova::TerrainTileCompositionRequest request;
-	request.page.sector_origin_x = p_draw.sector_x * 512;
-	request.page.sector_origin_z = p_draw.sector_z * 512;
-	request.page.page_local_x = p_draw.local_page_x;
-	request.page.page_local_z = p_draw.local_page_z;
-	request.page.page_lod_level = static_cast<uint8_t>(p_draw.page_lod_level);
-	request.tile_index = p_draw.tile_index;
-	request.source_origin_x = p_draw.source_page_x;
-	request.source_origin_z = p_draw.source_page_z;
+	opennova::TerrainTileCompositionRequest request =
+			opennova::terrain_tile_composition_request(p_draw);
 	if (opennova::TerrainTileCompositionCache::page_world_span(
 			request.page.page_lod_level) == 0) {
 		return unavailable;

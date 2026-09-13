@@ -198,6 +198,32 @@ bool test_level_density() {
 			"a 16-unit tile occupies 64x64 pixels on the 64-unit page");
 }
 
+bool test_flat_page_source_and_overlay_gate() {
+	Rgba8Image colormap = solid_image(8, 8, {220, 180, 120, 255});
+	Rgba8Image normal = solid_image(8, 8, {255, 128, 128, 128});
+	set_pixel(colormap, 0, 0, {31, 63, 95, 255});
+	set_pixel(normal, 0, 0, {128, 128, 255, 128});
+	const Rgba8Image tilestrip = solid_image(64, 64, {255, 0, 255, 255});
+	opennova::TilFile tiles;
+	tiles.entries.push_back(opennova::make_til_overlay_entry(0, 0, 0, 0));
+	opennova::terrain::TerrainTilePageSourceView sources;
+	sources.colormap = &colormap;
+	sources.heightfield_normal = &normal;
+	sources.tile_info = &tiles;
+	sources.tilestrip = &tilestrip;
+	sources.light_bytes = {128, 128, 255};
+	const Rgba8Image flat = opennova::terrain::compose_terrain_tile_page(cold_job(0), sources);
+	if (!expect(flat.is_valid(), "flat LOD-0 cache page composes")) return false;
+	const auto expected = base_pixel({31, 63, 95}, {128, 128, 255}, sources.light_bytes);
+	for (int y = 0; y < 256; ++y) {
+		for (int x = 0; x < 256; ++x) {
+			if (!expect_pixel(flat, x, y, expected,
+					"flat base and DOT3 use source UV zero and reject .til overlays")) return false;
+		}
+	}
+	return true;
+}
+
 bool test_rejects_source_atlases_without_a_complete_quadrant() {
 	const Rgba8Image valid = solid_image(2, 2, {128, 128, 255, 255});
 	const std::array<Rgba8Image, 3> tiny = {
@@ -647,6 +673,7 @@ bool test_optional_00tra_fork_oracle() {
 
 int main() {
 	if (!test_level_density()) return 1;
+	if (!test_flat_page_source_and_overlay_gate()) return 1;
 	if (!test_rejects_source_atlases_without_a_complete_quadrant()) return 1;
 	if (!test_source_orientation_quadrant_clamp_and_dot3()) return 1;
 	if (!test_overlay_atlas_flags_tint_clipping_and_order()) return 1;

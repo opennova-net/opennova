@@ -69,6 +69,7 @@ struct VisiblePatch {
 	int lod_level = 0;
 	float distance = 0.0f;
 	float sector_ox = 0.0f, sector_oz = 0.0f;
+	bool zero_height = false;
 };
 
 struct TraversalConfig {
@@ -112,7 +113,8 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
                        float sector_ox, float sector_oz,
                        const TraversalConfig& config,
                        std::vector<VisiblePatch>& out_patches,
-                       TraversalStats& stats);
+                       TraversalStats& stats,
+                       bool zero_height = false);
 
 // The frustum-surviving world AABB of one sector's quadtree: retail's
 // trackBounds traversal ignores the distance emit heuristic, subdivides every
@@ -147,7 +149,8 @@ void track_visible_bounds(const std::vector<QuadNode>& quad_nodes,
                           const Frustum& frustum,
                           float sector_ox, float sector_oz,
                           const TraversalConfig& config,
-                          VisibleBounds& out_bounds);
+                          VisibleBounds& out_bounds,
+                          bool zero_height = false);
 
 // Convert triangle strip to triangle list.
 void strip_to_list(const std::vector<uint16_t>& strip,

@@ -151,7 +151,7 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
                        float sector_ox, float sector_oz,
                        const TraversalConfig& config,
                        std::vector<VisiblePatch>& out_patches,
-                       TraversalStats& stats) {
+                       TraversalStats& stats, bool zero_height) {
 	if (node_idx < 0 || node_idx >= (int)quad_nodes.size()) return;
 	stats.nodes_visited++;
 	const QuadNode& node = quad_nodes[node_idx];
@@ -159,6 +159,11 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 	// World-space AABB
 	float wmin[3] = { sector_ox + node.aabb_min[0], node.aabb_min[1], sector_oz + node.aabb_min[2] };
 	float wmax[3] = { sector_ox + node.aabb_max[0], node.aabb_max[1], sector_oz + node.aabb_max[2] };
+
+	// Flat-sector culling and LOD use zero Y, retaining the source radius.
+	// [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, center @ 0x608A50;
+	// Terrain_TestAABBOutsideFrustumPlane @ 0x6086C0, Y/extent @ 0x6086DF/0x608772]
+	if (zero_height) wmin[1] = wmax[1] = 0.0f;
 
 	int force_subdiv_partial = 0;
 
@@ -237,7 +242,7 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 			if (out_patches.size() < 224) {
 				out_patches.push_back({
 					node.tile_index, compute_lod_sub(), node.lod_level,
-					dist, sector_ox, sector_oz
+					dist, sector_ox, sector_oz, zero_height
 				});
 				if (node.is_leaf) stats.leaf_emits++; else stats.nonleaf_emits++;
 				if (dist < stats.dist_min) stats.dist_min = dist;
@@ -250,7 +255,8 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 		for (int i = 0; i < 4; i++) {
 			traverse_quadtree(quad_nodes, tile_meshes, node.children[i],
 			                  frustum, cam_x, cam_y, cam_z,
-			                  sector_ox, sector_oz, config, out_patches, stats);
+			                  sector_ox, sector_oz, config, out_patches, stats,
+			                  zero_height);
 		}
 	}
 }
@@ -280,11 +286,12 @@ void track_visible_bounds(const std::vector<QuadNode>& quad_nodes,
                           const Frustum& frustum,
                           float sector_ox, float sector_oz,
                           const TraversalConfig& config,
-                          VisibleBounds& out_bounds) {
+                          VisibleBounds& out_bounds, bool zero_height) {
 	if (node_idx < 0 || node_idx >= (int)quad_nodes.size()) return;
 	const QuadNode& node = quad_nodes[node_idx];
 	float wmin[3] = { sector_ox + node.aabb_min[0], node.aabb_min[1], sector_oz + node.aabb_min[2] };
 	float wmax[3] = { sector_ox + node.aabb_max[0], node.aabb_max[1], sector_oz + node.aabb_max[2] };
+	if (zero_height) wmin[1] = wmax[1] = 0.0f;
 	if (!config.no_frustum) {
 		if (!config.no_nearfar) {
 			if (aabb_outside_plane(frustum.planes[Frustum::P_NEAR], wmin, wmax)) return;
@@ -303,11 +310,19 @@ void track_visible_bounds(const std::vector<QuadNode>& quad_nodes,
 			if (node.children[i] >= 0) {
 				has_children = true;
 				track_visible_bounds(quad_nodes, node.children[i], frustum,
-				                     sector_ox, sector_oz, config, out_bounds);
+				                     sector_ox, sector_oz, config, out_bounds,
+				                     zero_height);
 			}
 		}
 	}
-	if (!has_children) out_bounds.include(wmin, wmax);
+	if (!has_children) {
+		// The trackBounds stores still read the source node's raw Y limits,
+		// even when its culling center and rendered vertices were flattened.
+		// [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, stores @ 0x608E04..0x608E5F]
+		wmin[1] = node.aabb_min[1];
+		wmax[1] = node.aabb_max[1];
+		out_bounds.include(wmin, wmax);
+	}
 }
 
 // ---------------------------------------------------------------------------
