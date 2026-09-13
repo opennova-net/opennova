@@ -769,8 +769,16 @@ func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
 	assert_false(sim.request_local_player_nvg_toggle())
 	assert_true(sim.get_local_player_view().scope_engaged,
 			"a render-only same-weapon rebake preserves the scope restore latch")
+	# NVG-on only drops a promoted scope (Player_IsEquippedWeaponScoped
+	# @0x4DCC80). Let the restored raise settle before creating another latch;
+	# a direct mount retains a running interpolation and its engaged byte.
+	for _i in range(7):
+		sim.step()
+	assert_almost_eq(sim.get_local_player_view().scope_fraction, 1.0, 0.001)
 
 	assert_true(sim.request_local_player_nvg_toggle())
+	assert_false(sim.get_local_player_view().scope_engaged,
+			"the second NVG-on request drops the settled scope before the mount")
 	sim.set_local_player_weapon(weapon, {})
 	assert_false(sim.request_local_player_nvg_toggle())
 	assert_false(sim.get_local_player_view().scope_engaged,
@@ -1634,7 +1642,11 @@ func test_nocardswitch_controls_settled_sights_card_for_sighted_weapon() -> void
 		def_4.startrounds = 60
 		sim.set_local_player_weapon(def_4, {})
 		sim.step()
-		assert_true(sim.request_local_player_scope_toggle())
+		# ForceScoped is promoted by the mount itself @0x4DFB31; the toggle
+		# refuses its promoted scope @0x4DF12D instead of raising it again.
+		var forced := (def_4.flags & 0x20000000) != 0
+		assert_eq(sim.request_local_player_scope_toggle(), not forced,
+				"only an ordinary optic needs a scope-up request after mounting")
 		for _i in range(15):
 			sim.step()
 		var view := sim.get_local_player_view()

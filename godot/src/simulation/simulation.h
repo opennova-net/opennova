@@ -693,7 +693,7 @@ private:
 	}
 	void sync_local_usegun_weapon_transition() {
 		opennova::world::sync_local_usegun_weapon_transition(
-				kernel_->world, kernel_->local.weapon);
+				kernel_->world, kernel_->local.weapon, kernel_->local.view);
 	}
 	void commit_local_usegun_weapon_switch() {
 		opennova::world::commit_local_usegun_weapon_switch(
@@ -728,7 +728,7 @@ private:
 			const opennova::world::WeaponSwitchOutcome &p_out) {
 		opennova::world::handle_weapon_switch_outcome(
 				kernel_->world, kernel_->local.weapon,
-				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr, p_out);
+				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr, p_out, kernel_->local.view);
 	}
 	opennova::world::WeaponSwitchGates local_weapon_switch_gates() const {
 		return opennova::world::local_weapon_switch_gates(
@@ -1795,6 +1795,7 @@ public:
 	// viewport SIZE (device work) and the 3w<=4h rule itself is the engine's
 	// (world/player_view.h player_view_narrow_aspect). The rig maps view axes
 	// onto its camera frame. (engine: runtime/world/local_player_view.cpp)
+	Vector3 local_player_viewmodel_rotation_bias_deg() const;
 	Vector3 local_player_viewmodel_bias_view_units(
 			const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units,
 			int p_viewport_w, int p_viewport_h);

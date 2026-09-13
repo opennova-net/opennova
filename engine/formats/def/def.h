@@ -311,8 +311,14 @@ typedef struct DefWeaponDef {
     size_t actions_count;
     int flags;
     float error[6];
-    float pos[6];
-    float tpos[6];
+    // The first three authored pose columns are view-position units. Rotation
+    // columns retain the parser's Q16 degrees before rounded BAM promotion.
+    // [orig: WeaponDef_ParseProperty pos @0x544614..0x5446D8;
+    //  tpos @0x54475B..0x544825; Math_ParseFixedPoint16 @0x6131F0]
+    float pos[3];
+    int32_t pos_rotation_deg_q16[3];
+    float tpos[3];
+    int32_t tpos_rotation_deg_q16[3];
     DefSightEntry *sights;
     size_t sights_count;
     char (*raw_lines)[512];

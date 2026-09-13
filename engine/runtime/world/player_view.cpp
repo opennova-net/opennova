@@ -5,6 +5,7 @@
 #include <runtime/world/player_view.h>
 
 #include <cmath>
+#include <cassert>
 
 #include <base/io/bam.h>
 
@@ -15,6 +16,103 @@
 #include <runtime/world/tp_camera_mount.h>
 
 namespace opennova::world {
+
+// The six lanes share one active latch. In particular, an increasing-angle
+// lane can snap on its first tick while a position lane keeps the pose active.
+// [orig: CNetPlayerInterp_Setup @0x4DDFD0]
+void player_view_bias_interp_setup(PlayerViewBiasInterp &interp, uint32_t steps,
+                                  const PlayerViewPose &idle_source,
+                                  const PlayerViewPose &target) {
+    interp.target = target;
+    const PlayerViewPose &source = interp.active ? interp.current : idle_source;
+    double position_delta[3];
+    uint32_t rotation_delta[3];
+    bool unchanged = true;
+    for (int i = 0; i < 3; ++i) {
+        position_delta[i] = static_cast<double>(source.position_q16[i]) - target.position_q16[i];
+        rotation_delta[i] = source.rotation_bam[i] - target.rotation_bam[i];
+        unchanged = unchanged && position_delta[i] == 0.0 && rotation_delta[i] == 0;
+    }
+    if (unchanged) {
+        // Only this idle/zero-delta branch arms the counter. A running
+        // zero-delta setup preserves it and the velocities until spent.
+        // [orig: @0x4DE0CC..0x4DE11F]
+        if (!interp.active) {
+            interp.velocity = {};
+            interp.active = true;
+            interp.remaining = steps;
+        } else if (interp.remaining == 0) {
+            interp.velocity = {};
+            interp.active = false;
+        }
+        return;
+    }
+    // Every production caller supplies 1, 7, or 15 steps. Retail's integer
+    // division also requires a positive count on this nonzero-delta branch.
+    assert(steps != 0);
+    const double reciprocal = 1.0 / static_cast<double>(steps);
+    for (int i = 0; i < 3; ++i) {
+        interp.velocity.position_q16[i] = static_cast<float>(position_delta[i] * reciprocal);
+        // This is the witnessed threshold and one's-complement magnitude,
+        // not a signed shortest-arc divide. [orig: @0x4DE13C..0x4DE1AA]
+        const uint32_t delta = rotation_delta[i];
+        interp.velocity.rotation_bam[i] = delta <= 0x7FFFFF80u
+                ? delta / steps : 0u - ((0xFFFFFFFFu - delta) / steps);
+    }
+    if (!interp.active) {
+        interp.current = idle_source;
+        interp.active = true;
+    }
+}
+
+void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip) {
+    if (!interp.active) return;
+    if (interp.remaining != 0) --interp.remaining;
+    bool moving = false;
+    for (int i = 0; i < 3; ++i)
+        moving = moving || interp.velocity.position_q16[i] != 0.0f ||
+                 interp.velocity.rotation_bam[i] != 0;
+    if (!moving) {
+        // The active latch clears on the call AFTER the last moving lane
+        // snaps. Bias globals retain their last publication on this return.
+        // [orig: Player_StepFpViewBiasInterp @0x4DDD47..0x4DDDC3]
+        if (interp.remaining == 0) interp.active = false;
+        return;
+    }
+    for (int i = 0; i < 3; ++i) {
+        // x87 stores the narrowed current value, then compares the still
+        // unrounded subtraction against target. Equality does not snap.
+        // [orig: @0x4DDDC4..0x4DDE35]
+        const double current = static_cast<double>(interp.current.position_q16[i]) -
+                               interp.velocity.position_q16[i];
+        interp.current.position_q16[i] = static_cast<float>(current);
+        if (std::fabs(interp.velocity.position_q16[i]) >
+            std::fabs(current - interp.target.position_q16[i])) {
+            interp.velocity.position_q16[i] = 0.0f;
+            interp.current.position_q16[i] = interp.target.position_q16[i];
+        }
+        // The stored rotation words AND velocity are converted as unsigned
+        // integers. A negative modular velocity therefore has a large
+        // magnitude and can snap immediately. Preserve that retail quirk.
+        // [orig: @0x4DDE37..0x4DDF3F]
+        interp.current.rotation_bam[i] -= interp.velocity.rotation_bam[i];
+        const double distance = std::fabs(static_cast<double>(interp.current.rotation_bam[i]) -
+                                          interp.target.rotation_bam[i]);
+        if (static_cast<double>(interp.velocity.rotation_bam[i]) > distance) {
+            interp.velocity.rotation_bam[i] = 0;
+            interp.current.rotation_bam[i] = interp.target.rotation_bam[i];
+        }
+    }
+    // [orig: @0x4DDF42..0x4DDFC3] float difference -> truncating ftol for
+    // position, modular subtraction for rotation; both are relative to hip.
+    for (int i = 0; i < 3; ++i) {
+        interp.position_bias_q16[i] = static_cast<int32_t>(
+                static_cast<double>(interp.current.position_q16[i]) - hip.position_q16[i]);
+        interp.rotation_bias_bam[i] = io::bam_sub(
+                static_cast<int32_t>(interp.current.rotation_bam[i]),
+                static_cast<int32_t>(hip.rotation_bam[i]));
+    }
+}
 
 void player_view_resolve_mode(PlayerViewState &v) {
     // [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2..0x5ca24b]
@@ -54,18 +152,16 @@ float scope_target_step(const PlayerViewState &v) {
     return v.scope_hipfire ? 0.0f : static_cast<float>(v.ease_steps);
 }
 
-// CNetPlayerInterp_Setup @0x4ddfd0, projected onto the line: an ACTIVE interp
-// sources from its own current pose (@0x4de006..0x4de01a), an idle one from
-// the caller's pose (@0x4de01f..0x4de033); the per-step velocity is
-// delta / steps (@0x4de142..0x4de15a), carried here as the step count left
-// over the current delta (the same poses per step, an exact landing). A zero
-// delta against an active interp whose counter is spent deactivates it outright
-// (@0x4de0fe..0x4de11b) -- here the pose already sits on the latch's target,
-// so the ease simply reads idle -- and against an idle one arms `steps`
-// zero-velocity frames (@0x4de0d8..0x4de0f8), unreachable on this line where
-// every idle Setup spans the two endpoints. The caller stores the hipfire latch
-// (the target) right after, as every retail site does.
-void scope_interp_setup(PlayerViewState &v, int32_t steps, float idle_source_fraction) {
+// Existing scalar projection for optical admission and position blending.
+// It approximates a fixed 7/15/1-step hip..ADS line; D-WPN-39 tracks its
+// completion/rounding difference from the exact six-lane pose below. Every
+// transition feeds the authored interpolator before changing the hip latch.
+// [orig: CNetPlayerInterp_Setup @0x4DDFD0; caller latch stores @0x4DF373]
+void scope_interp_setup(PlayerViewState &v, int32_t steps, float idle_source_fraction,
+                        bool target_hip) {
+    player_view_bias_interp_setup(v.weapon_pose_interp, static_cast<uint32_t>(steps),
+            idle_source_fraction == 0.0f ? v.weapon_hip_pose : v.weapon_ads_pose,
+            target_hip ? v.weapon_hip_pose : v.weapon_ads_pose);
     const float from =
         player_view_scope_ease_active(v) ? player_view_scope_fraction(v) : idle_source_fraction;
     v.ease_steps = steps;
@@ -73,9 +169,9 @@ void scope_interp_setup(PlayerViewState &v, int32_t steps, float idle_source_fra
     v.scope_ease_remaining = steps;
 }
 
-// Player_StepFpViewBiasInterp @0x4ddd20, one step: the pose moves one velocity
-// toward the target and snaps onto it once within a velocity of it
-// (@0x4dddc4..0x4ddf3f). Returns true on the landing step.
+// Scalar admission clock, retained for D-WPN-39. The exact pose step above
+// preserves the separate lane snaps and the following completion call from
+// [orig: Player_StepFpViewBiasInterp @0x4DDD20].
 bool scope_interp_step(PlayerViewState &v) {
     const float target = scope_target_step(v);
     if (v.scope_step == target) return false;
@@ -100,22 +196,58 @@ void player_view_scope_reset(PlayerViewState &v) {
     v.ease_steps = kScopeEaseSteps;
     v.scope_step = 0.0f;
     v.scope_ease_remaining = 0;
+    v.weapon_pose_interp = {};
+    v.weapon_pose_bound = false;
+}
+
+void player_view_weapon_switch_reset(PlayerViewState &v) {
+    v.scope_engaged = false;
+    v.scope_hipfire = true;
+    v.ease_steps = kScopeEaseSteps;
+    v.scope_step = 0.0f;
+    v.scope_ease_remaining = 0;
+    PlayerViewBiasInterp &interp = v.weapon_pose_interp;
+    for (int i = 0; i < 3; ++i) {
+        interp.velocity.position_q16[i] = 0.0f;
+        interp.current.position_q16[i] = 0.0f;
+        interp.target.position_q16[i] = 0.0f;
+        interp.current.rotation_bam[i] = interp.velocity.rotation_bam[i];
+    }
+    interp.active = false;
+    v.weapon_pose_bound = false; // caller rebinds an optical equipped slot
+}
+
+void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed) {
+    if ((flags & 0x20000000) != 0) v.scope_settled = true;
+    else if (category_changed) v.scope_settled = false;
+    // Mount clears only the six published biases, retaining the running pose.
+    // [orig: Player_MountWeaponSlot @0x4DFBCF..0x4DFBE8]
+    for (int i = 0; i < 3; ++i) {
+        v.weapon_pose_interp.position_bias_q16[i] = 0;
+        v.weapon_pose_interp.rotation_bias_bam[i] = 0;
+    }
+    v.weapon_pose_bound = (flags & (3 | 0x04000000)) != 0;
+    if ((flags & 3) != 0 && v.scope_settled) {
+        v.scope_engaged = true;
+        scope_interp_setup(v, 1, 0.0f, false);
+        v.scope_hipfire = false;
+    }
 }
 
 void player_view_tick(PlayerViewState &v, const float eye[3]) {
     // The mode first: the arbiter precedes the camera work every frame
     // [orig: Render_ProcessMainSceneFrame @ 0x5ca1d2, ahead of the view build].
     player_view_resolve_mode(v);
-    // The promoted byte never outlives its target in this port (player_view.h
-    // player_view_scope_settled): a reset that wrote only the legacy fields
-    // (the local_player / player_weapon reset sites) is completed here.
-    if (!v.scope_engaged) v.scope_settled = false;
     // The scope-camera interp, one step per tick toward the latch's target,
     // then THE SETTLE PROMOTER on the landing step [orig: Player_UpdatePerFrame
     // @0x4de4c9 Player_StepFpViewBiasInterp -> @0x4de4f7 g_weaponScopeActive =
-    // (g_scopeEngaged != 0) once the interp reports done -- the step after the
-    // six velocities snapped; the landing step is that completion here].
+    // (g_scopeEngaged != 0) once the interp reports done]. This scalar
+    // clock's earlier promotion is retained explicitly under D-WPN-39.
     if (scope_interp_step(v)) v.scope_settled = v.scope_engaged;
+    if (v.weapon_pose_bound)
+        player_view_bias_interp_step(v.weapon_pose_interp, v.weapon_hip_pose);
+    else
+        v.weapon_pose_interp.active = false; // null slot/Def @0x4DDD2B..0x4DDDBC
 
     if (v.third_person) {
         if (!v.tp_anchor_valid) {
@@ -197,14 +329,14 @@ bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon
         //  (+0x124); g_scopeHipfire = 0 @0x4df373]
         v.scope_settled = false;
         v.scope_engaged = true;
-        scope_interp_setup(v, full, 0.0f);
+        scope_interp_setup(v, full, 0.0f, false);
         v.scope_hipfire = false;
     } else {
         // [orig: Setup 1 @0x4df1c3 (hipfire return) / 7 @0x4df1e8 / 15 @0x4df201
         //  from tpos to the hip copy; g_scopeEngaged = 0 @0x4df206;
         //  g_weaponScopeActive = 0 @0x4df20c; g_scopeHipfire = 1 @0x4df212]
         const int32_t steps = v.scope_hipfire ? kScopeEaseStepsHipfire : full;
-        scope_interp_setup(v, steps, 1.0f);
+        scope_interp_setup(v, steps, 1.0f, true);
         v.scope_engaged = false;
         v.scope_settled = false;
         v.scope_hipfire = true;
@@ -231,7 +363,7 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
         // [orig: activeFlag && !g_scopeHipfire @0x4df548 -> Setup(15, pos,
         //  hip copy) @0x4df567; g_scopeHipfire = 1 @0x4df56c].
         if (player_view_scope_ease_active(v) && !v.scope_hipfire) {
-            scope_interp_setup(v, kScopeEaseSteps, 0.0f);
+            scope_interp_setup(v, kScopeEaseSteps, 0.0f, true);
             v.scope_hipfire = true;
         }
         // The pinned defs skip to LABEL_33, whose own term refuses them
@@ -242,7 +374,7 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
         //  -> Setup(15, tpos, hip copy) @0x4df5d1; g_scopeHipfire = 1 @0x4df5d6].
         if (player_view_scope_settled(v) && !player_view_scope_ease_active(v) &&
             !v.scope_hipfire) {
-            scope_interp_setup(v, kScopeEaseSteps, 1.0f);
+            scope_interp_setup(v, kScopeEaseSteps, 1.0f, true);
             v.scope_hipfire = true;
         }
         return false;
@@ -256,7 +388,7 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
         (def_flags & kPinnedFlags) == 0) {
         v.scope_settled = false;
         v.scope_engaged = true;
-        scope_interp_setup(v, kScopeEaseSteps, 0.0f);
+        scope_interp_setup(v, kScopeEaseSteps, 0.0f, false);
         v.scope_hipfire = false;
     }
     return false;

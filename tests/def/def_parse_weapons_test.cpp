@@ -106,11 +106,11 @@ int main(void) {
         def_free_weapons(&wf);
         return 1;
     }
-    if (fabsf(m4->pos[3] - 2.500f) > FEPS ||
-        fabsf(m4->pos[4] - 0.750f) > FEPS ||
-        fabsf(m4->pos[5] - 356.750f) > FEPS) {
+    if (fabsf((m4->pos_rotation_deg_q16[0] / 65536.0f) - 2.500f) > FEPS ||
+        fabsf((m4->pos_rotation_deg_q16[1] / 65536.0f) - 0.750f) > FEPS ||
+        fabsf((m4->pos_rotation_deg_q16[2] / 65536.0f) - 356.750f) > FEPS) {
         fprintf(stderr, "FAIL: M4AUTO pos rotation mismatch: %.3f, %.3f, %.3f\n",
-                m4->pos[3], m4->pos[4], m4->pos[5]);
+                (m4->pos_rotation_deg_q16[0] / 65536.0f), (m4->pos_rotation_deg_q16[1] / 65536.0f), (m4->pos_rotation_deg_q16[2] / 65536.0f));
         def_free_weapons(&wf);
         return 1;
     }

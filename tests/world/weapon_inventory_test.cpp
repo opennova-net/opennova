@@ -360,7 +360,7 @@ void test_committed_switch_only_draws_after_holstering() {
                 local_weapon_switch_gates(world, weapon, &inv));
         CHECK(outcome.kind == WeaponSwitchOutcome::kMount);
         CHECK(outcome.same_category == same_category);
-        handle_weapon_switch_outcome(world, weapon, &inv, outcome);
+        handle_weapon_switch_outcome(world, weapon, &inv, outcome, view);
         LocalWeaponPumpIO io;
         io.view = &view;
         io.inventory = &inv;

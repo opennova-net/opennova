@@ -105,7 +105,8 @@ bool suppress_view_bias(const LocalPlayerWeapon &w, const WeaponSlotState *slot,
 void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
                              LocalPlayerViewTracker &t) {
     // [orig: Player_ResetCameraAndMovementState @0x4DE1F0]
-    player_view_scope_reset(v);
+    player_view_weapon_switch_reset(v);
+    v.weapon_pose_bound = w.active && (w.def.flags & 3) != 0;
     if (world != nullptr) world->weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
     v.binoculars_requested = false;
     v.binoculars_raised = false;
@@ -166,7 +167,7 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
 }
 
 void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
-                                          const MountSlotSelectRequest &req) {
+                                          const MountSlotSelectRequest &req, PlayerViewState &v) {
     Entity *player = world.registry.get(world.cached.local_player);
     Entity *mount = world.registry.get(req.mount);
     Entity *parent = req.use_parent_slot ? world.registry.get(req.parent) : nullptr;
@@ -175,7 +176,7 @@ void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
     mount->primary_weapon_slot.redirect_to_parent_slot = req.use_parent_slot;
     player->equipped_adm_index =
         req.use_parent_slot ? parent->primary_weapon_slot_adm : mount->primary_weapon_slot_adm;
-    sync_local_usegun_weapon_transition(world, w);
+    sync_local_usegun_weapon_transition(world, w, v);
 }
 
 int32_t local_player_scope_zoom(const LocalPlayerWeapon &w, WeaponSlotState &slot) {
@@ -736,6 +737,17 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
         out.camera.roll_deg += static_cast<float>(d_roll) * kDegPerBam;
     }
     out.camera_pose_valid = true;
+}
+
+void local_player_viewmodel_rotation_bias(World *world, const LocalPlayerWeapon &w,
+                                         const PlayerViewState &v, int32_t out_bam[3]) {
+    const WeaponSlotState *slot = world != nullptr ? active_local_weapon_slot(*world, w) : nullptr;
+    const bool suppressed = suppress_view_bias(w, slot, local_entity(world));
+    // Bone's hip rotation remains the base; only the published interpolation
+    // difference is suppressed. ForceScoped does not bypass this camera gate.
+    // [orig: Player_UpdateFirstPersonCamera @0x4DD40D..0x4DD456]
+    for (int i = 0; i < 3; ++i)
+        out_bam[i] = suppressed ? 0 : v.weapon_pose_interp.rotation_bias_bam[i];
 }
 
 void local_player_viewmodel_bias(World *world, const LocalPlayerWeapon &w,

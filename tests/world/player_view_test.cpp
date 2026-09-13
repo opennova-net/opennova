@@ -7,6 +7,9 @@
 #include <cstdio>
 #include <cstdint>
 #include <vector>
+#include <cstring>
+#include <formats/def/def.h>
+#include <runtime/world/player_weapon.h>
 
 #include <runtime/renderer/aspect_ratio.h>
 #include <runtime/terrain_query/height_field.h>
@@ -24,6 +27,149 @@ static int failures = 0;
     } while (0)
 
 namespace {
+
+uint64_t pose_interp_fingerprint(uint64_t hash, const PlayerViewBiasInterp &interp) {
+    const auto word = [&hash](uint32_t value) {
+        for (int shift = 0; shift < 32; shift += 8) {
+            hash ^= (value >> shift) & 0xFFu;
+            hash *= UINT64_C(1099511628211);
+        }
+    };
+    const auto pose = [&word](const PlayerViewPose &value) {
+        for (float component : value.position_q16) {
+            uint32_t bits;
+            std::memcpy(&bits, &component, sizeof(bits));
+            word(bits);
+        }
+        for (uint32_t component : value.rotation_bam) word(component);
+    };
+    word(interp.remaining);
+    pose(interp.velocity);
+    pose(interp.current);
+    pose(interp.target);
+    word(interp.active ? 1u : 0u);
+    for (int32_t component : interp.position_bias_q16) word(static_cast<uint32_t>(component));
+    for (int32_t component : interp.rotation_bias_bam) word(static_cast<uint32_t>(component));
+    return hash;
+}
+
+void test_authored_pose_interp_matches_original_six_lane_traces() {
+    // Raw-machine oracles: retail JO 1.7.5.7 CNetPlayerInterp_Setup 4DDFD0,
+    // Player_StepFpViewBiasInterp 4DDD20, including its real CRT ftol calls.
+    // FNV-1a covers every word of counter, six velocities, current, target,
+    // active and six published biases: initial setup + twenty ticks. The
+    // reverse row additionally fingerprints setup after tick 3, with a
+    // deliberately unrelated idle source proving that active state wins.
+    struct Case {
+        uint32_t steps;
+        PlayerViewPose hip;
+        PlayerViewPose ads;
+        int reverse_after;
+        uint64_t fingerprint;
+    };
+    const Case cases[] = {
+        {15, {{256, 512, 768}, {0x10000000u, 0x10000000u, 0xF0000000u}},
+             {{512, -256, 1024}, {0x08000000u, 0x20000000u, 0x10000000u}}, -1,
+             UINT64_C(0x0A55F92C1B3BA86C)},
+        {7, {{-6796.8f, 5952, -42240}, {0x10000000u, 0x10000000u, 0xF0000000u}},
+            {{-13452.8f, 10368, -40640}, {0x08000000u, 0x20000000u, 0x10000000u}}, -1,
+            UINT64_C(0x2D18B3D799CDE452)},
+        {1, {{1, 2, 3}, {0x7FFFFF80u, 0x7FFFFF81u, 0xFFFFFFFFu}},
+            {{4, 5, 6}, {0, 0, 0}}, -1, UINT64_C(0x788BD8A6C8CD08D0)},
+        {15, {{0, 0, 0}, {0x7FFFFF80u, 0x7FFFFF81u, 0xFFFFFFFFu}},
+             {{0, 0, 0}, {0, 0, 0}}, -1, UINT64_C(0x7ACB032789A2F89A)},
+        {7, {{11, 22, 33}, {0x12340001u, 0xFFFFFFFEu, 4}},
+            {{11, 22, 33}, {0x12340000u, 0xFFFFFFFFu, 0}}, -1,
+            UINT64_C(0x46035FCD17F8B54C)},
+        {7, {{11, 22, 33}, {1, 2, 3}}, {{11, 22, 33}, {1, 2, 3}}, -1,
+            UINT64_C(0x2D64F6B9C5C7BCFE)},
+        {15, {{256, 512, 768}, {0x10000000u, 0x10000000u, 0xF0000000u}},
+             {{512, -256, 1024}, {0x08000000u, 0x20000000u, 0x10000000u}}, 3,
+             UINT64_C(0x97C74E18FC4A6BC1)},
+    };
+    for (const Case &c : cases) {
+        PlayerViewBiasInterp interp;
+        player_view_bias_interp_setup(interp, c.steps, c.hip, c.ads);
+        uint64_t hash = pose_interp_fingerprint(UINT64_C(14695981039346656037), interp);
+        for (int tick = 0; tick < 20; ++tick) {
+            if (tick == c.reverse_after) {
+                const PlayerViewPose unrelated{{99, 88, 77}, {7, 8, 9}};
+                player_view_bias_interp_setup(interp, 15, unrelated, c.hip);
+                hash = pose_interp_fingerprint(hash, interp);
+            }
+            player_view_bias_interp_step(interp, c.hip);
+            hash = pose_interp_fingerprint(hash, interp);
+        }
+        if (hash != c.fingerprint)
+            std::printf("pose trace mismatch: steps %u reverse %d, got %llx expected %llx\n",
+                    c.steps, c.reverse_after, static_cast<unsigned long long>(hash),
+                    static_cast<unsigned long long>(c.fingerprint));
+        CHECK(hash == c.fingerprint);
+    }
+}
+
+void test_authored_pose_interp_keeps_original_snap_and_completion_rules() {
+    const PlayerViewPose hip{{256, 512, 768}, {0x10000000u, 0x10000000u, 0xF0000000u}};
+    const PlayerViewPose ads{{512, -256, 1024}, {0x08000000u, 0x20000000u, 0x10000000u}};
+    PlayerViewBiasInterp interp;
+    player_view_bias_interp_setup(interp, 15, hip, ads);
+    CHECK(interp.remaining == 0 && interp.active);
+    CHECK(interp.velocity.rotation_bam[0] == 0x00888888u);
+    CHECK(interp.velocity.rotation_bam[1] == 0xFEEEEEEFu);
+    CHECK(interp.velocity.rotation_bam[2] == 0xFDDDDDDEu);
+    player_view_bias_interp_step(interp, hip);
+    CHECK(interp.current.rotation_bam[0] == 0x0F777778u);
+    CHECK(interp.current.rotation_bam[1] == ads.rotation_bam[1]);
+    CHECK(interp.current.rotation_bam[2] == ads.rotation_bam[2]);
+    CHECK(interp.position_bias_q16[0] == 17 && interp.position_bias_q16[1] == -51);
+    for (int tick = 1; tick < 15; ++tick) player_view_bias_interp_step(interp, hip);
+    CHECK(interp.active); // all lanes landed, latch waits one more call
+    for (int i = 0; i < 3; ++i) CHECK(interp.current.rotation_bam[i] == ads.rotation_bam[i]);
+    player_view_bias_interp_step(interp, hip);
+    CHECK(!interp.active);
+
+    // An idle all-zero setup arms seven ticks without copying source into
+    // current; a running zero-delta setup only deactivates once spent.
+    interp = {};
+    player_view_bias_interp_setup(interp, 7, hip, hip);
+    CHECK(interp.active && interp.remaining == 7);
+    CHECK(interp.current.rotation_bam[0] == 0 && interp.current.position_q16[0] == 0);
+    const PlayerViewPose zero;
+    player_view_bias_interp_setup(interp, 1, ads, zero);
+    CHECK(interp.active && interp.remaining == 7);
+    for (int tick = 0; tick < 7; ++tick) player_view_bias_interp_step(interp, hip);
+    CHECK(!interp.active);
+}
+
+void test_authored_pose_def_promotes_parser_precision_and_wrapping_bam() {
+    using namespace opennova::def;
+    const char text[] =
+            "weapon \"POSE\"\npos 1,2,3,179.99999,180.00001,359.99999\n"
+            "tpos 4,5,6,360,-0.1,356.750\nend\n";
+    DefWeaponsFile parsed{};
+    CHECK(def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(text), sizeof(text) - 1,
+                                  &parsed) == 0);
+    CHECK(parsed.count == 1);
+    if (parsed.count == 1) {
+        const DefWeaponDef &row = parsed.entries[0];
+        // Original Math_ParseFixedPoint16 is unsigned digit syntax: a
+        // leading minus yields zero, while the 360-degree seam wraps in BAM.
+        CHECK(row.pos_rotation_deg_q16[0] == 11796479);
+        CHECK(row.pos_rotation_deg_q16[1] == 11796481);
+        CHECK(row.pos_rotation_deg_q16[2] == 23592959);
+        CHECK(row.tpos_rotation_deg_q16[1] == 0);
+        const WeaponInstallData install = weapon_install_data_from_def(row);
+        CHECK(install.view_hip_pose.position_q16[0] == 256.0f);
+        CHECK(install.view_ads_pose.position_q16[2] == 1536.0f);
+        const uint32_t hip[3] = {0x7FFFFECAu, 0x80000036u, 0xFFFFFE4Au};
+        const uint32_t ads[3] = {0xFFFFFF00u, 0u, 0xFDB05A08u};
+        for (int i = 0; i < 3; ++i) {
+            CHECK(install.view_hip_pose.rotation_bam[i] == hip[i]);
+            CHECK(install.view_ads_pose.rotation_bam[i] == ads[i]);
+        }
+    }
+    def_free_weapons(&parsed);
+}
 
 void test_scope_ease_is_fifteen_ticks_exactly() {
     PlayerViewState v;
@@ -53,32 +199,43 @@ void test_scope_ease_is_fifteen_ticks_exactly() {
     CHECK(!player_view_scope_ease_active(v));
 }
 
-// The tri-state reset, and the legacy four-field reset the two external sites
-// still write: the promoted byte never outlives its target, so a stale
-// `scope_settled` reads false and the next tick clears it.
-void test_scope_reset_and_stale_settled_byte() {
+// The promoted byte is independent of the target. A category-key camera
+// reset retains it and the rotation bookkeeping; a no-weapon clear discards it.
+void test_scope_reset_preserves_original_switch_bookkeeping() {
     PlayerViewState v;
-    const float eye[3] = {0, 0, 0};
-    CHECK(player_view_set_engaged(v, true, false));
-    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
-    CHECK(player_view_scope_settled(v));
+    v.scope_engaged = v.scope_settled = true;
+    v.scope_hipfire = false;
+    auto &interp = v.weapon_pose_interp;
+    interp.active = true;
+    interp.remaining = 37;
+    interp.velocity = {{1, 2, 3}, {0x11111111u, 0x80000001u, 0xFFFFFFFFu}};
+    interp.current = {{4, 5, 6}, {0x22222222u, 0x33333333u, 0x44444444u}};
+    interp.target = {{7, 8, 9}, {0x55555555u, 0x66666666u, 0x77777777u}};
+    for (int i = 0; i < 3; ++i) {
+        interp.position_bias_q16[i] = 11 + i;
+        interp.rotation_bias_bam[i] = 14 + i;
+    }
+    // Executed original Player_ResetCameraAndMovementState @0x4DE1F0 on
+    // this 21-word state: counter=37, rotations copied from velocity, position
+    // triples zero, active=0, promoted=1, engaged=0, hipfire=1; biases unchanged.
+    player_view_weapon_switch_reset(v);
+    CHECK(!v.scope_engaged && player_view_scope_settled(v) && v.scope_hipfire);
+    CHECK(!interp.active && interp.remaining == 37 && !v.weapon_pose_bound);
+    const uint32_t velocity[3] = {0x11111111u, 0x80000001u, 0xFFFFFFFFu};
+    const uint32_t target[3] = {0x55555555u, 0x66666666u, 0x77777777u};
+    for (int i = 0; i < 3; ++i) {
+        CHECK(interp.velocity.position_q16[i] == 0 && interp.current.position_q16[i] == 0 &&
+              interp.target.position_q16[i] == 0);
+        CHECK(interp.current.rotation_bam[i] == velocity[i] &&
+              interp.velocity.rotation_bam[i] == velocity[i] && interp.target.rotation_bam[i] == target[i]);
+        CHECK(interp.position_bias_q16[i] == 11 + i && interp.rotation_bias_bam[i] == 14 + i);
+    }
+    const float eye[3] = {};
+    player_view_tick(v, eye);
+    CHECK(player_view_scope_settled(v)); // an idle reset does not run the promoter
     player_view_scope_reset(v);
     CHECK(!v.scope_engaged && !v.scope_settled && v.scope_hipfire);
-    CHECK(v.scope_step == 0 && v.ease_steps == kScopeEaseSteps && v.scope_ease_remaining == 0);
-    CHECK(!player_view_scope_ease_active(v));
-
-    CHECK(player_view_set_engaged(v, true, false));
-    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
-    CHECK(v.scope_settled);
-    v.scope_engaged = false; // the legacy reset tuple (local_player / player_weapon)
-    v.scope_step = 0;
-    v.ease_steps = kScopeEaseSteps;
-    v.scope_hipfire = true;
-    CHECK(!player_view_scope_settled(v));
-    CHECK(!player_view_scope_ease_active(v));
-    CHECK(!player_view_move_input(v, true, 1)); // no phantom unscope on a stale byte
-    player_view_tick(v, eye);
-    CHECK(!v.scope_settled);
+    CHECK(!v.weapon_pose_interp.active && v.weapon_pose_interp.remaining == 0);
 }
 
 // The review's fps case: the SAME simulated time must produce the SAME state no
@@ -1176,6 +1333,9 @@ void test_camera_shake_chase() {
 }
 
 int main() {
+    test_authored_pose_interp_matches_original_six_lane_traces();
+    test_authored_pose_interp_keeps_original_snap_and_completion_rules();
+    test_authored_pose_def_promotes_parser_precision_and_wrapping_bam();
     test_scope_ease_is_fifteen_ticks_exactly();
     test_equal_ticks_equal_state_regardless_of_frame_grouping();
     test_anchor_chase_quarter_step_and_seeding();
@@ -1191,7 +1351,7 @@ int main() {
     test_toggle_latch_refusal_and_inset();
     test_unscope_on_move_and_up_refusal();
     test_move_reversal_and_auto_re_raise();
-    test_scope_reset_and_stale_settled_byte();
+    test_scope_reset_preserves_original_switch_bookkeeping();
     test_tp_effective_distance_march();
     test_compose_camera_first_person();
     test_compose_camera_terrain_floor();

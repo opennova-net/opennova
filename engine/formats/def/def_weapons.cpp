@@ -30,6 +30,18 @@ static double parse_double_n(const char *s, size_t len) {
     return strtod(buf, NULL);
 }
 
+// Keep the decimal-digit angle parser ahead of BAM promotion; a float degree
+// intermediate loses authored Q16 bits around the 180/360-degree seams.
+// [orig: WeaponDef_ParseProperty @0x544662 / @0x5447A9]
+static void parse_view_pose(const char *s, size_t len, float position[3], int32_t rotation[3]) {
+    Token values[6];
+    const int count = split_values(s, len, values, 6);
+    for (int i = 0; i < 3 && i < count; ++i)
+        position[i] = parse_float_n(values[i].s, values[i].len);
+    for (int i = 0; i < 3 && i + 3 < count; ++i)
+        rotation[i] = parse_fixed16_digits_n(values[i + 3].s, values[i + 3].len);
+}
+
 /* Shared buffer parser for weapon.def, used by both the path and memory entry points. */
 static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out) {
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
@@ -477,12 +489,12 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (ll > 3 && lower_starts_with(lower, ll, "pos", 3) &&
                        (lower[3] == ' ' || lower[3] == '\t')) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
-                parse_floats(v, vl, cw.pos, 6);
+                parse_view_pose(v, vl, cw.pos, cw.pos_rotation_deg_q16);
                 parsed = 1;
             } else if (ll > 4 && lower_starts_with(lower, ll, "tpos", 4) &&
                        (lower[4] == ' ' || lower[4] == '\t')) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
-                parse_floats(v, vl, cw.tpos, 6);
+                parse_view_pose(v, vl, cw.tpos, cw.tpos_rotation_deg_q16);
                 parsed = 1;
             } else if (ll > 6 && lower_starts_with(lower, ll, "sights", 6) &&
                        (lower[6] == ' ' || lower[6] == '\t')) {

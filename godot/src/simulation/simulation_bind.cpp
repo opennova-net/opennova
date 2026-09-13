@@ -328,6 +328,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_effects"), &Simulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("drain_fire_presentation_events"),
 			&Simulation::drain_fire_presentation_events);
+	ClassDB::bind_method(D_METHOD("local_player_viewmodel_rotation_bias_deg"),
+			&Simulation::local_player_viewmodel_rotation_bias_deg);
 	ClassDB::bind_method(D_METHOD("local_player_viewmodel_bias_view_units",
 					"pos_raw_units", "tpos_raw_units", "viewport_w", "viewport_h"),
 			&Simulation::local_player_viewmodel_bias_view_units);

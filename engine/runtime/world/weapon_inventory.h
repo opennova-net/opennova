@@ -255,6 +255,9 @@ struct WeaponSwitchOutcome {
     Kind kind = kNone;
     int32_t combo = -1;
     bool same_category = false; // MountWeaponSlot leg select [orig: @ 0x4dfb8b]
+    // Category-handle walks reset before selection; cycles/direct mounts do not.
+    // Also true when an admitted walk finds no slot. [orig: @0x4E0223]
+    bool reset_view = false;
 };
 
 // Player_SwitchToWeaponByHandle @ 0x4E0170 — the category-key walk. handle =
