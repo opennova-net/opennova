@@ -2301,6 +2301,87 @@ bool run_retransmit_0x42_keeps_keys() {
 
 // The join leg enforces capacity. A dedicated host with max_players == 2 admits two joiners; the third
 // 0x42 is rejected. [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0 — current_player_count >= max]
+// ClientAuth JSP is the submitted side/squad password; TR is the signed team
+// choice. Drive the real auth loader, JOIN validator, reject vehicle and team
+// reservation so a codec-only change cannot make this regression pass.
+// [orig: NapiNetConfig_SetJsp @0x4C26BE; Server_ValidatePlayerJoinRequest
+// @0x5124A2..0x5125D4; Server_AssignPlayerTeam @0x4FE424..0x4FE519]
+bool run_side_password_admission() {
+	struct Case {
+		const char *side_a;
+		const char *side_b;
+		const char *password;
+		int team_request;
+		bool spectator;
+		uint32_t reject;
+		uint8_t team;
+	};
+	const Case cases[] = {
+		{"Blue", "Red", "wrong", -1, false, 18, 0},
+		{"Blue", "Red", "wrong", 0, false, 19, 0},
+		{"Blue", "Red", "wrong", 1, false, 20, 0},
+		{"Blue", "Red", "bLuE", -1, false, 0, 1},
+		{"Blue", "Red", "rEd", -1, false, 0, 2},
+		{"Blue", "Red", "Blue", 1, false, 20, 0},
+		{"Blue", "", "", -1, false, 0, 2},
+		{"", "Red", "", -1, false, 0, 1},
+		{"", "", "", 1, false, 0, 2},
+		{"Blue", "Red", "", 0, true, 0, 0},
+	};
+	for (const Case &test : cases) {
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::GameConfig config;
+		config.game_type = 0x10000u;
+		config.mp_attributes = inmatch::GameConfig::kMpAttribTeamChoose;
+		config.spectator_slots = -1;
+		config.side_a_password = test.side_a;
+		config.side_b_password = test.side_b;
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey, nullptr, config);
+		auto auth = make_valid_client_auth(12, 0x1212u, kHostKey, "SideJoiner",
+				"TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB");
+		auth.cu.push_back(make_client_cu_chunk(2, "JSP", "overwritten"));
+		auth.cu.push_back(make_client_cu_chunk(2, "jSp", test.password));
+		auth.cu.push_back(make_client_cu_chunk(1, "JSP", "ignored-wrong-type"));
+		auth.cu.push_back(make_client_cu_chunk(2, "TR", std::to_string(test.team_request)));
+		if (test.spectator) auth.cu.push_back(make_client_cu_chunk(2, "JSR", "1"));
+		const auto datagram = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		const PeerAddr peer{0x0100007Fu, 32012};
+		inmatch::handle_server_datagram(ctx, peer, datagram.data(), datagram.size(), 3);
+		if (!expect(ctx.np_protocol.connection_list.size() == 1,
+				"side password is validated at JOIN, after ClientAuth")) return false;
+		auto &roster = ctx.np_protocol.connection_list;
+		auto &conn = roster.front();
+		replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
+		conn.link.transport = &transport;
+		const auto join = retail_join_request(config.expansion);
+		const auto replies = inmatch::dispatch_session_replies(config, conn,
+				{make_protocol_message(0x00, join)}, 5, roster, nullptr);
+		if (test.reject) {
+			replication::Datagram staged;
+			DisconnectEvent event;
+			const bool has_punt = transport.pop_outbound(staged) &&
+					parse_disconnect_event(staged.body.data(), staged.body.size(), event);
+			if (!expect(replies.empty() &&
+					conn.admission_stage == inmatch::GameAdmissionStage::Rejected &&
+					has_punt && event.ds == 1 && event.dc == 2 && event.dpc == test.reject,
+					"wrong side password emits the exact retail description reject")) {
+				std::fprintf(stderr, "expected DPC %u, observed %u (punt %d, replies %zu)\n",
+						test.reject, event.dpc, has_punt, replies.size());
+				return false;
+			}
+		} else {
+			if (!expect(!replies.empty() && replies.front().tag == s2c::INIT,
+					"valid side credential admits JOIN")) return false;
+			auto world = std::make_unique<opennova::world::World>();
+			if (!expect(inmatch::Server_ReservePlayerTeam(config, true, roster, conn, *world) ==
+					test.team, "the submitted password selects the matching side")) return false;
+		}
+		conn.link.transport = nullptr;
+	}
+	return true;
+}
+
 bool run_spectator_admission_codes_match_retail() {
 	const std::string scrk =
 			"TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
@@ -3308,7 +3389,7 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 } // namespace
 
 int main() {
-	bool ok = true;
+	bool ok = run_side_password_admission();
 	ok = run_mission_transfers_match_retail_lan_contract() && ok;
 	ok = run_tag60_mission_name_selects_by_game_type() && ok;
 	ok = run_reactive_replies() && ok;

@@ -10,6 +10,7 @@
 #include <runtime/world/world.h>        // World, registry, cached
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <array>
@@ -31,8 +32,7 @@ namespace {
 // [orig: Server_AssignPlayerTeam @0x4FE310; D-NET-113] One assignment policy for every mode.
 // Retail's misleading g_team1_name/g_team2_name symbols are the live SidePasswordA/B strings
 // (apply_session_settings_to_globals @0x552043/@0x552054), not a second team-name domain.
-// The current join protocol carries no FID credential, so the submitted-password leg is empty;
-// closing password-protected admission remains D-NET-167.
+// The submitted JSP credential selects a matching protected side before balancing.
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection &joining, const world::World &world) {
@@ -56,10 +56,15 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	const bool side_a_locked = !config.side_a_password.empty();
 	const bool side_b_locked = !config.side_b_password.empty();
 
-	// With the presently empty submitted FID, retail's two-team password leg
-	// rejects two protected sides or selects the one unprotected side.
-	// Four-team mode deliberately skips this branch.
-	// [orig: @0x4FE4AE..0x4FE519; D-NET-167]
+	// Password matches precede the two/four-team split and team preference.
+	// If both side passwords match, side A wins the ordered comparison.
+	// [orig: Server_AssignPlayerTeam @0x4FE424..0x4FE4AD]
+	if (side_a_locked && opennova::strutil::iequals(
+			config.side_a_password.c_str(), joining.join_password.c_str())) return 1;
+	if (side_b_locked && opennova::strutil::iequals(
+			config.side_b_password.c_str(), joining.join_password.c_str())) return 2;
+	// Without a match, two-team mode selects an unlocked side or fails.
+	// [orig: @0x4FE4AE..0x4FE519]
 	if (active_teams == 2) {
 		if (side_a_locked && side_b_locked) return 0;
 		if (side_a_locked) return 2;

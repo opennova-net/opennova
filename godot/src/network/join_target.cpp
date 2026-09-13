@@ -37,8 +37,12 @@ void JoinTarget::_bind_methods() {
 	JOIN_TARGET_PROPERTY(Variant::INT, join_role)
 	JOIN_TARGET_PROPERTY(Variant::STRING, spectator_password)
 	JOIN_TARGET_PROPERTY(Variant::STRING, server_password)
+	JOIN_TARGET_PROPERTY(Variant::STRING, join_password)
+	JOIN_TARGET_PROPERTY(Variant::INT, team_request)
 	JOIN_TARGET_PROPERTY(Variant::BOOL, role_explicit)
 #undef JOIN_TARGET_PROPERTY
+	ClassDB::bind_method(D_METHOD("allows_team_choice"), &JoinTarget::allows_team_choice);
+	ClassDB::bind_method(D_METHOD("has_team_password"), &JoinTarget::has_team_password);
 	ClassDB::bind_method(D_METHOD("allows_spectators"), &JoinTarget::allows_spectators);
 	ClassDB::bind_method(D_METHOD("server_password_required"),
 			&JoinTarget::server_password_required);
@@ -48,7 +52,10 @@ void JoinTarget::_bind_methods() {
 			&JoinTarget::from_lan_row);
 	BIND_ENUM_CONSTANT(ROLE_PLAYER);
 	BIND_ENUM_CONSTANT(ROLE_SPECTATOR);
+	BIND_ENUM_CONSTANT(FLAG_TEAM_CHOICE);
 	BIND_ENUM_CONSTANT(FLAG_SERVER_PASSWORD);
+	BIND_ENUM_CONSTANT(FLAG_BLUE_PASSWORD);
+	BIND_ENUM_CONSTANT(FLAG_RED_PASSWORD);
 	BIND_ENUM_CONSTANT(FLAG_ALLOW_SPECTATORS);
 	BIND_ENUM_CONSTANT(FLAG_SPECTATOR_PASSWORD);
 }

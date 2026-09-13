@@ -54,13 +54,14 @@ bool str_case_equal(const std::string &a, const char *b) {
 	return i == a.size() && b[i] == '\0';
 }
 
-struct ParsedClientJoinRole {
+struct ParsedClientJoinRequest {
 	bool spectator = false;
 	std::string spectator_password;
+	std::string join_password;
 };
 
-ParsedClientJoinRole parse_client_join_role(const ClientAuth &auth) {
-	ParsedClientJoinRole parsed;
+ParsedClientJoinRequest parse_client_join_request(const ClientAuth &auth) {
+	ParsedClientJoinRequest parsed;
 	for (const auto &blob : auth.cu) {
 		uint8_t cu_type = 0;
 		std::string cu_name;
@@ -78,6 +79,9 @@ ParsedClientJoinRole parse_client_join_role(const ClientAuth &auth) {
 		if (str_case_equal(cu_name, "JSR")) {
 			parsed.spectator = static_cast<uint8_t>(
 					std::strtol(cu_value.c_str(), nullptr, 10)) != 0;
+		} else if (str_case_equal(cu_name, "JSP")) {
+			// [orig: NapiNetConfig_SetJsp @0x4C26BE, Napi_CopyString(..., 64)]
+			parsed.join_password = cu_value.substr(0, 63);
 		} else if (str_case_equal(cu_name, "JSPP")) {
 			parsed.spectator_password = std::move(cu_value);
 		}
@@ -576,7 +580,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	const ClientGameEnvironment game_environment =
 			parse_client_game_environment(auth);
-	const ParsedClientJoinRole join_role = parse_client_join_role(auth);
+	const ParsedClientJoinRequest join_role = parse_client_join_request(auth);
 
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750] The stateless 0x41 leaves
 	// no node, so a first 0x42 creates one. Only retransmit/address-reuse paths
@@ -662,6 +666,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	conn.join_environment = game_environment;
 	conn.join_spectator_request = join_role.spectator ? 1 : 0;
 	conn.join_spectator_password = join_role.spectator_password;
+	conn.join_password = join_role.join_password;
 	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
 	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
 	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the

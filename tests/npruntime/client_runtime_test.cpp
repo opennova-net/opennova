@@ -869,12 +869,22 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 
 	// --- the NovaWorld joiner: APPID after COUNTRYCODE, CD after VERSIONCRCSTRING
 	inmatch::JoinerConnection joiner("JoinTokens");
+	joiner.set_join_request(inmatch::JoinRole::Player, "", "", "SideSecret");
+	inmatch::CharacterJoinVars side_profile;
+	side_profile.char_id[0] = 0x2101;
+	side_profile.team_request = 1;
+	joiner.set_character_join_vars(side_profile);
 	joiner.set_app_id("3225");
 	joiner.set_cd_cookie(cookie);
 	ServerHello server_hello;
 	ClientAuth client_auth;
 	if (!hello_to_client_auth(joiner, server_hello, client_auth)) return false;
 	const auto cu = cu_fields(client_auth);
+	const int jsp_at = index_of(cu, "JSP");
+	if (!expect(jsp_at >= 0 && cu[static_cast<size_t>(jsp_at)].second == "SideSecret",
+			"side/squad credential rides JSP in ClientAuth")) return false;
+	if (!expect(jsp_at < index_of(cu, "CI0"), "JSP precedes the profile character tags"))
+		return false;
 	const int appid_at = index_of(cu, "APPID");
 	const int country_at = index_of(cu, "COUNTRYCODE");
 	const int bt_at = index_of(cu, "BT");
@@ -936,6 +946,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	ClientAuth lan_auth;
 	if (!hello_to_client_auth(lan, lan_hello, lan_auth)) return false;
 	const auto lan_cu = cu_fields(lan_auth);
+	if (!expect(index_of(lan_cu, "JSP") < 0, "empty join credentials omit JSP")) return false;
 	if (!expect(index_of(lan_cu, "APPID") < 0, "a LAN joiner sends no APPID")) return false;
 	return expect(index_of(lan_cu, "COUNTRYCODE") >= 0,
 	              "the LAN ClientAuth keeps its fixed fields through COUNTRYCODE");

@@ -133,3 +133,51 @@ func test_both_passwords_have_distinct_controls() -> void:
 	if prompt != null:
 		assert_not_null(prompt.find_child("ServerPassword", true, false))
 		assert_not_null(prompt.find_child("SpectatorPassword", true, false))
+
+
+func test_team_password_and_team_choice_prompt_before_admission() -> void:
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	var target := _target(JoinTarget.FLAG_TEAM_CHOICE | JoinTarget.FLAG_BLUE_PASSWORD
+			| JoinTarget.FLAG_RED_PASSWORD | JoinTarget.FLAG_SERVER_PASSWORD)
+	target.join_password = "prefilled"
+	target.team_request = 1
+	controller.join_lan_server(target)
+	var prompt := layer.get_node_or_null("JoinRolePrompt")
+	assert_not_null(prompt, "protected sides prompt even without spectator access")
+	if prompt == null:
+		return
+	var password := prompt.find_child("JoinPassword", true, false) as LineEdit
+	var choice := prompt.find_child("TeamChoice", true, false) as OptionButton
+	assert_not_null(password)
+	assert_not_null(choice)
+	assert_not_null(prompt.find_child("ServerPassword", true, false))
+	if password != null:
+		assert_true(password.secret)
+		assert_eq(password.text, "prefilled")
+		assert_eq(password.max_length, 63)
+		password.text = "unsubmitted"
+	if choice != null:
+		assert_eq(choice.item_count, 3)
+		assert_eq(choice.selected, 2, "red is the second explicit side")
+		choice.select(0)
+	var cancel := prompt.find_child("CancelJoin", true, false) as Button
+	cancel.pressed.emit()
+	assert_eq(target.join_password, "prefilled", "cancel does not commit credentials")
+	assert_eq(target.team_request, 1, "cancel does not change team preference")
+	assert_false(target.role_explicit)
+
+
+func test_team_choice_without_password_keeps_credentials_absent() -> void:
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	var target := _target(JoinTarget.FLAG_TEAM_CHOICE)
+	controller.join_lan_server(target)
+	var prompt := layer.get_node_or_null("JoinRolePrompt")
+	assert_not_null(prompt)
+	if prompt != null:
+		assert_not_null(prompt.find_child("TeamChoice", true, false))
+		assert_null(prompt.find_child("JoinPassword", true, false))
+	assert_eq(target.team_request, -1, "automatic is the default")

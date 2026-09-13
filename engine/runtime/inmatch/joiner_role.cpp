@@ -51,14 +51,16 @@ namespace opennova::inmatch {
 JoinerRole::JoinerRole(KitSeams seams) : kit_seams(std::move(seams)) {}
 
 ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRole join_role,
-		const std::string &spectator_password, const std::string &server_password) {
+		const std::string &spectator_password, const std::string &server_password,
+		const std::string &join_password) {
 	player_name_ = player_name;
 	join_role_ = join_role;
 	spectator_password_ = spectator_password;
 	server_password_ = server_password;
+	join_password_ = join_password;
 	runtime = std::make_unique<ClientRuntime>(player_name);
 	runtime->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
-	runtime->set_join_request(join_role, spectator_password, server_password);
+	runtime->set_join_request(join_role, spectator_password, server_password, join_password);
 	return *runtime;
 }
 
@@ -77,7 +79,7 @@ void JoinerRole::bind(mission::MissionKernel &kernel) {
 bool JoinerRole::bring_up() {
 	const bool rebuild = !started_ || !runtime;
 	if (rebuild) {
-		create_runtime(player_name_, join_role_, spectator_password_, server_password_);
+		create_runtime(player_name_, join_role_, spectator_password_, server_password_, join_password_);
 		reset_for_runtime_rebuild();
 	}
 	runtime->set_world_ready(true);

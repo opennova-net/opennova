@@ -793,8 +793,8 @@ against `Jointops.exe` and ported; the in-match flow is `0x41 → 0x81`, `0x42 �
   The existing `0x48`-learning path is retained as the override for the NovaWorld case, where the
   dcb is gate-assigned, not host-assigned (TODO(P6): gate the host-assignment on the LAN network
   type once NovaWorld transport lands). This refines, but does not contradict, D-NET-92 (the
-  client self-ID is numeric in retail; the opennova `JoinerConnection` keeps its name-match per
-  the ROADMAP).
+  client self-ID is numeric in both retail and OpenNova; see the D-NET-169
+  implementation in §5.38b).
 
 - **D-NET-106 — the join leg enforces player and spectator capacity.**
   `[orig: CNapiNetwork_ValidateJoinRequest @ 0x4c61b0]` (installed as the join-validate callback by
@@ -996,8 +996,10 @@ join failing is retail behavior. The encrypted `NAMEINFO`/`PCID`/`JOINTICKET` KV
 of the same validator runs ONLY when `CNapiNetwork_GetLocalAddress @0x4c4f60` succeeds,
 and that helper returns 0 unless the transport is NovaWorld — so omitting the blob is
 faithful for LAN and becomes mandatory (DC=23) when the NovaWorld transport lands. The
-squad/side password legs (`FID`/`JSP`, DC=18..21) run on every transport: password-
-protected hosts are unjoinable until those CUs exist (D-NET-167).
+squad/side password legs use **JSP** for the credential and **TR** for team choice
+(DPC 18..21). FID is an independent numeric field. The side-password legs and JSP
+input now work in OpenNova; squad credential generation and host validation remain
+D-NET-167. See the protected-admission witness below.
 
 **OpenNova host admission (ported 2026-07-24).** The 0x42 gate now parses the CU
 list with retail's ordered/last-value-wins `atol` semantics and rejects
@@ -4657,40 +4659,26 @@ the vehicle prediction leg — is witnessed in §5.38e; the port is tracked as D
 class-table correction: @0x4b9a8c is the org1 (AI infantry) chase; PLAYERS chase in
 `Entity_UpdateInfantryPlayerBody @ 0x4B40E0`.]
 
-#### 5.38b Joiner-side self-identification — the name-match in the S2C 0x0C organic-spawn stream (D.0 witness, 2026-06-23)
+#### 5.38b Joiner-side self-identification — authenticated connection ownership
 
-§5.38a settled the HOST disposition (snap, never interpolate). This is its CLIENT-side counterpart: how a
-JOINER (`is_authority == 0`) learns WHICH wire entity is its own player, so it can simulate that player
-locally (the §5.38 motor) and stamp the right handle in its C2S `0x0C` uplink. Witnessed from
-`.scratch/host_and_join_lan.pcapng` (joiner "cdouglass" → host "biggy", mission dvxi5) cross-read with
-Jointops.exe; behavioral, read-only (no IDB writes).
+The client identifies its pool-0 player by `(Flags & 0x100) != 0` and
+`ownerConnectionId == NapiNP_GetLocalConnectionId()`. The latter reads the
+connection's dcb, learned from `ServerAuth.MI`. The organic-spawn `0x0C` record
+carries the owner at entity+120 and the separate Flags word at entity+36.
+The name in the old `host_and_join_lan` capture happened to match too; that was
+not the selection predicate. OpenNova now uses the numeric predicate (D-NET-169).
+[orig: Player_FindLocalPlayerEntity @ 0x4E0090;
+NapiNP_GetLocalConnectionId @ 0x4C6D40;
+NapiNPClientMsg_0x00C @ 0x42E864 / @ 0x42E91A]
 
-- **Self-ID is a NAME-MATCH in the S2C `0x0C` organic-spawn stream, NOT a slot-assignment packet. [D-NET-92
-  — CORRECTED 2026-06-25, see below]** The joiner's own player is the type-`0x14B9` organic in the host's S2C
-  `0x0C` batch (§5.23) whose `entity_name` equals the joiner's own player name; matching it sets
-  `g_local_player_entity @0xB75FC8`, and that record's `slot_id` IS the joiner's wire handle **H**. In the
-  capture, record 5 of the f=516 `0x0C` batch = `slot=0x0005 pool0/s5 type=0x14B9 name="cdouglass"
-  pos=(70,25,55.4) yaw=270° team=2` — the joiner's own entity. H (`0x0005`) is fixed at this named spawn
-  (f=516), BEFORE the game-start bundle (f=559) and BEFORE the first C2S `0x0C hdl=0x0005` (f=561). It is NOT
-  learned from `0x51` (absent in the capture) nor from `0x46` PlayerSync (whose `slot=1 entity=0x0005` arrived
-  f=564, AFTER the first uplink). `[orig: NapiNPClientMsg_0x00C @ 0x42E730]`
-  - **CORRECTION (D-NET-92):** the RETAIL client's self-ID is **NUMERIC, not a name-match.**
-    `Player_FindLocalPlayerEntity @0x4e0090` scans pool 0 for `(entity.miniFlags+0x36 & 0x100) &&
-    (entity+0x78 == local_session_id)`, where `local_session_id` is the client's own
-    `NapiNPConnection.unk_18` (its ConnectionId / dcb, via `NapiNP_GetLocalConnectionId`). In `host_and_join_lan.pcapng` the
-    matched record happened to ALSO carry `name="cdouglass"`, so the name-match was coincidental — the
-    `entity+0x78` (eFlags) numeric match is the real mechanism (confirmed by the F3 dcb work,
-    `project_dcb_join_mechanism`; the crash is `Player_InitPlayer @0x4e15f0` →
-    `Player_BuildNetIdLookupOrFatalError @0x4dff60` when the scan returns NULL). **Host requirement:** for a
-    retail joiner the host MUST stamp the joiner's own `0x0C` `entity_flags (entity+0x78)` = the joiner's
-    ConnectionId (learned from its in-match `0x48` ack) AND `minimap_flags (entity+0x36)` bit `0x100` — a name
-    alone is insufficient. Our `JoinerSession` name-match (`entity_name == player_name`) is a separate
-    opennova-side decode convenience for the opennova↔opennova path; it does not reflect the retail client's
-    self-ID path. `[orig: Player_FindLocalPlayerEntity @0x4e0090]`
-  - **Naming (2026-06-26, §5.41):** `entity+0x78` is now `GamePlayerEntity.ownerConnectionId` (was
-    `entityFlags`; D-NET-101); the local-id getter `sub_4C6D40` is now `NapiNP_GetLocalConnectionId`
-    returning `NapiNPConnection.connection_id` (D-NET-100); the NULL-abort `0x4dff60` is now
-    `Player_FatalPlayerDcbNotFound` (D-NET-102).
+The wire handle **H** is the matching record's `slot_id`. In the historical
+capture it was `0x0005`, learned before the first C2S `0x0C`. S2C `0x46`
+updates roster bookkeeping independently; `0x4D` handles local spawn tips or
+requests roster/visibility refreshes. Neither supplies the owning connection
+ID. Duplicate or server-renamed callsigns therefore do not change identity.
+[orig: NapiNPClientMsg_PlayerSync @ 0x431370;
+NapiNPClientMsg_HandleSpawnSlot @ 0x4317B0]
+
 - **`NapiNPClientMsg_0x00F` (WORLD-STATE-LOAD, §5.29) drives the post-load client burst when `!is_authority`.**
   It applies the spawn pos/yaw to the already-identified `g_local_player_entity` and clears the §5.6
   movement gate (`Flags & 1`); on a non-authority client it additionally caches the spawn at
@@ -4699,7 +4687,7 @@ Jointops.exe; behavioral, read-only (no IDB writes).
 - **`NapiNPClientMsg_PlayerSync` (`0x046`) is a SECONDARY slot↔handle channel, not the primary self-ID.** It
   binds a player-table slot to an entity (`entity_slot_id → Pool_GetEntryUnchecked(0, id)`; playerTable
   `slot+36` = entity, `slot+15` = entity_slot_id) and arrives AFTER the joiner already self-identified via
-  the `0x0C` name-match. `[orig: NapiNPClientMsg_PlayerSync @ 0x431370]` (full layout §5.21)
+  the `0x0C` owner-ID match. `[orig: NapiNPClientMsg_PlayerSync @ 0x431370]` (full layout §5.21)
 - **The witnessed joiner C2S admission sequence is server-reactive, with packet boundaries that
   matter (§5.0d):** exact `0x00` JOIN → `0x01 {00}` → `0x02` (256 B), then one grouped
   `0x4E/0x03/0x48/0x47/0x33`, standalone `0x47`, standalone eight-zero `0x37`, and one grouped
@@ -4712,10 +4700,6 @@ Jointops.exe; behavioral, read-only (no IDB writes).
   post-pick `0x5A`; the established session and authoritative-health latch remain active.
   Without spawn zones the initial grant also completes the UI stage. There is no C2S `0x0C`
   before H or before the first valid initial grant, but there is pre-pick pose traffic afterward.
-- **Unpinned (low-risk):** the exact store that writes `g_local_player_entity` on the name-match — the
-  `0x42E730` handler exceeds a clean single decompile — is not byte-anchored; the mechanism is empirically
-  certain from the wire (H == the named record's `slot_id`, set before any C2S `0x0C`).
-
 **Port (`engine/runtime/inmatch` + `godot/src`, this session; verdict MATCHING, unit-tested by
 `npruntime_client_runtime` + `npruntime_two_endpoint_socket` + `netsim_build_player_uplink`):**
 - `JoinerConnection` (`engine/runtime/inmatch/joiner_connection.cpp`) — the CLIENT MIRROR of the game
@@ -6614,8 +6598,8 @@ tracking + those tests — which is precisely why this is a dedicated session, n
 solo invariant, `mp_attributes` TeamChoose bit, pending reservations, all four counts, and the exact
 mixed-index defect. The duplicate `GameConfig::team_choose` boolean was deleted: retail owns only
 the bit in `dword_2550A04`. Spectator admission now feeds the witnessed early
-team-0 return; the remaining structural leg is the missing FID credential/password
-gate (D-NET-167). `[orig: Server_AssignPlayerTeam @0x4FE310]`
+team-0 return. The submitted JSP credential now runs the ordered, case-insensitive
+side A then side B password comparisons before two/four-team selection or balancing. `[orig: Server_AssignPlayerTeam @0x4FE310]`
 
 **D-NET-114** [behavior, MATCHING — reimpl divergence FIXED here] **The §5.2a initial-state burst
 is one-shot per join.** `Server_OnPlayerJoin @0x51a680` emits the *entire* sequence — 0x42 input
@@ -12279,7 +12263,7 @@ in [divergence-ledger.md](../divergence-ledger.md).
   `NapiNP_HandleResendList @ 0x623800`]
 - **D-NET-165** [LOW, FIXED 2026-08-03] LAN `0x81.P2` is now the live `CNapiServerConfig_BuildFlags` snapshot shared with S2C `0x08`, not zero or a captured constant. The four fresh `p403f16` retail↔retail maps all advertise `0x904`, including non-team 03TR; codec ordering, handler semantics, and the optional retail golden are pinned. `SUS1` was not part of this LAN defect: every fresh retail LAN oracle omits it, confirming that its separately gated server-user string must not be synthesized from `session_seed_id`. [orig: `CNapiServerConfig_BuildFlags @0x4c4dc0`; `NapiNPProtocol_SendServerInfoPacket @0x6204b0`]
 - **D-NET-166** [FIXED 2026-08-29 — the joiner CRCs the loose `expansion/<name>/version.txt` under the binding-supplied install root at JOIN-build time (`vfs_expansion_version_checksum`, `JoinerConnection::expansion_version_root_`, `Simulation::set_join_expansion_version_root`), the host computes its `g_expansion_checksum` analog from `game_root`; `"0"` only when no root/expansion/file exists, which is retail's own value there. Original finding:] The C2S JOIN `VERSIONCRCSTRING` was emitted as the constant `"0"`. When the host runs an expansion, `Server_ValidatePlayerJoinRequest @0x512100` compares `atol()` of the uploaded string against its `g_expansion_checksum` @0xb4c5a4 (reject DPC=48) — retail computes that checksum as CRC-32/MPEG-2 over the loose `expansion/<name>/version.txt`. `"0"` matches every install without that file (the live revx02 golden) and is rejected by any host whose install carries one. Close by plumbing the runtime resource path into the joiner and computing the same CRC over the same file (§5.0d).
-- **D-NET-167** [LOW, OPEN] The game ClientAuth never carries the join-password `FID` or team-choice `JSP` CUs. `@0x512100`'s squad-password (DC=21) and side-password (DC=18/19/20, `jsp[60]` team choice) legs therefore reject every OpenNova join to a password-protected host. Close with a join-password prompt feeding `FID` (+ `JSP` for the team preference). LAN-reachable: retail LAN hosts can set passwords.
+- **D-NET-167** [OPEN, narrowed 2026-09-13] Side-password admission is ported: the join prompt and typed `JoinTarget` carry the shared JSP credential and TR preference, ClientAuth writes JSP before profile tags, the host stores the last type-2 case-insensitive JSP tag (63-byte bound), JOIN emits DPC 18/19/20 on the witnessed side-password failures, and team reservation honors a matching password before balancing. PW and JSPP remain independent. **Correction:** the former FID=password/JSP=team mapping was wrong; FID is numeric, JSP is the credential, TR is team choice. Remaining: the squad challenge/seed-to-generated-password input and OpenNova host DPC 21 validator, plus mixed retail/OpenNova live acceptance. A caller may already supply a known squad credential through JSP. Evidence: `npruntime_handshake_server`, `npruntime_client_runtime`, `npruntime_server_spawn`; GUT `net/spectator_join_prompt_test.gd` and `net/spectator_session_test.gd`. [orig: CNapiServerInfo_SerializeToSession @ 0x4C3650; NapiNetConfig_SetJsp @ 0x4C26BE; Server_ValidatePlayerJoinRequest @ 0x51243D / @ 0x5124A2; Server_AssignPlayerTeam @ 0x4FE424]
 - **D-NET-168** [MED, FIXED 2026-07-24] The joiner's post-`0x1A` `0x2F` pair uploaded a FIXED default kit (capture-shaped header `02 08 C3|D4` + seven ADM rows) — the shell's applied local kit had no wire seam, so the host's granted per-slot table reflected the default, not the player's pick. Closed by the client-builder witness (§5.56, `NetPacket_SendLoadoutSubmit @ 0x42cdc0`): `JoinerConnection` now latches the wire team from the S2C 0x04 tail byte (`byte_A85B48` parity) and composes both submissions from the binding's `set_loadout_kit` seam (`Simulation::push_joiner_loadout_kit` — the applied spawn kit's ADM rows, the latched class, slot 195 then the equipped combo, mirroring `Game_StartMission @ 0x525836/@ 0x525c2e`). Headless callers keep the capture-default kit byte-for-byte. Pinned by `npruntime_client_runtime` (exact canned pair under the 0x04 team; injected kit through the zones e2e) and `nw_ingame_encode` `loadout_submit_roundtrip`. **De-tabled ledger detail (2026-08-06):** The joiner's `0x2F` loadout pair was a fixed default kit with no wire seam to the shell's applied selection; closed via the `NetPacket_SendLoadoutSubmit @0x42cdc0` witness — the S2C 0x04 team latch + the `set_loadout_kit` seam derive both submissions from the applied kit (headless callers keep the capture default). **Amended 2026-07-25:** the witnessed team latch (`byte_A85B48`) has THREE writers, and only one was ported at first close — (1) the S2C `0x04` tail byte `@0x425499`, (2) S2C `0x50` team-assign `@0x4319db`, and (3) the death-screen-close leg of the `0x0A` handler. Source (2) is now ported (`decode_team_assign` + the joiner `0x50` dispatch): it re-latches our own team, folds `entity->Team` for ANY pool 0..4 entity `@0x4319ee`, surfaces the own-team edge so the sim moves `Entity::team` + `round_sim.local_team`, and re-sends ONE C2S `0x2F` with the NEW team and slot **195 raw** `@0x431a9e`. Source (3) remains a residual. Four legs of the `0x50` self arm are also deferred with witnesses: the per-side profile CLASS reselect `@0x431a35..0x431a9a` (we hold ONE applied kit, so the kit's class is re-sent), the C2S `0x22`/`0x23` acks `@0x431acb..0x431b05` (byte layout ambiguous in the decompile), `Player_InitPlayer(1)` `@0x431b14`, and the minimap NetId maintenance `@0x431b3a..0x431b91`
 - **D-NET-169** [FIXED 2026-09-13] Organic-spawn self-identification now matches the authenticated connection ID, pool 0 and player Flags bit `0x100`. Renamed/duplicate callsigns do not affect ownership; empty/replaced rows and the `0x5D` sweep retire the binding. The `OrganicSpawnRecord` field formerly called `entity_flags` is now `owner_connection_id`, matching the existing host producer. **Correction to the audit:** `Player_FindLocalPlayerEntity @0x4E0090` scans pool-0 entities by `ownerConnectionId`, not the roster table. `NapiNPClientMsg_0x00C @0x42E864` stores the wire u32 at entity+120; `@0x42E91A` stores the distinct Flags u16. `NapiNP_GetLocalConnectionId @0x4C6D40` reads the connection dcb. S2C `0x4D` (`@0x4317B0`) handles spawn tips/refresh requests, not identity. Verified through real ClientHello/Auth, framed S2C spawn/removal tests (`npruntime_joiner_identity`) and the full deployment exchange (`npruntime_client_runtime`).
 - **D-NET-170** [HIGH, FIXED 2026-07-24] S2C `0x5A` is now an authoritative receive-side state channel, not merely a deploy-release signal: `ClientRuntime` retains the newest decoded `WeaponLoadout` with a revision, and `Simulation` rebuilds the local slot pool from that grant before actions without sending a new C2S `0x2F`. S2C `0x6F` and `0x53` are retained per zone; the DEATH list overlays BMS zone identity with the live 0x6F team/value/limit secured gate. Real-UDP tests pin mid-session grant replacement and live zone removal/reappearance; `deploy_screen_presenter_test.gd` pins stable selection by the zone's wire parameter rather than row index. [orig: `NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0`; `UI_UpdateDeathScreenContent @0x5536a0`]
@@ -14051,7 +14035,7 @@ MultiPlayer_JoinSessionStateMachine @0x56a50b]
 | --- | --- | --- |
 | D-WPN-3 | FIXED | FARP/ground-chain, water/swimming, clip and ammo cost gates plus Finish fire-loop kick condition are ported; the clip gate's def+0xDC bucket-pool read (`@0x541c6d..0x541c89` -> `sub_5405F0`) is folded into `slot.clip` and rides D-WPN-2. |
 | D-WPN-6 | OPEN, narrowed | Pure joiners pump remote borrowed slots and unoccupied hot pool-one slots once. The authority's general personal-slot coverage is separate from this receive replay port. |
-| D-NET-171 | OPEN, narrowed | The 0x42 password, key, app/version, index/CU, and identity checks now use the appropriate rejection replies, as do represented game-layer admission settings; the ladder, the validate callback's 14/2 lock and 14/3 source-address ban, and the split/resend/retention witnesses are recorded in the host admission section above. Side/squad password inputs (D-NET-167) and cookie/PunkBuster prerequisites remain wider admission work. |
+| D-NET-171 | OPEN, narrowed | The 0x42 password, key, app/version, index/CU, and identity checks now use the appropriate rejection replies, as do represented game-layer admission settings; the ladder, the validate callback's 14/2 lock and 14/3 source-address ban, and the split/resend/retention witnesses are recorded in the host admission section above. Squad challenge generation/validation (D-NET-167) and cookie/PunkBuster prerequisites remain wider admission work; side-password admission was ported 2026-09-13. |
 
 ## JO-C source cross-check (2026-09-13)
 
@@ -14100,3 +14084,43 @@ through the active weapon's limits. The mount clamp helper is defined in
 conditions and network/session legs retain their existing open scope. Recheck all
 active dispatch arms against `Player_AdjustWeaponElevation @0x4DBDF0` and the
 `0x4E130C..0x4E13AE` / `0x4DFAD3..0x4DFB16` sites before closure.
+
+
+### Protected admission implementation (2026-09-13)
+
+Implementation: `engine/runtime/inmatch/{joiner_connection,napi_np_protocol,
+server_message_dispatch,server_spawn}.cpp`, the typed `JoinTarget` and existing
+Godot join prompt. Witness: retail `Jointops.exe`, image base `0x400000`,
+`C:/Users/taylor/Development/ida_dbs/Jointops.exe.kong.i64`, cross-checked against
+the jo-c source named in the dated audit. No raw decompilation is included here.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Numeric local-player selection | MATCHING (native behavioral proof) | `npruntime_joiner_identity`, full deployment in `npruntime_client_runtime`; D-NET-169 |
+| JSP emission, host decode, side gate and team assignment | MATCHING (native behavioral proof) | Auth/JOIN/reject/team matrix in `npruntime_handshake_server`; CU emission in `npruntime_client_runtime`; D-NET-167 narrowed |
+| Godot prompt and real three-peer protected join | MATCHING (behavioral proof) | `net/spectator_join_prompt_test.gd`, `net/spectator_session_test.gd`: 11 passing tests, including duplicate callsigns and surfaced rejection |
+| Squad challenge and host code-21 validation | unlanded | D-NET-167 remains open |
+| Mixed retail/OpenNova acceptance for this change | unverified | Requires the live interoperability matrix; native wire tests are not that evidence |
+
+Witness map:
+
+- `CNapiServerInfo_SerializeToSession` emits numeric FID only when its u32 is
+  nonzero (`@ 0x4C3934`); a nonempty string at +176 becomes JSP (`@ 0x4C39D7`),
+  before CI0/CI1/TR. TR's byte is formatted as signed decimal, including -1.
+  [orig: CNapiServerInfo_SerializeToSession @ 0x4C3650]
+- The case-insensitive type-2 CU walk is ordered; the last JSP wins. Its setter
+  copies into 64 bytes including the terminator. [orig:
+  NapiNetConfig_LoadFromConnTags @ 0x4C7260; NapiNetConfig_SetJsp @ 0x4C26BE]
+- After spectator validation, BuildFlags bit 4 enables the side gate for players.
+  Automatic selection rejects only when both sides are protected and neither
+  matches (18); explicit side A/B compares only that side (19/20). Spectators
+  bypass this leg. [orig: Server_ValidatePlayerJoinRequest @ 0x5124A2]
+- Reservation compares nonempty side A then B passwords before the two/four-team
+  split, and before the preference/balance fallback. Equal passwords select A.
+  [orig: Server_AssignPlayerTeam @ 0x4FE424 / @ 0x4FE469]
+
+The initial audit remains a dated snapshot. Its 0x4D identity dependency and
+FID/JSP field interpretations are superseded by these direct witnesses.
+
+IDA update: appended implementation/doc backlinks at `0x4E0090`, `0x4C3650`,
+`0x512100` and `0x4FE310`, then saved the active IDB. No symbols or types were renamed.

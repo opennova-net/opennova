@@ -139,6 +139,23 @@ uint32_t validate_spectator_join(const GameConfig &config,
 	return 0;
 }
 
+// The side-password leg follows spectator admission. TR is already narrowed
+// by the auth tag loader; -1 accepts either password (or an unlocked side).
+// [orig: Server_ValidatePlayerJoinRequest @0x5124A2..0x5125D4]
+uint32_t validate_side_password(const GameConfig &config, const NapiNPConnection &conn) {
+	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) == 0 ||
+			conn.link.spectator) return 0;
+	const auto matches = [&](const std::string &password) {
+		return password.empty() || ascii_case_equal(password, conn.join_password);
+	};
+	switch (conn.char_vars.team_request) {
+		case 0xFF: return matches(config.side_a_password) || matches(config.side_b_password) ? 0 : 18;
+		case 0: return matches(config.side_a_password) ? 0 : 19;
+		case 1: return matches(config.side_b_password) ? 0 : 20;
+		default: return 22;
+	}
+}
+
 } // namespace
 
 MissionMetadataBlob build_mission_metadata_blob(
@@ -1024,6 +1041,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						reject_dpc = validate_join_request(config, admission_message->payload);
 					if (reject_dpc == 0)
 						reject_dpc = validate_spectator_join(config, conn, roster);
+					if (reject_dpc == 0)
+						reject_dpc = validate_side_password(config, conn);
 					if (reject_dpc != 0) {
 						(void)stage_join_gate_reject(conn, reject_dpc);
 						conn.admission_stage = GameAdmissionStage::Rejected;

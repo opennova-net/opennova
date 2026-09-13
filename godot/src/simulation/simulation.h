@@ -1028,7 +1028,8 @@ public:
 	// `join_role` 1 = the retail spectator role (ClientAuth JSR=1 + optional JSPP).
 	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name,
 			int p_join_role = 0, const String &p_spectator_password = String(),
-			const String &p_server_password = String());
+			const String &p_server_password = String(),
+			const String &p_join_password = String());
 	bool is_joiner() const { return session_.kind() == opennova::inmatch::RoleKind::Joiner; }
 	// Placed identities retired since the last take (the slot vanished or was
 	// re-typed): the mission root hides their placed representation.
