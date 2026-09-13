@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <formats/wac/program.h>
+#include <formats/wac/bytecode.h>
 #include <runtime/mission/runtime_boot.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/wac_layered_load.h>
@@ -92,7 +93,7 @@ static void test_compile_sources_numbers_events_across_files() {
 
 // A root with only <mission>.wac: game.wac/server.wac skip silently
 // [orig: WacScript_InitAndLoad], the mission file compiles and installs. No
-// .wac anywhere is the BMS-only case — callers leave the VM unloaded.
+// .wac anywhere is the BMS-only case — an empty terminator program still runs.
 static void test_layered_load_layers_and_skips_absent() {
     std::map<std::string, std::string> files;
     files["m01.wac"] = "if never() then set(v1,1) endif\n";
@@ -112,7 +113,16 @@ static void test_layered_load_layers_and_skips_absent() {
         const WacLayeredLoadStatus status = wac_layered_load(sys, source_over(&empty), "m01",
                 /*registry=*/nullptr, /*strict_diagnostics=*/false, error);
         CHECK(status == WacLayeredLoadStatus::kAbsent);
-        CHECK(!sys.vm().loaded());
+        CHECK(sys.vm().loaded());
+        CHECK(sys.program().code.size() == 1);
+        CHECK(sys.program().code[0] == kProgramTerminator);
+        ScriptedWorld w;
+        w.add_system(&sys);
+        w.load_systems();
+        w.script.squad_events.publish(0x1234, 71, 3, 1);
+        CHECK(sys.execute_initial(w));
+        CHECK(sys.vm().time() == 1 && w.cached.wac_ticks == 1);
+        CHECK(!w.script.squad_events.query(3)); // even empty bytecode executes its epilog
     }
 }
 
@@ -125,7 +135,7 @@ static void test_installed_program_runs_at_the_62_tick_divider() {
     WacSystem sys;
     w.add_system(&sys);
     w.load_systems();
-    CHECK(!sys.vm().loaded()); // no program installed -> VM unloaded (BMS-only case)
+    CHECK(!sys.vm().loaded()); // no install requested; distinct from an empty mission program
 
     // v1 starts 0, so eq(v1,0) fires on the first VM execution and sets v2=7.
     // The registry-aware compile (symbolic names resolve through the world).
@@ -181,7 +191,7 @@ static void test_mission_start_wac_is_eager_idempotent_and_restartable() {
     CHECK(sys.runs() == 2);                     // the next WAC run remains tick 62
     CHECK(w.script.vars.get_mission(2) == 1);  // the startup edge does not refire
 
-    sys.restore_runtime_state(sealed);
+    sys.restore_runtime_state(w, sealed);
     CHECK(sys.runs() == 1);                     // restart restores the sealed post-eager VM
     CHECK(w.script.vars.get_mission(2) == 1);
     tick_n(w, WacSystem::kTicksPerExecution);
@@ -206,7 +216,35 @@ static void test_installed_program_survives_a_reload() {
     CHECK(w.script.vars.get_mission(2) == 5); // the re-applied program executes
 }
 
+static void test_direct_system_tick_uses_mutable_clock_and_restore_publishes_it() {
+    ScriptedWorld w;
+    WacSystem sys;
+    sys.set_program(compile_source("set(ticks,-1) inc(v1)\n", {}));
+    sys.on_load(w);
+    w.cached.humans = 0;
+    world::TickContext ctx;
+    for (int i = 0; i < 2 * WacSystem::kTicksPerExecution; ++i) sys.tick(w, ctx);
+    CHECK(sys.runs() == 2 && sys.vm().time() == 0);
+    CHECK(w.cached.wac_ticks == 0 && w.script_may_advance());
+    sys.set_program(compile_source("if never then set(ticks,12) endif\n", {}), w);
+    CHECK(w.cached.wac_ticks == 0);
+    CHECK(sys.execute_initial(w));
+    CHECK(sys.runs() == 1 && sys.vm().time() == 13 && w.cached.wac_ticks == 13);
+    CHECK(!w.script_may_advance());
+    const WacSystem::RuntimeState state = sys.capture_runtime_state();
+    w.cached.humans = 1;
+    for (int i = 0; i < WacSystem::kTicksPerExecution; ++i) sys.tick(w, ctx);
+    CHECK(sys.vm().time() == 14 && w.cached.wac_ticks == 14);
+    sys.restore_runtime_state(w, state);
+    w.cached.humans = 0;
+    CHECK(sys.runs() == 1 && sys.vm().time() == 13 && w.cached.wac_ticks == 13);
+    CHECK(!w.script_may_advance());
+    sys.set_program(compile_source("", {}), w);
+    CHECK(w.cached.wac_ticks == 0 && w.script_may_advance());
+}
+
 int main() {
+    test_direct_system_tick_uses_mutable_clock_and_restore_publishes_it();
     test_compile_good_source();
     test_lenient_compile_surfaces_warnings();
     test_compile_sources_numbers_events_across_files();

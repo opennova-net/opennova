@@ -81,7 +81,7 @@ static void test_initial_execution_and_runtime_state() {
 
     w.load_systems();
     CHECK(sys.runs() == 0);
-    sys.restore_runtime_state(startup);
+    sys.restore_runtime_state(w, startup);
     CHECK(sys.runs() == 1);
     CHECK(sys.vm().time() == 1);
     for (int i = 0; i < WacSystem::kTicksPerExecution; ++i)
@@ -642,7 +642,7 @@ static void test_runtime_gaps_retain_source_and_restore_boot_evidence() {
         CHECK(first.last_tick > first.first_tick);
     }
     w.restore(baseline);
-    sys.restore_runtime_state(vm_baseline);
+    sys.restore_runtime_state(w, vm_baseline);
     CHECK(w.diagnostics.total_calls() == 2);
     run(w, sys, 1);
     CHECK(w.diagnostics.total_calls() == 4);
@@ -719,7 +719,7 @@ static void test_do_sections_cycle_and_restore_independently() {
     CHECK(w.script.vars.get_mission(5) == 3);
     CHECK(w.script.vars.get_mission(6) == 3);
     w.restore(baseline);
-    sys.restore_runtime_state(vm_baseline);
+    sys.restore_runtime_state(w, vm_baseline);
     run(w, sys, 3);
     CHECK(w.script.vars.get_mission(1) == 2);
     CHECK(w.script.vars.get_mission(2) == 1);

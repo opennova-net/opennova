@@ -182,9 +182,9 @@ struct CachedFrameState {
     // @0xC6EB14 — Server_BuildEntitySlotLists @0x4f97a0: zero @0x4f97c6, +1 per
     // active human slot @0x4f98b1]
     int32_t humans = 0;
-    // The WAC VM's execution counter, republished here so the script-advance gate
-    // can read it without reaching into the VM — retail keeps it in the same
-    // global bag as `humans`. [orig: wac_var_ticks]
+    // Derived view of the VM's mutable clock, published before admission and
+    // after execution/restore. Only the VM clock is serialized; this projection
+    // lets the world gate read retail's shared word. [orig: wac_var_ticks @0xC6EAD8]
     int32_t wac_ticks = 0;
     // The posed head as a BODY-RELATIVE delta, paired with local_head above.
     // Lag-free by construction; see the seated eye restamp in infantry.cpp.
@@ -853,9 +853,9 @@ public:
 
     // May the mission script advance this tick? Retail wraps its WAC tick, the
     // idle-timer sweep and the BMS event pump in ONE condition, and the half that
-    // matters here is `wac_var_humans || !wac_var_ticks`: once the VM has run at
-    // all, the whole script HOLDS until a human player is in the world. An empty
-    // host does not burn through its mission.
+    // matters here is `wac_var_humans || !wac_var_ticks`: a nonzero mutable WAC
+    // clock holds the script until a human player is in the world. Scripts may
+    // write ticks back to zero; completed-execution diagnostics do not gate it.
     //
     // That gate is the difference between a scripted kill reaching a client and
     // firing into an empty session: 05TRcoop kills ten AI a fifth of a second in,

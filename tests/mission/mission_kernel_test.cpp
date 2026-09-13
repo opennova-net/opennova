@@ -130,7 +130,7 @@ static void run_boot_trace_gates() {
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		const std::vector<std::string> expected = {
-				"mission_text", "load_mission", "spawn_local_player", "organic_init", "premission"};
+				"mission_text", "load_mission", "wac", "spawn_local_player", "organic_init", "premission"};
 		CHECK(kernel.boot_trace == expected);
 		CHECK(kernel.local.has_local_player());
 	}
@@ -210,6 +210,58 @@ static void test_numbered_vars_reset_after_premission_before_initial_wac() {
 		CHECK(kernel.world.script.vars.get_mission(1) == (has_wac ? 1 : 0));
 		CHECK(kernel.world.script.vars.get_mission(256) == (has_wac ? 8 : 7));
 	}
+}
+
+// Missing files still initialize the terminator-only program. Its startup
+// clock holds an empty host, and the sealed clock is visible as soon as restore
+// returns. An explicit WAC-disable option retains the unloaded-script contract.
+static void test_empty_wac_clock_and_baseline_gate() {
+    for (int source_kind = 0; source_kind < 4; ++source_kind) {
+        const bool enabled = source_kind != 3;
+        std::map<std::string, std::string> files;
+        if (source_kind == 2) files["synth.wac"] = "";
+        if (!enabled) files["synth.wac"] = "inc(v1)\n";
+        bms::File mission{};
+        bms::Event event{};
+        event.action_count = 1;
+        mission.events = {event};
+        bms::Action output{};
+        output.action_type = bms::ActionType::OutputText;
+        output.param1 = 12;
+        mission.actions = {output};
+        ms::MissionKernel kernel;
+        kernel.open_document(std::move(mission), "synth",
+                source_kind == 0 ? ms::BootFileSource{} : source_over(&files));
+        ms::KernelBootOptions options;
+        options.playable = false;
+        options.wac = enabled;
+        std::string error;
+        CHECK(kernel.boot(options, error));
+        CHECK(kernel.wac.vm().loaded() == enabled);
+        CHECK(kernel.wac.vm().time() == (enabled ? 1u : 0u));
+        CHECK(kernel.world.cached.wac_ticks == (enabled ? 1 : 0));
+        CHECK(kernel.world.script_may_advance() == !enabled);
+        for (int i = 0; i < 64; ++i) kernel.world.run_logic_tick();
+        CHECK(kernel.world.out.effects.count("text") == (enabled ? 0u : 1u));
+        CHECK(kernel.wac.runs() == (enabled ? 1u : 0u));
+        if (!enabled) continue;
+        kernel.world.cached.humans = 1;
+        for (int i = 0; i < wac::WacSystem::kTicksPerExecution; ++i)
+            kernel.world.run_logic_tick();
+        CHECK(kernel.wac.vm().time() == 2);
+        CHECK(kernel.world.cached.wac_ticks == 2);
+        CHECK(kernel.restore_baseline());
+        CHECK(kernel.wac.vm().time() == 1);
+        CHECK(kernel.world.cached.wac_ticks == 1);
+        CHECK(!kernel.world.script_may_advance());
+        CHECK(!kernel.wac.execute_initial(kernel.world));
+        kernel.world.cached.humans = 1;
+        for (int i = 0; i < wac::WacSystem::kTicksPerExecution - 1; ++i)
+            kernel.world.run_logic_tick();
+        CHECK(kernel.wac.vm().time() == 1);
+        kernel.world.run_logic_tick();
+        CHECK(kernel.wac.vm().time() == 2);
+    }
 }
 
 static void test_initial_wac_waits_for_the_weather_owner_once() {
@@ -310,6 +362,7 @@ static void test_sound_profiles_parse_once_and_keep_a_pre_boot_override() {
 }
 
 int main() {
+    test_empty_wac_clock_and_baseline_gate();
 	test_sound_profiles_parse_once_and_keep_a_pre_boot_override();
 	test_vehicle_spawn_pose_is_captured_after_initial_wac();
 	test_numbered_vars_reset_after_premission_before_initial_wac();

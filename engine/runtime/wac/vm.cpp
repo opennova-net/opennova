@@ -41,11 +41,6 @@ int32_t power_fold(int32_t base, int32_t exponent) {
 
 } // namespace
 
-bool wac_publish_ticks_and_gate(world::World &world, uint32_t runs) {
-    world.cached.wac_ticks = static_cast<int32_t>(runs);
-    return world.script_may_advance();
-}
-
 void WacVm::load(const Program &program) {
     prog_ = &program;
     events_.assign(static_cast<size_t>(program.event_count > 0 ? program.event_count : 1),

@@ -613,12 +613,12 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
         effects->open(effects_config);
         world.item_emitters.bind_scene(std::move(effects), true);
 	}
-	// Compile the mission WAC scripts; absent files skip compilation. The
+	// Compile the mission WAC scripts; absent files install an empty program. The
 	// numbered-variable reset belongs after PreMission, immediately before
 	// initial execution in complete_mission_start.
 	// [orig: WacScript_InitAndLoad @0x4F91F0, reset @0x4F95EE]
 	std::string wac_blocked_error; // strict mode's fatal diagnostic, if any
-	if (has_files && options.wac) {
+	if (options.wac) {
 		step("wac");
 		wac_loaded = false;
 		std::string wac_error;
@@ -829,7 +829,7 @@ bool MissionKernel::restore_baseline() {
 	local.weapon.switch_deferred_action = -1;
 	world.restore(baseline); // rewinds registry/vars/env/clock + re-inits systems (incl.
 	                         // AI; WacSystem::on_load also resets its 62-tick accumulator)
-	if (have_wac_baseline) wac.restore_runtime_state(wac_baseline);
+	if (have_wac_baseline) wac.restore_runtime_state(world, wac_baseline);
 	// Re-ground every soldier from scratch: the restored registry may reuse
 	// handles across epochs, so the high-water mark cannot be trusted.
 	reset_infantry_adm_ids();

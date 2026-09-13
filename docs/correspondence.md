@@ -1527,10 +1527,16 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 
 | Reimplementation | Original | Address | Verdict / evidence |
 |---|---|---|---|
-| `LocalPlayer::apply_scoped_aim_drift` / DEF stability parser | `Infantry_TickMovement` scoped oscillator / weapon DEF parser | `0x4B5966..0x4B5C97` / `0x544118..0x544169` | matching bounded drift path; D-WPN-36, original executable golden sequences and `local_player_view`, `def_parse_weapons`, `npruntime_weapon_table` |
+| `LocalPlayer::apply_scoped_aim_drift` / DEF stability parser | `Entity_UpdateInfantryPlayerBody` scoped oscillator / weapon DEF parser | `0x4B5966..0x4B5C97` / `0x544118..0x544169` | matching bounded drift path; D-WPN-36, original executable golden sequences and `local_player_view`, `def_parse_weapons`, `npruntime_weapon_table` |
 
 ### Empty-sector terrain fallback (2026-09-13)
 
 | Reimplementation | Original | Address | Verdict / evidence |
 |---|---|---|---|
 | Terrain frame, flat mesh and page composition / shader | `PolyTrn_RenderFrame`, `decode_terrain_tile_vertices`, `PolyTrn_RenderTile`, `terrain_tile_cache_lookup` | `0x60EAC0`, `0x602AA0`, `0x60DA70`, `0x604140` | matching bounded flat fallback; D-TERRAIN-12, terrain frame/cache/composer tests and Godot shader contract |
+
+### Shared WAC clock and empty startup (2026-09-13)
+
+| Reimplementation | Original | Address | Verdict / evidence |
+|---|---|---|---|
+| `WacSystem::prepare_tick`, `World::run_logic_tick`, `wac_layered_load` | shared main-frame gate / `WacScript_InitAndLoad` / `WacScript_AdvanceTick` | `0x4F91F0`, `0x4F9770`, `0x4F81D3` | matching mutable clock, one admitted frame and empty startup; D-WAC-7, `mission_kernel`, `event_runtime_bms`, `wac_program_surface` |

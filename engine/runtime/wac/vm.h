@@ -58,10 +58,11 @@ public:
     const std::vector<EventState> &events() const { return events_; }
     int32_t accumulator() const { return acc_; }
 
-    // The WAC time base: completed program executions, NOT 62 Hz engine ticks. At
-    // the original cadence one execution ~= one second; `past(n)`/`elapse(n)` and
-    // the Ticks builtin count in these units. [orig: wac_var_ticks — the run counter
-    // WacScript_AdvanceTick advances after each execution @0x4f81d3]
+    // The mutable WAC time word. Each execution increments it (about once per
+    // second), and scripts may also write it through Ticks. Temporal commands
+    // and shared script admission read this same clock, not engine ticks or
+    // diagnostic execution counts. [orig: wac_var_ticks @0xC6EAD8;
+    // WacScript_AdvanceTick increment @0x4F81D3]
     uint32_t time() const { return time_; }
     // Executed CALL instructions since load(), the unsupported-command ones
     // included: the dispatch sweep's proof that every registry row ran.
