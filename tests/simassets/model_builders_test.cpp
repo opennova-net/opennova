@@ -40,6 +40,30 @@ int read_model(const char *name, Threedi3di3 &out) {
 int main() {
     using namespace opennova::simassets;
 
+    // Entity-bound initialization feeds collision, live draws and static rows.
+    // The authored scale folds before the signed unscaled-first-husk max;
+    // a CDTA block stamps padding even for a zero model sphere.
+    {
+        EntityBoundRadiusInputs input;
+        input.model_radius_q16 = 8 << 16;
+        input.uniform_scale_q16 = 1 << 15;
+        input.has_first_husk = true;
+        input.first_husk_radius_q16 = 6 << 16;
+        TEST_EXPECT(entity_bound_radius_q16(input) == 0);
+        input.has_collision_block = true;
+        TEST_EXPECT(entity_bound_radius_q16(input) == (6 << 16) + 0x1000);
+        input.uniform_scale_q16 = 2 << 16;
+        TEST_EXPECT(entity_bound_radius_q16(input) == (16 << 16) + 0x1000);
+        input.has_first_husk = false;
+        input.uniform_scale_q16 = 0;
+        TEST_EXPECT(entity_bound_radius_q16(input) == (8 << 16) + 0x1000);
+        input.model_radius_q16 = 0x10001;
+        input.uniform_scale_q16 = 0x18000;
+        TEST_EXPECT(entity_bound_radius_q16(input) == 0x19002);
+        input.model_radius_q16 = 0;
+        TEST_EXPECT(entity_bound_radius_q16(input) == 0x1000);
+    }
+
     // --- bird: the face-only witness (18 CFAC over 9 sections, 0 BVOL) ------
     {
         Threedi3di3 model{};

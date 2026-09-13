@@ -216,15 +216,15 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 	shape.has_collision_block = state.collision_block_by_graphic[key];
 	if (!shape.has_collision_block) return shape;
 
-	int32_t bound_q16 = state.radius_q16_by_graphic[key];
-	if (shape.uniform_scale_q16 != 0)
-		bound_q16 = world::retail_q16_mul_rhu(
-				bound_q16, shape.uniform_scale_q16);
+	EntityBoundRadiusInputs bound;
+	bound.model_radius_q16 = state.radius_q16_by_graphic[key];
+	bound.uniform_scale_q16 = shape.uniform_scale_q16;
+	bound.has_collision_block = shape.has_collision_block;
 
 	// Only the FIRST husk participates in Entity_InitFromModel's max. The
 	// huskFinal pointer belongs to the later piece/death chain and is not a
 	// compatibility substitute for a missing first husk here.
-	// [orig: Entity_InitFromModel @0x40dced..0x40de16]
+	// [orig: Entity_InitFromModel @0x40dc30, first-husk max @0x40e062..0x40e06f]
 	if (def->husk[0] != '\0' && deps.models.has_index()) {
 		const std::string husk_key(def->husk);
 		auto radius_it = state.radius_q16_by_graphic.find(husk_key);
@@ -238,9 +238,10 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 			radius_it = state.radius_q16_by_graphic.emplace(
 					husk_key, husk_bound_q16).first;
 		}
-		bound_q16 = std::max(bound_q16, radius_it->second);
+		bound.has_first_husk = true;
+		bound.first_husk_radius_q16 = radius_it->second;
 	}
-	shape.bound_radius_q16 = bound_q16 + 0x1000;
+	shape.bound_radius_q16 = entity_bound_radius_q16(bound);
 
 	if (!(def->type == 6 && (def->attrib & 0x20u) != 0)) {
 		const std::array<int32_t, 3> &center = state.center_by_graphic[key];
@@ -389,14 +390,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		// operand itself is not multiplied in this initializer.
 		// [orig: Entity_InitFromModel @ 0x40dc30]
 		const bool has_collision_block = state.collision_block_by_graphic[key];
-		int32_t entity_bound_q16 = 0;
-		if (has_collision_block) {
-			entity_bound_q16 = state.radius_q16_by_graphic[key];
-			if (e->uniform_scale_q16 != 0) {
-				entity_bound_q16 = world::retail_q16_mul_rhu(
-						entity_bound_q16, e->uniform_scale_q16);
-			}
-		}
+		EntityBoundRadiusInputs bound;
+		bound.model_radius_q16 = state.radius_q16_by_graphic[key];
+		bound.uniform_scale_q16 = e->uniform_scale_q16;
+		bound.has_collision_block = has_collision_block;
 		// Platform probe boxes (vehicle-client-movers-re.md §3, D-VEH-1):
 		// retail's load-time derivation, ported as threedi_3di3_collision_probe_boxes —
 		// box Z = the CMDL header bbox Z pair, box X/Y = the lower-half
@@ -794,15 +791,15 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			}
 			// Only entity+52's FIRST husk model joins this signed max. A
 			// huskFinal-only definition has no substitute operand here.
-			// [orig: Entity_InitFromModel @0x40dced..0x40de16]
+			// [orig: Entity_InitFromModel @0x40dc30, first-husk max @0x40e062..0x40e06f]
 			if (first_husk_m3 != nullptr) {
-				const int32_t husk_bound_q16 =
+				bound.has_first_husk = true;
+				bound.first_husk_radius_q16 =
 						model_bound_radius_q16_from_3di(*first_husk_m3);
-				entity_bound_q16 = std::max(entity_bound_q16, husk_bound_q16);
 			}
 		}
 		if (has_collision_block && e->bound_radius <= 0.0f)
-			e->bound_radius = static_cast<float>(entity_bound_q16 + 0x1000) /
+			e->bound_radius = static_cast<float>(entity_bound_radius_q16(bound)) /
 					65536.0f;
 		const int32_t occ_id = state.occlusion_by_graphic[key];
 		// Entity_ClassifyForMinimap's ordinary-Building branch checks the

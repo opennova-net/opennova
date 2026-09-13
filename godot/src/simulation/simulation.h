@@ -1338,6 +1338,9 @@ public:
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
 	Vector3 get_local_player_position() const;
+	// FP lighting uses the local ENTITY sphere, before either model submit.
+	// [orig: Player_RenderFirstPersonViewModel @0x4DEEA9..0x4DEEB0]
+	bool local_player_light_query(Vector3 &r_position, int32_t &r_radius_q16) const;
 	// The local player's live eye offset above its position (the entity CameraOffset
 	// mirror the USE seat scan measures from), Godot space; Vector3() when no player is spawned.
 	Vector3 get_local_player_eye_offset() const;

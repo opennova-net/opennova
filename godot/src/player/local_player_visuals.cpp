@@ -129,6 +129,7 @@ ObjectModel *LocalPlayerVisuals::build_local_player_held_weapon(const String &p_
 				static_cast<Object *>(parent->call("local_view_presenter")));
 		if (presenter != nullptr) {
 			model->set_slot_shadow_capture_with(presenter->avatar());
+			model->set_entity_light_owner(presenter->avatar());
 		}
 	}
 	return model;

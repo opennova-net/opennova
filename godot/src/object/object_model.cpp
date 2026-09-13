@@ -5,6 +5,7 @@
 #include "object/object_model.h"
 #include "object/model_light.h"
 
+#include <base/io/fixed.h>
 #include <cmath>
 
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -289,13 +290,19 @@ Transform3D ObjectModel::compose_entity_transform(const Basis &p_basis,
 }
 
 void ObjectModel::set_shadow_bound_radii(float p_model_sphere, float p_entity_bound) {
-	const float sphere = p_model_sphere > 0.0f ? p_model_sphere : 0.0f;
-	const float bound = p_entity_bound > 0.0f ? p_entity_bound : 0.0f;
-	if (model_sphere_radius_ != sphere || entity_bound_radius_ != bound) {
+	set_bound_radii_q16(
+			opennova::io::float_to_fp16_16_round_sat(p_model_sphere),
+			opennova::io::float_to_fp16_16_round_sat(p_entity_bound));
+}
+
+void ObjectModel::set_bound_radii_q16(int32_t p_model_sphere, int32_t p_entity_bound) {
+	const float sphere = static_cast<float>(MAX(p_model_sphere, 0)) / 65536.0f;
+	const int32_t bound = MAX(p_entity_bound, 0);
+	if (model_sphere_radius_ != sphere || entity_bound_radius_q16_ != bound) {
 		SlotShadow::bump_caster_group_revision();
 	}
 	model_sphere_radius_ = sphere;
-	entity_bound_radius_ = bound;
+	entity_bound_radius_q16_ = bound;
 }
 
 float ObjectModel::get_model_sphere_radius() const {
@@ -303,7 +310,16 @@ float ObjectModel::get_model_sphere_radius() const {
 }
 
 float ObjectModel::get_entity_bound_radius() const {
-	return entity_bound_radius_;
+	return static_cast<float>(entity_bound_radius_q16_) / 65536.0f;
+}
+
+void ObjectModel::set_entity_light_owner(ObjectModel *p_owner) {
+	entity_light_owner_ = p_owner != nullptr && p_owner != this
+			? ObjectID(p_owner->get_instance_id()) : ObjectID();
+}
+
+ObjectModel *ObjectModel::get_entity_light_owner() const {
+	return Object::cast_to<ObjectModel>(ObjectDB::get_instance(entity_light_owner_));
 }
 
 void ObjectModel::set_slot_shadow_capture_with(ObjectModel *p_owner) {
@@ -1793,6 +1809,8 @@ void ObjectModel::apply_point_light_selection(int p_count,
 }
 
 void ObjectModel::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_entity_light_owner", "owner"),
+			&ObjectModel::set_entity_light_owner);
 	ClassDB::bind_method(D_METHOD("set_focal_sway", "active", "basis", "world_offset"),
 			&ObjectModel::set_focal_sway);
 	ClassDB::bind_static_method("ObjectModel",

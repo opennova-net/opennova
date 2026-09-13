@@ -610,6 +610,7 @@ Node3D *EntityPresenter::rebuild_held_weapon(int p_handle, int p_adm) {
 			// RenderSlot_RenderEntityAndChildren @0x5d78ef, see
 			// docs/render/render-lighting-re.md] — never a slot of its own.
 			built->set_slot_shadow_capture_with(resolve_wire_handle(p_handle));
+			built->set_entity_light_owner(resolve_wire_handle(p_handle));
 			// The held weapon draws at its owner's selected RLOD clamped to its
 			// own LOD count and never walks its own thresholds
 			// (renderer::attachment_lod_index). Retail draws it inside the

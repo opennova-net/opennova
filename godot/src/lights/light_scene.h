@@ -93,22 +93,27 @@ public:
 	// zero and owner_group_section names the current ROBJ, exactly matching the
 	// retail re-scope @0x5d8ff7. All arrays are parallel. Returns the number of
 	// models (not expanded draw contexts) that received at least one light.
+	// Optional query arrays override the source for camera-relative FP parts;
+	// nested head/husk models share their root entity query and groups.
 	int render_model_frame(const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
 			const PackedInt64Array &p_interior_owners,
 			const PackedInt32Array &p_interior_sections,
 			const PackedByteArray &p_robj_scoped,
-			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
+			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
+			const PackedVector3Array &p_entity_positions = PackedVector3Array(),
+			const PackedInt32Array &p_entity_bound_radii_q16 = PackedInt32Array());
 
-	// The same witnessed per-draw selection for static MultiMesh rows. Bounds
-	// are position/size pairs in atlas-row order; the remaining arrays are
-	// parallel to rows. Inactive (destroyed/carved) rows stay zero so their
+	// The same entity-cube selection for static MultiMesh rows. Each row carries
+	// its ENTITY origin and initialized Q16 bound radius, shared by every ROBJ
+	// of that entity. All arrays are parallel. Inactive/carved rows stay zero so their
 	// stable INSTANCE_CUSTOM.x identity never has to move. The RGBAF atlas is
 	// published as opennova_static_point_light_rows: count in texel 0.x, then
 	// four (world position.xyz, attenuation2)/(color.rgb, range) pairs.
 	// Returns the number of active rows that received at least one light.
 	int render_static_frame(
-			const PackedVector3Array &p_bounds_position_size,
+			const PackedVector3Array &p_entity_positions,
+			const PackedInt32Array &p_entity_bound_radii_q16,
 			const PackedInt64Array &p_owner_entities,
 			const PackedInt32Array &p_owner_sections,
 			const PackedInt64Array &p_interior_owners,

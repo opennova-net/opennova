@@ -226,6 +226,7 @@ int64_t EffectLightDirector::owner_id_for_node(ObjectModel *p_node) {
 	if (p_node == nullptr) {
 		return 0;
 	}
+	if (ObjectModel *owner = p_node->get_entity_light_owner()) p_node = owner;
 	const Ref<EntityRef> ref = p_node->get_entity_ref();
 	const int wire = ref.is_valid() ? ref->get_wire_handle() : -1;
 	return wire >= 0 ? LightScene::owner_id_for_wire(wire)
@@ -439,8 +440,8 @@ Vector3 EffectLightDirector::light_gain() const {
 }
 
 // Build the immutable-index static atlas rows. The placer owns row identity
-// and exact ROBJ bounds; this device supplies the same owner/interior groups
-// as the live-model pass, selects the witnessed nearest four, and publishes
+// and entity bounds; this device supplies the same owner/interior groups
+// as the live-model pass, selects the witnessed nearest three, and publishes
 // the RGBAF payload consumed through INSTANCE_CUSTOM.x.
 void EffectLightDirector::_render_static_light_rows(const Vector3 &p_gain, Weather *p_weather,
 		int p_time_ms) {
@@ -449,7 +450,8 @@ void EffectLightDirector::_render_static_light_rows(const Vector3 &p_gain, Weath
 		_rebuild_static_light_rows();
 		static_rows_revision_ = revision;
 	}
-	scene()->render_static_frame(static_rows_bounds_, static_rows_owner_entities_,
+	scene()->render_static_frame(static_rows_positions_, static_rows_bound_radii_q16_,
+			static_rows_owner_entities_,
 			static_rows_owner_sections_, static_rows_interior_owners_,
 			static_rows_interior_sections_, static_rows_active_, p_gain, p_time_ms, p_weather,
 			static_rows_revision_);
@@ -464,13 +466,15 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 			row_count = std::max(row_count, descriptor->get_atlas_row() + 1);
 		}
 	}
-	PackedVector3Array bounds_position_size;
+	PackedVector3Array entity_positions;
+	PackedInt32Array entity_bound_radii_q16;
 	PackedInt64Array owner_entities;
 	PackedInt32Array owner_sections;
 	PackedInt64Array interior_owners;
 	PackedInt32Array interior_sections;
 	PackedByteArray active;
-	bounds_position_size.resize(row_count * 2);
+	entity_positions.resize(row_count);
+	entity_bound_radii_q16.resize(row_count);
 	owner_entities.resize(row_count);
 	owner_sections.resize(row_count);
 	interior_owners.resize(row_count);
@@ -491,9 +495,8 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 		if (source.is_null()) {
 			continue;
 		}
-		const AABB world_bounds = descriptor->get_world_bounds();
-		bounds_position_size[atlas_row * 2] = world_bounds.position;
-		bounds_position_size[atlas_row * 2 + 1] = world_bounds.size;
+		entity_positions[atlas_row] = source->get_world_transform().origin;
+		entity_bound_radii_q16[atlas_row] = source->get_entity_bound_radius_q16();
 		active[atlas_row] = descriptor->is_active() ? 1 : 0;
 		// The row's two groups are the engine's static-row policy
 		// (renderer::static_light_row_groups): a building is its own
@@ -518,7 +521,8 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 		interior_owners[atlas_row] = static_cast<int64_t>(groups.interior_group_entity);
 		interior_sections[atlas_row] = groups.interior_group_section;
 	}
-	static_rows_bounds_ = bounds_position_size;
+	static_rows_positions_ = entity_positions;
+	static_rows_bound_radii_q16_ = entity_bound_radii_q16;
 	static_rows_owner_entities_ = owner_entities;
 	static_rows_owner_sections_ = owner_sections;
 	static_rows_interior_owners_ = interior_owners;
@@ -540,6 +544,8 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 	const Vector3 cam_pos = p_camera->get_camera_transform().origin;
 	const int time_ms = now_ms();
 	frame_models_.clear();
+	frame_entity_positions_.clear();
+	frame_entity_bound_radii_q16_.clear();
 	frame_owners_.clear();
 	// interior_*: the second witnessed group — the building each draw
 	// currently stands inside, plus that blink volume's section (the engine
@@ -560,6 +566,10 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 				continue;
 			}
 			frame_models_.push_back(model);
+			ObjectModel *entity_model = model->get_entity_light_owner();
+			if (entity_model == nullptr) entity_model = model;
+			frame_entity_positions_.push_back(entity_model->get_global_position());
+			frame_entity_bound_radii_q16_.push_back(entity_model->get_entity_bound_radius_q16());
 			frame_owners_.push_back(reg_owners_[i]);
 			frame_robj_scoped_.push_back(reg_robj_scoped_[i]);
 			int64_t interior_owner = 0;
@@ -582,12 +592,21 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 	// the room's lights reach the arms and weapon the same way they reach
 	// the third-person body standing there.
 	const BlinkOwner viewmodel_interior = _local_player_interior_group();
+	Vector3 local_entity_position;
+	int32_t local_entity_radius_q16 = 0;
+	const Ref<Simulation> sim = _sim();
+	const bool has_local_query = sim.is_valid() &&
+			sim->local_player_light_query(local_entity_position, local_entity_radius_q16);
 	for (int64_t i = 0; i < p_viewmodel_parts.size(); ++i) {
 		ObjectModel *part = Object::cast_to<ObjectModel>(static_cast<Object *>(p_viewmodel_parts[i]));
 		if (part == nullptr || !part->is_visible_in_tree()) {
 			continue;
 		}
 		frame_models_.push_back(part);
+		// Both first-person submits inherit the query made for the player,
+		// before viewmodel camera offsets. [orig: @0x4DEEA9..0x4DEEB0]
+		frame_entity_positions_.push_back(has_local_query ? local_entity_position : part->get_global_position());
+		frame_entity_bound_radii_q16_.push_back(has_local_query ? local_entity_radius_q16 : part->get_entity_bound_radius_q16());
 		frame_owners_.push_back(p_viewmodel_wire_handle >= 0
 						? LightScene::owner_id_for_wire(p_viewmodel_wire_handle)
 						: static_cast<int64_t>(part->get_instance_id()));
@@ -608,7 +627,8 @@ void EffectLightDirector::render_frame(Camera3D *p_camera,
 		census_stale_ = true;
 	}
 	scene()->render_model_frame(frame_models_, frame_owners_, frame_interior_owners_,
-			frame_interior_sections_, frame_robj_scoped_, gain, time_ms, weather);
+			frame_interior_sections_, frame_robj_scoped_, gain, time_ms, weather,
+			frame_entity_positions_, frame_entity_bound_radii_q16_);
 	_render_coronas(p_camera, gain, weather, frame_models_, frame_owners_, env);
 }
 
@@ -691,9 +711,13 @@ void EffectLightDirector::_rebuild_model_registry(Node *p_container) {
 		if (model == nullptr) {
 			continue;
 		}
-		const Ref<EntityRef> ref = model->get_entity_ref();
+		ObjectModel *entity_model = model->get_entity_light_owner();
+		if (entity_model == nullptr) entity_model = model;
+		const Ref<EntityRef> ref = entity_model->get_entity_ref();
 		reg_models_.push_back(ObjectID(model->get_instance_id()));
-		reg_owners_.push_back(owner_id_for_node(model));
+		const int64_t *static_owner = ref.is_valid()
+				? static_owner_by_bms_.getptr(ref->get_bms_id()) : nullptr;
+		reg_owners_.push_back(static_owner != nullptr ? *static_owner : owner_id_for_node(model));
 		reg_robj_scoped_.push_back(
 				ref.is_valid() && ref->get_kind() == MissionData::KIND_BUILDING ? 1 : 0);
 		reg_bms_ids_.push_back(ref.is_valid() ? ref->get_bms_id() : 0);

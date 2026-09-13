@@ -236,7 +236,8 @@ private:
 	// the light SELECTION over them runs per frame, as retail's per-batch
 	// select does.
 	int64_t static_rows_revision_ = -1;
-	PackedVector3Array static_rows_bounds_;
+	PackedVector3Array static_rows_positions_;
+	PackedInt32Array static_rows_bound_radii_q16_;
 	PackedInt64Array static_rows_owner_entities_;
 	PackedInt32Array static_rows_owner_sections_;
 	PackedInt64Array static_rows_interior_owners_;
@@ -291,6 +292,8 @@ private:
 	// Reused per-frame draw-context arrays (the native call reads them
 	// whole, so they are cleared, not tail-truncated).
 	TypedArray<Node3D> frame_models_;
+	PackedVector3Array frame_entity_positions_;
+	PackedInt32Array frame_entity_bound_radii_q16_;
 	PackedInt64Array frame_owners_;
 	PackedInt64Array frame_interior_owners_;
 	PackedInt32Array frame_interior_sections_;

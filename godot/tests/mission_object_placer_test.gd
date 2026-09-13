@@ -181,6 +181,8 @@ func test_runtime_static_batch_publishes_effect_source() -> void:
 	assert_eq(source.item_id, 105004)
 	assert_eq(source.graphic, "StaticCrate1")
 	assert_eq(source.object_data, object_data)
+	assert_eq(source.entity_bound_radius_q16, 0,
+			"a source without a CDTA block retains zero entity radius")
 	var expected_transform := MissionObjectPlacer.entity_transform(Vector3(3, 4, 5), Vector3.ZERO)
 	var actual_transform: Transform3D = source.world_transform
 	assert_true(actual_transform.is_equal_approx(expected_transform),
@@ -202,7 +204,7 @@ func test_runtime_static_batch_publishes_effect_source() -> void:
 	var actual_bounds := light_draw.world_bounds
 	assert_true(actual_bounds.position.is_equal_approx(expected_bounds.position))
 	assert_true(actual_bounds.size.is_equal_approx(expected_bounds.size),
-			"selection uses the exact transformed bounds of that ROBJ's surfaces")
+			"the diagnostic row retains exact transformed ROBJ geometry bounds")
 	# Getter rows are copies; callers cannot rewrite the placer's retained identity.
 	source.item_id = 0
 	assert_eq((placer.get_static_item_effect_sources()[0] as StaticEffectSource).item_id,
@@ -1548,3 +1550,63 @@ func test_dense_population_device_rows_match_the_bookkeeping() -> void:
 	check.call(level0, "level 0 after the carve")
 	assert_true(placer.show_static_instance(bms[2]))
 	check.call(level0, "level 0 after the restore")
+
+
+func test_static_and_live_placement_share_initialized_entity_light_radius() -> void:
+	var db := ItemDatabase.new()
+	assert_eq(db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(_abs("res://../fixtures/threedi/synth")), OK)
+	var data := ObjectData.new()
+	assert_eq(data.open_from_resource_root(root, "crate.3di"), OK)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	# crate.3di's authored GHDR sphere is 80265 Q16. The second existing
+	# definition has scale 1.5: RHU(80265 * 1.5) + 4096 = 124494.
+	for definition in [[105004, "StaticCrate1", 84361], [106103, "pump", 124494]]:
+		var placer := MissionObjectPlacer.create(root, db)
+		assert_true(placer.register_resolved_static_graphic(definition[1], data, [{
+			"mesh": BoxMesh.new(), "material": null,
+			"offset": Transform3D.IDENTITY, "submesh": 0,
+		}]))
+		var mission := MissionData.new()
+		assert_eq(mission.create_default(), OK)
+		assert_not_null(mission.add_entity(MissionData.KIND_ITEM,
+				definition[0], Vector3.ZERO, Vector3.ZERO))
+		var branch := Node3D.new()
+		parent.add_child(branch)
+		var stats := placer.place(mission, branch)
+		assert_eq(stats.batched, 1)
+		var sources := placer.get_static_item_effect_sources()
+		assert_eq(sources.size(), 1)
+		if sources.is_empty():
+			continue
+		assert_eq(sources[0].entity_bound_radius_q16, definition[2],
+				"static metadata uses authored scaling and the 0x1000 entity pad")
+		var live_placer := MissionObjectPlacer.create(root, db)
+		live_placer.register_object_data(definition[1], data)
+		live_placer.register_occlusion_verdict(definition[0], true)
+		var live_branch := Node3D.new()
+		parent.add_child(live_branch)
+		var live_stats := live_placer.place(mission, live_branch)
+		assert_eq(live_stats.animated, 1)
+		var live_models := live_placer.get_placed_models()
+		assert_eq(live_models.size(), 1)
+		if live_models.is_empty():
+			continue
+		var live: Node3D = live_models[0]
+		var scene := LightScene.new()
+		var radius := float(definition[2]) / 65536.0
+		for offset in [-0.01, 0.01]:
+			assert_gt(scene.spawn_model_light(ModelLightSpawn.make(
+					Vector3(radius + offset, 0.0, 0.0), 0.001)), 0)
+		var models: Array[Node3D] = [live]
+		assert_eq(scene.render_model_frame(models, PackedInt64Array([0]),
+				PackedInt64Array([0]), PackedInt32Array([0]), PackedByteArray([0]),
+				Vector3.ONE, 0, null), 1)
+		var surfaces: Array[Node] = live.find_children("*", "GeometryInstance3D", true, false)
+		assert_gt(surfaces.size(), 0)
+		if not surfaces.is_empty():
+			assert_eq(float((surfaces[0] as GeometryInstance3D).get_instance_shader_parameter(
+					"u_point_light_count")), 1.0,
+					"the live query has the same padded radius as its static source")

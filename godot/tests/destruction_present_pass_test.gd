@@ -921,3 +921,75 @@ func test_retained_husk_pick_retries_and_updates_only_the_husk_section_mask() ->
 		for part in parts.values():
 			assert_false((part as Node3D).visible, 'mask changes leave the intact model hidden')
 	presenter.teardown()
+
+
+func test_static_husk_carries_entity_light_cube_and_static_owner() -> void:
+	var temp_root := WorldFixture.stage_minimal_root("static_husk_light", false, {
+		"items.def": """begin "Light query shell"
+id 105004
+type object
+graphic LightShell
+husk LightShellHusk
+hp 50
+end
+"""})
+	var db := ItemDatabase.new()
+	assert_eq(db.load(temp_root.path_join("items.def")), OK)
+	var resources := ResourceRoot.new()
+	assert_eq(resources.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/synth")), OK)
+	var intact_data := ObjectData.new()
+	assert_eq(intact_data.open_from_resource_root(resources, "crate.3di"), OK)
+	var husk_data := ObjectData.new()
+	assert_eq(husk_data.open_from_resource_root(resources, "crate.3di"), OK)
+	var placer := MissionObjectPlacer.create(resources, db)
+	assert_true(placer.register_resolved_static_graphic("LightShell", intact_data,
+			[{"mesh": BoxMesh.new(), "material": null, "offset": Transform3D.IDENTITY,
+			"submesh": 0}]))
+	assert_true(placer.register_object_data("LightShellHusk", husk_data))
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 105004, Vector3.ZERO, Vector3.ZERO))
+	var world := WorldFixture.make_world(self)
+	var root := MissionRoot.new()
+	root.name = "MissionRoot"
+	world.add_child(root)
+	assert_eq(placer.place(mission, root).batched, 1)
+	var source: StaticEffectSource = placer.get_static_item_effect_sources()[0]
+	assert_eq(source.entity_bound_radius_q16, 84361,
+			"the intact crate's initialized entity radius is retained before carving")
+	var director := EffectLightDirector.new()
+	director.setup(world, placer.get_static_item_effect_sources,
+			placer.get_static_light_draw_sources, placer.get_static_light_draw_source_revision)
+	director.reattach()
+	var owner := LightScene.owner_id_for_static_source(source.source_index)
+	assert_gt(director.scene().spawn_model_light(ModelLightSpawn.make(Vector3(1, 0, 0), 0.01)
+			.attached(0, owner)), 0)
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	camera.position = Vector3(0, 0, 8)
+	director.render_frame(camera)
+	assert_almost_eq(director.scene().get_static_light_rows_image().get_pixel(0, 0).r,
+			1.0, 0.001, "the intact static row admits its owned light inside the entity cube")
+	var container := root.get_node("MissionObjects") as Node3D
+	var presenter := _make_presenter(null, container, _index_of([]), placer,
+			db, ItemEffectDirector.new(), null)
+	presenter.present_destruction_drained(DestructionDrain.make([
+			HuskSwapEvent.make(source.bms_id, 5004)]), [])
+	var graft: ObjectModel = _husk_models(world)[0]
+	assert_eq(graft.entity_ref.bms_id, source.bms_id)
+	director.render_frame(camera)
+	var surfaces: Array[Node] = graft.find_children("*", "GeometryInstance3D", true, false)
+	assert_gt(surfaces.size(), 0)
+	for node in surfaces:
+		assert_eq(float((node as GeometryInstance3D).get_instance_shader_parameter(
+				"u_point_light_count")), 1.0,
+				"the live husk keeps the intact entity radius AND static owner identity")
+	presenter.reset_wire_runtime_state()
+	await get_tree().process_frame
+	director.render_frame(camera)
+	assert_almost_eq(director.scene().get_static_light_rows_image().get_pixel(0, 0).r,
+			1.0, 0.001, "restoration keeps the original static row and light lease")
+	presenter.teardown()
+	world.unload()
+	TestFs.remove_dir_recursive(temp_root)

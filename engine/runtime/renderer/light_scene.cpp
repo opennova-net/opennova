@@ -27,6 +27,19 @@ int32_t clamp_i32(int64_t value) {
 
 } // namespace
 
+LightDrawContext entity_light_draw_context(const EntityLightQuery &entity) {
+	// [orig: setup_terrain_effect_for_entity @0x5c74a0, entity+0 and
+	// position +/- radius @0x5c74fb..0x5c7536 before select @0x5c753a]
+	LightDrawContext draw;
+	const uint32_t radius = static_cast<uint32_t>(entity.bound_radius_fixed);
+	for (size_t axis = 0; axis < entity.position_fixed.size(); ++axis) {
+		const uint32_t center = static_cast<uint32_t>(entity.position_fixed[axis]);
+		draw.aabb_min_fixed[axis] = static_cast<int32_t>(center - radius);
+		draw.aabb_max_fixed[axis] = static_cast<int32_t>(center + radius);
+	}
+	return draw;
+}
+
 uint32_t corona_texture_argb(int x, int y) {
 	// [orig: Lighting_InitTextures @ 0x5a973a..0x5a97ff].
 	if (x <= 0 || x >= kCoronaTextureSize - 1 || y <= 0 ||
@@ -536,6 +549,8 @@ void LightScene::select_for_draws(const LightDrawContext *draws,
 	};
 	std::array<Candidate, kQueryLimit> candidates;
 	std::array<LightHandle, kQueryLimit> handles;
+	const size_t query_limit = options.target == LightSelectionTarget::Objects
+			? kObjectQueryLimit : kQueryLimit;
 	for (size_t d = 0; d < draw_count; ++d) {
 		const LightDrawContext &draw = draws[d];
 		std::array<int32_t, 3> center{};
@@ -546,7 +561,7 @@ void LightScene::select_for_draws(const LightDrawContext *draws,
 		}
 		size_t count = 0;
 		// The exact witnessed admission: full per-axis overlap, saturating
-		// axis-distance sum, the first-64 cap in slot order. Identical for
+		// axis-distance sum, the caller-specific cap in slot order. Identical for
 		// both enumeration paths; returns false when the cap closes the walk.
 		auto admit = [&](const CompactSlot &slot) -> bool {
 			bool overlaps = true;
@@ -568,12 +583,12 @@ void LightScene::select_for_draws(const LightDrawContext *draws,
 			}
 			candidates[count] = Candidate{slot.handle, distance};
 			++count;
-			return count < kQueryLimit; // [orig: @ 0x5aa384]
+			return count < query_limit; // object @0x5ABA8D; general @0x5AA384
 		};
 		if (select_index_enabled_ && grid_cols_ > 0) {
 			// Gather the cell superset, then re-establish slot order: the
 			// candidate indexes sort ascending, so the exact test runs in the
-			// same enumeration order as the linear scan and the first-64
+			// same enumeration order as the linear scan and the slot-order
 			// truncation admits the same slots.
 			gather_scratch_.clear();
 			if (++gather_stamp_value_ == 0) {

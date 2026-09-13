@@ -526,21 +526,20 @@ func test_static_rows_dirty_maintenance_matches_full_rebuild() -> void:
 	for config in configs:
 		handles_fast.append(int(fast.spawn_model_light(config)))
 		handles_ref.append(int(ref.spawn_model_light(config)))
-	var bounds := PackedVector3Array([
-		Vector3(-2.0, -2.0, -2.0), Vector3(6.0, 6.0, 6.0),
-		Vector3(2.0, -1.0, -4.0), Vector3(5.0, 5.0, 5.0),
-		Vector3(-5.0, -1.0, 0.0), Vector3(4.0, 4.0, 4.0),
+	var positions := PackedVector3Array([
+		Vector3(1.0, 1.0, 1.0), Vector3(4.5, 1.5, -1.5), Vector3(-3.0, 1.0, 2.0),
 	])
+	var radii_q16 := PackedInt32Array([3 << 16, 163840, 2 << 16])
 	var owners := PackedInt64Array([0, 0, 0])
 	var sections := PackedInt32Array([0, 0, 0])
 	var active := PackedByteArray([1, 1, 1])
 	var ref_revision := 100
 	var compare := func(gain: Vector3, time_ms: int, label: String) -> void:
-		fast.render_static_frame(bounds, owners, sections,
+		fast.render_static_frame(positions, radii_q16, owners, sections,
 				PackedInt64Array([0, 0, 0]), PackedInt32Array([0, 0, 0]),
 				active, gain, time_ms, null, 1)
 		ref_revision += 1
-		ref.render_static_frame(bounds, owners, sections,
+		ref.render_static_frame(positions, radii_q16, owners, sections,
 				PackedInt64Array([0, 0, 0]), PackedInt32Array([0, 0, 0]),
 				active, gain, time_ms, null, ref_revision)
 		var img_fast: Image = fast.get_static_light_rows_image()

@@ -27,6 +27,19 @@ bool collision_model_from_3di(const opennova::threedi::ThreediCollisionModel *co
 int32_t model_bound_radius_q16_from_3di(const opennova::threedi::Threedi3di3 &model);
 float model_bound_radius_from_3di(const opennova::threedi::Threedi3di3 &model);
 
+// Entity_InitFromModel's entity+0 radius, shared by collision and render
+// metadata. The collision BLOCK pointer gates the stamp, even when that
+// block has no usable collision volumes. Only the first husk participates;
+// huskFinal belongs to the later death chain, and is not a substitute.
+struct EntityBoundRadiusInputs {
+	int32_t model_radius_q16 = 0;
+	int32_t uniform_scale_q16 = 0; // zero keeps the base radius unscaled
+	int32_t first_husk_radius_q16 = 0;
+	bool has_collision_block = false;
+	bool has_first_husk = false;
+};
+int32_t entity_bound_radius_q16(const EntityBoundRadiusInputs &inputs);
+
 // Build the runtime occlusion model from the parsed OCCL tables
 // [orig: load_occlusion_model_data @ 0x5b4a00].
 bool occlusion_model_from_3di(const opennova::threedi::Threedi3di3 &model,
