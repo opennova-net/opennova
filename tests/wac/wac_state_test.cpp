@@ -108,7 +108,73 @@ static void test_music_closed_stream_is_a_witnessed_success() {
     CHECK(f.world.diagnostics.empty() && f.world.out.effects.entries().empty());
 }
 
+static void test_auto_dword_assignment_and_partial_cache_refresh() {
+    Fixture f;
+    Entity player; player.item_id = 1; player.health = 100; player.team = 1;
+    const auto local = f.world.registry.spawn(0, player);
+    player.team = 2;
+    const auto selected = f.world.registry.spawn(0, player);
+    CHECK(selected.packed == 1);
+    f.world.cached.local_player = local;
+    const Program program = compile_source(
+            "if never then set(auto,196609) set(v1,auto) set(v2,Player) set(v3,Item) "
+            "pisteam(2) store(v4) set(auto,-2147483647) set(v5,auto) "
+            "set(auto,196609) endif\nv6=auto\n", {});
+    CHECK(program.ok());
+    WacVm vm; vm.load(program); vm.execute(f.world);
+    CHECK(f.value(1) == 196609 && f.value(2) == 196609 && f.value(3) == 196609);
+    CHECK(f.value(4) == 1); // entity consumers use the low-word selected handle
+    CHECK(f.value(5) == -2147483647);
+    CHECK(f.value(6) == 196609);
+    const auto baseline = vm.capture_runtime_state();
+    CHECK(baseline.auto_item == 0x00030001u);
+    vm.execute(f.world);
+    CHECK(f.value(6) == int32_t(0x00030000u | local.packed));
+    f.world.cached.local_player = {};
+    vm.execute(f.world);
+    CHECK(f.value(6) == 0x0003FFFF); // missing-player cache writes only LOWORD
+    vm.load(program);
+    vm.restore_runtime_state(program, baseline);
+    CHECK(vm.capture_runtime_state().auto_item == 0x00030001u);
+    vm.execute(f.world);
+    CHECK(f.value(6) == 0x0003FFFF);
+}
+
+static void test_auto_group_bindings_preserve_high_word_and_restore_it() {
+    Fixture f;
+    Entity player; player.item_id = 1; player.health = 100; player.team = 1;
+    const auto local = f.world.registry.spawn(0, player);
+    player.team = 2;
+    const auto selected = f.world.registry.spawn(0, player);
+    f.world.cached.local_player = local;
+    const int group = f.world.registry.intern_group("picked");
+    f.world.registry.set_script_group_members(group, {selected});
+    CompileEnv env; env.registry = &f.world.registry;
+    const Program program = compile_source(
+            "if never then set(auto,196609) endif\n"
+            "gloop G_picked v1=auto set(auto,327681) v2=auto end\nv3=auto\n", env);
+    CHECK(program.ok());
+    WacVm vm; vm.load(program); vm.execute(f.world);
+    CHECK(f.value(1) == int32_t(0x00030000u | selected.packed));
+    CHECK(f.value(2) == 327681);
+    CHECK(f.value(3) == int32_t(0x00050000u | local.packed));
+    const auto baseline = vm.capture_runtime_state();
+    CHECK(baseline.auto_item == (0x00050000u | local.packed));
+    f.world.cached.local_player = {};
+    vm.execute(f.world);
+    CHECK(f.value(1) == int32_t(0x00050000u | selected.packed));
+    CHECK(f.value(3) == 0x0005FFFF); // exhausted loop restores absent local player
+    vm.load(program);
+    vm.restore_runtime_state(program, baseline);
+    f.world.cached.local_player = local;
+    vm.execute(f.world);
+    CHECK(f.value(1) == int32_t(0x00050000u | selected.packed));
+    CHECK(f.value(3) == int32_t(0x00050000u | local.packed));
+}
+
 int main() {
+    test_auto_dword_assignment_and_partial_cache_refresh();
+    test_auto_group_bindings_preserve_high_word_and_restore_it();
     test_squad_selection_clear_and_retry();
     test_squad_ttl_is_per_execution_and_exports_are_mutable();
     test_random_named_result_and_wide_signed_product();

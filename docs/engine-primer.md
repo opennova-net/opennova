@@ -286,3 +286,5 @@ Empty terrain sectors (2026-09-13): ordinary views traverse quadrant 1 at zero h
 WAC/BMS timing (2026-09-13): both schedulers use the mutable WAC time word and one admission decision per logic tick. A terminator-only program still executes at startup. See [mission event runtime](mission/bms-event-runtime-re.md), D-WAC-7.
 
 2026-09-13, D-WPN-37: Airborne players suppress authored first-person ADS position bias while scope interpolation continues; reload, NoCardSwitch and ForceScoped keep their existing optical policy. See [world §14.10](world/world-wac-ai-re.md). Native `local_player_view` regressions pass.
+
+2026-09-13, D-WAC-8: The Player/Item/auto slot retains all 32 bits; cache and group refreshes replace only its low-word entity handle. [World §33.15](world/world-wac-ai-re.md) records the original word stores and passing `wac_state` regressions.

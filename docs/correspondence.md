@@ -1546,3 +1546,9 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 | Reimplementation | Original | Address | Verdict / evidence |
 |---|---|---|---|
 | `local_player_view` camera bias predicate | first-person bias consumers | `0x4DD40D..0x4DD414`, `0x4DD49F..0x4DD4A6` | matching existing position consumer and gate; D-WPN-37, native mid-transition airborne/landing regressions; rotational interpolation remains a separate correction |
+
+### WAC auto DWORD (2026-09-13)
+
+| Reimplementation | Original | Address | Verdict / evidence |
+|---|---|---|---|
+| `WacVm::bind_auto_handle`, AutoItem read/write and runtime state | `WacCmd_Set`, entry cache and group stores | `0x4ED520`, `0x4F5814`, `0x4F58A2`, `0x4F5B7E`, `0x4F5BAF`, `0x4F5BD2` | matching full DWORD and low-word updates; D-WAC-8, `wac_state` |

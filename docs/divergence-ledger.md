@@ -1514,3 +1514,5 @@ Closed 2026-09-13: **D-TERRAIN-12** -> `FIXED` — ordinary views render empty s
 Closed 2026-09-13: **D-WAC-7** -> `FIXED` — WAC/BMS admission uses the mutable VM time word and one decision per logic tick; empty programs execute startup maintenance, and restore/live replacement immediately publish the clock. Witnesses and integration regressions: mission/bms-event-runtime-re.md.
 
 Closed 2026-09-13: **D-WPN-37** -> `FIXED` — Airborne players suppress authored first-person ADS position bias while scope interpolation continues; reload, NoCardSwitch and ForceScoped keep their existing optical policy. Actual position consumption and the separate unported rotational path are documented in world/world-wac-ai-re.md §14.10; `local_player_view` covers jump, fall, landing and reload gates.
+
+Closed 2026-09-13: **D-WAC-8** -> `FIXED` — The Player/Item/auto slot retains all 32 bits; cache and group refreshes replace only its low-word entity handle. Full-width assignment, absent-player/group refresh and runtime restore are covered by `wac_state`; world/world-wac-ai-re.md §33.15.
