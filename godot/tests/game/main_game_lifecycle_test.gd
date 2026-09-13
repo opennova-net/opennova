@@ -274,6 +274,26 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 			"the water normal ImageTexture dies before RenderingServer shutdown")
 
 
+func test_explicit_spectator_choice_ignores_team_password() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var target := JoinTarget.new()
+	target.host_ip = "127.0.0.1"
+	target.port = 9
+	target.server_flags = (JoinTarget.FLAG_ALLOW_SPECTATORS
+			| JoinTarget.FLAG_BLUE_PASSWORD | JoinTarget.FLAG_RED_PASSWORD)
+	target.join_role = JoinTarget.ROLE_SPECTATOR
+	target.role_explicit = true
+	_shell.join_lan_server(target)
+	assert_true(_shell.is_world_loading(),
+			"an explicit spectator starts loading without supplying an irrelevant team password")
+	var operation: WorldLoadOperation = _shell.begin_runtime_shutdown()
+	if operation != null and not operation.is_settled():
+		await operation.settled
+	_shell.finish_runtime_shutdown()
+
+
 func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() -> void:
 	_shell = await _make_shell()
 	if _shell == null:

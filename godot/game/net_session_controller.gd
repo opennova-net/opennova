@@ -139,7 +139,8 @@ func join_lan_server(target: JoinTarget) -> void:
 	_dismiss_join_role_prompt()
 	if (target.role_explicit
 			and (not target.server_password_required() or not target.server_password.is_empty())
-			and (not target.has_team_password() or not target.join_password.is_empty())):
+			and (target.join_role == JoinTarget.ROLE_SPECTATOR
+				or not target.has_team_password() or not target.join_password.is_empty())):
 		_start_lan_join(target)
 		return
 	if target.server_flags < 0:
