@@ -308,14 +308,15 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		character_join_vars_ = vars;
 	}
-	// Select the retail game-session join role before start(). Player leaves the
-	// legacy ClientAuth byte stream unchanged; Spectator emits JSR=1 and the
-	// optional JSPP password.
+	// Configure the retail game-session request before start(). Spectator emits
+	// JSR=1 and optional JSPP; join_password emits JSP for a side/squad credential.
+	// The transport PW, JSP and spectator JSPP remain separate.
 	void set_join_request(JoinRole role, std::string spectator_password,
-			std::string server_password) {
+			std::string server_password, std::string join_password = {}) {
 		join_role_ = role;
 		spectator_password_ = std::move(spectator_password);
 		server_password_ = std::move(server_password);
+		join_password_ = join_password.substr(0, 63);
 	}
 
 	// The install root the JOIN VERSIONCRCSTRING checksum is computed from
@@ -676,6 +677,7 @@ private:
 	JoinRole join_role_ = JoinRole::Player;
 	std::string spectator_password_;
 	std::string server_password_;
+	std::string join_password_; // JSP: optional side/squad credential, up to 63 bytes
 	bool server_password_required_ = false;
 	bool spectator_mode_ = false;
 	Phase phase_ = Phase::Idle;

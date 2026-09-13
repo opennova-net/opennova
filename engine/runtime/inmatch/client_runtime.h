@@ -257,10 +257,10 @@ public:
 		if (joiner_) joiner_->set_character_join_vars(vars);
 	}
 	void set_join_request(JoinRole role, std::string spectator_password,
-			std::string server_password) {
+			std::string server_password, std::string join_password = {}) {
 		if (joiner_) {
 			joiner_->set_join_request(role, std::move(spectator_password),
-					std::move(server_password));
+					std::move(server_password), std::move(join_password));
 		}
 	}
 	bool is_spectator() const {

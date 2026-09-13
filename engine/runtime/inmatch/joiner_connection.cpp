@@ -462,6 +462,12 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	if (app_id_ != "0" && !app_id_.empty()) {
 		auth.cu.push_back(make_client_cu_chunk(2, "APPID", app_id_));
 	}
+	// JSP is the shared side/squad password string, before the character tags.
+	// FID is a separate numeric identifier and is not a password field.
+	// [orig: CNapiServerInfo_SerializeToSession @0x4C39D7..0x4C3A13]
+	if (!join_password_.empty()) {
+		auth.cu.push_back(make_client_cu_chunk(2, "JSP", join_password_));
+	}
 	// Retail serializes the live profile's per-side character block between the
 	// environment strings and the trailing locale/packet scalars. A zero value is
 	// absent, matching CNapiServerInfo's per-field guards. TR uses signed decimal:

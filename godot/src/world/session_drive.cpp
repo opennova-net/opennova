@@ -106,8 +106,14 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// network receive can deliver the 0x41 property clears or 0x39 challenge.
 	// A missing file deliberately leaves the inactive all-zero table.
 	join_preload_sim_->load_charattr_challenge(resource_root);
-	join_preload_sim_->set_join_character_profile(
-			build_join_character_profile(resource_root, world_->player_visuals_->spawn_loadout()));
+	Ref<CharacterJoinProfile> join_profile = build_join_character_profile(
+			resource_root, world_->player_visuals_->spawn_loadout());
+	if (join_profile.is_valid()) {
+		auto profile = join_profile->value();
+		profile.team_request = p_target->get_team_request();
+		join_profile->assign(profile);
+	}
+	join_preload_sim_->set_join_character_profile(join_profile);
 	if (!p_target->get_integrity_profile().is_empty() &&
 			!join_preload_sim_->set_join_integrity_profile(p_target->get_integrity_profile())) {
 		join_preload_sim_.unref();
@@ -124,7 +130,8 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	join_preload_sim_->set_join_cd_cookie(p_target->get_cd_cookie());
 	if (!join_preload_sim_->enable_join(p_target->get_host_ip(), p_target->get_port(),
 				p_target->get_player_name(), p_target->get_join_role(),
-				p_target->get_spectator_password(), p_target->get_server_password())) {
+				p_target->get_spectator_password(), p_target->get_server_password(),
+				p_target->get_join_password())) {
 		join_preload_sim_.unref();
 		clear_pending_session();
 		world_->emit_signal(kSignalLoadFailed, "join: could not open the LAN session socket");

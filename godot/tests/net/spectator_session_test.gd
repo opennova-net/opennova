@@ -90,3 +90,68 @@ func test_wrong_spectator_password_surfaces_retail_join_failure() -> void:
 		OS.delay_msec(2)
 	assert_eq(peers, 0,
 			"the rejected spectator's punted connection is reaped")
+
+
+func _protected_host(mission: MissionData) -> Simulation:
+	var host := Simulation.new()
+	var options := HostSessionOptions.new()
+	options.server_name = "Protected Teams"
+	options.mission_file = "TEAM_PASSWORD_TEST.BMS"
+	options.game_type = 0x10000
+	options.mp_attributes = 4
+	options.max_players = 4
+	options.side_a_password = "BlueSecret"
+	options.side_b_password = "RedSecret"
+	host.configure_host_session(options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	return host
+
+
+func test_two_same_named_players_join_protected_sides_with_distinct_identity() -> void:
+	var mission := _mission()
+	var host := _protected_host(mission)
+	var blue := Simulation.new()
+	var red := Simulation.new()
+	var automatic := CharacterJoinProfile.new()
+	blue.set_join_character_profile(automatic)
+	red.set_join_character_profile(automatic)
+	assert_true(blue.enable_join("127.0.0.1", host.get_host_listen_port(), "SharedName",
+			JoinTarget.ROLE_PLAYER, "", "", "blueSECRET"))
+	assert_true(red.enable_join("127.0.0.1", host.get_host_listen_port(), "SharedName",
+			JoinTarget.ROLE_PLAYER, "", "", "redSECRET"))
+	assert_true(blue.load_from_mission_data(mission))
+	assert_true(red.load_from_mission_data(mission))
+	var reached := false
+	for _i in range(1000):
+		host.step()
+		blue.step()
+		red.step()
+		if blue.is_joined_in_match() and red.is_joined_in_match():
+			reached = true
+			break
+		OS.delay_msec(2)
+	assert_true(reached, "both JSP credentials survive runtime rebuild and admit over real UDP")
+	assert_eq(blue.get_join_assigned_team(), 1)
+	assert_eq(red.get_join_assigned_team(), 2)
+	assert_ne(blue.get_joiner_self_handle(), red.get_joiner_self_handle(),
+			"duplicate callsigns keep distinct authenticated entity handles")
+	assert_ne(blue.get_joiner_self_handle(), host.get_local_player_wire_handle())
+	assert_ne(red.get_joiner_self_handle(), host.get_local_player_wire_handle())
+
+
+func test_wrong_side_password_surfaces_retail_join_failure() -> void:
+	var mission := _mission()
+	var host := _protected_host(mission)
+	var joiner := Simulation.new()
+	assert_true(joiner.enable_join("127.0.0.1", host.get_host_listen_port(), "WrongSide",
+			JoinTarget.ROLE_PLAYER, "", "", "wrong"))
+	var reason := ""
+	for _i in range(400):
+		joiner.poll_join_preload()
+		host.step()
+		reason = joiner.get_join_error()
+		if not reason.is_empty():
+			break
+		OS.delay_msec(2)
+	assert_string_contains(reason.to_lower(), "password")

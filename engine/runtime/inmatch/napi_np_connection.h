@@ -477,6 +477,7 @@ struct NapiNPConnection {
 	ClientGameEnvironment join_environment;
 	uint8_t join_spectator_request = 0;
 	std::string join_spectator_password;
+	std::string join_password; // ClientAuth JSP, shared side/squad credential (not numeric FID)
 	// The team restored when the portable player-slot spectator bit is cleared.
 	uint8_t spectator_restore_team = 1;
 	std::string client_scrk;       // ClientAuth.scrk — decrypts inbound 0x43

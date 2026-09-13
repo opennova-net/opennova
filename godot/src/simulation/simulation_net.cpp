@@ -544,10 +544,11 @@ void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 
 bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		const String &p_player_name, int p_join_role,
-		const String &p_spectator_password, const String &p_server_password) {
+		const String &p_spectator_password, const String &p_server_password,
+		const String &p_join_password) {
 	// P7: the joiner is a non-authority inmatch::ClientRuntime (Joiner role) built per-load by the boot's role hook;
 	// it owns the connect-leg state machine + the S2C->ClientState fold internally. Here we only dial
-	// the socket + store the player name (the ClientAuth.NA the host echoes for the name-match). Leave
+	// the socket + store the player name (the ClientAuth.NA display callsign). Leave
 	// listen_server_ false (the session kind is the flag); a sim is host XOR joiner.
 	// The joiner role, constructed with the loadout profile seams it keeps; the
 	// session's role switch is the gate: re-dialing a live mission is rejected
@@ -571,7 +572,8 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 					? opennova::inmatch::JoinRole::Spectator
 					: opennova::inmatch::JoinRole::Player,
 			std::string(p_spectator_password.utf8().get_data()),
-			std::string(p_server_password.utf8().get_data()));
+			std::string(p_server_password.utf8().get_data()),
+			std::string(p_join_password.utf8().get_data()));
 	install_charattr_challenge_table();
 	install_character_join_vars();
 	install_join_integrity_profile();

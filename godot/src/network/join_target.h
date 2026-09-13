@@ -30,7 +30,10 @@ public:
 	};
 	// The ServerHello P2 flag bits the LAN row carries (LanServerRow.server_flags).
 	enum ServerFlag {
+		FLAG_TEAM_CHOICE = 0x4,
 		FLAG_SERVER_PASSWORD = 0x8,
+		FLAG_RED_PASSWORD = 0x10,
+		FLAG_BLUE_PASSWORD = 0x20,
 		FLAG_ALLOW_SPECTATORS = 0x2000,
 		FLAG_SPECTATOR_PASSWORD = 0x4000,
 	};
@@ -56,6 +59,7 @@ public:
 	JOIN_TARGET_TEXT(server_name)
 	JOIN_TARGET_TEXT(spectator_password)
 	JOIN_TARGET_TEXT(server_password)
+	JOIN_TARGET_TEXT(join_password)
 #undef JOIN_TARGET_TEXT
 
 	int get_port() const { return port_; }
@@ -76,6 +80,15 @@ public:
 	bool get_role_explicit() const { return role_explicit_; }
 	void set_role_explicit(bool p_value) { role_explicit_ = p_value; }
 
+	int get_team_request() const { return team_request_; }
+	void set_team_request(int p_value) { team_request_ = p_value == 0 || p_value == 1 ? p_value : -1; }
+	bool allows_team_choice() const {
+		return server_flags_ >= 0 && (server_flags_ & FLAG_TEAM_CHOICE) != 0;
+	}
+	bool has_team_password() const {
+		return server_flags_ >= 0 &&
+				(server_flags_ & (FLAG_BLUE_PASSWORD | FLAG_RED_PASSWORD)) != 0;
+	}
 	bool server_password_required() const {
 		return server_flags_ >= 0 && (server_flags_ & FLAG_SERVER_PASSWORD) != 0;
 	}
@@ -109,6 +122,8 @@ private:
 	int join_role_ = ROLE_PLAYER;
 	String spectator_password_;
 	String server_password_;
+	String join_password_;
+	int team_request_ = -1; // -1 automatic, 0 blue, 1 red
 	bool role_explicit_ = false;
 };
 

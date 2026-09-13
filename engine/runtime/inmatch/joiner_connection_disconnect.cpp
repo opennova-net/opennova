@@ -56,6 +56,26 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 			host_disconnect_reason_ = "The spectator password is incorrect";
 			fail(host_disconnect_reason_);
 			return;
+		case 18:
+			host_disconnect_reason_ = "The team password is incorrect";
+			fail(host_disconnect_reason_);
+			return;
+		case 19:
+			host_disconnect_reason_ = "The blue team password is incorrect";
+			fail(host_disconnect_reason_);
+			return;
+		case 20:
+			host_disconnect_reason_ = "The red team password is incorrect";
+			fail(host_disconnect_reason_);
+			return;
+		case 21:
+			host_disconnect_reason_ = "The squad password is incorrect";
+			fail(host_disconnect_reason_);
+			return;
+		case 22:
+			host_disconnect_reason_ = "The requested team is invalid";
+			fail(host_disconnect_reason_);
+			return;
 		default:
 			break;
 		}

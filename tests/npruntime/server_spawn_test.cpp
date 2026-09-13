@@ -351,11 +351,11 @@ int main() {
 		chosen.side_a_password = "side-a";
 		if (!expect(reserve_sequence(chosen, {0xFF}) ==
 					std::vector<uint8_t>({2}),
-				"an empty FID selects the only unprotected side")) return 1;
+				"an empty JSP selects the only unprotected side")) return 1;
 		chosen.side_b_password = "side-b";
 		if (!expect(reserve_sequence(chosen, {0xFF}) ==
 					std::vector<uint8_t>({0}),
-				"an empty FID cannot select either protected side")) return 1;
+				"an empty JSP cannot select either protected side")) return 1;
 
 		// Four-side setup is intentionally peculiar in retail. With no side
 		// passwords, its stable count sort plus mixed-index availability lookup

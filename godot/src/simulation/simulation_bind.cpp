@@ -120,8 +120,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("admit_test_remote_peer", "position", "yaw_deg", "team"), &Simulation::admit_test_remote_peer);
 	ClassDB::bind_method(
 			D_METHOD("enable_join", "host_ip", "port", "player_name",
-					"join_role", "spectator_password", "server_password"),
-			&Simulation::enable_join, DEFVAL(0), DEFVAL(String()), DEFVAL(String()));
+					"join_role", "spectator_password", "server_password", "join_password"),
+			&Simulation::enable_join, DEFVAL(0), DEFVAL(String()), DEFVAL(String()), DEFVAL(String()));
 	ClassDB::bind_method(
 			D_METHOD("is_local_spectator"), &Simulation::is_local_spectator);
 	ClassDB::bind_method(
