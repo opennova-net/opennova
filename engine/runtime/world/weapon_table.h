@@ -73,6 +73,9 @@ struct WeaponTableEntry {
     // [orig: clipweight store @0x5440DB; weaponweight store @0x54410D]
     int32_t weaponweight_fp16 = 0;
     int32_t clipweight_fp16 = 0;
+    // Prone/crouch/stand scoped drift; retail initializes all three to 1.0.
+    // [orig: AdmDef_InitEntryDefaults @ 0x53FF61; body reads @ 0x4B5A62]
+    int32_t stability_fp16[3] = {0x10000, 0x10000, 0x10000};
     // Whether the definition authors a nonempty first-person-model reference.
     // Resource resolution is host-side; the renderer requires both this
     // candidate and the current host resolution result before suppressing the

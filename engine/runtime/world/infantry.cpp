@@ -32,6 +32,7 @@
 #include <runtime/world/infantry_burn.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/player_view.h> // player_view_floor_eye_to_terrain (the on-foot local eye leg)
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h> // registry.get for the local-player AiEntity->Entity mirror
@@ -1123,6 +1124,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         weight_inputs.clipweight_fp16 = held->clipweight_fp16;
     }
     infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
+    // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, local-only gate @0x4B5966]
+    if (world.local_player_state != nullptr)
+        world.local_player_state->apply_scoped_aim_drift(e, logic_tick);
     if (!npc_body && (tick_flags & 1u) == 0) {
         const Entity *parent = tick_entity != nullptr && tick_entity->mounted
                 ? world.registry.get(tick_entity->mount_target) : nullptr;

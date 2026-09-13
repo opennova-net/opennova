@@ -15,6 +15,29 @@ using namespace opennova::def;
 #define FEPS 0.01f
 
 int main(void) {
+    // The default matters for shipped defs: no stability key still enables
+    // drift. Each authored column retains Math_ParseFixedPoint16 precision.
+    {
+        static const char kStability[] =
+            "weapon \"WPN_DEFAULT_STABILITY\"\nend\n"
+            "weapon \"WPN_CUSTOM_STABILITY\"\nStability 0.5, 2, 1.5\nend\n"
+            "weapon \"WPN_ZERO_STABILITY\"\nstability 0, 0, 0\nend\n";
+        DefWeaponsFile parsed{};
+        if (def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(kStability),
+                sizeof(kStability) - 1, &parsed) != 0 || parsed.count != 3) return 1;
+        const int expected[3][3] = {{65536,65536,65536}, {32768,131072,98304}, {0,0,0}};
+        for (size_t row = 0; row < 3; ++row) {
+            for (int stance = 0; stance < 3; ++stance) {
+                if (parsed.entries[row].stability_fp16[stance] != expected[row][stance]) {
+                    fprintf(stderr, "FAIL: stability[%zu][%d]\n", row, stance);
+                    def_free_weapons(&parsed);
+                    return 1;
+                }
+            }
+        }
+        def_free_weapons(&parsed);
+    }
+
     /* The shipped weapon.def from the reference fixture set (OPENNOVA_JO_ASSETS):
        its field/pos/sights/actions pins and the memory-parse parity are the
        SKIP-LEG retail leg; the inline blocks run unconditionally. */

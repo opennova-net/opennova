@@ -425,6 +425,11 @@ typedef struct DefWeaponDef {
        weaponweight store @ 0x54410D] */
     int weaponweight_fp16;
     int clipweight_fp16;
+    /* Scoped aim drift multipliers, prone/crouch/stand, in 16.16. All three
+       default to one even when weapon.def omits the key. [orig:
+       AdmDef_InitEntryDefaults @ 0x53FF61; WeaponDefs_ParseLineCallback
+       stability @ 0x544118, stores +0x158/+0x15C/+0x160] */
+    int stability_fp16[3];
     /* 'scope_max_zero <maxSteps> <stepMetres> <defaultMetres> [<extra>]': the
        scope-zero table the SIGHTS card's `slide` rows and Weapon_GetScopeZoomLevel
        read. Three atol'd ints in order -> AdmDef+0x84 (the zero-step cap), +0x9C

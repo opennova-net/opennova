@@ -68,6 +68,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 /* [orig: AdmDef_InitEntryDefaults def[38] = 2 @ 0x53ff73 -> +0x98
                    'scope_min_mag', the scope zoom floor] */
                 cw.scope_min_mag = 2;
+                /* [orig: AdmDef_InitEntryDefaults @ 0x53FF61/0x53FF67/0x53FF6D] */
+                for (int &stability : cw.stability_fp16) stability = 0x10000;
                 extract_quoted(trimmed, tlen, cw.weapon_name, sizeof(cw.weapon_name));
                 state = ST_WEAPON;
             }
@@ -332,6 +334,15 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                     parsed = 1;
                 }
                 /* Unknown flags fall through to raw_lines */
+            } else if (lower_match_key(lower, ll, "stability", 9)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+                Token values[3];
+                int count = split_values(v, vl, values, 3);
+                /* [orig: WeaponDefs_ParseLineCallback @ 0x544118..0x544169;
+                   Math_ParseFixedPoint16 @ 0x6131F0] */
+                for (int i = 0; i < count; ++i)
+                    cw.stability_fp16[i] = parse_fixed16_digits_n(values[i].s, values[i].len);
+                parsed = 1;
             } else if (lower_match_key(lower, ll, "error", 5)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
                 /* Six independent 16.16 parses, stored consecutively at

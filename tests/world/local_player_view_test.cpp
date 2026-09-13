@@ -6,6 +6,8 @@
 //  @0x4b4d00]: the gates in front of the primitives and the order the tick
 //  runs them in, pinned where they used to live in the Godot binding.
 #include <cstdint>
+#include <cmath>
+#include <base/io/rotating_prng.h>
 #include <cstdio>
 #include <vector>
 
@@ -1041,7 +1043,185 @@ void test_host_own_fire_ends_spawn_protection() {
     }
 }
 
+// The sampled values below came from executing the original 4B5966..4B5C97
+// span, including PRNG_Next16, with seed 1A10101A on Jointops.exe SHA256
+// b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac.
+// No engine call was replaced. Initial oscillator globals and aim are zero.
+struct ScopedAimFixture : LocalWorld {
+    LocalPlayer player{w};
+    ScopedAimFixture() {
+        w.local_player_state = &player;
+        ai.attach(local);
+        body().inf.active = true;
+        body().inf.is_local_player = true;
+        body().health = 100;
+        entity().flags |= kEntityFlagPlayer;
+        entity().equipped_adm_index = 1;
+        w.tables.weapons.entries.resize(2);
+        w.tables.weapons.entries[1].valid = true;
+        player.weapon.active = true;
+        player.view.scope_engaged = true;
+        player.view.scope_settled = true;
+    }
+    AiEntity &body() { return *ai.for_handle(local); }
+    void sample(uint32_t tick, int32_t yaw, int32_t pitch) {
+        player.apply_scoped_aim_drift(body(), tick);
+        player.sync_local_mounted_input_heading();
+        CHECK(body().heading == yaw && body().pitch == pitch);
+        CHECK(player.input.look_heading == yaw && player.input.look_pitch == pitch);
+    }
+};
+
+void test_scoped_aim_original_sequences() {
+    struct Sample { uint32_t tick; int32_t yaw, pitch; unsigned draws; };
+    struct Case { InfantryState::Stance stance; int32_t stability[3]; Sample samples[5]; };
+    const Case cases[] = {
+        {InfantryState::Stance::kStand, {65536,65536,65536},
+            {{0,-214,-408,2}, {61,-417942,-796824,2}, {62,-431424,-821724,3},
+             {185,-2142140,-1977216,4}, {186,-2155681,-1988018,6}}},
+        {InfantryState::Stance::kCrouch, {65536,65536,65536},
+            {{0,-136,-95,2}, {61,-265608,-185535,2}, {62,-274176,-191341,3},
+             {185,-1361360,-768595,4}, {186,-1369988,-779743,6}}},
+        {InfantryState::Stance::kProne, {65536,65536,65536},
+            {{0,-105,-48,2}, {61,-205065,-93744,2}, {62,-211680,-96558,3},
+             {185,-1051050,228315,4}, {186,-1057741,227595,6}}},
+        {InfantryState::Stance::kProne, {32768,131072,98304},
+            {{0,-52,-12,2}, {61,-101556,-23436,2}, {62,-104832,-24139,3},
+             {185,-520520,59489,4}, {186,-523833,59325,6}}},
+        {InfantryState::Stance::kCrouch, {32768,131072,98304},
+            {{0,-273,-382,2}, {61,-533169,-579876,2}, {62,-550368,-592146,3},
+             {185,-2732730,-1439064,4}, {186,-2750050,-1460956,6}}},
+        {InfantryState::Stance::kStand, {32768,131072,98304},
+            {{0,-322,-918,2}, {61,-628866,-1618434,2}, {62,-649152,-1657017,3},
+             {185,-3223220,-2115612,4}, {186,-3243597,-2123349,6}}},
+        {InfantryState::Stance::kStand, {0,0,0},
+            {{0,0,0,2}, {61,0,0,2}, {62,0,0,3}, {185,0,0,4}, {186,0,0,6}}},
+    };
+    for (const Case &c : cases) {
+        ScopedAimFixture f;
+        f.body().inf.stance = c.stance;
+        for (int stance = 0; stance < 3; ++stance)
+            f.w.tables.weapons.entries[1].stability_fp16[stance] = c.stability[stance];
+        size_t sample = 0;
+        for (uint32_t tick = 0; tick <= 186; ++tick) {
+            f.player.apply_scoped_aim_drift(f.body(), tick);
+            if (tick != c.samples[sample].tick) continue;
+            const Sample &expected = c.samples[sample++];
+            CHECK(f.body().heading == expected.yaw && f.body().pitch == expected.pitch);
+            f.player.sync_local_mounted_input_heading();
+            CHECK(f.player.input.look_heading == expected.yaw);
+            CHECK(f.player.input.look_pitch == expected.pitch);
+            uint32_t expected_rng = World::kMissionPrng16Seed;
+            for (unsigned draw = 0; draw < expected.draws; ++draw)
+                opennova::io::rotating_prng_next16(expected_rng);
+            CHECK(f.w.prng16_state == expected_rng);
+        }
+    }
+}
+
+void test_scoped_aim_gates_and_independent_stance_resets() {
+    {
+        ScopedAimFixture f;
+        f.player.view.scope_settled = false;
+        f.sample(0, 0, 0); // raising has not promoted the scope
+        CHECK(f.w.prng16_state == World::kMissionPrng16Seed);
+        f.player.view.scope_settled = true;
+        f.sample(1, 0, 0); // engagement does not start a new phase
+        f.sample(62, 0, -214); // only pitch refreshes on this boundary
+        f.player.view.scope_settled = false;
+        const uint32_t retained_rng = f.w.prng16_state;
+        f.sample(186, 0, -214); // lower/raise retains both oscillators
+        CHECK(f.w.prng16_state == retained_rng);
+        f.player.view.scope_settled = true;
+        f.sample(187, 0, -642);
+        f.entity().mounted = true;
+        f.entity().mount_type = SeatType::Gunner;
+        f.sample(372, 0, -642);
+        CHECK(f.w.prng16_state == retained_rng);
+        f.player.view.scope_settled = false;
+        f.player.view.binoculars_raised = true;
+        f.sample(372, 0, -642); // third-person body pose is not binocular optics
+        CHECK(f.w.prng16_state == retained_rng);
+        f.player.view.binoculars_view_active = true;
+        f.sample(372, -48, -908); // binocular optics bypass the gunner gate, use prone scale
+        const uint32_t after_binoculars = f.w.prng16_state;
+        AiEntity remote;
+        remote.handle = EntityHandle::make(0, 7);
+        f.player.apply_scoped_aim_drift(remote, 558);
+        CHECK(remote.heading == 0 && remote.pitch == 0);
+        CHECK(f.w.prng16_state == after_binoculars);
+    }
+    {
+        ScopedAimFixture f;
+        f.sample(0, -214, -408);
+        f.body().inf.stance = InfantryState::Stance::kCrouch;
+        f.sample(1, -642, -1224); // neither axis resets immediately
+        f.sample(62, -1284, -1140); // pitch observes the stance first
+        f.sample(186, -1110, -1268); // yaw observes it on its own boundary
+    }
+}
+
+void test_scoped_aim_survives_kernel_replacement_without_sharing_sessions() {
+    ScopedAimFixture previous;
+    previous.sample(0, -214, -408);
+    ScopedAimFixture replacement;
+    replacement.player.carry_scoped_aim_drift_from(previous.player);
+    // A mission reset seeds new aim and PRNG, but not the oscillators. A
+    // non-boundary scope raise continues the previous drift and direction.
+    replacement.sample(1, -428, -816);
+    CHECK(replacement.w.prng16_state == World::kMissionPrng16Seed);
+    // Simultaneous native sessions still own independent local state.
+    ScopedAimFixture independent;
+    independent.sample(1, 0, 0);
+    CHECK(independent.w.prng16_state == World::kMissionPrng16Seed);
+}
+
+void test_scoped_aim_body_input_camera_and_fired_round() {
+    ScopedAimFixture f;
+    WeaponInstallData data;
+    data.name = "WPN_AIM";
+    data.clipsize = 30;
+    data.rows.resize(3);
+    std::snprintf(data.rows[0].name, sizeof(data.rows[0].name), "idle");
+    std::snprintf(data.rows[1].name, sizeof(data.rows[1].name), "fire");
+    data.rows[1].delayend = 6;
+    std::snprintf(data.rows[2].name, sizeof(data.rows[2].name), "recoil");
+    local_weapon_install(f.w, f.player.weapon, data, false, false, nullptr, f.player.view);
+    f.player.view.scope_engaged = true;
+    f.player.view.scope_settled = true;
+    f.w.tables.weapons.entries[1].ammo_index = 1;
+    f.w.tables.ammo.entries.resize(2);
+    f.w.tables.ammo.entries[1].valid = true;
+    f.player.apply_player_input_pre_tick();
+    TickContext ctx;
+    ctx.world = &f.w;
+    ctx.is_authority = true;
+    ctx.logic_tick = 0;
+    f.ai.tick(f.w, ctx); // includes the unconditional recoil draw before scoped drift
+    f.player.sync_local_mounted_input_heading();
+    CHECK(f.body().heading == -408 && f.body().pitch == -396);
+    CHECK(f.player.input.look_heading == -408 && f.player.input.look_pitch == -396);
+    // The next pre-tick input copy must not erase the body's aim additions.
+    f.player.apply_player_input_pre_tick();
+    CHECK(f.body().inf.target_heading == -408 && f.body().inf.look_pitch == -396);
+    LocalPlayerViewFrame frame = f.player.view_frame();
+    CHECK(frame.camera_pose_valid);
+    CHECK(std::abs(frame.camera.yaw_deg - (90.0 + 408.0 * 360.0 / 4294967296.0)) < 0.00001);
+    CHECK(std::abs(frame.camera.pitch_deg - (-396.0 * 360.0 / 4294967296.0)) < 0.000001);
+    local_weapon_set_input(f.player.weapon, f.player.view, true, true, false);
+    LocalWeaponPumpIO io;
+    io.view = &f.player.view;
+    io.is_authority = false;
+    local_weapon_pump_tick(f.w, f.player.weapon, io);
+    CHECK(io.fired.valid);
+    CHECK(io.fired.round.dir_yaw == -408 && io.fired.round.dir_pitch == -396);
+}
+
 int main() {
+    test_scoped_aim_original_sequences();
+    test_scoped_aim_gates_and_independent_stance_resets();
+    test_scoped_aim_body_input_camera_and_fired_round();
+    test_scoped_aim_survives_kernel_replacement_without_sharing_sessions();
     test_target_lock_cadence_and_audio();
     {
         // The adjust clamp's -1 floor: offline, or in session with the
