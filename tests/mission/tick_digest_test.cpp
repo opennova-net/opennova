@@ -62,7 +62,12 @@ namespace {
 // at boot, then the no-human gate pauses the VM. V1 stays 2. Replaying only
 // the previous V1 timeline (0 until tick 63, 1 until 125, then 2) recovers
 // 0x116f65ec9ea08922 exactly; entity, AI and RNG state did not move.
-constexpr uint64_t kSyntheticDigest = 0xe33cefc459163b68ULL;
+// D-WAC-10 (world-wac-ai-re.md section 33.15a) removes the detached 16-word
+// music bank from World: M# now addresses the actual compiled MUS context.
+// The synthetic mission has no music context. Restoring ONLY those 16 zero
+// DWORDs to each of the 241 hash samples recovers e33cefc459163b68 exactly;
+// entity, AI, RNG and real script state are unchanged by this digest update.
+constexpr uint64_t kSyntheticDigest = 0x18f8080dd8fcdb68ULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
