@@ -296,3 +296,5 @@ PR #649 adversarial correction (2026-09-13, D-WPN-36): local heading/leg/pitch c
 2026-09-13, D-EVT-9: BMS action counts use the original signed byte at execution; counts 128–255 skip actions while preserving event bookkeeping and linked spawns. See [D-EVT-9 evidence](mission/bms-event-runtime-re.md). Native `event_runtime_bms` immediate/delayed, truncated-slice and unsigned-trigger regressions pass.
 
 2026-09-13, D-FOLIAGE-13: Foliage collection survives saturation of the 224-entry main terrain list while retaining its own visibility, distance and 128-cell limits. See [D-FOLIAGE-13 evidence](foliage/foliage-re.md). Native `terrain_frame_compiler` and `terrain_foliage_detail_collector` regressions pass, alongside eight original-executable capacity combinations.
+
+2026-09-13, D-AI-13: Vehicle avoidance uses the original quantized footprint cosine and truncating bearing, preserving ordered neighbor braking and carrier exclusions. See [D-AI-13 evidence](world/world-wac-ai-re.md). Native `vehicle_mount` regressions pass for ground and boat callers, half-bin boundaries and compounded braking.
