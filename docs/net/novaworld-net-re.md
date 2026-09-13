@@ -14146,3 +14146,14 @@ cover removal/rebinding, full repair, truncated pages, pool bounds and replay.
 NapiNPClientMsg_0x00C @ 0x42E7CE;
 NapiNPClientMsg_FullEntitySpawn @ 0x433780;
 Server_RemoveEntityAndNotify @ 0x50A270]
+
+
+### PR #649 adversarial review: explicit spectator choice
+
+The side-password prompt initially treated an explicitly selected spectator like
+a player on protected-team hosts. The host's side validator already bypassed
+spectators. The prompt now respects that same role distinction, preserving the
+existing server-password prerequisite. The real `MainGame.join_lan_server` test
+`test_explicit_spectator_choice_ignores_team_password` failed before the change
+and passes after it, including loading-barrier shutdown settlement.
+[orig: Server_ValidatePlayerJoinRequest @ 0x5124A2]
