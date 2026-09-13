@@ -213,3 +213,5 @@ HUD follow-ups from #645 now include runtime flag/SSKB keys, flag-event audio, t
 2026-09-13, D-WPN-37: Airborne players suppress authored first-person ADS position bias while scope interpolation continues; reload, NoCardSwitch and ForceScoped keep their existing optical policy. See [world §14.10](world/world-wac-ai-re.md). Native `local_player_view` regressions pass.
 
 2026-09-13, D-WAC-8: The Player/Item/auto slot retains all 32 bits; cache and group refreshes replace only its low-word entity handle. [World §33.15](world/world-wac-ai-re.md) records the original word stores and passing `wac_state` regressions.
+
+PR #649 adversarial correction (2026-09-13, D-WPN-36): local heading/leg/pitch clamps precede scoped drift. The body-tick limit and PRNG regressions are recorded in [world §14.9](world/world-wac-ai-re.md).

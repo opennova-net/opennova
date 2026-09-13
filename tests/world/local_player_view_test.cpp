@@ -1347,7 +1347,55 @@ void test_scoped_aim_body_input_camera_and_fired_round() {
     CHECK(io.fired.round.dir_yaw == -408 && io.fired.round.dir_pitch == -396);
 }
 
+// The local view clamps and leg chase precede the drift additions in the
+// original body: @0x4B4945..0x4B4BC6 before @0x4B5C78..0x4B5C91.
+// Exercise the real motor; a direct oscillator call cannot expose re-clamping.
+void test_scoped_aim_follows_local_view_clamps_and_leg_chase() {
+    const auto tick = [](ScopedAimFixture &f) {
+        f.player.apply_player_input_pre_tick();
+        TickContext ctx;
+        ctx.world = &f.w;
+        ctx.is_authority = true;
+        ctx.logic_tick = 0;
+        f.ai.tick(f.w, ctx);
+        f.player.sync_local_mounted_input_heading();
+        uint32_t expected_rng = World::kMissionPrng16Seed;
+        for (int draw = 0; draw < 3; ++draw)
+            opennova::io::rotating_prng_next16(expected_rng);
+        CHECK(f.w.prng16_state == expected_rng);
+    };
+    {
+        ScopedAimFixture f;
+        f.player.input.look_pitch = -0x38E38E00;
+        tick(f);
+        // Retail keeps this frame's drift beyond the motor's pitch limit.
+        CHECK(f.body().pitch == -0x38E38E00 - 396);
+        CHECK(f.player.input.look_pitch == -0x38E38E00 - 396);
+    }
+    {
+        ScopedAimFixture f;
+        f.entity().flags |= kEntityFlagLadderContact;
+        f.player.input.look_heading = -0x55555500;
+        tick(f);
+        CHECK(f.body().heading == -0x55555500 - 408);
+        CHECK(f.player.input.look_heading == -0x55555500 - 408);
+        CHECK(f.body().inf.body_heading == 0);
+        CHECK(f.body().inf.leg_yaw[0] == 0 && f.body().inf.leg_yaw[1] == 0);
+    }
+    {
+        ScopedAimFixture f;
+        // A yaw beyond the replant threshold makes both legs take this input
+        // before the newly sampled drift changes the current view direction.
+        f.player.input.look_heading = 0x20000000;
+        tick(f);
+        CHECK(f.body().heading == 0x20000000 - 408);
+        CHECK(f.body().inf.leg_target[0] == 0x20000000);
+        CHECK(f.body().inf.leg_target[1] == 0x20000000);
+    }
+}
+
 int main() {
+    test_scoped_aim_follows_local_view_clamps_and_leg_chase();
     test_scoped_aim_original_sequences();
     test_scoped_aim_gates_and_independent_stance_resets();
     test_scoped_aim_body_input_camera_and_fired_round();
