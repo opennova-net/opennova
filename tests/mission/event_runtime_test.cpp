@@ -346,6 +346,97 @@ static void test_repeat_cooldown() {
     CHECK(w.out.effects.count("text") == 2);
 }
 
+// The file preserves an unsigned byte, but BOTH dispatch loops read it as a
+// signed char. Skipped actions do not skip the input consume, linked-spawn
+// hook, active latch, or repeat cooldown. Exercise the public World tick path.
+// [orig: EventTrigger_UpdateEntry @0x454C92/@0x454CAB and @0x454D01/@0x454D13]
+static void test_signed_action_count_immediate_and_delayed() {
+    struct Case { uint8_t count; int available; int executed; };
+    const Case cases[] = {
+        {0, 255, 0}, {1, 255, 1}, {127, 255, 127},
+        {128, 255, 0}, {255, 255, 0},
+        {127, 1, 1}, // bounded portable slice: never copy retail's invalid reads
+    };
+    for (const Case &c : cases) {
+        for (int delay : {0, 1}) {
+            World w;
+            w.cached.humans = 1;
+            w.registry.configure_pool(0, 4);
+            world::WaypointEntry marker;
+            marker.linked_event = 1; // retail reserves event index zero as no link
+            w.script.waypoints.entries = {{}, marker};
+            w.script.waypoints.current = 1;
+            w.script.input_action_bits = 0x40;
+
+            bms::Event filler = simple_event(bms::EventFlags::PreMission, 0);
+            filler.action_count = 0;
+            bms::Event event = simple_event(bms::EventFlags::ResetAfter, 1);
+            event.action_count = c.count;
+            event.delay = delay;
+            event.reset_after = 2;
+            std::vector<bms::Action> actions(static_cast<size_t>(c.available) + 1,
+                    misvar(bms::MissionVariableActionSubType::Increment, 7, 0));
+            actions[0] = misvar(bms::MissionVariableActionSubType::Set, 8, 99);
+            mission::BmsEventSystem sys;
+            sys.load({filler, event}, {}, actions);
+            w.add_system(&sys);
+            w.load_systems();
+            CHECK(sys.events()[1].event.action_count == c.count);
+
+            tick_n(w, 2 * kPass); // event 1 is the second quarter's first entry
+            CHECK(sys.is_active(1));
+            CHECK(sys.events()[1].repeat_countdown == 128);
+            if (delay != 0) {
+                CHECK(sys.events()[1].activate_countdown == 64);
+                CHECK(!sys.event_fired(1));
+                CHECK(w.script.vars.get_mission(7) == 0);
+                CHECK(!w.script.waypoints.entries[1].done);
+                w.script.input_action_bits = 0x80; // expiry must commit the old mirror
+                tick_n(w, kCycle);
+                CHECK(sys.events()[1].repeat_countdown == 64);
+            }
+            CHECK(sys.event_fired(1));
+            CHECK(sys.events()[1].activate_countdown == 0);
+            CHECK(w.script.vars.get_mission(7) == c.executed);
+            CHECK(w.script.vars.get_mission(8) == 0); // honor the action slice offset
+            CHECK(w.script.input_action_bits == 0x40);
+            CHECK(w.script.waypoints.entries[1].done);
+            CHECK(!w.script.waypoints.entries[0].done);
+            CHECK(w.script.waypoints.current == 0);
+
+            tick_n(w, (delay == 0 ? 2 : 1) * kCycle);
+            CHECK(!sys.is_active(1));
+            CHECK(!sys.event_fired(1));
+            CHECK(sys.events()[1].repeat_countdown == 0);
+            CHECK(w.script.vars.get_mission(7) == c.executed);
+        }
+    }
+}
+
+static void test_trigger_count_keeps_unsigned_byte_range() {
+    for (uint8_t count : {uint8_t{128}, uint8_t{255}}) {
+        World w;
+        w.cached.humans = 1;
+        mission::BmsEventSystem sys;
+        bms::Event event = simple_event(bms::EventFlags::None, 0);
+        event.trigger_count = count;
+        bms::Trigger condition{};
+        condition.main_type = bms::TriggerMainType::MissionVariable;
+        condition.sub_type = static_cast<int32_t>(
+                bms::MissionVariableTriggerType::MissionVariableIsEqual);
+        condition.param1 = 1;
+        std::vector<bms::Trigger> triggers(count, condition); // V1 == 0 throughout
+        triggers.back().param2 = 1; // the last unsigned-count entry rejects the chain
+        sys.load({event}, triggers,
+                {misvar(bms::MissionVariableActionSubType::Set, 7, 1)});
+        w.add_system(&sys);
+        w.load_systems();
+        tick_n(w, kPass);
+        CHECK(!sys.is_active(0));
+        CHECK(w.script.vars.get_mission(7) == 0);
+    }
+}
+
 // reset_after == 0: a repeat event re-fires on EVERY processing pass while its chain
 // holds [orig: the LABEL_24 path clears +20 in the same call].
 static void test_repeat_zero_refires_every_pass() {
@@ -2287,6 +2378,8 @@ int main() {
     test_activation_delay();
     test_activation_delay_signed_wrap();
     test_repeat_cooldown();
+    test_signed_action_count_immediate_and_delayed();
+    test_trigger_count_keeps_unsigned_byte_range();
     test_repeat_zero_refires_every_pass();
     test_pre_mission_pass();
     test_playpartanim_mutates_brain();

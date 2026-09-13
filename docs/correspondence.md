@@ -1556,3 +1556,5 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 PR #649 adversarial correction (2026-09-13, D-WPN-36): local heading/leg/pitch clamps precede scoped drift. The body-tick limit and PRNG regressions are recorded in [world §14.9](world/world-wac-ai-re.md).
 
 2026-09-13 D-WAC-9: Numbered V operands accept decimal prefixes while declared names retain precedence and indices clamp at 255. The [D-WAC-9 domain record](world/world-wac-ai-re.md) carries original addresses and the corresponding implementation. Native `wac_behavior` prefix, boundary and shadowing regressions pass.
+
+2026-09-13 D-EVT-9: BMS action counts use the original signed byte at execution; counts 128–255 skip actions while preserving event bookkeeping and linked spawns. The [D-EVT-9 domain record](mission/bms-event-runtime-re.md) carries original addresses and the corresponding implementation. Native `event_runtime_bms` immediate/delayed, truncated-slice and unsigned-trigger regressions pass.
