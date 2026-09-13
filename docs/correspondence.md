@@ -15,6 +15,22 @@ into them.
 > real producer is the `hudcolor` action row (code 10, default F6,
 > retail-shadowed by `huddetail` — D-CTRL-4).
 
+## 2026-09-13 source-comparison additions
+
+The [jo-c audit](jo-c-parity-audit-2026-09-13.md) pins the compared source files.
+These rows report source discrepancies or bounded research; they are not new IDA
+grills or live oracle results. Existing matching verdicts below retain their
+original slice scope.
+
+| Reimplementation surface | Original reference | Contract and verdict | Owning record |
+|---|---|---|---|
+| Guided replica reducer/tick | `NetPacket_DispatchToEntityByNetId @0x4D6960`; `Entity_SerializeGuidedMissileState @0x447C50`; `Entity_UpdateGuidedMissile_0 @0x446060` | **divergent**: update admission/lifecycle, explicit zero writes and current locked-target aim point; D-NET-64 widened | [net record](net/novaworld-net-re.md#jo-c-source-cross-check-2026-09-13) |
+| Inventory/FSM clip owner | `sub_5405F0 @0x5405F0`; `sub_540670 @0x540670`; `WeaponSlot_ReloadAmmo @0x541720` | **divergent**: original shared clip buckets still fold into slot.clip; carried class pools already implemented (D-WPN-2) | [net record](net/novaworld-net-re.md#jo-c-source-cross-check-2026-09-13) |
+| Material texture preprocessing | `sub_5B16F0 @0x5B16F0`, dispatch sites `0x5B179A`/`0x5B17B7`/`0x5B17D4`/`0x5B17DD`/`0x5B17E6` | **divergent**: five dedicated loader branches raw-load; kernels and corpus reachability still need research (D-RMAT-12) | [material record](render/render-material-re.md#texture-preprocessing-follow-up-2026-09-11) |
+| Particle simulation | `CParticleEmitter_SpawnParticle @0x5E7640`; `CParticleEmitter_SpawnNewParticle @0x5F35B0` | **divergent**: child scheduling, per-particle ORBIT rate and subframe context; collision consumer **unknown** (D-PTL-27..30) | [particle catalog](particles/ptl-format-re.md#9-divergence-catalog-d-ptl) |
+| MissionAudio reverb | `sub_766460 @0x766460`; coefficient table `0x7BF400`; mixer block `0x7BDCF0` | **divergent** selector/room-size policy; full DSP/index-zero **unknown** (D-SND-18) | [sound record](audio/lwf-dbf-sound-re.md#the-reverb-bed-witnessed-2026-08-28-not-ported) |
+| Mission save/restore | jo-c layout names `SaveFile_ReadAndValidateHeader @0x4ACDF0`, `SaveFile_SerializeEntityToRecord @0x4AB130`, `SaveFile_ApplyEntityRecord @0x4ABB00` | **unported**; complete schema, references, pool flags and live restoration **unknown** (D-SAVE-1) | [savegame record](mission/savegame-re.md) |
+
 ## 1. Per-system parity matrix
 
 Systems whose verdict tables already live in a tracked RE doc are not repeated here —

@@ -18,6 +18,11 @@ the script tick running on through the SP lose epilog,
 
 The #645 follow-ups are implemented in the active parity slice: [class events and squib](world/world-wac-ai-re.md#243b-squib-and-shared-class-effects-2026-09-11), [channel timing](anim/adm-bad-format-re.md#playback-clock-follow-up-2026-09-11), [ordered network effects](net/novaworld-net-re.md#item-explosion-and-state-receive-order-2026-09-11), and [texture conversion](render/render-material-re.md#texture-preprocessing-follow-up-2026-09-11). Their records distinguish the ported scope from pre-existing wider domain gaps.
 
+The [2026-09-13 jo-c audit](jo-c-parity-audit-2026-09-13.md) covers the full active
+backlog and adds the untabled material-loader, reverb, particle and savegame gaps.
+It orders implementation by state ownership and runtime consumers; the
+[ledger](divergence-ledger.md) retains current dispositions.
+
 ## The phase
 
 | Period | What it was | State |
@@ -122,17 +127,10 @@ Every recent slice ran this same shape, and a new one should too:
 
 ## Where the open work sits
 
-Counts come from the ledger's generated scoreboard — read them there, not here,
-because `scripts/lint/ledger_check.py --check` keeps that table honest and
-nothing keeps this sentence honest. As of the 2026-08-30 post-merge tidy (after
-the #595 renderer, #597 weather, and #601 spectator merges landed) the shape
-was: **World/AI** carries the largest share (56 of 121 domain-open; Fonts and
-VFS emptied 2026-08-29), **UI** (29 — the 2026-08-04 D-SND/D-MNU/D-LOADSCR
-catalog tabling's twelve register candidates were ratified `PERMANENT` on
-2026-08-29; the rest are small), **Net** (22), and the freshly tabled
-**Render — occlusion** (5 — the D-OCC-9..15 port divergences the record had
-carried since 2026-07-17, tabled per standing rule 2) the next largest, and
-every other domain is in single digits.
+Counts come from the [ledger's generated scoreboard](divergence-ledger.md#count-to-zero-scoreboard),
+maintained by `scripts/lint/ledger_check.py --check`. The
+[dated audit inventory](jo-c-parity-audit-2026-09-13.json) assigns every active ID
+to an implementation phase; use the ledger for subsequent status changes.
 
 Each domain's next step is named in its own record, not centrally:
 
@@ -142,10 +140,11 @@ Each domain's next step is named in its own record, not centrally:
 | Item class events | none open (D-ITEM-7 / D-DOOR-2 FIXED 2026-09-11, ledger closure lines) | [World §24.3a](world/world-wac-ai-re.md#243a-class-clocks-regional-shots-barrels-buildings-flags-and-targets) and §24.3b record all #645 class follow-ups; invalid target/model/section limits remain explicit |
 | Net (in-match + matchmaking) | ledger § Net (`PAR-NET`) | [net/novaworld-net-re.md](net/novaworld-net-re.md) §8; the build record behind it is `engine/runtime/inmatch/ROADMAP.md`; §5.10 covers joiner vehicle confirmation and shared seat/overlay occupancy |
 | UI (HUD, menus, sound, player info) | ledger § UI | [interface/hud-re.md](interface/hud-re.md), [interface/loading-screen-re.md](interface/loading-screen-re.md), [mnu/menu-re.md](mnu/menu-re.md), [playerinfo/avatars-re.md](playerinfo/avatars-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) PR #645: native-aspect sights-card correction ported; manual zero/rangefinder remain deferred. Host rule readback/sentinels and explicit aspect selection are ported; see the host dialog section in menu-re. |
-| Render (materials, order, lighting, occlusion) | ledger § Render — draw order + § Render — occlusion (the materials/state and lighting tables hold no open rows) | [render/README.md](render/README.md) |
+| Render (materials, order, lighting, occlusion) | ledger § Render — materials/state, draw order and occlusion (lighting holds no open rows) | [render/README.md](render/README.md) |
 | Terrain / foliage / tiles | ledger § Terrain, Foliage (§ Tiles holds no open rows: D-TIL-1..4 FIXED) | [terrain/terrain-re.md](terrain/terrain-re.md), [foliage/foliage-re.md](foliage/foliage-re.md) |
 | Environment | ledger § Environment | [env/env-tod-re.md](env/env-tod-re.md), [env/env-honored-matrix.md](env/env-honored-matrix.md) |
 | Formats (`.mis`, `.ptl`, LW `.3di`, CBIN, fonts, VFS) | ledger, per format | the matching record in [README.md](README.md) |
+| Mission savegames | ledger § Mission savegames | [mission/savegame-re.md](mission/savegame-re.md); schema, runtime state restoration and slot lifecycle, D-SAVE-1 |
 
 Work that is **not** a parity divergence — ONED and OpenNova Launcher UX, project health, code
 hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
