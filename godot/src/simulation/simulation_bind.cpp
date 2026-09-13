@@ -1,5 +1,6 @@
 // Simulation — ClassDB registration.
 #include "simulation/simulation_internal.h"
+#include "audio/music_director.h"
 
 #include "rtxt/rtxt_string_file.h" // the gametext table type the end-round / deploy feeds bind
 #include "simulation/end_round_state.h" // the typed end-of-round record
@@ -355,6 +356,7 @@ void Simulation::_bind_methods() {
 			&Simulation::get_last_occlusion_build_us);
 	ClassDB::bind_method(D_METHOD("get_last_occlusion_probe_us"),
 			&Simulation::get_last_occlusion_probe_us);
+	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &Simulation::compile_and_set_wac);
 	ClassDB::bind_method(D_METHOD("set_wac_paused", "paused"), &Simulation::set_wac_paused);
 	ClassDB::bind_method(D_METHOD("is_wac_paused"), &Simulation::is_wac_paused);
 	ClassDB::bind_method(D_METHOD("set_mission_variable", "index", "value"), &Simulation::set_mission_variable);
@@ -372,6 +374,7 @@ void Simulation::_bind_methods() {
 			&Simulation::get_mounted_graphic_source_count);
 	ClassDB::bind_method(D_METHOD("get_mission_variables_snapshot"), &Simulation::get_mission_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_global_variables_snapshot"), &Simulation::get_global_variables_snapshot);
+	ClassDB::bind_method(D_METHOD("set_music_director", "director"), &Simulation::set_music_director);
 	ClassDB::bind_method(D_METHOD("get_music_variables_snapshot"), &Simulation::get_music_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("set_global_variable", "index", "value"), &Simulation::set_global_variable);
 	ClassDB::bind_method(D_METHOD("get_global_variable", "index"), &Simulation::get_global_variable);

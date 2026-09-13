@@ -4064,7 +4064,7 @@ func test_variable_snapshots_are_bank_sized_and_track_writes() -> void:
 	var music: PackedInt32Array = sim.get_music_variables_snapshot()
 	assert_eq(mission.size(), 512, "V0..V511")
 	assert_eq(globals.size(), 256, "G0..G255")
-	assert_eq(music.size(), 16, "M0..M15")
+	assert_eq(music.size(), 0, "no active music context was bound at compilation")
 
 	sim.set_mission_variable(5, 42)
 	sim.set_global_variable(3, -7)

@@ -141,13 +141,12 @@ func open_menu_context(root, script_override := "", bank_override := "") -> bool
 	return _open_context("menu", root, bank_path, pair.script_name, script_override)
 
 
-## Open the GAME music context at mission start. The original opens it only for
-## MP session peers and STOPS the context in single-player [orig:
-## Game_StartMission @ 0x525581: is_mp_session_peer -> AudioVM_OpenMusicContext
-## (g_path_game_sbf/bin), else AudioVM_StopMusicContext @ 0x671e00]; ours opens
-## it in ALL sessions — D-MUS-SPGATE, maintainer decision 2026-07-09 (our SP
-## runs as a listen server, ADR 0009/0011/0012). The witnessed var seeding runs
-## after the open exactly as retail's mission start does on both branches:
+## Open the GAME music context at mission start for a session with a local
+## client. Retail SP is host+client (connection mode 3); dedicated hosts alone
+## stop the context [orig: Game_StartMission @0x525581..0x5255AE;
+## CGameSession_SetConnectionMode @0x4C49F0; D-MUS-SPGATE witness correction].
+## GameWorld opens before the initial WAC compile, whose M# operands bind the
+## context's globals. The witnessed variable seeding follows the open:
 ## GAME_SEEDED_VAR_FIRST..LAST zeroed except GAME_VAR_HEALTH_PCT =
 ## GAME_HEALTH_SEED (GAME_VAR_MISSION_STATE stays 0 — never written by retail,
 ## so gamemus loops its Multiplayerstart P0 track); the slot/seed witnesses

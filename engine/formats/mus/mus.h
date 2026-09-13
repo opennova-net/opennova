@@ -9,6 +9,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <memory>
 
 namespace opennova::mus {
 
@@ -234,6 +235,13 @@ void mus_free(void *p);
    indices >= 9 resolve to a NULL handler that no-ops + pushes 0. */
 
 typedef struct MusVM MusVM;
+struct MusGlobals;
+// Compile-time access to the active context's actual globals, with lifetime retained
+// independently of the streaming VM. Raw writes do not signal AudioVM variable hooks.
+// [orig: sub_671FD0 @0x671FD0; WacScript_ResolveParameter @0x4F2A17..0x4F2A34]
+std::shared_ptr<MusGlobals> mus_vm_globals(MusVM *vm);
+int32_t mus_globals_read(const MusGlobals &globals, uint32_t index);
+void mus_globals_write_raw(MusGlobals &globals, uint32_t index, int32_t value);
 typedef enum MusVMState {
     MUS_VM_STOPPED = 0,
     MUS_VM_RUNNING = 1,

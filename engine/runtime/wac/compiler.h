@@ -34,6 +34,7 @@ struct CompileEnv {
     const opennova::world::AmmoTable *ammo = nullptr; // literal AMMO bindings at compilation
     std::vector<std::string> source_names; // parallel to compile_program's source texts
     std::function<bool(const std::string &, std::string &)> load_source; // RUN's mounted-file reader
+    std::shared_ptr<opennova::mus::MusGlobals> music_globals;
 };
 
 // Compile a parsed statement list into a Program. Diagnostics from both parse and

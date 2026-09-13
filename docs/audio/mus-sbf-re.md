@@ -377,3 +377,21 @@ and `mus_authored_behavioral` lock the same behavior in CI without the binary.
 - Comments added at `0x53D090`, `0x53D899` (sniff #1), `0x5AE0A9` (sniff #2 —
   also corrects an older comment that claimed key `0xA55AA56D`; the immediate
   is `0xA55B1EED`), and `0x672D73` (music-path plaintext gate).
+
+
+## WAC access to music globals (2026-09-13)
+
+WAC is an additional **direct memory writer**, outside the five callers of
+`AudioVM_SetVariable` listed above. Its M# resolver obtains the current audio
+instance's global address through `sub_671FD0 @0x671FD0` at compile time
+(`WacScript_ResolveParameter @0x4F2A17..0x4F2A34`). These writes do not signal
+the audio VM's variable-change hook. Without an active context, every M# aliases
+the WAC scratch slot. See [world §33.15a](../world/world-wac-ai-re.md), D-WAC-10.
+
+MUS and compiled WAC now share the same native byte store; a compiled binding
+retains its context through unload/restart without attaching to a replacement.
+The GameWorld music-open signal precedes mission compilation, so initial WAC
+reads the seeded game variables. Dedicated starts close the context. Native
+MUS/WAC and mission-kernel coverage, plus live director and GameWorld startup
+regressions, check this path. The D-MUS-SPGATE witness correction remains:
+SP has a local client and opens music; only dedicated hosts close it.

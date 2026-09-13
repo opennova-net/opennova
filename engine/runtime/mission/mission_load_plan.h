@@ -25,8 +25,8 @@
 //    celestial, HUD and renderer resource loads and before the loading screen
 //    drops — late network spawns must not change it
 //    [orig: CEffectWorld_RebuildAllModelBuffers @0x5871CF from @0x525A6E];
-//  - the game music context opens and its vars seed at the audio stage
-//    [orig: @0x525581-0x52561b];
+//  - the game music context opens and its vars seed before runtime compiles
+//    WAC M# operands [orig: @0x525581..0x52561b before WAC init @0x525CB3];
 //  - the effect system loads every .ptl and its textures at load, so the
 //    first live spawn pays nothing [orig: CEffectSystem_Init @0x5f6070 from
 //    @0x524980]; the placed pools' glow lights spawn after it
@@ -40,8 +40,8 @@ enum class MissionLoadStage : int {
 	kEnvironment,     // the .env load, the mission overrides, the clock
 	kTerrain,         // the .trn / tile-info build
 	kObjects,         // object placement (the per-model loops)
-	kRuntime,         // runtime start + the loaded-model page freeze
-	kAudio,           // mission audio + the game music context
+	kRuntime,         // game music context, runtime start, loaded-model page freeze
+	kAudio,           // mission sound-bank loading and ambient audio
 	kEffects,         // the effect world
 	kEffectsWarm,     // effect textures and first-draw pipeline warm-up
 	kFinish,          // water/minimap present enable, before ready

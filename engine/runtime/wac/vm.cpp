@@ -1,4 +1,5 @@
 #include <runtime/wac/vm.h>
+#include <formats/mus/mus.h>
 
 #include <cctype>
 #include <algorithm>
@@ -117,7 +118,7 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
         case OperandKind::GlobalVar:
             return w.script.vars.get_global(static_cast<int>(operand_index(ref)));
         case OperandKind::MusicVar:
-            return w.script.vars.get_music(static_cast<int>(operand_index(ref)));
+            return prog_->music_globals ? mus::mus_globals_read(*prog_->music_globals, operand_index(ref)) : 0;
         case OperandKind::EventFired: {
             const uint32_t i = operand_index(ref);
             return i < events_.size() && events_[i].ever_fired;
@@ -162,7 +163,9 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) {
     switch (operand_kind(ref)) {
         case OperandKind::MissionVar: w.script.vars.set_mission(static_cast<int>(operand_index(ref)), v); break;
         case OperandKind::GlobalVar: w.script.vars.set_global(static_cast<int>(operand_index(ref)), v); break;
-        case OperandKind::MusicVar: w.script.vars.set_music(static_cast<int>(operand_index(ref)), v); break;
+        case OperandKind::MusicVar:
+            if (prog_->music_globals) mus::mus_globals_write_raw(*prog_->music_globals, operand_index(ref), v);
+            break;
         case OperandKind::Builtin:
             // The retail named-value resolver returns the address of the row's
             // mutable engine dword, so ordinary set/add/sub/inc/dec/store write

@@ -129,3 +129,84 @@ func test_signal_end_track_reports_the_restart_frame_codes() -> void:
 	assert_eq(dir.signal_end_track(1), -2,
 			"a stopped VM with a loaded script still takes the frame (the handler decides)")
 	assert_eq(dir.vm_state(), 0, "the frame never restarts the embedder state")
+
+
+func test_wac_binds_live_music_globals_and_keeps_its_compile_time_context() -> void:
+	var script := MusicScript.new()
+	assert_eq(script.load_from_path(SCRIPT_FIXTURE), OK)
+	var director := MusicDirector.new()
+	director.auto_start = false
+	add_child(director)
+	director.load_mus_script(script)
+	director.start()
+	director.set_var(7, 99)
+	var sim := Simulation.new()
+	sim.set_music_director(director)
+	sim.build_demo_mission()
+	# A bare Simulation has no host roster to publish humans. This authored
+	# clock write keeps its script admitted for each repeated 62-tick pass.
+	assert_true(sim.compile_and_set_wac(PackedStringArray([
+		"set(v1,m7) set(m7,55) set(v2,m7) set(ticks,-1)"
+	])))
+	for _tick in range(62):
+		sim.step()
+	assert_eq(sim.get_mission_variable(1), 99)
+	assert_eq(sim.get_mission_variable(2), 55)
+	assert_eq(director.get_var(7), 55)
+	assert_eq(sim.get_music_variables_snapshot()[7], 55)
+	director.set_var(7, 73)
+	assert_eq(sim.get_music_variables_snapshot()[7], 73)
+	for _tick in range(62):
+		sim.step()
+	assert_eq(sim.get_mission_variable(1), 73)
+	director.load_mus_script(null)
+	director.load_mus_script(script)
+	director.start()
+	director.set_var(7, 22)
+	for _tick in range(62):
+		sim.step()
+	assert_eq(sim.get_mission_variable(1), 55, "the repeated pass still reads the retired context")
+	assert_eq(director.get_var(7), 22, "compiled operands still address the retired context")
+	assert_true(sim.compile_and_set_wac(PackedStringArray(["set(v1,m7) set(m7,88)"])))
+	for _tick in range(62):
+		sim.step()
+	assert_eq(sim.get_mission_variable(1), 22)
+	assert_eq(director.get_var(7), 88)
+	director.free()
+	assert_true(sim.compile_and_set_wac(PackedStringArray(["set(m1,17) set(v1,m2)"])))
+	for _tick in range(62):
+		sim.step()
+	assert_eq(sim.get_mission_variable(1), 17, "missing provider binds the shared scratch slot")
+	assert_eq(sim.get_music_variables_snapshot().size(), 0)
+
+
+func test_world_opens_music_before_initial_wac_compilation() -> void:
+	var script := MusicScript.new()
+	assert_eq(script.load_from_path(SCRIPT_FIXTURE), OK)
+	var director := MusicDirector.new()
+	director.auto_start = false
+	add_child_autofree(director)
+	var world := WorldFixture.make_world(self)
+	world.set_music_director(director)
+	var opens := [0]
+	world.music_context_opened.connect(func(_root):
+		opens[0] += 1
+		director.load_mus_script(script)
+		director.start()
+		director.set_var(7, 99))
+	var root_dir := WorldFixture.stage_minimal_root("wac_music_startup", false, {
+		"game.wac": "set(v1,m7) set(m7,55) set(v2,m7)\n"
+	})
+	assert_eq(WorldFixture.load_mission(world, root_dir), OK)
+	assert_eq(opens[0], 1)
+	var sim := world.get_sim()
+	assert_not_null(sim)
+	if sim != null:
+		assert_eq(sim.get_mission_variable(1), 99, "initial WAC sees the preopened context")
+		assert_eq(sim.get_mission_variable(2), 55)
+		assert_eq(director.get_var(7), 55, "initial WAC writes the actual music VM")
+	world.unload()
+	world.get_resource_root().clear()
+	director.stop()
+	director.load_mus_script(null)
+	TestFs.remove_dir_recursive(root_dir)

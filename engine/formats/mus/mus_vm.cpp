@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <new>
 
 namespace opennova::mus {
 
@@ -40,6 +41,10 @@ constexpr int kLocalsBytes  = kLocalsCap * 4;
 
 }   /* anonymous namespace */
 
+struct MusGlobals {
+    uint8_t bytes[MUS_GLOBALS_BYTES]{};
+};
+
 struct MusVM {
     const MusScript *script;
     MusVMHooks       hooks;
@@ -54,7 +59,7 @@ struct MusVM {
     int      csp;
 
     /* Globals + locals as raw bytes for byte-granular access. */
-    uint8_t  globals[kGlobalsBytes];
+    std::shared_ptr<MusGlobals> globals = std::make_shared<MusGlobals>();
     uint8_t  locals [kLocalsBytes];
 
     /* Flag bitmap (FSet/FClear/FIsSet). 64 flags. */
@@ -76,14 +81,15 @@ struct MusVM {
 /* ---- E1: lifecycle + hooks --------------------------------------------- */
 
 MusVM *mus_vm_create(void) {
-    MusVM *vm = (MusVM *)calloc(1, sizeof(MusVM));
-    if (!vm) return NULL;
-    vm->state = MUS_VM_STOPPED;
-    return vm;
+    try {
+        return new MusVM{};
+    } catch (const std::bad_alloc &) {
+        return nullptr;
+    }
 }
 
 void mus_vm_destroy(MusVM *vm) {
-    free(vm);
+    delete vm;
 }
 
 void mus_vm_set_hooks(MusVM *vm, const MusVMHooks *hooks) {
@@ -117,6 +123,13 @@ uint32_t mus_vm_pc(const MusVM *vm) {
 
 int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     if (!vm || !s) return -1;
+    // A fresh context owns fresh storage. Existing compiled operands retain the
+    // old context rather than following a replacement or borrowing freed memory.
+    try {
+        vm->globals = std::make_shared<MusGlobals>();
+    } catch (const std::bad_alloc &) {
+        return -1;
+    }
     vm->script = s;
     vm->state  = MUS_VM_STOPPED;
     vm->sp     = 0;
@@ -125,7 +138,6 @@ int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     vm->halt_latch = 0;
     memset(vm->data_stack, 0, sizeof(vm->data_stack));
     memset(vm->call_stack, 0, sizeof(vm->call_stack));
-    memset(vm->globals,    0, sizeof(vm->globals));
     memset(vm->locals,     0, sizeof(vm->locals));
     vm->last_error[0] = 0;
     vm->current_section_name[0] = 0;
@@ -204,13 +216,13 @@ static int32_t vm_pop(MusVM *vm) {
 static int32_t globals_read32(const MusVM *vm, int byte_off) {
     if (byte_off < 0 || byte_off + 4 > kGlobalsBytes) return 0;
     int32_t v;
-    memcpy(&v, vm->globals + byte_off, 4);
+    memcpy(&v, vm->globals->bytes + byte_off, 4);
     return v;
 }
 
 static void globals_write32(MusVM *vm, int byte_off, int32_t v) {
     if (byte_off < 0 || byte_off + 4 > kGlobalsBytes) return;
-    memcpy(vm->globals + byte_off, &v, 4);
+    memcpy(vm->globals->bytes + byte_off, &v, 4);
 }
 
 static int32_t locals_read32(const MusVM *vm, int byte_off) {
@@ -356,11 +368,11 @@ static void op_nop(MusVM *vm) { (void)vm; }
    notification here, so we deliberately omit notify_var_changed to match. */
 static void op_inc_g(MusVM *vm) {
     int byte_off = read_u8(vm);
-    if (byte_off >= 0 && byte_off < kGlobalsBytes) ++vm->globals[byte_off];
+    if (byte_off >= 0 && byte_off < kGlobalsBytes) ++vm->globals->bytes[byte_off];
 }
 static void op_dec_g(MusVM *vm) {
     int byte_off = read_u8(vm);
-    if (byte_off >= 0 && byte_off < kGlobalsBytes) --vm->globals[byte_off];
+    if (byte_off >= 0 && byte_off < kGlobalsBytes) --vm->globals->bytes[byte_off];
 }
 static void op_inc_l(MusVM *vm) {
     int byte_off = read_u8(vm);
@@ -1069,6 +1081,20 @@ int mus_vm_signal(MusVM *vm, int32_t value) {
 }
 
 /* ---- Globals accessors ------------------------------------------------ */
+
+std::shared_ptr<MusGlobals> mus_vm_globals(MusVM *vm) {
+    return vm != nullptr && vm->script != nullptr ? vm->globals : nullptr;
+}
+
+int32_t mus_globals_read(const MusGlobals &globals, uint32_t index) {
+    int32_t value = 0;
+    if (index < MUS_GLOBALS_BYTES / 4) memcpy(&value, globals.bytes + index * 4, 4);
+    return value;
+}
+
+void mus_globals_write_raw(MusGlobals &globals, uint32_t index, int32_t value) {
+    if (index < MUS_GLOBALS_BYTES / 4) memcpy(globals.bytes + index * 4, &value, 4);
+}
 
 int32_t mus_vm_get_var(const MusVM *vm, uint8_t var_index) {
     if (!vm) return 0;

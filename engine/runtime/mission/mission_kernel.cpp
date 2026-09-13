@@ -624,7 +624,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		std::string wac_error;
 		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac, files_,
 				options.wac_basename.empty() ? mission_basename : options.wac_basename,
-				&world.registry, options.wac_strict_diagnostics, wac_error, &script_effect_catalog, &script_sound_catalog);
+				&world.registry, options.wac_strict_diagnostics, wac_error, &script_effect_catalog, &script_sound_catalog, options.music_globals);
 		if (status == wac::WacLayeredLoadStatus::kBlocked) {
 			if (options.wac_strict_diagnostics) {
 				wac_blocked_error = std::move(wac_error);

@@ -3,6 +3,8 @@
 // variables, perf counters.
 // The class spans several TUs; see simulation_internal.h for the map.
 #include "simulation/simulation_internal.h"
+#include "audio/music_director.h"
+#include <godot_cpp/core/object.hpp>
 #include "simulation/environment_snapshot.h" // the F3 Environment record as a typed read
 #include "simulation/hud_view_records.h" // RoundOutcome
 #include "simulation/present_event_records.h" // SoundEmitterRow (the bound emitter drain)
@@ -665,6 +667,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	// empty table, so a set_sound_profiles override applied above still wins).
 
 	ms::KernelBootOptions options;
+	options.music_globals = wac_music_globals();
 	options.playable = p_playable;
 	options.joiner = is_joiner();
     options.mp_session = is_host_listening() || is_joiner();
@@ -748,6 +751,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 		kernel_->set_items_table(&pending_item_db->native_items());
 	}
 	opennova::mission::KernelBootOptions options;
+	options.music_globals = wac_music_globals();
 	options.playable = false; // callers spawn explicitly (or the listen bring-up auto-spawns)
 	options.joiner = is_joiner();
     options.mp_session = is_host_listening() || is_joiner();
@@ -773,6 +777,7 @@ void Simulation::build_demo_mission() {
 	kernel_->open_document(make_demo_mission(), std::string(),
 			opennova::mission::BootFileSource{});
 	opennova::mission::KernelBootOptions options;
+	options.music_globals = wac_music_globals();
 	options.playable = false;
 	options.joiner = is_joiner();
     options.mp_session = is_host_listening() || is_joiner();
@@ -846,6 +851,7 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 		sources.emplace_back(utf8.get_data(), static_cast<size_t>(utf8.length()));
 	}
 	opennova::wac::CompileEnv env;
+	env.music_globals = wac_music_globals();
 	env.registry = &kernel_->world.registry;
 	env.ammo = &kernel_->world.tables.ammo;
     env.effects = &kernel_->script_effect_catalog;
@@ -1183,9 +1189,24 @@ PackedInt32Array Simulation::get_global_variables_snapshot() const {
 	                     &opennova::world::ScriptVarStore::get_global);
 }
 
+void Simulation::set_music_director(MusicDirector *director) {
+    music_director_id_ = director ? ObjectID(director->get_instance_id()) : ObjectID();
+}
+
+std::shared_ptr<opennova::mus::MusGlobals> Simulation::wac_music_globals() const {
+    MusicDirector *director = Object::cast_to<MusicDirector>(ObjectDB::get_instance(music_director_id_));
+    return director ? director->globals_for_wac() : nullptr;
+}
+
 PackedInt32Array Simulation::get_music_variables_snapshot() const {
-	return snapshot_bank(&kernel_->world, opennova::world::ScriptVarStore::kMusicVars,
-	                     &opennova::world::ScriptVarStore::get_music);
+    PackedInt32Array values;
+    const auto &globals = kernel_->wac.program().music_globals;
+    if (globals) {
+        values.resize(opennova::mus::MUS_GLOBALS_BYTES / 4);
+        for (int i = 0; i < values.size(); ++i)
+            values.set(i, opennova::mus::mus_globals_read(*globals, static_cast<uint32_t>(i)));
+    }
+    return values;
 }
 
 void Simulation::set_global_variable(int index, int value) {

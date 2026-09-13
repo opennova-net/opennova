@@ -20,6 +20,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <godot_cpp/core/object_id.hpp>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -49,6 +50,7 @@
 namespace godot {
 
 class Weather;
+class MusicDirector;
 class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
 class EntityCard;     // the typed per-entity debug card (world::inspect, ADR 0042 d5)
 class EntityRow;      // one typed entity-directory row
@@ -917,6 +919,8 @@ public:
 	bool command_lightning_color(int p_rgb);
 
 private:
+    ObjectID music_director_id_;
+    std::shared_ptr<opennova::mus::MusGlobals> wac_music_globals() const;
 	// The shared post-kernel-boot binding legs: session-header capture, HUD
 	// map zoom, score-row re-resolve, and the held-WacProgram re-apply.
 	void finish_kernel_boot();
@@ -1885,6 +1889,7 @@ public:
 	// Always bank-sized; all zeros when no mission is loaded.
 	PackedInt32Array get_mission_variables_snapshot() const;
 	PackedInt32Array get_global_variables_snapshot() const;
+	void set_music_director(MusicDirector *director);
 	PackedInt32Array get_music_variables_snapshot() const;
 	// Globals (G#) round out the scalar var API (mission V# already bound).
 	void set_global_variable(int index, int value);

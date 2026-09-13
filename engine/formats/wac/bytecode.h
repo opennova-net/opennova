@@ -93,7 +93,7 @@ enum class OperandKind : uint8_t {
     Pool = 0,       // index into Program::operands (resolved literal/handle/id)
     MissionVar = 1, // V# -> ScriptVarStore.mission
     GlobalVar = 2,  // G# -> ScriptVarStore.global
-    MusicVar = 3,   // M# -> ScriptVarStore.music
+    MusicVar = 3,   // M# -> Program.music_globals (compile-time audio context)
     Builtin = 4,    // engine value (ticks/health/humans/...)
     EventFired = 5, // named IF's fired flag [orig: dword_C6CE40]
     EntitySsn = 6,  // authored net ID, bound to a packed handle at program startup

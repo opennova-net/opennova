@@ -36,6 +36,8 @@ public:
 	// socket + NP session before the wire-header world load (SessionDrive
 	// surrenders it here). Null = setup creates a fresh Simulation. MissionRoot
 	// is the one adopter either way (ADR 0011/0012).
+	MusicDirector *get_music_director() const;
+	void set_music_director(MusicDirector *director);
 	Ref<Simulation> get_simulation() const { return simulation_; }
 	void set_simulation(const Ref<Simulation> &p_value) { simulation_ = p_value; }
 	// Mission identity for diagnostics and the host session advertisement.
@@ -136,6 +138,7 @@ protected:
 	static void _bind_methods();
 
 private:
+	ObjectID music_director_id_;
 	// The default lobby player cap when no host UI supplied one
 	// (HostSessionConfig.DEFAULT_MAX_PLAYERS; the host-side clamp to the
 	// witnessed 1..65 applies either way).

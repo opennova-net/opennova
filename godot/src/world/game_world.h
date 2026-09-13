@@ -324,6 +324,8 @@ public:
 	// --- the frame ------------------------------------------------------------
 	// The game shell hands its FrameStats here; the world re-hands it to every
 	// MissionRoot it creates and feeds its own tick legs.
+	void set_music_director(MusicDirector *director);
+	MusicDirector *get_music_director() const;
 	void set_frame_stats(const Ref<FrameStats> &p_board);
 	bool is_water_render_stats_measured() const;
 	// Enables the manual frame-span/A-B probe. Disabling restores every skip
@@ -671,6 +673,7 @@ private:
 	Ref<MissionObjectPlacer> placer_; // kept so mission audio reuses its item database
 	Ref<LoadTimeline> last_load_timeline_; // the most recent load_mission timing
 	Ref<WeaponDatabase> weapon_db_; // weapon.def, lazy per mounted root (FP viewmodel)
+	ObjectID music_director_id_;
 	ObjectID mission_audio_id_;
 	ObjectID effect_world_id_; // the runtime .ptl effect world (render-only, per mission)
 	// Frame-clear cache (divergence #21): recompute only when the env

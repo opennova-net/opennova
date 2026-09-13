@@ -285,6 +285,7 @@ func _ready() -> void:
 	# The one interactive-music context is the shell's (MusicService); the
 	# world names the mission-start open, the mission-end teardown and the
 	# per-frame gamemus var pump through these three signals.
+	_world.set_music_director(MusicService.director())
 	_world.music_context_opened.connect(MusicService.open_game_context)
 	_world.music_context_closed.connect(MusicService.stop_context)
 	_world.music_var_changed.connect(MusicService.set_var)

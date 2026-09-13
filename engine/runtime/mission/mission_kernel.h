@@ -66,6 +66,7 @@ namespace opennova::mission {
 
 struct KernelBootOptions {
 	bool playable = true;   // spawn the authoritative side's own player after load
+	std::shared_ptr<opennova::mus::MusGlobals> music_globals;
 	bool wac = true;        // game.wac / server.wac / <mission>.wac when present
 	// A world presenter seeds weather after boot, then completes mission start.
 	// Native boots with their weather already seeded finish here.

@@ -9189,6 +9189,44 @@ later event-fired predicate was incorrect. WAC now reads the BMS owner's active
 state through a narrow query interface, without keeping a second event-state
 table. Missing owners and invalid indices safely return zero.
 
+### 33.15a WAC music operands bind the audio context (2026-09-13)
+
+**D-WAC-10, fixed:** M# operands address the actual MUS globals selected at
+compilation. The prior `ScriptVarStore::music_` array was detached from the
+music VM and could neither read its live variables nor drive its program.
+[orig: WacScript_ResolveParameter @0x4F2920, M branch @0x4F2A17..0x4F2A34;
+sub_671FD0 @0x671FD0 returns the current instance global address only while
+the audio context is active, via @0x672687..0x67268D.] Without that context,
+all M# operands resolve to the same scratch address `0xC6EAEC`, whose value
+resets at VM entry. Opening a context later does not retarget those operands.
+
+`CompileEnv` now carries a native MUS-global binding and the resulting
+`Program` retains it. MUS bytecode, normal audio-variable writes and WAC raw
+writes share one byte-addressable store. A raw WAC write deliberately bypasses
+`AudioVM_SetVariable @0x671FA0` and its notification path. The obsolete world
+music bank is removed; the Simulation diagnostic snapshot reads the program's
+bound audio globals and is empty when no context was selected.
+
+The Godot music owner is a weak provider resolved at compilation. The game
+context opens before mission runtime/WAC compilation, matching the open at
+`Game_StartMission @0x525589` before WAC initialization `@0x525CB3`; dedicated
+boots supply no music context. Single-player opens music because it has a local
+client, consistent with the corrected D-MUS-SPGATE witness. A context reload creates fresh storage;
+compiled programs retain their original store safely until those programs die,
+rather than following a replacement context or borrowing freed memory. The
+portable MUS allocation bounds raw indices to its 68-byte globals area; retail's
+unchecked out-of-range addresses are not reproduced.
+
+The independent original-executable witness with active Var7=99 produced
+V1=99, V2=55 and actual Var7=55 for `set(v1,m7) set(m7,55) set(v2,m7)`;
+without a context, `set(m1,17) set(v1,m2)` produced V1=17. Native `wac_state`
+checks both cases, actual MUS-bytecode feedback, notification silence,
+compile-time binding across unload/restart, and safe retired storage.
+`mission_kernel` exercises both active and inactive bindings at initial WAC
+execution. Godot music-director tests cover the live compile path, weak-provider
+lifetime, and real GameWorld startup ordering.
+
+
 ### 33.16 Infantry obstacle detours and common think ordering
 
 The function labelled [orig: ai_find_cover_position @0x4AFAB0] seeks a clear
@@ -10409,6 +10447,7 @@ declined entry falls back to an OPEN class-D row.
 | D-WAC-6 | An unresolved FX/FACE/SOUNDSET/ANIM/AMMO literal or a RUN/LOOP/NEXT structural error blocks the mission's script (`wac_layered_load` kBlocked); a GLOOP operand that is not a group name is the non-fatal `Unknown Group` and group 0 as in retail (2026-09-12), except that an operand an earlier resolver table claims (a declared variable, an event, a named value) also takes group 0 where retail ORs in the dword behind that address | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0/-1/0xFFFF (§33.15); unknown commands and unresolved arguments are non-fatal on both sides; the GLOOP operand resolve [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter @0x4f30fc/@0x4f310a] | OPEN (low: only malformed authored scripts differ; the GLOOP unknown-group leg is FIXED 2026-09-12) |
 | D-WAC-8 | Player/Item/auto retain a mutable DWORD in live VM state and runtime snapshots; cache/group refreshes replace only LOWORD and entity consumers explicitly narrow | [orig: WacCmd_Set @0x4ED520; WacScript_CacheLocalPlayerState @0x4F5814/@0x4F58A2; WacScript_ExecuteBytecode word stores @0x4F5B7E/@0x4F5BAF/@0x4F5BD2] (§33.15) | FIXED 2026-09-13 (uint16 truncation removed; wac_state regressions) |
 | D-WAC-9 | V references parse a decimal prefix after the first-digit check; declared names win first, and numeric indices >=256 warn and clamp to V255 | [orig: WacScript_ResolveParameter declared-name lookup @0x4F2970..0x4F2A3C; digit/atol @0x4F2AA9..0x4F2AB8; signed clamp @0x4F2AC0/@0x4F2AF4] (§33.4) | FIXED 2026-09-13 (all-digits rejection removed; wac_behavior regressions) |
+| D-WAC-10 | M# operands bind the actual audio context at compilation; missing contexts share the VM scratch slot | [orig: WacScript_ResolveParameter @0x4F2A17..0x4F2A34; sub_671FD0 @0x671FD0; Game_StartMission @0x525589 before @0x525CB3] (§33.15a) | FIXED 2026-09-13; native WAC/MUS and mission-start regressions plus live Godot context coverage |
 | D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
 | D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
 | D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |
