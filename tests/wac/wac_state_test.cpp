@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <formats/mus/mus.h>
 #include <memory>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
@@ -172,7 +173,69 @@ static void test_auto_group_bindings_preserve_high_word_and_restore_it() {
     CHECK(f.value(3) == int32_t(0x00050000u | local.packed));
 }
 
+
+static void test_music_operands_bind_the_actual_context_at_compilation() {
+    using namespace opennova::mus;
+    Fixture f;
+    MusScript script{};
+    int line = 0, column = 0; const char *error = nullptr;
+    const int compiled = mus_compile("script t\nsection Begin\n{\nVar07 = 73\ndone\n}\n",
+                                     &script, &line, &column, &error);
+    CHECK(compiled == 0);
+    if (compiled != 0) return;
+    std::unique_ptr<MusVM, decltype(&mus_vm_destroy)> audio(mus_vm_create(), mus_vm_destroy);
+    CHECK(audio != nullptr && !mus_vm_globals(audio.get()));
+    // No context means every M# resolves to the same per-entry scratch slot.
+    Program inactive = compile_source("set(m1,17) set(v1,m2)\n", {});
+    CHECK(inactive.ok() && !inactive.music_globals);
+    CHECK(mus_vm_load_script(audio.get(), &script) == 0);
+    CompileEnv env; env.music_globals = mus_vm_globals(audio.get());
+    CHECK(env.music_globals != nullptr);
+    int notifications = 0;
+    MusVMHooks hooks{};
+    hooks.user = &notifications;
+    hooks.on_var_changed = [](void *user, uint8_t, int32_t) { ++*static_cast<int *>(user); };
+    mus_vm_set_hooks(audio.get(), &hooks);
+    mus_vm_set_var(audio.get(), 7, 99);
+    CHECK(notifications == 1);
+    Program active = compile_source("set(v1,m7) set(m7,55) set(v2,m7)\n", env);
+    CHECK(active.ok());
+    WacVm vm; vm.load(active); vm.execute(f.world);
+    CHECK(f.value(1) == 99 && f.value(2) == 55);
+    CHECK(mus_vm_get_var(audio.get(), 7) == 55 && notifications == 1);
+    // Actual MUS bytecode writes the same bank that the next WAC execution reads.
+    mus_vm_start(audio.get()); mus_vm_tick(audio.get(), 16);
+    CHECK(mus_vm_get_var(audio.get(), 7) == 73 && notifications == 2);
+    vm.execute(f.world);
+    CHECK(f.value(1) == 73 && mus_vm_get_var(audio.get(), 7) == 55);
+    CHECK(notifications == 2); // raw WAC lvalues never notify the audio VM
+    vm.load(inactive); vm.execute(f.world);
+    CHECK(f.value(1) == 17 && mus_vm_get_var(audio.get(), 1) == 0);
+    Program scratch_read = compile_source("set(v3,m1)\n", {});
+    vm.load(scratch_read); vm.execute(f.world);
+    CHECK(f.value(3) == 0); // scratch resets at execution entry
+
+    // Restarting the context does not silently rebind an already-compiled operand.
+    const auto retired = active.music_globals;
+    mus_vm_unload_script(audio.get());
+    CHECK(!mus_vm_globals(audio.get()));
+    CHECK(mus_vm_load_script(audio.get(), &script) == 0);
+    mus_vm_set_var(audio.get(), 7, 22);
+    vm.load(active); vm.execute(f.world);
+    CHECK(f.value(1) == 55 && mus_vm_get_var(audio.get(), 7) == 22);
+    CHECK(mus_globals_read(*retired, 7) == 55);
+    env.music_globals = mus_vm_globals(audio.get());
+    Program replacement = compile_source("set(v4,m7) set(m7,88)\n", env);
+    vm.load(replacement); vm.execute(f.world);
+    CHECK(f.value(4) == 22 && mus_vm_get_var(audio.get(), 7) == 88);
+    audio.reset();
+    vm.execute(f.world); // a compiled binding safely retains its retired storage
+    CHECK(f.value(4) == 88);
+    mus_script_free(&script);
+}
+
 int main() {
+    test_music_operands_bind_the_actual_context_at_compilation();
     test_auto_dword_assignment_and_partial_cache_refresh();
     test_auto_group_bindings_preserve_high_word_and_restore_it();
     test_squad_selection_clear_and_retry();

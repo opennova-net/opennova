@@ -82,6 +82,9 @@ public:
 	void pause();
 	void resume();
 	void jump_to_section(const StringName &p_section_name);
+	std::shared_ptr<opennova::mus::MusGlobals> globals_for_wac() const {
+        return opennova::mus::mus_vm_globals(_vm);
+    }
 	int get_var(int p_var_index) const;
 	void set_var(int p_var_index, int p_value);
 	int vm_state() const;

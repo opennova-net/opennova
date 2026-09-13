@@ -105,11 +105,7 @@ int main() {
         CHECK(fresh.get_global(3) == 1);
     }
 
-    // The music bank (M0..M15) + clear_all (the bank the snapshot bindings read).
-    w.script.vars.set_music(2, 11);
-    CHECK(w.script.vars.get_music(2) == 11);
     w.script.vars.clear_all();
-    CHECK(w.script.vars.get_music(2) == 0);
     CHECK(w.script.vars.get_global(3) == 0); // clear_all wipes globals too
 
     // Out-of-range safety: reads are 0, writes are ignored (the snapshot
@@ -120,7 +116,6 @@ int main() {
     CHECK(w.script.vars.get_mission(ScriptVarStore::kMissionVars) == 0);
     w.script.vars.set_global(-1, 9); // must not crash or wrap
     CHECK(w.script.vars.get_global(-1) == 0);
-    CHECK(w.script.vars.get_music(ScriptVarStore::kMusicVars) == 0);
 
     // logic tick = the 62 Hz engine tick; one call advances it by one. (The 62-tick
     // WAC divider lives inside WacSystem, where the original keeps it — see

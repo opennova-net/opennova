@@ -308,6 +308,14 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_RUNTIME));
 	timeline->span("runtime");
+	// Open and seed GAME music for sessions with a local client, including SP;
+	// dedicated hosts close the context. The shell owns the actual music VM.
+	// [orig: Game_StartMission @0x525581..0x52561B; the connection-mode
+	// is_client gate is corrected in mus-sbf-re.md, D-MUS-SPGATE]
+	// M# resolves this context while WAC compiles, so opening must precede boot.
+	// [orig: music open @0x525589 precedes WAC init @0x525CB3]
+	if (drive_.pending_dedicated()) emit_signal(kSignalMusicContextClosed);
+	else emit_signal(kSignalMusicContextOpened, resource_root_);
 	const int runtime_error = start_runtime(p_mission, p_bms_name);
 	timeline->end_span();
 	if (runtime_error != OK) {
@@ -965,6 +973,7 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	opts->set_terrain(terrain_data_);
 	opts->set_resource_root(resource_root_);
 	opts->set_wac_basename(p_bms_name.get_basename());
+	opts->set_music_director(get_music_director());
 	opts->set_mission_file(mission_file);
 	opts->set_mission_name(mission_label);
 	PackedStringArray spawn_names;
@@ -1119,14 +1128,7 @@ void GameWorld::start_mission_audio(const Ref<MissionData> &p_mission, const Str
 			"GameWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d ambient candidate(s), %d/%d physical channel(s) allocated",
 			stats->get_markers_resolved(), stats->get_markers_total(), stats->get_banks_loaded(),
 			stats->get_ambient_candidates(), stats->get_physical_channels(), stats->get_channel_budget()));
-	// Open the GAME music context + seed the witnessed vars [orig: Game_StartMission
-	// @ 0x525581-0x52561b]. Retail gates the open on is_mp_session_peer and STOPS
-	// music in single-player; ours opens in ALL sessions — D-MUS-SPGATE
-	// (docs/audio/mus-sbf-re.md §Game music driving; SP-as-listen-server, ADR
-	// 0009/0011/0012). gamemus's discriminator Var1 stays 0 (never written in
-	// retail), so the Multiplayerstart P0 loop plays. The shell's MusicService
-	// owns the context; MainGame connects this to open_game_context.
-	emit_signal(kSignalMusicContextOpened, resource_root_);
+
 }
 
 // Build retail's depthspin shore mask directly from the raw CPT height atlas.

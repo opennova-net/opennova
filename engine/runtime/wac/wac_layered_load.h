@@ -43,7 +43,8 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		const std::string &mission_basename, world::EntityRegistry *registry,
 		bool strict_diagnostics, std::string &error,
         particle::EffectCatalogNames *effect_catalog = nullptr,
-        const audio::SoundSetIndex *sound_catalog = nullptr);
+        const audio::SoundSetIndex *sound_catalog = nullptr,
+        const std::shared_ptr<opennova::mus::MusGlobals> &music_globals = {});
 
 // Same mounted mission/global chain as the audio host; no WAV decode needed.
 void load_script_sound_sets(const mission::BootFileSource &files,

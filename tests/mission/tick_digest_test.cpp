@@ -127,7 +127,6 @@ void hash_world(Digest &d, const w::World &world) {
 	});
 	for (int i = 0; i < w::ScriptVarStore::kMissionVars; ++i) d.value(world.script.vars.get_mission(i));
 	for (int i = 0; i < w::ScriptVarStore::kGlobalVars; ++i) d.value(world.script.vars.get_global(i));
-	for (int i = 0; i < w::ScriptVarStore::kMusicVars; ++i) d.value(world.script.vars.get_music(i));
 	d.value(world.match.remaining_ticks());
 	d.value(static_cast<uint32_t>(world.match.players().size()));
 	const w::MatchResult &result = world.match.result();

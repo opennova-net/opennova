@@ -1,8 +1,20 @@
 #include "mission/mission_setup_options.h"
+#include "audio/music_director.h"
+#include <godot_cpp/core/object.hpp>
 
 namespace godot {
 
+MusicDirector *MissionSetupOptions::get_music_director() const {
+    return Object::cast_to<MusicDirector>(ObjectDB::get_instance(music_director_id_));
+}
+
+void MissionSetupOptions::set_music_director(MusicDirector *director) {
+    music_director_id_ = director ? ObjectID(director->get_instance_id()) : ObjectID();
+}
+
 void MissionSetupOptions::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("get_music_director"), &MissionSetupOptions::get_music_director);
+    ClassDB::bind_method(D_METHOD("set_music_director", "director"), &MissionSetupOptions::set_music_director);
 #define SETUP_OPTION(m_variant, m_name)                                                          \
 	ClassDB::bind_method(D_METHOD("get_" #m_name), &MissionSetupOptions::get_##m_name);         \
 	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &MissionSetupOptions::set_##m_name); \

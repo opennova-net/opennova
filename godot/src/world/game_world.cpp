@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "network/net_session_policy.h"
+#include "audio/music_director.h"
 
 using namespace godot;
 
@@ -326,6 +327,14 @@ Color GameWorld::get_current_frame_clear_color() const {
 }
 
 // --- the frame stats / perf probe ------------------------------------------
+
+void GameWorld::set_music_director(MusicDirector *director) {
+    music_director_id_ = director ? ObjectID(director->get_instance_id()) : ObjectID();
+}
+
+MusicDirector *GameWorld::get_music_director() const {
+    return Object::cast_to<MusicDirector>(ObjectDB::get_instance(music_director_id_));
+}
 
 void GameWorld::set_frame_stats(const Ref<FrameStats> &p_board) {
 	if (p_board == frame_stats_) {
@@ -680,6 +689,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_current_frame_clear_color"),
 			&GameWorld::get_current_frame_clear_color);
 
+	ClassDB::bind_method(D_METHOD("set_music_director", "director"), &GameWorld::set_music_director);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "board"), &GameWorld::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("is_water_render_stats_measured"),
 			&GameWorld::is_water_render_stats_measured);

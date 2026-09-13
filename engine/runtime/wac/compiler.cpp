@@ -90,6 +90,7 @@ void stamp_source(Stmt &stmt, uint32_t source) {
 class Compiler {
 public:
     explicit Compiler(const CompileEnv &env) : env_(env) {
+        prog_.music_globals = env.music_globals;
         prog_.source_names = env.source_names;
         if (prog_.source_names.empty()) prog_.source_names.emplace_back();
     }
@@ -258,7 +259,11 @@ private:
         if (bare && !t.empty() && (t[0] == 'M' || t[0] == 'm') && t.size() > 1 &&
             std::isdigit(static_cast<unsigned char>(t[1]))) {
             int idx = std::atoi(t.c_str() + 1);
-            return encode_operand(OperandKind::MusicVar, idx);
+            // The resolver stores a direct context-global pointer, or the shared
+            // scratch address if no context exists at compile time.
+            // [orig: WacScript_ResolveParameter @0x4F2A17..0x4F2A34]
+            return env_.music_globals ? encode_operand(OperandKind::MusicVar, idx)
+                                      : encode_operand(OperandKind::Builtin, static_cast<uint32_t>(Builtin::Scratch));
         }
         // Only the first character after V must be a digit. atol consumes its
         // decimal prefix; declared names above still take precedence.

@@ -3,8 +3,11 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
+
+namespace opennova::mus { struct MusGlobals; }
 
 namespace opennova::wac {
 
@@ -22,6 +25,8 @@ struct InstructionSource {
 };
 
 struct Program {
+    // M# resolves to this context at compilation; absent context uses Scratch.
+    std::shared_ptr<opennova::mus::MusGlobals> music_globals;
     std::vector<uint32_t> code;        // instructions + inline operand refs; ends in 0x7A7A7A7A
     std::vector<int32_t> operands;     // resolved literal/handle/id pool [orig: dword_C6AA30]
     std::vector<std::string> strings;  // string literals [orig: byte_C69A20]

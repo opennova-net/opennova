@@ -154,6 +154,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		// `--capture-pcap <path>` (LaunchFlags) records this process's datagrams.
 		sim_->set_capture_pcap_path(LaunchFlags::capture_pcap());
 	}
+	sim_->set_music_director(options->get_music_director());
 	sim_->set_frame_stats(frame_stats_);
 	has_trace_stats_sampling_ = sim_.is_valid();
 	sync_runtime_profiling();

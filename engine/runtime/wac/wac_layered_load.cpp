@@ -57,19 +57,21 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 		const mission::BootFileSource &files,
 		const std::string &mission_basename, world::EntityRegistry *registry,
 		bool strict_diagnostics, std::string &error, particle::EffectCatalogNames *effect_catalog,
-        const audio::SoundSetIndex *sound_catalog) {
+        const audio::SoundSetIndex *sound_catalog,
+        const std::shared_ptr<opennova::mus::MusGlobals> &music_globals) {
 	error.clear();
+    CompileEnv env;
+    env.music_globals = music_globals;
 	if (!files.valid()) {
         // Even without source files retail installs a terminator, executes the
         // VM entry/exit, and increments the mutable clock at startup.
         // [orig: WacScript_InitAndLoad @0x4F91F0 -> @0x4F976B/@0x4F9770]
-        system.set_program(compile_program({}, {}));
+        system.set_program(compile_program({}, env));
         return WacLayeredLoadStatus::kAbsent;
     }
 	// The original layering, absent files skipped in order
 	// [orig: WacScript_InitAndLoad @0x4f91f0].
 	std::vector<std::string> sources;
-    CompileEnv env;
     env.load_source = [&files](const std::string &name, std::string &source) {
         std::vector<uint8_t> bytes;
         if (!files.has_file(name) || !files.read_file(name, bytes)) return false;

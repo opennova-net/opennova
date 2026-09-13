@@ -1,3 +1,4 @@
+#include <formats/mus/mus.h>
 // The mission kernel (ADR 0042 d3) booted over a SYNTHETIC mission and an
 // in-memory file source — ungated. Locks the promoted rig body's engine home:
 // open_document + boot run the S9 order end to end (entities promoted, the
@@ -361,7 +362,33 @@ static void test_sound_profiles_parse_once_and_keep_a_pre_boot_override() {
     }
 }
 
+
+static void test_initial_wac_binds_the_preopened_music_context() {
+    for (bool context_active : {false, true}) {
+        const std::map<std::string, std::string> files = {
+            {"synth.wac", "set(v1,m7) set(m7,55) set(v2,m7)\n"}
+        };
+        auto audio = std::unique_ptr<mus::MusVM, decltype(&mus::mus_vm_destroy)>(
+                mus::mus_vm_create(), mus::mus_vm_destroy);
+        mus::MusScript music_script{};
+        if (context_active) CHECK(mus::mus_vm_load_script(audio.get(), &music_script) == 0);
+        mus::mus_vm_set_var(audio.get(), 7, 99);
+        ms::MissionKernel kernel;
+        kernel.open_document(bms::File{}, "synth", source_over(&files));
+        ms::KernelBootOptions options;
+        options.playable = false;
+        options.music_globals = mus::mus_vm_globals(audio.get());
+        std::string error;
+        CHECK(kernel.boot(options, error));
+        CHECK(kernel.wac.runs() == 1);
+        CHECK(kernel.world.script.vars.get_mission(1) == (context_active ? 99 : 0));
+        CHECK(kernel.world.script.vars.get_mission(2) == 55);
+        CHECK(mus::mus_vm_get_var(audio.get(), 7) == (context_active ? 55 : 99));
+    }
+}
+
 int main() {
+    test_initial_wac_binds_the_preopened_music_context();
     test_empty_wac_clock_and_baseline_gate();
 	test_sound_profiles_parse_once_and_keep_a_pre_boot_override();
 	test_vehicle_spawn_pose_is_captured_after_initial_wac();
