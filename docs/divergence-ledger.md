@@ -1518,3 +1518,5 @@ Closed 2026-09-13: **D-WPN-37** -> `FIXED` — Airborne players suppress authore
 Closed 2026-09-13: **D-WAC-8** -> `FIXED` — The Player/Item/auto slot retains all 32 bits; cache and group refreshes replace only its low-word entity handle. Full-width assignment, absent-player/group refresh and runtime restore are covered by `wac_state`; world/world-wac-ai-re.md §33.15.
 
 PR #649 adversarial correction (2026-09-13, D-WPN-36): local heading/leg/pitch clamps precede scoped drift. The body-tick limit and PRNG regressions are recorded in [world §14.9](world/world-wac-ai-re.md).
+
+Closed 2026-09-13: **D-WAC-9** -> `FIXED` — Numbered V operands accept decimal prefixes while declared names retain precedence and indices clamp at 255. world/world-wac-ai-re.md; Native `wac_behavior` prefix, boundary and shadowing regressions pass.

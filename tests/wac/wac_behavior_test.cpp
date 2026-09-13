@@ -730,6 +730,55 @@ static void test_do_sections_cycle_and_restore_independently() {
     CHECK(w.diagnostics.empty());
 }
 
+static void test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup() {
+    BehaviorWorld w;
+    Program program = compile_source(
+            "set(v0suffix,7) set(v1tail,11) set(V02_more,22) "
+            "set(v255edge,55) set(v9,V255read) "
+            "set(v256tail,66) set(v10,v255) set(v11,V256again) "
+            "set(v12,V0255trail)\n", {});
+    CHECK(program.ok());
+    CHECK(program.diagnostics.size() == 2);
+    for (const Diagnostic &diagnostic : program.diagnostics)
+        CHECK(!diagnostic.error && diagnostic.message == "V# too big");
+    WacVm vm; vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(0) == 7);
+    CHECK(w.script.vars.get_mission(1) == 11);
+    CHECK(w.script.vars.get_mission(2) == 22);
+    CHECK(w.script.vars.get_mission(9) == 55); // V255 is valid before the clamp write
+    CHECK(w.script.vars.get_mission(255) == 66);
+    CHECK(w.script.vars.get_mission(10) == 66);
+    CHECK(w.script.vars.get_mission(11) == 66);
+    CHECK(w.script.vars.get_mission(12) == 66);
+    CHECK(w.script.vars.get_mission(256) == 0); // numeric syntax never reaches declarations
+
+    program = compile_source(
+            "var v1tail\nvar V256shadow\n"
+            "set(v1tail,101) set(V256SHADOW,202) set(v1,11) set(v255,55) "
+            "set(v3,V1TAIL) set(v4,v256shadow) "
+            "set(v5,v1other) set(v6,v256other)\n", {});
+    CHECK(program.ok());
+    CHECK(program.diagnostics.size() == 1);
+    if (!program.diagnostics.empty())
+        CHECK(program.diagnostics[0].message == "V# too big");
+    vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(256) == 101);
+    CHECK(w.script.vars.get_mission(257) == 202);
+    CHECK(w.script.vars.get_mission(3) == 101); // declared full name wins, case-insensitively
+    CHECK(w.script.vars.get_mission(4) == 202);
+    CHECK(w.script.vars.get_mission(5) == 11);
+    CHECK(w.script.vars.get_mission(6) == 55);
+
+    program = compile_source("set(v0,71) set(vsuffix,99) set(v,101)\n", {});
+    CHECK(program.ok());
+    // An unresolved name re-feeds both SET slots, then reports the stray
+    // token: two signature diagnostics and one Unknown per name.
+    CHECK(program.diagnostics.size() == 6);
+    for (const Diagnostic &diagnostic : program.diagnostics) CHECK(!diagnostic.error);
+    vm.load(program); vm.execute(w);
+    CHECK(w.script.vars.get_mission(0) == 71); // no first digit still means unresolved
+}
+
 static void test_named_event_reset_and_declared_variables() {
     BehaviorWorld w;
     WacSystem sys;
@@ -1854,6 +1903,7 @@ int main() {
     test_arithmetic_assignment_and_retail_expression_order();
     test_auto_parentheses_and_minus_token_context();
     test_boundary_lookahead_drops_an_outranked_frame();
+    test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup();
     test_named_event_reset_and_declared_variables();
     test_empty_server_holds_script_divider_after_boot();
     test_nested_conditions_and_accumulator_lifetime();

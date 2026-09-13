@@ -27,14 +27,6 @@ namespace {
 
 bool ieq(std::string_view a, const char *b) { return opennova::strutil::iequals(a, b); }
 
-bool all_digits(std::string_view s) {
-    if (s.empty()) return false;
-    for (char c : s) {
-        if (!std::isdigit(static_cast<unsigned char>(c))) return false;
-    }
-    return true;
-}
-
 bool starts_with_ci(const std::string &s, const char *prefix) {
     size_t i = 0;
     for (; prefix[i]; ++i) {
@@ -268,8 +260,12 @@ private:
             int idx = std::atoi(t.c_str() + 1);
             return encode_operand(OperandKind::MusicVar, idx);
         }
-        if (bare && !t.empty() && (t[0] == 'V' || t[0] == 'v') && all_digits(std::string_view(t).substr(1))) {
-            int idx = std::atoi(t.c_str() + 1);
+        // Only the first character after V must be a digit. atol consumes its
+        // decimal prefix; declared names above still take precedence.
+        // [orig: @0x4F2AA9..0x4F2AB8; signed clamp @0x4F2AC0/@0x4F2AF4]
+        if (bare && t.size() > 1 && (t[0] == 'V' || t[0] == 'v') &&
+                std::isdigit(static_cast<unsigned char>(t[1]))) {
+            int32_t idx = static_cast<int32_t>(std::atol(t.c_str() + 1));
             if (idx >= 256) { warn(line, "V# too big"); idx = 255; }
             return encode_operand(OperandKind::MissionVar, idx);
         }
