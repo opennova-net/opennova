@@ -635,7 +635,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     broad: `client_replica_lifecycle` retains the raw flags from an incoming original
     full-spawn 0x18 record for players and infantry; `coop_marker_pose`,
     `apply_spawn_point_latches` and the single-teleport branch already copy a preexisting
-    marker bit (`[orig: Entity_ApplyCommand @ 0x43E0A0]`). Fresh BMS seed promotion does
+    marker bit (`[orig: EventAction_TeleportEntityToSpawn @0x43E0A0 (test) / @0x43E0A5 (store), pool-0 targets only]`). Fresh BMS seed promotion does
     not author a chute attribute, and our server's `player_wire_flags` still emits only
     player/own/dead bits, so those copy paths do not prove a fresh local mission starts
     with a chute. The current-state render consumer is **FIXED 2026-09-13 (D-RORD-12)**:
@@ -2097,9 +2097,11 @@ This bounded integer witness is not a full retail playthrough comparison.
 No IDB edits were made for this slice.
 
 
-Adversarial review of PR #649 corrected the portable phase order: ladder yaw,
+The portable phase order was corrected the same day: ladder yaw,
 leg chase/replant and pitch clamps run before applying drift, as in retail
-`@0x4B49E9..0x4B4BC6` followed by `@0x4B5C78..0x4B5C91`. Actual body-tick
+`@0x4B49E9..0x4B4BC6` followed by `@0x4B5C78..0x4B5C91`. The local view/leg
+phase keys on the raw tick banked `@0x4B4147` (the leg phase masks that slot
+raw `@0x4B467A..0x4B4683`), not the org1 stagger key. Actual body-tick
 regressions retain drift beyond the pitch/ladder limit and keep leg targets at
 the pre-drift heading, while checking the unchanged three-draw PRNG sequence.
 
@@ -2168,8 +2170,8 @@ path; it did not prove that this consumer existed in OpenNova.
 | DEF rotation and install promotion | MATCHING (bounded integer witness) | `player_view` checks decimal-token Q16 values and exact rounded BAM words across 180/360 degrees; `def_parse_weapons` retains the retail M4 parse leg |
 | Authored six-lane interpolation | MATCHING (bounded machine witness) | `player_view` fingerprints seven original setup/20-tick traces, including all float position words, unsigned BAM lanes, velocity, active/counter state and published biases |
 | Rotation gate and actual rig consumer | MATCHING (bounded behavioral proof) | `local_player_view` exercises installed poses, airborne/reload/NoCardSwitch/ForceScoped gates and rebaking; `player_viewmodel_rotation_test.gd` observes the real rig basis and rotated offset through normal world/presenter setup, jump/landing and a forced-scope spawn without a toggle |
-| Mount/reset lifecycle | MATCHING at the install boundary; pending-slot timing OPEN, D-WPN-40 | Direct installs retain interpolation; category requests and UseGun attach reset before commit; same-category/ForceScoped installs schedule the original one-step ADS setup |
-| Optical completion and presented position interpolation | OPEN, D-WPN-39 | Existing scalar admission/position consumers remain independent of the retained six-lane state; original completion depends on authored data and position publication truncates to Q16 integers |
+| Mount/reset lifecycle | MATCHING at the install boundary; pending-slot timing OPEN, D-WPN-40 | Direct installs retain interpolation; category requests and UseGun attach reset before commit; same-category/ForceScoped installs schedule the original one-step ADS setup. UseGun attach staging performs the full reset including the binocular clears [orig: Entity_AttachToUseGunSlot @0x546ba4 -> Player_ResetCameraAndMovementState @0x4de2ad/@0x4de2b3] |
+| Optical completion and presented position interpolation | MATCHING | The settle promoter, the toggle's ease gate and the presented position all read the retained six-lane interp: promotion on the call after the last lane snap (tick 16 of a 15-step authored ease; tick 15 of a zero-span ease; at once for an unbound slot), and the position is the truncating Q16 publication over the def `pos` [orig: Player_UpdatePerFrame @0x4de4c7..0x4de4f7; Player_StepFpViewBiasInterp @0x4DDD2B..0x4DDFC3; Player_UpdateFirstPersonCamera @0x4dd479..0x4dd4da] |
 
 The DEF parser keeps XYZ as authored position units and the three angle
 columns as Q16 degrees from `Math_ParseFixedPoint16`. The install promotion
@@ -2181,8 +2183,15 @@ turn conversion. The digit parser has no signed-number prefix: `-0.1`
 produces zero. Examples around the seam are `179.99999 -> 11796479 ->
 0x7FFFFECA`, `180.00001 -> 11796481 -> 0x80000036`, and `359.99999 ->
 23592959 -> 0xFFFFFE4A` [orig: Math_ParseFixedPoint16 @ 0x6131F0;
-WeaponDef_ParseProperty, pos @0x544614..0x5446D8, hip-copy stores
+WeaponDefs_ParseLineCallback @0x543680, pos @0x544614..0x5446D8, hip-copy stores
 @0x5446DB..0x544717, tpos @0x54475B..0x544825].
+A `pos` or `tpos` line carrying fewer than six values is refused whole: the
+token-count gate (key plus six values) warns "too few params" and returns
+before the first store, so the row keeps its earlier values; extra values
+beyond six are ignored [orig: WeaponDefs_ParseLineCallback pos gate
+@0x5445EE..0x544613, tpos gate @0x544735..0x54475A]. Ported in
+`engine/formats/def/def_weapons.cpp` (`parse_view_pose`); regression
+`tests/def/def_parse_weapons_test.cpp` ("short pos/tpos refusal").
 
 `CNetPlayerInterp_Setup` copies the target's six lanes. An active interpolation
 sources from its own current pose; an idle one uses the caller's pose. XYZ
@@ -2255,7 +2264,7 @@ queues the outgoing action and the target pose binds at `local_weapon_install`
 after commit/presentation install. Request-time camera reset is now independent
 of that delay, but completing pending-target view timing requires feeding its
 authored poses before the install boundary; no matching claim covers that
-interval.
+interval. D-WPN-39 (the optical/position clock) closed 2026-09-13.
 
 The independent oracle executed the full original setup and step functions,
 including their real CRT conversion calls, from retail SHA256
@@ -2280,7 +2289,7 @@ at the actual installation and request boundaries.
 | ID | Status | Summary |
 |---|---|---|
 | D-WPN-38 | FIXED 2026-09-13 | Authored ADS rotation had no consumer. Q16 angle parsing, full-pose install data and the retained original six-lane interpolator now publish the gated rotation bias to the actual rig's basis and rotated offset. Native machine traces and real synthetic-world rig tests cover interpolation, wrapping, suppression, direct-mount continuation, request reset and forced-scope equip. |
-| D-WPN-39 | OPEN | Optical admission and position presentation still use `scope_step/ease_steps`, always completing on their nominal 7/15/1 clock and continuously blending float XYZ. Retail waits for all six velocities to snap and a later zero-velocity call, then promotes scope at `Player_UpdatePerFrame @0x4DE4C9..0x4DE4F7`; position uses the published truncating Q16 bias. The 15-step fixture above completes at tick 16, whereas current optical admission promotes at tick 15. Route these existing consumers through the now-retained pose state and add authored-data completion, interruption and real position-output regressions as a separate fix. |
+| D-WPN-39 | FIXED 2026-09-13 | Optical admission and position presentation used a separate scalar 7/15/1 clock with a float XYZ blend. The promoter now fires when the retained six-lane interp's active latch drops (`Player_UpdatePerFrame @0x4de4c7..0x4de4f7`), the toggle gate reads that latch (`@0x4df177`), and the presented position is `pos + ftol(current - hip)` from the published Q16 bias (`@0x4dd479..0x4dd4da`). Native regressions cover the 16th-call promotion on authored spans, the 15th-call zero-span counter, the unbound first-step deactivation, the reversal/re-raise legs and the exact Q16 publication. |
 | D-WPN-40 | OPEN | Retail binds the pending target's view pose during `Player_MountWeaponSlot @0x4DFB16/0x4DFC4B/0x4DFC7D`, before the outgoing action commits. OpenNova resets the view at admitted category-request time but binds the target's pose at the later `local_weapon_install` boundary. Feed the pending def's authored poses into native mount staging, preserve the outgoing weapon FSM, and test category/cycle/UseGun timing across request, outgoing action, commit and presentation rebake. This is distinct from D-WPN-39's optical/position interpolation clock. |
 
 No IDB edits were made for this slice.
@@ -9349,25 +9358,47 @@ music bank is removed; the Simulation diagnostic snapshot reads the program's
 bound audio globals and is empty when no context was selected.
 
 The Godot music owner is a weak provider resolved at compilation. The game
-context opens before mission runtime/WAC compilation, matching the open at
-`Game_StartMission @0x525589` before WAC initialization `@0x525CB3`; dedicated
-boots supply no music context. Single-player opens music because it has a local
-client, consistent with the corrected D-MUS-SPGATE witness. A context reload creates fresh storage;
-compiled programs retain their original store safely until those programs die,
-rather than following a replacement context or borrowing freed memory. The
-portable MUS allocation bounds raw indices to its 68-byte globals area; retail's
-unchecked out-of-range addresses are not reproduced. This bounded invalid-input
-residual is **D-WAC-11, OPEN (proposed class D)**: M17 and larger indices read
-zero and drop writes in the portable store, while the original resolver returns
-unchecked addresses beyond the active context's 68-byte globals allocation.
-Retain the safe guard; permanent classification awaits maintainer ratification.
-This does not change D-WAC-10's valid-index, compile-time context binding closure.
+context opens before mission runtime/WAC compilation, matching the original
+mission start: the connection-mode `is_client` gate, the music open, the Var
+seeding, then the WAC initialization call [orig: Game_StartMission @0x525581
+(the is_mp_session_peer test), @0x525589 (the AudioVM_OpenMusicContext push;
+the call @0x525598), @0x5255B3..0x52561B (Var1..Var12 seeding), @0x525CB3 (the
+WacScript_InitAndLoad call)]; dedicated boots supply no music context.
+Single-player opens music because it has a local client, consistent with the
+corrected D-MUS-SPGATE witness (mus-sbf-re.md, Context lifecycle).
+
+A context reload does not retarget compiled operands, on either side. Retail
+frees the instance data block on stop and allocates a fresh, zeroed block on
+the next open [orig: AudioVM_StopMusicContext @0x671E00 ->
+AudioVM_FreeSoundBuffer @0x672E10 (the free @0x672E1D, then `globals_0C =
+NULL`); ScriptInstance_Init @0x672EF0 (the allocation @0x672F8B)], so a WAC
+compiled against a replaced context holds a dangling pointer into freed audio
+memory: undefined, address-reuse dependent. The scenario is unreachable in the
+retail mission flow (the mission WAC compiles after the mission open @0x525589,
+and the context is only replaced after the mission ends). The reimpl keeps the
+retired block alive for the compiled program's lifetime instead; that is a
+reimpl-defined memory-safety decision, not a witnessed behavior, and the tests
+that pin it say so.
+
+Portable-input note (the bounded M# index guard, folded into this closure
+rather than tabled as its own row): retail indexes the loaded script's globals
+area with no bound. `sub_671FD0 @0x671FD0` returns `&globals_0C[index]` through
+`lea eax,[eax+ecx*4]` @0x672689..0x67268D, and the area's length is not a fixed
+size but the loaded chunk's `globalsBytes_18` [orig: sub_672550 @0x672583
+(`registerCount = globalsBytes_18 / 4`); sub_6725D0 @0x6725FB clamps to the
+same field]. The portable store is 68 bytes (`MUS_GLOBALS_BYTES`, Var00..Var15
+plus one user global, which fits gamemus); an M# index outside it reads zero
+and drops the write. Whether any retail script authors M17 and above is not
+witnessed (the gamemus chunk's `globalsBytes_18` was not read from data); the
+guard is a class-D portable-input boundary inside D-WAC-10, not a divergence
+with an observable retail counterpart.
 
 The independent original-executable witness with active Var7=99 produced
 V1=99, V2=55 and actual Var7=55 for `set(v1,m7) set(m7,55) set(v2,m7)`;
 without a context, `set(m1,17) set(v1,m2)` produced V1=17. Native `wac_state`
 checks both cases, actual MUS-bytecode feedback, notification silence,
-compile-time binding across unload/restart, and safe retired storage.
+compile-time binding across unload/restart, and the reimpl-defined
+retired-storage behavior.
 `mission_kernel` exercises both active and inactive bindings at initial WAC
 execution. Godot music-director tests cover the live compile path, weak-provider
 lifetime, and real GameWorld startup ordering.
@@ -10598,8 +10629,7 @@ declined entry falls back to an OPEN class-D row.
 | D-WAC-6 | An unresolved FX/FACE/SOUNDSET/ANIM/AMMO literal or a RUN/LOOP/NEXT structural error blocks the mission's script (`wac_layered_load` kBlocked); a GLOOP operand that is not a group name is the non-fatal `Unknown Group` and group 0 as in retail (2026-09-12), except that an operand an earlier resolver table claims (a declared variable, an event, a named value) also takes group 0 where retail ORs in the dword behind that address | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0/-1/0xFFFF (§33.15); unknown commands and unresolved arguments are non-fatal on both sides; the GLOOP operand resolve [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter @0x4f30fc/@0x4f310a] | OPEN (low: only malformed authored scripts differ; the GLOOP unknown-group leg is FIXED 2026-09-12) |
 | D-WAC-8 | Player/Item/auto retain a mutable DWORD in live VM state and runtime snapshots; cache/group refreshes replace only LOWORD and entity consumers explicitly narrow | [orig: WacCmd_Set @0x4ED520; WacScript_CacheLocalPlayerState @0x4F5814/@0x4F58A2; WacScript_ExecuteBytecode word stores @0x4F5B7E/@0x4F5BAF/@0x4F5BD2] (§33.15) | FIXED 2026-09-13 (uint16 truncation removed; wac_state regressions) |
 | D-WAC-9 | V references parse a decimal prefix after the first-digit check; declared names win first, and numeric indices >=256 warn and clamp to V255 | [orig: WacScript_ResolveParameter declared-name lookup @0x4F2970..0x4F2A3C; digit/atol @0x4F2AA9..0x4F2AB8; signed clamp @0x4F2AC0/@0x4F2AF4] (§33.4) | FIXED 2026-09-13 (all-digits rejection removed; wac_behavior regressions) |
-| D-WAC-10 | M# operands bind the actual audio context at compilation; missing contexts share the VM scratch slot | [orig: WacScript_ResolveParameter @0x4F2A17..0x4F2A34; sub_671FD0 @0x671FD0; Game_StartMission @0x525589 before @0x525CB3] (§33.15a) | FIXED 2026-09-13; native WAC/MUS and mission-start regressions plus live Godot context coverage |
-| D-WAC-11 | Out-of-range M# access is guarded to the 68-byte MUS globals store (indices 0–16); invalid reads return zero and writes are ignored | [orig: WacScript_ResolveParameter @0x4F2A17..0x4F2A34; sub_671FD0 @0x671FD0] (§33.15a) | OPEN (proposed class D invalid-input guard; retain safe access pending permanent classification) |
+| D-WAC-10 | M# operands bind the actual audio context at compilation; missing contexts share the VM scratch slot. Portable-input note: an M# index outside the 68-byte portable store (`MUS_GLOBALS_BYTES`) reads zero and drops the write; a compiled program keeps its retired store alive across a context reload (reimpl-defined memory safety) | [orig: WacScript_ResolveParameter @0x4F2A17..0x4F2A34; sub_671FD0 @0x671FD0 (unbounded `&globals_0C[index]` @0x672689..0x67268D over the loaded chunk's `globalsBytes_18`, sub_672550 @0x672583); AudioVM_FreeSoundBuffer @0x672E1D / ScriptInstance_Init @0x672F8B (retail frees and reallocates, leaving a dangling compiled pointer); Game_StartMission @0x525589 before @0x525CB3] (§33.15a) | FIXED 2026-09-13; native WAC/MUS and mission-start regressions plus live Godot context coverage |
 | D-INF-5 | NPC attention pass: staggered speaker/threat scan, tracking, independent head/look chase, spotting relations and the automatic GRM facial writes | [orig: Entity_UpdateInfantryAI @0x4B9910 (the scan @0x4BE0D0..0x4BE463, the chase @0x4BE92B); PlayerSlot_SetTimeout @0x4AD4C0; scar_decal_update @0x57FA50] (§33.27, §33.30) | FIXED 2026-09-09 |
 | D-INF-24 | The org1 secondary weapon channel is written from the primary at the motor head | [orig: Entity_UpdateInfantryAI @0x4B9910 (the copy @0x4B9A14..0x4B9A48)] (§33.19) | FIXED 2026-09-09 |
 | D-AI-5 | `AiProfile::OrganicWeapons` carries the four def ammo ids and three launch points per field; organic fire enters the shared NPC round entry | [orig: Entity_InitOrganicAI @0x4BFCC0 (the copies @0x4BFF17); ItemDef_ParseProperty @0x49EB00 (the keys @0x49F748..0x49F980); WacScript_EntityFireAtTarget @0x4F24E0] (§33.35) | FIXED 2026-09-09 |

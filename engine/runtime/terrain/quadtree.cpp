@@ -5,11 +5,20 @@
 // [orig: jodemo Terrain_TraverseQuadTreeNode @0x5C89C0, Terrain_CollectVisibleSectors @0x5C9120, Terrain_BuildHeightMipChain @0x5C5310; docs/terrain/terrain-re.md]
 // docs/engine_spec_terrain.md 5.3, 7.1
 
+#include <runtime/terrain/foliage_detail_collector.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 
 namespace opennova {
+
+// The traversal's 16-unit near zone: the LOD distance subtracts it scaled by
+// the quality factor, while the foliage handoff subtracts the raw literal
+// from the raw node distance. [orig: Terrain_TraverseQuadtreeNode @ 0x608A00,
+// flt_7C4870 = 16.0 @ 0x608D46, quality scale @ 0x608D4C, handoff subtract
+// @ 0x60906B]
+constexpr float kTraversalNearZoneUnit = 16.0f;
 
 // ---------------------------------------------------------------------------
 // Frustum extraction — Gribb/Hartmann method
@@ -213,7 +222,7 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 	float dist = node_distance(wmin, wmax, world_center, cam_x, cam_y, cam_z);
 
 	// LOD decision
-	float near_zone = config.quality * 16.0f;
+	float near_zone = config.quality * kTraversalNearZoneUnit;
 	float effective_dist = (dist > near_zone) ? dist - near_zone : 0.0f;
 	float lod_threshold = (float)node.size * config.quality * 0.7f;
 
@@ -245,11 +254,17 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 				dist, sector_ox, sector_oz, zero_height
 			};
 			// Exhausting terrain draws does not end the foliage handoff. Keep
-			// the same frustum/LOD decision; the collector retains its own
-			// distance and capacity gates. [orig: Terrain_TraverseQuadtreeNode
-			// @ 0x608A00, cap bypass @ 0x608FBC -> 0x609012,
-			// foliage gate/call @ 0x60905C..0x60907C]
-			if (out_foliage_handoffs != nullptr && node.lod_level >= 3)
+			// the same frustum/LOD decision, then retail's own node gate: the
+			// raw traversal distance (flat sectors: the zeroed center Y) less
+			// the fixed 16.0, not the quality-scaled near zone, must be within
+			// the 42-unit foliage limit (the x87 stack keeps [dist, 16.0]
+			// through the emit block). The collector then re-tests each 16u
+			// leaf and owns the 128-entry capacity.
+			// [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, 16.0 @ 0x608D46,
+			// cap bypass @ 0x608FBC -> 0x609012, LOD gate @ 0x609065,
+			// handoff gate @ 0x60906B..0x609078, call @ 0x60907C]
+			if (out_foliage_handoffs != nullptr && node.lod_level >= 3 &&
+					dist - kTraversalNearZoneUnit <= kFoliageDetailDistanceLimit)
 				out_foliage_handoffs->push_back(patch);
 			if (out_patches.size() < 224) {
 				out_patches.push_back(patch);

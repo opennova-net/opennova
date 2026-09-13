@@ -324,6 +324,11 @@ int32_t MissionObjectPlacer::_item_model_scale_q16(int p_item_id) const {
 	return item_db_.is_valid() ? item_db_->get_model_scale_q16(p_item_id) : 0;
 }
 
+bool MissionObjectPlacer::_item_projection_zero_center(int p_item_id) const {
+	return item_db_.is_valid() && opennova::simassets::item_def_zero_bbox_center(
+			item_db_->get_item_type(p_item_id), item_db_->get_attrib(p_item_id));
+}
+
 Transform3D MissionObjectPlacer::_entity_transform_for_item(
 		const Vector3 &p_position, const Vector3 &p_rotation_deg,
 		int p_item_id) const {
@@ -722,8 +727,14 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 				retained.bms_id = i < group.bms_ids.size() ? group.bms_ids[i] : 0;
 				const int item_id = i < group.item_ids.size() ? group.item_ids[i] : 0;
 				const int32_t scale_q16 = _item_model_scale_q16(item_id);
+				// An eweap powerup takes the zero-centered form its entity
+				// init stamps; every other item the midpoint form.
+				const bool zero_center = _item_projection_zero_center(item_id) &&
+						profile.zero_center_projection_sphere.valid;
 				const auto sphere = opennova::renderer::scale_object_projection_sphere_q16(
-						profile.projection_sphere, scale_q16);
+						zero_center ? profile.zero_center_projection_sphere
+									: profile.projection_sphere,
+						scale_q16);
 				retained.origin = ObjectLodFrame::projection_center(
 						group.xforms[i], sphere, scale_q16);
 				retained.radius_q16 = sphere.radius_q16;
@@ -1521,7 +1532,8 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 							opennova::simassets::model_bound_radius_q16_from_3di(chute->native_model());
 				}
 			}
-			p_model->configure_entity_projection(person, parachute_radius);
+			p_model->configure_entity_projection(person, parachute_radius,
+					_item_projection_zero_center(p_item_id));
 		}
 	}
 	String decal_texture;
@@ -1655,6 +1667,9 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 			}
 			profile.projection_sphere =
 					opennova::simassets::collision_projection_sphere_from_3di(native_model);
+			profile.zero_center_projection_sphere =
+					opennova::simassets::collision_projection_sphere_from_3di(
+							native_model, 0, 0, true);
 		}
 		p_tree_parent->remove_child(model);
 		memdelete(model);
@@ -1678,7 +1693,9 @@ MissionObjectPlacer::_static_lod_profile_for(const String &p_graphic) const {
 
 // Fill what the harvest or the registration seam left implicit: one
 // threshold row per harvested level, which levels carry geometry, and the
-// level-0 geometry bounds as the sphere fallback when no CMDL was supplied.
+// level-0 geometry bounds as the sphere fallback when no document was
+// supplied (a loaded document without a CMDL block already carries its
+// valid zero-radius sphere and never reaches this fallback).
 void MissionObjectPlacer::_complete_static_lod_profile(
 		StaticLodProfile &r_profile, const Vector<StaticBatch> &p_batches) {
 	std::size_t level_count = 1;

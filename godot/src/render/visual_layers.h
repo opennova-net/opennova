@@ -8,7 +8,8 @@ namespace godot {
 // camera mask (render/frame_fx), the sun-shadow light masks (env/sun_shadow),
 // the environment-cube capture (env/environment_cube_capture), the placed
 // object layers (mission/mission_object_placer), the terrain foliage blanket
-// (terrain/foliage_dispatcher) and the water mirror (env/water). The witness
+// (terrain/foliage_dispatcher), the terrain flat fallback (terrain/terrain)
+// and the water mirror (env/water). The witness
 // for the mirror's population lives with the mirror view
 // (engine/runtime/environment/water_mirror.h, env #30).
 namespace visual_layers {
@@ -33,6 +34,13 @@ enum : uint32_t {
 	// context's foliage-collect field is 0 where the live beauty scene passes
 	// 1 — see docs/env/env-tod-re.md #30).
 	TERRAIN_FOLIAGE = 1u << 17,
+	// The empty-sector flat fallback rides its own bit (alone, inside the
+	// 20-bit default mask): retail's water-mirror prerender view skips empty
+	// sectors whenever the mission has water, where the live beauty view
+	// draws them, so the beauty camera admits the bit and the mirror mask
+	// excludes it above and below water (docs/terrain/terrain-re.md,
+	// "Empty-sector flat fallback", the view +100 witnesses).
+	TERRAIN_FLAT_FALLBACK = 1u << 18,
 	SHADOW_CASTER_MASK = STATIC_SHADOW_CASTER | DYNAMIC_SHADOW_CASTER,
 	// The mirror camera's above-water mask; a below-water view adds
 	// WORLD_NO_MIRROR back (retail collects unfiltered there). The render-slot
@@ -40,7 +48,7 @@ enum : uint32_t {
 	// visual layer.
 	REFLECTION_CULL_MASK = 0xFFFFFu &
 			~(WATER | VIEWMODEL | FP_BODY_SHADOW_ONLY | SHADOW_CASTER_MASK |
-					WORLD_NO_MIRROR | TERRAIN_FOLIAGE),
+					WORLD_NO_MIRROR | TERRAIN_FOLIAGE | TERRAIN_FLAT_FALLBACK),
 };
 } // namespace visual_layers
 

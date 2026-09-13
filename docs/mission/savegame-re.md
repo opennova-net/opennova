@@ -1,10 +1,11 @@
-# Mission savegames — reverse-engineering record
+# Mission savegames: reverse-engineering record
 
 Date: 2026-09-13. Binary: retail `Jointops.exe`, imagebase `0x400000`.
 This is a source-comparison record against the pinned jo-c reconstruction in the
 [parity audit](../jo-c-parity-audit-2026-09-13.md), not a new IDA grill or a live
-save/load result. Function labels below are jo-c's recovered layout names;
-reconcile them with the current curated IDB before adding implementation citations.
+save/load result. The function names below are the curated IDB's (each address was
+resolved with `lookup_funcs` on 2026-09-13); no implementation citation exists yet
+because no OpenNova code implements this surface.
 
 OpenNova persists options and player profiles, but has no implemented mission
 snapshot/restore pipeline. Restarting a mission and reading a profile do not restore
@@ -12,30 +13,32 @@ an in-progress entity pool, AI state, script program, or objective state.
 
 ## Verdict and correspondence
 
-| Surface | Original entry / jo-c label | OpenNova correspondence | Verdict |
+| Surface | Original entry | OpenNova correspondence | Verdict |
 |---|---|---|---|
-| Header validation | `SaveFile_ReadAndValidateHeader @0x4ACDF0` | No mission-save reader | unported; complete schema NEEDS-RE |
-| Block framing | `SaveFile_BeginBlock @0x4A9FD0` | No mission-save block writer | unported; framing and all callers need a joint witness |
-| Entity serialization | `SaveFile_SerializeEntityToRecord @0x4AB130` | No runtime entity snapshot writer | unported |
-| Entity restoration | `SaveFile_ApplyEntityRecord @0x4ABB00` | No runtime entity snapshot reader | unported; handle/reference reconstruction NEEDS-RE |
-| AI component restore | `Entity_CopyVehicleDefToAIComp @0x45DB30` | Live AI owners exist, no saved-state restoration | partial subsystem, unported restore path |
-| Save-slot enumeration | `SaveFile_CountSaveSlotFiles @0x4AB6E0` | No retail mission-save slot flow | NEEDS-RE across UI and filesystem |
-| Start/resume integration | `SinglePlayer_StartMission @0x561AF0` | Ordinary mission startup exists | resume branch unported; full lifecycle NEEDS-RE |
+| Header validation | `[orig: SaveFile_ReadAndValidateHeader @ 0x4ACDF0]` | No mission-save reader | unported; complete schema NEEDS-RE |
+| Block framing | `[orig: SaveFile_BeginBlock @ 0x4A9FD0]` | No mission-save block writer | unported; framing and all callers need a joint witness |
+| Entity serialization | `[orig: SaveFile_SerializeEntityToRecord @ 0x4AB130]` | No runtime entity snapshot writer | unported |
+| Entity restoration | `[orig: SaveFile_ApplyEntityRecord @ 0x4ABB00]` | No runtime entity snapshot reader | unported; handle/reference reconstruction NEEDS-RE |
+| AI component restore | `[orig: Entity_CopyVehicleDefToAIComp @ 0x45DB30]` (sole xref from `SaveFile_ApplyEntityRecord @ 0x4AC030`) | Live AI owners exist, no saved-state restoration | partial subsystem, unported restore path |
+| Entity-pool flag storage | `[orig: SaveFile_ReadEntityPoolFlags @ 0x4A9DB0; SaveFile_WriteEntityPoolFlags @ 0x4AAA30]` | No pool-flag reader or writer | unported; the overlapping storage form NEEDS-RE |
+| Save-slot enumeration | `[orig: SaveFile_CountSaveSlotFiles @ 0x4AB6E0]` | No retail mission-save slot flow | NEEDS-RE across UI and filesystem |
+| Start/resume integration | `[orig: SinglePlayer_StartMission @ 0x561AF0]` | Ordinary mission startup exists | resume branch unported; full lifecycle NEEDS-RE |
 
 jo-c's save-state candidate 217 and single-player candidate 230 provide bounded
 original/linked comparisons and typed layouts. Their file, model, effect, UI and
-filesystem services are explicit fixture boundaries. The entity-pool flag readers
-and writers (`0x4A9DB0`, `0x4AAA30`) retain unsupported overlapping storage of the
-38400-by-24-byte table; screenshot persistence is also a boundary. Neither candidate
-establishes that a whole retail save can be restored into a running reconstructed
-mission. Those original routines and their fixtures are starting evidence, not a
-ready-to-copy application save service.
+filesystem services are explicit fixture boundaries. The entity-pool flag reader
+and writer (`SaveFile_ReadEntityPoolFlags @ 0x4A9DB0`, `SaveFile_WriteEntityPoolFlags
+@ 0x4AAA30`) retain unsupported overlapping storage of the 38400-by-24-byte table;
+screenshot persistence is also a boundary. Neither candidate establishes that a
+whole retail save can be restored into a running reconstructed mission. Those
+original routines and their fixtures are starting evidence, not a ready-to-copy
+application save service.
 
 ## Divergence catalog
 
 | ID | Divergence | Disposition |
 |---|---|---|
-| D-SAVE-1 | Mission save/load, including retail slot/header/block schema, entity/AI state, reference repair and resume orchestration, has no OpenNova runtime owner. Existing profile/options writers do not implement this contract. | **NEEDS-RE** — the missing subsystem is established; complete serialization coverage, pool-flag storage and live restore semantics need witnesses before porting. |
+| D-SAVE-1 | Mission save/load, including retail slot/header/block schema, entity/AI state, reference repair and resume orchestration, has no OpenNova runtime owner. Existing profile/options writers do not implement this contract. | **NEEDS-RE**: the missing subsystem is established; complete serialization coverage, pool-flag storage and live restore semantics need witnesses before porting. |
 
 ## Implementation and acceptance
 
@@ -62,4 +65,5 @@ in the [parity plan](../jo-c-parity-audit-2026-09-13.md).
 
 ## IDB changes
 
-None. This audit reads the existing records and reconstruction manifests.
+None. This audit reads the existing records and reconstruction manifests; the
+function names above are the IDB's existing names.

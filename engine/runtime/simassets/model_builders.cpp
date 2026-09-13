@@ -204,8 +204,15 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 
 opennova::renderer::ObjectProjectionSphere collision_projection_sphere_from_3di(
     const Threedi3di3 &model, int32_t runtime_scale_q16,
-    int32_t definition_scale_q16) {
-  if (model.collision == nullptr) return {};
+    int32_t definition_scale_q16, bool zero_center) {
+  // No collision block: both producers skip the stamp and the entity keeps
+  // its zero spawn words, which the collector then projects as radius zero.
+  // [orig: Entity_InitFromModel @0x40de97; Entity_ComputeBoundingSphere @0x5c69be]
+  if (model.collision == nullptr) {
+    opennova::renderer::ObjectProjectionSphere unstamped;
+    unstamped.valid = true;
+    return unstamped;
+  }
   const auto &bounds = model.collision->model_data;
   std::array<int32_t, 3> minimum{}, maximum{};
   for (int axis = 0; axis < 3; ++axis) {
@@ -215,7 +222,7 @@ opennova::renderer::ObjectProjectionSphere collision_projection_sphere_from_3di(
         : io::float_to_fp16_16_round_sat(bounds.bbox[axis + 3]);
   }
   return opennova::renderer::object_projection_sphere_from_bounds_q16(
-      minimum, maximum, runtime_scale_q16, definition_scale_q16);
+      minimum, maximum, runtime_scale_q16, definition_scale_q16, zero_center);
 }
 
 // The model bound-sphere radius. Production files use GHDR's exact Q16 value;

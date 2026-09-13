@@ -986,6 +986,52 @@ int main(void) {
         printf("scope_max_mag arg2 + scope_min_mag OK\n");
     }
 
+    /* A `pos`/`tpos` line with fewer than six values is refused whole: the
+       original's token-count gate (key + 6) warns "too few params" and returns
+       before the first store, so the row keeps its earlier values. A line with
+       extra values still stores its first six. [orig: WeaponDefs_ParseLineCallback
+       @0x543680, pos gate @0x5445EE..0x544613, tpos gate @0x544735..0x54475A] */
+    {
+        static const char kShortPoseDef[] =
+            "weapon \"WPN_SHORT_POSE\"\n"
+            "\tpos 1.5, 2.5, 3.5, 10, 20, 30\n"
+            "\ttpos 4.5, 5.5, 6.5, 40, 50, 60\n"
+            "\tpos 9, 9, 9, 9, 9\n"
+            "\ttpos 8, 8\n"
+            "end\n"
+            "weapon \"WPN_LONG_POSE\"\n"
+            "\tpos 1, 2, 3, 4, 5, 6, 7\n"
+            "end\n";
+        DefWeaponsFile pf;
+        memset(&pf, 0, sizeof(pf));
+        if (def_parse_weapons_memory((const unsigned char *)kShortPoseDef, sizeof(kShortPoseDef) - 1, &pf) != 0 ||
+            pf.count != 2) {
+            fprintf(stderr, "FAIL: short pose inline parse failed (count=%zu)\n", pf.count);
+            def_free_weapons(&pf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        const DefWeaponDef &sp = pf.entries[0];
+        const DefWeaponDef &lp = pf.entries[1];
+        if (fabsf(sp.pos[0] - 1.5f) > FEPS || fabsf(sp.pos[2] - 3.5f) > FEPS ||
+            sp.pos_rotation_deg_q16[0] != 10 * 65536 || sp.pos_rotation_deg_q16[2] != 30 * 65536 ||
+            fabsf(sp.tpos[0] - 4.5f) > FEPS || fabsf(sp.tpos[1] - 5.5f) > FEPS ||
+            sp.tpos_rotation_deg_q16[1] != 50 * 65536 ||
+            fabsf(lp.pos[0] - 1.0f) > FEPS || fabsf(lp.pos[2] - 3.0f) > FEPS ||
+            lp.pos_rotation_deg_q16[2] != 6 * 65536) {
+            fprintf(stderr, "FAIL: short pos/tpos line was not refused whole: pos %.2f/%.2f/%.2f rot %d, "
+                            "tpos %.2f/%.2f rot %d; long pos %.2f/%.2f rot %d\n",
+                    sp.pos[0], sp.pos[1], sp.pos[2], sp.pos_rotation_deg_q16[0],
+                    sp.tpos[0], sp.tpos[1], sp.tpos_rotation_deg_q16[1],
+                    lp.pos[0], lp.pos[2], lp.pos_rotation_deg_q16[2]);
+            def_free_weapons(&pf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&pf);
+        printf("short pos/tpos refusal OK\n");
+    }
+
     def_free_weapons(&wf);
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def (the shipped weapon table)");

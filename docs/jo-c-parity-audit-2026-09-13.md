@@ -14,7 +14,10 @@ WITNESSED-READY-DEFERRED. This audit tables **seven additional IDs** for gaps pr
 described only in prose or missing as a subsystem: four particle behaviors, specialized
 texture loading, reverb, and mission saves. It also retires stale D-ITEM-22: the deferred
 wire-wreck retry and its regression already landed in `9b24601587`. The resulting
-inventory has **126 active IDs**.
+inventory had **126 active IDs** at that baseline. The PR that carries this audit (#649)
+then closed D-NET-169 and narrowed D-NET-167 and D-NET-64 (the ledger closure lines and the
+net record own that evidence), so the package tables below hold 125; the JSON keeps the
+baseline 126.
 The [ledger](divergence-ledger.md) remains the status owner; this dated plan groups its
 work by dependencies. [The audit inventory](jo-c-parity-audit-2026-09-13.json) records
 every ID, its dated ledger description, work package, and evidence level.
@@ -23,7 +26,8 @@ every ID, its dated ledger description, work package, and evidence level.
 
 The new worktree starts from committed OpenNova source. The primary checkout's modified
 `godot/project.godot` and untracked `art/` and `local-data/` are outside this baseline.
-No gameplay implementation is changed by this audit.
+The audit itself changed no gameplay implementation; the PR that carries it does, and the
+[ledger](divergence-ledger.md) records those closures.
 
 The reference is the sibling `jo-c` checkout. It started at `614072b` with local renderer
 work; that work was committed during inspection as
@@ -68,20 +72,17 @@ pose. `RoundSim` separately records guided callbacks as unfinished.
 
 The original `NetPacket_DispatchToEntityByNetId @ 0x4D6960` requires an existing active
 entity and its class serializer. `Entity_UpdateGuidedMissile_0 @ 0x446060` refreshes a
-locked target's fire origin before computing pursuit error. The group-3 and group-5 read paths
-in `Entity_SerializeGuidedMissileState @ 0x447C50` store all coordinate values, including
-zero. Our `if (rec.pos_x || rec.pos_y || rec.pos_z)` retains the previous point for an
-all-zero update. On the original no-lock/all-zero branch the missile continues straight;
-retaining a previous steering point changes that behavior.
+locked target's fire origin before computing pursuit error. (The group-3/4/5 zero-value store of
+`Entity_SerializeGuidedMissileState @ 0x447C50` is ported: the reducer keeps every decoded
+coordinate, zero included.)
 
 Fix the spawn/class/ammo/launch-transform owner first, then connect guidance to that
-lifetime, refresh valid moving targets, preserve zero-valued state updates and straight
-flight, and port the local-frame pursuit and the distinct Stinger/Hellfire/Javelin
+lifetime, refresh valid moving targets, keep straight flight on the no-lock branch, and
+port the local-frame pursuit and the distinct Stinger/Hellfire/Javelin
 motors. Add the authority seeker, countermeasure and wire producers, then model/trail
 presentation. A codec-only change cannot close this ID.
 
-Acceptance: moving target with no repeated guidance packet; nonzero to all-zero group 5;
-guidance before spawn, after death, and after slot reuse; each missile family; loss of
+Acceptance: moving target with no repeated guidance packet; guidance before spawn, after death, and after slot reuse; each missile family; loss of
 lock and flare diversion; role-correct termination. Reuse `jo-c/tools/guided_missile_oracle.py`
 and the existing `guided_missile_flight`, `nw_ingame_guided`, and
 `npruntime_client_runtime` test seams, adding the missing integrated cases.
@@ -109,45 +110,28 @@ switch/restore, a host-local player and a remote player. Check clip count, reser
 HUD flash and emitted loadout bytes together. Reuse `weapon_inventory`, `weapon_fsm`,
 `npruntime_reload_relay`, and jo-c's reload/loadout/weapon-pump oracles.
 
-### 3. Numeric player identity must replace callsign matching
-
-**P1; source comparison; D-NET-169, with D-NET-127/-133/-136/-137.**
-
-[`joiner_connection.cpp`](../engine/runtime/inmatch/joiner_connection.cpp) still finds
-self from the organic-spawn name and rejects duplicate callsigns. The original
-`Player_FindLocalPlayerEntity @ 0x4E0090` tests the player flag and
-`ownerConnectionId == NapiNP_GetLocalConnectionId(...)`. The guard prevents an incorrect
-binding but is not equivalent behavior.
-
-Recover the complete connection-ID/player-table producer chain, including the relevant
-0x4D/0x46 meanings and per-entity flags, before changing the selector. Preserve initial
-admission order, numeric ownership, minimap net IDs, reconnect and slot reuse.
-
-Acceptance: three peers, two identical callsigns, reordered roster/spawn messages,
-disconnect/rejoin and name changes. Verify self control, HUD ownership, damage attribution
-and per-recipient bytes. Two uniquely named peers cannot close this gap.
-
-### 4. Successful handshake and codec coverage still leave admission and dispatch gaps
+### 3. Successful handshake and codec coverage still leave admission and dispatch gaps
 
 **P1; existing witnesses with source checks; D-NET-167/-171/-218.**
 
-The join path sends the ordinary server password and spectator fields, but lacks the
-side/squad-password `FID`/`JSP` flow recorded at `NapiNPServerMsg` admission
-`@ 0x512100`. The [193-entry dispatch audit](net/retail-message-dispatch-audit.md)
+The join path sends the ordinary server password, the spectator fields and the
+side-password `JSP`/`TR` fields (host DPC 18/19/20 validation, ported 2026-09-13), but
+not the squad challenge (host DPC 21) recorded at `NapiNPServerMsg` admission
+`@ 0x512100`; `FID` is numeric, not a password field. The [193-entry dispatch audit](net/retail-message-dispatch-audit.md)
 also distinguishes decoded messages from executed commands/replies: teleport,
 batch-kill acknowledgement, text-command tails, form/metrics, squad/admin/profile and
 integrity paths remain.
 
-Implement the witnessed password prompt and selected-team request, then close the
+Implement the witnessed squad challenge input and validation, then close the
 dispatch table by real consumers and reply/state assertions. Keep game version,
 expansion and security prerequisites explicit; a shaped reply without its state change
 is incomplete. Do not contact live hosted services to exercise LAN/gameplay work.
 
-Acceptance: correct/incorrect side and squad passwords; denied and admitted classes;
+Acceptance: correct/incorrect squad passwords; denied and admitted classes;
 each open message exercised through host/joiner dispatch, asserting reply bytes, state
 and ordering. Inventory the challenge prerequisites before implementing their replies.
 
-### 5. Destruction must drive collision, visibility and replicated section state together
+### 4. Destruction must drive collision, visibility and replicated section state together
 
 **P1; source checks and existing witnesses; D-COL-2, D-ITEM-3/-8, D-DOOR-1/-3,
 D-NET-147, D-OCC-9.**
@@ -170,7 +154,7 @@ both sides of an interior, operate several doors, then join late. Compare state,
 and wire on every peer. jo-c's `tower_sections_oracle.py`, `door_event_oracle.py`,
 `door_spawn_oracle.py` and `mission_bone_mask_oracle.py` provide useful bounded fixtures.
 
-### 6. Indoor projectiles and specialized impact/destruction tails remain
+### 5. Indoor projectiles and specialized impact/destruction tails remain
 
 **P1; existing witnesses; D-COL-11, D-ITEM-1/-4/-6/-9/-10/-11/-13/-21,
 D-WPN-25/-28, D-AI-8/-12.**
@@ -192,7 +176,7 @@ mounted exclusions, special ammunition, wrecks landing on another object, a cold
 joiner seeing destruction, and a high-rate impact/tracer scene. Compare effects and
 damage independently. Resolve unknown exclusion provenance before porting it.
 
-### 7. Parachute, mounted lean and body/camera tails are still visible gameplay gaps
+### 6. Parachute, mounted lean and body/camera tails are still visible gameplay gaps
 
 **P1; source checks and existing witnesses; D-INF-3/-11/-13/-17/-18/-20,
 D-COL-4/-8/-10, D-NET-196.**
@@ -213,7 +197,7 @@ aircraft exit, water landing, seated lean, a remote avatar on a sloping carrier,
 and camera-facing model parts under a moving camera. Existing infantry/view/animation
 tests need role and asset coverage, not just more standalone angle tests.
 
-### 8. NPC combat completion still needs behavior and real mission gates
+### 7. NPC combat completion still needs behavior and real mission gates
 
 **P1; existing witnesses; D-AI-1/-2/-4/-6/-7/-9, D-INF-2.**
 
@@ -230,7 +214,7 @@ class profiles. Continue beyond the accepted 00TRa mission with CP11 combat and 
 that require these branches. jo-c's CP11 witness modifies a small spawn fixture and
 does not establish every mission's authored walkthrough.
 
-### 9. Vehicle work should target the remaining branches, not repeat the motor port
+### 8. Vehicle work should target the remaining branches, not repeat the motor port
 
 **P1; existing witnesses and spawn-source check; D-NET-161/-196, D-SND-17.**
 
@@ -250,7 +234,7 @@ fixed-wing coverage; controller and passenger roles; moving support under a spaw
 flare target; mixed terrain/model contact. Keep jo-c's recorded aircraft contact
 instability as an unresolved reference boundary, not a target behavior to copy.
 
-### 10. Script and mission lifecycle work needs its missing consumers
+### 9. Script and mission lifecycle work needs its missing consumers
 
 **P1; source checks and existing witnesses; D-WAC-4/-5/-6, D-EVT-1/-3,
 D-AI-10, D-LOADSCR-8, D-PTL-26.**
@@ -270,7 +254,7 @@ Acceptance: win, lose, death/redeploy, in-game RESTART, quit and re-entry; verif
 ordering and no retained state after each transition. Preserve 00TRa's accepted ten
 gates, and add a mission where each new script/trigger branch matters.
 
-### 11. Mission save/load is an additional missing subsystem
+### 10. Mission save/load is an additional missing subsystem
 
 **P2, research first; new D-SAVE-1.**
 
@@ -286,7 +270,7 @@ serialize C++ memory or copy pointer-bearing retail blobs. Gate completion on a 
 process loading a retail save and the reverse retail-load direction if interoperability
 is claimed. jo-c's bounded save oracles alone cannot pass that gate.
 
-### 12. HUD, menus, input and profiles need end-to-end closure
+### 11. HUD, menus, input and profiles need end-to-end closure
 
 **P2, with identity/deploy prerequisites at P1; existing witnesses.**
 
@@ -308,7 +292,7 @@ accept/reopen options; remap mouse/joystick; change class/team/profile; deploy u
 and list; scope and zero an appropriate weapon; compare localized HUD output with fixed
 camera, resolution and gameplay state. Helper tests do not prove a button is wired.
 
-### 13. Specialized material loaders were absent from the open ledger
+### 12. Specialized material loaders were absent from the open ledger
 
 **P2; source comparison; new D-RMAT-12.**
 
@@ -324,7 +308,7 @@ by a rendered material fixture. The missing-MDT uninitialized-texture fallback i
 separate proposed class-D disposition; this plan does not authorize reproducing garbage
 or declare it permanently accepted.
 
-### 14. Particle fidelity includes four untabled behavior gaps
+### 13. Particle fidelity includes four untabled behavior gaps
 
 **P2; source comparisons/existing witnesses; new D-PTL-27/-28/-29/-30.**
 
@@ -341,7 +325,7 @@ The EMITVECTOR helper distinction needs a semantic witness without reopening D-P
 accepted RNG/FPU differences by assumption. Persistent emitter bounds are also a
 research follow-up; do not call current snapshot bounds byte-equivalent to retail.
 
-### 15. Renderer visibility and terrain-page composition still have coupled gaps
+### 14. Renderer visibility and terrain-page composition still have coupled gaps
 
 **P2; existing witnesses; D-TERRAIN-7, D-FOLIAGE-7/-9/-10, D-RORD-7,
 D-OCC-9/-12/-13/-14/-15, D-3DI-2.**
@@ -359,7 +343,7 @@ foliage silhouettes and a terrain page containing every supported contributor. A
 semantic admission/order and calibrated pixels; report unsupported contributors instead
 of hiding them behind a plausible image. Preserve ADR 0042's single Godot backend.
 
-### 16. Reverb is a confirmed approximation with an unresolved DSP boundary
+### 15. Reverb is a confirmed approximation with an unresolved DSP boundary
 
 **P2; source comparison and existing witness; new D-SND-18; D-SND-5/-8/-17.**
 
@@ -378,7 +362,7 @@ impulse response, test index 0, fades, underwater transitions and moving sources
 positional-audio oracle leaves playback as fixture services; its pass is not an audible
 reverb witness.
 
-### 17. Keep the remaining formats and low-reachability work explicit
+### 16. Keep the remaining formats and low-reachability work explicit
 
 **P3; existing witnesses/research; D-MIS-2/-3, D-CBIN-1, D-MNU-5/-6/-12/-13,
 D-LOADSCR-2/-5, D-WPN-1, D-ITEM-2.**
@@ -400,7 +384,7 @@ as bounded reviewed slices; a package is not necessarily one PR.
 | Package | Priority | Work and owner | Dependencies | Completion gate |
 |---|---|---|---|---|
 | W00 | first | Pin corpus/oracle manifests; reconcile stale ledger prose and live callers; inventory untested material/effect/weapon branches. | none | Every active ID assigned; each implementation slice names original inputs, outputs and a failing case. |
-| W01 | P1 | Numeric identity, password/admission, remaining request/reply consumers in `inmatch`/`replication`/`npwire`. | W00 | Three-peer and duplicate-name admission; relevant dispatch tests plus mixed retail/OpenNova LAN. |
+| W01 | P1 | Squad-password admission and remaining request/reply consumers in `inmatch`/`replication`/`npwire`. | W00 | Relevant dispatch tests plus mixed retail/OpenNova LAN. |
 | W02 | P1 | Full entity repair/initial state, ownership flags, net IDs, phase/priority/resend residuals and remote weapon state. | W01 for identity-dependent legs | Late join, loss/reorder, slot reuse and repair preserve entity/state/bytes across roles. |
 | W03 | P1 | Shared clip buckets, weapon owner/pump/fire gates, mount/switch/seed and HUD ammo consumers. | W00; W01/W02 for remote owner legs | Same scenario has matching ammo, action cadence, weight and wire for local/host/joiner. |
 | W04 | P1 | Guided families, indoor rounds, damage/impact/wreck and heat/tracer tails. | W02/W03; W05 for section geometry | Actual fire-to-flight-to-hit/death lifecycle, including moving target and countermeasures. |
@@ -461,16 +445,16 @@ results of this audit.
 
 ## Inventory coverage
 
-The accompanying JSON is a dated snapshot, not a second status ledger. It includes all
-126 active IDs, their complete ledger descriptions, proposed package/priority and
-evidence classification. Newly tabled rows identify their owning records. Existing
+The accompanying JSON is a dated snapshot at the master baseline, not a second status
+ledger. It includes the 126 IDs active there (D-NET-169 included), their ledger descriptions
+as of that baseline, proposed package/priority and evidence classification. Newly tabled rows identify their owning records. Existing
 closed or permanently accepted differences are excluded from the repair count.
 
 <!-- audit-coverage:begin -->
 | Package | Active IDs | Count |
 |---|---|---|
 | W00 | Cross-cutting evidence / acceptance gate | 0 |
-| W01 | `D-NET-136`, `D-NET-137`, `D-NET-167`, `D-NET-169`, `D-NET-171`, `D-NET-179`, `D-NET-218` | 7 |
+| W01 | `D-NET-136`, `D-NET-137`, `D-NET-167`, `D-NET-171`, `D-NET-179`, `D-NET-218` | 6 |
 | W02 | `D-NET-97`, `D-NET-116`, `D-NET-127`, `D-NET-133`, `D-NET-139`, `D-NET-164`, `D-NET-189` | 7 |
 | W03 | `D-NET-174`, `D-WPN-2`, `D-WPN-5`, `D-WPN-6`, `D-WPN-7`, `D-WPN-8`, `D-WPN-20`, `D-WPN-21`, `D-WPN-23`, `D-HUD-5` | 10 |
 | W04 | `D-NET-64`, `D-COL-11`, `D-ITEM-1`, `D-ITEM-4`, `D-ITEM-6`, `D-ITEM-9`, `D-ITEM-10`, `D-ITEM-11`, `D-ITEM-13`, `D-ITEM-21`, `D-WPN-25`, `D-WPN-28`, `D-AI-8`, `D-AI-12` | 14 |
@@ -483,9 +467,9 @@ closed or permanently accepted differences are excluded from the repair count.
 | W11 | `D-SND-5`, `D-SND-8`, `D-SND-18` | 3 |
 | W12 | `D-MNU-5`, `D-MNU-6`, `D-MNU-12`, `D-MNU-13`, `D-LOADSCR-2`, `D-LOADSCR-5`, `D-MIS-2`, `D-MIS-3`, `D-CBIN-1`, `D-WPN-1`, `D-ITEM-2` | 11 |
 | W13 | Cross-cutting evidence / acceptance gate | 0 |
-| **Total** | **Every active ID assigned once** | **126** |
+| **Total** | **Every baseline-active ID assigned once; D-NET-169 closed by the carrying PR and removed** | **125** |
 
-Statuses: **110 OPEN**, **7 NEEDS-RE**, **9 WITNESSED-READY-DEFERRED**.
+Statuses: **109 OPEN**, **7 NEEDS-RE**, **9 WITNESSED-READY-DEFERRED** (the ledger scoreboard, not this line, is current).
 OPEN rows with an additional NEEDS-RE facet retain that facet in the ledger and inventory.
 
 The audit restores D-ITEM-22's missing domain record and retires its stale open row.

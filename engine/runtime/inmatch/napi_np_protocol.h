@@ -79,8 +79,10 @@ struct HostAcceptEvent {
 	                                           // working retail join ack==eFlags==3; a guess does not.
 	std::string peer_name;                     // valid for PeerEnteredWorldStreaming / PeerSpawned:
 	                                           // the joiner's game ClientAuth.NA callsign, streamed
-	                                           // back as the S2C 0x0C organic entity_name so the
-	                                           // joiner matches the owner ID of.
+	                                           // back as the S2C 0x0C organic entity_name (the
+	                                           // displayed callsign only; the joiner self-identifies
+	                                           // by the record's owner_connection_id == ServerAuth.MI,
+	                                           // never by this name).
 	std::vector<ProtocolMessage> in_match_c2s; // valid when kind == PeerC2SInMatch
 };
 

@@ -366,22 +366,36 @@ void OcclusionWorld::stamp_building_flags(World &world, CollisionWorld &collisio
 // Bound sphere / view cull helpers
 // ----------------------------------------------------------------------------
 
-// [orig: Entity_ComputeBoundingSphere @ 0x5c69a0 — center = collision-header
-// AABB midpoints ((max-min)>>1 + min per axis), radius = min(sqrt(sum half^2),
-// 0x7FFF0000 as float) truncated. The +-0x40000000 unset-bound sentinels don't
-// arise here (our model bounds are always derived); the def-scale leg is
-// unported (statics carry no live scale).]
+// [orig: Entity_ComputeBoundingSphere @ 0x5c69a0 — per axis the collision-
+// header min is capped at 0x40000000 and the max floored at -0x40000000
+// (@ 0x5c6a02..0x5c6a39), center = min + ((max - min) >> 1) (@ 0x5c6a45/
+// 0x5c6a53/0x5c6a67), the radius components are max - center (@ 0x5c6a57/
+// 0x5c6a6d/0x5c6a7d: the positive-side half, one word larger on an odd
+// width), fsqrt, clamp to 0x7FFF0000 as float, ftol (@ 0x5c6ab8); then a
+// nonzero anim/def scale multiplies the three center words and the radius
+// with the +0x8000 rule (@ 0x5c6ac8..0x5c6b52).]
 void OcclusionWorld::bound_sphere_fixed(const CollisionModel &m, int32_t center_local[3],
-                                        int32_t &radius) {
-    const int32_t hx = (m.max[0] - m.min[0]) >> 1;
-    const int32_t hy = (m.max[1] - m.min[1]) >> 1;
-    const int32_t hz = (m.max[2] - m.min[2]) >> 1;
-    center_local[0] = m.min[0] + hx;
-    center_local[1] = m.min[1] + hy;
-    center_local[2] = m.min[2] + hz;
-    const double len = std::sqrt(static_cast<double>(hx) * hx + static_cast<double>(hy) * hy +
-                                 static_cast<double>(hz) * hz);
+                                        int32_t &radius, int32_t scale_q16) {
+    int32_t half[3];
+    for (int axis = 0; axis < 3; ++axis) {
+        const int32_t low = m.min[axis] < 0x40000000 ? m.min[axis] : 0x40000000;
+        const int32_t high = m.max[axis] > -0x40000000 ? m.max[axis] : -0x40000000;
+        const int32_t width = static_cast<int32_t>(static_cast<uint32_t>(high) -
+                                                   static_cast<uint32_t>(low));
+        center_local[axis] = static_cast<int32_t>(static_cast<uint32_t>(low) +
+                                                  static_cast<uint32_t>(width >> 1));
+        half[axis] = static_cast<int32_t>(static_cast<uint32_t>(high) -
+                                          static_cast<uint32_t>(center_local[axis]));
+    }
+    const double len = std::sqrt(static_cast<double>(half[0]) * half[0] +
+                                 static_cast<double>(half[1]) * half[1] +
+                                 static_cast<double>(half[2]) * half[2]);
     radius = ftol(std::fmin(len, 2147418112.0));
+    if (scale_q16 != 0) {
+        for (int axis = 0; axis < 3; ++axis)
+            center_local[axis] = retail_q16_mul_rhu(center_local[axis], scale_q16);
+        radius = retail_q16_mul_rhu(radius, scale_q16);
+    }
 }
 
 // The batch view cull: forward-depth against the fog distance, then the bound
@@ -521,7 +535,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
                               memo.pos[2] == epos[2];
         if (!pose_hit) {
             int32_t center_local[3];
-            bound_sphere_fixed(*cm, center_local, memo.radius);
+            bound_sphere_fixed(*cm, center_local, memo.radius, e->uniform_scale_q16);
             const CollisionMatrix pose = collision_matrix_from_heading(
                 bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw)), epos);
             pose.transform_point(center_local, memo.center_world);
@@ -1104,7 +1118,7 @@ bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, Batch
     int32_t radius_fixed = 0x10000;
     if (cand_cm != nullptr && cand_cm->valid()) {
         int32_t c[3], r;
-        bound_sphere_fixed(*cand_cm, c, r);
+        bound_sphere_fixed(*cand_cm, c, r, cand->uniform_scale_q16);
         const int32_t corner = vec_len_ftol(
             abs32(cand_cm->min[0]) > abs32(cand_cm->max[0]) ? cand_cm->min[0] : cand_cm->max[0],
             abs32(cand_cm->min[1]) > abs32(cand_cm->max[1]) ? cand_cm->min[1] : cand_cm->max[1],
@@ -1446,7 +1460,7 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
     entity_pos_fixed(ent, epos);
     if (cm != nullptr && cm->valid()) {
         int32_t center_local[3];
-        bound_sphere_fixed(*cm, center_local, radius);
+        bound_sphere_fixed(*cm, center_local, radius, ent.uniform_scale_q16);
         const CollisionMatrix pose = collision_matrix_from_heading(
             bam_heading_from_mission_yaw_deg(static_cast<double>(ent.yaw)), epos);
         pose.transform_point(center_local, center_world);

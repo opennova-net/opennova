@@ -388,10 +388,29 @@ instance's global address through `sub_671FD0 @0x671FD0` at compile time
 the audio VM's variable-change hook. Without an active context, every M# aliases
 the WAC scratch slot. See [world §33.15a](../world/world-wac-ai-re.md), D-WAC-10.
 
-MUS and compiled WAC now share the same native byte store; a compiled binding
-retains its context through unload/restart without attaching to a replacement.
-The GameWorld music-open signal precedes mission compilation, so initial WAC
-reads the seeded game variables. Dedicated starts close the context. Native
-MUS/WAC and mission-kernel coverage, plus live director and GameWorld startup
-regressions, check this path. The D-MUS-SPGATE witness correction remains:
-SP has a local client and opens music; only dedicated hosts close it.
+MUS and compiled WAC now share the same native byte store. A context reload does
+not retarget a compiled binding on either side, but the two engines differ in
+what the stale binding points at. Retail frees the instance data block on stop
+(`AudioVM_StopMusicContext @0x671E00` -> `AudioVM_FreeSoundBuffer @0x672E10`:
+`AudioMem_SafeFree(dataBlock_08)` at `@0x672E1D`, then `globals_0C = NULL`) and
+allocates a fresh, zeroed block on the next open (`AudioVM_OpenMusicContext
+@0x6722A0` -> `AudioVM_OpenContextFile @0x672160` -> `ScriptInstance_Init
+@0x672EF0`, the `"Script Data Block"` allocation at `@0x672F8B`), so a WAC
+compiled against a replaced context holds a dangling pointer into freed or
+reallocated audio memory in retail: undefined, address-reuse dependent. That
+scenario is unreachable in the retail mission flow (the mission WAC compiles
+after the mission open at `Game_StartMission @0x525589`, before the
+`WacScript_InitAndLoad` call at `@0x525CB3`, and the context is only replaced
+after the mission ends). The reimpl keeps the retired block alive for the
+compiled program's lifetime instead: a memory-safety decision, not a witnessed
+behavior. The `wac_state` and music-director retired-context assertions are
+reimpl-defined and labelled as such.
+
+The GameWorld music-open signal precedes mission compilation in that same order
+(the `is_client` gate `@0x525581`, the open `@0x525589`, Var seeding through
+`@0x52561B`, then the WAC init call `@0x525CB3`; see Context lifecycle above),
+so initial WAC reads the seeded game variables. Dedicated starts close the
+context. Native MUS/WAC and mission-kernel coverage, plus live director and
+GameWorld startup regressions, check this path. The D-MUS-SPGATE witness
+correction remains: SP has a local client and opens music; only dedicated hosts
+close it.

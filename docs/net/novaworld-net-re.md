@@ -4710,8 +4710,15 @@ NapiNPClientMsg_HandleSpawnSlot @ 0x4317B0]
   `world_ready`; it does not invent a fixed admission burst. An early terminal `0x11` is latched
   like the early `0x16` (see §5.0d). The S2C `0x0C` handler selects a pool-0 player (`Flags & 0x100`)
   whose `owner_connection_id` equals `ServerAuth.MI` and adopts `slot_id` as **H**.
-  Callsigns may collide or be changed by the server. Replacement or empty records
-  and the `0x5D` empty-slot sweep retire the binding. It does NOT compose `ClientSession` (whose
+  Callsigns may collide or be changed by the server. The binding's LIFETIME is OpenNova
+  structural policy, not a witnessed mechanism: replacement or empty records and the `0x5D`
+  empty-slot sweep retire it and a later matching record rebinds it, whereas retail resolves
+  the local entity once per `Player_InitPlayer @ 0x4E15F0` (its only callers:
+  `Game_StartMission @ 0x525BBC` and `NapiNPClientMsg_TeamAssign @ 0x431B14`), caches the
+  pointer in `g_local_player_entity`, never clears or re-resolves it on `0x0C`/`0x18`/`0x1F`/`0x5D`,
+  and aborts through `Player_FatalPlayerDcbNotFound @ 0x4DFF60` when the scan misses. While
+  the binding is retired `JoinerRole::self_wire_handle()` reads `kInvalid`, never 0 (a live pool-0
+  handle). It does NOT compose `ClientSession` (whose
   post-`0x82` path is the matchmaking lobby-verify flow, the wrong channel for the in-match game
   connection). The Godot binding surfaces `post_auth_stage_name()`; the shell's net-session
   drive watches the post-load admission tail against the retail 60 s window and aborts to the
@@ -6204,8 +6211,8 @@ master scoped flag (set/cleared by `Player_ToggleWeaponScope`); `Player_UpdatePe
 frame into `g_weaponScopeActive @0xB76478` (`= g_scopeEngaged != 0`) once the scope-camera interp settles.
 `g_weaponScopeActive` is the effective flag read by `CanFireWeapon` + the equipped-slot getters + the
 unscope-on-move / leave-FP / round-reset paths; `g_scopeHipfire @0x82CE98` is the complement.
-`g_cameraFovDeg @0x26C6848` (16.16°, default `0x500000` = 80.0; scope recomputes `80.0 / elevation`) is
-the current camera FOV, env-interpolated (target `g_cameraFovDegTarget @0x26C684C`). `g_currentWeaponSlot
+`g_cameraFovTargetQ16 @0x26C6848` (16.16°, default `0x500000` = 80.0; scope recomputes `80.0 / elevation`) is
+the current camera FOV, env-interpolated (target `g_cameraFovDefaultQ16 @0x26C684C`). `g_currentWeaponSlot
 @0xB76474` is the current equipped weapon-slot flat index (group×65 + offset into the 780-entry
 `weaponSlotArrayBase` pool). `g_inputFlags @0xB3B728` is the raw per-frame input bitfield
 (`Player_PackInputStateToEntity` packs it into `entity->MoveOrder@0x12C`, saves to `g_inputFlagsPrev`).
@@ -6264,7 +6271,7 @@ camera; `Player_StartRoundEndTransition` target = weapon bone, Z −1.0). This c
   applied.
 - Signatures: `0x4e0090` `GamePlayerEntity*(void)`; `0x4e15f0` `int(int isRestore)`; `0x4c6d40`
   `unsigned int(NapiNPServerCtx*)`.
-- Globals named/typed: `g_cameraFovDeg` + `g_cameraFovDegTarget` (`0x26C6848/4C`), `g_weaponScopeActive`
+- Globals named/typed: `g_cameraFovTargetQ16` + `g_cameraFovDefaultQ16` (`0x26C6848/4C`), `g_weaponScopeActive`
   (`0xB76478`), `g_currentWeaponSlot` (`0xB76474`), `g_inputFlags` + `g_inputFlagsPrev` (`0xB3B728/2C`),
   `g_scopeEngaged` + `g_scopeHipfire` (`0x82CE94/98`); `0x82CE40` + `0x82CEA0` typed `CNetPlayerInterp` →
   `g_fpCameraInterp` / `g_roundEndCameraInterp`.
@@ -9135,7 +9142,7 @@ seat-flag C2S 0x1D/169, camera interp (15 steps; 7 for `Field0C & 0x200`) toward
 `CamOffsetTpos` (+0x124, the §5.40 tpos), `WeaponSlot_TryQueueScopeUp @ 0x53f050` (ex
 "TryQueueReload" — queues 9, phase-gated {0,4}); disengage mirrors down
 (`..ScopeDown @ 0x53f080`, ex "TryQueueUnload" — queues 10), FOV back to 80.0; the
-zoom FOV (Flags&2): `g_cameraFovDeg @ 0x26C6848 = 80.0 / Player_GetClampedWeaponElevation`
+zoom FOV (Flags&2): `g_cameraFovTargetQ16 @ 0x26C6848 = 80.0 / Player_GetClampedWeaponElevation`
 (16.16) — the weapon.def `scope_max_mag` magnification.
 
 **Port** (PR #213 train). `engine/runtime/world/weapon_fsm.{h,cpp}`: the bake
@@ -9450,7 +9457,7 @@ aliased onto Underwater's 0x4 — replaced with the full two-dword table
 - Sighted-weapon FOV: engaged FP = `80 / Player_GetClampedWeaponElevation
   @ 0x4dc6b0` — the slot's ADJUSTABLE zoom (`MountSlot.Elevation`), seeded to
   `Def->MaxElevation` (scope_max_mag) on first use and clamped [0, max]; 3P or
-  disengaged = 80 (`g_cameraFovDeg = 0x500000`). The zoom STEP writer is
+  disengaged = 80 (`g_cameraFovTargetQ16 = 0x500000`). The zoom STEP writer is
   `Player_AdjustWeaponElevation @0x4dbdf0` (the weapon-cycle actions' scope leg,
   see the switch-chain block below): `Player_CanFireWeapon` + EquippedSlot + Def
   gates (`@0x4dbdfc..0x4dbe0e`), next = slot+0xC + delta, floor = Def+0x98
@@ -12265,7 +12272,7 @@ in [divergence-ledger.md](../divergence-ledger.md).
 - **D-NET-166** [FIXED 2026-08-29 — the joiner CRCs the loose `expansion/<name>/version.txt` under the binding-supplied install root at JOIN-build time (`vfs_expansion_version_checksum`, `JoinerConnection::expansion_version_root_`, `Simulation::set_join_expansion_version_root`), the host computes its `g_expansion_checksum` analog from `game_root`; `"0"` only when no root/expansion/file exists, which is retail's own value there. Original finding:] The C2S JOIN `VERSIONCRCSTRING` was emitted as the constant `"0"`. When the host runs an expansion, `Server_ValidatePlayerJoinRequest @0x512100` compares `atol()` of the uploaded string against its `g_expansion_checksum` @0xb4c5a4 (reject DPC=48) — retail computes that checksum as CRC-32/MPEG-2 over the loose `expansion/<name>/version.txt`. `"0"` matches every install without that file (the live revx02 golden) and is rejected by any host whose install carries one. Close by plumbing the runtime resource path into the joiner and computing the same CRC over the same file (§5.0d).
 - **D-NET-167** [OPEN, narrowed 2026-09-13] Side-password admission is ported: the join prompt and typed `JoinTarget` carry the shared JSP credential and TR preference, ClientAuth writes JSP before profile tags, the host stores the last type-2 case-insensitive JSP tag (63-byte bound), JOIN emits DPC 18/19/20 on the witnessed side-password failures, and team reservation honors a matching password before balancing. PW and JSPP remain independent. **Correction:** the former FID=password/JSP=team mapping was wrong; FID is numeric, JSP is the credential, TR is team choice. Remaining: the squad challenge/seed-to-generated-password input and OpenNova host DPC 21 validator, plus mixed retail/OpenNova live acceptance. A caller may already supply a known squad credential through JSP. Evidence: `npruntime_handshake_server`, `npruntime_client_runtime`, `npruntime_server_spawn`; GUT `net/spectator_join_prompt_test.gd` and `net/spectator_session_test.gd`. [orig: CNapiServerInfo_SerializeToSession @ 0x4C3650; NapiNetConfig_SetJsp @ 0x4C26BE; Server_ValidatePlayerJoinRequest @ 0x51243D / @ 0x5124A2; Server_AssignPlayerTeam @ 0x4FE424]
 - **D-NET-168** [MED, FIXED 2026-07-24] The joiner's post-`0x1A` `0x2F` pair uploaded a FIXED default kit (capture-shaped header `02 08 C3|D4` + seven ADM rows) — the shell's applied local kit had no wire seam, so the host's granted per-slot table reflected the default, not the player's pick. Closed by the client-builder witness (§5.56, `NetPacket_SendLoadoutSubmit @ 0x42cdc0`): `JoinerConnection` now latches the wire team from the S2C 0x04 tail byte (`byte_A85B48` parity) and composes both submissions from the binding's `set_loadout_kit` seam (`Simulation::push_joiner_loadout_kit` — the applied spawn kit's ADM rows, the latched class, slot 195 then the equipped combo, mirroring `Game_StartMission @ 0x525836/@ 0x525c2e`). Headless callers keep the capture-default kit byte-for-byte. Pinned by `npruntime_client_runtime` (exact canned pair under the 0x04 team; injected kit through the zones e2e) and `nw_ingame_encode` `loadout_submit_roundtrip`. **De-tabled ledger detail (2026-08-06):** The joiner's `0x2F` loadout pair was a fixed default kit with no wire seam to the shell's applied selection; closed via the `NetPacket_SendLoadoutSubmit @0x42cdc0` witness — the S2C 0x04 team latch + the `set_loadout_kit` seam derive both submissions from the applied kit (headless callers keep the capture default). **Amended 2026-07-25:** the witnessed team latch (`byte_A85B48`) has THREE writers, and only one was ported at first close — (1) the S2C `0x04` tail byte `@0x425499`, (2) S2C `0x50` team-assign `@0x4319db`, and (3) the death-screen-close leg of the `0x0A` handler. Source (2) is now ported (`decode_team_assign` + the joiner `0x50` dispatch): it re-latches our own team, folds `entity->Team` for ANY pool 0..4 entity `@0x4319ee`, surfaces the own-team edge so the sim moves `Entity::team` + `round_sim.local_team`, and re-sends ONE C2S `0x2F` with the NEW team and slot **195 raw** `@0x431a9e`. Source (3) remains a residual. Four legs of the `0x50` self arm are also deferred with witnesses: the per-side profile CLASS reselect `@0x431a35..0x431a9a` (we hold ONE applied kit, so the kit's class is re-sent), the C2S `0x22`/`0x23` acks `@0x431acb..0x431b05` (byte layout ambiguous in the decompile), `Player_InitPlayer(1)` `@0x431b14`, and the minimap NetId maintenance `@0x431b3a..0x431b91`
-- **D-NET-169** [FIXED 2026-09-13] Organic-spawn self-identification now matches the authenticated connection ID, pool 0 and player Flags bit `0x100`. Renamed/duplicate callsigns do not affect ownership; empty/replaced rows and the `0x5D` sweep retire the binding. The `OrganicSpawnRecord` field formerly called `entity_flags` is now `owner_connection_id`, matching the existing host producer. **Correction to the audit:** `Player_FindLocalPlayerEntity @0x4E0090` scans pool-0 entities by `ownerConnectionId`, not the roster table. `NapiNPClientMsg_0x00C @0x42E864` stores the wire u32 at entity+120; `@0x42E91A` stores the distinct Flags u16. `NapiNP_GetLocalConnectionId @0x4C6D40` reads the connection dcb. S2C `0x4D` (`@0x4317B0`) handles spawn tips/refresh requests, not identity. Verified through real ClientHello/Auth, framed S2C spawn/removal tests (`npruntime_joiner_identity`) and the full deployment exchange (`npruntime_client_runtime`).
+- **D-NET-169** [FIXED 2026-09-13] Organic-spawn self-identification now matches the authenticated connection ID, pool 0 and player Flags bit `0x100`. Renamed/duplicate callsigns do not affect ownership. The witnessed scope is the selection predicate only; the retire/rebind lifetime (empty/replaced rows and the `0x5D` sweep retire the binding, a later matching record rebinds it) is OpenNova structural policy: retail caches the pointer once at `Player_InitPlayer @0x4E15F0` (callers `Game_StartMission @0x525BBC`, `NapiNPClientMsg_TeamAssign @0x431B14`), never re-resolves it, and aborts via `Player_FatalPlayerDcbNotFound @0x4DFF60` when absent. The `OrganicSpawnRecord` field formerly called `entity_flags` is now `owner_connection_id`, matching the existing host producer. **Correction to the audit:** `Player_FindLocalPlayerEntity @0x4E0090` scans pool-0 entities by `ownerConnectionId`, not the roster table. `NapiNPClientMsg_0x00C @0x42E864` stores the wire u32 at entity+120; `@0x42E91A` stores the distinct Flags u16. `NapiNP_GetLocalConnectionId @0x4C6D40` reads the connection dcb. S2C `0x4D` (`@0x4317B0`) handles spawn tips/refresh requests, not identity. Verified through real ClientHello/Auth, framed S2C spawn/removal tests (`npruntime_joiner_identity`) and the full deployment exchange (`npruntime_client_runtime`).
 - **D-NET-170** [HIGH, FIXED 2026-07-24] S2C `0x5A` is now an authoritative receive-side state channel, not merely a deploy-release signal: `ClientRuntime` retains the newest decoded `WeaponLoadout` with a revision, and `Simulation` rebuilds the local slot pool from that grant before actions without sending a new C2S `0x2F`. S2C `0x6F` and `0x53` are retained per zone; the DEATH list overlays BMS zone identity with the live 0x6F team/value/limit secured gate. Real-UDP tests pin mid-session grant replacement and live zone removal/reappearance; `deploy_screen_presenter_test.gd` pins stable selection by the zone's wire parameter rather than row index. [orig: `NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0`; `UI_UpdateDeathScreenContent @0x5536a0`]
 - **D-NET-175** [HIGH, FIXED 2026-07-24] The full periodic request trio is live (§5.34): one holdoff-gated, MTU-batched send boundary carries `0x1C`, `0x08`, and `0x3D`. `0x3D` pages the renderer-finalized registry of unique loaded non-foliage `.3DI` definitions, frozen before world reveal, and later S2C spawns cannot mutate it. `0x1C` now comes from the real boot-soft `charattr.def` domain: an exact 16×124-byte CHARACTER table with retail section/key/value semantics, wrapped class selection plus active/id validation, and ordered S2C `0x41` property clears. The stock class-8 row CRC `0x22A25E01` reproduces two independent retail replies; missing resources and invalid classes retain retail's zero result.
 
@@ -14051,21 +14058,23 @@ net id and requires an active entity with its class serializer; updates do not
 synthesize that lifecycle. The lookup is by net id, not shooter id.
 [orig: NetPacket_DispatchToEntityByNetId @0x4D6960]
 
-The reducer's nonzero-XYZ guard also drops explicit all-zero coordinate writes.
-The serializer reads those fields unconditionally for groups 3 and 5 (group 5
-also clears the lock), while the original motor gives the zero vector its own
-straight-flight path. Preserving a previous target is different from preserving
-that sentinel. The replica tick uses stored steer coordinates and never resolves
+Zero-write leg PORTED 2026-09-13: the reducer stores every decoded coordinate,
+zero included, exactly as the serializer's read-full groups 3/4/5 store
+entity+700/704/708 unconditionally (group 5 also clears the lock); the former
+nonzero-XYZ guard is gone and `npruntime_client_runtime` pins an origin steer
+point seeding and re-aiming the flight. Still open on that axis: the original
+motor gives the zero vector its own straight-flight path, and the replica flight
+does not. The replica tick uses stored steer coordinates and never resolves
 the locked entity's current aim point. Ammo-specific launch/motor/seeker behavior
 and normal entity-model/trail ownership remain to be connected.
 [orig: Entity_SerializeGuidedMissileState @0x447C50;
 Entity_UpdateGuidedMissile_0 @0x446060]
 
 Existing `nw_ingame_guided`, `guided_missile_flight` and the client runtime guided
-lane do not establish these lifecycle, zero-write or moving-target properties.
-Add cases at the production reducer/world seam before changing them: update before
-spawn, update after termination, slot reuse, explicit zero coordinates and moving
-locked target, followed by an actual missile-family fire-to-termination scenario.
+lane do not establish the lifecycle or moving-target properties (the zero-write
+case is pinned). Add cases at the production reducer/world seam before changing
+them: update before spawn, update after termination, slot reuse and moving locked
+target, followed by an actual missile-family fire-to-termination scenario.
 
 **D-WPN-2 is a shared-bucket residual, not a missing ammo-class pool system.**
 `WeaponInventory` already owns class pools; `player_weapon.cpp` and server reload
@@ -14126,17 +14135,13 @@ IDA update: appended implementation/doc backlinks at `0x4E0090`, `0x4C3650`,
 `0x512100` and `0x4FE310`, then saved the active IDB. No symbols or types were renamed.
 
 
-### PR #649 adversarial review: self-identity lifetime
+### Self-identity lifetime (2026-09-13)
 
-Review of the first identity commit found that the cached binding survived S2C
-`0x12` removal and `0x18` full repair/replacement. The joiner also rejected an
-entire malformed `0x0C` page while its replica fold kept complete prefix records,
-and `JoinerRole` cached the initial H for firing after the runtime changed it.
-Six framed regressions failed on the reviewed revision.
-
-The connection now applies one numeric identity predicate to organic and full
-spawns, retires it on either removal channel or empty replacement, and retains
-complete organic prefixes while stopping at the original pool-capacity guard.
+The connection applies one numeric identity predicate to organic and full
+spawns, retires it on either removal channel (S2C `0x12`, the `0x5D` sweep) or
+an empty `0x18` replacement (OpenNova structural policy, see §5.38b: retail
+caches the pointer once), and retains complete organic prefixes of a truncated
+`0x0C` page while stopping at the original pool-capacity guard.
 Capture-seeded H remains explicit when no connection ID was authenticated;
 owner zero cannot infer a new identity. The role reads the runtime's current H
 for weapon, carrier and presentation consumers instead of storing another copy.
@@ -14148,12 +14153,12 @@ NapiNPClientMsg_FullEntitySpawn @ 0x433780;
 Server_RemoveEntityAndNotify @ 0x50A270]
 
 
-### PR #649 adversarial review: explicit spectator choice
+### Explicit spectator choice on protected-team hosts (2026-09-13)
 
-The side-password prompt initially treated an explicitly selected spectator like
-a player on protected-team hosts. The host's side validator already bypassed
-spectators. The prompt now respects that same role distinction, preserving the
-existing server-password prerequisite. The real `MainGame.join_lan_server` test
-`test_explicit_spectator_choice_ignores_team_password` failed before the change
-and passes after it, including loading-barrier shutdown settlement.
+The host's side validator bypasses spectators, so the joiner's side-password
+prompt applies the same role distinction: an explicitly selected spectator is
+never asked for a side password, while the server-password prerequisite stays.
+`MainGame.join_lan_server` is covered by
+`test_explicit_spectator_choice_ignores_team_password`, including the
+loading-barrier shutdown settlement.
 [orig: Server_ValidatePlayerJoinRequest @ 0x5124A2]

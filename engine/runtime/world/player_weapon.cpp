@@ -242,10 +242,10 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 	};
 	const auto stage_parent = [&](Entity &p_mount, uint8_t target_adm) {
         // UseGun's local attach resets before its direct mount; a detach does not
-        // take this leg. [orig: Entity_AttachToUseGunSlot @0x546B80]
-        player_view_weapon_switch_reset(view);
-        view.weapon_pose_bound = w.active && (w.def.flags & 3) != 0;
-        world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
+        // take this leg. The reset includes the binocular clears, so a wire-echoed
+        // attach drops a raised toggle too. [orig: Entity_AttachToUseGunSlot
+        // @0x546B80 -> Player_ResetCameraAndMovementState @0x546ba4]
+        local_player_camera_reset(&world, w, view);
 		if (!w.usegun_slot_active)
 			w.usegun_saved_adm = player->pre_use_gun_equipped_adm_index;
 		w.usegun_pending_mount = p_mount.handle;
@@ -349,11 +349,7 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
     if (out.reset_view) {
         // Category requests reset at the admitted walk, before the outgoing
         // action completes. Cycling never sets this flag. [orig: @0x4E0223]
-        player_view_weapon_switch_reset(view);
-        view.weapon_pose_bound = w.active && (w.def.flags & 3) != 0;
-        world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
-        view.binoculars_requested = false;
-        view.binoculars_view_active = false;
+        local_player_camera_reset(&world, w, view);
     }
 	switch (out.kind) {
 		case WeaponSwitchOutcome::kDeny: {
@@ -1309,8 +1305,8 @@ WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
     for (int i = 0; i < 3; ++i) {
         // The parser's float position is authored units * 256; rotation is
         // Q16 degrees * 0x0B60B60, rounded by add/adc 0x8000 before SHRD.
-        // [orig: WeaponDef_ParseProperty @0x544614..0x5446D8 /
-        //  @0x54475B..0x544825]
+        // [orig: WeaponDefs_ParseLineCallback @0x543680, pos @0x544614..0x5446D8 /
+        //  tpos @0x54475B..0x544825]
         data.view_hip_pose.position_q16[i] = row.pos[i] * 256.0f;
         data.view_ads_pose.position_q16[i] = row.tpos[i] * 256.0f;
         const auto rotation_bam = [](int32_t degrees_q16) {

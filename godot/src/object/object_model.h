@@ -401,6 +401,9 @@ private:
 	int32_t entity_uniform_scale_q16_ = 0;
 	float model_sphere_radius_ = 0.0f;  // gpm[5]; 0 = unstamped
 	int32_t entity_bound_radius_q16_ = 0;  // entity+0; 0 = none (no collision block)
+	// The eweap-powerup projection form: the entity init stores a zero bbox
+	// center before measuring the sphere (simassets::item_def_zero_bbox_center).
+	bool entity_projection_zero_center_ = false;
 	ObjectID slot_shadow_capture_with_;
 	ObjectID entity_light_owner_;
 	String slot_shadow_decal_texture_;
@@ -820,7 +823,8 @@ public:
 	// its own threshold table. This differs from an attachment's level owner.
 	void set_authored_lod_projection_owner(ObjectModel *p_owner);
 	ObjectModel *get_authored_lod_projection_owner() const;
-	void configure_entity_projection(bool p_person, int32_t p_parachute_radius_q16);
+	void configure_entity_projection(bool p_person, int32_t p_parachute_radius_q16,
+			bool p_zero_center);
 	void set_parachute_deployed(bool p_deployed);
 	// A carved static becomes a live husk visual while retaining the primary
 	// entity's already-derived local sphere and the scale of its pose matrix.

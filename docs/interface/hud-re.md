@@ -453,7 +453,7 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   the scope/movement/air/water verdicts in first person, but not the early
   slot/seat/reload rejects. Thus the crosshair draws throughout ADS ease and
   whenever the applicable CanFire gate fails. Its can't-fire path also resets
-  `g_cameraFovDeg = 5242880` = **80.0 deg** 16.16
+  `g_cameraFovTargetQ16 = 5242880` = **80.0 deg** 16.16
   `[orig: @0x5cf88e]` — the port's `fov_deg` default.
 - **Anchor**: the offset applies to the **virtual-space** projection of the
   aim point (`Viewport_ScreenToVirtual`). For the on-foot local player with no

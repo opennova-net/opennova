@@ -208,12 +208,15 @@ public:
                                const OcclusionFrameCamera &cam,
                                const int32_t center_world[3], int32_t radius,
                                uint8_t &latch, uint32_t logic_tick);
-    // Bound-sphere derivation from the collision model bounds.
-    // [orig: Entity_ComputeBoundingSphere @ 0x5c69a0 — center = AABB mid,
-    // radius = min(|half|, 0x7FFF0000 as float); the def scale leg is unported
-    // (statics carry no live scale)]
+    // Bound-sphere derivation from the collision model bounds: center = the
+    // per-axis midpoint, radius = min(|max - center|, 0x7FFF0000 as float)
+    // truncated, then center and radius scaled Q16 with the +0x8000 rule
+    // when the entity's scale is nonzero (`Entity::uniform_scale_q16`, the
+    // entity+0x158 / itemDef+0x1B8 selection; zero = unscaled).
+    // [orig: Entity_ComputeBoundingSphere @ 0x5c69a0, midpoint/half
+    // @ 0x5c6a3b..0x5c6ac2, scale @ 0x5c6ac8..0x5c6b52]
     static void bound_sphere_fixed(const CollisionModel &m, int32_t center_local[3],
-                                   int32_t &radius);
+                                   int32_t &radius, int32_t scale_q16);
 
     // --- frame results ---
     // Whether the building entered the visible batch this frame (distance +

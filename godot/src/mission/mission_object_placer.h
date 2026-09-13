@@ -337,6 +337,10 @@ private:
 		std::vector<int32_t> thresholds_q16;
 		std::vector<bool> available;
 		opennova::renderer::ObjectProjectionSphere projection_sphere;
+		// The same CMDL bounds in the eweap-powerup form (zero center, halves
+		// = the maxima); an instance whose item def takes that leg selects it.
+		// Invalid when the profile came without a document.
+		opennova::renderer::ObjectProjectionSphere zero_center_projection_sphere;
 	};
 	// One emitted MultiMesh population: capacity = the slot list it was
 	// emitted over, live rows packed [0, live) (visible_instance_count) in
@@ -393,6 +397,9 @@ private:
 	bool _placement_is_mirror_reflected(uint32_t p_entity_attrib,
 			int p_item_id) const;
 	int32_t _item_model_scale_q16(int p_item_id) const;
+	// Whether the item's entity init stores a zero bbox center (type-6 eweap
+	// powerups), the form the collision center and projection sphere share.
+	bool _item_projection_zero_center(int p_item_id) const;
 	int32_t _item_entity_bound_radius_q16(int p_item_id,
 			const Ref<ObjectData> &p_data);
 	Transform3D _entity_transform_for_item(const Vector3 &p_position,

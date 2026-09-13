@@ -118,8 +118,17 @@ public:
 
 	bool started() const { return started_; }
 	bool local_spawned() const { return local_spawned_; }
+	// H, the host-assigned wire identity, once L is spawned and the runtime
+	// still binds it. Unbound reads kInvalid, never 0: zero is a live pool-0
+	// handle (the listen host's own player), and every consumer that excludes
+	// "self" by handle would otherwise misclassify that remote row while the
+	// binding is retired (an OpenNova-only state; retail caches the pointer
+	// once at Player_InitPlayer @0x4E15F0 and never re-resolves it).
+	bool has_self_wire_handle() const {
+		return local_spawned_ && runtime && runtime->has_self_handle();
+	}
 	uint16_t self_wire_handle() const {
-		return local_spawned_ && runtime && runtime->has_self_handle() ? runtime->self_handle() : 0;
+		return has_self_wire_handle() ? runtime->self_handle() : world::EntityHandle::kInvalid;
 	}
 	int flat_seconds() const { return flat_seconds_; }
 	bool freeze_suspected() const { return freeze_suspected_; }

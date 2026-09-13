@@ -5,9 +5,9 @@
 //
 // Retail never walks this collection radially: the frustum-culled quadtree
 // traversal hands a SUBTREE to the collector at each frustum-surviving
-// emitted node of LOD level >= 3 whose nearest approach can reach the
-// 42-unit foliage limit [orig: Terrain_TraverseQuadtreeNode handoff
-// @ 0x60905c..0x60907c]. Cells behind the camera therefore never enter the
+// emitted node of LOD level >= 3 whose raw traversal distance less 16.0 is
+// within the 42-unit foliage limit [orig: Terrain_TraverseQuadtreeNode
+// handoff @ 0x60905c..0x60907c]. Cells behind the camera therefore never enter the
 // visible-key list, which keeps the far-slot pool's working set below its
 // 16-bit-index capacity (see foliage-re.md D-FOLIAGE-13).
 

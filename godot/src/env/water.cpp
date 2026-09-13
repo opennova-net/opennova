@@ -112,6 +112,9 @@ void Water::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_TERRAIN_FOLIAGE", VISUAL_LAYER_TERRAIN_FOLIAGE);
 	ClassDB::bind_integer_constant(get_class_static(), "",
+			"VISUAL_LAYER_TERRAIN_FLAT_FALLBACK",
+			VISUAL_LAYER_TERRAIN_FLAT_FALLBACK);
+	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_SHADOW_CASTER_MASK", VISUAL_LAYER_SHADOW_CASTER_MASK);
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"REFLECTION_CULL_MASK", REFLECTION_CULL_MASK);
@@ -521,12 +524,15 @@ void Water::build() {
 		// skip the encode but run the canvas dim in linear space (0x40/255
 		// becomes ~0.05), which is the wrong domain for that multiply.
 		_install_reflection_decode();
-		// The witnessed mirror scene: sky/terrain/celestials/foliage plus the
+		// The witnessed mirror scene: sky/terrain/celestials plus the
 		// flag-0x400 world population — vehicles by item type and records
 		// whose BMS attribute authors Reflective. It has no water surface, FP
-		// overlay, or player/person render leg. _update_reflection_camera
-		// re-adds WORLD_NO_MIRROR below water, where the retail collectors
-		// run unfiltered.
+		// overlay, player/person render leg, foliage blanket, or empty-sector
+		// flat terrain (the prerender view skips empty sectors whenever the
+		// mission has water; this mirror only renders for a nonzero height,
+		// see docs/terrain/terrain-re.md "Empty-sector flat fallback").
+		// _update_reflection_camera re-adds WORLD_NO_MIRROR below water,
+		// where the retail collectors run unfiltered.
 		reflection_camera_->set_cull_mask(REFLECTION_CULL_MASK);
 		reflection_viewport_->add_child(reflection_camera_);
 		reflection_camera_->make_current();

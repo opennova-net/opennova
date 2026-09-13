@@ -20,7 +20,7 @@ remain in place; ONED's paint and eyedropper consumers were removed by ADR 0037.
 | Surface | Retail witness | Reimpl result | Verdict |
 |---|---|---|---|
 | Definition/map source data | `.trn` foliage defs, charmap, foliagemap | formats and DETAIL's flat wrapped coordinate policy retained; no ONED authoring UI | matching format/coordinate helpers |
-| Detail-cell collection | frustum-surviving traversal nodes (level ≥ 3) hand subtrees to `Terrain_CollectNearFoliagePatches @ 0x603e60`, independent of the 224 main-draw cap; foliage cap 128 | an independent handoff from the same traversal decisions into the 16-unit mip-bound collector | matching (budget independence corrected 2026-09-13, D-FOLIAGE-13) |
+| Detail-cell collection | frustum-surviving traversal nodes (level ≥ 3, node distance less 16 within 42) hand subtrees to `Terrain_CollectNearFoliagePatches @ 0x603e60`, independent of the 224 main-draw cap; foliage cap 128 | an independent handoff from the same traversal decisions and node gate into the 16-unit mip-bound collector | matching (seating corrected 2026-07-16, D-FOLIAGE-13; budget independence and node gate corrected 2026-09-13, D-FOLIAGE-14) |
 | Detail placement | `generate_foliage_instances_0 @ 0x5ffdd0` | fresh `foliage::Runtime` literal vectors | matching |
 | Detail geometry | every surface of every LOD0 submesh expanded and terrain-bent | fresh CPU-expanded aggregate ArrayMesh batches | matching |
 | Detail pass split | high ref 180 / low ref 8 at distance 33 | separate high/low shaders and batches | matching |
@@ -110,10 +110,15 @@ the parsed flag but explicitly disables shadow casting on all three batches.
 ### Exact 16-unit collection
 
 Collection is seated INSIDE the frustum-culled render traversal: at each
-frustum-surviving emitted node of LOD level ≥ 3 whose LOD distance minus its
-extent can still reach 42, `Terrain_TraverseQuadtreeNode` tail-hands that
-node's subtree to the collector [`orig: gate + call @ 0x60905c..0x60907c;
-foliage-enabled flag 0x319FB34`]. Cells behind the camera therefore never
+frustum-surviving emitted node of LOD level ≥ 3 whose raw traversal distance
+(X/Z clamped to the node box, Y to the node center, which flat sectors zero)
+less a fixed 16.0 is within 42, `Terrain_TraverseQuadtreeNode` tail-hands that
+node's subtree to the collector [`orig: 16.0 @ 0x608d46; gate + call
+@ 0x60905c..0x60907c; foliage-enabled flag 0x319FB34`]. The 16.0 is the raw
+literal, not the quality-scaled near zone the LOD decision subtracts: the x87
+stack carries `[dist, 16.0]` through the emit block and the gate is
+`fsubrp; fcomp 42.0; jp skip`, so a node farther than 58 units is never
+handed off however near its own leaves are. Cells behind the camera therefore never
 enter the visible-key list (`Foliage_VisibleFarKeyList`, cap 128), which is
 what keeps the far-slot pool's working set below its 16-bit-index capacity
 (D-FOLIAGE-13). `Terrain_CollectNearFoliagePatches @ 0x603e60` then
@@ -129,13 +134,21 @@ the camera) into the same 512→16 height-mipchain descent, starting at the
 handoff node's rect; sector IDs select the same four 512-unit atlas quadrants
 as terrain rendering. This handoff is independent of the main terrain draw
 list: reaching its 224-entry cap only skips the main append. The traversal
-continues through the foliage-enabled, LOD and distance gates. The original
-collector then applies separate 128-entry checks to its near records and
-visible keys. OpenNova retains an independent per-sector handoff vector and
-the existing 128-cell output, so the main draw cap cannot starve nearby
-foliage or widen its frustum/distance acceptance. Witnesses:
+continues through the foliage-enabled, LOD (≥ 3) and node-distance
+(`dist - 16 <= 42`) gates. The original collector then applies separate
+128-entry checks to its near records and visible keys. OpenNova retains an
+independent per-sector handoff vector, applies the same node gate before the
+handoff (corrected 2026-09-13, D-FOLIAGE-14), and keeps the existing 128-cell
+output, so the main draw cap cannot starve nearby foliage or widen its
+frustum/distance acceptance. The node gate and the collector's leaf test are
+not interchangeable: a 64-unit node whose height range is [0,127] under a
+camera at Y=0 has node distance 63.5, and a flat sector under a camera above
+58 has node distance equal to the camera height (its zeroed center), so
+neither reaches the collector even though both contain 16-unit cells within
+42 of the camera. Witnesses:
 [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, main cap bypass
-@ 0x608FBC -> 0x609012, foliage gate/call @ 0x60905C..0x60907C];
+@ 0x608FBC -> 0x609012, 16.0 @ 0x608D46, foliage gate/call
+@ 0x60905C..0x60907C];
 [orig: Terrain_CollectNearFoliagePatches @ 0x603E60, near-record cap
 @ 0x603F98, visible-key cap @ 0x603FF1].
 
@@ -668,8 +681,11 @@ claim or divergence.
   127→128 capacity, and preservation of a full list.
 - `terrain_frame_compiler`: foliage handoff after 223/224 preceding terrain
   draws, saturation by several earlier sectors or default flat fallback,
-  unchanged forward-frustum/distance keys and order, plus flat keys propagated
-  into real empty foliage cache entries with no sampling or submissions.
+  unchanged forward-frustum/distance keys and order, flat keys propagated
+  into real empty foliage cache entries with no sampling or submissions, and
+  the node-distance handoff gate (a [0,127] node under a camera at Y=0, a
+  flat sector under a camera at 64 with raw cells at 64, the inclusive
+  58-unit boundary).
 - `foliage_runtime_adapter_test.gd`: fresh public adapter contract, disjoint
   DETAIL/MODEL callback routing, tier map selection, full multi-surface LOD0
   aggregation, view-depth gate, no
@@ -724,7 +740,8 @@ claim or divergence.
 | D-FOLIAGE-8 | **FIXED 2026-07-14.** Direct retail inspection resolved the supposed path/spacing substrate as the shared mission `.til` array. `til_blocks_foliage` ports the exact linear inclusive 16x16 AABB scan, GameWorld parses `<mission>.til` before terrain build, and terrain/foliage/network state share that resource/payload; `FORCE_ON` continues to bypass the sampler in the portable runtime. [orig: `Foliage_PathBlockedByPlacedTile @ 0x606490`; `Terrain_LoadTileInfoFile @ 0x60a740`; `Terrain_GetSurfaceTypeAtPosition @ 0x606510`] |
 | D-FOLIAGE-9 | **OPEN, reimpl mapping (narrowed 2026-07-16).** The anchor CLASS is now the witnessed stance gate (D-FOLIAGE-11); what remains approximate is visibility membership — camera frustum stands in for retail's visible-sector walk + `test_sector_entity_occlusion @ 0x5c4610`. No terrain-center fallback remains. Same-frame refreshes of an overlapping reimpl `(slot, cell key)` are coalesced without removing its distinct draw submissions, preventing reimpl-only regeneration/upload storms while this membership gap remains open. |
 | D-FOLIAGE-11 | **FIXED 2026-07-16.** The reimpl fed every placed mission object as a MODEL-tier anchor; retail's sector walk generates the tier only for entities with `MoveOrder` stance bits (`0x100` prone / `0x200` crouch) and an empty `groundEntity` — the hide-in-grass masks around infantry [`orig: @ 0x5c7dc2/0x5c7ded/0x5c7dd5`]. Anchors now come from the sim's stance query. The former ONED preview had no infantry and its placed-object `anchor_provider` plumbing was removed. Placed-object anchoring both drew non-retail grass masks around every object and, on object-dense vistas, thrashed the per-definition model caches into a 3 FPS frame. |
-| D-FOLIAGE-13 | **FIXED 2026-09-13 (reopened after the 2026-07-16 seating correction).** The former radial walk over-collected behind-view cells and thrashed the far-slot LRU; seating collection on frustum-surviving emitted nodes corrected that scope (reported 00TRa pose: 34→24 cells and no recurring eviction). The follow-up audit found that collection still depended on the retained 224-entry main draw list, dropping nearby foliage when earlier sectors filled it. Traversal now carries foliage handoffs independently while preserving LOD/frustum admission and the collector's 42-unit/128-cell limits. Full retail leaf execution pins main 223/224 versus independent near/key 127/128 boundaries; portable frame fixtures pin ordered nearby cells after authored or default-flat main saturation, with no extra far/behind-view cells. Adversarial review also corrected sector-zero rejection and the premature high-bit cache gate: flat cells use quadrant 1's raw height center, retain their flagged keys in the independent 128-cell budget, and allocate/touch ordinary empty cache residents whose generator performs no sampling. Nine additional original collector boundary cases and a two-frame original cache/generator sequence pin that behavior; portable terrain-to-foliage frame and capacity-one eviction fixtures cover the full consumer chain. A second collector correction moves distance rejection after unconditional nonleaf descent, preserving near low leaves under mixed-height ancestors; original flagged/unflagged execution and portable whole-sector/64-unit/32-unit fixtures pin that boundary. See Exact 16-unit collection above. [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, cap bypass @ 0x608FBC -> 0x609012, handoff @ 0x60905C..0x60907C; Terrain_CollectNearFoliagePatches @ 0x603E60, capacity gates @ 0x603F98 and @ 0x603FF1]. |
+| D-FOLIAGE-13 | **FIXED 2026-07-16.** The reimpl collected detail cells with a standalone RADIAL walk (the full 42-unit disc, ~34 cells on open ground); retail's collector is invoked only from frustum-surviving traversal nodes of level ≥ 3 [`orig: @ 0x60905c..0x60907c`], so its working set is the frustum wedge. Over-collection pushed the far-slot pool past its witnessed 16-bit-index capacity (`min(128, 65534/(36×V))` ≈ 32 for a ~54-vertex def) and the witnessed strict-first-max LRU (per-update stamps, all-ties) then hammered one slot per frame — a user-visible two-frame grass blink at working-set-over-capacity poses that retail never exhibits. Collection is now seated in the traversal handoff; at the reported 00TRa pose: 34→24 cells, 2 misses+evictions/frame→0, blink gone. |
+| D-FOLIAGE-14 | **FIXED 2026-09-13 (minted and closed).** Collector capacity and node gating after the D-FOLIAGE-13 seating. The follow-up audit found that collection still depended on the retained 224-entry main draw list, dropping nearby foliage when earlier sectors filled it. Traversal now carries foliage handoffs independently while preserving LOD/frustum admission and the collector's 42-unit/128-cell limits. Full retail leaf execution pins main 223/224 versus independent near/key 127/128 boundaries; portable frame fixtures pin ordered nearby cells after authored or default-flat main saturation, with no extra far/behind-view cells. Adversarial review also corrected sector-zero rejection and the premature high-bit cache gate: flat cells use quadrant 1's raw height center, retain their flagged keys in the independent 128-cell budget, and allocate/touch ordinary empty cache residents whose generator performs no sampling. Nine additional original collector boundary cases and a two-frame original cache/generator sequence pin that behavior; portable terrain-to-foliage frame and capacity-one eviction fixtures cover the full consumer chain. A second collector correction moves distance rejection after unconditional nonleaf descent, preserving near low leaves under mixed-height ancestors; original flagged/unflagged execution and portable whole-sector/64-unit/32-unit fixtures pin that boundary. A third correction restores the traversal's own node gate, which the independent handoff had dropped: a handoff requires the raw node distance less a fixed 16.0 to be within 42, so a far node center (a [0,127] node under a camera at Y=0) or a flat sector under a camera above 58 never reaches the collector; a compiler fixture pins both plus the inclusive 58-unit boundary. See Exact 16-unit collection above. [orig: Terrain_TraverseQuadtreeNode @ 0x608A00, 16.0 @ 0x608D46, cap bypass @ 0x608FBC -> 0x609012, handoff gate @ 0x60906B..0x609078, call @ 0x60907C; Terrain_CollectNearFoliagePatches @ 0x603E60, capacity gates @ 0x603F98 and @ 0x603FF1]. |
 | D-FOLIAGE-12 | **FIXED 2026-07-17.** The portable runtime now carries separate Q16 gate callbacks: detail consumes the flat 1024-wrap lookup while MODEL retains the sector-grid-routed lookup. `foliage_sample_detail_flat_wrap` ports the loader's actual-width stride, width-derived `floor(log2(width))`, low-10-bit coordinate wrap, and reimpl-plane Z convention without a float round-trip [`orig: Foliage_LoadFoliageMapPCX @ 0x605ad0`; `Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0`; `Foliage_SampleFoliageMapMask @ 0x606620`]. Runtime and capture probes share the flat DETAIL coordinate API. The Dvxi5 GameWorld fixture pins disjoint flat-positive/routed-negative and routed-positive/flat-negative authored-map witnesses, including the world-to-pixel mapping, then requires production detail output at the flat-positive point. |
 | D-FOLIAGE-10 | **OPEN, bounded reimpl order/reflection mapping.** Retail inserts each immediate MODEL depth-mask draw between its initial sector flush and later entity/foliage consumers; the reimpl's transparent-pass depth sorting reproduces the mask-occludes-farther-detail effect but cannot cull already-drawn farther tufts under a nearer mask, and cannot reproduce every arbitrary insertion point. The near secondary LOW's strict `LESS` is now emulated exactly via the high-pass cutoff discard (the 2026-07-15 grill retired the state half of this entry). Retail's water-REFLECTION invocation forces LOW and applies `fade × 0.1` (arg_8 = reflectionEnabled @ `0x5c95c1/0x5c9661`); the #30 mirror instead reflects the shared world's foliage at its normal main-scene tier/fade, so OpenNova's reflected vegetation can be visibly brighter. |
 

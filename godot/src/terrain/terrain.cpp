@@ -5,6 +5,7 @@
 #include "terrain/terrain_tile_info.h"
 #include "env/slot_shadow.h"
 #include "env/water.h"
+#include "render/visual_layers.h"
 #include "mission/mission_object_placer.h"
 
 #include <runtime/terrain_query/terrain_field_build.h>
@@ -533,6 +534,15 @@ void Terrain::render_frame() {
 		if (fresh || draw.zero_height != last_zero_height[i]) {
 			rs->instance_geometry_set_shader_parameter(
 					patch_instances[i], "u_instance_zero_height", draw.zero_height);
+			// The flat fallback rides its own visual layer alone, like the
+			// foliage blanket: the beauty camera admits it and the water
+			// mirror excludes it, because the retail mirror prerender view
+			// skips empty sectors whenever the mission has water while the
+			// live view draws them (docs/terrain/terrain-re.md,
+			// "Empty-sector flat fallback").
+			rs->instance_set_layer_mask(patch_instances[i], draw.zero_height
+					? static_cast<uint32_t>(visual_layers::TERRAIN_FLAT_FALLBACK)
+					: static_cast<uint32_t>(visual_layers::WORLD));
 			last_zero_height[i] = draw.zero_height;
 		}
 		const Vector2 quadrant(static_cast<float>(draw.quadrant_x),
@@ -1004,8 +1014,9 @@ void Terrain::build() {
 		rs->instance_set_scenario(inst, scenario);
 		rs->instance_geometry_set_material_override(inst, mat_rid);
 		// Static terrain silhouettes are already carried in the composed page A;
-		// the terrain participates only in the ordinary world-visible layer.
-		rs->instance_set_layer_mask(inst, 1u << 0);
+		// authored terrain participates only in the ordinary world-visible
+		// layer (render_frame moves flat fallback draws to their own layer).
+		rs->instance_set_layer_mask(inst, visual_layers::WORLD);
 		rs->instance_set_visible(inst, false);
 		// Draw-list index == pool slot == the light rows texture row this
 		// instance reads; fixed for the instance's lifetime.
@@ -1096,7 +1107,8 @@ bool Terrain::_build_terrain() {
 				uvs.set(vi, Vector2(vertex.atlas_uv[0], vertex.atlas_uv[1]));
 			}
 
-			total_verts += tile.vertex_count;
+			// Both variants share one vertex count; tally it once per tile.
+			if (variant == 0) total_verts += tile.vertex_count;
 
 			// Create one ArrayMesh per LOD level (single surface each)
 			for (int lod = 0; lod < 8; lod++) {

@@ -310,10 +310,11 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->span("runtime");
 	// Open and seed GAME music for sessions with a local client, including SP;
 	// dedicated hosts close the context. The shell owns the actual music VM.
-	// [orig: Game_StartMission @0x525581..0x52561B; the connection-mode
-	// is_client gate is corrected in mus-sbf-re.md, D-MUS-SPGATE]
-	// M# resolves this context while WAC compiles, so opening must precede boot.
-	// [orig: music open @0x525589 precedes WAC init @0x525CB3]
+	// The connection-mode is_client gate and the original open/seed sequence
+	// are witnessed in docs/audio/mus-sbf-re.md (Context lifecycle, D-MUS-SPGATE).
+	// M# resolves this context while WAC compiles, so opening must precede
+	// boot: the original mission start opens music before its WAC init call,
+	// see docs/world/world-wac-ai-re.md section 33.15a.
 	if (drive_.pending_dedicated()) emit_signal(kSignalMusicContextClosed);
 	else emit_signal(kSignalMusicContextOpened, resource_root_);
 	const int runtime_error = start_runtime(p_mission, p_bms_name);

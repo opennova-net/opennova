@@ -736,9 +736,12 @@ static void test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup() {
             "set(v0suffix,7) set(v1tail,11) set(V02_more,22) "
             "set(v255edge,55) set(v9,V255read) "
             "set(v256tail,66) set(v10,v255) set(v11,V256again) "
-            "set(v12,V0255trail)\n", {});
+            "set(v12,V0255trail) "
+            // Overlong suffixes: retail's 32-bit atol saturates, so both reach
+            // the >= 256 clamp (an LP64 atol would wrap 4294967297 to V1).
+            "set(v13,V4294967297) set(v14,V99999999999999999999)\n", {});
     CHECK(program.ok());
-    CHECK(program.diagnostics.size() == 2);
+    CHECK(program.diagnostics.size() == 4);
     for (const Diagnostic &diagnostic : program.diagnostics)
         CHECK(!diagnostic.error && diagnostic.message == "V# too big");
     WacVm vm; vm.load(program); vm.execute(w);
@@ -750,6 +753,9 @@ static void test_numbered_v_tokens_accept_decimal_prefixes_after_name_lookup() {
     CHECK(w.script.vars.get_mission(10) == 66);
     CHECK(w.script.vars.get_mission(11) == 66);
     CHECK(w.script.vars.get_mission(12) == 66);
+    CHECK(w.script.vars.get_mission(13) == 66); // saturated, clamped to V255
+    CHECK(w.script.vars.get_mission(14) == 66);
+    CHECK(w.script.vars.get_mission(1) == 11); // V1 was not aliased by the wrap
     CHECK(w.script.vars.get_mission(256) == 0); // numeric syntax never reaches declarations
 
     program = compile_source(

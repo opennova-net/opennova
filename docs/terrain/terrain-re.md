@@ -60,17 +60,51 @@ live top-tier terrain shader has no terrain-tint multiplier
 | Flat page base/DOT3 source and mission-overlay gate | MATCHING (bounded behavioral proof) | `terrain_tile_composer` checks every output texel against a distinct source-corner color/normal with an overlapping opaque `.til` entry; `terrain_tile_composition_cache` covers the LOD-0 projection and origin-sector borrower. |
 | Flat stage-2 blend transform and independent detail/noise | MATCHING (instruction witness; shader contract) | `terrain_shader_contract_test.gd` pins the collapsed blend coordinate independently of the live stage-1 detail and stage-3 detail/noise coordinates. Full-scene pixel equivalence remains unverified. |
 | Godot mesh upload and shader parameter application | host code / not grillable | `Terrain` uploads the native vertex variants, selects the flat mesh by draw-list flag, and applies the native zero-primary-UV projection. |
+| Water-mirror exclusion of the flat fallback | MATCHING (visual-layer split; instruction witness) | Flat draws ride `visual_layers::TERRAIN_FLAT_FALLBACK` alone; `REFLECTION_CULL_MASK` excludes it and the beauty camera admits it. `terrain_shader_contract_test.gd` pins the mask split. |
 
 A zero entry in the 16x16 `.trn` sector grid is not an unconditional hole.
 Both the main draw collector and the visible-bounds collector select quadrant
 1's existing quadtree with packed tile-key bit `0x80000000`, unless the view's
-word at byte offset `+100` requests skipping empty sectors. The ordinary main
-view writes this word to zero. The 11x11 sector window therefore continues to
-supply flat geometry beyond the authored land instead of exposing the scene
-clear. Witnesses: [orig: PolyTrn_RenderFrame @ 0x60EAC0, routing
-@ 0x60EC94..0x60ECBD]; [orig: terrain_render_visible_sectors @ 0x6090C0,
-routing @ 0x609238..0x609263]; [orig: terrain_setup_view_and_lighting
-@ 0x60FE40, zeroed view words @ 0x60FEBA]; [orig: sub_60FF50 @ 0x60FF50].
+word at byte offset `+100` is nonzero. That word is wider than an
+empty-sector switch: `PolyTrn_RenderFrame` copies it into `dword_319FB84`,
+the water-plane view mode, whose readers are the three empty-sector gates
+plus the sector batch (its per-light terrain pool re-draw loop is skipped
+when nonzero), the terrain scene renderer, and the lighting/shader setup.
+Its writers: the live draw pass writes zero, the bounds pass zeroes
+`+92..+100`, `sub_610420` writes zero, and both the water-mirror prerender
+and the PCX screenshot scene write `Env_WaterHeightFixed != 0`. The
+ordinary main view therefore includes the flat fallback, and the 11x11
+sector window continues to supply flat geometry beyond the authored land
+instead of exposing the scene clear, while every mirror rendered for a
+mission with water contains no empty-sector geometry (the prerender only
+runs while the water pass is active). OpenNova's shared compile models only
+the live draw pass: `TerrainViewInput::skip_empty_sectors` defaults to
+false and the bounds pass shares that value; the mirror exclusion is the
+visual-layer split described below, and the screenshot scene and the
+temporal reprojection (overlay) routing are not modeled. Witnesses:
+[orig: PolyTrn_RenderFrame @ 0x60EAC0, `+100` read @ 0x60EB3C, routing
+@ 0x60EC94..0x60ECBD, gate @ 0x60ECB0]; [orig: terrain_render_visible_sectors
+@ 0x6090C0, reads @ 0x609122 and @ 0x609244, routing @ 0x609238..0x609263];
+[orig: render_terrain_sector_batch @ 0x6092A0, reads @ 0x6092C6,
+@ 0x60983F..0x609846, @ 0x60997A and @ 0x609B31]; [orig: terrain_render_scene
+@ 0x60E850, reads @ 0x60E8B1 and @ 0x60E9EE]; [orig:
+terrain_setup_lighting_and_shader @ 0x604420, read @ 0x604444]; [orig:
+sub_6040A0 @ 0x6040A0, read @ 0x6040F3]; [orig: sub_60FF50 @ 0x60FF50, zero
+store @ 0x60FFCE]; [orig: terrain_setup_view_and_lighting @ 0x60FE40, zeroed
+view words @ 0x60FEBA]; [orig: sub_610420 @ 0x610420]; [orig:
+render_main_scene @ 0x5C1240, `+100` = 1 @ 0x5C1567 and = 0 @ 0x5C1583];
+[orig: render_scene_with_water_reflection @ 0x5D7EA0, stores @ 0x5D8061 and
+@ 0x5D8079]; [orig: Water_ReflectionPrerender @ 0x5C2780]; [orig:
+Render_TerrainScene @ 0x610C80].
+
+The water-mirror exclusion: retail's mirrored terrain never contains flat
+fallback geometry when the mission has water. OpenNova's mirror is a Godot
+camera over the same scene (env #30), so the flat draws ride their own
+visual layer alone (`visual_layers::TERRAIN_FLAT_FALLBACK`, written on the
+patch instance together with the zero-height flag): the beauty camera mask
+admits it, `REFLECTION_CULL_MASK` excludes it above and below water, and the
+mirror only renders for a nonzero water height, the same condition the
+retail word encodes. Ordinary draws keep the world layer.
 
 Flat mode zeros the traversal center Y and the AABB test's Y extent while
 retaining the source node's radius. The vertex decoder zeros position Y and
@@ -966,7 +1000,7 @@ as `terrain_raycast_los_clear` on the occlusion slice (the AI LOS
 | D-TERRAIN-10 | A | **FIXED (2026-07-14)** | **Terrain light-vector coordinate basis**: EnvFile preserves the direct retail getter tuple `g`, not Godot/world XYZ. Retail's D3DCOLOR pack writes GPU diffuse RGB `(g2,g0,g1)`, matching normal-map RGB `(grid X slope, grid Y slope, up)`; the old reimpl `(x,z,y)` pack swapped the horizontal DOT3 axes. Terrain and analytic foliage now pack `(z,x,y)`. Flat 06:00/12:00/18:00 checks could not distinguish the swap, so a non-flat 08:00 oracle pins light bytes `(231,83,187)` and slope alphas `0.8987774/0.0794002` [`orig: Environment_GetLightDirectionFloat @ 0x57d870; Terrain_GenerateNormalMap pack @ 0x603470..0x6034eb; PolyTrn light pack @ 0x60e201..0x60e331; PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e`]. |
 | D-TERRAIN-11 | A | **FIXED (2026-08-17)** | **Terrain detail coordinate scale**: retail constructs mesh UV1 as `source × polytrn_detaildensity / 512`; OpenNova had multiplied normalized 1024-atlas UV by density, halving every detail frequency. Runtime mesh UVs, authored detail2, and the underwater stage-3 swap now share the exact source-grid conversion. Deterministic 00TRa A/B probes select 2× with the existing axis at high correlation and reject the UV-swap alternative [`orig: parser @ 0x60f993..0x60f9b3; config load @ 0x60e634..0x60e63b; density/512 write @ 0x6029a0..0x6029aa; UV1 @ 0x602db5..0x602dbe; stage-3 transforms @ 0x609786..0x609810`]. GUT `terrain_shader_contract_test` pins the surviving consumers. |
 
-| D-TERRAIN-12 | A | **FIXED (2026-09-13)** | **Missing empty-sector flat fallback**: zero sector-grid entries now traverse quadrant 1 unless view `+100` skips them. The draw carries the high-bit mode through flat mesh selection and zero primary/blend UVs while preserving independent detail/noise coordinates and raw tracked source heights. Every flat draw shares the canonical LOD-0 page, whose base/DOT3 source is UV zero and whose `.til` overlay loop is suppressed; the origin sector can borrow it with the ordinary geometric projection. `terrain_frame_compiler`, `terrain_tile_composer`, `terrain_tile_composition_cache`, and the Godot terrain shader contract pin the bounded behavior. [orig: PolyTrn_RenderFrame @ 0x60EAC0; terrain_render_visible_sectors @ 0x6090C0; decode_terrain_tile_vertices @ 0x602AA0; PolyTrn_RenderTile @ 0x60DA70]. |
+| D-TERRAIN-12 | A | **FIXED (2026-09-13)** | **Missing empty-sector flat fallback**: zero sector-grid entries now traverse quadrant 1 unless view `+100` skips them (the live draw pass writes 0; the water-mirror prerender and the PCX screenshot scene write `Env_WaterHeightFixed != 0`, so the reimpl's flat draws ride a mirror-excluded visual layer). The draw carries the high-bit mode through flat mesh selection and zero primary/blend UVs while preserving independent detail/noise coordinates and raw tracked source heights. Every flat draw shares the canonical LOD-0 page, whose base/DOT3 source is UV zero and whose `.til` overlay loop is suppressed; the origin sector can borrow it with the ordinary geometric projection. `terrain_frame_compiler`, `terrain_tile_composer`, `terrain_tile_composition_cache`, and the Godot terrain shader contract pin the bounded behavior. [orig: PolyTrn_RenderFrame @ 0x60EAC0; terrain_render_visible_sectors @ 0x6090C0; decode_terrain_tile_vertices @ 0x602AA0; PolyTrn_RenderTile @ 0x60DA70]. |
 
 The completed passes close D-TERRAIN-5/6/8/10/11/12 and bound D-TERRAIN-7.
 The terrain data path remains the byte-identical TrnGen port; the pending grill

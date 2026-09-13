@@ -224,8 +224,22 @@ bool run_self_handle_lifecycle() {
 	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
 	h.role.runtime->receive(datagram.data(), datagram.size());
 	h.role.run_tick(h.input);
-	if (!expect(!h.role.runtime->has_self_handle() && h.role.self_wire_handle() == 0,
-			"role stops using the retired runtime identity")) return false;
+	if (!expect(!h.role.runtime->has_self_handle() && !h.role.has_self_wire_handle() &&
+					h.role.self_wire_handle() == w::EntityHandle::kInvalid,
+			"role stops using the retired runtime identity (kInvalid, never handle 0)")) return false;
+	// Slot 0 is a LIVE pool-0 handle (the listen host's own player). While the
+	// identity is retired, a remote row there must keep flowing to every
+	// consumer that excludes self by handle; a 0 sentinel silently dropped it.
+	// The minefield actor fold is the cheapest such consumer on the frame.
+	auto &host_row = h.role.runtime->state().upsert(0x0000);
+	host_row.cls = EntityClass::Player;
+	host_row.type_id = w::kPlayerInfantryTypeId;
+	h.role.run_tick(h.input);
+	bool host_row_seen = false;
+	for (const auto &actor : h.kernel->world.minefields.remote_actors)
+		if (actor.handle == 0x0000) host_row_seen = true;
+	if (!expect(host_row_seen,
+			"the slot-0 remote row is not mistaken for self while the identity is retired")) return false;
 	// The replay/session seed is also a public identity replacement seam.
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, 7, w::kPlayerInfantryTypeId);
@@ -242,7 +256,7 @@ bool run_reset_for_join() {
 	if (!expect(h.role.started(), "reset: latch armed before")) return false;
 	h.role.reset_for_join();
 	if (!expect(!h.role.started() && !h.role.local_spawned() &&
-					h.role.self_wire_handle() == 0 &&
+					h.role.self_wire_handle() == w::EntityHandle::kInvalid &&
 					h.role.flat_seconds() == 0 &&
 					!h.role.freeze_suspected(),
 			"reset: per-session latches cleared")) return false;

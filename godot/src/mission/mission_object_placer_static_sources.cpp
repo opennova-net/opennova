@@ -602,6 +602,9 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 	} else if (p_data->has_document()) {
 		profile.projection_sphere =
 				opennova::simassets::collision_projection_sphere_from_3di(p_data->native_model());
+		profile.zero_center_projection_sphere =
+				opennova::simassets::collision_projection_sphere_from_3di(
+						p_data->native_model(), 0, 0, true);
 	}
 	_complete_static_lod_profile(profile, retained);
 	object_data_cache_[p_graphic] = p_data;

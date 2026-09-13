@@ -56,13 +56,21 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	const bool side_a_locked = !config.side_a_password.empty();
 	const bool side_b_locked = !config.side_b_password.empty();
 
+	// The add event carries only the first 16 characters of the submitted JSP
+	// (Napi_CopyString(event+80, net_cfg.fid, 17) = 16 chars + NUL), and that
+	// truncated copy is what the ordered side compares see. Admission
+	// (validate_side_password) compares the untruncated field, as retail's
+	// Server_ValidatePlayerJoinRequest does.
+	// [orig: Server_BuildPlayerInfoAndAdd @0x51D686 (17-byte copy) ->
+	// Server_AssignPlayerTeam @0x4FE43F]
+	const std::string submitted_password = joining.join_password.substr(0, 16);
 	// Password matches precede the two/four-team split and team preference.
 	// If both side passwords match, side A wins the ordered comparison.
 	// [orig: Server_AssignPlayerTeam @0x4FE424..0x4FE4AD]
 	if (side_a_locked && opennova::strutil::iequals(
-			config.side_a_password.c_str(), joining.join_password.c_str())) return 1;
+			config.side_a_password.c_str(), submitted_password.c_str())) return 1;
 	if (side_b_locked && opennova::strutil::iequals(
-			config.side_b_password.c_str(), joining.join_password.c_str())) return 2;
+			config.side_b_password.c_str(), submitted_password.c_str())) return 2;
 	// Without a match, two-team mode selects an unlocked side or fails.
 	// [orig: @0x4FE4AE..0x4FE519]
 	if (active_teams == 2) {
@@ -73,10 +81,19 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 
 	// jsp[60] is signed at the original call site: 0/1 request side A/B and
 	// 0xFF means automatic. A locked requested side falls through to balance.
-	// [orig: Server_PlayerAdd @0x51CF24; assignment @0x4FE51A..0x4FE587]
+	// Server_PlayerAdd overwrites the add event's preference byte with -1
+	// BEFORE the assignment runs whenever the game type is exactly 0x10000
+	// (TDM) and either side password is set, so a TDM host with any locked
+	// side never honors TR; only the four-team path can observe the
+	// difference, since the two-team count legs above already decided.
+	// [orig: Server_PlayerAdd @0x51CC76..0x51CC91 (event+97 = -1), passed as
+	// teamPref @0x51CF24; assignment @0x4FE51A..0x4FE587]
+	uint8_t team_request = joining.char_vars.team_request;
+	if (gt == opennova::game_type::kTeamDeathmatch && (side_a_locked || side_b_locked))
+		team_request = 0xFF;
 	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) {
-		if (joining.char_vars.team_request == 0 && !side_a_locked) return 1;
-		if (joining.char_vars.team_request == 1 && !side_b_locked) return 2;
+		if (team_request == 0 && !side_a_locked) return 1;
+		if (team_request == 1 && !side_b_locked) return 2;
 	}
 
 	std::array<uint32_t, 4> counts{};

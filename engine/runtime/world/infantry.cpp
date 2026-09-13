@@ -1061,7 +1061,8 @@ static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
 // animation selection or ladder movement consumes aim.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B4945..0x4B4BC6;
 // scoped additions @0x4B5C78..0x4B5C91]
-static void infantry_local_view_tick(AiEntity &e, const Entity *tick_entity, uint32_t key) {
+// `tick` is the raw current_tick the org2 prologue banks [orig: @0x4B4147].
+static void infantry_local_view_tick(AiEntity &e, const Entity *tick_entity, uint32_t tick) {
     InfantryState &inf = e.inf;
     // org2 on-foot [orig: Entity_UpdateInfantryPlayerBody @0x4b4945-0x4b4ac1].
     // There is NO body chase: the LEGS chase the mouse yaw (+0x10) directly and
@@ -1099,16 +1100,17 @@ static void infantry_local_view_tick(AiEntity &e, const Entity *tick_entity, uin
         inf.leg_target[0] = yaw;
     } else {
         // Idle: per-leg re-plant measured vs the CURRENT LEG YAW (org1 measures
-        // vs the target), left window 32 ticks behind the right.
+        // vs the target), left window 32 ticks behind the right. Both windows
+        // key on the RAW tick banked at @0x4B4147, unstaggered.
         // [orig: L @0x4b4993/@0x4b49ad-0x4b49bc ((tick-32)&0x3F);
-        //  R @0x4b499b/@0x4b49d0-0x4b49e3 (ebp = tick&0x3F @0x4b4680)]
+        //  R @0x4b499b/@0x4b49d0-0x4b49e3 (ebp = tick&0x3F @0x4B467A..0x4B4683)]
         const int32_t dl = io::bam_sub(yaw, inf.leg_yaw[1]);
         if (abs_bam(dl) > kLegReplantMin &&
-            (abs_bam(dl) > kLegReplantSnap || ((key - 32) & 63u) == 0))
+            (abs_bam(dl) > kLegReplantSnap || ((tick - 32) & 63u) == 0))
             inf.leg_target[1] = yaw;
         const int32_t dr = io::bam_sub(yaw, inf.leg_yaw[0]);
         if (abs_bam(dr) > kLegReplantMin &&
-            (abs_bam(dr) > kLegReplantSnap || (key & 63u) == 0))
+            (abs_bam(dr) > kLegReplantSnap || (tick & 63u) == 0))
             inf.leg_target[0] = yaw;
     }
     const bool leg_model_skipped =
@@ -1230,9 +1232,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // This phase has no PRNG draws, so recoil/yaw/pitch sampling stays ordered.
     // [orig: view/legs @0x4B4945..0x4B4BC6 before drift @0x4B5966]
     const bool local_view_prepared = e.inf.is_local_player && !mounted_for_spread;
-    if (local_view_prepared)
-        infantry_local_view_tick(e, tick_entity,
-                logic_tick + 36u * static_cast<uint32_t>(e.net_id));
+    // The org2 body reads the RAW current_tick for its leg re-plant windows:
+    // the prologue stores it into the frame slot and the leg phase masks that
+    // slot, with no per-entity stagger term (that term is org1's alone).
+    // [orig: Entity_UpdateInfantryPlayerBody store @0x4B4147; read
+    //  @0x4B467A..0x4B4683 (ebp = tick & 0x3F)]
+    if (local_view_prepared) infantry_local_view_tick(e, tick_entity, logic_tick);
     // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, local-only gate @0x4B5966]
     if (world.local_player_state != nullptr)
         world.local_player_state->apply_scoped_aim_drift(e, logic_tick);
@@ -1776,7 +1781,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // A stale mount can fall back to the ordinary mover during this tick.
         // Valid mounted bodies returned above; ordinary local bodies already
         // ran the view phase ahead of their scoped drift.
-        if (!local_view_prepared) infantry_local_view_tick(e, tick_entity, key);
+        // Raw tick, not the org1 stagger key [orig: @0x4B4147 / @0x4B467A].
+        if (!local_view_prepared) infantry_local_view_tick(e, tick_entity, logic_tick);
     } else {
         // org1 [orig: Entity_UpdateInfantryAI @0x4be8fd-0x4beb18]. Body: quarter-step
         // toward the target, clamped ±69273360; live look moves by the SAME step,

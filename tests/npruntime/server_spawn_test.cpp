@@ -385,6 +385,58 @@ int main() {
 		if (!expect(reserve_sequence(four, {0xFF}) ==
 					std::vector<uint8_t>({3}),
 				"four-team password flags feed retail's mixed-index availability lookup")) return 1;
+
+		// A TDM (exactly 0x10000) host with ANY side password forces the add
+		// event's preference to automatic before the assignment runs, so a
+		// TR for the open side still balances. With two team-2 players
+		// present the sort walks [0,2,3,1] over the locked-A availability
+		// row and lands on team 3, not the requested side B.
+		// [orig: Server_PlayerAdd @0x51CC76..0x51CC91 -> @0x51CF24]
+		{
+			inmatch::GameConfig tdm_locked;
+			tdm_locked.game_type = opennova::game_type::kTeamDeathmatch;
+			tdm_locked.num_teams = 4;
+			tdm_locked.mp_attributes = inmatch::GameConfig::kMpAttribTeamChoose;
+			tdm_locked.side_a_password = "side-a";
+			std::vector<inmatch::NapiNPConnection> roster(3);
+			for (std::size_t i = 0; i < 2; ++i) {
+				roster[i].assigned_team_valid = true;
+				roster[i].assigned_team = 2;
+			}
+			roster.back().char_vars.team_request = 1; // side B, which is open
+			if (!expect(inmatch::Server_ReservePlayerTeam(
+						tdm_locked, true, roster, roster.back(), *team_world) == 3,
+					"TDM with a locked side forces TR to automatic (balance picks team 3)")) return 1;
+			// The force is keyed on the exact 0x10000 game type: TKOTH keeps
+			// honoring the open-side request under the same passwords.
+			inmatch::GameConfig tkoth_locked = tdm_locked;
+			tkoth_locked.game_type = opennova::game_type::kTeamKingOfTheHill;
+			roster.back().assigned_team_valid = false;
+			if (!expect(inmatch::Server_ReservePlayerTeam(
+						tkoth_locked, true, roster, roster.back(), *team_world) == 2,
+					"non-TDM four-team hosts still honor the open-side TR")) return 1;
+		}
+
+		// The side compares see the add event's 16-character copy of the JSP
+		// (Napi_CopyString(.., 17)); a longer credential sharing the 16-char
+		// prefix of a 16-char side password selects that side.
+		// [orig: Server_BuildPlayerInfoAndAdd @0x51D686 -> Server_AssignPlayerTeam @0x4FE43F]
+		{
+			inmatch::GameConfig prefix;
+			prefix.game_type = opennova::game_type::kAttackDefend;
+			prefix.side_a_password = "abcdefghijklmnop"; // 16 chars, the field's full width
+			std::vector<inmatch::NapiNPConnection> roster(1);
+			roster.back().char_vars.team_request = 0xFF;
+			roster.back().join_password = "abcdefghijklmnopQRS";
+			if (!expect(inmatch::Server_ReservePlayerTeam(
+						prefix, true, roster, roster.back(), *team_world) == 1,
+					"a JSP matching the 16-char truncation selects the locked side")) return 1;
+			roster.back().assigned_team_valid = false;
+			roster.back().join_password = "abcdefghijklmnoZ"; // differs inside the window
+			if (!expect(inmatch::Server_ReservePlayerTeam(
+						prefix, true, roster, roster.back(), *team_world) == 2,
+					"a JSP differing inside the 16-char window falls to the open side")) return 1;
+		}
 	}
 
 	// --- D-NET-146: the character stamp — per-side CU vars picked by ASSIGNED team. ---

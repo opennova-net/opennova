@@ -32,13 +32,18 @@ static double parse_double_n(const char *s, size_t len) {
 
 // Keep the decimal-digit angle parser ahead of BAM promotion; a float degree
 // intermediate loses authored Q16 bits around the 180/360-degree seams.
-// [orig: WeaponDef_ParseProperty @0x544662 / @0x5447A9]
+// A line with fewer than six values is refused whole: the original's token
+// count gate (key + 6 values) warns "too few params" and returns before the
+// first store, so the row keeps whatever it held.
+// [orig: WeaponDefs_ParseLineCallback @0x543680: the pos gate @0x5445EE..0x544613
+//  and tpos gate @0x544735..0x54475A -> WeaponDefs_ParseWarning; the
+//  Math_ParseFixedPoint16 calls @0x544662 / @0x5447A9]
 static void parse_view_pose(const char *s, size_t len, float position[3], int32_t rotation[3]) {
     Token values[6];
-    const int count = split_values(s, len, values, 6);
-    for (int i = 0; i < 3 && i < count; ++i)
+    if (split_values(s, len, values, 6) < 6) return;
+    for (int i = 0; i < 3; ++i)
         position[i] = parse_float_n(values[i].s, values[i].len);
-    for (int i = 0; i < 3 && i + 3 < count; ++i)
+    for (int i = 0; i < 3; ++i)
         rotation[i] = parse_fixed16_digits_n(values[i + 3].s, values[i + 3].len);
 }
 
