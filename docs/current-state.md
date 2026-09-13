@@ -132,6 +132,9 @@ maintained by `scripts/lint/ledger_check.py --check`. The
 [dated audit inventory](jo-c-parity-audit-2026-09-13.json) assigns every active ID
 to an implementation phase; use the ledger for subsequent status changes.
 
+The mission startup reset now follows the complete PreMission pass (D-EVT-8);
+[bms-event-runtime-re](mission/bms-event-runtime-re.md) records the ordering and regression.
+
 Each domain's next step is named in its own record, not centrally:
 
 | Domain | Open rows live in | The record that names the next step |

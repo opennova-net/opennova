@@ -218,10 +218,12 @@ public:
 	void tick_weather();
 	// The render owner (the shell's Weather node); null on a headless host.
 	world::IWeatherRenderTick *weather_render = nullptr;
-	// The mission-start boundary after the eager WAC execution [orig:
-	// Environment_MissionStartInit @ 0x57f1e0 then the 255 complete weather
-	// ticks @ 0x57f878..0x57f880]: the currents snap to the just-authored
-	// targets, the recovered clamps install, and 255 full ticks settle.
+	// The post-PreMission boundary clears V0..V255, then runs the eager WAC
+	// execution [orig: WacScript_InitAndLoad @0x4F95EE/@0x4F976B], followed by
+	// the environment initialization and 255 complete weather ticks
+	// [orig: Environment_MissionStartInit @0x57F1E0; @0x57F878..0x57F880]:
+	// the currents snap to the just-authored targets, the recovered clamps
+	// install, and 255 full ticks settle.
 	// Then count units, initialize authoritative vehicles and seal the restore
 	// point. Returns false if this load already completed the boundary.
 	bool complete_mission_start();

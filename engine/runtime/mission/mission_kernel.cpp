@@ -613,12 +613,10 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
         effects->open(effects_config);
         world.item_emitters.bind_scene(std::move(effects), true);
 	}
-	// Mission WAC scripts [orig: WacScript_InitAndLoad]; absent files skip.
-	// The load clears V0..V255 only: the declared half of the mission bank
-	// (carried into a rebuilt kernel by the embedder, ScriptVarStore::
-	// carry_declared_from) and the globals are not touched here.
-	// [orig: WacScript_InitAndLoad memset(dword_C6B240, 0, 0x400) @0x4f95ee]
-	world.script.vars.clear_numbered_mission_vars();
+	// Compile the mission WAC scripts; absent files skip compilation. The
+	// numbered-variable reset belongs after PreMission, immediately before
+	// initial execution in complete_mission_start.
+	// [orig: WacScript_InitAndLoad @0x4F91F0, reset @0x4F95EE]
 	std::string wac_blocked_error; // strict mode's fatal diagnostic, if any
 	if (has_files && options.wac) {
 		step("wac");
@@ -739,6 +737,13 @@ void MissionKernel::tick_weather() {
 
 bool MissionKernel::complete_mission_start() {
 	if (!mission_start_pending) return false;
+	// PreMission actions share their numbered variables for the whole pass,
+	// then WAC initialization clears V0..V255 before its first execution.
+	// This reset also runs without script files; declared V256+ and globals
+	// retain their values. Keep it behind the once-per-load boundary guard.
+	// [orig: Game_StartMission PreMission @0x525B86 -> WacScript_InitAndLoad
+	// @0x525CB3; numbered reset @0x4F95EE, initial VM @0x4F976B]
+	world.script.vars.clear_numbered_mission_vars();
 	// The environment has been seeded before this boundary. Initial WAC can
 	// change its targets and entity poses before the 255-tick settle and the
 	// first vehicle callback captures the respawn pose.

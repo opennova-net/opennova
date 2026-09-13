@@ -144,6 +144,74 @@ static void tick_no_net(opennova::mission::MissionKernel &kernel) {
 	role.run_tick(opennova::inmatch::TickInput{});
 }
 
+// PreMission has one shared variable bank, but its numbered writes are not
+// initial WAC input. The same startup reset applies to BMS-only missions.
+static void test_numbered_vars_reset_after_premission_before_initial_wac() {
+	for (int source_kind = 0; source_kind < 3; ++source_kind) {
+		const bool has_wac = source_kind == 2;
+		std::map<std::string, std::string> files;
+		if (has_wac) files["synth.wac"] = "var carried\nv2 = v1\ninc(v1)\ninc(carried)\n";
+		bms::File mission{};
+		bms::Event first{};
+		first.flags = bms::EventFlags::PreMission;
+		first.action_count = 2;
+		bms::Event second = first;
+		second.trigger_count = 1;
+		second.action_index = 2;
+		second.action_count = 3;
+		mission.events = {first, second};
+		bms::Trigger sees_first{};
+		sees_first.main_type = bms::TriggerMainType::MissionVariable;
+		sees_first.sub_type = static_cast<int32_t>(
+				bms::MissionVariableTriggerType::MissionVariableIsEqual);
+		sees_first.param1 = 1;
+		sees_first.param2 = 40;
+		mission.triggers = {sees_first};
+		const auto set_variable = [](int index, int value) {
+			bms::Action action{};
+			action.action_type = bms::ActionType::MisvarChange;
+			action.action_sub_type = static_cast<int32_t>(bms::MissionVariableActionSubType::Set);
+			action.param1 = index;
+			action.param2 = value;
+			return action;
+		};
+		bms::Action output{};
+		output.action_type = bms::ActionType::OutputText;
+		output.param1 = 12;
+		mission.actions = {set_variable(0, 17), set_variable(1, 40),
+				set_variable(1, 41), set_variable(255, 51), output};
+		ms::MissionKernel kernel;
+		kernel.world.script.vars.set_mission(256, 7);
+		kernel.open_document(std::move(mission), "synth",
+				source_kind == 0 ? ms::BootFileSource{} : source_over(&files));
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.defer_mission_start = true;
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(kernel.world.out.effects.count("text") == 1);
+		CHECK(kernel.world.script.vars.get_mission(0) == 17);
+		CHECK(kernel.world.script.vars.get_mission(1) == 41);
+		CHECK(kernel.world.script.vars.get_mission(255) == 51);
+		CHECK(kernel.world.script.vars.get_mission(256) == 7);
+		CHECK(kernel.wac.runs() == 0);
+		CHECK(!kernel.have_baseline);
+		CHECK(kernel.complete_mission_start());
+		CHECK(kernel.world.script.vars.get_mission(0) == 0);
+		CHECK(kernel.world.script.vars.get_mission(1) == (has_wac ? 1 : 0));
+		CHECK(kernel.world.script.vars.get_mission(2) == 0);
+		CHECK(kernel.world.script.vars.get_mission(255) == 0);
+		CHECK(kernel.world.script.vars.get_mission(256) == (has_wac ? 8 : 7));
+		CHECK(kernel.have_baseline);
+		kernel.world.script.vars.set_mission(1, 99);
+		CHECK(!kernel.complete_mission_start());
+		CHECK(kernel.world.script.vars.get_mission(1) == 99);
+		CHECK(kernel.restore_baseline());
+		CHECK(kernel.world.script.vars.get_mission(1) == (has_wac ? 1 : 0));
+		CHECK(kernel.world.script.vars.get_mission(256) == (has_wac ? 8 : 7));
+	}
+}
+
 static void test_initial_wac_waits_for_the_weather_owner_once() {
     std::map<std::string, std::string> files;
     files["synth.wac"] = "if never then inc(v1) fov(40) endif\n";
@@ -244,6 +312,7 @@ static void test_sound_profiles_parse_once_and_keep_a_pre_boot_override() {
 int main() {
 	test_sound_profiles_parse_once_and_keep_a_pre_boot_override();
 	test_vehicle_spawn_pose_is_captured_after_initial_wac();
+	test_numbered_vars_reset_after_premission_before_initial_wac();
 	test_initial_wac_waits_for_the_weather_owner_once();
 	// The synthetic mission: two placed entities plus one (empty) BMS event,
 	// and a mission-named WAC layer in the in-memory source.

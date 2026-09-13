@@ -767,9 +767,10 @@ absence of a joiner PreMission effect; lifecycle and host-role regressions pass.
 An item table supplied to the in-memory Godot load is installed before promotion,
 so that path uses the same item admission gates and definition callbacks.
 
-After the environment seed, `MissionKernel::complete_mission_start` owns initial
-authority WAC execution, the 255 weather ticks, unit recount, spawn marker
-construction, authority vehicle initialization and the final restore snapshot.
+After the environment seed, `MissionKernel::complete_mission_start` first clears
+V0..V255, then owns initial authority WAC execution, the 255 weather ticks, unit
+recount, spawn marker construction, authority vehicle initialization and the final
+restore snapshot.
 The Godot weather owner defers that boundary until its environment is ready;
 the dedicated host and native boots complete it directly. A boundary runs once
 per successful load. Vehicle support-relative spawn poses therefore include
@@ -778,6 +779,20 @@ taken before WAC or vehicle initialization. `mission_kernel` exercises an
 initial WAC teleport, its saved vehicle spawn pose, restoration and repeated
 completion calls. [orig: Game_StartMission @ 0x525CB8..0x526095;
 Environment_MissionStartInit @ 0x57F1E0]
+
+**D-EVT-8 FIXED (2026-09-13): numbered-variable startup reset ordering.**
+The numbered-variable reset follows the complete PreMission pass, including for
+missions without WAC files. `Game_StartMission` runs PreMission at `0x525B86`
+before `WacScript_InitAndLoad` at `0x525CB3`; that initializer compiles its layers,
+clears exactly 0x400 bytes at `0x4F95EE`, then executes the initial VM at `0x4F976B`.
+PreMission actions can therefore communicate through numbered variables during
+the pass, but those writes are absent from the initial WAC input and the saved
+play-start baseline. Declared V256+ slots and globals survive this reset. The
+2026-09-13 follow-up moves the earlier pre-PreMission reset into the guarded
+completion boundary; deferred completion and repeated completion calls preserve
+the same once-per-load behavior. `mission_kernel` covers ordered PreMission
+writes, rootless and missing-WAC boots, the V0/V255 boundaries, declared-slot carry,
+initial WAC reads, and baseline restoration.
 
 The IDB name `EventTrigger_ResetAllSlots @ 0x4513B0` is misleading: that late
 startup call clears eight helicopter lift slots and their count. It does not
