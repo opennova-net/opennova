@@ -518,6 +518,38 @@ Error Simulation::save_weapon_profile_selection(const String &p_path,
 	}
 	if (!updated) return ERR_INVALID_PARAMETER;
 
+	// The ACCEPT snapshot also carries the edited side's kit page exactly as the
+	// PLAYER screen serializes it (knife, class-5 medpack, PRIMARY/SECONDARY/
+	// ACCESSORY, three grenade slots; every entry name + three decimal values,
+	// "-1" filler). Retail writes that string block into the profile record's
+	// class page before PlayerProfile_SaveToFiles; the kit belongs to the side
+	// being edited ("team") and the shared PLAYERCLASS page. An absent "kit" key
+	// (no weapon.def loaded) leaves the saved pages untouched.
+	// See docs/playerinfo/avatars-re.md "Kit page serialization".
+	if (p_profile.has("kit")) {
+		const int team = p_profile.get("team", -1);
+		const Array kit = p_profile.get("kit", Array());
+		if (team < 0 || team > 1) return ERR_INVALID_PARAMETER;
+		opennova::playersav::KitPage page;
+		for (int i = 0; i < kit.size(); ++i) {
+			if (kit[i].get_type() != Variant::DICTIONARY) return ERR_INVALID_PARAMETER;
+			const Dictionary entry = kit[i];
+			const String name = entry.get("name", String());
+			if (name.is_empty()) return ERR_INVALID_PARAMETER;
+			opennova::playersav::KitEntry out;
+			out.name = std::string(name.utf8().get_data());
+			out.ammo_primary = int32_t(int(entry.get("ammo_primary", -1)));
+			out.ammo_secondary = int32_t(int(entry.get("ammo_secondary", -1)));
+			out.flags = int32_t(int(entry.get("flags", -1)));
+			page.entries.push_back(std::move(out));
+		}
+		opennova::playersav::Side &side = profile.slots[0].side(
+				team == 0 ? opennova::playersav::SideId::Blue
+				          : opennova::playersav::SideId::Red);
+		side.pages[static_cast<size_t>(player_class) -
+				opennova::playersav::kMinPlayerClass] = std::move(page);
+	}
+
 	// `write()` recreates every modeled record, while the temp + same-volume
 	// replace keeps the previous file intact until the new one is complete.
 	return write_weapon_profile_atomic(p_path, profile);

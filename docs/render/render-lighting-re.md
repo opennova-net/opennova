@@ -875,6 +875,26 @@ projected UV matrices land the silhouette.
 The slot LOD refreshes grazing-scaled: `(0.5 + |0.5/dirY|)·baseLod`
 clamped [6, 20] (`@ 0x5d6d5c..0x5d6dac`).
 
+*The light update's CALL SITE* (witnessed 2026-09-16) — retail runs
+`RenderSlot_UpdateEntityLight` from the 62.5 Hz entity walk, not from a render
+leg: `Entity_UpdateAllEntities @ 0x4c25e0..0x4c2602`, immediately after the
+eligible pool-0 update callback, does
+`if (enabled > 0 && (uint16_t)entity[+0x1B6] != 0)
+ RenderSlot_UpdateEntityLight(entity[+0x1B6], entity)` — `enabled @ 0x24D2054`
+is the shadow-quality cfg word and `entity+0x1B6` the entity's slot handle (the
+adjacent `entity+0x1B8` feeds the scar-decal position restamp `sub_57FFD0
+@ 0x4c2617` in the same tail). **Divergence, accepted:** OpenNova drives the
+same pick from the Godot shadow device leg once per DISPLAY frame
+(`godot/src/env/slot_shadow.cpp`, the per-assignment `pick_dominant_light`
+block), not once per entity update. The pick is a pure function of the entity
+centre, its bound radius, the clamped sun default and the nearby-zone light
+pool, so the only observable difference is the sampling cadence: above 62.5 fps
+the direction is re-picked more often than retail would, below it less, and a
+light that appears and disappears inside one display frame can be missed. The
+`[orig:` citation lives here rather than at the port site because `godot/src`
+carries no witness tags (ADR 0042 d7 / ADR 0043); `slot_shadow.cpp:834-838`
+names the same call site in prose.
+
 *Silhouette render* — `RenderSlot_RenderEntityAndChildren @ 0x5d7690`
 renders the entity plus its standing/mounted children into the slot RT
 (ortho extent = radius·1.25 clamped radius + 0.75,
@@ -1222,6 +1242,8 @@ limit; see the row below and the "Entity query cube correction" section above.
 | 0x2be3d30 | unk_2BE3D30 | RenderSlot_Table | 128-B shadow-slot records |
 | 0x5d5690 | shadow_decal_alloc_slot | RenderSlot_AllocSlot | find-or-alloc + the LOD-at-alloc laws (2026-08-20) |
 | 0x5d6530 | terrain_sort_and_assign_render_slots | RenderSlot_SortAndAssign | scoring, exclusions, 24-patch/12-RT binding (2026-08-20) |
+| 0x4c25e0 | Entity_UpdateAllEntities | (unchanged) | the per-entity call site of RenderSlot_UpdateEntityLight: `enabled @0x24D2054 > 0` + the slot handle at `entity+0x1B6` (2026-09-16); OpenNova runs the same pick per display frame instead — see the render-slot section |
+| 0x24d2054 | enabled | RenderSlot_ShadowQualityCfg | the cfg word gating the per-entity light update and the slot family (2026-09-16) |
 | 0x5d5320 | init_render_target_chain | RenderSlot_InitTextureChain | the 12-RT halving size chain (2026-08-20) |
 | 0x5d5130 | terrain_tile_rebuild_vertex_buffer | RenderSlot_RebuildPatchVertexBuffer | the 441-vertex terrain drape patch build (2026-08-20) |
 | 0x5d6e20 | sub_5D6E20 | RenderSlot_DrawAllDrapes | the per-slot drape walk + local-FP/prone gates (2026-08-20) |

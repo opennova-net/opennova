@@ -63,6 +63,17 @@ public:
 	// witnesses): the world block / fog / clear latch, and the terrain-ramp gate.
 	bool get_thermal_view() const { return value_.thermal_view; }
 	bool get_thermal_terrain_view() const { return value_.thermal_terrain_view; }
+	// The three fullscreen damage-feedback quads and the HUD suppression they
+	// carry (retail: the white hit flash, the red damage vignette and the medic
+	// revive tint drawn at the end of the scene frame; while the white word
+	// burns the whole HUD overlay pass early-returns). The engine reduces the
+	// raw words to these draw values; the presenter only fills rects. Witnesses
+	// live on the engine struct (<runtime/world/player_view.h>).
+	int get_screen_flash_white_alpha() const { return value_.screen_flash_white_alpha; }
+	int get_screen_flash_red_alpha() const { return value_.screen_flash_red_alpha; }
+	int get_screen_flash_revive() const { return value_.screen_flash_revive; }
+	int get_screen_flash_revive_channel() const { return value_.screen_flash_revive_channel; }
+	bool get_hud_overlays_suppressed() const { return value_.hud_overlays_suppressed; }
 	// The main camera's HORIZONTAL fov with the policy applied.
 	float get_fov_h_deg() const { return value_.fov_h_deg; }
 	// The chased eye anchor (Godot space).

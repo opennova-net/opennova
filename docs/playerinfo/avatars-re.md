@@ -392,10 +392,15 @@ g_curProfileSlot]` (`profile @ 0x252de58`, 15488 B/entry; the array ends at
   - `[orig: PlayerInfo_HandleProfileSelect @ 0x560960]` — on PLAYER combo change:
     `save_player_info_from_dialog` (commit current), switch `g_curPlayerProfile`/
     `g_curProfileSlot`, re-populate.
-  - `[orig: PlayerInfo_HandleVoiceSelect @ 0x55fe00]` — store voice into
-    `g_charSelCombo[…]`, rebuild PLAYERVOICE (DEFAULT_VOICE + per-character
-    `CHARVOICE_%d` from the voice-def table `@ 0x83C7AC`, stride 12, ending at
-    `ammoDef @ 0x83c830`).
+  - `[orig: PlayerInfo_HandleVoiceSelect @ 0x55fe00]` — **the COMBO_LIST
+    handler despite the name** (registered against `"COMBO_LIST"` `@0x5615a6`):
+    store the selected avatar into `g_charSelCombo[…]`, then rebuild PLAYERVOICE
+    inline and again through `populate_player_voice_combo`. See "PLAYERVOICE
+    list" below.
+  - `[orig: sub_560030 @ 0x560030]` — the real PLAYERVOICE handler
+    (`@0x5615c7`): on `0x5000001` it stores the notification's value BYTE
+    (`eventData+16`) into `g_curPlayerProfile[teamIndex + 1532]` and does
+    nothing else — no repopulate, no other side effect.
   - Team radios `SIDE_BLUE`/`SIDE_RED` re-run the populate for the new team via
     `[orig: PlayerInfo_SaveAndRepopulate @ 0x5608f0]` (save → populate(team) →
     weight); team `0 = blue/good`, `1 = red/evil` (consistent with D-PLAYERINFO-5).
@@ -406,6 +411,55 @@ g_curProfileSlot]` (`profile @ 0x252de58`, 15488 B/entry; the array ends at
 power-of-two mask `g_playerInfoClassMask @ 0x25DC550` (5→1, 6→2, 7→4, 8→8, 9→16)
 plus `g_playerInfoTeamMask @ 0x25DC54C = 2 - (team != 0)`. Both gate the loadout.
 
+### PLAYERVOICE list (D-PLAYERINFO-10 — witnessed + PORTED 2026-09-16)
+`[orig: populate_player_voice_combo @ 0x55dce0]` `(teamIndex)` builds the list:
+
+1. `list_widget_remove_row(list, -1)` clears it.
+2. `v11 = [orig: sub_57AE90 @ 0x57ae90](g_charSelCombo[33798*slot + 16387*team])`
+   — the packed combo id is looked up in the avatar registry by
+   `[orig: MinimapSlot_FindByPackedId @ 0x57a270]` (72-dword records; fields
+   `+0` nationality `id & 0x1F`, `+4` division `(id >> 5) & 0xF`, `+8` combo
+   `(id >> 9) & 0x3F`, `+276` occupied flag) and the value read back is
+   **`combo+280`**, which the parser stores from the HEAD part's `sex` field
+   (`[orig: CAvatarDefs_ParseConfigLine @ 0x57acc0]`, the store `@0x57aad2`
+   from `AvatarPartDefinition+0x48`). A lookup miss returns 0 `@0x57aeb5`.
+   So the list's filter key is the avatar's SEX, not its voice.
+3. `DEFAULT_VOICE` is added with value **0** `@0x55dd76`.
+4. The voice-definition table is walked from `0x83C7AC` in 12-byte strides while
+   `ptr < ammoDef @ 0x83C830` — **11 rows based at `0x83C7A8`**, each
+   `{enabled, CHARVOICE id, sex}`. A row is added as `"CHARVOICE_%d"` with
+   value `*ptr` when `*(ptr - 1) != 0 && v11 == ptr[1]` `@0x55dd9d`:
+
+   | Row base | enabled | id | sex |
+   | --- | --- | --- | --- |
+   | `0x83C7A8` | 1 | 1 | 0 |
+   | `0x83C7B4` | 1 | 2 | 0 |
+   | `0x83C7C0` | 1 | 3 | 0 |
+   | `0x83C7CC` | 1 | 4 | 0 |
+   | `0x83C7D8` | 1 | 5 | 0 |
+   | `0x83C7E4` | 1 | 6 | 0 |
+   | `0x83C7F0` | 1 | 7 | 1 |
+   | `0x83C7FC` | 1 | 8 | 1 |
+   | `0x83C808` | **0** | 9 | 0 |
+   | `0x83C814` | 1 | 10 | 0 |
+   | `0x83C820` | 1 | 11 | 1 |
+
+   A male head therefore offers `DEFAULT_VOICE` + ids 1..6 and 10 (id 9 is the
+   table's one disabled row); a female head offers `DEFAULT_VOICE` + 7, 8, 11.
+5. `found` is set when a listed id equals the persisted override
+   `g_curPlayerProfile[team + 1532]` `@0x55ddf4`; after the walk
+   `if (!found) g_curPlayerProfile[team + 1532] = 0` `@0x55de21`.
+6. `[orig: UIList_SelectByValue @ 0x645240](list, g_curPlayerProfile[team + 1532], 1)`
+   selects by VALUE, not position `@0x55de3c`.
+
+PORTED 2026-09-16 — `PlayerInfoMenuCompanion._populate_voices` carries the
+table, the sex filter, the not-found reset and the select-by-value; the picked
+row's value is the per-side override (`selected_voice()`), stored on the
+selection edge the way `sub_560030` does and persisted as the profile's
+`voice`. Residual: retail keeps the override as a PAIR of profile bytes
+(`profile+1532` blue, `+1533` red) while our saved profile carries a single
+value seeded into both sides — the per-side persistence rides D-PLAYERINFO-9.
+
 ### Voice preview — TESTPLAYERVOICE (D-PLAYERINFO-10)
 `[orig: PlayerInfo_PreviewVoice @ 0x55ff70]` — on the click notification
 `0x3000001`, the voice index is the profile override `*(g_curPlayerProfile + team +
@@ -415,10 +469,15 @@ plus `g_playerInfoTeamMask @ 0x25DC54C = 2 - (team != 0)`. Both gate the loadout
 params, &g_MenuSoundBank)` (params `[0]=0x10000, [2]=255`). The `menu.lwf` bank is
 loaded by the screen init.
 
-The reimpl port binds `TESTPLAYERVOICE` by control name and routes the selected
-avatar fallback through `MenuDriver.play_widget_sound("VOICE_%d", "menu.lwf")`.
-The persisted `profile+1532+team` override is intentionally still owned by the
-profile-persistence work in D-PLAYERINFO-9.
+The avatar-derived fallback reads a DIFFERENT field than the list filter:
+`Avatars_ResolveSelectionIndex` returns the BYTE at `combo+284`, stored from the
+head part's `voice` field (`AvatarPartDefinition+0x47`, the store `@0x57aae3`),
+whereas `populate_player_voice_combo` reads the `sex` dword at `combo+280`.
+
+PORTED 2026-09-16 — the reimpl binds `TESTPLAYERVOICE` by control name and now
+reproduces the full rule: the per-side override when non-zero, else the selected
+combo head's own `voice`, requested as `VOICE_%d` through
+`MenuDriver.play_widget_sound(..., "menu.lwf")`.
 
 ### ACCEPT / commit + persistence (D-PLAYERINFO-9)
 `[orig: save_player_info_from_dialog @ 0x55ee10]` reads each control back (combo
@@ -441,6 +500,48 @@ The class loop advances by `0x8006` and updates both sides
 divergence: retail writes only the SELECTED side's avatar bytes, while the
 port rewrites both sides from memory — normalizing a stale other side to
 the retail default.
+
+### Kit page serialization (D-PLAYERINFO-9 — witnessed + PORTED 2026-09-16)
+`[orig: serialize_weapon_loadout @ 0x55e4b0]` writes the side's kit page as
+consecutive NUL-terminated ASCII strings, **four per entry**
+(name, primary ammo count, secondary ammo count, ammo-type/flags). The filler
+for any value it has no number for is the literal `"-1"` (`@ 0x7C3328`), which
+the four-at-a-time reader decodes the same as a missing value
+(`playersav::KitEntry` defaults). The order is fixed:
+
+1. **Knife, always first** `@0x55e4dc`: `"WPN_KNIFE"` (`@ 0x7C3584`) when
+   `(g_playerInfoTeamMask & 2) != 0 || g_playerInfoTeamMask == 0`, else
+   `"WPN_KNIFE2"` (`@0x55e4ec`). With the mask rule
+   `g_playerInfoTeamMask = 2 - (team != 0)` that is blue → `WPN_KNIFE`,
+   red → `WPN_KNIFE2`; the mask-zero leg is defensive. The other three values
+   are the filler.
+2. **Medpack**, only when the profile slot's class byte for the selected side
+   (`g_charSelClass[67596*slot + 32774*team]`) is `5` `@0x55e624`:
+   `"WPN_MEDPACK"` (`@ 0x7D5CA8`) plus three fillers.
+3. **PRIMARY, SECONDARY, ACCESSORY** in that order `@0x55e6bb`
+   (`category_names[]` built `@0x55e4bc`). Each entry is
+   `UIList_GetSelectedValue(list)` → `g_weaponDefTable[192 * id]` (the weapon
+   name), `"%d"` of `g_playerInfoAmmoPriCounts[2*id]`, `"%d"` of
+   `g_playerInfoAmmoSecCounts[2*id]` (the interleaved pair), then the fourth
+   value: PRIMARY → `g_playerInfoAmmoTypePri[teamIndex]` `@0x55e7a9`,
+   SECONDARY → `g_playerInfoAmmoTypeSec[teamIndex]` `@0x55e79b`,
+   ACCESSORY → `-1` `@0x55e790`. **A NONE slot is not skipped**: the `"NONE"`
+   row is inserted with value `0` (`@0x56058f`), so it serializes weapon-table
+   entry 0's name with entry 0's count pair.
+4. **Exactly three grenade entries** from `g_playerInfoGrenadeSlots @ 0x25DC554`
+   `@0x55e7e0`, the loop bounded by `g_playerInfoAmmoPriCounts @ 0x25DC560`
+   (three dwords further on). Each is the slot's weapon name, its count pair,
+   and a filler. The three-slot array is ZEROED before each ammo refill
+   (`@0x55e8d0-0x55e8da` in `[orig: populate_weapon_accessory_ammo_ui
+   @ 0x55e8b0]`, which also resets every count pair to `-1`), so a slot the
+   class/team filter left empty serializes weapon-table entry 0 as well.
+
+PORTED 2026-09-16 — `PlayerInfoMenuCompanion.kit_entries()` emits the page in
+this exact order (knife, optional medpack, the three categories, three grenade
+slots) as `playersav::KitEntry`-shaped rows on the ACCEPT snapshot's `kit` key.
+Residual: `Simulation::save_weapon_profile_selection` still writes only the
+side header (class + avatar bytes) and leaves the existing kit pages alone, so
+the serialized page is not yet handed to `playersav::encode_kit_page`.
 
 ### Loadout population (D-PLAYERINFO-11)
 `[orig: populate_weapon_slot_lists @ 0x560430]` fills PRIMARY/SECONDARY/ACCESSORY
@@ -606,8 +707,8 @@ stable.
 | D-PLAYERINFO-6 | `nationality`/`division` id token: `if (*idStr > '9') ++idStr;` then `atol` | a single leading non-digit character is skipped before parsing the numeric id. The reimpl parser must mirror this lenient id read. |
 | D-PLAYERINFO-7 | screen = init (`PlayerInfo_InitProfileSelector @ 0x5611b0`) → `PlayerInfo_PopulateAllControls(team)` + 28 per-control handlers registered via `CUIScene_RegisterControlCallback @ 0x63c060`; the nat→div→combo cascade (`@ 0x560600`/`@ 0x560690`, notify `0x5000001`) repopulates dependents and **resets the division on a nationality change** | the reimpl port reproduces the populate order and the cascade: selecting a nationality resets the division selection and refills division+combo; selecting a division refills combo. |
 | D-PLAYERINFO-8 | PLAYERCLASS byte 5..9 → power-of-two class mask `g_playerInfoClassMask` (1/2/4/8/16); team → `g_playerInfoTeamMask = 2-(team!=0)` (`PlayerInfo_SetTeamAndClassMask @ 0x55de60`) | **implemented**: `player_info_menu_companion._selected_class_mask` (5..9→1/2/4/8/16) + team mask `2-(team!=0)` gate the weapon slot lists; repopulate on class/team change. |
-| D-PLAYERINFO-9 | ACCEPT/commit (`save_player_info_from_dialog @ 0x55EE10`) writes class (both teams), nat/div/combo, autoreload→`profile+1524`, automedic→`profile+1660` (**inverted**), name→`profile+4` (whitespace-rejected), then `serialize_weapon_loadout` | **avatar/class slice FIXED 2026-08-15:** both per-side selections restore from and atomically save to active `weapon.sav` slot 0; class is written to both side blocks (`@0x55EE3F..0x55EE6D`) while avatar bytes remain per-side (`@0x55EE93..0x55EF38`), and other slots/pages are preserved. Recorded, bounded divergence: retail writes only the selected side's avatar bytes; the port rewrites both sides from memory, normalizing a stale other side to the retail default. Remaining: serialize newly edited kit tuples and the `player.sav`-level option fields. |
-| D-PLAYERINFO-10 | TESTPLAYERVOICE previews `"VOICE_%d"` from `g_MenuSoundBank` (`menu.lwf`); voice index = profile override `profile+1532+team` else the avatar combo's voice; PLAYERVOICE list = DEFAULT_VOICE + per-character `CHARVOICE_%d` | **implemented**: the named button requests the selected avatar fallback as `VOICE_%d` through `menu.lwf`, and the avatar-derived list remains populated by `PlayerInfoMenuCompanion`; `test_voice_preview_requests_selected_avatar_voice` pins the public request. Persisted profile overrides ride D-PLAYERINFO-9. |
+| D-PLAYERINFO-9 | ACCEPT/commit (`save_player_info_from_dialog @ 0x55EE10`) writes class (both teams), nat/div/combo, autoreload→`profile+1524`, automedic→`profile+1660` (**inverted**), name→`profile+4` (whitespace-rejected), then `serialize_weapon_loadout` | **avatar/class slice FIXED 2026-08-15:** both per-side selections restore from and atomically save to active `weapon.sav` slot 0; class is written to both side blocks (`@0x55EE3F..0x55EE6D`) while avatar bytes remain per-side (`@0x55EE93..0x55EF38`), and other slots/pages are preserved. Recorded, bounded divergence: retail writes only the selected side's avatar bytes; the port rewrites both sides from memory, normalizing a stale other side to the retail default. The kit-page WRITER ORDER is witnessed and ported 2026-09-16 (see "Kit page serialization"): `PlayerInfoMenuCompanion.kit_entries()` emits the knife, the class-5 medpack, the three categories and the three fixed grenade slots as `playersav::KitEntry` rows on the snapshot's `kit` key. Remaining: hand that page to `playersav::encode_kit_page` from `Simulation::save_weapon_profile_selection` (which still writes only the side header), the per-side voice-override byte pair (`profile+1532`/`+1533`), and the `player.sav`-level option fields. |
+| D-PLAYERINFO-10 | TESTPLAYERVOICE previews `"VOICE_%d"` from `g_MenuSoundBank` (`menu.lwf`); voice index = profile override `profile+1532+team` else the avatar combo's own voice byte (`combo+284`); PLAYERVOICE list = DEFAULT_VOICE (value 0) + every ENABLED row of the 11-row voice table `@0x83C7A8` whose SEX field matches the avatar's `combo+280`, valued by its `CHARVOICE_%d` id, with the not-found override reset and a select-by-value (`populate_player_voice_combo @ 0x55dce0`, handler `sub_560030 @ 0x560030`) | **FIXED 2026-09-16**: `PlayerInfoMenuCompanion` carries the full table walk, the sex filter, the override reset and the select-by-value; the preview prefers the override and falls back to the head's voice. `player_info_menu_seam_test` pins the male/female row sets, the value store, the reset and the preview order. Residual: the per-side override BYTE PAIR is persisted as one profile value (D-PLAYERINFO-9). |
 | D-PLAYERINFO-11 | loadout combos from the weapon table `@ 0x2540D08` (192 B), filtered by class+team mask, slot-routed by `weapon_class +108` (1/2/0 = PRIMARY/SECONDARY/ACCESSORY), `"NONE"` first; ammo `@ 0x55e8b0`; weight `@ 0x55f480`. Producer `WeaponDef_ParseProperty @ 0x54d730` grilled — full `weapon.def` field map (above). | **FIXED 2026-07-30:** weapon lists, ammo combos, weight math/readout, and icons are ported through `engine/formats/def`, `WeaponDatabase`, and `PlayerInfoMenuCompanion`; `def_loadout_weight_test` and `player_info_menu_seam_test` pin the rules and UI host wiring. Persisting newly edited kit tuples is tracked separately by D-PLAYERINFO-9. |
 | D-PLAYERINFO-12 | selection state lives in per-slot/per-team globals keyed `[67596*slot + 32774*team]` (`g_charSelClass/Nationality/Division/Combo @ 0x2551130/1/2/4`), distinct from the 15488-B profile object (`profile @ 0x252de58`: name`+4`, autoreload`+1524`, voice`+1532`, automedic`+1660`) | **per-team memory FIXED 2026-08-15; the profile-slot dimension stays OPEN.** `PlayerCharacterSelectionState` keeps both team sides for slot 0 (restore on entry, survive a team switch, ClientAuth/host spawn, 0x0C decode, presentation) and the writer preserves the other four `weapon.sav` records; retail's five-slot `PLAYER` selector (`PlayerInfo_InitProfileSelector @0x5611b0`, `g_curProfileSlot @0x25506B8`) is not ported — the ledger row tracks that residual, it is not a "kept" decision. |
 

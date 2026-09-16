@@ -199,6 +199,35 @@ void test_declutter_rebuild_and_cycle() {
 	CHECK(d.cycle_level() == 1 && d.cycle_level() == 2 &&
 					d.cycle_level() == 3 && d.cycle_level() == 0,
 			"the level cycle wraps past 3 to 0");
+
+	// Retail's rebuild shifts a 32-bit register and keeps the LOW BYTE
+	// (`shl edx, cl` @0x59B0FB, `and cl, dl` @0x59B106), and the level word is
+	// stored with NO clamp anywhere (cfg @0x550339 / apply @0x55154d / the
+	// cycle @0x4E060B). So an out-of-range level hides everything, and the
+	// cycle recovers from it on the first press.
+	for (int level = 4; level <= 7; ++level) {
+		d.set_level(level);
+		CHECK(!d.visible()[kDeclutterSpinmap] && !d.visible()[kDeclutterDmgBar],
+				"levels 4..7 select a bit no HUDDECLUT arm authors");
+	}
+	d.set_level(8);
+	CHECK(!d.visible()[kDeclutterSpinmap] && !d.visible()[kDeclutterDmgBar],
+			"level 8 shifts the byte clean away");
+	d.set_level(31);
+	CHECK(!d.visible()[kDeclutterSpinmap] && !d.visible()[kDeclutterDmgBar],
+			"level 31 leaves a zero mask byte");
+	d.set_level(-1);
+	CHECK(!d.visible()[kDeclutterSpinmap] && !d.visible()[kDeclutterDmgBar],
+			"a negative level lands on cl = 31, the same zero byte");
+	// x86 takes the shift count modulo 32, so level 32 aliases level 0.
+	d.set_level(32);
+	CHECK(d.visible()[kDeclutterSpinmap] && d.visible()[kDeclutterDmgBar],
+			"level 32 aliases level 0 through the masked shift count");
+	// The stored level is verbatim, and the cycle's signed `cmp eax,3` on the
+	// SUM wraps any out-of-range level back to 0.
+	d.set_level(9);
+	CHECK(d.level() == 9, "the level is stored verbatim, never clamped");
+	CHECK(d.cycle_level() == 0, "huddetail wraps a parked out-of-range level to 0");
 }
 
 // The per-element declutter gates at their compile sites, the CHAT double

@@ -54,7 +54,11 @@ enum HudDeclutterSlot : int {
 	kDeclutterSlotCount = 24,
 };
 
-// The declutter level range: 0..3, one visibility bit per level in each mask.
+// The AUTHORED declutter level range: 0..3, one visibility bit per level in
+// each mask, and the wrap point of the huddetail cycle. It is NOT a clamp on
+// the stored level: retail's rebuild shifts an 8-bit bit selector, so a level
+// outside 0..3 simply matches no authored mask bit and hides every gated
+// element (see HudDeclutter::set_level / rebuild).
 inline constexpr int kDeclutterLevelMax = 3;
 
 // The authored token suffix for a slot ("MSNTITLE".."CHAT"; nullptr out of
@@ -100,17 +104,19 @@ public:
 	void set_mask(int slot, uint8_t mask);
 	uint8_t mask(int slot) const;
 
-	// The persisted hud_detail level (clamped 0..3), and the huddetail action
-	// cycle: level + 1, wrapping past 3 to 0; returns the new level.
+	// The persisted hud_detail level, stored VERBATIM (retail has no clamp),
+	// and the huddetail action cycle: level + 1, wrapping past 3 to 0;
+	// returns the new level.
 	// [orig: level @ 0x24D20BC; Input_HandleActionBinding_0
 	//  @ 0x4E0601..0x4E0624]
 	void set_level(int level);
 	int level() const { return level_; }
 	int cycle_level();
 
-	// visible[slot] = ((1 << level) & mask[slot]) != 0, rebuilt on every mask
-	// or level change. [orig: CRenderState_SetLayerVisibility @ 0x59B0F0 ->
-	//  dword_2723C80]
+	// visible[slot] = ((uint8_t)(1 << (level & 31)) & mask[slot]) != 0, rebuilt
+	// on every mask or level change — retail's 32-bit `shl` narrowed to the
+	// mask byte by the following `and cl, dl`.
+	// [orig: CRenderState_SetLayerVisibility @ 0x59B0F0 -> dword_2723C80]
 	const std::array<bool, kDeclutterSlotCount> &visible() const {
 		return visible_;
 	}

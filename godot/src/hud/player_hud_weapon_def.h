@@ -76,6 +76,17 @@ public:
 	// the witness). 0 for a def without a scope-zero default.
 	int get_sight_slide_multiplier() const { return sight_slide_multiplier_; }
 	void set_sight_slide_multiplier(int p_value) { sight_slide_multiplier_ = p_value; }
+	// The two card selectors' weapon.def halves, resolved by the engine
+	// (runtime/hud/scope_circle_mask.h, which carries the witnesses):
+	// `scoped_selector` = Scoped without Inset -- the arm that draws the
+	// scoped-view circle mask after the card; `sighted_selector` = the Sighted
+	// bit, which pre-empts it. The drawer's third Sighted term (the MountSlot
+	// action is not SWITCHFROM) is not a def field and is not modelled here;
+	// it only matters for a def that sets BOTH bits, and none ships.
+	bool get_scoped_selector() const { return scoped_selector_; }
+	void set_scoped_selector(bool p_value) { scoped_selector_ = p_value; }
+	bool get_sighted_selector() const { return sighted_selector_; }
+	void set_sighted_selector(bool p_value) { sighted_selector_ = p_value; }
 
 protected:
 	static void _bind_methods();
@@ -93,6 +104,8 @@ private:
 	int rounds_per_icon_ = 0;
 	TypedArray<WeaponSightRow> sights_;
 	int sight_slide_multiplier_ = 0;
+	bool scoped_selector_ = false;
+	bool sighted_selector_ = false;
 };
 
 } // namespace godot

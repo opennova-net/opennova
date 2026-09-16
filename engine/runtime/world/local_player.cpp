@@ -422,6 +422,10 @@ void LocalPlayer::apply_player_input_pre_tick() {
 	// gated on the player entity alone [orig: @ 0x4DE590; Game_ProcessMainFrame
 	// @ 0x52674b / @ 0x526774].
 	w::camera_shake_decay(view.shake);
+	// The three fullscreen damage-feedback words decay in the SAME instruction
+	// run, immediately after the shake and in the order white / red / revive
+	// [orig: Player_UpdatePerFrame @0x4DE5A7..0x4DE5F7].
+	w::screen_flash_decay(view.flash);
 	w::AiEntity *p = world.ai.for_handle(world.cached.local_player);
 	if (p == nullptr) return;
 	w::local_player_view_refresh(&world, view);
@@ -495,6 +499,11 @@ void LocalPlayer::reset_for_new_round() {
     input.crouch = input.prone = false;
     weapon.power_throw_start_tick = 0;
     view.shake.counter = 0;
+    // The three fullscreen damage-feedback words
+    // [orig: Game_InitNewRound @0x422778 / @0x422784 / @0x422790]. The revive
+    // tint holds at its 0xC4 decay floor forever otherwise, so this clear (and
+    // the mission-start one) is the only thing that ever puts it out.
+    w::screen_flash_clear(view.flash);
     world_.weather.core.hit_dim.intensity = 0;
     world_.weather.core.hit_dim.fade_rate = 0;
     view.camera_mode = 0;

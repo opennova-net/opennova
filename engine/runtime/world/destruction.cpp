@@ -15,6 +15,7 @@
 #include <runtime/world/dir_table.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/collision_force.h>
+#include <runtime/world/player_view.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
 
@@ -483,6 +484,12 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
             //  @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm].
             if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
                 player_body_class_think(target);
+            // Right after that notify, a blast on the LOCAL player arms the red
+            // damage vignette + the camera shake, unless the record's kz type is
+            // 3 (the medic heal)
+            // [orig: @0x4e6b77..0x4e6b8a -> Player_OnDamageReceived @0x4dd880].
+            if (target.handle == world.cached.local_player && e.type != ammo_kz::kMedic)
+                player_on_damage_received(world);
             if (target.health <= 0 && before > 0) {
                 world.script.relations.group(target.group_id).alert = TriggerRelations::kAlertRed;
                 RoundDeath d;
@@ -633,7 +640,17 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 if (!cone_gate(e, cone_half, d)) continue;
                 float surface = dist - bound;
                 if (surface < 0.0f) surface = 0.0f;
-                if (surface > blast_radius) continue; // outer band flinch remains open [orig: @0x4EB05C]
+                // The OUTER-BAND flinch, ahead of the blast-radius cut: an
+                // organic anywhere in the 2x reaction band takes the ammo
+                // reaction notify, so an explosive near-miss that deals no
+                // damage still floors the white flash and shakes the camera.
+                // [orig: `if (victim->itemDef(+0x20)->type(+0x5C) == 3)
+                //  Entity_OnDamageReceived(victim, entry.ammo, entry.owner)`
+                //  @0x4eb04a..0x4eb05c]. Its AI half (wasHit / damageTimer /
+                // lastAttacker) still rides the RoundHit drain, so a pure
+                // near-miss stamps no AI reaction here yet.
+                if (t->item_type == 3) entity_on_damage_received(world, *t, ammo);
+                if (surface > blast_radius) continue; // [orig: @0x4eb064..0x4eb06c]
                 if (e.type != ammo_kz::kRadiusBlast) {
                     // The mounted-occupant gate ahead of the LOS [orig: the
                     // parentSlot switch @0x4eb0e2..0x4eb136]: seats 1/2/5 with
@@ -668,6 +685,19 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // explosion-presentation gap recorded in world-wac-ai-re §24.
                 if (t->item_type == 3)
                     apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos, e.owner);
+                // A LIVE player body inside the blast arms the local damage
+                // feedback a SECOND time, ahead of the damage callback: retail
+                // gates on Flags & 0x100 (Player) && !(Flags & 2) (alive), the
+                // victim's unwitnessed +0x124 word being zero (the same word
+                // that gates the damage callback below, so our port's implicit
+                // reading of it as always-zero carries here), the victim being
+                // the local player, and the entry's kz type not being 3.
+                // [orig: @0x4eb2b6..0x4eb2df -> Player_OnDamageReceived @0x4dd880]
+                if (((t->flags | t->engine_flags) & kEntityFlagPlayer) != 0 &&
+                        (t->engine_flags & kEntityFlagDead) == 0 &&
+                        t->handle == world.cached.local_player &&
+                        e.type != ammo_kz::kMedic)
+                    player_on_damage_received(world);
                 entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
             }
         }

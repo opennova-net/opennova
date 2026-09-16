@@ -2167,6 +2167,166 @@ void test_bullet_building_material_is_plain_plus_four() {
         CHECK(world.round_sim.impacts[0].effect_tag == 5); // material 1 + 4
 }
 
+// A two-section CFAC pane sharing one face/vertex run. Section 1 is the one the
+// caller places on the ray, so the section bit the break sets is 1 << 1 rather
+// than the section-0 default every single-section fixture would produce.
+CollisionModel building_pane_face_model(uint8_t material) {
+    CollisionModel m = knife_person_face_model(material);
+    m.sections.push_back(m.sections[0]);
+    return m;
+}
+
+// Gunfire through a BUILDING's glass breaks the struck section: face material
+// 15 on a live item-type-5 victim sets 1 << ray[31] in the victim's section
+// mask and plays GLASS_SMASH at the hit point. Any other face material, a
+// non-building item type, or an already-husked victim leaves the mask clear.
+// The pane still stops the round either way: only the lawr/fgrenade
+// pass-through report would let it continue, and that report is unported.
+// [orig: Projectile_HandleEntityImpact @ 0x4E9390 — `cmp ecx, 0Fh` @0x4e964f,
+//  `test byte ptr [esi+24h], 4` @0x4e9654, `cmp dword ptr [ecx+5Ch], 5`
+//  @0x4e965d, `or [esi+134h], edx` @0x4e9684; the sound through
+//  Entity_PlaySectionBreakSound @ 0x439C00 @0x439d25, whose bank
+//  dword_24E0920 is the `GLASS_SMASH` resolver row @0x82F9A4]
+void test_material_15_breaks_the_building_glass_section() {
+    struct Case {
+        uint8_t material;
+        int32_t item_type;
+        uint32_t engine_flags;
+        uint32_t expect_mask;
+        bool expect_sound;
+    };
+    const Case cases[] = {
+        {15, 5, 0u, 1u << 1, true},           // glass on a live building
+        {14, 5, 0u, 0u, false},               // a metal pane never breaks
+        {15, 2, 0u, 0u, false},               // an ordinary item is not a building
+        {15, 5, kEntityFlagHusk, 0u, false},  // the husk stage is already broken
+    };
+    for (const Case &c : cases) {
+        HeapWorldFixture fixture;
+        World &world = fixture.world;
+        world.registry.configure_pool(0, 4);
+        world.registry.configure_pool(2, 4);
+
+        Entity shooter;
+        shooter.kind = EntityKind::Organic;
+        shooter.has_item_def = true;
+        shooter.item_type = 3;
+        shooter.position = {0.0f, 0.0f, 0.0f};
+        const EntityHandle owner = world.registry.spawn(0, shooter);
+
+        Entity building;
+        building.kind = EntityKind::Building;
+        building.has_item_def = true;
+        building.item_type = c.item_type;
+        building.engine_flags = c.engine_flags;
+        building.position = {4.0f, 0.0f, 0.0f};
+        building.health = 1000;
+        const EntityHandle bh = world.registry.spawn(2, building);
+
+        CollisionWorld collision;
+        const int32_t model_id =
+            collision.add_model(building_pane_face_model(c.material));
+        collision.assign_entity(bh, model_id);
+        const int32_t off_ray[3] = {4 * 65536, 100 * 65536, 0};
+        const int32_t on_ray[3] = {4 * 65536, 0, 0};
+        CHECK(collision.publish_entity_section_matrices(
+            bh, {collision_matrix_from_heading(0, off_ray),
+                 collision_matrix_from_heading(0, on_ray)}));
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+        world.out.fire_sounds.set_listener({0.0f, 0.0f, 1.0f});
+
+        AmmoTableEntry ammo;
+        ammo.name = "BULLET";
+        ammo.valid = true;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = 20;
+        ammo.weight_in_grains = 875;
+        ammo.max_damage = 25;
+        world.tables.ammo.entries.push_back(ammo);
+
+        RoundSpawnParams params;
+        params.owner = owner;
+        params.shooter_handle = owner.packed;
+        params.origin = {0.0f, 0.0f, 1.0f};
+        params.ammo_index = 0;
+        CHECK(world.round_sim.spawn(
+                  world, params, RoundConsequenceMode::Authoritative) >= 0);
+        world.round_sim.tick(world, nullptr, &collision);
+
+        CHECK(world.round_sim.impacts.size() == 1);
+        const Entity *struck = world.registry.get(bh);
+        CHECK(struck != nullptr);
+        if (struck != nullptr) CHECK(struck->section_mask == c.expect_mask);
+        bool smashed = false;
+        for (const ReadyFireSound &sound : world.out.fire_sounds.drain())
+            if (sound.set_name == "GLASS_SMASH") smashed = true;
+        CHECK(smashed == c.expect_sound);
+    }
+
+    // The break is idempotent: a second round through the same broken pane
+    // re-ORs the bit it already owns and plays nothing, because the helper's
+    // gate reads the mask BEFORE the OR.
+    // [orig: `test [ebx+134h], eax` @0x439c1e]
+    HeapWorldFixture fixture;
+    World &world = fixture.world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(2, 4);
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.has_item_def = true;
+    shooter.item_type = 3;
+    const EntityHandle owner = world.registry.spawn(0, shooter);
+
+    Entity building;
+    building.kind = EntityKind::Building;
+    building.has_item_def = true;
+    building.item_type = 5;
+    building.position = {4.0f, 0.0f, 0.0f};
+    building.health = 1000;
+    building.section_mask = 1u << 1; // already smashed
+    const EntityHandle bh = world.registry.spawn(2, building);
+
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(building_pane_face_model(15));
+    collision.assign_entity(bh, model_id);
+    const int32_t off_ray[3] = {4 * 65536, 100 * 65536, 0};
+    const int32_t on_ray[3] = {4 * 65536, 0, 0};
+    CHECK(collision.publish_entity_section_matrices(
+        bh, {collision_matrix_from_heading(0, off_ray),
+             collision_matrix_from_heading(0, on_ray)}));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+    world.out.fire_sounds.set_listener({0.0f, 0.0f, 1.0f});
+
+    AmmoTableEntry ammo;
+    ammo.name = "BULLET";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    ammo.weight_in_grains = 875;
+    ammo.max_damage = 25;
+    world.tables.ammo.entries.push_back(ammo);
+
+    RoundSpawnParams params;
+    params.owner = owner;
+    params.shooter_handle = owner.packed;
+    params.origin = {0.0f, 0.0f, 1.0f};
+    params.ammo_index = 0;
+    CHECK(world.round_sim.spawn(
+              world, params, RoundConsequenceMode::Authoritative) >= 0);
+    world.round_sim.tick(world, nullptr, &collision);
+
+    const Entity *struck = world.registry.get(bh);
+    CHECK(struck != nullptr);
+    if (struck != nullptr) CHECK(struck->section_mask == (1u << 1));
+    bool smashed = false;
+    for (const ReadyFireSound &sound : world.out.fire_sounds.drain())
+        if (sound.set_name == "GLASS_SMASH") smashed = true;
+    CHECK(!smashed);
+}
+
 // The in-flight `move` emitter's liveness through the round simulation, the
 // `useownmove` leg: the first flight tick arms it, the ClipWaterFx release
 // fires on the tick whose PRE-move z sits at/below the plane (the tests
@@ -2673,6 +2833,7 @@ int main() {
     test_visual_person_proxy_keeps_wire_identity_out_of_authority();
     test_knife_instant_kill_zone_raycast();
     test_bullet_building_material_is_plain_plus_four();
+    test_material_15_breaks_the_building_glass_section();
     test_terrain_impact_samples_charmap_surface();
     test_terrain_impact_emits_permanent_scorch();
     test_visual_dynamic_proxy_projects_decoded_pose_geometry();

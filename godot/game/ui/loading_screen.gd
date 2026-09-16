@@ -59,6 +59,40 @@ signal splash_dismissed
 
 enum SplashState { NONE, ACTIVE, CLOSING }
 
+
+## One laid-out line of a wrapped text block: the slice to paint and the
+## top-left the alignment resolved it to.
+class TextBlockLine extends RefCounted:
+	var text := ""
+	var x := 0.0
+	var y := 0.0
+
+	static func make(p_text: String, p_x: float, p_y: float) -> TextBlockLine:
+		var row := TextBlockLine.new()
+		row.text = p_text
+		row.x = p_x
+		row.y = p_y
+		return row
+
+
+## A laid-out wrapped text block: the lines to paint, plus `stopped_at` -- 0
+## when the whole string was consumed, otherwise the 1-based count of lines
+## processed when the box ran out of vertical room.
+class TextBlock extends RefCounted:
+	var lines: Array[TextBlockLine] = []
+	var stopped_at := 0
+
+
+# The three characters the wrapped-text block treats structurally: a space is
+# the wrap point it remembers, a carriage return is the hard break, and a line
+# feed is only swallowed when it trails a break
+# retail: the 32 / 13 / 10 tests at 0x580f88, 0x580fdf and 0x581128.
+const TEXT_SPACE := 32
+const TEXT_CARRIAGE_RETURN := 13
+const TEXT_LINE_FEED := 10
+# The size a .fnt without a fixed size is drawn at.
+const DEFAULT_TEXT_SIZE := 16
+
 var _splash_state := SplashState.NONE
 var _splash_arrow: Texture2D = null      # newarow1.tga, the menu cursor art
 var _splash_font: FontFile = null        # Impac22b.fnt (the large HUD label slot)
@@ -597,23 +631,139 @@ func _draw_session_text() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-# Word-wrapped text in a box: lines wrap at `width`, drawing stops at `bottom`
-# [orig: render_draw_wrapped_text_block_ex @ 0x580eb0 — wraps at the last
-# space, advances one line height, stops when the next line passes rect_bottom].
+## The wrapped-text block, ported line-break rule for line-break rule.
+##
+## `left`..`right` is the box the text measures against, `skip_lines` drops the
+## first N wrapped lines (they are still consumed and cost no vertical space),
+## and drawing stops once the next line would pass `bottom` -- unless
+## `top == bottom`, which disables the vertical clip entirely. Returns 0 when
+## the whole string was consumed, otherwise the 1-based count of lines
+## processed when it ran out of room.
+##
+## retail: render_draw_wrapped_text_block_ex @ 0x580eb0. The two kerning
+## parameters offset the first (`use_kerning_start`) and the wrapped
+## (`use_kerning_wrap`) lines by the font's tab-width field font+0x168; every
+## loading-screen call site passes `use_kerning_start = 0` (@0x521fee,
+## @0x52201a, @0x52203c, @0x5220bd) and the field is 0 unless
+## GText_SetLineSpacing @ 0x674720 sets one, so the offset folds out here --
+## D-LOADSCR-2 carries the residual with the rest of the CGameFont metrics.
+static func wrap_text_lines(font: Font, font_size: int, text: String,
+		max_width: int) -> PackedStringArray:
+	var out := PackedStringArray()
+	if font == null or text.is_empty() or max_width <= 0:
+		return out
+	var n := text.length()
+	var line_start := 0
+	var i := 0
+	var last_space := 0  # absolute index; 0 means "no usable space on this line"
+	var width := 0       # loop-carried: a NUL/end step re-uses the last measure
+	while i <= n:
+		var ch := text.unicode_at(i) if i < n else 0
+		if ch == TEXT_SPACE:
+			last_space = i
+		if ch != 0:
+			# Measure the whole prefix up to and INCLUDING this character, the
+			# way retail NUL-terminates one past it and re-measures the line.
+			var span := i - line_start + 1
+			width = (int(font.get_string_size(text.substr(line_start, span),
+					HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x) if span > 0 else 0)
+		var break_at := i
+		if width <= max_width:
+			# Only '\r' and the terminator break a line that still fits; a '\n'
+			# is an ordinary glyph unless it trails a break.
+			if ch != TEXT_CARRIAGE_RETURN and ch != 0:
+				i += 1
+				continue
+		elif last_space != 0:
+			# Overflow with a space on this line: break at the LAST space.
+			break_at = last_space
+		# Overflow with no space breaks at the current character, which is then
+		# dropped with every other break character.
+		out.append(text.substr(line_start, break_at - line_start))
+		if break_at >= n:
+			return out
+		line_start = break_at + 1
+		if line_start < n and text.unicode_at(line_start) == TEXT_LINE_FEED:
+			line_start += 1  # a '\n' right after the break is swallowed
+		i = break_at + 1
+		last_space = 0
+		width = 0
+	return out
+
+
+## The laid-out block: every line the drawer will paint, already placed, plus
+## the line count the walk stopped at.
+##
+## Lines before `skip_lines` are consumed without being placed AND without
+## costing vertical space; a line that measures empty advances HALF a line
+## instead of a whole one.
+##
+## retail: the drawing half of render_draw_wrapped_text_block_ex @ 0x580eb0 --
+## the alignment fold (4 = centred on left + width/2 @0x5810ab, 5 = right
+## aligned on rect_right @0x581094, else left @0x58107f), the half advance
+## `extent >> 1` @0x580f40/@0x581005 against the full advance @0x5810d7, the
+## skip_lines jump @0x580ffb, and the ordering of the end-of-text return
+## @0x581155 ahead of the bottom test @0x58111e.
+static func layout_text_block(font: Font, font_size: int, text: String,
+		left: int, top: int, right: int, bottom: int,
+		align: HorizontalAlignment, skip_lines := 0) -> TextBlock:
+	var out := TextBlock.new()
+	var width := right - left
+	if font == null or text.is_empty() or width <= 0:
+		return out
+	# The line pitch is the 'I' character's own extent
+	# retail: CGameFont_GetCharExtent(font, 'I', ...) @ 0x580f2b.
+	var line_h := int(font.get_height(font_size))
+	var half_h := line_h >> 1
+	var cursor := top
+	var lines := wrap_text_lines(font, font_size, text, width)
+	for i in lines.size():
+		var line := lines[i]
+		if i >= skip_lines:
+			var line_w := (font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT,
+					-1, font_size).x if not line.is_empty() else 0.0)
+			if line_w <= 0.0:
+				cursor += half_h
+			else:
+				var px := float(left)
+				if align == HORIZONTAL_ALIGNMENT_CENTER:
+					px = float(left + (width >> 1)) - line_w * 0.5
+				elif align == HORIZONTAL_ALIGNMENT_RIGHT:
+					px = float(right) - line_w
+				out.lines.append(TextBlockLine.make(line, px, float(cursor)))
+				cursor += line_h
+		# The terminating break reports "consumed"; only a line that still has
+		# text behind it can run the box out of room, and top == bottom disables
+		# the vertical clip entirely.
+		if i == lines.size() - 1:
+			return out
+		if bottom != top and cursor + line_h > bottom:
+			out.stopped_at = i + 1
+			return out
+	return out
+
+
+# Word-wrapped text in a box, painted from the laid-out block. `width` is the
+# band width (retail's rect_right - rect_left); `y` is the line TOP, so each
+# baseline adds the ascent.
 # Line metrics ride the FontFile view of the .fnt; exact CGameFont glyph
 # spacing is the standing follow-up (docs/interface/loading-screen-re.md
 # D-LOADSCR-2, shared with hud-re.md).
 func _draw_wrapped(font: FontFile, text: String, x: int, y: int, width: int,
-		bottom: int, align: HorizontalAlignment, color: Color) -> void:
-	if text.is_empty():
-		return
+		bottom: int, align: HorizontalAlignment, color: Color,
+		skip_lines := 0) -> int:
+	if font == null:
+		return 0
 	var fs := font.get_fixed_size()
 	if fs <= 0:
-		fs = 16
-	var line_h := font.get_height(fs)
-	var max_lines := maxi(1, int((bottom - y) / line_h)) if bottom > y else 1
-	draw_multiline_string(font, Vector2(x, y + font.get_ascent(fs)), text,
-		align, width, fs, max_lines, color)
+		fs = DEFAULT_TEXT_SIZE
+	var block := layout_text_block(font, fs, text, x, y, x + width, bottom,
+			align, skip_lines)
+	var ascent := font.get_ascent(fs)
+	for row in block.lines:
+		draw_string(font, Vector2(row.x, row.y + ascent), row.text,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, color)
+	return block.stopped_at
 
 
 # The progress bar, scaled from the HudPos.DESIGN_* virtual overlay space onto

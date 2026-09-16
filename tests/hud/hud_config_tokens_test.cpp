@@ -35,8 +35,6 @@ int main() {
 	// The hud_detail token: default 0, 0..3, level 3 is the blank HUD.
 	check(kHudDetailLevelDefault == 0, "detail default 0");
 	check(kHudDetailLevelBlank == 3, "detail blank 3");
-	check(clamp_hud_detail_level(-1) == 0, "detail clamp low");
-	check(clamp_hud_detail_level(9) == 3, "detail clamp high");
 	check(next_hud_detail_level(0) == 1, "detail next 0 -> 1");
 	check(next_hud_detail_level(2) == 3, "detail next 2 -> 3");
 	check(next_hud_detail_level(3) == 0, "detail next 3 -> 0");

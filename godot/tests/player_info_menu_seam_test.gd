@@ -84,6 +84,7 @@ func _avatar_screen_xml(include_preview := false) -> String:
 	body += _wnd("radio", "SIDE_RED", y + 24, "<GROUP>1</GROUP>")
 	body += _wnd("edit", "PLAYERNAME", y + 48)
 	body += _wnd("button", "ACCEPT", y + 72)
+	body += _wnd("button", "TESTPLAYERVOICE", y + 96)
 	if include_preview:
 		body += ('<WINDOW type="window" name="PLAYER_PREVIEW">'
 				+ '<POSITION><LEFT>500</LEFT><TOP>100</TOP><RIGHT>700</RIGHT>'
@@ -954,3 +955,160 @@ func test_weapon_dict_carries_loadout_subclasses() -> void:
 	assert_gt(idx, 0)
 	assert_eq(wdb.get_weapon(idx).loadout_subclasses, 2,
 		"loadout_subclasses (+36) rides the transport dict")
+
+
+# --- PLAYERVOICE (the voice-definition table walk) -----------------------------
+
+# The list is DEFAULT_VOICE plus every ENABLED voice-table row whose sex matches
+# the selected head's sex byte, not the head's own voice id. The synth table's
+# N00/D00 combos are all male heads, so the male set (ids 1..6 and 10 -- id 9 is
+# the table's one disabled row) shows; N00/D03's second combo is a female head
+# and swaps the list to the female set (7, 8, 11).
+# docs/playerinfo/avatars-re.md "PLAYERVOICE list" (the table at 0x83C7A8).
+func test_voice_list_carries_every_row_matching_the_avatar_sex() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	var db := _load_db()
+	companion.set_database(db)
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+
+	var voices := driver.widget_id("PLAYERVOICE")
+	assert_eq(db.get_combo(0, 0, 0).get_head().sex, 0, "N00/D00 combo 0 is a male head")
+	assert_eq(driver.item_count(voices), 8,
+		"DEFAULT_VOICE + the seven enabled male rows (1..6, 10)")
+	assert_eq(driver.item_text(voices, 0), "Default", "DEFAULT_VOICE leads the list")
+	assert_eq(driver.item_text(voices, 7), "Voice 10",
+		"the disabled id-9 row is skipped, so 10 is the last male row")
+
+	# The female head's division swaps the whole set.
+	driver.select_row(driver.widget_id("DIVISION"), 3)
+	driver.select_row(driver.widget_id("COMBO_LIST"), 1)
+	assert_eq(db.get_combo(0, 3, 1).get_head().sex, 1, "N00/D03 combo 1 is a female head")
+	assert_eq(driver.item_count(voices), 4, "DEFAULT_VOICE + the three female rows")
+	assert_eq(driver.item_text(voices, 1), "Voice 7")
+	assert_eq(driver.item_text(voices, 3), "Voice 11")
+
+
+# The picked row's VALUE is the persisted override, and a populate whose rows no
+# longer offer that value resets it to DEFAULT_VOICE before selecting by value
+# (retail's "if (!found) profile[team + 1532] = 0").
+func test_voice_override_persists_and_resets_when_the_avatar_drops_it() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	var voices := driver.widget_id("PLAYERVOICE")
+
+	assert_eq(companion.selected_voice(), 0, "a fresh profile starts on DEFAULT_VOICE")
+	driver.select_row(voices, 3)  # row 0 is DEFAULT_VOICE, so row 3 is "Voice 3"
+	assert_eq(companion.selected_voice(), 3, "the pick stores the row VALUE, not the row")
+	assert_eq(int(companion.snapshot().get("voice", -1)), 3,
+		"ACCEPT persists the voice value")
+
+	# Voice 3 is a male row; moving to the female head drops it from the list.
+	driver.select_row(driver.widget_id("DIVISION"), 3)
+	driver.select_row(driver.widget_id("COMBO_LIST"), 1)
+	assert_eq(companion.selected_voice(), 0,
+		"an override the new avatar cannot offer resets to DEFAULT_VOICE")
+	assert_eq(driver.selected_row(voices), 0, "and the list selects that value's row")
+
+
+# A persisted override the avatar still offers survives the build and selects its
+# own row BY VALUE. Id 10 proves the distinction: it is the LAST male row
+# (index 7) because the disabled id-9 row never enters the list.
+func test_persisted_voice_selects_its_row_by_value() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	companion.set_persisted_profile({"voice": 10})
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+
+	assert_eq(companion.selected_voice(), 10, "the persisted override survives the build")
+	var voices := driver.widget_id("PLAYERVOICE")
+	assert_eq(driver.item_text(voices, driver.selected_row(voices)), "Voice 10",
+		"the list selects by value: id 10 is the LAST male row, not row 10")
+
+
+# The preview prefers the persisted override; only a zero override falls back to
+# the selected head's own voice byte (the synth head carries voice 1).
+func test_voice_preview_prefers_the_persisted_override() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	companion.set_persisted_profile({"voice": 6})
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	watch_signals(driver)
+
+	var button := driver.widget_id("TESTPLAYERVOICE")
+	driver.widget_activated.emit(button, "TESTPLAYERVOICE")
+	assert_signal_emitted_with_parameters(driver, "sound_requested",
+		["menu.lwf", "VOICE_6"], 0)
+
+	# Clearing the override hands the preview back to the avatar's own voice.
+	driver.select_row(driver.widget_id("PLAYERVOICE"), 0)
+	driver.widget_activated.emit(button, "TESTPLAYERVOICE")
+	assert_signal_emitted_with_parameters(driver, "sound_requested",
+		["menu.lwf", "VOICE_1"], 1)
+
+
+# --- Kit page serialization (D-PLAYERINFO-9) ----------------------------------
+
+# The saved kit page is the witnessed entry ORDER, not just the three loadout
+# slots: the side's knife leads, the medic adds a medpack, then
+# PRIMARY/SECONDARY/ACCESSORY, then ALWAYS three grenade entries.
+# docs/playerinfo/avatars-re.md "Kit page serialization".
+func test_kit_page_carries_knife_medpack_slots_and_three_grenades() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
+	var wdb := _load_weapons()
+	var companion := _make_ammo_companion(wdb)  # the screen opens on class 5 (medic)
+
+	var kit: Array = companion.snapshot().get("kit", [])
+	assert_eq(kit.size(), 8, "knife + medpack + three slots + three grenade slots")
+	var knife: Dictionary = kit[0]
+	assert_eq(String(knife.get("name", "")), "WPN_KNIFE",
+		"the blue side's knife leads the page")
+	for key in ["ammo_primary", "ammo_secondary", "flags"]:
+		assert_eq(int(knife.get(key, 0)), -1,
+			"the knife entry's three other values are the -1 filler")
+	assert_eq(String((kit[1] as Dictionary).get("name", "")), "WPN_MEDPACK",
+		"class 5 adds the medpack entry")
+
+	# Slot index 2 = PRIMARY. Nothing picked yet, so retail's NONE row value (0)
+	# serializes weapon-table entry 0.
+	assert_eq(String((kit[2] as Dictionary).get("name", "")), wdb.get_weapon(0).name,
+		"a NONE slot serializes weapon-table entry 0")
+
+	var picked := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1,
+			"WPN_M4AUTO")
+	_ammo_driver.select_row(_ammo_id("PRIMARY_AMMO1"), 0)  # clip pick stores row + 1
+	kit = companion.snapshot().get("kit", [])
+	var primary: Dictionary = kit[2]
+	assert_eq(String(primary.get("name", "")), picked.name)
+	assert_eq(int(primary.get("ammo_primary", 0)), 1,
+		"the recorded clip pick rides the entry's second value")
+	assert_eq(int(primary.get("flags", -99)), companion.selected_ammo_type("PRIMARY"),
+		"PRIMARY's fourth value is its team ammo-type byte")
+	assert_eq(int((kit[4] as Dictionary).get("flags", 0)), -1,
+		"ACCESSORY's fourth value is always the filler")
+	assert_eq(kit.size() - 5, 3, "exactly three grenade entries close the page")
+	for i in 3:
+		assert_false(String((kit[5 + i] as Dictionary).get("name", "")).is_empty(),
+			"every grenade slot serializes a name, filled or not")
+
+
+# Class 8 (rifleman) writes no medpack entry; the page then has seven entries.
+func test_kit_page_medpack_is_class_five_only() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
+	var companion := _make_ammo_companion(_load_weapons())
+	_ammo_driver.select_row(_ammo_id("PLAYERCLASS"), 3)  # values 5..9 -> row 3 = class 8
+
+	var kit: Array = companion.snapshot().get("kit", [])
+	assert_eq(kit.size(), 7, "no medpack for a rifleman")
+	assert_eq(String((kit[0] as Dictionary).get("name", "")), "WPN_KNIFE",
+		"the blue side keeps WPN_KNIFE")
+	for entry in kit:
+		assert_ne(String((entry as Dictionary).get("name", "")), "WPN_MEDPACK")

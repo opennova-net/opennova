@@ -710,8 +710,9 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(effects.get_canvas_item()),
 			Rect2(0, 0, 1024, 768),
 			"Retail masks cover the viewport while inset art stays in design coordinates.")
-	assert_eq(effects.get_child_count(true), 3,
-			"The underwater murk, sun veil, and NVG post-processes are internal children.")
+	assert_eq(effects.get_child_count(true), 6,
+			"The underwater murk, sun veil, NVG post-process and the three "
+			+ "fullscreen damage-feedback quads are internal children.")
 	var murk := effects.get_node("UnderwaterMurk") as ColorRect
 	var veil := effects.get_node("SunVeil") as ColorRect
 	var nvg := effects.get_node("NvgPost") as ColorRect
@@ -731,6 +732,62 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	effects.update_view(false, 1, false, 0)
 	assert_false(nvg.visible,
 			"Camera suppression hides the post-process without consuming simulation state.")
+
+
+# The three fullscreen damage-feedback quads. The engine owns every word, decay
+# and cap (ctest screen_flash); this asserts only the presenter's reduction of
+# those draw values onto rects, and the retail emission order white -> red
+# vignette -> revive tint. The addressed witness lives in
+# docs/interface/hud-re.md, "Local damage feedback".
+func test_player_view_effects_damage_feedback_quads() -> void:
+	var effects := PlayerViewEffectsScript.new()
+	effects.size = Vector2(1024, 768)
+	add_child_autofree(effects)
+	var white := effects.get_node("ScreenFlashWhite") as ColorRect
+	var vignette := effects.get_node("ScreenFlashVignette") as TextureRect
+	var revive := effects.get_node("ScreenFlashReviveTint") as ColorRect
+	assert_not_null(white)
+	assert_not_null(vignette)
+	assert_not_null(revive)
+	assert_false(white.visible, "No damage means no quads.")
+	assert_false(vignette.visible)
+	assert_false(revive.visible)
+	assert_lt(white.get_index(true), vignette.get_index(true),
+			"retail emits the white hit flash before the red damage vignette.")
+	assert_lt(vignette.get_index(true), revive.get_index(true),
+			"and the red vignette before the revive tint.")
+	assert_false(white.show_behind_parent,
+			"The quads follow the binocular/NVG draw, not precede it.")
+	var tint_material := revive.material as CanvasItemMaterial
+	assert_not_null(tint_material,
+			"The revive tint multiplies the frame rather than covering it.")
+	assert_eq(tint_material.blend_mode, CanvasItemMaterial.BLEND_MODE_MUL)
+
+	# A full white flash: opaque white, no texture involved.
+	effects.update_damage_feedback(255, 0, 0, 255)
+	assert_true(white.visible)
+	assert_almost_eq(white.color.a, 1.0, 0.0001)
+	assert_false(vignette.visible)
+	assert_false(revive.visible)
+
+	# Half a white flash plus the red vignette at its 192 draw cap. With no
+	# resource root the vignette texture is absent, so that quad stays down.
+	effects.update_damage_feedback(128, 192, 0, 255)
+	assert_almost_eq(white.color.a, 128.0 / 255.0, 0.0001)
+	assert_false(vignette.visible,
+			"Without vignette.tga loaded the red quad has nothing to draw.")
+
+	# The revive tint at its held floor: R = G = 255 - (196 >> 1) = 157, B 255.
+	effects.update_damage_feedback(0, 0, 196, 157)
+	assert_false(white.visible)
+	assert_true(revive.visible)
+	assert_almost_eq(revive.color.r, 157.0 / 255.0, 0.0001)
+	assert_almost_eq(revive.color.g, 157.0 / 255.0, 0.0001)
+	assert_almost_eq(revive.color.b, 1.0, 0.0001)
+	assert_almost_eq(revive.color.a, 1.0, 0.0001)
+
+	effects.update_damage_feedback(0, 0, 0, 255)
+	assert_false(revive.visible, "A cleared word retires its quad.")
 
 
 func test_player_view_effects_tracks_exact_underwater_murk_pass() -> void:

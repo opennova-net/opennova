@@ -120,6 +120,7 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState
     v.binoculars_raised = false;
     t.binocular_yaw_offset_deg = 0.0f;
     t.binocular_pitch_offset_deg = 0.0f;
+    t.binocular_sway_latched = false; // [orig: dword_29D6BA8 @0x5ca4b0]
     v.nvg_gain = kNvgGainMin;
     v.nvg_active = world != nullptr &&
                    (world->tables.mission_attrib_flags &
@@ -409,8 +410,7 @@ bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerV
 }
 
 bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
-                                    PlayerViewState &v, LocalPlayerViewTracker &t,
-                                    const std::function<float()> &unit_random) {
+                                    PlayerViewState &v, LocalPlayerViewTracker &t) {
     const Entity *local = world.registry.get(world.cached.local_player);
     if (local == nullptr) return false;
     // Retail refuses binoculars while a PowerThrow charge is live. Allowing the
@@ -421,17 +421,40 @@ bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
     if (v.scope_engaged && local->mounted && local->mount_type == SeatType::Gunner)
         return false;
     const bool requested = player_view_toggle_binoculars(v);
-    if (requested) {
-        // The fixed-radius random aim displacement (kBinocularAimOffsetDeg + the
-        // sway helper); the sampler is the caller's RNG.
-        player_view_binocular_sway_offset(unit_random(), t.binocular_yaw_offset_deg,
-                                          t.binocular_pitch_offset_deg);
-    } else {
+    if (!requested) {
         t.binocular_yaw_offset_deg = 0.0f;
         t.binocular_pitch_offset_deg = 0.0f;
     }
+    // The SEED is not this action's: retail draws it from the render frame the
+    // first time the optical view is actually up (local_player_binocular_sway_latch
+    // below), so a raise refused by movement/death/round end/third person draws
+    // nothing at all.
     local_player_view_refresh(&world, v);
+    local_player_binocular_sway_latch(world, v, t);
     return requested;
+}
+
+// The once-per-activation sway seed [orig: Render_ProcessMainSceneFrame
+// @0x5ca3d3..0x5ca3f8, the clear @0x5ca4b0]. The retail latch dword_29D6BA8
+// gates one Environment_RandomizeSunDirection @0x4dd830 call -- a misnomer for
+// the binocular sway writer -- per activation, and is cleared on every frame
+// the optical view is down. The draw comes off the SAME PRNG_Next16 owner
+// retail uses (World::next_prng16), so a raise consumes one word of the shared
+// mission stream exactly as retail's does.
+void local_player_binocular_sway_latch(World &world, const PlayerViewState &v,
+                                       LocalPlayerViewTracker &t) {
+    if (!v.binoculars_view_active) {
+        t.binocular_sway_latched = false; // [orig: dword_29D6BA8 = 0 @0x5ca4b0]
+        return;
+    }
+    if (t.binocular_sway_latched) return;
+    t.binocular_sway_latched = true; // [orig: dword_29D6BA8 = 1 @0x5ca3e9]
+    // PRNG_Next16() << 16 read as a full-circle BAM32 fraction is our
+    // `unit_random` in [0, 1); the fixed-radius circle is kBinocularAimOffsetDeg.
+    // [orig: Environment_RandomizeSunDirection @0x4dd830]
+    const float unit_random = static_cast<float>(world.next_prng16()) / 65536.0f;
+    player_view_binocular_sway_offset(unit_random, t.binocular_yaw_offset_deg,
+                                      t.binocular_pitch_offset_deg);
 }
 
 bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v,
@@ -465,6 +488,7 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
             world->cached.sound_listener_view_flags = v.camera_mode == 0 ? 2 : 4;
         player_view_update_effective_modes(v, false,
                                            world != nullptr && world->match.outcome().ended);
+        if (world != nullptr) local_player_binocular_sway_latch(*world, v, t);
         v.tp_anchor_valid = false;
         return;
     }
@@ -523,6 +547,9 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
     player_view_resolve_mode(v);
     if (v.camera_mode == 4 && mode_before != 4) enter_death_camera(*world, *e, v, s);
     local_player_view_refresh(world, v);
+    // The binocular sway seed/clear, once the optical view is resolved
+    // [orig: Render_ProcessMainSceneFrame @0x5ca3d3..0x5ca3f8 / @0x5ca4b0].
+    local_player_binocular_sway_latch(*world, v, t);
     // The per-tick movement delta the FP motion lead samples per render frame
     // (retail: the (position - entity+0x80 prev-position) << 8 samples
     // @0x437bb2/0x437b92/0x437ba2 -- player_view.h carries the witness).
@@ -604,6 +631,17 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     out.nvg_active = v.nvg_active;
     out.nvg_visible = player_view_nvg_visible(v);
     out.nvg_gain = v.nvg_gain;
+    // The three fullscreen damage-feedback quads and the HUD early return
+    // [orig: Render_ProcessMainSceneFrame @0x5CAB9A..0x5CAC48;
+    //  HUD_RenderAllOverlays @0x5a8098]. The death screen owns its own frame,
+    // so retail skips all three while it is up [orig: @0x5cab9a..0x5caba1].
+    if (!v.death_screen_active) {
+        out.screen_flash_white_alpha = v.flash.white;
+        out.screen_flash_red_alpha = screen_flash_red_draw_alpha(v.flash, v.camera_mode);
+        out.screen_flash_revive = v.flash.revive;
+        out.screen_flash_revive_channel = screen_flash_revive_channel(v.flash);
+    }
+    out.hud_overlays_suppressed = screen_flash_hud_overlays_suppressed(v.flash);
     const Entity *local = local_entity(world);
     out.mounted = local != nullptr && local->mounted;
     // The RESOLVED camera mode and the chase preference behind it

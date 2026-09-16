@@ -7,6 +7,7 @@
 
 #include <formats/def/def.h>
 #include <runtime/hud/hud_math.h>
+#include <runtime/hud/scope_circle_mask.h>
 #include <runtime/hud/sight_overlay.h>
 #include <runtime/hud/loading_screen.h>
 #include <runtime/hud/view_effects.h>
@@ -159,6 +160,13 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect"), &HudPos::nvg_scale_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_modulate"), &HudPos::nvg_scale_modulate);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_range_step", "current", "target"), &HudPos::binocular_range_step);
+	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_points", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode"), &HudPos::scope_mask_points, DEFVAL(-1));
+	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_colors", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode"), &HudPos::scope_mask_colors, DEFVAL(-1));
+	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_indices", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode"), &HudPos::scope_mask_indices, DEFVAL(-1));
+	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_frame", "surface", "screen_width", "aspect_mode"), &HudPos::scope_mask_frame, DEFVAL(-1));
+	ClassDB::bind_static_method("HudPos", D_METHOD("scoped_view_overlay", "binoculars_view_active", "sighted", "scoped"), &HudPos::scoped_view_overlay);
+	ClassDB::bind_static_method("HudPos", D_METHOD("scoped_selector_from_def", "weapon_flags", "weapon_flags2"), &HudPos::scoped_selector_from_def);
+	ClassDB::bind_static_method("HudPos", D_METHOD("sighted_selector_from_def", "weapon_flags", "slot_switching_from"), &HudPos::sighted_selector_from_def);
 	ClassDB::bind_method(D_METHOD("load", "path"), &HudPos::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &HudPos::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &HudPos::is_loaded);
@@ -197,6 +205,9 @@ void HudPos::_bind_methods() {
 	BIND_CONSTANT(SPLASH_FONT_SCALE_BASE_W);
 	BIND_CONSTANT(BINOCULAR_DIGIT_STEP);
 	BIND_CONSTANT(VIEW_DIGIT_CELL);
+	BIND_CONSTANT(SCOPE_MASK_RING);
+	BIND_CONSTANT(SCOPE_MASK_CROSS);
+	BIND_CONSTANT(SCOPE_MASK_GRID);
 	ClassDB::bind_static_method("HudPos", D_METHOD("percent_to_alpha"),
 			&HudPos::percent_to_alpha);
 }
@@ -787,4 +798,161 @@ Color HudPos::nvg_scale_modulate() {
 
 int HudPos::binocular_range_step(int p_current, int p_target) {
 	return opennova::hud::binocular_range_step(p_current, p_target);
+}
+
+namespace {
+
+// One built mask, memoised on its inputs: the typed getters below each want a
+// different slice of the same build, and the shell asks for all four whenever
+// the surface or the crosshair gate changes.
+struct ScopeMaskCache {
+	bool valid = false;
+	int32_t w = 0;
+	int32_t h = 0;
+	int32_t screen_w = 0;
+	bool draw_crosshair = false;
+	int aspect_mode = 0;
+	opennova::hud::ScopeCircleMask mask;
+};
+
+const opennova::hud::ScopeCircleMask *scope_mask_build(const Vector2 &p_surface,
+		int p_screen_width, bool p_draw_crosshair, int p_aspect_mode) {
+	static ScopeMaskCache cache;
+	const int32_t w = static_cast<int32_t>(p_surface.x);
+	const int32_t h = static_cast<int32_t>(p_surface.y);
+	if (w <= 0 || h <= 0) {
+		return nullptr;
+	}
+	const int32_t screen_w = p_screen_width > 0 ? p_screen_width : w;
+	if (cache.valid && cache.w == w && cache.h == h && cache.screen_w == screen_w &&
+			cache.draw_crosshair == p_draw_crosshair && cache.aspect_mode == p_aspect_mode) {
+		return &cache.mask;
+	}
+	cache.mask = opennova::hud::build_scope_circle_mask(0, 0, w, h, screen_w,
+			p_draw_crosshair, p_aspect_mode);
+	cache.valid = true;
+	cache.w = w;
+	cache.h = h;
+	cache.screen_w = screen_w;
+	cache.draw_crosshair = p_draw_crosshair;
+	cache.aspect_mode = p_aspect_mode;
+	return &cache.mask;
+}
+
+const std::vector<opennova::hud::ScopeMaskVertex> *scope_mask_verts(
+		const opennova::hud::ScopeCircleMask &mask, int batch) {
+	switch (batch) {
+		case godot::HudPos::SCOPE_MASK_RING: return &mask.ring;
+		case godot::HudPos::SCOPE_MASK_CROSS: return &mask.crosshair;
+		case godot::HudPos::SCOPE_MASK_GRID: return &mask.grid;
+		default: return nullptr;
+	}
+}
+
+const std::vector<uint16_t> *scope_mask_ids(const opennova::hud::ScopeCircleMask &mask,
+		int batch) {
+	switch (batch) {
+		case godot::HudPos::SCOPE_MASK_RING: return &mask.ring_indices;
+		case godot::HudPos::SCOPE_MASK_CROSS: return &mask.crosshair_indices;
+		case godot::HudPos::SCOPE_MASK_GRID: return &mask.grid_indices;
+		default: return nullptr;
+	}
+}
+
+} // namespace
+
+PackedVector2Array HudPos::scope_mask_points(const Vector2 &p_surface, int p_screen_width,
+		bool p_draw_crosshair, int p_batch, int p_aspect_mode) {
+	PackedVector2Array out;
+	const opennova::hud::ScopeCircleMask *mask =
+			scope_mask_build(p_surface, p_screen_width, p_draw_crosshair, p_aspect_mode);
+	if (mask == nullptr) {
+		return out;
+	}
+	const std::vector<opennova::hud::ScopeMaskVertex> *verts = scope_mask_verts(*mask, p_batch);
+	if (verts == nullptr) {
+		return out;
+	}
+	out.resize(static_cast<int64_t>(verts->size()));
+	for (size_t i = 0; i < verts->size(); ++i) {
+		out[static_cast<int64_t>(i)] = Vector2((*verts)[i].x, (*verts)[i].y);
+	}
+	return out;
+}
+
+PackedColorArray HudPos::scope_mask_colors(const Vector2 &p_surface, int p_screen_width,
+		bool p_draw_crosshair, int p_batch, int p_aspect_mode) {
+	PackedColorArray out;
+	const opennova::hud::ScopeCircleMask *mask =
+			scope_mask_build(p_surface, p_screen_width, p_draw_crosshair, p_aspect_mode);
+	if (mask == nullptr) {
+		return out;
+	}
+	const std::vector<opennova::hud::ScopeMaskVertex> *verts = scope_mask_verts(*mask, p_batch);
+	if (verts == nullptr) {
+		return out;
+	}
+	out.resize(static_cast<int64_t>(verts->size()));
+	for (size_t i = 0; i < verts->size(); ++i) {
+		out[static_cast<int64_t>(i)] = opennova::color_from_argb((*verts)[i].argb);
+	}
+	return out;
+}
+
+PackedInt32Array HudPos::scope_mask_indices(const Vector2 &p_surface, int p_screen_width,
+		bool p_draw_crosshair, int p_batch, int p_aspect_mode) {
+	PackedInt32Array out;
+	const opennova::hud::ScopeCircleMask *mask =
+			scope_mask_build(p_surface, p_screen_width, p_draw_crosshair, p_aspect_mode);
+	if (mask == nullptr) {
+		return out;
+	}
+	const std::vector<uint16_t> *ids = scope_mask_ids(*mask, p_batch);
+	if (ids == nullptr) {
+		return out;
+	}
+	out.resize(static_cast<int64_t>(ids->size()));
+	for (size_t i = 0; i < ids->size(); ++i) {
+		out[static_cast<int64_t>(i)] = static_cast<int32_t>((*ids)[i]);
+	}
+	return out;
+}
+
+PackedFloat32Array HudPos::scope_mask_frame(const Vector2 &p_surface, int p_screen_width,
+		int p_aspect_mode) {
+	PackedFloat32Array out;
+	const int32_t w = static_cast<int32_t>(p_surface.x);
+	const int32_t h = static_cast<int32_t>(p_surface.y);
+	if (w <= 0 || h <= 0) {
+		return out;
+	}
+	const opennova::hud::ScopeCircleMaskGeometry g = opennova::hud::scope_circle_mask_geometry(
+			0, 0, w, h, p_screen_width > 0 ? p_screen_width : w, p_aspect_mode);
+	out.resize(9);
+	out[0] = g.center_x;
+	out[1] = g.center_y;
+	out[2] = g.ring_size;
+	out[3] = g.radius_inner;
+	out[4] = g.radius_outer;
+	out[5] = g.scale_x;
+	out[6] = g.scale_y;
+	out[7] = g.arm_half_thickness;
+	out[8] = g.tick_spacing;
+	return out;
+}
+
+int HudPos::scoped_view_overlay(bool p_binoculars_view_active, bool p_sighted,
+		bool p_scoped) {
+	return static_cast<int>(opennova::hud::scoped_view_overlay(
+			p_binoculars_view_active, p_sighted, p_scoped));
+}
+
+bool HudPos::scoped_selector_from_def(int p_weapon_flags, int p_weapon_flags2) {
+	return opennova::hud::scoped_selector_from_def(
+			static_cast<uint32_t>(p_weapon_flags), static_cast<uint32_t>(p_weapon_flags2));
+}
+
+bool HudPos::sighted_selector_from_def(int p_weapon_flags, bool p_slot_switching_from) {
+	return opennova::hud::sighted_selector_from_def(
+			static_cast<uint32_t>(p_weapon_flags), p_slot_switching_from);
 }

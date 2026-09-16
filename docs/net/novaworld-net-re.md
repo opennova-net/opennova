@@ -382,7 +382,7 @@ sweep; blank = not yet characterized.
 | 0x37 | 0x431250 | `_HandleWeaponSlotAction` (misnomer: door rows) | DOOR-SLOT ACTION `[u16 handle][i16 state][u8 number]` (5 B, each short read 0): row = door_slot (entity+0x2B8) + number − 1; gate itemDef && row > −1 && number != 0 && number <= (int8)itemDef+0x890 (@0x4312f8); row.state = state (@0x431307); state 0 snaps the phase to 0 (@0x43131f), state 2 to 0x10000 (@0x431316), 1/3 leave it to FadeEffect_UpdateAll. Senders: `Server_SendWeaponSlotActionPacket @0x50F9A0` (mask 0x90; the state word is row (door_slot + n − 1)'s state, 0 when n > count, unguarded for n == 0) on every row completion (FadeEffect_UpdateAll @0x44e982, 1-based row number) and for EVERY selected section of a door command (Entity_ProcessSectionDamageTransition @0x43f462, 0-based idx, transition or not), plus the requester-only reply to C2S 0x1A (@0x514c74, mask 0x30). Codec `decode_door_slot_action` / `encode_door_slot_action` (2026-09-12); the runtime consumers are D-DOOR-1 (world-wac-ai-re.md §33.14) |
 | 0x38 | 0x4260B0 | `_0x038` | |
 | 0x39 | 0x42E6D0 | `_0x039` | anti-cheat charattr CHARACTER-row CRC challenge `[u32 seed]` → C2S 0x1C (§5.34) |
-| 0x3A | 0x422680 | `_0x03A` | MEDIC-REVIVING (empty body, witnessed 2026-09-10): the recipient's `+0x1E0` "a medic is reviving me" word <- 1, `dword_B764BC` <- 255, the default progress bar, the player ambient sound. The latch hides the DEATH screen's MEDIC/CALLMEDIC statics (`!entity+0x1E0` @0x553ec5) and blocks a second medic (`GameEvent_HandleMedicInteraction @0x4E6790`); cleared by `Game_InitNewRound @0x422740` (the local respawn) and mission start @0x524360; the host stamps the victim in the revive sender @0x517CD0. Ported: `ClientState::local_medic_reviving` -> the deploy statics feed |
+| 0x3A | 0x422680 | `_0x03A` | MEDIC-REVIVING (empty body, witnessed 2026-09-10): the recipient's `+0x1E0` "a medic is reviving me" word <- 1, `dword_B764BC` <- 255, the default progress bar, the player ambient sound. The latch hides the DEATH screen's MEDIC/CALLMEDIC statics (`!entity+0x1E0` @0x553ec5) and blocks a second medic (`GameEvent_HandleMedicInteraction @0x4E6790`); cleared by `Game_InitNewRound @0x422740` (the local respawn) and mission start @0x524360; the host stamps the victim in the revive sender @0x517CD0. Ported: `ClientState::local_medic_reviving` -> the deploy statics feed, and (2026-09-16) the `dword_B764BC` REVIVE TINT consumer -- `world::screen_flash_track_revive` off that latch's rising edge in `JoinerRole::pump`, drawn as the blue-white fullscreen tint that decays 255 -> 196 and HOLDS until the round clears ([docs/interface/hud-re.md](../interface/hud-re.md) "Local damage feedback") |
 | 0x3B | 0x431340 | `_0x03B` | |
 | 0x3D | 0x422870 | `_0x03D` | |
 | 0x3E | 0x4226D0 | `_0x03E` | ack-style |
@@ -674,6 +674,26 @@ pre-session sequence below (re-read 2026-09-14), then the session steps 1–3:
 - the `NapiGameSettings` / `NetConfig` fill: `game_settings.mp_attributes =
   multiplayerAttributeFlags_34C` (`@ 0x561cdb`, i.e. 0x3A06), `game_settings.max_players = 1`
   (`@ 0x561cec`), `server_name = "SINGLEPLAYERGAME"`; then `CNapiGameSession_CreateSession` (step 3).
+
+**SP role words (witnessed 2026-09-16, OPEN divergence).** `sub_4C4A50(ctx, 0) @ 0x561bd4`
+is the session-state setter (`@ 0x4c4a50`: state 0 = disconnected, 1..3 = active; it stores
+`+0x50 = state` and `+0x58 = (state != 0)`, and a state-1 exit runs
+`CNapiGameSession_ResetToDisconnected`). Single player therefore enters
+`CNapiGameSession_CreateSession` with `transport_mode (+0x50) = 0` and **`is_in_session (+0x58)
+= 0`**, then `SetConnectionMode(3)` (+0x5C 3, +0x60 1, +0x64 1) and `SetTransportMode(1)`
+(+0x54 1): the six words are `[0, 1, 0, 3, 1, 1]`. `CreateSession` itself never sets `+0x58`
+(its only stores `@ 0x4c9814/@ 0x4c9817` zero both words on the state-1 reset path), and
+the launch reads the word back `@ 0x561e79` (`if (!is_in_session) AnimChannel_ResetActiveSlots()`).
+`is_in_session` has **280 readers**, many of which are the SP-vs-MP switch itself (e.g.
+`UI_OpenWeaponScreenSinglePlayer @ 0x424390`, `Entity_GetNetIdIfAuthority @ 0x4e4010`
+"not in a multiplayer session, or authority", `Input_HandleActionBinding` case 23
+`@ 0x49b3de`, `Server_TickUpdate @ 0x51d86e`, `Game_StartMission` x18). Our
+`create_session` (`engine/runtime/inmatch/server_session.cpp`) stores `is_in_session = 1`
+unconditionally, so every ported consumer runs the MP arm in single player (`NetworkType`
+has no 0 value either). Not flipped in this pass: the consumers must be audited one by one
+against their SP arms first (the retail SP loop shape under `is_in_session = 0` is the
+open question for the "in-process listen server" reading above). Cross-check: the jo-c
+reconstruction observed the same six words live (`docs/native-frontend-278.md`).
 
 Reimpl: `HostRole::bring_up_singleplayer` (`engine/runtime/inmatch/host_role.cpp`) builds the SP
 `GameConfig` with SINGLEPLAYERGAME / `mp_attributes = 0x3A06` / `max_players = 1`, mirrored by the
@@ -2000,7 +2020,7 @@ header; the rest is client-side.
 | sub-block 3 | `==3 && g_GameType & 0x20000`: 4× i32, 16 B (else 0 B) | `won, lost, show_win, show_lose` → dword_AC86F4/F0/EC/E8. The gate is wire-invisible, so `decode_frame_update` reads the body only when its `is_objective_gametype` hint is set. **First witnessed in probe3** (Co-op, `g_GameType 0x30020`; 771 frames, body all-zero); the `flags2 & 0xF0` high bits don't change sub-block selection (D-NET-75) [orig: 0x430361..0x4303D0] |
 | state_flag_byte | u8 | **The recipient's OWN stance echo**: bit 0 (prone)→`dword_B76484`, bit 1 (crouch)→`dword_B76480`, bits 0/1→`g_local_player_entity` MoveOrder (+0x12C) bits 8/9 — re-latched EVERY frame (@ 0x430562/@ 0x430570), so a host that hardcodes 0 force-STANDS a crouched client each frame (witness 2026-07-03; the pre-v32 crouch/prone bug). The authoritative source is the server's per-player stance from C2S 0x1D (dispatch table) — vehicle attach/detach clears it (@ 0x435c54/@ 0x43561e). (The `<<8` of older notes was the receiver's internal shift, not a wire-format detail) [orig: 0x4303E5] |
 | mountHandle | u16 | vehicle-mount handle (`pool<<12\|slot`; `0xFFFF`=none) [orig: 0x430408] |
-| health | i16 | read @0x430428; applied late in the handler — compares the new value to the stored `Health` (`cmp dx,[entity+0x11E]` @0x43059a, `jge` skip @0x4305a1) and, ONLY when it DROPPED, fires INLINE COSMETIC feedback (red flash `dword_B764B4+=0x78` @0x4305a3, camera-shake `dword_B764B0+=0x0A` @0x4305c1; both capped 0xFF; **no `Radar_AddBlip`** — distinct from the body motor's `Player_OnDamageReceived`, §5.38d) — then stores `Health` @0x4305df. ⇒ stream this at full health (`healthMax`) or any below-stored tail self-triggers the flash [orig: 0x430428 / 0x43059a / 0x4305df] |
+| health | i16 | read @0x430428; applied late in the handler — compares the new value to the stored `Health` (`cmp dx,[entity+0x11E]` @0x43059a, `jge` skip @0x4305a1) and, ONLY when it DROPPED, fires INLINE COSMETIC feedback (red flash `dword_B764B4+=0x78` @0x4305a3, camera-shake `dword_B764B0+=0x0A` @0x4305c1; both capped 0xFF; **no `Radar_AddBlip`** — distinct from the body motor's `Player_OnDamageReceived`, §5.38d) — then stores `Health` @0x4305df. ⇒ stream this at full health (`healthMax`) or any below-stored tail self-triggers the flash [orig: 0x430428 / 0x43059a / 0x4305df]. **Consumer ported 2026-09-16**: `world::screen_flash_arm_health_drop` (the fullscreen-flash words + the shake counter), called from `JoinerRole::apply_authoritative_health` ahead of the store; the flash words themselves are recorded in [docs/interface/hud-re.md](../interface/hud-re.md) "Local damage feedback" |
 | state_word | i16 | → `*(WORD*)g_local_player_entity->pad7` (packed state) — bytes 6/7 of the 7 B tail; previously misread as two separate `hdr_trail_a/b` bytes [orig: 0x430442] |
 | **mounted-ammo record (conditional, `(flags2 & 0xF) == 8`)** | 6 B (or 2 B early-skip) | recipient-scoped mount/loadout echo |
 | mount_handle | u16 | recipient's `mount_target`; `0xFFFF` early-skips the next 4 B [orig: writer @0x4FFDAE; reader @0x430474] |
@@ -7948,7 +7968,7 @@ initial − +684 remaining) < the ammo `arm_age` (dword 3) means the round is NO
 and spawns its `notarmmedammo` (+241) child in its place (`AmmoDef_LookupByName`, copies
 692 B of the projectile) — the inert/dud variant of a grenade inside arming distance (the
 old "penetration budget" reading was wrong);
-weapon-type-15 bone/section damage via `Entity_ComputeBoneCollisionBounds`; kinetic clamp
+weapon-type-15 bone/section damage via `Entity_PlaySectionBreakSound`; kinetic clamp
 (`Entity_ClampKineticEnergy`); pass-through flags 0x18000000 = `lawr|fgrenade`
 (`@0x4e95a0`); then `Projectile_ProcessDamageOnTarget @ 0x4E7FB0`.
 

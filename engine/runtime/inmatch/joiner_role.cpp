@@ -31,6 +31,7 @@
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <runtime/world/local_player_view.h> // local_player_view_refresh (the mount-change edge)
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/player_view.h>   // the fullscreen damage-feedback words + the shake arm
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
@@ -568,6 +569,15 @@ void JoinerRole::pump() {
 	materialize_replica_world();
 	spawn_and_arm_local_player();
 	if (decoded.health) apply_authoritative_health();
+	// The S2C 0x3A revive tint. Retail arms the word inside the message handler;
+	// our replica state keeps the recipient's retained +0x1E0 "a medic is
+	// reviving me" word instead, so the arm rides that latch's rising edge here
+	// (the latch drops on the local respawn, and the respawn's Game_InitNewRound
+	// clears the tint outright).
+	// [orig: NapiNPClientMsg_0x03A @0x422685 -> dword_B764BC = 255;
+	//  NapiNPClientMsg_GameReset @0x422843; Game_InitNewRound @0x422790]
+	world::screen_flash_track_revive(kernel.local.view.flash,
+			rt.state().local_medic_reviving);
 	sync_authoritative_mount();
 	apply_mounted_ammo_update();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
@@ -1116,6 +1126,18 @@ void JoinerRole::apply_authoritative_health() {
 			// HP. The independent C2S 0x0E gameplay hold never forces health to zero.
 			const int16_t health = rt.authoritative_spawn_released()
 					? rt.state().local_health : 0;
+			// The tail's DECREASE detector, ahead of the store: a signed
+			// compare against the recipient's currently stored Health, and only
+			// on a DROP does the handler fire its inline cosmetics -- the red
+			// damage vignette +0x78 and the camera shake +0x0A, both capped at
+			// 0xFF, with NO radar blip (this is not Player_OnDamageReceived).
+			// The handshake's pre-release zero default is not a wire drop, so
+			// the detector waits for the released tail.
+			// [orig: NapiNPClientMsg_0x00A @0x43059a `cmp dx,[eax+0x11E]` /
+			//  `jge` @0x4305a1 -> @0x4305a3..0x4305d4, store @0x4305df]
+			if (rt.authoritative_spawn_released())
+				world::screen_flash_arm_health_drop(lp.view.flash, lp.view.shake,
+						health, local->health);
 			if (health <= 0) {
 				local->health = health;
 				local_ai->health = health;
