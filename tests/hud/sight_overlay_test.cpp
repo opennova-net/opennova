@@ -4,6 +4,7 @@
 // slide multiplier's three arms. [orig: draw_weapon_sight_overlays @0x4dce00;
 //  Input_HandleActionBinding_0 case 216 @0x4e0c31; Player_InitPlayer @0x4e178c]
 
+#include <runtime/hud/scope_circle_mask.h>
 #include <runtime/hud/sight_overlay.h>
 
 #include <cstdio>
@@ -198,6 +199,130 @@ int main() {
 		far_default.scope_zero_step = 100;
 		far_default.scope_zero_default = 300;
 		expect(hud::sight_slide_multiplier(far_default) == 3, "`10 100 300 1` -> 3");
+	}
+
+	// ---------------------------------------------------------------------
+	// The scoped-view circle mask that follows the card on the Scoped arm
+	// [orig: Hud_DrawScopeCircleMask @0x5d17a0; the cross/grid @0x5d1160].
+	{
+		// The fork's order: binoculars, then Sighted, then Scoped.
+		expect(hud::scoped_view_overlay(true, true, true) ==
+						hud::ScopedViewOverlay::kBinocularMask,
+				"binoculars pre-empt both card selectors");
+		expect(hud::scoped_view_overlay(false, true, true) ==
+						hud::ScopedViewOverlay::kSightedCard,
+				"Sighted pre-empts Scoped, so no circle mask");
+		expect(hud::scoped_view_overlay(false, false, true) ==
+						hud::ScopedViewOverlay::kScopedCardWithCircleMask,
+				"the Scoped arm always reaches the circle mask");
+		expect(hud::scoped_view_overlay(false, false, false) ==
+						hud::ScopedViewOverlay::kEntityMarkers,
+				"neither selector draws the entity markers");
+		expect(hud::scoped_selector_from_def(1u, 0u), "Flags & 1 without Inset is Scoped");
+		expect(!hud::scoped_selector_from_def(1u, 0x200u), "Inset takes the other byte");
+		expect(hud::sighted_selector_from_def(2u, false), "Flags & 2 is Sighted");
+		expect(!hud::sighted_selector_from_def(2u, true), "SWITCHFROM clears the Sighted byte");
+
+		// The retail 1024x768 design surface: centre (512, 384), ring size
+		// (768 >> 3) + (768 >> 1) = 480, radii 340.8 / 720, and at the native
+		// 4:3 ratio scale_x == scale_y == 1 (a true circle).
+		const hud::ScopeCircleMaskGeometry g =
+				hud::scope_circle_mask_geometry(0, 0, 1024, 768, 1024);
+		expect(g.center_x == 512.0f && g.center_y == 384.0f, "the mask centres on the rect");
+		expect(g.ring_size == 480.0f, "ring size = (h >> 3) + (h >> 1)");
+		expect(std::abs(g.radius_inner - 340.8f) < .01f, "inner radius = 0.71 * ring size");
+		expect(g.radius_outer == 720.0f, "outer radius = 1.5 * ring size");
+		expect(std::abs(g.scale_x - 1.0f) < .0001f && std::abs(g.scale_y - 1.0f) < .0001f,
+				"4:3 makes both mask scales 1");
+		expect(std::abs(g.arm_half_thickness - 3.2f) < .0001f, "arm half thickness = W / 320");
+		expect(std::abs(g.tick_spacing - 16.0f) < .0001f, "tick pitch = W / 64");
+		// The outer radius clears the corner, so the annulus really masks the
+		// whole surface outside the scope circle.
+		expect(g.radius_outer > std::sqrt(512.0f * 512.0f + 384.0f * 384.0f),
+				"the outer ring covers the viewport corners");
+
+		// A forced 4:3 ratio on a 16:9 surface keeps scale_y at 1 and widens
+		// scale_x, the retail ellipse.
+		const hud::ScopeCircleMaskGeometry wide =
+				hud::scope_circle_mask_geometry(0, 0, 1920, 1080, 1920, 0);
+		expect(std::abs(wide.scale_y - 1.0f) < .0001f, "mode 0 pins scale_y at 1");
+		expect(std::abs(wide.scale_x - (1920.0f / 1080.0f) * 0.75f) < .001f,
+				"scale_x follows the surface ratio");
+
+		const hud::ScopeCircleMask rowless =
+				hud::build_scope_circle_mask(0, 0, 1024, 768, 1024, true);
+		expect(static_cast<int>(rowless.ring.size()) == hud::kScopeRingVertexCount,
+				"the ring submits 130 strip vertices");
+		expect(rowless.ring_indices.size() == 128u * 3u, "128 triangles expand the strip");
+		expect(rowless.ring[0].argb == hud::kScopeRingInnerColor &&
+						rowless.ring[1].argb == hud::kScopeRingOuterColor,
+				"inner 0xFF181820, outer 0xFF040408");
+		// Segment 0 sits at table index 0: cos 1, sin 0 -> due right of centre.
+		expect(std::abs(rowless.ring[0].x - (512.0f + 340.8f)) < .05f &&
+						std::abs(rowless.ring[0].y - 384.0f) < .05f,
+				"segment 0 is the inner vertex due right of centre");
+		expect(std::abs(rowless.ring[1].x - (512.0f + 720.0f)) < .05f,
+				"its outer twin shares the angle");
+		// Segment 16 is a quarter turn: +Y in the table is UP on screen.
+		expect(std::abs(rowless.ring[32].x - 512.0f) < .05f &&
+						std::abs(rowless.ring[32].y - (384.0f - 340.8f)) < .05f,
+				"a quarter of the ring is straight up");
+		// The 65th stop closes the loop back onto the first.
+		expect(std::abs(rowless.ring[128].x - rowless.ring[0].x) < .05f &&
+						std::abs(rowless.ring[128].y - rowless.ring[0].y) < .05f,
+				"the 65th stop closes the ring");
+
+		// The cross: four spokes from the exact centre out to 0.71 of the
+		// radii, breaking at 0.4, with the half-thickness across the axis.
+		expect(rowless.crosshair.size() == 28u && rowless.crosshair_indices.size() == 72u,
+				"four 7-vertex spokes");
+		expect(rowless.crosshair[0].x == 512.0f && rowless.crosshair[0].y == 384.0f &&
+						rowless.crosshair[0].argb == hud::kScopeCrosshairCenterColor,
+				"each spoke starts at the centre with alpha 0x20");
+		// Every endpoint passes through retail's ftol truncation, and the
+		// float 0.4 / 0.71 literals sit just off the round value: 0.4 * 480 is
+		// 192.0000029, so cx - it truncates DOWN to 319, and 0.71 * 480 is
+		// 340.7999897, so cx - it truncates to 171.
+		expect(rowless.crosshair[2].x == 319.0f &&
+						rowless.crosshair[2].argb == hud::kScopeCrosshairAxisColor,
+				"the left spoke breaks at trunc(cx - 0.4 * 480) = 319");
+		expect(rowless.crosshair[5].x == 171.0f,
+				"its outer end is trunc(cx - 0.71 * 480) = 171");
+		expect(rowless.crosshair[1].argb == hud::kScopeCrosshairEdgeColor &&
+						std::abs(rowless.crosshair[1].y - (384.0f - 3.2f)) < .001f,
+				"the off-axis vertices are transparent at +/- W/320");
+		expect(rowless.crosshair[7 + 2].y == 191.0f &&
+						rowless.crosshair[7 + 2].x == 512.0f,
+				"spoke 1 runs up to trunc(cy - 0.4 * 480) = 191");
+		expect(rowless.crosshair[7 + 5].y == 43.0f, "and out to 43");
+		expect(rowless.crosshair[14 + 2].x == 704.0f &&
+						rowless.crosshair[14 + 5].x == 852.0f,
+				"spoke 2 runs right (704 / 852)");
+		expect(rowless.crosshair[21 + 2].y == 576.0f &&
+						rowless.crosshair[21 + 5].y == 724.0f,
+				"spoke 3 runs down (576 / 724)");
+
+		// The grid: 4 ticks per direction at i * W/64, unscaled screen pixels.
+		expect(rowless.grid.size() == 80u && rowless.grid_indices.size() == 192u,
+				"sixteen 5-vertex diamonds");
+		expect(rowless.grid[0].x == 512.0f + 16.0f && rowless.grid[0].y == 384.0f &&
+						rowless.grid[0].argb == hud::kScopeGridTickCenterColor,
+				"the first tick is one pitch to the right");
+		expect(rowless.grid[15 * 5].y == 384.0f - 64.0f &&
+						rowless.grid[15 * 5].x == 512.0f,
+				"the last tick is four pitches up");
+		expect(rowless.grid[1].argb == hud::kScopeGridTickEdgeColor &&
+						std::abs(rowless.grid[1].x - (512.0f + 16.0f + 3.2f)) < .001f,
+				"the diamond points sit one arm half-thickness out at alpha 0x10");
+
+		// A card that DREW rows suppresses only the cross and the grid; the
+		// annulus is unconditional on the Scoped arm.
+		const hud::ScopeCircleMask carded =
+				hud::build_scope_circle_mask(0, 0, 1024, 768, 1024, false);
+		expect(static_cast<int>(carded.ring.size()) == hud::kScopeRingVertexCount,
+				"authored SIGHTS rows never suppress the circle mask");
+		expect(carded.crosshair.empty() && carded.grid.empty(),
+				"they suppress the inner cross and grid only");
 	}
 
 	if (failures != 0) {

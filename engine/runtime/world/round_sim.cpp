@@ -19,6 +19,7 @@
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/collision_force.h>
+#include <runtime/world/player_view.h>
 #include <runtime/world/round_move_effect.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/weapon_table.h>
@@ -33,6 +34,11 @@ constexpr double kPi = io::kPi;
 constexpr double kRadPerBam = io::kRadiansPerBam;
 constexpr int32_t kProjectileGravityQ16 = 167;
 constexpr int32_t kDragTableSize = 1220;
+// The glass-section break sound: row 29 of the 84-row {char name[32]; int *handle}
+// trigger-set resolver table, whose slot is the global the break helper plays
+// [orig: table row @0x82F9A4 -> dword_24E0920, read @0x439d1c; DialogSystem_Init
+// @ 0x527687 resolves every row at load].
+constexpr const char *kGlassSmashSound = "GLASS_SMASH";
 
 constexpr uint32_t rotl32(uint32_t value, unsigned count) {
     return (value << count) | (value >> (32u - count));
@@ -1316,6 +1322,14 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             // [orig: Entity_HandleDamageAndTriggerZones @0x40772f]
             const bool target_not_dead =
                 ((target->flags | target->engine_flags) & kEntityFlagDead) == 0;
+            // The local player's damage feedback (red vignette + camera shake) arms
+            // on every hit that beats the 5-point floor, after the class damage
+            // callback and ahead of the kill routing; retail tests the value it
+            // just computed, not the applied health delta
+            // [orig: Projectile_ProcessDamageOnTarget @0x4e8213..0x4e822b ->
+            //  Player_OnDamageReceived @0x4dd880].
+            if (target_not_dead && target->handle == world.cached.local_player && damage > 5)
+                player_on_damage_received(world);
             if (!authoritative && !peer_person_hit) {
                 // The hit callback executes on both peers; only the health
                 // subtraction and gameplay kill fan below require authority.
@@ -1716,6 +1730,86 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             }
         }
 
+        // The entity-impact handler's two FACE-MATERIAL legs, in retail order:
+        // the dead-victim effect suppression, then the material-15 section
+        // break. Both read the struck face's CFAC material byte (ray[22],
+        // `collision.surface_type`), cached once by retail into the frame slot
+        // the auto-namer calls `weaponType` — it is the material, not a weapon
+        // type (world-wac-ai-re §15.8 "ray[22] = face MATERIAL byte"; the same
+        // slot feeds the material + 4 effect row @0x4e982b).
+        // Only hit types 1/2 (pool-2 statics, pool-1 dynamics) reach this
+        // handler; the person pass has its own handler, ported below.
+        // [orig: Projectile_HandleEntityImpact @ 0x4E9390 — `mov ecx, [edi+58h]`
+        //  @0x4e95c7; the sole caller arm @0x4ea73a]
+        const bool entity_impact_handler_leg =
+            collision.hit_class == ProjectileHitClass::StaticEntity ||
+            collision.hit_class == ProjectileHitClass::DynamicEntity;
+        // A victim already flagged dead drops the whole impact-effect
+        // presentation for two face classes: a person body (itemDef+92 == 3)
+        // and the flesh material 19 (19 + 4 = the `flesh` effect row). Either
+        // clears retail's `shouldProcessEffect`, which gates BOTH the
+        // material + 4 spawn and the slot-2 local-player feedback, so a corpse
+        // on the item pass sprays nothing.
+        // [orig: the dead test `test byte ptr [esi+24h], 2` @0x4e95c3,
+        //  `cmp dword ptr [eax+5Ch], 3` @0x4e95d0 storing 0 @0x4e95d6,
+        //  `cmp ecx, 13h` @0x4e95db storing 0 @0x4e95e0; consumed @0x4e9817]
+        bool entity_effect_suppressed = false;
+        if (entity_impact_handler_leg && target != nullptr &&
+            (((target->flags & kEntityFlagDead) != 0) ||
+             ((target->engine_flags & kEntityFlagDead) != 0)) &&
+            (target->item_type == 3 || collision.surface_type == 19))
+            entity_effect_suppressed = true;
+        // Face material 15 is GLASS: a round through a live BUILDING's glass
+        // breaks that section outright. The section bit is set on the victim
+        // unconditionally (even section 0), while the helper that fronts it
+        // plays the break sound only for a not-yet-broken NON-ZERO section of
+        // an entity that carries an item def. That helper is an auto-namer
+        // misnomer: its transformed min/max bone points and the extent product
+        // it computes are dead locals, and its one observable effect is the
+        // full-volume positional play of the GLASS_SMASH trigger set at the hit
+        // point. NOTHING recomputes collision bounds, in retail or here: the bit
+        // removes the section from the DRAW (`item_hidden_sections` ->
+        // inmatch/present_rows.cpp) and from the person bone-sphere walks
+        // (collision_query.cpp `collision_raycast_person_sections`,
+        // collision_trace.cpp), while the item CFAC face walk consults only the
+        // matrix-disabled bit, so a shot-out pane still stops ordinary rounds.
+        // The rocket family is what passes through it, by the report below.
+        // [orig: the face walk's only per-section gate is `(boneMatrix+60) & 3`
+        //  @0x4e4f12 in Physics_RaycastAgainstBoneCollision @ 0x4E4CB0]
+        // [orig: `cmp ecx, 0Fh` @0x4e964f, the husk gate `test byte ptr
+        //  [esi+24h], 4` @0x4e9654, `cmp dword ptr [ecx+5Ch], 5` @0x4e965d, the
+        //  `or [esi+134h], edx` @0x4e9684; the helper
+        //  Entity_PlaySectionBreakSound @ 0x439C00 — gate @0x439c08 /
+        //  @0x439c1e / @0x439c2a, play @0x439d25 ->
+        //  Entity_PlaySound3D_FullVolume @ 0x528E20 -> Sound_Play3DPositional
+        //  @ 0x527CB0 at volume 255; the bank handle dword_24E0920 is row 29
+        //  `GLASS_SMASH` of the 36-B {name[32], slot*} resolver table @0x82F9A4
+        //  that DialogSystem_Init @ 0x527687 fills]
+        if (entity_impact_handler_leg && collision.surface_type == 15 &&
+            target != nullptr && (target->engine_flags & kEntityFlagHusk) == 0 &&
+            target->item_type == 5 && collision.section_index >= 0) {
+            // Material 15 can only arrive from a CFAC face walk, so retail's
+            // hit record always carries that face's section here; the bound
+            // keeps the shift defined for the face-less sphere stand-in.
+            const int32_t section = collision.section_index;
+            const uint32_t bit = 1u << (static_cast<uint32_t>(section) & 31u);
+            if (section != 0 && (target->section_mask & bit) == 0 &&
+                target->has_item_def)
+                world.out.fire_sounds.play_immediate(
+                    kGlassSmashSound, impact_position, target->bms_id,
+                    target->handle.packed);
+            target->section_mask |= bit;
+            // UNPORTED: the pass-through report. A `lawr|fgrenade` round
+            // (ammo flags 0x18000000, the round's +0x114 copy) that breaks a
+            // section reports "continue" to the flight loop and keeps flying
+            // through the hole. RoundSim has no round-continues output — an
+            // entity stop always consumes the round below — so the rocket
+            // stops at the glass instead of passing it.
+            // [orig: `test dword ptr [ebx+114h], 18000000h` @0x4e968a ->
+            //  `mov dword ptr [eax], 1` @0x4e969a; DEF_AMMO_FLAG_LAWR 0x08000000
+            //  | DEF_AMMO_FLAG_FGRENADE 0x10000000, the flag table @0x813500]
+        }
+
 		if (!not_armed && target != nullptr && ammo != nullptr) {
 			// The impact helper receives the ray's incoming direction, not
 			// the struck face normal. [orig: Projectile_UpdatePhysics @0x4E9D70,
@@ -1843,6 +1937,12 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             imp.effect_tag = collision.surface_type + 4;
         } else {
             imp.effect_tag = 4; // generic object without material data
+        }
+        // The dead-victim gate resolved above with the other face-material legs
+        // [orig: `shouldProcessEffect` @0x4e95d6/@0x4e95e0, consumed @0x4e9817].
+        if (entity_effect_suppressed) {
+            imp.present_effect = false;
+            imp.present_sound = false;
         }
         imp.tick = world.logic_tick;
         // Armor is an additional row before the ordinary person effect. Its

@@ -51,6 +51,36 @@ const PARENT_SLOTS := {
 # values 0/1/2); ACCESSORY and the grenades have none.
 const TYPE_SLOTS := ["PRIMARY", "SECONDARY"]
 const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
+# The three loadout categories in the order the kit page serializes them.
+# retail: the category_names[] array built at 0x55e4bc-0x55e4cc.
+const KIT_SLOT_ORDER := ["PRIMARY", "SECONDARY", "ACCESSORY"]
+
+# The voice definition table: one row per selectable character voice,
+# {enabled, CHARVOICE id, avatar SEX the row belongs to} (sex 0 = male,
+# 1 = female -- the head part's `sex` keyword).
+# retail: the 11 12-byte rows based at 0x83C7A8; the walk starts at the id word
+# 0x83C7AC, strides 12 and stops at ammoDef @ 0x83C830, testing
+# `*(ptr - 1) != 0 && avatar_sex == ptr[1]`. Row id 9 is the one DISABLED row.
+const VOICE_TABLE := [
+	[1, 1, 0], [1, 2, 0], [1, 3, 0], [1, 4, 0], [1, 5, 0], [1, 6, 0],
+	[1, 7, 1], [1, 8, 1], [0, 9, 0], [1, 10, 0], [1, 11, 1],
+]
+# The DEFAULT_VOICE row's value, and the value a rejected persisted override
+# falls back to. retail: UIList_AddRow(list, DEFAULT_VOICE, 0, 0, -1) @ 0x55dd76
+# and `if (!found) profile[team + 1532] = 0` @ 0x55de21.
+const DEFAULT_VOICE_VALUE := 0
+
+# The kit page's filler value: retail writes the literal string "-1" (@ 0x7C3328)
+# for every count/flags slot it has no number for, and the reader decodes a
+# missing value as -1 all the same.
+const KIT_FILLER := -1
+# The knife every page leads with, per side, then the medic's medpack.
+# retail: "WPN_KNIFE" @ 0x7C3584 / "WPN_KNIFE2" @ 0x55e4ec / "WPN_MEDPACK" @ 0x7D5CA8.
+const KIT_KNIFE_BLUE := "WPN_KNIFE"
+const KIT_KNIFE_RED := "WPN_KNIFE2"
+const KIT_MEDPACK := "WPN_MEDPACK"
+# The PLAYERCLASS value that earns the medpack entry (retail tests == 5).
+const MEDIC_PLAYER_CLASS := 5
 
 var _db: AvatarDatabase
 var _weapons: WeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
@@ -78,12 +108,25 @@ var _combo_handlers: Dictionary = {}
 # freed and rebuilt on each on_menu_built.
 var _icon_mounts: Dictionary = {}
 var _character_state := PlayerCharacterSelectionStateScript.new()
+# PLAYERVOICE row -> the row's VALUE (0 for DEFAULT_VOICE, else the CHARVOICE id);
+# the list is filled at runtime, so the values live here the way _nat_db_index
+# carries the nationality list's.
+var _voice_values: Array[int] = []
+# The persisted voice override per side, 0 = DEFAULT_VOICE.
+# retail: the profile bytes g_curPlayerProfile[teamIndex + 1532] @ 0x25510FC.
+var _voice_override: Dictionary = {}
 signal avatar_chosen(profile: Dictionary)
 
 
 ## Install the active + per-side weapon.sav character snapshot before the next build.
 func set_persisted_profile(profile: Dictionary) -> void:
 	_character_state.set_persisted_profile(profile)
+	# Retail keeps one override BYTE per side (profile+1532 and profile+1533);
+	# our saved profile carries a single "voice", so both sides start from it
+	# and then diverge per side exactly as retail's pair does. The per-side
+	# persistence of the pair is the remaining D-PLAYERINFO-9 residual.
+	var voice := int(profile.get("voice", DEFAULT_VOICE_VALUE))
+	_voice_override = {0: voice, 1: voice}
 
 
 # True for the JO PLAYER_INFO screen's unique avatar controls.
@@ -124,6 +167,7 @@ func _wire(_file: String, _screen: String) -> void:
 	_connect_combo("NATIONALITY", _on_nat_selected)
 	_connect_combo("DIVISION", _on_div_selected)
 	_connect_combo("COMBO_LIST", _on_combo_selected)
+	_connect_combo("PLAYERVOICE", _on_voice_selected)
 	_connect_pressed(VOICE_PREVIEW_CONTROL, _preview_voice)
 	# Prefer persisted team; otherwise retain player.mnu's authored SIDE_BLUE default.
 	var authored_team := 1 if _radio_checked("SIDE_RED") else 0
@@ -699,38 +743,99 @@ func _populate_combos() -> void:
 	_refresh_preview()
 
 
-# The voice list is avatar-derived: a default entry plus the selected character's
-# voice. [orig: PlayerInfo_HandleVoiceSelect @ 0x55fe00 -- DEFAULT_VOICE + CHARVOICE_%d]
+# The voice list is avatar-derived: DEFAULT_VOICE (value 0) plus every ENABLED
+# voice-table row whose sex matches the selected head's `sex` byte, each row
+# valued with its CHARVOICE id. A persisted override that is not one of those
+# rows is reset to DEFAULT_VOICE, and the list then selects BY VALUE.
+# retail: populate_player_voice_combo @ 0x55dce0 -- clear the list, resolve the
+# selected avatar's SEX through the combo record (sub_57AE90 @ 0x57ae90 returns
+# combo+280, which CAvatarDefs_ParseConfigLine stores from the head part's
+# sex field @ 0x57aad2; a combo the registry cannot resolve yields 0 = male),
+# add DEFAULT_VOICE, walk the table, then
+# `if (!found) profile[team + 1532] = 0` and
+# UIList_SelectByValue(list, profile[team + 1532], 1).
 func _populate_voices() -> void:
 	var combo := _id("PLAYERVOICE")
 	if combo < 0:
 		return
+	var sex := _selected_combo_head_sex()
+	var saved := selected_voice()
 	var rows := PackedStringArray()
+	_voice_values.clear()
+	_voice_values.append(DEFAULT_VOICE_VALUE)
 	rows.append(_menu_text("DEFAULT_VOICE", "Default"))
-	var voice := _selected_combo_head_voice()
-	if voice >= 0:
+	var found := false
+	for row in VOICE_TABLE:
+		if int(row[0]) == 0 or int(row[2]) != sex:
+			continue
+		var voice := int(row[1])
 		rows.append(_menu_text("CHARVOICE_%d" % voice, "Voice %d" % voice))
+		_voice_values.append(voice)
+		if voice == saved:
+			found = true
+	if not found:
+		_voice_override[_team] = DEFAULT_VOICE_VALUE
 	_set_combo_items(combo, rows)
+	var target := _voice_values.find(selected_voice())
+	_driver.select_row(combo, maxi(target, 0), false)
 
 
+## The persisted voice override for the shown side; 0 = DEFAULT_VOICE, otherwise
+## the CHARVOICE id the PLAYERVOICE list carries as that row's value.
+func selected_voice() -> int:
+	return int(_voice_override.get(_team, DEFAULT_VOICE_VALUE))
+
+
+# The selected combo head's SEX byte, the voice list's filter key. An
+# unresolvable selection yields 0 (male) the way retail's failed registry
+# lookup does. retail: sub_57AE90 @ 0x57ae90 -> MinimapSlot_FindByPackedId
+# @ 0x57a270, `return 0` on a miss @ 0x57aeb5.
+func _selected_combo_head_sex() -> int:
+	var head := _selected_combo_head()
+	return head.sex if head != null else 0
+
+
+# The selected combo head's own `voice` byte, the voice PREVIEW fallback.
+# retail: Avatars_ResolveSelectionIndex @ 0x57ae60 reads combo+284, stored from
+# the head part's voice field @ 0x57aae3.
 func _selected_combo_head_voice() -> int:
+	var head := _selected_combo_head()
+	return head.voice if head != null else -1
+
+
+func _selected_combo_head() -> AvatarPartRow:
 	if _db == null or _sel_nat < 0 or _sel_div < 0:
-		return -1
+		return null
 	var combo := _id("COMBO_LIST")
 	var idx := _driver.selected_row(combo) if combo >= 0 else 0
 	if idx < 0:
 		idx = 0
 	if idx >= _db.get_combo_count(_sel_nat, _sel_div):
-		return -1
-	return _db.get_combo(_sel_nat, _sel_div, idx).get_head().voice
+		return null
+	return _db.get_combo(_sel_nat, _sel_div, idx).get_head()
+
+
+# PLAYERVOICE selection: store the picked ROW VALUE as this side's override.
+# Retail does NOT repopulate the list here.
+# retail: sub_560030 @ 0x560030 -- `g_curPlayerProfile[teamIndex + 1532] =
+# *(BYTE *)(eventData + 16)`, the selection notification's value byte.
+func _on_voice_selected(row: int, _value: String) -> void:
+	if _populating:
+		return
+	_voice_override[_team] = (_voice_values[row]
+			if row >= 0 and row < _voice_values.size() else DEFAULT_VOICE_VALUE)
 
 
 func _preview_voice() -> void:
-	var voice := _selected_combo_head_voice()
-	if voice < 0 or _driver == null:
+	if _driver == null:
 		return
-	# The persisted profile override is owned by D-PLAYERINFO-9; until that profile
-	# field exists, retail's selected-avatar fallback is the authoritative voice.
+	# retail: PlayerInfo_PreviewVoice @ 0x55ff70 -- the persisted override when
+	# NON-ZERO, else the selected combo head's own voice byte.
+	var voice := selected_voice()
+	if voice == DEFAULT_VOICE_VALUE:
+		voice = _selected_combo_head_voice()
+	if voice < 0:
+		return
 	_driver.play_widget_sound(VOICE_PREVIEW_TRIGGER_FORMAT % voice, VOICE_PREVIEW_BANK)
 
 
@@ -856,6 +961,9 @@ func _on_div_selected(row: int, _value: String) -> void:
 	_populate_combos()
 
 
+# retail: PlayerInfo_HandleVoiceSelect @ 0x55fe00 -- the COMBO_LIST handler
+# despite its name (registered against "COMBO_LIST" @ 0x5615a6): it stores the
+# picked avatar and rebuilds PLAYERVOICE for the new head.
 func _on_combo_selected(_row: int, _value: String) -> void:
 	if _populating:
 		return
@@ -918,13 +1026,14 @@ func _remember_current_character_selection() -> void:
 # [orig: save_player_info_from_dialog @0x55EE3F-0x55EF38].
 func snapshot() -> Dictionary:
 	var combo := _id("COMBO_LIST")
-	var voice := _id("PLAYERVOICE")
 	var player_class := _selected_player_class()
+	# The persisted voice is the picked row's VALUE, not its position: retail
+	# stores the notification's value byte into the profile and re-selects the
+	# list by that value on the next populate.
 	var profile := _character_state.snapshot(
 			_team, _sel_nat, _sel_div,
 			_driver.selected_row(combo) if combo >= 0 else -1,
-			player_class, _edit_text("PLAYERNAME"),
-			_driver.selected_row(voice) if voice >= 0 else -1)
+			player_class, _edit_text("PLAYERNAME"), selected_voice())
 	# Missing weapon.def means there was no loadout choice to commit. Keep that
 	# distinct from a loaded screen whose three selected rows are explicitly NONE.
 	if _weapons != null and _weapons.is_loaded():
@@ -944,8 +1053,80 @@ func snapshot() -> Dictionary:
 			"secondary_ammo_type": selected_ammo_type("SECONDARY"),
 			"accessory": accessory.name if accessory != null else "",
 			"accessory_clips": selected_clips("ACCESSORY"),
+			"kit": kit_entries(),
 		})
 	return profile
+
+
+## The kit page exactly as retail serializes it: consecutive entries of
+## (name, primary ammo count, secondary ammo count, ammo-type/flags), in the
+## witnessed order -- the side's knife, the medic's medpack, the three loadout
+## categories, then ALWAYS three grenade slots. Each entry is a Dictionary with
+## the playersav::KitEntry field names, so the profile writer can hand the page
+## straight to the encoder.
+##
+## retail: serialize_weapon_loadout @ 0x55e4b0 -- knife first (@0x55e4dc picks
+## the blade off g_playerInfoTeamMask), the class-5 medpack block (@0x55e624),
+## the PRIMARY/SECONDARY/ACCESSORY selections (@0x55e6bb), then the fixed
+## g_playerInfoGrenadeSlots[0..2] walk (@0x55e7e0, bounded by
+## g_playerInfoAmmoPriCounts @ 0x25DC560 = three dwords past 0x25DC554).
+func kit_entries() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if _weapons == null or not _weapons.is_loaded():
+		return out
+	# The knife leads every page: the BLUE mask (2) -- and the defensive
+	# mask-zero leg -- take WPN_KNIFE, the RED mask (1) takes WPN_KNIFE2.
+	var team_mask := WeaponDatabase.player_info_team_mask(_team)
+	out.append(_kit_filler_entry(KIT_KNIFE_BLUE
+			if (team_mask & 2) != 0 or team_mask == 0 else KIT_KNIFE_RED))
+	if _selected_player_class() == MEDIC_PLAYER_CLASS:
+		out.append(_kit_filler_entry(KIT_MEDPACK))
+	for control in KIT_SLOT_ORDER:
+		# PRIMARY and SECONDARY carry their team's ammo-type byte as the entry's
+		# fourth value; ACCESSORY always writes the filler.
+		out.append(_kit_slot_entry(_slot_weapon_index(control),
+				selected_ammo_type(control) if control in TYPE_SLOTS else KIT_FILLER))
+	for i in GRENADE_CONTROLS.size():
+		# The three grenade slots are a FIXED array that the ammo fill zeroes
+		# before refilling, so a slot the class/team filter left empty
+		# serializes weapon-table entry 0
+		# retail: the zero store @ 0x55e8d0-0x55e8da in
+		# populate_weapon_accessory_ammo_ui @ 0x55e8b0.
+		out.append(_kit_slot_entry(
+				_grenade_rows[i].index if i < _grenade_rows.size() else 0, KIT_FILLER))
+	return out
+
+
+# An entry retail writes with the "-1" filler in all three value slots.
+func _kit_filler_entry(name: String) -> Dictionary:
+	return {
+		"name": name,
+		"ammo_primary": KIT_FILLER,
+		"ammo_secondary": KIT_FILLER,
+		"flags": KIT_FILLER,
+	}
+
+
+# One weapon-table entry with its recorded interleaved count pair.
+func _kit_slot_entry(index: int, flags: int) -> Dictionary:
+	var w := _weapons.get_weapon(index)
+	return {
+		"name": w.name if w != null else "",
+		"ammo_primary": int(_ammo_pri.get(index, KIT_FILLER)),
+		"ammo_secondary": int(_ammo_sec.get(index, KIT_FILLER)),
+		"flags": flags,
+	}
+
+
+# The weapon-table index a loadout list would report as its selected VALUE.
+# Every weapon row carries its table index and the NONE row carries 0, so a
+# NONE slot serializes weapon-table entry 0 -- retail's own quirk.
+# retail: the NONE insert UIList_AddRow(list, "NONE", 0, 0, 0) @ 0x56058f in
+# populate_weapon_slot_lists @ 0x560430, read back through
+# UIList_GetSelectedValue @ 0x644660 at 0x55e6e8.
+func _slot_weapon_index(control: String) -> int:
+	var w := _selected_weapon(control)
+	return w.index if w != null else 0
 
 
 func commit() -> void:

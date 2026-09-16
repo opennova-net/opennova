@@ -28,11 +28,22 @@ struct World;
 // and its per-tick movement delta, and the local-dead edge the death stamp
 // reads.
 struct LocalPlayerViewTracker {
-    // The binocular toggle seeds one fixed-radius random aim displacement. It
-    // survives movement/death/third-person suppression until the raw toggle
-    // drops [orig: the binocular-raise offset beside g_binocularsToggle].
+    // The binocular ACTIVATION seeds one fixed-radius random aim displacement.
+    // It survives movement/death/third-person suppression and is re-seeded on
+    // the next activation, not on the raw toggle: retail runs the seed from the
+    // RENDER frame behind a latch that is set on the first frame the optical
+    // view is up and cleared on every frame it is down, so a raise that stays
+    // suppressed (moving, dead, round over, third person) never draws
+    // [orig: Render_ProcessMainSceneFrame @0x5ca3d3..0x5ca3f8 — the
+    //  `if (!dword_29D6BA8) { dword_29D6BA8 = 1; Environment_RandomizeSunDirection(); }`
+    //  arm, the clear @0x5ca4b0; the seeded pair is added to the view angles
+    //  @0x5ca3f8..0x5ca407. Environment_RandomizeSunDirection @0x4dd830 is a
+    //  misnomer: it writes the BINOCULAR SWAY pair, dword_B7653C = 8*(int)s and
+    //  dword_B76540 = 8*(int)(s*cos(4194304.0)) with
+    //  s = sin(PRNG_Next16() << 16 * 1.4629627e-9) * 4194304].
     float binocular_yaw_offset_deg = 0.0f;
     float binocular_pitch_offset_deg = 0.0f;
+    bool binocular_sway_latched = false; // dword_29D6BA8
     // The FP viewmodel motion-lead tracker (per render frame) and the local
     // entity's per-62.5 Hz-tick movement delta it samples
     // [orig: the (position - entity+0x80) samples @0x437bb2/0x437b92/0x437ba2].
@@ -210,14 +221,20 @@ bool local_player_vehicle_zone_team_matches(const World &world);
 // Action 26: toggle the persistent binocular request. Refused while a
 // PowerThrow charge is live (the raised view would suppress the held weapon
 // input and turn the charge into an unintended release) and while a scope is
-// engaged in a gunner seat. A raise seeds the aim displacement from
-// `unit_random` in [0, 1); dropping the request zeroes it. Returns the new
-// requested state (false also = refused). `unit_random` is sampled once, only
-// on a raise. [orig: g_fireChargeStartTick @0xB76800; the action 26 gate; the
-//  offset seed beside g_binocularsToggle]
+// engaged in a gunner seat. Dropping the request zeroes the aim displacement;
+// SEEDING it is not this action's job (the once-per-activation render latch in
+// local_player_view_tick owns that). Returns the new requested state (false
+// also = refused). [orig: g_fireChargeStartTick @0xB76800; the action 26 gate]
 bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
-                                    PlayerViewState &v, LocalPlayerViewTracker &t,
-                                    const std::function<float()> &unit_random);
+                                    PlayerViewState &v, LocalPlayerViewTracker &t);
+
+// The binocular sway's ONCE-PER-ACTIVATION seed and its clear (the tracker's
+// `binocular_sway_latched` is retail's dword_29D6BA8). Runs after every
+// effective-mode refresh; draws one PRNG_Next16 word on the activating frame
+// only. [orig: Render_ProcessMainSceneFrame @0x5ca3d3..0x5ca3f8 / @0x5ca4b0 ->
+//  Environment_RandomizeSunDirection @0x4dd830]
+void local_player_binocular_sway_latch(World &world, const PlayerViewState &v,
+                                       LocalPlayerViewTracker &t);
 
 // Action 41: toggle NVG. Raising NVG over a settled Inset scope first drops the
 // scope through `scope_toggle` and latches a one-shot restore; clearing NVG
@@ -291,6 +308,21 @@ struct LocalPlayerViewFrame {
     //  Render_TerrainScene @0x610e51..0x610e5b]
     bool thermal_view = false;
     bool thermal_terrain_view = false;
+    // The three fullscreen damage-feedback quads, already reduced to what the
+    // presenting shell draws (player_view.h carries the arms/decays/colours):
+    // `screen_flash_white_alpha` is the raw word, `screen_flash_red_alpha` the
+    // capped DRAW alpha with the camera-mode-3 suppression applied, and
+    // `screen_flash_revive_channel` the red/green byte of the revive tint
+    // (blue 255) with `screen_flash_revive` as its non-zero gate.
+    // `hud_overlays_suppressed` is retail's whole-HUD early return while the
+    // white word burns.
+    // [orig: Render_ProcessMainSceneFrame @0x5CAB9A..0x5CAC48;
+    //  HUD_RenderAllOverlays @0x5a8098]
+    int32_t screen_flash_white_alpha = 0;
+    int32_t screen_flash_red_alpha = 0;
+    int32_t screen_flash_revive = 0;
+    int32_t screen_flash_revive_channel = 255;
+    bool hud_overlays_suppressed = false;
     bool mounted = false;
     bool third_person = false;
     bool third_person_selected = false;

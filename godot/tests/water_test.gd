@@ -566,8 +566,13 @@ func test_strip_and_mirror_register_to_the_live_aspect_mode_target() -> void:
 			+ "policy 80), never the surface camera's culling superset")
 	var uv_scale: Vector2 = water.get_water_material().get_shader_parameter(
 			"u_reflection_uv_scale")
-	# The target is sized to whole pixels, so the ratio carries one rounding.
-	assert_almost_eq(uv_scale.y, selected, 0.002,
+	# The target is sized to whole pixels (lround(h / selected)), so the ratio
+	# carries one rounding of the target WIDTH: on a tiny headless surface that
+	# is a few thousandths, on a real one well under the fixed floor.
+	var target_vp := through.get_viewport()
+	var one_pixel := 1.0 / float(target_vp.size.x) if target_vp != null \
+			and target_vp.size.x > 0 else 0.0
+	assert_almost_eq(uv_scale.y, selected, maxf(0.002, 2.0 * one_pixel),
 			"reflection V converts from the TARGET's projection (the selected ratio) "
 			+ "to the square RTT")
 

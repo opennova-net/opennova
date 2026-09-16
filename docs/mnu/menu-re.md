@@ -182,9 +182,39 @@ in this section).
 **Frame entry.** The menu is a game MODE (struct `@ 0x83b404`): init =
 `Menu_InitShellResources @ 0x552500`, update = `Menu_UpdateFrame @ 0x5528a0`
 (nav push, message pump, `scene_end_frame` on `g_GameMenu @ 0x2551100`, LAN/
-preview/admin pumps), render = `Menu_RenderFrame @ 0x54b7c0`: device-lost
+preview/admin pumps, then the deferred expansion reload below), render =
+`Menu_RenderFrame @ 0x54b7c0`: device-lost
 handling, gate on `g_GameMenu` + `g_menu_render_dirty @ 0x2551114`, clear,
 BeginScene, Bink update, `CUIScene_DrawScreensAndCursor @ 0x63bf60`, Present.
+
+**Deferred expansion reload (witnessed + PORTED 2026-09-16).** Choosing an
+expansion NEVER remounts inside the click handler. The selection handler
+`[orig: sub_55A710 @ 0x55a710]` saves the profile, copies the pick into
+`g_ExpansionName`, and only RAISES a request flag — `dword_252DD90 = 1`
+`@0x55ad4f` when the pick took, `= 0` `@0x55ad5b` when it did not. The tail of
+`Menu_UpdateFrame` then runs it on the NEXT menu update tick
+`@0x552906-0x55291d`:
+
+```c
+if ( dword_252DD90 && !dword_25C7708 ) {
+    Game_ReloadExpansionAndMods();   /* @ 0x552710 */
+    dword_252DD90 = 0;
+}
+```
+
+The second flag is the VIDEO-MODE-CHANGE state machine's state, not a second
+reload latch: `0` idle, `2` apply pending, `3` awaiting confirm
+(`[orig: apply_video_mode_change @ 0x55a590]`; seeded `0` by
+`[orig: sub_555710 @ 0x555734]`, also read by `[orig: sub_55C450 @ 0x55c464]`
+and gated on by `options_screen_init @ 0x554820` and
+`Game_CloseInGameScreens @ 0x54b942`). A resolution change in flight therefore
+SUPPRESSES the remount until it settles; the request stays raised.
+
+`menu_shell.gd` ports the deferral: `_apply_expansion` validates the pick and
+stores `_expansion_reload_request`, and the public `update_menu_frame()` (the
+`_process` body, our `Menu_UpdateFrame`) consumes it at its tail through
+`_mount_expansion`. OpenNova has no video-mode state machine, so only the
+request flag gates there.
 
 **Scene walk** `[orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]`: every screen
 in the scene container (`scene+20`: `{+4 array, +8 count}`) draws via vtable+24
@@ -909,6 +939,23 @@ then the cursor — retail paints both after every screen widget,
 a child canvas item one z above the frame, so it draws over any companion mount. Pinned by
 `menu_frame_compiler_test` (the overlay tail holds the popup quads; empty with no popup
 and no cursor).
+
+**Cursor material flags (witnessed 2026-09-16, not ported).** The CURSOR node's `FLAGS`
+text is resolved by `sub_646CC0 @ 0x646cc0`: tokens split on `" ,|+"`, each matched
+case-insensitively against `g_UIMaterialFlagNames @ 0x84a5d0` (43 rows x 132 bytes,
+`wchar name[64]` + `DWORD flags`) and OR'd. Rows: `STANDARD 0x300600`,
+`STANDARD_TRANSPARENT 0x300651`, `AFUNC_*` nibble 0..0xA (`NONE/BLEND/SRCCOPY/ADD/
+SHADE/GLOW/ALPHALIGHT/MULTIPLY/DEST/MULTIPLYDBL/SQR/SQRADD`, bitmask 0xF), `ASRC_*`
+(`CONSTANT 0x10, ITERATED 0x20, TEXTURE 0x30, TEXTURExCONSTANT 0x40, TEXTURExITERATED
+0x50`, mask 0xF0), `COLOR_*` (`CONSTANT 0x100 .. TEXTUREdpITERATED 0x900`, mask 0xF00),
+`COLOR2_SQRD 0x1000`, `APPLYSPECULAR 0x10000`, `APPLYFOG 0x20000`, `ALPHATEST 0x40000`,
+`NATIVE2X 0x80000`, `NOWRITEDEPTH 0x100000`, `NOCHECKDEPTH 0x200000`,
+`GMAT_OVR_CLAMPUV1/2 0x1000000/0x2000000`, `TINTASTEXT 0x80000000`. The cursor texture
+is created with the resolved word (`STANDARD` alone draws OPAQUE, the black-box symptom the
+jo-c reconstruction hit with a truncated table). Our `mnu` parser keeps the string
+(`MnuCursor::flags`) and nothing consumes it; every shipped JO `.mnu` authors exactly
+`STANDARD_TRANSPARENT` and no `BITMAP_FLAGS` at all, so the alpha-blended cursor we draw
+matches the only authored value. Port the table when a data set authors anything else.
 
 **Activation vs scripted ACTION order (fixed 2026-08-15, same train; cataloged as D-MNU-19 — kept divergence, reimpl-structural):** retail runs a
 button's ACTION list first and its registered control callback last

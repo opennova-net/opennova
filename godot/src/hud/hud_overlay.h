@@ -280,7 +280,6 @@ public:
 	static int next_hud_color_index(int p_index);
 	static int hud_detail_level_default();
 	static int hud_detail_level_blank();
-	static int clamp_hud_detail_level(int p_level);
 	static int next_hud_detail_level(int p_level);
 	static int showhud_flags_default();
 	static int next_showhud_flags(int p_flags);

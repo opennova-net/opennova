@@ -39,6 +39,12 @@ The 2026-07-31 recoil/spread grill then closed the write side behind the
 crosshair's two dynamic terms: the round-spawn impulse, the infantry-body
 decay/drift, the local movement/weapon-weight accumulator, and their distinct
 projectile-versus-HUD shifts are now witnessed and ported (D-HUD-7).
+The 2026-09-16 pass witnessed and ported the **scoped-view circle mask**
+(`Hud_DrawScopeCircleMask @0x5d17a0` + the reticle cross/grid
+`draw_minimap_crosshair_and_grid @0x5d1160`), refuting this record's
+"rowless-weapon fallback" gate reading — the mask draws on every Scoped frame
+and the SIGHTS row count gates only the inner cross and grid — and corrected
+the HUD declutter level arithmetic to retail's unclamped 8-bit form.
 The 2026-08-15 post-merge review witnessed and ported the **HUD declutter**
 system (`huddetail`/`HUDDECLUT_*` — refuting the July "compiled-in `-1`
 master switch" reading), corrected the map-pointer blink and 253/254
@@ -58,6 +64,7 @@ end).
 | Clip + rounds indicator (HUDCLIPGFX/HUDRNDGFX) | **ported** (`HudFrameCompiler::element_clip_indicator`, D-HUD-5) | `[orig: draw_hud_ammo_indicator @0x599a30]`; parse `[orig: @0x5442fc]`; `hud_helpers_test.gd` round_icon_count + flash |
 | Crosshair / reticle + spread | **ported** (`HudFrameCompiler::element_crosshair`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / lock brackets unported) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd` |
 | Standard weapon SIGHTS card | **ported** (`world::weapon_sights_card_eligible` → sim `scope_card_active`; `HudFrameCompiler::element_sights_card` + `godot/game/world/hud_sights_card.gd` materialize the authored rows) | `[orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]`; Scoped/Sighted selectors + SWITCHFROM + NoCardSwitch/ForceScoped suppression; `simulation_test.gd` + `hud_overlay_test.gd` + ctest `weapon_fsm` |
+| Scoped-view circle mask + reticle cross/grid | **ported** (`engine/runtime/hud/scope_circle_mask.*` → the `HudPos.scope_mask_*` statics → `godot/game/world/hud_scope_circle_mask.gd`; the record's old “rowless-weapon fallback” gate reading corrected 2026-09-16) | `[orig: Hud_DrawScopeCircleMask @0x5d17a0]` + `[orig: draw_minimap_crosshair_and_grid @0x5d1160]`; the unconditional Scoped-arm call + the `!rows` crosshair argument `[orig: Render_ProcessMainSceneFrame @0x5cab08..0x5cab15; render_hud_overlay @0x5d82e5..0x5d82f2]`; ctest `sight_overlay` |
 | ALPHAFADE semantics | **ported** (`hud_math::fade_decay`/`fade_flash_alpha`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
 | Attach labels (seat/armory floats) | **ported** (`VehicleSystem::collect_attach_labels` + `LocalPlayer::local_player_can_fire` + `HudFrameCompiler::element_attach_labels` + `game_hud_presenter.gd`, D-HUD-11/12/13 CLOSED) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; nearest-entity branch consumes complete `Player_CanFireWeapon @0x5cf780`; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; the bold Arial label font + slot scale `[orig: @0x5a3680; HUD_InitAllFonts @0x51ee20]` ported 2026-08-11; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `simulation_test.gd`/`hud_helpers_test.gd` |
 | Friendly tags (overhead name labels) | **ported** (`world::collect_friendly_tags` + `HudFrameCompiler::element_friendly_tags` + `game_hud_presenter.gd`, D-HUD-20) | `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]` → `[orig: HUD_DrawEntityLabel @0x5a39b0]` full witness; names `[orig: Entity_SpawnFromBMSRecord @0x40ecbf]` + the 36-name fallback `[orig: g_fallbackPeopleNames @0x840a78]`; modes/toggle `[orig: @0x49b573]`; eye-offset anchor `[orig: @0x4bf078..0x4bf14c]` + Arial label font `[orig: HUD_InitAllFonts @0x51ee20]` witnessed + ported 2026-08-11; ctest `hud_math`/`hud_frame_compiler`/`infantry`/`promote` |
@@ -144,9 +151,30 @@ playthrough acceptance: this record had folded both cells into one "persisted
 cfg cell", and the port persisted every live write, which left the HUD blank
 in every mission after a death screen; `game_hud_presenter.gd` now keeps the
 two states and re-seeds the live level at every world load.) Rule:
-`visible[slot] = ((1 << hud_detail) & mask[slot]) != 0`, rebuilt into
+`visible[slot] = ((uint8_t)(1 << hud_detail) & mask[slot]) != 0`, rebuilt into
 `dword_2723C80[24]` by `CRenderState_SetLayerVisibility @0x59B0F0` on every
 mask or level change.
+
+**The level arithmetic is unclamped and 8-bit (witnessed 2026-09-16).**
+`CRenderState_SetLayerVisibility` is `mov ecx,[esp+level]; mov edx,1;
+shl edx,cl; ... mov cl,byte_2723CE0[eax]; and cl,dl` `@0x59B0F0..0x59B10A`: the
+shift is a full 32-bit `shl` whose count x86 takes modulo 32, and the
+`and cl,dl` that follows keeps only the LOW BYTE of the result. So levels 4..7
+select bits no `HUDDECLUT_*` parse arm ever authors and hide every gated
+element, levels 8..31 leave a zero byte and hide everything too, level 32
+aliases level 0, and a negative level lands on `cl = 31` (hidden). Nothing
+clamps on the way in either: the cfg token is stored raw (`call atol;
+mov g_GameConfigState.hudDetail_518,eax` `@0x550330..0x550339`), applied raw
+(`mov layerIndex,edx` `@0x55154d`), and the `huddetail` cycle compares the SUM
+(`add eax,ebx; cmp eax,3; jle` `@0x4E0606..0x4E0610`), so any parked
+out-of-range level wraps back to 0 on the first press.
+`HudDeclutter::set_level` / `HudDeclutter::rebuild` mirror that exactly since
+2026-09-16 (the earlier 0..3 clamp is gone, and `HudOverlay::set_hud_detail_level`
+no longer clamps either); ctest `hud_frame_compiler` pins levels 4..7, 8, 31,
+32, -1 and the wrap from 9. One residual stays by choice: the shell's
+persisted-cfg read still runs `hud::clamp_hud_detail_level`, which agrees with
+retail for every level above 3 (both blank the HUD, both cycle to 0) and
+differs only for a hand-edited NEGATIVE `hud_detail`.
 
 - **Parser arms** — the `HUD_ParseHudposToken` family: each
   `HUDDECLUT_<TOKEN> a b c d` row ORs bit `1/2/4/8` per nonzero field into
@@ -604,19 +632,35 @@ presence of a `SIGHTS` block nor a static Scoped bit alone is its gate:
 
 Only the post-clear bytes reach the drawing branch. Sighted calls
 `draw_weapon_sight_overlays @0x4dce00` at `0x5caaf3/0x5caafa`; otherwise
-Scoped calls it at `0x5cab01/0x5cab08`, followed by
-`Hud_DrawScopeCircleMask @0x5d17a0` at `0x5cab15` as the Scoped fallback. When
-both selectors are zero, the first-person viewmodel path remains available
+Scoped calls it at `0x5cab01/0x5cab08` and then **always**
+`Hud_DrawScopeCircleMask @0x5d17a0` at `0x5cab15`. When both selectors are
+zero, the first-person viewmodel path remains available
 (`0x5ca32c..0x5ca343`, consumed at `0x5ca822..0x5ca829`).
+
+**Corrected 2026-09-16 (the circle mask is not a fallback).** This record
+previously read the mask as a rowless-weapon fallback that "a nonzero count
+suppresses". The byte sequence refutes it: `Hud_DrawScopeCircleMask` is called
+unconditionally on the Scoped arm, and the SIGHTS row count only forms its
+single argument — `v11 = draw_weapon_sight_overlays(...);
+Hud_DrawScopeCircleMask(!v11, ...)` `@0x5cab08..0x5cab15`, and the same shape
+in the second caller `render_hud_overlay @0x5d82e5..0x5d82f2`
+(`xor ecx,ecx; cmp eax,ebx; setz cl; push ecx`). Inside the drawer that
+argument reaches ONLY the tail `if (draw_crosshair)
+draw_minimap_crosshair_and_grid(...)` `@0x5d1cc9..0x5d1cf4`, after the ring has
+already been submitted `@0x5d1cc4`. So every scoped frame gets the annulus, and
+an authored SIGHTS row suppresses only the inner reticle cross and grid ticks.
+The consequence of the old reading — a scoped weapon with rows drawing with no
+circular mask at all — was the visible symptom in OpenNova before the port. The
+full geometry is the new section below.
 
 `draw_weapon_sight_overlays` itself reads only the authored count
 (`WeaponDef+0x258`) and rows (`WeaponDef+0x1c8`, stride `0x24`). Those rows are
 card **content**, including draw order/blend/scale, not selection policy. A
-nonzero count is reported even if a row's texture handle is missing, which can
-suppress the circle fallback and leave a blank reticle. REVX02's
-`WPN_M4AUTO_EOTECH` confirms the Sighted path: it is Sighted, not Scoped, has no
-NoCardSwitch, and authors `M4ET_SGT.TGA` plus additive/scaled `et_rtcle.tga`;
-both textures exist in the retail resource root.
+nonzero count is reported even if a row's texture handle is missing, so a
+weapon whose card art fails to load still suppresses the cross and grid.
+REVX02's `WPN_M4AUTO_EOTECH` confirms the Sighted path: it is Sighted, not
+Scoped, has no NoCardSwitch, and authors `M4ET_SGT.TGA` plus additive/scaled
+`et_rtcle.tga`; both textures exist in the retail resource root.
 
 `WeaponDef_CreateBlendNamedMaterial @0x540180` recognizes six tokens. The port
 keeps their transport values stable as `blend=0`, `add=1`, `blendat=2`,
@@ -679,6 +723,115 @@ yet; the default arm is live from the parsed `scope_max_zero` ints
 to multiplier 0 (`Weapon_GetScopeZoomLevel(0, d)` returns `d` untouched
 `@0x422fd1..0x422fd5`); the `10 100 200 x` weapons resolve to 2 (a 33-frame row
 shifts 66 px), `1 100 100 1` and `1 300 300` to 1, `10 100 300 1` to 3.
+
+### Scoped-view circle mask — `Hud_DrawScopeCircleMask @0x5d17a0` (witnessed + ported 2026-09-16)
+
+The near-black annulus every Scoped frame draws over the scoped view, and the
+reticle cross + cardinal grid it chains through
+`draw_minimap_crosshair_and_grid @0x5d1160` when the SIGHTS card drew no
+authored row. Both callers (`Render_ProcessMainSceneFrame @0x5cab15`,
+`render_hud_overlay @0x5d82f2`) pass `draw_crosshair = (row count == 0)`; see
+the correction in the SIGHTS-card section above for why this is not a fallback.
+
+**Frame.** All of it derives from the viewport rect
+`dword_24C1428..0x24C1434` (x0/y0/x1/y1) and the full surface width
+`overlayCtx @0x24C1420`:
+
+| Term | Value | Witness |
+|---|---|---|
+| centre | `((x1 + x0) >> 1, (y0 + y1) >> 1)` — arithmetic shifts of the summed edges | `@0x5d17cc` / `@0x5d17e1` |
+| `scaleX` | `(double)cx / (double)cy * 0.75` | `@0x5d17f5` |
+| `scaleY` | `3.0 / (flt_8409EC * 4.0)` — `sub_58A920 @0x58a920` returns the selected H/W ratio `Render_SetAspectRatioMode @0x58d870` stores (0.75 / 0.6 / 0.5625 / 0.625, or the viewport's own H/W in the native mode) | `@0x5d1811` |
+| ring size | `((y1 - y0) >> 3) + ((y1 - y0) >> 1)` = five eighths of the viewport height, as an INTEGER shift pair | `@0x5d1830` |
+| inner radius | `0.71f * ring_size` | `@0x5d184d` |
+| outer radius | `ring_size * 1.5f` | `@0x5d1857` |
+| cross/tick unit `t` | `(W + W) * flt_7D00A8` = `W / 320` | `@0x5d12ad..0x5d12b5` |
+| tick pitch | `(W * flt_7C44B4) * flt_7D00A8` = `W / 64` (`flt_7C44B4 = 10.0f`) | `@0x5d160a..0x5d1635` |
+
+At the NATIVE ratio `scaleX == scaleY` and the ring is a true circle; a forced
+4:3 / 16:10 / 16:9 / 5:4 ratio pins `scaleY` and widens `scaleX` with the
+surface, so the ring becomes an ellipse that keeps the same fraction of the
+width and height it covered at the authored ratio. On a 1024x768 surface the
+inner radius is 340.8 px and the outer 720 px — past the 640 px corner
+distance, so the annulus really does mask the whole surface outside the circle.
+
+**The ring.** 64 quad segments over 65 angle stops (the 65th closes the loop),
+two vertices per stop, submitted as ONE 130-vertex `D3DPT_TRIANGLESTRIP`
+through the dynamic VB (`GDynamicVB_DrawPrimitive(5, &unk_2BE1088, 0x82)`
+`@0x5d1cc4`). Segment `s` reads BAM table index `16 * s`:
+`g_bam_sin_table_q22 @0x31bfbc0` holds 1024 Q22 entries per revolution and
+`off_849934 = &g_bam_sin_table_q22[256]` is its cosine view, both read as
+`table[i] * 2^-22` (`@0x5d18cd` / `@0x5d18e7`). Each stop emits
+`x = cos*r*scaleX + cx`, `y = cy - sin*r*scaleY` (`@0x5d18f6` / `@0x5d190d`),
+inner first at `0xFF181820` (`@0x5d18cf`) then outer at `0xFF040408`
+(`@0x5d1936`) — an opaque near-black annulus with a slight inward lift.
+
+**The reticle cross.** Four tapered spokes (left, up, right, down in submit
+order), each a 7-vertex / 18-index block drawn as a `D3DPT_TRIANGLELIST`
+(`GDynamicVB_DrawIndexedPrimitive(4, &flt_2BE0F68, 7, indices, 0x12)`
+`@0x5d1435` / `@0x5d14bf` / `@0x5d153b` / `@0x5d15b7`). With
+`A = scaleX * ring_size` and `B = scaleY * ring_size`, the spoke runs from the
+exact viewport centre out to `0.71` of the radii and breaks at `0.4`
+(`flt_7C56A0 = 0.4f` `@0x5d11d5`, `flt_7DC624 = 0.71f` `@0x5d1261`); every
+endpoint passes through `_ftol2_sse` and comes straight back in through `fild`
+(`@0x5d121f..0x5d1298`), so the break points are integer pixels — at 1024x768
+the left spoke breaks at `trunc(512 - 0.4*480) = 319` and ends at
+`trunc(512 - 0.71*480) = 171`, because both float literals sit just off the
+round value. The half-thickness `t` spreads across the spoke axis. Colours:
+the shared centre vertex `0x20000000` (`@0x5d132c`), the two on-axis break
+vertices opaque black `0xFF000000` (`@0x5d1344` / `@0x5d1364`), the four
+off-axis vertices fully transparent (`@0x5d1338` and friends). Index block
+`{0,1,2, 0,2,3, 2,1,4, 2,4,5, 3,2,5, 3,5,6}` (`@0x5d11bf..0x5d1218`).
+
+**The cardinal grid.** Four ticks in each of four directions
+(switch order `@0x5d167c`: 0 = +X, 1 = -X, 2 = +Y, 3 = -Y), each a 5-vertex /
+12-index diamond of half-size `t` at `i * (W/64)` from the centre, `i = 1..4`
+(`@0x5d1653..0x5d171d`). The offsets are plain screen pixels — neither
+`scaleX` nor `scaleY` touches them. Centre vertex `0xFF000000` (`@0x5d162b`),
+the four points `0x10000000` (`@0x5d1639`). Index block
+`{0,1,2, 0,2,3, 0,3,4, 0,4,1}` (`@0x5d15c7..0x5d1626`).
+
+**Device shape (not ported as such).** Both batches ride the XYZRHW + DIFFUSE +
+SPECULAR + TEX2 dynamic-VB vertex (stride 40) with `z = 0.5`, `rhw = 1`, the
+specular dword left stale and — for the cross and grid — no texcoords written
+at all, which is what pins effect pass `0x700000` as the untextured
+alpha-blended overlay pass. The ring takes device render-state slot 1
+(`@0x5d185b`), the cross/grid slot 2 (`@0x5d139e`); the ring's own texcoords
+(`u = s/64` on both sets, `v = 0` inner / `1` outer) are therefore vestigial.
+OpenNova submits the same vertex colours as flat vertex-coloured triangles.
+
+**The feature switch.** `dword_843480` is a shipped constant `1` with three
+readers and no writer: this drawer (`@0x5d17fe`), `sub_5CF3F0 @0x5cf3f0` (which
+just returns it) and `sub_5D27F0 @0x5d27f0`. It selects the modern scope
+treatment; the zero arm (`sub_5D27F0` re-rendering the terrain scene through
+the weapon's elevation offsets, and the `!sub_5CF3F0()` branch `@0x5ca74c`) is
+unreachable in the shipped image. Not ported, and nothing should gate on it.
+
+**Port.** `engine/runtime/hud/scope_circle_mask.{h,cpp}` builds the three
+vertex-coloured triangle batches plus the frame terms from the viewport rect,
+the surface width, the aspect mode and `draw_crosshair`; it also owns the
+scene-frame overlay fork (`scoped_view_overlay` — binoculars, then Sighted,
+then Scoped) and the two selector bytes' weapon.def halves
+(`scoped_selector_from_def` = Scoped without Inset, `sighted_selector_from_def`
+= the Sighted bit). The typed statics `HudPos.scope_mask_points` /
+`_colors` / `_indices` (one batch per call, over a memoised build) plus
+`HudPos.scope_mask_frame` and `HudPos.scoped_view_overlay` bind it,
+`PlayerHudWeaponDef` carries the two def halves, and
+`godot/game/world/hud_scope_circle_mask.gd` rasterises the batches with
+`RenderingServer.canvas_item_add_triangle_array` as a child of the HUD overlay
+directly after the SIGHTS card, so the card draws first and the mask covers its
+corners — retail's submit order. `game_hud_presenter.gd` feeds the fork next to
+the card switch with `draw_crosshair = the AUTHORED row array is empty` (a row
+whose texture fails to load still counts, like retail's). ctest
+`sight_overlay` pins the fork, the frame terms, the ring stops and colours, the
+truncated spoke endpoints and the tick lattice.
+
+Residual: the third Sighted term (`MountSlot.currentAction != SWITCHFROM`
+`@0x4dcd30`) is not a def field, so the shell feeds the fork the def bit alone.
+It can only matter for a weapon.def that sets BOTH the Scoped and Sighted bits,
+and none ships; the exact term is already computed in
+`world::weapon_sights_card_eligible` and wants exporting on
+`LocalPlayerViewFrame` when that file is next touched.
 
 ### Mission triggered text — `HUD_DisplayTriggeredText @0x51f190` (ported 2026-07-09)
 
@@ -1853,8 +2006,24 @@ labels (bit 5), location labels (bit 17), the tracked-target legs (bits
 7/19 — no tracked-target source exists in this runtime yet), the remaining
 model-extent size feed and pointer line length, and the sibling out-of-map
 consumers (`draw_radar_blips @0x5a2c00`
-in-world markers, `draw_damage_direction_indicators @0x59a300`,
-`draw_directional_indicator_ring @0x598180`). The HUDDECLUT_* consumer is
+in-world markers, `draw_directional_indicator_ring @0x598180`).
+Radar topology re-read 2026-09-16 (live IDB): `Radar_AddBlip @0x59b280` (skipped when
+`g_rules_flags & 1`) stamps ONE of four compass-edge WORD timers
+`@0x2721EEC..0x2721EF3` to 31 ticks (`quadrant = (atan2 BAM - Yaw - 0x1FFFFFE0) >> 30`)
+and takes the first free row of the 128 x 24-byte blip table `@0x2721F40` (type, xyz, life
+62, colour). `update_radar_contacts @0x59a7e0` runs from `HUD_DrawMapOverlay @0x5a791c`
+only when the map element flags carry `0x200 | 0x40 | 0x400` (`@0x5a78ff..0x5a790f`), and
+from `HUD_RenderAllOverlays @0x5a817d`; it decays the edge timers and rebuilds the sector
+bytes (type 0 -> 12 `@0x2721F30`, 1 -> 12 `@0x2721F24`, 2 -> 24 `@0x2721F0C`, 3 -> 24
+`@0x2721EF4`, type 255 = all 12). `Player_OnDamageReceived @0x4dd880` produces type 255 for
+self-damage, 2 when the attacker's item def `+0x294 == 6`, else 0. Under that same gate
+`draw_weapon_direction_indicators @0x59c350` draws the 12 + 24 sector marks and
+`draw_timer_overlay_box @0x59c7b0` ends in `draw_directional_indicator_ring @0x598180`
+(12 segments: 1 = friendly list `@0x27233E8`, 2 = the `sub_59B200` contact list
+`@0x2722B40`, 2 blinking on `tick & 8` for the type-0 damage sectors). The
+four-quadrant edge drawer `draw_damage_direction_indicators @0x59a300` (four screen-edge
+triangles, colour `0xFB441A`, visible while `timer/31 > 0.375`) has **no callers** in JO:
+the edge timers are written and decayed but never drawn. The HUDDECLUT_* consumer is
 no longer an open witness: the declutter system is witnessed and ported
 (the HUD declutter section above) — JOX authors `HUDDECLUT_SPINMAP 1 1 0 0`,
 hiding the spinmap at `hud_detail >= 2` (the earlier `1 0 0 0` reading here
@@ -2486,14 +2655,16 @@ call; IDB saved):
   (anchored: indexes `HUDSTANCE` frames by `byte_27235C0 = hudInfo+568` stance
   index; D-HUD-1), with the misnomer + stance-keying comment at `0x599f10`.
 - **Rename** `draw_minimap_compass_ring @0x5d17a0` → `Hud_DrawScopeCircleMask` —
-  the 64-segment circular scope mask drawn for Scoped weapons that author no
-  SIGHTS rows (net-re §5.62). Re-witnessed 2026-07-19: the
-  `Render_ProcessMainSceneFrame @0x5cab15` caller is the fallback after the
-  post-clear standard Scoped selector's SIGHTS-row call reports no authored
-  rows; a nonzero count suppresses it even if a texture handle is missing. The
-  second caller remains `render_hud_overlay @0x5d82f2`. The sibling reticle drawer
-  `draw_minimap_crosshair_and_grid @0x5d1160` keeps its name (second caller
-  unwitnessed) and carries a candidate-rename comment for the next HUD grill.
+  the 64-segment circular scope mask (net-re §5.62). Re-witnessed
+  2026-07-19, and **corrected 2026-09-16**: the `Render_ProcessMainSceneFrame
+  @0x5cab15` caller is NOT a fallback — the mask draws on every Scoped frame and
+  the SIGHTS-row count only forms the `draw_crosshair` argument that gates the
+  inner cross/grid. The function comment carried the old fallback gloss and was
+  rewritten this session. The second caller remains `render_hud_overlay
+  @0x5d82f2`. The sibling reticle drawer `draw_minimap_crosshair_and_grid
+  @0x5d1160` keeps its name (its second caller is `draw_minimap_compass_border
+  @0x5d27bc`, which IS a minimap element) and carries a candidate-rename
+  comment for the next HUD grill.
 - **Comment** at `0x59e3d6` noting `dword_25510DC` = the user crosshair-style
   index (`cross%02d.tga`), `dword_25510E0` = the user crosshair color, and
   `dword_25510E4` = the `mp_CrossHairSpread` enable.
@@ -2566,6 +2737,27 @@ Read-only re-witness 2026-07-19 (no IDB mutations applied):
 - `SIGHTS` rows are the selected card's content/fallback input, not the
   selector. The post-clear bytes gate the calls at
   `0x5caaf3..0x5cab15`.
+
+Applied 2026-09-16 (the scoped-view circle-mask grill; comments only, IDB saved):
+
+- **Comment** at `0x5d17a0` — replaces the old "drawn for Scoped weapons that
+  author no SIGHTS rows" gloss with the refuting byte sequence (both callers
+  compute `arg1 = (row count == 0)` and it only gates the tail
+  `draw_minimap_crosshair_and_grid` call `@0x5d1cc9`), plus the full ring
+  geometry, the two colours, the 130-vertex strip and the vertex stride.
+- **Comment** at `0x5d1160` — the four tapered spokes and the sixteen tick
+  diamonds with their fractions, ftol truncation, `W/320` / `W/64` units and
+  colours; records that the second caller `draw_minimap_compass_border
+  @0x5d27bc` IS a minimap element, which is why the name stays.
+- **Comment** at `0x59b0f0` — the 8-bit `shl`/`and cl,dl` arithmetic and the
+  absence of any clamp on the level (cfg `@0x550339`, apply `@0x55154d`, cycle
+  `@0x4E0608`).
+- **Comment** at `0x843480` — the shipped-constant-1 scope-treatment feature
+  switch, its three readers and the dead zero arm.
+
+No renames were applied: `draw_minimap_crosshair_and_grid` keeps its name now
+that its minimap caller is witnessed, and the 2026-07-19 held proposals for
+`0x4dcd30` / `0x4dcce0` remain held.
 
 ## Ledger de-table transplants (2026-08-06)
 
@@ -2678,3 +2870,110 @@ Malformed actor/entity bindings safely omit sound/count contributions;
 retail's unchecked/null dereferences are not reproduced. The already
 tracked map image, other feed-event side effects, roster join/leave text,
 and verbose-toggle residues remain separate.
+
+## Local damage feedback (fullscreen flashes)
+
+Witnessed 2026-09-16 against retail `Jointops.exe` (IDB `Jointops.exe.kong.i64`).
+Three per-tick words drive three viewport-filling quads at the very end of the
+scene frame, and one of them blanks the whole HUD overlay pass while it burns.
+They sit beside the camera-shake counter `dword_B764B0` in both memory and code:
+all four are zeroed together by the local respawn and decayed together in one
+instruction run.
+
+### The words
+
+| word | meaning | arm | per-tick decay (`Player_UpdatePerFrame @0x4DE5A7..0x4DE5F7`) |
+|---|---|---|---|
+| `dword_B764B4` | RED damage vignette | `+= 120`, cap 255, in `Player_OnDamageReceived @0x4dd88f..0x4dd896`; the joiner's own S2C 0x0A tail health DROP adds the same `0x78` inline `@0x4305a3..0x4305bb` | `if (v > 1) v -= 2; else v = 0;` `@0x4DE5BF..0x4DE5D0` |
+| `dword_B764B8` | WHITE hit flash | `= 255` from BOTH legs of `Entity_ApplyCollisionForce`'s kz_physics-3 blackout `@0x4af729` / `@0x4af769`; raised to a FLOOR of 128 by `Entity_OnDamageReceived @0x4af828..0x4af82a` when the ammo's `kz_physics` byte (+0xE1) reads 3 | `if (v > 3) v -= 4; else v = 0;` `@0x4DE5A7..0x4DE5B9` |
+| `dword_B764BC` | REVIVE tint | `= 255` in `NapiNPClientMsg_0x03A @0x422685` (a medic is reviving me); also cleared by `NapiNPClientMsg_GameReset @0x422843` | `if (v > 1) { v -= 1; if (v < 0xC4) v = 0xC4; }` `@0x4DE5D6..0x4DE5ED` |
+
+Sibling arm in the same function: `g_CameraShakeCounter += 10`, cap 255
+`[orig: @0x4dd8a6..0x4dd8ad]`.
+
+Three details the decay run hides:
+
+- The order is white, red, revive, immediately after the shake decay
+  `[orig: @0x4DE590]` - one basic block, one client frame.
+- A white flash of 255 runs exactly 64 ticks (63 subtractions of 4 land on 3,
+  which snaps to 0); a red flash of 255 runs 128 ticks.
+- The revive leg has NO `else` branch, and its `0xC4` floor is a HOLD, not a
+  clamp toward zero: 255 slides to 196 over 59 ticks and then stays at 196
+  forever. Only `Game_InitNewRound @0x422790` (the local respawn), the mission
+  start, or the 0x3A reset ever puts it out.
+
+Clear: `Game_InitNewRound @0x422778` / `@0x422784` / `@0x422790`.
+
+### The HUD suppression
+
+`HUD_RenderAllOverlays @0x5A8070` early-returns on
+`if (g_spawn_success_gate || dword_B764B8 || !g_local_player_entity) return`
+`[orig: @0x5a8084..0x5a80a3]`. A collision or explosive hit therefore BLANKS the
+entire gameplay HUD overlay pass for up to 64 ticks. The SIGHTS card rows and the
+FP viewmodel are drawn by `Render_ProcessMainSceneFrame`, not by that pass, so
+they keep drawing.
+
+### The draw
+
+`Render_ProcessMainSceneFrame @0x5CAB9A..0x5CAC48`, only while
+`!g_death_screen_active` `[orig: @0x5cab9a..0x5caba1]`, AFTER the HUD overlay
+pass and the death-menu latch and BEFORE
+`Environment_ApplySunVeilAndExposureStopdown @0x5cac4b`. Each quad goes through
+`render_fullscreen_decal_quad(x, z, colour, mode) @0x5C6590`: the viewport rect
+as 4 x 40-byte vertices at `0x29D6000`, `uv (0,0)(1,0)(0,1)(1,1)`, drawn as a
+triangle strip with pass flags `0x300000` (NOWRITEDEPTH | NOCHECKDEPTH).
+
+| # | word | condition | colour | quad mode |
+|---|---|---|---|---|
+| 1 | white | `!= 0` `@0x5caba7` | `(word << 24) \| 0xFFFFFF` | 2 - device render state 2, the untextured iterated-colour material (the same one the sun-glare veil uses) |
+| 2 | red | `!= 0` AND `g_camera_mode != 3` `@0x5cabd5..0x5cabe5` | `a = min(word, 0xC0)`; `(a << 24) \| 0xFF0000` | 3 - `g_vignetteMaterial`, `vignette.tga` loaded by `sub_5C36B0 @0x5c36c1` with material flags 593 = 0x251 = AFUNC_BLEND \| ASRC_TEXTURExITERATED \| COLOR_ITERATED (texture alpha x vertex alpha, vertex colour) |
+| 3 | revive | `!= 0` `@0x5cac18` | `0xFFFFFFFF - ((word >> 1) * 0x10100)` = A 255, R = G = `255 - (word >> 1)`, B 255 | 0 - device render state 3 |
+
+Camera mode 3 is the retail free/spectator camera; the red vignette is the only
+one of the three it suppresses.
+
+**Residual - the revive quad's blend.** Device render state 3 has exactly one
+user in the binary (this quad), so its blend mode is not readable from a call
+site the way states 1 and 2 are. An alpha-255 source-over quad is ruled out by
+behaviour, not by disassembly: the word HOLDS at 196 until the round clears, and
+a source-over `(157, 157, 255)` wall would leave a revived player staring at
+opaque blue for the rest of the round. The port draws it as a MULTIPLY tint
+(R = G = `channel/255`, B = 1.0), which is the only reading consistent with the
+hold. Re-witness it if the state-3 material is ever pinned.
+
+### The five Player_OnDamageReceived call sites
+
+See [docs/world/world-wac-ai-re.md](../world/world-wac-ai-re.md)
+"Player_OnDamageReceived" for the arm body, the two unported producers inside it
+(the radar damage blip, D-HUD-21, and the `unk_26C77A0` per-player-slot words)
+and the per-call-site gates.
+
+### Port status
+
+| piece | status |
+|---|---|
+| the three words, their arms, decays, the `0xC4` hold and the round clear | **ported** - `world::ScreenFlashState` + `screen_flash_*` in `engine/runtime/world/player_view.h`, decayed in `LocalPlayer::apply_player_input_pre_tick` beside the shake, cleared in `LocalPlayer::reset_for_new_round`; ctest `screen_flash` |
+| `Player_OnDamageReceived` (red 120 + shake 10) | **ported** - `world::player_on_damage_received` |
+| its four ported call sites | **ported** - `destruction.cpp` (the person path and the pool-0 explosion sweep), `infantry.cpp` (the org2 landing leg) |
+| `Projectile_ProcessDamageOnTarget @0x4e8213` | **open** - the fifth call site, in `round_sim.cpp` |
+| `Entity_UpdateInfantryPlayerBody @0x4b61e8` (org1 death leg) | **open** - our unified infantry motor has no separate org1 death leg |
+| the white flash's two collision-blackout writes | **ported** - `collision_force.cpp`, both legs, inside the NoFriendlyFire gate |
+| the explosive white FLOOR + the near-miss shake | **ported** - `world::entity_on_damage_received` (`collision_force.cpp`), called from the outer-band flinch `@0x4eb05c` |
+| the joiner 0x0A tail health-drop arm | **ported** - `world::screen_flash_arm_health_drop`, called from `JoinerRole::apply_authoritative_health` |
+| the S2C 0x3A revive arm | **ported** - `screen_flash_track_revive` off `ClientState::local_medic_reviving`'s rising edge, from `JoinerRole::pump` |
+| the three quads + the HUD suppression | **ported** - `godot/game/world/player_view_effects.gd` (`update_damage_feedback`) and `godot/game/world/game_hud_presenter.gd` |
+| the radar damage blip | **open** - D-HUD-21, the radar blip system is unported |
+| the `unk_26C77A0` slot words +11 / +12 | **open** - no witnessed consumer |
+
+**Shell stacking divergence.** Retail draws the three quads after
+`HUD_RenderAllOverlays` and before the sun veil. In our shell the quads live on
+`PlayerViewEffects`, which is mounted behind the gameplay HUD, and the sun veil
+is a behind-parent sibling of that node. The three quads therefore sit BELOW the
+HUD and ABOVE the sun veil rather than the other way round. It only shows when
+the HUD is visible at the same time as the red vignette or the revive tint (the
+white flash suppresses the HUD outright). The suppression itself is applied as
+`self_modulate` alpha 0 on the overlay Control, which blanks that Control's own
+draw list while leaving its children (the view effects, the SIGHTS card) drawing
+- the same split retail's two passes have - but it does not short-circuit the
+draw-list build, so `hud_hidden_capture_witness` still reports the quads it would
+have drawn.

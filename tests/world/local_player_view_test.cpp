@@ -143,19 +143,59 @@ void test_binoculars_refused_while_power_throw_charges_and_rng_untouched() {
     w.power_throw_start_tick = 40;
     PlayerViewState v;
     LocalPlayerViewTracker t;
-    int samples = 0;
-    const auto rng = [&samples]() -> float { ++samples; return 0.25f; };
-    CHECK(!local_player_binoculars_toggle(lw.w, w, v, t, rng));
+    const uint32_t prng_at_start = lw.w.prng16_state;
+    CHECK(!local_player_binoculars_toggle(lw.w, w, v, t));
     CHECK(!v.binoculars_requested);
-    CHECK(samples == 0); // a refused toggle never draws
+    // A refused toggle never activates the view, so the latch never draws.
+    CHECK(lw.w.prng16_state == prng_at_start);
+    CHECK(!t.binocular_sway_latched);
     w.power_throw_start_tick = 0;
-    CHECK(local_player_binoculars_toggle(lw.w, w, v, t, rng));
+    CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
     CHECK(v.binoculars_requested);
-    CHECK(samples == 1); // one draw seeds the aim displacement
+    CHECK(v.binoculars_view_active);
+    // The ACTIVATION latch draws exactly one word and seeds the displacement.
+    CHECK(lw.w.prng16_state != prng_at_start);
+    CHECK(t.binocular_sway_latched);
     CHECK(t.binocular_yaw_offset_deg != 0.0f || t.binocular_pitch_offset_deg != 0.0f);
-    CHECK(!local_player_binoculars_toggle(lw.w, w, v, t, rng)); // dropping the request
-    CHECK(samples == 1);
+    const uint32_t prng_after_seed = lw.w.prng16_state;
+    // Holding the view up does not re-draw.
+    local_player_binocular_sway_latch(lw.w, v, t);
+    CHECK(lw.w.prng16_state == prng_after_seed);
+    CHECK(!local_player_binoculars_toggle(lw.w, w, v, t)); // dropping the request
+    CHECK(lw.w.prng16_state == prng_after_seed);
+    CHECK(!t.binocular_sway_latched);
     CHECK(t.binocular_yaw_offset_deg == 0.0f && t.binocular_pitch_offset_deg == 0.0f);
+}
+
+// The seed rides the ACTIVATION, not the raw toggle: a raise made while a
+// movement key is held draws nothing until the view actually comes up.
+// [orig: the dword_29D6BA8 latch @0x5ca3e1..0x5ca3f3, cleared @0x5ca4b0]
+void test_binocular_sway_seeds_once_per_activation() {
+    LocalWorld lw;
+    LocalPlayerWeapon w = scoped_weapon(0);
+    PlayerViewState v;
+    LocalPlayerViewTracker t;
+    v.move_held = true; // suppresses the raise
+    const uint32_t prng_at_start = lw.w.prng16_state;
+    CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
+    CHECK(v.binoculars_requested);
+    CHECK(!v.binoculars_view_active);
+    CHECK(lw.w.prng16_state == prng_at_start); // suppressed: no draw yet
+    v.move_held = false;
+    local_player_view_refresh(&lw.w, v);
+    local_player_binocular_sway_latch(lw.w, v, t);
+    CHECK(v.binoculars_view_active);
+    CHECK(lw.w.prng16_state != prng_at_start);
+    const uint32_t first = lw.w.prng16_state;
+    // Suppress again, then re-activate: the next activation draws afresh.
+    v.move_held = true;
+    local_player_view_refresh(&lw.w, v);
+    local_player_binocular_sway_latch(lw.w, v, t);
+    CHECK(!t.binocular_sway_latched);
+    v.move_held = false;
+    local_player_view_refresh(&lw.w, v);
+    local_player_binocular_sway_latch(lw.w, v, t);
+    CHECK(lw.w.prng16_state != first);
 }
 
 void test_binoculars_refused_scoped_in_gunner_seat() {
@@ -167,10 +207,9 @@ void test_binoculars_refused_scoped_in_gunner_seat() {
     PlayerViewState v;
     v.scope_engaged = true;
     LocalPlayerViewTracker t;
-    const auto rng = []() -> float { return 0.5f; };
-    CHECK(!local_player_binoculars_toggle(lw.w, w, v, t, rng));
+    CHECK(!local_player_binoculars_toggle(lw.w, w, v, t));
     v.scope_engaged = false;
-    CHECK(local_player_binoculars_toggle(lw.w, w, v, t, rng));
+    CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
 }
 
 // --- NVG: the Inset restore latch -----------------------------------------
@@ -1616,6 +1655,7 @@ int main() {
     test_inset_scope_refused_under_nvg();
     test_mid_ease_toggle_refused_then_forcescoped_pins_the_sight();
     test_binoculars_refused_while_power_throw_charges_and_rng_untouched();
+    test_binocular_sway_seeds_once_per_activation();
     test_binoculars_refused_scoped_in_gunner_seat();
     test_nvg_drops_a_settled_inset_scope_and_restores_it();
     test_nvg_over_a_non_inset_scope_leaves_it_alone();

@@ -766,8 +766,18 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	assert_gte(avail, 0, "AVAIL_LIST authored")
 	assert_eq(driver.item_count(avail), 1, "one expansion discovered under expansion/")
 	assert_eq(driver.item_text(avail, 0), "jox01")
-	# Activation (list double-click) mounts + persists + describes.
+	# Activation (list double-click) only RAISES the reload request; the remount,
+	# the persist and the describe all run at the next menu update tick, the way
+	# Menu_UpdateFrame consumes retail's request flag (docs/mnu/menu-re.md,
+	# "Deferred expansion reload").
 	driver.list_activated.emit(avail, 0)
+	assert_true(shell.has_pending_expansion_reload(),
+		"the click raises the request instead of remounting inline")
+	assert_eq(ResourceDirSettings.get_expansion(), "",
+		"nothing is persisted before the update tick runs")
+	shell.update_menu_frame()
+	assert_false(shell.has_pending_expansion_reload(),
+		"the update tick lowers the request flag")
 	assert_eq(shell.get_selected_expansion(), "jox01")
 	assert_eq(ResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
 	assert_not_null(MusicService.current_script(), "expansion menu context reopens")
@@ -813,6 +823,7 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 	watch_signals(shell)
 	driver.widget_activated.emit(accept, "ACCEPT")  # press OK
 	assert_signal_not_emitted(shell, "start_requested", "OK on the Mods screen must not launch")
+	shell.update_menu_frame()  # the deferred remount runs on the next menu tick
 	assert_eq(shell.get_selected_expansion(), "jox01", "OK applied the highlighted mod")
 	assert_eq(ResourceDirSettings.get_expansion(), "jox01", "applied choice persisted")
 	shell.get_resource_root().clear()
@@ -858,6 +869,9 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	var accept: int = driver.widget_id("ACCEPT")
 	assert_gte(accept, 0)
 	driver.widget_activated.emit(accept, "ACCEPT")
+	assert_false(shell.has_pending_expansion_reload(),
+			"an unusable pick never raises the reload request")
+	shell.update_menu_frame()
 	assert_eq(shell.get_selected_expansion(), "", "the loose mount refuses the switch")
 	assert_eq(ResourceDirSettings.get_expansion(), "", "nothing persisted")
 	assert_false(root.read_file("options.mnu").is_empty(),
@@ -934,9 +948,17 @@ func test_play_screen_accept_still_launches() -> void:
 	var driver: MenuDriver = shell.get_driver()
 	var accept: int = driver.widget_id("ACCEPT")
 	assert_gte(accept, 0, "SP ACCEPT control authored")
+	var list_id := driver.widget_id("IA_LIST")
+	assert_gt(list_id, -1, "jo_sp authors the IA_LIST mission list")
 	watch_signals(shell)
-	driver.widget_activated.emit(accept, "ACCEPT")  # no explicit pick -> first .bms
-	# ACCEPT on a mission-list screen still launches (first .bms, none selected).
+	# Retail's ACCEPT launches only through the shown list's current entry; with
+	# nothing selected it does nothing (SinglePlayer_HandleAccept, menu-re.md).
+	driver.widget_activated.emit(accept, "ACCEPT")
+	assert_signal_not_emitted(shell, "start_requested",
+			"ACCEPT with no mission selected is a no-op, never a first-entry fallback")
+	driver.widget_value_changed.emit("IA_LIST", "list", 0, driver.item_text(list_id, 0))
+	driver.widget_activated.emit(accept, "ACCEPT")
+	# ACCEPT on a mission-list screen launches the selected entry.
 	assert_signal_emitted_with_parameters(shell, "start_requested", ["alpha.bms"])
 	DirAccess.remove_absolute(dir.path_join("main.mnu"))
 	DirAccess.remove_absolute(dir.path_join("alpha.bms"))
@@ -964,7 +986,11 @@ func test_options_controls_inert_without_control_table() -> void:
 		return
 	var driver: MenuDriver = shell.get_driver()
 	assert_lt(driver.widget_id("CONTROL_MAPPING"), 0, "jo_sp authors no control table")
+	var list_id := driver.widget_id("IA_LIST")
+	assert_gt(list_id, -1, "jo_sp authors the IA_LIST mission list")
 	watch_signals(shell)
+	# The launch needs a selected mission (retail's ACCEPT is a no-op otherwise).
+	driver.widget_value_changed.emit("IA_LIST", "list", 0, driver.item_text(list_id, 0))
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	assert_signal_emitted(shell, "start_requested", "the shell launch path still owns ACCEPT")
 	assert_eq(shell.get_current_menu_file(), "main.mnu",

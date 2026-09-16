@@ -123,7 +123,6 @@ int HudOverlay::clamp_hud_color_index(int p_index) { return opennova::hud::clamp
 int HudOverlay::next_hud_color_index(int p_index) { return opennova::hud::next_hud_color_index(p_index); }
 int HudOverlay::hud_detail_level_default() { return opennova::hud::kHudDetailLevelDefault; }
 int HudOverlay::hud_detail_level_blank() { return opennova::hud::kHudDetailLevelBlank; }
-int HudOverlay::clamp_hud_detail_level(int p_level) { return opennova::hud::clamp_hud_detail_level(p_level); }
 int HudOverlay::next_hud_detail_level(int p_level) { return opennova::hud::next_hud_detail_level(p_level); }
 int HudOverlay::showhud_flags_default() { return static_cast<int>(opennova::hud::kShowHudFlagsDefault); }
 int HudOverlay::next_showhud_flags(int p_flags) {
@@ -153,7 +152,6 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_color_index", "index"), &HudOverlay::next_hud_color_index);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("hud_detail_level_default"), &HudOverlay::hud_detail_level_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("hud_detail_level_blank"), &HudOverlay::hud_detail_level_blank);
-	ClassDB::bind_static_method("HudOverlay", D_METHOD("clamp_hud_detail_level", "level"), &HudOverlay::clamp_hud_detail_level);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_detail_level", "level"), &HudOverlay::next_hud_detail_level);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("showhud_flags_default"), &HudOverlay::showhud_flags_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_showhud_flags", "flags"), &HudOverlay::next_showhud_flags);
@@ -1247,8 +1245,10 @@ void HudOverlay::set_hud_detail_level(int p_level) {
 	// The level write + visibility rebuild [orig: the hud_detail global
 	// @0x24D20BC -> CRenderState_SetLayerVisibility @0x59B0F0, see
 	// docs/interface/hud-re.md]. The presenter owns the persistence and the
-	// cycle/death-force policy.
-	declutter_.set_level(CLAMP(p_level, 0, opennova::hud::kDeclutterLevelMax));
+	// cycle/death-force policy. The level is stored VERBATIM: retail clamps
+	// nowhere, and an out-of-range level hides every gated element until the
+	// huddetail cycle wraps it (the engine module carries the arithmetic).
+	declutter_.set_level(p_level);
 	apply_declutter_();
 	queue_redraw();
 }

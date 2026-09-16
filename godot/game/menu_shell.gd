@@ -21,6 +21,18 @@ extends Control
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
+
+## One cross-.mnu back-stack rung: the document and screen a forward jump left.
+class MenuStackEntry extends RefCounted:
+	var file := ""
+	var screen := ""
+
+	static func make(p_file: String, p_screen: String) -> MenuStackEntry:
+		var entry := MenuStackEntry.new()
+		entry.file = p_file
+		entry.screen = p_screen
+		return entry
+
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
 # engine/runtime/audio audio/music_policy.h kMenuMusicVarSlot (the menumus MUS
@@ -160,7 +172,7 @@ var _player_options: PlayerOptions = null
 var _options_controller: OptionsMenuController = null
 
 var _menu_cache: Dictionary = {}            # filename -> MnuDocument
-var _menu_stack: Array[Dictionary] = []     # [{file, screen}] cross-.mnu back stack
+var _menu_stack: Array[MenuStackEntry] = []  # cross-.mnu back stack
 var _current_file := ""
 var _selected_mission := ""
 # Per-widget catalog rows behind the seeded mission lists (widget id ->
@@ -168,6 +180,10 @@ var _selected_mission := ""
 # resolve the FILE through this model rather than the row text.
 var _mission_rows := {}
 var _selected_expansion := ""
+# The pending expansion remount: raised by the Mods click, consumed by the next
+# menu update tick ("" = no request).
+# retail: the request flag dword_252DD90 @ 0x252DD90.
+var _expansion_reload_request := ""
 var _in_game := false
 # Named-control routing rebuilt per open_menu: NAME (upper) -> Callable.
 var _named_handlers: Dictionary = {}
@@ -190,6 +206,18 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var started := Time.get_ticks_usec() if stats_on else 0
+	update_menu_frame(delta)
+	if stats_on:
+		_frame_stats.add(FrameStats.FRAME_MENU_SHELL,
+				Time.get_ticks_usec() - started)
+
+
+## The menu mode's per-frame update: the widget clock, the menu-portrait model
+## advance, and -- at the tail, the way the original orders it -- the deferred
+## expansion remount. Public so a caller (and the GUT suite) can step the menu
+## tick the way the mode loop does.
+## retail: Menu_UpdateFrame @ 0x5528a0 (the mode struct's update slot @ 0x83b404).
+func update_menu_frame(delta: float = 0.0) -> void:
 	# The blink/marquee clock rides the OS tick like the original's
 	# GetTickCount gate.
 	if _driver != null:
@@ -198,9 +226,7 @@ func _process(delta: float) -> void:
 	# (avatar previews) are ObjectModels, which no longer self-clock. The static
 	# advance is per-frame-guarded, so a mission's own driver takes precedence.
 	ObjectModel.advance_awake_frame(delta)
-	if stats_on:
-		_frame_stats.add(FrameStats.FRAME_MENU_SHELL,
-				Time.get_ticks_usec() - started)
+	_consume_expansion_reload_request()
 
 
 ## MainGame installs its process-lifetime owner before setup; standalone shells
@@ -638,10 +664,13 @@ func _on_apply_selected_mod() -> void:
 		_apply_expansion(_driver.item_text(id, idx))
 
 
-# Mount the chosen expansion onto the live root, refresh the content that depends on
-# it, and persist the choice. The persisted key is read at the next launch/world load
-# by main_game.gd, so the selection affects gameplay too. A failed mount clears the
-# root, so the previous expansion is re-mounted to recover.
+# Choosing an expansion only RAISES the reload request: the remount runs at the
+# next menu update tick. The click handler validates the pick the way the
+# original does before it raises the flag (an unusable pick leaves it lowered).
+# retail: the expansion-select handler sets dword_252DD90 = 1 @ 0x55ad4f (and
+# clears it @ 0x55ad5b when the pick did not take), and
+# Menu_UpdateFrame @ 0x5528a0 calls Game_ReloadExpansionAndMods @ 0x552710
+# on the following tick.
 func _apply_expansion(name: String) -> void:
 	if _root == null or name.is_empty() or name == _current_expansion():
 		return
@@ -651,6 +680,37 @@ func _apply_expansion(name: String) -> void:
 	# root through mount_runtime and clearing it on the inevitable failure.
 	if not _root.is_runtime_mount():
 		push_warning("MenuShell: expansions need a packed game install; the loose mount stands")
+		return
+	_expansion_reload_request = name
+
+
+## True while an expansion pick is waiting for the next menu update tick.
+func has_pending_expansion_reload() -> bool:
+	return not _expansion_reload_request.is_empty()
+
+
+# The Menu_UpdateFrame tail: run the pending reload and lower the flag.
+# retail: `if (dword_252DD90 && !dword_25C7708) { Game_ReloadExpansionAndMods();
+# dword_252DD90 = 0; }` @ 0x552906-0x55291d. The second flag is the
+# video-mode-change state machine's state (0 = idle, 2 = apply pending,
+# 3 = awaiting confirm; apply_video_mode_change @ 0x55a590, seeded 0 by
+# sub_555710 @ 0x555734), which suppresses the remount while a resolution
+# change is in flight. OpenNova has no such state machine, so only the request
+# flag gates here.
+func _consume_expansion_reload_request() -> void:
+	var pending := _expansion_reload_request
+	if pending.is_empty():
+		return
+	_expansion_reload_request = ""
+	_mount_expansion(pending)
+
+
+# Mount the chosen expansion onto the live root, refresh the content that depends on
+# it, and persist the choice. The persisted key is read at the next launch/world load
+# by main_game.gd, so the selection affects gameplay too. A failed mount clears the
+# root, so the previous expansion is re-mounted to recover.
+func _mount_expansion(name: String) -> void:
+	if _root == null:
 		return
 	var dir := _root.get_root_dir()
 	var prev := _current_expansion()
@@ -714,7 +774,7 @@ func _current_expansion() -> String:
 
 func _on_menu_requested(file: String, target_screen: String) -> void:
 	# Cross-.mnu forward jump: remember where we are so the back stack can return.
-	var previous := {"file": _current_file, "screen": _driver.get_current_screen()}
+	var previous := MenuStackEntry.make(_current_file, _driver.get_current_screen())
 	if open_menu(file, target_screen):
 		_menu_stack.push_back(previous)
 
@@ -723,8 +783,8 @@ func _on_quit_requested() -> void:
 	# Top-level back/quit. Cross-.mnu back first; then it means resume (in-game)
 	# or exit-to-desktop (main menu).
 	if not _menu_stack.is_empty():
-		var prev: Dictionary = _menu_stack.pop_back()
-		open_menu(String(prev.get("file", main_menu_file)), String(prev.get("screen", "")))
+		var prev: MenuStackEntry = _menu_stack.pop_back()
+		open_menu(prev.file if not prev.file.is_empty() else main_menu_file, prev.screen)
 	elif _in_game:
 		resume_requested.emit()
 	else:

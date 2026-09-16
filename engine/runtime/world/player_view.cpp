@@ -13,7 +13,9 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/tp_camera_mount.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 
@@ -386,6 +388,20 @@ bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags) {
     return v.move_held && (def_flags & 1) != 0;
 }
 
+// [orig: Player_OnDamageReceived @0x4DD880]
+void player_on_damage_received(World &world) {
+    LocalPlayer *local = world.local_player_state;
+    if (local == nullptr) return;
+    screen_flash_add_red(local->view.flash, kScreenFlashRedArm); // [orig: @0x4dd88f..0x4dd896]
+    camera_shake_arm(local->view.shake, kShakeArmDamageReceived); // [orig: @0x4dd8a6..0x4dd8ad]
+    // The radar damage blip [orig: Radar_AddBlip @0x59b280, called @0x4dd8c5
+    // (self damage -> all 12 sectors) / @0x4dd8ee (indicator type 2 when the
+    // attacker's ItemDef +0x294 reads 6, else 0)] and the per-player-slot
+    // words unk_26C77A0[100 * (shadowSlot1 & 0x7FFF)] +11 = 6 / +12 = 10
+    // [orig: @0x4dd907..0x4dd916] stay unported: the radar blip system has no
+    // port (D-HUD-21) and the slot words have no witnessed consumer.
+}
+
 bool player_view_toggle_binoculars(PlayerViewState &v) {
     v.binoculars_requested = !v.binoculars_requested;
     if (!v.binoculars_requested) {
@@ -442,8 +458,12 @@ float player_view_fov_h_deg(const PlayerViewState &v, int32_t current_fov_q16,
     // Guard malformed zero/negative zoom instead of a floating divide by zero.
     if (zoom < 1) zoom = 1;
     int32_t fov = current_fov_q16;
-    if (sighted) fov = (80 << 16) / zoom;
-    else if (scoped) fov /= zoom;
+    // The equipped-slot sway rides each optical arm here in retail and is
+    // unported (see the header): the SIGHTED arm applies it only behind the
+    // WeaponDef +0x84 word [orig: @0x5ca452..0x5ca465], the SCOPED arm applies
+    // it unconditionally with a slot equipped [orig: @0x5ca496..0x5ca4a0].
+    if (sighted) fov = (80 << 16) / zoom;   // [orig: @0x5ca42b..0x5ca449]
+    else if (scoped) fov /= zoom;           // [orig: @0x5ca472..0x5ca490]
     return static_cast<float>(fov) / 65536.0f;
 }
 

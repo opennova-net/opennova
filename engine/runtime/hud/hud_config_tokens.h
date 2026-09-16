@@ -36,11 +36,11 @@ inline int next_hud_color_index(int index) {
 inline constexpr int kHudDetailLevelDefault = 0;
 inline constexpr int kHudDetailLevelMax = 3;
 inline constexpr int kHudDetailLevelBlank = 3;
-inline int clamp_hud_detail_level(int level) {
-	if (level < 0) return 0;
-	if (level > kHudDetailLevelMax) return kHudDetailLevelMax;
-	return level;
-}
+// No clamp anywhere: retail stores the `atol` result raw (`mov
+// g_GameConfigState.hudDetail_518, eax` @0x550339) and applies it raw (`mov
+// layerIndex, edx` @0x55154d), so a hand-edited cfg level outside 0..3 reaches
+// CRenderState_SetLayerVisibility unaltered and blanks every gated element until
+// the huddetail cycle wraps it (hud_declutter.cpp rebuild models the 8-bit shift).
 // The `huddetail` cycle (dispatch code 19): 0 -> 1 -> 2 -> 3 -> 0.
 inline int next_hud_detail_level(int level) {
 	return level >= kHudDetailLevelMax ? 0 : level + 1;

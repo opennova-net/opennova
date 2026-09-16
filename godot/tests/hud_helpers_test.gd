@@ -202,3 +202,55 @@ func test_folded_reserve() -> void:
 	assert_eq(HudPos.folded_reserve(1, 4, 1), 5)
 	assert_eq(HudPos.folded_reserve(12, 90, 30), 90, "Only capacity 1 folds.")
 	assert_eq(HudPos.folded_reserve(-1, 4, 1), 4, "The -1 sentinels never fold.")
+
+
+func test_scoped_view_overlay_fork() -> void:
+	# retail: the scene frame's overlay fork tests binoculars, then the Sighted
+	# card byte, then the Scoped card byte; only the Scoped arm chains the
+	# circle mask, and it chains it unconditionally. The engine owns the fork
+	# (runtime/hud/scope_circle_mask.h); see docs/interface/hud-re.md.
+	assert_eq(HudPos.scoped_view_overlay(true, true, true), 1, "Binoculars win.")
+	assert_eq(HudPos.scoped_view_overlay(false, true, true), 2, "Sighted pre-empts Scoped.")
+	assert_eq(HudPos.scoped_view_overlay(false, false, true), 3, "Scoped reaches the mask.")
+	assert_eq(HudPos.scoped_view_overlay(false, false, false), 0, "Neither draws markers.")
+	assert_true(HudPos.scoped_selector_from_def(1, 0), "Scoped without Inset.")
+	assert_false(HudPos.scoped_selector_from_def(1, 0x200), "Inset takes the other byte.")
+	assert_true(HudPos.sighted_selector_from_def(2, false), "The Sighted bit.")
+	assert_false(HudPos.sighted_selector_from_def(2, true), "SWITCHFROM clears it.")
+
+
+func test_scope_circle_mask_geometry() -> void:
+	# retail: the annulus spans 0.71 to 1.5 of five eighths of the viewport
+	# height, as a 130-vertex strip, and the reticle cross plus sixteen grid
+	# diamonds only join it when the SIGHTS card drew no authored row.
+	var surface := Vector2(HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT)
+	var frame := HudPos.scope_mask_frame(surface, 1024)
+	assert_eq(frame.size(), 9, "The frame reports nine derived terms.")
+	assert_eq(Vector2(frame[0], frame[1]), Vector2(512, 384),
+		"The mask centres on the surface.")
+	assert_almost_eq(frame[2], 480.0, 0.01, "Ring size is (768 >> 3) + (768 >> 1).")
+	assert_almost_eq(frame[3], 340.8, 0.01, "The inner radius is 0.71 of it.")
+	assert_almost_eq(frame[4], 720.0, 0.01,
+		"The outer radius is 1.5 of it, past the 640 px corner.")
+	assert_almost_eq(frame[5], 1.0, 0.0001, "4:3 gives both mask scales 1.")
+	assert_almost_eq(frame[6], 1.0, 0.0001, "4:3 gives both mask scales 1.")
+	assert_almost_eq(frame[7], 3.2, 0.001, "The arm half thickness is W / 320.")
+	assert_almost_eq(frame[8], 16.0, 0.001, "The tick pitch is W / 64.")
+
+	var ring := HudPos.scope_mask_points(surface, 1024, true, HudPos.SCOPE_MASK_RING)
+	assert_eq(ring.size(), 130, "65 angle stops, two vertices each.")
+	assert_eq(HudPos.scope_mask_indices(surface, 1024, true, HudPos.SCOPE_MASK_RING).size(),
+		384, "128 triangles expand the strip.")
+	var ring_colors := HudPos.scope_mask_colors(surface, 1024, true, HudPos.SCOPE_MASK_RING)
+	assert_eq(ring_colors[0].a8, 255, "The annulus is opaque.")
+	assert_eq(HudPos.scope_mask_points(surface, 1024, true, HudPos.SCOPE_MASK_CROSS).size(),
+		28, "Four 7-vertex spokes.")
+	assert_eq(HudPos.scope_mask_points(surface, 1024, true, HudPos.SCOPE_MASK_GRID).size(),
+		80, "Sixteen 5-vertex diamonds.")
+
+	assert_eq(HudPos.scope_mask_points(surface, 1024, false, HudPos.SCOPE_MASK_RING).size(),
+		130, "Authored SIGHTS rows never suppress the annulus.")
+	assert_true(HudPos.scope_mask_points(surface, 1024, false, HudPos.SCOPE_MASK_CROSS).is_empty(),
+		"They suppress the reticle cross.")
+	assert_true(HudPos.scope_mask_points(surface, 1024, false, HudPos.SCOPE_MASK_GRID).is_empty(),
+		"And the grid ticks.")

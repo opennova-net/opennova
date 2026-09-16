@@ -2214,9 +2214,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // [orig: `test dl,2` @0x4bf843 -- without it a hard-landing corpse
             // would round its health back toward 0 through the clamp]. org2 tests
             // the threshold ALONE [orig: @0x4b7d0d..0x4b7d21]: no 0x2000 and no
-            // dead test; its local-player red flash, Player_OnDamageReceived
-            // @0x4b7d2b..0x4b7d2d ahead of the authority test (so a joiner's own
-            // body flashes on a hard landing it never charges), is unmodeled. A
+            // dead test; its local-player damage feedback,
+            // Player_OnDamageReceived @0x4b7d2b..0x4b7d2d, fires AHEAD of the
+            // authority test and of the Indestructible test, so a joiner's own
+            // body flashes on a hard landing it never charges (ported below). A
             // damaging landing also stages the fall death-anim selection (+0x2C0,
             // cause 4 -> 174) [orig: org1 @0x4bf85d-0x4bf879, org2
             // @0x4b7d6f-0x4b7d8b -- the staged selector matches our generic-death
@@ -2229,6 +2230,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             const bool fall_charges = inf.is_local_player
                     ? inf.vel[2] <= fall_threshold
                     : inf.airborne && e.health > 0 && inf.vel[2] <= fall_threshold;
+            // org2's local-player damage feedback: red vignette + camera shake,
+            // between the threshold test and the authority/Indestructible tests
+            // [orig: @0x4b7d23..0x4b7d2d -> Player_OnDamageReceived @0x4dd880].
+            // (org1's own arm @0x4b61e8 sits on ITS death leg instead -- that
+            // motor's health-adjust block, health <= 0 and not already dead --
+            // and this unified motor has no separate org1 death leg to hang it
+            // on, so it stays unported; world-wac-ai-re carries the note.)
+            if (inf.is_local_player && fall_charges) player_on_damage_received(world);
             if (fall_charges && is_authority &&
                 (tick_flags & kEntityFlagIndestructible) == 0) {
                 int32_t excess = fall_threshold - inf.vel[2];

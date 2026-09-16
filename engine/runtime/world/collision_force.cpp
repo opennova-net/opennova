@@ -1,6 +1,9 @@
 #include <runtime/world/collision_force.h>
 #include <runtime/world/world.h>
+#include <runtime/world/ammo_table.h>
 #include <runtime/world/dir_table.h>
+#include <runtime/world/local_player.h>
+#include <runtime/world/player_view.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
 #include <cmath>
@@ -99,23 +102,29 @@ void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
         const bool friendly = attacker == target.handle ||
                 (owner != nullptr && owner->group_id == target.group_id &&
                  owner->team == target.team && !session_non_team);
+        // Both legs also hard-set the WHITE hit flash to 255 alongside the hit
+        // dim, and the NoFriendlyFire return skips BOTH writes (the store sits
+        // after the gate's `jnz` out) [orig: @0x4af729 enemy / @0x4af769
+        // friendly]. It blanks the whole HUD overlay pass while it burns
+        // [orig: HUD_RenderAllOverlays @0x5a8098] and draws as a fullscreen
+        // white quad [orig: Render_ProcessMainSceneFrame @0x5caba7].
+        LocalPlayer *local_state = world.local_player_state;
         if (friendly) {
             // Suppressed in session when the rules word carries NoFriendlyFire
             // (g_rules_flags & 0x200) [orig: @0x4af752]; otherwise intensity
             // 0xA000, rate 0x8000 / ((124 * mult) >> 2) [orig: @0x4af764..0x4af77e]
-            if (!world.rules.mp_session || !world.rules.no_friendly_fire)
+            if (!world.rules.mp_session || !world.rules.no_friendly_fire) {
                 world.weather.core.hit_dim.arm(damage_multiplier == 3, /*friendly=*/true);
+                if (local_state != nullptr)
+                    screen_flash_arm_white_hit(local_state->view.flash); // [orig: @0x4af769]
+            }
         } else {
             // intensity 0xA000, rate ((mult << 15) >> 2) / ((310 * mult) >> 2)
             // [orig: @0x4af724..0x4af73e]
             world.weather.core.hit_dim.arm(damage_multiplier == 3, /*friendly=*/false);
+            if (local_state != nullptr)
+                screen_flash_arm_white_hit(local_state->view.flash); // [orig: @0x4af729]
         }
-        // Both legs also write dword_B764B8 = 255 [orig: @0x4af769 / @0x4af729]
-        // — a HUD hit indicator shared with Entity_OnDamageReceived @0x4af822
-        // and reset by Game_InitNewRound @0x422784; its readers
-        // (Player_UpdatePerFrame @0x4de5a7, HUD_RenderAllOverlays @0x5a8098,
-        // Render_ProcessMainSceneFrame @0x5caba7) are unwitnessed, so it has
-        // no port home yet (world-wac-ai-re §17.3b).
         break;
     }
     case 4: { // direct push [orig: @0x4af794..0x4af7dd]
@@ -134,6 +143,20 @@ void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
     default:
         break;
     }
+}
+
+// [orig: Entity_OnDamageReceived @0x4AF800 — the local-player head only; the
+//  wasHit/damageTimer/lastAttacker tail is ported on the RoundHit drain]
+void entity_on_damage_received(World &world, const Entity &victim,
+        const AmmoTableEntry *ammo) {
+    // [orig: `entity == g_local_player_entity && ammoSource` @0x4af812]
+    if (!(victim.handle == world.cached.local_player) || ammo == nullptr) return;
+    LocalPlayer *local_state = world.local_player_state;
+    if (local_state == nullptr) return;
+    // The explosive FLOOR, not a set [orig: @0x4af828..0x4af82a]
+    if (ammo->kz_physics == 3) screen_flash_arm_white_explosive(local_state->view.flash);
+    // The near-miss shake, ahead of every damage gate [orig: @0x4af830..0x4af84b]
+    if (ammo->kz_damage != 0) camera_shake_arm(local_state->view.shake, kShakeArmNearMiss);
 }
 
 // [orig: org1 @0x4BBF8F; org2 @0x4B70D9]

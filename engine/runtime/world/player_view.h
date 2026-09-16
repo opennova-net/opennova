@@ -26,6 +26,8 @@ struct TerrainHeightField;
 
 namespace opennova::world {
 
+class World;
+
 // The per-toggle ease lengths [orig: CNetPlayerInterp_Setup call sites in
 // Player_ToggleWeaponScope — engage 15 @ 0x4df36e / 7 for Inset (flags2 0x200)
 // weapons @ 0x4df355; disengage mirrors them @ 0x4df201 / @ 0x4df1e8, and the
@@ -177,6 +179,179 @@ inline void camera_shake_decay(CameraShakeState &st) {
 	else st.counter -= kShakeDecayPerTick;
 }
 
+// THE THREE FULLSCREEN DAMAGE-FEEDBACK WORDS. Retail keeps them beside the
+// shake counter, decays all four in the SAME instruction run, and draws them
+// as three viewport-filling quads at the very end of the scene frame.
+//
+//   red    dword_B764B4  the damage vignette (vignette.tga tinted 0xFF0000)
+//   white  dword_B764B8  the hit flash (untextured white)
+//   revive revive tint   dword_B764BC, the medic blue-white tint
+//
+// ARMS
+//   red    += 120 cap 255 in Player_OnDamageReceived [orig: @0x4dd88f]; the
+//          joiner's own 0x0A tail health DROP adds the same 0x78 = 120 inline
+//          [orig: NapiNPClientMsg_0x00A @0x4305a3, cap @0x4305bb].
+//   white  = 255 from BOTH legs of the local-player hit blackout
+//          [orig: Entity_ApplyCollisionForce @0x4af729 / @0x4af769]; raised to
+//          a FLOOR of 128 when the damaging ammo's kz_physics byte (+0xE1) is 3
+//          [orig: Entity_OnDamageReceived @0x4af828..0x4af82a].
+//   revive = 255 on the "a medic is reviving me" message
+//          [orig: NapiNPClientMsg_0x03A @0x422685].
+//
+// DECAY, once per client frame, in retail's order (white, red, revive) right
+// after the shake [orig: Player_UpdatePerFrame @0x4DE5A7..0x4DE5F7]. The revive
+// leg is the odd one: it steps by ONE and FLOORS at 0xC4, so it slides 255 ->
+// 196 over 59 ticks and then HOLDS at 196 until a clear. It also has no `else`
+// branch, so a word already at 0 or 1 is left exactly where it is.
+//
+// CLEAR: all three are zeroed by the local respawn / mission start
+// [orig: Game_InitNewRound @0x422778 / @0x422784 / @0x422790].
+//
+// DRAW [orig: Render_ProcessMainSceneFrame @0x5CAB9A..0x5CAC48, only while
+// !g_death_screen_active, after the HUD overlay pass and before the sun veil]:
+//   1. white:  colour (white << 24) | 0xFFFFFF, quad mode 2
+//   2. red:    only while g_camera_mode != 3, alpha = min(red, 0xC0),
+//              colour (alpha << 24) | 0xFF0000, quad mode 3 = the vignette.tga
+//              material (flags 593 = 0x251 AFUNC_BLEND | ASRC_TEXTURExITERATED
+//              | COLOR_ITERATED: texture alpha x vertex alpha, vertex colour)
+//   3. revive: colour 0xFFFFFFFF - ((revive >> 1) * 0x10100), quad mode 0
+//              (A 255, R = G = 255 - (revive >> 1), B 255)
+//
+// While the white word is non-zero the ENTIRE HUD overlay pass early-returns,
+// so a collision/explosion flash blanks the HUD for up to 64 ticks
+// [orig: HUD_RenderAllOverlays @0x5a8098..0x5a809f].
+inline constexpr int kScreenFlashMax = 255;
+// Player_OnDamageReceived's red add, and the identical 0x78 the 0x0A tail
+// health-drop detector adds [orig: @0x4dd88f / @0x4305a9].
+inline constexpr int kScreenFlashRedArm = 120;
+// Player_OnDamageReceived's shake add [orig: @0x4dd8a6].
+inline constexpr int kShakeArmDamageReceived = 10;
+// The red quad's alpha ceiling at draw time [orig: @0x5cabe7..0x5cabee].
+inline constexpr int kScreenFlashRedDrawCap = 0xC0;
+// The explosive-ammo floor [orig: @0x4af82a].
+inline constexpr int kScreenFlashWhiteExplosiveFloor = 128;
+// The revive tint's decay floor [orig: @0x4de5e1..0x4de5ed].
+inline constexpr int kScreenFlashReviveFloor = 0xC4;
+inline constexpr int kScreenFlashWhiteDecayPerTick = 4;
+inline constexpr int kScreenFlashRedDecayPerTick = 2;
+// The camera mode that suppresses the red vignette [orig: @0x5cabde].
+inline constexpr int kScreenFlashRedSuppressedCameraMode = 3;
+
+struct ScreenFlashState {
+	int32_t red = 0;    // dword_B764B4
+	int32_t white = 0;  // dword_B764B8
+	int32_t revive = 0; // dword_B764BC
+	// Our ClientState carries the medic-revive message as a LATCH rather than
+	// as the raw 0x3A edge retail arms on, so the arm rides the latch's rising
+	// edge; this bool is that edge detector and has no retail counterpart.
+	bool revive_latched = false;
+};
+
+// red += amount, saturating at 255 [orig: @0x4dd88f..0x4dd896 / @0x4305a9..0x4305bb].
+inline void screen_flash_add_red(ScreenFlashState &st, int amount) {
+	st.red += amount;
+	if (st.red > kScreenFlashMax) st.red = kScreenFlashMax;
+}
+
+// The local-player hit blackout's hard set [orig: @0x4af729 / @0x4af769].
+inline void screen_flash_arm_white_hit(ScreenFlashState &st) {
+	st.white = kScreenFlashMax;
+}
+
+// The explosive-ammo FLOOR, not a set [orig: @0x4af828..0x4af82a].
+inline void screen_flash_arm_white_explosive(ScreenFlashState &st) {
+	if (st.white < kScreenFlashWhiteExplosiveFloor)
+		st.white = kScreenFlashWhiteExplosiveFloor;
+}
+
+// The medic-revive arm [orig: @0x422685].
+inline void screen_flash_arm_revive(ScreenFlashState &st) {
+	st.revive = kScreenFlashMax;
+}
+
+// The being-revived latch folded into the arm above: our replica state exposes
+// the retained +0x1E0 word, so the 0x3A message edge is its 0 -> 1 transition.
+inline void screen_flash_track_revive(ScreenFlashState &st, bool reviving) {
+	if (!reviving) {
+		st.revive_latched = false;
+		return;
+	}
+	if (!st.revive_latched) {
+		st.revive_latched = true;
+		screen_flash_arm_revive(st);
+	}
+}
+
+// One client frame of decay, in retail's instruction order
+// [orig: Player_UpdatePerFrame @0x4DE5A7..0x4DE5F7].
+inline void screen_flash_decay(ScreenFlashState &st) {
+	if (st.white > 3) st.white -= kScreenFlashWhiteDecayPerTick; // [orig: @0x4de5a7]
+	else st.white = 0;
+	if (st.red > 1) st.red -= kScreenFlashRedDecayPerTick;       // [orig: @0x4de5bf]
+	else st.red = 0;
+	if (st.revive > 1) {                                          // [orig: @0x4de5d6]
+		st.revive -= 1;
+		if (st.revive < kScreenFlashReviveFloor) st.revive = kScreenFlashReviveFloor;
+	}
+	// No else: retail leaves a word already at 0 or 1 exactly where it is.
+}
+
+// [orig: Game_InitNewRound @0x422778 / @0x422784 / @0x422790]
+inline void screen_flash_clear(ScreenFlashState &st) {
+	st.red = 0;
+	st.white = 0;
+	st.revive = 0;
+	st.revive_latched = false;
+}
+
+// The joiner's 0x0A tail-health DECREASE detector, the one arm that is not
+// Player_OnDamageReceived: the handler compares the wire's signed 16-bit health
+// against the recipient's stored Health and, only when it DROPPED, adds 120 to
+// the red vignette and 10 to the camera shake, both capped at 255 -- and adds
+// NO radar blip, which is what separates it from the body motor's arm.
+// [orig: NapiNPClientMsg_0x00A @0x43059a `cmp dx,[eax+0x11E]` / `jge` @0x4305a1
+//  -> @0x4305a3..0x4305d4; the Health store follows @0x4305df]
+inline void screen_flash_arm_health_drop(ScreenFlashState &flash, CameraShakeState &shake,
+                                         int new_health, int stored_health) {
+	if (new_health >= stored_health) return;
+	screen_flash_add_red(flash, kScreenFlashRedArm);
+	camera_shake_arm(shake, kShakeArmHealthDrop);
+}
+
+// The whole HUD overlay pass early-returns while the white word burns
+// [orig: HUD_RenderAllOverlays @0x5a8098..0x5a809f].
+inline bool screen_flash_hud_overlays_suppressed(const ScreenFlashState &st) {
+	return st.white != 0;
+}
+
+// The red quad's DRAW alpha: nothing in camera mode 3, otherwise the word
+// capped at 0xC0 [orig: @0x5cabd5..0x5cabf3].
+inline int32_t screen_flash_red_draw_alpha(const ScreenFlashState &st, int camera_mode) {
+	if (st.red == 0 || camera_mode == kScreenFlashRedSuppressedCameraMode) return 0;
+	return st.red > kScreenFlashRedDrawCap ? kScreenFlashRedDrawCap : st.red;
+}
+
+// The revive quad's red/green channel byte; blue stays 255 and alpha 255
+// [orig: 0xFFFFFFFF - ((v >> 1) * 0x10100) @0x5cac18..0x5cac43].
+inline int32_t screen_flash_revive_channel(const ScreenFlashState &st) {
+	return kScreenFlashMax - (st.revive >> 1);
+}
+
+// THE LOCAL PLAYER'S DAMAGE FEEDBACK, one retail function
+// [orig: Player_OnDamageReceived @0x4DD880]: the red vignette gains 120 and the
+// camera shake 10, both capped at 255, then a radar damage blip is added and
+// two per-player-slot words are stamped. Every one of retail's five call sites
+// is gated on the victim being the local player; this function is the arm they
+// share. A world with no bound local player state is a no-op.
+//
+// UNPORTED here, deliberately: the radar damage blip producer
+// [orig: Radar_AddBlip @0x59b280 from @0x4dd8c5 (self damage: all 12 sectors)
+//  and @0x4dd8ee (type 2 when the attacker's ItemDef +0x294 == 6, else 0)] —
+// the radar blip system as a whole is not ported (D-HUD-21) — and the
+// unk_26C77A0[100 * (shadowSlot1 & 0x7FFF)] words +11 = 6 / +12 = 10
+// [orig: @0x4dd907..0x4dd916], whose consumers are unwitnessed.
+void player_on_damage_received(World &world);
+
 // Retail's six-lane first-person pose: three float Q16 position values and
 // three wrapping BAM words, not six interchangeable scalar angles.
 // [orig: WeaponDef +0x10C / +0x124; CNetPlayerInterp_Setup @0x4DDFD0]
@@ -273,6 +448,10 @@ struct PlayerViewState {
     // compose, whose deltas render) [orig: the callers @ 0x526781 and
     //  @ 0x5ca34d]; the frame read therefore mutates, like retail's globals.
     mutable CameraShakeState shake;
+    // The three fullscreen damage-feedback words (ScreenFlashState above):
+    // armed by the damage/collision/revive legs, decayed beside the shake in
+    // the same pre-tick pass, cleared by the local respawn.
+    ScreenFlashState flash;
     bool binoculars_requested = false;   // [orig: raw toggle g_binocularsToggle @ 0xB76539]
     bool binoculars_raised = false;      // [orig: body-pose g_binocularsRaised @ 0xB7653A]
     bool binoculars_view_active = false; // [orig: first-person view g_binocularsViewActive @ 0xB76538]
@@ -464,6 +643,17 @@ bool player_view_nvg_visible(const PlayerViewState &v);
 // pose ease. Resolved optical flags select 80/zoom (Sighted) or current/zoom
 // (Scoped); binoculars select 20 degrees. The caller owns the visibility gates.
 // [orig: Render_ProcessMainSceneFrame @0x5CA3C5..0x5CA4A6]
+//
+// The same retail block also adds an EQUIPPED-SLOT sway to the view angles that
+// this port does not model: `pitch -= slot->field_4; yaw += slot->field_8` off
+// the local player's EquippedSlot (entity +0x118, a MountSlot). Its gate is
+// NOT the same on the two optical arms -- the SIGHTED arm applies it only when
+// the slot's WeaponDef word at +0x84 is non-zero [orig: @0x5ca452..0x5ca465],
+// the SCOPED arm applies it whenever a slot is equipped at all
+// [orig: @0x5ca496..0x5ca4a0]. The MountSlot pitch/yaw pair is the turret aim
+// our vehicle mount does not publish to the view yet, so neither arm sways
+// here; the binocular arm's own pair is ported
+// (LocalPlayerViewTracker::binocular_*_offset_deg).
 float player_view_fov_h_deg(const PlayerViewState &v, int32_t current_fov_q16,
                            bool scoped, bool sighted, int32_t zoom);
 

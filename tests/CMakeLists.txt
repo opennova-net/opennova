@@ -1615,6 +1615,11 @@ add_executable(collision_force_test world/collision_force_test.cpp)
 target_link_libraries(collision_force_test PRIVATE opennova_runtime)
 add_test(NAME collision_force COMMAND collision_force_test)
 
+# The three fullscreen damage-feedback words (arms, decays, draw reductions).
+add_executable(screen_flash_test world/screen_flash_test.cpp)
+target_link_libraries(screen_flash_test PRIVATE opennova_runtime)
+add_test(NAME screen_flash COMMAND screen_flash_test)
+
 add_executable(infantry_terrain_test world/infantry_terrain_test.cpp)
 target_link_libraries(infantry_terrain_test PRIVATE opennova_runtime)
 add_test(NAME infantry_terrain COMMAND infantry_terrain_test)

@@ -6,6 +6,10 @@
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -162,6 +166,34 @@ public:
 	static Rect2 nvg_scale_rect();
 	static Color nvg_scale_modulate();
 	static int binocular_range_step(int p_current, int p_target);
+
+	// The scoped-view circle mask (runtime/hud/scope_circle_mask.h carries the
+	// geometry and the witnesses). One batch per call, in VIEWPORT PIXELS and
+	// ready for RenderingServer.canvas_item_add_triangle_array: `batch` is
+	// SCOPE_MASK_RING / _CROSS / _GRID, and the cross and grid come back empty
+	// unless `draw_crosshair` -- retail's only argument to the drawer, meaning
+	// the SIGHTS card drew no authored row.
+	enum {
+		SCOPE_MASK_RING = 0,
+		SCOPE_MASK_CROSS = 1,
+		SCOPE_MASK_GRID = 2,
+	};
+	static PackedVector2Array scope_mask_points(const Vector2 &p_surface,
+			int p_screen_width, bool p_draw_crosshair, int p_batch, int p_aspect_mode);
+	static PackedColorArray scope_mask_colors(const Vector2 &p_surface,
+			int p_screen_width, bool p_draw_crosshair, int p_batch, int p_aspect_mode);
+	static PackedInt32Array scope_mask_indices(const Vector2 &p_surface,
+			int p_screen_width, bool p_draw_crosshair, int p_batch, int p_aspect_mode);
+	// The derived frame, in order: center x, center y, ring size, inner radius,
+	// outer radius, scale x, scale y, arm half thickness, tick pitch.
+	static PackedFloat32Array scope_mask_frame(const Vector2 &p_surface,
+			int p_screen_width, int p_aspect_mode);
+	// The scene frame's overlay fork (0 markers, 1 binocular mask, 2 sighted
+	// card, 3 scoped card + circle mask) and the two selector bytes' def halves.
+	static int scoped_view_overlay(bool p_binoculars_view_active, bool p_sighted,
+			bool p_scoped);
+	static bool scoped_selector_from_def(int p_weapon_flags, int p_weapon_flags2);
+	static bool sighted_selector_from_def(int p_weapon_flags, bool p_slot_switching_from);
 
 	Error load(const String &path);
 	// Load hudpos.def by flat name through the mounted resource root (VFS), so the

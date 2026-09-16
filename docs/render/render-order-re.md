@@ -552,11 +552,24 @@ driver; camera above water shown — the sides mirror when underwater):
    ENTITY ground shadows are a different family and are ported — they render
    at frame open (step 1's slot pass) and drape during the terrain scene
    walk via `RenderSlot_DrawAllDrapes @ 0x5d6e20`; see
-   render-lighting-re.md's render-slot section), radar/scope overlays,
-   HUD (`HUD_RenderAllOverlays @ 0x5a8070`, mode-0 flushes for 3D HUD
-   elements), fades, tips.
-7. `FrameFX_RenderBloomPass` (flush 4 = Q3), present,
-   `RenderBatchCtx_EndFrameStats`.
+   render-lighting-re.md's render-slot section): the death-lerp fade
+   (`type 4 @ 0x5caa3f`), the red damage vignette (`type 1 @ 0x5caa71`), then
+   the quality-3 FrameFX pass.
+7. **`FrameFX_RenderBloomPass` (flush 4 = Q3)** — corrected 2026-09-16: this
+   step is NOT after the HUD. It is reached only through
+   `if (FrameFX_QualityAtLeast3()) Render_DispatchShadowByType(..., 2, ...)`
+   `@ 0x5caa7b..0x5caa97` → `sub_5841D0 @ 0x5844eb` →
+   `FrameFX_RenderBloomPass @ 0x584234` (its ONLY caller chain in the image),
+   and that call sits **before** the scoped-view overlay fork
+   `@ 0x5caae1..0x5cab26` (binocular mask / SIGHTS card / the scope circle mask
+   `Hud_DrawScopeCircleMask @ 0x5cab15` / the entity markers) and before the
+   whole HUD block `@ 0x5cab2b` onward. The reimpl already matches the binary:
+   the FrameFX compositor effect runs as a viewport compositor pass and the HUD
+   is a canvas layer drawn over its output.
+8. Radar/scope overlays and the HUD (`HUD_RenderAllOverlays @ 0x5a8070`,
+   mode-0 flushes for 3D HUD elements), the fullscreen feedback quads, fades,
+   tips.
+9. Present, `RenderBatchCtx_EndFrameStats`.
 
 **Dead variants** (zero live callers; never order-witness from them):
 `render_skybox_layers @ 0x5ac230`, `render_sun_lens_flare @ 0x5ad490`,

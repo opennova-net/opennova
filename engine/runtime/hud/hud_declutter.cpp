@@ -112,14 +112,23 @@ uint8_t HudDeclutter::mask(int slot) const {
 }
 
 void HudDeclutter::set_level(int level) {
-	level_ = level < 0 ? 0 : (level > kDeclutterLevelMax ? kDeclutterLevelMax
-														 : level);
+	// Retail stores the level word as handed over — the cfg cell @0x24D20BC
+	// takes the parsed int and the callers pass it straight into
+	// CRenderState_SetLayerVisibility. There is NO clamp: an out-of-range level
+	// simply selects a bit no authored mask carries, and the whole gated HUD
+	// hides until the next huddetail cycle wraps the level back to 0.
+	// [orig: `mov layerIndex, eax` @0x4E060B/@0x4E0614; the cfg apply
+	//  @0x55154d; the death force-3 @0x42e41c]
+	level_ = level;
 	rebuild();
 }
 
 int HudDeclutter::cycle_level() {
-	// level + 1, wrapping past 3 to 0
-	// [orig: Input_HandleActionBinding_0 @ 0x4E0601..0x4E0624].
+	// level + 1, wrapping past 3 to 0 — the compare is signed and runs on the
+	// SUM, so a level the cfg parked above 3 wraps to 0 on the first press.
+	// [orig: Input_HandleActionBinding_0 @ 0x4E0601..0x4E0624:
+	//  `mov eax,layerIndex; add eax,ebx; cmp eax,3; mov layerIndex,eax;
+	//   jle short; xor eax,eax; mov layerIndex,eax`]
 	int next = level_ + 1;
 	if (next > kDeclutterLevelMax) {
 		next = 0;
@@ -130,10 +139,19 @@ int HudDeclutter::cycle_level() {
 
 void HudDeclutter::rebuild() {
 	// [orig: CRenderState_SetLayerVisibility @ 0x59B0F0 — for slot 0..23,
-	// dword_2723C80[slot] = ((1 << level) & byte_2723CE0[slot]) != 0]
+	//  dword_2723C80[slot] = ((uint8_t)(1 << level) & byte_2723CE0[slot]) != 0]
+	// The shift is x86's `shl edx, cl`, so the count is taken modulo 32, and
+	// the `and cl, dl` that follows keeps only the LOW BYTE of the result:
+	// levels 4..7 test bits no HUDDECLUT arm ever authors (everything hides),
+	// levels 8..31 leave a zero byte (everything hides), and level 32 aliases
+	// level 0 again. A negative level lands the same way through cl.
+	// [orig: `shl edx, cl` @0x59B0FB; `mov cl, byte_2723CE0[eax]; and cl, dl`
+	//  @0x59B100..0x59B106]
+	const unsigned shift = static_cast<unsigned>(level_) & 31u;
+	const uint8_t bit = static_cast<uint8_t>(1u << shift);
 	for (int slot = 0; slot < kDeclutterSlotCount; ++slot) {
 		visible_[static_cast<size_t>(slot)] =
-				((1u << level_) & masks_[static_cast<size_t>(slot)]) != 0;
+				(bit & masks_[static_cast<size_t>(slot)]) != 0;
 	}
 }
 

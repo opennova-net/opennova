@@ -65,14 +65,11 @@ bool Simulation::request_local_player_scope_toggle() {
 
 bool Simulation::request_local_player_binoculars_toggle() {
 	if (kernel_ == nullptr) return false;
-	// The raise's aim-displacement angle samples the process RNG, only on a raise.
-	const auto unit_random = []() -> float {
-		return static_cast<float>(
-				(static_cast<double>(std::rand()) + 0.5) /
-				(static_cast<double>(RAND_MAX) + 1.0));
-	};
+	// The raise's aim-displacement angle is no longer sampled here: retail seeds
+	// it once per ACTIVATION from the render frame, off the mission PRNG the
+	// engine owns, so the engine's view tick draws it.
 	return opennova::world::local_player_binoculars_toggle(
-			kernel_->world, kernel_->local.weapon, kernel_->local.view, kernel_->local.view_tracker, unit_random);
+			kernel_->world, kernel_->local.weapon, kernel_->local.view, kernel_->local.view_tracker);
 }
 
 bool Simulation::request_local_player_nvg_toggle() {

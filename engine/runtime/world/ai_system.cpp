@@ -486,7 +486,14 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             }
             // Self-damage does not stamp a reaction or attacker. Retail tests the
             // timer against 25, then adds 10 without clamping (24 becomes 34).
-            // [orig: Entity_OnDamageReceived @0x4af859..0x4af878]
+            // This is Entity_OnDamageReceived's TAIL; its HEAD -- the local
+            // player's white hit flash floor and the explosive near-miss camera
+            // shake, both keyed on the ammo record -- is ported as
+            // world::entity_on_damage_received (collision_force.cpp), called
+            // from the explosion sweep where the ammo row is still in hand. The
+            // RoundHit drained here carries no ammo, so the split is deliberate.
+            // [orig: Entity_OnDamageReceived @0x4af859..0x4af878; the head
+            //  @0x4af812..0x4af84b]
             if (hit.shooter != victim->handle) {
                 victim->inf.was_hit = true;
                 if (victim->inf.damage_timer < 25) victim->inf.damage_timer += 10;

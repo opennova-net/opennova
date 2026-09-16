@@ -23,7 +23,8 @@ load and found loading-art pixels across the extended surface.
 | Component | Verdict | Evidence |
 | --- | --- | --- |
 | Sidecar background resolution (`<missionbase>.pcx` → `loadscrn.pcx`) | **MATCHING** (ported) | witness map below; GUT `godot/tests/game/loading_screen_test.gd` (sidecar name, fallback, custom flag) |
-| MP session text block (title/mission/game-type band + server message) | **MATCHING** (ported; glyph renderer approximated, D-LOADSCR-2) | layout constants + alignment enum + color tags witnessed; GUT gametype-key + SP/MP-split tests |
+| MP session text block (title/mission/game-type band + server message) | **MATCHING** (ported; glyph metrics approximated, D-LOADSCR-2) | layout constants + alignment enum + color tags witnessed; the wrap/layout algorithm ported 2026-09-16 (see "Wrapped text block"); GUT gametype-key + SP/MP-split tests plus the wrap-rule suite (last-space break, dropped overflow character, `` hard break, `
+` swallow, half-height blank line, skip_lines, centre/right placement, bottom clip) |
 | Progress bar (geometry, colors, exact checkpoints, throttle) | **MATCHING geometry**; intentional stage-schedule divergence (D-LOADSCR-1) | exact integer fill arithmetic; native + GUT tests pin exact stage values and prohibit autonomous creep |
 | Fullscreen background stretch and live resize | **MATCHING** (ported) | full-backbuffer stretch witnessed at `LoadingScreen_DrawEffectFullscreen @ 0x586ba0`; retail `00TRa.bms` render probe switches to fullscreen during the blocked load, requires window/viewport/loading-surface/capture extents to match, and samples real art beyond the old window bounds |
 | Present pump during the blocking load | reimpl code (direct CanvasItem transforms + forced-draw analog of the witnessed pump) | cadence witnessed at `LoadingScreen_UpdateAndPresent @ 0x586be0`; event processing, embedded-viewport sync, direct canvas-RID transforms, and `RenderingServer.force_draw` stand in for Game_PumpWindowMessages/BeginScene/Present |
@@ -83,8 +84,57 @@ Text layout (texture space, 800×600 retail art):
   gametext `LoadingText`/`LT_SERVERMSG` (fallback literal "Message from Game Server")
   formatted `<c80E0FF>%s:\r\n<cFFFFFF>` at (0.02·w, 0.87·h); body at (0.02·w, 0.90·h);
   box right/bottom edge (0.98·w, h). Constants are doubles at `0x7D01A0/0x7D0198/0x7D0190/0x7C4878`.
-- The wrap routine breaks at the last space, advances one line cell, stops when the next
-  line would pass rect_bottom [orig: 0x580eb0].
+### Wrapped text block — `render_draw_wrapped_text_block_ex @ 0x580eb0`
+
+`(text, font, left, top, right, bottom, alignment, depth, skip_lines,
+use_kerning_start, use_kerning_wrap)`. Witnessed in full and PORTED 2026-09-16
+(`LoadingScreen.wrap_text_lines` + `LoadingScreen.layout_text_block`).
+
+**Setup.** Returns 0 immediately when `font`, `text`, or `right - left <= 0`
+`@0x580f1f`. The line pitch is the `'I'` character's extent
+(`CGameFont_GetCharExtent(font, 73, ...)` `@0x580f2b`): the FULL advance is that
+height `@0x5810d7` and the half advance is `height >> 1` `@0x580f40`. The x
+kerning term starts at `font[90]` when `use_kerning_start` is set, else 0
+`@0x580ef1`; `font[90]` is `font+0x168`, the CGameFont TAB-WIDTH field
+(`CGameFont_GetCharExtent`'s `charCode == 9` arm `@0x674dd8`, written by the
+misnamed `GText_SetLineSpacing @ 0x674720`). Every loading-screen call site
+passes `use_kerning_start = 0` (`@0x521fee`, `@0x52201a`, `@0x52203c`,
+`@0x5220bd`), and the field is 0 unless something sets a tab width, so the
+offset folds out of the ported block.
+
+**Break loop** `@0x580f77-0x581139`, per character index `i` from `line_start`:
+
+- a space at `i` records `last_space = i` `@0x580f88` (index 0 counts as "no
+  space", the `if (max_width)` test `@0x580fd2`);
+- a non-NUL character re-measures the WHOLE prefix `line_start..i` by writing a
+  temporary NUL at `i + 1` and calling `CGameFont_GetTextExtent` `@0x580fa9`;
+  `current_width = kerning + extent` and the value is LOOP-CARRIED, so the
+  terminator step re-uses the previous measure;
+- if `current_width <= right - left`, only `` (13) or the terminator breaks
+  `@0x580fdf`; otherwise the break is at `last_space` when there is one
+  `@0x580fd6`, else at the current character `@0x580fee` — which is then
+  DROPPED, because the break character is NUL'd out for the draw and the next
+  line starts at `break + 1` `@0x581120`;
+- a `
+` (10) immediately after the break is swallowed too `@0x581128`. A bare
+  `
+` that does not trail a break is an ordinary glyph.
+
+**Draw/advance.** Lines with index `< skip_lines` are consumed with no draw AND
+no vertical advance `@0x580ffb`. An EMPTY line (`line_start == break`
+`@0x581003`) — and a line whose measure does not exceed the kerning term
+`@0x581033` — advances HALF the `'I'` height `@0x581005`; a drawn line advances
+the full height `@0x5810d7`. Alignment 4 centres on `left + (width >> 1)` in
+render mode 1 `@0x5810ab`, alignment 5 right-aligns on `rect_right` in mode 2
+`@0x581094`, anything else draws from `rect_left` in mode 0 `@0x58107f`. After
+a drawn line the kerning term becomes `font[90]` when `use_kerning_wrap` is set,
+else 0 `@0x5810e5`; after a half-height line it follows `use_kerning_start`
+`@0x581015`.
+
+**Return.** The end-of-text check runs FIRST and returns 0 `@0x581155`; only
+then does the vertical clip `rect_top != rect_bottom && y + line_h > rect_bottom`
+return the 1-based line count `@0x58111e`. So the final line never trips the
+clip, and `top == bottom` disables it outright.
 
 ### Text provider — HUD_GetLoadingScreenTextByGameType @ 0x51f300
 
@@ -328,7 +378,7 @@ Impac22b.fnt under D-LOADSCR-2's standing CGameFont approximation.
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
 | D-LOADSCR-1 | Nine actual-operation checkpoints (0..80), local-world-ready 90, and presentation-complete 100; repeated model pulses hold their stage value; no autonomous creep | ~30 call sites incl. per-subsystem slot++ ticks (62..69), separate 7/26 loop constants, and a displayed value that may creep up to reported+10 | our pipeline decomposes differently, and its user-facing bar deliberately never claims unfinished work. Stage progress is deterministic and exact; join admission owns the final 100 edge. — INTENTIONAL 2026-09-04 |
-| D-LOADSCR-2 | Godot FontFile view of the .fnt fonts, drawn under the image scale transform; Godot line metrics + word wrap | CGameFont glyph composite into the texture, `GameFont_LoadFromBlob`/`sub_6741C0` spacing params (120 small / 0 large, semantics unwitnessed) | glyph-exact spacing is the standing CGameFont follow-up shared with [hud-re.md](hud-re.md); positions/alignments/colors/wrap box are witnessed and ported |
+| D-LOADSCR-2 | Godot FontFile view of the .fnt fonts, drawn under the image scale transform; the BREAK RULE is now the ported one (`LoadingScreen.wrap_text_lines`/`layout_text_block`, 2026-09-16 — `draw_multiline_string` is gone), so only the glyph METRICS remain approximated | CGameFont glyph composite into the texture, `GameFont_LoadFromBlob`/`sub_6741C0` spacing params (120 small / 0 large, semantics unwitnessed) | glyph-exact spacing is the standing CGameFont follow-up shared with [hud-re.md](hud-re.md); positions/alignments/colors/wrap box are witnessed and ported |
 | D-LOADSCR-3 — **FIXED 2026-07-24** | `world_loaded` completes the wire-header world and available shared assets but does not release a joiner's presentation. `ClientRuntime` continues the real session under the hidden world; `Simulation::is_joined_in_match` / `is_join_deploy_pick_pending` feed edge-triggered `GameWorld.join_admission_ready` / `join_deploy_pick_required`, and `MainGame` releases only at one of those authoritative boundaries. The same deploy edge rearms after death without replaying the loading screen | retail holds through TWO blocking waits bracketing its header-driven terrain/assets load — `NapiClient_WaitForDisconnect @ 0x42cb20` (connect handshake) then `NapiClient_WaitForGameStart @ 0x42cc10` (spawn gate `g_spawn_success_gate @ 0x24c1928`, S2C 0x1D — net-re §5.2) — revealing on the spawn leg or entering the DEATH picker when a spawn choice is owed | real-UDP `main_game_lifecycle_test.gd::test_join_loading_stays_raised_until_authoritative_admission` proves the old early-reveal boundary and the fixed release |
 | D-LOADSCR-4 — **FIXED 2026-08-15** | The SP start-mission splash is ported as a `LoadingScreen` mode: same held background, the blinking centered LT_Continue line (Impac22b.fnt, half-bright, 512 ms white/`0xFF8080` pulse), the cursor-arrow quad at the live mouse position, key-queue-flush entry semantics, any-key/any-mouse-button dismissal, the final background-only frame, and the fire-and-forget START_MISSION one-shot; shell gate + world-tick hold in `main_game.gd` | `show_start_mission_splash @ 0x520820` (the full witness set above) | GUT `loading_screen_splash_test.gd`; the epilog-stage re-show entry split off as D-LOADSCR-8; the 2026-08-15 xref walk corrected the old "or the sound completes" gloss (input-only dismissal) |
 | D-LOADSCR-8 | The epilog-stage splash re-show — the start key at the SP post-spawn stage re-runs the splash then queues the deploy event (branch jnz @ 0x49c871; recomposite @ 0x49c887, splash re-run @ 0x49c88f, release @ 0x49c899) — is not ported | `Input_HandleSpecialKeys @ 0x49c5c0` branch @ 0x49c871 | rides the unported SP epilog/respawn flow (and the configurable start-key binding, D-CTRL-1 territory); witnessed 2026-08-15, deferred with that flow |

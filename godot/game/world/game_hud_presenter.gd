@@ -12,6 +12,7 @@ extends Node
 ##  TextResource_LoadMissionTextBin @0x51ed90]
 
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
+const HudScopeCircleMaskScript := preload("res://game/world/hud_scope_circle_mask.gd")
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
 
 const HudHiddenCaptureWitness := preload(
@@ -47,6 +48,7 @@ var _end_round_stats := EndRoundStatisticsPresenterScript.new()  # the SP Show S
 var _lfp_panel := LfpPanelPresenterScript.new()  # the AAS zone status panel lane
 var _hud_pos: HudPos = null  # the loaded hudpos.def (VEHICLE_HUD blocks for the panel lane)
 var _sights_card: HudSightsCard = null # child of the overlay (per-row blend controls)
+var _scope_circle_mask: HudScopeCircleMask = null # child of the overlay (the scoped annulus)
 var _view_effects: PlayerViewEffects = null # child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
 var _hud_weapon_name := ""  # equipped-weapon cache (re-resolves WepDes on change)
@@ -94,9 +96,11 @@ var _score_fanfare := ScoreFanfarePresenter.new()  # the S2C 0x81 hit-confirm la
 # cycle and the death screen write. Every mission start re-seeds the live level
 # from the config value, so a death's forced blank never outlives its mission.
 const HUD_DETAIL_CONFIG_KEY := "hud_detail"
-var _hud_detail_config: int = HudOverlay.clamp_hud_detail_level(
-		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
-				HUD_DETAIL_CONFIG_KEY, HudOverlay.hud_detail_level_default())))
+# Stored verbatim: retail atol()s the token and applies it raw, so an
+# out-of-range level blanks every gated element until the huddetail cycle
+# wraps it (docs/interface/hud-re.md, the declutter section).
+var _hud_detail_config: int = int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
+		HUD_DETAIL_CONFIG_KEY, HudOverlay.hud_detail_level_default()))
 var _hud_detail_level: int = _hud_detail_config
 var _hud_detail_was_down := false
 # Render-comparison declutter is a reversible runtime transaction over the
@@ -186,6 +190,7 @@ func teardown() -> void:
 		_game_hud.queue_free()
 		_game_hud = null
 	_sights_card = null
+	_scope_circle_mask = null
 	_view_effects = null
 	_hud_weapon_name = ""
 	_hud_objective = ""
@@ -283,6 +288,16 @@ func ensure_game_hud() -> void:
 	_sights_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_hud.add_child(_sights_card)
 	_sights_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# The scoped-view circle mask sits AFTER the card in the overlay's child
+	# order, so the annulus covers the card's own corners -- retail submits the
+	# SIGHTS card first and the mask straight after it on the Scoped arm.
+	_scope_circle_mask = HudScopeCircleMaskScript.new()
+	_scope_circle_mask.name = "ScopeCircleMask"
+	_scope_circle_mask.show_behind_parent = true
+	_scope_circle_mask.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_scope_circle_mask.visible = false
+	_game_hud.add_child(_scope_circle_mask)
+	_scope_circle_mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_push_sight_state()
 	var hudpos := HudPos.new()
 	var root: ResourceRoot = _world.get_resource_root() \
@@ -444,6 +459,14 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var nvg_visible := false
 	var nvg_gain := 0
 	var vehicle_attack_context := false
+	# The three fullscreen damage-feedback quads plus the HUD-overlay early
+	# return that rides the white one. The engine reduces the raw words to these
+	# draw values (engine/runtime/world/player_view.h carries the witnesses).
+	var flash_white := 0
+	var flash_red := 0
+	var flash_revive := 0
+	var flash_revive_channel := 255
+	var hud_overlays_suppressed := false
 	var lv: PlayerLocalView = _world.local_player_view()
 	if lv != null:
 		scope_card = lv.scope_card_active
@@ -454,6 +477,11 @@ func tick(gameplay_input_active: bool = false) -> void:
 		nvg_visible = lv.nvg_visible
 		nvg_gain = lv.nvg_gain
 		vehicle_attack_context = lv.vehicle_attack_context
+		flash_white = lv.screen_flash_white_alpha
+		flash_red = lv.screen_flash_red_alpha
+		flash_revive = lv.screen_flash_revive
+		flash_revive_channel = lv.screen_flash_revive_channel
+		hud_overlays_suppressed = lv.hud_overlays_suppressed
 
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	_apply_attach_labels()
@@ -561,9 +589,34 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# suppressed by the binocular view like the ported shell HUD folded it.
 	if _sights_card != null:
 		_sights_card.set_card_up(scope_card and not binoculars_view_active)
+	# The scoped-view circle mask. retail: the scene frame's overlay fork picks
+	# binoculars, then the Sighted card, then the Scoped card -- and only the
+	# Scoped arm chains the mask, unconditionally, with one argument saying the
+	# card drew no AUTHORED row (a missing texture does not change that count).
+	# The fork itself is the engine's (HudPos.scoped_view_overlay ->
+	# runtime/hud/scope_circle_mask.h); the vehicle-attack context clears both
+	# selector bytes before it. See docs/interface/hud-re.md.
+	if _scope_circle_mask != null:
+		var card_selectors := scope_card and not vehicle_attack_context \
+				and weapon != null
+		var overlay_branch := HudPos.scoped_view_overlay(binoculars_view_active,
+				card_selectors and weapon.sighted_selector,
+				card_selectors and weapon.scoped_selector)
+		_scope_circle_mask.set_mask_state(overlay_branch == 3,
+				weapon == null or weapon.sights.is_empty())
 	if _view_effects != null:
 		_view_effects.update_view(binoculars_view_active, binocular_range,
 				nvg_visible, nvg_gain)
+		_view_effects.update_damage_feedback(flash_white, flash_red,
+				flash_revive, flash_revive_channel)
+	# retail: while the white hit flash burns, the whole HUD overlay pass
+	# early-returns, so a collision or explosion blanks the gameplay HUD for up
+	# to 64 ticks. The overlay's own draw list is what that pass covers; its
+	# children (this node's view effects, the SIGHTS card) belong to the scene
+	# frame and keep drawing, which is exactly what self_modulate leaves alone.
+	# The addressed witness lives in docs/interface/hud-re.md.
+	_game_hud.self_modulate = Color(1.0, 1.0, 1.0, 0.0) if hud_overlays_suppressed \
+			else Color.WHITE
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
@@ -886,7 +939,7 @@ func cycle_hud_detail() -> void:
 ## never touches the persisted config value (retail's cycle and death force
 ## write the layer level only; game.cfg carries the config value).
 func set_hud_detail_level(level: int) -> void:
-	_hud_detail_level = HudOverlay.clamp_hud_detail_level(level)
+	_hud_detail_level = level
 	if _game_hud != null:
 		_game_hud.set_hud_detail_level(_hud_detail_level)
 
@@ -941,7 +994,7 @@ func finish_hud_hidden_capture() -> void:
 	if not _hud_hidden_capture_active:
 		return
 	_hud_hidden_capture_active = false
-	_hud_detail_level = HudOverlay.clamp_hud_detail_level(_hud_hidden_saved_detail_level)
+	_hud_detail_level = _hud_hidden_saved_detail_level
 	if _game_hud != null and is_instance_valid(_game_hud):
 		_game_hud.set_hud_detail_level(_hud_detail_level)
 

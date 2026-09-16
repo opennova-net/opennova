@@ -1,5 +1,7 @@
 #include "hud/player_hud_weapon_def.h"
 
+#include <runtime/hud/scope_circle_mask.h>
+
 using namespace godot;
 
 Ref<PlayerHudWeaponDef> PlayerHudWeaponDef::from_weapon_def(const Ref<WeaponDef> &p_def) {
@@ -21,6 +23,12 @@ Ref<PlayerHudWeaponDef> PlayerHudWeaponDef::from_weapon_def(const Ref<WeaponDef>
 	out->rounds_per_icon_ = rounds_per_icon_from_layout(layout);
 	out->sights_ = p_def->get_sights();
 	out->sight_slide_multiplier_ = p_def->get_sight_slide_multiplier();
+	// The card selectors' def halves; the engine owns the bit policy.
+	out->scoped_selector_ = opennova::hud::scoped_selector_from_def(
+			static_cast<uint32_t>(p_def->get_flags()),
+			static_cast<uint32_t>(p_def->get_flags2()));
+	out->sighted_selector_ = opennova::hud::sighted_selector_from_def(
+			static_cast<uint32_t>(p_def->get_flags()), false);
 	return out;
 }
 
@@ -56,6 +64,8 @@ void PlayerHudWeaponDef::_bind_methods() {
 	PLAYER_HUD_WEAPON_DEF_PROPERTY(Variant::VECTOR2I, rndgfx_step)
 	PLAYER_HUD_WEAPON_DEF_PROPERTY(Variant::INT, rounds_per_icon)
 	PLAYER_HUD_WEAPON_DEF_PROPERTY(Variant::INT, sight_slide_multiplier)
+	PLAYER_HUD_WEAPON_DEF_PROPERTY(Variant::BOOL, scoped_selector)
+	PLAYER_HUD_WEAPON_DEF_PROPERTY(Variant::BOOL, sighted_selector)
 #undef PLAYER_HUD_WEAPON_DEF_PROPERTY
 	ClassDB::bind_method(D_METHOD("get_sights"), &PlayerHudWeaponDef::get_sights);
 	ClassDB::bind_method(D_METHOD("set_sights", "value"), &PlayerHudWeaponDef::set_sights);

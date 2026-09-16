@@ -2791,6 +2791,40 @@ collision block's **CFAC triangle mesh**, per section. Ported as
   (`ray[22] + 4 @ 0x4e982b`; the ammo effects_table of §17.4), plus the slot-2
   local-player-hit feedback when the victim is `g_local_player_entity`. JO data:
   metal props author material 14 → tag 18 `metal` (Mbarel1X: 20×14 + 8×1 faces).
+- **The dead-victim effect gate** (PORTED 2026-09-16) `[orig:
+  Projectile_HandleEntityImpact @ 0x4e9390]`: when the victim already carries
+  Flags & 2 (`test byte ptr [esi+24h], 2 @0x4e95c3`), two face classes clear
+  `shouldProcessEffect` — a person body (`cmp dword ptr [eax+5Ch], 3 @0x4e95d0`
+  → store 0 `@0x4e95d6`) and the flesh material 19 (`cmp ecx, 13h @0x4e95db` →
+  store 0 `@0x4e95e0`; 19 + 4 = tag 23 `flesh`). The flag gates BOTH the
+  material + 4 spawn and the slot-2 local-player feedback `@0x4e9817`, so a
+  corpse reached through the ITEM pass sprays nothing. (`v21`/`weaponType` in
+  the decompilation is the cached `ray[22]` material byte, not a weapon type.)
+- **The glass section break** (PORTED 2026-09-16) `[orig:
+  Projectile_HandleEntityImpact @ 0x4e9390 → Entity_PlaySectionBreakSound
+  @ 0x439c00]`: face material 15 is GLASS. On a victim that is not a husk
+  (`test byte ptr [esi+24h], 4 @0x4e9654`) and whose itemDef+0x5C item type is
+  5 = Building (`@0x4e965d`), the struck section breaks: the helper runs first
+  `@0x4e9672`, then `or [esi+134h], edx @0x4e9684` sets `1 << ray[31]` in the
+  victim's section mask (unconditional, section 0 included). The helper's name
+  is an auto-namer misnomer — its bone min/max transforms and the extent
+  product it computes at `@0x439c64..0x439cd2` are DEAD locals, and its one
+  observable effect is `Entity_PlaySound3D_FullVolume(dword_24E0920,
+  hitPosition, entity) @0x439d25` (volume 255 through `Sound_Play3DPositional
+  @ 0x527cb0`), gated on a NON-ZERO section index `@0x439c08`, the bit still
+  clear `@0x439c1e`, and a live itemDef `@0x439c2a`. `dword_24E0920` is row 29
+  `GLASS_SMASH` of the 36-B `{char name[32]; int *handle}` resolver table
+  (`@0x82f9a4`) that `DialogSystem_Init @ 0x527687` fills, so the leg is the
+  window-smash sound plus the pane's disappearance. Nothing recomputes
+  collision bounds: the item CFAC face walk's only per-section gate is
+  `(boneMatrix+60) & 3 @0x4e4f12`, so a shot-out pane still STOPS ordinary
+  rounds; the mask removes it from the draw and from the person bone-sphere
+  walks. UNPORTED residual: `test dword ptr [ebx+114h], 18000000h @0x4e968a`
+  → `*outFlag = 1 @0x4e969a` — a `lawr|fgrenade` round (the round's ammo-flag
+  copy at +0x114; `DEF_AMMO_FLAG_LAWR` 0x08000000 | `DEF_AMMO_FLAG_FGRENADE`
+  0x10000000, flag table `@0x813500`) reports "continue" and flies on through
+  the hole it just made. RoundSim has no round-continues output, so a rocket
+  stops at the glass.
 - **The runtime arrays** `[orig: Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0 —
   ex ThreediGp_BuildCollisionModel, renamed (the chunked form is 3DI3)]`: one arena;
   8-B Q8 int16 vertex records, 8-B Q14 normal records keeping the dominate-axis
@@ -3395,11 +3429,15 @@ absolute error against the yaw is below `0x3FFFFFC0`, else 4 `[orig: @ 0x4af4c6.
   rate `0x8000 / ((124 * mult) >> 2)` (352 facing / 264 behind) `[orig: @ 0x4af764..
   0x4af77e]`; enemy: rate `((mult << 15) >> 2) / ((310 * mult) >> 2)` (105 either
   way) `[orig: @ 0x4af724..0x4af73e]`. Both legs also write `dword_B764B8 = 255`
-  `[orig: @ 0x4af769 / @ 0x4af729]` — a HUD hit indicator shared with
+  `[orig: @ 0x4af769 / @ 0x4af729]` — the WHITE fullscreen hit flash, shared with
   `Entity_OnDamageReceived @ 0x4af822`, reset by `Game_InitNewRound @ 0x422784`,
-  read by `Player_UpdatePerFrame @ 0x4de5a7`, `HUD_RenderAllOverlays @ 0x5a8098`
-  and `Render_ProcessMainSceneFrame @ 0x5caba7`; its readers are unwitnessed and
-  it has no port home yet (the one residual of this function).
+  decayed by `Player_UpdatePerFrame @ 0x4de5a7`, read as the HUD overlay pass's
+  early return by `HUD_RenderAllOverlays @ 0x5a8098` and drawn as a viewport quad
+  by `Render_ProcessMainSceneFrame @ 0x5caba7`. Both writes sit AFTER their
+  respective rate computations, so the NoFriendlyFire return skips the flash as
+  well as the hit dim. Witnessed and ported 2026-09-16
+  (`world::screen_flash_arm_white_hit`; the full record is
+  [docs/interface/hud-re.md](../interface/hud-re.md) "Local damage feedback").
 - **4 direct push** (`slideDecay < 4096`): `velocityX/Y += (cos/sin << 10) >> 22`,
   `slideDecay += 1024` `[orig: @ 0x4af794..0x4af7dd]`.
 
@@ -3409,6 +3447,62 @@ triple) with `quantized_dir` (`dir_table.h`); case 3 arms
 session/team leg reads `rules.mp_session` + `match.rules().game_type`, the
 NoFriendlyFire leg `rules.no_friendly_fire`. Both callers pass `ammo->kz_physics`.
 A person without an infantry body has no target for either half.
+
+### Player_OnDamageReceived — the local player's damage feedback
+
+`Player_OnDamageReceived(attackerEntity, blipPosition) @ 0x4DD880` is the shared
+arm behind every "I just took damage" cue. It is two lines of state plus two
+unported producers:
+
+```
+dword_B764B4 += 120; if (> 255) = 255            [orig: @0x4dd88f..0x4dd896]  // the RED vignette
+g_CameraShakeCounter += 10; if (> 255) = 255     [orig: @0x4dd8a6..0x4dd8ad]
+if (attacker == g_local_player_entity)
+    Radar_AddBlip(attacker, pos, 255)            [orig: @0x4dd8c5]  // self damage: all 12 sectors
+else {
+    type = 0;
+    if (attacker && attacker->itemDef(+0x170) && itemDef+0x294 == 6) type = 2;   // vehicle class 6
+    Radar_AddBlip(attacker, pos, type)           [orig: @0x4dd8ee]
+}
+slot = &unk_26C77A0[100 * (local->shadowSlot1 & 0x7FFF)];
+slot[11] = 6; slot[12] = 10;                     [orig: @0x4dd907..0x4dd916]
+```
+
+The second parameter is a POSITION pointer (the blip's world position), not a
+damage amount. Five call sites, every one gated on the victim being the local
+player:
+
+| call site | extra gate | ported |
+|---|---|---|
+| `Entity_ApplyWeaponDamage @0x4e6b77..0x4e6b8a` (after the `deathCallback(entity,2,0)` notify @0x4e6b72) | the damage record's kz type `+0x18 != 3` (not the medic heal); args `(record+0x20, record)` | yes — `destruction.cpp`, the person path of `entity_apply_weapon_damage` |
+| `Projectile_ProcessDamageOnTarget @0x4e8213..0x4e822b` | `!(victim.Flags & 2)` (alive) AND `damage > 5`; args `(projectile owner, owner+4)` | not yet (`round_sim.cpp`) |
+| `Projectile_ProcessExplosionQueue @0x4eb2b6..0x4eb2df` | `victim.Flags & 0x100` (Player) && `!(Flags & 2)` && `victim+0x124 == 0` && local && `record+0x18 != 3` | yes — `destruction.cpp`, the pool-0 sweep ahead of the damage callback |
+| `Entity_UpdateInfantryPlayerBody @0x4b61e8..0x4b61f5` (org1) | reached on org1's health-adjust DEATH leg only (`Health <= 0` and `!(Flags & 2)`, after the fall death-anim stage and the class callback) | no — our unified infantry motor has no separate org1 death leg to hang it on |
+| `Entity_UpdateInfantryPlayerBody @0x4b7d23..0x4b7d2d` (org2 fall damage) | the landing threshold alone, AHEAD of the authority and Indestructible tests, so a joiner's own body flashes on a hard landing it never charges | yes — `infantry.cpp`, the landing leg |
+
+Neither producer inside the function is ported: the radar damage blip
+(`Radar_AddBlip @0x59b280`) belongs to the unported radar blip system (D-HUD-21),
+and the per-player-slot words at `unk_26C77A0 + 100 * slot` (+11 = 6, +12 = 10)
+have no witnessed consumer. Port: `world::player_on_damage_received(World &)` in
+`engine/runtime/world/player_view.cpp`; the three flash words and the decay run
+are recorded in [docs/interface/hud-re.md](../interface/hud-re.md).
+
+`Entity_OnDamageReceived @ 0x4AF800` is the sibling notify. Its head is the local
+player's cosmetic half, gated on `entity == g_local_player_entity && ammoSource`
+`[orig: @0x4af812]`: an ammo whose `kz_physics` byte (+225) reads 3 raises the
+white flash to a FLOOR of 128 `[orig: @0x4af828..0x4af82a]`, and an ammo with a
+non-zero `kz_damage` word (+46) adds 20 to the camera shake
+`[orig: @0x4af830..0x4af84b]` — that arm sits ahead of any damage gate, so an
+explosive NEAR-MISS that deals nothing still shakes. Its tail (`wasHit`,
+`damageTimer += 10` below 25, `lastAttacker`, all skipped on self damage)
+`[orig: @0x4af85b..0x4af878]` is ported on the `RoundHit` drain in
+`AiSystem::tick`. Three call sites: `Entity_HandleDamageTrigger @0x407588` and
+`Entity_HandleDamageAndTriggerZones @0x40792b` (the two class damage callbacks,
+unported for the cosmetic half) and `Projectile_ProcessExplosionQueue @0x4eb05c`
+— the OUTER-BAND flinch, taken by any organic (`victim->itemDef->type(+0x5C) == 3`)
+inside the 2x reaction band BEFORE the blast-radius cut `[orig: @0x4eb04a..0x4eb06c]`.
+That last one is ported as `world::entity_on_damage_received`
+(`collision_force.cpp`), called from the pool-0 sweep in `destruction.cpp`.
 
 The org2 four-tick selection chooses authored clips 111..114 for byte values 1..4.
 An absent clip preserves the selected animation and burn byte. Every sixteenth
@@ -6608,7 +6702,7 @@ the FFI structs.
 |---|---|---|---|
 | D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — the port's extra "building material 1 → 23 flesh" remap in `RoundSim` REFUTED 2026-08-15 and DELETED: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally `@0x4e982b` and `AmmoDef_ProcessImpactEffect` clamps only ≥ 28 `@0x40a1bf`; the remap is the knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888`). The adjacent person-leg residual raised 2026-08-15 was GRILLED and FIXED 2026-08-22 — see D-ITEM-21. A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
-| D-ITEM-3 | The mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte | `@ 0x4e6c5e-0x4e6e6b` | partial visual damage (windows/panels before death) missing; needs the section-flag plumb in the collision build |
+| D-ITEM-3 | The BLAST-time mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte. The GUNFIRE half of the same mask is PORTED 2026-09-16 (§15.8): a round whose CFAC face material is 15 (glass) on a non-husk item-type-5 building ORs `1 << ray[31]` into sectionMask and plays the `GLASS_SMASH` trigger set at the hit point; nothing recomputes collision bounds, so the broken pane leaves the draw but still stops ordinary rounds. Own residual: the `lawr/fgrenade` pass-through report `@0x4e968a` → `@0x4e969a` (RoundSim has no round-continues output) | `@ 0x4e6c5e-0x4e6e6b`; the gunfire leg `@ 0x4e964f-0x4e969a` → `Entity_PlaySectionBreakSound @ 0x439c00` | partial visual damage from BLASTS (windows/panels before death) missing; needs the section-flag plumb in the collision build. The gunfire leg is live and pinned by `projectile_combat::test_material_15_breaks_the_building_glass_section` |
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs (organic knockback `Entity_ApplyCollisionForce` PORTED 2026-09-14, §17.3b): the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
@@ -6626,7 +6720,7 @@ the FFI structs.
 | D-ITEM-18 | **FIXED 2026-08-23.** UnitType 3's explicit `PiecePhysics` callback now ports raw-Q16 air/water motion, the one-draw angle branch, four Q22 slope probes and the husk-picked model-bottom correction, strict landing pose, `Effect_HeloGroundHit`, scorch 7, authority-only Organic/MItem dual blasts, exact fallback sounds, and a separate `PiecePitchSettle` state for `DeathPiece_SettlePitch`'s two-degree step/four-degree snap/delayed transition | `DeathPiece_PhysicsUpdate @0x48f500`; `Entity_CalcSlopeForces @0x4b0b00`; `DeathPiece_SettlePitch @0x48f0b0` | `destruction_test::test_specialized_piece_physics_callback` pins dry/wet/ramp/authority paths; object participation in the four rays is tracked once under D-ITEM-9 |
 | D-ITEM-19 | **FIXED 2026-08-15.** Collision resolution retains exact case-insensitive `DEAD` points from the first husk only; UnitType 11 transforms each through full Euler and emits one family-0 `Effect_ShockWaterBrdg` at raw water height, first transition only, with no origin fallback | `Entity_SpawnDeathEffectsAtBones @ 0x4944c0` | `destruction_test::test_bridge_dead_points_emit_water_shocks` pins count, full-pose positions, zero water, first-transition gating, no fallback, and non-UnitType-11 silence; `simulation_test` pins real 3DI user-point axes |
 | D-ITEM-20 | **FIXED 2026-07-22.** Building Static/collapse dispatch gates on `ItemDeathTraits::husk_model_loaded`, fed by successful live huskFinal/husk `ObjectData` resolution and kept separate from authored `has_husk` | `Entity_ProcessBuildingDeath @ 0x49442c`; the pointer gate wraps only the callback body | missing/corrupt husk assets receive the matched-row death flags, but no pieces, Static motion, or collapse sound; valid first-stage and final-only models both open the gate |
-| D-ITEM-21 | **FIXED 2026-08-22 (grill).** The bullet person impact-effect leg. Correspondence first, because the dispatch is easy to misread: bullets reach a person ONLY through the bone-section pass. `Entity_BuildProximityLists_Pool01` fills `g_DynProx*` from pool 1 `@0x4b9389` and `g_PersonProx*` from pool 0 `@0x4b93eb`; `Projectile_RaycastProximitySlots` walks `g_StaticProx` for slotType 2 and `g_DynProx` for slotType 1, reaching `g_PersonProx` only on its DEFAULT leg `@0x4e57e7`, which the bullet dispatch never calls (it passes 2 `@0x4ea4f5` and 1 `@0x4ea535` only). Pool 0 is reached solely via `Physics_RaycastAgainstProximityList @0x4ea5bf` → `Physics_RaycastAgainstBoneSections @0x4e4670` (sole caller `@0x4e4c59`) → dispatch case 3 → `Projectile_HandleTerrainImpact_0 @0x4e98f0`, an auto-namer misnomer that is in fact the person-impact handler. Cases 1/2 therefore cannot produce a person hit, and the bone-bounds call inside `Projectile_HandleEntityImpact @0x4e9672` is a different thing (`Entity_ComputeBoneCollisionBounds`, gated `weaponType==15 && itemDef+92==5`). Ported from that handler: an already-dead victim (`hitEntity+36 & 2`) presents NOTHING; the LOCAL player takes tag 2 'player'; every other person takes tag 23 'flesh' but ONLY IF the victim's group differs from the local player's OR the victim is below half its items.def hp — a same-group victim at or above half health shows no impact effect at all (squad declutter). The two tag legs are mutually exclusive, not additive. Ours previously emitted tag 2 for every person collision | dead gate `@0x4e9920`/`@0x4e994f`; local compare `@0x4e9a55`, push 2 `@0x4e9aa1`; group WORDs +0x11C `@0x4e9aac`/`@0x4e9ab3`; healthMax WORD itemDef+0x17C halved by `sar dx,1` `@0x4e9abf`..`@0x4e9ac6`; signed Health WORD +0x11E compared with `jge` skipping the spawn `@0x4e9ac9`/`@0x4e9ad0`; push 17h `@0x4e9ad7` | shooting an enemy now plays the flesh row (`imp_bullet_flesh`) instead of the player row, and a healthy squad-mate no longer sprays. `projectile_combat::test_person_impact_tag_splits_on_identity_and_squad_health` pins all five branches; `npruntime_round_sim` and `simulation_test` pin the non-local sound row. RESIDUAL: the ADDITIVE body-armor leg `@0x4e99f8`..`@0x4e9a38` (tag 24 'bodyarmor' when the hit zone `hitContext+0x80` is 0..4 UNSIGNED and `victim+0x2C & 8`, the armor carry bit from weapon def `flags & 0x1000` — `WeaponSlotTable_LoadAllFromDefs @0x5415ac`) is UNPORTED: `WeaponInventory::carry_flags` exists but has no per-entity mirror, so the victim's bit is unreadable. Needs an `Entity` field plus a host/wire feed |
+| D-ITEM-21 | **FIXED 2026-08-22 (grill).** The bullet person impact-effect leg. Correspondence first, because the dispatch is easy to misread: bullets reach a person ONLY through the bone-section pass. `Entity_BuildProximityLists_Pool01` fills `g_DynProx*` from pool 1 `@0x4b9389` and `g_PersonProx*` from pool 0 `@0x4b93eb`; `Projectile_RaycastProximitySlots` walks `g_StaticProx` for slotType 2 and `g_DynProx` for slotType 1, reaching `g_PersonProx` only on its DEFAULT leg `@0x4e57e7`, which the bullet dispatch never calls (it passes 2 `@0x4ea4f5` and 1 `@0x4ea535` only). Pool 0 is reached solely via `Physics_RaycastAgainstProximityList @0x4ea5bf` → `Physics_RaycastAgainstBoneSections @0x4e4670` (sole caller `@0x4e4c59`) → dispatch case 3 → `Projectile_HandleTerrainImpact_0 @0x4e98f0`, an auto-namer misnomer that is in fact the person-impact handler. Cases 1/2 therefore cannot produce a person hit, and the bone-bounds call inside `Projectile_HandleEntityImpact @0x4e9672` is a different thing (`Entity_PlaySectionBreakSound`, gated `weaponType==15 && itemDef+92==5`). Ported from that handler: an already-dead victim (`hitEntity+36 & 2`) presents NOTHING; the LOCAL player takes tag 2 'player'; every other person takes tag 23 'flesh' but ONLY IF the victim's group differs from the local player's OR the victim is below half its items.def hp — a same-group victim at or above half health shows no impact effect at all (squad declutter). The two tag legs are mutually exclusive, not additive. Ours previously emitted tag 2 for every person collision | dead gate `@0x4e9920`/`@0x4e994f`; local compare `@0x4e9a55`, push 2 `@0x4e9aa1`; group WORDs +0x11C `@0x4e9aac`/`@0x4e9ab3`; healthMax WORD itemDef+0x17C halved by `sar dx,1` `@0x4e9abf`..`@0x4e9ac6`; signed Health WORD +0x11E compared with `jge` skipping the spawn `@0x4e9ac9`/`@0x4e9ad0`; push 17h `@0x4e9ad7` | shooting an enemy now plays the flesh row (`imp_bullet_flesh`) instead of the player row, and a healthy squad-mate no longer sprays. `projectile_combat::test_person_impact_tag_splits_on_identity_and_squad_health` pins all five branches; `npruntime_round_sim` and `simulation_test` pin the non-local sound row. RESIDUAL: the ADDITIVE body-armor leg `@0x4e99f8`..`@0x4e9a38` (tag 24 'bodyarmor' when the hit zone `hitContext+0x80` is 0..4 UNSIGNED and `victim+0x2C & 8`, the armor carry bit from weapon def `flags & 0x1000` — `WeaponSlotTable_LoadAllFromDefs @0x5415ac`) is UNPORTED: `WeaponInventory::carry_flags` exists but has no per-entity mirror, so the victim's bit is unreadable. Needs an `Entity` field plus a host/wire feed |
 
 ### 24.8 IDB write-backs (2026-07-17, saved)
 

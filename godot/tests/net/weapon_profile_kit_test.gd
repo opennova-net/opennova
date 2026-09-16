@@ -212,3 +212,51 @@ func test_an_unlatched_team_commits_no_page() -> void:
 				"%s is on the RED page; an unlatched team must not commit a side" % name)
 	assert_does_not_have(held, OFF_PAGE,
 			"%s is on no page at all" % OFF_PAGE)
+
+
+# The kit page reaches the profile record. The PLAYER screen serializes the edited
+# side's page as consecutive (name, primary, secondary, flags) entries (knife first,
+# then the class-5 medpack, the three category picks, three grenade slots) and retail
+# writes that block into the side's CLASS page before PlayerProfile_SaveToFiles.
+# retail: serialize_weapon_loadout @ 0x55e4b0; see docs/playerinfo/avatars-re.md.
+func test_player_info_accept_writes_the_edited_sides_class_page() -> void:
+	var path := _write_weapon_sav()
+	var kit := [
+		{"name": "WPN_KNIFE2", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+		{"name": "WPN_DRAGUNOV", "ammo_primary": 5, "ammo_secondary": -1, "flags": 0},
+		{"name": "WPN_357", "ammo_primary": 3, "ammo_secondary": -1, "flags": 1},
+		{"name": "WPN_M4AUTO", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
+	]
+	var profile := {
+		"team": 1,
+		"player_class": RED_CLASS,
+		"side_profiles": [
+			{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0400},
+			{"avatar_a": 7, "avatar_b": 0, "avatar_packed": 0x8407},
+		],
+		"kit": kit,
+	}
+	assert_eq(Simulation.save_weapon_profile_selection(path, profile), OK)
+
+	var expected := PackedByteArray()
+	for entry in kit:
+		for token in [String(entry["name"]), str(entry["ammo_primary"]),
+				str(entry["ammo_secondary"]), str(entry["flags"])]:
+			expected.append_array(token.to_ascii_buffer())
+			expected.append(0)
+	expected.append(0)
+	var bytes := FileAccess.get_file_as_bytes(path)
+	var page_at := HEADER_BYTES + SIDE_BYTES + FIRST_PAGE_OFFSET \
+			+ PAGE_BYTES * (RED_CLASS - 5)
+	assert_eq(bytes.slice(page_at, page_at + expected.size()), expected,
+			"the RED class-%d page carries the serialized kit verbatim" % RED_CLASS)
+	# The untouched BLUE page of the same class keeps the fixture's block.
+	var blue_at := HEADER_BYTES + FIRST_PAGE_OFFSET + PAGE_BYTES * (BLUE_CLASS - 5)
+	var blue_blob := _page_blob(BLUE_PAGE)
+	assert_eq(bytes.slice(blue_at, blue_at + blue_blob.size()), blue_blob,
+			"the other side's page is not rewritten by the kit")
+
+	var bad := profile.duplicate(true)
+	bad["kit"] = [{"name": "", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1}]
+	assert_eq(Simulation.save_weapon_profile_selection(path, bad), ERR_INVALID_PARAMETER,
+			"an entry without a weapon name is refused before the file is touched")

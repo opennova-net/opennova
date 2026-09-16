@@ -18,9 +18,15 @@ var _binocular_crosshair: Texture2D
 var _binocular_numbers: Texture2D
 var _nvg_mask: Texture2D
 var _nvg_scale: Texture2D
+var _vignette: Texture2D
 var _underwater_murk: ColorRect
 var _sun_veil: ColorRect
 var _nvg_post: ColorRect
+# The three fullscreen damage-feedback quads the retail scene frame draws last
+# (see update_damage_feedback).
+var _white_flash: ColorRect
+var _red_vignette: TextureRect
+var _revive_tint: ColorRect
 var _environment: MissionEnvironment
 var _environment_light_state: EnvLightState
 # The presenter's per-frame view facts (update_view).
@@ -71,7 +77,63 @@ func _ready() -> void:
 	add_child(_nvg_post, false, Node.INTERNAL_MODE_BACK)
 	_nvg_post.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_nvg_post.visible = _nvg_visible
+	_build_damage_feedback_quads()
 	_sync_underwater_murk()
+
+
+## The three fullscreen damage-feedback quads, in the order the retail scene
+## frame emits them: the white hit flash, the red damage vignette, then the
+## medic revive tint. They are ordinary (non behind-parent) children, so they
+## follow this Control's own binocular/NVG draw, matching retail's placement at
+## the very end of the frame. Retail's own order also puts them AFTER the HUD
+## overlay pass and BEFORE the sun veil; our HUD is this node's parent and the
+## sun veil is a behind-parent sibling, so both of those neighbours sit on the
+## other side of the three quads here. That stacking difference is recorded in
+## docs/interface/hud-re.md.
+func _build_damage_feedback_quads() -> void:
+	# 1. The white hit flash: an untextured white quad whose alpha IS the word.
+	# retail: quad colour (word << 24) | 0xFFFFFF through the untextured
+	# iterated-colour material (the same one the sun-glare veil uses).
+	_white_flash = ColorRect.new()
+	_white_flash.name = "ScreenFlashWhite"
+	_white_flash.color = Color(1.0, 1.0, 1.0, 0.0)
+	_white_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_white_flash.visible = false
+	add_child(_white_flash, false, Node.INTERNAL_MODE_BACK)
+	_white_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# 2. The red damage vignette: vignette.tga stretched over the viewport, its
+	# TEXTURE alpha multiplied by the vertex alpha and tinted by the vertex
+	# colour (retail material flags 593 = AFUNC_BLEND | ASRC_TEXTURExITERATED |
+	# COLOR_ITERATED), i.e. Godot's ordinary modulate over an alpha-blended
+	# TextureRect. The alpha is capped at 192 and suppressed in camera mode 3;
+	# the engine applies both before this feed.
+	_red_vignette = TextureRect.new()
+	_red_vignette.name = "ScreenFlashVignette"
+	_red_vignette.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_red_vignette.stretch_mode = TextureRect.STRETCH_SCALE
+	_red_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_red_vignette.modulate = Color(1.0, 0.0, 0.0, 0.0)
+	_red_vignette.visible = false
+	add_child(_red_vignette, false, Node.INTERNAL_MODE_BACK)
+	_red_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# 3. The medic revive tint: retail sends an OPAQUE (alpha 255) quad whose
+	# red and green channels fall to 255 - (word >> 1) while blue stays 255, and
+	# the word floors at 196 and holds there until the round clears. An opaque
+	# source-over quad would wall the view off permanently, so the material
+	# behind its quad mode is a MULTIPLY: the frame is tinted blue, deepening
+	# with the word. The blend is the one part of the three quads not witnessed
+	# byte-for-byte (its render-state slot has no other user); the hold-at-196
+	# behaviour is what rules source-over out.
+	_revive_tint = ColorRect.new()
+	_revive_tint.name = "ScreenFlashReviveTint"
+	_revive_tint.color = Color.WHITE
+	_revive_tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var tint_material := CanvasItemMaterial.new()
+	tint_material.blend_mode = CanvasItemMaterial.BLEND_MODE_MUL
+	_revive_tint.material = tint_material
+	_revive_tint.visible = false
+	add_child(_revive_tint, false, Node.INTERNAL_MODE_BACK)
+	_revive_tint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 
 func set_environment(environment: MissionEnvironment) -> void:
@@ -117,6 +179,11 @@ func set_resource_root(root: ResourceRoot) -> void:
 	_binocular_numbers = _load_texture("BNumbers.tga")
 	_nvg_mask = _load_texture("NVG.tga")
 	_nvg_scale = _load_texture("Nvgscale.tga")
+	# The red damage vignette's texture; retail loads it once into the material
+	# behind the quad's mode-3 pass.
+	_vignette = _load_texture("vignette.tga")
+	if _red_vignette != null:
+		_red_vignette.texture = _vignette
 	queue_redraw()
 
 
@@ -139,6 +206,37 @@ func update_view(binoculars_view_active: bool, binocular_range: int,
 		_nvg_post.visible = _nvg_visible
 	if changed:
 		queue_redraw()
+
+
+## The three fullscreen damage-feedback quads, fed straight from the engine's
+## per-frame view state. The engine owns every word, decay, cap and gate (the
+## witnesses live at engine/runtime/world/player_view.h); this only sizes rects
+## and picks colours.
+##   `white_alpha`   the raw hit-flash word, 0..255, drawn as white at that alpha
+##   `red_alpha`     the vignette's DRAW alpha, already capped at 192 and already
+##                   zeroed in the free/spectator camera mode
+##   `revive`        the revive word, non-zero = draw
+##   `revive_channel` 255 - (revive >> 1): the tint's red/green byte, blue is 255
+func update_damage_feedback(white_alpha: int, red_alpha: int, revive: int,
+		revive_channel: int) -> void:
+	if _white_flash != null:
+		var show_white := white_alpha > 0
+		if show_white:
+			_white_flash.color = Color(1.0, 1.0, 1.0,
+					clampf(float(white_alpha) / 255.0, 0.0, 1.0))
+		_white_flash.visible = show_white
+	if _red_vignette != null:
+		var show_red := red_alpha > 0 and _vignette != null
+		if show_red:
+			_red_vignette.modulate = Color(1.0, 0.0, 0.0,
+					clampf(float(red_alpha) / 255.0, 0.0, 1.0))
+		_red_vignette.visible = show_red
+	if _revive_tint != null:
+		var show_revive := revive > 0
+		if show_revive:
+			var channel := clampf(float(revive_channel) / 255.0, 0.0, 1.0)
+			_revive_tint.color = Color(channel, channel, 1.0, 1.0)
+		_revive_tint.visible = show_revive
 
 
 ## Retail's persistent rangefinder easing. Large corrections step quickly while
