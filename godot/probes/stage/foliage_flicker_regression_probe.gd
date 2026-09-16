@@ -93,7 +93,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 
 	var definition := TerrainFoliageDef.new()
 	definition.graphic = "procedural_regression_cross"
-	definition.match = _foliage_index
+	definition.match = PackedInt32Array([_foliage_index])
 
 	var colormap_data := TerrainData.new()
 	colormap_data.colormap = _solid_texture(Color(0.72, 0.90, 0.66, 1.0), 16)

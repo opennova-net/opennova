@@ -19,7 +19,7 @@ remain in place; ONED's paint and eyedropper consumers were removed by ADR 0037.
 
 | Surface | Retail witness | Reimpl result | Verdict |
 |---|---|---|---|
-| Definition/map source data | `.trn` foliage defs, charmap, foliagemap | formats and DETAIL's flat wrapped coordinate policy retained; no ONED authoring UI | matching format/coordinate helpers |
+| Definition/map source data | `.trn` foliage defs (`match` = up to seven byte args per slot, FOUR consumed), charmap, foliagemap | formats (four-code `FoliageDef::match` since 2026-09-14, see Definition match codes) and DETAIL's flat wrapped coordinate policy retained; no ONED authoring UI | matching format/coordinate helpers |
 | Detail-cell collection | frustum-surviving traversal nodes (level ≥ 3, node distance less 16 within 42) hand subtrees to `Terrain_CollectNearFoliagePatches @ 0x603e60`, independent of the 224 main-draw cap; foliage cap 128 | an independent handoff from the same traversal decisions and node gate into the 16-unit mip-bound collector | matching (seating corrected 2026-07-16, D-FOLIAGE-13; budget independence and node gate corrected 2026-09-13, D-FOLIAGE-14) |
 | Detail placement | `generate_foliage_instances_0 @ 0x5ffdd0` | fresh `foliage::Runtime` literal vectors | matching |
 | Detail geometry | every surface of every LOD0 submesh expanded and terrain-bent | fresh CPU-expanded aggregate ArrayMesh batches | matching |
@@ -216,11 +216,32 @@ whole-disc walk: it over-collected ~34 cells at open-ground poses, exceeding
 the pool capacity and thrashing the witnessed LRU into a two-frame cell
 blink retail does not show (its frustum wedge stays under capacity).
 
+### Definition match codes
+
+Witnessed 2026-09-14. Each `.trn` foliage definition carries up to SEVEN
+`match` args, not one: the config parser's `match` arm stores them as bytes at
+slot+0x108.. (`match_idx` 1..7 -> `bytes[536*slot + 6227 + idx]`, slot base
+5964, stride 0x218 = 536) `[orig: Terrain_ParseConfigCallback @ 0x60F330]`.
+The runtime consumer reads only FOUR of them: `Foliage_RemapPixelToDefMask
+@ 0x5FF4E0` turns a foliagemap pixel into a slot mask by setting `1 << slot`
+for every slot whose four bytes at +0x108..+0x10B contain the pixel; pixel 0
+returns 0 before the slot walk, and a slot whose header byte (+0, the graphic
+name's first character) is 0 is skipped. Args five to seven are therefore
+stored but never consumed. The reimpl widens `FoliageDef::match` to four codes
+(`engine/formats/foliage/foliage.h`, `FOLIAGE_MATCH_CODES`), parses up to seven
+and keeps four, writes every authored code on the one `match` line, and hosts
+the remap as `foliage_remap_pixel_to_def_mask` (pixel-0 and empty-graphic
+gates included); `FoliageDispatcher` evaluates it once per pixel value at
+`configure_slots`. The previous single-code port only ever matched the first
+authored code; shipped maps author one code per slot (Dvxi5 254/253/252/251),
+so no observable divergence was ledgered and no D row is minted.
+
 ### Gate and expansion
 
 For every detail candidate:
 
-- the **foliagemap** palette index selects matching definition slots;
+- the **foliagemap** palette index selects every definition slot whose four
+  `match` codes contain it (Definition match codes above);
 - the surface/charmap is not consulted;
 - the full source model is yawed and translated without subtracting its bounds
   center;

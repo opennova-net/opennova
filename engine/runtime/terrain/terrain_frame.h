@@ -77,15 +77,28 @@ struct TerrainSceneSnapshot {
 TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
                                                   const TrnConfig &trn);
 
-// Orthonormal camera state in world space plus the projection, both
-// column-major. The compiler multiplies proj*view and extracts the frustum
-// itself so the embedder never owns culling math.
+// Orthonormal camera state in world space (column-major world-to-view, -Z
+// forward) plus the scalars retail's terrain context carries: the horizontal
+// FOV the clip cone is rebuilt from, the frame's view distance, and the
+// polygon-detail setting. The compiler builds the cull itself so the embedder
+// never owns culling math; the projection matrix plays no part (retail's
+// terrain walk never reads it).
+// [orig: PolyTrn_RenderFrame @ 0x60EAC0 — ctx[3] fov @0x60eaf6, ctx[6] view
+//  distance @0x60eb7e; render_scene_with_water_reflection @ 0x5d7ea0 fills
+//  ctx[3] from dword_A7839C/65536 @0x5d8037 and ctx[6] from word_26C681E
+//  @0x5d8052]
 struct TerrainViewInput {
 	float cam_x = 0.0f;
 	float cam_y = 0.0f;
 	float cam_z = 0.0f;
 	float view[16] = {};
-	float proj[16] = {};
+	float fov_deg = kTerrainDefaultFovDeg;
+	// The frame's view distance in world units (the high word of
+	// Env_FogDistCurrent); <= 0 keeps the traversal's 2000-unit default.
+	float far_distance = 0.0f;
+	// The polygon-detail setting 0..3 (dword_24D2040); 3 is the max-quality
+	// target and leaves the context scale untouched.
+	int polygon_detail = kTerrainMaxPolygonDetail;
 	// Live water height in world units; 0 = no water this mission (the retail
 	// Env_WaterHeightFixed == 0 sentinel). Feeds the below-water terrain flag.
 	float water_height = 0.0f;

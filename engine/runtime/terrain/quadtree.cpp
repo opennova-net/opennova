@@ -57,6 +57,125 @@ bool aabb_outside_plane(const float plane[4],
 }
 
 // ---------------------------------------------------------------------------
+// The retail terrain view/cull contract
+// ---------------------------------------------------------------------------
+
+// [orig: sub_603DA0 @0x603DA0 — halfH = fov * 0.5 @0x603db0, halfV =
+//  0.5 * (fov * 0.83333331) @0x603dc4, deg->rad literal 0.01745327777777778,
+//  the four plane stores @0x603de8..0x603e4f]
+TerrainViewCull make_terrain_view_cull(const float view[16], float fov_deg,
+                                       float far_distance) {
+	TerrainViewCull cull;
+	std::memcpy(cull.view, view, sizeof(cull.view));
+	cull.far_distance = far_distance;
+	const double half_h = double(fov_deg) * 0.5;
+	const double half_v = 0.5 * (double(fov_deg) * double(kTerrainVerticalFovRatio));
+	const float cos_h = static_cast<float>(std::cos(half_h * kTerrainDegToRad));
+	const float sin_h = static_cast<float>(std::sin(half_h * kTerrainDegToRad));
+	const float cos_v = static_cast<float>(std::cos(half_v * kTerrainDegToRad));
+	const float sin_v = static_cast<float>(std::sin(half_v * kTerrainDegToRad));
+	cull.planes[0][0] = cos_h;  cull.planes[0][1] = 0.0f;   cull.planes[0][2] = sin_h;
+	cull.planes[1][0] = -cos_h; cull.planes[1][1] = 0.0f;   cull.planes[1][2] = sin_h;
+	cull.planes[2][0] = 0.0f;   cull.planes[2][1] = -cos_v; cull.planes[2][2] = sin_v;
+	cull.planes[3][0] = 0.0f;   cull.planes[3][1] = cos_v;  cull.planes[3][2] = sin_v;
+	return cull;
+}
+
+float terrain_lod_quality_scale(float context_scale, int polygon_detail) {
+	// [orig: Terrain_Init @0x60fc33 `(detail + 1) * 0.25`; sub_605D70 @0x605D70
+	//  clamp @0x605d7c..0x605d8c, `* 0.80000001 + 0.2` @0x605d9a]
+	float detail = static_cast<float>(polygon_detail + 1) * 0.25f;
+	if (detail < 0.0f) detail = 0.0f;
+	if (detail > 1.0f) detail = 1.0f;
+	return context_scale * (detail * 0.80000001f + 0.2f);
+}
+
+namespace {
+
+// World -> view-space (x, y, depth) with retail's forward-positive depth.
+void view_point(const float view[16], float x, float y, float z, float out[3]) {
+	out[0] = view[0] * x + view[4] * y + view[8] * z + view[12];
+	out[1] = view[1] * x + view[5] * y + view[9] * z + view[13];
+	out[2] = -(view[2] * x + view[6] * y + view[10] * z + view[14]);
+}
+
+// The eight AABB corners against one view-space plane: outside only when no
+// corner sits strictly inside. Flat sectors collapse the Y extent to 0.
+// [orig: Terrain_TestAABBOutsideFrustumPlane @ 0x6086C0 — flat Y/extent
+//  @0x6086DF/0x608772, the `> 0` inside tests @0x608800..0x6089e0]
+bool node_aabb_outside_view_plane(const float view[16], const float plane[3],
+                                  const float wmin[3], const float wmax[3]) {
+	for (int corner = 0; corner < 8; ++corner) {
+		const float x = (corner & 1) ? wmax[0] : wmin[0];
+		const float y = (corner & 2) ? wmax[1] : wmin[1];
+		const float z = (corner & 4) ? wmax[2] : wmin[2];
+		float v[3];
+		view_point(view, x, y, z, v);
+		if (plane[0] * v[0] + plane[1] * v[1] + plane[2] * v[2] > 0.0f) return false;
+	}
+	return true;
+}
+
+struct NodeCull {
+	bool reject = false;
+	bool force_subdivide = false;
+	int rejected_plane = -1; // -1 = the depth slab
+};
+
+// The per-node view tests in retail order: the far/near depth slab, the
+// far-straddle subdivide arms, the four cone planes against the bound
+// sphere, then the AABB refinement for a sphere that straddles a plane.
+// [orig: Terrain_TraverseQuadtreeNode @ 0x608A00 — center @0x608a19..0x608a5c,
+//  transform @0x608a62..0x608aa2, far @0x608aaa..0x608ab9, near
+//  @0x608abf..0x608acb, straddle arms @0x608ad1..0x608b03 (flt_7C333C = 0.25),
+//  sphere planes @0x608b08..0x608bd7, AABB refinement @0x608bdd..0x608c97
+//  (flt_7C59B4 = 0.33)]
+NodeCull cull_node(const QuadNode& node, const TerrainViewCull& cull,
+                   const float wmin[3], const float wmax[3],
+                   float center_x, float center_y, float center_z,
+                   const TraversalConfig& config) {
+	NodeCull result;
+	if (config.no_frustum) return result;
+	float v[3];
+	view_point(cull.view, center_x, center_y, center_z, v);
+	const float depth = v[2];
+	const float r = node.radius;
+	if (!config.no_nearfar) {
+		if (cull.far_distance < depth - r) { result.reject = true; return result; }
+		if (depth + r < 0.0f) { result.reject = true; return result; }
+		const float straddle = depth - cull.far_distance;
+		if (straddle > 0.0f && node.lod_level == 0) result.force_subdivide = true;
+		if (straddle > r * 0.25f && node.lod_level == 1) result.force_subdivide = true;
+	}
+	if (config.no_sideplanes) return result;
+	float dist[4];
+	for (int p = 0; p < 4; ++p) {
+		const float* pl = cull.planes[p];
+		dist[p] = pl[0] * v[0] + pl[1] * v[1] + pl[2] * v[2];
+		if (dist[p] < -r) {
+			result.reject = true;
+			result.rejected_plane = p;
+			return result;
+		}
+	}
+	if (config.no_partial_subdiv) return result;
+	const float threshold = -(r * 0.33000001f);
+	for (int p = 0; p < 4; ++p) {
+		if (dist[p] < threshold) {
+			if (node_aabb_outside_view_plane(cull.view, cull.planes[p], wmin, wmax)) {
+				result.reject = true;
+				result.rejected_plane = p;
+				return result;
+			}
+			if (node.lod_level < 3) result.force_subdivide = true;
+		}
+	}
+	return result;
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
 // Mipchain — port of gobj_trn_build_heightmap_mipchain (0x10030C91)
 // ---------------------------------------------------------------------------
 
@@ -155,7 +274,7 @@ float node_distance(const float aabb_min[3], const float aabb_max[3],
 void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
                        const std::vector<TileMesh>& tile_meshes,
                        int node_idx,
-                       const Frustum& frustum,
+                       const TerrainViewCull& cull,
                        float cam_x, float cam_y, float cam_z,
                        float sector_ox, float sector_oz,
                        const TraversalConfig& config,
@@ -175,48 +294,39 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 	// Terrain_TestAABBOutsideFrustumPlane @ 0x6086C0, Y/extent @ 0x6086DF/0x608772]
 	if (zero_height) wmin[1] = wmax[1] = 0.0f;
 
+	// The cull center is the node's own sphere center (world X/Z offset by the
+	// sector origin, the source Y or zero when flat), not the AABB midpoint.
+	// [orig: @0x608a19..0x608a5c reads node+0x30/+0x34/+0x38]
+	const float center_x = sector_ox + node.center[0];
+	const float center_y = zero_height ? 0.0f : node.center[1];
+	const float center_z = sector_oz + node.center[2];
+	const NodeCull view_cull = cull_node(node, cull, wmin, wmax,
+			center_x, center_y, center_z, config);
+	if (view_cull.reject) {
+		switch (view_cull.rejected_plane) {
+			// Plane 0 (cos H, 0, sin H) rejects far-left centers, plane 1
+			// far-right, plane 2 (0, -cos V, sin V) far-above, plane 3 far-below.
+			case 0: stats.rej_left++; break;
+			case 1: stats.rej_right++; break;
+			case 2: stats.rej_top++; break;
+			case 3: stats.rej_bottom++; break;
+			default: stats.rej_nearfar++; break;
+		}
+		return;
+	}
 	int force_subdiv_partial = 0;
-
-	if (!config.no_frustum) {
-		// Near/far planes
-		if (!config.no_nearfar) {
-			if (aabb_outside_plane(frustum.planes[Frustum::P_NEAR], wmin, wmax)) { stats.rej_nearfar++; return; }
-			if (aabb_outside_plane(frustum.planes[Frustum::P_FAR], wmin, wmax))  { stats.rej_nearfar++; return; }
-		}
-
-		// Side planes
-		if (!config.no_sideplanes) {
-			if (aabb_outside_plane(frustum.planes[Frustum::P_LEFT], wmin, wmax))   { stats.rej_left++;   return; }
-			if (aabb_outside_plane(frustum.planes[Frustum::P_RIGHT], wmin, wmax))  { stats.rej_right++;  return; }
-			if (aabb_outside_plane(frustum.planes[Frustum::P_BOTTOM], wmin, wmax)) { stats.rej_bottom++; return; }
-			if (aabb_outside_plane(frustum.planes[Frustum::P_TOP], wmin, wmax))    { stats.rej_top++;    return; }
-		}
-
-		// Partial-subdivision: force subdivision when AABB center is deep
-		// past a side frustum plane (IDA sub_10032BA6)
-		if (!config.no_partial_subdiv) {
-			float cx = (wmin[0] + wmax[0]) * 0.5f;
-			float cy = (wmin[1] + wmax[1]) * 0.5f;
-			float cz = (wmin[2] + wmax[2]) * 0.5f;
-			float threshold = -(node.radius * 0.33000001f);
-			for (int p = Frustum::P_LEFT; p <= Frustum::P_TOP; p++) {
-				const float* pl = frustum.planes[p];
-				float center_dist = pl[0] * cx + pl[1] * cy + pl[2] * cz + pl[3];
-				if (center_dist < threshold && node.lod_level < 3) {
-					force_subdiv_partial = 1;
-					stats.partial_subdiv_count++;
-					if (node.lod_level >= 0 && node.lod_level < 5)
-						stats.partial_subdiv_per_level[node.lod_level]++;
-					break;
-				}
-			}
-		}
+	if (view_cull.force_subdivide) {
+		force_subdiv_partial = 1;
+		stats.partial_subdiv_count++;
+		if (node.lod_level >= 0 && node.lod_level < 5)
+			stats.partial_subdiv_per_level[node.lod_level]++;
 	}
 
-	// Distance
+	// Distance: X/Z clamped to the world box, Y against the cull center.
+	// [orig: @0x608c9a..0x608d3c]
 	float world_center[3] = {
 		(wmin[0] + wmax[0]) * 0.5f,
-		(wmin[1] + wmax[1]) * 0.5f,
+		center_y,
 		(wmin[2] + wmax[2]) * 0.5f
 	};
 	float dist = node_distance(wmin, wmax, world_center, cam_x, cam_y, cam_z);
@@ -278,7 +388,7 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 	} else if (!node.is_leaf) {
 		for (int i = 0; i < 4; i++) {
 			traverse_quadtree(quad_nodes, tile_meshes, node.children[i],
-			                  frustum, cam_x, cam_y, cam_z,
+			                  cull, cam_x, cam_y, cam_z,
 			                  sector_ox, sector_oz, config, out_patches, stats,
 			                  zero_height, out_foliage_handoffs);
 		}
@@ -301,13 +411,13 @@ void VisibleBounds::include(const float wmin[3], const float wmax[3]) {
 	}
 }
 
-// The same frustum rejection as the draw traversal, no distance heuristic:
+// The same view rejection as the draw traversal, no distance heuristic:
 // a surviving node subdivides until the LOD cap (the leaves) and each
 // terminal node's world AABB joins the running bounds.
 // [orig: Terrain_TraverseQuadtreeNode @ 0x608a00 trackBounds leg]
 void track_visible_bounds(const std::vector<QuadNode>& quad_nodes,
                           int node_idx,
-                          const Frustum& frustum,
+                          const TerrainViewCull& cull,
                           float sector_ox, float sector_oz,
                           const TraversalConfig& config,
                           VisibleBounds& out_bounds, bool zero_height) {
@@ -316,24 +426,16 @@ void track_visible_bounds(const std::vector<QuadNode>& quad_nodes,
 	float wmin[3] = { sector_ox + node.aabb_min[0], node.aabb_min[1], sector_oz + node.aabb_min[2] };
 	float wmax[3] = { sector_ox + node.aabb_max[0], node.aabb_max[1], sector_oz + node.aabb_max[2] };
 	if (zero_height) wmin[1] = wmax[1] = 0.0f;
-	if (!config.no_frustum) {
-		if (!config.no_nearfar) {
-			if (aabb_outside_plane(frustum.planes[Frustum::P_NEAR], wmin, wmax)) return;
-			if (aabb_outside_plane(frustum.planes[Frustum::P_FAR], wmin, wmax)) return;
-		}
-		if (!config.no_sideplanes) {
-			if (aabb_outside_plane(frustum.planes[Frustum::P_LEFT], wmin, wmax)) return;
-			if (aabb_outside_plane(frustum.planes[Frustum::P_RIGHT], wmin, wmax)) return;
-			if (aabb_outside_plane(frustum.planes[Frustum::P_BOTTOM], wmin, wmax)) return;
-			if (aabb_outside_plane(frustum.planes[Frustum::P_TOP], wmin, wmax)) return;
-		}
-	}
+	const NodeCull view_cull = cull_node(node, cull, wmin, wmax,
+			sector_ox + node.center[0], zero_height ? 0.0f : node.center[1],
+			sector_oz + node.center[2], config);
+	if (view_cull.reject) return;
 	bool has_children = false;
 	if (!node.is_leaf) {
 		for (int i = 0; i < 4; i++) {
 			if (node.children[i] >= 0) {
 				has_children = true;
-				track_visible_bounds(quad_nodes, node.children[i], frustum,
+				track_visible_bounds(quad_nodes, node.children[i], cull,
 				                     sector_ox, sector_oz, config, out_bounds,
 				                     zero_height);
 			}

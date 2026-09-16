@@ -761,13 +761,12 @@ func _on_url_requested(url: String) -> void:
 # --- Named-control handlers (shell policy: launch / quit by control name) -------
 
 func _on_start_control() -> void:
+	# The retail ACCEPT handler launches only through a SHOWN mission list's
+	# current entry (or the IA_LIST's selected value); with nothing selected it
+	# does nothing (docs/mnu/menu-re.md, SINGLE_PLAYER). No catalog fallback.
 	var mission := _selected_mission
 	if mission.is_empty():
-		# No explicit pick: fall back to the first available mission so a menu
-		# without a list (or before a selection) can still start something.
-		mission = MissionCatalog.first_mission_name(_root)
-	if mission.is_empty():
-		push_warning("MenuShell: start pressed with no mission available")
+		push_warning("MenuShell: start pressed with no mission selected")
 		return
 	start_requested.emit(mission)
 

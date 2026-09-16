@@ -33,7 +33,8 @@ int main() {
     saved.detailmapdist2 = "roundtrip_dmd2.tga";
     saved.detail_density = 192;
     saved.detail_density2 = 12;
-    saved.sector_count = 3;
+    // The retail admission gate needs a power-of-two sector count.
+    saved.sector_count = 4;
     saved.sector_rows = 2;
     saved.origin_x = -4;
     saved.origin_y = 7;
@@ -53,22 +54,23 @@ int main() {
     saved.sector_grid[0][0] = 1;
     saved.sector_grid[0][1] = 2;
     saved.sector_grid[0][2] = 3;
+    saved.sector_grid[0][3] = 4;
     saved.sector_grid[1][0] = 4;
     saved.sector_grid[1][1] = 0;
     saved.sector_grid[1][2] = 1;
+    saved.sector_grid[1][3] = 2;
 
     opennova::FoliageDef foliage_a;
     foliage_a.graphic = "tree_a";
     foliage_a.color_lower = static_cast<int>(opennova::FoliageColorMode::Blend50);
     foliage_a.color_upper = static_cast<int>(opennova::FoliageColorMode::RetainFullColor);
-    foliage_a.match = 2;
+    foliage_a.match = {2, 250, -1, -1};
     saved.foliage_defs.push_back(foliage_a);
 
     opennova::FoliageDef foliage_b;
     foliage_b.graphic = "tree_b";
     foliage_b.color_lower = static_cast<int>(opennova::FoliageColorMode::MatchGround);
     foliage_b.color_upper = static_cast<int>(opennova::FoliageColorMode::Blend50);
-    foliage_b.match = -1;
     saved.foliage_defs.push_back(foliage_b);
 
     std::string error;
@@ -112,7 +114,8 @@ int main() {
 
     if (!expect(loaded.sector_grid[0][0] == 1 && loaded.sector_grid[0][1] == 2 && loaded.sector_grid[0][2] == 3,
                 "explicit sector grid values should round-trip")) return 1;
-    if (!expect(loaded.sector_grid[0][3] == 1, "wrap_x should pad sectors cyclically")) return 1;
+    if (!expect(loaded.sector_grid[0][3] == 4, "the fourth explicit column should round-trip")) return 1;
+    if (!expect(loaded.sector_grid[0][4] == 1, "wrap_x should pad sectors cyclically")) return 1;
     if (!expect(loaded.sector_grid[2][1] == loaded.sector_grid[0][1], "wrap_y should pad rows cyclically")) return 1;
 
     std::printf("OK: trn config round-trip preserved terrain metadata\n");

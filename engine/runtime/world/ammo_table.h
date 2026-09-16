@@ -60,6 +60,11 @@ inline int impact_effect_tag_index(const char *name) {
 struct AmmoImpactEffectRow {
     std::string effect;
     std::string sound;
+    // The tag was authored (a row exists in the compacted bank even when both
+    // columns are 'none'): the readers that overwrite a seeded default with the
+    // row's value [orig: AmmoDef_GetExplosionRadius @0x409770, `radius =
+    // effectEntry[2]` on every tag-5 row @0x4097ab] see the row's zero, not the default.
+    bool authored = false;
 };
 
 // Kill-zone classes (record word +44) and the item-class damage exclusions the
@@ -188,6 +193,17 @@ struct AmmoTableEntry {
 // sequential AmmoDef_AllocateSlot per `ammo <NAME>` block @0x40b0b0]
 struct AmmoTable {
     std::vector<AmmoTableEntry> entries;
+
+    // The explosion-sound fallback for an ammo without a tag-5 (dirt) row: ammo def
+    // 0's effect bank is the static 448-byte `word_A2EB28` (not an allocation), and
+    // `dword_A2EB80` = bank + 0x58 = bank row 5, dword +8 — the sound of the FIFTH
+    // authored tag in ascending tag order (row 0 is the always-copied slot 0), i.e.
+    // tag 5 itself when def 0 authors tags 1..5 as shipped AT_NULL does. Empty when
+    // def 0 authors fewer than five tags (the static bank stays zero).
+    // [orig: AmmoDef_InitEffectsTable @0x409F20 — `ammoDef == g_ammoDefTable` ->
+    //  word_A2EB28 @0x409f62, the `*srcEffect || entryIndex <= 0` copy gate @0x409fe8;
+    //  AmmoDef_GetExplosionRadius @0x409770 — `radius = dword_A2EB80` @0x40978c]
+    std::string default_explosion_sound;
 
     bool empty() const { return entries.empty(); }
 

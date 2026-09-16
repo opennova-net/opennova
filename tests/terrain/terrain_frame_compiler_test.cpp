@@ -2,7 +2,7 @@
 // snapshot invariants, the sector-window walk, front-to-back order, the shared
 // emission budget, the LOD-family fallback, the foliage detail-cell handoff
 // (and its node-distance gate),
-// and the engine-side MVP/frustum path.
+// and the engine-side view-cull path (the retail clip cone and far slab).
 #include <runtime/terrain/terrain_frame.h>
 #include <runtime/renderer/foliage_frame.h>
 
@@ -50,17 +50,6 @@ opennova::CptFile make_cpt_base() {
 void identity(float m[16]) {
 	for (int i = 0; i < 16; ++i) m[i] = 0.0f;
 	m[0] = m[5] = m[10] = m[15] = 1.0f;
-}
-
-void perspective_gl(float m[16], float fovy_rad, float aspect, float near_p,
-                    float far_p) {
-	for (int i = 0; i < 16; ++i) m[i] = 0.0f;
-	const float f = 1.0f / std::tan(fovy_rad * 0.5f);
-	m[0] = f / aspect;
-	m[5] = f;
-	m[10] = (far_p + near_p) / (near_p - far_p);
-	m[11] = -1.0f;
-	m[14] = 2.0f * far_p * near_p / (near_p - far_p);
 }
 
 struct V3 {
@@ -131,7 +120,6 @@ int test_foliage_handoff_is_independent_of_terrain_budget() {
 		view.cam_x = view.cam_z = 544.0f;
 		view.cam_y = 10.0f;
 		identity(view.view);
-		identity(view.proj);
 		view.config.no_frustum = true;
 		view.config.force_leaves = true;
 		opennova::TerrainFrameCompiler compiler;
@@ -180,7 +168,6 @@ int test_flat_terrain_keys_reach_empty_foliage_cache_entries() {
 	terrain_view.cam_x = terrain_view.cam_z = 256.0f;
 	terrain_view.cam_y = 10.0f;
 	identity(terrain_view.view);
-	identity(terrain_view.proj);
 	terrain_view.config.no_frustum = true;
 	terrain_view.config.force_leaves = true;
 	opennova::TerrainFrameCompiler terrain;
@@ -251,7 +238,7 @@ int test_full_terrain_budget_preserves_foliage_frustum_and_distance_gates() {
 	view.config.force_leaves = true;
 	look_at(view.view, {896.0f, 10.0f, 896.0f},
 			{896.0f, 10.0f, 895.0f}, {0.0f, 1.0f, 0.0f});
-	perspective_gl(view.proj, 1.5707963268f, 8.0f, 0.1f, 5000.0f);
+	view.fov_deg = 165.75f; // 2*atan(tan(45 deg)*8): the old 8:1 fixture
 	opennova::TerrainFrameCompiler compiler;
 	const auto expected = compiler.compile(control, view).detail_cells;
 	if (!expect(!expected.empty(), "the forward nearby foliage wedge is visible")) return 1;
@@ -285,7 +272,6 @@ int test_foliage_handoff_requires_the_traversal_node_distance_gate() {
 		view.cam_x = view.cam_z = 32.0f;
 		view.cam_y = cam_y;
 		identity(view.view);
-		identity(view.proj);
 		view.config.no_frustum = true;
 		view.config.force_leaves = true;
 		return view;
@@ -416,7 +402,6 @@ int main() {
 	view.cam_y = 10.0f;
 	view.cam_z = 32.0f;
 	identity(view.view);
-	identity(view.proj);
 	view.config.no_frustum = true;
 	view.config.quality = 1.0f;
 
@@ -478,14 +463,14 @@ int main() {
 				"heights keep it unreachable in practice)")) return 1;
 	}
 
-	// --- Compile with the engine-side MVP/frustum path ----------------------
+	// --- Compile with the engine-side view-cull path -------------------------
 	{
 		TerrainViewInput fv;
 		fv.skip_empty_sectors = true;
 		fv.cam_x = 32.0f;
 		fv.cam_y = 40.0f;
 		fv.cam_z = -20.0f;
-		perspective_gl(fv.proj, 1.2f, 4.0f / 3.0f, 0.1f, 2000.0f);
+		fv.fov_deg = 84.8f; // 2*atan(tan(0.6)*4/3): the old 4:3 fixture
 		look_at(fv.view, {32.0f, 40.0f, -20.0f}, {32.0f, 8.0f, 32.0f},
 				{0.0f, 1.0f, 0.0f});
 		fv.config.quality = 1.0f;
@@ -604,16 +589,26 @@ int main() {
 				other_page->binding.layer == flat_layer,
 				"different flat mesh tiles and LODs cannot split the shared page identity")) return 1;
 
+		// A camera 1000 units below the map looking straight up with a
+		// 650-unit far slab: every 512-tile node keeps the source radius
+		// (~362.2), so the flat variant's zeroed cull center at depth 1000
+		// stays inside the slab (1000 - 362.2 < 650) while the authored
+		// 8..32 heights put the source center (y = 20) at depth 1020, past it
+		// (1020 - 362.2 > 650). [orig: Terrain_TraverseQuadtreeNode
+		// @ 0x608A00, flat center @ 0x608A50, far slab @ 0x608AAA..0x608AB9]
 		TerrainViewInput low_view;
-		identity(low_view.view);
-		identity(low_view.proj);
-		low_view.config.no_nearfar = true;
+		low_view.cam_x = low_view.cam_z = 32.0f;
+		low_view.cam_y = -1000.0f;
+		look_at(low_view.view, {32.0f, -1000.0f, 32.0f}, {32.0f, -999.0f, 32.0f},
+				{0.0f, 0.0f, 1.0f});
+		low_view.far_distance = 650.0f;
+		low_view.config.force_leaves = true;
 		const auto &low_window = compiler.compile(fallback_scene, low_view);
 		if (!expect(!low_window.patches.empty(),
-				"a frustum around zero height retains flat fallback geometry")) return 1;
+				"a far slab around zero height retains flat fallback geometry")) return 1;
 		for (const auto &patch : low_window.patches) {
 			if (!expect(patch.zero_height,
-					"the zero-height frustum rejects elevated source terrain but admits its flat variant")) return 1;
+					"the zero-height far slab rejects elevated source terrain but admits its flat variant")) return 1;
 		}
 		if (!expect(low_window.visible_bounds.valid && low_window.visible_bounds.min[1] >= 8.0f,
 				"flat culling does not replace retail's raw tracked height stores")) return 1;
@@ -663,7 +658,6 @@ int main() {
 		dv.cam_y = 10.0f;
 		dv.cam_z = 256.0f;
 		identity(dv.view);
-		identity(dv.proj);
 		dv.config.no_frustum = true;
 		dv.config.force_leaves = true;
 		dv.config.quality = 1.0f;

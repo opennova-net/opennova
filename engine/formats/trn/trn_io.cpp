@@ -5,7 +5,8 @@
 #include <sstream>
 
 // [orig: PolyTrn_LoadTerrainConfig @0x60e3d0 -> Terrain_ParseConfigCallback @0x60f330 — the .trn
-//  key parser (foliage attribs: "forceon" @0x60f58b); Terrain_LoadEnvironmentConfig @0x610940]
+//  key parser (foliage attribs: "forceon" @0x60f58b; `match` stores up to 7 byte args per
+//  slot at +0x108..); Terrain_LoadEnvironmentConfig @0x610940 — the admission gate at its tail]
 
 namespace opennova {
 
@@ -33,7 +34,7 @@ static void parse_foliage_attribs(std::istringstream &iss, FoliageDef &def) {
 } // namespace
 
 bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
-	(void)error;
+	int seen_sector_rows = 0;
 
 	std::string line;
 	while (std::getline(f, line)) {
@@ -76,7 +77,18 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 					} else if (fk == "color_upper") {
 						def.color_upper = std::atoi(fv.c_str());
 					} else if (fk == "match") {
-						def.match = std::atoi(fv.c_str());
+						// Retail stores up to 7 args as bytes; only the first
+						// FOLIAGE_MATCH_CODES are ever consumed (foliage.h), so
+						// the rest are read and dropped here.
+						def.match.fill(FOLIAGE_MATCH_UNSET);
+						int idx = 0;
+						std::string tok = fv;
+						do {
+							if (idx < FOLIAGE_MATCH_CODES) {
+								def.match[static_cast<size_t>(idx)] = std::atoi(tok.c_str());
+							}
+							++idx;
+						} while (idx < 7 && (fiss >> tok));
 					} else if (fk == "attrib") {
 						def.attrib_flags = 0;
 						def.attrib_flags = static_cast<uint8_t>(def.attrib_flags | (
@@ -160,6 +172,10 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 				out.origin_y = std::atoi(val2.c_str());
 			}
 		} else if (key == "polytrn_sectors") {
+			// Retail counts every row line (+5960) and rejects > 16 below; the
+			// grid itself only has 16 rows, so the extra lines are counted, not
+			// stored.
+			++seen_sector_rows;
 			if (out.sector_rows < 16) {
 				int col = 0;
 				out.sector_grid[out.sector_rows][col++] = std::atoi(val.c_str());
@@ -180,6 +196,37 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 		} else if (key == "polytrn_tileinfo") {
 			out.tileinfo = unquote(val);
 		}
+	}
+
+	// The admission gate [orig: Terrain_LoadEnvironmentConfig @0x610940 tail]:
+	// the config is rejected (returns 0) when the colormap (+256), detailmap
+	// (+512) or polydata (+3072) name is empty, when the `polytrn_sectors` row
+	// count (+5960) or `polytrn_sectorcount` (+5956) exceeds 16, or when either
+	// is not a power of two (`((n - 1) & n) != 0`). The heightmap row shift
+	// (`shift_terrain_heightmap_rows @0x60f190`) failing also rejects there;
+	// that leg runs over the loaded .cpt, not the text, and is not ported here.
+	if (out.colormap.empty()) {
+		error = "TRN rejected: polytrn_colormap is empty";
+		return false;
+	}
+	if (out.detailmap.empty()) {
+		error = "TRN rejected: polytrn_detailmap is empty";
+		return false;
+	}
+	if (out.polydata.empty()) {
+		error = "TRN rejected: polytrn_polydata is empty";
+		return false;
+	}
+	const auto power_of_two_or_zero = [](int n) { return ((n - 1) & n) == 0; };
+	if (seen_sector_rows > 16 || !power_of_two_or_zero(seen_sector_rows)) {
+		error = "TRN rejected: polytrn_sectors row count " + std::to_string(seen_sector_rows) +
+			" is not a power of two <= 16";
+		return false;
+	}
+	if (out.sector_count > 16 || !power_of_two_or_zero(out.sector_count)) {
+		error = "TRN rejected: polytrn_sectorcount " + std::to_string(out.sector_count) +
+			" is not a power of two <= 16";
+		return false;
 	}
 
 	const int rows = std::max(out.sector_rows, 1);
@@ -293,8 +340,21 @@ bool save_trn(std::ostream &f, const TrnConfig &cfg, std::string &error) {
 		}
 		f << "  color_lower     " << normalized.color_lower << nl;
 		f << "  color_upper     " << normalized.color_upper << nl;
-		if (normalized.match >= 0) {
-			f << "  match           " << normalized.match << nl;
+		if (foliage_def_match_count(normalized) > 0) {
+			// Every authored code on the one `match` line, in retail's arg order.
+			f << "  match           ";
+			bool wrote = false;
+			for (int code : normalized.match) {
+				if (code < 0) {
+					continue;
+				}
+				if (wrote) {
+					f << " ";
+				}
+				f << code;
+				wrote = true;
+			}
+			f << nl;
 		}
 		if (normalized.attrib_flags != 0) {
 			f << "  attrib          ";

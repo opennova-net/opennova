@@ -3358,18 +3358,57 @@ flag-table arbitration (bit 2 locked → pending; bit 5 + target not bit 0 → p
 
 | Component | Verdict | Evidence |
 |---|---|---|
-| Hit producer and org1/org2 burn selection | MATCHING (behavioral proof) | `infantry_burn`, `infantry`, `projectile_combat`; `engine/runtime/world/infantry_burn.cpp` |
+| Hit producer and org1/org2 burn selection | MATCHING (behavioral proof) | `collision_force`, `infantry`, `projectile_combat`; `engine/runtime/world/collision_force.cpp` |
+| The four `kz_physics` collision-force modes + the local-player hit blackout | MATCHING (witnessed 2026-09-14) | `collision_force` (`apply_collision_force`), `env::HitDimState::arm`; `tests/world/collision_force_test.cpp` |
 
 Ammo `secondary_anim` (+224) stamps the live body's byte +0x368. Player-class
 bodies receive moveTimer 1. NPCs receive 1/2 for the attacker's same command group,
 36/48 otherwise; the shorter duration uses the signed wrapped absolute bearing
-error below `0x3FFFFFC0`. Flags&2 blocks the store; zero hit type is inert.
+error below `0x3FFFFFC0`. Flags&2 blocks the store; zero hit type skips the store.
 The projectile callback invokes this before death dispatch; the blast invokes it
 inside its range/visibility gates before the damage callback's armor rejection.
 [orig: Entity_ApplyCollisionForce @ 0x4AF4A0; Entity_HandleDamageTrigger @ 0x4074BA;
 Entity_HandleDamageAndTriggerZones @ 0x407822; Projectile_ProcessExplosionQueue
 @ 0x4EB1D2] Retail assumes a valid attacker for the NPC group lookup; ownerless
 embedder events use the ordinary duration.
+
+The same function's second argument, ammo `kz_physics` (+225, `forceType`), then
+runs a switch that is NOT gated on the hit type or the dead bit — the dead bit
+only picks smaller constants, and Flags 0x40 (mounted/guarding) blocks every
+velocity write `[orig: switch @ 0x4af558]`. The bearing is `atan2(dy, dx) *
+683565275.5764316` `[orig: @ 0x4af4d8]`, the multiplier 3 when its wrapped
+absolute error against the yaw is below `0x3FFFFFC0`, else 4 `[orig: @ 0x4af4c6..
+0x4af4e7]`; the trig rows are `Math_BuildSinTable`'s Q22 table at `(bearing +
+0x200000) >> 22` (cos = the same table +256, `off_849934`) `[orig: @ 0x4af583..
+0x4af59d]`:
+
+- **1 walk push** (`slideDecay (+0xA0) < 4096`): live body `slideDecay += 5120`,
+  `velocityX/Y += (9216 * cos/sin) >> 22` `[orig: @ 0x4af5e0..0x4af602]`; dead
+  body `+= 2560` and `4608` `[orig: @ 0x4af5a9..0x4af5cb]`.
+- **2 drift** (`|velocityX| + |velocityY| < 4096`): planar only, `9216` live /
+  `2304` dead `[orig: @ 0x4af631..0x4af6b0]`.
+- **3 hit blackout**, local player only `[orig: @ 0x4af6c5]`: `friendly` = self, or
+  same commandGroup (+284) AND same team byte (+354) unless in session with a
+  NON-team game type (`g_GameType & 0x10000` clear — 0x10000 is the team bit,
+  TDM = 0x10000) `[orig: @ 0x4af6e8..0x4af70e]`. Friendly: unless in session with
+  `g_rules_flags & 0x200` (NoFriendlyFire) `[orig: @ 0x4af752]`, intensity 0xA000,
+  rate `0x8000 / ((124 * mult) >> 2)` (352 facing / 264 behind) `[orig: @ 0x4af764..
+  0x4af77e]`; enemy: rate `((mult << 15) >> 2) / ((310 * mult) >> 2)` (105 either
+  way) `[orig: @ 0x4af724..0x4af73e]`. Both legs also write `dword_B764B8 = 255`
+  `[orig: @ 0x4af769 / @ 0x4af729]` — a HUD hit indicator shared with
+  `Entity_OnDamageReceived @ 0x4af822`, reset by `Game_InitNewRound @ 0x422784`,
+  read by `Player_UpdatePerFrame @ 0x4de5a7`, `HUD_RenderAllOverlays @ 0x5a8098`
+  and `Render_ProcessMainSceneFrame @ 0x5caba7`; its readers are unwitnessed and
+  it has no port home yet (the one residual of this function).
+- **4 direct push** (`slideDecay < 4096`): `velocityX/Y += (cos/sin << 10) >> 22`,
+  `slideDecay += 1024` `[orig: @ 0x4af794..0x4af7dd]`.
+
+Port: `apply_collision_force` over `InfantryState::vel[3]` (the +0x98/+0x9C/+0xA0
+triple) with `quantized_dir` (`dir_table.h`); case 3 arms
+`world.weather.core.hit_dim` through `HitDimState::arm(facing, friendly)`, the
+session/team leg reads `rules.mp_session` + `match.rules().game_type`, the
+NoFriendlyFire leg `rules.no_friendly_fire`. Both callers pass `ammo->kz_physics`.
+A person without an infantry body has no target for either half.
 
 The org2 four-tick selection chooses authored clips 111..114 for byte values 1..4.
 An absent clip preserves the selected animation and burn byte. Every sixteenth
@@ -4019,7 +4058,8 @@ This is the person item's `entity+0x1C8` damage/death callback (`Entity_InitFrom
   (BAM scale 683565275.5764316 = 2^32/2π) `[orig: @ 0x407478]`; selection =
   `ComputeAnimSlotIndex(entity, hitBone, quadrant, 1)` → **`entity+0x2C0`
   deathAnimStateId** `[orig: @ 0x407483]`.
-- `Entity_ApplyCollisionForce @ 0x4af4a0` with ammo bytes +224/+225 (knockback).
+- `Entity_ApplyCollisionForce @ 0x4af4a0` with ammo bytes +224/+225 (the burn state +
+  the collision force; ported in full, §17.3b).
 - ammo dword +72 (a burn effect id) → spawn attached emitter (`entity+0x1CC` handle)
   and OVERRIDE the selection to 173 `death_fire` `[orig: @ 0x4076d5]` — incendiary
   kills burn regardless of bone.
@@ -4099,10 +4139,11 @@ first-match `find_by_net_id`/`find_by_name` could misroute scripted refs to
 a lower-slot clone (retail's backward-scanning allocator makes the dupe
 mostly land above the victim).
 
-Ammo properties `secondary_anim` and `kz_physics` now parse and bake into their
-witnessed +224/+225 byte slots. They are deliberately not interpreted yet: the
-interior arithmetic of `Entity_ApplyCollisionForce` remains unwitnessed. The
-ammo-dword +72 authoring/load source is likewise still unresolved, so the
+Ammo properties `secondary_anim` and `kz_physics` parse and bake into their
+witnessed +224/+225 byte slots and both are consumed: the interior of
+`Entity_ApplyCollisionForce` is witnessed and ported (§17.3b — the burn state
+from +224, the four collision-force modes and the local-player hit blackout from
++225). The ammo-dword +72 authoring/load source is still unresolved, so the
 incendiary emitter and death-state-173 override remain open rather than being
 guessed.
 
@@ -4138,9 +4179,10 @@ hit — authoritative or not, damage 0 included — gated only on the dead bit; 
 lethal tail (dismemberment, the death record) stays behind the health test. On a
 joiner the leg reaches exactly the joiner's own body: the wire person proxies
 never resolve to an entity (`collision_trace.cpp`), so the remote rows keep their
-wire-driven pose. Still behind the `damage != 0` gate (unchanged, D-AI-9 tails):
-`Entity_ApplyCollisionForce` (the burn/knockback) and the `Entity_OnDamageReceived`
-AI reaction stamps; the incendiary 173 override stays on the unresolved +72 source.
+wire-driven pose. Still behind the `damage != 0` gate (unchanged):
+`Entity_ApplyCollisionForce` (the burn/knockback, ported in full — §17.3b) and the
+`Entity_OnDamageReceived` AI reaction stamps (D-AI-9 tails); the incendiary 173
+override stays on the unresolved +72 source.
 
 #### 19.2a Kill-cause bits and the plyr think cadence (witnessed + ported 2026-09-12)
 
@@ -5874,6 +5916,13 @@ blast damage leg `@ 0x4e6f84..0x4e6f93` and `cb(entity, 4, 0)` from S2C 0x13
 37 `gnrl`, 82 `emit`, 7 `bld2`, 1 `towr`):
 
 - `null` @ 0x813000 → `0x406FF0`: `+0x2AC = 0x1000000`, never dies.
+- `rokt`/`stng`/`hlfr`/`jvln` @ 0x8132B8..0x813300 → `sub_443630 @ 0x443630` and
+  `arty` @ 0x813318 → `sub_443640 @ 0x443640`: byte-identical to the `null` row body
+  (`+0x2AC = 0x1000000; return`) — the same `kNull` class, never the tree body
+  (IDA 2026-09-14; they were tagged unwitnessed and ran the tree body before).
+- `aflr` @ 0x813330 → `nullsub_65 @ 0x443650` and `gflr` @ 0x813348 → `nullsub_66
+  @ 0x443660`: a single `retn` — no `+0x2AC` write, no body at all (`kNone`; the
+  dispatch returns without touching the entity).
 - `gnrc` @ 0x8130C0 → `sub_407020`: authority first call at health <= 0: scar clear,
   Flags |= 2, `+0x2AC = 4`, death tick, `sub_50C840` (0x26 + scoring if def+0x54 &
   0x8000 `@ 0x50c876`); when the 4-tick countdown expires with Flags & 2 and !4:
@@ -6266,7 +6315,25 @@ request count 10 before removal. The 0x21 packet retains the requested byte,
 although local effects cap the count at eight. Local effects create AirExp,
 queue kz_M406HE on authority, and select row-five sound from source+0x26C
 (or ammo zero). Infantry advanced-ammo and placed-device carriers supply
-that field when applicable. Single player consumes three fan-PRNG draws for
+that field when applicable. The row-five lookup (`AmmoDef_GetExplosionRadius
+@ 0x409770`, a misnomer: the tag-5 `dirt` row's sound dword +8, not a radius)
+seeds its result from `dword_A2EB80` `@ 0x40978c` and then overwrites it with
+EVERY tag-5 row of the requested ammo `@ 0x4097ab`. `dword_A2EB80` is NOT a
+writer-less zero: `AmmoDef_InitEffectsTable @ 0x409F20` points ammo def 0
+(`ammoDef == g_ammoDefTable`) at the static 448-byte bank `word_A2EB28`
+`@ 0x409f62` instead of allocating, and fills it from the 28-slot tag-addressed
+stage `g_ammoFxStageTagId @ 0xA2E964` with the copy gate `*srcEffect ||
+entryIndex <= 0` `@ 0x409fe8` (slot 0 always, then the authored tags in
+ascending order); `0xA2EB80 = 0xA2EB28 + 0x58` = bank row 5, dword +8 = the
+sound of def 0's FIFTH authored tag, i.e. tag 5 itself when tags 1..5 are all
+authored (shipped JOX `ammo.def`: def 0 `AT_NULL` authors 24 rows including
+move/player/zip/obj/dirt, so the fallback is `imp_bullet_dirt`), or zero when
+def 0 authors fewer than five tags. An ammo whose tag-5 row is authored `none`
+therefore plays nothing while an ammo with NO tag-5 row plays def 0's sound.
+Ported as `AmmoTable::default_explosion_sound` (baked in `ammo_table_build.cpp`)
++ `AmmoImpactEffectRow::authored`, consumed by `spawn_item_explosion`; pinned
+by the `weapon_table` bake cases and `client_runtime`'s
+`run_explosion_sound_falls_back_to_ammo_zero_bank_row_five` (IDA 2026-09-14). Single player consumes three fan-PRNG draws for
 each of two half-count hemispheres. The purported extra shrapnel is refuted in
 this image: Weapon_SpawnSingleProjectile immediately returns on its zero-filled
 A2ECF4 pointer; an image-wide direct/address-literal scan found only the two
@@ -6544,7 +6611,7 @@ the FFI structs.
 | D-ITEM-3 | The mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte | `@ 0x4e6c5e-0x4e6e6b` | partial visual damage (windows/panels before death) missing; needs the section-flag plumb in the collision build |
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
-| D-ITEM-6 | Blast/damage stubs: organic knockback (`Entity_ApplyCollisionForce`), the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
+| D-ITEM-6 | Blast/damage stubs (organic knockback `Entity_ApplyCollisionForce` PORTED 2026-09-14, §17.3b): the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
 | D-ITEM-7 | FIXED: all #645 deferred item classes, cohort clocks, shared fade/ambient/scoring and ordered 0x21/0x26/0x12 effects are ported (§24.3a/b) | The class table selects event and motor; gnl2/barrel retain requested explosion counts and SP PRNG history | Invalid target/model/section data is bounded as documented in §24.3b; the uninitialized SP shrapnel pointer is refuted |
 | D-ITEM-8 | The crane/water-tower special death (the "scrane" pool walk + the double kz queue `@ 0x43fc70`) and `Entity_ProcessCraneDestruction @ 0x43eee0` are unported; the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are unported | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
 | D-ITEM-9 | The Falling/Generic wreck callbacks and unitType-3's four short slope rays ground on TERRAIN only. Falling/Generic use sec0 z extents synthesized from LOD-0 primitive bounds (upright leg only); PiecePhysics uses the husk-flag pick — the husk collision shell's floor for a husked piece (the section-AABB union stands in for the CMDL header z-lo), `box_z_lo` otherwise. Static's separate terrain/water thresholds are ported as described in §24.5 | `Entity_RaycastGroundHeightAndObject @0x414320` (Falling/Generic, terrain + objects, mask 0x200000); `Entity_RaycastGroundHeight @0x4142c0` x4 from `Entity_CalcSlopeForces @0x4b0b00`; section-row +84/+88 extents `@0x461e23-0x461e4b` | a wreck dying on a roof can sink to terrain below; port the object-return leg for both query shapes and verify the generic runtime section-row fields against the render-model builder |

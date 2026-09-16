@@ -1431,7 +1431,14 @@ Accepted/divergent (each a documented decision, not a defect):
   the mission; screen activation re-syncs ACCEPT to whether the list has a
   selection (`SinglePlayer_RefreshAcceptOnActivate @ 0x561a20` over
   `UIList_CountSelectedItems @ 0x6445c0` — style-slot-3 rows; both defined
-  + named in the IDB 2026-08-10). Reimpl:
+  + named in the IDB 2026-08-10). The ACCEPT click itself
+  (`SinglePlayer_HandleStartEvent @ 0x561fb0`, re-read 2026-09-14) launches
+  ONLY through a SHOWN `CA_MISSION_LIST` (its current entry, no re-read of the
+  list) or a SHOWN `IA_LIST` (`UIList_GetSelectedValue` ->
+  `missionListOut[value]`); with neither shown, or nothing selected, it does
+  nothing — there is no "first catalog mission" fallback. `menu_shell.gd`'s
+  `_on_start_control` matches: no selection is a no-op (a warning), never a
+  launch (GUT `test_start_without_selection_is_a_no_op`). Reimpl:
   `engine/runtime/mission/mission_catalog.{h,cpp}` (the `.bin` resolves
   through the mount stack rather than the paired volume — identical on
   retail data; `.npj`/`.npz` legs not ported) + the `MissionCatalog`

@@ -314,6 +314,71 @@ int main(void) {
 	def_free_weapons(&wf);
 	}  // retail leg
 
+	// --- the explosion-sound fallback: ammo def 0's static effect bank, row 5
+	// dword +8 (dword_A2EB80) = the FIFTH authored tag in ascending tag order,
+	// never a positional file row [orig: AmmoDef_InitEffectsTable @0x409F20
+	// @0x409f62 / @0x409fe8; AmmoDef_GetExplosionRadius @0x409770 @0x40978c].
+	{
+		const auto row = [](DefEffectTableEntry &e, const char *tag, const char *sound) {
+			std::strcpy(e.surface_type, tag);
+			std::strcpy(e.hit_effect, "none");
+			std::strcpy(e.impact_sound, sound);
+		};
+		// def 0 authors tags 1..6 contiguously (as shipped AT_NULL does): bank row 5 = tag 5 (dirt).
+		DefEffectTableEntry rows0[6] = {};
+		row(rows0[0], "move", "none");
+		row(rows0[1], "player", "S_PLAYER");
+		row(rows0[2], "zip", "S_ZIP");
+		row(rows0[3], "obj", "S_OBJ");
+		row(rows0[4], "dirt", "DEF0_DIRT");
+		row(rows0[5], "grass", "S_GRASS");
+		// def 1 authors no dirt row at all; def 2 authors dirt as 'none'.
+		DefEffectTableEntry rows1[2] = {};
+		row(rows1[0], "grass", "S_GRASS");
+		row(rows1[1], "metal", "S_METAL");
+		DefEffectTableEntry rows2[1] = {};
+		row(rows2[0], "dirt", "none");
+		DefAmmoDef defs[3] = {};
+		std::strcpy(defs[0].name, "AT_NULL");
+		defs[0].effects_table = rows0;
+		defs[0].effects_table_count = 6;
+		std::strcpy(defs[1].name, "AMMO_NO_DIRT");
+		defs[1].effects_table = rows1;
+		defs[1].effects_table_count = 2;
+		std::strcpy(defs[2].name, "AMMO_DIRT_NONE");
+		defs[2].effects_table = rows2;
+		defs[2].effects_table_count = 1;
+		DefAmmoFile af{defs, 3};
+		const world::AmmoTable t = world::build_ammo_table(af);
+		CHECK(t.default_explosion_sound == "DEF0_DIRT");
+		CHECK(t.by_index(0) != nullptr && t.by_index(0)->impact_effects[5].authored &&
+		      t.by_index(0)->impact_effects[5].sound == "DEF0_DIRT");
+		CHECK(t.by_index(1) != nullptr && !t.by_index(1)->impact_effects[5].authored &&
+		      t.by_index(1)->impact_effects[5].sound.empty());
+		CHECK(t.by_index(2) != nullptr && t.by_index(2)->impact_effects[5].authored &&
+		      t.by_index(2)->impact_effects[5].sound.empty());
+
+		// A sparse def 0 (tags 1, 4, 5, 6, 7, 8): bank row 5 is the fifth authored
+		// tag = snow (7), not dirt — the bank is compacted, not tag-positional.
+		DefEffectTableEntry sparse[6] = {};
+		row(sparse[0], "move", "none");
+		row(sparse[1], "obj", "S_OBJ");
+		row(sparse[2], "dirt", "S_DIRT");
+		row(sparse[3], "grass", "S_GRASS");
+		row(sparse[4], "snow", "S_SNOW");
+		row(sparse[5], "cement", "S_CEMENT");
+		DefAmmoDef sparse_def{};
+		std::strcpy(sparse_def.name, "AT_NULL");
+		sparse_def.effects_table = sparse;
+		sparse_def.effects_table_count = 6;
+		DefAmmoFile sparse_file{&sparse_def, 1};
+		CHECK(world::build_ammo_table(sparse_file).default_explosion_sound == "S_SNOW");
+
+		// Fewer than five authored tags: the static bank's row 5 stays zero.
+		sparse_def.effects_table_count = 4;
+		CHECK(world::build_ammo_table(sparse_file).default_explosion_sound.empty());
+	}
+
 	// --- by-name reuse: a re-parsed name keeps its index and takes the new fields
 	//     [orig: WeaponDefs_ParseLineCallback @0x5436e1 AvatarDef_FindIndexByName leg].
 	{

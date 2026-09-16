@@ -78,7 +78,7 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	viewport.add_child(dispatcher)
 	var definition := TerrainFoliageDef.new()
 	definition.graphic = "tile_cache_contract"
-	definition.match = 1
+	definition.match = PackedInt32Array([1])
 	dispatcher.configure_slots([definition], [BoxMesh.new()], [])
 	dispatcher.height_sampler = Callable(self, "_sample_height")
 	dispatcher.foliage_sampler = Callable(self, "_sample_foliage")

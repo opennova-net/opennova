@@ -14,7 +14,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/dir_table.h>
 #include <runtime/world/infantry.h>
-#include <runtime/world/infantry_burn.h>
+#include <runtime/world/collision_force.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
 
@@ -667,7 +667,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // Its attached hit emitter [orig: @0x4EB292] remains a separate
                 // explosion-presentation gap recorded in world-wac-ai-re §24.
                 if (t->item_type == 3)
-                    apply_infantry_burn(world, *t, ammo->secondary_anim, e.pos, e.owner);
+                    apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos, e.owner);
                 entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
             }
         }

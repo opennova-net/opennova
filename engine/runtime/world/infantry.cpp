@@ -29,7 +29,7 @@
 #include <runtime/world/dir_table.h>
 #include <runtime/world/infantry_ladder.h>
 #include <runtime/world/infantry_sound.h>
-#include <runtime/world/infantry_burn.h>
+#include <runtime/world/collision_force.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/local_player.h>

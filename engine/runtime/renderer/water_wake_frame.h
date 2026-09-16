@@ -9,7 +9,8 @@ namespace opennova::renderer {
 // [orig: sub_5DDC60 @ 0x5DDC60 (the bank allocation); IDB: CWeatherSlot_Init
 //  @ 0x5DDD80 (a misnomer: it initialises one surface-ring row); sub_5DDC90
 //  @ 0x5DDC90 only loads wake5.tga / wakegrad.tga and sets their sampler
-//  addressing]
+//  addressing; the draw-side 128-slot scanner over the bank @ 0x5DE340 feeds
+//  render_water_surface_decal @ 0x5DE0F0]
 class WaterWakePool {
 public:
 	struct Row {

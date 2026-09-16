@@ -134,6 +134,15 @@ public:
 	// (256).]
 	static constexpr int kCapacity = 128;
 	static constexpr int kDimension = 256;
+	// Creation-time clear of every page render target. Retail clears each of
+	// the 128 tile RTs to D3DCOLOR 0xFFFF6060 (ARGB: A=FF R=FF G=60 B=60) with
+	// z 0.99994999 as it allocates them, then seeds the slot key/UV sentinels
+	// with 0x12345678 and the indices with -1; one extra square target of
+	// dimension dword_31A00D0 (the model-shadow target) follows and is not
+	// this cache's. The Godot device binding fills its blank layers with this
+	// colour. [orig: sub_604DD0 @ 0x604DD0, GTexRT_SelectThunk(0x12345678,
+	// rt, -40864, 0.99994999) per slot]
+	static constexpr uint32_t kTileClearColorArgb = 0xFFFF6060u;
 
 	// [orig: span = 1024 >> lodLevel @ 0x60dbf6/0x60dd87 in
 	// PolyTrn_RenderTile.]

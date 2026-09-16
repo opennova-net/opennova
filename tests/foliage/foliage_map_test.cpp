@@ -1,6 +1,7 @@
 #include <formats/foliage/foliage.h>
 
 #include <cstdio>
+#include <vector>
 
 namespace {
 
@@ -64,6 +65,42 @@ int main() {
 	if (!expect(opennova::foliage_sample_detail_flat_wrap(oversized_map, 0, 0) == 0,
 	            "detail lookup should reject dimensions that make retail's shift invalid"))
 		return 1;
+
+	// The foliagemap pixel -> slot mask [orig: Foliage_RemapPixelToDefMask
+	// @0x5FF4E0]: OR of 1 << slot over slots whose four codes contain the
+	// pixel; pixel 0 never matches; an empty-graphic slot is skipped.
+	{
+		std::vector<opennova::FoliageDef> defs(4);
+		defs[0].graphic = "grass.3di";
+		defs[0].match = {254, 10, 20, 30};
+		defs[1].graphic = "bush.3di";
+		defs[1].match = {253, 30, -1, -1};
+		defs[2].graphic = "";
+		defs[2].match = {254, -1, -1, -1};
+		defs[3].graphic = "tree.3di";
+		defs[3].match = {0, 40, -1, -1};
+		if (!expect(opennova::foliage_remap_pixel_to_def_mask(defs, 254) == 0x1u,
+				"the first code selects its slot")) return 1;
+		if (!expect(opennova::foliage_remap_pixel_to_def_mask(defs, 20) == 0x1u,
+				"the third code selects the slot as well")) return 1;
+		if (!expect(opennova::foliage_remap_pixel_to_def_mask(defs, 30) == 0x3u,
+				"a pixel matching two slots ORs both slot bits")) return 1;
+		if (!expect(opennova::foliage_remap_pixel_to_def_mask(defs, 253) == 0x2u,
+				"slot one selects on its own code")) return 1;
+		if (!expect(opennova::foliage_remap_pixel_to_def_mask(defs, 40) == 0x8u,
+				"slot three selects on its second code")) return 1;
+		if (!expect(opennova::foliage_remap_pixel_to_def_mask(defs, 0) == 0u,
+				"pixel 0 never matches, even an authored 0 code")) return 1;
+		if (!expect(opennova::foliage_remap_pixel_to_def_mask(defs, 99) == 0u,
+				"an unmatched pixel selects nothing")) return 1;
+		if (!expect(!opennova::foliage_def_matches_pixel(defs[2], 254),
+				"a slot with an empty graphic (header byte 0) is skipped")) return 1;
+		std::vector<opennova::FoliageDef> five(5, defs[0]);
+		five[4].graphic = "extra.3di";
+		five[4].match = {77, -1, -1, -1};
+		if (!expect(opennova::foliage_remap_pixel_to_def_mask(five, 77) == 0u,
+				"only FOLIAGE_MAX_DEFS slots participate")) return 1;
+	}
 
 	const int map_x = opennova::foliage_map_x_from_heightmap_x(512.0f, 256);
 	const int map_y = opennova::foliage_map_y_from_heightmap_y(768.0f, 256);

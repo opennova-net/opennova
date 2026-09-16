@@ -24,7 +24,7 @@ void TerrainFoliageDef::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_shadow"), &TerrainFoliageDef::get_shadow);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "graphic"), "set_graphic", "get_graphic");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "match", PROPERTY_HINT_RANGE, "-1,255,1"), "set_match", "get_match");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "match"), "set_match", "get_match");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "attrib_flags"), "set_attrib_flags", "get_attrib_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "shadow"), "set_shadow", "get_shadow");
 
@@ -38,12 +38,23 @@ String TerrainFoliageDef::get_graphic() const {
 	return graphic;
 }
 
-void TerrainFoliageDef::set_match(int value) {
-	match = std::clamp(value, -1, 255);
+void TerrainFoliageDef::set_match(const PackedInt32Array &value) {
+	opennova::FoliageDef def;
+	const int64_t count = std::min<int64_t>(value.size(), opennova::FOLIAGE_MATCH_CODES);
+	for (int64_t i = 0; i < count; ++i) {
+		def.match[static_cast<size_t>(i)] = value[i];
+	}
+	match = opennova::foliage_normalize_def(def).match;
 }
 
-int TerrainFoliageDef::get_match() const {
-	return match;
+PackedInt32Array TerrainFoliageDef::get_match() const {
+	PackedInt32Array out;
+	for (int code : match) {
+		if (code >= 0) {
+			out.push_back(code);
+		}
+	}
+	return out;
 }
 
 void TerrainFoliageDef::set_attrib_flags(int value) {

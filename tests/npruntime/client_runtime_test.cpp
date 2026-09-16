@@ -5638,8 +5638,10 @@ bool run_explosion_sound_reads_the_pool_twin_damage_ammo() {
     world.tables.ammo.entries.resize(3);
     world.tables.ammo.entries[0].valid = true;
     world.tables.ammo.entries[0].impact_effects[5].sound = "DEFAULT_BOOM";
+    world.tables.ammo.entries[0].impact_effects[5].authored = true;
     world.tables.ammo.entries[2].valid = true;
     world.tables.ammo.entries[2].impact_effects[5].sound = "ITEM_BOOM";
+    world.tables.ammo.entries[2].impact_effects[5].authored = true;
     world.out.fire_sounds.set_listener({});
     ExplosionEffectRecord effect;
     effect.source = source.packed; effect.count = 4;
@@ -5648,6 +5650,43 @@ bool run_explosion_sound_reads_the_pool_twin_damage_ammo() {
     const auto ready = world.out.fire_sounds.drain();
     return expect(ready.size() == 1 && ready[0].set_name == "ITEM_BOOM" && ready[0].source_bms_id == 4242,
             "a pool-1 explosion source resolves through its twin's damage ammo and bms id");
+}
+
+// The explosion sound seeds from ammo def 0's static bank row 5 (the table's
+// baked default_explosion_sound) and is overwritten only by an AUTHORED tag-5
+// row of the credited ammo: an absent row plays the fallback, an authored
+// 'none' row plays nothing. [orig: AmmoDef_GetExplosionRadius @0x409770 —
+// `radius = dword_A2EB80` @0x40978c, the tag-5 overwrite @0x4097ab]
+bool run_explosion_sound_falls_back_to_ammo_zero_bank_row_five() {
+    const auto play = [](bool authored_none) -> std::string {
+        inmatch::ClientRuntime runtime("ExplosionAudioFallback");
+        w::World world;
+        world.rules.logic_authority = false;
+        world.rules.mp_session = true;
+        world.registry.configure_pool(1, 8);
+        w::Entity attacker;
+        attacker.item_id = 1291; attacker.has_item_def = true;
+        attacker.squib.damage_ammo_index = 2;
+        const auto source = world.registry.spawn(1, attacker);
+        ns::ClientEntityState &row = runtime.state().upsert(source.packed);
+        row.type_id = 1291; row.cls = EntityClass::Vehicle;
+        world.tables.ammo.entries.resize(3);
+        world.tables.ammo.entries[0].valid = true;
+        world.tables.ammo.default_explosion_sound = "DEFAULT_BOOM";
+        world.tables.ammo.entries[2].valid = true;
+        world.tables.ammo.entries[2].impact_effects[5].authored = authored_none;
+        world.out.fire_sounds.set_listener({});
+        ExplosionEffectRecord effect;
+        effect.source = source.packed; effect.count = 4;
+        runtime.view().apply(s2c::EXPLOSION_EFFECT, encode_explosion_effect(effect));
+        runtime.apply_received_effects(world);
+        const auto ready = world.out.fire_sounds.drain();
+        return ready.size() == 1 ? ready[0].set_name : std::string("<none>");
+    };
+    return expect(play(false) == "DEFAULT_BOOM",
+                   "an ammo without a tag-5 row plays ammo def 0's bank row-5 sound") &&
+           expect(play(true) != "DEFAULT_BOOM",
+                   "an authored 'none' tag-5 row overwrites the seeded default with silence");
 }
 
 // The remote stance latch's prone clear reads only a MOUNT parent's def: a
@@ -5814,6 +5853,7 @@ int main() {
 	                run_medic_reviving_plays_both_receive_cues() &&
                     run_flag_event_audio_and_feed_drain_independently() &&
                     run_explosion_sound_reads_the_pool_twin_damage_ammo() &&
+                    run_explosion_sound_falls_back_to_ammo_zero_bank_row_five() &&
                     run_remote_stance_sound_parent_is_the_mount_only() &&
                     run_radio_zone_context_uses_the_nearest_entry_coverage() &&
 	                run_direct_uplink_framing_is_transient() &&

@@ -233,9 +233,14 @@ void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &p
         if (source) blast.owner=source->handle;
         world.explosions.queue_explosion(world,blast);
     }
-    // AmmoDef_GetExplosionRadius is a misleading IDB name: row 5's sound,
-    // not a radius. The default dword_A2EB80 has no writer and stays zero.
-    // [orig: AmmoDef_GetExplosionRadius @0x409770]
+    // AmmoDef_GetExplosionRadius is a misleading IDB name: the tag-5 row's
+    // sound, not a radius. It seeds the result from dword_A2EB80 — ammo def
+    // 0's static effect bank, row 5 dword +8 (AmmoTable::default_explosion_sound,
+    // baked at table build) — then overwrites it with every tag-5 row of the
+    // requested ammo, so an authored-but-'none' row yields silence while an
+    // absent row yields def 0's fallback.
+    // [orig: AmmoDef_GetExplosionRadius @0x409770 — `radius = dword_A2EB80`
+    //  @0x40978c, the tag-5 overwrite @0x4097ab]
     int sound_ammo = source ? source->squib.damage_ammo_index : 0;
     if (source) {
         if (const auto *body = world.ai.for_handle(source->handle))
@@ -245,9 +250,12 @@ void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &p
                     device.entity_spawn_id == source->registry_spawn_id)
                 sound_ammo = device.ammo_index;
     }
-    if (const auto *ammo=world.tables.ammo.by_index(sound_ammo))
-        world.out.fire_sounds.play_with_distance_delay(ammo->impact_effects[5].sound.c_str(),
+    if (const auto *ammo=world.tables.ammo.by_index(sound_ammo)) {
+        const AmmoImpactEffectRow &row = ammo->impact_effects[5];
+        const std::string &sound = row.authored ? row.sound : world.tables.ammo.default_explosion_sound;
+        world.out.fire_sounds.play_with_distance_delay(sound.c_str(),
                 pos, source ? source->bms_id : 0, source ? source->handle.packed : uint16_t(0xFFFF));
+    }
     if (!world.rules.mp_session) {
         const int half=std::min(count,8)>>1;
         for (int i=0;i<2*half;++i) {

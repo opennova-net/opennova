@@ -84,9 +84,61 @@ FoliageDef foliage_normalize_def(const FoliageDef &def) {
 	FoliageDef normalized = def;
 	normalized.color_lower = foliage_normalize_color_mode(normalized.color_lower);
 	normalized.color_upper = foliage_normalize_color_mode(normalized.color_upper);
-	normalized.match = std::clamp(normalized.match, -1, 255);
+	// Clamp each code to a byte (retail stores the atoi result as a byte) and
+	// compact the authored codes to the front so a saved/reloaded def compares
+	// equal; the OR-of-four consumer reads the same set either way.
+	std::array<int, FOLIAGE_MATCH_CODES> compact;
+	compact.fill(FOLIAGE_MATCH_UNSET);
+	int count = 0;
+	for (int code : normalized.match) {
+		if (code < 0) {
+			continue;
+		}
+		compact[static_cast<size_t>(count++)] = std::clamp(code, 0, 255);
+	}
+	normalized.match = compact;
 	normalized.attrib_flags = foliage_normalize_attrib_flags(normalized.attrib_flags);
 	return normalized;
+}
+
+int foliage_def_match_count(const FoliageDef &def) {
+	int count = 0;
+	for (int code : def.match) {
+		if (code >= 0) {
+			++count;
+		}
+	}
+	return count;
+}
+
+// [orig: Foliage_RemapPixelToDefMask @0x5FF4E0 — per slot: header byte 0 skips
+//  the slot, then the pixel is compared against the four bytes at +0x108..+0x10B]
+bool foliage_def_matches_pixel(const FoliageDef &def, int pixel) {
+	if (pixel == 0 || def.graphic.empty()) {
+		return false;
+	}
+	for (int code : def.match) {
+		if (code >= 0 && code == pixel) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// [orig: Foliage_RemapPixelToDefMask @0x5FF4E0 — pixel 0 returns 0 before the
+//  slot walk; each matching slot ORs `1 << slot`]
+uint32_t foliage_remap_pixel_to_def_mask(const std::vector<FoliageDef> &defs, int pixel) {
+	if (pixel == 0) {
+		return 0u;
+	}
+	uint32_t mask = 0u;
+	const size_t slots = std::min<size_t>(defs.size(), static_cast<size_t>(FOLIAGE_MAX_DEFS));
+	for (size_t slot = 0; slot < slots; ++slot) {
+		if (foliage_def_matches_pixel(defs[slot], pixel)) {
+			mask |= 1u << slot;
+		}
+	}
+	return mask;
 }
 
 FoliageMap foliage_make_default_map(int width, int height, uint8_t fill_index) {

@@ -19,7 +19,7 @@ func before_each() -> void:
 
 	var def := TerrainFoliageDef.new()
 	def.graphic = "adapter_test"
-	def.match = 1
+	def.match = PackedInt32Array([1])
 
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2.0, 6.0, 2.0)
@@ -558,7 +558,7 @@ func test_non_triangle_array_mesh_disables_slot() -> void:
 
 	var def := TerrainFoliageDef.new()
 	def.graphic = "line_mesh"
-	def.match = 1
+	def.match = PackedInt32Array([1])
 	_dispatcher.configure_slots([def], [line_mesh], [])
 	_dispatcher.render_preview(_camera_xform())
 	_dispatcher.render_preview(_camera_xform())
@@ -571,13 +571,13 @@ func test_non_triangle_array_mesh_disables_slot() -> void:
 func test_slot_diagnostics_explain_every_authored_slot_that_cannot_render() -> void:
 	var enabled := TerrainFoliageDef.new()
 	enabled.graphic = 'enabled_veg'
-	enabled.match = 1
+	enabled.match = PackedInt32Array([1])
 	var missing := TerrainFoliageDef.new()
 	missing.graphic = 'missing_veg'
-	missing.match = 2
+	missing.match = PackedInt32Array([2])
 	var invalid := TerrainFoliageDef.new()
 	invalid.graphic = 'invalid_veg'
-	invalid.match = 3
+	invalid.match = PackedInt32Array([3])
 
 	var line_mesh := ArrayMesh.new()
 	var arrays := []

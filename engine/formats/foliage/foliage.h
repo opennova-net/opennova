@@ -36,14 +36,27 @@ enum class FoliageColorMode : int {
 	RetainFullColor = 2,
 };
 
+// The match codes a definition slot CONSUMES. The .trn parser stores up to 7
+// `match` args as bytes at slot+0x108.. (`match_idx` 1..7 -> bytes[536*slot +
+// 6227 + idx], slot base 5964, stride 0x218) [orig: Terrain_ParseConfigCallback
+// @0x60F330], but the foliagemap remap compares the pixel against only the
+// FOUR bytes at +0x108..+0x10B [orig: Foliage_RemapPixelToDefMask @0x5FF4E0],
+// so the reimpl keeps four; args five to seven are parsed and dropped.
+constexpr int FOLIAGE_MATCH_CODES = 4;
+// An unset code. Retail leaves the byte 0, and since pixel 0 never matches a
+// zero byte is equally inert; -1 keeps "unset" distinct from an authored 0.
+constexpr int FOLIAGE_MATCH_UNSET = -1;
+
 struct FoliageDef {
 	std::string graphic;
 	int color_lower = static_cast<int>(FoliageColorMode::MatchGround);
 	int color_upper = static_cast<int>(FoliageColorMode::MatchGround);
-	// Fidelity: bounded deviation. Engine stores up to 4 match codes per slot;
-	// the shared port still exposes one authored match until the terrain/TRN
-	// wrappers are widened.
-	int match = -1;
+	// The consumed codes in authored order; FOLIAGE_MATCH_UNSET pads the tail
+	// (foliage_normalize_def compacts authored codes to the front, which the
+	// OR-of-four consumer cannot distinguish from the authored positions).
+	std::array<int, FOLIAGE_MATCH_CODES> match = {
+		FOLIAGE_MATCH_UNSET, FOLIAGE_MATCH_UNSET, FOLIAGE_MATCH_UNSET, FOLIAGE_MATCH_UNSET
+	};
 	uint8_t attrib_flags = 0;
 };
 
@@ -57,6 +70,17 @@ struct FoliageMap {
 int foliage_normalize_color_mode(int value);
 uint8_t foliage_normalize_attrib_flags(uint8_t flags);
 FoliageDef foliage_normalize_def(const FoliageDef &def);
+
+// Number of authored (non-unset) codes after normalization.
+int foliage_def_match_count(const FoliageDef &def);
+
+// The foliagemap pixel -> definition-slot mask [orig: Foliage_RemapPixelToDefMask
+// @0x5FF4E0]: pixel 0 never matches; a slot whose header byte (+0, the graphic
+// name's first char) is 0 is skipped; otherwise bit `1 << slot` is set when
+// the pixel equals ANY of the slot's four stored codes. `defs` is indexed by
+// slot; entries past `FOLIAGE_MAX_DEFS` are ignored.
+bool foliage_def_matches_pixel(const FoliageDef &def, int pixel);
+uint32_t foliage_remap_pixel_to_def_mask(const std::vector<FoliageDef> &defs, int pixel);
 
 FoliageMap foliage_make_default_map(int width, int height, uint8_t fill_index = 0);
 bool foliage_has_size(const FoliageMap &map);

@@ -18,7 +18,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/infantry.h>
-#include <runtime/world/infantry_burn.h>
+#include <runtime/world/collision_force.h>
 #include <runtime/world/round_move_effect.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/weapon_table.h>
@@ -1342,7 +1342,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                                             primary_section, secondary_section});
                     if (damage_target_is_person) {
                         // [orig: Entity_HandleDamageTrigger @0x4074BA; twin @0x407822]
-                        apply_infantry_burn(world, *target, ammo->secondary_anim, r.pos, r.owner);
+                        apply_collision_force(world, *target, ammo->secondary_anim, ammo->kz_physics, r.pos, r.owner);
                     }
                     if (!damage_target_is_person) {
                         target->last_attacker = r.owner;

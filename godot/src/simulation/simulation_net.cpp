@@ -72,6 +72,9 @@ opennova::inmatch::HostBringup Simulation::host_bringup() {
 		host_config.max_players = net_.host_max_players; // the UI player cap as configure_host_session published it (host_player_slot_limit)
 	} else {
 		host_config.server_name = "SINGLEPLAYERGAME";
+		// Mirrors HostRole::bring_up_singleplayer: the SP launcher advertises the
+		// literal attribute word 0x3A06 and one player (docs/net/novaworld-net-re.md §5.0).
+		host_config.mp_attributes = 0x3A06u;
 		host_config.max_players = 1;
 		host_config.game_type = mission_game_type();
 	}
