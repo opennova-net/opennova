@@ -615,6 +615,12 @@ struct SessionRules {
     // WeaponSlot_InitFromDef @0x53ef17 reads), so the bit is live only when a
     // host cfg carries it in mpattrib.
     bool auto_scope_zero = false;
+    // The mpattrib rules word's 0x200 bit (host option NoFriendlyFire): in
+    // session it suppresses the self/friendly-hit blackout arm
+    // [orig: `test g_rules_flags,200h` @0x4af752 in Entity_ApplyCollisionForce;
+    // g_rules_flags @0x24D1E34 = mpattrib]. Hosts stamp it from their config's
+    // mpattrib value, joiners from the S2C 0x64 fixed block's +44 word.
+    bool no_friendly_fire = false;
     // The host's allowSniperScopeZoom option as the SESSION sees it (byte_A821F0):
     // the class-6 sniper lock on a Primary def's scope zoom (its floor becomes
     // scope_max_mag) reads it at the zoom step and the mount clamp. Retail zeroes

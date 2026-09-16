@@ -37,11 +37,19 @@
 
 namespace opennova::env {
 
-// Retail allocates a square 256 RTT at water detail 2; only detail >= 3 or
-// the capture override selects 512 [orig: Water_CreateReflectionRenderTarget @ 0x5c08d1..0x5c0937].
-// The reimpl has no higher-detail/capture selector, so its witnessed mapping
-// is 256.
-inline constexpr int kReflectionRttSize = 256;
+// Retail sizes the square reflection RTT from the water detail level:
+// `if (dword_B4C3C0 || (size = 256, Water_DetailLevel >= 3)) size = 512;`
+// i.e. 256 at detail 2, 512 at detail >= 3 or under the capture override,
+// then `sub_6800D0(obj, size, size, 1, 1)` allocates it
+// [orig: Water_CreateReflectionRenderTarget @ 0x5c08b0, the allocation body
+// @ 0x5c08d1..0x5c0937, the size selector @ 0x5c08eb..0x5c08ed;
+// Water_DetailLevel @ 0x24d2050]. The shipped
+// max-quality path (our locked target) runs detail 3: Game_StartMission copies
+// the adapter caps (`sub_5899E0(0)`/`sub_676850`) and with caps 0xFDF the
+// detail-1 downgrade never fires [orig: Game_StartMission @ 0x524662..0x524668;
+// downgrade @ 0x5c19da], so the live retail witness is a populated 512x512
+// target. The reimpl carries no detail selector; it fixes the max-quality size.
+inline constexpr int kReflectionRttSize = 512;
 
 // The witnessed reflected-scene dim (env #37's mechanism): after the mirrored
 // sky/terrain/world render into the RTT, detail >= 2 multiplies the WHOLE

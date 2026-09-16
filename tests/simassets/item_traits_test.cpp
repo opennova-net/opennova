@@ -470,6 +470,17 @@ int main() {
     CHECK(item_death_class_from_tag("gnrcx") == ItemDeathClass::kNull);  // whole-string, not a prefix
     CHECK(item_death_class_from_tag("towr") == ItemDeathClass::kTower);
     CHECK(item_death_class_from_tag("emit") == ItemDeathClass::kEmitter);
+    // The missile/artillery rows share the null row's body [orig: sub_443630
+    // @0x443630 / sub_443640 @0x443640 == 0x406FF0], the flare rows are a bare
+    // retn [orig: nullsub_65 @0x443650 / nullsub_66 @0x443660] — neither is the
+    // tree body.
+    CHECK(item_death_class_from_tag("rokt") == ItemDeathClass::kNull);
+    CHECK(item_death_class_from_tag("stng") == ItemDeathClass::kNull);
+    CHECK(item_death_class_from_tag("hlfr") == ItemDeathClass::kNull);
+    CHECK(item_death_class_from_tag("jvln") == ItemDeathClass::kNull);
+    CHECK(item_death_class_from_tag("arty") == ItemDeathClass::kNull);
+    CHECK(item_death_class_from_tag("aflr") == ItemDeathClass::kNone);
+    CHECK(item_death_class_from_tag("gflr") == ItemDeathClass::kNone);
 
     // ---- the vehicle-trait table: every slot's sentinel in its own field ----
     const VehicleTraits *vt = w.vehicles.traits.get(500);

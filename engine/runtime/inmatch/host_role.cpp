@@ -72,6 +72,8 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 	// the host's mpattrib word, the S2C 0x64 +44 dword on a joiner].
 	kernel.world.rules.auto_scope_zero =
 			(config.mp_attributes & GameConfig::kMpAttribAutoScopeZero) != 0;
+	kernel.world.rules.no_friendly_fire =
+			(config.mp_attributes & GameConfig::kMpAttribNoFriendlyFire) != 0;
 	kernel.world.rules.session_open = true;
 }
 
@@ -93,6 +95,12 @@ void HostRole::bring_up_singleplayer() {
 	mission::MissionKernel &kernel = *kernel_;
 	inmatch::GameConfig config;
 	config.server_name = "SINGLEPLAYERGAME";
+	// The SP launcher stores the attribute word LITERALLY after Game_SaveConfig
+	// (not the cfg default 0x3A02) and one player, then copies both into the
+	// game settings [orig: SinglePlayer_StartMission — `multiplayerAttributeFlags_34C
+	//  = 14854` @0x561bb7 -> game_settings.mp_attributes @0x561cdb; maxPlayers_3F4 = 1
+	//  @0x561c1d -> game_settings.max_players = 1 @0x561cec].
+	config.mp_attributes = 0x3A06u;
 	config.max_players = 1;
 	config.game_type = game_type::for_mission_attribs(kernel.mission.header.attrib_flags);
 	reset_state(config, /*serve_and_play=*/true);

@@ -9,7 +9,7 @@
 #include <base/io/fixed.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
-#include <runtime/world/infantry_burn.h>
+#include <runtime/world/collision_force.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/world.h>
 

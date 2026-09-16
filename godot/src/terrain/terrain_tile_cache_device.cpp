@@ -12,6 +12,7 @@
 #include "terrain/terrain_tile_info.h"
 
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/variant/color.hpp>
 #include <base/io/hash.h>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -782,6 +783,16 @@ bool TerrainTileCacheDevice::_allocate_texture() {
 	if (blank.is_null()) {
 		return false;
 	}
+	// Every page starts as the retail creation-time clear colour (the engine
+	// constant is D3DCOLOR ARGB), so an unpublished layer reads as retail's
+	// freshly allocated tile RT rather than black.
+	const uint32_t clear_argb =
+			opennova::TerrainTileCompositionCache::kTileClearColorArgb;
+	blank->fill(Color(
+			static_cast<float>((clear_argb >> 16) & 0xFFu) / 255.0f,
+			static_cast<float>((clear_argb >> 8) & 0xFFu) / 255.0f,
+			static_cast<float>(clear_argb & 0xFFu) / 255.0f,
+			static_cast<float>((clear_argb >> 24) & 0xFFu) / 255.0f));
 	for (int layer = 0;
 			layer < opennova::TerrainTileCompositionCache::kCapacity; ++layer) {
 		layers.append(blank);

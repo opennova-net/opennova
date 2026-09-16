@@ -109,10 +109,13 @@ struct GameConfig {
 	// bit is live only when a host cfg carries it in its mpattrib value.
 	static constexpr uint32_t kMpAttribAutoScopeZero = 0x10000;
 	// [orig game_settings +0xD0; the cfg default `mov g_mpattrib_flags,3A02h`
-	//  @0x54d406 in Config_SetDefaults = 14850. The captured 14854 carried the
-	//  TEAM_CHOOSE spin's bit 0x4 persisted on in that install's game.cfg; a
-	//  fresh retail host advertises P2 0x900, not 0x904 (jo-c cross-check
-	//  2026-09-10). The spin is the shell's to set.]
+	//  @0x54d406 in Config_SetDefaults = 14850. The SP launcher does NOT take
+	//  that default: SinglePlayer_StartMission stores the literal 14854 (0x3A06)
+	//  unconditionally after Game_SaveConfig @0x561bb7 and copies it into the
+	//  game settings @0x561cdb (IDA 2026-09-14; the earlier "persisted
+	//  install artifact" reading of the captured 14854 is refuted). A fresh
+	//  retail MP host advertises P2 0x900, not 0x904 (jo-c cross-check
+	//  2026-09-10); the TEAM_CHOOSE spin is the shell's to set there.]
 	uint32_t mp_attributes = 14850;
 	// The host-global class availability word sent to every joining client as
 	// S2C 0x76. Retail derives its ten low bits from the per-class host settings

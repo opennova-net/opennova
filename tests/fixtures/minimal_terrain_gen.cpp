@@ -189,10 +189,10 @@ TrnConfig make_trn() {
 	bush1.graphic = "bush1.3di";
 	bush1.color_lower = 0;
 	bush1.color_upper = 2;
-	bush1.match = 254;
+	bush1.match[0] = 254;
 	FoliageDef bush2 = bush1;
 	bush2.graphic = "bush2.3di";
-	bush2.match = 253;
+	bush2.match[0] = 253;
 	c.foliage_defs = {bush1, bush2};
 	return c;
 }
@@ -286,8 +286,8 @@ int main(int argc, char **argv) {
 	failures += !expect(reloaded.name == "Tmap" && reloaded.polydata == "Tmap.cpt" &&
 	                            reloaded.foliagemap == "Tmap_f.pcx" && reloaded.charmap == "Tmap_m.pcx" &&
 	                            reloaded.water_height == kWaterHeight &&
-	                            reloaded.foliage_defs.size() == 2 && reloaded.foliage_defs[0].match == 254 &&
-	                            reloaded.foliage_defs[1].match == 253 && reloaded.sector_count == 8 &&
+	                            reloaded.foliage_defs.size() == 2 && reloaded.foliage_defs[0].match[0] == 254 &&
+	                            reloaded.foliage_defs[1].match[0] == 253 && reloaded.sector_count == 8 &&
 	                            reloaded.sector_grid[3][3] == 1 && reloaded.sector_grid[4][4] == 4,
 	                    "Tmap.trn round-trips its identity, water, foliage and sector block");
 	failures += guard(dir + "/Tmap.trn", std::vector<uint8_t>(trn_string.begin(), trn_string.end()), write_mode);

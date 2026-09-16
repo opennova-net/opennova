@@ -140,6 +140,9 @@ int main() {
 		CHECK(host.host_owner.ctx.mission == &kernel.mission);
 		CHECK(host.host_owner.ctx.config.server_name == "SINGLEPLAYERGAME");
 		CHECK(host.host_owner.ctx.config.max_players == 1u);
+		// The SP launcher's literal attribute word, not the cfg default 0x3A02
+		// [orig: SinglePlayer_StartMission @0x561bb7 -> @0x561cdb].
+		CHECK(host.host_owner.ctx.config.mp_attributes == 0x3A06u);
 		CHECK(host.host_owner.ctx.config.game_type == options.game_type);
 		CHECK(host.client_runtime != nullptr);
 		if (host.client_runtime) {

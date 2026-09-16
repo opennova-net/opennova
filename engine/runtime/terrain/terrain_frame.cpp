@@ -306,16 +306,16 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 		return draw_list_;
 	}
 
-	// MVP = proj * view, column-major, then Gribb/Hartmann plane extraction.
-	float mvp[16] = {};
-	for (int row = 0; row < 4; ++row) {
-		for (int col = 0; col < 4; ++col) {
-			for (int k = 0; k < 4; ++k) {
-				mvp[col * 4 + row] += view.proj[k * 4 + row] * view.view[col * 4 + k];
-			}
-		}
-	}
-	const Frustum frustum = extract_frustum(mvp);
+	// The retail cull: the clip cone from the horizontal FOV, the far slab from
+	// the frame's view distance when positive, and the settings-derived LOD
+	// multiplier folded into the context scale.
+	// [orig: PolyTrn_RenderFrame @ 0x60EAC0 — sub_603DA0 @0x60eaff, far
+	//  override @0x60eb7e..0x60eb8d, `flt_319FB2C = ctx[5] * flt_8493D8`
+	//  @0x60eb4a]
+	const TerrainViewCull cull = make_terrain_view_cull(view.view, view.fov_deg,
+			view.far_distance > 0.0f ? view.far_distance : kTerrainDefaultFarDistance);
+	TraversalConfig config = view.config;
+	config.quality = terrain_lod_quality_scale(view.config.quality, view.polygon_detail);
 
 	TraversalStats stats;
 	if (visible_.capacity() < static_cast<size_t>(kPatchBudget)) {
@@ -364,12 +364,12 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 			// Retail walks each routed sector twice per frame: the
 			// bounds-tracking pass at view setup, then the draw pass.
 			track_visible_bounds(scene.quad_nodes, scene.l1_children[child],
-					frustum, sector_ox, sector_oz, view.config,
+					cull, sector_ox, sector_oz, config,
 					draw_list_.visible_bounds, zero_height);
 			traverse_quadtree(scene.quad_nodes, scene.tile_meshes,
-					scene.l1_children[child], frustum,
+					scene.l1_children[child], cull,
 					view.cam_x, view.cam_y, view.cam_z,
-					sector_ox, sector_oz, view.config, visible_, stats, zero_height,
+					sector_ox, sector_oz, config, visible_, stats, zero_height,
 					&foliage_handoffs_);
 			++draw_list_.debug.sectors_walked;
 

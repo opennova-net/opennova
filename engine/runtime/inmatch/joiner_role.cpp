@@ -594,6 +594,8 @@ void JoinerRole::pump() {
     world.rules.session_open = true;
     world.rules.auto_scope_zero =
             (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;
+    world.rules.no_friendly_fire =
+            (rt.view().mp_attributes() & GameConfig::kMpAttribNoFriendlyFire) != 0;
     materializer_.fill_minefield_actors(rt.state(), self_wire_handle(), world.minefields.remote_actors);
 	// The tick's own phases land on the SIM_WORLD_* rows inside run_logic_tick.
 	world.run_logic_tick(

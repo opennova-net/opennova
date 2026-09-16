@@ -442,8 +442,9 @@ struct AiEntity {
     int32_t net_saved_live_pose[3] = {}; // entity+0x80/+0x84/+0x88 (interp delta basis)
     int16_t net_interp_steps = 0;        // entity+0x27E (2..16; buckets {3,4,5,8,16})
 
-    int32_t vel_x = 0;         // entity+152
-    int32_t vel_z = 0;         // entity+156
+    int32_t vel_x = 0;         // entity+152 (velocityX)
+    int32_t vel_z = 0;         // entity+160 (slideDecay, the vertical velocity); the retail
+                               // +152/+156/+160 triple is InfantryState::vel[3]
     int16_t health = 100;      // entity+286 (<=0 -> death path)
     int32_t net_id = 0;        // entity+124 (RelationMatrix_SetBitA key / DcbId)
     uint16_t relmat_id = 0;    // entity+284 (RelationMatrix_SetBitB key)

@@ -437,7 +437,7 @@ func test_start_emits_selected_mission() -> void:
 	_cleanup(dir)
 
 
-func test_start_without_selection_falls_back_to_first_mission() -> void:
+func test_start_without_selection_is_a_no_op() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
@@ -445,8 +445,12 @@ func test_start_without_selection_falls_back_to_first_mission() -> void:
 		_cleanup(dir)
 		return
 	watch_signals(shell)
-	shell._on_start_control()  # no selection -> first .bms in the dir (test.bms)
-	assert_signal_emitted_with_parameters(shell, "start_requested", ["test.bms"])
+	# The retail ACCEPT handler launches only through a shown list's current
+	# entry; nothing selected means nothing launches, even though the dir holds
+	# a .bms (docs/mnu/menu-re.md, SINGLE_PLAYER). The warning path reports it.
+	shell._on_start_control()
+	assert_signal_not_emitted(shell, "start_requested",
+		"no selection must not launch the catalog's first mission")
 	_cleanup(dir)
 
 

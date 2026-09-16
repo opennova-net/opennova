@@ -152,8 +152,8 @@ func test_reflection_rtt_is_retail_square_and_preserves_horizontal_fov() -> void
 	cam.fov = Simulation.fov_vertical_from_horizontal(
 			72.0, float(strip_vp.size.x) / float(strip_vp.size.y))
 	water.advance_frame(TICK)
-	assert_eq(water.get_reflection_viewport().size, Vector2i(256, 256),
-			"retail detail 2 allocates a fixed square RTT [orig: Water_CreateReflectionRenderTarget @ 0x5c08d1]")
+	assert_eq(water.get_reflection_viewport().size, Vector2i(512, 512),
+			"retail water detail 3 (the shipped max-quality path) allocates a fixed 512 square RTT [orig: Water_CreateReflectionRenderTarget @ 0x5c08d1]")
 	assert_almost_eq(water.get_reflection_camera().fov, 72.0, 0.001,
 			"square projection preserves the source horizontal FOV")
 	var uv_scale: Vector2 = water.get_water_material().get_shader_parameter(
@@ -167,7 +167,7 @@ func test_reflection_rtt_is_retail_square_and_preserves_horizontal_fov() -> void
 	cam.keep_aspect = Camera3D.KEEP_WIDTH
 	cam.fov = 72.0
 	water.advance_frame(TICK)
-	assert_eq(water.get_reflection_viewport().size, Vector2i(256, 256),
+	assert_eq(water.get_reflection_viewport().size, Vector2i(512, 512),
 			"display resizing must not resize Water_ReflectionTexture")
 	assert_almost_eq(water.get_reflection_camera().fov, 72.0, 0.001,
 			"the new source aspect still projects the same horizontal field")

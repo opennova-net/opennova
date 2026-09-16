@@ -654,7 +654,30 @@ A single-player mission is **not** an offline codepath. It stands up a NovaWorld
 same process and connects a **local client** to it, then runs the full in-game replication loop
 (§5.1–§5.17) over an in-memory (socketless) transport. Witnessed 2026-06-16 in `Jointops.exe`.
 
-`[orig: SinglePlayer_StartMission @ 0x561af0]` (the menu "start mission" action) does, in order:
+`[orig: SinglePlayer_StartMission @ 0x561af0]` (the menu "start mission" action) first runs the
+pre-session sequence below (re-read 2026-09-14), then the session steps 1–3:
+
+- `@ 0x561b79` copies the selected mission-list entry's filename into `g_map_file_name`;
+- `@ 0x561b99` `g_curPlayerProfile+60 = entry+260`;
+- `@ 0x561ba6` copies `g_ExpansionName` into `byte_24D22A8`;
+- `@ 0x561bb2` `Game_SaveConfig()`;
+- `@ 0x561bb7` `g_GameConfigState.multiplayerAttributeFlags_34C = 14854` (**0x3A06**) — a LITERAL
+  store, unconditional, after the config save (it is not the `Config_SetDefaults` 0x3A02 default and
+  not a persisted install artifact — the earlier reading of the captured 14854 is refuted);
+- `@ 0x561bc1` the `sub_563620()` gate — the launch is aborted when it returns 0. Its body is an
+  unresolved Hex-Rays failure that reads BSS `0x24D20A4` / `0x24D20A8`; **unwitnessed**;
+- `sub_4C4A50`, then `CGameSession_SetConnectionMode(3)` (step 1), `CNapiNetwork_SetTransportMode(1)`
+  (step 2), `sub_56AAA0`, `PlayerProfile_SaveToFiles()`;
+- `word_24D2506 = 0`, `dword_24D211C = 1`, `dword_24D2124 = 1`, `g_GameType = 0x10020` (65568,
+  `@ 0x561c0d`), `dword_24C116C = 0`, `g_GameConfigState.maxPlayers_3F4 = 1` (`@ 0x561c1d`);
+- `Server_InitNewRoundState()`, `apply_session_settings_to_globals()`;
+- the `NapiGameSettings` / `NetConfig` fill: `game_settings.mp_attributes =
+  multiplayerAttributeFlags_34C` (`@ 0x561cdb`, i.e. 0x3A06), `game_settings.max_players = 1`
+  (`@ 0x561cec`), `server_name = "SINGLEPLAYERGAME"`; then `CNapiGameSession_CreateSession` (step 3).
+
+Reimpl: `HostRole::bring_up_singleplayer` (`engine/runtime/inmatch/host_role.cpp`) builds the SP
+`GameConfig` with SINGLEPLAYERGAME / `mp_attributes = 0x3A06` / `max_players = 1`, mirrored by the
+Godot `Simulation` bring-up; pinned by the `host_role` ctest.
 
 1. `[orig: CGameSession_SetConnectionMode @ 0x4c49f0]` with mode **3**. The function maps the
    connection mode to two booleans and stores all three on `g_napi_np_ctx` (§6.3): mode →

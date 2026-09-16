@@ -273,11 +273,15 @@ void FoliageDispatcher::_notification(int p_what) {
 void FoliageDispatcher::configure_slots(const Array &p_defs,
                                             const Array &p_meshes,
                                             const Array &p_fd_textures) {
-  palette_masks_.clear();
+  palette_masks_.fill(0u);
   slot_diagnostics_.clear();
   authored_slot_count_ = 0;
   enabled_slot_count_ = 0;
   disabled_slot_count_ = 0;
+  // The defs the remap walks, indexed by slot. A slot with no renderable mesh
+  // keeps an empty graphic so the remap's header-byte gate skips it, exactly
+  // the shape of an unloaded retail slot.
+  std::vector<opennova::FoliageDef> mask_defs(opennova::FOLIAGE_MAX_DEFS);
 
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
     runtime_slots_[slot] = opennova::foliage::RuntimeSlot{};
@@ -310,7 +314,7 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
 
     if (def.is_null()) {
       diagnostic["graphic"] = String();
-      diagnostic["match"] = -1;
+      diagnostic["match"] = PackedInt32Array();
       diagnostic["status"] = "missing_definition";
       slot_diagnostics_.append(diagnostic);
       continue;
@@ -342,7 +346,14 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
     runtime_slots_[slot].source_vertex_count = static_cast<uint32_t>(
         std::min<size_t>(source_geometry_[slot].vertices.size(),
                          std::numeric_limits<uint32_t>::max()));
-    palette_masks_[def->get_match()] |= static_cast<uint32_t>(1u << slot);
+    mask_defs[static_cast<size_t>(slot)] = def->to_native();
+  }
+
+  // Pixel 0 never matches and a slot with an empty graphic is skipped; the
+  // engine remap owns both gates and the OR-of-four code compare.
+  for (int pixel = 0; pixel < 256; ++pixel) {
+    palette_masks_[static_cast<size_t>(pixel)] =
+        opennova::foliage_remap_pixel_to_def_mask(mask_defs, pixel);
   }
 
   compiler_.configure_slots(runtime_slots_, source_geometry_);
@@ -1723,8 +1734,10 @@ int FoliageDispatcher::_sample_model_foliage_index(
 }
 
 uint32_t FoliageDispatcher::_mask_for_palette_index(int p_index) const {
-  const auto found = palette_masks_.find(p_index);
-  return found == palette_masks_.end() ? 0u : found->second;
+  if (p_index < 0 || p_index >= static_cast<int>(palette_masks_.size())) {
+    return 0u;
+  }
+  return palette_masks_[static_cast<size_t>(p_index)];
 }
 
 Vector2 FoliageDispatcher::_terrain_uv(float p_world_x,

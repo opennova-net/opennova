@@ -48,6 +48,10 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_lod_quality"), &Terrain::get_lod_quality);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_quality", PROPERTY_HINT_RANGE, "0.1,4.0,0.1"),
 		"set_lod_quality", "get_lod_quality");
+	ClassDB::bind_method(D_METHOD("set_polygon_detail", "detail"), &Terrain::set_polygon_detail);
+	ClassDB::bind_method(D_METHOD("get_polygon_detail"), &Terrain::get_polygon_detail);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "polygon_detail", PROPERTY_HINT_RANGE, "0,3,1"),
+		"set_polygon_detail", "get_polygon_detail");
 
 	ClassDB::bind_method(D_METHOD("set_tile_overlay_enabled", "enabled"), &Terrain::set_tile_overlay_enabled);
 	ClassDB::bind_method(D_METHOD("get_tile_overlay_enabled"), &Terrain::get_tile_overlay_enabled);
@@ -297,6 +301,16 @@ float Terrain::get_lod_quality() const {
 	return lod_quality;
 }
 
+void Terrain::set_polygon_detail(int p_detail) {
+	polygon_detail = p_detail < 0 ? 0
+			: p_detail > opennova::kTerrainMaxPolygonDetail ? opennova::kTerrainMaxPolygonDetail
+			: p_detail;
+}
+
+int Terrain::get_polygon_detail() const {
+	return polygon_detail;
+}
+
 void Terrain::set_tile_overlay_enabled(bool p_enabled) {
 	if (tile_overlay_enabled == p_enabled) {
 		return;
@@ -456,13 +470,18 @@ void Terrain::render_frame() {
 	view_input.view[8]  = b[0][2]; view_input.view[9]  = b[1][2]; view_input.view[10] = b[2][2]; view_input.view[11] = 0;
 	view_input.view[12] = o.x;     view_input.view[13] = o.y;     view_input.view[14] = o.z;     view_input.view[15] = 1;
 
-	// Godot Projection stores columns; the compiler wants column-major floats.
-	for (int col = 0; col < 4; col++) {
-		view_input.proj[col * 4 + 0] = proj.columns[col][0];
-		view_input.proj[col * 4 + 1] = proj.columns[col][1];
-		view_input.proj[col * 4 + 2] = proj.columns[col][2];
-		view_input.proj[col * 4 + 3] = proj.columns[col][3];
-	}
+	// The terrain walk never reads the projection: it rebuilds its clip cone
+	// from the horizontal FOV, which the symmetric projection's first column
+	// carries as 1/tan(fov/2) whatever the camera's keep-aspect mode.
+	const double p00 = static_cast<double>(proj.columns[0][0]);
+	if (p00 > 0.0)
+		view_input.fov_deg = static_cast<float>(
+				2.0 * std::atan(1.0 / p00) * 180.0 / 3.14159265358979323846);
+	// The frame's view distance is the integer part of the live fog distance,
+	// the same env scalar the occlusion frame and the priority score read.
+	if (cached_env_node != nullptr)
+		view_input.far_distance = std::floor(cached_env_node->get_fog_distance());
+	view_input.polygon_detail = polygon_detail;
 
 	traversal_config.quality = lod_quality;
 	view_input.config = traversal_config;

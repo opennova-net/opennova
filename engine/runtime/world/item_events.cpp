@@ -106,13 +106,17 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 		{"palm", ItemDeathClass::kPalm},   // @0x813270 -> 0x53C4C0
 		{"psec", ItemDeathClass::kNull},          // @0x813288 -> 0x406FF0
 		{"CHel", ItemDeathClass::kUnwitnessed},   // @0x8132A0 -> 0x4581B0
-		{"rokt", ItemDeathClass::kUnwitnessed},   // @0x8132B8 -> 0x443630
-		{"stng", ItemDeathClass::kUnwitnessed},   // @0x8132D0 -> 0x443630
-		{"hlfr", ItemDeathClass::kUnwitnessed},   // @0x8132E8 -> 0x443630
-		{"jvln", ItemDeathClass::kUnwitnessed},   // @0x813300 -> 0x443630
-		{"arty", ItemDeathClass::kUnwitnessed},   // @0x813318 -> 0x443640
-		{"aflr", ItemDeathClass::kUnwitnessed},   // @0x813330 -> 0x443650
-		{"gflr", ItemDeathClass::kUnwitnessed},   // @0x813348 -> 0x443660
+		// [orig: sub_443630 @0x443630 == the Entity null row body @0x406FF0
+		//  (`+0x2AC = 0x1000000; return`), byte-identical]
+		{"rokt", ItemDeathClass::kNull},          // @0x8132B8 -> 0x443630
+		{"stng", ItemDeathClass::kNull},          // @0x8132D0 -> 0x443630
+		{"hlfr", ItemDeathClass::kNull},          // @0x8132E8 -> 0x443630
+		{"jvln", ItemDeathClass::kNull},          // @0x813300 -> 0x443630
+		// [orig: sub_443640 @0x443640 == the Entity null row body @0x406FF0]
+		{"arty", ItemDeathClass::kNull},          // @0x813318 -> 0x443640
+		// [orig: nullsub_65 @0x443650 / nullsub_66 @0x443660 — a bare retn]
+		{"aflr", ItemDeathClass::kNone},          // @0x813330 -> 0x443650
+		{"gflr", ItemDeathClass::kNone},          // @0x813348 -> 0x443660
 		{"pwrp", ItemDeathClass::kNull},          // @0x813360 -> 0x406FF0
 		{"cveh", ItemDeathClass::kUnwitnessed},   // @0x813378 -> 0x4583C0
 		{"cbot", ItemDeathClass::kUnwitnessed},   // @0x813390 -> 0x462130
@@ -679,6 +683,8 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
 	case ItemDeathClass::kNull:
         target.class_think_ticks = 0x1000000;
 		return; // [orig: 0x406FF0 — +0x2AC = 0x1000000 and nothing else]
+	case ItemDeathClass::kNone:
+		return; // [orig: nullsub_65 @0x443650 / nullsub_66 @0x443660 — retn]
 	case ItemDeathClass::kGnrc:
 		gnrc_death_event(world, target, phase, hit.section);
 		return;

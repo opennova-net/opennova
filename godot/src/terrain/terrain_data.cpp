@@ -56,7 +56,20 @@ static bool foliage_def_from_variant(const Variant &value, opennova::FoliageDef 
 		out_def.graphic = String(dict.get("graphic", "")).utf8().get_data();
 		out_def.color_lower = static_cast<int>(dict.get("color_lower", static_cast<int>(opennova::FoliageColorMode::MatchGround)));
 		out_def.color_upper = static_cast<int>(dict.get("color_upper", static_cast<int>(opennova::FoliageColorMode::MatchGround)));
-		out_def.match = static_cast<int>(dict.get("match", -1));
+		// "match" is the authored code list (PackedInt32Array or Array); a
+		// bare int is one code.
+		const Variant match_value = dict.get("match", Variant());
+		out_def.match.fill(opennova::FOLIAGE_MATCH_UNSET);
+		if (match_value.get_type() == Variant::INT) {
+			out_def.match[0] = static_cast<int>(match_value);
+		} else if (match_value.get_type() == Variant::PACKED_INT32_ARRAY ||
+				match_value.get_type() == Variant::ARRAY) {
+			const Array codes = match_value;
+			const int count = std::min<int>(codes.size(), opennova::FOLIAGE_MATCH_CODES);
+			for (int i = 0; i < count; ++i) {
+				out_def.match[static_cast<size_t>(i)] = static_cast<int>(codes[i]);
+			}
+		}
 		int attrib_flags = static_cast<int>(dict.get("attrib_flags", 0));
 		if (static_cast<bool>(dict.get("shadow", false))) {
 			attrib_flags |= opennova::FOLIAGE_ATTRIB_SHADOW;
@@ -843,19 +856,8 @@ Error TerrainData::_load_from_trn_text(const std::string &trn_content, const Str
 	tilestrip_tex = load_tex("tilestrip", tilestrip_filename);
 	trn.tilestrip = tilestrip_filename.utf8().get_data();
 
-	// CPT is an export-time bake artefact; editor projects legitimately save
-	// a .trn without one (see plan: "Make CPT optional"). Missing/empty
-	// polydata is not an error — load() still succeeds, cpt stays empty, and
-	// consumers that need CPT (Terrain::_build_terrain @ terrain.cpp:571,
-	// get_height* guards @ terrain_data.cpp:714/739/758) already early-out
-	// gracefully.
-	if (trn.polydata.empty()) {
-		loaded = true;
-		UtilityFunctions::print_verbose("TerrainData: Loaded terrain '", terrain_name,
-			"' (no CPT — editor project mode)");
-		return OK;
-	}
-
+	// load_trn's admission gate already rejected an empty polydata name (the
+	// retail loader refuses such a config), so the .cpt is always named here.
 	PackedByteArray cpt_bytes;
 	const String cpt_name = String(trn.polydata.c_str());
 	const String cpt_path = trn_dir.path_join(cpt_name);
