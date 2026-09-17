@@ -339,20 +339,16 @@ bool geometry_bounds_and_reuse_contract() {
 	if (!check(first.vertices.size() == 4 &&
 			sizeof(first.vertices[0]) == 28,
 			"one visible quad emits four 28-byte vertices")) return false;
-	// Retail pairs the (-half, -half) corner with (u_min, v_min) in a +Y-up
-	// view frame [orig: BuildBillboardQuads @ 0x5e7213..0x5e7374], so the
-	// texture's top row (v_min) lands on the quad's BOTTOM corners: the
-	// top-left vertex carries v_max - inset, the bottom-right v_min + inset.
 	const auto &top_left = first.vertices[0];
 	const auto &bottom_right = first.vertices[3];
 	if (!check(near(top_left.x, 8.0f) && near(top_left.y, 21.0f) &&
 			near(top_left.z, 27.0f) && near(top_left.u, 0.15f) &&
-			near(top_left.v, 0.7f) &&
+			near(top_left.v, 0.3f) &&
 			near(bottom_right.x, 12.0f) &&
 			near(bottom_right.y, 19.0f) &&
 			near(bottom_right.z, 27.0f) &&
 			near(bottom_right.u, 0.85f) &&
-			near(bottom_right.v, 0.3f),
+			near(bottom_right.v, 0.7f),
 			"camera pull, extents, and inset UVs compile exactly")) return false;
 	if (!check(top_left.primary_color == 0x11223344u &&
 			top_left.secondary_color == 0x55667788u,

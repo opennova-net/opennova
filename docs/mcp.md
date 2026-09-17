@@ -160,7 +160,6 @@ mission runtime, net codecs) is not a probe: it is a ctest under `tests/<domain>
 | perf | `perf_mission_rows` | the mission-load / re-ground rows (`warmup_seconds`, `window_seconds`, `windows`, `label`) |
 | perf | `frame_stats` | one settled frame-stats window (`settle_ms`, `window_ms`) |
 | render | `render_fixture_capture` | the exact-pose render fixture publication (`id`, `catalog`, `mode`, `profile`, `output_dir`, `mission_resource_dir`, `source_commit`, `gdextension_binary`) |
-| render | `effect_capture` | one authored effect under the crosshair on the loaded mission (`effect`, `weapon`, `walk_frames`, `pitch_deg`, `height_offset`, `fire_frames`, `hide_node`, `frames_between`, `captures`, `output_dir`): a pre-spawn frame, then captures with every rendered emitter's quads in camera and screen space and the atlas resolution report, to localize one effect's rendering |
 | render | `render_swatch` | the material swatch A/B driver on its own stage (`mode`: capture, composite, lighting, channels, clip, projshadow, matchterrain, glow, calibrate, compare) |
 | render | `foliage_spawn_capture` | the frozen-spawn retail comparison capture (`mission`, `mission_path`, `expansion`, `flicker`, `model_lighting_trace`) |
 | render | `environment_cube_capture` | the environment-cube proof on Forward+ D3D12 |

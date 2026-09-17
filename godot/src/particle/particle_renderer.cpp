@@ -1226,12 +1226,7 @@ public:
 					}
 					const float planar = heading.x * heading.x + heading.y * heading.y;
 					if (planar > 1.0e-12f) {
-						// The texture's top row (v_min) sits on the quad's local
-						// -half_height corners (particle_frame.cpp build_quad), so
-						// pointing the FILE's top along the heading — the flame tip of
-						// Car15_5point's radial star, the spark streak — rolls the local
-						// -y axis onto it: atan2(-x, y) + pi.
-						quad.roll = std::atan2(heading.x, -heading.y);
+						quad.roll = std::atan2(-heading.x, heading.y);
 					}
 				}
 				quad.state.pipeline = static_cast<opennova::renderer::ParticlePipeline>(layer.type);
@@ -1944,26 +1939,6 @@ Array ParticleRenderer::get_debug_emitter_bounds() const {
 			value["quad_count"] = static_cast<int64_t>(bounds.quad_count);
 			value["bounds_valid"] = bounds.bounds.valid;
 			value["bounds"] = bounds.bounds.valid ? godot_aabb(bounds.bounds) : AABB();
-			// Diagnostics: the emitter's first emitted quads as world-space
-			// corner lists (four vertices per quad, draw-list order).
-			const opennova::renderer::ParticleDrawList &draw_list =
-					impl_->compilers[slot].draw_list();
-			Array quads;
-			const std::size_t quad_limit = std::min<std::size_t>(bounds.quad_count, 8u);
-			for (std::size_t quad = 0; quad < quad_limit; ++quad) {
-				const std::size_t first_vertex =
-						(static_cast<std::size_t>(bounds.first_quad) + quad) * 4u;
-				if (first_vertex + 4u > draw_list.vertices.size())
-					break;
-				PackedVector3Array corners;
-				for (std::size_t k = 0; k < 4u; ++k) {
-					const opennova::renderer::ParticleVertex &vertex =
-							draw_list.vertices[first_vertex + k];
-					corners.push_back(Vector3(vertex.x, vertex.y, vertex.z));
-				}
-				quads.push_back(corners);
-			}
-			value["quads"] = quads;
 			result.push_back(value);
 		}
 	}
