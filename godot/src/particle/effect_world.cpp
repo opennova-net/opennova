@@ -284,6 +284,21 @@ int64_t EffectWorld::_owner_token_for(const Variant &p_key) {
 	return token;
 }
 
+// A descriptor spawn (transient or owned) with a zero orientation is retail's
+// "no orientation" case: CEffectWorld_SpawnEmitterAtPosition @ 0x5f6e52..0x5f6e5c
+// hands the group a zero vector, CEffectEmitter_SetOrientationFromDirection
+// @ 0x5e5d51 leaves every EMITVECTOR member's emission axis zero, and the
+// direction helper then emits around world +Y. A pose always carries a basis,
+// so that case aims the forward at +Y, which the engine's cone helper resolves
+// to the identical world-axis frame. Attached spawns keep their identity local
+// frame: their orientation comes from the owner transform they compose with.
+Transform3D EffectWorld::descriptor_pose(const Vector3 &p_position, const Vector3 &p_orientation) {
+	if (p_orientation.length_squared() <= 0.000001f) {
+		return forward_pose(p_position, Vector3(0.0f, 1.0f, 0.0f));
+	}
+	return forward_pose(p_position, p_orientation);
+}
+
 Transform3D EffectWorld::forward_pose(const Vector3 &p_position, const Vector3 &p_forward) {
 	if (p_forward.length_squared() <= 0.000001f) {
 		return Transform3D(Basis(), p_position);
@@ -433,7 +448,7 @@ int64_t EffectWorld::spawn_effect_transient(const String &p_name, const Vector3 
 	options->set_source_tick(p_source_tick);
 	options->set_source_order(p_source_order);
 	const Ref<EffectSpawnReceipt> receipt =
-			spawn_effect_request(p_name, forward_pose(p_position, p_orientation), options);
+			spawn_effect_request(p_name, descriptor_pose(p_position, p_orientation), options);
 	return receipt->get_effect_handle();
 }
 
@@ -447,7 +462,7 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_owned_request(const Variant &p
 	if (particles_disabled_) {
 		return _disabled_receipt();
 	}
-	const Transform3D initial_transform = forward_pose(p_position, p_orientation);
+	const Transform3D initial_transform = descriptor_pose(p_position, p_orientation);
 	Ref<EffectSpawnOptions> options;
 	options.instantiate();
 	options->set_admission(ADMISSION_REPLACE_OWNED);
@@ -504,7 +519,7 @@ int64_t EffectWorld::spawn_effect_unless_alive(const Variant &p_owner_key, const
 	options->set_admission(ADMISSION_SUPPRESS_WHILE_OWNED);
 	options->set_slot_key(p_owner_key);
 	const Ref<EffectSpawnReceipt> receipt =
-			spawn_effect_request(p_name, forward_pose(p_position, p_orientation), options);
+			spawn_effect_request(p_name, descriptor_pose(p_position, p_orientation), options);
 	return receipt->get_effect_handle();
 }
 
@@ -514,7 +529,7 @@ bool EffectWorld::spawn_effect_by_handle(int64_t p_handle, const Vector3 &p_posi
 		return false;
 	}
 	Ref<EffectSpawnRequest> request =
-			EffectSpawnRequest::make(p_handle, forward_pose(p_position, p_orientation));
+			EffectSpawnRequest::make(p_handle, descriptor_pose(p_position, p_orientation));
 	request->set_kill_plane_y(water_height_);
 	return scene_->spawn(request)->get_spawned();
 }
@@ -760,6 +775,8 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("intern_effect", "name"), &EffectWorld::intern_effect);
 	ClassDB::bind_method(D_METHOD("effect_name_for_handle", "handle"),
 			&EffectWorld::effect_name_for_handle);
+	ClassDB::bind_static_method("EffectWorld", D_METHOD("descriptor_pose", "position", "orientation"),
+			&EffectWorld::descriptor_pose);
 	ClassDB::bind_static_method("EffectWorld", D_METHOD("forward_pose", "position", "forward"),
 			&EffectWorld::forward_pose);
 	ClassDB::bind_method(D_METHOD("spawn_effect_request", "name", "transform", "options"),

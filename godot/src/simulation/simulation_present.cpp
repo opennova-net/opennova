@@ -365,8 +365,8 @@ void Simulation::fill_objectives(const Ref<RtxtStringFile> &p_mission_text,
 // resolved through the ammo effects_table (canonical tag -> {effect, sound}) and its
 // per-leg presentation mask; rows with no enabled authored leg are dropped, matching
 // the original impact presenter [orig: AmmoDef_ProcessImpactEffect @ 0x40a170;
-// ballistic wrapper Projectile_SpawnImpactEffect @ 0x4e9b80; selection witness
-// on world/round_sim.h RoundImpact].
+// the physical handlers that call it are listed on world/round_sim.h RoundImpact,
+// with the selection witness].
 void Simulation::drain_round_impact_rows(
 		std::vector<opennova::world::RoundImpactPresentation> &r_rows) {
 	r_rows.clear();

@@ -347,11 +347,15 @@ struct RoundDeath {
 };
 
 // A round impact the flight pass resolved this tick — the IMPACT-EFFECT seam. The host
-// drains these and presents the enabled legs of the ammo effects_table row for the tag,
-// with the emitter forward = the flight direction. Retail ballistic rounds select and
-// spawn both legs from the physical impact handlers at collision time
-// [orig: Projectile_UpdatePhysics @ 0x4E9D70 -> Projectile_SpawnImpactEffect
-// @ 0x4E9B80]. Custom motors can select the legs independently: grenade bounces call
+// drains these and presents the enabled legs of the ammo effects_table row for the tag.
+// Retail ballistic rounds select and spawn both legs from the physical impact handlers
+// at collision time [orig: Projectile_UpdatePhysics @ 0x4E9D70 -> the terrain
+// (@ 0x4E9210), entity (@ 0x4E9390), person (@ 0x4E98F0) and water (@ 0x4E9B80)
+// handlers -> AmmoDef_ProcessImpactEffect @ 0x40A170]. The emitter orientation is the
+// handler's descriptor source: entity/person hits pass the ray record (its +24..+32 =
+// the normalized flight direction); terrain/water hits pass NONE, a zero orientation
+// that leaves EMITVECTOR members emitting around world +Y (see round_sim.cpp).
+// Custom motors can select the legs independently: grenade bounces call
 // AmmoDef_ProcessImpactEffect directly with sound enabled and particles disabled
 // [orig: Entity_UpdateGrenadePhysics @ 0x4447D3..0x444824]. Weapon_RaycastAndSpawnImpact
 // @ 0x4E8460 is a separate Knife-only
@@ -362,7 +366,8 @@ struct RoundDeath {
 // sampler walks the mission `.til` array, net-re §5.60).
 struct RoundImpact {
     Vec3 position;
-    Vec3 direction;         // normalized flight direction (the witnessed descriptor dir)
+    Vec3 direction;         // the descriptor orientation: the normalized flight direction
+                            // for entity/person hits, zero (none) for terrain/water hits
     int32_t ammo_index = -1;
     int32_t effect_tag = 0; // canonical effect-tag index [orig: g_AmmoEffectTagTable
                             //  @ 0x813420; world/ammo_table.h kImpactEffectTagNames]

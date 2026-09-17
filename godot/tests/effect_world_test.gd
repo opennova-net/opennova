@@ -612,3 +612,19 @@ func test_empty_catalog_warm_cleans_pipeline_helpers() -> void:
 	await get_tree().process_frame
 	assert_eq(_warm_helper_count(world), 0,
 			"the empty-catalog early return does not strand helper geometry")
+
+
+# A descriptor spawn with no orientation is retail's zero-orientation case:
+# SpawnEmitterAtPosition @ 0x5f6e52..0x5f6e5c hands the group a zero vector and
+# EMITVECTOR members then emit around world +Y (SetOrientationFromDirection
+# @ 0x5e5d51 leaves their axis zero). The pose seam aims that case at +Y; a
+# real orientation is kept as the forward axis.
+func test_descriptor_pose_without_orientation_aims_up() -> void:
+	var origin := Vector3(3.0, 4.0, 5.0)
+	var none := EffectWorld.descriptor_pose(origin, Vector3.ZERO)
+	assert_eq(none.origin, origin, "position kept")
+	assert_almost_eq(none.basis.z, Vector3.UP, Vector3.ONE * 0.0001, "zero orientation -> +Y forward")
+	assert_almost_eq(none.basis.z, EffectWorld.forward_pose(origin, Vector3.UP).basis.z, Vector3.ONE * 0.0001, "same frame as an explicit +Y forward")
+	var aimed := EffectWorld.descriptor_pose(origin, Vector3(0.0, -0.6, 0.8))
+	assert_almost_eq(aimed.basis.z, Vector3(0.0, -0.6, 0.8), Vector3.ONE * 0.0001, "a real orientation is the forward axis")
+	assert_almost_eq(aimed.basis.z.length(), 1.0, 0.0001, "normalized")

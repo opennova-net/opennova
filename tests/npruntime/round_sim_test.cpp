@@ -1189,8 +1189,8 @@ int main() {
 	// -45 deg from z=+5 on an empty lane (y=50, no entities). The impact-effect tag
 	// is the no-surface-map default (type 1 + 4 = dirt) and the interpolated stop
 	// sits on the plane, not a sub-step under it
-	// [orig: Projectile_HandleTerrainImpact -> Projectile_SpawnImpactEffect
-	//  @ 0x4e9b80; D-WPN-15 carries the remaining tag-selection gaps]. ---
+	// [orig: Projectile_HandleTerrainImpact @ 0x4e9210 -> AmmoDef_ProcessImpactEffect
+	//  @ 0x40a170; D-WPN-15 carries the remaining tag-selection gaps]. ---
 	{
 		std::vector<uint16_t> flat_hm(512 * 512, 0);
 		std::vector<int> flat_grid(256, 1);
@@ -1218,8 +1218,11 @@ int main() {
 		if (!expect(std::fabs(imp.position.z) < 0.02f,
 		            "the interpolated stop sits ON the surface, not a sub-step under it"))
 			return 1;
-		if (!expect(imp.direction.z < -0.5f && imp.direction.x > 0.5f,
-		            "impact direction = the normalized downward flight ray"))
+		if (!expect(imp.direction.x == 0.0f && imp.direction.y == 0.0f &&
+		                imp.direction.z == 0.0f,
+		            "a terrain stop carries NO orientation: the handler's descriptor has a "
+		            "NULL record [orig: Projectile_HandleTerrainImpact @ 0x4e92c8 -> "
+		            "CEffectWorld_SpawnEmitterAtPosition @ 0x5f6e52]"))
 			return 1;
 		world.round_sim.impacts.clear();
 	}

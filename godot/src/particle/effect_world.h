@@ -120,6 +120,7 @@ public:
 	// an up hint of UP (RIGHT when the forward is vertical). Shared with the
 	// static item-effect sources (ItemEffectDirector).
 	static Transform3D forward_pose(const Vector3 &p_position, const Vector3 &p_forward);
+	static Transform3D descriptor_pose(const Vector3 &p_position, const Vector3 &p_orientation);
 
 	// Deep spawn seam. Admission, binding, and render domain are explicit
 	// values; the options' slot_key/owner_key Variants are interned to
