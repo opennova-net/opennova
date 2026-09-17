@@ -21,8 +21,8 @@ struct WeaponScopeZero {
     int32_t paralax_distance_q16 = 0;
     // WeaponDef+0xF0: the furthest range (Q16) the bake's synthetic rounds
     // reached at their lifetime's expiry or their first tick below the ammo's
-    // min-stable speed, over every solve. No retail reader traced
-    // [orig: store @0x5453f8].
+    // min-stable speed, over every solve. The scope range HUD turns red beyond
+    // this bound [orig: store @0x5453f8; HUD_DrawScopeOverlayDetails @0x59e541].
     int32_t max_range_q16 = 0;
     std::array<int32_t, 40> elevation{};
 };
@@ -43,10 +43,11 @@ int32_t weapon_scope_zero_pitch(const WeaponScopeZero &zero, int16_t step);
 // (+0x9C * step) << 16 floored at 100 m) in BAM, 0 without a parallax key. The
 // slot installs (local_weapon_install, VehicleSystem::prepare_weapon_slot) seed
 // it outside the flags & 3 elevation gate; the adjust recomputes it and alone
-// negates it for a negative +0x8C (its caller's leg). Consumer, NOT ported: the
-// main-scene view builder sub_5D27F0 adds MountSlot+8 to the view yaw and takes
-// MountSlot+4 off the pitch under Player_CanFireWeapon
+// negates it for a negative +0x8C (its caller's leg). LocalPlayer::view_frame
+// applies it in the modern main-scene Sighted/Scoped branches: add MountSlot+8
+// to BAM yaw and subtract MountSlot+4 from pitch (docs/interface/hud-re.md, D-HUD-27).
 // [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b; Player_AdjustWeaponZoomLevel
-//  @0x4dbd91..0x4dbde3; sub_5D27F0 @0x5d2859..0x5d285c]
+//  @0x4dbd91..0x4dbde3; Render_ProcessMainSceneFrame @0x5ca452..0x5ca4a0;
+//  the unused predecessor sub_5D27F0 @0x5d2859..0x5d285c]
 int32_t weapon_scope_zero_yaw(const WeaponScopeZero &zero, int16_t step);
 }

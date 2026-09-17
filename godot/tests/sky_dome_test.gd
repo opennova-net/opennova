@@ -275,3 +275,48 @@ func test_scroll_falls_back_to_a_private_core_without_weather() -> void:
 	assert_ne(off1, first, "the fallback core keeps ticking the accumulators")
 	assert_lt(off1.x, 0.0, "fallback layer-1 U is negative too")
 	assert_ne(second, Vector2.ZERO, "layer 2 advances as well")
+
+
+func test_rendered_dome_fog_matches_the_exposed_background() -> void:
+	if DisplayServer.get_name() == "headless":
+		pending("sky/background color continuity needs a windowed renderer")
+		return
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var clear := WorldEnvironment.new()
+	clear.environment = Environment.new()
+	clear.environment.background_mode = Environment.BG_COLOR
+	viewport.add_child(clear)
+	var env_node := MissionEnvironment.new()
+	env_node.name = "SkyTestEnv"
+	viewport.add_child(env_node)
+	var env := EnvFile.new()
+	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
+	env.load()
+	env_node.environment_data = env
+	var camera := Camera3D.new()
+	camera.far = 501.0
+	viewport.add_child(camera)
+	camera.make_current()
+	var sky := SkyDome.new()
+	sky.environment_path = NodePath("../SkyTestEnv")
+	sky.frame_clear_environment = clear.environment
+	viewport.add_child(sky)
+	sky.advance_frame(0.0)
+	# Fully fogged dome pixels and the open area beneath it must be the same
+	# color. Comparing rendered pixels catches Godot's background sRGB decode;
+	# comparing uniforms alone cannot detect that device conversion.
+	sky.get_sky_material().set_shader_parameter("u_fog_end", 1.0)
+	var samples: Array[Color] = []
+	for direction in [Vector3.UP, Vector3.DOWN]:
+		camera.look_at_from_position(Vector3.ZERO, direction, Vector3.FORWARD)
+		await RenderingServer.frame_post_draw
+		await RenderingServer.frame_post_draw
+		samples.append(viewport.get_texture().get_image().get_pixel(32, 32))
+	assert_gt(samples[0].r, 0.1, "the sky sample is lit, not an empty viewport")
+	for channel in 3:
+		assert_almost_eq(samples[0][channel], samples[1][channel], 0.01,
+				"fogged sky and frame clear agree in channel %d" % channel)

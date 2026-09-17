@@ -1050,9 +1050,10 @@ func test_pose_skeleton_matches_script_bone_loop() -> void:
 	var bones: Array = sk.get_skeleton_bones()
 	assert_gt(bones.size(), 0, "rig has bones")
 	for skel in [native_skel, script_skel]:
-		for raw in bones:
-			var b: Dictionary = raw
-			(skel as Skeleton3D).add_bone(String(b.get("name", "")))
+		# Pose equivalence is indexed. Retail labels may contain ':' or '/',
+		# which Godot rejects; ObjectModel sanitizes them for the live rig.
+		for i in range(bones.size()):
+			(skel as Skeleton3D).add_bone("bone_%d" % i)
 		for i in range(bones.size()):
 			var b: Dictionary = bones[i]
 			var parent := int(b.get("parent_index", -1))

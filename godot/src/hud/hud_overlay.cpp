@@ -7,6 +7,7 @@
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/simulation.h"
+#include "simulation/player_local_view.h"
 #include "terrain/terrain_data.h"
 #include "util/axes.h"
 
@@ -142,6 +143,7 @@ HudOverlay::FriendlyTagMode HudOverlay::next_friendly_tag_mode(FriendlyTagMode p
 float HudOverlay::friendly_tag_lift() { return opennova::hud::kFriendlyTagLiftUnits; }
 
 void HudOverlay::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_scope_state", "view", "gametext"), &HudOverlay::set_scope_state);
 	BIND_ENUM_CONSTANT(SHOWHUD_FLAG_GUN);
 	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_OFF);
 	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_FAR_BRIEF);
@@ -523,6 +525,10 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	veh_stance_pos_ = p_hudpos->get_veh_stance_pos();
 	layout_.clip_pos = pos_record2(p_hudpos->get_clip_pos());
 	layout_.stance_pos = pos_record2(p_hudpos->get_stance_pos());
+	const auto &hud = p_hudpos->native_file().hud;
+	layout_.scope_range = pos_record2(Vector2i(hud.scope_range[0], hud.scope_range[1]));
+	layout_.scope_zero = pos_record2(Vector2i(hud.scope_zero[0], hud.scope_zero[1]));
+	layout_.scope_mag = pos_record2(Vector2i(hud.scope_mag[0], hud.scope_mag[1]));
 	layout_.health_rect = rect_record(p_hudpos->get_health_rect());
 	layout_.heat_rect = rect_record(p_hudpos->get_heat_rect());
 	layout_.power_rect = rect_record(p_hudpos->get_powerbar_rect());
@@ -852,6 +858,35 @@ void HudOverlay::set_weapon_state(bool p_active, int p_clip, int p_reserve, int 
 	state_.windup_active = p_windup_active;
 	state_.windup_held_ticks = p_windup_held_ticks;
 	queue_redraw();
+}
+
+void HudOverlay::set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<RtxtStringFile> &p_gametext) {
+    auto &scope = state_.scope;
+    scope = {};
+    if (p_view.is_valid()) {
+        const auto &v = p_view->native_frame();
+        scope.active = v.scope_details_active;
+        scope.scoped = v.scope_details_scoped;
+        scope.rangefinder = (v.scope_weapon_flags & 0x400u) != 0;
+        scope.zeroable = (v.scope_weapon_flags & 0x800u) != 0;
+        scope.range_q16 = v.aim_range_q16;
+        scope.max_range_q16 = v.scope_max_range_q16;
+        scope.zero_word = v.scope_zero_word;
+        scope.zero_step_metres = v.scope_zero_step;
+        scope.magnification = v.scope_magnification;
+    }
+    if (scope.active && p_gametext.is_valid()) {
+        const auto text = [&](const char *section, const char *key) -> std::string {
+            return p_gametext->get_string_in_section(section, key).utf8().get_data();
+        };
+        scope.range_format = text("Overlays", "STROVER_DIST");
+        scope.range_over_1km = text("Overlays", "STROVER_DIST1KM");
+        scope.zero_format = text("hud", "hud_scope_zero");
+        scope.zero_auto = text("hud", "hud_scope_zero_auto");
+        scope.zero_none = text("hud", "hud_scope_zero_none");
+        scope.magnification_format = text("hud", "hud_scope_mag");
+    }
+    queue_redraw();
 }
 
 void HudOverlay::set_view_state(bool p_binoculars_view_active, const Vector2 &p_aim_screen) {

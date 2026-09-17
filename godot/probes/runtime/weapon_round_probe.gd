@@ -7,7 +7,9 @@ extends GameProbe
 ## at the spawn tents tried first (zone-gated; `rig_weapon` is applied
 ## directly when out of zone). With `fire` the fire-chain diagnostic instead:
 ## equip `weapon` when given, hold LMB and log the FSM view + the audio bank
-## result every ten frames, then the reload variant ring; with `animtrace`
+## result every ten frames, then the reload variant ring. `stance` selects
+## standing/crouched/prone, `scoped_fire` keeps ADS for the volley, and
+## `zero_delta` adjusts elevation before the scope capture; with `animtrace`
 ## the per-frame viewmodel playhead trace across a held volley and the
 ## release (animtrace.log). Captures land in `output_dir` or the run's
 ## artifact dir. The JOX id is WPN_Barret (one T); the ease reads ~2 sim
@@ -277,6 +279,12 @@ func _fire_diag() -> void:
 	if world == null or sim == null:
 		_ctx.log("fire diag: no world/sim")
 		return
+	var stance := int(_ctx.args.get("stance", -1))
+	if stance >= 0:
+		var original_stance := sim.get_local_player_stance()
+		sim.request_local_player_stance(stance)
+		_ctx.defer_restore(func() -> void: sim.request_local_player_stance(original_stance))
+		await _ctx.wait_frames(60)
 	var audio := world.get_mission_audio()
 	if audio != null:
 		for set_name in BANK_SETS:
@@ -291,17 +299,23 @@ func _fire_diag() -> void:
 				vdef.weapon_name, str(vdef.pos_units), str(vdef.rot_bias_deg),
 				str(vdef.tpos_units), str(vdef.renderfov_h_deg), vdef.gfx1, vdef.animadm])
 	await _capture("90_diag_hip.png")
-	# ADS alignment check: raise, settle, capture, drop (the Sighted tpos view).
+	# ADS alignment check: raise, settle, capture, then optionally keep ADS
+	# through the volley (the default remains the hip-fire diagnostic).
 	ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, true)
 	await _ctx.wait_frames(3)
 	ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, false)
 	await _ctx.wait_frames(40)
+	var zero_delta := int(_ctx.args.get("zero_delta", 0))
+	if zero_delta != 0:
+		sim.request_local_player_scope_zero(zero_delta)
+		await _ctx.wait_frames(4)
 	_log_view("diag ADS settled")
 	await _capture("91_diag_ads.png")
-	ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, true)
-	await _ctx.wait_frames(3)
-	ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, false)
-	await _ctx.wait_frames(30)
+	if not bool(_ctx.args.get("scoped_fire", false)):
+		ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, true)
+		await _ctx.wait_frames(3)
+		ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, false)
+		await _ctx.wait_frames(30)
 	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)
 	for i in range(FIRE_SAMPLES):
 		await _ctx.wait_frames(FIRE_SAMPLE_FRAMES)
@@ -359,6 +373,10 @@ func _log_view(stage: String) -> void:
 			pv.scope_fraction if pv != null else -1.0,
 			str(pv.scope_card_active) if pv != null else "<null>",
 			str(wv.clip) if wv != null else "<null>"])
+	if pv != null and wv != null:
+		_ctx.log("scope: stance=%d mag=%d zero=%d fov=%.3f spread_row=%d spread_fp16=%d aimed=%s" % [
+				_ctx.sim().get_local_player_stance(), pv.scope_magnification, pv.scope_zero_word,
+				pv.fov_h_deg, wv.hud_spread_row, wv.hud_spread_fp16, str(wv.aimed_shot_available)])
 
 
 func _capture(file_name: String) -> void:

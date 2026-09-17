@@ -25,6 +25,9 @@ protected:
 
 public:
 	void assign(const opennova::world::LocalPlayerViewFrame &p_value) { value_ = p_value; }
+	const opennova::world::LocalPlayerViewFrame &native_frame() const { return value_; }
+	int get_scope_zero_word() const { return value_.scope_zero_word; }
+	int get_scope_magnification() const { return value_.scope_magnification; }
 
     int get_sight_slide_multiplier() const {
         opennova::hud::ScopeZeroInputs in;

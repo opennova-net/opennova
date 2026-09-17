@@ -35,12 +35,12 @@ struct LocalPlayerViewTracker {
     // view is up and cleared on every frame it is down, so a raise that stays
     // suppressed (moving, dead, round over, third person) never draws
     // [orig: Render_ProcessMainSceneFrame @0x5ca3d3..0x5ca3f8 — the
-    //  `if (!dword_29D6BA8) { dword_29D6BA8 = 1; Environment_RandomizeSunDirection(); }`
+    //  `if (!dword_29D6BA8) { dword_29D6BA8 = 1; Binoculars_RandomizeSwayOffsets(); }`
     //  arm, the clear @0x5ca4b0; the seeded pair is added to the view angles
-    //  @0x5ca3f8..0x5ca407. Environment_RandomizeSunDirection @0x4dd830 is a
-    //  misnomer: it writes the BINOCULAR SWAY pair, dword_B7653C = 8*(int)s and
-    //  dword_B76540 = 8*(int)(s*cos(4194304.0)) with
-    //  s = sin(PRNG_Next16() << 16 * 1.4629627e-9) * 4194304].
+    //  @0x5ca3f8..0x5ca407. Binoculars_RandomizeSwayOffsets @ 0x4dd830 writes
+    //  the BINOCULAR SWAY pair: eight times truncated Q22 sin(angle)
+    //  and cos(angle); the decompiler loses the x87 angle across ftol.
+    //  The port stores mission-coordinate degree deltas (yaw sign reversed).]
     float binocular_yaw_offset_deg = 0.0f;
     float binocular_pitch_offset_deg = 0.0f;
     bool binocular_sway_latched = false; // dword_29D6BA8
@@ -221,18 +221,17 @@ bool local_player_vehicle_zone_team_matches(const World &world);
 // Action 26: toggle the persistent binocular request. Refused while a
 // PowerThrow charge is live (the raised view would suppress the held weapon
 // input and turn the charge into an unintended release) and while a scope is
-// engaged in a gunner seat. Dropping the request zeroes the aim displacement;
-// SEEDING it is not this action's job (the once-per-activation render latch in
-// local_player_view_tick owns that). Returns the new requested state (false
+// engaged in a gunner seat. The render latch in LocalPlayer::view_frame owns
+// the displacement and PRNG draw. Returns the new requested state (false
 // also = refused). [orig: g_fireChargeStartTick @0xB76800; the action 26 gate]
 bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
                                     PlayerViewState &v, LocalPlayerViewTracker &t);
 
 // The binocular sway's ONCE-PER-ACTIVATION seed and its clear (the tracker's
-// `binocular_sway_latched` is retail's dword_29D6BA8). Runs after every
-// effective-mode refresh; draws one PRNG_Next16 word on the activating frame
+// `binocular_sway_latched` is retail's dword_29D6BA8). Runs when the rendered
+// view is assembled; draws one PRNG_Next16 word on the activating frame
 // only. [orig: Render_ProcessMainSceneFrame @0x5ca3d3..0x5ca3f8 / @0x5ca4b0 ->
-//  Environment_RandomizeSunDirection @0x4dd830]
+//  Binoculars_RandomizeSwayOffsets @ 0x4dd830]
 void local_player_binocular_sway_latch(World &world, const PlayerViewState &v,
                                        LocalPlayerViewTracker &t);
 
@@ -279,6 +278,12 @@ void local_player_set_eye_offset(World *world, const float offset_mission[3],
 //  @0x5ca299..0x5ca304; Camera_ComputeThirdPersonView @0x437d10 — the
 //  MOUNTED local eye leg @0x4b6908 re-anchored to the live position]
 struct LocalPlayerViewFrame {
+    bool scope_camera_zero_active = false;
+    bool scope_details_active = false;
+    bool scope_details_scoped = false;
+    uint32_t scope_weapon_flags = 0;
+    int32_t scope_magnification = 1;
+    int32_t scope_max_range_q16 = 0;
     int16_t scope_zero_word = 0;
     int32_t scope_zero_max = 0;
     int32_t scope_zero_step = 0;

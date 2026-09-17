@@ -463,6 +463,23 @@ void test_fov_policy() {
     CHECK(player_view_fov_h_deg(v, 55 << 16, false, false, 1) == 55.0f);
 }
 
+// The x87 stack keeps the angle below the truncated sine result; the second
+// trig operation is cos(angle), not cos(4194304). Mission yaw reverses BAM.
+// [orig: Binoculars_RandomizeSwayOffsets @0x4dd830; render adds @0x5ca403..0x5ca407]
+void test_binocular_sway_axes_and_quantization() {
+    struct Sample { float angle; int32_t sin_q22; int32_t cos_q22; };
+    // Pinned with the binary's dbl_7C3608 (not exact tau / 2^32).
+    const Sample samples[] = {{0.0f, 0, 4194304}, {0.25f, 4194303, -201},
+        {0.5f, 402, -4194303}, {0.75f, -4194303, -201}, {0.125f, 2965891, 2965749}};
+    constexpr double degrees_per_q22 = 360.0 * 8.0 / 4294967296.0;
+    for (const auto &sample : samples) {
+        float yaw, pitch;
+        player_view_binocular_sway_offset(sample.angle, yaw, pitch);
+        CHECK(yaw == static_cast<float>(-sample.sin_q22 * degrees_per_q22));
+        CHECK(pitch == static_cast<float>(sample.cos_q22 * degrees_per_q22));
+    }
+}
+
 void test_binoculars_effective_state_and_fov() {
     PlayerViewState v;
     CHECK(!v.binoculars_requested);
@@ -1425,6 +1442,7 @@ void test_camera_shake_chase() {
 }
 
 int main() {
+    test_binocular_sway_axes_and_quantization();
     test_authored_pose_interp_matches_original_six_lane_traces();
     test_authored_pose_interp_keeps_original_snap_and_completion_rules();
     test_authored_pose_def_promotes_parser_precision_and_wrapping_bam();

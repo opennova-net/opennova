@@ -139,63 +139,74 @@ void test_mid_ease_toggle_refused_then_forcescoped_pins_the_sight() {
 
 void test_binoculars_refused_while_power_throw_charges_and_rng_untouched() {
     LocalWorld lw;
-    LocalPlayerWeapon w = scoped_weapon(0);
-    w.power_throw_start_tick = 40;
-    PlayerViewState v;
-    LocalPlayerViewTracker t;
-    const uint32_t prng_at_start = lw.w.prng16_state;
-    CHECK(!local_player_binoculars_toggle(lw.w, w, v, t));
-    CHECK(!v.binoculars_requested);
-    // A refused toggle never activates the view, so the latch never draws.
-    CHECK(lw.w.prng16_state == prng_at_start);
-    CHECK(!t.binocular_sway_latched);
-    w.power_throw_start_tick = 0;
-    CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
-    CHECK(v.binoculars_requested);
-    CHECK(v.binoculars_view_active);
-    // The ACTIVATION latch draws exactly one word and seeds the displacement.
-    CHECK(lw.w.prng16_state != prng_at_start);
-    CHECK(t.binocular_sway_latched);
-    CHECK(t.binocular_yaw_offset_deg != 0.0f || t.binocular_pitch_offset_deg != 0.0f);
-    const uint32_t prng_after_seed = lw.w.prng16_state;
-    // Holding the view up does not re-draw.
-    local_player_binocular_sway_latch(lw.w, v, t);
-    CHECK(lw.w.prng16_state == prng_after_seed);
-    CHECK(!local_player_binoculars_toggle(lw.w, w, v, t)); // dropping the request
-    CHECK(lw.w.prng16_state == prng_after_seed);
-    CHECK(!t.binocular_sway_latched);
-    CHECK(t.binocular_yaw_offset_deg == 0.0f && t.binocular_pitch_offset_deg == 0.0f);
+    LocalPlayer player(lw.w);
+    player.weapon = scoped_weapon(0);
+    player.weapon.power_throw_start_tick = 40;
+    const uint32_t before = lw.w.prng16_state;
+    CHECK(!local_player_binoculars_toggle(lw.w, player.weapon, player.view, player.view_tracker));
+    CHECK(!player.view.binoculars_requested);
+    player.view_frame();
+    CHECK(lw.w.prng16_state == before);
+    CHECK(!player.view_tracker.binocular_sway_latched);
 }
 
-// The seed rides the ACTIVATION, not the raw toggle: a raise made while a
-// movement key is held draws nothing until the view actually comes up.
-// [orig: the dword_29D6BA8 latch @0x5ca3e1..0x5ca3f3, cleared @0x5ca4b0]
+// Input and fixed ticks must not consume the render-owned seed. Even a
+// raise/lower pair between frames leaves the shared mission stream untouched.
+// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0, latch @0x5ca3e1..0x5ca3f3]
 void test_binocular_sway_seeds_once_per_activation() {
     LocalWorld lw;
-    LocalPlayerWeapon w = scoped_weapon(0);
-    PlayerViewState v;
-    LocalPlayerViewTracker t;
-    v.move_held = true; // suppresses the raise
-    const uint32_t prng_at_start = lw.w.prng16_state;
-    CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
-    CHECK(v.binoculars_requested);
-    CHECK(!v.binoculars_view_active);
-    CHECK(lw.w.prng16_state == prng_at_start); // suppressed: no draw yet
-    v.move_held = false;
-    local_player_view_refresh(&lw.w, v);
-    local_player_binocular_sway_latch(lw.w, v, t);
-    CHECK(v.binoculars_view_active);
-    CHECK(lw.w.prng16_state != prng_at_start);
-    const uint32_t first = lw.w.prng16_state;
-    // Suppress again, then re-activate: the next activation draws afresh.
+    LocalPlayer player(lw.w);
+    player.weapon = scoped_weapon(0);
+    auto &v = player.view;
+    auto &t = player.view_tracker;
+    const auto toggle = [&]() {
+        return local_player_binoculars_toggle(lw.w, player.weapon, v, t);
+    };
+    const auto tick = [&]() {
+        local_player_view_tick(&lw.w, player.weapon, v, t, {});
+    };
+    uint32_t expected = lw.w.prng16_state;
+    CHECK(toggle());
+    tick();
+    CHECK(lw.w.prng16_state == expected);
+    CHECK(!toggle());
+    tick();
+    player.view_frame();
+    CHECK(lw.w.prng16_state == expected);
+    CHECK(!t.binocular_sway_latched);
+
+    CHECK(toggle());
+    tick();
+    CHECK(lw.w.prng16_state == expected);
+    player.view_frame();
+    opennova::io::rotating_prng_next16(expected);
+    CHECK(lw.w.prng16_state == expected);
+    CHECK(t.binocular_sway_latched);
+    const float yaw = t.binocular_yaw_offset_deg;
+    const float pitch = t.binocular_pitch_offset_deg;
+    CHECK(yaw != 0.0f || pitch != 0.0f);
+    // No rendered down frame: keep this activation's offsets and seed.
+    CHECK(!toggle());
+    tick();
+    CHECK(toggle());
+    tick();
+    player.view_frame();
+    CHECK(lw.w.prng16_state == expected);
+    CHECK(t.binocular_yaw_offset_deg == yaw && t.binocular_pitch_offset_deg == pitch);
+
+    // Movement suppresses the optical view. Rendering that state clears the
+    // latch; the next rendered activation, not the release tick, draws again.
     v.move_held = true;
-    local_player_view_refresh(&lw.w, v);
-    local_player_binocular_sway_latch(lw.w, v, t);
+    tick();
+    CHECK(!v.binoculars_view_active);
+    player.view_frame();
     CHECK(!t.binocular_sway_latched);
     v.move_held = false;
-    local_player_view_refresh(&lw.w, v);
-    local_player_binocular_sway_latch(lw.w, v, t);
-    CHECK(lw.w.prng16_state != first);
+    tick();
+    CHECK(lw.w.prng16_state == expected);
+    player.view_frame();
+    opennova::io::rotating_prng_next16(expected);
+    CHECK(lw.w.prng16_state == expected);
 }
 
 void test_binoculars_refused_scoped_in_gunner_seat() {
@@ -1434,6 +1445,38 @@ struct ScopedAimFixture : LocalWorld {
     }
 };
 
+// The main scene applies the equipped slot's zero AFTER composing the camera.
+// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0, Scoped @0x5ca494..0x5ca4a0]
+void test_rendered_scope_applies_elevation_and_parallax() {
+    for (const auto stance : {InfantryState::Stance::kStand, InfantryState::Stance::kProne}) {
+        ScopedAimFixture f;
+        f.body().inf.stance = stance;
+        f.player.weapon.def.flags = DEF_WEAPON_FLAG_SCOPED;
+        auto base = f.player.view_frame();
+        CHECK(base.camera_pose_valid);
+        f.player.weapon.slot.zero_pitch = 0x01000000; // 1.40625 degrees
+        f.player.weapon.slot.zero_yaw = 0x00800000; // 0.703125 degrees
+        auto zeroed = f.player.view_frame();
+        CHECK(std::abs(zeroed.camera.pitch_deg - base.camera.pitch_deg + 1.40625f) < 0.00001f);
+        // Mission yaw is 90 - retail BAM yaw, hence the inverted sign.
+        CHECK(std::abs(zeroed.camera.yaw_deg - base.camera.yaw_deg + 0.703125f) < 0.00001f);
+        f.player.weapon.def.flags = DEF_WEAPON_FLAG_SIGHTED;
+        auto sighted = f.player.view_frame();
+        CHECK(std::abs(sighted.camera.pitch_deg - base.camera.pitch_deg) < 0.00001f);
+        f.player.weapon.def.scope_zero.max_steps = 10;
+        sighted = f.player.view_frame();
+        CHECK(std::abs(sighted.camera.pitch_deg - zeroed.camera.pitch_deg) < 0.00001f);
+        f.player.weapon.def.flags = DEF_WEAPON_FLAG_SCOPED;
+        CHECK(f.body().pitch == 0 && f.body().heading == 0);
+        CHECK(f.player.input.look_pitch == 0 && f.player.input.look_heading == 0);
+        f.player.view.scope_engaged = false;
+        f.player.view.scope_settled = false;
+        auto hip = f.player.view_frame();
+        CHECK(std::abs(hip.camera.pitch_deg - base.camera.pitch_deg) < 0.00001f);
+        CHECK(std::abs(hip.camera.yaw_deg - base.camera.yaw_deg) < 0.00001f);
+    }
+}
+
 void test_scoped_aim_original_sequences() {
     struct Sample { uint32_t tick; int32_t yaw, pitch; unsigned draws; };
     struct Case { InfantryState::Stance stance; int32_t stability[3]; Sample samples[5]; };
@@ -1627,6 +1670,7 @@ void test_scoped_aim_follows_local_view_clamps_and_leg_chase() {
 }
 
 int main() {
+    test_rendered_scope_applies_elevation_and_parallax();
     test_scoped_aim_follows_local_view_clamps_and_leg_chase();
     test_scoped_aim_original_sequences();
     test_scoped_aim_gates_and_independent_stance_resets();

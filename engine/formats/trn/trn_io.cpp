@@ -85,7 +85,7 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 						std::string tok = fv;
 						do {
 							if (idx < FOLIAGE_MATCH_CODES) {
-								def.match[static_cast<size_t>(idx)] = std::atoi(tok.c_str());
+								def.match[static_cast<size_t>(idx)] = static_cast<uint8_t>(std::atoi(tok.c_str()));
 							}
 							++idx;
 						} while (idx < 7 && (fiss >> tok));

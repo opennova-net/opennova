@@ -250,8 +250,6 @@ bool LocalPlayer::toggle_mount() {
 	const bool changed = world.vehicles.player_toggle_mount(world.cached.local_player);
 	if (changed) {
 		view.binoculars_requested = false;
-		view_tracker.binocular_yaw_offset_deg = 0.0f;
-		view_tracker.binocular_pitch_offset_deg = 0.0f;
 		w::local_player_view_refresh(&world, view);
 		sync_local_mounted_input_heading();
 		w::sync_local_usegun_weapon_transition(world, weapon, view);
@@ -287,8 +285,6 @@ bool LocalPlayer::select_numbered_seat(int index) {
 			carrier->seats[static_cast<size_t>(selected.seat_index)].bone_index);
 	if (changed) {
 		view.binoculars_requested = false;
-		view_tracker.binocular_yaw_offset_deg = 0.0f;
-		view_tracker.binocular_pitch_offset_deg = 0.0f;
 		w::local_player_view_refresh(&world_, view);
 		sync_local_mounted_input_heading();
 		w::sync_local_usegun_weapon_transition(world_, weapon, view);
@@ -298,8 +294,28 @@ bool LocalPlayer::select_numbered_seat(int index) {
 
 w::LocalPlayerViewFrame LocalPlayer::view_frame() {
 	World &world = world_;
+	// The rendered view owns this latch; target-lock queries and fixed ticks
+	// must not advance the shared mission PRNG. [orig:
+	// Render_ProcessMainSceneFrame @ 0x5ca0f0, latch @0x5ca3e1..0x5ca3f3]
+	w::local_player_binocular_sway_latch(world, view, view_tracker);
 	w::LocalPlayerViewFrame f;
 	w::local_player_view_frame(&world, weapon, view, view_tracker, f);
+	// The main scene's camera zero, after camera composition. Input, body aim
+	// and the unadjusted targeting query retain their own frames.
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0,
+	// Sighted @0x5ca452..0x5ca465; Scoped @0x5ca494..0x5ca4a0]
+	const auto *slot = w::active_local_weapon_slot(world, weapon);
+	if (f.camera_pose_valid && f.binoculars_view_active) {
+		// Already converted from BAM to mission-coordinate deltas.
+		// [orig: Render_ProcessMainSceneFrame @0x5ca403..0x5ca407]
+		f.camera.yaw_deg += f.binocular_yaw_offset_deg;
+		f.camera.pitch_deg += f.binocular_pitch_offset_deg;
+	} else if (f.camera_pose_valid && slot != nullptr && f.scope_camera_zero_active) {
+		constexpr double degrees_per_bam = 360.0 / 4294967296.0;
+		// Mission yaw is 90 - BAM heading.
+		f.camera.yaw_deg -= static_cast<float>(slot->zero_yaw * degrees_per_bam);
+		f.camera.pitch_deg -= static_cast<float>(slot->zero_pitch * degrees_per_bam);
+	}
 	return f;
 }
 

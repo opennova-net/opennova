@@ -574,6 +574,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# The crosshair's witnessed anchor: Vector2.INF in first person (the overlay
 	# pins the design center @0x5928a0), the projected aim in 3P/spectate
 	# (@0x592910).
+	_game_hud.set_scope_state(lv, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_game_hud.set_view_state(binoculars_view_active,
 			_player_presenter.aim_screen_point() \
 					if _player_presenter != null else Vector2.INF)
@@ -1074,11 +1075,7 @@ func cycle_sight_scale() -> void:
 	_push_sight_state()
 
 
-## The SIGHTS card's row-mode inputs: the overlay's sight-scale index and the
-## equipped weapon's `slide` multiplier at its DEFAULT zero (the engine
-## evaluator over the def's scope_max_zero table with the slot's zero word 0).
-## The manual zero word and the rangefinder arm have no port yet (D-WPN-8),
-## so a zero adjust never moves the row here.
+## Live sight-scale and zero/rangefinder slide state from the equipped slot.
 func _push_sight_state() -> void:
 	if _sights_card == null or _game_hud == null:
 		return

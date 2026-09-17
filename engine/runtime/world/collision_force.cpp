@@ -131,11 +131,12 @@ void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
         if (inf.vel[2] < 4096 && (flags & kEntityFlagMounted) == 0) {
             int32_t cos22 = 0, sin22 = 0;
             quantized_dir(angle_to_source, cos22, sin22);
-            // (table << 10) >> 22 [orig: @0x4af7c4 / @0x4af7d3]
+            // (table << 10) >> 22, using a product to avoid shifting a
+            // negative signed value [orig: @0x4af7c4 / @0x4af7d3].
             inf.vel[0] = io::bam_add(inf.vel[0],
-                    static_cast<int32_t>((static_cast<int64_t>(cos22) << 10) >> 22));
+                    impulse_q22(1024, cos22));
             inf.vel[1] = io::bam_add(inf.vel[1],
-                    static_cast<int32_t>((static_cast<int64_t>(sin22) << 10) >> 22));
+                    impulse_q22(1024, sin22));
             inf.vel[2] = io::bam_add(inf.vel[2], 1024); // [orig: @0x4af7dd]
         }
         break;

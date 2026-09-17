@@ -153,6 +153,20 @@ int main() {
 				"normalization clamps each code to a byte and compacts authored codes")) return 1;
 	}
 
+	// Authored match arguments are byte stores, including negatives and overflow.
+	{
+		opennova::TrnConfig wrapped;
+		std::istringstream input_bytes(
+				"polytrn_colormap c.tga\npolytrn_detailmap d.tga\npolytrn_polydata p.cpt\n"
+				"foliage\n graphic bush.3di\n match -1 256 511 -256\nend\n");
+		error.clear();
+		if (!expect(opennova::load_trn(input_bytes, wrapped, error),
+				"byte-wrapped match codes should parse")) return 1;
+		if (!expect(wrapped.foliage_defs.size() == 1 &&
+				wrapped.foliage_defs[0].match == std::array<int, 4>{255, 0, 255, 0},
+				"authored match codes must wrap to bytes, without losing negative arguments")) return 1;
+	}
+
 	// A config with only the admission-gate minimum (colormap, detailmap,
 	// polydata) parses with default locks.
 	opennova::TrnConfig defaults;

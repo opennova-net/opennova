@@ -234,7 +234,12 @@ the remap as `foliage_remap_pixel_to_def_mask` (pixel-0 and empty-graphic
 gates included); `FoliageDispatcher` evaluates it once per pixel value at
 `configure_slots`. The previous single-code port only ever matched the first
 authored code; shipped maps author one code per slot (Dvxi5 254/253/252/251),
-so no observable divergence was ledgered and no D row is minted.
+so no observable divergence was ledgered and no D row is minted. The
+2026-09-16 review also pins the parser's byte narrowing: `match -1 256 511
+-256` stores `255 0 255 0`, not saturation or the tool API's -1 sentinel.
+The authored TRN parse narrows before `foliage_normalize_def`; the latter
+retains its tool-input normalization. `[orig: Terrain_ParseConfigCallback
+@ 0x60f330]` Ctest `trn_roundtrip` covers the out-of-range tokens.
 
 ### Gate and expansion
 

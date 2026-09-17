@@ -38,6 +38,8 @@ void PlayerLocalView::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(m_variant, #m_name, PROPERTY_HINT_NONE, "",                 \
 						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY),              \
 			"", "get_" #m_name);
+	PLAYER_LOCAL_VIEW_FIELD(Variant::INT, scope_zero_word)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::INT, scope_magnification)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, scope_engaged)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, mounted)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, third_person)
