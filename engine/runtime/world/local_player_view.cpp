@@ -410,7 +410,7 @@ bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerV
 }
 
 bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
-                                    PlayerViewState &v, LocalPlayerViewTracker &t) {
+                                    PlayerViewState &v, LocalPlayerViewTracker &) {
     const Entity *local = world.registry.get(world.cached.local_player);
     if (local == nullptr) return false;
     // Retail refuses binoculars while a PowerThrow charge is live. Allowing the
@@ -421,23 +421,18 @@ bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
     if (v.scope_engaged && local->mounted && local->mount_type == SeatType::Gunner)
         return false;
     const bool requested = player_view_toggle_binoculars(v);
-    if (!requested) {
-        t.binocular_yaw_offset_deg = 0.0f;
-        t.binocular_pitch_offset_deg = 0.0f;
-    }
     // The SEED is not this action's: retail draws it from the render frame the
     // first time the optical view is actually up (local_player_binocular_sway_latch
     // below), so a raise refused by movement/death/round end/third person draws
     // nothing at all.
     local_player_view_refresh(&world, v);
-    local_player_binocular_sway_latch(world, v, t);
     return requested;
 }
 
 // The once-per-activation sway seed [orig: Render_ProcessMainSceneFrame
 // @0x5ca3d3..0x5ca3f8, the clear @0x5ca4b0]. The retail latch dword_29D6BA8
-// gates one Environment_RandomizeSunDirection @0x4dd830 call -- a misnomer for
-// the binocular sway writer -- per activation, and is cleared on every frame
+// gates one Binoculars_RandomizeSwayOffsets @ 0x4dd830 call per activation,
+// and is cleared on every frame
 // the optical view is down. The draw comes off the SAME PRNG_Next16 owner
 // retail uses (World::next_prng16), so a raise consumes one word of the shared
 // mission stream exactly as retail's does.
@@ -451,7 +446,7 @@ void local_player_binocular_sway_latch(World &world, const PlayerViewState &v,
     t.binocular_sway_latched = true; // [orig: dword_29D6BA8 = 1 @0x5ca3e9]
     // PRNG_Next16() << 16 read as a full-circle BAM32 fraction is our
     // `unit_random` in [0, 1); the fixed-radius circle is kBinocularAimOffsetDeg.
-    // [orig: Environment_RandomizeSunDirection @0x4dd830]
+    // [orig: Binoculars_RandomizeSwayOffsets @ 0x4dd830]
     const float unit_random = static_cast<float>(world.next_prng16()) / 65536.0f;
     player_view_binocular_sway_offset(unit_random, t.binocular_yaw_offset_deg,
                                       t.binocular_pitch_offset_deg);
@@ -488,7 +483,6 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
             world->cached.sound_listener_view_flags = v.camera_mode == 0 ? 2 : 4;
         player_view_update_effective_modes(v, false,
                                            world != nullptr && world->match.outcome().ended);
-        if (world != nullptr) local_player_binocular_sway_latch(*world, v, t);
         v.tp_anchor_valid = false;
         return;
     }
@@ -547,9 +541,6 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
     player_view_resolve_mode(v);
     if (v.camera_mode == 4 && mode_before != 4) enter_death_camera(*world, *e, v, s);
     local_player_view_refresh(world, v);
-    // The binocular sway seed/clear, once the optical view is resolved
-    // [orig: Render_ProcessMainSceneFrame @0x5ca3d3..0x5ca3f8 / @0x5ca4b0].
-    local_player_binocular_sway_latch(*world, v, t);
     // The per-tick movement delta the FP motion lead samples per render frame
     // (retail: the (position - entity+0x80 prev-position) << 8 samples
     // @0x437bb2/0x437b92/0x437ba2 -- player_view.h carries the witness).
@@ -686,10 +677,26 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     const bool scoped = out.scope_card_active &&
                         (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0 &&
                         (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) == 0;
+    // The modern main-scene branches: Sighted requires a nonzero max-zero
+    // definition; Scoped always applies its slot offsets. Binoculars bypass
+    // both. [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0,
+    // Sighted @0x5ca452..0x5ca465; Scoped @0x5ca494..0x5ca4a0]
+    out.scope_camera_zero_active = sighted ? w.def.scope_zero.max_steps != 0 : scoped;
     const int32_t current_fov = world != nullptr
         ? world->weather.core.scalar_channels.camera_fov_fp : 80 << 16;
     const int32_t zoom = sighted || scoped ? local_player_scope_zoom(w, *active_slot) : 1;
     out.fov_h_deg = player_view_fov_h_deg(v, current_fov, scoped, sighted, zoom);
+    // HUD_DrawScopeOverlayDetails tests CanFire and the two promoted flag
+    // selectors, independently of the scene's Inset/NoCardSwitch card fork.
+    // [orig: HUD_DrawScopeOverlayDetails @ 0x59e420, gate @0x59e47f]
+    out.scope_details_scoped = out.scope_settled && (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0;
+    const bool details_sighted = out.scope_settled && (w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
+        active_slot != nullptr && active_slot->current != weapon_action::kSwitchFrom;
+    out.scope_details_active = optical_view && (out.scope_details_scoped || details_sighted) &&
+        !v.binoculars_view_active;
+    out.scope_weapon_flags = w.def.flags;
+    out.scope_magnification = active_slot != nullptr ? active_slot->scope_zoom : 1;
+    out.scope_max_range_q16 = w.def.scope_zero.max_range_q16;
     out.scope_zero_word = active_slot != nullptr ? active_slot->scope_zero : 0;
     out.scope_zero_max = w.def.scope_zero.max_steps;
     out.scope_zero_step = w.def.scope_zero.step_metres;
@@ -715,14 +722,10 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     out.fp_pitch_recoil_deg = player_view_fp_pitch_recoil_deg(p->inf.recoil_pitch);
     out.fp_roll_deg = player_view_fp_roll_deg(p->inf.torso_roll, p->inf.lean_angle);
     if (e == nullptr) return;
-    // The aim angles the camera composes over: the presented look getters'
-    // values, plus the binocular wander while its optical view is up.
+    // Compose from the body aim. The rendered view adds optical offsets
+    // afterwards, matching the main-scene consumer in LocalPlayer::view_frame.
     float aim_yaw = static_cast<float>(mission_yaw_deg_from_bam_heading(p->heading));
     float aim_pitch = static_cast<float>(static_cast<double>(p->pitch) * kDegreesPerBam);
-    if (v.binoculars_view_active) {
-        aim_yaw += t.binocular_yaw_offset_deg;
-        aim_pitch += t.binocular_pitch_offset_deg;
-    }
     const float position[3] = {e->position.x, e->position.y, e->position.z};
     // The eye is Position + CameraOffset, NOT an absolute head point. Retail
     // restamps CameraOffset as (head - Position) from a skeleton it poses in

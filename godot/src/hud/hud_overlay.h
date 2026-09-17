@@ -30,6 +30,7 @@ namespace godot {
 class HudDrawListStats;
 class RtxtStringFile;
 class Simulation;
+class PlayerLocalView;
 class VehicleHudBlock;
 
 class HudPos;
@@ -75,6 +76,7 @@ public:
 	// runtime state (a fresh HUD build).
 	void configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root);
 	bool is_configured() const;
+	void set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<RtxtStringFile> &p_gametext);
 
 	// Select and (when configured) immediately reload the crosshair art;
 	// runtime state (messages, fades) survives the layout refresh.

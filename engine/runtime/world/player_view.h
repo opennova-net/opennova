@@ -41,8 +41,9 @@ constexpr float kPlayerCameraFovHDeg = 80.0f;
 constexpr float kBinocularCameraFovHDeg = 20.0f;
 // The fixed radius of the one random aim displacement a binocular raise seeds
 // (2.8125 deg = 0x02000000 BAM32). The displacement survives movement/death/
-// third-person suppression until the raw toggle (g_binocularsToggle) drops.
-// [orig: the binocular-raise aim offset seeded with the input action 26 toggle]
+// third-person suppression only until a rendered frame observes binoculars
+// down; the next active render seeds again. Input action 26 only toggles the
+// request. [orig: Render_ProcessMainSceneFrame @0x5ca3e1..0x5ca4b0]
 constexpr float kBinocularAimOffsetDeg = 2.8125f;
 // [orig: the five NVG gain positions selected by actions 56/57]
 constexpr int32_t kNvgGainMin = 0;
@@ -615,8 +616,8 @@ bool player_view_toggle_binoculars(PlayerViewState &v);
 
 // The one random fixed-radius aim displacement a binocular raise seeds:
 // `unit_random` in [0, 1) picks the angle around the kBinocularAimOffsetDeg
-// circle; the yaw/pitch offsets persist until the request drops (the caller
-// zeroes them then). [orig: the binocular-raise offset beside g_binocularsToggle]
+// circle; local_player_binocular_sway_latch owns their render-time lifetime.
+// [orig: Binoculars_RandomizeSwayOffsets @0x4dd830]
 void player_view_binocular_sway_offset(float unit_random,
                                        float &yaw_offset_deg,
                                        float &pitch_offset_deg);

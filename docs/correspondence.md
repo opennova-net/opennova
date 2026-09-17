@@ -15,6 +15,16 @@ into them.
 > real producer is the `hudcolor` action row (code 10, default F6,
 > retail-shadowed by `huddetail` — D-CTRL-4).
 
+## PR #650 review (2026-09-16)
+
+| Reimplementation surface | Retail witness | Verdict and evidence |
+|---|---|---|
+| `LocalPlayer::view_frame` scope camera | `Render_ProcessMainSceneFrame @ 0x5ca452..0x5ca4a0` | MATCHING for ordinary Sighted/Scoped offset consumers; standing/prone `local_player_view` regression. [HUD record](interface/hud-re.md#scope-camera-zero-and-readouts-2026-09-16-d-hud-27), D-HUD-27. |
+| `HudFrameCompiler::element_scope_details` | `HUD_DrawScopeOverlayDetails @ 0x59e420` | MATCHING textual gates, range/zero/magnification and colors; `hud_frame_compiler`. Flag-8 vehicle target reticle is outside this port. |
+| Binocular activation latch | `Render_ProcessMainSceneFrame @ 0x5ca3e1..0x5ca4b0`; `Binoculars_RandomizeSwayOffsets @ 0x4dd830` | MATCHING render-owned timing; `local_player_view` PRNG assertions. [HUD record](interface/hud-re.md#binocular-sway-render-latch-2026-09-16-review). |
+| Sky background property | `Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf`; `sub_579CB0 @ 0x579cb0` | Godot device adaptation of the retail clear/fog equality; windowed `sky_dome_test` pixels and 00TRa/00TRg captures. [Environment record](env/env-tod-re.md). |
+| Authored foliage match bytes | `Terrain_ParseConfigCallback @ 0x60f330` | MATCHING byte narrowing; `trn_roundtrip` negative/overflow-token regression. [Foliage record](foliage/foliage-re.md#definition-match-codes). |
+
 ## 2026-09-13 source-comparison additions
 
 The [jo-c audit](jo-c-parity-audit-2026-09-13.md) pins the compared source files.

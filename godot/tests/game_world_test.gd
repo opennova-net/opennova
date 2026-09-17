@@ -1073,7 +1073,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	var lit := EnvFile.lit_water_color(
 			Color(env.get_water_color().x, env.get_water_color().y, env.get_water_color().z),
 			combined)
-	assert_eq(world.get_current_frame_clear_color(), Color(lit.r, lit.g, lit.b),
+	assert_eq(world.get_current_frame_clear_color(), Color(lit.r, lit.g, lit.b).linear_to_srgb(),
 			"v_offset below water selects the underwater clear even when the node origin is above")
 	# Environment_ApplyFogAndAmbient selects one pass payload from the same
 	# render-eye classification as the clear: underwater the lit water color,

@@ -2185,8 +2185,50 @@ void test_kill_announcement(const fnt_font_t *font) {
     CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "banner expires after age 186");
 }
 
+// Scope text is independent of weapon declutter, with retail's exact range
+// boundary, zero-word meanings and magnification gate.
+void test_scope_details(const fnt_font_t *font) {
+    HudLayout layout;
+    layout.scope_range.x = 100; layout.scope_range.y = 200;
+    layout.scope_zero.x = 100; layout.scope_zero.y = 220;
+    layout.scope_mag.x = 100; layout.scope_mag.y = 240;
+    HudFrameCompiler compiler;
+    compiler.configure(layout, font);
+    HudFrameState state;
+    state.declutter_visible.fill(false);
+    auto &scope = state.scope;
+    scope.active = true; scope.scoped = true; scope.rangefinder = true; scope.zeroable = true;
+    scope.range_format = "%dm"; scope.range_over_1km = ">1km";
+    scope.zero_format = "%dm"; scope.zero_auto = "AUTO"; scope.zero_none = "NONE";
+    scope.magnification_format = "%dx";
+    scope.range_q16 = 1000 << 16; scope.max_range_q16 = 900 << 16;
+    scope.zero_word = 3; scope.zero_step_metres = 100; scope.magnification = 10;
+    auto list = compiler.compile(state, 1024, 768);
+    CHECK(list.glyphs.size() == 12, "scope draws 1000m, 300m and 10x with weapon declutter off");
+    if (list.glyphs.size() == 12) {
+        CHECK(std::abs(list.glyphs[0].x_top_left - 99.5f) < 0.01f, "scope uses authored range x");
+        CHECK(std::abs(list.glyphs[0].y_top - 199.5f) < 0.01f, "scope uses authored range y");
+        CHECK(list.glyphs[0].color == opennova::hud::half_bright_argb(0xFFFF5050u), "beyond effective range uses retail red");
+        CHECK(std::abs(list.glyphs[5].y_top - 219.5f) < 0.01f, "zero uses its own authored position");
+    }
+    ++scope.range_q16;
+    scope.zero_word = -1;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.size() == 11, "above 1000m uses >1km; minus one uses AUTO");
+    scope.range_q16 = 0; scope.zero_word = -2; scope.scoped = false;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.size() == 6, "range floors to 1m; negative zero uses NONE; sighted has no magnification");
+    scope.rangefinder = false; scope.zeroable = false;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "weapon flags gate range and zero");
+    scope.scoped = true; state.binoculars_view_active = true;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "binoculars replace scope details");
+    state.binoculars_view_active = false; state.hud_detail_level = 3;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "whole HUD hide suppresses scope details");
+    state.hud_detail_level = 0; scope.active = false;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "lowered or unavailable optics show no readouts");
+}
+
 int main() {
 	fnt_font_t font = make_font();
+	test_scope_details(&font);
 	test_kill_announcement(&font);
 	test_measure_advance_and_trailing_pad(&font);
 	test_layout_pages_bold_underline(&font);

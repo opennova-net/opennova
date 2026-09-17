@@ -305,7 +305,10 @@ void SkyDome::sync_frame_clear_color() {
 		return;
 	}
 	const opennova::env::Rgb rgb = env->state().frame_clear_color();
-	frame_clear_environment_->set_bg_color(Color(rgb.r, rgb.g, rgb.b));
+	// Environment decodes its sRGB color before clearing the scene target.
+	// Our spatial passes write retail gamma-domain values (D-RMAT-7), so
+	// pre-encode this device input to preserve those same values in the clear.
+	frame_clear_environment_->set_bg_color(Color(rgb.r, rgb.g, rgb.b).linear_to_srgb());
 }
 
 } // namespace godot

@@ -55,6 +55,7 @@ end).
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
+| Scope camera zero + range/elevation/magnification text | MATCHING (D-HUD-27) | `[orig: Render_ProcessMainSceneFrame @ 0x5ca0f0; HUD_DrawScopeOverlayDetails @ 0x59e420]`; `local_player_view`, `hud_frame_compiler`; windowed default L115A prone probe |
 | Render pipeline + two-struct model | confirm-only (read-only grill) | `[orig: HUD_RenderAllOverlays @0x5a8070]` → `[orig: HUD_RenderOverlays @0x5a7bb0]` → element draws; per-frame `[orig: HUD_BuildEntityInfo @0x4b8440]` |
 | Virtual coordinate space (1024×768) | ported (`engine/runtime/hud/hud_math` — the virtual-coords scale) | `[orig: Viewport_ScaleToVirtualCoords @0x5d2b20]` exact formula; `hud_helpers_test.gd` |
 | Health bar | ported (`HudFrameCompiler::element_health` + `hud_math::health_color_band_fp16`) | `[orig: HUD_DrawHealthBar @0x5a2e50]` rect/fill/threshold-color; `hud_helpers_test.gd` thresholds |
@@ -715,10 +716,11 @@ index policy `next_sight_scale_index`), `HudFrameCompiler::element_sights_card`
 + `godot/game/world/hud_sights_card.gd` materialize the evaluated rows and use
 the selector only for visibility, and `game_hud_presenter.gd` polls the
 `dotsize` binding (`HudOverlay::cycle_sight_scale`). The slide multiplier's
-rangefinder (0xFFFF) and manual-word arms wait on the scope-zero keys
-(MountSlot+0x60, the `ScopeZeroInc/Dec` rows 41/42) that the port does not carry
-yet; the default arm is live from the parsed `scope_max_zero` ints
-(`WeaponDef::get_sight_slide_multiplier`). Shipped data: the sole `slide` author,
+rangefinder (0xFFFF), manual-word and default arms consume the live slot
+zero and aim range through `PlayerLocalView`; the `ScopeZeroInc/Dec` rows
+41/42 are ported. `WeaponDef::get_sight_slide_multiplier` remains the
+standalone definition/default helper. The main-view camera consumer and
+HUD readouts are recorded under D-HUD-27 below. Shipped data: the sole `slide` author,
 `WPN_M16M203HE`, authors `scope_max_zero 10 50 0 0`, so its default arm resolves
 to multiplier 0 (`Weapon_GetScopeZoomLevel(0, d)` returns `d` untouched
 `@0x422fd1..0x422fd5`); the `10 100 200 x` weapons resolve to 2 (a 33-frame row
@@ -2186,6 +2188,76 @@ behind it.
   fontLarge/fontBold slots ride the compiler's single HUD font until the font
   plumb lands.
 
+### Scope camera zero and readouts (2026-09-16, D-HUD-27)
+
+**MATCHING for the ordinary Sighted/Scoped view and textual readouts.**
+`LocalPlayer::view_frame` consumes the active slot's elevation/parallax in
+`Render_ProcessMainSceneFrame`'s modern camera branches. Sighted takes
+precedence and applies the offsets only when `WeaponDef+0x84` (maximum zero
+steps) is nonzero; Scoped applies them whenever the slot exists. Both subtract
+slot+4 from camera pitch and add slot+8 to BAM yaw, after camera composition;
+binoculars bypass them. Mission yaw is `90 - BAM heading`, so both ported degree
+adjustments subtract. Body/input aim and the separate targeting query remain
+unadjusted by this camera consumer. `[orig: Render_ProcessMainSceneFrame
+@ 0x5ca0f0; Sighted @ 0x5ca452..0x5ca465; Scoped @ 0x5ca494..0x5ca4a0]`
+The similar `sub_5D27F0` predecessor discussed above remains unreachable; it is
+not the implementation witness for this port.
+
+`HudFrameCompiler::element_scope_details` draws through the existing HUD font,
+half-bright color and authored `HUDSCOPERANGEXY`, `HUDSCOPEZEROXY`,
+`HUDSCOPEMAGXY` positions. The entry gate is equipped player + CanFire + either
+promoted scope selector. Its caller suppresses it for death-screen/binocular
+views and HUD detail >= 3; the weapon declutter byte does not gate it.
+`[orig: HUD_DrawScopeOverlayDetails @ 0x59e420, gate @ 0x59e47f;
+HUD_RenderAllOverlays @ 0x5a8070, call @ 0x5a8526]`
+
+- Rangefinder flag `0x400`: integer metres, floored at 1; strictly over 1000 m
+  uses `Overlays/STROVER_DIST1KM`, otherwise `STROVER_DIST`. A nonzero baked
+  `WeaponDef+0xF0` limit turns an over-range readout `0xFFFF5050` before the
+  half-bright transform. `[orig: @ 0x59e4a9..0x59e59e]`
+- Elevation flag `0x800`: signed slot word >= 0 times the authored metre step
+  uses `hud/hud_scope_zero`; -1 uses `hud_scope_zero_auto`, lower negatives
+  `hud_scope_zero_none`. `[orig: @ 0x59e8a2..0x59e974]`
+- Only the Scoped selector draws `hud/hud_scope_mag` using slot+0x0C. A Sighted
+  weapon can have magnification and an authored scope card while omitting
+  this label, exactly as retail does. `[orig: @ 0x59e97c..0x59e9f6]`
+
+Evidence: ctests `local_player_view` (standing/prone camera offsets, Sighted
+maximum-zero gate, unchanged input/body aim and hip view) and
+`hud_frame_compiler` (range boundary, over-range color, manual/auto/none zero,
+magnification selector and visibility). A windowed `weapon_round` probe on
+Training: Sniper (`00TRe.bms`) with its default `WPN_L115A` verifies prone ADS,
+authored 200 m elevation and the unchanged aimed ERROR row 3, 524 Q16 units
+(about 0.008 degrees). This install authors L115A as Sighted, so elevation is
+visible and the magnification label is intentionally absent. A second prone
+probe increments the zero from 200 m to 250 m and verifies the live readout.
+This is not a claim of measured bullet-group parity. The separate flag-8 vehicle target
+reticle and D-HUD-26 terrain-ring renderer remain outside this textual port.
+
+### Binocular sway render latch (2026-09-16 review)
+
+**MATCHING for activation timing.** The render branch seeds once on its first
+active binocular frame and clears the latch when a rendered frame sees the
+view down. Input toggles, fixed ticks and target-lock queries must not consume
+the shared mission PRNG. A lower/raise pair between renders preserves the
+previous displacement; a rendered movement/seat/death suppression permits a
+fresh seed at the next active frame. `[orig: Render_ProcessMainSceneFrame
+@ 0x5ca0f0, seed @ 0x5ca3e1..0x5ca3f3, clear @ 0x5ca4b0;
+Binoculars_RandomizeSwayOffsets @ 0x4dd830]`
+`LocalPlayer::view_frame` owns `local_player_binocular_sway_latch`; the pure
+frame composer remains usable by targeting. Ctest `local_player_view` pins
+render versus tick PRNG consumption, uninterrupted activation and suppression.
+The randomizer's assembly keeps the signed BAM angle on the x87 stack across
+its first integer conversion. Yaw is `8 * trunc(sin(angle) * 4194304)` and pitch
+is `8 * trunc(cos(angle) * 4194304)`; the decompiler's `cos(4194304)` expression
+is an x87-stack reconstruction error. The angle uses the binary's
+`dbl_7C3608 = 1.4629627251502471e-9` radians per BAM unit (about 30.5 ppm above
+exact `2pi / 2^32`). The port now preserves axis order and Q22 truncation, reverses the yaw delta for mission coordinates, and adds both
+after camera composition. `[orig: Binoculars_RandomizeSwayOffsets
+@ 0x4dd83c..0x4dd874; Render_ProcessMainSceneFrame @ 0x5ca403..0x5ca407]`
+Ctest `player_view` pins the cardinal and eighth-turn offsets. No IDB edits
+were made for this review.
+
 ## Divergence catalog (D-HUD)
 
 | ID | Ours / reference | Original (Jointops.exe) | Why / consequence |
@@ -2216,6 +2288,7 @@ behind it.
 | D-HUD-24 | The Tab scoreboard. DATA lane: S2C 0x16 folds to `ClientScoreboard` (flags, rows in wire order, the team table, the in-game/spectator trailer) and S2C 0x46 to a connection-slot roster, both in `ClientState`; joiners receive all three lanes on the reducer stream, the host's own view binds via the loopback self-0x46 (D-NET-114 form). PANEL (drawn 2026-08-19): `HudFrameCompiler::element_scoreboard` + `hud::hud_scoreboard` carry the witnessed layout in raw design-space constants through the shared scaler, every string on `g_hudLabelFontBold`; a press-TOGGLE on the playerlist action; the stdbox geometry (pieces, fill insets, the title notch, the screen-anchored wrap-tiled fill) pinned by ctest `hud_frame_compiler`; the monogram watermark deliberately not drawn (pure additive over a measured all-black sheet) | data: `[orig: NapiNPClientMsg_PlayerList @0x42FAE0; NapiNPClientMsg_PlayerSync @0x431370; Server_BuildAndBroadcastScoreboard @0x50D960 every 311 ticks]` — every well-formed 0x16 applies unconditionally (an empty update EMPTIES the board `@0x42fb46`), roster-unknown rows drop `@0x42fc05`, name/clan join at apply time `@0x42fd4c..0x42fd8f`, a 0x46 removal deactivates + wipes the slot `@0x434730/@0x4346c0`; the second row u16 is a STATUS BITFIELD not a ping `@0x42fdb4`, the fourth is accumulated points/EXP `@0x52C8E0`, the team-row bytes are kothHold/ctfFlag `@0x50dc62/@0x50dd30`. panel: `HUD_DrawKillList @0x423A30` + the header block `@0x423060` — stdbox (20,78)-(1004,550) `HUD_DrawLabelBox @0x423a90`, header rungs 105..185 stepping 0x14 `@0x42315c..0x42322a`, rows from base + 18 `@0x423d30` while y < 490 `@0x424168`, non-team modes (types 0/1/8) alternate x190/x690 with a SIGNED score, team modes column by team and draw only live-entity rows `@0x423d1b`, spectators at x440 with no score/rank `@0x423e04`, one GLOBAL rank counter `@0x42424f`, the neticon2.tga band `NetIcon_DrawConnectionQualityBand @0x4c2ee0`, the status-glyph append order `@0x423f29-0x4240e5`; the toggle `Scoreboard_TogglePlayerList @0x4244c0` from `@0x49bb68`, the drawer gate `HUD_DrawKillListIfVisible @0x424300`; the stdbox scale `s = surface_w / 1600` `@0x51f02e`, the fill cell extraction `@0x56adbd-0x56ae44` -> `stdbox_draw_fill_wrap_tiled @0x56b5d0` | **OPEN (partial).** One capability gap, not a missing witness: the eight border pieces bind border x boxtile as ONE combined material with a screen-anchored second stage `[orig: CGfxTexture_Create @0x56af3c, applied @0x56b902; draw_textured_quad_0 @0x56b3e0]`, so retail's pieces read camo where ours read plain stencil (needs a second texture stage the HUD quad stream does not carry). PORTED 2026-08-29: the C2S 0x22 unknown-row retry (reducer-queued slot ids, one reliable `{slot, 0x1CF7}` per dropped row framed by the joiner runtime `@0x42fc05..0x42fc3a`) and the 4-team page (`g_num_teams_config > 2 && dword_A87060 & 0x80` flips the team board to teams 3/4 with 0xFFFFFF00/0xFFFF027F every 128 HUD frames `@0x423cd0-0x423cf1`; the joiner's side count is the 0x16 team-table byte `@0x42fdda`). Unported tails: the per-mode team-score header block `@0x4232bf-0x423a12`; the per-recipient SU status gate `@0x423ef8`; host-side sessionvar strings; the host-side 0x16 serializer's `CPlayerStats` sources (`encode_player_list` emits zero status/score words, so an opennova-HOSTED board shows zero scores; retail-server joins are unaffected); the slot+0x20 label `@0x434870`; the same-team class suffix `@0x423d8a`; the KOTH countdown row `@0x423e7d`; the PgUp/PgDn page fold `@0x423c1c`. Full row text: the ledger's D-HUD-24 entry. |
 | D-HUD-25 | **FIXED 2026-08-24.** The MP end-of-round presentation: both S2C 0x1D header forms decode (the non-team top-three names/scores form included) into the overlay ladder (`hud/end_round_overlay.h`, `HudFrameCompiler::element_end_round_overlay`, `EndRoundPresenter`); the S2C 0x56 stat board pulled over C2S 0x2B feeds the stat.mnu STAT screen (`npruntime/stat_screen_feed.h`); the toggled Show Score statistics panel (`hud/end_round_statistics.h`; catalog row 99 `ShowScore`, F5, action 422) and the joiner's `g_round_time_remaining` fold are live; the stat.mnu exit is confirmed and player-initiated: HIDDEN_BACK's authored actions raise CONFIRM_EXIT and the CONFIRM_YES command exits the mission (`[orig: UI_StatConfirmExitCommand @0x562210]` — the same close-screens + action-3 pair as the pause menu's confirm; `EndRoundPresenter.exit_to_menu_requested` → the shell's return-to-menu teardown), while the round cycle's own transitions stay the host's | `EndRoundScoreboard_SerializeHeader @0x505280` sent from `Server_ProcessRoundEnd @0x516839`; the non-team form `@0x43086c..0x430883` staged into `byte_A81B40/60/80` `@0x430889..0x4309af`; the ladder `draw_endround_stats_overlay @0x5b7cd0`; `populate_stat_results_list @0x562240`; `HUD_DrawEndRoundStatistics @0x5b7600` behind `g_showEndRoundStatistics @0x24C18AC`; the 0x0A sub-block 1 host projection `@0x4ffa81..0x4ffaca`; the post-STAT once-only latch `@0x5b864a`; the host's linger-expiry mission exit, reason 3 `@0x51db63` | Closed on the ledger's 2026-08-24 closure line; the full transaction is net-re §5.68 (the 0x56 chunk pull) plus the 0x1D / 0x56 catalog rows. One recorded residual rides the npwire protocol-cursor contract: the decoder REJECTS a short stream where retail zero-fills. |
 | D-HUD-26 | No terrain-ring scope overlay: every scoped weapon takes the standard scope/sights treatment, and the per-frame camera shake samples twice (quantum + frame) | `Render_ProcessMainSceneFrame` draws `Render_RadarCompassOverlay @0x5c9740` when the equipped weapon can fire, `Player_IsEquippedWeaponScoped` holds, the def flags word carries `0x200`, and the binocular view is down (gate `@0x5ca949`, outdoors flag forwarded): two GDynamicVB ring primitives (inner filled, outer outline) clip a full 3D terrain scene (`Render_TerrainScene`) re-rendered from a THIRD `Camera_ComputeThirdPersonView` call that frame (`@0x5c9841` — advancing the mode-0 shake IIRs once more, its shaken pose rendering), with the equipped slot's elevation counters applied (`pitch -= counter[1]`, `yaw += counter[2]` `@0x5c98fc..0x5c9903`) and a near-Z swap to 0.2 (`@0x5c992d`) | The mortar-class scope view is a whole unported overlay (ledger D-HUD-26, OPEN). Porting it is a render+HUD slice: ring mask, the offset camera, a second terrain scene pass. Until then the third IIR advance is deliberately absent (`local_player_view_frame` carries the pointer) — the shake trajectory differs only while this overlay would draw, with identical per-axis distribution. |
+| D-HUD-27 | **FIXED 2026-09-16.** Rendered scope camera omitted the active slot offsets; scope range/elevation/magnification text was absent | Modern main-scene Sighted/Scoped camera branches `[orig: Render_ProcessMainSceneFrame @ 0x5ca452..0x5ca4a0]`; HUD text/gates `[orig: HUD_DrawScopeOverlayDetails @ 0x59e420]` | Camera consumer and typed HUD feed ported; standing/prone and text policy regressions pass. The separate flag-8 vehicle target reticle and D-HUD-26 terrain-ring overlay are not included. |
 
 ## Follow-ups (not yet witnessed / deferred)
 

@@ -566,6 +566,8 @@ Closed 2026-08-12: **D-WPN-30** -> `FIXED` - every ammo.def fixed-point key pars
 
 ### UI — menus/controls, sound, player-info, HUD
 
+Closed 2026-09-16: **D-HUD-27** -> `FIXED` - modern main-scene scope elevation/parallax and the range/elevation/magnification HUD text are ported, with standing/prone and readout regressions. See [scope camera and readouts](interface/hud-re.md#scope-camera-zero-and-readouts-2026-09-16-d-hud-27). The distinct D-HUD-26 terrain-ring renderer remains open.
+
 Closed 2026-07-05: **D-SND-2** -> `FIXED` (expansion bank slots 0/1 load ahead of
 the static banks in slot order `[orig: Expansion_LoadAssets @ 0x4a4989/@ 0x4a495e]`,
 fed by `ResourceRoot.get_expansion()` off the runtime mount; missing files skip

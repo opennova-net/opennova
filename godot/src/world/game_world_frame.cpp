@@ -1109,7 +1109,7 @@ void GameWorld::update_frame_clear_color() {
 	if (occlusion_->is_blink_indoors()) {
 		if (clear_env_generation_ != -2) {
 			clear_env_generation_ = -2;
-			environment->set_bg_color(env_->frame_clear_color_for(true, true));
+			environment->set_bg_color(env_->frame_clear_color_for(true, true).linear_to_srgb());
 		}
 		return;
 	}
@@ -1121,7 +1121,10 @@ void GameWorld::update_frame_clear_color() {
 	}
 	clear_env_generation_ = gen;
 	clear_above_water_ = above;
-	environment->set_bg_color(env_->frame_clear_color_for(false, above));
+	// Godot decodes BG_COLOR from sRGB before writing the scene target.
+	// Pre-encode the retail gamma-domain value so the clear and spatial
+	// shader output share one numeric domain (D-RMAT-7), including underwater.
+	environment->set_bg_color(env_->frame_clear_color_for(false, above).linear_to_srgb());
 }
 
 // Re-drive the gamemus vars from the local player each frame, the way the

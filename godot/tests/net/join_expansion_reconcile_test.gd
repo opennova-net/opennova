@@ -26,6 +26,13 @@ const NOT_A_MISSION := "this is not a bms"
 const HOST_TERRAIN := "HOSTTRN"
 const HOST_ENVIRONMENT := "HOSTENV"
 const ASSET_MISSING_FAILURE := "HOSTTRN.trn"
+const HOST_TRN := """terrain_name "Expansion join fixture"
+polytrn_colormap mnml_dm.tga
+polytrn_detailmap mnml_dm.tga
+polytrn_polydata mnml.cpt
+polytrn_sectorcount 1
+polytrn_sectors 1
+"""
 # The in-process host needs a handful of steps to reach its S2C 0x11 admission marker; the
 # joiner's own admission observer is tick-polled, so both are pumped from one loop.
 const PRELOAD_PUMP_FRAMES := 900
@@ -286,10 +293,18 @@ func _make_install() -> String:
 		"install_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01")), OK)
 	_write_pff(dir.path_join("resource.pff"), [{"name": "basetag.txt", "bytes": "BASE"}])
+	# The expansion must contain a loadable terrain, not just a resolvable name:
+	# load_trn enforces retail's required map names and sector dimensions.
+	var heightmap := FileAccess.get_file_as_bytes("res://../assets/mnml.cpt")
+	var texture := FileAccess.get_file_as_bytes("res://../assets/mnml_dm.tga")
+	assert_false(heightmap.is_empty(), "the synthetic heightmap fixture exists")
+	assert_false(texture.is_empty(), "the synthetic terrain texture exists")
 	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "exptag.txt", "bytes": "EXP"},
 		{"name": HOST_MAP, "bytes": NOT_A_MISSION},
-		{"name": HOST_TERRAIN + ".trn", "bytes": "not a trn"},
+		{"name": HOST_TERRAIN + ".trn", "bytes": HOST_TRN},
+		{"name": "mnml.cpt", "bytes": heightmap},
+		{"name": "mnml_dm.tga", "bytes": texture},
 		{"name": HOST_ENVIRONMENT + ".env", "bytes": "not an env"},
 	])
 	_dirs.append(dir)

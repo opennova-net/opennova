@@ -195,6 +195,9 @@ struct HudSightsRow {
 // texture names to the slots above and hands the parsed .fnt).
 // [orig: the dword_27237xx.. layout global block, HUD_ParseHudposToken @0x59f370 parse]
 struct HudLayout {
+	HudPosRecord scope_range;
+	HudPosRecord scope_zero;
+	HudPosRecord scope_mag;
 	HudPosRecord ammo_count;
 	HudPosRecord weapon_name;
 	HudPosRecord game_info;
@@ -308,6 +311,26 @@ struct HudLayout {
 	float alpha_fade_seconds = 0.0f;
 	int chat_lines = 8;
 	std::vector<HudSightsRow> sights;
+};
+
+// [orig: HUD_DrawScopeOverlayDetails @ 0x59e420]. The embedder supplies
+// localized templates; the compiler owns selection, values, color and layout.
+struct HudScopeState {
+	bool active = false;
+	bool scoped = false;
+	bool rangefinder = false;
+	bool zeroable = false;
+	int32_t range_q16 = 0;
+	int32_t max_range_q16 = 0;
+	int zero_word = 0;
+	int zero_step_metres = 0;
+	int magnification = 1;
+	std::string range_format;
+	std::string range_over_1km;
+	std::string zero_format;
+	std::string zero_auto;
+	std::string zero_none;
+	std::string magnification_format;
 };
 
 struct HudWeaponState {
@@ -580,6 +603,7 @@ struct HudFrameState {
 	// for the input binding row (identical visually: alpha 0 draws nothing).
 	uint32_t objectives_alpha = 0xFF;
 	HudWeaponState weapon;
+	HudScopeState scope;
 	// The SIGHTS card's per-PLAYER inputs (they outlive the weapon record,
 	// which clear_weapon resets): the sight-scale index retail keeps in
 	// dword_B76780 (default at player init, cycled by the dotsize action —
@@ -804,6 +828,7 @@ private:
 	float measure_text_w(const char *text) const;
 	float text_line_h() const;
 
+	void element_scope_details(const HudFrameState &state, float w, float h);
 	void element_frame(const HudFrameState &state, float w, float h);
 	void element_health(const HudFrameState &state, float w, float h);
 	void element_stance(const HudFrameState &state, float w, float h);
