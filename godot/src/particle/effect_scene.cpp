@@ -5,6 +5,7 @@
 #include "util/string_convert.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -182,6 +183,12 @@ void EffectScene::_bind_methods() {
 			&EffectScene::reset_runtime_state);
 	ClassDB::bind_method(D_METHOD("advance_in_place", "delta_seconds"),
 			&EffectScene::advance_in_place);
+	ClassDB::bind_method(D_METHOD("set_global_wind", "wind"),
+			&EffectScene::set_global_wind);
+	ClassDB::bind_method(D_METHOD("set_view_frustum", "planes", "inside_probe"),
+			&EffectScene::set_view_frustum);
+	ClassDB::bind_method(D_METHOD("clear_view_frustum"),
+			&EffectScene::clear_view_frustum);
 
 	BIND_ENUM_CONSTANT(ADMISSION_ALWAYS);
 	BIND_ENUM_CONSTANT(ADMISSION_REPLACE_OWNED);
@@ -292,7 +299,6 @@ Ref<EffectSpawnReceipt> EffectScene::spawn(const Ref<EffectSpawnRequest> &p_requ
 	request.force_zone = uint16_t(p_request->get_force_zone());
 	request.source_tick = token_from_godot(p_request->get_source_tick());
 	request.source_order = token_from_godot(p_request->get_source_order());
-	request.color_tint = native_vector(p_request->get_color_tint());
 	request.spring_const = p_request->get_spring_const();
 	request.lod_divisor = std::max<std::uint32_t>(
 			non_negative_u32(p_request->get_lod_divisor()), 1u);
@@ -397,8 +403,53 @@ void EffectScene::advance_with_forces(
 	opennova::particle::EffectAdvanceRequest request;
 	request.delta_seconds = static_cast<float>(p_delta_seconds);
 	request.forces = forces;
+	request.global_wind = global_wind_;
+	request.frustum = frustum_;
 	scene_->advance_simulation(request);
 	snapshot_dirty_ = true;
+}
+
+void EffectScene::set_global_wind(const Vector3 &p_wind) {
+	global_wind_ = {};
+	if (std::isfinite(p_wind.x) && std::isfinite(p_wind.y) && std::isfinite(p_wind.z)) {
+		global_wind_ = {p_wind.x, p_wind.y, p_wind.z};
+	}
+}
+
+void EffectScene::set_view_frustum(const TypedArray<Plane> &p_planes,
+		const Vector3 &p_inside_probe) {
+	frustum_ = {};
+	if (p_planes.size() != 6) {
+		return;
+	}
+	// Godot planes answer `normal . p - d`; the simulator wants
+	// `a x + b y + c z + d >= 0` inside. Camera3D::get_frustum orients its
+	// normals so the probe reads "over" (outside), which the flip below undoes;
+	// a plane set that already reads inside is kept as is.
+	float sign = 1.0f;
+	{
+		const Plane first = p_planes[0];
+		if (first.normal.dot(p_inside_probe) - first.d > 0.0f) {
+			sign = -1.0f;
+		}
+	}
+	for (int index = 0; index < 6; ++index) {
+		const Plane plane = p_planes[index];
+		if (!std::isfinite(plane.normal.x) || !std::isfinite(plane.normal.y) ||
+				!std::isfinite(plane.normal.z) || !std::isfinite(plane.d)) {
+			frustum_ = {};
+			return;
+		}
+		frustum_.planes[index][0] = sign * plane.normal.x;
+		frustum_.planes[index][1] = sign * plane.normal.y;
+		frustum_.planes[index][2] = sign * plane.normal.z;
+		frustum_.planes[index][3] = -sign * plane.d;
+	}
+	frustum_.valid = true;
+}
+
+void EffectScene::clear_view_frustum() {
+	frustum_ = {};
 }
 
 const opennova::particle::ParticleFrameSnapshot &

@@ -61,9 +61,55 @@ bool test_init() {
 	if (!expect(near(e.position.x, 1.0f) && near(e.position.y, 2.0f) && near(e.position.z, 3.0f), "position copied")) return false;
 	if (!expect(e.particles.empty(), "no particles at init")) return false;
 	if (!expect(e.active, "active by default")) return false;
-	if (!expect(e.finite, "finite by default (no FOREVEREMIT)")) return false;
-	if (!expect(near(e.emit_dur_remaining, 1.0f), "emit_dur loaded")) return false;
+	if (!expect(e.self_emitting, "self-emitting by default")) return false;
+	if (!expect(near(e.emit_dur_total, 1.0f), "emit_dur loaded")) return false;
+	// budget = emit_burst * (int)(rate * dur) = 1 * (int)(10 * 1)
+	// [orig: CEffectEmitter_Initialize @ 0x5e62bf..0x5e62e1]
+	if (!expect(e.emit_budget == 10, "finite particle budget (no FOREVEREMIT)")) return false;
+	if (!expect(near(e.emit_interval, 0.0f), "the first interval is the (zero) delay")) return false;
 	return true;
+}
+
+bool test_init_seeds_the_delay_as_the_first_interval() {
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.emit_delay = 0.35f;
+	def.age = 10.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 1);
+	if (!expect(near(e.emit_interval, 0.35f), "emitter+0x114 starts at emit_delay")) return false;
+	// The emit-rate curve phase spans delay + dur and starts negative
+	// [orig: CEffectEmitter_Initialize @ 0x5e635b..0x5e6379].
+	if (!expect(near(e.emit_clock_rate, 256.0f / 1.35f, 0.01f), "clock rate = 256 / (delay + dur)")) return false;
+	if (!expect(near(e.emit_clock, -0.35f * 1.35f / 256.0f, 0.0001f), "clock seed = -delay * span / 256")) return false;
+	emitter_advance(e, 0.3f);
+	if (!expect(e.particles.empty(), "nothing before the delay elapses")) return false;
+	emitter_advance(e, 0.1f);
+	if (!expect(e.particles.size() == 1, "the first burst fires once the carried time passes the delay")) {
+		std::fprintf(stderr, "  got %zu\n", e.particles.size());
+		return false;
+	}
+	// Pre-aged by the time past the delay inside that frame: 0.4 - 0.35.
+	return expect(near(e.particles[0].age, 10.0f - 0.05f, 0.0001f) &&
+			near(e.particles[0].curve_phase, 0.05f * 25.6f, 0.001f),
+			"the sub-frame offset pre-ages the particle and its curve phase");
+}
+
+bool test_budget_caps_the_burst_count() {
+	// budget = burst * (int)(rate * dur): rate 3 over 0.5 s truncates to ONE
+	// burst even though the window would fit a second at t = 1/3
+	// [orig: CEffectEmitter_Initialize @ 0x5e62c7..0x5e62d9; AdvanceEmission @ 0x5e1e4a].
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.emit_rate = 3.0f;
+	def.emit_dur = 0.5f;
+	def.emit_burst = 2;
+	def.age = 10.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 1);
+	if (!expect(e.emit_budget == 2, "budget truncates rate * dur")) return false;
+	emitter_advance(e, 1.0f);
+	return expect(e.particles.size() == 2 && e.emit_budget == 0, "one burst then the budget is spent");
 }
 
 bool test_init_randomizes_retail_emission_window_and_rate() {
@@ -75,30 +121,64 @@ bool test_init_randomizes_retail_emission_window_and_rate() {
 	def.emit_rate_adj = 10.0f;
 	Emitter e;
 	emitter_init(e, &def, {0, 0, 0}, 142u);
-	if (!expect(near(e.emit_dur_remaining, 12.0f, 0.0001f), __func__)) return false;
+	if (!expect(near(e.emit_dur_total, 12.0f, 0.0001f), __func__)) return false;
 	return expect(near(e.emit_rate, 20.263929f, 0.0001f), __func__);
 }
 
-bool test_init_converts_authored_orbital_speed_and_adjustment_to_radians() {
+bool test_spawn_randomizes_the_orbit_rate_per_particle() {
+	// CParticleEmitter_SpawnNewParticle @ 0x5f3764..0x5f37c3: every particle
+	// draws its own `(rand01*2-1) * adj + base * sign` in degrees/second, the
+	// sign random unless SIGNEDROTATIONS, then converts with pi/180.
 	using namespace opennova::particle;
 	constexpr float kDegreesToRadians = 0.01745329251994329577f;
 
 	ParticleDef smoke = make_minimal_def();
 	smoke.orbitalspeed = 5.0f;
+	smoke.flags |= particle_flag::SignedRotations;
+	smoke.emit_rate = 0.0f;
 	Emitter smoke_emitter;
 	emitter_init(smoke_emitter, &smoke, {0, 0, 0}, 142u);
-	if (!expect(near(smoke_emitter.orbit_speed, 5.0f * kDegreesToRadians, 0.0001f),
-			"base orbit speed is converted from authored degrees")) {
+	if (!expect(emitter_spawn_one(smoke_emitter) &&
+			near(smoke_emitter.particles[0].orbit_rate, 5.0f * kDegreesToRadians, 0.0001f),
+			"base orbit rate is converted from authored degrees")) {
 		return false;
 	}
 
 	ParticleDef fire = make_minimal_def();
 	fire.orbitalspeed = 30.0f;
 	fire.orbitalspeed_adj = 15.0f;
+	fire.flags |= particle_flag::SignedRotations;
+	fire.emit_rate = 0.0f;
 	Emitter fire_emitter;
 	emitter_init(fire_emitter, &fire, {0, 0, 0}, 142u);
-	return expect(near(fire_emitter.orbit_speed, 20.6891475f * kDegreesToRadians, 0.0001f),
-			"orbit adjustment is randomized in degrees before conversion");
+	bool distinct = false;
+	float first = 0.0f;
+	for (int i = 0; i < 8; ++i) {
+		if (!expect(emitter_spawn_one(fire_emitter), "spawn")) return false;
+		const float rate = fire_emitter.particles.back().orbit_rate / kDegreesToRadians;
+		if (!expect(rate >= 15.0f - 0.001f && rate <= 45.0f + 0.001f,
+				"each particle's rate stays within orbitalspeed +/- adj")) {
+			std::fprintf(stderr, "  rate=%f\n", rate);
+			return false;
+		}
+		if (i == 0) first = rate; else if (!near(rate, first, 0.0001f)) distinct = true;
+	}
+	if (!expect(distinct, "the adjustment is drawn per particle, not per emitter")) return false;
+
+	ParticleDef unsigned_def = make_minimal_def();
+	unsigned_def.orbitalspeed = 30.0f;
+	unsigned_def.emit_rate = 0.0f;
+	Emitter unsigned_emitter;
+	emitter_init(unsigned_emitter, &unsigned_def, {0, 0, 0}, 9u);
+	bool positive = false;
+	bool negative = false;
+	for (int i = 0; i < 16; ++i) {
+		if (!expect(emitter_spawn_one(unsigned_emitter), "spawn")) return false;
+		const float rate = unsigned_emitter.particles.back().orbit_rate;
+		positive = positive || rate > 0.0f;
+		negative = negative || rate < 0.0f;
+	}
+	return expect(positive && negative, "without SIGNEDROTATIONS the base rate takes a random sign");
 }
 
 bool test_rand_unit_includes_retail_one_endpoint() {
@@ -125,7 +205,10 @@ bool test_manual_spawn() {
 	return true;
 }
 
-bool test_nonpositive_and_nonfinite_lifetimes_are_rejected() {
+bool test_zero_and_nonfinite_lifetimes_are_rejected_negative_ones_reaped() {
+	// SpawnParticle @ 0x5e80a9..0x5e80c1 rejects a life inside [0, time_offset]
+	// (a plain zero at offset 0); a negative life is inserted and reclaimed by
+	// the next expiry pass instead.
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
 	def.emit_rate = 0.0f;
@@ -136,7 +219,12 @@ bool test_nonpositive_and_nonfinite_lifetimes_are_rejected() {
 	if (!expect(!emitter_spawn_one(e) && e.particles.empty(), __func__)) return false;
 	def.age = std::numeric_limits<float>::quiet_NaN();
 	emitter_init(e, &def, {0, 0, 0}, 7);
-	return expect(!emitter_spawn_one(e) && e.particles.empty(), __func__);
+	if (!expect(!emitter_spawn_one(e) && e.particles.empty(), __func__)) return false;
+	def.age = -1.0f;
+	emitter_init(e, &def, {0, 0, 0}, 7);
+	if (!expect(emitter_spawn_one(e) && e.particles.size() == 1, "negative life is inserted")) return false;
+	emitter_advance(e, 0.016f);
+	return expect(e.particles.empty(), "and reaped on the next advance");
 }
 
 bool test_spawn_records_visual_choices() {
@@ -290,7 +378,7 @@ bool test_extreme_rate_and_burst_stop_at_capacity() {
 	e.max_particles = std::numeric_limits<std::size_t>::max();
 	emitter_advance(e, 0.1f);
 	if (!expect(e.particles.size() == kEmitterHardParticleLimit, __func__)) return false;
-	return expect(std::isfinite(e.emit_accumulator), __func__);
+	return expect(std::isfinite(e.emit_carry), __func__);
 }
 
 bool test_lifetime_expires() {
@@ -403,8 +491,8 @@ bool test_expiry_moves_the_last_slot_into_the_hole() {
 
 bool test_gravity_uses_retail_authored_units() {
 	// NORMAL movement adds the emitter slot to vel.y. Initialize seeds that
-	// slot as authored gravity × -0.09803897, so positive authored gravity
-	// sinks and negative authored gravity lifts.
+	// slot as authored gravity × flt_7DC738 = -0.0981, so positive authored
+	// gravity sinks and negative authored gravity lifts.
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
 	def.gravity = 100.0f;
@@ -426,7 +514,7 @@ bool test_gravity_uses_retail_authored_units() {
 	}
 	const float vy = e.particles[0].velocity.y;
 	const float y1 = e.particles[0].position.y;
-	if (!expect(near(vy, -9.803897f, 0.001f), __func__)) return false;
+	if (!expect(near(vy, -9.81f, 0.001f), __func__)) return false;
 	if (!expect(vy < 0.0f, "gravity reduces vy")) {
 		std::fprintf(stderr, "  vy=%f\n", vy);
 		return false;
@@ -764,6 +852,7 @@ bool test_he_explosion_orbit_uses_authored_degrees() {
 	def.move = move_flag::Orbit;
 	def.orbital_axis = {0.0f, 1.0f, 0.0f};
 	def.orbitalspeed = 30.0f;
+	def.flags |= particle_flag::SignedRotations;
 	def.gravity = 0.0f;
 	def.drag = 0.0f;
 	def.age = 100.0f;
@@ -834,9 +923,10 @@ bool test_gravitate_spring_const_overrides_def_gravity() {
 
 bool test_emit_rate_curve_zeroes_emission_when_lut_zero() {
 	// CEffectEmitter_AdvanceEmission @ 0x5e1d30 scales the emission interval
-	// by `lut[t*256] / 128`. A LUT filled with zeros must suppress all
-	// emission until the curve recovers. Verifies our portable simulator
-	// reads the baked LUT.
+	// by `lut[(int)clock & 0xFF] / 128`. A LUT filled with zeros makes every
+	// reload infinite — but the FIRST burst still fires, because the interval
+	// slot starts at emit_delay (zero here), not at a curve-scaled value
+	// [orig: CEffectEmitter_Initialize @ 0x5e62ee..0x5e62f4].
 	using namespace opennova::particle;
 	std::vector<TableDef> tables;
 	TableDef zero;
@@ -858,8 +948,14 @@ bool test_emit_rate_curve_zeroes_emission_when_lut_zero() {
 	Emitter e;
 	emitter_init(e, &def, {0, 0, 0}, 1);
 	emitter_advance(e, 0.5f);
-	if (!expect(e.particles.empty(), "zero-LUT emit_rate_func suppresses emission")) {
+	if (!expect(e.particles.size() == 1, "zero-LUT emit_rate_func allows only the delay-interval burst")) {
 		std::fprintf(stderr, "  particles=%zu\n", e.particles.size());
+		return false;
+	}
+	emitter_advance(e, 0.5f);
+	if (!expect(e.particles.size() == 1 && !std::isfinite(e.emit_interval),
+			"and every reload is infinite while the curve reads zero")) {
+		std::fprintf(stderr, "  particles=%zu interval=%f\n", e.particles.size(), e.emit_interval);
 		return false;
 	}
 	return true;
@@ -914,10 +1010,13 @@ bool test_emit_rate_curve_neutral_lut_matches_constant_rate() {
 	return true;
 }
 
-bool test_emit_rate_curve_doubles_with_lut_255() {
-	// LUT = 255 maps to ~1.99 rate scale, so half-second of emission with
-	// rate=10 + burst=1 should produce roughly twice as many particles as
-	// the unmodulated case.
+bool test_emit_rate_curve_quadruples_with_lut_255() {
+	// LUT = 255 maps to ~1.99 per lookup, and retail applies it TWICE: the
+	// base interval is divided by `lut[0] / 128` once at Initialize
+	// [orig: CEffectEmitter_Initialize @ 0x5e6302..0x5e6323] and every reload
+	// divides again by the clock-indexed byte [orig: AdvanceEmission
+	// @ 0x5e1e86..0x5e1ec3], so an all-255 curve runs ~3.97x the authored rate:
+	// half a second at rate 10 reloads every 0.0252 s -> 20 bursts.
 	using namespace opennova::particle;
 	std::vector<TableDef> tables;
 	TableDef boost;
@@ -931,7 +1030,7 @@ bool test_emit_rate_curve_doubles_with_lut_255() {
 
 	ParticleDef def = make_minimal_def();
 	def.emit_rate = 10.0f;
-	def.emit_dur = 1.0f;
+	def.emit_dur = 10.0f;  // budget 100, so the cadence and not the budget is measured
 	def.emit_burst = 1;
 	def.age = 100.0f;
 	def.emit_rate_func.name = "boost";
@@ -943,9 +1042,9 @@ bool test_emit_rate_curve_doubles_with_lut_255() {
 	emitter_advance(e_boost, 0.5f);
 	const std::size_t boost_count = e_boost.particles.size();
 
-	if (!expect(boost_count >= 8 && boost_count <= 12,
-			"LUT 255 (~2x scale) produces ~10 particles in 0.5s with rate=10")) {
-		std::fprintf(stderr, "  boost_count=%zu (expected ~10, range 8-12)\n", boost_count);
+	if (!expect(boost_count >= 19 && boost_count <= 21,
+			"LUT 255 (~1.99 applied twice) produces ~20 particles in 0.5s with rate=10")) {
+		std::fprintf(stderr, "  boost_count=%zu (expected ~20, range 19-21)\n", boost_count);
 		return false;
 	}
 	return true;
@@ -1244,16 +1343,241 @@ bool test_spawn_yawandpitch_seeds_euler_channel() {
 			"pitch_rate carries the authored pitch_rot");
 }
 
+bool test_spawn_happens_after_integration_and_pre_ages_by_the_offset() {
+	// AdvanceFrame integrates the live particles, THEN AdvanceEmission spawns
+	// [orig: CParticleEmitter_AdvanceFrame @ 0x5e690c..0x5e6928]: a particle
+	// born this frame is not moved by it, only pre-aged by the time left in
+	// the frame after its burst [orig: SpawnParticle @ 0x5e7d52..0x5e7d63].
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.emit_rate = 10.0f;
+	def.emit_dur = 1.0f;
+	def.speed = 5.0f;
+	def.spread = 0.0f;
+	def.age = 2.0f;
+	def.gravity = 0.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 1);
+	emitter_advance(e, 0.25f);
+	// Bursts at carried times 0.25 (offset 0.25), 0.15, 0.05 -> three particles.
+	if (!expect(e.particles.size() == 3, "three bursts inside the frame")) {
+		std::fprintf(stderr, "  got %zu\n", e.particles.size());
+		return false;
+	}
+	const Particle &first = e.particles[0];
+	if (!expect(near(first.age, 2.0f - 0.25f, 0.0001f) && near(first.curve_phase, 0.25f * 128.0f, 0.01f),
+			"the first burst is pre-aged by the whole frame")) {
+		std::fprintf(stderr, "  age=%f phase=%f\n", first.age, first.curve_phase);
+		return false;
+	}
+	if (!expect(near(first.position.y, 0.0f) && near(first.position.x, 0.0f) && near(first.position.z, 0.0f),
+			"and not integrated in its spawn frame")) return false;
+	if (!expect(near(e.particles[2].age, 2.0f - 0.05f, 0.0001f), "the last burst carries its own offset")) return false;
+	return expect(near(e.emit_carry, 0.05f, 0.0001f), "the remainder under one interval carries over");
+}
+
+bool test_initial_y_clip_reaps_particles_below_the_emitter() {
+	// INITIALYCLIP (0x02): the expiry pass also reclaims a particle whose y
+	// fell below the emitter's y [orig: CParticleEmitter_AdvanceFrame
+	// @ 0x5e682a..0x5e6898, the second compare @ 0x5e684e].
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.flags |= particle_flag::InitialClip;
+	def.emit_rate = 0.0f;
+	def.age = 10.0f;
+	def.gravity = 0.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 5.0f, 0}, 1);
+	emitter_spawn_one(e);
+	emitter_spawn_one(e);
+	e.particles[0].position.y = 5.5f;
+	e.particles[1].position.y = 4.5f;
+	emitter_advance(e, 0.016f);
+	return expect(e.particles.size() == 1 && e.particles[0].position.y > 5.0f,
+			"only the particle above the emitter survives");
+}
+
+bool test_global_wind_drifts_position_only() {
+	// GLOBALWIND (0x400): `pos += wind * dt` after the velocity integration,
+	// velocity untouched [orig: CParticleEmitter_UpdateAllParticles @ 0x5f3c49
+	//  and the per-particle wind add].
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.flags |= particle_flag::GlobalWind;
+	def.emit_rate = 0.0f;
+	def.age = 10.0f;
+	def.gravity = 0.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 1);
+	emitter_spawn_one(e);
+	e.particles[0].velocity = {0.0f, 0.0f, 0.0f};
+	EmitterEnvironment env;
+	env.global_wind = {4.0f, 0.0f, -2.0f};
+	emitter_advance(e, 0.5f, env);
+	const Particle &p = e.particles[0];
+	if (!expect(near(p.position.x, 2.0f) && near(p.position.z, -1.0f), "wind moved the particle")) {
+		std::fprintf(stderr, "  pos=(%f,%f,%f)\n", p.position.x, p.position.y, p.position.z);
+		return false;
+	}
+	if (!expect(near(p.velocity.x, 0.0f) && near(p.velocity.z, 0.0f), "without touching velocity")) return false;
+	ParticleDef still = make_minimal_def();
+	still.emit_rate = 0.0f;
+	still.age = 10.0f;
+	still.gravity = 0.0f;
+	Emitter f;
+	emitter_init(f, &still, {0, 0, 0}, 1);
+	emitter_spawn_one(f);
+	f.particles[0].velocity = {0.0f, 0.0f, 0.0f};
+	emitter_advance(f, 0.5f, env);
+	return expect(near(f.particles[0].position.x, 0.0f), "a def without the flag ignores the wind");
+}
+
+bool test_no_vis_no_update_freezes_an_unseen_emitter_while_it_emits() {
+	// NOVISNOUPDATE (0x01): an emitter with budget whose bounds fall outside
+	// the view is not advanced at all; once the budget is spent it updates
+	// again so it can die [orig: CParticleEmitter_AdvanceFrame @ 0x5e6588..0x5e65f3].
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.flags |= particle_flag::NoVisNoUpdate;
+	def.emit_rate = 10.0f;
+	def.emit_dur = 1.0f;
+	def.age = 10.0f;
+	def.gravity = 0.0f;
+	// A single plane x >= 100 stands for the whole clip set; the rest accept everything.
+	ParticleViewFrustum frustum;
+	frustum.valid = true;
+	frustum.planes[0][0] = 1.0f;
+	frustum.planes[0][3] = -100.0f;
+	for (int i = 1; i < 6; ++i) {
+		frustum.planes[i][1] = 1.0f;
+		frustum.planes[i][3] = 1.0e9f;
+	}
+	EmitterEnvironment env;
+	env.frustum = &frustum;
+	Emitter hidden;
+	emitter_init(hidden, &def, {0, 0, 0}, 1);
+	emitter_advance(hidden, 0.5f, env);
+	if (!expect(hidden.particles.empty() && hidden.age == 0.0f, "an unseen emitting emitter is frozen")) return false;
+	Emitter seen;
+	emitter_init(seen, &def, {200.0f, 0, 0}, 1);
+	emitter_advance(seen, 0.5f, env);
+	if (!expect(!seen.particles.empty(), "a visible one advances")) return false;
+	EmitterEnvironment headless;
+	Emitter unknown;
+	emitter_init(unknown, &def, {0, 0, 0}, 1);
+	emitter_advance(unknown, 0.5f, headless);
+	if (!expect(!unknown.particles.empty(), "no clip state means no gate")) return false;
+	hidden.emit_budget = 0;
+	hidden.particles.push_back(seen.particles[0]);
+	emitter_advance(hidden, 0.5f, env);
+	return expect(hidden.age > 0.0f, "a spent emitter updates even while unseen");
+}
+
+bool test_child_emitter_spawns_from_each_parent_particle() {
+	// The child_id chain [orig: CEffectEmitter_Initialize @ 0x5e6417..0x5e64a4
+	//  binds the child; SpawnParticle @ 0x5e7fe2..0x5e80a6 seeds the per-particle
+	//  schedule; AdvanceFrame @ 0x5e6633..0x5e6807 walks it]: each parent
+	// particle spawns child bursts at the child's rate for the child's
+	// duration, at the parent's position along its velocity.
+	using namespace opennova::particle;
+	ParticleDef parent_def = make_minimal_def();
+	parent_def.id = "parent";
+	parent_def.emit_rate = 0.0f;
+	parent_def.age = 10.0f;
+	parent_def.gravity = 0.0f;
+	parent_def.speed = 0.0f;
+	ParticleDef child_def = make_minimal_def();
+	child_def.id = "child";
+	child_def.emit_rate = 10.0f;
+	child_def.emit_dur = 0.5f;   // budget 5 per parent particle
+	child_def.emit_burst = 1;
+	child_def.age = 10.0f;
+	child_def.gravity = 0.0f;
+	child_def.speed = 0.0f;
+	child_def.flags |= particle_flag::UseParentScale;
+	Emitter parent;
+	emitter_init(parent, &parent_def, {0, 0, 0}, 1);
+	parent.child_def = &child_def;
+	Emitter child;
+	child.self_emitting = false;
+	emitter_init(child, &child_def, {0, 0, 0}, 2);
+	if (!expect(child.emit_budget == kEmitterForeverBudget, "a child never budgets itself")) return false;
+	emitter_spawn_one(parent);
+	emitter_spawn_one(parent);
+	parent.particles[0].position = {1.0f, 2.0f, 3.0f};
+	parent.particles[1].position = {-4.0f, 0.0f, 0.0f};
+	for (Particle &p : parent.particles) {
+		if (!expect(p.child_budget == 5 && near(p.child_interval, 0.1f, 0.0001f) && p.child_clock == 0.0f,
+				"each parent particle carries the child's schedule")) return false;
+	}
+	emitter_advance(parent, 0.016f, {}, &child);
+	if (!expect(child.particles.size() == 2, "the zero delay fires one child per parent on the first frame")) {
+		std::fprintf(stderr, "  got %zu\n", child.particles.size());
+		return false;
+	}
+	if (!expect(near(child.particles[0].position.x, 1.0f) && near(child.particles[0].position.y, 2.0f) &&
+			near(child.particles[1].position.x, -4.0f), "children spawn at their parent's position")) return false;
+	if (!expect(near(child.particles[0].size, parent.particles[0].size), "USEPARENTSCALE copies the parent size")) return false;
+	if (!expect(parent.particles[0].child_budget == 4, "the budget drops per child spawned")) return false;
+	emitter_advance(child, 0.016f);
+	for (int i = 0; i < 62; ++i) {
+		emitter_advance(parent, 0.016f, {}, &child);
+		emitter_advance(child, 0.016f);
+	}
+	if (!expect(child.particles.size() == 10, "each parent particle spawned its five children")) {
+		std::fprintf(stderr, "  got %zu\n", child.particles.size());
+		return false;
+	}
+	if (!expect(emitter_alive(child), "the child stays alive while its parent lives")) return false;
+	child.emit_budget = 0;  // the parent died: OnChildDied @ 0x5ef9c0
+	child.particles.clear();
+	return expect(!emitter_alive(child), "and dies once drained after the parent's death");
+}
+
+bool test_on_my_death_children_spawn_when_the_parent_expires() {
+	// ONMYDEATH (0x10) arms the schedule with the parent's life and one child
+	// burst [orig: SpawnParticle @ 0x5e8095..0x5e80a6].
+	using namespace opennova::particle;
+	ParticleDef parent_def = make_minimal_def();
+	parent_def.flags |= particle_flag::OnMyDeath;
+	parent_def.emit_rate = 0.0f;
+	parent_def.age = 0.5f;
+	parent_def.gravity = 0.0f;
+	ParticleDef child_def = make_minimal_def();
+	child_def.emit_burst = 3;
+	child_def.emit_rate = 1.0f;
+	child_def.emit_dur = 1.0f;
+	child_def.age = 5.0f;
+	Emitter parent;
+	emitter_init(parent, &parent_def, {0, 0, 0}, 1);
+	parent.child_def = &child_def;
+	Emitter child;
+	child.self_emitting = false;
+	emitter_init(child, &child_def, {0, 0, 0}, 2);
+	emitter_spawn_one(parent);
+	if (!expect(near(parent.particles[0].child_clock, 0.5f) && parent.particles[0].child_budget == 3,
+			"the clock is the parent's life and the budget one child burst")) return false;
+	for (int i = 0; i < 30; ++i) {
+		emitter_advance(parent, 0.016f, {}, &child);
+	}
+	if (!expect(child.particles.empty(), "nothing before the parent's life elapses")) return false;
+	emitter_advance(parent, 0.016f, {}, &child);
+	emitter_advance(parent, 0.016f, {}, &child);
+	return expect(child.particles.size() == 3, "the burst fires as the parent expires");
+}
+
 } // namespace
 
 int main() {
 	int failures = 0;
 	if (!test_init())                       ++failures;
+	if (!test_init_seeds_the_delay_as_the_first_interval()) ++failures;
+	if (!test_budget_caps_the_burst_count()) ++failures;
 	if (!test_init_randomizes_retail_emission_window_and_rate()) ++failures;
-	if (!test_init_converts_authored_orbital_speed_and_adjustment_to_radians()) ++failures;
+	if (!test_spawn_randomizes_the_orbit_rate_per_particle()) ++failures;
 	if (!test_rand_unit_includes_retail_one_endpoint()) ++failures;
 	if (!test_manual_spawn())               ++failures;
-	if (!test_nonpositive_and_nonfinite_lifetimes_are_rejected()) ++failures;
+	if (!test_zero_and_nonfinite_lifetimes_are_rejected_negative_ones_reaped()) ++failures;
 	if (!test_spawn_records_visual_choices()) ++failures;
 	if (!test_curve_phase_clock())          ++failures;
 	if (!test_spawn_size_from_graphic_scale()) ++failures;
@@ -1277,7 +1601,7 @@ int main() {
 	if (!test_gravitate_spring_const_overrides_def_gravity()) ++failures;
 	if (!test_emit_rate_curve_zeroes_emission_when_lut_zero()) ++failures;
 	if (!test_emit_rate_curve_neutral_lut_matches_constant_rate()) ++failures;
-	if (!test_emit_rate_curve_doubles_with_lut_255())  ++failures;
+	if (!test_emit_rate_curve_quadruples_with_lut_255())  ++failures;
 	if (!test_lod_divisor_default_is_one())            ++failures;
 	if (!test_lod_divisor_does_not_affect_simulation()) ++failures;
 	if (!test_kill_plane_disabled_keeps_particles_alive()) ++failures;
@@ -1290,6 +1614,12 @@ int main() {
 	if (!test_spawn_seeds_roll_from_orientation_z_and_signed_rate()) ++failures;
 	if (!test_spawn_roll_rate_sign_randomizes_without_signedrotations()) ++failures;
 	if (!test_spawn_yawandpitch_seeds_euler_channel()) ++failures;
+	if (!test_spawn_happens_after_integration_and_pre_ages_by_the_offset()) ++failures;
+	if (!test_initial_y_clip_reaps_particles_below_the_emitter()) ++failures;
+	if (!test_global_wind_drifts_position_only()) ++failures;
+	if (!test_no_vis_no_update_freezes_an_unseen_emitter_while_it_emits()) ++failures;
+	if (!test_child_emitter_spawns_from_each_parent_particle()) ++failures;
+	if (!test_on_my_death_children_spawn_when_the_parent_expires()) ++failures;
 	if (failures != 0) {
 		std::fprintf(stderr, "%d test(s) failed\n", failures);
 		return 1;

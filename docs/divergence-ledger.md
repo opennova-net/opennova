@@ -714,10 +714,6 @@ witness: [mission/mis-format-re.md](mission/mis-format-re.md).
 | D-MIS-2 | `weapon_availability` emitted empty + skipped on read; the semantics are now grilled (SEMANTICS CLOSED 2026-07-18 in mis-format-re.md — the per-map `{name, statusByte}` weapon-rules list, `[orig: build_item_restriction_table @ 0x54ddb0]`, net-re §5.63); the `.mis` text section stays empty-emitted pending the dfx2med grammar grill (D-MIS-3); the tuple names `{name, ammoPri, ammoSec, flags}` are applied to `bms.h` + the loadout panel (2026-07-30) | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-MIS-3 | Full `dfx2med.exe` `.mis` grammar unmapped (hand-authored / legacy variants beyond the writer subset) | B | NEEDS-RE | PAR-WORLD |
 | D-PTL-26 | Script entity+460 slots still need unification with native actor/vehicle effect groups and their destruction/corpse/respawn releases; WAC/BMS command pose, selection and per-script group replacement are implemented (ptl-format-re.md script follow-up) | A | OPEN | PAR-WORLD |
-| D-PTL-27 | Child-particle/ONMYDEATHUSEPARENT runtime scheduling and parent lifetime behavior absent despite retained definitions | B | OPEN + NEEDS-RE (child spawn legs identified; cadence/lifetime witness incomplete) | PAR-WORLD / W10 |
-| D-PTL-28 | ORBIT randomized per emitter instead of per particle; original basis/age chain incomplete | B | OPEN + NEEDS-RE (per-particle write identified; complete transform/age semantics pending) | PAR-WORLD / W10 |
-| D-PTL-29 | Native particle spawn has no original subframe time-offset input/integration | B | OPEN + NEEDS-RE (spawn signature confirmed; all caller timing conventions pending) | PAR-WORLD / W10 |
-| D-PTL-30 | Parsed particle elasticity/collision sounds lack a runtime collision/response/sound consumer | B | NEEDS-RE (reachable flags, response and sound cadence must be witnessed) | PAR-WORLD / W10 |
 
 Retired from the tables 2026-08-28: **D-3DILW-1**, **D-3DILW-2**, **D-3DILW-3** - the
 `threedi_lw` parser they describe never landed (PR #45 closed) and ADR 0027 removed the
@@ -731,6 +727,11 @@ De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
 Closed 2026-08-12: **D-MIS-1** -> `FIXED` - `.mis` `begin item` records classify into the four pools through the witnessed items.def TYPE mapping `[orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]`: `parse_mis_text_to_bms` takes an embedder-built type resolver (the mission format lib stays def-free), routes each record through `entity_kind_for_item_type` (the 185k-entity/114-mission empirical 1:1 pin), and the idempotency ctest pins classification + byte round-trip; callers without an items.def keep the generic pool explicitly; the `dfx2med.exe` grammar confirmation stays with D-MIS-3 (full entry: mission/mis-format-re.md).
+
+Closed 2026-09-17: **D-PTL-27** -> `FIXED` — `child_id` chains: one nested child emitter per parent member (self-emission off, pool sized from the parent), the per-particle `+0xF0` schedule seeded at every parent spawn (ONMYDEATH = the particle's life + one child burst), the parent's advance spawning children at each particle's position/velocity with the sub-frame pre-age and the USEPARENT* inherit block, and the dying parent zeroing its child's budget `[orig: CEffectEmitter_Initialize @ 0x5e6417..0x5e64a4; CParticleEmitter_SpawnParticle @ 0x5e7d66..0x5e80a6; CParticleEmitter_AdvanceFrame @ 0x5e6633..0x5e6807; CEffectEmitter_OnChildDied @ 0x5ef9c0]` (full detail: particles/ptl-format-re.md).
+Closed 2026-09-17: **D-PTL-28** -> `FIXED` — the ORBIT rate is the per-particle aux+16 word and the update rotates by exactly `rate × dt` around `orbital_axis`; the "age × basis chain" reading was refuted (the +352 matrix has no reader in the update) `[orig: CParticleEmitter_SpawnNewParticle @ 0x5f3764..0x5f37c3; CParticleEmitter_UpdateAllParticles @ 0x5f3be0]` (full detail: particles/ptl-format-re.md).
+Closed 2026-09-17: **D-PTL-29** -> `FIXED` — emission is retail's carried-time loop: the interval slot starts at `emit_delay`, each burst pre-ages its particles by the time left in the frame (life + curve phase, no position integration), the budget is `emit_burst × (int)(rate × dur)`, the curve reload is clock-indexed over a base already divided by `lut[0]/128`, spawns run after the update `[orig: CEffectEmitter_AdvanceEmission @ 0x5e1d30; CEffectEmitter_Initialize @ 0x5e62c7..0x5e6323; CParticleEmitter_SpawnParticle @ 0x5e7d52..0x5e7d63]` (full detail: particles/ptl-format-re.md).
+Closed 2026-09-17: **D-PTL-30** -> `CLOSED` (retail dead code) — the updaters' only collision probe is `CParticleEmitter_CollisionProbe_Stub @ 0x5f78f0` (`xor eax, eax; ret`), so the COLLIDE* response, the `elastic` bounce and the collide-sound lookup never run in retail; no consumer is parity (full detail: particles/ptl-format-re.md).
 
 Closed 2026-08-22: **D-PTL-21** -> `FIXED` — `ParticleFrameCompiler` now reproduces retail's projected emitter-sphere intervals, Z→X→Y inclusive recursive partition, rendered-entry recursion, per-leaf raw particle depths, and literal non-stable `Utility_QuickSortWithAux` tie behavior. The portable adversarial contract pins both spatial leaf separation and equal-depth swaps `[orig: CParticleManager_TransformToViewSpace @ 0x5ecc50; CParticleManager_RecursiveSortAndRender @ 0x5ec980; CParticleManager_RenderBatch @ 0x5e9890; Utility_QuickSortWithAux @ 0x53d470]` (full detail: particles/ptl-format-re.md).
 
@@ -1294,7 +1295,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | UI (menu/ctrl/sound/playerinfo/HUD) | 30 | 0 | 3 | 33 | 0 |
 | Mission `.mis` | 0 | 1 | 1 | 2 | 0 |
 | Mission savegames | 0 | 1 | 0 | 1 | 0 |
-| Particles `.ptl` | 4 | 1 | 0 | 5 | 0 |
+| Particles `.ptl` | 1 | 0 | 0 | 1 | 0 |
 | 3DI `.3di` (GP) | 0 | 1 | 0 | 1 | 0 |
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 0 |
 | Terrain | 1 | 0 | 0 | 1 | 0 |
@@ -1302,9 +1303,9 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 1 | 0 | 0 | 1 | 0 |
 | Render — draw order | 1 | 0 | 0 | 1 | 0 |
 | Render — occlusion | 4 | 0 | 1 | 5 | 0 |
-| **Total** | **110** | **7** | **9** | **126** | 5 |
+| **Total** | **107** | **6** | **9** | **122** | 5 |
 
-Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-179, D-NET-218, D-NET-97, D-OCC-9, D-PTL-27, D-PTL-28, D-PTL-29, D-RMAT-12, D-SND-18.
+Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-179, D-NET-218, D-NET-97, D-OCC-9, D-RMAT-12, D-SND-18.
 
 <!-- scoreboard:generated:end -->
 
@@ -1487,9 +1488,10 @@ then-existing text. Later evidence passes have extended the particle catalog thr
 - [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) → **D-3DILW-1..3** (retired from the
   tables 2026-08-28: the parser is not in the tree; the record's §4 keeps them) (v8
   branch, textures, SAF/KSA playback — the record's own deferrals).
-- [particles/ptl-format-re.md](particles/ptl-format-re.md) → **D-PTL-1..23** (the
+- [particles/ptl-format-re.md](particles/ptl-format-re.md) → **D-PTL-1..30** (the
   intentional parse mapping, renderer/runtime approximations, platform-stable substitutions,
-  and bounded-safety choices; pure "not yet researched" §8 items stay in §8; D-PTL-8 is closed).
+  and bounded-safety choices; pure "not yet researched" §8 items stay in §8; D-PTL-8 is
+  closed; the 2026-09-17 sweep closed D-PTL-27..30, leaving D-PTL-26 open).
 - [mission/mis-format-re.md](mission/mis-format-re.md) → **D-MIS-1..5** (the
   writer-subset gaps + the full `dfx2med.exe` grill as a `NEEDS-RE` row;
   D-MIS-4/-5 minted-and-FIXED at the 2026-07-07 Nile parity pass).

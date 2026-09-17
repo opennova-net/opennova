@@ -586,7 +586,11 @@ void test_rotor_wash_particles_and_lifetime() {
 	sample.curve_phase = 14;
 	sample.phase_rate = 62.5f;
 	emitter.particles.push_back(sample);
-	p::emitter_advance(emitter, 0.016f, &world.rotor_wash);
+	{
+		p::EmitterEnvironment env;
+		env.forces = &world.rotor_wash;
+		p::emitter_advance(emitter, 0.016f, env);
+	}
 	CHECK(emitter.particles[0].force_zone == slot,
 			"focal particle reacquires its zone at phase/index cadence");
 	CHECK(emitter.particles[0].velocity.y < 0 && emitter.particles[0].velocity.x > 0,

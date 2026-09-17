@@ -13,16 +13,24 @@ namespace opennova::particle {
 // preserves more than 10x that authored headroom while bounding hostile mods.
 inline constexpr std::size_t kEmitterHardParticleLimit = 4096;
 
+// Retail's "unlimited" particle budget word: FOREVEREMIT emitters and every
+// child emitter (no self-emission) hold this value in emitter+0x11C
+// [orig: CEffectEmitter_Initialize @ 0x5e62e1; CEffectEmitter_CalcEmissionRate @ 0x5e1c8f].
+inline constexpr std::int32_t kEmitterForeverBudget = 0x7FFFFFF;
+
 // Portable, Godot-agnostic particle simulator. Captures the engine's
 // CParticleEmitter behavior (per-particle physics, emission shapes, lifetime,
-// child particles) but does NOT claim byte-exact parity with the retail
+// child emitters) but does NOT claim byte-exact parity with the retail
 // renderer — the engine has DirectX-bound state (draw order, atlas baking,
 // view-space transforms) that lives outside the simulation core.
 //
 // Engine references (Jointops.exe IDB):
-//   CParticleEmitter_AdvanceFrame    @ 0x5e6570  — emission + expiration loop
-//   CParticleEmitter_UpdateParticles @ 0x5e6980  — per-frame physics integration
-//   CParticleEmitter_SpawnParticle   @ 0x5e7640  — per-particle init + RNG
+//   CParticleEmitter_AdvanceFrame    @ 0x5e6570  — child spawns, expiry, update, emission, clock
+//   CParticleEmitter_UpdateParticles @ 0x5e6980  — base-system physics integration
+//   CParticleEmitter_UpdateAllParticles @ 0x5f3be0 — super-system integration (wind, orbit, aux angles)
+//   CParticleEmitter_SpawnParticle   @ 0x5e7640  — per-particle init + RNG + parent inheritance
+//   CParticleEmitter_SpawnNewParticle @ 0x5f35b0 — super-system spawn (aux angles, orbit rate)
+//   CEffectEmitter_AdvanceEmission   @ 0x5e1d30  — the self-emission schedule
 //   CParticleEmitter_TranslatePosition @ 0x5efe90 — parent transform follow
 //
 // RNG: engine uses `rand() & 0x3FF` (10-bit, 0..1023) throughout SpawnParticle.
@@ -62,6 +70,28 @@ public:
 	virtual std::uint16_t zone_at(const Vec3 &position) const = 0;
 };
 
+// The camera's six clip planes in the effect frame, `a*x + b*y + c*z + d >= 0`
+// inside. Retail keeps the equivalent viewport/clip state on the particle
+// manager (+108) and tests each NOVISNOUPDATE emitter's bounding sphere
+// against it before updating [orig: CParticleEmitter_AdvanceFrame @ 0x5e65dc ->
+// BoundingBox_IsVisibleInFrustum @ 0x5e45b0 -> Viewport_TransformAndClipPoint @ 0x4115e0].
+struct ParticleViewFrustum {
+	float planes[6][4]{};
+	bool valid = false;
+};
+
+// Per-advance environment. Everything here is read-only for the simulator.
+struct EmitterEnvironment {
+	const ParticleForceField *forces = nullptr;
+	// GLOBALWIND drift, effect-frame units per second — retail multiplies the
+	// mission wind's per-tick fixed-point vector by 62 into flt_848D40..48 every
+	// tick [orig: render_emitter_effect @ 0x5f70c0 (0x5f7112..0x5f7143)].
+	Vec3 global_wind{};
+	// NOVISNOUPDATE gate; null (or !valid) means no visibility state — retail
+	// skips the test while the manager's clip state is unset (+108 == 0).
+	const ParticleViewFrustum *frustum = nullptr;
+};
+
 struct Particle {
 	std::uint16_t force_zone = 0;
 	Vec3 position{};
@@ -79,11 +109,11 @@ struct Particle {
 	// Curve phase: 0 -> 256 across the particle's lifetime. This is the LUT
 	// index source for every per-particle curve (color/alpha/scale) — the
 	// engine stores it at particle+0x30 and advances it by `phase_rate * dt`
-	// per frame; it is NOT a draw-size ramp (the earlier "spawn-pop softener"
-	// reading was wrong). Color LUTs read `lut[(int)phase % 256]` (no lerp);
-	// the scale LUT lerps between bytes with the fractional part
-	// [orig: SpawnParticle @ 0x5e7898 seeds 0; UpdateParticles @ 0x5e6980
-	// advances; BuildBillboardQuads @ 0x5e6d60 indexes].
+	// per frame; it is NOT a draw-size ramp. Color LUTs read
+	// `lut[(int)phase % 256]` (no lerp); the scale LUT lerps between bytes with
+	// the fractional part. A mid-frame spawn starts at `time_offset * rate`
+	// [orig: SpawnParticle @ 0x5e7898 seeds 0, @ 0x5e7d60 adds the offset;
+	// UpdateParticles @ 0x5e6980 advances; BuildBillboardQuads @ 0x5e6d60 indexes].
 	float curve_phase = 0.0f;
 	// 256 / lifetime — the phase advance per second
 	// [orig: SpawnParticle @ 0x5e788c — flt_7D1D70 (256.0) / age into +0x34].
@@ -94,12 +124,28 @@ struct Particle {
 	// per-particle yaw/pitch Euler state in a parallel array at emitter+0x150
 	// [orig: CParticleEmitter_SpawnNewParticle @ 0x5f3663 seeds yaw =
 	// def.orientation.x + adj.x*rand01, yaw_rate = yaw_rot family @ 0x5f36a5;
-	// pitch pair follows; RenderStaticBillboards @ 0x5f5068 feeds
-	// (yaw, pitch, roll) * pi/180 into the Euler matrix]. Radians here.
+	// pitch pair at aux+8/+12 @ 0x5f36fe/0x5f3757; RenderStaticBillboards
+	// @ 0x5f5068 feeds (yaw, pitch, roll) * pi/180 into the Euler matrix]. Radians here.
 	float yaw = 0.0f;
 	float yaw_rate = 0.0f;
 	float pitch = 0.0f;
 	float pitch_rate = 0.0f;
+	// ORBIT rate, radians/second, randomized PER PARTICLE at aux+16:
+	// `((rand01*2-1) * orbitalspeed_adj + orbitalspeed * sign) * pi/180`, the
+	// sign random unless SIGNEDROTATIONS [orig: CParticleEmitter_SpawnNewParticle
+	// @ 0x5f3764..0x5f37c3 — the randomize-then-x-pi/180 tail @ 0x5f37a2..0x5f37c3]. The update rotates the particle's emitter-relative
+	// position and velocity around def.orbital_axis by `orbit_rate * dt`
+	// [orig: CParticleEmitter_UpdateAllParticles @ 0x5f3be0, the (move & 4) leg].
+	float orbit_rate = 0.0f;
+	// Child-emission schedule, one record per parent particle (retail keeps
+	// them in a parallel array at emitter+0xF0, seeded in the SpawnParticle
+	// tail @ 0x5e7fe2..0x5e80a6 and walked at the top of the parent's
+	// AdvanceFrame @ 0x5e6633..0x5e6807). `child_clock` counts down to the next
+	// child burst, `child_interval` is the reload value, `child_budget` the
+	// particles this parent may still spawn.
+	float child_clock = 0.0f;
+	float child_interval = 0.0f;
+	std::int32_t child_budget = 0;
 	Color3 color{};            // sampled from one of color1..4 at spawn (per engine, DWORD-randomized)
 	std::uint8_t alpha = 255;
 	std::uint8_t color_slot = 0;     // which of color1..4 this particle sampled at spawn
@@ -111,16 +157,24 @@ struct Particle {
 struct Emitter {
 	std::uint16_t force_zone = 0;
 	const ParticleDef *def = nullptr;
+	// The resolved `child_id` definition. Retail instantiates one child emitter
+	// per parent emitter at Initialize (emitter+0xC) and seeds a per-particle
+	// schedule for it on every parent spawn; the embedder binds the child
+	// Emitter it advances alongside [orig: CEffectEmitter_Initialize @ 0x5e6417..0x5e64a4].
+	const ParticleDef *child_def = nullptr;
 	Vec3 position{};
 	Vec3 prev_position{};
-	Vec3 forward = {0.0f, 0.0f, 1.0f}; // emission direction for shape=3 (cone)
-
-	// Manager-level RGB tint applied to every particle's modulated color in
-	// the renderer (CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 reads
-	// emitter+200..202 as 3 bytes and computes `(byte * channel) >> 7` per
-	// channel — so engine-byte 128 = 1.0 neutral). Used for screen-flash /
-	// explosion tints. Default {1, 1, 1} matches the engine neutral state.
-	Vec3 color_tint = {1.0f, 1.0f, 1.0f};
+	// Emission axis handed to the direction helper. EMITVECTOR defs take the
+	// spawn direction; every other def leaves it zero, and the helper's
+	// `|v|^2 < 0.99` fallback then emits around world +Y
+	// [orig: CEffectEmitter_Initialize @ 0x5e60f9..0x5e612e (flag 0x10000);
+	//  compute_cone_direction_vector @ 0x5e203a / generate_random_direction_basis @ 0x5e23d6].
+	Vec3 forward = {0.0f, 0.0f, 0.0f};
+	// The direction the group was spawned/re-oriented with, kept for every def
+	// (retail's group orientation input); reports read this, the simulator
+	// only reads `forward` [orig: CEffectEmitter_SetOrientationFromDirection
+	// @ 0x5e5b00 — the +48/+60/+124 writes @ 0x5e5d51..0x5e5d82 are EMITVECTOR-only].
+	Vec3 spawn_direction = {0.0f, 0.0f, 1.0f};
 
 	// Optional override for the shared NORMAL-gravity / GRAVITATE-force slot.
 	// Retail seeds that slot in CEffectEmitter_Initialize @ 0x5e6020 as
@@ -129,46 +183,37 @@ struct Emitter {
 	float spring_const = 0.0f;
 	float gravity_accel = 0.0f;     // retail authored gravity × -0.09803897
 	float drag_coefficient = 0.0f;  // retail authored drag × 0.01
-	// Runtime radians/sec, converted after signed-randomizing authored
-	// orbitalspeed +/- orbitalspeed_adj (which are degrees/sec). The reimpl ORBIT
-	// integrator remains an approximation of retail's basis/age chain.
-	float orbit_speed = 0.0f;
 
 	// CParticleEmitter_TranslatePosition @ 0x5efe90 mirror.
 	// `last_translation_delta` holds (new_pos - old_pos) from the most
 	// recent `emitter_translate` call; `cumulative_translation` is the
-	// running sum of those deltas since `emitter_init`. The engine seeds
-	// equivalents at emitter+212/+224 to the spawn position and uses them
-	// as AABB min/max accumulators in UpdateAllParticles; we expose just
-	// the deltas because we don't yet track a runtime AABB.
+	// running sum of those deltas since `emitter_init`.
 	Vec3 last_translation_delta = {0.0f, 0.0f, 0.0f};
 	Vec3 cumulative_translation = {0.0f, 0.0f, 0.0f};
+
+	// The live-particle AABB retail accumulates in UpdateParticles
+	// (emitter+0xD4..0xE8, reset to ±1e15 each update) and collapses to the
+	// emitter position when no particle is alive [orig: UpdateAllParticles
+	// @ 0x5f3be0 head; AdvanceFrame @ 0x5e658a]. Read by the NOVISNOUPDATE gate.
+	Vec3 bounds_min{};
+	Vec3 bounds_max{};
+	bool bounds_valid = false;
 
 	// CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 LOD decimation:
 	// engine computes `divisor = round(1.0 / *(emitter+8 + 0x3F4))` each
 	// frame from a manager-set perf budget, then skips particles where
 	// `(particle.serial % divisor) != 0`. Default 1 = render every
-	// particle (engine behaviour at full perf budget). Higher values
-	// uniformly skip particles for low-perf scenes — physics remains
-	// untouched because the simulator never reads this field; only the
-	// renderer does. Exposed for callers that want to dial down render
-	// cost without changing simulation state.
+	// particle (engine behaviour at full perf budget). Physics remains
+	// untouched because the simulator never reads this field.
 	std::uint32_t lod_divisor = 1;
 
 	// CParticleEmitter_UpdateParticles @ 0x5e6980 kill-plane:
 	//   def.flags & 0x08000000 (bit 27 = BELOWH20): kill if particle.y > threshold
 	//   def.flags & 0x10000000 (bit 28 = ABOVEH20): kill if particle.y <= threshold
 	// Engine threshold lives at `*(emitter+332)` (a manager-supplied
-	// `float*` populated per spawn site — terrain y for ground kill,
-	// ceiling y for upward kill). We expose the value + mode directly.
-	// Default mode 0 = disabled (no kill plane). Bits 27/28 are the named
-	// flags BELOWH20 / ABOVEH20 (`particle_flag::BelowH2O` / `AboveH2O`,
-	// engine flag-table idx 27/28 — corrected from the earlier "engine-
-	// internal" note per the ParticleEdit grill D5). `def.flags` carries them
-	// via the parser and the retail corpus authors both bits. A
-	// caller still has to map the bit to a mode and provide the site-specific
-	// threshold. Like `color_tint` / `spring_const` / `lod_divisor`, these are
-	// runtime scalars NOT reset by `emitter_init`.
+	// `float*` populated per spawn site). We expose the value + mode directly.
+	// Default mode 0 = disabled (no kill plane). Like `spring_const` /
+	// `lod_divisor`, these are runtime scalars NOT reset by `emitter_init`.
 	std::uint32_t kill_plane_mode = 0;  // 0=disabled, 1=kill above, 2=kill at/below
 	float kill_plane_y = 0.0f;
 
@@ -177,21 +222,42 @@ struct Emitter {
 	// the simulator even when a caller assigns this field directly.
 	std::size_t max_particles = 256;
 
-	// Emission scheduling
-	float emit_accumulator = 0.0f;     // tracks time since last burst
-	float emit_dur_remaining = 0.0f;   // counts down from def.emit_dur (by AGE, not per burst)
-	float emit_dur_total = 0.0f;
-	float emit_rate = 0.0f;
 	// Runtime copies of the definition's two positional values. Ordinary
 	// emitters retain the authored y-offset/camera-pull behavior; controlled
 	// effect groups reinterpret the pair through retail's blend parameter.
 	float spawn_y_offset = 0.0f;
 	float camera_pull = 0.0f;
 	float age = 0.0f;                  // emitter wall-clock
-	float emit_delay_remaining = 0.0f; // counts down from def.emit_delay before any spawn
-	bool emit_started = false;         // first burst primed? (it lands at t≈0, not one interval in)
+
+	// The self-emission schedule [orig: CEffectEmitter_Initialize @ 0x5e6020;
+	// CEffectEmitter_AdvanceEmission @ 0x5e1d30]:
+	//   emit_rate      randomized `emit_rate ± emit_rate_adj` (particles/second)
+	//   emit_dur_total randomized `emit_dur ± emit_dur_adj`
+	//   emit_interval  the current inter-burst interval slot (emitter+0x114). It
+	//                  STARTS AT emit_delay, which is how the delay is realized:
+	//                  the first burst waits until the carried time reaches it.
+	//   emit_carry     time carried between frames (emitter+0x144)
+	//   emit_budget    particles this emitter may still spawn (emitter+0x11C) =
+	//                  emit_burst * (int)(rate * dur), kEmitterForeverBudget for
+	//                  FOREVEREMIT and for child emitters
+	//   emit_clock     the emit-rate curve phase (emitter+0x110): starts at
+	//                  `-delay*(delay+dur)/256`, advances `256/(delay+dur)` per
+	//                  second, indexes `lut[(int)clock % 256]`; the emitter's
+	//                  emission window closes when it reaches 256
+	//   emit_heading   the sequential azimuth accumulator (emitter+208) the
+	//                  BURSTDISTRIBUTE direction helper advances by 2*pi/emit_burst
+	//   self_emitting  false for child emitters and for trigger-only groups
+	//                  (retail emitter+0x104 == 0): AdvanceEmission is skipped
+	float emit_rate = 0.0f;
+	float emit_dur_total = 0.0f;
+	float emit_interval = 0.0f;
+	float emit_carry = 0.0f;
+	std::int32_t emit_budget = 0;
+	float emit_clock = 0.0f;
+	float emit_clock_rate = 0.0f;
+	float emit_heading = 0.0f;
+	bool self_emitting = true;
 	bool active = false;
-	bool finite = true;                // false if FOREVEREMIT flag set
 
 	// Per-particle serial counter (matches engine's `LOBYTE(emitter[1].prevPosZ)` increment).
 	std::uint8_t next_serial = 0;
@@ -204,9 +270,9 @@ struct Emitter {
 // `emit_shape` (offset +3924) and the switch in CParticleEmitter_SpawnParticle.
 enum class EmitShape : std::uint32_t {
 	Point = 0,
-	Box = 1,         // axis-aligned box ±emit_shape_size
-	Sphere = 2,      // random direction normalized, biased by emit_shape_size
-	Cone = 3,        // cone around `forward` with emit_shape_size half-angles
+	Box = 1,         // hollow box shell ±emit_shape_size
+	Sphere = 2,      // direction helper with polar range [0, 360], annular per-axis magnitude
+	Cone = 3,        // direction helper pinned to polar 90 (a ring around the axis), annular magnitude
 };
 
 // 10-bit deterministic RNG. Engine uses `rand() & 0x3FF`; this returns the
@@ -219,14 +285,28 @@ float emitter_rand_unit(Emitter &e) noexcept;
 // rand10 normalized to [-1, 1], inclusive.
 float emitter_rand_signed(Emitter &e) noexcept;
 
-// Initialise an emitter against a particle def. Resets all state, including
-// emission delay/duration counters. Particle storage is cleared but the
-// underlying vector capacity is retained.
-void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t seed);
+// Initialise an emitter against a particle def at `pos`. `direction` is the
+// spawn direction; only EMITVECTOR defs adopt it as their emission axis.
+// Resets all schedule state. Particle storage is cleared but the underlying
+// vector capacity is retained.
+void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t seed,
+		Vec3 direction = {0.0f, 0.0f, 1.0f});
 
-// Advance the simulation by `dt` seconds. Spawns new particles per emission
-// schedule, integrates physics, ages particles, removes expired ones.
-void emitter_advance(Emitter &e, float dt, const ParticleForceField *forces = nullptr);
+// Retail's per-particle budget for a freshly initialized emitter:
+// `emit_burst * (int)(rate * dur)`, or kEmitterForeverBudget for FOREVEREMIT /
+// non-self-emitting emitters [orig: CEffectEmitter_Initialize @ 0x5e62bf..0x5e62e1].
+std::int32_t emitter_initial_budget(const Emitter &e) noexcept;
+
+// Advance the simulation by `dt` seconds in retail's AdvanceFrame order: child
+// spawns into `child` (when the def names a child and one is bound), expiry,
+// integration, self-emission, clock. `child` may be null.
+void emitter_advance(Emitter &e, float dt, const EmitterEnvironment &env = {},
+		Emitter *child = nullptr);
+
+// The retail aliveness leaf: emitting (budget left and the window open, or a
+// non-self-emitting child) or still carrying live particles
+// [orig: CParticleEmitter_IsAliveOrEmitting @ 0x5e2640].
+bool emitter_alive(const Emitter &e) noexcept;
 
 // Spawn one particle immediately (bypasses the emission schedule). Returns
 // false if the particle pool is at max_particles and no slot can be reclaimed.
@@ -253,5 +333,11 @@ bool emitter_spawn_one_at(Emitter &e, Vec3 position, Vec3 forward,
 // (e.g. moving emitters following a parent transform).
 void emitter_translate(Emitter &e, Vec3 new_pos) noexcept;
 
+// The mission wind as the particle world sees it: `wind_speed` and
+// `wind_direction` (degrees) from the mission header become a per-tick
+// fixed-point vector, which the effect world converts to its float frame and
+// scales by 62 into units per second [orig: sub_5DE970 @ 0x5de970 (Game_StartMission
+// @ 0x524aff); render_emitter_effect @ 0x5f70c0 @ 0x5f7112..0x5f7143].
+Vec3 mission_wind_vector(int wind_speed, int wind_direction_degrees) noexcept;
 
 } // namespace opennova::particle

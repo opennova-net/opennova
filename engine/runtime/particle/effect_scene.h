@@ -155,7 +155,6 @@ struct EffectSpawnRequest {
 	std::uint64_t source_tick = 0;
 	std::uint64_t source_order = 0;
 
-	Vec3 color_tint = {1.0f, 1.0f, 1.0f};
 	float spring_const = 0.0f;
 	std::uint32_t lod_divisor = 1;
 	EffectKillPlane kill_plane = EffectKillPlane::Disabled;
@@ -200,6 +199,12 @@ struct EffectOwnerPoseUpdate {
 struct EffectAdvanceRequest {
 	float delta_seconds = 0.0f;
 	const ParticleForceField *forces = nullptr;
+	// The mission wind in effect-frame units per second (GLOBALWIND drift);
+	// see particle::mission_wind_vector.
+	Vec3 global_wind{};
+	// The current camera's clip planes for the NOVISNOUPDATE gate; leave
+	// `valid` false (headless, no camera) to advance every emitter.
+	ParticleViewFrustum frustum;
 };
 
 struct EffectBounds {
@@ -237,13 +242,15 @@ struct EffectEmitterFrameSnapshot {
 	std::size_t particle_count = 0;
 	Vec3 position{};
 	Vec3 forward = {0.0f, 0.0f, 1.0f};
-	Vec3 color_tint = {1.0f, 1.0f, 1.0f};
 	float age = 0.0f;
 	float spring_const = 0.0f;
 	float camera_pull = 0.0f;
 	std::uint32_t lod_divisor = 1;
 	EffectKillPlane kill_plane = EffectKillPlane::Disabled;
 	float kill_plane_y = 0.0f;
+	// A `child_id` emitter fed by its parent's per-particle schedule rather
+	// than by its own emission window.
+	bool child_emitter = false;
 };
 
 struct ParticleFrameSnapshot {
@@ -265,6 +272,7 @@ struct EffectEmitterDebugSnapshot {
 	std::uint32_t definition_flags = 0;
 	std::size_t alive_particle_count = 0;
 	bool emitting = false;
+	bool child_emitter = false;
 	Vec3 position{};
 	Vec3 forward = {0.0f, 0.0f, 1.0f};
 	float age = 0.0f;

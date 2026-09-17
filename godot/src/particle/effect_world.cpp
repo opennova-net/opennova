@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
@@ -620,6 +621,12 @@ void EffectWorld::_sync_owner_poses(bool p_refresh_frame) {
 	}
 }
 
+void EffectWorld::set_mission_wind(int p_wind_speed, int p_wind_direction_degrees) {
+	const opennova::particle::Vec3 wind =
+			opennova::particle::mission_wind_vector(p_wind_speed, p_wind_direction_degrees);
+	scene_->set_global_wind(Vector3(wind.x, wind.y, wind.z));
+}
+
 void EffectWorld::advance_fixed_tick(double p_delta) {
 	advance_simulation_tick(p_delta, nullptr);
 }
@@ -627,6 +634,21 @@ void EffectWorld::advance_fixed_tick(double p_delta) {
 void EffectWorld::advance_simulation_tick(double p_delta,
 		const opennova::particle::ParticleForceField *p_forces) {
 	_sync_owner_poses(false);
+	// The NOVISNOUPDATE gate reads the camera that rendered the previous
+	// frame, like retail's manager clip state set at BeginFrame; without a
+	// current camera every emitter advances.
+	Camera3D *camera = nullptr;
+	if (Viewport *viewport = get_viewport(); viewport != nullptr) {
+		camera = viewport->get_camera_3d();
+	}
+	if (camera != nullptr) {
+		const Transform3D camera_transform = camera->get_camera_transform();
+		const Vector3 probe = camera_transform.origin -
+				camera_transform.basis.get_column(2) * (camera->get_near() + 1.0f);
+		scene_->set_view_frustum(camera->get_frustum(), probe);
+	} else {
+		scene_->clear_view_frustum();
+	}
 	scene_->advance_with_forces(p_delta > 0.0 ? p_delta : 0.0, p_forces);
 }
 
@@ -782,6 +804,8 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::has_cached_owner_pose);
 	ClassDB::bind_method(D_METHOD("has_no_owner_bindings"), &EffectWorld::has_no_owner_bindings);
 	ClassDB::bind_method(D_METHOD("advance_fixed_tick", "delta"), &EffectWorld::advance_fixed_tick);
+	ClassDB::bind_method(D_METHOD("set_mission_wind", "wind_speed", "wind_direction_degrees"),
+			&EffectWorld::set_mission_wind);
 	ClassDB::bind_method(D_METHOD("render_frame"), &EffectWorld::render_frame);
 	ClassDB::bind_method(D_METHOD("get_debug_group_report", "include_hidden"),
 			&EffectWorld::get_debug_group_report, DEFVAL(false));

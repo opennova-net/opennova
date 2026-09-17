@@ -5,13 +5,17 @@
 //               one-sided into [skip/2, size/2] (sign random unless
 //               SIGNEDROTATIONS pins it positive @ 0x5e790f); the other two
 //               axes get ±size/2 uniform.
-//   Sphere (2): random unit direction × per-axis annular lerp(skip, size, r)
-//               magnitude added to POSITION — a hollow ellipsoidal shell.
-//   Cone (3):   direction within a fixed 90° cap around emitter.forward,
-//               annular magnitude, added to POSITION.
-// Velocity is seeded separately for ALL shapes: direction within def.spread
-// around emitter.forward × (speed + speed_adj × rand_signed)
-// [orig: the post-switch vtable-direction + def+3892/+3896 multiply].
+//   Sphere (2): the direction helper with polar range [0, 360] × per-axis
+//               annular lerp(skip, size, r) magnitude added to POSITION — a
+//               hollow ellipsoidal shell.
+//   Cone (3):   the direction helper pinned to polar 90 (flt_7DCBF0 for both
+//               bounds @ 0x5e7a33..0x5e7a48) — a RING around the spawn
+//               direction, annular magnitude, added to POSITION.
+// Velocity is seeded separately for ALL shapes: the direction helper draws a
+// polar angle uniform in [spread_skip, spread] and a uniform azimuth around
+// the spawn direction, × (speed + speed_adj × rand_signed)
+// [orig: compute_cone_direction_vector @ 0x5e1f10 / generate_random_direction_basis
+//  @ 0x5e22a0; the post-switch call + def+3892/+3896 multiply @ 0x5e7c41..0x5e7d1e].
 // We test the geometric properties (dominance, range bounds, shell radii)
 // rather than byte-exact matches against the FPU stream.
 
@@ -28,6 +32,10 @@ bool expect(bool condition, const char *message) {
 	if (condition) return true;
 	std::fprintf(stderr, "FAIL: %s\n", message);
 	return false;
+}
+
+bool near_value(float actual, float expected, float epsilon = 0.001f) {
+	return std::fabs(actual - expected) <= epsilon;
 }
 
 opennova::particle::ParticleDef base_def() {
@@ -230,7 +238,9 @@ bool test_velocity_spread_skip_excludes_inner_cone() {
 	return true;
 }
 
-bool test_velocity_spread_skip_bounds_each_yaw_and_pitch_rotation() {
+bool test_velocity_spread_skip_pins_the_polar_angle() {
+	// spread_skip == spread collapses the helper's polar range to one angle:
+	// every direction sits on the 60-degree cone around the axis.
 	using namespace opennova::particle;
 	ParticleDef def = base_def();
 	def.speed = 10.0f;
@@ -239,7 +249,7 @@ bool test_velocity_spread_skip_bounds_each_yaw_and_pitch_rotation() {
 	Emitter e;
 	emitter_init(e, &def, {0, 0, 0}, 0x6161);
 	e.forward = {0.0f, 1.0f, 0.0f};
-	const float expected_forward_dot = 0.25f; // cos(60 degrees) * cos(60 degrees)
+	const float expected_forward_dot = 0.5f; // cos(60 degrees)
 	for (int i = 0; i < 32; ++i) {
 		e.particles.clear();
 		if (!emitter_spawn_one(e)) return false;
@@ -255,8 +265,9 @@ bool test_velocity_spread_skip_bounds_each_yaw_and_pitch_rotation() {
 }
 
 bool test_cone_position_cap_around_forward() {
-	// Cone displaces POSITION within a 90°-cap shell around emitter.forward
-	// (flt_7DCBF0 = 90.0) — every offset lands in the forward hemisphere.
+	// Cone displaces POSITION onto the ring perpendicular to the spawn
+	// direction (both helper bounds are flt_7DCBF0 = 90.0) — every offset is
+	// orthogonal to the axis at the annular radius.
 	using namespace opennova::particle;
 	ParticleDef def = base_def();
 	def.emit_shape = static_cast<int>(EmitShape::Cone);
@@ -271,15 +282,83 @@ bool test_cone_position_cap_around_forward() {
 		emitter_spawn_one(e);
 		const Vec3 pos = e.particles[0].position;
 		const float radius = std::sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
-		if (radius <= 1e-3f) continue;
-		// A square (yaw, pitch) cap of 90° half-angle can exceed the forward
-		// hemisphere at the corners (up to √2 × 90°); require the offset to
-		// stay loosely forward-facing.
+		if (!expect(std::fabs(radius - 1.0f) < 0.001f, "cone offset sits at the annular radius")) {
+			std::fprintf(stderr, "  iter=%d pos=(%f,%f,%f) r=%f\n", i, pos.x, pos.y, pos.z, radius);
+			return false;
+		}
 		const float dot = pos.y / radius;
-		if (!expect(dot > -0.45f, "cone spawn offset stays in the widened forward cap")) {
+		if (!expect(std::fabs(dot) < 0.001f, "cone spawn offset is a ring perpendicular to the axis")) {
 			std::fprintf(stderr, "  iter=%d pos=(%f,%f,%f) dot=%f\n", i, pos.x, pos.y, pos.z, dot);
 			return false;
 		}
+	}
+	return true;
+}
+
+bool test_burst_distribute_spaces_the_azimuth_evenly() {
+	// BURSTDISTRIBUTE (0x2000000) routes particles 2..N of a burst through
+	// the sequential helper: azimuth += 2*pi / emit_burst per particle, so a
+	// burst of 4 at a pinned polar angle lands on four quarter-turn headings
+	// [orig: CEffectEmitter_AdvanceEmission @ 0x5e1e0d..0x5e1e3e ->
+	//  compute_cone_direction_vector @ 0x5e1f6e].
+	using namespace opennova::particle;
+	ParticleDef def = base_def();
+	def.speed = 10.0f;
+	def.spread = 90.0f;
+	def.spread_skip = 90.0f;
+	def.emit_burst = 4;
+	def.emit_rate = 1.0f;
+	def.emit_dur = 10.0f;
+	def.age = 10.0f;
+	def.flags |= particle_flag::BurstDistribute;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 0x7777);
+	e.forward = {0.0f, 1.0f, 0.0f};
+	emitter_advance(e, 0.016f);
+	if (!expect(e.particles.size() == 4, "one burst of four")) {
+		std::fprintf(stderr, "  got %zu\n", e.particles.size());
+		return false;
+	}
+	for (int i = 0; i < 4; ++i) {
+		const Vec3 a = e.particles[static_cast<std::size_t>(i)].velocity;
+		const Vec3 b = e.particles[static_cast<std::size_t>((i + 1) % 4)].velocity;
+		const float dot = (a.x * b.x + a.z * b.z) / 100.0f;
+		if (!expect(std::fabs(dot) < 0.01f, "consecutive burst members are a quarter turn apart")) {
+			std::fprintf(stderr, "  i=%d dot=%f\n", i, dot);
+			return false;
+		}
+	}
+	return true;
+}
+
+bool test_emit_vector_selects_the_emission_axis() {
+	// Only EMITVECTOR (0x10000) defs emit around the spawn direction; every
+	// other def's axis is zero and the helper's fallback emits around world
+	// +Y [orig: CEffectEmitter_Initialize @ 0x5e60f9..0x5e612e;
+	//  compute_cone_direction_vector @ 0x5e203a].
+	using namespace opennova::particle;
+	ParticleDef def = base_def();
+	def.speed = 10.0f;
+	def.spread = 0.0f;
+	def.spread_skip = 0.0f;
+	Emitter plain;
+	emitter_init(plain, &def, {0, 0, 0}, 3, {1.0f, 0.0f, 0.0f});
+	if (!expect(plain.forward.x == 0.0f && plain.forward.y == 0.0f && plain.forward.z == 0.0f,
+			"a plain def keeps a zero axis")) return false;
+	if (!emitter_spawn_one(plain)) return false;
+	if (!expect(near_value(plain.particles[0].velocity.y, 10.0f), "and emits straight up")) {
+		const Vec3 v = plain.particles[0].velocity;
+		std::fprintf(stderr, "  v=(%f,%f,%f)\n", v.x, v.y, v.z);
+		return false;
+	}
+	def.flags |= particle_flag::EmitVector;
+	Emitter vectored;
+	emitter_init(vectored, &def, {0, 0, 0}, 3, {1.0f, 0.0f, 0.0f});
+	if (!emitter_spawn_one(vectored)) return false;
+	if (!expect(near_value(vectored.particles[0].velocity.x, 10.0f), "EMITVECTOR emits along the spawn direction")) {
+		const Vec3 v = vectored.particles[0].velocity;
+		std::fprintf(stderr, "  v=(%f,%f,%f)\n", v.x, v.y, v.z);
+		return false;
 	}
 	return true;
 }
@@ -294,8 +373,10 @@ int main() {
 	if (!test_sphere_position_shell_within_skip_size_range())   ++failures;
 	if (!test_velocity_from_speed_within_spread_cone())         ++failures;
 	if (!test_velocity_spread_skip_excludes_inner_cone())       ++failures;
-	if (!test_velocity_spread_skip_bounds_each_yaw_and_pitch_rotation()) ++failures;
+	if (!test_velocity_spread_skip_pins_the_polar_angle())     ++failures;
 	if (!test_cone_position_cap_around_forward())               ++failures;
+	if (!test_burst_distribute_spaces_the_azimuth_evenly())     ++failures;
+	if (!test_emit_vector_selects_the_emission_axis())          ++failures;
 	if (failures != 0) {
 		std::fprintf(stderr, "%d test(s) failed\n", failures);
 		return 1;

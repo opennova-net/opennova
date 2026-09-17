@@ -203,6 +203,9 @@ public:
 	// key is still holding a slot token, owner token, reverse lookup, or
 	// cached pose.
 	bool has_no_owner_bindings() const;
+	// The mission header's wind, the GLOBALWIND drift every tick
+	// (particle::mission_wind_vector). GameWorld feeds it at effect-world start.
+	void set_mission_wind(int p_wind_speed, int p_wind_direction_degrees);
 	// The only simulation clock. Callers feed fixed mission ticks (1 / 62.5 s).
 	void advance_fixed_tick(double p_delta);
 	// The same clock with the simulation's borrowed force field (the

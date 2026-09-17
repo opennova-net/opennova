@@ -128,6 +128,14 @@ public:
 	Vector3 get_cloud_highlight() const;
 	Vector3 get_cloud_edge() const;
 	Vector3 get_color_src_gain() const;
+	// The two particle tints the effect world refreshes every tick from the
+	// environment, as per-channel factors where retail byte 128 = 1.0:
+	// AMBIENTCOLOR (and any blend-mode-0 graphic) draws through
+	// Env_TerrainLightCombined; everything else through the modulator block
+	// doubled and saturated at 255 (retail render_emitter_effect @ 0x5f70c0
+	//  (world+0x3E8 / +0x3F0); CParticleEmitter_AdvanceFrame @ 0x5e6600..0x5e661c).
+	Vector3 get_particle_ambient_tint() const;
+	Vector3 get_particle_modulator_tint() const;
 
 	// --- keyframe targets ---------------------------------------------------
 	Vector3 get_fill_light_target() const;

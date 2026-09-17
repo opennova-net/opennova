@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -93,6 +94,8 @@ private:
             std::make_shared<opennova::particle::EffectScene>();
 	mutable opennova::particle::ParticleFrameSnapshot last_frame_;
 	mutable bool snapshot_dirty_ = true;
+	opennova::particle::Vec3 global_wind_{};
+	opennova::particle::ParticleViewFrustum frustum_{};
 
 	void _materialize_snapshot() const;
 
@@ -140,6 +143,14 @@ public:
 	void advance_in_place(double p_delta_seconds);
 	void advance_with_forces(
 			double p_delta_seconds, const opennova::particle::ParticleForceField *forces);
+	// The two per-advance environment inputs retail reads off globals: the
+	// mission wind (GLOBALWIND drift, effect-frame units per second) and the
+	// camera's clip planes (the NOVISNOUPDATE gate). `p_inside_probe` is a
+	// point known to be inside the view (the planes are re-oriented so it is);
+	// clearing the frustum advances every emitter.
+	void set_global_wind(const Vector3 &p_wind);
+	void set_view_frustum(const TypedArray<Plane> &p_planes, const Vector3 &p_inside_probe);
+	void clear_view_frustum();
 
 	// Native renderer adapters use the same immutable frame without a
 	// Dictionary round trip. This is intentionally not bound to Godot.
