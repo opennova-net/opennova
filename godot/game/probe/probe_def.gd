@@ -430,6 +430,27 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"burst_frames": { "type": "integer", "minimum": 1, "default": 20 },
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, true, 300_000),
+		ProbeDef.make("effect_capture",
+				"One authored effect under the crosshair: equip `weapon` when given, walk "
+				+ "forward `walk_frames`, step the look until the local player pitches "
+				+ "`pitch_deg` down, spawn `effect` once (empty skips it) where that aim meets "
+				+ "the terrain, `height_offset` metres off the surface (aimed up like a flat "
+				+ "terrain hit), hold the trigger `fire_frames` frames (with the scene node "
+				+ "named `hide_node` hidden meanwhile, to bisect a draw), then "
+				+ "capture `captures` frames every `frames_between` frames while it plays, "
+				+ "logging every live emitter's position and rendered bounds per capture.",
+				RENDER + "effect_capture_probe.gd", {
+					"effect": { "type": "string", "default": "Effect_AmHitDirt" },
+					"weapon": { "type": "string", "default": "" },
+					"fire_frames": { "type": "integer", "minimum": 0, "default": 0 },
+					"hide_node": { "type": "string", "default": "" },
+					"pitch_deg": { "type": "number", "minimum": 5.0, "maximum": 89.0, "default": 30.0 },
+					"height_offset": { "type": "number", "default": 0.0 },
+					"walk_frames": { "type": "integer", "minimum": 0, "default": 0 },
+					"frames_between": { "type": "integer", "minimum": 1, "default": 3 },
+					"captures": { "type": "integer", "minimum": 1, "maximum": 60, "default": 8 },
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, true, 120_000),
 		ProbeDef.make("mission_playthrough",
 				"The first SP mission played through its authored sequence on the real "
 				+ "input path (docs/world/npc-mission-completion.md): load `mission`, then "

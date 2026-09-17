@@ -38,6 +38,8 @@ void Terrain::_bind_methods() {
 		&Terrain::get_light_patches_lit);
 	ClassDB::bind_method(D_METHOD("get_light_rows_total"),
 		&Terrain::get_light_rows_total);
+	ClassDB::bind_method(D_METHOD("get_debug_light_rows"),
+		&Terrain::get_debug_light_rows);
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "data"), &Terrain::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &Terrain::get_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_surface_inputs"), &Terrain::get_surface_inputs);
@@ -734,6 +736,40 @@ void Terrain::_bind_light_textures() {
 	terrain_material->set_shader_parameter("u_terrain_light_rows",
 			light_rows_texture);
 	light_textures_bound = true;
+}
+
+Array Terrain::get_debug_light_rows() const {
+	Array out;
+	const size_t count = std::min(light_patch_bounds.size(), light_patch_rows.size());
+	for (size_t i = 0; i < count; ++i) {
+		const opennova::renderer::TerrainLightPatchBounds &bounds = light_patch_bounds[i];
+		const opennova::renderer::TerrainLightPatchRows &rows = light_patch_rows[i];
+		Dictionary patch;
+		patch["index"] = static_cast<int64_t>(i);
+		// mission fixed (x, y, z) -> Godot (x, z, -y), re-ordered per axis.
+		const Vector3 a(static_cast<float>(bounds.aabb_min_fixed[0]) / 65536.0f,
+				static_cast<float>(bounds.aabb_min_fixed[2]) / 65536.0f,
+				-static_cast<float>(bounds.aabb_min_fixed[1]) / 65536.0f);
+		const Vector3 b(static_cast<float>(bounds.aabb_max_fixed[0]) / 65536.0f,
+				static_cast<float>(bounds.aabb_max_fixed[2]) / 65536.0f,
+				-static_cast<float>(bounds.aabb_max_fixed[1]) / 65536.0f);
+		const Vector3 lo = a.min(b);
+		const Vector3 hi = a.max(b);
+		patch["aabb"] = AABB(lo, hi - lo);
+		patch["count"] = static_cast<int64_t>(rows.count);
+		Array lights;
+		for (size_t k = 0; k < rows.count; ++k) {
+			const opennova::renderer::TerrainLightRow &row = rows.rows[k];
+			Dictionary light;
+			light["position"] = Vector3(row.position[0], row.position[2], -row.position[1]);
+			light["inv_scale"] = row.inv_scale;
+			light["rgb"] = Vector3(row.pixel_rgb[0], row.pixel_rgb[1], row.pixel_rgb[2]);
+			lights.push_back(light);
+		}
+		patch["lights"] = lights;
+		out.push_back(patch);
+	}
+	return out;
 }
 
 void Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list) {

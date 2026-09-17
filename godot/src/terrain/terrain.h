@@ -238,6 +238,9 @@ public:
 	// total in the last render_frame.
 	int get_light_patches_lit() const { return light_patches_lit; }
 	int get_light_rows_total() const { return light_rows_total; }
+	// Diagnostics: the last render_frame's per-patch light rows — each
+	// patch's collect volume (render frame) and its published light rows.
+	Array get_debug_light_rows() const;
 
 	void build();
 

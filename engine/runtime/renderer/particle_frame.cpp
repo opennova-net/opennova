@@ -303,8 +303,17 @@ void build_quad(const ParticleQuadSnapshot &particle,
 	const float v0 = atlas.rect.v_min + atlas.inset_v;
 	const float u1 = atlas.rect.u_max - atlas.inset_u;
 	const float v1 = atlas.rect.v_max - atlas.inset_v;
+	// Retail's corner walk pairs the (-half, -half) corner with (u_min, v_min)
+	// and (+half, +half) with (u_max, v_max) [orig: BuildBillboardQuads
+	// @ 0x5e7213..0x5e7374; RenderStaticBillboards and the rot-head renderer
+	// share the walk], and its D3D view frame keeps height on +Y (the fold
+	// Math_FixedPointToFloat3_YNegated @ 0x611210), so texture row 0 (the
+	// file's TOP row after the loaders' row swap) lands on the quad's BOTTOM
+	// corners. Every asymmetric authored texture is drawn for that
+	// (Cfisthit.tga's flash spike rises from the impact, watrdrop.tga falls
+	// head-first): local +half_height carries v_max, -half_height v_min.
 	const float u[4] = {u0, u1, u0, u1};
-	const float v[4] = {v0, v0, v1, v1};
+	const float v[4] = {v1, v1, v0, v0};
 
 	for (std::size_t i = 0; i < 4; ++i) {
 		vertices[i].x = positions[i].x;
