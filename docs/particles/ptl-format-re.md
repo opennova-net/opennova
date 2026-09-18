@@ -495,7 +495,7 @@ damping, force vec); our struct does not mirror byte layout.
 
 | Original | Addr (size) | Behavior witnessed | Reimpl + pinning |
 | --- | --- | --- | --- |
-| `CParticleEmitter_BuildBillboardQuads` | `0x5e6d60` (0x7d7) | vertex 28 B (pos 12 + color 4 + lit color 4 + uv 8), 4 verts/quad, indices 0/1/2/1/3/2; roll matrix (labelled `D3DXMatrixRotationX`, a `(M,f)` FLIRT-collision family) x manager camera matrix (+664) through the PSGP multiply; **quad half-extent = `particle.base_size (+0x38) x (ScaleCurve ? lerp(scaleLUT[i], scaleLUT[i+1], frac(phase)) / 128 : 1) x 0.5`** (`flt_7C3DD4` = 1/128, `flt_7C3B94` = 0.5 `@ 0x5f51ab`-analog; the scale LUT LERPS and reads `lut[i+1]` one byte past the LUT at i=255); color/alpha LUTs read the RAW byte at `(int)phase % 256`, channel x byte / 256, no lerp; **quad center += `emitter+0x140` (= `-def.z_offset`) x the per-frame view-axis globals `flt_2C06578/7C/80`** (`CParticleManager_BeginFrame @ 0x5ecfe8`) — the z_offset camera-ward pull `@ 0x5e71c9`; **flipbook clock = `(256/phase_rate) x flip_rate x phase / 64` = 4 x flip_rate x elapsed-seconds** `@ 0x5e6f17`, GFXFLIPRAND adds a particle-ptr-derived start offset; per-frame UV entry at graphic+724 = **6 dwords `{material_ptr, u_min, v_min, u_max, v_max, inset}`** — inset ADDS on min edges, SUBTRACTS on max; material changes flush + rebind via `CParticleBatch_FlushAndBindMaterial @ 0x5e4230`; manager RGB tint at emitter+200..+202, applied `(byte * channel) >> 7` (byte 128 = 1.0); **LOD decimation** `divisor = round(1.0 / *(emitter+8 + 0x3F4))`, render only when `serial % divisor == 0` (render-only; sim untouched) | `renderer::ParticleFrameCompiler` emits a value-owned immutable quad draw list with four exact 28-byte vertices per quad and applies size/LUT/z-offset/flipbook/tint/LOD. The Godot scene-to-quad adapter applies the exact bump-color matrix and expands each quad to triangle vertices `0/1/2/1/3/2`; `ParticleCompositorEffect` streams those vertices through one persistent growable RD vertex buffer and executes every adjacent state run in draw list order. Contracts pin stride, expansion, domain filtering, ordering, bounds, and command runs |
+| `CParticleEmitter_BuildBillboardQuads` | `0x5e6d60` (0x7d7) | vertex 28 B (pos 12 + color 4 + lit color 4 + uv 8), 4 verts/quad in perimeter order, indices 0/1/2/2/3/0; roll matrix (labelled `D3DXMatrixRotationX`, a `(M,f)` FLIRT-collision family) x manager camera matrix (+664) through the PSGP multiply; **quad half-extent = `particle.base_size (+0x38) x (ScaleCurve ? lerp(scaleLUT[i], scaleLUT[i+1], frac(phase)) / 128 : 1) x 0.5`** (`flt_7C3DD4` = 1/128, `flt_7C3B94` = 0.5 `@ 0x5f51ab`-analog; the scale LUT LERPS and reads `lut[i+1]` one byte past the LUT at i=255); color/alpha LUTs read the RAW byte at `(int)phase % 256`, channel x byte / 256, no lerp; **quad center += `emitter+0x140` (= `-def.z_offset`) x the per-frame view-axis globals `flt_2C06578/7C/80`** (`CParticleManager_BeginFrame @ 0x5ecfe8`) — the z_offset camera-ward pull `@ 0x5e71c9`; **flipbook clock = `(256/phase_rate) x flip_rate x phase / 64` = 4 x flip_rate x elapsed-seconds** `@ 0x5e6f17`, GFXFLIPRAND adds a particle-ptr-derived start offset; per-frame UV entry at graphic+724 = **6 dwords `{material_ptr, u_min, v_min, u_max, v_max, inset}`** — inset ADDS on min edges, SUBTRACTS on max; material changes flush + rebind via `CParticleBatch_FlushAndBindMaterial @ 0x5e4230`; manager RGB tint at emitter+200..+202, applied `(byte * channel) >> 7` (byte 128 = 1.0); **LOD decimation** `divisor = round(1.0 / *(emitter+8 + 0x3F4))`, render only when `serial % divisor == 0` (render-only; sim untouched) | `renderer::ParticleFrameCompiler` emits a value-owned immutable quad draw list with four exact 28-byte vertices per quad and applies size/LUT/z-offset/flipbook/tint/LOD. The Godot scene-to-quad adapter applies the exact bump-color matrix and expands each quad to triangle vertices `0/1/2/1/3/2`; `ParticleCompositorEffect` streams those vertices through one persistent growable RD vertex buffer and executes every adjacent state run in draw list order. Contracts pin stride, expansion, domain filtering, ordering, bounds, and command runs |
 | `CParticleEmitter_RenderStaticBillboards` | `0x5f4e10` (0x80c) | same vertex layout; selected by `(def.flags & 0x100) == 0 ? rotated : static` (bit 8 = YAWANDPITCH). **NOT rotation-suppressed: the path renders WORLD-ORIENTED quads** — `(yaw, pitch, roll) = (aux+0, aux+8, particle+0x3C) x pi/180` into the `(M,f,f,f)` Euler builder `@ 0x5f5068..0x5f508d` (the `init_D3DXMatrixScaling` import label is a FLIRT prototype collision — scaling by angle-sized factors would collapse the +-half corners fed through the PSGP corner transforms; the semantics are RotationYawPitchRoll), corners `(+-half, +-half, 0)` transformed then translated by the pulled center. Per-particle yaw/pitch live in the parallel array at `emitter+0x150` (SS2.3) | the portable compiler's oriented-quad branch consumes the same per-particle Euler state and writes it into the shared draw list; it is no longer a per-emitter mesh path |
 | `CParticleEmitter_ComputeViewDepths` | `0x5e7580` | stores `-dot(rawParticleCenter-camera, cameraForward)` for every particle before `BuildBillboardQuads` applies the camera pull | `ParticleFrameCompiler` sorts each leaf from the same raw-center depth; the pulled center is used only when emitting vertices |
 | `CParticleManager_TransformToViewSpace` | `0x5ecc50` (0x31c) | takes the emitter AABB center and half-diagonal sphere radius, projects center plus/minus camera-right and camera-forward radius, uses the projected right half-diameter for both screen extents and the projected forward Z half-diameter for depth, then calls `RecursiveSortAndRender` | the live adapter supplies the camera projection and the compiler reproduces those projected intervals; its headless fallback preserves the same near=1/far=0 axis convention |
@@ -779,6 +779,10 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
   ComputeViewDepths @ 0x5e7580; RenderBatch @ 0x5e9890]`.
 - **YAWANDPITCH static billboards** (flags bit 8) — non-rotating quad path
   `[orig: RenderStaticBillboards @ 0x5f4e10]`.
+- **Sprite V orientation** maps the dense source edge at `v_min` to negative local Y
+  and `v_max` to positive local Y in all three quad builders (re-witnessed
+  2026-09-17; terrain-dirt correction below). The compiler stores the top row
+  first, so its V rows are `{v_max, v_max, v_min, v_min}` after atlas inset.
 - **TOPALIGN heading roll** (flags bit 3) — the quad's top follows the particle's
   screen heading every frame `[orig: CParticleEmitter_RenderTopAlignedBillboards @ 0x5f5640]`.
 - **Environment tints** — AMBIENTCOLOR defs (and any def with a blend-mode-0 graphic)
@@ -1461,3 +1465,27 @@ the first advance and retained through catalog reloads/runtime resets. Previousl
 ordinary advance requests received wind, leaving pre-aged GLOBALWIND particles at their
 unshifted positions. Native particle-position and Godot EffectWorld bounds regressions
 compare eight ordinary ticks with an eight-tick pre-aged spawn.
+
+### Terrain-dirt sprite orientation (2026-09-17)
+
+The expansion's `Effect_Rev_BUL_grass` reproduced a clean upper edge on open ground.
+Its `REV_BUL_grass_upsplash` layer uses `drtspl1/2/3.tga`: the source texture's
+`v_min` edge is dense and its `v_max` edge fades. The compiler had mapped `v_min`
+to positive local Y, placing the dense base at the top of the plume.
+
+All three retail quad builders start at `(-half, -half)` with
+`(u_min + inset, v_min + inset)` and bind `v_max - inset` to positive local Y:
+
+- Camera-facing: `[orig: CParticleEmitter_BuildBillboardQuads @0x5e7213;
+  UV writes @0x5e732f..0x5e7374]`.
+- TOPALIGN: `[orig: CParticleEmitter_RenderTopAlignedBillboards @0x5f5c99;
+  UV writes @0x5f5ddc..0x5f5e21]`.
+- YAWANDPITCH: `[orig: CParticleEmitter_RenderStaticBillboards @0x5f52e4;
+  UV writes @0x5f5400..0x5f5445]`.
+
+The shared frame compiler now pairs its top-first vertex order with
+`{v_max, v_max, v_min, v_min}`. Size, alpha, rotation and atlas inset are unchanged.
+The native geometry/UV contract and the asymmetric-texture GPU test
+`test_dirt_splash_keeps_its_dense_base_below_its_fading_top` both fail with the old
+mapping and pass with the corrected one. Captures of the shipped expansion
+effect confirm the fading upper plume on open ground and against a wall.

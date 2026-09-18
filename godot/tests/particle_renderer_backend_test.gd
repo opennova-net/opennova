@@ -680,3 +680,56 @@ func test_muzzle_distortion_preserves_particles_already_drawn_behind_it() -> voi
 	assert_eq(int(backend.get("drawn_commands", -1)), int(backend.get("submitted_commands", 0)))
 	assert_eq(int(backend.get("scene_color_copies", 0)), 2,
 			"each ordered distortion run samples the preceding particle draws")
+
+
+func _asymmetric_dirt_texture(_name: String) -> Texture2D:
+	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	for y in image.get_height():
+		for x in image.get_width():
+			image.set_pixel(x, y, Color(1.0, 0.0, 0.0, 1.0 - float(y) / 31.0))
+	return ImageTexture.create_from_image(image)
+
+
+func test_dirt_splash_keeps_its_dense_base_below_its_fading_top() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(128, 128)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var background := WorldEnvironment.new()
+	background.environment = Environment.new()
+	background.environment.background_mode = Environment.BG_COLOR
+	background.environment.background_color = Color.BLACK
+	viewport.add_child(background)
+	var particle := _overlap_definition("dirt", 0)
+	(particle.graphics[0] as ParticleGraphicLayer).scale_value = 2.0
+	var effect := ParticleEffect.new()
+	effect.id = "dirt"
+	effect.pdefs = PackedStringArray([particle.id])
+	var file := ParticleFile.new()
+	file.particles = [particle]
+	file.effects = [effect]
+	var scene := EffectScene.new()
+	scene.open([file])
+	var renderer := ParticleRenderer.new()
+	renderer.scene = scene
+	renderer.texture_provider = _asymmetric_dirt_texture
+	renderer.set_water_plane(-100.0, null)
+	viewport.add_child(renderer)
+	_overlap_spawn(scene, "dirt", 0.0)
+	var image := await _overlap_image(viewport, renderer)
+	var top := Vector2i(camera.unproject_position(Vector3(0.0, 1.7, 0.0)))
+	var base := Vector2i(camera.unproject_position(Vector3(0.0, 0.3, 0.0)))
+	# The expansion's drtspl textures put the dense base at source V=0.
+	# Retail maps that edge to negative local Y, below the fading V=1 tail.
+	assert_gt(image.get_pixelv(base).r, 0.8, "the dense source edge belongs at the base of the splash")
+	assert_lt(image.get_pixelv(top).r, image.get_pixelv(base).r - 0.2,
+			"the upper plume must fade instead of showing the texture's dense cut edge")
+	assert_engine_error_count(0)

@@ -339,16 +339,18 @@ bool geometry_bounds_and_reuse_contract() {
 	if (!check(first.vertices.size() == 4 &&
 			sizeof(first.vertices[0]) == 28,
 			"one visible quad emits four 28-byte vertices")) return false;
+	// Retail binds v_min to negative local Y and v_max to positive local Y.
+	// [orig: BuildBillboardQuads @0x5e7213 / UV writes @0x5e732f..0x5e7374]
 	const auto &top_left = first.vertices[0];
 	const auto &bottom_right = first.vertices[3];
 	if (!check(near(top_left.x, 8.0f) && near(top_left.y, 21.0f) &&
 			near(top_left.z, 27.0f) && near(top_left.u, 0.15f) &&
-			near(top_left.v, 0.3f) &&
+			near(top_left.v, 0.7f) &&
 			near(bottom_right.x, 12.0f) &&
 			near(bottom_right.y, 19.0f) &&
 			near(bottom_right.z, 27.0f) &&
 			near(bottom_right.u, 0.85f) &&
-			near(bottom_right.v, 0.7f),
+			near(bottom_right.v, 0.3f),
 			"camera pull, extents, and inset UVs compile exactly")) return false;
 	if (!check(top_left.primary_color == 0x11223344u &&
 			top_left.secondary_color == 0x55667788u,
