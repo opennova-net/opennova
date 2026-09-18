@@ -220,7 +220,7 @@ func test_world_particles_use_the_uncapped_rd_compositor_contract() -> void:
 			"RenderSceneData.get_view_projection() is already depth-corrected; " +
 			"correcting it again makes particles move against scene geometry.")
 	assert_eq(String(backend.get("scene_color_copy_policy", "")),
-			"once_per_distorting_view")
+			"before_each_distortion_run")
 	assert_eq(String(backend.get("scene_color_snapshot_backend", "")),
 			"fullscreen_sampled_blit",
 			"Resolved scene color is sampleable but is not a transfer source.")
@@ -568,3 +568,115 @@ func test_reflection_camera_receives_two_ordered_camera_correct_submissions() ->
 			"the cutover leaves no ambiguous legacy draw-list key")
 	assert_false(report.has("world_backend"),
 			"the cutover leaves no single-pass backend alias")
+
+
+func _overlap_texture(name: String) -> Texture2D:
+	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	var color := Color(0.5, 0.5, 1.0, 1.0)
+	if name == "impact.tga":
+		color = Color.RED
+	elif name == "smoke.tga":
+		color = Color(0.0, 1.0, 0.0, 0.5)
+	image.fill(color)
+	return ImageTexture.create_from_image(image)
+
+
+func _overlap_definition(name: String, blend: int) -> ParticleDef:
+	var particle := ParticleDef.new()
+	particle.id = name
+	particle.emit_dur = 0.1
+	particle.emit_rate = 10.0
+	particle.emit_burst = 1
+	particle.age = 100.0
+	particle.alpha = 1.0
+	particle.color1 = Color.WHITE
+	particle.color2 = Color.WHITE
+	particle.color3 = Color.WHITE
+	particle.color4 = Color.WHITE
+	var graphics: Array = particle.graphics
+	var layer := graphics[0] as ParticleGraphicLayer
+	layer.present = true
+	layer.texture = name + ".tga"
+	layer.blend_mode = blend
+	layer.alpha = 1.0
+	layer.scale_value = 1.0
+	particle.graphics = graphics
+	return particle
+
+
+func _overlap_spawn(scene: EffectScene, name: String, depth: float) -> void:
+	var pose := Transform3D.IDENTITY
+	pose.origin = Vector3(0.0, 1.0, depth)
+	assert_eq(scene.spawn(EffectSpawnRequest.make(scene.intern(name), pose)).status,
+			EffectScene.SPAWN_STATUS_SPAWNED)
+	scene.advance_in_place(0.1)
+
+
+func _overlap_image(viewport: SubViewport, renderer: ParticleRenderer) -> Image:
+	renderer.render_now()
+	for frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	return viewport.get_texture().get_image()
+
+
+func test_muzzle_distortion_preserves_particles_already_drawn_behind_it() -> void:
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(128, 128)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var background := WorldEnvironment.new()
+	background.environment = Environment.new()
+	background.environment.background_mode = Environment.BG_COLOR
+	background.environment.background_color = Color.BLACK
+	viewport.add_child(background)
+	var file := ParticleFile.new()
+	file.particles = [_overlap_definition("impact", 0),
+			_overlap_definition("smoke", 0), _overlap_definition("haze", 7)]
+	var effects: Array[ParticleEffect] = []
+	for name in ["impact", "smoke", "haze"]:
+		var effect := ParticleEffect.new()
+		effect.id = name
+		effect.pdefs = PackedStringArray([name])
+		effects.append(effect)
+	file.effects = effects
+	var scene := EffectScene.new()
+	scene.open([file])
+	var renderer := ParticleRenderer.new()
+	renderer.scene = scene
+	renderer.texture_provider = _overlap_texture
+	renderer.set_water_plane(-100.0, null)
+	viewport.add_child(renderer)
+
+	_overlap_spawn(scene, "impact", 0.0)
+	var before := await _overlap_image(viewport, renderer)
+	assert_gt(before.get_pixel(64, 64).r, 0.95, "the distant impact is visible")
+	_overlap_spawn(scene, "haze", 1.0)
+	var after := await _overlap_image(viewport, renderer)
+	assert_almost_eq(after.get_pixel(64, 64).r, before.get_pixel(64, 64).r, 0.05,
+			"neutral muzzle haze must preserve the impact behind it")
+
+	# A color draw between two distortion runs must enter the next snapshot.
+	_overlap_spawn(scene, "smoke", 2.0)
+	var smoke := await _overlap_image(viewport, renderer)
+	var expected := smoke.get_pixel(64, 64)
+	assert_gt(expected.g, 0.5, "the intervening smoke contributes green")
+	_overlap_spawn(scene, "haze", 3.0)
+	var overlapping := await _overlap_image(viewport, renderer)
+	var actual := overlapping.get_pixel(64, 64)
+	assert_almost_eq(actual.r, expected.r, 0.05, "near haze preserves the red impact")
+	assert_almost_eq(actual.g, expected.g, 0.05, "near haze preserves intervening smoke")
+	var backend: Dictionary = renderer.get_debug_draw_list_report().get("world_camera_backend", {})
+	assert_eq(String(backend.get("status", "")), "drawn", String(backend.get("failure", "")))
+	assert_eq(int(backend.get("drawn_commands", -1)), int(backend.get("submitted_commands", 0)))
+	assert_eq(int(backend.get("scene_color_copies", 0)), 2,
+			"each ordered distortion run samples the preceding particle draws")

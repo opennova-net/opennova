@@ -94,7 +94,6 @@ private:
             std::make_shared<opennova::particle::EffectScene>();
 	mutable opennova::particle::ParticleFrameSnapshot last_frame_;
 	mutable bool snapshot_dirty_ = true;
-	opennova::particle::Vec3 global_wind_{};
 	opennova::particle::ParticleViewFrustum frustum_{};
 
 	void _materialize_snapshot() const;

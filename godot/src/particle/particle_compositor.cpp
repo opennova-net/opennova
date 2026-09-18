@@ -1277,11 +1277,9 @@ bool ParticleCompositorEffect::Impl::draw(
 	std::size_t distortion_commands_skipped = 0;
 	for (std::uint32_t view = 0; view < view_count; ++view) {
 		ViewTarget &target = targets[view];
-		const bool scene_color_available = needs_scene_color &&
-				ensure_scene_color_target(target, view) &&
-				snapshot_scene_color(target, view);
-		if (scene_color_available)
-			++scene_color_copies;
+		const bool scene_target_available = needs_scene_color &&
+				ensure_scene_color_target(target, view);
+		bool scene_color_available = false;
 
 		// RenderSceneData::get_view_projection(view) already includes Godot's
 		// depth/Y correction and TAA jitter. Applying another depth correction
@@ -1316,21 +1314,42 @@ bool ParticleCompositorEffect::Impl::draw(
 		write_f32(push_constants, 120,
 				static_cast<float>(static_cast<std::uint32_t>(ticks)) * 0.004f);
 
-		const int64_t draw_list = rd->draw_list_begin(target.framebuffer);
-		if (draw_list == RenderingDevice::INVALID_ID) {
-			set_failure("RenderingDevice could not begin the particle draw list",
-					"draw_list_failed");
-			return false;
-		}
+		int64_t draw_list = RenderingDevice::INVALID_ID;
 		const int64_t format = rd->framebuffer_get_format(target.framebuffer);
-		const RID scene_uniform_set = scene_color_available ?
-				target.scratch_uniform_set : fallback_scene_uniform_set;
+		bool previous_distort = false;
 		for (const opennova::renderer::ParticleDrawCommand &command : submission.commands) {
-			if (command.pipeline == opennova::renderer::ParticlePipeline::Distort &&
-					!scene_color_available) {
+			const bool distort =
+					command.pipeline == opennova::renderer::ParticlePipeline::Distort;
+			if (distort && !previous_distort) {
+				// Finish the preceding color draws before sampling their attachment.
+				// A pre-particle snapshot lets muzzle haze replace distant impacts
+				// with bare terrain. Keep one immutable copy per contiguous Distort
+				// run, and refresh it after any intervening color draws. This is a
+				// Godot compositing boundary, not a witnessed retail capture time.
+				if (draw_list != RenderingDevice::INVALID_ID) {
+					rd->draw_list_end();
+					draw_list = RenderingDevice::INVALID_ID;
+				}
+				scene_color_available = scene_target_available &&
+						snapshot_scene_color(target, view);
+				if (scene_color_available)
+					++scene_color_copies;
+			}
+			previous_distort = distort;
+			if (distort && !scene_color_available) {
 				++distortion_commands_skipped;
 				continue;
 			}
+			if (draw_list == RenderingDevice::INVALID_ID) {
+				draw_list = rd->draw_list_begin(target.framebuffer);
+				if (draw_list == RenderingDevice::INVALID_ID) {
+					set_failure("RenderingDevice could not begin the particle draw list",
+							"draw_list_failed");
+					return false;
+				}
+			}
+			const RID scene_uniform_set = scene_color_available ?
+					target.scratch_uniform_set : fallback_scene_uniform_set;
 			const std::uint32_t mode = static_cast<std::uint32_t>(command.pipeline);
 			write_u32(push_constants, 124, mode);
 			const RID pipeline = pipeline_for(command, format);
@@ -1355,7 +1374,8 @@ bool ParticleCompositorEffect::Impl::draw(
 			++gpu_draw_calls;
 			++drawn_commands;
 		}
-		rd->draw_list_end();
+		if (draw_list != RenderingDevice::INVALID_ID)
+			rd->draw_list_end();
 	}
 
 	{
@@ -1401,7 +1421,7 @@ Dictionary ParticleCompositorEffect::Impl::report() const {
 			"scene,black,black,scene,white,gray127,black,scene";
 	result["view_projection_source"] = "render_scene_data_corrected";
 	result["adds_view_projection_depth_correction"] = false;
-	result["scene_color_copy_policy"] = "once_per_distorting_view";
+	result["scene_color_copy_policy"] = "before_each_distortion_run";
 	result["scene_color_snapshot_backend"] = "fullscreen_sampled_blit";
 	result["scene_color_source_requirement"] = "sampling_only";
 	result["scene_color_requires_copy_from"] = false;

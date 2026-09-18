@@ -628,3 +628,33 @@ func test_descriptor_pose_without_orientation_aims_up() -> void:
 	var aimed := EffectWorld.descriptor_pose(origin, Vector3(0.0, -0.6, 0.8))
 	assert_almost_eq(aimed.basis.z, Vector3(0.0, -0.6, 0.8), Vector3.ONE * 0.0001, "a real orientation is the forward axis")
 	assert_almost_eq(aimed.basis.z.length(), 1.0, 0.0001, "normalized")
+
+
+func test_preaged_effect_receives_mission_wind_before_its_first_tick() -> void:
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	add_child_autofree(camera)
+	var file := _make_renderable_effect_file()
+	var particle := file.find_particle("puff dots")
+	particle.flags = particle.flags | (1 << 10) # GLOBALWIND
+	particle.age = 2.0
+	var normal := _make_world()
+	var preaged := _make_world()
+	for world in [normal, preaged]:
+		world.load_particle_file(file)
+		world.set_mission_wind(10, 90)
+	assert_gt(normal.spawn_effect_transient("puff", Vector3.ZERO), 0)
+	for tick in 8:
+		normal.advance_fixed_tick(0.016)
+	assert_gt(preaged.spawn_effect_transient("puff", Vector3.ZERO, Vector3.ZERO, 8), 0)
+	normal.render_now()
+	preaged.render_now()
+	var expected := _single_emitter(normal)
+	var actual := _single_emitter(preaged)
+	assert_eq(actual.alive, expected.alive, "the catch-up population matches ordinary ticks")
+	assert_true(expected.bounds_valid and actual.bounds_valid)
+	assert_gt(expected.bounds.get_center().x, 0.05, "the mission wind moves the particles")
+	assert_almost_eq(actual.bounds.position, expected.bounds.position, Vector3.ONE * 0.0001,
+			"spawn catch-up uses mission wind even before the world's first advance")
+	assert_almost_eq(actual.bounds.size, expected.bounds.size, Vector3.ONE * 0.0001)

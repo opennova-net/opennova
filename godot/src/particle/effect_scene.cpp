@@ -403,17 +403,13 @@ void EffectScene::advance_with_forces(
 	opennova::particle::EffectAdvanceRequest request;
 	request.delta_seconds = static_cast<float>(p_delta_seconds);
 	request.forces = forces;
-	request.global_wind = global_wind_;
 	request.frustum = frustum_;
 	scene_->advance_simulation(request);
 	snapshot_dirty_ = true;
 }
 
 void EffectScene::set_global_wind(const Vector3 &p_wind) {
-	global_wind_ = {};
-	if (std::isfinite(p_wind.x) && std::isfinite(p_wind.y) && std::isfinite(p_wind.z)) {
-		global_wind_ = {p_wind.x, p_wind.y, p_wind.z};
-	}
+	scene_->set_global_wind(native_vector(p_wind));
 }
 
 void EffectScene::set_view_frustum(const TypedArray<Plane> &p_planes,

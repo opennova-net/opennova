@@ -199,9 +199,6 @@ struct EffectOwnerPoseUpdate {
 struct EffectAdvanceRequest {
 	float delta_seconds = 0.0f;
 	const ParticleForceField *forces = nullptr;
-	// The mission wind in effect-frame units per second (GLOBALWIND drift);
-	// see particle::mission_wind_vector.
-	Vec3 global_wind{};
 	// The current camera's clip planes for the NOVISNOUPDATE gate; leave
 	// `valid` false (headless, no camera) to advance every emitter.
 	ParticleViewFrustum frustum;
@@ -376,6 +373,12 @@ public:
 	// remains valid for the next play session.
 	void reset_runtime_state();
 
+	// Scene-wide mission wind in effect-frame units per second. Both ordinary
+	// ticks and spawn-time catch-up use it, including spawns before the first
+	// advance. Retained across catalog reloads and runtime resets; non-finite
+	// input clears it. See particle::mission_wind_vector.
+	void set_global_wind(const Vec3 &wind) noexcept;
+
 	// Advances all live emitters and reclaims completed groups without copying
 	// render values. Embedders that batch multiple fixed ticks materialize only the
 	// final frame through write_snapshot().
@@ -392,6 +395,7 @@ public:
 private:
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
+	Vec3 global_wind_{};
     bool spawn_enabled_ = true;
 };
 

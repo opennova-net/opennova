@@ -807,7 +807,8 @@ EffectSpawnReceipt EffectScene::spawn(const EffectSpawnRequest &request) {
 
 	const std::uint32_t initial_age_ticks = std::min(
 			request.initial_age_ticks, kEffectInitialAgeTickLimit);
-	const EmitterEnvironment replay_environment;
+	EmitterEnvironment replay_environment;
+	replay_environment.global_wind = global_wind_;
 	for (std::uint32_t tick = 0; tick < initial_age_ticks; ++tick) {
 		for (const std::size_t emitter_slot : group.emitter_slots) {
 			Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
@@ -1029,6 +1030,11 @@ void EffectScene::reset_runtime_state() {
 	impl_->capacity_rejection_count = 0;
 }
 
+void EffectScene::set_global_wind(const Vec3 &wind) noexcept {
+	global_wind_ = std::isfinite(wind.x) && std::isfinite(wind.y) &&
+			std::isfinite(wind.z) ? wind : Vec3{};
+}
+
 void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 	double requested_seconds = static_cast<double>(request.delta_seconds);
 	if (!std::isfinite(requested_seconds) || requested_seconds < 0.0) {
@@ -1065,7 +1071,7 @@ void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 
 	EmitterEnvironment environment;
 	environment.forces = request.forces;
-	environment.global_wind = request.global_wind;
+	environment.global_wind = global_wind_;
 	environment.frustum = request.frustum.valid ? &request.frustum : nullptr;
 	for (std::uint32_t step = 0; step < step_count; ++step) {
 		for (const std::size_t group_slot : impl_->active_group_slots) {
