@@ -34,12 +34,13 @@ Records `{char name[8]; void (*fn)(Entity*)}`, the **per-frame motor** per class
 | projectiles/effects | shell/missile/flare physics | out of scope |
 
 ### 1.3 Consequence for OpenNova (the reframing verdict)
-Our `engine/runtime/world` AI port (24-row SM @ 0x815238, states 16–18, `AI_BeginUpdate @ 0x457b40`,
-`AI_UpdateWaypointMovement @ 0x457bd0`, targeting/combat P1/P2) is a **byte-exact port of the
-AI-vehicle decision layer** (cveh/cbot/ctrn). Those verdicts stand. The divergence: OpenNova
-currently routes **BMS organics** through that vehicle layer; the original routes them through
-`Entity_UpdateInfantryAI @ 0x4b9910`, where **locomotion is animation-driven root motion**.
-User decision 2026-06-10: port the infantry motor to full fidelity (§3) before extracting PR-B1.
+The `engine/runtime/world` state-machine and targeting port models the
+AI-vehicle decision layer (cveh/cbot/ctrn). Section 34 corrects the original
+`AI_BeginUpdate @ 0x457B40` controller ownership and class-callback admission.
+The 2026-06-10 routing discovery separated BMS organics from that vehicle
+layer: the original uses `Entity_UpdateInfantryAI @ 0x4B9910`, whose locomotion
+is animation-driven root motion. The port now follows that organic motor
+through `tick_infantry`; section 3 records its mechanics.
 
 Also confirmed: `AI_DispatchStateMachineByProfileClass @ 0x4680a0` (defined this session) is
 **unreferenced dead code** (no callers, no data refs, no rel32 sites). `g_AIMoveStepFnTable @
@@ -53,7 +54,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 
 | reimpl (engine/runtime/world) | original | addr | evidence | verdict |
 |---|---|---|---|---|
-| `AiSystem::begin_update` | `AI_BeginUpdate` | 0x457b40 | byte-walk this session (budget 0x1F0, pend=8/brain[6], +brain[7]) | **matching** (as vehicle-layer) |
+| `AiSystem::begin_update` | `AI_BeginUpdate` | 0x457b40 | per-entity controller phase >496, pend=8/brain[6], +brain[7]; 24 original-executable vectors (section 34) | **MATCHING** (movement-controller row 4) |
 | `AiSystem::update_waypoint_movement` | `AI_UpdateWaypointMovement` | 0x457bd0 | prior grill + re-read | **matching** (vehicle mover) |
 | `ai_waypoint_update_target` | `AIWaypoint_UpdateTarget` | 0x457380 | prior grill; also called by aircraft motor @0x490310 | **matching** |
 | `process_infantry_state_machine` | SM dispatcher (vehicle classes) | 0x4581b0 | event-callback fn1 rows | **matching**; name is now known to be historical — it is the AI-VEHICLE SM |
@@ -752,10 +753,11 @@ present boundary (`mission_yaw = 90 − heading / kBamPerDegree`). The Godot bas
   `brain[131] = Entity_CalcAverageGroundHeight(e, 0x50000) + 0x50000` unconditionally, with the 372/744
   phase counters. This session labeled it "the vehicle mover" — **superseded by §1.3**, which
   identified it as a directional **death-fall mover** (move-step ids 0–3); the mechanics stand.
-- Dispatcher facts confirmed: SM dispatcher `0x4581b0` (24-row table @ 0x815238), per-frame budget gate
-  `AI_BeginUpdate @ 0x457b40` (cap 496); dispatch event args 0=update / 1=spawn / 4=death. The
-  then-open "per-entity driver near 0x462120" lead was later resolved by §1.1: those are the
-  event-callback thunks for `cbot/cpln/ctrn`.
+- Dispatcher facts confirmed: SM dispatcher `@ 0x4581B0` (24-row table @ 0x815238),
+  event args 0=update / 1=spawn / 4=death. `AI_BeginUpdate @ 0x457B40` is movement
+  controller row 4 with a per-entity phase limit of 496, not a per-frame admission
+  budget (corrected in section 34). The callback thunks for `cbot/cpln/ctrn` resolve
+  the earlier driver lead near @ 0x462120.
 
 ## 8. Appendix: animation selection from item-type ADM (2026-06-07)
 
@@ -10883,3 +10885,44 @@ animated/destroyed-section table is not claimed fixed by this marking change.
 
 The full scope, original executable hashes, regeneration commands and live-test
 limits are in [the validation report](../jo-c-validation-2026-09-18.md).
+
+## 34. AI callback ownership and movement controllers (2026-09-18)
+
+This correction covers `ai_system.cpp`, `ai_aircraft.cpp` and their public tick
+and event entry points. Reference: jo-c `f2cd385955ad8b889aa7e820973a849707aa51a4`,
+retail `Jointops.exe`, IDB `Jointops.exe.kong.i64`; the executable SHA256 and
+reproduction command are in [the validation report](../jo-c-validation-2026-09-18.md).
+No IDB changes were made in this movement pass.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Pool-1 callback admission | MATCHING (read-only grill and public-tick regression) | Per-entity countdown only; `movement_brain_parity` runs 80 vehicle brains on each role and checks working-register retention; `vehicle_motor` requires zero movement from a freshly boarded routeless hull. |
+| Aircraft controller row 4 | MATCHING (behavioral proof) | 24 original-instruction vectors through `AiSystem::aircraft_movement`, including phases 496/497 and an untouched second aircraft. |
+| Default class events | MATCHING (behavioral proof) | 252 original-dispatcher vectors for air/ground, authority/client, event types 2/3/6 and pending-state transitions, including reset/enter/exit callbacks. |
+
+`Entity_UpdatePool1Slot @ 0x4B8DD0` admits the class callback when entity+0x2AC
+is nonpositive (site @ 0x4B8E1B), refreshes proximity, calls +0x1C8
+(@ 0x4B8E3C), then calls the motor +0x1C4 every visit (@ 0x4B8E53). The countdown
+decrements at @ 0x4B8EA0. There is no preceding `AI_BeginUpdate` call or global
+work quota. Removing that invented gate prevents later entities being skipped
+and preserves state handlers' working registers between think visits.
+
+`AI_BeginUpdate @ 0x457B40` belongs to row 4 (@ 0x8153D8) of
+`g_AIMoveStepFnTable @ 0x8153B8`. Its phase lives at brain[2]+16 in the entity's
+32-byte controller. It seeds working speed, height, heading and aim words;
+phase >496 requests pending state 8, or brain[6] when `profile.flags100 & 2` is nonzero.
+Otherwise phase advances by brain[7]. The port now dispatches row 4 explicitly
+and uses `AiEntity::aircraft_phase`; the shared `AiScheduler` and its debug
+counter are removed. Fresh ground brains therefore retain their zero speed,
+rather than receiving this unrelated controller's speed seed.
+
+Default event types still reach the dispatchers' transition tail. The ground
+client accepts pending 16 or 21..23; the air client accepts 7 or 13..15. The
+same authority/client guards now apply to those events in the port.
+[orig: EntityAI_ProcessVehicleStateMachine @ 0x4583C0 (default branch
+@ 0x45846D); EntityAI_ProcessInfantryStateMachine @ 0x4581B0 (default branch
+@ 0x458261)]
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-AI-14 | Removed the shared admission budget and unconditional working-register seed; dispatched movement-controller row 4 with per-entity phase; default events commit through the normal role guard. | Pool-1 callback @ 0x4B8E1B..0x4B8E53, controller @ 0x457B40, default-event tails @ 0x458261 / @ 0x45846D. | FIXED 2026-09-18 in PR #652. Prevents skipped brains, false boarding throttle and missed event transitions; 276 original-instruction cases plus crowded-world and first-tick boarding regressions. |

@@ -15,6 +15,15 @@ into them.
 > real producer is the `hudcolor` action row (code 10, default F6,
 > retail-shadowed by `huddetail` — D-CTRL-4).
 
+## AI and player motor follow-through (2026-09-18, PR #652)
+
+| Reimplementation surface | Original witness | Verdict and evidence |
+|---|---|---|
+| `AiSystem::tick` callback admission | `Entity_UpdatePool1Slot @ 0x4B8DD0` | MATCHING per-entity countdown without a shared quota; 80 brains on each role and first-tick boarding regressions. [D-AI-14](world/world-wac-ai-re.md#34-ai-callback-ownership-and-movement-controllers-2026-09-18). |
+| `aircraft_movement` controller 4 / `begin_update` | `AI_BeginUpdate @ 0x457B40`; `g_AIMoveStepFnTable @ 0x8153B8` | MATCHING per-entity phase and working registers; 24 original-instruction cases in `movement_brain_parity`. |
+| Default class-event tails | `EntityAI_ProcessInfantryStateMachine @ 0x4581B0`; `EntityAI_ProcessVehicleStateMachine @ 0x4583C0` | MATCHING role guards and transition effects; 252 original-instruction cases. |
+| `stage_player_vehicle_input` | `Entity_UpdateVehiclePhysics @ 0x48AF00`; `Entity_UpdateLightVehiclePhysics @ 0x483FE0` | MATCHING bounded command stage; full BAM heading, analog direction and brake state match 640 original-instruction cases through the public motor. [D-VEH-3](world/vehicle-client-movers-re.md#39-player-motor-command-precision-and-brake-transitions-2026-09-18). |
+
 ## Particle simulation grill (2026-09-17, the sixth jo-c sweep)
 
 | Reimplementation surface | Retail witness | Verdict and evidence |

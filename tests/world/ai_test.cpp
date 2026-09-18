@@ -1,5 +1,5 @@
 // AI subsystem foundation tests: state enum, struct layout, AIEvent ring, the
-// AI_BeginUpdate budget gate, the infantry state-machine dispatcher + transitions,
+// AI_BeginUpdate per-entity movement phase, the infantry state-machine dispatcher + transitions,
 // and the byte-exact trivial handler ports. Driven by a manual World + tick.
 #include <cstdio>
 #include <memory>
@@ -2345,7 +2345,7 @@ int main() {
     CHECK(streq(ai_state_name(13), "?")); // transitional gap
     CHECK(streq(ai_state_name(21), "?"));
 
-    // ---- AI_BeginUpdate budget gate ----
+    // ---- AI_BeginUpdate per-entity movement phase ----
     {
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -2355,23 +2355,23 @@ int main() {
         e.brain.f[AiBrain::kSpeedA] = 7;
         e.heading = 123;
 
-        // Under budget: accumulates and proceeds; working fields copied.
-        sys.scheduler.budget = 0;
+        // Before phase expiry: accumulates and proceeds; working fields copied.
+        e.aircraft_phase = 0;
         CHECK(sys.begin_update(e) == true);
-        CHECK(sys.scheduler.budget == 64);          // += step
+        CHECK(e.aircraft_phase == 64);          // += step
         CHECK(e.brain.f[AiBrain::kOutSpeed] == 7);  // [128] = [49]
         CHECK(e.brain.f[132] == 123);               // = heading
 
-        // Over budget, profile flag clear -> forced pending state 8.
-        sys.scheduler.budget = 500;
+        // Expired phase, profile flag clear -> forced pending state 8.
+        e.aircraft_phase = 500;
         e.brain.f[AiBrain::kPendState] = 0;
         e.profile.flags100 = 0;
         CHECK(sys.begin_update(e) == false);
-        CHECK(sys.scheduler.budget == 500);         // unchanged
+        CHECK(e.aircraft_phase == 500);         // unchanged
         CHECK(e.brain.f[AiBrain::kPendState] == 8);
 
-        // Over budget, profile flag set -> forced pending = fallback.
-        sys.scheduler.budget = 500;
+        // Expired phase, profile flag set -> forced pending = fallback.
+        e.aircraft_phase = 500;
         e.profile.flags100 = 2;
         e.brain.f[AiBrain::kFallback] = 17;
         CHECK(sys.begin_update(e) == false);

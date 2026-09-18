@@ -1528,13 +1528,18 @@ target_include_directories(vehicle_suspension_test PRIVATE ${CMAKE_CURRENT_SOURC
 add_test(NAME vehicle_suspension COMMAND vehicle_suspension_test)
 
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
-# budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
+# per-entity movement phase (AI_BeginUpdate), the state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.
 add_executable(ai_test world/ai_test.cpp)
 target_link_libraries(ai_test PRIVATE opennova_runtime)
 target_include_directories(ai_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ai_test PRIVATE cxx_std_17)
 add_test(NAME ai COMMAND ai_test)
+
+add_executable(movement_brain_parity_test world/movement_brain_parity_test.cpp)
+target_link_libraries(movement_brain_parity_test PRIVATE opennova_runtime)
+target_compile_features(movement_brain_parity_test PRIVATE cxx_std_17)
+add_test(NAME movement_brain_parity COMMAND movement_brain_parity_test)
 
 add_executable(npc_weapons_test world/npc_weapons_test.cpp)
 target_link_libraries(npc_weapons_test PRIVATE opennova_runtime)

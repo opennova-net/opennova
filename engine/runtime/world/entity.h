@@ -1173,6 +1173,11 @@ struct Entity {
         // 1 while `occupant && Flags & 8 && itemDef->handBrake`, and the
         // command word is forced to zero for as long as it holds.
         uint8_t handbrake_latched = 0;
+        // Retained direction used by the brake-mode freelook merge (+0x3C8).
+        // Its only original writer is the unreferenced mover @0x48748B; live
+        // ground/bike motors read it without replacing it.
+        // [orig: Entity_UpdateVehiclePhysics @0x48B855..0x48B864]
+        int32_t handbrake_direction = 0;
     };
     VehicleMotorState veh;
 };

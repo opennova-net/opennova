@@ -3,7 +3,8 @@
 The concrete differences found in this pass are corrected: guided-round birth,
 lifetime and motion; shared loaded-ammo storage; blast section marking; indoor
 projectile terrain admission; parachute descent; writable WAC night state;
-reverb selection/preset behavior; and dedicated texture producers. Mission
+reverb selection/preset behavior; dedicated texture producers; AI callback and
+controller ownership; and player steering/handbrake command state. Mission
 save/resume is excluded at the user's request.
 
 This is a bounded comparison with the original executable and `../jo-c`, not a
@@ -62,10 +63,10 @@ stereo packing and pacing intact. Every preset produced SHA256
 
 ## Validation and remaining limits
 
-- Full native Release build succeeded. CTest: **482 passed, 1 skipped, 0 failed**
+- Initial projectile/material pass: full native Release build succeeded. CTest: **482 passed, 1 skipped, 0 failed**
   out of 483; `motorcycle_gravity_06tr` could not open its required retail 06TR
   mission in the supplied reference install. Both retail asset roots were set.
-- Godot RelWithDebInfo extension build succeeded. The new producer test and
+- Initial projectile/material pass: Godot RelWithDebInfo extension build succeeded. The new producer test and
   existing resource-root contract suite: **23 tests, 237 assertions passed**.
 - Original-executable comparisons: **308 guided cases, 14 horizon images,
   40 mixer preset cases passed**. No audible or live visual equivalence claim.
@@ -86,3 +87,52 @@ Durable domain details: [network](net/novaworld-net-re.md),
 [materials](render/render-material-re.md). IDB comments for the new reverb and
 texture findings were appended at @ 0x7BDD12, @ 0x58A220 and @ 0x58CB90 and saved;
 no original executable bytes or reference source files were edited.
+
+## AI and player movement follow-through
+
+This pass compares PR #652 head `0fb204f13ea1303123896f8c38375c323a5b5350`
+with jo-c `f2cd385955ad8b889aa7e820973a849707aa51a4` and the same SHA256-pinned
+original executable above. The shared native engine owns these corrections:
+
+- D-AI-14: remove the invented global brain quota and unconditional movement
+  register seed. Each pool-1 brain uses its own think countdown. Aircraft
+  movement-controller row 4 now runs with the owning aircraft's phase; default
+  class events retain the original authority/client transition guard.
+- D-VEH-3: retain full driver heading precision, replace inactive digital
+  directions in the analog arm, and use prior brake state and its retained
+  direction in the ground/bike command branches. A freshly boarded routeless
+  AI vehicle now stays still from the first tick.
+
+`movement_brain_parity` consumes **916 original-instruction vectors**: 640
+player ground/bike command cases, 252 air/ground default-event cases and 24
+aircraft recovery-phase cases. The original dispatcher callbacks execute
+unchanged; motor slices stop before steering/contact. No engine calls are
+mocked. Public-tick coverage also runs 80 brains on each role and checks that
+later vehicles think without unrelated register rewrites. `vehicle_motor`
+pins first-tick and sustained zero movement for the fresh routeless driver case.
+The initial 436-case subset plus crowded-world checks reproduced 1095 failed
+assertions before the implementation changes; the final vectors broaden the
+motor scope to bikes and retained brake directions.
+
+```text
+python scripts/oracles/movement_brain_parity.py --retail-exe <Jointops.exe>
+# Add --write to regenerate tests/world/fixtures/*_vectors.inc for this oracle.
+ctest --test-dir build -C Release -R "^(movement_brain_parity|ai|vehicle_motor)$" --output-on-failure
+```
+
+The oracle needs `pefile` and `unicorn`; native tests use only the committed
+synthetic vectors. Domain evidence and addresses are in
+[world section 34](world/world-wac-ai-re.md#34-ai-callback-ownership-and-movement-controllers-2026-09-18)
+and [vehicle section 39](world/vehicle-client-movers-re.md#39-player-motor-command-precision-and-brake-transitions-2026-09-18).
+No original/reference files or IDB state were changed in this movement pass.
+No new live mission or mixed retail/OpenNova multiplayer playthrough is claimed.
+
+Final movement-pass validation: full native Release build succeeded; **483 tests
+passed, 1 skipped, 0 failed** out of 484 with both retail asset roots set and Git
+LFS fixtures materialized. The skip is the same missing `06TR.bms` mission.
+All 916 oracle vectors verified against the pinned executable. Repository
+ratchets, maturity, include/link graphs, orphan headers, witness census (zero
+lost), fixture provenance/materialization, environment/convention checks,
+ledger scoreboard, retail-gate documentation and diff whitespace passed.
+The GDExtension/GUT results above belong to the earlier projectile/material pass;
+they were not rerun for this native movement follow-through.

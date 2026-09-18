@@ -265,12 +265,24 @@ void stage_player_vehicle_input(
     // player's 0x0A record, so the latch is wire-visible until the next uplink
     // rewrites it [orig: ground @0x48b847..0x48b897 (`or eax, 10h` /
     // `or [ecx+12Ch], 10h`); boat @0x48DE04..0x48DE7B].
-    if (analog_sum != 0 || (moving && dir != 0)) {
+    const bool brake_mode = traits.physics != 0 &&
+            (traits.family == VehicleFamily::Ground || traits.family == VehicleFamily::Bike);
+    const int free_look_dir = brake_mode && m.handbrake_latched != 0
+            ? m.handbrake_direction : dir;
+    // The prior brake latch selects +0x3C8 for this merge only; the steering
+    // switch below still uses the current input direction.
+    // [orig: Entity_UpdateVehiclePhysics @0x48B855..0x48B864; D-VEH-3]
+    if (analog_sum != 0 || (moving && free_look_dir != 0)) {
         move_order |= Entity::kMoveOrderFreeLook;
         occ.net_move_input |= static_cast<uint8_t>(Entity::kMoveOrderFreeLook);
     }
 
-	int32_t driver_yaw_bam = bam_heading_from_mission_yaw_deg(occ.yaw);
+	// Read the full-precision LOOK word shared by the body and aircraft mover;
+	// the degree mirror is a fallback for unbound bodies.
+	// [orig: Entity_UpdateVehiclePhysics @0x48BB0B; D-VEH-3]
+	const AiEntity *driver_body = world.ai.for_handle(occ.handle);
+	int32_t driver_yaw_bam = driver_body != nullptr ? driver_body->heading
+			: bam_heading_from_mission_yaw_deg(occ.yaw);
 
 	// Family split at the command source: the boat player leg reads itemDef
     // waterSpeed (+0x8EC) at EVERY command site — retail cbot defs author no
@@ -293,7 +305,11 @@ void stage_player_vehicle_input(
         }
     }
 
-    if (boat_hard_turn || moving) {
+    // The previous full-ground/bike brake latch chooses the analog arm even
+    // while a movement key is held. The latch itself updates later this tick.
+    // [orig: Entity_UpdateVehiclePhysics @0x48B9D2..0x48B9E5; bike @0x484B81]
+    const bool braking = brake_mode && m.handbrake_latched != 0;
+    if (boat_hard_turn || (moving && !braking)) {
         m.cmd_speed = cmd_base;
     } else {
         int32_t steer_delta =
@@ -301,9 +317,14 @@ void stage_player_vehicle_input(
         const int32_t alt =
                 (kAnalogSteerScale * static_cast<int32_t>(occ.net_analog_y)) >> 1;
         if (std::abs(alt) > std::abs(steer_delta)) steer_delta = alt;
-        m.steer_target_bam -= steer_delta;
-        m.cmd_speed =
-                -(cmd_base * static_cast<int32_t>(occ.net_analog_x)) >> 7;
+        if (!braking) dir = 0; // analog control replaces the digital direction
+        m.steer_target_bam = io::bam_sub(m.steer_target_bam, steer_delta);
+        m.cmd_speed = io::bam_sar(io::bam_sub(0,
+                bam_mul_wrap(cmd_base, static_cast<int32_t>(occ.net_analog_x))), 7);
+        // The bike clears analog throttle while the old brake latch is set;
+        // ground vehicles keep it until the later current-input brake test.
+        // [orig: Entity_UpdateLightVehiclePhysics @0x484BA7..0x484BAB]
+        if (braking && traits.family == VehicleFamily::Bike) m.cmd_speed = 0;
 		// The same pedal turn updates the driver's view unless freelook is
 		// latched. The signed three-axis sum above can cancel to zero while
 		// the dominant steering axis remains nonzero.

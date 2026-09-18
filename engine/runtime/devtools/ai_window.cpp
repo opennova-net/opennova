@@ -116,8 +116,8 @@ void AiWindow::format_snapshot() {
 	const world::inspect::AiSystemCounters &c = snapshot_.report.counters;
 	char buf[192];
 	std::snprintf(buf, sizeof(buf),
-			"brains %d  budget %d  events %d  unported %d  rel_ops %d  find_target %d  mission gaps %u / %llu calls",
-			c.brain_count, c.scheduler_budget, c.event_count, c.unported_calls,
+			"brains %d  events %d  unported %d  rel_ops %d  find_target %d  mission gaps %u / %llu calls",
+			c.brain_count, c.event_count, c.unported_calls,
 			c.rel_ops, c.find_target_calls, c.runtime_gap_sites,
             static_cast<unsigned long long>(c.runtime_gap_calls));
 	counters_ = buf;

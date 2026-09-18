@@ -1954,6 +1954,10 @@ void test_handbrake_latch() {
     drv.net_move_input = 0x08;
     r.w.vehicles.tick_motor(r.veh(), t, nullptr);
     CHECK(r.veh().veh.handbrake_latched == 0);
+    // The old latch still selects analog input on the release tick; digital
+    // forward resumes on the following visit. [orig: @0x48B9D2..0x48B9E5]
+    CHECK(r.veh().veh.cmd_speed == 0);
+    r.w.vehicles.tick_motor(r.veh(), t, nullptr);
     CHECK(r.veh().veh.cmd_speed == t.player_speed);
     // A def without handBrake ignores the key.
     t.hand_brake = 0;
