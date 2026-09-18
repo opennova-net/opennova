@@ -540,8 +540,11 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 		var transform: Transform3D = spawn.transform
 		assert_eq(spawn.name, IMPACT_EFFECT,
 				"the surface row's authored .ptl effect reaches the effect world")
-		assert_lt(transform.basis.z.distance_to(Vector3.DOWN), 0.05,
-				"the transient carries the real incoming flight direction")
+		# Terrain hits omit orientation and use the effect's world +Y default.
+		# [orig: Projectile_HandleTerrainImpact @0x4e92c8;
+		#  CEffectWorld_SpawnEmitterAtPosition @0x5f6e52..0x5f6e5c]
+		assert_lt(transform.basis.z.distance_to(Vector3.UP), 0.05,
+				"the terrain transient uses the upward default emission axis")
 		# The engine stamps imp.tick DURING the producing tick and bumps
 		# logic_tick before the shell's fixed-tick drain runs, so a same-frame
 		# impact reads age 1 (one counter bump), never real catch-up aging: the
