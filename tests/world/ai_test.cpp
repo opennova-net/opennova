@@ -120,7 +120,7 @@ void test_vehicle_death_rows() {
 }
 
 // The sim resolves the launch point at each fire event, with a raw-origin fallback.
-// A stand-in for the asset-aware muzzle-pose provider (SimPoseProvider
+// A stand-in for the asset-aware muzzle-pose provider (EntityPoseProvider
 // in production): fixed points per handle, so the consumers' plumbing is pinned
 // without a rig. [orig: Entity_GetAttachmentWorldPosition @0x4b2670;
 //  Entity_ComputeUserpointWorldTransform @0x545c60]
@@ -3611,7 +3611,7 @@ int main() {
         CHECK(npc_h.valid());
         // Headless: no models, so the rig's posed launch points are emulated at
         // chest height (a production world resolves them through
-        // SimPoseProvider); without a provider both ends are the raw
+        // EntityPoseProvider); without a provider both ends are the raw
         // origins at the feet and every level shot grazes the ground.
         FakeMuzzleProvider provider;
         w.registry.get(player_h)->eye_offset_z = static_cast<int32_t>(0.9 * 65536.0);

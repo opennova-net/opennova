@@ -23,7 +23,7 @@ in place.
 |---|---|---|
 | `.adm` grammar (rows, comments, variant rings) | MATCHING | ctests `adm_parse`, `adm_comment`, `adm_trim_value`, `adm_variants`; 3 `[orig]` cites in `adm/adm.h` |
 | `.adm` writer | RETIRED (ADR 0038, 2026-08-26): the canonical-form writer and ctest `adm_write` are gone; grammar parity is read-side | ctests `adm_parse`, `adm_variants` |
-| `.bad` container read | MATCHING (retail-corpus parse; layout pinned by the reader) | ctests `bad_parse`, `simassets_adm_skeletal_clips_weapon_channel` (weapon-channel resolution over real clips), the asset-gated `anim_positions_from_model_corpus` (every viewmodel `.bad` under `OPENNOVA_JO_ASSETS`); the byte-exact write round-trip (`bad_roundtrip`; the FFI twin `test_bad_write_ffi.py` retired with ADR 0038) retired with the writer, ADR 0038 |
+| `.bad` container read | MATCHING (retail-corpus parse; layout pinned by the reader) | ctests `bad_parse`, `anim_skeletal_clips_weapon_channel` (weapon-channel resolution over real clips), the asset-gated `anim_positions_from_model_corpus` (every viewmodel `.bad` under `OPENNOVA_JO_ASSETS`); the byte-exact write round-trip (`bad_roundtrip`; the FFI twin `test_bad_write_ffi.py` retired with ADR 0038) retired with the writer, ADR 0038 |
 | `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table rig; rest-carrying composition) | ctest `anim_sample` (`sample_clip(model_bind)` is the reference form; production loaders run the equivalent rest-carrying factorization); ledger D-INF-14 (mechanism witnessed + ported) |
 | `.bad` runtime consumption — world/body rigs | UNGRILLED, OPEN | ledger D-INF-13 — CORRECTED 2026-08-17: bodies and FP rigs run the SAME loader path (`model_bind=true` has no production caller); what is open is the equivalence proof against `build_world_bone_matrices @0x40c770` (its table source, padding loop, frame), not an FP-only path to extend |
 | `BadBone.position` | dead at runtime (original never reads it) | correspondence `BoneAnim_BuildWorldMatrices @ 0x40c400` row; ctest `anim_sample` (synthetic) + the asset-gated ctest `anim_positions_from_model_corpus` (retail rigs) |
@@ -141,7 +141,7 @@ All existing ledger IDs — this record mints none:
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| Normalized channel timeline and terminal sample | MATCHING | anim_sample, simassets_adm_playback, simassets_adm_root_motion, mission_infantry_anim; skeletal_anim_test GUT |
+| Normalized channel timeline and terminal sample | MATCHING | anim_sample, anim_adm_playback, anim_adm_root_motion, mission_infantry_anim; skeletal_anim_test GUT |
 | FP viewmodel timeline divisor | MATCHING | player_viewmodel_rig.cpp and shared native timeline |
 | Automatic action delay conversion | MATCHING, separate clock | npruntime_weapon_table and weapon_fsm fixtures retain 62.5 plus one |
 
@@ -166,7 +166,7 @@ and latches 0x20000 without the 0x10000 stop, so the wrap tick samples the clip
 end (rec[frames-1]..rec[frames], trigger[frames-1]) and the promoted clip's
 frame 0 lands on the next tick. `ClipTimeline::normalized_at(ticks,
 armed_boundary)` and `AdmRootMotion::advance_armed` carry that park (ctest
-`simassets_adm_playback`), and both consumers take it through the
+`anim_adm_playback`), and both consumers take it through the
 `IRootMotionSource::advance_armed` seam: the local primary channel arms its
 step-3b promotion clock (`clip_length_ticks`, the clip's first end) and the
 replica channel arms its lazily computed `net_anim_pending_boundary`; each

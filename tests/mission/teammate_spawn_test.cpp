@@ -39,7 +39,7 @@ int main() {
             && rig.index.has_file("Medic02.adm");
     if (!medic_assets)
         std::printf("UNEXERCISED: retail medic ADM/3DI assets absent; authored scene coverage is separate\n");
-    CHECK(rig.models.model_for("Fblkhawm") != nullptr);
+    CHECK(rig.assets().model("Fblkhawm").get() != nullptr);
     CHECK(rig.world.teammates.count() == 1); // pre-mission dispatch sees initialized marker DEFs
     if (rig.world.teammates.count() != 1) return 1;
     rig.capture_baseline();

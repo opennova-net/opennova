@@ -1,7 +1,7 @@
 // Parse the shipped mp5_1st.adm (the reference fixture set, OPENNOVA_JO_ASSETS;
 // the whole test is gated on it) and pin its entries. The authored rig maps
 // under fixtures/anim are the unconditional coverage (adm_variants, the
-// simassets clip index).
+// anim clip index).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -85,14 +85,14 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 
 #include "wac/wac_program.h"
 #include <formats/def/def.h> // the retained weapon.def parse (S6b)
-#include <runtime/simassets/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
+#include <runtime/anim/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
 #include <runtime/world/player_loadout.h> // the moved loadout cluster (S7b, ADR 0028)
 #include <runtime/world/player_weapon.h> // the moved equipped-weapon cluster (S7a, ADR 0028)
 #include <runtime/world/present_rows.h> // the engine-owned PF_* present-row layout (ADR 0031)
-#include <runtime/simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
-#include <runtime/simassets/sim_pose_provider.h> // the engine-side pose provider (S3, ADR 0028)
-#include <runtime/simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
-#include <runtime/simassets/mounted_pose.h> // reusable PANM part matrices for mounted attachments
+#include <runtime/mission/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
+#include <runtime/world/entity_pose.h> // the engine-side pose provider (S3, ADR 0028)
+#include <runtime/assets/asset_store.h> // the sim's own .3di source (ADR 0028)
+#include <runtime/world/mounted_pose.h> // reusable PANM part matrices for mounted attachments
 #include <runtime/inmatch/session.h>
 #include <runtime/inmatch/present_rows.h> // PoolPresentLifecycleMap (the host present path's respawn mirror)
 #include <runtime/world/ai.h>
@@ -119,7 +119,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include <runtime/devtools/environment_snapshot.h> // the ONE mission boot + state + no-net tick (ADR 0042 d3)
 #include <runtime/devtools/physics_snapshot.h>
 #include <runtime/devtools/rays_snapshot.h>
-#include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
+#include <runtime/anim/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
 #include <runtime/inmatch/host_role.h>                // HostRole: the listen/dedicated host's state + frame (ADR 0043 d3)
 #include <runtime/inmatch/joiner_role.h>              // JoinerRole: the joiner's runtime, bridge and frame
@@ -1428,7 +1428,7 @@ public:
 	// The production mount (S6b, ADR 0028): find the row in the RETAINED
 	// weapon.def parse, bake the FSM def from it, and seed the clip rings from
 	// the rig's own .adm through the sim's mounted index — one step at ACCEPT
-	// time, no shell dictionary and no render dependency (engine: runtime/simassets/adm_clip_index.h). Returns false
+	// time, no shell dictionary and no render dependency (engine: runtime/anim/adm_clip_index.h). Returns false
 	// when the name is not in the retained table (caller keeps the current
 	// weapon, mirroring the armory guard). The Dictionary pair above survives
 	// as the GUT synthetic-def seam and retires with S7a.
@@ -1495,7 +1495,7 @@ public:
 	static Vector3 presentation_forward(float p_yaw_deg, float p_pitch_deg);
 	static Vector3 aim_ray_endpoint(const Vector3 &p_eye, float p_yaw_deg, float p_pitch_deg);
 	static int rangefinder_units(const Vector3 &p_position, const Vector3 &p_endpoint);
-	// The FP viewmodel rig's frame math (simassets/fp_viewmodel_spec.h): the
+	// The FP viewmodel rig's frame math (renderer/fp_viewmodel_spec.h): the
 	// view-frame -> camera-local axis map, the def rotation bias as camera
 	// euler radians, the rig yaw, the renderfov default, the TEX_TEAM byte.
 	static Vector3 viewmodel_camera_local_from_view(const Vector3 &p_view_units);
@@ -1663,14 +1663,14 @@ public:
 	// weapon_sav_relpath): with an active expansion retail looks ONLY under
 	// "expansion/<name>/", never the root (engine: formats/playersav/weapon_sav.cpp). Static so shell path assembly stays a join.
 	static String weapon_profile_relpath(const String &p_expansion_name);
-	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (simassets
+	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (renderer
 	// fp_viewmodel_spec (engine: runtime/inmatch/joiner_role.cpp)). `character_arms` is the local
 	// player's resolved combo arms graphic (retail's CharacterEntity arms model,
 	// the ONLY arms source — weapon.def gfx1a/gfx1b are discarded tokens);
 	// has_def=false is the bring-up path; an empty gun on a resolved def means
 	// submit no FP gun.
 	// The witnessed viewmodel placement units, re-exported from engine
-	// simassets/fp_viewmodel_spec.h.
+	// renderer/fp_viewmodel_spec.h.
 	static double weapon_def_pos_scale();
 	static Vector3 viewmodel_fallback_pos_units();
 	static Vector3 viewmodel_fallback_tpos_units();
@@ -1804,7 +1804,7 @@ public:
 	// The sound-profile chain (engine: base/gameprofile/required_resources.c): feed SndProf.def text (VFS
 	// bytes) — parsed into world.tables.sound_profiles now and re-applied on
 	// reset_world; per-entity bindings resolve in the kernel boot's
-	// simassets::resolve_ai_weapons step.
+	// mission::resolve_ai_weapons step.
 	void set_sound_profiles(const PackedByteArray &p_sndprof_text);
 	// The mission water plane (godot Y units) the footstep water pick and the
 	// landing legs compare feet against (engine: runtime/replication/client_replica_pipeline.h).
@@ -2065,7 +2065,7 @@ public:
 	// and direct test/tooling fixtures call this through MissionRoot.setup().
 	void set_terrain_height_field(const Ref<TerrainData> &p_terrain);
 	// S16 (ADR 0028): the seat/mount table installs through the NATIVE
-	// extractor (simassets::extract_item_seat_specs) over the retained def
+	// extractor (mission::extract_item_seat_specs) over the retained def
 	// rows + the sim's own model parses. Seeds are full 1xxxxx def ids; the
 	// extractor walks authored addeweap children transitively. The shell
 	// GDScript extraction + its Dictionary install seam are gone — proven
@@ -2104,7 +2104,7 @@ public:
 	// attrib — gates the 0x0D AI-trailer, D-NET-97), net_class_code (§5.10b *_function class
 	// tag -> the 0x0A serialize class; an unresolved/ewep item must NOT be serialized as a
 	// vehicle or the client desyncs), and health_max/health (items.def hp = healthMax
-	// (engine: runtime/simassets/item_traits.cpp)). Idempotent; call after load (and again after
+	// (engine: runtime/mission/item_traits.cpp)). Idempotent; call after load (and again after
 	// spawning the local player).
 	void resolve_item_traits(const Ref<class ItemDatabase> &p_item_db);
 
@@ -2124,7 +2124,7 @@ public:
 	// Returns the instance count. Also attaches the render-occlusion portal
 	// models (buildings whose graphic carries OVRT/OPLN/OFAC/OOBJ records)
 	// with their def bits. Idempotent per load. Model extraction reads the
-	// sim's own SimModelCache through the installed asset root
+	// sim's own assets::AssetStore through the installed asset root
 	// (set_asset_root; ADR 0028) — a rootless sim attaches nothing.
 	int resolve_collision_instances(const Ref<class ItemDatabase> &p_item_db);
 	// Install the mounted root the SIMULATION resolves assets through — the

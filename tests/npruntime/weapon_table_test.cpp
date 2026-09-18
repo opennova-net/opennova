@@ -18,6 +18,7 @@
 
 #include <formats/def/def.h>
 #include <base/resource_index/resource_index.h>
+#include <runtime/assets/asset_store.h>
 #include <base/vfs/vfs.h>
 
 #include <cstdio>
@@ -418,9 +419,10 @@ int main(void) {
 				sizeof(kAutomatic) - 1, &automatic) == 0);
 
 		opennova::ResourceIndex index;
+    opennova::assets::AssetStore index_assets{&index};
 		CHECK(index.scan(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/anim"));
 		const world::WeaponTable unresolved = world::build_weapon_table(automatic);
-		const world::WeaponTable resolved = world::build_weapon_table(automatic, &index);
+		const world::WeaponTable resolved = world::build_weapon_table(automatic, &index_assets);
 		const world::WeaponFsmAction &unresolved_fire =
 				unresolved.by_index(1)->action_fsm.actions[world::weapon_action::kFire];
 		const world::WeaponFsmAction &resolved_fire =
@@ -445,7 +447,7 @@ int main(void) {
 		CHECK(def_parse_weapons_memory(
 				reinterpret_cast<const uint8_t *>(kNoAdm),
 				sizeof(kNoAdm) - 1, &no_adm) == 0);
-		const world::WeaponTable no_adm_table = world::build_weapon_table(no_adm, &index);
+		const world::WeaponTable no_adm_table = world::build_weapon_table(no_adm, &index_assets);
 		const world::WeaponFsmAction &no_adm_fire =
 				no_adm_table.by_index(1)->action_fsm.actions[world::weapon_action::kFire];
 		CHECK(no_adm_fire.delay_start == 0 && no_adm_fire.delay_end == 0);

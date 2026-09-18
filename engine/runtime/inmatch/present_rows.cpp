@@ -4,9 +4,9 @@
 #include <runtime/inmatch/client_replica_present.h> // the emplaced/overlay/held-weapon writers
 #include <runtime/inmatch/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 #include <runtime/inmatch/replica_query.h> // client_entity_for_handle
-#include <runtime/simassets/mounted_pose.h> // the ONE mounted matrix path (S4b)
-#include <runtime/simassets/pose_inputs.h> // seat/mount pose predicates + aim inputs (ADR 0028)
-#include <runtime/simassets/seat_spec_extract.h> // item_seat_spec_for_type
+#include <runtime/world/mounted_pose.h> // the ONE mounted matrix path (S4b)
+#include <runtime/world/pose_inputs.h> // seat/mount pose predicates + aim inputs (ADR 0028)
+#include <runtime/mission/seat_spec_extract.h> // item_seat_spec_for_type
 #include <runtime/world/mount_controls.h> // heat-glow + emplaced turret CTRL sources (ADR 0028)
 #include <runtime/world/present_rows.h>
 #include <runtime/world/vehicle_motor.h> // vehicle_ctrl_registers
@@ -106,7 +106,7 @@ inline void write_present_vehicle_motion_controls(float *record, const World &wo
 }
 
 // S4b (ADR 0028): the joiner's addeweap reconstruction rides the SAME engine
-// resolver the host authority runs (simassets::resolve_model_mounted_pose) —
+// resolver the host authority runs (world::resolve_model_mounted_pose) —
 // one mounted matrix path. The model resolves through the sim cache by the
 // installed spec's graphic key, exactly like the host-side resolver.
 bool resolve_client_eweap_attachment_pose(
@@ -114,14 +114,14 @@ bool resolve_client_eweap_attachment_pose(
 		const replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs,
 		const std::unordered_map<int32_t, std::string> &graphics_by_type,
-		simassets::SimModelCache &models,
+		const assets::AssetStore &models,
 		uint32_t time_ms, MountedPose &out) {
 	if (child.parent_handle == EntityHandle::kInvalid) return false;
 	const replication::ClientEntityState *parent =
 			client_entity_for_handle(state, child.parent_handle);
 	if (parent == nullptr) return false;
 	const mission::ItemSeatSpec *parent_spec =
-			simassets::item_seat_spec_for_type(specs, parent->type_id);
+			mission::item_seat_spec_for_type(specs, parent->type_id);
 	if (parent_spec == nullptr) return false;
 
 	// The 0x0D relation names only the parent, not the authored attachment slot.
@@ -140,9 +140,9 @@ bool resolve_client_eweap_attachment_pose(
 			attachment->anchor.bone_index == 0)
 		return false;
 	const auto graphic_found = graphics_by_type.find(parent->type_id);
-	if (graphic_found == graphics_by_type.end() || !models.has_index())
+	if (graphic_found == graphics_by_type.end() || !models.has_source())
 		return false;
-	const Threedi3di3 *model_ptr = models.model_for(graphic_found->second);
+	const Threedi3di3 *model_ptr = models.model(graphic_found->second).get();
 	if (model_ptr == nullptr) return false;
 
 	// Remote generic PLAYPARTANIM phases are not in ClientEntityState. Do not
@@ -181,7 +181,7 @@ bool resolve_client_eweap_attachment_pose(
 			static_cast<double>(parent->pitch_bam) * kDegreesPerBam));
 	carrier.roll = static_cast<int16_t>(std::lround(
 			static_cast<double>(parent->roll_bam) * kDegreesPerBam));
-	return simassets::resolve_model_mounted_pose(
+	return world::resolve_model_mounted_pose(
 			model, carrier, attachment->anchor, ctrl_values, time_ms, out);
 }
 
@@ -335,7 +335,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			write_present_section_mask(r, item_hidden_sections(*ent));
 			write_present_doors(r, i, kernel.world, *ent, door_phases);
 			r[PF_RIGHT_HAND_COLLAPSED] =
-					simassets::mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
+					world::mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
 			// The cveh render callback publishes directly from the live entity
 			// motor fields. Do this only for the authoritative registry row:
 			// the compact view has no steer/currentSpeed source to reconstruct.
@@ -417,7 +417,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		const bool reconstructed_client_attachment_pose = joiner &&
 				resolve_client_eweap_attachment_pose(
 						es, cs, kernel.seat_specs, kernel.mounted_graphics,
-						kernel.models, attachment_time_ms, client_attachment_pose);
+						kernel.assets(), attachment_time_ms, client_attachment_pose);
 		if (authoritative_attachment_pose) {
 			// NoNetworkCallback addeweap children have only their 0x0D spawn pose in
 			// ClientState. The host has already advanced their authoritative userpoint
@@ -485,7 +485,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				if (ent != nullptr &&
 						infantry_weapon_channel_visible(
 								ae->inf, (ent->engine_flags & kEntityFlagPlayer) != 0,
-								simassets::mount_blocks_weapon_channel(*ent))) {
+								world::mount_blocks_weapon_channel(*ent))) {
 					r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.wpn_state);
 					r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
 					r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
@@ -500,7 +500,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				}
 				if (ent != nullptr) {
 					const anim::AimOverlayInputs inputs =
-							simassets::aim_overlay_inputs_for(*ae, *ent);
+							world::aim_overlay_inputs_for(*ae, *ent);
 					anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 					anim::compute_aim_overlay_angles(inputs, angles);
 					write_present_overlay(r, angles);
@@ -677,7 +677,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	write_present_section_mask(r, item_hidden_sections(e));
 	write_present_doors(r, row_index, w, e, door_phases);
 	r[PF_RIGHT_HAND_COLLAPSED] =
-			simassets::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
+			world::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
 	// The cveh render callback publishes directly from the live entity
 	// motor fields [orig: Entity_CacheVehicleHUDStats @0x4929B0, stores
 	// @0x4929D7 / @0x4929F1; see docs/world/vehicle-client-movers-re.md].
@@ -757,7 +757,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	// player" mirror of entity+0x24 (NPCs carry no hold ladder).
 	if (infantry_weapon_channel_visible(
 				ae->inf, (e.engine_flags & kEntityFlagPlayer) != 0,
-				simassets::mount_blocks_weapon_channel(e))) {
+				world::mount_blocks_weapon_channel(e))) {
 		r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.wpn_state);
 		r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
 		r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
@@ -770,7 +770,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 					static_cast<float>(ae->inf.wpn_prev_variant);
 		}
 	}
-	const anim::AimOverlayInputs inputs = simassets::aim_overlay_inputs_for(*ae, e);
+	const anim::AimOverlayInputs inputs = world::aim_overlay_inputs_for(*ae, e);
 	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 	anim::compute_aim_overlay_angles(inputs, angles);
 	write_present_overlay(r, angles);

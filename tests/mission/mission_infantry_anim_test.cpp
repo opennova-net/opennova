@@ -34,6 +34,7 @@ namespace fs = std::filesystem;
 struct Assets {
 	fs::path directory;
 	ResourceIndex index;
+	assets::AssetStore store{&index};
 
 	Assets() {
 		const fs::path parent = test_paths_temp_dir();
@@ -78,7 +79,7 @@ struct Harness {
 		map(3, "missing.adm");
 		map(4, "unusable.adm");
 		kernel->set_items_table(&items);
-		kernel->set_asset_index(&assets.index);
+		kernel->set_assets(&assets.store);
 	}
 
 	void map(size_t row, const char *name) { std::strcpy(rows[row].anim_def, name); }

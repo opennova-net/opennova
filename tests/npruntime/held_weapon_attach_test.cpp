@@ -17,10 +17,10 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/inmatch/client_replica_present.h>
 #include <runtime/anim/aim_overlay.h>
-#include <runtime/simassets/adm_skeletal_clips.h>
-#include <runtime/simassets/collision_resolve.h>
-#include <runtime/simassets/sim_pose_provider.h>
-#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/anim/skeletal_clips.h>
+#include <runtime/mission/collision_resolve.h>
+#include <runtime/world/entity_pose.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/present_rows.h>
@@ -145,22 +145,22 @@ int main() {
 	DefItemsFile items{};
 	if (def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) != 0)
 		return retail::skip("a parseable items.def");
-	const DefItemDef *def = simassets::find_item_def(
-			items, simassets::visual_item_id_for_runtime_type(kPlayerRuntimeType, items));
-	simassets::SimModelCache models;
-	models.set_index(&index);
-	const Threedi3di3 *body = def != nullptr ? models.model_for(def->graphic) : nullptr;
+	const DefItemDef *def = mission::find_item_def(
+			items, mission::visual_item_id_for_runtime_type(kPlayerRuntimeType, items));
+	assets::AssetStore models{&index};
+
+	const Threedi3di3 *body = def != nullptr ? models.model(def->graphic).get() : nullptr;
 	if (expect(body != nullptr, "the player's visual model loads")) {
 		std::vector<anim::Vec3> origins;
 		std::vector<int> parents;
-		simassets::model_bone_table(*body, origins, parents);
+		world::model_bone_table(*body, origins, parents);
 		std::string adm(def->anim_def);
 		if (adm.size() < 4 || adm.compare(adm.size() - 4, 4, ".adm") != 0) adm += ".adm";
-		simassets::AdmSkeletalClips clips;
-		if (expect(clips.load_from_adm(&index, adm, origins, parents), "the player's rig loads") &&
+		anim::SkeletalClips clips;
+		if (expect(clips.load_from_adm(&models, adm, origins, parents), "the player's rig loads") &&
 				expect(clips.bone_count() > static_cast<size_t>(kHandBone) && clips.fk_valid(),
 						"the rig carries bone 16 with a valid FK chain")) {
-			const simassets::AdmSkeletalClips::RestTransform &rest = clips.rest_global()[kHandBone];
+			const anim::SkeletalClips::RestTransform &rest = clips.rest_global()[kHandBone];
 			std::printf("held_weapon_attach: %s bone %d rest origin (%.3f, %.3f, %.3f)\n",
 					clips.adm_name().c_str(), kHandBone, rest.origin.x, rest.origin.y, rest.origin.z);
 			expect(std::fabs(rest.origin.x) > 0.3f, "bone 16 rests out along the arm (bind T-pose)");
@@ -168,7 +168,7 @@ int main() {
 		}
 	}
 	def_free_items(&items);
-	if (const Threedi3di3 *m4 = models.model_for("M4_3RD")) {
+	if (const Threedi3di3 *m4 = models.model("M4_3RD").get()) {
 		int ahead = 0;
 		for (size_t i = 0; i < m4->user_point_count; ++i) {
 			float p[3];

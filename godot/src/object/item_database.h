@@ -31,7 +31,7 @@ class ItemDatabase : public RefCounted {
 
 private:
 	// The retained items.def parse (ADR 0028): the ONE store. The sim's
-	// engine-side trait fold (simassets::resolve_item_traits /
+	// engine-side trait fold (mission::resolve_item_traits /
 	// resolve_ai_weapons) and the netsim replication catalog read DefItemDef
 	// rows directly from here; every accessor below converts at the call.
 	// Freed at the top of every load attempt (the id index clears first) and
@@ -136,7 +136,7 @@ public:
 	// read 0x20000 "ChangeTeam" / 0x40000 "SpawnPoint". [net-re §5.61]
 	uint32_t get_attrib(int id) const;
 	// The raw items.def ItemDefAttrib2 dword (itemDef+0x58); 0 for unknown ids. The
-	// render-occlusion weld pass reads bit 6 ("weldable") (engine: runtime/simassets/collision_resolve.cpp).
+	// render-occlusion weld pass reads bit 6 ("weldable") (engine: runtime/mission/collision_resolve.cpp).
 	uint32_t get_attrib2(int id) const;
 	// The authored items.def `shadow` blob decal (C++ seam for the placer):
 	// false when the item authors none; dims = (width, length, offset_x,
@@ -170,7 +170,7 @@ public:
 	int get_mount_config(int id) const;
 	// items.def husk / huskfinal — the destroyed-model stages the render and
 	// collision swap to at death (Flags & 4); empty if none authored.
-	// (engine: runtime/simassets/collision_resolve.cpp)
+	// (engine: runtime/mission/collision_resolve.cpp)
 	String get_husk(int id) const;
 	String get_huskfinal(int id) const;
 	// S13 (ADR 0028): the envs-class ambient marker resolution over the

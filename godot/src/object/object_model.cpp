@@ -28,7 +28,7 @@
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
 #include <runtime/renderer/object_lod.h>
-#include <runtime/simassets/model_builders.h>
+#include <runtime/world/model_geometry.h>
 #include <runtime/renderer/render_order.h>
 
 using namespace opennova::threedi;
@@ -694,7 +694,7 @@ void ObjectModel::refresh_entity_projection_sphere() {
 		// zero-radius sphere (the projector's sub-pixel cull); only a
 		// document-less preview stays invalid for the geometry fallback.
 		entity_projection_sphere_ = object_data_.is_valid()
-				? opennova::simassets::collision_projection_sphere_from_3di(
+				? opennova::world::collision_projection_sphere_from_3di(
 						object_data_->native_model(), entity_uniform_scale_q16_, 0,
 						entity_projection_zero_center_)
 				: opennova::renderer::ObjectProjectionSphere{};

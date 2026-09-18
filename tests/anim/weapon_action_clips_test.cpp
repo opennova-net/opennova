@@ -9,10 +9,11 @@
 #include "common/retail_paths.h"
 
 #include <base/resource_index/resource_index.h>
+#include <runtime/assets/asset_store.h>
 #include <base/vfs/vfs.h>
 #include <formats/def/def.h>
 #include <runtime/world/weapon_table_build.h>
-#include <runtime/simassets/adm_clip_index.h>
+#include <runtime/anim/adm_clip_index.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/weapon_table.h>
 
@@ -49,6 +50,7 @@ int main() {
 	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
 			"OPENNOVA_JO_ASSETS (an extracted JO tree carrying weapon.def)");
 	ResourceIndex index;
+    opennova::assets::AssetStore index_assets{&index};
 	if (!index.scan(assets) && !index.scan(assets, std::string(), VfsMountMode::LooseOnly))
 		return retail::skip("a mountable OPENNOVA_JO_ASSETS tree");
 	std::vector<uint8_t> bytes;
@@ -56,7 +58,7 @@ int main() {
 	DefWeaponsFile file{};
 	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file) != 0)
 		return retail::skip("a parseable weapon.def");
-	const world::WeaponTable table = world::build_weapon_table(file, &index);
+	const world::WeaponTable table = world::build_weapon_table(file, &index_assets);
 	expect(!table.empty(), "the weapon table bakes");
 
 	int weapons = 0, keyed = 0, resolved = 0, missing = 0, auto_rows = 0, auto_checked = 0, collapsed = 0;
@@ -64,8 +66,8 @@ int main() {
 		const DefWeaponDef &d = file.entries[i];
 		if (d.animadm[0] == '\0') continue;
 		++weapons;
-		simassets::AdmClipIndex clips;
-		clips.load(&index, d.animadm);
+		anim::AdmClipIndex clips;
+		clips.load(&index_assets, d.animadm);
 		std::map<std::string, int> uses;
 		for (size_t a = 0; a < d.actions_count; ++a)
 			if (d.actions[a].anim[0] != '\0') ++uses[lower(d.actions[a].anim)];

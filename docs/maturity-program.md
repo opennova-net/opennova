@@ -737,3 +737,8 @@ Godot comments into the native `EntityLightQuery` contract and linked the
 binding comments to that owner. The original addresses are retained;
 `godot_orig_cites` tightens from 1023 to 1021. Enforced ratchet and citation
 census checks pass; this change does not raise any baseline.
+
+ADR 0044 adds `runtime/assets/asset_store.cpp` to the citation allowlist:
+shared immutable ownership, cache keys and invalidation are infrastructure with
+no retail counterpart. Format decoding and animation behavior retain their
+witness citations in their existing native implementations.

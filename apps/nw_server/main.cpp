@@ -263,8 +263,9 @@ int main(int argc, char **argv) {
 
 	// --- Adopt the parsed mission over the mounted file source: the kernel is
 	//     the one mission boot + state + tick (ADR 0042 d3). ---
+	assets::AssetStore asset_store{&index};
 	mission::MissionKernel kernel;
-	kernel.set_asset_index(&index);
+	kernel.set_assets(&asset_store);
 	mission::BootFileSource files;
 	files.has_file = [&index](const std::string &name) { return index.has_file(name); };
 	files.read_file = [&index](const std::string &name, std::vector<uint8_t> &out) {

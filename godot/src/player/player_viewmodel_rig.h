@@ -57,7 +57,7 @@ class Simulation;
 // witnessed JOX WPN_AK47AUTO line, kept as the no-def fallback. (The pre-def
 // constant (10, 0, -201) turned out to be the REVX-era WPN_AK47AUTO `pos` --
 // that SKU's def drives the AKM_1st viewmodel.) The witnessed scale +
-// fallback placement values live at engine simassets/fp_viewmodel_spec.h,
+// fallback placement values live at engine renderer/fp_viewmodel_spec.h,
 // re-exported through Simulation statics. Tunable (properties, not
 // constants) so debug drivers can sweep placements live; the values are the
 // witnessed WPN_AK47AUTO def line + the current best facing.

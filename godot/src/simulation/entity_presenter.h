@@ -21,7 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <runtime/simassets/sim_pose_provider.h>
+#include <runtime/world/entity_pose.h>
 #include <runtime/world/minefield.h>
 
 #include "object/entity_index.h"
@@ -131,7 +131,7 @@ public:
 	static constexpr int DEFAULT_COLD_SPAWN_BUDGET = 4;
 	enum HeldWeaponConstants {
 		HELD_WEAPON_BONE_INDEX =
-				opennova::simassets::kHeldWeaponBoneIndex,
+				opennova::world::kHeldWeaponBoneIndex,
 	};
 
 	// --- The PLACED walk -----------------------------------------------------
@@ -306,7 +306,7 @@ public:
 
 	// Third-person held-weapon placement — the ONE home (the witnessed
 	// calibration constants and the full derivation live at engine
-	// simassets/sim_pose_provider.h). `body` may be the body root or the
+	// world/entity_pose.h). `body` may be the body root or the
 	// skeleton itself (resolved via find_skeleton); returns a Transform3D, or
 	// null when the skeleton cannot place one.
 	static Variant held_weapon_attach_transform(Object *body,

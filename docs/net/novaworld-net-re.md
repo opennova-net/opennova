@@ -5678,7 +5678,7 @@ weapon.def tokens (`WeaponDefs_ParseLineCallback @0x5448d0/@0x5448e6 → loc_545
 0`); the first-person arms model is the local player's CharacterEntity arms (blip +8 = the
 Avatars.def combo arms graphic, `Player_RenderFirstPersonViewModel @0x4df05f/@0x4deff4`),
 submitted after `Avatar_SetArmsCamoCtrl @0x4df008/@0x4df070`, and a character without an arms
-model submits no arms. `simassets::fp_viewmodel_spec` now takes the character arms; the
+model submits no arms. `renderer::fp_viewmodel_spec` now takes the character arms; the
 `armsG` default it carried was a misreading and is retired.
 **Open (the §5.40 refinement grill):** the FP rig is its OWN pre-posed skeleton —
 `ak47_RST.bad` is 39 bones (BN01 Pelvis, arms, 26 fingers, gun bones; BN## tags do NOT match

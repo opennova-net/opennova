@@ -96,7 +96,7 @@ Ref<ScarDrawList> Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	// takes the world fold mission (x, y, z) -> Godot (x, z, -y). An entity-ring
 	// slot is SECTION-LOCAL: the hit went through the inverse of the live
 	// collision section matrix, whose local side is the decoded model space the
-	// collision model and the render parts share (engine/runtime/simassets —
+	// collision model and the render parts share (engine/runtime/world —
 	// "decoded model space is (-source y, source z, source x)"), and the
 	// section node's mesh is that same space through the model builder's
 	// godot_position = (-x, y, z). The world swap applied to a section-local

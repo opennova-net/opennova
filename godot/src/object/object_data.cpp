@@ -57,14 +57,8 @@ ObjectData::~ObjectData() {
 	_clear();
 }
 
-void ObjectData::_clear_source_model() {
-	threedi_3di3_free(&source_model);
-	std::memset(&source_model, 0, sizeof(source_model));
-	has_source_model = false;
-}
-
 void ObjectData::_clear() {
-	_clear_source_model();
+	source_model_.reset();
 	submesh_cache.clear();
 	_invalidate_panm_cache();
 	_invalidate_runtime_control_names();
@@ -110,20 +104,20 @@ Error ObjectData::open_from_resource_root(
 		last_error = "Only mounted .3di object files are supported";
 		return ERR_FILE_UNRECOGNIZED;
 	}
-	const PackedByteArray bytes = p_resource_root->read_file(file);
-	if (bytes.is_empty()) {
-		last_error = "Object file not found in resource root: " + file;
-		return ERR_FILE_NOT_FOUND;
-	}
-
-	const Error err = _open_3di_bytes(file, bytes);
-	if (err == OK) {
-		resource_root = p_resource_root;
-		source_dir = p_resource_root->get_root_dir();
-		register_network_challenge_model(file, p_include_in_network_challenge);
-		_notify_object_changed();
-	}
-	return err;
+    const auto model = p_resource_root->native_assets().model(file.utf8().get_data());
+    if (!model) {
+        last_error = "Object file missing or invalid in resource root: " + file;
+        return p_resource_root->has_file(file) ? ERR_FILE_CANT_READ : ERR_FILE_NOT_FOUND;
+    }
+    _clear();
+    source_model_ = model;
+    source_path = file.get_file();
+    source_dir = p_resource_root->get_root_dir();
+    object_name = model->header.name[0] ? from_native(model->header.name) : filename_stem(file);
+    resource_root = p_resource_root;
+    register_network_challenge_model(file, p_include_in_network_challenge);
+    _notify_object_changed();
+    return OK;
 }
 
 void ObjectData::mark_cached_network_challenge_foliage_model(
@@ -148,43 +142,17 @@ int64_t ObjectData::network_challenge_model_count() {
 }
 
 Error ObjectData::_open_3di(const String &p_path) {
-	const std::string native_path = to_native_path(p_path);
-	Threedi3di3 next_model = {};
-	if (threedi_3di3_read(native_path.c_str(), &next_model) != 0) {
-		last_error = "Failed to read 3DI";
-		return ERR_FILE_CANT_READ;
-	}
-	_clear();
-	source_model = next_model;
-	has_source_model = true;
-	source_path = p_path;
-	source_dir = p_path.get_base_dir();
-	object_name = source_model.header.name[0] != '\0'
-			? from_native(source_model.header.name)
-			: filename_stem(p_path);
-	_notify_object_changed();
-	return OK;
-}
-
-Error ObjectData::_open_3di_bytes(
-		const String &p_name, const PackedByteArray &p_bytes) {
-	if (p_bytes.is_empty()) {
-		last_error = "Mounted 3DI entry is empty";
-		return ERR_FILE_CANT_READ;
-	}
-	Threedi3di3 next_model = {};
-	if (threedi_3di3_read_memory(p_bytes.ptr(),
-			static_cast<size_t>(p_bytes.size()), &next_model) != 0) {
-		last_error = "Failed to read mounted 3DI";
-		return ERR_FILE_CANT_READ;
-	}
-	_clear();
-	source_model = next_model;
-	has_source_model = true;
-	source_path = p_name.get_file();
-	source_dir = String();
-	object_name = source_model.header.name[0] != '\0'
-			? from_native(source_model.header.name)
-			: filename_stem(p_name);
-	return OK;
+    auto model = opennova::assets::read_model_file(to_native_path(p_path));
+    if (!model) {
+        last_error = "Failed to read 3DI";
+        return ERR_FILE_CANT_READ;
+    }
+    _clear();
+    source_model_ = std::move(model);
+    source_path = p_path;
+    source_dir = p_path.get_base_dir();
+    object_name = source_model_->header.name[0]
+            ? from_native(source_model_->header.name) : filename_stem(p_path);
+    _notify_object_changed();
+    return OK;
 }

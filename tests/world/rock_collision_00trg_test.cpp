@@ -193,7 +193,7 @@ int main() {
 	if (!expect(spawn_record != nullptr && target_record != nullptr, "the fixture records (spawn 1197, target 650) exist"))
 		return 1;
 	const int target_item = static_cast<int>(target_record->type_id) + static_cast<int>(mission::kItemIdOffset);
-	const DefItemDef *target_def = simassets::find_item_def(rig.items, target_item);
+	const DefItemDef *target_def = mission::find_item_def(rig.items, target_item);
 	if (!expect(target_item == kTargetItemId && target_def != nullptr && lower(target_def->graphic) == lower(kTargetGraphic),
 				"entity 650 keeps its identity (item 101471, graphic RckS05)"))
 		return 1;
@@ -224,7 +224,7 @@ int main() {
 	w::Entity *target = rig.world.registry.by_bms_id(kTargetBmsId);
 	if (!expect(target != nullptr, "entity 650 promoted")) return 1;
 	const w::CollisionMatrix placement = w::entity_placement_matrix(*target);
-	const Threedi3di3 *model = rig.models.model_for(kTargetGraphic);
+	const Threedi3di3 *model = rig.assets().model(kTargetGraphic).get();
 	if (!expect(model != nullptr, "RckS05.3di parses through the sim's model cache")) return 1;
 	const RenderMesh render = render_mesh(*model, placement);
 	if (!expect(!render.triangles.empty(), "RckS05 has LOD-0 render triangles")) return 1;

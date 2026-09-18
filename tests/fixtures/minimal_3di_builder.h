@@ -5,7 +5,7 @@
 // (ADR 0003) and re-minted byte-for-byte on every platform.
 //
 // Frames (docs/threedi/3di-gp-format-re.md; the runtime conversions in
-// godot/src/object/object_data_geometry.cpp and engine/runtime/simassets):
+// godot/src/object/object_data_geometry.cpp and engine/runtime/world):
 //   - MISSION axes (x forward, y left, z up) are the authoring frame here and
 //     the on-disk frame of the collision block (CVRT/CNRM/CFAC/BPLN/BVOL/COBJ/
 //     CXLT/CMDL) and of the user points (USRP 16.16 ints).

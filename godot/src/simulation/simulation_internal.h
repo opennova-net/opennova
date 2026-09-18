@@ -10,7 +10,7 @@
 #include "util/axes.h"
 
 #include <base/io/perf_clock.h> // the opt-in profiling clock (opennova::io::perf_now_us)
-#include <runtime/simassets/mounted_pose.h> // the ONE mounted matrix path (S4b)
+#include <runtime/world/mounted_pose.h> // the ONE mounted matrix path (S4b)
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/world/turret_window.h>
@@ -49,8 +49,8 @@
 #include <base/io/bam.h>           // bam_add/bam_sar: the FP roll term composition
 #include <base/io/strutil.h>       // iequals: the loadout sub-variant ammo-class compare
 #include <runtime/world/angle.h>
-#include <runtime/simassets/model_builders.h> // the sim-side .3di derivations (ADR 0028)
-#include <runtime/simassets/pose_inputs.h>    // seat/mount pose predicates + aim inputs (ADR 0028)
+#include <runtime/world/model_geometry.h> // the sim-side .3di derivations (ADR 0028)
+#include <runtime/world/pose_inputs.h>    // seat/mount pose predicates + aim inputs (ADR 0028)
 #include <runtime/world/mount_controls.h>     // heat-glow + emplaced turret CTRL sources (ADR 0028)
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/spawn_select.h>
@@ -92,10 +92,10 @@ inline int32_t trace_profile_lane(int64_t value) {
 }
 
 // The seat/mount pose predicates moved to the engine (ADR 0028):
-// engine/runtime/simassets pose_inputs.h. The using declarations keep this
+// engine/runtime/world pose_inputs.h. The using declarations keep this
 // header's call sites unchanged.
-using opennova::simassets::mount_blocks_weapon_channel;
-using opennova::simassets::mount_collapses_right_hand_row;
+using opennova::world::mount_blocks_weapon_channel;
+using opennova::world::mount_collapses_right_hand_row;
 
 // The policy lives in engine/runtime/mission placement_traits.h; this wrapper
 // only answers the "does the catalog carry the player visual?" probe from the
@@ -109,7 +109,7 @@ inline int visual_item_id_for_runtime_type(int item_id, const Ref<ItemDatabase> 
 static_assert(opennova::mission::kPlayerRuntimeTypeId ==
 		opennova::world::kPlayerInfantryTypeId);
 
-using opennova::simassets::aim_overlay_inputs_for;
+using opennova::world::aim_overlay_inputs_for;
 
 // The decoded-row lookup + the mounted-shooter carrier-exclusion rule moved to
 // the engine with the joiner frame (S10a, ADR 0028):
@@ -118,7 +118,7 @@ using opennova::simassets::aim_overlay_inputs_for;
 using opennova::inmatch::client_entity_for_handle;
 using opennova::inmatch::wire_carrier_exclusion_for;
 // The installed-table probe lives beside the extraction now (ADR 0031).
-using opennova::simassets::item_seat_spec_for_type;
+using opennova::mission::item_seat_spec_for_type;
 
 inline constexpr char kVehicleSpecial1Register[] = "VEHICLE_SPECIAL1";
 inline constexpr char kVehicleSpecial2Register[] = "VEHICLE_SPECIAL2";
@@ -157,9 +157,9 @@ inline std::string dictionary_string(const Dictionary &d, const char *key, const
 }
 
 // The collision/occlusion/bound-radius builders and the model predicates
-// moved to the engine (ADR 0028): engine/runtime/simassets. The using
+// moved to the engine (ADR 0028): engine/runtime/world. The using
 // declarations keep this header's call sites unchanged.
-using opennova::simassets::model_bound_radius_from_3di;
+using opennova::world::model_bound_radius_from_3di;
 
 
 // Coordinate converter shared by the debug reports and present getters.

@@ -174,8 +174,8 @@ void Simulation::reset_world() {
 	kernel_->mounted_graphics = std::move(kept_mounted_graphics);
 	kernel_->local.look_settings = kept_look_settings;
 	kernel_->world.script.vars.carry_declared_from(kept_script_vars);
-	kernel_->set_asset_index(
-			assets_.root.is_valid() ? &assets_.root->native_index() : nullptr);
+	kernel_->set_assets(
+			assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
 	kernel_->profile.set_active(runtime_profiling_enabled_);
 	// Mission-scoped, while player_.weapon_profile is player-scoped and outlives every
@@ -452,7 +452,7 @@ void Simulation::apply_sound_state_to_world() {
                     reinterpret_cast<const char *>(assets_.sndprof_text.data()), assets_.sndprof_text.size());
     }
     if (const auto *items = kernel_->items_table())
-        opennova::simassets::resolve_item_event_sounds(kernel_->world, *items);
+        opennova::mission::resolve_item_event_sounds(kernel_->world, *items);
 	kernel_->world.env.water_z = assets_.env_water_z_q16;
 	kernel_->sync_water_plane();
 }

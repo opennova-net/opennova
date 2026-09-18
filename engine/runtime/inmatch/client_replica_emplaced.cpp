@@ -1,6 +1,6 @@
 #include <runtime/inmatch/client_replica_emplaced.h>
 #include <runtime/replication/client_state.h>
-#include <runtime/simassets/seat_spec_extract.h>
+#include <runtime/mission/seat_spec_extract.h>
 #include <runtime/world/mount_controls.h>
 
 namespace opennova::inmatch {
@@ -14,7 +14,7 @@ world::TurretWindow replica_window(const replication::ClientEntityState &mount,
 			if (carrier.handle != mount.carrier_handle)
 				continue;
 			if (const mission::ItemSeatSpec *carrier_spec =
-							simassets::item_seat_spec_for_type(specs, carrier.type_id)) {
+							mission::item_seat_spec_for_type(specs, carrier.type_id)) {
 				for (const mission::ItemEmplacementAttachmentSpec &candidate :
 						carrier_spec->emplacement_attachments) {
 					if (candidate.anchor_found && candidate.anchor.bone_index == mount.mount_bone &&
@@ -45,7 +45,7 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		uint16_t self_handle) {
 	for (auto &mount : state.entities) {
 		mount.emplaced_controls_valid = false;
-		const auto *spec = simassets::item_seat_spec_for_type(specs, mount.type_id);
+		const auto *spec = mission::item_seat_spec_for_type(specs, mount.type_id);
 		if (spec == nullptr)
 			continue;
 		for (auto &occupant : state.entities) {

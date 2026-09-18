@@ -14,7 +14,7 @@
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,
-    environment, hud, menu, simassets, and devtools (the Dear ImGui pass, ADR
+    environment, hud, menu, assets, and devtools (the Dear ImGui pass, ADR
     0039: infrastructure like io/vfs, not a port, so it sits in the citation
     allowlist; the pass, the frame-stats board and ONED's run surface build in
     every flavour, the game's F3 windows only with `OPENNOVA_DEVTOOLS` — off for

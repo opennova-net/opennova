@@ -15,7 +15,7 @@
 // neither does retail (@0x4355f0 / @0x4359d0, both read).
 //
 // This harness loads the REAL DTruck1 collision through the real pipeline
-// (ResourceIndex -> SimModelCache -> collision_model_from_3di), places the
+// (ResourceIndex -> assets::AssetStore -> collision_model_from_3di), places the
 // truck at the origin facing +y, drops a capsule at a rear passenger seat and
 // walks it forward at the live root step, resolving every tick exactly as the
 // infantry tick does. The pipeline preconditions are asserted (the model
@@ -31,9 +31,9 @@
 #include <vector>
 
 #include <base/resource_index/resource_index.h>
-#include <runtime/simassets/collision_resolve.h>
-#include <runtime/simassets/model_builders.h>
-#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/mission/collision_resolve.h>
+#include <runtime/world/model_geometry.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
@@ -65,14 +65,14 @@ int main() {
 	const char *dir = install.c_str();
 	opennova::ResourceIndex index;
 	if (!index.scan(dir)) return retail::skip("a scannable resource index under OPENNOVA_JO_DIR");
-	simassets::SimModelCache cache;
-	cache.set_index(&index);
-	const Threedi3di3 *m3 = cache.model_for("DTruck1");
+	assets::AssetStore cache{&index};
+
+	const Threedi3di3 *m3 = cache.model("DTruck1").get();
 	if (m3 == nullptr || m3->collision == nullptr)
 		return retail::skip("DTruck1.3di (with collision) on the OPENNOVA_JO_DIR mount");
 	w::CollisionModel model;
-	if (!expect(simassets::collision_model_from_3di(m3->collision, model,
-	                                                simassets::model_has_collision(*m3)),
+	if (!expect(world::collision_model_from_3di(m3->collision, model,
+	                                                world::model_has_collision(*m3)),
 	            "DTruck1 collision converts")) {
 		return 1;
 	}
@@ -133,11 +133,11 @@ int main() {
 	// A SOLDIER's real bound radius, against the 0x10000 (1.0 u) that D-COL-3
 	// hardcodes into the peer-repulsion threshold. Eindo11 is the 00TRg
 	// passenger model (item 102086, graphic Eindo11).
-	if (const Threedi3di3 *sm = cache.model_for("Eindo11")) {
+	if (const Threedi3di3 *sm = cache.model("Eindo11").get()) {
 		if (sm->collision != nullptr) {
 			w::CollisionModel smodel;
-			if (simassets::collision_model_from_3di(sm->collision, smodel,
-			        simassets::model_has_collision(*sm))) {
+			if (world::collision_model_from_3di(sm->collision, smodel,
+			        world::model_has_collision(*sm))) {
 				std::printf("  Eindo11 fallback_bound_radius = %.3f u  (hardcoded 1.000)\n",
 				            double(smodel.fallback_bound_radius_q16) / 65536.0);
 			}
@@ -160,7 +160,7 @@ int main() {
 	truck.position = {0.0f, 0.0f, 0.0f};
 	truck.yaw = 0;
 	// Seats, from the authored user points. The real pipeline fills these via
-	// simassets::extract_item_seat_specs; this harness builds the truck by hand,
+	// mission::extract_item_seat_specs; this harness builds the truck by hand,
 	// so without them mount() finds no seat and the dismount path is never
 	// exercised (which silently made an earlier run of this test meaningless).
 	{

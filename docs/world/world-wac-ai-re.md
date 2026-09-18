@@ -1258,7 +1258,7 @@ family's rows in the same 0x80 flag table the hand-frame branch reads. The origi
 below still describes the seat taxonomy the port reuses.
 
 The predicate gates the weapon node's visibility, reusing the existing seat
-taxonomy (`item_seat_specs.gd`, now `engine/runtime/simassets/seat_spec_extract.h`; SEAT_PASSENGER/CONTROLLER/GUNNER/
+taxonomy (`item_seat_specs.gd`, now `engine/runtime/mission/seat_spec_extract.h`; SEAT_PASSENGER/CONTROLLER/GUNNER/
 DRIVER) and the `mount_type` already exported through `simulation.cpp`. The exact
 `Entity_CanFireWeapon` predicate (incl. the `Flags & 2` weapon-disabled gate and the local
 gunner third-person condition) is the faithful rule. **Open follow-ups:** IDB hygiene (rename
@@ -1957,7 +1957,7 @@ shared advance onto AI bodies:**
    (mirrors `begin_body_transition`; the `wpn_prev/wpn_prev_clip_phase/wpn_blend_weight/
    wpn_blend_step` trio), the advance in `AiSystem::infantry_weapon_channel_advance`,
    and ONE composition seam for both presentation and authoritative collision —
-   `SkeletalAnim::splice_weapon_channel` / `AdmSkeletalClips::splice_weapon_channel`
+   `SkeletalAnim::splice_weapon_channel` / `SkeletalClips::splice_weapon_channel`
    evaluate the outgoing/target weapon clips through `eval_pose_blended` before the
    mask splice. The `PF_WPN_SOURCE_STATE / _SOURCE_PHASE_TICKS / _BLEND_WEIGHT`
    present fields mirror the primary's `PF_ANIM_SOURCE_*` trio so wire peers cross-fade
@@ -1969,7 +1969,7 @@ shared advance onto AI bodies:**
    `@0x40bc24 / @0x40bd2e`); an EMPTY key (the §14.8.6 gate off) remains the only
    no-splice case. Both splices route through `eval_pose_blended`, which already owns
    that fallback, so the two channels share one rule. Pinned by the new
-   `simassets_adm_skeletal_clips_weapon_channel` ctest over the reference set's BINOC.bad rig
+   `anim_skeletal_clips_weapon_channel` ctest over the reference set's BINOC.bad rig
    with a clip SYNTHESIZED in-test (one mask bone and one leg bone turned 90°) — the
    healthy-export trap makes a real-retail-only fixture pass for the wrong reason.
 3. **Per-entity BODY-adm variant rings.** `AdmRootMotion` now keeps the RING of tracks
@@ -1983,7 +1983,7 @@ shared advance onto AI bodies:**
    PF_WPN_SOURCE_VARIANT`), and both composition seams
    `[orig: AnimMap_PlayAnimBySlot @0x40bda0]`. Pinned by `infantry::
    test_player_weapon_channel_variant_ring` and the ring block of
-   `simassets_adm_root_motion`. The PRIMARY channel's `eval_pose_blended`s also
+   `anim_adm_root_motion`. The PRIMARY channel's `eval_pose_blended`s also
    accept variants now (defaulted 0), so AI body clip rings can ride the same seam
    once their producer serves them. Grilled 2026-08-19: the ring rotate replaces the
    table slot with `entry+36` and re-inits the CHANNEL from the served entry
@@ -1993,7 +1993,7 @@ shared advance onto AI bodies:**
    entry's length is the promotion clock. `clip_length_ticks` therefore takes the
    variant (defaulted overload), `scan_triggers`/`capsule_bottom_at` accept one,
    and the secondary channel's deferred promotion compares `wpn_clip_phase`
-   against the SERVED entry's length (pinned by the `simassets_adm_root_motion`
+   against the SERVED entry's length (pinned by the `anim_adm_root_motion`
    ring block).
 4. **AI (org1) bodies mirror the primary state before shared advance.** The
    writer at 0x4B9A14..0x4B9A48 copies current and pending primary state into
@@ -3184,7 +3184,7 @@ internals = open item, §16.5).
   corpus authors them on 38/39 persons and 39/39 vehicles). An unauthored (0)
   signature makes the entity undetectable to this feed. Ported: `engine/formats/def`
   parses the pair, the item-traits sweep stamps `Entity::radar_sig/heat_sig`
-  (`engine/runtime/simassets/item_traits.cpp`), the feed supplies them as the caps.
+  (`engine/runtime/mission/item_traits.cpp`), the feed supplies them as the caps.
 - **brain[37] (`+148`) priority-target producers**: the only witnessed writers are the
   savegame/record restore `Entity_CopyVehicleDefToAIComp @ 0x45db30` (`brain+148 =
   EntityPool_GetPtrFromHandle(record+476)`, beside `+152 = handle(record+480)`
@@ -4948,8 +4948,8 @@ synchronously at its own call site, on the logic tick that needs it, building th
 on demand. The port does the same (2026-08-26; the present-pass push and its stamps are gone):
 
 - `World::pose_provider` (`world::IPoseProvider`, `engine/runtime/world/pose_provider.h`)
-  is the native collision rig, `SimPoseProvider`
-  (`engine/runtime/simassets/sim_pose_provider.cpp`).
+  is the native collision rig, `EntityPoseProvider`
+  (`engine/runtime/world/entity_pose.cpp`).
 - Persons — `resolve_muzzle_pose`: the composed clip/blend/aim-overlay pose of the current
   tick, the launch bone's FK prefix against `rest_global_inverse`, the def's
   `launchups_closeattack` userpoint through `collision_matrix_from_euler(body overlay,
@@ -6131,7 +6131,7 @@ flags-bit0 strip (our fold passes no flags).
 |---|---|---|
 | Pool 1/2/3 countdown visits and trailing decrement | MATCHING (behavioral proof) | `item_events`, `destruction`; [orig: Entity_UpdatePool1Slot @ 0x4B8DD0; Entity_UpdateAllEntities @ 0x4C2100] |
 | `brrl`, `bldg`, `bld2`, `ele0`, `door`, `target` callback state and effects | MATCHING (behavioral proof); independent state-packet/scoring work remains | `item_events`, `doors`, `destruction` |
-| `envs` and tree regional SHOT selection, delay parsing and bank resolution | MATCHING (behavioral proof) | `item_events`, `def_parse_items`, `simassets_item_traits`, `mission_kernel` |
+| `envs` and tree regional SHOT selection, delay parsing and bank resolution | MATCHING (behavioral proof) | `item_events`, `def_parse_items`, `mission_item_traits`, `mission_kernel` |
 | `flag` idle/home/ground/rider return callback | MATCHING (behavioral proof) | `item_events`, `match`; [orig: Entity_UpdateIdleCheck @ 0x408430] |
 | `flag` carry-limit break (CTF/FlagBall/Flag Me): the host's 1 Hz sweep counts a carrier's consecutive seconds, at `flagResetTime` drops the flag beside the carrier, re-syncs it to its authored pose and kills the carrier (Health = -1); no return feed, no scoring | MATCHING (ported 2026-09-12) | `match` (`Match::sync_flag_to_authored_pose`), `npruntime_server_tick_maintenance`; [orig: Server_CheckPlayerViolations @ 0x51abd0 -> Entity_DropCarriedObject @ 0x439df0 + Entity_SyncPositionFromDefinition @ 0x43a9b0 (equal pose no-op @ 0x43a9f8, near path 0x2F only @ 0x43aa6b, snap + ground raycast + 0x2F @ 0x43aa7d..0x43ab40)] |
 
@@ -8347,7 +8347,7 @@ consumer census is closed: exactly four functions touch the
 `engine/runtime/world/collision_resolve.cpp` (`LadderResolveIO` + the CL block),
 `engine/runtime/world/infantry_ladder.cpp` (the climb block + exits + the org1
 legs + the view clamp; `infantry.cpp` defers to it),
-`engine/runtime/simassets/pose_inputs.h` (the arms lock), and the view
+`engine/runtime/world/pose_inputs.h` (the arms lock), and the view
 write-back seam in `godot/src/simulation/simulation_player.cpp`
 (`sync_local_mounted_input_heading`).
 
@@ -9215,7 +9215,7 @@ existing slot[38]; values >=126 return zero. This fixes the prior flat-distance,
 first-tie implementation.
 
 Regression coverage: native `infantry`, `entity_spawn`, `wac_behavior`, `ai`,
-`event_runtime_bms` and `simassets_item_traits` all pass with retail asset roots
+`event_runtime_bms` and `mission_item_traits` all pass with retail asset roots
 configured. Tests exercise the actual death/respawn motor, finite and unlimited
 counts, unchanged entity identity, visibility/session gating, control-point
 hide/release, silent LeaveCorpse cleanup, effect ownership, health/magazine
@@ -9350,7 +9350,7 @@ D-COL-2 finding: the table represented door states, not destroyed walls.
 
 [orig: build_bone_transforms @0x4E3070] and [orig:
 BoneCallback_AnimatedBones_World @0x4E3180] publish phases from CTRL ordinal
-DOOR_00. SimPoseProvider and the engine present-row collector now read the same
+DOOR_00. EntityPoseProvider and the engine present-row collector now read the same
 DoorSystem. The present row carries only PF_DOOR_COUNT; the phases ride a
 door side table (`inmatch::DoorPhaseTable`: row index, count, phase[count] as
 exact signed dwords including the fully open 65536, in row order for rows with
@@ -9966,7 +9966,7 @@ occupant, calls [orig: Weapon_FireProcess @0x53F5B0], restores the occupant and
 returns 1. Missing model/userpoint data is guarded in OpenNova.
 
 The shared source-fire path preserves presentation, ownership, authority and
-ceasefire handling. wac_projectiles exercises both real SimPoseProvider
+ceasefire handling. wac_projectiles exercises both real EntityPoseProvider
 userpoints, their positions and directions, byte wrap, health-word truncation,
 null/invalid target handling, temporary and existing occupants, client ownership
 and retry. The test exposed a stale outgoing RoundRing after World::restore.
@@ -10364,7 +10364,7 @@ new dragger.
 
 **Pose ownership.** IPoseProvider::resolve_skeletal_anchor obtains both anchors
 from the existing native skeleton/overlay/secondary-channel evaluator.
-SimPoseProvider shares its bone-matrix fold with muzzle resolution. [orig:
+EntityPoseProvider shares its bone-matrix fold with muzzle resolution. [orig:
 Entity_BuildBoneTransformMatrices @0x4B1290] supplies the hand-pivot nudge
 (+0.05,-0.05,+0.051 in the original render frame) and the head-pivot offset
 (0,+0.15,+0.10). Missing model/pose data retains raw entity position, matching
@@ -10610,7 +10610,7 @@ raw-pose fallback.
 
 The port carries the ammo/launch family in AiProfile::OrganicWeapons, replacing
 the D-AI-5 single-ammo stand-in. Mission startup and dynamic helper creation
-share the resource fold. SimPoseProvider resolves the indexed point at the call
+share the resource fold. EntityPoseProvider resolves the indexed point at the call
 site, validates the registry lifetime, and takes the live fixed-point motor
 position. Organic fire enters RoundSim::fire_npc_ammo, the shared
 WeaponSlot_FireAndSpawnEffects port: session authority gates the whole entry;

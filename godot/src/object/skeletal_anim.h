@@ -13,21 +13,21 @@
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include <runtime/anim/anim_sample.h>
+#include <runtime/assets/asset_store.h>
+#include <runtime/anim/skeletal_clips.h>
 
 namespace godot {
 
 class ResourceRoot;
 class Skeleton3D;
 
-// Godot adapter over the portable .bad/.adm skeletal runtime (engine/runtime/anim + engine/formats/bad +
-// engine/adm). Loads a model's .adm (a key -> .bad-basename map), parses + samples every
-// referenced .bad clip, and exposes Godot-typed results so the GDScript owner can build a
-// Skeleton3D + Skin + drive per-bone poses:
+// Godot adapter over a shared immutable native rig (runtime/assets + runtime/anim).
+// Marshals model bone tables and native poses into Godot values so consumers
+// can build a Skeleton3D + Skin and drive per-bone poses:
 //   - get_skeleton_bones(): bind-pose bones (name/parent/parent-local rest Transform3D)
 //   - eval_pose(key, t):    per-bone parent-local pose Transform3D at playhead t (seconds)
 //
@@ -41,42 +41,13 @@ class SkeletalAnim : public RefCounted {
 	GDCLASS(SkeletalAnim, RefCounted)
 
 private:
-	struct LoadedClip {
-		String key;                 // ADM key, e.g. "anim_walk"
-		opennova::anim::Clip clip;  // sampled (Z-up sample space)
-	};
-
-	std::vector<opennova::anim::ClipBone> bones_;  // canonical skeleton (names + parents)
-	std::vector<Transform3D> bind_local_;          // per-bone parent-local rest (Godot space)
-	// A multi-clip .adm row registers one clip PER quoted token under the same key,
-	// kept in file order — the slot's variant ring in the original; consecutive
-	// same-key entries here [orig: AnimMap_ParseConfigLine @ 0x40cb60 registers every
-	// token; AnimMap_RegisterBoneNode @ 0x40c2d0 links them into a circular ring].
-	// The ring CURSOR is not here: rotation state lives with the weapon/entity FSM
-	// that consumes it (Simulation), exactly as the original keeps the heads on
-	// the per-entity animState (+72) — this class is the loaded clip data only, so
-	// the two viewmodel parts sharing one .adm stay in lockstep.
-	std::vector<LoadedClip> clips_;
-	// Case-folded key -> clips_ indices in insertion (= .adm file / ring) order.
-	// The present pass resolves clips per animated model per render frame
-	// (has_clip / get_clip_fps / get_clip_length / eval), so lookups must not
-	// linear-scan clips_ with per-entry case-insensitive compares.
-	std::unordered_map<std::string, std::vector<size_t>> clip_index_;
-	String adm_name_;
-	String last_error_;
-	bool loaded_ = false;
-
-	// ASCII case fold matching nocasecmp_to over this format's key alphabet
-	// (.adm/.def keys are ASCII; non-ASCII bytes pass through unfolded).
-	static std::string fold_clip_key(const String &p_key);
-	void rebuild_clip_index();
-
-	const LoadedClip *find_clip(const String &p_key) const;
-	// The p_variant-th same-key clip (file order, wrapped modulo the variant count —
-	// robust when a variant's .bad failed to load on one part). p_variant <= 0 or a
-	// single-clip key serve the first match.
-	const LoadedClip *find_clip_variant(const String &p_key, int p_variant) const;
-	Array apply_pose_overlay(Array p_pose,
+    using LoadedClip = opennova::anim::SkeletalClips::LoadedClip;
+    opennova::assets::SkeletalRig rig_;
+    String last_error_;
+    const opennova::anim::SkeletalClips &rig() const;
+    const LoadedClip *find_clip(const String &key) const;
+    const LoadedClip *find_clip_variant(const String &key, int variant) const;
+	Array apply_pose_overlay(std::vector<opennova::anim::PoseBone> p_pose,
 			const PackedInt32Array &p_classes, const Basis *p_deltas,
 			const String &p_wpn_key, double p_wpn_playhead_seconds,
 			bool p_collapse_right_hand, const String &p_wpn_prev_key = String(),
@@ -85,32 +56,6 @@ private:
 			int p_wpn_prev_variant = 0) const;
 	void write_pose_to_skeleton(Skeleton3D *p_skeleton, const Array &p_pose,
 			bool p_collapse_right_hand) const;
-
-	// Shared core: build bones_/bind_local_/clips_ from already-resolved .bad bytes.
-	// p_reset_bytes defines the shared skeleton + bind pose; each (key, bytes) pair is sampled
-	// against the shared rest origins and registered as a clip. When p_model_parents pairs with
-	// p_model_origins (same non-zero size), the MODEL's bone table defines the rig outright --
-	// row count, hierarchy, and pivots; the .bad contributes rotations only, by row index, and
-	// its bone count/parents/positions are never read [orig: BoneAnim_BuildWorldMatrices
-	// @0x40c400 bounds the FK by modelDef+52 and reads parent/pivot from the modelDef+56 rows;
-	// extra rows past the .bad's channels take bone 0's composed matrix, the padding loop
-	// @0x40c5a1]. The skeleton's rest POSITIONS are RECONSTRUCTED from the model table + the
-	// reset .bad's bind rotations via the corpus-exact export relation
-	// (anim_sample.h positions_from_model), and the clips run the SAME rest-carrying
-	// composition the body pipeline uses -- so a rig whose shipped BadBone.position is
-	// zeroed/stale renders exactly like a healthy one, and a healthy one renders bit-for-bit
-	// like the .bad-driven path (the proven-equivalent factorization of the witnessed composed
-	// builders; sample_clip's model_bind mode remains the direct reference implementation,
-	// exercised by ctest). No-parents mode (retail's menu-preview semantics):
-	// p_model_origins sized like the .bad's bone count OVERRIDES the reset .bad's bone
-	// positions as the shared rest origins; otherwise
-	// the reset .bad positions are used. Caller clears state first
-	// and sets adm_name_. Returns false (with last_error_) on an unusable reset .bad or when
-	// no clip survives. Shared by load_from_resource_root and load_from_bad_files.
-	bool build_from_bad_bytes(const PackedByteArray &p_reset_bytes,
-			const std::vector<std::pair<String, PackedByteArray>> &p_clip_bads,
-			const std::vector<opennova::anim::Vec3> &p_model_origins = {},
-			const std::vector<int> &p_model_parents = {});
 
 protected:
 	static void _bind_methods();
@@ -123,7 +68,7 @@ public:
 	// with equal sizes, the MODEL defines the rig (count, hierarchy, pivots-by-reconstruction)
 	// and the .bad contributes rotations only, exactly as the original consumes
 	// modelDef+52/+56; origins alone are the legacy positional override (see
-	// build_from_bad_bytes).
+	// anim::SkeletalClips).
 	bool load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_adm_name,
 			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
 			const PackedInt32Array &p_model_bone_parents = PackedInt32Array());
@@ -141,10 +86,10 @@ public:
 			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
 			const PackedInt32Array &p_model_bone_parents = PackedInt32Array());
 
-	bool is_loaded() const { return loaded_; }
+	bool is_loaded() const { return rig_ != nullptr; }
 	String get_last_error() const { return last_error_; }
 
-	int get_bone_count() const { return static_cast<int>(bones_.size()); }
+	int get_bone_count() const { return static_cast<int>(rig().bone_count()); }
 	PackedStringArray get_clip_keys() const;
 	// [{ name: String, parent_index: int, rest: Transform3D }], parent-local bind pose.
 	Array get_skeleton_bones() const;
@@ -182,30 +127,6 @@ public:
 			double p_source_playhead_seconds, const String &p_target_key,
 			double p_target_playhead_seconds, float p_weight,
 			int p_source_variant = 0, int p_target_variant = 0) const;
-
-	// The upper-body WEAPON channel: sample p_wpn_key at ITS OWN playhead and hard-override
-	// the mask bones' WORLD rotations (clavicles/arms/forearms/neck/head/hands — the
-	// anim::kWeaponChannelMaskBones set by BN## index), then re-localize the complete
-	// mixed hierarchy. Origins keep the primary pose's (the shared skeleton owns the
-	// pivots). [orig: the mask override in Entity_BuildBoneTransformMatrices
-	// @0x4b14db/@0x4b16a7; world-wac-ai-re.md §14.8.6]
-	//
-	// An EMPTY p_wpn_key means the §14.8.6 gate is off — no override at all. A key with
-	// no matching clip is DIFFERENT: registration backfills every absent anim_<name>
-	// with entry 0, so a missing key plays the RESET clip rather than no-opping
-	// [orig: the unrolled backfill loops @0x40bc24 / @0x40bd2e, see
-	// docs/world/world-wac-ai-re.md §14.8.1].
-	//
-	// p_wpn_prev_key/playhead/weight carry the secondary channel's own cross-fade — the
-	// weapon layer re-inits through the SAME AnimMap_UpdateEntity body as the primary,
-	// so it takes the same blend window [orig: AnimMap_UpdateDualChannels @0x40b8c0
-	// -> @0x40b5f0 and AnimChannel_BlendTwoChannels @0x410740, see
-	// docs/world/world-wac-ai-re.md §14.8.7]. Empty prev = no blend.
-	void splice_weapon_channel(Array &p_pose, const String &p_wpn_key,
-			double p_wpn_playhead_seconds, const String &p_wpn_prev_key = String(),
-			double p_wpn_prev_playhead_seconds = 0.0,
-			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
-			int p_wpn_prev_variant = 0) const;
 
 	// Per-bone overlay class (anim::OverlayClass) parsed from the BN## bone names, for
 	// eval_pose_overlay. Accessory/unparsable bones map to the body class (the original's

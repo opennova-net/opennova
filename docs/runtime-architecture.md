@@ -67,6 +67,28 @@ session. There is no callback lattice and no second legacy frame sequence.
 
 ## Ownership and seams
 
+### Shared native assets
+
+Each mounted resource source owns one `assets::AssetStore`. The Godot
+`ResourceRoot` supplies that store to `MissionKernel`, `ObjectData` and
+`SkeletalAnim`; a headless kernel owns a store bound to its own resource index.
+Parsed 3DI models, ADM maps, BAD animations and compiled skeletal rigs are
+immutable shared handles. Definition tables already retained by `ItemDatabase`
+remain the mission's input instead of being loaded again.
+
+`ResourceIndex` supplies mounted bytes and a source revision; `AssetStore`
+owns parsed data. A remount, decode-policy change or explicit cache refresh
+invalidates future lookups, including cached misses. Existing handles remain
+valid snapshots. Active mission collision registrations and animation clocks
+still belong to the mission; meshes, materials and skeleton nodes belong to
+Godot. The shared store neither owns nor mutates those instances.
+
+Animation loading and evaluation live in `runtime/anim`, entity setup in
+`runtime/mission`, model collision geometry and attachment poses in
+`runtime/world`, and first-person viewmodel rules in `runtime/renderer`.
+[ADR 0044](adr/0044-shared-native-assets.md) records the ownership decision.
+
+
 ### Portable session
 
 `engine/runtime/inmatch/session.*` owns:

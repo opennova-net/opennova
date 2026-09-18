@@ -20,8 +20,8 @@
 
 #include <base/io/perf_clock.h>          // perf_now_us (the frame's phase clocks)
 
-#include <runtime/simassets/collision_resolve.h> // find_item_def (a rider's authored hp)
-#include <runtime/simassets/seat_spec_extract.h> // refresh_item_seat_spec (a streamed row's seats)
+#include <runtime/mission/collision_resolve.h> // find_item_def (a rider's authored hp)
+#include <runtime/mission/seat_spec_extract.h> // refresh_item_seat_spec (a streamed row's seats)
 #include <runtime/wac/remote_command.h>        // run_remote_command (the S2C 0x23 handler body)
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
@@ -174,7 +174,7 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 	world::VehicleSeatOccupancy result{true, false, 1, 1, true, rider->cls == EntityClass::Player};
 	const def::DefItemsFile *items = kernel_->items_table();
 	const def::DefItemDef *item = items != nullptr
-			? simassets::find_item_def(*items,
+			? mission::find_item_def(*items,
 					  static_cast<int>(rider->type_id) + mission::kItemIdOffset)
 			: nullptr;
 	if (item == nullptr) return result;
@@ -291,7 +291,7 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 		for (const world::EntityLifetime lifetime : rows) {
 			if (lifetime.handle.pool() != 1) continue;
 			if (world::Entity *entity = kernel.world.registry.get(lifetime))
-				simassets::refresh_item_seat_spec(kernel.world, kernel.seat_specs, *entity,
+				mission::refresh_item_seat_spec(kernel.world, kernel.seat_specs, *entity,
 						kernel.wire_header_world);
 		}
 	};

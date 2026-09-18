@@ -1,5 +1,5 @@
 // Wave-1 native assets (ADR 0028 trunk, S3b/S16 full) on the retail data: the
-// sim resolves every collision/occlusion .3di through its OWN SimModelCache,
+// sim resolves every collision/occlusion .3di through its OWN assets::AssetStore,
 // the boot installs the seat/mount table through the NATIVE extractor, the
 // booted world keeps producing native hitboxes with ZERO provider declines,
 // the by-name weapon install bakes the FSM from the retained weapon.def row,

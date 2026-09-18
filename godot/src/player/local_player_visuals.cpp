@@ -366,7 +366,7 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	// -> the ctx block]).
 	const Ref<PlayerViewmodelDef> def = local_player_viewmodel_def();
 	// The submit spec (gun/arms/clip-adm + the emplaced arms omission)
-	// resolves natively in simassets; the AK set is only the no-definition
+	// resolves natively in native renderer; the AK set is only the no-definition
 	// bring-up fallback and a resolved def with no fpModel intentionally
 	// submits no gun. [orig: Player_RenderFirstPersonViewModel @0x4ded60; @0x4dedc7]
 	const Ref<PlayerVisualSpec> character_spec = local_player_visual_spec();
