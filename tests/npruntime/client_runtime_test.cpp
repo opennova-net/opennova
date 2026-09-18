@@ -49,6 +49,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/round_sim.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
@@ -5789,13 +5790,17 @@ bool run_guided_zero_steer_point_is_stored() {
 	origin.target_slot = 0xFFFF;
 	origin.pos_x = origin.pos_y = origin.pos_z = 0;
 	view.apply(0x44, make_routed(0x0002, 5, GuidedFieldGroup::Pos, origin));
-	const ns::ClientGuidedMissile *m = nullptr;
-	for (const ns::ClientGuidedMissile &g : view.state().guided)
-		if (g.active && g.net_id == 5) m = &g;
-	if (!expect(m != nullptr, "guided: the group-5 record created the missile row")) return false;
-	if (!expect(m->has_steer && m->steer[0] == 0 && m->steer[1] == 0 && m->steer[2] == 0 &&
-					m->flight_seeded && m->lock_target == 0xFFFF,
-			"guided: an all-zero group-5 steer point is stored and seeds the flight")) return false;
+    auto round = std::make_unique<opennova::world::LiveRound>();
+    round->active = true; round->shot_seq = 5; round->max_age_ticks = 620;
+    round->guided_family = opennova::world::GuidedFamily::Stinger;
+    round->guided.steer[0] = 123;
+    view.set_guided_round_resolver([&](int16_t id) { return id == 5 ? round.get() : nullptr; });
+    view.apply(0x44, make_routed(0x0002, 4, GuidedFieldGroup::Pos, origin));
+    if (!expect(round->guided.steer[0] == 123, "guidance cannot create a missing missile")) return false;
+    view.apply(0x44, make_routed(0x0002, 5, GuidedFieldGroup::Pos, origin));
+    auto *m = &round->guided;
+    if (!expect(m->steer[0] == 0 && m->steer[1] == 0 && m->steer[2] == 0 && m->target == 0xFFFF,
+            "guidance stores the origin on an existing round")) return false;
 	// A non-zero lock moves the steer point; a following zero lock moves it
 	// back to the origin instead of leaving the stale point in place.
 	GuidedRecord lock;
@@ -5805,14 +5810,20 @@ bool run_guided_zero_steer_point_is_stored() {
 	lock.pos_z = 0x30000;
 	view.apply(0x44, make_routed(0x0002, 5, GuidedFieldGroup::TargetPos, lock));
 	if (!expect(m->steer[0] == 0x10000 && m->steer[1] == 0x20000 && m->steer[2] == 0x30000 &&
-					m->lock_target == 0x1003,
+					m->target == 0x1003,
 			"guided: a non-zero group-3 lock stores its steer point and target")) return false;
 	GuidedRecord zero_lock = lock;
 	zero_lock.pos_x = zero_lock.pos_y = zero_lock.pos_z = 0;
 	view.apply(0x44, make_routed(0x0002, 5, GuidedFieldGroup::TargetPos, zero_lock));
-	return expect(m->steer[0] == 0 && m->steer[1] == 0 && m->steer[2] == 0 &&
-					m->lock_target == 0x1003 && m->has_steer,
-			"guided: a zero group-3 steer point overwrites the previous point (retail stores zeros)");
+    if (!expect(m->steer[0] == 0 && m->steer[1] == 0 && m->steer[2] == 0 && m->target == 0x1003,
+            "zero coordinates overwrite the old steer point")) return false;
+    view.apply(0x44, make_routed(0, 5, GuidedFieldGroup::Status, origin));
+    view.apply(0x44, make_routed(0, 5, GuidedFieldGroup::TargetPos, lock));
+    if (!expect((m->flags & 1) && round->det_at_expiry && m->steer[0] == 0,
+            "guidance cannot revive a terminated round")) return false;
+    round->guided = {}; round->det_at_expiry = false;
+    view.apply(0x44, make_routed(0, 5, GuidedFieldGroup::TargetPos, lock));
+    return expect(m->steer[0] == 65536 && !(m->flags & 1), "a fresh lifetime admits guidance");
 }
 
 int main() {

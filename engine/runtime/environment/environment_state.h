@@ -350,8 +350,8 @@ public:
 	Vec3 moon_direction() const { return moon_dir_; }
 	// Sun by day, moon by night
 	// [orig: Environment_GetLightDirectionFloat @ 0x57d870].
-	Vec3 light_direction() const { return light_dir_; }
-	bool is_night_phase() const { return is_night_; }
+	Vec3 light_direction() const { return is_night_phase() ? moon_dir_ : sun_dir_; }
+	bool is_night_phase() const { return weather_->is_night_phase(); }
 	// 0..1 ramp toward the current phase across the 20-minute sunrise/sunset
 	// windows [orig: Environment_ComputeTimeOfDayColors @ 0x57de99].
 	float day_phase_blend() const { return day_phase_blend_; }

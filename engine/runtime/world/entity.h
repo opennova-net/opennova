@@ -496,6 +496,7 @@ struct Entity {
     // ambient inside a pool-2 building scales by (transfer x 0.5 + 0.5)
     // [orig: Entity_UpdateInfantryPlayerBody @ 0x4b4747..0x4b490e].
     float light_transfer = 0.0f;
+    int16_t reverb = 0; // ItemDef+432, zero inherits mission [orig: @0x4B5FC3]
     // Signed impact/KZ armor classes and vehicle occupant-reduction factors
     // from ItemDef +0x190/+0x192 and +0x188/+0x18C.
     int32_t armor_impact = 0; // signed i16 retail storage carried sign-extended

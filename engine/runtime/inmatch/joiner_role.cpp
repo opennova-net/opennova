@@ -698,6 +698,30 @@ void JoinerRole::wire_frame_providers() {
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B7CF4;
 	// Entity_UpdateInfantryAI @0x4BF7FA; Entity_MovementCollisionResolver tail
 	// @0x4B3D6E..0x4B3DA9]
+    rt.view().set_round_receiver([this](const replication::ClientRoundEvent &ev) { apply_round_event(ev); });
+    rt.view().set_guided_round_resolver([this](int16_t id) { return kernel_->world.round_sim.find_guided(id); });
+    world.round_sim.guided_inputs_provider = [this](const world::LiveRound &round, world::GuidedInputs &in) {
+        const auto *owner = runtime->state().find(round.shooter_handle);
+        in.owner = in.owner || owner != nullptr;
+        if (owner) {
+            in.owner_ai = true;
+            in.owner_target = owner->fire_target_handle;
+            if (const auto *aim = runtime->state().find(in.owner_target)) {
+                in.owner_aim = true;
+                in.aim[0] = aim->x; in.aim[1] = aim->y; in.aim[2] = aim->z;
+            }
+        }
+        const uint16_t target_id = round.guided.target == 0xFFFF && round.guided.phase == 0
+                ? in.owner_target : round.guided.target;
+        const auto *target = runtime->state().find(target_id);
+        if (target) {
+            in.target_present = true;
+            const uint32_t dead_bit = target->cls == EntityClass::Vehicle
+                    ? replication::kVehicleFlagDeadPose : world::kEntityFlagDead;
+            in.target_alive = (target->state_flags & dead_bit) == 0;
+            in.target_origin[0] = target->x; in.target_origin[1] = target->y; in.target_origin[2] = target->z;
+        }
+    };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);
 	// The replica water/float channel reads the mission water plane
 	// [orig: Env_WaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
@@ -1121,6 +1145,13 @@ void JoinerRole::apply_authoritative_health() {
 		world::AiEntity *local_ai =
 				world.ai.for_handle(local_h);
 		if (local != nullptr && local_ai != nullptr) {
+            if (const auto *self = client_entity_for_handle(rt.state(), rt.self_handle());
+                    self != nullptr && self->state_flags_known) {
+                const uint32_t chute = self->state_flags & world::kEntityFlagParachute;
+                local->flags = (local->flags & ~world::kEntityFlagParachute) | chute;
+                local->engine_flags = (local->engine_flags & ~world::kEntityFlagParachute) | chute;
+            }
+
 			// ClientRuntime latches authoritative spawn closed on a decoded zero
 			// tail, even if a later packet in this recv pump carries stale positive
 			// HP. The independent C2S 0x0E gameplay hold never forces health to zero.
@@ -1727,94 +1758,7 @@ void JoinerRole::apply_gameplay_events() {
 	// World::run_logic_tick admits this pool only under the explicit
 	// mp_session && !projectile_authority visual-client gate. Every descriptor
 	// is spawned VisualOnly below, and that mode gates every gameplay consequence.
-	for (const replication::ClientRoundEvent &ev : rt.drain_round_events()) {
-		// The retail deserializer dispatches only the alt/projectile bit or the
-		// standard adm-indexed bit [orig: @0x42f2a8]. Other flag shapes do not
-		// enter RoundData_SpawnRound.
-		if ((ev.flags & (kRoundEventFlagAltFire | kRoundEventFlagAdmIndexed)) == 0)
-			continue;
-		const world::WeaponTableEntry *adm =
-				world.tables.weapons.by_index(ev.adm_index);
-		if (adm == nullptr || adm->ammo_index < 0) continue;
-		world::RoundSpawnParams round;
-		world::RoundSourceState source;
-		round.owner = world::EntityHandle{};
-		round.shooter_handle = ev.shooter_handle;
-		// The mounted shooter's own vehicle joins the trace exclusion exactly
-		// like retail's mount rule — see wire_carrier_exclusion_for.
-		round.shooter_carrier_handle = wire_carrier_exclusion_for(
-				rt.state(), ev.shooter_handle, kernel.seat_specs);
-		// Retail resolves the wire shooter entity and copies its TEAM into the
-		// spawned round — the friend/enemy throwable item and tracer styling key
-		// on it. Without this every remote grenade wore the enemy variant (and a
-		// variant with no motor row froze mid-air). [orig: @0x4ec705]
-		if (replication::ClientEntityState *shooter_row =
-					rt.state().find(ev.shooter_handle)) {
-			round.shooter_team = shooter_row->team;
-			const int anim = shooter_row->anim_state_id;
-			// The category follows the retail animation-flags table, not a
-			// hand-maintained list of familiar locomotion clips. In particular,
-			// 170/171 remain crouched, 172 is prone, and idle_mortar (46) is
-			// neither. [orig: g_animStateFlagsTable @0x8139E8; category read in
-			// RoundData_SpawnRound @0x4EC252..0x4EC27A]
-			const uint32_t anim_flags = world::infantry_anim_flags(anim);
-			const bool prone = (anim_flags & world::kAnimStanceFlagProne) != 0;
-			const bool crouched =
-					(anim_flags & world::kAnimStanceFlagCrouched) != 0;
-			const bool swimming = anim == 36 || anim == 37 || anim == 154;
-			const bool mounted =
-					round.shooter_carrier_handle != wire_handle::kInvalid;
-			// Retail tests eye Z (Position.Z + CameraOffset.Z) against the fixed
-			// water plane [orig: RoundData_SpawnRound @0x4EC2DE..0x4EC2EA]. The
-			// decoded row has no CameraOffset carrier, so raw fixed position Z is
-			// the bounded projection; the swimming anim remains an independent
-			// positive witness. Do not invent a standing-eye constant here.
-			const bool below_water = world.env.water_z != 0 &&
-					shooter_row->z < world.env.water_z;
-			source.person_with_item_def =
-					shooter_row->cls == EntityClass::Player ||
-					shooter_row->cls == EntityClass::Infantry;
-			source.player = shooter_row->cls == EntityClass::Player;
-			source.underwater = swimming || below_water;
-			// Mounted is the later retail override and therefore wins even while
-			// below water; otherwise the underwater predicate forces standing row 2.
-			source.stance_category = mounted ? 1 : (source.underwater ? 2 :
-					(prone ? 0 : (crouched ? 1 : 2)));
-			source.scope_raised =
-					(shooter_row->state_flags &
-					 world::kEntityFlagScopeRaised) != 0;
-			source.recoil_pitch = &shooter_row->recoil_pitch;
-			replica_weapon_action_source(*shooter_row, world, ev.flags, source);
-			round.source_state = &source;
-			// The adm-arm action sounds play at the SHOOTER's position, and a
-			// decoded remote shooter has no local entity — supply its row
-			// position for the sim's fire-sound leg (world/fire_sound.h).
-			// [orig: entity+4 @ 0x4020ef; the pool resolve @ 0x42f491]
-			round.shooter_pos = world::Vec3{
-					static_cast<float>(shooter_row->x / kFixed16),
-					static_cast<float>(shooter_row->y / kFixed16),
-					static_cast<float>(shooter_row->z / kFixed16)};
-			round.shooter_pos_valid = true;
-		}
-		round.origin.x = static_cast<float>(ev.origin_x) / kFixed16;
-		round.origin.y = static_cast<float>(ev.origin_y) / kFixed16;
-		round.origin.z = static_cast<float>(ev.origin_z) / kFixed16;
-		round.dir_yaw_bam = ev.dir_yaw_bam;
-		round.dir_pitch_bam = ev.dir_pitch_bam;
-		round.ammo_index = adm->ammo_index;
-		round.adm_index = ev.adm_index;
-		round.shot_seq = ev.shot_seq;
-		round.subtype = ev.subtype;
-		round.charge = ev.slot_byte;
-		// Carry the arm through so presentation can honour retail's split: the
-		// adm-indexed arm spawns no ammo-def effect at the wire position (which is
-		// the shooter's EYE — Position + CameraOffset), it executes the addressed
-		// def's action rows at the weapon's own userpoint instead.
-		// [orig: @0x42f521 / @0x42f6ce]
-		round.wire_round_flags = ev.flags;
-		world.round_sim.spawn(
-				world, round, world::RoundConsequenceMode::VisualOnly);
-	}
+	for (const auto &ev : rt.drain_round_events()) apply_round_event(ev);
 
 	for (const WeaponReload &reload :
 			rt.drain_reload_notifications()) {
@@ -1859,7 +1803,8 @@ void JoinerRole::apply_gameplay_events() {
 						lp.inventory, equipped_def->ammo_class_id);
 			}
 			if (combo == lp.inventory.equipped_combo) {
-				active_slot.clip = reloaded->clip;
+				active_slot.clip = world::weapon_inventory_loaded_rounds(
+                        world.tables.weapons, lp.inventory, combo);
 				active_slot.phase = static_cast<uint8_t>(
 						active_slot.phase &
 						~world::weapon_phase::kReloadPendingBit);
@@ -1933,8 +1878,102 @@ bool JoinerRole::reset_to_baseline(SessionError &error) {
 
 // Leaving: the disconnect datagrams ride the shell's send leg.
 void JoinerRole::close() {
+	if (kernel_) kernel_->world.round_sim.guided_inputs_provider = {};
 	if (!runtime) return;
 	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
 }
 
+void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
+    auto &world = kernel_->world;
+    auto &rt = *runtime;
+    auto &kernel = *kernel_;
+
+	// The retail deserializer dispatches only the alt/projectile bit or the
+	// standard adm-indexed bit [orig: @0x42f2a8]. Other flag shapes do not
+	// enter RoundData_SpawnRound.
+	if ((ev.flags & (kRoundEventFlagAltFire | kRoundEventFlagAdmIndexed)) == 0)
+		return;
+	const world::WeaponTableEntry *adm =
+			world.tables.weapons.by_index(ev.adm_index);
+	if (adm == nullptr || adm->ammo_index < 0) return;
+	world::RoundSpawnParams round;
+	world::RoundSourceState source;
+	round.owner = world::EntityHandle{};
+	round.shooter_handle = ev.shooter_handle;
+	// The mounted shooter's own vehicle joins the trace exclusion exactly
+	// like retail's mount rule — see wire_carrier_exclusion_for.
+	round.shooter_carrier_handle = wire_carrier_exclusion_for(
+			rt.state(), ev.shooter_handle, kernel.seat_specs);
+	// Retail resolves the wire shooter entity and copies its TEAM into the
+	// spawned round — the friend/enemy throwable item and tracer styling key
+	// on it. Without this every remote grenade wore the enemy variant (and a
+	// variant with no motor row froze mid-air). [orig: @0x4ec705]
+	if (replication::ClientEntityState *shooter_row =
+				rt.state().find(ev.shooter_handle)) {
+		round.shooter_team = shooter_row->team;
+		const int anim = shooter_row->anim_state_id;
+		// The category follows the retail animation-flags table, not a
+		// hand-maintained list of familiar locomotion clips. In particular,
+		// 170/171 remain crouched, 172 is prone, and idle_mortar (46) is
+		// neither. [orig: g_animStateFlagsTable @0x8139E8; category read in
+		// RoundData_SpawnRound @0x4EC252..0x4EC27A]
+		const uint32_t anim_flags = world::infantry_anim_flags(anim);
+		const bool prone = (anim_flags & world::kAnimStanceFlagProne) != 0;
+		const bool crouched =
+				(anim_flags & world::kAnimStanceFlagCrouched) != 0;
+		const bool swimming = anim == 36 || anim == 37 || anim == 154;
+		const bool mounted =
+				round.shooter_carrier_handle != wire_handle::kInvalid;
+		// Retail tests eye Z (Position.Z + CameraOffset.Z) against the fixed
+		// water plane [orig: RoundData_SpawnRound @0x4EC2DE..0x4EC2EA]. The
+		// decoded row has no CameraOffset carrier, so raw fixed position Z is
+		// the bounded projection; the swimming anim remains an independent
+		// positive witness. Do not invent a standing-eye constant here.
+		const bool below_water = world.env.water_z != 0 &&
+				shooter_row->z < world.env.water_z;
+		source.person_with_item_def =
+				shooter_row->cls == EntityClass::Player ||
+				shooter_row->cls == EntityClass::Infantry;
+		source.player = shooter_row->cls == EntityClass::Player;
+		source.underwater = swimming || below_water;
+		// Mounted is the later retail override and therefore wins even while
+		// below water; otherwise the underwater predicate forces standing row 2.
+		source.stance_category = mounted ? 1 : (source.underwater ? 2 :
+				(prone ? 0 : (crouched ? 1 : 2)));
+		source.scope_raised =
+				(shooter_row->state_flags &
+				 world::kEntityFlagScopeRaised) != 0;
+		source.recoil_pitch = &shooter_row->recoil_pitch;
+		replica_weapon_action_source(*shooter_row, world, ev.flags, source);
+		round.source_state = &source;
+		// The adm-arm action sounds play at the SHOOTER's position, and a
+		// decoded remote shooter has no local entity — supply its row
+		// position for the sim's fire-sound leg (world/fire_sound.h).
+		// [orig: entity+4 @ 0x4020ef; the pool resolve @ 0x42f491]
+		round.shooter_pos = world::Vec3{
+				static_cast<float>(shooter_row->x / kFixed16),
+				static_cast<float>(shooter_row->y / kFixed16),
+				static_cast<float>(shooter_row->z / kFixed16)};
+		round.shooter_pos_valid = true;
+	}
+	round.origin.x = static_cast<float>(ev.origin_x) / kFixed16;
+	round.origin.y = static_cast<float>(ev.origin_y) / kFixed16;
+	round.origin.z = static_cast<float>(ev.origin_z) / kFixed16;
+	round.dir_yaw_bam = ev.dir_yaw_bam;
+	round.dir_pitch_bam = ev.dir_pitch_bam;
+	round.ammo_index = adm->ammo_index;
+	round.adm_index = ev.adm_index;
+	round.shot_seq = ev.shot_seq;
+	round.subtype = ev.subtype;
+	round.charge = ev.slot_byte;
+	// Carry the arm through so presentation can honour retail's split: the
+	// adm-indexed arm spawns no ammo-def effect at the wire position (which is
+	// the shooter's EYE — Position + CameraOffset), it executes the addressed
+	// def's action rows at the weapon's own userpoint instead.
+	// [orig: @0x42f521 / @0x42f6ce]
+	round.wire_round_flags = ev.flags;
+	world.round_sim.spawn(
+			world, round, world::RoundConsequenceMode::VisualOnly);
+
+}
 } // namespace opennova::inmatch

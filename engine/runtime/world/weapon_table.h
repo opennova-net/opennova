@@ -40,7 +40,7 @@ struct WeaponTableEntry {
                                     // [orig: @0x544E43 is a plain scalar store]
     std::string ammo_class;         // `ammoclass <name> <n>` [orig: @0x5441CB]
     int16_t ammo_class_count = 0;
-    int16_t ammo_bucket = 0;        // [orig: @0x544045]
+    int32_t ammo_bucket = 0;        // [orig: @0x544045]
     // The fired round: `round_type "AMMO_X"`, resolved to an AmmoTable index at load —
     // the original stores the resolved ammo index at adm+4
     // (adm+84 is statid) [orig: §5.60; resolve = AmmoDef_LookupByName]. -1 = unresolved.

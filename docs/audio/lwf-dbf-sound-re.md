@@ -715,7 +715,7 @@ slots / crossfade), and the `dialog_vs_ambient` probe's bed-vs-dialog gate
 | D-SND-9 | FIXED 2026-08-12: the BPLN flags word rides the collision feed (`CollisionPlane::flags`, fed by `collision_model_from_3di` from the parse's retained `+0` word) and the entity-leg clip selects per plane — a nonzero flags BYTE substitutes `max(radius, 0)` for the raw radius | flagged planes clamp the clip radius at 0, so only flag-0 planes read 0.5u thin on ray 2 (`@ 0x538d00` byte test; flagged arm subtracts the clamped register `@ 0x538d4b`, flag-0 the raw arg `@ 0x538dd6`) | ctest `collision` `test_sound_occlusion_flagged_planes_ignore_thin_ray_shrink` pins the exact inflate split (flag-0 thin slab clears ray 2; flagged stays solid). The LOS terrain callback reads the witnessed nearest 0.5u-quantized texel. |
 | D-SND-8 | master fade ramp, underwater vol/pan halving, options SFX volume, and the bearing-byte pan map to reimpl territory (Ambient bus volume, Godot's spatial panner); doppler (emitter/listener velocity feed) unported | `g_SoundMasterFadeQ24 @ 0x85A3E4` (255/256 steady), `g_SoundListenerUnderwater @ 0x33429A8` halving @ 0x75ca7d, `g_SoundVolumeOption @ 0x24D20CC` per channel write, atan2 bearing pan @ 0x5289c0, `calculate_3d_sound_attenuation @ 0x527f60` doppler | reimpl playback/bus routing (not grillable address-by-address); the underwater duck and doppler are candidates once an underwater/vehicle pass needs them. |
 | D-SND-16 | **PORTED 2026-07-28** (`engine/runtime/audio` `AmbientMixer` + the `AmbientMixer` binding): marker eval/registration runs on the logic-tick clock through the witnessed `tick & 7` cohort walk (each placed marker every 8th tick), layers register into a faithful 767-slot transient table with TICK-unit keep-alives (marker default 10; vol-0 register clears), and the per-render-frame call is only the live-slot mix — lazy range cache, axis+euclid cull, one lazy LOS per raw-audible marker, member-0 two-radius volume, loudest-first ranking. `MissionAudio` keeps stream resolution, decode-failure fallback, and the eight persistent voices (D-SND-6/8); a diagnostic host with no ticking runtime can free-run an autonomous 62.5 Hz eval clock (the weather world-driven/autonomous split). The curve statics (`calc_distance_volume`/`emitter_layer_volume`/`crossfade_volume_byte`/`time_of_day_region`) moved to engine/runtime/audio; the GDScript seams delegate | registration and mix on split clocks (§driver cadence): the pool-2 `tick & 7` stagger @ 0x4c225a (attached emitters per tick), tick-unit lifetimes, the per-frame render-lane mix @ 0x521341 | evidence: `ambient_mixer` ctest (curve integer pins, cohort stagger, tick-lifetime expiry/revisit, region-flip overlap, same-set suppress, occlusion-once, ranking, vol-0 clear, autonomous clock); GUT `mission_audio_test.gd` / `sound_runtime_test.gd` on the new seam. Measured A/B (ASH_I5A spawn, 143 markers, 10 s windows, same box): the world tick's audio leg 1.19 ms -> 0.21 ms avg per frame (p95 1.41 -> 0.29 ms); frame wall 10.4 -> 8.8 ms. Reimpl residues: candidate-id tie-break for deterministic membership (retail ties by slot order), the range cull compares reimpl-float axes (Q16 at the curve boundary), and min-only layers cull like retail (zero JOX layers are min-only). Was: the full marker x layer eval every render frame in GDScript — the measured 1.2-1.5 ms/frame F3 "Audio" row. |
-| D-SND-18 | `_apply_reverb` derives Godot room size from the mission id at setup; the live player region selector and retail mixer coefficients/DSP are unported | Per-player userpoint > building > mission selection in `Entity_UpdateInfantryPlayerBody @0x4B40E0`, which calls the reverb-index setter `sub_766460 @0x766460` (a two-instruction global store, `dword_3346FA0 = index`) once per player tick at `@0x4B633F`; `0x7BF400` (the 20-row coefficient table) and `0x7BDCF0` (the mixer block) are data, not functions; the DSP owner that consumes the row is unknown; stock rows have identical coefficients (§The reverb bed) | **OPEN + NEEDS-RE**: selector/room-size mismatch confirmed; index-zero and mixer DSP still require a witness before porting (2026-09-13). |
+| D-SND-18 | FIXED 2026-09-18: the world selects the live region/building/mission value and Godot no longer invents room size from it | Original preset selection and counterfactual mixer output executed for all 20 indices; see the reverb witness below | Selector test and 40 original mixer cases pass; this proves the preset boundary, not full audio-backend equivalence. |
 | D-SND-19 | **FIXED 2026-09-13:** one-shot planning filters layers by the live listener view before member selection and pitch randomness. Residual, documented not ported: retail performs the two ROL3 pitch draws only when the picked member's wave handle is non-null (`@0x75CE1A` guards the set jitter `@0x75CE81` and member jitter `@0x75CEBA`); the planner draws them for every admitted layer with a member because the shell resolves the wave later. Shipped banks resolve every wave, so the stream matches on real data | `SoundBank_PlayTriggerEntries @ 0x75CCD0`, view gate `@0x75CD54`; internal/external bits 2/4 and optional set-bit0 / layer-bit0x20 match; null-wave guard `@0x75CE1A` | `audio_oneshot_play` covers neutral/absent view bits, special set gating, suppressed cursor/RNG state, and shipped GS_TANK/GF_TANK_RL; GUT `sound_runtime_test` verifies live Simulation view changes through SoundBank |
 
 **IDB changes (2026-07-10 session):** renamed `Entity_SpawnBoneEffect -> Entity_UpdateEnvSoundEmitter @ 0x4a8080`,
@@ -753,39 +753,44 @@ maintainer OK (same day): the curated misnomer `render_loading_frame @ 0x521310 
 GameLoop_RenderFrame`, entry comment rewritten to the mode-table witness (the old
 "loading frame / previous name confirmed correct" note was wrong). IDB saved.
 
-## The reverb bed (witnessed 2026-08-28; NOT ported)
+## Reverb selection and the mixer preset boundary (2026-09-18)
 
-Retail's reverb is a software DSP inside the audio mixer, driven by a 20-row x 24-byte
-coefficient table baked into the image at `0x7BF400` (`.text`, 4 words + 4 dwords per
-row) and optionally overridden by a text script `reverb.def`: `Audio_LoadReverbDefs
-@ 0x766d80` (called from `Audio_InitSubsystems @ 0x767124`) reads the file through the
-search paths when `File_CheckExists` finds it and `Audio_ParseReverbColorTable @ 0x7bf5e4`
-(the IDB name is a misnomer; it is the reverb table parser) fills up to 20 rows: two
-`AudioScript_ParseNumber` pairs are MMX-unpacked into the word quads and the two scale
-values are stored as `-22 * value`. **Stock JO/JO:CA ships no `reverb.def`** (none in the
-install's pffs or loose tree), so the baked table stands, and every one of its 20 rows is
-identical: words `(8192, 8192, 4096, 6144)`, dwords `(-2816 = -22*128, -3960 = -22*180,
-0, 0)`. The row index is the current reverb id `dword_3346FA0`, written once per player
-tick by `Entity_UpdateInfantryPlayerBody @ 0x4b633f` (`sub_766460`, the setter) from,
-in priority order: the userpoint case-4 value, the occupied building's def word +432
-(the `reverb` items.def property, `ItemDef_ParseProperty @ 0x4a015a`), else the mission
-default `dword_A762E4` (written `@ 0x4b5f9e`); the F3 environment page prints it as
-`Reverb: %i` (`Debug_DrawEnvironmentValues @ 0x4ef16a` via the getter `sub_766470`).
-The mixer reads the row at `0x7bdd12..0x7bdd4e` (`lea ebx,[ebx+ebx*2]; lea ebx,[ebx*8]`
-= index * 24, copied into the DSP state at `0x798898..0x7988A8`) inside a self-modifying
-MMX block (`0x7bdcf0` patches a jump opcode on a device-caps compare), so whether index 0
-bypasses the reverb or applies the same coefficients is unresolved until that DSP is
-decompiled. Reimpl: NONE of this is ported. `godot/src/audio/mission_audio.cpp`
-`_apply_reverb` installs a Godot `AudioEffectReverb` whose room size scales with the
-mission header `reverb` id -- an invented stand-in that retail does not compute (retail's
-rows do not vary with the id at all in stock data). This is now **D-SND-18**,
-OPEN + NEEDS-RE (2026-09-13): retain the source-proven discrepancy while witnessing
-the DSP/index-zero boundary before replacing the stand-in. There is no permanent
-disposition for this approximation. The current adapter applies the mission id at
-setup; it also lacks the player's per-tick userpoint/building/default selection.
-jo-c's positional-audio oracle bounds backend services and does not prove audible
-reverb equivalence. Closure needs selector fixtures, original coefficient/output
-samples and a bounded live region-transition comparison.
+The original has a 20-row, 24-byte preset table at `0x7BF400`.
+`Audio_LoadReverbDefs @ 0x766D80` optionally loads `reverb.def` through
+`Audio_ParseReverbColorTable @ 0x7BF5E4`; all stock rows contain the same
+words `(8192,8192,4096,6144)` and scales `(-2816,-3960,0,0)`.
+The player selects mission default, then a nonzero occupied-building definition
+word, then the last strictly enclosing case-4 userpoint (including value zero).
+[orig: Entity_UpdateInfantryPlayerBody @ 0x4B5F9E..0x4B614F;
+setter call @ 0x4B633F; sub_766460 @ 0x766460]
+
+`world::ReverbState` now owns that selection. Mission promotion supplies the
+regions/default, items.def promotion supplies the building word, and the local
+player updates it each body tick. The `reverb` test pins overlapping regions,
+strict boundaries, zero overrides, exit to the building and exit to the mission.
+
+**Correction to the earlier DSP inference:** copying a coefficient table does
+not establish that the live sample path uses it. Original instructions
+`@ 0x7BDD12..0x7BDD4E` copy the selected row into `0x798898..0x7988AF`.
+A direct-memory operand scan finds writes at `@ 0x7BDD3C`, `@ 0x7BDD43`,
+`@ 0x7BDD48` and `@ 0x7BDD4E`, with no reads of that range in the executable.
+The live mixer tail `@ 0x7BEC79..0x7BEF93` performs its integrator/filter/pack
+work independently of those copied values.
+
+`scripts/oracles/reverb_preset.py` executes the original selector and tail,
+supplying controlled MMX bus samples at `@ 0x7BDD90` through actual MOVQ
+instructions. All 20 stock presets and all 20 deliberately changed presets
+produce the same nonzero 4096-byte stereo output over 1024 frames:
+`c51d1e7766544e5394f9ca3e415440f722392b575934f22bf2dc1c2f3fdcca03`.
+Index zero has no special bypass in this observed path. The fixture uses the
+pinned executable hash and command recorded in
+[the validation report](../jo-c-validation-2026-09-18.md).
+
+Godot's `0.4 + 0.08 * id` room-size approximation is removed. No replacement
+preset-dependent DSP is invented. This closes D-SND-18's selector/preset
+mismatch; it does not claim that Godot reproduces every original mixer sample
+or that an audible live region-transition comparison was performed. IDB comments
+were appended at `@ 0x7BDD12` and saved in `Jointops.exe.kong.i64`.
 
 ## Verdict
 

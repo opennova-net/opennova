@@ -523,7 +523,7 @@ change. This closes D-RMAT-8 rather than bounding it to opaque surfaces.
 | D-RMAT-9 | Object composer fog was a linear ramp with an invented `smoothstep` for type 3 | the device fog table: type 0 exponential `ln(64)/end`, types 1/2/3 linear with start = 0.5 / `(1−density)·end·0.5` / `(1−density)·end·0.25` (`[orig: Render_SetFogState @ 0x58a950 → CD3DDevice_SetFogParameters @ 0x677960]`; env-tod-re.md §Fog policy) | **FIXED (2026-07-06, the model-parity slice)**: the composer emits the witnessed table (one text with `terrain_lighting.gdshaderinc`/`water.gdshader`); covered by the same T1 re-dump |
 | D-RMAT-10 | The `_MT` secondary (detail) stage ran HALF the witnessed combine: the composer emitted `base.rgb *= detail.rgb` — ×1, no alpha touch — so resolved MT surfaces (RckS05's `W_Rck1_o`, gray avg 93/255) modulated ×0.365 where retail runs ×0.73 (MT objects too dark in detail regions, the REN-7 T3 "W_RCK1_O watch item"), and the stage never alpha-modulated; a missing secondary bound a white ×1 fallback (neutral then, a ×2 brightener under the fix) | stage 1 = `TSSColor(1, Modulate2x, Texture, Current)` + `TSSAlpha(1, Modulate, Texture, Current)` (§FF technique tables — "the same on stage 1 vs Current for `_MT`"), and the combine is CORPUS-UNIFORM across every second-diffuse family (REN-7 sweep, the .fx re-derived from retail `localres.pff` via `engine/formats/pff`+`engine/formats/scr`, never committed): `BDiffT2.fx` (`EffectTag "VS_DOT3DIFF2"`) carries the identical stage-1 pair, and `SkBDiffO2.fx` (`EffectTag "VS_SKBUMPDIFFOBJ2"`) applies BOTH diffuses in its NORMAL P3 "post multiply" pass — same TSS pair under `RSAlphaMode(TRUE, DESTCOLOR, SRCCOLOR)` (the ×2-onto-framebuffer form); a NULL-texture stage is dropped; the sample set is the SECOND authored UV channel — the .3di v8 vertex carries TWO UV sets unconditionally (stride 40 = pos+normal+uv0+uv1; RckS05 uv1 distinct on 48/48 verts, FOUNTAIN M4 on 455/455; FVF 0x212 TEX2 corroborates the D3D FF stage-N→texcoord-N default) | **FIXED (REN-7, 2026-07-07)**: composer emits `base.rgb *= detail.rgb * 2.0; base.a *= detail.a;` `[orig: _FFP.fx TECHNIQUE_NORMAL _MT stage 1]`; the reimpl masks `OSCAP_DETAIL` off the composed key when the secondary fails to resolve (exact stage-drop identity, retail-shaped; the white fallback deleted; `classify()` stays pure — 0 classification rows moved). T1 re-dump: exactly the 224 OSCAP_DETAIL composed hashes moved (+27 bytes each = the two text edits), everything else byte-identical; handoff pins unchanged (`FF_MT_OP/base → 0x00001004`) |
 | D-RMAT-11 | Controlled flipbooks treated every CTRL as a state-zero signed 16.16 fraction, so RevX02 `IndoArms.3di` consumed raw `TEX_CAMO1 = 1` as frame zero (`A_Arm1st.tga`, tattooed) | the retail image statically seeds the adjacent state dwords for `TEX_TEAM` and `TEX_CAMO1/2/3` (ordinals 92–95) to one; `apply_shader_parameters` therefore uses signed `value % frame_count` for those four selectors `[orig: @ 0x58DC36..0x58DC42]` | **FIXED (2026-08-17, PR-503 adversarial T3)**: `compute_anim_frame` selects modulo only for exact ordinals 92–95 and preserves the generic 16.16 path; literal pins cover two-frame `IndoArms.3di` and three-frame `APLFP1.3DI` Jflag1/Jflag2/Jflag3, including the signed negative remainder |
-| D-RMAT-12 | Request types 6/7/16/17/18 return the ordinary decoded image in `material_texture.cpp` | Dedicated environment-map, alpha-overlay, chunk-normal, height-normal and TGA-overlay loaders are selected by `sub_5B16F0 @0x5B16F0` (§Texture preprocessing follow-up) | **OPEN + NEEDS-RE** — dispatch mismatch confirmed; loader kernels, resource/cache semantics and shipped-content reachability must be pinned before implementation (2026-09-13 audit). |
+| D-RMAT-12 | FIXED 2026-09-18: dedicated height/volume/chunk resources replace raw loads | Original dispatch and pixel producers, 14 original horizon vectors; NQ8B/HRZ8/AOC8 formats and Godot dimensionality tests | Producer/resource parity established; no special-type stock material was found in jo-c's 2717-model scan, and no live visual comparison is claimed. |
 
 ## IDB changes made during the session
 
@@ -616,17 +616,28 @@ missing data and unsupported types 3, 9..15 and >18 with this resource; cache
 epoch teardown releases its device handles with the rest of the texture cache.
 [orig: Render_CreateCheckerboardTexture @ 0x5B1600]
 
-Two caveats on that table row (2026-09-11 review). First, the dispatcher's
-second switch (`movzx edx, byte ptr [ecx+11h]` @ 0x5B1723, `jmp jpt_5B1737`
-@ 0x5B1737) has five dedicated-loader legs the port raw-loads as the decoded
-texture: case 6 @ 0x5B179A (`sub_58A580`, environment-map build), case 7
-@ 0x5B17B7 (`sub_58CE10`, the `:AO:N` alpha-overlay variant), case 16
-@ 0x5B17D4 (`sub_58F350`, chunk normal map), case 17 @ 0x5B17DD (`sub_58F470`,
-height map to normal) and case 18 @ 0x5B17E6 (`load_tga_alpha_overlay_texture`);
-whether shipped JO `.3di` rows carry those types is unchecked. These five legs
-are now tracked as **D-RMAT-12** (2026-09-13), with corpus inventory and per-loader
-byte fixtures required before closure. The existing normal-map/fallback test
-does not exercise these loaders. Second, a
+The dedicated types are implemented (D-RMAT-12, 2026-09-18): type 6 builds a
+quarter-width/height horizon volume with 16 azimuth slices and 256 wrapped alpha
+height samples; type 7 performs the original all-white AO output. Type 16 selects
+`NQ8B` and converts BGRA; type 17 selects `HRZ8` as an alpha-only volume; type 18
+selects `AOC8` as alpha-only 2D data. Chunk dimensions start at payload +12/+16
+(and +20 for depth), pixels at +28. Godot returns `Texture3D` for volumes and
+`Texture2D` otherwise. Cache keys separate generated types, and the selected
+TGA/DDS source never silently falls through after a decode failure.
+[orig: dispatch @ 0x5B179A, @ 0x5B17B7, @ 0x5B17D4, @ 0x5B17DD, @ 0x5B17E6;
+generate_environment_map @ 0x58A220; AO producer @ 0x58CB90;
+chunk loaders @ 0x58F350, @ 0x58F470, @ 0x58F590]
+
+`renderer_material_texture` compares every pixel of 14 original-executable
+horizon outputs, including rectangular and non-power-of-two inputs, and covers
+chunk channels, nesting, slice order and truncated data. Godot's
+`material_texture_producers_test.gd` verifies the uploaded resource dimensions;
+`resource_root_contract_test.gd` keeps source choice/cache behavior covered.
+Regeneration: `scripts/oracles/jo_c_parity.py`; provenance and the jo-c corpus
+reachability limitation are in [the report](../jo-c-validation-2026-09-18.md).
+Original IDB comments at `@ 0x58A220` and `@ 0x58CB90` were appended and saved.
+
+One bounded fallback remains: a
 missing `.MDT` is not a retail checkerboard: `load_texture_as_normalmap`'s
 absent-file leg jumps into the null-data kernel walk (`jz` @ 0x58C586) with
 zero dimensions, the pixel loop is skipped (`jle` @ 0x58C901), and

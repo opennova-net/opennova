@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include <runtime/world/body_anim.h>
+#include <runtime/world/parachute.h>
 #include <runtime/world/entity.h> // EntityHandle (the combat-pass target/focus fields)
 
 namespace opennova::world {
@@ -52,6 +53,7 @@ enum : int {
     kWashRun = 29,
     kJumpStart = 30,
     kJumpLoop = 31,
+    kParachute = 47,
     // The climb family (D-COL-5): idle holds on the ladder, up/down by the
     // look-pitch sign, top near the anchor (org1 select). [orig: the org2 climb
     // block @0x4b7484-0x4b76d8; org1 33/35 select @0x4bfaca-0x4bfad8]
@@ -323,6 +325,7 @@ public:
 };
 
 struct InfantryState {
+    ParachuteState parachute;
     bool active = false;
     bool is_local_player = false;
 

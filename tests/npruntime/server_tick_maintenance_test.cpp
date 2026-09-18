@@ -1240,10 +1240,88 @@ bool check_respawn_pick_admission() {
 			"handle 0 over an empty pool-0 row is rejected");
 }
 
+bool check_shared_loaded_ammo_fire_and_reload() {
+    w::World world;
+    world.rules.mp_session = true;
+    world.registry.configure_pool(0, 8);
+    install_rifle_armory(world);
+    auto &table = world.tables.weapons;
+    table.ammo_class_names.push_back("SHARED");
+    table.ammo_class_caps.push_back(1000);
+    table.entries[5].ammo_bucket = 1;
+    auto variant = table.entries[5]; variant.rank = 3;
+    table.entries.push_back(variant);
+    const auto shooter = w::spawn_remote_player(world, player_spawn(0,0,0));
+    std::vector<inmatch::NapiNPConnection> roster;
+    roster.push_back(make_conn(3,1,nullptr,ns::TransportMode::Client,shooter,true));
+    auto &conn = roster.front();
+    conn.reply.shared_clips[1] = 2;
+    conn.reply.ammo_pools[0] = 5;
+    for (uint8_t adm : {5,6}) {
+        auto &slot = conn.weapon_slots[3*65+table.entries[adm].rank];
+        slot.adm_index = adm; slot.clip = 123;
+    }
+    uint32_t client_tick = conn.tick_seed;
+    auto fire = [&](uint8_t adm) {
+        (void)inmatch::dispatch_session_replies(inmatch::GameConfig{},conn,
+            {make_protocol_message(c2s::FIRED_ROUND,fire_body(conn,shooter.packed,adm,client_tick))},100,roster,&world);
+    };
+    fire(5); fire(6); fire(5);
+    if (!expect(conn.reply.shared_clips[1]==0 && world.out.rounds.count==2,
+            "two weapon selections consume one shared clip; the third fire is empty")) return false;
+    WeaponReload reload;
+    reload.entity_handle=shooter.packed; reload.reload_param=3*65+3;
+    (void)inmatch::dispatch_session_replies(inmatch::GameConfig{},conn,
+        {make_protocol_message(c2s::WEAPON_RELOAD_REQUEST,encode_weapon_reload(reload))},100,roster,&world);
+    if (!expect(conn.reply.shared_clips[1]==5 && conn.reply.ammo_pools[0]==0,
+            "reload fills the shared clip from its reserve pool")) return false;
+    fire(5);
+    return expect(conn.reply.shared_clips[1]==4 && world.out.rounds.count==3 &&
+            conn.weapon_slots[197].clip==123 && conn.weapon_slots[198].clip==123,
+            "the other weapon sees the reload without rewriting either private clip");
+}
+
+bool check_guidance_waits_for_spawn_frame() {
+    inmatch::NapiNPServerCtx ctx;
+    inmatch::set_connection_mode(ctx,inmatch::ConnectionMode::HostOnly);
+    ctx.is_in_session=1;
+    ctx.network_quality_broadcast_countdown=100;
+    ctx.config.game_type=game_type::kTeamDeathmatch;
+    w::World world;
+    world.rules.mp_session=true;
+    world.registry.configure_pool(0,8);
+    w::MatchRules rules; rules.game_type=ctx.config.game_type; world.match.configure(rules);
+    ctx.world=&world;
+    const auto player=w::spawn_remote_player(world,player_spawn(0,0,0));
+    ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+    ctx.np_protocol.connection_list.push_back(make_conn(3,1,&transport,ns::TransportMode::Client,player,true));
+    auto &conn=ctx.np_protocol.connection_list.front();
+    conn.s2c_send_boundary_open=false;
+    w::RoundSim::GuidedUpdate update{};
+    update.shooter=player.packed; update.net_id=9; update.groups=1u<<3;
+    update.state.target=0x1001; update.state.steer[0]=1234;
+    world.round_sim.guided_updates.push_back(update);
+    inmatch::Server_TickUpdate(ctx);
+    for (const auto &d:drain(transport))
+        if (!expect(d.tag!=0x44,"guidance waits while the spawn frame boundary is closed")) return false;
+    if (!expect(conn.pending_guidance.size()==1,"guidance survives the closed send boundary")) return false;
+    conn.s2c_send_boundary_open=true;
+    inmatch::Server_TickUpdate(ctx);
+    bool frame=false, guidance=false;
+    for (const auto &d:drain(transport)) {
+        if (d.tag==0x0A) frame=true;
+        if (d.tag==0x44) {
+            if (!expect(frame,"the fire-bearing frame precedes queued guidance")) return false;
+            guidance=true;
+        }
+    }
+    return expect(guidance && conn.pending_guidance.empty(),"queued guidance drains once at the open boundary");
+}
+
 } // namespace
 
 int main() {
-	bool ok = true;
+	bool ok = check_shared_loaded_ammo_fire_and_reload() && check_guidance_waits_for_spawn_frame();
 	ok = check_spawn_protection_seeded_at_creation() && ok;
 	ok = check_spawn_protection_countdown_and_gates() && ok;
 	ok = check_spawn_protection_cleared_by_validated_fire() && ok;

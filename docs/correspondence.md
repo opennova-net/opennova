@@ -1562,3 +1562,15 @@ Rows for the functions the tidy re-witnessed at instruction level (world-wac-ai-
 | `EntityLightQuery` / `light_scene` object query | `setup_terrain_effect_for_entity` / `Terrain_RenderSectorEntitiesBySide` / `Light_SelectAndEnableForDraw` | `0x5C74A0` / `0x5C7F9A..0x5C8020` / `0x5ABA7F..0x5ABA8D` | matching entity origin/radius cube, 63 object candidates (general/terrain 64), per-material group selection; D-RLIT-11 (minted and closed), native selector/model-builder suites and Godot per-model/first-person/placement/destruction/effect-world regressions |
 | `object_lod` projection sphere | `Model_SelectRlodLevel` / `Entity_ComputeBoundingSphere` | `0x5C3B20` / `0x5C69A0` | matching exact CMDL bounds, rotated entity-local midpoint, positive-side half-diagonal scaled once, person radius or type-185 parachute radius; D-RORD-12, native sphere/model-builder/present-row regressions and eight Godot cases |
 | `OcclusionWorld::bound_sphere_fixed` | `Entity_ComputeBoundingSphere` | `0x5C69A0` (`0x5C6A02..0x5C6B52`) | matching midpoint, positive-side halves, unset-bound clamps and the Q16 scale leg; D-OCC-16 (minted and closed), `occlusion_test` |
+
+### JO-C parity validation, 2026-09-18
+
+| Original | Port | Verdict / evidence |
+|---|---|---|
+| Guided launch @ 0x445DB0 / @ 0x445EF0; pursuit @ 0x546B30; motors @ 0x446060 / @ 0x446690 / @ 0x446BA0 | world/guided_missile_flight.cpp, world/guided_round.cpp | MATCHING bounded instruction outputs: 308 PC53 cases; runtime lifecycle/ammo/target tests. Anchored by original instruction execution through jo-c oracle; flare candidate and proximity-side-effect scope remains open. |
+| Shared loaded-ammo get/set @ 0x5405F0 / @ 0x540670 | world/weapon_inventory.cpp, inmatch/server_message_dispatch.cpp | MATCHING source/control-flow and public fire/reload tests; separate reserve and DWORD loaded owners. |
+| Player chute block @ 0x4B7AD9..0x4B7C8D | world/parachute.cpp | MATCHING bounded body behavior; authority/local/replica integration tests, live canopy presentation unverified. |
+| Height horizon @ 0x58A220; AO @ 0x58CB90; NQ8B/HRZ8/AOC8 @ 0x58F350 / @ 0x58F470 / @ 0x58F590 | renderer/material_texture_producers.cpp | MATCHING 14 original horizon outputs; chunk format/bounds tests and Godot dimensionality checks. IDB comments appended to the two producers. |
+| Reverb selection @ 0x4B5F9E..0x4B633F; preset copy @ 0x7BDD12 | world/reverb.h, audio/mission_audio.cpp | MATCHING selector/preset boundary: 40 original mixer cases, no observed coefficient-dependent output. IDB comment appended at the copy. Full mixer equivalence unclaimed. |
+
+Pinned executable and regeneration commands: [validation report](jo-c-validation-2026-09-18.md).

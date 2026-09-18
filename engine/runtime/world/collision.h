@@ -129,6 +129,7 @@ struct CollisionFace {
 // @+68..+88, bound-sphere
 // center @+92..+100 + radius @+104.]
 struct CollisionSection {
+    uint32_t flags = 0; // COBJ+0, bit 1 selects blast breakage [orig: @0x4E6CD0]
     int32_t vertex_start = 0;
     int32_t vertex_count = 0;
     int32_t normal_start = 0;

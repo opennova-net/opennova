@@ -15,6 +15,7 @@
 
 namespace opennova::world {
 class IRootMotionSource;
+struct LiveRound;
 } // namespace opennova::world
 
 namespace opennova::terrain {
@@ -79,10 +80,10 @@ public:
 	// [orig: update_map_overlay_timers @0x5BFCE0;
 	//  render_minimap_slot_blip @0x5be4ac]
 	void tick_minimap_overlays();
-	// Advance every active client-flown guided missile one 62 Hz tick. The
-	// client only flies — termination arrives solely as the wire's group 1
-	// (client_replica_guided.cpp; §5.15, D-NET-64).
-	void tick_guided_missiles();
+    using GuidedRoundResolver = std::function<world::LiveRound *(int16_t)>;
+    void set_guided_round_resolver(GuidedRoundResolver resolver) { guided_round_resolver_ = std::move(resolver); }
+    // Fire synchronously at the receive boundary, before a following 0x44.
+    void set_round_receiver(std::function<void(const ClientRoundEvent &)> receiver) { round_receiver_ = std::move(receiver); }
 
 	// JOINER role only (net-re §5.38e, D-NET-196): switch the 0x0A fold from
 	// live-pose snap to smooth-target STAGING, and enable tick_remote_motion.
@@ -388,6 +389,8 @@ private:
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::vector<ClientRoundEvent> pending_round_events_;
+    GuidedRoundResolver guided_round_resolver_;
+    std::function<void(const ClientRoundEvent &)> round_receiver_;
 	std::vector<ClientGameEvent> pending_game_events_;
 	std::vector<ClientChatLine> pending_chat_lines_;
 	std::vector<WeaponReload> pending_weapon_reloads_;

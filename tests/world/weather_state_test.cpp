@@ -419,17 +419,26 @@ void test_wire_sample_writes_targets_only() {
 }
 
 void test_night_phase_follows_the_clock() {
-	w::WeatherState ws;
-	w::WeatherSeed seed = seed_800();
-	seed.tod_fixed24 = 12u << 24;
-	ws.seed(seed);
-	CHECK(!ws.is_night_phase());
-	ws.command_time_of_day_minutes(2 * 60);
-	CHECK(ws.is_night_phase());
-	ws.command_time_of_day_minutes(18 * 60 + 50);
-	CHECK(ws.is_night_phase());
-	ws.command_time_of_day_minutes(6 * 60 + 5);
-	CHECK(!ws.is_night_phase());
+    w::WeatherState ws;
+    w::WeatherSeed seed = seed_800();
+    seed.tod_fixed24 = 12u << 24;
+    seed.tod_keyframed = true;
+    ws.seed(seed);
+    CHECK(!ws.is_night_phase());
+    ws.night_phase = 7;
+    ws.command_time_of_day_minutes(6 * 60 + 5);
+    CHECK(ws.night_phase == 7); // TOD command only writes the clock.
+    w::WeatherTickEvents events;
+    ws.tick_sim(nullptr, events);
+    CHECK(ws.night_phase == 0);
+    ws.command_time_of_day_minutes(2 * 60);
+    ws.tick_sim(nullptr, events);
+    CHECK(ws.night_phase == 1);
+    ws.tod_keyframed = false;
+    ws.night_phase = -4;
+    ws.command_time_of_day_minutes(12 * 60);
+    ws.tick_sim(nullptr, events);
+    CHECK(ws.night_phase == -4 && ws.is_night_phase());
 }
 
 void test_debug_scrub_is_exact_while_the_wac_tod_truncates() {

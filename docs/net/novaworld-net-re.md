@@ -3070,22 +3070,27 @@ serializer layer.
 **Port + status.** `GuidedRecord` + `encode_guided_field_group` /
 `decode_guided_field_group` (`ingame_encode.cpp` / `ingame_decode.cpp`) port the
 write/read switches; `nw_ingame_guided_test` round-trips every (mode, group).
-**Advanced 2026-08-18** (D-NET-64): the S2C 0x44 dispatch is wired —
-`replication::ClientReplicaPipeline::apply_entity_routed` folds groups 1/2/3/4/5 into
-typed `ClientGuidedMissile` state and the flight is hosted
-(`world::GuidedFlight` `[orig: Entity_UpdateGuidedMissile_0 @0x446060]`;
-the overshoot/steer-guard detonation and the proximity AI-notify are
-AUTHORITY-only `[orig: the role gate @0x4463cb]` — a non-authority client
-flies until the wire's group 1 sets the dead bit) — and
-the per-group field semantics were capture-validated against a local retail
-Karo Stinger capture before the capture root retired (ca1cef465, 2026-08-29;
-the earlier "no capture in hand" blocker was closed by that capture, and the
-findings stand as recorded history). The live CI gates are `nw_ingame_guided`
-(the per-(mode, field-group) codec round-trip) and `guided_missile_flight`
-(the integrator). Still deferred: the
-authority seeker branch (the 0x44 write side), missile presentation, and the
-per-missile ammo resolve for velocity/turn clamps. Verdict: **ported**
-(dispatch + flight + capture-validated; residuals in the ledger row).
+**Current implementation (2026-09-18, D-NET-64).** All six receive groups mutate
+an existing positive-lifetime `RoundSim` slot; a packet cannot allocate or revive
+one. Fire descriptors supply ammo, family, launch pose and target, after entity
+records in the same frame have landed. Stinger, Hellfire and Javelin motors share
+the ordinary collision/lifetime/model/trail pool. Pursuit uses the original
+local-frame Q22 geometry; each tick resolves the live target and per-ammo limits.
+The launch velocity is already nonzero before the age-31 booster gate.
+The authority queues its guidance after the fire-bearing frame, retaining it
+across each recipient's closed send boundary.
+[orig: NetPacket_DispatchToEntityByNetId @ 0x4D6960;
+Entity_SerializeGuidedMissileState @ 0x447C50; motors @ 0x446060, @ 0x446690,
+@ 0x446BA0; launch @ 0x445DB0, @ 0x445EF0; pursuit @ 0x546B30]
+
+`guided_missile_flight` consumes 308 original-instruction witnesses generated
+with jo-c's execution harness (PC53, real pursuit/rotation instructions, bounded
+world/network service inputs). `projectile_combat`, `npruntime_client_runtime`
+and `npruntime_server_tick_maintenance` pin moving targets, ammo speed/turn limits,
+spawn/death admission, zero coordinates, shared lifetime and delayed delivery.
+The earlier Karo capture remains codec evidence. D-NET-64 stays open for the
+flare projectile-candidate ring, proximity AI/warning consumers and command-map
+0x44 overload. No new mixed-client playthrough is claimed.
 
 ### 5.16 C2S 0x06 — client-fired-round (3-player loopback 2026-06-16d)
 
@@ -14083,7 +14088,7 @@ MultiPlayer_JoinSessionStateMachine @0x56a50b]
 
 | ID | Status | Scope |
 | --- | --- | --- |
-| D-WPN-3 | FIXED | FARP/ground-chain, water/swimming, clip and ammo cost gates plus Finish fire-loop kick condition are ported; the clip gate's def+0xDC bucket-pool read (`@0x541c6d..0x541c89` -> `sub_5405F0`) is folded into `slot.clip` and rides D-WPN-2. |
+| D-WPN-3 | FIXED | FARP/ground-chain, water/swimming, clip and ammo cost gates plus Finish fire-loop kick condition are ported; the clip gate's def+0xDC bucket read (`@0x541c6d..0x541c89` -> `sub_5405F0`) now uses the shared DWORD owner (D-WPN-2, fixed 2026-09-18). |
 | D-WPN-6 | OPEN, narrowed | Pure joiners pump remote borrowed slots and unoccupied hot pool-one slots once. The authority's general personal-slot coverage is separate from this receive replay port. |
 | D-NET-171 | OPEN, narrowed | The 0x42 password, key, app/version, index/CU, and identity checks now use the appropriate rejection replies, as do represented game-layer admission settings; the ladder, the validate callback's 14/2 lock and 14/3 source-address ban, and the split/resend/retention witnesses are recorded in the host admission section above. Squad challenge generation/validation (D-NET-167) and cookie/PunkBuster prerequisites remain wider admission work; side-password admission was ported 2026-09-13. |
 
@@ -14094,40 +14099,20 @@ separates inspected source contracts from live verification. No new IDA grill or
 packet capture was made here, and existing closure evidence remains scoped as
 recorded above.
 
-**D-NET-64 has additional runtime residuals.**
-`client_replica_guided.cpp` can allocate a missile from an update record and revive
-a terminated row on later coordinate data. The original dispatch looks up the
-net id and requires an active entity with its class serializer; updates do not
-synthesize that lifecycle. The lookup is by net id, not shooter id.
-[orig: NetPacket_DispatchToEntityByNetId @0x4D6960]
+**2026-09-18 follow-through.** The missile lifecycle, ammo, launch and moving-target
+findings above are fixed; see section 5.15 and the dated validation report.
+D-NET-64 retains the explicitly listed seeker-side-effect/command-map scope.
 
-Zero-write leg PORTED 2026-09-13: the reducer stores every decoded coordinate,
-zero included, exactly as the serializer's read-full groups 3/4/5 store
-entity+700/704/708 unconditionally (group 5 also clears the lock); the former
-nonzero-XYZ guard is gone and `npruntime_client_runtime` pins an origin steer
-point seeding and re-aiming the flight. Still open on that axis: the original
-motor gives the zero vector its own straight-flight path, and the replica flight
-does not. The replica tick uses stored steer coordinates and never resolves
-the locked entity's current aim point. Ammo-specific launch/motor/seeker behavior
-and normal entity-model/trail ownership remain to be connected.
-[orig: Entity_SerializeGuidedMissileState @0x447C50;
-Entity_UpdateGuidedMissile_0 @0x446060]
-
-Existing `nw_ingame_guided`, `guided_missile_flight` and the client runtime guided
-lane do not establish the lifecycle or moving-target properties (the zero-write
-case is pinned). Add cases at the production reducer/world seam before changing
-them: update before spawn, update after termination, slot reuse and moving locked
-target, followed by an actual missile-family fire-to-termination scenario.
-
-**D-WPN-2 is a shared-bucket residual, not a missing ammo-class pool system.**
-`WeaponInventory` already owns class pools; `player_weapon.cpp` and server reload
-dispatch transfer/refund class units. The remaining original def+0xDC bucket
-selection/read/write (`sub_5405F0 @0x5405F0`, `sub_540670 @0x540670`) is folded into
-`slot.clip`. Trace this owner through reload, recoil/fire eligibility, total clips,
-weight, mounted/borrowed slots and HUD. Do not reimplement the class-pool subsystem.
-The original reload and total-clips consumers are `WeaponSlot_ReloadAmmo @0x541720`
-and `WeaponSlot_GetTotalClips @0x5425F0`; carried class pools are distinct
-(`Entity_GetScoreValueBySlotType @0x5406E0`).
+**D-WPN-2 / D-WPN-20 are fixed (2026-09-18).** `WeaponInventory` retains separate
+reserve pools and DWORD loaded-ammo buckets. Def+0xDC selects the latter through
+`sub_5405F0 @ 0x5405F0` / `sub_540670 @ 0x540670`; private clips retain signed-word
+storage. Recalc/refund, total clips/weight, local fire/selection/reload, authority
+loadout grants and fire/reload all use the same selected owner. Mounted slots
+keep their own owner. `weapon_inventory`, `weapon_fsm` and
+`npruntime_server_tick_maintenance` include two weapons sharing loaded rounds,
+empty admission and a reload through one weapon consumed by the other.
+[orig: WeaponSlot_ReloadAmmo @ 0x541720; WeaponSlot_GetTotalClips @ 0x5425F0;
+reserve-pool getter Entity_GetScoreValueBySlotType @ 0x5406E0]
 
 **D-WPN-9 needs caller completion, not another zoom-step helper.**
 `scope_min_mag` is parsed, and `simulation_player_weapon.cpp` routes actions 212/214

@@ -1,6 +1,6 @@
 // Guided-missile flight integrator tests [orig: Entity_UpdateGuidedMissile_0
 // @0x446060; Entity_ComputeGuidedPursuitError pursuit error; Entity_UpdateTurretAim @0x445CC0 turn
-// clamp]. Pins the witnessed semantics: the 31-tick ignition hold, the boost
+// clamp]. Pins the witnessed semantics: the 31-tick booster gate, the boost
 // ramp's integer-truncated ((velocity/divisor) << 16) / 62 speed, the per-axis
 // BAM turn clamp (with the <=0 -> 6734910 default), the authority-only role
 // split of the termination leg (overshoot marks but still advances, the steer
@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <iterator>
 
 #include <runtime/world/guided_missile_flight.h>
 
@@ -37,18 +38,19 @@ int32_t speed_at(int32_t velocity, int32_t divisor) {
             (static_cast<int64_t>(velocity / divisor) << 16) / GuidedFlight::kTickDiv);
 }
 
-// Age gate: ticks 1..30 must not move the missile [orig: cmp 31 @0x446538].
-void test_ignition_hold() {
+// Ignition retains the launch velocity; the booster only replaces it at age 31.
+// [orig: launch @0x445F28..0x445F64; motor age gate @0x446538]
+void test_preignition_launch_velocity() {
     GuidedFlightState st = launch_at_origin();
-    const int32_t steer[3] = { 1000 * kUnit, 0, 0 };
-    GuidedFlight::aim_at(st, steer);
+    const int32_t steer[3] = {1000 * kUnit, 0, 0};
+    GuidedInputs in;
+    GuidedFlight::launch(st, GuidedFamily::Stinger, {300,0,0,0}, in);
+    const int32_t launch_speed = speed_at(300,8);
     for (int i = 0; i < GuidedFlight::kAgeGate - 1; ++i) {
-        CHECK(GuidedFlight::step(st, steer, 300, 0, 0, false) == GuidedStepResult::kNone);
-        CHECK(st.pos[0] == 0 && st.pos[1] == 0 && st.pos[2] == 0);
+        CHECK(GuidedFlight::step(st,steer,300,0,0,false)==GuidedStepResult::kNone);
+        CHECK(st.pos[0]==(i+1)*launch_speed);
     }
-    CHECK(st.age == GuidedFlight::kAgeGate - 1);
-    GuidedFlight::step(st, steer, 300, 0, 0, false);   // age 31 — first moving tick
-    CHECK(st.pos[0] > 0);
+    CHECK(st.pos[0]>0);
 }
 
 // Boost ramp: divisor 39-age clamps to 1 at full boost, and the per-tick
@@ -175,8 +177,50 @@ void test_wrap_bam() {
 
 } // namespace
 
+// These expected bytes come from the original executable, not this implementation.
+static void test_original_instruction_vectors() {
+    static const int32_t vectors[][76] = {
+#include "fixtures/guided_missile_vectors.inc"
+    };
+    for (size_t n = 0; n < std::size(vectors); ++n) {
+        const int32_t *p = vectors[n];
+        auto read = [&] { return *p++; };
+        const int root = read();
+        GuidedFlightState s; GuidedAmmo a; GuidedInputs in;
+        for (auto &v : s.pos) v = read();
+        s.yaw_bam = read(); s.pitch_bam = read(); s.roll_bam = read(); s.age = read();
+        for (auto &v : s.velocity) v = read();
+        for (auto &v : s.steer) v = read();
+        for (auto &v : s.saved) v = read();
+        s.flags = uint16_t(read()); s.phase = uint16_t(read()); s.target = uint16_t(read());
+        s.timer = read(); s.initial_range = read(); s.previous_distance = read();
+        a.speed = read(); a.max_pitch = read(); a.max_yaw = read(); a.tracking = read();
+        in.authority = read()!=0; in.session = read()!=0; in.owner = read()!=0;
+        in.owner_aim = read()!=0; in.owner_ai = read()!=0; in.owner_target = uint16_t(read());
+        for (auto &v : in.aim) v = read();
+        in.target_present = read()!=0; in.target_alive = read()!=0;
+        for (auto &v : in.target_origin) v = read();
+        in.acquisition_ran = read()!=0; in.acquired = read()!=0; in.acquired_flare = read()!=0;
+        in.acquired_target = uint16_t(read());
+        for (auto &v : in.acquired_origin) v = read();
+        int32_t error[4]; for (auto &v : error) v = read();
+        const int32_t forward = read(); const bool error_pointer = read()!=0;
+        if (root == 0) GuidedFlight::pursuit(s, s.steer, error);
+        else if (root == 1) GuidedFlight::turn(s, error_pointer ? error : nullptr, forward, a);
+        else if (root <= 4) GuidedFlight::motor(s, GuidedFamily(root-1), a, in);
+        else GuidedFlight::launch(s, root == 5 ? GuidedFamily::Stinger : GuidedFamily::Javelin, a, in);
+        const int32_t actual[] = {s.yaw_bam,s.pitch_bam,s.roll_bam,
+            s.velocity[0],s.velocity[1],s.velocity[2],s.steer[0],s.steer[1],s.steer[2],
+            s.saved[0],s.saved[1],s.saved[2],s.flags,s.phase,s.target,s.timer,s.initial_range,s.previous_distance,
+            error[0],error[1],error[2],error[3]};
+        for (int i = root == 0 ? 18 : 0; i < (root == 0 ? 22 : 18); ++i)
+            if (actual[i] != p[i]) { std::printf("oracle vector %zu field %d expected %d got %d\n",n,i,p[i],actual[i]); ++failures; }
+    }
+}
+
 int main() {
-    test_ignition_hold();
+    test_original_instruction_vectors();
+    test_preignition_launch_velocity();
     test_boost_ramp_exact_speeds();
     test_turn_clamp();
     test_overshoot_marks_and_still_advances();

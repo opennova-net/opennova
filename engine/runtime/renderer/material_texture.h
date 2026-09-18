@@ -7,7 +7,7 @@
 
 namespace opennova::renderer {
 
-enum class MaterialTextureTransform : uint8_t { Unchanged, NormalFromAlpha, Checkerboard };
+enum class MaterialTextureTransform : uint8_t { Unchanged, NormalFromAlpha, HorizonVolume, AmbientOcclusion, ChunkNormal, ChunkHorizon, ChunkOcclusion, Checkerboard };
 
 // The texture-row dispatcher selects the loader by TYPE, not the sampler slot.
 // MDT is already a normal map; TGA carries height in A and output alpha in B.
@@ -18,12 +18,8 @@ enum class MaterialTextureTransform : uint8_t { Unchanged, NormalFromAlpha, Chec
 std::string normal_material_filename(std::string_view name,
         bool loose_tga_preferred, bool dds_exists);
 
-// Three outcomes cover types 0-5/8 and the default cases (3, 9..15, >18).
-// The dispatcher's dedicated-loader legs are NOT ported and raw-load
-// (Unchanged): case 6 @0x5B179A (sub_58A580, environment-map build), case 7
-// @0x5B17B7 (sub_58CE10, the ':AO:N' alpha-overlay variant), case 16
-// @0x5B17D4 (sub_58F350, chunk normal map), case 17 @0x5B17DD (sub_58F470,
-// height map to normal), case 18 @0x5B17E6 (load_tga_alpha_overlay_texture).
+// Specialized producer types preserve their dimensionality: 6 and 17 are
+// volumes, 7 is the retail white AO producer, 16/18 load NQ8B/AOC8 chunks.
 // [orig: jpt_5B1737 switch @0x5B1737; the single result test @0x5B17F0 and
 // the checkerboard default @0x5B17F4..0x5B1800]
 // A missing MDT is the one failed row retail does not checkerboard: the
@@ -44,6 +40,17 @@ MaterialTextureTransform material_texture_transform(
 std::vector<uint8_t> normal_map_from_height_rgba(const uint8_t *rgba,
 		uint32_t width, uint32_t height, float scale,
 		uint8_t height_channel = 2, uint8_t alpha_channel = 3);
+
+struct MaterialTexturePixels {
+    uint32_t width = 0, height = 0, depth = 0;
+    std::vector<uint8_t> rgba;
+    explicit operator bool() const { return !rgba.empty(); }
+};
+// [orig: generate_environment_map @0x58A220; AO generator @0x58CB90]
+MaterialTexturePixels horizon_volume_from_height(const uint8_t *rgba, uint32_t width, uint32_t height);
+MaterialTexturePixels ambient_occlusion_from_height(const uint8_t *rgba, uint32_t width, uint32_t height);
+// [orig: NQ8B @0x58F350; HRZ8 @0x58F470; AOC8 @0x58F590]
+MaterialTexturePixels load_material_chunk(const uint8_t *bytes, size_t size, uint8_t type);
 
 inline constexpr uint32_t kMissingMaterialTextureSide = 128;
 // Opaque gray 0x30 / 0x50 squares, four pixels wide.

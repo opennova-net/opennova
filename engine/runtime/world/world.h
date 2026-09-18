@@ -46,6 +46,7 @@
 #include <runtime/world/fire_sound.h>
 #include <runtime/world/sound_emitter_mailbox.h>
 #include <runtime/world/weather_state.h>
+#include <runtime/world/reverb.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/item_sections.h>
 #include <runtime/world/terrain_scorch_events.h>
@@ -724,6 +725,7 @@ public:
     World &operator=(World &&) = delete;
 
     EntityRegistry registry;
+    ReverbState reverb;
     EnvState env;
     // The retail weather globals, ONE home (weather_state.h): the WAC weather
     // handlers write it through EntityCommands, the weather tick advances it
@@ -970,7 +972,8 @@ public:
         std::vector<SoundSlotEvent> initial_slot_sounds;
         uint64_t next_script_effect_order = 0;
         int32_t forced_animation = 0;
-        EnvState env;
+        ReverbState reverb;
+    EnvState env;
         WeatherState weather;
         DoorSystem doors;
         FacialSystem facials;

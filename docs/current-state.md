@@ -1,5 +1,10 @@
 # Where the project is, and what is next
 
+The [2026-09-18 JO-C validation and fixes](jo-c-validation-2026-09-18.md) cover
+guided round lifecycles/motors, shared loaded ammo, blast/indoor collision state,
+parachute descent, writable night, reverb selection and specialized textures.
+Mission saves are excluded; the report distinguishes remaining wider gaps.
+
 The one-page router for "what phase are we in, and where is the next step written
 down". It holds no facts of its own: every number and every next step below is a
 pointer into the tracked instrument that owns it. When they disagree, the

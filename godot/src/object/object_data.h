@@ -211,7 +211,7 @@ public:
 	static void clear_static_caches();
 	Array get_control_registers() const;
 	String resolve_material_texture_path(int p_material_index, int p_texture_index) const;
-	Ref<Texture2D> load_material_texture(int p_material_index, int p_texture_index) const;
+	Ref<Texture> load_material_texture(int p_material_index, int p_texture_index) const;
 	Ref<Texture2D> load_texture_name(const String &p_texture_name) const;
 	int get_light_count() const;
 	// One LGHT record (object/model_light.h); null out of range.

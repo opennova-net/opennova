@@ -179,6 +179,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
 		e->render_sway = def != nullptr && fourcc_prefix(def->render_function) == "sway";
 		e->light_transfer = def != nullptr ? def->light_transfer : 0.0f;
+        e->reverb = def != nullptr ? int16_t(def->reverb) : 0;
 		e->uniform_scale_q16 = def != nullptr ? def->scale_q16 : 0;
 		// Both ItemDefAttrib words and the per-entity facts derived from them
         // (AI-capable, the AS zone gates, LeaveCorpse) go through the ONE

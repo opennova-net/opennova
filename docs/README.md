@@ -1,5 +1,10 @@
 # OpenNova documentation
 
+The [2026-09-18 JO-C validation and fixes](jo-c-validation-2026-09-18.md) cover
+guided round lifecycles/motors, shared loaded ammo, blast/indoor collision state,
+parachute descent, writable night, reverb selection and specialized textures.
+Mission saves are excluded; the report distinguishes remaining wider gaps.
+
 Tracked golden docs: architecture maps, decision records (ADRs), and
 reverse-engineering records — kept pristine, representing the best current
 understanding of the original engine. RE findings land here directly, and

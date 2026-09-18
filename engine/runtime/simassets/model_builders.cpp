@@ -166,6 +166,7 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 	for (size_t s = 0; s < col->object_count; ++s) {
 		const ThreediCollisionObject &object = col->objects[s];
 		opennova::world::CollisionSection &sec = out.sections[s];
+        sec.flags = static_cast<uint32_t>(object.unk0); // [orig: COBJ copy @0x5B3BF0]
 		sec.vertex_start = vertex_cursor;
 		sec.vertex_count = object.num_vertices;
 		sec.normal_start = normal_cursor;

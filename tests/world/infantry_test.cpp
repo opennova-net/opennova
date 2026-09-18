@@ -1548,6 +1548,49 @@ void test_npc_ledge_fall_keeps_clip() {
 // or stamp jump_loop merely because the resolver returns >0xF000.
 // [orig: `test eax,10A002h; jnz` @0x4b7e22-0x4b7e2a, before the airborne write
 //  @0x4b7e3c; compare org1's 0x10A000 gate + pre-dead-test write @0x4bf8b5-0x4bf8cf]
+// Retail deploys after gravity crosses -0x3800, consumes the carried chute,
+// brakes before integration, and closes on the next grounded tick.
+void test_parachute_deployment_and_descent() {
+    Field flat([](int) { return static_cast<uint16_t>(0); });
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    w.registry.configure_pool(0, 4);
+    Entity player;
+    player.kind = EntityKind::Organic;
+    player.item_type = 3;
+    player.flags = kEntityFlagPlayer | kEntityFlagInAir;
+    player.carry_flags = 0x10;
+    player.position = {100,100,80};
+    player.health = 100;
+    const auto h = w.registry.spawn(0, player);
+    AiSystem ai;
+    ai.terrain = &flat.field;
+    TestSource src;
+    src.clips = {31,43,44,47};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    CHECK(e->handle == h);
+    e->health = 100;
+    e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = fx(80);
+    e->inf.is_local_player = true;
+    e->inf.airborne = true;
+    e->inf.anim_state = anim_state::kJumpLoop;
+    e->inf.vel[2] = -0x3800 + 208;
+    run_ticks(ai, w, 1, 2);
+    CHECK((w.registry.get(h)->flags & kEntityFlagParachute) != 0);
+    CHECK((w.registry.get(h)->carry_flags & 0x10u) == 0);
+    CHECK(e->inf.vel[2] == -0x3800 + 0x29C);
+    CHECK(e->pos[2] == fx(80) - 0x3800 + 0x29C);
+    CHECK(e->inf.anim_state == 47);
+    run_ticks(ai, w, 2, 100);
+    CHECK(e->inf.vel[2] >= -0x1C00 - 208);
+    CHECK(e->pos[2] > fx(50));
+    e->pos[2] = 0;
+    run_ticks(ai, w, 100, 103);
+    CHECK((w.registry.get(h)->flags & kEntityFlagParachute) == 0);
+    CHECK((w.registry.get(h)->carry_flags & 0x20u) == 0);
+}
+
 void test_dead_player_ledge_fall_edge_is_suppressed() {
     Field ground0([](int) { return static_cast<uint16_t>(0); });
     World w;
@@ -4506,6 +4549,7 @@ void test_slope_probes_include_candidate_models() {
 }
 
 int main() {
+    test_parachute_deployment_and_descent();
     test_slope_probes_include_candidate_models();
     test_downwash_query_and_body_selection();
     test_reselecting_current_state_arbitrates_player_but_skips_org1();

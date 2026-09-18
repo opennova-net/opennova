@@ -526,7 +526,32 @@ static int test_local_held_weapon_visible() {
 	return 0;
 }
 
+// The second weapon reads/refunds the SAME loaded bucket, not another clip.
+// [orig: WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280]
+void test_two_weapons_share_loaded_ammo() {
+    Fixture f;
+    auto &a = f.t.entries[f.m4];
+    auto &b = f.t.entries[f.ak];
+    a.ammo_bucket = b.ammo_bucket = 1;
+    b.ammo_class_id = a.ammo_class_id;
+    b.ammo_class = a.ammo_class;
+    WeaponInventory inv;
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_AK47AUTO"}, inv);
+    weapon_pool_set(f.t, inv, a.ammo_class_id, 100);
+    weapon_inventory_recalc_clips(f.t, inv);
+    CHECK(weapon_pool_get(inv, a.ammo_class_id) == 70);
+    CHECK(inv.slot(195)->clip == 0 && inv.slot(196)->clip == 0);
+    CHECK(weapon_inventory_total_clips(f.t, inv, 195) == 3);
+    CHECK(weapon_inventory_total_clips(f.t, inv, 196) == 3);
+    weapon_inventory_set_loaded_rounds(f.t, inv, 195, 23);
+    CHECK(weapon_inventory_loaded_rounds(f.t, inv, 196) == 23);
+    CHECK(weapon_inventory_reload_slot(f.t, inv, 196) == 30);
+    CHECK(weapon_pool_get(inv, a.ammo_class_id) == 63);
+}
+
 int main() {
+    test_two_weapons_share_loaded_ammo();
     test_knife_is_selectable();
     test_local_held_weapon_visible();
     test_availability_pairs();

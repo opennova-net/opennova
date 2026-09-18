@@ -299,7 +299,8 @@ int32_t engine_axis_bam(int16_t degrees) {
 // docs/net/novaworld-net-re.md (D-NET-136). Carry the movement/spawn gate (0x02) through while
 // the entity is still spawning [orig: entity+36 bit 1].
 uint16_t player_wire_flags(const world::Entity &e, world::EntityHandle recipient_own) {
-	uint16_t flags = 0x0100u;
+	uint16_t flags = 0x0100u | static_cast<uint16_t>(
+            (e.flags | e.engine_flags) & world::kEntityFlagParachute);
 	if (recipient_own.valid() && e.handle == recipient_own) flags |= 0x01u;
 	if ((e.flags & 0x2u) != 0) flags |= 0x2u;
 	return flags;

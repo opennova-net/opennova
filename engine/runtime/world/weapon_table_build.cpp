@@ -287,7 +287,7 @@ world::WeaponTable build_weapon_table(
 		e.loadout_subclasses = static_cast<uint8_t>(d.loadout_subclasses);
 		e.ammo_class = d.ammo_class;
 		e.ammo_class_count = static_cast<int16_t>(d.ammo_class_count);
-		e.ammo_bucket = static_cast<int16_t>(d.ammobucket);
+		e.ammo_bucket = d.ammobucket;
 		e.round_type = d.round_type; // resolved to an AmmoTable index by
 		                             // resolve_weapon_round_types (§5.60)
 		e.voice_macro_token = d.vmacrotoken;

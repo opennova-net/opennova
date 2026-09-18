@@ -816,8 +816,11 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		if ((es.rm_entity_flags & 0x108000u) == 0) {
 			es.rm_vel_z -= es.cls == EntityClass::Player ? kGravityStepPlayer
 			                                             : kGravityStep;
-			if (es.rm_vel_z < kTerminalVelZ) es.rm_vel_z = kTerminalVelZ;
+			if (es.cls != EntityClass::Player && es.rm_vel_z < kTerminalVelZ) es.rm_vel_z = kTerminalVelZ;
 		}
+        if (es.cls == EntityClass::Player)
+            world::parachute_tick(es.rm_parachute, es.rm_entity_flags,
+                    es.rm_chute_carry_flags, es.rm_vel_z, false, tick);
 		es.z = io::bam_add(es.z, es.cls == EntityClass::Player
 				? es.rm_vel_z : 2 * es.rm_vel_z);
 		ClientReplicaPipeline::ReplicaContactQuery q;
@@ -1768,7 +1771,30 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// [orig: NapiNPClientMsg_0x00A @0x430174]; the timer, environment,
 		// objective, tail, and every entity/round come from the host's own
 		// World on this role.
-		++state_.frames_applied;
+		// Tag 2 carries a fire origin and direction. Lift the compressed origin by
+	// this frame's anchor now, while those transient coordinates are together.
+	for (const RoundEventRecord &rec : fu.round_events) {
+		ClientRoundEvent ev;
+		ev.flags = rec.flags;
+		ev.adm_index = rec.adm_index;
+		ev.subtype = rec.subtype;
+		ev.slot_byte = rec.slot_byte;
+		ev.shooter_handle = rec.shooter_handle;
+		ev.target_handle = rec.target_handle;
+		ev.shot_seq = rec.shot_seq;
+		ev.origin_x = fu.anchor_x + network_decompress_fixedpoint(rec.pos_x_compressed);
+		ev.origin_y = fu.anchor_y + network_decompress_fixedpoint(rec.pos_y_compressed);
+		ev.origin_z = fu.anchor_z + network_decompress_fixedpoint(rec.pos_z_compressed);
+		ev.dir_yaw_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(rec.yaw_bam_high) << 16);
+		ev.dir_pitch_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(rec.pitch_bam_high) << 16);
+		if (auto *shooter = state_.find(ev.shooter_handle)) shooter->fire_target_handle = ev.target_handle;
+		if (round_receiver_) round_receiver_(ev);
+        else pending_round_events_.push_back(ev);
+	}
+
+	++state_.frames_applied;
 		state_.mark_changed();
 		return;
 	}
@@ -1806,27 +1832,6 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		state_.mounted_ammo.clip = fu.passenger.clip;
 		state_.mounted_ammo.reserve = fu.passenger.reserve;
 		++state_.mounted_ammo.revision;
-	}
-
-	// Tag 2 carries a fire origin and direction. Lift the compressed origin by
-	// this frame's anchor now, while those transient coordinates are together.
-	for (const RoundEventRecord &rec : fu.round_events) {
-		ClientRoundEvent ev;
-		ev.flags = rec.flags;
-		ev.adm_index = rec.adm_index;
-		ev.subtype = rec.subtype;
-		ev.slot_byte = rec.slot_byte;
-		ev.shooter_handle = rec.shooter_handle;
-		ev.target_handle = rec.target_handle;
-		ev.shot_seq = rec.shot_seq;
-		ev.origin_x = fu.anchor_x + network_decompress_fixedpoint(rec.pos_x_compressed);
-		ev.origin_y = fu.anchor_y + network_decompress_fixedpoint(rec.pos_y_compressed);
-		ev.origin_z = fu.anchor_z + network_decompress_fixedpoint(rec.pos_z_compressed);
-		ev.dir_yaw_bam = static_cast<int32_t>(
-				static_cast<uint32_t>(rec.yaw_bam_high) << 16);
-		ev.dir_pitch_bam = static_cast<int32_t>(
-				static_cast<uint32_t>(rec.pitch_bam_high) << 16);
-		pending_round_events_.push_back(ev);
 	}
 
 	state_.compact_records_applied += static_cast<std::uint32_t>(fu.records.size());
@@ -2245,6 +2250,29 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	}
 
 	refresh_carried_entities();
+
+	// Tag 2 carries a fire origin and direction. Lift the compressed origin by
+	// this frame's anchor now, while those transient coordinates are together.
+	for (const RoundEventRecord &rec : fu.round_events) {
+		ClientRoundEvent ev;
+		ev.flags = rec.flags;
+		ev.adm_index = rec.adm_index;
+		ev.subtype = rec.subtype;
+		ev.slot_byte = rec.slot_byte;
+		ev.shooter_handle = rec.shooter_handle;
+		ev.target_handle = rec.target_handle;
+		ev.shot_seq = rec.shot_seq;
+		ev.origin_x = fu.anchor_x + network_decompress_fixedpoint(rec.pos_x_compressed);
+		ev.origin_y = fu.anchor_y + network_decompress_fixedpoint(rec.pos_y_compressed);
+		ev.origin_z = fu.anchor_z + network_decompress_fixedpoint(rec.pos_z_compressed);
+		ev.dir_yaw_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(rec.yaw_bam_high) << 16);
+		ev.dir_pitch_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(rec.pitch_bam_high) << 16);
+		if (auto *shooter = state_.find(ev.shooter_handle)) shooter->fire_target_handle = ev.target_handle;
+		if (round_receiver_) round_receiver_(ev);
+        else pending_round_events_.push_back(ev);
+	}
 
 	++state_.frames_applied;
 	state_.mark_changed();

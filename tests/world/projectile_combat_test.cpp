@@ -2831,7 +2831,105 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     world.collision = nullptr;
 }
 
+// A round inside a building's BB volume crosses terrain without stopping,
+// then resumes terrain collision after leaving the volume [orig: @0x4EA2F0].
+void test_projectile_indoor_terrain_gate() {
+    HeapWorldFixture f;
+    World &w = f.world;
+    w.registry.configure_pool(2, 4);
+    Entity building;
+    building.kind = EntityKind::Building;
+    building.item_type = 5;
+    building.position = {10.0f, -20.0f, 0.0f};
+    building.bound_radius = 30.0f;
+    const auto h = w.registry.spawn(2, building);
+    CollisionModel model;
+    CollisionVolume bb;
+    bb.type = 8;
+    bb.flags = 0; // flags ^ 6 includes the indoor bit
+    bb.min_x = bb.min_y = bb.min_z = -5 * 65536;
+    bb.max_x = bb.max_y = bb.max_z = 5 * 65536;
+    model.volumes.push_back(bb);
+    CollisionSection sec;
+    sec.volume_count = 1;
+    model.sections.push_back(sec);
+    CollisionWorld cw;
+    cw.assign_entity(h, cw.add_model(std::move(model)));
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    cw.terrain = &flat;
+    cw.build_initial_tables(w);
+    w.collision = &cw;
+    AmmoTableEntry ammo;
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    w.tables.ammo.entries.push_back(ammo);
+    RoundSpawnParams params;
+    params.origin = {10.0f, -20.0f, 2.0f};
+    params.ammo_index = 0;
+    const int slot = w.round_sim.spawn(w, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &r = w.round_sim.rounds[slot];
+    r.vel = {0.0f, 0.0f, -10.0f};
+    w.round_sim.tick(w, &flat, &cw);
+    CHECK(r.active);
+    CHECK(r.pos.z < 0.0f);
+    // Outside the volume, the same terrain-crossing segment must stop.
+    r.pos = {50.0f, -20.0f, 2.0f};
+    r.vel = {0.0f, 0.0f, -10.0f};
+    w.round_sim.tick(w, &flat, &cw);
+    CHECK(!r.active);
+}
+
+void test_guided_round_uses_live_target_ammo_and_pool_lifetime() {
+    Rig rig;
+    auto &world=rig.world;
+    world.rules.mp_session=true;
+    auto &ammo=world.tables.ammo.entries[0];
+    ammo.tracer_item_friendly=10;
+    ammo.velocity=248;
+    ammo.max_age_ticks=100;
+    ammo.turnrate_maxyaw=1000000;
+    ammo.turnrate_maxpit=2000000;
+    world.throwables.classes.set({10,ThrowClass::kNone,ThrowClass::kStinger});
+    world.registry.get(rig.shooter)->last_fire_target=rig.target;
+    world.registry.get(rig.target)->position={500,100,20};
+    RoundSpawnParams params;
+    params.owner=rig.shooter; params.shooter_handle=rig.shooter.packed;
+    params.origin={0,0,20}; params.ammo_index=0; params.shot_seq=77;
+    const int slot=world.round_sim.spawn(world,params,RoundConsequenceMode::VisualOnly);
+    CHECK(slot>=0); if(slot<0) return;
+    auto &round=world.round_sim.rounds[slot];
+    CHECK(round.guided_family==GuidedFamily::Stinger);
+    CHECK(round.vel.x==0.5f); // (248 / 8) / 62, at yaw/pitch zero
+    CHECK(world.round_sim.find_guided(77)==&round);
+    world.round_sim.tick(world,nullptr);
+    world.round_sim.tick(world,nullptr);
+    world.registry.get(rig.target)->position={500,-100,30};
+    round.age_ticks=39;
+    world.round_sim.tick(world,nullptr);
+    CHECK(round.guided.steer[1]==-100*65536 && round.guided.steer[2]==30*65536);
+    CHECK(round.yaw_bam==-1000000); // ammo's yaw limit, not a fixed default
+    CHECK(round.vel.x>3.9f && round.vel.x<=4.0f); // this ammo's 248 u/s
+    CHECK(round.guided.target==rig.target.packed);
+    round.guided.flags|=1; round.det_at_expiry=true;
+    world.round_sim.tick(world,nullptr);
+    CHECK(!round.active && world.round_sim.find_guided(77)==nullptr);
+    CHECK(!world.round_sim.impacts.empty());
+    CHECK(world.round_sim.hits.empty()); // a visual round never applies authority damage
+    world.round_sim.reset();
+    CHECK(world.round_sim.find_guided(77)==nullptr);
+}
+
 int main() {
+    test_guided_round_uses_live_target_ammo_and_pool_lifetime();
+    test_projectile_indoor_terrain_gate();
     test_item_callbacks_receive_geometric_section_on_both_peers();
     test_projectile_stamps_burn_before_death_dispatch();
     test_arming_dud_and_armed_damage();

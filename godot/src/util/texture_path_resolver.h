@@ -29,9 +29,12 @@ godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filena
 
 // Upload the engine's material-specific pixel transform; generated textures
 // share the resolver's epoch and shutdown lifetime.
-godot::Ref<godot::Texture2D> prepare_material_texture(
+godot::Ref<godot::Texture> prepare_material_texture(
 		const godot::Ref<godot::Texture2D> &source,
 		const godot::String &name, uint8_t type);
+
+godot::Ref<godot::Texture> prepare_material_chunk(
+        const godot::PackedByteArray &bytes, uint8_t type);
 
 // Case-insensitive lookup of a sidecar file (e.g. a .til) next to `dir`.
 godot::String resolve_sidecar_path(const godot::String &dir, const godot::String &filename, const char *ext);
@@ -44,7 +47,7 @@ godot::String resolve_file_in_dir(const godot::String &dir, const godot::String 
 // Drop the per-session directory-index and decoded-texture caches. Call when the
 // resource directory changes or its on-disk contents may have changed. Main-thread
 // only (the resolver is never called off-thread).
-godot::Ref<godot::Texture2D> load_material_texture_from_dir(
+godot::Ref<godot::Texture> load_material_texture_from_dir(
         const godot::String &dir, const godot::String &name, uint8_t type);
 void clear_texture_resolver_caches();
 

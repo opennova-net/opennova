@@ -55,6 +55,7 @@ world::WeatherSeed weather_seed_from_config(const Config &config, const bms::Hea
 	seed.lightning_color = pack_rgb(EnvironmentState::scale_global_color(
 			config.lightning_rgb, config.envscale));
 	seed.wind_scale = 256;
+	seed.tod_keyframed = !config.keyframes.empty();
 	return seed;
 }
 

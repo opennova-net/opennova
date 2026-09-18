@@ -1077,6 +1077,10 @@ static void infantry_local_view_tick(AiEntity &e, const Entity *tick_entity, uin
     const uint32_t leg_flags = tick_entity != nullptr
             ? (tick_entity->flags | tick_entity->engine_flags)
             : 0u;
+    if ((leg_flags & kEntityFlagParachute) != 0) {
+        const int32_t delta = io::bam_add(io::bam_sub(inf.target_heading, inf.body_heading), 8) >> 4;
+        inf.body_heading = io::bam_add(inf.body_heading, delta);
+    }
     infantry_ladder_view_clamp(inf, leg_flags);
     e.heading = inf.target_heading; // mouse-instant render/aim yaw [orig:
                                     // Input_HandleActionBinding @0x49ad40 writes +0x10]
@@ -1461,7 +1465,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             }
         }
         // The rain ambient registration rides the local body tick.
-        if (ent != nullptr) infantry_rain_ambient(world, *ent);
+        if (ent != nullptr) {
+            infantry_rain_ambient(world, *ent);
+            int32_t building_reverb = 0;
+            if (ent->blink_hits[0])
+                if (const auto *building = world.registry.get(EntityHandle::make(2, ent->blink_hits[0] >> 20)))
+                    building_reverb = building->reverb;
+            world.reverb.update(e.pos, building_reverb);
+        }
         if ((logic_tick & 15u) == 0) world.commands.update_local_location(e.handle);
     } else if (e.health > 0 && is_authority && (key & 15u) == 0) {
 		// 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
@@ -1892,6 +1903,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             const int32_t sy = static_cast<int32_t>(std::sin(angle) * -64.0);
             inf.vel[0] -= cx;
             inf.vel[1] -= sy;
+            if ((tick_flags & kEntityFlagParachute) != 0 && inf.vel[2] <= -0x3800 &&
+                    inf.player_move_dir_index == 0) {
+                inf.vel[0] -= cx;
+                inf.vel[1] -= sy;
+            }
         }
         inf.vel[0] = (63 * inf.vel[0]) >> 6;
         inf.vel[1] = (63 * inf.vel[1]) >> 6;
@@ -2027,22 +2043,27 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         const bool org1_tick_gate_open =
             inf.is_local_player || (logic_tick & 1u) == 0;
         if (inf.is_local_player) {
-            if (!gravity_skip) {
-                inf.vel[2] -= kGravityStepPlayer;
-                if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
+            if (!gravity_skip) inf.vel[2] -= kGravityStepPlayer;
+            if (tick_entity != nullptr) {
+                uint32_t flags = tick_entity->flags | tick_entity->engine_flags;
+                const ParachuteEvents events = parachute_tick(inf.parachute, flags,
+                        tick_entity->carry_flags, inf.vel[2], is_authority, logic_tick);
+                tick_entity->flags = (tick_entity->flags & ~kEntityFlagParachute) |
+                        (flags & kEntityFlagParachute);
+                tick_entity->engine_flags = (tick_entity->engine_flags & ~kEntityFlagParachute) |
+                        (flags & kEntityFlagParachute);
+                if ((flags & kEntityFlagParachute) != 0 && inf.anim_state != anim_state::kParachute)
+                    inf.begin_body_transition(anim_state::kParachute);
+                if (events.opened) emit_slot_sound(world, e, audio::kSlotChuteOpen, e.pos);
+                if (events.closed) emit_slot_sound(world, e, audio::kSlotChuteClose, e.pos);
+                if (events.flap) emit_slot_sound(world, e, audio::kSlotChuteFlap, e.pos);
+                if (events.free_fall) emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
+            } else {
+                inf.vel[2] = std::max(inf.vel[2], kTerminalVelZ);
+                if ((logic_tick & 63u) == 0 && inf.vel[2] < -0x3000)
+                    emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
             }
             e.pos[2] += inf.vel[2];
-            // The freefall rush while dropping fast without a parachute (the
-            // chute flag 0x20 is unmodeled, so the "chute closed" leg always
-            // applies): profile slot 44, restarted once per 64-tick window —
-            // the gate is the RAW tick's low six bits being zero, not every
-            // body tick. The chute family (slots 41-43 + the vel brake
-            // @0x4b7bfd) rides the parachute slice. [orig: @0x4b7c4c-0x4b7c74;
-            // `cmp var_10A8,0` (= current_tick & 0x3F @0x4b4680) @0x4b7c4c; vel
-            // gate < -0x3000 @0x4b7c52; the smoothTargetPos-delta gate skips
-            // net-pulled bodies — our net peers skip the whole motor]
-            if ((logic_tick & 63u) == 0 && inf.vel[2] < -0x3000)
-                emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
         } else if ((gravity_flags & kEntityFlagAiClimb) != 0) {
             // The org1 ladder-climb chase replaces gravity: sixteenth-step Z
             // toward the AI move target, capped 0x4000 up, floor -16384 (half
@@ -2151,7 +2172,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 //   carried is force-cleared, not skipped); otherwise 3/4 of this
                 //   tick's rotated root step carries into the slide velocity —
                 //   running momentum off a ledge — pending clears, and 31 stamps
-                //   STRAIGHT (47 while parachuting rides the unmodeled Flags 0x20;
+                //   STRAIGHT (47 while parachuting follows Flags 0x20;
                 //   the has_clip guard is a reimpl guard the original lacks).
                 //   [orig: @0x4b7e17-0x4b7e73]
                 //   org1 (NPC): NO carry, and NO stamp on a plain fall — the 47/31
@@ -2163,12 +2184,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     inf.vel[0] += (3 * root_wx) >> 2;
                     inf.vel[1] += (3 * root_wy) >> 2;
                     inf.anim_pending = 0; // [orig: @0x4b7e46, before the stamp]
-                    if (inf.anim_state != anim_state::kJumpLoop &&
-                        root_motion != nullptr &&
-                        root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
-                        inf.begin_body_transition(anim_state::kJumpLoop);
-                    }
+                    const int falling_state = tick_entity != nullptr &&
+                            ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagParachute) != 0
+                            ? anim_state::kParachute : anim_state::kJumpLoop;
+                    if (inf.anim_state != falling_state) inf.begin_body_transition(falling_state);
                 } else if (e.health > 0) {
+                    if (tick_entity && ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagParachute)) {
+                        const int falling_state = !root_motion || root_motion->has_clip(inf.adm_id, anim_state::kParachute)
+                                ? anim_state::kParachute : anim_state::kJumpLoop;
+                        inf.begin_body_transition(falling_state);
+                    }
                     inf.anim_pending = 0; // [orig: @0x4bf901]
                 }
             }

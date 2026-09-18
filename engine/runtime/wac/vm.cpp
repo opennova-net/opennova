@@ -148,7 +148,7 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 case Builtin::Fallmps: return w.script.wac_values.fallmps;               // [orig: 0xC6EAE4]
 				case Builtin::Seatbelt:
 					return w.script.wac_values.seatbelt;
-				case Builtin::Night: return w.weather.is_night_phase() ? 1 : 0;   // Env_IsNightPhase [orig: @0x26c645c]
+				case Builtin::Night: return w.weather.night_phase;   // Env_IsNightPhase [orig: @0x26c645c]
                 case Builtin::Breathtime: return w.script.wac_values.breathtime; // [orig: 0xC6EAE0]
                 case Builtin::Autogain: return w.script.wac_values.autogain;     // [orig: wac_var_autogain 0xC6EAFC]
                 case Builtin::Scratch: return scratch_;                          // [orig: dword_C6EAEC]
@@ -195,11 +195,7 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) {
                 case Builtin::Autogain: w.script.wac_values.autogain = v; break;     // [orig: 0xC6EAFC]
                 case Builtin::Wind: w.commands.set_wind_scale(v); break; // Env_WindScale [orig: the `wind` row @0x82EEF0]
                 case Builtin::Scratch: scratch_ = v; break;               // [orig: dword_C6EAEC]
-                // The night phase is derived from the clock on every read
-                // here; retail's Env dword @0x26c645c takes the write until
-                // Environment_ComputeTimeOfDayColors @0x57deae rewrites it.
-                // Tracked divergence: the write is dropped.
-                case Builtin::Night: break;
+                case Builtin::Night: w.weather.night_phase = v; break; // [orig: @0x26C645C]
             }
             break;
         default: break; // pool values are not lvalues

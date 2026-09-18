@@ -32,7 +32,7 @@ void ladder_unlatch(Entity *ent) {
 }
 
 void infantry_ladder_view_clamp(InfantryState &inf, uint32_t entity_flags) {
-    if ((entity_flags & kEntityFlagLadderContact) == 0) return;
+    if ((entity_flags & (kEntityFlagLadderContact | kEntityFlagParachute)) == 0) return;
     const int32_t d = io::bam_sub(inf.target_heading, inf.body_heading);
     if (d > 1431655680)
         inf.target_heading = io::bam_add(inf.body_heading, 1431655680);

@@ -808,6 +808,7 @@ void RoundSim::reset() noexcept {
 	impacts.clear();
 	hits.clear();
 	fired.clear();
+	guided_updates.clear();
 	next_impact_order = 1;
 	next_presentation_generation_ = 1;
 	debug_trail = {};
@@ -1134,6 +1135,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
         r.spin_pitch = 11930464;
         r.spin_roll = 11930464;
     }
+
+    init_guided(world, r, *ammo);
 
     // Record the fire for the host present layer (sound + muzzle effect) — the
     // inline-presentation moment of the original [orig: WeaponSlot_FireAndSpawnEffects
@@ -1494,7 +1497,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // stored age before dispatch; the custom motor compensates so its
         // elapsed/remaining values match retail's post-motor decrement
         // [orig: Projectile_UpdatePhysics @ 0x4e9da7..0x4e9f4e].
-        if (r.det_at_expiry || r.age_ticks >= r.max_age_ticks) {
+        if (r.det_at_expiry || (r.guided_family != GuidedFamily::None && (r.guided.flags & 1)) || r.age_ticks >= r.max_age_ticks) {
             // Only rounds the motor armed detonate at this head; an ordinary
             // ballistic lifetime expiry vanishes silently.
             const AmmoTableEntry *fuze_ammo = world.tables.ammo.by_index(r.ammo_index);
@@ -1535,7 +1538,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const AmmoTableEntry *ammo = world.tables.ammo.by_index(r.ammo_index);
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
 
-        // `ignore` rounds only age.
+        if (ammo && r.guided_family != GuidedFamily::None) tick_guided(world, r, *ammo, authoritative);
+
+        // `ignore` rounds skip the stock sweep after their class motor.
         if ((ammo_flags & kAmmoFlagIgnore) != 0) continue;
 
         // The `move`-row emitter's lifecycle, tested BEFORE the move — every
@@ -1580,6 +1585,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 }
             }
         }
+
         // `useownmove` rounds run ONLY their class motor — no stock ray,
         // gravity, or drag [orig: the +452 motor leg of Projectile_UpdatePhysics
         // @ 0x4e9f06; the motor may convert the round into a placed device or
@@ -1640,6 +1646,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         trace.owner = r.owner;
         trace.radius_q16 = ammo != nullptr ? ammo->bullet_radius_fp16 : 0;
         trace.ammo_flags = ammo_flags;
+        // Non-building projectiles refresh their own BB membership; the
+        // shooter can be in a different room [orig: Entity_BuildProximityList
+        // @0x4B3DC0; Projectile_UpdatePhysics terrain gate @0x4EA2F0].
+        const int32_t blink_position[3] = {position_q16.x, position_q16.y, position_q16.z};
+        BlinkAccum blink;
+        queries->query_blink_boxes_at_point(world, blink_position, blink);
+        trace.walk_terrain = (blink.flags & kBlinkIndoorsBit) == 0;
         // Only decoded remote presentation rounds may trace the client-state
         // proxy projections (person + dynamic). A default Authoritative round
         // in a non-authority MP world is consequence-gated above, but it must
@@ -1652,8 +1665,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const ProjectileHit collision = queries->trace_projectile(world, trace);
         if (!collision.hit()) {
             r.pos = vec_from_fixed(end_q16);
-            if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
-            if (ammo != nullptr)
+            if (r.guided_family == GuidedFamily::None && (ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
+            if (ammo != nullptr && r.guided_family == GuidedFamily::None)
                 apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z,
                                        /*surface_normal=*/0);
             r.vel = vec_from_fixed(velocity_q16);

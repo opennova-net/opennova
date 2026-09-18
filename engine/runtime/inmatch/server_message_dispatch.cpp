@@ -1492,6 +1492,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// 0x5A apply is the deploy un-latcher — resets dword_81474C; §5.30, D-NET-156).
 				st.last_loadout_reply = encode_weapon_loadout(grant.reply);
 				st.ammo_pools = grant.ammo_pools;
+                st.shared_clips = grant.shared_clips;
 				// The rebuilt host-side slot table: every granted combo with its drawn clip
 				// replaces the previous rows (the 0x06 pipeline used to seed a full clip on
 				// first fire; the accept now owns the rows retail's rebuild leaves behind).
@@ -1928,8 +1929,16 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 								slot.adm_index = fr.adm_index;
 								slot.clip = adm->clipsize;
 							}
-							if (slot.clip == 0) break;
-							--slot.clip;
+							if (adm->ammo_bucket != 0) {
+                                const uint32_t bucket = static_cast<uint32_t>(adm->ammo_bucket);
+                                if (bucket >= st.shared_clips.size() ||
+                                        bucket >= world->tables.weapons.ammo_class_names.size() ||
+                                        st.shared_clips[bucket] == 0) break;
+                                --st.shared_clips[bucket];
+                            } else {
+                                if (slot.clip == 0) break;
+                                --slot.clip;
+                            }
 						}
 					}
 					// Primary fire mirrors the equipped weapon onto the entity
@@ -2120,7 +2129,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						//  the clamped draw and slot+16 store @0x541811..0x541850]
 						if (adm != nullptr && adm->clipsize != -1) {
 							WeaponSlotState &slot = slot_it->second;
-							const int class_id = adm->ammo_class_id;
+							const bool shared = adm->ammo_bucket != 0;
+                            const uint32_t bucket = static_cast<uint32_t>(adm->ammo_bucket);
+                            auto &shared_clips = addressed_owner->reply.shared_clips;
+                            const bool bucket_valid = bucket < shared_clips.size() &&
+                                    bucket < world->tables.weapons.ammo_class_names.size();
+                            const int32_t loaded = shared ? (bucket_valid ? shared_clips[bucket] : 0) : slot.clip;
+                            const int class_id = adm->ammo_class_id;
 							if (adm->ammo_class_count != 0 && class_id >= 0 &&
 							    class_id < static_cast<int>(addressed_owner->reply.ammo_pools.size())) {
 								int32_t &pool = addressed_owner->reply.ammo_pools[
@@ -2131,14 +2146,15 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 										? world->tables.weapons.ammo_class_caps[
 												  static_cast<size_t>(class_id)]
 										: 0;
-								if (slot.clip != 0) {
-									pool += static_cast<int32_t>(slot.clip) * units;
+								if (loaded != 0) {
+                                    pool += loaded * units;
 									if (pool > cap) pool = cap;
 								}
 								int32_t draw = static_cast<int32_t>(adm->clipsize) * units;
 								if (draw > pool) draw = pool;
 								pool -= draw;
-								slot.clip = static_cast<int16_t>(draw / units);
+								if (!shared) slot.clip = static_cast<int16_t>(draw / units);
+                                else if (bucket_valid) shared_clips[bucket] = draw / units;
 							} else {
 								slot.clip = adm->clipsize; // [orig: slot+16 @0x541850]
 							}

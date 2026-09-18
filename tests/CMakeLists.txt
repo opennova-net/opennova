@@ -949,6 +949,10 @@ add_test(NAME weather_seed COMMAND weather_seed_test)
 # The weather home (runtime/world/weather_state): the WAC handler math, the
 # mission-start initializer, the wire sample apply, and the sim tick against a
 # scripted world.
+add_executable(reverb_test world/reverb_test.cpp)
+target_link_libraries(reverb_test PRIVATE opennova_runtime)
+add_test(NAME reverb COMMAND reverb_test)
+
 add_executable(weather_state_test world/weather_state_test.cpp)
 target_link_libraries(weather_state_test PRIVATE opennova_runtime)
 target_include_directories(weather_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

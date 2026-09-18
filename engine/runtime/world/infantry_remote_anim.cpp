@@ -14,6 +14,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/infantry_ladder.h>
+#include <runtime/audio/sound_profile.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
@@ -198,6 +199,23 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         if (death_transition >= 0)
             inf.begin_body_transition(death_transition);
     }
+
+    // Vertical velocity persists independently of the uplink-owned position.
+    // The authority owns chute admission [orig: org2 @0x4B7AD9..0x4B7C8D].
+    uint32_t chute_flags = ent->flags | ent->engine_flags;
+    if ((chute_flags & kEntityFlagInAir) == 0 || ent->mounted) inf.vel[2] = 0;
+    else if ((chute_flags & (kEntityFlagDrowning | kEntityFlagLadderContact)) == 0)
+        inf.vel[2] -= 208;
+    const ParachuteEvents chute = parachute_tick(inf.parachute, chute_flags,
+            ent->carry_flags, inf.vel[2], is_authority, logic_tick);
+    ent->flags = (ent->flags & ~kEntityFlagParachute) | (chute_flags & kEntityFlagParachute);
+    ent->engine_flags = (ent->engine_flags & ~kEntityFlagParachute) | (chute_flags & kEntityFlagParachute);
+    if ((chute_flags & kEntityFlagParachute) != 0 && inf.anim_state != anim_state::kParachute)
+        inf.begin_body_transition(anim_state::kParachute);
+    if (chute.opened) emit_slot_sound(world, e, audio::kSlotChuteOpen, e.pos);
+    if (chute.closed) emit_slot_sound(world, e, audio::kSlotChuteClose, e.pos);
+    if (chute.flap) emit_slot_sound(world, e, audio::kSlotChuteFlap, e.pos);
+    if (chute.free_fall) emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
 
     // Snapshot ownership suppresses locomotion, not the retail collision tail.
     // Resolve the current pose with the anim capsule and zero movement channels;
