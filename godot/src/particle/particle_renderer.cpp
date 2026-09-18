@@ -142,6 +142,9 @@ struct LayerVisual {
 
 struct DefinitionVisual {
 	std::array<LayerVisual, kGraphicLayerCount> layers;
+	// AMBIENTCOLOR authored, or forced by a blend-mode-0 graphic at Initialize
+	// (retail CEffectEmitter_Initialize @ 0x5e6038..0x5e605e).
+	bool ambient_lit = false;
 };
 
 opennova::renderer::ParticleRgbaImage particle_rgba_image(const Ref<Image> &image,
@@ -605,6 +608,14 @@ public:
 	float fog_start = 30000.0f;
 	float fog_end = 100000.0f;
 	std::int32_t fog_type = 1;
+	// The manager's two per-frame particle tints (retail byte 128 = 1.0):
+	// +0x3E8 = Env_TerrainLightCombined for AMBIENTCOLOR emitters, +0x3F0 =
+	// the modulator block doubled+saturated for the rest
+	// (retail render_emitter_effect @ 0x5f70c0; CParticleEmitter_AdvanceFrame
+	//  @ 0x5e6600..0x5e661c selects into emitter+200). Neutral until an
+	// environment source is attached.
+	std::array<float, 3> ambient_tint{1.0f, 1.0f, 1.0f};
+	std::array<float, 3> modulator_tint{1.0f, 1.0f, 1.0f};
 
 	Impl() {
 		create_effects();
@@ -660,6 +671,8 @@ public:
 		fog_start = 30000.0f;
 		fog_end = 100000.0f;
 		fog_type = 1;
+		ambient_tint = {1.0f, 1.0f, 1.0f};
+		modulator_tint = {1.0f, 1.0f, 1.0f};
 		if (env != nullptr) {
 			const Vector3 color = env->get_scene_fog_color();
 			if (std::isfinite(color.x) && std::isfinite(color.y) &&
@@ -673,6 +686,15 @@ public:
 			fog_end = finite_or(env->get_scene_fog_end(), fog_end);
 			fog_type = std::clamp<std::int32_t>(
 					env->get_scene_fog_type(), 0, 3);
+			auto finite_tint = [](const Vector3 &value, std::array<float, 3> fallback) {
+				if (std::isfinite(value.x) && std::isfinite(value.y) &&
+						std::isfinite(value.z)) {
+					return std::array<float, 3>{value.x, value.y, value.z};
+				}
+				return fallback;
+			};
+			ambient_tint = finite_tint(env->get_particle_ambient_tint(), ambient_tint);
+			modulator_tint = finite_tint(env->get_particle_modulator_tint(), modulator_tint);
 		}
 		cached_environment_source = source_id;
 		cached_environment_generation = has_generation ? generation :
@@ -888,6 +910,8 @@ public:
 			const opennova::particle::ParticleDef &definition =
 					(*definitions)[definition_index];
 			DefinitionVisual &visual = definition_visuals[definition_index];
+			visual.ambient_lit = (definition.flags &
+					opennova::particle::particle_flag::AmbientColor) != 0;
 			bool any_present = false;
 			for (int layer_index = 0; layer_index < kGraphicLayerCount;
 					++layer_index) {
@@ -899,6 +923,8 @@ public:
 				LayerVisual &layer = visual.layers[static_cast<std::size_t>(layer_index)];
 				layer.present = true;
 				layer.type = static_cast<std::uint8_t>(graphic.blend_mode);
+				if (graphic.blend_mode == opennova::particle::BlendMode::Blend)
+					visual.ambient_lit = true;
 				layer.flip_frames = std::clamp(graphic.flip_frames, 1,
 						opennova::particle::kMaxParticleFlipFrames);
 				layer.flip_rate = std::max(0, graphic.flip_rate);
@@ -1129,16 +1155,20 @@ public:
 				}
 				const float size = particle.size * scale_multiplier;
 
+				// The manager tint `(byte * channel) >> 7`: AMBIENTCOLOR defs — and
+				// every def with a blend-mode-0 graphic, which Initialize forces
+				// into AMBIENTCOLOR (retail CEffectEmitter_Initialize @ 0x5e6038..
+				// 0x5e605e) — take the terrain light; the rest the doubled modulator
+				// (retail CParticleEmitter_AdvanceFrame @ 0x5e6600..0x5e661c;
+				//  BuildBillboardQuads @ 0x5e6d60 / RenderStaticBillboards @ 0x5f4e10).
+				const std::array<float, 3> &tint = visual.ambient_lit ? ambient_tint : modulator_tint;
 				constexpr float byte_to_unit = 1.0f / 255.0f;
 				float red = static_cast<float>(particle.color.r) * byte_to_unit;
 				float green = static_cast<float>(particle.color.g) * byte_to_unit;
 				float blue = static_cast<float>(particle.color.b) * byte_to_unit;
-				red = std::clamp(red * red_multiplier * source_emitter.color_tint.x,
-						0.0f, 1.0f);
-				green = std::clamp(green * green_multiplier * source_emitter.color_tint.y,
-						0.0f, 1.0f);
-				blue = std::clamp(blue * blue_multiplier * source_emitter.color_tint.z,
-						0.0f, 1.0f);
+				red = std::clamp(red * red_multiplier * tint[0], 0.0f, 1.0f);
+				green = std::clamp(green * green_multiplier * tint[1], 0.0f, 1.0f);
+				blue = std::clamp(blue * blue_multiplier * tint[2], 0.0f, 1.0f);
 				const float alpha = std::clamp(
 						static_cast<float>(particle.alpha) * byte_to_unit *
 								alpha_multiplier,
@@ -1177,6 +1207,28 @@ public:
 						opennova::particle::particle_flag::YawAndPitch) != 0 ?
 						opennova::renderer::ParticleAlignment::WorldOriented :
 						opennova::renderer::ParticleAlignment::CameraFacing;
+				if ((definition.flags & opennova::particle::particle_flag::TopAlign) != 0) {
+					// TOPALIGN defs run through the rot-head system, whose renderer
+					// overwrites the roll every frame so the quad's top follows the
+					// particle's heading: the velocity is taken into the view frame,
+					// normalized, and the roll is `±acos(dot(dir, up))`, negative
+					// when the direction points right (retail: the CParticleRotHeadSystem
+					// vtable+40 renderer @ 0x5f5640 — head = pos + vel @ 0x5f587f,
+					// normalize @ 0x5f597b, acos and sign @ 0x5f59a0..0x5f59c7). A
+					// world-oriented quad measures against its own yaw/pitch frame.
+					Vector3 heading(particle.velocity.x, particle.velocity.y, particle.velocity.z);
+					if (quad.alignment == opennova::renderer::ParticleAlignment::WorldOriented) {
+						const Basis frame = Basis::from_euler(
+								Vector3(particle.pitch, particle.yaw, 0.0f), EULER_ORDER_YXZ);
+						heading = frame.xform_inv(heading);
+					} else {
+						heading = view_basis.xform(heading);
+					}
+					const float planar = heading.x * heading.x + heading.y * heading.y;
+					if (planar > 1.0e-12f) {
+						quad.roll = std::atan2(-heading.x, heading.y);
+					}
+				}
 				quad.state.pipeline = static_cast<opennova::renderer::ParticlePipeline>(layer.type);
 				quad.state.pass = layer.type == 7 ?
 						opennova::renderer::ParticleRenderPass::Distortion :

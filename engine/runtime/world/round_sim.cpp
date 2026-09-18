@@ -1841,7 +1841,26 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
 
         RoundImpact imp;
         imp.position = impact_position;
+        // The orientation the physical handlers hand the effect spawner. The
+        // entity and person handlers pass the ray record as the descriptor's
+        // orientation source, and its +24..+32 is the round's normalized flight
+        // direction [orig: Projectile_HandleEntityImpact @0x4e97c5 and
+        // Projectile_HandleTerrainImpact_0 @0x4e9a57 -> AmmoDef_ProcessImpactEffect
+        // @0x40a240 -> CEffectWorld_SpawnEmitterAtPosition @0x5f6e44; the record
+        // is laid out in Projectile_UpdatePhysics @0x4ea241..0x4ea25f]. The
+        // terrain and water handlers build their descriptor with a NULL record
+        // [orig: Projectile_HandleTerrainImpact @0x4e92c8;
+        // Projectile_SpawnImpactEffect @0x4e9d1c], which the spawner turns into
+        // a zero orientation [orig: @0x5f6e52..0x5f6e5c]: every EMITVECTOR
+        // member keeps a zero emission axis [orig:
+        // CEffectEmitter_SetOrientationFromDirection @0x5e5d51] and the
+        // direction helper emits it around world +Y, so a dirt puff rises out
+        // of the ground instead of following the round into it.
         imp.direction = flight_direction(r.vel);
+        if (collision.hit_class == ProjectileHitClass::Terrain ||
+            collision.hit_class == ProjectileHitClass::Water) {
+            imp.direction = Vec3{0.0f, 0.0f, 0.0f};
+        }
         imp.ammo_index = impact_ammo_index;
         if (collision.hit_class == ProjectileHitClass::Terrain) {
             // Permanent terrain-cache scorch, before the ordinary impact

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
@@ -283,6 +284,21 @@ int64_t EffectWorld::_owner_token_for(const Variant &p_key) {
 	return token;
 }
 
+// A descriptor spawn (transient or owned) with a zero orientation is retail's
+// "no orientation" case: CEffectWorld_SpawnEmitterAtPosition @ 0x5f6e52..0x5f6e5c
+// hands the group a zero vector, CEffectEmitter_SetOrientationFromDirection
+// @ 0x5e5d51 leaves every EMITVECTOR member's emission axis zero, and the
+// direction helper then emits around world +Y. A pose always carries a basis,
+// so that case aims the forward at +Y, which the engine's cone helper resolves
+// to the identical world-axis frame. Attached spawns keep their identity local
+// frame: their orientation comes from the owner transform they compose with.
+Transform3D EffectWorld::descriptor_pose(const Vector3 &p_position, const Vector3 &p_orientation) {
+	if (p_orientation.length_squared() <= 0.000001f) {
+		return forward_pose(p_position, Vector3(0.0f, 1.0f, 0.0f));
+	}
+	return forward_pose(p_position, p_orientation);
+}
+
 Transform3D EffectWorld::forward_pose(const Vector3 &p_position, const Vector3 &p_forward) {
 	if (p_forward.length_squared() <= 0.000001f) {
 		return Transform3D(Basis(), p_position);
@@ -432,7 +448,7 @@ int64_t EffectWorld::spawn_effect_transient(const String &p_name, const Vector3 
 	options->set_source_tick(p_source_tick);
 	options->set_source_order(p_source_order);
 	const Ref<EffectSpawnReceipt> receipt =
-			spawn_effect_request(p_name, forward_pose(p_position, p_orientation), options);
+			spawn_effect_request(p_name, descriptor_pose(p_position, p_orientation), options);
 	return receipt->get_effect_handle();
 }
 
@@ -446,7 +462,7 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_owned_request(const Variant &p
 	if (particles_disabled_) {
 		return _disabled_receipt();
 	}
-	const Transform3D initial_transform = forward_pose(p_position, p_orientation);
+	const Transform3D initial_transform = descriptor_pose(p_position, p_orientation);
 	Ref<EffectSpawnOptions> options;
 	options.instantiate();
 	options->set_admission(ADMISSION_REPLACE_OWNED);
@@ -503,7 +519,7 @@ int64_t EffectWorld::spawn_effect_unless_alive(const Variant &p_owner_key, const
 	options->set_admission(ADMISSION_SUPPRESS_WHILE_OWNED);
 	options->set_slot_key(p_owner_key);
 	const Ref<EffectSpawnReceipt> receipt =
-			spawn_effect_request(p_name, forward_pose(p_position, p_orientation), options);
+			spawn_effect_request(p_name, descriptor_pose(p_position, p_orientation), options);
 	return receipt->get_effect_handle();
 }
 
@@ -513,7 +529,7 @@ bool EffectWorld::spawn_effect_by_handle(int64_t p_handle, const Vector3 &p_posi
 		return false;
 	}
 	Ref<EffectSpawnRequest> request =
-			EffectSpawnRequest::make(p_handle, forward_pose(p_position, p_orientation));
+			EffectSpawnRequest::make(p_handle, descriptor_pose(p_position, p_orientation));
 	request->set_kill_plane_y(water_height_);
 	return scene_->spawn(request)->get_spawned();
 }
@@ -620,6 +636,12 @@ void EffectWorld::_sync_owner_poses(bool p_refresh_frame) {
 	}
 }
 
+void EffectWorld::set_mission_wind(int p_wind_speed, int p_wind_direction_degrees) {
+	const opennova::particle::Vec3 wind =
+			opennova::particle::mission_wind_vector(p_wind_speed, p_wind_direction_degrees);
+	scene_->set_global_wind(Vector3(wind.x, wind.y, wind.z));
+}
+
 void EffectWorld::advance_fixed_tick(double p_delta) {
 	advance_simulation_tick(p_delta, nullptr);
 }
@@ -627,6 +649,21 @@ void EffectWorld::advance_fixed_tick(double p_delta) {
 void EffectWorld::advance_simulation_tick(double p_delta,
 		const opennova::particle::ParticleForceField *p_forces) {
 	_sync_owner_poses(false);
+	// The NOVISNOUPDATE gate reads the camera that rendered the previous
+	// frame, like retail's manager clip state set at BeginFrame; without a
+	// current camera every emitter advances.
+	Camera3D *camera = nullptr;
+	if (Viewport *viewport = get_viewport(); viewport != nullptr) {
+		camera = viewport->get_camera_3d();
+	}
+	if (camera != nullptr) {
+		const Transform3D camera_transform = camera->get_camera_transform();
+		const Vector3 probe = camera_transform.origin -
+				camera_transform.basis.get_column(2) * (camera->get_near() + 1.0f);
+		scene_->set_view_frustum(camera->get_frustum(), probe);
+	} else {
+		scene_->clear_view_frustum();
+	}
 	scene_->advance_with_forces(p_delta > 0.0 ? p_delta : 0.0, p_forces);
 }
 
@@ -738,6 +775,8 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("intern_effect", "name"), &EffectWorld::intern_effect);
 	ClassDB::bind_method(D_METHOD("effect_name_for_handle", "handle"),
 			&EffectWorld::effect_name_for_handle);
+	ClassDB::bind_static_method("EffectWorld", D_METHOD("descriptor_pose", "position", "orientation"),
+			&EffectWorld::descriptor_pose);
 	ClassDB::bind_static_method("EffectWorld", D_METHOD("forward_pose", "position", "forward"),
 			&EffectWorld::forward_pose);
 	ClassDB::bind_method(D_METHOD("spawn_effect_request", "name", "transform", "options"),
@@ -782,6 +821,8 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::has_cached_owner_pose);
 	ClassDB::bind_method(D_METHOD("has_no_owner_bindings"), &EffectWorld::has_no_owner_bindings);
 	ClassDB::bind_method(D_METHOD("advance_fixed_tick", "delta"), &EffectWorld::advance_fixed_tick);
+	ClassDB::bind_method(D_METHOD("set_mission_wind", "wind_speed", "wind_direction_degrees"),
+			&EffectWorld::set_mission_wind);
 	ClassDB::bind_method(D_METHOD("render_frame"), &EffectWorld::render_frame);
 	ClassDB::bind_method(D_METHOD("get_debug_group_report", "include_hidden"),
 			&EffectWorld::get_debug_group_report, DEFVAL(false));

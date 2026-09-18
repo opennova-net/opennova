@@ -1230,6 +1230,13 @@ void GameWorld::start_effect_world() {
 	if (item_fx_->particles_hidden()) {
 		effect_world->set_particles_hidden(true);
 	}
+	// The mission header's wind drives GLOBALWIND particles
+	// (retail Game_StartMission @ 0x524aff -> sub_5DE970 @ 0x5de970).
+	if (loaded_mission_.is_valid()) {
+		if (const Ref<MissionInfo> info = loaded_mission_->get_info(); info.is_valid()) {
+			effect_world->set_mission_wind(info->get_wind_speed(), info->get_wind_direction());
+		}
+	}
 	const int count = effect_world->load_from_resource_root(resource_root_);
     if (const Ref<Simulation> sim = get_sim(); sim.is_valid())
         sim->bind_item_effect_scene(effect_world->shared_native_scene());

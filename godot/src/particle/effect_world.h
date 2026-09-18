@@ -120,6 +120,7 @@ public:
 	// an up hint of UP (RIGHT when the forward is vertical). Shared with the
 	// static item-effect sources (ItemEffectDirector).
 	static Transform3D forward_pose(const Vector3 &p_position, const Vector3 &p_forward);
+	static Transform3D descriptor_pose(const Vector3 &p_position, const Vector3 &p_orientation);
 
 	// Deep spawn seam. Admission, binding, and render domain are explicit
 	// values; the options' slot_key/owner_key Variants are interned to
@@ -203,6 +204,9 @@ public:
 	// key is still holding a slot token, owner token, reverse lookup, or
 	// cached pose.
 	bool has_no_owner_bindings() const;
+	// The mission header's wind, the GLOBALWIND drift every tick
+	// (particle::mission_wind_vector). GameWorld feeds it at effect-world start.
+	void set_mission_wind(int p_wind_speed, int p_wind_direction_degrees);
 	// The only simulation clock. Callers feed fixed mission ticks (1 / 62.5 s).
 	void advance_fixed_tick(double p_delta);
 	// The same clock with the simulation's borrowed force field (the

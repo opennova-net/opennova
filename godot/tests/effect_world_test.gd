@@ -612,3 +612,49 @@ func test_empty_catalog_warm_cleans_pipeline_helpers() -> void:
 	await get_tree().process_frame
 	assert_eq(_warm_helper_count(world), 0,
 			"the empty-catalog early return does not strand helper geometry")
+
+
+# A descriptor spawn with no orientation is retail's zero-orientation case:
+# SpawnEmitterAtPosition @ 0x5f6e52..0x5f6e5c hands the group a zero vector and
+# EMITVECTOR members then emit around world +Y (SetOrientationFromDirection
+# @ 0x5e5d51 leaves their axis zero). The pose seam aims that case at +Y; a
+# real orientation is kept as the forward axis.
+func test_descriptor_pose_without_orientation_aims_up() -> void:
+	var origin := Vector3(3.0, 4.0, 5.0)
+	var none := EffectWorld.descriptor_pose(origin, Vector3.ZERO)
+	assert_eq(none.origin, origin, "position kept")
+	assert_almost_eq(none.basis.z, Vector3.UP, Vector3.ONE * 0.0001, "zero orientation -> +Y forward")
+	assert_almost_eq(none.basis.z, EffectWorld.forward_pose(origin, Vector3.UP).basis.z, Vector3.ONE * 0.0001, "same frame as an explicit +Y forward")
+	var aimed := EffectWorld.descriptor_pose(origin, Vector3(0.0, -0.6, 0.8))
+	assert_almost_eq(aimed.basis.z, Vector3(0.0, -0.6, 0.8), Vector3.ONE * 0.0001, "a real orientation is the forward axis")
+	assert_almost_eq(aimed.basis.z.length(), 1.0, 0.0001, "normalized")
+
+
+func test_preaged_effect_receives_mission_wind_before_its_first_tick() -> void:
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	add_child_autofree(camera)
+	var file := _make_renderable_effect_file()
+	var particle := file.find_particle("puff dots")
+	particle.flags = particle.flags | (1 << 10) # GLOBALWIND
+	particle.age = 2.0
+	var normal := _make_world()
+	var preaged := _make_world()
+	for world in [normal, preaged]:
+		world.load_particle_file(file)
+		world.set_mission_wind(10, 90)
+	assert_gt(normal.spawn_effect_transient("puff", Vector3.ZERO), 0)
+	for tick in 8:
+		normal.advance_fixed_tick(0.016)
+	assert_gt(preaged.spawn_effect_transient("puff", Vector3.ZERO, Vector3.ZERO, 8), 0)
+	normal.render_now()
+	preaged.render_now()
+	var expected := _single_emitter(normal)
+	var actual := _single_emitter(preaged)
+	assert_eq(actual.alive, expected.alive, "the catch-up population matches ordinary ticks")
+	assert_true(expected.bounds_valid and actual.bounds_valid)
+	assert_gt(expected.bounds.get_center().x, 0.05, "the mission wind moves the particles")
+	assert_almost_eq(actual.bounds.position, expected.bounds.position, Vector3.ONE * 0.0001,
+			"spawn catch-up uses mission wind even before the world's first advance")
+	assert_almost_eq(actual.bounds.size, expected.bounds.size, Vector3.ONE * 0.0001)

@@ -761,7 +761,101 @@ bool huge_delta_catch_up_is_bounded_contract() {
 
 } // namespace
 
+bool child_id_chain_contract() {
+	// A member whose child_id resolves gets a nested child emitter right after
+	// it in the group, fed by the parent's per-particle schedule; the child
+	// outlives its parent only to drain, then the group dies with it.
+	p::ParticleDef parent = particle("debris");
+	parent.child_id = "Trail";
+	parent.emit_dur = 0.05f;
+	parent.emit_rate = 20.0f;  // budget 1: one parent particle
+	parent.age = 0.5f;
+	p::ParticleDef child = particle("trail");
+	child.emit_rate = 20.0f;
+	child.emit_dur = 0.25f;    // 5 children per parent particle
+	child.age = 1.0f;
+	p::EffectSceneConfig config;
+	config.documents.push_back(document("chain.ptl", {parent, child},
+			{{"burst", {"debris"}}}));
+	p::EffectScene scene;
+	scene.open(config);
+	const auto effect = scene.intern("burst");
+	const auto receipt = scene.spawn(spawn_request(effect));
+	if (!check(receipt.spawned(), "chain effect spawns")) return false;
+	auto debug = scene.inspect();
+	const auto *group = debug_group(debug, receipt.group);
+	if (!check(group && group->emitters.size() == 2 && !group->emitters[0].child_emitter &&
+			group->emitters[1].child_emitter && group->emitters[1].definition_name == "trail",
+			"the child emitter follows its parent in the group")) return false;
+	if (!check(!group->emitters[1].emitting, "a child never self-emits")) return false;
+	p::ParticleFrameSnapshot frame = advance_frame(scene, 0.3f);
+	const auto *frame_view = frame_group(frame, receipt.group);
+	if (!check(frame_view && frame_view->emitter_count == 2 &&
+			frame.emitters[frame_view->first_emitter + 1].child_emitter &&
+			frame.emitters[frame_view->first_emitter + 1].particle_count == 5,
+			"the parent particle spawned its five children")) {
+		if (frame_view) {
+			std::fprintf(stderr, "  children=%zu\n",
+					frame.emitters[frame_view->first_emitter + 1].particle_count);
+		}
+		return false;
+	}
+	// The parent dies at 0.5 s; its child keeps draining for up to 1 s more.
+	frame = advance_frame(scene, 0.3f);
+	frame_view = frame_group(frame, receipt.group);
+	if (!check(frame_view && frame_view->emitter_count == 1 &&
+			frame.emitters[frame_view->first_emitter].child_emitter,
+			"the dead parent leaves its child draining")) return false;
+	frame = advance_frame(scene, 1.2f);
+	return check(frame_group(frame, receipt.group) == nullptr && !scene.contains_group(receipt.group),
+			"the group dies once the drained child is gone");
+}
+
+bool initial_age_uses_scene_wind_contract() {
+	auto config = one_effect();
+	config.simulation_tick_seconds = 0.016f;
+	config.documents[0].file.particles[0].flags |= p::particle_flag::GlobalWind;
+	p::EffectScene normal;
+	p::EffectScene preaged;
+	for (p::EffectScene *scene : {&normal, &preaged}) {
+		// Mission state must reach catch-up even before the first advance,
+		// and survive the catalog/runtime resets used during loading.
+		scene->set_global_wind({10.0f, 0.0f, -5.0f});
+		scene->open(config);
+		scene->reset_runtime_state();
+	}
+	if (!check(normal.spawn(spawn_request(normal.intern("flash"))).spawned(),
+			"ordinary wind fixture spawns")) return false;
+	for (int tick = 0; tick < 8; ++tick) {
+		normal.advance_simulation({config.simulation_tick_seconds});
+	}
+	auto request = spawn_request(preaged.intern("flash"));
+	request.initial_age_ticks = 8;
+	if (!check(preaged.spawn(request).spawned(),
+			"pre-aged wind fixture spawns")) return false;
+	p::ParticleFrameSnapshot expected;
+	p::ParticleFrameSnapshot actual;
+	normal.write_snapshot(expected);
+	preaged.write_snapshot(actual);
+	if (!check(!expected.particles.empty() &&
+			actual.particles.size() == expected.particles.size(),
+			"wind catch-up has the same nonempty population")) return false;
+	if (!check(expected.particles.front().position.x > 1.0f,
+			"ordinary wind control moves particles")) return false;
+	for (std::size_t index = 0; index < expected.particles.size(); ++index) {
+		const auto &a = actual.particles[index];
+		const auto &b = expected.particles[index];
+		if (!check(near(a.position.x, b.position.x) && near(a.position.y, b.position.y) &&
+				near(a.position.z, b.position.z) && near(a.velocity.x, b.velocity.x) &&
+				near(a.velocity.z, b.velocity.z),
+				"spawn catch-up matches ordinary wind integration")) return false;
+	}
+	return true;
+}
+
 int main() {
+	if (!initial_age_uses_scene_wind_contract()) return 1;
+	if (!child_id_chain_contract()) return 1;
 	if (!catalog_and_stock_alias_contract()) return 1;
 	if (!pdef_reference_resolution_is_case_insensitive_contract()) return 1;
 	if (!effect_resolve_is_all_or_nothing_contract()) return 1;

@@ -40,7 +40,6 @@ namespace godot {
 	X(int, initial_age_ticks, 0)                                                                   \
 	X(int64_t, source_tick, 0)                                                                     \
 	X(int64_t, source_order, 0)                                                                    \
-	X(Vector3, color_tint, Vector3(1.0f, 1.0f, 1.0f))                                              \
 	X(float, spring_const, 0.0f)                                                                   \
 	X(int, lod_divisor, 1)                                                                         \
 	X(int, kill_plane, 0)                                                                          \

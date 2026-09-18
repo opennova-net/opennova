@@ -155,7 +155,6 @@ struct EffectSpawnRequest {
 	std::uint64_t source_tick = 0;
 	std::uint64_t source_order = 0;
 
-	Vec3 color_tint = {1.0f, 1.0f, 1.0f};
 	float spring_const = 0.0f;
 	std::uint32_t lod_divisor = 1;
 	EffectKillPlane kill_plane = EffectKillPlane::Disabled;
@@ -200,6 +199,9 @@ struct EffectOwnerPoseUpdate {
 struct EffectAdvanceRequest {
 	float delta_seconds = 0.0f;
 	const ParticleForceField *forces = nullptr;
+	// The current camera's clip planes for the NOVISNOUPDATE gate; leave
+	// `valid` false (headless, no camera) to advance every emitter.
+	ParticleViewFrustum frustum;
 };
 
 struct EffectBounds {
@@ -237,13 +239,15 @@ struct EffectEmitterFrameSnapshot {
 	std::size_t particle_count = 0;
 	Vec3 position{};
 	Vec3 forward = {0.0f, 0.0f, 1.0f};
-	Vec3 color_tint = {1.0f, 1.0f, 1.0f};
 	float age = 0.0f;
 	float spring_const = 0.0f;
 	float camera_pull = 0.0f;
 	std::uint32_t lod_divisor = 1;
 	EffectKillPlane kill_plane = EffectKillPlane::Disabled;
 	float kill_plane_y = 0.0f;
+	// A `child_id` emitter fed by its parent's per-particle schedule rather
+	// than by its own emission window.
+	bool child_emitter = false;
 };
 
 struct ParticleFrameSnapshot {
@@ -265,6 +269,7 @@ struct EffectEmitterDebugSnapshot {
 	std::uint32_t definition_flags = 0;
 	std::size_t alive_particle_count = 0;
 	bool emitting = false;
+	bool child_emitter = false;
 	Vec3 position{};
 	Vec3 forward = {0.0f, 0.0f, 1.0f};
 	float age = 0.0f;
@@ -368,6 +373,12 @@ public:
 	// remains valid for the next play session.
 	void reset_runtime_state();
 
+	// Scene-wide mission wind in effect-frame units per second. Both ordinary
+	// ticks and spawn-time catch-up use it, including spawns before the first
+	// advance. Retained across catalog reloads and runtime resets; non-finite
+	// input clears it. See particle::mission_wind_vector.
+	void set_global_wind(const Vec3 &wind) noexcept;
+
 	// Advances all live emitters and reclaims completed groups without copying
 	// render values. Embedders that batch multiple fixed ticks materialize only the
 	// final frame through write_snapshot().
@@ -384,6 +395,7 @@ public:
 private:
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
+	Vec3 global_wind_{};
     bool spawn_enabled_ = true;
 };
 

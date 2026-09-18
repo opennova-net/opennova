@@ -17,7 +17,8 @@ namespace opennova::world {
 // The canonical effects_table tag order — the array index IS the impact effect id the
 // round-impact selection uses [orig: g_AmmoEffectTagTable @ 0x813420, 28 {name, id}
 // pairs scanned from index 1 ('null' at 0 is never matchable, scan @ 0x40a46a);
-// consumers: Projectile_SpawnImpactEffect @ 0x4e9b80 for ballistic impacts and the
+// consumers: the ballistic impact handlers (terrain Projectile_HandleTerrainImpact
+// @ 0x4e9210, entity @ 0x4e9390, person @ 0x4e98f0, water @ 0x4e9b80) and the
 // Knife-only Weapon_RaycastAndSpawnImpact @ 0x4e8460 leaf — terrain surface + 4,
 // entity/building material + 4 unconditionally on the bullet path
 // (AmmoDef_ProcessImpactEffect @ 0x40a170 only clamps >= 28 to 4 @ 0x40a1bf);

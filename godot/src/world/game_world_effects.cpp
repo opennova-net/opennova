@@ -64,7 +64,8 @@ void GameWorld::route_script_effects() {
 // Impact particles are generic Always transients in the world domain; their
 // production tick/order and catch-up age survive a multi-tick render frame.
 // [orig: Projectile_UpdatePhysics @ 0x4e9d70 -> the type-specific impact
-//  handler -> Projectile_SpawnImpactEffect @ 0x4e9b80]
+//  handler (terrain @ 0x4e9210, entity @ 0x4e9390, person @ 0x4e98f0, water
+//  @ 0x4e9b80) -> AmmoDef_ProcessImpactEffect @ 0x40a170]
 void GameWorld::route_round_impacts() {
 	Ref<Simulation> sim = get_sim();
 	if (sim.is_null()) {

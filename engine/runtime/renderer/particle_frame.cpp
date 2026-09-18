@@ -304,7 +304,13 @@ void build_quad(const ParticleQuadSnapshot &particle,
 	const float u1 = atlas.rect.u_max - atlas.inset_u;
 	const float v1 = atlas.rect.v_max - atlas.inset_v;
 	const float u[4] = {u0, u1, u0, u1};
-	const float v[4] = {v0, v0, v1, v1};
+	// Retail's first corner is (-half, -half) with (u_min, v_min), and
+	// its positive-Y corners use v_max. Our strip stores the top row first,
+	// so V runs oppositely to the vertex row order. Reversing this displays
+	// asymmetric dirt splashes upside down, with their dense base at the top.
+	// [orig: BuildBillboardQuads @0x5e7213 / @0x5e732f..0x5e7374;
+	//  RenderTopAlignedBillboards @0x5f5c99 / @0x5f5ddc..0x5f5e21]
+	const float v[4] = {v1, v1, v0, v0};
 
 	for (std::size_t i = 0; i < 4; ++i) {
 		vertices[i].x = positions[i].x;

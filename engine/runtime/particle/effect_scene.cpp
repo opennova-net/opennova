@@ -118,8 +118,7 @@ EffectBounds emitter_bounds(const Emitter &emitter) noexcept {
 }
 
 bool emitter_finished(const Emitter &emitter) noexcept {
-	return emitter.finite && emitter.emit_dur_remaining <= 0.0f &&
-			emitter.particles.empty();
+	return !emitter_alive(emitter);
 }
 
 std::uint32_t seed_for(std::uint32_t base, std::uint64_t group_id,
@@ -173,6 +172,10 @@ struct EffectScene::Impl {
 		std::size_t group_slot = kInvalidIndex;
 		std::size_t ordinal = 0;
 		std::size_t definition_index = 0;
+		// The `child_id` emitter this record spawns into (retail emitter+0xC),
+		// and whether this record IS such a child (retail emitter+0x108 != 0).
+		std::size_t child_slot = kInvalidIndex;
+		bool child_emitter = false;
 		Emitter emitter;
 	};
 
@@ -180,6 +183,9 @@ struct EffectScene::Impl {
 	EffectLoadReport load_report;
 	std::shared_ptr<const std::vector<ParticleDef>> definitions =
 			std::make_shared<std::vector<ParticleDef>>();
+	// Per definition, the resolved `child_id` definition (kInvalidIndex when
+	// absent or unresolved) [orig: CEffectDef_ResolveAllReferences @ 0x5e9d90].
+	std::vector<std::size_t> child_definition_index;
 	std::vector<CatalogEffect> effects;
 	std::unordered_map<std::string, std::size_t> effect_by_name;
 	std::size_t stock_effect_index = kInvalidIndex;
@@ -266,6 +272,8 @@ struct EffectScene::Impl {
 		record.group_slot = kInvalidIndex;
 		record.ordinal = 0;
 		record.definition_index = 0;
+		record.child_slot = kInvalidIndex;
+		record.child_emitter = false;
 		return slot;
 	}
 
@@ -280,10 +288,21 @@ struct EffectScene::Impl {
 		record.active = false;
 		record.id = 0;
 		record.group_slot = kInvalidIndex;
+		record.child_slot = kInvalidIndex;
+		record.child_emitter = false;
 		record.emitter.active = false;
 		record.emitter.def = nullptr;
+		record.emitter.child_def = nullptr;
 		record.emitter.particles.clear();
 		free_emitter_slots.push_back(slot);
+	}
+
+	Emitter *child_emitter_of(const EmitterRecord &record) {
+		if (record.child_slot >= emitter_pool.size()) {
+			return nullptr;
+		}
+		EmitterRecord &child = emitter_pool[record.child_slot];
+		return child.active ? &child.emitter : nullptr;
 	}
 
 	void reap_finished_emitters(GroupRecord &group) {
@@ -295,6 +314,15 @@ struct EffectScene::Impl {
 			if (keep) {
 				group.emitter_slots[write_index++] = emitter_slot;
 			} else {
+				// A dying parent zeroes its child's budget, so the child drains
+				// its live particles and then dies itself
+				// [orig: CParticleEmitter_AdvanceFrame @ 0x5e695f -> vtable+60 =
+				//  CEffectEmitter_OnChildDied @ 0x5ef9c0 on emitter+0xC].
+				if (emitter_slot < emitter_pool.size()) {
+					if (Emitter *child = child_emitter_of(emitter_pool[emitter_slot])) {
+						child->emit_budget = 0;
+					}
+				}
 				release_emitter_slot(emitter_slot);
 			}
 		}
@@ -341,9 +369,22 @@ struct EffectScene::Impl {
 				continue;
 			}
 			Emitter &emitter = emitter_pool[emitter_slot].emitter;
-			emitter.finite = true;
-			emitter.emit_dur_remaining = 0.0f;
+			// Detaching ends emission; the live particles drain and the
+			// emitter dies once they are gone.
+			emitter.emit_budget = 0;
 		}
+	}
+
+	// Emitter records a spawn of this definition needs: the member plus its
+	// resolved child_id chain (bounded like the spawn walk).
+	std::size_t emitter_chain_length(std::size_t definition_index) const noexcept {
+		std::size_t length = 0;
+		for (int depth = 0; depth < 4 && definition_index != kInvalidIndex; ++depth) {
+			++length;
+			definition_index = definition_index < child_definition_index.size()
+					? child_definition_index[definition_index] : kInvalidIndex;
+		}
+		return length;
 	}
 
 	void move_group_to_pose(GroupRecord &group, const EffectPose &pose) {
@@ -358,7 +399,14 @@ struct EffectScene::Impl {
 				continue;
 			}
 			emitter_translate(record.emitter, pose.position);
-			record.emitter.forward = forward;
+			// A re-orientation reaches the emission axis of EMITVECTOR defs
+			// only [orig: CEffectEmitter_SetOrientationFromDirection @ 0x5e5b00,
+			//  the flag test @ 0x5e5d51].
+			record.emitter.spawn_direction = forward;
+			if (record.emitter.def != nullptr &&
+					(record.emitter.def->flags & particle_flag::EmitVector) != 0) {
+				record.emitter.forward = forward;
+			}
 		}
 	}
 
@@ -482,6 +530,17 @@ EffectLoadReport EffectScene::open(const EffectSceneConfig &config) {
 	}
 	next->load_report.particle_definition_count = mutable_definitions->size();
 	next->definitions = mutable_definitions;
+	next->child_definition_index.assign(mutable_definitions->size(), kInvalidIndex);
+	for (std::size_t index = 0; index < mutable_definitions->size(); ++index) {
+		const std::string &child_name = (*mutable_definitions)[index].child_id;
+		if (child_name.empty()) {
+			continue;
+		}
+		const auto found = definition_by_name.find(fold_ascii(child_name));
+		if (found != definition_by_name.end()) {
+			next->child_definition_index[index] = found->second;
+		}
+	}
 
 	for (const EffectCatalogDocument &document : config.documents) {
 		for (const EffectDef &source_effect : document.file.effects) {
@@ -633,7 +692,11 @@ EffectSpawnReceipt EffectScene::spawn(const EffectSpawnRequest &request) {
 		return impl_->rejected(
 				request.effect, EffectSpawnStatus::GroupCapacityReached);
 	}
-	if (!impl_->emitter_capacity_available(effect->definition_indices.size())) {
+	std::size_t required_emitters = 0;
+	for (const std::size_t definition_index : effect->definition_indices) {
+		required_emitters += impl_->emitter_chain_length(definition_index);
+	}
+	if (!impl_->emitter_capacity_available(required_emitters)) {
 		return impl_->rejected(
 				request.effect, EffectSpawnStatus::EmitterCapacityReached);
 	}
@@ -670,47 +733,90 @@ EffectSpawnReceipt EffectScene::spawn(const EffectSpawnRequest &request) {
 		}
 	}
 
-	for (std::size_t ordinal = 0;
-			ordinal < effect->definition_indices.size(); ++ordinal) {
-		const std::size_t definition_index = effect->definition_indices[ordinal];
-		const ParticleDef &definition = (*impl_->definitions)[definition_index];
-		const std::size_t emitter_slot = impl_->acquire_emitter_slot();
-		Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
-		record.group_slot = group_slot;
-		record.ordinal = ordinal;
-		record.definition_index = definition_index;
-		Emitter &emitter = record.emitter;
-		emitter.max_particles = definition.emit_maxoverride > 0
-				? std::min(static_cast<std::size_t>(definition.emit_maxoverride),
-						kEmitterHardParticleLimit)
-				: kDefaultEmitterCapacity;
-		emitter.color_tint = request.color_tint;
-		emitter.spring_const = request.spring_const;
-		emitter.lod_divisor = std::max(request.lod_divisor, 1u);
-		EffectKillPlane kill_plane = request.kill_plane;
-		if (kill_plane == EffectKillPlane::Disabled) {
-			if ((definition.flags & particle_flag::BelowH2O) != 0) {
-				kill_plane = EffectKillPlane::KillAbove;
-			} else if ((definition.flags & particle_flag::AboveH2O) != 0) {
-				kill_plane = EffectKillPlane::KillAtOrBelow;
+	// Retail instantiates every pdefs member, and each member whose child_id
+	// resolved gets one nested child emitter appended right after it in the
+	// group's list with self-emission disabled; the child's pool is sized by
+	// the parent's particle count [orig: CEffectGroup_SpawnChildEmitters
+	// @ 0x5ea0a0 -> CEffectEmitter_Initialize @ 0x5e6417..0x5e64a4, the
+	// count multiply @ 0x5e63c8..0x5e6411].
+	const Vec3 spawn_direction = normalized_or_forward(group.pose.forward);
+	std::size_t next_ordinal = 0;
+	for (std::size_t member = 0; member < effect->definition_indices.size(); ++member) {
+		std::size_t definition_index = effect->definition_indices[member];
+		std::size_t parent_slot = kInvalidIndex;
+		std::size_t parent_capacity = 0;
+		// One nested child per resolved child_id, bounded against authoring cycles.
+		for (int depth = 0; depth < 4 && definition_index != kInvalidIndex; ++depth) {
+			const ParticleDef &definition = (*impl_->definitions)[definition_index];
+			const std::size_t emitter_slot = impl_->acquire_emitter_slot();
+			Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
+			record.group_slot = group_slot;
+			record.ordinal = next_ordinal;
+			record.definition_index = definition_index;
+			record.child_emitter = parent_slot != kInvalidIndex;
+			Emitter &emitter = record.emitter;
+			if (definition.emit_maxoverride > 0) {
+				emitter.max_particles = std::min(
+						static_cast<std::size_t>(definition.emit_maxoverride),
+						kEmitterHardParticleLimit);
+			} else if (record.child_emitter) {
+				const float rate_max = std::abs(definition.emit_rate) +
+						std::abs(definition.emit_rate_adj);
+				const float dur_max = std::abs(definition.emit_dur) +
+						std::abs(definition.emit_dur_adj);
+				const float per_parent = std::ceil(rate_max * dur_max) *
+						static_cast<float>(std::max(definition.emit_burst, 1));
+				const float capacity = std::isfinite(per_parent)
+						? std::max(per_parent, 1.0f) * static_cast<float>(parent_capacity)
+						: static_cast<float>(kEmitterHardParticleLimit);
+				emitter.max_particles = static_cast<std::size_t>(std::min(
+						std::max(capacity, 1.0f),
+						static_cast<float>(kEmitterHardParticleLimit)));
+			} else {
+				emitter.max_particles = kDefaultEmitterCapacity;
 			}
+			emitter.spring_const = request.spring_const;
+			emitter.lod_divisor = std::max(request.lod_divisor, 1u);
+			EffectKillPlane kill_plane = request.kill_plane;
+			if (kill_plane == EffectKillPlane::Disabled) {
+				if ((definition.flags & particle_flag::BelowH2O) != 0) {
+					kill_plane = EffectKillPlane::KillAbove;
+				} else if ((definition.flags & particle_flag::AboveH2O) != 0) {
+					kill_plane = EffectKillPlane::KillAtOrBelow;
+				}
+			}
+			emitter.kill_plane_mode = static_cast<std::uint32_t>(kill_plane);
+			emitter.kill_plane_y = request.kill_plane_y;
+			emitter.self_emitting = !record.child_emitter;
+			emitter_init(emitter, &definition, group.pose.position,
+					seed_for(impl_->config.random_seed, group.id.value, next_ordinal),
+					spawn_direction);
+			emitter.force_zone = request.force_zone;
+			if (parent_slot != kInvalidIndex) {
+				Impl::EmitterRecord &parent = impl_->emitter_pool[parent_slot];
+				parent.child_slot = emitter_slot;
+				parent.emitter.child_def = &definition;
+			}
+			group.emitter_slots.push_back(emitter_slot);
+			++next_ordinal;
+			parent_slot = emitter_slot;
+			parent_capacity = emitter.max_particles;
+			definition_index = impl_->child_definition_index[definition_index];
 		}
-		emitter.kill_plane_mode = static_cast<std::uint32_t>(kill_plane);
-		emitter.kill_plane_y = request.kill_plane_y;
-		emitter_init(emitter, &definition, group.pose.position,
-				seed_for(impl_->config.random_seed, group.id.value, ordinal));
-		emitter.forward = normalized_or_forward(group.pose.forward);
-		emitter.force_zone = request.force_zone;
-		group.emitter_slots.push_back(emitter_slot);
 	}
 
 	const std::uint32_t initial_age_ticks = std::min(
 			request.initial_age_ticks, kEffectInitialAgeTickLimit);
+	EmitterEnvironment replay_environment;
+	replay_environment.global_wind = global_wind_;
 	for (std::uint32_t tick = 0; tick < initial_age_ticks; ++tick) {
 		for (const std::size_t emitter_slot : group.emitter_slots) {
-			Emitter &emitter = impl_->emitter_pool[emitter_slot].emitter;
-			emitter_advance(emitter,
-					impl_->config.simulation_tick_seconds);
+			Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
+			if (!record.active) {
+				continue;
+			}
+			emitter_advance(record.emitter, impl_->config.simulation_tick_seconds,
+					replay_environment, impl_->child_emitter_of(record));
 		}
 		impl_->reap_finished_emitters(group);
 		if (group.emitter_slots.empty()) {
@@ -828,12 +934,18 @@ bool EffectScene::set_group_parameters(EffectGroupId group_id,
 				(*impl_->definitions)[record.definition_index];
 		Emitter &emitter = record.emitter;
 		// The first descriptor value replaces spawn-time randomisation with a
-		// live base/adjust interpolation. Negative rates stop emission.
-		// [orig: CEffectEmitter_CalcEmissionRate @ 0x5e1c30]
+		// live base/adjust interpolation of BOTH the rate and the duration, and
+		// re-arms the particle budget `emit_burst * (int)(rate * dur)` (forever
+		// for FOREVEREMIT / non-self-emitting). Negative rates stop emission.
+		// [orig: CEffectEmitter_CalcEmissionRate @ 0x5e1c30 — @ 0x5e1c5e..0x5e1c8f]
 		const float rate =
 				definition.emit_rate + definition.emit_rate_adj * rate_lerp;
 		emitter.emit_rate =
 				std::isfinite(rate) ? std::max(rate, 0.0f) : 0.0f;
+		const float duration =
+				definition.emit_dur + definition.emit_dur_adj * rate_lerp;
+		emitter.emit_dur_total = std::isfinite(duration) ? duration : 0.0f;
+		emitter.emit_budget = emitter_initial_budget(emitter);
 		// The second value turns the authored y/z pair into an interpolated
 		// spawn offset and clears the ordinary billboard camera pull.
 		// [orig: CEffectWorld_UpdateBlendValues @ 0x5e5df0]
@@ -852,16 +964,15 @@ bool EffectScene::trigger_group_children(EffectGroupId group_id, const Vec3 &pos
 	if (group == nullptr || group->detached) {
 		return false;
 	}
-	// The portable scene has no nested child emitters, so every group emitter
-	// is a top-level child (retail's +264 == 0 gate). A full pool refuses the
-	// spawn exactly as CParticleEmitter_SpawnParticle's count >= capacity
-	// test does @0x5E7687.
+	// Only top-level members re-trigger; a child_id emitter (retail's +264 != 0
+	// word) is skipped. A full pool refuses the spawn exactly as
+	// CParticleEmitter_SpawnParticle's count >= capacity test does @0x5E7687.
 	for (const std::size_t emitter_slot : group->emitter_slots) {
 		if (emitter_slot >= impl_->emitter_pool.size()) {
 			continue;
 		}
 		Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
-		if (!record.active) {
+		if (!record.active || record.child_emitter) {
 			continue;
 		}
 		emitter_spawn_one_at(record.emitter, position, forward, force_zone, nullptr);
@@ -919,6 +1030,11 @@ void EffectScene::reset_runtime_state() {
 	impl_->capacity_rejection_count = 0;
 }
 
+void EffectScene::set_global_wind(const Vec3 &wind) noexcept {
+	global_wind_ = std::isfinite(wind.x) && std::isfinite(wind.y) &&
+			std::isfinite(wind.z) ? wind : Vec3{};
+}
+
 void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 	double requested_seconds = static_cast<double>(request.delta_seconds);
 	if (!std::isfinite(requested_seconds) || requested_seconds < 0.0) {
@@ -953,14 +1069,21 @@ void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 		impl_->pending_simulation_seconds = 0.0;
 	}
 
+	EmitterEnvironment environment;
+	environment.forces = request.forces;
+	environment.global_wind = global_wind_;
+	environment.frustum = request.frustum.valid ? &request.frustum : nullptr;
 	for (std::uint32_t step = 0; step < step_count; ++step) {
 		for (const std::size_t group_slot : impl_->active_group_slots) {
 			Impl::GroupRecord &group = impl_->group_pool[group_slot];
+			// Group order is parent-then-child, so a parent's spawns land in
+			// the child before the child's own expiry/update this tick
+			// [orig: CEffectGroup_AdvanceChildrenAndReap @ 0x5e59a0].
 			for (const std::size_t emitter_slot : group.emitter_slots) {
 				Impl::EmitterRecord &record = impl_->emitter_pool[emitter_slot];
 				if (record.active) {
-					emitter_advance(
-							record.emitter, impl_->config.simulation_tick_seconds, request.forces);
+					emitter_advance(record.emitter, impl_->config.simulation_tick_seconds,
+							environment, impl_->child_emitter_of(record));
 				}
 			}
 		}
@@ -1027,8 +1150,7 @@ void EffectScene::write_snapshot(ParticleFrameSnapshot &snapshot) const {
 			emitter_snapshot.first_particle = snapshot.particles.size();
 			emitter_snapshot.particle_count = emitter.particles.size();
 			emitter_snapshot.position = emitter.position;
-			emitter_snapshot.forward = emitter.forward;
-			emitter_snapshot.color_tint = emitter.color_tint;
+			emitter_snapshot.forward = emitter.spawn_direction;
 			emitter_snapshot.age = emitter.age;
 			emitter_snapshot.spring_const = emitter.spring_const;
 			emitter_snapshot.camera_pull = emitter.camera_pull;
@@ -1036,6 +1158,7 @@ void EffectScene::write_snapshot(ParticleFrameSnapshot &snapshot) const {
 			emitter_snapshot.kill_plane =
 					static_cast<EffectKillPlane>(emitter.kill_plane_mode);
 			emitter_snapshot.kill_plane_y = emitter.kill_plane_y;
+			emitter_snapshot.child_emitter = record.child_emitter;
 			snapshot.emitters.push_back(std::move(emitter_snapshot));
 			snapshot.particles.insert(snapshot.particles.end(),
 					emitter.particles.begin(), emitter.particles.end());
@@ -1110,10 +1233,13 @@ EffectDebugSnapshot EffectScene::inspect(bool p_include_bounds) const {
 				emitter_snapshot.definition_flags = definition.flags;
 			}
 			emitter_snapshot.alive_particle_count = emitter.particles.size();
+			// Self-emission still open; a child_id emitter never emits on its own.
 			emitter_snapshot.emitting = !group.detached && emitter.active &&
-					(!emitter.finite || emitter.emit_dur_remaining > 0.0f);
+					emitter.self_emitting && emitter.emit_budget > 0 &&
+					emitter.emit_clock < 256.0f;
+			emitter_snapshot.child_emitter = record.child_emitter;
 			emitter_snapshot.position = emitter.position;
-			emitter_snapshot.forward = emitter.forward;
+			emitter_snapshot.forward = emitter.spawn_direction;
 			emitter_snapshot.age = emitter.age;
 			emitter_snapshot.emit_rate = emitter.emit_rate;
 			emitter_snapshot.spawn_y_offset = emitter.spawn_y_offset;

@@ -917,6 +917,13 @@ void test_visual_person_proxy_keeps_wire_identity_out_of_authority() {
     CHECK(world.round_sim.impacts[0].effect_tag == 23);
     CHECK(world.round_sim.impacts[0].present_effect);
     CHECK(to_fixed(world.round_sim.impacts[0].position.x) == hit.position_q16.x);
+    // A person stop's descriptor carries the ray record, whose +24..+32 is the
+    // round's normalized flight direction (+x here) [orig:
+    // Projectile_HandleTerrainImpact_0 @0x4e9a57; the record layout in
+    // Projectile_UpdatePhysics @0x4ea241..0x4ea25f].
+    CHECK(world.round_sim.impacts[0].direction.x > 0.99f);
+    CHECK(world.round_sim.impacts[0].direction.y < 0.01f);
+    CHECK(world.round_sim.impacts[0].direction.y > -0.01f);
     CHECK(world.round_sim.hits.empty());
     CHECK(world.round_sim.deaths.empty());
     CHECK(world.explosions.queue.empty());
@@ -2040,8 +2047,16 @@ void test_terrain_impact_samples_charmap_surface() {
             Vec3{0.0f, 0.0f, -10.0f};
         world.round_sim.tick(world, &flat, &cw);
         CHECK(world.round_sim.impacts.size() == 1);
-        if (!world.round_sim.impacts.empty())
+        if (!world.round_sim.impacts.empty()) {
             CHECK(world.round_sim.impacts[0].effect_tag == v.expected_tag);
+            // A terrain stop's descriptor carries NO orientation: the handler
+            // hands the spawner a NULL record, so EMITVECTOR members emit around
+            // world +Y, not along the round [orig: Projectile_HandleTerrainImpact
+            // @0x4e92c8 -> CEffectWorld_SpawnEmitterAtPosition @0x5f6e52].
+            CHECK(world.round_sim.impacts[0].direction.x == 0.0f);
+            CHECK(world.round_sim.impacts[0].direction.y == 0.0f);
+            CHECK(world.round_sim.impacts[0].direction.z == 0.0f);
+        }
     }
 }
 

@@ -2,6 +2,9 @@
 
 #include "util/axes.h"
 
+#include <algorithm>
+
+#include <formats/env/env_weather.h>
 #include <runtime/environment/water_frame.h>
 
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -148,6 +151,10 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_cloud_edge);
 	ClassDB::bind_method(D_METHOD("get_color_src_gain"),
 			&MissionEnvironment::get_color_src_gain);
+	ClassDB::bind_method(D_METHOD("get_particle_ambient_tint"),
+			&MissionEnvironment::get_particle_ambient_tint);
+	ClassDB::bind_method(D_METHOD("get_particle_modulator_tint"),
+			&MissionEnvironment::get_particle_modulator_tint);
 
 	ClassDB::bind_method(D_METHOD("get_fill_light_target"),
 			&MissionEnvironment::get_fill_light_target);
@@ -735,6 +742,24 @@ Vector3 MissionEnvironment::get_cloud_edge() const {
 
 Vector3 MissionEnvironment::get_color_src_gain() const {
 	return to_vector3(state_.color_src_gain());
+}
+
+Vector3 MissionEnvironment::get_particle_ambient_tint() const {
+	// Env_TerrainLightCombined's bytes over 128.
+	const opennova::env::Rgb combined = opennova::env::combine_terrain_light(
+			state_.sun_light(), state_.sky_ambient());
+	constexpr float kByteOver128 = 255.0f / 128.0f;
+	return Vector3(combined.r * kByteOver128, combined.g * kByteOver128,
+			combined.b * kByteOver128);
+}
+
+Vector3 MissionEnvironment::get_particle_modulator_tint() const {
+	// `min(2 * modulator_byte, 255) / 128`; color_src_gain already carries the
+	// modulator byte over 64, so only the saturation remains.
+	const opennova::env::Rgb gain = state_.color_src_gain();
+	constexpr float kSaturated = 255.0f / 128.0f;
+	return Vector3(std::min(gain.r, kSaturated), std::min(gain.g, kSaturated),
+			std::min(gain.b, kSaturated));
 }
 
 Vector3 MissionEnvironment::get_fill_light_target() const {
