@@ -21,7 +21,7 @@ func test_fnt_loads_as_native_resource_and_font_file_view() -> void:
 		return
 
 	assert_eq(res.get_page_count(), 1, "synth_1page is a one-page FNT fixture.")
-	assert_eq(res.get_glyph_count(), 224, "Nova FNT exposes fixed glyph slots 32..255.")
+	assert_eq(res.get_glyph_count(), 224, "NovaLogic FNT exposes fixed glyph slots 32..255.")
 	assert_eq(res.get_first_char(), 32, "First glyph code should be ASCII 32.")
 
 	var page := res.get_page_image(0)
@@ -39,7 +39,7 @@ func test_fnt_loads_as_native_resource_and_font_file_view() -> void:
 func test_blank_fnt_saves_and_reloads_alpha_and_glyph_rect() -> void:
 	var res := FntResource.new()
 	var err := res.create_blank(1, -3)
-	assert_eq(err, OK, "Blank Nova FNT resource should initialize.")
+	assert_eq(err, OK, "Blank NovaLogic FNT resource should initialize.")
 
 	res.set_glyph_rect(32, 0, Rect2i(0, 0, 4, 3))
 	res.set_pixel_alpha(0, 0, 0, 200)

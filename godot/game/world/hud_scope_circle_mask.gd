@@ -54,28 +54,6 @@ func set_mask_state(up: bool, draw_crosshair: bool) -> void:
 	queue_redraw()
 
 
-func is_mask_up() -> bool:
-	return _mask_up
-
-
-## The resolved vertex batch for one of BATCHES (a read seam for the tests).
-func batch_points(batch: int) -> PackedVector2Array:
-	_resolve(size)
-	return _points[batch] if _cached else PackedVector2Array()
-
-
-## The resolved colours for one of BATCHES (a read seam for the tests).
-func batch_colors(batch: int) -> PackedColorArray:
-	_resolve(size)
-	return _colors[batch] if _cached else PackedColorArray()
-
-
-## The resolved index list for one of BATCHES (a read seam for the tests).
-func batch_indices(batch: int) -> PackedInt32Array:
-	_resolve(size)
-	return _indices[batch] if _cached else PackedInt32Array()
-
-
 func _resolve(surface: Vector2) -> void:
 	if surface.x <= 0.0 or surface.y <= 0.0:
 		_cached = false
