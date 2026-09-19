@@ -179,12 +179,13 @@ int32_t AiSystem::nearest_route_node(const AiEntity &e, uint32_t list) const {
 // carrier ref cleared, then the brain wp slots + the per-leg turn budget seed].
 void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
     AiBrain &b = e.brain;
-    const NavChannel *ch = nav.channel(list);
-    if (ch == nullptr || ch->count <= 0) return; // dangling list: no order lands
-    if (node < 0) node = nearest_route_node(e, static_cast<uint32_t>(list));
+    // Commands 0 and 123..127 have no NavChannel. Their node is an authored
+    // operand (e.g. a carrier SSN), so the writer must neither reject the
+    // command nor clamp its operand to a route length. Only -1 means nearest.
+    if (node == -1) node = nearest_route_node(e, static_cast<uint32_t>(list));
     b.f[AiBrain::kWpType] = 1;                                     // [orig: aiComp[35] = 1]
     b.f[AiBrain::kWpChannel] = list;                               // [orig: aiComp[37]]
-    b.f[AiBrain::kWpNode] = std::min<int32_t>(node, ch->count - 1); // [orig: aiComp[38]]
+    b.f[AiBrain::kWpNode] = node;                                 // [orig: aiComp[38]]
     // The SLOT half of the same witnessed block — the INFANTRY think navigates
     // from slot+140/+148/+152, not the brain registers, and a spawn command
     // (waypoint_id 123..127) parked in slot[37] otherwise short-circuits the

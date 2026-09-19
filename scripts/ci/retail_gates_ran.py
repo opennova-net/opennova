@@ -43,7 +43,7 @@ MUST_RUN = {
     "jo_assets": [
         "root_motion", "anim_positions_from_model_corpus", "anim_reload_clips_us01",
         "anim_weapon_action_clips", "wac_corpus", "cpt_jo_assets_sweep", "lwf_jo_assets_sweep",
-        "ai_corpse", "rock_collision_00trg", "soak_00trg", "native_assets_00trg",
+        "ai_corpse", "parachute_09tr", "rock_collision_00trg", "soak_00trg", "native_assets_00trg",
         "npruntime_remote_body_state", "npruntime_held_weapon_attach",
         "npruntime_authored_payload_00trg",
         # The shipped .bms missions loose at the tree's root.

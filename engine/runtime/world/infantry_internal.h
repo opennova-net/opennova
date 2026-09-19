@@ -17,6 +17,9 @@ int32_t bearing_to(int32_t dx, int32_t dy);
 void commit_body_state(InfantryState &inf, int resolved, const IRootMotionSource *root_motion);
 void commit_player_body_state(InfantryState &inf, int resolved,
                               const IRootMotionSource *root_motion, bool wash);
+// Standing org1/org2 carrier delta, after the animation capsule sample.
+// Returns whether carrier transport changed the position.
+bool infantry_follow_carrier(AiEntity &, World &, int32_t capsule_bottom, bool player_body);
 // Select/cache an obstacle detour and publish target_heading before gait selection.
 // [orig: ai_find_cover_position @0x4AFAB0]
 void infantry_detour(AiSystem &ai, AiEntity &e, World &world);

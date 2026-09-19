@@ -623,6 +623,9 @@ struct InfantryState {
     // (torsoRoll + lean/4 [orig: @0x437fe6]) and the section-14 head/spine roll
     // terms. [orig: @0x4b5cff-0x4b5d6d + @0x4b700c-0x4b7025]
     int32_t torso_roll = 0;
+    // Org2 carrier pitch awaiting the 1/32 look-follow step (entity+0x2E0).
+    // [orig: @0x4B5715; @0x4B57CD..0x4B57E5]
+    int32_t carrier_pitch_lag = 0;
     // The held weapon's run-gait class (weapon.def run_anim -> AdmDefs +0xAC) and its
     // ForceCrouch flag (weapon.def flags 0x40000), mirrored per tick like wpn_hold_kind.
     // run gait: forward-walk promotes to run_2/run_3 by 2 + run_anim [orig: @0x4b729d];

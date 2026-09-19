@@ -8227,7 +8227,7 @@ moving entity rides it. There is no vehicle-type gate: a static carrier
 simply contributes zero deltas.
 
 - **Entry/drop** `[orig: org2 @ 0x4b5288-0x4b52ff; org1 @ 0x4ba45d-0x4ba479]`:
-  null groundEntity skips. An UNMOUNTED rider beyond the carrier's
+  null groundEntity skips. Only org2 drops an UNMOUNTED rider beyond the carrier's
   boundRadius (`[carrier+0]`, 3D distance saturated at
   `flt_7C19E0 = 2147418112.0`) drops the ride AND zeroes groundEntity; a
   mounted (+0x16C) rider skips the radius check.
@@ -8254,16 +8254,19 @@ simply contributes zero deltas.
   Yaw add (bodyHeading still follows); the LOCAL player's camera-yaw
   accumulator (`dword_B75FCC`) follows too. org1 additionally drags its chase
   TARGET (+0x1A8) and the look Pitch (+0x14) `[orig: @ 0x4ba867/@ 0x4ba88e]`;
-  org2 adds pitchΔ' to bodyPitch (+0x90) only.
+  org2 adds pitchΔ' to bodyPitch (+0x90), the pitch-follow accumulator
+  (+0x2E0) and aim pitch (+0x2D0). Its look follows by `(lag+16)>>5`, with
+  negative-residual correction, at @0x4B57CD..0x4B57E5. Org1 preserves look yaw
+  and aim when its combat target has a different groundEntity (@0x4BA82C..0x4BA858).
 - **Port notes (replica rows)**: the carrier keeps the REAL mover-entry
   savedLivePose — `Entity::saved_live_*`, stamped by `stamp_saved_live_pose`
   at the top of both world vehicle passes via the shared
   `carrier_pose_fixed` reader — and the provider serves live + saved
   together, the witnessed source pair (a never-stamped static reads zero
   delta). Our joiner frame runs vehicle prediction AFTER remote motion, so a
-  rider consumes the PREVIOUS frame's carrier delta — retail's own
-  rider-ticks-before-carrier ordering case (the mover order is entity-table
-  order there). Rows adopt heading (+ the org1 chase target and RENDERED
+  rider consumes the PREVIOUS frame's carrier delta. This is a joiner placement
+  difference: retail's pool-1 callbacks precede pool-0 callbacks
+  (@0x4C2158..0x4C21F1 before @0x4C2426..0x4C2474). Rows adopt heading (+ the org1 chase target and RENDERED
   look pitch) and roll (rendered — the avatar euler consumes
   `pitch_bam`/`roll_bam`). The remaining organic item on D-NET-196 is org2
   bodyPitch/torso-aim adoption belongs to the shared infantry replica
@@ -10926,3 +10929,48 @@ same authority/client guards now apply to those events in the port.
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
 | D-AI-14 | Removed the shared admission budget and unconditional working-register seed; dispatched movement-controller row 4 with per-entity phase; default events commit through the normal role guard. | Pool-1 callback @ 0x4B8E1B..0x4B8E53, controller @ 0x457B40, default-event tails @ 0x458261 / @ 0x45846D. | FIXED 2026-09-18 in PR #652. Prevents skipped brains, false boarding throttle and missed event transitions; 276 original-instruction cases plus crowded-world and first-tick boarding regressions. |
+
+## 35. Unseated helicopter riders and reserved route orders (2026-09-18)
+
+The 09TR MC-5 training mission exposed two authority-path gaps in PR #652.
+The existing replica deck transform did not run for local/authority infantry,
+and the mixed entity loop moved infantry before the vehicle motor. Standing
+riders therefore kept their old world position while the Chinook translated
+away. Separately, `apply_route_order` rejected channels without a NavChannel,
+so events 25/26 (command 123, carrier SSN 4572) and 27 (command 0, stop) left
+NPCs chasing their previous helipad waypoints.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Carrier transport for unseated organic bodies | MATCHING for the recovered translation/rotation and adoption rules | `infantry_follow_carrier`, using the shared Q22 transform with capsule-midpoint bias; org1 @0x4BA45D..0x4BA891 and org2 @0x4B52A0..0x4B5726, pitch-follow @0x4B57CD..0x4B57E5. Existing absolute seat posing still owns mounted bodies. |
+| Authority carrier/infantry order | MATCHING for the pool-1-before-pool-0 dependency | Current local input is published before vehicle motors, which run before organic motors; `Entity_UpdateAllEntities` pool-1 callbacks @0x4C2158..0x4C21F1, pool-0 callbacks @0x4C2426..0x4C2474. This is not a claim that every interleaved world subsystem has identical scheduling. |
+| Redirect command admission and operand | MATCHING | `Entity_SetWaypointByTeam @0x43CDB4` writes mode/channel/node without looking up a route; only node -1 requests nearest. Both slot and brain mirrors retain command 123's SSN and command 0's stop. |
+
+Local input packing stays ahead of this vehicle pass. `LocalPlayer` publishes
+current heading/pitch and MoveOrder before the organic body pose, matching
+`Player_PackInputStateToEntity @0x4DF450` and mouse look at
+`Input_ProcessMouseAxisBindings @0x499680`. The new `vehicle_motor`
+regression initially failed all three checks for same-tick throttle,
+steering and key release; it now passes with the vehicle-first order.
+
+`infantry_terrain` exercises actual local/AI motor translation, org2 radius
+release, capsule-biased rotation, independent NPC world aim and player pitch
+follow. `event_runtime_bms` drives boarding/stop through event dispatch; its ten
+assertions failed before the writer fix. `parachute_09tr` uses shipped BMS,
+ADM motion and model collision, stages the player above the cabin floor without
+setting a support link or mounting, and runs 50 seconds of the authored flight.
+It requires the player and instructor to stay unseated and all six other
+passengers to board. Before the fix the player fell behind the cabin at tick
+1565; carrying alone still left the NPCs walking out after takeoff.
+
+Reference: jo-c `f2cd385955ad8b889aa7e820973a849707aa51a4` and the pinned
+`Jointops.exe.kong.i64` used in section 34. The disassembly confirms the
+org2-only radius rule and NPC off-carrier target gate; no IDB state was changed.
+The render-only `player_motion_capture` probe records still/moving/stopped
+frames. A successful capture is not evidence that the reported visual trail
+is fixed; that issue remains a separate live presentation investigation.
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-INF-25 | Local and authority organic motors apply carrier translation, capsule-biased rotation and look/body adoption after vehicle motors; org2 retains pitch-follow lag. | Org1 @0x4BA45D..0x4BA891, org2 @0x4B52A0..0x4B57E5; pool ordering @0x4C2158 / @0x4C2426. | FIXED 2026-09-18 in PR #652; unseated training helicopter riders retain support through takeoff. Replica scheduling remains the separate section 29.2 limitation. |
+| D-AI-15 | Route-order writers accept reserved commands and preserve authored operands without NavChannel admission/clamping. | `Entity_SetWaypointByTeam @0x43CDB4`; only -1 resolves nearest. | FIXED 2026-09-18 in PR #652; boarding/stop orders replace the old routes instead of letting NPCs walk out of a moving cabin. |

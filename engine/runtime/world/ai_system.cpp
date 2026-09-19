@@ -33,8 +33,8 @@ namespace {
 
 // Apply only the carrier-owned body frame. This is deliberately separate from
 // pose_if_mounted's input, gunner-look, animation, and wire-state work so the
-// authority can repeat the pose after its later pool-1 vehicle motor without
-// advancing any of those once-per-body-tick behaviors twice.
+// non-organic controllers can refresh after the pool-1 motor without advancing
+// those behaviors twice. Organic bodies run after vehicles and pose only once.
 int32_t apply_resolved_mounted_seat_frame(AiEntity &e, World &world,
                                           Entity &occupant, Entity &vehicle,
                                           const Seat &seat) {
@@ -549,37 +549,11 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         AiEntity &e = *at(i);
         // A freed AI component (owner word 0) is not an entity's brain any more:
         // retail reaches brains only through live entities' +100 pointer.
-        if (e.brain.f[AiBrain::kOwner] == 0) continue;
+        if (e.brain.f[AiBrain::kOwner] == 0 || e.inf.active) continue;
         const devtools::ProfileScope entity_scope(
-                world.profile, e.inf.active ? devtools::Slot::SIM_AI_INFANTRY
-                                            : devtools::Slot::SIM_AI_OTHER_ENTITIES);
+                world.profile, devtools::Slot::SIM_AI_OTHER_ENTITIES);
         const Entity *motor_entity = world.registry.get(e.handle);
         const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
-        if (e.inf.active) {
-            if (motor_suspended) continue;
-            // Joiners retain seat-follow presentation for wire-owned peers. The
-            // authority continues into the remote org2 animation/collision tail:
-            // mounted contact callbacks remain live while model push is suppressed.
-            if (e.net_is_remote_peer && pose_if_mounted(e, world)) {
-                advance_part_anim(e);
-                if (!is_authority) continue;
-            }
-            // A client-only wire peer has no authority collision tail, so its
-            // blink/indoors presentation state comes from the position-only refresh.
-            // [orig: remote persons
-            // refresh via the net position/create handlers — NapiNPClientMsg_0x00F
-            // @0x42e442, NetPacket_HandleEntityCreate @0x42f227; the @0x4c229c per-tick
-            // walk is pool-2 statics on an 8-per-tick stagger, not persons]
-            if (collision_active && e.net_is_remote_peer && !is_authority) {
-                if (Entity *ent = world.registry.get(e.handle))
-                    collision->refresh_blink(world, *ent);
-            }
-            // org1-class soldier: the infantry motor replaces the vehicle SM + kinematic
-            // locomotion for this entity. [orig: g_EntityClassPhysicsTable row "org1" ->
-            // Entity_UpdateInfantryAI @0x4b9910]
-            tick_infantry(e, world, ctx.logic_tick);
-            continue;
-        }
         // Non-infantry mounted controllers retain the seat-follow shortcut.
         if (!motor_suspended && pose_if_mounted(e, world)) {
             advance_part_anim(e);
@@ -665,6 +639,40 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     }
     lap.mark(devtools::Slot::SIM_AI_ENTITIES);
     world.vehicles.tick_motors(is_authority, lap);
+    // Pool 1 precedes pool 0: deck riders consume the carrier's CURRENT
+    // motor delta, then resolve contacts against that same pose.
+    // [orig: Entity_UpdateAllEntities @0x4C2158..0x4C21F1 before the
+    // pool-0 callback walk @0x4C2426..0x4C2474]
+    for (int i = 0; i < count(); ++i) {
+        AiEntity &e = *at(i);
+        if (e.brain.f[AiBrain::kOwner] == 0 || !e.inf.active) continue;
+        const Entity *motor_entity = world.registry.get(e.handle);
+        const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
+        const devtools::ProfileScope entity_scope(world.profile, devtools::Slot::SIM_AI_INFANTRY);
+        if (motor_suspended) continue;
+        // Joiners retain seat-follow presentation for wire-owned peers. The
+        // authority continues into the remote org2 animation/collision tail:
+        // mounted contact callbacks remain live while model push is suppressed.
+        if (e.net_is_remote_peer && pose_if_mounted(e, world)) {
+            advance_part_anim(e);
+            if (!is_authority) continue;
+        }
+        // A client-only wire peer has no authority collision tail, so its
+        // blink/indoors presentation state comes from the position-only refresh.
+        // [orig: remote persons
+        // refresh via the net position/create handlers — NapiNPClientMsg_0x00F
+        // @0x42e442, NetPacket_HandleEntityCreate @0x42f227; the @0x4c229c per-tick
+        // walk is pool-2 statics on an 8-per-tick stagger, not persons]
+        if (collision_active && e.net_is_remote_peer && !is_authority) {
+            if (Entity *ent = world.registry.get(e.handle))
+                collision->refresh_blink(world, *ent);
+        }
+        // org1-class soldier: the infantry motor replaces the vehicle SM + kinematic
+        // locomotion for this entity. [orig: g_EntityClassPhysicsTable row "org1" ->
+        // Entity_UpdateInfantryAI @0x4b9910]
+        tick_infantry(e, world, ctx.logic_tick);
+    }
+    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
     events.process_timed(*this, world);
     lap.mark(devtools::Slot::SIM_AI_EVENTS);
 }

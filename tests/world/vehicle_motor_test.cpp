@@ -14,6 +14,7 @@
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/vehicle_sound.h>
 #include <runtime/world/world.h>
+#include <runtime/world/local_player.h>
 #include <runtime/terrain_query/height_field.h>
 
 #include <formats/def/def.h>
@@ -1985,7 +1986,41 @@ void test_state0_brain_with_ai_driver_holds() {
 	CHECK(moved == 0.0f); // no invented speed seed or boarding pulse
 }
 
+// Input is packed before pool-1 motors; pool-0 body posing follows them.
+// [orig: Player_PackInputStateToEntity @0x4DF450;
+// Entity_UpdateAllEntities @0x4C2158 / @0x4C2426]
+static void test_local_controls_reach_first_carrier_tick() {
+    Rig r;
+    const auto traits = buggy_traits();
+    r.w.vehicles.traits.set(r.veh().item_id, traits);
+    auto &body = *r.w.ai.at(r.w.ai.attach(r.drv_h));
+    body.inf.active = true;
+    body.inf.is_local_player = true;
+    body.health = r.drv().health;
+    r.w.cached.local_player = r.drv_h;
+    r.w.ai.is_authority = true;
+    r.mount();
+    LocalPlayer local(r.w);
+    constexpr int32_t heading = 0x23456789;
+    local.input.forward = true;
+    local.input.look_heading = heading;
+    local.apply_player_input_pre_tick();
+    TickContext ctx{};
+    ctx.world = &r.w;
+    ctx.is_authority = true;
+    ctx.logic_tick = 1;
+    r.w.ai.tick(r.w, ctx);
+    CHECK(r.veh().veh.cmd_speed == traits.player_speed);
+    CHECK(r.veh().veh.steer_target_bam == heading);
+    local.input.forward = false;
+    local.apply_player_input_pre_tick();
+    ++ctx.logic_tick;
+    r.w.ai.tick(r.w, ctx);
+    CHECK(r.veh().veh.cmd_speed == 0); // release reaches this motor tick too
+}
+
 int main() {
+    test_local_controls_reach_first_carrier_tick();
 	test_state0_brain_with_ai_driver_holds();
 	test_vehicle_carrier_follow_and_refresh();
 	test_skid_effects_and_sound_edges();

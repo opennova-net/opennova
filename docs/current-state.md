@@ -3,7 +3,9 @@
 The [2026-09-18 JO-C validation and fixes](jo-c-validation-2026-09-18.md) cover
 guided round lifecycles/motors, shared loaded ammo, blast/indoor collision state,
 parachute descent, writable night, reverb selection, specialized textures,
-AI callback/controller ownership and player steering/brake transitions.
+AI callback/controller ownership, player steering/brake transitions, and
+unseated helicopter carry with authored NPC boarding/stop orders
+([world section 35](world/world-wac-ai-re.md#35-unseated-helicopter-riders-and-reserved-route-orders-2026-09-18)).
 Mission saves are excluded; the report distinguishes remaining wider gaps.
 
 The one-page router for "what phase are we in, and where is the next step written

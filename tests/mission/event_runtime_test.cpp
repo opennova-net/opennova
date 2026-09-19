@@ -589,6 +589,60 @@ static void test_redirect_actions_preserve_authored_node() {
     CHECK(w.script.relations.single_visited(43, 2, 1));
 }
 
+// 09TR redirects boarding groups to command 123 (node is the carrier SSN),
+// and stops the free-standing group with command 0. Neither requires a route.
+// [orig: Entity_SetWaypointByTeam @0x43CDB4]
+static void test_redirect_actions_accept_boarding_and_stop_commands() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 8);
+    world::Entity soldier{};
+    soldier.net_id = 42;
+    soldier.group_id = 3;
+    soldier.alive = true;
+    const auto boarder = w.registry.spawn(0, soldier);
+    soldier.net_id = 43;
+    soldier.group_id = 4;
+    const auto standing = w.registry.spawn(0, soldier);
+    for (const auto h : {boarder, standing}) {
+        auto &a = *w.ai.at(w.ai.attach(h));
+        a.slot.f[35] = a.brain.f[world::AiBrain::kWpType] = 1;
+        a.slot.f[37] = a.brain.f[world::AiBrain::kWpChannel] = 2;
+        a.slot.f[38] = a.brain.f[world::AiBrain::kWpNode] = 1;
+        a.inf.wait_cooldown = 30;
+    }
+    bms::Event e = simple_event(bms::EventFlags::None, 0);
+    e.action_count = 2;
+    bms::Action board{};
+    board.action_type = bms::ActionType::RedirectGroupTo;
+    board.param1 = 3;
+    board.param2 = 123;
+    board.param3 = 4572;
+    bms::Action stop{};
+    stop.action_type = bms::ActionType::RedirectSingleTo;
+    stop.param1 = 43;
+    stop.param2 = 0;
+    stop.param3 = 0;
+    mission::BmsEventSystem sys;
+    sys.load({e}, {}, {board, stop});
+    w.add_system(&sys);
+    w.load_systems();
+    tick_n(w, kPass);
+    const auto &boarding_ai = *w.ai.for_handle(boarder);
+    const auto &standing_ai = *w.ai.for_handle(standing);
+    CHECK(boarding_ai.slot.f[37] == 123);
+    CHECK(boarding_ai.slot.f[38] == 4572);
+    CHECK(boarding_ai.brain.f[world::AiBrain::kWpChannel] == 123);
+    CHECK(boarding_ai.brain.f[world::AiBrain::kWpNode] == 4572);
+    CHECK(standing_ai.slot.f[37] == 0);
+    CHECK(standing_ai.slot.f[38] == 0);
+    CHECK(standing_ai.brain.f[world::AiBrain::kWpChannel] == 0);
+    CHECK(standing_ai.brain.f[world::AiBrain::kWpNode] == 0);
+    CHECK(boarding_ai.inf.wait_cooldown == 0);
+    CHECK(standing_ai.inf.wait_cooldown == 0);
+    CHECK(w.registry.get(boarder)->wp_number == 4572);
+}
+
 // Presentation actions surface as presentation-only EffectLog entries; an unmodelled
 // action records as "unported_action" (diagnostic), never as a real effect.
 static void test_presentation_effects() {
@@ -2384,6 +2438,7 @@ int main() {
     test_pre_mission_pass();
     test_playpartanim_mutates_brain();
     test_redirect_actions_preserve_authored_node();
+    test_redirect_actions_accept_boarding_and_stop_commands();
     test_presentation_effects();
     test_waypoint_track_integration();
     test_subgoal_state();

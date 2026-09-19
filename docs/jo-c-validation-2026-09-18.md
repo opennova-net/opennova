@@ -136,3 +136,70 @@ lost), fixture provenance/materialization, environment/convention checks,
 ledger scoreboard, retail-gate documentation and diff whitespace passed.
 The GDExtension/GUT results above belong to the earlier projectile/material pass;
 they were not rerun for this native movement follow-through.
+
+
+## MC-5 helicopter floor follow-up
+
+The latest PR build (`590e4a6badf813e6e6a75565825bee9bc5fbb822`) reproduced
+an unseated player falling behind the helicopter cabin at tick 1565 of the
+09TR takeoff regression. NPCs also left the cabin: their authored boarding
+and stop orders were discarded by a route lookup that reserved commands do
+not require. This follow-up corrects both causes.
+
+- D-INF-25: local and authority organic bodies consume the carrier's current
+  translation and capsule-biased Q22 rotation. The vehicle pass now precedes
+  infantry, matching the original pool order. Org2 retains its radius release
+  and gradual pitch follow; NPC world aim stays independent for off-carrier
+  combat targets. Mounted bodies retain their absolute seat poses.
+- D-AI-15: route-order writers preserve reserved commands and their operands.
+  09TR events 25/26 can now send command 123 with carrier SSN 4572, and event
+  27 can stop the standing instructor with command 0. Only node -1 asks for
+  the nearest route node.
+- Local input packing remains before the vehicle pass. Current steering,
+  throttle and key release reach the same motor tick; the new `vehicle_motor`
+  regression failed all three assertions before that timing correction.
+
+`infantry_terrain` covers local, NPC and authority remote-player carrier
+transport, radius release, capsule rotation, world-aim adoption and pitch lag.
+`event_runtime_bms` reproduced ten failed assertions for discarded reserved
+orders. `parachute_09tr` boots the shipped mission, ADM motion and collision
+assets, lets the opening events run, and stages the player above the floor
+without setting a support link or mount. It runs 50 seconds of authored
+flight and checks the unseated player and instructor plus six seated NPCs.
+The helicopter travels approximately 248 horizontal units and climbs 18;
+translation, turning and all three boarding/stop events are required.
+
+```text
+ctest --test-dir build -C Release -R "^(infantry_terrain|event_runtime_bms|vehicle_motor|local_player_view|parachute_09tr)$" --output-on-failure
+```
+
+The asset root for `parachute_09tr` is `OPENNOVA_JO_ASSETS`; see the
+[asset-gated test matrix](asset-gated-tests.md). The original witnesses and
+bounded verdicts are in [world section 35](world/world-wac-ai-re.md#35-unseated-helicopter-riders-and-reserved-route-orders-2026-09-18).
+Reference source, executable and IDB pins are unchanged; no IDB state was edited.
+
+Final follow-up validation:
+
+- Full native Release and Godot RelWithDebInfo extension builds passed.
+- Full CTest with both retail asset roots: **484 passed, 1 skipped, 0 failed**
+  out of 485, including the existing 916 movement/brain vectors. The remaining
+  skip is `motorcycle_gravity_06tr`, whose required `06TR.bms` is absent from
+  the supplied install. No new original-instruction vectors are claimed here.
+- The restarted Godot game ran the real 09TR mission. A 62-second floor-ride
+  capture stayed in the cabin through takeoff with NPCs aboard; the final
+  rebuilt extension also completed a still/strafe/stopped capture and retained
+  an alive, airborne local player. This is not a complete mission playthrough.
+- Repository ratchets, witness census, maturity, include/link graphs, orphan
+  headers, fixture provenance, environment/convention checks, ledger consistency,
+  retail-gate documentation and diff whitespace passed. The earlier GUT counts
+  above are not a new GUT run for this native movement fix.
+
+The separate report of faint trails while the local player moves is **not yet
+reproduced or fixed**. The registered `player_motion_capture` probe records 18
+viewport frames plus player/camera positions at rest, during a strafe and after
+stopping; `move=false` with `interval_ms=3000` records a stationary floor ride.
+The captured frames did not establish the reported trail. Clarification about
+turning the camera in place versus walking remains pending; no speculative
+rendering changes were made. Captures stay in local `user://probe-runs/`, not
+in the repository. Replica carrier scheduling retains the separate section
+29.2 limitation; no new mixed retail/OpenNova multiplayer playthrough is claimed.

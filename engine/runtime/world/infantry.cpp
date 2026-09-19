@@ -962,6 +962,7 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.lean_right = false;
     inf.lean_angle = 0;
     inf.torso_roll = 0;
+    inf.carrier_pitch_lag = 0;
     inf.body_heading = heading;
     inf.target_heading = heading;
     inf.leg_yaw[0] = inf.leg_yaw[1] = heading;
@@ -1590,6 +1591,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
     inf.last_events = have_clip ? frame.events : 0;
     animation_lap.mark(devtools::Slot::SIM_AI_INFANTRY_ANIMATION);
+    infantry_follow_carrier(e, world, frame.capsule_bottom, !npc_body);
 
     // 3'. The eye-offset restamp (the entity+0x6C/+0x70/+0x74 triple).
     // Entity_UpdateInfantryPlayerBody restamps org2 bodies at two sites —
