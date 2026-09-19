@@ -142,7 +142,7 @@ func test_tile_overlay_composite_is_shared_and_independently_refreshable() -> vo
 		"Disabling composition must not hide the parsed .til source.")
 
 
-func test_nova_terrain_delegates_surface_input_ownership() -> void:
+func test_terrain_delegates_surface_input_ownership() -> void:
 	var terrain: Terrain = add_child_autofree(Terrain.new())
 	var data := TerrainData.new()
 	terrain.set_terrain_data(data)

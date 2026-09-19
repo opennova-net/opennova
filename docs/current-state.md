@@ -39,7 +39,11 @@ THE structural program since 2026-09-02 is the **hard cut to canonical C++ and
 Godot** ([ADR 0043](adr/0043-canonical-cpp-and-godot-hard-cut.md), the one
 current-architecture record: behavior onto owning systems, one session with
 roles, `net/` means wire, the Godot world as C++ Nodes, tests over real
-fixtures), landing as one PR of committed-as-we-go slices. What led to it,
+fixtures), landing as one PR of committed-as-we-go slices.
+[ADR 0044](adr/0044-shared-native-assets.md) (2026-09-18, PR #653) is its first
+follow-on record: one shared `assets::AssetStore` per mounted resource source
+for simulation and presentation alike, `runtime/simassets` dissolved into its
+owning systems. What led to ADR 0043,
 in order: the **rearchitecture**
 ([ADR 0033](adr/0033-engine-owned-loops-device-shells.md), approved
 2026-08-09, replacing the ADR 0031/0032 adapter-seam regime in full): the
@@ -184,7 +188,7 @@ for the evidence and tests. Select further research from the ledger's current
 | `scripts/lint/cite_census.py` | a witness address (`@0xADDR`) silently disappearing from the code trees during a structural move; a wire-frozen name or a docs citation/ledger id lost in a rename (`--audit-range`, the local diff guard) | CI, hard-fail against `scripts/lint/cite_census_baseline.json`; a deliberate deletion is banked with `--write-baseline` and named in the commit |
 | `scripts/lint/link_graph_check.py` | forbidden lib edges (ADR 0019/0020 seams) | CI, hard-fail |
 | `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission/world may include only terrain_query's six seam headers (`coords.h`, `height_field.h`, `surface_type_map.h`, `terrain_field_store.h` — ADR 0042 d4's engine field builder — `terrain_raycast.h`, `terrain_scorch_record.h`, under the group-qualified `runtime/terrain_query/` prefix), never the terrain-format stack; Dear ImGui includes escaping `engine/runtime/devtools` + `tests/devtools` (ADR 0042 d6) | CI, hard-fail |
-| `scripts/lint/orphan_header_check.py` | an `engine/` header wired to nothing: policy code that no engine, binding or app source includes (a header included only by its own test is exactly that shape), left behind by a move or landed ahead of its caller | CI, hard-fail; two deliberate escapes, `scripts/lint/orphan_header_allowlist.json` (a reasoned-exception list, burned down to empty on 2026-08-27) and a `STAGED, NOT WIRED` marker in the header naming the owner that will consume it |
+| `scripts/lint/orphan_header_check.py` | an `engine/` header wired to nothing: policy code that no engine, binding or app source includes (a header included only by its own test is exactly that shape), left behind by a move or landed ahead of its caller | CI, hard-fail; two deliberate escapes, `scripts/lint/orphan_header_allowlist.json` (a reasoned-exception list, burned down on 2026-08-27 to its one entry-point row, `godot/src/register_types.h`) and a `STAGED, NOT WIRED` marker in the header naming the owner that will consume it |
 | `scripts/lint/maturity_lint.py` | dict-contract drift and new magic numbers in changed `.gd` ranges | CI, hard-fail (advisory legs stay advisory) |
 | `scripts/lint/env_lint.py` | a new environment read outside the two documented roots (`OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`), `GODOT_BIN` and the service family (ADR 0041; [dev-env-vars.md](dev-env-vars.md)) | CI, hard-fail; the allowlist is `scripts/lint/env_allowlist.json` |
 | `scripts/lint/fixture_lint.py` | a file under `fixtures/` that is not MINTED, AUTHORED or KEEP, an oversize fixture, or one that missed LFS (`fixtures/README.md`, ADR 0041) | CI, hard-fail with `--require-pulled`; the KEEP list is `scripts/lint/fixture_allowlist.json` |

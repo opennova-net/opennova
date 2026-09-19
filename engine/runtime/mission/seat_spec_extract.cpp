@@ -4,6 +4,7 @@
 // typed table is the exact production composition.
 #include <runtime/mission/seat_spec_extract.h>
 
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <runtime/world/mount_controls.h> // turret_limit_bam
 #include <runtime/world/world.h>
@@ -101,9 +102,9 @@ const DefItemDef *find_item(const DefItemsFile &items, int item_id) {
 // composition collapses to (-y, x, z)/65536 over the RAW authored ints.
 world::Vec3 seat_local_from_user_point(const ThreediUserPoint &point) {
 	return world::Vec3{
-			static_cast<float>(point.y) / -65536.0f,
-			static_cast<float>(point.x) / 65536.0f,
-			static_cast<float>(point.z) / 65536.0f};
+			static_cast<float>(point.y) / -io::kFp16One,
+			static_cast<float>(point.x) / io::kFp16One,
+			static_cast<float>(point.z) / io::kFp16One};
 }
 
 // The authored local-Z direction into the seat yaw offset (degrees): the same
@@ -111,9 +112,9 @@ world::Vec3 seat_local_from_user_point(const ThreediUserPoint &point) {
 // the shell's two degeneracy guards (a near-zero direction, then near-zero
 // planar components after normalization).
 int seat_yaw_offset_from_user_point(const ThreediUserPoint &point) {
-	const double gx = static_cast<double>(point.rot_y) / 65536.0;
-	const double gy = static_cast<double>(point.rot_z) / 65536.0;
-	const double gz = static_cast<double>(point.rot_x) / 65536.0;
+	const double gx = static_cast<double>(point.rot_y) / io::kFp16OneD;
+	const double gy = static_cast<double>(point.rot_z) / io::kFp16OneD;
+	const double gz = static_cast<double>(point.rot_x) / io::kFp16OneD;
 	const double len_sq = gx * gx + gy * gy + gz * gz;
 	if (len_sq < 1.0e-6) return 0;
 	const double len = std::sqrt(len_sq);

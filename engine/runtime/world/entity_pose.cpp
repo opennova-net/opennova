@@ -9,6 +9,7 @@
 #include <runtime/world/pose_inputs.h>
 
 #include <runtime/anim/aim_overlay.h>
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm_pose.h>
@@ -20,6 +21,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -243,15 +245,15 @@ bool EntityPoseProvider::resolve_named_transform(
 
 // [orig: Entity_FindAttachBone @0x4B9580, last case-insensitive match]
 int EntityPoseProvider::last_named_userpoint(
-        world::World &world, world::EntityHandle entity, const char *name) {
-    if (name == nullptr || world.collision == nullptr) return 0;
-    const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
-    if (found == userpoint_models_.end() || found->second == nullptr) return 0;
-    const Threedi3di3 &model = *found->second;
-    int result = 0;
-    for (size_t i = 0; model.user_points && i < model.user_point_count; ++i)
-        if (strutil::iequals(model.user_points[i].name, name)) result = static_cast<int>(i + 1);
-    return result;
+		world::World &world, world::EntityHandle entity, const char *name) {
+	if (name == nullptr || world.collision == nullptr) return 0;
+	const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
+	if (found == userpoint_models_.end() || found->second == nullptr) return 0;
+	const Threedi3di3 &model = *found->second;
+	int result = 0;
+	for (size_t i = 0; model.user_points && i < model.user_point_count; ++i)
+		if (strutil::iequals(model.user_points[i].name, name)) result = static_cast<int>(i + 1);
+	return result;
 }
 
 bool EntityPoseProvider::resolve_userpoint_rigid(world::World &world,
@@ -298,17 +300,17 @@ bool EntityPoseProvider::resolve_userpoint_pivot(
 
 // [orig: Entity_ProcessSectionDamageTransition @0x43F496..0x43F501]
 bool EntityPoseProvider::resolve_section_pivot(world::World &world,
-        world::EntityHandle entity, int part, int32_t out[3]) {
-    if (out == nullptr || part < 0 || world.collision == nullptr) return false;
-    const world::Entity *e = world.registry.get(entity);
-    if (e == nullptr) return false;
-    const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
-    if (found == userpoint_models_.end() || found->second == nullptr) return false;
-    const Threedi3di3 &model = *found->second;
-    if (model.collision == nullptr || model.collision->objects == nullptr ||
-            size_t(part) >= model.collision->object_count) return false;
-    world::entity_placement_matrix(*e).transform_point(model.collision->objects[part].offset, out);
-    return true;
+		world::EntityHandle entity, int part, int32_t out[3]) {
+	if (out == nullptr || part < 0 || world.collision == nullptr) return false;
+	const world::Entity *e = world.registry.get(entity);
+	if (e == nullptr) return false;
+	const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
+	if (found == userpoint_models_.end() || found->second == nullptr) return false;
+	const Threedi3di3 &model = *found->second;
+	if (model.collision == nullptr || model.collision->objects == nullptr ||
+			size_t(part) >= model.collision->object_count) return false;
+	world::entity_placement_matrix(*e).transform_point(model.collision->objects[part].offset, out);
+	return true;
 }
 
 bool EntityPoseProvider::has_skeletal_entity(
@@ -358,29 +360,29 @@ bool EntityPoseProvider::resolve_muzzle_pose(world::World &world,
 }
 
 bool EntityPoseProvider::resolve_organic_attachment(world::World &world,
-        world::EntityHandle entity, uint8_t userpoint, int32_t out[3]) {
-    ++muzzle_queries_;
-    const auto found = skeletal_sources_.find(entity.packed);
-    const world::Entity *registered = world.registry.get(entity);
-    if (out == nullptr || userpoint == 0 || found == skeletal_sources_.end() ||
-            registered == nullptr || found->second.registry_spawn_id != registered->registry_spawn_id)
-        return false;
-    const auto &source = found->second;
-    if (!source.model || !source.model->user_points ||
-            size_t(userpoint) > source.model->user_point_count) return false;
-    const auto &point = source.model->user_points[userpoint - 1];
-    world::CollisionMatrix matrix;
-    if (!build_skeletal_bone_matrix(world, source, entity, point.subobject_index, matrix))
-        return false;
-    const int32_t local[3] = {point.x, point.y, point.z};
-    matrix.transform_point(local, out);
-    ++muzzle_resolves_;
-    return true;
+		world::EntityHandle entity, uint8_t userpoint, int32_t out[3]) {
+	++muzzle_queries_;
+	const auto found = skeletal_sources_.find(entity.packed);
+	const world::Entity *registered = world.registry.get(entity);
+	if (out == nullptr || userpoint == 0 || found == skeletal_sources_.end() ||
+			registered == nullptr || found->second.registry_spawn_id != registered->registry_spawn_id)
+		return false;
+	const auto &source = found->second;
+	if (!source.model || !source.model->user_points ||
+			size_t(userpoint) > source.model->user_point_count) return false;
+	const auto &point = source.model->user_points[userpoint - 1];
+	world::CollisionMatrix matrix;
+	if (!build_skeletal_bone_matrix(world, source, entity, point.subobject_index, matrix))
+		return false;
+	const int32_t local[3] = {point.x, point.y, point.z};
+	matrix.transform_point(local, out);
+	++muzzle_resolves_;
+	return true;
 }
 
 bool EntityPoseProvider::build_skeletal_bone_matrix(world::World &world,
-        const SkeletalSource &source, world::EntityHandle entity, int bone_index,
-        world::CollisionMatrix &out_matrix) const {
+		const SkeletalSource &source, world::EntityHandle entity, int bone_index,
+		world::CollisionMatrix &out_matrix) const {
 	const anim::SkeletalClips *rig = source.rig.get();
 	if (bone_index < 0 || rig == nullptr || !rig->loaded() ||
 			!rig->fk_valid() ||
@@ -434,9 +436,9 @@ bool EntityPoseProvider::build_skeletal_bone_matrix(world::World &world,
 	float render_pose[16];
 	render_matrix_from_deformation(deformation, render_pose);
 	const int32_t position[3] = {
-			ai_entity != nullptr ? ai_entity->pos[0] : static_cast<int32_t>(posed_entity->position.x * 65536.0f),
-			ai_entity != nullptr ? ai_entity->pos[1] : static_cast<int32_t>(posed_entity->position.y * 65536.0f),
-			ai_entity != nullptr ? ai_entity->pos[2] : static_cast<int32_t>(posed_entity->position.z * 65536.0f),
+			ai_entity != nullptr ? ai_entity->pos[0] : static_cast<int32_t>(posed_entity->position.x * io::kFp16One),
+			ai_entity != nullptr ? ai_entity->pos[1] : static_cast<int32_t>(posed_entity->position.y * io::kFp16One),
+			ai_entity != nullptr ? ai_entity->pos[2] : static_cast<int32_t>(posed_entity->position.z * io::kFp16One),
 	};
 	const world::CollisionMatrix body_world =
 			world::collision_matrix_from_euler(
@@ -452,35 +454,37 @@ bool EntityPoseProvider::build_skeletal_bone_matrix(world::World &world,
 
 
 bool EntityPoseProvider::resolve_skeletal_anchor(world::World &world,
-        world::EntityHandle entity, world::SkeletalAnchor anchor, int32_t out[3]) {
-    const auto found = skeletal_sources_.find(entity.packed);
-    const world::Entity *registered = world.registry.get(entity);
-    if (out == nullptr || found == skeletal_sources_.end() || registered == nullptr ||
-            found->second.registry_spawn_id != registered->registry_spawn_id) return false;
-    const SkeletalSource &source = found->second;
-    const int bone = anchor == world::SkeletalAnchor::Head ? 14 : kHeldWeaponBoneIndex;
-    world::CollisionMatrix matrix;
-    if (!build_skeletal_bone_matrix(world, source, entity, bone, matrix)) return false;
-    const anim::Vec3 pivot = source.rig->rest_global()[static_cast<size_t>(bone)].origin;
-    // Rest pivots are in the X-negated render frame. Convert the nudged point
-    // back to native model axes before applying the same posed matrix as collision.
-    // [orig: held pivot+nudge @0x4B2180; head pivot+(0,.15,.10) @0x4B1290 tail]
-    const bool held = anchor == world::SkeletalAnchor::HeldWeapon;
-    const float point[3] = {
-        pivot.z + (held ? kHeldWeaponAttachNudgeZ : 0.10f),
-        pivot.x + (held ? kHeldWeaponAttachNudgeX : 0.0f),
-        pivot.y + (held ? kHeldWeaponAttachNudgeY : 0.15f)
-    };
-    // Keep the authored binary32 point's fractional Q16 bits until the final
-    // world-coordinate store. These anchors are float-matrix translations.
-    for (int axis = 0; axis < 3; ++axis) {
-        const int32_t *row = matrix.m + 4 * axis;
-        const double value = double(row[3]) +
-                (double(row[0]) * point[0] + double(row[1]) * point[1] +
-                 double(row[2]) * point[2]) / 64.0;
-        out[axis] = static_cast<int32_t>(std::clamp(value, -2147483648.0, 2147483647.0));
-    }
-    return true;
+		world::EntityHandle entity, world::SkeletalAnchor anchor, int32_t out[3]) {
+	const auto found = skeletal_sources_.find(entity.packed);
+	const world::Entity *registered = world.registry.get(entity);
+	if (out == nullptr || found == skeletal_sources_.end() || registered == nullptr ||
+			found->second.registry_spawn_id != registered->registry_spawn_id) return false;
+	const SkeletalSource &source = found->second;
+	const int bone = anchor == world::SkeletalAnchor::Head ? 14 : kHeldWeaponBoneIndex;
+	world::CollisionMatrix matrix;
+	if (!build_skeletal_bone_matrix(world, source, entity, bone, matrix)) return false;
+	const anim::Vec3 pivot = source.rig->rest_global()[static_cast<size_t>(bone)].origin;
+	// Rest pivots are in the X-negated render frame. Convert the nudged point
+	// back to native model axes before applying the same posed matrix as collision.
+	// [orig: held pivot+nudge @0x4B2180; head pivot+(0,.15,.10) @0x4B1290 tail]
+	const bool held = anchor == world::SkeletalAnchor::HeldWeapon;
+	const float point[3] = {
+		pivot.z + (held ? kHeldWeaponAttachNudgeZ : 0.10f),
+		pivot.x + (held ? kHeldWeaponAttachNudgeX : 0.0f),
+		pivot.y + (held ? kHeldWeaponAttachNudgeY : 0.15f)
+	};
+	// Keep the authored binary32 point's fractional Q16 bits until the final
+	// world-coordinate store. These anchors are float-matrix translations.
+	for (int axis = 0; axis < 3; ++axis) {
+		const int32_t *row = matrix.m + 4 * axis;
+		const double value = double(row[3]) +
+				(double(row[0]) * point[0] + double(row[1]) * point[1] +
+				 double(row[2]) * point[2]) / 64.0;
+		out[axis] = static_cast<int32_t>(std::clamp(value,
+				static_cast<double>(std::numeric_limits<int32_t>::min()),
+				static_cast<double>(std::numeric_limits<int32_t>::max())));
+	}
+	return true;
 }
 
 bool EntityPoseProvider::eval_entity_pose(world::World &world,
@@ -641,10 +645,10 @@ bool EntityPoseProvider::panm_part_matrices(world::World &world,
 	// values are indistinguishable on the bus, exactly like the binding's
 	// Dictionary translation.
 	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
-    const world::Entity *e = world.registry.get(entity);
-    if (e != nullptr)
-        for (int phase = 0; phase < 6; ++phase)
-            ctrl_values[THREEDI_CTRL_OBJECT_DESTROY + phase] = e->destroy_phases_q16[phase];
+	const world::Entity *e = world.registry.get(entity);
+	if (e != nullptr)
+		for (int phase = 0; phase < 6; ++phase)
+			ctrl_values[THREEDI_CTRL_OBJECT_DESTROY + phase] = e->destroy_phases_q16[phase];
 	world::AiEntity *ai_entity =
 			world.ai.for_handle(entity);
 	// PLAYPARTANIM publishes its two phase accumulators to the fixed retail
@@ -683,8 +687,8 @@ bool EntityPoseProvider::panm_part_matrices(world::World &world,
 		}
 	}
 	if (e != nullptr)
-        world.doors.write_phases(*e, ctrl_values + THREEDI_CTRL_DOOR_00,
-                world::DoorSystem::kMaxDoors);
+		world.doors.write_phases(*e, ctrl_values + THREEDI_CTRL_DOOR_00,
+				world::DoorSystem::kMaxDoors);
 	const uint32_t time_ms = panm_time_override_ms >= 0
 			? static_cast<uint32_t>(panm_time_override_ms)
 			: world.logic_tick * 16u;

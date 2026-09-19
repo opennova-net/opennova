@@ -23,7 +23,7 @@ own systems.
 
 ## Live OpenNova path
 
-[ADR 0036](adr/0036-one-inmatch-session-wire-first.md) splits the frame
+[ADR 0043](adr/0043-canonical-cpp-and-godot-hard-cut.md) (d3/d9, superseding ADR 0036) splits the frame
 between one portable session module and one first-class Godot pipeline:
 
 ```text

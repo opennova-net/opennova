@@ -8,7 +8,7 @@
 
 namespace opennova {
 
-// 61-char SCRK matching retail captures (notes/retail_capture_findings.md:
+// 61-char SCRK matching retail captures (docs/net/novaworld-net-re.md §5.9:
 // ClientAuth and ServerAuth SCRK are both 61 chars; alphabet = A-Z0-9, 36
 // chars). We don't replicate the two-30-char-halves structure (random is
 // fine), only the length + alphabet. Retail's own generator

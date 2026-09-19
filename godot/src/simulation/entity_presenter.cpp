@@ -72,19 +72,19 @@ struct CtrlNames {
 	String owner_sector_team = String("present:sector_team");
 	String owner_zone = String("present:zone");
 	String owner_world_heat = String("present:world_heat");
-    String owner_doors = String("present:doors");
-    String doors[30];
-    // The org0 skin bone-callback's DEATH register (catalog ordinal 6, the
-    // corpse fade) the organic rows publish from PF_DEATH_CTRL.
-    String owner_death = String("present:death");
-    String death;
-    CtrlNames() {
-        for (int i = 0; i < 30; ++i)
-            doors[i] = opennova::threedi::threedi_ctrl_register_name(
-                    opennova::threedi::THREEDI_CTRL_DOOR_00 + i);
-        death = opennova::threedi::threedi_ctrl_register_name(
-                opennova::threedi::THREEDI_CTRL_DEATH);
-    }
+	String owner_doors = String("present:doors");
+	String doors[30];
+	// The org0 skin bone-callback's DEATH register (catalog ordinal 6, the
+	// corpse fade) the organic rows publish from PF_DEATH_CTRL.
+	String owner_death = String("present:death");
+	String death;
+	CtrlNames() {
+		for (int i = 0; i < 30; ++i)
+			doors[i] = opennova::threedi::threedi_ctrl_register_name(
+					opennova::threedi::THREEDI_CTRL_DOOR_00 + i);
+		death = opennova::threedi::threedi_ctrl_register_name(
+				opennova::threedi::THREEDI_CTRL_DEATH);
+	}
 };
 
 const CtrlNames &names() {
@@ -358,8 +358,8 @@ void EntityPresenter::present_scars() {
 }
 
 void EntityPresenter::present_passes() {
-    present_minefields();
-    if (Simulation *simulation = sim()) simulation->advance_facial_presentation(listener_position_);
+	present_minefields();
+	if (Simulation *simulation = sim()) simulation->advance_facial_presentation(listener_position_);
 	fire_->present();
 	destruction_->present();
 	throwable_->present();
@@ -369,8 +369,8 @@ void EntityPresenter::present_passes() {
 }
 
 PackedInt64Array EntityPresenter::profile_present_passes() {
-    present_minefields();
-    if (Simulation *simulation = sim()) simulation->advance_facial_presentation(listener_position_);
+	present_minefields();
+	if (Simulation *simulation = sim()) simulation->advance_facial_presentation(listener_position_);
 	PackedInt64Array spans;
 	spans.resize(PASS_PROFILE_SLOT_COUNT);
 	Time *clock = Time::get_singleton();
@@ -874,17 +874,17 @@ int EntityPresenter::emplaced_apply(Object *node,
 // --- The per-row legs both walks share ---------------------------------------
 
 void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base) {
-    model = destruction_->visual_model(model);
-    static const String owner("present:destruction");
-    static const String registers[] = {"OBJECT_DESTROY", "OBJECT_DESTROY01", "OBJECT_DESTROY02",
-            "OBJECT_DESTROY03", "OBJECT_DESTROY04", "OBJECT_DESTROY05"};
-    model->begin_ctrl_update();
-    for (int i = 0; i < 6; ++i) {
-        const int32_t phase = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
-        if (phase != 0) model->set_ctrl_override(owner, registers[i], phase);
-        else model->clear_ctrl_override(owner, registers[i]);
-    }
-    model->end_ctrl_update();
+	model = destruction_->visual_model(model);
+	static const String owner("present:destruction");
+	static const String registers[] = {"OBJECT_DESTROY", "OBJECT_DESTROY01", "OBJECT_DESTROY02",
+			"OBJECT_DESTROY03", "OBJECT_DESTROY04", "OBJECT_DESTROY05"};
+	model->begin_ctrl_update();
+	for (int i = 0; i < 6; ++i) {
+		const int32_t phase = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
+		if (phase != 0) model->set_ctrl_override(owner, registers[i], phase);
+		else model->clear_ctrl_override(owner, registers[i]);
+	}
+	model->end_ctrl_update();
 }
 
 void EntityPresenter::stamp_match_terrain(ObjectModel *model, const float *p,
@@ -928,7 +928,7 @@ bool EntityPresenter::aim_payload_changed(const float *p, int base,
 
 void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 		int base, int64_t &last_mask) {
-    model = destruction_->visual_model(model);
+	model = destruction_->visual_model(model);
 	if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
 		const uint32_t hidden_mask =
 				static_cast<uint32_t>(field_i(
@@ -1021,7 +1021,7 @@ void EntityPresenter::release_part_anim_outputs() {
 		// The ordinal DOOR_xx bus has no fixed register set: release whatever
 		// this writer owns instead of probing all 30 names.
 		model->clear_ctrl_overrides_owned(names().owner_doors);
-        model->clear_ctrl_overrides_owned("present:destruction");
+		model->clear_ctrl_overrides_owned("present:destruction");
 		model->clear_ctrl_overrides_owned(names().owner_death);
 		model->end_ctrl_update();
 	}
@@ -1103,7 +1103,7 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 			++p_profile->rows;
 		}
 		stamp_match_terrain(model, p, base);
-        stamp_destroy_phases(model, p, base);
+		stamp_destroy_phases(model, p, base);
 		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
 			// Compare the six packed source floats before constructing either
 			// the placement Basis or Transform3D.
@@ -1264,8 +1264,8 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 							Simulation::PF_WORLD_HEAT_GLOW_VALID) == 1
 					? 1
 					: 0;
-            const int32_t door_count = std::clamp(
-                    field_i(p, base, Simulation::PF_DOOR_COUNT), 0, 30);
+			const int32_t door_count = std::clamp(
+					field_i(p, base, Simulation::PF_DOOR_COUNT), 0, 30);
 			const std::array<int32_t, CTRL_PUBLISH_COUNT>
 					next_ctrl_publish_state = {
 				active1,
@@ -1276,7 +1276,7 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 				zone_valid,
 				lfp_valid,
 				heat_valid,
-                door_count,
+				door_count,
 			};
 			const bool cold = !row.ctrl_publish_state_valid;
 			const auto was_published = [&](CtrlPublishField field) {
@@ -1304,8 +1304,8 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 					was_published(CTRL_PUBLISH_LFP);
 			const bool heat_work = heat_valid != 0 || cold ||
 					was_published(CTRL_PUBLISH_HEAT);
-            const bool door_work = door_count != 0 || cold ||
-                    was_published(CTRL_PUBLISH_DOORS);
+			const bool door_work = door_count != 0 || cold ||
+					was_published(CTRL_PUBLISH_DOORS);
 			// The org0 skin bone-callback's DEATH register (the corpse fade)
 			// rides the organic row's PF_DEATH_CTRL word, which the engine
 			// fills with world::death_ctrl_register_value over the
@@ -1575,67 +1575,67 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 namespace godot {
 namespace {
 Transform3D mine_transform(const opennova::world::CollisionMatrix &matrix) {
-    const int32_t *m = matrix.m;
-    constexpr float rotation_scale = 1.0f / 4194304.0f;
-    // World mission XYZ -> Godot XZ-Y; model YZX -> mission XYZ.
-    const Basis basis(Vector3(m[1], m[9], -static_cast<double>(m[5])) * rotation_scale,
-            Vector3(m[2], m[10], -static_cast<double>(m[6])) * rotation_scale,
-            Vector3(m[0], m[8], -static_cast<double>(m[4])) * rotation_scale);
-    return Transform3D(basis, Vector3(m[3], m[11], -static_cast<double>(m[7])) *
-            opennova::io::kInvFp16One);
+	const int32_t *m = matrix.m;
+	constexpr float rotation_scale = 1.0f / 4194304.0f;
+	// World mission XYZ -> Godot XZ-Y; model YZX -> mission XYZ.
+	const Basis basis(Vector3(m[1], m[9], -static_cast<double>(m[5])) * rotation_scale,
+			Vector3(m[2], m[10], -static_cast<double>(m[6])) * rotation_scale,
+			Vector3(m[0], m[8], -static_cast<double>(m[4])) * rotation_scale);
+	return Transform3D(basis, Vector3(m[3], m[11], -static_cast<double>(m[7])) *
+			opennova::io::kInvFp16One);
 }
 }
 
 void EntityPresenter::reset_minefields() {
-    for (const auto &entry : minefield_nodes_) {
-        if (auto *node = Object::cast_to<Node>(ObjectDB::get_instance(entry.second.node)))
-            node->queue_free();
-    }
-    minefield_nodes_.clear();
-    minefield_draws_.clear();
+	for (const auto &entry : minefield_nodes_) {
+		if (auto *node = Object::cast_to<Node>(ObjectDB::get_instance(entry.second.node)))
+			node->queue_free();
+	}
+	minefield_nodes_.clear();
+	minefield_draws_.clear();
 }
 
 void EntityPresenter::present_minefields() {
-    Simulation *simulation = sim();
-    if (simulation == nullptr || placer_.is_null()) return;
-    simulation->fill_minefield_draw_rows(minefield_draws_);
-    for (auto &entry : minefield_nodes_) entry.second.seen = false;
-    for (const auto &draw : minefield_draws_) {
-        const uint32_t key = (static_cast<uint32_t>(draw.owner.packed) << 4) | draw.slot;
-        auto &entry = minefield_nodes_[key];
-        auto *node = Object::cast_to<ObjectModel>(ObjectDB::get_instance(entry.node));
-        if (node != nullptr && entry.spawn_id != draw.registry_spawn_id) {
-            node->queue_free();
-            node = nullptr;
-        }
-        ObjectModel *source = index_.is_valid() ? index_->resolve(draw.bms_id,
-                opennova::world::spawn_origin_kind(draw.spawn_origin),
-                opennova::world::spawn_origin_index(draw.spawn_origin)) : nullptr;
-        if (source == nullptr) source = resolve_wire_handle(draw.owner.packed);
-        if (node == nullptr) {
-            Node3D *parent = source != nullptr ? source : container();
-            if (parent == nullptr) parent = this;
-            node = placer_->build_model_from_graphic(String(draw.model.c_str()), String(),
-                    parent, String(), String(), true);
-            if (node == nullptr) continue;
-            node->set_name(String("MineMarker_") + String::num_int64(key));
-            node->set_rigid_parts(true);
-            entry.node = node->get_instance_id();
-            entry.spawn_id = draw.registry_spawn_id;
-        }
-        entry.seen = true;
-        node->set_authored_lod_owner(source, true);
-        node->set_active_lod(source != nullptr ? source->get_active_lod() : 0);
-        node->set_global_transform(mine_transform(draw.transform));
-        // Parenting under the source makes this frame's later occlusion
-        // verdict apply to the markers immediately. Their pose stays native.
-        node->set_present_visible(source == nullptr || source->is_present_visible());
-    }
-    for (auto it = minefield_nodes_.begin(); it != minefield_nodes_.end();) {
-        if (it->second.seen) { ++it; continue; }
-        if (auto *node = Object::cast_to<Node>(ObjectDB::get_instance(it->second.node)))
-            node->queue_free();
-        it = minefield_nodes_.erase(it);
-    }
+	Simulation *simulation = sim();
+	if (simulation == nullptr || placer_.is_null()) return;
+	simulation->fill_minefield_draw_rows(minefield_draws_);
+	for (auto &entry : minefield_nodes_) entry.second.seen = false;
+	for (const auto &draw : minefield_draws_) {
+		const uint32_t key = (static_cast<uint32_t>(draw.owner.packed) << 4) | draw.slot;
+		auto &entry = minefield_nodes_[key];
+		auto *node = Object::cast_to<ObjectModel>(ObjectDB::get_instance(entry.node));
+		if (node != nullptr && entry.spawn_id != draw.registry_spawn_id) {
+			node->queue_free();
+			node = nullptr;
+		}
+		ObjectModel *source = index_.is_valid() ? index_->resolve(draw.bms_id,
+				opennova::world::spawn_origin_kind(draw.spawn_origin),
+				opennova::world::spawn_origin_index(draw.spawn_origin)) : nullptr;
+		if (source == nullptr) source = resolve_wire_handle(draw.owner.packed);
+		if (node == nullptr) {
+			Node3D *parent = source != nullptr ? source : container();
+			if (parent == nullptr) parent = this;
+			node = placer_->build_model_from_graphic(String(draw.model.c_str()), String(),
+					parent, String(), String(), true);
+			if (node == nullptr) continue;
+			node->set_name(String("MineMarker_") + String::num_int64(key));
+			node->set_rigid_parts(true);
+			entry.node = node->get_instance_id();
+			entry.spawn_id = draw.registry_spawn_id;
+		}
+		entry.seen = true;
+		node->set_authored_lod_owner(source, true);
+		node->set_active_lod(source != nullptr ? source->get_active_lod() : 0);
+		node->set_global_transform(mine_transform(draw.transform));
+		// Parenting under the source makes this frame's later occlusion
+		// verdict apply to the markers immediately. Their pose stays native.
+		node->set_present_visible(source == nullptr || source->is_present_visible());
+	}
+	for (auto it = minefield_nodes_.begin(); it != minefield_nodes_.end();) {
+		if (it->second.seen) { ++it; continue; }
+		if (auto *node = Object::cast_to<Node>(ObjectDB::get_instance(it->second.node)))
+			node->queue_free();
+		it = minefield_nodes_.erase(it);
+	}
 }
 } // namespace godot

@@ -52,10 +52,6 @@ String DebugControlRow::target_name_of(Target p_target) {
 	return "unknown";
 }
 
-String DebugControlRow::owner_name_of(Owner p_owner) {
-	return p_owner == OWNER_ENGINE ? "engine" : "device";
-}
-
 Dictionary DebugControlRow::to_json_value() const {
 	Dictionary out;
 	out["id"] = String(id_);

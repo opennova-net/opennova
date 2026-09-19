@@ -240,7 +240,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 		DoorPhaseTable &door_phases);
 
 void build_client_replica_present_rows(const PresentRowsContext &context,
-        PoolPresentLifecycleMap &lifecycle, std::vector<float> &out, DoorPhaseTable &door_phases) {
+		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out, DoorPhaseTable &door_phases) {
 	out.clear();
 	if (context.runtime == nullptr) return;
 	mission::MissionKernel &kernel = context.kernel;
@@ -315,9 +315,9 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
-            r[PF_HUSK] = (ent->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
-            for (int phase = 0; phase < 6; ++phase)
-                r[PF_OBJECT_DESTROY + phase] = float(ent->destroy_phases_q16[phase]);
+			r[PF_HUSK] = (ent->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+			for (int phase = 0; phase < 6; ++phase)
+				r[PF_OBJECT_DESTROY + phase] = float(ent->destroy_phases_q16[phase]);
 			// The org0 skin callback's DEATH register off the authoritative
 			// organic row's dead flag + corpse timer [orig: BoneCallback_org0_Skin
 			// @0x4e3669..0x4e368e].
@@ -516,59 +516,59 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				}
 			}
 		}
-        // These class callbacks mutate the peer's own model sections/pose.
-        // Their 0x26 payload is not a compact-transform update.
-        // [orig: palm @ 0x53C4C0; cran @ 0x43FC70]
-        if (joiner) {
-            const Entity *local = kernel.world.registry.get(h);
-            if (local && static_cast<uint16_t>(local->item_id) == es.type_id) {
-                r[PF_HUSK] = (local->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
-                for (int phase = 0; phase < 6; ++phase)
-                    r[PF_OBJECT_DESTROY + phase] = float(local->destroy_phases_q16[phase]);
-                // The door records advance on every peer (the per-frame entity
-                // update calls the door tick at the pool-2 loop exit with no
-                // authority test) and the door render/bone callbacks copy each
-                // row's Q16 phase onto the CTRL bus from DOOR_00 for every drawn
-                // door entity, so a joiner publishes its own DoorSystem rows
-                // (ticked + contact-driven locally) exactly as the authority
-                // collector does; write_phases self-gates on door_motion.
-                // [orig: Entity_UpdateAllEntities @0x4c2100 (the site @0x4C2307,
-                //  loop exit @0x4c2278); build_bone_transforms @0x4E3070 (the
-                //  loop @0x4e312a..0x4e3145); BoneCallback_AnimatedBones_World
-                //  @0x4E3180 (@0x4e3201..0x4e3218)]
-                write_present_doors(r, i, kernel.world, *local, door_phases);
-            }
-            const auto *item = local ? kernel.world.tables.item_death_traits.get(local->item_id) : nullptr;
-            if (local && static_cast<uint16_t>(local->item_id) == es.type_id &&
-                    (local->palm_sections || local->item_section_piece ||
-                     (item && item->death_class == ItemDeathClass::kTower) ||
-                     local->death_motion == DeathMotionMode::CraneFalling ||
-                     local->death_motion == DeathMotionMode::BuildingEffects)) {
-                const Vec3 pos = item_section_render_position(kernel.world, *local);
-                r[PF_POS_X] = pos.x; r[PF_POS_Y] = pos.z; r[PF_POS_Z] = -pos.y;
-                r[PF_YAW_DEG] = local->yaw;
-                r[PF_PITCH_DEG] = local->pitch; r[PF_ROLL_DEG] = local->roll;
-                r[PF_ALIVE] = local->alive ? 1.0f : 0.0f;
-                write_present_section_mask(r, item_hidden_sections(*local));
-            }
-        }
-    }
-    // A callback allocates its fragment directly into the local pool. It has
-    // no independent spawn message to wait for. Append only these locally
-    // created rows through the ordinary pool-row writer (a fragment publishes
-    // no door entry); keep decoded organics on their receive-side animation
-    // path. Only the fragment rows touch the shared lifecycle map.
-    // [orig: Entity_CloneFromTemplateByType @ 0x4398A0;
-    // collect_visible_entities_for_terrain @ 0x5C8C60]
-    if (!joiner) return;
-    DoorPhaseTable unused_doors;
-    kernel.world.registry.for_each([&](const Entity &entity) {
-        if (!entity.item_section_piece || cs.find(entity.handle.packed) != nullptr) return;
-        const int row_index = static_cast<int>(out.size() / PF_STRIDE);
-        out.resize(out.size() + PF_STRIDE, 0.0f);
-        write_world_present_row(context, local_player, first_person_usegun, entity, row_index,
-                lifecycle, out.data() + static_cast<size_t>(row_index) * PF_STRIDE, unused_doors);
-    });
+		// These class callbacks mutate the peer's own model sections/pose.
+		// Their 0x26 payload is not a compact-transform update.
+		// [orig: palm @ 0x53C4C0; cran @ 0x43FC70]
+		if (joiner) {
+			const Entity *local = kernel.world.registry.get(h);
+			if (local && static_cast<uint16_t>(local->item_id) == es.type_id) {
+				r[PF_HUSK] = (local->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+				for (int phase = 0; phase < 6; ++phase)
+					r[PF_OBJECT_DESTROY + phase] = float(local->destroy_phases_q16[phase]);
+				// The door records advance on every peer (the per-frame entity
+				// update calls the door tick at the pool-2 loop exit with no
+				// authority test) and the door render/bone callbacks copy each
+				// row's Q16 phase onto the CTRL bus from DOOR_00 for every drawn
+				// door entity, so a joiner publishes its own DoorSystem rows
+				// (ticked + contact-driven locally) exactly as the authority
+				// collector does; write_phases self-gates on door_motion.
+				// [orig: Entity_UpdateAllEntities @0x4c2100 (the site @0x4C2307,
+				//  loop exit @0x4c2278); build_bone_transforms @0x4E3070 (the
+				//  loop @0x4e312a..0x4e3145); BoneCallback_AnimatedBones_World
+				//  @0x4E3180 (@0x4e3201..0x4e3218)]
+				write_present_doors(r, i, kernel.world, *local, door_phases);
+			}
+			const auto *item = local ? kernel.world.tables.item_death_traits.get(local->item_id) : nullptr;
+			if (local && static_cast<uint16_t>(local->item_id) == es.type_id &&
+					(local->palm_sections || local->item_section_piece ||
+					 (item && item->death_class == ItemDeathClass::kTower) ||
+					 local->death_motion == DeathMotionMode::CraneFalling ||
+					 local->death_motion == DeathMotionMode::BuildingEffects)) {
+				const Vec3 pos = item_section_render_position(kernel.world, *local);
+				r[PF_POS_X] = pos.x; r[PF_POS_Y] = pos.z; r[PF_POS_Z] = -pos.y;
+				r[PF_YAW_DEG] = local->yaw;
+				r[PF_PITCH_DEG] = local->pitch; r[PF_ROLL_DEG] = local->roll;
+				r[PF_ALIVE] = local->alive ? 1.0f : 0.0f;
+				write_present_section_mask(r, item_hidden_sections(*local));
+			}
+		}
+	}
+	// A callback allocates its fragment directly into the local pool. It has
+	// no independent spawn message to wait for. Append only these locally
+	// created rows through the ordinary pool-row writer (a fragment publishes
+	// no door entry); keep decoded organics on their receive-side animation
+	// path. Only the fragment rows touch the shared lifecycle map.
+	// [orig: Entity_CloneFromTemplateByType @ 0x4398A0;
+	// collect_visible_entities_for_terrain @ 0x5C8C60]
+	if (!joiner) return;
+	DoorPhaseTable unused_doors;
+	kernel.world.registry.for_each([&](const Entity &entity) {
+		if (!entity.item_section_piece || cs.find(entity.handle.packed) != nullptr) return;
+		const int row_index = static_cast<int>(out.size() / PF_STRIDE);
+		out.resize(out.size() + PF_STRIDE, 0.0f);
+		write_world_present_row(context, local_player, first_person_usegun, entity, row_index,
+				lifecycle, out.data() + static_cast<size_t>(row_index) * PF_STRIDE, unused_doors);
+	});
 }
 
 void build_world_present_rows(const PresentRowsContext &context,
@@ -625,7 +625,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 		// A player's wire net_id IS its packed character id (entity+0x15C).
 		r[PF_CHARACTER_ID] = static_cast<float>(replication::player_wire_net_id(e));
 	}
-    const Vec3 render_position = item_section_render_position(w, e);
+	const Vec3 render_position = item_section_render_position(w, e);
 	r[PF_POS_X] = render_position.x;
 	r[PF_POS_Y] = render_position.z;
 	r[PF_POS_Z] = -render_position.y;
@@ -658,9 +658,9 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_BODY_ANIM_SLOT] = static_cast<float>(e.body_anim_slot);
 	r[PF_HIDDEN] = e.hidden ? 1.0f : 0.0f;
 	r[PF_ALIVE] = e.alive ? 1.0f : 0.0f;
-    r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
-    for (int phase = 0; phase < 6; ++phase)
-        r[PF_OBJECT_DESTROY + phase] = float(e.destroy_phases_q16[phase]);
+	r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+	for (int phase = 0; phase < 6; ++phase)
+		r[PF_OBJECT_DESTROY + phase] = float(e.destroy_phases_q16[phase]);
 	// The org0 skin bone-callback's DEATH register (CTRL ordinal 6): the corpse
 	// fade off the authoritative organic row's dead flag + corpse timer; every
 	// other row reads retail's live 0xFFFF [orig: BoneCallback_org0_Skin

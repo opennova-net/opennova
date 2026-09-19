@@ -329,7 +329,7 @@ Ref<AvatarComboRow> AvatarDatabase::combo_row(int nat_index, int div_index, int 
 	// alignment comes from the owning nationality (D-PLAYERINFO copies it into
 	// the combo); the packed id is the registry's derivation for these indices.
 	const AvatarNationality *n = nationality_at(nat_index);
-	const opennova::npruntime::CharacterEntry *entry =
+	const opennova::inmatch::CharacterEntry *entry =
 			character_registry().find_by_indices(nat_index, div_index, combo_index);
 	Ref<AvatarComboRow> row;
 	row.instantiate();
@@ -342,10 +342,10 @@ Ref<AvatarComboRow> AvatarDatabase::get_combo(int nat_index, int div_index, int 
 	return combo_row(nat_index, div_index, combo_index);
 }
 
-const opennova::npruntime::CharacterRegistry &
+const opennova::inmatch::CharacterRegistry &
 AvatarDatabase::character_registry() const {
 	if (registry_dirty_) {
-		registry_ = opennova::npruntime::CharacterRegistry::from_file(file_);
+		registry_ = opennova::inmatch::CharacterRegistry::from_file(file_);
 		registry_dirty_ = false;
 	}
 	return registry_;
@@ -353,9 +353,9 @@ AvatarDatabase::character_registry() const {
 
 Ref<AvatarComboRow> AvatarDatabase::resolve_character_id(
 		int character_id, int expected_alignment) const {
-	// The registry decode (npruntime/character_registry.h carries the witness).
+	// The registry decode (runtime/inmatch/character_registry.h carries the witness).
 	const uint16_t packed = static_cast<uint16_t>(character_id & 0xffff);
-	const opennova::npruntime::CharacterEntry *entry =
+	const opennova::inmatch::CharacterEntry *entry =
 			character_registry().find_by_packed_id(packed, expected_alignment);
 	if (entry == nullptr) {
 		return Ref<AvatarComboRow>();
@@ -369,7 +369,7 @@ int AvatarDatabase::first_character_id(int alignment) const {
 
 Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile(
 		const Dictionary &p_selection) const {
-	opennova::npruntime::JoinSideSelection saved[2];
+	opennova::inmatch::JoinSideSelection saved[2];
 	const Array sides = p_selection.has("side_profiles")
 			? (Array)p_selection["side_profiles"]
 			: Array();
@@ -386,23 +386,23 @@ Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile(
 		saved[side].division_index = dict_int(sd, "division", -1);
 		saved[side].combo_index = dict_int(sd, "combo", -1);
 		saved[side].player_class = dict_int(sd, "player_class",
-				opennova::npruntime::kJoinDefaultPlayerClass);
+				opennova::inmatch::kJoinDefaultPlayerClass);
 	}
 	Ref<CharacterJoinProfile> out;
 	out.instantiate();
-	out->assign(opennova::npruntime::join_character_profile(character_registry(), saved));
+	out->assign(opennova::inmatch::join_character_profile(character_registry(), saved));
 	return out;
 }
 
 Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile_from_loadout(
 		const Ref<PlayerSpawnLoadout> &p_loadout) const {
-	opennova::npruntime::JoinSideSelection saved[2];
+	opennova::inmatch::JoinSideSelection saved[2];
 	if (p_loadout.is_valid()) {
 		p_loadout->fill_join_sides(saved);
 	}
 	Ref<CharacterJoinProfile> out;
 	out.instantiate();
-	out->assign(opennova::npruntime::join_character_profile(character_registry(), saved));
+	out->assign(opennova::inmatch::join_character_profile(character_registry(), saved));
 	return out;
 }
 
@@ -410,7 +410,7 @@ std::vector<AvatarDatabase::CharacterSexRow>
 AvatarDatabase::character_sex_rows() const {
 	// File order, duplicate packed ids first-wins (the registry's walk order).
 	std::vector<CharacterSexRow> rows;
-	for (const opennova::npruntime::CharacterEntry &entry :
+	for (const opennova::inmatch::CharacterEntry &entry :
 			character_registry().entries()) {
 		const bool duplicate = std::any_of(rows.begin(), rows.end(),
 				[&entry](const CharacterSexRow &row) {

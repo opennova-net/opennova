@@ -83,8 +83,9 @@ Two products compose it:
    window, run a layout pass, assert what it formats; a record/request window
    also pins the push/clear and the queue round-trip directly (clicking its
    buttons needs a real backend).
-6. Row labels or comments that must say "host" (the game host) go through
-   `scripts/lint/host_allowlist.json`; identifiers never contain the word.
+6. Row labels or comments say "host" only for the game host (CONTEXT.md "Host /
+   Joiner"); identifiers never contain the word. Vocabulary is a review concern, not
+   a lint (ADR 0043 retired `host_lint.py`).
 
 ## Adding a slot
 

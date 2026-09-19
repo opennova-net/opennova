@@ -61,7 +61,6 @@ public:
 
 	static String kind_name_of(Kind p_kind);
 	static String target_name_of(Target p_target);
-	static String owner_name_of(Owner p_owner);
 
 private:
 	friend class DebugControlTable;

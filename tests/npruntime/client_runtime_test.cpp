@@ -33,7 +33,7 @@
 #include <runtime/replication/connection.h>
 #include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/idatagram_socket.h>
-#include "common/null_datagram_socket.h"
+#include <runtime/inmatch/null_datagram_socket.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/session_transport.h>
 #include <runtime/inmatch/udp_session_transport.h>
@@ -1811,7 +1811,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 			"legacy family vectors remain diagnostic views of the same packet");
 }
 
-using opennova::testrig::NullDatagramSocket;
+using opennova::inmatch::NullDatagramSocket;
 
 struct HostPumpHookProbe {
 	inmatch::HostOwner *owner = nullptr;

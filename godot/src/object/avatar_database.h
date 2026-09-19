@@ -43,9 +43,9 @@ private:
 	// The engine's wire-identity registry over the parsed tree (rebuilt lazily
 	// after a load): every packed-id decode, per-side default and sex row is
 	// its witnessed walk.
-	mutable opennova::npruntime::CharacterRegistry registry_;
+	mutable opennova::inmatch::CharacterRegistry registry_;
 	mutable bool registry_dirty_ = true;
-	const opennova::npruntime::CharacterRegistry &character_registry() const;
+	const opennova::inmatch::CharacterRegistry &character_registry() const;
 	String source_path;
 	String last_error;
 

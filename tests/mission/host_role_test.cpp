@@ -19,7 +19,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/mission/mission_kernel.h>
 
-#include "common/null_datagram_socket.h"
+#include <runtime/inmatch/null_datagram_socket.h>
 
 #include <cstdio>
 #include <map>
@@ -157,7 +157,7 @@ int main() {
 		// tick per frame; the per-tick 0x0A fan reaches the local ClientState
 		// through the loopback fold; a headless embedder leaves the viewport
 		// seam at 0 and a windowed one stamps its height.
-		testrig::NullDatagramSocket socket;
+		opennova::inmatch::NullDatagramSocket socket;
 		role.set_socket(&socket);
 		const uint32_t tick0 = kernel.world.logic_tick;
 		const uint32_t now0 = host.host_owner.now_tick;
@@ -259,7 +259,7 @@ int main() {
 		// The same frame drives a dedicated host: the logic clock and the
 		// owner tick advance together, and the drain has no local connection
 		// to serve.
-		testrig::NullDatagramSocket socket;
+		opennova::inmatch::NullDatagramSocket socket;
 		const uint32_t tick0 = kernel.world.logic_tick;
 		const uint32_t now0 = host.host_owner.now_tick;
 		for (int i = 0; i < 4; ++i)

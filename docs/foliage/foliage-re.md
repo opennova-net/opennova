@@ -158,7 +158,7 @@ traversal and collector with a qualifying synthetic leaf: all eight
 `(224,128,128)`, with one collector call each. With the main list already
 full, foliage-disabled, LOD-below-3 and distant-leaf controls retained both
 foliage counts at 127 and made no collector call. The existing jo-c
-`tools/terrain_traversal_oracle.py` executed the verified retail PE
+scratch oracle `terrain_traversal_oracle.py` (untracked; never in the repo) executed the verified retail PE
 SHA-256 `b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac`
 without replacing engine calls; fresh IDA reads used image base `0x400000`
 and `Jointops.exe.kong.i64`, with no IDB writes. These probes establish the

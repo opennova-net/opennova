@@ -365,7 +365,7 @@ void EntityPresenter::present_wire_snapshot(const PackedFloat32Array &p_snap,
 								opennova::world::kSpawnOriginIndexNone)) {
 			continue;
 		}
-		const int runtime_kind = opennova::npruntime::
+		const int runtime_kind = opennova::inmatch::
 				mission_kind_for_wire_handle(uint16_t(handle));
 		const int visual_item_id =
 				placer_->resolve_player_visual_item_id(type_id);
@@ -585,7 +585,7 @@ Vector3 EntityPresenter::muzzle_world_for(int p_handle,
 // path; the per-frame rigid attach lives in the hot walk. Kept beside nodes_
 // rather than parented under the body: ObjectModel rebuild() frees all of its
 // children, so a child weapon would vanish on any body rebuild. (Witness:
-// npruntime/wire_present.h ledger — the model resolves off the equipped ADM;
+// runtime/inmatch/wire_present.h ledger — the model resolves off the equipped ADM;
 // the sim folds the draw gate in.)
 Node3D *EntityPresenter::rebuild_held_weapon(int p_handle, int p_adm) {
 	Simulation *s = sim();

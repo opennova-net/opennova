@@ -16,6 +16,8 @@
   [ADR 0029](0029-engine-group-targets.md) (the chain order). ADR 0017 (typed records),
   ADR 0022 (the ledger), ADR 0028 d1 (four groups), ADR 0037, ADR 0039, ADR 0040 and
   ADR 0041 stand unchanged.
+- **Amended**: [ADR 0044](0044-shared-native-assets.md) (2026-09-18) amends d4's NET-AGNOSTIC
+  runtime tree list (`simassets` dissolved into its owning systems; `assets` added).
 
 ## Context
 

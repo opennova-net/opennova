@@ -137,17 +137,6 @@ const opennova::mnu::Window *MnuDocument::window_at(const Locator &loc) const {
 	return w;
 }
 
-MnuDocument::IdWindow *MnuDocument::id_window_at(const Locator &loc) {
-	if (!loc.valid() || loc.is_screen) {
-		return nullptr;
-	}
-	IdWindow *n = &ids_[loc.screen_index].root;
-	for (int idx : loc.path) {
-		n = &n->children[idx];
-	}
-	return n;
-}
-
 const char *MnuDocument::state_for_slot(int slot) {
 	switch (slot) {
 		case TEX_DEFAULT:

@@ -386,7 +386,6 @@ public:
 	int mounted_declines = 0;
 	int mounted_evaluations = 0;
 	int mounted_cache_hits = 0;
-	size_t mounted_rest_cache_size() const { return mounted_rest_cache_.size(); }
 
 	// Re-point the world/AI/collision systems at the terrain field store and
 	// the collision world (the embedder re-layers its own device-fed surface

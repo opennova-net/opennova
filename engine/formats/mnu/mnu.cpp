@@ -601,15 +601,12 @@ Window parse_window(const mnu_xml::Node *window_node);
 // [orig: CUIElement_ParseXMLDefinition @ 0x648120 (base attrs); edit attrs in
 //  parse_edit_widget_xml_properties @ 0x661d10; checkbox attrs @ 0x64ad90]
 // The original splits attributes across a base parser + per-widget-class overrides;
-// this reimpl flattens them onto every window (harmless superset). DROPPED by reimpl:
-// FORM (int -> widget+0x124 @0x6482a6), GLOBAL_VAR (@0x648323), PASSWORD (edit, @0x661d3b).
-// See notes/mnu/divergence-backlog.md.
+// this reimpl flattens them onto every window (harmless superset), including the
+// per-class FORM (int -> widget+0x124 @0x6482a6), GLOBAL_VAR (@0x648323) and PASSWORD
+// (edit, @0x661d3b) attributes.
 Window parse_window(const mnu_xml::Node *window_node) {
   Window win;
   if (!window_node) return win;
-
-  // Debug: print window being parsed.
-  // fprintf(stderr, "[MNU Parse] Window: %s\n", window_node->attr("name").c_str());
 
   // Parse attributes.
   win.name = window_node->attr("name");

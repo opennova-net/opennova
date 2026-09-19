@@ -87,7 +87,6 @@ bool remove_area_trigger(bms::File &file, size_t index, std::string &error);
 // --- the weapon loadout, the item availability rules, the groups -----------------
 std::vector<WeaponLoadoutEntry> weapon_loadout(const bms::File &file);
 bool set_weapon_loadout(bms::File &file, const std::vector<WeaponLoadoutEntry> &entries, std::string &error);
-std::vector<ItemAvailabilityEntry> item_availability(const bms::File &file);
 bool group(const bms::File &file, size_t index, GroupFields &out);
 std::vector<GroupFields> groups(const bms::File &file);
 bool set_group(bms::File &file, size_t index, int field0, int field8, int field12, std::string &error);

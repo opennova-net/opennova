@@ -55,7 +55,7 @@ jobs:
 
       # The retail data the asset gates need (docs/asset-gated-tests.md): the
       # composite action restores or checks out the two private reference
-      # repositories and exports the three roots; without the
+      # repositories and exports the two roots; without the
       # REFERENCE_ASSETS_TOKEN secret it does nothing and the gates stay closed.
       - name: Mount the reference data
         uses: ./.github/actions/mount-reference-data
@@ -98,7 +98,7 @@ jobs:
           # in scripts/lint/fixture_allowlist.json; LFS-tracked, under 2 MiB,
           # referenced by a test or doc, and materialized in this checkout.
           python scripts/lint/fixture_lint.py --enforce --require-pulled
-          # Environment-variable gate (docs/dev-env-vars.md): the four machine
+          # Environment-variable gate (docs/dev-env-vars.md): the two machine
           # roots through their resolvers, GODOT_BIN in the scripts, the
           # deployed service's own config and the OS variables; nothing else.
           python scripts/lint/env_lint.py --enforce
@@ -133,7 +133,7 @@ jobs:
 
       # A green ctest run never proves the asset-gated tests saw their data
       # (a gate reports Skipped or SKIP-LEG). With the reference data mounted,
-      # every test the three roots gate must have run.
+      # every test the two roots gate must have run.
       - name: Asset-gated tests ran
         if: env.HAVE_REFERENCE_ASSETS == 'true'
         shell: bash

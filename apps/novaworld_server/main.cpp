@@ -1,9 +1,8 @@
 // Standalone novaworld server entrypoint.
 //
 // Wires the gate UDP, NW UDP, HTTP listeners onto a single SQLite-backed
-// process. Architecture diagram + design rationale: notes/architecture.md.
-// Per memory `feedback_novaworld_server_naming.md` this is "our" server,
-// not an emulator — refer to it as the novaworld server, not the emulator.
+// process. Architecture and design rationale: the README.md beside this file.
+// This is our NovaWorld server, not an emulator (CONTEXT.md "NovaWorld").
 
 #include "gate_listener.h"
 #include "nw_udp_listener.h"

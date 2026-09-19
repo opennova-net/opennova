@@ -1137,7 +1137,7 @@ the two bases differ by the x/z swap `godot = (z, y, x)_render`
 `[orig: Math_FixedPointToFloat3_YNegated @ 0x611210; the glint submit matrix
 update_sun_glare @ 0x5ad1ba..0x5ad213]`, so every low-sun frame front-lit
 where retail backlights. Fixed via one mapping seam
-(`godot/src/env/env_axes.h`) at every consumer — the environment direction
+(`godot/src/util/axes.h`) at every consumer — the environment direction
 getters, the object directional term, sun/moon/glare/glint placement, the
 glare jitter plane, the sun-veil dot, the dome uniforms and the star
 placement — with the raw tuple deliberately left on the terrain/foliage

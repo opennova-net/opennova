@@ -15,7 +15,7 @@ namespace opennova {
 // layout — the all-purpose post-auth traffic carrier.
 //
 // **Witnessed in retail Jointops.exe** (re-validated 2026-04-25, see
-// notes/ida_witness_matrix.md + notes/dispatcher_table.md):
+// docs/net/novaworld-net-re.md "Opcode dispatcher" and docs/net/retail-message-dispatch-audit.md):
 //   `NapiNPProtocol_HandleSessionPacket @ 0x626A00` — opcode 0x43/0x83
 //      entry point. Decrypts payload with SESSION_NWU_KEY, validates that
 //      bytes 0..3 (`session_key`) match `conn->session_keys.local_key`,

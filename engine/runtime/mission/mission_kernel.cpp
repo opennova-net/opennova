@@ -53,9 +53,9 @@ int32_t bam_from_radians(double radians) {
 } // namespace
 
 MissionKernel::MissionKernel() : local(world) {
-    world.local_player_state = &local;
-    world.teammate_spawner = this;
-    world.item_piece_spawner = this;
+	world.local_player_state = &local;
+	world.teammate_spawner = this;
+	world.item_piece_spawner = this;
 	occlusion.bind_focal_wind_random(&world.prng16_c_state);
 	// The kernel pumps the local player's slot itself (run_local_player_post_tick
 	// with the live trigger/reload/scope inputs), so the world's global local.weapon
@@ -69,8 +69,8 @@ MissionKernel::~MissionKernel() {
 	// The systems and providers the world points at outlive nothing: drop the
 	// non-owning links before the members tear down in reverse order.
 	world.teammate_spawner = nullptr;
-    world.item_piece_spawner = nullptr;
-    world.local_player_state = nullptr;
+	world.item_piece_spawner = nullptr;
+	world.local_player_state = nullptr;
 	world.collision = nullptr;
 	world.pose_provider = nullptr;
 	world.tables.terrain = nullptr;
@@ -166,7 +166,7 @@ void MissionKernel::resweep_item_traits() {
 	if (item_wire_class_ && items_table() != nullptr)
 		mission::resolve_item_traits(world, *items_table(), item_wire_class_);
 	if (items_table() != nullptr)
-        world.facials.configure(world, asset_index(), *items_table());
+		world.facials.configure(world, asset_index(), *items_table());
 	if (items_table() != nullptr && !world.tables.ammo.entries.empty())
 		mission::resolve_minefields(world, *items_table(), assets());
 }
@@ -307,10 +307,10 @@ bool MissionKernel::load_mission_into_world(const KernelBootOptions &options) {
 	// promote applies the retail 15-char copy at its cited port site.
 	opts.people_name_resolver = people_name_resolver_;
 	promo = promote_mission(mission, world, opts);
-    // DEF initialization precedes PreMission actions in retail. Marker/health
-    // predicates and dynamically spawned helpers must see those traits now.
-    // [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitFromModel]
-    if (items_table() != nullptr)
+	// DEF initialization precedes PreMission actions in retail. Marker/health
+	// predicates and dynamically spawned helpers must see those traits now.
+	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitFromModel]
+	if (items_table() != nullptr)
 		mission::resolve_item_traits(world, *items_table(), item_wire_class_);
 	register_mission_systems();
 	return true;
@@ -492,10 +492,10 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		error = "open() / open_document() first";
 		return false;
 	}
-    // [orig: SinglePlayer_StartMission @0x561af0 / host setup precede
-    // Game_StartMission @0x524360 and Mission_LoadBMSFile @0x40f4e0]
-    world.rules.mp_session = options.mp_session || options.joiner;
-    world.rules.projectile_authority = !options.joiner;
+	// [orig: SinglePlayer_StartMission @0x561af0 / host setup precede
+	// Game_StartMission @0x524360 and Mission_LoadBMSFile @0x40f4e0]
+	world.rules.mp_session = options.mp_session || options.joiner;
+	world.rules.projectile_authority = !options.joiner;
 	// The shared model source, wired before the seat step runs (S16).
 	collision_pose.set_assets(&assets());
 	bringup_net_session_ = options.bringup_net_session;
@@ -591,24 +591,24 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// the boot (Simulation::compile_and_set_wac) binds the same names.
 	if (has_files) {
 		step("script_catalogs");
-        wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
-        world.tables.sound_sets = &script_sound_catalog;
-        // SndProf.def -> the footstep/foley/landing/scream slot table. The
-        // parse appends, so it runs only over an EMPTY table: a table the
-        // embedder filled before the boot (Simulation::set_sound_profiles,
-        // the tests/tools override) wins. [orig: SoundProfile_LoadAll
-        // @0x527490 from Game_InitSubsystems]
-        if (world.tables.sound_profiles.empty()) {
-            std::vector<uint8_t> profile_bytes;
-            if (files_.read_file("SndProf.def", profile_bytes))
-                world.tables.sound_profiles.parse(
-                        reinterpret_cast<const char *>(profile_bytes.data()), profile_bytes.size());
-        }
-        particle::EffectSceneConfig effects_config;
-        wac::load_script_effect_catalog(files_, script_effect_catalog, &effects_config);
-        auto effects = std::make_shared<particle::EffectScene>();
-        effects->open(effects_config);
-        world.item_emitters.bind_scene(std::move(effects), true);
+		wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
+		world.tables.sound_sets = &script_sound_catalog;
+		// SndProf.def -> the footstep/foley/landing/scream slot table. The
+		// parse appends, so it runs only over an EMPTY table: a table the
+		// embedder filled before the boot (Simulation::set_sound_profiles,
+		// the tests/tools override) wins. [orig: SoundProfile_LoadAll
+		// @0x527490 from Game_InitSubsystems]
+		if (world.tables.sound_profiles.empty()) {
+			std::vector<uint8_t> profile_bytes;
+			if (files_.read_file("SndProf.def", profile_bytes))
+				world.tables.sound_profiles.parse(
+						reinterpret_cast<const char *>(profile_bytes.data()), profile_bytes.size());
+		}
+		particle::EffectSceneConfig effects_config;
+		wac::load_script_effect_catalog(files_, script_effect_catalog, &effects_config);
+		auto effects = std::make_shared<particle::EffectScene>();
+		effects->open(effects_config);
+		world.item_emitters.bind_scene(std::move(effects), true);
 	}
 	// Compile the mission WAC scripts; absent files install an empty program. The
 	// numbered-variable reset belongs after PreMission, immediately before
@@ -659,7 +659,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("item_traits");
 		mission::resolve_item_traits(world, *items_table(),
 				[](int32_t) -> uint8_t { return 0; });
-        world.facials.configure(world, asset_index(), *items_table());
+		world.facials.configure(world, asset_index(), *items_table());
 	}
 	if (has_item_db && options.collision) {
 		// World-object collision instances (BVOL/BPLN) [orig: the movement
@@ -702,13 +702,13 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	world.registry.for_each_in_pool(0, [&](const w::Entity &row) {
 		w::initialize_organic_ai(world, *world.registry.get(row.handle));
 	});
-    // Only authority runs the PreMission whole-list pass. A joiner can
-    // carry a full BMS in a tool session without replaying its actions.
-    // [orig: Game_StartMission @0x525b86, g_napi_np_ctx.is_authority gate]
-    if (!options.joiner) {
-        step("premission");
-        world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
-    }
+	// Only authority runs the PreMission whole-list pass. A joiner can
+	// carry a full BMS in a tool session without replaying its actions.
+	// [orig: Game_StartMission @0x525b86, g_napi_np_ctx.is_authority gate]
+	if (!options.joiner) {
+		step("premission");
+		world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
+	}
 	mission_start_pending = true;
 	if (!options.defer_mission_start) complete_mission_start();
 	return true;
@@ -1023,15 +1023,15 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 // --- world::IPoseProvider: muzzles / userpoints (the sim pose) ---------------
 
 bool MissionKernel::resolve_skeletal_anchor(w::World &p_world, w::EntityHandle entity,
-        w::SkeletalAnchor anchor, int32_t out[3]) {
-    ensure_collision_instance(p_world, entity);
-    return collision_pose.resolve_skeletal_anchor(p_world, entity, anchor, out);
+		w::SkeletalAnchor anchor, int32_t out[3]) {
+	ensure_collision_instance(p_world, entity);
+	return collision_pose.resolve_skeletal_anchor(p_world, entity, anchor, out);
 }
 
 bool MissionKernel::resolve_organic_attachment(w::World &p_world, w::EntityHandle entity,
-        uint8_t userpoint, int32_t out[3]) {
-    ensure_collision_instance(p_world, entity);
-    return collision_pose.resolve_organic_attachment(p_world, entity, userpoint, out);
+		uint8_t userpoint, int32_t out[3]) {
+	ensure_collision_instance(p_world, entity);
+	return collision_pose.resolve_organic_attachment(p_world, entity, userpoint, out);
 }
 
 bool MissionKernel::resolve_muzzle_pose(w::World &p_world, w::EntityHandle entity,

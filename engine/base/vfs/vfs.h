@@ -63,7 +63,7 @@ struct VfsFileLocation {
 // order per call. Packed mode is archive-default while an archive is online and keeps loose
 // roots available for ForceLooseFirst; its standalone no-archive default falls back loose, while
 // the game runtime rejects that state via has_mounted_archive(). See
-// notes/vfs/phase0_ida_verification.md.
+// docs/vfs/vfs-pff-mount-re.md.
 class Vfs {
 public:
     Vfs();

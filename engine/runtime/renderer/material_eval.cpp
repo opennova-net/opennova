@@ -14,7 +14,7 @@ using namespace opennova::threedi;
 namespace opennova::renderer {
 namespace {
 
-static uint8_t localCtrlOrdinal(
+uint8_t local_ctrl_ordinal(
         int idx, const std::vector<std::string>& ctrl_names) {
     if (idx < 0 || idx >= static_cast<int>(ctrl_names.size())) {
         return THREEDI_CTRL_LOD_FRAC;
@@ -23,29 +23,29 @@ static uint8_t localCtrlOrdinal(
             ctrl_names[static_cast<size_t>(idx)].c_str());
 }
 
-static int32_t regValue(int idx,
+int32_t reg_value(int idx,
                         const std::vector<std::string>& ctrl_names,
                         const ControlRegisterValues& ctrl_bus) {
-    return ctrl_bus[localCtrlOrdinal(idx, ctrl_names)];
+    return ctrl_bus[local_ctrl_ordinal(idx, ctrl_names)];
 }
 
-static bool ctrlUsesDiscreteFrameSelector(uint8_t ordinal) {
+bool ctrl_uses_discrete_frame_selector(uint8_t ordinal) {
     return ordinal >= THREEDI_CTRL_TEX_TEAM &&
            ordinal <= THREEDI_CTRL_TEX_CAMO3;
 }
 
-static int64_t roundNearest(double value) {
+int64_t round_nearest(double value) {
     return value >= 0.0 ? static_cast<int64_t>(value + 0.5)
                         : static_cast<int64_t>(value - 0.5);
 }
 
-static uint8_t quantizeByte(float value, float scale) {
-    const int64_t raw = roundNearest(static_cast<double>(value) * scale);
+uint8_t quantize_byte(float value, float scale) {
+    const int64_t raw = round_nearest(static_cast<double>(value) * scale);
     return static_cast<uint8_t>(std::clamp<int64_t>(raw, 0, 255));
 }
 
-static int16_t quantizeS16(float value, float scale) {
-    const int64_t raw = roundNearest(static_cast<double>(value) * scale);
+int16_t quantize_s16(float value, float scale) {
+    const int64_t raw = round_nearest(static_cast<double>(value) * scale);
     // Preview the packed file value, including the writer's low-word wrap for
     // out-of-range editor inputs. Clamping here made the live preview disagree
     // with the exported .3di and with retail's signed-word consumer.
@@ -61,42 +61,42 @@ static int16_t quantizeS16(float value, float scale) {
 // even when a later consumer interprets that style as a waveform and uses
 // the byte as phase rather than reading the CTRL bus.
 // [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]
-static uint8_t phaseOrRegisterByte(
+uint8_t phase_or_register_byte(
         uint8_t style,
         float phase,
         int32_t reg,
         const std::vector<std::string>& ctrl_names) {
-    return style <= 112 ? quantizeByte(phase, 256.0f)
-                        : localCtrlOrdinal(reg, ctrl_names);
+    return style <= 112 ? quantize_byte(phase, 256.0f)
+                        : local_ctrl_ordinal(reg, ctrl_names);
 }
 
-static UvAnimChannel rawUvChannel(
+UvAnimChannel raw_uv_channel(
         const ThreediUvParams& params,
         const std::vector<std::string>& ctrl_names) {
     UvAnimChannel channel;
     channel.type = params.style;
-    channel.phase = phaseOrRegisterByte(
+    channel.phase = phase_or_register_byte(
             params.style, params.phase, params.reg, ctrl_names);
-    channel.speed = quantizeS16(params.gen_rate, 256.0f);
-    channel.base = quantizeS16(params.start, 256.0f);
-    channel.range = quantizeS16(params.end, 256.0f);
+    channel.speed = quantize_s16(params.gen_rate, 256.0f);
+    channel.base = quantize_s16(params.start, 256.0f);
+    channel.range = quantize_s16(params.end, 256.0f);
     return channel;
 }
 
-static bool uvChannelUsesNoise(const UvAnimChannel& channel) {
+bool uv_channel_uses_noise(const UvAnimChannel& channel) {
     const uint8_t mode = channel.type & 0xF0;
     return channel.type <= 0x70 && (channel.type & 0x0F) == 6 &&
            mode != 0 && mode != 0x10 && mode != 0x20;
 }
 
-static uint16_t timeUnits16(uint32_t time_ms) {
+uint16_t time_units16(uint32_t time_ms) {
     return static_cast<uint16_t>((time_ms << 8) / 1000u);
 }
 
-static uint16_t phase16(uint8_t phase_byte, int16_t rate_word, uint32_t time_ms) {
+uint16_t phase16(uint8_t phase_byte, int16_t rate_word, uint32_t time_ms) {
     const uint32_t sum =
             (static_cast<uint32_t>(phase_byte) << 8) +
-            static_cast<uint32_t>(timeUnits16(time_ms)) *
+            static_cast<uint32_t>(time_units16(time_ms)) *
                     static_cast<uint32_t>(static_cast<uint16_t>(rate_word));
     return static_cast<uint16_t>(sum);
 }
@@ -104,7 +104,7 @@ static uint16_t phase16(uint8_t phase_byte, int16_t rate_word, uint32_t time_ms)
 // Retail keeps only IMUL's low 32 bits, then performs an arithmetic SAR 16.
 // Spell out both the wrap and signed shift so the result is portable.
 // [orig: AlphaGen_EvaluateValue @ 0x5B234C; RgbGen_EvaluateColor @ 0x5B24AC]
-static int32_t mulShift16(int32_t delta, int32_t fraction) {
+int32_t mul_shift16(int32_t delta, int32_t fraction) {
     const uint32_t low_product =
             static_cast<uint32_t>(delta) * static_cast<uint32_t>(fraction);
     const int64_t product =
@@ -117,7 +117,7 @@ static int32_t mulShift16(int32_t delta, int32_t fraction) {
     return -static_cast<int32_t>((-product + 65535) / 65536);
 }
 
-static int32_t waveformFraction(uint8_t style,
+int32_t waveform_fraction(uint8_t style,
                                 uint8_t phase_byte,
                                 int16_t rate_word,
                                 uint32_t time_ms) {
@@ -126,7 +126,7 @@ static int32_t waveformFraction(uint8_t style,
     return uv_anim_wave_lookup(style, phase16(phase_byte, rate_word, time_ms), random);
 }
 
-static void evalRgbGen(uint8_t style,
+void eval_rgb_gen(uint8_t style,
                        uint8_t phase_byte,
                        int16_t rate_word,
                        const std::array<uint8_t, 3>& start,
@@ -143,15 +143,15 @@ static void evalRgbGen(uint8_t style,
                     ? 0
                     : ((style == 113 || style == 114)
                                ? ctrl_value
-                               : waveformFraction(style, phase_byte, rate_word, time_ms));
+                               : waveform_fraction(style, phase_byte, rate_word, time_ms));
     *out_r = static_cast<float>(
-                     start[0] + mulShift16(end[0] - start[0], fraction)) *
+                     start[0] + mul_shift16(end[0] - start[0], fraction)) *
              kByteToFloat;
     *out_g = static_cast<float>(
-                     start[1] + mulShift16(end[1] - start[1], fraction)) *
+                     start[1] + mul_shift16(end[1] - start[1], fraction)) *
              kByteToFloat;
     *out_b = static_cast<float>(
-                     start[2] + mulShift16(end[2] - start[2], fraction)) *
+                     start[2] + mul_shift16(end[2] - start[2], fraction)) *
              kByteToFloat;
 }
 
@@ -177,50 +177,50 @@ MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
         //  (@0x5B24AC); its sole caller @0x58DB80 uploads the value to constant
         //  223 with no 113 special case. The earlier port drove it from the
         //  CTRL register (jo-c cross-check 2026-09-10).]
-        const int32_t ctrl = regValue(mat.alpha_gen.reg, ctrl_names, ctrl_bus);
+        const int32_t ctrl = reg_value(mat.alpha_gen.reg, ctrl_names, ctrl_bus);
         (void)ctrl;
         const int32_t fraction =
                 mat.alpha_gen.style == 24
                         ? 0
                         : (mat.alpha_gen.style == 113
                                    ? 0
-                                   : waveformFraction(
+                                   : waveform_fraction(
                                              mat.alpha_gen.style,
-                                             phaseOrRegisterByte(
+                                             phase_or_register_byte(
                                                      mat.alpha_gen.style,
                                                      mat.alpha_gen.phase,
                                                      mat.alpha_gen.reg,
                                                      ctrl_names),
-                                             quantizeS16(mat.alpha_gen.rate, 256.0f),
+                                             quantize_s16(mat.alpha_gen.rate, 256.0f),
                                              time_ms));
         const int32_t value =
                 mat.alpha_gen.start +
-                mulShift16(mat.alpha_gen.end - mat.alpha_gen.start, fraction);
+                mul_shift16(mat.alpha_gen.end - mat.alpha_gen.start, fraction);
         rt.alpha = static_cast<float>(value) * (1.0f / 255.0f);
     }
 
     if (mat.rgb_gen.style == 0) {
         rt.rgb_r = rt.rgb_g = rt.rgb_b = 1.0f;
     } else {
-        const int32_t ctrl = regValue(mat.rgb_gen.reg, ctrl_names, ctrl_bus);
+        const int32_t ctrl = reg_value(mat.rgb_gen.reg, ctrl_names, ctrl_bus);
         const std::array<uint8_t, 3> start = {
-            quantizeByte(mat.rgb_gen.start_color[0], 255.0f),
-            quantizeByte(mat.rgb_gen.start_color[1], 255.0f),
-            quantizeByte(mat.rgb_gen.start_color[2], 255.0f),
+            quantize_byte(mat.rgb_gen.start_color[0], 255.0f),
+            quantize_byte(mat.rgb_gen.start_color[1], 255.0f),
+            quantize_byte(mat.rgb_gen.start_color[2], 255.0f),
         };
         const std::array<uint8_t, 3> end = {
-            quantizeByte(mat.rgb_gen.end_color[0], 255.0f),
-            quantizeByte(mat.rgb_gen.end_color[1], 255.0f),
-            quantizeByte(mat.rgb_gen.end_color[2], 255.0f),
+            quantize_byte(mat.rgb_gen.end_color[0], 255.0f),
+            quantize_byte(mat.rgb_gen.end_color[1], 255.0f),
+            quantize_byte(mat.rgb_gen.end_color[2], 255.0f),
         };
-        evalRgbGen(
+        eval_rgb_gen(
                 mat.rgb_gen.style,
-                phaseOrRegisterByte(
+                phase_or_register_byte(
                         mat.rgb_gen.style,
                         mat.rgb_gen.phase,
                         mat.rgb_gen.reg,
                         ctrl_names),
-                quantizeS16(mat.rgb_gen.rate, 256.0f),
+                quantize_s16(mat.rgb_gen.rate, 256.0f),
                 start,
                 end,
                 time_ms,
@@ -233,10 +233,10 @@ MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
     // Retail evaluates AlphaGen, RgbGen, then UV in this order. Preserve that
     // ordering because noise waveforms share the CRT random stream.
     // [orig: apply_shader_parameters @ 0x58DB80]
-    const UvAnimChannel u_channel = rawUvChannel(mat.u_params, ctrl_names);
-    const UvAnimChannel v_channel = rawUvChannel(mat.v_params, ctrl_names);
-    const bool u_uses_noise = uvChannelUsesNoise(u_channel);
-    const bool v_uses_noise = uvChannelUsesNoise(v_channel);
+    const UvAnimChannel u_channel = raw_uv_channel(mat.u_params, ctrl_names);
+    const UvAnimChannel v_channel = raw_uv_channel(mat.v_params, ctrl_names);
+    const bool u_uses_noise = uv_channel_uses_noise(u_channel);
+    const bool v_uses_noise = uv_channel_uses_noise(v_channel);
     // Function-argument evaluation order is not portable. Consume the shared
     // CRT stream explicitly in retail's U-then-V order before dispatch.
     const uint16_t u_random =
@@ -249,9 +249,9 @@ MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
     rt.uv = uv_anim_transform(
             u_channel,
             v_channel,
-            timeUnits16(time_ms),
-            regValue(mat.u_params.reg, ctrl_names, ctrl_bus),
-            regValue(mat.v_params.reg, ctrl_names, ctrl_bus),
+            time_units16(time_ms),
+            reg_value(mat.u_params.reg, ctrl_names, ctrl_bus),
+            reg_value(mat.v_params.reg, ctrl_names, ctrl_bus),
             u_random,
             v_random);
 
@@ -284,7 +284,7 @@ LightRuntime eval_light_runtime(uint8_t style,
     const std::array<uint8_t, 3> end = {
         color_end[2], color_end[1], color_end[0],
     };
-    evalRgbGen(
+    eval_rgb_gen(
             style,
             phase_byte,
             static_cast<int16_t>(rate_word),
@@ -319,7 +319,7 @@ int compute_anim_frame(const ThreediMaterial& mat,
     }
 
     const int reg_index = static_cast<int>(mat.animation.cycle_frame_time);
-    const uint8_t ctrl_ordinal = localCtrlOrdinal(reg_index, ctrl_names);
+    const uint8_t ctrl_ordinal = local_ctrl_ordinal(reg_index, ctrl_names);
     const int32_t ctrl = ctrl_bus[ctrl_ordinal];
     // TEX_TEAM and TEX_CAMO1/2/3 are discrete texture selectors; avatar CAMO
     // writers zero-extend their bytes while TEX_TEAM retains its signed input.
@@ -328,14 +328,14 @@ int compute_anim_frame(const ThreediMaterial& mat,
     // [orig: Avatar_SetArmsCamoCtrl @ 0x57A3B0;
     //  dword_83FFCC/dword_83FFD4/dword_83FFDC/dword_83FFE4 = 1;
     //  apply_shader_parameters @ 0x58DC36..0x58DC42]
-    if (ctrlUsesDiscreteFrameSelector(ctrl_ordinal)) {
+    if (ctrl_uses_discrete_frame_selector(ctrl_ordinal)) {
         return ctrl % frame_count;
     }
     // The odd dword in retail's 8-byte CTRL slot selects an alternate modulo
     // mode. Ordinary animation controls retain the signed low-dword IMUL/SAR
     // fractional-frame branch; the static texture-selector state is handled above.
     // [orig: apply_shader_parameters @ 0x58DB80]
-    int frame = mulShift16(frame_count, ctrl);
+    int frame = mul_shift16(frame_count, ctrl);
     if (frame >= frame_count) frame = frame_count - 1;
     return frame;
 }

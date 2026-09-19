@@ -1,4 +1,4 @@
-# Machine-local retail data gates (tests/common/retail_paths.h, the four
+# Machine-local retail data gates (tests/common/retail_paths.h, the two
 # OPENNOVA_* roots in docs/asset-gated-tests.md): a gated test prints
 # "SKIP: needs <what>" and exits 77 when its data is absent, so ctest reports it
 # Skipped, never Passed. A test whose synthetic legs ran prints "SKIP-LEG:
@@ -1121,9 +1121,9 @@ target_include_directories(minimap_markers_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_features(minimap_markers_test PRIVATE cxx_std_17)
 add_test(NAME minimap_markers COMMAND minimap_markers_test)
 
-# The character registry (npruntime/character_registry.h): the packed-id
+# The character registry (runtime/inmatch/character_registry.h): the packed-id
 # decode, the per-side default walk, and the joiner profile projection
-# (npruntime/join_character_profile.h).
+# (runtime/inmatch/join_character_profile.h).
 add_executable(character_registry_test npruntime/character_registry_test.cpp)
 target_link_libraries(character_registry_test PRIVATE opennova_runtime)
 add_test(NAME character_registry COMMAND character_registry_test)
@@ -2100,7 +2100,6 @@ add_test(NAME mission_kernel_lifecycle COMMAND mission_kernel_lifecycle_test)
 # drain, and the dedicated (HostOnly) bring-up.
 add_executable(host_role_test mission/host_role_test.cpp)
 target_link_libraries(host_role_test PRIVATE opennova_net opennova_runtime)
-target_include_directories(host_role_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(host_role_test PRIVATE cxx_std_17)
 add_test(NAME host_role COMMAND host_role_test)
 
@@ -2856,7 +2855,6 @@ add_test(NAME npruntime_joiner_identity COMMAND npruntime_joiner_identity_test)
 
 add_executable(npruntime_client_runtime_test npruntime/client_runtime_test.cpp)
 target_link_libraries(npruntime_client_runtime_test PRIVATE opennova_net opennova_runtime)
-target_include_directories(npruntime_client_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}) # common/null_datagram_socket.h
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
 add_executable(npruntime_client_message_dispatch_test npruntime/client_message_dispatch_test.cpp)

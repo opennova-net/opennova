@@ -16,14 +16,14 @@ namespace godot {
 class CharacterJoinProfile : public RefCounted {
 	GDCLASS(CharacterJoinProfile, RefCounted)
 
-	opennova::npruntime::JoinCharacterProfile value_;
+	opennova::inmatch::JoinCharacterProfile value_;
 
 protected:
 	static void _bind_methods();
 
 public:
-	void assign(const opennova::npruntime::JoinCharacterProfile &p_value) { value_ = p_value; }
-	const opennova::npruntime::JoinCharacterProfile &value() const { return value_; }
+	void assign(const opennova::inmatch::JoinCharacterProfile &p_value) { value_ = p_value; }
+	const opennova::inmatch::JoinCharacterProfile &value() const { return value_; }
 
 	// side 0 = blue/good, 1 = red/evil; any other side reads the blue value.
 	int get_character_id(int p_side) const;

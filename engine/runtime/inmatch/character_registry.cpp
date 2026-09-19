@@ -4,7 +4,7 @@
 
 using namespace opennova::avatars;
 
-namespace opennova::npruntime {
+namespace opennova::inmatch {
 
 CharacterRegistry CharacterRegistry::from_file(const AvatarsFile &file) {
 	CharacterRegistry registry;
@@ -84,4 +84,4 @@ uint16_t CharacterRegistry::first_character_id(int alignment) const {
 	return entries_.empty() ? 0 : entries_.front().packed_id;
 }
 
-} // namespace opennova::npruntime
+} // namespace opennova::inmatch

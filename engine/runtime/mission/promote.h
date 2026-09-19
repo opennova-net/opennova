@@ -11,7 +11,7 @@
 // profile-by-name, a PER-ENTITY 32-byte scheduler at unk_B1FF80+32*slot, initial state 0,
 // spawn-transform copy). The nav table mirrors the waypoint populator XML_ParseGroupAction
 // @0x4cc450 (34-dword channel records over pool-3 marker nodes). See
-// notes/world/ai_movement.md §4 / §10 for the RE map + the tracked deviations below.
+// docs/world/world-wac-ai-re.md for the RE map + the tracked deviations below.
 #pragma once
 
 #include <cstddef>

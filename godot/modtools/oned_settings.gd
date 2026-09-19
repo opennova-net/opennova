@@ -5,10 +5,10 @@ extends RefCounted
 ## its own config; neither side reads or migrates the other's state.
 
 const CONFIG_PATH := "user://oned.cfg"
-const SECTION := "resources"
-const DIR_KEY := "resource_dir"
-const EXPANSION_KEY := "expansion"
-const GAME_KEY := "game"
+const SECTION := ResourceDirSettings.SECTION
+const DIR_KEY := ResourceDirSettings.DIR_KEY
+const EXPANSION_KEY := ResourceDirSettings.EXPANSION_KEY
+const GAME_KEY := ResourceDirSettings.GAME_KEY
 const RECENT_KEY := "recent_dirs"
 const RETAIL_DIR_KEY := "retail_dir"
 const RECENT_LIMIT := 8

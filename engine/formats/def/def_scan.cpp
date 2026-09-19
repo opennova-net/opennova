@@ -422,15 +422,6 @@ int parse_ints(const char *s, size_t len, int *out, int max_n) {
     return n;
 }
 
-/* Parse N floats from value string (with comma replacement) */
-int parse_floats(const char *s, size_t len, float *out, int max_n) {
-    Token tok[MAX_TOKENS];
-    int n = split_values(s, len, tok, max_n < MAX_TOKENS ? max_n : MAX_TOKENS);
-    for (int i = 0; i < n && i < max_n; ++i)
-        out[i] = parse_float_n(tok[i].s, tok[i].len);
-    return n;
-}
-
 /* Parse HudColor from RGB values */
 DefHudColor parse_hud_color(Token *vals, int n) {
     DefHudColor c = {0, 0, 0, 255};

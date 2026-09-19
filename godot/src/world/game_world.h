@@ -335,10 +335,6 @@ public:
 	void set_perf_probe_skip_occlusion(bool p_skip) { perf_probe_skip_occl_ = p_skip; }
 	void set_perf_probe_skip_effect_tick(bool p_skip) { perf_probe_skip_effect_tick_ = p_skip; }
 	void set_perf_probe_skip_fixed_handlers(bool p_skip) { perf_probe_skip_fixed_handlers_ = p_skip; }
-	// The render-occlusion frame (OcclusionFrame): the device legs drive its
-	// blink gates and per-frame apply, the load re-hands it each mission's
-	// runtime members and resets it at unload. C++ only.
-	OcclusionFrame *occlusion_frame() const { return occlusion_.ptr(); }
 	// The handoff from the local-player presenter (its setup binds, its
 	// teardown releases): the local-view device leg and the fixed-tick weapon
 	// drain reach the presenter through this seam.
