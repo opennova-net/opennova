@@ -19,7 +19,7 @@ const SPEED_MIN := 5.0
 const SPEED_MAX := 2000.0
 const SPEED_STEP := 1.2
 
-var fly_speed: float = 75.0
+var fly_speed: float = 18.75
 
 var _yaw: float = 0.0
 var _pitch: float = 0.0
