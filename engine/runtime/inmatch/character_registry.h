@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace opennova::npruntime {
+namespace opennova::inmatch {
 
 struct CharacterEntry {
 	int nationality_index = -1; // tree indices into the parsed file
@@ -68,4 +68,4 @@ private:
 	std::vector<CharacterEntry> entries_;
 };
 
-} // namespace opennova::npruntime
+} // namespace opennova::inmatch

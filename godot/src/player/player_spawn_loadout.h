@@ -27,7 +27,7 @@ namespace godot {
 	X(nationality, -1)              \
 	X(division, -1)                 \
 	X(combo, -1)                    \
-	X(player_class, opennova::npruntime::kJoinDefaultPlayerClass)
+	X(player_class, opennova::inmatch::kJoinDefaultPlayerClass)
 
 class PlayerSpawnLoadout : public RefCounted {
 	GDCLASS(PlayerSpawnLoadout, RefCounted)
@@ -78,7 +78,7 @@ public:
 	// The engine projections (C++ only): the kit slots for the spawn
 	// projection and the two join-side selections.
 	opennova::world::SpawnLoadoutInput engine_input() const;
-	void fill_join_sides(opennova::npruntime::JoinSideSelection (&r_sides)[2]) const;
+	void fill_join_sides(opennova::inmatch::JoinSideSelection (&r_sides)[2]) const;
 
 protected:
 	static void _bind_methods();

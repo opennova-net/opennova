@@ -79,7 +79,7 @@ class Simulation;
 // Its COLD path (spawn/defer/unresolved bookkeeping, the liveness prune,
 // held-weapon builds, spawn signals and stats) and its per-row hot path live
 // in entity_presenter_wire.cpp; the pool->kind projection witness is at the
-// engine header (npruntime/wire_present.h).
+// engine header (runtime/inmatch/wire_present.h).
 //
 // Beside the two row walks it OWNS the four tick-driven present passes (ADR
 // 0043 d9): FirePresenter (AI/remote fire sound + muzzle effect + tracers),
@@ -202,7 +202,7 @@ public:
 	// World position of a named userpoint on this wire body's HELD WEAPON —
 	// the anchor retail's adm-arm fire effect spawns at. Falls back to the
 	// body's own origin, never the wire fire position (witness:
-	// npruntime/wire_present.h ledger, rigid weapon draw + userpoint
+	// runtime/inmatch/wire_present.h ledger, rigid weapon draw + userpoint
 	// fallback).
 	Vector3 muzzle_world_for(int p_handle, const String &p_userpoint) const;
 	int wire_entity_count() const { return int(nodes_.size()); }

@@ -491,14 +491,14 @@ int Simulation::get_mission_header_size() const {
 
 void Simulation::set_join_character_profile(const Ref<CharacterJoinProfile> &p_profile) {
 	if (p_profile.is_null()) return;
-	net_.join_character_vars = opennova::npruntime::character_join_vars(p_profile->value());
+	net_.join_character_vars = opennova::inmatch::character_join_vars(p_profile->value());
 	net_.join_character_vars_set = true;
 	install_character_join_vars();
 }
 
 void Simulation::set_local_character_profile(const Ref<CharacterJoinProfile> &p_profile) {
 	if (p_profile.is_null()) return;
-	net_.local_character_vars = opennova::npruntime::character_join_vars(p_profile->value());
+	net_.local_character_vars = opennova::inmatch::character_join_vars(p_profile->value());
 	net_.local_character_vars_set = true;
 }
 

@@ -13,7 +13,7 @@
 #include <runtime/mission/placement_traits.h>
 #include <net/npwire/wire_handle.h>
 
-namespace opennova::npruntime {
+namespace opennova::inmatch {
 
 // The BMS entity kind a wire-direct row presents as, or -1 for pools with no
 // BMS family (effects and beyond).
@@ -52,4 +52,4 @@ static_assert(mission_kind_for_wire_handle(0x4001) == -1);  // effects pool
 //    sim folds the draw gate in (a hidden or unarmed body reports ADM 0)
 //    [orig: the model resolve off the equipped ADM row]
 
-}  // namespace opennova::npruntime
+}  // namespace opennova::inmatch
