@@ -2,6 +2,7 @@
 #include <base/io/fixed.h>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <runtime/hud/hud_frame.h>
 
 namespace opennova::hud {
@@ -22,13 +23,41 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 		return;
 	// [orig: palette[5], palette[3], auxiliaryColors[2] initialized @0x51F240]
 	constexpr uint32_t warning = uint32_t(-44976), aim_color = uint32_t(-8347393);
+	// Every cue here draws with clipToScreen: a quad that would cross a design
+	// edge is slid fully back on-screen and recoloured auxiliaryColors[1].
+	// [orig: draw_textured_quad_centered @0x5909E0 -- gate @0x590A37, left
+	//  @0x590A45..0x590A5F, right @0x590A70..0x590A87, top @0x590A8B..0x590AA9,
+	//  bottom @0x590AB4..0x590ACB]
+	constexpr uint32_t edge_color = uint32_t(-32736);
 	auto centered = [&](const HudProjectedPoint &p, const HudSprite &sprite, int tex,
 							uint32_t color) {
 		if (!p.valid || !sprite.valid)
 			return;
-		const float x = p.x * 1024 / w, y = p.y * 768 / h;
-		emit_rect(sx(x - sprite.width / 2, w), sy(y - sprite.height / 2, h),
-				sx(x + sprite.width / 2, w), sy(y + sprite.height / 2, h), color, true, tex);
+		const int cx = int(p.x * 1024 / w), cy = int(p.y * 768 / h);
+		int left = cx - sprite.width / 2, right = sprite.width / 2 + cx;
+		int top = cy - sprite.height / 2, bottom = cy + sprite.height / 2;
+		if (left < 0) {
+			right += std::abs(left) + 1;
+			left = 1;
+			color = edge_color;
+		}
+		if (right > 1024) {
+			left = 1023 - right + left;
+			right = 1023;
+			color = edge_color;
+		}
+		if (top < 0) {
+			bottom += std::abs(top) + 1;
+			top = 1;
+			color = edge_color;
+		}
+		if (bottom > 768) {
+			top = 767 - bottom + top;
+			bottom = 767;
+			color = edge_color;
+		}
+		emit_rect(sx(float(left), w), sy(float(top), h), sx(float(right), w),
+				sy(float(bottom), h), color, true, tex);
 	};
 	if (c.vehicle_fixed)
 		centered(c.vehicle_fixed_point, l.vehicle_fixed, kHudTexVehicleFixed, active_color(s));

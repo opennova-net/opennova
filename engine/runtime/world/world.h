@@ -567,9 +567,8 @@ struct MissionTables {
 // The session/game-option bits the host stamps at bring-up; the SP defaults
 // hold otherwise.
 struct SessionRules {
-	uint32_t mpattrib = 0;
-	bool hit_feedback =
-			true; // [orig: Config_SetDefaults @0x54D18B] // [orig: g_rules_flags @0x24D1E34, HUD target gates @0x5926DC]
+	uint32_t mpattrib = 0; // [orig: g_rules_flags @0x24D1E34, HUD target gates @0x5926DC]
+	bool hit_feedback = true; // [orig: Config_SetDefaults @0x54D18B]
     // Session + game-option state the BMS Teammate trigger family reads. Hosts
     // stamp these at bring-up; the SP defaults hold otherwise.
     // [orig: g_napi_np_ctx.is_in_session gate @0x453b53; option dword_24D1E34

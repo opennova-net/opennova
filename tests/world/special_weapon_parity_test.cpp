@@ -66,26 +66,60 @@ void mortar_elevation_is_independent_of_view_pitch() {
     const auto fire = r.fire();
     CHECK(fire.fired.round.dir_pitch == 85*degree);
     CHECK(r.local.input.look_pitch == 0);
+    // Mouse Y SUBTRACTS from the elevation offset where it adds to the body
+    // pitch: pulling back at the 85 degree stop changes nothing, pushing
+    // forward lowers the tube to its 45 degree floor.
+    // [orig: `sub dword_B79008, ecx` @0x4E0FE2 vs `add [eax+14h], edx` @0x4E0D39]
+    Rig pulled(DEF_WEAPON_FLAG_ABSORBPITCH | DEF_WEAPON_FLAG_FORCESCOPED, -45, 85);
+    pulled.local.look(0, 3000);
+    CHECK(pulled.local.input.look_pitch == 0);
+    CHECK(pulled.fire().fired.round.dir_pitch == 85*degree);
     Rig moved(DEF_WEAPON_FLAG_ABSORBPITCH | DEF_WEAPON_FLAG_FORCESCOPED, -45, 85);
-    moved.local.look(0, 3000);
+    moved.local.look(0, -3000);
     CHECK(moved.local.input.look_pitch == 0);
     const auto low = moved.fire();
     CHECK(low.fired.round.dir_pitch == 45*degree);
 }
+// The retail mortar authors AbsorbPitch + OnlyScoped: every AbsorbPitch
+// consumer asks Entity_CheckWeaponSeatFlags, which answers nothing for the
+// local player until the scope is promoted. Carried unscoped it looks around
+// like any other weapon. [orig: @0x540D00; consumers @0x4E0F9D / @0x4DC8A3]
+void only_scoped_mortar_absorbs_pitch_once_promoted() {
+    Rig r(DEF_WEAPON_FLAG_ABSORBPITCH | DEF_WEAPON_FLAG_ONLYSCOPED | DEF_WEAPON_FLAG_SIGHTED, -45, 85);
+    CHECK(!player_view_scope_settled(r.local.view));
+    CHECK(r.local.weapon.pitch_offset_bam == 40*degree); // the mount stamp reads the raw flag
+    r.local.look(0, -400);
+    CHECK(r.local.input.look_pitch > 0);
+    CHECK(r.local.weapon.pitch_offset_bam == 40*degree);
+    int32_t pose[6];
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, false, pose);
+    CHECK(pose[4] == 0); // the body pitch, no elevation offset
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, pose);
+    CHECK(pose[4] == 85*degree);
+    // Scope-up levels the body pitch for an AbsorbPitch weapon.
+    // [orig: Player_ToggleWeaponScope @0x4DF302..0x4DF314]
+    auto *slot = active_local_weapon_slot(r.world, r.local.weapon);
+    CHECK(local_player_scope_toggle(r.world, r.local.weapon, r.local.view, *slot));
+    CHECK(r.local.input.look_pitch == 0);
+    r.local.view.scope_settled = true;
+    r.local.look(0, -400);
+    CHECK(r.local.input.look_pitch == 0);
+    CHECK(r.local.weapon.pitch_offset_bam < 40*degree);
+}
 void mortar_elevation_survives_rebake_and_ignores_look_keys() {
     Rig r(DEF_WEAPON_FLAG_ABSORBPITCH | DEF_WEAPON_FLAG_FORCESCOPED, -45, 85);
-    r.local.look(0, 500); // an intermediate tube elevation
+    r.local.look(0, -500); // an intermediate tube elevation
     int32_t before[6], after[6];
-    local_weapon_fire_pose(r.world, r.local.weapon, 4, before);
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, before);
     CHECK(before[4] > 45*degree && before[4] < 85*degree);
     local_weapon_install(r.world, r.local.weapon, r.data, true, true, nullptr, r.local.view);
-    local_weapon_fire_pose(r.world, r.local.weapon, 4, after);
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, after);
     CHECK(after[4] == before[4]);
     r.local.set_view_keys(false, true, false, false, false);
     r.world.logic_tick = 1;
     r.local.apply_player_input_pre_tick();
     CHECK(r.local.input.look_pitch == 0);
-    local_weapon_fire_pose(r.world, r.local.weapon, 4, after);
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, after);
     CHECK(after[4] == before[4]);
     // Recoil enters reload without resetting the tube; ForceCrouch's separate
     // keep-scope behavior remains covered by weapon_fsm_test.
@@ -95,7 +129,7 @@ void mortar_elevation_survives_rebake_and_ignores_look_keys() {
     LocalWeaponPumpIO io;
     io.view = &r.local.view; io.is_authority = false;
     local_weapon_pump_tick(r.world, r.local.weapon, io);
-    local_weapon_fire_pose(r.world, r.local.weapon, 4, after);
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, after);
     CHECK(after[4] == before[4]);
 }
 
@@ -107,7 +141,7 @@ void designator_fire_uses_the_measured_position() {
     body.inf.aim_point[1] = 30*65536;
     body.inf.aim_point[2] = 5*65536;
     int32_t aim[6];
-    local_weapon_fire_pose(r.world, r.local.weapon, 4, aim);
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, aim);
     CHECK(aim[0] == 10*65536); // aiming starts at the shooter
     const auto fire = r.fire();
     CHECK(fire.fired.round.origin_x == 200*65536);
@@ -148,6 +182,33 @@ void tank_gunner_fires_from_the_selected_barrel() {
         r.world.pose_provider = nullptr;
     }
 }
+// A G-attached gun routed to its parent slot fires from the HULL's userpoint
+// table. [orig: Entity_CalcWeaponFirePosition @0x4DC7A9..0x4DC7D9]
+void redirected_gunner_fires_from_the_hull() {
+    Rig r;
+    Entity hull;
+    hull.kind = EntityKind::Item; hull.has_item_def = true; hull.item_type = 1;
+    hull.item_attrib = kItemAttribEweap;
+    hull.weapon_userpoint_bytes[0][0] = 21;
+    const auto hull_handle = r.world.registry.spawn(1, hull);
+    Entity gun;
+    gun.kind = EntityKind::Item; gun.has_item_def = true; gun.item_type = 6;
+    gun.item_attrib = kItemAttribEweap;
+    gun.emplacement_attachment_flags = 2;
+    gun.ground_target = hull_handle;
+    gun.weapon_userpoint_bytes[0][0] = 9;
+    const auto gun_handle = r.world.registry.spawn(1, gun);
+    auto &shooter = *r.world.registry.get(r.shooter);
+    shooter.mounted = true; shooter.mount_target = gun_handle; shooter.mount_type = SeatType::Gunner;
+    Poses poses; r.world.pose_provider = &poses;
+    int32_t pose[6];
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, pose);
+    CHECK(poses.queried == gun_handle && poses.userpoint == 9);
+    r.world.registry.get(gun_handle)->primary_weapon_slot.redirect_to_parent_slot = true;
+    local_weapon_fire_pose(r.world, r.local.weapon, 4, true, pose);
+    CHECK(poses.queried == hull_handle && poses.userpoint == 21);
+    r.world.pose_provider = nullptr;
+}
 // ctank input does not translate lean keys into bike jump/brake flags.
 // [orig: Entity_UpdateTankVehiclePhysics @0x489675..0x4896A7]
 void tank_input_preserves_non_input_flags() {
@@ -165,13 +226,19 @@ void tank_input_preserves_non_input_flags() {
     CHECK((tank.flags & 0x28u) == 0x28u);
 }
 
-void guided_rounds_track_the_target_position() {
+// In flight the motors steer at the target's AIM ORIGIN (a person's phased
+// CameraOffset point), not at its raw Position.
+// [orig: Entity_ComputeWeaponFireOrigin @0x43B4B0 -- stng @0x4463A3, jvln @0x446C2D;
+//  person leg @0x43B4C2..0x43B523]
+void guided_rounds_track_the_target_aim_origin() {
     for (auto motor : {ThrowClass::kJavelin,ThrowClass::kStinger}) {
         Rig r;
         r.world.tables.ammo.entries[1].tracer_item_friendly = 10;
         r.world.throwables.classes.set({10,ThrowClass::kNone,motor});
         Entity target;
-        target.kind = EntityKind::Item; target.item_id = 2;
+        target.kind = EntityKind::Organic; target.item_id = 2;
+        target.has_item_def = true; target.item_type = 3;
+        target.eye_offset_z = 2*65536;
         target.position = {200,30,4}; target.health = 100; target.alive = true;
         const auto h = r.world.registry.spawn(1,target);
         r.world.registry.get(r.shooter)->last_fire_target = h;
@@ -194,7 +261,10 @@ void guided_rounds_track_the_target_position() {
             r.world.registry.get(h)->position = {210,35,6};
             r.world.round_sim.tick(r.world,nullptr);
             CHECK(round.guided.target == h.packed);
-            CHECK(round.guided.steer[0] == 210*65536 && round.guided.steer[1] == 35*65536);
+            // Phase 0 (tick 0, net id 0): half the XY eye offset plus the
+            // (-64, -32) * 64 jitter, never the feet.
+            CHECK(round.guided.steer[0] == 210*65536 - 64*64);
+            CHECK(round.guided.steer[1] == 35*65536 - 32*64);
         }
         r.world.pose_provider = nullptr;
     }
@@ -204,8 +274,10 @@ int main() {
     mortar_elevation_is_independent_of_view_pitch();
     mortar_elevation_survives_rebake_and_ignores_look_keys();
     designator_fire_uses_the_measured_position();
+    only_scoped_mortar_absorbs_pitch_once_promoted();
     tank_gunner_fires_from_the_selected_barrel();
-    guided_rounds_track_the_target_position();
+    redirected_gunner_fires_from_the_hull();
+    guided_rounds_track_the_target_aim_origin();
     tank_input_preserves_non_input_flags();
     if (!failures) std::puts("special_weapon_parity: all checks passed");
     return failures ? 1 : 0;

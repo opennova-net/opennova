@@ -199,6 +199,13 @@ int main() {
 		// A drain with nothing queued is a no-op.
 		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
+		// The host's own medic call (action 217 -> C2S 0x2E) rides the same
+		// queue and must reach the dispatcher, not the movement-only drain.
+		// [orig: Input_HandleActionBinding @0x49B4B4..0x49B50C]
+		CHECK(role.send_medic_request());
+		CHECK(host.host_loop.c2s_pending() == 1);
+		role.drain_host_client_gameplay_requests();
+		CHECK(host.host_loop.c2s_pending() == 0);
 		// The next frame's Server_TickUpdate drains what the local drain left.
 		host.host_loop.client_send(c2s::ENTITY_UPLINK, std::vector<uint8_t>{0});
 		role.run_tick(tick_input(0));

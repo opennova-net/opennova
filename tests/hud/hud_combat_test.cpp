@@ -204,16 +204,22 @@ static void world_feeds() {
 	read();
 	CHECK(frame.hud_combat.state.target_cursor && frame.hud_combat.state.target_locked);
 	CHECK(frame.hud_combat.state.target_brackets && frame.hud_combat.state.inset_friendly);
+	// Every HUD-owning instance is a client (modes 2 and 3): bit 3 admits or
+	// refuses the brackets on a listen host and a joiner alike, and bit 8 --
+	// the dedicated host's -- never reaches a HUD. [orig: @0x5926D4..0x5926E1]
 	world.rules.mpattrib = 0x100;
-	read();
-	CHECK(!frame.hud_combat.state.target_brackets);
-	world.rules.mp_session = true;
-	world.rules.projectile_authority = false;
 	read();
 	CHECK(frame.hud_combat.state.target_brackets);
 	world.rules.mpattrib = 8;
 	read();
 	CHECK(!frame.hud_combat.state.target_brackets);
+	world.rules.mp_session = true;
+	world.rules.projectile_authority = false;
+	read();
+	CHECK(!frame.hud_combat.state.target_brackets);
+	world.rules.mpattrib = 0x100;
+	read();
+	CHECK(frame.hud_combat.state.target_brackets);
 	world.rules.mpattrib = 0;
 	Entity mount;
 	mount.has_item_def = true;
@@ -296,7 +302,7 @@ static void world_feeds() {
 	field.dim = 4;
 	world.ai.terrain = &field;
 	const int rounds = world.round_sim.active_count;
-	const auto impact = predict_hud_impact(world, weapon, 0);
+	const auto impact = predict_hud_impact(world, weapon, true, 0);
 	CHECK(impact.hit && impact.position[2] == 0);
 	// z starts at 10u; each falling-object tick subtracts 167 more than the last.
 	// 89 ticks reach the water/terrain plane; horizontal motion is 1u per tick.

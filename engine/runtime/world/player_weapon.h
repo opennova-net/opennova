@@ -271,11 +271,22 @@ WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w);
 const WeaponSlotState *active_local_weapon_slot(const World &world,
                                                const LocalPlayerWeapon &w);
 
+// g_local_player_entity->Pitch = 0, shared by the AbsorbPitch mount stamp and
+// the scope-up leg. [orig: @0x4DFAB7; @0x4DF314]
+void local_player_level_pitch(World &world);
+
+// The equipped weapon's flag query. An OnlyScoped weapon in the local
+// player's hands answers no mask until the scope is PROMOTED, so AbsorbPitch
+// (and every other seat flag) is inert while the mortar is carried unscoped.
+// [orig: Entity_CheckWeaponSeatFlags @0x540D00]
+bool local_weapon_seat_flag(const LocalPlayerWeapon &, bool scope_settled, uint32_t mask);
+
 // Shared local fire/aim pose, including AbsorbPitch and mounted barrels.
-// clip_before_consume selects the barrel before the FSM spends ammo.
+// clip_before_consume selects the barrel before the FSM spends ammo;
+// scope_settled is the promoted byte the seat-flag query reads.
 // [orig: Entity_CalcWeaponFirePosition @0x4DC750]
 void local_weapon_fire_pose(World &, const LocalPlayerWeapon &,
-                           int32_t clip_before_consume, int32_t out[6]);
+                           int32_t clip_before_consume, bool scope_settled, int32_t out[6]);
 
 // The seat/equip gates the switch walks consume.
 // [orig: the parentSlot {2,3,5} stance gate @ 0x4e0192; the equip-commit

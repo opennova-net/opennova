@@ -463,9 +463,11 @@ struct Entity {
     // Loadout-derived entity+44 bits 8 (armor) and 16 (parachute).
     // [orig: WeaponSlotTable_LoadAllFromDefs @0x541503..0x5415ba]
     uint32_t carry_flags = 0;
-	std::string hud_image;
-	uint32_t hud_hit_feedback_serial =
-			0; // [orig: hit flag +44 &0x1000 @0x4E9390] // item definition sprite, read by the HUD
+	std::string hud_image; // item definition sprite, read by the HUD
+	// The shooter's hit-feedback latch, modelled as a serial each connection
+	// consumes once. [orig: entity+0x2C |= 0x1000 @0x4E9962; test/clear
+	//  @0x4FF7C5..0x4FF7D9]
+	uint32_t hud_hit_feedback_serial = 0;
     int32_t health = 100;     // signed i16 retail storage carried sign-extended; <=0 -> dead
     // items.def hp (itemDef+0x17C healthMax), stamped by the host's item-traits sweep
     // (0 = unresolved). The original spawns entities at Health = healthMax

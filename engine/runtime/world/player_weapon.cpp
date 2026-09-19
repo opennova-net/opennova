@@ -48,6 +48,16 @@ WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w) {
 	return &w.slot;
 }
 
+// The local player's Pitch store: the body, its look mirror and the
+// input-owned look word move together.
+void local_player_level_pitch(World &world) {
+	if (AiEntity *body = world.ai.for_handle(world.cached.local_player)) {
+		body->pitch = 0;
+		body->inf.look_pitch = 0;
+	}
+	if (world.local_player_state) world.local_player_state->input.look_pitch = 0;
+}
+
 const WeaponSlotState *active_local_weapon_slot(const World &world,
 		const LocalPlayerWeapon &w) {
 	if (w.usegun_slot_active && w.usegun_mount.valid()) {
@@ -505,13 +515,10 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
     if (!same_weapon_rebake) {
         const bool absorb = (flags & DEF_WEAPON_FLAG_ABSORBPITCH) != 0;
         w.pitch_offset_bam = absorb ? io::bam_sub(w.pitch_max_bam, w.pitch_min_bam) : 0;
-        if (absorb) {
-            if (AiEntity *body = world.ai.for_handle(world.cached.local_player)) {
-                body->pitch = 0;
-                body->inf.look_pitch = 0;
-            }
-            if (world.local_player_state) world.local_player_state->input.look_pitch = 0;
-        }
+        // The mount stamp reads the RAW def flag, not the seat-flag query.
+        // [orig: Player_MountWeaponSlot @0x4DFA86; Pitch = 0 / offset = max - min
+        //  @0x4DFAB7, else 0 @0x4DFABE]
+        if (absorb) local_player_level_pitch(world);
     }
     view.weapon_hip_pose = data.view_hip_pose;
     view.weapon_ads_pose = data.view_ads_pose;
@@ -1058,7 +1065,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			const WeaponTableEntry *adm = world.tables.weapons.by_index(adm_index);
 			if (adm != nullptr && adm->ammo_index >= 0) {
                 int32_t pose[6];
-                local_weapon_fire_pose(world, w, ev.fired_clip_before_consume, pose);
+                local_weapon_fire_pose(world, w, ev.fired_clip_before_consume,
+                        player_view_scope_settled(view), pose);
                 const Vec3 origin{float(pose[0])/65536.0f, float(pose[1])/65536.0f, float(pose[2])/65536.0f};
                 const FixedVec3 fire_origin{pose[0], pose[1], pose[2]};
 				const bool accepted = !io.is_authority ||

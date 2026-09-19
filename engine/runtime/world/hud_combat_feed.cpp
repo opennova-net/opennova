@@ -51,10 +51,15 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 		world.ai.weapon_aim_origin(world, *target, out.target.data());
 		out.target_valid = true;
 		// These are mpattrib option bits, not a time-based animation. The
-		// original shifts by 3 on a network peer, by 8 locally.
-		// [orig: @0x592680..0x592705, @0x592CE2..0x592D0D]
-		const bool peer = world.rules.mp_session && !world.rules.projectile_authority;
-		const bool admitted = ((world.rules.mpattrib >> (peer ? 3 : 8)) & 1u) == 0;
+		// selector is the is_client bit, which connection modes 2 AND 3 set:
+		// every instance that owns a local player (single player, the listen
+		// host, a joiner) tests bit 3. The >> 8 leg belongs to a dedicated
+		// host, which draws no HUD.
+		// [orig: HUD_DrawCrosshair -- g_rules_flags @0x59265F,
+		//  is_mp_session_peer @0x5926D4, shr 3 @0x5926DC / shr 8 @0x5926E1;
+		//  CGameSession_SetConnectionMode @0x4C49F0]
+		const bool client = world.cached.local_player.valid();
+		const bool admitted = ((world.rules.mpattrib >> (client ? 3 : 8)) & 1u) == 0;
 		const bool team = s.target_friendly || (target->team != 1 && target->team != 2);
 		const bool team_mode =
 				!world.rules.session_open || (world.match.rules().game_type & 0x10000u);
@@ -79,7 +84,7 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 				? 0
 				: 2 - ((player->net_stance_bits & 2) != 0);
 		const int spread = def ? def->error_fp16[stance + (view.scope_details_scoped ? 3 : 0)] : 0;
-		const auto impact = predict_hud_impact(world, weapon, spread);
+		const auto impact = predict_hud_impact(world, weapon, view.scope_settled, spread);
 		out.impact = impact.position;
 		out.impact_valid = true;
 		s.impact_map = impact.hit && (weapon.def.flags & 0x100000u);
@@ -135,7 +140,7 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	if (s.custom_aim && mount && world.collision) {
 		int32_t pose[6];
 		const auto *slot = active_local_weapon_slot(world, weapon);
-		local_weapon_fire_pose(world, weapon, slot ? slot->clip : 0, pose);
+		local_weapon_fire_pose(world, weapon, slot ? slot->clip : 0, view.scope_settled, pose);
 		int32_t end[3], forward[3] = { 65536000, 0, 0 };
 		collision_matrix_from_euler(pose[3], pose[4], pose[5], pose).transform_point(forward, end);
 		ProjectileTrace ray;

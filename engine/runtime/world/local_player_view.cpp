@@ -402,6 +402,13 @@ bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerV
     // 1 on the hipfire-return leg) [orig: Setup @0x4df1b3..0x4df36e].
     if (!local_player_set_scope(world, w, v, active_slot, !promoted))
         return false;
+    // The engage leg forces the promoted byte to 1 around its seat-flag
+    // queries, so an OnlyScoped AbsorbPitch weapon levels the body pitch as
+    // the sight comes up; the tube elevation then rides the offset alone.
+    // [orig: g_weaponScopeActive = 1 @0x4DF2A2; AbsorbPitch query @0x4DF302
+    //  -> Pitch = 0 @0x4DF314; g_weaponScopeActive = 0 @0x4DF31D]
+    if (!promoted && (w.def.flags & DEF_WEAPON_FLAG_ABSORBPITCH) != 0)
+        local_player_level_pitch(world);
     if (!promoted)
         weapon_fsm_queue_scope_up(active_slot);
     else
@@ -578,7 +585,9 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
 }
 
 // HUD stance differs from the body's animation stance while mounted.
-// [orig: HUD_BuildEntityInfo @0x4B8539..0x4B8786]
+// [orig: HUD_BuildEntityInfo @0x4B8440 -- MoveOrder stance @0x4B860C..0x4B8636,
+//  seat switch @0x4B863D..0x4B8767, organic mounted @0x4B876D..0x4B8779,
+//  parachute @0x4B8780..0x4B8786]
 static void fill_hud_context(World *world, const Entity *local,
         const LocalPlayerWeapon &weapon, LocalPlayerViewFrame &out) {
     if (!world || !local) return;
@@ -600,13 +609,17 @@ static void fill_hud_context(World *world, const Entity *local,
         case SeatType::Driver:
             out.hud_stance = 3;
             break;
-        case SeatType::Gunner: {
-            const Entity *carrier = world->registry.get(mount->emplacement_parent);
-            out.hud_stance = carrier && carrier->has_item_def && carrier->item_type == 1 ? 3 : 4;
+        case SeatType::Gunner:
+            // A gunner reads "Emplaced" (4) whatever carries the gun. Retail's
+            // carrier-is-a-vehicle -> 3 leg tests hudInfo+0x234, which the frame
+            // builder has just memset to zero, so it never fires.
+            // [orig: HUD_RenderAllOverlays memset @0x5A80A5..0x5A80B1 before the
+            //  call @0x5A80BC; the stale read @0x4B84D1 and its dead store
+            //  @0x4B8507; the EmplacedStance - 1 override @0x4B8539..0x4B8549]
+            out.hud_stance = 4;
             if (weapon.active && weapon.emplaced_stance != 0)
                 out.hud_stance = uint8_t(uint32_t(weapon.emplaced_stance) - 1u);
             break;
-        }
         default: break;
         }
     }

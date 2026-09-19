@@ -1745,9 +1745,12 @@ void test_hud_context_tracks_mount_weapon_and_dismount() {
     install(1);
     read();
     CHECK(frame.hud_stance == 4 && frame.hud_weapon_category == 4);
+    // Retail's carrier-is-a-vehicle leg reads hudInfo+0x234 straight after the
+    // frame builder zeroed it, so a vehicle-carried gun still reads Emplaced.
+    // [orig: memset @0x5A80B1; stale read @0x4B84D1]
     lw.w.registry.get(gun)->emplacement_parent = hull;
     read();
-    CHECK(frame.hud_stance == 3); // a gun attached to a type-1 carrier
+    CHECK(frame.hud_stance == 4);
     install(0);
     read();
     CHECK(frame.hud_stance == 1); // authored stance overrides the carrier default

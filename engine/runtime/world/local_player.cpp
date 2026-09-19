@@ -183,13 +183,18 @@ void LocalPlayer::look(float dx_px, float dy_px) {
 	look_accum_x_ -= static_cast<float>(dx);
 	look_accum_y_ -= static_cast<float>(dy);
 	if (dx == 0 && dy == 0) return;
-    if (weapon.active && (weapon.def.flags & DEF_WEAPON_FLAG_ABSORBPITCH) != 0) {
-        // Axis bindings 164/165 change dword_B79008, leaving body pitch alone.
-        // [orig: Input_HandleActionBinding_0 @0x4E0EC3..0x4E0FE8]
+    if (w::local_weapon_seat_flag(weapon, w::player_view_scope_settled(view),
+                DEF_WEAPON_FLAG_ABSORBPITCH)) {
+        // The mouse-Y binding (action 164) SUBTRACTS its scaled value from
+        // dword_B79008 where the ordinary arm adds the same value to Pitch,
+        // then clamps the offset to 0..(max - min). Body pitch is left alone.
+        // [orig: Input_HandleActionBinding_0 case 164 -- seat-flag query
+        //  @0x4E0F9D, `sub dword_B79008, ecx` @0x4E0FE2, clamp
+        //  @0x4E0F1A..0x4E0F3A; the ordinary arm `add [eax+14h], edx` @0x4E0D39]
         const auto delta = player_look_delta(look_settings, dx, dy, scoped_zoom);
         input.look_heading = io::bam_add(input.look_heading, delta.yaw);
         weapon.pitch_offset_bam = std::max(0, std::min(
-            io::bam_add(weapon.pitch_offset_bam, delta.pitch),
+            io::bam_sub(weapon.pitch_offset_bam, delta.pitch),
             io::bam_sub(weapon.pitch_max_bam, weapon.pitch_min_bam)));
     } else {
         w::player_look_apply(input.look_heading, input.look_pitch, look_settings, dx, dy, scoped_zoom, prone);
@@ -458,9 +463,11 @@ void LocalPlayer::apply_player_input_pre_tick() {
     // [orig: Entity_ApplyFreeLookRotation @0x4ae090, called by the local
     // body before aim/camera updates]. Both pitch limits follow body slope.
     if ((world.logic_tick & 1u) != 0) {
-        // Look-up/down key bindings are refused by AbsorbPitch weapons.
-        // [orig: @0x4E0E88 / @0x4E0F67]
-        const bool absorb = weapon.active && (weapon.def.flags & DEF_WEAPON_FLAG_ABSORBPITCH) != 0;
+        // Look-up/down key bindings are refused while the AbsorbPitch seat
+        // flag answers (an OnlyScoped weapon only once promoted).
+        // [orig: cases 154/155 -- Entity_CheckWeaponSeatFlags @0x4E0EA5 / @0x4E0F73]
+        const bool absorb = w::local_weapon_seat_flag(weapon, w::player_view_scope_settled(view),
+                DEF_WEAPON_FLAG_ABSORBPITCH);
         int32_t pitch = input.look_pitch;
         player_look_keys(input.look_heading, pitch, input.turn_left,
             input.turn_right, input.look_up && !absorb, input.look_down && !absorb,

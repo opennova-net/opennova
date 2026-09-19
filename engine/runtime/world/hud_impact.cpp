@@ -8,7 +8,8 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 namespace opennova::world {
-HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, int32_t spread_q16) {
+HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, bool scope_settled,
+		int32_t spread_q16) {
 	HudImpact out;
 	const Entity *player = world.registry.get(world.cached.local_player);
 	const int index = world.tables.weapons.index_of(weapon.def_name.c_str());
@@ -23,7 +24,7 @@ HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, int32_t sp
 		return out;
 	int32_t pose[6];
 	const auto *slot = active_local_weapon_slot(world, weapon);
-	local_weapon_fire_pose(world, weapon, slot ? slot->clip : 0, pose);
+	local_weapon_fire_pose(world, weapon, slot ? slot->clip : 0, scope_settled, pose);
 	const int32_t speed = int32_t(uint32_t(ammo->velocity) << 16) / 62;
 	const double pitch = double(int32_t(uint32_t(pose[4]) & 0xFFFF0000u)) * io::kRadiansPerBam;
 	const double yaw = double(int32_t(uint32_t(pose[3]) & 0xFFFF0000u)) * io::kRadiansPerBam;

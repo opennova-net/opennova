@@ -2915,7 +2915,15 @@ void test_guided_round_uses_live_target_ammo_and_pool_lifetime() {
     world.registry.get(rig.target)->position={500,-100,30};
     round.age_ticks=39;
     world.round_sim.tick(world,nullptr);
-    CHECK(round.guided.steer[1]==-100*65536 && round.guided.steer[2]==30*65536);
+    // The in-flight refresh samples the person target's AIM ORIGIN: its
+    // Position plus the phased CameraOffset point and the XY jitter, keyed on
+    // tick + 36 * net id. This rig's target carries a zero CameraOffset.
+    // [orig: Entity_ComputeWeaponFireOrigin @0x43B4C2..0x43B523; stng @0x4463A3]
+    const Entity *tracked=world.registry.get(rig.target);
+    const uint32_t phase=world.logic_tick+36u*uint32_t(tracked->net_id);
+    const int32_t jitter=int32_t(phase&0x60u);
+    CHECK(round.guided.steer[0]==500*65536+(jitter-64)*64);
+    CHECK(round.guided.steer[1]==-100*65536+(jitter-32)*64 && round.guided.steer[2]==30*65536);
     CHECK(round.yaw_bam==-1000000); // ammo's yaw limit, not a fixed default
     CHECK(round.vel.x>3.9f && round.vel.x<=4.0f); // this ammo's 248 u/s
     CHECK(round.guided.target==rig.target.packed);

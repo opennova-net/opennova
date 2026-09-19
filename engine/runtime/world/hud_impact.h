@@ -14,5 +14,6 @@ struct HudImpact {
 // It never spawns a live round, effects, damage, or inventory mutations.
 // [orig: Player_UpdatePerFrame @0x4DE350; Projectile_InitFromSpawnSlot @0x4E75A0;
 // Entity_UpdateFallingObject @0x445420]
-HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, int32_t spread_q16);
+HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, bool scope_settled,
+		int32_t spread_q16);
 } // namespace opennova::world

@@ -165,12 +165,18 @@ void HostRole::drain_host_client_gameplay_requests() {
 	replication::Datagram dg;
 	std::vector<replication::Datagram> deferred;
 	while (state.host_loop.host_recv(dg)) {
-		// The host's action-6 request uses its local client queue too. Dispatch
-		// it before the later ENTITY_UPLINK-only drain consumes this FIFO.
-		// [orig: Input_HandleActionBinding_0 @ 0x4E0420 (action 6 @ 0x4E0492) ->
-		// NapiNPServerMsg_HandleWeaponToggle @ 0x511A70]
+		// Every gameplay request the host's own player produces rides this
+		// local client queue: the reload, the action-6 mounted-slot select and
+		// the medic call all go through CNapiNetwork_QueueReliableMessage with
+		// no is_authority exclusion. Dispatch them before the later
+		// ENTITY_UPLINK-only drain consumes this FIFO.
+		// [orig: Input_HandleActionBinding_0 @ 0x4E0420 (action 6 @ 0x4E0492,
+		//  push 16h @ 0x4E04E4) -> NapiNPServerMsg_HandleWeaponToggle @ 0x511A70;
+		//  Input_HandleActionBinding action 217 @ 0x49B4B4..0x49B50C (push 2Eh
+		//  @ 0x49B500)]
 		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST &&
-				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT) {
+				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT &&
+				dg.tag != c2s::MEDIC_REQUEST) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}

@@ -51,7 +51,7 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 			const auto saved_pitch = mount->emplaced_gun_pitch_word;
 			mount->emplaced_gun_yaw_word = int16_t(desired_yaw);
 			mount->emplaced_gun_pitch_word = int16_t(desired_pitch);
-			local_weapon_fire_pose(world, weapon, slot->clip, pose);
+			local_weapon_fire_pose(world, weapon, slot->clip, view.scope_settled, pose);
 			mount->emplaced_gun_yaw_word = saved_yaw;
 			mount->emplaced_gun_pitch_word = saved_pitch;
 			if (weapon.def.scope_zero.max_steps) {

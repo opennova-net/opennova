@@ -1237,12 +1237,6 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
     const auto *ammo = world.tables.ammo.by_index(r.ammo_index);
     EntityHandle damage_entity = collision.geometry_entity;
     Entity *target = world.registry.get(damage_entity);
-	// Physical entity contact arms feedback even when armor absorbs all damage.
-	// The per-recipient frame consumes it once, including the listen host.
-	// [orig: Projectile_HandleEntityImpact @0x4E9390; writer @0x4FF7C5]
-	if (authoritative && target && !(target->flags & kEntityFlagDead))
-		if (Entity *owner = world.registry.get(r.owner))
-			++owner->hud_hit_feedback_serial;
     if (target && target->item_type != 1 && (target->item_attrib & kItemAttribEweap)) {
         Entity *parent = world.registry.get(target->ground_target);
         if (parent && parent->item_type == 1) { target = parent; damage_entity = parent->handle; }
@@ -1855,6 +1849,23 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                   : (collision.hit_zone >= 0 ? collision.hit_zone
                                              : collision.bone_index))
             : static_cast<int16_t>(-1);
+
+        // The PERSON impact handler arms the shooter's hit-feedback latch at
+        // its head, before any damage and even when armor absorbs it all, for
+        // a victim not already flagged dead. The entity handler and the squib
+        // rays never set it. The per-recipient frame consumes it once,
+        // including the listen host's own.
+        // [orig: Projectile_HandleTerrainImpact_0 @0x4E98F0 (the person
+        //  handler) -- dead gate @0x4E9920, owner @0x4E9958, `or [eax+2Ch],
+        //  1000h` @0x4E9962; consumed by NetPacket_WritePlayerState @0x4FF7C5]
+        if (person_collision && r.consequence_mode == RoundConsequenceMode::Authoritative &&
+                (!world.rules.mp_session || world.rules.projectile_authority)) {
+            const Entity *victim = world.registry.get(collision.geometry_entity);
+            if (victim != nullptr &&
+                    ((victim->flags | victim->engine_flags) & kEntityFlagDead) == 0)
+                if (Entity *shooter = world.registry.get(r.owner))
+                    ++shooter->hud_hit_feedback_serial;
+        }
 
         if (!not_armed) process_damage_hit(world, r, collision, velocity_q16);
 

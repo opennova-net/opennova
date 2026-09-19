@@ -93,7 +93,8 @@ void LocalPlayer::update_aim_target() {
     if (!e || !body || (e->flags & 2u) != 0) return;
     if ((world_.logic_tick & 15u) == 0 && world_.collision) {
         int32_t fire[6];
-        local_weapon_fire_pose(world_, weapon, active_local_weapon_slot(world_, weapon)->clip, fire);
+        local_weapon_fire_pose(world_, weapon, active_local_weapon_slot(world_, weapon)->clip,
+                player_view_scope_settled(view), fire);
         int32_t origin[3] = {fire[0], fire[1], fire[2]};
         int32_t yaw = fire[3], pitch = fire[4], roll = fire[5];
         // The weapon-view offsets: the scope-zero elevation comes back OUT of
