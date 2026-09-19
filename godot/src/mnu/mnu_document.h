@@ -126,7 +126,6 @@ private:
 
 	opennova::mnu::Window *window_at(const Locator &loc);
 	const opennova::mnu::Window *window_at(const Locator &loc) const;
-	IdWindow *id_window_at(const Locator &loc);
 
 	// The opennova::mnu::Appearance state string of a texture slot.
 	static const char *state_for_slot(int slot);

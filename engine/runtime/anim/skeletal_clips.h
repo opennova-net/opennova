@@ -115,6 +115,23 @@ public:
 	const LoadedClip *find_clip(const std::string &key) const;
 	const LoadedClip *find_clip_variant(const std::string &key, int variant) const;
 
+	// Compose the channels over an already sampled pose: the weapon-channel
+	// splice, then the aim overlay on top, in the witnessed order
+	// [orig: @0x4b14a7..@0x4b16a7 run before the per-bone overlay loop].
+	// Presentation passes its typed overlay-class rows (the SkeletalAnim
+	// binding's get_overlay_classes); authoritative posing passes this rig's
+	// own overlay_classes(). Null deltas or a class row shorter than the pose
+	// skip the overlay; the weapon channel still splices.
+	void apply_pose_overlay(std::vector<anim::PoseBone> &pose,
+			const anim::Quat *deltas, const std::vector<uint8_t> &classes,
+			const std::string &weapon_key, double weapon_seconds,
+			const std::string &weapon_prev_key = std::string(),
+			double weapon_prev_seconds = 0.0, float weapon_weight = 1.0f,
+			int weapon_variant = 0, int weapon_prev_variant = 0) const;
+
+private:
+	void rebuild_clip_index();
+
 	// The upper-body WEAPON channel: sample weapon_key at ITS OWN playhead and hard-override
 	// the mask bones' WORLD rotations (clavicles/arms/forearms/neck/head/hands — the
 	// anim::kWeaponChannelMaskBones set by BN## index), then re-localize the complete
@@ -141,22 +158,6 @@ public:
 	                           float weapon_blend_weight = 1.0f,
 	                           int weapon_variant = 0,
 	                           int weapon_prev_variant = 0) const;
-	// Compose the channels over an already sampled pose: the weapon-channel
-	// splice, then the aim overlay on top, in the witnessed order
-	// [orig: @0x4b14a7..@0x4b16a7 run before the per-bone overlay loop].
-	// Presentation passes its typed overlay-class rows (the SkeletalAnim
-	// binding's get_overlay_classes); authoritative posing passes this rig's
-	// own overlay_classes(). Null deltas or a class row shorter than the pose
-	// skip the overlay; the weapon channel still splices.
-	void apply_pose_overlay(std::vector<anim::PoseBone> &pose,
-			const anim::Quat *deltas, const std::vector<uint8_t> &classes,
-			const std::string &weapon_key, double weapon_seconds,
-			const std::string &weapon_prev_key = std::string(),
-			double weapon_prev_seconds = 0.0, float weapon_weight = 1.0f,
-			int weapon_variant = 0, int weapon_prev_variant = 0) const;
-
-private:
-	void rebuild_clip_index();
 
 	bool loaded_ = false;
 	bool fk_valid_ = false;

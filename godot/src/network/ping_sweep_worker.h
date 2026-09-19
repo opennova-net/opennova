@@ -31,7 +31,6 @@ public:
 	// flight — the caller re-issues once that sweep's results land.
 	bool start(std::vector<std::pair<int64_t, std::string>> targets, Callable sink,
 	           int64_t generation);
-	bool in_flight() const { return running_.load(); }
 	// Asks the running sweep to stop at its next chunk boundary and joins it.
 	void cancel();
 

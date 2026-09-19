@@ -94,8 +94,6 @@ int lookup_item_attrib2(const char *name, size_t len);
 
 int parse_ints(const char *s, size_t len, int *out, int max_n);
 
-int parse_floats(const char *s, size_t len, float *out, int max_n);
-
 opennova::def::DefHudColor parse_hud_color(Token *vals, int n);
 
 opennova::def::DefHudColor parse_hud_color_argb(Token *vals, int n);

@@ -1913,9 +1913,6 @@ public:
 	// Native (unbound) form for the in-process C++ dev tools (ADR 0042 d6): the same engine
 	// join, returned as the engine vector — no TypedArray/Variant round-trip. Empty without a kernel.
 	std::vector<opennova::world::inspect::EntityRow> native_entity_directory() const;
-	// The engine's tool/probe mutation seam by entity handle (ADR 0042 d5), for the C++
-	// embedders (DevTools) that already hold a handle; null without a kernel.
-	opennova::world::EntityCommands *entity_commands();
 	// Native (unbound): the engine card by value for the C++ dev tools; invalid without a kernel
 	// or a resolving handle.
 	opennova::world::inspect::EntityCard native_entity_card(int p_handle) const;

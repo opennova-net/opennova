@@ -1109,10 +1109,6 @@ Error Simulation::debug_set_entity_item_attrib(int p_handle, int64_t p_attrib,
 			: ERR_DOES_NOT_EXIST;
 }
 
-opennova::world::EntityCommands *Simulation::entity_commands() {
-	return kernel_ ? &kernel_->world.commands : nullptr;
-}
-
 int Simulation::get_mission_variable(int index) const {
 	return kernel_ ? kernel_->world.script.vars.get_mission(index) : 0;
 }
