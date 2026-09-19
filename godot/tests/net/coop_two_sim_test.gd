@@ -44,7 +44,7 @@ const MountLook := preload("res://tests/support/mount_look.gd")
 # flat asset dir under the gitignored res://.godot (ResourceRoot rejects
 # user:// roots), wire it with sim.set_asset_root FIRST, then
 # install_seat_specs_for_type_ids(item_db, ...) runs the ONE engine extractor
-# (simassets::extract_item_seat_specs) over items.def rows + .3di userpoints.
+# (mission::extract_item_seat_specs) over items.def rows + .3di userpoints.
 # carrierzero.3di is the committed carrier with its ctrlx13 seat local zeroed and
 # the sitex rows retired: the corpus authors no zero-offset control seat, and
 # the same-frame carrier-follow pin below compares L against the carrier root.

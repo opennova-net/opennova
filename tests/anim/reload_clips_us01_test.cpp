@@ -13,10 +13,10 @@
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/anim/aim_overlay.h>
-#include <runtime/simassets/adm_skeletal_clips.h>
-#include <runtime/simassets/collision_resolve.h>
-#include <runtime/simassets/sim_pose_provider.h>
-#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/anim/skeletal_clips.h>
+#include <runtime/mission/collision_resolve.h>
+#include <runtime/world/entity_pose.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/world/infantry.h>
 
 #include <cmath>
@@ -95,8 +95,8 @@ int main() {
 			"infantry anim key 66 is reload2");
 
 	// --- 0x14B9 -> the US01 visual item.
-	const int visual = simassets::visual_item_id_for_runtime_type(kPlayerRuntimeType, items);
-	const DefItemDef *def = simassets::find_item_def(items, visual);
+	const int visual = mission::visual_item_id_for_runtime_type(kPlayerRuntimeType, items);
+	const DefItemDef *def = mission::find_item_def(items, visual);
 	if (!expect(def != nullptr, "wire type 0x14B9 resolves to a visual item")) {
 		def_free_items(&items);
 		return 1;
@@ -108,20 +108,20 @@ int main() {
 			"the wire remote player's anim_def is US01");
 
 	// --- The rig: US01.3di bone table + US01.adm clips.
-	simassets::SimModelCache models;
-	models.set_index(&index);
-	const Threedi3di3 *model = models.model_for(def->graphic);
+	assets::AssetStore models{&index};
+
+	const Threedi3di3 *model = models.model(def->graphic).get();
 	if (!expect(model != nullptr, "US01.3di loads")) {
 		def_free_items(&items);
 		return 1;
 	}
 	std::vector<anim::Vec3> origins;
 	std::vector<int> parents;
-	expect(simassets::model_bone_table(*model, origins, parents), "US01 carries a bone table");
+	expect(world::model_bone_table(*model, origins, parents), "US01 carries a bone table");
 	std::string adm(def->anim_def);
 	if (adm.size() < 4 || !iequals(adm.substr(adm.size() - 4).c_str(), ".adm")) adm += ".adm";
-	simassets::AdmSkeletalClips clips;
-	if (!expect(clips.load_from_adm(&index, adm, origins, parents), "US01.adm loads over the bone table")) {
+	anim::SkeletalClips clips;
+	if (!expect(clips.load_from_adm(&models, adm, origins, parents), "US01.adm loads over the bone table")) {
 		def_free_items(&items);
 		return 1;
 	}
@@ -136,7 +136,7 @@ int main() {
 		char msg[160];
 		std::snprintf(msg, sizeof(msg), "US01 clip set carries %s", key);
 		if (!expect(clips.has_clip(key), msg)) continue;
-		const simassets::AdmSkeletalClips::LoadedClip *clip = clips.find_clip(key);
+		const anim::SkeletalClips::LoadedClip *clip = clips.find_clip(key);
 		const uint32_t frames = clip != nullptr ? clip->clip.frame_count : 0;
 		const float fps = clips.clip_fps(key, 0);
 		std::printf("reload_clips: %-13s frames=%u fps=%.2f\n", key, frames, fps);

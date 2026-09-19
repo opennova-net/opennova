@@ -4,7 +4,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
-#include <runtime/simassets/model_builders.h>
+#include <runtime/world/model_geometry.h>
 #include <base/io/fixed.h>
 
 #include "mission/mission_object_placer_keys.h"
@@ -601,9 +601,9 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 		profile.projection_sphere.valid = true;
 	} else if (p_data->has_document()) {
 		profile.projection_sphere =
-				opennova::simassets::collision_projection_sphere_from_3di(p_data->native_model());
+				opennova::world::collision_projection_sphere_from_3di(p_data->native_model());
 		profile.zero_center_projection_sphere =
-				opennova::simassets::collision_projection_sphere_from_3di(
+				opennova::world::collision_projection_sphere_from_3di(
 						p_data->native_model(), 0, 0, true);
 	}
 	_complete_static_lod_profile(profile, retained);

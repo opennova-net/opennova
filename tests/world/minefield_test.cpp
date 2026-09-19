@@ -1,8 +1,8 @@
 // [orig: Entity_InitHardpoints @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
 #include <base/io/rotating_prng.h>
 #include <base/resource_index/resource_index.h>
-#include <runtime/simassets/item_traits.h>
-#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/mission/item_traits.h>
+#include <runtime/assets/asset_store.h>
 #include "common/test_paths.h"
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
@@ -304,8 +304,8 @@ void buried_mine_blast() {
 void authored_binding() {
     ResourceIndex index;
     CHECK(index.scan(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth"));
-    simassets::SimModelCache models;
-    models.set_index(&index);
+    assets::AssetStore models{&index};
+
     def::DefItemDef definition{};
     definition.id = 101896;
     std::strcpy(definition.graphic, "pump_minefield");
@@ -329,7 +329,7 @@ void authored_binding() {
         field.yaw = yaw;
         field.uniform_scale_q16 = 0x20000;
         const auto handle = w.registry.spawn(2, field);
-        simassets::resolve_minefields(w, definitions, models);
+        mission::resolve_minefields(w, definitions, models);
         const auto &bound = *w.registry.get(handle);
         CHECK(bound.minefield.think && bound.minefield.render);
         CHECK(bound.minefield.ammo_small == 1 && bound.minefield.ammo_large == 2);
@@ -341,7 +341,7 @@ void authored_binding() {
             CHECK(p.z == 0); // terrain snap after the identity-bone model-global point
         }
         const auto rng = w.prng16_b_state;
-        simassets::resolve_minefields(w, definitions, models);
+        mission::resolve_minefields(w, definitions, models);
         CHECK(w.prng16_b_state == rng);
     }
 }

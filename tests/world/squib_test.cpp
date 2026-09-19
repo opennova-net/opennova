@@ -1,6 +1,6 @@
 #include <runtime/world/world.h>
 #include <runtime/world/collision.h>
-#include <runtime/simassets/item_traits.h>
+#include <runtime/mission/item_traits.h>
 #include <formats/def/def.h>
 #include <memory>
 #include <cstdio>
@@ -26,7 +26,7 @@ static int test_squib_init_keys_on_ai_function() {
     const auto ai_only=w.registry.spawn(3,marker);
     marker.item_id=6035;
     const auto move_only=w.registry.spawn(3,marker);
-    opennova::simassets::resolve_item_traits(w,definitions,{});
+    opennova::mission::resolve_item_traits(w,definitions,{});
     CHECK(w.registry.get(ai_only)->has_item_def && w.registry.get(move_only)->has_item_def);
     CHECK(!w.registry.get(ai_only)->squib.motor);
     CHECK(w.registry.get(ai_only)->squib.spread_q16==20*65536);

@@ -563,7 +563,7 @@ the sampled water plane. Zero magnitude, dry state, death, disappearance, or
 generation replacement releases the exact group. `VehicleWakePresenter`
 reconciles those groups before `EffectWorld` advances, while portable
 `EffectScene::set_group_parameters` applies the two live formulas above.
-`watercraft_client_motor`, `simassets_item_traits`,
+`watercraft_client_motor`, `mission_item_traits`,
 `particle_effect_scene_contract`, and
 `vehicle_wake_present_pass_test.gd` pin the route.
 

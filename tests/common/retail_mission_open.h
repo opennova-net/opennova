@@ -43,7 +43,6 @@ inline bool open_mission(opennova::testrig::RetailMissionRig &rig, const std::st
 	const size_t dot = name.rfind('.');
 	rig.open_document(std::move(parsed), dot == std::string::npos ? name : name.substr(0, dot),
 	                  std::move(files));
-	rig.set_asset_index(&rig.index);
 	rig.root_dir = install;
 	return true;
 }

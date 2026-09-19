@@ -1,5 +1,7 @@
 #pragma once
 
+#include <runtime/assets/asset_store.h>
+
 #include <atomic>
 
 namespace opennova::env {
@@ -44,8 +46,7 @@ private:
 	// Immutable parsed runtime content. Loading another .3di replaces the whole
 	// model and invalidates every derived cache; there is no Godot authoring
 	// session or editable intermediate representation.
-	opennova::threedi::Threedi3di3 source_model = {};
-	bool has_source_model = false;
+	opennova::assets::Model source_model_;
 	uint64_t change_revision_ = 0;
 	// Process-wide content counter bumped alongside every per-document revision.
 	// Per-frame consumers compare it once instead of walking every tracked model.
@@ -114,10 +115,8 @@ private:
 	}
 
 	void _clear();
-	void _clear_source_model();
 	void _notify_object_changed();
 	Error _open_3di(const String &p_path);
-	Error _open_3di_bytes(const String &p_name, const PackedByteArray &p_bytes);
 	bool _effective_panm_for_lod(int p_lod_index,
 			std::vector<opennova::threedi::ThreediPartAnimation> &r_nodes) const;
 
@@ -166,7 +165,10 @@ public:
 	// Native-side read access to the parsed model. The collision sweep
 	// (Simulation::resolve_collision_instances) builds the runtime collision
 	// model from the CDTA block; GDScript keeps the curated getters only.
-	const opennova::threedi::Threedi3di3 &native_model() const { return source_model; }
+	const opennova::threedi::Threedi3di3 &native_model() const {
+		static const opennova::threedi::Threedi3di3 empty{};
+		return source_model_ ? *source_model_ : empty;
+	}
 
 	Error open_file(const String &p_path);
 	// Mounted .3DI loads also feed the retail-compatible network challenge registry.

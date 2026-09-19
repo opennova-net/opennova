@@ -14,7 +14,7 @@
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include <runtime/mission/placement_traits.h>
-#include <runtime/simassets/sim_pose_provider.h>
+#include <runtime/world/entity_pose.h>
 #include <runtime/world/entity.h>       // EntityKind: the organic-row gate of the DEATH leg
 #include <runtime/world/present_rows.h> // PF_DEATH_CTRL: the org0 skin DEATH register word
 
@@ -556,23 +556,23 @@ namespace {
 
 // The held weapon placement — the calibration and the full derivation live at
 // pivot nudge in raw def units, X negated into the render frame — the values
-// engine simassets/sim_pose_provider.h (the sim-side muzzle shares them)
+// engine world/entity_pose.h (the sim-side muzzle shares them)
 // [orig: flt_7C68E8 = 0.05 +X/-Y, flt_7C9BA8 = 0.051 +Z @ 0x4b2186].
-constexpr int kHeldWeaponBoneIndex = opennova::simassets::kHeldWeaponBoneIndex;
-const Vector3 kHeldWeaponAttachNudge(opennova::simassets::kHeldWeaponAttachNudgeX,
-		opennova::simassets::kHeldWeaponAttachNudgeY,
-		opennova::simassets::kHeldWeaponAttachNudgeZ);
+constexpr int kHeldWeaponBoneIndex = opennova::world::kHeldWeaponBoneIndex;
+const Vector3 kHeldWeaponAttachNudge(opennova::world::kHeldWeaponAttachNudgeX,
+		opennova::world::kHeldWeaponAttachNudgeY,
+		opennova::world::kHeldWeaponAttachNudgeZ);
 // Hand-frame calibration [orig: Rz dbl_7C9BA0 / Ry dbl_7C9B98 via
 // Math_BuildRotationMatrix4x4_ByAxis @ 0x611db0].
-constexpr double kHandFrameZRad = opennova::simassets::kHeldWeaponHandFrameZRad;
-constexpr double kHandFrameYRad = opennova::simassets::kHeldWeaponHandFrameYRad;
+constexpr double kHandFrameZRad = opennova::world::kHeldWeaponHandFrameZRad;
+constexpr double kHandFrameYRad = opennova::world::kHeldWeaponHandFrameYRad;
 
 } // namespace
 
 Basis EntityPresenter::held_weapon_hand_frame_basis(const Basis &bone_model_to_world) {
 	// Row-major `Ry_e · Rz_e · M16` = the calibrations on the RIGHT in column
-	// form; signs as authored (two inversions cancel — the simassets ledger
-	// documents why).
+	// form; signs as authored (two inversions cancel — the entity_pose.h
+	// ledger documents why).
 	return bone_model_to_world * Basis(Vector3(0, 0, 1), kHandFrameZRad) *
 			Basis(Vector3(0, 1, 0), kHandFrameYRad);
 }
@@ -602,11 +602,11 @@ Vector3 EntityPresenter::held_weapon_attach_nudge() {
 }
 
 double EntityPresenter::held_weapon_hand_frame_z_rad() {
-	return opennova::simassets::kHeldWeaponHandFrameZRad;
+	return opennova::world::kHeldWeaponHandFrameZRad;
 }
 
 double EntityPresenter::held_weapon_hand_frame_y_rad() {
-	return opennova::simassets::kHeldWeaponHandFrameYRad;
+	return opennova::world::kHeldWeaponHandFrameYRad;
 }
 
 Object *EntityPresenter::find_skeleton(Object *root) {

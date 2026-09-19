@@ -17,7 +17,7 @@ easier to relay than to rediscover.
   `formats/` (one directory per NovaLogic format — pff, threedi, def, mnu, env, ...;
   ADR 0024 layout; the target also builds mission's format half), `runtime/`(
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
-  terrain_query, environment, hud, menu, simassets, devtools — the Dear ImGui
+  terrain_query, environment, hud, menu, assets, devtools — the Dear ImGui
   pass with the game's F3 dev-tool windows (debug builds only) and ONED's run
   surface, ADR 0039 — plus `session` (the in-match session, the listen-host
   frame, the server/client state machines and frame loops, the transports) and

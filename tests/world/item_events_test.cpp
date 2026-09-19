@@ -5,7 +5,7 @@
 #include <string>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/mission/mission_kernel.h>
-#include <runtime/simassets/item_traits.h>
+#include <runtime/mission/item_traits.h>
 #include <cstring>
 using namespace opennova::world;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n",__LINE__,#c);return 1; } } while(0)
@@ -84,7 +84,7 @@ int test_regional_sound() {
     opennova::def::DefItemsFile items{};
     CHECK(opennova::def::def_parse_items_memory(
             reinterpret_cast<const unsigned char *>(definitions), sizeof(definitions)-1, &items) == 0);
-    opennova::simassets::resolve_item_event_sounds(w, items);
+    opennova::mission::resolve_item_event_sounds(w, items);
     traits = w.tables.item_death_traits.get_mutable(10);
     CHECK(traits->regional_sounds[0].name == "Explicit");
     CHECK(traits->regional_sounds[0].base_ticks == 16384);

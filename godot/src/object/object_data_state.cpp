@@ -2,7 +2,7 @@
 #include "object/object_data_internal.h"
 
 bool ObjectData::has_document() const {
-	return has_source_model;
+	return bool(source_model_);
 }
 
 String ObjectData::get_source_path() const {
@@ -14,5 +14,5 @@ String ObjectData::get_last_error() const {
 }
 
 int ObjectData::get_lod_count() const {
-	return has_source_model ? static_cast<int>(source_model.lod_count) : 0;
+	return source_model_ ? static_cast<int>(native_model().lod_count) : 0;
 }

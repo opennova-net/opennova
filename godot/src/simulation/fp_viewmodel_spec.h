@@ -4,23 +4,23 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <runtime/simassets/fp_viewmodel_spec.h>
+#include <runtime/renderer/fp_viewmodel_spec.h>
 
 namespace godot {
 
-// The first-person submit spec (simassets::FpViewmodelSpec): the gun and arms
+// The first-person submit spec (renderer::FpViewmodelSpec): the gun and arms
 // graphics, the clip .adm, and whether the arms submit at all. Produced by
 // Simulation.fp_viewmodel_spec; the struct carries the witnesses.
 class FpViewmodelSpec : public RefCounted {
 	GDCLASS(FpViewmodelSpec, RefCounted)
 
-	opennova::simassets::FpViewmodelSpec value_;
+	opennova::renderer::FpViewmodelSpec value_;
 
 protected:
 	static void _bind_methods();
 
 public:
-	void assign(const opennova::simassets::FpViewmodelSpec &p_value) { value_ = p_value; }
+	void assign(const opennova::renderer::FpViewmodelSpec &p_value) { value_ = p_value; }
 
 	// Empty = a resolved def with no fpModel intentionally submits no gun.
 	String get_gun() const;

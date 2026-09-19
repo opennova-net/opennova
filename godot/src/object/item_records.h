@@ -123,7 +123,7 @@ public:
 
 // The static mount analysis of ONE item (ItemDatabase.extract_seat_specs_for_item):
 // the native seat-spec extraction over its items.def row + its model
-// (simassets::extract_item_seat_specs), shaped for inspection. `error` names
+// (mission::extract_item_seat_specs), shaped for inspection. `error` names
 // why nothing resolved ("missing_resource_root_or_item_db", "item_not_found");
 // an item without runtime metadata yields an empty card with no error.
 class ItemSeatCard : public RefCounted {

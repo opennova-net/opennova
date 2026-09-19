@@ -9,6 +9,12 @@
 
 namespace opennova {
 
+// Process-wide refresh for derived resource caches. ResourceRoot advances this
+// on mount/clear and explicit refresh; native asset consumers observe it too.
+// Individual ResourceIndex revisions also cover mounts in headless embedders.
+uint64_t cache_epoch();
+void bump_cache_epoch();
+
 struct ResourceFileEntry {
 	std::string kind;
 	std::string path;
@@ -51,6 +57,8 @@ public:
 	          VfsMountMode mode = VfsMountMode::PackedWithLooseOverride,
 	          VfsArchiveDiscovery discovery = VfsArchiveDiscovery::ScanAll);
 	void clear();
+	// Mount/decode revision, including failed scans.
+	uint64_t revision() const { return revision_; }
 	bool has_mounted_archive() const;
 	bool prefers_loose_file(const std::string &name) const;
 
@@ -81,6 +89,7 @@ public:
 	const std::string &last_error() const;
 
 private:
+	uint64_t revision_ = 0;
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 };

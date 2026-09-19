@@ -12,7 +12,7 @@
 #include <string>
 
 #include <runtime/world/present_passes.h>
-#include <runtime/simassets/model_builders.h>
+#include <runtime/world/model_geometry.h>
 
 #include "audio/mission_audio.h"
 #include "lights/effect_light_director.h"
@@ -379,7 +379,7 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 		const Ref<StaticEffectSource> source = light_sources[i];
 		if (source.is_null() || source->get_bms_id() != bms_id) continue;
 		graft->set_bound_radii_q16(
-				opennova::simassets::model_bound_radius_q16_from_3di(
+				opennova::world::model_bound_radius_q16_from_3di(
 						graft->get_object_data()->native_model()),
 				source->get_entity_bound_radius_q16());
 		graft->set_entity_ref(EntityRef::make(source->get_kind(), source->get_entity_index(),

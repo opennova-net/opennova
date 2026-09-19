@@ -15,7 +15,8 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
-#include <runtime/simassets/adm_root_motion.h>
+#include <runtime/anim/adm_root_motion.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
 
@@ -77,8 +78,9 @@ int main() {
 	ResourceIndex index;
 	if (!index.scan(assets) && !index.scan(assets, std::string(), VfsMountMode::LooseOnly))
 		return retail::skip("a mountable OPENNOVA_JO_ASSETS tree");
-	simassets::AdmRootMotion root_motion;
-	const int adm = root_motion.register_adm(&index, "US01.adm");
+	opennova::assets::AssetStore store{&index};
+	anim::AdmRootMotion root_motion;
+	const int adm = root_motion.register_adm(&store, "US01.adm");
 	if (adm < 0) return retail::skip("US01.adm under OPENNOVA_JO_ASSETS");
 
 	expect(std::strcmp(world::kInfantryAnimNames[as::kRollLeft], "roll_left") == 0,

@@ -5,7 +5,7 @@
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
-#include <runtime/simassets/sim_pose_provider.h>
+#include <runtime/world/entity_pose.h>
 #include <formats/threedi/threedi_3di3.h>
 
 using namespace opennova::world;
@@ -200,7 +200,7 @@ static void test_entry_authority_and_ceasefire_presentation() {
 static void test_ssn_fire_uses_the_models_alternating_userpoints() {
     Fixture f;
     CollisionWorld collision;
-    opennova::simassets::SimPoseProvider poses;
+    opennova::world::EntityPoseProvider poses;
     opennova::threedi::ThreediUserPoint points[2] = {};
     points[0].x = 65536; points[0].y = 2 * 65536; points[0].z = 3 * 65536;
     points[1].x = -65536; points[1].z = 2 * 65536;
@@ -218,7 +218,8 @@ static void test_ssn_fire_uses_the_models_alternating_userpoints() {
     const auto shooter = f.world.registry.spawn(1, seed);
     const int model_id = collision.add_model(CollisionModel{});
     collision.assign_entity(shooter, model_id);
-    poses.register_userpoint_model(model_id, &model);
+    poses.register_userpoint_model(model_id,
+            std::make_shared<opennova::threedi::Threedi3di3>(model));
     Entity target;
     target.net_id = 2; target.position = {-100, -200, -300};
     const auto victim = f.world.registry.spawn(0, target);

@@ -12,7 +12,7 @@
 #include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 #include <runtime/mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
 #include <net/npwire/ingame_message_id.h>
-#include <runtime/simassets/fp_viewmodel_spec.h> // the FP viewmodel submit rule
+#include <runtime/renderer/fp_viewmodel_spec.h> // the FP viewmodel submit rule
 #include <runtime/replication/client_roster_tags.h> // the joiner's player walk of the tag pass
 #include <runtime/world/friendly_tags.h> // the D-HUD-20 tag gather
 #include <runtime/world/local_player_view.h> // the USE key's vehicle-loadout zone gates
@@ -556,37 +556,37 @@ Error Simulation::save_weapon_profile_selection(const String &p_path,
 }
 
 double Simulation::weapon_def_pos_scale() {
-	return opennova::simassets::kWeaponDefPosScale;
+	return opennova::renderer::kWeaponDefPosScale;
 }
 
 Vector3 Simulation::viewmodel_fallback_pos_units() {
-	const float *v = opennova::simassets::kFallbackPosUnits;
+	const float *v = opennova::renderer::kFallbackPosUnits;
 	return Vector3(v[0], v[1], v[2]);
 }
 
 Vector3 Simulation::viewmodel_fallback_tpos_units() {
-	const float *v = opennova::simassets::kFallbackTposUnits;
+	const float *v = opennova::renderer::kFallbackTposUnits;
 	return Vector3(v[0], v[1], v[2]);
 }
 
 Vector3 Simulation::viewmodel_fallback_rot_bias_deg() {
-	const float *v = opennova::simassets::kFallbackRotBiasDeg;
+	const float *v = opennova::renderer::kFallbackRotBiasDeg;
 	return Vector3(v[0], v[1], v[2]);
 }
 
 double Simulation::viewmodel_pass_near_z() {
-	return opennova::simassets::kViewmodelPassNearZ;
+	return opennova::renderer::kViewmodelPassNearZ;
 }
 
 String Simulation::viewmodel_bringup_fallback_weapon() {
-	return String(opennova::simassets::kBringupFallbackWeapon);
+	return String(opennova::renderer::kBringupFallbackWeapon);
 }
 
 Ref<FpViewmodelSpec> Simulation::fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 		const String &p_character_arms, const String &p_animadm, int p_flags) {
 	Ref<FpViewmodelSpec> out;
 	out.instantiate();
-	out->assign(opennova::simassets::fp_viewmodel_spec(p_has_def,
+	out->assign(opennova::renderer::fp_viewmodel_spec(p_has_def,
 			std::string(p_gfx1.utf8().get_data()),
 			std::string(p_character_arms.utf8().get_data()),
 			std::string(p_animadm.utf8().get_data()),
@@ -783,7 +783,7 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
 		return index->read_file(name, out);
 	};
-	if (!kernel_->load_weapon_table(files, index,
+	if (!kernel_->load_weapon_table(files, &p_resource_root->native_assets(),
 				std::string(file_name.utf8().get_data())))
 		return ERR_FILE_NOT_FOUND;
 	// In a live session the resident kit buffer is the assigned side's profile

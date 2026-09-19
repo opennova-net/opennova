@@ -19,30 +19,30 @@ constexpr uint32_t kMaxMaterialTextures = 24;
 } // namespace
 
 int ObjectData::get_material_count() const {
-	return has_source_model ? static_cast<int>(source_model.material_count) : 0;
+	return source_model_ ? static_cast<int>(native_model().material_count) : 0;
 }
 
 int ObjectData::find_material_array_index(int p_material_index) const {
-	if (!has_source_model) {
+	if (!source_model_) {
 		return -1;
 	}
-	for (size_t i = 0; i < source_model.material_count; ++i) {
-		if (source_model.materials[i].index == p_material_index) {
+	for (size_t i = 0; i < native_model().material_count; ++i) {
+		if (native_model().materials[i].index == p_material_index) {
 			return static_cast<int>(i);
 		}
 	}
-	if (p_material_index >= 0 && static_cast<size_t>(p_material_index) < source_model.material_count) {
+	if (p_material_index >= 0 && static_cast<size_t>(p_material_index) < native_model().material_count) {
 		return p_material_index;
 	}
 	return -1;
 }
 
 Ref<Texture2D> ObjectData::load_material_slot_texture(int p_array_index, int p_slot) const {
-	if (!has_source_model || p_array_index < 0 ||
-			static_cast<size_t>(p_array_index) >= source_model.material_count) {
+	if (!source_model_ || p_array_index < 0 ||
+			static_cast<size_t>(p_array_index) >= native_model().material_count) {
 		return Ref<Texture2D>();
 	}
-	const ThreediMaterial &mat = source_model.materials[p_array_index];
+	const ThreediMaterial &mat = native_model().materials[p_array_index];
 	for (uint32_t i = 0; i < mat.texture_count && i < kMaxMaterialTextures; ++i) {
 		if (static_cast<int>(mat.textures[i].slot) != p_slot) {
 			continue;
@@ -56,10 +56,10 @@ Ref<Texture2D> ObjectData::load_material_slot_texture(int p_array_index, int p_s
 }
 
 bool ObjectData::get_material_info(int p_index, MaterialInfo &r_info) const {
-	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
+	if (!source_model_ || p_index < 0 || static_cast<size_t>(p_index) >= native_model().material_count) {
 		return false;
 	}
-	const ThreediMaterial &mat = source_model.materials[p_index];
+	const ThreediMaterial &mat = native_model().materials[p_index];
 	MaterialInfo &info = r_info;
 	info = MaterialInfo();
 	info.name = from_native(mat.shader_name);
@@ -92,28 +92,28 @@ bool ObjectData::get_material_info(int p_index, MaterialInfo &r_info) const {
 	info.rgb_gen_start_color = Color(mat.rgb_gen.start_color[0], mat.rgb_gen.start_color[1], mat.rgb_gen.start_color[2], mat.rgb_gen.start_color[3]);
 	info.rgb_gen_end_color = Color(mat.rgb_gen.end_color[0], mat.rgb_gen.end_color[1], mat.rgb_gen.end_color[2], mat.rgb_gen.end_color[3]);
 	info.rgb_gen_reg = mat.rgb_gen.reg;
-	info.rgb_gen_reg_name = control_register_name_for(source_model, mat.rgb_gen.reg);
+	info.rgb_gen_reg_name = control_register_name_for(native_model(), mat.rgb_gen.reg);
 	info.alpha_gen_style = static_cast<int>(mat.alpha_gen.style);
 	info.alpha_gen_rate = mat.alpha_gen.rate;
 	info.alpha_gen_phase = mat.alpha_gen.phase;
 	info.alpha_gen_start = static_cast<int>(mat.alpha_gen.start);
 	info.alpha_gen_end = static_cast<int>(mat.alpha_gen.end);
 	info.alpha_gen_reg = mat.alpha_gen.reg;
-	info.alpha_gen_reg_name = control_register_name_for(source_model, mat.alpha_gen.reg);
+	info.alpha_gen_reg_name = control_register_name_for(native_model(), mat.alpha_gen.reg);
 	info.uv_u_style = static_cast<int>(mat.u_params.style);
 	info.uv_u_rate = mat.u_params.gen_rate;
 	info.uv_u_phase = mat.u_params.phase;
 	info.uv_u_start = mat.u_params.start;
 	info.uv_u_end = mat.u_params.end;
 	info.uv_u_reg = mat.u_params.reg;
-	info.uv_u_reg_name = control_register_name_for(source_model, mat.u_params.reg);
+	info.uv_u_reg_name = control_register_name_for(native_model(), mat.u_params.reg);
 	info.uv_v_style = static_cast<int>(mat.v_params.style);
 	info.uv_v_rate = mat.v_params.gen_rate;
 	info.uv_v_phase = mat.v_params.phase;
 	info.uv_v_start = mat.v_params.start;
 	info.uv_v_end = mat.v_params.end;
 	info.uv_v_reg = mat.v_params.reg;
-	info.uv_v_reg_name = control_register_name_for(source_model, mat.v_params.reg);
+	info.uv_v_reg_name = control_register_name_for(native_model(), mat.v_params.reg);
 	info.anim_frames = static_cast<int>(mat.animation.num_frames);
 	info.anim_type = static_cast<int>(mat.animation.animation_type);
 	info.anim_frame_time = static_cast<int>(mat.animation.cycle_frame_time);
@@ -122,10 +122,10 @@ bool ObjectData::get_material_info(int p_index, MaterialInfo &r_info) const {
 
 PackedStringArray ObjectData::get_material_anim_frames(int p_index, int p_slot) const {
 	PackedStringArray out;
-	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
+	if (!source_model_ || p_index < 0 || static_cast<size_t>(p_index) >= native_model().material_count) {
 		return out;
 	}
-	const ThreediMaterial &mat = source_model.materials[p_index];
+	const ThreediMaterial &mat = native_model().materials[p_index];
 	const int frames = static_cast<int>(mat.animation.num_frames);
 	if (frames <= 0) {
 		return out;
@@ -187,11 +187,11 @@ String ObjectData::canonical_control_register_name(const String &p_name) {
 
 Array ObjectData::get_control_registers() const {
 	Array result;
-	if (!has_source_model) {
+	if (!source_model_) {
 		return result;
 	}
-	for (uint32_t i = 0; i < source_model.ctrl.count; ++i) {
-		const char *authored_name = source_model.ctrl.registers[i].name;
+	for (uint32_t i = 0; i < native_model().ctrl.count; ++i) {
+		const char *authored_name = native_model().ctrl.registers[i].name;
 		const uint8_t runtime_ordinal =
 				threedi_ctrl_register_loader_ordinal(authored_name);
 		Dictionary item;
@@ -211,12 +211,12 @@ Array ObjectData::get_control_registers() const {
 }
 
 String ObjectData::resolve_material_texture_path(int p_material_index, int p_texture_index) const {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count ||
+	if (!source_model_ || p_material_index < 0 || static_cast<size_t>(p_material_index) >= native_model().material_count ||
 			p_texture_index < 0 || p_texture_index >= static_cast<int>(kMaxMaterialTextures)) {
 		return String();
 	}
 
-	const ThreediMaterial &material = source_model.materials[p_material_index];
+	const ThreediMaterial &material = native_model().materials[p_material_index];
 	if (static_cast<uint32_t>(p_texture_index) >= material.texture_count) {
 		return String();
 	}
@@ -230,12 +230,12 @@ String ObjectData::resolve_material_texture_path(int p_material_index, int p_tex
 }
 
 Ref<Texture2D> ObjectData::load_material_texture(int p_material_index, int p_texture_index) const {
-	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count ||
+	if (!source_model_ || p_material_index < 0 || static_cast<size_t>(p_material_index) >= native_model().material_count ||
 			p_texture_index < 0 || p_texture_index >= static_cast<int>(kMaxMaterialTextures)) {
 		return Ref<Texture2D>();
 	}
 
-	const ThreediMaterial &material = source_model.materials[p_material_index];
+	const ThreediMaterial &material = native_model().materials[p_material_index];
 	if (static_cast<uint32_t>(p_texture_index) >= material.texture_count) {
 		return Ref<Texture2D>();
 	}
@@ -248,7 +248,7 @@ Ref<Texture2D> ObjectData::load_material_texture(int p_material_index, int p_tex
 }
 
 Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const {
-	if (!has_source_model || p_texture_name.is_empty()) {
+	if (!source_model_ || p_texture_name.is_empty()) {
 		return Ref<Texture2D>();
 	}
 	if (resource_root.is_valid()) {

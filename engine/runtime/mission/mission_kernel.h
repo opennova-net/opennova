@@ -28,13 +28,13 @@
 #include <runtime/mission/event_runtime.h>
 #include <runtime/mission/promote.h>
 #include <runtime/mission/runtime_boot.h>
-#include <runtime/simassets/adm_clip_index.h>
-#include <runtime/simassets/adm_root_motion.h>
-#include <runtime/simassets/collision_resolve.h>
-#include <runtime/simassets/item_traits.h>
-#include <runtime/simassets/mounted_pose.h>
-#include <runtime/simassets/sim_pose_provider.h>
-#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/anim/adm_clip_index.h>
+#include <runtime/anim/adm_root_motion.h>
+#include <runtime/mission/collision_resolve.h>
+#include <runtime/mission/item_traits.h>
+#include <runtime/world/mounted_pose.h>
+#include <runtime/world/entity_pose.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/particle/effect_catalog_names.h>
@@ -137,12 +137,15 @@ public:
 	void open_document(bms::File mission_doc, std::string mission_file_basename,
 			BootFileSource files);
 	// --- embedder source seams (ADR 0042 d3) --------------------------------
-	// The embedder's already-mounted index (the shell's ResourceRoot). When
+	// The embedder's shared native assets (the shell's ResourceRoot). When
 	// installed it replaces the kernel's own mount for every asset resolve
 	// (models, collision pose rigs, .adm registration, the weapon-table
-	// texture index) and clears the pose caches like a root switch; null
-	// reverts to the kernel's own open() mount.
-	void set_asset_index(const ResourceIndex *asset_index);
+	// animation source) and clears the pose caches like a root switch; null
+	// reverts to the kernel's own open() mount. The source outlives the kernel.
+	void set_assets(const assets::AssetStore *source);
+	const assets::AssetStore &assets() const {
+		return external_assets_ ? *external_assets_ : owned_assets_;
+	}
 	// The embedder's already-parsed items.def (the shell's retained rows).
 	// Overrides the open_document parse — the caller keeps it alive for the
 	// kernel's lifetime; null reverts to the kernel's own parse.
@@ -153,13 +156,13 @@ public:
 		return items_override_ != nullptr ? items_override_
 										  : (items_ok ? &items : nullptr);
 	}
-	// The embedder's item-trait sweep over items_table() (simassets
-	// resolve_item_traits with the embedder's wire-class classifier: the
-	// callback class and health every registry row carries). The baseline is
+	// The embedder's item-trait sweep over items_table(), using
+	// mission::resolve_item_traits with the embedder's wire-class classifier: the
+	// callback class and health every registry row carries. The baseline is
 	// captured before the embedder supplies these traits, so restore_baseline
 	// re-runs the sweep with the retained classifier before any view is
 	// rebuilt from the restored rows.
-	void resolve_item_traits(simassets::ItemWireClassFn wire_class);
+	void resolve_item_traits(mission::ItemWireClassFn wire_class);
 	// Re-run the embedder's sweep with the retained classifier (a streamed
 	// topology change, the baseline restore); no-op before the embedder ran it.
 	void resweep_item_traits();
@@ -256,9 +259,9 @@ public:
 	// The armory table (weapon.def -> world.tables.weapons + the retained rows), the
 	// mission loadout-chunk promotion and the spawn-kit rebuild — the boot's
 	// load_weapon_table step over an explicit source so the embedder's
-	// table-feed seam shares the one body. `index` resolves texture/model
-	// references (null = the kernel's own asset index).
-	bool load_weapon_table(const BootFileSource &files, const ResourceIndex *index,
+	// table-feed seam shares the one body. `source` supplies shared animation
+	// assets (null = the kernel's installed asset store).
+	bool load_weapon_table(const BootFileSource &files, const assets::AssetStore *source,
 			const std::string &name = "weapon.def");
 	// ammo.def -> world.tables.ammo + the weapon round_type resolve.
 	bool load_ammo_table(const BootFileSource &files,
@@ -268,11 +271,11 @@ public:
 	// re-point the AI. Returns the default map's clip count (0 = no default;
 	// armed model-specific maps still resolve and can supply root motion).
 	int install_infantry_anim(const std::string &adm_name,
-			const ResourceIndex *adm_index = nullptr);
+			const assets::AssetStore *adm_assets = nullptr);
 	// (Re)arm the per-entity .adm resolution: every soldier grounds on its OWN
 	// model .adm from here on (D-INF-6); the boot's resolve_infantry_adm step
 	// and the shell's explicit re-arm share this body.
-	void rearm_infantry_adm(const ResourceIndex *adm_index = nullptr);
+	void rearm_infantry_adm(const assets::AssetStore *adm_assets = nullptr);
 	// Spawn the authoritative side's own player at the mission's player-START
 	// marker, selected the way the original engine does (by game type,
 	// FARTHEST from the enemy set). 1 = spawned at a real marker, 0 = origin
@@ -322,10 +325,9 @@ public:
 	bool wac_loaded = false;
 	world::CollisionWorld collision;
 	world::OcclusionWorld occlusion;
-	simassets::SimPoseProvider collision_pose;
-	simassets::SimModelCache models;
-	simassets::CollisionResolveState collision_state;
-	simassets::AdmRootMotion root_motion;
+	world::EntityPoseProvider collision_pose;
+	mission::CollisionResolveState collision_state;
+	anim::AdmRootMotion root_motion;
 	std::vector<ItemSeatSpec> seat_specs;
 	std::unordered_map<int32_t, std::string> mounted_graphics;
 	// The loaded document is a true S2C 0x0B mission: the 616-byte BMS header
@@ -370,10 +372,10 @@ public:
 	opennova::def::DefWeaponsFile weapon_defs{};
 	bool weapon_defs_ok = false;
 	bool ammo_ok = false;
-	simassets::AdmClipIndex clip_index;
+	anim::AdmClipIndex clip_index;
 	// A non-negative value is the shell's once-per-frame retail presentation
 	// DWORD for the PANM pose clock; -1 = deterministic logic time
-	// (simassets::mounted_pose_time_ms consumes it).
+	// (world::mounted_pose_time_ms consumes it).
 	int64_t panm_time_override_ms = -1;
 
 	// The native pose counters the soak gates on (the binding's masked-failure
@@ -426,28 +428,31 @@ private:
 	// The live asset source: the embedder's installed index, else the kernel's
 	// own open() mount, else null (nothing to resolve against).
 	const ResourceIndex *asset_index() const {
-		if (external_index_ != nullptr) return external_index_;
-		return own_mounted_ ? &index : nullptr;
+		if (external_assets_ != nullptr) return external_assets_->index();
+		return assets().has_source() ? assets().index() : nullptr;
 	}
+	// The kernel's own store over its open() mount; assets() serves the
+	// embedder's store instead once set_assets installed one. Declared after
+	// `index` (it binds the index's address; the kernel never moves).
+	assets::AssetStore owned_assets_{&index};
 
 	BootFileSource files_;
 	// The per-boot net bring-up hook (KernelBootOptions::bringup_net_session).
 	std::function<void()> bringup_net_session_;
-	// The embedder source overrides (set_asset_index / set_items_table).
-	const ResourceIndex *external_index_ = nullptr;
+	// The embedder source overrides (set_assets / set_items_table).
+	const assets::AssetStore *external_assets_ = nullptr;
 	const opennova::def::DefItemsFile *items_override_ = nullptr;
 	// The embedder's trait sweep classifier (resolve_item_traits); unset until
 	// the embedder ran the sweep, so a restore re-stamps only what it stamped.
-	simassets::ItemWireClassFn item_wire_class_;
+	mission::ItemWireClassFn item_wire_class_;
 	// The embedder's collision sweep ran (resolve_collision_instances): the
 	// gate for the re-sweeps and the wire collision shapes.
 	bool collision_items_resolved_ = false;
 	std::unordered_map<uint16_t, world::ResolvedCollisionShape> wire_collision_shape_by_type_;
 	std::unordered_map<uint16_t, int> adm_by_runtime_type_;
-	bool own_mounted_ = false;
-	// The index the infantry .adm registrations resolve through (the install/
-	// re-arm seam's; defaults to the asset index).
-	const ResourceIndex *adm_index_ = nullptr;
+	// The asset store infantry .adm registrations resolve through (the install/
+	// re-arm seam's; defaults to the kernel's asset store).
+	const assets::AssetStore *adm_assets_ = nullptr;
 	bool opened_ = false;
 	std::function<std::string(int32_t)> people_name_resolver_;
 	void reset_infantry_adm_ids();
@@ -457,16 +462,16 @@ private:
 	int infantry_adm_resolved_ai_count_ = 0;
 
 	struct MountedPoseRest {
-		simassets::MountedPosePartMatrices parts;
+		world::MountedPosePartMatrices parts;
 	};
 	struct MountedPoseLive {
 		uint32_t time_ms = 0;
 		std::array<int32_t, opennova::threedi::THREEDI_CTRL_REGISTER_COUNT> controls{};
 		bool valid = false;
-		simassets::MountedPosePartMatrices parts;
+		world::MountedPosePartMatrices parts;
 	};
-	std::map<const opennova::threedi::Threedi3di3 *, MountedPoseRest> mounted_rest_cache_;
-	std::map<const opennova::threedi::Threedi3di3 *, std::vector<MountedPoseLive>> mounted_live_cache_;
+	std::map<assets::Model, MountedPoseRest> mounted_rest_cache_;
+	std::map<assets::Model, std::vector<MountedPoseLive>> mounted_live_cache_;
 	uint32_t mounted_cache_tick_ = 0xFFFFFFFFu;
 };
 

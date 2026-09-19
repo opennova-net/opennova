@@ -1,8 +1,8 @@
 // Mission-owned allocation for the BMS teammate operations.
 // [orig: Entity_SpawnHelicopter @0x4521A0; Entity_SpawnFromItemDef @0x452390]
 #include <runtime/mission/mission_kernel.h>
-#include <runtime/simassets/item_traits.h>
-#include <runtime/simassets/seat_spec_extract.h>
+#include <runtime/mission/item_traits.h>
+#include <runtime/mission/seat_spec_extract.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity_spawn.h>
 #include <base/io/strutil.h>
@@ -16,7 +16,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     using namespace world;
     const def::DefItemsFile *table = items_table();
     if (!table) return {};
-    const def::DefItemDef *item = simassets::find_item_def(*table, request.item_type + kItemIdOffset);
+    const def::DefItemDef *item = mission::find_item_def(*table, request.item_type + kItemIdOffset);
     if (!item || (item->attrib & kItemAttribAIData) == 0) return {};
 
     const aip::Profile *profile = nullptr;
@@ -38,9 +38,9 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
 
     // Resolve the whole attachment family before allocating any rows. The
     // extractor's cycle/depth handling is shared with ordinary mission boot.
-    simassets::SeatSpecExtraction extracted;
-    simassets::extract_item_seat_specs(*table,
-            [this](const std::string &graphic) { return models.model_for(graphic); },
+    mission::SeatSpecExtraction extracted;
+    mission::extract_item_seat_specs(*table,
+            [this](const std::string &graphic) { return assets().model(graphic).get(); },
             {int(request.item_type) + kItemIdOffset}, extracted);
     for (const ItemSeatSpec &spec : extracted.specs) {
         const auto existing = std::find_if(seat_specs.begin(), seat_specs.end(),
@@ -51,7 +51,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     for (const auto &graphic : extracted.graphic_by_type) mounted_graphics[graphic.first] = graphic.second;
     std::sort(seat_specs.begin(), seat_specs.end(),
             [](const ItemSeatSpec &a, const ItemSeatSpec &b) { return a.type_id < b.type_id; });
-    simassets::stamp_seat_spec_turret_limits(world, seat_specs);
+    mission::stamp_seat_spec_turret_limits(world, seat_specs);
 
     Entity seed;
     seed.kind = request.helicopter ? world::EntityKind::Item : world::EntityKind::Organic;
@@ -69,7 +69,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     if (!handle.valid()) return {};
     world.ai.release(handle);
     const int index = world.ai.attach(handle);
-    simassets::resolve_item_traits(world, *table, item_wire_class_, handle);
+    mission::resolve_item_traits(world, *table, item_wire_class_, handle);
     Entity &entity = *world.registry.get(handle);
     AiEntity &ai = *world.ai.at(index);
     std::copy_n(request.pos, 3, ai.pos);
@@ -117,12 +117,12 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
         if (adm_id == -2 && item->anim_def[0]) {
             std::string name = item->anim_def;
             if (!strutil::ends_with_icase(name, ".adm")) name += ".adm";
-            adm_id = root_motion.register_adm(adm_index_ ? adm_index_ : asset_index(), name);
+            adm_id = root_motion.register_adm(adm_assets_ ? adm_assets_ : &assets(), name);
         }
         ai.inf.adm_id = adm_id;
         world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
     }
-    simassets::resolve_ai_weapons(world, *table, handle, &models);
+    mission::resolve_ai_weapons(world, *table, handle, &assets());
     if (profile) {
         ai.brain.f[AiBrain::kAmmoA] = ai.profile.fire_a.ammo_index >= 0 ? profile->primary.ammo : 0;
         ai.brain.f[AiBrain::kAmmoB] = ai.profile.fire_b.ammo_index >= 0 ? profile->secondary.ammo : 0;
@@ -136,7 +136,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
 
     const ItemAttachmentSpawns children = spawn_item_attachments(world, {handle}, seat_specs);
     for (EntityHandle child : children.handles) {
-        simassets::resolve_item_traits(world, *table, item_wire_class_, child);
+        mission::resolve_item_traits(world, *table, item_wire_class_, child);
         ensure_collision_instance(world, child);
     }
     world.facials.initialize(world);
@@ -148,7 +148,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
 // [orig: Entity_CloneFromTemplateByType @ 0x4398A0]
 world::EntityHandle MissionKernel::spawn_item_piece(const world::Entity &seed) {
     const auto *table = items_table();
-    const auto *def = table ? simassets::find_item_def(*table, seed.item_id + kItemIdOffset) : nullptr;
+    const auto *def = table ? mission::find_item_def(*table, seed.item_id + kItemIdOffset) : nullptr;
     if (!def || seed.item_id == 0) return {};
     const int pool = def->type == 3 ? 0 :
             (def->type == 1 || def->type == 6) ? 1 :
@@ -156,7 +156,7 @@ world::EntityHandle MissionKernel::spawn_item_piece(const world::Entity &seed) {
     if (pool < 0) return {};
     const auto handle = world.registry.spawn(pool, seed);
     if (!handle.valid()) return {};
-    simassets::resolve_item_traits(world, *table, item_wire_class_, handle);
+    mission::resolve_item_traits(world, *table, item_wire_class_, handle);
     // Template values win over definition initialization for these fields.
     auto &piece = *world.registry.get(handle);
     piece.health = seed.health;

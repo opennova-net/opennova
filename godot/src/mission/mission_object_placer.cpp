@@ -16,7 +16,7 @@
 #include <runtime/anim/adm_fallback.h> // the default.adm substitution every spawn applies
 #include <runtime/renderer/object_lod.h>
 #include <base/io/fixed.h>
-#include <runtime/simassets/model_builders.h>
+#include <runtime/world/model_geometry.h>
 #include <runtime/world/entity.h>
 
 #include "env/water.h"
@@ -325,7 +325,7 @@ int32_t MissionObjectPlacer::_item_model_scale_q16(int p_item_id) const {
 }
 
 bool MissionObjectPlacer::_item_projection_zero_center(int p_item_id) const {
-	return item_db_.is_valid() && opennova::simassets::item_def_zero_bbox_center(
+	return item_db_.is_valid() && opennova::world::item_def_zero_bbox_center(
 			item_db_->get_item_type(p_item_id), item_db_->get_attrib(p_item_id));
 }
 
@@ -1476,8 +1476,8 @@ int32_t MissionObjectPlacer::_item_entity_bound_radius_q16(int p_item_id,
 		const Ref<ObjectData> &p_data) {
 	if (p_data.is_null() || item_db_.is_null()) return 0;
 	const auto &model = p_data->native_model();
-	opennova::simassets::EntityBoundRadiusInputs inputs;
-	inputs.model_radius_q16 = opennova::simassets::model_bound_radius_q16_from_3di(model);
+	opennova::world::EntityBoundRadiusInputs inputs;
+	inputs.model_radius_q16 = opennova::world::model_bound_radius_q16_from_3di(model);
 	inputs.uniform_scale_q16 = _item_model_scale_q16(p_item_id);
 	inputs.has_collision_block = model.collision != nullptr;
 	const String husk = item_db_->get_husk(p_item_id);
@@ -1486,11 +1486,11 @@ int32_t MissionObjectPlacer::_item_entity_bound_radius_q16(int p_item_id,
 		if (husk_data.is_valid()) {
 			inputs.has_first_husk = true;
 			inputs.first_husk_radius_q16 =
-					opennova::simassets::model_bound_radius_q16_from_3di(
+					opennova::world::model_bound_radius_q16_from_3di(
 							husk_data->native_model());
 		}
 	}
-	return opennova::simassets::entity_bound_radius_q16(inputs);
+	return opennova::world::entity_bound_radius_q16(inputs);
 }
 
 void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
@@ -1519,7 +1519,7 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 		if (data.is_valid()) {
 			const int32_t entity_radius = _item_entity_bound_radius_q16(p_item_id, data);
 			p_model->set_bound_radii_q16(
-					opennova::simassets::model_bound_radius_q16_from_3di(data->native_model()),
+					opennova::world::model_bound_radius_q16_from_3di(data->native_model()),
 					entity_radius);
 			const bool person = item_db_->get_item_type(p_item_id) == ItemDatabase::TYPE_PERSON;
 			int32_t parachute_radius = 0;
@@ -1529,7 +1529,7 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 				if (!chute_graphic.is_empty()) {
 					const Ref<ObjectData> chute = _load_object_data(chute_graphic);
 					if (chute.is_valid()) parachute_radius =
-							opennova::simassets::model_bound_radius_q16_from_3di(chute->native_model());
+							opennova::world::model_bound_radius_q16_from_3di(chute->native_model());
 				}
 			}
 			p_model->configure_entity_projection(person, parachute_radius,
@@ -1666,9 +1666,9 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 				profile.thresholds_q16.push_back(native_model.lods[lod].lod_threshold);
 			}
 			profile.projection_sphere =
-					opennova::simassets::collision_projection_sphere_from_3di(native_model);
+					opennova::world::collision_projection_sphere_from_3di(native_model);
 			profile.zero_center_projection_sphere =
-					opennova::simassets::collision_projection_sphere_from_3di(
+					opennova::world::collision_projection_sphere_from_3di(
 							native_model, 0, 0, true);
 		}
 		p_tree_parent->remove_child(model);

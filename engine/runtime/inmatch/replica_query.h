@@ -4,7 +4,7 @@
 
 #include <runtime/mission/promote.h> // ItemSeatSpec (the binding-fed per-type seat table)
 #include <runtime/replication/client_state.h>
-#include <runtime/simassets/seat_spec_extract.h> // item_seat_spec_for_type (the installed-table probe)
+#include <runtime/mission/seat_spec_extract.h> // item_seat_spec_for_type (the installed-table probe)
 #include <runtime/world/entity.h>
 
 #include <cstdint>
@@ -43,7 +43,7 @@ inline uint16_t wire_carrier_exclusion_for(
 	const replication::ClientEntityState *carrier =
 			client_entity_for_handle(state, row->carrier_handle);
 	const mission::ItemSeatSpec *spec = carrier != nullptr
-			? simassets::item_seat_spec_for_type(seat_specs, carrier->type_id)
+			? mission::item_seat_spec_for_type(seat_specs, carrier->type_id)
 			: nullptr;
 	if (spec == nullptr) return 0xFFFFu;
 	for (const world::Seat &seat : spec->seats) {

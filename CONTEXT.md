@@ -42,6 +42,18 @@ engine fact reached through one engine function; anything that exists only becau
 Godot node/server/viewport/window/socket/clock/input event/audio player exists is a
 device fact, written as typed Godot code beside its owner.
 
+## Resources and assets
+
+**Resource source**:
+A mounted collection of files, with one lookup policy deciding which loose or
+archived file supplies a name.
+
+**Asset**:
+Reusable model or animation content shared by the entities that use it.
+An entity's position, animation playhead and damage belong to that entity,
+not to its asset.
+_Avoid_: simulation asset, render asset (when both consume the same content)
+
 ## Menu UI (MNU)
 
 The vocabulary for NovaLogic's `.mnu` menu system and OpenNova's runtime support for it.

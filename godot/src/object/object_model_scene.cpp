@@ -9,7 +9,7 @@
 #include "render/frame_fx.h"
 
 #include <runtime/renderer/authored_occluder.h>
-#include <runtime/simassets/model_builders.h>
+#include <runtime/world/model_geometry.h>
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/array_occluder3d.hpp>
@@ -211,7 +211,7 @@ void ObjectModel::rebuild_scene() {
 
 	if (authored_occluders_enabled_) {
 		opennova::world::OcclusionModel occlusion_model;
-		if (opennova::simassets::occlusion_model_from_3di(native_model,
+		if (opennova::world::occlusion_model_from_3di(native_model,
 					occlusion_model)) {
 			const std::vector<opennova::renderer::AuthoredOccluderSection> sections =
 					opennova::renderer::build_authored_occluder_sections(occlusion_model);

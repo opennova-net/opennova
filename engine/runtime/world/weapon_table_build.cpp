@@ -1,7 +1,7 @@
 #include <runtime/world/weapon_table_build.h>
 
 #include <base/io/strutil.h>
-#include <runtime/simassets/adm_clip_index.h>
+#include <runtime/anim/adm_clip_index.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/entity.h>
 
@@ -98,7 +98,7 @@ float table_clip_seconds(void *opaque, const char *key) {
 	return seconds;
 }
 
-void build_clip_context(const DefWeaponDef &def, const ResourceIndex *resources,
+void build_clip_context(const DefWeaponDef &def, const assets::AssetStore *resources,
 		WeaponTableClipContext &out) {
 	if (resources == nullptr) return;
 	// No authored animadm = no anim object at Def+372, so every 'auto' field
@@ -107,7 +107,7 @@ void build_clip_context(const DefWeaponDef &def, const ResourceIndex *resources,
 	// the per-block animadm buffer is consumed then cleared at each weapon
 	// `end` by WeaponDefs_ResetParseState @0x53ff90].
 	if (def.animadm[0] == '\0') return;
-	simassets::AdmClipIndex clips;
+	anim::AdmClipIndex clips;
 	clips.load(resources, def.animadm);
 	for (size_t i = 0; i < def.actions_count; ++i) {
 		const char *key = def.actions[i].anim;
@@ -215,7 +215,7 @@ LoadoutAmmoBytes resolve_loadout_ammo(const world::WeaponTable &table, uint8_t a
 }
 
 world::WeaponTable build_weapon_table(
-		const DefWeaponsFile &weapons, const ResourceIndex *resources) {
+		const DefWeaponsFile &weapons, const assets::AssetStore *resources) {
 	world::WeaponTable table;
 
 	// Ammo classes share the engine's score-slot registry. Before weapon.def parses,

@@ -15,6 +15,7 @@
 #include <unordered_map>
 
 #include <base/resource_index/resource_index.h>
+#include <runtime/assets/asset_store.h>
 
 namespace godot {
 
@@ -38,6 +39,7 @@ private:
 	String root_dir_;
 	String last_error_;
 	opennova::ResourceIndex index_;
+	opennova::assets::AssetStore assets_{&index_};
 	MountKind mount_kind_ = MountKind::None;
 
 	// resolve_file memo: lowercased flat name -> on-disk path (empty = case-variant
@@ -99,7 +101,7 @@ public:
 	// Mods screen and the LAN joiner both perform.
 	Error mount_runtime(const String &path, const String &expansion = String(),
 	                    bool allow_loose_override = false, const String &game_code = "jo");
-	// Global cache epoch (see util/engine_caches.h): bumped by every mount/clear on ANY
+	// Global cache epoch (see base/resource_index/resource_index.h): bumped by every mount/clear on ANY
 	// root. GDScript cache holders compare it against the epoch they were built under and
 	// self-clear when it moved. bump_cache_epoch() lets tools/tests force an
 	// invalidation after files change on disk without remounting.
@@ -162,6 +164,7 @@ public:
 	// C++ siblings only (not bound): direct access to the mounted index without
 	// Variant-boxing its rows through GDScript dictionaries.
 	const opennova::ResourceIndex &native_index() const { return index_; }
+	const opennova::assets::AssetStore &native_assets() const { return assets_; }
 };
 
 } // namespace godot

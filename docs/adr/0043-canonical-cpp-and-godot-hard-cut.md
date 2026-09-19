@@ -73,7 +73,7 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
    through `World &`: `VehicleSystem`, `ZoneSystem`, `LocalPlayer`. The
    feed builders stay free functions under `world/feeds/`. `MissionKernel` is
    boot + state, owns no tick, inherits no provider interface; one
-   `IPoseProvider` with one `simassets::SimPoseProvider` replaces the three
+   `IPoseProvider` with one `world::EntityPoseProvider` replaces the three
    provider interfaces; the dead seams go outright (`INetCommandSink` /
    `LocalSink` / `SerializingSink`, an unwitnessed 0x23 payload with no
    caller; `mission_systems.h`; the kernel's registry and command
