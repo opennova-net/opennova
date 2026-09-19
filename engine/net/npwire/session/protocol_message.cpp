@@ -606,8 +606,7 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 //
 // Regression history: an earlier rewrite used `frag_first && !frag_end`
 // (= dispatch on FRAG_CONT+FRAG_END) which broke retail's mid-fragment
-// flag=0x46 by dispatching it prematurely. See notes/ida_witness_matrix.md
-// for diagnosis trail.
+// flag=0x46 by dispatching it prematurely.
 bool reassemble_protocol_payload(ProtocolReassemblyState &state,
                                  const ProtocolMessage &msg,
                                  std::vector<uint8_t> &payload_out,

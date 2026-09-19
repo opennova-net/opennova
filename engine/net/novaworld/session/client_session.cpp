@@ -15,7 +15,7 @@ namespace opennova {
 namespace {
 
 // A 61-char [A-Z0-9] client SCRK matching retail's length + alphabet
-// (notes/retail_capture_findings.md). Retail randomizes per session; we
+// (docs/net/novaworld-net-re.md §5.9). Retail randomizes per session; we
 // derive deterministically from the client key so dev/test runs are
 // reproducible — only the length + alphabet matter on the wire.
 std::string make_client_scrk(uint32_t seed) {

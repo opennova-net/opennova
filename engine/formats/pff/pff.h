@@ -18,7 +18,7 @@ inline constexpr uint32_t PFF_MAGIC_BHD = 0x34460001u;  /* BHD variant          
 
 /* Entry flags. Bit 0 marks an ENCRYPTED payload (it is NOT a "deleted" marker): the
    engine XOR-decrypts such entries when reading them. Verified against Jointops.exe
-   PFF_LoadFileToMemory @ 0x768920 (see notes/vfs/phase0_ida_verification.md). */
+   PFF_LoadFileToMemory @ 0x768920 (see docs/vfs/vfs-pff-mount-re.md). */
 inline constexpr uint32_t PFF_FLAG_ENCRYPTED = 0x01u;
 
 /* --- Structs --- */

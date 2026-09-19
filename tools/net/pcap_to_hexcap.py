@@ -15,7 +15,7 @@ Requires tshark (ships with Wireshark). On Windows it is auto-detected under
 "C:/Program Files/Wireshark"; override with --tshark.
 
 Examples:
-    python tools/net/pcap_to_hexcap.py capture.pcapng -o notes/ingame.hexcap
+    python tools/net/pcap_to_hexcap.py capture.pcapng -o ingame.hexcap
     python tools/net/pcap_to_hexcap.py capture.pcapng --ports 32768,32769 -o out.hexcap
 """
 

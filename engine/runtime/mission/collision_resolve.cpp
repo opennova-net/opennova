@@ -571,8 +571,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			// entity. A successfully opened model supplies that pointer even when
 			// it has no collision block; missing/corrupt assets leave it null.
 			// [orig: Entity_ProcessBuildingDeath @ 0x49442c]
-			// S3b full: husk models resolve exclusively through the sim cache's
-			// parse-once source.
+			// S3b full: husk models resolve exclusively through the shared
+			// assets::AssetStore (ADR 0044).
 			const Threedi3di3 *first_husk_m3 = nullptr;
 			const Threedi3di3 *final_husk_m3 = nullptr;
 			if (deps.models.has_source()) {

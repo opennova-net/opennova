@@ -72,7 +72,7 @@ struct LobbyConnState {
 	uint32_t server_sk = 0;
 	// Inbound fragment reassembly state. Multi-packet messages
 	// (e.g. ClientRequestVerifyResult ~3.4 KB per
-	// notes/retail_capture_findings.md) carry FRAG_CONT (0x04) on
+	// docs/net/novaworld-net-re.md) carry FRAG_CONT (0x04) on
 	// every chunk except the final. We accumulate into `reassembly`
 	// and only dispatch the assembled payload when FRAG_CONT clears.
 	ProtocolReassemblyState reassembly;

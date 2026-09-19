@@ -10,7 +10,7 @@
    The streaming form (pff_write_archive_streamed) is the core: it pulls one payload at a time via
    a callback, so a multi-hundred-MB archive resaves with only the largest single entry buffered.
    The flat-array form (pff_write_archive) is a thin wrapper for tests and the future dir packer.
-   Mirrors the layout verified in notes/vfs/phase0_ida_verification.md (PFF_Open @ 0x7682e0). */
+   Mirrors the layout witnessed in docs/vfs/vfs-pff-mount-re.md (PFF_Open @ 0x7682e0). */
 
 #include <formats/pff/pff.h>
 

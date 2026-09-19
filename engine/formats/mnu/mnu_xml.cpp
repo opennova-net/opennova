@@ -490,7 +490,7 @@ std::unique_ptr<Node> parse_element(const char *&p, const char *end,
 // [orig: XML_ParseWithBOMDetection @ 0x76a690]  The original detects UTF-16 LE/BE and
 // UTF-8 BOMs and routes no-BOM/UTF-8 through MultiByteToWideChar (its parser is
 // wchar_t throughout); this reimpl handles only the UTF-8 BOM and works in UTF-8/ASCII
-// (matching for the all-ASCII shipped corpus). See notes/mnu/mnu.md.
+// (matching for the all-ASCII shipped corpus). See docs/mnu/menu-re.md (the BOM paragraph).
 const char *skip_bom(const char *data, size_t size) {
   if (size >= 3 && static_cast<uint8_t>(data[0]) == 0xEF &&
       static_cast<uint8_t>(data[1]) == 0xBB &&
