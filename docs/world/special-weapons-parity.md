@@ -79,3 +79,39 @@ checks weapon and seat transitions against the original HUD routines. It fixes
 seat-specific group visibility, mounted stance, Inset reticle selection, and
 launcher reload flashing, then adds launcher targeting, mortar impact/map
 transitions, the separate Inset scene, and vehicle instruments.
+
+## Tank training right-click follow-up
+
+The single-player host queued action 6's C2S `0x16`, but
+`HostRole::drain_host_client_gameplay_requests` admitted only reloads. Its
+movement-only successor then discarded the selector. The host now dispatches
+both gameplay requests through the existing authority handler before that drain.
+This fixes repeated cannon/alternate-gun switching without replacing the mount,
+sharing ammunition, or changing the configured scope binding.
+
+The original checks the carried gun's G bit at entity `+0x326`, then queues a
+two-byte selector: zero for the child slot, nonzero for the vehicle's slot
+[orig: Input_HandleActionBinding_0 @ 0x4E0420, action 6 @ 0x4E0492..0x4E0526].
+The authority writes the route bit and equipped-slot pointer after validating
+the sender's gun and vehicle [orig: NapiNPServerMsg_HandleWeaponToggle @ 0x511A70,
+selection @ 0x511AF9..0x511B38]. Both were rechecked through IDA MCP and jo-c.
+
+`host_role` now catches the previously discarded request through the real
+listen-host queue, including repeated return switches and distinct depleted
+cannon/coax ammunition. The prior preservation check now uses a movement packet,
+which actually belongs to the later decoder. It failed before the fix.
+
+`godot/tests/tank_weapon_switch_test.gd` loads JOTAC's `07TR.bms`, boards the
+M1A1 gunner seat, and drives three action-6 switches through the real simulation
+and `LocalPlayerPresenter`. It checks the selected weapon, independent ammo,
+HUD definition and authored sight card after switching. Its T80 case places
+an unoccupied installed T80 nearby because the mission's original T80 targets
+have enemy crews. Both cases pass headless and with D3D12 (65 assertions per run). The D3D12
+run injects real right-button press/release events through the default binding
+and input router; the headless run uses the action-6 request seam. No retail assets are stored
+in the repository.
+
+This installed test requires an authored G attachment. JOTAC supplies it;
+the stock JO:CA/Escalation tanks do not, so those optional cases pend on stock
+assets. The native `host_role` regression always runs. The original scope
+fallback and the data's ordinary roof-gun seats are unchanged.

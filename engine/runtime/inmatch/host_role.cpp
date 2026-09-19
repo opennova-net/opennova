@@ -165,7 +165,12 @@ void HostRole::drain_host_client_gameplay_requests() {
 	replication::Datagram dg;
 	std::vector<replication::Datagram> deferred;
 	while (state.host_loop.host_recv(dg)) {
-		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST) {
+		// The host's action-6 request uses its local client queue too. Dispatch
+		// it before the later ENTITY_UPLINK-only drain consumes this FIFO.
+		// [orig: Input_HandleActionBinding_0 @ 0x4E0420 (action 6 @ 0x4E0492) ->
+		// NapiNPServerMsg_HandleWeaponToggle @ 0x511A70]
+		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST &&
+				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}

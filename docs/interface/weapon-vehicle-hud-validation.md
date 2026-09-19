@@ -121,6 +121,14 @@ captures run at 1024×768 and 1920×1080; GPU runs save their readbacks locally
 to `user://hud-installed-captures/`. These images are not test goldens or
 tracked game assets.
 
+The [tank training follow-up](../world/special-weapons-parity.md#tank-training-right-click-follow-up)
+also covers JOTAC's authored cannon/alternate-gun selection. The real presenter
+updates the HUD weapon definition and sight card through repeated switches,
+while each slot retains its own ammunition (`tank_weapon_switch_test.gd`,
+two cases / 65 assertions in both headless and D3D12 runs; D3D12 exercises
+the actual default RMB binding). Stock Escalation has no G-designated tank gun and
+pends these optional cases; the native host-loopback regression runs everywhere.
+
 ## Boundaries
 
 This closes the missing weapon/vehicle display paths above, not every open

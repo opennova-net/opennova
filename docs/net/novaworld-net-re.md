@@ -478,7 +478,7 @@ This is what a reimplemented server must **handle**.
 | 0x0F | 0x514180 | player/entity-info request — `[u16 pool-0/1 handle]`; host serializes that entity's info + broadcasts it as S2C 0x18. The fallback spawn-menu "query loop" (pool-1 slots `0x10NN`) is this — NOT an input/movement frame (JO has no raw-input channel; see D-NET-68). [orig: `NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180`] |
 | 0x13 | 0x514330 | `NapiNPServerMsg_HandleSectorAction` — pool-3 def-type-2044 sector actions (action byte + nearest-sector resolve; action 6 arms a 30-tick timer); NOT a death message — only S2C 0x13 is the death notify (§5.60) |
 | 0x14 | 0x501E00 | |
-| 0x16 | 0x511A70 | designated-G mounted-weapon route selector — exact 2-byte bool-as-i16; zero selects the child's embedded `MountSlot`, nonzero selects the validated `groundEntity` parent EWeap slot. The action-6 producer sends it; authority resolves the target from the sender's owned mount. |
+| 0x16 | 0x511A70 | designated-G mounted-weapon route selector — exact 2-byte bool-as-i16; zero selects the child's embedded `MountSlot`, nonzero selects the validated `groundEntity` parent EWeap slot. The action-6 producer sends it; authority resolves the target from the sender's owned mount. The listen host dispatches its own queued selector before the movement-only drain (2026-09-19 training fix; `host_role` regression, [installed validation](../world/special-weapons-parity.md#tank-training-right-click-follow-up)). |
 | 0x17 | 0x514850 | |
 | 0x18 | 0x51A020 | |
 | 0x19 | 0x514250 | |
