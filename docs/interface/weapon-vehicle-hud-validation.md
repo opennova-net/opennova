@@ -61,7 +61,8 @@ the extra SubViewport; it does not infer weapon families from names.
 
 ## Validation
 
-The final native Release and Godot RelWithDebInfo builds pass:
+The initial HUD implementation passed native Release and Godot RelWithDebInfo
+builds before integration with the runtime-only base branch:
 
 - **21/21 native suites pass**, including the new combat HUD and received
   designation tests, the existing weapon/vehicle integration suites, and
@@ -96,15 +97,22 @@ from the private reference-assets corpus at
 `200a18e83e585a678c5aaecf7fd32229814074fd`. These are separate from the
 installed JOTAC definitions exercised by the installed-data suite.
 
-The optional installed-data suite mounts `OPENNOVA_JO_DIR` and stages only
+The optional installed-data suite checks the base mount and installed expansions
+in order, selecting the first weapon table that carries Javelin. Stock JO needs
+Escalation for Javelin and the tank control seats; JOTAC supplies those in its
+base mount. It mounts `OPENNOVA_JO_DIR` and stages only
 selected definition rows into the existing minimal mission fixture. It
 exercises the actual native simulation, HUD presenter, resource loader,
 installed fonts and sight textures. It also boards the installed M1A1, T80
 and Blackhawk control seats through the public simulation API and checks
 the HUD on exit. No game asset files are committed with the tests.
 
-The installation used here is **JOTAC**, selected through `OPENNOVA_JO_DIR`;
-its modified `hudpos.def` is not described as stock JO. Captures use a controlled
+Local installed-data validation covers **JOTAC** and CI's **JO:CA + Escalation**
+packed reference at `36571cbaa09501b4740830c5c8bcd91dcabf09c4`, selected through
+`OPENNOVA_JO_DIR`. The isolated stock-data rerun passes both installed HUD tests
+with 105 assertions. This reproduces and fixes the CI failure caused by mounting
+only the base game; no weapon or vehicle assertions were removed. JOTAC's
+modified `hudpos.def` is not described as stock JO. Captures use a controlled
 background/minimal world, not a synchronized running-original screenshot.
 The independent GPU multiply/alpha-test case checks scene preservation
 behind scope art. The live Inset test checks its camera, World3D, viewport

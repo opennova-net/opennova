@@ -106,14 +106,12 @@
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
 #include "hud/hud_inset_scope.h"
-#include "devtools/imgui_pass_node.h"
 #include "devtools/dev_tools.h"
 #include "devtools/debug_arg_spec.h"
 #include "devtools/debug_control_records.h"
 #include "devtools/debug_control_table.h"
 #include "devtools/debug_shell_host.h"
 #include "devtools/frame_stats.h"
-#include "devtools/oned_ui.h"
 #include "hud/hud_pos.h"
 #include "hud/vehicle_hud_block.h"
 #include "mission/mission_catalog.h"
@@ -156,7 +154,6 @@
 #include "network/net_protocol.h"
 #include "network/net_session_policy.h"
 #include "util/paths.h"
-#include "util/process.h"
 #include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "audio/sbf_bank.h"
@@ -383,7 +380,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(FntResource);
 	GDREGISTER_CLASS(RtxtStringFile);
 	GDREGISTER_CLASS(Paths);
-	GDREGISTER_CLASS(Process);
 	GDREGISTER_CLASS(ParticleCurveRef);
 	GDREGISTER_CLASS(ParticleEffect);
 	GDREGISTER_CLASS(ParticleTable);
@@ -473,10 +469,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NetProtocol);
 	GDREGISTER_CLASS(NetSessionPolicy);
 	// The ImGui pass seams (ADR 0039): registered in every flavour so scripts
-	// parse; the release DLL's DevTools is inert, OnedUi runs everywhere.
+	// parse; the release DLL's DevTools is inert.
 	GDREGISTER_CLASS(FrameStatsWindow);
 	GDREGISTER_CLASS(FrameStats);
-	GDREGISTER_ABSTRACT_CLASS(ImGuiPassNode);
 	GDREGISTER_CLASS(DevTools);
 	// The debug-control table F3 and MCP share (ADR 0043 d12), in every
 	// flavour: only the ImGui windows are debug-only.
@@ -487,8 +482,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(DebugInvokeResult);
 	GDREGISTER_CLASS(DebugShellHost);
 	GDREGISTER_CLASS(DebugControlTable);
-	GDREGISTER_CLASS(OnedUiRequest);
-	GDREGISTER_CLASS(OnedUi);
 }
 
 void uninitialize_opennova_module(ModuleInitializationLevel p_level) {

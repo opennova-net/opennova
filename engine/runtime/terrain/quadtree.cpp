@@ -48,14 +48,6 @@ Frustum extract_frustum(const float mvp[16]) {
 	return wf;
 }
 
-bool aabb_outside_plane(const float plane[4],
-                        const float aabb_min[3], const float aabb_max[3]) {
-	float px = (plane[0] >= 0) ? aabb_max[0] : aabb_min[0];
-	float py = (plane[1] >= 0) ? aabb_max[1] : aabb_min[1];
-	float pz = (plane[2] >= 0) ? aabb_max[2] : aabb_min[2];
-	return (plane[0] * px + plane[1] * py + plane[2] * pz + plane[3]) < 0.0f;
-}
-
 // ---------------------------------------------------------------------------
 // The retail terrain view/cull contract
 // ---------------------------------------------------------------------------

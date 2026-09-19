@@ -3,7 +3,7 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // ONED "tactical tool" palette. Friendly names map to CSS variables in
+        // OpenNova color palette. Friendly names map to CSS variables in
         // src/assets/tailwind.css (the single place to re-skin the whole site).
         surface: 'rgb(var(--surface) / <alpha-value>)',
         panel: 'rgb(var(--panel) / <alpha-value>)',
@@ -23,7 +23,7 @@ module.exports = {
         online: 'rgb(var(--online) / <alpha-value>)'
       },
       borderColor: {
-        // Bare `border` (no explicit color) uses the ONED 1px border color.
+        // Bare `border` (no explicit color) uses the standard 1px border color.
         DEFAULT: 'rgb(var(--border) / <alpha-value>)'
       },
       borderRadius: {

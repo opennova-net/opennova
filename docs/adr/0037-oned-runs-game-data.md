@@ -1,5 +1,7 @@
 # ADR 0037: ONED runs game data; it does not edit it
 
+> ONED, bundled data, and picker provisions are superseded by [ADR 0045](0045-cli-game-data-runtime-only.md). Runtime ImGui and retail format findings remain applicable.
+
 - **Status**: accepted (2026-08-24; hard cut)
 - **Owners**: ONED product, game packaging
 - **Supersedes/updates**: updates ADR 0015's second-product role; supersedes

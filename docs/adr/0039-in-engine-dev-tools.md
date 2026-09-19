@@ -1,5 +1,7 @@
 # ADR 0039: The tool UI lives in the engine, drawn with Dear ImGui
 
+> ONED, bundled data, and picker provisions are superseded by [ADR 0045](0045-cli-game-data-runtime-only.md). Runtime ImGui and retail format findings remain applicable.
+
 - **Status**: accepted (2026-08-27; hard cut)
 - **Owners**: engine runtime, the game shell
 - **Supersedes/updates**: updates ADR 0034 d6 (the F3 debug pages are no longer
@@ -36,6 +38,15 @@ is the same kind of tool UI, so it moves onto the same pass and proves the
 integration is not a one-off.
 
 ## Decision
+
+*Amended 2026-09-19 after ONED's removal:* the game is the pass's only
+consumer. `DevTools` now owns the Godot context and frame lifecycle directly;
+`ImGuiPassNode` and its virtual hand-offs are removed. The pass always draws
+the game's dockspace and Windows menu, every window can undock, and Escape
+follows `GameWindow`'s Play/Interact policy. Dear ImGui and the pass now compile
+only with `OPENNOVA_DEVTOOLS`; release keeps the frame-stats board and inert
+`DevTools` binding, without fetching or linking ImGui. This supersedes the
+shared-product and always-built ImGui portions of decisions 1, 3 and 4 below.
 
 1. **The tool UI is engine code.** `engine/runtime/devtools/` (inside
    `opennova_runtime`, namespace `opennova::devtools`) owns the ImGui pass —

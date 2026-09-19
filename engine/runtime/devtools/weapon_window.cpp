@@ -65,7 +65,7 @@ double tick_of(float x0, float ppt, double origin, float x) {
 	return origin + static_cast<double>(x - x0) / static_cast<double>(ppt);
 }
 
-// The ONED disabled-button idiom: an empty `block` enables the button, a
+// The disabled-button contract: an empty `block` enables the button, a
 // non-empty one disables it AND becomes the tooltip explaining why.
 bool action_button(const char *label, const char *block) {
 	const bool blocked = block != nullptr && block[0] != '\0';

@@ -1,6 +1,7 @@
 #include <base/pcapio/pcap_reader.h>
 
 #include <base/pcapio/pcap_writer.h>
+#include <base/io/le.h>
 
 #include <fstream>
 #include <functional>
@@ -27,11 +28,6 @@ constexpr uint32_t LINKTYPE_IPV4 = 228;    // raw IPv4
 
 constexpr uint16_t AF_INET = 2;
 
-uint16_t read_u16_le(const uint8_t *p) { return uint16_t(p[0]) | uint16_t(p[1]) << 8; }
-uint32_t read_u32_le(const uint8_t *p) {
-	return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 |
-	       uint32_t(p[3]) << 24;
-}
 uint32_t read_u32_be(const uint8_t *p) {
 	return uint32_t(p[3]) | uint32_t(p[2]) << 8 | uint32_t(p[1]) << 16 |
 	       uint32_t(p[0]) << 24;
@@ -47,7 +43,7 @@ int strip_link_header(uint32_t linktype, const uint8_t *frame, size_t len) {
 		if (len < 4) return -1;
 		// NULL: host byte order; LOOP: big-endian. The AF value is small
 		// (2 = AF_INET) so we detect by checking both orders.
-		uint32_t af_le = read_u32_le(frame);
+		uint32_t af_le = io::read_u32_le(frame);
 		uint32_t af_be = read_u32_be(frame);
 		uint32_t af = (af_le < 256) ? af_le : af_be;
 		if (af != AF_INET) return -1;
@@ -131,8 +127,8 @@ uint64_t idb_ns_multiplier(const uint8_t *body, size_t body_len) {
 	uint64_t mult = 1000; // if_tsresol absent => 1e-6 (microseconds)
 	size_t o = 8;         // after linktype(2) + reserved(2) + snaplen(4)
 	while (o + 4 <= body_len) {
-		const uint16_t code = read_u16_le(body + o);
-		const uint16_t olen = read_u16_le(body + o + 2);
+		const uint16_t code = io::read_u16_le(body + o);
+		const uint16_t olen = io::read_u16_le(body + o + 2);
 		o += 4;
 		if (code == 0) break; // opt_endofopt
 		if (code == 9 && olen >= 1 && o < body_len)
@@ -152,26 +148,26 @@ void read_pcapng_block(uint32_t btype, const uint8_t *body, size_t body_len,
                        const std::function<void(PcapDatagram &)> &emit,
                        int &fragments_dropped) {
 	if (btype == PCAPNG_BLOCK_IDB && body_len >= 8) {
-		cur_linktype = read_u32_le(body) & 0xFFFF;
+		cur_linktype = io::read_u32_le(body) & 0xFFFF;
 		if_mult.push_back(idb_ns_multiplier(body, body_len));
 		if_linktype.push_back(cur_linktype);
 	} else if (btype == PCAPNG_BLOCK_EPB && body_len >= 20) {
 		// EPB: interface_id(4) ts_high(4) ts_low(4) cap_len(4) pkt_len(4) data...
 		// Timestamp units come from that interface's IDB if_tsresol option.
-		const uint32_t iface = read_u32_le(body);
+		const uint32_t iface = io::read_u32_le(body);
 		const uint64_t mult = iface < if_mult.size() ? if_mult[iface] : 1000ull;
 		const uint32_t lt = iface < if_linktype.size() ? if_linktype[iface] : cur_linktype;
-		const uint64_t ts = (uint64_t(read_u32_le(body + 4)) << 32) |
-		                    uint64_t(read_u32_le(body + 8));
+		const uint64_t ts = (uint64_t(io::read_u32_le(body + 4)) << 32) |
+		                    uint64_t(io::read_u32_le(body + 8));
 		const uint64_t ts_nanos = ts * mult;
-		const uint32_t cap_len = read_u32_le(body + 12);
+		const uint32_t cap_len = io::read_u32_le(body + 12);
 		if (20 + cap_len <= body_len) {
 			++frame_index;
 			extract_ipv4_udp(body + 20, cap_len, lt, frame_index,
 			                 ts_nanos, emit, fragments_dropped);
 		}
 	} else if (btype == PCAPNG_BLOCK_SPB && body_len >= 4) {
-		const uint32_t pkt_len = read_u32_le(body);
+		const uint32_t pkt_len = io::read_u32_le(body);
 		if (4 + pkt_len <= body_len) {
 			++frame_index;
 			extract_ipv4_udp(body + 4, pkt_len, (if_linktype.empty() ? cur_linktype : if_linktype[0]), frame_index, 0,
@@ -189,12 +185,12 @@ bool read_pcap_udp(const uint8_t *data, size_t len, std::vector<PcapDatagram> &o
 	int frame_index = 0;
 	auto emit = [&out](PcapDatagram &d) { out.push_back(std::move(d)); };
 
-	const uint32_t magic = read_u32_le(data);
+	const uint32_t magic = io::read_u32_le(data);
 	if (magic == PCAP_MAGIC_LE || magic == PCAP_MAGIC_BE ||
 	    magic == PCAP_MAGIC_NSEC_LE || magic == PCAP_MAGIC_NSEC_BE) {
 		const bool be = (magic == PCAP_MAGIC_BE || magic == PCAP_MAGIC_NSEC_BE);
 		const bool nsec = (magic == PCAP_MAGIC_NSEC_LE || magic == PCAP_MAGIC_NSEC_BE);
-		auto r32 = [&](const uint8_t *p) { return be ? read_u32_be(p) : read_u32_le(p); };
+		auto r32 = [&](const uint8_t *p) { return be ? read_u32_be(p) : io::read_u32_le(p); };
 		const uint32_t linktype = r32(data + 20);
 		size_t off = 24;
 		// Record header: ts_sec(4) ts_frac(4) incl_len(4) orig_len(4) then data.
@@ -214,15 +210,15 @@ bool read_pcap_udp(const uint8_t *data, size_t len, std::vector<PcapDatagram> &o
 		}
 	} else if (magic == PCAPNG_BLOCK_SHB) {
 		if (len < 28) return false;
-		const uint32_t bom = read_u32_le(data + 8);
+		const uint32_t bom = io::read_u32_le(data + 8);
 		if (bom != 0x1A2B3C4Du) return false; // big-endian pcapng unsupported
 		uint32_t cur_linktype = LINKTYPE_ETHERNET;
 		std::vector<uint64_t> if_mult; // per-interface ns-per-tick (IDB order)
 		std::vector<uint32_t> if_linktype; // per-interface linktype (IDB order)
 		size_t off = 0;
 		while (off + 8 <= len) {
-			const uint32_t btype = read_u32_le(data + off);
-			const uint32_t blen = read_u32_le(data + off + 4);
+			const uint32_t btype = io::read_u32_le(data + off);
+			const uint32_t blen = io::read_u32_le(data + off + 4);
 			if (blen < 12 || off + blen > len) break;
 			const uint8_t *body = data + off + 8;
 			const size_t body_len = blen - 12; // minus type + len*2
@@ -270,13 +266,13 @@ bool stream_pcap_udp_file(const std::string &path,
 
 	uint8_t hdr[24];
 	if (!f.read(reinterpret_cast<char *>(hdr), 24)) return false;
-	const uint32_t magic = read_u32_le(hdr);
+	const uint32_t magic = io::read_u32_le(hdr);
 
 	if (magic == PCAP_MAGIC_LE || magic == PCAP_MAGIC_BE ||
 	    magic == PCAP_MAGIC_NSEC_LE || magic == PCAP_MAGIC_NSEC_BE) {
 		const bool be = (magic == PCAP_MAGIC_BE || magic == PCAP_MAGIC_NSEC_BE);
 		const bool nsec = (magic == PCAP_MAGIC_NSEC_LE || magic == PCAP_MAGIC_NSEC_BE);
-		auto r32 = [&](const uint8_t *p) { return be ? read_u32_be(p) : read_u32_le(p); };
+		auto r32 = [&](const uint8_t *p) { return be ? read_u32_be(p) : io::read_u32_le(p); };
 		const uint32_t linktype = r32(hdr + 20);
 		std::vector<uint8_t> frame;
 		uint8_t rec[16];
@@ -295,9 +291,9 @@ bool stream_pcap_udp_file(const std::string &path,
 			if (stop) break;
 		}
 	} else if (magic == PCAPNG_BLOCK_SHB) {
-		const uint32_t bom = read_u32_le(hdr + 8);
+		const uint32_t bom = io::read_u32_le(hdr + 8);
 		if (bom != 0x1A2B3C4Du) return false; // big-endian pcapng unsupported
-		const uint32_t shb_len = read_u32_le(hdr + 4);
+		const uint32_t shb_len = io::read_u32_le(hdr + 4);
 		if (shb_len < 24 || shb_len > kMaxRecord) return false;
 		if (shb_len > 24) f.seekg(shb_len - 24, std::ios::cur); // skip SHB options
 		uint32_t cur_linktype = LINKTYPE_ETHERNET;
@@ -306,8 +302,8 @@ bool stream_pcap_udp_file(const std::string &path,
 		std::vector<uint32_t> if_linktype; // per-interface linktype (IDB order)
 		uint8_t bh[8];
 		while (f.read(reinterpret_cast<char *>(bh), 8)) {
-			const uint32_t btype = read_u32_le(bh);
-			const uint32_t blen = read_u32_le(bh + 4);
+			const uint32_t btype = io::read_u32_le(bh);
+			const uint32_t blen = io::read_u32_le(bh + 4);
 			if (blen < 12 || blen > kMaxRecord) break;
 			const size_t body_total = blen - 8; // body + trailing length copy
 			block.resize(body_total);

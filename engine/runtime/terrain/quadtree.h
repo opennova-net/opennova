@@ -23,10 +23,6 @@ struct Frustum {
 // renderer's foliage silhouette anchor gate still does.
 Frustum extract_frustum(const float mvp[16]);
 
-// Test if AABB is completely outside a single plane.
-bool aabb_outside_plane(const float plane[4],
-                        const float aabb_min[3], const float aabb_max[3]);
-
 // ---------------------------------------------------------------------------
 // The retail terrain view/cull contract
 // ---------------------------------------------------------------------------

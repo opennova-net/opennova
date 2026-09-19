@@ -1,4 +1,0 @@
-OpenNova minimal
-Startup error.
-No resource archives could be opened.
-Unable to load error strings (gameerr.bin).

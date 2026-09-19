@@ -18,8 +18,7 @@ easier to relay than to rediscover.
   ADR 0024 layout; the target also builds mission's format half), `runtime/`(
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
   terrain_query, environment, hud, menu, assets, devtools — the Dear ImGui
-  pass with the game's F3 dev-tool windows (debug builds only) and ONED's run
-  surface, ADR 0039 — plus `inmatch` (the in-match session, the listen-host
+  pass with the game's F3 dev-tool windows (debug builds only) (ADR 0039) — plus `inmatch` (the in-match session, the listen-host
   frame, the server/client state machines and frame loops, the transports) and
   `replication` (the world<->wire seam and the client replica state), ADR 0043 d4),
   `net/` (the wire only: novacrypto, napi, npwire, novaworld; it never includes
@@ -31,11 +30,8 @@ easier to relay than to rediscover.
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
   `game/` (the game shell plus its game-level GDScript runtime — world,
   debug, ui, avatar, probe, mcp, resource_index, strings, util),
-  `modtools/` (ONED: settings, loose OpenNova run,
-  staged retail run, Stop, and the hidden release pack command; its surface
-  is the engine's ImGui `OnedUi` window, the app only executes its requests),
   `probes/` (the registered `game_probe` runtime probes, source-only and
-  excluded from both export presets, ADR 0041; see `docs/mcp.md`),
+  excluded from the runtime export preset, ADR 0041; see `docs/mcp.md`),
   `tests/` (GUT suite).
 - `apps/` — `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
@@ -144,8 +140,6 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
 - "Host" means the game/server host and nothing else (CONTEXT.md "Host / Joiner");
   front-ends are Shells, a lib's embedding app is its embedder. Vocabulary is a
   review concern, not a lint (ADR 0043 retired `host_lint.py`).
-- ONED is run-only (ADR 0037). Do not add authoring workspaces, project/import
-  state, preview runtimes, an asset database, or embedded MCP.
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),
   don't bundle pre-JO Delta Force titles; say pre-1.0/experimental, never
   "production-ready"; no em dashes.
@@ -189,12 +183,10 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   it plus the ADRs before touching `godot/src/mission/mission_root.cpp`,
   `godot/src/world/game_world_frame.cpp` (the frame-leg table), the native present appliers
   (`godot/src/simulation/entity_presenter*.cpp`), or `Simulation`.
-- [godot/modtools/README.md](godot/modtools/README.md) — ONED,
-  retail staging, and hidden release pack command.
 - [docs/mcp.md](docs/mcp.md) — the game MCP: launching with `--mcp-port`,
   `scripts/mcp/game_mcp.py` / `game_mcp.ps1`, the tool catalog and the
   `game_probe` runtime probes (ADR 0041); drive it with the `game-mcp` skill.
 - Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/src/CLAUDE.md`,
-  `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
-- Project skills in `.claude/skills/`: `gut`, `oned-run`, `game-mcp`, `new-format-lib`, `re-doc`,
+  `godot/tests/CLAUDE.md`.
+- Project skills in `.claude/skills/`: `gut`, `game-mcp`, `new-format-lib`, `re-doc`,
   `extract-pr`, `grill-ida`, `engine-research`, and `diagnosing-bugs`.

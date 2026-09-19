@@ -151,7 +151,7 @@ func _has_complete_detail_output(dispatcher: FoliageDispatcher, stats: FoliageFr
 func _stage_runtime_fixture() -> void:
 	var root := _fixture_root()
 	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)
-	for source in [TestFs.TMAP_FIXTURE_DIR, TestFs.MINIMAL_ASSETS_DIR]:
+	for source in [TestFs.TMAP_FIXTURE_DIR, TestFs.BOOT_FIXTURE_DIR]:
 		var source_dir := ProjectSettings.globalize_path(source)
 		for filename in DirAccess.get_files_at(source_dir):
 			_copy_file(source_dir.path_join(filename), root.path_join(filename))

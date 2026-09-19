@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -33,10 +32,6 @@ int64_t file_modified_unix_seconds(const fs::path &path) {
 	return std::chrono::duration_cast<std::chrono::seconds>(system_time.time_since_epoch()).count();
 }
 
-std::string to_lower_ascii(std::string value) { return opennova::strutil::to_lower(value); }
-
-std::string trim_copy(const std::string &value) { return opennova::strutil::trim(value); }
-
 bool has_magic(const std::vector<uint8_t> &bytes, const char (&want)[5]) {
 	return bytes.size() >= 4 &&
 	       bytes[0] == want[0] &&
@@ -57,7 +52,7 @@ bool has_scr_magic(const std::vector<uint8_t> &bytes) {
 }
 
 std::string extension_for_name(const std::string &name) {
-	return to_lower_ascii(fs::path(name).extension().string());
+	return strutil::to_lower(fs::path(name).extension().string());
 }
 
 std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, bool is_scr_bin) {
@@ -67,7 +62,7 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 	// shared with weapon/items/ammo/hudpos.def, which the engine consumes by name at
 	// runtime and which stay unbrowsable (like .dbf). [orig: CAvatarDefs_Init @ 0x57b180
 	// opens "Avatars.def" by exact name]
-	if (to_lower_ascii(fs::path(name).filename().string()) == "avatars.def") {
+	if (strutil::to_lower(fs::path(name).filename().string()) == "avatars.def") {
 		return "avatar";
 	}
 	if (extension == ".bms" || extension == ".mis") {
@@ -115,7 +110,7 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 	// The .def family is name-keyed, not extension-keyed (items/weapon/ammo/avatars all share
 	// .def and are consumed at runtime by name). Only hudpos.def is a browsable kind, for the
 	// HUD layout catalog; the rest stay unclassified.
-	if (extension == ".def" && to_lower_ascii(fs::path(name).filename().string()) == "hudpos.def") {
+	if (extension == ".def" && strutil::to_lower(fs::path(name).filename().string()) == "hudpos.def") {
 		return "hudpos";
 	}
 	// NOTE: .dbf (dialog bank) is intentionally NOT classified as a browsable kind.
@@ -131,7 +126,7 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 }
 
 std::string normalize_kind(const std::string &kind) {
-	const std::string key = to_lower_ascii(trim_copy(kind));
+	const std::string key = strutil::to_lower(strutil::trim(kind));
 	if (key.empty() || key == "*" || key == "all") {
 		return "";
 	}
@@ -280,8 +275,8 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 
 	std::sort(impl_->records.begin(), impl_->records.end(),
 	          [](const ResourceFileEntry &a, const ResourceFileEntry &b) {
-		          const std::string a_key = a.kind + ":" + to_lower_ascii(a.relative_path);
-		          const std::string b_key = b.kind + ":" + to_lower_ascii(b.relative_path);
+		          const std::string a_key = a.kind + ":" + strutil::to_lower(a.relative_path);
+		          const std::string b_key = b.kind + ":" + strutil::to_lower(b.relative_path);
 		          return a_key < b_key;
 	          });
 	return true;

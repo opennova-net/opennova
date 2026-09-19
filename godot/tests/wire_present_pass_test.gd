@@ -220,7 +220,7 @@ func _sim() -> Simulation:
 func _ticking_sim() -> Simulation:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../assets")), OK)
+			RuntimeFixture.directory())), OK)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	var sim := Simulation.new()

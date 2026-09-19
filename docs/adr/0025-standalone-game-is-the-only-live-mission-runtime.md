@@ -1,6 +1,8 @@
 # ADR 0025: the standalone game is ONED's only live mission runtime
 
 - **Status**: accepted (2026-07-29)
+- **Partially superseded**: [ADR 0045](0045-cli-game-data-runtime-only.md) removes
+  ONED and the bundled-data/folder-picker startup behavior.
 - **Updated**: [ADR 0037](0037-oned-runs-game-data.md) retains the standalone
   loose Run/Stop rule and removes F6/current-mission and unsaved-authoring
   behavior.

@@ -59,8 +59,6 @@ ImGuiAbi imgui_abi() {
 			static_cast<int>(sizeof(ImWchar))};
 }
 
-ImGuiPass::ImGuiPass(ImGuiPassOptions options) : options_(options), open_(options.start_open) {}
-
 ImGuiPass::~ImGuiPass() {
 	open_ = false;
 	sync_visibility();
@@ -137,25 +135,22 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	const bool reset_layout = layout_reset_pending_;
 	layout_reset_pending_ = false;
 
-	if (options_.dockspace) {
-		// The workspace owns the main viewport. Install its default when ImGui
-		// did not restore this dockspace from persisted settings, and again on
-		// a reset: the persisted dockspace is torn down first, so every window
-		// (a new one the ini never saw, one dragged out to another monitor)
-		// docks back into its declared placement.
-		const ImGuiID dockspace_id = ImHashStr(kWorkspaceDockspace);
-		const ImGuiViewport *viewport = ImGui::GetMainViewport();
-		if (reset_layout) {
-			ImGui::DockBuilderRemoveNode(dockspace_id);
-		}
-		if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
-			create_default_layout(dockspace_id, *viewport, windows_);
-		}
-		ImGui::DockSpaceOverViewport(dockspace_id, viewport, ImGuiDockNodeFlags_None);
+	// The workspace owns the main viewport. Install its default when ImGui
+	// did not restore this dockspace from persisted settings, and again on
+	// a reset: the persisted dockspace is torn down first, so every window
+	// (a new one the ini never saw, one dragged out to another monitor)
+	// docks back into its declared placement.
+	const ImGuiID dockspace_id = ImHashStr(kWorkspaceDockspace);
+	const ImGuiViewport *viewport = ImGui::GetMainViewport();
+	if (reset_layout) {
+		ImGui::DockBuilderRemoveNode(dockspace_id);
 	}
+	if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
+		create_default_layout(dockspace_id, *viewport, windows_);
+	}
+	ImGui::DockSpaceOverViewport(dockspace_id, viewport, ImGuiDockNodeFlags_None);
 
-	bool close_requested = false;
-	if (options_.menu_bar && ImGui::BeginMainMenuBar()) {
+	if (ImGui::BeginMainMenuBar()) {
 		if (ImGui::BeginMenu("Windows")) {
 			for (auto &window : windows_) {
 				if (window->is_closeable()) {
@@ -170,11 +165,6 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 			ImGui::Separator();
 			if (ImGui::MenuItem("Reset layout")) {
 				layout_reset_pending_ = true;
-			}
-			if (options_.escape_closes) {
-				if (ImGui::MenuItem("Close dev tools", "Esc")) {
-					close_requested = true;
-				}
 			}
 			ImGui::EndMenu();
 		}
@@ -229,11 +219,6 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		if (!window.is_scrollable()) {
 			flags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 		}
-		ImGuiWindowClass window_class;
-		if (!window.is_undockable()) {
-			window_class.DockNodeFlagsOverrideSet |= ImGuiDockNodeFlags_NoUndocking;
-			ImGui::SetNextWindowClass(&window_class);
-		}
 		const WindowSizeHint hint = window.preferred_size();
 		if (!reset_layout && hint.width > 0.0f && hint.height > 0.0f) {
 			ImGui::SetNextWindowSize(ImVec2(hint.width, hint.height), ImGuiCond_FirstUseEver);
@@ -260,13 +245,7 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		ImGui::End();
 	}
 
-	if (options_.escape_closes && ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::GetIO().WantTextInput) {
-		close_requested = true;
-	}
 	sync_visibility();
-	if (close_requested) {
-		set_open(false);
-	}
 	return true;
 }
 

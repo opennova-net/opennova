@@ -26,7 +26,7 @@ extends GutTest
 
 const DeployHost := preload("res://game/world/deploy_screen_presenter.gd")
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
-const FIXTURE_DIR := "res://../assets"
+static var FIXTURE_DIR := RuntimeFixture.directory()
 const TMP_DIR := "res://.godot/host_punt_surfacing_test"
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 # What JoinerConnection composes for the captured punt: the DPC/DC codes the client's own
@@ -317,7 +317,7 @@ func _make_menu_shell():
 	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
 	_write_pff(_temp_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
 	_write_pff(_temp_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
-	ResourceDirSettings.set_resource_dir(_temp_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _temp_dir]))
 	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game("jo")
 	var shell = MAIN_GAME_SCENE.instantiate()

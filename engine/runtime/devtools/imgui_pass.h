@@ -1,13 +1,12 @@
 // The ImGui pass (ADR 0039): the one per-frame Dear ImGui layout pass a
-// product composes its tool windows onto. The engine owns everything about
+// game composes its tool windows onto. The engine owns everything about
 // the windows — registry, open/closed state, the dockspace and menu bar,
 // what each window shows — while the embedding shell supplies only the ImGui
 // context (created by its ImGui bridge) and the frame bracket (call
 // draw_frame between the bridge's NewFrame and Render).
 //
-// Two products compose it today: the game's F3 workspace
-// (game_dev_tools.h; compiled with OPENNOVA_DEVTOOLS) and ONED's run surface
-// (oned_ui.h; every flavour). Not an editor (ADR 0037).
+// The game's F3 workspace (game_dev_tools.h) owns the pass; it is compiled
+// only with OPENNOVA_DEVTOOLS. Escape follows GameWindow's Play/Interact policy.
 //
 // Ownership: a pass is a plain object its composer owns; there is no
 // process-wide instance. Windows are registered once and live as long as the
@@ -51,7 +50,6 @@ public:
 	virtual void on_visibility(bool visible) { (void)visible; }
 	// Window policy is explicit so the pass never special-cases a title.
 	virtual bool is_closeable() const { return true; }
-	virtual bool is_undockable() const { return true; }
 	virtual bool is_collapsible() const { return true; }
 	virtual bool is_scrollable() const { return true; }
 	virtual InitialDockPlacement initial_dock_placement() const {
@@ -90,21 +88,9 @@ private:
 using ImGuiAllocFn = void *(*)(size_t size, void *user_data);
 using ImGuiFreeFn = void (*)(void *ptr, void *user_data);
 
-struct ImGuiPassOptions {
-	// An opaque application dockspace over the main viewport. Off for a single
-	// full-viewport surface.
-	bool dockspace = true;
-	// The main menu bar with the "Windows" menu of open toggles.
-	bool menu_bar = true;
-	// Escape (outside a text field) closes the pass.
-	bool escape_closes = true;
-	// The pass starts open (a product surface) or closed (a toggled overlay).
-	bool start_open = false;
-};
-
 class ImGuiPass {
 public:
-	explicit ImGuiPass(ImGuiPassOptions options = ImGuiPassOptions{});
+	ImGuiPass() = default;
 	~ImGuiPass();
 	ImGuiPass(const ImGuiPass &) = delete;
 	ImGuiPass &operator=(const ImGuiPass &) = delete;
@@ -142,7 +128,7 @@ public:
 	// dockspace, the menu bar, every visible window. frame_index is the
 	// render frame (windows key their cadences on it). Returns false when
 	// nothing was drawn (closed or not attached). The caller reads is_open()
-	// after the call (Escape and the menu close from inside).
+	// after processing the Game window's requests (including Escape).
 	bool draw_frame(uint64_t frame_index);
 
 	// Restore the default docked layout on the next layout pass: the
@@ -158,7 +144,6 @@ public:
 private:
 	void sync_visibility();
 
-	ImGuiPassOptions options_;
 	std::vector<std::unique_ptr<Window>> windows_;
 	bool attached_ = false;
 	bool platform_windows_enabled_ = true;

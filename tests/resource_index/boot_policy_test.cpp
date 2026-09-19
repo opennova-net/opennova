@@ -1,10 +1,5 @@
-// Launch flags and the boot resource directory ladder
-// (base/resource_index/boot_policy.h): the retail flag vocabulary parsed
-// case-insensitively, a flag winning over a persisted fallback, the JO game
-// default, and the flag > persisted > bundled game > bundled assets ladder
-// with its loose-mount blessing.
+// Explicit CLI resource roots and the retail launch vocabulary.
 #include <cstdio>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -19,17 +14,6 @@ static int failures = 0;
     } while (0)
 
 namespace {
-
-struct FakeFs {
-    std::set<std::string> files;
-    std::set<std::string> dirs;
-    BootDirProbe probe() const {
-        BootDirProbe p;
-        p.file_exists = [this](const std::string &path) { return files.count(path) != 0; };
-        p.dir_exists = [this](const std::string &path) { return dirs.count(path) != 0; };
-        return p;
-    }
-};
 
 void test_flags_parse_case_insensitively_with_values() {
     const LaunchFlags f = parse_launch_flags(
@@ -118,11 +102,11 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     CHECK(launch_expansion(none, "revx02") == "revx02");
     CHECK(launch_game(none, " DFX ") == "dfx");
     CHECK(launch_game(none, "") == "jo");
-    CHECK(launch_resource_dir(none, " D:/x ") == "D:/x");
+    CHECK(none.resource_dir.empty());
     const LaunchFlags set = parse_launch_flags({"/exp", "jox01", "/game", "JODEMO", "--resource-dir", "E:/y"});
     CHECK(launch_expansion(set, "revx02") == "jox01");
     CHECK(launch_game(set, "dfx") == "jodemo");
-    CHECK(launch_resource_dir(set, "D:/x") == "E:/y");
+    CHECK(set.resource_dir == "E:/y");
 }
 
 void test_path_join() {
@@ -130,48 +114,6 @@ void test_path_join() {
     CHECK(boot_path_join("C:/exe", "assets") == "C:/exe/assets");
     CHECK(boot_path_join("C:/exe/", "assets") == "C:/exe/assets");
     CHECK(boot_path_join("C:\\exe\\", "assets") == "C:\\exe\\assets");
-}
-
-void test_boot_dir_ladder() {
-    FakeFs fs;
-    const LaunchFlags none = parse_launch_flags({});
-    // Nothing anywhere: ask.
-    CHECK(boot_resource_dir(none, "", "C:/exe", fs.probe()).empty());
-    // The loose assets/ sibling is the last rung.
-    fs.dirs.insert("C:/exe/assets");
-    CHECK(bundled_assets_dir("C:/exe", fs.probe()) == "C:/exe/assets");
-    CHECK(boot_resource_dir(none, "", "C:/exe", fs.probe()) == "C:/exe/assets");
-    // A boot archive beside the exe outranks the assets/ sibling.
-    fs.files.insert("C:/exe/localres.pff");
-    CHECK(bundled_game_dir("C:/exe", fs.probe()) == "C:/exe");
-    CHECK(boot_resource_dir(none, "", "C:/exe", fs.probe()) == "C:/exe");
-    // Any boot-table archive qualifies (case as probed).
-    FakeFs lang;
-    lang.files.insert("C:/exe/language.pff");
-    CHECK(bundled_game_dir("C:/exe", lang.probe()) == "C:/exe");
-    FakeFs stray;
-    stray.files.insert("C:/exe/mod.pff");
-    CHECK(bundled_game_dir("C:/exe", stray.probe()).empty());
-    // The persisted pick outranks the bundle; the flag outranks both.
-    CHECK(boot_resource_dir(none, "C:/picked", "C:/exe", fs.probe()) == "C:/picked");
-    const LaunchFlags flagged = parse_launch_flags({"--resource-dir", "C:/flag"});
-    CHECK(boot_resource_dir(flagged, "C:/picked", "C:/exe", fs.probe()) == "C:/flag");
-    // No exe dir known: only the flag / persisted rungs.
-    CHECK(boot_resource_dir(none, "", "", fs.probe()).empty());
-}
-
-void test_loose_mount_blessing() {
-    FakeFs fs;
-    fs.dirs.insert("C:/exe/assets");
-    const LaunchFlags none = parse_launch_flags({});
-    CHECK(boot_loose_allowed(none, "C:/exe/assets", "C:/exe", fs.probe()));
-    CHECK(!boot_loose_allowed(none, "C:/picked", "C:/exe", fs.probe()));
-    CHECK(!boot_loose_allowed(none, "", "C:/exe", fs.probe()));
-    const LaunchFlags root = parse_launch_flags({"--loose-root"});
-    CHECK(boot_loose_allowed(root, "C:/picked", "C:/exe", fs.probe()));
-    // Without an assets/ sibling nothing is blessed by default.
-    FakeFs bare;
-    CHECK(!boot_loose_allowed(none, "C:/exe/assets", "C:/exe", bare.probe()));
 }
 
 } // namespace
@@ -182,8 +124,6 @@ int main() {
     test_lan_fallbacks_and_join_endpoint();
     test_flags_win_over_fallbacks_and_jo_is_the_default_game();
     test_path_join();
-    test_boot_dir_ladder();
-    test_loose_mount_blessing();
     if (failures == 0) std::printf("boot_policy_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

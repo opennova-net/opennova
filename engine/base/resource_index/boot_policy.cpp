@@ -1,9 +1,8 @@
-// Launch flags and the boot resource directory ladder -- see boot_policy.h.
+// Launch flags and path helpers -- see boot_policy.h.
 
 #include <base/resource_index/boot_policy.h>
 
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -13,21 +12,16 @@ namespace opennova {
 namespace {
 
 // ASCII-only by design (io/strutil.h): flag matching never follows the locale.
-std::string lower_ascii(const std::string &s) { return strutil::to_lower(s); }
-std::string strip(const std::string &s) { return strutil::trim(s); }
-
 bool has_flag(const std::vector<std::string> &args, const char *flag) {
-    const std::string wanted = lower_ascii(flag);
     for (const std::string &a : args)
-        if (lower_ascii(a) == wanted) return true;
+        if (strutil::iequals(a, flag)) return true;
     return false;
 }
 
 // The token following `flag`, stripped, or "" when absent/empty.
 std::string value_after(const std::vector<std::string> &args, const char *flag) {
-    const std::string wanted = lower_ascii(flag);
     for (std::size_t i = 0; i + 1 < args.size(); ++i)
-        if (lower_ascii(args[i]) == wanted) return strip(args[i + 1]);
+        if (strutil::iequals(args[i], flag)) return strutil::trim(args[i + 1]);
     return std::string();
 }
 
@@ -56,7 +50,7 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     LaunchFlags f;
     f.loose_override = has_flag(args, "/d");
     f.expansion = value_after(args, "/exp");
-    f.game = lower_ascii(value_after(args, "/game"));
+    f.game = strutil::to_lower(value_after(args, "/game"));
     f.resource_dir = value_after(args, "--resource-dir");
     f.loose_mission = value_after(args, "--loose-mission");
     f.loose_root = has_flag(args, "--loose-root");
@@ -95,11 +89,11 @@ LanEndpoint launch_lan_join_endpoint(const LaunchFlags &flags, int default_port)
     if (target.empty()) return endpoint;
     const std::size_t colon = target.find(':');
     if (colon == std::string::npos) {
-        endpoint.ip = strip(target);
+        endpoint.ip = strutil::trim(target);
         return endpoint;
     }
-    endpoint.ip = strip(target.substr(0, colon));
-    const long port = parse_long(strip(target.substr(colon + 1)), 0);
+    endpoint.ip = strutil::trim(target.substr(0, colon));
+    const long port = parse_long(strutil::trim(target.substr(colon + 1)), 0);
     if (port >= 1 && port <= 65535) endpoint.port = static_cast<int>(port);
     return endpoint;
 }
@@ -110,12 +104,8 @@ std::string launch_expansion(const LaunchFlags &flags, const std::string &fallba
 
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback) {
     if (!flags.game.empty()) return flags.game;
-    const std::string fb = lower_ascii(strip(fallback));
+    const std::string fb = strutil::to_lower(strutil::trim(fallback));
     return fb.empty() ? std::string("jo") : fb;
-}
-
-std::string launch_resource_dir(const LaunchFlags &flags, const std::string &fallback) {
-    return flags.resource_dir.empty() ? strip(fallback) : flags.resource_dir;
 }
 
 std::string boot_path_join(const std::string &dir, const std::string &name) {
@@ -123,33 +113,6 @@ std::string boot_path_join(const std::string &dir, const std::string &name) {
     const char last = dir.back();
     if (last == '/' || last == '\\') return dir + name;
     return dir + "/" + name;
-}
-
-std::string bundled_game_dir(const std::string &exe_dir, const BootDirProbe &fs) {
-    if (exe_dir.empty() || !fs.file_exists) return std::string();
-    for (const char *archive : kBootArchiveTable)
-        if (fs.file_exists(boot_path_join(exe_dir, archive))) return exe_dir;
-    return std::string();
-}
-
-std::string bundled_assets_dir(const std::string &exe_dir, const BootDirProbe &fs) {
-    if (exe_dir.empty() || !fs.dir_exists) return std::string();
-    const std::string dir = boot_path_join(exe_dir, "assets");
-    return fs.dir_exists(dir) ? dir : std::string();
-}
-
-std::string boot_resource_dir(const LaunchFlags &flags, const std::string &persisted,
-                              const std::string &exe_dir, const BootDirProbe &fs) {
-    std::string dir = launch_resource_dir(flags, persisted);
-    if (dir.empty()) dir = bundled_game_dir(exe_dir, fs);
-    if (dir.empty()) dir = bundled_assets_dir(exe_dir, fs);
-    return dir;
-}
-
-bool boot_loose_allowed(const LaunchFlags &flags, const std::string &dir,
-                        const std::string &exe_dir, const BootDirProbe &fs) {
-    if (flags.loose_root) return true;
-    return !dir.empty() && dir == bundled_assets_dir(exe_dir, fs);
 }
 
 } // namespace opennova

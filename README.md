@@ -2,8 +2,8 @@
 
 OpenNova is an open-source C++ and Godot reimplementation of the Joint
 Operations generation of NovaLogic games. The repository contains the game
-runtime, native format readers, NovaWorld-compatible services, the ONED run and
-packaging utility, and the project web and launcher applications.
+runtime, native format readers, NovaWorld-compatible services, and the project
+web and launcher applications. Users supply their own game data.
 
 This is a pre-1.0 project. Implemented systems and known differences from the
 retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
@@ -13,9 +13,8 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | Path | Purpose |
 | --- | --- |
 | `engine/` | Native formats, runtime, networking, and service code. |
-| `godot/` | Godot game, ONED, project resources, and GDScript tests. |
+| `godot/` | Godot game, project resources, and GDScript tests. |
 | `apps/` | Native command-line and NovaWorld service applications. |
-| `assets/` | Source-controlled game data consumed by OpenNova. |
 | `fixtures/` | Test fixtures: synthetic files minted by `tests/fixtures/*_gen.cpp` (the 3DI model set under `fixtures/threedi/synth/`, terrain, fonts, sound banks) plus a small retail-interop keep set (`fixtures/README.md`). |
 | `tests/` | Native CTest suite. |
 | `launcher/` | Windows launcher and its .NET tests. |
@@ -65,27 +64,29 @@ retail-compatibility development workflows.
 
 ## Run OpenNova
 
-Build the GDExtension, point `GODOT_BIN` at Godot 4.6.1, then run:
+Build the GDExtension, point `GODOT_BIN` at Godot 4.6.1, and supply the path
+to your game data:
 
 ```bash
-$GODOT_BIN --path godot
+$GODOT_BIN --path godot -- --resource-dir "C:/Games/Joint Operations"
 ```
 
-ONED is the companion utility for choosing data, running the game, staging a
-retail-compatible tree, and building release data:
+Packaged Windows runtime:
 
-```bash
-$GODOT_BIN --path godot res://modtools/oned_main.tscn
+```text
+opennova.exe -- --resource-dir "C:\Games\Joint Operations"
 ```
 
-See [godot/modtools/README.md](godot/modtools/README.md) for its scope.
+For loose data without boot archives, add `--loose-root /d`. `/game <code>`
+selects the game (default `jo`); `/exp <name>` selects an expansion. The data
+directory is required on every launch and is never saved. Missing input prints
+usage and exits with code 2; an invalid or unmountable directory exits with code 1.
 
 ## Downloads
 
-Tagged releases publish one Windows game archive named
-`opennova-game-windows-v<version>.zip`. It contains `opennova.exe`, the matching
-GDExtension, and packed game data. Development archives produced by CI also
-include ONED and loose tracked data for testing.
+CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
+contains `opennova.exe`, the matching native dependencies, and launch instructions.
+Game data is supplied separately. Debug builds include the game's F3 tools.
 
 ## Documentation
 

@@ -638,68 +638,16 @@ foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup)
     add_test(NAME rtxt_${test} COMMAND rtxt_${test}_test)
 endforeach()
 
-# Minimal authored fixture set — the fatal-set RTXT string tables
-# (assets/) and the synthetic parity set (fixtures/rtxt). Regenerates each
-# in memory and guards it byte-matches the committed file + round-trips.
-# See assets/README.md and fixtures/README.md.
+# Synthetic RTXT parity fixtures: byte-exact generation and round trips.
 add_executable(minimal_rtxt_gen_test fixtures/minimal_rtxt_gen.cpp)
 target_link_libraries(minimal_rtxt_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_rtxt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(minimal_rtxt_gen_test PRIVATE
-    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
     RTXT_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/rtxt")
 add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
 
-# Minimal set's hand-authored text resources must be CRLF: retail's text
-# parsers are not LF-tolerant and fail SILENTLY (a LF-only menu_style.mns
-# dead-ends the menu shell before main.mnu; a bare LF stops the .def parser
-# after block 0). Witnessed on retail 2026-08-23.
-add_executable(minimal_eol_guard_test fixtures/minimal_eol_guard.cpp)
-target_compile_definitions(minimal_eol_guard_test PRIVATE
-    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-add_test(NAME minimal_eol_guard COMMAND minimal_eol_guard_test)
-
-# Minimal set's text .def files parse through our loaders (items/weapon/ammo).
-add_executable(minimal_def_validate_test fixtures/minimal_def_validate.cpp)
-target_link_libraries(minimal_def_validate_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_def_validate_test PRIVATE
-    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-add_test(NAME minimal_def_validate COMMAND minimal_def_validate_test)
-
-# Minimal set's menus parse (main Startup node + mp host/join screen).
-add_executable(minimal_mnu_validate_test fixtures/minimal_mnu_validate.cpp)
-target_link_libraries(minimal_mnu_validate_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_mnu_validate_test PRIVATE
-    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-add_test(NAME minimal_mnu_validate COMMAND minimal_mnu_validate_test)
-
-# Minimal set's custom map — the .env + .bms legs (the .trn rides its own slice).
-add_executable(minimal_map_validate_test fixtures/minimal_map_validate.cpp)
-target_link_libraries(minimal_map_validate_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_map_validate_test PRIVATE
-    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-add_test(NAME minimal_map_validate COMMAND minimal_map_validate_test)
-
-# Minimal map's terrain config (.trn) — round-trip guarded; the heavy .cpt/tiles
-# are generate-at-package (not committed).
-add_executable(minimal_trn_gen_test fixtures/minimal_trn_gen.cpp)
-target_include_directories(minimal_trn_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(minimal_trn_gen_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_trn_gen_test PRIVATE
-    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-add_test(NAME minimal_trn_gen COMMAND minimal_trn_gen_test)
-
-# Minimal map's source-art images (colormap/detail/tilestrip TGAs, charmap/
-# foliagemap PCX) the .trn references — authored + validated.
-add_executable(minimal_art_validate_test fixtures/minimal_art_validate.cpp)
-target_link_libraries(minimal_art_validate_test PRIVATE opennova_formats)
-target_compile_definitions(minimal_art_validate_test PRIVATE
-    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-add_test(NAME minimal_art_validate COMMAND minimal_art_validate_test)
-
-# Minimal set's generated boot font (minimal_fnt_builder.h): validity +
-# byte-stable roundtrip + label glyphs drawable. Always-on; the boot font
-# itself is emitted at package time, never committed. The same builder mints
+# Synthetic fonts: validity, byte-stable round trips and drawable glyphs.
+# The builder mints
 # fixtures/fnt/synth_{1,3}page.fnt, byte-compared every run (--write regenerates).
 add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
 target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_formats)
@@ -723,32 +671,6 @@ add_executable(minimal_env_gen_test fixtures/minimal_env_gen.cpp)
 target_link_libraries(minimal_env_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_env_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_env_gen COMMAND minimal_env_gen_test)
-
-# Minimal mission's dialog companions (mnml.dbf + mnml.lwf): empty-but-valid
-# via the engine/formats/dbf + engine/formats/lwf writers, byte-stable vs the committed files.
-add_executable(minimal_companion_gen_test fixtures/minimal_companion_gen.cpp)
-target_link_libraries(minimal_companion_gen_test PRIVATE opennova_formats)
-target_include_directories(minimal_companion_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(minimal_companion_gen_test PRIVATE
-    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-add_test(NAME minimal_companion_gen COMMAND minimal_companion_gen_test)
-
-# Minimal set's generated boot music (minimal_mus_builder.h): the silent SBF
-# bank + the minimal MENUMUS/GAMEMUS scripts parse back valid. Always-on; the
-# files are emitted at package time, never committed.
-add_executable(minimal_mus_gen_test fixtures/minimal_mus_gen.cpp)
-target_link_libraries(minimal_mus_gen_test PRIVATE opennova_formats)
-add_test(NAME minimal_mus_gen COMMAND minimal_mus_gen_test)
-
-# Minimal set's packaging tool: PFF-bundle the committed assets/ tree or
-# assemble a loose install. A TOOL, not a test: it only acts on
-# `minimal_pff_package_test --write-pff` / `--install <dir>` (assets/README.md),
-# so it is built here beside the generators but never registered with ctest.
-add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
-target_include_directories(minimal_pff_package_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(minimal_pff_package_test PRIVATE opennova_runtime opennova_formats)
-target_compile_definitions(minimal_pff_package_test PRIVATE
-    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 
 # RTXT parity over the minted synthetic string tables (format invariants + byte
 # roundtrip); the same checks over the retail bins are the gated install sweep.
@@ -1224,7 +1146,6 @@ add_executable(menu_video_test menu/menu_video_test.cpp)
 target_link_libraries(menu_video_test PRIVATE opennova_runtime)
 target_include_directories(menu_video_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_video COMMAND menu_video_test)
-
 
 foreach(name crypto_roundtrip cdep_read cdep_roundtrip)
     add_executable(${name}_test terrain/${name}_test.cpp)
@@ -1874,7 +1795,6 @@ add_executable(tp_camera_mount_test world/tp_camera_mount_test.cpp)
 target_link_libraries(tp_camera_mount_test PRIVATE opennova_runtime)
 target_include_directories(tp_camera_mount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tp_camera_mount COMMAND tp_camera_mount_test)
-
 
 # The mouse-look pipeline (pixel deltas -> yaw/pitch BAM): the witnessed integer
 # math — sens << 11, the +0x8000 rounding, the scoped zoom divide, flipmouse,
@@ -2828,8 +2748,6 @@ foreach(gated
     opennova_add_gated_test(${gated_dir}_${gated_name} COMMAND ${gated_dir}_${gated_name}_test)
 endforeach()
 
-
-
 add_executable(npruntime_round_end_test npruntime/round_end_test.cpp)
 target_link_libraries(npruntime_round_end_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_round_end COMMAND npruntime_round_end_test)
@@ -2935,15 +2853,12 @@ add_test(NAME npruntime_two_endpoint_socket COMMAND npruntime_two_endpoint_socke
 add_subdirectory(playersav)
 
 # The in-engine dev tools (ADR 0039, engine/runtime/devtools). The frame-stats
-# board, the ImGui pass and ONED's surface are unconditional; the game-window
-# test needs them compiled in (OPENNOVA_DEVTOOLS, the root default). The ImGui
+# board is unconditional; the ImGui pass and game-window test need
+# OPENNOVA_DEVTOOLS (the root default). The ImGui
 # tests drive a null backend.
 add_executable(frame_stats_board_test devtools/frame_stats_board_test.cpp)
 target_link_libraries(frame_stats_board_test PRIVATE opennova_runtime)
 add_test(NAME frame_stats_board COMMAND frame_stats_board_test)
-add_executable(oned_ui_test devtools/oned_ui_test.cpp)
-target_link_libraries(oned_ui_test PRIVATE opennova_runtime opennova_imgui)
-add_test(NAME oned_ui COMMAND oned_ui_test)
 if(OPENNOVA_DEVTOOLS)
     add_executable(devtools_test devtools/devtools_test.cpp)
     target_link_libraries(devtools_test PRIVATE opennova_runtime opennova_imgui)

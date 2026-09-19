@@ -86,7 +86,7 @@ protected:
 public:
 	static bool is_valid_root(const String &path);
 
-	// Loose-source mount: PFF archives are ignored. The ONED fallback and
+	// Loose-source mount: PFF archives are ignored. The explicit --loose-root fallback and
 	// format/runtime fixtures use this path over an unpacked game-data tree.
 	Error set_root_dir(const String &path);
 	// Runtime mount: the PFF archives are the packed game data. At least one fixed-table archive

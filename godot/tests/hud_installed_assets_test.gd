@@ -24,13 +24,37 @@ func _definition(source: String, kind: String, name: String) -> String:
 	return source.substr(found.get_start(),
 			(end.get_start() if end != null else source.length()) - found.get_start())
 
-func test_installed_launcher_and_mortar_hud_transitions() -> void:
+# Javelin and tanks are Escalation content in the stock install. Mods may
+# provide them in the base mount; choose the first authored weapon table that
+# carries Javelin instead of assuming OPENNOVA_JO_DIR implies an expansion.
+func _combat_root() -> ResourceRoot:
 	var installed := RetailData.install()
 	if installed.is_empty():
-		pending("OPENNOVA_JO_DIR is required for installed HUD asset validation")
+		pending("OPENNOVA_JO_DIR is required for installed combat HUD validation")
+		return null
+	var expansions := PackedStringArray([""])
+	expansions.append_array(RetailData.expansions())
+	for expansion: String in expansions:
+		var art := ResourceRoot.new()
+		var mounted := art.mount_runtime(installed, expansion)
+		assert_eq(mounted, OK, "combat HUD assets mount: " + expansion)
+		if mounted != OK:
+			return null
+		var weapons := WeaponDatabase.new()
+		var loaded := weapons.load_from_resource_root(art, "weapon.def")
+		assert_eq(loaded, OK, "combat HUD weapon definitions load: " + expansion)
+		if loaded != OK:
+			return null
+		if weapons.find_weapon("WPN_JAVELIN") >= 0:
+			return art
+	pending("OPENNOVA_JO_DIR needs Escalation or mod data providing Javelin and tanks")
+	return null
+
+
+func test_installed_launcher_and_mortar_hud_transitions() -> void:
+	var art := _combat_root()
+	if art == null:
 		return
-	var art := ResourceRoot.new()
-	assert_eq(art.mount_runtime(installed), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(art, "weapon.def"), OK)
 	var layout := HudPos.new()
@@ -144,12 +168,9 @@ func test_installed_launcher_and_mortar_hud_transitions() -> void:
 		assert_false(hud.get_draw_list_stats().big_map_visible, "lowering the mortar closes the map")
 
 func test_installed_tank_and_pilot_hud_entry_exit() -> void:
-	var installed := RetailData.install()
-	if installed.is_empty():
-		pending("OPENNOVA_JO_DIR is required for installed vehicle HUD validation")
+	var art := _combat_root()
+	if art == null:
 		return
-	var art := ResourceRoot.new()
-	assert_eq(art.mount_runtime(installed), OK)
 	var items := ItemDatabase.new()
 	assert_eq(items.load_from_resource_root(art, "items.def"), OK)
 	var weapons := WeaponDatabase.new()

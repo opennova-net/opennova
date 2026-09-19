@@ -10,7 +10,7 @@
 // every color block ([orig: interpolate_weather_color @ 0x57d9e0]), the
 // cloud-scroll accumulators, and the writeback of the smoothed colors into
 // env::EnvironmentState. It also owns the standalone embedding (no
-// simulation: ONED previews, the GUT fixtures) — a private WeatherState
+// simulation: the GUT fixtures) — a private WeatherState
 // ticked from the render delta at the sim's 62.5 Hz, the deterministic
 // mission reset epoch, and the 255-tick mission-start settle. The shell node
 // owns only device work (node resolution, the hook registration, shader-

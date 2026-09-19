@@ -1,7 +1,8 @@
 #include <base/gameprofile/gameprofile.h>
 
-#include <stddef.h>
-#include <ctype.h>
+#include <base/io/strutil.h>
+
+#include <iterator>
 
 namespace opennova::gameprofile {
 
@@ -30,52 +31,38 @@ const GameProfile k_profiles[] = {
     { GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, 0, GAMEPROFILE_FORMAT_PFF3 },
 };
 
-/* Case-insensitive ASCII compare of two NUL-terminated strings. */
-int code_ieq(const char *a, const char *b) {
-    while (*a && *b) {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
-            return 0;
-        }
-        ++a;
-        ++b;
-    }
-    return *a == *b;
-}
-
 } // namespace
 
 int gameprofile_count(void) {
-    return (int)(sizeof(k_profiles) / sizeof(k_profiles[0]));
+    return static_cast<int>(std::size(k_profiles));
 }
 
 const GameProfile *gameprofile_at(int index) {
     if (index < 0 || index >= gameprofile_count()) {
-        return NULL;
+        return nullptr;
     }
     return &k_profiles[index];
 }
 
 const GameProfile *gameprofile_by_id(int game_id) {
-    int i;
-    for (i = 0; i < gameprofile_count(); ++i) {
-        if (k_profiles[i].id == game_id) {
-            return &k_profiles[i];
+    for (const GameProfile &profile : k_profiles) {
+        if (profile.id == game_id) {
+            return &profile;
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 const GameProfile *gameprofile_by_code(const char *code) {
-    int i;
-    if (code == NULL) {
-        return NULL;
+    if (code == nullptr) {
+        return nullptr;
     }
-    for (i = 0; i < gameprofile_count(); ++i) {
-        if (code_ieq(k_profiles[i].code, code)) {
-            return &k_profiles[i];
+    for (const GameProfile &profile : k_profiles) {
+        if (strutil::iequals(profile.code, code)) {
+            return &profile;
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 int gameprofile_scr_policy_for_code(const char *code) {

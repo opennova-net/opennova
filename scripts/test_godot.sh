@@ -10,8 +10,7 @@
 #
 # The suite runs against an ISOLATED user:// (see below). Tests that persist
 # settings or drop scratch files therefore cannot reach the developer's real
-# Godot user directory -- a run must never change which resource directory ONED
-# or the game opens next time, nor leave debris behind.
+# Godot user directory -- a run must never change the game's player preferences, nor leave debris behind.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,7 +33,7 @@ if [[ -z "${GODOT_BIN:-}" || ! -x "$GODOT_BIN" ]]; then
 fi
 
 log="$(mktemp)"
-trap 'rm -f "$log"' EXIT
+trap 'rm -f "$log"; rm -rf "$root/.godot-test-fixtures"' EXIT
 
 # --- isolate user:// ----------------------------------------------------------
 # Godot derives user:// from the platform data dir ($APPDATA on Windows,
@@ -56,7 +55,7 @@ export APPDATA="$user_dir"
 export XDG_DATA_HOME="$user_dir"
 export HOME="$user_dir"
 if [[ "$keep_user_dir" == "0" ]]; then
-  trap 'rm -f "$log"; rm -rf "$user_dir"' EXIT
+  trap 'rm -f "$log"; rm -rf "$user_dir" "$root/.godot-test-fixtures"' EXIT
 fi
 
 set +e

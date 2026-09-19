@@ -120,3 +120,6 @@ ida_dumps/
 
 # The CI checkout of opennova-net/opennova-reference-retail-packed (the OPENNOVA_JO_DIR install).
 .reference-retail-packed/
+
+# Generated GUT resource roots, never part of the runtime.
+/.godot-test-fixtures/
