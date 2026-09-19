@@ -1322,12 +1322,19 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
+	# The current motor supplies the shot eye and target capsule from native clips.
+	assert_gt(host.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
 
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "CombatJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
 	_install_combat_tables(joiner)
+	assert_gt(joiner.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
+	# Apply before admission, like the shell: a later grant must not refill a
+	# magazine while this test is exercising the fire/reload transaction.
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
+	joiner.set_local_player_weapon(_retail_m4(), {})
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
@@ -1335,8 +1342,6 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 
 	assert_eq(joiner.get_join_assigned_team(), 1,
 			"the pre-spawn 0x04 advertises the co-op team the host entity received")
-	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
-	joiner.set_local_player_weapon(_retail_m4(), {})
 	for _settle in range(3):
 		joiner.step()
 		host.step()
@@ -1392,6 +1397,8 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	var reload_before := after_fire.reload_serial
 	var applied_before := after_fire.reload_applied_serial
 	assert_lt(spent_clip, 30, "the fire consumed one local magazine round")
+	assert_eq(_inventory_clip(joiner, "WPN_M4AUTO"), spent_clip,
+			"inventory readback exposes the spent shared ammo bucket")
 	joiner.set_local_player_weapon_input(false, false, true)
 	joiner.step()
 	var awaiting_echo := joiner.get_local_player_weapon_state()

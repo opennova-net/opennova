@@ -20,6 +20,10 @@ void ClientReplicaPipeline::apply_entity_routed(const std::vector<uint8_t> &body
     if (rec.target_bound) { s.flags |= 2; s.target = rec.target_slot; s.timer = -1; }
     if (group == GuidedFieldGroup::TargetTypePos) s.phase = rec.weapon_type;
     if (group == GuidedFieldGroup::TargetPos || group == GuidedFieldGroup::TargetTypePos || group == GuidedFieldGroup::Pos) {
+        // Read-full stores every decoded coordinate, including an all-zero point.
+        // [orig: Entity_SerializeGuidedMissileState @0x447C50, group 3
+        //  @0x447EEB/@0x447F08/@0x447F2E, group 4 @0x4480E5/@0x448102/@0x448129,
+        //  group 5 @0x448151/@0x44816E/@0x448195]
         s.steer[0] = rec.pos_x; s.steer[1] = rec.pos_y; s.steer[2] = rec.pos_z;
     }
     if (group == GuidedFieldGroup::AttachOffsets) {
