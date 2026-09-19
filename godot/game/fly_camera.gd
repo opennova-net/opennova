@@ -15,11 +15,11 @@ signal escape_pressed
 @export var zoom_speed: float = 20.0
 @export var pan_sensitivity: float = 0.5
 
-const SPEED_MIN := 5.0
+const SPEED_MIN := 1.25
 const SPEED_MAX := 2000.0
 const SPEED_STEP := 1.2
 
-var fly_speed: float = 18.75
+var fly_speed: float = 4.6875
 
 var _yaw: float = 0.0
 var _pitch: float = 0.0
