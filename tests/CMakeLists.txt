@@ -1804,6 +1804,11 @@ target_include_directories(local_player_targeting_test PRIVATE ${CMAKE_CURRENT_S
 target_compile_features(local_player_targeting_test PRIVATE cxx_std_17)
 add_test(NAME local_player_targeting COMMAND local_player_targeting_test)
 
+add_executable(special_weapon_parity_test world/special_weapon_parity_test.cpp)
+target_link_libraries(special_weapon_parity_test PRIVATE opennova_runtime)
+target_compile_features(special_weapon_parity_test PRIVATE cxx_std_17)
+add_test(NAME special_weapon_parity COMMAND special_weapon_parity_test)
+
 # The attach-command seat-selection mirror (world/vehicle_attach.h
 # predict_seat_selection) and the shared weight table.
 add_executable(seat_prediction_test world/seat_prediction_test.cpp)

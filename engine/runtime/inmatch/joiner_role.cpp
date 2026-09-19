@@ -402,7 +402,7 @@ void JoinerRole::tick_local_weapon() {
 		fire.shooter_handle = self_wire_handle();
 		fire.fire_flags = fired.round.mode_flags;
 		fire.adm_index = fired.adm_index;
-		fire.target_handle = 0xFFFF;
+		fire.target_handle = fired.target_handle;
 		// hit_part is NOT a bare sequence: it is
 		// (own roster slot << 9) | (shot_seq & 0x1FF). The host copies the
 		// raw word straight into the GLOBAL word_B7C670 on the network arm
@@ -703,7 +703,9 @@ void JoinerRole::wire_frame_providers() {
     world.round_sim.guided_inputs_provider = [this](const world::LiveRound &round, world::GuidedInputs &in) {
         const auto *owner = runtime->state().find(round.shooter_handle);
         in.owner = in.owner || owner != nullptr;
-        if (owner) {
+        // Local fire has current input; a delayed replica must not replace
+        // its lock when the predicted missile launches.
+        if (owner && round.owner != kernel_->world.cached.local_player) {
             in.owner_ai = true;
             in.owner_target = owner->fire_target_handle;
             if (const auto *aim = runtime->state().find(in.owner_target)) {

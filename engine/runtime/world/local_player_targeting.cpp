@@ -92,26 +92,16 @@ void LocalPlayer::update_aim_target() {
     AiEntity *body = player_ai();
     if (!e || !body || (e->flags & 2u) != 0) return;
     if ((world_.logic_tick & 15u) == 0 && world_.collision) {
-        int32_t origin[3] = {
-            io::bam_add(body->pos[0], body->inf.eye_offset_x),
-            io::bam_add(body->pos[1], body->inf.eye_offset_y),
-            io::bam_add(body->pos[2], body->inf.eye_offset_z)};
-        int32_t yaw = body->heading;
-        int32_t pitch = io::bam_add(body->pitch, body->inf.recoil_pitch);
-        int32_t roll = body->roll;
+        int32_t fire[6];
+        local_weapon_fire_pose(world_, weapon, active_local_weapon_slot(world_, weapon)->clip, fire);
+        int32_t origin[3] = {fire[0], fire[1], fire[2]};
+        int32_t yaw = fire[3], pitch = fire[4], roll = fire[5];
         // The weapon-view offsets: the scope-zero elevation comes back OUT of
-        // the ray while the weapon can fire (offsetY = -MountSlot+4, else 0);
-        // a raised binocular view substitutes its yaw/pitch wander for both.
-        // The on-foot seed (Position + CameraOffset, Yaw / Pitch + pitchBlend)
-        // is the origin/pitch above. Residual: the mounted seeds (parentSlot 3
-        // -> the gunner bone @0x4b4f35 / @0x4dc789; seat 2 on a mountable gun
-        // @0x4dc7e5), the seat-flag 0x10000 turret clamp @0x4dc8a3..0x4dc8ef
-        // and the ammo-flag 0x2000000 aimPoint override @0x4dc91a..0x4dc92c.
-        // [orig: Entity_UpdateInfantryPlayerBody @0x4b4ea7..0x4b4ee0
-        //  (Player_CanFireWeapon @0x4b4ea7; offsetY @0x4b4eb0..0x4b4ebd; the
-        //  binocular pair @0x4b4ec8..0x4b4ed6); Entity_BuildCameraFromWeaponView
-        //  @0x4b0f52 (yaw += offsetX) / @0x4b0f56 (pitch += offsetY);
-        //  Entity_CalcWeaponFirePosition no-parent arm @0x4dc847..0x4dc880]
+        // the ray while the weapon can fire. A binocular view substitutes
+        // its wander. The shared fire pose supplies mounted and mortar seeds.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4B4EA7..0x4B4EE0;
+        // binocular offsets @0x4B4EC8..0x4B4ED6; Entity_BuildCameraFromWeaponView
+        // yaw @0x4B0F52 and pitch @0x4B0F56]
         const bool can_fire = local_player_can_fire();
         if (view.binoculars_view_active) {
             yaw = io::bam_sub(yaw, bam_from_degrees_wrapped(view_tracker.binocular_yaw_offset_deg));

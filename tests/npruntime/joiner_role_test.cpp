@@ -29,6 +29,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/player_loadout.h>
 #include <runtime/world/player_weapon.h>
+#include <runtime/world/throwables.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
 
@@ -721,6 +722,64 @@ bool run_remote_vehicle_occupancy() {
 	return ok;
 }
 
+// A real local weapon pump must carry its selected lock through C2S 0x06.
+// [orig: WeaponAction_Fire @0x542C0D; writer @0x42A7B6]
+bool run_guided_fire_preserves_selected_target() {
+    Harness h;
+    auto &world = h.kernel->world;
+    world.tables.weapons.entries.resize(2);
+    auto &def = world.tables.weapons.entries[1];
+    def.valid = true; def.name = "WPN_GUIDED"; def.ammo_index = 1;
+    world.tables.ammo.entries.resize(2);
+    world.tables.ammo.entries[1].valid = true;
+    world.tables.ammo.entries[1].max_age_ticks = 100;
+    world.tables.ammo.entries[1].velocity = 248;
+    world.tables.ammo.entries[1].tracer_item_friendly = 10;
+    world.tables.ammo.entries[1].tracer_item_enemy = 10;
+    world.throwables.classes.set({10,w::ThrowClass::kNone,w::ThrowClass::kJavelin});
+    h.role.kit_seams.apply_authoritative = [&h] {
+        h.kernel->local.inventory_valid = true;
+        h.inventory().equipped_combo = 0;
+        h.inventory().slots[0].adm_index = 1;
+    };
+    h.role.poll_preload();
+    h.role.runtime->seed_session(kSessionId,kClientKey,kClientScrk,kServerScrk,
+        1,0,0x0005,w::kPlayerInfantryTypeId);
+    h.role.run_tick(h.input);
+    w::WeaponInstallData data;
+    data.name = "WPN_GUIDED"; data.clipsize = 4; data.rows.resize(3);
+    std::snprintf(data.rows[0].name,sizeof(data.rows[0].name),"idle");
+    std::snprintf(data.rows[1].name,sizeof(data.rows[1].name),"fire");
+    data.rows[1].delayend = 6;
+    std::snprintf(data.rows[2].name,sizeof(data.rows[2].name),"recoil");
+    w::local_weapon_install(world,h.weapon(),data,false,false,nullptr,h.kernel->local.view);
+    h.kernel->local.inventory_valid = false;
+    constexpr uint16_t target = 0x1003;
+    auto *body = world.ai.for_handle(world.cached.local_player);
+    if (!expect(body != nullptr,"guided: local body spawned")) return false;
+    body->slot.f[3] = int(target)+1;
+    // The latest player lock must win over an older self replica at launch.
+    h.role.runtime->state().upsert(0x0005).fire_target_handle = 0x1002;
+    auto &target_row = h.role.runtime->state().upsert(target);
+    target_row.cls = EntityClass::Vehicle;
+    target_row.x = 200*65536; target_row.y = 30*65536; target_row.z = 4*65536;
+    h.weapon().fire_pressed = h.weapon().fire_held = true;
+    h.role.run_tick(h.input);
+    h.role.run_tick(h.input);
+    ProtocolMessage message;
+    if (!expect(h.socket.last_message(0x06,message),"guided: C2S fire sent")) return false;
+    ClientFiredRound fire;
+    size_t consumed = 0;
+    if (!expect(decode_client_fired_round(message.payload.data(),message.payload.size(),fire,consumed)
+        && fire.target_handle == target,"guided: C2S fire retains selected target")) return false;
+    for (const auto &round : world.round_sim.rounds) {
+        if (round.guided_family == w::GuidedFamily::Javelin)
+            return expect(round.active && round.guided.target == target,
+                "guided: predicted launch retains current lock despite stale replica");
+    }
+    return expect(false,"guided: local fire creates a predicted Javelin");
+}
+
 // A pilot's countermeasure rides the same C2S 0x06 as the handheld, and the
 // descriptor's side bytes are the PILOT's, not the flare's. Retail: the flare
 // fires with the vehicle's occupantEntity as the shooter and
@@ -1041,6 +1100,7 @@ int main() {
 	ok &= run_confirmed_vehicle_drive(0, true);
 	ok &= run_confirmed_vehicle_drive(0, true, true);
 	ok &= run_flare_descriptor_carries_the_pilot_handheld();
+	ok &= run_guided_fire_preserves_selected_target();
 	ok &= run_rules_stamp_from_mp_attributes(0x10000u, true);
 	ok &= run_rules_stamp_from_mp_attributes(0x3A02u, false);
 	if (!ok) return 1;

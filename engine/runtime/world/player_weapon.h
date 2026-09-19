@@ -168,6 +168,9 @@ struct LocalPlayerWeapon {
 
     float scope_max_mag = 0.0f;
     int32_t aim_range_q16 = 0;
+    // AbsorbPitch: WeaponDef+316/+320 and local elevation dword_B79008.
+    // [orig: Player_MountWeaponSlot @0x4DFA40]
+    int32_t pitch_min_bam = 0, pitch_max_bam = 0, pitch_offset_bam = 0;
     int32_t attack_kind = 0;
     int32_t run_anim = 0;
     bool force_crouch = false;
@@ -198,6 +201,7 @@ struct WeaponInstallData {
     PlayerViewPose view_ads_pose;
     WeaponScopeZero scope_zero;
     int32_t ammo_cost = 0;
+    int32_t pitch_min_bam = 0, pitch_max_bam = 0;
     std::string soundfireloop;
     std::string soundtrailoff;
     std::string soundhead;
@@ -236,6 +240,7 @@ struct LocalWeaponFiredWire {
     uint8_t adm_index = 0;
     int32_t ammo_index = -1;
     uint8_t charge = 0;
+    uint16_t target_handle = EntityHandle::kInvalid; // C2S 0x06 +28, aiRuntime[3]
     int32_t shooter_pose[5] = {0, 0, 0, 0, 0}; // pos xyz (16.16) + heading/pitch BAM
 };
 struct LocalWeaponReloadWire {
@@ -262,6 +267,12 @@ struct LocalWeaponPumpIO {
 WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w);
 const WeaponSlotState *active_local_weapon_slot(const World &world,
                                                const LocalPlayerWeapon &w);
+
+// Shared local fire/aim pose, including AbsorbPitch and mounted barrels.
+// clip_before_consume selects the barrel before the FSM spends ammo.
+// [orig: Entity_CalcWeaponFirePosition @0x4DC750]
+void local_weapon_fire_pose(World &, const LocalPlayerWeapon &,
+                           int32_t clip_before_consume, int32_t out[6]);
 
 // The seat/equip gates the switch walks consume.
 // [orig: the parentSlot {2,3,5} stance gate @ 0x4e0192; the equip-commit

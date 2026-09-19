@@ -338,9 +338,10 @@ void stage_player_vehicle_input(
     if ((move_order & Entity::kMoveOrderProne) != 0) m.cmd_speed >>= 2;
     if ((move_order & 0x20u) != 0) veh.flags |= 0x80u;
     else veh.flags &= ~0x80u;
-    if (!boat) {
-        // Ground/bike lean flags; a boat's bits 6/7 are the motion overrides above
-        // and its leg writes no flags from this range [orig: @0x48DFE5..0x48E0C0].
+    if (!boat && traits.family != VehicleFamily::Tank) {
+        // Ground/bike lean flags. The tank input only updates the sprint flag;
+        // it preserves 0x20/0x8 regardless of the occupant's lean keys.
+        // [orig: ctank @0x489675..0x4896A7; boat @0x48DFE5..0x48E0C0]
         if ((move_order & 0x40u) != 0) veh.flags |= 0x20u;
         else veh.flags &= ~0x20u;
         if ((move_order & 0x80u) != 0) veh.flags |= 0x8u;

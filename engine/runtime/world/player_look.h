@@ -36,6 +36,11 @@ struct PlayerLookSettings {
     bool invert_y = false; // flipmouse [orig: dword_24D2078; default OFF = push-forward looks up]
 };
 
+struct PlayerLookDelta { int32_t yaw = 0, pitch = 0; };
+// Shared scaling before human-view or AbsorbPitch bounds are applied.
+PlayerLookDelta player_look_delta(const PlayerLookSettings &, int32_t dx_px,
+                                 int32_t dy_px, int32_t scoped_zoom);
+
 // One frame of mouse pixels onto the look angles. `dx_px`/`dy_px` are cursor pixels
 // in screen sense (+x right, +y down — the raw center-lock offset). `scoped_zoom` is
 // the current zoom magnification when the scoped sensitivity reduction applies

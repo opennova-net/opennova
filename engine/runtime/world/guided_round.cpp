@@ -7,6 +7,13 @@
 namespace opennova::world {
 EntityHandle guided_heat_target(World &, const Entity &, const AiEntity &, const AmmoTableEntry &);
 namespace {
+// Guided callbacks copy target Position, not muzzle userpoints.
+// [orig: launch @0x445E40; stng @0x446370; jvln @0x446D39]
+void target_position(const Entity &target, int32_t out[3]) {
+    out[0] = to_fixed(target.position.x);
+    out[1] = to_fixed(target.position.y);
+    out[2] = to_fixed(target.position.z);
+}
 GuidedAmmo parameters(const AmmoTableEntry &ammo) {
     return {ammo.velocity, ammo.turnrate_maxpit, ammo.turnrate_maxyaw, ammo.boresight_maxang};
 }
@@ -24,13 +31,13 @@ GuidedInputs inputs(World &world, const LiveRound &r, bool authority) {
         }
         if (const Entity *aim = world.registry.get(EntityHandle{in.owner_target})) {
             in.owner_aim = true;
-            world.ai.weapon_fire_origin(world, *aim, in.aim);
+            target_position(*aim, in.aim);
         }
     }
     const uint16_t target_id = r.guided.target == 0xFFFF && r.guided.phase == 0 ? in.owner_target : r.guided.target;
     if (const Entity *target = world.registry.get(EntityHandle{target_id})) {
         in.target_present = true; in.target_alive = target->health > 0;
-        world.ai.weapon_fire_origin(world, *target, in.target_origin);
+        target_position(*target, in.target_origin);
     }
     return in;
 }
@@ -98,7 +105,7 @@ void RoundSim::tick_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
             in.acquired_target = chosen.packed;
             if (const Entity *target = world.registry.get(chosen)) {
                 in.acquired = true; in.target_present = true; in.target_alive = target->health > 0;
-                world.ai.weapon_fire_origin(world, *target, in.target_origin);
+                target_position(*target, in.target_origin);
                 std::copy_n(in.target_origin, 3, in.acquired_origin);
             }
         }
