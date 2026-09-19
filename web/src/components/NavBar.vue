@@ -14,7 +14,6 @@
       <nav class="hidden items-center gap-6 text-sm uppercase tracking-wider text-ink md:flex">
         <RouterLink class="hover:text-ink-bright transition" to="/lobby">Lobbies</RouterLink>
         <RouterLink class="hover:text-ink-bright transition" to="/expansions">Expansions</RouterLink>
-        <RouterLink class="hover:text-ink-bright transition" to="/mod-tools">Tools</RouterLink>
         <RouterLink class="hover:text-ink-bright transition" to="/admin">Admin</RouterLink>
         <RouterLink
           class="rounded-control border border-accent px-4 py-1 text-accent transition hover:bg-accent hover:text-on-accent"
@@ -73,7 +72,6 @@
         <div class="flex flex-col gap-2 text-sm uppercase tracking-[0.2em] text-ink">
           <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/lobby" @click="closeMenu">Lobbies</RouterLink>
           <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/expansions" @click="closeMenu">Expansions</RouterLink>
-          <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/mod-tools" @click="closeMenu">Mod Tools</RouterLink>
           <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/admin" @click="closeMenu">Admin</RouterLink>
           <RouterLink
             class="rounded-control border border-accent px-4 py-2 text-center text-accent transition hover:bg-accent hover:text-on-accent"

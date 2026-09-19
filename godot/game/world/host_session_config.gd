@@ -68,7 +68,7 @@ var dedicated: bool:
 
 
 func _init() -> void:
-	dir = ""           ## resource-dir override (dev/tests); empty = the persisted directory
+	dir = ""           ## resource-dir override (dev/tests); empty = the CLI directory
 	server_name = "COOPGAME"
 	player_name = "Player"  ## the host's own callsign (rides ClientAuth like any player's)
 	expansion = ""     ## g_ExpansionName: what the process actually mounted; "" for base JO

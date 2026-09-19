@@ -13,35 +13,6 @@ Two products compose it:
   window (closed by default), and ImGui's demo window.
   Debug builds only
   (`OPENNOVA_DEVTOOLS`; off for the release GDExtension flavour).
-- **ONED's run surface** (`oned_ui.*`): the one window with the game-data
-  directory, its recents, the game/expansion profile, the retail install and
-  the Run / Stage & Run Retail / Stop actions. Every flavour — ONED ships in
-  the dev zip that master exports in release mode.
-
-| File | What it is |
-|---|---|
-| `imgui_pass.h/.cpp` | The pass: context binding (`attach_imgui`), the window registry, open/closed state, the per-frame layout (dockspace, "Windows" menu, each open window, Escape), the ABI fingerprint |
-| `imgui_abi.h` | The version + struct-size fingerprint the shell passes to `ImGuiGD.GetImGuiPtrs` (no ImGui include) |
-| `frame_stats_slots.h` | The slot table (X-macro): one entry per measured span or VALUE counter; the engine enum, the `FrameStats` constants and the Stats rows all derive from it |
-| `frame_stats_board.h/.cpp` | The fixed-slot per-frame accumulator (sums, worst-frame peaks, sampled-frame counts) with the capture edge and the atomic drain |
-| `game_dev_tools.h/.cpp` | The game's window set on a pass, with the board hand-off, the pushed-record channels and the one control-request drain (`take_control_request`) |
-| `game_window.h/.cpp` | The mandatory embedded Game window, its narrow viewport adapter, the typed Play/Interact/Close request policy, and the spectator checkbox leaving as a `local_spectator` control request |
-| `stats_window.h/.cpp`, `stats_window_rows.h` | The Stats window: the row tree over a drained window, refreshed every 0.5 s |
-| `entities_window.h/.cpp` | The Entities window: the filterable entity-directory table over the pushed snapshot and the selection the shell's world pick lands on (`select_handle`, pending until a push carries the row); the one control-request queue both entity windows feed |
-| `entity_properties_window.h/.cpp` | The Entity Properties window (its own dock node, so list and card dock independently): the selected row's card over the pushed detail record (identity, item, health, AI state), the debug actions, and both items.def attrib words as keyword-labelled checkboxes from the def parser's own table, each toggle leaving as a control request. Every edit sits under the snapshot's authority fact: read-only on a joiner, and the AIData bit stays locked while a wire session is live |
-| `environment_window.h/.cpp`, `environment_snapshot.h` | The Environment window: the retail environment debug page's rows (`Debug_DrawEnvironmentValues`) over the pushed weather record, with a control strip of the WAC weather commands leaving as control requests (the table's `environment_*` rows) |
-| `control_request.h`, `debug_control_ids.h` | `ControlRequest`: one debug-control invocation by wire id plus typed positional arguments (ADR 0043 d12), the queue entry every F3 window feeds and the embedder drains into the debug-control table F3 and MCP share; `debug_control_ids.h` is the table's wire-id catalog in registration order |
-| `ai_window.h/.cpp`, `ai_debug_snapshot.h` | The AI window: the AI system counters, the selected brain's deep pane (rides the Entities selection + the same detail push), the TriggerRelations group table and the nav-channel table, over the pushed `world::inspect::ai_debug_report` join |
-| `rays_window.h/.cpp`, `rays_snapshot.h`, `rays_request.h` | The Rays window: the engine ray-debug capture's per-category counts and mask/TTL draw filter over the pushed record, the filter/clear requests drained into the Simulation ray-debug seam |
-| `physics_window.h/.cpp`, `physics_snapshot.h`, `physics_request.h` | The Physics window: the engine contact capture's control surface — the capture arm, per-kind counts and a kind mask over the pushed record, the mask/clear/capture requests drained into the Simulation contact-debug seam |
-| `entity_directory_snapshot.h` | `EntityDirectorySnapshot`: the value record the embedder pushes (the engine `world::inspect::entity_directory` join + the logic tick + the session-role facts `authority` / `session_live`, ADR 0042 d5) |
-| `entity_detail_snapshot.h` | `EntityDetailSnapshot`: the selected row's value record (the engine `world::inspect::build_entity_card` + the logic tick); an invalid card clears |
-| `weapon_window.h/.cpp` | The Weapon window: a DCC-style dope sheet over the equipped weapon's twelve ACTION slots (strips retimed by dragging), stacked over an NLA-style trace of the FSM as it actually ran. Custom `ImDrawList` geometry — ImGui ships no timeline widget. REC keeps the engine's 1024-tick ring armed through a hide (one sample copy per pump tick), so closing F3 to shoot and reopening shows the burst |
-| `weapon_action_snapshot.h` | `WeaponDefinitionSnapshot` (the baked slots + the authored rows behind them + the ANIM picker's clip keys, pushed on a serial bump: an install, an applied edit) and `WeaponLiveSnapshot` (the active slot, the input gates as reasons, the trace delta, pushed every frame) |
-| `weapon_request.h` | `WeaponRequest`: the Weapon window's typed edits and triggers. Triggers name the REAL input seams (fire, reload, scope toggle, weapon cycle), never the FSM's internal queue writers |
-| `demo_window.h/.cpp` | ImGui's demo window, the docking/multi-viewport smoke test |
-| `oned_ui.h/.cpp` | ONED's surface: the fields it owns, the state the app pushes, the typed request queue the app drains |
-
 ## Adding a window to the game's dev tools
 
 1. Subclass `Window` (`imgui_pass.h`): `title()` and `draw(ImGuiPass &, uint64_t frame_index)`;
@@ -93,12 +64,3 @@ One `X(NAME, "description")` line in `frame_stats_slots.h`, in the group it
 belongs to. Feed it from the shell (`FrameStats.add(FrameStats.NAME, us)`) or
 from `Simulation::fold_frame_stats`, then add its row to
 `stats_window_rows.h` (SPAN/GROUP/HEADER/RESIDUAL, parented by depth).
-
-## Changing ONED's surface
-
-`OnedUi` owns the text fields; the app seeds them and reads them back on the
-`APPLY_*`/`COMMIT_*` requests. Anything else the surface shows is pushed by the
-app (`set_recent_dirs`, `set_readiness`, `set_status`). A new control is a new
-`OnedAction` the app handles in `oned_app.gd` — the surface never spawns a
-process, opens a dialog or writes a setting. `tests/devtools/oned_ui_test.cpp`
-pins the surface, `godot/tests/oned_app_test.gd` the app over its seam.

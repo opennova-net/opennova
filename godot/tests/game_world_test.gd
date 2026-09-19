@@ -35,7 +35,7 @@ func _staged(root_dir: String) -> String:
 
 # The committed minimal pack (the default root of every bare mission load).
 func _minimal_assets_dir() -> String:
-	return ProjectSettings.globalize_path(WorldFixture.MINIMAL_ASSETS_DIR)
+	return ProjectSettings.globalize_path(WorldFixture.BOOT_FIXTURE_DIR)
 
 
 func test_mission_load_reports_only_real_stage_checkpoints() -> void:
@@ -367,7 +367,7 @@ func test_wire_header_missing_asset_reason_names_the_install() -> void:
 	var world := WorldFixture.make_world(self)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	assert_eq(world.missing_mission_asset_reason("dvi.trn", "x.bms", root, false),
 			"dvi.trn (from x.bms) not found in %s" % root.get_root_dir(),
 			"a local-file load keeps the historical reason text")
@@ -834,7 +834,7 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 	DirAccess.make_dir_recursive_absolute(root_dir)
 	for source_dir in [
 		ProjectSettings.globalize_path("res://../fixtures/terrain/tmap"),
-		ProjectSettings.globalize_path("res://../assets"),
+		ProjectSettings.globalize_path(RuntimeFixture.directory()),
 	]:
 		for file_name in DirAccess.get_files_at(source_dir):
 			assert_eq(DirAccess.copy_absolute(
@@ -867,7 +867,7 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 
 func test_wire_header_mission_uses_host_metadata_without_a_local_bms_body() -> void:
 	var fixture_path := ProjectSettings.globalize_path(
-			"res://../assets/mnml.bms")
+			RuntimeFixture.file("mnml.bms"))
 	var full_bytes := FileAccess.get_file_as_bytes(fixture_path)
 	assert_gt(full_bytes.size(), 616)
 	var full_mission := MissionData.new()
@@ -1007,7 +1007,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	DirAccess.make_dir_recursive_absolute(root_dir)
 	for source_dir in [
 		ProjectSettings.globalize_path("res://../fixtures/terrain/tmap"),
-		ProjectSettings.globalize_path("res://../assets"),
+		ProjectSettings.globalize_path(RuntimeFixture.directory()),
 	]:
 		for file_name in DirAccess.get_files_at(source_dir):
 			assert_eq(DirAccess.copy_absolute(
@@ -1402,7 +1402,7 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	world.set_playable(false)
 
 	var root := ResourceRoot.new()
-	var fixture_dir := ProjectSettings.globalize_path("res://../assets")
+	var fixture_dir := ProjectSettings.globalize_path(RuntimeFixture.directory())
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
 	var mission := MissionData.new()
@@ -1461,7 +1461,7 @@ func _world_driven_weather_state_after(deltas: Array) -> Array:
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../assets")), OK)
+			RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
@@ -1569,7 +1569,7 @@ func test_failed_host_load_does_not_arm_the_next_mission_as_a_lan_host() -> void
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 
 	assert_eq(world.load_mission_as_host(_lan_host_config("missing.bms", 0)),
@@ -1592,7 +1592,7 @@ func test_lan_host_threads_truthful_base_metadata_into_the_native_session() -> v
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 
 	assert_eq(world.load_mission_as_host(_lan_host_config("mnml.bms", 0)), OK)
@@ -1620,7 +1620,7 @@ func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless()
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 	watch_signals(world)
 	var failures: Array[String] = []
@@ -1653,7 +1653,7 @@ func test_lan_host_bind_failure_survives_synchronous_teardown_handler() -> void:
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 	var failures: Array[String] = []
 	world.load_failed.connect(func(reason: String):
@@ -1683,7 +1683,7 @@ func test_escape_aborts_the_joiner_preload_wait() -> void:
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 	var failures: Array[String] = []
 	world.load_failed.connect(func(reason: String): failures.append(reason))
@@ -1710,7 +1710,7 @@ func test_freeing_world_during_joiner_preload_leaves_no_suspended_owner_method()
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 
 	assert_eq(world.load_mission_as_joiner(
@@ -1751,7 +1751,7 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
@@ -1804,7 +1804,7 @@ func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	world.set_playable(false)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 
 	assert_eq(world.load_mission_as_joiner(_join_target(
@@ -1826,7 +1826,7 @@ func test_environment_load_failure_finishes_its_perf_timeline() -> void:
 	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
 	var bms_name := "timeline_env_fail_%d.bms" % Time.get_ticks_usec()
 	assert_eq(DirAccess.copy_absolute(
-		ProjectSettings.globalize_path("res://../assets/mnml.bms"),
+		ProjectSettings.globalize_path(RuntimeFixture.file("mnml.bms")),
 		root_dir.path_join(bms_name)), OK)
 	_write_fixture_file(root_dir.path_join("mnml.env"), "")
 	_write_fixture_file(root_dir.path_join("mnml.trn"), "terrain_name \"mnml\"\n")
@@ -1860,12 +1860,12 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
 	var bms_name := "timeline_terrain_fail_%d.bms" % Time.get_ticks_usec()
 	assert_eq(DirAccess.copy_absolute(
-		ProjectSettings.globalize_path("res://../assets/mnml.bms"),
+		ProjectSettings.globalize_path(RuntimeFixture.file("mnml.bms")),
 		root_dir.path_join(bms_name)), OK)
 	# A REAL environment node parses the env stage now, so this root needs the
 	# valid fixture env; the empty terrain still fails the terrain stage.
 	assert_eq(DirAccess.copy_absolute(
-		ProjectSettings.globalize_path("res://../assets/mnml.env"),
+		ProjectSettings.globalize_path(RuntimeFixture.file("mnml.env")),
 		root_dir.path_join("mnml.env")), OK)
 	_write_fixture_file(root_dir.path_join("mnml.trn"), "")
 	var root := ResourceRoot.new()
@@ -1896,7 +1896,7 @@ func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void
 	await get_tree().process_frame
 
 	var root := ResourceRoot.new()
-	var fixture_dir := ProjectSettings.globalize_path("res://../assets")
+	var fixture_dir := ProjectSettings.globalize_path(RuntimeFixture.directory())
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
 	world.mission_file = "boot-option.bms"
@@ -1965,7 +1965,7 @@ func test_editor_run_rejects_non_top_level_or_non_bms_paths() -> void:
 
 func test_runtime_mission_til_forces_loose_first_in_packed_mode() -> void:
 	var root_dir := _make_fixture_root("loose_first_til")
-	var source_dir := ProjectSettings.globalize_path("res://../assets")
+	var source_dir := ProjectSettings.globalize_path(RuntimeFixture.directory())
 	var archive_entries: Array = []
 	for file_name in DirAccess.get_files_at(source_dir):
 		archive_entries.append({
@@ -2003,7 +2003,7 @@ func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() ->
 	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join(
 		"mission_til_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
-	var source_dir := ProjectSettings.globalize_path("res://../assets")
+	var source_dir := ProjectSettings.globalize_path(RuntimeFixture.directory())
 	for file_name in DirAccess.get_files_at(source_dir):
 		assert_eq(DirAccess.copy_absolute(
 			source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
@@ -2064,7 +2064,7 @@ func test_unload_forgets_the_viewmodel_def_memo() -> void:
 	var world := WorldFixture.make_world(self)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 	# The debug viewmodel rig (the `set_viewmodel_weapon` control's seam).
@@ -2089,7 +2089,7 @@ func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
 	var world := WorldFixture.make_world(self)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../assets")), OK)
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
 	world.set_resource_root(root)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 
@@ -2354,7 +2354,7 @@ func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 	var world := WorldFixture.make_world(self)
 	await get_tree().process_frame
 	var root := ResourceRoot.new()
-	var fixture_dir := ProjectSettings.globalize_path("res://../assets")
+	var fixture_dir := ProjectSettings.globalize_path(RuntimeFixture.directory())
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
 	var mission := MissionData.new()
@@ -3039,20 +3039,26 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 	# the native verdict/delta contracts behind them are pinned on the real sim
 	# in simulation_test.gd.)
 	var root_dir := _stage_building_fixture("occl_frame")
+	# Keep the building and camera above the synthetic Tmap surface.
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+	var data := TerrainData.new()
+	assert_eq(data.load_from_resource_root(root, "mnml.trn"), OK)
+	var building_z := data.get_height_world(Vector3(16, 0, -24)) + 4.0
 	var world := WorldFixture.make_world(self)
 	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				placed.append(mission.add_entity(
-						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))), OK)
+						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, building_z), Vector3.ZERO))), OK)
 	var bms_id := (placed[0] as MissionEntityRecord).bms_id
 	assert_gt(bms_id, 0)
 	var building := world.get_runtime().get_entity_index().resolve_single(bms_id) as Node3D
 	assert_not_null(building, "the authored building placed a real ObjectModel")
 	if building == null:
 		return
-	# Godot-space building position: mission (16, 24, 4) -> (16, 4, -24).
-	var eye := Vector3(16, 6, 0)
+	# Look horizontally toward the building, two units above its origin.
+	var eye := Vector3(16, building_z + 2, 0)
 	var toward := Transform3D(Basis.IDENTITY, eye)  # -Z forward: sees the building
 	var away := Transform3D(Basis(Vector3.UP, PI), eye)  # +Z forward: it is behind
 
@@ -3092,19 +3098,25 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 	# entity-cull legs died with the sim doubles — see the occlusion frame test
 	# above for what the fixture world can witness.)
 	var root_dir := _stage_building_fixture("occl_probe_skip")
+	# Keep the building and camera above the synthetic Tmap surface.
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+	var data := TerrainData.new()
+	assert_eq(data.load_from_resource_root(root, "mnml.trn"), OK)
+	var building_z := data.get_height_world(Vector3(16, 0, -24)) + 4.0
 	var world := WorldFixture.make_world(self)
 	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				placed.append(mission.add_entity(
-						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))), OK)
+						MissionData.KIND_BUILDING, 102001, Vector3(16, 24, building_z), Vector3.ZERO))), OK)
 	var building := world.get_runtime().get_entity_index().resolve_single(
 			(placed[0] as MissionEntityRecord).bms_id) as Node3D
 	assert_not_null(building)
 	if building == null:
 		return
 	var weather := world.get_weather_node() as Weather
-	var eye := Vector3(16, 6, 0)
+	var eye := Vector3(16, building_z + 2, 0)
 	var away := Transform3D(Basis(Vector3.UP, PI), eye)
 
 	world.tick(eye, away, ONE_TICK_DELTA)

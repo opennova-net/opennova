@@ -433,7 +433,7 @@ private:
 
 	// The one runtime-frame set: every model holding live per-frame work (PANM,
 	// dynamic materials, part/body anim, an env restamp due). The single frame
-	// driver — GameWorld's render_material_frame leg, the menu/ONED
+	// driver — GameWorld's render_material_frame leg, the menu
 	// process loop — advances this set once per render frame; models add
 	// themselves on wake and drop out on park. Replaces the per-node _process
 	// clock so nothing self-clocks outside that one driver.
@@ -661,7 +661,7 @@ public:
 
 	// The one runtime-frame clock: every context's single driver advances the
 	// AWAKE set once per render frame — the game from GameWorld's
-	// render_material_frame leg, the menu shell and ONED from their one process
+	// render_material_frame leg, the menu shell from their one process
 	// loop. Models self-park out of the set the first frame they hold no live
 	// work; there is no per-node _process.
 	static void advance_awake_frame(double p_delta);

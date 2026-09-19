@@ -1,5 +1,7 @@
 # ADR 0039: The tool UI lives in the engine, drawn with Dear ImGui
 
+> ONED, bundled data, and picker provisions are superseded by [ADR 0045](0045-cli-game-data-runtime-only.md). Runtime ImGui and retail format findings remain applicable.
+
 - **Status**: accepted (2026-08-27; hard cut)
 - **Owners**: engine runtime, the game shell
 - **Supersedes/updates**: updates ADR 0034 d6 (the F3 debug pages are no longer

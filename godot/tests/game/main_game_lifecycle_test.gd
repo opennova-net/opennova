@@ -4,7 +4,7 @@ extends GutTest
 # the real blocking GameWorld load. It never relies on the test process having /d.
 
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
-const FIXTURE_DIR := "res://../assets"
+static var FIXTURE_DIR := RuntimeFixture.directory()
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 # The packed shell recipe (the retail-shaped archive layout, the baked Tmap
 # terrain, the lifecycle-only weapon.def) lives on WorldFixture.boot_shell.
@@ -180,37 +180,6 @@ func after_each() -> void:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 
 
-func test_boot_gates_flag_mission_when_the_resource_dir_cannot_mount() -> void:
-	# A loose-only directory (no packed archives) fails the runtime mount when no
-	# --loose-root flag sanctions the loose fallback. The boot continuations
-	# (--mission here, --loose-mission in a managed run) must gate on
-	# that failure instead of starting a world load with no mounted root.
-	_temp_dir = OS.get_cache_dir().path_join(
-			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
-	var loose := FileAccess.open(_temp_dir.path_join("Alpha.TRN"), FileAccess.WRITE)
-	assert_not_null(loose)
-	loose.store_string("loose trn")
-	loose.close()
-	ResourceDirSettings.set_resource_dir(_temp_dir)
-	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir,
-			"the persisted dir round-trips, so the boot below reads THIS dir")
-	ResourceDirSettings.set_game("jo")
-	LaunchFlags.set_args_override(PackedStringArray(["--mission", "mnml.bms"]))
-	_shell = MAIN_GAME_SCENE.instantiate()
-	assert_not_null(_shell)
-	add_child(_shell)
-	await get_tree().process_frame
-	assert_false(_shell.is_world_loading(),
-			"no load handoff may start without a mounted root")
-	assert_null(_shell.current_resource_root(),
-			"the failed mount leaves the shell without a resource session")
-	assert_false(_shell.get_node("World").is_loaded())
-	var state: Dictionary = _shell.get_game_debug_adapter().get_mcp_game_state()
-	assert_eq(String(state["shell"]["state"]), "menu",
-			"the shell stays on the front-end state the picker contract needs")
-
-
 func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() -> void:
 	_shell = await _make_shell()
 	if _shell == null:
@@ -337,36 +306,8 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 			"shutdown releases the shell from the debug adapter")
 
 
-func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
-	# The picker's accept leg (apply_picked_resource_dir, the ADR-0018 seam
-	# behind _on_dir_selected): a process-local launch must never write its
-	# picker escape into the game's resource_dir preference, an unmanaged
-	# first-launch pick must, and an unmountable pick changes nothing.
-	_shell = await _make_shell()
-	if _shell == null:
-		return
-	var picked_dir := _temp_dir.path_join("picked")
-	assert_eq(DirAccess.make_dir_recursive_absolute(picked_dir), OK)
-	WorldFixture.stage_shell_archives(self, picked_dir, false)
-	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir)
-
-	assert_true(_shell.apply_picked_resource_dir(picked_dir, true),
-			"a process-local pick mounts and enters the menu")
-	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir,
-			"a process-local pick never writes the game's persisted key")
-	assert_false(_shell.apply_picked_resource_dir(
-			_temp_dir.path_join("does-not-exist"), false),
-			"an unmountable pick is refused")
-	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir,
-			"a refused pick changes nothing")
-	assert_true(_shell.apply_picked_resource_dir(picked_dir, false),
-			"an unmanaged pick mounts")
-	assert_eq(ResourceDirSettings.get_resource_dir(), picked_dir,
-			"the unmanaged first-launch pick persists")
-
-
 func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
-	# The ONED run contract: with --loose-root, a directory
+	# The explicit loose-root contract: with --loose-root, a directory
 	# holding none of the packed archives mounts as the loose file set being
 	# authored; without it, retail's no-archives fatal stands. Parameterized
 	# entry so the contract is testable without process arguments (ADR 0018).
@@ -403,83 +344,6 @@ func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
 		packed.clear()
 
 
-func test_bundled_game_dir_is_the_exe_dir_only_when_it_carries_a_boot_archive() -> void:
-	# A shipped opennova.exe sits IN its game dir, retail-style. A dir with no
-	# boot-table archive (a dev run: the Godot binary's own dir) is not a game.
-	_temp_dir = OS.get_cache_dir().path_join(
-			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
-	assert_eq(LaunchFlags.bundled_game_dir(_temp_dir), "",
-			"no boot archive -> not a game dir")
-	assert_eq(LaunchFlags.bundled_game_dir(""), "",
-			"an empty probe dir is never a game dir")
-	WorldFixture.write_pff(self, _temp_dir.path_join("localres.pff"), [])
-	assert_eq(LaunchFlags.bundled_game_dir(_temp_dir), _temp_dir,
-			"any boot-table archive makes the exe dir the default game dir")
-
-
-func test_boot_defaults_to_the_bundled_game_dir_and_never_persists_it() -> void:
-	# The shipped-zip flow: no flag, nothing configured, the exe's own dir carries
-	# the packed game -> that is the boot dir. It is a per-boot default, not a
-	# pick: the settings key stays untouched, and a configured dir always wins.
-	_temp_dir = OS.get_cache_dir().path_join(
-			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
-	var game_dir := _temp_dir.path_join("game")
-	var configured_dir := _temp_dir.path_join("configured")
-	assert_eq(DirAccess.make_dir_recursive_absolute(game_dir), OK)
-	assert_eq(DirAccess.make_dir_recursive_absolute(configured_dir), OK)
-	WorldFixture.write_pff(self, game_dir.path_join("localres.pff"), [])
-	var saved_dir := ResourceDirSettings.get_resource_dir()
-	var saved_override: String = LaunchFlags.get_bundled_probe_override()
-	ResourceDirSettings.set_resource_dir("")
-
-	LaunchFlags.set_bundled_probe_override(game_dir)
-	assert_eq(LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir()), game_dir,
-			"unconfigured boot resolves to the bundled game dir")
-	assert_eq(ResourceDirSettings.get_resource_dir(), "",
-			"the default is never written to the shared settings key")
-
-	ResourceDirSettings.set_resource_dir(configured_dir)
-	assert_eq(LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir()), configured_dir,
-			"an explicit configured dir wins over the bundle")
-	ResourceDirSettings.set_resource_dir(saved_dir)
-	LaunchFlags.set_bundled_probe_override(saved_override)
-
-
-func test_boot_falls_through_to_bundled_loose_assets_and_blesses_only_them() -> void:
-	# The dev-zip flow: no flag, nothing configured, no packed game beside the exe, but
-	# an assets/ sibling of loose sources -> that is the boot dir, and it (alone) may
-	# take the loose authoring mount without --loose-root. A picked or persisted loose
-	# dir keeps retail's no-archives fatal.
-	_temp_dir = OS.get_cache_dir().path_join(
-			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
-	var exe_dir := _temp_dir.path_join("exe")
-	var assets_dir := exe_dir.path_join("assets")
-	var picked_dir := _temp_dir.path_join("picked")
-	assert_eq(DirAccess.make_dir_recursive_absolute(assets_dir), OK)
-	assert_eq(DirAccess.make_dir_recursive_absolute(picked_dir), OK)
-	var saved_dir := ResourceDirSettings.get_resource_dir()
-	var saved_override: String = LaunchFlags.get_bundled_probe_override()
-	ResourceDirSettings.set_resource_dir("")
-
-	LaunchFlags.set_bundled_probe_override(exe_dir)
-	assert_eq(LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir()), assets_dir,
-			"with no packed game beside the exe, the loose assets/ sibling is the boot dir")
-	assert_true(LaunchFlags.boot_loose_allowed(assets_dir),
-			"exactly that dir is blessed for the loose mount")
-	assert_false(LaunchFlags.boot_loose_allowed(picked_dir),
-			"any other dir keeps retail's no-archives fatal without --loose-root")
-	assert_eq(ResourceDirSettings.get_resource_dir(), "", "never persisted")
-
-	# The packed bundle outranks the loose sibling when both are present (tagged zip
-	# carrying stray sources still boots the packed game).
-	WorldFixture.write_pff(self, exe_dir.path_join("localres.pff"), [])
-	assert_eq(LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir()), exe_dir,
-			"a boot archive beside the exe wins over the assets/ sibling")
-	ResourceDirSettings.set_resource_dir(saved_dir)
-	LaunchFlags.set_bundled_probe_override(saved_override)
-
-
 func test_mission_return_restores_menu_frame_and_supports_another_load() -> void:
 	_shell = await _make_shell()
 	if _shell == null:
@@ -493,9 +357,9 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 	# cannot redirect one consumer into a separately remounted VFS.
 	var detached_resource_dir := _temp_dir.path_join("detached")
 	assert_eq(DirAccess.make_dir_recursive_absolute(detached_resource_dir), OK)
-	ResourceDirSettings.set_resource_dir(detached_resource_dir)
-	assert_eq(ResourceDirSettings.get_resource_dir(), detached_resource_dir,
-			"the persisted directory now points away from the mounted fixture")
+	ConfigStore.write(STATE_CONFIG_PATH, "resources", "resource_dir", detached_resource_dir)
+	assert_eq(LaunchFlags.resource_dir(), _temp_dir,
+			"a stale saved directory cannot redirect the launch root")
 
 	# This is the same public intent emitted by the mission-list ACCEPT command.
 	menu_shell.start_requested.emit("mnml.bms")
@@ -806,10 +670,9 @@ func test_f11_withdraws_the_tools_platform_windows_before_the_switch() -> void:
 	# ImGui multi-viewport must be off at the NewFrame that first sees the
 	# fullscreen size (the window_fullscreen probe pins the black frame on the
 	# live process); the shell's F11 handler withdraws it before the mode change.
-	_shell = MAIN_GAME_SCENE.instantiate()
-	assert_not_null(_shell)
-	add_child(_shell)
-	await get_tree().process_frame
+	_shell = await _make_shell()
+	if _shell == null:
+		return
 	var dev_tools: DevTools = _shell.get_dev_tools()
 	assert_true(dev_tools.are_platform_windows_allowed(),
 			"windowed: undocked tool windows may become OS windows")

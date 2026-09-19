@@ -1,7 +1,7 @@
 # Developing OpenNova
 
 How to build and run OpenNova locally: the C++ core, the Godot GDExtension, the
-game and ONED, and the NovaWorld servers, including how to test the servers
+game, and the NovaWorld servers, including how to test the servers
 against both retail Joint Operations and our own Godot client.
 
 For the runtime build and release layout see [README.md](README.md). For
@@ -13,7 +13,7 @@ deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md).
 - **Godot 4.6.1** (only for Godot work). Set `GODOT_BIN` to the binary, or drop it in `.godot-bin/`.
 - **Docker** (Docker Desktop on Windows/macOS) to run the NovaWorld servers locally.
 - **.NET 8 SDK** to build the launcher (Windows).
-- **Git LFS** (assets and some fixtures are LFS objects).
+- **Git LFS** (binary test fixtures are LFS objects).
 
 ## First-time setup
 
@@ -69,7 +69,7 @@ scripts/build_godot.sh Release    # Release   -> plain /O2, no symbols
 ```
 
 All three flavors produce the same `template_debug`-named artifact, the one loaded by
-the Godot editor and source/debug runs of the game or ONED; they differ only
+the Godot editor and source/debug runs of the game; they differ only
 in compiler flags. Build `DebugFull` when you need to step through native code;
 expect roughly 1.5x whole-frame cost in-game while it is installed, so never profile
 against it. The `template_release` DLL that a release export loads is not produced by
@@ -83,10 +83,10 @@ hot-reload reliably, and on Windows the running editor holds the DLL lock so the
 deferred. A stale DLL shows up as GDScript "class not found" errors for classes that
 `engine/` has since added.
 
-## Run the game and ONED
+## Run the game
 
 ```bash
-$GODOT_BIN --path godot
+$GODOT_BIN --path godot -- --resource-dir "C:/Games/Joint Operations"
 ```
 
 On a fresh checkout, import the resources once before the first run:
@@ -95,17 +95,10 @@ On a fresh checkout, import the resources once before the first run:
 $GODOT_BIN --headless --path godot --import
 ```
 
-The import can crash on a cold cache; just run it again (CI retries it). The project's
-main scene is the runtime game. To run ONED from source, pass its feature-override
-scene explicitly:
-
-```bash
-$GODOT_BIN --path godot res://modtools/oned_main.tscn
-```
-
-ONED provides Settings, Run OpenNova, Stage & Run Retail,
-and Stop. It has no asset-authoring workspaces; see
-[`godot/modtools/README.md`](godot/modtools/README.md).
+The import can crash on a cold cache; retry it as CI does. The main scene is
+the runtime game. Every launch requires `--resource-dir`; use `--loose-root /d`
+for an extracted loose tree. The repository and downloads contain no game data.
+See [README.md](README.md) for packaged launch examples and exit codes.
 
 ## Run the NovaWorld servers locally
 

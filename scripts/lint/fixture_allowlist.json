@@ -1,7 +1,10 @@
 {
   "_comment": "Provenance rows for scripts/lint/fixture_lint.py (fixtures/README.md). MINTED files need no row when a tests/fixtures/*_gen.cpp names them; a fixture a TEST regenerates (an opennova-produced self-capture, zero retail bytes) gets a 'minted_by' row naming that test and its flag. 'authored' is text we wrote; 'keep' is the retail-interop set kept byte-for-byte so the parsers prove they read what the shipped game wrote (ADR 0003). Size exceptions carry a why; nothing else may exceed 2 MiB.",
   "minted_by": [
-    { "path": "fixtures/novaworld/self-capture-session.pcap", "generator": "nw_self_capture_test --write-fixture" }
+    {
+      "path": "fixtures/novaworld/self-capture-session.pcap",
+      "generator": "nw_self_capture_test --write-fixture"
+    }
   ],
   "authored": [
     "fixtures/README.md",
@@ -21,9 +24,5 @@
     "fixtures/novaworld/*.hexcap",
     "fixtures/novaworld/run_*/*"
   ],
-  "size_exceptions": [
-    { "path": "assets/mnml.cpt", "why": "the minimal map's baked terrain (CDEP + tiles); the writer's exact output, needed at its authored 1024^2 resolution" },
-    { "path": "assets/mnml_c.tga", "why": "the minimal map's colour map at the retail 2048^2 tile-composer resolution" },
-    { "path": "assets/mnml_d1.tga", "why": "the minimal map's detail texture at the retail resolution the composer samples" }
-  ]
+  "size_exceptions": []
 }

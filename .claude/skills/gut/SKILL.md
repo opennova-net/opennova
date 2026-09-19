@@ -61,7 +61,7 @@ The wrapper takes no arguments; invoke GUT directly:
 
 Full-suite failures can come from shared `user://` state (tests can encounter
 the same persisted product config as a local run, including
-`user://oned.cfg`). On any reported failure:
+`user://opennova.cfg`). On any reported failure:
 
 1. Re-run that test FILE alone with `-gtest=` as above.
 2. Fails alone → real failure; debug it.

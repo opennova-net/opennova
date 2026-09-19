@@ -2,9 +2,8 @@
 // (fixtures/README.md): Tmap.trn, Tmap.cpt, Tmap_f.pcx and Tmap_m.pcx, minted by our own
 // writers (save_trn, CptFile::write, encode_pcx_indexed) from integer data,
 // so every platform mints the same bytes. It is the second committed map
-// beside the minimal set's flat mnml: the same sector layout and terrain
-// art (Tmap.trn names the mnml_* images, so a runtime root is assets/ plus
-// this directory; godot/tests/support/test_fs.gd stages one), but with
+// with the same sector layout and synthetic terrain art used by
+// godot/tests/support/runtime_fixture.gd (TestFs stages the combined root), but with
 // water at 21, its own single-surface charmap (index 1, the value retail's
 // Dvxi5 carries everywhere; the sim records no bounce or impact on surface
 // 0), two foliage definitions, a painted foliage map and the relief the
@@ -158,7 +157,7 @@ CptFile make_cpt() {
 	return cpt;
 }
 
-// The mnml layout (assets/mnml.trn, itself modeled on the retail Dvxi5 grid)
+// An eight-sector layout modeled on the retail Dvxi5 grid
 // with this map's own polydata, foliage map, water and foliage definitions.
 TrnConfig make_trn() {
 	TrnConfig c;

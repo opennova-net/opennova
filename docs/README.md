@@ -169,3 +169,6 @@ The [HUD #645 follow-up](interface/hud-re.md#645-follow-ups-flag-feed-announceme
 ### PR #645 follow-up records (2026-09-11)
 
 The active parity slice covers the deferred gameplay, wire, controls, sound, and rendering findings. Detailed new witnesses are in [item classes and squib](world/world-wac-ai-re.md#243b-squib-and-shared-class-effects-2026-09-11), [animation timing](anim/adm-bad-format-re.md#playback-clock-follow-up-2026-09-11), [item effect replication](net/novaworld-net-re.md#item-explosion-and-state-receive-order-2026-09-11), [normal maps](render/render-material-re.md#texture-preprocessing-follow-up-2026-09-11), and [projection/thermal waves](render/render-order-re.md#projection-and-thermal-wave-follow-up-2026-09-11). Vehicle, HUD, mission, controls, and audio findings remain in their domain records; the divergence ledger retains unrelated open work.
+
+The runtime-only distribution and required CLI data directory are defined in
+[ADR 0045](adr/0045-cli-game-data-runtime-only.md).

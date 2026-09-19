@@ -12,7 +12,7 @@ func after_each() -> void:
 		_root = ""
 
 func test_mission_field_submits_markers_and_restores_them_on_stop() -> void:
-	var defs := FileAccess.get_file_as_string("res://../assets/items.def") + """
+	var defs := FileAccess.get_file_as_string(RuntimeFixture.file("items.def")) + """
 begin "Synthetic marked field"
  id 101896
  type decoration

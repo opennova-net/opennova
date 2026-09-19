@@ -6,8 +6,8 @@
 // draw_frame between the bridge's NewFrame and Render).
 //
 // Two products compose it today: the game's F3 workspace
-// (game_dev_tools.h; compiled with OPENNOVA_DEVTOOLS) and ONED's run surface
-// (oned_ui.h; every flavour). Not an editor (ADR 0037).
+// (game_dev_tools.h; compiled with OPENNOVA_DEVTOOLS).
+// Shared by the game dev tools.
 //
 // Ownership: a pass is a plain object its composer owns; there is no
 // process-wide instance. Windows are registered once and live as long as the

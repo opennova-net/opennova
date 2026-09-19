@@ -208,5 +208,3 @@ each schema; the table above is the map, the catalog is the truth.
   environment launch).
 - Bytes out of a mounted install: `opennova-extract --game <dir> [/exp x]
   weapon.def M82_1st.adm --out <dir>` (formerly the dump probes).
-- The ONED boundary (ADR 0037) is unchanged: ONED has no MCP server; it runs
-  the game, and the game carries the endpoint.

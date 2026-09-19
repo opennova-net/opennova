@@ -295,8 +295,8 @@ func _make_install() -> String:
 	_write_pff(dir.path_join("resource.pff"), [{"name": "basetag.txt", "bytes": "BASE"}])
 	# The expansion must contain a loadable terrain, not just a resolvable name:
 	# load_trn enforces retail's required map names and sector dimensions.
-	var heightmap := FileAccess.get_file_as_bytes("res://../assets/mnml.cpt")
-	var texture := FileAccess.get_file_as_bytes("res://../assets/mnml_dm.tga")
+	var heightmap := FileAccess.get_file_as_bytes(RuntimeFixture.file("mnml.cpt"))
+	var texture := FileAccess.get_file_as_bytes(RuntimeFixture.file("mnml_dm.tga"))
 	assert_false(heightmap.is_empty(), "the synthetic heightmap fixture exists")
 	assert_false(texture.is_empty(), "the synthetic terrain texture exists")
 	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [

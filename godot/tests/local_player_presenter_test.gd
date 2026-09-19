@@ -36,7 +36,7 @@ extends GutTest
 const TEST_ROOT := "local_player_presenter_test"
 var TICK := Simulation.tick_dt()
 
-const MINIMAL_FIXTURE_DIR := "res://../assets"
+static var MINIMAL_FIXTURE_DIR := RuntimeFixture.directory()
 const TMAP_FIXTURE_DIR := "res://../fixtures/terrain/tmap"
 const PERSON_FIXTURE := "res://../fixtures/threedi/synth/person.3di"
 const SOLDIER_ADM_FIXTURE := "res://../fixtures/anim/soldier.adm"

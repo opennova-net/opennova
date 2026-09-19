@@ -224,7 +224,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		"label": label,
 		"mission": {
 			"file": bms,
-			"resource_dir": ResourceDirSettings.get_resource_dir(),
+			"resource_dir": LaunchFlags.resource_dir(),
 			"expansion": ResourceDirSettings.get_expansion(),
 		},
 		"configuration": {
