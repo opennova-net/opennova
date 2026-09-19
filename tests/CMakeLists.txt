@@ -1,4 +1,4 @@
-# Machine-local retail data gates (tests/common/retail_paths.h, the four
+# Machine-local retail data gates (tests/common/retail_paths.h, the two
 # OPENNOVA_* roots in docs/asset-gated-tests.md): a gated test prints
 # "SKIP: needs <what>" and exits 77 when its data is absent, so ctest reports it
 # Skipped, never Passed. A test whose synthetic legs ran prints "SKIP-LEG:
