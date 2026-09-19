@@ -35,6 +35,7 @@ struct WeatherSeed {
     uint32_t cloud_scroll_rate_target = 0;   // Env_CloudScrollRateTarget (sky_speed << 10)
     uint32_t tod_fixed24 = 12u << 24;        // Env_CurTimeFixed24 (BMS start_time << 16)
     uint32_t tod_advance_per_tick = 0;       // Env_TodAdvancePerTick
+    bool tod_keyframed = false;             // Env_EnvSnapshotCount != 0
     int32_t fog_type = 1;                    // Env_FogType @ 0x26c6808
     uint32_t lightning_color = 0x00FFFFFFu;  // Env_LightningColor @ 0x26c646c (.env lightning_rgb)
     int32_t wind_scale = 256;                // Env_WindScale @ 0x26c68c0 (Environment_InitDefaults @ 0x57c1d1)
@@ -126,6 +127,11 @@ struct WeatherState {
     uint32_t tod_advance_per_tick = 0;
     int32_t tod_minute_tickdown = kTodMinuteTicks;
     uint32_t tod_minutes_elapsed = 0;
+    // Script lvalue, preserved until a keyframed TOD computation writes 0/1.
+    // [orig: WacCmd_Set @ 0x4ED520; Environment_ComputeTimeOfDayColors @ 0x57DE40]
+    int32_t night_phase = 0; // Env_IsNightPhase @ 0x26C645C
+    bool tod_keyframed = false;
+    void compute_night_phase();
 
     uint32_t quake_ticks = 0;              // Env_QuakeTicks @ 0x26c68ac
     uint32_t cloud_scroll_rate_target = 0; // Env_CloudScrollRateTarget @ 0x26c6870

@@ -9,7 +9,6 @@
 #include <runtime/world/world.h>
 
 namespace opennova::world {
-namespace {
 // The heat-seeker arm of the shared target query, contexts 6 and 11: the
 // pool-0 and pool-1 legs. LOS follows the bounded, stable score sort; the
 // query disables it during scan. NOT ported: the ctx-flag 0x200 projectile-
@@ -24,7 +23,7 @@ namespace {
 // Entity_UpdateShellBounce @0x443e69 / Projectile_ReleaseEffects @0x4e82ea,
 // case-11 deflection arm @0x539385..0x539415; Entity_ValidateWeaponTarget
 // @0x53a400; Weapon_CalcDamageByType @0x539140]
-EntityHandle heat_target(World &world, const Entity &owner, const AiEntity &body,
+EntityHandle guided_heat_target(World &world, const Entity &owner, const AiEntity &body,
                          const AmmoTableEntry &ammo) {
     const Entity *occupant = world.registry.get(owner.primary_occupant);
     const int team = occupant ? occupant->team : owner.team;
@@ -82,7 +81,6 @@ EntityHandle heat_target(World &world, const Entity &owner, const AiEntity &body
         }
     }
     return {};
-}
 }
 
 // Aim/range acquisition runs every sixteen ticks. The locked tone is refreshed
@@ -178,7 +176,7 @@ void LocalPlayer::update_aim_target() {
                 const int index = world_.tables.weapons.index_of(weapon.def_name.c_str());
                 const WeaponTableEntry *def = index < 0 ? nullptr : world_.tables.weapons.by_index(uint8_t(index));
                 const AmmoTableEntry *ammo = def ? world_.tables.ammo.by_index(def->ammo_index) : nullptr;
-                if (ammo) target = heat_target(world_, *e, *body, *ammo);
+                if (ammo) target = guided_heat_target(world_, *e, *body, *ammo);
             }
             body->inf.combat_target = target;
             body->slot.f[3] = target.valid() ? static_cast<int32_t>(target.packed) + 1 : 0;

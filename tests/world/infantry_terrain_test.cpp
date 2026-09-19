@@ -3,6 +3,8 @@
 // org2 @0x4B79DC]
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/world.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/infantry_internal.h>
 #include <base/io/bam.h>
 
 #include <algorithm>
@@ -336,6 +338,115 @@ void test_suppression_and_carriers() {
 }
 
 
+// Exercise the organic motor call, not just the shared parent transform.
+void test_standing_carrier_motion() {
+    for (bool player : {false, true}) {
+        Motor stationary(0, 0, player), moving(0, 0, player);
+        for (auto *m : {&stationary, &moving}) {
+            world::Entity platform;
+            platform.position = {98, -100, 60};
+            platform.bound_radius = 20;
+            const auto h = m->w->registry.spawn(0, platform);
+            auto &parent = *m->w->registry.get(h);
+            world::stamp_saved_live_pose(parent);
+            m->entity().ground_target = h;
+            if (m == &moving) parent.position = {101, -98, 61};
+        }
+        stationary.tick();
+        moving.tick();
+        CHECK(moving.ai().pos[0] - stationary.ai().pos[0] == q16(3));
+        CHECK(moving.ai().pos[1] - stationary.ai().pos[1] == q16(2));
+        CHECK(moving.ai().pos[2] - stationary.ai().pos[2] == q16(1));
+        CHECK(moving.entity().position.x == world::from_fixed(moving.ai().pos[0]));
+    }
+    // Authority-side remote players retain wire-owned locomotion but consume
+    // carrier motion, including without a model collision provider.
+    {
+        Motor m(0, 0, true);
+        m.ai().inf.is_local_player = false;
+        m.ai().net_is_remote_peer = true;
+        m.entity().position = {100, -100, 60};
+        world::Entity platform;
+        platform.position = {98, -100, 60};
+        platform.bound_radius = 20;
+        const auto h = m.w->registry.spawn(0, platform);
+        auto &parent = *m.w->registry.get(h);
+        world::stamp_saved_live_pose(parent);
+        parent.position = {101, -98, 61};
+        m.entity().ground_target = h;
+        m.tick();
+        CHECK(m.entity().position.x == 103);
+        CHECK(m.entity().position.y == -98);
+        CHECK(m.entity().position.z == 61);
+    }
+    // Player-only radius release; NPC support is released by contact instead.
+    for (bool player : {false, true}) {
+        Motor m(0, 0, player);
+        world::Entity platform;
+        platform.position = {90, -100, 60};
+        platform.bound_radius = 2;
+        const auto h = m.w->registry.spawn(0, platform);
+        auto &parent = *m.w->registry.get(h);
+        world::stamp_saved_live_pose(parent);
+        parent.position.x += 1;
+        m.entity().ground_target = h;
+        m.tick();
+        CHECK(m.ai().pos[0] == q16(player ? 100 : 101) + 1111);
+        CHECK(m.entity().ground_target.valid() == !player);
+    }
+    // Off-deck combat targets keep world aim while the NPC's body follows.
+    // Retail's approximate BAM-to-radians constant puts quarter turns within
+    // 1/4096 u of the ideal cardinal position; heading additions remain exact.
+    for (bool external_target : {false, true}) {
+        Motor m(0, 0);
+        world::Entity platform;
+        platform.position = {98, -100, 60};
+        platform.veh.yaw_seeded = true;
+        const auto h = m.w->registry.spawn(0, platform);
+        auto &parent = *m.w->registry.get(h);
+        world::stamp_saved_live_pose(parent);
+        parent.veh.yaw_bam = 0x40000000;
+        m.entity().ground_target = h;
+        if (external_target) m.ai().inf.combat_target = m.w->registry.spawn(0, {});
+        m.ai().heading = 0;
+        world::infantry_follow_carrier(m.ai(), *m.w, q16(2), false);
+        CHECK(std::abs(m.ai().pos[0] - q16(98)) <= 16);
+        CHECK(std::abs(m.ai().pos[1] + q16(98)) <= 16);
+        CHECK(std::abs(m.ai().pos[2] - q16(60)) <= 16);
+        CHECK(m.ai().heading == (external_target ? 0 : 0x40000000));
+        CHECK(m.ai().inf.body_heading == 0x40000000);
+        CHECK(m.ai().inf.aim_heading == (external_target ? 0 : 0x40000000));
+    }
+    // Both bodies rotate about the animation capsule midpoint. Org1 adopts
+    // pitch immediately; org2 banks it and applies its first look-follow step.
+    for (bool player : {false, true}) {
+        Motor m(0, 0, player);
+        world::Entity platform;
+        platform.position = {98, -100, 60};
+        platform.bound_radius = 20;
+        platform.veh.yaw_seeded = true;
+        const auto h = m.w->registry.spawn(0, platform);
+        auto &parent = *m.w->registry.get(h);
+        world::stamp_saved_live_pose(parent);
+        parent.veh.air_pitch_bam = 0x40000000;
+        m.entity().ground_target = h;
+        m.ai().heading = 0;
+        world::infantry_follow_carrier(m.ai(), *m.w, q16(2), player);
+        CHECK(std::abs(m.ai().pos[0] - q16(99)) <= 16);
+        CHECK(std::abs(m.ai().pos[1] + q16(100)) <= 16);
+        CHECK(std::abs(m.ai().pos[2] - q16(63)) <= 16);
+        CHECK(m.ai().body_pitch == 0x40000000);
+        CHECK(m.ai().pitch == (player ? 0x02000000 : 0x40000000));
+        CHECK(m.ai().inf.carrier_pitch_lag == (player ? 0x3E000000 : 0));
+    }
+    // The pitch-follow residual keeps relaxing after a player steps off.
+    Motor m(0, 0, true);
+    m.ai().inf.carrier_pitch_lag = -3200;
+    world::infantry_follow_carrier(m.ai(), *m.w, 0, true);
+    CHECK(m.ai().inf.look_pitch == -100);
+    CHECK(m.ai().inf.carrier_pitch_lag == -3099);
+}
+
 void test_player_jump_uses_current_slope() {
     for (bool steep : {false, true}) {
         Motor m(steep ? 768 : 0, 0, true);
@@ -380,6 +491,7 @@ int main() {
     test_suppression_and_carriers();
     test_slope_arms_route_detour_before_think();
     test_player_jump_uses_current_slope();
+    test_standing_carrier_motion();
     if (failures == 0) std::puts("infantry terrain: OK");
     return failures == 0 ? 0 : 1;
 }

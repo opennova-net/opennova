@@ -451,6 +451,15 @@ void LocalPlayer::apply_player_input_pre_tick() {
         player_look_keys(input.look_heading, input.look_pitch, input.turn_left,
         input.turn_right, input.look_up, input.look_down, input.prone, p->body_pitch);
 	w::apply_player_body_input(*p, w::pack_player_body_input(input));
+	// Input precedes the pool-1 vehicle callbacks. Publish current look and
+	// MoveOrder now, before the later pool-0 body pose; otherwise a driver's
+	// key press, release and mouse steering arrive one motor tick late.
+	// This mirror copies retained animation/eye values without advancing them.
+	// [orig: Player_PackInputStateToEntity @0x4DF450;
+	// Input_ProcessMouseAxisBindings @0x499680; pool-1 walk @0x4C2158]
+	p->heading = p->inf.target_heading;
+	p->pitch = p->inf.look_pitch;
+	world.ai.mirror_wire_anim(*p, world);
 	if (w::Entity *entity = world.registry.get(p->handle))
 		entity->analog_throttle = input.analog_throttle;
 	const bool scope_promoted = weapon.active && w::player_view_scope_settled(view);

@@ -216,7 +216,8 @@ struct WeaponSlotState {
     int16_t switch_timer = 0;
     uint8_t kick = 0;
     uint8_t burst = 0;
-    int32_t clip = 0;          // rounds in the magazine (MountSlot+0x10 low u16)
+    int32_t clip = 0;          // effective loaded rounds (slot word or shared dword)
+    bool shared_clip = false; // selects the dword width of def+0xDC
     int32_t reserve = 0;       // carried pool, in rounds (the per-class pool via
                                // Entity_GetScoreValueBySlotType @ 0x5406e0; single-class
                                // model, D-WPN-2)

@@ -141,18 +141,29 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 			GrantedWeaponLoadout::Row row;
 			row.combo = slot.combo;
 			row.adm_index = slot.wire.type_id;
-			row.clip = we != nullptr ? static_cast<int16_t>(we->clipsize) : int16_t{0};
+			row.clip = we != nullptr && we->ammo_bucket == 0
+                    ? static_cast<int16_t>(we->clipsize) : int16_t{0};
+            const bool shared = we != nullptr && we->ammo_bucket != 0;
+            const uint32_t bucket = we != nullptr ? static_cast<uint32_t>(we->ammo_bucket) : 0;
+            const bool bucket_valid = bucket < grant.shared_clips.size() &&
+                    bucket < table->ammo_class_names.size();
 			if (we != nullptr && we->ammo_class_id >= 0 &&
 			    we->ammo_class_id < static_cast<int>(grant.ammo_pools.size()) &&
 			    we->ammo_class_count != 0 && we->clipsize != -1) {
 				int32_t &pool = grant.ammo_pools[
 						static_cast<size_t>(we->ammo_class_id)];
-				int32_t draw = static_cast<int32_t>(we->clipsize) * we->ammo_class_count;
+				if (shared && bucket_valid && grant.shared_clips[bucket] != 0) {
+                    pool += grant.shared_clips[bucket] * we->ammo_class_count;
+                    if (static_cast<size_t>(we->ammo_class_id) < table->ammo_class_caps.size())
+                        pool = std::min(pool, table->ammo_class_caps[we->ammo_class_id]);
+                }
+                int32_t draw = static_cast<int32_t>(we->clipsize) * we->ammo_class_count;
 				if (draw > pool) draw = pool;
 				pool -= draw;
 				if (pool < 0) pool = 0; // WeaponSlot_DecrementAmmo's lower clamp
 				// slot+16 = the drawn rounds [orig: @0x5423xx in the recalc]
-				row.clip = static_cast<int16_t>(draw / we->ammo_class_count);
+				if (!shared) row.clip = static_cast<int16_t>(draw / we->ammo_class_count);
+                else if (bucket_valid) grant.shared_clips[bucket] = draw / we->ammo_class_count;
 			}
 			grant.rows.push_back(row);
 			slot.wire.ammo_alt = find_ammo_damage_class(

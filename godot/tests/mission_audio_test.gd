@@ -596,7 +596,7 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	TestFs.remove_dir_recursive(fixture_dir)
 
 
-func test_teardown_removes_the_mission_reverb_from_the_ambient_bus() -> void:
+func test_mission_reverb_does_not_install_an_unwitnessed_bus_effect() -> void:
 	var fixture_dir := OS.get_cache_dir().path_join("mission_audio_reverb_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(fixture_dir)
 	var root := ResourceRoot.new()
@@ -610,7 +610,8 @@ func test_teardown_removes_the_mission_reverb_from_the_ambient_bus() -> void:
 	var ambient_bus := AudioServer.get_bus_index(&"Ambient")
 	assert_gte(ambient_bus, 0)
 	audio.setup(mission, "reverb_probe.bms", container)
-	assert_eq(_reverb_count(ambient_bus), 1, "mission setup installs its Ambient reverb")
+	assert_eq(_reverb_count(ambient_bus), 0,
+		"the retail preset selector does not introduce a Godot reverb effect")
 
 	audio.teardown()
 	assert_eq(_reverb_count(ambient_bus), 0,

@@ -505,7 +505,7 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 		return rig->has_clip(reset_key) ? reset_key : key;
 	};
 	const std::string primary_key =
-			resolve_primary_key(opennova::world::infantry_anim_key(r_ai->inf.anim_state));
+			resolve_primary_key(opennova::world::infantry_anim_key(r_ai->inf.body_clip_state()));
 	if (primary_key.empty()) return false;
 	const double primary_seconds =
 			rig->clip_seconds_at_tick(primary_key, r_ai->inf.clip_phase);
@@ -539,7 +539,7 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 			world::infantry_weapon_channel_visible(
 					r_ai->inf, weapon_active,
 					mount_blocks_weapon_channel(*r_entity))) {
-		weapon_key = opennova::world::infantry_anim_key(r_ai->inf.wpn_state);
+		weapon_key = opennova::world::infantry_anim_key(r_ai->inf.weapon_clip_state());
 		weapon_variant = r_ai->inf.wpn_variant;
 		weapon_seconds = rig->clip_seconds_at_tick(
 				weapon_key, r_ai->inf.wpn_clip_phase, weapon_variant);

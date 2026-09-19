@@ -1208,37 +1208,17 @@ void MissionAudio::_load_bank(const String &p_lwf_name) {
 	}
 }
 
-// Reverb id -> an AudioEffectReverb preset on the Ambient bus. NOT a port: retail's
-// reverb is a software DSP in the mixer driven by a 20-row coefficient table baked
-// into the image (0x7BF400; every row identical in stock JO, which ships no
-// reverb.def for Audio_LoadReverbDefs @0x766d80 / the parser @0x7bf5e4 to
-// override) and indexed by the per-tick reverb id the player body sets
-// (@0x4b633f: userpoint, else the occupied building's def `reverb`, else the
-// mission default). Witness record: docs/audio/lwf-dbf-sound-re.md "The reverb
-// bed". This room-size stand-in scales with an id retail's rows do not vary with;
-// its disposition (port the DSP or ledger a D-SND row) is pending the maintainer.
-void MissionAudio::_apply_reverb(int p_reverb_id) {
-	AudioServer *audio_server = AudioServer::get_singleton();
-	const int bus_idx = audio_server->get_bus_index(StringName(kAmbientBus));
-	if (bus_idx < 0) {
-		return;
-	}
-	// Clear any reverb left by a previous mission.
-	for (int i = audio_server->get_bus_effect_count(bus_idx) - 1; i >= 0; --i) {
-		const Ref<AudioEffect> effect = audio_server->get_bus_effect(bus_idx, i);
-		if (Object::cast_to<AudioEffectReverb>(effect.ptr()) != nullptr) {
-			audio_server->remove_bus_effect(bus_idx, i);
-		}
-	}
-	if (p_reverb_id <= 0) {
-		return;
-	}
-	Ref<AudioEffectReverb> reverb;
-	reverb.instantiate();
-	reverb->set_room_size(static_cast<float>(CLAMP(0.4 + 0.08 * static_cast<double>(p_reverb_id), 0.0, 1.0)));
-	reverb->set_wet(0.25f);
-	reverb->set_dry(0.9f);
-	audio_server->add_bus_effect(bus_idx, reverb);
+// The original mixer copies its selected preset, but the live sample path has
+// no consumer for those values. Region selection lives in World::reverb;
+// see the original-output witness in docs/audio/lwf-dbf-sound-re.md.
+void MissionAudio::_apply_reverb(int /*p_reverb_id*/) {
+    AudioServer *audio_server = AudioServer::get_singleton();
+    const int bus_idx = audio_server->get_bus_index(StringName(kAmbientBus));
+    if (bus_idx < 0) return;
+    for (int i = audio_server->get_bus_effect_count(bus_idx) - 1; i >= 0; --i) {
+        const Ref<AudioEffect> effect = audio_server->get_bus_effect(bus_idx, i);
+        if (Object::cast_to<AudioEffectReverb>(effect.ptr())) audio_server->remove_bus_effect(bus_idx, i);
+    }
 }
 
 // Witnessed no-op: the .bms header `music` field has NO live consumer in retail

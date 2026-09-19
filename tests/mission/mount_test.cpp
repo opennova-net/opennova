@@ -536,8 +536,8 @@ int main() {
         CHECK(ae->pos[0] == to_fixed(10.0));
         CHECK(ae->pos[1] == to_fixed(20.0));
         CHECK(ae->pos[2] == to_fixed(5.0));
-        CHECK(ae->inf.anim_state == 67); // anim_emplaced
-        CHECK(ae->inf.clip_phase == 0);
+        CHECK(ae->inf.anim_state == 67); // anim_emplaced request
+        CHECK(ae->inf.clip_phase == 42); // data-less body keeps its current channel
 
         // Move the gun -> the gunner follows next tick.
         w.registry.get(gh)->position = {30.f, 40.f, 5.f};

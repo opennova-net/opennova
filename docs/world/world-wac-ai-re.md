@@ -34,12 +34,13 @@ Records `{char name[8]; void (*fn)(Entity*)}`, the **per-frame motor** per class
 | projectiles/effects | shell/missile/flare physics | out of scope |
 
 ### 1.3 Consequence for OpenNova (the reframing verdict)
-Our `engine/runtime/world` AI port (24-row SM @ 0x815238, states 16–18, `AI_BeginUpdate @ 0x457b40`,
-`AI_UpdateWaypointMovement @ 0x457bd0`, targeting/combat P1/P2) is a **byte-exact port of the
-AI-vehicle decision layer** (cveh/cbot/ctrn). Those verdicts stand. The divergence: OpenNova
-currently routes **BMS organics** through that vehicle layer; the original routes them through
-`Entity_UpdateInfantryAI @ 0x4b9910`, where **locomotion is animation-driven root motion**.
-User decision 2026-06-10: port the infantry motor to full fidelity (§3) before extracting PR-B1.
+The `engine/runtime/world` state-machine and targeting port models the
+AI-vehicle decision layer (cveh/cbot/ctrn). Section 34 corrects the original
+`AI_BeginUpdate @ 0x457B40` controller ownership and class-callback admission.
+The 2026-06-10 routing discovery separated BMS organics from that vehicle
+layer: the original uses `Entity_UpdateInfantryAI @ 0x4B9910`, whose locomotion
+is animation-driven root motion. The port now follows that organic motor
+through `tick_infantry`; section 3 records its mechanics.
 
 Also confirmed: `AI_DispatchStateMachineByProfileClass @ 0x4680a0` (defined this session) is
 **unreferenced dead code** (no callers, no data refs, no rel32 sites). `g_AIMoveStepFnTable @
@@ -53,7 +54,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 
 | reimpl (engine/runtime/world) | original | addr | evidence | verdict |
 |---|---|---|---|---|
-| `AiSystem::begin_update` | `AI_BeginUpdate` | 0x457b40 | byte-walk this session (budget 0x1F0, pend=8/brain[6], +brain[7]) | **matching** (as vehicle-layer) |
+| `AiSystem::begin_update` | `AI_BeginUpdate` | 0x457b40 | per-entity controller phase >496, pend=8/brain[6], +brain[7]; 24 original-executable vectors (section 34) | **MATCHING** (movement-controller row 4) |
 | `AiSystem::update_waypoint_movement` | `AI_UpdateWaypointMovement` | 0x457bd0 | prior grill + re-read | **matching** (vehicle mover) |
 | `ai_waypoint_update_target` | `AIWaypoint_UpdateTarget` | 0x457380 | prior grill; also called by aircraft motor @0x490310 | **matching** |
 | `process_infantry_state_machine` | SM dispatcher (vehicle classes) | 0x4581b0 | event-callback fn1 rows | **matching**; name is now known to be historical — it is the AI-VEHICLE SM |
@@ -480,9 +481,8 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     heading; the doubles are the image's stored approximations of 2π/65536 and π/4 at
     0x7C9BC0/0x7C9BB0, the multiplier is `flt_7C9BD8 = -64.0f`, truncation via `ftol2_sse
     @0x76bc00` [orig: the leg `@0x4b78b7..0x4b790f`]. The DOUBLED chute arm (`Flags & 0x20`,
-    vertical vel ≤ −0x3800, dir 0 [orig: `@0x4b7920..0x4b793d`]) is unreachable until the
-    parachute system lands and stays unported under **D-INF-20** (which now counts this second
-    waiting consumer). Pinned by the airborne-steer case in `tests/world/infantry_test.cpp`
+    vertical vel ≤ −0x3800, dir 0 [orig: `@0x4b7920..0x4b793d`]) is ported with
+    the parachute motor (2026-09-18, D-INF-20). Pinned by the airborne-steer case in `tests/world/infantry_test.cpp`
     (steer-before-decay ordering, the axis split off the heading high word, the no-input arm).
   - **D-INF-10** per-tick gravity, asymmetric by motor — **CLOSED for both legs 2026-07-16
     (§22)**. Neither infantry mover gates the vertical step on tick parity. The NPC (org1)
@@ -566,41 +566,25 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     our port gates on alive/prone/airborne only (the modeled equivalents of 0x2/0x2000).
     The seated (`+0x168 == 1`) ±0x1400000 ramp variant [orig: `@0x4b66b5`] rides the
     mounting slice. `infantry_lean_tick` / `player_body_select`.
-  - **D-INF-18** the remote CameraOffset approximation unported; the FP eye's terrain
-    clamp FIXED 2026-08-12. The local head-bone eye is sampled binding-side from the
-    render skeleton (the structural translation of the `@0x4b6bb3` bone path; the
-    reimpl's Position + 0.125 eye floor is a DEFENSIVE stand-in — the witnessed `0x2000`
-    floor `@0x4b6b98` belongs to the sample-less on-foot CAPSULE leg, and neither exact
-    head leg floors [witnessed 2026-08-19: on-foot `@0x4b6bb3..0x4b6cc8`, mounted
-    `@0x4b6908..0x4b696c`]); the original's FIVE-sample terrain
-    floor — the eye column plus ±0x4000 along each ground axis, each sample + 0x1000,
-    max-folded onto the eye Z unless `Flags & 0x800000` (indoors — the heightmap has no
-    interiors) [orig: `@0x4b6c08-0x4b6ca4`; sampler `Terrain_SampleHeightBilinear
-    @0x6067b0`] — is now ported as `world::player_view_floor_eye_to_terrain`
-    (terrain_query seam), applied inside `player_view_compose_camera`'s head-bone path
-    AND on the third-person anchor-chase feed (retail floors the one CameraOffset both
-    consumers read), pinned by `player_view_test::test_compose_camera_terrain_floor`.
-    The world-side below-water classifier's `CameraOffset.Z` projection FIXED
-    2026-08-12: the round-source stance/recoil classifier and both Godot-side
-    aimed-shot/HUD-crosshair rows compare `Position.Z + eye_offset_z` (the ported
-    `entity+0x74`) with `Env_WaterHeightFixed`, strictly below, wherever the drowning
-    bit is clear [orig: `RoundData_SpawnRound` stance leg `@0x4ec2d5..0x4ec2ea`
-    (`Flags & 0x108020` folds the ladder/parachute bits); the recoil x4 legs
-    `@0x4ec342..0x4ec35a` / `@0x4ec86d..0x4ec885`], pinned by `npruntime_round_sim`'s
-    eyes-dry/eyes-wet split; decoded wire rows keep their documented bounded
-    projection (no CameraOffset carrier on the wire).
-    2026-08-19: the sim-side eye-offset store took the exact local leg — with the
-    shell-fed head sample, `Entity::eye_offset_{x,y,z}` = posed head − Position, the
-    head z first terrain-floored on foot (the same five-tap walk, indoors exempt), no
-    `0x2000` floor on either exact leg [orig: on-foot `@0x4b6bb3..0x4b6cc8`; mounted
-    `@0x4b6908..0x4b696c` — the sites split on the entity+0x16C carrier `@0x4b6386`];
-    NPCs gained the org1 lateral pair; only the sample-less player legs' full 3-angle
-    lateral tilt [orig: on-foot `@0x4b69ab..0x4b6b7c`, mounted `@0x4b66fc..0x4b68e5`]
-    keeps the capsule z-only approximation. The camera's
-    `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)` terms are fed live from
-    `InfantryState.torso_roll` / `.recoil_pitch` through
-    `player_view_compose_camera` (the earlier "producers open" note is superseded;
-    residual gate legs stay on D-INF-17). `godot/src/player/local_player_presenter.cpp`.
+  - **D-INF-18** OPEN only for the non-local/sample-less player's full capsule-trig
+    CameraOffset. The local eye is now resolved from the current simulation pose
+    through `IPoseProvider::resolve_skeletal_anchor(Head)`, after channel advancement
+    and before org2 gait selection (PR #652, 2026-09-18). Bone 14 includes the retail
+    head-anchor offset; the motor terrain-floors it on foot and stores head minus
+    Position, without the former render-frame feedback or defensive 0.125-unit
+    camera floor. Mounted exact eyes are unfloored. Both camera composition and
+    anchor chase consume current Position + CameraOffset. [orig:
+    Entity_BuildBoneTransformMatrices @ 0x4B1290; local on-foot producer
+    @ 0x4B6BB3..0x4B6CC8; mounted producer @ 0x4B6908..0x4B696C;
+    Camera_ComputeThirdPersonView @ 0x437FA5..0x437FB7]
+    `player_view_floor_eye_to_terrain` retains the five samples, each +0x1000,
+    and the indoors exemption. The below-water classifier already reads
+    Position.Z + eye_offset_z (2026-08-12). Camera recoil and roll remain the
+    live `2*pitchBlend` and `torsoRoll + lean/4` terms. The remaining capsule
+    approximation is its full three-angle lateral tilt [orig: on-foot
+    @ 0x4B69AB..0x4B6B7C; mounted @ 0x4B66FC..0x4B68E5].
+    Tests: `infantry`, `local_player_view`, `player_view`, and
+    `godot/tests/local_player_presenter_test.gd`; see section 36.
   - **D-INF-19** the slope pass's conform selector dropped by the port — FIXED 2026-07-13.
     The dump-based port applied the slope lean+slide to EVERY live body and wrote the look
     pitch (`+0x14`) instead of `bodyPitch(+0x90)`, so a standing local player's Roll chased
@@ -620,7 +604,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     Guarded by `test_slope_standing_camera_stays_level` / `test_slope_prone_body_conforms_org2`
     / `test_slope_pass_org1_selector_and_chase` + the motor-level standing case in
     `tests/world/infantry_test.cpp`.
-  - **D-INF-20** parachute deployment and physics remain unmodeled (Flags 0x20 = deployed).
+  - **D-INF-20** deployment/descent is ported (2026-09-18; Flags 0x20 = deployed); fresh marker authoring and live presentation validation remain.
     Witnessed legs (§22): auto-deploy on the authority when alive, `vel_z ≤ −14336`, and
     aux `+0x2C & 0x10` [orig: `@0x4b7aef-0x4b7afa`]; the in-air anim while set: org2 adds
     0x10 to its straight 31 stamp (the `(Flags&0x20)?0x10:0 + 0x1F` trick
@@ -753,10 +737,11 @@ present boundary (`mission_yaw = 90 − heading / kBamPerDegree`). The Godot bas
   `brain[131] = Entity_CalcAverageGroundHeight(e, 0x50000) + 0x50000` unconditionally, with the 372/744
   phase counters. This session labeled it "the vehicle mover" — **superseded by §1.3**, which
   identified it as a directional **death-fall mover** (move-step ids 0–3); the mechanics stand.
-- Dispatcher facts confirmed: SM dispatcher `0x4581b0` (24-row table @ 0x815238), per-frame budget gate
-  `AI_BeginUpdate @ 0x457b40` (cap 496); dispatch event args 0=update / 1=spawn / 4=death. The
-  then-open "per-entity driver near 0x462120" lead was later resolved by §1.1: those are the
-  event-callback thunks for `cbot/cpln/ctrn`.
+- Dispatcher facts confirmed: SM dispatcher `@ 0x4581B0` (24-row table @ 0x815238),
+  event args 0=update / 1=spawn / 4=death. `AI_BeginUpdate @ 0x457B40` is movement
+  controller row 4 with a per-entity phase limit of 496, not a per-frame admission
+  budget (corrected in section 34). The callback thunks for `cbot/cpln/ctrn` resolve
+  the earlier driver lead near @ 0x462120.
 
 ## 8. Appendix: animation selection from item-type ADM (2026-06-07)
 
@@ -2656,7 +2641,7 @@ and a 0.5 m player detection sphere (§1.2.2.7).
 | D-COL-8 | run-over kill / crush sound / walk-over-body sound / non-flag attrib-1 waypoint branches + the attrib-2 collision callback / the blocked-push AI latch (pad_368[1]) not ported; the shared ItemDef branch order and the exact attrib-1 flag-family contact producer are ported (2026-08-23); the resolver's player predicate is the class bit (`Flags & 0x100`) at every physics leg for local and remote bodies alike, the local-entity compare reserved for the side-writes (2026-08-24) | steps 4/5/6 above | Door contacts and their shared motor/pose path are ported in section 33.14; the remaining contacts need their Score/net, sound and destruction owners |
 | D-COL-9 | mounted-organic cadence and force suppression PORTED 2026-07-20: a live mounted source calls the resolver every eight salted ticks and still processes contact/flag callbacks, but skips model push accumulation when it has a live modeled parent or `Flags & 0x40`; the MoveOrder-0x100 bump and the `+0x2c` bit-4 pitch-restore latch landed with the ladder slice (§30) | `[orig: Entity_UpdateInfantryAI @ 0x4bf5a5-0x4bf5c6]`; `[orig: movement collision resolver @ 0x4b2be0-0x4b2d3f]`; force gates `@ 0x4b3045-0x4b30af` / `@ 0x4b3658-0x4b36b9` | mounted contact phase is live and no longer receives ordinary mover push; the step-up/auxiliary tails landed with the D-COL-5 port (§30) |
 | D-COL-10 | PANM rotation types 3/4 are correctly classified as live and routed through per-section matrices, but `ObjectData::evaluate_panm` currently passes an identity `view_inverse` | retail types 3/4 derive their matrix from the current global inverse-view matrix in `PANM_BuildNodeMatrices` | camera-facing/upright billboard parts can have a camera-relative visual/collision pose mismatch; no committed collidable type-3/4 witness yet. Requires sharing the render camera matrix beside `PanmClock` |
-| D-COL-11 | `LiveRound` has no BB/indoors state; projectile terrain arbitration only has the ammo-flag bypass | retail refreshes each projectile's blink state per tick and skips the terrain clamp while the round is indoors (`Projectile_UpdatePhysics @ 0x4e9d70`, refresh call `@ 0x4e9f21`, terrain gate `@ 0x413785`) | a shot inside an underground/interior BB can falsely hit the terrain heightfield. Port after the projectile probe radius/state lifetime is pinned; do not guess from the player’s 0.5 m BB sphere |
+| D-COL-11 | FIXED 2026-09-18: pre-move projectile BB probe suppresses terrain while indoors | Projectile_UpdatePhysics @ 0x4E9D70 / terrain gate @ 0x4EA2F0 | projectile_combat tests crossing the same terrain inside a building BB and outside it |
 
 **D-INF-3 status**: the horizontal capsule + object standing now land through
 this port (walls push out, roofs carry via the model-aware ground probe), and
@@ -5130,8 +5115,8 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 
 1. The org2 parachute physics half `@ 0x4b7b18-0x4b7c8d` (auto-deploy at
    vel −14336 + aux 0x10, chute sounds/flap words, the chute brake
-   `vel += 0x29C` under −0x1C00) — read 2026-08-06, still unported; rides
-   D-INF-20. The WATER half is §29.1 (witnessed; replica-ported AND, 2026-08-24,
+   `vel += 0x29C` under −0x1C00) — ported 2026-09-18 in world/parachute.cpp and local/remote body paths;
+   D-INF-20 retains only authoring/live presentation follow-ups. The WATER half is §29.1 (witnessed; replica-ported AND, 2026-08-24,
    ported in the LOCAL motors — `AiSystem::infantry_water_block` /
    `player_water_block` in world/infantry_water.cpp — with the swim selection
    36-40; the wash 27/28 and scope auto-untoggle remain on D-INF-3). The
@@ -6703,7 +6688,7 @@ the FFI structs.
 |---|---|---|---|
 | D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — the port's extra "building material 1 → 23 flesh" remap in `RoundSim` REFUTED 2026-08-15 and DELETED: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally `@0x4e982b` and `AmmoDef_ProcessImpactEffect` clamps only ≥ 28 `@0x40a1bf`; the remap is the knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888`). The adjacent person-leg residual raised 2026-08-15 was GRILLED and FIXED 2026-08-22 — see D-ITEM-21. A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
-| D-ITEM-3 | The BLAST-time mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte. The GUNFIRE half of the same mask is PORTED 2026-09-16 (§15.8): a round whose CFAC face material is 15 (glass) on a non-husk item-type-5 building ORs `1 << ray[31]` into sectionMask and plays the `GLASS_SMASH` trigger set at the hit point; nothing recomputes collision bounds, so the broken pane leaves the draw but still stops ordinary rounds. Own residual: the `lawr/fgrenade` pass-through report `@0x4e968a` → `@0x4e969a` (RoundSim has no round-continues output) | `@ 0x4e6c5e-0x4e6e6b`; the gunfire leg `@ 0x4e964f-0x4e969a` → `Entity_PlaySectionBreakSound @ 0x439c00` | partial visual damage from BLASTS (windows/panels before death) missing; needs the section-flag plumb in the collision build. The gunfire leg is live and pinned by `projectile_combat::test_material_15_breaks_the_building_glass_section` |
+| D-ITEM-3 | Blast half FIXED 2026-09-18: flags/section-center box sweep and one-time glass sound supplement gunfire marking; lawr/fgrenade pass-through remains OPEN @ 0x4E968A..0x4E969A | @ 0x4E6C5E..0x4E6E6B; Entity_PlaySectionBreakSound @ 0x439C00 | destruction covers root translation, box corners, flag filtering and repeated blasts; projectile_combat retains glass behavior. Wider destroyed/animated collision tables remain D-COL-2. |
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
 | D-ITEM-6 | Blast/damage stubs (organic knockback `Entity_ApplyCollisionForce` PORTED 2026-09-14, §17.3b): the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
@@ -8100,7 +8085,7 @@ items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
 | 0x4 | `kEntityFlagNVGWorn` | organics: NVG worn — draw gate for the goggle model; same bit, kind-dependent read | `[orig: draw @ 0x4e3b54]`; §13.1 draw 3 |
 | 0x8 | `kEntityFlagBinoculars` | binoculars raised (bits 2-4 refresh from the local `g_binocularsRaised` global; peers receive them over the wire) | `[orig: draw @ 0x4e3c04; refresh gate @ 0x4b5d77]`; §13.1 draw 4 |
 | 0x10 | `kEntityFlagScopeRaised` | weapon scope raised (`g_weaponScopeActive` refresh) | `[orig: test @ 0x4b5deb]`; §13.2 |
-| 0x20 | `kEntityFlagParachute` | parachute deployed (system unmodeled, D-INF-20) | `[orig: repulsion radius leg @ 0x4b3aac]`; §15.4 |
+| 0x20 | `kEntityFlagParachute` | parachute deployed (motor ported 2026-09-18, D-INF-20) | `[orig: repulsion radius leg @ 0x4b3aac]`; §15.4 |
 | 0x40 | `kEntityFlagMounted` | carried / vehicle-mounted; the AI guard family also reads it | `[orig: Entity_AttachToVehicleSlot @ 0x494752-0x494775]`; §1, §15, §17, D-COL-9 |
 | 0x80 | `kEntityFlagAiClimb` | org1 ladder-CLIMB order mode (named 2026-08-15): the capped sixteenth-step Z chase to +0x304 replacing gravity (floor −16384) — PORTED §30 — plus the eighth-step x/y chase to +0x2FC/+0x300 gated on `attachParent == self` (the AI direct-move mover; rides the AI-order slice with the bit's WRITER). The COMMAND writer is ChangeAI sub 23 (runtime-only, no dfx2med token) — NOT sub 17, which is the AI-slot CLIMBER bit 0x400 (§32.2, corrected 2026-09-01) | `[orig: test @ 0x4bf6c1; z chase @ 0x4bf6d2-0x4bf6e5; x/y chase @ 0x4bf651-0x4bf664; command case 0x17 @ 0x43afae]`; §30 |
 | 0x100 | `kEntityFlagPlayer` | player — the wire Player dispatch class; gates held-weapon draws and the death-event leg | §5.10b (net-re); §13.2; §16.2 |
@@ -8227,7 +8212,7 @@ moving entity rides it. There is no vehicle-type gate: a static carrier
 simply contributes zero deltas.
 
 - **Entry/drop** `[orig: org2 @ 0x4b5288-0x4b52ff; org1 @ 0x4ba45d-0x4ba479]`:
-  null groundEntity skips. An UNMOUNTED rider beyond the carrier's
+  null groundEntity skips. Only org2 drops an UNMOUNTED rider beyond the carrier's
   boundRadius (`[carrier+0]`, 3D distance saturated at
   `flt_7C19E0 = 2147418112.0`) drops the ride AND zeroes groundEntity; a
   mounted (+0x16C) rider skips the radius check.
@@ -8254,16 +8239,19 @@ simply contributes zero deltas.
   Yaw add (bodyHeading still follows); the LOCAL player's camera-yaw
   accumulator (`dword_B75FCC`) follows too. org1 additionally drags its chase
   TARGET (+0x1A8) and the look Pitch (+0x14) `[orig: @ 0x4ba867/@ 0x4ba88e]`;
-  org2 adds pitchΔ' to bodyPitch (+0x90) only.
+  org2 adds pitchΔ' to bodyPitch (+0x90), the pitch-follow accumulator
+  (+0x2E0) and aim pitch (+0x2D0). Its look follows by `(lag+16)>>5`, with
+  negative-residual correction, at @0x4B57CD..0x4B57E5. Org1 preserves look yaw
+  and aim when its combat target has a different groundEntity (@0x4BA82C..0x4BA858).
 - **Port notes (replica rows)**: the carrier keeps the REAL mover-entry
   savedLivePose — `Entity::saved_live_*`, stamped by `stamp_saved_live_pose`
   at the top of both world vehicle passes via the shared
   `carrier_pose_fixed` reader — and the provider serves live + saved
   together, the witnessed source pair (a never-stamped static reads zero
   delta). Our joiner frame runs vehicle prediction AFTER remote motion, so a
-  rider consumes the PREVIOUS frame's carrier delta — retail's own
-  rider-ticks-before-carrier ordering case (the mover order is entity-table
-  order there). Rows adopt heading (+ the org1 chase target and RENDERED
+  rider consumes the PREVIOUS frame's carrier delta. This is a joiner placement
+  difference: retail's pool-1 callbacks precede pool-0 callbacks
+  (@0x4C2158..0x4C21F1 before @0x4C2426..0x4C2474). Rows adopt heading (+ the org1 chase target and RENDERED
   look pitch) and roll (rendered — the avatar euler consumes
   `pitch_bam`/`roll_bam`). The remaining organic item on D-NET-196 is org2
   bodyPitch/torso-aim adoption belongs to the shared infantry replica
@@ -9423,11 +9411,10 @@ words whose retail consumers ([orig: HUD_DrawBreathBar @0x59D6F0 (the read
 @0x59d70f); Server_UpdateEntityIdleTimers @0x50D770 (@0x50d7e6);
 GameEvent_PlayerDeath @0x516DD0 (@0x5172f6); NetPacket_WritePlayerState @0x4FF6B0
 (@0x4ff9db); Environment_ApplyFogAndAmbient @0x57E440 (@0x57e514)]) are not yet
-ported. The `night` write
-is dropped (D-WAC-4, §33.38): its row resolves to the Env dword @0x26C645C that
-[orig: Environment_ComputeTimeOfDayColors @0x57DE40 (the store @0x57deae)] rewrites on the next
-time-of-day computation, and the port derives the night phase from the clock on
-every read. neartype/neardist/nearid are not JO rows (Jointops.exe carries no
+ported. The `night` DWORD is writable (D-WAC-4 fixed 2026-09-18): its row resolves to
+Env @0x26C645C. [orig: Environment_ComputeTimeOfDayColors @0x57DE40 (store @0x57DEAE)]
+rewrites it only when the authored TOD keyframe path runs; immediate WAC reads
+and the light selector observe the retained word. neartype/neardist/nearid are not JO rows (Jointops.exe carries no
 such strings) and were removed. An unresolvable argument is a NON-FATAL compile diagnostic
 carrying the action signature from [orig: WacScript_FormatActionParameters
 @0x4EFC20] with the operand pointed at the scratch dword &dword_C6EAEC
@@ -10786,7 +10773,7 @@ declined entry falls back to an OPEN class-D row.
 | D-GRM-1 | The GRM parser rejects unsafe indices, excessive row/parameter counts, non-finite coordinates and field-overflow names, and treats names as data | [orig: FaceAnimConfig_ParseProperty @0x5886A0] writes unbounded indices and sprintf-format names into fixed fields and admits `index == count` (§33.30) | PERMANENT (class D, proposed PR #642) |
 | D-TMATE-1 | Direct pickup initializes the helicopter reference before treatment; a failed helper allocation or a destroyed helicopter/teammate entity ends the operation instead of dereferencing it | [orig: HeliLift_SpawnPickup @0x4525E0] never initializes the pointer that [orig: HeliLift_UpdateSlotState @0x451730 (the deref @0x451e09; @0x451e4c)] dereferences on treatment expiry, reached from [orig: HeliLift_UpdateAll @0x451FA0] (compaction only) (§33.32) | PERMANENT (class D, proposed PR #642) |
 | D-WAC-3 | weaponfired/blockfire/record_fire_request refuse negative categories (return 0 / refuse / no stamp) | [orig: WacCmd_WeaponFired @0x4ED360 (the jl @0x4ED367); WacCmd_BlockFire @0x4EE140 (the jl @0x4EE147); Input_HandleActionBinding_0 @0x4e0420 (the jge @0x4E0966)] bound only the high side and index before dword_C6EA44 / dword_C6EA6C for negatives (§33.17) | PERMANENT (class D, proposed PR #642) |
-| D-WAC-4 | `set(night, v)` (and add/sub/inc/dec/store on the `night` row) is dropped; the night phase is derived from the clock on every read (`WeatherState::is_night_phase`) | The `night` row @0x82EEF0 resolves to the Env dword @0x26C645C, which holds a script write until [orig: Environment_ComputeTimeOfDayColors @0x57DE40 (the store @0x57deae)] rewrites it on the next TOD computation; [orig: Environment_GetLightDirectionFloat @0x57D870 (the read @0x57d873)] reads it meanwhile (§33.15) | OPEN (low: observable only as `set(night,1) set(v1,night)` -> 1 in retail vs the derived phase here until the light-direction getters consume a script-written word) |
+| D-WAC-4 | FIXED 2026-09-18: night is a writable DWORD; WAC arithmetic and immediate reads preserve it | Env @ 0x26C645C; Environment_ComputeTimeOfDayColors @ 0x57DE40, store @ 0x57DEAE | Only an authored TOD keyframe computation overwrites it. Light selection and snapshots consume the stored value; wac_state and weather_state cover writes and clock ownership. |
 | D-WAC-5 | On the S2C 0x23 wire the Fx (ParamType 22) and SoundSet (ParamType 19) operands of fx2tgt, fx2ssn, sound, sound2tgt and SS2SSN carry the compiled program's 1-based effect/sound handles; the decoder also rejects a wire index past the 165-row registry and a body under 2 bytes | Retail sends what [orig: WacScript_ResolveParameter @0x4f2920] stored: the SoundSet operand is the trigger-entry pointer from [orig: SoundBank_FindTriggerByName @0x75be90] via [orig: SoundBank_FindSetByNameAnyBank @0x5274F0] (`*(bank+56) + 84*index`, a host-process address; the site @0x4f2fe2), the Fx operand is the 1-based index into the effect world's global intern pool [orig: CEffectWorld_InternEffectHandle @0x5F7310] in first-intern order (the site @0x4f3067); [orig: GameMode_DispatchRemoteCommand @0x4f81e0 (the site @0x4f828c)] indexes 44*id past its table for an out-of-range index and dispatches row 0 (elapse, gated off @0x4f8429) for a short body (§33.39) | OPEN (retail-interop residual: the Fx half needs the intern order reproduced, the SoundSet half is inherently host-local; the decoder bounds are class-D portable boundaries) |
 | D-WAC-6 | An unresolved FX/FACE/SOUNDSET/ANIM/AMMO literal or a RUN/LOOP/NEXT structural error blocks the mission's script (`wac_layered_load` kBlocked); a GLOOP operand that is not a group name is the non-fatal `Unknown Group` and group 0 as in retail (2026-09-12), except that an operand an earlier resolver table claims (a declared variable, an event, a named value) also takes group 0 where retail ORs in the dword behind that address | [orig: WacScript_InitAndLoad @0x4F91F0 (the clear @0x4f926a; the execute @0x4f976b)] ignores Script_Compile's return, keeps the first message in byte_C6EB30 for [orig: Debug_DrawScriptState @0x4F64C0 (the read @0x4f652a)] and runs the script with the failed slot holding 0/-1/0xFFFF (§33.15); unknown commands and unresolved arguments are non-fatal on both sides; the GLOOP operand resolve [orig: Script_Compile @0x4f365d..0x4f3693 -> WacScript_ResolveParameter @0x4f30fc/@0x4f310a] | OPEN (low: only malformed authored scripts differ; the GLOOP unknown-group leg is FIXED 2026-09-12) |
 | D-WAC-8 | Player/Item/auto retain a mutable DWORD in live VM state and runtime snapshots; cache/group refreshes replace only LOWORD and entity consumers explicitly narrow | [orig: WacCmd_Set @0x4ED520; WacScript_CacheLocalPlayerState @0x4F5814/@0x4F58A2; WacScript_ExecuteBytecode word stores @0x4F5B7E/@0x4F5BAF/@0x4F5BD2] (§33.15) | FIXED 2026-09-13 (uint16 truncation removed; wac_state regressions) |
@@ -10861,3 +10848,196 @@ No new runtime change or fresh GUT execution is claimed.
 | ID | Divergence | Evidence / acceptance | Disposition |
 |---|---|---|---|
 | D-ITEM-22 | A dynamic wreck whose body was deferred by the cold-spawn budget used to retain a null husk permanently. | `DestructionPresenter::apply_husk_swap` now returns without caching the temporary miss; the retained PF_HUSK presentation retries after wire-node registration. Existing `godot/tests/destruction_present_pass_test.gd::test_retained_husk_pick_retries_and_updates_only_the_husk_section_mask` exercises the early miss, later body materialization, one husk across repeated snapshots, mask updates and live pose. | **FIXED** in `9b24601587` (2026-09-11); stale ledger entry retired by the 2026-09-13 source audit. The existing GUT regression was read, not re-run here. |
+
+### JO-C runtime follow-through (2026-09-18)
+
+The new `world/parachute.cpp` motor ports the complete bounded org2 descent block:
+authority/alive/velocity/carry admission, ground or ladder cancellation, carry
+consumption, 0x300/0x200 canopy growth, closed-canopy decay, +0x29C braking below
+-0x1C00, and the 64-tick flap/free-fall sounds. Animation 47, heading chase,
+doubled forward air steering and the shared view clamp consume deployment.
+Snapshot-owned players retain vertical descent state while their position stays
+uplink-owned; replica players brake from the transmitted flag. Full spawn and
+compact wire projections include 0x20. `infantry`, `npruntime_client_runtime`
+and `replication` cover the surrounding paths.
+[orig: Entity_UpdateInfantryPlayerBody @ 0x4B7AD9..0x4B7C8D;
+air steering @ 0x4B7920..0x4B793D]
+
+Blast marking uses each flagged COBJ section's AABB center transformed by the
+callback's first matrix and the inclusive explosion box. A box corner outside
+the sphere still qualifies; repeated marks do not replay GLASS_SMASH. The mask
+write does not itself rebuild collision geometry. Indoor projectiles probe BB
+state at their pre-move point; leaving the BB restores the terrain branch.
+`destruction` and `projectile_combat` pin these boundaries. D-COL-2's separate
+animated/destroyed-section table is not claimed fixed by this marking change.
+
+The full scope, original executable hashes, regeneration commands and live-test
+limits are in [the validation report](../jo-c-validation-2026-09-18.md).
+
+## 34. AI callback ownership and movement controllers (2026-09-18)
+
+This correction covers `ai_system.cpp`, `ai_aircraft.cpp` and their public tick
+and event entry points. Reference: jo-c `f2cd385955ad8b889aa7e820973a849707aa51a4`,
+retail `Jointops.exe`, IDB `Jointops.exe.kong.i64`; the executable SHA256 and
+reproduction command are in [the validation report](../jo-c-validation-2026-09-18.md).
+No IDB changes were made in this movement pass.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Pool-1 callback admission | MATCHING (read-only grill and public-tick regression) | Per-entity countdown only; `movement_brain_parity` runs 80 vehicle brains on each role and checks working-register retention; `vehicle_motor` requires zero movement from a freshly boarded routeless hull. |
+| Aircraft controller row 4 | MATCHING (behavioral proof) | 24 original-instruction vectors through `AiSystem::aircraft_movement`, including phases 496/497 and an untouched second aircraft. |
+| Default class events | MATCHING (behavioral proof) | 252 original-dispatcher vectors for air/ground, authority/client, event types 2/3/6 and pending-state transitions, including reset/enter/exit callbacks. |
+
+`Entity_UpdatePool1Slot @ 0x4B8DD0` admits the class callback when entity+0x2AC
+is nonpositive (site @ 0x4B8E1B), refreshes proximity, calls +0x1C8
+(@ 0x4B8E3C), then calls the motor +0x1C4 every visit (@ 0x4B8E53). The countdown
+decrements at @ 0x4B8EA0. There is no preceding `AI_BeginUpdate` call or global
+work quota. Removing that invented gate prevents later entities being skipped
+and preserves state handlers' working registers between think visits.
+
+`AI_BeginUpdate @ 0x457B40` belongs to row 4 (@ 0x8153D8) of
+`g_AIMoveStepFnTable @ 0x8153B8`. Its phase lives at brain[2]+16 in the entity's
+32-byte controller. It seeds working speed, height, heading and aim words;
+phase >496 requests pending state 8, or brain[6] when `profile.flags100 & 2` is nonzero.
+Otherwise phase advances by brain[7]. The port now dispatches row 4 explicitly
+and uses `AiEntity::aircraft_phase`; the shared `AiScheduler` and its debug
+counter are removed. Fresh ground brains therefore retain their zero speed,
+rather than receiving this unrelated controller's speed seed.
+
+Default event types still reach the dispatchers' transition tail. The ground
+client accepts pending 16 or 21..23; the air client accepts 7 or 13..15. The
+same authority/client guards now apply to those events in the port.
+[orig: EntityAI_ProcessVehicleStateMachine @ 0x4583C0 (default branch
+@ 0x45846D); EntityAI_ProcessInfantryStateMachine @ 0x4581B0 (default branch
+@ 0x458261)]
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-AI-14 | Removed the shared admission budget and unconditional working-register seed; dispatched movement-controller row 4 with per-entity phase; default events commit through the normal role guard. | Pool-1 callback @ 0x4B8E1B..0x4B8E53, controller @ 0x457B40, default-event tails @ 0x458261 / @ 0x45846D. | FIXED 2026-09-18 in PR #652. Prevents skipped brains, false boarding throttle and missed event transitions; 276 original-instruction cases plus crowded-world and first-tick boarding regressions. |
+
+## 35. Unseated helicopter riders and reserved route orders (2026-09-18)
+
+The 09TR MC-5 training mission exposed two authority-path gaps in PR #652.
+The existing replica deck transform did not run for local/authority infantry,
+and the mixed entity loop moved infantry before the vehicle motor. Standing
+riders therefore kept their old world position while the Chinook translated
+away. Separately, `apply_route_order` rejected channels without a NavChannel,
+so events 25/26 (command 123, carrier SSN 4572) and 27 (command 0, stop) left
+NPCs chasing their previous helipad waypoints.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Carrier transport for unseated organic bodies | MATCHING for the recovered translation/rotation and adoption rules | `infantry_follow_carrier`, using the shared Q22 transform with capsule-midpoint bias; org1 @0x4BA45D..0x4BA891 and org2 @0x4B52A0..0x4B5726, pitch-follow @0x4B57CD..0x4B57E5. Existing absolute seat posing still owns mounted bodies. |
+| Authority carrier/infantry order | MATCHING for the pool-1-before-pool-0 dependency | Current local input is published before vehicle motors, which run before organic motors; `Entity_UpdateAllEntities` pool-1 callbacks @0x4C2158..0x4C21F1, pool-0 callbacks @0x4C2426..0x4C2474. This is not a claim that every interleaved world subsystem has identical scheduling. |
+| Redirect command admission and operand | MATCHING | `Entity_SetWaypointByTeam @0x43CDB4` writes mode/channel/node without looking up a route; only node -1 requests nearest. Both slot and brain mirrors retain command 123's SSN and command 0's stop. |
+
+Local input packing stays ahead of this vehicle pass. `LocalPlayer` publishes
+current heading/pitch and MoveOrder before the organic body pose, matching
+`Player_PackInputStateToEntity @0x4DF450` and mouse look at
+`Input_ProcessMouseAxisBindings @0x499680`. The new `vehicle_motor`
+regression initially failed all three checks for same-tick throttle,
+steering and key release; it now passes with the vehicle-first order.
+
+`infantry_terrain` exercises actual local/AI motor translation, org2 radius
+release, capsule-biased rotation, independent NPC world aim and player pitch
+follow. `event_runtime_bms` drives boarding/stop through event dispatch; its ten
+assertions failed before the writer fix. `parachute_09tr` uses shipped BMS,
+ADM motion and model collision, stages the player above the cabin floor without
+setting a support link or mounting, and runs 50 seconds of the authored flight.
+It requires the player and instructor to stay unseated and all six other
+passengers to board. Before the fix the player fell behind the cabin at tick
+1565; carrying alone still left the NPCs walking out after takeoff.
+
+Reference: jo-c `f2cd385955ad8b889aa7e820973a849707aa51a4` and the pinned
+`Jointops.exe.kong.i64` used in section 34. The disassembly confirms the
+org2-only radius rule and NPC off-carrier target gate; no IDB state was changed.
+The render-only `player_motion_capture` probe records still/moving/stopped
+frames. A successful capture is not evidence that the reported visual trail
+is fixed; that issue remains a separate live presentation investigation.
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-INF-25 | Local and authority organic motors apply carrier translation, capsule-biased rotation and look/body adoption after vehicle motors; org2 retains pitch-follow lag. | Org1 @0x4BA45D..0x4BA891, org2 @0x4B52A0..0x4B57E5; pool ordering @0x4C2158 / @0x4C2426. | FIXED 2026-09-18 in PR #652; unseated training helicopter riders retain support through takeoff. Replica scheduling remains the separate section 29.2 limitation. |
+| D-AI-15 | Route-order writers accept reserved commands and preserve authored operands without NavChannel admission/clamping. | `Entity_SetWaypointByTeam @0x43CDB4`; only -1 resolves nearest. | FIXED 2026-09-18 in PR #652; boarding/stop orders replace the old routes instead of letting NPCs walk out of a moving cabin. |
+
+
+## 36. Animation and relative-motion timing audit (2026-09-18)
+
+Implementation: `engine/runtime/world/infantry_animation.cpp`, `infantry.cpp`,
+`infantry_remote_anim.cpp`, `infantry_weapon_channel.cpp`, the simulation pose
+provider and presentation rows, and the local camera/presenter. Reference jo-c:
+`d4148fbabcb98cb6b48e44fe0da9393730bde852`; call ordering and head-anchor output
+were checked in the retail `Jointops.exe.kong.i64` named in the preamble.
+This follow-up implements the witnessed ordering in PR #652. The reported
+faint trails still require the user's visual comparison; code regressions do
+not establish that their cause has been removed.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Channel update versus state selection | MATCHING (behavioral proof), D-INF-26 fixed | `infantry` samples the existing clip before local/NPC selection and tests canceled requests, death during blending, deferred weapon transitions and variant serving. [orig: org1 call @ 0x4B9A48; org2 call @ 0x4B41DF] |
+| Player root-heading lifetime | MATCHING within the existing rotation arithmetic | `player_spawn` pins root rotation against the body heading before the current leg chase, while the presented body uses the updated heading. [orig: @ 0x4B41E4..0x4B4255 before @ 0x4B4945..0x4B4ABB] |
+| Playing-pose publication | host code / not grillable; behavioral tests | Authority rows, local presentation and simulation skeletal evaluation read the playing id with its playhead/blend tuple; gameplay and wire requests remain separate. `mission_infantry_anim`, `netsim_present_rows`, skeletal/presentation GUT regressions. |
+| Current-tick local head | MATCHING within existing skeletal-pose precision; D-INF-18 narrowed | `infantry` verifies the pose provider observes the advanced channel in the same tick. `local_player_view`, `player_view` and the local presenter test verify live-position re-anchoring and camera composition. [orig: @ 0x4B6BB3; mounted @ 0x4B6908] |
+| Spectator camera ordering | host code / not grillable; behavioral proof | `fly_camera_spectator_test.gd` fails with the old parent-before-camera ordering and passes when free-camera movement precedes world frame preparation. Speed remains 4.6875. |
+| Held-weapon attachment ordering | host code / not grillable | The local presenter poses the body and weapon layer before attaching the held model to the resulting bones. |
+
+### 36.1 Requested state and playing channel are different lifetimes
+
+Org1 copies primary state/pending into the secondary request fields at
+@ 0x4B9A14..0x4B9A2E, then calls `AnimMap_UpdateDualChannels` at @ 0x4B9A48.
+Its authority branch and AI/gait selector follow. Org2 calls the updater at
+@ 0x4B41DF, before its fourth-tick gait selector and arbitration at
+@ 0x4B70CE / @ 0x4B7356..0x4B7396. There is one direct dual update per body:
+secondary first, then primary [orig: AnimMap_UpdateDualChannels @ 0x40B8C0,
+calls @ 0x40B908 / @ 0x40B94E].
+
+`InfantryState::anim_state` and `wpn_state` now represent entity requests;
+`anim_playing_state` and `wpn_playing_state` represent each AnimMap slot's
+current id. Selection, script stores, ladder, seat, jump, death and attack
+requests leave the playing tuple intact. The motor-head updater consumes the
+final request, inserts gait-to-stance clips and serves weapon variants there.
+An A-to-B-to-A sequence of requests between updates never restarts A.
+[orig: AnimMap_UpdateEntity @ 0x40B633..0x40B779]
+
+Deferred promotion changes the request after initialization checks and before
+advancing the old channel; the promoted clip initializes on the following
+update. This preserves the original ordering without publishing a new clip id
+beside an old root/pose sample. The existing clip-length end detection and
+missing-data fallbacks retain their prior scope; this is not a claim that all
+animation-channel or motor residuals are closed.
+[orig: AnimMap_UpdateEntity @ 0x40B77B..0x40B7FE]
+
+Org2 also captures its root heading before the view/leg chase. Local gait
+selection now follows the current head construction, as the original does.
+The current head comes from bone 14 with the authored head-anchor nudge
+(0, .15, .10 in model/render axes), rather than the prior rendered bone origin.
+The input router no longer sends a render skeleton back into the simulation.
+Camera chase, camera composition, local aim and local round origin re-anchor
+that motor offset to the current entity position. Mounted/scoped fire-origin
+branches and other D-WPN-8 residuals remain separate.
+[orig: Entity_BuildBoneTransformMatrices @ 0x4B1290, outHeadBoneMatrix tail;
+Entity_UpdateInfantryPlayerBody @ 0x4B6908 / @ 0x4B6BB3;
+Camera_ComputeThirdPersonView @ 0x437FA5..0x437FB7]
+
+### 36.2 Verification and limits of the visual conclusion
+
+Before the fix, the new motor regression failed for both local and NPC bodies:
+a selected walk clip was sampled and moved the body in the selection tick.
+The new current-head regression also failed because the provider was never
+called. The spectator test reproduced a frame consumer observing the previous
+camera position. These pin the corrected boundaries, not the reported trail.
+
+The authority path presents its live pools, with externally pinned skeletal
+phases; it does not free-run a body animation between snapshots. Both engines
+render the latest fixed-tick state after catch-up [orig: Game_MainLoop
+@ 0x52B630]. Spectator translation still uses display delta while actors use
+16 ms logic ticks. Lack of actor interpolation alone is not a new retail
+mismatch. Q3 draws read the final view matrix from `RenderSceneData`; fixing
+CPU camera-preparation order is not proof of a prior duplicated silhouette.
+
+Validation totals are recorded in `docs/jo-c-validation-2026-09-18.md`.
+No IDB names, types, comments or saved state were changed.
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-INF-26 | FIXED: requested states and playing ids are distinct; local/NPC and authority remote body channels advance at the motor head; late requests preserve the sampled tuple. | Secondary then primary update precedes body selection. [orig: Entity_UpdateInfantryAI @ 0x4B9A48; Entity_UpdateInfantryPlayerBody @ 0x4B41DF; AnimMap_UpdateDualChannels @ 0x40B8C0] | PR #652: movement, pose and channel ownership now follow the witnessed tick order. Continuous visual ghosting remains unproven. |

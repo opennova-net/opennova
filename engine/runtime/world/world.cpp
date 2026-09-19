@@ -420,6 +420,7 @@ World::Snapshot World::snapshot() const {
     s.next_script_effect_order = out.next_script_effect_order;
     s.forced_animation = script.forced_animation;
     s.diagnostics = diagnostics;
+    s.reverb = reverb;
     s.env = env;
     s.weather = weather;
     s.doors = doors;
@@ -445,6 +446,7 @@ void World::restore(const Snapshot &s) {
     registry.restore_from(s.registry);
     script.vars = s.vars;
     script.wac_values = s.wac_values;
+    reverb = s.reverb;
     env = s.env;
     weather = s.weather;
     doors = s.doors;

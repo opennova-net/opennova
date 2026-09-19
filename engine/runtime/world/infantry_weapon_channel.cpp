@@ -47,9 +47,8 @@ void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic
     // idiom a few lines up — so every body selects on the same phase. Consequences are
     // witnessed behavior, not approximation: a hold-pose change lands 0-15 ticks late,
     // and the 80-tick reload window is sampled by five passes rather than eighty.
-    // Everything below this block (deferred promotion, playhead advance) stays per-tick
-    // because in the original it lives in AnimMap_UpdateDualChannels @0x40b8c0, ahead
-    // of the gate. Retail's slow pass carries much more than the weapon channel (the
+    // Deferred promotion and playback already ran at the motor head through
+    // AnimMap_UpdateDualChannels @0x40b8c0, ahead of this gate. Retail's slow pass carries much more than the weapon channel (the
     // slot timer, threat scan, damage and the music gamescript block, @0x4b5d77..
     // @0x4b637b); this ports the weapon-channel tenant only.
     if ((logic_tick & 0xFu) == 0u) {
@@ -69,25 +68,36 @@ void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic
         infantry_weapon_channel_select(e);
     }
 
-    infantry_weapon_channel_advance(e);
 }
 
 void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
     InfantryState &inf = e.inf;
 
-    // Deferred promotion when the playing clip reaches its end — the channel end-flag
-    // path [orig: AnimMap_UpdateEntity @0x40b77b, reached through the @0x40b8c0 swap].
-    // The clock is the SERVED ring entry's length: the state-entry rotate re-inits
-    // the channel from that entry, so the end flag fires on its own frame count
-    // [orig: ring rotate @0x40b740-0x40b749; frame_count read @0x40b25d].
+    if (inf.wpn_playing_state < 0) inf.wpn_playing_state = inf.wpn_state;
+    if (inf.wpn_state != inf.weapon_clip_state()) {
+        const int requested = inf.wpn_state;
+        const int inserted = inf.wpn_deferred == 0
+                ? gait_stance_transition_clip(inf.weapon_clip_state(), requested) : -1;
+        const bool use_insert = inserted >= 0 && root_motion != nullptr &&
+                root_motion->has_clip(inf.adm_id, inserted);
+        const int played = use_insert ? inserted : requested;
+        inf.begin_weapon_transition(played,
+                weapon_ring_size(root_motion, inf.adm_id, played));
+        if (use_insert) {
+            inf.wpn_deferred = requested;
+            inf.wpn_blend_step = (infantry_anim_flags(requested) & 0x400u) != 0
+                    ? 1.0f / 15.0f : 0.1f;
+        }
+    }
+    // End notification promotes the REQUEST only. The old channel advances
+    // once more here; the next update initializes the promoted channel.
+    // [orig: shared AnimMap_UpdateEntity @0x40B77B..0x40B7FE]
     if (inf.wpn_deferred != 0 && root_motion != nullptr) {
-        const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.wpn_state,
-                                                           inf.wpn_variant);
-        if (len >= 0 && inf.wpn_clip_phase >= len) {
-            const int promoted = inf.wpn_deferred;
+        const int32_t length = root_motion->clip_length_ticks(
+                inf.adm_id, inf.weapon_clip_state(), inf.wpn_variant);
+        if (length >= 0 && inf.wpn_clip_phase >= length) {
+            inf.wpn_state = inf.wpn_deferred;
             inf.wpn_deferred = 0;
-            inf.begin_weapon_transition(promoted,
-                    weapon_ring_size(root_motion, inf.adm_id, promoted));
         }
     }
 
@@ -108,12 +118,12 @@ void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
             // output is discarded either way (the weapon layer never feeds motion), so
             // stepping the two variant tracks independently is exact.
             RootMotionFrame discard_prev;
+            root_motion->advance_variant(inf.adm_id, inf.weapon_clip_state(), inf.wpn_variant,
+                                         inf.wpn_clip_phase, discard);
             root_motion->advance_variant(inf.adm_id, inf.wpn_prev, inf.wpn_prev_variant,
                                          inf.wpn_prev_clip_phase, discard_prev);
-            root_motion->advance_variant(inf.adm_id, inf.wpn_state, inf.wpn_variant,
-                                         inf.wpn_clip_phase, discard);
         } else {
-            root_motion->advance_variant(inf.adm_id, inf.wpn_state, inf.wpn_variant,
+            root_motion->advance_variant(inf.adm_id, inf.weapon_clip_state(), inf.wpn_variant,
                                          inf.wpn_clip_phase, discard);
         }
     }
@@ -190,12 +200,9 @@ void AiSystem::infantry_weapon_channel_select(AiEntity &e) {
         if ((curf & 0x4u) != 0 || (curf & 0x20u) != 0) {
             inf.wpn_deferred = desired; // [orig: @0x4b5e88/@0x4b5e95]
         } else {
-            // The re-init is the SHARED AnimMap_UpdateEntity body the dual-channel
-            // update routes the secondary pair through, so the weapon layer takes the
-            // same blend-10 / blend-15 window the primary does.
-            // [orig: @0x4b5e9d; the re-init AnimMap_UpdateEntity @0x40b5f0]
-            inf.begin_weapon_transition(desired,
-                    weapon_ring_size(root_motion, inf.adm_id, desired));
+            // The next motor-head update consumes this request.
+            // [orig: @0x4B5E9D; re-init @0x40B5F0 on the next @0x4B41DF]
+            inf.request_weapon_animation(desired);
             inf.wpn_deferred = 0;       // [orig: @0x4b5ea3]
         }
     }
@@ -204,7 +211,7 @@ void AiSystem::infantry_weapon_channel_select(AiEntity &e) {
 // The fire-path attack stamp — see the infantry.h declaration. Unlike the per-tick
 // selection this writes the target immediately, whatever the current state's flags.
 // [orig: WeaponAction_Fire @0x542bbc..0x542bea; ebx = 0 from @0x542b22]
-void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind, int ring_size) {
+void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind) {
     int state;
     if (attack_kind == 1)
         state = anim_state::kKnifeAttack;   // 62 [orig: @0x542bcb]
@@ -215,9 +222,8 @@ void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind, int ring_
     // The channel re-inits only on a target CHANGE [orig: AnimMap_UpdateEntity @0x40b5f0
     // pulls a new clip only when target differs] — a repeat stamp of the same attack
     // state mid-clip does not restart the playing clip.
-    // begin_weapon_transition is a no-op when the state is already playing, which IS
-    // the repeat-stamp rule: a repeated attack mid-clip keeps the playhead.
-    inf.begin_weapon_transition(state, ring_size);
+    // Only the next channel update serves a variant and reinitializes playback.
+    inf.request_weapon_animation(state);
     inf.wpn_deferred = 0;
 }
 

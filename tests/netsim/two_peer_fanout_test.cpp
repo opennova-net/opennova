@@ -1843,10 +1843,10 @@ bool run_vehicle_drive_authority() {
 	// Land the remote driver's grounded 0x0C intent through the production read-apply:
 	// forward + moving, with an independent 45-degree LOOK while the vehicle starts at
 	// 0 degrees. The authority motor must consume the player's LOOK, not the seat yaw.
-	const int32_t driver_steer_target = w::bam_heading_from_mission_yaw_deg(45.0);
+	const int32_t requested_driver_heading = w::bam_heading_from_mission_yaw_deg(45.0);
 	constexpr int32_t carrier_heading = 90 * 11930464;
 	const uint32_t local_heading_bits =
-			static_cast<uint32_t>(driver_steer_target) -
+			static_cast<uint32_t>(requested_driver_heading) -
 			static_cast<uint32_t>(carrier_heading);
 	const int32_t driver_wire_look = static_cast<int32_t>(
 			(static_cast<uint32_t>(local_heading_bits) & 0xFFFF0000u) +
@@ -1892,8 +1892,8 @@ bool run_vehicle_drive_authority() {
 	w::Entity *veh = world.registry.get(vh);
 	player = world.registry.get(ph);
 	driver_ai = ai.for_handle(ph);
-	if (!expect(veh != nullptr && veh->veh.steer_target_bam == driver_steer_target,
-	            "authority motor consumes the remote driver's preserved LOOK"))
+	if (!expect(veh != nullptr && veh->veh.steer_target_bam == driver_wire_look,
+	            "authority motor consumes the full-precision remote driver LOOK"))
 		return false;
 	if (!expect(player != nullptr && driver_ai != nullptr && player->yaw == 45 &&
 	                    driver_ai->heading == driver_wire_look,

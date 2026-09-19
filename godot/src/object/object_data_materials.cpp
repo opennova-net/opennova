@@ -229,7 +229,7 @@ String ObjectData::resolve_material_texture_path(int p_material_index, int p_tex
 	return opennova::resolve_texture_path(source_dir, texture_name);
 }
 
-Ref<Texture2D> ObjectData::load_material_texture(int p_material_index, int p_texture_index) const {
+Ref<Texture> ObjectData::load_material_texture(int p_material_index, int p_texture_index) const {
 	if (!source_model_ || p_material_index < 0 || static_cast<size_t>(p_material_index) >= native_model().material_count ||
 			p_texture_index < 0 || p_texture_index >= static_cast<int>(kMaxMaterialTextures)) {
 		return Ref<Texture2D>();

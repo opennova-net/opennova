@@ -117,17 +117,6 @@ bool Simulation::local_death_screen_active() const {
 	return runtime_ != nullptr && runtime_->state().death_screen_active;
 }
 
-void Simulation::set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid) {
-	// Godot (x, y, z) -> mission (x, -z, y), the get_local_player_position inverse.
-	const float eye[3] = {p_eye_godot.x, -p_eye_godot.z, p_eye_godot.y};
-	opennova::world::local_player_set_eye(&kernel_->world, kernel_->local.weapon, eye, p_valid);
-}
-
-void Simulation::set_local_player_eye_offset(const Vector3 &p_offset_godot, bool p_valid) {
-	const float offset[3] = {p_offset_godot.x, -p_offset_godot.z, p_offset_godot.y};
-	opennova::world::local_player_set_eye_offset(&kernel_->world, offset, p_valid);
-}
-
 Ref<PlayerLocalView> Simulation::get_local_player_view() const {
 	Ref<PlayerLocalView> out;
 	out.instantiate();

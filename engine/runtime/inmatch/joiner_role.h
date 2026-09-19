@@ -228,6 +228,7 @@ private:
 	void mirror_predicted_vehicles();
 	void refresh_wire_collision_proxies();
 	void apply_gameplay_events();
+    void apply_round_event(const replication::ClientRoundEvent &);
 
 	opennova::IDatagramSocket *socket_ = nullptr;
 	PeerAddr host_addr_{};

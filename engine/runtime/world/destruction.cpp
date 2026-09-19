@@ -390,7 +390,7 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
 // @ 0x4e6820]. `distance` is the surface distance (center distance minus the
 // victim's bound radius, clamped at 0 by the caller), `blast_radius` the
 // resolved radius.
-void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEntry &e,
+void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity &target, const ExplosionEntry &e,
                                 EntityHandle attacker, float distance, float blast_radius) {
     if ((target.engine_flags & kEntityFlagDead) != 0) return; // [orig: Flags & 2 @ 0x4e682e]
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
@@ -507,9 +507,41 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
         return;
     }
 
-    // Non-person: the breakable-section sweep (sectionMask marking
-    // @ 0x4e6c5e-0x4e6e6b) rides the collision-model section flags — not yet
-    // carried by our CollisionModel build (tracked §24/D-ITEM-3).
+    // [orig: Entity_ApplyWeaponDamage @0x4E6C5E..0x4E6E6B]
+    // The original transforms every COBJ AABB center through the callback's
+    // first matrix. This is an inclusive box admission; the later vector
+    // normalization supplies the break helper, not a spherical rejection.
+    if (collision != nullptr) {
+        const CollisionModel *model = collision->model(collision->entity_model_id(target.handle));
+        CollisionMatrix matrix;
+        if (model != nullptr && collision->entity_section_matrix(world, target.handle, 0, matrix)) {
+            const int32_t center[3] = {to_fixed(e.pos.x), to_fixed(e.pos.y), to_fixed(e.pos.z)};
+            const int32_t radius = to_fixed(blast_radius);
+            for (size_t i = 0; i < model->sections.size(); ++i) {
+                const CollisionSection &section = model->sections[i];
+                if ((section.flags & 2u) == 0) continue;
+                const int32_t local[3] = {
+                    io::bam_add(section.min_x, section.max_x) >> 1,
+                    io::bam_add(section.min_y, section.max_y) >> 1,
+                    io::bam_add(section.min_z, section.max_z) >> 1};
+                int32_t point[3];
+                matrix.transform_point(local, point);
+                bool inside = true;
+                for (int axis = 0; axis < 3; ++axis)
+                    if (int64_t(point[axis]) < int64_t(center[axis]) - radius ||
+                            int64_t(point[axis]) > int64_t(center[axis]) + radius) inside = false;
+                if (!inside) continue;
+                const uint32_t bit = 1u << (static_cast<uint32_t>(i) & 31u);
+                // The misleadingly named bounds helper only plays this sound;
+                // its transformed bounds are dead locals [orig: @0x439C00].
+                if (i != 0 && (target.section_mask & bit) == 0 && target.has_item_def)
+                    world.out.fire_sounds.play_immediate("GLASS_SMASH",
+                            {float(from_fixed(point[0])), float(from_fixed(point[1])), float(from_fixed(point[2]))},
+                            target.bms_id, target.handle.packed);
+                target.section_mask |= bit;
+            }
+        }
+    }
     apply_item_blast_damage(world, target, damage, attacker, e.ammo_index);
 }
 
@@ -698,7 +730,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                         t->handle == world.cached.local_player &&
                         e.type != ammo_kz::kMedic)
                     player_on_damage_received(world);
-                entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
+                entity_apply_weapon_damage(world, collision, *t, e, resolved, surface, blast_radius);
             }
         }
 
@@ -734,7 +766,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                     t->death_blast_center = e.pos;
                 float surface = dist - bound;
                 if (surface < 0.0f) surface = 0.0f;
-                entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
+                entity_apply_weapon_damage(world, collision, *t, e, resolved, surface, blast_radius);
             }
         }
 
@@ -766,7 +798,7 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                         world, *t, e.pos, ammo->kz_maxradius, events);
                 if (t->health > 0 && runs_tree_death_body(world, *t))
                     t->death_blast_center = e.pos;
-                entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
+                entity_apply_weapon_damage(world, collision, *t, e, resolved, surface, blast_radius);
             }
         }
     }

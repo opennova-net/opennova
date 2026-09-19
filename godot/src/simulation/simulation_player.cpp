@@ -225,7 +225,7 @@ String Simulation::get_local_player_anim_key() const {
 	if (!kernel_->world.cached.local_player.valid()) return String();
 	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (!p) return String();
-	return infantry_anim_key(p->inf.anim_state);
+	return infantry_anim_key(p->inf.body_clip_state());
 }
 
 Simulation::Stance Simulation::get_local_player_stance() const {

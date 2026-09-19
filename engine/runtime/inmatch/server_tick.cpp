@@ -1584,6 +1584,8 @@ void Server_RecalculateAllPlayerKitWeights(
 				std::min(inventory.pools.size(), conn.reply.ammo_pools.size());
 		for (size_t i = 0; i < pool_count; ++i)
 			inventory.pools[i] = conn.reply.ammo_pools[i];
+        for (size_t i = 0; i < pool_count; ++i)
+            inventory.shared_clips[i] = conn.reply.shared_clips[i];
 		body->inf.loadout_weight_fp16 =
 				world::weapon_inventory_loadout_weight_fp16(table, inventory);
 	}
@@ -2190,7 +2192,36 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			ctx.round_end_linger_ticks > 0) {
 		--ctx.round_end_linger_ticks;
 		if (ctx.round_end_linger_ticks == 0) ctx.is_in_session = 0;
-	}
+	}    // Guidance follows the frame carrying the corresponding fired-round birth.
+    // [orig: Entity_SendEffectPacket @0x445C40, routed serializer @0x4D6240]
+    if (ctx.is_in_session) for (const auto &update : world.round_sim.guided_updates) {
+        for (int group = 1; group <= 6; ++group) {
+            if (!(update.groups & (1u << group))) continue;
+            GuidedRecord record;
+            record.target_slot = update.state.target; record.weapon_type = update.state.phase;
+            record.pos_x = update.state.steer[0]; record.pos_y = update.state.steer[1]; record.pos_z = update.state.steer[2];
+            record.attach_x = update.state.saved[0]; record.attach_y = update.state.saved[1]; record.attach_z = update.state.saved[2];
+            std::vector<uint8_t> body;
+            put_u16le(body, update.shooter); put_u16le(body, update.net_id); body.push_back(uint8_t(group));
+            const auto payload = encode_guided_field_group(GuidedMode::WriteFull, GuidedFieldGroup(group), record);
+            body.insert(body.end(), payload.begin(), payload.end());
+            for (auto &conn : ctx.np_protocol.connection_list)
+                if (active_player_recipient(conn) && conn.link.mode != replication::TransportMode::Loopback)
+                    conn.pending_guidance.push_back(body);
+        }
+    }
+    world.round_sim.guided_updates.clear();
+    for (auto &conn : ctx.np_protocol.connection_list) {
+        if (!ctx.is_in_session || !active_player_recipient(conn)) {
+            conn.pending_guidance.clear();
+            continue;
+        }
+        if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
+        for (const auto &body : conn.pending_guidance)
+            conn.link.transport->host_send(0x44, body, true, 0);
+        conn.pending_guidance.clear();
+    }
+
 	emit_periodic_rtt(ctx, world);
 	lap.mark(devtools::Slot::SIM_SERVER_REPLICATION);
 

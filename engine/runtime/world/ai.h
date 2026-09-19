@@ -8,7 +8,7 @@
 //
 // IDA anchors (Jointops.exe, imagebase 0x400000):
 //   EntityAI_ProcessInfantryStateMachine @0x4581b0   (the dispatcher)
-//   AI_BeginUpdate                        @0x457b40   (per-frame budget gate, cap 496)
+//   AI_BeginUpdate                        @0x457b40   (movement controller row 4, phase limit 496)
 //   AIEvent_QueueEntry                    @0x455da0   (1024 x 5-dword ring)
 //   AIEvent_ProcessTimedEntries           @0x455df0   (timer -= 0.016/frame)
 //   state-handler table                   @0x815238   (24 records x {enter,tick,exit,event})
@@ -16,9 +16,9 @@
 //
 // Tracked deviation (per feedback_ida_algorithmic_fidelity): the original keeps
 // brains in the absolute global array unk_AED380 (812-byte stride), the profile at
-// brain[1] and the scheduler at brain[2] as absolute pointers, and the handler
-// dispatch in absolute function-pointer tables. We rebase those to pool-relative
-// containers (a vector of AiEntity, a direct AiProfile/AiScheduler member, a static
+// brain[1] and the per-entity controller at brain[2] as absolute pointers, and the
+// handler dispatch in absolute function-pointer tables. We rebase those to
+// containers (a vector of AiEntity, embedded profile/controller fields, a static
 // StateRow table). Struct bodies are modeled as int32 f[N] + named indices so the
 // ported handlers index fields exactly as the decompiler does (b.f[4], b.f[5], ...).
 #pragma once
@@ -99,7 +99,7 @@ struct AiBrain {
         kCurState = 4,     // current AI state  [byte +16]
         kPendState = 5,    // pending state (applied when != kCurState) [byte +20]
         kFallback = 6,     // fallback state [byte +24]
-        kStep = 7,         // move step / per-frame budget cost (idle 16 / patrol 64) [byte +28]
+        kStep = 7,         // think period / controller phase step (idle 16 / patrol 64) [byte +28]
         kFireTimer = 9,    // fire countdown (decrements by kStep) [byte +36]
         kTick = 10,        // ++ each SM update [byte +40]
         // ---- waypoint sub-struct (passed to AIWaypoint_UpdateTarget as brain+52) ----
@@ -341,11 +341,6 @@ struct AiProfile {
 	int32_t type = 0; // +16: HELO 1 / GROUND 2 / ORGANIC 3 (0 = unresolved)
 };
 
-// AiScheduler — brain[2], the shared per-frame budget accumulator (the +16 field).
-struct AiScheduler {
-    int32_t budget = 0; // [orig: scheduler+16]
-    static constexpr int32_t kBudgetCap = 496; // [orig: AI_BeginUpdate @0x457b40]
-};
 
 // ----------------------------------------------------------------------------
 // Nav / anim node table. [orig: globals at 0xA71DD0 (Buffer) / 0xA71DD4
@@ -451,11 +446,9 @@ struct AiEntity {
     uint8_t team = 0;          // entity+354 (team id; 0 = neutral)
     bool see_all = false;      // entity+104 aiSlot[4] & 0x200 (targets any team)
     int32_t arrival_prox = 0;  // entity+32 def +2340 (heading arrival proximity, patrol)
-    // brain[2] "scheduler" per-entity patrol state. Tracked deviation: the original keeps the
-    // frame budget (+16) and the patrol triple (+0/+4/+8) in one struct reached via brain[2];
-    // we keep the budget shared (AiSystem::scheduler, the foundation's frame-stagger model) and
-    // model the per-entity patrol fields here. Whether brain[2] is global or per-entity/per-group
-    // is an open RE TODO (notes §9); reconciling would move the budget here too.
+    // brain[2] is this entity's movement controller. Its +16 phase survives
+    // world ticks and advances only through the selected movement callback.
+    // [orig: AI_BeginUpdate @0x457B40; world-wac-ai-re.md (D-AI-14)]
     int32_t patrol_f0 = 0;     // scheduler +0
     int32_t patrol_delta = 0;  // scheduler +4 (patrol heading delta)
 	int32_t aircraft_controller = 0; // controller+0: movement callback ID
@@ -721,7 +714,6 @@ public:
     int index_for_handle(EntityHandle h) const;
     int count() const { return static_cast<int>(entities_.size()); }
 
-    AiScheduler scheduler;
     AiEventQueue events;
     NavNodeTable nav;         // channel/node table the waypoint mover walks
     bool is_authority = true; // [orig: g_napi_np_ctx.is_authority]
@@ -909,8 +901,8 @@ public:
     // returns false and the combat event switch proceeds faithfully.
     bool ai_handle_command(World &world, AiEntity &e, const AiEventEntry &ev);
 
-    // [orig: AI_BeginUpdate @0x457b40] budget gate. Returns false (skip this frame)
-    // when the shared scheduler budget exceeds the cap; forces idle/fallback.
+    // [orig: AI_BeginUpdate @0x457b40] movement-controller row 4. Copies working
+    // fields, then advances this entity's phase or requests combat/fallback past 496.
     bool begin_update(AiEntity &e);
 
     // The two class event callbacks (fn1 of g_EntityClassEventCallbackTable

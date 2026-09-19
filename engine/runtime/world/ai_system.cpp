@@ -33,8 +33,8 @@ namespace {
 
 // Apply only the carrier-owned body frame. This is deliberately separate from
 // pose_if_mounted's input, gunner-look, animation, and wire-state work so the
-// authority can repeat the pose after its later pool-1 vehicle motor without
-// advancing any of those once-per-body-tick behaviors twice.
+// non-organic controllers can refresh after the pool-1 motor without advancing
+// those behaviors twice. Organic bodies run after vehicles and pose only once.
 int32_t apply_resolved_mounted_seat_frame(AiEntity &e, World &world,
                                           Entity &occupant, Entity &vehicle,
                                           const Seat &seat) {
@@ -289,24 +289,25 @@ int AiSystem::index_for_handle(EntityHandle h) const {
     return entities_[index].handle == h ? index : -1;
 }
 
-// [orig: AI_BeginUpdate @0x457b40] copy working fields, then the shared-budget gate.
+// Per-entity movement controller row 4, not a world scheduling budget.
+// [orig: AI_BeginUpdate @0x457b40] See world-wac-ai-re.md (D-AI-14).
 bool AiSystem::begin_update(AiEntity &e) {
     AiBrain &b = e.brain;
     b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA]; // [128]=[49]
     b.f[138] = e.profile.field220;
     b.f[134] = 0;
     b.f[133] = 0;
-    b.f[131] = b.f[51] + e.profile.field216;
+    b.f[131] = io::bam_add(b.f[51], e.profile.field216);
     b.f[132] = e.heading;
-    int32_t budget_used = scheduler.budget;
-    if (budget_used > AiScheduler::kBudgetCap) {
+    const int32_t phase = e.aircraft_phase;
+    if (phase > 496) { // controller+16, strict greater-than [orig: @0x457b9f]
         if ((e.profile.flags100 & 2) == 0)
             b.f[AiBrain::kPendState] = 8;
         else
             b.f[AiBrain::kPendState] = b.f[AiBrain::kFallback];
         return false;
     }
-    scheduler.budget = budget_used + b.f[AiBrain::kStep];
+    e.aircraft_phase = io::bam_add(phase, b.f[AiBrain::kStep]);
     return true;
 }
 
@@ -424,6 +425,9 @@ void process_class_state_machine(
             sys.apply_transition(e, world);
         return;
     }
+    // Every other event still reaches the class-specific transition tail.
+    // [orig: EntityAI_ProcessVehicleStateMachine @0x45846D; air @0x458261]
+    finish();
 }
 } // namespace
 
@@ -464,7 +468,6 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     // d5); an inactive profile reads no clock.
     devtools::ProfileLap lap(world.profile);
     is_authority = ctx.is_authority;
-    scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
     // Drain the round sim's processed hits into the AI reaction stamps BEFORE any brain
     // updates: infantry get wasHit/lastAttacker (consumed by the §17.1 scan + §17.3 hit
     // reactions), SM brains get the type-1 damage AIEvent (h_combat_event -> evade).
@@ -546,37 +549,11 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         AiEntity &e = *at(i);
         // A freed AI component (owner word 0) is not an entity's brain any more:
         // retail reaches brains only through live entities' +100 pointer.
-        if (e.brain.f[AiBrain::kOwner] == 0) continue;
+        if (e.brain.f[AiBrain::kOwner] == 0 || e.inf.active) continue;
         const devtools::ProfileScope entity_scope(
-                world.profile, e.inf.active ? devtools::Slot::SIM_AI_INFANTRY
-                                            : devtools::Slot::SIM_AI_OTHER_ENTITIES);
+                world.profile, devtools::Slot::SIM_AI_OTHER_ENTITIES);
         const Entity *motor_entity = world.registry.get(e.handle);
         const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
-        if (e.inf.active) {
-            if (motor_suspended) continue;
-            // Joiners retain seat-follow presentation for wire-owned peers. The
-            // authority continues into the remote org2 animation/collision tail:
-            // mounted contact callbacks remain live while model push is suppressed.
-            if (e.net_is_remote_peer && pose_if_mounted(e, world)) {
-                advance_part_anim(e);
-                if (!is_authority) continue;
-            }
-            // A client-only wire peer has no authority collision tail, so its
-            // blink/indoors presentation state comes from the position-only refresh.
-            // [orig: remote persons
-            // refresh via the net position/create handlers — NapiNPClientMsg_0x00F
-            // @0x42e442, NetPacket_HandleEntityCreate @0x42f227; the @0x4c229c per-tick
-            // walk is pool-2 statics on an 8-per-tick stagger, not persons]
-            if (collision_active && e.net_is_remote_peer && !is_authority) {
-                if (Entity *ent = world.registry.get(e.handle))
-                    collision->refresh_blink(world, *ent);
-            }
-            // org1-class soldier: the infantry motor replaces the vehicle SM + kinematic
-            // locomotion for this entity. [orig: g_EntityClassPhysicsTable row "org1" ->
-            // Entity_UpdateInfantryAI @0x4b9910]
-            tick_infantry(e, world, ctx.logic_tick);
-            continue;
-        }
         // Non-infantry mounted controllers retain the seat-follow shortcut.
         if (!motor_suspended && pose_if_mounted(e, world)) {
             advance_part_anim(e);
@@ -609,7 +586,10 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         const bool think = countdown_entity == nullptr || countdown_entity->spawn_phase <= 0;
         if (think && countdown_entity != nullptr && collision != nullptr)
             collision->refresh_blink(world, *countdown_entity);
-        if (think && begin_update(e)) {
+        // The class callback has no AI_BeginUpdate admission gate. That leaf
+        // belongs to movement controller row 4 and its per-entity phase.
+        // [orig: Entity_UpdatePool1Slot @0x4B8E1B..0x4B8E53]
+        if (think) {
             const Entity *ent = world.registry.get(e.handle);
             const VehicleTraits *vt =
                     ent != nullptr ? world.vehicles.traits.get(ent->item_id) : nullptr;
@@ -659,6 +639,40 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     }
     lap.mark(devtools::Slot::SIM_AI_ENTITIES);
     world.vehicles.tick_motors(is_authority, lap);
+    // Pool 1 precedes pool 0: deck riders consume the carrier's CURRENT
+    // motor delta, then resolve contacts against that same pose.
+    // [orig: Entity_UpdateAllEntities @0x4C2158..0x4C21F1 before the
+    // pool-0 callback walk @0x4C2426..0x4C2474]
+    for (int i = 0; i < count(); ++i) {
+        AiEntity &e = *at(i);
+        if (e.brain.f[AiBrain::kOwner] == 0 || !e.inf.active) continue;
+        const Entity *motor_entity = world.registry.get(e.handle);
+        const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
+        const devtools::ProfileScope entity_scope(world.profile, devtools::Slot::SIM_AI_INFANTRY);
+        if (motor_suspended) continue;
+        // Joiners retain seat-follow presentation for wire-owned peers. The
+        // authority continues into the remote org2 animation/collision tail:
+        // mounted contact callbacks remain live while model push is suppressed.
+        if (e.net_is_remote_peer && pose_if_mounted(e, world)) {
+            advance_part_anim(e);
+            if (!is_authority) continue;
+        }
+        // A client-only wire peer has no authority collision tail, so its
+        // blink/indoors presentation state comes from the position-only refresh.
+        // [orig: remote persons
+        // refresh via the net position/create handlers — NapiNPClientMsg_0x00F
+        // @0x42e442, NetPacket_HandleEntityCreate @0x42f227; the @0x4c229c per-tick
+        // walk is pool-2 statics on an 8-per-tick stagger, not persons]
+        if (collision_active && e.net_is_remote_peer && !is_authority) {
+            if (Entity *ent = world.registry.get(e.handle))
+                collision->refresh_blink(world, *ent);
+        }
+        // org1-class soldier: the infantry motor replaces the vehicle SM + kinematic
+        // locomotion for this entity. [orig: g_EntityClassPhysicsTable row "org1" ->
+        // Entity_UpdateInfantryAI @0x4b9910]
+        tick_infantry(e, world, ctx.logic_tick);
+    }
+    lap.mark(devtools::Slot::SIM_AI_ENTITIES);
     events.process_timed(*this, world);
     lap.mark(devtools::Slot::SIM_AI_EVENTS);
 }
@@ -871,7 +885,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     if (e.inf.active) {
         const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
         if (e.inf.anim_state != mounted_state) {
-            e.inf.begin_body_transition(mounted_state);
+            e.inf.request_body_animation(mounted_state);
         }
         e.inf.anim_pending = 0;
         e.inf.move_mode = 0;
@@ -1002,7 +1016,6 @@ void AiSystem::on_load(World &) {
     if (baseline_captured_) entities_ = spawn_baseline_;
     rebuild_handle_index();
     events.clear();
-    scheduler.budget = 0;
     relmat_calls.clear();
     rel_ops.clear();
     target_set_calls.clear();

@@ -57,6 +57,7 @@ struct AmmoTableEntry;
 // ----------------------------------------------------------------------------
 enum class ThrowClass : uint8_t {
     kNone = 0,
+    kStinger, kHellfire, kJavelin,
     kNade,     // thrown grenade: arc + bounce + fuse [orig motor @ 0x443F50]
     kSatchel,  // thrown charge: stick + convert to placed [orig @ 0x4482A0]
     kClaymore, // placed upright: stick + convert to placed [orig @ 0x4472F0]

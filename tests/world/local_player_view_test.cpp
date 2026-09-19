@@ -875,21 +875,34 @@ void test_use_item_vehicle_loadout_zone_gates() {
     CHECK(!local_player_vehicle_zone_team_matches(empty));
 }
 
-void test_set_eye_mirrors_the_head_into_the_world() {
+void test_view_uses_current_motor_offset_and_live_position() {
     LocalWorld lw;
     LocalPlayerWeapon w = scoped_weapon(0);
-    const float eye[3] = {1.0f, 2.0f, 3.0f};
-    local_player_set_eye(&lw.w, w, eye, true);
-    CHECK(w.eye_valid);
-    CHECK(w.eye_mission[2] == 3.0f);
-    CHECK(lw.w.cached.local_head_valid);
-    CHECK(lw.w.cached.local_head.y == 2.0f);
-    const float offset[3] = {0.0f, 0.0f, 1.5f};
-    local_player_set_eye_offset(&lw.w, offset, true);
-    CHECK(lw.w.cached.local_head_offset_valid);
-    CHECK(lw.w.cached.local_head_offset.z == 1.5f);
-    local_player_set_eye(nullptr, w, eye, false); // a null world only drops the sample
-    CHECK(!w.eye_valid);
+    AiEntity *body = lw.ai.at(lw.ai.attach(lw.local));
+    body->inf.active = true;
+    body->inf.is_local_player = true;
+    Entity &entity = lw.entity();
+    entity.eye_offset_x = 0x4000;
+    entity.eye_offset_y = -0x8000;
+    entity.eye_offset_z = 0x18000;
+    PlayerViewState view;
+    view.debug_third_person_on_foot = true;
+    LocalPlayerViewTracker tracker;
+    LocalViewSessionInputs session;
+    local_player_view_tick(&lw.w, w, view, tracker, session);
+    CHECK(view.tp_anchor[0] == entity.position.x + 0.25f);
+    CHECK(view.tp_anchor[1] == entity.position.y - 0.5f);
+    CHECK(view.tp_anchor[2] == entity.position.z + 1.5f);
+
+    // A moving carrier/body re-anchors without another render or input sample.
+    entity.position.x += 20.0f;
+    entity.position.z += 3.0f;
+    view.debug_third_person_on_foot = false;
+    player_view_resolve_mode(view);
+    LocalPlayerViewFrame frame;
+    local_player_view_frame(&lw.w, w, view, tracker, frame);
+    CHECK(std::abs(frame.camera.eye[2] - (entity.position.z + 1.5f)) < 0.001f);
+    CHECK(std::abs(frame.camera.eye[0] - (entity.position.x + 0.25f)) < 0.2f);
 }
 
 } // namespace
@@ -1714,7 +1727,7 @@ int main() {
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();
     test_frame_chase_shake_consumes_the_tick();
     test_use_item_vehicle_loadout_zone_gates();
-    test_set_eye_mirrors_the_head_into_the_world();
+    test_view_uses_current_motor_offset_and_live_position();
     test_pump_feeds_the_heat_window_water_gate_from_the_body_z();
     test_weapon_trace_records_one_sample_per_pump_tick();
     test_weapon_trace_samples_since_is_incremental();

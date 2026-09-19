@@ -1,5 +1,5 @@
 // The LOCAL PLAYER's view cluster, orchestrated: the view-effect requests
-// (scope / binoculars / NVG), the per-tick view promoter, the shell-fed eye,
+// (scope / binoculars / NVG), the per-tick view promoter, the simulated eye,
 // and the composed per-frame view read. player_view.h owns the witnessed
 // primitives (the ease, the arbiter, the camera composition); this module
 // owns the ORDER retail runs them in and the gates in front of them, so the
@@ -258,16 +258,13 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w,
                             PlayerViewState &v, LocalPlayerViewTracker &t,
                             const LocalViewSessionInputs &session);
 
-// The shell-fed head-bone eye (mission space) for the 3P anchor chase; also
-// mirrored into the world so the infantry body tick can restamp the local
-// eye-offset triple from the exact posed head (the D-HUD-20 local leg).
-void local_player_set_eye(World *world, LocalPlayerWeapon &w,
-                          const float eye_mission[3], bool valid);
-// The posed head as a BODY-RELATIVE delta (head minus the skeleton origin)
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b6908 -- the mounted local eye
-//  leg stores head - Position from a skeleton posed in the SAME tick].
-void local_player_set_eye_offset(World *world, const float offset_mission[3],
-                                 bool valid);
+// The motor writes CameraOffset; every later consumer re-anchors it to the
+// current position. [orig: Camera_ComputeThirdPersonView @0x437FA5..0x437FB7]
+inline Vec3 player_eye_position(const Entity &entity) {
+    return {entity.position.x + static_cast<float>(entity.eye_offset_x) / 65536.0f,
+            entity.position.y + static_cast<float>(entity.eye_offset_y) / 65536.0f,
+            entity.position.z + static_cast<float>(entity.eye_offset_z) / 65536.0f};
+}
 
 // The composed per-frame view read, mission space: the effect states, the
 // resolved camera mode and its gates, the NoCardSwitch bias suppression, the

@@ -252,7 +252,7 @@ void AiSystem::aircraft_evade_tick(AiEntity &ai, World &world) {
 }
 
 // Per-entity movement callback dispatch. Controller phase/result/side are not
-// the shared AI scheduling budget. [orig: tables @0x8153B8/@0x8153E0;
+// a shared AI scheduling budget. [orig: tables @0x8153B8/@0x8153E0;
 // @0x461C30/@0x461CB0/@0x466C20/@0x466DB0/@0x4613A0/@0x461870]
 // The two 0x1000x movers carry swapped-looking IDB names: AI_CalcGroundVehicleTarget
 // @0x4613A0 is the HELICOPTER mover (controller 0x10000, table 0x8153E0[1]) and
@@ -274,6 +274,10 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 		}
 		return target;
 	};
+	// The fifth movement row uses the same per-entity phase as rows 0..3.
+	// [orig: g_AIMoveStepFnTable row 4 @0x8153D8 -> AI_BeginUpdate @0x457B40]
+	if (ai.aircraft_controller == 4)
+		return begin_update(ai) ? 1 : 0;
 	if (ai.aircraft_controller <= 3) {
 		b.f[138] = mul32(3, p.field220 >> 1);
 		b.f[AiBrain::kWorkPitch] = b.f[AiBrain::kWorkRoll] = 0;

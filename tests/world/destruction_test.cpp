@@ -3246,7 +3246,54 @@ void test_mounted_blast_protection_follows_seat_type() {
     }
 }
 
+void test_blast_breaks_flagged_sections_at_transformed_box_centers() {
+    auto storage = std::make_unique<World>();
+    World &w = *storage;
+    seed_ammo(w);
+    w.registry.configure_pool(2, 4);
+    Entity seed;
+    seed.kind = EntityKind::Building;
+    seed.item_type = 5;
+    seed.has_item_def = true;
+    seed.health = seed.health_max = 1000;
+    seed.bound_radius = 20;
+    seed.position = {20, 30, 10};
+    const auto h = w.registry.spawn(2, seed);
+    CollisionModel model;
+    model.sections.resize(4);
+    for (auto &sec : model.sections) {
+        sec.flags = 2;
+        sec.authored_bounds = true;
+        sec.radius = 65536;
+    }
+    model.sections[0].flags = 0;
+    // Center is exactly on all three blast AABB edges; retail does not apply
+    // a sphere-distance rejection after this box test.
+    model.sections[1].min_x = model.sections[1].max_x = 8 * 65536;
+    model.sections[1].min_y = model.sections[1].max_y = 8 * 65536;
+    model.sections[1].min_z = model.sections[1].max_z = 8 * 65536;
+    model.sections[2].min_x = model.sections[2].max_x = 9 * 65536;
+    model.sections[3].flags = 0;
+    CollisionWorld collision;
+    collision.assign_entity(h, collision.add_model(std::move(model)));
+    collision.build_initial_tables(w);
+    w.collision = &collision;
+    ExplosionEntry blast;
+    blast.type = ammo_kz::kRadiusBlast;
+    blast.ammo_index = 1;
+    blast.pos = seed.position;
+    w.explosions.queue_explosion(w, blast);
+    w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
+    CHECK(w.registry.get(h)->section_mask == 2u);
+    // Repeating the blast preserves the section mask and suppresses a second
+    // section-break sound, while ordinary health damage can still occur.
+    w.explosions.queue_explosion(w, blast);
+    w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
+    CHECK(w.registry.get(h)->section_mask == 2u);
+}
+
 int main() {
+    test_blast_breaks_flagged_sections_at_transformed_box_centers();
     test_mounted_blast_protection_follows_seat_type();
 	test_gnrl_death_is_husk_sound_and_one_effect();
 	test_gnrl_client_kill_leg();

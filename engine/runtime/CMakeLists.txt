@@ -97,6 +97,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_texture.cpp
+    renderer/material_texture_producers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_shader_template.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_lod.cpp
@@ -168,7 +169,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_world.cpp    # instance registry + the proximity table build
     ${CMAKE_CURRENT_SOURCE_DIR}/world/occlusion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/iris_march.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/parachute.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_carrier.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_slope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_force.cpp   # Entity_ApplyCollisionForce: burn state + the four force modes
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_attention.cpp
@@ -178,6 +181,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_ladder.cpp         # the D-COL-5 climb legs
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_board.cpp           # the 123..127 command legs (ex-D-INF-2)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_combat.cpp          # the D-AI-4 combat pass
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_animation.cpp     # motor-head channel update
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_remote_anim.cpp   # remote-player body anim (size gate)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_sound.cpp          # the foley/footstep slot-sound leg
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_water.cpp          # the §29.1 water/float channel
@@ -217,7 +221,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/death_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/lfp_feed.cpp           # the AAS zone status panel's zone rows
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_panel_feed.cpp # the mounted-vehicle panel's seat rows
-    ${CMAKE_CURRENT_SOURCE_DIR}/world/guided_missile_flight.cpp  # the stng pursuit integrator (D-NET-64)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/guided_missile_flight.cpp
+    world/guided_round.cpp  # the stng pursuit integrator (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/round_sim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/sound_emitter_mailbox.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/terrain_scorch_events.cpp

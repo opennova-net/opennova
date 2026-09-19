@@ -290,7 +290,6 @@ void Simulation::_bind_methods() {
 			&Simulation::request_local_player_nvg_toggle);
 	ClassDB::bind_method(D_METHOD("request_local_player_nvg_gain", "delta"),
 			&Simulation::request_local_player_nvg_gain);
-	ClassDB::bind_method(D_METHOD("set_local_player_eye", "eye_godot", "valid"), &Simulation::set_local_player_eye);
 	ClassDB::bind_method(D_METHOD("set_local_player_third_person_selected", "selected"), &Simulation::set_local_player_third_person_selected);
 	ClassDB::bind_method(D_METHOD("set_local_player_debug_third_person", "enabled"), &Simulation::set_local_player_debug_third_person);
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &Simulation::get_local_player_view);
@@ -389,8 +388,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_input_action_bits"), &Simulation::debug_input_action_bits);
 	ClassDB::bind_method(D_METHOD("debug_crew_vehicle", "occupant_ssn", "vehicle_ssn"),
 	                     &Simulation::debug_crew_vehicle);
-	ClassDB::bind_method(D_METHOD("set_local_player_eye_offset", "offset", "valid"),
-	                     &Simulation::set_local_player_eye_offset);
 	ClassDB::bind_method(D_METHOD("local_player_fp_weapon_hidden"),
 	                     &Simulation::local_player_fp_weapon_hidden);
 	ClassDB::bind_method(D_METHOD("debug_crew_local_player", "vehicle_ssn"),

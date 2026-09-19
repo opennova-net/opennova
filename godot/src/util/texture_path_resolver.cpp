@@ -8,6 +8,7 @@
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/image_texture3d.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 
 #include <string>
@@ -360,41 +361,73 @@ godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filena
 	return godot::Ref<godot::Texture2D>();
 }
 
-godot::Ref<godot::Texture2D> prepare_material_texture(
-		const godot::Ref<godot::Texture2D> &source,
-		const godot::String &name, uint8_t type) {
-	using namespace opennova::renderer;
-	const auto mode = material_texture_transform(type, name.utf8().get_data(), source.is_valid());
-	if (mode == MaterialTextureTransform::Unchanged) return source;
-	const std::string key = mode == MaterialTextureTransform::Checkerboard ? "material:checkerboard"
-			: "material:normal:" + std::to_string(source->get_instance_id());
-	const auto cached = g_texture_cache.find(key);
-	if (cached != g_texture_cache.end()) return cached->second;
-	uint32_t width = kMissingMaterialTextureSide, height = kMissingMaterialTextureSide;
-	std::vector<uint8_t> pixels;
-	if (mode == MaterialTextureTransform::Checkerboard) {
-		pixels = missing_material_texture_rgba();
-	} else {
-		godot::Ref<godot::Image> image = source->get_image();
-		// One contract for every failed row: retail tests the loader result
-		// once (test eax,eax @0x5b17f0; jnz @0x5b17f2) and binds the
-		// checkerboard @0x5b17f4..0x5b1800 for any zero, so a texture whose
-		// image cannot be read routes as a failed load, never as a null the
-		// material would replace with the flat normal.
-		if (image.is_null()) return prepare_material_texture({}, name, type);
-		if (image->is_compressed()) image->decompress();
-		image->convert(godot::Image::FORMAT_RGBA8);
-		const godot::PackedByteArray rgba = image->get_data();
-		width = image->get_width(); height = image->get_height();
-		pixels = normal_map_from_height_rgba(rgba.ptr(), width, height, 1.0f / 64.0f, 3, 2);
-	}
-	godot::PackedByteArray data;
-	data.resize(pixels.size());
-	std::copy(pixels.begin(), pixels.end(), data.ptrw());
-	const auto image = godot::Image::create_from_data(width, height, false, godot::Image::FORMAT_RGBA8, data);
-	const auto texture = texture_from_image(image);
-	g_texture_cache.emplace(key, texture);
-	return texture;
+namespace {
+std::unordered_map<std::string, godot::Ref<godot::Texture>> g_material_cache;
+
+godot::Ref<godot::Texture> upload_material_pixels(
+        const renderer::MaterialTexturePixels &pixels, bool volume) {
+    if (!pixels) return {};
+    const size_t slice_size = size_t(pixels.width) * pixels.height * 4;
+    godot::TypedArray<godot::Ref<godot::Image>> slices;
+    for (uint32_t z = 0; z < pixels.depth; ++z) {
+        godot::PackedByteArray data;
+        data.resize(slice_size);
+        std::copy_n(pixels.rgba.data() + z * slice_size, slice_size, data.ptrw());
+        slices.push_back(godot::Image::create_from_data(pixels.width, pixels.height,
+                false, godot::Image::FORMAT_RGBA8, data));
+    }
+    if (!volume) return texture_from_image(slices[0]);
+    godot::Ref<godot::ImageTexture3D> texture;
+    texture.instantiate();
+    if (texture->create(godot::Image::FORMAT_RGBA8, pixels.width, pixels.height,
+            pixels.depth, false, slices) != godot::OK) return {};
+    return texture;
+}
+} // namespace
+
+godot::Ref<godot::Texture> prepare_material_texture(
+        const godot::Ref<godot::Texture2D> &source,
+        const godot::String &name, uint8_t type) {
+    using namespace opennova::renderer;
+    const auto mode = material_texture_transform(type, name.utf8().get_data(), source.is_valid());
+    if (mode == MaterialTextureTransform::Unchanged) return source;
+    const std::string key = mode == MaterialTextureTransform::Checkerboard ? "material:checkerboard"
+            : "material:" + std::to_string(type) + ":" + std::to_string(source->get_instance_id());
+    const auto cached = g_material_cache.find(key);
+    if (cached != g_material_cache.end()) return cached->second;
+    MaterialTexturePixels pixels;
+    if (mode == MaterialTextureTransform::Checkerboard) {
+        pixels = {kMissingMaterialTextureSide, kMissingMaterialTextureSide, 1, missing_material_texture_rgba()};
+    } else {
+        godot::Ref<godot::Image> image = source->get_image();
+        if (image.is_null()) return prepare_material_texture({}, name, type);
+        if (image->is_compressed() && image->decompress() != godot::OK)
+            return prepare_material_texture({}, name, type);
+        image->convert(godot::Image::FORMAT_RGBA8);
+        const godot::PackedByteArray rgba = image->get_data();
+        const uint32_t width = image->get_width(), height = image->get_height();
+        switch (mode) {
+            case MaterialTextureTransform::NormalFromAlpha:
+                pixels = {width, height, 1, normal_map_from_height_rgba(rgba.ptr(), width, height, 1.0f / 64.0f, 3, 2)};
+                break;
+            case MaterialTextureTransform::HorizonVolume:
+                pixels = horizon_volume_from_height(rgba.ptr(), width, height); break;
+            case MaterialTextureTransform::AmbientOcclusion:
+                pixels = ambient_occlusion_from_height(rgba.ptr(), width, height); break;
+            default: break;
+        }
+    }
+    if (!pixels) return prepare_material_texture({}, name, type);
+    const auto texture = upload_material_pixels(pixels, mode == MaterialTextureTransform::HorizonVolume);
+    if (texture.is_null()) return prepare_material_texture({}, name, type);
+    g_material_cache.emplace(key, texture);
+    return texture;
+}
+
+godot::Ref<godot::Texture> prepare_material_chunk(const godot::PackedByteArray &bytes, uint8_t type) {
+    const auto pixels = renderer::load_material_chunk(bytes.ptr(), bytes.size(), type);
+    const auto texture = upload_material_pixels(pixels, type == 17);
+    return texture.is_valid() ? texture : prepare_material_texture({}, {}, 0);
 }
 
 godot::String resolve_file_in_dir(const godot::String &dir, const godot::String &name) {
@@ -448,9 +481,14 @@ godot::String resolve_sidecar_path(const godot::String &dir, const godot::String
 	return godot::String();
 }
 
-godot::Ref<godot::Texture2D> load_material_texture_from_dir(
+godot::Ref<godot::Texture> load_material_texture_from_dir(
         const godot::String &dir, const godot::String &name, uint8_t type) {
-    if (type != 4 && type != 5) return prepare_material_texture(load_texture_from_dir(dir, name), name, type);
+    if (type >= 16 && type <= 18) {
+        const auto path = resolve_file_in_dir(dir, name);
+        return prepare_material_chunk(path.is_empty() ? godot::PackedByteArray() :
+                godot::FileAccess::get_file_as_bytes(path), type);
+    }
+    if (type < 4 || type > 7) return prepare_material_texture(load_texture_from_dir(dir, name), name, type);
     const bool loose_tga = !resolve_file_in_dir(dir, name).is_empty();
     const godot::String dds = name.get_basename() + ".dds";
     const std::string selected = renderer::normal_material_filename(name.utf8().get_data(),
@@ -474,6 +512,7 @@ godot::Ref<godot::Texture2D> load_material_texture_from_dir(
 void clear_texture_resolver_caches() {
 	g_dir_index_cache.clear();
 	g_texture_cache.clear();
+	g_material_cache.clear();
 }
 
 } // namespace opennova

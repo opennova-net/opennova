@@ -15,11 +15,11 @@ signal escape_pressed
 @export var zoom_speed: float = 20.0
 @export var pan_sensitivity: float = 0.5
 
-const SPEED_MIN := 5.0
+const SPEED_MIN := 1.25
 const SPEED_MAX := 2000.0
 const SPEED_STEP := 1.2
 
-var fly_speed: float = 300.0
+var fly_speed: float = 4.6875
 
 var _yaw: float = 0.0
 var _pitch: float = 0.0
@@ -32,6 +32,9 @@ var _gameplay_locked: bool = false
 var _spectator_mode: bool = false
 
 func _ready() -> void:
+	# MainGame consumes the final free-camera pose for world/frame preparation.
+	# A camera child otherwise processes after its parent and supplies the old pose.
+	process_priority = -1
 	_yaw = rotation.y
 	_pitch = rotation.x
 	_pivot = global_position - global_transform.basis.z * _distance

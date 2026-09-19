@@ -50,6 +50,8 @@
 #pragma once
 
 #include <array>
+#include <functional>
+#include <runtime/world/guided_missile_flight.h>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -282,6 +284,9 @@ struct LiveRound {
     // emitter and consumes this per row [orig: the spawn @0x4E9F58..0x4E9F94,
     // the water release @0x4EA01D..0x4EA036; world/round_move_effect.h].
     bool move_effect_live = false;
+
+    GuidedFamily guided_family = GuidedFamily::None;
+    GuidedFlightState guided;
 
     // --- throwable state (zeroed on ballistic rounds; world-wac-ai-re §27) ---
     // Orientation + spin [orig: round +16/+20/+24 angles, +164/+168/+172 spin
@@ -516,6 +521,12 @@ public:
 
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
+    LiveRound *find_guided(int16_t net_id);
+    std::function<void(const LiveRound &, GuidedInputs &)> guided_inputs_provider;
+    struct GuidedUpdate { uint16_t shooter, net_id; uint8_t groups; GuidedFlightState state; };
+    std::vector<GuidedUpdate> guided_updates;
+    void init_guided(World &, LiveRound &, const AmmoTableEntry &);
+    void tick_guided(World &, LiveRound &, const AmmoTableEntry &, bool authority);
     void present_fire(World &world, const RoundSpawnParams &params);
 	// Ammo-indexed source fire, including launch presentation and role routing.
 	// [orig: Weapon_FireProcess @0x53F5B0]

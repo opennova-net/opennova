@@ -798,23 +798,14 @@ void player_view_compose_camera(const PlayerViewState &v,
         out.third_person = true;
         return;
     }
-    // The eye anchor: the shell-fed head-bone eye floored kEyeMinAbovePosition
-    // over Position, or the non-person +1.0 bump. The 0x2000-equivalent floor
-    // is a DEFENSIVE stand-in on this leg: retail floors only the sample-less
-    // capsule leg [orig: Entity_UpdateInfantryPlayerBody @0x4b6b98] — the head-bone legs store unfloored
-    // (on-foot @ 0x4b6bb3..0x4b6cc8, mounted @ 0x4b6908..0x4b696c; D-INF-18).
-    // [orig: the bump @ 0x437e8f]
+    // CameraOffset was already posed and terrain-floored by the body motor.
+    // The camera consumes it directly; only the non-person leg adds 1 unit.
+    // [orig: Camera_ComputeThirdPersonView @0x437E8F / @0x437FA5..0x437FB7]
     float eye[3];
     if (anchor_valid) {
         eye[0] = anchor_eye[0];
         eye[1] = anchor_eye[1];
-        eye[2] = anchor_eye[2] < position[2] + kEyeMinAbovePosition
-                ? position[2] + kEyeMinAbovePosition
-                : anchor_eye[2];
-        // The D-INF-18 terrain floor rides only the head-bone eye path
-        // [orig: @ 0x4b6c08..0x4b6ca4 — the fallback branch @ 0x4b6b92 has no
-        //  terrain leg].
-        player_view_floor_eye_to_terrain(terrain, indoors, eye);
+        eye[2] = anchor_eye[2];
     } else {
         eye[0] = position[0];
         eye[1] = position[1];

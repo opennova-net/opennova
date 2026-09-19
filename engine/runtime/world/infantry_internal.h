@@ -9,14 +9,18 @@
 namespace opennova::world {
 
 // BAM bearing of (dx, dy) [orig: dbl_7C19D8 @0x7c19d8 -- atan2 * 2^31/pi]; the body-state
-// commits with the gait->stance insert: the org1 form skips the arbitration on
+// request arbitration: the org1 form skips the arbitration on
 // equality [orig: @0x4bd841], the org2 player form arbitrates unconditionally and
 // applies the rotor-wash substitution [orig: @0x4b7356..0x4b73e5]. All defined in
 // infantry.cpp, shared with infantry_combat.cpp and infantry_board.cpp.
+// The motor-head channel update in infantry_animation.cpp owns gait inserts.
 int32_t bearing_to(int32_t dx, int32_t dy);
 void commit_body_state(InfantryState &inf, int resolved, const IRootMotionSource *root_motion);
 void commit_player_body_state(InfantryState &inf, int resolved,
                               const IRootMotionSource *root_motion, bool wash);
+// Standing org1/org2 carrier delta, after the animation capsule sample.
+// Returns whether carrier transport changed the position.
+bool infantry_follow_carrier(AiEntity &, World &, int32_t capsule_bottom, bool player_body);
 // Select/cache an obstacle detour and publish target_heading before gait selection.
 // [orig: ai_find_cover_position @0x4AFAB0]
 void infantry_detour(AiSystem &ai, AiEntity &e, World &world);

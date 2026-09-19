@@ -559,7 +559,9 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 					? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
 					: nullptr;
 			if (def != nullptr && strutil::iequals(data.name, def->name)) {
-				w.slot.clip = eq->clip;
+				w.slot.clip = weapon_inventory_loaded_rounds(
+                        world.tables.weapons, *inventory, inventory->equipped_combo);
+                w.slot.shared_clip = def->ammo_bucket != 0;
                 w.slot.scope_zero = eq->scope_zero;
                 w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, eq->scope_zero);
                 w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, eq->scope_zero);
@@ -659,7 +661,8 @@ bool local_held_weapon_visible(const World &world, const Entity &entity,
 	// ported as weapon_pool_get]
 	if ((def->flags & weapon_flag::kNoClipsNoDraw) != 0 &&
 			weapon_pool_get(inventory, def->ammo_class_id) == 0 &&
-			slot->clip <= 0)
+			weapon_inventory_loaded_rounds(world.tables.weapons, inventory,
+                    inventory.equipped_combo) <= 0)
 		return false;
 	// A weapon with no FIRST-person model is hidden on your OWN body even
 	// though every observer still sees it — retail asymmetry, not a bug.
@@ -828,6 +831,17 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// active selection, but this tick's ammo bridge still belongs to the slot the
 	// FSM actually pumped.
 	const bool borrowed_usegun_slot = w.usegun_slot_active;
+    if (io.inventory != nullptr && !borrowed_usegun_slot) {
+        const auto *eq = io.inventory->slot(io.inventory->equipped_combo);
+        const auto *def = eq != nullptr && eq->adm_index >= 0
+                ? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index)) : nullptr;
+        active_slot.shared_clip = def != nullptr && def->ammo_bucket != 0;
+        if (active_slot.shared_clip) {
+            active_slot.clip = weapon_inventory_loaded_rounds(world.tables.weapons,
+                    *io.inventory, io.inventory->equipped_combo);
+            active_slot.reserve = weapon_pool_get(*io.inventory, def->ammo_class_id);
+        }
+    }
 	WeaponFsmInputs in;
 	// The pilot's trigger is dead: retail's fire gate rejects a Controller or
 	// Driver seat before any slot work [orig: Player_CanFireWeapon @0x5cf780].
@@ -1013,11 +1027,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		//  @ 0x401f00 -> dword_83FCE8].
 		AiEntity *p = world.ai.for_handle(world.cached.local_player);
 		if (p != nullptr && p->inf.active) {
-			const int stamped = w.attack_kind == 1 ? anim_state::kKnifeAttack
-					: w.attack_kind == 2 ? anim_state::kGrenadeAttack : -1;
-			const int ring = (stamped >= 0 && world.ai.root_motion != nullptr)
-					? world.ai.root_motion->variant_count(p->inf.adm_id, stamped) : 1;
-			infantry_weapon_attack_stamp(p->inf, w.attack_kind, ring);
+			infantry_weapon_attack_stamp(p->inf, w.attack_kind);
 		}
 		// Local/SP fire already passed the same FSM/ammo authority that the remote
 		// C2S 0x06 handler validates. Append the host's round-ring record and spawn
@@ -1031,14 +1041,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			const uint8_t adm_index = shooter->equipped_adm_index;
 			const WeaponTableEntry *adm = world.tables.weapons.by_index(adm_index);
 			if (adm != nullptr && adm->ammo_index >= 0) {
-				Vec3 origin = shooter->position;
-				if (w.eye_valid) {
-					origin.x = w.eye_mission[0];
-					origin.y = w.eye_mission[1];
-					origin.z = w.eye_mission[2];
-				} else {
-					origin.z += 1.0f;
-				}
+				const Vec3 origin = player_eye_position(*shooter);
 				const FixedVec3 fire_origin{to_fixed(origin.x), to_fixed(origin.y), to_fixed(origin.z)};
 				const bool accepted = !io.is_authority ||
 						(weapon_fire_owner_status(world, *shooter, adm, false) == 0 &&
@@ -1242,9 +1245,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// the previous tick); the refund below consumes it.
 				weapon_inventory_reload_slot(world.tables.weapons, inventory,
 						inventory.equipped_combo);
-				active_slot.clip = eq->clip;
+				active_slot.clip = weapon_inventory_loaded_rounds(
+                        world.tables.weapons, inventory, inventory.equipped_combo);
 			} else {
-				eq->clip = active_slot.clip; // fire consume mirrors down
+				weapon_inventory_set_loaded_rounds(world.tables.weapons, inventory,
+                        inventory.equipped_combo, active_slot.clip);
 			}
 			active_slot.reserve =
 					weapon_pool_get(inventory, eq_def->ammo_class_id);

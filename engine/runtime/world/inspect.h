@@ -377,7 +377,6 @@ struct AiGroupRow {
 // System-level AI counters worth one line in the window.
 struct AiSystemCounters {
 	int32_t brain_count = 0;
-	int32_t scheduler_budget = 0;
 	int32_t event_count = 0;
 	int32_t unported_calls = 0;
     uint64_t runtime_gap_calls = 0;

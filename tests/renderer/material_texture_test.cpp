@@ -93,13 +93,56 @@ int main() {
 	expect(material_texture_transform(5, "Body.tga", false) == MaterialTextureTransform::Checkerboard &&
 			material_texture_transform(4, "Body.MDT", false) == MaterialTextureTransform::Checkerboard,
 			"unreadable normal rows bind the checkerboard, not a null");
-	// The dedicated-loader legs stay raw loads (their retail loaders are
-	// unported): jpt_5B1737 cases 6/7/16/17/18.
-	const uint8_t raw_load_types[] = {6, 7, 16, 17, 18};
-	for (const uint8_t type : raw_load_types) {
-		expect(material_texture_transform(type, "Body.tga", true) == MaterialTextureTransform::Unchanged,
-				"dedicated-loader rows raw-load until their loaders are ported");
-	}
+    const MaterialTextureTransform transforms[] = {MaterialTextureTransform::HorizonVolume,
+        MaterialTextureTransform::AmbientOcclusion, MaterialTextureTransform::ChunkNormal,
+        MaterialTextureTransform::ChunkHorizon, MaterialTextureTransform::ChunkOcclusion};
+    const uint8_t types[] = {6, 7, 16, 17, 18};
+    for (size_t i = 0; i < 5; ++i)
+        expect(material_texture_transform(types[i], "Body.tga", true) == transforms[i], "dedicated producer dispatch");
+    expect(material_texture_transform(6, "Body.png", true) == MaterialTextureTransform::Checkerboard,
+        "the height producer requires TGA input");
+    struct HorizonCase { uint32_t w, h; const char *source, *expected; };
+    const HorizonCase horizon_cases[] = {
+#include "material_horizon_vectors.inc"
+    };
+    const auto unhex = [](const char *hex) {
+        std::vector<uint8_t> out;
+        for (size_t i = 0; hex[i]; i += 2) out.push_back(uint8_t(std::stoul(std::string(hex+i,2),nullptr,16)));
+        return out;
+    };
+    for (const auto &row : horizon_cases) {
+        const auto source = unhex(row.source), expected = unhex(row.expected);
+        const auto volume = horizon_volume_from_height(source.data(), row.w, row.h);
+        expect(volume.width == row.w/4 && volume.height == row.h/4 && volume.depth == 16,
+            "retail horizon volume dimensions");
+        expect(volume.rgba == expected, "all horizon volume slices match the original instructions");
+        const auto ao = ambient_occlusion_from_height(source.data(), row.w, row.h);
+        expect(ao.rgba == std::vector<uint8_t>(row.w*row.h*4,255), "retail AO fills every output lane white");
+    }
+    const auto put = [](std::vector<uint8_t> &b, size_t at, uint32_t v) {
+        for (int i=0;i<4;++i) b[at+i]=uint8_t(v>>(8*i));
+    };
+    for (uint8_t type : {16,17,18}) {
+        const size_t count = type == 17 ? 8 : 4;
+        std::vector<uint8_t> bytes(8+8+28+count*(type==16?4:1),0);
+        const char *tag = type==16 ? "NQ8B" : type==17 ? "HRZ8" : "AOC8";
+        for (int i=0;i<4;++i) bytes[8+i]=tag[i];
+        put(bytes,12,uint32_t(bytes.size()-16));
+        put(bytes,28,2); put(bytes,32,2); put(bytes,36,2);
+        for (size_t i=44;i<bytes.size();++i) bytes[i]=uint8_t(i-44+1);
+        const auto pixels = load_material_chunk(bytes.data(),bytes.size(),type);
+        expect(pixels.width==2 && pixels.height==2 && pixels.depth==(type==17?2u:1u), "chunk dimensions");
+        for (size_t i=0;i<count;++i) {
+            expect(pixels.rgba[4*i+3]==(type==16?4*i+4:i+1), "chunk alpha lanes and slice order");
+            expect(pixels.rgba[4*i]==(type==16?4*i+3:255) && pixels.rgba[4*i+2]==(type==16?4*i+1:255),
+                "BGRA normals and A8 occlusion format mapping");
+        }
+        auto nested = bytes;
+        nested.insert(nested.begin()+8,8,0); nested[8]='N'; nested[9]='E'; nested[10]='S'; nested[11]='T';
+        put(nested,12,uint32_t(bytes.size()-8)|0x80000000u);
+        expect(load_material_chunk(nested.data(),nested.size(),type).rgba==pixels.rgba,"nested producer chunk");
+        expect(!load_material_chunk(bytes.data(),bytes.size()-1,type), "truncated chunk is a failed load");
+    }
 	const auto checker = missing_material_texture_rgba();
 	expect(checker.size() == 128 * 128 * 4, "fallback dimensions");
 	for (size_t i = 0; i < checker.size(); i += 4) {

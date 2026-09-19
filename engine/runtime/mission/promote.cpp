@@ -783,7 +783,17 @@ PromoteResult promote_mission(const bms::File &m, World &world,
 
     // [orig: Mission_LoadBMSFile @0x40FCC3] Normalize each bounding-box axis.
     // Type 5 supplies WAC location IDs; these are not area-trigger records.
+    world.reverb = {};
+    world.reverb.mission = world.reverb.selected = m.header.reverb;
     for (const bms::BoundingBox &box : m.bounding_boxes) {
+        if (box.type == 4) {
+            ReverbRegion r;
+            const int32_t lo[3] = {box.min_x, box.min_y, box.min_z};
+            const int32_t hi[3] = {box.max_x, box.max_y, box.max_z};
+            for (int i = 0; i < 3; ++i) { r.min[i] = std::min(lo[i], hi[i]); r.max[i] = std::max(lo[i], hi[i]); }
+            r.value = box.ref_id;
+            world.reverb.regions.push_back(r);
+        }
         if (box.type != 5) continue;
         Aabb bounds;
         bounds.min = {std::min(box.min_x, box.max_x) / 65536.0f,

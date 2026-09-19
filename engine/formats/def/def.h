@@ -864,6 +864,7 @@ typedef struct DefItemDef {
        into retail ItemDef+0x218. Ihq01 authors 20 -> 0.2.
        [orig: ItemDef_ParseProperty @0x4A19FD..0x4A1A50] */
     float light_transfer;
+    int reverb; /* signed word, ItemDef+432 [orig: @0x4A015A] */
     /* items.def 'shadow <name> <w> <l> <ox> <oy>' — the authored ground-shadow
        blob decal. Appended for layout stability. Retail copies the name
        UNGUARDED into the 16-byte slot at ItemDef+0xA0 (huskshadow starts at

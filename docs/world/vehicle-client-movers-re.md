@@ -4645,9 +4645,11 @@ every visit (`@0x4B8E53`), and subtracts one at its tail (`@0x4B8EA0`); the
 class init seeds brain[7] = 16 (`@0x468915`) and `+684 = dword_B21F80++ mod 16`
 (`@0x46891C..0x468945`, helo twin `@0x468645..0x468669`). A brain therefore
 thinks every brain[7] visits (16 with step 16), on the visit after any
-transition, with a 0..15 spawn stagger; `AI_BeginUpdate @0x457B40` (no direct
-caller; id 4 of `g_AIMoveStepFnTable @0x8153D8`) keeps its port semantics and
-merely moves onto the think visits. Ported 2026-09-12 (the former D-NET-161
+transition, with a 0..15 spawn stagger. `AI_BeginUpdate @ 0x457B40` is a
+separate movement-controller row, never a callback admission gate; its per-entity
+phase ownership and the removed global gate are documented in
+[world section 34](world-wac-ai-re.md#34-ai-callback-ownership-and-movement-controllers-2026-09-18).
+Ported 2026-09-12 (the former D-NET-161
 (f)): the gate, re-arm, zero and decrement in `AiSystem::tick` /
 `apply_transition` over `Entity::spawn_phase` (the same +0x2AC dword the org2
 body think reads; the item callbacks read it as `class_think_ticks`), seeds in
@@ -5078,6 +5080,7 @@ also checking the authoritative pose and mounted prediction order.
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
 | D-VEH-2 | Clear the vacated tail when compacting the water-ring bank | `sub_5DDDB0 @ 0x5DDDB0` zeroes the removed slot and shifts the suffix (`@0x5DDDCB..0x5DDDFC`) without ever clearing slot 127; `sub_5DDE10 @ 0x5DDE10` steps its cursor back onto the removed index (`@0x5DDEAD..0x5DDEC0`) | PERMANENT — proposed in PR #640 (2026-09-07), requires maintainer ratification at merge (no sign-off recorded yet; [ADR 0022](../adr/0022-divergence-burn-down.md#permanent-register) original-bug class): a completely full bank otherwise re-copies and re-expires the duplicated final row forever. The saturation regression fills all 128 slots and proves retirement terminates. Normal non-full ring behavior is unchanged. |
+| D-VEH-3 | Player steering reads the full BAM heading; analog input clears inactive digital direction; prior brake state and the retained +0x3C8 direction select the original ground/bike branches. | Ground @ 0x48B847..0x48C095 and bike @ 0x48496D..0x48526F; section 39. | FIXED 2026-09-18 in PR #652. 640 original-instruction command-state vectors cover heading precision, analog cancellation, stale directions and brake transitions. |
 
 ## 35. Ground and boat pedal view turn
 
@@ -5193,14 +5196,13 @@ head (the in-motor stamp stays for direct motor callers). The old profile seed
 (row 17 GROUND_COMBAT for every GROUND_FOLLOWWP profile, because
 `AIState_LookupByName` returns 17 for that name) had hidden the inversion: with a
 faithful 0 seed and the promotion inside the motor, a boarded AI driver drove
-at combat speed (00TRa's DTruck2 1714 drove off its spot). The single boarding-tick
-command pulse that follows is FAITHFUL: per entity the AI callback runs before the
-class mover (`Entity_UpdatePool1Slot @ 0x4b8dd0`: ai-fn `@ 0x4b8e3c`, class update
-`@ 0x4b8e53`), so on the tick a driver first sits in a PRETTY hull the state machine
-sees 22, row 22 leaves `AI_BeginUpdate`'s `[128] = [49]` standing, the mover hands
-back 22 -> 16 and copies `[136] = min([128], playerSpeed)` once; only the next tick's
-row 16 zeroes it (a sub-unit coast, pinned by `vehicle_motor`'s state-0 driver
-case). Residuals noted, not
+at combat speed (00TRa's DTruck2 1714 drove off its spot). The earlier claim that a boarding pulse was faithful is corrected: the pool
+callback never seeds `[128] = [49]` through `AI_BeginUpdate`. Row 22 retains the
+existing working speed, so a fresh brain's zero stays zero through the mover's
+hand-back. `vehicle_motor` now requires the fresh routeless hull to stay exactly
+still from its first tick. [orig: Entity_UpdatePool1Slot @ 0x4B8DD0
+(callback @ 0x4B8E3C, motor @ 0x4B8E53); D-AI-14 in the world record.]
+Residuals noted, not
 ledgered: `AiEntity::arrival_prox` (retail def+2340) is never stamped, so a brain
 entering GROUND_EVADE with the flee goal stays in row 18; `AiEntity::has_physics`
 (the entity+368 stand-in) defaults true for promoted vehicles while retail's +368
@@ -5332,3 +5334,43 @@ The 7-slot scan @ 0x478726..0x4787AF is the +2EF/+364/+365 latch arm, not a
 depth. The census retires 0x477FF4, 0x478014 and 0x478D15 as crash-depth
 witnesses; the translated `crash_depth` / `wheel_depth` split was already
 correct. [orig: Entity_ProcessWheeledVehiclePhysics @ 0x475DE0]
+
+## 39. Player motor command precision and brake transitions (2026-09-18)
+
+The shared player-input stage in `engine/runtime/world/vehicle_motor.cpp` was
+compared with jo-c and the pinned retail executable in `Jointops.exe.kong.i64`.
+The oracle executes the original input blocks and brake tails, stopping before
+steering physics/contact; it does not mock engine calls. This pass made no IDB
+changes. [Reproduction and limits](../jo-c-validation-2026-09-18.md).
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Ground and bike input command state | MATCHING (behavioral proof) | `movement_brain_parity`: 640 vectors across both families, 16 MoveOrders, five analog triples, both prior brake states and two retained-direction values; public motor compared on eight output fields. |
+| Full driver heading | MATCHING (read-only grill and command-state vectors) | Original occupant +0x10 feeds steering; `AiEntity::heading` preserves the full BAM word while `Entity::yaw` remains a rounded display mirror. |
+
+The full ground mover reads the occupant's 32-bit yaw at @ 0x48BB0B. Analog
+input clears the local digital direction when the old brake latch is zero
+(@ 0x48BA03..0x48BA0C); otherwise held movement still takes the analog branch
+(@ 0x48B9D2..0x48B9E5). Ground retains that analog throttle until the later
+current-input brake test (@ 0x48C03A..0x48C095), while the bike zeroes it under
+the old latch too (@ 0x484BA7..0x484BAB). Thus release has a family-specific
+one-tick effect. The translation retains wraparound multiplication/subtraction
+and arithmetic right shifts.
+[orig: Entity_UpdateVehiclePhysics @ 0x48AF00;
+Entity_UpdateLightVehiclePhysics @ 0x483FE0]
+
+The earlier freelook merge uses retained entity+0x3C8 while +0x3CD is set,
+otherwise the current direction; it also tests the signed sum of all three
+analog axes. A nonzero steering axis can cancel out of that sum, allowing a
+view turn. The command switch still uses the current direction. The port keeps
+these two direction sources distinct. The live ground/bike motors do not write
++0x3C8; the mover-specific writer is in the unreferenced @ 0x486A50 motor
+(@ 0x48748B), already classified as orphaned in the earlier mover census.
+[orig: ground merge @ 0x48B855..0x48B897; bike merge @ 0x48497B..0x4849BD]
+
+The shared heading/analog-direction correction also reaches the existing
+simple-ground and watercraft callers. The watercraft analog clear and full-yaw
+read are independently witnessed at @ 0x48E063 / @ 0x48E122; its existing tests
+remain the family integration coverage. The new executable vectors prove the
+bounded ground/bike command stage, not full contact or multiplayer playthrough
+parity. [orig: Entity_UpdateWatercraftPhysics @ 0x48D480]

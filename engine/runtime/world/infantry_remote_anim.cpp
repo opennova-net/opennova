@@ -14,6 +14,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/infantry_ladder.h>
+#include <runtime/audio/sound_profile.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
@@ -36,9 +37,18 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // The motor's registry hydration is skipped for wire-snapped peers (tick_infantry
     // returns before it); sync the health copy the selection/lean gates read.
     e.health = ent->health;
-    int death_transition = -1;
     RootMotionFrame collision_frame;
     bool have_collision_frame = false;
+
+    // Same motor-head dual update as local org2; only translation is wire-owned.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B41DF]
+    infantry_weapon_channel_advance(e);
+    if (root_motion != nullptr) {
+        if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
+        have_collision_frame = advance_primary_channel(inf, *root_motion, collision_frame);
+    } else {
+        advance_primary_channel_fallback(inf);
+    }
 
     if (ent->health <= 0) {
         // Death edge — one-shot to the death pose, the org2 twin of the motor's
@@ -68,7 +78,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
                 death = root_motion->has_clip(inf.adm_id, torso) ? torso
                                                                  : anim_state::kDeathFire;
             }
-            death_transition = death;
+            inf.request_body_animation(death);
         }
     } else {
         // The replicated JUMP key (MoveOrder bit 5): the retail host derives the
@@ -111,7 +121,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
             }
             // STRAIGHT stamps, same as the local block — no availability
             // check in the witnessed org2 jump stamps [orig: @0x4b7ef2/@0x4b7efc].
-            inf.begin_body_transition(anim_state::kJumpStart);
+            inf.request_body_animation(anim_state::kJumpStart);
             inf.anim_pending = anim_state::kJumpLoop;
         }
         const bool jump_episode =
@@ -161,50 +171,45 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     inf.binoculars_raised = (ent->flags & kEntityFlagBinoculars) != 0;
     infantry_weapon_channel(e, world, logic_tick);
 
-    // Advance the playing clip's channel every tick — the wire ratio source. Uses the real
-    // .adm loop rate when the embedder has anim data; without it the phase self-advances on a
-    // 62-tick loop stand-in (tracked divergence, D-NET-159 — the faithful source is the
-    // anim data rate). Root translation remains wire-owned; the frame's capsule
-    // feeds the shared collision tail below.
-    if (root_motion != nullptr) {
-        if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
-        have_collision_frame =
-                advance_primary_channel(inf, *root_motion, collision_frame);
-        if (have_collision_frame) {
-            inf.prev_capsule_bottom = collision_frame.capsule_bottom;
-            // The remote-player eye-offset restamp: retail runs the same body
-            // updater for net-snapped peers, and the +0x74 store persists while
-            // the pose work is inert — the org2 non-local formula, lean at rest.
-            // [orig: Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b68f5]
-            const int32_t extent = collision_frame.capsule_top -
-                                   collision_frame.capsule_bottom;
-            int32_t eye_z = std::min(extent, 0xD000);
-            if (eye_z < 0x2000) eye_z = 0x2000;
-            inf.eye_offset_z = eye_z;
-        }
-        // The end-flag pending promotion, as on the local path [orig: @0x40b77b].
-        if (death_transition >= 0) {
-            inf.begin_body_transition(death_transition);
-        } else if (inf.anim_pending != 0) {
-            const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state, 0);
-            if (len >= 0 && inf.clip_phase >= len) {
-                const int next = inf.anim_pending;
-                inf.anim_pending = 0; // consumed; the insert may re-arm it
-                begin_body_transition_with_insert(inf, next, root_motion);
-            }
-        }
-    } else {
-        advance_primary_channel_fallback(inf);
-        if (death_transition >= 0)
-            inf.begin_body_transition(death_transition);
+    if (have_collision_frame) {
+        inf.prev_capsule_bottom = collision_frame.capsule_bottom;
+        // The remote-player eye-offset restamp: retail runs the same body
+        // updater for net-snapped peers, and the +0x74 store persists while
+        // the pose work is inert — the org2 non-local formula, lean at rest.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b68f5]
+        const int32_t extent = collision_frame.capsule_top -
+                               collision_frame.capsule_bottom;
+        int32_t eye_z = std::min(extent, 0xD000);
+        if (eye_z < 0x2000) eye_z = 0x2000;
+        inf.eye_offset_z = eye_z;
     }
+
+    // Vertical velocity persists independently of the uplink-owned position.
+    // The authority owns chute admission [orig: org2 @0x4B7AD9..0x4B7C8D].
+    uint32_t chute_flags = ent->flags | ent->engine_flags;
+    if ((chute_flags & kEntityFlagInAir) == 0 || ent->mounted) inf.vel[2] = 0;
+    else if ((chute_flags & (kEntityFlagDrowning | kEntityFlagLadderContact)) == 0)
+        inf.vel[2] -= 208;
+    const ParachuteEvents chute = parachute_tick(inf.parachute, chute_flags,
+            ent->carry_flags, inf.vel[2], is_authority, logic_tick);
+    ent->flags = (ent->flags & ~kEntityFlagParachute) | (chute_flags & kEntityFlagParachute);
+    ent->engine_flags = (ent->engine_flags & ~kEntityFlagParachute) | (chute_flags & kEntityFlagParachute);
+    if ((chute_flags & kEntityFlagParachute) != 0 && inf.anim_state != anim_state::kParachute)
+        inf.request_body_animation(anim_state::kParachute);
+    if (chute.opened) emit_slot_sound(world, e, audio::kSlotChuteOpen, e.pos);
+    if (chute.closed) emit_slot_sound(world, e, audio::kSlotChuteClose, e.pos);
+    if (chute.flap) emit_slot_sound(world, e, audio::kSlotChuteFlap, e.pos);
+    if (chute.free_fall) emit_slot_sound(world, e, audio::kSlotFreeFall, e.pos);
+
+    const bool carried = infantry_follow_carrier(e, world, collision_frame.capsule_bottom, true);
 
     // Snapshot ownership suppresses locomotion, not the retail collision tail.
     // Resolve the current pose with the anim capsule and zero movement channels;
     // mounted bodies retain the resolver's ordinary force-suppression rule.
     // [orig: org2 resolver call @0x4B7CE0..0x4B7CF4; CT callback gate
     // @0x4B31DD..0x4B3238]
-    if (collision != nullptr && collision->instance_count() != 0) {
+    const bool resolve_contacts = collision != nullptr && collision->instance_count() != 0;
+    if (resolve_contacts) {
         int32_t contact_vel[2] = {0, 0}, contact_vel_z = 0;
         const int32_t tick_start_z = e.pos[2];
         const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
@@ -217,6 +222,10 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
                 is_authority, logic_tick, inf.anim_state,
                 infantry_anim_flags(inf.anim_state), e.health, nullptr, &lio);
         ent->health = e.health;
+    }
+    // Only motor-owned movement writes position back; otherwise retain the
+    // wire-owned registry pose, including in data-less authority fixtures.
+    if (carried || resolve_contacts) {
         ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
         ent->position.y = static_cast<float>(from_fixed(e.pos[1]));
         ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
@@ -224,7 +233,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
 
     // Present-pass clip for the host's own third-person view of this peer.
     if (ent->alive && ent->health > 0)
-        ent->body_anim_slot = body_anim_slot_from_state(inf.anim_state);
+        ent->body_anim_slot = body_anim_slot_from_state(inf.body_clip_state());
 
     mirror_wire_anim(e, world);
 }

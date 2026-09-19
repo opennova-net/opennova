@@ -21,14 +21,19 @@ std::string normal_material_filename(std::string_view name,
     return result;
 }
 
-// [orig: sub_5B16F0 @0x5B16F0]
+// [orig: sub_5B16F0 @0x5B16F0; dedicated cases @0x5B179A (6),
+// @0x5B17B7 (7), @0x5B17D4 (16), @0x5B17DD (17), @0x5B17E6 (18)]
 MaterialTextureTransform material_texture_transform(
 		uint8_t type, std::string_view name, bool loaded) {
 	if (!loaded || type == 3 || (type >= 9 && type <= 15) || type > 18)
 		return MaterialTextureTransform::Checkerboard;
-	// Types 6/7/16/17/18 raw-load here: their dedicated retail loaders
-	// (jpt_5B1737 cases @0x5B179A / @0x5B17B7 / @0x5B17D4 / @0x5B17DD /
-	// @0x5B17E6) are unported; see material_texture.h.
+    if (type == 16) return MaterialTextureTransform::ChunkNormal;
+    if (type == 17) return MaterialTextureTransform::ChunkHorizon;
+    if (type == 18) return MaterialTextureTransform::ChunkOcclusion;
+    if (type == 6 || type == 7) {
+        if (strutil::to_upper(name).find(".TGA") == std::string::npos) return MaterialTextureTransform::Checkerboard;
+        return type == 6 ? MaterialTextureTransform::HorizonVolume : MaterialTextureTransform::AmbientOcclusion;
+    }
 	if (type != 4 && type != 5) return MaterialTextureTransform::Unchanged;
 	const std::string upper = strutil::to_upper(name);
 	if (upper.find(".MDT") != std::string::npos) return MaterialTextureTransform::Unchanged;

@@ -501,6 +501,11 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             current.phrase_set = parse_int_n(v, vl);
             current.phrase_set_valid = 1;
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "reverb", 6)) {
+            size_t vl;
+            const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+            current.reverb = static_cast<int16_t>(parse_int_n(v, vl));
+            parsed = 1;
 		} else if (lower_match_key(lower, ll, "light_transfer", 14)) {
 			size_t vl;
 			const char *v = consume_value_span(trimmed, tlen, 14, &vl);

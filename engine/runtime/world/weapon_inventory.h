@@ -123,6 +123,9 @@ struct WeaponInventory {
     // observable, so one array carries all classes here (D-WPN-24).
     // [orig: g_localAmmoPools @ 0xB75FE8; entity+288 @ 0x540ba5; caps @ 0x24E7DE0]
     std::vector<int32_t> pools;
+    // Shared loaded rounds, distinct from carried reserves [orig: sub_5405F0
+    // @0x5405F0 / sub_540670 @0x540670, local table @0xB761E8].
+    std::vector<int32_t> shared_clips;
     int32_t equipped_combo = -1; // [orig: EquippedSlot +0x118 / g_currentWeaponSlot]
     int32_t pending_combo = -1;  // [orig: entity+0x308 staged slot / g_pendingWeaponSlot]
     // entity+44 carry-presentation bits gathered by the fill (8 = def.flags&0x1000,
@@ -132,6 +135,7 @@ struct WeaponInventory {
     void reset(const WeaponTable &table) {
         slots.fill(WeaponInventorySlot{});
         pools.assign(table.ammo_class_names.size(), 0);
+        shared_clips.assign(table.ammo_class_names.size(), 0);
         equipped_combo = -1;
         pending_combo = -1;
         carry_flags = 0;
@@ -147,6 +151,12 @@ struct WeaponInventory {
                        : nullptr;
     }
 };
+
+// Loaded-round access selects def+0xDC when nonzero, otherwise the slot word.
+int32_t weapon_inventory_loaded_rounds(const WeaponTable &table,
+        const WeaponInventory &inv, int32_t combo);
+void weapon_inventory_set_loaded_rounds(const WeaponTable &table,
+        WeaponInventory &inv, int32_t combo, int32_t rounds);
 
 // Pool access with the per-class carry-cap clamp [orig: WeaponSlot_AddAmmo @ 0x540A20 /
 // WeaponSlot_SetAmmoCount @ 0x540B50 / the pool leg of Entity_GetScoreValueBySlotType
@@ -187,8 +197,8 @@ void weapon_inventory_apply_authority_pools(const WeaponTable &table, WeaponInve
 
 // The slot's TOTAL AMMO IN CLIPS on the LIVE inventory [orig:
 // WeaponSlot_GetTotalClips @ 0x5425F0 — (class pool + loaded rounds) / clipsize;
-// clipsize -1 returns -1; clamp 127; the pass-type shared-pool leg (def+0xDC)
-// is the deferred D-WPN-20 residual]. Unpopulated slot -> 0.
+// clipsize -1 returns -1; clamp 127; def+0xDC selects shared loaded rounds].
+// Unpopulated slot -> 0.
 int32_t weapon_inventory_total_clips(const WeaponTable &table, const WeaponInventory &inv,
                                      int32_t combo);
 

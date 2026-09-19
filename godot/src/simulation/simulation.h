@@ -1476,9 +1476,6 @@ public:
 	// The debug menu's on-foot third person — stock JO never resolves it
 	// (net-re §5.39, the onhook debug affordance); never a gameplay key.
 	void set_local_player_debug_third_person(bool p_enabled);
-	// The shell-sampled head-bone eye (Godot space) for the 3P anchor chase; pass
-	// valid=false when no skeleton sample exists (falls back to Position + 1.0).
-	void set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid);
 	// The view-state snapshot: {scope_engaged, scope_fraction, fov_h_deg,
 	// tp_anchor (Godot space), tp_anchor_valid}. Read-only; ticked at 62.5 Hz.
 	Ref<PlayerLocalView> get_local_player_view() const;
@@ -1954,7 +1951,6 @@ public:
 	// ERR_INVALID_PARAMETER for a missing AI index, and OK only after both mirrors are mutated.
 	Error debug_set_entity_health(int p_index, int p_hp);
 	Error debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn);
-	void set_local_player_eye_offset(const Vector3 &p_offset_godot, bool p_valid);
 	bool local_player_fp_weapon_hidden() const;
 	Error debug_crew_local_player(int p_vehicle_ssn);
 	// Authority test seam: queue a RoundDeath for the player entity at `handle` (killer = the

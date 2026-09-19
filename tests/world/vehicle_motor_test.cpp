@@ -14,6 +14,7 @@
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/vehicle_sound.h>
 #include <runtime/world/world.h>
+#include <runtime/world/local_player.h>
 #include <runtime/terrain_query/height_field.h>
 
 #include <formats/def/def.h>
@@ -1934,18 +1935,11 @@ void test_vehicle_carrier_follow_and_refresh() {
 	CHECK(!v.ground_target.valid());
 }
 
-// A freshly allocated brain (state 0, the allocator's zero words) with an AI
-// driver aboard, driven through the REAL pass order (state machine, then the
-// vehicle pass): the pass promotes 0 -> PRETTY at the mover head, BEFORE the
-// AI-driver staging, so the hand-back lands in FOLLOWWP and the row-16 tick
-// zeroes AI_BeginUpdate's [128] = [49] out-speed every tick — a routeless
-// driven hull stays put. Staging the drive ahead of the promotion left the
-// brain at 0 for the AI leg (the machine commits the pending 0 straight back
-// each tick), so it never handed back and the un-zeroed combat out-speed drove
-// the hull straight (the 00TRa armory-truck drift, 2026-09-10).
-// [orig: Entity_UpdateVehiclePhysics 0 -> 22 @0x48afac..0x48afb2 ahead of the
-//  occupant block @0x48b949 and the AI hand-back @0x48bc16; AI_BeginUpdate
-//  @0x457b40 `[128] = [49]`]
+// A fresh brain has zero working speed. Boarding promotes 0 -> PRETTY at the
+// mover head and hands back to FOLLOWWP, whose routeless think keeps it stopped.
+// The class callback does not invoke movement-controller row 4 beforehand.
+// [orig: Entity_UpdatePool1Slot @0x4B8E1B..0x4B8E53;
+// Entity_UpdateVehiclePhysics @0x48AFAC..0x48AFB2 / @0x48BC16; D-AI-14]
 void test_state0_brain_with_ai_driver_holds() {
 	Rig r;
 	r.mount();
@@ -1971,21 +1965,9 @@ void test_state0_brain_with_ai_driver_holds() {
 	r.w.ai.tick(r.w, ctx);
 	// One pass: 0 -> 22 at the head, then the AI leg's 22 -> 16 hand-back.
 	CHECK(ae.brain.f[AiBrain::kCurState] == kAiGroundFollowWp);
-	// The tick a driver first sits in a PRETTY hull commands a pulse in retail
-	// too: the entity's AI callback runs before its class mover
-	// [orig: Entity_UpdatePool1Slot @0x4b8dd0 — ai-fn @0x4b8e3c, class update
-	//  @0x4b8e53], row 22's tick leaves AI_BeginUpdate's [128] = [49] standing,
-	//  and the mover's hand-back copies it into [136] until row 16's first
-	//  think zeroes it — the brain thinks only every brain[7] pool-1 visits
-	//  (@0x4b8e1b / @0x4b8ea0), so the pulse lasts up to 16 ticks of the
-	//  accel-limited ramp (60/tick from rest, well under a unit). The pin is
-	//  therefore not "never moved" but "does not keep driving": the buggy
-	//  coasts that pulse out and is then at rest in FOLLOWWP, whereas the
-	//  sustained drive was ~0.24 u per tick (30 u over this run). The coast is
-	//  long: the 16-tick ramp peaks at 1401 (the standing start's raw 1/32
-	//  chase, then 15 x 60) and the zero-target 1/32 servo only reaches the
-	//  <48 stop snap ~106 ticks later [orig: the chase @0x48C1FC..0x48C215,
-	//  the snap @0x48C308..0x48C31C], so the at-rest window opens at tick 200.
+	CHECK(ae.brain.f[AiBrain::kOutSpeed] == 0);
+	CHECK(r.veh().veh.cmd_speed == 0);
+	CHECK(r.veh().veh.speed == 0);
 	for (int i = 1; i < 200; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
 		r.w.ai.tick(r.w, ctx);
@@ -2001,10 +1983,44 @@ void test_state0_brain_with_ai_driver_holds() {
 	CHECK(r.veh().veh.cmd_speed == 0); // no route: the row-16 tick froze the out-speed
 	CHECK(r.veh().veh.speed == 0);
 	CHECK(moved_late == 0.0f); // at rest: no sustained drive
-	CHECK(moved < 2.0f);       // the boarding pulse's ramp and coast, nothing more
+	CHECK(moved == 0.0f); // no invented speed seed or boarding pulse
+}
+
+// Input is packed before pool-1 motors; pool-0 body posing follows them.
+// [orig: Player_PackInputStateToEntity @0x4DF450;
+// Entity_UpdateAllEntities @0x4C2158 / @0x4C2426]
+static void test_local_controls_reach_first_carrier_tick() {
+    Rig r;
+    const auto traits = buggy_traits();
+    r.w.vehicles.traits.set(r.veh().item_id, traits);
+    auto &body = *r.w.ai.at(r.w.ai.attach(r.drv_h));
+    body.inf.active = true;
+    body.inf.is_local_player = true;
+    body.health = r.drv().health;
+    r.w.cached.local_player = r.drv_h;
+    r.w.ai.is_authority = true;
+    r.mount();
+    LocalPlayer local(r.w);
+    constexpr int32_t heading = 0x23456789;
+    local.input.forward = true;
+    local.input.look_heading = heading;
+    local.apply_player_input_pre_tick();
+    TickContext ctx{};
+    ctx.world = &r.w;
+    ctx.is_authority = true;
+    ctx.logic_tick = 1;
+    r.w.ai.tick(r.w, ctx);
+    CHECK(r.veh().veh.cmd_speed == traits.player_speed);
+    CHECK(r.veh().veh.steer_target_bam == heading);
+    local.input.forward = false;
+    local.apply_player_input_pre_tick();
+    ++ctx.logic_tick;
+    r.w.ai.tick(r.w, ctx);
+    CHECK(r.veh().veh.cmd_speed == 0); // release reaches this motor tick too
 }
 
 int main() {
+    test_local_controls_reach_first_carrier_tick();
 	test_state0_brain_with_ai_driver_holds();
 	test_vehicle_carrier_follow_and_refresh();
 	test_skid_effects_and_sound_edges();

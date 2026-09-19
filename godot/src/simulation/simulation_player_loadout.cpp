@@ -690,7 +690,8 @@ Ref<PlayerInventory> Simulation::get_local_player_inventory() const {
 			opennova::world::LocalInventoryView::Slot slot;
 			slot.combo = combo;
 			slot.name = def->name;
-			slot.clip = s->clip;
+			slot.clip = opennova::world::weapon_inventory_loaded_rounds(
+					table, kernel_->local.inventory, combo);
 			v.slots.push_back(std::move(slot));
 			if (combo == kernel_->local.inventory.equipped_combo)
 				v.equipped_name = def->name;

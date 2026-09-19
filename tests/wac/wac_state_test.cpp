@@ -241,7 +241,21 @@ static void test_music_operands_bind_the_actual_context_at_compilation() {
     mus_script_free(&script);
 }
 
+// [orig: WacCmd_Set @ 0x4ED520; night row @ 0x026C645C]
+static void test_night_writes_are_visible_until_tod_recomputation() {
+    Fixture f;
+    f.run("set(night,7) v1=night\nadd(night,-3) v2=night\n");
+    CHECK(f.value(1) == 7 && f.value(2) == 4);
+    const auto saved = f.world.snapshot();
+    f.run("set(night,0) v3=night\n");
+    CHECK(f.value(3) == 0);
+    f.world.restore(saved);
+    f.run("v4=night\n");
+    CHECK(f.value(4) == 4);
+}
+
 int main() {
+    test_night_writes_are_visible_until_tod_recomputation();
     test_music_operands_bind_the_actual_context_at_compilation();
     test_auto_dword_assignment_and_partial_cache_refresh();
     test_auto_group_bindings_preserve_high_word_and_restore_it();

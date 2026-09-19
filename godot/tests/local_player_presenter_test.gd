@@ -529,9 +529,10 @@ func test_camera_stamps_the_sim_composed_pose_and_policy_fov() -> void:
 			"the camera sits exactly at the sim-composed eye")
 	# The eye is the POSED HEAD BONE pulled back 0.1875 u along the view forward
 	# [orig: CameraOffset = head - Position @0x4b6bb3; kFpEyePullback]. The head
-	# sample comes from the avatar's real render skeleton (D-INF-18).
-	var head: Vector3 = presenter.avatar_head_world()
-	assert_ne(head, Vector3.INF, "the avatar serves a posed head bone")
+	# motor resolves the retail head anchor, including its .15 up/.10 forward
+	# offset, before publishing CameraOffset. No render-to-simulation feedback.
+	var head := sim.get_local_player_position() + sim.get_local_player_eye_offset()
+	assert_gt(sim.get_local_player_eye_offset().y, 0.0, "the motor serves a posed head")
 	var yaw := float(sim.get_local_player_yaw_deg())
 	assert_almost_eq(view.camera_eye, head - _forward_for(yaw) * 0.1875,
 			Vector3(0.01, 0.01, 0.01),

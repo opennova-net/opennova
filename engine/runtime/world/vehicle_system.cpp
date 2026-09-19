@@ -69,9 +69,9 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
 			// Our drive staging runs ahead of the motor (and of the motor-side
 			// twin in tick_health), so the promotion is hoisted with it: a driven
 			// hull left at 0 here never handed back — the state machine commits
-			// the pending 0 straight back every tick — and AI_BeginUpdate's
-			// [128] = [49] out-speed reached the AI leg unzeroed (the routeless
-			// 00TRa armory truck drove off at combat speed).
+			// the pending 0 straight back every tick. The mover must still
+			// hand the authored state back to FOLLOWWP; a fresh brain retains
+			// its zero working speed until a real movement controller sets it.
 			// [orig: Entity_UpdateVehiclePhysics `cmp [edi+10h],0; jnz; mov
 			//  [edi+10h],16h` @0x48afac..0x48afb2, ahead of the occupant block
 			//  @0x48b949; Entity_UpdateAircraftPhysics @0x490377..0x49037d
@@ -207,14 +207,12 @@ void VehicleSystem::tick_motors(bool is_authority, devtools::ProfileLap &lap) {
             }
         }
         vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_MOTORS);
-        // Pool-0 bodies were seat-posed in the entity loop above, before these
-        // pool-1 motors advanced their carriers. Recompose only their carrier-
-        // owned frame now so the authority snapshot writes a stable seat-local
-        // offset against the vehicle's final same-tick pose. Retail's compact
-        // writer consumes that final pair; leaving the earlier body pose here
-        // makes every remote rider trail by one vehicle motor step.
-        for (int i = 0; i < world.ai.count(); ++i)
-            world.ai.refresh_mounted_pose(*world.ai.at(i), world);
+        // Non-organic mounted controllers ran in the preceding brain pass.
+        // Organic seats now pose once, in the following infantry motor pass.
+        for (int i = 0; i < world.ai.count(); ++i) {
+            AiEntity &e = *world.ai.at(i);
+            if (!e.inf.active) world.ai.refresh_mounted_pose(e, world);
+        }
         vehicle_lap.mark(devtools::Slot::SIM_AI_VEHICLE_RIDERS);
     }
     lap.mark(devtools::Slot::SIM_AI_AUTH_VEHICLES);

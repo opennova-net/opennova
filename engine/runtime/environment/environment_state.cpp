@@ -90,7 +90,9 @@ void EnvironmentState::update_tod() {
 	// The light source switches sun<->moon at the hardcoded 06:00/18:45
 	// boundaries [orig: Environment_GetLightDirectionFloat @ 0x57d870].
 	const DayPhase phase = compute_day_phase(static_cast<float>(time_of_day_));
-	is_night_ = phase.is_night;
+    weather_->tod_keyframed = !config_->keyframes.empty();
+    if (weather_->tod_keyframed) weather_->night_phase = phase.is_night ? 1 : 0;
+    is_night_ = weather_->is_night_phase();
 	day_phase_blend_ = phase.blend;
 	light_dir_ = is_night_ ? moon_dir_ : sun_dir_;
 	tod_valid_ = !config_->keyframes.empty();
@@ -365,7 +367,7 @@ Rgb EnvironmentState::sun_light_target() const {
 	if (!tod_valid_) {
 		return sun_light_;
 	}
-	return is_night_ ? tod_.moon : tod_.sun;
+	return is_night_phase() ? tod_.moon : tod_.sun;
 }
 
 Rgb EnvironmentState::fog_color_target() const {

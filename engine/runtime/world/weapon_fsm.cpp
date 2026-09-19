@@ -1,3 +1,5 @@
+// Shared clip admission @0x541C6D..0x541C89, mount getter @0x5461A0,
+// consumption @0x5408B5..0x5408FC use the slot shared_clip discriminant.
 // First-person weapon action FSM — see weapon_fsm.h.
 // [orig: WeaponAction_ProcessFrame @ 0x540e60 + the wpn_std_* handlers @ 0x542920..
 //  0x543500; Anim_InitActions @ 0x541fa0; docs/net/novaworld-net-re.md §5.62]
@@ -751,18 +753,10 @@ bool weapon_fsm_can_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
         return false;
     }
     if (def.clip_capacity != -1) {
-        // `slot.clip` stands in for retail's shared pool[128 + ammobucket]: a
-        // def with an ammobucket (+0xDC) scores its bucket through sub_5405F0
-        // (the local table @0xB761E8 = g_localAmmoPools + 0x200, or the
-        // authority's conn+89176[bucket]) and the consume decrements the same
-        // entry; only a bucket-less def reads the MountSlot+0x10 word itself.
-        // The Gunner/EWEAP legs resolve to the pumped mount slot's own +0x10
-        // word and the Controller refusal rides player_weapon.cpp's seat
-        // block, so folding the bucket into the clip is identical while no
-        // two carried weapons share a bucket (the single-class model, D-WPN-2).
-        // [orig: @0x541c6d..0x541c89 -> sub_5405F0 @0x5405f0 (mount word via
-        //  sub_5461A0 @0x5461a0); consume @0x5408b5..0x5408fc]
-        if (static_cast<int16_t>(slot.clip) != 0) return true;
+        // The pump resolves carried shared buckets before entering the FSM;
+        // mounted slots retain their own word [orig: sub_5405F0 @0x5405F0].
+        if ((slot.shared_clip ? slot.clip : static_cast<int16_t>(slot.clip)) != 0)
+            return true;
         slot.next = slot.reserve != 0 ? weapon_action::kRecoil : weapon_action::kEmptyIdle;
         return false;
     }

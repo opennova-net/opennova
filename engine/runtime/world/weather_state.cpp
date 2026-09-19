@@ -1,3 +1,4 @@
+// The stored night dword is refreshed at the TOD store @0x57DEAE.
 #include <runtime/world/weather_state.h>
 
 #include <runtime/world/ai.h>
@@ -71,7 +72,14 @@ double WeatherState::tod_hhmm() const {
 }
 
 bool WeatherState::is_night_phase() const {
-    return env::compute_day_phase(static_cast<float>(tod_hhmm())).is_night;
+    return night_phase != 0;
+}
+
+void WeatherState::compute_night_phase() {
+    // The original returns without overwriting the script lvalue when the
+    // keyframe table is empty. [orig: Environment_ComputeTimeOfDayColors @ 0x57DE40]
+    if (tod_keyframed)
+        night_phase = env::compute_day_phase(static_cast<float>(tod_hhmm())).is_night ? 1 : 0;
 }
 
 void WeatherState::seed(const WeatherSeed &seed) {
@@ -88,6 +96,9 @@ void WeatherState::seed(const WeatherSeed &seed) {
     // [orig: @ 0x57d2da].
     cloud_scroll_rate_target = seed.cloud_scroll_rate_target;
     tod_fixed24 = seed.tod_fixed24 % kTodDayFixed24;
+    tod_keyframed = seed.tod_keyframed;
+    night_phase = 0;
+    compute_night_phase();
     tod_advance_per_tick = seed.tod_advance_per_tick;
     tod_minute_tickdown = kTodMinuteTicks;
     tod_minutes_elapsed = 0;
@@ -344,6 +355,7 @@ void WeatherState::tick_sim(World *world, WeatherTickEvents &events) {
     // advanced clock [orig: @ 0x57e9c7]; the 310-tick minute counter
     // [orig: @ 0x57e9da..0x57e9ef].
     tod_fixed24 = (tod_fixed24 + tod_advance_per_tick) % kTodDayFixed24;
+    compute_night_phase();
     if (--tod_minute_tickdown < 0) {
         tod_minute_tickdown = kTodMinuteTicks;
         if (tod_advance_per_tick != 0) ++tod_minutes_elapsed;

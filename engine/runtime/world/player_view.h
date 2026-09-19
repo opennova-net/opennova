@@ -790,10 +790,10 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
 
 // The composed local camera for one presented frame, mission space — the
 // witnessed pose math; the presenting shell converts frames and stamps the
-// Camera3D node. `anchor_eye` is the shell-fed head-bone eye (the permanent
-// D-INF-18 write-back; pass valid=false for the non-person +1.0 bump over
-// `position`), `aim_yaw/pitch_deg` the post-binocular aim angles. `terrain` +
-// `indoors` feed the head-bone eye's terrain floor (above; null skips it).
+// Camera3D node. `anchor_eye` is live Position + the motor's CameraOffset;
+// pass valid=false for the non-person +1.0 bump over `position`.
+// `aim_yaw/pitch_deg` are the post-binocular aim angles. `terrain` + `indoors`
+// feed third-person clearance; the motor already floors the on-foot head.
 // First person [orig: Camera_ComputeThirdPersonView @ 0x437d10 mode 0, the
 // on-foot person leg @ 0x437f9c..0x438031]: eye = the floored anchor pulled
 // back kFpEyePullback along the view forward; pitch adds the doubled recoil;

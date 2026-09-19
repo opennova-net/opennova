@@ -509,8 +509,9 @@ Ref<Texture2D> ResourceRoot::load_texture(const String &name, LookupPolicy polic
 	return result;
 }
 
-Ref<Texture2D> ResourceRoot::load_material_texture(const String &name, uint8_t type) const {
-    if (type != 4 && type != 5)
+Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t type) const {
+    if (type >= 16 && type <= 18) return opennova::prepare_material_chunk(read_file(name), type);
+    if (type < 4 || type > 7)
         return opennova::prepare_material_texture(load_texture(name), name, type);
     const String dds = name.get_basename() + ".dds";
     const std::string native_name(name.utf8().get_data());

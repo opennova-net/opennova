@@ -260,6 +260,8 @@ struct SessionReplyState {
 	// full by S2C 0x0F after loadout acceptance. Indices are the weapon table's
 	// retail ammo-class ids; unused classes remain zero.
 	std::array<int32_t, 128> ammo_pools{};
+    // Loaded-round buckets [orig: player+89176; sub_540670 @0x540670].
+    std::array<int32_t, 128> shared_clips{};
 	// The last GRANTED 0x5A loadout body, retained for the deploy-release re-send: the retail
 	// deploy leg re-sends the player's loadout, and the client's 0x5A handler is the deploy
 	// UN-LATCHER — it resets dword_81474C (set by the 0x0E pick) on completion, which is what
@@ -450,6 +452,8 @@ struct NapiNPConnection {
 	uint32_t s2c_send_holdoff_ticks = 0;
 	uint32_t s2c_send_holdoff_countdown = 0;
 	bool s2c_send_boundary_open = true;
+	// Hold routed guidance until the frame that can carry its fire descriptor.
+	std::vector<std::vector<uint8_t>> pending_guidance;
 	// The configured period is known when the node is allocated, but +0x648 is
 	// not armed until NapiNPServer_UpdateHoldoffTicks dictates CS field 3 and
 	// resets the counter. Pre-dictation hello/auth/admission turns stay open.

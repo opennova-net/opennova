@@ -949,6 +949,10 @@ add_test(NAME weather_seed COMMAND weather_seed_test)
 # The weather home (runtime/world/weather_state): the WAC handler math, the
 # mission-start initializer, the wire sample apply, and the sim tick against a
 # scripted world.
+add_executable(reverb_test world/reverb_test.cpp)
+target_link_libraries(reverb_test PRIVATE opennova_runtime)
+add_test(NAME reverb COMMAND reverb_test)
+
 add_executable(weather_state_test world/weather_state_test.cpp)
 target_link_libraries(weather_state_test PRIVATE opennova_runtime)
 target_include_directories(weather_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1524,13 +1528,18 @@ target_include_directories(vehicle_suspension_test PRIVATE ${CMAKE_CURRENT_SOURC
 add_test(NAME vehicle_suspension COMMAND vehicle_suspension_test)
 
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
-# budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
+# per-entity movement phase (AI_BeginUpdate), the state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.
 add_executable(ai_test world/ai_test.cpp)
 target_link_libraries(ai_test PRIVATE opennova_runtime)
 target_include_directories(ai_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ai_test PRIVATE cxx_std_17)
 add_test(NAME ai COMMAND ai_test)
+
+add_executable(movement_brain_parity_test world/movement_brain_parity_test.cpp)
+target_link_libraries(movement_brain_parity_test PRIVATE opennova_runtime)
+target_compile_features(movement_brain_parity_test PRIVATE cxx_std_17)
+add_test(NAME movement_brain_parity COMMAND movement_brain_parity_test)
 
 add_executable(npc_weapons_test world/npc_weapons_test.cpp)
 target_link_libraries(npc_weapons_test PRIVATE opennova_runtime)
@@ -2781,7 +2790,7 @@ foreach(port
         world/ai_muzzle_pose
         world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
         mission/native_assets_00trg mission/buggy_01tr
-        mission/watercraft_02tr)
+        mission/watercraft_02tr mission/parachute_09tr)
     get_filename_component(port_name ${port} NAME)
     add_executable(${port_name}_test ${port}_test.cpp)
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)

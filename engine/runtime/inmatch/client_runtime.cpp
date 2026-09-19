@@ -812,7 +812,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// nonzero. These portable movers are that entity body, not network work.
 	// [orig: network pump @0x526692; entity gate @0x52672C]
 	if (!preround_active)
-		view_.tick_guided_missiles(); // the client-flown section 5.15 pursuit
 
 	// The remote lean integrator runs once per client frame regardless of role —
 	// the body tick that owns it in retail. [orig: decay @0x4b5c97, then the ramp

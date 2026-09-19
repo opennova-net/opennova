@@ -92,6 +92,9 @@ ThrowClass throw_class_from_tag(const char *tag) {
         }
         return tag[i] == '\0';
     };
+    if (eq("stng")) return ThrowClass::kStinger;
+    if (eq("hlfr")) return ThrowClass::kHellfire;
+    if (eq("jvln")) return ThrowClass::kJavelin;
     if (eq("nade")) return ThrowClass::kNade;
     if (eq("schl")) return ThrowClass::kSatchel;
     if (eq("clym")) return ThrowClass::kClaymore;

@@ -38,12 +38,33 @@ int32_t ammo_score(const WeaponTable &table, const WeaponInventory &inv, int32_t
     const WeaponTableEntry *def = entry_at(table, inv, combo);
     const WeaponInventorySlot *s = inv.slot(combo);
     if (def == nullptr || s == nullptr) return 0;
-    // The def+0xDC pass-type branch (shared-pool "clip" reads via sub_5405F0) is
-    // deferred with the recalc pass leg (D-WPN-20, docs/divergence-ledger.md).
-    return weapon_pool_get(inv, def->ammo_class_id) + s->clip;
+    return weapon_pool_get(inv, def->ammo_class_id) +
+            weapon_inventory_loaded_rounds(table, inv, combo);
 }
 
 } // namespace
+
+// [orig: sub_5405F0 @0x5405F0 / sub_540670 @0x540670; carried-player legs]
+int32_t weapon_inventory_loaded_rounds(const WeaponTable &table,
+        const WeaponInventory &inv, int32_t combo) {
+    const auto *def = entry_at(table, inv, combo);
+    if (def == nullptr) return 0;
+    if (def->ammo_bucket == 0) return static_cast<int16_t>(inv.slot(combo)->clip);
+    const uint32_t bucket = static_cast<uint32_t>(def->ammo_bucket);
+    return bucket < inv.shared_clips.size() ? inv.shared_clips[bucket] : 0;
+}
+
+void weapon_inventory_set_loaded_rounds(const WeaponTable &table,
+        WeaponInventory &inv, int32_t combo, int32_t rounds) {
+    const auto *def = entry_at(table, inv, combo);
+    if (def == nullptr) return;
+    if (def->ammo_bucket == 0) {
+        inv.slot(combo)->clip = static_cast<int16_t>(rounds);
+        return;
+    }
+    const uint32_t bucket = static_cast<uint32_t>(def->ammo_bucket);
+    if (bucket < inv.shared_clips.size()) inv.shared_clips[bucket] = rounds;
+}
 
 void weapon_availability_apply_pairs(
         WeaponAvailability &avail, const WeaponTable &table,
@@ -255,7 +276,9 @@ int32_t weapon_inventory_total_clips(const WeaponTable &table, const WeaponInven
     const WeaponTableEntry *def = entry_at(table, inv, combo);
     const WeaponInventorySlot *slot = inv.slot(combo);
     if (def == nullptr || slot == nullptr) return 0;
-    int32_t result = weapon_pool_get(inv, def->ammo_class_id) + slot->clip;
+    if (static_cast<uint32_t>(def->ammo_bucket) >= table.ammo_class_names.size()) return 0;
+    int32_t result = weapon_pool_get(inv, def->ammo_class_id) +
+            weapon_inventory_loaded_rounds(table, inv, combo);
     if (def->clipsize == -1) return -1;
     if (def->clipsize != 0) result /= def->clipsize;
     if (result > 127) return 127;
@@ -310,7 +333,7 @@ void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &in
     //  the pool, then draw one full clip clamped by what the pool affords. The
     //  arithmetic is ported literally, including the negative-pool degeneration the
     //  record notes for shipped -1 startrounds (§5.57 "the v15 ammo issues"). The
-    //  def+0xDC pass-type leg is deferred (D-WPN-20).]
+    //  def+0xDC selects the shared loaded-round bucket.]
     for (int32_t combo = 0; combo < weapon_combo::kSlotCount; ++combo) {
         const WeaponTableEntry *def = entry_at(table, inv, combo);
         WeaponInventorySlot *slot = inv.slot(combo);
@@ -318,8 +341,9 @@ void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &in
         if (def->ammo_class_count == 0) continue; // [orig: def[56] gate @ 0x5422ba]
         if (def->clipsize == -1) continue;        // [orig: def+88 != -1 @ 0x542304]
         int32_t units = def->ammo_class_count;
-        if (slot->clip != 0)
-            weapon_pool_add(table, inv, def->ammo_class_id, slot->clip * units);
+        const int32_t loaded = weapon_inventory_loaded_rounds(table, inv, combo);
+        if (loaded != 0)
+            weapon_pool_add(table, inv, def->ammo_class_id, loaded * units);
         int32_t clamped = static_cast<int32_t>(def->clipsize) * units;
         int32_t pool = weapon_pool_get(inv, def->ammo_class_id);
         if (clamped > pool) clamped = pool; // [orig: @ 0x542364]
@@ -328,7 +352,7 @@ void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &in
         if (def->ammo_class_id >= 0 &&
             def->ammo_class_id < static_cast<int>(inv.pools.size()))
             inv.pools[static_cast<size_t>(def->ammo_class_id)] -= clamped;
-        slot->clip = clamped / units;
+        weapon_inventory_set_loaded_rounds(table, inv, combo, clamped / units);
     }
 }
 
@@ -345,18 +369,19 @@ int32_t weapon_inventory_reload_slot(const WeaponTable &table, WeaponInventory &
     const WeaponTableEntry *def = entry_at(table, inv, combo);
     WeaponInventorySlot *slot = inv.slot(combo);
     if (def == nullptr || slot == nullptr) return 0;
-    if (def->clipsize == -1 || def->ammo_class_count == 0) return slot->clip;
+    const int32_t loaded = weapon_inventory_loaded_rounds(table, inv, combo);
+    if (def->clipsize == -1 || def->ammo_class_count == 0) return loaded;
     int32_t units = def->ammo_class_count;
-    if (slot->clip != 0)
-        weapon_pool_add(table, inv, def->ammo_class_id, slot->clip * units);
+    if (loaded != 0)
+        weapon_pool_add(table, inv, def->ammo_class_id, loaded * units);
     int32_t draw = static_cast<int32_t>(def->clipsize) * units;
     int32_t pool = weapon_pool_get(inv, def->ammo_class_id);
     if (draw > pool) draw = pool;
     if (def->ammo_class_id >= 0 &&
         def->ammo_class_id < static_cast<int>(inv.pools.size()))
         inv.pools[static_cast<size_t>(def->ammo_class_id)] -= draw;
-    slot->clip = draw / units;
-    return slot->clip;
+    weapon_inventory_set_loaded_rounds(table, inv, combo, draw / units);
+    return weapon_inventory_loaded_rounds(table, inv, combo);
 }
 
 bool weapon_select_slot(const WeaponTable &table, WeaponInventory &inv, int32_t combo,

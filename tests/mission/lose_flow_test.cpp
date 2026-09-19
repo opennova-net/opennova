@@ -1,3 +1,4 @@
+#include <runtime/world/local_player_view.h>
 // P2 round outcome on the retail data: a training mission's witnessed lose
 // flow, the sim half (the shell half — the MISSION FAILED screen and ESC to
 // the menu — is godot/tests/game/main_game_lifecycle_test.gd). One executable,
@@ -143,17 +144,10 @@ struct Run {
 	int seconds() const { return ticks / kTicksPerSecond; }
 };
 
-// Where the local pump spawns the player's rounds: the embedder-fed eye
-// sample when one is valid, else Position + 1.0 u — this bare kernel never
-// feeds one (player_weapon.cpp, the WeaponAction_Fire @0x542c5e spawn leg).
-// That pump rule is the D-WPN-8 residual (retail: Position + CameraOffset,
-// Entity_CalcWeaponFirePosition @0x4dc847); this helper tracks the pump, not
-// retail, so the staged LOS ray starts where the round actually spawns.
+// The local fire path uses the current motor's Position + CameraOffset.
 w::Vec3 local_round_origin(const testrig::RetailMissionRig &rig) {
-	const w::LocalPlayerWeapon &wpn = rig.local.weapon;
-	if (wpn.eye_valid) return w::Vec3{wpn.eye_mission[0], wpn.eye_mission[1], wpn.eye_mission[2]};
-	const w::Vec3 p = rig.local.player_position();
-	return w::Vec3{p.x, p.y, p.z + 1.0f};
+    const w::Entity *entity = rig.world.registry.get(rig.world.cached.local_player);
+    return entity != nullptr ? w::player_eye_position(*entity) : rig.local.player_position();
 }
 
 // The victim's widest posed hit sphere — the same posed sections the round's
