@@ -9,6 +9,7 @@
 #include <runtime/world/pose_inputs.h>
 
 #include <runtime/anim/aim_overlay.h>
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm_pose.h>
@@ -20,6 +21,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -434,9 +436,9 @@ bool EntityPoseProvider::build_skeletal_bone_matrix(world::World &world,
 	float render_pose[16];
 	render_matrix_from_deformation(deformation, render_pose);
 	const int32_t position[3] = {
-			ai_entity != nullptr ? ai_entity->pos[0] : static_cast<int32_t>(posed_entity->position.x * 65536.0f),
-			ai_entity != nullptr ? ai_entity->pos[1] : static_cast<int32_t>(posed_entity->position.y * 65536.0f),
-			ai_entity != nullptr ? ai_entity->pos[2] : static_cast<int32_t>(posed_entity->position.z * 65536.0f),
+			ai_entity != nullptr ? ai_entity->pos[0] : static_cast<int32_t>(posed_entity->position.x * io::kFp16One),
+			ai_entity != nullptr ? ai_entity->pos[1] : static_cast<int32_t>(posed_entity->position.y * io::kFp16One),
+			ai_entity != nullptr ? ai_entity->pos[2] : static_cast<int32_t>(posed_entity->position.z * io::kFp16One),
 	};
 	const world::CollisionMatrix body_world =
 			world::collision_matrix_from_euler(
@@ -478,7 +480,9 @@ bool EntityPoseProvider::resolve_skeletal_anchor(world::World &world,
 		const double value = double(row[3]) +
 				(double(row[0]) * point[0] + double(row[1]) * point[1] +
 				 double(row[2]) * point[2]) / 64.0;
-		out[axis] = static_cast<int32_t>(std::clamp(value, -2147483648.0, 2147483647.0));
+		out[axis] = static_cast<int32_t>(std::clamp(value,
+				static_cast<double>(std::numeric_limits<int32_t>::min()),
+				static_cast<double>(std::numeric_limits<int32_t>::max())));
 	}
 	return true;
 }

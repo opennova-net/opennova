@@ -5,6 +5,7 @@
 
 #include <formats/adm/adm.h>
 #include <formats/bad/bad.h>
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <runtime/assets/asset_store.h>
 
@@ -241,7 +242,7 @@ int32_t AdmRootMotion::capsule_bottom_at(int adm_id, int state_id,
 										 int32_t phase_ticks, int variant) const {
 	const Track *track = resolve_track(adm_id, state_id, variant);
 	if (track == nullptr || track->bottom.empty()) return 0;
-	return static_cast<int32_t>(sample(*track, track->bottom, phase_ticks) * 65536.0f);
+	return static_cast<int32_t>(sample(*track, track->bottom, phase_ticks) * io::kFp16One);
 }
 
 bool AdmRootMotion::advance(int adm_id, int state_id, int32_t &phase_ticks,
@@ -281,9 +282,9 @@ bool AdmRootMotion::advance_armed(int adm_id, int state_id, int variant,
 	// out_transform[3]=bottom*65536, out_transform[4]=top*65536+0x2000; consumed by
 	// tick_infantry's ground clamp — docs/world/world-wac-ai-re.md D-INF-6].
 	out.capsule_bottom =
-			static_cast<int32_t>(sample(*track, track->bottom, phase_ticks, armed_boundary) * 65536.0f);
+			static_cast<int32_t>(sample(*track, track->bottom, phase_ticks, armed_boundary) * io::kFp16One);
 	out.capsule_top =
-			static_cast<int32_t>(sample(*track, track->top, phase_ticks, armed_boundary) * 65536.0f) + 0x2000;
+			static_cast<int32_t>(sample(*track, track->top, phase_ticks, armed_boundary) * io::kFp16One) + 0x2000;
 	// Event bits from the lower keyframe of the current position [orig: trigger unlerped;
 	// consumers sample on alternating ticks, so the per-frame repeat is faithful].
 	out.events = sample_trigger(*track, phase_ticks, armed_boundary);
@@ -326,9 +327,9 @@ bool AdmRootMotion::advance_blended(
 	out.dy = static_cast<int32_t>(blend(primary->lat, target->lat, true) * 32768.0f);
 	out.dz = static_cast<int32_t>(blend(primary->vert, target->vert, true) * 32768.0f);
 	out.capsule_bottom =
-			static_cast<int32_t>(blend(primary->bottom, target->bottom) * 65536.0f);
+			static_cast<int32_t>(blend(primary->bottom, target->bottom) * io::kFp16One);
 	out.capsule_top =
-			static_cast<int32_t>(blend(primary->top, target->top) * 65536.0f) + 0x2000;
+			static_cast<int32_t>(blend(primary->top, target->top) * io::kFp16One) + 0x2000;
 	out.events = sample_trigger(*target, target_phase_ticks);
 	return true;
 }
