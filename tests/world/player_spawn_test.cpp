@@ -336,8 +336,8 @@ int main() {
 
     // --- player movement uses real 8-way clip states. Facing stays fixed; left input selects
     //     walk_left (state 7), then the retail body transition blends its lateral root in.
-    //     The root vector rotates by the same-tick leg-midpoint body heading, so the planted
-    //     feet initially turn the lateral step across both world axes.
+    //     Root rotation uses the body heading captured at the motor head, before
+    //     this tick's leg-midpoint update turns the planted feet.
     //     [orig: Entity_UpdateInfantryPlayerBody body midpoint @0x4B4AA9..0x4B4ABB;
     //     entity+0x8C load @0x4B41E4; Q22 root rotation @0x4B41F0..0x4B4255]
     {
@@ -362,17 +362,18 @@ int main() {
 
         CHECK(ae.inf.anim_state == anim_state::kWalkForward + 6);
         CHECK(ae.inf.body_heading == 0x30000000);
-        CHECK(ae.pos[0] == -2017);
-        CHECK(ae.pos[1] == 835);
-        CHECK(ae.inf.anim_blend_weight == (1.0f / 15.0f));
+        CHECK(ae.pos[0] == 0);
+        CHECK(ae.pos[1] == 0);
+        CHECK(ae.inf.body_clip_state() == anim_state::kIdle);
+        CHECK(ae.inf.anim_blend_weight == 1.0f);
 
         ctx.logic_tick = 1;
         submit_player_input(ae, in);
         ai.tick(w, ctx);
         CHECK(ae.inf.body_heading == 0x2D000000);
-        CHECK(ae.pos[0] == -5919);
-        CHECK(ae.pos[1] == 2799);
-        CHECK(ae.inf.anim_blend_weight == (2.0f / 15.0f));
+        CHECK(ae.pos[0] == -2017);
+        CHECK(ae.pos[1] == 835);
+        CHECK(ae.inf.anim_blend_weight == (1.0f / 15.0f));
     }
 
     // --- grounding mirror runs for NON-player motor entities too (the AI-in-the-ground fix):

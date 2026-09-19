@@ -205,17 +205,30 @@ in the repository. Replica carrier scheduling retains the separate section
 29.2 limitation; no new mixed retail/OpenNova multiplayer playthrough is claimed.
 
 
-## Animation and relative-motion source audit
+## Animation and relative-motion alignment
 
-The follow-up review used jo-c `d4148fbabcb98cb6b48e44fe0da9393730bde852`
-and the same retail IDB. [World section 36](world/world-wac-ai-re.md#36-animation-and-relative-motion-timing-audit-2026-09-18)
-records D-INF-26: original infantry advances channels before state selection,
-whereas our motor selects and retargets before advancing. It also bounds the
-existing D-INF-18 head feedback and the spectator camera callback ordering.
-The authority presenter pins body phase to the simulation and does not
-free-run it between snapshots. No visual-trail fix is claimed.
+The jo-c follow-up closes D-INF-26's request/playback ordering mismatch. Both
+channels advance at the motor head; requests, playing ids and root/pose samples
+have separate lifetimes. Player root rotation reads the heading before leg chase.
+The local eye is resolved from the current simulated head and re-anchored after
+movement; old render feedback is removed. Held-weapon attachment follows body
+posing. Spectator translation precedes world camera-dependent preparation, with
+the user's 4.6875 camera speed retained. See [world section 36](world/world-wac-ai-re.md#36-animation-and-relative-motion-timing-audit-2026-09-18)
+for witnesses, regression boundaries and the remaining scope limits.
 
-The six focused native tests (`anim_sample`, `simassets_adm_root_motion`,
-`simassets_adm_playback`, `movement_brain_parity`, `infantry`, and
-`mission_infantry_anim`) pass. They do not cover D-INF-26's ordering difference.
-This follow-up changes the evidence record and a source comment only.
+New motor, current-head and spectator-order regressions were demonstrated red
+before their fixes. Final validation with both retail asset roots:
+
+- Native Release and Godot RelWithDebInfo extension builds passed.
+- Full CTest: **484 passed, 1 skipped, 0 failed** out of 485. The remaining
+  `motorcycle_gravity_06tr` skip requires the absent `06TR.bms`.
+- Focused GUT (`fly_camera_spectator_test.gd`, `local_player_presenter_test.gd`,
+  `skeletal_anim_test.gd`, `mission_present_pass_test.gd`): **92 tests and
+  3,114 assertions passed**. One existing orphan warning; no script errors.
+- Repository ratchets, witness census (zero lost addresses), maturity,
+  include/link graphs, orphan headers, fixtures, environment/conventions,
+  ledger consistency, retail-gate documentation and diff whitespace passed.
+
+The visual-trail cause remains unproven; the rebuilt 09TR mission is for the
+user's player/spectator comparison. No new mixed retail/OpenNova multiplayer
+playthrough or complete closure of the broader motor/camera residuals is claimed.

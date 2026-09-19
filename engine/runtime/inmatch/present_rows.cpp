@@ -468,7 +468,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				}
 			}
 			if (ae && ae->inf.active) {
-				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
+				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.body_clip_state());
 				r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
 				if (ae->inf.body_blend_active()) {
 					r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
@@ -486,7 +486,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 						infantry_weapon_channel_visible(
 								ae->inf, (ent->engine_flags & kEntityFlagPlayer) != 0,
 								simassets::mount_blocks_weapon_channel(*ent))) {
-					r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.wpn_state);
+					r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.weapon_clip_state());
 					r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
 					r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
 					if (ae->inf.weapon_blend_active()) {
@@ -744,7 +744,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 				: 0.0f;
 	}
 	if (!ae->inf.active) return;
-	r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
+	r[PF_ANIM_STATE] = static_cast<float>(ae->inf.body_clip_state());
 	r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
 	if (ae->inf.body_blend_active()) {
 		r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
@@ -758,7 +758,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	if (infantry_weapon_channel_visible(
 				ae->inf, (e.engine_flags & kEntityFlagPlayer) != 0,
 				simassets::mount_blocks_weapon_channel(e))) {
-		r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.wpn_state);
+		r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.weapon_clip_state());
 		r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
 		r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
 		if (ae->inf.weapon_blend_active()) {

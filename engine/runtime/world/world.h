@@ -168,13 +168,6 @@ private:
 struct CachedFrameState {
     uint8_t sound_listener_view_flags = 6; // startup; camera 0 -> 2, other -> 4 [orig: @0x43924A]
     EntityHandle local_player;
-    // The shell-fed posed head-bone world position for the local player
-    // (mission units) — the embedder-feeds-back seam the exact eye-offset
-    // store consumes (engine/runtime/world carries no skeletal pose). False
-    // until the shell samples a skeleton; the capsule formula then stands in,
-    // like retail before the first bone build.
-    Vec3 local_head;
-    bool local_head_valid = false;
     int32_t local_health = 0;
     // Active human player slot count — the WAC 'humans' builtin, rebuilt by the host
     // server tick just before the script pre-pass. Doubles in the original as the
@@ -187,10 +180,6 @@ struct CachedFrameState {
     // after execution/restore. Only the VM clock is serialized; this projection
     // lets the world gate read retail's shared word. [orig: wac_var_ticks @0xC6EAD8]
     int32_t wac_ticks = 0;
-    // The posed head as a BODY-RELATIVE delta, paired with local_head above.
-    // Lag-free by construction; see the seated eye restamp in infantry.cpp.
-    Vec3 local_head_offset;
-    bool local_head_offset_valid = false;
 };
 
 // Mutable engine values exposed to mission scripts through retail's named-value

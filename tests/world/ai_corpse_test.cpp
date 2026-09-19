@@ -22,6 +22,8 @@
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
+#include <runtime/world/local_player_view.h>
+
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -125,17 +127,17 @@ int main() {
 
 	// --- Fire: pre-weaken, then steer the look at the target's live chest every
 	// tick while the trigger is held (the FSM sustains the volley and reloads).
-	// Rounds leave the muzzle (the +0.9 u chest stand-in) parallel to the look,
-	// so aim the muzzle at the chest.
+	// Rounds leave the current motor eye parallel to the look, so aim from
+	// that same CameraOffset instead of assuming a fixed muzzle height.
 	//
 	// The ambient firefight is incidental to this test (the subject is the
 	// corpse chain), and since the 2026-09-01 guard-bit fix landed the authored
 	// group guard-clear on engine_flags, the formerly frozen guards patrol
 	// faithfully — the target evades and the pack can win the incidental race.
 	// Two scripted (WAC-shaped) stores pin the scenario without touching the
-	// kill chain: ssnguard holds the target on its post (the guard bit routes
-	// it into the stationary mounted-fire tail), and the player is topped up
-	// through the same SETHP store each tick.
+	// kill chain: ssnguard applies the retail guard policy, and the player is
+	// topped up through SETHP each tick. The aim follows live posed geometry
+	// even when the target continues moving.
 	{
 		const w::Entity *tent0 = rig.world.registry.get(target);
 		if (tent0 != nullptr && tent0->net_id != 0)
@@ -157,9 +159,19 @@ int main() {
 			const w::AiEntity *tai = rig.world.ai.for_handle(target);
 			if (tai != nullptr) {
 				const w::Vec3 me = rig.local.player_position();
-				const w::Vec3 muzzle{me.x, me.y, me.z + 0.9f};
+				const w::Entity *player = rig.world.registry.get(rig.world.cached.local_player);
+				const w::Vec3 muzzle = w::player_eye_position(*player);
 				w::Vec3 chest = testrig::ai_position(*tai);
-				chest.z += 0.9f;
+				// Use the same posed section centers the round collision walk tests.
+				int32_t widest = 0;
+				for (const auto &section : rig.world.collision->debug_person_sections(
+							rig.world, tai->pos, w::to_fixed(2.0f), 32)) {
+					if (section.handle != target || section.masked || section.radius <= widest) continue;
+					widest = section.radius;
+					chest = {section.center[0] / 65536.0f, section.center[1] / 65536.0f,
+							section.center[2] / 65536.0f};
+				}
+				expect(widest > 0, "the target has a posed hit sphere to aim at");
 				rig.local.aim_at(muzzle, chest);
 				rig.local.input.forward = testrig::planar_distance(me, chest) > 8.0f;
 			}

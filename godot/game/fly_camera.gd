@@ -32,6 +32,9 @@ var _gameplay_locked: bool = false
 var _spectator_mode: bool = false
 
 func _ready() -> void:
+	# MainGame consumes the final free-camera pose for world/frame preparation.
+	# A camera child otherwise processes after its parent and supplies the old pose.
+	process_priority = -1
 	_yaw = rotation.y
 	_pitch = rotation.x
 	_pivot = global_position - global_transform.basis.z * _distance

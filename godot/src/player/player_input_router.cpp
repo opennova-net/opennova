@@ -17,7 +17,6 @@ using namespace godot;
 
 namespace {
 
-const Vector3 kNoSample(INFINITY, INFINITY, INFINITY);
 
 } // namespace
 
@@ -116,28 +115,6 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
         p_gameplay_input_active && pressed("turn_left"), p_gameplay_input_active && pressed("turn_right"));
 	frame_input->set_look_delta(p_gameplay_input_active ? look_delta_ : Vector2());
 	look_delta_ = Vector2();
-	if (tick_sim.is_valid()) {
-		// Feed the sim the head-bone eye for the 3P anchor chase [orig: the
-		// chase target is Position + CameraOffset @0x437b70; CameraOffset is
-		// the posed head bone, computed sim-side in the original @0x4b6bb3 --
-		// in the port, the render skeleton is the sample source (D-INF-18)].
-		// Feed the head RELATIVE TO THE AVATAR ROOT. The render skeleton is a
-		// frame behind the sim, so an absolute head point carries a frame of
-		// travel with it - invisible on foot, but 5-10 u in a helicopter, which
-		// put the cockpit camera behind the aircraft. A body-relative delta
-		// carries none and the sim re-anchors it to the live position.
-		const Vector3 head = owner->avatar_head_world();
-		const Vector3 root = owner->avatar_root_world();
-		const bool head_ok = head != kNoSample;
-		tick_sim->set_local_player_eye(head_ok ? head : Vector3(), head_ok);
-		// ...and the SAME sample as a body-relative delta. The render skeleton
-		// is a frame behind the sim, so an absolute head carries a frame of
-		// travel: invisible on foot, 5-10 u in a helicopter, which put the
-		// cockpit camera behind the aircraft. The delta carries none, and the
-		// sim re-anchors it to the live position for the seated eye.
-		const bool delta_ok = head_ok && root != kNoSample;
-		tick_sim->set_local_player_eye_offset(delta_ok ? head - root : Vector3(), delta_ok);
-	}
 	// The USE hold ages first: its previous-frame state decides which digit
 	// presses the binding rows below never see.
 	sample_use_item(p_gameplay_input_active);

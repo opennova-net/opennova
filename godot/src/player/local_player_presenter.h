@@ -238,11 +238,8 @@ public:
 	// endpoint, the truncation and the 1..1000 display clamp are the engine's
 	// (world/presentation_frame.h). This leg samples the terrain surface.
 	int aim_range_units() const;
-	// The posed head-bone eye (Vector3.INF = no skeleton): the input router
-	// feeds it to the sim for the 3P anchor chase [orig: the chase target
-	// @0x437b70]. The avatar root the head bone is measured against. Pairing
-	// the two lets the sim store a BODY-RELATIVE eye delta, which carries no
-	// frame of travel.
+    // Read-only render-pose diagnostics (Vector3.INF when no skeleton exists).
+    // Gameplay eyes come from the current simulation CameraOffset.
 	Vector3 avatar_root_world() const;
 	Vector3 avatar_head_world() const;
 

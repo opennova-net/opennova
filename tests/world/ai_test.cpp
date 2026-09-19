@@ -750,8 +750,9 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     ai.tick(w, tick);
 
     CHECK(victim.inf.anim_state >= 173 && victim.inf.anim_state <= 239);
-    CHECK(victim.inf.clip_phase == 0);
-    CHECK(victim.inf.anim_blend_weight == 0.0f);
+    CHECK(victim.inf.body_clip_state() == anim_state::kIdle);
+    CHECK(victim.inf.clip_phase == 2);
+    CHECK(victim.inf.anim_blend_weight == 1.0f);
     CHECK(victim.pos[0] == transition_x);
     CHECK(victim.pos[2] == transition_z);
 
@@ -1485,8 +1486,9 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
     CHECK(npc.inf.anim_state == kSelectedDeath);
     CHECK(w->registry.get(npc_h)->death_anim_state == 0);
     CHECK(w->registry.get(npc_h)->corpse_timer == 123);
-    CHECK(npc.inf.clip_phase == 0); // death edge retains the mounted channel this tick
-    CHECK(npc.inf.anim_blend_weight == 0.0f);
+    CHECK(npc.inf.body_clip_state() == anim_state::kIdle);
+    CHECK(npc.inf.clip_phase == 1); // death edge retains this tick's playing channel
+    CHECK(npc.inf.anim_blend_weight == 1.0f);
 }
 
 static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models() {

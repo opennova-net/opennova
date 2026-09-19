@@ -592,19 +592,11 @@ Vector2 LocalPlayerPresenter::aim_angles_deg() const {
 // exactly as the animation moves the head.
 // [orig: the local bone path @0x4b6bb3 (Entity_BuildBoneTransformMatrices ->
 // head, CameraOffset = head - Position); consumed by the on-foot person leg
-// @0x437f9c. Unported tail: the remote trig approximation @0x4b6984. The
-// 0.125u floor here is a DEFENSIVE stand-in -- the original floors only the
-// sample-less capsule leg (the capsule-leg cite sits in
-// engine/runtime/world/player_view.cpp); the head-bone legs store unfloored
-// (D-INF-18).]
+// @0x437f9c. The motor resolves it from the current simulation skeleton.]
 Vector3 LocalPlayerPresenter::eye_position(const Vector3 &p_pos) const {
-	Vector3 head = avatar_head_world();
-	if (head == kNoSample) {
-		// non-person bump [orig: @0x437e8f]
-		return p_pos + Vector3(0.0f, static_cast<float>(Simulation::player_non_person_eye_bump()), 0.0f);
-	}
-	head.y = Math::max(head.y, p_pos.y + static_cast<float>(Simulation::player_eye_min_above_position()));
-	return head;
+    const Ref<Simulation> eye_sim = sim();
+    if (eye_sim.is_valid()) return p_pos + eye_sim->get_local_player_eye_offset();
+    return p_pos + Vector3(0.0f, static_cast<float>(Simulation::player_non_person_eye_bump()), 0.0f);
 }
 
 Vector3 LocalPlayerPresenter::avatar_root_world() const {
@@ -997,7 +989,6 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	const bool draw_avatar = third_person_ || debug_body_in_first_person_;
 	body->set_presentation_layer(draw_avatar ? ObjectModel::PRESENTATION_LAYER_LOCAL_BODY
 											 : ObjectModel::PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
-	update_held_weapon(overlay);
 	const Ref<Simulation> anim_sim = sim();
 	const String anim_key = anim_sim.is_valid() ? anim_sim->get_local_player_anim_key() : String();
 	const int anim_phase = anim_sim.is_valid() ? anim_sim->get_local_player_anim_phase_ticks() : 0;
@@ -1026,6 +1017,8 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	} else {
 		body->play_body_anim_at(anim_sim.is_valid() ? anim_sim->get_local_player_body_anim_slot() : -1, anim_phase);
 	}
+	// Attach only after this frame's body clip and weapon layer have been posed.
+	update_held_weapon(overlay);
 }
 
 void LocalPlayerPresenter::_bind_methods() {

@@ -1027,11 +1027,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		//  @ 0x401f00 -> dword_83FCE8].
 		AiEntity *p = world.ai.for_handle(world.cached.local_player);
 		if (p != nullptr && p->inf.active) {
-			const int stamped = w.attack_kind == 1 ? anim_state::kKnifeAttack
-					: w.attack_kind == 2 ? anim_state::kGrenadeAttack : -1;
-			const int ring = (stamped >= 0 && world.ai.root_motion != nullptr)
-					? world.ai.root_motion->variant_count(p->inf.adm_id, stamped) : 1;
-			infantry_weapon_attack_stamp(p->inf, w.attack_kind, ring);
+			infantry_weapon_attack_stamp(p->inf, w.attack_kind);
 		}
 		// Local/SP fire already passed the same FSM/ammo authority that the remote
 		// C2S 0x06 handler validates. Append the host's round-ring record and spawn
@@ -1045,14 +1041,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			const uint8_t adm_index = shooter->equipped_adm_index;
 			const WeaponTableEntry *adm = world.tables.weapons.by_index(adm_index);
 			if (adm != nullptr && adm->ammo_index >= 0) {
-				Vec3 origin = shooter->position;
-				if (w.eye_valid) {
-					origin.x = w.eye_mission[0];
-					origin.y = w.eye_mission[1];
-					origin.z = w.eye_mission[2];
-				} else {
-					origin.z += 1.0f;
-				}
+				const Vec3 origin = player_eye_position(*shooter);
 				const FixedVec3 fire_origin{to_fixed(origin.x), to_fixed(origin.y), to_fixed(origin.z)};
 				const bool accepted = !io.is_authority ||
 						(weapon_fire_owner_status(world, *shooter, adm, false) == 0 &&

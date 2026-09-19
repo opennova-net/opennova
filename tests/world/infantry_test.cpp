@@ -232,6 +232,51 @@ void give_held_weapon(World &w, AiEntity *e, uint8_t adm, int special_hold) {
     w.tables.weapons.entries[adm].special_hold = special_hold;
 }
 
+// Both retail motors advance channels before their later state selector.
+// Observe the source actually sampled by the motor, not only the requested id.
+// [orig: Entity_UpdateInfantryAI @ 0x4B9A48;
+//  Entity_UpdateInfantryPlayerBody @ 0x4B41DF]
+void test_motor_samples_existing_clip_before_selection() {
+    struct Source : TestSource {
+        std::vector<int> sampled;
+        bool advance(int adm, int state, int32_t &phase, RootMotionFrame &out) override {
+            sampled.push_back(state);
+            return TestSource::advance(adm, state, phase, out);
+        }
+    };
+    for (const bool local : {false, true}) {
+        auto world = std::make_unique<World>();
+        auto ai = std::make_unique<AiSystem>();
+        Source source;
+        source.clips = {anim_state::kIdle, anim_state::kWalkForward};
+        ai->root_motion = &source;
+        AiEntity *body = soldier(*ai);
+        body->inf.is_local_player = local;
+        body->health = 100;
+        body->pos[0] = fx(100);
+        body->inf.player_moving = local;
+        if (!local) route(*ai, body, {node(fx(200), 0, fx(2))}, 0);
+        const int32_t before = body->pos[0];
+        run_ticks(*ai, *world, 0, 1);
+        CHECK(body->inf.anim_state == anim_state::kWalkForward);
+        CHECK(std::find(source.sampled.begin(), source.sampled.end(),
+                        anim_state::kWalkForward) == source.sampled.end());
+        CHECK(body->pos[0] == before);
+        CHECK(body->inf.clip_phase == 1);
+        source.sampled.clear();
+        run_ticks(*ai, *world, 1, 2);
+        CHECK(std::find(source.sampled.begin(), source.sampled.end(),
+                        anim_state::kWalkForward) != source.sampled.end());
+        CHECK(body->pos[0] > before);
+        CHECK(body->inf.body_clip_state() == anim_state::kWalkForward);
+        body->inf.request_body_animation(anim_state::kIdle2);
+        body->inf.request_body_animation(anim_state::kWalkForward);
+        run_ticks(*ai, *world, 2, 3);
+        CHECK(body->inf.clip_phase == 2); // canceled request never resets playback
+        CHECK(body->inf.anim_prev == anim_state::kIdle);
+    }
+}
+
 void test_recoil_and_weapon_weight_kernels() {
     // Ammo recoil=1 in the standing slot produces 1<<18 before this body tick.
     // Pin the exact split, decay, pitch drift, and PRNG-selected yaw sign.
@@ -1431,14 +1476,14 @@ void test_player_body_chase_crosses_the_bam_seam() {
     CHECK(opennova::io::bam_abs(opennova::io::bam_sub(e->inf.body_heading, target)) <= 1);
 }
 
-// The player root step rotates by this tick's leg-midpoint BODY heading, not
-// the instant mouse/render yaw and not the previous tick's body. Starting the
-// feet at 0 and aiming +90 degrees makes the distinction exact: the leg twist
-// clamp places the body at +22.5 degrees before the root add.
+// The player rotates the sampled root step before this tick's leg chase.
+// Starting the feet at 0 and aiming +90 degrees moves along the old heading
+// even though the body reaches +22.5 degrees before integration. The next
+// motor call consumes that midpoint for its own root rotation.
 // [orig: Entity_UpdateInfantryPlayerBody body midpoint @0x4B4AA9..0x4B4ABB;
 // body-heading load entity+0x8C @0x4B41E4; Q22 root rotation
 // @0x4B41F0..0x4B4255; additive integration @0x4B7CB4..0x4B7CEF]
-void test_player_root_uses_same_tick_body_heading() {
+void test_player_root_uses_motor_head_body_heading() {
     World w;
     AiSystem ai;
     BlendProbeSource src;
@@ -1454,7 +1499,12 @@ void test_player_root_uses_same_tick_body_heading() {
 
     CHECK(e->heading == 0x40000000);
     CHECK(e->inf.body_heading == 0x10000000);
-    CHECK(e->pos[0] == 15136);
+    CHECK(e->pos[0] == 0x4000);
+    CHECK(e->pos[1] == 0);
+
+    run_ticks(ai, w, 2, 3);
+    CHECK(e->inf.body_heading > 0x10000000);
+    CHECK(e->pos[0] == 0x4000 + 15136);
     CHECK(e->pos[1] == 6269);
 }
 
@@ -1858,10 +1908,12 @@ void test_player_weapon_channel() {
     // Selections land only on the 16-tick slow pass, so each step below crosses one.
     uint32_t t = 1;
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.anim_state == anim_state::kIdle);
     CHECK(e->inf.wpn_state == anim_state::kIdle);
     e->inf.player_moving = true;
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.anim_state == anim_state::kWalkForward);
     CHECK(e->inf.wpn_state == anim_state::kWalkForward);
     CHECK(e->inf.wpn_clip_phase > 0); // the secondary playhead advances on its own
@@ -1871,6 +1923,7 @@ void test_player_weapon_channel() {
     // the next tick [orig: @0x4b5e67/@0x4b5e9d behind the @0x4b5d71 gate].
     e->inf.reload_anim_ticks = 80; // [orig: WeaponSlot_ReloadAmmo @0x54173c]
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kReload);
     CHECK(e->inf.wpn_clip_phase == 1);          // fresh channel re-init + first advance
     CHECK(e->inf.anim_state == anim_state::kWalkForward); // the legs keep locomotion
@@ -1888,6 +1941,7 @@ void test_player_weapon_channel() {
     // [orig: defer @0x4b5e88; promote @0x40b77b].
     e->inf.reload_anim_ticks = 1;
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.reload_anim_ticks == 0);
     CHECK(e->inf.wpn_state == anim_state::kReload);         // still locked in its clip
     CHECK(e->inf.wpn_deferred == anim_state::kWalkForward); // the exit is queued
@@ -1900,16 +1954,15 @@ void test_player_weapon_channel() {
     // playing to its own end, the mirror desire waits in the deferred slot.
     e->inf.reload_anim_ticks = 80;
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kReload);
     e->inf.reload_anim_ticks = 2;
-    t = run_to_next_selection(ai, w, t); // window over, clip still mid-play
+    t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t; // window over, clip still mid-play
     CHECK(e->inf.reload_anim_ticks == 0);
     CHECK(e->inf.wpn_state == anim_state::kReload);          // still locked in
     CHECK(e->inf.wpn_deferred == anim_state::kWalkForward);  // the exit is queued
     run_ticks(ai, w, t, t + 41); // ...until the clip's 40 phase ticks complete
-    std::fprintf(stderr, "DBG wpn_state=%d deferred=%d phase=%d primary=%d\n",
-                 e->inf.wpn_state, e->inf.wpn_deferred, e->inf.wpn_clip_phase,
-                 e->inf.anim_state);
     CHECK(e->inf.wpn_state == anim_state::kWalkForward);
     CHECK(e->inf.wpn_deferred == 0);
 }
@@ -1939,6 +1992,7 @@ void test_player_weapon_channel_blend_window() {
     // Settle: idle mirror, no blend in flight.
     uint32_t t = 1;
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kIdle);
     CHECK(!e->inf.weapon_blend_active());
     CHECK(e->inf.wpn_blend_weight == 1.0f);
@@ -1948,6 +2002,7 @@ void test_player_weapon_channel_blend_window() {
     // commit tick's advance already stepped the weight once (0.1) and both playheads.
     e->inf.reload_anim_ticks = 80;
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kReload);
     CHECK(e->inf.wpn_prev == anim_state::kIdle);
     CHECK(e->inf.weapon_blend_active());
@@ -1985,6 +2040,7 @@ void test_player_weapon_channel_blend_window() {
     CHECK(!e->inf.weapon_blend_active());
     e->inf.reload_anim_ticks = 80;
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kReload);
     CHECK(e->inf.wpn_blend_step > 0.09f && e->inf.wpn_blend_step < 0.11f); // 0.1
     e->inf.reload_anim_ticks = 0;
@@ -1999,6 +2055,9 @@ void test_player_weapon_channel_blend_window() {
     run_ticks(ai, w, t, t + 1);
     t += 1;
     CHECK(e->inf.wpn_state == anim_state::kWalkForward);
+    CHECK(e->inf.weapon_clip_state() == anim_state::kReload);
+    run_ticks(ai, w, t, t + 1); ++t;
+    CHECK(e->inf.weapon_clip_state() == anim_state::kWalkForward);
     CHECK(e->inf.wpn_prev == anim_state::kReload);
     CHECK(e->inf.weapon_blend_active());
     CHECK(e->inf.wpn_blend_step > 0.06f && e->inf.wpn_blend_step < 0.07f); // 1/15
@@ -2017,6 +2076,7 @@ void test_player_weapon_channel_blend_window() {
     t += 16;
     e->inf.player_moving = false;
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kIdle);
     CHECK(e->inf.wpn_prev == anim_state::kWalkForward);
     CHECK(e->inf.weapon_blend_active());
@@ -2025,7 +2085,8 @@ void test_player_weapon_channel_blend_window() {
     infantry_weapon_attack_stamp(e->inf, 1); // knife attack 62
     CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
     CHECK(e->inf.wpn_prev == anim_state::kWalkForward); // outgoing NOT replaced by idle
-    CHECK(e->inf.wpn_clip_phase == 0);
+    CHECK(e->inf.weapon_clip_state() == anim_state::kIdle);
+    CHECK(e->inf.wpn_clip_phase == 4); // the request did not reset the playing idle
 
     // A repeat stamp of the SAME attack mid-clip does not restart the playhead.
     run_ticks(ai, w, t, t + 3);
@@ -2069,6 +2130,7 @@ void test_player_weapon_channel_variant_ring() {
 
     uint32_t t = 1;
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kIdle);
     CHECK(e->inf.wpn_variant == 0); // idle: single-clip row
 
@@ -2076,6 +2138,7 @@ void test_player_weapon_channel_variant_ring() {
     for (int expected : {0, 1, 2, 0}) {
         e->inf.reload_anim_ticks = 80;
         t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
         CHECK(e->inf.wpn_state == anim_state::kReload);
         CHECK(e->inf.wpn_variant == expected);
         // Run the locked clip out and let the mirror re-land + blend settle.
@@ -2089,15 +2152,16 @@ void test_player_weapon_channel_variant_ring() {
     }
 
     // Rings are PER STATE: the knife ring is untouched by the reload plays and
-    // starts at 0; the fire-path stamp serves it (its ring size is passed by the
-    // caller, the same way the sim passes it from the equipped .adm).
-    infantry_weapon_attack_stamp(e->inf, 1, src.variant_count(0, anim_state::kKnifeAttack));
+    // starts at 0; the next motor-head update serves the ring after the stamp.
+    infantry_weapon_attack_stamp(e->inf, 1);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
     CHECK(e->inf.wpn_variant == 0);
     // A repeat stamp of the same state mid-clip does NOT re-serve (no transition).
     run_ticks(ai, w, t, t + 3);
     t += 3;
-    infantry_weapon_attack_stamp(e->inf, 1, 2);
+    infantry_weapon_attack_stamp(e->inf, 1);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_variant == 0);
     // Let it finish, then the next knife play serves entry 1, and the one after wraps.
     run_ticks(ai, w, t, t + 31);
@@ -2105,13 +2169,15 @@ void test_player_weapon_channel_variant_ring() {
     run_ticks(ai, w, t, t + 16);
     t += 16;
     CHECK(e->inf.wpn_state == anim_state::kIdle);
-    infantry_weapon_attack_stamp(e->inf, 1, 2);
+    infantry_weapon_attack_stamp(e->inf, 1);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_variant == 1);
     run_ticks(ai, w, t, t + 31);
     t += 31;
     run_ticks(ai, w, t, t + 16);
     t += 16;
-    infantry_weapon_attack_stamp(e->inf, 1, 2);
+    infantry_weapon_attack_stamp(e->inf, 1);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_variant == 0);
 
     // The outgoing variant is latched too: mid-blend, prev carries the served
@@ -2122,6 +2188,7 @@ void test_player_weapon_channel_variant_ring() {
     t += 16;
     e->inf.reload_anim_ticks = 80;
     t = run_to_next_selection(ai, w, t);
+    run_ticks(ai, w, t, t + 1); ++t;
     CHECK(e->inf.wpn_state == anim_state::kReload);
     CHECK(e->inf.wpn_variant == 1); // the reload ring resumes at head 1
     CHECK(e->inf.wpn_prev == anim_state::kIdle);
@@ -2236,10 +2303,11 @@ void test_player_weapon_attack_stamp() {
 
     // The knife stamp lands immediately [orig: @0x542bcb]; the hold desire then defers
     // behind the locked attack until its 24-tick clip end.
+    const int32_t before_attack = e->inf.wpn_clip_phase;
     infantry_weapon_attack_stamp(e->inf, 1);
     CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
     CHECK(e->inf.wpn_deferred == 0);
-    CHECK(e->inf.wpn_clip_phase == 0); // fresh clip on the target change
+    CHECK(e->inf.wpn_clip_phase == before_attack); // request leaves the live pose intact
     t = run_to_next_selection(ai, w, t);
     CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
     CHECK(e->inf.wpn_deferred == anim_state::kHoldKnife); // the exit is queued
@@ -3064,8 +3132,9 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     CHECK(e->inf.anim_prev == kPrimary);
     CHECK(e->inf.anim_prev_clip_phase == 5);
     CHECK(e->inf.anim_state == kDeath);
-    CHECK(e->inf.clip_phase == 0);
-    CHECK(e->inf.anim_blend_weight == 0.0f);
+    CHECK(e->inf.body_clip_state() == kFirstTarget);
+    CHECK(e->inf.clip_phase == 5);
+    CHECK(e->inf.anim_blend_weight == 0.5f);
 
     const int32_t blend_x = e->pos[0];
     ctx.logic_tick = 6;
@@ -3232,30 +3301,42 @@ void test_eye_offset_restamp() {
     run_ticks(ai, w, 4, 6);
     CHECK(reg->eye_offset_z == 0xD000);
 
-    // The local exact leg: a shell-fed head sample replaces the capsule formula.
-    // The shell feeds it BODY-RELATIVE (head minus the skeleton origin) because
-    // its render skeleton is a frame behind the sim; an absolute sample would
-    // carry that frame of travel into the offset. Stored UNfloored — the 0x2000
-    // floor belongs to the capsule legs; retail's on-foot leg terrain-floors
-    // the head first (a no-op here: this AiSystem carries no height field).
-    // [orig: Entity_UpdateInfantryPlayerBody on-foot @0x4b6bb3..0x4b6cc8;
-    //  mounted @0x4b6908..0x4b696c]
+    // The exact local eye is resolved during this motor tick, after channel
+    // advancement. No previously presented frame may supply its pose.
+    struct HeadPose : IPoseProvider {
+        AiEntity *body = nullptr;
+        Vec3 offset{0.25f, -0.5f, 1.4f};
+        int32_t sampled_phase = -1;
+        bool available = true;
+        bool resolve_skeletal_anchor(World &, EntityHandle entity, SkeletalAnchor anchor,
+                                      int32_t out[3]) override {
+            CHECK(entity == body->handle);
+            CHECK(anchor == SkeletalAnchor::Head);
+            if (!available) return false;
+            sampled_phase = body->inf.clip_phase;
+            out[0] = body->pos[0] + static_cast<int32_t>(offset.x * 65536.0f);
+            out[1] = body->pos[1] + static_cast<int32_t>(offset.y * 65536.0f);
+            out[2] = body->pos[2] + static_cast<int32_t>(offset.z * 65536.0f);
+            return true;
+        }
+    } pose;
+    pose.body = e;
+    w.pose_provider = &pose;
     e->pos[0] = fx(10);
     e->pos[1] = fx(20);
     e->pos[2] = fx(5);
-    w.cached.local_head_offset = Vec3{0.25f, -0.5f, 1.4f}; // head - body root
-    w.cached.local_head_offset_valid = true;
     run_ticks(ai, w, 6, 8);
+    CHECK(pose.sampled_phase == e->inf.clip_phase);
     CHECK(reg->eye_offset_x == fx(1) / 4);
     CHECK(reg->eye_offset_y == -fx(1) / 2);
     CHECK(std::abs(reg->eye_offset_z - (fx(1) + fx(1) * 2 / 5)) <= 2);
     // A head barely above Position stores the raw 0.05 u offset (no floor).
-    w.cached.local_head_offset = Vec3{0.0f, 0.0f, 0.05f};
+    pose.offset = Vec3{0.0f, 0.0f, 0.05f};
     run_ticks(ai, w, 8, 10);
     CHECK(reg->eye_offset_x == 0);
     CHECK(reg->eye_offset_y == 0);
     CHECK(std::abs(reg->eye_offset_z - 3277) <= 3);
-    w.cached.local_head_offset_valid = false; // sample lost -> capsule formula returns
+    pose.available = false; // no model -> capsule formula returns
     run_ticks(ai, w, 10, 12);
     CHECK(reg->eye_offset_z == 0xD000);
     CHECK(reg->eye_offset_x == 0); // stale head laterals reset with the sample
@@ -3625,10 +3706,12 @@ void test_out_of_range_enemy_is_approached() {
     red = ai.at(0); // attach can reallocate the AI pool; reacquire the first body
 
     bool saw_approach = false;
+    bool saw_fight_after_approach = false;
     double closest = 1e30;
     for (uint32_t tick = 0; tick < 96; ++tick) {
         run_ticks(ai, w, tick, tick + 1);
         closest = std::min(closest, std::hypot(double(blue->pos[0] - red->pos[0]), double(blue->pos[1] - red->pos[1])));
+        if (saw_approach && blue->inf.move_mode == 7) saw_fight_after_approach = true;
         if (blue->inf.move_mode == 1) {
             saw_approach = true;
             CHECK(blue->inf.arrival_radius == 655360);
@@ -3638,7 +3721,7 @@ void test_out_of_range_enemy_is_approached() {
     // The goal now reaches gait selection in the same think, so this soldier
     // actually closes and then fights. A permanently approaching pose is wrong.
     CHECK(closest < fx(1));
-    CHECK(blue->inf.move_mode == 7);
+    CHECK(saw_fight_after_approach);
 }
 
 // ---- the weapon channel on the retail data (SKIP-LEG without OPENNOVA_JO_ASSETS) ----
@@ -3774,6 +3857,8 @@ static void test_retail_weapon_channel_holds() {
             rifle_reload >= 0 ? kInfantryAnimNames[rifle_reload] : "?", rig.local.weapon.slot.current);
     CHECK(rifle_reload == anim_state::kReload);
     CHECK(rig.local.weapon.slot.current == weapon_action::kReload); // mid-reload: FSM in RELOAD
+    rig.tick(); // initialize the requested reload at the next motor head
+    CHECK(pa->inf.weapon_clip_state() == anim_state::kReload);
     phase_a = pa->inf.wpn_clip_phase;
     for (int t = 0; t < 4; ++t) rig.tick();
     phase_b = pa->inf.wpn_clip_phase;
@@ -3845,7 +3930,8 @@ static void test_find_and_use_attachment_motor() {
     w.ai.tick_infantry(e, w, 8);
     CHECK(e.inf.move_mode == 6);
     CHECK(e.inf.arrival_radius == fx(1));
-    CHECK(e.pos[0] > 0);
+    CHECK(e.pos[0] == 0); // selection requests movement; this tick sampled idle
+    CHECK(e.inf.body_clip_state() == anim_state::kIdle);
     const int32_t before_x = e.pos[0], before_z = e.pos[2];
     const int32_t before_phase = e.inf.clip_phase;
     CHECK(w.commands.apply_ai_command(42, EntityCommands::kAiNodePath, 1, 0, 0));
@@ -4756,7 +4842,7 @@ int main() {
         // That tick starts the 10-tick walk->idle blend, whose retained primary root
         // carries the body a bounded distance beyond the radius edge.
         run_ticks(ai, w, 0, 33);
-        CHECK(e->pos[0] == 212165);                 // first idle-blend sample included
+        CHECK(e->pos[0] == 204793);                 // the arrival tick still samples walk
         CHECK(e->inf.wait_cooldown == 16);          // (248 + 8) >> 4, stamped at t=32
         CHECK(e->slot.f[38] == 1);                  // advanced past node0
         CHECK(ai.relmat_calls.size() == 2);         // SetBitB + SetBitA at the arrival
@@ -4770,19 +4856,29 @@ int main() {
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->inf.wait_cooldown == 6);
 
-        run_ticks(ai, w, 200, 320); // hold expires, then blended walk/idle reaches node1
-        CHECK(e->pos[0] == 372717);                 // bounded stop inside node1 radius
-        CHECK(e->slot.f[38] == 1);                  // one-shot end pins the last node
+        run_ticks(ai, w, 200, 320); // hold expires; the next approach is still moving
+        CHECK(e->pos[0] == 458737);
+        CHECK(e->slot.f[38] == 1);
+        CHECK(e->inf.anim_state == anim_state::kJogForward);
+        CHECK(e->inf.wait_cooldown == 0);
+        CHECK(!w.script.relations.group_visited(4, 1, 1));
+
+        // Sampling the previous clip on each selection tick changes the near-goal
+        // turn. Pin the resulting arrival and then its stationary one-shot hold.
+        run_ticks(ai, w, 320, 1200);
+        CHECK(e->pos[0] == 437272);
+        CHECK(e->pos[1] == -38987);
         CHECK(e->inf.anim_state == anim_state::kIdle);
-        CHECK(e->inf.wait_cooldown == 20);          // end-of-path cooldown
+        CHECK(e->inf.wait_cooldown == 13);
         CHECK(w.script.relations.group_visited(4, 1, 1));
         CHECK(w.script.relations.single_visited(8, 1, 1));
-
+        CHECK(std::hypot(double(e->pos[0] - fx(6)), double(e->pos[1])) < fx(1));
         const size_t marks = ai.relmat_calls.size();
-        run_ticks(ai, w, 320, 1200); // parked: cooldown re-arms, never moves again
-        CHECK(e->pos[0] == 372717);
-        CHECK(e->pos[1] == 0);
+        run_ticks(ai, w, 1200, 1400);
+        CHECK(e->pos[0] == 437272);
+        CHECK(e->pos[1] == -38987);
         CHECK(ai.relmat_calls.size() > marks); // re-arrivals keep marking the matrix
+
     }
 
     // ---- movetimer facing: arrival turns the body to the marker's authored heading ----
@@ -4835,7 +4931,10 @@ int main() {
         run_ticks(ai, w, 1, 17);
         CHECK(e->inf.anim_state == anim_state::kWalkForward);
         CHECK(e->inf.anim_pending == 0);
+        CHECK(e->inf.body_clip_state() == 115);
+        run_ticks(ai, w, 17, 18);
         CHECK(e->inf.anim_prev == 115);
+        CHECK(e->inf.body_clip_state() == anim_state::kWalkForward);
     }
 
     // ---- death edge: one-shot pose pick + freeze ----
@@ -5514,9 +5613,9 @@ int main() {
         // 31 pending [orig: @0x4b7ef2/@0x4b7efc].
         CHECK(e->inf.anim_state == anim_state::kJumpStart);
         CHECK(e->inf.anim_pending == anim_state::kJumpLoop);
-        // Third 15-tick blend sample: trunc(0x4000 * 0.2000000179f) = 3276;
-        // the jump carries three quarters of that current root step.
-        CHECK(e->inf.vel[0] == 2457);
+        // The second blend sample follows the tick-0 gait request:
+        // trunc(0x4000 * (2/15)) = 2184; the jump carries three quarters.
+        CHECK(e->inf.vel[0] == 1638);
         run_ticks(ai, w, 3, 4);
         CHECK(e->inf.vel[2] == 0x1600 - 208); // org2 per-tick gravity
         CHECK(e->pos[2] > floor_z);           // rising
@@ -5695,13 +5794,14 @@ int main() {
     test_local_player_stale_airborne_word_lands_first();
     test_ledge_edge_carried_bit_by_motor();
     test_local_player_uplink_carries_the_jump_bit();
+    test_motor_samples_existing_clip_before_selection();
     test_recoil_and_weapon_weight_kernels();
     test_hurt_volume_updates_registry_health();
     test_remote_player_body_publishes_exact_change_team_contact();
     test_registry_max_health_drives_wounded_gait();
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();
-    test_player_root_uses_same_tick_body_heading();
+    test_player_root_uses_motor_head_body_heading();
     test_npc_ledge_fall_keeps_clip();
     test_dead_player_ledge_fall_edge_is_suppressed();
     test_player_idle_skip_throttle_no_bounce();

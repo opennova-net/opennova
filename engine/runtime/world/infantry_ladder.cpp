@@ -97,7 +97,7 @@ void AiSystem::infantry_ladder_override(AiEntity &e, Entity *tick_entity) {
     auto stamp = [&](int state) {
         if (root_motion == nullptr || !root_motion->has_clip(inf.adm_id, state))
             return;
-        inf.begin_body_transition(state);
+        inf.request_body_animation(state);
         inf.anim_pending = 0;
     };
     if (!inf.player_moving) {
@@ -173,7 +173,7 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
     // @ 0x4bfa2d / @ 0x4bfad8 / @ 0x4bfacc]
     auto stamp_keep_pending = [&](int state) {
         const int pending = inf.anim_pending;
-        inf.begin_body_transition(state);
+        inf.request_body_animation(state);
         inf.anim_pending = pending;
     };
     const LadderContact &lf = collision->last_ladder_frame;

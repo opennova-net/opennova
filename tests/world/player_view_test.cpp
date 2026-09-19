@@ -907,7 +907,7 @@ void test_tp_effective_distance_march() {
     CHECK(player_view_tp_effective_distance(512.0f) == 512.0f);
 }
 
-// The FP leg: the doubled recoil, the torso+lean/4 roll, the 0.125 eye floor,
+// The FP leg: the doubled recoil, the torso+lean/4 roll, the motor eye,
 // and the 0.1875 pull-back along the (recoiled) forward.
 void test_compose_camera_first_person() {
     PlayerViewState v;
@@ -927,11 +927,11 @@ void test_compose_camera_first_person() {
     CHECK(near_eq(pose.eye[0], anchor[0] - 0.1875f * std::cos(2.0f * 3.14159265f / 180.0f), 0.001f));
     CHECK(near_eq(pose.eye[2], anchor[2] - 0.1875f * std::sin(2.0f * 3.14159265f / 180.0f), 0.001f));
 
-    // The floor: an anchor below position + 0.125 clamps up [orig: @ 0x4b6b98].
+    // The exact motor eye passes through without the capsule fallback floor.
     const float low_anchor[3] = {10.0f, 20.0f, 5.0f};
     player_view_compose_camera(v, position, low_anchor, true, nullptr, false,
             0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(near_eq(pose.eye[2], 5.125f, 0.001f));
+    CHECK(near_eq(pose.eye[2], 5.0f, 0.001f));
 
     // No anchor: the non-person +1.0 bump over position [orig: @ 0x437e8f].
     player_view_compose_camera(v, position, position, false, nullptr, false,
@@ -960,14 +960,17 @@ void test_compose_camera_terrain_floor() {
     PlayerViewState v;
     // Mission y = -4 samples atlas z = +4 (the engine-y -> atlas-z negation).
     const float position[3] = {100.0f, -4.0f, 5.0f};
-    const float anchor[3] = {100.0f, -4.0f, 6.6f}; // below terrain 8.0
+    float anchor[3] = {100.0f, -4.0f, 6.6f}; // below terrain 8.0
     PlayerCameraPose pose;
+    player_view_floor_eye_to_terrain(&field, false, anchor);
     player_view_compose_camera(v, position, anchor, true, &field, false,
             0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
     // yaw 0 pitch 0: fwd = (0, 1, 0); the pull-back rides Y, the Z is the
     // floored eye = 8.0 + 0.0625.
     CHECK(near_eq(pose.eye[2], 8.0625f, 0.001f));
 
+    anchor[2] = 6.6f;
+    player_view_floor_eye_to_terrain(&field, true, anchor);
     // INDOORS skips the floor [orig: the Flags & 0x800000 gate @ 0x4b6c08].
     player_view_compose_camera(v, position, anchor, true, &field, true,
             0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
@@ -989,6 +992,7 @@ void test_compose_camera_terrain_floor() {
     // the +0.25 probe's bilinear tap — the max fold over the five samples.
     // Column x=101 at 24.0u: probe x=100.25 -> 8 + (24-8)*0.25 = 12.0.
     for (int z = 0; z < kDim; ++z) heightmap[z * kDim + 101] = 24 * 256;
+    player_view_floor_eye_to_terrain(&field, false, anchor);
     player_view_compose_camera(v, position, anchor, true, &field, false,
             0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
     CHECK(near_eq(pose.eye[2], 12.0625f, 0.001f));

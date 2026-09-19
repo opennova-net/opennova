@@ -365,9 +365,14 @@ struct InfantryState {
 	int anim_state = anim_state::kIdle;   // entity[175]
     int anim_pending = 0;                 // entity[174]
     int anim_prev = anim_state::kIdle;    // entity[178]
+    // The request is entity+0x2BC; the playing id is AnimMap slot+0x3C.
+    // Body selection only writes the request. The next motor-head update
+    // commits it and advances the corresponding playheads together.
+    // [orig: AnimMap_UpdateEntity @0x40B633..0x40B779]
+    int anim_playing_state = -1;
     int32_t clip_phase = 0;
     // The primary AnimMap keeps both playheads alive while it cross-fades state
-    // changes. The target channel is anim_state/clip_phase; anim_prev owns this
+    // changes. The target channel is anim_playing_state/clip_phase; anim_prev owns this
     // independent old-channel phase. The float32 weight is accumulated by 0.1
     // normally, or 1/15 when the target state has flag 0x400.
     // [orig: AnimMap_UpdateEntity @0x40b5f0; AnimChannel_InitFromParams @0x410640]
@@ -375,13 +380,24 @@ struct InfantryState {
     float anim_blend_weight = 1.0f;
     float anim_blend_step = 0.0f;
 
+    int body_clip_state() const {
+        return anim_playing_state >= 0 ? anim_playing_state : anim_state;
+    }
+    void request_body_animation(int state) {
+        anim_state = state;
+        anim_pending = 0;
+    }
+
     bool body_blend_active() const { return anim_blend_weight < 1.0f; }
 
     // `blend_key_state` is the state whose flags pick the blend duration when
     // it differs from the played clip (the gait->stance insert); -1 = the
     // target itself.
     void begin_body_transition(int target_state, int blend_key_state = -1) {
-        if (target_state == anim_state) {
+        const int playing = body_clip_state();
+        anim_state = target_state;
+        anim_playing_state = target_state;
+        if (target_state == playing) {
             anim_pending = 0;
             return;
         }
@@ -389,10 +405,9 @@ struct InfantryState {
         // only secondary B with C. Once a blend has completed, the playing target
         // becomes the next transition's primary.
         if (!body_blend_active()) {
-            anim_prev = anim_state;
+            anim_prev = playing;
             anim_prev_clip_phase = clip_phase;
         }
-        anim_state = target_state;
         anim_pending = 0;
         clip_phase = 0;
         anim_blend_weight = 0.0f;
@@ -409,17 +424,16 @@ struct InfantryState {
                         : 0.1f;
     }
 
-    // A raw animStateId store still retargets the presentation channel, but
-    // leaves the independent pending state intact. Script and ladder stores
+    // A raw animStateId store leaves both the playing channel and the
+    // independent pending state intact. Script and ladder stores
     // use this form. [orig: WacCmd_SsnAnim @0x4F7630; WacCmd_Anim @0x4ED5B0]
     void store_body_animation(int state) {
-        const int pending = anim_pending;
-        begin_body_transition(state);
-        anim_pending = pending;
+        anim_state = state;
     }
 
     void reset_body_animation(int state = opennova::world::anim_state::kIdle) {
         anim_state = state;
+        anim_playing_state = state;
         anim_pending = 0;
         anim_prev = state;
         clip_phase = 0;
@@ -486,6 +500,7 @@ struct InfantryState {
     // [orig: AnimMap_UpdateDualChannels @ 0x40b8c0; witness world-wac-ai-re.md §14.8]
     int wpn_state = anim_state::kIdle;    // entity+0x2C8
     int wpn_deferred = 0;                 // entity+0x2C4
+    int wpn_playing_state = -1;        // secondary AnimMap slot+0x3C
     int32_t wpn_clip_phase = 0;
     // The secondary channel cross-fades its state changes exactly as the primary
     // does: AnimMap_UpdateEntity is the SHARED body both channels run through
@@ -506,6 +521,11 @@ struct InfantryState {
     int32_t wpn_variant = 0;
     int32_t wpn_prev_variant = 0; // the outgoing clip's served variant
 
+    int weapon_clip_state() const {
+        return wpn_playing_state >= 0 ? wpn_playing_state : wpn_state;
+    }
+    void request_weapon_animation(int state) { wpn_state = state; }
+
     bool weapon_blend_active() const { return wpn_blend_weight < 1.0f; }
 
     // Re-init the secondary channel onto `target_state`, keeping the outgoing
@@ -517,13 +537,15 @@ struct InfantryState {
     // [orig: AnimMap_PlayAnimBySlot @0x40bda0: animEntry = slot[i]; slot[i] = next;
     //  animState+68 = animEntry].
     void begin_weapon_transition(int target_state, int ring_size = 1) {
-        if (target_state == wpn_state) return;
+        const int playing = weapon_clip_state();
+        wpn_state = target_state;
+        wpn_playing_state = target_state;
+        if (target_state == playing) return;
         if (!weapon_blend_active()) {
-            wpn_prev = wpn_state;
+            wpn_prev = playing;
             wpn_prev_clip_phase = wpn_clip_phase;
             wpn_prev_variant = wpn_variant;
         }
-        wpn_state = target_state;
         wpn_clip_phase = 0;
         wpn_blend_weight = 0.0f;
         wpn_blend_step =
@@ -548,6 +570,7 @@ struct InfantryState {
 
     void reset_weapon_animation(int state = opennova::world::anim_state::kIdle) {
         wpn_state = state;
+        wpn_playing_state = state;
         wpn_deferred = 0;
         wpn_prev = state;
         wpn_clip_phase = 0;
@@ -650,7 +673,7 @@ struct InfantryState {
     // lateral = (delta * sinQ22(lean) * 3) >> 2 rotated by heading —
     // x = +lat*sin(yaw), y = -lat*cos(yaw) [orig: Entity_UpdateInfantryAI
     // @0x4bf078..0x4bf14c — stores @0x4bf141/0x4bf149/0x4bf14c]. LOCAL player
-    // with a shell-fed head sample: the exact posed-head-minus-Position triple,
+    // with a current simulation head pose: the exact posed-head-minus-Position triple,
     // the head z first floored to the five-tap terrain column when on foot
     // (indoors exempt), no 0x2000 floor on either exact leg [orig: on-foot
     // @0x4b6bb3..0x4b6cc8 (taps @0x4b6c1e..0x4b6c95); mounted
@@ -796,7 +819,7 @@ void infantry_weapon_weight_spread_tick(
 // fire plays only the FP clip on the weapon adm + the .3di control registers). Written
 // IMMEDIATELY — it bypasses the selection commit's locked/emote defer.
 // [orig: WeaponAction_Fire @ 0x542bbc..0x542bea — +0x2C8 = state, +0x2C4 = 0]
-void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind, int ring_size = 1);
+void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind);
 
 // Stamp the witnessed 20-tick arms dip when this entity observes a different resolved
 // held AnimMap identity. Serial 0 means no mounted weapon map. Keeping the observed

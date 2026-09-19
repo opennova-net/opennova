@@ -472,7 +472,7 @@ Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
 				entity != nullptr && mount_blocks_weapon_channel(*entity);
 		if (p && entity && opennova::world::infantry_weapon_channel_visible(
 					p->inf, w.active, blocked_mount)) {
-			v.body_anim_key = opennova::world::infantry_anim_key(p->inf.wpn_state);
+			v.body_anim_key = opennova::world::infantry_anim_key(p->inf.weapon_clip_state());
 			v.body_anim_phase = p->inf.wpn_clip_phase;
 			v.body_anim_variant = p->inf.wpn_variant;
 			if (p->inf.weapon_blend_active()) {

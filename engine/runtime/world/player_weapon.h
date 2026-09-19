@@ -180,9 +180,6 @@ struct LocalPlayerWeapon {
     bool presentation_pending = false;
     bool nvg_scope_restore = false;
 
-    float eye_mission[3] = {0.0f, 0.0f, 0.0f};
-    bool eye_valid = false;
-
     std::vector<WeaponPresentationEvent> events;
 
     // The F3 Weapon window's tick trace (devtools only). Disarmed by default:

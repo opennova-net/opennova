@@ -553,22 +553,10 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
     t.tick_prev_pos[1] = e->position.y;
     t.tick_prev_pos[2] = e->position.z;
     t.tick_prev_valid = true;
-    // The anchor-chase target is Position + CameraOffset -- the posed head-bone
-    // eye [orig: ThirdPersonCamera_Update @0x437b70..76], fed by the shell's
-    // per-frame skeleton sample (w.eye_mission). Without a sample: Position +
-    // 1.0, the witnessed NON-person bump [orig: @0x437e8f].
-    float eye[3] = {
-        w.eye_valid ? w.eye_mission[0] : e->position.x,
-        w.eye_valid ? w.eye_mission[1] : e->position.y,
-        w.eye_valid ? w.eye_mission[2] : e->position.z + 1.0f,
-    };
-    // The chase target inherits the CameraOffset terrain floor: retail's
-    // producer floors the head-bone eye before the store the chase reads
-    // (D-INF-18; the witnessed walk is player_view_floor_eye_to_terrain).
-    if (w.eye_valid) {
-        player_view_floor_eye_to_terrain(world->ai.terrain,
-                                         (e->flags & kEntityFlagIndoors) != 0, eye);
-    }
+    // Chase the current motor's CameraOffset, re-anchored after movement.
+    // [orig: ThirdPersonCamera_Update @0x437B70..0x437B76]
+    const Vec3 current_eye = player_eye_position(*e);
+    const float eye[3] = {current_eye.x, current_eye.y, current_eye.z};
     player_view_tick(v, eye);
     // The per-quantum camera compose advances the three shake IIR filters
     // from the tick's weather PRNG word (the deltas it yields are overwritten
@@ -584,27 +572,6 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
         int32_t d_roll = 0;
         camera_shake_sample(v.shake, world->weather.core.oscillator.prng, d_yaw, d_pitch, d_roll);
     }
-}
-
-void local_player_set_eye(World *world, LocalPlayerWeapon &w, const float eye_mission[3],
-                          bool valid) {
-    w.eye_mission[0] = eye_mission[0];
-    w.eye_mission[1] = eye_mission[1];
-    w.eye_mission[2] = eye_mission[2];
-    w.eye_valid = valid;
-    // Mirror into the world so the infantry body tick can restamp the local
-    // eye-offset triple from the exact posed head (the D-HUD-20 local leg).
-    if (world != nullptr) {
-        world->cached.local_head = Vec3{eye_mission[0], eye_mission[1], eye_mission[2]};
-        world->cached.local_head_valid = valid;
-    }
-}
-
-void local_player_set_eye_offset(World *world, const float offset_mission[3], bool valid) {
-    if (world == nullptr) return;
-    world->cached.local_head_offset =
-        Vec3{offset_mission[0], offset_mission[1], offset_mission[2]};
-    world->cached.local_head_offset_valid = valid;
 }
 
 void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
@@ -727,28 +694,13 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     float aim_yaw = static_cast<float>(mission_yaw_deg_from_bam_heading(p->heading));
     float aim_pitch = static_cast<float>(static_cast<double>(p->pitch) * kDegreesPerBam);
     const float position[3] = {e->position.x, e->position.y, e->position.z};
-    // The eye is Position + CameraOffset, NOT an absolute head point. Retail
-    // restamps CameraOffset as (head - Position) from a skeleton it poses in
-    // the SAME tick, and the camera adds that delta back to the LIVE position
-    // every frame. The shell's head sample comes from the rendered avatar, so
-    // it is a frame stale as an absolute point -- 0.6 u of error on foot, but
-    // 5-7 u in a helicopter at ~69 u/s, which put the camera behind and below
-    // the aircraft looking at its own underside. Re-anchoring the stored
-    // OFFSET to the live position removes that: a seated pilot's offset barely
-    // changes between frames while his position moves a whole unit per tick.
-    // [orig: Entity_UpdateInfantryPlayerBody @0x4b6908 -- the MOUNTED local
-    //  eye leg (selector @0x4b66d0, unfloored) stores head-Position into
-    //  +0x6C/+0x70/+0x74; Camera_ComputeThirdPersonView @0x437fa5..0x437fb7
-    //  adds the triple to the tracked entity's position]
-    float anchor_eye[3] = {w.eye_mission[0], w.eye_mission[1], w.eye_mission[2]};
-    const bool seated_eye = e->mounted && (e->eye_offset_x != 0 || e->eye_offset_y != 0 ||
-                                           e->eye_offset_z != 0);
-    if (seated_eye) {
-        anchor_eye[0] = position[0] + static_cast<float>(from_fixed(e->eye_offset_x));
-        anchor_eye[1] = position[1] + static_cast<float>(from_fixed(e->eye_offset_y));
-        anchor_eye[2] = position[2] + static_cast<float>(from_fixed(e->eye_offset_z));
-    }
-    player_view_compose_camera(v, position, anchor_eye, seated_eye || w.eye_valid,
+    // CameraOffset already includes the current motor's posed head and its
+    // on-foot terrain floor. Re-anchor it after the motor's translation.
+    // [orig: Camera_ComputeThirdPersonView @0x437FA5..0x437FB7]
+    const Vec3 current_eye = player_eye_position(*e);
+    const float anchor_eye[3] = {current_eye.x, current_eye.y, current_eye.z};
+    const bool seated_eye = e->mounted;
+    player_view_compose_camera(v, position, anchor_eye, p->inf.active,
                                world->ai.terrain,
                                (e->flags & kEntityFlagIndoors) != 0, aim_yaw, aim_pitch,
                                p->inf.recoil_pitch, p->inf.torso_roll, p->inf.lean_angle,
