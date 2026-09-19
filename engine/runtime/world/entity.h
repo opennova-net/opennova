@@ -364,6 +364,20 @@ struct Entity {
     // placement matrix [orig: Entity_ComputeWeaponFireOrigin @0x43b5d4..0x43b5f6].
 	uint8_t look_userpoint_byte = 0; // def+1351, LOOK; fire-validation LOS origin
 	uint8_t target_userpoint_byte = 0;
+	// The mounted first-person camera sources (world/local_player_view.h,
+	// local_player_mounted_camera). An EWEAP resolves the "CAMERA" userpoint of
+	// its OWN model (entity+0x318, 1-based, 0 = none). A carrier whose def
+	// authors `virtualdisplay <model> <userpoint>` carries that userpoint's
+	// record position out of the VIRTUAL-DISPLAY model; retail keeps the byte
+	// def+0x1C0 and reads the record at use. input_class is the def's
+	// `input_function` row: 0 null, 1 troop, 2 tank.
+	// [orig: Entity_InitBoneReferences @0x4414A9..0x4414B4;
+	//  EntityDef_LoadModelsAndCallbacks @0x43A5D3..0x43A644; rows @0x829DA8]
+	uint8_t camera_userpoint_byte = 0;
+	uint8_t input_class = 0;
+	bool virtual_display_camera = false;
+	int32_t virtual_display_camera_q16[3] = {};
+	std::string virtual_display_model; // the cockpit graphic key, lowercased
 	int32_t item_unit_type = 0; // raw ItemDef unit_type; vehicle minimap icon selector
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
                                 // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]

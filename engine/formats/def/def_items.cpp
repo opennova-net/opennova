@@ -350,6 +350,24 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
 			consume_value_str(
 					trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
 			parsed = 1;
+		} else if (lower_match_key(lower, ll, "input_function", 14)) {
+			consume_value_str(
+					trimmed, tlen, 14, current.input_function, sizeof(current.input_function));
+			parsed = 1;
+		} else if (lower_match_key(lower, ll, "virtualdisplay", 14)) {
+			/* [orig: ItemDef_ParseProperty @0x49F4E0 -- token 2 -> def+0xD0,
+			   token 3 -> def+0xE0] */
+			size_t vl;
+			const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+			Token display[2];
+			const int n = tokenize(v, vl, display, 2);
+			if (n >= 1)
+				safe_copy(current.virtual_display, sizeof(current.virtual_display),
+						display[0].s, display[0].len);
+			if (n >= 2)
+				safe_copy(current.virtual_display_userpoint,
+						sizeof(current.virtual_display_userpoint), display[1].s, display[1].len);
+			parsed = 1;
         /* [orig: ItemDef_ParseProperty @ 0x4A1823, def+0x56B / +0x58B] */
 		} else if (lower_match_key(lower, ll, "ammo_closeattack", 16)) {
 			consume_value_str(

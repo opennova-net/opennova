@@ -191,10 +191,13 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 		return int((((int64_t(a) * a << 16) / kAglRangeSquared) * bar_height + io::kFp16OneInt / 2) >> 16);
 	};
 	const int marker = bar_y + bar_height - curve(500 - limited);
-	// This rectangle is a color-target clear, not the readout's wire outline.
-	// [orig: sub_5D48E0 @0x5D4942 -> IDirect3DDevice9::Clear @0x67719B]
+	// This rectangle is a colour-target CLEAR, not the readout's wire outline:
+	// a device clear ignores the authored alpha (stock AGLCOLOR carries 0x41) and
+	// writes the colour opaque.
+	// [orig: sub_5D48E0 @0x5D48E0 -> CGfxTextOverlay_Draw(rect, 1) @0x5D493D ->
+	//  the device vtbl+0xAC clear @0x67719B]
 	emit_rect(sx(float(l.agl_left), w), float(marker - bar_height), float(right), float(marker),
-			l.agl_color, true);
+			l.agl_color | 0xFF000000u, true);
 	for (int a = 500; a >= 0; a -= 100) {
 		const float y = float(marker + curve(a) - bar_height);
 		draw_list_.lines.push_back({ float(right), y, float(right + 4), y, 1, l.agl_color });

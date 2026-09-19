@@ -16,6 +16,9 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/mount_controls.h>
+#include <runtime/world/pose_provider.h>
 #include <runtime/world/death_camera.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed
@@ -584,6 +587,115 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
     }
 }
 
+bool local_view_draws_virtual_display(const World &world, const PlayerViewState &v,
+		const Entity &vehicle) {
+    const VehicleTraits *traits = world.vehicles.traits.get(vehicle.item_id);
+    return traits != nullptr && traits->render_family == VehicleRenderFamily::Tank &&
+            world.cached.local_player.valid() &&
+            vehicle.primary_occupant == world.cached.local_player && v.camera_mode == 0;
+}
+
+bool local_player_seat_bone_pose(World &world, const Entity &rider, int32_t out[6]) {
+    if (!rider.mounted) return false;
+    const Entity *parent = world.registry.get(rider.mount_target);
+    if (parent == nullptr) return false;
+    const AiEntity *body = world.ai.for_handle(rider.handle);
+    const bool posable = parent->has_item_def &&
+            (parent->item_attrib & kItemAttribEweap) != 0 && world.collision != nullptr &&
+            world.collision->entity_model_id(parent->handle) >= 0;
+    if (parent->has_item_def && !posable) {
+        // Not an EWEAP, or no model to pose: the rider's own Position +
+        // CameraOffset and rotation triple. [orig: @0x545EB7..0x545EEA;
+        //  the no-skeleton copy @0x545F17..0x545F4E]
+        out[0] = io::bam_add(body ? body->pos[0] : to_fixed(rider.position.x),
+                body ? body->inf.eye_offset_x : rider.eye_offset_x);
+        out[1] = io::bam_add(body ? body->pos[1] : to_fixed(rider.position.y),
+                body ? body->inf.eye_offset_y : rider.eye_offset_y);
+        out[2] = io::bam_add(body ? body->pos[2] : to_fixed(rider.position.z),
+                body ? body->inf.eye_offset_z : rider.eye_offset_z);
+        out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(rider.yaw);
+        out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
+        out[5] = bam_from_degrees_wrapped(rider.roll);
+        return true;
+    }
+    // [orig: CAMERA byte parent+0x318 @0x545F5B; the posed record and its
+    //  part euler @0x545F69..0x546098; no byte (or no def) -> the gun's raw
+    //  pose @0x5460AD..0x5460CC]
+    if (parent->has_item_def && parent->camera_userpoint_byte != 0 &&
+            world.pose_provider != nullptr &&
+            world.pose_provider->resolve_userpoint_transform(
+                    world, parent->handle, parent->camera_userpoint_byte, out))
+        return true;
+    out[0] = to_fixed(parent->position.x);
+    out[1] = to_fixed(parent->position.y);
+    out[2] = to_fixed(parent->position.z);
+    out[3] = emplaced_gun_frame_heading(*parent);
+    out[4] = emplaced_gun_frame_pitch(*parent);
+    out[5] = bam_from_degrees_wrapped(parent->roll);
+    return true;
+}
+
+bool local_player_mounted_camera(World &world, const Entity &rider, int32_t out[6]) {
+    if (!rider.mounted) return false;
+    const Entity *parent = world.registry.get(rider.mount_target);
+    if (parent == nullptr || !parent->has_item_def) return false;
+    // Mode 0 opens with the rider's own Position and rotation triple; the
+    // callbacks rewrite what they own. [orig: @0x437D6F..0x437D9B]
+    const AiEntity *body = world.ai.for_handle(rider.handle);
+    out[0] = body ? body->pos[0] : to_fixed(rider.position.x);
+    out[1] = body ? body->pos[1] : to_fixed(rider.position.y);
+    out[2] = body ? body->pos[2] : to_fixed(rider.position.z);
+    out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(rider.yaw);
+    out[4] = body ? body->pitch : bam_from_degrees_wrapped(rider.pitch);
+    out[5] = bam_from_degrees_wrapped(rider.roll);
+    if (parent->virtual_display_camera) {
+        // Every input row carries a camera callback, so def+0x174 never fails
+        // the gate; def+0x1C0 is the virtual-display userpoint byte.
+        // [orig: gates @0x437DC7 / @0x437DD3; vehicle arm @0x437DDF..0x437E2E;
+        //  ground-entity arm @0x437E38..0x437E57 (slot flag +0x4D2 & 8);
+        //  parent arm @0x437E61..0x437E72]
+        const Entity *carrier = parent;
+        if (parent->item_type != 1) {
+            const Entity *ground = world.registry.get(parent->ground_target);
+            if (ground != nullptr && ground->has_item_def &&
+                    ground->primary_weapon_slot.redirect_to_parent_slot)
+                carrier = ground;
+        }
+        if (carrier->input_class == 2) {
+            // [orig: tank camera callback @0x44A190 -- record position through
+            //  the carrier matrix @0x44A22D..0x44A24C, the view-rotation matrix
+            //  @0x44A272, the (-0x3000, 0, 0) pull-back @0x44A27E..0x44A292]
+            if (!carrier->virtual_display_camera) return false;
+            int32_t eye[3];
+            entity_placement_matrix(*carrier).transform_point(
+                    carrier->virtual_display_camera_q16, eye);
+            const int32_t back[3] = {-0x3000, 0, 0};
+            collision_matrix_from_euler(out[3], out[4], out[5], eye).transform_point(back, out);
+            return true;
+        }
+        // [orig: null / troop camera callback @0x4DC710 -- Position +
+        //  CameraOffset (+0x6C) and the carrier's own rotation triple]
+        const AiEntity *carrier_body = world.ai.for_handle(carrier->handle);
+        out[0] = io::bam_add(to_fixed(carrier->position.x), carrier->eye_offset_x);
+        out[1] = io::bam_add(to_fixed(carrier->position.y), carrier->eye_offset_y);
+        out[2] = io::bam_add(to_fixed(carrier->position.z), carrier->eye_offset_z);
+        out[3] = carrier_body ? carrier_body->heading
+                : carrier->veh.yaw_seeded ? carrier->veh.yaw_bam
+                                          : bam_heading_from_mission_yaw_deg(carrier->yaw);
+        out[4] = carrier_body ? carrier_body->pitch : bam_from_degrees_wrapped(carrier->pitch);
+        out[5] = carrier_body ? carrier_body->roll : bam_from_degrees_wrapped(carrier->roll);
+        return true;
+    }
+    // The seat-bone leg: an EWEAP that is not PlayerControl, a Person rider.
+    // [orig: attrib & 0x20 && !(attrib & 0x40) @0x437E7C..0x437E87; the
+    //  Person gate @0x437E89; Entity_GetBoneWorldPosition @0x437EA8]
+    if ((parent->item_attrib & kItemAttribEweap) == 0 ||
+            (parent->item_attrib & kItemAttribPlayerControl) != 0)
+        return false;
+    if (!rider.has_item_def || rider.item_type != 3) return false;
+    return local_player_seat_bone_pose(world, rider, out);
+}
+
 // HUD stance differs from the body's animation stance while mounted.
 // [orig: HUD_BuildEntityInfo @0x4B8440 -- MoveOrder stance @0x4B860C..0x4B8636,
 //  seat switch @0x4B863D..0x4B8767, organic mounted @0x4B876D..0x4B8779,
@@ -771,6 +883,28 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
                                // entirely. The roll is the seat-carried hull bank the
                                // mount pose wrote, never the standing torso tilt.
                                seated_eye, static_cast<float>(e->roll), out.camera);
+    // A seated first-person view belongs to the carrier: its virtual-display
+    // camera callback, or the gun's posed CAMERA userpoint. Chase (mode 1) and
+    // the death lerp never reach this leg.
+    // [orig: Camera_ComputeThirdPersonView mode 0 @0x437DAC..0x437EAD]
+    int32_t mounted[6];
+    if (seated_eye && !out.camera.third_person && v.camera_mode == 0 &&
+            local_player_mounted_camera(*world, *e, mounted)) {
+        out.camera.eye[0] = static_cast<float>(from_fixed(mounted[0]));
+        out.camera.eye[1] = static_cast<float>(from_fixed(mounted[1]));
+        out.camera.eye[2] = static_cast<float>(from_fixed(mounted[2]));
+        out.camera.yaw_deg = static_cast<float>(mission_yaw_deg_from_bam_heading(mounted[3]));
+        out.camera.pitch_deg = static_cast<float>(static_cast<double>(mounted[4]) * kDegreesPerBam);
+        out.camera.roll_deg = static_cast<float>(static_cast<double>(mounted[5]) * kDegreesPerBam);
+        out.mounted_camera = true;
+    }
+    if (const Entity *vehicle = world->registry.get(e->mount_target)) {
+        if (local_view_draws_virtual_display(*world, v, *vehicle)) {
+            out.virtual_display_active = true;
+            out.virtual_display_carrier = vehicle->handle;
+            out.virtual_display_model = vehicle->virtual_display_model;
+        }
+    }
 	out.inset_camera = out.camera; // unshaken pose, before either scene sample
     // The camera shake, per rendered frame: retail's scene frame calls
     // Camera_ComputeThirdPersonView once more per frame after the per-quantum

@@ -653,6 +653,19 @@ typedef struct DefItemDef {
     char move_function[16];
     char render_function[16];
     char disk_function[16];
+    /* 'input_function <class>': the input class row -- null / troop / tank. Its
+       first callback is the key handler, its second the mounted first-person
+       camera the carrier leg calls. [orig: ItemDef_ParseProperty @0x49F650 ->
+       def+0x168; rows @0x829DA8, resolved by Entity_LookupPhysicsCallbacks
+       @0x497910 into def+0x170 / def+0x174] */
+    char input_function[16];
+    /* 'virtualdisplay <model> <userpoint>': the cockpit model the `tank` render
+       class draws INSTEAD of the hull for the local first-person driver, and the
+       camera userpoint inside it. Stock data: `tankdrvr camera` (M1A1),
+       `t80_drvr camera` (T80). [orig: ItemDef_ParseProperty @0x49F4E0 -- model ->
+       def+0xD0 @0x49F506, userpoint -> def+0xE0 @0x49F521] */
+    char virtual_display[16];
+    char virtual_display_userpoint[16];
     unsigned int attrib;   /* ItemDefAttrib (+0x54) bitmask; attrib: tokens -> bits. AIData 0x100000 = AI class. [orig: ItemDef_ParseProperty; docs/world/itemdef-re.md] */
     unsigned int attrib2;  /* ItemDefAttrib2 (+0x58) bitmask. */
     /* Vehicle physics-property block, scaled AT PARSE exactly like the original loader

@@ -195,6 +195,34 @@ static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
 			e.weapon_userpoint_bytes[slot][field] = bytes[slot * 3 + field];
 }
 
+// The def's `input_function` row and its `virtualdisplay <model> <userpoint>`
+// camera. Retail matches the name over EVERY userpoint of the virtual-display
+// model and keeps the LAST hit as the 1-based byte def+0x1C0; the camera
+// callback then reads that record's position.
+// [orig: EntityDef_LoadModelsAndCallbacks @0x43A5D3..0x43A644 (gate: model
+//  def+0x12C && name def+0xE0); input rows @0x829DA8 null / troop / tank]
+static void resolve_virtual_display_camera(const DefItemDef &def,
+		const CollisionResolveDeps &deps, world::Entity &e) {
+	e.input_class = strutil::iequals(def.input_function, "tank") ? 2
+			: strutil::iequals(def.input_function, "troop")	  ? 1
+															  : 0;
+	e.virtual_display_camera = false;
+	e.virtual_display_model.clear();
+	if (def.virtual_display[0] == '\0' || def.virtual_display_userpoint[0] == '\0') return;
+	const std::string display_key = strutil::to_lower(def.virtual_display);
+	const Threedi3di3 *display = deps.models.model(display_key).get();
+	if (display == nullptr || display->user_points == nullptr) return;
+	e.virtual_display_model = display_key;
+	for (size_t i = 0; i < display->user_point_count; ++i) {
+		const ThreediUserPoint &point = display->user_points[i];
+		if (!strutil::iequals(point.name, def.virtual_display_userpoint)) continue;
+		e.virtual_display_camera = true;
+		e.virtual_display_camera_q16[0] = point.x;
+		e.virtual_display_camera_q16[1] = point.y;
+		e.virtual_display_camera_q16[2] = point.z;
+	}
+}
+
 world::ResolvedCollisionShape collision_shape_for_runtime_type(
 		int runtime_item_id, const DefItemsFile &items,
 		CollisionResolveState &state, const CollisionResolveDeps &deps) {
@@ -539,9 +567,14 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				}
 			}
 			if (!is_organic && (def->attrib & world::kItemAttribEweap) != 0u) {
-				if (const Threedi3di3 *m3 = deps.models.model(key).get())
+				if (const Threedi3di3 *m3 = deps.models.model(key).get()) {
 					resolve_weapon_userpoint_bytes(*def, *m3, *e);
+					// The gun's own first-person camera userpoint.
+					// [orig: Entity_InitBoneReferences @0x4414A9..0x4414B4 -> +0x318]
+					e->camera_userpoint_byte = userpoint_index_by_name(*m3, "CAMERA");
+				}
 			}
+			resolve_virtual_display_camera(*def, deps, *e);
 			if (is_organic) {
 				deps.pose.remove_entity(h);
 				// S3 (ADR 0028): the native skeletal source resolves from

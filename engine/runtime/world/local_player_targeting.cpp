@@ -123,6 +123,17 @@ void LocalPlayer::update_aim_target() {
         const int32_t forward[3] = {1000 << 16, 0, 0};
         int32_t endpoint[3];
         collision_matrix_from_euler(yaw, pitch, roll, origin).transform_point(forward, endpoint);
+        // A gunner's ray STARTS at the carrier's seat-bone pose (the posed
+        // CAMERA userpoint); only the far point rides the weapon view.
+        // [orig: parentSlot == 3 @0x4B4F1C -> Entity_GetBoneWorldPosition
+        //  @0x4B4F35; every other seat -> Entity_CalcWeaponFirePosition
+        //  @0x4B4F4F; the far point from Entity_BuildCameraFromWeaponView
+        //  @0x4B4EE0]
+        int32_t seat_pose[6];
+        if (weapon.active && view.camera_mode == 0 && e->mounted &&
+                e->mount_type == SeatType::Gunner &&
+                local_player_seat_bone_pose(world_, *e, seat_pose))
+            std::copy_n(seat_pose, 3, origin);
         ProjectileTrace trace;
         trace.owner = e->handle;
         trace.start = {origin[0], origin[1], origin[2]};
