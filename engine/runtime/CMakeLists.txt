@@ -77,6 +77,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_combat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_optical_cues.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/inset_scope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/sight_overlay.cpp # the SIGHTS card row modes + the dotsize cycle
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/scope_circle_mask.cpp # the scoped-view circle mask + its reticle cross/grid
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/feed_format.cpp   # the 0x1E feed line/color policy
@@ -205,6 +208,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/hud_combat_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/hud_impact.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/hud_vehicle_sights.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp

@@ -1578,6 +1578,7 @@ void test_signed_armor_equality_and_damage_state_gates() {
         CHECK(r.world.round_sim.impacts.size() == 1);
         CHECK(r.world.round_sim.active_count == 0);
         CHECK(target->armor_impact == expected_armor);
+		CHECK(r.world.registry.get(r.shooter)->hud_hit_feedback_serial == 1);
         if (expected_damage == 0) {
             CHECK(target->health == 100);
             CHECK(r.world.round_sim.hits.empty());

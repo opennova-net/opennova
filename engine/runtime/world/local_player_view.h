@@ -14,10 +14,12 @@
 
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 #include <runtime/world/entity.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
+#include <runtime/world/hud_combat_feed.h>
 
 namespace opennova::world {
 
@@ -28,6 +30,12 @@ struct World;
 // and its per-tick movement delta, and the local-dead edge the death stamp
 // reads.
 struct LocalPlayerViewTracker {
+	uint8_t hud_hit_feedback_frames = 0;
+	hud::HudServiceState hud_service;
+	std::vector<hud::HudDesignationPoint> hud_designations;
+	// A failed impact preview resets its point, but retains the last range.
+	// [orig: Player_UpdatePerFrame @0x4DE9F2, miss @0x4DEADE..0x4DEB43]
+	int32_t hud_impact_distance_q16 = 0;
     // The binocular ACTIVATION seeds one fixed-radius random aim displacement.
     // It survives movement/death/third-person suppression and is re-seeded on
     // the next activation, not on the raw toggle: retail runs the seed from the
@@ -64,6 +72,9 @@ struct LocalPlayerViewTracker {
 // globals). [orig: Render_ProcessMainSceneFrame @0x5ca1f4..0x5ca24b;
 //  NapiNPClientMsg_0x00A @0x42ff88..0x43002b]
 struct LocalViewSessionInputs {
+	uint8_t hud_hit_feedback_frames = 0;
+	hud::HudServiceState hud_service;
+	std::vector<hud::HudDesignationPoint> hud_designations;
     bool in_session = false;
     bool joiner = false;
     bool death_screen_active = false;
@@ -275,6 +286,13 @@ inline Vec3 player_eye_position(const Entity &entity) {
 //  @0x5ca299..0x5ca304; Camera_ComputeThirdPersonView @0x437d10 — the
 //  MOUNTED local eye leg @0x4b6908 re-anchored to the live position]
 struct LocalPlayerViewFrame {
+	HudCombatView hud_combat;
+	// Separate scene camera: Inset consumes another shake sample and
+	// its own slot-zero offsets after the main scene has sampled its camera.
+	// [orig: Render_RadarCompassOverlay @0x5C9841..0x5C9903]
+	bool inset_scope_active = false;
+	PlayerCameraPose inset_camera;
+	float inset_fov_over_zoom = 0;
     bool scope_camera_zero_active = false;
     bool scope_details_active = false;
     bool scope_details_scoped = false;
@@ -348,8 +366,8 @@ struct LocalPlayerViewFrame {
     float fp_roll_deg = 0.0f;
     PlayerCameraPose camera;
 };
-void local_player_view_frame(World *world, LocalPlayerWeapon &w,
-                             const PlayerViewState &v, const LocalPlayerViewTracker &t,
+void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
+		LocalPlayerViewTracker &t,
                              LocalPlayerViewFrame &out);
 
 // The authored pose interpolation's additive rotation bias. The same airborne

@@ -149,6 +149,8 @@ add_library(${TARGET_NAME} SHARED
     object/skeletal_anim.cpp
     hud/hud_draw_list_stats.cpp
     hud/hud_overlay.cpp
+    hud/hud_overlay_combat.cpp
+    hud/hud_inset_scope.cpp
     hud/feed_row.cpp
     hud/player_hud_weapon_def.cpp
     devtools/frame_stats.cpp

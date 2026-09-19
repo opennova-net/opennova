@@ -1,115 +1,135 @@
 # Weapon and vehicle HUD validation — 2026-09-19
 
-The seat-dependent HUD rules, mounted stance feed, Inset reticle selection,
-and capacity-one ammo flash are corrected and covered by regressions. This
-validation does **not** establish complete visual parity for Javelin, Stinger,
-mortar, tank, or aircraft HUDs: several targeting and instrument elements are
-still absent, and retail assets were unavailable for mission comparisons.
+PR #655 implements the weapon/vehicle display paths identified in the first
+HUD audit: launcher targeting, mounted aim cues, vehicle status, aircraft
+altitude, received designation radius, hit feedback, the Inset scene, and the mortar's separate impact HUD.
+It also preserves the earlier seat-specific ammo/stance/panel corrections.
 
-## Reference and scope
+## Reference
 
-Compared the live IDA MCP database `Jointops.exe.kong.i64` (image base
-`0x400000`) with `~/Development/jo-c/Jointops.exe.kong.c`, jo-c revision
-`1dfaae1a2aaf9e7879cfae60d7aa8d1461867486`. The OpenNova starting point was
-`1d092a0dc` on PR #655. The evidence is the original function bodies, not their
-sometimes misleading names. No reference files or IDB records were changed.
+Read-only comparison against IDA MCP `Jointops.exe.kong.i64`, image base
+`0x400000`, and `~/Development/jo-c/Jointops.exe.kong.c` at
+`1dfaae1a2aaf9e7879cfae60d7aa8d1461867486`. No reference files or IDB records
+were changed. The starting PR revision was `c56ee9b8a`.
 
-| Routine | What it establishes |
-| --- | --- |
-| `HUD_RenderOverlays @0x5A7BB0`, seat dispatch `@0x5A7CC0..0x5A7D55` | Separate gunner, passenger, pilot/controller, driver, and on-foot draw branches |
-| `HUD_BuildEntityInfo @0x4B8440` | Displayed ammo, player stance, mounted root, and aircraft feed fields |
-| Weapon parser `@0x544174..0x54419B` | `emplacedstance` writes weapon definition offset `+228` |
-| `Player_IsVehicleHasAutoAim @0x4DCCB0` | Actually tests the equipped weapon's `flags2 & 0x200` (Inset), regardless of seat |
-| `HUD_DrawCrosshair @0x592640` | Spread reticle, tracked-target cursor, custom aim-point quad, and target brackets |
-| `HUD_DrawScopeOverlayDetails @0x59E420` | Promoted scope/sight gates, range, zero/elevation, magnification, and a separate emplaced reticle branch |
-| `hud_draw_target_entity_overlay @0x59A5D0` | Vehicle status sprite and localized control/stance text |
-| `HUD_DrawVehicleHealthBars @0x5A4FD0` | Hull silhouette and occupied/empty/own-seat markers |
+The reference checks corrected these earlier interpretations:
 
-## Mode matrix
+- `Render_RadarCompassOverlay @0x5C9740` belongs to **Scoped + FLAGS2 Inset**,
+  not mortar/base FLAGS `0x200`. The load at `@0x5CA2B1` reads definition
+  `+0x0C`. The installed mortars author Sighted, OnlyScoped, UseDesignator,
+  2DImpact and ShowImpactDist; they do not author Scoped/Inset.
+- Friendly brackets use `mpattrib` bits (peer bit 3, local bit 8), not a
+  clock-driven blink. They surround the main aim anchor, not the target's
+  projected position (`@0x592680..0x592705`, `@0x592CE2..0x592DD7`).
+- The crosshair's color is **diffuse**, not specular. Forced disassembly of
+  `@0x590F50` and the FVF `0x2C4` stores at `@0x678962/@0x678A3E` establish
+  XYZRHW, diffuse at +16, zero specular at +20, and two UV sets. The
+  decompiler's local variable names were offset by one vertex field.
+- `UseDesignator` (`FLAGS 0x200000`) adjusts the 2D impact radius using the
+  nearest active same-team type-1 designation received through S2C `0x6B`.
+  `LollyPop` (`0x8000`) draws the red world marker. The installed mortar
+  authors UseDesignator and does not author LollyPop; the two are independent.
 
-WPNGRP below means the weapon-group declutter flag. XHAIRS independently gates
-the crosshair complex. Whole-HUD level 3 suppresses all these gameplay groups.
+## Display and transition matrix
 
-| Player context | Original display behavior | Validation result |
+| Context | Implemented behavior | Original evidence |
 | --- | --- | --- |
-| On foot, including a lowered launcher | WPNGRP controls ammo/name, round icons, and stance. The health bar reads the player. | Fixed the stance gate; native regressions pass. |
-| Raised Javelin/Stinger or another optic | Authored Scoped/Sighted/Inset/SIGHTS flags select the optical view. Rangefinder and Zeroable gate their text; magnification appears for Scoped. | Existing scope/readout tests pass. Corrected Inset reticle feed; real GameWorld/presenter raise/lower/switch test passes. Actual launcher art and target cues remain unverified or absent below. |
-| Mortar | Applicable weapon/seat rules plus the flag-`0x200` scoped terrain-ring pass. Scope zero/elevation text follows Zeroable, not a newly invented tube-angle label. | Common HUD rules tested. The distinctive mortar terrain view is still absent (D-HUD-26). |
-| Gunner, seat 3 | WPNGRP controls ammo/name/icons, stance, and hull/seat panel. Stance uses the authored one-based `emplacedstance`, otherwise emplacement/carrier defaults; organic mounted and parachute flags override it. | Parsed definition -> installed weapon -> native view regression passes. Panel re-root and health/seat tests pass. |
-| Passenger, seat 1 | Stance and vehicle panel remain visible independently of WPNGRP. Ammo/name/icons follow WPNGRP. | Seat transition matrix passes. |
-| Pilot/controller, seat 2; driver, seat 5 | Stance and panel remain visible. Ammo/name/icons appear only for weapon category >9, independently of WPNGRP. Vehicle control/status text is a separate draw. | Fixed ammo/group dispatch. Vehicle control/status text remains absent. |
-| Aircraft pilot/driver | The above rules, plus aircraft-family-3 ground-relative altitude, absolute altitude, vertical velocity, and power inputs; ALTGRP gates the instrument draw. | Feed and draw entry points identified; the flight instrument display remains absent. |
-| Dismount | Return to infantry stance and WPNGRP behavior; hide the vehicle panel. | Native view and draw-list transitions pass, including inactive weapon/no-player resets. |
+| Lowered launcher / infantry | Authored ammo/name/round icons, stance, silhouette fade and user-colored spread reticle; capacity-one reload does not restart the flash without a displayed ammo change. | `@0x599A30`, `@0x59A710`, `@0x5A7CC0` |
+| Raised Javelin / Stinger | Authored SIGHTS cards and scope text; tracked-target fire-origin cursor with lock/team colors; friendly brackets; all clear on lowering, weapon change, binoculars or death as their original gates require. | `@0x592640`, `@0x59E420` |
+| CustomAim mounted weapon | The weapon's own reticle at the mounted muzzle ray's collision point; replaces the ordinary spread reticle. | `@0x592973..0x592AB8` |
+| Tank / emplaced optic | Controller forward cue, articulated turret lag cue, third-person `dirguide.tga`, and the flag-8 commander reticle with its clipped circle and connecting line. | `@0x59EA20`, `@0x59ECA0`, `@0x59E3F6`, `@0x59E5B9..0x59E87F` |
+| Controller / driver | Authored vehicle silhouette and localized medium/low/high control label. Separate weapon category/seat rules continue to govern ammo, stance, hull and occupant health. | `@0x59A5D0`, `@0x4B8661..0x4B8786` |
+| Aircraft unit type 3 | ALTGRP-controlled nonlinear AGL ladder, feet readout, authored AGL color and bold label font. Absolute altitude and vertical speed participate in admission; this routine does not draw separate power/velocity gauges. | `@0x4B86CF..0x4B8734`, `@0x59F050` |
+| Scoped + Inset | Separate scene camera with slot offsets, the additional shake sample, inclusive viewport bounds, 32-part aperture, green antialiased ring/cross and friendly label. The optical pass survives HUD declutter. | `@0x5C9740..0x5CA0E1`, gate `@0x5CA290..0x5CA2B4` |
+| Mortar deployed | Side-effect-free falling-object impact prediction, green map radius (color `0xFF208020`) and localized impact distance. Live map slots retain their 1984-tick lifetime. A missed trajectory removes the map marker and retains the last valid distance. OnlyScoped gates the preview. | `@0x4DE350`, `@0x445420`, `@0x540D00`, `@0x5BEA19` |
+| UseDesignator / LollyPop | UseDesignator reads the received link table in order, excludes expired/type-3/wrong-team records, and adjusts the impact radius. LollyPop independently draws the LOS-dependent red world marker. | `@0x4DEBE1..0x4DEC62`, `@0x5BBF10`, `@0x5BEC10`, `@0x5A87CB..0x5A8A38` |
+| Mortar raise / lower / holster | Authored `scopeup_map` opens mode 2 only from mode 0; `scopedown_map` and `switchfrom_map` close only mode 2. Mode 3 is preserved. Both local and joiner pumps consume the callbacks. | `@0x5432D0`, `@0x543360`, `@0x5434E0` |
+| Physical hit feedback | Living entity contact arms one outgoing frame bit even if armor absorbs damage. Each received frame sets the countdown to ten or decrements it; rendering does not consume it. Sighted optics retain the red reticle while this feedback is active. | `@0x4E9390`, `@0x4FF7C5`, `@0x42FF60`, `@0x592BCE` |
+| Carry / vehicle service | Parachute, armor and cargo icons; received preround and FARP timer/zone state feeds localized armory/bay/rearm prompts. | `@0x5925C0`, `@0x599C20`, `@0x5BDE60` |
+| Dismount / death | Vehicle instruments and control labels clear; infantry groups return on dismount; death suppresses targeting and optical impact cues. | `@0x5A7BB0`, `@0x59264D` |
 
-The player health bar and vehicle panel use distinct values: rider health for
-the player bar, hull health for the silhouette, occupant health for occupied
-seat boxes. Existing `vehicle_panel_feed` and `hud_vehicle_panel` tests cover
-the panel's data and color/marker behavior.
+The preview follows the original falling-object callback rather than firing
+an invisible live round: drag, velocity integration, gravity, water crossing,
+and terrain snap cannot produce damage, effects, or consume round slots.
+The zero-spread radius reads weapon `splash` (`AdmDef+0x454`), not the ammo
+blast radius. Crosshair geometry snaps the outer rectangle first, then uses
+integer midpoints/half-extents and literal atlas UVs.
 
-## Corrected divergences (D-HUD-28)
+Native modules own eligibility, source points, state and draw commands.
+Godot loads the art/fonts, projects through the current camera and renders
+the extra SubViewport; it does not infer weapon families from names.
 
-- The presenter supplied infantry animation stance and no HUD seat/category
-  context. Native view facts now carry the original mounted stance rules, with
-  `emplacedstance` parsed and retained through weapon installation. Infantry
-  animation stance is unchanged.
-- The compiler applied one generic weapon-group gate to every seat and drew
-  stance even when the on-foot group was hidden. The original seat dispatch
-  now controls weapon text, round icons, stance, and gunner panel visibility.
-- The presenter used occupied vehicle context to keep the aimed reticle up.
-  The original query reads **Inset on the equipped weapon**. That flag now
-  drives this exception, including on foot.
-- Capacity-one ammo was already folded by the HUD feed, but the compiler
-  folded the chamber again for its flash key. A reload therefore restarted
-  the flash while the displayed total stayed constant. The flash now consumes
-  the same already-folded total as the text and icons.
+## Validation
 
-The initial regression run failed with `on-foot stance hides with WPNGRP` and
-`a single-shot reload does not restart the ammo-change flash`. Both pass after
-these corrections.
+The final native Release and Godot RelWithDebInfo builds pass:
 
-## Remaining HUD work
+- **21/21 native suites pass**, including the new combat HUD and received
+  designation tests, the existing weapon/vehicle integration suites, and
+  308 unchanged original-instruction guided-missile vectors.
+- **40/40 Godot HUD tests pass with D3D12 Forward+**, with 586 assertions
+  and no pending cases. The headless run passes 39 tests / 558 assertions;
+  only the GPU pixel-readback test is pending there.
+- Windows **debug export and boot smoke checks pass** for both Mod Tools
+  and Runtime; ONED packs the game and both distribution ZIPs are produced.
+- Ratchet, maturity, include/link graph, orphan-header, environment,
+  citation, conventions, fixture, retail-gate and ledger checks pass.
+  No baselines change.
 
-| Gap | Original evidence and required behavior |
-| --- | --- |
-| Tracked-target cursor | `@0x592790..0x592875`: project the target's **weapon fire origin/userpoint**, with authored cursor art, team color/texture selection and blink. Missile guidance's raw Position is a different consumer. |
-| Custom weapon aim-point quad | `flags2 & 0x80`, `@0x592973..0x592AC8`: mounted userpoint/raycast projection with the weapon's own crosshair record. |
-| Target brackets | `@0x592CE2..0x592DD7`: four clipped lines, target **item-definition type 3**, team/blink/pool rules. The old RE note calling this target mount state 3 was incorrect. These are not a generic launcher lock-progress meter. |
-| Emplaced scope reticle | Flag-8 branch of `HUD_DrawScopeOverlayDetails @0x59E420`: attached-gun aim and custom reticle/line projection. |
-| Sighted hit-feedback exception | `dword_A8235C` writers `@0x42FF60/@0x42FF74` and crosshair gate `@0x592AFA`: the retained peer-hit countdown and promoted Sighted predicate are not yet modeled by this HUD feed. |
-| Mortar terrain scope | D-HUD-26: `Render_RadarCompassOverlay @0x5C9740`, caller gate `@0x5CA949`; ring clipping, another terrain scene, and an additional offset/shaken camera sample. |
-| Vehicle control/status and aircraft instruments | Status `@0x59A5D0`; aircraft feed `@0x4B86CF..0x4B8734`; altitude/power draw `@0x59F050`. A hull/seat panel does not replace these elements. |
-
-## Verification
-
-- Native build and **19 focused suites passed**: HUD math/compiler, sight
-  overlay, vehicle panel/feed, plus the 14 gameplay/network suites from the
-  [weapon parity pass](../world/special-weapons-parity.md).
-- Godot GDExtension build passed. Headless HUD/presenter run: **34 passed,
-  4 pending, 389 assertions**. GPU run: **35 passed, 3 pending**; the multiplyat
-  transparency/pixel-readback check passes with a RenderingDevice.
-- Three remaining Godot cases require the retail `hudpos.def`/weapon fixture
-  set under `OPENNOVA_JO_ASSETS`. Exact shipped Javelin, Stinger, mortar, and
-  vehicle artwork, layouts, and live mission transitions need that comparison.
-- Regression commands:
+The focused native command is:
 
 ```powershell
-ctest --test-dir build -C Release --output-on-failure -R '^(hud_frame_compiler|hud_math|hud_vehicle_panel|vehicle_panel_feed|sight_overlay|local_player_view)$'
-& ./.godot-bin/Godot_v4.6.1-stable_win64_console.exe --headless --path godot -s addons/gut/gut_cmdln.gd -gtest=res://tests/hud_overlay_test.gd,res://tests/hud_sights_card_test.gd,res://tests/hud_presenter_lanes_test.gd,res://tests/game_hud_presenter_declutter_test.gd -gexit
+ctest --test-dir build -C Release --output-on-failure -R '^(hud_combat|client_minimap_overlay|hud_frame_compiler|hud_math|hud_vehicle_panel|vehicle_panel_feed|sight_overlay|special_weapon_parity|inmatch_joiner_role|local_player_targeting|local_player_view|player_look|projectile_combat|vehicle_motor|guided_missile_flight|weapon_fsm|fire_sound|emplaced_gun_channel|throwables|weapon_inventory|npruntime_client_fire)$'
 ```
 
-The same Godot command without `--headless` runs the pixel check. Test runs
-used a separate `APPDATA` directory under `.scratch`.
+The GPU test command below also runs headless when the rendering options
+are replaced with `--headless`. Runs use isolated application settings,
+`OPENNOVA_JO_ASSETS` for the reference definitions, and `OPENNOVA_JO_DIR`
+for the installed art and vehicle data.
 
-### Controlled before/after capture
+```powershell
+& ./.godot-bin/Godot_v4.6.1-stable_win64_console.exe --path godot --rendering-method forward_plus --rendering-driver d3d12 -s addons/gut/gut_cmdln.gd -gtest=res://tests/hud_overlay_test.gd,res://tests/hud_sights_card_test.gd,res://tests/hud_presenter_lanes_test.gd,res://tests/game_hud_presenter_declutter_test.gd,res://tests/hud_installed_assets_test.gd -gexit
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/package_godot_windows.ps1 -SkipBuild -ExportMode debug
+```
 
-These GPU-rendered images use the real live simulation/presenter and
-`HudOverlay`, with a synthetic 64x64 reticle atlas and WPNGRP hidden to isolate
-the reticle. The before image reproduces the previous presenter input
-(`vehicle_attack_context = false` on foot) on the same aimed Inset state;
-the after image uses the corrected native Inset fact. They are a logic witness,
-not a retail-art or full launcher-HUD comparison. The temporary capture
-harness was removed from the regression test after rendering.
+The stock reference cases use `hudpos.def`, `weapon.def` and `ammo.def`
+from the private reference-assets corpus at
+`200a18e83e585a678c5aaecf7fd32229814074fd`. These are separate from the
+installed JOTAC definitions exercised by the installed-data suite.
 
-| Before (old input reproduced) | After |
-| --- | --- |
-| ![Inset reticle incorrectly hidden on foot](images/hud-inset-before.png) | ![Inset reticle retained while aimed](images/hud-inset-after.png) |
+The optional installed-data suite mounts `OPENNOVA_JO_DIR` and stages only
+selected definition rows into the existing minimal mission fixture. It
+exercises the actual native simulation, HUD presenter, resource loader,
+installed fonts and sight textures. It also boards the installed M1A1, T80
+and Blackhawk control seats through the public simulation API and checks
+the HUD on exit. No game asset files are committed with the tests.
+
+The installation used here is **JOTAC**, selected through `OPENNOVA_JO_DIR`;
+its modified `hudpos.def` is not described as stock JO. Captures use a controlled
+background/minimal world, not a synchronized running-original screenshot.
+The independent GPU multiply/alpha-test case checks scene preservation
+behind scope art. The live Inset test checks its camera, World3D, viewport
+bounds, raise/lower/switch lifecycle and declutter independence. Launcher
+captures run at 1024×768 and 1920×1080; GPU runs save their readbacks locally
+to `user://hud-installed-captures/`. These images are not test goldens or
+tracked game assets.
+
+## Boundaries
+
+This closes the missing weapon/vehicle display paths above, not every open
+HUD item in the project's divergence ledger. The general map-label/overlay
+residue in D-HUD-21 and the vehicle-bay/FARP gameplay systems remain separate.
+D-HUD-14 is narrowed to menu/system integration; rendering received service
+state does not implement the host's rearm service.
+
+The impact preview completes the deterministic trajectory synchronously;
+the original allocates a machine-speed-dependent CPU budget after two
+benchmark steps. Shared projectile drag retains its existing tumble-model
+boundary. Received designation HUD behavior is implemented; creating and
+broadcasting designations on an OpenNova host remains the separate gameplay
+tracker work beside RoundSim. The optional slot-selection strip is outside
+the installed mortar/launcher HUD layout exercised here.
+
+These are source-backed behavior and rendering checks, not a claim of
+bit-identical D3D9/Godot rasterization or mixed original/OpenNova live-play
+validation. The older synthetic before/after reticle images illustrate the
+previous Inset admission fix only; they do not show the new scene pass.

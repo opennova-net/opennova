@@ -301,6 +301,11 @@ typedef struct DefWeaponDef {
     char gfx1b[128];
     char gfx3[128];
     char crosshair[128];
+	// [orig: crosshair second texture @0x544993; commandersX @0x5449FB]
+	char crosshair_secondary[128];
+	int splash; /* Designation radius, engine units [orig: AdmDef+0x454 @0x4DEBBD]. */
+	char commanders_x[128];
+	char hud_loadout_select[128];
     char hudicon[128];
     char hudclipgfx_texture[128];
     int hudclipgfx_offset[2];
@@ -728,6 +733,7 @@ typedef struct DefItemDef {
                            @0x40e136; AI_FindBestTargetB cap read @0x467277] */
     int heat_sig;       /* +0x17A u16 raw ("heatsig") — entity+420, the secondary-FOV cap
                            [orig: @0x40e144; cap read @0x46723e] */
+	char hud_image[128]; // [orig: ItemDef hud_image @0x4A0FB0, sprite +0x94C]
     int unit_type;      /* "unit_type" raw — the minimap icon class selector on vehicles
                            (5..8 helo, 3/4 boat, 12 special, else ground)
                            [orig: Entity_ClassifyForMinimap @0x50FA70 reads itemDef->unitType] */

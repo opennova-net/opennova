@@ -605,6 +605,10 @@ struct ClientMinimapOverlaySlot {
 // lifetime and handle each tick; its expiry clears the slot.
 // [orig: linked table @0x28E1B28, update_map_overlay_timers @0x5bfd3a..]
 struct ClientMinimapLinkedSlot {
+	// The nearest-designation query reads the retained link, even if its
+	// special map slot could not be allocated. [orig: @0x5BEC95..0x5BECB5]
+	int32_t x = 0, y = 0, radius_q16 = 0;
+	uint8_t type = 0;
 	bool active = false;
 	uint16_t handle = 0xFFFF;
 	uint32_t remaining_ticks = 0; // wire seconds x62 [orig: @0x4255c9..0x4255d6]
@@ -703,6 +707,8 @@ struct ClientState {
 	// networking and maintenance remain live while nonzero.
 	// [orig: reader @0x430064; Game_ProcessMainFrame gate @0x52672C]
 	std::uint8_t preround_delay_seconds = 0;
+	uint8_t vehicle_reload_seconds = 0;
+	uint32_t owned_zone_mask = 0;
 	// S2C 0x66 replaces the complete 255-entry armory availability image.
 	// Revision zero means no host policy has arrived.
 	// [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0]
@@ -737,6 +743,7 @@ struct ClientState {
 	// @0x42ff88..0x43002b — dword_A860F0/A860F4 = 0 @0x42ffa6, g_enemyTagsVisible
 	// @0x42ffb2/@0x430025]. The sub-mode is written by the spectate actions
 	// (unported) and stays 0 here.
+	uint8_t hud_hit_feedback_frames = 0; // [orig: dword_A8235C @0x42FF60..0x42FF74]
 	bool death_screen_active = false;
 	std::uint8_t death_screen_submode = 0;
 	// The local entity's +0x1E0 "a medic is reviving me" latch: set by S2C

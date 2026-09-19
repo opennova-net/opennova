@@ -125,6 +125,7 @@ struct GameConfig {
 	uint16_t class_allow_mask = 0x03FFu;
 	// Authoritative projectile game-option globals. These do not alter the
 	// advertised mp_attributes word; the host simulation consumes them directly.
+	bool hit_feedback = true; // [orig: hitFeedback_198 @0x54D18B]
 	bool fat_bullets = false;                   // [orig g_FatBullets @0x24D21A0]
 	bool one_shot_kill = false;                 // [orig g_OneShotKill @0x24D219C]
 

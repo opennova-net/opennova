@@ -2974,3 +2974,9 @@ add_executable(asset_store_test assets/asset_store_test.cpp)
 target_link_libraries(asset_store_test PRIVATE opennova_runtime)
 target_include_directories(asset_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME asset_store COMMAND asset_store_test)
+
+# Target cursors, vehicle instruments, Inset geometry, mortar preview, and peer feedback.
+add_executable(hud_combat_test hud/hud_combat_test.cpp)
+target_link_libraries(hud_combat_test PRIVATE opennova_runtime)
+target_compile_features(hud_combat_test PRIVATE cxx_std_17)
+add_test(NAME hud_combat COMMAND hud_combat_test)

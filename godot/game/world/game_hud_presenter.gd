@@ -47,6 +47,7 @@ var _message_log := MessageLogPresenterScript.new()  # the Recent Messages (J) l
 var _end_round_stats := EndRoundStatisticsPresenterScript.new()  # the SP Show Score (F5) panel lane
 var _lfp_panel := LfpPanelPresenterScript.new()  # the AAS zone status panel lane
 var _hud_pos: HudPos = null  # the loaded hudpos.def (VEHICLE_HUD blocks for the panel lane)
+var _inset_scope: HudInsetScope = null
 var _sights_card: HudSightsCard = null # child of the overlay (per-row blend controls)
 var _scope_circle_mask: HudScopeCircleMask = null # child of the overlay (the scoped annulus)
 var _view_effects: PlayerViewEffects = null # child of the overlay (binocular/NVG stack)
@@ -189,6 +190,7 @@ func teardown() -> void:
 	if _game_hud != null:
 		_game_hud.queue_free()
 		_game_hud = null
+	_inset_scope = null
 	_sights_card = null
 	_scope_circle_mask = null
 	_view_effects = null
@@ -282,6 +284,13 @@ func ensure_game_hud() -> void:
 	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_view_effects.set_environment(
 			_world.get_environment_node() if _world != null else null)
+	_inset_scope = HudInsetScope.new()
+	_inset_scope.name = "InsetScope"
+	_inset_scope.show_behind_parent = true
+	_inset_scope.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_inset_scope.visible = false
+	_game_hud.add_child(_inset_scope)
+	_inset_scope.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_sights_card = HudSightsCardScript.new()
 	_sights_card.name = "SightsCard"
 	_sights_card.show_behind_parent = true
@@ -578,6 +587,14 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# pins the design center @0x5928a0), the projected aim in 3P/spectate
 	# (@0x592910).
 	_game_hud.set_scope_state(lv, Strings.get_table(Strings.TABLE_GAMETEXT))
+	var combat_camera := _game_hud.get_viewport().get_camera_3d()
+	if _inset_scope != null:
+		_inset_scope.update_view(lv, combat_camera, _aspect_mode)
+	_game_hud.set_combat_state(lv,
+			combat_camera.global_transform if combat_camera != null else Transform3D.IDENTITY,
+			hud_view_projection(combat_camera) if combat_camera != null else Projection.IDENTITY,
+			combat_camera != null, Strings.get_table(Strings.TABLE_GAMETEXT),
+			ControlsBindings.model().display_text_for_token("useitem"))
 	_game_hud.set_view_state(binoculars_view_active,
 			_player_presenter.aim_screen_point() \
 					if _player_presenter != null else Vector2.INF)

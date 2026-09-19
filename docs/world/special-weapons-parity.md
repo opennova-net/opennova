@@ -58,8 +58,9 @@ mechanics; they are not claimed as retail asset measurements.
 
 ## Remaining boundaries
 
-- D-HUD-26 remains open: the mortar's scoped terrain-ring rendering and third
-  camera sample are not implemented by these elevation fixes.
+- The later [HUD follow-up](../interface/weapon-vehicle-hud-validation.md)
+  implements the mortar impact HUD and the distinct Scoped + Inset scene
+  (D-HUD-26); the original attribution of that scene to mortars was wrong.
 - D-NET-64 remains open for the flare projectile-candidate ring, proximity
   AI/warning consumers and C2S command-map 0x44 overload. The AI Javelin no-lock
   750-unit forward query (`@0x445DCF`) is also not covered by this pass; the
@@ -67,14 +68,14 @@ mechanics; they are not claimed as retail asset measurements.
 - Tank sound's extra-effect argument remains D-SND-17. These corrections do not
   claim complete tracked-vehicle dynamics or every mounted rig's alternate
   userpoint/model transform behavior.
-- No retail assets were mounted in this checkout. Animated barrel presentation,
-  a live mortar/Javelin/Stinger/tank mission, and mixed retail/OpenNova network
-  play still need an asset-backed playthrough.
+- The initial gameplay pass used synthetic fixtures. The later HUD follow-up
+  mounts the installed JOTAC data for launcher/mortar/vehicle tests. Mixed
+  original/OpenNova live play is still a separate validation boundary.
 
 ## HUD follow-up
 
 The [2026-09-19 HUD validation](../interface/weapon-vehicle-hud-validation.md)
 checks weapon and seat transitions against the original HUD routines. It fixes
 seat-specific group visibility, mounted stance, Inset reticle selection, and
-launcher reload flashing, and records the remaining launcher targeting, mortar
-terrain-scope, and vehicle instrument gaps.
+launcher reload flashing, then adds launcher targeting, mortar impact/map
+transitions, the separate Inset scene, and vehicle instruments.

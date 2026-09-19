@@ -10,6 +10,7 @@
 // hud/hud_math.h and stays the single source.
 
 #include <runtime/hud/feed_format.h>
+#include <runtime/hud/hud_combat.h>
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_declutter.h>
 #include <runtime/hud/hud_math.h>
@@ -74,6 +75,18 @@ enum HudTexture : int32_t {
 	//  draws no tile, the same degradation as the silhouette.
 	kHudTexLfpTileOwn,
 	kHudTexLfpTileOther,
+	kHudTexTarget,
+	kHudTexTargetFriendly,
+	kHudTexCustomAim,
+	kHudTexCommander,
+	kHudTexWeaponSilhouette,
+	kHudTexVehicleStatus,
+	kHudTexCargo,
+	kHudTexParachute,
+	kHudTexArmor,
+	kHudTexDriverCrosshair,
+	kHudTexVehicleFixed,
+	kHudTexVehicleLag,
 	kHudTexSightsBase, // authored SIGHTS rows: kHudTexSightsBase + row index
 };
 
@@ -140,6 +153,7 @@ struct HudTriVertex {
 	float y = 0.0f;
 	float u = 0.0f;
 	float v = 0.0f;
+	uint32_t color = 0xFFFFFFFFu;
 };
 
 struct HudTri {
@@ -195,6 +209,7 @@ struct HudSightsRow {
 // texture names to the slots above and hands the parsed .fnt).
 // [orig: the dword_27237xx.. layout global block, HUD_ParseHudposToken @0x59f370 parse]
 struct HudLayout {
+	HudCombatLayout combat;
 	HudPosRecord scope_range;
 	HudPosRecord scope_zero;
 	HudPosRecord scope_mag;
@@ -569,6 +584,7 @@ struct HudLfpPanelState {
 };
 
 struct HudFrameState {
+	HudCombatState combat;
 	int ticks = 0;
 	// THE RECENT MESSAGES (J) WINDOW: the OldMessages toggle and its stdbox
 	// title (Overlays/STROVER43, resolved by the embedder like the scoreboard's)
@@ -719,6 +735,9 @@ static_assert(kHudFontSlotImpact38 < kHudFontSlotCount,
 // Deep in-process module: the whole witnessed element walk, stance cross-fade
 // state, the clip-indicator flash state, and the triggered-text message ring
 // live here; compile() emits everything for one frame in retail's order.
+bool hud_weapon_group_visible(const HudFrameState &state);
+bool hud_stance_group_visible(const HudFrameState &state);
+
 class HudFrameCompiler {
 public:
 	void configure(const HudLayout &layout, const opennova::fnt::fnt_font_t *font);
@@ -852,6 +871,11 @@ private:
 			float h);
 	void element_vehicle_panel(const HudFrameState &state, float w, float h);
 	void element_sights_card(const HudFrameState &state, float w, float h);
+	void element_service_prompt(const HudFrameState &state, float w, float h);
+	void element_inset_cues(const HudFrameState &state, float w, float h);
+	void element_optical_cues(const HudFrameState &state, float w, float h);
+	void element_targeting(const HudFrameState &state, float w, float h);
+	void element_instruments(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);
 	void element_clip_indicator(const HudFrameState &state, float w, float h);
 
@@ -877,6 +901,9 @@ private:
 	// @ 0x599af9]: the round count drop stamps the flash start.
 	int flash_prev_rounds_ = -1;
 	int flash_stamp_ = 0;
+	int silhouette_stamp_ = 0;
+	uint64_t silhouette_vehicle_ = 0;
+	std::string silhouette_weapon_;
 	std::vector<HudMessageLine> feed_lines_;   // the SYSTEM ring
 	std::vector<HudMessageLine> chat_lines_;   // the CHAT ring (S2C 0x14)
 };

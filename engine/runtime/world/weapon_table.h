@@ -52,6 +52,8 @@ struct WeaponTableEntry {
     // the STROVER_USEGUN default label. [orig: @0x544d6c parse; consumer
     // draw_vehicle_seat_and_armory_labels @0x5a3538]
     std::string attach_text_id;
+	std::string hud_icon, crosshair, commanders_x, hud_loadout_select;
+	int32_t hud_splash_radius = 0; // engine units [orig: AdmDef+0x454 @0x4DEBBD]
     std::string voice_macro_token; // [orig: WeaponDefs_ParseLineCallback @0x543C29]
     // The two FLAGS dwords [orig: AdmDef+8 / AdmDef+12; token table @0x830bf0].
     // The switch/select paths read: flags bit 0x8000000 = the binoculars slot marker

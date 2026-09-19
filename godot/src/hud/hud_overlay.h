@@ -78,6 +78,9 @@ public:
 	bool is_configured() const;
 	void set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<RtxtStringFile> &p_gametext);
     void set_player_context(const Ref<PlayerLocalView> &p_view);
+	void set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,
+			const Projection &projection, bool has_camera, const Ref<RtxtStringFile> &gametext,
+			const String &use_key);
 
 	// Select and (when configured) immediately reload the crosshair art;
 	// runtime state (messages, fades) survives the layout refresh.
@@ -378,6 +381,9 @@ private:
 	// saturated, alpha unchanged (the compass ring's pipeline).
 	Ref<Texture2D> double_saturate_texture_(const Ref<Texture2D> &p_texture) const;
 	void load_crosshair_texture_();
+	void configure_combat_(const Ref<HudPos> &hudpos);
+	void combat_texture_(int slot, const String &name, opennova::hud::HudSprite &sprite);
+	std::array<String, kTextureSlots> combat_texture_names_;
 	// Stamp the cached colour/spread options into layout_.
 	void apply_crosshair_options_();
 	void clear_font_();

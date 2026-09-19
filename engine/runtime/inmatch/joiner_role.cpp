@@ -338,6 +338,7 @@ void JoinerRole::tick_local_weapon() {
 				kernel_->seat_specs);
 	};
 	world::local_weapon_pump_tick(kernel.world, lp.weapon, io);
+	lp.hud_map_control.weapon_command(io.map_command);
 	std::vector<world::LocalWeaponFiredWire> fires;
 	if (io.fired.valid)
 		fires.push_back(io.fired);
@@ -602,6 +603,7 @@ void JoinerRole::pump() {
     // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
     // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
     world.rules.session_open = true;
+	world.rules.mpattrib = rt.view().mp_attributes();
     world.rules.auto_scope_zero =
             (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;
     world.rules.no_friendly_fire =

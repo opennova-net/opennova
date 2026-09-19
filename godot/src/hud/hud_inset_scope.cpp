@@ -1,0 +1,100 @@
+#include "hud/hud_inset_scope.h"
+#include "simulation/player_local_view.h"
+#include "simulation/simulation.h"
+#include "util/axes.h"
+#include <godot_cpp/classes/viewport_texture.hpp>
+#include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
+
+namespace godot {
+void HudInsetScope::_bind_methods() {
+	ClassDB::bind_method(
+			D_METHOD("update_view", "view", "source", "aspect_mode"), &HudInsetScope::update_view);
+	ClassDB::bind_method(D_METHOD("is_scope_active"), &HudInsetScope::is_scope_active);
+	ClassDB::bind_method(D_METHOD("get_render_viewport"), &HudInsetScope::get_render_viewport);
+	ClassDB::bind_method(D_METHOD("get_render_bounds"), &HudInsetScope::get_render_bounds);
+}
+Rect2 HudInsetScope::get_render_bounds() const {
+	return Rect2(geometry_.left, geometry_.top, geometry_.right - geometry_.left + 1,
+			geometry_.bottom - geometry_.top + 1);
+}
+void HudInsetScope::_notification(int what) {
+	if (what == NOTIFICATION_VISIBILITY_CHANGED && target_ && !is_visible_in_tree())
+		target_->set_update_mode(SubViewport::UPDATE_DISABLED);
+}
+void HudInsetScope::update_view(const Ref<PlayerLocalView> &view, Camera3D *source, int mode) {
+	active_ = view.is_valid() && view->native_frame().inset_scope_active &&
+			view->native_frame().camera_pose_valid && source;
+	set_visible(active_);
+	if (!active_) {
+		if (target_)
+			target_->set_update_mode(SubViewport::UPDATE_DISABLED);
+		return;
+	}
+	const auto &v = view->native_frame();
+	const Vector2 surface = get_size();
+	geometry_ =
+			opennova::hud::inset_scope_geometry(surface.x, surface.y, mode, v.inset_fov_over_zoom);
+	if (!geometry_.valid) {
+		active_ = false;
+		if (target_)
+			target_->set_update_mode(SubViewport::UPDATE_DISABLED);
+		return;
+	}
+	if (!target_) {
+		target_ = memnew(SubViewport);
+		target_->set_name("InsetTerrainTarget");
+		target_->set_disable_input(true);
+		target_->set_clear_mode(SubViewport::CLEAR_MODE_ALWAYS);
+		add_child(target_);
+		camera_ = memnew(Camera3D);
+		camera_->set_name("InsetTerrainCamera");
+		camera_->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
+		target_->add_child(camera_);
+		camera_->make_current();
+	}
+	target_->set_world_3d(source->get_world_3d());
+	const Vector2i size(geometry_.right - geometry_.left + 1, geometry_.bottom - geometry_.top + 1);
+	if (target_->get_size() != size)
+		target_->set_size(size);
+	Viewport *surface_view = source->get_viewport();
+	target_->set_msaa_3d(surface_view->get_msaa_3d());
+	target_->set_screen_space_aa(surface_view->get_screen_space_aa());
+	target_->set_mesh_lod_threshold(surface_view->get_mesh_lod_threshold());
+	target_->set_use_debanding(surface_view->is_using_debanding());
+	camera_->set_near(0.2);
+	camera_->set_far(source->get_far());
+	camera_->set_fov(geometry_.fov_h_deg);
+	camera_->set_cull_mask(source->get_cull_mask());
+	camera_->set_environment(source->get_environment());
+	camera_->set_attributes(source->get_attributes());
+	const auto &pose = v.inset_camera;
+	const Vector3 eye = mission_to_godot(pose.eye);
+	const Vector3 forward = Simulation::presentation_forward(pose.yaw_deg, pose.pitch_deg);
+	camera_->set_global_position(eye);
+	camera_->look_at(eye + forward, Vector3(0, 1, 0));
+	camera_->rotate_object_local(Vector3(0, 0, -1), Math::deg_to_rad(pose.roll_deg));
+	target_->set_update_mode(
+			is_visible_in_tree() ? SubViewport::UPDATE_ALWAYS : SubViewport::UPDATE_DISABLED);
+	queue_redraw();
+}
+void HudInsetScope::_draw() {
+	if (!active_ || !geometry_.valid || !target_)
+		return;
+	PackedVector2Array points, uv;
+	PackedColorArray colors;
+	colors.push_back(Color(1, 1, 1, 1));
+	for (int i = 0; i < 32; ++i) {
+		points.push_back(Vector2(geometry_.inner[i].x, geometry_.inner[i].y));
+		uv.push_back(Vector2(geometry_.uv[i].x, geometry_.uv[i].y));
+	}
+	draw_polygon(points, colors, uv, target_->get_texture());
+	for (int i = 0; i < 32; ++i) {
+		PackedVector2Array quad;
+		for (auto p : { geometry_.inner[i], geometry_.inner[i + 1], geometry_.outer[i + 1],
+					 geometry_.outer[i] })
+			quad.push_back(Vector2(p.x, p.y));
+		draw_colored_polygon(quad, Color(0, 0, 0, 1));
+	}
+}
+} // namespace godot

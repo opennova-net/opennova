@@ -1737,6 +1737,10 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	// The deploy-map overlay follows the host every frame — set AND cleared
 	// by assignment, not edges [orig: NapiNPClientMsg_0x00A @0x42ff82 —
 	// g_deploy_screen_active = (flags1 >> 1) & 1].
+	if (fu.flags1 & 4u)
+		state_.hud_hit_feedback_frames = 10;
+	else if (state_.hud_hit_feedback_frames)
+		--state_.hud_hit_feedback_frames;
 	state_.deploy_overlay_active = (fu.flags1 & 0x02u) != 0;
 	if (!state_.deploy_overlay_active) state_.deploy_overlay_open_latch = false;
 	// The death-screen edges on flags1 bit 0 [orig: @0x42ff88..0x43002b].
@@ -1760,6 +1764,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// Retain it between phase cycles, exactly like the client global.
 		// [orig: NapiNPClientMsg_0x00A @0x430064]
 		state_.preround_delay_seconds = fu.weapon.preround_timer;
+		state_.vehicle_reload_seconds = fu.weapon.reload_seconds;
+		state_.owned_zone_mask = uint32_t(fu.weapon.uniform_team_mask);
 		// The DEATH screen's three slot timers ride the same sub-block
 		// [orig: @0x430084 / @0x43009f / @0x4300c3].
 		state_.respawn_penalty_seconds = fu.weapon.slot_state360;

@@ -340,7 +340,12 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 	var sim := world.get_sim()
 	var presenter := HudFixture.presenter_over(self, world)
 	presenter.set_hud_detail_level(0)
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	camera.make_current()
 	var hud := presenter.get_game_hud()
+	hud.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	hud.size = Vector2(1024, 768)
 	# Settling the body on the fixture terrain keeps the airborne ADS refusal
 	# out of this test, which is about the rendered reticle selection.
 	for _i in range(90):
@@ -361,10 +366,31 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 		assert_false(view.mounted, "the Inset keep-up rule also applies on foot")
 		assert_eq(view.hud_stance, sim.get_local_player_stance())
 		assert_eq(view.hud_keep_crosshair_while_aimed, name == "WPN_HUD_INSET")
-		assert_eq(hud.get_draw_list_stats().tris, 14 if name == "WPN_HUD_INSET" else 0,
+		assert_eq(hud.get_draw_list_stats().tris, 584 if name == "WPN_HUD_INSET" else 0,
 				"switching the equipped weapon updates the aimed crosshair immediately")
+		var inset_view := hud.get_node("InsetScope") as HudInsetScope
+		assert_eq(inset_view.is_scope_active(), name == "WPN_HUD_INSET")
+		if inset_view.is_scope_active():
+			assert_eq(inset_view.get_render_bounds(), Rect2(639, 223, 323, 323))
+			assert_eq(inset_view.get_render_viewport().size, Vector2i(323, 323))
+			assert_eq(inset_view.get_render_viewport().find_world_3d(), camera.get_world_3d())
+			if RenderingServer.get_rendering_device() != null:
+				await get_tree().process_frame
+				await get_tree().process_frame
+				RenderingServer.force_draw(true)
+				RenderingServer.force_sync()
+				var rendered := inset_view.get_render_viewport().get_texture().get_image()
+				assert_eq(rendered.get_size(), Vector2i(323, 323))
+				assert_gt(rendered.get_pixel(160, 160).a, 0.9, "the Inset scene renders an opaque camera pass")
+
+			presenter.set_hud_detail_level(3)
+			presenter.tick()
+			assert_true(inset_view.is_scope_active(), "optical terrain view survives declutter")
+			assert_eq(hud.get_draw_list_stats().tris, 570)
+			presenter.set_hud_detail_level(0)
 		assert_true(sim.request_local_player_scope_toggle())
 		for _i in range(30):
 			sim.step()
 		presenter.tick()
+		assert_false(inset_view.is_scope_active())
 		assert_eq(hud.get_draw_list_stats().tris, 14, "lowering the optic restores the hip reticle")

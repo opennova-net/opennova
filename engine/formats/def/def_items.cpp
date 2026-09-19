@@ -751,6 +751,9 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 current.armor_impact =
                     signed_i16_value(parse_int_n(tok[1].s, tok[1].len));
             parsed = 1;
+		} else if (lower_match_key(lower, ll, "hud_image", 9)) {
+			consume_value_str(trimmed, tlen, 9, current.hud_image, sizeof(current.hud_image));
+			parsed = 1;
 		} else if (lower_match_key(lower, ll, "unit_type", 9)) {
 			size_t vl;
 			const char *v = consume_value_span(trimmed, tlen, 9, &vl);

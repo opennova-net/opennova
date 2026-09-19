@@ -252,6 +252,7 @@ struct LocalWeaponReloadWire {
 };
 
 struct LocalWeaponPumpIO {
+	int8_t map_command = 0; // authored scope/holster map callback for the local HUD
     PlayerViewState *view = nullptr;      // required
     WeaponInventory *inventory = nullptr; // null = no inventory installed
     bool is_authority = true;             // the joiner defers refills/rounds

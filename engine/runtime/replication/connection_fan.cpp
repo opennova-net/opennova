@@ -82,7 +82,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	fu.anchor_x = ax;
 	fu.anchor_y = ay;
 	fu.anchor_z = az;
-	fu.flags1 = hdr.flags1; // per-recipient signal byte (deploy hold / spectator / load hint)
+	fu.flags1 = hdr.flags1; // per-recipient signal byte (deploy hold / spectator / hit feedback)
 	fu.flags2 = flags2;
 
 	// Header sub-block, selected by `flags2 & 3` [orig: NetPacket_WritePlayerState @0x4ff6b0 phase
@@ -1051,7 +1051,11 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	FrameHeaderState hs;
 	hs.flags1 = static_cast<uint8_t>(
 			(conn.spectator ? 0x01u : 0x00u) |
-			(conn.respawn_pending ? 0x02u : 0x00u));
+			(conn.respawn_pending ? 0x02u : 0x00u) |
+			((w.rules.hit_feedback &&
+					 owned->hud_hit_feedback_serial != conn.hud_hit_feedback_serial)
+							? 4u
+							: 0u));
 	hs.preround_delay_seconds =
 			static_cast<uint8_t>(w.preround_delay_seconds);
 	hs.fallmps = static_cast<uint8_t>(std::clamp(w.script.wac_values.fallmps, 0, 255));
@@ -1123,6 +1127,8 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 		conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
 		                          /*reliable=*/false);
 		lap.mark(devtools::Slot::SIM_REPLICATION_ENQUEUE);
+		if (w.rules.hit_feedback)
+			conn.hud_hit_feedback_serial = owned->hud_hit_feedback_serial;
 		return true;
 	}
 
@@ -1166,6 +1172,8 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
 	                          /*reliable=*/false);
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENQUEUE);
+	if (w.rules.hit_feedback)
+		conn.hud_hit_feedback_serial = owned->hud_hit_feedback_serial;
 	return true;
 }
 

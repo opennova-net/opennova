@@ -1237,6 +1237,12 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
     const auto *ammo = world.tables.ammo.by_index(r.ammo_index);
     EntityHandle damage_entity = collision.geometry_entity;
     Entity *target = world.registry.get(damage_entity);
+	// Physical entity contact arms feedback even when armor absorbs all damage.
+	// The per-recipient frame consumes it once, including the listen host.
+	// [orig: Projectile_HandleEntityImpact @0x4E9390; writer @0x4FF7C5]
+	if (authoritative && target && !(target->flags & kEntityFlagDead))
+		if (Entity *owner = world.registry.get(r.owner))
+			++owner->hud_hit_feedback_serial;
     if (target && target->item_type != 1 && (target->item_attrib & kItemAttribEweap)) {
         Entity *parent = world.registry.get(target->ground_target);
         if (parent && parent->item_type == 1) { target = parent; damage_entity = parent->handle; }

@@ -70,6 +70,8 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 	// The mpattrib word's 0x10000 bit the scope-zero -1 floor reads in session
 	// [orig: `test g_rules_flags,10000h` @0x4dbd15; g_rules_flags @0x24D1E34 is
 	// the host's mpattrib word, the S2C 0x64 +44 dword on a joiner].
+	kernel.world.rules.mpattrib = config.mp_attributes;
+	kernel.world.rules.hit_feedback = config.hit_feedback;
 	kernel.world.rules.auto_scope_zero =
 			(config.mp_attributes & GameConfig::kMpAttribAutoScopeZero) != 0;
 	kernel.world.rules.no_friendly_fire =

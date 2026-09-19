@@ -474,6 +474,9 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
 
 void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerViewState &v,
                             LocalPlayerViewTracker &t, const LocalViewSessionInputs &s) {
+	t.hud_hit_feedback_frames = s.hud_hit_feedback_frames;
+	t.hud_service = s.hud_service;
+	t.hud_designations = s.hud_designations;
     if (world == nullptr || !world->cached.local_player.valid()) {
         // No seat without a player: the arbiter resolves to first person (or
         // the debug override) before the effective modes read the mode.
@@ -583,8 +586,8 @@ static void fill_hud_context(World *world, const Entity *local,
     out.hud_stance = body ? int(body->inf.stance) : 0;
     out.hud_weapon_category = weapon.active ? weapon.hud_category : 0;
     // The misleadingly named Player_IsVehicleHasAutoAim reads the equipped
-    // weapon's Inset flag, not the occupied seat. The separate Sighted
-    // hit-feedback countdown remains unmodeled.
+	// weapon's Inset flag, not the occupied seat. The combat feed adds the
+	// separate Sighted hit-feedback exception after the promoted scope read.
     // [orig: @0x4DCCB0..0x4DCCDA; crosshair draw gate @0x592AFA]
     out.hud_keep_crosshair_while_aimed =
         weapon.active && (weapon.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0;
@@ -612,7 +615,7 @@ static void fill_hud_context(World *world, const Entity *local,
 }
 
 void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
-                             const LocalPlayerViewTracker &t, LocalPlayerViewFrame &out) {
+		LocalPlayerViewTracker &t, LocalPlayerViewFrame &out) {
     out = LocalPlayerViewFrame();
     WeaponSlotState *active_slot =
         world != nullptr ? active_local_weapon_slot(*world, w) : nullptr;
@@ -706,7 +709,15 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     out.scope_zero_max = w.def.scope_zero.max_steps;
     out.scope_zero_step = w.def.scope_zero.step_metres;
     out.scope_zero_default = w.def.scope_zero.default_metres;
+	out.inset_scope_active = optical_view && out.scope_details_scoped &&
+			(w.def.flags2 & DEF_WEAPON_FLAG2_INSET) && !v.binoculars_view_active;
+	out.inset_fov_over_zoom = out.inset_scope_active
+			? float(current_fov) / 65536.0f / local_player_scope_zoom(w, *active_slot)
+			: 0;
     out.aim_range_q16 = w.aim_range_q16;
+	if (world)
+		fill_hud_combat_view(*world, w, out, t, optical_view);
+	out.hud_combat.state.dead = out.hud_combat.state.dead || v.death_screen_active;
     out.tp_anchor[0] = v.tp_anchor[0];
     out.tp_anchor[1] = v.tp_anchor[1];
     out.tp_anchor[2] = v.tp_anchor[2];
@@ -747,6 +758,7 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
                                // entirely. The roll is the seat-carried hull bank the
                                // mount pose wrote, never the standing torso tilt.
                                seated_eye, static_cast<float>(e->roll), out.camera);
+	out.inset_camera = out.camera; // unshaken pose, before either scene sample
     // The camera shake, per rendered frame: retail's scene frame calls
     // Camera_ComputeThirdPersonView once more per frame after the per-quantum
     // call [orig: Render_ProcessMainSceneFrame @ 0x5ca34d]. First person
@@ -756,8 +768,7 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     // STATELESS sin/cos chain over the raw counter and the engine tick
     // [orig: the mode>=1 block @ 0x438939..0x4389e5 — the mode-4 lerp then
     //  overwrites the rotation wholesale, so only mode 1 renders it]. The
-    // radar-compass overlay's extra call (@ 0x5c9841, when it draws) is not
-    // mirrored — the whole flag-0x200 scope overlay is unported (D-HUD-26).
+	// Inset overlay samples the same filters once again below (@0x5C9841).
     if (world != nullptr) {
         int32_t d_yaw = 0;
         int32_t d_pitch = 0;
@@ -774,6 +785,16 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
         out.camera.pitch_deg += static_cast<float>(d_pitch) * kDegPerBam;
         out.camera.roll_deg += static_cast<float>(d_roll) * kDegPerBam;
     }
+	if (out.inset_scope_active) {
+		int32_t yaw = 0, pitch = 0, roll = 0;
+		camera_shake_sample(v.shake, world->weather.core.oscillator.prng, yaw, pitch, roll);
+		constexpr double degrees_per_bam = 360.0 / 4294967296.0;
+		out.inset_camera.yaw_deg += float(yaw * degrees_per_bam);
+		out.inset_camera.pitch_deg += float(pitch * degrees_per_bam);
+		out.inset_camera.roll_deg += float(roll * degrees_per_bam);
+		out.inset_camera.yaw_deg -= float(active_slot->zero_yaw * degrees_per_bam);
+		out.inset_camera.pitch_deg -= float(active_slot->zero_pitch * degrees_per_bam);
+	}
     out.camera_pose_valid = true;
 }
 

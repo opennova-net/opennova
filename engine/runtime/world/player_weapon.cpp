@@ -821,6 +821,7 @@ void weapon_trace_record(LocalPlayerWeapon &w, const WeaponSlotState &slot,
 
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		LocalWeaponPumpIO &io) {
+	io.map_command = 0;
 	io.fired = LocalWeaponFiredWire{};
 	io.reload = LocalWeaponReloadWire{};
 	if (io.view == nullptr || !world.cached.local_player.valid()) return;
@@ -942,6 +943,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	if (!accept_weapon_input) active_slot.refire_queued = false;
 	WeaponFsmEvents ev;
 	weapon_fsm_tick(w.def, active_slot, in, ev);
+	io.map_command = ev.map_command;
 	if (player != nullptr) weapon_sound_publish(world, *player, w.def, ev);
 	// A release whose fire request the FSM refused must not leave the charge
 	// latched for a later unrelated shot — the charge byte is consumed by the

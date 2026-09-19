@@ -202,6 +202,10 @@ void ClientReplicaPipeline::apply_minimap_overlay_batch(
 		// Wire lifetime is seconds; x62 to ticks. [orig: @0x4255c9..0x4255d6]
 		linked->remaining_ticks =
 				static_cast<uint32_t>(entry.lifetime_s) * 62u;
+		linked->type = entry.type;
+		linked->x = int32_t(entry.x) * 65536;
+		linked->y = int32_t(entry.y) * 65536;
+		linked->radius_q16 = int32_t(entry.height) * 65536;
 
 		// The link's STORED SLOT is the only key retail consults: an existing
 		// link updates its own slot in place; a fresh link ALWAYS allocates a

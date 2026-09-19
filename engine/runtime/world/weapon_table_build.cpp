@@ -282,6 +282,11 @@ world::WeaponTable build_weapon_table(
 		e.round_type = d.round_type; // resolved to an AmmoTable index by
 		                             // resolve_weapon_round_types (§5.60)
 		e.voice_macro_token = d.vmacrotoken;
+		e.hud_icon = d.hudicon;
+		e.crosshair = d.crosshair;
+		e.hud_splash_radius = d.splash;
+		e.commanders_x = d.commanders_x;
+		e.hud_loadout_select = d.hud_loadout_select;
 		e.attach_text_id = d.attach_text_id; // the attach-label Overlays key [orig: +0x3A0]
 		e.flags = d.flags;
 		e.flags2 = d.flags2;

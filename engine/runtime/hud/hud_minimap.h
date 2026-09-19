@@ -400,6 +400,14 @@ struct HudMapControl {
 		big_zoom_q16 = spawn_big_zoom_q16;
 	}
 
+    // Mortar scope callbacks preserve an already-open fullscreen map.
+	// [orig: @0x54330C/@0x54339C/@0x5434E7]
+	void weapon_command(int command) {
+		if (command > 0 && mode == 0)
+			mode = 2;
+		else if (command < 0 && mode == 2)
+			mode = 0;
+	}
 	// [orig: HUD_CycleMapMode @0x520bc0]
 	int cycle() {
 		mode = mode == 0 ? 2 : (mode == 2 ? 3 : 0);

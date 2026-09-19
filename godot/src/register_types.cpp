@@ -105,6 +105,7 @@
 #include "hud/player_hud_weapon_def.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
+#include "hud/hud_inset_scope.h"
 #include "devtools/imgui_pass_node.h"
 #include "devtools/dev_tools.h"
 #include "devtools/debug_arg_spec.h"
@@ -311,6 +312,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(VehicleHudBlock);
 	GDREGISTER_CLASS(HudDrawListStats);
 	GDREGISTER_CLASS(HudOverlay);
+	GDREGISTER_CLASS(HudInsetScope);
 	GDREGISTER_CLASS(FeedRow);
 	GDREGISTER_CLASS(PlayerHudWeaponDef);
 	GDREGISTER_CLASS(MissionInfo);
