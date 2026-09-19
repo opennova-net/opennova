@@ -1720,6 +1720,8 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	sim.resolve_item_traits(item_db)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
+	# The motor derives the firing eye and target capsule from native clips.
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO")
 	var fire_def := WeaponDef.new()
 	fire_def.name = "WPN_M4AUTO"
@@ -2576,6 +2578,9 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 			break
 		sim.step()
 	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
+			"the mount selects its next pose after this tick advances the playing clip")
 	sim.step()
 	assert_eq(sim.get_local_player_anim_key(), "anim_emplaced_5",
 			"a late-spawn player receives US01 before phrase_set 4 selects its pose")

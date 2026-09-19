@@ -545,20 +545,10 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 			if carrier_node != null else Transform3D.IDENTITY)
 	for _settle in range(125):
 		assert_true(rt.tick())
-	assert_eq(rt.get_sim().debug_teleport_local_player(
-			Vector3(carrier_node.global_position.x - 1.0, -carrier_node.global_position.z,
-					carrier_node.global_position.y), 90.0, -37.0), OK)
-	# Placement only rides the debug teleport; boarding takes the real USE toggle
-	# (Entity_ToggleVehicleMount -> Entity_FindNearestSeatOrArmory). The teleport
-	# faces the buggy (yaw 90 = +x) and looks down at its control seat (pitch -37):
-	# the scan scores each free seat by its 3D reach plus its angular offset from
-	# the view inside a 90 deg standing cone, so looking at the ctrlx point (a hand
-	# below the eye, 1 u away) is what selects it over the sitex beside it. The
-	# candidate scan reads the proximity slice built at the tick head, so one tick
-	# runs between the teleport and the key, as it would between a move and a press.
-	assert_true(rt.tick())
-	assert_true(rt.get_sim().local_player_toggle_mount(),
-			"the local player mounts the real DBuggy controller")
+	# Select the authored control seat through the same best-seat command as
+	# the Blackhawk fixture; a view-cone USE scan may board a passenger seat.
+	assert_eq(rt.get_sim().debug_crew_local_player(placed.bms_id), OK,
+			"the local player takes the DBuggy control seat")
 	# The drive rides the typed frame input: the session re-applies the
 	# frame's movement before every tick (ADR 0035), so a latch deposited
 	# on the sim is clobbered by the empty MissionFrameInput rt.tick() builds.
@@ -736,15 +726,10 @@ func test_real_dbuggy_attachment_stays_collected_when_driven_away() -> void:
 
 	for _settle in range(125):
 		assert_true(rt.tick())
-	assert_eq(sim.debug_teleport_local_player(
-			Vector3(carrier_node.global_position.x - 1.0, -carrier_node.global_position.z,
-					carrier_node.global_position.y), 90.0, -37.0), OK)
-	# Placement only rides the debug teleport; boarding takes the real USE toggle,
-	# one tick later so the proximity slice sees the teleported player. The pose
-	# faces the buggy and looks down at its control seat: the scan's view cone
-	# and score pick the seat the player looks at.
-	assert_true(rt.tick())
-	assert_true(sim.local_player_toggle_mount(), "the local player mounts the DBuggy")
+	# Select the authored control seat through the same best-seat command as
+	# the Blackhawk fixture; a view-cone USE scan may board a passenger seat.
+	assert_eq(sim.debug_crew_local_player(placed.bms_id), OK,
+			"the local player takes the DBuggy control seat")
 	rt.play()
 	for _tick in range(62 * 6):
 		var input := MissionFrameInput.new()

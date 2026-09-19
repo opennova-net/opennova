@@ -287,6 +287,8 @@ func _install_combat_tables(sim: Simulation) -> void:
 	sim.resolve_item_traits(item_db)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
+	# Current-motor eyes and collision capsules require the native clip map.
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
 
 
 func _retail_m4() -> WeaponDef:
@@ -1322,15 +1324,12 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
-	# The current motor supplies the shot eye and target capsule from native clips.
-	assert_gt(host.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
 
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "CombatJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
 	_install_combat_tables(joiner)
-	assert_gt(joiner.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
 	# Apply before admission, like the shell: a later grant must not refill a
 	# magazine while this test is exercising the fire/reload transaction.
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
