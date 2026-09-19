@@ -24,7 +24,7 @@ hardening, and project health. Divergences from the original engine belong in
       onhook-mcp advertises protocol version `2026-07-28`, which Claude Code rejects
       (negotiate `2025-06-18`/`2025-03-26`); optionally an `onhook_exercise_input`
       tool would retire `exercise_retail_input.ps1`. Baseline: the 2026-08-05 suites captured 24/24 cells
-      cleanly, wire-ready + `diff_vs_golden` GREEN.
+      cleanly, wire-ready + the since-retired `diff_vs_golden.ps1` (ca1cef465) GREEN.
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
       every file under `engine/runtime/terrain` now carries an anchor, and the cpt/til/trn
       resource formats moved to `engine/formats/` carrying theirs, so the gap is
@@ -33,8 +33,8 @@ hardening, and project health. Divergences from the original engine belong in
       static-shadow rasterizer only its collector/tile-walk anchors; `docs/terrain/terrain-re.md`
       is still partial (PAR-R1); narrow or close this entry after the sweep
 - [ ] Present-pass / entity-reconcile citation pass: the present anchors live at
-      the native walks (`present_applier.{h,cpp}` 10, the wire walk +
-      cold path `godot/src/simulation/present_applier_wire.cpp`, the
+      the native walks (`godot/src/simulation/entity_presenter.{h,cpp}`, the wire walk +
+      cold path `godot/src/simulation/entity_presenter_wire.cpp`, the
       held-weapon reference math `engine/runtime/inmatch/client_replica_present.h`) —
       but the native `EntityIndex` (`godot/src/object/entity_index.cpp` —
       the registry's successor) still carries none. Remaining:

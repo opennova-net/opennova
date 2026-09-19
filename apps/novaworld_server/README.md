@@ -23,7 +23,7 @@ session handshake, the browser/host/play container services, and the legacy
   through the `ConnectionManager` verbs (add / refresh / drop) and the
   `NwUdpListener`'s `lobby_states_` map (guarded by `lobby_states_mu_`). SQLite is
   built `THREADSAFE=1`, so writes from a listener thread are serialized by the
-  engine; the higher-level invariants (the lobby-state map, the unknown
+  engine; the higher-level invariants (the per-peer session-state map, the unknown
   accumulator) carry their own mutexes.
 - **The `UnknownTracker` records from listener threads** into an in-memory,
   mutex-guarded accumulator and is flushed to the DB only on the main tick — never
@@ -42,7 +42,7 @@ reasons (`ConnectionManager::DropReason`):
 | `Shutdown` | the server is stopping |
 
 Every drop, regardless of reason, fires `on_lost` → `NwUdpListener::erase_lobby_state`,
-which removes the in-memory lobby state and the matching `active_hosts` /
+which removes the in-memory per-peer session state and the matching `active_hosts` /
 `host_players` rows (the host row by RID, the player row by peer address). So a host
 that quits, times out, or is replaced disappears from the browser the same way.
 

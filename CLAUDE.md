@@ -19,7 +19,7 @@ easier to relay than to rediscover.
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
   terrain_query, environment, hud, menu, assets, devtools — the Dear ImGui
   pass with the game's F3 dev-tool windows (debug builds only) and ONED's run
-  surface, ADR 0039 — plus `session` (the in-match session, the listen-host
+  surface, ADR 0039 — plus `inmatch` (the in-match session, the listen-host
   frame, the server/client state machines and frame loops, the transports) and
   `replication` (the world<->wire seam and the client replica state), ADR 0043 d4),
   `net/` (the wire only: novacrypto, napi, npwire, novaworld; it never includes
@@ -30,7 +30,7 @@ easier to relay than to rediscover.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
   `game/` (the game shell plus its game-level GDScript runtime — world,
-  debug, mission, object, terrain, ui, ...),
+  debug, ui, avatar, probe, mcp, resource_index, strings, util),
   `modtools/` (ONED: settings, loose OpenNova run,
   staged retail run, Stop, and the hidden release pack command; its surface
   is the engine's ImGui `OnedUi` window, the app only executes its requests),
@@ -116,8 +116,8 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
 - The in-match session owns lifecycle, role policy, fixed-tick banking, and
-  input consumption in portable C++ (`engine/runtime/inmatch/session.*`; ADR 0036,
-  superseding ADR 0035's old name/location). An `inmatch::Role` (Local / Host / Joiner,
+  input consumption in portable C++ (`engine/runtime/inmatch/session.*`; ADR 0043 d3,
+  which superseded ADR 0035 and ADR 0036 in full). An `inmatch::Role` (Local / Host / Joiner,
   ADR 0043 d3) runs the tick over the kernel it binds. The C++ `GameWorld` samples one
   typed frame input, advances that session, and orders Godot-only presentation/device
   work once per display frame through ONE static frame-leg table
