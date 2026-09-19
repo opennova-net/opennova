@@ -1,30 +1,7 @@
-# Build and export OpenNova Godot applications for Windows.
-#
-# Produces (version read from godot/project.godot) the workflow's TWO zips:
-#
-#   dist\opennova-windows-v<version>.zip           the DEV build (PRs + non-tag)
-#       opennova.exe            the game; default-mounts the assets\ beside it (loose)
-#       opennova-modtools.exe   ONED; same default source tree
-#       libopennova.windows.<flavour>.x86_64.dll
-#       assets\                 the game's tracked loose sources — ONE copy of the data
-#
-#   dist\opennova-game-windows-v<version>.zip      the GAME build (tagged releases)
-#       opennova.exe            default-mounts its own dir, retail-style
-#       libopennova.windows.<flavour>.x86_64.dll
-#       localres.pff            the packed game, built by ONED's
-#                               --pack-game CLI over the staged sources
-#       menumus.sbf gamemus.sbf earlyerr.txt       loose by contract
-#
-# Both are built on every run so pull-request CI exercises the pack CLI long
-# before a tag needs it. The dev zip keeps ONED beside the runtime because
-# ONED runs the sibling opennova.exe against the loose assets tree.
-#
-# Requires:
-#   - MSVC toolchain + cmake (preinstalled on windows-latest)
-#   - Git submodules already initialised (third_party/godot-cpp)
-#
-# Usage:
-#   pwsh -File scripts\package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
+# Build and export the Windows runtime. Game data is supplied with --resource-dir.
+# Produces dist/opennova-game-windows-v<version>.zip with opennova.exe and its
+# matching native dependencies. Debug exports include the game's ImGui tools.
+# Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
 
 param(
     # CI builds the GDExtension once per flavour (the build-gdextension-windows job)
@@ -49,11 +26,7 @@ $ProgressPreference = "SilentlyContinue"  # keeps Invoke-WebRequest fast on larg
 $ROOT = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location $ROOT
 
-# The imgui-godot addon (the ImGui bridge for ONED's surface and the game's dev
-# tools, ADR 0039) must be installed for BOTH export modes: ONED ships it always,
-# the game's export plugin keeps it for a debug export and strips it from a
-# release export (export_presets.cfg imgui/debug, imgui/release). Only the addon
-# script runs here: an export must never carry GUT.
+# Install the game dev-tools bridge; the release export strips it.
 Write-Host "=== Installing the imgui-godot addon ==="
 & bash "scripts/bootstrap_imgui_godot.sh"
 if ($LASTEXITCODE -ne 0) { throw "bootstrap_imgui_godot.sh failed (exit $LASTEXITCODE)" }
@@ -71,7 +44,7 @@ $versionParts = @($Version.Split("."))
 while ($versionParts.Count -lt 4) { $versionParts += "0" }
 $WinVersion = $versionParts -join "."
 
-# Stamp version into both export presets so Godot embeds it in the .exe VERSIONINFO
+# Stamp version into the runtime export preset so Godot embeds it in the .exe VERSIONINFO
 $presetsPath = "$ROOT\godot\export_presets.cfg"
 $presets = Get-Content $presetsPath -Raw
 $presets = $presets -replace 'application/file_version="[^"]*"',    "application/file_version=`"$WinVersion`""
@@ -167,7 +140,7 @@ if ($SkipBuild) {
 else {
     # RelWithDebInfo, not Debug: the same optimized-plus-symbols flavour
     # scripts/build_godot.sh Dev and CI produce, so a debug-mode package ships
-    # the DLL source/debug game and ONED runs use rather than an /Od build.
+    # the DLL source/debug game runs use rather than an /Od build.
     Invoke-GDExtensionBuild `
         -GodotCppTarget "template_debug" `
         -BuildDir "build-godot-debug" `
@@ -190,8 +163,6 @@ $DIST = "$ROOT\dist"
 New-Item -ItemType Directory -Force -Path $DIST | Out-Null
 
 $RUNTIME_EXE = "$DIST\opennova.exe"
-$MODTOOLS_EXE = "$DIST\opennova-modtools.exe"
-$APPS_ZIP = "$DIST\opennova-windows-v$Version.zip"
 $GAME_ZIP = "$DIST\opennova-game-windows-v$Version.zip"
 
 function Invoke-GodotExport {
@@ -282,7 +253,7 @@ function Test-GodotAppBoot {
 
         $combinedOutput = "$(Get-Content $stdoutLog -Raw)`n$(Get-Content $stderrLog -Raw)"
 
-        if ($proc.ExitCode -ne 0) {
+        if ($proc.ExitCode -ne 2 -or $combinedOutput -notmatch "OpenNova requires game data.*--resource-dir") {
             Write-Host $combinedOutput.TrimEnd()
             throw "Boot smoke for '$PackageName' exited with code $($proc.ExitCode)"
         }
@@ -306,161 +277,48 @@ function Test-GodotAppBoot {
     }
 }
 
-Write-Host "=== Exporting opennova-modtools.exe ==="
-Invoke-GodotExport -PresetName "OpenNova Mod Tools" -OutputPath $MODTOOLS_EXE
-Test-GodotAppBoot -PackageName "opennova-modtools" -ExePath $MODTOOLS_EXE
-
 Write-Host "=== Exporting opennova.exe ==="
 Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
 Test-GodotAppBoot -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE
 
-# ---------------------------------------------------------------------------
-# 5. Stage the game sources: the TRACKED files of assets/ (never a wildcard copy
-#    — the working assets/ dir doubles as the retail validation game dir and
-#    holds untracked retail binaries that must never ship).
-# ---------------------------------------------------------------------------
-function Copy-GameSources {
-    param([string]$AssetsStageDir)
-
-    New-Item -ItemType Directory -Force -Path $AssetsStageDir | Out-Null
-    $tracked = & git -C $ROOT ls-files -z assets
-    if ($LASTEXITCODE -ne 0) { throw "git ls-files assets failed (exit $LASTEXITCODE)" }
-    $names = $tracked -split "`0" | Where-Object { $_ }
-    # Repo metadata rides the tree but is not game data.
-    $names = $names | Where-Object { (Split-Path $_ -Leaf) -notin @(".gitignore", "README.md") }
-    if ($names.Count -eq 0) { throw "No tracked asset files found under assets/" }
-
-    $lfsSentinel = [System.Text.Encoding]::ASCII.GetBytes("version https://git-lfs")
-    foreach ($name in $names) {
-        $src = Join-Path $ROOT ($name -replace "/", "\")
-        if (-not (Test-Path -LiteralPath $src)) { throw "Tracked asset missing from the working tree: $name" }
-        # git archive would emit LFS POINTERS for the binary majority of this tree;
-        # the working tree carries the smudged bytes, but only when LFS pulled — guard.
-        $head = [System.IO.File]::ReadAllBytes($src)
-        if ($head.Length -ge $lfsSentinel.Length) {
-            $prefix = $head[0..($lfsSentinel.Length - 1)]
-            if ([System.Linq.Enumerable]::SequenceEqual([byte[]]$prefix, $lfsSentinel)) {
-                throw "$name is an unpulled git-LFS pointer; run 'git lfs pull' first"
-            }
-        }
-        $rel = $name -replace "^assets/", "" -replace "/", "\"
-        $dst = Join-Path $AssetsStageDir $rel
-        New-Item -ItemType Directory -Force -Path (Split-Path $dst -Parent) | Out-Null
-        Copy-Item -LiteralPath $src -Destination $dst -Force
+# Stage only this export's runtime dependencies. Never copy a data directory.
+$gameStage = Join-Path $DIST ".stage-opennova-game-windows"
+$stagePath = [IO.Path]::GetFullPath($gameStage)
+$distPrefix = [IO.Path]::GetFullPath($DIST).TrimEnd('\') + '\'
+if (-not $stagePath.StartsWith($distPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Unexpected stage path: $stagePath"
+}
+if (Test-Path -LiteralPath $stagePath) {
+    if ((Get-Item -LiteralPath $stagePath).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "Refusing to remove a linked stage directory: $stagePath"
     }
-    Write-Host "    staged $($names.Count) tracked asset files"
+    Remove-Item -LiteralPath $stagePath -Recurse -Force
 }
-
-# ---------------------------------------------------------------------------
-# 6. Pack the game with ONED's hidden command. The shipped
-#    localres.pff is produced by the shipped opennova-modtools.exe; --pack-game
-#    runs headless and drops the archive plus loose-by-contract files into the
-#    game-zip stage.
-# ---------------------------------------------------------------------------
-function Invoke-PackGame {
-    param([string]$AssetsDir, [string]$GameDir)
-
-    Write-Host "=== Packing the game with ONED ==="
-    $dllBeside = Join-Path (Split-Path $MODTOOLS_EXE -Parent) (Split-Path $SHIPPED_DLL -Leaf)
-    if (-not (Test-Path $dllBeside)) {
-        Copy-Item -LiteralPath $SHIPPED_DLL -Destination $dllBeside -Force
+New-Item -ItemType Directory -Path $stagePath | Out-Null
+try {
+    Copy-Item -LiteralPath $RUNTIME_EXE -Destination (Join-Path $stagePath "opennova.exe")
+    Copy-Item -LiteralPath $SHIPPED_DLL -Destination $stagePath
+    if ($ExportMode -eq "debug") {
+        $imguiLibs = @(Get-ChildItem -LiteralPath $DIST -Filter "libimgui-godot-native.*" -File)
+        if ($imguiLibs.Count -eq 0) { throw "Debug export is missing the ImGui addon library" }
+        foreach ($lib in $imguiLibs) { Copy-Item -LiteralPath $lib.FullName -Destination $stagePath }
     }
-    $stdoutLog = [System.IO.Path]::GetTempFileName()
-    $stderrLog = [System.IO.Path]::GetTempFileName()
-    try {
-        $proc = Start-Process `
-            -FilePath $MODTOOLS_EXE `
-            -ArgumentList "--headless -- --pack-game `"$AssetsDir`" `"$GameDir`"" `
-            -WindowStyle Hidden `
-            -Wait `
-            -PassThru `
-            -RedirectStandardOutput $stdoutLog `
-            -RedirectStandardError $stderrLog
-        $combined = "$(Get-Content $stdoutLog -Raw)`n$(Get-Content $stderrLog -Raw)"
-        Write-Host $combined.TrimEnd()
-        if ($proc.ExitCode -ne 0) {
-            throw "pack-game exited with code $($proc.ExitCode)"
-        }
-    }
-    finally {
-        Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
-    }
-    if (-not (Test-Path (Join-Path $GameDir "localres.pff"))) {
-        throw "pack-game produced no localres.pff in $GameDir"
-    }
-}
+    $launchHelp = @"
+OpenNova requires your own game data.
 
-# ---------------------------------------------------------------------------
-# 7. The two zips. Dev: both exes + DLL + loose assets\ (one copy of the data;
-#    the game default-mounts it and ONED offers it as the implicit selection).
-#    Game: opennova.exe + DLL + the packed game, which default-mounts its own
-#    dir, retail-style.
-# ---------------------------------------------------------------------------
-function New-StageDir {
-    param([string]$Name)
-    $stageDir = Join-Path $DIST $Name
-    if (Test-Path $stageDir) {
-        Remove-Item -LiteralPath $stageDir -Recurse -Force
-    }
-    New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
-    return $stageDir
-}
+Packed install:
+  opennova.exe -- --resource-dir "C:\Games\Joint Operations"
+Loose data:
+  opennova.exe -- --resource-dir "C:\MyGameData" --loose-root /d
 
-function Compress-Stage {
-    param([string]$StageDir, [string]$ZipPath)
-    Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue
-    Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $ZipPath -Force
-    if (-not (Test-Path $ZipPath)) {
-        throw "Packaging produced no zip at $ZipPath"
-    }
+Use /game <code> and /exp <name> to select a game or expansion.
+"@
+    Set-Content -LiteralPath (Join-Path $stagePath "README.txt") -Value $launchHelp -Encoding UTF8
+    Compress-Archive -Path (Join-Path $stagePath "*") -DestinationPath $GAME_ZIP -Force
+    if (-not (Test-Path -LiteralPath $GAME_ZIP)) { throw "Packaging produced no zip" }
 }
-
-foreach ($exe in @($MODTOOLS_EXE, $RUNTIME_EXE)) {
-    if (-not (Test-Path $exe)) { throw "Cannot package; exe is missing: $exe" }
+finally {
+    Remove-Item -LiteralPath $stagePath -Recurse -Force
 }
-if (-not (Test-Path $SHIPPED_DLL)) {
-    throw "Cannot package; shipped GDExtension DLL is missing: $SHIPPED_DLL"
-}
-$dllLeaf = Split-Path $SHIPPED_DLL -Leaf
-
-# Godot exports every GDExtension library beside the exe. ONED's ImGui surface
-# needs the imgui-godot addon's own library in BOTH modes (it rides the dev zip),
-# so its export keeps the addon; the game's release export strips it (the game
-# zip carries the library only for a debug export, whose dev tools use it).
-$imguiLibs = @(Get-ChildItem -LiteralPath $DIST -Filter "libimgui-godot-native.*" -File -ErrorAction SilentlyContinue)
-if ($imguiLibs.Count -eq 0) {
-    throw "The exports are missing the imgui-godot addon library beside the exes (is the addon installed and enabled?)"
-}
-function Copy-ImGuiAddonLibraries {
-    param([string]$StageDir)
-    foreach ($lib in $imguiLibs) {
-        Copy-Item -LiteralPath $lib.FullName -Destination (Join-Path $StageDir $lib.Name) -Force
-    }
-}
-
-Write-Host "=== Packaging $(Split-Path $APPS_ZIP -Leaf) (dev build) ==="
-$devStage = New-StageDir -Name ".stage-opennova-windows"
-foreach ($exe in @($MODTOOLS_EXE, $RUNTIME_EXE)) {
-    Copy-Item -LiteralPath $exe -Destination (Join-Path $devStage (Split-Path $exe -Leaf)) -Force
-}
-Copy-Item -LiteralPath $SHIPPED_DLL -Destination (Join-Path $devStage $dllLeaf) -Force
-Copy-ImGuiAddonLibraries -StageDir $devStage
-Copy-GameSources -AssetsStageDir (Join-Path $devStage "assets")
-Compress-Stage -StageDir $devStage -ZipPath $APPS_ZIP
-
-Write-Host "=== Packaging $(Split-Path $GAME_ZIP -Leaf) (tagged-release build) ==="
-$gameStage = New-StageDir -Name ".stage-opennova-game-windows"
-Copy-Item -LiteralPath $RUNTIME_EXE -Destination (Join-Path $gameStage "opennova.exe") -Force
-Copy-Item -LiteralPath $SHIPPED_DLL -Destination (Join-Path $gameStage $dllLeaf) -Force
-if ($ExportMode -eq "debug") { Copy-ImGuiAddonLibraries -StageDir $gameStage }
-Invoke-PackGame -AssetsDir (Join-Path $devStage "assets") -GameDir $gameStage
-Compress-Stage -StageDir $gameStage -ZipPath $GAME_ZIP
-
-Remove-Item -LiteralPath $devStage -Recurse -Force
-Remove-Item -LiteralPath $gameStage -Recurse -Force
-
-# ---------------------------------------------------------------------------
-# 8. Done
-# ---------------------------------------------------------------------------
 Write-Host "=== Done ==="
-Get-Item -LiteralPath @($APPS_ZIP, $GAME_ZIP) | Select-Object Name, Length
+Get-Item -LiteralPath $GAME_ZIP | Select-Object Name, Length

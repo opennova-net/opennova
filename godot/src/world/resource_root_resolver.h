@@ -7,9 +7,9 @@
 
 namespace godot {
 
-// The shell's persisted resource settings as the world sees them (ADR 0043
+// The shell's launch resource settings as the world sees them (ADR 0043
 // slice G10: the ex `_resolve_root` Callable the net-session drive borrowed).
-// A world load without an injected root mounts the persisted resource
+// A world load without an injected root mounts the explicit CLI resource
 // directory with the persisted expansion and game code; the settings store
 // itself (ResourceDirSettings) stays shell-side, so the shell implements the
 // three hooks and installs the resolver
@@ -21,7 +21,7 @@ class ResourceRootResolver : public RefCounted {
 protected:
 	static void _bind_methods();
 
-	// The persisted resource directory ("" = unset).
+	// The explicit CLI resource directory ("" = unset).
 	GDVIRTUAL0R(String, _resource_dir)
 	// The persisted expansion name ("" = the base game).
 	GDVIRTUAL0R(String, _expansion)

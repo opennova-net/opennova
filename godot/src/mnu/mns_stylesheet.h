@@ -58,7 +58,7 @@ public:
 	void set_variables(const Dictionary &p_variables);
 	void clear();
 
-	// --- Document view (ONED authoring surface) ---
+	// --- Document view (native format inspection) ---
 	// Ordered active defines: {name, value, raw_value, inline_comment, line,
 	// node_index, multiline, group, preceding_comments}.
 	Array get_entries() const;

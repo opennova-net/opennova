@@ -3,7 +3,6 @@ import LandingPage from '../pages/LandingPage.vue';
 import RegisterPage from '../pages/RegisterPage.vue';
 import LobbyPage from '../pages/LobbyPage.vue';
 import ExpansionsPage from '../pages/ExpansionsPage.vue';
-import ModToolsPage from '../pages/ModToolsPage.vue';
 import ExpansionDetailPage from '../pages/expansions/ExpansionDetailPage.vue';
 import AdminLayout from '../pages/admin/AdminLayout.vue';
 import ReleasesSection from '../pages/admin/ReleasesSection.vue';
@@ -19,7 +18,6 @@ const router = createRouter({
     { path: '/lobby', component: LobbyPage },
     { path: '/expansions', component: ExpansionsPage },
     { path: '/expansions/:slug', component: ExpansionDetailPage },
-    { path: '/mod-tools', component: ModToolsPage },
     {
       path: '/admin',
       component: AdminLayout,

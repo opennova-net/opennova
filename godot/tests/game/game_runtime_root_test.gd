@@ -4,7 +4,7 @@ const RUNTIME_ROOT_PATH := "res://game/game_runtime_root.tscn"
 const RUNTIME_SCRIPT_PATH := "res://game/game_runtime_root.gd"
 
 
-func test_startup_and_oned_share_the_runtime_root() -> void:
+func test_startup_uses_the_runtime_root() -> void:
 	assert_eq(ProjectSettings.get_setting("application/run/main_scene"), RUNTIME_ROOT_PATH)
 	assert_true(ResourceLoader.exists(RUNTIME_ROOT_PATH))
 	assert_true(ResourceLoader.exists(RUNTIME_SCRIPT_PATH))

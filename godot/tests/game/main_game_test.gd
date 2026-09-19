@@ -1,9 +1,6 @@
 extends GutTest
 
-# Runtime shell (main_game): the F9 "change game folder" hotkey may only summon the
-# asset picker from the menu front-end and never while one is already open or while a
-# mission is live. The native dialog can't be shown headless, so these gate the pure
-# predicate that decides whether the hotkey acts (the hotkey just calls into it).
+# Runtime shell lifecycle, presentation, and explicit resource-root contracts.
 
 const MainGameScript := preload("res://game/main_game.gd")
 const MainGameScene := preload("res://game/main_game.tscn")
@@ -12,7 +9,7 @@ const ShellPresentationSessionScript := preload(
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
-const FIXTURE_DIR := "res://../assets"
+static var FIXTURE_DIR := RuntimeFixture.directory()
 const POLICY_FILE := "policy.bin"
 const POLICY_PLAIN := "persisted game profile reached the mounted root"
 const SCR_KEY_DEFAULT := 0xabee_face
@@ -57,29 +54,11 @@ func after_each() -> void:
 
 
 func _make() -> MainGame:
-	# Not added to the tree on purpose: the predicate only reads _state/_picker, and
+	# Not added to the tree: these public queries only read state, and
 	# staying out of the tree keeps _ready/@onready (which need the full scene) from running.
 	var game = MainGameScript.new()
 	autofree(game)
 	return game
-
-
-func test_can_summon_in_menu_state() -> void:
-	var game := _make()
-	assert_true(game.can_summon_dir_picker(), "picker summonable from the menu front-end")
-	assert_true(MainGameScript.can_summon_dir_picker_in(MainGameScript.State.MENU, false))
-
-
-func test_cannot_summon_during_mission() -> void:
-	assert_false(MainGameScript.can_summon_dir_picker_in(MainGameScript.State.WORLD, false),
-			"not summonable while a world is live")
-	assert_false(MainGameScript.can_summon_dir_picker_in(MainGameScript.State.PAUSED, false),
-			"not summonable from the pause overlay")
-
-
-func test_cannot_summon_while_picker_open() -> void:
-	assert_false(MainGameScript.can_summon_dir_picker_in(MainGameScript.State.MENU, true),
-			"no second picker while one is already open")
 
 
 func test_repeat_close_request_ends_a_pending_music_drain() -> void:
@@ -526,7 +505,7 @@ func test_crosshair_option_caches_before_hud_and_updates_an_existing_hud() -> vo
 
 func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	var root := ResourceRoot.new()
-	var fixture_dir := ProjectSettings.globalize_path("res://../assets")
+	var fixture_dir := ProjectSettings.globalize_path(RuntimeFixture.directory())
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 
 	var world := GameWorld.new()
@@ -596,7 +575,7 @@ func _make_packed_shell(game_code: String):
 	})
 	_write_pff(_temp_dir.path_join("resource.pff"), entries)
 
-	ResourceDirSettings.set_resource_dir(_temp_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _temp_dir]))
 	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game(game_code)
 	var shell = MainGameScene.instantiate()

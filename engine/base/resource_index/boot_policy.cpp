@@ -1,9 +1,8 @@
-// Launch flags and the boot resource directory ladder -- see boot_policy.h.
+// Launch flags and path helpers -- see boot_policy.h.
 
 #include <base/resource_index/boot_policy.h>
 
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -114,42 +113,11 @@ std::string launch_game(const LaunchFlags &flags, const std::string &fallback) {
     return fb.empty() ? std::string("jo") : fb;
 }
 
-std::string launch_resource_dir(const LaunchFlags &flags, const std::string &fallback) {
-    return flags.resource_dir.empty() ? strip(fallback) : flags.resource_dir;
-}
-
 std::string boot_path_join(const std::string &dir, const std::string &name) {
     if (dir.empty()) return name;
     const char last = dir.back();
     if (last == '/' || last == '\\') return dir + name;
     return dir + "/" + name;
-}
-
-std::string bundled_game_dir(const std::string &exe_dir, const BootDirProbe &fs) {
-    if (exe_dir.empty() || !fs.file_exists) return std::string();
-    for (const char *archive : kBootArchiveTable)
-        if (fs.file_exists(boot_path_join(exe_dir, archive))) return exe_dir;
-    return std::string();
-}
-
-std::string bundled_assets_dir(const std::string &exe_dir, const BootDirProbe &fs) {
-    if (exe_dir.empty() || !fs.dir_exists) return std::string();
-    const std::string dir = boot_path_join(exe_dir, "assets");
-    return fs.dir_exists(dir) ? dir : std::string();
-}
-
-std::string boot_resource_dir(const LaunchFlags &flags, const std::string &persisted,
-                              const std::string &exe_dir, const BootDirProbe &fs) {
-    std::string dir = launch_resource_dir(flags, persisted);
-    if (dir.empty()) dir = bundled_game_dir(exe_dir, fs);
-    if (dir.empty()) dir = bundled_assets_dir(exe_dir, fs);
-    return dir;
-}
-
-bool boot_loose_allowed(const LaunchFlags &flags, const std::string &dir,
-                        const std::string &exe_dir, const BootDirProbe &fs) {
-    if (flags.loose_root) return true;
-    return !dir.empty() && dir == bundled_assets_dir(exe_dir, fs);
 }
 
 } // namespace opennova

@@ -18,7 +18,7 @@
 
 namespace godot {
 
-// Godot PFF document binding used by ONED's hidden pack command and format tests.
+// Godot PFF document binding used by native-format consumers and tests.
 // Wraps the engine/formats/pff reader + streaming writer + the payload decode
 // layer + the game-profile table. A "game" choice drives
 // both the container key (for encrypting added files) and the payload codec (for decoding on
@@ -116,14 +116,8 @@ public:
 	// The games the tool can target: [{id:int, name:String}, ...] from the gameprofile table.
 	static Array list_games();
 
-	// The packed-game policy (engine base/vfs/pack_policy.h + vfs.h's boot
-	// table), re-exported for the packer and the boot-dir probe.
+	// The runtime boot archive table.
 	static PackedStringArray boot_archive_names();
-	static String pack_archive_name();
-	static PackedStringArray pack_loose_extensions();
-	static PackedStringArray pack_excluded_extensions();
-	static PackedStringArray pack_excluded_dirs();
-	static int pff_name_bytes();
 
 	Error open(const String &path);
 	String get_source_path() const;

@@ -6,8 +6,8 @@ namespace opennova::gameprofile {
    Jointops.exe demands by literal name to boot to the main menu and start a
    mission, with the witnessed failure class for each. Generated from the R8
    record — docs/required-resources.md is the witness source; this table is
-   the engine-side instantiation BOTH the game's boot validation and ONED's
-   diagnostics consume. Rows are ordered by the witnessed boot sequence
+   the engine-side manifest consumed by the game's boot validation and test
+   diagnostics. Rows are ordered by the witnessed boot sequence
    (phase-major).
 
    These functions are internal to the native engine (ADR 0024). */

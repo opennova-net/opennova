@@ -1,6 +1,6 @@
 # TODO
 
-Everything here is work that is **not** a parity divergence: ONED and OpenNova Launcher UX, code
+Everything here is work that is **not** a parity divergence: OpenNova Launcher UX, code
 hardening, and project health. Divergences from the original engine belong in
 [docs/divergence-ledger.md](docs/divergence-ledger.md) instead, and
 [docs/current-state.md](docs/current-state.md) explains which is which.
@@ -91,11 +91,6 @@ hardening, and project health. Divergences from the original engine belong in
       row, the a11y flag on Flush tail, effects live count,
       fire/destruction/throwable/wire present stats, occlusion counts (`occl`).
       Each returns as a VALUE slot fed by the shell sampler that owns the source.
-- [ ] Managed-game shutdown: ONED close/Stop may still require forced termination.
-      Add a bounded graceful-quit window before the current forced termination,
-      and keep the process-handle lifecycle reliable so a stopped retail child
-      releases the staged files before the next pack.
-
 ## Project health follow-ups
 
 - [ ] NovaWorld production deploy + cutover (operator-executed, one-time): the

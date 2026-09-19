@@ -19,14 +19,13 @@ _Avoid_: libs (the pre-2026-08 path), core, framework
 **The Godot layer (first-class, ADR 0034)**:
 `godot/src/` (pure C++ GDExtension bindings) plus `godot/game/` (the game-level
 GDScript runtime) — the layer that wires Godot nodes to engine facts. The game
-shell is composed inside its game runtime; ONED uses the process and packaging
-bindings it needs.
+shell is composed inside its game runtime.
 _Avoid_: godot/engine (the pre-2026-08 path), engine layer (that word is the
 engine's), glue, bindings (only half of it)
 
 **Shell**:
 An application front-end composed inside the Godot layer's game runtime: the game
-shell (in `godot/game/`) and ONED (`godot/modtools/`). Shells own UI and application
+shell (in `godot/game/`). Shells own UI and application
 flow, never engine behavior.
 _Avoid_: frontend, app (in project prose), host (reserved for the game host)
 
@@ -157,8 +156,8 @@ _Avoid_: manual probe script, env-configured probe, `*_probe.gd` under `godot/te
 The `opennova-game` Model Context Protocol server the game runtime embeds
 (`--mcp-port`), through which scripts, runbooks and agents read state, drive the
 debug catalog and menu, capture frames and run probes. Retail is driven separately
-through `onhook-mcp` (`opennova-int`). ONED has no MCP (ADR 0037).
-_Avoid_: ONED MCP, the editor MCP
+through `onhook-mcp` (`opennova-int`).
+_Avoid_: editor MCP
 
 **In-match / Matchmaking**:
 The two network protocol domains. **In-match** is the 62 Hz game session between a host
@@ -304,23 +303,16 @@ _Avoid_: numbered hurt volume, damage tier 16/17/18
 ## Products & modes
 
 **Godot product**:
-One of the two OpenNova applications built with Godot: the game and ONED. The
+The OpenNova game runtime built with Godot (ADR 0045). The
 separately distributed OpenNova Launcher, backend services, and development tools
 are outside this taxonomy (ADR 0015).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
 (as a product name)
 
-**ONED**:
-The developer-facing Godot product for selecting a game-data tree, running it in
-OpenNova or staged retail, and stopping the one game process it started. ONED does
-not author game data (ADR 0037).
-_Avoid_: launcher, editor, OpenNova Editor, modtools (as a product name)
-
 **OpenNova Launcher**:
 The separately distributed Windows tray product that directs a stock NovaLogic
 installation to OpenNova's NovaWorld service. It is the only product called
 Launcher.
-_Avoid_: ONED launcher, launcher (when referring to ONED)
 
 **Serve mode**:
 `opennova.exe` hosting a match without being a player: the server-options menu path,
@@ -361,8 +353,7 @@ _Avoid_: overlay, UI (too broad)
 The engine-owned Dear ImGui tool windows behind F3 (`engine/runtime/devtools`,
 ADR 0039): the Stats window over the frame-stats board, and every inspection
 or control window added later. Debug builds only; the Godot side is one
-`DevTools` node plus the imgui-godot addon. ONED's run surface rides the same
-engine ImGui pass (`OnedUi`) but is a product surface, not a dev tool.
+`DevTools` node plus the imgui-godot addon.
 _Avoid_: debug overlay, F3 overlay (the retired GDScript surface), editor
 
 **Spinmap**:

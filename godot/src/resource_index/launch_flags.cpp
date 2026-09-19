@@ -1,8 +1,6 @@
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
 
-#include <godot_cpp/classes/dir_access.hpp>
-#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
@@ -14,7 +12,6 @@ namespace godot {
 using opennova::to_gd;
 using opennova::to_std;
 
-std::string LaunchFlags::bundled_probe_override_;
 std::vector<std::string> LaunchFlags::args_override_;
 bool LaunchFlags::args_override_set_ = false;
 
@@ -51,24 +48,12 @@ void LaunchFlags::_bind_methods() {
 			&LaunchFlags::expansion, DEFVAL(String()));
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("game", "fallback"),
 			&LaunchFlags::game, DEFVAL(String("jo")));
-	ClassDB::bind_static_method("LaunchFlags", D_METHOD("resource_dir", "fallback"),
-			&LaunchFlags::resource_dir, DEFVAL(String()));
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("resource_dir"),
+			&LaunchFlags::resource_dir);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("loose_mission"),
 			&LaunchFlags::loose_mission);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("loose_root_allowed"),
 			&LaunchFlags::loose_root_allowed);
-	ClassDB::bind_static_method("LaunchFlags", D_METHOD("boot_resource_dir", "persisted"),
-			&LaunchFlags::boot_resource_dir);
-	ClassDB::bind_static_method("LaunchFlags", D_METHOD("boot_loose_allowed", "dir"),
-			&LaunchFlags::boot_loose_allowed);
-	ClassDB::bind_static_method("LaunchFlags", D_METHOD("bundled_game_dir", "exe_dir"),
-			&LaunchFlags::bundled_game_dir);
-	ClassDB::bind_static_method("LaunchFlags", D_METHOD("bundled_assets_dir", "exe_dir"),
-			&LaunchFlags::bundled_assets_dir);
-	ClassDB::bind_static_method("LaunchFlags", D_METHOD("set_bundled_probe_override", "dir"),
-			&LaunchFlags::set_bundled_probe_override);
-	ClassDB::bind_static_method("LaunchFlags", D_METHOD("get_bundled_probe_override"),
-			&LaunchFlags::get_bundled_probe_override);
 }
 
 // Every token the game was launched with (engine + user args): Godot commands
@@ -89,23 +74,6 @@ opennova::LaunchFlags LaunchFlags::parse() {
 	return opennova::parse_launch_flags(args);
 }
 
-opennova::BootDirProbe LaunchFlags::probe() {
-	opennova::BootDirProbe p;
-	p.file_exists = [](const std::string &path) {
-		return FileAccess::file_exists(to_gd(path));
-	};
-	p.dir_exists = [](const std::string &path) {
-		return DirAccess::dir_exists_absolute(to_gd(path));
-	};
-	return p;
-}
-
-std::string LaunchFlags::probe_dir() {
-	if (!bundled_probe_override_.empty()) return bundled_probe_override_;
-	OS *os = OS::get_singleton();
-	return os != nullptr ? to_std(os->get_executable_path().get_base_dir()) : std::string();
-}
-
 bool LaunchFlags::loose_override_enabled() {
 	return parse().loose_override;
 }
@@ -118,8 +86,8 @@ String LaunchFlags::game(const String &fallback) {
 	return to_gd(opennova::launch_game(parse(), to_std(fallback)));
 }
 
-String LaunchFlags::resource_dir(const String &fallback) {
-	return to_gd(opennova::launch_resource_dir(parse(), to_std(fallback)));
+String LaunchFlags::resource_dir() {
+	return to_gd(parse().resource_dir);
 }
 
 String LaunchFlags::loose_mission() {
@@ -200,30 +168,6 @@ void LaunchFlags::clear_args_override() {
 
 bool LaunchFlags::has_args_override() {
 	return args_override_set_;
-}
-
-String LaunchFlags::boot_resource_dir(const String &persisted) {
-	return to_gd(opennova::boot_resource_dir(parse(), to_std(persisted), probe_dir(), probe()));
-}
-
-bool LaunchFlags::boot_loose_allowed(const String &dir) {
-	return opennova::boot_loose_allowed(parse(), to_std(dir), probe_dir(), probe());
-}
-
-String LaunchFlags::bundled_game_dir(const String &exe_dir) {
-	return to_gd(opennova::bundled_game_dir(to_std(exe_dir), probe()));
-}
-
-String LaunchFlags::bundled_assets_dir(const String &exe_dir) {
-	return to_gd(opennova::bundled_assets_dir(to_std(exe_dir), probe()));
-}
-
-void LaunchFlags::set_bundled_probe_override(const String &dir) {
-	bundled_probe_override_ = to_std(dir);
-}
-
-String LaunchFlags::get_bundled_probe_override() {
-	return to_gd(bundled_probe_override_);
 }
 
 } // namespace godot

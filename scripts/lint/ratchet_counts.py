@@ -12,11 +12,10 @@ in maturity_baseline.json:
                         test classes (a file-level `extends` or an inline
                         `class X extends Y` / `class X:` + `extends Y`) under
                         godot/tests/**/*.gd whose base is a PRODUCTION class:
-                        a `class_name` declared under godot/game or
-                        godot/modtools, or a class registered in
+                        a `class_name` declared under godot/game, or a class registered in
                         godot/src/register_types.cpp. ADR 0043 rule 11: a test
                         boots a real fixture or fakes a GDScript INTERFACE
-                        class (GameShell, WorldView, RunSessionPlatform,
+                        class (GameShell, WorldView,
                         MenuCompanion hooks) by overriding public verbs; it
                         never subclasses a production Node to override
                         behavior and never overrides a private. Non-increasing;
@@ -26,8 +25,7 @@ in maturity_baseline.json:
                         the allowlisted infra libs (citation is inapplicable
                         there) -- the faithful-port rule's coverage floor.
   godot_orig_cites      "[orig:" citations across the whole Godot side --
-                        godot/src C++ plus the godot/game, godot/modtools and
-                        godot/probes GDScript -- as ONE count (ADR 0043 merged
+                        godot/src C++ plus the godot/game and godot/probes GDScript -- as ONE count (ADR 0043 merged
                         the former adapter_cpp_orig_cites / gd_orig_cites
                         pair). A cite moves freely between the two Godot-side
                         languages; the gauge falls only when witnessed code
@@ -35,8 +33,7 @@ in maturity_baseline.json:
                         code -- bank it with --write-baseline. The one cite
                         marker is `[orig: Name @0xADDR]` (ADR 0042 d7).
   gd_foreign_private_accesses
-                        lines in the shipping GDScript (godot/game,
-                        godot/modtools) that access an _underscore member of
+                        lines in the shipping GDScript (godot/game) that access an _underscore member of
                         ANOTHER object (self._ excluded) -- a "method annex"
                         reaching into its owner's privates is not a class
                         boundary (ADR 0043). Non-increasing; target zero.
@@ -50,7 +47,7 @@ in maturity_baseline.json:
                         exists for it.
   godot_node_meta_sites Object metadata calls (set_meta / get_meta / has_meta /
                         remove_meta) anywhere under godot/ (bindings, game
-                        scripts, modtools, probes, tests). An ABSOLUTE zero
+                        scripts, probes, tests). An ABSOLUTE zero
                         floor like mcp_boundary_cites: a fact hung on a node
                         by string key is an untyped record nobody can find;
                         it belongs on the node class as a typed property, on
@@ -59,8 +56,7 @@ in maturity_baseline.json:
                         2500-line limit as oversize_cpp_files (the .cpp glob
                         never saw headers).
   gd_dict_key_sites     Dictionary-keyed reads (`x["key"]`, `.get("key"`) on
-                        code lines of the shipping GDScript (godot/game,
-                        godot/modtools), excluding godot/game/mcp (the
+                        code lines of the shipping GDScript (godot/game), excluding godot/game/mcp (the
                         sanctioned JSON transport edge) and godot/game/probe
                         (the probe model: its arguments are JSON Schema and
                         its status pages are the game_probe wire by design,
@@ -143,12 +139,11 @@ def count_test_private_pokes() -> int:
 
 
 def count_gd_foreign_private_accesses() -> int:
-    """Foreign `._member` accesses in the SHIPPING GDScript (godot/game,
-    godot/modtools): the annex pattern -- a RefCounted "method annex" split
+    """Foreign `._member` accesses in the SHIPPING GDScript (godot/game): the annex pattern -- a RefCounted "method annex" split
     off its owner for size and reaching back through `_owner._field` -- is
     C++ `friend` without the keyword. A class owns its state; an object that
     needs another's privates is a method of that other class (ADR 0043)."""
-    return _count_private_pokes(("game", "modtools"))
+    return _count_private_pokes(("game",))
 
 
 CLASS_NAME_DECL = re.compile(r"^class_name\s+([A-Za-z_]\w*)", re.M)
@@ -160,7 +155,7 @@ TEST_EXTENDS = re.compile(r"^\s*(?:class\s+\w+\s+)?extends\s+([A-Za-z_]\w*)\s*:?
 
 def _production_class_names() -> set[str]:
     names: set[str] = set()
-    for sub in ("game", "modtools"):
+    for sub in ("game",):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or _in_build_dir(parts):
@@ -245,7 +240,7 @@ def count_godot_orig_cites() -> int:
         except OSError:
             continue
         count += text.count("[orig:")
-    for sub in ("game", "modtools", "probes"):
+    for sub in ("game", "probes"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or _in_build_dir(parts):
@@ -322,10 +317,6 @@ def count_engine_stdout_prints() -> int:
 GD_PRINT = re.compile(r"(?:^|[^_a-zA-Z\"])(?:print|prints|printerr|print_rich|print_debug)\s*\(")
 # The shipping Godot layer routes diagnostics through push_error/push_warning,
 # print_verbose, or the dev tools (F3).
-GD_PRINT_ALLOWLIST: set[str] = {
-    # Hidden release-build CLI: stdout/stderr is its user interface.
-    "godot/modtools/pack_game_cli.gd",
-}
 CPP_CONSOLE = re.compile(
     r"UtilityFunctions::print(?!_verbose)\s*\(|UtilityFunctions::printerr\s*\("
     r"|UtilityFunctions::print_rich\s*\("
@@ -339,11 +330,8 @@ def count_gd_prints_outside_debug() -> int:
     godot/probes log through their ProbeContext, so they are in scope.
     godot/src is C++-only (ADR 0034 d6); its .gd leg here is a tripwire."""
     count = 0
-    for sub in ("src", "game", "modtools", "probes"):
+    for sub in ("src", "game", "probes"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
-            rel = path.relative_to(REPO).as_posix()
-            if rel in GD_PRINT_ALLOWLIST:
-                continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -369,7 +357,7 @@ def count_has_method_guards() -> int:
     has_method() probe is the same duck dispatch, just invisible to GDScript
     greps."""
     count = 0
-    for sub in ("src", "game", "modtools", "probes"):
+    for sub in ("src", "game", "probes"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -460,8 +448,7 @@ GD_DICT_KEY_SITE = re.compile(r'\["[A-Za-z_]\w*"\]|\.get\("')
 
 
 def count_gd_dict_key_sites() -> int:
-    """Dictionary-keyed reads in the shipping GDScript (godot/game and
-    godot/modtools; godot/game/mcp excluded as the sanctioned JSON transport
+    """Dictionary-keyed reads in the shipping GDScript (godot/game; godot/game/mcp excluded as the sanctioned JSON transport
     edge, godot/game/probe as the probe model whose arguments are JSON Schema
     and whose status pages are the game_probe wire by design): `row["key"]`
     and `.get("key"` on code lines. Each site is a record crossing a seam
@@ -469,7 +456,7 @@ def count_gd_dict_key_sites() -> int:
     is the documented transport edges (the dict-contract allowlist in this
     file's baseline)."""
     count = 0
-    for sub in ("game", "modtools"):
+    for sub in ("game",):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or _in_build_dir(parts):

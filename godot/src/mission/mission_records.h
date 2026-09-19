@@ -14,7 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// The mission document's typed views as the ONED/test document API reads
+// The mission document's typed views as the document API reads
 // them (ADR 0043 d10 over slice E11): each record is a value wrapper over the
 // engine's bms::Entity or a formats/mission view struct — forwarding getters
 // bound as read-only properties, never mirrored members. A static make()

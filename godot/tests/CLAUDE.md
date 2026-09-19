@@ -29,12 +29,11 @@
 - Tests drive real fixtures (ADR 0043 rule 11): never subclass a production Node or
   world-layer class to override behavior, never poke a `_private`. Boot the real object
   through `support/world_fixture.gd` (`WorldFixture.boot_minimal` — the packaged
-  `game_world.tscn` over the minimal pack, `boot_mission_data`, `boot_shell`,
+  `game_world.tscn` over generated runtime fixtures, `boot_mission_data`, `boot_shell`,
   `stage_minimal_root` + `stage_effects` + `stage_sound_bank`) or `support/hud_fixture.gd`
   (a real `HudOverlay`), and assert through public read seams (`get_debug_group_report`,
   `get_stats`, `recent_fired_soundsets`, ...). Fake only a GDScript INTERFACE class by
-  overriding its public verbs (`GameShell`, `WorldView`/`ArmoryWorldView`,
-  `RunSessionPlatform`). `ratchet_counts.py gd_test_production_subclasses` holds the residue.
+  overriding its public verbs (`GameShell`, `WorldView`/`ArmoryWorldView`). `ratchet_counts.py gd_test_production_subclasses` holds the residue.
 - Always `autofree`/`add_child_autofree` what you create. A loaded `GameWorld` must be
   unloaded before it is freed (`WorldFixture.make_world` does it on tree exit): a world
   freed loaded, or a leaked instance carrying a `Transform3D`-typed member, segfaults the

@@ -5,19 +5,13 @@ extends GameShell
 # .mnu menu set + audio from the chosen resource dir) and hands off to a GameWorld
 # when the player starts a mission, with pause + return-to-menu on demand. The
 # engine ships no game data; everything (menus, audio, terrain, missions) loads
-# from the chosen resource dir. The first-launch directory picker lives here
-# (runtime-only); headless probes set the dir explicitly and never block on it.
+# from the required --resource-dir supplied at launch.
 
-const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const PlayerOptionsScript := preload("res://game/player_options.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
 const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.gd")
 const ShellPresentationSessionScript := preload("res://game/shell_presentation_session.gd")
 const HudHiddenCaptureWitness := preload("res://game/world/hud_hidden_capture_witness.gd")
-# Re-summon the game-folder picker. The original engine has no "change game dir"
-# control (the game *is* its install folder); this is an OpenNova convenience so a
-# wrong / menu-less folder can be re-picked without restarting. Front-end only.
-const CHANGE_DIR_KEY := KEY_F9
 # The HUD presenter's gameplay keys (objectives/friendly-tags) live with the
 # presenter — GameHudPresenter.handle_gameplay_key.
 # The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
@@ -55,7 +49,6 @@ enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND }
 @onready var _menu_layer: CanvasLayer = $MenuLayer
 @onready var _menu_shell: MenuShell = $MenuLayer/MenuShell
 
-var _picker: FileDialog
 var _root: ResourceRoot
 var _state: int = State.MENU
 var _shell_wired := false
@@ -151,7 +144,6 @@ func begin_runtime_shutdown() -> WorldLoadOperation:
 	_shutdown_prepared = true
 	var load_operation := _world_load.cancel_current()
 	_world_load_pending = false
-	_cleanup_picker()
 	finish_hud_hidden_capture()
 	for presenter in [
 		_player_presenter, _armory_presenter, _deploy_presenter, _hud_presenter,
@@ -177,7 +169,6 @@ func finish_runtime_shutdown() -> void:
 	begin_runtime_shutdown()
 	_shutdown_resources_released = true
 	_world_load.dismiss()
-	_cleanup_picker()
 	if is_instance_valid(_menu_shell):
 		_menu_shell.release_runtime_renderer_resources()
 	else:
@@ -237,6 +228,11 @@ func current_resource_root() -> ResourceRoot:
 
 
 func _ready() -> void:
+	var dir := LaunchFlags.resource_dir()
+	if dir.is_empty():
+		push_warning("OpenNova requires game data. Usage: opennova.exe -- --resource-dir <path> [--loose-root] [/d]")
+		get_tree().quit(2)
+		return
 	_previous_auto_accept_quit = get_tree().auto_accept_quit
 	get_tree().auto_accept_quit = false
 	_quit_policy_installed = true
@@ -289,9 +285,8 @@ func _ready() -> void:
 	_world.music_context_opened.connect(MusicService.open_game_context)
 	_world.music_context_closed.connect(MusicService.stop_context)
 	_world.music_var_changed.connect(MusicService.set_var)
-	# The persisted resource settings behind the world's own mount (the game
-	# path with no injected root).
-	_world.set_resource_root_resolver(SettingsResourceRootResolver.new())
+	# The explicit launch directory and current game/expansion selection.
+	_world.set_resource_root_resolver(LaunchResourceRootResolver.new())
 	_hud_presenter = GameHudPresenter.new()
 	_hud_presenter.name = "GameHudPresenter"
 	add_child(_hud_presenter)
@@ -321,14 +316,8 @@ func _ready() -> void:
 	# for text/banner presentation): "round_end" starts the end-of-mission flow.
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
-	# Flag > persisted pick > the game bundled around a shipped exe (LaunchFlags).
-	var dir := LaunchFlags.boot_resource_dir(ResourceDirSettings.get_resource_dir())
-	if dir.is_empty():
-		_request_resource_dir()
-		return
 	if not _enter_menu(dir):
-		# The picker is up and the shell holds no root: none of the boot
-		# continuations below could load anything.
+		get_tree().quit(1)
 		return
 	# F6 is still the real standalone game and normal loading presentation; it
 	# only selects the exact saved top-level loose BMS instead of an archive row.
@@ -380,10 +369,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# F11 fullscreen uses the shared runtime window policy.
 	if WindowState.is_toggle_event(event):
 		_toggle_fullscreen()
-		get_viewport().set_input_as_handled()
-		return
-	if key.keycode == CHANGE_DIR_KEY and can_summon_dir_picker():
-		_request_resource_dir()
 		get_viewport().set_input_as_handled()
 		return
 	if key.keycode == DEV_TOOLS_KEY:
@@ -608,25 +593,13 @@ func hud_objective_line() -> String:
 	return _hud_presenter.hud_objective_line() if _hud_presenter != null else ""
 
 
-# Whether the folder picker may be summoned right now: only from the menu front-end
-# and only when one is not already open (the static rule is unit-testable headless).
-func can_summon_dir_picker() -> bool:
-	return can_summon_dir_picker_in(_state, _picker != null)
-
-
-static func can_summon_dir_picker_in(state: int, picker_open: bool) -> bool:
-	return state == State.MENU and not picker_open
-
-
 # --- Menu state ---------------------------------------------------------------
 
-# Returns false when the directory would not mount (the picker is raised and
-# the shell holds no root) so boot continuations can gate on it.
+# Returns false when the requested directory cannot mount.
 func _enter_menu(dir: String) -> bool:
 	if _root == null or _root.get_root_dir() != dir:
-		var root := BootRootMount.mount(dir, LaunchFlags.boot_loose_allowed(dir))
+		var root := BootRootMount.mount(dir, LaunchFlags.loose_root_allowed())
 		if root == null:
-			_request_resource_dir()
 			return false
 		_root = root
 	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
@@ -735,58 +708,6 @@ func _try_open_armory() -> bool:
 # 44, rebindable in Options -> Controls).
 func _is_use_item_key(keycode: Key) -> bool:
 	return ControlsBindings.model().godot_keys_for_token("useitem").has(int(keycode))
-
-
-# --- Resource dir picker (first launch) --------------------------------------
-
-func _request_resource_dir() -> void:
-	if GameRuntimeRoot.is_headless() or _picker != null:
-		return
-	var picker := FileDialog.new()
-	picker.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-	picker.access = FileDialog.ACCESS_FILESYSTEM
-	picker.use_native_dialog = true
-	picker.title = "Select your OpenNova asset directory"
-	picker.dir_selected.connect(_on_dir_selected)
-	picker.canceled.connect(_on_dir_canceled)
-	_picker = picker
-	add_child(picker)
-	picker.popup_centered_ratio(0.6)
-
-
-func _on_dir_selected(dir: String) -> void:
-	_cleanup_picker()
-	apply_picked_resource_dir(dir, not LaunchFlags.resource_dir().is_empty())
-
-
-## The picker's accept leg. `process_local` is resolved from --resource-dir at
-## the signal callback above: an ONED-selected directory is process-local,
-## so persisting a picker escape would overwrite the game's saved preference.
-## Parameterized for
-## the same ADR-0018 reason as BootRootMount.mount; returns false when the pick
-## would not mount (the picker is re-raised). Public and name-stable for the
-## lifecycle tests.
-func apply_picked_resource_dir(dir: String, process_local: bool) -> bool:
-	var root := BootRootMount.mount(dir, LaunchFlags.boot_loose_allowed(dir))
-	if root == null:
-		_request_resource_dir()
-		return false
-	_root = root
-	if not process_local:
-		ResourceDirSettings.set_resource_dir(dir)
-	_enter_menu(dir)
-	return true
-
-
-func _on_dir_canceled() -> void:
-	_cleanup_picker()
-	_request_resource_dir()
-
-
-func _cleanup_picker() -> void:
-	if _picker != null:
-		_picker.queue_free()
-		_picker = null
 
 
 # --- Menu <-> world transitions ----------------------------------------------
@@ -1200,11 +1121,8 @@ func _teardown_world_to_menu() -> void:
 		_hud_presenter.teardown()
 	if _root != null and _enter_menu(_root.get_root_dir()):
 		return
-	# No mountable root to return to: land on the pre-mount front-end state so
-	# the picker/F9 contract (MENU-only) holds, with the picker as the only
-	# recovery surface.
-	_state = State.MENU
-	_request_resource_dir()
+	push_warning("OpenNova: the game-data directory is no longer mountable")
+	get_tree().quit(1)
 
 
 func _on_exit_to_desktop() -> void: request_quit()

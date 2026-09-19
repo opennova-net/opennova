@@ -212,7 +212,7 @@ the leg table (`render_particle_frame`, `render_material_frame`, and the
 per-model advance is one static driver over a shared awake set
 (`ObjectModel::advance_awake_frame`, per-frame-guarded); the menu shell and
 its portrait models drive that same static advance from the game process loop
-outside a live mission. ONED has no preview-model loop (ADR 0037).
+outside a live mission.
 
 D-RORD-8 (fixed 2026-08-12): the one-frame visibility lag was the CAMERA, not
 the occlusion-after-present order. The local-player camera/viewmodel placement

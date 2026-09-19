@@ -35,7 +35,7 @@ func test_runtime_flags_read_through_the_override() -> void:
 	assert_eq(LaunchFlags.integrity_profile(), "retail")
 	assert_eq(LaunchFlags.capture_pcap(), "C:/cap/s.pcapng")
 	assert_eq(LaunchFlags.mcp_port(), 8975)
-	assert_eq(LaunchFlags.resource_dir("D:/persisted"), "C:/Games/JO")
+	assert_eq(LaunchFlags.resource_dir(), "C:/Games/JO")
 	assert_eq(LaunchFlags.expansion("revx02"), "jox01")
 	assert_true(LaunchFlags.loose_override_enabled())
 	assert_true(LaunchFlags.loose_root_allowed())
@@ -57,7 +57,7 @@ func test_absent_flags_fall_back() -> void:
 	assert_eq(LaunchFlags.integrity_profile(), "")
 	assert_eq(LaunchFlags.capture_pcap(), "")
 	assert_eq(LaunchFlags.mcp_port(), 0)
-	assert_eq(LaunchFlags.resource_dir("D:/persisted"), "D:/persisted")
+	assert_eq(LaunchFlags.resource_dir(), "")
 	assert_false(LaunchFlags.loose_override_enabled())
 
 

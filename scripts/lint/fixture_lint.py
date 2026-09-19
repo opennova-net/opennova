@@ -17,7 +17,7 @@ Rules (each hit names the file and the rule):
                 extension carve-outs), judged by the materialized content:
                 no NUL byte and printable throughout is text; an unpulled
                 pointer counts as binary
-  size          no tracked file under fixtures/ or assets/ exceeds 2 MiB
+  size          no tracked file under fixtures/ exceeds 2 MiB
                 (the size comes from the LFS pointer, so this needs no pull);
                 scripts/lint/fixture_allowlist.json "size_exceptions" carries
                 the few oversize assets with a reason
@@ -186,8 +186,7 @@ def main() -> int:
     allow = json.loads(ALLOWLIST_PATH.read_text(encoding="utf-8"))
     size_exceptions = {row["path"]: row["why"] for row in allow.get("size_exceptions", [])}
     fixtures = tracked("fixtures/")
-    assets = tracked("assets/")
-    attrs = lfs_attributes(fixtures + assets)
+    attrs = lfs_attributes(fixtures)
     corpus = reference_corpus()
     gen_names = generator_names()
 
@@ -224,7 +223,7 @@ def main() -> int:
         else:
             classes[cls] += 1
 
-    for rel in fixtures + assets:
+    for rel in fixtures:
         try:
             size = blob_size(rel, attrs.get(rel) == "lfs")
         except subprocess.CalledProcessError:
@@ -238,7 +237,7 @@ def main() -> int:
             hits["provenance"].append(
                 f"{glob}: keep rows live only under fixtures/novaworld/ (retail files read from the reference fixture set)")
     for rel in size_exceptions:
-        if rel not in fixtures and rel not in assets:
+        if rel not in fixtures:
             hits["size"].append(f"{rel}: size exception names an untracked file")
     # A minted_by row names a tracked fixture and a test that exists: the test
     # binary's name (before the flag) must be a source under tests/.
@@ -254,7 +253,7 @@ def main() -> int:
     total = sum(len(v) for v in hits.values())
     print(f"[fixture-lint] {len(fixtures)} fixture file(s): "
           + ", ".join(f"{classes[c]} {c}" for c in ("minted", "authored", "keep"))
-          + f"; {len(assets)} asset file(s) size-checked; {total} hit(s)")
+          + f"; {total} hit(s)")
     for rule in ("lfs", "size", "referenced", "provenance", "pulled"):
         if hits[rule]:
             print(f"[fixture-lint]   {len(hits[rule]):4d}  {rule}")

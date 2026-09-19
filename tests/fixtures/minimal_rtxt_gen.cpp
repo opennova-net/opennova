@@ -1,22 +1,4 @@
-// Generator + guard for two RTXT string-table sets written by our own writer
-// (engine/formats/rtxt) — no retail asset is carried by either:
-//
-//  * assets/ — the minimal set's boot tables (gameerr.bin, gametext.bin,
-//    vmacros.bin, keyhelp.bin) [orig: Game_InitSubsystems @ 0x4A6CD0:
-//    gameerr @ 0x4a6fc8 (miss is ShowEarlyError(4), non-fatal, but boots dirty),
-//    gametext @ 0x4a6fed, vmacros @ 0x4a702f, keyhelp @ 0x4a7072], the menu
-//    table and the mission sidecar. Each needs only to LOAD as a valid RTXT
-//    (missing keys fall back to literals in the engine), so these are
-//    minimal-but-valid tables. See assets/README.md.
-//  * fixtures/rtxt — the synthetic parity set rtxt_synth_parity grills: the
-//    shapes the shipped tables have (a multi-section game table with position
-//    hints, a menu table, a mission sidecar with cp1252 text and odd-length
-//    padding, a one-entry file). Retail parity itself is the gated
-//    rtxt_jo_install_sweep over the install's own bins.
-//
-// Default: regenerate each table in memory, assert it byte-matches the
-// committed file and round-trips (parse->write is byte-stable). Run with
-// `--write` (re)writes the committed files.
+// Synthetic RTXT fixtures: rebuild with --write and verify byte-exact round trips.
 #include <formats/rtxt/rtxt.h>
 
 #include <cstdint>
@@ -61,61 +43,13 @@ void add_section(File &f, const std::string &section, const std::vector<Row> &ro
 	}
 }
 
-// A minimal-but-valid table: one section, its keys grouped contiguously. The
-// content is a small placeholder set — it grows only when retail validation
-// shows a fallback literal that reads wrong (documented in the README).
+// Compose a single-section synthetic table.
 File make_table(const std::string &section, const std::vector<std::pair<std::string, std::string>> &kv) {
 	File f;
 	std::vector<Row> rows;
 	for (const auto &pair : kv) rows.push_back({pair.first.c_str(), pair.second.c_str()});
 	add_section(f, section, rows);
 	return f;
-}
-
-// The three fatal tables. gametext carries a couple of the boot/host keys the
-// menu path references (the rest fall back to literals); vmacros and keyhelp
-// are valid-but-empty (voice macros / keyboard help are non-essential to boot).
-File gametext_table() {
-	return make_table("Server", {
-	                                {"STRSRV_MEDREQ", "Medic!"},
-	                                {"STR_HOST", "Host Game"},
-	                                {"STR_JOIN", "Join Game"},
-	                            });
-}
-File vmacros_table() { return File{}; }
-File keyhelp_table() { return File{}; }
-// Error strings: valid-but-empty — every error dialog falls back to its
-// literal, and the ShowEarlyError(4) boot noise goes away.
-File gameerr_table() { return File{}; }
-// The mission's text sidecar (<stem>.bin, retail family member in
-// language.pff). [Info] TITLE is what the mission list shows for the row
-// [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250 via
-// SinglePlayer_PopulateMissionList @ 0x561840]; with no title the populate
-// falls back to the BMS header mission_name, then to the raw filename.
-// BRIEFING fills the briefing pane when the row is selected.
-File mnmlbin_table() {
-	return make_table("Info", {
-	                              {"TITLE", "Minimal"},
-	                              {"BRIEFING", "A minimal authored map."},
-	                          });
-}
-// Menu labels: the string ids the authored main.mnu / mp.mnu reference via
-// TEXT_RSRC menutxt.BIN (retail ships menutxt.bin in language.pff).
-File menutxt_table() {
-	return make_table("Menu", {
-	                              {"MM_Singleplayer", "Single Player"},
-	                              {"MM_LANMultiplayer", "LAN Multiplayer"},
-	                              {"MM_Exit", "Exit"},
-	                              {"MP_Host", "Host"},
-	                              {"MP_Join", "Join"},
-	                              {"MP_Back", "Back"},
-	                              // sp.mnu (ids match retail's own sp.mnu so the
-	                              // screen stays swappable against the retail one).
-	                              {"SP_Campaigns", "Missions"},
-	                              {"SP_MissionDesc", "Briefing"},
-	                              {"NAV_ACCEPT", "Accept"},
-	                              {"NAV_BACK", "Back"},
-	                          });
 }
 
 // --- fixtures/rtxt: the synthetic parity set ------------------------------
@@ -264,9 +198,6 @@ int run(const std::string &dir, const Target *targets, size_t count, bool write_
 } // namespace
 
 int main(int argc, char **argv) {
-#ifndef GAME_ASSETS_DIR
-#define GAME_ASSETS_DIR "."
-#endif
 #ifndef RTXT_FIXTURE_DIR
 #define RTXT_FIXTURE_DIR "."
 #endif
@@ -274,24 +205,15 @@ int main(int argc, char **argv) {
 	bool write_mode = false;
 	for (int i = 1; i < argc; ++i)
 		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
-	const Target asset_targets[] = {
-	    {"gameerr.bin", gameerr_table},
-	    {"gametext.bin", gametext_table},
-	    {"vmacros.bin", vmacros_table},
-	    {"keyhelp.bin", keyhelp_table},
-	    {"menutxt.bin", menutxt_table},
-	    {"mnml.bin", mnmlbin_table},
-	};
 	const Target fixture_targets[] = {
 	    {"synth_game.bin", synth_game_table},
 	    {"synth_menu.bin", synth_menu_table},
 	    {"synth_mission.bin", synth_mission_table},
 	    {"synth_tiny.bin", synth_tiny_table},
 	};
-	int failures = run(GAME_ASSETS_DIR, asset_targets, sizeof(asset_targets) / sizeof(asset_targets[0]), write_mode);
-	failures += run(RTXT_FIXTURE_DIR, fixture_targets, sizeof(fixture_targets) / sizeof(fixture_targets[0]),
+	int failures = run(RTXT_FIXTURE_DIR, fixture_targets, sizeof(fixture_targets) / sizeof(fixture_targets[0]),
 	                write_mode);
 	if (failures == 0)
-		std::printf("OK: minimal RTXT fatal-set tables + the synthetic parity set valid + byte-reproducible\n");
+		std::printf("OK: synthetic RTXT parity set valid + byte-reproducible\n");
 	return failures == 0 ? 0 : 1;
 }

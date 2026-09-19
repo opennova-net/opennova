@@ -28,13 +28,22 @@ func test_idle_spotting_drives_bms_and_the_presented_head_on_retry() -> void:
 	assert_eq(DirAccess.copy_absolute(
 			ProjectSettings.globalize_path("res://../fixtures/threedi/synth/person.3di"),
 			root_dir.path_join("US02.3di")), OK)
+	# Place the actors and observation camera above the shared synthetic terrain.
+	# An underground camera culls the NPC and legitimately skips its bone poses.
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+	var terrain := TerrainData.new()
+	assert_eq(terrain.load_from_resource_root(root, "mnml.trn"), OK)
+	var ground := terrain.get_height_world(Vector3.ZERO)
+	var camera_position := Vector3(0, ground + 3, 10)
+	var camera := Transform3D(Basis.IDENTITY, camera_position)
 	var ids: Array[int] = []
 	var world := WorldFixture.make_world(self)
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				for i in 2:
 					var actor := mission.add_entity(MissionData.KIND_ORGANIC, 105311,
-							Vector3(3 * i, i, 2), Vector3(0, 90, 0))
+							Vector3(3 * i, i, ground + 2), Vector3(0, 90, 0))
 					assert_not_null(actor)
 					ids.append(actor.bms_id)
 					for field in {"team": 1, "group": 20 + i, "max_attack_distance": 20, "ai_flags": 1}:
@@ -68,7 +77,7 @@ func test_idle_spotting_drives_bms_and_the_presented_head_on_retry() -> void:
 		skeleton.force_update_all_bone_transforms()
 		var before := skeleton.get_bone_global_pose(14).basis
 		for _frame in 320:
-			world.tick(Vector3.ZERO, Transform3D(), 0.02)
+			world.tick(camera_position, camera, 0.02)
 			var rows := sim.get_present_snapshot()
 			for base in range(0, rows.size(), Simulation.PF_STRIDE):
 				if int(rows[base + Simulation.PF_BMS_ID]) != ids[0]:

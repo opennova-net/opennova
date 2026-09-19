@@ -65,7 +65,7 @@ func _run_capture(ctx: ProbeContext) -> void:
 			mission_name, mission_path])
 		return
 	_logv(["[spawn-capture] saved loose mission: ", mission_path])
-	_logv(["[spawn-capture] packed runtime root: ", ResourceDirSettings.get_resource_dir()])
+	_logv(["[spawn-capture] packed runtime root: ", LaunchFlags.resource_dir()])
 	_logv(["[spawn-capture] mission: ", mission_name])
 	_logv(["[spawn-capture] input: disabled after shell load; none synthesized"])
 

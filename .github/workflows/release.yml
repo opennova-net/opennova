@@ -30,10 +30,7 @@ jobs:
         shell: bash
         run: scripts/build.sh --no-godot
 
-  # Tagged releases ship the GAME zip only: opennova.exe + the packed pffs,
-  # built by ONED's hidden --pack-game CLI, pre-configured to boot from its own
-  # directory. The dev build (game + ONED + loose sources) comes
-  # from master CI runs, not releases.
+  # Tagged releases ship the runtime only. Game data is supplied via CLI.
   package-godot-windows:
     runs-on: windows-latest
     outputs:

@@ -10,7 +10,7 @@ extends Control
 #
 # Each composed third-person part shares one skeletal idle (Dt1rst.bad rest + PI_Idle.BAD clip),
 # matching the original PLAYER_INFO preview [orig: PlayerInfo_InitPreviewModel @ 0x5600d0].
-# When those .bad assets aren't resolvable (e.g. a loose ONED mount that lacks them) the parts
+# When those .bad assets aren't resolvable (e.g. a loose-data mount that lacks them) the parts
 # render static at rest — a valid degraded state. The remaining unwitnessed piece of
 # D-PLAYERINFO-1 is the in-world (spawned-player) combo binding, not this preview idle.
 

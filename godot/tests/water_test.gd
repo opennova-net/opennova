@@ -111,7 +111,7 @@ func test_water_pass_follows_the_visible_terrain_height_range() -> void:
 func test_height_precedence_is_bms_then_signed_trn_then_env() -> void:
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../assets")), OK)
+			RuntimeFixture.directory())), OK)
 	var terrain := TerrainData.new()
 	assert_eq(terrain.load_from_resource_root(resource_root, "mnml.trn"), OK)
 	terrain.set_water_height(-20) # engine half-units -> -10 world units

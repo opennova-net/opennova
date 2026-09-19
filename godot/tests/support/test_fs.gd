@@ -5,9 +5,9 @@ extends RefCounted
 
 ## The synthetic terrain map (fixtures/terrain/tmap, minted by
 ## tests/fixtures/minimal_terrain_gen.cpp): Tmap.trn names the minimal set's
-## terrain art, so a runtime root is the minimal assets plus the tmap files.
+## terrain art, so a runtime root is the synthetic boot fixtures plus the tmap files.
 const TMAP_FIXTURE_DIR := "res://../fixtures/terrain/tmap"
-const MINIMAL_ASSETS_DIR := "res://../assets"
+static var BOOT_FIXTURE_DIR := RuntimeFixture.directory()
 const TMAP_TRN := "Tmap.trn"
 
 
@@ -18,7 +18,7 @@ static func stage_terrain_root(name: String) -> String:
 	var root := OS.get_cache_dir().path_join(
 			"opennova_terrain_%s_%d" % [name, Time.get_ticks_usec()])
 	DirAccess.make_dir_recursive_absolute(root)
-	for source in [TMAP_FIXTURE_DIR, MINIMAL_ASSETS_DIR]:
+	for source in [TMAP_FIXTURE_DIR, BOOT_FIXTURE_DIR]:
 		var source_dir := ProjectSettings.globalize_path(source)
 		for file_name in DirAccess.get_files_at(source_dir):
 			var target := root.path_join(file_name)
