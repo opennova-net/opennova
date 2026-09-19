@@ -6,7 +6,6 @@
 #include <runtime/world/entity.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -53,14 +52,6 @@ static_assert(world::kItemAttribNoDismember == DEF_ITEM_ATTRIB_NODISMEMBER);
 static_assert(world::kItemAttribNoDie == DEF_ITEM_ATTRIB_NODIE);
 
 namespace {
-
-bool ci_equal(const char *a, const char *b) {
-	while (*a != '\0' && *b != '\0' &&
-	       std::tolower(static_cast<unsigned char>(*a)) ==
-	               std::tolower(static_cast<unsigned char>(*b)))
-		++a, ++b;
-	return *a == '\0' && *b == '\0';
-}
 
 // One definition-local copy of the AnimMap slot heads. The action bake probes
 // without advancing, then each automatic field serves and advances the named
@@ -147,19 +138,19 @@ int32_t clips_of(const world::WeaponTableEntry &e, uint8_t requested) {
 uint8_t charfilter_bit(const char *token) {
 	// [orig: token table @0x830EB0]
 	if (token == nullptr) return 0;
-	if (ci_equal(token, "medic")) return 0x01;
-	if (ci_equal(token, "sniper")) return 0x02;
-	if (ci_equal(token, "gunner")) return 0x04;
-	if (ci_equal(token, "rifleman")) return 0x08;
-	if (ci_equal(token, "engineer")) return 0x10;
+	if (strutil::iequals(token, "medic")) return 0x01;
+	if (strutil::iequals(token, "sniper")) return 0x02;
+	if (strutil::iequals(token, "gunner")) return 0x04;
+	if (strutil::iequals(token, "rifleman")) return 0x08;
+	if (strutil::iequals(token, "engineer")) return 0x10;
 	return 0; // unrecognized -> no bit (the original warns "unrecognized character type")
 }
 
 uint8_t teamfilter_bit(const char *token) {
 	// [orig: token table @0x830ED8]
 	if (token == nullptr) return 0;
-	if (ci_equal(token, "red")) return 0x01;
-	if (ci_equal(token, "blue")) return 0x02;
+	if (strutil::iequals(token, "red")) return 0x01;
+	if (strutil::iequals(token, "blue")) return 0x02;
 	return 0;
 }
 
@@ -204,7 +195,7 @@ LoadoutAmmoBytes resolve_loadout_ammo(const world::WeaponTable &table, uint8_t a
 			const world::WeaponTableEntry *sub =
 					table.by_index(static_cast<uint8_t>(adm_index + k));
 			if (sub == nullptr) continue;
-			if (!ci_equal(sub->ammo_class.c_str(), e->ammo_class.c_str())) {
+			if (!strutil::iequals(sub->ammo_class.c_str(), e->ammo_class.c_str())) {
 				const int32_t alt = clips_of(*sub, 0xFF);
 				out.secondary = alt < 0 ? 0xFF : static_cast<uint8_t>(alt);
 				break;

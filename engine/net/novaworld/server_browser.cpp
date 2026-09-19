@@ -1,7 +1,8 @@
 #include <net/novaworld/server_browser.h>
 
+#include <base/io/strutil.h>
+
 #include <algorithm>
-#include <cctype>
 #include <climits>
 #include <cstdio>
 
@@ -9,31 +10,13 @@ namespace opennova {
 
 namespace {
 
-char ascii_lower(char c) {
-	return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-}
-
-std::string ascii_lowered(const std::string &s) {
-	std::string out = s;
-	for (char &c : out) c = ascii_lower(c);
-	return out;
-}
-
-std::string trimmed(const std::string &s) {
-	std::size_t a = 0;
-	std::size_t b = s.size();
-	while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
-	while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
-	return s.substr(a, b - a);
-}
-
 // The three-way case-insensitive compare the text columns and the name
 // tiebreak use (-1 / 0 / 1).
 int nocase_compare(const std::string &a, const std::string &b) {
 	const std::size_t n = std::min(a.size(), b.size());
 	for (std::size_t i = 0; i < n; ++i) {
-		const char ca = ascii_lower(a[i]);
-		const char cb = ascii_lower(b[i]);
+		const char ca = strutil::ascii_tolower(a[i]);
+		const char cb = strutil::ascii_tolower(b[i]);
 		if (ca != cb) return ca < cb ? -1 : 1;
 	}
 	if (a.size() == b.size()) return 0;
@@ -83,14 +66,14 @@ std::array<std::string, kBrowserColumnCount> browser_row_cells(const GsbServerEn
 
 std::vector<std::size_t> browser_filter_rows(const std::vector<GsbServerEntry> &rows,
                                              const BrowserFilter &filter) {
-	const std::string text = ascii_lowered(trimmed(filter.text));
-	const std::string game_type = trimmed(filter.game_type);
+	const std::string text = strutil::to_lower(strutil::trim(filter.text));
+	const std::string game_type = strutil::trim(filter.game_type);
 	std::vector<std::size_t> out;
 	for (std::size_t i = 0; i < rows.size(); ++i) {
 		const GsbServerEntry &row = rows[i];
 		if (!text.empty()) {
 			const std::string haystack =
-					ascii_lowered(row.server_name + "\n" + row.mission_name + "\n" + row.mod);
+					strutil::to_lower(row.server_name + "\n" + row.mission_name + "\n" + row.mod);
 			if (haystack.find(text) == std::string::npos) continue;
 		}
 		if (!game_type.empty() && nocase_compare(row.game_type, game_type) != 0) continue;
@@ -144,7 +127,7 @@ void browser_sort_rows(std::vector<std::size_t> &order, const std::vector<GsbSer
 std::vector<std::string> browser_details_lines(const GsbServerEntry &row) {
 	std::vector<std::string> lines;
 	const auto push = [&lines](const char *label, const std::string &value) {
-		if (!trimmed(value).empty()) lines.push_back(std::string(label) + ": " + value);
+		if (!strutil::trim_view(value).empty()) lines.push_back(std::string(label) + ": " + value);
 	};
 	push("Server", row.server_name);
 	push("Message", row.msg);

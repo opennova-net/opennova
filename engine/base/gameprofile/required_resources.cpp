@@ -3,7 +3,8 @@
    the witness source; edits land there first and here in the same change. */
 #include <base/gameprofile/required_resources.h>
 
-#include <ctype.h>
+#include <base/io/strutil.h>
+
 #include <stddef.h>
 
 namespace opennova::gameprofile {
@@ -274,27 +275,12 @@ const RequiredResource *gameprofile_required_resource_at(int index) {
     return &k_required_resources[index];
 }
 
-namespace {
-
-int name_equals_ci(const char *a, const char *b) {
-    while (*a && *b) {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
-            return 0;
-        }
-        ++a;
-        ++b;
-    }
-    return *a == '\0' && *b == '\0';
-}
-
-} // namespace
-
 const RequiredResource *gameprofile_required_resource_find(const char *name) {
     if (!name) {
         return NULL;
     }
     for (int i = 0; i < k_required_resource_count; ++i) {
-        if (name_equals_ci(k_required_resources[i].name, name)) {
+        if (strutil::iequals(k_required_resources[i].name, name)) {
             return &k_required_resources[i];
         }
     }
