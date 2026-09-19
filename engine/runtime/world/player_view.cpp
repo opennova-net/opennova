@@ -847,9 +847,12 @@ void player_view_compose_camera(const PlayerViewState &v,
         // Composing the person leg here froze the standing terrain torso-roll
         // (16.9 degrees on the spawn hillside) into the cockpit view for the
         // entire flight, tilting the horizon and skewing the instrument panel.
-        // [orig: Camera_ComputeThirdPersonView carrier branch @0x437c5d..
-        //  0x437cc2 — gated on carrier def +0x1C0 && +0x174, then goto the tail
-        //  past the person leg at 0x437f9c]
+        // This leg is the fallback for a carrier neither mounted-camera leg
+        // admits; local_player_mounted_camera (world/local_player_view.h)
+        // overrides the pose when the carrier owns the view.
+        // [orig: Camera_ComputeThirdPersonView carrier block @0x437DAC..
+        //  0x437EAD — the callback leg gated on carrier def +0x1C0 && +0x174,
+        //  then the jump to the tail past the person leg at 0x437f9c]
         out.yaw_deg = aim_yaw_deg;
         out.pitch_deg = aim_pitch_deg;
         out.roll_deg = carrier_roll_deg;

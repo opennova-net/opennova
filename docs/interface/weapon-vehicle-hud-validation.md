@@ -18,7 +18,10 @@ The reference checks corrected these earlier interpretations:
   not mortar/base FLAGS `0x200`. The load at `@0x5CA2B1` reads definition
   `+0x0C`. The installed mortars author Sighted, OnlyScoped, UseDesignator,
   2DImpact and ShowImpactDist; they do not author Scoped/Inset.
-- Friendly brackets use `mpattrib` bits (peer bit 3, local bit 8), not a
+- Friendly brackets use an `mpattrib` bit selected by the is_client flag,
+  which connection modes 2 AND 3 set: single player, the listen host and a
+  joiner all test bit 3, and bit 8 is the dedicated host's leg, which draws no
+  HUD (`@0x5926D4..0x5926E1`; `CGameSession_SetConnectionMode @0x4C49F0`). It is not a
   clock-driven blink. They surround the main aim anchor, not the target's
   projected position (`@0x592680..0x592705`, `@0x592CE2..0x592DD7`).
 - The crosshair's color is **diffuse**, not specular. Forced disassembly of
@@ -34,7 +37,7 @@ The reference checks corrected these earlier interpretations:
 
 | Context | Implemented behavior | Original evidence |
 | --- | --- | --- |
-| Lowered launcher / infantry | Authored ammo/name/round icons, stance, silhouette fade and user-colored spread reticle; capacity-one reload does not restart the flash without a displayed ammo change. | `@0x599A30`, `@0x59A710`, `@0x5A7CC0` |
+| Lowered launcher / infantry | Authored ammo/name/round icons, stance, silhouette fade and user-colored spread reticle; capacity-one reload does not restart the flash without a displayed ammo change. | `@0x599A30`, `@0x59A710`, `@0x5A7CBE` |
 | Raised Javelin / Stinger | Authored SIGHTS cards and scope text; tracked-target fire-origin cursor with lock/team colors; friendly brackets; all clear on lowering, weapon change, binoculars or death as their original gates require. | `@0x592640`, `@0x59E420` |
 | CustomAim mounted weapon | The weapon's own reticle at the mounted muzzle ray's collision point; replaces the ordinary spread reticle. | `@0x592973..0x592AB8` |
 | Tank / emplaced optic | Controller forward cue, articulated turret lag cue, third-person `dirguide.tga`, and the flag-8 commander reticle with its clipped circle and connecting line. | `@0x59EA20`, `@0x59ECA0`, `@0x59E3F6`, `@0x59E5B9..0x59E87F` |
@@ -42,9 +45,9 @@ The reference checks corrected these earlier interpretations:
 | Aircraft unit type 3 | ALTGRP-controlled nonlinear AGL ladder, feet readout, authored AGL color and bold label font. Absolute altitude and vertical speed participate in admission; this routine does not draw separate power/velocity gauges. | `@0x4B86CF..0x4B8734`, `@0x59F050` |
 | Scoped + Inset | Separate scene camera with slot offsets, the additional shake sample, inclusive viewport bounds, 32-part aperture, green antialiased ring/cross and friendly label. The optical pass survives HUD declutter. | `@0x5C9740..0x5CA0E1`, gate `@0x5CA290..0x5CA2B4` |
 | Mortar deployed | Side-effect-free falling-object impact prediction, green map radius (color `0xFF208020`) and localized impact distance. Live map slots retain their 1984-tick lifetime. A missed trajectory removes the map marker and retains the last valid distance. OnlyScoped gates the preview. | `@0x4DE350`, `@0x445420`, `@0x540D00`, `@0x5BEA19` |
-| UseDesignator / LollyPop | UseDesignator reads the received link table in order, excludes expired/type-3/wrong-team records, and adjusts the impact radius. LollyPop independently draws the LOS-dependent red world marker. | `@0x4DEBE1..0x4DEC62`, `@0x5BBF10`, `@0x5BEC10`, `@0x5A87CB..0x5A8A38` |
+| UseDesignator / LollyPop | UseDesignator reads the received link table in order, excludes expired/type-3/wrong-team records, and adjusts the impact radius. LollyPop independently draws the LOS-dependent red world marker. | `@0x4DEBE1..0x4DEC62`, `@0x5BBF10`, `@0x5BEC10`, `@0x5A87F9..0x5A89DA` |
 | Mortar raise / lower / holster | Authored `scopeup_map` opens mode 2 only from mode 0; `scopedown_map` and `switchfrom_map` close only mode 2. Mode 3 is preserved. Both local and joiner pumps consume the callbacks. | `@0x5432D0`, `@0x543360`, `@0x5434E0` |
-| Physical hit feedback | Living entity contact arms one outgoing frame bit even if armor absorbs damage. Each received frame sets the countdown to ten or decrements it; rendering does not consume it. Sighted optics retain the red reticle while this feedback is active. | `@0x4E9390`, `@0x4FF7C5`, `@0x42FF60`, `@0x592BCE` |
+| Physical hit feedback | The PERSON impact handler arms the shooter's latch at its head, for a victim not already dead, even if armor then absorbs the damage. Entity contacts and squib rays never set it. The owner's next outgoing frame carries the bit once. Each received frame sets the countdown to ten or decrements it; rendering does not consume it. Sighted optics retain the red reticle while this feedback is active. | person handler `0x4E98F0` (dead gate `@0x4E9920`, `or [eax+2Ch], 1000h` `@0x4E9962`), writer `@0x4FF7C5..0x4FF7D9`, reader `@0x42FF5C..0x42FF74`, reticle `@0x592BCE` |
 | Carry / vehicle service | Parachute, armor and cargo icons; received preround and FARP timer/zone state feeds localized armory/bay/rearm prompts. | `@0x5925C0`, `@0x599C20`, `@0x5BDE60` |
 | Dismount / death | Vehicle instruments and control labels clear; infantry groups return on dismount; death suppresses targeting and optical impact cues. | `@0x5A7BB0`, `@0x59264D` |
 

@@ -46,7 +46,9 @@ bool local_weapon_seat_flag(const LocalPlayerWeapon &weapon, bool scope_settled,
 
 // [orig: Entity_CalcWeaponFirePosition @0x4DC750 -- gunner branch
 //  @0x4DC7A0..0x4DC802 (G-redirect arm @0x4DC7A9..0x4DC7E5), controller branch
-//  @0x4DC803..0x4DC846, on-foot leg @0x4DC847..0x4DC939]
+//  @0x4DC803..0x4DC846, on-foot leg @0x4DC847..0x4DC937. The slot-flag & 1
+//  replay arm @0x4DC75C..0x4DC789 returns the slot's stored position; the wire
+//  replay sets that bit only transiently, so the local pump never takes it.]
 void local_weapon_fire_pose(World &world, const LocalPlayerWeapon &weapon,
                            int32_t clip_before_consume, bool scope_settled, int32_t out[6]) {
     std::fill_n(out, 6, 0);
@@ -101,7 +103,8 @@ void local_weapon_fire_pose(World &world, const LocalPlayerWeapon &weapon,
         emplaced_clamp_turret_bam(out[4], weapon.pitch_max_bam, weapon.pitch_min_bam);
     }
     // Designator rounds originate at the measured aim point only while firing.
-    // [orig: ammo flag @0x4DC90D, action gate @0x4DC916, copy @0x4DC91C..0x4DC937]
+    // [orig: ammo flag @0x4DC90D, action gate @0x4DC916..0x4DC91A, copy
+    //  @0x4DC91C..0x4DC937 (first store @0x4DC92C)]
     const auto *slot = active_local_weapon_slot(world, weapon);
     const auto *entry = world.tables.weapons.by_index(shooter->equipped_adm_index);
     const auto *ammo = entry ? world.tables.ammo.by_index(entry->ammo_index) : nullptr;

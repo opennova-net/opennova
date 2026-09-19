@@ -312,8 +312,8 @@ the weather keeps advancing while the entities are held (the reimpl's
   look-at's zero roll (`@ 0x438939..0x4389e5`; the mode-4 lerp then overwrites
   the rotation, so only the chase renders it) — ported 2026-08-30 (tidy round)
   as `camera_shake_sample_chase`, applied in `local_player_view_frame`'s
-  third-person branch; the overlay's extra call is not mirrored — the whole
-  flag-0x200 scope overlay is unported, D-HUD-26);
+  third-person branch; the Inset overlay's extra call is mirrored as one more filter sample after the
+  main scene's (`@0x5C9841`; D-HUD-26 FIXED 2026-09-19);
   pool-1 entities whose def carries
   `attrib & 0x40` likewise (`@ 0x57ebde..0x57ec29`, the shake when the player's
   parent is displaced); `--Env_QuakeTicks` (`@ 0x57ec61`). Then the HIT BLACKOUT

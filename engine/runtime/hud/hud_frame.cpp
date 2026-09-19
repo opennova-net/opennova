@@ -314,7 +314,7 @@ void HudFrameCompiler::emit_text(const char *text, float design_x,
 }
 
 // Seat-specific WPNGRP dispatch, independent of the crosshair's XHAIRS gate.
-// [orig: HUD_RenderOverlays @0x5A7CC0..0x5A7D55]
+// [orig: HUD_RenderOverlays @0x5A7CBE..0x5A7D55]
 bool hud_weapon_group_visible(const HudFrameState &state) {
     if (state.mount_slot == 2 || state.mount_slot == 5)
         return state.weapon_category > 9;

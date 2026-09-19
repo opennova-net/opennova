@@ -76,7 +76,7 @@ void HudFrameCompiler::element_optical_cues(const HudFrameState &s, float w, flo
 	const auto &c = s.combat;
 	if (c.dead || w <= 0 || h <= 0)
 		return;
-	// [orig: HUD_RenderAllOverlays @0x5A87CB..0x5A8A38]
+	// [orig: HUD_RenderAllOverlays @0x5A87F9..0x5A89DA]
 	if (c.designator && c.impact_point.valid && !c.impact_point.clip) {
 		const float x = c.impact_point.x, y = c.impact_point.y;
 		const int radius = int(20 * c.designator_scale);

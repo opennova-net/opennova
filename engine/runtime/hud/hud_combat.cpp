@@ -143,7 +143,7 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 		++draw_list_.elements_drawn;
 	};
 	// Weapon and control-seat silhouettes share the original flash stamp.
-	// [orig: HUD_RenderOverlays @0x5A7CC0..0x5A7D65; sub_59A710 @0x59A710]
+	// [orig: HUD_RenderOverlays @0x5A7CBE..0x5A7D64; sub_59A710 @0x59A710]
 	const int ramp = int(layout_.alpha_fade_seconds * 62.0f);
 	const int base = int(layout_.alpha_fade_base * 2.55f);
 	const int maximum = int(layout_.alpha_fade_max * 2.55f);
@@ -176,7 +176,7 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 	if (c.carrying)
 		sprite(l.cargo, l.cargo_x, l.cargo_y, kHudTexCargo, active_color(s));
 	// The flight instrument uses ground-relative altitude. The two other
-	// fields participate in its nonzero gate only. [orig: @0x5A7D98..0x5A7DB1]
+	// fields participate in its nonzero gate only. [orig: HUD_RenderOverlays @0x5A7D81..0x5A7DA5]
 	if (!s.declutter_visible[kDeclutterAltGrp] ||
 			!(c.altitude_agl_q16 || c.altitude_q16 || c.vertical_velocity_q16))
 		return;

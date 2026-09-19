@@ -723,7 +723,8 @@ bool run_remote_vehicle_occupancy() {
 }
 
 // A real local weapon pump must carry its selected lock through C2S 0x06.
-// [orig: WeaponAction_Fire @0x542C0D; writer @0x42A7B6]
+// [orig: WeaponAction_Fire target read @0x542C00..0x542C15;
+//  NetPacket_WriteEntityPositionUpdate target store @0x42A759]
 bool run_guided_fire_preserves_selected_target() {
     Harness h;
     auto &world = h.kernel->world;

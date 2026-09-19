@@ -64,7 +64,8 @@ HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, bool scope
 	const double dy = double(to_fixed(player->position.y)) - position.y;
 	out.distance_q16 = int32_t(std::min(std::hypot(dx, dy), 2147418112.0));
 	// The map radius is twice the lateral dispersion displacement.
-	// [orig: @0x4DE9F8..0x4DEAD5; map-slot +28 @0x4DEC71]
+	// [orig: Player_UpdatePerFrame @0x4DE9F8..0x4DEAD2; map-slot +0x1C writes
+	//  @0x4DEBAA / @0x4DEBCC, designation radius @0x4DEC40 / @0x4DEC62]
 	const int32_t error_bam = int32_t((int64_t(spread_q16) * 0xB60B60 + 0x8000) >> 16);
 	const double spread_yaw = double(io::bam_add(pose[3], error_bam)) * io::kRadiansPerBam;
 	const int32_t offset_x =

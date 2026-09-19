@@ -2282,7 +2282,7 @@ void test_stance_obeys_weapon_group_declutter(const fnt_font_t *font) {
 // The mounted dispatch in HUD_RenderOverlays is intentionally asymmetric:
 // pilots/drivers use category > 9, passengers retain their stance/panel, and
 // gunners follow WPNGRP. XHAIRS remains a separate gate in every seat.
-// [orig: HUD_RenderOverlays @0x5A7CC0..0x5A7D55]
+// [orig: HUD_RenderOverlays @0x5A7CBE..0x5A7D55]
 void test_seat_weapon_and_stance_transitions(const fnt_font_t *font) {
 	using namespace opennova::hud;
 	HudLayout layout;

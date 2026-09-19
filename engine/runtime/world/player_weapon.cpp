@@ -1336,7 +1336,7 @@ WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
     data.hud_category = row.category;
     data.emplaced_stance = row.emplacedstance;
     // The parser negates the minimum and uses truncated BAM/degree.
-    // [orig: WeaponDefs_ParseLineCallback @0x5443B8..0x54444D]
+    // [orig: WeaponDefs_ParseLineCallback @0x5443D1..0x544440]
     data.pitch_min_bam = int32_t(0u - uint32_t(row.targetpitchmin) * 11930464u);
     data.pitch_max_bam = int32_t(uint32_t(row.targetpitchmax) * 11930464u);
     for (int i = 0; i < 3; ++i) {

@@ -1052,6 +1052,9 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	hs.flags1 = static_cast<uint8_t>(
 			(conn.spectator ? 0x01u : 0x00u) |
 			(conn.respawn_pending ? 0x02u : 0x00u) |
+			// Bit 2: the owned entity's hit-feedback latch, consumed once per
+			// recipient and only under the hitFeedback option.
+			// [orig: NetPacket_WritePlayerState @0x4FF7C5..0x4FF7D9]
 			((w.rules.hit_feedback &&
 					 owned->hud_hit_feedback_serial != conn.hud_hit_feedback_serial)
 							? 4u

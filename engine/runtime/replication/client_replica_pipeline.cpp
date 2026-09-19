@@ -1734,13 +1734,17 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	state_.anchor_x = fu.anchor_x;
 	state_.anchor_y = fu.anchor_y;
 	state_.anchor_z = fu.anchor_z;
-	// The deploy-map overlay follows the host every frame — set AND cleared
-	// by assignment, not edges [orig: NapiNPClientMsg_0x00A @0x42ff82 —
-	// g_deploy_screen_active = (flags1 >> 1) & 1].
+	// flags1 bit 2 is the hit-feedback pulse: a set bit reloads the countdown to
+	// 10, a clear bit drains one per received frame. It runs ahead of the
+	// authority early-out, so the listen host folds its own.
+	// [orig: NapiNPClientMsg_0x00A @0x42FF5C..0x42FF74 — dword_A8235C]
 	if (fu.flags1 & 4u)
 		state_.hud_hit_feedback_frames = 10;
 	else if (state_.hud_hit_feedback_frames)
 		--state_.hud_hit_feedback_frames;
+	// The deploy-map overlay follows the host every frame — set AND cleared
+	// by assignment, not edges [orig: NapiNPClientMsg_0x00A @0x42ff82 —
+	// g_deploy_screen_active = (flags1 >> 1) & 1].
 	state_.deploy_overlay_active = (fu.flags1 & 0x02u) != 0;
 	if (!state_.deploy_overlay_active) state_.deploy_overlay_open_latch = false;
 	// The death-screen edges on flags1 bit 0 [orig: @0x42ff88..0x43002b].

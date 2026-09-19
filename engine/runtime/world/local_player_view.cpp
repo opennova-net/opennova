@@ -709,7 +709,8 @@ static void fill_hud_context(World *world, const Entity *local,
     // The misleadingly named Player_IsVehicleHasAutoAim reads the equipped
 	// weapon's Inset flag, not the occupied seat. The combat feed adds the
 	// separate Sighted hit-feedback exception after the promoted scope read.
-    // [orig: @0x4DCCB0..0x4DCCDA; crosshair draw gate @0x592AFA]
+    // [orig: Player_IsVehicleHasAutoAim @0x4DCCB0..0x4DCCDA; its crosshair-gate
+    //  call @0x592AE5 (the Sighted query Player_IsVehicleGunnerScoped @0x592AFA)]
     out.hud_keep_crosshair_while_aimed =
         weapon.active && (weapon.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0;
     const Entity *mount = world->registry.get(local->mount_target);
