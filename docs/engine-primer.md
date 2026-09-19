@@ -220,8 +220,9 @@ Order of operations when you need an engine truth:
      prints the disagreements (stale names, auto-names, undefined or other-image
      addresses, stale `reimpl:` back-links); run it after a merge train and before a
      release (grill-ida `LIFECYCLE.md` §4).
-   - Byte-exact fixture roundtrips in ctest — e.g. `tests/rtxt/real_parity_test.cpp`
-     (98/98 retail bins), `tests/terrain/cdep_roundtrip_test.cpp` and
+   - Byte-exact fixture roundtrips in ctest — e.g. `tests/rtxt/synth_parity_test.cpp`
+     (the synthetic parity set) and the `OPENNOVA_JO_DIR`-gated
+     `tests/rtxt/jo_install_sweep_test.cpp` (98/98 retail bins), `tests/terrain/cdep_roundtrip_test.cpp` and
      `tests/terrain/trn_config_roundtrip_test.cpp`, the `.bad`/3DI
      roundtrips under `tests/<domain>/`.
    - Retail-install sweeps and corpus tests, gated on the two documented roots (`OPENNOVA_JO_DIR`,
