@@ -1580,6 +1580,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (inf.is_local_player) infantry_weapon_channel(e, world, logic_tick);
     else infantry_weapon_channel_advance(e);
 
+    // D-INF-26: retail advances at the motor head, before the selection above;
+    // this port currently retargets the playing channel during selection.
+    // [orig: Entity_UpdateInfantryAI @ 0x4B9A48;
+    //  Entity_UpdateInfantryPlayerBody @ 0x4B41DF]
+    // See docs/world/world-wac-ai-re.md section 36 (D-INF-26).
     // 3. Advance the selected playing clip and fetch its root motion (every tick).
     if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
     if (root_motion != nullptr)

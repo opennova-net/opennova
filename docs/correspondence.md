@@ -705,6 +705,12 @@ Host-side spawn flow (R1, 2026-06-16; net-re §5.2a):
 | `AnimChannel_AdvancePlayback` | `0x40b140` | a stopped channel (0x10000) never advances; loops wrap freely and latch 0x20000 + park t=0.99999 only when 0x40000 is armed (`@0x40b19e..0x40b1b1`); one-shots at end set 0x10000, plus 0x20000 when 0x40000 armed (`@0x40b172..0x40b18f`) — so a pending queued behind an ALREADY-stopped one-shot never promotes in retail (the hold-wedge D-NET-209 (a) documents our immediate-promote divergence) | decompile 2026-08-07; D-NET-209 | ported as the growing-phase boundary convention (loop = next wrap, one-shot = clip end) |
 | `AnimChannel_InitFromData` | `0x410560` | channel flags/frame count seed from the clip data's flag word (flags & 0x1000 → animData[4]; the loop bit rides it `@0x410577`); rate = animData[2]/ref/animData[3] | decompile 2026-08-07 | ported (`IRootMotionSource::clip_loops` reads the same clip-data loop bit) |
 
+Animation/motor ordering audit (2026-09-18, world record section 36):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `AnimMap_UpdateDualChannels` at infantry motor heads | `0x40b8c0` | Secondary then primary advance before the later gait/state selector; one call in org1 at @ 0x4B9A48 and org2 at @ 0x4B41DF | jo-c `d4148fbabcb98cb6b48e44fe0da9393730bde852` + retail IDA call-site disassembly; org2 selector @ 0x4B70CE / @ 0x4B7356 | divergent, D-INF-26: `tick_infantry` selects/retargets before advancing; six focused tests pass without covering this order |
+
 Local-player input→pose locomotion (Phase 2, 2026-06-20; net-re §5.38):
 
 | original | addr | role | evidence | status |

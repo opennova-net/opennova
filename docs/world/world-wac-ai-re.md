@@ -10974,3 +10974,74 @@ is fixed; that issue remains a separate live presentation investigation.
 |---|---|---|---|
 | D-INF-25 | Local and authority organic motors apply carrier translation, capsule-biased rotation and look/body adoption after vehicle motors; org2 retains pitch-follow lag. | Org1 @0x4BA45D..0x4BA891, org2 @0x4B52A0..0x4B57E5; pool ordering @0x4C2158 / @0x4C2426. | FIXED 2026-09-18 in PR #652; unseated training helicopter riders retain support through takeoff. Replica scheduling remains the separate section 29.2 limitation. |
 | D-AI-15 | Route-order writers accept reserved commands and preserve authored operands without NavChannel admission/clamping. | `Entity_SetWaypointByTeam @0x43CDB4`; only -1 resolves nearest. | FIXED 2026-09-18 in PR #652; boarding/stop orders replace the old routes instead of letting NPCs walk out of a moving cabin. |
+
+
+## 36. Animation and relative-motion timing audit (2026-09-18)
+
+This is a source audit of `engine/runtime/world/infantry.*`, the ADM root-motion
+source, and the Godot body/camera presenters. Reference source: jo-c
+`d4148fbabcb98cb6b48e44fe0da9393730bde852`; original-call ordering was checked in
+the retail `Jointops.exe.kong.i64` named in this record's preamble. The reported
+faint trails occur in player and spectator views according to the user; their
+cause has not been established by a captured frame or a regression test.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Playback clock and root sampling | MATCHING within the existing tested scope | `ClipTimeline` retains the original float accumulation and wrap/park rules; `anim_sample`, `simassets_adm_root_motion`, `simassets_adm_playback` pass. [orig: AnimChannel_AdvancePlayback @ 0x40B140; AnimChannel_InterpolateKeyframe @ 0x40B230] |
+| Selection versus playback order in local/authority infantry | divergent: D-INF-26 | The original advances both channels at the motor head; the port selects and immediately retargets before advancing them. Calls checked at org1 @ 0x4B9A48 and org2 @ 0x4B41DF. |
+| Authority body presentation | host code / not grillable; source trace completed | `Simulation::get_present_snapshot` selects `build_world_present_rows`, publishing position and `clip_phase` from the live authority. `play_body_clip_at`/`play_body_blend_at` pin the pose; `advance_body_animation` does not add render delta to an externally pinned phase. |
+| Player head feedback | existing D-INF-18 residual | The input router samples the preceding render skeleton; the original computes the head inside the current motor tick. [orig: Entity_UpdateInfantryPlayerBody @ 0x4B6BB3; mounted leg @ 0x4B6908] |
+| Spectator camera ordering | host code / not grillable; bounded source observation | `MainGame._process` prepares the world before its child `FlyCamera._process` applies translation. CPU camera-dependent preparation can see the earlier camera. Q3 draws obtain the final view matrix from `RenderSceneData`, so this observation does not demonstrate a stale Q3 projection or duplicated silhouette. |
+
+### 36.1 Requested state and playing channel are different lifetimes
+
+Org1 copies primary state/pending into the secondary request fields at
+@ 0x4B9A14..0x4B9A2E, then calls `AnimMap_UpdateDualChannels` at @ 0x4B9A48.
+The authority branch and the later AI/gait selector follow that call.
+Org2 calls the same updater at @ 0x4B41DF, before the fourth-tick gait selector
+and its request arbitration at @ 0x4B70CE / @ 0x4B7356..0x4B7396.
+There is one direct dual-channel update call in each motor. The updater runs
+the secondary channel first and the primary channel second
+[orig: AnimMap_UpdateDualChannels @ 0x40B8C0, calls @ 0x40B908 / @ 0x40B94E].
+Later stores to the entity's requested state do not rerun that updater.
+
+The port's `tick_infantry` calls `player_body_select` / `infantry_select`, whose
+commit immediately calls `begin_body_transition`, before
+`advance_primary_channel`. `begin_body_transition` replaces the incoming
+channel, resets its phase and blend weight, and the later advance samples
+that new tuple in the same tick. The original consumes the request on the
+next channel-update pass. Transition timing therefore differs by a motor
+tick, and later overrides can also replace the presented tuple after root
+motion was sampled. This does not establish repeated rollback during an
+unchanged walk/run state: same-state commits retain the playhead.
+
+A correction needs explicit requested-state versus playing-channel ownership,
+including late overrides, deferred transitions, secondary-channel mirroring,
+and the pose/root sample published after catch-up ticks. Reordering one call
+without preserving those lifetimes would leave those consumers inconsistent.
+No behavioral fix is claimed by this audit.
+
+### 36.2 Limits of the visual conclusion
+
+The ordinary authority path has no network pose correction: the host presents
+its own pools, matching the original authority bypass of the remote chase
+[orig: Entity_UpdateInfantryAI @ 0x4B9A74]. Its root position and pinned skeletal
+phase come from the same completed simulation tick. The render clock cannot
+freely advance that body and then reset it to the last simulation phase.
+
+Both loops render the latest fixed-tick state; the original's 4 ms phase bank
+calls the logic update every fourth phase and renders after the catch-up loop
+[orig: Game_MainLoop @ 0x52B630]. Our spectator translation uses display delta,
+while actors move on the 16 ms clock. Uneven relative motion is possible, but
+lack of actor interpolation alone is not a newly discovered retail mismatch.
+The D-INF-18 head feedback cannot by itself explain a spectator-only sighting.
+
+The six existing tests `anim_sample`, `simassets_adm_root_motion`,
+`simassets_adm_playback`, `movement_brain_parity`, `infantry`, and
+`mission_infantry_anim` passed (6/6). These tests do not assert the newly
+identified request-to-channel ordering and do not prove the trail report fixed.
+No IDB names, types, comments, or saved state were changed.
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-INF-26 | Local/authority infantry selects and immediately retargets playback before the channel advance; request and playing target share `anim_state`. | Both infantry motors advance existing channel requests at their head, before later state selection. [orig: Entity_UpdateInfantryAI @ 0x4B9A48; Entity_UpdateInfantryPlayerBody @ 0x4B41DF; AnimMap_UpdateDualChannels @ 0x40B8C0] | OPEN: state-change/root-motion/pose timing differs; continuous visual ghosting remains unproven. |

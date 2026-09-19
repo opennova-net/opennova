@@ -198,8 +198,24 @@ The separate report of faint trails while the local player moves is **not yet
 reproduced or fixed**. The registered `player_motion_capture` probe records 18
 viewport frames plus player/camera positions at rest, during a strafe and after
 stopping; `move=false` with `interval_ms=3000` records a stationary floor ride.
-The captured frames did not establish the reported trail. Clarification about
-turning the camera in place versus walking remains pending; no speculative
-rendering changes were made. Captures stay in local `user://probe-runs/`, not
+The captured frames did not establish the reported trail. The user subsequently also reported the effect in spectator view, worse
+when moving opposite a watched actor. The supplied clip was described as stock
+JOX, so it is not a confirmed OpenNova reproduction. Captures stay in local `user://probe-runs/`, not
 in the repository. Replica carrier scheduling retains the separate section
 29.2 limitation; no new mixed retail/OpenNova multiplayer playthrough is claimed.
+
+
+## Animation and relative-motion source audit
+
+The follow-up review used jo-c `d4148fbabcb98cb6b48e44fe0da9393730bde852`
+and the same retail IDB. [World section 36](world/world-wac-ai-re.md#36-animation-and-relative-motion-timing-audit-2026-09-18)
+records D-INF-26: original infantry advances channels before state selection,
+whereas our motor selects and retargets before advancing. It also bounds the
+existing D-INF-18 head feedback and the spectator camera callback ordering.
+The authority presenter pins body phase to the simulation and does not
+free-run it between snapshots. No visual-trail fix is claimed.
+
+The six focused native tests (`anim_sample`, `simassets_adm_root_motion`,
+`simassets_adm_playback`, `movement_brain_parity`, `infantry`, and
+`mission_infantry_anim`) pass. They do not cover D-INF-26's ordering difference.
+This follow-up changes the evidence record and a source comment only.
