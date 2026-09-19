@@ -105,7 +105,6 @@
 #include "hud/player_hud_weapon_def.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
-#include "devtools/imgui_pass_node.h"
 #include "devtools/dev_tools.h"
 #include "devtools/debug_arg_spec.h"
 #include "devtools/debug_control_records.h"
@@ -471,7 +470,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	// parse; the release DLL's DevTools is inert.
 	GDREGISTER_CLASS(FrameStatsWindow);
 	GDREGISTER_CLASS(FrameStats);
-	GDREGISTER_ABSTRACT_CLASS(ImGuiPassNode);
 	GDREGISTER_CLASS(DevTools);
 	// The debug-control table F3 and MCP share (ADR 0043 d12), in every
 	// flavour: only the ImGui windows are debug-only.

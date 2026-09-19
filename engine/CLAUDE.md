@@ -16,8 +16,8 @@
     anim, audio, particle, renderer, controls, terrain, terrain_query,
     environment, hud, menu, assets, and devtools (the Dear ImGui pass, ADR
     0039: infrastructure like io/vfs, not a port, so it sits in the citation
-    allowlist; the pass, the frame-stats board build in
-    every flavour, the game's F3 windows only with `OPENNOVA_DEVTOOLS` — off for
+    allowlist; the frame-stats board builds in every flavour, while Dear ImGui,
+    the pass and the game's F3 windows build only with `OPENNOVA_DEVTOOLS` — off for
     the release GDExtension flavour; ImGui headers never leave the group, the
     shell hands the context over as plain pointers via `devtools/imgui_abi.h`).
   - `net/` — the retail WIRE (ADRs 0009–0012, 0019; ADR 0043 d4: net means
@@ -114,10 +114,8 @@
   is a real migration needing a CPT-corpus byte diff, not a swap. That byte diff is
   NOT in ctest today: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) pins the
   bit codec and the DPTH/CDEP/POLY round-trips on synthetic buffers only, so run a
-  retail-corpus byte diff by hand whenever you touch the CPT encoder. The BMS `Reader`
-  (`engine/formats/mission/bms.cpp` since the mission-format move) is still its own
-  class with a safe bound (`count <= remaining()`), so what remains is a mechanical
-  migration, not a hardening one. Three more stay by design: `formats/bink`'s
+  retail-corpus byte diff by hand whenever you touch the CPT encoder. Three more stay
+  by design: `formats/bink`'s
   `BitReader` is a fail-latching decoder contract (`peek`, `align32`, the first short
   read poisons it), the `wire_cursor` posture rather than `io::BitReader`'s lenient
   zero-fill; `net/npwire/wire/ingame_encode.cpp`'s `Writer` already rides
