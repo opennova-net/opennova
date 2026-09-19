@@ -12,7 +12,7 @@
 #include "common/retail_paths.h"
 
 #include <formats/threedi/threedi_3di3.h>
-#include <runtime/simassets/adm_skeletal_clips.h>
+#include <runtime/anim/skeletal_clips.h>
 
 #include <cmath>
 #include <cstdio>
@@ -142,7 +142,7 @@ int main() {
 			rig.world, pe->handle, pm);
 	std::printf("muzzle: player launch point resolved=%d (the local player's fire pass reads the viewmodel)\n",
 			int(player_muzzle));
-	const simassets::AdmSkeletalClips *rig_clips = rig.collision_pose.skeletal_rig(pe->handle);
+	const anim::SkeletalClips *rig_clips = rig.collision_pose.skeletal_rig(pe->handle);
 	if (expect(rig_clips != nullptr && rig_clips->loaded(), "the player's skeletal rig is registered")) {
 		expect(rig_clips->bone_count() > static_cast<size_t>(kHandBone),
 				"the player rig carries the head and weapon-hand bones");
@@ -156,7 +156,7 @@ int main() {
 			expect(hand.y > 0.0f, "the weapon hand rests above the pelvis origin");
 		}
 	}
-	if (const Threedi3di3 *m4 = rig.models.model_for("M4_3RD")) {
+	if (const Threedi3di3 *m4 = rig.assets().model("M4_3RD").get()) {
 		expect(m4->user_point_count > 0, "M4_3RD carries user points");
 		int forward = 0;
 		for (size_t i = 0; i < m4->user_point_count; ++i) {

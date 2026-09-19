@@ -3,8 +3,8 @@
 #include "resource_index/resource_root.h"
 
 #include <formats/mission/mission.h> // kItemIdOffset
-#include <runtime/simassets/seat_spec_extract.h>
-#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/mission/seat_spec_extract.h>
+#include <runtime/assets/asset_store.h>
 
 #include "mission/mission_data.h"
 #include "resource_index/resource_root.h"
@@ -443,15 +443,14 @@ Ref<ItemSeatCard> ItemDatabase::extract_seat_specs_for_item(
 	out->set_model(get_display_name(p_item_id), graphic,
 			graphic.is_empty() ? String() : graphic.get_file().get_basename() + ".3di");
 
-	opennova::simassets::SimModelCache models;
-	models.set_index(&p_root->native_index());
-	opennova::simassets::SeatSpecExtraction native;
-	opennova::simassets::extract_item_seat_specs(
+	const auto &models = p_root->native_assets();
+	opennova::mission::SeatSpecExtraction native;
+	opennova::mission::extract_item_seat_specs(
 			native_items(),
-			[&models](const std::string &key) { return models.model_for(key); },
+			[&models](const std::string &key) { return models.model(key).get(); },
 			{p_item_id}, native);
 	const opennova::mission::ItemSeatSpec *spec =
-			opennova::simassets::item_seat_spec_for_type(native.specs,
+			opennova::mission::item_seat_spec_for_type(native.specs,
 					static_cast<uint16_t>(type_id));
 	if (spec != nullptr) out->assign_spec(*spec); // else: no runtime metadata — an empty card
 	return out;

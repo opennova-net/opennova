@@ -402,7 +402,7 @@ private:
 	float model_sphere_radius_ = 0.0f;  // gpm[5]; 0 = unstamped
 	int32_t entity_bound_radius_q16_ = 0;  // entity+0; 0 = none (no collision block)
 	// The eweap-powerup projection form: the entity init stores a zero bbox
-	// center before measuring the sphere (simassets::item_def_zero_bbox_center).
+	// center before measuring the sphere (world::item_def_zero_bbox_center).
 	bool entity_projection_zero_center_ = false;
 	ObjectID slot_shadow_capture_with_;
 	ObjectID entity_light_owner_;
@@ -715,7 +715,7 @@ public:
 			const Vector3 &p_origin) const;
 	// The two radii retail's shadow slot reads, world units, stamped by the
 	// placer from the .3di: the MODEL SPHERE (the header's origin sphere,
-	// gpm[5] — simassets model_bound_radius_from_3di) sizes the silhouette
+	// gpm[5] — world model_bound_radius_from_3di) sizes the silhouette
 	// capture extent and the depth clip; the ENTITY BOUND (entity+0: that
 	// sphere raised to the husk model's, + the 0x1000 pad, written only for a
 	// model with a collision block) sizes the slot lod/patch and the light

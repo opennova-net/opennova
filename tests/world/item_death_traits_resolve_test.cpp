@@ -1,4 +1,4 @@
-// The collision sweep's death-trait mining (runtime/simassets/collision_resolve
+// The collision sweep's death-trait mining (runtime/mission/collision_resolve
 // over world::ItemDeathTraits), the cases the retired DestructionDebugCard
 // binding served to GUT (simulation_test.gd's KZ / glass witnesses, ADR 0043
 // d10): retail walks every exact, case-insensitive "KZ" point on the active
@@ -22,10 +22,10 @@
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
-#include <runtime/simassets/collision_resolve.h>
-#include <runtime/simassets/item_traits.h>
-#include <runtime/simassets/sim_model_cache.h>
-#include <runtime/simassets/sim_pose_provider.h>
+#include <runtime/mission/collision_resolve.h>
+#include <runtime/mission/item_traits.h>
+#include <runtime/assets/asset_store.h>
+#include <runtime/world/entity_pose.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/occlusion.h>
@@ -108,18 +108,18 @@ std::vector<uint8_t> text_bytes(const char *text) {
 // engine systems a resolve writes into, and the sweep itself.
 struct Rig {
     ResourceIndex index;
-    simassets::SimModelCache models;
-    simassets::SimPoseProvider pose;
+    assets::AssetStore models{&index};
+    world::EntityPoseProvider pose;
     CollisionWorld collision;
     OcclusionWorld occlusion;
-    simassets::CollisionResolveState state;
+    mission::CollisionResolveState state;
     World w;
     EntityHandle building;
 
     Rig(const TempRoot &root, const Items &items, int32_t item_id) {
         CHECK(index.scan(root.dir, std::string(), VfsMountMode::LooseOnly));
-        models.set_index(&index);
-        pose.set_resource_index(&index);
+
+        pose.set_assets(&models);
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(1, 8);
         w.registry.configure_pool(2, 8);
@@ -132,9 +132,9 @@ struct Rig {
         building = w.registry.spawn(2, e);
         CHECK(building.valid());
         // The trait rows the sweep fills come from the items.def fold first.
-        simassets::resolve_item_traits(w, items.file, [](int) -> uint8_t { return 0; });
-        const simassets::CollisionResolveDeps deps{collision, occlusion, pose, models};
-        CHECK(simassets::resolve_collision_instances(w, items.file, state, deps) == 1);
+        mission::resolve_item_traits(w, items.file, [](int) -> uint8_t { return 0; });
+        const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
+        CHECK(mission::resolve_collision_instances(w, items.file, state, deps) == 1);
     }
     const ItemDeathTraits *traits(int32_t item_id) const {
         return w.tables.item_death_traits.get(item_id);

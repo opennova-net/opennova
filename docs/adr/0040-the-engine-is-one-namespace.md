@@ -139,7 +139,7 @@ reach any particular number.
 | B4 | the local-player view/aim frames and the character profile still crossing as Dictionaries (`get_local_player_view`, `get_local_player_aim_overlay`, `MissionSetupOptions.local_character_profile`) | typed `LocalPlayerViewFrame` / `AimOverlay` / `CharacterProfile` records assigned from the engine structs | QUEUED (census C-15, C-22) |
 | C1 | the mission load plan (`Game_StartMission`'s sequence + progress schedule) | `engine/runtime/mission/mission_load_plan.h` | LANDED `d081d2908` |
 | C2 | the HUD presenter's config tokens and feed units | `engine/runtime/hud/hud_config_tokens.h` | LANDED `d8fa149b2` |
-| C3+C4 | the presenter's swizzles/rangefinder and the viewmodel rig's frame math | `engine/runtime/world/presentation_frame.h` + `engine/runtime/simassets/fp_viewmodel_spec.h` | LANDED `0b07c5f9f` |
+| C3+C4 | the presenter's swizzles/rangefinder and the viewmodel rig's frame math | `engine/runtime/world/presentation_frame.h` + `engine/runtime/renderer/fp_viewmodel_spec.h` | LANDED `0b07c5f9f` |
 | C5 | the light director's spawner constants | `engine/runtime/renderer/light_scene.h` | LANDED `89440caf7` |
 | C6 | the loading screen's names, sidecar and due rules | `engine/runtime/hud/loading_screen.h` | LANDED `4c8a38c6a` |
 | C7 | the character registry and the joiner profile | `engine/runtime/inmatch/character_registry.{h,cpp}` + `engine/runtime/inmatch/join_character_profile.h` | LANDED `eb9fa8c69` |

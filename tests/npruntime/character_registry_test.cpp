@@ -43,7 +43,7 @@ const char kDef[] =
 } // namespace
 
 int main() {
-	using namespace opennova::npruntime;
+	using namespace opennova::inmatch;
 
 	AvatarsFile file;
 	check(avatars_parse_memory(kDef, sizeof(kDef) - 1, &file) == 0, "fixture parses");

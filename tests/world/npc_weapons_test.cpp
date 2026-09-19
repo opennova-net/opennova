@@ -5,8 +5,8 @@
 #include <base/io/bam.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
-#include <runtime/simassets/item_traits.h>
-#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/mission/item_traits.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/world.h>
 #include <chrono>
@@ -222,9 +222,9 @@ static void test_definition_names_byte_width_and_missing_resources() {
         CHECK(threedi::threedi_3di3_write(path.string().c_str(), &assembled.model) == 0);
         ResourceIndex index;
         CHECK(index.scan(root.string(), "", VfsMountMode::LooseOnly));
-        simassets::SimModelCache models;
-        models.set_index(&index);
-        CHECK(models.model_for("WEAPONS") != nullptr);
+        assets::AssetStore models{&index};
+
+        CHECK(models.model("WEAPONS").get() != nullptr);
         def::DefItemDef definition{};
         definition.id = 100510;
         definition.clipsize = 65535;
@@ -240,7 +240,7 @@ static void test_definition_names_byte_width_and_missing_resources() {
         items.entries = &definition; items.count = 1;
         Fixture f;
         for (int i = 1; i <= 4; ++i) f.world.tables.ammo.entries[i].name = std::string(1, char('A' + i - 1));
-        CHECK(simassets::resolve_ai_weapons(f.world, items, f.shooter, &models) == 1);
+        CHECK(mission::resolve_ai_weapons(f.world, items, f.shooter, &models) == 1);
         CHECK((f.body().profile.organic.ammo == std::array<uint8_t, 4>{1, 2, 3, 4}));
         CHECK((f.body().profile.organic.launch == std::array<uint8_t, 3>{1, 3, 255}));
         CHECK(f.body().inf.magazine == -1);
@@ -257,12 +257,12 @@ static void test_definition_names_byte_width_and_missing_resources() {
         std::strcpy(definition.launchups_closeattack, "Wrapped");
         std::strcpy(definition.launchups_rocket, "Next");
         std::strcpy(definition.launchups_marker3, "Missing");
-        simassets::resolve_ai_weapons(f.world, items, f.shooter, &models);
+        mission::resolve_ai_weapons(f.world, items, f.shooter, &models);
         CHECK((f.body().profile.organic.ammo == std::array<uint8_t, 4>{0, 1, 0, 4}));
         CHECK((f.body().profile.organic.launch == std::array<uint8_t, 3>{0, 1, 0}));
         definition.ammo_marker3[0] = 'D';
         f.world.tables.ammo.entries.clear();
-        simassets::resolve_ai_weapons(f.world, items, f.shooter);
+        mission::resolve_ai_weapons(f.world, items, f.shooter);
         CHECK((f.body().profile.organic.ammo == std::array<uint8_t, 4>{}));
         CHECK((f.body().profile.organic.launch == std::array<uint8_t, 3>{}));
         CHECK(f.body().inf.magazine == -1); // initialization still runs without ammo/models

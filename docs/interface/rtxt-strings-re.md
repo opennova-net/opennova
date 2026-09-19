@@ -12,7 +12,8 @@ Ground truth: all 98 RTXT-magic `.bin` files in the retail install
 (`tests/rtxt/jo_install_sweep_test.cpp`, gated on `OPENNOVA_JO_DIR`). Four of
 them (gametext, menutxt, and the mission bins ash_g3d and 00tra, whose string
 ids the GUT menu tests pin) are committed under `fixtures/rtxt/` and pinned by
-`tests/rtxt/real_parity_test.cpp`.
+`tests/rtxt/synth_parity_test.cpp` (the synthetic parity set that replaced the four retail
+string tables in b0a8ec2ec).
 
 ## On-disk format
 
@@ -113,8 +114,8 @@ Retail tables are cp1252 (67/98 files contain bytes ≥ 0x80 — curly quotes,
 accents). `engine/formats/rtxt` treats text as raw bytes (no transcoding);
 `RtxtStringFile` decodes UTF-8 when the bytes are valid UTF-8, cp1252
 otherwise, and re-encodes edited strings to cp1252 whenever every character
-fits — pinned losslessly on retail data by
-`tests/rtxt/real_parity_test.cpp`, including the cp1252 `00tra.bin` fixture.
+fits — pinned losslessly by
+`tests/rtxt/synth_parity_test.cpp`, including the cp1252 `00tra.bin` fixture.
 
 ## Divergences (D-RTXT-N)
 
@@ -144,6 +145,6 @@ wiring, and expansion override loading from `Expansion_LoadAssets`.
 ## Test inventory
 
 - `tests/rtxt/{roundtrip,byte_equal,lookup,strip_hotkey,empty,section_lookup}_test.cpp` — unit behaviour
-- `tests/rtxt/real_parity_test.cpp` — committed retail fixtures: raw-byte format invariants + byte roundtrip
+- `tests/rtxt/synth_parity_test.cpp` — committed fixtures: raw-byte format invariants + byte roundtrip
 - `tests/rtxt/jo_install_sweep_test.cpp` — full-install sweep (`OPENNOVA_JO_DIR`)
 - `godot/tests/strings_test.gd` — runtime registry integration

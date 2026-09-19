@@ -152,26 +152,26 @@ void ObjectData::stamp_weather_ctrl_registers(GlobalCtrlValues &r_values,
 bool ObjectData::_effective_panm_for_lod(int p_lod_index,
 		std::vector<ThreediPartAnimation> &r_nodes) const {
 	r_nodes.clear();
-	if (!has_source_model || source_model.lods == nullptr || p_lod_index < 0 ||
-			static_cast<size_t>(p_lod_index) >= source_model.lod_count)
+	if (!source_model_ || native_model().lods == nullptr || p_lod_index < 0 ||
+			static_cast<size_t>(p_lod_index) >= native_model().lod_count)
 		return false;
-	const ThreediLod &lod = source_model.lods[p_lod_index];
+	const ThreediLod &lod = native_model().lods[p_lod_index];
 	if (lod.part_animation_count > 0 && lod.part_animations != nullptr) {
 		r_nodes.assign(lod.part_animations,
 				lod.part_animations + lod.part_animation_count);
-	} else if (source_model.part_animation_count > 0 &&
-			source_model.part_animations != nullptr) {
-		r_nodes.assign(source_model.part_animations,
-				source_model.part_animations + source_model.part_animation_count);
+	} else if (native_model().part_animation_count > 0 &&
+			native_model().part_animations != nullptr) {
+		r_nodes.assign(native_model().part_animations,
+				native_model().part_animations + native_model().part_animation_count);
 	}
 	return !r_nodes.empty();
 }
 
 bool ObjectData::has_live_panm_for_lod(int p_lod_index) const {
-	if (!has_source_model || source_model.lods == nullptr || p_lod_index < 0 ||
-			static_cast<size_t>(p_lod_index) >= source_model.lod_count)
+	if (!source_model_ || native_model().lods == nullptr || p_lod_index < 0 ||
+			static_cast<size_t>(p_lod_index) >= native_model().lod_count)
 		return false;
-	const ThreediLod &lod = source_model.lods[p_lod_index];
+	const ThreediLod &lod = native_model().lods[p_lod_index];
 	if (lod.render_object_count == 0 || lod.render_objects == nullptr) return false;
 	std::vector<ThreediPartAnimation> nodes;
 	_effective_panm_for_lod(p_lod_index, nodes);
@@ -181,8 +181,8 @@ bool ObjectData::has_live_panm_for_lod(int p_lod_index) const {
 }
 
 int ObjectData::get_live_panm_lod() const {
-	if (!has_source_model || source_model.lods == nullptr) return -1;
-	for (size_t lod_index = 0; lod_index < source_model.lod_count; ++lod_index)
+	if (!source_model_ || native_model().lods == nullptr) return -1;
+	for (size_t lod_index = 0; lod_index < native_model().lod_count; ++lod_index)
 		if (has_live_panm_for_lod(static_cast<int>(lod_index)))
 			return static_cast<int>(lod_index);
 	return -1;
@@ -217,7 +217,7 @@ Dictionary ObjectData::eval_material_runtime(int p_index, int64_t p_time_ms, con
 
 const std::vector<std::string> &ObjectData::_runtime_control_names() const {
 	if (!runtime_control_names_valid_) {
-		runtime_control_names_cache_ = control_register_names(source_model);
+		runtime_control_names_cache_ = control_register_names(native_model());
 		runtime_control_names_valid_ = true;
 	}
 	return runtime_control_names_cache_;
@@ -266,10 +266,10 @@ bool ObjectData::uses_weather_ctrl_registers() const {
 bool ObjectData::eval_material_runtime_native(int p_index, int64_t p_time_ms,
 		const opennova::renderer::ControlRegisterValues &p_ctrl_values,
 		opennova::renderer::MaterialRuntime &r_runtime) const {
-	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
+	if (!source_model_ || p_index < 0 || static_cast<size_t>(p_index) >= native_model().material_count) {
 		return false;
 	}
-	r_runtime = opennova::renderer::eval_material_runtime(source_model.materials[p_index],
+	r_runtime = opennova::renderer::eval_material_runtime(native_model().materials[p_index],
 			threedi_panm_runtime_time_ms(p_time_ms), _runtime_control_names(),
 			p_ctrl_values);
 	return true;
@@ -277,21 +277,21 @@ bool ObjectData::eval_material_runtime_native(int p_index, int64_t p_time_ms,
 
 int ObjectData::compute_anim_frame_native(int p_index, int64_t p_time_ms,
 		const opennova::renderer::ControlRegisterValues &p_ctrl_values) const {
-	if (!has_source_model || p_index < 0 ||
-			static_cast<size_t>(p_index) >= source_model.material_count) {
+	if (!source_model_ || p_index < 0 ||
+			static_cast<size_t>(p_index) >= native_model().material_count) {
 		return 0;
 	}
-	return opennova::renderer::compute_anim_frame(source_model.materials[p_index], 0,
+	return opennova::renderer::compute_anim_frame(native_model().materials[p_index], 0,
 			threedi_panm_runtime_time_ms(p_time_ms), _runtime_control_names(),
 			p_ctrl_values);
 }
 
 Dictionary ObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	Dictionary out;
-	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
+	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
 		return out;
 	}
-	const ThreediLod &lod = source_model.lods[p_lod_index];
+	const ThreediLod &lod = native_model().lods[p_lod_index];
 	if (lod.render_object_count == 0 || lod.render_objects == nullptr) {
 		return out;
 	}
@@ -301,7 +301,7 @@ Dictionary ObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, const D
 
 	std::vector<ThreediPartAnimation> effective_anims;
 	_effective_panm_for_lod(p_lod_index, effective_anims);
-	resolve_panm_registers(source_model, effective_anims);
+	resolve_panm_registers(native_model(), effective_anims);
 	const ThreediPartAnimation *anims =
 			effective_anims.empty() ? nullptr : effective_anims.data();
 	const size_t node_count = effective_anims.size();
@@ -379,16 +379,16 @@ static uint64_t panm_ctrl_hash(const GlobalCtrlValues &values) {
 // The next evaluation after this re-arms a full apply (time sentinel).
 ObjectData::PanmEvalCache *ObjectData::_panm_cache_prepare(
 		int p_lod_index) const {
-	if (!has_source_model || source_model.lods == nullptr || p_lod_index < 0 ||
-			static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
+	if (!source_model_ || native_model().lods == nullptr || p_lod_index < 0 ||
+			static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
 		return nullptr;
 	}
-	const ThreediLod &lod = source_model.lods[p_lod_index];
+	const ThreediLod &lod = native_model().lods[p_lod_index];
 	if (lod.render_object_count == 0 || lod.render_objects == nullptr) {
 		return nullptr;
 	}
-	if (panm_caches_.size() < source_model.lod_count) {
-		panm_caches_.resize(source_model.lod_count);
+	if (panm_caches_.size() < native_model().lod_count) {
+		panm_caches_.resize(native_model().lod_count);
 	}
 	PanmEvalCache &c = panm_caches_[static_cast<size_t>(p_lod_index)];
 	if (c.valid && c.lod == p_lod_index) {
@@ -399,7 +399,7 @@ ObjectData::PanmEvalCache *ObjectData::_panm_cache_prepare(
 	c.ctrl_hash = 0;
 	c.valid = true;
 	_effective_panm_for_lod(p_lod_index, c.anims);
-	resolve_panm_registers(source_model, c.anims);
+	resolve_panm_registers(native_model(), c.anims);
 	c.has_noise = false;
 	for (const ThreediPartAnimation &anim : c.anims) {
 		c.has_noise = c.has_noise || threedi_panm_animation_uses_noise(anim);
@@ -450,7 +450,7 @@ int64_t ObjectData::apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms
 		return 0;
 	}
 	PanmEvalCache &c = *cache;
-	const ThreediLod &lod = source_model.lods[p_lod_index];
+	const ThreediLod &lod = native_model().lods[p_lod_index];
 	const GlobalCtrlValues &ctrl_table = p_ctrl_table;
 	const uint64_t ctrl_hash = panm_ctrl_hash(ctrl_table);
 	const bool first_eval = c.time_ms == INT64_MIN;
@@ -506,13 +506,13 @@ int64_t ObjectData::get_panm_evaluation_serial() const {
 
 Array ObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	Array out;
-	if (!has_source_model || source_model.light_count == 0) {
+	if (!source_model_ || native_model().light_count == 0) {
 		return out;
 	}
 	const GlobalCtrlValues ctrl_values =
 			global_control_values_from_dict(p_ctrl_values);
-	for (size_t i = 0; i < source_model.light_count; ++i) {
-		const ThreediLight &light = source_model.lights[i];
+	for (size_t i = 0; i < native_model().light_count; ++i) {
+		const ThreediLight &light = native_model().lights[i];
 		if ((light.flags & THREEDI_LIGHT_FLAG_DISABLE_OBJECTS) != 0) {
 			continue;
 		}
@@ -521,9 +521,9 @@ Array ObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_va
 		if (runtime_light.style > 0x70) {
 			const char *name = nullptr;
 			const size_t local_ordinal = runtime_light.phase;
-			if (source_model.ctrl.registers != nullptr &&
-					local_ordinal < source_model.ctrl.count) {
-				name = source_model.ctrl.registers[local_ordinal].name;
+			if (native_model().ctrl.registers != nullptr &&
+					local_ordinal < native_model().ctrl.count) {
+				name = native_model().ctrl.registers[local_ordinal].name;
 			}
 			// The light loader applies the same local-name -> global-ordinal
 			// rewrite as PANM. Controlled styles read that bus slot; waveform

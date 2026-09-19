@@ -2,7 +2,7 @@
 
 The Godot layer's native half (ADR 0016/0028/0034 d6): C++ only — the
 GDExtension classes binding `engine/` to Godot. Register new classes in
-`register_types.cpp`. ADR 0035 supersedes ADR 0033's callback-bus design: a
+`register_types.cpp`. ADR 0043 d9 (which superseded ADR 0033's callback bus and ADR 0035) rules: a
 line here earns its place only as a device leg (marshalling, nodes, servers,
 input, audio, draw-list appliers), the typed bridge from `inmatch::Session` to
 the `GameWorld` frame-leg table, or a documented seam bridge — format/runtime logic
@@ -35,8 +35,8 @@ on any increase. Shipping GDScript has no size ratchet; it has
 `gd_foreign_private_accesses` instead: a script that reaches into another
 object's `_privates` is a method annex, not a class, and the count only falls.
 
-The game-level GDScript runtime (world, debug, mission, object, terrain,
-ui, avatar, probe, mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
+The game-level GDScript runtime (world, debug, ui, avatar, probe,
+mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
 there that is really engine behavior is the C++ rewrite queue. The debug-control
 table itself is C++ here (`devtools/debug_control_table`, ADR 0043 d12): the F3
 windows' `ControlRequest`s and MCP's `game_debug` drive the one instance.

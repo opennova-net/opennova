@@ -9,7 +9,7 @@
 #include <net/npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
 #include <runtime/world/local_player_view.h>
 #include <runtime/renderer/aspect_ratio.h>
-#include <runtime/simassets/fp_viewmodel_spec.h>
+#include <runtime/renderer/fp_viewmodel_spec.h>
 #include <runtime/world/presentation_frame.h>
 
 #include <cstdlib>
@@ -180,25 +180,25 @@ int Simulation::rangefinder_units(const Vector3 &p_position, const Vector3 &p_en
 Vector3 Simulation::viewmodel_camera_local_from_view(const Vector3 &p_view_units) {
 	const float view[3] = {p_view_units.x, p_view_units.y, p_view_units.z};
 	float out[3];
-	opennova::simassets::viewmodel_camera_local_from_view(view, out);
+	opennova::renderer::viewmodel_camera_local_from_view(view, out);
 	return Vector3(out[0], out[1], out[2]);
 }
 
 Vector3 Simulation::viewmodel_bias_euler_rad(const Vector3 &p_rot_bias_deg) {
 	const float bias[3] = {p_rot_bias_deg.x, p_rot_bias_deg.y, p_rot_bias_deg.z};
 	float out[3];
-	opennova::simassets::viewmodel_bias_euler_rad(bias, out);
+	opennova::renderer::viewmodel_bias_euler_rad(bias, out);
 	return Vector3(out[0], out[1], out[2]);
 }
 
 float Simulation::viewmodel_rig_yaw_deg() {
-	return opennova::simassets::kViewmodelRigYawDeg;
+	return opennova::renderer::kViewmodelRigYawDeg;
 }
 
 float Simulation::weapon_render_fov_h_deg_default() {
-	return opennova::simassets::kWeaponRenderFovHDegDefault;
+	return opennova::renderer::kWeaponRenderFovHDegDefault;
 }
 
 int Simulation::viewmodel_team_byte(int p_team) {
-	return opennova::simassets::viewmodel_team_byte(p_team);
+	return opennova::renderer::viewmodel_team_byte(p_team);
 }

@@ -16,6 +16,8 @@
   [ADR 0029](0029-engine-group-targets.md) (the chain order). ADR 0017 (typed records),
   ADR 0022 (the ledger), ADR 0028 d1 (four groups), ADR 0037, ADR 0039, ADR 0040 and
   ADR 0041 stand unchanged.
+- **Amended**: [ADR 0044](0044-shared-native-assets.md) (2026-09-18) amends d4's NET-AGNOSTIC
+  runtime tree list (`simassets` dissolved into its owning systems; `assets` added).
 
 ## Context
 
@@ -73,7 +75,7 @@ untouched — landed as ONE pull request of committed-as-we-go slices.
    through `World &`: `VehicleSystem`, `ZoneSystem`, `LocalPlayer`. The
    feed builders stay free functions under `world/feeds/`. `MissionKernel` is
    boot + state, owns no tick, inherits no provider interface; one
-   `IPoseProvider` with one `simassets::SimPoseProvider` replaces the three
+   `IPoseProvider` with one `world::EntityPoseProvider` replaces the three
    provider interfaces; the dead seams go outright (`INetCommandSink` /
    `LocalSink` / `SerializingSink`, an unwitnessed 0x23 payload with no
    caller; `mission_systems.h`; the kernel's registry and command

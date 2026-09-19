@@ -2,7 +2,7 @@
    [orig: PFF_LoadFileToMemory @ 0x768920, PFF_SortEntries @ 0x768280; docs/vfs/vfs-pff-mount-re.md (D-VFS)]
    Supports modern PFF3/PFF4/BHD archives and the legacy (pre-PFF3) format.
    Structural port of the Jointops.exe file subsystem; addresses are cited inline and
-   the algorithms are documented in notes/vfs/phase0_ida_verification.md. */
+   the algorithms are documented in docs/vfs/vfs-pff-mount-re.md. */
 
 #include <formats/pff/pff.h>
 

@@ -339,8 +339,8 @@ numbering").
 
 - **Unit:** `netsim_two_peer_fanout` (`run_0a_subblock_phase_cycle`) pins the header cycle deterministically
   — no live client needed.
-- **Coverage diff:** `scripts/net/diff_vs_golden.ps1` compares native decoder
-  tag coverage with a retail-host golden.
+- **Coverage diff:** `scripts/net/diff_vs_golden.ps1` was retired with the capture gates
+  (ca1cef465); the shape diff below is the surviving golden comparison.
 - **Shape diff:** `python scripts/net/diff_0a.py --ours <cap> --golden <golden> --items ~/Desktop/JOX/ITEMS.DEF`
   compares sub-block distribution + record-class mix + per-field population vs the retail-host golden. The
   golden profile caches to `<golden>.0a.json` (instant re-runs; `--refresh` after a decoder change). This

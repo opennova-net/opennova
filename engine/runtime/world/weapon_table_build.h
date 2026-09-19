@@ -10,7 +10,7 @@
 #include <runtime/world/weapon_table.h>
 
 namespace opennova {
-class ResourceIndex;
+namespace assets { class AssetStore; }
 }
 
 namespace opennova::world {
@@ -55,6 +55,6 @@ LoadoutAmmoBytes resolve_loadout_ammo(const world::WeaponTable &table, uint8_t a
 // rings for authored automatic action delays; a null/missing source preserves
 // retail's unresolved-clip zero fallback [orig: Anim_InitActions @0x541fa0].
 world::WeaponTable build_weapon_table(
-		const opennova::def::DefWeaponsFile &weapons, const ResourceIndex *resources = nullptr);
+		const opennova::def::DefWeaponsFile &weapons, const assets::AssetStore *resources = nullptr);
 
 } // namespace opennova::world

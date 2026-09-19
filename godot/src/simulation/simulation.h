@@ -85,14 +85,14 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 
 #include "wac/wac_program.h"
 #include <formats/def/def.h> // the retained weapon.def parse (S6b)
-#include <runtime/simassets/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
+#include <runtime/anim/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
 #include <runtime/world/player_loadout.h> // the moved loadout cluster (S7b, ADR 0028)
 #include <runtime/world/player_weapon.h> // the moved equipped-weapon cluster (S7a, ADR 0028)
 #include <runtime/world/present_rows.h> // the engine-owned PF_* present-row layout (ADR 0031)
-#include <runtime/simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
-#include <runtime/simassets/sim_pose_provider.h> // the engine-side pose provider (S3, ADR 0028)
-#include <runtime/simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
-#include <runtime/simassets/mounted_pose.h> // reusable PANM part matrices for mounted attachments
+#include <runtime/mission/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
+#include <runtime/world/entity_pose.h> // the engine-side pose provider (S3, ADR 0028)
+#include <runtime/assets/asset_store.h> // the shared native asset store (ADR 0044)
+#include <runtime/world/mounted_pose.h> // reusable PANM part matrices for mounted attachments
 #include <runtime/inmatch/session.h>
 #include <runtime/inmatch/present_rows.h> // PoolPresentLifecycleMap (the host present path's respawn mirror)
 #include <runtime/world/ai.h>
@@ -119,7 +119,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include <runtime/devtools/environment_snapshot.h> // the ONE mission boot + state + no-net tick (ADR 0042 d3)
 #include <runtime/devtools/physics_snapshot.h>
 #include <runtime/devtools/rays_snapshot.h>
-#include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
+#include <runtime/anim/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
 #include <runtime/inmatch/host_role.h>                // HostRole: the listen/dedicated host's state + frame (ADR 0043 d3)
 #include <runtime/inmatch/joiner_role.h>              // JoinerRole: the joiner's runtime, bridge and frame
@@ -180,7 +180,7 @@ class TickSink;
 // each tick. Runtime transport and fixture teardown share the
 // play/pause/step/restart surface.
 class Simulation : public RefCounted,
-                       private opennova::inmatch::TickObserver {
+					   private opennova::inmatch::TickObserver {
 	GDCLASS(Simulation, RefCounted)
 
 public:
@@ -309,13 +309,13 @@ public:
 		PF_FOCAL_SWAY_Y = opennova::world::PF_FOCAL_SWAY_Y,
 		PF_FOCAL_SWAY_Z = opennova::world::PF_FOCAL_SWAY_Z,
 		PF_DOOR_COUNT = opennova::world::PF_DOOR_COUNT,
-        PF_HUSK = opennova::world::PF_HUSK,
-        PF_OBJECT_DESTROY = opennova::world::PF_OBJECT_DESTROY,
-        PF_OBJECT_DESTROY01 = opennova::world::PF_OBJECT_DESTROY01,
-        PF_OBJECT_DESTROY02 = opennova::world::PF_OBJECT_DESTROY02,
-        PF_OBJECT_DESTROY03 = opennova::world::PF_OBJECT_DESTROY03,
-        PF_OBJECT_DESTROY04 = opennova::world::PF_OBJECT_DESTROY04,
-        PF_OBJECT_DESTROY05 = opennova::world::PF_OBJECT_DESTROY05,
+		PF_HUSK = opennova::world::PF_HUSK,
+		PF_OBJECT_DESTROY = opennova::world::PF_OBJECT_DESTROY,
+		PF_OBJECT_DESTROY01 = opennova::world::PF_OBJECT_DESTROY01,
+		PF_OBJECT_DESTROY02 = opennova::world::PF_OBJECT_DESTROY02,
+		PF_OBJECT_DESTROY03 = opennova::world::PF_OBJECT_DESTROY03,
+		PF_OBJECT_DESTROY04 = opennova::world::PF_OBJECT_DESTROY04,
+		PF_OBJECT_DESTROY05 = opennova::world::PF_OBJECT_DESTROY05,
 		PF_PARACHUTE_DEPLOYED = opennova::world::PF_PARACHUTE_DEPLOYED,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
@@ -888,7 +888,7 @@ public:
 	// Thunder one-shots since the last drain (weather_state.h carries the cites).
 	// NOT ClassDB-bound: MissionAudio plays the engine rows.
 	void drain_weather_sounds(std::vector<opennova::world::WeatherSoundEvent> &r_events);
-    void drain_script_sounds(std::vector<opennova::world::ScriptSoundEvent> &r_events);
+	void drain_script_sounds(std::vector<opennova::world::ScriptSoundEvent> &r_events);
 	// The F3 Environment record (devtools/environment_snapshot.h) as a typed
 	// read for the GUT/probe side; null without a world.
 	Ref<EnvironmentSnapshot> get_environment_snapshot() const;
@@ -920,8 +920,8 @@ public:
 	bool command_lightning_color(int p_rgb);
 
 private:
-    ObjectID music_director_id_;
-    std::shared_ptr<opennova::mus::MusGlobals> wac_music_globals() const;
+	ObjectID music_director_id_;
+	std::shared_ptr<opennova::mus::MusGlobals> wac_music_globals() const;
 	// The shared post-kernel-boot binding legs: session-header capture, HUD
 	// map zoom, score-row re-resolve, and the held-WacProgram re-apply.
 	void finish_kernel_boot();
@@ -1428,7 +1428,7 @@ public:
 	// The production mount (S6b, ADR 0028): find the row in the RETAINED
 	// weapon.def parse, bake the FSM def from it, and seed the clip rings from
 	// the rig's own .adm through the sim's mounted index — one step at ACCEPT
-	// time, no shell dictionary and no render dependency (engine: runtime/simassets/adm_clip_index.h). Returns false
+	// time, no shell dictionary and no render dependency (engine: runtime/anim/adm_clip_index.h). Returns false
 	// when the name is not in the retained table (caller keeps the current
 	// weapon, mirroring the armory guard). The Dictionary pair above survives
 	// as the GUT synthetic-def seam and retires with S7a.
@@ -1454,8 +1454,8 @@ public:
 	// and queues the scopeup/scopedown FSM states. Returns whether it toggled.
 	// (engine: runtime/world/local_player_view.cpp)
 	bool request_local_player_scope_toggle();
-    void set_local_player_aspect_mode(int p_mode);
-    int get_local_player_aspect_mode() const;
+	void set_local_player_aspect_mode(int p_mode);
+	int get_local_player_aspect_mode() const;
 	bool request_local_player_scope_zero(int p_delta);
 	// Retail action 26 (default B): toggles the persistent binocular request.
 	// The effective raised/view bits are derived each tick from movement, life,
@@ -1492,7 +1492,7 @@ public:
 	static Vector3 presentation_forward(float p_yaw_deg, float p_pitch_deg);
 	static Vector3 aim_ray_endpoint(const Vector3 &p_eye, float p_yaw_deg, float p_pitch_deg);
 	static int rangefinder_units(const Vector3 &p_position, const Vector3 &p_endpoint);
-	// The FP viewmodel rig's frame math (simassets/fp_viewmodel_spec.h): the
+	// The FP viewmodel rig's frame math (renderer/fp_viewmodel_spec.h): the
 	// view-frame -> camera-local axis map, the def rotation bias as camera
 	// euler radians, the rig yaw, the renderfov default, the TEX_TEAM byte.
 	static Vector3 viewmodel_camera_local_from_view(const Vector3 &p_view_units);
@@ -1541,9 +1541,9 @@ public:
 	// (engine: runtime/world/ammo_table.h). The native form is the C++
 	// consumer's (GameWorld); the bound form wraps the same rows for the tests.
 	void drain_round_impact_rows(std::vector<opennova::world::RoundImpactPresentation> &r_rows);
-    void drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events);
-    std::vector<std::string> script_effect_names() const;
-    void bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene);
+	void drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events);
+	std::vector<std::string> script_effect_names() const;
+	void bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene);
 	TypedArray<RoundImpactRow> drain_round_impacts();
 	// Destructively drain permanent terrain-cache scorch insertions (mission
 	// 16.16 bounds; the consumer folds mission (x,y) to terrain/Godot (x,z)).
@@ -1660,14 +1660,14 @@ public:
 	// weapon_sav_relpath): with an active expansion retail looks ONLY under
 	// "expansion/<name>/", never the root (engine: formats/playersav/weapon_sav.cpp). Static so shell path assembly stays a join.
 	static String weapon_profile_relpath(const String &p_expansion_name);
-	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (simassets
+	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (renderer
 	// fp_viewmodel_spec (engine: runtime/inmatch/joiner_role.cpp)). `character_arms` is the local
 	// player's resolved combo arms graphic (retail's CharacterEntity arms model,
 	// the ONLY arms source — weapon.def gfx1a/gfx1b are discarded tokens);
 	// has_def=false is the bring-up path; an empty gun on a resolved def means
 	// submit no FP gun.
 	// The witnessed viewmodel placement units, re-exported from engine
-	// simassets/fp_viewmodel_spec.h.
+	// renderer/fp_viewmodel_spec.h.
 	static double weapon_def_pos_scale();
 	static Vector3 viewmodel_fallback_pos_units();
 	static Vector3 viewmodel_fallback_tpos_units();
@@ -1801,7 +1801,7 @@ public:
 	// The sound-profile chain (engine: base/gameprofile/required_resources.c): feed SndProf.def text (VFS
 	// bytes) — parsed into world.tables.sound_profiles now and re-applied on
 	// reset_world; per-entity bindings resolve in the kernel boot's
-	// simassets::resolve_ai_weapons step.
+	// mission::resolve_ai_weapons step.
 	void set_sound_profiles(const PackedByteArray &p_sndprof_text);
 	// The mission water plane (godot Y units) the footstep water pick and the
 	// landing legs compare feet against (engine: runtime/replication/client_replica_pipeline.h).
@@ -1910,9 +1910,6 @@ public:
 	// Native (unbound) form for the in-process C++ dev tools (ADR 0042 d6): the same engine
 	// join, returned as the engine vector — no TypedArray/Variant round-trip. Empty without a kernel.
 	std::vector<opennova::world::inspect::EntityRow> native_entity_directory() const;
-	// The engine's tool/probe mutation seam by entity handle (ADR 0042 d5), for the C++
-	// embedders (DevTools) that already hold a handle; null without a kernel.
-	opennova::world::EntityCommands *entity_commands();
 	// Native (unbound): the engine card by value for the C++ dev tools; invalid without a kernel
 	// or a resolving handle.
 	opennova::world::inspect::EntityCard native_entity_card(int p_handle) const;
@@ -2061,7 +2058,7 @@ public:
 	// and direct test/tooling fixtures call this through MissionRoot.setup().
 	void set_terrain_height_field(const Ref<TerrainData> &p_terrain);
 	// S16 (ADR 0028): the seat/mount table installs through the NATIVE
-	// extractor (simassets::extract_item_seat_specs) over the retained def
+	// extractor (mission::extract_item_seat_specs) over the retained def
 	// rows + the sim's own model parses. Seeds are full 1xxxxx def ids; the
 	// extractor walks authored addeweap children transitively. The shell
 	// GDScript extraction + its Dictionary install seam are gone — proven
@@ -2100,7 +2097,7 @@ public:
 	// attrib — gates the 0x0D AI-trailer, D-NET-97), net_class_code (§5.10b *_function class
 	// tag -> the 0x0A serialize class; an unresolved/ewep item must NOT be serialized as a
 	// vehicle or the client desyncs), and health_max/health (items.def hp = healthMax
-	// (engine: runtime/simassets/item_traits.cpp)). Idempotent; call after load (and again after
+	// (engine: runtime/mission/item_traits.cpp)). Idempotent; call after load (and again after
 	// spawning the local player).
 	void resolve_item_traits(const Ref<class ItemDatabase> &p_item_db);
 
@@ -2120,7 +2117,7 @@ public:
 	// Returns the instance count. Also attaches the render-occlusion portal
 	// models (buildings whose graphic carries OVRT/OPLN/OFAC/OOBJ records)
 	// with their def bits. Idempotent per load. Model extraction reads the
-	// sim's own SimModelCache through the installed asset root
+	// shared assets::AssetStore through the installed asset root
 	// (set_asset_root; ADR 0028) — a rootless sim attaches nothing.
 	int resolve_collision_instances(const Ref<class ItemDatabase> &p_item_db);
 	// Install the mounted root the SIMULATION resolves assets through — the
@@ -2219,7 +2216,7 @@ public:
 	// follows the viewer team (engine: runtime/world/round_sim.h).
 	// The native form is the throwable pass's; the bound form wraps the same
 	// rows for the tests.
-    void advance_facial_presentation(const Vector3 &p_camera);
+	void advance_facial_presentation(const Vector3 &p_camera);
 	void fill_minefield_draw_rows(std::vector<opennova::world::MinefieldDraw> &r_rows) const;
 	void fill_throwable_visual_rows(std::vector<opennova::world::ThrowableVisualRow> &r_rows) const;
 	TypedArray<ThrowableVisualRow> get_throwable_visuals() const;
@@ -2320,8 +2317,8 @@ public:
 	// serial (retail's slot carries the entity pointer from registration;
 	// this is the lookup that identity stands in for).
 	opennova::world::EntityHandle handle_for_bms_id(int p_bms_id) const;
-    // Native presentation identity for the existing audio occlusion query.
-    int sound_source_bms_id(uint16_t p_handle) const;
+	// Native presentation identity for the existing audio occlusion query.
+	int sound_source_bms_id(uint16_t p_handle) const;
 
 	// The marched iris-exposure sampling (D-RLIT-2): three classification codes
 	// for env::WeatherCore::set_exposure_from_iris_samples — the camera ray runs

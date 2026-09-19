@@ -31,8 +31,7 @@ class Water;
 // the world's _init, wired to the retained scene nodes in _ready (setup),
 // re-handed the mission runtime's sim / entity index / entity presenter on
 // every load (bind_mission) and released on unload (reset). GameWorld's
-// frame and load legs reach it through occlusion_frame()
-// accessor.
+// frame leg drives it through apply_occlusion_frame().
 //
 // HOT PATH: GameWorld's device frame calls apply_blink_gates()/apply_frame()
 // directly every frame. Every entry here is a plain method call over

@@ -3,6 +3,7 @@
 #include <base/vfs/vfs.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
@@ -16,6 +17,7 @@ namespace fs = std::filesystem;
 namespace opennova {
 
 namespace {
+std::atomic<uint64_t> g_cache_epoch{1};
 
 // Last-write time of `path` as Unix seconds (UTC), or 0 when it can't be read.
 // fs::file_time_type has no portable epoch before C++20, so map it onto
@@ -202,10 +204,24 @@ struct ResourceIndex::Impl {
 	std::vector<ResourceFileEntry> records; // recognized-kind entries
 };
 
+uint64_t cache_epoch() {
+	return g_cache_epoch.load(std::memory_order_acquire);
+}
+
+void bump_cache_epoch() {
+	g_cache_epoch.fetch_add(1, std::memory_order_acq_rel);
+}
+
 ResourceIndex::ResourceIndex() : impl_(std::make_unique<Impl>()) {}
 ResourceIndex::~ResourceIndex() = default;
 ResourceIndex::ResourceIndex(ResourceIndex &&) noexcept = default;
-ResourceIndex &ResourceIndex::operator=(ResourceIndex &&) noexcept = default;
+ResourceIndex &ResourceIndex::operator=(ResourceIndex &&other) noexcept {
+	if (this != &other) {
+		impl_ = std::move(other.impl_);
+		++revision_;
+	}
+	return *this;
+}
 
 bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansion, VfsMountMode mode,
                          VfsArchiveDiscovery discovery) {
@@ -272,6 +288,7 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 }
 
 void ResourceIndex::clear() {
+	++revision_;
 	impl_->vfs.clear();
 	impl_->root_dir.clear();
 	impl_->last_error.clear();
@@ -306,6 +323,7 @@ std::string ResourceIndex::particle_extension() const {
 }
 
 void ResourceIndex::set_scr_policy(int scr_policy) {
+	++revision_;
 	// Vfs::clear() (called by scan) does not reset the policy, so this persists across re-scans.
 	impl_->vfs.set_scr_policy(scr_policy);
 }

@@ -120,15 +120,6 @@ struct WeaponLoadoutEntry {
 	std::string flags = "-1";
 };
 
-// Public view of one item-availability record from the .bms secondary chunk — the
-// per-map weapon rules ({name, status} pairs) the mission-list scanners compile into
-// the availability template [orig: build_item_restriction_table @0x54DDB0 name-list
-// mode over the chunk; status -1 maps to 3 mission-allowed at apply].
-struct ItemAvailabilityEntry {
-	std::string name;
-	int status = 1;
-};
-
 // Typed view of a 32-byte group record. The field WIDTHS are witnessed
 // ([orig: dfx2med.exe Med_WriteBmsFile @0x44f920]) but their in-engine MEANING is still
 // ungrilled (the open question is docs/mission/bms-event-runtime-re.md §3a, the

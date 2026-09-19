@@ -671,7 +671,7 @@ Closed 2026-08-12: **D-SND-9** -> `FIXED` - the BPLN flags word rides the collis
 
 Closed 2026-08-13: **D-SND-11** -> `FIXED` - the footstep pick reads the live `Entity::ground_target`, the `entity+0x28 groundEntity` link the resolve's ground probe stores unconditionally each tick `[orig: Entity_RaycastGroundHeightAndObject @0x525fd0; the +0x28 store @0x414370]`, null-on-miss like retail, the never-set `standing_on_entity` mirror deleted; walking on placed objects plays the single generic `SS*FootOBJ` pair exactly like retail (ctest `slot_sound`; full entry: audio/lwf-dbf-sound-re.md).
 
-Closed 2026-08-15: **D-SND-12** -> `FIXED` - `AvatarDatabase` projects each character's packed id and `combo.head.sex` into the simulation's reset-stable character-traits table; player entities select `AiProfile::sound_profile_female` when the packed character id is female [orig: `Entity_GetProfileSlotSound @0x52831c`], unknown ids and NPCs keep the primary profile, both items.def profile names keeping the retail default fallback (`slot_sound`, `simassets_item_traits`, `avatars_data_test`; full entry: audio/lwf-dbf-sound-re.md).
+Closed 2026-08-15: **D-SND-12** -> `FIXED` - `AvatarDatabase` projects each character's packed id and `combo.head.sex` into the simulation's reset-stable character-traits table; player entities select `AiProfile::sound_profile_female` when the packed character id is female [orig: `Entity_GetProfileSlotSound @0x52831c`], unknown ids and NPCs keep the primary profile, both items.def profile names keeping the retail default fallback (`slot_sound`, `mission_item_traits`, `avatars_data_test`; full entry: audio/lwf-dbf-sound-re.md).
 
 Closed 2026-08-11: **D-SND-14** -> `FIXED` - the local player's death edge emits org2's body-model composite `sprintf("%s_%s", Entity_GetBodyModelPrefix(entity), "DEATH"/"DEATH_K")` as a named `SoundSlotEvent` (the by-name drain reproduces retail's miss = silence) `[orig: @0x4b4c4a-0x4b4c6a; SoundProfile_FindByEntityAndType @0x528180 over the g_entity_sound_type_table @0x82F548; prefix switch @0x5280F0 (anim-slot +0x374, 0->1->BM1)]`; NPCs keep slots 7/8; the record's old `"<DefName>_<Type>"` gloss corrected (ctest `slot_sound`; full entry: audio/lwf-dbf-sound-re.md).
 
@@ -1138,7 +1138,7 @@ the two bases differ by the x/z swap `godot = (z, y, x)_render`
 `[orig: Math_FixedPointToFloat3_YNegated @ 0x611210; the glint submit matrix
 update_sun_glare @ 0x5ad1ba..0x5ad213]`, so every low-sun frame front-lit
 where retail backlights. Fixed via one mapping seam
-(`godot/src/env/env_axes.h`) at every consumer — the environment direction
+(`godot/src/util/axes.h`) at every consumer — the environment direction
 getters, the object directional term, sun/moon/glare/glint placement, the
 glare jitter plane, the sun-veil dot, the dome uniforms and the star
 placement — with the raw tuple deliberately left on the terrain/foliage

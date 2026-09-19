@@ -4,9 +4,9 @@
 #include <runtime/inmatch/client_replica_present.h> // the emplaced/overlay/held-weapon writers
 #include <runtime/inmatch/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 #include <runtime/inmatch/replica_query.h> // client_entity_for_handle
-#include <runtime/simassets/mounted_pose.h> // the ONE mounted matrix path (S4b)
-#include <runtime/simassets/pose_inputs.h> // seat/mount pose predicates + aim inputs (ADR 0028)
-#include <runtime/simassets/seat_spec_extract.h> // item_seat_spec_for_type
+#include <runtime/world/mounted_pose.h> // the ONE mounted matrix path (S4b)
+#include <runtime/world/pose_inputs.h> // seat/mount pose predicates + aim inputs (ADR 0028)
+#include <runtime/mission/seat_spec_extract.h> // item_seat_spec_for_type
 #include <runtime/world/mount_controls.h> // heat-glow + emplaced turret CTRL sources (ADR 0028)
 #include <runtime/world/present_rows.h>
 #include <runtime/world/vehicle_motor.h> // vehicle_ctrl_registers
@@ -106,22 +106,22 @@ inline void write_present_vehicle_motion_controls(float *record, const World &wo
 }
 
 // S4b (ADR 0028): the joiner's addeweap reconstruction rides the SAME engine
-// resolver the host authority runs (simassets::resolve_model_mounted_pose) —
-// one mounted matrix path. The model resolves through the sim cache by the
+// resolver the host authority runs (world::resolve_model_mounted_pose) —
+// one mounted matrix path. The model resolves through the shared asset store by the
 // installed spec's graphic key, exactly like the host-side resolver.
 bool resolve_client_eweap_attachment_pose(
 		const replication::ClientEntityState &child,
 		const replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs,
 		const std::unordered_map<int32_t, std::string> &graphics_by_type,
-		simassets::SimModelCache &models,
+		const assets::AssetStore &models,
 		uint32_t time_ms, MountedPose &out) {
 	if (child.parent_handle == EntityHandle::kInvalid) return false;
 	const replication::ClientEntityState *parent =
 			client_entity_for_handle(state, child.parent_handle);
 	if (parent == nullptr) return false;
 	const mission::ItemSeatSpec *parent_spec =
-			simassets::item_seat_spec_for_type(specs, parent->type_id);
+			mission::item_seat_spec_for_type(specs, parent->type_id);
 	if (parent_spec == nullptr) return false;
 
 	// The 0x0D relation names only the parent, not the authored attachment slot.
@@ -140,9 +140,9 @@ bool resolve_client_eweap_attachment_pose(
 			attachment->anchor.bone_index == 0)
 		return false;
 	const auto graphic_found = graphics_by_type.find(parent->type_id);
-	if (graphic_found == graphics_by_type.end() || !models.has_index())
+	if (graphic_found == graphics_by_type.end() || !models.has_source())
 		return false;
-	const Threedi3di3 *model_ptr = models.model_for(graphic_found->second);
+	const Threedi3di3 *model_ptr = models.model(graphic_found->second).get();
 	if (model_ptr == nullptr) return false;
 
 	// Remote generic PLAYPARTANIM phases are not in ClientEntityState. Do not
@@ -181,7 +181,7 @@ bool resolve_client_eweap_attachment_pose(
 			static_cast<double>(parent->pitch_bam) * kDegreesPerBam));
 	carrier.roll = static_cast<int16_t>(std::lround(
 			static_cast<double>(parent->roll_bam) * kDegreesPerBam));
-	return simassets::resolve_model_mounted_pose(
+	return world::resolve_model_mounted_pose(
 			model, carrier, attachment->anchor, ctrl_values, time_ms, out);
 }
 
@@ -240,7 +240,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 		DoorPhaseTable &door_phases);
 
 void build_client_replica_present_rows(const PresentRowsContext &context,
-        PoolPresentLifecycleMap &lifecycle, std::vector<float> &out, DoorPhaseTable &door_phases) {
+		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out, DoorPhaseTable &door_phases) {
 	out.clear();
 	if (context.runtime == nullptr) return;
 	mission::MissionKernel &kernel = context.kernel;
@@ -315,9 +315,9 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
-            r[PF_HUSK] = (ent->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
-            for (int phase = 0; phase < 6; ++phase)
-                r[PF_OBJECT_DESTROY + phase] = float(ent->destroy_phases_q16[phase]);
+			r[PF_HUSK] = (ent->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+			for (int phase = 0; phase < 6; ++phase)
+				r[PF_OBJECT_DESTROY + phase] = float(ent->destroy_phases_q16[phase]);
 			// The org0 skin callback's DEATH register off the authoritative
 			// organic row's dead flag + corpse timer [orig: BoneCallback_org0_Skin
 			// @0x4e3669..0x4e368e].
@@ -335,7 +335,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			write_present_section_mask(r, item_hidden_sections(*ent));
 			write_present_doors(r, i, kernel.world, *ent, door_phases);
 			r[PF_RIGHT_HAND_COLLAPSED] =
-					simassets::mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
+					world::mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
 			// The cveh render callback publishes directly from the live entity
 			// motor fields. Do this only for the authoritative registry row:
 			// the compact view has no steer/currentSpeed source to reconstruct.
@@ -417,7 +417,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		const bool reconstructed_client_attachment_pose = joiner &&
 				resolve_client_eweap_attachment_pose(
 						es, cs, kernel.seat_specs, kernel.mounted_graphics,
-						kernel.models, attachment_time_ms, client_attachment_pose);
+						kernel.assets(), attachment_time_ms, client_attachment_pose);
 		if (authoritative_attachment_pose) {
 			// NoNetworkCallback addeweap children have only their 0x0D spawn pose in
 			// ClientState. The host has already advanced their authoritative userpoint
@@ -485,7 +485,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				if (ent != nullptr &&
 						infantry_weapon_channel_visible(
 								ae->inf, (ent->engine_flags & kEntityFlagPlayer) != 0,
-								simassets::mount_blocks_weapon_channel(*ent))) {
+								world::mount_blocks_weapon_channel(*ent))) {
 					r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.weapon_clip_state());
 					r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
 					r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
@@ -500,7 +500,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				}
 				if (ent != nullptr) {
 					const anim::AimOverlayInputs inputs =
-							simassets::aim_overlay_inputs_for(*ae, *ent);
+							world::aim_overlay_inputs_for(*ae, *ent);
 					anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 					anim::compute_aim_overlay_angles(inputs, angles);
 					write_present_overlay(r, angles);
@@ -516,59 +516,59 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				}
 			}
 		}
-        // These class callbacks mutate the peer's own model sections/pose.
-        // Their 0x26 payload is not a compact-transform update.
-        // [orig: palm @ 0x53C4C0; cran @ 0x43FC70]
-        if (joiner) {
-            const Entity *local = kernel.world.registry.get(h);
-            if (local && static_cast<uint16_t>(local->item_id) == es.type_id) {
-                r[PF_HUSK] = (local->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
-                for (int phase = 0; phase < 6; ++phase)
-                    r[PF_OBJECT_DESTROY + phase] = float(local->destroy_phases_q16[phase]);
-                // The door records advance on every peer (the per-frame entity
-                // update calls the door tick at the pool-2 loop exit with no
-                // authority test) and the door render/bone callbacks copy each
-                // row's Q16 phase onto the CTRL bus from DOOR_00 for every drawn
-                // door entity, so a joiner publishes its own DoorSystem rows
-                // (ticked + contact-driven locally) exactly as the authority
-                // collector does; write_phases self-gates on door_motion.
-                // [orig: Entity_UpdateAllEntities @0x4c2100 (the site @0x4C2307,
-                //  loop exit @0x4c2278); build_bone_transforms @0x4E3070 (the
-                //  loop @0x4e312a..0x4e3145); BoneCallback_AnimatedBones_World
-                //  @0x4E3180 (@0x4e3201..0x4e3218)]
-                write_present_doors(r, i, kernel.world, *local, door_phases);
-            }
-            const auto *item = local ? kernel.world.tables.item_death_traits.get(local->item_id) : nullptr;
-            if (local && static_cast<uint16_t>(local->item_id) == es.type_id &&
-                    (local->palm_sections || local->item_section_piece ||
-                     (item && item->death_class == ItemDeathClass::kTower) ||
-                     local->death_motion == DeathMotionMode::CraneFalling ||
-                     local->death_motion == DeathMotionMode::BuildingEffects)) {
-                const Vec3 pos = item_section_render_position(kernel.world, *local);
-                r[PF_POS_X] = pos.x; r[PF_POS_Y] = pos.z; r[PF_POS_Z] = -pos.y;
-                r[PF_YAW_DEG] = local->yaw;
-                r[PF_PITCH_DEG] = local->pitch; r[PF_ROLL_DEG] = local->roll;
-                r[PF_ALIVE] = local->alive ? 1.0f : 0.0f;
-                write_present_section_mask(r, item_hidden_sections(*local));
-            }
-        }
-    }
-    // A callback allocates its fragment directly into the local pool. It has
-    // no independent spawn message to wait for. Append only these locally
-    // created rows through the ordinary pool-row writer (a fragment publishes
-    // no door entry); keep decoded organics on their receive-side animation
-    // path. Only the fragment rows touch the shared lifecycle map.
-    // [orig: Entity_CloneFromTemplateByType @ 0x4398A0;
-    // collect_visible_entities_for_terrain @ 0x5C8C60]
-    if (!joiner) return;
-    DoorPhaseTable unused_doors;
-    kernel.world.registry.for_each([&](const Entity &entity) {
-        if (!entity.item_section_piece || cs.find(entity.handle.packed) != nullptr) return;
-        const int row_index = static_cast<int>(out.size() / PF_STRIDE);
-        out.resize(out.size() + PF_STRIDE, 0.0f);
-        write_world_present_row(context, local_player, first_person_usegun, entity, row_index,
-                lifecycle, out.data() + static_cast<size_t>(row_index) * PF_STRIDE, unused_doors);
-    });
+		// These class callbacks mutate the peer's own model sections/pose.
+		// Their 0x26 payload is not a compact-transform update.
+		// [orig: palm @ 0x53C4C0; cran @ 0x43FC70]
+		if (joiner) {
+			const Entity *local = kernel.world.registry.get(h);
+			if (local && static_cast<uint16_t>(local->item_id) == es.type_id) {
+				r[PF_HUSK] = (local->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+				for (int phase = 0; phase < 6; ++phase)
+					r[PF_OBJECT_DESTROY + phase] = float(local->destroy_phases_q16[phase]);
+				// The door records advance on every peer (the per-frame entity
+				// update calls the door tick at the pool-2 loop exit with no
+				// authority test) and the door render/bone callbacks copy each
+				// row's Q16 phase onto the CTRL bus from DOOR_00 for every drawn
+				// door entity, so a joiner publishes its own DoorSystem rows
+				// (ticked + contact-driven locally) exactly as the authority
+				// collector does; write_phases self-gates on door_motion.
+				// [orig: Entity_UpdateAllEntities @0x4c2100 (the site @0x4C2307,
+				//  loop exit @0x4c2278); build_bone_transforms @0x4E3070 (the
+				//  loop @0x4e312a..0x4e3145); BoneCallback_AnimatedBones_World
+				//  @0x4E3180 (@0x4e3201..0x4e3218)]
+				write_present_doors(r, i, kernel.world, *local, door_phases);
+			}
+			const auto *item = local ? kernel.world.tables.item_death_traits.get(local->item_id) : nullptr;
+			if (local && static_cast<uint16_t>(local->item_id) == es.type_id &&
+					(local->palm_sections || local->item_section_piece ||
+					 (item && item->death_class == ItemDeathClass::kTower) ||
+					 local->death_motion == DeathMotionMode::CraneFalling ||
+					 local->death_motion == DeathMotionMode::BuildingEffects)) {
+				const Vec3 pos = item_section_render_position(kernel.world, *local);
+				r[PF_POS_X] = pos.x; r[PF_POS_Y] = pos.z; r[PF_POS_Z] = -pos.y;
+				r[PF_YAW_DEG] = local->yaw;
+				r[PF_PITCH_DEG] = local->pitch; r[PF_ROLL_DEG] = local->roll;
+				r[PF_ALIVE] = local->alive ? 1.0f : 0.0f;
+				write_present_section_mask(r, item_hidden_sections(*local));
+			}
+		}
+	}
+	// A callback allocates its fragment directly into the local pool. It has
+	// no independent spawn message to wait for. Append only these locally
+	// created rows through the ordinary pool-row writer (a fragment publishes
+	// no door entry); keep decoded organics on their receive-side animation
+	// path. Only the fragment rows touch the shared lifecycle map.
+	// [orig: Entity_CloneFromTemplateByType @ 0x4398A0;
+	// collect_visible_entities_for_terrain @ 0x5C8C60]
+	if (!joiner) return;
+	DoorPhaseTable unused_doors;
+	kernel.world.registry.for_each([&](const Entity &entity) {
+		if (!entity.item_section_piece || cs.find(entity.handle.packed) != nullptr) return;
+		const int row_index = static_cast<int>(out.size() / PF_STRIDE);
+		out.resize(out.size() + PF_STRIDE, 0.0f);
+		write_world_present_row(context, local_player, first_person_usegun, entity, row_index,
+				lifecycle, out.data() + static_cast<size_t>(row_index) * PF_STRIDE, unused_doors);
+	});
 }
 
 void build_world_present_rows(const PresentRowsContext &context,
@@ -625,7 +625,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 		// A player's wire net_id IS its packed character id (entity+0x15C).
 		r[PF_CHARACTER_ID] = static_cast<float>(replication::player_wire_net_id(e));
 	}
-    const Vec3 render_position = item_section_render_position(w, e);
+	const Vec3 render_position = item_section_render_position(w, e);
 	r[PF_POS_X] = render_position.x;
 	r[PF_POS_Y] = render_position.z;
 	r[PF_POS_Z] = -render_position.y;
@@ -658,9 +658,9 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_BODY_ANIM_SLOT] = static_cast<float>(e.body_anim_slot);
 	r[PF_HIDDEN] = e.hidden ? 1.0f : 0.0f;
 	r[PF_ALIVE] = e.alive ? 1.0f : 0.0f;
-    r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
-    for (int phase = 0; phase < 6; ++phase)
-        r[PF_OBJECT_DESTROY + phase] = float(e.destroy_phases_q16[phase]);
+	r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+	for (int phase = 0; phase < 6; ++phase)
+		r[PF_OBJECT_DESTROY + phase] = float(e.destroy_phases_q16[phase]);
 	// The org0 skin bone-callback's DEATH register (CTRL ordinal 6): the corpse
 	// fade off the authoritative organic row's dead flag + corpse timer; every
 	// other row reads retail's live 0xFFFF [orig: BoneCallback_org0_Skin
@@ -677,7 +677,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	write_present_section_mask(r, item_hidden_sections(e));
 	write_present_doors(r, row_index, w, e, door_phases);
 	r[PF_RIGHT_HAND_COLLAPSED] =
-			simassets::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
+			world::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
 	// The cveh render callback publishes directly from the live entity
 	// motor fields [orig: Entity_CacheVehicleHUDStats @0x4929B0, stores
 	// @0x4929D7 / @0x4929F1; see docs/world/vehicle-client-movers-re.md].
@@ -757,7 +757,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	// player" mirror of entity+0x24 (NPCs carry no hold ladder).
 	if (infantry_weapon_channel_visible(
 				ae->inf, (e.engine_flags & kEntityFlagPlayer) != 0,
-				simassets::mount_blocks_weapon_channel(e))) {
+				world::mount_blocks_weapon_channel(e))) {
 		r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.weapon_clip_state());
 		r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
 		r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
@@ -770,7 +770,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 					static_cast<float>(ae->inf.wpn_prev_variant);
 		}
 	}
-	const anim::AimOverlayInputs inputs = simassets::aim_overlay_inputs_for(*ae, e);
+	const anim::AimOverlayInputs inputs = world::aim_overlay_inputs_for(*ae, e);
 	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 	anim::compute_aim_overlay_angles(inputs, angles);
 	write_present_overlay(r, angles);

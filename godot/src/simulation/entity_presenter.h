@@ -21,7 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <runtime/simassets/sim_pose_provider.h>
+#include <runtime/world/entity_pose.h>
 #include <runtime/world/minefield.h>
 
 #include "object/entity_index.h"
@@ -79,7 +79,7 @@ class Simulation;
 // Its COLD path (spawn/defer/unresolved bookkeeping, the liveness prune,
 // held-weapon builds, spawn signals and stats) and its per-row hot path live
 // in entity_presenter_wire.cpp; the pool->kind projection witness is at the
-// engine header (npruntime/wire_present.h).
+// engine header (runtime/inmatch/wire_present.h).
 //
 // Beside the two row walks it OWNS the four tick-driven present passes (ADR
 // 0043 d9): FirePresenter (AI/remote fire sound + muzzle effect + tracers),
@@ -131,7 +131,7 @@ public:
 	static constexpr int DEFAULT_COLD_SPAWN_BUDGET = 4;
 	enum HeldWeaponConstants {
 		HELD_WEAPON_BONE_INDEX =
-				opennova::simassets::kHeldWeaponBoneIndex,
+				opennova::world::kHeldWeaponBoneIndex,
 	};
 
 	// --- The PLACED walk -----------------------------------------------------
@@ -202,7 +202,7 @@ public:
 	// World position of a named userpoint on this wire body's HELD WEAPON —
 	// the anchor retail's adm-arm fire effect spawns at. Falls back to the
 	// body's own origin, never the wire fire position (witness:
-	// npruntime/wire_present.h ledger, rigid weapon draw + userpoint
+	// runtime/inmatch/wire_present.h ledger, rigid weapon draw + userpoint
 	// fallback).
 	Vector3 muzzle_world_for(int p_handle, const String &p_userpoint) const;
 	int wire_entity_count() const { return int(nodes_.size()); }
@@ -306,7 +306,7 @@ public:
 
 	// Third-person held-weapon placement — the ONE home (the witnessed
 	// calibration constants and the full derivation live at engine
-	// simassets/sim_pose_provider.h). `body` may be the body root or the
+	// world/entity_pose.h). `body` may be the body root or the
 	// skeleton itself (resolved via find_skeleton); returns a Transform3D, or
 	// null when the skeleton cannot place one.
 	static Variant held_weapon_attach_transform(Object *body,

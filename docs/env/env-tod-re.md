@@ -947,7 +947,7 @@ RENDER-FLOAT (D3D world) axes — mission `(x,y,z)` -> render `(-y, z, x)`
 `[orig: Math_FixedPointToFloat3_YNegated @ 0x611210]` — while the reimpl's
 Godot world is mission `(x, z, -y)`; the Godot-facing seams had
 identity-mapped the tuple (bodies/glare/dome/object-directional/shadow 90
-deg off in yaw + mirrored). Fixed via the `godot/src/env/env_axes.h` x/z
+deg off in yaw + mirrored). Fixed via the `godot/src/util/axes.h` x/z
 swap at every consumer seam (render-lighting-re.md carries the closed note
 and the per-seam list).
 

@@ -81,7 +81,7 @@ int main() {
 			// character), carried for retail-shape fidelity.
 			CHECK(std::strcmp(rifle->gfx1a, "ARMSG") == 0, "the rifle carries the retail arms row");
 			// Raw def units; the /256 scale is the consumer's
-			// [runtime/simassets/fp_viewmodel_spec.h kWeaponDefPosScale].
+			// [runtime/renderer/fp_viewmodel_spec.h kWeaponDefPosScale].
 			CHECK(rifle->pos[0] == 10.0f && rifle->pos[2] == -201.0f, "the hip viewmodel offset");
 			CHECK(rifle->tpos[0] == -28.046f && rifle->tpos[2] == -187.857f, "the ADS viewmodel offset");
 			CHECK(rifle->renderfov == 80.0f, "the rifle takes the default render fov");

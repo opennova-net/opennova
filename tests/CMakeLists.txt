@@ -1,4 +1,4 @@
-# Machine-local retail data gates (tests/common/retail_paths.h, the four
+# Machine-local retail data gates (tests/common/retail_paths.h, the two
 # OPENNOVA_* roots in docs/asset-gated-tests.md): a gated test prints
 # "SKIP: needs <what>" and exits 77 when its data is absent, so ctest reports it
 # Skipped, never Passed. A test whose synthetic legs ran prints "SKIP-LEG:
@@ -784,50 +784,50 @@ target_link_libraries(resource_index_mus_test PRIVATE opennova_base)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 
-# simassets: the sim-side .3di derivations (ADR 0028)
-add_executable(simassets_model_builders_test simassets/model_builders_test.cpp)
-target_link_libraries(simassets_model_builders_test PRIVATE opennova_runtime)
-target_include_directories(simassets_model_builders_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME simassets_model_builders COMMAND simassets_model_builders_test)
+# native world: the sim-side .3di derivations (ADR 0028)
+add_executable(world_model_geometry_test world/model_geometry_test.cpp)
+target_link_libraries(world_model_geometry_test PRIVATE opennova_runtime)
+target_include_directories(world_model_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME world_model_geometry COMMAND world_model_geometry_test)
 
-add_executable(simassets_fp_viewmodel_spec_test simassets/fp_viewmodel_spec_test.cpp)
-target_link_libraries(simassets_fp_viewmodel_spec_test PRIVATE opennova_runtime)
-target_include_directories(simassets_fp_viewmodel_spec_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME simassets_fp_viewmodel_spec COMMAND simassets_fp_viewmodel_spec_test)
+add_executable(renderer_fp_viewmodel_spec_test renderer/fp_viewmodel_spec_test.cpp)
+target_link_libraries(renderer_fp_viewmodel_spec_test PRIVATE opennova_runtime)
+target_include_directories(renderer_fp_viewmodel_spec_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME renderer_fp_viewmodel_spec COMMAND renderer_fp_viewmodel_spec_test)
 
-add_executable(simassets_adm_root_motion_test simassets/adm_root_motion_test.cpp)
-target_link_libraries(simassets_adm_root_motion_test PRIVATE opennova_runtime)
-target_include_directories(simassets_adm_root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME simassets_adm_root_motion COMMAND simassets_adm_root_motion_test)
+add_executable(anim_adm_root_motion_test anim/adm_root_motion_test.cpp)
+target_link_libraries(anim_adm_root_motion_test PRIVATE opennova_runtime)
+target_include_directories(anim_adm_root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_adm_root_motion COMMAND anim_adm_root_motion_test)
 
-add_executable(simassets_adm_playback_test simassets/adm_playback_test.cpp)
-target_link_libraries(simassets_adm_playback_test PRIVATE opennova_runtime)
-target_include_directories(simassets_adm_playback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME simassets_adm_playback COMMAND simassets_adm_playback_test)
+add_executable(anim_adm_playback_test anim/adm_playback_test.cpp)
+target_link_libraries(anim_adm_playback_test PRIVATE opennova_runtime)
+target_include_directories(anim_adm_playback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_adm_playback COMMAND anim_adm_playback_test)
 
-add_executable(simassets_adm_clip_index_test simassets/adm_clip_index_test.cpp)
-target_link_libraries(simassets_adm_clip_index_test PRIVATE opennova_runtime)
-target_include_directories(simassets_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME simassets_adm_clip_index COMMAND simassets_adm_clip_index_test)
+add_executable(anim_adm_clip_index_test anim/adm_clip_index_test.cpp)
+target_link_libraries(anim_adm_clip_index_test PRIVATE opennova_runtime)
+target_include_directories(anim_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_adm_clip_index COMMAND anim_adm_clip_index_test)
 
 # The SECONDARY (weapon) channel composition over the shipped BINOC.bad rig
 # plus its BINOC_twist.bad (the two-bone twist minted once from the retired
 # writer; the test asserts that provenance before probing). Both come from the
 # reference fixture set; gated on OPENNOVA_JO_ASSETS.
-add_executable(simassets_adm_skeletal_clips_weapon_channel_test simassets/adm_skeletal_clips_weapon_channel_test.cpp)
-target_link_libraries(simassets_adm_skeletal_clips_weapon_channel_test PRIVATE opennova_runtime)
-target_include_directories(simassets_adm_skeletal_clips_weapon_channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(simassets_adm_skeletal_clips_weapon_channel COMMAND simassets_adm_skeletal_clips_weapon_channel_test)
+add_executable(anim_skeletal_clips_weapon_channel_test anim/skeletal_clips_weapon_channel_test.cpp)
+target_link_libraries(anim_skeletal_clips_weapon_channel_test PRIVATE opennova_runtime)
+target_include_directories(anim_skeletal_clips_weapon_channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(anim_skeletal_clips_weapon_channel COMMAND anim_skeletal_clips_weapon_channel_test)
 
-add_executable(simassets_item_traits_test simassets/item_traits_test.cpp)
-target_link_libraries(simassets_item_traits_test PRIVATE opennova_runtime)
-target_include_directories(simassets_item_traits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME simassets_item_traits COMMAND simassets_item_traits_test)
+add_executable(mission_item_traits_test mission/item_traits_test.cpp)
+target_link_libraries(mission_item_traits_test PRIVATE opennova_runtime)
+target_include_directories(mission_item_traits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_item_traits COMMAND mission_item_traits_test)
 
-add_executable(simassets_seat_spec_extract_test simassets/seat_spec_extract_test.cpp)
-target_link_libraries(simassets_seat_spec_extract_test PRIVATE opennova_runtime)
-target_include_directories(simassets_seat_spec_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME simassets_seat_spec_extract COMMAND simassets_seat_spec_extract_test)
+add_executable(mission_seat_spec_extract_test mission/seat_spec_extract_test.cpp)
+target_link_libraries(mission_seat_spec_extract_test PRIVATE opennova_runtime)
+target_include_directories(mission_seat_spec_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_seat_spec_extract COMMAND mission_seat_spec_extract_test)
 
 # Object renderer/shader tests
 foreach(test device_fog environment_cube foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
@@ -1125,9 +1125,9 @@ target_include_directories(minimap_markers_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_features(minimap_markers_test PRIVATE cxx_std_17)
 add_test(NAME minimap_markers COMMAND minimap_markers_test)
 
-# The character registry (npruntime/character_registry.h): the packed-id
+# The character registry (runtime/inmatch/character_registry.h): the packed-id
 # decode, the per-side default walk, and the joiner profile projection
-# (npruntime/join_character_profile.h).
+# (runtime/inmatch/join_character_profile.h).
 add_executable(character_registry_test npruntime/character_registry_test.cpp)
 target_link_libraries(character_registry_test PRIVATE opennova_runtime)
 add_test(NAME character_registry COMMAND character_registry_test)
@@ -1560,7 +1560,7 @@ add_executable(item_events_test world/item_events_test.cpp)
 target_link_libraries(item_events_test PRIVATE opennova_runtime)
 add_test(NAME item_events COMMAND item_events_test)
 
-# The collision sweep's death-trait mining (simassets/collision_resolve ->
+# The collision sweep's death-trait mining (mission/collision_resolve ->
 # world::ItemDeathTraits): the first husk's KZ / DEAD banks, the huskFinal-only
 # and missing-husk gates, and the retail GLASS userpoint table, over
 # byte-patched synthetic fixtures in a loose temp root (ADR 0043 d10).
@@ -2109,7 +2109,6 @@ add_test(NAME mission_kernel_lifecycle COMMAND mission_kernel_lifecycle_test)
 # drain, and the dedicated (HostOnly) bring-up.
 add_executable(host_role_test mission/host_role_test.cpp)
 target_link_libraries(host_role_test PRIVATE opennova_net opennova_runtime)
-target_include_directories(host_role_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(host_role_test PRIVATE cxx_std_17)
 add_test(NAME host_role COMMAND host_role_test)
 
@@ -2865,7 +2864,6 @@ add_test(NAME npruntime_joiner_identity COMMAND npruntime_joiner_identity_test)
 
 add_executable(npruntime_client_runtime_test npruntime/client_runtime_test.cpp)
 target_link_libraries(npruntime_client_runtime_test PRIVATE opennova_net opennova_runtime)
-target_include_directories(npruntime_client_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}) # common/null_datagram_socket.h
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
 add_executable(npruntime_client_message_dispatch_test npruntime/client_message_dispatch_test.cpp)
@@ -2965,3 +2963,9 @@ add_test(NAME minefield_replica COMMAND minefield_replica_test)
 add_executable(squib_test world/squib_test.cpp)
 target_link_libraries(squib_test PRIVATE opennova_runtime)
 add_test(NAME squib COMMAND squib_test)
+
+# Shared immutable assets consumed by both simulation and Godot.
+add_executable(asset_store_test assets/asset_store_test.cpp)
+target_link_libraries(asset_store_test PRIVATE opennova_runtime)
+target_include_directories(asset_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME asset_store COMMAND asset_store_test)

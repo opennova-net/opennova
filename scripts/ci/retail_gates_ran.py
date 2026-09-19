@@ -50,7 +50,7 @@ MUST_RUN = {
         "mission_corpus",
         # The reference fixture set (<assets>/fixtures/**): the fifteen revx02 menus,
         # the shipped MP5 rig map, the BINOC rig and its twist.
-        "mnu_compat", "mnu_coverage", "adm_parse", "simassets_adm_skeletal_clips_weapon_channel",
+        "mnu_compat", "mnu_coverage", "adm_parse", "anim_skeletal_clips_weapon_channel",
         "def_parse_hudpos",
     ],
 }

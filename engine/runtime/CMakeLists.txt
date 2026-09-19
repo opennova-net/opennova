@@ -1,5 +1,5 @@
 # opennova_runtime — the engine runtime (world sim, AI, terrain build/query,
-# renderer math, anim, audio, particle, wac, mission runtime, simassets, hud,
+# renderer math, anim, audio, particle, wac, mission runtime, assets, hud,
 # controls), one STATIC group target (Shape A).
 #
 # The mission FORMAT half lives in engine/formats/mission (the Shape A
@@ -9,6 +9,9 @@
 
 add_library(opennova_runtime STATIC
     # anim — skeletal sampling + the aim overlay (.adm parse: engine/formats/adm)
+    ${CMAKE_CURRENT_SOURCE_DIR}/anim/adm_clip_index.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/anim/adm_root_motion.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/anim/skeletal_clips.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/aim_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/anim_sample.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/clip_timeline.cpp
@@ -55,6 +58,9 @@ add_library(opennova_runtime STATIC
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # the boot policy, and the ONE mission kernel (boot + state + no-net tick,
     # ADR 0042 d3) evaluated against the shared runtime world
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/collision_resolve.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/item_traits.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/seat_spec_extract.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
@@ -99,23 +105,13 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/q3_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/fp_viewmodel_spec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_order.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_slot_shadow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/precipitation_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/tracer_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/uv_anim.cpp
-    # simassets — sim-consumed asset resolution (ADR 0028; Model B only)
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/adm_clip_index.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/adm_root_motion.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/adm_skeletal_clips.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/collision_resolve.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/fp_viewmodel_spec.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/item_traits.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/model_builders.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/mounted_pose.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/seat_spec_extract.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/sim_pose_provider.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/sim_model_cache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_store.cpp
     # terrain — runtime terrain collection, rendering, and queries
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lighting.cpp
@@ -149,6 +145,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/wac_layered_load.cpp
     # world — the ONE runtime World: entities, AI, collision, players, vehicles,
     # weapons, zones (62 Hz tick)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/model_geometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/mounted_pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/match.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/world.cpp

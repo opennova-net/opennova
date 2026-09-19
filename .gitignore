@@ -103,7 +103,6 @@ deploy/compose/docker-compose.winport.yml
 
 # Local reverse-engineering notes/dumps
 ida_dumps/
-stripify_call_*.log
 
 # Loose scratch dumps at the repo root (retail-derived data: never commit).
 .scratch_*

@@ -3,9 +3,9 @@
 // matrices from the .3di collision IR, and the mission item seat specs.
 #include "simulation/simulation_internal.h"
 
-#include <runtime/simassets/item_traits.h>
-#include <runtime/simassets/mounted_pose.h>      // the native mounted-pose resolver (S4, ADR 0028)
-#include <runtime/simassets/seat_spec_extract.h> // the native seat-spec extraction (S4, ADR 0028)
+#include <runtime/mission/item_traits.h>
+#include <runtime/world/mounted_pose.h>      // the native mounted-pose resolver (S4, ADR 0028)
+#include <runtime/mission/seat_spec_extract.h> // the native seat-spec extraction (S4, ADR 0028)
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 
@@ -18,11 +18,12 @@
 using namespace sim_internal;
 
 int Simulation::set_infantry_anim_map(const Ref<ResourceRoot> &p_resource_root, const String &p_adm_name) {
+	assets_.infantry_adm_resource_root = p_resource_root;
 	// The kernel owns default/model map resolution. The joiner observes its
 	// animation revision and re-arms decoded rows when the registry changes.
 	return kernel_->install_infantry_anim(
 			std::string(p_adm_name.utf8().get_data()),
-			p_resource_root.is_valid() ? &p_resource_root->native_index() : nullptr);
+			p_resource_root.is_valid() ? &p_resource_root->native_assets() : nullptr);
 }
 
 // Per-entity .adm resolution: ground each soldier off its OWN model's clip,
@@ -36,14 +37,14 @@ void Simulation::resolve_infantry_adm_ids(const Ref<ResourceRoot> &p_resource_ro
 	assets_.infantry_adm_resource_root = p_resource_root;
 	assets_.infantry_adm_item_db = p_item_db;
 	kernel_->set_items_table(&p_item_db->native_items());
-	kernel_->rearm_infantry_adm(&p_resource_root->native_index());
+	kernel_->rearm_infantry_adm(&p_resource_root->native_assets());
 }
 
-// The items.def trait sweep: the engine-side fold (simassets::resolve_item_traits,
+// The items.def trait sweep: the engine-side fold (mission::resolve_item_traits,
 // ADR 0028) reads the database's retained DefItemsFile rows directly — the trait
 // semantics, ID-space offset, and [orig] witnesses live there now. This binding
 // contributes the ONE wire-class source — the netsim ItemReplicationCatalog
-// (ADR 0026) — as an injected supplier so simassets stays net-free. Idempotent;
+// (ADR 0026) — as an injected supplier so mission code stays net-free. Idempotent;
 // called after load and again after spawning the local player.
 void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 	if (p_item_db.is_null()) return;
@@ -182,8 +183,8 @@ int Simulation::get_mounted_graphic_source_count() const {
 
 void Simulation::set_asset_root(const Ref<ResourceRoot> &p_root) {
 	assets_.root = p_root;
-	kernel_->set_asset_index(
-			p_root.is_valid() ? &p_root->native_index() : nullptr);
+	kernel_->set_assets(
+			p_root.is_valid() ? &p_root->native_assets() : nullptr);
 }
 
 int Simulation::resolve_collision_instances(
@@ -193,13 +194,13 @@ int Simulation::resolve_collision_instances(
 	// The kernel's demand sweep (ensure_collision_instance) reads the same
 	// rows; the Ref above pins their lifetime.
 	kernel_->set_items_table(&p_item_db->native_items());
-	// Production installs the sim's own asset source first (ADR 0028).
-	if (!kernel_->models.has_index()) {
+	// Production installs the shared native asset source first (ADR 0044).
+	if (!kernel_->assets().has_source()) {
 		godot::UtilityFunctions::print_verbose(
 				"Simulation: no asset root installed — collision/occlusion "
 				"extraction has no model source (install set_asset_root first)");
 	}
-	// The sweep itself is the kernel's (simassets::resolve_collision_instances
+	// The sweep itself is the kernel's (mission::resolve_collision_instances
 	// over its retained items.def rows and its own systems, ADR 0031 re-opening
 	// the S7b asset-resolution leg); this binding supplies the rows, nothing else.
 	return kernel_->resolve_collision_instances();
@@ -207,13 +208,13 @@ int Simulation::resolve_collision_instances(
 
 void Simulation::stamp_seat_spec_turret_limits() {
 	if (!kernel_) return;
-	opennova::simassets::stamp_seat_spec_turret_limits(kernel_->world, kernel_->seat_specs);
+	opennova::mission::stamp_seat_spec_turret_limits(kernel_->world, kernel_->seat_specs);
 }
 
 void Simulation::refresh_item_seat_spec(
 		opennova::world::Entity &p_entity) {
 	if (!kernel_) return;
-	opennova::simassets::refresh_item_seat_spec(kernel_->world, kernel_->seat_specs,
+	opennova::mission::refresh_item_seat_spec(kernel_->world, kernel_->seat_specs,
 			p_entity, kernel_->wire_header_world);
 }
 
@@ -255,11 +256,11 @@ void Simulation::finalize_installed_seat_specs() {
 }
 
 // S16 (ADR 0028): the production seat/mount install IS the native extraction —
-// simassets::extract_item_seat_specs over the retained items.def rows and the
-// sim's own parse-once models. The shell GDScript extractor and its Dictionary
+// mission::extract_item_seat_specs over the retained items.def rows and the
+// shared native models. The shell GDScript extractor and its Dictionary
 // install seam are gone; before this cutover the two extractions were diffed
 // live on retail 00TRg (29/29 specs identical, 0 mismatches, 0 native-missing,
-// 2026-08-07). Model userpoints resolve through the sim cache at install, so
+// 2026-08-07). Model userpoints resolve through the shared asset store at install, so
 // boot wires the asset root before the steps run.
 void Simulation::install_native_seat_specs(
 		const Ref<ItemDatabase> &p_item_db,
@@ -267,11 +268,11 @@ void Simulation::install_native_seat_specs(
 	kernel_->seat_specs.clear();
 	kernel_->mounted_graphics.clear();
 	if (p_item_db.is_valid() && !p_seed_item_ids.empty()) {
-		opennova::simassets::SeatSpecExtraction native;
-		opennova::simassets::extract_item_seat_specs(
+		opennova::mission::SeatSpecExtraction native;
+		opennova::mission::extract_item_seat_specs(
 				p_item_db->native_items(),
 				[this](const std::string &graphic) {
-					return kernel_->models.model_for(graphic);
+					return kernel_->assets().model(graphic).get();
 				},
 				p_seed_item_ids, native);
 		kernel_->seat_specs = std::move(native.specs);
@@ -283,7 +284,7 @@ void Simulation::install_native_seat_specs(
 bool Simulation::install_seat_specs_for_type_ids(
 		const Ref<ItemDatabase> &p_item_db,
 		const PackedInt32Array &p_type_ids) {
-	if (p_item_db.is_null() || !kernel_->models.has_index()) return false;
+	if (p_item_db.is_null() || !kernel_->assets().has_source()) return false;
 	std::vector<int> seeds;
 	seeds.reserve(static_cast<size_t>(p_type_ids.size()));
 	for (int64_t i = 0; i < p_type_ids.size(); ++i) {

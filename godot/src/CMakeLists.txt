@@ -223,7 +223,6 @@ add_library(${TARGET_NAME} SHARED
     audio/mission_audio_voice.cpp
     dbf/dbf_data.cpp
     rtxt/rtxt_string_file.cpp
-    util/engine_caches.cpp
     util/data_format.cpp
     util/paths.cpp
     util/process.cpp

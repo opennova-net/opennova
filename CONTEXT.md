@@ -42,6 +42,18 @@ engine fact reached through one engine function; anything that exists only becau
 Godot node/server/viewport/window/socket/clock/input event/audio player exists is a
 device fact, written as typed Godot code beside its owner.
 
+## Resources and assets
+
+**Resource source**:
+A mounted collection of files, with one lookup policy deciding which loose or
+archived file supplies a name.
+
+**Asset**:
+Reusable model or animation content shared by the entities that use it.
+An entity's position, animation playhead and damage belong to that entity,
+not to its asset.
+_Avoid_: simulation asset, render asset (when both consume the same content)
+
 ## Menu UI (MNU)
 
 The vocabulary for NovaLogic's `.mnu` menu system and OpenNova's runtime support for it.
@@ -156,7 +168,7 @@ service's domain. Code and libs are named by their domain, never bare "net".
 _Avoid_: unqualified "net code", lobby (for either)
 
 **Wire codec / In-match session / Match**:
-The two stable in-match boundaries and the gameplay model (ADR 0036). The **wire
+The two stable in-match boundaries and the gameplay model (ADR 0043 d3/d4, superseding ADR 0036). The **wire
 codec** (`engine/net/npwire`, ADR 0019) is the retail compatibility contract and
 encodes/decodes the byte stream; its message catalog is the single source of
 truth (ADR 0013). The **in-match session**

@@ -378,8 +378,8 @@ enum class ActionType : int32_t {
 
 // AI action subtypes — shared by CHANGE_GROUP_AI(3), AREA_AI_RED/BLUE(12/13), CHANGE_SINGLE_AI(21).
 // [orig: dfx2med Med_ActionSubTypeName @0x445EE0 / param layout Med_AiSubTypeParams @0x44A920]
-// Canonical names + values from the DFX2 mission editor token table (notes/mission/event-grill-dfx2med.md
-// section 4). Several names were corrected against the editor and the alert/wpz sub-types added.
+// Canonical names + values from the DFX2 mission editor token table (docs/mission/bms-event-runtime-re.md
+// §1.5). Several names were corrected against the editor and the alert/wpz sub-types added.
 enum class AIActionSubType : int32_t {
     GuardBit = 2,
     RedAlert = 5,            // TO_RED_ALERT (added)
@@ -746,7 +746,7 @@ struct Trigger {
 };
 
 // [orig: EventAction_Dispatch @0x4542e0 — switch(action_type) reads param1..4 as actionEntry[3..6]]
-// Per-type param meaning in notes/mission/param-semantics.md. MisvarChange (5): action_sub_type
+// Per-type param meaning in docs/mission/bms-event-runtime-re.md §7. MisvarChange (5): action_sub_type
 // 1=Set/2=Add/3=Sub/4=Inc/5=Dec on dword_C6B240[param1] with param2. ResetEvent (34): clears events[param1]
 // active flag. reserved0/reserved1 unused by the dispatcher.
 struct Action {
@@ -785,6 +785,11 @@ struct WeaponLoadout {
     std::vector<WeaponLoadoutRecord> entries;
 };
 
+// One {name, status} pair of the item-availability chunk: the per-map weapon rules
+// the mission-list scanners compile into the availability template
+// [orig: build_item_restriction_table @0x54DDB0 name-list mode over the chunk].
+// The original reads the status byte SIGNED: a -1 pair maps to 3 mission-allowed
+// at apply [orig: @0x54de3f..0x54de49].
 struct ItemAvailabilityEntry {
     std::string name;
     uint8_t status = 0;

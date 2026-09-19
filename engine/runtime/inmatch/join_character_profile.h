@@ -19,7 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace opennova::npruntime {
+namespace opennova::inmatch {
 
 // One side's persisted selection: the Avatars.def tree indices and the class
 // byte. `present` false = the side was never saved (the retail default).
@@ -100,4 +100,4 @@ inline inmatch::CharacterJoinVars character_join_vars(const JoinCharacterProfile
 	return vars;
 }
 
-} // namespace opennova::npruntime
+} // namespace opennova::inmatch

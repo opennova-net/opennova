@@ -18,7 +18,7 @@ inline constexpr int kMaxParticleFlipFrames = 256;
 // IDB: retail Jointops.exe.
 // Section dispatcher: CEffectWorld_ParseSectionCallback @ 0x5ecb40.
 // Definition hydrator: CParticleDef_ParseFromConfigMap @ 0x5ed210 (size 0x1da5).
-// See notes/ida_particle_witness.md for the full witness matrix and field-offset table.
+// See docs/particles/ptl-format-re.md §2 for the witness matrix and field-offset table.
 
 struct Color3 {
 	std::uint8_t r = 0;
@@ -100,8 +100,8 @@ std::string format_move_bits(std::uint32_t bits);
 // Bit values MUST match the engine exactly: HAZE (idx 9), BELOWH20 (idx 27),
 // ABOVEH20 (idx 28) were absent in the earlier 26-entry list, which silently
 // shifted GLOBALWIND..AMBIENTCOLOR off by one bit and dropped HAZE (used in
-// fire.ptl) on round-trip. See notes/ida_particle_witness.md "ParticleEdit
-// cross-witness grill" D5. BELOWH20/ABOVEH20 are the water-level flags the
+// fire.ptl) on round-trip. See docs/particles/ptl-format-re.md §1 (the ParticleEdit
+// cross-witness grill, D5). BELOWH20/ABOVEH20 are the water-level flags the
 // emitter kill-plane logic refers to as bits 27/28.
 namespace particle_flag {
 constexpr std::uint32_t NoVisNoUpdate         = 1u <<  0;  // 0x01
@@ -191,7 +191,7 @@ struct GraphicLayer {
 
 // Engine: CParticleEffectDef, ~5204 B. Field comments cite offsets in the
 // engine heap layout (see CParticleDef_ParseFromConfigMap decompile,
-// notes/ida_particle_witness.md "CParticleEffectDef layout" table).
+// docs/particles/ptl-format-re.md §2, the CParticleEffectDef layout table).
 struct ParticleDef {
 	std::string id;             // +0
 	std::string child_id;       // +132

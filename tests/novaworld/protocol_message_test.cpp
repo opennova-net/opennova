@@ -165,8 +165,7 @@ bool check_first_fragment_resets_stale_buffer() {
 // 0x42, where 0x46 (= LEN16 + FRAG_CONT + FRAG_END) is a MID fragment that
 // must keep buffering. A previous rewrite used the condition
 // `frag_first && !frag_end` which dispatched 0x46 prematurely, losing the
-// earlier buffered fragments. See notes/ida_witness_matrix.md for the
-// diagnosis trail. Cross-checked against onnet `nw_udp_server.py`
+// earlier buffered fragments. Cross-checked against onnet `nw_udp_server.py`
 // process_protocol_message.
 bool check_fragment_reassembly_three_fragments() {
 	opennova::ProtocolReassemblyState state;

@@ -49,8 +49,8 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 # Seat-spec EXTRACTION rules (name-prefix typing incl. embedded-token
 # rejection, sitexNN pose digits + the 0..30 clamp, the yaw-zero local/yaw
 # conversions, addeweap anchor resolution + the parent-root fallback) are
-# native (simassets::extract_item_seat_specs) and pinned by
-# tests/simassets/seat_spec_extract_test.cpp; the attach-command seat
+# native (mission::extract_item_seat_specs) and pinned by
+# tests/mission/seat_spec_extract_test.cpp; the attach-command seat
 # selection (world/vehicle_attach.h) by tests/world/seat_prediction_test.cpp.
 
 

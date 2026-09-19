@@ -4,7 +4,6 @@
 
 #include "cbin/cbin_asset_lookup.h"
 #include "fnt/fnt_resource.h"
-#include "util/engine_caches.h"
 #include "util/texture_path_resolver.h"
 
 #include <base/gameprofile/gameprofile.h>
@@ -222,6 +221,10 @@ Error ResourceRoot::mount_with_mode(const String &path, const String &expansion,
 	// GDScript-side cache holders (placer, veg assets) the same thing.
 	opennova::clear_texture_resolver_caches();
 	opennova::bump_cache_epoch();
+	// Discard the old native source before validation too: a rejected path
+	// must not leave simulation or skeletal loaders reading the previous mount.
+	index_.clear();
+	assets_.invalidate();
 	const String clean = normalize_dir(path);
 	if (clean.is_empty()) {
 		root_dir_ = String();
@@ -300,6 +303,7 @@ void ResourceRoot::clear() {
 	opennova::clear_texture_resolver_caches();
 	opennova::bump_cache_epoch();
 	index_.clear();
+	assets_.invalidate();
 }
 
 int64_t ResourceRoot::cache_epoch() {

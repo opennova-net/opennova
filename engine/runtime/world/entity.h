@@ -1184,7 +1184,7 @@ struct Entity {
 
 // The ONE home of the ItemDefAttrib stamp: both raw dwords plus the per-entity
 // facts the engine derives from them at spawn (the items.def trait sweep,
-// simassets/item_traits.cpp) and again when a tool overrides one entity's words
+// mission/item_traits.cpp) and again when a tool overrides one entity's words
 // (EntityCommands::set_entity_item_attrib). Per-item caches keyed by item id
 // (world.tables.item_death_traits, vehicle_traits) are the sweep's alone.
 // [orig: Entity_InitFromItemDef @0x49e550 — the def+84/+88 copies; the AS zone

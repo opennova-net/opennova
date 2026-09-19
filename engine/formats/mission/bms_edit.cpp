@@ -573,17 +573,6 @@ std::vector<WeaponLoadoutEntry> weapon_loadout(const bms::File &file) {
 	return out;
 }
 
-std::vector<ItemAvailabilityEntry> item_availability(const bms::File &file) {
-	std::vector<ItemAvailabilityEntry> out;
-	out.reserve(file.item_availability.size());
-	for (const bms::ItemAvailabilityEntry &entry : file.item_availability) {
-		// The status byte is signed in the original's read (a -1 pair value maps to
-		// 3 mission-allowed at apply) [orig: @0x54de3f..0x54de49].
-		out.push_back({entry.name, static_cast<int>(static_cast<int8_t>(entry.status))});
-	}
-	return out;
-}
-
 bool set_weapon_loadout(bms::File &file, const std::vector<WeaponLoadoutEntry> &entries, std::string &error) {
 	// The .bms loadout chunk serializes an empty name as a leading NUL, which the loader reads as the
 	// chunk terminator: a nameless entry cannot be stored and would silently drop that weapon (and every

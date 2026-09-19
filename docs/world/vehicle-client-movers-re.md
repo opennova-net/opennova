@@ -1471,7 +1471,7 @@ at load time [orig: `Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0`, tail
   nothing qualifies.
 
 Port: `threedi_3di3_collision_probe_boxes` (engine/formats/threedi/
-threedi_3di3.h), consumed by the simassets collision resolve into
+threedi_3di3.h), consumed by the mission collision resolve into
 `VehicleTraits`; pinned by ctest `threedi_collision_3di`
 (`test_collision_probe_boxes_follow_the_witnessed_folds`). The earlier
 stand-in (union of per-COBJ AABBs on all axes) floated every wheeled hull by
@@ -4746,11 +4746,11 @@ and the follow alike); `h_enter_vehicle_dying` kills the list under
 chain, the dying kill, the `Parent` gate). Fed by retail data since 2026-09-12:
 the items.def parser's attrib arm maps the `Parent` token onto
 `DefItemDef::attrib_parent` (`def_items.cpp`, `@0x4a0cd6..0x4a0ce2`), the
-items.def traits sweep (`simassets/item_traits.cpp`) copies it into
+items.def traits sweep (`mission/item_traits.cpp`) copies it into
 `VehicleTraits::attrib_parent`, and the collision resolve
-(`simassets/collision_resolve.cpp`, beside the `flare_points` fill) fills
+(`mission/collision_resolve.cpp`, beside the `flare_points` fill) fills
 `agun_points` from the model's first sixteen `agun*` userpoints (`strnicmp` 4;
-`def_parse_item_attrib` + `simassets_item_traits` ctests). The addeweap emplacement
+`def_parse_item_attrib` + `mission_item_traits` ctests). The addeweap emplacement
 children keep the earlier stand-in kill in `h_enter_vehicle_dying` (a
 different list; retail kills only the refNum peers) because
 `destruction_test::test_vehicle_death_kills_authored_children` pins it; the

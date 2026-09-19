@@ -67,7 +67,7 @@ bool icontains(std::string_view haystack, std::string_view needle) noexcept {
 // 29 entries in engine table order (the write order). HAZE (idx 9), BELOWH20
 // (idx 27), ABOVEH20 (idx 28) added per the ParticleEdit cross-witness grill
 // (D5) — fixes the HAZE round-trip drop (fire.ptl) and the GLOBALWIND..
-// AMBIENTCOLOR bit-shift. See notes/ida_particle_witness.md.
+// AMBIENTCOLOR bit-shift. See docs/particles/ptl-format-re.md §1.
 constexpr std::array<std::pair<const char *, std::uint32_t>, 29> kParticleFlagEntries = {{
 	{"NOVISNOUPDATE",        particle_flag::NoVisNoUpdate},
 	{"INITIALYCLIP",         particle_flag::InitialClip},
@@ -125,7 +125,7 @@ template <std::size_t N>
 std::string format_flag_table(std::uint32_t bits,
 		const std::array<std::pair<const char *, std::uint32_t>, N> &entries) {
 	// [orig: FlagTable_BuildString @ 0x428fe0 (ParticleEdit_v1_1.exe); JO FlagTable_BuildString @ 0x5df9c0 (ex sub_5DF9C0)]
-	// DIVERGENCE D1 (see notes/ida_particle_witness.md): the engine seeds the
+	// DIVERGENCE D1 (docs/particles/ptl-format-re.md §9): the engine seeds the
 	// buffer with a LEADING space (*(WORD*)buf = 0x20) before appending names, so
 	// the value is " NAME1 NAME2 " and a line reads "flags\t=  NAME1 NAME2 ;" (two
 	// spaces after '='). Corpus confirms. We emit no leading space (single space).

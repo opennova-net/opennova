@@ -65,7 +65,7 @@ current game runtime.
   retire; the read side stays pinned by `bad_parse` and the `adm_*` ctests.
 - Re-expressed natively: `tests/test_bad_pos_derivation.py` becomes the synthetic
   `anim_sample` pin plus the `OPENNOVA_JO_ASSETS`-gated `anim_positions_from_model_corpus`
-  ctest; `simassets_adm_skeletal_clips_weapon_channel` returns on a committed twist
+  ctest; `anim_skeletal_clips_weapon_channel` returns on a committed twist
   fixture; the shader-resource pytests become `godot/tests/shader_resource_contract_test.gd`
   and `shader_provenance_pins_test.gd` (the retail `.fx` decode legs go with
   `third_party/modsuperoed`). GUT tests that authored their 3DI inputs through the

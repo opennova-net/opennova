@@ -4,7 +4,7 @@
 #include "object/model_light.h"
 #include "object/model_user_point.h"
 
-#include <runtime/simassets/model_builders.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
+#include <runtime/world/model_geometry.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
 #include <formats/threedi/threedi_strip_decode.h> // the strip decode + material lookup (one impl with terrain)
 #include <runtime/world/ai.h> // part_anim_rate_from_seconds / part_anim_step (ADR 0016: one impl)
 
@@ -42,14 +42,14 @@ bool vertex_has_tangents(const ThreediVertex &v) {
 } // namespace
 
 int ObjectData::get_light_count() const {
-	return has_source_model ? static_cast<int>(source_model.light_count) : 0;
+	return source_model_ ? static_cast<int>(native_model().light_count) : 0;
 }
 
 Ref<ModelLight> ObjectData::get_light_info(int p_index) const {
-	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.light_count) {
+	if (!source_model_ || p_index < 0 || static_cast<size_t>(p_index) >= native_model().light_count) {
 		return Ref<ModelLight>();
 	}
-	const ThreediLight &light = source_model.lights[p_index];
+	const ThreediLight &light = native_model().lights[p_index];
 	Ref<ModelLight> info;
 	info.instantiate();
 	info->set_name(vformat("Light %d", p_index));
@@ -71,14 +71,14 @@ Ref<ModelLight> ObjectData::get_light_info(int p_index) const {
 }
 
 int ObjectData::get_user_point_count() const {
-	return has_source_model ? static_cast<int>(source_model.user_point_count) : 0;
+	return source_model_ ? static_cast<int>(native_model().user_point_count) : 0;
 }
 
 Ref<ModelUserPoint> ObjectData::get_user_point_info(int p_index) const {
-	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.user_point_count) {
+	if (!source_model_ || p_index < 0 || static_cast<size_t>(p_index) >= native_model().user_point_count) {
 		return Ref<ModelUserPoint>();
 	}
-	const ThreediUserPoint &point = source_model.user_points[p_index];
+	const ThreediUserPoint &point = native_model().user_points[p_index];
 	float position[3];
 	float direction[3];
 	threedi_user_point_position(&point, position);
@@ -91,8 +91,8 @@ Ref<ModelUserPoint> ObjectData::get_user_point_info(int p_index) const {
 }
 
 int ObjectData::get_user_point_bone_mask(const String &p_name) const {
-	if (!has_source_model) return 0;
-	return threedi_3di3_user_point_mask(&source_model,
+	if (!source_model_) return 0;
+	return threedi_3di3_user_point_mask(&native_model(),
 			p_name.utf8().get_data());
 }
 
@@ -102,13 +102,13 @@ int ObjectData::part_anim_rate_for_seconds(double p_seconds) {
 
 bool ObjectData::has_collision() const {
 	// One implementation per engine fact (ADR 0016): the predicate lives in
-	// engine/runtime/simassets beside the collision model build it gates.
-	return has_source_model &&
-			opennova::simassets::model_has_collision(source_model);
+	// engine/runtime/world beside the collision model build it gates.
+	return source_model_ &&
+			opennova::world::model_has_collision(native_model());
 }
 
 bool ObjectData::has_occlusion() const {
-	return has_source_model && source_model.occlusion_object_count > 0;
+	return source_model_ && native_model().occlusion_object_count > 0;
 }
 
 Array ObjectData::get_collision_volumes() const {
@@ -126,10 +126,10 @@ Array ObjectData::get_collision_volumes() const {
 	// a pure cyclic axis rotation. Applying it makes a hull placed at the same transform
 	// as the visual model coincide with it.
 	Array out;
-	if (!has_source_model || source_model.collision == nullptr) {
+	if (!source_model_ || native_model().collision == nullptr) {
 		return out;
 	}
-	const ThreediCollisionModel *col = source_model.collision;
+	const ThreediCollisionModel *col = native_model().collision;
 
 	// Per-volume owning object/part: BVOL runs are sequential per COBJ; volumes
 	// beyond the owned runs are retail's dead trailing data (kept, unowned).
@@ -188,20 +188,20 @@ Array ObjectData::get_collision_volumes() const {
 }
 
 int ObjectData::get_part_anim_count(int p_lod_index) const {
-	if (!has_source_model || p_lod_index < 0 ||
-			static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
+	if (!source_model_ || p_lod_index < 0 ||
+			static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
 		return 0;
 	}
 	return static_cast<int>(
-			source_model.lods[p_lod_index].part_animation_count);
+			native_model().lods[p_lod_index].part_animation_count);
 }
 
 PackedVector3Array ObjectData::get_bone_origins(int p_lod_index) const {
 	PackedVector3Array out;
-	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
+	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
 		return out;
 	}
-	const ThreediLod &lod = source_model.lods[p_lod_index];
+	const ThreediLod &lod = native_model().lods[p_lod_index];
 	out.resize(static_cast<int64_t>(lod.render_object_count));
 	for (size_t i = 0; i < lod.render_object_count; ++i) {
 		const ThreediRenderObject &part = lod.render_objects[i];
@@ -217,10 +217,10 @@ PackedVector3Array ObjectData::get_bone_origins(int p_lod_index) const {
 
 PackedInt32Array ObjectData::get_bone_parents(int p_lod_index) const {
 	PackedInt32Array out;
-	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
+	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
 		return out;
 	}
-	const ThreediLod &lod = source_model.lods[p_lod_index];
+	const ThreediLod &lod = native_model().lods[p_lod_index];
 	out.resize(static_cast<int64_t>(lod.render_object_count));
 	for (size_t i = 0; i < lod.render_object_count; ++i) {
 		// Raw parent index (the root references itself in the file; the sampler normalizes).
@@ -231,17 +231,17 @@ PackedInt32Array ObjectData::get_bone_parents(int p_lod_index) const {
 
 bool ObjectData::is_skinned(int p_lod_index) const {
 	// One implementation per engine fact (ADR 0016): delegates to
-	// engine/runtime/simassets, beside the collision gate that consumes it.
-	return has_source_model &&
-			opennova::simassets::model_is_skinned(source_model, p_lod_index);
+	// engine/runtime/world, beside the collision gate that consumes it.
+	return source_model_ &&
+			opennova::world::model_is_skinned(native_model(), p_lod_index);
 }
 
 Array ObjectData::get_lod_surfaces(int p_lod_index) const {
 	Array result;
-	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
+	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
 		return result;
 	}
-	const ThreediLod &lod = source_model.lods[p_lod_index];
+	const ThreediLod &lod = native_model().lods[p_lod_index];
 	if (lod.vertices.items == nullptr || lod.indices.indices == nullptr || lod.strips == nullptr) {
 		return result;
 	}
@@ -357,7 +357,7 @@ Array ObjectData::get_lod_surfaces(int p_lod_index) const {
 			Dictionary surface;
 			surface["primitive_index"] = static_cast<int64_t>(prim_index);
 			surface["material_index"] = strip.material_index;
-			surface["material_array_index"] = threedi_material_array_index_for_id(source_model, strip.material_index);
+			surface["material_array_index"] = threedi_material_array_index_for_id(native_model(), strip.material_index);
 			surface["part_index"] = static_cast<int>(part_idx);
 			surface["abs"] = godot_vec3(ro.abs);
 			surface["is_alpha"] = s >= static_cast<size_t>(ro.num_strips);
@@ -391,7 +391,7 @@ uint64_t ObjectData::_submesh_cache_key(int p_lod_index, bool p_skeletal, int p_
 Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bone_count,
 		bool p_native_frame) const {
 	Array result;
-	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
+	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
 		return result;
 	}
 	// Memo hit: hand back a deep copy of the ENTRY dictionaries (so a caller's
@@ -403,7 +403,7 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 	if (cached != submesh_cache.end()) {
 		return cached->second.duplicate(true);
 	}
-	const ThreediLod &lod = source_model.lods[p_lod_index];
+	const ThreediLod &lod = native_model().lods[p_lod_index];
 	const Array surfaces = get_lod_surfaces(p_lod_index);
 	for (int i = 0; i < surfaces.size(); ++i) {
 		const Dictionary surface = surfaces[i];

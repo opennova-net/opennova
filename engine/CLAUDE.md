@@ -14,7 +14,7 @@
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,
-    environment, hud, menu, simassets, and devtools (the Dear ImGui pass, ADR
+    environment, hud, menu, assets, and devtools (the Dear ImGui pass, ADR
     0039: infrastructure like io/vfs, not a port, so it sits in the citation
     allowlist; the pass, the frame-stats board and ONED's run surface build in
     every flavour, the game's F3 windows only with `OPENNOVA_DEVTOOLS` — off for
@@ -73,7 +73,7 @@
   (every formats/ lib; the mission FORMAT lib's membership here is the fold that keeps
   the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
   pcapio), `opennova_net` (novacrypto, napi, npwire + novaworld session/gate — the
-  wire), `opennova_runtime` (the rest of runtime/, including `session` and
+  wire), `opennova_runtime` (the rest of runtime/, including `inmatch` and
   `replication`), and `opennova_novaworld_service` (the service alone — the ONLY
   target linking `opennova_sqlite`; the Godot layer (`godot/src`) links
   `opennova_runtime`, which PUBLIC-links `opennova_net`, never the service).
@@ -83,9 +83,9 @@
   `link_graph_check.py` forbids `opennova_net -> opennova_runtime` and keeps the
   sqlite containment. The ADR 0024 family groups are deleted as subsumed; ADR
   0020's terrain seam is include-level (`scripts/lint/include_graph_check.py` —
-  for session/replication/wac/mission/world the `runtime/terrain/` prefix is fully
+  for inmatch/replication/wac/mission/world the `runtime/terrain/` prefix is fully
   forbidden; the seam is terrain_query's `<runtime/terrain_query/...>` headers),
-  and every runtime lib but session/replication is NET-AGNOSTIC (no `net/`,
+  and every runtime lib but inmatch/replication is NET-AGNOSTIC (no `net/`,
   `runtime/inmatch/` or `runtime/replication/` include — the same lint).
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/

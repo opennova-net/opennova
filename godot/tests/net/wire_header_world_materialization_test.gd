@@ -18,7 +18,7 @@ const DESIGNATED_G_CHILD_TYPE := 1419
 # compose a flat asset dir under the gitignored res://.godot (ResourceRoot
 # rejects user:// roots), wire it with sim.set_asset_root FIRST, then
 # install_seat_specs_for_type_ids(item_db, ...) runs the ONE engine extractor
-# (simassets::extract_item_seat_specs) over items.def rows + .3di userpoints.
+# (mission::extract_item_seat_specs) over items.def rows + .3di userpoints.
 # Three composed models re-author committed fixtures at the byte level
 # (48-byte USRP records; the name field at +32):
 # - tank.3di      (verbatim)  one ctrlx control seat, retail slot 8, bone 1.

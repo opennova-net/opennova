@@ -25,7 +25,7 @@ struct ServerConfig {
 
 	// NW UDP — Layer 2-3 NAPI traffic (HELLO/JOIN/SESSION/GOODBYE) on
 	// port 64206 in retail. Same socket serves both lobby and in-match
-	// clients (PN dispatch — see notes/architecture.md).
+	// clients (PN dispatch — see README.md "Listeners").
 	uint16_t nw_udp_port = 64206;
 
 	// HTTP — Drogon binds here. Serves /api/* + falls back to web/dist/

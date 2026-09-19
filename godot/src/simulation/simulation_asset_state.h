@@ -27,9 +27,9 @@ class ResourceRoot;
 class TerrainData;
 
 struct SimulationAssetState {
-	// The sim's asset source (ADR 0028): the mounted root pinned for its index
-	// lifetime; the kernel's parse-once model cache reads through it
-	// (set_asset_index). Render caches stay render-only.
+	// The sim's asset source (ADR 0028, ADR 0044): the mounted root pinned for
+	// the lifetime of the shared asset store the kernel reads through
+	// (set_assets). Render caches stay render-only.
 	Ref<ResourceRoot> root;
 	// The shell input the collision sweep reads (its retained items.def rows
 	// feed the engine resolve). RefCounted, so retaining it also keeps its

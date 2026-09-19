@@ -1,5 +1,5 @@
 #include <formats/def/def.h>
-#include <runtime/simassets/item_traits.h>
+#include <runtime/mission/item_traits.h>
 #include <runtime/mission/event_runtime.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/wac_system.h>
@@ -10,9 +10,9 @@
 #include <memory>
 #include "common/retail_paths.h"
 #include <base/resource_index/resource_index.h>
-#include <runtime/simassets/collision_resolve.h>
-#include <runtime/simassets/sim_model_cache.h>
-#include <runtime/simassets/sim_pose_provider.h>
+#include <runtime/mission/collision_resolve.h>
+#include <runtime/assets/asset_store.h>
+#include <runtime/world/entity_pose.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
 
@@ -71,7 +71,7 @@ static void test_parse_and_bind() {
     e.item_id = 1998;
     e.kind = EntityKind::Building;
     const auto h = w.registry.spawn(2, e);
-    simassets::resolve_item_traits(w, items, {});
+    mission::resolve_item_traits(w, items, {});
     const Entity *bound = w.registry.get(h);
     CHECK(bound->door_event && bound->door_motion);
     CHECK(bound->door_count == 2 && bound->door_first_bone == 2);
@@ -79,7 +79,7 @@ static void test_parse_and_bind() {
     const DoorSystem::Slot *slot = w.doors.slot(*bound, 0);
     CHECK(slot != nullptr);
     if (slot != nullptr) CHECK(slot->step == 528);
-    simassets::resolve_item_traits(w, items, {});
+    mission::resolve_item_traits(w, items, {});
     CHECK(w.doors.allocated() == 2);
     def::def_free_items(&items);
 }
@@ -213,13 +213,13 @@ static void test_retail_door_pose() {
     }
     ResourceIndex index;
     CHECK(index.scan(assets, std::string(), VfsMountMode::LooseOnly));
-    simassets::SimModelCache models;
-    models.set_index(&index);
-    simassets::SimPoseProvider pose;
-    pose.set_resource_index(&index);
+    assets::AssetStore models{&index};
+
+    world::EntityPoseProvider pose;
+    pose.set_assets(&models);
     CollisionWorld collision;
     OcclusionWorld occlusion;
-    simassets::CollisionResolveState resolve;
+    mission::CollisionResolveState resolve;
     World w;
     w.registry.configure_pool(2, 1);
     const char source[] = "begin \"Iblock01\"\n id 101998\n type building\n"
@@ -233,9 +233,9 @@ static void test_retail_door_pose() {
     e.item_id = 1998;
     e.yaw = 90;
     const auto h = w.registry.spawn(2, e);
-    simassets::resolve_item_traits(w, items, {});
-    const simassets::CollisionResolveDeps deps{collision, occlusion, pose, models};
-    CHECK(simassets::resolve_collision_instances(w, items, resolve, deps) == 1);
+    mission::resolve_item_traits(w, items, {});
+    const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
+    CHECK(mission::resolve_collision_instances(w, items, resolve, deps) == 1);
     w.pose_provider = &pose;
     collision.set_pose_provider(&pose);
     w.collision = &collision;

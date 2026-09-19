@@ -47,7 +47,7 @@ Ref<PlayerSpawnLoadout> PlayerSpawnLoadout::from_profile(const Dictionary &p_pro
 		selection.division = dict_int(sd, "division", -1);
 		selection.combo = dict_int(sd, "combo", -1);
 		selection.player_class = dict_int(sd, "player_class",
-				opennova::npruntime::kJoinDefaultPlayerClass);
+				opennova::inmatch::kJoinDefaultPlayerClass);
 	}
 	return out;
 }
@@ -88,9 +88,9 @@ opennova::world::SpawnLoadoutInput PlayerSpawnLoadout::engine_input() const {
 }
 
 void PlayerSpawnLoadout::fill_join_sides(
-		opennova::npruntime::JoinSideSelection (&r_sides)[2]) const {
+		opennova::inmatch::JoinSideSelection (&r_sides)[2]) const {
 	for (int side = 0; side < 2; ++side) {
-		r_sides[side] = opennova::npruntime::JoinSideSelection();
+		r_sides[side] = opennova::inmatch::JoinSideSelection();
 		if (!sides_[side].present) {
 			continue;
 		}

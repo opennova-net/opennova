@@ -51,7 +51,7 @@ struct ClientHello {
 // Server-identity name defaults — ONE home for the three name-bearing wire
 // fields, which deliberately differ: the 0x81 ServerHello carries our own
 // AP/SN identity, while the 0x82 ServerAuth CU "NovaworldName" must stay the
-// literal "NWServer" retail emits (notes/retail_capture_findings.md; the
+// literal "NWServer" retail emits (docs/net/novaworld-net-re.md §7; the
 // earlier "OpenNova" value there was retired for retail parity). Keeping all
 // three side by side is what stops one being rebranded without the others
 // being reconsidered.
@@ -85,7 +85,7 @@ struct ServerHello {
 	// is therefore a parse-side marker rather than an encoder switch. The
 	// SF/P1/P2/NP/MP fields appear between SN and NC, and SUS1/SUS2 appear
 	// between RPN and EIP. Witnessed in the retail capture
-	// (notes/retail_capture2_decoded.txt frame 62334) — the host's
+	// (docs/net/novaworld-net-re.md §5.9) — the host's
 	// ServerHello on the game-server UDP port carries these extra fields
 	// so the client knows the game type, current/max players, expansion,
 	// and game-session id. Without them the client receives a generic
@@ -378,7 +378,7 @@ struct ServerAuth {
 // order (high byte first); `client_port` is its UDP port; `server_sk` and
 // `server_scrk` are caller-chosen values (deterministic values OK for
 // development; production would use a secure random).
-// Defaults per retail capture (notes/retail_capture_findings.md):
+// Defaults per retail capture (docs/net/novaworld-net-re.md §7):
 //   novaworld_name = "NWServer" (was "OpenNova"; retail emits the literal "NWServer")
 //   nwuid          = 60-char ASCII hex ID; placeholder default is fine for dev, the
 //                    UDP listener overrides with a freshly-generated value per session.

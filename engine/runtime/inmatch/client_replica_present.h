@@ -15,8 +15,8 @@
 #include <runtime/anim/aim_overlay.h>
 #include <base/io/bam.h>
 #include <runtime/mission/promote.h>
-#include <runtime/simassets/pose_inputs.h>
-#include <runtime/simassets/seat_spec_extract.h>
+#include <runtime/world/pose_inputs.h>
+#include <runtime/mission/seat_spec_extract.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
@@ -140,7 +140,7 @@ inline bool aim_overlay_inputs_for_client(
 	// instead of letting body_yaw ride the aim — an aim-riding body orbits the
 	// mount with the gunner's scan, which is the reported joiner spin.
 	const mission::ItemSeatSpec *spec =
-			simassets::item_seat_spec_for_type(specs, carrier->type_id);
+			mission::item_seat_spec_for_type(specs, carrier->type_id);
 	const world::Seat *seat = nullptr;
 	if (spec != nullptr) {
 		for (const world::Seat &candidate : spec->seats) {
@@ -165,10 +165,10 @@ inline bool aim_overlay_inputs_for_client(
 		// transport-only boolean.
 		*r_collapse_right_hand =
 				entity.cls == EntityClass::Infantry &&
-				simassets::seat_type_blocks_weapon_channel(seat->type);
+				world::seat_type_blocks_weapon_channel(seat->type);
 	}
 
-	out.mount_mode = simassets::mount_mode_for_seat_type(seat->type);
+	out.mount_mode = world::mount_mode_for_seat_type(seat->type);
 	if (out.mount_mode == anim::MountMode::OnFoot) return true;
 	out.mount_config_valid = spec->mount_config_valid;
 	out.mount_config = spec->mount_config_valid ? spec->mount_config : 0;
