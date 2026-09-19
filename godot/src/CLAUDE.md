@@ -50,8 +50,7 @@ drive those legs; GUT counts engine errors as failures); `push_error` is for
 invariant violations nothing recovers from. Load/lifecycle narration uses
 `print_verbose` (visible under `--verbose`), live inspection goes through the
 dev tools (F3: engine-owned ImGui windows; `devtools/` here is the
-`ImGuiPassNode` seam with its `DevTools` node and the
-`FrameStats` board binding, ADR 0039), and `engine/` diagnostics ride the
+`DevTools` node and the `FrameStats` board binding, ADR 0039), and `engine/` diagnostics ride the
 `io/log.h` sink.
 Never raw `print`/`printerr`/`print_line`/`WARN_PRINT`/`ERR_PRINT` in shipping
 code.

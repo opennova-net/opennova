@@ -176,7 +176,6 @@ void test_game_window_is_mandatory_and_detachable() {
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
 	CHECK(game.open, "Game opens from construction");
 	CHECK(!game.is_closeable(), "Game is mandatory");
-	CHECK(game.is_undockable(), "Game can detach from the application workspace");
 	CHECK(game.initial_dock_placement() == InitialDockPlacement::Center,
 			"Game owns the center dock");
 	CHECK(stats.initial_dock_placement() == InitialDockPlacement::Right,

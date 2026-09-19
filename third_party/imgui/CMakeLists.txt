@@ -14,8 +14,7 @@
 # For offline/air-gapped builds, point
 # -DFETCHCONTENT_SOURCE_DIR_IMGUI_DOCKING=<dir> at a pre-extracted copy.
 #
-# Built in every flavour: the ImGui pass hosts ONED's run surface as well as the
-# game's debug-only dev-tool windows (engine/runtime/CMakeLists.txt gates those).
+# Built only with OPENNOVA_DEVTOOLS for the game's F3 windows.
 
 include(FetchContent)
 
@@ -33,8 +32,6 @@ add_library(opennova_imgui STATIC
     "${imgui_docking_SOURCE_DIR}/imgui_draw.cpp"
     "${imgui_docking_SOURCE_DIR}/imgui_tables.cpp"
     "${imgui_docking_SOURCE_DIR}/imgui_widgets.cpp"
-    # std::string-backed InputText (the ONED fields).
-    "${imgui_docking_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp"
 )
 
 target_include_directories(opennova_imgui

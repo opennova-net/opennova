@@ -17,18 +17,7 @@
 
 namespace opennova::devtools {
 
-namespace {
-
-ImGuiPassOptions game_pass_options() {
-	ImGuiPassOptions options;
-	// The Game window owns the Play/Interact-aware Escape policy.
-	options.escape_closes = false;
-	return options;
-}
-
-}  // namespace
-
-GameDevTools::GameDevTools() : pass_(game_pass_options()) {
+GameDevTools::GameDevTools() {
 	auto game = std::make_unique<GameWindow>();
 	game_window_ = game.get();
 	game->open = true;
