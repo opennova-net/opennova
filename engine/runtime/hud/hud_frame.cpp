@@ -309,6 +309,22 @@ void HudFrameCompiler::emit_text(const char *text, float design_x,
 			run.underlines.begin(), run.underlines.end());
 }
 
+namespace {
+// Seat-specific WPNGRP dispatch, independent of the crosshair's XHAIRS gate.
+// [orig: HUD_RenderOverlays @0x5A7CC0..0x5A7D55]
+bool hud_weapon_group_visible(const HudFrameState &state) {
+    if (state.mount_slot == 2 || state.mount_slot == 5)
+        return state.weapon_category > 9;
+    return (state.mount_slot == 0 || state.mount_slot == 1 || state.mount_slot == 3) &&
+        state.declutter_visible[kDeclutterWpnGrp];
+}
+bool hud_stance_group_visible(const HudFrameState &state) {
+    if (state.mount_slot == 1 || state.mount_slot == 2 || state.mount_slot == 5) return true;
+    return (state.mount_slot == 0 || state.mount_slot == 3) &&
+        state.declutter_visible[kDeclutterWpnGrp];
+}
+}
+
 const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 		float surface_w, float surface_h) {
 	draw_list_.quads.clear();
@@ -345,7 +361,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// The stance cross-fade restamp [orig: @ 0x599f8a; it lives inside the
 	// stance drawer, so a blanked level-3 pass never restamps — matched by
 	// placing it under the early-out].
-	if (state.stance != stance_.cur) {
+	if (hud_stance_group_visible(state) && state.stance != stance_.cur) {
 		stance_.prev = stance_.cur;
 		stance_.cur = state.stance;
 		stance_.stamp = state.ticks;
@@ -379,7 +395,8 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// The mounted-vehicle panel sits with the overlay cluster, BEFORE the feed
 	// and the Tab board -- both of those are held-open surfaces that should
 	// cover it, not the other way round.
-	element_vehicle_panel(state, surface_w, surface_h);
+    if (hud_stance_group_visible(state) || state.mount_slot == 0)
+        element_vehicle_panel(state, surface_w, surface_h);
 	// The console messages close the overlay pass [orig: HUD_DrawConsoleMessages
 	//  @0x5a87d1, after HUD_DrawFriendlyTagsPass @0x5a87cc].
 	element_feed(state, surface_w, surface_h);
@@ -620,6 +637,7 @@ void HudFrameCompiler::element_health(const HudFrameState &state, float w,
 
 void HudFrameCompiler::element_stance(const HudFrameState &state, float w,
 		float h) {
+    if (!hud_stance_group_visible(state)) return;
 	// [orig: HUD_DrawStanceIndicator @ 0x599f10 — ramp+texture gates, the
 	// shared frame-0 scale, the cross-fade pair]
 	if (layout_.stance_pos.x == 0 && layout_.stance_pos.y == 0) {
@@ -682,7 +700,7 @@ void HudFrameCompiler::element_weapon_cluster(const HudFrameState &state,
 	// the clip indicator [orig: the slot-8 cmps @ 0x5A7CC8 / @ 0x5A7D04 /
 	// @ 0x5A7D42]; the crosshair rides its OWN XHAIRS slot inside
 	// element_crosshair.
-	const bool wpngrp_visible = state.declutter_visible[kDeclutterWpnGrp];
+	const bool wpngrp_visible = hud_weapon_group_visible(state);
 	const uint32_t wc = half_bright_argb(layout_.weapon_text);
 	char ammo[64];
 	const std::string ammo_text = format_ammo(state.weapon.clip,
@@ -733,7 +751,10 @@ void HudFrameCompiler::element_clip_indicator(const HudFrameState &state,
 	}
 	// The restamp key at the reimpl's single-pool altitude (D-HUD-5): the
 	// (round_type, reserve) pair; the compiler keys on the folded count.
-	const int folded = folded_reserve(wep.clip, wep.reserve, wep.capacity);
+    // HUD_BuildEntityInfo has already folded capacity-one ammo. Reloading
+    // cannot change this flash key while the displayed total stays constant.
+    // [orig: @0x4B85EF; draw_hud_ammo_indicator @0x599A30]
+    const int folded = wep.reserve;
 	if (folded != flash_prev_rounds_) {
 		flash_prev_rounds_ = folded;
 		flash_stamp_ = state.ticks;

@@ -303,3 +303,68 @@ func test_world_points_project_through_the_presenter_view_projection() -> void:
 	player.teardown()
 	assert_eq(presenter.hud_view_projection(camera).x.x, camera.get_camera_projection().x.x,
 			"without a live target the HUD projects through the camera's own projection")
+
+
+# Exercise the live GameWorld -> PlayerLocalView -> presenter -> draw-list path.
+# Inset belongs to the equipped weapon, including on foot; a seat proxy loses it.
+# [orig: Player_IsVehicleHasAutoAim @0x4dccb0; HUD_DrawCrosshair @0x592afa]
+func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> void:
+	_staged_dir = HudFixture.stage_root(true)
+	var source := FileAccess.get_file_as_string(_staged_dir.path_join("weapon.def"))
+	var start := source.find('weapon "WPN_M4AUTO"')
+	var end := source.find('weapon "WPN_AK47AUTO"', start)
+	assert_gte(start, 0)
+	assert_gt(end, start)
+	var row := source.substr(start, end - start)
+	var inset := row.replace("WPN_M4AUTO", "WPN_HUD_INSET").replace(
+			"flags       auto", "flags auto\nflags scoped\nflags inset").replace("statid   100", "statid   102")
+	var plain := row.replace("WPN_M4AUTO", "WPN_HUD_PLAIN").replace(
+			"flags       auto", "flags auto\nflags scoped").replace("statid   100", "statid   103")
+	WorldFixture.write_file(_staged_dir.path_join("weapon.def"), source + inset + plain)
+	# The actual texture loader receives a synthetic white 8x8 reticle atlas.
+	var bytes := PackedByteArray()
+	bytes.resize(18 + 8 * 8 * 4)
+	bytes.fill(255)
+	for i in range(18):
+		bytes[i] = 0
+	bytes[2] = 2
+	bytes[12] = 8
+	bytes[14] = 8
+	bytes[16] = 32
+	bytes[17] = 0x28
+	var texture := FileAccess.open(_staged_dir.path_join("cross01.tga"), FileAccess.WRITE)
+	texture.store_buffer(bytes)
+	texture.close()
+	var world := WorldFixture.boot_minimal(self, _staged_dir)
+	world.set_process(false)
+	var sim := world.get_sim()
+	var presenter := HudFixture.presenter_over(self, world)
+	presenter.set_hud_detail_level(0)
+	var hud := presenter.get_game_hud()
+	# Settling the body on the fixture terrain keeps the airborne ADS refusal
+	# out of this test, which is about the rendered reticle selection.
+	for _i in range(90):
+		sim.step()
+	for name in ["WPN_HUD_INSET", "WPN_HUD_PLAIN", "WPN_HUD_INSET"]:
+		assert_true(world.set_local_player_weapon_by_name(name))
+		for _i in range(30):
+			sim.step()
+		presenter.tick()
+		assert_eq(hud.get_draw_list_stats().tris, 14, "hip view draws the spread reticle")
+		assert_true(sim.request_local_player_scope_toggle())
+		for _i in range(30):
+			sim.step()
+		presenter.tick()
+		var view := world.local_player_view()
+		assert_true(world.local_player_weapon_view().aimed_shot_available,
+				"the authored optic has finished raising")
+		assert_false(view.mounted, "the Inset keep-up rule also applies on foot")
+		assert_eq(view.hud_stance, sim.get_local_player_stance())
+		assert_eq(view.hud_keep_crosshair_while_aimed, name == "WPN_HUD_INSET")
+		assert_eq(hud.get_draw_list_stats().tris, 14 if name == "WPN_HUD_INSET" else 0,
+				"switching the equipped weapon updates the aimed crosshair immediately")
+		assert_true(sim.request_local_player_scope_toggle())
+		for _i in range(30):
+			sim.step()
+		presenter.tick()
+		assert_eq(hud.get_draw_list_stats().tris, 14, "lowering the optic restores the hip reticle")

@@ -1682,7 +1682,99 @@ void test_scoped_aim_follows_local_view_clamps_and_leg_chase() {
     }
 }
 
+// Real parsed weapon -> installed slot -> local HUD facts, across seat changes.
+// Animation stance remains an infantry value; the HUD selects its mounted frame.
+// [orig: HUD_BuildEntityInfo @0x4B8539..0x4B8786; Inset query @0x4DCCB0]
+void test_hud_context_tracks_mount_weapon_and_dismount() {
+    static const char source[] =
+        "weapon \"WPN_HUD_GUN\"\ncategory 10\nclipsize 1\nEmplacedStance 2\nend\n"
+        "weapon \"WPN_HUD_FOOT\"\ncategory 4\nclipsize 1\nend\n";
+    DefWeaponsFile defs{};
+    CHECK(def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(source),
+            sizeof(source) - 1, &defs) == 0);
+    CHECK(defs.count == 2);
+    if (defs.count != 2) { def_free_weapons(&defs); return; }
+    CHECK(defs.entries[0].emplacedstance == 2);
+    CHECK(defs.entries[1].emplacedstance == 0);
+    LocalWorld lw;
+    Entity mount;
+    mount.has_item_def = true;
+    mount.item_type = 3;
+    const auto gun = lw.w.registry.spawn(0, mount);
+    Entity carrier;
+    carrier.has_item_def = true;
+    carrier.item_type = 1;
+    const auto hull = lw.w.registry.spawn(0, carrier);
+    lw.ai.attach(lw.local);
+    auto *body = lw.ai.for_handle(lw.local);
+    body->inf.stance = InfantryState::Stance::kCrouch;
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    const auto read = [&]() {
+        local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    };
+    const auto install = [&](int row) {
+        local_weapon_install(lw.w, weapon, weapon_install_data_from_def(defs.entries[row]),
+                false, false, nullptr, view);
+    };
+    install(0);
+    read();
+    CHECK(frame.hud_stance == 1 && frame.hud_mount_slot == 0);
+    CHECK(frame.hud_weapon_category == 10);
+    CHECK(!frame.hud_keep_crosshair_while_aimed);
+    // Inset keeps the spread reticle even on foot; occupying a vehicle alone
+    // must not make a non-Inset optic keep it up.
+    weapon.def.flags2 |= DEF_WEAPON_FLAG2_INSET;
+    read();
+    CHECK(frame.hud_keep_crosshair_while_aimed);
+    weapon.def.flags2 &= ~DEF_WEAPON_FLAG2_INSET;
+    lw.entity().mounted = true;
+    lw.entity().mount_target = gun;
+    for (const auto seat : {SeatType::Passenger, SeatType::Controller, SeatType::Driver}) {
+        lw.entity().mount_type = seat;
+        read();
+        CHECK(frame.hud_stance == 3 && frame.hud_mount_slot == int(seat));
+        CHECK(!frame.hud_keep_crosshair_while_aimed);
+        CHECK(body->inf.stance == InfantryState::Stance::kCrouch);
+    }
+    lw.entity().mount_type = SeatType::Gunner;
+    read();
+    CHECK(frame.hud_stance == 1); // authored 2 is one-based
+    install(1);
+    read();
+    CHECK(frame.hud_stance == 4 && frame.hud_weapon_category == 4);
+    lw.w.registry.get(gun)->emplacement_parent = hull;
+    read();
+    CHECK(frame.hud_stance == 3); // a gun attached to a type-1 carrier
+    install(0);
+    read();
+    CHECK(frame.hud_stance == 1); // authored stance overrides the carrier default
+    lw.entity().flags |= kEntityFlagMounted;
+    read();
+    CHECK(frame.hud_stance == 3); // organic mounted flag wins last
+    lw.entity().flags |= kEntityFlagParachute;
+    read();
+    CHECK(frame.hud_stance == 5);
+    lw.entity().flags &= ~(kEntityFlagMounted | kEntityFlagParachute);
+    lw.entity().mounted = false;
+    lw.entity().mount_target = EntityHandle{};
+    lw.entity().mount_type = SeatType::None;
+    body->inf.stance = InfantryState::Stance::kProne;
+    read();
+    CHECK(frame.hud_stance == 2 && frame.hud_mount_slot == 0);
+    weapon.active = false;
+    weapon.def.flags2 |= DEF_WEAPON_FLAG2_INSET;
+    read();
+    CHECK(frame.hud_weapon_category == 0 && !frame.hud_keep_crosshair_while_aimed);
+    local_player_view_frame(nullptr, weapon, view, tracker, frame);
+    CHECK(frame.hud_stance == 0 && frame.hud_mount_slot == 0);
+    def_free_weapons(&defs);
+}
+
 int main() {
+    test_hud_context_tracks_mount_weapon_and_dismount();
     test_rendered_scope_applies_elevation_and_parallax();
     test_scoped_aim_follows_local_view_clamps_and_leg_chase();
     test_scoped_aim_original_sequences();

@@ -47,6 +47,8 @@ void PlayerLocalView::_bind_methods() {
 	PLAYER_LOCAL_VIEW_FIELD(Variant::INT, camera_mode)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, camera_mounted)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, vehicle_attack_context)
+    PLAYER_LOCAL_VIEW_FIELD(Variant::INT, hud_stance)
+    PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, hud_keep_crosshair_while_aimed)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, scope_fraction)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, suppress_view_bias)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, scope_card_active)

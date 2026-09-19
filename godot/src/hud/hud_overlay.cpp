@@ -144,6 +144,7 @@ float HudOverlay::friendly_tag_lift() { return opennova::hud::kFriendlyTagLiftUn
 
 void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_scope_state", "view", "gametext"), &HudOverlay::set_scope_state);
+    ClassDB::bind_method(D_METHOD("set_player_context", "view"), &HudOverlay::set_player_context);
 	BIND_ENUM_CONSTANT(SHOWHUD_FLAG_GUN);
 	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_OFF);
 	BIND_ENUM_CONSTANT(FRIENDLY_TAGS_FAR_BRIEF);
@@ -858,6 +859,12 @@ void HudOverlay::set_weapon_state(bool p_active, int p_clip, int p_reserve, int 
 	state_.windup_active = p_windup_active;
 	state_.windup_held_ticks = p_windup_held_ticks;
 	queue_redraw();
+}
+
+void HudOverlay::set_player_context(const Ref<PlayerLocalView> &p_view) {
+    state_.mount_slot = p_view.is_valid() ? p_view->native_frame().hud_mount_slot : 0;
+    state_.weapon_category = p_view.is_valid() ? p_view->native_frame().hud_weapon_category : 0;
+    queue_redraw();
 }
 
 void HudOverlay::set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<RtxtStringFile> &p_gametext) {

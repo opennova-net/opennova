@@ -286,6 +286,9 @@ struct LocalPlayerViewFrame {
     int32_t scope_zero_step = 0;
     int32_t scope_zero_default = 0;
     int32_t aim_range_q16 = 0;
+    // HUD_BuildEntityInfo @0x4B8440 and HUD_RenderOverlays @0x5A7BB0.
+    int hud_stance = 0, hud_mount_slot = 0, hud_weapon_category = 0;
+    bool hud_keep_crosshair_while_aimed = false;
     bool scope_engaged = false; // the TARGET (g_scopeEngaged)
     bool scope_settled = false; // the PROMOTED byte (g_weaponScopeActive)
     bool binoculars_requested = false;

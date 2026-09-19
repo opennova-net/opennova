@@ -336,7 +336,7 @@ struct HudScopeState {
 struct HudWeaponState {
 	bool active = false;
 	int clip = -1;
-	int reserve = -1;
+	int reserve = -1; // HUD total: capacity-one chamber already folded by the feed
 	int capacity = 0;
 	int rounds_per_icon = 1;
 	int heat = 0; // 0..0xFFFF
@@ -580,6 +580,7 @@ struct HudFrameState {
 	HudLfpPanelState lfp_panel;
 	float health_fraction = 1.0f;
 	int stance = 0;
+    int mount_slot = 0, weapon_category = 0; // HUD info +560 and WeaponDef+0
 	bool binoculars_view_active = false;
 	bool aimed_shot_available = false;
 	bool keep_crosshair_while_aimed = false;

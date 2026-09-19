@@ -77,6 +77,7 @@ public:
 	void configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root);
 	bool is_configured() const;
 	void set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<RtxtStringFile> &p_gametext);
+    void set_player_context(const Ref<PlayerLocalView> &p_view);
 
 	// Select and (when configured) immediately reload the crosshair art;
 	// runtime state (messages, fades) survives the layout refresh.

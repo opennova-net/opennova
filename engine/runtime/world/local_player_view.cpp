@@ -574,6 +574,43 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
     }
 }
 
+// HUD stance differs from the body's animation stance while mounted.
+// [orig: HUD_BuildEntityInfo @0x4B8539..0x4B8786]
+static void fill_hud_context(World *world, const Entity *local,
+        const LocalPlayerWeapon &weapon, LocalPlayerViewFrame &out) {
+    if (!world || !local) return;
+    const AiEntity *body = world->ai.for_handle(local->handle);
+    out.hud_stance = body ? int(body->inf.stance) : 0;
+    out.hud_weapon_category = weapon.active ? weapon.hud_category : 0;
+    // The misleadingly named Player_IsVehicleHasAutoAim reads the equipped
+    // weapon's Inset flag, not the occupied seat. The separate Sighted
+    // hit-feedback countdown remains unmodeled.
+    // [orig: @0x4DCCB0..0x4DCCDA; crosshair draw gate @0x592AFA]
+    out.hud_keep_crosshair_while_aimed =
+        weapon.active && (weapon.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0;
+    const Entity *mount = world->registry.get(local->mount_target);
+    if (mount && mount->has_item_def) {
+        out.hud_mount_slot = int(local->mount_type);
+        switch (local->mount_type) {
+        case SeatType::Passenger:
+        case SeatType::Controller:
+        case SeatType::Driver:
+            out.hud_stance = 3;
+            break;
+        case SeatType::Gunner: {
+            const Entity *carrier = world->registry.get(mount->emplacement_parent);
+            out.hud_stance = carrier && carrier->has_item_def && carrier->item_type == 1 ? 3 : 4;
+            if (weapon.active && weapon.emplaced_stance != 0)
+                out.hud_stance = uint8_t(uint32_t(weapon.emplaced_stance) - 1u);
+            break;
+        }
+        default: break;
+        }
+    }
+    if (body && (local->flags & kEntityFlagMounted) != 0) out.hud_stance = 3;
+    if ((local->flags & kEntityFlagParachute) != 0) out.hud_stance = 5;
+}
+
 void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerViewState &v,
                              const LocalPlayerViewTracker &t, LocalPlayerViewFrame &out) {
     out = LocalPlayerViewFrame();
@@ -602,6 +639,7 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     out.hud_overlays_suppressed = screen_flash_hud_overlays_suppressed(v.flash);
     const Entity *local = local_entity(world);
     out.mounted = local != nullptr && local->mounted;
+    fill_hud_context(world, local, w, out);
     // The RESOLVED camera mode and the chase preference behind it
     // [orig: g_camera_mode @0xA890C8; g_camera_third_person_selected @0xA860DF].
     out.third_person = v.third_person;

@@ -567,6 +567,8 @@ Closed 2026-08-12: **D-WPN-30** -> `FIXED` - every ammo.def fixed-point key pars
 
 ### UI — menus/controls, sound, player-info, HUD
 
+Closed 2026-09-19: **D-HUD-28** -> `FIXED` - seat-specific weapon/stance/panel dispatch, parsed mounted stance, the equipped Inset reticle predicate, and capacity-one reload flash are corrected. Native and real Godot presenter regressions pass. The [weapon/vehicle HUD validation](interface/weapon-vehicle-hud-validation.md) records the mode matrix, controlled captures, and remaining targeting, mortar terrain-scope, vehicle-status and flight-instrument gaps.
+
 Closed 2026-09-16: **D-HUD-27** -> `FIXED` - modern main-scene scope elevation/parallax and the range/elevation/magnification HUD text are ported, with standing/prone and readout regressions. See [scope camera and readouts](interface/hud-re.md#scope-camera-zero-and-readouts-2026-09-16-d-hud-27). The distinct D-HUD-26 terrain-ring renderer remains open.
 
 Closed 2026-07-05: **D-SND-2** -> `FIXED` (expansion bank slots 0/1 load ahead of

@@ -70,3 +70,11 @@ mechanics; they are not claimed as retail asset measurements.
 - No retail assets were mounted in this checkout. Animated barrel presentation,
   a live mortar/Javelin/Stinger/tank mission, and mixed retail/OpenNova network
   play still need an asset-backed playthrough.
+
+## HUD follow-up
+
+The [2026-09-19 HUD validation](../interface/weapon-vehicle-hud-validation.md)
+checks weapon and seat transitions against the original HUD routines. It fixes
+seat-specific group visibility, mounted stance, Inset reticle selection, and
+launcher reload flashing, and records the remaining launcher targeting, mortar
+terrain-scope, and vehicle instrument gaps.

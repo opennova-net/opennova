@@ -51,6 +51,11 @@ master switch" reading), corrected the map-pointer blink and 253/254
 ring glosses, and applied the previously parked IDB renames (logged at the
 end).
 
+The 2026-09-19 [weapon and vehicle HUD validation](weapon-vehicle-hud-validation.md)
+corrected seat-dependent group dispatch, mounted stance, the Inset reticle
+predicate, and capacity-one reload flashing (D-HUD-28). It also records the
+remaining launcher targeting, mortar terrain-scope, and pilot instrument gaps.
+
 ## Verdict table
 
 | Component | Verdict | Evidence |
@@ -470,8 +475,12 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   `[orig: @0x592bd5]`; defaults unwitnessed (D-HUD-8 / follow-up).
 - **Visibility**: the cluster gates on `dword_2723CB4` and the weapon-def ptr;
   the spread crosshair draws when the player **cannot** take an aimed shot —
-  `!Player_CanFireWeapon() || vehicle auto-aim || (dword_A8235C && gunner
-  scoped)` `[orig: @0x592adc..0x592b01]`. `Player_CanFireWeapon @0x5cf780`
+  `!Player_CanFireWeapon() || equipped Inset || (dword_A8235C && promoted
+  Sighted)` `[orig: @0x592adc..0x592b01]`. Rechecked 2026-09-19:
+  `Player_IsVehicleHasAutoAim @0x4dccb0` actually reads equipped `flags2 & 0x200`,
+  and `Player_IsVehicleGunnerScoped @0x4dcd30` is the promoted Sighted selector;
+  neither name implies that a vehicle seat is required.
+  `Player_CanFireWeapon @0x5cf780`
   requires either the **settled Scoped** view (`Player_IsEquippedWeaponScoped
   @0x4dcc80` = `WeaponDef.Flags & 1` plus `g_weaponScopeActive`) or the separate
   settled **Sighted** predicate (`@0x4dcd30` = `Flags & 2`, promoted active,
@@ -505,11 +514,10 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   / 1 crouch (`&0x200`) / 2 stand, forced 2 when swimming/under water
   (`entity+36 & 0x108020` or below `Env_WaterHeightFixed`), forced 1 when
   mounted `[orig: @0x592b35..0x592b87]`. Because the draw gate and the row
-  select share the CanFire predicate, **on foot every drawn crosshair reads
-  the hip rows 0..2**; the scoped rows 3..5 are reachable only through the
-  vehicle auto-aim / gunner-scoped cases (witness comment left at
-  `@0x592b87`; a train-side fix that keyed +3 on the port's `scope_engaged`
-  contradicts this — re-adjudicate when the ADS-ease plumbing lands). Then
+  select share the CanFire predicate, the ordinary un-aimed crosshair reads
+  hip rows 0..2. Inset and the Sighted hit-feedback exception can draw aimed
+  rows 3..5 **on foot as well as mounted**. The earlier vehicle-only gloss
+  relied on misleading function names (corrected 2026-09-19). Then
   `spread = C·(ERROR[row] + (player+0x380 >> 7) + (player+0x384 >> 7))` with
   `C = flt_7D76D0 = 11930464.0 = 2^31/180`, and
   `pixel = int(spread · screen_w / fov_scale) >> 16` where
@@ -593,7 +601,7 @@ required for retail parity. `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
     (`Entity_ComputeUserpointTransform` → `physics_raycast_entity_pools…` →
     project) `[orig: @0x592973..0x592ac8]`;
   - the **lock brackets** — four clipped 2D lines blinking around the tracked
-    target when its mount state reads 3, team- and blink-gated
+    target when its item-definition type reads 3, team- and blink-gated
     `[orig: @0x592ce2..0x592dd7]`.
   - a mode flag `dword_24C1930 & 0x10000` replaces triggered/gametext strings
     with the literal `"&"` `[orig: @0x51f1c8 / @0x51ebe3]` — writer
@@ -2289,6 +2297,7 @@ were made for this review.
 | D-HUD-25 | **FIXED 2026-08-24.** The MP end-of-round presentation: both S2C 0x1D header forms decode (the non-team top-three names/scores form included) into the overlay ladder (`hud/end_round_overlay.h`, `HudFrameCompiler::element_end_round_overlay`, `EndRoundPresenter`); the S2C 0x56 stat board pulled over C2S 0x2B feeds the stat.mnu STAT screen (`npruntime/stat_screen_feed.h`); the toggled Show Score statistics panel (`hud/end_round_statistics.h`; catalog row 99 `ShowScore`, F5, action 422) and the joiner's `g_round_time_remaining` fold are live; the stat.mnu exit is confirmed and player-initiated: HIDDEN_BACK's authored actions raise CONFIRM_EXIT and the CONFIRM_YES command exits the mission (`[orig: UI_StatConfirmExitCommand @0x562210]` — the same close-screens + action-3 pair as the pause menu's confirm; `EndRoundPresenter.exit_to_menu_requested` → the shell's return-to-menu teardown), while the round cycle's own transitions stay the host's | `EndRoundScoreboard_SerializeHeader @0x505280` sent from `Server_ProcessRoundEnd @0x516839`; the non-team form `@0x43086c..0x430883` staged into `byte_A81B40/60/80` `@0x430889..0x4309af`; the ladder `draw_endround_stats_overlay @0x5b7cd0`; `populate_stat_results_list @0x562240`; `HUD_DrawEndRoundStatistics @0x5b7600` behind `g_showEndRoundStatistics @0x24C18AC`; the 0x0A sub-block 1 host projection `@0x4ffa81..0x4ffaca`; the post-STAT once-only latch `@0x5b864a`; the host's linger-expiry mission exit, reason 3 `@0x51db63` | Closed on the ledger's 2026-08-24 closure line; the full transaction is net-re §5.68 (the 0x56 chunk pull) plus the 0x1D / 0x56 catalog rows. One recorded residual rides the npwire protocol-cursor contract: the decoder REJECTS a short stream where retail zero-fills. |
 | D-HUD-26 | No terrain-ring scope overlay: every scoped weapon takes the standard scope/sights treatment, and the per-frame camera shake samples twice (quantum + frame) | `Render_ProcessMainSceneFrame` draws `Render_RadarCompassOverlay @0x5c9740` when the equipped weapon can fire, `Player_IsEquippedWeaponScoped` holds, the def flags word carries `0x200`, and the binocular view is down (gate `@0x5ca949`, outdoors flag forwarded): two GDynamicVB ring primitives (inner filled, outer outline) clip a full 3D terrain scene (`Render_TerrainScene`) re-rendered from a THIRD `Camera_ComputeThirdPersonView` call that frame (`@0x5c9841` — advancing the mode-0 shake IIRs once more, its shaken pose rendering), with the equipped slot's elevation counters applied (`pitch -= counter[1]`, `yaw += counter[2]` `@0x5c98fc..0x5c9903`) and a near-Z swap to 0.2 (`@0x5c992d`) | The mortar-class scope view is a whole unported overlay (ledger D-HUD-26, OPEN). Porting it is a render+HUD slice: ring mask, the offset camera, a second terrain scene pass. Until then the third IIR advance is deliberately absent (`local_player_view_frame` carries the pointer) — the shake trajectory differs only while this overlay would draw, with identical per-axis distribution. |
 | D-HUD-27 | **FIXED 2026-09-16.** Rendered scope camera omitted the active slot offsets; scope range/elevation/magnification text was absent | Modern main-scene Sighted/Scoped camera branches `[orig: Render_ProcessMainSceneFrame @ 0x5ca452..0x5ca4a0]`; HUD text/gates `[orig: HUD_DrawScopeOverlayDetails @ 0x59e420]` | Camera consumer and typed HUD feed ported; standing/prone and text policy regressions pass. The separate flag-8 vehicle target reticle and D-HUD-26 terrain-ring overlay are not included. |
+| D-HUD-28 | **FIXED 2026-09-19.** Missing seat-specific HUD dispatch and mounted stance; vehicle proxy for Inset reticle; repeated capacity-one ammo folding for flash | `HUD_RenderOverlays @0x5A7CC0..0x5A7D55`; `HUD_BuildEntityInfo @0x4B8539..0x4B8786`; Inset `@0x4DCCB0`; flash `@0x599A30` | Native seat/view and real presenter regressions pass; [mode matrix and remaining gaps](weapon-vehicle-hud-validation.md). |
 
 ## Follow-ups (not yet witnessed / deferred)
 

@@ -482,6 +482,9 @@ typedef struct DefWeaponDef {
         @ 0x4dbe29..0x4dbe57, Player_MountWeaponSlot @ 0x4dfad3..0x4dfb16] */
     int scope_max_mag_arg2;    /* +0x94, the slot's initial zoom; 0 = absent */
     int scope_min_mag;         /* +0x98, the zoom floor; default 2 */
+    /* Mounted HUD stance selector; zero uses the carrier/default icon.
+       [orig: emplacedstance @0x544174..0x54419B, HUD @0x4B8539..0x4B8549] */
+    int emplacedstance;
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

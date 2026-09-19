@@ -498,6 +498,8 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.def.heat_decay_per_tick = data.heat_decay_per_tick;
 	w.def.heat_glow_threshold = data.heat_glow_threshold;
 	w.scope_max_mag = data.scope_max_mag;
+    w.hud_category = data.hud_category;
+    w.emplaced_stance = data.emplaced_stance;
     w.pitch_min_bam = data.pitch_min_bam;
     w.pitch_max_bam = data.pitch_max_bam;
     if (!same_weapon_rebake) {
@@ -1321,6 +1323,8 @@ WeaponInstallData weapon_install_data_from_def(const DefWeaponDef &row) {
 	data.heat_decay_per_tick = row.heat_decay_per_tick;
 	data.heat_glow_threshold = row.heat_glow_threshold;
 	data.scope_max_mag = row.scope_max_mag;
+    data.hud_category = row.category;
+    data.emplaced_stance = row.emplacedstance;
     // The parser negates the minimum and uses truncated BAM/degree.
     // [orig: WeaponDefs_ParseLineCallback @0x5443B8..0x54444D]
     data.pitch_min_bam = int32_t(0u - uint32_t(row.targetpitchmin) * 11930464u);

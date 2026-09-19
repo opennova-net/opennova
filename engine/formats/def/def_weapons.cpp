@@ -473,6 +473,10 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 if (hn >= 1) safe_copy(cw.heat_effect, sizeof(cw.heat_effect), hv[0].s, hv[0].len);
                 if (hn >= 2) cw.heat_glow_threshold = parse_fixed16_digits_n(hv[1].s, hv[1].len);
                 parsed = 1;
+            } else if (lower_match_key(lower, ll, "emplacedstance", 14)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+                cw.emplacedstance = parse_int_n(v, vl);
+                parsed = 1;
             } else if (lower_match_key(lower, ll, "special_hold", 12)) {
                 /* 3P hold-pose kind, atol [orig: weapon.def key 'special_hold' ->
                    record+0xA4 @ 0x543cb7/0x543cd8]. */

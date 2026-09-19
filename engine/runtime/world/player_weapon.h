@@ -171,6 +171,7 @@ struct LocalPlayerWeapon {
     // AbsorbPitch: WeaponDef+316/+320 and local elevation dword_B79008.
     // [orig: Player_MountWeaponSlot @0x4DFA40]
     int32_t pitch_min_bam = 0, pitch_max_bam = 0, pitch_offset_bam = 0;
+    int hud_category = 0, emplaced_stance = 0;
     int32_t attack_kind = 0;
     int32_t run_anim = 0;
     bool force_crouch = false;
@@ -202,6 +203,7 @@ struct WeaponInstallData {
     WeaponScopeZero scope_zero;
     int32_t ammo_cost = 0;
     int32_t pitch_min_bam = 0, pitch_max_bam = 0;
+    int hud_category = 0, emplaced_stance = 0;
     std::string soundfireloop;
     std::string soundtrailoff;
     std::string soundhead;

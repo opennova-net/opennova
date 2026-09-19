@@ -48,6 +48,8 @@ public:
 	int get_camera_mode() const { return value_.camera_mode; }
 	bool get_camera_mounted() const { return value_.camera_mounted; }
 	bool get_vehicle_attack_context() const { return value_.vehicle_attack_context; }
+    int get_hud_stance() const { return value_.hud_stance; }
+    bool get_hud_keep_crosshair_while_aimed() const { return value_.hud_keep_crosshair_while_aimed; }
 	// 0 = hip .. 1 = sighted, over the toggle's ease steps.
 	float get_scope_fraction() const { return value_.scope_fraction; }
 	// The NoCardSwitch reload rule: the FP view bias is dropped for the frame.
