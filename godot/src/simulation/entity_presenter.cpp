@@ -571,8 +571,8 @@ constexpr double kHandFrameYRad = opennova::world::kHeldWeaponHandFrameYRad;
 
 Basis EntityPresenter::held_weapon_hand_frame_basis(const Basis &bone_model_to_world) {
 	// Row-major `Ry_e · Rz_e · M16` = the calibrations on the RIGHT in column
-	// form; signs as authored (two inversions cancel — the native world ledger
-	// documents why).
+	// form; signs as authored (two inversions cancel — the entity_pose.h
+	// ledger documents why).
 	return bone_model_to_world * Basis(Vector3(0, 0, 1), kHandFrameZRad) *
 			Basis(Vector3(0, 1, 0), kHandFrameYRad);
 }

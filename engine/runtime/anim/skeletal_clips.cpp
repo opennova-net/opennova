@@ -93,50 +93,50 @@ void SkeletalClips::clear() {
 }
 
 bool SkeletalClips::load_from_adm(
-        const assets::AssetStore *assets, const std::string &adm_name,
-        const std::vector<anim::Vec3> &model_bone_origins,
-        const std::vector<int> &model_bone_parents) {
-    clear();
-    if (!assets || adm_name.empty()) return false;
-    const auto map = assets->animation_map(adm_name);
-    if (!map) return false;
-    std::string reset_value;
-    std::vector<std::pair<std::string, std::string>> clips;
-    for (size_t i = 0; i < map->count; ++i) {
-        const auto &entry = map->entries[i];
-        if (entry.variant_count && entry.variants[0] && entry.variants[0][0]) {
-            if (reset_value.empty()) reset_value = entry.variants[0];
-            if (strutil::to_lower(entry.key).find("reset") != std::string::npos) {
-                reset_value = entry.variants[0];
-                break;
-            }
-        }
-    }
-    // Every authored token registers a variant, including repeated files.
-    // [orig: AnimMap_ParseConfigLine @0x40cb60; AnimMap_RegisterBoneNode @0x40c2d0]
-    for (size_t i = 0; i < map->count; ++i) {
-        const auto &entry = map->entries[i];
-        for (size_t v = 0; v < entry.variant_count; ++v)
-            if (entry.variants[v] && entry.variants[v][0])
-                clips.emplace_back(entry.key, entry.variants[v]);
-    }
-    const bool ok = load_from_files(assets, reset_value, clips,
-                                   model_bone_origins, model_bone_parents);
-    adm_name_ = adm_name;
-    return ok;
+		const assets::AssetStore *assets, const std::string &adm_name,
+		const std::vector<anim::Vec3> &model_bone_origins,
+		const std::vector<int> &model_bone_parents) {
+	clear();
+	if (!assets || adm_name.empty()) return false;
+	const auto map = assets->animation_map(adm_name);
+	if (!map) return false;
+	std::string reset_value;
+	std::vector<std::pair<std::string, std::string>> clips;
+	for (size_t i = 0; i < map->count; ++i) {
+		const auto &entry = map->entries[i];
+		if (entry.variant_count && entry.variants[0] && entry.variants[0][0]) {
+			if (reset_value.empty()) reset_value = entry.variants[0];
+			if (strutil::to_lower(entry.key).find("reset") != std::string::npos) {
+				reset_value = entry.variants[0];
+				break;
+			}
+		}
+	}
+	// Every authored token registers a variant, including repeated files.
+	// [orig: AnimMap_ParseConfigLine @0x40cb60; AnimMap_RegisterBoneNode @0x40c2d0]
+	for (size_t i = 0; i < map->count; ++i) {
+		const auto &entry = map->entries[i];
+		for (size_t v = 0; v < entry.variant_count; ++v)
+			if (entry.variants[v] && entry.variants[v][0])
+				clips.emplace_back(entry.key, entry.variants[v]);
+	}
+	if (!load_from_files(assets, reset_value, clips, model_bone_origins, model_bone_parents))
+		return false;
+	adm_name_ = adm_name;
+	return true;
 }
 
 bool SkeletalClips::load_from_files(
-        const assets::AssetStore *assets, const std::string &skeleton_bad,
-        const std::vector<std::pair<std::string, std::string>> &clip_bads,
-        const std::vector<anim::Vec3> &model_bone_origins,
-        const std::vector<int> &model_bone_parents) {
-    clear();
-    if (!assets) return false;
-    const auto skeleton = assets->bone_animation(skeleton_bad);
-    if (!skeleton) return false;
-    const BadFile &skeleton_bf = *skeleton;
-    adm_name_ = skeleton_bad;
+		const assets::AssetStore *assets, const std::string &skeleton_bad,
+		const std::vector<std::pair<std::string, std::string>> &clip_bads,
+		const std::vector<anim::Vec3> &model_bone_origins,
+		const std::vector<int> &model_bone_parents) {
+	clear();
+	if (!assets) return false;
+	const auto skeleton = assets->bone_animation(skeleton_bad);
+	if (!skeleton) return false;
+	const BadFile &skeleton_bf = *skeleton;
+	adm_name_ = skeleton_bad;
 
 	// Pass 1: the reset/skeleton .bad -> canonical bones, shared rest origins,
 	// bind pose. Model-table mode (origins + parents paired): the .3di model's
@@ -224,15 +224,15 @@ bool SkeletalClips::load_from_files(
 	// Pass 2: sample every clip against the SHARED skeleton rest origins (not
 	// each clip's own) [orig: AnimMap_RegisterEntity @0x40bb60 pins the rig
 	// skeleton once; AnimMap_PlayAnimBySlot @0x40bda0 never rebuilds it].
-    for (const auto &kv : clip_bads) {
-        if (kv.first.empty() || kv.second.empty()) continue;
-        const auto file = assets->bone_animation(kv.second);
-        if (!file) continue;
-        LoadedClip lc;
-        lc.key = kv.first;
-        lc.clip = anim::sample_clip(*file, shared_rest, false, nullptr, rig_parents);
-        clips_.push_back(std::move(lc));
-    }
+	for (const auto &kv : clip_bads) {
+		if (kv.first.empty() || kv.second.empty()) continue;
+		const auto file = assets->bone_animation(kv.second);
+		if (!file) continue;
+		LoadedClip lc;
+		lc.key = kv.first;
+		lc.clip = anim::sample_clip(*file, shared_rest, false, nullptr, rig_parents);
+		clips_.push_back(std::move(lc));
+	}
 
 	if (clips_.empty()) {
 		rebuild_clip_index();
@@ -402,27 +402,27 @@ bool SkeletalClips::eval_composed_pose(const std::string &primary_key,
 	} else {
 		eval_pose(primary_key, primary_seconds, primary_variant, r_pose);
 	}
-    apply_pose_overlay(r_pose, deltas, classes_, weapon_key, weapon_seconds,
-            weapon_prev_key, weapon_prev_seconds, weapon_blend_weight,
-            weapon_variant, weapon_prev_variant);
-    return !r_pose.empty();
+	apply_pose_overlay(r_pose, deltas, classes_, weapon_key, weapon_seconds,
+			weapon_prev_key, weapon_prev_seconds, weapon_blend_weight,
+			weapon_variant, weapon_prev_variant);
+	return !r_pose.empty();
 }
 
 void SkeletalClips::apply_pose_overlay(std::vector<anim::PoseBone> &pose,
-        const anim::Quat *deltas, const std::vector<uint8_t> &classes,
-        const std::string &weapon_key, double weapon_seconds,
-        const std::string &weapon_prev_key, double weapon_prev_seconds,
-        float weapon_weight, int weapon_variant, int weapon_prev_variant) const {
-    // The witnessed order: primary sample -> weapon-channel mask override ->
-    // aim overlay on top [orig: @0x4b14a7..@0x4b16a7].
-    splice_weapon_channel(pose, weapon_key, weapon_seconds, weapon_prev_key,
-            weapon_prev_seconds, weapon_weight, weapon_variant, weapon_prev_variant);
-    const size_t n = pose.size();
-    if (!n || n != bones_.size() || !deltas || classes.size() < n) return;
-    std::vector<anim::Quat> rotations(n);
-    for (size_t i = 0; i < n; ++i) rotations[i] = pose[i].rotation;
-    anim::apply_aim_overlay(parents_, deltas, classes.data(), rotations);
-    for (size_t i = 0; i < n; ++i) pose[i].rotation = rotations[i];
+		const anim::Quat *deltas, const std::vector<uint8_t> &classes,
+		const std::string &weapon_key, double weapon_seconds,
+		const std::string &weapon_prev_key, double weapon_prev_seconds,
+		float weapon_weight, int weapon_variant, int weapon_prev_variant) const {
+	// The witnessed order: primary sample -> weapon-channel mask override ->
+	// aim overlay on top [orig: @0x4b14a7..@0x4b16a7].
+	splice_weapon_channel(pose, weapon_key, weapon_seconds, weapon_prev_key,
+			weapon_prev_seconds, weapon_weight, weapon_variant, weapon_prev_variant);
+	const size_t n = pose.size();
+	if (!n || n != bones_.size() || !deltas || classes.size() < n) return;
+	std::vector<anim::Quat> rotations(n);
+	for (size_t i = 0; i < n; ++i) rotations[i] = pose[i].rotation;
+	anim::apply_aim_overlay(parents_, deltas, classes.data(), rotations);
+	for (size_t i = 0; i < n; ++i) pose[i].rotation = rotations[i];
 }
 
 } // namespace opennova::anim

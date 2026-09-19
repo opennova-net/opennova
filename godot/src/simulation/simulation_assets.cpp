@@ -260,7 +260,7 @@ void Simulation::finalize_installed_seat_specs() {
 // shared native models. The shell GDScript extractor and its Dictionary
 // install seam are gone; before this cutover the two extractions were diffed
 // live on retail 00TRg (29/29 specs identical, 0 mismatches, 0 native-missing,
-// 2026-08-07). Model userpoints resolve through the sim cache at install, so
+// 2026-08-07). Model userpoints resolve through the shared asset store at install, so
 // boot wires the asset root before the steps run.
 void Simulation::install_native_seat_specs(
 		const Ref<ItemDatabase> &p_item_db,

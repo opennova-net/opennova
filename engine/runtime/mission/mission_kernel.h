@@ -143,9 +143,9 @@ public:
 	// animation source) and clears the pose caches like a root switch; null
 	// reverts to the kernel's own open() mount. The source outlives the kernel.
 	void set_assets(const assets::AssetStore *source);
-    const assets::AssetStore &assets() const {
-        return external_assets_ ? *external_assets_ : owned_assets_;
-    }
+	const assets::AssetStore &assets() const {
+		return external_assets_ ? *external_assets_ : owned_assets_;
+	}
 	// The embedder's already-parsed items.def (the shell's retained rows).
 	// Overrides the open_document parse — the caller keeps it alive for the
 	// kernel's lifetime; null reverts to the kernel's own parse.
@@ -304,7 +304,6 @@ public:
 
 	// --- the mounted root and the mission ------------------------------------
 	ResourceIndex index;
-	assets::AssetStore owned_assets_{&index};
 	std::string root_dir;
 	std::string mission_name;
 	std::string mission_basename;
@@ -432,6 +431,10 @@ private:
 		if (external_assets_ != nullptr) return external_assets_->index();
 		return assets().has_source() ? assets().index() : nullptr;
 	}
+	// The kernel's own store over its open() mount; assets() serves the
+	// embedder's store instead once set_assets installed one. Declared after
+	// `index` (it binds the index's address; the kernel never moves).
+	assets::AssetStore owned_assets_{&index};
 
 	BootFileSource files_;
 	// The per-boot net bring-up hook (KernelBootOptions::bringup_net_session).

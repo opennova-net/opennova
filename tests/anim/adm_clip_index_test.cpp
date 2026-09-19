@@ -27,7 +27,7 @@ int main() {
 
     {
         opennova::ResourceIndex index;
-    opennova::assets::AssetStore index_assets{&index};
+        opennova::assets::AssetStore index_assets{&index};
         TEST_EXPECT(index.scan(std::string(root) + "/fixtures/anim"));
         AdmClipIndex clips;
         // ".adm" appends when missing; keys land lowercased.
@@ -73,7 +73,7 @@ int main() {
                  "anim_wpn_reload\t\t\t\t\"mp5_1r\"\r\n";
         }
         opennova::ResourceIndex index;
-    opennova::assets::AssetStore index_assets{&index};
+        opennova::assets::AssetStore index_assets{&index};
         TEST_EXPECT(index.scan(dir));
         AdmClipIndex clips;
         TEST_EXPECT(clips.load(&index_assets, "mp5_1st.adm") == 0);

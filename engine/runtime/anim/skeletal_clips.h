@@ -17,8 +17,8 @@
 
 #include <string>
 #include <unordered_map>
-#include <vector>
 #include <utility>
+#include <vector>
 
 namespace opennova {
 namespace assets { class AssetStore; }
@@ -45,11 +45,11 @@ public:
 	bool load_from_adm(const assets::AssetStore *assets, const std::string &adm_name,
 	                   const std::vector<anim::Vec3> &model_bone_origins,
 	                   const std::vector<int> &model_bone_parents);
-    bool load_from_files(const assets::AssetStore *assets, const std::string &skeleton_bad,
-                         const std::vector<std::pair<std::string, std::string>> &clips,
-                         const std::vector<anim::Vec3> &model_bone_origins = {},
-                         const std::vector<int> &model_bone_parents = {});
-    void clear();
+	bool load_from_files(const assets::AssetStore *assets, const std::string &skeleton_bad,
+						 const std::vector<std::pair<std::string, std::string>> &clips,
+						 const std::vector<anim::Vec3> &model_bone_origins = {},
+						 const std::vector<int> &model_bone_parents = {});
+	void clear();
 
 	bool loaded() const { return loaded_; }
 	const std::string &adm_name() const { return adm_name_; }
@@ -115,14 +115,6 @@ public:
 	const LoadedClip *find_clip(const std::string &key) const;
 	const LoadedClip *find_clip_variant(const std::string &key, int variant) const;
 
-    // Compose channels over an already sampled pose. Presentation can supply
-    // its typed overlay-class rows; authoritative posing uses this rig's rows.
-    void apply_pose_overlay(std::vector<anim::PoseBone> &pose,
-                            const anim::Quat *deltas, const std::vector<uint8_t> &classes,
-                            const std::string &weapon_key, double weapon_seconds,
-                            const std::string &weapon_prev_key = {},
-                            double weapon_prev_seconds = 0.0, float weapon_weight = 1.0f,
-                            int weapon_variant = 0, int weapon_prev_variant = 0) const;
 	// The upper-body WEAPON channel: sample weapon_key at ITS OWN playhead and hard-override
 	// the mask bones' WORLD rotations (clavicles/arms/forearms/neck/head/hands — the
 	// anim::kWeaponChannelMaskBones set by BN## index), then re-localize the complete
@@ -141,8 +133,7 @@ public:
 	// so it takes the same blend window [orig: AnimMap_UpdateDualChannels @0x40b8c0
 	// -> @0x40b5f0 and AnimChannel_BlendTwoChannels @0x410740, see
 	// docs/world/world-wac-ai-re.md §14.8.7]. Empty prev = no blend.
-
-    void splice_weapon_channel(std::vector<anim::PoseBone> &pose,
+	void splice_weapon_channel(std::vector<anim::PoseBone> &pose,
 	                           const std::string &weapon_key,
 	                           double weapon_seconds,
 	                           const std::string &weapon_prev_key = std::string(),
@@ -150,6 +141,20 @@ public:
 	                           float weapon_blend_weight = 1.0f,
 	                           int weapon_variant = 0,
 	                           int weapon_prev_variant = 0) const;
+	// Compose the channels over an already sampled pose: the weapon-channel
+	// splice, then the aim overlay on top, in the witnessed order
+	// [orig: @0x4b14a7..@0x4b16a7 run before the per-bone overlay loop].
+	// Presentation passes its typed overlay-class rows (the SkeletalAnim
+	// binding's get_overlay_classes); authoritative posing passes this rig's
+	// own overlay_classes(). Null deltas or a class row shorter than the pose
+	// skip the overlay; the weapon channel still splices.
+	void apply_pose_overlay(std::vector<anim::PoseBone> &pose,
+			const anim::Quat *deltas, const std::vector<uint8_t> &classes,
+			const std::string &weapon_key, double weapon_seconds,
+			const std::string &weapon_prev_key = std::string(),
+			double weapon_prev_seconds = 0.0, float weapon_weight = 1.0f,
+			int weapon_variant = 0, int weapon_prev_variant = 0) const;
+
 private:
 	void rebuild_clip_index();
 

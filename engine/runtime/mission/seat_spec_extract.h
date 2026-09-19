@@ -27,7 +27,7 @@ struct SeatSpecExtraction {
 	// Sorted by type_id (the runtime table's binary-search order).
 	std::vector<mission::ItemSeatSpec> specs;
 	// The graphic key per emitted type — the mounted-pose model source
-	// (assets::AssetStore::model_for takes exactly this key).
+	// (assets::AssetStore::model takes exactly this key).
 	std::unordered_map<int32_t, std::string> graphic_by_type;
 };
 

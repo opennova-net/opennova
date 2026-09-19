@@ -50,7 +50,7 @@ int main() {
 	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
 			"OPENNOVA_JO_ASSETS (an extracted JO tree carrying weapon.def)");
 	ResourceIndex index;
-    opennova::assets::AssetStore index_assets{&index};
+	opennova::assets::AssetStore index_assets{&index};
 	if (!index.scan(assets) && !index.scan(assets, std::string(), VfsMountMode::LooseOnly))
 		return retail::skip("a mountable OPENNOVA_JO_ASSETS tree");
 	std::vector<uint8_t> bytes;

@@ -419,7 +419,7 @@ int main(void) {
 				sizeof(kAutomatic) - 1, &automatic) == 0);
 
 		opennova::ResourceIndex index;
-    opennova::assets::AssetStore index_assets{&index};
+		opennova::assets::AssetStore index_assets{&index};
 		CHECK(index.scan(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/anim"));
 		const world::WeaponTable unresolved = world::build_weapon_table(automatic);
 		const world::WeaponTable resolved = world::build_weapon_table(automatic, &index_assets);

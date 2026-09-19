@@ -5,8 +5,8 @@ anim slots to `.bad` clip names) and `.bad` (the binary skeletal clip
 container). Implementing code: `engine/formats/adm` (parser), `engine/formats/bad`
 (parser); the `adm_write`/`bad_write.cpp` writers and their flat C ABI were
 retired 2026-08-26 (ADR 0038); runtime consumers
-`engine/runtime/anim` (clip sampling), `engine/runtime/simassets` (clip
-index / root motion / skeletal clip resolution), and
+`engine/runtime/anim` (clip sampling, the clip index, root motion and the
+shared skeletal rig), `engine/runtime/assets` (the shared asset store), and
 `godot/src/object/skeletal_anim.cpp`.
 Binary: retail Jointops.exe; all addresses are that binary's.
 

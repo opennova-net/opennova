@@ -25,9 +25,9 @@ int AdmRootMotion::parse_adm(const opennova::assets::AssetStore *assets,
 	if (assets == nullptr) {
 		return 0;
 	}
-    const auto map = assets->animation_map(adm_name);
-    if (!map) return 0;
-    const AdmFile &adm = *map;
+	const auto map = assets->animation_map(adm_name);
+	if (!map) return 0;
+	const AdmFile &adm = *map;
 	out.adm_name = adm_name;
 
 	// .bad basename resolution, as in SkeletalAnim::load_from_resource_root.
@@ -49,8 +49,8 @@ int AdmRootMotion::parse_adm(const opennova::assets::AssetStore *assets,
 			return cached->second.frame_count > 0 ? &cached->second : nullptr;
 		}
 		Track t;
-        if (const auto file = assets->bone_animation(bad_name)) {
-            const BadFile &bf = *file;
+		if (const auto file = assets->bone_animation(bad_name)) {
+			const BadFile &bf = *file;
 			// Fence-post: frame_count+1 root records [orig: 0x40b230 lerps rec[i]..rec[i+1]].
 			// No fps gate: the channel delta is fps/62/frames with no fps test, so an
 			// fps of 0 is a channel frozen at frame 0 with live capsule extents, not a

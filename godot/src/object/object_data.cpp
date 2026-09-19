@@ -104,20 +104,20 @@ Error ObjectData::open_from_resource_root(
 		last_error = "Only mounted .3di object files are supported";
 		return ERR_FILE_UNRECOGNIZED;
 	}
-    const auto model = p_resource_root->native_assets().model(file.utf8().get_data());
-    if (!model) {
-        last_error = "Object file missing or invalid in resource root: " + file;
-        return p_resource_root->has_file(file) ? ERR_FILE_CANT_READ : ERR_FILE_NOT_FOUND;
-    }
-    _clear();
-    source_model_ = model;
-    source_path = file.get_file();
-    source_dir = p_resource_root->get_root_dir();
-    object_name = model->header.name[0] ? from_native(model->header.name) : filename_stem(file);
-    resource_root = p_resource_root;
-    register_network_challenge_model(file, p_include_in_network_challenge);
-    _notify_object_changed();
-    return OK;
+	const auto model = p_resource_root->native_assets().model(file.utf8().get_data());
+	if (!model) {
+		last_error = "Object file missing or invalid in resource root: " + file;
+		return p_resource_root->has_file(file) ? ERR_FILE_CANT_READ : ERR_FILE_NOT_FOUND;
+	}
+	_clear();
+	source_model_ = model;
+	source_path = file.get_file();
+	source_dir = p_resource_root->get_root_dir();
+	object_name = model->header.name[0] ? from_native(model->header.name) : filename_stem(file);
+	resource_root = p_resource_root;
+	register_network_challenge_model(file, p_include_in_network_challenge);
+	_notify_object_changed();
+	return OK;
 }
 
 void ObjectData::mark_cached_network_challenge_foliage_model(
@@ -142,17 +142,17 @@ int64_t ObjectData::network_challenge_model_count() {
 }
 
 Error ObjectData::_open_3di(const String &p_path) {
-    auto model = opennova::assets::read_model_file(to_native_path(p_path));
-    if (!model) {
-        last_error = "Failed to read 3DI";
-        return ERR_FILE_CANT_READ;
-    }
-    _clear();
-    source_model_ = std::move(model);
-    source_path = p_path;
-    source_dir = p_path.get_base_dir();
-    object_name = source_model_->header.name[0]
-            ? from_native(source_model_->header.name) : filename_stem(p_path);
-    _notify_object_changed();
-    return OK;
+	auto model = opennova::assets::read_model_file(to_native_path(p_path));
+	if (!model) {
+		last_error = "Failed to read 3DI";
+		return ERR_FILE_CANT_READ;
+	}
+	_clear();
+	source_model_ = std::move(model);
+	source_path = p_path;
+	source_dir = p_path.get_base_dir();
+	object_name = source_model_->header.name[0]
+			? from_native(source_model_->header.name) : filename_stem(p_path);
+	_notify_object_changed();
+	return OK;
 }

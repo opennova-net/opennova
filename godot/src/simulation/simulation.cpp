@@ -452,7 +452,7 @@ void Simulation::apply_sound_state_to_world() {
                     reinterpret_cast<const char *>(assets_.sndprof_text.data()), assets_.sndprof_text.size());
     }
     if (const auto *items = kernel_->items_table())
-        opennova::mission::resolve_item_event_sounds(kernel_->world, *items);
+		opennova::mission::resolve_item_event_sounds(kernel_->world, *items);
 	kernel_->world.env.water_z = assets_.env_water_z_q16;
 	kernel_->sync_water_plane();
 }

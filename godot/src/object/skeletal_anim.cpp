@@ -10,7 +10,6 @@
 #include <godot_cpp/variant/quaternion.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-
 #include <runtime/anim/aim_overlay.h> // the torso-bend overlay [orig: @0x4b1290]
 #include <runtime/anim/skeletal_pose.h>
 #include <runtime/world/body_anim.h>
@@ -61,12 +60,12 @@ Array pose_to_array(const std::vector<opennova::anim::PoseBone> &p_pose) {
 // rest must match it (not a sampled clip frame) -- otherwise the skin deforms
 // ~identity at idle but collapses under large motion.
 Transform3D bind_rest_to_godot(const opennova::anim::SkeletalClips::RestTransform &rest) {
-    const float *rows = rest.rows;
-    Basis basis;
-    basis.rows[0] = Vector3(rows[0], rows[1], rows[2]);
-    basis.rows[1] = Vector3(rows[3], rows[4], rows[5]);
-    basis.rows[2] = Vector3(rows[6], rows[7], rows[8]);
-    return Transform3D(basis, Vector3(rest.origin.x, rest.origin.y, rest.origin.z));
+	const float *rows = rest.rows;
+	Basis basis;
+	basis.rows[0] = Vector3(rows[0], rows[1], rows[2]);
+	basis.rows[1] = Vector3(rows[3], rows[4], rows[5]);
+	basis.rows[2] = Vector3(rows[6], rows[7], rows[8]);
+	return Transform3D(basis, Vector3(rest.origin.x, rest.origin.y, rest.origin.z));
 }
 
 std::vector<opennova::anim::Vec3> to_model_origins(const PackedVector3Array &p_origins) {
@@ -91,56 +90,56 @@ std::vector<int> to_model_parents(const PackedInt32Array &p_parents) {
 }  // namespace
 
 const opennova::anim::SkeletalClips &SkeletalAnim::rig() const {
-    static const opennova::anim::SkeletalClips empty;
-    return rig_ ? *rig_ : empty;
+	static const opennova::anim::SkeletalClips empty;
+	return rig_ ? *rig_ : empty;
 }
 
 const SkeletalAnim::LoadedClip *SkeletalAnim::find_clip(const String &key) const {
-    return rig().find_clip(key.utf8().get_data());
+	return rig().find_clip(key.utf8().get_data());
 }
 
 const SkeletalAnim::LoadedClip *SkeletalAnim::find_clip_variant(const String &key, int variant) const {
-    return rig().find_clip_variant(key.utf8().get_data(), variant);
+	return rig().find_clip_variant(key.utf8().get_data(), variant);
 }
 
 bool SkeletalAnim::load_from_resource_root(const Ref<ResourceRoot> &p_resource_root,
-        const String &p_adm_name, const PackedVector3Array &p_model_bone_origins,
-        const PackedInt32Array &p_model_bone_parents) {
-    rig_.reset();
-    last_error_ = String();
-    if (p_resource_root.is_null()) {
-        last_error_ = "Resource root is null";
-        return false;
-    }
-    rig_ = p_resource_root->native_assets().skeletal_rig(p_adm_name.utf8().get_data(),
-            to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents));
-    if (!rig_) last_error_ = "Animation rig missing or invalid: " + p_adm_name;
-    return rig_ != nullptr;
+		const String &p_adm_name, const PackedVector3Array &p_model_bone_origins,
+		const PackedInt32Array &p_model_bone_parents) {
+	rig_.reset();
+	last_error_ = String();
+	if (p_resource_root.is_null()) {
+		last_error_ = "Resource root is null";
+		return false;
+	}
+	rig_ = p_resource_root->native_assets().skeletal_rig(p_adm_name.utf8().get_data(),
+			to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents));
+	if (!rig_) last_error_ = "Animation rig missing or invalid: " + p_adm_name;
+	return rig_ != nullptr;
 }
 
 bool SkeletalAnim::load_from_bad_files(const Ref<ResourceRoot> &p_resource_root,
-        const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
-        const PackedVector3Array &p_model_bone_origins,
-        const PackedInt32Array &p_model_bone_parents) {
-    rig_.reset();
-    last_error_ = String();
-    if (p_resource_root.is_null()) {
-        last_error_ = "Resource root is null";
-        return false;
-    }
-    std::vector<std::pair<std::string, std::string>> clips;
-    const Array keys = p_key_to_bad.keys();
-    for (int i = 0; i < keys.size(); ++i) {
-        const String key = keys[i];
-        const String name = p_key_to_bad[keys[i]];
-        if (!key.is_empty() && !name.is_empty())
-            clips.emplace_back(key.utf8().get_data(), name.utf8().get_data());
-    }
-    rig_ = p_resource_root->native_assets().skeletal_rig_from_files(
-            p_skeleton_bad.utf8().get_data(), clips,
-            to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents));
-    if (!rig_) last_error_ = "Animation rig missing or invalid: " + p_skeleton_bad;
-    return rig_ != nullptr;
+		const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
+		const PackedVector3Array &p_model_bone_origins,
+		const PackedInt32Array &p_model_bone_parents) {
+	rig_.reset();
+	last_error_ = String();
+	if (p_resource_root.is_null()) {
+		last_error_ = "Resource root is null";
+		return false;
+	}
+	std::vector<std::pair<std::string, std::string>> clips;
+	const Array keys = p_key_to_bad.keys();
+	for (int i = 0; i < keys.size(); ++i) {
+		const String key = keys[i];
+		const String name = p_key_to_bad[keys[i]];
+		if (!key.is_empty() && !name.is_empty())
+			clips.emplace_back(key.utf8().get_data(), name.utf8().get_data());
+	}
+	rig_ = p_resource_root->native_assets().skeletal_rig_from_files(
+			p_skeleton_bad.utf8().get_data(), clips,
+			to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents));
+	if (!rig_) last_error_ = "Animation rig missing or invalid: " + p_skeleton_bad;
+	return rig_ != nullptr;
 }
 
 String SkeletalAnim::slot_to_key(int p_slot) const {
@@ -233,21 +232,21 @@ bool SkeletalAnim::is_clip_looping(const String &p_key, int p_variant) const {
 }
 
 Array SkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds,
-        int p_variant) const {
-    std::vector<opennova::anim::PoseBone> pose;
-    rig().eval_pose(p_key.utf8().get_data(), p_playhead_seconds, p_variant, pose);
-    return pose_to_array(pose);
+		int p_variant) const {
+	std::vector<opennova::anim::PoseBone> pose;
+	rig().eval_pose(p_key.utf8().get_data(), p_playhead_seconds, p_variant, pose);
+	return pose_to_array(pose);
 }
 
 Array SkeletalAnim::eval_pose_blended(const String &p_source_key,
-        double p_source_playhead_seconds, const String &p_target_key,
-        double p_target_playhead_seconds, float p_weight,
-        int p_source_variant, int p_target_variant) const {
-    std::vector<opennova::anim::PoseBone> pose;
-    rig().eval_pose_blended(p_source_key.utf8().get_data(), p_source_playhead_seconds,
-            p_target_key.utf8().get_data(), p_target_playhead_seconds,
-            p_weight, pose, p_source_variant, p_target_variant);
-    return pose_to_array(pose);
+		double p_source_playhead_seconds, const String &p_target_key,
+		double p_target_playhead_seconds, float p_weight,
+		int p_source_variant, int p_target_variant) const {
+	std::vector<opennova::anim::PoseBone> pose;
+	rig().eval_pose_blended(p_source_key.utf8().get_data(), p_source_playhead_seconds,
+			p_target_key.utf8().get_data(), p_target_playhead_seconds,
+			p_weight, pose, p_source_variant, p_target_variant);
+	return pose_to_array(pose);
 }
 
 PackedInt32Array SkeletalAnim::get_overlay_classes() const {
@@ -270,9 +269,9 @@ Array SkeletalAnim::eval_pose_overlay_deltas(const String &p_key, double p_playh
 		bool p_collapse_right_hand, const String &p_wpn_prev_key,
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
 		int p_wpn_variant, int p_wpn_prev_variant) const {
-    std::vector<opennova::anim::PoseBone> pose;
-    rig().eval_pose(p_key.utf8().get_data(), p_playhead_seconds, 0, pose);
-    return apply_pose_overlay(std::move(pose),
+	std::vector<opennova::anim::PoseBone> pose;
+	rig().eval_pose(p_key.utf8().get_data(), p_playhead_seconds, 0, pose);
+	return apply_pose_overlay(std::move(pose),
 			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
 			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
 			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
@@ -286,10 +285,10 @@ Array SkeletalAnim::eval_pose_blended_overlay_deltas(
 		double p_wpn_playhead_seconds, bool p_collapse_right_hand,
 		const String &p_wpn_prev_key, double p_wpn_prev_playhead_seconds,
 		float p_wpn_weight, int p_wpn_variant, int p_wpn_prev_variant) const {
-    std::vector<opennova::anim::PoseBone> pose;
-    rig().eval_pose_blended(p_source_key.utf8().get_data(), p_source_playhead_seconds,
-            p_target_key.utf8().get_data(), p_target_playhead_seconds, p_weight, pose);
-    return apply_pose_overlay(std::move(pose),
+	std::vector<opennova::anim::PoseBone> pose;
+	rig().eval_pose_blended(p_source_key.utf8().get_data(), p_source_playhead_seconds,
+			p_target_key.utf8().get_data(), p_target_playhead_seconds, p_weight, pose);
+	return apply_pose_overlay(std::move(pose),
 			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
 			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
 			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
@@ -301,27 +300,27 @@ Array SkeletalAnim::apply_pose_overlay(std::vector<opennova::anim::PoseBone> nat
 		bool p_collapse_right_hand, const String &p_wpn_prev_key,
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
 		int p_wpn_variant, int p_wpn_prev_variant) const {
-    std::vector<uint8_t> classes;
-    classes.reserve(static_cast<size_t>(p_classes.size()));
-    for (int i = 0; i < p_classes.size(); ++i) {
-        const int c = p_classes[i];
-        classes.push_back(static_cast<uint8_t>(
-                c >= 0 && c < int(opennova::anim::kOverlayClassCount) ? c : 0));
-    }
-    opennova::anim::Quat deltas[opennova::anim::kOverlayClassCount];
-    if (p_deltas) {
-        for (size_t c = 0; c < opennova::anim::kOverlayClassCount; ++c) {
-            const Quaternion q = p_deltas[c].get_rotation_quaternion();
-            deltas[c] = {float(q.w), float(q.x), float(q.y), float(q.z)};
-        }
-    }
-    rig().apply_pose_overlay(native_pose, p_deltas ? deltas : nullptr, classes,
-            p_wpn_key.utf8().get_data(), p_wpn_playhead_seconds,
-            p_wpn_prev_key.utf8().get_data(), p_wpn_prev_playhead_seconds,
-            p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
-    Array pose = pose_to_array(native_pose);
-    apply_right_hand_local_collapse(pose, p_collapse_right_hand);
-    return pose;
+	std::vector<uint8_t> classes;
+	classes.reserve(static_cast<size_t>(p_classes.size()));
+	for (int i = 0; i < p_classes.size(); ++i) {
+		const int c = p_classes[i];
+		classes.push_back(static_cast<uint8_t>(
+				c >= 0 && c < int(opennova::anim::kOverlayClassCount) ? c : 0));
+	}
+	opennova::anim::Quat deltas[opennova::anim::kOverlayClassCount];
+	if (p_deltas) {
+		for (size_t c = 0; c < opennova::anim::kOverlayClassCount; ++c) {
+			const Quaternion q = p_deltas[c].get_rotation_quaternion();
+			deltas[c] = {float(q.w), float(q.x), float(q.y), float(q.z)};
+		}
+	}
+	rig().apply_pose_overlay(native_pose, p_deltas ? deltas : nullptr, classes,
+			p_wpn_key.utf8().get_data(), p_wpn_playhead_seconds,
+			p_wpn_prev_key.utf8().get_data(), p_wpn_prev_playhead_seconds,
+			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
+	Array pose = pose_to_array(native_pose);
+	apply_right_hand_local_collapse(pose, p_collapse_right_hand);
+	return pose;
 }
 
 void SkeletalAnim::pose_skeleton_deltas(Skeleton3D *p_skeleton, const String &p_key,

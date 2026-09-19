@@ -81,11 +81,11 @@ bool model_bone_table(const opennova::threedi::Threedi3di3 &model,
 
 class EntityPoseProvider : public world::IPoseProvider {
 public:
-    // Registrations retain immutable model handles from the mounted store.
-    void set_assets(const assets::AssetStore *source) {
-        if (assets_ != source) clear();
-        assets_ = source;
-    }
+	// Registrations retain immutable model handles from the mounted store.
+	void set_assets(const assets::AssetStore *source) {
+		if (assets_ != source) clear();
+		assets_ = source;
+	}
 	void clear();
 
 	// Register the pose model for a collision model id whose canonical first

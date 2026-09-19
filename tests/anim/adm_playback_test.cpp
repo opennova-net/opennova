@@ -74,7 +74,7 @@ int main() {
 		adm << "anim_reset \"once\"\nanim_idle \"slow\"\nanim_walk_forward \"frozen\"\n";
 	}
 	opennova::ResourceIndex index;
-    opennova::assets::AssetStore index_assets{&index};
+	opennova::assets::AssetStore index_assets{&index};
 	TEST_EXPECT(index.scan(dir.string()));
 	opennova::anim::AdmRootMotion source;
 	const int id = source.register_adm(&index_assets, "clock.adm");

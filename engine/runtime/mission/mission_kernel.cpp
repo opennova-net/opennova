@@ -311,7 +311,7 @@ bool MissionKernel::load_mission_into_world(const KernelBootOptions &options) {
     // predicates and dynamically spawned helpers must see those traits now.
     // [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitFromModel]
     if (items_table() != nullptr)
-        mission::resolve_item_traits(world, *items_table(), item_wire_class_);
+		mission::resolve_item_traits(world, *items_table(), item_wire_class_);
 	register_mission_systems();
 	return true;
 }

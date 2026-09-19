@@ -25,9 +25,9 @@ int AdmClipIndex::load(const opennova::assets::AssetStore *assets,
 	if (!strutil::ends_with_icase(name, ".adm")) {
 		name += ".adm";
 	}
-    const auto map = assets->animation_map(name);
-    if (!map) return 0;
-    const AdmFile &adm = *map;
+	const auto map = assets->animation_map(name);
+	if (!map) return 0;
+	const AdmFile &adm = *map;
 	adm_name_ = name;
 
 	for (size_t i = 0; i < adm.count; ++i) {
@@ -46,9 +46,9 @@ int AdmClipIndex::load(const opennova::assets::AssetStore *assets,
 			if (value == nullptr || value[0] == '\0') {
 				continue;
 			}
-            const auto file = assets->bone_animation(value);
-            if (!file) continue;
-            const BadFile &bf = *file;
+			const auto file = assets->bone_animation(value);
+			if (!file) continue;
+			const BadFile &bf = *file;
 			lengths.push_back(bf.fps > 0 && bf.frame_count > 0
 					? static_cast<float>(bf.frame_count) / static_cast<float>(bf.fps)
 					: 0.0f);

@@ -166,9 +166,9 @@ public:
 	// (Simulation::resolve_collision_instances) builds the runtime collision
 	// model from the CDTA block; GDScript keeps the curated getters only.
 	const opennova::threedi::Threedi3di3 &native_model() const {
-        static const opennova::threedi::Threedi3di3 empty{};
-        return source_model_ ? *source_model_ : empty;
-    }
+		static const opennova::threedi::Threedi3di3 empty{};
+		return source_model_ ? *source_model_ : empty;
+	}
 
 	Error open_file(const String &p_path);
 	// Mounted .3DI loads also feed the retail-compatible network challenge registry.

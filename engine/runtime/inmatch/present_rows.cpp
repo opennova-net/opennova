@@ -107,7 +107,7 @@ inline void write_present_vehicle_motion_controls(float *record, const World &wo
 
 // S4b (ADR 0028): the joiner's addeweap reconstruction rides the SAME engine
 // resolver the host authority runs (world::resolve_model_mounted_pose) —
-// one mounted matrix path. The model resolves through the sim cache by the
+// one mounted matrix path. The model resolves through the shared asset store by the
 // installed spec's graphic key, exactly like the host-side resolver.
 bool resolve_client_eweap_attachment_pose(
 		const replication::ClientEntityState &child,

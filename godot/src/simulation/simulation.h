@@ -91,7 +91,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include <runtime/world/present_rows.h> // the engine-owned PF_* present-row layout (ADR 0031)
 #include <runtime/mission/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
 #include <runtime/world/entity_pose.h> // the engine-side pose provider (S3, ADR 0028)
-#include <runtime/assets/asset_store.h> // the sim's own .3di source (ADR 0028)
+#include <runtime/assets/asset_store.h> // the shared native asset store (ADR 0044)
 #include <runtime/world/mounted_pose.h> // reusable PANM part matrices for mounted attachments
 #include <runtime/inmatch/session.h>
 #include <runtime/inmatch/present_rows.h> // PoolPresentLifecycleMap (the host present path's respawn mirror)
@@ -2124,7 +2124,7 @@ public:
 	// Returns the instance count. Also attaches the render-occlusion portal
 	// models (buildings whose graphic carries OVRT/OPLN/OFAC/OOBJ records)
 	// with their def bits. Idempotent per load. Model extraction reads the
-	// sim's own assets::AssetStore through the installed asset root
+	// shared assets::AssetStore through the installed asset root
 	// (set_asset_root; ADR 0028) — a rootless sim attaches nothing.
 	int resolve_collision_instances(const Ref<class ItemDatabase> &p_item_db);
 	// Install the mounted root the SIMULATION resolves assets through — the

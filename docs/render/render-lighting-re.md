@@ -909,7 +909,7 @@ under an orthographic projection of scale 1/extent over the depth band
 near) = −0.00004); ported 2026-08-29 as `renderer::silhouette_capture_basis`
 (since 2026-08-30 the one engine look-at, `renderer::direction_look_at` in
 `direction_look_at.h`, which the addeweap attachment frame in
-`simassets/mounted_pose.cpp` consumes too) and the `kSilhouetteCaptureNear/Far`
+`world/mounted_pose.cpp` consumes too) and the `kSilhouetteCaptureNear/Far`
 constants; as read, that band starts 0.2 u in front of the view origin the
 entity is rendered at, and the render state that admits the entity's near
 half is unwitnessed — D-RLIT-10 records the shell's eye), on the detail-scaled refresh

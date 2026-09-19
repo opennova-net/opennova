@@ -138,11 +138,11 @@ bool EntityPoseProvider::register_skeletal_entity(
 		const std::string &adm_name, const assets::Model &model,
 		const std::string &muzzle_userpoint) {
 	skeletal_sources_.erase(entity.packed);
-    if (assets_ == nullptr || !model || adm_name.empty()) return false;
-    std::vector<anim::Vec3> origins;
-    std::vector<int> parents;
-    if (!model_bone_table(*model, origins, parents)) return false;
-    auto rig = assets_->skeletal_rig(adm_name, origins, parents);
+	if (assets_ == nullptr || !model || adm_name.empty()) return false;
+	std::vector<anim::Vec3> origins;
+	std::vector<int> parents;
+	if (!model_bone_table(*model, origins, parents)) return false;
+	auto rig = assets_->skeletal_rig(adm_name, origins, parents);
 	if (rig == nullptr || !rig->loaded() || !rig->fk_valid()) return false;
 	SkeletalSource source;
 	source.model_id = model_id;

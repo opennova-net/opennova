@@ -1,5 +1,5 @@
 // The seat-spec extraction — the shell's GDScript walk moved verbatim onto
-// the retained def rows + the sim's parse cache (ADR 0028), composed with the
+// the retained def rows + the shared asset store (ADR 0028, ADR 0044), composed with the
 // same slot/clamp validations the Dictionary ingest applied, so the emitted
 // typed table is the exact production composition.
 #include <runtime/mission/seat_spec_extract.h>

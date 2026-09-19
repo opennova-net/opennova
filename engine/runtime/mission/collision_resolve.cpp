@@ -279,8 +279,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		const std::string key(def->graphic);
 		const int32_t resolved_model = collision_model_for_graphic(state, deps, key);
         if (auto *traits = world.tables.item_death_traits.get_mutable(e->item_id);
-                traits != nullptr && !traits->model_loaded && deps.models.has_source()) {
-            if (const Threedi3di3 *model = deps.models.model(key).get()) {
+				traits != nullptr && !traits->model_loaded && deps.models.has_source()) {
+			if (const Threedi3di3 *model = deps.models.model(key).get()) {
                 traits->model_loaded = true;
                 const uint16_t fx_mask = threedi_3di3_user_point_mask(model, def->particlefx.userpoint);
                 for (size_t i = 0; i < model->user_point_count && i < 16; ++i) {
@@ -296,7 +296,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
                     break;
                 }
                 traits->graphic_name = model->header.name;
-                traits->model_radius_q16 = world::model_bound_radius_q16_from_3di(*model);
+				traits->model_radius_q16 = world::model_bound_radius_q16_from_3di(*model);
                 // GPM+24/+28 remain zero in the retail 3DI3 load path. These
                 // legacy fields are distinct from CMDL's XY/Z radii.
                 // [orig: ThreediGp_LoadFromFile @0x5B5780: zero +4..+E7,

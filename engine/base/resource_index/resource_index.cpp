@@ -205,22 +205,22 @@ struct ResourceIndex::Impl {
 };
 
 uint64_t cache_epoch() {
-    return g_cache_epoch.load(std::memory_order_acquire);
+	return g_cache_epoch.load(std::memory_order_acquire);
 }
 
 void bump_cache_epoch() {
-    g_cache_epoch.fetch_add(1, std::memory_order_acq_rel);
+	g_cache_epoch.fetch_add(1, std::memory_order_acq_rel);
 }
 
 ResourceIndex::ResourceIndex() : impl_(std::make_unique<Impl>()) {}
 ResourceIndex::~ResourceIndex() = default;
 ResourceIndex::ResourceIndex(ResourceIndex &&) noexcept = default;
 ResourceIndex &ResourceIndex::operator=(ResourceIndex &&other) noexcept {
-    if (this != &other) {
-        impl_ = std::move(other.impl_);
-        ++revision_;
-    }
-    return *this;
+	if (this != &other) {
+		impl_ = std::move(other.impl_);
+		++revision_;
+	}
+	return *this;
 }
 
 bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansion, VfsMountMode mode,

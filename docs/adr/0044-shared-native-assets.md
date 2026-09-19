@@ -10,8 +10,9 @@ existing format representations.
 The resource index supplies a content revision. Remounts, failed scans and decode
 policy changes invalidate subsequent asset lookups; explicit invalidation also
 supports edited loose files. The existing process-wide cache epoch now lives
-with the native resource index so a refresh reaches simulation lookups immediately. Previously issued handles remain valid snapshots
-until consumers release them. There is no global cache keyed by raw index pointers.
+with the native resource index so a refresh reaches simulation lookups
+immediately. Previously issued handles remain valid snapshots until consumers
+release them. There is no global cache keyed by raw index pointers.
 The source owns the store and outlives its lookups; asset handles can outlive both.
 
 Animation playheads, channel rotation, entity traits and collision instances stay

@@ -225,7 +225,7 @@ int main() {
 	if (!expect(target != nullptr, "entity 650 promoted")) return 1;
 	const w::CollisionMatrix placement = w::entity_placement_matrix(*target);
 	const Threedi3di3 *model = rig.assets().model(kTargetGraphic).get();
-	if (!expect(model != nullptr, "RckS05.3di parses through the sim's model cache")) return 1;
+	if (!expect(model != nullptr, "RckS05.3di parses through the shared asset store")) return 1;
 	const RenderMesh render = render_mesh(*model, placement);
 	if (!expect(!render.triangles.empty(), "RckS05 has LOD-0 render triangles")) return 1;
 	V vmin = render.points[0], vmax = render.points[0];

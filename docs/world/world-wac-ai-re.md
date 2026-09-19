@@ -787,7 +787,7 @@ Selection panel) has **no animation control**. Per-entity animation comes from e
    @ 0x541fef`). Port: `engine/runtime/anim/adm_fallback.h` +
    `MissionObjectPlacer::_skeletal_from_adm` (world items and the FP arms/gun
    share it; the cache keys the resolved name). A resolved def's empty
-   `animadm` sets NO clip (`simassets/fp_viewmodel_spec`, 2026-09-12; the
+   `animadm` sets NO clip (`renderer/fp_viewmodel_spec`, 2026-09-12; the
    pre-def bring-up seam survives only for the no-def case, documented there
    as non-retail; the shell then builds the rig without a SkeletalAnim).
    Verified 2026-09-12 that the SkeletalAnim-less rig matches the
@@ -1912,8 +1912,9 @@ root-motion-discarding playhead advance; ctest `infantry`
 `reload_applied` event; the typed-record exposure (`PlayerWeaponView.body_anim_key/
 body_anim_phase` — same-state channels remain populated because their playheads are
 independent; key empty only when the §14.8.6 gate is off); the mask-bone splice
-in `engine/runtime/anim` (`kWeaponChannelMaskBones`) + `SkeletalAnim::splice_weapon_channel`
-composed in WORLD-rotation space inside `eval_pose_overlay` in the witnessed order;
+in `engine/runtime/anim` (`kWeaponChannelMaskBones`) + `SkeletalClips::splice_weapon_channel`
+composed in WORLD-rotation space inside `SkeletalClips::apply_pose_overlay` (the
+`SkeletalAnim` binding's `eval_pose_overlay_deltas` routes there) in the witnessed order;
 `ObjectModel.set_weapon_channel` and `LocalPlayerPresenter._update_avatar` consumption.
 Live-verified (the `infantry` ctest's retail weapon-channel leg, formerly
 `body_reload_probe`; historical ONED PIE,
@@ -1957,8 +1958,8 @@ shared advance onto AI bodies:**
    (mirrors `begin_body_transition`; the `wpn_prev/wpn_prev_clip_phase/wpn_blend_weight/
    wpn_blend_step` trio), the advance in `AiSystem::infantry_weapon_channel_advance`,
    and ONE composition seam for both presentation and authoritative collision —
-   `SkeletalAnim::splice_weapon_channel` / `SkeletalClips::splice_weapon_channel`
-   evaluate the outgoing/target weapon clips through `eval_pose_blended` before the
+   `SkeletalClips::splice_weapon_channel` (the `SkeletalAnim` binding and the
+   collision pose provider both compose through it) evaluates the outgoing/target weapon clips through `eval_pose_blended` before the
    mask splice. The `PF_WPN_SOURCE_STATE / _SOURCE_PHASE_TICKS / _BLEND_WEIGHT`
    present fields mirror the primary's `PF_ANIM_SOURCE_*` trio so wire peers cross-fade
    too. Note the ladder's own outputs (43–66) never carry `0x400`; the slow window is

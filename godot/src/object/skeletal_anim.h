@@ -41,12 +41,12 @@ class SkeletalAnim : public RefCounted {
 	GDCLASS(SkeletalAnim, RefCounted)
 
 private:
-    using LoadedClip = opennova::anim::SkeletalClips::LoadedClip;
-    opennova::assets::SkeletalRig rig_;
-    String last_error_;
-    const opennova::anim::SkeletalClips &rig() const;
-    const LoadedClip *find_clip(const String &key) const;
-    const LoadedClip *find_clip_variant(const String &key, int variant) const;
+	using LoadedClip = opennova::anim::SkeletalClips::LoadedClip;
+	opennova::assets::SkeletalRig rig_;
+	String last_error_;
+	const opennova::anim::SkeletalClips &rig() const;
+	const LoadedClip *find_clip(const String &key) const;
+	const LoadedClip *find_clip_variant(const String &key, int variant) const;
 	Array apply_pose_overlay(std::vector<opennova::anim::PoseBone> p_pose,
 			const PackedInt32Array &p_classes, const Basis *p_deltas,
 			const String &p_wpn_key, double p_wpn_playhead_seconds,
