@@ -2100,7 +2100,6 @@ add_test(NAME mission_kernel_lifecycle COMMAND mission_kernel_lifecycle_test)
 # drain, and the dedicated (HostOnly) bring-up.
 add_executable(host_role_test mission/host_role_test.cpp)
 target_link_libraries(host_role_test PRIVATE opennova_net opennova_runtime)
-target_include_directories(host_role_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(host_role_test PRIVATE cxx_std_17)
 add_test(NAME host_role COMMAND host_role_test)
 
@@ -2856,7 +2855,6 @@ add_test(NAME npruntime_joiner_identity COMMAND npruntime_joiner_identity_test)
 
 add_executable(npruntime_client_runtime_test npruntime/client_runtime_test.cpp)
 target_link_libraries(npruntime_client_runtime_test PRIVATE opennova_net opennova_runtime)
-target_include_directories(npruntime_client_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}) # common/null_datagram_socket.h
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
 add_executable(npruntime_client_message_dispatch_test npruntime/client_message_dispatch_test.cpp)
