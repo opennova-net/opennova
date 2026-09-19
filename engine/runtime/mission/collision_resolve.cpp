@@ -278,72 +278,72 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		if (def == nullptr || def->graphic[0] == '\0') continue;
 		const std::string key(def->graphic);
 		const int32_t resolved_model = collision_model_for_graphic(state, deps, key);
-        if (auto *traits = world.tables.item_death_traits.get_mutable(e->item_id);
+		if (auto *traits = world.tables.item_death_traits.get_mutable(e->item_id);
 				traits != nullptr && !traits->model_loaded && deps.models.has_source()) {
 			if (const Threedi3di3 *model = deps.models.model(key).get()) {
-                traits->model_loaded = true;
-                const uint16_t fx_mask = threedi_3di3_user_point_mask(model, def->particlefx.userpoint);
-                for (size_t i = 0; i < model->user_point_count && i < 16; ++i) {
-                    if ((fx_mask & (1u << i)) == 0) continue;
-                    const auto &point = model->user_points[i];
-                    traits->has_particlefx_point = true;
-                    traits->particlefx_point_q16[0] = point.x;
-                    traits->particlefx_point_q16[1] = point.y;
-                    traits->particlefx_point_q16[2] = point.z;
-                    traits->particlefx_direction_q16[0] = point.rot_x;
-                    traits->particlefx_direction_q16[1] = point.rot_y;
-                    traits->particlefx_direction_q16[2] = point.rot_z;
-                    break;
-                }
-                traits->graphic_name = model->header.name;
+				traits->model_loaded = true;
+				const uint16_t fx_mask = threedi_3di3_user_point_mask(model, def->particlefx.userpoint);
+				for (size_t i = 0; i < model->user_point_count && i < 16; ++i) {
+					if ((fx_mask & (1u << i)) == 0) continue;
+					const auto &point = model->user_points[i];
+					traits->has_particlefx_point = true;
+					traits->particlefx_point_q16[0] = point.x;
+					traits->particlefx_point_q16[1] = point.y;
+					traits->particlefx_point_q16[2] = point.z;
+					traits->particlefx_direction_q16[0] = point.rot_x;
+					traits->particlefx_direction_q16[1] = point.rot_y;
+					traits->particlefx_direction_q16[2] = point.rot_z;
+					break;
+				}
+				traits->graphic_name = model->header.name;
 				traits->model_radius_q16 = world::model_bound_radius_q16_from_3di(*model);
-                // GPM+24/+28 remain zero in the retail 3DI3 load path. These
-                // legacy fields are distinct from CMDL's XY/Z radii.
-                // [orig: ThreediGp_LoadFromFile @0x5B5780: zero +4..+E7,
-                // GHDR radius -> raw+24 (GPM+20); wrapper @0x5B6160 returns raw+4]
-                traits->model_radius_xy_q16 = 0;
-                traits->model_radius_z_q16 = 0;
-                if (model->collision != nullptr) {
-                    traits->model_bounds_loaded = true;
-                    for (size_t i = 0; i < model->collision->translation_count; ++i) {
-                        const auto &p = model->collision->translations[i].translation;
-                        traits->model_pivots_q16.push_back({p[0], p[1], p[2]});
-                    }
-                    const auto &bounds = model->collision->model_data;
-                    for (size_t i = 0; i < model->collision->object_count; ++i) {
-                        const auto &section = model->collision->objects[i];
-                        traits->model_section_origins_q16.push_back(
-                                {section.offset[0], section.offset[1], section.offset[2]});
-                        traits->model_section_heights_q16.push_back(static_cast<int32_t>(
-                                uint32_t(section.max[2]) - uint32_t(section.min[2])));
-                    }
-                    if (model->collision->object_count > 0) {
-                        traits->model_section0_min_z_q16 = model->collision->objects[0].min[2];
-                        traits->model_section0_max_z_q16 = model->collision->objects[0].max[2];
-                    }
-                    for (int axis = 0; axis < 3; ++axis) {
-                        traits->model_min_q16[axis] = static_cast<int32_t>(
-                                std::lround(double(bounds.bbox[axis]) * 65536.0));
-                        traits->model_max_q16[axis] = static_cast<int32_t>(
-                                std::lround(double(bounds.bbox[axis + 3]) * 65536.0));
-                    }
-                }
-                // [orig: Entity_InitFromModel @0x40DC30: first SOUND point,
-                // def+0x54A one-based byte; transform consumer @0x408290]
-                for (size_t i = 0; i < model->user_point_count; ++i) {
-                    const auto &point = model->user_points[i];
-                    if (!strutil::iequals(point.name, "SOUND")) continue;
-                    const uint8_t one_based = static_cast<uint8_t>(i + 1);
-                    if (one_based != 0 && one_based <= 127) {
-                        float pos[3];
-                        threedi_user_point_position(&model->user_points[one_based - 1], pos);
-                        traits->has_sound_point = true;
-                        traits->sound_point = {pos[2], -pos[0], pos[1]};
-                    }
-                    break;
-                }
-            }
-        }
+				// GPM+24/+28 remain zero in the retail 3DI3 load path. These
+				// legacy fields are distinct from CMDL's XY/Z radii.
+				// [orig: ThreediGp_LoadFromFile @0x5B5780: zero +4..+E7,
+				// GHDR radius -> raw+24 (GPM+20); wrapper @0x5B6160 returns raw+4]
+				traits->model_radius_xy_q16 = 0;
+				traits->model_radius_z_q16 = 0;
+				if (model->collision != nullptr) {
+					traits->model_bounds_loaded = true;
+					for (size_t i = 0; i < model->collision->translation_count; ++i) {
+						const auto &p = model->collision->translations[i].translation;
+						traits->model_pivots_q16.push_back({p[0], p[1], p[2]});
+					}
+					const auto &bounds = model->collision->model_data;
+					for (size_t i = 0; i < model->collision->object_count; ++i) {
+						const auto &section = model->collision->objects[i];
+						traits->model_section_origins_q16.push_back(
+								{section.offset[0], section.offset[1], section.offset[2]});
+						traits->model_section_heights_q16.push_back(static_cast<int32_t>(
+								uint32_t(section.max[2]) - uint32_t(section.min[2])));
+					}
+					if (model->collision->object_count > 0) {
+						traits->model_section0_min_z_q16 = model->collision->objects[0].min[2];
+						traits->model_section0_max_z_q16 = model->collision->objects[0].max[2];
+					}
+					for (int axis = 0; axis < 3; ++axis) {
+						traits->model_min_q16[axis] = static_cast<int32_t>(
+								std::lround(double(bounds.bbox[axis]) * 65536.0));
+						traits->model_max_q16[axis] = static_cast<int32_t>(
+								std::lround(double(bounds.bbox[axis + 3]) * 65536.0));
+					}
+				}
+				// [orig: Entity_InitFromModel @0x40DC30: first SOUND point,
+				// def+0x54A one-based byte; transform consumer @0x408290]
+				for (size_t i = 0; i < model->user_point_count; ++i) {
+					const auto &point = model->user_points[i];
+					if (!strutil::iequals(point.name, "SOUND")) continue;
+					const uint8_t one_based = static_cast<uint8_t>(i + 1);
+					if (one_based != 0 && one_based <= 127) {
+						float pos[3];
+						threedi_user_point_position(&model->user_points[one_based - 1], pos);
+						traits->has_sound_point = true;
+						traits->sound_point = {pos[2], -pos[0], pos[1]};
+					}
+					break;
+				}
+			}
+		}
 		// The blast window path resolves from the INTACT graphic. Cache even a
 		// miss so repeated attachment sweeps never reopen or rewalk the model.
 		auto glass_it = state.glass_points_by_graphic.find(key);
@@ -583,7 +583,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			}
 			if (world::ItemDeathTraits *t =
 						world.tables.item_death_traits.get_mutable(e->item_id)) {
-                t->primary_husk_loaded = first_husk_m3 != nullptr;
+				t->primary_husk_loaded = first_husk_m3 != nullptr;
 				t->husk_model_loaded =
 						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
 				// The death-flash radius source is the PIECE model — huskFinal
@@ -763,22 +763,22 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				const CollisionHuskPieceInfo &info = hs->second;
 				if (t->husk_section_count == 0 && info.sections > 0)
 					t->husk_section_count = info.sections;
-                // The section-piece render pivot walks the PRIMARY husk's COBJ
-                // list: a spawned section never carries +0x38 huskFinalModel
-                // (Entity_SpawnSectionEntity's memset template @0x440322 stores
-                // only [13] = +0x34 huskModel @0x440343), so the +0x38 ?: +0x34
-                // pick lands on +0x34; the final husk stands in only where
-                // retail would dereference a null +0x34.
-                // [orig: Entity_BuildDeathSectionTransforms @0x492B46 / @0x492B4D]
-                if (t->husk_section_origins_q16.empty()) {
-                    const Threedi3di3 *piece = first_husk_m3 != nullptr ? first_husk_m3 : final_husk_m3;
-                    if (piece && piece->collision) {
-                        for (size_t i = 0; i < piece->collision->object_count; ++i) {
-                            const auto &p = piece->collision->objects[i].offset;
-                            t->husk_section_origins_q16.push_back({p[0], p[1], p[2]});
-                        }
-                    }
-                }
+				// The section-piece render pivot walks the PRIMARY husk's COBJ
+				// list: a spawned section never carries +0x38 huskFinalModel
+				// (Entity_SpawnSectionEntity's memset template @0x440322 stores
+				// only [13] = +0x34 huskModel @0x440343), so the +0x38 ?: +0x34
+				// pick lands on +0x34; the final husk stands in only where
+				// retail would dereference a null +0x34.
+				// [orig: Entity_BuildDeathSectionTransforms @0x492B46 / @0x492B4D]
+				if (t->husk_section_origins_q16.empty()) {
+					const Threedi3di3 *piece = first_husk_m3 != nullptr ? first_husk_m3 : final_husk_m3;
+					if (piece && piece->collision) {
+						for (size_t i = 0; i < piece->collision->object_count; ++i) {
+							const auto &p = piece->collision->objects[i].offset;
+							t->husk_section_origins_q16.push_back({p[0], p[1], p[2]});
+						}
+					}
+				}
 				if (t->husk_section_centers.empty() && !info.centers.empty())
 					t->husk_section_centers = info.centers;
 				t->husk_rest_min_z = info.rest_min_z;

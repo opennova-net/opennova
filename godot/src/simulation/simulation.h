@@ -180,7 +180,7 @@ class TickSink;
 // each tick. Runtime transport and fixture teardown share the
 // play/pause/step/restart surface.
 class Simulation : public RefCounted,
-                       private opennova::inmatch::TickObserver {
+					   private opennova::inmatch::TickObserver {
 	GDCLASS(Simulation, RefCounted)
 
 public:
@@ -309,13 +309,13 @@ public:
 		PF_FOCAL_SWAY_Y = opennova::world::PF_FOCAL_SWAY_Y,
 		PF_FOCAL_SWAY_Z = opennova::world::PF_FOCAL_SWAY_Z,
 		PF_DOOR_COUNT = opennova::world::PF_DOOR_COUNT,
-        PF_HUSK = opennova::world::PF_HUSK,
-        PF_OBJECT_DESTROY = opennova::world::PF_OBJECT_DESTROY,
-        PF_OBJECT_DESTROY01 = opennova::world::PF_OBJECT_DESTROY01,
-        PF_OBJECT_DESTROY02 = opennova::world::PF_OBJECT_DESTROY02,
-        PF_OBJECT_DESTROY03 = opennova::world::PF_OBJECT_DESTROY03,
-        PF_OBJECT_DESTROY04 = opennova::world::PF_OBJECT_DESTROY04,
-        PF_OBJECT_DESTROY05 = opennova::world::PF_OBJECT_DESTROY05,
+		PF_HUSK = opennova::world::PF_HUSK,
+		PF_OBJECT_DESTROY = opennova::world::PF_OBJECT_DESTROY,
+		PF_OBJECT_DESTROY01 = opennova::world::PF_OBJECT_DESTROY01,
+		PF_OBJECT_DESTROY02 = opennova::world::PF_OBJECT_DESTROY02,
+		PF_OBJECT_DESTROY03 = opennova::world::PF_OBJECT_DESTROY03,
+		PF_OBJECT_DESTROY04 = opennova::world::PF_OBJECT_DESTROY04,
+		PF_OBJECT_DESTROY05 = opennova::world::PF_OBJECT_DESTROY05,
 		PF_PARACHUTE_DEPLOYED = opennova::world::PF_PARACHUTE_DEPLOYED,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
@@ -888,7 +888,7 @@ public:
 	// Thunder one-shots since the last drain (weather_state.h carries the cites).
 	// NOT ClassDB-bound: MissionAudio plays the engine rows.
 	void drain_weather_sounds(std::vector<opennova::world::WeatherSoundEvent> &r_events);
-    void drain_script_sounds(std::vector<opennova::world::ScriptSoundEvent> &r_events);
+	void drain_script_sounds(std::vector<opennova::world::ScriptSoundEvent> &r_events);
 	// The F3 Environment record (devtools/environment_snapshot.h) as a typed
 	// read for the GUT/probe side; null without a world.
 	Ref<EnvironmentSnapshot> get_environment_snapshot() const;
@@ -920,8 +920,8 @@ public:
 	bool command_lightning_color(int p_rgb);
 
 private:
-    ObjectID music_director_id_;
-    std::shared_ptr<opennova::mus::MusGlobals> wac_music_globals() const;
+	ObjectID music_director_id_;
+	std::shared_ptr<opennova::mus::MusGlobals> wac_music_globals() const;
 	// The shared post-kernel-boot binding legs: session-header capture, HUD
 	// map zoom, score-row re-resolve, and the held-WacProgram re-apply.
 	void finish_kernel_boot();
@@ -1454,8 +1454,8 @@ public:
 	// and queues the scopeup/scopedown FSM states. Returns whether it toggled.
 	// (engine: runtime/world/local_player_view.cpp)
 	bool request_local_player_scope_toggle();
-    void set_local_player_aspect_mode(int p_mode);
-    int get_local_player_aspect_mode() const;
+	void set_local_player_aspect_mode(int p_mode);
+	int get_local_player_aspect_mode() const;
 	bool request_local_player_scope_zero(int p_delta);
 	// Retail action 26 (default B): toggles the persistent binocular request.
 	// The effective raised/view bits are derived each tick from movement, life,
@@ -1544,9 +1544,9 @@ public:
 	// (engine: runtime/world/ammo_table.h). The native form is the C++
 	// consumer's (GameWorld); the bound form wraps the same rows for the tests.
 	void drain_round_impact_rows(std::vector<opennova::world::RoundImpactPresentation> &r_rows);
-    void drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events);
-    std::vector<std::string> script_effect_names() const;
-    void bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene);
+	void drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events);
+	std::vector<std::string> script_effect_names() const;
+	void bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene);
 	TypedArray<RoundImpactRow> drain_round_impacts();
 	// Destructively drain permanent terrain-cache scorch insertions (mission
 	// 16.16 bounds; the consumer folds mission (x,y) to terrain/Godot (x,z)).
@@ -2223,7 +2223,7 @@ public:
 	// follows the viewer team (engine: runtime/world/round_sim.h).
 	// The native form is the throwable pass's; the bound form wraps the same
 	// rows for the tests.
-    void advance_facial_presentation(const Vector3 &p_camera);
+	void advance_facial_presentation(const Vector3 &p_camera);
 	void fill_minefield_draw_rows(std::vector<opennova::world::MinefieldDraw> &r_rows) const;
 	void fill_throwable_visual_rows(std::vector<opennova::world::ThrowableVisualRow> &r_rows) const;
 	TypedArray<ThrowableVisualRow> get_throwable_visuals() const;
@@ -2324,8 +2324,8 @@ public:
 	// serial (retail's slot carries the entity pointer from registration;
 	// this is the lookup that identity stands in for).
 	opennova::world::EntityHandle handle_for_bms_id(int p_bms_id) const;
-    // Native presentation identity for the existing audio occlusion query.
-    int sound_source_bms_id(uint16_t p_handle) const;
+	// Native presentation identity for the existing audio occlusion query.
+	int sound_source_bms_id(uint16_t p_handle) const;
 
 	// The marched iris-exposure sampling (D-RLIT-2): three classification codes
 	// for env::WeatherCore::set_exposure_from_iris_samples — the camera ray runs

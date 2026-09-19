@@ -309,9 +309,9 @@ void Simulation::drain_weather_sounds(std::vector<opennova::world::WeatherSoundE
 }
 
 void Simulation::drain_script_sounds(std::vector<opennova::world::ScriptSoundEvent> &r_events) {
-    r_events.clear();
-    if (!world_installed_ || kernel_ == nullptr) return;
-    r_events.swap(kernel_->world.out.script_sounds);
+	r_events.clear();
+	if (!world_installed_ || kernel_ == nullptr) return;
+	r_events.swap(kernel_->world.out.script_sounds);
 }
 
 Ref<EnvironmentSnapshot> Simulation::get_environment_snapshot() const {
@@ -445,13 +445,13 @@ void Simulation::apply_terrain_to_ai() {
 void Simulation::apply_sound_state_to_world() {
 	if (!kernel_) return;
 	kernel_->world.script.voice.set_set_resolver(voice_set_resolver_);
-    if (assets_.sound_profiles_override) {
-        kernel_->world.tables.sound_profiles.clear();
-        if (!assets_.sndprof_text.empty())
-            kernel_->world.tables.sound_profiles.parse(
-                    reinterpret_cast<const char *>(assets_.sndprof_text.data()), assets_.sndprof_text.size());
-    }
-    if (const auto *items = kernel_->items_table())
+	if (assets_.sound_profiles_override) {
+		kernel_->world.tables.sound_profiles.clear();
+		if (!assets_.sndprof_text.empty())
+			kernel_->world.tables.sound_profiles.parse(
+					reinterpret_cast<const char *>(assets_.sndprof_text.data()), assets_.sndprof_text.size());
+	}
+	if (const auto *items = kernel_->items_table())
 		opennova::mission::resolve_item_event_sounds(kernel_->world, *items);
 	kernel_->world.env.water_z = assets_.env_water_z_q16;
 	kernel_->sync_water_plane();
@@ -475,7 +475,7 @@ void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
 }
 
 void Simulation::set_sound_profiles(const PackedByteArray &p_sndprof_text) {
-    assets_.sound_profiles_override = true;
+	assets_.sound_profiles_override = true;
 	assets_.sndprof_text.assign(p_sndprof_text.ptr(), p_sndprof_text.ptr() + p_sndprof_text.size());
 	apply_sound_state_to_world();
 }
@@ -670,7 +670,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	options.music_globals = wac_music_globals();
 	options.playable = p_playable;
 	options.joiner = is_joiner();
-    options.mp_session = is_host_listening() || is_joiner();
+	options.mp_session = is_host_listening() || is_joiner();
 	// The shell owns the terrain field's parsed-document entry (the store the
 	// setter above built, or none): the kernel never loads one from files here.
 	options.terrain = false;
@@ -754,7 +754,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	options.music_globals = wac_music_globals();
 	options.playable = false; // callers spawn explicitly (or the listen bring-up auto-spawns)
 	options.joiner = is_joiner();
-    options.mp_session = is_host_listening() || is_joiner();
+	options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	stamp_admission_limits(options, net_, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
@@ -780,7 +780,7 @@ void Simulation::build_demo_mission() {
 	options.music_globals = wac_music_globals();
 	options.playable = false;
 	options.joiner = is_joiner();
-    options.mp_session = is_host_listening() || is_joiner();
+	options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	stamp_admission_limits(options, net_, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
@@ -854,8 +854,8 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 	env.music_globals = wac_music_globals();
 	env.registry = &kernel_->world.registry;
 	env.ammo = &kernel_->world.tables.ammo;
-    env.effects = &kernel_->script_effect_catalog;
-    env.sounds = &kernel_->script_sound_catalog;
+	env.effects = &kernel_->script_effect_catalog;
+	env.sounds = &kernel_->script_sound_catalog;
 	opennova::wac::Program program = opennova::wac::compile_program(sources, env);
 	auto holder = std::make_shared<WacProgram>();
 	// Adopt the registry-compiled program into the holder so the retained
@@ -1053,7 +1053,7 @@ int Simulation::debug_kill_group(int p_group) {
 }
 
 Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
-                                                  float p_yaw_deg, float p_pitch_deg) {
+												  float p_yaw_deg, float p_pitch_deg) {
 	if (!kernel_->world.cached.local_player.valid()) {
 		return ERR_UNAVAILABLE;
 	}
@@ -1072,7 +1072,7 @@ Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
 // the binding's lookup, the both-store move is the engine's
 // (EntityCommands::set_entity_position).
 void Simulation::debug_set_world_entity_position(int p_net_id,
-                                                     const Vector3 &p_mission_pos) {
+													 const Vector3 &p_mission_pos) {
 	if (!kernel_ || p_net_id <= 0 || p_net_id > 0xFFFF) return;
 	const opennova::world::EntityHandle h =
 			kernel_->world.registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
@@ -1092,7 +1092,7 @@ Error Simulation::debug_set_world_entity_weapon_ammo(
 }
 
 Error Simulation::debug_set_entity_item_attrib(int p_handle, int64_t p_attrib,
-                                                   int64_t p_attrib2) {
+												   int64_t p_attrib2) {
 	if (!kernel_) return ERR_UNAVAILABLE;
 	// The one non-authoritative role: a joiner's rows are replicas the wire
 	// re-writes, so the seam refuses here as well as in the debug-control
@@ -1168,7 +1168,7 @@ void Simulation::debug_set_panm_time_ms(int64_t p_time_ms) {
 
 namespace {
 PackedInt32Array snapshot_bank(const opennova::world::World *world, int count,
-                               int32_t (opennova::world::ScriptVarStore::*getter)(int) const) {
+							   int32_t (opennova::world::ScriptVarStore::*getter)(int) const) {
 	PackedInt32Array out;
 	out.resize(count);
 	int32_t *w = out.ptrw();
@@ -1190,23 +1190,23 @@ PackedInt32Array Simulation::get_global_variables_snapshot() const {
 }
 
 void Simulation::set_music_director(MusicDirector *director) {
-    music_director_id_ = director ? ObjectID(director->get_instance_id()) : ObjectID();
+	music_director_id_ = director ? ObjectID(director->get_instance_id()) : ObjectID();
 }
 
 std::shared_ptr<opennova::mus::MusGlobals> Simulation::wac_music_globals() const {
-    MusicDirector *director = Object::cast_to<MusicDirector>(ObjectDB::get_instance(music_director_id_));
-    return director ? director->globals_for_wac() : nullptr;
+	MusicDirector *director = Object::cast_to<MusicDirector>(ObjectDB::get_instance(music_director_id_));
+	return director ? director->globals_for_wac() : nullptr;
 }
 
 PackedInt32Array Simulation::get_music_variables_snapshot() const {
-    PackedInt32Array values;
-    const auto &globals = kernel_->wac.program().music_globals;
-    if (globals) {
-        values.resize(opennova::mus::MUS_GLOBALS_BYTES / 4);
-        for (int i = 0; i < values.size(); ++i)
-            values.set(i, opennova::mus::mus_globals_read(*globals, static_cast<uint32_t>(i)));
-    }
-    return values;
+	PackedInt32Array values;
+	const auto &globals = kernel_->wac.program().music_globals;
+	if (globals) {
+		values.resize(opennova::mus::MUS_GLOBALS_BYTES / 4);
+		for (int i = 0; i < values.size(); ++i)
+			values.set(i, opennova::mus::mus_globals_read(*globals, static_cast<uint32_t>(i)));
+	}
+	return values;
 }
 
 void Simulation::set_global_variable(int index, int value) {
