@@ -45,11 +45,6 @@ std::string basename_of(const std::string &name) {
 	return dot == std::string::npos ? name : name.substr(0, dot);
 }
 
-int32_t bam_from_radians(double radians) {
-	return static_cast<int32_t>(
-			static_cast<int64_t>(std::llround(radians * io::kBamPerRadian)));
-}
-
 } // namespace
 
 MissionKernel::MissionKernel() : local(world) {

@@ -42,12 +42,9 @@ inline int ticks_for_seconds(double seconds) {
 	return static_cast<int>(seconds / kTickSeconds + 0.5);
 }
 
-constexpr double kBamPerRad = opennova::io::kBamPerRadian;
 constexpr double kBamPerDeg = 4294967296.0 / 360.0;
 
-inline int32_t bam_from_radians(double radians) {
-	return static_cast<int32_t>(static_cast<int64_t>(std::llround(radians * kBamPerRad)));
-}
+using opennova::io::bam_from_radians;
 
 // The kernel plus the ctest-side halves: retail terrain documents and the
 // two tick roles. Everything a test reads or

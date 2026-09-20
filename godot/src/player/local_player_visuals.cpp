@@ -539,14 +539,8 @@ void LocalPlayerVisuals::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "world"), &LocalPlayerVisuals::setup);
 	ClassDB::bind_method(D_METHOD("reset"), &LocalPlayerVisuals::reset);
 	ClassDB::bind_method(D_METHOD("set_spawn_loadout", "loadout"), &LocalPlayerVisuals::set_spawn_loadout);
-	ClassDB::bind_method(D_METHOD("spawn_loadout"), &LocalPlayerVisuals::spawn_loadout);
 	ClassDB::bind_method(D_METHOD("apply_local_player_spawn_loadout"),
 			&LocalPlayerVisuals::apply_local_player_spawn_loadout);
-	ClassDB::bind_method(D_METHOD("build_local_player_held_weapon", "graphic"),
-			&LocalPlayerVisuals::build_local_player_held_weapon);
-	ClassDB::bind_method(D_METHOD("build_local_player_avatar"), &LocalPlayerVisuals::build_local_player_avatar);
-	ClassDB::bind_method(D_METHOD("prewarm_loaded_model_challenge_definitions"),
-			&LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon_by_name", "weapon_name", "preserve_slot_state"),
 			&LocalPlayerVisuals::set_local_player_weapon_by_name, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("clear_local_player_weapon"), &LocalPlayerVisuals::clear_local_player_weapon);
@@ -556,7 +550,6 @@ void LocalPlayerVisuals::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("local_player_first_person_arms_witness"),
 			&LocalPlayerVisuals::local_player_first_person_arms_witness);
 	ClassDB::bind_method(D_METHOD("local_player_weapon_name"), &LocalPlayerVisuals::local_player_weapon_name);
-	ClassDB::bind_method(D_METHOD("local_weapon"), &LocalPlayerVisuals::local_weapon);
 	ClassDB::bind_method(D_METHOD("set_local_player_nvg_view", "active", "gain"),
 			&LocalPlayerVisuals::set_local_player_nvg_view);
 	ClassDB::bind_method(D_METHOD("local_player_view"), &LocalPlayerVisuals::local_player_view);
@@ -564,6 +557,5 @@ void LocalPlayerVisuals::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"),
 			&LocalPlayerVisuals::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("local_player_viewmodel_def"), &LocalPlayerVisuals::local_player_viewmodel_def);
-	ClassDB::bind_method(D_METHOD("local_player_visual_spec"), &LocalPlayerVisuals::local_player_visual_spec);
 	ClassDB::bind_method(D_METHOD("local_player_character_id"), &LocalPlayerVisuals::local_player_character_id);
 }

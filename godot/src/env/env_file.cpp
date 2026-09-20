@@ -58,9 +58,6 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_fog_start", "overcast"), &EnvFile::get_fog_start, DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("get_fog_density"), &EnvFile::get_fog_density);
 	ClassDB::bind_method(D_METHOD("get_fog_end_distance", "overcast"), &EnvFile::get_fog_end_distance, DEFVAL(0.0f));
-	ClassDB::bind_static_method("EnvFile",
-			D_METHOD("fog_end_above_water", "fog_distance", "overcast"),
-			&EnvFile::fog_end_above_water);
 	ClassDB::bind_method(D_METHOD("get_fog_end_underwater"), &EnvFile::get_fog_end_underwater);
 	ClassDB::bind_method(D_METHOD("get_day_phase", "time"), &EnvFile::get_day_phase);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("double_saturate_color", "color"), &EnvFile::double_saturate_color);

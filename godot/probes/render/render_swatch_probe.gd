@@ -171,11 +171,7 @@ func _capture_mode(out_dir: String, prefix: String) -> void:
 		"grid": {"cols": GRID_COLS, "rows": rows, "cell_world": CELL_WORLD},
 		"cells": cells,
 	}
-	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
-	if mf != null:
-		mf.store_string(JSON.stringify(manifest, "\t"))
-		mf.close()
-	_sink.artifact("%s_manifest" % prefix, out_dir.path_join("%s_manifest.json" % prefix))
+	RenderSwatchSupport.write_manifest(_sink, out_dir, prefix, manifest)
 
 	_sink.logv(["render_swatch_probe: cells=", cells.size(), " png=", png_path, " ok=", err == OK])
 	_sink.quit(0 if err == OK else 1)
@@ -264,11 +260,7 @@ func _composite_mode(out_dir: String, prefix: String) -> void:
 		"window": [WINDOW_SIZE.x, WINDOW_SIZE.y],
 		"scenes": manifest_scenes,
 	}
-	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
-	if mf != null:
-		mf.store_string(JSON.stringify(manifest, "\t"))
-		mf.close()
-	_sink.artifact("%s_manifest" % prefix, out_dir.path_join("%s_manifest.json" % prefix))
+	RenderSwatchSupport.write_manifest(_sink, out_dir, prefix, manifest)
 	cache.clear_water_plane()
 
 	_sink.logv(["render_swatch_probe composite: scenes=", scenes.size(), " png=", png_path, " ok=", err == OK])

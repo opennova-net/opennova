@@ -9,9 +9,6 @@ void MissionFrameInput::_bind_methods() {
 			&MissionFrameInput::set_delta_seconds);
 	ClassDB::bind_method(D_METHOD("get_delta_seconds"),
 			&MissionFrameInput::get_delta_seconds);
-	ClassDB::bind_method(D_METHOD("set_camera_sample", "position", "forward",
-			"listener_valid"), &MissionFrameInput::set_camera_sample,
-			DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_camera_position"),
 			&MissionFrameInput::get_camera_position);
 	ClassDB::bind_method(D_METHOD("is_listener_valid"),
@@ -19,8 +16,6 @@ void MissionFrameInput::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_movement", "forward", "back", "left",
 			"right", "lean_left", "lean_right", "jump"),
 			&MissionFrameInput::set_movement);
-    ClassDB::bind_method(D_METHOD("set_view_keys", "free_look", "up", "down", "left", "right"),
-            &MissionFrameInput::set_view_keys);
 	ClassDB::bind_method(D_METHOD("set_weapon_input", "fire_held", "fire_pressed",
 			"reload_pressed", "medic_pressed"), &MissionFrameInput::set_weapon_input,
 			DEFVAL(false));

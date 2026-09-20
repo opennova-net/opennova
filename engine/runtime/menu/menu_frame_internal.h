@@ -7,6 +7,10 @@
 
 namespace opennova::menu {
 
+inline mnu::RectEdges offset_rect(const mnu::RectEdges &rect, int dx, int dy) {
+	return { rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy };
+}
+
 // Per-widget resolved build info. Rects stay in the 800x600 design space
 // (ints); scaling + the per-element int truncation happen at emit
 // [orig: CUIElement_DrawStretchedTexture @ 0x647d40].

@@ -21,7 +21,6 @@ void ParticleFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tables"), &ParticleFile::get_tables);
 
 	ClassDB::bind_method(D_METHOD("load_from_file", "path"), &ParticleFile::load_from_file);
-	ClassDB::bind_method(D_METHOD("load_from_buffer", "bytes", "display_path"), &ParticleFile::load_from_buffer);
 	ClassDB::bind_method(D_METHOD("find_effect", "id"), &ParticleFile::find_effect);
 	ClassDB::bind_method(D_METHOD("find_particle", "id"), &ParticleFile::find_particle);
 

@@ -789,10 +789,7 @@ func _apply_friendly_tags() -> void:
 func _resolve_weapon_display_name(weapon_name: String) -> String:
 	if weapon_name.is_empty():
 		return ""
-	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	if t != null and t.has_string_in_section(Strings.SECTION_WEPDES, weapon_name):
-		return t.get_string_in_section(Strings.SECTION_WEPDES, weapon_name)
-	return ""
+	return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_WEPDES, weapon_name, "")
 
 
 # Mission effects feed the HUD's text surfaces. Drained effects carry
@@ -1241,10 +1238,7 @@ func _show_triggered_text(text_id: int) -> void:
 	if _game_hud == null:
 		return
 	var key := "ID%03d" % text_id
-	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
-	var text := ""
-	if table != null and table.has_string_in_section("Triggered Text", key):
-		text = table.get_string_in_section("Triggered Text", key)
+	var text: String = Strings.lookup_or(Strings.TABLE_MISSION, "Triggered Text", key, "")
 	if text.is_empty():
 		push_warning("GameHud: mission text %s not found in the mission string table." % key)
 		return

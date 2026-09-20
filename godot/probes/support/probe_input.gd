@@ -14,6 +14,12 @@ static func hold(k: Key, down: bool) -> void:
 	Input.parse_input_event(e)
 
 
+## A full key tap: the press and its release through the input stack.
+static func tap(k: Key) -> void:
+	hold(k, true)
+	hold(k, false)
+
+
 ## Press or release a mouse button.
 static func mouse_btn(b: MouseButton, down: bool) -> void:
 	var e := InputEventMouseButton.new()

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <formats/cbin/cbin.h>
+#include "common/file_io.h"
 #include "common/test_expect.h"
 
 #ifndef OPENNOVA_SOURCE_DIR
@@ -18,16 +19,6 @@
 
 static constexpr const char* kFixturePath =
     OPENNOVA_SOURCE_DIR "/fixtures/cbin/synth_nlist.kda";
-
-static bool load_file(const char* path, std::vector<uint8_t>& out) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return false;
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
-    out.resize(static_cast<size_t>(size));
-    return static_cast<bool>(
-        file.read(reinterpret_cast<char*>(out.data()), size));
-}
 
 static bool items_equal(const opennova::cbin::CreditsDisplayItem& a,
                         const opennova::cbin::CreditsDisplayItem& b) {
@@ -123,7 +114,7 @@ int main() {
     // produces the identical item sequence.
     {
         std::vector<uint8_t> data;
-        TEST_EXPECT(load_file(kFixturePath, data));
+        TEST_EXPECT(test_io::read_file(kFixturePath, data));
         Credits credits;
         std::string error;
         TEST_EXPECT(opennova::cbin::decode_credits(data.data(), data.size(), credits, error));

@@ -74,6 +74,17 @@ static func bind_production_object_resources(material: ShaderMaterial,
 	return material.get_shader_parameter("u_phong_map") != null
 
 
+## Write `<prefix>_manifest.json` beside the grid PNG and report it as an artifact.
+static func write_manifest(sink: Sink, out_dir: String, prefix: String,
+		manifest: Dictionary) -> void:
+	var path := out_dir.path_join("%s_manifest.json" % prefix)
+	var mf := FileAccess.open(path, FileAccess.WRITE)
+	if mf != null:
+		mf.store_string(JSON.stringify(manifest, "\t"))
+		mf.close()
+	sink.artifact("%s_manifest" % prefix, path)
+
+
 static func load_manifest_for(png_path: String) -> Dictionary:
 	var manifest_path := png_path.replace("_grid.png", "_manifest.json")
 	if not FileAccess.file_exists(manifest_path):

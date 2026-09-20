@@ -23,15 +23,6 @@ namespace opennova::world {
 
 namespace w = opennova::world;
 
-namespace {
-
-int32_t bam_from_radians(double radians) {
-	return static_cast<int32_t>(
-			static_cast<int64_t>(std::llround(radians * io::kBamPerRadian)));
-}
-
-} // namespace
-
 bool LocalPlayer::has_local_player() const {
 	const World &world = world_;
 	return world.cached.local_player.valid() && world.registry.get(world.cached.local_player) != nullptr;
@@ -205,8 +196,8 @@ void LocalPlayer::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {
 	World &world = world_;
 	const double dx = target.x - eye.x, dy = target.y - eye.y, dz = target.z - eye.z;
 	const double horizontal = std::sqrt(dx * dx + dy * dy);
-	input.look_heading = bam_from_radians(std::atan2(dy, dx));
-	input.look_pitch = bam_from_radians(std::atan2(dz, horizontal));
+	input.look_heading = io::bam_from_radians(std::atan2(dy, dx));
+	input.look_pitch = io::bam_from_radians(std::atan2(dz, horizontal));
 	if (w::AiEntity *p = player_ai()) {
 		p->inf.target_heading = input.look_heading;
 		p->inf.look_pitch = input.look_pitch;

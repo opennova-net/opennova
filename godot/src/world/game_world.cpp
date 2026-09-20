@@ -636,9 +636,6 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("missing_mission_asset_reason", "asset", "bms_name",
 			"resource_root", "wire_header_join"), &GameWorld::missing_mission_asset_reason);
 	ClassDB::bind_method(D_METHOD("unload"), &GameWorld::unload);
-	ClassDB::bind_method(D_METHOD("settle_join_wire_assets"), &GameWorld::settle_join_wire_assets);
-	ClassDB::bind_method(D_METHOD("is_join_wire_present_drained"),
-			&GameWorld::is_join_wire_present_drained);
 	ClassDB::bind_method(D_METHOD("report_join_wire_asset_failure", "reason"),
 			&GameWorld::report_join_wire_asset_failure);
 	ClassDB::bind_method(D_METHOD("build_minimap_water_mask"), &GameWorld::build_minimap_water_mask);
@@ -729,7 +726,6 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_particles_hidden"), &GameWorld::is_particles_hidden);
 	ClassDB::bind_method(D_METHOD("set_foliage_hidden", "hidden"), &GameWorld::set_foliage_hidden);
 	ClassDB::bind_method(D_METHOD("is_foliage_hidden"), &GameWorld::is_foliage_hidden);
-	ClassDB::bind_method(D_METHOD("route_mission_effects", "effects"), &GameWorld::route_mission_effects);
 	ClassDB::bind_method(D_METHOD("get_minimap_water_mask"), &GameWorld::get_minimap_water_mask);
 	ClassDB::bind_method(D_METHOD("get_effect_world"), &GameWorld::get_effect_world);
 	ClassDB::bind_method(D_METHOD("get_item_effect_director"), &GameWorld::get_item_effect_director);
@@ -738,8 +734,6 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_item_db"), &GameWorld::get_item_db);
 	ClassDB::bind_method(D_METHOD("get_environment_node"), &GameWorld::get_environment_node);
 	ClassDB::bind_method(D_METHOD("get_weather_node"), &GameWorld::get_weather_node);
-	ClassDB::bind_method(D_METHOD("get_debug_mission_minute_of_day"),
-			&GameWorld::get_debug_mission_minute_of_day);
 	ClassDB::bind_method(D_METHOD("debug_set_mission_minute_of_day", "minute_of_day"),
 			&GameWorld::debug_set_mission_minute_of_day);
 	ClassDB::bind_method(D_METHOD("get_water_node"), &GameWorld::get_water_node);

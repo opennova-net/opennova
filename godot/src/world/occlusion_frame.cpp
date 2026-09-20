@@ -43,16 +43,9 @@ int64_t ticks_usec() {
 void OcclusionFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "terrain", "sky", "celestial", "water", "env"),
 			&OcclusionFrame::setup);
-	ClassDB::bind_method(D_METHOD("bind_mission", "sim", "index", "entities"),
-			&OcclusionFrame::bind_mission);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "board"), &OcclusionFrame::set_frame_stats);
-	ClassDB::bind_method(D_METHOD("apply_blink_gates", "forces_indoors"),
-			&OcclusionFrame::apply_blink_gates);
 	ClassDB::bind_method(D_METHOD("apply_frame", "camera", "camera_xform", "forces_indoors"),
 			&OcclusionFrame::apply_frame);
-	ClassDB::bind_method(D_METHOD("enter_probe_skip"), &OcclusionFrame::enter_probe_skip);
-	ClassDB::bind_method(D_METHOD("leave_probe_skip"), &OcclusionFrame::leave_probe_skip);
-	ClassDB::bind_method(D_METHOD("rebind_placed_nodes"), &OcclusionFrame::rebind_placed_nodes);
 	ClassDB::bind_method(D_METHOD("reset"), &OcclusionFrame::reset);
 	ClassDB::bind_method(D_METHOD("is_blink_indoors"), &OcclusionFrame::is_blink_indoors);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "blink_indoors"), "", "is_blink_indoors");

@@ -209,22 +209,13 @@ func _on_load_progress(percent: int) -> void:
 	if _fullscreen_during_load and not _fullscreen_requested and percent >= 0 \
 			and _window != null:
 		_fullscreen_requested = true
-		_press_f11()
+		ProbeInput.tap(WindowState.TOGGLE_KEY)
 		DisplayServer.process_events()
 	# This callback runs after WorldLoadCoordinator presented the checkpoint.
 	# Complete that queued draw before reading back its pixels; frame_post_draw
 	# alone is delivered only after the synchronous loader yields to the loop.
 	RenderingServer.force_draw(true, 0.0)
 	_sample_loading_frame(percent)
-
-
-static func _press_f11() -> void:
-	for pressed in [true, false]:
-		var key := InputEventKey.new()
-		key.keycode = WindowState.TOGGLE_KEY
-		key.physical_keycode = WindowState.TOGGLE_KEY
-		key.pressed = pressed
-		Input.parse_input_event(key)
 
 
 func _on_frame_post_draw() -> void:

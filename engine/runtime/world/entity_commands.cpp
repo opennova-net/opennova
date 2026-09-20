@@ -15,7 +15,6 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/vehicle_attach.h>
-#include <runtime/world/vehicle_sound.h>
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 #include <base/io/bam.h>

@@ -82,7 +82,4 @@ func flush_chat_lines(hud: HudOverlay, sim: Simulation) -> void:
 ## The stdbox title from gametext Overlays/STROVER43; absent, the box draws
 ## untitled (no literal is witnessed for this one).
 func _title() -> String:
-	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	if table != null and table.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER43"):
-		return table.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER43")
-	return ""
+	return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, "STROVER43", "")

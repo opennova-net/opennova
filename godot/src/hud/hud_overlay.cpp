@@ -231,8 +231,6 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_friendly_tag_mode);
 	ClassDB::bind_method(D_METHOD("get_friendly_tag_mode"),
 			&HudOverlay::get_friendly_tag_mode);
-	ClassDB::bind_method(D_METHOD("set_friendly_tag_env", "fog_distance_units", "speaking_level"),
-			&HudOverlay::set_friendly_tag_env);
 	ClassDB::bind_method(D_METHOD("set_hud_color_index", "index"),
 			&HudOverlay::set_hud_color_index);
 	ClassDB::bind_method(D_METHOD("get_hud_color_index"),

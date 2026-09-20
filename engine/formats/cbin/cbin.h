@@ -100,11 +100,6 @@ struct Credits {
 // Special tokens in TEXT content
 namespace tokens {
     constexpr const char* kNewline = "<CR>";
-    constexpr const char* kColorPrefix = "~C";
-    constexpr const char* kJustifyRight = "~JR";
-    constexpr const char* kJustifyLeft = "~JL";
-    constexpr const char* kJustifyCenter = "~JC";
-    constexpr const char* kImagePrefix = "~F0|";
 }
 
 // Check if data starts with CBIN magic.
@@ -120,7 +115,7 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
 // The display view: the Color/Justify CONTROL entries collapsed into effective
 // per-item state, so every consumer of the credits sees stamped items instead
 // of re-deriving the control-code state machine. Semantics carried over from
-// the former ONED .kda editor (no [orig] witnesses yet — the retail read path is the
+// the retired .kda editor (no [orig] witnesses yet — the retail read path is the
 // cbin-re.md PAR-R5 gap); the seeds and emission quirks below are the observed
 // stock-file conventions the editor round-trips against.
 

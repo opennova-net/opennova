@@ -299,27 +299,20 @@ func _ensure_menu() -> bool:
 	return true
 
 
-# The compiled frame is a passive surface — it draws and hit-tests but never
-# pumps input itself; forward its gui input to the driver the way MenuShell
-# does (event positions are frame-local, the space process_mouse expects).
+# The compiled frame is a passive surface; MenuFrameSurface.forward_gui_input
+# forwards its gui input to the driver the way MenuShell does. The armory's
+# lists also take the wheel.
 func _on_frame_gui_input(event: InputEvent) -> void:
 	if _driver == null or not is_open():
 		return
-	if event is InputEventMouseMotion:
-		var motion := event as InputEventMouseMotion
-		_driver.process_mouse(motion.position,
-				(motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0)
-	elif event is InputEventMouseButton:
-		var button := event as InputEventMouseButton
-		if button.button_index == MOUSE_BUTTON_LEFT:
-			_driver.process_mouse(button.position, button.pressed)
+	MenuFrameSurface.forward_gui_input(event, _driver, _frame)
+	var button := event as InputEventMouseButton
+	if button != null and button.pressed and (button.button_index == MOUSE_BUTTON_WHEEL_DOWN \
+			or button.button_index == MOUSE_BUTTON_WHEEL_UP):
+		# One notch = one row tick (D-MNU-18 deliberate divergence).
+		if _driver.process_wheel(button.position,
+				1 if button.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1):
 			_frame.accept_event()
-		elif button.pressed and (button.button_index == MOUSE_BUTTON_WHEEL_DOWN \
-				or button.button_index == MOUSE_BUTTON_WHEEL_UP):
-			# One notch = one row tick (D-MNU-18 deliberate divergence).
-			if _driver.process_wheel(button.position,
-					1 if button.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1):
-				_frame.accept_event()
 
 
 # Armory ACCEPT: the full multi-slot kit (primary/secondary/accessory/grenades + clip

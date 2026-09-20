@@ -182,7 +182,6 @@ public:
 	double mission_minute_of_day() const;
 	// The bound home's exact 8.24 clock.
 	int mission_time_fixed24() const;
-	static double mission_start_time_hhmm(int start_time_q8_8);
 
 	// --- the weather-home reads (world::WeatherState carries the cites) ----
 

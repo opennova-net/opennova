@@ -465,10 +465,9 @@ func _register_text_tables(root: ResourceRoot) -> void:
 
 func _game_text(section: String, key: String, fallback: String) -> String:
 	# [orig: GameText_GetString(Strings.SECTION_WPNAMES, "STRWPNAME%03d") @0x5536a0]
-	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	if t != null and not key.is_empty() and t.has_string_in_section(section, key):
-		return t.get_string_in_section(section, key)
-	return fallback
+	if key.is_empty():
+		return fallback
+	return Strings.lookup_or(Strings.TABLE_GAMETEXT, section, key, fallback)
 
 
 func _recompute_fit() -> void:

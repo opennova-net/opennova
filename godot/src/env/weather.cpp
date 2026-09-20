@@ -43,11 +43,6 @@ void Weather::_bind_methods() {
 			"set_iris_samples", "get_iris_samples");
 
 	ClassDB::bind_method(D_METHOD("bind_simulation", "sim"), &Weather::bind_simulation);
-	ClassDB::bind_method(D_METHOD("run_mission_start_boundary", "sim",
-			"start_time_q8_8", "minutes_per_day"),
-			&Weather::run_mission_start_boundary);
-	ClassDB::bind_method(D_METHOD("set_world_tick_driven", "enabled"),
-			&Weather::set_world_tick_driven);
 	ClassDB::bind_method(D_METHOD("prepare_world_driven"),
 			&Weather::prepare_world_driven);
 	ClassDB::bind_method(D_METHOD("prepare_autonomous"),
@@ -56,8 +51,6 @@ void Weather::_bind_methods() {
 			&Weather::prewarm_mission_start);
 	ClassDB::bind_method(D_METHOD("tick_fixed"), &Weather::tick_fixed);
 	ClassDB::bind_method(D_METHOD("resync_colors"), &Weather::resync_colors);
-	ClassDB::bind_method(D_METHOD("resync_colors_now"),
-			&Weather::resync_colors_now);
 	ClassDB::bind_method(D_METHOD("settle_exposure"),
 			&Weather::settle_exposure);
 	ClassDB::bind_method(D_METHOD("set_sun_veil_stopdown", "stopdown"),
@@ -82,13 +75,6 @@ void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("command_time_of_day_minutes", "minute_of_day"),
 			&Weather::command_time_of_day_minutes);
 	ClassDB::bind_method(D_METHOD("command_fog_type", "type"), &Weather::command_fog_type);
-	ClassDB::bind_method(D_METHOD("command_sky_height", "height_raw"), &Weather::command_sky_height);
-	ClassDB::bind_method(D_METHOD("command_sun_fade", "percent", "seconds"), &Weather::command_sun_fade);
-	ClassDB::bind_method(D_METHOD("command_color_fade", "seconds"), &Weather::command_color_fade);
-	ClassDB::bind_method(D_METHOD("command_wind_scale", "value"), &Weather::command_wind_scale);
-	ClassDB::bind_method(D_METHOD("command_weather_color", "target", "rgb"),
-			&Weather::command_weather_color);
-	ClassDB::bind_method(D_METHOD("command_lightning_color", "rgb"), &Weather::command_lightning_color);
 	ClassDB::bind_method(D_METHOD("set_wind_duration", "seconds"),
 			&Weather::set_wind_duration);
 	ClassDB::bind_method(D_METHOD("get_wind_duration"),
@@ -98,8 +84,6 @@ void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sway_phase"), &Weather::get_sway_phase);
 	ClassDB::bind_method(D_METHOD("get_lightning_intensity"),
 			&Weather::get_lightning_intensity);
-	ClassDB::bind_method(D_METHOD("get_terrain_light_combined_rgb"),
-			&Weather::get_terrain_light_combined_rgb);
 
 	ClassDB::bind_method(D_METHOD("get_smooth_fill"), &Weather::get_smooth_fill);
 	ClassDB::bind_method(D_METHOD("get_smooth_sun"), &Weather::get_smooth_sun);

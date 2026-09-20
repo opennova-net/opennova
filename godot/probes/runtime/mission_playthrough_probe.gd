@@ -1023,10 +1023,7 @@ func _text_lines() -> Array[String]:
 ## The "Triggered Text" line for a mission text id, or "" (the HUD's own
 ## lookup: HUD_DisplayTriggeredText reads ID%03i from the mission table).
 func _mission_string(section: String, key: String) -> String:
-	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
-	if table == null or not table.has_string_in_section(section, key):
-		return ""
-	return table.get_string_in_section(section, key)
+	return Strings.lookup_or(Strings.TABLE_MISSION, section, key, "")
 
 
 func _connect_effects() -> void:

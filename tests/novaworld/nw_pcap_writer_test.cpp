@@ -10,6 +10,7 @@
 #include <base/pcapio/pcap_reader.h>
 #include <base/pcapio/pcap_writer.h>
 
+#include "common/file_io.h"
 #include "common/test_paths.h"
 
 #include <cstdio>
@@ -33,17 +34,6 @@ int failures = 0;
 
 std::string temp_path(const char *stem) {
 	return std::string(test_paths_temp_dir()) + "/" + stem;
-}
-
-std::vector<uint8_t> slurp(const std::string &path) {
-	std::vector<uint8_t> out;
-	std::FILE *f = std::fopen(path.c_str(), "rb");
-	if (f == nullptr) return out;
-	uint8_t buf[4096];
-	size_t n = 0;
-	while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) out.insert(out.end(), buf, buf + n);
-	std::fclose(f);
-	return out;
 }
 
 // Three datagrams both directions, varied sizes including an empty-ish one.
@@ -109,7 +99,7 @@ void test_streaming_matches_in_memory_builder() {
 		}
 	}
 
-	const std::vector<uint8_t> streamed = slurp(path);
+	const std::vector<uint8_t> streamed = test_io::read_file(path);
 	const std::vector<uint8_t> in_memory = net::build_pcap_udp(dgrams);
 	CHECK(!streamed.empty(), "the streamed capture is non-empty");
 	CHECK(streamed == in_memory,

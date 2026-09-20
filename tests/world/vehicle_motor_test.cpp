@@ -12,7 +12,6 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_motor_detail.h>
 #include <runtime/world/vehicle_part_anim.h>
-#include <runtime/world/vehicle_sound.h>
 #include <runtime/world/world.h>
 #include <runtime/world/local_player.h>
 #include <runtime/terrain_query/height_field.h>

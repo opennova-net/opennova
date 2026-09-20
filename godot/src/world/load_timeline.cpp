@@ -11,7 +11,6 @@ void LoadTimelineSpan::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_name", "name"), &LoadTimelineSpan::set_name);
 	ClassDB::bind_method(D_METHOD("get_depth"), &LoadTimelineSpan::get_depth);
 	ClassDB::bind_method(D_METHOD("set_depth", "depth"), &LoadTimelineSpan::set_depth);
-	ClassDB::bind_method(D_METHOD("set_start_us", "value"), &LoadTimelineSpan::set_start_us);
 	ClassDB::bind_method(D_METHOD("get_end_us"), &LoadTimelineSpan::get_end_us);
 	ClassDB::bind_method(D_METHOD("set_end_us", "value"), &LoadTimelineSpan::set_end_us);
 	ClassDB::bind_method(D_METHOD("duration_us"), &LoadTimelineSpan::duration_us);

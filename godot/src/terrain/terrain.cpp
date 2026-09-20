@@ -101,12 +101,6 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_frame"), &Terrain::render_frame);
 
 	// Debug API
-	ClassDB::bind_method(D_METHOD("has_visible_terrain_bounds"),
-			&Terrain::has_visible_terrain_bounds);
-	ClassDB::bind_method(D_METHOD("get_visible_terrain_min_height"),
-			&Terrain::get_visible_terrain_min_height);
-	ClassDB::bind_method(D_METHOD("get_visible_terrain_max_height"),
-			&Terrain::get_visible_terrain_max_height);
 	ClassDB::bind_method(D_METHOD("get_visible_patch_count"), &Terrain::get_visible_patch_count);
 	ClassDB::bind_method(D_METHOD("get_patches_active"), &Terrain::get_patches_active);
 
@@ -656,7 +650,7 @@ void Terrain::render_frame() {
 			// docs/terrain/terrain-re.md].
 			cached_env_node->apply_terrain_uniforms(terrain_material);
 			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
-			// one multiply; the shared runtime/ONED tile path consumes this uniform.
+			// one multiply; the tile path consumes this uniform.
 			// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md].
 			tile_overlay_tint = cached_env_node->get_tile_overlay_tint();
 			terrain_material->set_shader_parameter(

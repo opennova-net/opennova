@@ -17,25 +17,12 @@
 #include <vector>
 
 #include <formats/mission/bms.h>
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 
 namespace fs = std::filesystem;
 
 namespace {
-
-std::vector<uint8_t> read_file(const fs::path &path) {
-	std::ifstream file(path, std::ios::binary | std::ios::ate);
-	if (!file.good()) {
-		return {};
-	}
-	const std::streamsize size = file.tellg();
-	file.seekg(0, std::ios::beg);
-	std::vector<uint8_t> data(static_cast<size_t>(size));
-	if (size > 0 && !file.read(reinterpret_cast<char *>(data.data()), size)) {
-		return {};
-	}
-	return data;
-}
 
 bool has_bms_extension(const fs::path &path) {
 	std::string ext = path.extension().string();
@@ -47,7 +34,7 @@ bool has_bms_extension(const fs::path &path) {
 // Canonicalizes one mission. Returns true on success; logs the first divergence on failure.
 bool check_mission(const fs::path &path) {
 	const std::string name = path.filename().string();
-	const std::vector<uint8_t> original = read_file(path);
+	const std::vector<uint8_t> original = test_io::read_file(path.string());
 	if (original.empty()) {
 		std::fprintf(stderr, "  FAIL %s: could not read file\n", name.c_str());
 		return false;

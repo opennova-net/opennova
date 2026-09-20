@@ -34,17 +34,11 @@ func update(hud: HudOverlay, sim: Simulation, frame_counter: int) -> void:
 		_hide(hud)
 		return
 	var strings := {
-		"under_attack": "!Under\nAttack!!",
-		"ready": "!Ready for\nTakeover!",
+		"under_attack": Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS,
+				"STROVER_UNDERATTACK", "!Under\nAttack!!"),
+		"ready": Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS,
+				"STROVER_READYFORTAKEOVER", "!Ready for\nTakeover!"),
 	}
-	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	if table != null:
-		if table.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_UNDERATTACK"):
-			strings["under_attack"] = table.get_string_in_section(
-					Strings.SECTION_OVERLAYS, "STROVER_UNDERATTACK")
-		if table.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_READYFORTAKEOVER"):
-			strings["ready"] = table.get_string_in_section(
-					Strings.SECTION_OVERLAYS, "STROVER_READYFORTAKEOVER")
 	hud.set_lfp_panel(true, game_type, sim.get_local_player_team(), frame_counter,
 			strings, sim)
 	_pushed = true

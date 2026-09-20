@@ -1509,8 +1509,6 @@ ParticleRenderer::~ParticleRenderer() = default;
 void ParticleRenderer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("warm_pipelines", "position"),
 			&ParticleRenderer::warm_pipelines);
-	ClassDB::bind_method(D_METHOD("clear_warm_pipelines"),
-			&ParticleRenderer::clear_warm_pipelines);
 	ClassDB::bind_method(D_METHOD("set_scene", "scene"),
 			&ParticleRenderer::set_scene);
 	ClassDB::bind_method(D_METHOD("get_scene"),

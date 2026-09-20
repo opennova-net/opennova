@@ -66,7 +66,7 @@ func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool,
 		if label_key != "" and table.has_string_in_section(Strings.SECTION_OVERLAYS, label_key):
 			strings["game_type"] = table.get_string_in_section(Strings.SECTION_OVERLAYS, label_key)
 		# "<label> <count>": the counts are engine-computed — the players
-		# count is netsim's witnessed rows-minus-spectators header arithmetic
+		# count is replication's witnessed rows-minus-spectators header arithmetic
 		# (scoreboard_header); this lane only pairs them with the strings.
 		var spectators := board.spectators
 		if table.has_string_in_section("Client", "STRCLI04"):

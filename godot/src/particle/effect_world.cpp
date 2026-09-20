@@ -818,9 +818,6 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::spawn_effect_owned_request, DEFVAL(Vector3()));
 	ClassDB::bind_method(D_METHOD("spawn_effect_owned", "owner_key", "name", "position", "orientation"),
 			&EffectWorld::spawn_effect_owned, DEFVAL(Vector3()));
-	ClassDB::bind_method(D_METHOD("spawn_effect_attached_request", "owner_key", "name",
-								 "initial_transform", "local_pos", "local_dir"),
-			&EffectWorld::spawn_effect_attached_request);
 	ClassDB::bind_method(D_METHOD("spawn_effect_attached", "owner_key", "name", "initial_transform",
 								 "local_pos", "local_dir"),
 			&EffectWorld::spawn_effect_attached);
@@ -830,9 +827,6 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_effect_by_handle", "handle", "position", "orientation"),
 			&EffectWorld::spawn_effect_by_handle, DEFVAL(Vector3()));
 	ClassDB::bind_method(D_METHOD("stop_group", "group_id"), &EffectWorld::stop_group);
-	ClassDB::bind_method(D_METHOD("trigger_group_children", "group_id", "position", "forward",
-								 "force_zone"),
-			&EffectWorld::trigger_group_children);
 	ClassDB::bind_method(D_METHOD("set_group_parameters", "group_id", "rate_control",
 					"offset_control"),
 			&EffectWorld::set_group_parameters);

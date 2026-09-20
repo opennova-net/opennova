@@ -93,9 +93,6 @@ void AvatarDatabase::_bind_methods() {
 	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("preview_idle_bad"), &AvatarDatabase::preview_idle_bad);
 	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("part_camo_registers"),
-			&AvatarDatabase::part_camo_registers);
-	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("apply_part_camo", "model", "camo", "owner"),
 			&AvatarDatabase::apply_part_camo);
 	ClassDB::bind_method(D_METHOD("load", "path"), &AvatarDatabase::load);
@@ -120,8 +117,6 @@ void AvatarDatabase::_bind_methods() {
 			&AvatarDatabase::first_character_id);
 	ClassDB::bind_method(D_METHOD("character_join_profile", "selection"),
 			&AvatarDatabase::character_join_profile, DEFVAL(Dictionary()));
-	ClassDB::bind_method(D_METHOD("character_join_profile_from_loadout", "loadout"),
-			&AvatarDatabase::character_join_profile_from_loadout);
 
 	BIND_ENUM_CONSTANT(PART_HEAD);
 	BIND_ENUM_CONSTANT(PART_BODY);

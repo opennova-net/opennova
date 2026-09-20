@@ -121,7 +121,6 @@ void NetSessionPolicy::_bind_methods() {
 			D_METHOD("describe_installed", "installed"),
 			&NetSessionPolicy::describe_installed);
 	ClassDB::bind_method(D_METHOD("arm_preload", "now_ms"), &NetSessionPolicy::arm_preload);
-	ClassDB::bind_method(D_METHOD("disarm_preload"), &NetSessionPolicy::disarm_preload);
 	ClassDB::bind_method(D_METHOD("preload_step", "join_error", "now_ms"),
 			&NetSessionPolicy::preload_step);
 	ClassDB::bind_method(D_METHOD("validate_promote_mission_file", "mission_file"),
@@ -132,12 +131,8 @@ void NetSessionPolicy::_bind_methods() {
 			&NetSessionPolicy::validate_promote_header);
 	ClassDB::bind_method(D_METHOD("arm_admission_watch", "now_ms"),
 			&NetSessionPolicy::arm_admission_watch);
-	ClassDB::bind_method(D_METHOD("disarm_admission_watch"),
-			&NetSessionPolicy::disarm_admission_watch);
 	ClassDB::bind_method(D_METHOD("is_admission_watch_active"),
 			&NetSessionPolicy::is_admission_watch_active);
-	ClassDB::bind_method(D_METHOD("request_admission_abort"),
-			&NetSessionPolicy::request_admission_abort);
 	ClassDB::bind_method(D_METHOD("begin_admission_frame", "session_loss_reason",
 								 "deploy_pending", "initial_admission_complete",
 								 "join_error", "admission_stage", "now_ms"),

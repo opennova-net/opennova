@@ -8,14 +8,6 @@ namespace {
 
 constexpr float kTau = 6.28318530717958647692f;
 
-Rgb packed_to_rgb01(uint32_t packed) {
-	Rgb c;
-	c.r = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
-	c.g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
-	c.b = static_cast<float>(packed & 0xFF) / 255.0f;
-	return c;
-}
-
 } // namespace
 
 float WeatherCore::sway_amount() const {

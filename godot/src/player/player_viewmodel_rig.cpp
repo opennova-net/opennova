@@ -428,14 +428,8 @@ void PlayerViewmodelRig::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("vm_parts"), &PlayerViewmodelRig::vm_parts);
 	ClassDB::bind_method(D_METHOD("viewmodel"), &PlayerViewmodelRig::viewmodel);
 	ClassDB::bind_method(D_METHOD("camera"), &PlayerViewmodelRig::camera);
-	ClassDB::bind_method(D_METHOD("set_capture_hidden", "hidden"), &PlayerViewmodelRig::set_capture_hidden);
 	ClassDB::bind_method(D_METHOD("is_capture_hidden"), &PlayerViewmodelRig::is_capture_hidden);
 	ClassDB::bind_method(D_METHOD("projection_feed"), &PlayerViewmodelRig::projection_feed);
-	ClassDB::bind_method(D_METHOD("ensure_viewmodel"), &PlayerViewmodelRig::ensure_viewmodel);
 	ClassDB::bind_method(D_METHOD("refresh_viewmodel"), &PlayerViewmodelRig::refresh_viewmodel);
 	ClassDB::bind_method(D_METHOD("viewmodel_generation"), &PlayerViewmodelRig::viewmodel_generation);
-	ClassDB::bind_method(D_METHOD("clear_viewmodel"), &PlayerViewmodelRig::clear_viewmodel);
-	ClassDB::bind_method(D_METHOD("update_viewmodel", "view", "weapon_view", "third_person", "force_visible"),
-			&PlayerViewmodelRig::update_viewmodel);
-	ClassDB::bind_method(D_METHOD("restamp_at_camera"), &PlayerViewmodelRig::restamp_at_camera);
 }

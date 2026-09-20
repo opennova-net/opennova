@@ -1,5 +1,6 @@
 #include <net/novacrypto/epask.h>
 
+#include <net/novacrypto/ap_alphabet.h>
 #include <net/novacrypto/nwu.h>
 
 #include <chrono>
@@ -45,38 +46,6 @@ bool is_prime(uint64_t n) {
 		if (n % i == 0) return false;
 	}
 	return true;
-}
-
-// A-P alphabet: byte → 2 chars, low nibble first ('A'+lo), high nibble
-// second ('A'+hi). Matches onnw/protocol/crypto.py::epask_decode_nibbles
-// and is the same packing as PUBcrypto's _decode_ap. Kept local because
-// pubcrypto.cpp's helper has internal linkage.
-std::vector<uint8_t> decode_ap(const std::string &s) {
-	if (s.size() % 2 != 0) {
-		throw std::runtime_error("EPASK ciphertext length must be even");
-	}
-	std::vector<uint8_t> out;
-	out.reserve(s.size() / 2);
-	for (size_t i = 0; i < s.size(); i += 2) {
-		const int low  = s[i]     - 'A';
-		const int high = s[i + 1] - 'A';
-		if (low < 0 || low > 15 || high < 0 || high > 15) {
-			throw std::runtime_error("EPASK ciphertext contains non-A-P character");
-		}
-		out.push_back(static_cast<uint8_t>(low | (high << 4)));
-	}
-	return out;
-}
-
-// [orig: NapiNP_EncodeToHexAlpha @ 0x666570 (retail) — A-P, low nibble first ('A'+lo, 'A'+hi)]
-std::string encode_ap(const std::vector<uint8_t> &data) {
-	std::string out;
-	out.reserve(data.size() * 2);
-	for (uint8_t b : data) {
-		out.push_back(static_cast<char>('A' + (b & 0x0Fu)));
-		out.push_back(static_cast<char>('A' + ((b >> 4) & 0x0Fu)));
-	}
-	return out;
 }
 
 // Brute-force modexp decrypt: for each 4-byte LE word in `data`, find

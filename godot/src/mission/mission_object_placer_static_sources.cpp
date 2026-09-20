@@ -196,7 +196,6 @@ MissionObjectPlacer::get_static_terrain_shadow_source_diagnostics() {
 		row->set_entity_kind(source.entity_kind);
 		row->set_entity_index(source.entity_index);
 		row->set_team(source.team);
-		row->set_entity_attrib(static_cast<int64_t>(source.entity_attrib));
 		row->set_item_attrib(static_cast<int64_t>(source.item_attrib));
 		row->set_item_attrib2(static_cast<int64_t>(source.item_attrib2));
 		row->set_graphic(source.graphic);

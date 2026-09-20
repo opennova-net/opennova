@@ -81,8 +81,6 @@ void MissionObjectPlacer::_bind_methods() {
 			"set_item_db", "get_item_db_property");
 	ClassDB::bind_method(D_METHOD("set_avatar_db", "db"),
 			&MissionObjectPlacer::set_avatar_db);
-	ClassDB::bind_method(D_METHOD("get_avatar_db"),
-			&MissionObjectPlacer::get_avatar_db);
 	ClassDB::bind_method(D_METHOD("set_panm_clock", "clock"),
 			&MissionObjectPlacer::set_panm_clock);
 	ClassDB::bind_method(D_METHOD("get_item_db"),
@@ -165,8 +163,6 @@ void MissionObjectPlacer::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("get_static_terrain_shadow_source_revision"),
 			&MissionObjectPlacer::get_static_terrain_shadow_source_revision);
-	ClassDB::bind_method(D_METHOD("graphic_for", "item_id"),
-			&MissionObjectPlacer::graphic_for);
 	ClassDB::bind_method(D_METHOD("object_data_for", "graphic"),
 			&MissionObjectPlacer::object_data_for);
 

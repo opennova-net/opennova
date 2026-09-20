@@ -59,10 +59,6 @@ uint32_t argb_from_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
 			(static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
 }
 
-mnu::RectEdges offset_rect(const mnu::RectEdges &rect, int dx, int dy) {
-	return {rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy};
-}
-
 } // namespace
 
 MenuFrameCompiler::MenuFrameCompiler() = default;

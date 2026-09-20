@@ -307,13 +307,9 @@ func set_weapon_database(weapons: WeaponDatabase) -> void:
 
 # Load weapon.def into the loadout table (best-effort; absent -> empty slot lists).
 func _ensure_weapons() -> void:
-	if _weapons != null or _root == null:
-		return
-	_weapons = WeaponDatabase.new()
-	if _weapons.load_from_resource_root(_root, "weapon.def") != OK or not _weapons.is_loaded():
-		push_warning("PlayerInfoMenuCompanion: weapon.def not loaded (%s); loadout combos stay empty"
-			% _weapons.get_last_error())
-		_weapons = null
+	if _weapons == null and _root != null:
+		_weapons = LoadoutLabels.load_weapon_database(_root, "PlayerInfoMenuCompanion",
+				"loadout combos stay empty")
 
 
 # Fill PRIMARY/SECONDARY/ACCESSORY for the selected class + team, each led by a "NONE" row,
@@ -345,7 +341,7 @@ func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: i
 	rows.append(_menu_text("NONE", "None"))  # NONE at index 0 [orig: @ 0x560430]
 	defs.append(null)
 	for w: WeaponDef in _weapons.get_slot_weapons(slot, class_mask, team_mask):
-		rows.append(_weapon_label(w))
+		rows.append(LoadoutLabels.weapon_label(w))
 		defs.append(w)
 	_slot_rows[control] = defs
 	_set_combo_items(combo, rows)
@@ -362,17 +358,6 @@ func _selected_weapon(control: String) -> WeaponDef:
 	if row < 0 or row >= defs.size():
 		return null
 	return defs[row]
-
-
-# Weapon display name = loadout_menu_textid resolved in gametext's Strings.SECTION_WEPDES section, else the
-# raw weapon id [orig: populate_weapon_slot_lists @ 0x560430: entry+40 textid else entry+0].
-func _weapon_label(w: WeaponDef) -> String:
-	var textid := w.display_textid
-	if not textid.is_empty():
-		var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-		if t != null and t.has_string_in_section(Strings.SECTION_WEPDES, textid):
-			return t.get_string_in_section(Strings.SECTION_WEPDES, textid)
-	return w.name
 
 
 # PLAYERCLASS carries values 5..9 (Medic..Engineer); the class mask is the matching
@@ -431,7 +416,7 @@ func _populate_slot_ammo(control: String) -> void:
 			# Rows 1..maxclips: "%d - %s" = rounds + round label; row value = the
 			# clip count (retail keys rows by the def index; ours by position).
 			for clips in range(1, maxclips + 1):
-				rows.append(_ammo_row_label(w, clips))
+				rows.append(LoadoutLabels.ammo_row_label(w, clips))
 			_set_combo_items(ammo1, rows)
 			# Saved count selects its row; -1/absent = the maxclips row (full
 			# default) [orig: the `saved == i || (saved == -1 && i == maxclips)`
@@ -465,7 +450,7 @@ func _populate_slot_ammo(control: String) -> void:
 			var sub_max := sub.maxclips
 			var rows2 := PackedStringArray()
 			for clips in range(1, sub_max + 1):
-				rows2.append(_ammo_row_label(sub, clips))
+				rows2.append(LoadoutLabels.ammo_row_label(sub, clips))
 			_set_combo_items(ammo2, rows2)
 			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
 			_driver.select_row(ammo2,
@@ -505,22 +490,11 @@ func _populate_grenades(class_mask: int, team_mask: int) -> void:
 		var maxclips := w.maxclips
 		var rows := PackedStringArray()
 		for clips in range(0, maxclips + 1):
-			rows.append(_ammo_row_label(w, clips))
+			rows.append(LoadoutLabels.ammo_row_label(w, clips))
 		_set_combo_items(combo, rows)
 		var saved := int(_ammo_pri.get(w.index, -1))
 		_driver.select_row(combo,
 				maxclips if saved < 0 else clampi(saved, 0, maxclips), false)
-
-
-# "<rounds> - <round label>" [orig: sprintf "%d - %s" with i*clipsize + round_type
-# in every ammo fill; the label resolves through gametext Strings.SECTION_WEPDES].
-func _ammo_row_label(w: WeaponDef, clips: int) -> String:
-	var round_label := w.round_type
-	if not round_label.is_empty():
-		var gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-		if gametext != null and gametext.has_string_in_section(Strings.SECTION_WEPDES, round_label):
-			round_label = gametext.get_string_in_section(Strings.SECTION_WEPDES, round_label)
-	return "%d - %s" % [clips * w.clipsize, round_label]
 
 
 func _slot_type_store(control: String) -> Dictionary:

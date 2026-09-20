@@ -53,7 +53,6 @@ public:
   void set_basename(const String &p_value) { basename_ = p_value; }
   String get_model_path() const { return model_path_; }
   void set_model_path(const String &p_value) { model_path_ = p_value; }
-  void set_scene_path(const String &p_value) { scene_path_ = p_value; }
 
 protected:
   static void _bind_methods();
@@ -61,7 +60,6 @@ protected:
 private:
   String basename_;
   String model_path_;
-  String scene_path_;
 };
 
 // Godot render applier for the portable foliage frame (ADR 0033 R2).

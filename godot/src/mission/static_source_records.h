@@ -111,7 +111,6 @@ public:
 #define STATIC_TERRAIN_SHADOW_SOURCE_ACCESSOR(m_name, m_default) STATIC_SOURCE_INT_ACCESSORS(m_name)
 	STATIC_TERRAIN_SHADOW_SOURCE_INT_FIELDS(STATIC_TERRAIN_SHADOW_SOURCE_ACCESSOR)
 #undef STATIC_TERRAIN_SHADOW_SOURCE_ACCESSOR
-	void set_entity_attrib(int64_t p_value) { entity_attrib_ = p_value; }
 	int64_t get_item_attrib() const { return item_attrib_; }
 	void set_item_attrib(int64_t p_value) { item_attrib_ = p_value; }
 	int64_t get_item_attrib2() const { return item_attrib2_; }
@@ -132,7 +131,6 @@ private:
 #define STATIC_TERRAIN_SHADOW_SOURCE_MEMBER(m_name, m_default) int m_name##_ = m_default;
 	STATIC_TERRAIN_SHADOW_SOURCE_INT_FIELDS(STATIC_TERRAIN_SHADOW_SOURCE_MEMBER)
 #undef STATIC_TERRAIN_SHADOW_SOURCE_MEMBER
-	int64_t entity_attrib_ = 0;
 	int64_t item_attrib_ = 0;
 	int64_t item_attrib2_ = 0;
 	String graphic_;

@@ -92,8 +92,6 @@ void ScarPresenter::_bind_methods() {
 			&ScarPresenter::get_stats_record);
 	ClassDB::bind_method(D_METHOD("reset_runtime_state"),
 			&ScarPresenter::reset_runtime_state);
-	ClassDB::bind_method(D_METHOD("get_present_stats"),
-			&ScarPresenter::get_present_stats);
 }
 
 void ScarPresenter::_notification(int p_what) {

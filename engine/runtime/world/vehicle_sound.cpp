@@ -1,5 +1,10 @@
+// Ground-vehicle sound-profile consumer (the VehicleSystem sound verbs).
+//
+// The portable producer for retail's generic entity-attached sound-emitter
+// seam. It owns authored slot selection and fixed-point gain/pitch math;
+// callers and the Godot presenter only see SoundEmitterEvent rows.
+// [orig: Entity_ProcessMovementSoundEffects @0x5294a0]
 #include <runtime/world/vehicle_system.h>
-#include <runtime/world/vehicle_sound.h>
 
 #include <algorithm>
 #include <cmath>

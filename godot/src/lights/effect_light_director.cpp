@@ -972,12 +972,9 @@ void EffectLightDirector::_bind_methods() {
 								 "viewmodel_wire_handle", "run_census"),
 			&EffectLightDirector::render_frame, DEFVAL(TypedArray<ObjectModel>()), DEFVAL(-1),
 			DEFVAL(true));
-	ClassDB::bind_method(D_METHOD("run_census_now"), &EffectLightDirector::run_census_now);
 	ClassDB::bind_method(D_METHOD("advance_fixed_tick"), &EffectLightDirector::advance_fixed_tick);
 	ClassDB::bind_method(D_METHOD("on_muzzle_fire", "shooter_handle", "world_pos"),
 			&EffectLightDirector::on_muzzle_fire);
-	ClassDB::bind_method(D_METHOD("on_impact_light", "world_pos", "radius", "color", "duration_ticks"),
-			&EffectLightDirector::on_impact_light);
 	ClassDB::bind_method(D_METHOD("on_death_light", "world_pos", "radius"),
 			&EffectLightDirector::on_death_light);
 	ClassDB::bind_method(D_METHOD("sync_round_glows", "rows"),

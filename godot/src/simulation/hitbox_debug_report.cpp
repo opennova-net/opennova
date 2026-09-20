@@ -72,7 +72,6 @@ void HitboxDebugReport::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "organics", PROPERTY_HINT_ARRAY_TYPE, "HitboxDebugOrganic"),
 			"set_organics", "get_organics");
 	ClassDB::bind_method(D_METHOD("add_entity", "row"), &HitboxDebugReport::add_entity);
-	ClassDB::bind_method(D_METHOD("add_organic", "row"), &HitboxDebugReport::add_organic);
 	ClassDB::bind_static_method("HitboxDebugReport", D_METHOD("make", "entities", "organics"),
 			&HitboxDebugReport::make, DEFVAL(TypedArray<HitboxDebugEntity>()),
 			DEFVAL(TypedArray<HitboxDebugOrganic>()));
