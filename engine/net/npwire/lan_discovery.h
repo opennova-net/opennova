@@ -30,17 +30,23 @@ struct LanDiscoveryServer {
 
 // Build a complete, ready-to-send NWU datagram containing the same NP/NAPI
 // 0x41 JointOperations identity as the existing direct-peer join path. The
-// caller owns broadcast/socket policy.
+// caller owns broadcast/socket policy. `client_index` is the CI the replies
+// echo; it must be non-zero (the announce builder omits a zero CI entirely).
 std::vector<uint8_t> build_lan_discovery_probe(uint32_t client_index);
 
 // Decode a complete NWU datagram and project a 0x81 ServerHello into the LAN
-// browser model. Returns false for malformed packets or any opcode other than
-// ServerHello; `out` is changed only on success.
-bool parse_lan_discovery_reply(const uint8_t *data, size_t size, LanDiscoveryServer &out);
+// browser model. `client_index` is the browse window's CI: retail resolves the
+// reply's CI against its enumerator and drops a reply for a CI it did not
+// issue (an absent CI resolves as 0 and never matches a live enumerator).
+// Returns false for malformed packets, any opcode other than ServerHello, a
+// foreign CI, or a non-JO game identity; `out` is changed only on success.
+bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client_index,
+                               LanDiscoveryServer &out);
 
 // The witnessed browse window: the LAN screen's state machine re-enables
 // LAN_SEARCH (MP_SEARCH) once GetTickCount() - search_start > 0x7530
-// (30000 ms). [orig: UI_ProcessLANSessionStateMachine @0x558de0, the 0x7530
+// (30000 ms) — strictly greater, so the window is still open at exactly
+// 30000. [orig: UI_ProcessLANSessionStateMachine @0x558de0, the 0x7530
 // gate @0x55933a]
 inline constexpr double kLanBrowseWindowSeconds = 30.0;
 // Retail re-announces while enumerating every 3000 ms — discovery is a
@@ -52,6 +58,11 @@ inline constexpr double kLanBrowseWindowSeconds = 30.0;
 // @0x6290c0 interval select; NapiNPSession_SendAnnouncePacket @0x61fa00 +37
 // player-count gate]
 inline constexpr double kLanAnnounceIntervalSeconds = 3.0;
+// The per-pump walk over the discovered sessions examines at most 32 entries,
+// so a browse window never lists more than 32 hosts.
+// [orig: UI_ProcessLANSessionStateMachine @0x558de0, the `session_count >= 32`
+// break @0x5593b5]
+inline constexpr size_t kLanBrowseMaxSessions = 32;
 
 // One discovered host: the reply's source endpoint plus its projected hello.
 struct LanDiscoveryRow {
@@ -61,29 +72,33 @@ struct LanDiscoveryRow {
 };
 
 enum class LanRowChange : uint8_t {
-	kNone = 0, // filtered, unparsable, or an unchanged re-announce
+	kNone = 0, // filtered, unparsable, or a repeat sighting of a listed host
 	kAdded,
-	kUpdated,
 };
 
 // The LAN browse window over the retail game-server UDP range: one probe
 // identity per window (retail keeps its connection identity across the
 // enumerator's re-announce pumps, so every burst repeats the same bytes),
 // the 30-second window, the 3-second re-announce cadence, the reply filter
-// (the browsed port range, a usable source address, a retail-identity 0x81)
-// and the endpoint-keyed upsert whose rows are live state (player count,
-// mission rotation) refreshed in place. The embedder owns the socket: it
-// sends `probe()` to every port in the range on begin and whenever `advance`
-// reports an announce due, feeds every received datagram to `accept_reply`,
-// and stops when `advance` returns false.
+// (the browsed port range, a usable source address, our CI, a retail-identity
+// 0x81), the 32-row cap, and first-sighting rows: retail's row table keys on
+// the session id and a repeat sighting adds and updates nothing, so a row
+// keeps the counts it was first seen with for the whole window. The embedder
+// owns the socket: it sends `probe()` to every port in the range on begin and
+// whenever `advance` reports an announce due, feeds every received datagram
+// to `accept_reply`, and stops when `advance` returns false.
+// [orig: UI_ProcessLANSessionStateMachine @0x558de0 — the key hit @0x5593c4
+//  falls through to the next node, the miss @0x5593e3 appends @0x5593fa..0x559521]
 class LanDiscoveryBrowser {
 public:
-	// Begins a window; false (nothing changes) on an invalid port range.
+	// Begins a window; false (nothing changes) on an invalid port range or a
+	// zero client index.
 	bool begin(uint32_t client_index, int port_min, int port_max);
 	void stop();
 	bool browsing() const { return browsing_; }
 	int port_min() const { return port_min_; }
 	int port_max() const { return port_max_; }
+	uint32_t client_index() const { return client_index_; }
 	const std::vector<uint8_t> &probe() const { return probe_; }
 
 	// One outer frame: false once the window has expired (the browse is
@@ -102,6 +117,7 @@ private:
 	std::vector<uint8_t> probe_;
 	std::vector<LanDiscoveryRow> servers_;
 	std::unordered_map<std::string, size_t> index_by_endpoint_;
+	uint32_t client_index_ = 0;
 	int port_min_ = 0;
 	int port_max_ = 0;
 	double browse_elapsed_s_ = 0.0;

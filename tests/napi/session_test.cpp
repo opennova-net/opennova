@@ -65,8 +65,165 @@ bool check_timing_constants() {
 	if (!expect(SESSION_CONNECT_TIMEOUT_MS == 60000u, "connect/host poll timeout 60s (0xEA60)")) return false;
 	if (!expect(SESSION_PERIODIC_UPDATE_TIMEOUT_MS == 20000u, "periodic-update timeout 20s (0x4E20)")) return false;
 	if (!expect(SESSION_MESSAGE_CHUNK_BYTES == 1300u, "message chunk size 1300 bytes")) return false;
-	if (!expect(SESSION_TIMEOUT_RANDOM_MIN_MS == 1000u, "transport random min")) return false;
-	if (!expect(SESSION_TIMEOUT_RANDOM_MAX_MS == 9999u, "transport random max")) return false;
+	if (!expect(SESSION_APPID_RANDOM_MIN == 1000u, "session AppId random min")) return false;
+	if (!expect(SESSION_APPID_RANDOM_MAX == 9999u, "session AppId random max")) return false;
+	// (tick + rand) % 0x2328 + 1000 [orig: CNapiNetwork_RandomizeTimeout @0x4c4d80]
+	if (!expect(make_session_app_id(0, 0) == 1000u, "AppId floor")) return false;
+	if (!expect(make_session_app_id(8999, 0) == 9999u, "AppId ceiling")) return false;
+	if (!expect(make_session_app_id(9000, 0) == 1000u, "AppId wraps at 0x2328")) return false;
+	if (!expect(make_session_app_id(1234, 5) == 2239u, "AppId sums tick and rand")) return false;
+	if (!expect(SESSION_CONNECT_RETRANSMIT_MS == 3000u, "stage retransmit 3000 ms")) return false;
+	if (!expect(SESSION_GATE_PROBE_RETRY_MS == 3000u && SESSION_GATE_PROBE_TIMEOUT_MS == 30000u,
+	            "gate probe 3000 ms retry / 30000 ms deadline")) return false;
+	if (!expect(SESSION_GLSVSS_POLL_MS == 1000u, "GLSVSS poll 1000 ms")) return false;
+	if (!expect(SESSION_HOST_INFO_REFRESH_TICKS == 1860u, "host info refresh 0x744 ticks")) return false;
+	// The six-slot cookie-key ring [orig: CSessionIdRing_AdvanceAndGenerate @0x4dbb80].
+	SessionIdRing ring;
+	if (!expect(ring.current() == 0 && ring.count == 0, "ring starts empty")) return false;
+	if (!expect(ring.advance(0x12345678u, 0x11) == 1 && ring.index == 1, "first advance fills slot 1")) return false;
+	if (!expect(ring.current() == ((0x12345678u + 0x11u) & 0xFFFFFFu) + 0x1000000u,
+	            "the key is ((rand + tick) & 0xFFFFFF) + 0x1000000")) return false;
+	for (int i = 0; i < 5; ++i) ring.advance(1, 1);
+	if (!expect(ring.index == 0 && ring.count == 6, "the index wraps at 6 and the count caps at 6")) return false;
+	ring.advance(1, 1);
+	if (!expect(ring.index == 1 && ring.count == 6, "a seventh advance keeps the cap")) return false;
+	return true;
+}
+
+// The host-leg, gate-leg and server-message maps.
+bool check_host_and_gate_error_maps() {
+	using namespace opennova;
+	if (!expect(novaworld_host_error_tag(0x3E9) == "NWEC53", "1001 -> NWEC53")) return false;
+	if (!expect(novaworld_host_error_tag(0x3EC) == "NWEC54", "1004 -> NWEC54")) return false;
+	if (!expect(novaworld_host_error_tag(0x3ED) == "NWEC55", "1005 -> NWEC55")) return false;
+	if (!expect(novaworld_host_error_tag(0x3F0) == "NWEC56", "1008 -> NWEC56")) return false;
+	if (!expect(novaworld_host_error_tag(0x3F1) == "NWEC57", "1009 -> NWEC57")) return false;
+	if (!expect(novaworld_host_error_tag(0x3F3) == "NWEC60", "1011 -> NWEC60")) return false;
+	if (!expect(novaworld_host_error_tag(1010) == "NWEC58", "other -> NWEC58")) return false;
+	if (!expect(std::string(NWEC_HOST_TIMEOUT) == "NWEC52", "host poll timeout NWEC52")) return false;
+	if (!expect(novaworld_gate_error_tag(-2, false) == "NWEC18", "gate -2 -> NWEC18")) return false;
+	if (!expect(novaworld_gate_error_tag(-8, false) == "NWEC24", "gate -8 -> NWEC24")) return false;
+	if (!expect(novaworld_gate_error_tag(-9, false) == "NWEC15", "gate -9 in phase 1 -> the NWEC15 default")) return false;
+	if (!expect(novaworld_gate_error_tag(-9, true) == "NWEC25", "gate -9 in phase 3 -> NWEC25")) return false;
+	if (!expect(novaworld_gate_error_tag(-1, true) == "NWEC16", "gate other in phase 3 -> NWEC16")) return false;
+	if (!expect(novaworld_gate_error_tag(-5, true) == "NWEC21", "gate -5 in phase 3 -> NWEC21")) return false;
+	if (!expect(novaworld_server_msg_code_key(1) == "NWUSERVERMSGCODE_UNKNOWNERROR", "msgcode 1")) return false;
+	if (!expect(novaworld_server_msg_code_key(6) == "NWUSERVERMSGCODE_NOVAWORLDDOWNFORMAINTENANCE", "msgcode 6")) return false;
+	if (!expect(novaworld_server_msg_code_key(1004) == "NWUSERVERMSGCODE_REJECTEDHOSTINGINFO", "msgcode 1004")) return false;
+	if (!expect(novaworld_server_msg_code_key(6002) == "NWUSERVERMSGCODE_JOINTICKETIPADDRESSDOESNOTMATCH", "msgcode 6002")) return false;
+	if (!expect(novaworld_server_msg_code_key(999) == "NWUSERVERMSGCODE_UNKNOWNERROR", "unknown msgcode -> the unknown key")) return false;
+	return true;
+}
+
+// The Server*Result parsers (atol semantics, case-insensitive names) and the HostCommands walk.
+bool check_server_result_parsers() {
+	using namespace opennova;
+	NapiMessage result;
+	result.name = "ServerHostResult";
+	auto add = [](NapiMessage &m, const char *name, const std::string &value) {
+		NapiField f;
+		f.name = name;
+		f.data.assign(value.begin(), value.end());
+		m.fields.push_back(f);
+	};
+	add(result, "success", " 7abc");
+	add(result, "MSGCODE", "-3");
+	add(result, "MsgParam1", "12");
+	add(result, "MsgParam2", "x");
+	const ServerResultFields fields = parse_server_result_fields(result);
+	if (!expect(fields.success == 7 && fields.msg_code == -3 && fields.msg_param1 == 12 && fields.msg_param2 == 0,
+	            "Success/MsgCode/MsgParam1/MsgParam2 atol like retail, names case-insensitive")) return false;
+	NapiMessage commands;
+	commands.name = "ServerVarList";
+	add(commands, "VarList", "HostCommands");
+	NapiMessage var;
+	var.name = "ServerVar";
+	add(var, "VarFNum", "0");
+	add(var, "VarName", "GSID");
+	add(var, "VarValue", "GSID-01-DEADBEEF");
+	commands.children.push_back(var);
+	NapiMessage other;
+	other.name = "ServerVarList";
+	add(other, "VarList", "ConnectCommands");
+	other.children.push_back(var);
+	result.children.push_back(other);
+	result.children.push_back(commands);
+	const auto parsed = parse_host_commands(result);
+	if (!expect(parsed.size() == 1 && parsed.count("GSID") == 1 && parsed.at("GSID") == "GSID-01-DEADBEEF",
+	            "only the HostCommands ServerVarList feeds the map")) return false;
+	return true;
+}
+
+// ServerCommand: the quoted tokenizer, the verb prefix/equality match and the target suffixes.
+bool check_server_command_parse() {
+	using namespace opennova;
+	const auto tokens = tokenize_quoted("  PuntPlayerByName \"Some Guy\" extra\targ ");
+	if (!expect(tokens.size() == 4 && tokens[0] == "PuntPlayerByName" && tokens[1] == "Some Guy" &&
+	                    tokens[2] == "extra" && tokens[3] == "arg",
+	            "quotes group one token, whitespace splits, quotes are dropped")) return false;
+	auto make = [](const std::string &cmd) {
+		NapiMessage m;
+		m.name = "ServerCommand";
+		NapiField f;
+		f.name = "Cmd";
+		f.data.assign(cmd.begin(), cmd.end());
+		m.fields.push_back(f);
+		return m;
+	};
+	ServerCommand out;
+	if (!expect(parse_server_command(make("puntplayerbyindex 3"), out) &&
+	                    out.verb == ServerCommandVerb::PuntPlayer && out.target == ServerCommandTarget::ByIndex &&
+	                    out.args.size() == 1 && out.args[0] == "3",
+	            "PuntPlayerByIndex parses by prefix + suffix, case-insensitively")) return false;
+	if (!expect(parse_server_command(make("KillPlayerByIpAndPort 10.0.0.1:32768"), out) &&
+	                    out.verb == ServerCommandVerb::KillPlayer && out.target == ServerCommandTarget::ByIpAndPort,
+	            "KillPlayerByIpAndPort")) return false;
+	if (!expect(parse_server_command(make("TextChatServer \"hello all\""), out) &&
+	                    out.verb == ServerCommandVerb::TextChatServer && out.target == ServerCommandTarget::None &&
+	                    out.args.size() == 1 && out.args[0] == "hello all",
+	            "TextChatServer takes the quoted text")) return false;
+	if (!expect(!parse_server_command(make("TextChatServerX hi"), out),
+	            "whole-token verbs do not prefix-match")) return false;
+	if (!expect(parse_server_command(make("DisarmPlayerByPCID guy"), out) &&
+	                    out.verb == ServerCommandVerb::DisarmPlayer && out.target == ServerCommandTarget::ByPCID,
+	            "DisarmPlayerByPCID")) return false;
+	if (!expect(parse_server_command(make("Cycle"), out) && out.verb == ServerCommandVerb::Cycle && out.args.empty(),
+	            "Cycle")) return false;
+	if (!expect(!parse_server_command(make("Frobnicate 1"), out), "an unknown verb is dropped")) return false;
+	NapiMessage no_cmd;
+	no_cmd.name = "ServerCommand";
+	if (!expect(!parse_server_command(no_cmd, out), "no Cmd param -> nothing")) return false;
+	return true;
+}
+
+// The host-side and client-side statement builders added for the registration/play legs.
+bool check_leg_builders() {
+	using namespace opennova;
+	const NapiMessage added = make_client_host_player_added(2, "Joiner", "10.0.0.2:32768", "P2", "1", "0");
+	if (!expect(added.name == "ClientHostPlayerAdded" && added.fields.size() == 6 &&
+	                    added.fields[0].name == "PlayerNumber" && field_str(added, "PlayerNumber") == "2" &&
+	                    added.fields[1].name == "PlayerName" && added.fields[2].name == "PlayerIpAndPort" &&
+	                    added.fields[3].name == "PlayerPCID" && added.fields[4].name == "PlayerTeam" &&
+	                    added.fields[5].name == "PlayerType",
+	            "ClientHostPlayerAdded carries the six params in order")) return false;
+	const NapiMessage removed = make_client_host_player_removed(2);
+	if (!expect(removed.name == "ClientHostPlayerRemoved" && removed.fields.size() == 1 &&
+	                    field_str(removed, "PlayerNumber") == "2",
+	            "ClientHostPlayerRemoved carries PlayerNumber only")) return false;
+	const NapiMessage enter = make_client_player_enter_request(5, 0x0100007Fu, 32768, "T-1");
+	if (!expect(enter.name == "ClientPlayerEnterRequest" && enter.fields.size() == 4 &&
+	                    field_str(enter, "ConnectionId") == "5" && field_str(enter, "IpAddress") == "16777343" &&
+	                    field_str(enter, "PortNumber") == "32768" && field_str(enter, "JoinTicket") == "T-1",
+	            "ClientPlayerEnterRequest: ConnectionId, IpAddress (decimal u32), PortNumber, JoinTicket")) return false;
+	const NapiMessage glsvss = make_client_glsvss_request("REQ", {{0, "NWUID", "u"}});
+	if (!expect(glsvss.name == "ClientGLSVSSRequest" && field_str(glsvss, "GLSVSSRequest") == "REQ" &&
+	                    glsvss.children.size() == 1 && field_str(glsvss.children[0], "VarList") == "Cookie",
+	            "ClientGLSVSSRequest: the GLSVSSRequest param + the Cookie list")) return false;
+	const auto setup = make_play_setup_vars("Row", "1.2.3.4", "32768", "3225", 7);
+	if (!expect(setup.size() == 5 && setup[0].name == "ServerName" && setup[1].name == "IpAddress" &&
+	                    setup[2].name == "PortNumber" && setup[3].name == "AppId" && setup[4].name == "Lan" &&
+	                    setup[4].value == "7",
+	            "PlaySetup: ServerName, IpAddress, PortNumber, AppId, Lan")) return false;
 	return true;
 }
 
@@ -200,6 +357,10 @@ int main() {
 	if (!check_error_nwec_mapping()) return 1;
 	if (!check_error_from_code()) return 1;
 	if (!check_timing_constants()) return 1;
+	if (!check_host_and_gate_error_maps()) return 1;
+	if (!check_server_result_parsers()) return 1;
+	if (!check_server_command_parse()) return 1;
+	if (!check_leg_builders()) return 1;
 	if (!check_state_values()) return 1;
 	if (!check_handshake_names()) return 1;
 	if (!check_handshake_wire_roundtrip()) return 1;

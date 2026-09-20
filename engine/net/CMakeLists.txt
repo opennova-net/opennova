@@ -46,6 +46,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/session_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/client_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/join_identity.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/lobby_update.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/session/lobby_vars.cpp
     # novaworld gate leg — first-contact + account entry: novaworld_gate
     # probe/response, registration URL cipher, HTTP login flow, GSB browser data
@@ -81,7 +82,6 @@ set_target_properties(opennova_net PROPERTIES
 # ONLY target that links sqlite (see the guardrail note at the top).
 add_library(opennova_novaworld_service STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/lobby_session.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/lobby_update.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/host_repository.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/unknown_tracker.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/connection/registry.cpp

@@ -2,78 +2,50 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace opennova {
 
-// NovaWorld lobby state: fields a hosting jodemo publishes to
-// POSTIPADDRESS:POSTIPPORT from Lobby_UpdateServerInfo @ 0x4fe8c0.
-// The wire form is a single-line text KV blob:
+// The plaintext host-status heartbeat a hosting retail client posts to the
+// gate's POSTIPADDRESS:POSTIPPORT every ~30 s (1860 sim ticks)
+// [orig: Lobby_UpdateServerInfo @0x4fe8c0, the UDP leg @0x4ff448..0x4ff62c;
+//  Server_TickUpdate @0x51d92c reloads the 1860-tick timer]. The wire form
+// is one line of text inside the NAPI CRC envelope (no NWU):
 //
-//   <LobbyName>  HostKey = <hostkey> <K> = <V> ... p=<playername>
+//   "<LobbyName> " + " HostKey = <hk>" + (" <K> = <V>")* + (" p=<name>")* | " p="
 //
-// Values are sanitized by the retail lobby string helper. Hosting teardown is
-// a separate ClientStopHosting statement, not a "Port = -1 DELETE" variant.
-struct LobbyServerInfo {
-	// Identity / addressing.
+// where the K/V pairs are the host's whole Host ClientVarList in list order
+// (so LobbyName and HostKey each appear a second time as ordinary entries),
+// every key and value is lobby-sanitized (String_SanitizeForLobby
+// @0x4fe750: ' ', '?', '@', '=' -> '+'; empty -> "---"), and the player
+// suffix is the PlayerList's PlayerName values when the send-players flag
+// (dword_24D2188) is set, else absent.
+struct LobbyStatusBlob {
 	std::string lobby_name;
 	std::string host_key;
-	std::string host_did; // obsolete witness; not emitted
-
-	// Server identity.
-	std::string server_name;
-	std::string game_type;
-	std::string mission_name;
-	std::string region;
-	std::string msg;
-	int players = 0;
-	int max_players = 0;
-	int mi1 = 0;
-	int mi2 = 0;
-	int mi3 = 0;
-
-	// Boolean-ish flags emitted as retail Y/N tokens.
-	bool dedicated = false;
-	bool locked = false;
-	bool skins_allowed = true;
-	bool password_protected = false;
-	bool tracers_disabled = false;
-
-	// Misc UI / metadata.
-	std::string time_left;
-	std::string country;
-	std::string tod;
-	std::string access_code_list; // obsolete witness; not emitted
-	int app_id = 0;
-	int pcid_key = 0;
-	int game_server_baffle_key = 0;
-	std::string stat = "N";
-	std::string level_range = " ";
-	int bb_mode = 0;
-	std::string mod;
-	std::string pix = "1";
-	std::string gv;
-	std::string version;
-	std::string country_name;
-	std::string lang;
-	int timezone_bias = 0;
-	bool pb_server = false;
-	int allow_ping = 110;
-	std::string ver1 = "3";
-	std::string ver2 = "2345";
-	std::string port = "-1";
-	std::string exp;
-	std::string expbits = "3";
-	std::string joicon2 = "4000";
-	std::string gcc;
-
-	// Uptime formatted like "%ld %2.2ld:%2.2ld:%2.2ld"; emitted as Age.
-	std::string uptime;
-
+	// The Host ClientVarList, in wire order, unsanitized on the build side
+	// and as-received (sanitized) on the parse side.
+	std::vector<std::pair<std::string, std::string>> host_vars;
+	// PlayerName values of the PlayerList.
 	std::vector<std::string> player_names;
-	std::vector<std::pair<std::string, std::string>> extra_pairs;
+	// dword_24D2188: emit the " p=" suffix at all.
+	bool send_player_names = true;
 };
 
-std::string lobby_update_build(const LobbyServerInfo &info);
+// String_SanitizeForLobby @0x4fe750.
+std::string lobby_sanitize_value(std::string_view value);
+
+// Build the blob text exactly as the retail host sends it.
+std::string lobby_update_build(const LobbyStatusBlob &blob);
+
+// Parse a received blob. Returns false unless the text carries the
+// "HostKey =" preamble. Values come back as sent (still sanitized).
+bool lobby_update_parse(std::string_view text, LobbyStatusBlob &out);
+
+// Look up a Host var by key in the parsed blob (case-insensitive, first
+// match; empty when absent).
+std::string lobby_status_value(const LobbyStatusBlob &blob, std::string_view key);
 
 } // namespace opennova
