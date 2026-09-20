@@ -19,27 +19,17 @@ var _reinstall_pending := ""
 var _reinstall_ticks := 0
 
 
-var _terrain_root := ""
-
-
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
-# assets it names; one root per test file, removed at the end.
+# assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
+const TMAP_STAGE := "throwable"
+
+
 func should_skip_script():
-	if RetailData.def_root().is_empty():
-		return RetailData.fixture_pending_text("def/weapon.def")
-	return false
-
-
-func _tmap_trn() -> String:
-	if _terrain_root.is_empty():
-		_terrain_root = TestFs.stage_terrain_root("throwable")
-	return _terrain_root.path_join(TestFs.TMAP_TRN)
+	return RetailData.def_root_skip()
 
 
 func after_all() -> void:
-	if not _terrain_root.is_empty():
-		TestFs.remove_dir_recursive(_terrain_root)
-		_terrain_root = ""
+	TestFs.release_staged_tmap(TMAP_STAGE)
 
 
 func before_each() -> void:
@@ -260,7 +250,7 @@ func test_grenade_ground_bounces_are_sound_only_until_the_fuse() -> void:
 	_sim.resolve_item_traits(item_db)
 
 	var terrain := TerrainData.new()
-	terrain.set_trn_path(_tmap_trn())
+	terrain.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(terrain.load(), OK, "the committed Tmap terrain loads")
 	assert_true(terrain.is_loaded())
 	_sim.set_terrain_height_field(terrain)
@@ -322,7 +312,7 @@ func test_satchel_loadout_can_switch_to_detonator() -> void:
 	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
 	_sim.resolve_item_traits(item_db)
 	var terrain := TerrainData.new()
-	terrain.set_trn_path(_tmap_trn())
+	terrain.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(terrain.load(), OK)
 	_sim.set_terrain_height_field(terrain)
 	var ground := terrain.get_height_world_bilinear(Vector3.ZERO)
@@ -347,7 +337,8 @@ func test_satchel_loadout_can_switch_to_detonator() -> void:
 # The same obj row presents again at actual expiry.
 #
 # The fuse length here is whatever the MOUNTED ammo.def authors.  This test loads
-# fixtures/def/ammo.def, which is a byte-exact copy of BASE JO: max_age 30 ->
+# the reference fixture set's def/ammo.def (RetailData.def_root()), a byte-exact
+# copy of BASE JO: max_age 30 ->
 # 1860 ticks.  The revx02 expansion re-authors that row to max_age 40 (and
 # velocity 20), so a JO+revx02 mount resolves a 2480-tick fuse instead — a
 # property of the mount order, not of the physics under test.  Pin the file this

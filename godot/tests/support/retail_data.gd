@@ -71,6 +71,23 @@ static func def_root() -> String:
 	return dir
 
 
+## The should_skip_script() verdict of a script that needs def_root(): the
+## pending text naming the root when the set is absent, else false.
+static func def_root_skip():
+	if def_root().is_empty():
+		return fixture_pending_text("def/weapon.def")
+	return false
+
+
+## The should_skip_script() verdict of a script that stages reference
+## fixtures: the pending text of the first absent `rels` entry, else false.
+static func fixtures_skip(rels: Array):
+	for rel in rels:
+		if fixture(String(rel)).is_empty():
+			return fixture_pending_text(String(rel))
+	return false
+
+
 ## The expansion names the install carries (the engine's own enumeration of
 ## <install>/expansion), sorted; empty without an install.
 static func expansions() -> PackedStringArray:

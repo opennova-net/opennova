@@ -296,12 +296,4 @@ func _draw_binoculars(surface: Vector2) -> void:
 
 
 func _load_texture(name: String) -> Texture2D:
-	if _root == null or name.is_empty():
-		return null
-	var bytes := _root.read_file(name.get_file())
-	if bytes.is_empty():
-		return null
-	var image := Image.new()
-	if image.load_tga_from_buffer(bytes) != OK:
-		return null
-	return ImageTexture.create_from_image(image)
+	return TgaTexture.load_from_root(_root, name)

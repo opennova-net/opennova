@@ -31,7 +31,6 @@ extends GutTest
 const WIRE_EYE := Vector3(10.0, 1.8, -4.0)
 const BODY_ORIGIN := Vector3(10.0, 0.0, -4.0)
 const WEAPON_POSITION := Vector3(10.6, 1.55, -4.7)
-const POSITION_EPS := Vector3(0.001, 0.001, 0.001)
 const SHOOTER := 0x0011
 # The gun fixture (fixtures/README.md) carries MFlash01 on the barrel.
 const WEAPON_3DI := "res://../fixtures/threedi/synth/gun.3di"
@@ -132,13 +131,6 @@ func _event(adm_arm: bool, action_effect: String = "EFFECT_M16MF") -> FirePresen
 			adm_arm, 24, "AMMO_EFFECT", action_effect, MUZZLE_USERPOINT)
 
 
-# The emitter position of one group report row (the spawn point of a transient).
-func _emitter_position(row: EffectGroupReport) -> Vector3:
-	if row == null or row.emitters.is_empty():
-		return Vector3.INF
-	return (row.emitters[0] as EffectEmitterReport).position
-
-
 func test_ammo_arm_keeps_the_ammo_def_effect_at_the_wire_position() -> void:
 	_fire.present_fires([_event(false)])
 	var groups := _fx.get_debug_group_report()
@@ -147,7 +139,7 @@ func test_ammo_arm_keeps_the_ammo_def_effect_at_the_wire_position() -> void:
 		var group := groups[0] as EffectGroupReport
 		assert_eq(group.name, "AMMO_EFFECT",
 				"the ammo arm uses the AMMO def's effect")
-		assert_true(_emitter_position(group).is_equal_approx(WIRE_EYE),
+		assert_true(PresentPassFixture.emitter_position(group).is_equal_approx(WIRE_EYE),
 				"the ammo arm spawns at the wire position, unmoved")
 
 
@@ -162,7 +154,7 @@ func test_adm_arm_uses_the_fire_row_at_the_weapon_anchor() -> void:
 		var group := groups[0] as EffectGroupReport
 		assert_eq(group.name, "EFFECT_M16MF",
 				"the adm arm uses the FIRE action row's effect, not the ammo def's")
-		assert_true(_emitter_position(group).is_equal_approx(_muzzle),
+		assert_true(PresentPassFixture.emitter_position(group).is_equal_approx(_muzzle),
 				"the adm arm spawns at the weapon's userpoint, NOT the wire eye position")
 
 
@@ -185,7 +177,7 @@ func test_adm_arm_falls_back_to_the_body_origin_not_the_eye() -> void:
 		var group := groups[0] as EffectGroupReport
 		assert_eq(group.name, "EFFECT_M16MF",
 				"the row choice does not depend on the anchor resolve")
-		assert_true(_emitter_position(group).is_equal_approx(BODY_ORIGIN),
+		assert_true(PresentPassFixture.emitter_position(group).is_equal_approx(BODY_ORIGIN),
 				"an unarmed shooter anchors at its body origin, not the wire eye")
 
 
@@ -202,7 +194,7 @@ func test_adm_arm_with_no_wire_body_keeps_the_wire_value() -> void:
 		var group := groups[0] as EffectGroupReport
 		assert_eq(group.name, "EFFECT_M16MF",
 				"the row choice does not depend on the anchor resolve")
-		assert_true(_emitter_position(group).is_equal_approx(WIRE_EYE),
+		assert_true(PresentPassFixture.emitter_position(group).is_equal_approx(WIRE_EYE),
 				"with no body at all the wire value is the only origin there is")
 
 

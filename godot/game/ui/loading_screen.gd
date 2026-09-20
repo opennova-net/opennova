@@ -439,7 +439,7 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 	if _texture == null or _splash_state != SplashState.NONE:
 		return false
 	if root != null:
-		_splash_arrow = _load_tga_texture(root, HudPos.loading_splash_arrow_image())
+		_splash_arrow = TgaTexture.load_from_root(root, HudPos.loading_splash_arrow_image())
 		_splash_font = _load_font(root, HudPos.loading_splash_continue_font())
 	_splash_text = _lookup_loading_text(HudPos.loading_splash_continue_key(), "")
 	_splash_state = SplashState.ACTIVE
@@ -806,14 +806,3 @@ func _load_font(root: ResourceRoot, name: String) -> FontFile:
 	return res.to_font_file()
 
 
-# TGA art rides the raw VFS read + Godot's TGA decoder (ResourceRoot's
-# load_texture is the PCX path), like the view-effect masks
-# [orig: CTerrainTileData_LoadTGAFromArchive @ 0x520871].
-static func _load_tga_texture(root: ResourceRoot, name: String) -> Texture2D:
-	var bytes := root.read_file(name)
-	if bytes.is_empty():
-		return null
-	var image := Image.new()
-	if image.load_tga_from_buffer(bytes) != OK:
-		return null
-	return ImageTexture.create_from_image(image)

@@ -21,9 +21,7 @@ static var _flat_dir := ""
 
 
 func should_skip_script():
-	if RetailData.def_root().is_empty():
-		return RetailData.fixture_pending_text("def/weapon.def")
-	return false
+	return RetailData.def_root_skip()
 
 
 func before_all() -> void:
@@ -58,14 +56,6 @@ func before_all() -> void:
 class Snapshot:
 	extends RefCounted
 	var entities: Array = []
-	func _write_phase(out: PackedFloat32Array, base: int,
-			channel: int, phase: int, active: bool) -> void:
-		var phase_field := Simulation.PF_PHASE1 + (channel - 1) * 2
-		var active_field := Simulation.PF_ACTIVE1 + (channel - 1) * 2
-		var bits := phase & 0xFFFFFFFF
-		out[base + phase_field] = float(bits & 0xFFFF)
-		out[base + active_field] = (
-				float(((bits >> 16) & 0xFFFF) + 1) if active else 0.0)
 	func build() -> PackedFloat32Array:
 		var stride := Simulation.PF_STRIDE
 		var out := PackedFloat32Array()
@@ -92,9 +82,9 @@ class Snapshot:
 			out[base + Simulation.PF_ALIVE] = float(entity.get("alive", 1))
 			out[base + Simulation.PF_RESPAWN_REVISION] = float(
 					entity.get("respawn_revision", 0))
-			_write_phase(out, base, 1, int(entity.get("phase1", 0)),
+			PresentPassFixture.write_phase(out, base, 1, int(entity.get("phase1", 0)),
 					int(entity.get("active1", 0)) != 0)
-			_write_phase(out, base, 2, int(entity.get("phase2", 0)),
+			PresentPassFixture.write_phase(out, base, 2, int(entity.get("phase2", 0)),
 					int(entity.get("active2", 0)) != 0)
 			out[base + Simulation.PF_ANIM_STATE] = float(entity.get("anim_state", -1))
 			out[base + Simulation.PF_ANIM_PHASE_TICKS] = float(
@@ -228,36 +218,10 @@ func _ticking_sim() -> Simulation:
 	return sim
 
 
-func _container() -> Node3D:
-	var container := Node3D.new()
-	add_child_autofree(container)
-	return container
-
-
-# The per-entity lighting factors (x = effectScale, y = interior flag,
-# z = interior daylight t) are one instance uniform stamped on the direct
-# GeometryInstance3D children of every ROBJ part node and of the model's own
-# Skeleton3D (skinned submeshes bind there instead of under a part).
-func _entity_light_instances(model: ObjectModel) -> Array[GeometryInstance3D]:
-	var parents: Array[Node] = []
-	var parts: Dictionary = model.get_render_part_nodes()
-	for key in parts.keys():
-		parents.append(parts[key] as Node3D)
-	if model.has_skeleton():
-		parents.append(model.get_skeleton())
-	var out: Array[GeometryInstance3D] = []
-	for parent in parents:
-		for child in parent.get_children():
-			var instance := child as GeometryInstance3D
-			if instance != null:
-				out.append(instance)
-	return out
-
-
 func _assert_entity_light(model: ObjectModel, expected: Vector4,
 		message: String) -> void:
 	var checked := 0
-	for instance in _entity_light_instances(model):
+	for instance in PresentPassFixture.entity_light_instances(model):
 		var actual: Variant = instance.get_instance_shader_parameter("u_entity_light")
 		assert_true(actual is Vector4 and (actual as Vector4).is_equal_approx(expected),
 				"%s: %s carries %s, expected %s" % [
@@ -306,7 +270,7 @@ func _empty_index() -> EntityIndex:
 
 
 func test_present_snapshot_rejects_a_short_stride() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, _empty_index())
 	var short_stride := Simulation.PF_STRIDE - 1
 	var snapshot := PackedFloat32Array()
@@ -317,7 +281,7 @@ func test_present_snapshot_rejects_a_short_stride() -> void:
 
 
 func test_sp_synthetic_filter_materializes_only_attachment_origin_rows() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, _empty_index(), {
 		"synthetic_origin_only": true,
 	})
@@ -341,7 +305,7 @@ func test_sp_synthetic_filter_materializes_only_attachment_origin_rows() -> void
 
 
 func test_wire_handle_resolver_keeps_synthetic_siblings_distinct() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, _empty_index(), {
 		"synthetic_origin_only": true,
 	})
@@ -363,7 +327,7 @@ func test_wire_handle_resolver_keeps_synthetic_siblings_distinct() -> void:
 
 
 func test_zero_wire_handle_is_a_valid_remote_pool_slot() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0, "x": 3.0 }]
@@ -375,7 +339,7 @@ func test_zero_wire_handle_is_a_valid_remote_pool_slot() -> void:
 
 
 func test_wire_pose_preserves_authored_model_scale() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -412,7 +376,7 @@ func test_local_player_handle_is_filtered_from_the_wire_walk() -> void:
 	sim.spawn_local_player(Vector3(100, 0, 100), 0.0, 0)
 	assert_true(sim.has_local_player())
 	var local_handle := int(sim.get_local_player_wire_handle())
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(sim, _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [
@@ -427,7 +391,7 @@ func test_local_player_handle_is_filtered_from_the_wire_walk() -> void:
 
 
 func test_unresolved_slot_retries_after_disappearance_and_reuse() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_UNRESOLVED, "handle": 0x1004 }]
@@ -444,7 +408,7 @@ func test_unresolved_slot_retries_after_disappearance_and_reuse() -> void:
 
 
 func test_unresolved_slot_retries_immediately_when_type_changes() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_UNRESOLVED, "handle": 0x1004 }]
@@ -460,7 +424,7 @@ func test_unresolved_slot_retries_immediately_when_type_changes() -> void:
 
 
 func test_live_slot_type_change_rebuilds_the_visual() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0x1004 }]
@@ -477,7 +441,7 @@ func test_live_slot_type_change_rebuilds_the_visual() -> void:
 
 
 func test_live_player_character_id_change_rebuilds_the_visual() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -505,7 +469,7 @@ func test_placed_identity_rows_defer_even_without_a_resolvable_node() -> void:
 	# so the registry resolves null — yet the row carries its placed .bms
 	# identity, and the placed representation owns the render. The wire pass must
 	# not spawn a duplicate. Rows without placed identity still spawn.
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, _empty_index())
 	var snap := Snapshot.new()
 	snap.entities = [
@@ -524,7 +488,7 @@ func test_placed_identity_rows_defer_even_without_a_resolvable_node() -> void:
 
 func test_stable_host_layout_keeps_placed_rows_deferred() -> void:
 	var placed := _index_with_placed(11)
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, placed["index"])
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0x1004, "bms_id": 11,
@@ -550,7 +514,7 @@ func test_admitted_player_row_with_synthetic_origin_builds_on_the_host() -> void
 	# admitted player (spawn_player_entity) has NO authored .bms placement, so
 	# its row carries the none/synthetic origin (kind 255, index 0xFFFFFF) and
 	# must BUILD here — the defer gate only owns real placed identities.
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, _empty_index())
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -576,7 +540,7 @@ func test_render_culled_row_hides_and_skips_legs_until_released() -> void:
 	# drawn, so no presentation leg runs for it (the node hides, its transform
 	# stays where it was), and the compare-gated legs re-assert exactly what
 	# changed once the gate releases it.
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_RIFLEMAN, "handle": 2, "x": 7.0 }]
@@ -610,7 +574,7 @@ func test_render_culled_row_hides_and_skips_legs_until_released() -> void:
 
 
 func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [
@@ -652,7 +616,7 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
 	var observer := SpawnObserver.new()
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, placed["index"], {
 		"cold_spawn_budget": 2,
 		"camera": camera,
@@ -705,7 +669,7 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 
 func test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacements() -> void:
 	var observer := SpawnObserver.new()
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, null, {
 		"cold_spawn_budget": 1,
 	})
@@ -742,7 +706,7 @@ func test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacemen
 
 
 func test_unresolved_attempt_consumes_budget_without_stranding_later_rows() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, null, {
 		"cold_spawn_budget": 1,
 	})
@@ -764,7 +728,7 @@ func test_unresolved_attempt_consumes_budget_without_stranding_later_rows() -> v
 
 
 func test_runtime_reset_rematerializes_the_restored_same_type_slot() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0x1004 }]
@@ -782,7 +746,7 @@ func test_runtime_reset_rematerializes_the_restored_same_type_slot() -> void:
 
 
 func test_synthetic_attachment_uses_panm_and_hidden_visibility_contract() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, _empty_index(), {
 		"synthetic_origin_only": true,
 	})
@@ -829,7 +793,7 @@ func test_synthetic_attachment_uses_panm_and_hidden_visibility_contract() -> voi
 
 
 func test_wire_model_spawn_registers_after_identity_and_transform_are_ready() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var observer := SpawnObserver.new()
 	var p := _wire_pass(_sim(), _placer(), container)
 	p.wire_node_spawned.connect(observer.on_spawned)
@@ -883,7 +847,7 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	var angles := PackedVector3Array()
 	for i in range(9):
 		angles.append(Vector3(-4.0 + i, 70.0 + i, 1.0 + i))
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -926,7 +890,7 @@ func test_wire_model_free_runs_compact_infantry_when_phase_is_absent() -> void:
 	# Production infantry compacts carry the state byte but no player-channel
 	# phase byte. Re-presenting that snapshot must preserve local playback
 	# instead of externally pinning the selected clip to tick zero.
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -948,7 +912,7 @@ func test_host_current_body_state_is_posed_without_remote_rearbitration() -> voi
 	# Host-loopback snapshots carry AiEntity's already-accepted current state
 	# and phase, not a compact pending request. It must retain the direct pose
 	# path (externally phased, no remote latch).
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -963,7 +927,6 @@ func test_host_current_body_state_is_posed_without_remote_rearbitration() -> voi
 	var model: ObjectModel = p.resolve_wire_handle(0x0004)
 	assert_eq(model.get_active_body_clip(), "anim_idle",
 			"host current state keeps the authoritative direct-phase pose path")
-	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_idle")
 	assert_almost_eq(model.get_animation_time(), model.get_skeletal_anim().get_clip_phase_seconds("anim_idle", 11), 0.0001,
 			"the sim phase poses the clip directly")
 	assert_false(model.remote_body_needs_fixed_tick(),
@@ -971,7 +934,7 @@ func test_host_current_body_state_is_posed_without_remote_rearbitration() -> voi
 
 
 func test_host_current_body_state_uses_authoritative_blend_tuple() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -991,7 +954,6 @@ func test_host_current_body_state_uses_authoritative_blend_tuple() -> void:
 	assert_true(model.has_body_blend())
 	assert_eq(model.get_body_blend_source_key(), "anim_idle",
 			"host-loopback consumes authority rather than reconstructing a blend")
-	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_idle")
 	assert_almost_eq(model.get_body_blend_source_time(),
 			model.get_skeletal_anim().get_clip_phase_seconds("anim_idle", 18), 0.0001)
 	assert_almost_eq(model.get_body_blend_weight(), 0.3, 0.000001)
@@ -999,7 +961,7 @@ func test_host_current_body_state_uses_authoritative_blend_tuple() -> void:
 
 func test_remote_blend_uses_logic_tick_delta_not_present_call_count() -> void:
 	var sim := _ticking_sim()
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(sim, _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1048,7 +1010,7 @@ func test_wire_model_receives_the_transition_pulse_before_the_current_state() ->
 	# PF_ANIM_STATE_PULSE. Presentation dispatches it FIRST — retail applies the
 	# anim byte per record [orig: @0x4c1153] — so the locked roll clip accepts
 	# and the follow-up state queues behind it at the model.
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1081,7 +1043,7 @@ func test_wire_model_receives_the_transition_pulse_before_the_current_state() ->
 
 func test_state_edge_latch_survives_a_revision_bumped_plan_rebuild() -> void:
 	var sim := _ticking_sim()
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(sim, _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1106,7 +1068,7 @@ func test_state_edge_latch_survives_a_revision_bumped_plan_rebuild() -> void:
 
 
 func test_wire_model_resets_remote_body_channel_on_respawn_revision_change() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1134,7 +1096,7 @@ func test_wire_model_resets_remote_body_channel_on_respawn_revision_change() -> 
 
 
 func test_wire_model_applies_and_restores_mounted_right_hand_collapse() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1153,7 +1115,7 @@ func test_wire_model_applies_and_restores_mounted_right_hand_collapse() -> void:
 
 
 func test_wire_model_applies_and_clears_named_emplaced_controls() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1176,7 +1138,7 @@ func test_wire_model_applies_and_clears_named_emplaced_controls() -> void:
 
 
 func test_wire_direct_carrier_applies_and_releases_scoped_world_heat() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1202,7 +1164,7 @@ func test_wire_direct_carrier_applies_and_releases_scoped_world_heat() -> void:
 
 
 func test_wire_direct_numbered_zone_applies_and_releases_callback_controls() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1237,7 +1199,7 @@ func test_wire_direct_numbered_zone_applies_and_releases_callback_controls() -> 
 func test_wire_model_honors_local_first_person_parent_cull() -> void:
 	# Host-side dynamic/unplaced mount targets are owned by this pass rather
 	# than MissionPresentPass. They consume the same transient render verdict.
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container, _empty_index())
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1265,7 +1227,7 @@ func test_wire_model_honors_local_first_person_parent_cull() -> void:
 
 
 func test_wire_model_clears_overlay_when_snapshot_selector_is_invalid() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1289,7 +1251,7 @@ func test_wire_model_clears_overlay_when_snapshot_selector_is_invalid() -> void:
 # [orig: the selection Entity_UpdateInfantryPlayerBody @0x4b5dad, which retail
 #  runs for every player body it draws rather than only the local one]
 func test_wire_model_applies_and_clears_the_remote_weapon_channel() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -1323,7 +1285,7 @@ func test_wire_model_applies_and_clears_the_remote_weapon_channel() -> void:
 func test_person_body_and_late_held_weapon_share_the_thermal_wave_lane() -> void:
 	var sim := _sim()
 	assert_eq(sim.load_weapon_table(_flat_root(), "weapon.def"), OK)
-	var p := _wire_pass(sim, _placer(), _container())
+	var p := _wire_pass(sim, _placer(), PresentPassFixture.container(self))
 	var snap := Snapshot.new()
 	snap.entities = [{
 		"type_id": TYPE_RIFLEMAN,
@@ -1374,7 +1336,7 @@ func test_composed_avatar_head_shares_the_body_thermal_wave_lane() -> void:
 	assert_eq(avatar_db.load(avatar_path), OK)
 	var placer := _placer()
 	placer.set_avatar_db(avatar_db)
-	var p := _wire_pass(_sim(), placer, _container())
+	var p := _wire_pass(_sim(), placer, PresentPassFixture.container(self))
 	var snap := Snapshot.new()
 	snap.entities = [{
 		"type_id": TYPE_RIFLEMAN,
@@ -1399,7 +1361,7 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	var sim := _sim()
 	assert_eq(sim.load_weapon_table(_flat_root(), "weapon.def"), OK,
 			"the fixture weapon table loads (adm 1 -> M9K_3rd)")
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(sim, _placer(), container)
 	var snap := Snapshot.new()
 	snap.entities = [{

@@ -7,7 +7,7 @@ const CAPTURE_ROOT := "user://render-capture-test"
 func after_each() -> void:
 	var absolute := ProjectSettings.globalize_path(CAPTURE_ROOT)
 	if DirAccess.dir_exists_absolute(absolute):
-		_remove_tree(absolute)
+		TestFs.remove_dir_recursive(absolute)
 
 
 func test_write_bundle_persists_png_and_correlated_state_sidecar() -> void:
@@ -143,14 +143,3 @@ func test_capture_cancellation_restores_only_an_active_presentation() -> void:
 			"a pre-cancelled bundle never mutates HUD/FPS presentation")
 	assert_eq(finish_calls[0], 0,
 			"no cleanup callback runs when presentation never began")
-
-
-func _remove_tree(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	for name in dir.get_files():
-		DirAccess.remove_absolute(path.path_join(name))
-	for name in dir.get_directories():
-		_remove_tree(path.path_join(name))
-	DirAccess.remove_absolute(path)

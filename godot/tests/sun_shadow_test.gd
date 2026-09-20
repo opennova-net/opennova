@@ -14,7 +14,7 @@ func _environment_at(time_of_day: int, node_name: String) -> MissionEnvironment:
 
 func _expected_emission(environment: MissionEnvironment) -> Vector3:
 	# get_light_direction already serves the Godot-axes surface->light vector
-	# (the env_axes x/z swap of the raw getter tuple IS the (g2, g1, g0)
+	# (the util/axes.h x/z swap of the raw getter tuple IS the (g2, g1, g0)
 	# reduction); the entity shadow projection then clamps the vertical
 	# component to 0.25 and negates — renderer::slot_projection_direction,
 	# which SunShadow applies in every projection mode

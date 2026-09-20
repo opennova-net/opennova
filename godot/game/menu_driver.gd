@@ -303,13 +303,7 @@ func _load_text_rsrc(file: String) -> RtxtStringFile:
 	var key := file.to_lower()
 	if _text_rsrc_cache.has(key):
 		return _text_rsrc_cache[key]
-	var loaded: RtxtStringFile = null
-	if _root != null:
-		var bytes := _root.read_file(file.get_file())
-		if not bytes.is_empty():
-			var t := RtxtStringFile.new()
-			if t.load_from_byte_array(bytes) == OK:
-				loaded = t
+	var loaded := Strings.load_rtxt(_root, file.get_file())
 	_text_rsrc_cache[key] = loaded
 	return loaded
 

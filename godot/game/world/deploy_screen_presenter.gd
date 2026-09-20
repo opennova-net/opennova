@@ -29,13 +29,6 @@ extends Node
 
 const MENU_FILE := "death.mnu"
 const MENU_SCREEN := "DEATH"
-const STYLESHEET_FILE := "menu_style.mns"
-# The menumus discriminator SLOT the driver pushes each screen's authored
-# MUSICVAR value into (death.mnu authors <MUSICVAR>3</MUSICVAR>; the slot is
-# the same as MenuShell's — the witness [orig: UI_DispatchScreenEvent
-# @ 0x54e6a0, store @ 0x54eff4 -> AudioVM_SetVariable(2, v)] lives at engine
-# audio/music_policy.h kMenuMusicVarSlot).
-const MUSIC_VAR_INDEX := MusicDirector.MENU_MUSIC_VAR_SLOT
 # The content refresh cadence: engine truth 0.256 s, 16 ticks of the 62.5 Hz
 # loop (world/deploy_screen_feed.h kDeployRefreshTicks carries the witness;
 # the cadence rides the tick, not a round 250 ms).
@@ -57,7 +50,6 @@ var _layout_control: Control = null
 var _frame: MenuFrame = null
 var _audio: MenuAudio = null
 var _driver: MenuDriver = null
-var _menu_root: ResourceRoot = null
 var _refresh_accum := 0.0
 # The spawn list's presenter-side row model, aligned with the compiled list's
 # visible rows: {label, param} per row, rebuilt by _populate_spawn_list. The
@@ -184,7 +176,6 @@ func teardown() -> void:
 	_frame = null
 	_audio = null
 	_driver = null
-	_menu_root = null
 	_spawn_rows = []
 
 
@@ -292,8 +283,9 @@ func _populate_spawn_list(sim: Simulation) -> void:
 		# The compiled list has no inline markup channel yet (the row-style
 		# residue in D-HUD-19): the engine text keeps retail's <cRRGGBB>/<b>
 		# tags, the list shows them stripped. The sort already ran over the
-		# tagged text, so the row order is retail's.
-		var label := _strip_inline_tags(row.text)
+		# tagged text, so the row order is retail's. The stripper is retail's own
+		# (the engine's hud::strip_inline_tags [orig: Chat_StripHtmlTags @0x4983f0]).
+		var label := Simulation.strip_inline_tags(row.text)
 		labels.append(label)
 		_spawn_rows.append(SpawnRow.new(label, row.value))
 	# set_widget_items resets the selection to row 0; restore the previous pick by
@@ -306,11 +298,6 @@ func _populate_spawn_list(sim: Simulation) -> void:
 				break
 
 
-# Retail's inline text markup (<cRRGGBB> colour, <b> bold) the compiled list
-# cannot draw yet — stripped for display only, with retail's own stripper
-# (the engine's hud::strip_inline_tags [orig: Chat_StripHtmlTags @0x4983f0]).
-static func _strip_inline_tags(text: String) -> String:
-	return Simulation.strip_inline_tags(text)
 
 
 # The team-change service is unmodeled: hide the swap/team buttons (retail
@@ -400,45 +387,21 @@ func _ensure_menu() -> bool:
 	var root: ResourceRoot = _view.resource_root()
 	if root == null:
 		return false
-	var bytes := root.read_file(MENU_FILE)
-	if bytes.is_empty():
-		push_warning("DeployScreenPresenter: %s not found in the resource root" % MENU_FILE)
-		return false
-	var doc := MnuDocument.new()
-	if doc.load_from_bytes(bytes) != OK:
-		push_warning("DeployScreenPresenter: %s did not parse" % MENU_FILE)
+	var doc := MenuFrameSurface.load_document(root, MENU_FILE, "DeployScreenPresenter")
+	if doc == null:
 		return false
 	_register_text_tables(root)
-	# death.mnu shares the retail menu's fixed 800x600 design space; the frame
-	# scales it to its OWN size internally, so the fit just sizes the Control.
-	# [orig: CUIScene_SetScreenScale @0x639480]
-	_frame = MenuFrame.new()
-	_frame.name = "DeployScreenMenu"
-	_frame.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	# Unlike MenuShell (a Control parent sampling for a full-rect child frame),
-	# the presenter overlays a foreign HUD parent, so the frame itself is the
-	# input surface: its gui_input forwards into the driver's pump.
-	_frame.mouse_filter = Control.MOUSE_FILTER_STOP
-	_frame.gui_input.connect(_on_frame_gui_input)
-	_ui_parent.add_child(_frame)
-	_recompute_fit()
-	# Widget <SOUND> triggers play through the MenuAudio device leg.
-	_audio = MenuAudio.new()
-	_audio.name = "DeployScreenMenuAudio"
-	_audio.set_resource_root(root)
-	_ui_parent.add_child(_audio)
-	_driver = MenuDriver.new()
-	_driver.attach(_frame, _audio)
-	_driver.set_music_director(MusicService.director())
-	_driver.set_music_var_index(MUSIC_VAR_INDEX)
+	# death.mnu authors <MUSICVAR>3</MUSICVAR>; the surface wires the slot.
+	var surface := MenuFrameSurface.build(root, _ui_parent, _layout_control,
+			"DeployScreenMenu", _on_frame_gui_input)
+	_frame = surface.frame
+	_audio = surface.audio
+	_driver = surface.driver
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
-	var style := MenuFrameSurface.load_style(root, STYLESHEET_FILE)
-	var menu_text: RtxtStringFile = Strings.get_table(Strings.TABLE_MENUTXT)
-	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
-		push_warning("DeployScreenPresenter: %s has no screens" % MENU_FILE)
+	if not MenuFrameSurface.open_document(_driver, doc, root, MENU_FILE, MENU_SCREEN,
+			"DeployScreenPresenter"):
 		teardown()
 		return false
-	_menu_root = root
 	return true
 
 
@@ -451,15 +414,12 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 
 
 func _register_text_tables(root: ResourceRoot) -> void:
-	for spec in [["menutxt", "menutxt.BIN"], ["gametext", "gametext.bin"],
-			["gameui", "Game.bin"]]:
+	for spec in [[Strings.TABLE_MENUTXT, "menutxt.BIN"], [Strings.TABLE_GAMETEXT, "gametext.bin"],
+			[Strings.TABLE_GAMEUI, "Game.bin"]]:
 		if Strings.get_table(spec[0]) != null:
 			continue
-		var bytes := root.read_file(spec[1])
-		if bytes.is_empty():
-			continue
-		var loaded := RtxtStringFile.new()
-		if loaded.load_from_byte_array(bytes) == OK:
+		var loaded := Strings.load_rtxt(root, spec[1])
+		if loaded != null:
 			Strings.register_table(spec[0], loaded)
 
 

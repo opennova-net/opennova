@@ -532,16 +532,8 @@ func _resource_root() -> ResourceRoot:
 # mission basename.
 func _resolve_mission_title(bms_name: String) -> String:
 	var base := bms_name.get_file().get_basename()
-	var root := _resource_root()
-	if root == null:
-		return base
-	var bytes := root.read_file(base + ".bin")
-	if bytes.is_empty():
-		return base
-	var table := RtxtStringFile.new()
-	if table.load_from_byte_array(bytes) != OK:
-		return base
-	if not table.has_string_in_section("info", "title"):
+	var table := Strings.load_rtxt(_resource_root(), base + ".bin")
+	if table == null or not table.has_string_in_section("info", "title"):
 		return base
 	var title := table.get_string_in_section("info", "title")
 	return title if not title.is_empty() else base

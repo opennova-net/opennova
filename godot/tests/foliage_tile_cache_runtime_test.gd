@@ -2,21 +2,13 @@ extends GutTest
 
 
 
-var _terrain_root := ""
-
-
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
-# assets it names; one root per test file, removed at the end.
-func _tmap_trn() -> String:
-	if _terrain_root.is_empty():
-		_terrain_root = TestFs.stage_terrain_root("foliage_tile_cache")
-	return _terrain_root.path_join(TestFs.TMAP_TRN)
+# assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
+const TMAP_STAGE := "foliage_tile_cache"
 
 
 func after_all() -> void:
-	if not _terrain_root.is_empty():
-		TestFs.remove_dir_recursive(_terrain_root)
-		_terrain_root = ""
+	TestFs.release_staged_tmap(TMAP_STAGE)
 
 
 func _sample_height(_world_x: float, _world_z: float) -> float:
@@ -60,7 +52,7 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	add_child_autofree(viewport)
 
 	var data := TerrainData.new()
-	data.set_trn_path(_tmap_trn())
+	data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(data.load(), OK, "the Tmap fixture terrain must load")
 
 	var terrain := Terrain.new()

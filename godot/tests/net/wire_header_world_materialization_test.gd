@@ -32,9 +32,7 @@ const NATIVE_MODEL_DIR := "res://.godot/native_3dp_wire_header"
 
 
 func should_skip_script():
-	if RetailData.def_root().is_empty():
-		return RetailData.fixture_pending_text("def/weapon.def")
-	return false
+	return RetailData.def_root_skip()
 
 
 func before_all() -> void:

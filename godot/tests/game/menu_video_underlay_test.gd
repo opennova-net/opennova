@@ -15,18 +15,7 @@ func before_each() -> void:
 
 
 func after_each() -> void:
-	_remove_tree(ProjectSettings.globalize_path(_root_dir))
-
-
-func _remove_tree(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	for name in dir.get_files():
-		DirAccess.remove_absolute(path.path_join(name))
-	for name in dir.get_directories():
-		_remove_tree(path.path_join(name))
-	DirAccess.remove_absolute(path)
+	TestFs.remove_dir_recursive(ProjectSettings.globalize_path(_root_dir))
 
 
 func _touch(rel: String) -> void:

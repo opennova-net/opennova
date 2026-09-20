@@ -50,6 +50,24 @@ class Sink:
 				("%s (exit %d)" % [summary_fallback, exit_code]), data)
 
 
+## The current orthographic camera framing a swatch grid of `count` cells laid
+## out `cols` wide at `spacing` (rows grow down -Y), sized for the 1280x720
+## capture aspect with a 0.6 margin.
+static func add_grid_camera(scene: Node3D, count: int, cols: int, spacing: float) -> Camera3D:
+	var rows := int(ceil(float(count) / float(cols)))
+	var grid_w := cols * spacing
+	var grid_h := rows * spacing
+	var aspect := 1280.0 / 720.0
+	var camera := Camera3D.new()
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera.size = maxf(grid_h, grid_w / aspect) + 0.6
+	camera.position = Vector3((cols - 1) * spacing * 0.5,
+			-(rows - 1) * spacing * 0.5, 18.0)
+	camera.current = true
+	scene.add_child(camera)
+	return camera
+
+
 static func add_framefx(scene: Node3D, q3_enabled: bool) -> FrameFx:
 	var renderer := FrameFx.new()
 	renderer.visible = q3_enabled

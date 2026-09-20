@@ -99,14 +99,10 @@ var _grenade_rows: Array[WeaponDef] = []  # the first 3 class-3 defs, table orde
 var _nat_db_index: Array[int] = []      # NATIONALITY visible row -> nationality DB index
 var _sel_nat := -1
 var _sel_div := -1
-var _populating := false                # guards the cascade against programmatic-fill re-entry
 var _preview                            # AvatarPreview mounted over PLAYER_PREVIEW (null until wired)
 var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-zoom filter
 # NAME (upper) -> Callable(row, value), dispatched by combo value changes.
 var _combo_handlers: Dictionary = {}
-# The icon TextureRects mounted as frame children ("PRIMARY"/... -> TextureRect);
-# freed and rebuilt on each on_menu_built.
-var _icon_mounts: Dictionary = {}
 var _character_state := PlayerCharacterSelectionStateScript.new()
 # PLAYERVOICE row -> the row's VALUE (0 for DEFAULT_VOICE, else the CHARVOICE id);
 # the list is filled at runtime, so the values live here the way _nat_db_index
@@ -631,34 +627,8 @@ func _update_weight() -> void:
 # The icon TextureRects mount as frame children over each *_ICON widget rect
 # (the compiled frame has no per-widget Controls to parent into).
 func _update_icons() -> void:
-	var frame := _driver.get_frame() if _driver != null else null
-	if frame == null:
-		return
-	for control in PARENT_SLOTS:
-		var holder := _id(control + "_ICON")
-		if holder < 0:
-			continue
-		var icon_rect: TextureRect = _icon_mounts.get(control)
-		if icon_rect == null or not is_instance_valid(icon_rect):
-			icon_rect = TextureRect.new()
-			icon_rect.name = control + "LoadoutIcon"
-			icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			icon_rect.stretch_mode = TextureRect.STRETCH_SCALE
-			icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			frame.add_child(icon_rect)
-			_icon_mounts[control] = icon_rect
-		_place_mount(icon_rect, holder)
-		var selected := _selected_weapon(control)
-		var icon_name := selected.icon if selected != null else ""
-		if icon_name.is_empty() or _root == null:
-			icon_rect.texture = null
-		else:
-			icon_rect.texture = _root.load_texture(
-					icon_name, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
+	_update_weapon_icons("LoadoutIcon", _selected_weapon)
 
-
-# The weight/encumbrance keys are menu-UI tokens (menutxt "Menu", else gameui
-# "Menu") — a different section set than the Avatars display keys.
 
 # --- Population (the cascade) -------------------------------------------------
 
@@ -875,26 +845,11 @@ func _selected_combo_index() -> int:
 # Free the previous build's frame-child mounts; the shell re-opens the document
 # and hands us a fresh on_menu_built, so the mounts rebuild from scratch too.
 func _clear_mounts() -> void:
-	for control in _icon_mounts:
-		var mount: TextureRect = _icon_mounts[control]
-		if mount != null and is_instance_valid(mount):
-			mount.queue_free()
-	_icon_mounts.clear()
+	_clear_icon_mounts()
 	if _preview != null and is_instance_valid(_preview):
 		_preview.queue_free()
 	_preview = null
 	_preview_id = -1
-
-
-# Place a mount over its widget: widget_frame_rect is the design rect scaled to
-# the frame's current size, and a zero rect means the widget is not on the
-# configured screen — the mount hides with it (the old per-screen Control
-# parenting gave both for free).
-func _place_mount(mount: Control, id: int) -> void:
-	var rect := _driver.widget_frame_rect(id)
-	mount.position = rect.position
-	mount.size = rect.size
-	mount.visible = rect.size.x > 0.0 and rect.size.y > 0.0
 
 
 func _reposition_mounts() -> void:
@@ -904,13 +859,7 @@ func _reposition_mounts() -> void:
 	# against the new one (the sibling handlers carry the same guard).
 	if _driver == null or _driver.get_menu_file() != _wired_file:
 		return
-	for control in _icon_mounts:
-		var icon_rect: TextureRect = _icon_mounts[control]
-		if icon_rect == null or not is_instance_valid(icon_rect):
-			continue
-		var holder := _id(String(control) + "_ICON")
-		if holder >= 0:
-			_place_mount(icon_rect, holder)
+	_reposition_icon_mounts()
 	if _preview != null and is_instance_valid(_preview) and _preview_id >= 0:
 		_place_mount(_preview, _preview_id)
 
@@ -1108,17 +1057,6 @@ func commit() -> void:
 
 
 # --- Helpers ------------------------------------------------------------------
-
-# Fill a combo and pre-select the first row without firing the cascade (the fill is
-# programmatic; user selections come through widget_value_changed). select_row with
-# emit=false suppresses the relay; the _populating guard covers any incidental emit.
-func _set_combo_items(combo: int, rows: PackedStringArray) -> void:
-	_populating = true
-	_driver.set_widget_items(combo, rows)
-	if rows.size() > 0:
-		_driver.select_row(combo, 0, false)
-	_populating = false
-
 
 # Register a combo-select handler (row, value) for a named control, dispatched off
 # the driver's aggregate widget_value_changed (kind == "combo") — the item_selected

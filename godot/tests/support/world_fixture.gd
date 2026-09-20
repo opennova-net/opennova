@@ -263,6 +263,21 @@ static func write_pff(test: GutTest, path: String, entries: Array) -> void:
 			"PFF fixture should be writable: %s" % path)
 
 
+## Drive `count` fixed world ticks through the local-player presenter the way
+## the shell's frame does (the input override, then before/after world tick
+## around the world's own tick); `jump` holds the jump intent for the run.
+static func step_player_frames(presenter: LocalPlayerPresenter, world: GameWorld,
+		camera: Camera3D, count: int = 1, jump: bool = false) -> void:
+	var input := PlayerMoveIntent.new()
+	input.jump = jump
+	presenter.set_input_override(input)
+	for tick in count:
+		var frame_input := presenter.before_world_tick(Simulation.tick_dt(), false, true)
+		world.tick(camera.global_position, camera.global_transform,
+				Simulation.tick_dt(), frame_input)
+		presenter.after_world_tick()
+
+
 ## One archive's rows for `filenames` out of the minimal pack, with the
 ## lifecycle substitutions: the render-capable Tmap.trn under mnml.trn's
 ## name, the shipped JO in-world menus (when the reference fixture set is

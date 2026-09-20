@@ -9,20 +9,6 @@ extends GutTest
 const SILENT_DB := -80.0
 
 
-# Occlusion recorder driven through MissionAudio's typed Callable override seam
-# (set_occlusion_override) — the live path is the Simulation provider.
-class OcclusionRecorder:
-	extends RefCounted
-	var calls := 0
-	var source_bms_ids: Array[int] = []
-
-	func occlude(_listener_pos: Vector3, _source_pos: Vector3,
-			raw_distance_q16: int, source_bms_id: int) -> int:
-		calls += 1
-		source_bms_ids.append(source_bms_id)
-		return raw_distance_q16
-
-
 # One placed marker record: `layers_by_set` maps a set name to its
 # AmbientLayer rows (set order = the mixer's slot-key index order).
 func _marker(pos: Vector3, slot_sets: PackedStringArray,
@@ -291,7 +277,7 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 	var fixture_dir := OS.get_cache_dir().path_join(
 		"mission_audio_vehicle_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
-	_write_bytes(fixture_dir.path_join("tone.wav"),
+	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path(
 				"res://../fixtures/lwf/tone.wav")))
@@ -367,7 +353,7 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	var fixture_dir := OS.get_cache_dir().path_join(
 		"mission_audio_vehicle_catchup_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
-	_write_bytes(fixture_dir.path_join("tone.wav"),
+	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path(
 				"res://../fixtures/lwf/tone.wav")))
@@ -433,7 +419,7 @@ begin "Non-env marker"
 end
 """
 	_write_text(fixture_dir.path_join("items.def"), items)
-	_write_bytes(fixture_dir.path_join("tone.wav"),
+	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
 	var lwf := LwfData.new()
 	lwf.create_empty()
@@ -505,8 +491,8 @@ begin "Good ambient"
 end
 """
 	_write_text(fixture_dir.path_join("items.def"), items)
-	_write_bytes(fixture_dir.path_join("bad.wav"), PackedByteArray([1, 2, 3, 4]))
-	_write_bytes(fixture_dir.path_join("good.wav"),
+	TestFs.write_bytes(self, fixture_dir.path_join("bad.wav"), PackedByteArray([1, 2, 3, 4]))
+	TestFs.write_bytes(self, fixture_dir.path_join("good.wav"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
 	var lwf := LwfData.new()
@@ -548,10 +534,10 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	var fixture_dir := OS.get_cache_dir().path_join(
 		"mission_audio_reuse_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(fixture_dir)
-	_write_bytes(fixture_dir.path_join("first.DBF"),
+	TestFs.write_bytes(self, fixture_dir.path_join("first.DBF"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path("res://../fixtures/dbf/synth_bank.dbf")))
-	_write_bytes(fixture_dir.path_join("tone.wav"),
+	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
 	var lwf := LwfData.new()
@@ -624,13 +610,6 @@ func _write_text(path: String, value: String) -> void:
 	assert_not_null(file)
 	if file != null:
 		file.store_string(value)
-
-
-func _write_bytes(path: String, value: PackedByteArray) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	if file != null:
-		file.store_buffer(value)
 
 
 func _add_lwf_set(

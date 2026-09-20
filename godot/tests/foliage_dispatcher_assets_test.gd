@@ -12,7 +12,7 @@ var _dispatcher: FoliageDispatcher = null
 
 
 func before_each() -> void:
-	_cleanup_dir(_fixture_root())
+	TestFs.remove_dir_recursive(_fixture_root())
 	_dispatcher = FoliageDispatcher.new()
 	add_child_autofree(_dispatcher)
 	ObjectData.reset_network_challenge_model_registry()
@@ -21,7 +21,7 @@ func before_each() -> void:
 func after_each() -> void:
 	_dispatcher = null
 	ObjectData.reset_network_challenge_model_registry()
-	_cleanup_dir(_fixture_root())
+	TestFs.remove_dir_recursive(_fixture_root())
 
 
 func test_list_graphics_preserves_actual_model_path_case() -> void:
@@ -122,7 +122,7 @@ func test_resolve_slot_meshes_loads_graphic_resident_only_in_runtime_pff() -> vo
 	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
 	var model_bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(SOURCE_OBJECT))
 	assert_gt(model_bytes.size(), 0)
-	_write_pff(root_dir.path_join('resource.pff'), [{
+	WorldFixture.write_pff(self, root_dir.path_join('resource.pff'), [{
 		'name': 'Mveg6.3di',
 		'bytes': model_bytes,
 	}])
@@ -147,11 +147,11 @@ func test_mesh_cache_does_not_alias_base_and_expansion_mounts_of_same_directory(
 	var expansion_bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(OVERRIDE_OBJECT))
 	assert_gt(base_bytes.size(), 0)
 	assert_gt(expansion_bytes.size(), 0)
-	_write_pff(root_dir.path_join('resource.pff'), [{
+	WorldFixture.write_pff(self, root_dir.path_join('resource.pff'), [{
 		'name': 'Mveg6.3di',
 		'bytes': base_bytes,
 	}])
-	_write_pff(root_dir.path_join('expansion/jox01/jox01.pff'), [{
+	WorldFixture.write_pff(self, root_dir.path_join('expansion/jox01/jox01.pff'), [{
 		'name': 'Mveg6.3di',
 		'bytes': expansion_bytes,
 	}])
@@ -299,17 +299,3 @@ func _copy_file(src: String, dst: String) -> void:
 		return
 	file.store_buffer(bytes)
 	file.close()
-
-
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
-
-
-func _cleanup_dir(path: String) -> void:
-	if not DirAccess.dir_exists_absolute(path):
-		return
-	for file in DirAccess.get_files_at(path):
-		DirAccess.remove_absolute(path.path_join(file))
-	for dir in DirAccess.get_directories_at(path):
-		_cleanup_dir(path.path_join(dir))
-	DirAccess.remove_absolute(path)

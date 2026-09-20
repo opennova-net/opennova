@@ -292,14 +292,14 @@ func _make_install() -> String:
 	var dir := OS.get_cache_dir().path_join("opennova_join_expansion").path_join(
 		"install_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01")), OK)
-	_write_pff(dir.path_join("resource.pff"), [{"name": "basetag.txt", "bytes": "BASE"}])
+	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [{"name": "basetag.txt", "bytes": "BASE"}])
 	# The expansion must contain a loadable terrain, not just a resolvable name:
 	# load_trn enforces retail's required map names and sector dimensions.
 	var heightmap := FileAccess.get_file_as_bytes(RuntimeFixture.file("mnml.cpt"))
 	var texture := FileAccess.get_file_as_bytes(RuntimeFixture.file("mnml_dm.tga"))
 	assert_false(heightmap.is_empty(), "the synthetic heightmap fixture exists")
 	assert_false(texture.is_empty(), "the synthetic terrain texture exists")
-	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "exptag.txt", "bytes": "EXP"},
 		{"name": HOST_MAP, "bytes": NOT_A_MISSION},
 		{"name": HOST_TERRAIN + ".trn", "bytes": HOST_TRN},
@@ -315,8 +315,3 @@ func _remove_install(dir: String) -> void:
 	for sub in ["resource.pff", "expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
 		DirAccess.remove_absolute(dir.path_join(sub))
 	DirAccess.remove_absolute(dir)
-
-
-# The shared PFF3 fixture writer (TestPff.write), asserted here.
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)

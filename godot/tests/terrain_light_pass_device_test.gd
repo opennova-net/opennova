@@ -9,21 +9,13 @@ extends GutTest
 ## @0x609685, LightInstance_IsAliveAndLightsTerrain @0x609880) ->
 ## Light_SetupTerrainProjectedPass @0x5AA830].
 
-var _terrain_root := ""
-
-
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
-# assets it names; one root per test file, removed at the end.
-func _tmap_trn() -> String:
-	if _terrain_root.is_empty():
-		_terrain_root = TestFs.stage_terrain_root("light_pass")
-	return _terrain_root.path_join(TestFs.TMAP_TRN)
+# assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
+const TMAP_STAGE := "light_pass"
 
 
 func after_all() -> void:
-	if not _terrain_root.is_empty():
-		TestFs.remove_dir_recursive(_terrain_root)
-		_terrain_root = ""
+	TestFs.release_staged_tmap(TMAP_STAGE)
 
 
 const NEAR_PATCH := AABB(Vector3(-8.0, -2.0, -8.0), Vector3(16.0, 6.0, 16.0))
@@ -103,7 +95,7 @@ func test_a_built_terrain_collects_rows_for_the_patches_a_light_overlaps() -> vo
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var data := TerrainData.new()
-	data.set_trn_path(_tmap_trn())
+	data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(data.load(), OK, "the Tmap fixture terrain must load")
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)

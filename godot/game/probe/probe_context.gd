@@ -4,7 +4,7 @@ extends RefCounted
 ## Everything a running probe touches (docs/mcp.md, ADR 0041): its typed
 ## args and artifact directory, live accessors onto the shell (functions,
 ## never cached references: a probe must not hold a Simulation or Node
-## across an await), the waits that replace the old boot tails, the mission
+## across an await), the boot and frame waits, the mission
 ## verbs, guarded mutations that finish() undoes in reverse, capture helpers,
 ## and the log/progress channel game_probe op=status reads back.
 
@@ -112,9 +112,8 @@ func wait_ms(duration_ms: int) -> void:
 		await tree.process_frame
 
 
-## The old StandaloneGameProbe.boot tail: wait until the world holds a local
-## player, then leave the start-mission splash and the reveal. False on
-## timeout or cancellation.
+## Wait until the world holds a local player, then leave the start-mission
+## splash and the reveal. False on timeout or cancellation.
 func wait_for_local_player(timeout_ms := LOCAL_PLAYER_TIMEOUT_MS) -> bool:
 	var deadline := Time.get_ticks_msec() + timeout_ms
 	while not cancelled and tree != null:

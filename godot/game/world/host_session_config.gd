@@ -52,9 +52,6 @@ const CHANNEL_NOVAWORLD := "NovaWorld"
 var mission := ""       ## the .bms to load (host screens put the rotation's first pick here)
 var missions: Array[String] = []
 var game_type_attr := ""  ## the GAME_TYPE spin's raw value attr (HG_COOP=2, ...), for later
-var dedicated: bool:
-	get: return not serve_and_play
-	set(value): serve_and_play = not value
 
 
 func _init() -> void:
@@ -95,15 +92,6 @@ func _init() -> void:
 	start_delay = NetProtocol.DEFAULT_START_DELAY
 	destroy_buildings = NetProtocol.DEFAULT_DESTROY_BUILDINGS
 	death_messages = NetProtocol.DEFAULT_DEATH_MESSAGES
-
-
-## Retail's mission-attrib -> g_GameType table — the engine home is
-## engine/base/gameprofile/game_type.h for_mission_mode (MissionData.ATTRIB_* values
-## are pinned to the engine's bms::AttribFlags by static_assert). The zero-mode
-## case is important: 00TRg has no authored multiplayer mode, yet direct LAN
-## hosting selects the stock/training Co-op word.
-static func game_type_for_mission_mode(mode: int) -> int:
-	return NetProtocol.game_type_for_mission_mode(mode)
 
 
 ## The session slice for Simulation.configure_host_session as the typed record

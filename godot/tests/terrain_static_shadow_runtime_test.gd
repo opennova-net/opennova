@@ -10,21 +10,13 @@ const SYN_HOUSE_SINE_UV1 := "res://../fixtures/threedi/synth/house_lod0_sine_rot
 const SYN_HOUSE_UVSCROLL := "res://../fixtures/threedi/synth/house_mtrl0_uvscroll16_alphatest.3di"
 
 
-var _terrain_root := ""
-
-
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
-# assets it names; one root per test file, removed at the end.
-func _tmap_trn() -> String:
-	if _terrain_root.is_empty():
-		_terrain_root = TestFs.stage_terrain_root("static_shadow")
-	return _terrain_root.path_join(TestFs.TMAP_TRN)
+# assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
+const TMAP_STAGE := "static_shadow"
 
 
 func after_all() -> void:
-	if not _terrain_root.is_empty():
-		TestFs.remove_dir_recursive(_terrain_root)
-		_terrain_root = ""
+	TestFs.release_staged_tmap(TMAP_STAGE)
 
 
 static func _terrain_light_epoch(raw_tuple: Vector3) -> Vector3i:
@@ -37,31 +29,12 @@ static func _terrain_light_epoch(raw_tuple: Vector3) -> Vector3i:
 		int((clampf(raw_tuple.y, -1.0, 1.0) + 1.0) * 127.5))
 
 
-func _settle_tile_cache(terrain: Terrain) -> Dictionary:
-	var diagnostics: Dictionary = {}
-	# Exact material animation can make the two CPU workers rasterize every
-	# authored alpha surface instead of skipping an unsupported draw. Keep the
-	# loop frame-bounded, but leave enough headless Debug frames for all 61
-	# visible pages to publish on slower Windows CI runners.
-	for _attempt in range(2048):
-		terrain.render_frame()
-		diagnostics = terrain.get_tile_cache_diagnostics()
-		if int(diagnostics.get("pending_jobs", -1)) == 0 \
-				and int(diagnostics.get("frame_requests", 0)) > 0 \
-				and int(diagnostics.get("frame_ready_hits", -1)) \
-						== int(diagnostics.get("frame_requests", 0)):
-			return diagnostics
-		await get_tree().process_frame
-	assert_true(false, "the bounded terrain compiler must settle visible pages")
-	return diagnostics
-
-
 func test_replacing_terrain_data_cancels_old_jobs_without_borrowing_old_receiver_memory() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var old_data: TerrainData = TerrainData.new()
-	old_data.set_trn_path(_tmap_trn())
+	old_data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(old_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -91,7 +64,7 @@ func test_replacing_terrain_data_cancels_old_jobs_without_borrowing_old_receiver
 			"the replacement regression must cancel an executing receiver job, not only queued work")
 	var old_weak: WeakRef = weakref(old_data)
 	var replacement := TerrainData.new()
-	replacement.set_trn_path(_tmap_trn())
+	replacement.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(replacement.load(), OK)
 	terrain.set_terrain_data(replacement)
 	terrain.build()
@@ -106,7 +79,7 @@ func test_replacing_terrain_data_cancels_old_jobs_without_borrowing_old_receiver
 		await get_tree().process_frame
 	assert_null(old_weak.get_ref(),
 			"worker snapshots retain portable receiver bytes, not the replaced resource")
-	var settled := await _settle_tile_cache(terrain)
+	var settled := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(settled.get("pending_jobs", -1)), 0)
 	assert_gt(int(settled.get("ready_pages", 0)), 0)
 	assert_eq(int(settled.get("upload_failures", -1)), 0)
@@ -137,7 +110,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	environment.configure_mission_clock(0x0900, 60)
 
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(_tmap_trn())
+	terrain_data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(terrain_data.load(), OK, "the Tmap terrain fixture must load")
 
 	var terrain := Terrain.new()
@@ -160,7 +133,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	# promised static-shadow raster job. Headless Texture2DArray readback exposes
 	# only its blank allocation, so authoritative comparison stays in the device
 	# before upload.
-	var baseline_diagnostics := await _settle_tile_cache(terrain)
+	var baseline_diagnostics := await TestFs.settle_tile_cache(self, terrain)
 	var page_array: TextureLayered = terrain.get_tile_cache_texture()
 	assert_not_null(page_array)
 	if page_array == null:
@@ -198,7 +171,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	assert_eq(int(queued_shadow["frame_uploads"]), 0)
 	assert_eq(int(queued_shadow["shadow_epoch_raster_jobs"]), 0,
 			"static planning and rasterization must not complete inside request()")
-	var diagnostics := await _settle_tile_cache(terrain)
+	var diagnostics := await TestFs.settle_tile_cache(self, terrain)
 	assert_true(bool(diagnostics["shadow_raster_available"]))
 	assert_gt(int(diagnostics["shadow_raster_jobs"]), 0,
 		"at least one resident page must execute the promised real-geometry raster")
@@ -275,24 +248,24 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 		int(restored_light["frame_requests"]))
 
 	terrain.set_static_terrain_shadow_enabled(false)
-	var disabled := await _settle_tile_cache(terrain)
+	var disabled := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(disabled["resident_output_hash"]), baseline_hash,
 		"canonical shadows_off must invalidate and restore unshadowed page alpha")
 	assert_eq(int(disabled["shadow_epoch_alpha_changed_bytes"]), 0)
 	terrain.set_static_terrain_shadow_enabled(true)
-	var reenabled := await _settle_tile_cache(terrain)
+	var reenabled := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(reenabled["resident_output_hash"]), shadowed_hash,
 		"re-enabling page shadows must transactionally restore the silhouette")
 	assert_gt(int(reenabled["shadow_epoch_alpha_changed_bytes"]), 0)
 	assert_eq(int(reenabled["shadow_epoch_rgb_changed_bytes"]), 0)
 	terrain.set_suppressed_static_shadow_bms_ids(PackedInt32Array([100]))
-	var suppressed := await _settle_tile_cache(terrain)
+	var suppressed := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(suppressed["resident_output_hash"]), baseline_hash,
 		"BMS attribution suppression must filter the typed caster source")
 	assert_eq(int(suppressed["shadow_epoch_alpha_changed_bytes"]), 0)
 	assert_eq(int(suppressed["shadow_provider_epoch_triangles"]), 0)
 	terrain.set_suppressed_static_shadow_bms_ids(PackedInt32Array())
-	var unsuppressed := await _settle_tile_cache(terrain)
+	var unsuppressed := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(unsuppressed["resident_output_hash"]), shadowed_hash,
 		"clearing BMS suppression must restore the exact shadowed pages")
 	assert_gt(int(unsuppressed["shadow_epoch_alpha_changed_bytes"]), 0)
@@ -304,7 +277,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	# (Material 0's uv_u_style 1 — the time/control-driven UV mutation — is
 	# the minimal_3di_gen ctest's pin on house_lod0_sine_rotx_uv1.)
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_SINE_UV1)), OK)
-	var animated_uv := await _settle_tile_cache(terrain)
+	var animated_uv := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(animated_uv["shadow_provider_epoch_plan_failures"]), 0,
 		"the shared runtime evaluator must keep dynamic projected-shadow UV exact")
 	assert_eq(int(animated_uv["ready_pages"]), int(unsuppressed["ready_pages"]),
@@ -317,7 +290,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	assert_gt(int(animated_uv["shadow_provider_epoch_triangles"]), 0,
 		"the dynamically transformed material must still submit its silhouettes")
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_SINE)), OK)
-	var restored_material := await _settle_tile_cache(terrain)
+	var restored_material := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(restored_material["shadow_provider_epoch_plan_failures"]), 0,
 		"restoring a supported static material must make every page plan exact again")
 	assert_gt(int(restored_material["shadow_epoch_alpha_changed_bytes"]), 0)
@@ -327,7 +300,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	# to the identical canonical resident-page output.
 	terrain.set_static_terrain_shadow_enabled(false)
 	terrain.set_static_terrain_shadow_enabled(true)
-	var fully_rebuilt_material := await _settle_tile_cache(terrain)
+	var fully_rebuilt_material := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(fully_rebuilt_material["resident_output_pages"]),
 		int(diagnostics["resident_output_pages"]))
 	assert_eq(int(fully_rebuilt_material["resident_output_hash"]), shadowed_hash,
@@ -349,7 +322,7 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(_tmap_trn())
+	terrain_data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(terrain_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -375,7 +348,7 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	placer.register_static_instance(101, "house", 1,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), mover_origin), true)
 	terrain.set_static_shadow_placer(placer)
-	var settled := await _settle_tile_cache(terrain)
+	var settled := await TestFs.settle_tile_cache(self, terrain)
 	var settled_ready_pages := int(settled["ready_pages"])
 	var settled_hash := int(settled["resident_output_hash"])
 	assert_gt(settled_ready_pages, 0)
@@ -403,7 +376,7 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	assert_gt(int(moved["frame_stale_hits"]), 0,
 		"the mover's re-targeted pages must keep serving their published payload")
 
-	var resettled := await _settle_tile_cache(terrain)
+	var resettled := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(resettled["shadow_raster_failures"]), 0)
 	assert_eq(int(resettled["frame_stale_hits"]), 0,
 		"a settled cache serves no stale payloads")
@@ -443,7 +416,7 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(_tmap_trn())
+	terrain_data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(terrain_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -470,7 +443,7 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 	terrain.set_static_shadow_placer(placer)
 	var clock_ms := 1000
 	terrain.set_light_context(null, clock_ms)
-	var settled := await _settle_tile_cache(terrain)
+	var settled := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(settled["shadow_raster_failures"]), 0)
 	assert_eq(int(settled["shadow_provider_epoch_plan_failures"]), 0)
 	var epoch_plans := int(settled["shadow_provider_epoch_plan_count"])
@@ -519,7 +492,7 @@ func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> voi
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(_tmap_trn())
+	terrain_data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(terrain_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -540,7 +513,7 @@ func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> voi
 	placer.register_static_instance(889, "Scrate1", 0,
 		Transform3D(Basis().scaled(Vector3(4.0, 4.0, 4.0)), origin), true)
 	terrain.set_static_shadow_placer(placer)
-	var diagnostics := await _settle_tile_cache(terrain)
+	var diagnostics := await TestFs.settle_tile_cache(self, terrain)
 	assert_gt(int(diagnostics["shadow_provider_epoch_projection_draws"]), 0,
 		"the mounted Scrate1 must enter at least one resident PROJSHAD page")
 	assert_eq(int(diagnostics["shadow_provider_epoch_plan_failures"]), 0)

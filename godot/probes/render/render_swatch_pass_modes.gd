@@ -323,17 +323,7 @@ func matchterrain_mode(out_dir: String, prefix: String) -> void:
 			"mesh": mesh,
 		})
 
-	var rows := int(ceil(float(entries.size()) / float(COLS)))
-	var grid_w := COLS * SPACING
-	var grid_h := rows * SPACING
-	var aspect := 1280.0 / 720.0
-	var camera := Camera3D.new()
-	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = maxf(grid_h, grid_w / aspect) + 0.6
-	camera.position = Vector3((COLS - 1) * SPACING * 0.5,
-			-(rows - 1) * SPACING * 0.5, 18.0)
-	camera.current = true
-	scene.add_child(camera)
+	var camera := RenderSwatchSupport.add_grid_camera(scene, entries.size(), COLS, SPACING)
 
 	var captures := {}
 	var states := ["disabled_rejected", "missing_cache", "page_unready",
@@ -563,17 +553,7 @@ func glow_mode(out_dir: String, prefix: String) -> void:
 			"contract": str(contracts.get(name, "missing")),
 			"material": material, "mesh": mesh})
 
-	var rows := int(ceil(float(entries.size()) / float(COLS)))
-	var grid_w := COLS * SPACING
-	var grid_h := rows * SPACING
-	var aspect := 1280.0 / 720.0
-	var camera := Camera3D.new()
-	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = maxf(grid_h, grid_w / aspect) + 0.6
-	camera.position = Vector3((COLS - 1) * SPACING * 0.5,
-			-(rows - 1) * SPACING * 0.5, 18.0)
-	camera.current = true
-	scene.add_child(camera)
+	var camera := RenderSwatchSupport.add_grid_camera(scene, entries.size(), COLS, SPACING)
 
 	var captures := {}
 	var states := ["nopass_off", "nopass_on", "glow_off_aligned",

@@ -767,7 +767,7 @@ func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 	var root := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join("missing_env_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root)
 	# Pass the runtime archive gate so this fixture reaches the missing-environment contract.
-	_write_pff(root.path_join("resource.pff"), [])
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [])
 	_write_fixture_file(root.path_join("Tmap.trn"), "terrain_name \"Tmap\"\n")
 
 	var world := WorldFixture.make_world(self)
@@ -1915,11 +1915,11 @@ func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void
 func test_runtime_dev_mount_still_loads_bms_from_archive() -> void:
 	var root_dir := _staged(WorldFixture.stage_minimal_root("archive_only_bms"))
 	var archived_bms := FileAccess.get_file_as_bytes(root_dir.path_join("mnml.bms"))
-	_write_pff(root_dir.path_join("resource.pff"), [{
+	WorldFixture.write_pff(self, root_dir.path_join("resource.pff"), [{
 		"name": "mnml.bms",
 		"bytes": archived_bms,
 	}])
-	_write_bytes(root_dir.path_join("mnml.bms"), "not a mission".to_utf8_buffer())
+	TestFs.write_bytes(self, root_dir.path_join("mnml.bms"), "not a mission".to_utf8_buffer())
 
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.mount_runtime(root_dir, "", true), OK,
@@ -1937,7 +1937,7 @@ func test_runtime_dev_mount_still_loads_bms_from_archive() -> void:
 
 func test_editor_run_loads_the_exact_saved_loose_bms() -> void:
 	var root_dir := _staged(WorldFixture.stage_minimal_root("exact_loose_bms"))
-	_write_pff(root_dir.path_join("resource.pff"), [{
+	WorldFixture.write_pff(self, root_dir.path_join("resource.pff"), [{
 		"name": "mnml.bms",
 		"bytes": "not a mission".to_utf8_buffer(),
 	}])
@@ -1976,8 +1976,8 @@ func test_runtime_mission_til_forces_loose_first_in_packed_mode() -> void:
 		"name": "mnml.til",
 		"bytes": TilFixture.bytes_for_cell(0),
 	})
-	_write_pff(root_dir.path_join("resource.pff"), archive_entries)
-	_write_bytes(root_dir.path_join("mnml.til"), TilFixture.bytes_for_cell(4))
+	WorldFixture.write_pff(self, root_dir.path_join("resource.pff"), archive_entries)
+	TestFs.write_bytes(self, root_dir.path_join("mnml.til"), TilFixture.bytes_for_cell(4))
 
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.mount_runtime(root_dir), OK,
@@ -3222,19 +3222,6 @@ func _make_fixture_root(name: String) -> String:
 		"%s_%d" % [name, Time.get_ticks_usec()])
 	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
 	return root_dir
-
-
-func _write_bytes(path: String, bytes: PackedByteArray) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "Fixture file should be writable: %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
-# The shared PFF3 fixture writer (TestPff.write), asserted here.
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
 
 
 # Stage the minimal fixture plus the armory.3di fixture (authored OOBJ

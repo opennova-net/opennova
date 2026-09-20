@@ -25,14 +25,6 @@ const SECTIONED_3DI := "res://../fixtures/threedi/synth/pump.3di"
 class Snapshot:
 	extends RefCounted
 	var entities: Array = []
-	func _write_phase(out: PackedFloat32Array, base: int,
-			channel: int, phase: int, active: bool) -> void:
-		var phase_field := Simulation.PF_PHASE1 + (channel - 1) * 2
-		var active_field := Simulation.PF_ACTIVE1 + (channel - 1) * 2
-		var bits := phase & 0xFFFFFFFF
-		out[base + phase_field] = float(bits & 0xFFFF)
-		out[base + active_field] = (
-				float(((bits >> 16) & 0xFFFF) + 1) if active else 0.0)
 	func build() -> PackedFloat32Array:
 		var stride: int = Simulation.PF_STRIDE
 		var out := PackedFloat32Array()
@@ -50,9 +42,9 @@ class Snapshot:
 			out[b + Simulation.PF_POS_Y] = float(e.get("pos_y", 0.0))
 			out[b + Simulation.PF_POS_Z] = float(e.get("pos_z", 0.0))
 			out[b + Simulation.PF_YAW_DEG] = float(e.get("yaw_deg", 0.0))
-			_write_phase(out, b, 1, int(e.get("phase1", 0)),
+			PresentPassFixture.write_phase(out, b, 1, int(e.get("phase1", 0)),
 					int(e.get("active1", 0)) != 0)
-			_write_phase(out, b, 2, int(e.get("phase2", 0)),
+			PresentPassFixture.write_phase(out, b, 2, int(e.get("phase2", 0)),
 					int(e.get("active2", 0)) != 0)
 			var doors: Array = e.get("doors", [])
 			out[b + Simulation.PF_DOOR_COUNT] = float(doors.size())

@@ -100,6 +100,20 @@ func get_table(name: String) -> RtxtStringFile:
 	return _tables.get(name.to_lower())
 
 
+## One RTXT .bin read off a mounted resource root; null when there is no root,
+## the root carries no such file, or it does not parse.
+func load_rtxt(root: ResourceRoot, file: String) -> RtxtStringFile:
+	if root == null:
+		return null
+	var bytes := root.read_file(file)
+	if bytes.is_empty():
+		return null
+	var table := RtxtStringFile.new()
+	if table.load_from_byte_array(bytes) != OK:
+		return null
+	return table
+
+
 ## --- Override table [orig: TextResource_LoadOverrideTable @ 0x75D5C0] ---
 
 ## Sets the table consulted before every lookup (the original engine loads the

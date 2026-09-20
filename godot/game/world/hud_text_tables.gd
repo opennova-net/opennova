@@ -17,7 +17,7 @@ static func register(root: ResourceRoot, world: GameWorld) -> void:
 	# strings. The gametext table IS gametext.bin [orig: Game_InitSubsystems
 	# @0x4a6cd0 — TextResource_LoadFromArchive("gametext.bin") -> g_TextGameText;
 	# Game.bin is the SEPARATE menu resource (@0x552510) and carries no WepDes].
-	Strings.register_table(Strings.TABLE_GAMETEXT, load_rtxt(root, "gametext.bin"))
+	Strings.register_table(Strings.TABLE_GAMETEXT, Strings.load_rtxt(root, "gametext.bin"))
 	# The host's medic broadcast format [orig: Server_BroadcastMedicRequest @0x515390].
 	var sim: Simulation = world.get_sim() if world != null else null
 	var gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
@@ -31,12 +31,3 @@ static func register(root: ResourceRoot, world: GameWorld) -> void:
 		base = String(world.get_loaded_mission_file()).get_basename()
 	Strings.register_table(Strings.TABLE_MISSION, RtxtStringFile.load_mission_table(root, base))
 
-
-static func load_rtxt(root: ResourceRoot, name: String) -> RtxtStringFile:
-	var bytes := root.read_file(name)
-	if bytes.is_empty():
-		return null
-	var table := RtxtStringFile.new()
-	if table.load_from_byte_array(bytes) != OK:
-		return null
-	return table

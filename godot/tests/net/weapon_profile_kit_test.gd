@@ -26,7 +26,8 @@ const FIRST_PAGE_OFFSET := 6
 
 const BLUE_CLASS := 8
 const RED_CLASS := 6
-# Every name below exists in fixtures/def/weapon.def (94 rows, 1-based ADM space).
+# Every name below exists in the reference fixture set's def/weapon.def (94 rows,
+# 1-based ADM space; staged through RetailData.def_root()).
 const BLUE_PAGE := ["WPN_KNIFE", "WPN_M4AUTO", "WPN_colt45"]
 const RED_PAGE := ["WPN_KNIFE2", "WPN_DRAGUNOV", "WPN_357"]
 # Deliberately absent from both pages: if it shows up in the local pool, the pool was

@@ -14,9 +14,9 @@ func test_runtime_does_not_ship_resource_roots() -> void:
 
 func test_resource_root_resolves_only_top_level_files() -> void:
 	var root := _make_flat_root("flat_resolve")
-	_write_file(root.path_join("Alpha.TRN"), "trn")
+	TestFs.write_text(self, root.path_join("Alpha.TRN"), "trn")
 	DirAccess.make_dir_recursive_absolute(root.path_join("terrains"))
-	_write_file(root.path_join("terrains/Dvxi5.trn"), "nested")
+	TestFs.write_text(self, root.path_join("terrains/Dvxi5.trn"), "nested")
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.set_root_dir(root), OK)
@@ -33,8 +33,8 @@ func test_resource_root_resolves_only_top_level_files() -> void:
 
 func test_editor_set_root_dir_is_loose_only() -> void:
 	var root := _make_flat_root("loose_only")
-	_write_file(root.path_join("Alpha.TRN"), "loose trn")
-	_write_pff(root.path_join("aa_base.pff"), [
+	TestFs.write_text(self, root.path_join("Alpha.TRN"), "loose trn")
+	WorldFixture.write_pff(self, root.path_join("aa_base.pff"), [
 		{"name": "Alpha.TRN", "bytes": "archived trn"},
 		{"name": "Bravo.env", "bytes": "archived env"},
 	])
@@ -49,15 +49,15 @@ func test_editor_set_root_dir_is_loose_only() -> void:
 
 func test_runtime_mount_is_packed_with_optional_loose_override() -> void:
 	var root := _make_flat_root("packed_runtime")
-	_write_file(root.path_join("Alpha.TRN"), "loose trn")
+	TestFs.write_text(self, root.path_join("Alpha.TRN"), "loose trn")
 	# The runtime mounts only the witnessed boot archive table (language/localres/
 	# resource.pff) [orig: PFF_OpenAllArchives @ 0x4a4310]; an arbitrary-named .pff
 	# never mounts at runtime (D-VFS-2).
-	_write_pff(root.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "Alpha.TRN", "bytes": "archived trn"},
 		{"name": "Bravo.env", "bytes": "archived env"},
 	])
-	_write_pff(root.path_join("zz_extra.pff"), [
+	WorldFixture.write_pff(self, root.path_join("zz_extra.pff"), [
 		{"name": "Extra.env", "bytes": "never mounts"},
 	])
 
@@ -82,7 +82,7 @@ func test_runtime_mount_is_packed_with_optional_loose_override() -> void:
 
 func test_runtime_mount_rejects_loose_only_root_even_with_dev_override() -> void:
 	var root := _make_flat_root("runtime_requires_archive")
-	_write_file(root.path_join("Alpha.TRN"), "loose trn")
+	TestFs.write_text(self, root.path_join("Alpha.TRN"), "loose trn")
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root, "", true), ERR_FILE_NOT_FOUND)
@@ -94,9 +94,9 @@ func test_runtime_mount_rejects_loose_only_root_even_with_dev_override() -> void
 
 func test_packed_runtime_caller_can_force_loose_first() -> void:
 	var root := _make_flat_root("packed_force_loose")
-	_write_file(root.path_join("Shared.dat"), "loose")
-	_write_file(root.path_join("LooseOnly.dat"), "loose only")
-	_write_pff(root.path_join("resource.pff"), [
+	TestFs.write_text(self, root.path_join("Shared.dat"), "loose")
+	TestFs.write_text(self, root.path_join("LooseOnly.dat"), "loose only")
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "Shared.dat", "bytes": "archive"},
 	])
 
@@ -118,9 +118,9 @@ func test_packed_runtime_caller_can_force_loose_first() -> void:
 
 func test_dev_runtime_caller_can_force_archive_only() -> void:
 	var root := _make_flat_root("dev_force_archive")
-	_write_file(root.path_join("Shared.dat"), "loose")
-	_write_file(root.path_join("LooseOnly.dat"), "loose only")
-	_write_pff(root.path_join("resource.pff"), [
+	TestFs.write_text(self, root.path_join("Shared.dat"), "loose")
+	TestFs.write_text(self, root.path_join("LooseOnly.dat"), "loose only")
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "Shared.dat", "bytes": "archive"},
 	])
 
@@ -143,8 +143,8 @@ func test_dev_runtime_caller_can_force_archive_only() -> void:
 func test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archive() -> void:
 	var root := _make_flat_root("qualified_runtime")
 	DirAccess.make_dir_recursive_absolute(root.path_join("Nested"))
-	_write_file(root.path_join("Nested/MixedCase.dat"), "nested loose")
-	_write_pff(root.path_join("resource.pff"), [
+	TestFs.write_text(self, root.path_join("Nested/MixedCase.dat"), "nested loose")
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "MixedCase.dat", "bytes": "flat archive"},
 	])
 
@@ -180,8 +180,8 @@ func test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archi
 
 func test_load_texture_obeys_runtime_vfs_precedence() -> void:
 	var root := _make_flat_root("texture_precedence")
-	_write_bytes(root.path_join("mission.pcx"), _solid_test_pcx(Color.BLUE))
-	_write_pff(root.path_join("language.pff"), [
+	TestFs.write_bytes(self, root.path_join("mission.pcx"), _solid_test_pcx(Color.BLUE))
+	WorldFixture.write_pff(self, root.path_join("language.pff"), [
 		{"name": "mission.pcx", "bytes": _solid_test_pcx(Color.RED)},
 	])
 
@@ -208,9 +208,9 @@ func test_load_texture_obeys_runtime_vfs_precedence() -> void:
 func test_texture_cache_separates_policy_and_full_query() -> void:
 	var root := _make_flat_root("texture_policy_cache")
 	DirAccess.make_dir_recursive_absolute(root.path_join("Nested"))
-	_write_bytes(root.path_join("swatch.pcx"), _solid_test_pcx(Color.BLUE))
-	_write_bytes(root.path_join("Nested/swatch.pcx"), _solid_test_pcx(Color.GREEN))
-	_write_pff(root.path_join("resource.pff"), [
+	TestFs.write_bytes(self, root.path_join("swatch.pcx"), _solid_test_pcx(Color.BLUE))
+	TestFs.write_bytes(self, root.path_join("Nested/swatch.pcx"), _solid_test_pcx(Color.GREEN))
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "swatch.pcx", "bytes": _solid_test_pcx(Color.RED)},
 	])
 
@@ -241,7 +241,7 @@ func test_editor_load_texture_retains_loose_png_support() -> void:
 	var image := Image.create(3, 2, false, Image.FORMAT_RGBA8)
 	image.fill(Color.GREEN)
 	var root := _make_flat_root("loose_png")
-	_write_bytes(root.path_join("swatch.png"), image.save_png_to_buffer())
+	TestFs.write_bytes(self, root.path_join("swatch.png"), image.save_png_to_buffer())
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.set_root_dir(root), OK)
@@ -256,18 +256,18 @@ func test_editor_load_texture_retains_loose_png_support() -> void:
 func test_runtime_expansion_override_chain() -> void:
 	var root := _make_flat_root("expansion")
 	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox01"))
-	_write_pff(root.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "shared.env", "bytes": "base env"},
 		{"name": "baseonly.trn", "bytes": "base trn"},
 	])
-	_write_pff(root.path_join("expansion/jox01/jox01.pff"), [
+	WorldFixture.write_pff(self, root.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "shared.env", "bytes": "main env"},
 		{"name": "exponly.3di", "bytes": "exp model"},
 	])
-	_write_pff(root.path_join("expansion/jox01/jox01L.pff"), [
+	WorldFixture.write_pff(self, root.path_join("expansion/jox01/jox01L.pff"), [
 		{"name": "shared.env", "bytes": "local env"},
 	])
-	_write_file(root.path_join("expansion/jox01/shared.env"), "loose env")
+	TestFs.write_text(self, root.path_join("expansion/jox01/shared.env"), "loose env")
 
 	var resources := ResourceRoot.new()
 	# Packed runtime (no /d): archive chain {name}L.pff > {name}.pff > base; loose ignored.
@@ -295,12 +295,12 @@ func test_runtime_remount_in_place_switches_expansion() -> void:
 	# expansion (D-NET-178), so nothing the previous mount indexed or decoded may survive.
 	var root := _make_flat_root("remount_expansion")
 	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox01"))
-	_write_pff(root.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "shared.env", "bytes": "base env"},
 		{"name": "baseonly.trn", "bytes": "base trn"},
 		{"name": "briefing.pcx", "bytes": _solid_test_pcx(Color.RED)},
 	])
-	_write_pff(root.path_join("expansion/jox01/jox01.pff"), [
+	WorldFixture.write_pff(self, root.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "shared.env", "bytes": "exp env"},
 		{"name": "exponly.3di", "bytes": "exp model"},
 		{"name": "briefing.pcx", "bytes": _solid_test_pcx(Color.BLUE)},
@@ -338,8 +338,8 @@ func test_is_runtime_mount_discriminates_runtime_from_editor_mounts() -> void:
 	# The discriminator for a caller re-mounting a root it did not create: only a live
 	# mount_runtime() mount may be re-mounted with mount_runtime.
 	var root := _make_flat_root("mount_kind")
-	_write_file(root.path_join("Alpha.TRN"), "loose trn")
-	_write_pff(root.path_join("resource.pff"), [{"name": "Bravo.env", "bytes": "archived env"}])
+	TestFs.write_text(self, root.path_join("Alpha.TRN"), "loose trn")
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [{"name": "Bravo.env", "bytes": "archived env"}])
 
 	var resources := ResourceRoot.new()
 	assert_false(resources.is_runtime_mount(), "A never-mounted root is not a runtime mount.")
@@ -349,7 +349,7 @@ func test_is_runtime_mount_discriminates_runtime_from_editor_mounts() -> void:
 	assert_true(resources.is_runtime_mount())
 
 	var loose_only := _make_flat_root("mount_kind_loose_only")
-	_write_file(loose_only.path_join("Alpha.TRN"), "loose trn")
+	TestFs.write_text(self, loose_only.path_join("Alpha.TRN"), "loose trn")
 	assert_eq(resources.mount_runtime(loose_only), ERR_FILE_NOT_FOUND)
 	assert_false(resources.is_runtime_mount(), "A failed runtime mount leaves no runtime mount behind.")
 
@@ -364,7 +364,7 @@ func test_boot_manifest_reports_missing_fatal_resources() -> void:
 	# individually-fatal FILE rows are probed; the boot-archive-table trio is
 	# mount_runtime's own gate [orig: fatal check @ 0x4a6f44].
 	var root := _make_flat_root("boot_manifest")
-	_write_pff(root.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "gametext.bin", "bytes": "strings"},
 	])
 
@@ -391,9 +391,9 @@ func test_resource_root_list_expansions() -> void:
 	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox01"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/jox02"))
 	DirAccess.make_dir_recursive_absolute(root.path_join("expansion/incomplete"))
-	_write_pff(root.path_join("expansion/jox01/jox01.pff"), [{"name": "a.3di", "bytes": "x"}])
-	_write_pff(root.path_join("expansion/jox02/jox02.pff"), [{"name": "b.3di", "bytes": "y"}])
-	_write_file(root.path_join("expansion/incomplete/readme.txt"), "no pff here")
+	WorldFixture.write_pff(self, root.path_join("expansion/jox01/jox01.pff"), [{"name": "a.3di", "bytes": "x"}])
+	WorldFixture.write_pff(self, root.path_join("expansion/jox02/jox02.pff"), [{"name": "b.3di", "bytes": "y"}])
+	TestFs.write_text(self, root.path_join("expansion/incomplete/readme.txt"), "no pff here")
 
 	# list_expansions does not require the root to be mounted (the UI lists before mounting).
 	var expansions := ResourceRoot.new().list_expansions(root)
@@ -418,7 +418,7 @@ func test_resource_root_loads_dds_from_pff() -> void:
 
 	var root := _make_flat_root("dds_pff")
 	# resource.pff: only the witnessed boot-table archives mount at runtime (D-VFS-2).
-	_write_pff(root.path_join("resource.pff"), [{"name": "swatch.dds", "bytes": dds}])
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [{"name": "swatch.dds", "bytes": dds}])
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
@@ -438,7 +438,7 @@ func test_packed_texture_collapses_compound_authored_extensions() -> void:
 	var fallback_image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
 	fallback_image.fill(Color.BLUE)
 	var root := _make_flat_root("compound_texture_extension")
-	_write_pff(root.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "swatch.dds", "bytes": inner_image.save_dds_to_buffer()},
 		{"name": "swatch.dds.dds", "bytes": fallback_image.save_dds_to_buffer()},
 	])
@@ -462,19 +462,19 @@ func test_resolve_file_snapshots_per_cache_epoch() -> void:
 	# the index-backed listings: on-disk edits surface via scan/mount or an explicit
 	# bump_cache_epoch(), never mid-epoch.
 	var root := _make_flat_root("resolve_epoch")
-	_write_file(root.path_join("Alpha.TRN"), "trn")
+	TestFs.write_text(self, root.path_join("Alpha.TRN"), "trn")
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.set_root_dir(root), OK)
 	assert_eq(_norm(resources.resolve_file("alpha.trn")), _norm(root.path_join("Alpha.TRN")))
 
-	_write_file(root.path_join("Bravo.TRN"), "trn")
+	TestFs.write_text(self, root.path_join("Bravo.TRN"), "trn")
 	assert_eq(resources.resolve_file("bravo.trn"), "", "A file added after the mount stays invisible until the epoch moves.")
 
 	ResourceRoot.bump_cache_epoch()
 	assert_eq(_norm(resources.resolve_file("bravo.trn")), _norm(root.path_join("Bravo.TRN")), "bump_cache_epoch() re-reads the directory.")
 
-	_write_file(root.path_join("Charlie.TRN"), "trn")
+	TestFs.write_text(self, root.path_join("Charlie.TRN"), "trn")
 	assert_eq(resources.set_root_dir(root), OK)
 	assert_eq(_norm(resources.resolve_file("charlie.trn")), _norm(root.path_join("Charlie.TRN")), "A remount/rescan re-reads the directory.")
 
@@ -486,7 +486,7 @@ func test_packed_texture_loads_share_one_decode_per_epoch() -> void:
 	var image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0.6, 0.3, 0.1, 1.0))
 	var root := _make_flat_root("dds_pff_cache")
-	_write_pff(root.path_join("resource.pff"), [{"name": "swatch.dds", "bytes": image.save_dds_to_buffer()}])
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [{"name": "swatch.dds", "bytes": image.save_dds_to_buffer()}])
 
 	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
@@ -506,7 +506,7 @@ func test_clear_releases_cached_texture_before_render_server_shutdown() -> void:
 	var image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0.6, 0.3, 0.1, 1.0))
 	var root := _make_flat_root('dds_clear_cache')
-	_write_pff(root.path_join('resource.pff'), [{
+	WorldFixture.write_pff(self, root.path_join('resource.pff'), [{
 		'name': 'swatch.dds',
 		'bytes': image.save_dds_to_buffer(),
 	}])
@@ -533,22 +533,6 @@ func _make_flat_root(name: String) -> String:
 	var root := OS.get_cache_dir().path_join("opennova_resource_root_contract").path_join("%s_%d" % [name, Time.get_ticks_usec()])
 	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)
 	return root
-
-
-func _write_file(path: String, text: String) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "Fixture should be writable: %s" % path)
-	if file != null:
-		file.store_string(text)
-		file.close()
-
-
-func _write_bytes(path: String, bytes: PackedByteArray) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "Fixture should be writable: %s" % path)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
 
 
 func _solid_test_pcx(color: Color) -> PackedByteArray:
@@ -578,12 +562,6 @@ func _solid_test_pcx(color: Color) -> PackedByteArray:
 	return bytes
 
 
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
-
-
-# A PFF entry payload is either a String (text fixtures) or a raw PackedByteArray (binary
-# fixtures such as a DDS); normalize to bytes so both forms work.
 func _norm(path: String) -> String:
 	return path.replace("\\", "/").to_lower()
 
@@ -608,12 +586,12 @@ func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> 
 	var root := _make_flat_root("normal_sources")
 	var source := Image.create(4, 4, false, Image.FORMAT_RGBA8)
 	source.fill(Color8(50, 70, 121, 128))
-	_write_pff(root.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
 		{"name": "brick.dds", "bytes": source.save_dds_to_buffer()},
 		{"name": "brick.tga", "bytes": _normal_test_tga(61)},
 		{"name": "ready.mdt", "bytes": source.save_dds_to_buffer()},
 	])
-	_write_bytes(root.path_join("brick.tga"), _normal_test_tga(233))
+	TestFs.write_bytes(self, root.path_join("brick.tga"), _normal_test_tga(233))
 	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root, "", false), OK)
 	var packed: Texture2D = resources.load_material_texture("brick.tga", 4)

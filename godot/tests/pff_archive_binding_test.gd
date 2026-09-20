@@ -18,7 +18,7 @@ func test_list_games_returns_the_profile_table() -> void:
 
 func test_open_lists_entries() -> void:
 	var path := _pff_dir().path_join("entries.pff")
-	_write_pff(path, [
+	WorldFixture.write_pff(self, path, [
 		{"name": "alpha.txt", "bytes": "hello"},
 		{"name": "Bravo.dat", "bytes": "world!!"},
 	])
@@ -37,7 +37,7 @@ func test_open_lists_entries() -> void:
 
 func test_read_entry_raw_and_decoded() -> void:
 	var path := _pff_dir().path_join("read.pff")
-	_write_pff(path, [{"name": "note.txt", "bytes": "plaintext"}])
+	WorldFixture.write_pff(self, path, [{"name": "note.txt", "bytes": "plaintext"}])
 	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 	# A plain (non-SCR/BFC1) payload decodes to itself, so raw and decoded match here.
@@ -55,7 +55,7 @@ func test_plaintext_scr0_music_script_survives_decode() -> void:
 	var mus := "SCR0".to_ascii_buffer()
 	mus.append_array(PackedByteArray([0, 1, 0, 0, 42, 7, 99, 1, 2, 3]))
 	var path := root.path_join("mus.pff")
-	_write_pff(path, [{"name": "gamemus.bin", "bytes": mus}])
+	WorldFixture.write_pff(self, path, [{"name": "gamemus.bin", "bytes": mus}])
 	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 
@@ -68,7 +68,7 @@ func test_plaintext_scr0_music_script_survives_decode() -> void:
 func test_extract_to_and_extract_all() -> void:
 	var root := _pff_dir()
 	var path := root.path_join("extract.pff")
-	_write_pff(path, [
+	WorldFixture.write_pff(self, path, [
 		{"name": "a.bin", "bytes": "AAAA"},
 		{"name": "b.bin", "bytes": "BBBBBB"},
 	])
@@ -89,7 +89,7 @@ func test_extract_to_and_extract_all() -> void:
 func test_extract_async_selected_and_all() -> void:
 	var root := _pff_dir()
 	var path := root.path_join("async.pff")
-	_write_pff(path, [
+	WorldFixture.write_pff(self, path, [
 		{"name": "a.bin", "bytes": "AAAA"},
 		{"name": "b.bin", "bytes": "BBBBBB"},
 		{"name": "c.bin", "bytes": "CC"},
@@ -129,7 +129,7 @@ func test_extract_async_reports_raw_fallback() -> void:
 	var bad := "BFC1".to_ascii_buffer()
 	bad.append_array(PackedByteArray([0, 0, 1, 0, 255, 255, 255, 255, 255, 255, 255, 255]))
 	var path := root.path_join("asyncraw.pff")
-	_write_pff(path, [{"name": "broken.dat", "bytes": bad}, {"name": "plain.txt", "bytes": "hello"}])
+	WorldFixture.write_pff(self, path, [{"name": "broken.dat", "bytes": bad}, {"name": "plain.txt", "bytes": "hello"}])
 	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 
@@ -147,7 +147,7 @@ func test_extract_async_reports_raw_fallback() -> void:
 func test_add_remove_save_roundtrip() -> void:
 	var root := _pff_dir()
 	var path := root.path_join("edit.pff")
-	_write_pff(path, [
+	WorldFixture.write_pff(self, path, [
 		{"name": "keep.txt", "bytes": "keep me"},
 		{"name": "drop.txt", "bytes": "remove me"},
 	])
@@ -156,7 +156,7 @@ func test_add_remove_save_roundtrip() -> void:
 	assert_false(arc.is_dirty(), "A freshly opened archive is clean.")
 
 	var added_src := root.path_join("added_source.bin")
-	_write_file(added_src, "freshly added")
+	TestFs.write_text(self, added_src, "freshly added")
 	assert_eq(arc.add_file_from_disk(added_src, "added.bin", false), OK, arc.get_last_error())
 	assert_true(arc.is_dirty(), "Adding a file marks the archive dirty.")
 	assert_eq(arc.get_entry_count(), 3)
@@ -180,7 +180,7 @@ func test_add_remove_save_roundtrip() -> void:
 
 func test_save_as_refuses_overwriting_source() -> void:
 	var path := _pff_dir().path_join("guard.pff")
-	_write_pff(path, [{"name": "x.bin", "bytes": "x"}])
+	WorldFixture.write_pff(self, path, [{"name": "x.bin", "bytes": "x"}])
 	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 	assert_ne(arc.save_as(path), OK, "Save-As must refuse to overwrite the source archive.")
@@ -195,7 +195,7 @@ func test_extract_to_status_raw_fallback() -> void:
 	var bad := "BFC1".to_ascii_buffer()
 	bad.append_array(PackedByteArray([0, 0, 1, 0, 255, 255, 255, 255, 255, 255, 255, 255]))
 	var path := root.path_join("raw.pff")
-	_write_pff(path, [{"name": "broken.dat", "bytes": bad}, {"name": "plain.txt", "bytes": "hello"}])
+	WorldFixture.write_pff(self, path, [{"name": "broken.dat", "bytes": bad}, {"name": "plain.txt", "bytes": "hello"}])
 	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 
@@ -218,16 +218,3 @@ func _pff_dir() -> String:
 	var dir := OS.get_cache_dir().path_join("opennova_pff_binding").path_join(str(Time.get_ticks_usec()))
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
 	return dir
-
-
-func _write_file(path: String, text: String) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "Fixture should be writable: %s" % path)
-	if file != null:
-		file.store_string(text)
-		file.close()
-
-
-# The shared PFF3 fixture writer (TestPff.write), asserted here.
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)

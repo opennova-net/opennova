@@ -357,7 +357,7 @@ func _fire_diag() -> void:
 	if root != null:
 		for f in TEXT_FILES:
 			_ctx.log("root has %-12s -> %s" % [f, str(root.has_file(f))])
-	for table in ["menutxt", "gametext"]:
+	for table in [Strings.TABLE_MENUTXT, Strings.TABLE_GAMETEXT]:
 		var tb := Strings.get_table(table)
 		_ctx.log("strings %-9s -> %s  WepDes/WEAP_SHORT_M4=%s" % [table, str(tb != null),
 				Strings.lookup(table, "WepDes", "WEAP_SHORT_M4") if tb != null else "<no table>"])

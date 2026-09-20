@@ -2,26 +2,18 @@ extends GutTest
 
 
 
-var _terrain_root := ""
-
-
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
-# assets it names; one root per test file, removed at the end.
-func _tmap_trn() -> String:
-	if _terrain_root.is_empty():
-		_terrain_root = TestFs.stage_terrain_root("tile_cache_readiness")
-	return _terrain_root.path_join(TestFs.TMAP_TRN)
+# assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
+const TMAP_STAGE := "tile_cache_readiness"
 
 
 func after_all() -> void:
-	if not _terrain_root.is_empty():
-		TestFs.remove_dir_recursive(_terrain_root)
-		_terrain_root = ""
+	TestFs.release_staged_tmap(TMAP_STAGE)
 
 
 func _loaded_data() -> TerrainData:
 	var data := TerrainData.new()
-	data.set_trn_path(_tmap_trn())
+	data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(data.load(), OK, "the Tmap terrain fixture must load")
 	return data
 
@@ -91,21 +83,6 @@ func test_tile_free_mission_keeps_base_page_cache_ready_without_tilestrip() -> v
 		"u_has_tile_cache")))
 
 
-func _settle(terrain: Terrain) -> Dictionary:
-	var diagnostics: Dictionary = {}
-	for _attempt in range(2048):
-		terrain.render_frame()
-		diagnostics = terrain.get_tile_cache_diagnostics()
-		if int(diagnostics.get("pending_jobs", -1)) == 0 \
-				and int(diagnostics.get("frame_requests", 0)) > 0 \
-				and int(diagnostics.get("frame_ready_hits", -1)) \
-						== int(diagnostics.get("frame_requests", 0)):
-			return diagnostics
-		await get_tree().process_frame
-	assert_true(false, "the bounded terrain compiler must settle visible pages")
-	return diagnostics
-
-
 func test_unresolved_scorch_set_rejects_records_without_dropping_base_pages() -> void:
 	# The fixture root carries no trscrch/qburn decal TGAs, so the permanent
 	# scorch overlay is absent for the whole mission. That is an optional
@@ -145,7 +122,7 @@ func test_unresolved_scorch_set_rejects_records_without_dropping_base_pages() ->
 	assert_true(bool(diagnostics["available"]),
 		"a rejected scorch record never drops the base page cache")
 
-	var settled := await _settle(terrain)
+	var settled := await TestFs.settle_tile_cache(self, terrain)
 	assert_gt(int(settled["frame_requests"]), 0)
 	assert_eq(int(settled["frame_ready_hits"]), int(settled["frame_requests"]),
 		"every visible page still resolves through a ready binding")

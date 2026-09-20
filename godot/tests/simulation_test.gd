@@ -77,15 +77,6 @@ func _write_fixture_bytes(dir: String, name: String, bytes: PackedByteArray) -> 
 	file.close()
 
 
-func _write_fixture_text(dir: String, name: String, text: String) -> void:
-	var file := FileAccess.open(dir.path_join(name), FileAccess.WRITE)
-	assert_not_null(file)
-	if file == null:
-		return
-	file.store_string(text)
-	file.close()
-
-
 func _copy_fixture(dir: String, source_res_path: String, dest_name: String) -> void:
 	_write_fixture_bytes(dir, dest_name, FileAccess.get_file_as_bytes(source_res_path))
 
@@ -96,7 +87,7 @@ func _fixture_items_text() -> String:
 
 
 func _item_db_from_text(dir: String, text: String) -> ItemDatabase:
-	_write_fixture_text(dir, "items.def", text)
+	TestFs.write_text(self, dir.path_join("items.def"), text)
 	var db := ItemDatabase.new()
 	assert_eq(db.load(dir.path_join("items.def")), OK)
 	return db
@@ -150,7 +141,7 @@ func _write_char_rig(dir: String, graphic: String) -> void:
 			graphic + ".3di")
 	_write_fixture_bytes(dir, "BINOC.bad", FileAccess.get_file_as_bytes(RetailData.fixture(BINOC_REL)))
 	var quote := String.chr(34)
-	_write_fixture_text(dir, graphic + ".adm",
+	TestFs.write_text(self, dir.path_join(graphic + ".adm"),
 			"anim_reset %sBINOC.bad%s\n" % [quote, quote]
 			+ "anim_idle %sBINOC.bad%s\n" % [quote, quote]
 			+ "anim_idle_2 %sBINOC.bad%s\n" % [quote, quote]
@@ -2613,7 +2604,7 @@ func test_vehicle_panel_resolves_authored_item_id_after_seat_selection() -> void
   attrib: PlayerControl
 end
 """)
-	_write_fixture_text(dir, "hudpos.def", """VEHICLE_HUD
+	TestFs.write_text(self, dir.path_join("hudpos.def"), """VEHICLE_HUD
   sid carrier_panel
   interface carrier_panel.tga
   driver 16,196
@@ -2668,7 +2659,7 @@ begin "Driver"
 end
 """)
 	var sndprof_path := fixture_dir.path_join("SndProf.def")
-	_write_fixture_text(fixture_dir, "SndProf.def", """begin "SP_Transport"
+	TestFs.write_text(self, fixture_dir.path_join("SndProf.def"), """begin "SP_Transport"
   soundloop_1 V_TRUCK_ILP .8 1.2
 end
 """)
