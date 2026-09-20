@@ -303,11 +303,22 @@ _Avoid_: numbered hurt volume, damage tier 16/17/18
 ## Products & modes
 
 **Godot product**:
-The OpenNova game runtime built with Godot (ADR 0045). The
-separately distributed OpenNova Launcher, backend services, and development tools
-are outside this taxonomy (ADR 0015).
+One of the two applications exported from the `godot/` project: the OpenNova game
+runtime (`opennova.exe`; its Play export adds the runtime MCP for the editor) and the
+OpenNova Editor (`opennova-editor.exe`), ADR 0046. The separately distributed OpenNova
+Launcher, backend services, and development tools are outside this taxonomy (ADR 0015).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
 (as a product name)
+
+**OpenNova Editor**:
+The project-based data editor, the second Godot product (ADR 0046): it owns a Project,
+enforces the engine's Required resources as a checklist, edits assets through the
+engine's own format libraries, and packs a Build for Play or Export. Its portable core
+is `engine/editor/` (`opennova_editor`), its bindings `godot/src/authoring/`, its
+panels Dear ImGui windows (ADR 0039). "The editor" in prose means this product; the
+Godot editor is always "the Godot editor".
+_Avoid_: ONED (the retired product), mod tools, modtools, terrain editor, editor MCP
+(until one exists)
 
 **OpenNova Launcher**:
 The separately distributed Windows tray product that directs a stock NovaLogic
@@ -341,6 +352,56 @@ and dedicated dev hosts. Other historical uses of the word (old-title format upl
 normalization, fixture curation, code relocation) should be phrased as *migrate*,
 *normalize*, *whitelist*, and *move* respectively.
 _Avoid_: promote (for anything but the mission→world spawn)
+
+## Authoring (the OpenNova Editor)
+
+The vocabulary of ADR 0046's project model.
+
+**Project**:
+A directory the editor owns: `project.opennova` (versioned JSON: title, target game,
+feature toggles, export settings), the loose source files anywhere beneath it, and a
+disposable `.opennova/` cache. The project IS the source tree; nothing lives in a
+database.
+_Avoid_: workspace (an editor panel, not the data), mod (an expansion-type project is a
+project kind), game directory (the runtime's mounted root)
+
+**Logical name**:
+The flat, case-insensitive name the engine resolves an asset by (`main.mnu`,
+`items.def`), at most 16 bytes as a PFF entry. A project asset's identity; its path in
+the tree is organization only. Uniqueness and length are checked on output names.
+_Avoid_: path (when the engine-facing identity is meant), resource name
+
+**Import / sidecar**:
+Bringing a non-native source (an image, a GLB scene, a wave) into the project the Godot
+way: a committed `<file>.import` sidecar records the importer, its version, options and
+output logical names; the outputs are regenerated into `.opennova/imported/` by content
+hash and packed like native assets.
+_Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route)
+
+**Requirement**:
+One row of the editor's checklist: a file the engine demands by name (a Required
+resources manifest row with its witnessed severity and failure text, keyed by a stable
+role token) or a project feature's own need, shown as Present / Missing / Wrong kind with
+Create, Assign and Import actions. The engine's names stay fixed; the checklist enforces
+them.
+_Avoid_: dependency (that is a reference between assets), contract (the deferred
+runtime-read deployment contract)
+
+**Build**:
+The one operation behind Play and Export: validate the project, route every asset into
+the canonical archives (`language.pff`, `localres.pff`, `resource.pff`) and the
+mandatory loose files, write through the streamed PFF writer, verify through the VFS,
+and publish an immutable `.opennova/build/play/<build-id>/` directory. Incremental by
+per-archive input hash.
+_Avoid_: pack (a step inside a build), export (a build copied to a chosen directory),
+stage (the retired retail-staging vocabulary)
+
+**Play**:
+Build, then launch the game runtime (`opennova.exe -- --resource-dir <build>
+--mcp-port <n>`) as the editor's one managed child through a `PlaySession`; Stop ends
+it. The editor tails the session log until the runtime MCP answers, then drives it there.
+_Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running game),
+"see in game"
 
 ## Runtime presentation
 

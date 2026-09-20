@@ -8,7 +8,10 @@
   superseded by that consolidation), d5 (the debug-control table is C++ in
   `godot/src/devtools`), d7 (`godot_orig_cites` is one gauge over the whole
   Godot side) and takes d8 (netsim/npruntime/inmatch move under `runtime/`).
-  d1, d4, d6 stand.
+  d1, d4, d6 stand. [ADR 0046](0046-opennova-editor.md) (2026-09-20) amends d6's
+  ImGui include containment: `engine/editor/ui` and `tests/editor_ui` join
+  `engine/runtime/devtools` and `tests/devtools`; `godot/src/authoring` stays behind the
+  pointer seam like `godot/src/devtools`.
 - **Owners**: runtime architecture, the Godot layer, tooling (MCP/F3)
 - **Supersedes/updates**: closes ADR 0033's R4 rung and supersedes its d1 device triad; updates
   ADR 0016 (fully historical), ADR 0020 d4 (the terrain-field provider), ADR 0035 (d5 made

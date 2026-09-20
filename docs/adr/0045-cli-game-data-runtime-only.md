@@ -1,5 +1,11 @@
 # ADR 0045: CLI game data and a runtime-only distribution
 
+> **Updated by [ADR 0046](0046-opennova-editor.md).** The editor and packaging
+> provisions (ONED removed, no integrated run/packaging utility) are superseded: the
+> OpenNova Editor returns as a second Godot product with its own project model and
+> packer. The runtime's CLI rule below (`--resource-dir` required, no picker, no
+> executable-adjacent discovery) stands.
+
 - **Status**: Accepted, 2026-09-19
 - **Supersedes**: ADR 0037; the bundled-data and picker contracts in ADR 0025;
   ONED product and distribution provisions of ADRs 0015 and 0039.

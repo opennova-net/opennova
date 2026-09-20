@@ -99,7 +99,7 @@ the normal map spawn selection.
 | `opennova-extract` | `--game <dir> [/exp <name>] [/game <code>] [/d] --out <dir> <name>...` |
 | `renderer_state_vectors_test`, `nw_codec_identity_test` | `--dump` (print the replacement vector table) |
 | `nw_self_capture_test` | `--write-fixture` (regenerate `fixtures/novaworld/self-capture-session.pcap`) |
-| `minimal_*_gen_test` | `--write` (regenerate that generator's minted fixtures); `minimal_pff_package_test --write-pff` / `--install <dir>` |
+| `minimal_*_gen_test` | `--write` (regenerate that generator's minted fixtures) |
 | `ai_path_conformance_test` | `--report`, `--ticks`, `--bms` |
 | `mnu_compat_test` | extra loose menus as positional arguments |
 | `wac_corpus_test` | extra corpus directories as positional arguments |
