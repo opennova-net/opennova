@@ -435,4 +435,45 @@ EndRoundColumnLayout end_round_column_layout(
 	return out;
 }
 
+void EndRoundTransition::reset() {
+	// [orig: Game_InitMissionRoundState @0x525903 clears byte_28E561C/D]
+	header_seen = false;
+	header_edge_ms = 0;
+	stat_opened = false;
+}
+
+EndRoundTransitionStep EndRoundTransition::step(bool header_known, bool board_known,
+		uint32_t now_ms) {
+	EndRoundTransitionStep out;
+	if (!header_known) {
+		// The announcement went away (a new round, a departed session): the
+		// latches clear with it.
+		if (header_seen) {
+			reset();
+			out.reset = true;
+		}
+		return out;
+	}
+	if (!header_seen) {
+		// The first pass: byte_28E561C and t0 [orig: @0x5b8600 first pass].
+		header_seen = true;
+		header_edge_ms = now_ms;
+		stat_opened = false;
+		out.announced = true;
+	}
+	if (stat_opened) {
+		// The locret @0x5b864a once byte_28E561D is set: no teardown, no overlay.
+		return out;
+	}
+	// Every PRE-STAT pass tears the scene down and draws the overlay; the
+	// board + 6000 ms gate opens stat.mnu once [orig: @0x5b8615..0x5b862a].
+	out.pre_stat = true;
+	if (board_known &&
+			static_cast<int32_t>(now_ms - header_edge_ms) >= kEndRoundStatScreenDelayMsec) {
+		stat_opened = true;
+		out.open_stat = true;
+	}
+	return out;
+}
+
 } // namespace opennova::hud

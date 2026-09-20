@@ -1264,7 +1264,6 @@ public:
 	// engine's stat_screen_row_visible).
 	TypedArray<EndRoundRow> get_end_round_rows(int p_tab) const;
 	// hud::kEndRoundStatScreenDelayMsec — the 6 s stat.mnu delay.
-	static int end_round_stat_screen_delay_msec();
 	// hud::strip_inline_tags — retail's `<...>` markup stripper.
 	static String strip_inline_tags(const String &p_text);
 	// The SP Show Score statistics counters (hud/end_round_statistics.h):

@@ -165,8 +165,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_end_round_columns);
 	ClassDB::bind_method(D_METHOD("get_end_round_rows", "tab"), &Simulation::get_end_round_rows,
 	                     DEFVAL(0));
-	ClassDB::bind_static_method("Simulation", D_METHOD("end_round_stat_screen_delay_msec"),
-	                            &Simulation::end_round_stat_screen_delay_msec);
 	ClassDB::bind_static_method("Simulation", D_METHOD("strip_inline_tags", "text"),
 	                            &Simulation::strip_inline_tags);
 	ClassDB::bind_method(D_METHOD("get_end_round_statistics"),

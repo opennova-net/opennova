@@ -143,10 +143,6 @@ Ref<EndRoundOverlay> Simulation::get_end_round_overlay(const Ref<RtxtStringFile>
 	return out;
 }
 
-int Simulation::end_round_stat_screen_delay_msec() {
-	return opennova::hud::kEndRoundStatScreenDelayMsec;
-}
-
 String Simulation::strip_inline_tags(const String &p_text) {
 	return opennova::to_gd(opennova::hud::strip_inline_tags(p_text.utf8().get_data()));
 }
