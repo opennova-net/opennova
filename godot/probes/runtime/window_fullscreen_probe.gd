@@ -44,14 +44,14 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		"resize":
 			window.size = DisplayServer.screen_get_size(window.current_screen)
 		_:
-			_press_f11()
+			ProbeInput.tap(WindowState.TOGGLE_KEY)
 	await ctx.wait_frames(SETTLE_FRAMES)
 	if mode != "resize":
 		_check(WindowState.is_fullscreen(window), "F11 enters fullscreen")
 	await _observe(ctx, window, runtime_root, "fullscreen")
 
 	if mode == "fullscreen":
-		_press_f11()
+		ProbeInput.tap(WindowState.TOGGLE_KEY)
 	else:
 		WindowState.set_fullscreen(window, false)
 	await ctx.wait_frames(SETTLE_FRAMES)
@@ -71,7 +71,7 @@ func _observe(ctx: ProbeContext, window: Window, runtime_root: GameRuntimeRoot,
 		"root_visible": false,
 	}
 	var root_image: Image = _image_of(window)
-	state["root_visible"] = root_image != null and _has_visible_color(root_image)
+	state["root_visible"] = root_image != null and ProbeCapture.has_visible_color(root_image)
 	_check(bool(state["root_visible"]), "%s: the root window presents a lit frame" % label)
 	_save(ctx, root_image, label + "_root")
 	if runtime_root != null and runtime_root.is_game_view_embedded():
@@ -85,22 +85,12 @@ func _observe(ctx: ProbeContext, window: Window, runtime_root: GameRuntimeRoot,
 			_check(game_viewport.size == window.size,
 					"%s: the game viewport follows the window size" % label)
 			var game_image: Image = _image_of(game_viewport)
-			state["game_visible"] = game_image != null and _has_visible_color(game_image)
+			state["game_visible"] = game_image != null and ProbeCapture.has_visible_color(game_image)
 			_check(bool(state["game_visible"]),
 					"%s: the embedded game viewport presents a lit frame" % label)
 			_save(ctx, game_image, label + "_game")
 	_data[label] = state
 	ctx.log("%s: %s" % [label, JSON.stringify(state)])
-
-
-## The real key path: the press and its release through the input stack.
-static func _press_f11() -> void:
-	for pressed in [true, false]:
-		var key := InputEventKey.new()
-		key.keycode = WindowState.TOGGLE_KEY
-		key.physical_keycode = WindowState.TOGGLE_KEY
-		key.pressed = pressed
-		Input.parse_input_event(key)
 
 
 func _check(condition: bool, message: String) -> void:
@@ -127,13 +117,3 @@ func _save(ctx: ProbeContext, image: Image, label: String) -> void:
 	var path := ctx.artifact_dir.path_join("%s.png" % label)
 	if image.save_png(path) == OK:
 		ctx.artifact(label, path, "png")
-
-
-static func _has_visible_color(source: Image) -> bool:
-	var image: Image = source.duplicate()
-	image.convert(Image.FORMAT_RGBA8)
-	var bytes: PackedByteArray = image.get_data()
-	for offset in range(0, bytes.size(), 4):
-		if bytes[offset] > 24 or bytes[offset + 1] > 24 or bytes[offset + 2] > 24:
-			return true
-	return false

@@ -209,7 +209,7 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	assert_true(sim.is_listen_server(), "listen server enabled before load")
-	assert_true(sim.load_from_mission_data(md), "promoted as the npruntime in-process listen server")
+	assert_true(sim.load_from_mission_data(md), "promoted as the inmatch in-process listen server")
 
 	# The faithful §5.0 mode-3 bring-up auto-spawns the host's own player (ADR 0012), so the world is
 	# the 2 organics + the host player. The AI-pool truth is readable through the scalar getters (they
@@ -544,7 +544,7 @@ func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
-	assert_true(sim.load_from_mission_data(md), "loaded as the npruntime listen server")
+	assert_true(sim.load_from_mission_data(md), "loaded as the inmatch listen server")
 	# Faithful §5.0: the host's own player auto-spawns at bring-up (no explicit spawn call needed).
 	assert_true(sim.has_local_player(), "the host's own player auto-spawned at load")
 

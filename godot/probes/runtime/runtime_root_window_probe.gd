@@ -61,7 +61,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	_check(texture != null and not texture.is_empty(),
 			"the central Game window receives a rendered texture")
 	if texture != null and not texture.is_empty():
-		_check(_has_visible_color(texture),
+		_check(ProbeCapture.has_visible_color(texture),
 				"resizing the hidden direct composite does not clear the embedded game frame")
 		var viewport_path := ctx.artifact_dir.path_join("viewport.png")
 		if texture.save_png(viewport_path) == OK:
@@ -100,13 +100,3 @@ func _verdict() -> ProbeVerdict:
 	if _failures.is_empty():
 		return ProbeVerdict.passed("the embedded game view behaves", data)
 	return ProbeVerdict.failed("%d embedded-view check(s) failed" % _failures.size(), data)
-
-
-static func _has_visible_color(source: Image) -> bool:
-	var image: Image = source.duplicate()
-	image.convert(Image.FORMAT_RGBA8)
-	var bytes: PackedByteArray = image.get_data()
-	for offset in range(0, bytes.size(), 4):
-		if bytes[offset] > 24 or bytes[offset + 1] > 24 or bytes[offset + 2] > 24:
-			return true
-	return false

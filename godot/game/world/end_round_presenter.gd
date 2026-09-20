@@ -10,7 +10,7 @@ extends Node
 ## filter + the HIDDEN_BACK / CONFIRM_* exits wired.
 ## The ladder's key selection, the empty-resolve folds, the printf forms, the
 ## column headers, the tab filter and the 6 s delay are the engine's
-## (hud/end_round_overlay.h, npruntime/stat_screen_feed.h through the
+## (hud/end_round_overlay.h, inmatch/stat_screen_feed.h through the
 ## Simulation feeds); this node owns only the device work: the HUD element,
 ## the compiled stat.mnu frame, its widgets and the cursor.
 ## [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (every HUD frame while

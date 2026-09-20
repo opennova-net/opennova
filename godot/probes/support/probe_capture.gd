@@ -24,6 +24,18 @@ static func changed_pixels(reference: Image, candidate: Image, skip_rows: int,
 	return changed
 
 
+## True when any pixel carries a colour channel above the near-black floor
+## (24/255): the "did this surface present a frame" test.
+static func has_visible_color(source: Image) -> bool:
+	var image: Image = source.duplicate()
+	image.convert(Image.FORMAT_RGBA8)
+	var bytes: PackedByteArray = image.get_data()
+	for offset in range(0, bytes.size(), 4):
+		if bytes[offset] > 24 or bytes[offset + 1] > 24 or bytes[offset + 2] > 24:
+			return true
+	return false
+
+
 ## After the next frame is drawn, read the viewport back and save it as PNG.
 ## False when the readback yielded no image or the save failed.
 static func save_viewport_png(viewport: Viewport, path: String) -> bool:

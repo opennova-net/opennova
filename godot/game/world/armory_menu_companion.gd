@@ -176,13 +176,9 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 
 
 func _ensure_weapons() -> void:
-	if _weapons != null or _root == null:
-		return
-	_weapons = WeaponDatabase.new()
-	if _weapons.load_from_resource_root(_root, "weapon.def") != OK or not _weapons.is_loaded():
-		push_warning("ArmoryMenuCompanion: weapon.def not loaded (%s); armory lists stay empty"
-			% _weapons.get_last_error())
-		_weapons = null
+	if _weapons == null and _root != null:
+		_weapons = LoadoutLabels.load_weapon_database(_root, "ArmoryMenuCompanion",
+				"armory lists stay empty")
 
 
 # PLAYER_CLASS carries the five MP soldier classes; the host fills the spinlist
@@ -299,7 +295,7 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 	# NONE inserted at 0 @0x566f15].
 	var labeled: Array = []
 	for w: WeaponDef in defs:
-		labeled.append([_weapon_label(w), w])
+		labeled.append([LoadoutLabels.weapon_label(w), w])
 	labeled.sort_custom(func(a, b): return String(a[0]).nocasecmp_to(String(b[0])) < 0)
 	var rows := PackedStringArray()
 	rows.append(Strings.menu_text("NONE", "None"))
@@ -349,7 +345,7 @@ func _populate_grenades(team_mask: int) -> void:
 		var maxclips := w.maxclips if allowed else 0
 		var rows := PackedStringArray()
 		for clips in range(0, maxclips + 1):
-			rows.append(_ammo_row_label(w, clips))
+			rows.append(LoadoutLabels.ammo_row_label(w, clips))
 		_set_combo_items(combo, rows)
 		if w != null:
 			_driver.select_row(combo, _current_grenade_clips(w.name, maxclips), false)
@@ -364,27 +360,6 @@ func _current_grenade_clips(weapon_name: String, maxclips: int) -> int:
 		var clips := int(row.get("ammo_primary", -1))
 		return maxclips if clips < 0 else clampi(clips, 0, maxclips)
 	return 0
-
-
-func _weapon_label(w: WeaponDef) -> String:
-	var textid := w.display_textid
-	if not textid.is_empty():
-		var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-		if t != null and t.has_string_in_section(Strings.SECTION_WEPDES, textid):
-			return t.get_string_in_section(Strings.SECTION_WEPDES, textid)
-	return w.name
-
-
-# The "<rounds> - <round label>" clip row; a null (unavailable) def rows "0 - ".
-func _ammo_row_label(w: WeaponDef, clips: int) -> String:
-	if w == null:
-		return "%d - " % clips
-	var round_label := w.round_type
-	if not round_label.is_empty():
-		var gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-		if gametext != null and gametext.has_string_in_section(Strings.SECTION_WEPDES, round_label):
-			round_label = gametext.get_string_in_section(Strings.SECTION_WEPDES, round_label)
-	return "%d - %s" % [clips * w.clipsize, round_label]
 
 
 # The slot's selected weapon.def row (null = NONE). Public read seam (ADR
@@ -418,7 +393,7 @@ func _populate_ammo(control: String) -> void:
 	var rows := PackedStringArray()
 	var maxclips := w.maxclips if w != null else 0
 	for clips in range(1, maxclips + 1):
-		rows.append(_ammo_row_label(w, clips))
+		rows.append(LoadoutLabels.ammo_row_label(w, clips))
 	_set_combo_items(combo, rows)
 	if not rows.is_empty():
 		var clips := int(_current_parent_clips.get(control, -1))

@@ -214,11 +214,7 @@ func clip_mode(out_dir: String, prefix: String) -> void:
 		"techniques": reports,
 		"failures": failures,
 	}
-	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
-	if mf != null:
-		mf.store_string(JSON.stringify(manifest, "\t"))
-		mf.close()
-	_sink.artifact("%s_manifest" % prefix, out_dir.path_join("%s_manifest.json" % prefix))
+	RenderSwatchSupport.write_manifest(_sink, out_dir, prefix, manifest)
 	_clip_probe_disarm()
 	if failures.is_empty():
 		_sink.logv(["render_swatch_probe clip: PASS - ", entries.size(),
@@ -418,11 +414,7 @@ func matchterrain_mode(out_dir: String, prefix: String) -> void:
 		"techniques": reports,
 		"failures": failures,
 	}
-	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
-	if mf != null:
-		mf.store_string(JSON.stringify(manifest, "\t"))
-		mf.close()
-	_sink.artifact("%s_manifest" % prefix, out_dir.path_join("%s_manifest.json" % prefix))
+	RenderSwatchSupport.write_manifest(_sink, out_dir, prefix, manifest)
 	if failures.is_empty():
 		_sink.logv(["render_swatch_probe matchterrain: PASS - ", entries.size(),
 				" techniques honor stance, residency, coverage, and tile-channel contracts"])
@@ -668,11 +660,7 @@ func glow_mode(out_dir: String, prefix: String) -> void:
 		"technique_count": entries.size(), "states": states,
 		"backend": frame_renderer.get_backend_report(),
 		"techniques": reports, "failures": failures}
-	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
-	if mf != null:
-		mf.store_string(JSON.stringify(manifest, "\t"))
-		mf.close()
-	_sink.artifact("%s_manifest" % prefix, out_dir.path_join("%s_manifest.json" % prefix))
+	RenderSwatchSupport.write_manifest(_sink, out_dir, prefix, manifest)
 	if failures.is_empty():
 		_sink.logv(["render_swatch_probe glow: PASS - ", entries.size(),
 				" techniques honor LUM copy, glass sun glint, and no-pass contracts"])
@@ -904,11 +892,7 @@ func projshadow_mode(out_dir: String, prefix: String) -> void:
 		"beauty_at_crate": [beauty_color.r, beauty_color.g, beauty_color.b],
 		"failures": failures,
 	}
-	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
-	if mf != null:
-		mf.store_string(JSON.stringify(manifest, "\t"))
-		mf.close()
-	_sink.artifact("%s_manifest" % prefix, out_dir.path_join("%s_manifest.json" % prefix))
+	RenderSwatchSupport.write_manifest(_sink, out_dir, prefix, manifest)
 	if failures.is_empty():
 		_sink.logv(["render_swatch_probe projshadow: PASS - ", casters.size(),
 				" casters through the RenderingDevice slot pass honor black-over-white, texture-alpha, detail-alpha, AlphaGen, blend and no-pass contracts"])

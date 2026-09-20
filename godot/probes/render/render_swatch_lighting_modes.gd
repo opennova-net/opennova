@@ -279,11 +279,7 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 		"techniques": reports,
 		"failures": failures,
 	}
-	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
-	if mf != null:
-		mf.store_string(JSON.stringify(manifest, "\t"))
-		mf.close()
-	_sink.artifact("%s_manifest" % prefix, out_dir.path_join("%s_manifest.json" % prefix))
+	RenderSwatchSupport.write_manifest(_sink, out_dir, prefix, manifest)
 	if failures.is_empty():
 		_sink.logv(["render_swatch_probe lighting: PASS - ", entries.size(),
 				" techniques respond according to their audited light contract"])
@@ -483,11 +479,7 @@ func channel_mode(out_dir: String, prefix: String) -> void:
 		"techniques": reports,
 		"failures": failures,
 	}
-	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
-	if mf != null:
-		mf.store_string(JSON.stringify(manifest, "\t"))
-		mf.close()
-	_sink.artifact("%s_manifest" % prefix, out_dir.path_join("%s_manifest.json" % prefix))
+	RenderSwatchSupport.write_manifest(_sink, out_dir, prefix, manifest)
 	if failures.is_empty():
 		_sink.logv(["render_swatch_probe channels: PASS - ", entries.size(),
 				" techniques honor RGB, alpha, specular, and coverage contracts"])

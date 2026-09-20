@@ -7,7 +7,7 @@ extends GameProbe
 ## format_feed_camp_line) and HudOverlay.push_feed_line with the witnessed
 ## per-case colors, so the capture shows the real ring geometry (HUDSYSTEXT
 ## anchor, three rows, 18-design-px downward step) and the real line palette.
-## Only the wire leg (S2C 0x1E -> netsim fold) is bypassed; ctest
+## Only the wire leg (S2C 0x1E -> replication fold) is bypassed; ctest
 ## `feed_format` pins that half and needs a remote match to fire live. Needs
 ## a window.
 

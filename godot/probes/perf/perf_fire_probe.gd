@@ -90,7 +90,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var base := await _measure("baseline", 5000)
 	data["baseline"] = base
 	if baseline_only:
-		# One structural A/B: the whole world tick (sim + netsim pump + present
+		# One structural A/B: the whole world tick (sim + replication pump + present
 		# passes) off for 3 s. A session tolerates it (peer timeout is 120 s).
 		var worldoff := await _leg_world_off()
 		ctx.log(ProbeFrameSampler.report_line("BASELINE", base))
