@@ -272,4 +272,10 @@ int player_info_default_clip_row(int saved, int maxclips) {
     return maxclips;
 }
 
+int player_info_default_grenade_row(int saved, int maxclips) {
+    if (maxclips <= 0) return 0;
+    if (saved < 0) return maxclips;
+    return saved < maxclips ? saved : maxclips;
+}
+
 } // namespace opennova::world

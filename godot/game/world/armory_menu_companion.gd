@@ -353,8 +353,9 @@ func _current_grenade_clips(weapon_name: String, maxclips: int) -> int:
 		var row := value as Dictionary
 		if String(row.get("name", "")).nocasecmp_to(weapon_name) != 0:
 			continue
-		var clips := int(row.get("ammo_primary", -1))
-		return maxclips if clips < 0 else clampi(clips, 0, maxclips)
+		# The engine's zero-row default-select (player_loadout.h
+		# player_info_default_grenade_row).
+		return WeaponDatabase.default_grenade_row(int(row.get("ammo_primary", -1)), maxclips)
 	return 0
 
 

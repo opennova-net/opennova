@@ -68,6 +68,9 @@ void WeaponDatabase::_bind_methods() {
 			D_METHOD("default_clip_row", "saved", "maxclips"),
 			&WeaponDatabase::default_clip_row);
 	ClassDB::bind_static_method("WeaponDatabase",
+			D_METHOD("default_grenade_row", "saved", "maxclips"),
+			&WeaponDatabase::default_grenade_row);
+	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("player_info_voice_values", "sex"),
 			&WeaponDatabase::player_info_voice_values);
 	ClassDB::bind_static_method("WeaponDatabase",
@@ -261,6 +264,10 @@ int WeaponDatabase::player_info_class_mask(int p_playerclass_value) {
 
 int WeaponDatabase::default_clip_row(int p_saved, int p_maxclips) {
 	return opennova::world::player_info_default_clip_row(p_saved, p_maxclips);
+}
+
+int WeaponDatabase::default_grenade_row(int p_saved, int p_maxclips) {
+	return opennova::world::player_info_default_grenade_row(p_saved, p_maxclips);
 }
 
 String WeaponDatabase::weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const {

@@ -178,4 +178,12 @@ void weapon_slot_indices(const opennova::def::DefWeaponDef *rows, size_t count, 
 // 0 on a degenerate maxclips).
 int player_info_default_clip_row(int saved, int maxclips);
 
+// The GRENADE_AMMO* combos' default-select row. Their rows run 0..maxclips
+// INCLUDING the zero row, so the row IS the clip count: the -1/absent
+// sentinel picks the full maxclips row, a saved count its own row clamped
+// into 0..maxclips (a saved 0 stays 0) [orig: the >= 3 leg of
+// populate_ammo_combo_boxes @0x55def0 and the WEAPON screen's category-3
+// fill @0x5647a4..0x5648a6].
+int player_info_default_grenade_row(int saved, int maxclips);
+
 } // namespace opennova::world

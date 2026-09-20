@@ -145,6 +145,9 @@ public:
 	static int player_info_team_mask(int p_team);
 	static int player_info_class_mask(int p_playerclass_value);
 	static int default_clip_row(int p_saved, int p_maxclips);
+	// The GRENADE_AMMO* combos' default-select row (rows run 0..maxclips, so
+	// the row is the clip count; -1 -> the full row, a saved 0 stays 0).
+	static int default_grenade_row(int p_saved, int p_maxclips);
 	// The PLAYER_INFO kit model (one impl in engine/runtime/menu
 	// player_info_kit.h): the PLAYERVOICE list values for a head's sex byte
 	// (DEFAULT_VOICE first), the persisted-override reset, and the weapon.sav

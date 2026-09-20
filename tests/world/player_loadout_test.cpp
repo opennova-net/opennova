@@ -191,6 +191,12 @@ static void test_player_info_menu_policy() {
     CHECK(player_info_default_clip_row(3, 6) == 3);
     CHECK(player_info_default_clip_row(9, 6) == 6);   // clamps into the table
     CHECK(player_info_default_clip_row(-1, 0) == 0);  // degenerate maxclips
+    // The grenade combos carry a zero row: the row is the clip count.
+    CHECK(player_info_default_grenade_row(-1, 4) == 4);  // untouched -> full row
+    CHECK(player_info_default_grenade_row(0, 4) == 0);   // a saved 0 stays 0
+    CHECK(player_info_default_grenade_row(2, 4) == 2);
+    CHECK(player_info_default_grenade_row(9, 4) == 4);   // clamps into the table
+    CHECK(player_info_default_grenade_row(-1, 0) == 0);  // degenerate maxclips
 }
 
 int main() {

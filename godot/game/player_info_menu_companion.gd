@@ -469,9 +469,8 @@ func _populate_grenades(class_mask: int, team_mask: int) -> void:
 			rows.append(_weapons.ammo_row_label(w.index, clips,
 					Strings.get_table(Strings.TABLE_GAMETEXT)))
 		_set_combo_items(combo, rows)
-		var saved := int(_ammo_pri.get(w.index, -1))
-		_driver.select_row(combo,
-				maxclips if saved < 0 else clampi(saved, 0, maxclips), false)
+		_driver.select_row(combo, WeaponDatabase.default_grenade_row(
+				int(_ammo_pri.get(w.index, -1)), maxclips), false)
 
 
 func _slot_type_store(control: String) -> Dictionary:
