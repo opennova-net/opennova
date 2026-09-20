@@ -393,7 +393,6 @@ public:
 	// @ 0x57edd7; targets-only snap @ 0x57d1e0]. Every consumer (dome c9,
 	// water UV state, object/terrain fog ends, the frame clear) reads through
 	// here, so the ramp reaches them all.
-	float fog_distance() const { return fog_level(); }
 	float fog_level() const;
 	float fog_level_target() const;
 	// Policy lives in env_render [orig: Render_SetFogState @ 0x58a950].

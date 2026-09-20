@@ -1,11 +1,9 @@
 #include <formats/cpt/cpt_io.h>
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
-#include <unordered_map>
 #include <vector>
 #include <base/io/bit_stream.h>
 #include <base/io/le.h>

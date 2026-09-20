@@ -154,7 +154,7 @@ struct NapiNPServerCtx {
 	// set to 2790 (45 s at the 62 Hz tick) BEFORE the per-slot round-end loop and
 	// gated on is_in_session [orig: @0x5166c4], drained by Server_TickUpdate
 	// (authority) / the client frame; SP never drains it (the epilog owns the SP
-	// exit). The round-end wire pass keys on World::round_end instead.
+	// exit). The round-end wire pass keys on World::match.outcome() instead.
 	// [orig: dword_24C10C0] The process-global family toggle. Executable initial
 	// storage is zero: false selects 0x31, true selects 0x30, then every boundary
 	// XORs it even when no player is eligible. Neither session nor round init
@@ -203,7 +203,7 @@ struct NapiNPServerCtx {
 	// --- reimpl-owned, NOT in the original singleton ---
 	// The authoritative simulation. Non-owning. The in-match replication seam (the per-connection
 	// C2S drain / S2C fan) is owned by Server_TickUpdate over connection_list — there is no separate
-	// NetSystem (retired P8): the drain/emit primitives live in netsim/connection_fan.h.
+	// NetSystem (retired P8): the drain/emit primitives live in runtime/replication/connection_fan.h.
 	world::World *world = nullptr;
 
 	// Last-sent S2C 0x6F body per zone handle — the golden shows 0x6F is NOT a steady

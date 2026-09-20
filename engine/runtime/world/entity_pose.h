@@ -154,8 +154,6 @@ public:
 	bool resolve_named_transform(
 			world::World &, world::EntityHandle, const char *name, int32_t out[6]) override;
 	int last_named_userpoint(world::World &, world::EntityHandle, const char *) override;
-	uint64_t muzzle_query_count() const { return muzzle_queries_; }
-	uint64_t muzzle_resolve_count() const { return muzzle_resolves_; }
 
 private:
 	struct SkeletalSource {
@@ -197,8 +195,6 @@ private:
 	std::unordered_map<int32_t, assets::Model> generic_models_;
 	std::unordered_map<int32_t, assets::Model> userpoint_models_;
 	std::unordered_map<uint64_t, SkeletalSource> skeletal_sources_;
-	uint64_t muzzle_queries_ = 0;
-	uint64_t muzzle_resolves_ = 0;
 };
 
 } // namespace opennova::world

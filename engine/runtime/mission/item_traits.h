@@ -25,7 +25,7 @@ void resolve_minefields(world::World &world, const def::DefItemsFile &items,
 // The §5.10b wire-dispatch class supplier: maps an items.def definition id to
 // the wire entity-class BYTE (npwire EntityClass values; 0 = Unknown, the
 // fail-closed default for missing/ambiguous definitions). Injected by the
-// embedder so the ONE wire-class source stays the netsim
+// embedder so the ONE wire-class source stays the replication
 // ItemReplicationCatalog (ADR 0026) — mission code never links the net stack.
 using ItemWireClassFn = std::function<uint8_t(int definition_id)>;
 

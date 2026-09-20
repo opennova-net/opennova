@@ -351,7 +351,7 @@ static int arbitrate_body_state(InfantryState &inf, int resolved) {
 // AnimMap_UpdateEntity @0x40b662..0x40b737]: with no deferral armed, a forward
 // gait committing to its crouch/prone walk plays the 169-172 transition clip
 // first and re-arms the real target as pending for the clip-end promotion,
-// gated on the adm actually carrying the clip. The netsim replica channel runs
+// gated on the adm actually carrying the clip. The replication replica channel runs
 // the same insert through the shared pair map (D-NET-209 / D-INF-23).
 
 void commit_body_state(InfantryState &inf, int resolved, const IRootMotionSource *root_motion) {

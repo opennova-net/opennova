@@ -1,4 +1,4 @@
-// Mission -> world promotion. See mission/promote.h + notes/world/ai_movement.md §10.
+// Mission -> world promotion. See mission/promote.h + docs/world/world-wac-ai-re.md.
 #include <runtime/mission/promote.h>
 
 #include <runtime/world/ai.h>
@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <limits>
 #include <array>
-#include <cmath>
 #include <cstdlib>
 #include <utility>
 #include <vector>

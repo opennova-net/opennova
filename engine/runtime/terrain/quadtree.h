@@ -125,14 +125,10 @@ struct TraversalConfig {
 };
 
 struct TraversalStats {
-	int nodes_visited = 0;
 	int rej_nearfar = 0;
 	int rej_left = 0, rej_right = 0, rej_bottom = 0, rej_top = 0;
 	int partial_subdiv_count = 0;
 	int budget_drops = 0;
-	int leaf_emits = 0;
-	int nonleaf_emits = 0;
-	int partial_subdiv_per_level[5] = {};
 	float dist_min = 1e9f;
 	float dist_max = 0.0f;
 	int lod_fallbacks = 0;

@@ -283,7 +283,6 @@ private:
 	uint64_t weapon_availability_revision_seen_ = 0;
 
 	// ~1 Hz frozen-session tripwire state.
-	std::size_t last_gap_depth_ = 0;
 	uint32_t last_frontier_seq_ = 0;
 	uint32_t last_records_applied_ = 0;
 	uint32_t last_outbound_seq_ = 0;

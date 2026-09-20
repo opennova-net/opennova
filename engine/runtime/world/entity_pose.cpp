@@ -124,8 +124,6 @@ void EntityPoseProvider::clear() {
 	generic_models_.clear();
 	userpoint_models_.clear();
 	skeletal_sources_.clear();
-	muzzle_queries_ = 0;
-	muzzle_resolves_ = 0;
 }
 
 void EntityPoseProvider::register_generic_model(int32_t model_id,
@@ -341,7 +339,6 @@ bool EntityPoseProvider::build_section_matrices(world::World &world,
 
 bool EntityPoseProvider::resolve_muzzle_pose(world::World &world,
 		world::EntityHandle entity, int32_t out[3]) {
-	++muzzle_queries_;
 	if (out == nullptr) return false;
 	const auto found = skeletal_sources_.find(entity.packed);
 	const world::Entity *registered = world.registry.get(entity);
@@ -355,13 +352,11 @@ bool EntityPoseProvider::resolve_muzzle_pose(world::World &world,
 	if (!build_skeletal_bone_matrix(world, source, entity, source.muzzle_bone, muzzle_world))
 		return false;
 	muzzle_world.transform_point(source.muzzle_model_position, out);
-	++muzzle_resolves_;
 	return true;
 }
 
 bool EntityPoseProvider::resolve_organic_attachment(world::World &world,
 		world::EntityHandle entity, uint8_t userpoint, int32_t out[3]) {
-	++muzzle_queries_;
 	const auto found = skeletal_sources_.find(entity.packed);
 	const world::Entity *registered = world.registry.get(entity);
 	if (out == nullptr || userpoint == 0 || found == skeletal_sources_.end() ||
@@ -376,7 +371,6 @@ bool EntityPoseProvider::resolve_organic_attachment(world::World &world,
 		return false;
 	const int32_t local[3] = {point.x, point.y, point.z};
 	matrix.transform_point(local, out);
-	++muzzle_resolves_;
 	return true;
 }
 

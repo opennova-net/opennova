@@ -2,13 +2,13 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <string>
 #include <utility>
 
 #include <base/io/le.h>
+#include <base/io/strutil.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/match.h>
 #include <runtime/world/world.h>
@@ -47,16 +47,6 @@ constexpr std::array<const char *, 32> kScoreFieldNames = {
 	"NUMSKILLKILL", "NUMTHEMINFLAGZONEKILLS", "NUMMEINFLAGZONEKILLS",
 	"NUMASSISTS", "NUMENEMYSNIPERKILLS", "NUMLFPTAKEOVERS",
 };
-
-bool ascii_iequals(std::string_view a, std::string_view b) {
-	if (a.size() != b.size()) return false;
-	for (std::size_t i = 0; i < a.size(); ++i) {
-		if (std::tolower(static_cast<unsigned char>(a[i])) !=
-		    std::tolower(static_cast<unsigned char>(b[i])))
-			return false;
-	}
-	return true;
-}
 
 const char *score_game_type_name(uint32_t game_type) {
 	if (game_type == gtype::kDeathmatch) return "DM";
@@ -117,14 +107,14 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 		std::string directive;
 		if (!(row >> directive) || directive.rfind("//", 0) == 0) continue;
 
-		if (ascii_iequals(directive, "VERSION")) {
+		if (strutil::iequals(directive, "VERSION")) {
 			if (row >> version) saw_version = true;
 			continue;
 		}
-		if (ascii_iequals(directive, "GAMETYPE")) {
+		if (strutil::iequals(directive, "GAMETYPE")) {
 			std::string name;
 			if (row >> std::quoted(name)) {
-				selected = ascii_iequals(name, target);
+				selected = strutil::iequals(name, target);
 				found_target = found_target || selected;
 			} else {
 				selected = false;
@@ -137,9 +127,9 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 		std::string name;
 		int64_t value = 0;
 		if (!(row >> std::quoted(name) >> value)) continue;
-		if (ascii_iequals(directive, "FIELD")) {
+		if (strutil::iequals(directive, "FIELD")) {
 			for (std::size_t i = 0; i < kScoreFieldNames.size(); ++i) {
-				if (!ascii_iequals(name, kScoreFieldNames[i])) continue;
+				if (!strutil::iequals(name, kScoreFieldNames[i])) continue;
 				// The first recognized FIELD after every matching GAMETYPE
 				// replaces the prior/default schema; duplicate matching sections
 				// therefore follow the same reset-and-replace behavior as retail.
@@ -157,9 +147,9 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 			}
 			continue;
 		}
-		if (!ascii_iequals(directive, "VAR")) continue;
+		if (!strutil::iequals(directive, "VAR")) continue;
 		for (std::size_t i = 0; i < kScoreVarNames.size(); ++i) {
-			if (!ascii_iequals(name, kScoreVarNames[i])) continue;
+			if (!strutil::iequals(name, kScoreVarNames[i])) continue;
 			parsed[i] = static_cast<int32_t>(static_cast<uint32_t>(value));
 			break;
 		}

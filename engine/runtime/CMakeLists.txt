@@ -258,7 +258,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_suspension.cpp # the spring leg: latch pick + per-wheel step (split of the contact solves)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ammo_table_build.cpp   # ammo.def -> AmmoTable + the round_type resolve
-    ${CMAKE_CURRENT_SOURCE_DIR}/world/score_rules_build.cpp  # score.ini -> ScoreRules for the game type
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_table_build.cpp # weapon.def -> WeaponTable + the D-NET-141 loadout rules
     ${CMAKE_CURRENT_SOURCE_DIR}/world/script_projectiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/script_effects.cpp

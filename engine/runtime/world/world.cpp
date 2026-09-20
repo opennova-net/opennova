@@ -4,7 +4,6 @@
 #include <runtime/devtools/tick_profile.h>
 
 #include <algorithm>
-#include <cmath>
 #include <utility>
 #include <vector>
 

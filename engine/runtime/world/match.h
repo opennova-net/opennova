@@ -71,6 +71,9 @@ struct MatchLiveScoreboard {
 // The shared retail defaults consumed by Match and the S2C 0x58 session
 // report. Keeping the recovered table in one domain source prevents gameplay
 // points and advertised points from drifting.
+// Indexed by the slot of the shipped VAR name table (retail reads
+// `scoringTable[74 + slot]`) [orig: off_830348 @ 0x830348: 38 {name, slot}
+// pairs, slots 0..37].
 // [orig: GameType_CreateDefaultSettings @0x52DD00]
 std::array<int32_t, 39> default_match_score_values(uint32_t game_type);
 std::vector<MatchScoreField> default_match_score_fields(uint32_t game_type);
@@ -188,8 +191,10 @@ struct MatchPlayerPunt {
 
 // One outcome latch for every producer: automatic multiplayer rules and the
 // WAC/BMS Co-op/SP actions all converge here. Team 0 is a draw/no-team outcome.
-// [orig: g_spawn_success_gate / g_round_winning_team, latched by
-// Server_ProcessRoundEnd @0x5164F0]
+// [orig: g_spawn_success_gate @0x24c1928 (latched by Server_ProcessRoundEnd
+// @0x5164F0 at @0x5168e4, cleared by Game_StartMission @0x524a1f),
+// g_round_winning_team @0x24c1924, the scoreboard winner @0x24c1970 (= S2C 0x1D
+// payload byte 0; memset 0 at mission start, so it stays 0 until the round ends)]
 struct MatchOutcome {
     bool ended = false;
     int32_t winner_team = 0;

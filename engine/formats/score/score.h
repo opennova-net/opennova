@@ -27,11 +27,21 @@
 //
 // Individual values are read as `row + 300 + 4 * entryIndex`
 // [orig: ScoreConfig_GetRowEntry (ex sub_52D430) @ 0x52D430], and `row + 24` holds the block's team count
-// (`g_scoreTeamCount` @0x52D300). Consumers of the parsed model live in
-// runtime/net (the scoring dispatch [orig: GameEvent_ProcessScoring @ 0x52F550]
-// and the change-gated S2C 0x81 score mirror
-// [orig: Server_UpdateCaptureZoneProximity @ 0x5086A0]); per ADR 0030 only the
-// file knowledge lives here.
+// (`g_scoreTeamCount` @0x52D300). Per ADR 0030 only the file knowledge lives
+// here; the retail consumers are the scoring dispatch
+// [orig: GameEvent_ProcessScoring @ 0x52F550] and the change-gated S2C 0x81
+// score mirror [orig: Server_UpdateCaptureZoneProximity @ 0x5086A0].
+//
+// STAGED, NOT WIRED (2026-09-20 tidy): the live score.ini reader is
+// inmatch::load_session_score_config (engine/runtime/inmatch/session_status.cpp),
+// which still scans the text itself while applying the witnessed selection
+// rules (the VERSION 40 gate, reset-and-replace on a duplicate GAMETYPE
+// section, the 34-FIELD cap) on top of world::default_match_score_values. It
+// is the owner-to-be: that function reading its rows through score::parse.
+// The write-only world::ScoreRules feed that used to include this header is
+// gone (world::Match owns the awards). Consumed by
+// tests/score/score_roundtrip_test.cpp only until then
+// (scripts/lint/orphan_header_check.py).
 //
 // COVERAGE GAP (stated per ADR 0030 for a partial port): this lib models the
 // file's TEXT grammar — the authored VERSION / EXP_FANFARE / GAMETYPE / FIELD /

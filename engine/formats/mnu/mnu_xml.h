@@ -70,10 +70,6 @@ struct Document {
   // Find first root element by tag name (case-insensitive).
   const Node *find_root(const std::string &tag_name) const;
   Node *find_root(const std::string &tag_name);
-
-  // Get first root element (regardless of tag).
-  const Node *first_root() const;
-  Node *first_root();
 };
 
 // Parse options.

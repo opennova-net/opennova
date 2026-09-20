@@ -91,6 +91,12 @@ public:
 	// Effective gameplay readiness. Every C2S gameplay send (0x0C uplink,
 	// 0x06 fire, 0x2C ping) requires both retail's dword_81474C hold to be open
 	// and the independent authoritative spawn/health latch to be released.
+	// Every valid 0x5A opens the literal gameplay gate even while a spawn-zone
+	// deploy screen remains pending; queuing C2S 0x0E closes only that gate. A
+	// complete recipient-local 0x0A tail with health <= 0 closes only the
+	// authoritative spawn latch. Positive health does not reopen it: death
+	// re-enters JoinerConnection's deployment-pick FSM, and only the applicable
+	// post-pick release reopens spawn.
 	bool is_deployed() const {
 		return deployed_ && authoritative_spawn_released_;
 	}
@@ -238,14 +244,6 @@ public:
 	                  std::string server_scrk, uint32_t next_seq, uint32_t last_ack,
 	                  uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0,
 	                  uint32_t tick_seed = 0, bool replay_mode = true);
-
-	// The two-latch effective predicate gating the 0x0C uplink. Every valid 0x5A
-	// opens the literal gameplay gate even while a spawn-zone deploy screen remains
-	// pending; queuing C2S 0x0E closes only that gate. A complete recipient-local
-	// 0x0A tail with health <= 0 closes only the authoritative spawn latch.
-	// Positive health does not reopen it: death re-enters JoinerConnection's
-	// deployment-pick FSM, and only the applicable post-pick release reopens spawn.
-	bool deployed() const { return is_deployed(); }
 
 	// The shell's kit for the 0x1A-released loadout-submission pair (Joiner only; see
 	// JoinerConnection::set_loadout_kit). HostClient has no 0x2F leg — its player fills

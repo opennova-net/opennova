@@ -8,8 +8,8 @@
 
 namespace opennova {
 
-// Transport-neutral POD inputs shared by the in-match replication code: the netsim world<->wire bridge
-// (entity_wire_bridge / connection_fan), the npruntime per-frame 0x0A fan + Server_TickUpdate, and the
+// Transport-neutral POD inputs shared by the in-match replication code: the replication world<->wire bridge
+// (entity_wire_bridge / connection_fan), the inmatch per-frame 0x0A fan + Server_TickUpdate, and the
 // reactive §5.1 reply dispatcher (server_message_dispatch). The CLI server, Godot server scene, and
 // tests share this one game-state model; the runtime never reaches back into a transport layer.
 //

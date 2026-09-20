@@ -7,23 +7,7 @@
 
 #include <formats/aip/aip.h>
 
-#include <cctype>
-#include <cstring>
-
 namespace opennova::mission {
-
-namespace {
-
-// Lowercased, whitespace-trimmed copy of a fixed char field (the shell
-// resolver's strip_edges().to_lower()); the field is an ASCII .bms name, so
-// strutil's C-locale whitespace set matches the shell's.
-std::string ascii_lower(const char *data, std::size_t max_len) {
-	std::size_t len = 0;
-	while (len < max_len && data[len] != '\0') ++len;
-	return strutil::to_lower(strutil::trim_view(std::string_view(data, len)));
-}
-
-} // namespace
 
 BootFileSource boot_files_from_index(const ResourceIndex &index) {
     BootFileSource files;

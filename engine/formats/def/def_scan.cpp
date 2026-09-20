@@ -37,11 +37,6 @@ char *read_file(const char *path, size_t *out_len) {
     return buf;
 }
 
-static const char *skip_ws(const char *s) {
-    while (*s && (*s == ' ' || *s == '\t')) ++s;
-    return s;
-}
-
 void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_len) {
     if (src_len >= dst_size) src_len = dst_size - 1;
     memcpy(dst, src, src_len);

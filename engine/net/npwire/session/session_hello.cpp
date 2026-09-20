@@ -117,7 +117,7 @@ bool str_case_equal(std::string_view a, std::string_view b) {
 bool is_jointoperations_protocol_name(std::string_view protocol_name) {
 	// The retail PN compare is case-insensitive, which subsumes the two spellings the
 	// established NovaWorld PN router accepted; keep the policy in the neutral
-	// game-wire layer so npruntime does not reimplement service routing.
+	// game-wire layer so inmatch does not reimplement service routing.
 	return str_case_equal(protocol_name, "JOINTOPERATIONS");
 }
 

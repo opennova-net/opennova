@@ -1,7 +1,6 @@
 #include <formats/pcx/pcx_io.h>
 
 #include <algorithm>
-#include <fstream>
 #include <vector>
 
 namespace opennova {

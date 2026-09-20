@@ -15,7 +15,7 @@ namespace opennova::world {
 // rotate the child's offset about the parent — un-rotate by the SAVED attitude
 // with negated sines, re-rotate by the CURRENT attitude with positive sines
 // (Q22 trig, <<8 +127 bias, no capsule bias — the org deck rides inline the
-// same twins with the capsule term; netsim row_deck_ride is the ported
+// same twins with the capsule term; replication row_deck_ride is the ported
 // sibling) — and finally yaw += dyaw with the pitch/roll delta pair rotated by
 // the pre-add parent-vs-child relative yaw. The delta reads the parent's own
 // saved channel (Entity::saved_live_* — retail +0x80..+0x94), no rider-side

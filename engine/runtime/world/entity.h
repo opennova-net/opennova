@@ -174,7 +174,7 @@ enum class DeathMotionMode : uint8_t {
 // Minimal live-entity state the scripting evaluators read and mutate. This is a
 // clean model over the original 172-byte bms record + the pool record's net id;
 // the renderer/AI's full entity layout is a separate, deferred concern.
-// Named mirrors of the DEF_ITEM_ATTRIB_* bits world/netsim code reads off the
+// Named mirrors of the DEF_ITEM_ATTRIB_* bits world/replication code reads off the
 // entity's ItemDefAttrib dword (Entity::item_attrib, and the same dword on
 // ai.h's def_attrib profile mirror). engine/runtime/world stays def-parser-free; parity
 // static_asserts against def.h live in runtime/world/weapon_table_build.cpp.
@@ -384,7 +384,7 @@ struct Entity {
     // The §5.10b wire replication class, resolved from the item's items.def *_function class
     // tag (ai_function, else move_function -> ItemDef+356 serialize callback) and stamped by
     // the host's post-promotion item-traits sweep. Stored as an OPAQUE code (the novaworld
-    // EntityClass value; engine/runtime/world stays net-agnostic) — 0xFF = unresolved, netsim falls back
+    // EntityClass value; engine/runtime/world stays net-agnostic) — 0xFF = unresolved, replication falls back
     // to its minimal heuristic. Load-bearing: a pool-1 item that is NOT a vehicle class (e.g.
     // ai_function ewep emplacements) must NOT be serialized with the vehicle compact record or
     // the client desyncs mid-frame (retail-join v13, 2026-07-02).
@@ -407,7 +407,7 @@ struct Entity {
     // adds the triple to the tracked entity's position [orig:
     // Camera_ComputeThirdPersonView @0x437fa5..0x437fb7]; the friendly-tag
     // anchor reads z only (anchor z = z + this + 0x4000 [orig:
-    // HUD_DrawEntityLabel @0x5a3a84..0x5a3a98]); netsim's water line derives
+    // HUD_DrawEntityLabel @0x5a3a84..0x5a3a98]); replication's water line derives
     // its own z copy. 0 = never stamped (no anim channel), matching the retail
     // spawn value; the local-player seeds (0xB333 [orig: Player_InitPlayer
     // @0x4e18a1], deploy 0xD000 [orig: NapiNPClientMsg_0x00A @0x42ffc9]) are
@@ -506,7 +506,7 @@ struct Entity {
     // sweep. Combat keeps this value on the entity because damage targets are
     // not necessarily AI entities. In particular bit 0x40000000 is NoDie:
     // weapon damage may reduce health only as far as 1.
-    // The kItemAttrib* constants below name the bits world/netsim code reads
+    // The kItemAttrib* constants below name the bits world/replication code reads
     // (same dword on ai.h's def_attrib profile mirror).
     uint32_t item_attrib = 0;
     uint32_t item_attrib2 = 0; // raw ItemDefAttrib2 dword (ItemDef+88)

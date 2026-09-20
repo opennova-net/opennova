@@ -3,6 +3,7 @@
 // Dictionary getters; their witness citations moved with them.
 #include <runtime/world/inspect.h>
 
+#include <base/io/fixed.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry.h>
@@ -15,7 +16,7 @@ namespace opennova::world::inspect {
 
 namespace {
 
-constexpr float kFixed16 = 65536.0f;
+constexpr float kFixed16 = io::kFp16One;
 
 Vec3 mission_from_fixed3(const int32_t pos[3]) {
 	return Vec3{static_cast<float>(pos[0]) / kFixed16,

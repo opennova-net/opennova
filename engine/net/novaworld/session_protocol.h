@@ -8,7 +8,7 @@ namespace opennova {
 // the matchmaking lobby container; "JointOperations"/"JOINTOPERATIONS" = the in-match game protocol.
 // The in-match reply dispatch itself lives in engine/runtime/inmatch (dispatch_session_replies over a
 // NapiNPConnection) since P8 retired GameServerRuntime; this stays here as the shared PN classifier
-// used by both the npruntime legs and the standalone server's lobby router.
+// used by both the inmatch legs and the standalone server's lobby router.
 enum class SessionProtocolKind {
 	Unsupported,
 	Lobby,

@@ -9,7 +9,6 @@
 #include <runtime/terrain_query/height_field.h>
 #include <cstring>
 #include <algorithm>
-#include <cmath>
 #include <chrono>
 #include <runtime/audio/ambient_mixer.h>
 
@@ -59,9 +58,6 @@ void regional_sound_event(World &world, Entity &entity, int phase) {
     entity.class_think_ticks = io::bam_add(shot.base_ticks, int32_t(uint32_t(product >> 16)));
 }
 
-// Entity_SpawnExplosionEffects @0x4399C0, gnl2 and brrl detonation.
-constexpr const char *kAmmoKzM406HE = "kz_M406HE";
-constexpr const char *kAirExplosionEffect = "Effect_AirExp";
 } // namespace
 
 // The event-callback table in its shipped row order, each row resolved to the

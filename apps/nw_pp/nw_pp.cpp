@@ -25,7 +25,6 @@
 //   nw_pp <capture-path> 0x0d 0x20      # filter to listed S2C tags
 //   nw_pp <capture-path> --sequencing   # packet-level seq/ACK timeline
 //   nw_pp <capture-path> --parity-events # stable packet/event verifier stream
-//   NW_INGAME_HEXCAP=<hexcap> nw_pp     # env-driven, hexcap only (test contract)
 
 #include <formats/def/def.h>
 #include <formats/wac/command.h>
@@ -316,25 +315,12 @@ std::string to_hex_sample(const uint8_t *p, size_t n, size_t cap = 48) {
 
 double fp16(int32_t v) { return double(v) / 65536.0; }
 
-// Pool taxonomy from docs/engine-primer.md + docs/world/world-wac-ai-re.md:
-// 0=organics (player + dynamic spawned units), 1=items (vehicles, spawn
-// points, props), 2=buildings/static, 3=markers (waypoints, nav, objectives).
-const char *pool_label(unsigned p) {
-	switch (p) {
-		case 0: return "organics";
-		case 1: return "items";
-		case 2: return "buildings";
-		case 3: return "markers";
-		default: return "?";
-	}
-}
-
 std::string handle_str(uint16_t h) {
 	char buf[40];
 	if (h == 0xFFFF) std::snprintf(buf, sizeof(buf), "0xFFFF=none");
 	else std::snprintf(buf, sizeof(buf), "0x%04x p%u(%s)/s%u", h,
-	                   unsigned(h >> 12), pool_label(unsigned(h >> 12)),
-	                   unsigned(h & 0xFFF));
+	                   unsigned(wire_handle::pool(h)), wire_handle::pool_label(wire_handle::pool(h)),
+	                   unsigned(wire_handle::slot(h)));
 	return buf;
 }
 
@@ -1941,8 +1927,7 @@ bool print_tag_00_kv(const std::vector<uint8_t> &body) {
 // --- histogram mode (machine-readable coverage; --histogram) ----------------
 //
 // Tally per (dir, tag) message count + total inner-payload bytes, decoupled from
-// the pretty-printer's per-tag layout so the golden-diff harness
-// (scripts/net/diff_vs_golden.ps1) and CI parse a stable contract regardless of
+// the pretty-printer's per-tag layout so a consumer parses a stable contract regardless of
 // how the human renderer evolves. One line per (dir, tag):
 //
 //   HIST <dir> 0x<tag> count=<n> bytes=<total> name=<catalog-name-or-?>

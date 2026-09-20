@@ -472,7 +472,7 @@ public:
     int active_count = 0;
 
     // Deaths detected by the damage pass, in tick order. The host session drains this
-    // every tick (npruntime server tick) and stages the death broadcasts.
+    // every tick (inmatch server tick) and stages the death broadcasts.
     std::vector<RoundDeath> deaths;
 
     // Impacts resolved this tick, in tick order — drained by the presenting host

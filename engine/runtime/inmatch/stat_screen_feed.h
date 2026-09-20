@@ -1,7 +1,7 @@
 #pragma once
 
 // THE STAT SCREEN FEED (net-re §5.68; lives beside end_round_protocol in
-// npruntime because it reads the npwire EndRoundStats board): what stat.mnu's RESULTLIST table shows
+// inmatch because it reads the npwire EndRoundStats board): what stat.mnu's RESULTLIST table shows
 // after the 6-second end-round overlay — the column set and the per-player
 // rows, computed from the reassembled S2C 0x56 board the way
 // populate_stat_results_list @0x562240 builds the CTableWnd. The embedder

@@ -19,6 +19,7 @@
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
 #include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
 #include <formats/threedi/threedi_ctrl_catalog.h>
+#include <base/io/fixed.h>
 #include <base/io/strutil.h> // iequals
 
 #include <cmath>
@@ -32,7 +33,7 @@ using namespace opennova::world;
 
 namespace {
 
-inline constexpr double kFixed16 = 65536.0;
+inline constexpr double kFixed16 = io::kFp16OneD;
 // The EWEAP articulation registers a mounted gun's .3di CTRL table names.
 inline constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
 inline constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
@@ -259,7 +260,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 	mission::MissionKernel &kernel = context.kernel;
 	ClientRuntime &runtime = *context.runtime;
 	const bool joiner = context.joiner;
-	// P7: every path (SP / LAN host / joiner) reads its own npruntime ClientRuntime view's ClientState.
+	// P7: every path (SP / LAN host / joiner) reads its own inmatch ClientRuntime view's ClientState.
 	const replication::ClientState &cs = runtime.state();
 	const Entity *local_player = kernel.world.registry.get(kernel.world.cached.local_player);
 	const bool first_person_usegun = local_first_person_usegun(kernel, local_player);

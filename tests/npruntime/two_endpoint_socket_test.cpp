@@ -177,7 +177,7 @@ int main() {
 		drain_joiner();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d);
 		++tick;
-		ready = client.in_match() && client.deployed();
+		ready = client.in_match() && client.is_deployed();
 	}
 	if (!expect(ready, "joiner reached InMatch + deployed over real UDP sockets")) {
 		net::shutdown();

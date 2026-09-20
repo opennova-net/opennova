@@ -1,27 +1,11 @@
 #include <formats/mnu/mnu_layout.h>
 
+#include <base/io/strutil.h>
+
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
 
 namespace opennova::mnu {
-
-namespace {
-
-bool iequals_ascii(const std::string &a, const char *b) {
-	const char *p = b;
-	for (char c : a) {
-		if (*p == '\0') return false;
-		if (std::tolower(static_cast<unsigned char>(c)) !=
-				std::tolower(static_cast<unsigned char>(*p))) {
-			return false;
-		}
-		++p;
-	}
-	return *p == '\0';
-}
-
-} // namespace
 
 // [orig: init_border_materials @ 0x646f70 — the SIZE x SIZE grid slices]
 FrameTileRect frame_tile_rect(int size, int col, int row) {
@@ -116,10 +100,10 @@ RectEdges adjust_rect_to_text_size(const RectEdges &rect, int text_w,
 	RectEdges r = rect;
 	if (r.right <= r.left) {
 		const int anchor = r.left; // right == left after the extent stage
-		if (iequals_ascii(justify, "center")) {
+		if (strutil::iequals(justify, "center")) {
 			r.left = anchor - text_w / 2;
 			r.right = r.left + text_w;
-		} else if (iequals_ascii(justify, "right")) {
+		} else if (strutil::iequals(justify, "right")) {
 			r.left = anchor - text_w; // the right edge stays at the anchor
 		} else {
 			r.right = anchor + text_w;
@@ -127,10 +111,10 @@ RectEdges adjust_rect_to_text_size(const RectEdges &rect, int text_w,
 	}
 	if (r.bottom <= r.top) {
 		const int anchor = r.top;
-		if (iequals_ascii(vjustify, "center")) {
+		if (strutil::iequals(vjustify, "center")) {
 			r.top = anchor - text_h / 2;
 			r.bottom = r.top + text_h;
-		} else if (iequals_ascii(vjustify, "bottom")) {
+		} else if (strutil::iequals(vjustify, "bottom")) {
 			r.top = anchor - text_h; // the bottom edge stays at the anchor
 		} else {
 			r.bottom = anchor + text_h;

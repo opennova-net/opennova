@@ -206,7 +206,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 		pump_and_deliver();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d);
 		++tick;
-		ready = client.in_match() && client.deployed();
+		ready = client.in_match() && client.is_deployed();
 	}
 	if (!expect(ready, "joiner reached InMatch + deployed over the in-memory socket")) return false;
 

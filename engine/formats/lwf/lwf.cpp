@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <sstream>
 
 namespace opennova {
 namespace lwf {

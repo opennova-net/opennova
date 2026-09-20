@@ -252,9 +252,9 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 
 // ===========================================================================
 // §5.1 reply-body encoders — colocated with their ingame_decode.cpp partners so the reply tags are
-// round-trippable in the same lib (the encode side previously lived in npruntime/server_message_
+// round-trippable in the same lib (the encode side previously lived in runtime/inmatch/server_message_
 // dispatch.cpp, decoupled from its decoder). The host-side SOURCE is the PlayerReplicationState reply
-// POD; npruntime's reactive dispatcher fills it and calls these.
+// POD; inmatch's reactive dispatcher fills it and calls these.
 // ===========================================================================
 
 // tag=0x46 PLAYER-SYNC — the inverse of decode_player_sync (PlayerSync). Flag-driven slot-state record:
@@ -311,7 +311,7 @@ struct PlayerListFrame {
 
 // tag=0x16 PLAYER-LIST/SCOREBOARD — the inverse of decode_player_list. [orig:
 // NetPacket_SerializeScoreboard0x16 @0x504b80 / client NapiNPClientMsg_PlayerList @0x42FAE0].
-// The dispatcher builds `players` from the roster (the npruntime-side walk that can see
+// The dispatcher builds `players` from the roster (the inmatch-side walk that can see
 // NapiNPConnection); this serializes the witnessed wire shape: [u8 flags (bit0 team-mode, bit1
 // timed-scores)][u8 rowCount] then per-player [u8 slot][u16 statusFlags][u16 score1][u16 score2]
 // [u8 (team<<1)|spectator], then [u8 team_count=2] + (team_count+1) × {u16 score1, u16 score2,

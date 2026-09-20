@@ -989,28 +989,6 @@ const char *window_type_name(WindowType type) {
   return "unknown";
 }
 
-const Appearance *Items::find_appearance(const std::string &state,
-                                         const std::string &type) const {
-  for (const Appearance &appearance : appearances) {
-    if (opennova::strutil::iequals(appearance.state, state) &&
-        opennova::strutil::iequals(appearance.type, type)) {
-      return &appearance;
-    }
-  }
-  return nullptr;
-}
-
-Appearance *Items::find_appearance(const std::string &state,
-                                   const std::string &type) {
-  for (Appearance &appearance : appearances) {
-    if (opennova::strutil::iequals(appearance.state, state) &&
-        opennova::strutil::iequals(appearance.type, type)) {
-      return &appearance;
-    }
-  }
-  return nullptr;
-}
-
 void Items::set_appearance_value(const std::string &state,
                                  const std::string &type,
                                  const std::string &value) {

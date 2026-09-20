@@ -86,7 +86,7 @@ int napi_message_decode(const uint8_t *data, size_t data_len, NapiMessage &out, 
 // this layer — the doc T§2.2 description is refuted by IDA (the putative
 // flags bitfield came from Wireshark-dissector analysis; the binary does
 // a simple type-byte dispatch: 0x01 = end, 0x02 = container, else =
-// error). See notes/net_verification_log.md for the trace.
+// error). See docs/net/novaworld-net-re.md (the NapiMessage TLV framing).
 //
 // Overhead: +1 byte for the trailing 0x01 terminator.
 

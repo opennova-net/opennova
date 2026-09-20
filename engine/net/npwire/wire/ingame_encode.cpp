@@ -709,7 +709,7 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 }
 
 // ---------------------------------------------------------------------------
-// §5.1 reply-body encoders (relocated from npruntime/server_message_dispatch.cpp so encode + decode
+// §5.1 reply-body encoders (relocated from runtime/inmatch/server_message_dispatch.cpp so encode + decode
 // share the lib). The host-side input is the PlayerReplicationState reply POD.
 // ---------------------------------------------------------------------------
 

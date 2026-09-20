@@ -18,6 +18,7 @@
 #include <net/npwire/ingame_encode.h>    // the C2S 0x06 fired-round descriptor pose
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 
+#include <base/io/fixed.h>               // kFp16OneD
 #include <base/io/perf_clock.h>          // perf_now_us (the frame's phase clocks)
 
 #include <runtime/mission/collision_resolve.h> // find_item_def (a rider's authored hp)
@@ -508,7 +509,7 @@ void JoinerRole::run_tick(const TickInput &) {
 
 namespace {
 
-constexpr double kFixed16 = 65536.0;
+constexpr double kFixed16 = io::kFp16OneD;
 
 // SelfSpawn (mission i32 16.16 + full BAM32 orientation) -> PlayerSpawn for L.
 world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
@@ -978,7 +979,6 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		last_frontier_seq_ = frontier;
 		last_records_applied_ = records;
 		last_outbound_seq_ = out_seq;
-		last_gap_depth_ = gap_depth;
 		diagnostic_sampled_ = true;
 	}
 	FrameSignals decoded;
@@ -1838,7 +1838,6 @@ void JoinerRole::reset_for_join() {
 	mounted_ammo_revision_seen_ = 0;
 	redeploy_release_pending_ = false;
 	redeploy_health_updates_at_release_ = 0;
-	last_gap_depth_ = 0;
 	last_frontier_seq_ = 0;
 	last_records_applied_ = 0;
 	last_outbound_seq_ = 0;

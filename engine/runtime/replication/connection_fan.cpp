@@ -994,7 +994,7 @@ void drain_connection_c2s(world::World &world, Connection &conn) {
 
 // Serialize the live world into one S2C 0x0A frame for `conn` and host_send it. anchor_for_connection
 // is file-static; the per-connection emit body is shared by the legacy listen-server binding and
-// npruntime's Server_TickUpdate fan over connection_list.
+// inmatch's Server_TickUpdate fan over connection_list.
 std::vector<std::vector<uint8_t>> build_water_cross_messages(
         const world::World &world) {
 	// One positioned message per crossing recorded this tick. Which of the two

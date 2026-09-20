@@ -125,24 +125,6 @@ Node *Document::find_root(const std::string &tag_name) {
   return nullptr;
 }
 
-const Node *Document::first_root() const {
-  for (const auto &root : roots) {
-    if (root->is_element()) {
-      return root.get();
-    }
-  }
-  return nullptr;
-}
-
-Node *Document::first_root() {
-  for (auto &root : roots) {
-    if (root->is_element()) {
-      return root.get();
-    }
-  }
-  return nullptr;
-}
-
 // Parser implementation.
 namespace {
 

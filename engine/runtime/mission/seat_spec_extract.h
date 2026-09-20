@@ -52,7 +52,7 @@ void extract_item_seat_specs(const opennova::def::DefItemsFile &items,
 world::Vec3 seat_local_from_user_point(const opennova::threedi::ThreediUserPoint &point);
 int seat_yaw_offset_from_user_point(const opennova::threedi::ThreediUserPoint &point);
 
-// The installed-table lookup (moved from npruntime's joiner bridge — a pure
+// The installed-table lookup (moved from inmatch's joiner bridge — a pure
 // specs probe belongs beside the extraction, below the net stack).
 inline const mission::ItemSeatSpec *item_seat_spec_for_type(
 		const std::vector<mission::ItemSeatSpec> &specs,

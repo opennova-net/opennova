@@ -85,7 +85,6 @@ public:
 			bool first_person, std::vector<FacialDraw> &out);
 
 	const std::vector<FacialSlot> &slots() const { return slots_; }
-	const std::vector<std::string> &load_errors() const { return load_errors_; }
 	uint32_t display_frame() const { return display_frame_; }
 
 private:
@@ -94,7 +93,6 @@ private:
 	std::unordered_map<int32_t, std::string> model_names_;
 	std::vector<std::pair<std::string, std::shared_ptr<const grm::File>>> models_;
 	std::vector<FacialSlot> slots_;
-	std::vector<std::string> load_errors_;
 	uint32_t display_frame_ = 0;
 };
 

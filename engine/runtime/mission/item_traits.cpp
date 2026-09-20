@@ -93,7 +93,7 @@ const DefItemDef *find_item(
 // The case-folded fourcc prefix of an items.def class tag: the retail
 // callback table keys 4-byte tags and items.def authors longer tokens onto
 // them (`cbike`, `ctank`, `catv`, mixed-case `CHel`) — whole-string matching
-// sent the shipped Motorcycle down the Ground motor. Same rule as netsim's
+// sent the shipped Motorcycle down the Ground motor. Same rule as replication's
 // motion_family_from_tag; the two classifiers must agree (ADR 0026 §4).
 std::string fourcc_prefix(const char *tag) {
     std::string out;

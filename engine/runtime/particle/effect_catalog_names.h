@@ -35,7 +35,6 @@ public:
 	std::vector<std::string> interned_names() const;
 
 	std::size_t effect_count() const { return display_by_key_.size(); }
-	bool has_stock_effect() const { return has_stock_effect_; }
 
 private:
 	std::unordered_map<std::string, std::string> display_by_key_; // folded -> catalog id

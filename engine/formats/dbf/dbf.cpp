@@ -4,11 +4,8 @@
 #include <formats/dbf/dbf.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
-#include <sstream>
 
 #include <base/io/strutil.h>
 

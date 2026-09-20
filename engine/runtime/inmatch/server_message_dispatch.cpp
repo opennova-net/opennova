@@ -435,7 +435,7 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 // bind its local player (golden: 0x16 grows 31 B [host only] -> 39 B [host + joiner] right before the
 // joiner deploys). `roster` is the connection_list; `fallback` covers the World-less/test path (no bound
 // players -> a single default entry). The wire SERIALIZE lives in encode_player_list (novaworld); this is
-// just the npruntime-side roster walk (it reads NapiNPConnection, which novaworld cannot) that builds the
+// just the inmatch-side roster walk (it reads NapiNPConnection, which novaworld cannot) that builds the
 // entry list.
 std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	                                    const std::vector<NapiNPConnection> &roster,
@@ -2016,7 +2016,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					conn.fire_tick_floor = fr.current_tick +
 							(!alt_fire && adm != nullptr ? adm->fire_interval_ticks() : 0u);
 				}
-				// No reactive reply — the echo rides the per-frame 0x0A fan (netsim
+				// No reactive reply — the echo rides the per-frame 0x0A fan (replication
 				// select_round_events), reaching every OTHER in-match recipient.
 				break;
 			}

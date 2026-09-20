@@ -6,6 +6,8 @@
 
 #include <runtime/world/weapon_fsm.h>
 
+#include <base/io/strutil.h>
+
 #include <cstring>
 
 namespace opennova::world {
@@ -50,18 +52,6 @@ namespace {
 
 // ASCII case-insensitive compare (the original binds action names via stricmp
 // [orig: ActionDef_FindByNameInTable @ 0x402360 / ActionDef_ParseScriptLine @ 0x4023f3]).
-bool name_equals_ci(const char *a, const char *b) {
-    while (*a && *b) {
-        char ca = *a, cb = *b;
-        if (ca >= 'A' && ca <= 'Z') ca = static_cast<char>(ca - 'A' + 'a');
-        if (cb >= 'A' && cb <= 'Z') cb = static_cast<char>(cb - 'A' + 'a');
-        if (ca != cb) return false;
-        ++a;
-        ++b;
-    }
-    return *a == *b;
-}
-
 void copy_key(char (&dst)[64], const char *src) {
     std::strncpy(dst, src, sizeof(dst) - 1);
     dst[sizeof(dst) - 1] = '\0';
@@ -573,10 +563,10 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
         int32_t de = 0;
         const char *anim = nullptr;
         for (size_t r = 0; r < row_count; ++r) {
-            if (!name_equals_ci(rows[r].name, kWeaponActionSuffixes[i])) continue;
-			a.map_command = name_equals_ci(rows[r].function, "wpn_std_scopeup_map") ? 1
-					: (name_equals_ci(rows[r].function, "wpn_std_scopedown_map") ||
-							  name_equals_ci(rows[r].function, "wpn_std_switchfrom_map"))
+            if (!strutil::iequals(rows[r].name, kWeaponActionSuffixes[i])) continue;
+			a.map_command = strutil::iequals(rows[r].function, "wpn_std_scopeup_map") ? 1
+					: (strutil::iequals(rows[r].function, "wpn_std_scopedown_map") ||
+							  strutil::iequals(rows[r].function, "wpn_std_switchfrom_map"))
 					? -1
 					: 0;
 			a.action_value = rows[r].action_value;

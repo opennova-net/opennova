@@ -1,11 +1,8 @@
 #include <runtime/wac/vm.h>
 #include <formats/mus/mus.h>
 
-#include <cctype>
 #include <algorithm>
-#include <cstring>
 #include <cmath>
-#include <limits>
 
 #include <formats/wac/bytecode.h>
 #include <formats/wac/command.h>

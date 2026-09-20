@@ -897,10 +897,6 @@ namespace {
 constexpr int32_t kBikeFallSeedBam = 0x016C16C1;
 constexpr int32_t kBikeFallAccelerationBam = 298261;
 
-int32_t q22_mul_trunc(int32_t a, int32_t b) {
-    return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
-}
-
 // Square footprint: the lower axle, then its copy lifted by half the model height.
 // [orig: Entity_ComputeBoundingQuad @ 0x45B6E0]
 static void light_bounding_quad(const VehicleTraits &traits, const VehicleEulerBasis &basis,

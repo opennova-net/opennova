@@ -246,7 +246,7 @@ struct GameConfig {
 	// The per-frame 0x0A byte cap [orig: g_entity_send_budget @0xC8FC50, the
 	// BANDWIDTH server command — atol/5 clamped 100-1600 @0x50b884/@0x50b890;
 	// the round-start initializer resets retail to 600 @0x51ca7c].
-	// start_host_session applies it to the netsim global at bring-up.
+	// start_host_session applies it to the replication global at bring-up.
 	// The retail round-start default is 600 bytes. The configure_host_session
 	// "bandwidth" lever remains an explicit per-session override.
 	uint32_t entity_send_budget = 600;

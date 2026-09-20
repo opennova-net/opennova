@@ -1,6 +1,6 @@
 // Spawn-state init for runtime entities — the field-init half of the host player-spawn
 // machine (docs/net/novaworld-net-re.md §5.2b). Kept separate from promotion
-// (engine/runtime/mission) so the netsim/Phase-2 in-process listen-server player spawn can reuse it
+// (engine/runtime/mission) so the runtime/replication/Phase-2 in-process listen-server player spawn can reuse it
 // without pulling in a mission dependency (engine/runtime/world stays Godot- and mission-agnostic).
 #pragma once
 

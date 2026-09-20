@@ -49,7 +49,7 @@ struct PeerAddrLess {
 	}
 };
 
-// The in-match host: the npruntime ctx + the per-peer transports + the host's own loopback drain.
+// The in-match host: the inmatch ctx + the per-peer transports + the host's own loopback drain.
 // The ctx.world / ctx.mission are wired by the owner (main.cpp / the Godot binding / the test)
 // before the first pump.
 struct HostOwner {
