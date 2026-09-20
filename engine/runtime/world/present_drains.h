@@ -1,20 +1,23 @@
 #pragma once
 
-// The per-tick presentation drain rows the embedder's Simulation fills from
-// the world's outputs for its present passes (ADR 0043 d10): every row is an
-// engine-owned value in MISSION space (x east, y north, z up; the device layer
-// axis-maps on read), the typed twin of the world state it summarizes — the
-// fire ring, the resolved impacts, the live rounds and placed devices, the
-// death-piece pool, the round glows. The C++ present passes read the vectors
-// directly; the Godot records wrap one row by value. The witnesses live on
-// the fills (Simulation::drain_* / fill_*) and on the world state each reads.
+// The per-tick presentation drain rows the present passes read (ADR 0043
+// d10): every row is an engine-owned value in MISSION space (x east, y north,
+// z up; the device layer axis-maps on read), the typed twin of the world state
+// it summarizes — the fire ring, the resolved impacts, the live rounds and
+// placed devices, the death-piece pool, the round glows. The fills below
+// (present_drains.cpp) build them from the world; the embedder only gates on a
+// live world and forwards. The C++ present passes read the vectors directly;
+// the Godot records wrap one row by value.
 
 #include <runtime/world/geom.h>
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace opennova::world {
+
+class World;
 
 // One round spawned since the last drain: the EFFECT legs of both retail
 // receive arms. `adm_arm` selects the adm-indexed arm, whose `action_effect`
@@ -114,5 +117,15 @@ struct RoundGlowRow {
     float radius = 0.0f;
     uint32_t color_rgb24 = 0xFFFFFFu;
 };
+
+// The fills. Each clears `r_rows` first; the two drains also clear the world
+// ring they consumed (the fire ring, the resolved impacts), so a second call
+// on the same tick yields nothing.
+void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualRow> &r_rows);
+void fill_vehicle_trail_visual_rows(const World &world, std::vector<VehicleTrailVisualRow> &r_rows);
+void drain_round_impact_rows(World &world, std::vector<RoundImpactPresentation> &r_rows);
+void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow> &r_rows);
+void fill_death_pieces(const World &world, std::vector<DeathPieceRow> &r_pieces);
+void fill_round_glows(const World &world, std::vector<RoundGlowRow> &r_rows);
 
 } // namespace opennova::world

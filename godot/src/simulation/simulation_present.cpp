@@ -29,6 +29,7 @@
 #include <runtime/world/minimap_overlay.h>   // classifier + the blip draw policy
 #include <runtime/renderer/tracer_frame.h> // the styled tracer-ribbon compile
 #include <runtime/world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
+#include <runtime/world/present_drains.h> // the present-pass row fills (ADR 0040 ladder E0)
 
 using namespace sim_internal;
 
@@ -57,80 +58,7 @@ void Simulation::fill_throwable_visual_rows(
 		std::vector<opennova::world::ThrowableVisualRow> &r_rows) const {
 	r_rows.clear();
 	if (!kernel_) return;
-	const double kDegPerBam = opennova::world::kDegreesPerBam;
-	auto push_entry = [&](int64_t key, int item_id, const opennova::world::Vec3 &pos,
-			int32_t yaw_bam, int32_t pitch_bam, int32_t roll_bam,
-			const char *move_effect, bool move_effect_live) {
-		opennova::world::ThrowableVisualRow d;
-		d.key = key;
-		d.item_id = item_id;
-		d.pos = pos;
-		// the placer euler convention: rotation_deg = (pitch, MISSION yaw, roll)
-		d.pitch_deg = static_cast<float>(double(pitch_bam) * kDegPerBam);
-		d.yaw_deg = static_cast<float>(
-				opennova::world::mission_yaw_deg_from_bam_heading(yaw_bam));
-		d.roll_deg = static_cast<float>(double(roll_bam) * kDegPerBam);
-		// effects_table tag 1 ("move") is a round-bound particle, not an
-		// impact. Retail copies it to AmmoDef+0x70 [orig: @0x409fc2],
-		// spawns/updates it through round+0x1cc [orig:
-		// @0x4e9f58/@0x4ea8ae/@0x5f7410], then releases it with the round
-		// [orig: Projectile_ReleaseEffects @0x4e8280].
-		d.move_effect = move_effect != nullptr ? move_effect : "";
-		// The round's emitter liveness (the +0x1CC handle mirror): the shell
-		// spawns while this is set and holds no handle, and retires + forgets
-		// the handle when it clears, so a round that dips under water releases
-		// its plume and re-acquires one on surfacing [orig:
-		// Projectile_UpdatePhysics @0x4ea019..0x4ea03e, the lazy spawn
-		// @0x4e9f58..0x4e9f94; see docs/world/world-wac-ai-re.md].
-		d.move_effect_live = move_effect_live;
-		r_rows.push_back(std::move(d));
-	};
-	for (int i = 0; i < opennova::world::RoundSim::kCapacity; ++i) {
-		const opennova::world::LiveRound &r =
-				kernel_->world.round_sim.rounds[static_cast<size_t>(i)];
-		if (!r.active) continue;
-		const opennova::world::AmmoTableEntry *ammo =
-				kernel_->world.tables.ammo.by_index(r.ammo_index);
-		const char *move_effect = ammo != nullptr
-				? ammo->impact_effects[1].effect.c_str()
-				: "";
-		// TrcrID still binds the round's item callbacks on non-tracer shots,
-		// but @0x4ec900 clears their visible model pointer. The tag-1 move
-		// effect is independent of that presentation gate and can remain live
-		// even when no item model is drawn.
-		const int32_t visible_item =
-				opennova::world::round_visible_item_id(r);
-		if (visible_item == 0 &&
-				(move_effect == nullptr || move_effect[0] == '\0'))
-			continue;
-		// 512 pool slots need nine bits. Keep a tenth low bit spare and put
-		// the monotonic lifetime above it so a same-slot replacement cannot
-		// inherit the outgoing round's model/effect group.
-		const uint64_t generation =
-				r.presentation_generation != 0 ? r.presentation_generation : 1;
-		const int64_t presentation_key = static_cast<int64_t>(
-				(generation << 10) | static_cast<uint64_t>(i));
-		push_entry(presentation_key, visible_item, r.pos, r.yaw_bam,
-				r.pitch_bam, r.roll_bam,
-				move_effect, r.move_effect_live);
-	}
-	uint8_t viewer_team = 0xFF;
-	if (const opennova::world::Entity *lp =
-			kernel_->world.registry.get(kernel_->world.cached.local_player))
-		viewer_team = static_cast<uint8_t>(lp->team);
-	for (const opennova::world::PlacedDevice &d : kernel_->world.throwables.devices) {
-		if (!d.active) continue;
-		// Viewer-side team variant with the retail base/friendly fallback when
-		// no foe TrcrID is authored [orig: @ 0x5469db..0x546a15].
-		const int item = opennova::world::throwable_item_for_viewer(
-				d.item_friendly, d.item_enemy, d.team, viewer_team);
-		if (item == 0) continue;
-		const int64_t device_key =
-				0x4000000000000000LL |
-				static_cast<int64_t>(d.entity.packed);
-		push_entry(device_key, item, d.pos, d.yaw_bam, d.pitch_bam,
-				d.roll_bam, "", false);
-	}
+	opennova::world::fill_throwable_visual_rows(kernel_->world, r_rows);
 }
 
 TypedArray<ThrowableVisualRow> Simulation::get_throwable_visuals() const {
@@ -155,30 +83,7 @@ void Simulation::fill_vehicle_trail_visual_rows(
 	r_rows.clear();
 	if (!kernel_)
 		return;
-	const auto &world = kernel_->world;
-	world.registry.for_each([&](const opennova::world::Entity &entity) {
-		if (!entity.alive || entity.veh.movement_effects_disabled ||
-				((entity.flags | entity.engine_flags) & opennova::world::kEntityFlagDead) != 0)
-			return;
-		const auto *traits = world.vehicles.traits.get(entity.item_id);
-		if (traits == nullptr)
-			return;
-		for (uint8_t i = 0; i < 16; ++i) {
-			const auto &point = entity.veh.trails.points[i];
-			if (point.definition == 0 || point.definition > 4)
-				continue;
-			opennova::world::VehicleTrailVisualRow row;
-			row.handle_packed = entity.handle.packed;
-			row.registry_spawn_id = entity.registry_spawn_id;
-			row.point = i;
-			row.source_tick = point.source_tick;
-			row.pos = point.position;
-			row.dir = point.direction;
-			row.effect = traits->trails[point.definition - 1].effect;
-			row.magnitude_q16 = point.magnitude_q16;
-			r_rows.push_back(std::move(row));
-		}
-	});
+	opennova::world::fill_vehicle_trail_visual_rows(kernel_->world, r_rows);
 }
 
 Ref<WaypointHudView> Simulation::get_waypoint_hud_view() const {
@@ -356,40 +261,7 @@ void Simulation::drain_round_impact_rows(
 		std::vector<opennova::world::RoundImpactPresentation> &r_rows) {
 	r_rows.clear();
 	if (!kernel_) return;
-	const uint32_t now = kernel_->world.logic_tick;
-	for (const opennova::world::RoundImpact &imp : kernel_->world.round_sim.impacts) {
-		const opennova::world::AmmoTableEntry *ammo = kernel_->world.tables.ammo.by_index(imp.ammo_index);
-		if (ammo == nullptr) continue;
-		if (imp.effect_tag < 0 || imp.effect_tag >= opennova::world::kImpactEffectTagCount)
-			continue;
-		const opennova::world::AmmoImpactEffectRow &row = ammo->impact_effects[imp.effect_tag];
-		const bool has_effect = imp.present_effect && !row.effect.empty();
-		const bool has_sound = imp.present_sound && !row.sound.empty();
-		if (!has_effect && !has_sound) continue;
-		opennova::world::RoundImpactPresentation d;
-		// The rows cross in mission space; the consumer axis-maps mission
-		// (x,y,z) -> Godot (x, z, -y), the get_local_player_position convention.
-		d.position = imp.position;
-		d.direction = imp.direction;
-		if (has_effect) d.effect = row.effect;
-		if (has_sound) d.sound = row.sound;
-		// A lifecycle rewind must never turn a future/stale source tick into an
-		// unsigned multi-billion-tick particle pre-age request.
-		d.age_ticks = now >= imp.tick ? now - imp.tick : 0u;
-		d.source_tick = imp.tick;
-		d.source_order = imp.source_order;
-		// The impact flash light rides the effect leg's own gate — retail
-		// requires the effect entry AND the ammo light_impact radius (the
-		// witness map on renderer/light_scene.h).
-		if (has_effect && ammo->light_impact_radius > 0.0f) {
-			d.has_light = true;
-			d.light_radius = ammo->light_impact_radius;
-			d.light_color_rgb24 = ammo->light_impact_color;
-			d.light_ticks = ammo->light_impact_ticks;
-		}
-		r_rows.push_back(std::move(d));
-	}
-	kernel_->world.round_sim.impacts.clear();
+	opennova::world::drain_round_impact_rows(kernel_->world, r_rows);
 }
 
 TypedArray<RoundImpactRow> Simulation::drain_round_impacts() {
@@ -454,66 +326,7 @@ void Simulation::drain_fire_presentation_rows(
 		std::vector<opennova::world::FirePresentationRow> &r_rows) {
 	r_rows.clear();
 	if (!world_installed_) return;
-	constexpr double kRadPerBam = (2.0 * 3.14159265358979323846) / 4294967296.0;
-	const bool have_local = kernel_->world.cached.local_player.valid();
-	for (const opennova::world::FireEvent &fe : kernel_->world.round_sim.fired) {
-		opennova::world::FirePresentationRow d;
-		d.origin = fe.origin;
-		// Retail's two receive arms are mutually exclusive and present differently.
-		// Bit 0 is tested first; only when it is CLEAR and bit 1 is set does the
-		// adm-indexed arm run, and that arm spawns no ammo-def sound or effect.
-		// A zero flags byte is host/AI-originated fire, which keeps the ammo-def
-		// legs because retail presents those inline at the shooter instead.
-		// [orig: @0x42f521 / @0x42f6ce; ammo legs @0x42f5dc / @0x42f6c2]
-		d.adm_arm = (fe.wire_round_flags & opennova::kRoundEventFlagAltFire) == 0 &&
-				(fe.wire_round_flags & opennova::kRoundEventFlagAdmIndexed) != 0;
-		d.adm_index = fe.adm_index;
-		const double bearing = static_cast<double>(fe.yaw_bam) * kRadPerBam;
-		const double pitch = static_cast<double>(fe.pitch_bam) * kRadPerBam;
-		const double cp = std::cos(pitch);
-		d.forward = opennova::world::Vec3{static_cast<float>(std::cos(bearing) * cp),
-				static_cast<float>(std::sin(bearing) * cp), static_cast<float>(std::sin(pitch))};
-		d.shooter_handle = static_cast<int32_t>(fe.shooter_handle);
-		const opennova::world::Entity *shooter = kernel_->world.registry.get(fe.shooter);
-		d.source_bms_id = shooter != nullptr ? shooter->bms_id : 0;
-		d.is_local_player = have_local && fe.shooter == kernel_->world.cached.local_player;
-		d.ammo_index = fe.ammo_index;
-		const opennova::world::AmmoTableEntry *ammo = kernel_->world.tables.ammo.by_index(fe.ammo_index);
-		if (ammo) d.effect = ammo->ai_launch_effect;
-		d.mf_light = ammo ? ammo->mf_light : 0;
-		// The SOUND legs of both arms moved onto the sim's logic clock with the
-		// propagation-delay queue (world/fire_sound.h; drain_fire_sounds) — this
-		// drain carries only the EFFECT legs.
-		// The adm arm's replacement leg: retail executes the ADDRESSED def's action
-		// rows instead of the ammo-def pair, and the FIRE row (slot 2) is the one that
-		// carries the muzzle flash — its effect is the only one that can reach the
-		// muzzle-glow leg, which retail gates on the action context being 2.
-		// The row index needs no mapping: retail's per-def action array is 12 slots at
-		// def+676 in the order of the suffix table, so def+684 IS slot 2, and our
-		// weapon_action::kFire is the same ordinal.
-		// [orig: array base/stride @0x54203d/@0x542231, bound @0x542239; suffix table
-		//  g_weaponActionTable @0x830B90; the +684 call @0x42f777/@0x42f98f; the glow
-		//  gate @0x40205e/@0x402080 with the context stamped 2 @0x42f8a0]
-		const opennova::world::WeaponTableEntry *fired_def =
-				kernel_->world.tables.weapons.by_index(fe.adm_index);
-		const opennova::world::WeaponFsmAction *fire_row =
-				fired_def != nullptr
-						? &fired_def->action_fsm.actions[opennova::world::weapon_action::kFire]
-						: nullptr;
-		if (fire_row) d.action_effect = fire_row->particle;
-		// Resolved against the THIRD-PERSON model (gfx3): ActionDef+57 is the gfx3
-		// userpoint index and +56 the gfx1 one — the opposite way round from three
-		// currently-tracked doc lines. [orig: loader @0x54506c/@0x545092, resolver
-		//  @0x54039e/@0x54040f]
-		if (fire_row) d.action_userpoint = fire_row->particle_userpoint;
-		// The 3P adm-arm anchor is the SHELL's: the rendered held-weapon node's
-		// own userpoint (EntityPresenter.muzzle_world_for), which is what retail
-		// spawns at — the muzzle-authority decision that closed the S12a
-		// sim-posed shadow seam. The event carries the row's userpoint name; the
-		// presentation layer resolves it against the node it renders.
-		r_rows.push_back(std::move(d));
-	}
-	kernel_->world.round_sim.fired.clear();
+	opennova::world::drain_fire_presentation_rows(kernel_->world, r_rows);
 }
 
 TypedArray<FirePresentationEvent> Simulation::drain_fire_presentation_events() {
@@ -598,25 +411,7 @@ void Simulation::drain_destruction_events(opennova::world::DestructionEvents &r_
 void Simulation::fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const {
 	r_pieces.clear();
 	if (!world_installed_) return;
-	for (size_t slot = 0; slot < kernel_->world.death_pieces.pieces.size(); ++slot) {
-		const opennova::world::DeathPiece &p = kernel_->world.death_pieces.pieces[slot];
-		if (!p.active) continue;
-		opennova::world::DeathPieceRow d;
-		d.slot = static_cast<int32_t>(slot);
-		d.generation = p.generation;
-		d.item_id = p.item_id;
-		d.section = static_cast<int32_t>(p.section);
-		// The debris-type row names the trail effect through the ONE native
-		// table (death_piece_trail_effect) [orig: g_death_piece_types
-		// @ 0x8404f0 +0x2C]; "" = no trail authored.
-		d.type_index = static_cast<int32_t>(p.type_index);
-		d.scale = p.render_scale;
-		d.pos = p.pos;
-		d.heading = p.heading;
-		d.pitch = p.pitch;
-		d.settled = p.settled;
-		r_pieces.push_back(std::move(d));
-	}
+	opennova::world::fill_death_pieces(kernel_->world, r_pieces);
 }
 
 // Whether the collision world holds an instance for the placed entity: the
@@ -662,21 +457,7 @@ PackedFloat32Array Simulation::get_tracer_trails() const {
 void Simulation::fill_round_glows(std::vector<opennova::world::RoundGlowRow> &r_rows) const {
 	r_rows.clear();
 	if (!world_installed_) return;
-	for (const opennova::world::LiveRound &r : kernel_->world.round_sim.rounds) {
-		if (!r.active || r.ammo_index < 0) continue;
-		const opennova::world::AmmoTableEntry *ammo =
-				kernel_->world.tables.ammo.by_index(r.ammo_index);
-		if (ammo == nullptr || ammo->light_move_radius <= 0.0f) continue;
-		opennova::world::RoundGlowRow d;
-		d.id = r.presentation_generation;
-		// The spawn rides radius/2 above the round and the per-tick follow
-		// re-centers at the round position [orig: @0x4ec8d6 / @0x4eaa9f,
-		// see renderer/light_scene.h].
-		d.pos = r.pos;
-		d.radius = ammo->light_move_radius;
-		d.color_rgb24 = ammo->light_move_color;
-		r_rows.push_back(std::move(d));
-	}
+	opennova::world::fill_round_glows(kernel_->world, r_rows);
 }
 
 // The typed entity inspection API (ADR 0042 d5): the directory join and the

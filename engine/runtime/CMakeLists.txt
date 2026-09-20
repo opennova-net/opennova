@@ -200,6 +200,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_loadout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_look.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_present.cpp  # the local player's presentation law: the FP submit, the fire-effect gate, the batch order, the spawn-loadout projection
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/present_drains.cpp  # the present-pass row fills: throwables, vehicle trails, impacts, fires, death pieces, round glows
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player.cpp

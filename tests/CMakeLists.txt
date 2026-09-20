@@ -1716,6 +1716,11 @@ target_include_directories(local_player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_features(local_player_view_test PRIVATE cxx_std_17)
 add_test(NAME local_player_view COMMAND local_player_view_test)
 
+add_executable(present_drains_test world/present_drains_test.cpp)
+target_link_libraries(present_drains_test PRIVATE opennova_runtime)
+target_compile_features(present_drains_test PRIVATE cxx_std_17)
+add_test(NAME present_drains COMMAND present_drains_test)
+
 add_executable(local_player_targeting_test world/local_player_targeting_test.cpp)
 target_link_libraries(local_player_targeting_test PRIVATE opennova_runtime)
 target_include_directories(local_player_targeting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
