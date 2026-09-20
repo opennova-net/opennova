@@ -98,6 +98,7 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 	bool saw_score_fields = false;
 	bool saw_version = false;
 	int version = 0;
+	uint16_t exp_fanfare = 0;
 
 	std::istringstream input{std::string(score_ini)};
 	std::string line;
@@ -109,6 +110,20 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 
 		if (strutil::iequals(directive, "VERSION")) {
 			if (row >> version) saw_version = true;
+			continue;
+		}
+		// EXP_FANFARE lo hi is a top-level directive: stored only when both
+		// operands are nonzero and hi > lo, lo in the low byte.
+		// [orig: ScoreConfig_LoadFile @0x52DC5F — atol @0x52DC75/@0x52DC7C,
+		//  gate @0x52DC8E, LOBYTE/HIBYTE stores @0x52DC96/@0x52DC9F]
+		if (strutil::iequals(directive, "EXP_FANFARE")) {
+			int64_t lo = 0;
+			int64_t hi = 0;
+			if ((row >> lo >> hi) && lo != 0 && hi != 0 && hi > lo) {
+				exp_fanfare = static_cast<uint16_t>(
+						(static_cast<uint32_t>(lo) & 0xFFu) |
+						((static_cast<uint32_t>(hi) & 0xFFu) << 8));
+			}
 			continue;
 		}
 		if (strutil::iequals(directive, "GAMETYPE")) {
@@ -157,6 +172,7 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 
 	if (!saw_version || version != 40 || !found_target) return false;
 	config.session_status_stat_values = parsed;
+	config.exp_fanfare = exp_fanfare;
 	if (saw_score_fields)
 		config.scoreboard_fields = std::move(parsed_fields);
 	else

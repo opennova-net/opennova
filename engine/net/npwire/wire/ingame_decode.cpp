@@ -1669,22 +1669,23 @@ bool decode_session_status(const uint8_t *body, size_t len, SessionStatusBlock &
 	out.kv_count = c.u8();
 	if (!c.ok) return false;
 	// The retail reader is bounds-tolerant: each of the kv_count pairs reads 0
-	// on underflow (@0x531055/@0x531067), so a wire count larger than the pairs
-	// actually present is legal — golden retail sends it. Mirror that: stop at
-	// the end of the body without flagging an error.
-	for (uint8_t i = 0; i < out.kv_count && c.p < c.end; ++i) {
+	// on underflow (@0x531055 for the key, @0x531067 for the value), keeps the
+	// pair, and the record is stamped valid unconditionally (@0x5310AA), so a
+	// wire count larger than the pairs actually present is legal — golden retail
+	// sends it. Mirror that byte for byte: a partial final pair zero-fills the
+	// missing bytes instead of failing the decode.
+	for (uint8_t i = 0; i < out.kv_count; ++i) {
 		SessionStatusKV kv;
-		kv.key = c.u8();
-		kv.value = c.u32();
-		if (!c.ok) break;
+		kv.key = (c.p + 1 <= c.end) ? c.u8() : 0;
+		kv.value = (c.p + 4 <= c.end) ? c.u32() : 0;
 		out.kv.push_back(kv);
 	}
 	// The retail parser stops here; the dispatcher never requires full
 	// consumption, and golden retail carries trailing zero bytes after the kv
 	// pairs. Tolerate + surface them.
-	out.trailing_bytes = c.ok ? size_t(c.end - c.p) : 0;
-	if (c.ok) c.skip(out.trailing_bytes);
-	return c.ok;
+	out.trailing_bytes = size_t(c.end - c.p);
+	c.skip(out.trailing_bytes);
+	return true;
 }
 
 // §5.49 S2C 0x6F — [orig: NapiNPClientMsg_ZoneTimerValue @ 0x428D60]. Fixed 15 B.

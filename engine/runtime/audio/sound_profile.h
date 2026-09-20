@@ -104,6 +104,9 @@ const char *sound_profile_slot_keyword(int slot);
 enum EntitySoundType {
     kEntitySoundDeath = 0,
     kEntitySoundMedicRequest = 1, // the C2S 0x2E help call [orig: @ 0x515526]
+    kEntitySoundSurfaceBreath = 2, // surfacing after a short dive [orig: @ 0x50d8c2]
+    kEntitySoundSurfaceGasp = 3,   // surfacing after a long dive [orig: @ 0x50d8b9]
+    kEntitySoundWaterGag = 4,      // the three pre-drown warnings [orig: @ 0x50d86f]
     kEntitySoundDeathNight = 5, // the "_K" night composite
     kEntitySoundTypeCount = 9,
 };

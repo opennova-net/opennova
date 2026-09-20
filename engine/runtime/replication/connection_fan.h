@@ -37,6 +37,16 @@ namespace opennova::replication {
 // [orig: dispatch_entity_packet_callback @0x4D6A80 gates on g_napi_np_ctx.is_authority].
 void drain_connection_c2s(world::World &world, Connection &conn);
 
+// Read-apply ONE decoded C2S 0x0C body onto `conn`'s owned entity: the same
+// owner gate, pre-round hold and SNAP as the drain above, callable from the
+// host's session dispatch so an uplink lands in wire order with the other
+// gameplay messages of its datagram (retail applies it inside the dispatch
+// walk, not on a later tick). Returns false when nothing was applied.
+// [orig: NapiNPServerMsg_0x00C @0x501C30 -> dispatch_entity_packet_callback
+//  @0x4D6A80 mode-4 read-apply]
+bool apply_connection_uplink(world::World &world, Connection &conn,
+                             const std::vector<uint8_t> &body);
+
 // The per-frame 0x0A byte cap, header included [orig: g_entity_send_budget
 // @0xC8FC50, default 600, runtime-set by the BANDWIDTH server command clamped
 // 100-1600]. A global like retail's; the host session applies GameConfig's
@@ -76,5 +86,19 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type = 0,
                          std::size_t max_frame_body_bytes = 0);
+
+// The same frame, built but NOT sent: every per-recipient state advance (phase,
+// age, cache, watermark) happens here and the 0x0A body lands in `frame_out`.
+// The host tick builds each recipient's frame BEFORE the entity motor (retail's
+// 0x0A is a pre-motor snapshot) and sends it after the maintenance legs, which
+// precede the 0x0A inside retail's Server_TickUpdate.
+// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate @0x5266B4, whose
+//  last leg is the per-slot 0x0A @0x51E3D6..0x51E450, then
+//  Entity_UpdateAllEntities @0x52674B]
+bool build_connection_s2c(const world::World &w, Connection &conn,
+                          const std::vector<GameEntitySnapshot> &ents,
+                          std::vector<uint8_t> &frame_out,
+                          uint32_t game_type = 0,
+                          std::size_t max_frame_body_bytes = 0);
 
 } // namespace opennova::replication

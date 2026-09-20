@@ -94,11 +94,17 @@ void arm_row(ns::ClientReplicaPipeline &view) {
 	view.state().find(kPlayerHandle)->rm_adm_id = 0;
 }
 
+// The spawn stream's row: a compact record never creates one.
+void seed_row(ns::ClientReplicaPipeline &view) {
+	view.state().upsert(kPlayerHandle).type_id = kPlayerType;
+}
+
 // The tapped prone roll, now arbitrated per record: a fold of [41, 48] locks
 // the roll (48 queues behind flags[41]&4) instead of coalescing to 48.
 void test_tapped_roll_locks_and_queues() {
 	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver(&classify);
+	seed_row(view);
 	view.apply(0x0A, player_frame(as::kIdleProne, 0));
 	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
 	expect(es != nullptr, "player row decoded");
@@ -137,6 +143,7 @@ void test_pending_promotes_at_clip_end() {
 	view.set_remote_motion_mode(true);
 	BodySource src;
 	view.set_root_motion_source(&src);
+	seed_row(view);
 	view.apply(0x0A, player_frame(as::kIdleProne, 0));
 	arm_row(view);
 	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
@@ -165,6 +172,7 @@ void test_gait_transition_insert() {
 	view.set_remote_motion_mode(true);
 	BodySource src;
 	view.set_root_motion_source(&src);
+	seed_row(view);
 	view.apply(0x0A, player_frame(as::kRunForward, 0));
 	arm_row(view);
 	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
@@ -190,6 +198,7 @@ void test_gait_transition_insert() {
 void test_dead_park_and_respawn_edges() {
 	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver(&classify);
+	seed_row(view);
 	view.apply(0x0A, player_frame(as::kIdle, 0));
 	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
 

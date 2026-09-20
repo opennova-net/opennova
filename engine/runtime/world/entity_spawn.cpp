@@ -24,6 +24,7 @@ void entity_reset_to_spawn_state(Entity &e) {
     e.last_attacker = {};
     e.dragger = {};
     e.dragger_spawn_id = 0;
+    e.medic_reviving = false; // [orig: the +0x1E0 clear at Game_InitNewRound @0x422740]
     e.roll = 0;
     // The World overload selects 153 when the class has that clip and advances
     // both channels. A fresh row without a motor seeds the fallback state.

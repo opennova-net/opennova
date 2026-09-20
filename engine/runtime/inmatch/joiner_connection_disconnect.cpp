@@ -1,13 +1,15 @@
 // JoinerConnection — the disconnect / session-loss family: the host's description punt
 // and 0x86 goodbye receive legs, the silence reap, the latched disconnect record and the
-// 0x46 leave burst, and the terminal fail transition. Split out of joiner_connection.cpp;
-// the class header is the shared declaration.
+// 0x46 leave burst, and the terminal fail transition — plus the 0x85 outer connection
+// ping, the other CK-keyed outer opcode that stamps the same reap clock. Split out of
+// joiner_connection.cpp; the class header is the shared declaration.
 #include <runtime/inmatch/joiner_connection.h>
 
 #include <base/io/log.h>
-#include <net/npwire/nw_session_framing.h> // nw_encode_outbound (the 0x46 envelope)
+#include <net/npwire/nw_session_framing.h> // nw_encode_outbound (the 0x46 / 0x45 envelope)
 #include <net/npwire/session_hello.h>      // DisconnectEvent / parse_disconnect_event / client_goodbye_to_bytes
-#include <net/npwire/session_keys.h>       // SESSION_OPCODE_CLIENT_GOODBYE
+#include <net/npwire/session_keys.h>       // SESSION_OPCODE_CLIENT_GOODBYE / SESSION_OPCODE_CLIENT_PING
+#include <net/npwire/session_ping.h>       // the shared 0x45/0x85 body codec
 
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +18,29 @@
 #include <vector>
 
 namespace opennova::inmatch {
+
+// [orig: Nwu_HandlePing @0x623A70]: the body after the NWU layer is
+// `[u32 receiver-local key][flat TLVs]`; the key must equal OUR local key (CK)
+// @0x623BC2 or the datagram is dropped silently; the TLV walk reads `WR` (u8)
+// and `MS` (u32) case-insensitively and stops at an empty name; then the
+// connection's reap clock is stamped @0x623C56, and either a 0x45 pong with WR
+// clear and the same MS goes back @0x623C5C (CNapiNPConnection_SendPing
+// @0x61F080: opcode 0x45 for a client, `[u32 remote key][WR][MS]`) or the rtt
+// lands in session_keys.rtt_ms @0x623C9B.
+void JoinerConnection::on_server_ping(const std::vector<uint8_t> &body, PollResult &out) {
+	SessionPingBody ping;
+	if (!parse_session_ping_body(body.data(), body.size(), ping)) return;
+	if (ping.receiver_local_key != client_key_) return;
+	last_receive_ms_ = monotonic_milliseconds_();
+	receive_clock_armed_ = true;
+	if (ping.wants_reply) {
+		out.outbound.push_back(nw_encode_outbound(SESSION_OPCODE_CLIENT_PING,
+				build_session_ping_body(conn_.server_sk, /*wants_reply=*/false,
+						ping.timestamp_ms)));
+		return;
+	}
+	session_rtt_ms_ = monotonic_milliseconds32() - ping.timestamp_ms;
+}
 
 // The host closed the session on its own terms (docs/net/novaworld-net-re.md §5.64 — the punt
 // families and the captured bytes). Retail's receiver stores the event only when its

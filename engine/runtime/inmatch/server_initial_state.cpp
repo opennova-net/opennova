@@ -174,6 +174,8 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	int32_t py = static_cast<int32_t>(ctx.config.spawn_y);
 	int32_t pz = static_cast<int32_t>(ctx.config.spawn_z);
 	int16_t yaw = 0;
+	int16_t pitch = 0;
+	int16_t roll = 0;
 	uint8_t recipient_team = 0;
 	// Prefer the joiner's live spawned pool-0 entity (bound by Server_ProcessPendingPlayerSpawns before
 	// the burst); fall back to the host-advertised spawn from the session config.
@@ -186,6 +188,13 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 			// heading (90 - mission_yaw); matches snapshot_of / pose_for_conn (D-NET-86).
 			constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
 			yaw = static_cast<int16_t>((static_cast<int64_t>(90 - e->yaw) * kBamPerDegree) >> 16);
+			// Pitch/roll are pure degree-to-BAM axes (no frame inversion); the
+			// wire carries their 16.16 high words and the retail joiner applies
+			// them straight onto its local entity (<<16) at every 0x0F.
+			// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D80 (pitch hi)
+			//  / @0x502D9A (roll hi); NapiNPClientMsg_0x00F @0x42E3E9/@0x42E3F2]
+			pitch = static_cast<int16_t>((static_cast<int64_t>(e->pitch) * kBamPerDegree) >> 16);
+			roll = static_cast<int16_t>((static_cast<int64_t>(e->roll) * kBamPerDegree) >> 16);
 			recipient_team = e->team;
 		}
 	}
@@ -196,8 +205,8 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	put_u32(b, static_cast<uint32_t>(py));
 	put_u32(b, static_cast<uint32_t>(pz));
 	put_u16(b, static_cast<uint16_t>(yaw));       // yaw  (i16, client <<16)
-	put_u16(b, 0);                                // pitch
-	put_u16(b, 0);                                // roll
+	put_u16(b, static_cast<uint16_t>(pitch));     // pitch (i16 hi word, client <<16)
+	put_u16(b, static_cast<uint16_t>(roll));      // roll  (i16 hi word, client <<16)
 	const bool has_spawn_zones =
 			ctx.world != nullptr && ctx.world->zones.has_spawn_zone();
 	uint8_t game_flags = has_spawn_zones ? 0x01u : 0x00u;

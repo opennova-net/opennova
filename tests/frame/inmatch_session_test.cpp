@@ -120,26 +120,30 @@ int main() {
 				"only the batch's last tick carries last_tick_of_batch")) return 1;
 	}
 
-	// A zero-tick frame retains edge input until a tick actually runs.
+	// A zero-tick frame retains edge input until a tick actually runs. Under
+	// 4 ms nothing drains (the retail 4 ms quantum); the balance of the 16 ms
+	// group then runs the tick.
 	{
 		TickProbe target;
 		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput first;
-		first.delta_seconds = TickAccumulator::kTickDt / 2.0;
+		first.delta_seconds = TickAccumulator::kTickDt / 8.0;
 		first.player.pressed_action_bits = 0x8u;
 		first.player.look_delta_y = -3.0f;
 		if (!expect(session.advance(first).ticks_run() == 0 && target.inputs.empty(),
-				"half quantum runs no tick")) return 1;
+				"a sub-quantum frame runs no tick")) return 1;
 		FrameInput second;
-		second.delta_seconds = TickAccumulator::kTickDt / 2.0;
+		second.delta_seconds = TickAccumulator::kTickDt * 7.0 / 8.0;
 		const FrameOutcome out = session.advance(second);
 		if (!expect(out.ticks_run() == 1 && target.inputs[0].player.pressed_action_bits == 0x8u &&
 				target.inputs[0].player.look_delta_y == -3.0f,
 				"zero-tick edges survive to the next tick")) return 1;
 	}
 
-	// The retail hitch clamp is owned here and drops the clamped backlog.
+	// The retail hitch clamp is owned here: a stall caps at 500 ms of bank,
+	// and the frames after it are smoothed against that clamped history —
+	// retail's post-stall fast-forward, not a dropped backlog.
 	{
 		TickProbe target;
 		Session session(target);
@@ -152,8 +156,9 @@ int main() {
 		target.inputs.clear();
 		FrameInput tiny;
 		tiny.delta_seconds = 0.001;
-		if (!expect(session.advance(tiny).ticks_run() == 0,
-				"clamped backlog is dropped")) return 1;
+		// (7 * 8000 + 16 + 4) >> 3 = 7002 units -> 109 quanta from phase 125 -> 27.
+		if (!expect(session.advance(tiny).ticks_run() == 27,
+				"the frame after a stall fast-forwards on the smoothed bank")) return 1;
 	}
 
 	// Pause clears banked time; manual step and reset stay local-only.
@@ -162,7 +167,7 @@ int main() {
 		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput half;
-		half.delta_seconds = TickAccumulator::kTickDt / 2.0;
+		half.delta_seconds = TickAccumulator::kTickDt / 8.0;
 		(void)session.advance(half);
 		if (!expect(session.pause().applied(), "pause applies")) return 1;
 		if (!expect(session.step_once().ticks_run() == 1,
@@ -172,7 +177,7 @@ int main() {
 				"reset restores baseline and remains paused")) return 1;
 		if (!expect(session.resume().applied(), "resume after reset")) return 1;
 		if (!expect(session.advance(half).ticks_run() == 0,
-				"pause/reset discarded the old half quantum")) return 1;
+				"pause/reset discarded the old sub-quantum bank")) return 1;
 	}
 
 	// Network roles cannot pause, step, or reset.

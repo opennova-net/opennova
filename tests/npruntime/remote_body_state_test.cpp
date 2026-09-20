@@ -103,6 +103,7 @@ int main() {
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
 	view.set_root_motion_source(&root_motion);
+	view.state().upsert(kPlayerHandle).type_id = kPlayerType; // the spawn stream's row
 	view.apply(0x0A, player_frame(as::kIdleProne, 0));
 	ns::ClientEntityState *es = view.state().find(kPlayerHandle);
 	if (!expect(es != nullptr, "the player row decoded")) return 1;

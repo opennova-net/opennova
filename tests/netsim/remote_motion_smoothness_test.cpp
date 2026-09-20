@@ -126,12 +126,19 @@ nw::FrameUpdate vehicle_frame(uint16_t handle, int32_t ax, int32_t ay, int32_t a
 	return fu;
 }
 
+// The spawn stream's row: a compact record never creates one, so every leg
+// seeds the handle it drives with the type its records carry.
+void seed_row(ns::ClientReplicaPipeline &view, uint16_t handle, uint16_t type_id) {
+	view.state().upsert(handle).type_id = type_id;
+}
+
 // Drive kWarmupTicks + kMeasureTicks client ticks against the PORTED mover:
 // fold (staging), then tick_remote_motion (the chase), then sample — the
 // production per-tick order (recv fold first, movers after; §5.38e §6).
 bool run_leg(const char *label, uint16_t handle, int32_t step_fx,
              bool vehicle, int gap_ticks, ns::ClientReplicaPipeline &view) {
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	seed_row(view, handle, vehicle ? kVehicleType : kPlayerType);
 	std::vector<int32_t> presented;
 	presented.reserve(kWarmupTicks + kMeasureTicks);
 
@@ -229,6 +236,7 @@ bool run_vehicle_fast_speed_snaps_not_stalls() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x1008;
+	seed_row(view, handle, kVehicleType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	const int32_t step_fx = 16384; // 0.25 m/tick = 15.6 m/s
 	int32_t max_lag = 0;
@@ -270,6 +278,7 @@ bool run_player_large_jump_snaps_in_one_tick() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x0009;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	const int32_t x0 = ax;
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
@@ -292,6 +301,7 @@ bool run_player_deadband_ignores_jitter() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x000A;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
 	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax)));
@@ -314,6 +324,7 @@ bool run_respawn_snaps_without_glide() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x000B;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
 	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax)));
@@ -357,6 +368,7 @@ bool run_org2_bucket_ladder_is_verbatim() {
 		ns::ClientReplicaPipeline view(class_of);
 		view.set_remote_motion_mode(true);
 		const uint16_t handle = next_handle++;
+		seed_row(view, handle, kPlayerType);
 		const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 		view.apply(nw::s2c::PER_FRAME_UPDATE,
 		           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax)));
@@ -386,6 +398,7 @@ bool run_vehicle_bucket_ladder_is_verbatim() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x1030;
+	seed_row(view, handle, kVehicleType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
 	           nw::encode_frame_update(vehicle_frame(handle, ax, ay, az, ax)));
@@ -422,6 +435,7 @@ bool run_vehicle_starvation_decay_is_signed_untruncated() {
 		ns::ClientReplicaPipeline view(class_of);
 		view.set_remote_motion_mode(true);
 		const uint16_t handle = next_handle++;
+		seed_row(view, handle, kVehicleType);
 		const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 		view.apply(nw::s2c::PER_FRAME_UPDATE,
 		           nw::encode_frame_update(
@@ -458,6 +472,7 @@ bool run_player_pitch_chases_wire_byte() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x0031;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
 	fu.records[0].player.pitch_byte = 0;
@@ -630,6 +645,7 @@ bool run_crouch_transition_stays_on_terrain() {
 	view.set_remote_motion_terrain(&terrain.field);
 
 	const uint16_t handle = 0x0040;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16;
 	const int32_t ground = 50 << 16;
 	const int32_t stand_bottom = 2 << 16;
@@ -695,6 +711,7 @@ bool run_infantry_crouch_transition_stays_on_terrain() {
 	view.set_remote_motion_terrain(&terrain.field);
 
 	const uint16_t handle = 0x004C;
+	seed_row(view, handle, 0x0777);
 	const int32_t ax = 100 << 16, ay = 20 << 16;
 	const int32_t ground = 50 << 16;
 	auto stance_frame = [&](int32_t capsule_bottom, int state) {
@@ -759,6 +776,7 @@ bool run_terrain_settle_respects_retail_probe_window() {
 		view.set_remote_motion_mode(true);
 		view.set_root_motion_source(&src);
 		view.set_remote_motion_terrain(&terrain.field);
+		seed_row(view, handle, kPlayerType);
 		nw::FrameUpdate fu = player_frame(handle, ax, ay, ground, ax);
 		const uint16_t compressed =
 				nw::network_compress_fixedpoint(origin_z - ground);
@@ -803,6 +821,7 @@ bool run_terrain_settle_wraps_the_fixedpoint_seam() {
 	view.set_remote_motion_terrain(&terrain.field);
 
 	const uint16_t handle = 0x004D;
+	seed_row(view, handle, kPlayerType);
 	nw::FrameUpdate fu = player_frame(handle, 0, 0, 0, 0);
 	fu.records[0].player.move_input_byte = 0;
 	fu.records[0].player.anim_state_id =
@@ -832,6 +851,7 @@ bool run_reset_bottom_state_keeps_raw_vertical_root() {
 	view.set_root_motion_source(&src);
 
 	const uint16_t handle = 0x0048;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16;
 	const int32_t z0 = -(50 << 16);
 	nw::FrameUpdate fu = player_frame(handle, ax, ay, z0, ax);
@@ -859,6 +879,7 @@ bool run_leg_chase_exact_half_turn_matches_x86_abs() {
 	StanceSource src;
 	view.set_root_motion_source(&src);
 	const uint16_t handle = 0x004B;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -(50 << 16);
 	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
 	fu.records[0].player.move_input_byte = 0;
@@ -894,6 +915,7 @@ bool run_player_root_motion_dead_reckons() {
 	WalkSource src;
 	view.set_root_motion_source(&src);
 	const uint16_t handle = 0x0041;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	const int32_t step_fx = 4096; // 3.9 m/s — walk speed, clip-matched
 	std::vector<int32_t> presented;
@@ -953,6 +975,7 @@ bool run_starved_row_forces_idle() {
 	WalkSource src;
 	view.set_root_motion_source(&src);
 	const uint16_t handle = 0x0042;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
 	fu.records[0].player.anim_state_id =
@@ -989,6 +1012,7 @@ bool run_self_row_gets_no_root_add() {
 	WalkSource src;
 	view.set_root_motion_source(&src);
 	const uint16_t handle = 0x0043;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
 	fu.records[0].player.anim_state_id =
@@ -1020,6 +1044,7 @@ bool run_root_rotation_follows_heading() {
 	WalkSource src;
 	view.set_root_motion_source(&src);
 	const uint16_t handle = 0x0044;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
 	fu.records[0].player.anim_state_id =
@@ -1050,6 +1075,7 @@ bool run_infantry_root_motion_dead_reckons() {
 	WalkSource src;
 	view.set_root_motion_source(&src);
 	const uint16_t handle = 0x0045;
+	seed_row(view, handle, 0x0777);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	nw::FrameUpdate fu = header_only_frame();
 	fu.anchor_x = ax; fu.anchor_y = ay; fu.anchor_z = az;
@@ -1084,6 +1110,7 @@ bool run_root_transition_blends() {
 	WalkSource src;
 	view.set_root_motion_source(&src);
 	const uint16_t handle = 0x0046;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
 	fu.records[0].player.anim_state_id =
@@ -1127,6 +1154,7 @@ bool run_dead_row_disarms_and_respawn_rearms() {
 	WalkSource src;
 	view.set_root_motion_source(&src);
 	const uint16_t handle = 0x0047;
+	seed_row(view, handle, kPlayerType);
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
 	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
 	fu.records[0].player.anim_state_id =

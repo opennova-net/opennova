@@ -266,6 +266,11 @@ bool run() {
 		return type_id == 0x2000 ? nw::EntityClass::Infantry
 		                         : nw::EntityClass::Unknown;
 	});
+	// The spawn stream's row: a compact 0x0A never creates one
+	// [orig: NapiNPClientMsg_0x00A @0x42FEC0 — the pre-apply check
+	//  @0x4307B1..0x4307FA queues C2S 0x0F and drops the record on a miss].
+	view.state().upsert(static_cast<uint16_t>((h.pool() << 12) | (h.slot() & 0x0FFF)))
+			.type_id = 0x2000;
 	view.pump(channel);
 	if (!expect(view.frames_applied() == 1 && view.unknown_tags() == 0,
 	            "client applied exactly one frame, no unknown tags")) return false;
@@ -332,8 +337,11 @@ bool run_unresolved_carrier_record_drops_whole() {
 	ns::ClientReplicaPipeline view([](uint16_t) {
 		return nw::EntityClass::Player;
 	});
+	view.state().upsert(0x0003).type_id = 0x14B9; // the spawn stream's row
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
-	if (!expect(view.state().find(0x0003) == nullptr,
+	const ns::ClientEntityState *untouched = view.state().find(0x0003);
+	if (!expect(untouched != nullptr && untouched->compact_revision == 0 &&
+	                    untouched->anim_state_id == 0,
 	            "an unresolvable-carrier record applies NOTHING")) return false;
 	const std::vector<uint16_t> repairs = view.drain_carrier_repair_requests();
 	if (!expect(repairs.size() == 1 && repairs[0] == 0x2001,
@@ -393,6 +401,11 @@ bool run_compact_pose_fields_survive_client_fold() {
 		if (type_id == 0x1500) return nw::EntityClass::Vehicle;
 		return type_id == 0x14B9 ? nw::EntityClass::Player : nw::EntityClass::Infantry;
 	});
+	// The spawn stream's rows: a compact never creates one.
+	view.state().upsert(0x0001).type_id = 0x14B9;
+	view.state().upsert(0x0002).type_id = 0x2000;
+	view.state().upsert(0x1007).type_id = 0x1500;
+	view.state().upsert(0x1008).type_id = 0x1500;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(mounted));
 
 	const ns::ClientEntityState *p = view.state().find(0x0001);
@@ -466,6 +479,8 @@ bool run_remote_lean_integrator_decays_before_ramping() {
 	frame.records.push_back(right);
 
 	ns::ClientReplicaPipeline view([](uint16_t) { return nw::EntityClass::Player; });
+	view.state().upsert(0x0001).type_id = 0x14B9; // the spawn stream's rows
+	view.state().upsert(0x0002).type_id = 0x14B9;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
 	const ns::ClientEntityState *l = view.state().find(0x0001);
 	const ns::ClientEntityState *r = view.state().find(0x0002);
@@ -541,6 +556,11 @@ bool run_compact_lifecycle_survives_multi_frame_pump() {
 		return type_id == 0x14B9 ? nw::EntityClass::Player :
 				nw::EntityClass::Infantry;
 	});
+
+	// The spawn stream's rows: a compact 0x0A never creates one
+	// [orig: NapiNPClientMsg_0x00A @0x42FEC0, pre-apply check @0x4307B1..0x4307FA].
+	view.state().upsert(0x0001).type_id = 0x14B9;
+	view.state().upsert(0x0002).type_id = 0x2000;
 
 	// An initially witnessed dead record establishes the known state, but is not
 	// itself a respawn edge. Retain high/raw bits rather than normalizing the byte.
@@ -626,6 +646,8 @@ bool run_carrier_local_pose_lifts_after_later_carrier_record() {
 		return type_id == 0x1004 ? nw::EntityClass::Vehicle : nw::EntityClass::Infantry;
 	};
 	ns::ClientReplicaPipeline view(classify);
+	view.state().upsert(0x0002).type_id = 0x2000; // the spawn stream's rows
+	view.state().upsert(0x1007).type_id = 0x1004;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
 	const ns::ClientEntityState *decoded = view.state().find(0x0002);
 	if (!expect(decoded != nullptr && decoded->x == (1 << 16) &&
@@ -697,6 +719,8 @@ bool run_carried_child_follows_later_carrier_same_mover_tick() {
 	};
 	ns::ClientReplicaPipeline view(classify);
 	view.set_remote_motion_mode(true);
+	view.state().upsert(0x0002).type_id = 0x2000; // the spawn stream's rows
+	view.state().upsert(0x1007).type_id = 0x1004;
 
 	nw::FrameUpdate frame;
 	frame.flags2 = 0;
@@ -1070,6 +1094,9 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	if (!expect(decoded_carrier != nullptr && decoded_carrier->pitch_bam == 178956960 &&
 	                    decoded_carrier->roll_bam == -119304640,
 	            "production carrier spawn retains authored pitch and roll")) return false;
+	// The infantry's own spawn-stream row (0x0C in production): a compact 0x0A
+	// never creates one [orig: NapiNPClientMsg_0x00A pre-apply check @0x4307B1..0x4307FA].
+	view.state().upsert(ih.packed).type_id = 0x2000;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, dg.body);
 	const ns::ClientEntityState *decoded = view.state().find(ih.packed);
 	if (!expect(decoded != nullptr && decoded->carrier_handle == vh.packed &&

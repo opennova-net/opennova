@@ -164,6 +164,40 @@ struct GameConfig {
 	//  Config_SetDefaults @0x54d485; Config_ParseSettingsLine @0x54f939;
 	//  NapiNPServerMsg_HandlePlayerLoadout @0x515ba6]
 	uint32_t armory_reuse_time = 30;
+	// The join-time team-balance hold: a requested side is refused (and the
+	// joiner re-nagged with S2C 0x03 once per second) while the add would push
+	// the larger team more than max(1, ceil(min(team0, team1) * percent))
+	// players ahead. cfg keys `balance_join` / `balance_join_percent`.
+	// [orig g_GameConfigState.balanceJoin_A30 / balanceJoinPercent_A34;
+	//  CNapiServer_ProcessPendingPlayerSpawns @0x4C8F0A..0x4C8F74]
+	bool balance_join = false;
+	float balance_join_percent = 0.0f;
+	// score.ini `EXP_FANFARE lo hi` (lo byte = KILLTONE threshold, hi byte =
+	// HEADSHOTTONE), kept only when both are nonzero and hi > lo; advertised in
+	// the 0x60 server-info VarList. 0 = unset, every joiner's score tones stay
+	// silent. [orig: ScoreConfig_LoadFile @0x52DC5F..0x52DC9F -> word_24C1170]
+	uint16_t exp_fanfare = 0;
+	// The host's ping policy: a completed C2S 0x2C return-leg sample below
+	// `min_ping` (with the min check on) or above `max_ping` (max check on)
+	// counts a strike; the 21st consecutive strike punts the player with chat
+	// 36 "minping" / 37 "maxping". cfg keys `DoMinPingCheck` / `MinPing` /
+	// `DoMaxPingCheck` / `MaxPing` (Config_ParseSettingsLine); the checks are
+	// off unless a host cfg turns them on.
+	// [orig: g_GameConfigState.checkMinPing_54C / minPing_548 / checkMaxPing_554
+	//  / maxPing_550 -> g_DoMinPingCheck @0x24D21B0 / g_MinPing @0x24D21AC /
+	//  g_DoMaxPingCheck @0x24D21B8 / g_MaxPing @0x24D21B4 via
+	//  apply_session_settings_to_globals @0x551C3E..0x551C5D;
+	//  NapiNPServerMsg_HandlePingResponse @0x515183..0x51521A]
+	bool do_min_ping_check = false;
+	uint32_t min_ping = 0;
+	bool do_max_ping_check = false;
+	uint32_t max_ping = 0;
+	// game.cfg `mpreset`: the NovaWorld ServerCommand SetMPReset stores its
+	// argument here and saves the config; the shell persists it. Its reader is
+	// the between-round reset policy, not modeled on this host.
+	// [orig: g_GameConfigState.multiplayerReset_344; the SetMPReset arm of the
+	//  ServerCommand handler @0x4D2E28 -> Game_SaveConfig @0x4D2E2D]
+	int32_t multiplayer_reset = 0;
 	int32_t capture_duration_seconds = 15; // [orig g_capture_duration @0x24D2248] `TakeoverTime`
 	int32_t capture_speed_setting = 1;     // [orig g_capture_speed_setting @0x24D2254]
 	int32_t spawn_wave_time_base = 0;      // [orig g_spawn_wave_time_base @0x24D224C]

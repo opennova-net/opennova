@@ -694,6 +694,66 @@ int main() {
 		            "the join pose is the parent-transformed marker")) return 1;
 	}
 
+	// The balance-join hold: with a side password armed (BuildFlags & 0xF0) and
+	// `balance_join`, a joiner REQUESTING side A is refused while the add would
+	// push side A more than max(1, ceil(min * percent)) ahead; the refusal
+	// stages the once-per-second S2C 0x03 nag, and a later side-B admission
+	// releases the hold. [orig: CNapiServer_ProcessPendingPlayerSpawns
+	//  @0x4C8E89..0x4C8F74, nag @0x4C8F7A..0x4C8FD1]
+	{
+		auto bal_world = std::make_unique<w::World>();
+		make_world(*bal_world);
+		for (const int32_t item_id : {6096, 6097}) {
+			w::Entity start;
+			start.kind = w::EntityKind::Marker;
+			start.item_id = item_id;
+			bal_world->registry.spawn(3, start);
+		}
+		inmatch::NapiNPServerCtx bal_ctx;
+		inmatch::GameConfig settings;
+		settings.max_players = 8;
+		settings.game_type = opennova::game_type::kTeamDeathmatch;
+		// A locked side B arms BuildFlags 0x10; unpassworded joiners are
+		// assigned the open side A, a "bravo" credential lands on side B.
+		settings.side_b_password = "bravo";
+		settings.balance_join = true;
+		settings.balance_join_percent = 0.5f;
+		inmatch::test::bring_up_host(bal_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+		                        /*host_key=*/0, nullptr, settings);
+		bal_ctx.world = bal_world.get();
+		if (!expect((bal_ctx.np_protocol.build_flags & 0xF0u) != 0,
+		            "balance: a side password arms the team-mode BuildFlags nibble")) return 1;
+		auto admit = [&](uint32_t dcb, uint8_t team_request, const char *password) {
+			inmatch::NapiNPConnection joining;
+			joining.type = 1;
+			joining.connection_id = dcb;
+			joining.self_id_seen = true;
+			joining.phase = inmatch::ConnectionPhase::Joined;
+			joining.char_vars.team_request = team_request;
+			joining.join_password = password;
+			bal_ctx.np_protocol.connection_list.push_back(joining);
+		};
+		admit(inmatch::kFirstJoinerDcb, 0, "");
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(bal_ctx, *bal_world) == 1,
+		            "balance: the first side-A request is admitted (diff 1 <= 1)")) return 1;
+		admit(inmatch::kFirstJoinerDcb + 1, 0, "");
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(bal_ctx, *bal_world) == 0,
+		            "balance: a second side-A request is held (2 vs 0 > 1)")) return 1;
+		const inmatch::NapiNPConnection &held = bal_ctx.np_protocol.connection_list.back();
+		if (!expect(held.phase < inmatch::ConnectionPhase::PlayerAdded &&
+		                    held.reply.admission_hold_nag_pending,
+		            "balance: the held joiner is staged its S2C 0x03 nag")) return 1;
+		admit(inmatch::kFirstJoinerDcb + 2, 0xFF, "bravo");
+		// The side-B credential selects team 1 (retail's index) for the balance
+		// check and lands on side B; its add restarts the walk: 1 vs 1 -> max
+		// diff 1 -> the held side-A joiner now fits (2 vs 1).
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(bal_ctx, *bal_world) == 2,
+		            "balance: a side-B admission releases the held side-A joiner")) return 1;
+		const w::Entity *released = pool0_player(*bal_world, inmatch::kFirstJoinerDcb + 1);
+		if (!expect(released != nullptr && released->team == 1,
+		            "balance: the released joiner spawns on its requested side")) return 1;
+	}
+
 	std::printf("OK\n");
 	return 0;
 }

@@ -56,6 +56,12 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	ctx.round_end_announced = false;
 	ctx.round_end_linger_ticks = 0;
 	ctx.round_end_board_stream.clear();
+	// Every mission start advances both transfer counters; the first mission of
+	// this context serves id 1 on 0x60 and 0x64, the map cycle's next one 2.
+	// [orig: Game_StartMission @0x5247F3 `++g_replayBlockMagic`;
+	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E9C1 `++dword_C86FC8`]
+	++ctx.server_info_transfer_id;
+	++ctx.mission_metadata_transfer_id;
 	// Retail seeds the process CRT stream from the clock once when the host
 	// allocates its player-slot table and immediately spends one draw on the
 	// table's anti-cheat base offset (`rand() % 25145`); the simulation's owned

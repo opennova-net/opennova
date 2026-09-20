@@ -83,6 +83,16 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		world::World &world, bool spectator);
 
+// Apply the C2S 0x51 requests the dispatcher admitted: the retail kill-and-
+// convert — the slot's spectator latch and hide byte, its team cleared, the
+// entity hidden with health 1 and damage disabled, its spawn-wave removal,
+// the deploy leg with the request's killer handle, then S2C 0x32 [5][name]
+// to every active player. Runs once per host tick before the state fan.
+// [orig: Server_KillPlayerAndNotify @0x519E00 — gates @0x519E16..0x519E3F,
+//  the convert @0x519E5B..0x519EA4, SpawnWaveList_RemovePlayer @0x519EB3,
+//  Server_ProcessPlayerDeath @0x519ECE, 0x32 @0x519EDC..0x519F43]
+void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &world);
+
 // Synthetic in-process peer admit WITHOUT a handshake — an owner/test hook (the Godot binding's
 // admit_test_remote_peer). Spawns a pool-0 REMOTE player at `spawn` (net_id forced to 0 — a player
 // carries no SSN, D-NET-112; identity is handle + ownerConnectionId), registers (or reuses) a type-1

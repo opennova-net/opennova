@@ -171,10 +171,13 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         if (world::AiEntity *body = world.ai.for_handle(h))
             body->profile.clip_size = def != nullptr ? def->clipsize : 0;
 		e->vehicle_spawn_ids.clear();
+		e->vehicle_spawn_groups.clear();
 		if (def != nullptr) {
 			for (int group = 0; group < items.vehicle_spawn_id_count; ++group)
-				if ((def->vehicle_spawn_mask & (uint32_t(1) << group)) != 0)
+				if ((def->vehicle_spawn_mask & (uint32_t(1) << group)) != 0) {
 					e->vehicle_spawn_ids.push_back(items.vehicle_spawn_ids[group]);
+					e->vehicle_spawn_groups.push_back(static_cast<uint8_t>(group));
+				}
 		}
 		e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
 		e->render_sway = def != nullptr && fourcc_prefix(def->render_function) == "sway";

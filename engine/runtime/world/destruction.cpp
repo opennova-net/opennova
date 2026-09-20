@@ -642,9 +642,41 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         const AmmoTableEntry *ammo = world.tables.ammo.by_index(e.ammo_index);
         if (ammo == nullptr) continue;
         // Type dispatch [orig: the switch @ 0x4eadc6]: 2/5/6/7 -> weapon
-        // damage; 1 (vehicle ram) and 3 (medic heal) are cited stubs at this
-        // altitude (the ram rides the vehicle pass, the medic the revive port).
-        if (e.type == ammo_kz::kKnife || e.type == ammo_kz::kMedic) continue;
+        // damage; 1 (vehicle ram) is a cited stub at this altitude (the ram
+        // rides the vehicle pass); 3 (the medic kit) routes to the medic
+        // interaction below.
+        if (e.type == ammo_kz::kKnife) continue;
+        if (e.type == ammo_kz::kMedic) {
+            // The kz-type-3 callback is GameEvent_HandleMedicInteraction only
+            // when the owner's class carries the Medic charattr (AnimMap slot
+            // bit 8) [orig: @0x4EADF0..0x4EADFC]. Per organic in the blast
+            // radius (the ordinary pool-0 sweep shape): a person that is not
+            // the healer, a live healer, the same team; a DEAD target that is
+            // not already being revived is revived (the alive-and-hurt heal,
+            // GameEvent_HealPlayer @0x50DE30, is unported).
+            // [orig: GameEvent_HandleMedicInteraction @0x4E6790 — gates
+            //  @0x4E679C..0x4E67BD, dead arm @0x4E67C2..0x4E67D8]
+            const Entity *healer = world.registry.get(e.owner);
+            if (healer == nullptr ||
+                    !world.tables.class_has_attribute(healer->player_class,
+                            MissionTables::kCharAttrMedic) ||
+                    (healer->flags & kEntityFlagDead) != 0u)
+                continue;
+            const float medic_radius = e.radius_override != 0.0f
+                    ? e.radius_override : ammo->kz_maxradius;
+            const size_t pool0 = world.registry.pool_capacity(0);
+            for (size_t s = 0; s < pool0; ++s) {
+                Entity *t = world.registry.get(EntityHandle::make(0, static_cast<int>(s)));
+                if (t == nullptr || t == healer || t->kind != EntityKind::Organic) continue;
+                if (t->team != healer->team) continue;
+                const Vec3 d = vec_sub(t->position, e.pos);
+                const float bound = t->bound_radius > 0.0f ? t->bound_radius : 0.6f;
+                if (vec_len(d) - bound > medic_radius) continue;
+                if ((t->flags & kEntityFlagDead) == 0u || t->medic_reviving) continue;
+                world.round_sim.medic_revives.push_back(MedicRevive{t->handle, healer->handle});
+            }
+            continue;
+        }
         float blast_radius = ammo->kz_maxradius; // [orig: E+28 -> +56 @ 0x4eadcd]
         if (e.radius_override != 0.0f)
             blast_radius = e.radius_override;    // [orig: the E+0x2C float @ 0x4eae64]

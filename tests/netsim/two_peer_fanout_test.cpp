@@ -203,6 +203,10 @@ bool run_fanout_and_per_connection_anchor() {
 	// The host's own client parses the header-only frame where retail's parser
 	// returns [orig: NapiNPClientMsg_0x00A @0x430174].
 	self_view.set_authority_recipient(true);
+	// The joiner's rows come from the 0x0C spawn stream (a compact never
+	// creates one); this harness fans frames only, so seed them.
+	join_view.state().upsert(host_h.packed).type_id = 0x14B9;
+	join_view.state().upsert(joiner_h.packed).type_id = 0x14B9;
 	self_view.pump(self_ch);
 	join_view.pump(udp_join);
 	if (!expect(self_view.frames_applied() == 1 && join_view.frames_applied() == 1,
@@ -485,6 +489,9 @@ bool run_retail_player_slots_start_after_bms_organics() {
 	ns::UdpSessionTransport udp_join(ns::UdpSessionTransport::Role::Client);
 	carry(udp_host, udp_join);
 	ns::ClientReplicaPipeline join_view;
+	// The spawn stream's rows for both players (a compact never creates one).
+	join_view.state().upsert(0x0004).type_id = 0x14B9;
+	join_view.state().upsert(0x0005).type_id = 0x14B9;
 	join_view.pump(udp_join);
 	if (!expect(join_view.frames_applied() == 1, "join view applied retail-slot frame"))
 		return false;
@@ -2023,6 +2030,10 @@ bool run_vehicle_drive_authority() {
 	// Decode through the real client fold as well: a child-first pool-0 row must
 	// reconstruct at the final same-frame pool-1 carrier, not at its pre-motor pose.
 	ns::ClientReplicaPipeline view(attach_test_class);
+	// The spawn stream's rows (a compact never creates one): the frame's own
+	// record identities, exactly as the world stream would have typed them.
+	for (const nw::FrameUpdateRecord &r : fb.records)
+		view.state().upsert(r.handle).type_id = r.type_id;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, dg.body);
 	const ns::ClientEntityState *decoded_driver = view.state().find(ph.packed);
 	const ns::ClientEntityState *decoded_vehicle = view.state().find(vh.packed);

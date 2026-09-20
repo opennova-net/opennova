@@ -11,9 +11,11 @@
 
 #include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
+#include <net/npwire/ingame_message_id.h> // s2c::FORMATTED_GAME_TEXT (the 0x51 convert notice)
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <optional>
 
 namespace opennova::inmatch {
@@ -429,6 +431,75 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	return h;
 }
 
+namespace {
+
+// Server_CountAlivePlayers: the active player-slot rows that carry a bound
+// entity/connection [orig: @0x4FD770 — slot byte +4 && dword +28].
+uint32_t count_alive_players(const NapiNPServerCtx &ctx) {
+	uint32_t count = 0;
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.phase >= ConnectionPhase::PlayerAdded &&
+				conn.phase < ConnectionPhase::Goodbye &&
+				conn.link.owned_entity.valid())
+			++count;
+	}
+	return count;
+}
+
+// Server_CountPlayersOnTeam(index): the live players on team index+1, plus the
+// pre-spawn reservations already assigned there [orig: @0x501630].
+int32_t count_players_on_team(const NapiNPServerCtx &ctx, const world::World &world,
+		const NapiNPConnection &joining, uint8_t team) {
+	int32_t count = 0;
+	world.registry.for_each([&](const world::Entity &e) {
+		if (e.handle.pool() != 0 || e.item_id != world::kPlayerInfantryTypeId) return;
+		if (e.team == team) ++count;
+	});
+	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (&c == &joining || !c.assigned_team_valid || c.link.owned_entity.valid()) continue;
+		if (c.assigned_team == team) ++count;
+	}
+	return count;
+}
+
+// The balance-join hold: with a team-mode BuildFlags nibble and `balance_join`
+// set, a joiner who REQUESTED a side (0/1, or one selected by a matching side
+// password) is refused while adding it would leave the larger team more than
+// max(1, ceil(min(team0, team1) * balance_join_percent)) ahead. An automatic
+// request (-1) is never held.
+// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8E89 (BuildFlags & 0xF0),
+//  side-password override @0x4C8ED1/@0x4C8EEC, gate @0x4C8F0A, counts
+//  @0x4C8F19/@0x4C8F1B, ceil @0x4C8F41..0x4C8F53, compare @0x4C8F74]
+bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &conn,
+		const world::World &world) {
+	if ((ctx.np_protocol.build_flags & 0xF0u) == 0) return true;
+	int team_id = conn.char_vars.team_request == 0 ? 0
+			: conn.char_vars.team_request == 1 ? 1 : -1;
+	if (!ctx.config.side_a_password.empty() &&
+			opennova::strutil::iequals(conn.join_password.c_str(),
+					ctx.config.side_a_password.c_str())) {
+		team_id = 0;
+	} else if (!ctx.config.side_b_password.empty() &&
+			opennova::strutil::iequals(conn.join_password.c_str(),
+					ctx.config.side_b_password.c_str())) {
+		team_id = 1;
+	}
+	if (!ctx.config.balance_join || team_id == -1) return true;
+	int32_t team0_count = count_players_on_team(ctx, world, conn, 1);
+	int32_t team1_count = count_players_on_team(ctx, world, conn, 2);
+	const int32_t min_team_count = std::min(team0_count, team1_count);
+	int32_t max_team_diff = static_cast<int32_t>(std::ceil(
+			static_cast<double>(min_team_count) * ctx.config.balance_join_percent));
+	if (max_team_diff < 1) max_team_diff = 1;
+	if (team_id != 0) ++team1_count;
+	else ++team0_count;
+	const int32_t larger_team = std::max(team0_count, team1_count);
+	const int32_t smaller_team = std::min(team0_count, team1_count);
+	return larger_team - smaller_team <= max_team_diff;
+}
+
+} // namespace
+
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !dword_24D1DE0 &&
 // !g_spawn_success_gate. dword_24D1DE0 is the mission-LOADING-in-progress flag (set/cleared all over
 // Game_StartMission @0x524360); the original does NOT process spawns until the load completes and the
@@ -438,16 +509,48 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 // is loaded with its markers. A production driver that wires
 // ctx.world DURING load must add a load-complete gate here, else the spawn resolver finds no marker and
 // the idempotent origin fallback below latches the player at (0,0,0) permanently.
+// The pump runs once per periodic second from the host tick (the caller's
+// gate). Every successful add restarts the walk from the head with the capacity
+// predicate re-evaluated (LABEL_5 @0x4C8E02); a pending player the capacity or
+// balance-join gate holds is re-nagged with S2C 0x03 at most once per 1000 ms
+// (@0x4C8F7A..0x4C8FD1, staged here and framed by tick_connections).
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world) {
 	if (!ctx.is_authority || world.match.outcome().ended) return 0;
 	int spawned = 0;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		// Spawn an accepted-but-unspawned player: the host loopback (self_id_seen latched at
-		// create_session) or a joiner that completed the C2S 0x00 -> 0x01 -> 0x02 admission
-		// exchange (and may later restamp its dcb via 0x48). Mid-handshake nodes are skipped.
-		if (!conn.self_id_seen) continue;
-		if (conn.phase >= ConnectionPhase::PlayerAdded) continue; // already spawned
-		if (Server_BuildPlayerInfoAndAdd(ctx, conn, world).valid()) ++spawned;
+	const uint32_t host_ms = ctx.np_protocol.host_run_duration_ms;
+	bool restart = true;
+	while (restart) {
+		restart = false;
+		const bool has_spawn_slots = count_alive_players(ctx) < ctx.config.max_players;
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			// Spawn an accepted-but-unspawned player: the host loopback (self_id_seen latched at
+			// create_session) or a joiner that completed the C2S 0x00 -> 0x01 -> 0x02 admission
+			// exchange (and may later restamp its dcb via 0x48). Mid-handshake nodes are skipped.
+			if (!conn.self_id_seen) continue;
+			if (conn.phase >= ConnectionPhase::PlayerAdded) continue; // already spawned
+			// NetPlayer state 4: the NovaWorld ticket result is outstanding, so
+			// the player is not yet in the pump's state-6 population.
+			// [orig: CNetPlayer_SetGameState(player, 4) @0x4C8BCA, back to 6 only
+			//  in HandlePlayEnterResponse @0x4D1C11]
+			if (conn.player_enter_pending()) continue;
+			if (has_spawn_slots && balance_join_admits(ctx, conn, world)) {
+				// Retail unlinks the node before the add, so a failed add (pool
+				// full, no AiSystem) leaves the walk; only a successful add
+				// restarts it from the head [orig: unlink @0x4C8FF6, goto LABEL_5
+				// @0x4C9128].
+				if (!Server_BuildPlayerInfoAndAdd(ctx, conn, world).valid()) continue;
+				++spawned;
+				restart = true;
+				break;
+			}
+			if (conn.type != NapiNPConnection::kTypeServerSide) continue;
+			if (!conn.reply.admission_hold_nag_host_ms_valid ||
+					host_ms - conn.reply.admission_hold_nag_host_ms > 1000u) {
+				conn.reply.admission_hold_nag_pending = true;
+				conn.reply.admission_hold_nag_host_ms = host_ms;
+				conn.reply.admission_hold_nag_host_ms_valid = true;
+			}
+		}
 	}
 	return spawned;
 }
@@ -609,6 +712,38 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	match_player.name = conn->player_name;
 	world.match.upsert_player(match_player);
 	return h;
+}
+
+void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &world) {
+	if (!ctx.is_authority) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (!conn.reply.spectator_convert_pending) continue;
+		conn.reply.spectator_convert_pending = false;
+		// The handler's own gates repeat inside the kill: authority, a live
+		// entity, not already a spectator [orig: @0x519E22..0x519E4B].
+		if (!conn.link.owned_entity.valid() || conn.link.spectator) continue;
+		world::Entity *player = world.registry.get(conn.link.owned_entity);
+		if (player == nullptr) continue;
+		// The convert: latch + hide byte + team 0 + Flags bit 0 + damage -1 +
+		// health 1 [orig: @0x519E5B..0x519EA4]; Server_SetPlayerSpectator is that
+		// same slot/entity mutation.
+		if (!Server_SetPlayerSpectator(ctx, conn, world, /*spectator=*/true)) continue;
+		player->health = 1;                                       // entity+286 = 1 @0x519EA4
+		world.zones.spawn_waves.remove_player(conn.link.owned_entity); // @0x519EB3
+		// Server_ProcessPlayerDeath(player, killerHandle) @0x519ECE: the deploy
+		// leg, whose spectator arm hides the body; the killer handle only feeds
+		// the death record.
+		(void)conn.reply.spectator_convert_killer;
+		// S2C 0x32 [u8 5][cstr name], mask 128 [orig: @0x519EDC..0x519F43].
+		std::vector<uint8_t> body;
+		body.push_back(5);
+		for (const char ch : conn.reply.player_name) body.push_back(static_cast<uint8_t>(ch));
+		body.push_back(0);
+		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+			if (!is_in_match(c) || c.link.transport == nullptr) continue;
+			c.link.transport->host_send(s2c::FORMATTED_GAME_TEXT, body);
+		}
+	}
 }
 
 } // namespace opennova::inmatch

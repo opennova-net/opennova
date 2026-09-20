@@ -139,6 +139,9 @@ int main() {
 			});
 
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = 50 << 16;
+	// The spawn stream's rows: a compact never creates one.
+	view.state().upsert(kRowA).type_id = kPlayerType;
+	view.state().upsert(kRowB).type_id = kPlayerType;
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
 	           nw::encode_frame_update(player_frame(kRowA, ax, ay, az, ax)));
 	view.apply(nw::s2c::PER_FRAME_UPDATE,

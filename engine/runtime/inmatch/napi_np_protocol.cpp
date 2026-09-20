@@ -10,6 +10,7 @@
 #include <net/npwire/protocol_message.h> // make_protocol_message (frame the burst messages)
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
+#include <net/npwire/session_ping.h> // the shared 0x45/0x85 body codec
 
 #include <runtime/inmatch/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 
@@ -507,7 +508,11 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
                          const std::vector<uint8_t> &body, HandleResult &out) {
 	ClientHello hello;
 	if (!parse_client_hello(body.data(), body.size(), hello)) return;
-	if (!matches_jointoperations_identity(hello)) {
+	// A nonzero PM (a peer host's own announce) bypasses the NVS/PN/PG/PV1
+	// identity walk; only a PM-less probe is held to the JO identity.
+	// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 — `jnz loc_6218B6`
+	//  @0x6217C2 skips the validation, send @0x6218FC]
+	if (!client_hello_admits(hello)) {
 		return; // not the retail JO game identity (no node created)
 	}
 	// The host must be up before it admits a join — Hello rejects while host_running == 0 (and only
@@ -533,10 +538,14 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	reply.p2 = ctx.np_protocol.build_flags;
 	reply.np = occupied_player_count(ctx);
 	reply.mp = ctx.np_protocol.max_players;
-	// Fresh retail LAN captures omit SUS1. It is an optional session-user
-	// string (for example, a NovaWorld-provided GSID), not session_seed_id.
-	// No such source exists on a LAN host, so preserve retail's absent field.
-	reply.sus1.clear();
+	// SUS1 is the protocol's server_user_string1: the GSID a NovaWorld
+	// ServerHostResult handed this host, copied into the protocol block and
+	// written whenever non-empty. A pure LAN host never ran that leg, so fresh
+	// retail LAN captures omit the field; it is never session_seed_id.
+	// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D5C0F
+	//  -> server_user_string1; NapiNPProtocol_SendServerInfoPacket @0x6204B0
+	//  SUS1 write @0x620AF2 gated on the first byte]
+	reply.sus1 = ctx.novaworld_gsid;
 	reply.sus2 = ctx.config.expansion;
 	// R1: advertise our real host key (seed-injected via SessionStartup) rather than
 	// build_server_hello's placeholder default, when one is set. The retail 0x81 carries host_key.
@@ -747,6 +756,9 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		conn.server_sk = make_random_session_u32();
 	}
 	conn.phase = ConnectionPhase::Joined;
+	// The validation-phase deadline base for CheckPlayerTimeouts (netPlayer+0xA4
+	// is stamped with GetTickCount when the node enters the validating state).
+	conn.join_validated_host_ms = ctx.np_protocol.host_run_duration_ms;
 	out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, conn));
 	std::vector<uint8_t> initial_settings =
 			frame_session_replies(conn, make_game_session_initial_settings());
@@ -870,8 +882,11 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	ServerDispatchInputs dispatch_inputs;
 	dispatch_inputs.session_uptime_ms = ctx.np_protocol.host_run_duration_ms;
 	dispatch_inputs.mission_metadata_blob = &ctx.mission_metadata_blob;
+	dispatch_inputs.server_info_transfer_id = ctx.server_info_transfer_id;
+	dispatch_inputs.mission_metadata_transfer_id = ctx.mission_metadata_transfer_id;
 	dispatch_inputs.round_end_board_stream = &ctx.round_end_board_stream;
 	dispatch_inputs.medic_request_format = &ctx.server_text.medic_request_format;
+	dispatch_inputs.server_ctx = &ctx;
 	std::vector<ProtocolMessage> replies =
 			dispatch_session_replies(ctx.config, conn, messages, now_tick,
 			                         ctx.np_protocol.connection_list, ctx.world,
@@ -913,10 +928,12 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// / tick path observes the burst change first wins (one-shot via the *_announced latches).
 	surface_burst_events(ctx, conn, out.events);
 
-	// Once a connection exists, surface the joiner's in-match C2S 0x0C uplinks for Server_TickUpdate to
-	// read-apply. Pre-spawn 0x0C only updates the cached pose (handled above) — no connection to
-	// route it to yet.
-	if (conn.spawned_announced) {
+	// With a World bound, every in-match C2S 0x0C was read-applied in wire order inside
+	// dispatch_session_replies above (retail's NapiNPServerMsg_0x00C applies during the
+	// dispatch walk). Only the World-less unit path still surfaces the uplinks for the
+	// transport FIFO that Server_TickUpdate drains; surfacing them here as well with a
+	// World would apply each pose twice. Pre-spawn 0x0C only updates the cached pose.
+	if (conn.spawned_announced && ctx.world == nullptr) {
 		std::vector<ProtocolMessage> c2s;
 		for (const ProtocolMessage &m : messages) {
 			if (m.tag == c2s::ENTITY_UPLINK) c2s.push_back(m);
@@ -970,6 +987,32 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		}
 		out.outbound.push_back(nw_encode_outbound(
 				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(session_body)));
+	}
+}
+
+// 0x45 ClientPing -> 0x85 ServerPing (WR set) or an RTT sample (WR clear). The
+// body is the receiver-local key dword then WR/MS TLVs (net/npwire/session_ping.h);
+// a mismatched key is dropped before anything else. The ping refreshes the reap
+// clock like an in-order session packet. [orig: Nwu_HandlePing @0x623A70 —
+// active/drop gates @0x623B55, key compare @0x623BC2, WR @0x623BFF, MS @0x623C1A,
+// activity stamp @0x623C56, SendPing(conn, 0, MS) @0x623C6F, rtt store @0x623C9B]
+void handle_client_ping(NapiNPServerCtx &ctx, const PeerAddr &peer,
+		const std::vector<uint8_t> &body, HandleResult &out) {
+	NapiNPConnection *conn = find_connection(ctx, peer);
+	if (conn == nullptr || conn->type != NapiNPConnection::kTypeServerSide ||
+			conn->phase < ConnectionPhase::Joined)
+		return;
+	SessionPingBody ping;
+	if (!parse_session_ping_body(body.data(), body.size(), ping)) return;
+	if (ping.receiver_local_key != conn->server_sk) return;
+	conn->receive_inactive_ms = 0;
+	if (ping.wants_reply) {
+		out.outbound.push_back(nw_encode_outbound(SESSION_OPCODE_SERVER_PING,
+				build_session_ping_body(conn->client_ck, /*wants_reply=*/false,
+						ping.timestamp_ms)));
+	} else {
+		conn->session_ping_rtt_ms =
+				ctx.np_protocol.host_run_duration_ms - ping.timestamp_ms;
 	}
 }
 
@@ -1049,6 +1092,9 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		break;
 	case SESSION_OPCODE_CLIENT_RESEND_LIST:
 		handle_client_resend_list(ctx, peer, body, out);
+		break;
+	case SESSION_OPCODE_CLIENT_PING:
+		handle_client_ping(ctx, peer, body, out);
 		break;
 	case SESSION_OPCODE_CLIENT_GOODBYE:
 		handle_client_goodbye(ctx, peer, body, out);
@@ -1141,9 +1187,13 @@ std::vector<TickOut> tick_connections(
 		if (!datagram.empty()) to.outbound.push_back(std::move(datagram));
 	};
 
-	// P3 World-driven path: spawn any accepted-but-unspawned players once per tick (idempotent), before
-	// walking the connections to advance their bursts.
-	if (ctx.world != nullptr) Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
+	// P3 World-driven path: the pending-player spawn pump runs on the shared periodic
+	// second — the call sits inside Server_TickUpdate's g_periodic_second_timer block,
+	// not on every tick — before walking the connections to advance their bursts. The
+	// bring-up call for the host's own player (host_session.cpp) is direct.
+	// [orig: Server_TickUpdate @0x51DBFD inside the reload-62 block @0x51DB93]
+	if (ctx.world != nullptr && ctx.world->match.periodic_second())
+		Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
 
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		// Accumulate the active-send interval before application production, but defer minting its
@@ -1193,6 +1243,18 @@ std::vector<TickOut> tick_connections(
 		to.peer = conn.peer;
 		if (send_boundary_closed) continue;
 
+		// A held pending player (capacity / balance-join) is re-sent the one-byte
+		// S2C 0x03 restriction flag the spawn pump staged, at most once a second.
+		// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8F9A..0x4C8FD1]
+		if (conn.type == NapiNPConnection::kTypeServerSide &&
+				conn.phase < ConnectionPhase::PlayerAdded &&
+				conn.reply.admission_hold_nag_pending) {
+			conn.reply.admission_hold_nag_pending = false;
+			std::vector<uint8_t> nag = frame_session_replies(
+					conn, {make_protocol_message(s2c::SYNC_TICK, {0x00})});
+			if (!nag.empty()) to.outbound.push_back(std::move(nag));
+		}
+
 		// Retail's C2S 0x02 handler, pending-player spawn pump, and first
 		// roster publish occupy distinct send boundaries. In particular 0x04
 		// must arrive after the client has processed one intervening frame;
@@ -1200,7 +1262,13 @@ std::vector<TickOut> tick_connections(
 		// submits the opposite faction's 0x2F kit. The production host calls
 		// tick_connections in the same pump that handled C2S 0x02, so the
 		// captured admission tick is an explicit lower bound as well as the
-		// packet latches below.
+		// packet latches below. The pump itself runs on the periodic second
+		// at the head of this call, so the 0x03 / settings / 0x05 / 0x04 /
+		// 0x7B boundary ships in the same pump that added the player — the
+		// retail in-pump order [orig: CNapiServer_ProcessPendingPlayerSpawns
+		// @0x4C8FF6..0x4C9123]; the one residual is that retail writes its
+		// 0x03 before Server_BuildPlayerInfoAndAdd and these bodies are built
+		// after it, which the wire cannot distinguish.
 		const bool staged_join_ready =
 				conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.admission_stage == GameAdmissionStage::Complete &&
