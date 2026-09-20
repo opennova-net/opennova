@@ -196,8 +196,8 @@ def scan() -> tuple[list[str], int]:
                 violations.append(f"[godot-free] {where}")
                 continue
             # A quoted include that resolves locally is the includer's own
-            # sibling / binding / test header (`"devtools/imgui_pass_node.h"`
-            # is the shell's node, not Dear ImGui).
+            # sibling / binding / test header (a quoted `"devtools/imgui_*.h"` is
+            # the includer's own header, not Dear ImGui).
             resolves_locally = quote == '"' and any(
                     (r / inc).is_file() for r in local_roots(rel))
             if IMGUI_INCLUDE.search(inc) and not resolves_locally and \

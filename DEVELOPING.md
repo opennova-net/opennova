@@ -198,7 +198,8 @@ Notes:
 
 ## Test with our Godot game
 
-1. Build the GDExtension (above) and run the project: `$GODOT_BIN --path godot`.
+1. Build the GDExtension (above) and run the project:
+   `$GODOT_BIN --path godot -- --resource-dir <game dir>` (every launch needs the game data).
 2. From the menu, open **NovaWorld**. The panel (`godot/game/novaworld_panel.gd`) creates a
    `NovaWorldClient` that probes the local gate at `127.0.0.1:7597` (its `server_host` /
    `gate_port` exports), runs the session handshake against the dev server, fills the
@@ -222,8 +223,8 @@ red, re-run that single test file in isolation to confirm before treating it as 
 - **GDScript "class not found" / a GUT test silently dropped**: stale GDExtension. Re-run
   `scripts/build_godot.sh` and fully restart the editor.
 - **`error: set GODOT_BIN ...`**: point `GODOT_BIN` at a Godot 4.6.1 binary, or drop one in `.godot-bin/`.
-- **Missing assets or parse errors on a fresh clone**: `git lfs pull` and
-  `git submodule update --init --recursive`, then re-import (`--headless --import`).
+- **Missing classes or parse errors on a fresh clone**: `git submodule update --init --recursive`,
+  build the GDExtension, then re-import (`--headless --import`). Test fixtures need `git lfs pull`.
 - **Retail JO will not connect**: confirm the dev stack is up (`curl /api/server-info`),
   the launcher shows redirection active, and UDP `7597`/`64206` are not firewalled.
 - **The first import crashes**: re-run `--headless --import` (cold-cache flake).

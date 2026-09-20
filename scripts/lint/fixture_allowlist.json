@@ -16,8 +16,7 @@
     "fixtures/mns/test_style.mns",
     "fixtures/particle/gorehit.ptu",
     "fixtures/score/score_sample.ini",
-    "fixtures/terrain/tmap/items.def",
-    "fixtures/novaworld/*_manifest.txt"
+    "fixtures/terrain/tmap/items.def"
   ],
   "keep": [
     "fixtures/novaworld/*.gsb",

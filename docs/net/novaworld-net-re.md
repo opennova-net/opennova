@@ -3610,8 +3610,8 @@ a labeled death/join/disconnect timeline.
 
 **Limits.** `PDAT` is *decoded* state, so it validates VALUES, not wire byte-framing/encryption.
 Only pool-0 (the two human players) is recorded — the AI/mission entities (pool-1/3, the §5.11/5.12
-spawn batches) are not; the authored-mission cross-validation (§5.24,
-`fixtures/novaworld/dvxi5_manifest.txt` + `nw_pool_groundtruth_test`) covers those. Sampling is 8-tick
+spawn batches) are not; the authored-mission cross-validation (§5.24) covered those until its
+capture-gated `nw_pool_groundtruth_test` and manifest were retired with the capture root. Sampling is 8-tick
 (~7.75 Hz). Tooling: `apps/nw_pp` remains the live `.sph` reader
 (suffix-dispatched); the decoder is `engine/net/npwire/serverlog_decode.h` +
 `engine/net/npwire/replay/serverlog_decode.cpp`. Its controlled-knowns ctest
@@ -3679,7 +3679,8 @@ host (retail `Jointops.exe`) serialized the *known* `mission.bms` onto the wire,
 spawn records can be checked field-for-field against the authored facts — the sibling of
 D-NET-61 for pools 1/2/3.
 
-Tooling (this commit): the authored `.bms` is reduced to `fixtures/novaworld/dvxi5_manifest.txt`
+Tooling (historical; the manifest and `nw_pool_groundtruth_test` were retired with the capture
+root): the authored `.bms` was reduced to `fixtures/novaworld/dvxi5_manifest.txt`
 (via `opennova_mission_save_mis_path` → the engine/formats/mission `.mis` writer); nw_pp's native pcap
 reader is factored into the shared `apps/common/pcap_reader.{h,cpp}` (buffer-core + file wrapper
 + `build_pcap_udp` in-memory builder); `tests/novaworld/nw_pool_groundtruth_test` decodes the

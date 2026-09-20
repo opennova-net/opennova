@@ -28,7 +28,7 @@ anything marked *re-grep at execution* drifts too easily to pin.
 > Particles, which landed with the `.ptl` stack on 2026-07-12 and was never on
 > this program's matrix. The live count is
 > `EditorWorkstation._workspace_defs()`; the live list is
-> [`godot/modtools/README.md`](../../godot/modtools/README.md).
+> `godot/modtools/README.md` (removed with ONED, ADR 0045).
 
 ## The bar (what "up to snuff" means, per workspace)
 

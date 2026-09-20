@@ -20,6 +20,11 @@ golden pcaps. **Server-first.**
 > lifecycle/cadence owner and `npwire` is the retail compatibility boundary.
 > This document retains the original phase names only as a build record.
 >
+> **Architecture amendment (2026-09-02):** ADR 0043 superseded ADR 0036 in full. The
+> `npruntime` and `netsim` directories named throughout this record are now
+> `engine/runtime/inmatch` and `engine/runtime/replication` (ADR 0043 d4); only the
+> `tests/npruntime` and `tests/netsim` directory and ctest names keep the old spelling.
+>
 > **Env-gate note (2026-08-28, superseded 2026-08-29):** the `NW_GOLDEN_*` /
 > `NW_PROFILE_SPH_DIR` environment variables the phase text below names were
 > first folded into a capture root, and that root and its capture-gated ctests
