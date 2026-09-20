@@ -412,95 +412,65 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 			"the atlas carries the authored LGHT transformed by its static entity")
 
 
-## Corona billboards (the D-RLIT-4 corona leg): the binding surfaces the
-## portable walk's quads [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 —
-## three segments toward the camera, the authored corona-disable, the
-## 100-wu cull; semantics pinned by ctest renderer_light_scene].
-func test_corona_rows_surface_the_witnessed_segments() -> void:
+## The corona billboards land as ONE MultiMesh buffer write (the D-RLIT-4
+## corona leg): pin the interleaved TRANSFORM_3D + color float layout against
+## the engine walk's witnessed values [orig: EffectWorld_RenderLightCoronas
+## @ 0x5aaf40 — three segments toward the camera, 0.1 x radius apart, half
+## size radius/2, white record color x 1/16 at full fade; the semantics are
+## the renderer_light_scene ctest's] through the headless-safe buffer seam
+## (the dummy RenderingServer stores no MultiMesh instance data).
+func test_fill_corona_multimesh_packs_the_witnessed_segments() -> void:
 	var scene := LightScene.new()
 	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.0, 1.0, 0.0), 4.0)), 0)
 	var no_models: Array[Node3D] = []
-	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), null)
-	assert_eq(rows.size(), 3, "an enabled corona draws three segments")
-	if rows.size() == 3:
-		var first: CoronaRow = rows[0]
-		# Segments march 0.1 x radius toward the camera; half-size radius/2.
-		assert_almost_eq(first.half_size, 2.0, 0.001)
-		var pos := first.position
-		assert_almost_eq(pos.z, 0.4, 0.02,
-				"the first segment steps 0.1 x radius toward the camera")
-		var color := first.color
-		# White record color x 1/16 at full fade.
-		assert_almost_eq(color.r, 255.0 / 256.0 / 16.0, 0.002)
-	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(2.0, 1.0, 0.0), 4.0)
-			.masking(true, false, false)), 0)
-	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), null)
-	assert_eq(rows.size(), 3,
-			"the corona-disabled record adds nothing to the first light's three segments")
-	# Fog-to-black [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6]:
-	# past the fog end the corona color folds to black but the quads remain.
-	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
-			PackedInt64Array(), _fog_values(true, 1, 2.0, 8.0))
-	assert_eq(rows.size(), 3)
-	if rows.size() == 3:
-		var fogged: Color = (rows[0] as CoronaRow).color
-		assert_almost_eq(fogged.r, 0.0, 0.0001,
-				"a corona past the fog end fades fully to black")
-
-
-## The hot corona path packs the same rows as ONE MultiMesh buffer write.
-## Pin the interleaved TRANSFORM_3D + color float layout against the
-## Dictionary seam row by row through the headless-safe buffer seam (the
-## dummy RenderingServer stores no MultiMesh instance data).
-func test_fill_corona_multimesh_matches_the_row_seam() -> void:
-	var scene := LightScene.new()
-	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.0, 1.0, 0.0), 4.0)), 0)
-	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(3.0, 2.0, -1.0), 6.0)), 0)
-	var no_models: Array[Node3D] = []
-	var fog := _fog_values(true, 1, 2.0, 40.0)
-	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
-			PackedInt64Array(), fog)
-	assert_gt(rows.size(), 0, "the seam produced comparison rows")
 	var mesh := MultiMesh.new()
 	mesh.transform_format = MultiMesh.TRANSFORM_3D
 	mesh.use_colors = true
 	var count := scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
-			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
-			PackedInt64Array(), fog, mesh)
-	assert_eq(count, rows.size(), "both seams walk the same quads")
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(), null, mesh)
+	assert_eq(count, 3, "an enabled corona draws three segments")
 	var buffer := scene.get_last_corona_buffer()
 	assert_true(buffer.size() >= count * 16, "one 16-float record per row")
-	for i in range(count):
-		var row: CoronaRow = rows[i]
-		var half := row.half_size
-		var center := row.position
-		var color := row.color
-		var base := i * 16
-		assert_almost_eq(buffer[base + 0], half, 0.000001)
-		assert_almost_eq(buffer[base + 5], half, 0.000001)
-		assert_almost_eq(buffer[base + 10], half, 0.000001)
-		assert_almost_eq(buffer[base + 3], center.x, 0.000001)
-		assert_almost_eq(buffer[base + 7], center.y, 0.000001)
-		assert_almost_eq(buffer[base + 11], center.z, 0.000001)
-		assert_almost_eq(buffer[base + 12], color.r, 0.000001)
-		assert_almost_eq(buffer[base + 13], color.g, 0.000001)
-		assert_almost_eq(buffer[base + 14], color.b, 0.000001)
-		assert_almost_eq(buffer[base + 15], 1.0, 0.000001)
+	if buffer.size() >= 16:
+		# The scale-only basis carries the half size (radius/2) on its diagonal.
+		assert_almost_eq(buffer[0], 2.0, 0.001)
+		assert_almost_eq(buffer[5], 2.0, 0.001)
+		assert_almost_eq(buffer[10], 2.0, 0.001)
+		# The origin is the Godot-world segment center: the first segment
+		# steps 0.1 x radius from the light toward the camera.
+		assert_almost_eq(buffer[3], 0.0, 0.02)
+		assert_almost_eq(buffer[7], 1.0, 0.02)
+		assert_almost_eq(buffer[11], 0.4, 0.02)
+		# White record color x 1/16 at full fade, opaque.
+		assert_almost_eq(buffer[12], 255.0 / 256.0 / 16.0, 0.002)
+		assert_almost_eq(buffer[15], 1.0, 0.000001)
+	# A corona-disabled record adds nothing.
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(2.0, 1.0, 0.0), 4.0)
+			.masking(true, false, false)), 0)
+	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(), null, mesh)
+	assert_eq(count, 3,
+			"the corona-disabled record adds nothing to the first light's three segments")
+	# Fog-to-black [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6]:
+	# past the fog end the corona color folds to black but the quads remain.
+	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
+			PackedInt64Array(), _fog_values(true, 1, 2.0, 8.0), mesh)
+	assert_eq(count, 3)
+	buffer = scene.get_last_corona_buffer()
+	if buffer.size() >= 16:
+		assert_almost_eq(buffer[12], 0.0, 0.0001,
+				"a corona past the fog end fades fully to black")
 	# A camera past the 100-wu cull empties the frame; the mesh keeps its
 	# high-water capacity and hides every instance instead of reallocating.
 	var far_count := scene.fill_corona_multimesh(Vector3(0.0, 1.0, 500.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
-			PackedInt64Array(), fog, mesh)
+			PackedInt64Array(), _fog_values(true, 1, 2.0, 40.0), mesh)
 	assert_eq(far_count, 0)
 	assert_eq(mesh.visible_instance_count, 0)
-	assert_eq(mesh.instance_count, count,
-			"capacity persists at the high-water mark")
+	assert_eq(mesh.instance_count, 3, "capacity persists at the high-water mark")
 
 
 ## Static-row dirty maintenance: steady frames rewrite only gen-animated rows

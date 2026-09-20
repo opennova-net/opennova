@@ -19,10 +19,6 @@ Dictionary EffectLightRow::to_json_value() const {
 	return out;
 }
 
-void CoronaRow::_bind_methods() {
-	CORONA_ROW_FIELDS(EFFECT_LIGHT_BIND_FIELD)
-}
-
 void EffectLightRow::_bind_methods() {
 	EFFECT_LIGHT_ROW_FIELDS(EFFECT_LIGHT_BIND_FIELD)
 	ClassDB::bind_method(D_METHOD("to_json_value"), &EffectLightRow::to_json_value);

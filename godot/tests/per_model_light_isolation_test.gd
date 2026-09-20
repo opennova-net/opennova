@@ -278,26 +278,26 @@ func test_owned_corona_gates_on_owner_section_visibility() -> void:
 			.attached(2, owner_model.get_instance_id())), 0)
 	var models: Array[Node3D] = [owner_model]
 	var owners := PackedInt64Array([owner_model.get_instance_id()])
+	var mesh := MultiMesh.new()
+	mesh.transform_format = MultiMesh.TRANSFORM_3D
+	mesh.use_colors = true
 	# No occlusion verdict yet (mask -1): the owner is not in the table and
 	# the corona passes like retail's non-building owners.
-	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+	var count := scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
-			owners, null)
-	assert_eq(rows.size(), 3,
-			"an owner without an occlusion verdict passes the gate")
+			owners, null, mesh)
+	assert_eq(count, 3, "an owner without an occlusion verdict passes the gate")
 	# The occlusion pass hides section 2: the owned corona disappears.
 	owner_model.set_section_visibility_mask(~(1 << 2))
-	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
-			owners, null)
-	assert_eq(rows.size(), 0,
-			"a hidden owner section suppresses the owned corona")
+			owners, null, mesh)
+	assert_eq(count, 0, "a hidden owner section suppresses the owned corona")
 	owner_model.set_section_visibility_mask(1 << 2)
-	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+	count = scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, models,
-			owners, null)
-	assert_eq(rows.size(), 3,
-			"a visible owner section admits the owned corona")
+			owners, null, mesh)
+	assert_eq(count, 3, "a visible owner section admits the owned corona")
 
 
 func test_render_model_frame_returns_lit_model_count_and_clears() -> void:

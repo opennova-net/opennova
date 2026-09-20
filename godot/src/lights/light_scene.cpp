@@ -880,30 +880,6 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 	}
 }
 
-TypedArray<CoronaRow> LightScene::collect_corona_rows(
-		const Vector3 &p_camera_pos, const Vector3 &p_camera_forward,
-		const Vector3 &p_ambient_scale, int p_time_ms, int p_frame_index,
-		Weather *p_weather, const TypedArray<Node3D> &p_models,
-		const PackedInt64Array &p_owner_entities, const Ref<EnvLightValues> &p_fog) {
-	opennova::renderer::LightCoronaFrameInputs inputs;
-	std::vector<opennova::renderer::LightCoronaOwnerMask> owner_masks;
-	build_corona_inputs(p_camera_pos, p_camera_forward, p_ambient_scale,
-			p_time_ms, p_frame_index, p_weather, p_models, p_owner_entities,
-			p_fog, owner_masks, inputs);
-	std::vector<opennova::renderer::LightCoronaQuad> quads;
-	scene_.collect_corona_quads(inputs, quads);
-	TypedArray<CoronaRow> rows;
-	for (const opennova::renderer::LightCoronaQuad &quad : quads) {
-		Ref<CoronaRow> row;
-		row.instantiate();
-		row->set_position(mission_to_godot(quad.center));
-		row->set_half_size(quad.half_size);
-		row->set_color(Color(quad.rgb[0], quad.rgb[1], quad.rgb[2]));
-		rows.push_back(row);
-	}
-	return rows;
-}
-
 int LightScene::fill_corona_multimesh(const Vector3 &p_camera_pos,
 		const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 		int p_time_ms, int p_frame_index, Weather *p_weather,
@@ -1173,10 +1149,6 @@ void LightScene::_bind_methods() {
 			"interior_owners", "interior_sections", "active",
 			"ambient_scale", "time_ms", "weather", "rows_revision"),
 			&LightScene::render_static_frame, DEFVAL(-1));
-	ClassDB::bind_method(D_METHOD("collect_corona_rows", "camera_pos",
-			"camera_forward", "ambient_scale", "time_ms", "frame_index",
-			"weather", "models", "owner_entities", "fog"),
-			&LightScene::collect_corona_rows);
 	ClassDB::bind_method(D_METHOD("fill_corona_multimesh", "camera_pos",
 			"camera_forward", "ambient_scale", "time_ms", "frame_index",
 			"weather", "models", "owner_entities", "fog", "mesh"),
