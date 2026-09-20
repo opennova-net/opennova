@@ -79,6 +79,11 @@ public:
 	enum {
 		CLIP_COUNT_DEF_DEFAULT = -1,
 	};
+	// The PLAYERVOICE list's DEFAULT_VOICE row value (engine:
+	// runtime/menu/player_info_kit.h kDefaultVoiceValue).
+	enum {
+		DEFAULT_VOICE_VALUE = 0,
+	};
 
 	// The armory class-allow / class-filter mask domains — mirrors
 	// engine/runtime/world player_loadout.h (static_asserts in the .cpp pin
@@ -137,6 +142,21 @@ public:
 	static int player_info_team_mask(int p_team);
 	static int player_info_class_mask(int p_playerclass_value);
 	static int default_clip_row(int p_saved, int p_maxclips);
+	// The PLAYER_INFO kit model (one impl in engine/runtime/menu
+	// player_info_kit.h): the PLAYERVOICE list values for a head's sex byte
+	// (DEFAULT_VOICE first), the persisted-override reset, and the weapon.sav
+	// kit page in retail's order. The page takes the three category picks and
+	// the three fixed grenade picks as parallel arrays (weapon-table index,
+	// primary count, secondary count, flags) and returns one Dictionary per
+	// KitEntry (name, ammo_primary, ammo_secondary, flags).
+	static PackedInt32Array player_info_voice_values(int p_sex);
+	static int player_info_voice_selection(int p_saved, const PackedInt32Array &p_values);
+	Array player_info_kit_entries(int p_team, int p_player_class,
+			const PackedInt32Array &p_slot_indices, const PackedInt32Array &p_slot_ammo_primary,
+			const PackedInt32Array &p_slot_ammo_secondary, const PackedInt32Array &p_slot_flags,
+			const PackedInt32Array &p_grenade_indices,
+			const PackedInt32Array &p_grenade_ammo_primary,
+			const PackedInt32Array &p_grenade_ammo_secondary) const;
 	// The armory screen's open-time class policy (one impl in
 	// engine/runtime/world player_loadout.h (engine: runtime/world/player_loadout.cpp)): the current class when the S2C 0x76 allow mask permits it,
 	// else scan up through 9, else gunner (7); and the class filter bit

@@ -1127,6 +1127,11 @@ add_test(NAME script_remote_command COMMAND script_remote_command_test)
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the
 # per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
+add_executable(player_info_kit_test menu/player_info_kit_test.cpp)
+target_link_libraries(player_info_kit_test PRIVATE opennova_runtime)
+target_compile_features(player_info_kit_test PRIVATE cxx_std_17)
+add_test(NAME player_info_kit COMMAND player_info_kit_test)
+
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

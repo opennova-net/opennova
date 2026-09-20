@@ -4,7 +4,12 @@
 
 #include <godot_cpp/variant/packed_float32_array.hpp>
 
+#include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+
 #include <formats/def/def.h>
+#include <runtime/menu/player_info_kit.h> // the PLAYER_INFO voice list + kit page order
 #include <runtime/world/player_loadout.h> // armory class policy (ADR 0016: one impl)
 
 #include <base/io/strutil.h>
@@ -60,6 +65,16 @@ void WeaponDatabase::_bind_methods() {
 			D_METHOD("default_clip_row", "saved", "maxclips"),
 			&WeaponDatabase::default_clip_row);
 	ClassDB::bind_static_method("WeaponDatabase",
+			D_METHOD("player_info_voice_values", "sex"),
+			&WeaponDatabase::player_info_voice_values);
+	ClassDB::bind_static_method("WeaponDatabase",
+			D_METHOD("player_info_voice_selection", "saved", "values"),
+			&WeaponDatabase::player_info_voice_selection);
+	ClassDB::bind_method(D_METHOD("player_info_kit_entries", "team", "player_class", "slot_indices",
+								 "slot_ammo_primary", "slot_ammo_secondary", "slot_flags",
+								 "grenade_indices", "grenade_ammo_primary", "grenade_ammo_secondary"),
+			&WeaponDatabase::player_info_kit_entries);
+	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("armory_resolve_selected_class", "player_class", "class_allow_mask"),
 			&WeaponDatabase::armory_resolve_selected_class);
 	ClassDB::bind_static_method("WeaponDatabase",
@@ -78,6 +93,7 @@ void WeaponDatabase::_bind_methods() {
 	BIND_CONSTANT(ENCUMBRANCE_NORMAL);
 	BIND_CONSTANT(ENCUMBRANCE_HEAVY);
 	BIND_CONSTANT(CLIP_COUNT_DEF_DEFAULT);
+	BIND_CONSTANT(DEFAULT_VOICE_VALUE);
 	BIND_CONSTANT(CLASS_ALLOW_ALL);
 	BIND_CONSTANT(CLASS_MASK_ALL);
 }
@@ -233,6 +249,63 @@ int WeaponDatabase::player_info_class_mask(int p_playerclass_value) {
 
 int WeaponDatabase::default_clip_row(int p_saved, int p_maxclips) {
 	return opennova::world::player_info_default_clip_row(p_saved, p_maxclips);
+}
+
+static_assert(godot::WeaponDatabase::DEFAULT_VOICE_VALUE == opennova::menu::kDefaultVoiceValue,
+		"DEFAULT_VOICE_VALUE mirrors the engine's PLAYERVOICE default");
+
+PackedInt32Array WeaponDatabase::player_info_voice_values(int p_sex) {
+	PackedInt32Array out;
+	for (int32_t value : opennova::menu::player_info_voice_values(p_sex)) out.push_back(value);
+	return out;
+}
+
+int WeaponDatabase::player_info_voice_selection(int p_saved, const PackedInt32Array &p_values) {
+	std::vector<int32_t> values;
+	values.reserve(static_cast<size_t>(p_values.size()));
+	for (int i = 0; i < p_values.size(); ++i) values.push_back(p_values[i]);
+	return opennova::menu::player_info_voice_selection(p_saved, values);
+}
+
+Array WeaponDatabase::player_info_kit_entries(int p_team, int p_player_class,
+		const PackedInt32Array &p_slot_indices, const PackedInt32Array &p_slot_ammo_primary,
+		const PackedInt32Array &p_slot_ammo_secondary, const PackedInt32Array &p_slot_flags,
+		const PackedInt32Array &p_grenade_indices, const PackedInt32Array &p_grenade_ammo_primary,
+		const PackedInt32Array &p_grenade_ammo_secondary) const {
+	const auto pick = [](const PackedInt32Array &idx, const PackedInt32Array &pri,
+							  const PackedInt32Array &sec, const PackedInt32Array *flags,
+							  int i) {
+		opennova::menu::KitSlotPick p;
+		if (i < idx.size()) p.weapon_index = idx[i];
+		if (i < pri.size()) p.ammo_primary = pri[i];
+		if (i < sec.size()) p.ammo_secondary = sec[i];
+		if (flags != nullptr && i < flags->size()) p.flags = (*flags)[i];
+		return p;
+	};
+	opennova::menu::PlayerInfoKitSelection sel;
+	sel.team_mask = opennova::world::player_info_team_mask(p_team);
+	sel.player_class = p_player_class;
+	sel.primary = pick(p_slot_indices, p_slot_ammo_primary, p_slot_ammo_secondary, &p_slot_flags, 0);
+	sel.secondary = pick(p_slot_indices, p_slot_ammo_primary, p_slot_ammo_secondary, &p_slot_flags, 1);
+	sel.accessory = pick(p_slot_indices, p_slot_ammo_primary, p_slot_ammo_secondary, &p_slot_flags, 2);
+	for (int i = 0; i < 3; ++i) {
+		sel.grenades[i] = pick(p_grenade_indices, p_grenade_ammo_primary, p_grenade_ammo_secondary,
+				nullptr, i);
+	}
+	const opennova::menu::WeaponNameLookup name = [this](int32_t index) -> std::string {
+		const opennova::def::DefWeaponDef *w = row(index);
+		return w != nullptr ? std::string(w->weapon_name) : std::string();
+	};
+	Array out;
+	for (const opennova::playersav::KitEntry &e : opennova::menu::player_info_kit_entries(sel, name)) {
+		Dictionary d;
+		d["name"] = String::utf8(e.name.c_str());
+		d["ammo_primary"] = e.ammo_primary;
+		d["ammo_secondary"] = e.ammo_secondary;
+		d["flags"] = e.flags;
+		out.push_back(d);
+	}
+	return out;
 }
 
 int WeaponDatabase::armory_resolve_selected_class(int p_player_class,

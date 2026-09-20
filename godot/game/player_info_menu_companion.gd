@@ -55,32 +55,9 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # retail: the category_names[] array built at 0x55e4bc-0x55e4cc.
 const KIT_SLOT_ORDER := ["PRIMARY", "SECONDARY", "ACCESSORY"]
 
-# The voice definition table: one row per selectable character voice,
-# {enabled, CHARVOICE id, avatar SEX the row belongs to} (sex 0 = male,
-# 1 = female -- the head part's `sex` keyword).
-# retail: the 11 12-byte rows based at 0x83C7A8; the walk starts at the id word
-# 0x83C7AC, strides 12 and stops at ammoDef @ 0x83C830, testing
-# `*(ptr - 1) != 0 && avatar_sex == ptr[1]`. Row id 9 is the one DISABLED row.
-const VOICE_TABLE := [
-	[1, 1, 0], [1, 2, 0], [1, 3, 0], [1, 4, 0], [1, 5, 0], [1, 6, 0],
-	[1, 7, 1], [1, 8, 1], [0, 9, 0], [1, 10, 0], [1, 11, 1],
-]
-# The DEFAULT_VOICE row's value, and the value a rejected persisted override
-# falls back to. retail: UIList_AddRow(list, DEFAULT_VOICE, 0, 0, -1) @ 0x55dd76
-# and `if (!found) profile[team + 1532] = 0` @ 0x55de21.
-const DEFAULT_VOICE_VALUE := 0
-
-# The kit page's filler value: retail writes the literal string "-1" (@ 0x7C3328)
-# for every count/flags slot it has no number for, and the reader decodes a
-# missing value as -1 all the same.
-const KIT_FILLER := -1
-# The knife every page leads with, per side, then the medic's medpack.
-# retail: "WPN_KNIFE" @ 0x7C3584 / "WPN_KNIFE2" @ 0x55e4ec / "WPN_MEDPACK" @ 0x7D5CA8.
-const KIT_KNIFE_BLUE := "WPN_KNIFE"
-const KIT_KNIFE_RED := "WPN_KNIFE2"
-const KIT_MEDPACK := "WPN_MEDPACK"
-# The PLAYERCLASS value that earns the medpack entry (retail tests == 5).
-const MEDIC_PLAYER_CLASS := 5
+# The voice table, the DEFAULT_VOICE value and the kit page's fillers,
+# knives, medpack and medic class are the engine's (WeaponDatabase over
+# runtime/menu/player_info_kit.h).
 
 var _db: AvatarDatabase
 var _weapons: WeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
@@ -121,7 +98,7 @@ func set_persisted_profile(profile: Dictionary) -> void:
 	# our saved profile carries a single "voice", so both sides start from it
 	# and then diverge per side exactly as retail's pair does. The per-side
 	# persistence of the pair is the remaining D-PLAYERINFO-9 residual.
-	var voice := int(profile.get("voice", DEFAULT_VOICE_VALUE))
+	var voice := int(profile.get("voice", WeaponDatabase.DEFAULT_VOICE_VALUE))
 	_voice_override = {0: voice, 1: voice}
 
 
@@ -702,32 +679,26 @@ func _populate_voices() -> void:
 	var combo := _id("PLAYERVOICE")
 	if combo < 0:
 		return
-	var sex := _selected_combo_head_sex()
-	var saved := selected_voice()
+	# The values (DEFAULT_VOICE first, then the enabled table rows of the
+	# selected head's sex) and the persisted-override reset are the engine's;
+	# this companion resolves the labels and applies the selection.
+	var values := WeaponDatabase.player_info_voice_values(_selected_combo_head_sex())
 	var rows := PackedStringArray()
 	_voice_values.clear()
-	_voice_values.append(DEFAULT_VOICE_VALUE)
-	rows.append(_menu_text("DEFAULT_VOICE", "Default"))
-	var found := false
-	for row in VOICE_TABLE:
-		if int(row[0]) == 0 or int(row[2]) != sex:
-			continue
-		var voice := int(row[1])
-		rows.append(_menu_text("CHARVOICE_%d" % voice, "Voice %d" % voice))
+	for voice in values:
 		_voice_values.append(voice)
-		if voice == saved:
-			found = true
-	if not found:
-		_voice_override[_team] = DEFAULT_VOICE_VALUE
+		rows.append(_menu_text("DEFAULT_VOICE", "Default")
+				if voice == WeaponDatabase.DEFAULT_VOICE_VALUE
+				else _menu_text("CHARVOICE_%d" % voice, "Voice %d" % voice))
+	_voice_override[_team] = WeaponDatabase.player_info_voice_selection(selected_voice(), values)
 	_set_combo_items(combo, rows)
-	var target := _voice_values.find(selected_voice())
-	_driver.select_row(combo, maxi(target, 0), false)
+	_driver.select_row(combo, maxi(_voice_values.find(selected_voice()), 0), false)
 
 
 ## The persisted voice override for the shown side; 0 = DEFAULT_VOICE, otherwise
 ## the CHARVOICE id the PLAYERVOICE list carries as that row's value.
 func selected_voice() -> int:
-	return int(_voice_override.get(_team, DEFAULT_VOICE_VALUE))
+	return int(_voice_override.get(_team, WeaponDatabase.DEFAULT_VOICE_VALUE))
 
 
 # The selected combo head's SEX byte, the voice list's filter key. An
@@ -767,7 +738,7 @@ func _on_voice_selected(row: int, _value: String) -> void:
 	if _populating:
 		return
 	_voice_override[_team] = (_voice_values[row]
-			if row >= 0 and row < _voice_values.size() else DEFAULT_VOICE_VALUE)
+			if row >= 0 and row < _voice_values.size() else WeaponDatabase.DEFAULT_VOICE_VALUE)
 
 
 func _preview_voice() -> void:
@@ -776,7 +747,7 @@ func _preview_voice() -> void:
 	# retail: PlayerInfo_PreviewVoice @ 0x55ff70 -- the persisted override when
 	# NON-ZERO, else the selected combo head's own voice byte.
 	var voice := selected_voice()
-	if voice == DEFAULT_VOICE_VALUE:
+	if voice == WeaponDatabase.DEFAULT_VOICE_VALUE:
 		voice = _selected_combo_head_voice()
 	if voice < 0:
 		return
@@ -997,48 +968,33 @@ func kit_entries() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if _weapons == null or not _weapons.is_loaded():
 		return out
-	# The knife leads every page: the BLUE mask (2) -- and the defensive
-	# mask-zero leg -- take WPN_KNIFE, the RED mask (1) takes WPN_KNIFE2.
-	var team_mask := WeaponDatabase.player_info_team_mask(_team)
-	out.append(_kit_filler_entry(KIT_KNIFE_BLUE
-			if (team_mask & 2) != 0 or team_mask == 0 else KIT_KNIFE_RED))
-	if _selected_player_class() == MEDIC_PLAYER_CLASS:
-		out.append(_kit_filler_entry(KIT_MEDPACK))
+	# The order, the per-side knife, the medic's medpack and the fixed grenade
+	# slots are the engine's page builder; this companion supplies its picks:
+	# the three category selections with their recorded count pairs (-1 =
+	# untouched) and the team's ammo-type byte for PRIMARY/SECONDARY, then the
+	# three grenade positions (entry 0 when the class/team filter left one empty).
+	var indices := PackedInt32Array()
+	var pri := PackedInt32Array()
+	var sec := PackedInt32Array()
+	var flags := PackedInt32Array()
 	for control in KIT_SLOT_ORDER:
-		# PRIMARY and SECONDARY carry their team's ammo-type byte as the entry's
-		# fourth value; ACCESSORY always writes the filler.
-		out.append(_kit_slot_entry(_slot_weapon_index(control),
-				selected_ammo_type(control) if control in TYPE_SLOTS else KIT_FILLER))
+		var index := _slot_weapon_index(control)
+		indices.append(index)
+		pri.append(int(_ammo_pri.get(index, -1)))
+		sec.append(int(_ammo_sec.get(index, -1)))
+		flags.append(selected_ammo_type(control) if control in TYPE_SLOTS else -1)
+	var grenade_indices := PackedInt32Array()
+	var grenade_pri := PackedInt32Array()
+	var grenade_sec := PackedInt32Array()
 	for i in GRENADE_CONTROLS.size():
-		# The three grenade slots are a FIXED array that the ammo fill zeroes
-		# before refilling, so a slot the class/team filter left empty
-		# serializes weapon-table entry 0
-		# retail: the zero store @ 0x55e8d0-0x55e8da in
-		# populate_weapon_accessory_ammo_ui @ 0x55e8b0.
-		out.append(_kit_slot_entry(
-				_grenade_rows[i].index if i < _grenade_rows.size() else 0, KIT_FILLER))
+		var index := _grenade_rows[i].index if i < _grenade_rows.size() else 0
+		grenade_indices.append(index)
+		grenade_pri.append(int(_ammo_pri.get(index, -1)))
+		grenade_sec.append(int(_ammo_sec.get(index, -1)))
+	for row in _weapons.player_info_kit_entries(_team, _selected_player_class(), indices,
+			pri, sec, flags, grenade_indices, grenade_pri, grenade_sec):
+		out.append(row)
 	return out
-
-
-# An entry retail writes with the "-1" filler in all three value slots.
-func _kit_filler_entry(name: String) -> Dictionary:
-	return {
-		"name": name,
-		"ammo_primary": KIT_FILLER,
-		"ammo_secondary": KIT_FILLER,
-		"flags": KIT_FILLER,
-	}
-
-
-# One weapon-table entry with its recorded interleaved count pair.
-func _kit_slot_entry(index: int, flags: int) -> Dictionary:
-	var w := _weapons.get_weapon(index)
-	return {
-		"name": w.name if w != null else "",
-		"ammo_primary": int(_ammo_pri.get(index, KIT_FILLER)),
-		"ammo_secondary": int(_ammo_sec.get(index, KIT_FILLER)),
-		"flags": flags,
-	}
 
 
 # The weapon-table index a loadout list would report as its selected VALUE.
