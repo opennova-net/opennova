@@ -170,6 +170,7 @@
 #include "mnu/menu_draw_list_stats.h"
 #include "mnu/menu_frame.h"
 #include "mnu/menu_audio.h"
+#include "mnu/menu_driver.h"
 #include "mnu/menu_video_underlay.h"
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
@@ -441,6 +442,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuDrawListStats);
 	GDREGISTER_CLASS(MenuFrame);
 	GDREGISTER_CLASS(MenuAudio);
+	GDREGISTER_CLASS(MenuScrollRange);
+	GDREGISTER_CLASS(MenuDriver);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
 	GDREGISTER_CLASS(ControlsModel);
 	// The local player's presentation (ADR 0043 slice G8): the presenter node,

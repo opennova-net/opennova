@@ -238,6 +238,7 @@ add_library(${TARGET_NAME} SHARED
     mnu/menu_draw_list_stats.cpp
     mnu/menu_frame.cpp
     mnu/menu_audio.cpp
+    mnu/menu_driver.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp

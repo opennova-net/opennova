@@ -41,6 +41,8 @@ protected:
 
 public:
 	void assign(const opennova::mnu::Action &p_value) { value_ = p_value; }
+	// The parsed row, for the engine dispatch (menu::MenuRuntime::dispatch_action).
+	const opennova::mnu::Action &native() const { return value_; }
 	// The test-side constructor: a row with the fields the driver dispatches on.
 	static Ref<MnuActionRow> make(const String &p_type, const String &p_target,
 			const String &p_state, bool p_toggle, const String &p_file);

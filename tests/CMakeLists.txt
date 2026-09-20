@@ -1141,6 +1141,14 @@ add_test(NAME script_remote_command COMMAND script_remote_command_test)
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the
 # per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
+# The compiled-menu interaction runtime (menu/menu_runtime.h) over a fake frame seam
+# and a synthetic document: the id tree, navigation, the state store and its replay,
+# ACTION dispatch, radio groups, the spin wrap, the combo popup, the input machine.
+add_executable(menu_runtime_test menu/menu_runtime_test.cpp)
+target_link_libraries(menu_runtime_test PRIVATE opennova_runtime)
+target_compile_features(menu_runtime_test PRIVATE cxx_std_17)
+add_test(NAME menu_runtime COMMAND menu_runtime_test)
+
 # The loadout screens' shared text compositions (menu/loadout_labels.h): the WepDes
 # weapon label, the ammo row, the armory row order and the weight readout.
 add_executable(loadout_labels_test menu/loadout_labels_test.cpp)
