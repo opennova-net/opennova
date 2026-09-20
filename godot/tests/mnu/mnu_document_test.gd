@@ -6,7 +6,6 @@ extends GutTest
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
 # The shipped menus and style sheet come from the reference fixture set; the
 # legs that read them pend without it.
-const JO_MAIN_REL := "mnu/jo_main.mnu"
 const MNS_REL := "mns/menu_style.mns"
 
 
@@ -88,20 +87,6 @@ func test_serialize_roundtrip() -> void:
 	var root2 := doc2.get_screen_root_id(doc2.get_screen_ids()[0])
 	assert_eq(doc2.get_child_ids(root2).size(), 5, "round-trip keeps 5 children")
 	assert_eq(doc2.get_screen_music_var(doc2.get_screen_ids()[0]), 3, "round-trip keeps music_var")
-
-
-func _all_ids(doc: MnuDocument) -> Array:
-	var out: Array = []
-	for sid in doc.get_screen_ids():
-		out.append(sid)
-		_walk_ids(doc, doc.get_screen_root_id(sid), out)
-	return out
-
-
-func _walk_ids(doc: MnuDocument, id: int, out: Array) -> void:
-	out.append(id)
-	for c in doc.get_child_ids(id):
-		_walk_ids(doc, c, out)
 
 
 func _walk_for_name(doc: MnuDocument, id: int, wname: String) -> int:

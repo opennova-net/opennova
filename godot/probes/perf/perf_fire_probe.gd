@@ -27,7 +27,6 @@ var _seg_worst_draw := 0
 var _phase := ""
 var _sample_t0 := 0
 var _world_skipped := false
-var _hud_skipped := false
 
 
 func run(ctx: ProbeContext) -> ProbeVerdict:
@@ -168,11 +167,9 @@ func _attribution_legs(shell: Node, world: GameWorld, runtime: MissionRoot) -> D
 	# out-of-process cost with it (deferred/RS-side work its calls generate)?
 	legs["worldoff"] = await _leg_world_off()
 	shell.get_perf_probe_switches().skip_hud = true
-	_hud_skipped = true
 	await ctx.wait_ms(500)
 	legs["hudtickoff"] = await _measure("hudtickoff", 3000)
 	shell.get_perf_probe_switches().skip_hud = false
-	_hud_skipped = false
 	# Existing presenter options provide state-safe A/Bs without a production
 	# probe branch: freeze transform/visibility/body submission independently
 	# while simulation, body posing and muzzle feedback continue normally.

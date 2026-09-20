@@ -581,18 +581,6 @@ func shell_state_name() -> String:
 			return "menu"
 
 
-# Mission-effect passthrough + the last-text read seam: the surface lives on the
-# shared GameHudPresenter (queued until the lazy HUD exists); these stay callable
-# on the shell for drains routed here and for the parity tests (ADR 0018).
-func apply_mission_effects(effects: Array) -> void:
-	if _hud_presenter != null:
-		_hud_presenter.apply_mission_effects(effects)
-
-
-func hud_objective_line() -> String:
-	return _hud_presenter.hud_objective_line() if _hud_presenter != null else ""
-
-
 # --- Menu state ---------------------------------------------------------------
 
 # Returns false when the requested directory cannot mount.

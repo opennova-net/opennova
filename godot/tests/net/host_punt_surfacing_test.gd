@@ -24,7 +24,6 @@ extends GutTest
 # host-side punt trigger (none is exposed), so the former sim-double tests of the
 # observer/teardown edges retired with the doubles.
 
-const DeployHost := preload("res://game/world/deploy_screen_presenter.gd")
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 static var FIXTURE_DIR := RuntimeFixture.directory()
 const TMP_DIR := "res://.godot/host_punt_surfacing_test"

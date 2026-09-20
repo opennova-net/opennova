@@ -237,9 +237,6 @@ func _seed_marquee_widgets() -> void:
 	for id in _index_of_id:
 		if widget_kind_of(int(id)) != MnuDocument.TYPE_MARQUEE:
 			continue
-		var seeded: MenuWidgetState = _id_state.get(id)
-		if seeded != null and seeded.has_marquee_lines:
-			continue  # embedder-seeded content wins
 		var datasource := _doc.get_widget_datasource(int(id))
 		if datasource.is_empty():
 			continue
@@ -601,15 +598,6 @@ func set_widget_scroll_range(id: int, minimum: int, maximum: int,
 func get_widget_scroll_range(id: int) -> MenuScrollRange:
 	var state := _saved_state(id)
 	return state.scroll_range if state != null else null
-
-
-func set_widget_marquee_lines(id: int, lines: PackedStringArray) -> void:
-	var state := _state_of(id)
-	state.marquee_lines = lines
-	state.has_marquee_lines = true
-	var index := frame_index(id)
-	if index >= 0:
-		_frame.set_widget_marquee_lines(index, lines)
 
 
 # --- Table state (menu_table_state.gd owns the shapes) --------------------------

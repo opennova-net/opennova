@@ -83,10 +83,6 @@ func set_resource_root(root: ResourceRoot) -> void:
 	_skeletal_tried = false
 
 
-func get_resource_root() -> ResourceRoot:
-	return _resource_root
-
-
 # --- Typed read seams (tests and the MCP read the portrait through these) ---
 
 func portrait_camera() -> FlyCamera:

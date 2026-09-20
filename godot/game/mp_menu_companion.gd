@@ -158,7 +158,7 @@ func _on_lan_join() -> void:
 #  HostDialog_AddRemoveSelectedMissions @0x557c10 (ADD: table row = name /
 #  GateTypeAbbrev cell / rotation default, hide from the list; REMOVE:
 #  restore); the START_GAME interactive gate on the selected table].
-# The engine rules live in npwire game_type.h through the NetProtocol binding.
+# The engine rules live in base/gameprofile game_type.h through the NetProtocol binding.
 
 # The GAME_TYPE spin's ALL-types item value [orig: @0x558aee].
 const HOST_FILTER_ALL := 255

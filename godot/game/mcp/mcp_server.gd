@@ -25,8 +25,6 @@ var registry := McpToolRegistry.new()
 var instructions := ""
 var server_name := "opennova"
 var server_title := "OpenNova MCP"
-## Disabled only by tests that exercise non-localhost behavior.
-var origin_check_enabled := true
 ## func(args: Dictionary) -> McpToolContext; when invalid, a bare context is
 ## built (pure tests, no running game).
 var context_factory: Callable = Callable()
@@ -331,8 +329,6 @@ func _prune_sessions(now: int) -> void:
 # the DNS-rebinding gate; curl and MCP clients typically send neither Origin
 # nor a non-local Host.
 func _origin_allowed(headers: Dictionary) -> bool:
-	if not origin_check_enabled:
-		return true
 	for key in ["origin", "host"]:
 		var raw := String(headers.get(key, ""))
 		if raw.is_empty():

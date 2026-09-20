@@ -16,7 +16,6 @@ const TYPE_ARMORY := 6101    # -> item 106101, armory
 const TYPE_RIFLEMAN := 6102  # -> item 106102, shed + soldier.adm (skeletal)
 const TYPE_SCALED := 6103    # -> item 106103, pump at authored scale 1.5
 const TYPE_UNRESOLVED := 555
-const TYPE_UNRESOLVED_B := 666
 
 static var _flat_dir := ""
 

@@ -41,7 +41,6 @@ const TABLE_GAMEUI := "gameui"
 ## KeyHelp_GetStringWithFallback lookup over retail's g_TextKeyHelp).
 const TABLE_KEYHELP := "keyhelp"
 const SECTION_MENU := "Menu"
-const SECTION_AVATARS := "Avatars"
 
 var _table: RtxtStringFile
 var _tables: Dictionary = {}
@@ -60,10 +59,6 @@ func load_table(path: String) -> Error:
 
 func is_loaded() -> bool:
 	return _table != null
-
-
-func has_string(key: StringName) -> bool:
-	return _table != null and _table.has_string(key)
 
 
 ## Returns the raw localized text (including any {hot} marker), or default.
