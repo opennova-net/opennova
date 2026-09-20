@@ -1,4 +1,5 @@
 #include "hud/hud_inset_scope.h"
+#include "render/visual_layers.h"
 #include "simulation/player_local_view.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
@@ -65,7 +66,10 @@ void HudInsetScope::update_view(const Ref<PlayerLocalView> &view, Camera3D *sour
 	camera_->set_near(0.2);
 	camera_->set_far(source->get_far());
 	camera_->set_fov(geometry_.fov_h_deg);
-	camera_->set_cull_mask(source->get_cull_mask());
+	// The gameplay camera admits the first-person viewmodel layer; this second
+	// scene pass draws terrain, sky and the world only, so the aimed gun must
+	// never render magnified inside the aperture.
+	camera_->set_cull_mask(source->get_cull_mask() & ~visual_layers::SECOND_SCENE_VIEW_EXCLUDED);
 	camera_->set_environment(source->get_environment());
 	camera_->set_attributes(source->get_attributes());
 	const auto &pose = v.inset_camera;
@@ -88,13 +92,13 @@ void HudInsetScope::_draw() {
 		points.push_back(Vector2(geometry_.inner[i].x, geometry_.inner[i].y));
 		uv.push_back(Vector2(geometry_.uv[i].x, geometry_.uv[i].y));
 	}
+	// The inner polygon IS the aperture: the square scene target reaches the
+	// surface only inside it. Retail's strip between the inner and the doubled
+	// outer ring is no visible band -- black drawn additively (one/one) adds
+	// nothing to colour; with depth writes on and the depth compare off it
+	// stamps near depth over the square so the scene pass that follows is
+	// clipped to the circle. Drawing the target through this polygon is that
+	// clip, so the main view stays visible right up to the ring.
 	draw_polygon(points, colors, uv, target_->get_texture());
-	for (int i = 0; i < 32; ++i) {
-		PackedVector2Array quad;
-		for (auto p : { geometry_.inner[i], geometry_.inner[i + 1], geometry_.outer[i + 1],
-					 geometry_.outer[i] })
-			quad.push_back(Vector2(p.x, p.y));
-		draw_colored_polygon(quad, Color(0, 0, 0, 1));
-	}
 }
 } // namespace godot

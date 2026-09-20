@@ -267,6 +267,11 @@ private:
 	static void set_model_lighting_context(ObjectModel *p_model, bool p_interior, float p_transfer,
 			float p_effect_scale);
 	void update_scope_camera();
+	// The vehicle first-person swap, local-view half: this frame's engine
+	// verdict (the view snapshot's virtual-display triple) handed to the entity
+	// presenter, which owns the carrier nodes and draws the display model in
+	// the hidden hull's place. `p_live` false feeds the inactive frame.
+	void feed_virtual_display(bool p_live);
 	void update_view_projection(const opennova::world::ViewProjection &p_projection);
 	void release_view_projection();
 	void update_avatar(const Vector3 &p_pos);

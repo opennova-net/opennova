@@ -8,8 +8,9 @@ namespace godot {
 // camera mask (render/frame_fx), the sun-shadow light masks (env/sun_shadow),
 // the environment-cube capture (env/environment_cube_capture), the placed
 // object layers (mission/mission_object_placer), the terrain foliage blanket
-// (terrain/foliage_dispatcher), the terrain flat fallback (terrain/terrain)
-// and the water mirror (env/water). The witness
+// (terrain/foliage_dispatcher), the terrain flat fallback (terrain/terrain),
+// the water mirror (env/water) and the weapon Inset scene camera
+// (hud/hud_inset_scope). The witness
 // for the mirror's population lives with the mirror view
 // (engine/runtime/environment/water_mirror.h, env #30).
 namespace visual_layers {
@@ -49,6 +50,12 @@ enum : uint32_t {
 	REFLECTION_CULL_MASK = 0xFFFFFu &
 			~(WATER | VIEWMODEL | FP_BODY_SHADOW_ONLY | SHADOW_CASTER_MASK |
 					WORLD_NO_MIRROR | TERRAIN_FOLIAGE | TERRAIN_FLAT_FALLBACK),
+	// What a second view of the beauty scene (the weapon Inset pass) takes out
+	// of the gameplay camera's mask: the first-person viewmodel, which retail
+	// draws in the main frame's viewmodel-first step and never inside the
+	// inset's own terrain/sky/scene pass, plus -- as for the mirror -- the
+	// layer-hidden first-person body and the caster markers.
+	SECOND_SCENE_VIEW_EXCLUDED = VIEWMODEL | FP_BODY_SHADOW_ONLY | SHADOW_CASTER_MASK,
 };
 } // namespace visual_layers
 

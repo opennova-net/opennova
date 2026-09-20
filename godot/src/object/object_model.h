@@ -744,6 +744,11 @@ public:
 	void update_slot_shadow_group();
 	void set_entity_lighting_context(float p_effect_scale, bool p_interior_lerp,
 			float p_interior_daylight);
+	// The stamped context, for a second model drawn as the SAME entity
+	// submission (the local view's virtual display takes its carrier's).
+	float get_lighting_effect_scale() const { return lighting_effect_scale_; }
+	bool is_interior_lerp() const { return interior_lerp_; }
+	float get_interior_daylight() const { return interior_daylight_; }
 	void set_interior_section_light_transfer(float p_daylight);
 	AABB get_model_bounds() const { return model_bounds_; }
 	// The rendered model bounds in world space (geometry diagnostics/culling).

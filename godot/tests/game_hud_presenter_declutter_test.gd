@@ -374,6 +374,18 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 			assert_eq(inset_view.get_render_bounds(), Rect2(639, 223, 323, 323))
 			assert_eq(inset_view.get_render_viewport().size, Vector2i(323, 323))
 			assert_eq(inset_view.get_render_viewport().find_world_3d(), camera.get_world_3d())
+			# The Inset pass is a second view of the WORLD: whatever the source
+			# camera admits, minus the first-person viewmodel (the aimed gun must
+			# never render magnified inside the aperture), the layer-hidden
+			# first-person body and the caster markers.
+			var second_view_excluded: int = Water.VISUAL_LAYER_VIEWMODEL \
+					| Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY | Water.VISUAL_LAYER_SHADOW_CASTER_MASK
+			var inset_camera := inset_view.get_render_viewport().get_camera_3d()
+			assert_not_null(inset_camera)
+			assert_eq(camera.cull_mask & second_view_excluded, second_view_excluded,
+					"the source camera of this fixture admits every excluded layer")
+			assert_eq(inset_camera.cull_mask, camera.cull_mask & ~second_view_excluded,
+					"the Inset camera takes the source mask without the viewmodel/body/caster layers")
 			if RenderingServer.get_rendering_device() != null:
 				await get_tree().process_frame
 				await get_tree().process_frame

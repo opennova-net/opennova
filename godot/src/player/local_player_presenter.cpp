@@ -384,6 +384,9 @@ void LocalPlayerPresenter::after_world_tick() {
 	const Ref<PlayerWeaponView> weapon_view = visuals_->local_player_weapon_view();
 	weapon_effects_->set_weapon_view(weapon_view);
 	update_player_camera();
+	// This leg runs after the session leg's entity rows, so the carrier hull
+	// the display copies already carries this frame's stamped transform.
+	feed_virtual_display(true);
 	weapon_effects_->consume_pending(weapon_view);
 }
 
@@ -484,6 +487,9 @@ void LocalPlayerPresenter::clear_models() {
 	}
 	avatar_id_ = ObjectID();
 	viewmodel_rig_->clear_viewmodel();
+	// Every exit from live play (no player, a spectator, teardown) also ends
+	// the vehicle's first-person display.
+	feed_virtual_display(false);
 	release_view_projection();
 	Camera3D *cam = camera();
 	if (cam != nullptr && camera_saved_fov_ > 0.0f) {
@@ -784,6 +790,29 @@ void LocalPlayerPresenter::set_model_lighting_context(ObjectModel *p_model, bool
 	if (p_model != nullptr) {
 		p_model->set_entity_lighting_context(p_effect_scale, p_interior, p_transfer);
 	}
+}
+
+// The engine decides the swap (the claimant seat, the first-person camera mode
+// and the def's authored display ride world::LocalPlayerViewFrame; the hull's
+// present row is local-view suppressed the same frame). This presenter only
+// holds the frame's one view snapshot -- assembling another would advance the
+// rendered view's shake filters a second time -- so it is the feed; the entity
+// presenter owns the vehicle's nodes and does the drawing.
+void LocalPlayerPresenter::feed_virtual_display(bool p_live) {
+	Node *node = world();
+	MissionRoot *runtime = node != nullptr
+			? Object::cast_to<MissionRoot>(static_cast<Object *>(node->call("get_runtime")))
+			: nullptr;
+	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
+	if (entities == nullptr) {
+		return;
+	}
+	if (!p_live || view_.is_null() || !view_->get_virtual_display_active()) {
+		entities->present_virtual_display(false, Simulation::INVALID_WIRE_HANDLE, String());
+		return;
+	}
+	entities->present_virtual_display(true, view_->get_virtual_display_carrier(),
+			view_->get_virtual_display_model());
 }
 
 // The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted

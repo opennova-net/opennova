@@ -172,6 +172,14 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reset_wire_runtime_state"),
 			&EntityPresenter::reset_wire_runtime_state);
 	ClassDB::bind_method(D_METHOD("teardown"), &EntityPresenter::teardown);
+	// --- the local view's virtual display ---
+	ClassDB::bind_method(D_METHOD("resolve_present_handle", "handle"),
+			&EntityPresenter::resolve_present_handle);
+	ClassDB::bind_method(
+			D_METHOD("present_virtual_display", "active", "carrier_handle", "model"),
+			&EntityPresenter::present_virtual_display);
+	ClassDB::bind_method(D_METHOD("virtual_display_node"),
+			&EntityPresenter::virtual_display_node);
 	// --- the present passes ---
 	ClassDB::bind_method(D_METHOD("setup_passes", "container", "item_db",
 			"resource_root", "audio", "fx", "lights", "environment", "anchors"),
@@ -1002,6 +1010,7 @@ void EntityPresenter::rebuild_row_plan(const float *p, int64_t size, int stride,
 		row.entity_kind = kind;
 		row.entity_index = idx;
 		row.bms_id = bms_id;
+		row.handle = field_i(p, base, Simulation::PF_WIRE_HANDLE);
 		rows_.push_back(row);
 	}
 }
@@ -1636,6 +1645,109 @@ void EntityPresenter::present_minefields() {
 		if (auto *node = Object::cast_to<Node>(ObjectDB::get_instance(it->second.node)))
 			node->queue_free();
 		it = minefield_nodes_.erase(it);
+	}
+}
+
+// --- The local view's virtual display ------------------------------------------
+
+ObjectModel *EntityPresenter::resolve_present_handle(int p_handle) const {
+	if (ObjectModel *wire_node = resolve_wire_handle(p_handle)) {
+		return wire_node;
+	}
+	// A per-frame caller asks for the same handle again: try the row that
+	// answered last before walking the plan.
+	const size_t count = rows_.size();
+	if (present_handle_hint_ >= count || rows_[present_handle_hint_].handle != p_handle) {
+		size_t found = count;
+		for (size_t i = 0; i < count; ++i) {
+			if (rows_[i].handle == p_handle) {
+				found = i;
+				break;
+			}
+		}
+		if (found == count) {
+			return nullptr;
+		}
+		present_handle_hint_ = found;
+	}
+	return Object::cast_to<ObjectModel>(
+			ObjectDB::get_instance(rows_[present_handle_hint_].node_id));
+}
+
+ObjectModel *EntityPresenter::virtual_display_node() const {
+	return virtual_display_id_.is_valid()
+			? Object::cast_to<ObjectModel>(ObjectDB::get_instance(virtual_display_id_))
+			: nullptr;
+}
+
+void EntityPresenter::reset_virtual_display() {
+	if (ObjectModel *node = virtual_display_node()) {
+		node->queue_free();
+	}
+	virtual_display_id_ = ObjectID();
+	virtual_display_graphic_ = String();
+	virtual_display_carrier_id_ = ObjectID();
+}
+
+void EntityPresenter::present_virtual_display(bool p_active, int p_carrier_handle,
+		const String &p_model) {
+	ObjectModel *node = virtual_display_node();
+	ObjectModel *carrier = p_active && !p_model.is_empty() && placer_.is_valid()
+			? resolve_present_handle(p_carrier_handle)
+			: nullptr;
+	if (carrier == nullptr) {
+		// No swap this frame (on foot, another seat, the chase camera, no
+		// authored display, the carrier gone): the built model waits hidden.
+		if (node != nullptr && node->is_present_visible()) {
+			node->set_present_visible(false);
+		}
+		return;
+	}
+	// A sibling of its carrier: the same world, the same render layers, and a
+	// member of the container the light select and the mission unload walk.
+	Node3D *parent = Object::cast_to<Node3D>(carrier->get_parent());
+	if (parent == nullptr) parent = container();
+	if (parent == nullptr) parent = this;
+	// One model per graphic key AND carrier node: the light select reads a
+	// model's light owner once, when it registers the container's members, so
+	// another hull (or a respawned wire body) takes a fresh model. The placer
+	// keeps the parsed graphic, so a rebuild never re-reads the file.
+	const ObjectID carrier_id(carrier->get_instance_id());
+	if (node != nullptr &&
+			(virtual_display_graphic_ != p_model ||
+					virtual_display_carrier_id_ != carrier_id ||
+					node->get_parent() != parent)) {
+		reset_virtual_display();
+		node = nullptr;
+	}
+	if (node == nullptr) {
+		virtual_display_graphic_ = p_model;
+		virtual_display_carrier_id_ = carrier_id;
+		node = placer_->build_model_from_graphic(p_model, String(), parent);
+		if (node == nullptr) {
+			return;
+		}
+		node->set_name("VirtualDisplay");
+		// One entity, one submission: the display draws in its carrier's
+		// place, so it shares the carrier's light query and groups.
+		node->set_entity_light_owner(carrier);
+		virtual_display_id_ = node->get_instance_id();
+	}
+	// ...and the carrier's lighting context (both setters are change-gated:
+	// an unchanged frame writes nothing).
+	node->set_thermal_entity_wave(carrier->get_thermal_entity_wave());
+	node->set_entity_lighting_context(carrier->get_lighting_effect_scale(),
+			carrier->is_interior_lerp(), carrier->get_interior_daylight());
+	const Transform3D pose = carrier->get_global_transform();
+	if (node->get_global_transform() != pose) {
+		node->set_global_transform(pose);
+	}
+	// The carrier's collector gate still holds: a hull the occlusion frame
+	// does not collect draws nothing, its display included.
+	const bool collected = !carrier->is_occlusion_hidden() &&
+			!wire_render_culled_.has(p_carrier_handle);
+	if (node->is_present_visible() != collected) {
+		node->set_present_visible(collected);
 	}
 }
 } // namespace godot

@@ -32,6 +32,14 @@ float PlayerLocalView::get_camera_roll_deg() const {
 	return value_.camera_pose_valid ? value_.camera.roll_deg : 0.0f;
 }
 
+int PlayerLocalView::get_virtual_display_carrier() const {
+	return value_.virtual_display_carrier.packed;
+}
+
+String PlayerLocalView::get_virtual_display_model() const {
+	return String::utf8(value_.virtual_display_model.c_str());
+}
+
 void PlayerLocalView::_bind_methods() {
 #define PLAYER_LOCAL_VIEW_FIELD(m_variant, m_name)                                        \
 	ClassDB::bind_method(D_METHOD("get_" #m_name), &PlayerLocalView::get_##m_name);       \
@@ -79,5 +87,8 @@ void PlayerLocalView::_bind_methods() {
 	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, camera_yaw_deg)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, camera_pitch_deg)
 	PLAYER_LOCAL_VIEW_FIELD(Variant::FLOAT, camera_roll_deg)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::BOOL, virtual_display_active)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::INT, virtual_display_carrier)
+	PLAYER_LOCAL_VIEW_FIELD(Variant::STRING, virtual_display_model)
 #undef PLAYER_LOCAL_VIEW_FIELD
 }

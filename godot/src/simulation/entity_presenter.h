@@ -227,6 +227,30 @@ public:
 	// (the node is going away).
 	void teardown();
 
+	// --- The local view's virtual display ------------------------------------
+
+	// The live model a packed pool/slot handle presents through EITHER walk:
+	// the wire registry, else the placed row plan (each planned row keeps its
+	// row's PF_WIRE_HANDLE). Null for a handle neither walk draws.
+	ObjectModel *resolve_present_handle(int p_handle) const;
+	// The device half of the vehicle render class's first-person swap (the
+	// rule and its witnesses live with world::LocalPlayerViewFrame, engine
+	// runtime/world/local_player_view.h). While the frame says the local
+	// player's vehicle draws its virtual display -- the same frame that hull's
+	// row is PF_LOCAL_VIEW_SUPPRESSED, so the walks above hid its node and kept
+	// stamping its transform -- this shows graphic `p_model` rigidly at the
+	// carrier node's CURRENT transform, as an ordinary world model beside the
+	// carrier, lit as the carrier is. It hides otherwise; an empty graphic key
+	// draws nothing (the def authors no virtual display). The local-view frame
+	// leg feeds the frame's triple once per display frame, after the row walks
+	// stamped the carrier; tests feed the same triple. One model is built per
+	// graphic key and carrier node and reused -- shown or hidden -- until
+	// either changes or the runtime state resets.
+	void present_virtual_display(bool p_active, int p_carrier_handle, const String &p_model);
+	// The built virtual-display model (null before the first show and after a
+	// reset) -- the read seam.
+	ObjectModel *virtual_display_node() const;
+
 	// --- The present passes (ADR 0043 decision 9) ----------------------------
 
 	enum PassProfileSlot {
@@ -339,6 +363,14 @@ private:
     std::vector<opennova::world::MinefieldDraw> minefield_draws_;
     void present_minefields();
     void reset_minefields();
+	// The virtual display: the built model, and the graphic key and carrier
+	// node it was built for.
+	ObjectID virtual_display_id_;
+	String virtual_display_graphic_;
+	ObjectID virtual_display_carrier_id_;
+	void reset_virtual_display();
+	// resolve_present_handle's last answering placed row (a lookup hint only).
+	mutable size_t present_handle_hint_ = 0;
 	struct MissionFrameProfile {
 		int64_t core_us = 0;
 		int64_t aim_us = 0;
@@ -385,6 +417,9 @@ private:
 		int32_t entity_kind = -1;
 		int32_t entity_index = -1;
 		int32_t bms_id = 0;
+		// The row's PF_WIRE_HANDLE (the packed registry handle; stable for the
+		// plan's layout revision): resolve_present_handle's placed key.
+		int32_t handle = -1;
 		// Last-applied edge state (-1 = unknown, first frame always applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
