@@ -23,8 +23,8 @@ on:
       - 'tests/napi/**'
       - 'tests/novaworld/**'
       - '.github/workflows/novaworld-images.yml'
+  # Every pull request, whatever its base (stacked PRs included).
   pull_request:
-    branches: [master]
     paths:
       - 'apps/novaworld_server/**'
       - 'engine/net/novaworld/**'
