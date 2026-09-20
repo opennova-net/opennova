@@ -40,7 +40,12 @@ struct HudServiceState {
 	uint32_t owned_zone_mask = 0;
 };
 struct HudCombatState {
-	bool dead = false;
+	// The client death-screen latch, the ONE flag the crosshair, instrument and
+	// scope passes test. The local dead bit and the death lerp camera are not
+	// HUD gates: between the death and the latch those passes still draw.
+	// [orig: g_death_screen_active @0xA860EC -- HUD_DrawCrosshair @0x592646,
+	//  HUD_RenderOverlays @0x5A7BBC, HUD_RenderAllOverlays @0x5A850D]
+	bool death_screen = false;
 	// Armory/bay use one line; an eligible FARP replaces it later in the walk.
 	int service_prompt = 0, service_wait_seconds = 0;
 	bool service_above_declutter = false;

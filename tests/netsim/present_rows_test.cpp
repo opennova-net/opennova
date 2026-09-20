@@ -15,6 +15,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -258,6 +259,45 @@ bool test_vehicle_suspension_reaches_present_rows() {
 	return ok;
 }
 
+// A motor-driven hull publishes the motor's BAM pitch/roll, not their
+// whole-degree mirrors: the drawn hull (and the cockpit drawn at its transform)
+// then sits in the same frame as entity_placement_matrix, which places the
+// carrier-owned first-person eye. A 0.49 degree mirror error over the 1.83-unit
+// camera arm is the 1.6 cm the driver's eye sat off its cockpit.
+bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(1, 16);
+	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
+	if (!expect(e != nullptr, "vehicle row exists"))
+		return false;
+	// Unseeded: the whole-degree mission mirrors are all a row carries.
+	e->pitch = 3;
+	e->roll = -2;
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	bool ok = expect(rows[w::PF_PITCH_DEG] == 3.0f && rows[w::PF_ROLL_DEG] == -2.0f,
+			"an unseeded row publishes the mission mirrors");
+	// Seeded: 2.49 / -1.51 degrees round to 2 / -2 in the mirrors.
+	const double bam_per_degree = 4294967296.0 / 360.0;
+	e->veh.yaw_seeded = true;
+	e->veh.air_pitch_bam = static_cast<int32_t>(2.49 * bam_per_degree);
+	e->veh.air_roll_bam = static_cast<int32_t>(-1.51 * bam_per_degree);
+	e->pitch = 2;
+	e->roll = -2;
+	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	ok = expect(std::abs(rows[w::PF_PITCH_DEG] - 2.49f) < 1e-4f &&
+					 std::abs(rows[w::PF_ROLL_DEG] + 1.51f) < 1e-4f,
+				 "a motor-seeded row publishes the BAM attitude") &&
+			ok;
+	ok = expect(std::abs(im::pool_present_pitch_deg(*e) - 2.49) < 1e-6 &&
+					 std::abs(im::pool_present_roll_deg(*e) + 1.51) < 1e-6,
+				 "the shared helpers read the same pair") &&
+			ok;
+	return ok;
+}
+
 bool test_door_phases_reach_present_rows() {
     opennova::mission::MissionKernel kernel;
     kernel.world.registry.configure_pool(2, 1);
@@ -440,6 +480,7 @@ int main() {
     test_joiner_door_phases_reach_present_rows();
 	test_vehicle_suspension_reaches_present_rows();
 	bool ok = true;
+	ok = test_vehicle_rows_publish_the_motor_attitude_unrounded() && ok;
 	ok = test_world_rows_carry_the_authoritative_record() && ok;
 	ok = test_full_spawn_parachute_state_reaches_player_and_infantry_rows() && ok;
 	ok = test_replica_rows_project_the_decoded_state_and_keep_the_pulses() && ok;

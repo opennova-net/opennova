@@ -555,8 +555,10 @@ bool run_0a_subblock_phase_cycle() {
 			if (!expect(fu.weapon.preround_timer == 0x23,
 			            "phase 0 carries the low byte of the live pre-round seconds"))
 				return false;
-			if (!expect(fu.weapon.uniform_team_mask == 0x8,
-			            "phase 0 uniform team mask = 8 (golden steady value)")) return false;
+			// No zone chain: the owned-zone walk yields its own 0, never a
+			// constant [orig: ZoneSlotChain_GetOwnedZoneMask @0x4A2620].
+			if (!expect(fu.weapon.uniform_team_mask == 0,
+			            "phase 0 owned-zone mask is 0 without a zone chain")) return false;
 			ns::ClientReplicaPipeline fold;
 			fold.apply(dg.tag, dg.body);
 			if (!expect(fold.state().preround_delay_seconds == 0x23,
@@ -656,6 +658,44 @@ bool run_0a_subblock_phase_cycle() {
 	            "phase 3 carries won/lost/show-win/show-lose in retail order")) return false;
 	if (!expect(objective_fu.local_tail_present,
 	            "objective bytes cannot be mistaken for the recipient health tail")) return false;
+	// The phase-0 mask is the recipient team's live chain walk: the golden
+	// ASH_I5A steady 0x8 is zone 3 wholly owned, and it follows the zone when
+	// it changes hands. The joiner keeps the word as its FARP unlock mask.
+	// [orig: written @0x4FF996..0x4FF9BB; the client store @0x430136]
+	{
+		world.registry.configure_pool(1, 8);
+		const uint8_t team = world.registry.get(host_h)->team;
+		w::Entity zone;
+		zone.kind = w::EntityKind::Item;
+		zone.item_id = 1359;
+		zone.alive = true;
+		zone.is_capture_trigger = true;
+		zone.zone_number = 3;
+		zone.team = team;
+		const w::EntityHandle owned_zone = world.registry.spawn(1, zone);
+		zone.zone_number = 1;
+		zone.team = static_cast<uint8_t>(team + 1);
+		world.registry.spawn(1, zone);
+		world.zones.build_chain_from_mission();
+		for (const int32_t expected : {0x8, 0}) {
+			conns[0].s2c_phase = 0xFFu;
+			ns::test::emit_all(world, conns);
+			ns::Datagram zone_dg;
+			if (!expect(ch.client_recv(zone_dg), "zone-chain 0x0A frame dequeued")) return false;
+			nw::FrameUpdate zone_fu;
+			if (!expect(nw::decode_frame_update(zone_dg.body.data(), zone_dg.body.size(),
+			                    ns::class_for_type_id, zone_fu) &&
+			                    zone_fu.weapon.present,
+			            "zone-chain phase-0 frame decodes")) return false;
+			if (!expect(zone_fu.weapon.uniform_team_mask == expected,
+			            "phase 0 carries the recipient team's owned-zone walk")) return false;
+			ns::ClientReplicaPipeline fold;
+			fold.apply(zone_dg.tag, zone_dg.body);
+			if (!expect(fold.state().owned_zone_mask == static_cast<uint32_t>(expected),
+			            "client fold keeps the mask the FARP prompt reads")) return false;
+			world.registry.get(owned_zone)->team = static_cast<uint8_t>(team + 1);
+		}
+	}
 	std::printf("PASS 0a_subblock_phase_cycle\n");
 	return true;
 }

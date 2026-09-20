@@ -57,6 +57,10 @@ struct FrameHeaderState {
 	uint8_t respawn_delay_seconds = 0;
 	uint8_t downed_revive_seconds = 0;
 	uint8_t spawn_target_hold_seconds = 0;
+	// The recipient team's owned-zone mask off the live chain; an empty chain
+	// walks to 0. [orig: ZoneSlotChain_GetOwnedZoneMask(playerSlot+0x1A0)
+	// @0x4FF996..0x4FF9BB]
+	uint32_t owned_zone_mask = 0;
 	FrameEnv env{};
 	FrameMountAmmo mount_ammo{};
 };
@@ -93,10 +97,10 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// 364/356/460 + ammo + ZoneSlotChain_GetOwnedZoneMask]. Our host does not model the
 		// recipient's +356/+460 weapon-slot state yet; +360/+368/+364 are the live
 		// respawn/downed counters from its player slot. The uniform
-		// mask is the recipient's OWNED-ZONE mask from the zone chain (net-re §5.61) — the rep-state
-		// default 0x8 is the golden ASH_I5A steady value (zone 3 wholly owned), so a chain-less host
-		// still emits the witnessed byte. (Renamed from the FrameAimBlock misnomer to
-		// FrameWeaponBlock, grill 2026-07-01.)
+		// mask is the recipient's OWNED-ZONE mask walked off the live zone chain every frame
+		// (net-re §5.61): the client keeps it as its FARP unlock word, so a constant here would
+		// unlock or lock stations the chain never decided. (Renamed from the FrameAimBlock
+		// misnomer to FrameWeaponBlock, grill 2026-07-01.)
 		fu.weapon.present = true;
 		// The global whole-second countdown is truncated directly to the wire
 		// byte; values above 255 wrap rather than clamp.
@@ -105,7 +109,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		fu.weapon.slot_state360 = hdr.respawn_delay_seconds;
 		fu.weapon.slot_state368 = hdr.downed_revive_seconds;
 		fu.weapon.slot_state364 = hdr.spawn_target_hold_seconds;
-		fu.weapon.uniform_team_mask = ctx.uniform_team_mask;
+		fu.weapon.uniform_team_mask = static_cast<int32_t>(hdr.owned_zone_mask);
 		break;
 	case 1:
 		// Server-status block [orig: @0x4ff9d5 phase-1]. LOAD-BEARING — carries the client's
@@ -1061,7 +1065,8 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 							: 0u));
 	hs.preround_delay_seconds =
 			static_cast<uint8_t>(w.preround_delay_seconds);
-	hs.fallmps = static_cast<uint8_t>(std::clamp(w.script.wac_values.fallmps, 0, 255));
+	hs.owned_zone_mask = w.zones.owned_zone_mask(owned->team);
+	hs.fallmps =static_cast<uint8_t>(std::clamp(w.script.wac_values.fallmps, 0, 255));
 	hs.round_time_remaining_ticks = w.match.remaining_ticks();
 	// The weather home's native globals narrowed exactly once here
 	// [orig: NetPacket_WritePlayerState @0x4ff6b0 — Env_FogDistTarget hi word,

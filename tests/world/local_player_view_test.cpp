@@ -1921,8 +1921,36 @@ void test_hud_context_tracks_mount_weapon_and_dismount() {
     def_free_weapons(&defs);
 }
 
+// The HUD's death gate is the death-screen latch alone: the local dead bit and
+// the death lerp camera (mode 4) leave the crosshair, instrument and scope
+// passes running until the latch arrives.
+// [orig: g_death_screen_active -- HUD_DrawCrosshair @0x592646,
+//  HUD_RenderOverlays @0x5A7BBC; no Flags & 2 / g_camera_mode test on either]
+void test_hud_death_gate_is_the_death_screen_latch_alone() {
+    LocalWorld lw;
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    lw.entity().flags |= kEntityFlagDead;
+    view.camera_mode = 4;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.camera_mode == 4 && !frame.hud_combat.state.death_screen);
+    view.death_screen_active = true;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.hud_combat.state.death_screen);
+    lw.entity().flags &= ~kEntityFlagDead;
+    view.camera_mode = 0;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(frame.hud_combat.state.death_screen);
+    view.death_screen_active = false;
+    local_player_view_frame(&lw.w, weapon, view, tracker, frame);
+    CHECK(!frame.hud_combat.state.death_screen);
+}
+
 int main() {
     test_hud_context_tracks_mount_weapon_and_dismount();
+    test_hud_death_gate_is_the_death_screen_latch_alone();
     test_rendered_scope_applies_elevation_and_parallax();
     test_scoped_aim_follows_local_view_clamps_and_leg_chase();
     test_scoped_aim_original_sequences();

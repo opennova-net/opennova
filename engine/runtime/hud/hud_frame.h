@@ -845,6 +845,13 @@ private:
 	void emit_wire_rect(float x0, float y0, float x1, float y1, uint32_t color);
 	void emit_text(const char *text, float design_x, float design_y,
 			float surface_w, float surface_h, uint32_t argb, uint32_t flags);
+	// One run in an overlay font SLOT at a surface anchor: the slot's scale
+	// pair rides into the draw. A slot whose file is absent falls back to the
+	// hudpos font at scale 1, like every other label element.
+	// [orig: HUD_DrawTextLeft_HalfBright @0x5804C0 -- slot scales @0x58052B /
+	//  @0x580539; HUD_DrawTextCentered_HalfBright @0x580680]
+	void emit_slot_text(const GameFont &slot, float slot_scale, const char *text,
+			float surface_x, float surface_y, uint32_t argb, uint32_t flags);
 	float measure_text_w(const char *text) const;
 	float text_line_h() const;
 

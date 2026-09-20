@@ -313,6 +313,20 @@ void HudFrameCompiler::emit_text(const char *text, float design_x,
 			run.underlines.begin(), run.underlines.end());
 }
 
+void HudFrameCompiler::emit_slot_text(const GameFont &slot, float slot_scale, const char *text,
+		float surface_x, float surface_y, uint32_t argb, uint32_t flags) {
+	const bool have_slot = slot.font() != nullptr;
+	const GameFont &font = have_slot ? slot : font_;
+	if (text == nullptr || text[0] == 0 || font.font() == nullptr) {
+		return;
+	}
+	const float scale = have_slot ? slot_scale : 1.0f;
+	const GameFontRun run = font.layout(text, surface_x, surface_y, scale, scale, flags, argb);
+	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(), run.quads.end());
+	draw_list_.underlines.insert(draw_list_.underlines.end(), run.underlines.begin(),
+			run.underlines.end());
+}
+
 // Seat-specific WPNGRP dispatch, independent of the crosshair's XHAIRS gate.
 // [orig: HUD_RenderOverlays @0x5A7CBE..0x5A7D55]
 bool hud_weapon_group_visible(const HudFrameState &state) {
@@ -491,7 +505,7 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	// capacity — a fresh local re-allocated it every frame.
 	HudMinimapInput &input = minimap_input_;
 	input = state.minimap;
-	if (state.combat.impact_map && !state.combat.dead) {
+	if (state.combat.impact_map) {
 		HudMinimapMarker marker;
 		marker.bank = uint8_t(HudMinimapBank::kSpecial);
 		marker.icon = 254;
@@ -824,7 +838,7 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 	if (!state.declutter_visible[kDeclutterXhairs]) {
 		return;
 	}
-	if (state.binoculars_view_active || state.combat.dead || state.combat.custom_aim) {
+	if (state.binoculars_view_active || state.combat.death_screen || state.combat.custom_aim) {
 		return;
 	}
 	if (!crosshair_should_draw(state.aimed_shot_available,

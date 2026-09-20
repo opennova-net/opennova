@@ -13,7 +13,7 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 	auto &s = v.state;
 	const Entity *player = world.registry.get(world.cached.local_player);
 	Entity *mount = player ? world.registry.get(player->mount_target) : nullptr;
-	if (!player || !mount || !mount->has_item_def || !weapon.active || s.dead)
+	if (!player || !mount || !mount->has_item_def || !weapon.active)
 		return;
 	const int32_t root[3] = { to_fixed(mount->position.x), to_fixed(mount->position.y),
 		to_fixed(mount->position.z) };
