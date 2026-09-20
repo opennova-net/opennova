@@ -201,4 +201,49 @@ SpawnLoadoutPlan spawn_loadout_plan(const SpawnLoadoutInput &input,
     return plan;
 }
 
+FireEffectPlan fire_effect_plan(const FirePresentationRow &row) {
+    FireEffectPlan plan;
+    plan.userpoint = row.action_userpoint;
+    // The MF_Light muzzle glow re-arms per shot for EVERY shooter — retail
+    // spawns it on both fire arms, the local player's included [orig:
+    // WeaponSlot_FireAndSpawnEffects @ 0x53f597 at the fire position;
+    // ActionSlot_SpawnEffect @ 0x402080 at the action-transform muzzle;
+    // both gate on ammo +36 MF_Light]. Owner = shooter, so the witnessed
+    // group gate scopes it to the shooter's own draws. The adm arm anchors it
+    // on the rendered gun's userpoint.
+    plan.glow = row.mf_light != 0;
+    plan.glow_at_muzzle = plan.glow && row.adm_arm;
+    // The local player's own fire is presented by the action-slot legs
+    // [orig: ActionSlot_ExecuteActionTick @ 0x541A70 routing]; everyone
+    // else's rides the ammo-def legs below. (The SOUND legs of every arm
+    // run in the sim — world/fire_sound.h — and arrive through
+    // drain_fire_sounds; this plan owns the EFFECT legs.)
+    if (row.is_local_player) return plan;
+    // THE ARM SPLIT. Retail's round-event receive path has two mutually exclusive
+    // arms and only one of them is the ammo-def pair. The adm-indexed arm spawns
+    // no ammo-def effect: it executes the ADDRESSED def's FIRE action row
+    // instead, at that weapon's own userpoint on the gfx3 model.
+    // This matters because the wire position is the shooter's EYE — retail sends
+    // Position + CameraOffset [orig: Entity_CalcWeaponFirePosition @0x4dc750] — so
+    // running the ammo-def leg on this arm draws every remote muzzle flash out of
+    // the shooter's face, roughly a metre behind the barrel.
+    // [orig: arms @0x42f521 / @0x42f6ce; ammo effect @0x42f6c2;
+    //  the fire row @0x42f777 / @0x42f98f]
+    plan.effect = row.adm_arm ? row.action_effect : row.effect;
+    // The anchor: this shooter's held weapon, not the wire point — the
+    // rendered gun's own userpoint, which is what retail spawns at (the
+    // authority DECISION closing the S12a shadow seam: the rendered-node
+    // anchor is permanent, the sim-posed re-derivation is gone). Falling
+    // back to the wire eye position would reintroduce the very bug this
+    // fixes, so an unresolvable anchor takes the provider's own
+    // body-origin fallback — retail's deepest fallback is the entity
+    // origin [orig: @0x401867..0x401887].
+    plan.spawn_at_muzzle = row.adm_arm;
+    // The muzzle effect at the fire origin along the fire direction
+    // [orig: the 56-B spawn descriptor -> CEffectWorld_SpawnEmitterAtPosition
+    // @ 0x5F6DF0; every fire spawns one — no per-shooter guard on this leg].
+    plan.spawn = !plan.effect.empty();
+    return plan;
+}
+
 } // namespace opennova::world
