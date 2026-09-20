@@ -2,20 +2,32 @@
 // validates clean, the run is idempotent, one row can be created alone, a wrong-kind
 // file is never overwritten, and every Required row of the default project has a
 // factory (the mission rows without one are reported, not skipped silently).
+#include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
+#include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/blank/create_missing.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
+#include <formats/mnu/mnu.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 
 using namespace opennova::editor;
+
+static bool window_names_a_string_id(const opennova::mnu::Window &window) {
+	if (opennova::strutil::iequals(window.string_data.type, "id")) return true;
+	for (const opennova::mnu::Window &child : window.children) {
+		if (window_names_a_string_id(child)) return true;
+	}
+	return false;
+}
 
 struct Evaluated {
 	AssetScan scan;
@@ -63,6 +75,21 @@ static int test_default_project_fills_and_validates() {
 	for (const RequirementRow &row : after.report.rows) {
 		if (row.required) TEST_EXPECT(row.state == RequirementState::Present);
 	}
+
+	// The filled project is closed over itself: the startup screen names no text table
+	// and no string id that this run did not create (an optional row such as menutxt.bin
+	// is never made here, and a label looked up in a missing table draws its raw key).
+	std::vector<uint8_t> menu_bytes;
+	std::string io_error;
+	TEST_EXPECT(read_file_bytes(root + "/menus/main.mnu", menu_bytes, io_error));
+	opennova::mnu::Document menu;
+	std::string parse_error;
+	TEST_EXPECT(opennova::mnu::parse(menu_bytes.data(), menu_bytes.size(), menu, parse_error));
+	const opennova::mnu::Screen *startup = menu.find_screen("STARTUP");
+	TEST_EXPECT(startup != nullptr);
+	const std::string &text_table = startup->root_window.text_rsrc;
+	TEST_EXPECT(text_table.empty() || after.scan.find(text_table) != nullptr);
+	TEST_EXPECT(text_table.empty() ? !window_names_a_string_id(startup->root_window) : true);
 
 	// Idempotent: nothing is created or touched on a second run.
 	const CreateMissingResult again = create_missing_requirements(paths, doc, after.report);

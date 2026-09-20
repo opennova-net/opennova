@@ -62,9 +62,10 @@ Code at it), host 8975 / joiner 8976 for a LAN pair (`scripts/net/run_lan_pair.p
 `.mcp.json` at session start; a game started later is reached with `/mcp`
 reconnect, or through the script clients.
 
-`--mcp-port` is a debug / Mod Tools capability (ADR 0043 d12): the transport
-(`godot/game/mcp/`) ships in the editor, the debug packaging and the Mod
-Tools export, and the Runtime export excludes it (`export_presets.cfg`). A
+`--mcp-port` is a debug / authoring capability (ADR 0043 d12): the transport
+(`godot/game/mcp/`) ships in source runs and in the "OpenNova Play Runtime"
+export (the OpenNova Editor's Play child, ADR 0046 d8), and the Runtime
+export excludes it (`export_presets.cfg`). A
 Runtime build launched with the flag logs a warning and serves no endpoint;
 the game shell loads the service by path, so nothing else in the shell
 depends on it. The probe object model (`godot/game/probe/`) ships in every

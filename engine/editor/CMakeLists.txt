@@ -23,8 +23,16 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/project/local_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_files.cpp
+    # project_build — routing into the boot-table archives, the plan, the immutable build
+    # (the directory is not "build*": the lints skip those)
+    ${CMAKE_CURRENT_SOURCE_DIR}/project_build/archive_routing.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_plan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_session.cpp
     # requirements — the manifest rows evaluated against the project
     ${CMAKE_CURRENT_SOURCE_DIR}/requirements/requirements.cpp
+    # run — the Play launch plan and the one managed child over the platform seam
+    ${CMAKE_CURRENT_SOURCE_DIR}/run/launch_plan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
 )
 
 # engine/ is the one public include root (ADR 0040): <editor/<lib>/file.h>.

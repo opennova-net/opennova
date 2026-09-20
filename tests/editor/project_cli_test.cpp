@@ -53,10 +53,18 @@ static int test_new_status_validate() {
 	TEST_EXPECT(run({"create-missing", root}) == 0);
 	TEST_EXPECT(run({"create-missing", root, "--role", "no_such_role"}) == 0); // nothing to do
 
+	// Build: a directory the runtime boots, and the same content is the same build.
+	TEST_EXPECT(run({"build", root, "--out"}) == 2);
+	TEST_EXPECT(run({"build", root}) == 0);
+	TEST_EXPECT(run({"build", root}) == 0);
+	TEST_EXPECT(run({"build", root, "--out", dir.file("elsewhere")}) == 0);
+	TEST_EXPECT(std::filesystem::is_regular_file(dir.file("elsewhere") + "/last_good.json"));
+
 	// A file with the wrong content behind a required name is an error too.
 	TEST_EXPECT(editor_test::write_text(root + "/strings/gametext.bin", "raw"));
 	TEST_EXPECT(run({"validate", root}) == 1);
 	TEST_EXPECT(run({"create-missing", root}) == 1); // refused, never overwritten
+	TEST_EXPECT(run({"build", root}) == 1);          // blocked until fixed
 	return 0;
 }
 

@@ -48,8 +48,10 @@ const std::vector<std::string> &blank_gametext_sections() {
 }
 
 const std::vector<std::pair<std::string, std::string>> &blank_menutxt_keys() {
-	// The labels the blank startup screen and the next screens a modder adds reach
-	// for; the shell resolves menu tokens through menutxt's "Menu" section first.
+	// A starting label table for the screens a modder adds; the shell resolves menu
+	// tokens through menutxt's "Menu" section first. menutxt.bin is an optional row, so
+	// it is made only when asked for by role, and the blank startup screen never
+	// depends on it (its labels are literal text).
 	static const std::vector<std::pair<std::string, std::string>> keys = {
 		{"MM_Exit", "Exit"},
 		{"NAV_ACCEPT", "Accept"},

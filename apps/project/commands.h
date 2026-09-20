@@ -7,11 +7,13 @@
 //   opennova-project status <dir>
 //   opennova-project validate <dir>
 //   opennova-project create-missing <dir> [--role <token>]
+//   opennova-project build <dir> [--out <dir>]
 //
 // Exit 0 on success (validate: no errors and no unmet required row; create-missing:
-// every missing required file created), 1 when validate found errors or unmet
-// requirements or create-missing left a required file uncreated, 2 on a usage error
-// or a project that could not be created or opened.
+// every missing required file created; build: a directory the runtime boots), 1 when
+// validate found errors or unmet requirements, create-missing left a required file
+// uncreated, or the build was blocked or failed, 2 on a usage error or a project that
+// could not be created or opened.
 #include <cstdio>
 
 namespace opennova::project_cli {

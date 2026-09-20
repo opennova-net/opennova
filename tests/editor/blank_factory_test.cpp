@@ -124,26 +124,21 @@ static int test_startup_menu_compiles() {
 	TEST_EXPECT(opennova::mnu::parse(bytes.data(), bytes.size(), doc, error));
 	const opennova::mnu::Screen *startup = doc.find_screen("STARTUP");
 	TEST_EXPECT(startup != nullptr);
-	TEST_EXPECT(startup->root_window.text_rsrc == "menutxt.BIN");
 	const opennova::mnu::Window *exit_button = find_window(startup->root_window, "EXIT");
 	TEST_EXPECT(exit_button != nullptr && exit_button->type == opennova::mnu::WindowType::Button);
 	TEST_EXPECT(exit_button->actions.empty()); // bound by name, the shell's exit command
 	const opennova::mnu::Window *title = find_window(startup->root_window, "TITLE");
 	TEST_EXPECT(title != nullptr && title->string_data.value == "Blank & Co");
 
-	// Every string id the screen names resolves through the blank menutxt table.
-	const std::vector<uint8_t> menutxt = make("menutxt", "menutxt.bin");
-	opennova::rtxt::File menu;
-	TEST_EXPECT(opennova::rtxt::parse(menutxt.data(), menutxt.size(), menu, error));
+	// The screen stands on the Required files alone: no text table of its own and no
+	// string id, because menutxt.bin is an optional row that a new project does not
+	// have, and an id looked up in a missing table draws its raw key.
+	TEST_EXPECT(startup->root_window.text_rsrc.empty());
 	std::vector<std::string> ids;
 	collect_string_ids(startup->root_window, ids);
-	TEST_EXPECT(!ids.empty());
-	std::map<std::string, std::string> lookup;
-	for (const std::string &id : ids) {
-		const opennova::rtxt::Entry *entry = menu.find_in_section("Menu", id);
-		TEST_EXPECT(entry != nullptr);
-		lookup[id] = entry->text;
-	}
+	TEST_EXPECT(ids.empty());
+	TEST_EXPECT(exit_button->string_data.value == "Exit");
+	const std::map<std::string, std::string> lookup; // what a new project offers: nothing
 
 	// The stylesheet the screen's %VAR% references resolve through.
 	const std::vector<uint8_t> style_bytes = make("menu_style", "menu_style.mns");

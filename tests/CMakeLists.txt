@@ -3092,6 +3092,16 @@ target_link_libraries(editor_create_missing_test PRIVATE opennova_editor)
 target_include_directories(editor_create_missing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_create_missing COMMAND editor_create_missing_test)
 
+add_executable(editor_project_build_test editor/project_build_test.cpp)
+target_link_libraries(editor_project_build_test PRIVATE opennova_editor)
+target_include_directories(editor_project_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_project_build COMMAND editor_project_build_test)
+
+add_executable(editor_play_session_test editor/play_session_test.cpp)
+target_link_libraries(editor_play_session_test PRIVATE opennova_editor)
+target_include_directories(editor_play_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_play_session COMMAND editor_play_session_test)
+
 add_executable(project_cli_test editor/project_cli_test.cpp)
 target_link_libraries(project_cli_test PRIVATE opennova_project_cli)
 target_include_directories(project_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

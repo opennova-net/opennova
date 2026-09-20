@@ -27,6 +27,11 @@ std::string xml_escape(const std::string &text) {
 // stylesheet variables so the blank menu_style.mns styles it. The Exit button carries
 // no action: exit buttons are shell Commands bound by Window name
 // (docs/mnu/menu-re.md, ADR 0001; the shell's exit_control_names).
+//
+// The screen depends only on files "Create all missing" makes. Its labels are literal
+// text, not string ids: menutxt.bin is an OPTIONAL row of the manifest (retail falls back
+// to literals without it), so it is never created for a new project, and a label looked
+// up in a table that is not there draws its raw key.
 std::string startup_screen_xml(const std::string &title) {
 	return "<SCREEN>\n"
 	       "\t<NAME>STARTUP</NAME>\n"
@@ -39,7 +44,6 @@ std::string startup_screen_xml(const std::string &title) {
 	       "\t\t\t<RIGHT>800</RIGHT>\n"
 	       "\t\t\t<BOTTOM>525</BOTTOM>\n"
 	       "\t\t</POSITION>\n"
-	       "\t\t<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>\n"
 	       "\t\t<FONT>\n"
 	       "\t\t\t<NAME>%DEF_FONTNAME_LG%</NAME>\n"
 	       "\t\t\t<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>\n"
@@ -66,7 +70,7 @@ std::string startup_screen_xml(const std::string &title) {
 	       "\t\t\t\t<TOP>378</TOP>\n"
 	       "\t\t\t\t<RIGHT>460</RIGHT>\n"
 	       "\t\t\t</POSITION>\n"
-	       "\t\t\t<STRING type=\"id\" justify=\"CENTER\">MM_Exit</STRING>\n"
+	       "\t\t\t<STRING justify=\"CENTER\">Exit</STRING>\n"
 	       "\t\t</WINDOW>\n"
 	       "\t</WINDOW>\n"
 	       "</SCREEN>\n";
