@@ -1,5 +1,7 @@
 #pragma once
 
+#include <godot_cpp/classes/canvas_item.hpp>
+#include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -134,6 +136,13 @@ public:
 	// unknown) plus the non-integer layout values the LoadingScreen shell
 	// draws with.
 	static String loading_gametype_text_key(int p_game_type);
+	// The loading screen's wrapped text block painted into a CanvasItem: the
+	// engine breaks and places the lines (hud/loading_screen.h) against this
+	// font's measure, this leg only draws them. `align` is a HorizontalAlignment
+	// (left / center / right); returns the block's stopped_at.
+	static int draw_wrapped_text(CanvasItem *p_item, const Ref<Font> &p_font, int p_font_size,
+			const String &p_text, int p_x, int p_y, int p_width, int p_bottom, int p_align,
+			const Color &p_color, int p_skip_lines);
 	static String loading_fallback_image();
 	static String loading_font_small();
 	static String loading_font_large();

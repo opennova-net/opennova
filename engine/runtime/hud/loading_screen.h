@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <vector>
 
 // The mission loading screen's witnessed spec: the GAMETYPE -> LoadingText
 // key policy and the layout/appearance block the shell's LoadingScreen draws
@@ -163,5 +165,55 @@ inline constexpr int kSplashContinueY = 730;
 inline constexpr uint32_t kSplashContinueColorOn = 0xFFFFFFFFu;
 inline constexpr uint32_t kSplashContinueColorOff = 0xFFFF8080u;
 inline constexpr int kSplashBlinkMaskMs = 0x200;
+
+// --- the wrapped text block (loading_screen.cpp) --------------------------------
+// The original composites its text blocks with render_draw_wrapped_text_block_ex
+// @ 0x580eb0: a line breaker and a line placer over one width measure. The
+// measure is the embedder's (today the FontFile view of the .fnt; D-LOADSCR-2
+// carries the CGameFont metric residual), so the rules take it as a callback:
+// the pixel extent of a UTF-8 string in the font the block draws in.
+using TextExtent = std::function<float(const std::string &text)>;
+
+// The three bytes the breaker treats structurally: a space is the wrap point it
+// remembers, a carriage return is the hard break, and a line feed is only
+// swallowed when it trails a break [orig: the 32 / 13 / 10 tests @0x580f88,
+// @0x580fdf and @0x581128].
+inline constexpr unsigned char kTextSpace = 32;
+inline constexpr unsigned char kTextCarriageReturn = 13;
+inline constexpr unsigned char kTextLineFeed = 10;
+
+// The line breaker: the wrapped lines of `text` measured against `max_width`,
+// break characters consumed. Empty for no measure, empty text or a zero box.
+std::vector<std::string> wrap_text_lines(const TextExtent &extent, const std::string &text,
+		int max_width);
+
+// The alignment fold: retail's 4 = centred on left + width/2, 5 = right-aligned
+// on rect_right, anything else left [orig: @0x5810ab / @0x581094 / @0x58107f].
+enum class TextBlockAlign : uint8_t { kLeft = 0, kCenter = 1, kRight = 2 };
+
+// One laid-out line: the slice to paint and the top-left the alignment resolved
+// it to.
+struct TextBlockLine {
+	std::string text;
+	float x = 0.0f;
+	float y = 0.0f;
+};
+
+// The laid-out block: every line the drawer will paint, already placed, plus
+// `stopped_at` -- 0 when the whole string was consumed, otherwise the 1-based
+// count of lines processed when the box ran out of vertical room.
+struct TextBlock {
+	std::vector<TextBlockLine> lines;
+	int stopped_at = 0;
+};
+
+// The line placer over the breaker. `line_height` is the font's line pitch
+// (retail: the 'I' character's own extent @0x580f2b); lines before
+// `skip_lines` are consumed without being placed and without costing vertical
+// space; a line that measures empty advances HALF a line; drawing stops once
+// the next line would pass `bottom` unless `top == bottom`, which disables the
+// vertical clip.
+TextBlock layout_text_block(const TextExtent &extent, int line_height, const std::string &text,
+		int left, int top, int right, int bottom, TextBlockAlign align, int skip_lines = 0);
 
 } // namespace opennova::hud

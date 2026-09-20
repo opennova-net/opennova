@@ -1,6 +1,9 @@
 #include "hud/hud_pos.h"
 #include "util/color_convert.h"
+#include "util/string_convert.h"
 #include "hud/vehicle_hud_block.h"
+
+#include <godot_cpp/classes/canvas_item.hpp>
 
 #include "resource_index/resource_root.h"
 #include "util/data_format.h"
@@ -155,6 +158,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_key"), &HudPos::loading_splash_continue_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_font"), &HudPos::loading_splash_continue_font);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_color", "phase_on"), &HudPos::loading_splash_continue_color);
+	ClassDB::bind_static_method("HudPos", D_METHOD("draw_wrapped_text", "item", "font", "font_size", "text", "x", "y", "width", "bottom", "align", "color", "skip_lines"), &HudPos::draw_wrapped_text, DEFVAL(0));
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_crosshair_rect"), &HudPos::binocular_crosshair_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_digit_pos"), &HudPos::binocular_digit_pos);
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect"), &HudPos::nvg_scale_rect);
@@ -763,6 +767,31 @@ String HudPos::loading_splash_continue_key() {
 
 String HudPos::loading_splash_continue_font() {
 	return String(opennova::hud::kSplashContinueFont);
+}
+
+int HudPos::draw_wrapped_text(CanvasItem *p_item, const Ref<Font> &p_font, int p_font_size,
+		const String &p_text, int p_x, int p_y, int p_width, int p_bottom, int p_align,
+		const Color &p_color, int p_skip_lines) {
+	if (p_item == nullptr || p_font.is_null()) return 0;
+	// The measure is the FontFile view of the .fnt (D-LOADSCR-2 carries the
+	// CGameFont metric residual); the rules are the engine's.
+	const opennova::hud::TextExtent extent = [&p_font, p_font_size](const std::string &s) {
+		return static_cast<float>(
+				p_font->get_string_size(opennova::to_gd(s), HORIZONTAL_ALIGNMENT_LEFT, -1, p_font_size).x);
+	};
+	opennova::hud::TextBlockAlign align = opennova::hud::TextBlockAlign::kLeft;
+	if (p_align == HORIZONTAL_ALIGNMENT_CENTER) align = opennova::hud::TextBlockAlign::kCenter;
+	else if (p_align == HORIZONTAL_ALIGNMENT_RIGHT) align = opennova::hud::TextBlockAlign::kRight;
+	const opennova::hud::TextBlock block = opennova::hud::layout_text_block(extent,
+			static_cast<int>(p_font->get_height(p_font_size)), opennova::to_std(p_text), p_x, p_y,
+			p_x + p_width, p_bottom, align, p_skip_lines);
+	// `y` is the line TOP, so each baseline adds the ascent.
+	const float ascent = p_font->get_ascent(p_font_size);
+	for (const opennova::hud::TextBlockLine &row : block.lines) {
+		p_item->draw_string(p_font, Vector2(row.x, row.y + ascent), opennova::to_gd(row.text),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, p_font_size, p_color);
+	}
+	return block.stopped_at;
 }
 
 Color HudPos::loading_splash_continue_color(bool p_phase_on) {
