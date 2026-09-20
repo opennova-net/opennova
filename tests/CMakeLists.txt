@@ -1691,6 +1691,12 @@ target_include_directories(deploy_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_features(deploy_screen_feed_test PRIVATE cxx_std_17)
 add_test(NAME deploy_screen_feed COMMAND deploy_screen_feed_test)
 
+# The gamemus var pump from the local player (world/music_vars.h).
+add_executable(music_vars_test world/music_vars_test.cpp)
+target_link_libraries(music_vars_test PRIVATE opennova_runtime)
+target_compile_features(music_vars_test PRIVATE cxx_std_17)
+add_test(NAME music_vars COMMAND music_vars_test)
+
 # The SP objectives panel's row walk (world/objectives_feed.h).
 add_executable(objectives_feed_test world/objectives_feed_test.cpp)
 target_link_libraries(objectives_feed_test PRIVATE opennova_runtime)

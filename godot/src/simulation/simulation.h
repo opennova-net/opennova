@@ -35,6 +35,7 @@
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout the snapshot carries
 #include <runtime/world/present_drains.h> // the per-tick presentation drain rows (ADR 0043 d10)
+#include <runtime/world/music_vars.h> // MusicVarWrite (the gamemus var pump)
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the attach-label scan), the attach-command ids + the seat mirror
 #include <runtime/world/destruction.h> // DestructionEvents (the destruction drain)
@@ -1365,6 +1366,9 @@ public:
 	// The gamemus Var7 projection (world/music_vars.h carries the witness).
 	int get_local_player_health_percent() const;
 	int get_local_player_team() const;
+	// The gamemus var pump's writes for this frame (unbound; the world node
+	// relays them through its music_var_changed signal).
+	std::array<opennova::world::MusicVarWrite, 2> game_music_var_writes() const;
 	// The packed Avatars.def character id (npwire/character_id.h) the authority
 	// stamped on the local player — entity+0x15C on the host's own spawn, the
 	// named 0x0C record's id on a joiner (also before L exists); 0 = none yet.

@@ -297,6 +297,10 @@ int Simulation::get_local_player_health_percent() const {
 			get_local_player_max_health());
 }
 
+std::array<opennova::world::MusicVarWrite, 2> Simulation::game_music_var_writes() const {
+	return opennova::world::game_music_var_writes(kernel_->world);
+}
+
 int Simulation::get_local_player_team() const {
 	if (!kernel_->world.cached.local_player.valid()) return 0;
 	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);

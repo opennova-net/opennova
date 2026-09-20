@@ -20,7 +20,6 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include "audio/music_director.h"
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
 
@@ -1129,19 +1128,10 @@ void GameWorld::update_frame_clear_color() {
 	environment->set_bg_color(env_->frame_clear_color_for(false, above).linear_to_srgb());
 }
 
-// Re-drive the gamemus vars from the local player each frame, the way the
-// original does from the local player's body update [orig:
-// Entity_UpdateInfantryPlayerBody @ 0x4b40e0, gate entity ==
-// g_local_player_entity @ 0x4b6234; full map docs/audio/mus-sbf-re.md §Game
-// music driving]. Pumped here: Var7 = health % (cur*100/max, 100 when max <=
-// cur [orig: @ 0x4b6315-0x4b6324]) and Var10 = team [orig: @ 0x4b62fc].
-// Witnessed-but-unpumped seams (the shipped gamemus reads none of them --
-// docs/audio/mus-sbf-re.md (D-MUS-VARPUMP)): Var2 view pitch (the original
-// writes raw engine angle units, unwitnessed conversion), Var5/Var6 threat
-// distance / threat-targets-me (Entity_FindNearestThreat @ 0x4b0990
-// unported), Var3/Var4 (low-confidence), Var8 game type (retail scoring-mode
-// ids not yet mapped to our sessions). The var writes cross to the shell's
-// MusicService through the music_var_changed signal.
+// Re-drive the gamemus vars from the local player each frame: the engine names
+// the writes (world/music_vars.h game_music_var_writes, the var map of the
+// local player's body update), and they cross to the shell's MusicService
+// through the music_var_changed signal.
 void GameWorld::music_var_pump() {
 	MissionRoot *runtime = get_runtime();
 	if (runtime == nullptr || !runtime->has_player()) {
@@ -1151,10 +1141,9 @@ void GameWorld::music_var_pump() {
 	if (pump_sim.is_null()) {
 		return;
 	}
-	emit_signal("music_var_changed", static_cast<int>(MusicDirector::GAME_VAR_HEALTH_PCT),
-			pump_sim->get_local_player_health_percent());
-	emit_signal("music_var_changed", static_cast<int>(MusicDirector::GAME_VAR_TEAM),
-			runtime->local_player_team());
+	for (const opennova::world::MusicVarWrite &write : pump_sim->game_music_var_writes()) {
+		emit_signal("music_var_changed", write.slot, write.value);
+	}
 }
 
 // --- the perf counters --------------------------------------------------------------
