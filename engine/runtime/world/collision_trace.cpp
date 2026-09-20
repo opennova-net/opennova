@@ -2,9 +2,6 @@
 #include <runtime/world/pose_provider.h>
 #include <base/io/fixed.h>
 
-// Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // The projectile trace: target views, the broad phase, trace_projectile itself, and
 // the blink refresh that rides the same view cache.
 
@@ -369,25 +366,32 @@ CollisionWorld::ContactDebugKind contact_kind_for_trace(ProjectileHitClass hit_c
 
 }  // namespace
 
-ProjectileHit CollisionWorld::trace_projectile(const World &world,
-                                               const ProjectileTrace &trace) const {
-    const ProjectileHit hit = trace_projectile_impl(world, trace, false);
+// The F3 ray and contact capture shared by the two recorded traces.
+void CollisionWorld::record_trace_debug(const World &world, const ProjectileTrace &trace,
+                                        const ProjectileHit &hit, RayDebugCategory category,
+                                        bool knife) const {
     if (ray_debug_enabled_) {
         const int32_t a[3] = {trace.start.x, trace.start.y, trace.start.z};
         const int32_t b[3] = {trace.end.x, trace.end.y, trace.end.z};
         const int32_t h[3] = {hit.position_q16.x, hit.position_q16.y,
                               hit.position_q16.z};
-        ray_debug_record(RayDebugCategory::kProjectile, world.logic_tick, a, b,
+        ray_debug_record(category, world.logic_tick, a, b,
                          hit.hit() ? h : nullptr,
                          hit.hit() ? kRayDebugHit : kRayDebugClear);
     }
     if (contact_debug_enabled_ && hit.hit()) {
         const int32_t h[3] = {hit.position_q16.x, hit.position_q16.y,
                               hit.position_q16.z};
-        contact_debug_record(contact_kind_for_trace(hit.hit_class, false),
+        contact_debug_record(contact_kind_for_trace(hit.hit_class, knife),
                              world.logic_tick, hit.geometry_entity, h,
                              static_cast<uint8_t>(hit.hit_class));
     }
+}
+
+ProjectileHit CollisionWorld::trace_projectile(const World &world,
+                                               const ProjectileTrace &trace) const {
+    const ProjectileHit hit = trace_projectile_impl(world, trace, false);
+    record_trace_debug(world, trace, hit, RayDebugCategory::kProjectile, false);
     return hit;
 }
 
@@ -398,22 +402,7 @@ ProjectileHit CollisionWorld::trace_aim(const World &world, const ProjectileTrac
 ProjectileHit CollisionWorld::trace_knife_impact(
         const World &world, const ProjectileTrace &trace) const {
     const ProjectileHit hit = trace_projectile_impl(world, trace, true);
-    if (ray_debug_enabled_) {
-        const int32_t a[3] = {trace.start.x, trace.start.y, trace.start.z};
-        const int32_t b[3] = {trace.end.x, trace.end.y, trace.end.z};
-        const int32_t h[3] = {hit.position_q16.x, hit.position_q16.y,
-                              hit.position_q16.z};
-        ray_debug_record(RayDebugCategory::kKnife, world.logic_tick, a, b,
-                         hit.hit() ? h : nullptr,
-                         hit.hit() ? kRayDebugHit : kRayDebugClear);
-    }
-    if (contact_debug_enabled_ && hit.hit()) {
-        const int32_t h[3] = {hit.position_q16.x, hit.position_q16.y,
-                              hit.position_q16.z};
-        contact_debug_record(contact_kind_for_trace(hit.hit_class, true),
-                             world.logic_tick, hit.geometry_entity, h,
-                             static_cast<uint8_t>(hit.hit_class));
-    }
+    record_trace_debug(world, trace, hit, RayDebugCategory::kKnife, true);
     return hit;
 }
 

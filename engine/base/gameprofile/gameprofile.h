@@ -44,8 +44,6 @@ typedef struct GameProfile {
     uint32_t    container_key;  /* ROL7 XOR seed for PFF_FLAG_ENCRYPTED entries (all = 0x0312A4CE
                                    today; verified vs PFF_LoadFileToMemory @ 0x768920)            */
     int         scr_policy;     /* ScrPolicy                                                     */
-    int         bfc1_compress;  /* always 0 — no BFC1 compressor exists                          */
-    int         default_format; /* PffFormat for a NEW archive (0=PFF3, 1=PFF4, 2=BHD)            */
 } GameProfile;
 
 /* Number of profiles in the table. */

@@ -1,7 +1,6 @@
 #pragma once
 
-// Internal to engine/runtime/mission — not part of the public interface. Split out of
-// mission.cpp (quality campaign W3-1); the bodies are unchanged.
+// Internal to engine/formats/mission — not part of the public interface.
 //
 // The small shared primitives: fixed-width string fields, header byte accessors,
 // the .mis scalar formatters, entity-kind mapping, and the waypoint-record
@@ -24,13 +23,7 @@
 
 namespace opennova::mission::detail {
 
-inline std::string fixed_string(const char *data, size_t max_len) {
-	size_t len = 0;
-	while (len < max_len && data[len] != '\0') {
-		++len;
-	}
-	return std::string(data, len);
-}
+using strutil::fixed_string;
 
 inline std::string mis_string(std::string value) {
 	for (char &ch : value) {

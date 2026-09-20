@@ -632,8 +632,6 @@ const ParticleDrawList &ParticleFrameCompiler::compile(
 	debug.vertex_capacity = draw_list.vertices.capacity();
 	debug.command_capacity = draw_list.commands.capacity();
 	debug.emitter_bounds_capacity = draw_list.emitter_bounds.capacity();
-	debug.emitter_sort_capacity = impl.emitter_order.capacity();
-	debug.particle_sort_capacity = impl.particle_order.capacity();
 	debug.sort_stack_capacity = impl.sort_stack.capacity();
 	return draw_list;
 }

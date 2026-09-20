@@ -60,11 +60,6 @@ std::optional<UserRecord> get_user_by_username(opennova::db::Database &db,
                                                 const std::string &username);
 std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id);
 
-// All seeded players in `id` order. Used by the dev-mode round-robin
-// fallback in POST /NWLogin.dll when the request didn't supply an
-// EPASK form field (curl walkthroughs).
-std::vector<UserRecord> list_dev_players(opennova::db::Database &db);
-
 // All registered players, stripped of password_hash, ordered by id.
 // Powers GET /api/admin/users.
 std::vector<UserRecord> list_users(opennova::db::Database &db);

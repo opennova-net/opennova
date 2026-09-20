@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "common/file_io.h"
 #include "common/test_paths.h"
 #include <formats/threedi/threedi.h>
 #include "threedi/threedi_compare.h"
@@ -183,13 +184,11 @@ static int first_chunk_header_offset(const std::string &src, const char id[4], s
 
 static int write_modified_chunk_copy(const std::string &src, const std::string &dst, const char id[4])
 {
-    std::ifstream in(src.c_str(), std::ios::binary);
-    if (!in) {
+    std::vector<unsigned char> bytes;
+    if (!test_io::read_file(src, bytes)) {
         fprintf(stderr, "failed to open %s\n", src.c_str());
         return 0;
     }
-    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)),
-                                     std::istreambuf_iterator<char>());
     size_t payload_offset = 0;
     if (!first_chunk_payload_offset(src, id, &payload_offset) || payload_offset >= bytes.size()) {
         return 0;
@@ -204,13 +203,11 @@ static int write_modified_chunk_copy(const std::string &src, const std::string &
 
 static int write_modified_float_copy(const std::string &src, const std::string &dst, size_t byte_offset, float delta)
 {
-    std::ifstream in(src.c_str(), std::ios::binary);
-    if (!in) {
+    std::vector<unsigned char> bytes;
+    if (!test_io::read_file(src, bytes)) {
         fprintf(stderr, "failed to open %s\n", src.c_str());
         return 0;
     }
-    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)),
-                                     std::istreambuf_iterator<char>());
     if (byte_offset + sizeof(float) > bytes.size()) {
         return 0;
     }
@@ -228,13 +225,11 @@ static int write_modified_float_copy(const std::string &src, const std::string &
 
 static int write_modified_byte_copy(const std::string &src, const std::string &dst, size_t byte_offset)
 {
-    std::ifstream in(src.c_str(), std::ios::binary);
-    if (!in) {
+    std::vector<unsigned char> bytes;
+    if (!test_io::read_file(src, bytes)) {
         fprintf(stderr, "failed to open %s\n", src.c_str());
         return 0;
     }
-    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)),
-                                     std::istreambuf_iterator<char>());
     if (byte_offset >= bytes.size()) {
         return 0;
     }
@@ -248,13 +243,11 @@ static int write_modified_byte_copy(const std::string &src, const std::string &d
 
 static int write_parent_flag_toggled_chunk_copy(const std::string &src, const std::string &dst, const char id[4])
 {
-    std::ifstream in(src.c_str(), std::ios::binary);
-    if (!in) {
+    std::vector<unsigned char> bytes;
+    if (!test_io::read_file(src, bytes)) {
         fprintf(stderr, "failed to open %s\n", src.c_str());
         return 0;
     }
-    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)),
-                                     std::istreambuf_iterator<char>());
     size_t header_offset = 0;
     if (!first_chunk_header_offset(src, id, &header_offset) || header_offset + 7 >= bytes.size()) {
         return 0;

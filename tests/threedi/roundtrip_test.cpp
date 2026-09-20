@@ -3,8 +3,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "common/dirent_compat.h"
-#include <sys/stat.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <string>
+#include <system_error>
+#include <vector>
 
 #include <formats/threedi/threedi_3di3.h>
 #include "common/test_paths.h"
@@ -142,51 +146,32 @@ static int roundtrip_nonzero_glow(const char *path) {
 
 int main(void) {
     const char *repo_root = test_paths_repo_root(__FILE__);
-    char fixtures_dir[4096];
-    DIR *d;
-    struct dirent *ent;
-    char **files = NULL;
-    size_t file_count = 0, file_cap = 0;
-    size_t i;
+    const std::string fixtures_dir = std::string(repo_root) + "/fixtures/threedi/synth";
+    std::vector<std::string> files;
 
-    snprintf(fixtures_dir, sizeof(fixtures_dir), "%s/fixtures/threedi/synth", repo_root);
-
-    d = opendir(fixtures_dir);
-    if (!d) {
-        fprintf(stderr, "No fixture 3di files found under %s\n", fixtures_dir);
-        return EXIT_FAILURE;
-    }
-    while ((ent = readdir(d)) != NULL) {
-        if (has_extension(ent->d_name, ".3di")) {
-            char path[4096];
-            snprintf(path, sizeof(path), "%s/%s", fixtures_dir, ent->d_name);
-            if (file_count >= file_cap) {
-                file_cap = file_cap ? file_cap * 2 : 16;
-                files = (char **)realloc(files, file_cap * sizeof(char *));
-            }
-            files[file_count] = (char *)malloc(strlen(path) + 1);
-            strcpy(files[file_count], path);
-            file_count++;
+    std::error_code ec;
+    for (std::filesystem::directory_iterator it(fixtures_dir, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        const std::string name = it->path().filename().string();
+        if (has_extension(name.c_str(), ".3di")) {
+            files.push_back(fixtures_dir + "/" + name);
         }
     }
-    closedir(d);
+    // Directory order is unspecified; keep the run order stable.
+    std::sort(files.begin(), files.end());
 
-    if (file_count == 0) {
-        fprintf(stderr, "No fixture 3di files found under %s\n", fixtures_dir);
-        free(files);
+    if (files.empty()) {
+        fprintf(stderr, "No fixture 3di files found under %s\n", fixtures_dir.c_str());
         return EXIT_FAILURE;
     }
 
-    printf("Testing %zu 3DI files...\n", file_count);
-    for (i = 0; i < file_count; ++i) {
+    printf("Testing %zu 3DI files...\n", files.size());
+    for (const std::string &file : files) {
         // Extract filename for display
-        const char *name = strrchr(files[i], '/');
-        name = name ? name + 1 : files[i];
+        const char *name = strrchr(file.c_str(), '/');
+        name = name ? name + 1 : file.c_str();
         printf("  %s... ", name);
-        if (!roundtrip(files[i])) {
-            // Cleanup
-            for (i = 0; i < file_count; ++i) free(files[i]);
-            free(files);
+        if (!roundtrip(file.c_str())) {
             return EXIT_FAILURE;
         }
         printf("OK\n");
@@ -195,12 +180,10 @@ int main(void) {
 
     {
         int glow_tested = 0;
-        for (i = 0; i < file_count; ++i) {
-            const int result = roundtrip_nonzero_glow(files[i]);
+        for (const std::string &file : files) {
+            const int result = roundtrip_nonzero_glow(file.c_str());
             if (result < 0) {
-                fprintf(stderr, "Nonzero OOBJ glow roundtrip failed for %s\n", files[i]);
-                for (i = 0; i < file_count; ++i) free(files[i]);
-                free(files);
+                fprintf(stderr, "Nonzero OOBJ glow roundtrip failed for %s\n", file.c_str());
                 return EXIT_FAILURE;
             }
             if (result > 0) {
@@ -210,13 +193,9 @@ int main(void) {
         }
         if (!glow_tested) {
             fprintf(stderr, "No OOBJ fixture available for the glow roundtrip\n");
-            for (i = 0; i < file_count; ++i) free(files[i]);
-            free(files);
             return EXIT_FAILURE;
         }
     }
 
-    for (i = 0; i < file_count; ++i) free(files[i]);
-    free(files);
     return EXIT_SUCCESS;
 }

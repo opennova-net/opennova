@@ -15,7 +15,7 @@ namespace opennova::world {
 // infantry.cpp, shared with infantry_combat.cpp and infantry_board.cpp.
 // The motor-head channel update in infantry_animation.cpp owns gait inserts.
 int32_t bearing_to(int32_t dx, int32_t dy);
-void commit_body_state(InfantryState &inf, int resolved, const IRootMotionSource *root_motion);
+void commit_body_state(InfantryState &inf, int resolved);
 void commit_player_body_state(InfantryState &inf, int resolved,
                               const IRootMotionSource *root_motion, bool wash);
 // Standing org1/org2 carrier delta, after the animation capsule sample.

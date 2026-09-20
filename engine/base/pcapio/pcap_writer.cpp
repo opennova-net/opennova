@@ -1,5 +1,7 @@
 #include <base/pcapio/pcap_writer.h>
 
+#include <base/io/le.h>
+
 #include <chrono>
 #include <cstdlib>
 
@@ -10,15 +12,11 @@ constexpr uint32_t PCAP_MAGIC_LE = 0xa1b2c3d4u;
 constexpr uint32_t LINKTYPE_RAW = 101; // raw IP — each record is a bare IPv4 frame
 
 void put32(std::vector<uint8_t> &out, uint32_t v) {
-	out.push_back(uint8_t(v));
-	out.push_back(uint8_t(v >> 8));
-	out.push_back(uint8_t(v >> 16));
-	out.push_back(uint8_t(v >> 24));
+	io::append_u32_le(out, v);
 }
 
 void put16(std::vector<uint8_t> &out, uint16_t v) {
-	out.push_back(uint8_t(v));
-	out.push_back(uint8_t(v >> 8));
+	io::append_u16_le(out, v);
 }
 
 void put16_be(std::vector<uint8_t> &out, uint16_t v) {

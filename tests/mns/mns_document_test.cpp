@@ -1,8 +1,8 @@
 /* MNS lossless document model tests (opennova::mns::Document, ADR 0014).
 
-   The committed fixture fixtures/mns/menu_style.mns is the real shipped JO
-   stylesheet, sourced byte-exact from the revx02 menu set (the same provenance
-   as the fixtures/mnu menus; its 38-line comment header is NovaLogic's own
+   The reference fixture OPENNOVA_JO_ASSETS/fixtures/mns/menu_style.mns is the
+   real shipped JO stylesheet, byte-exact from the revx02 menu set (no retail
+   fixture lives in the tree; its 38-line comment header is NovaLogic's own
    format specification and the acid test for losslessness: CRLF line endings,
    no BOM, no final newline, tab-aligned defines, mixed-case values).
 
@@ -19,12 +19,11 @@
 #include <formats/mns/mns.h>
 #include <formats/mns/mns_document.h>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
 
 #include <cstring>
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 #include <string>
 
 #include "common/retail_paths.h"
@@ -36,15 +35,6 @@ namespace {
 // OPENNOVA_JO_ASSETS, when the retail legs below are skipped (SKIP-LEG).
 std::string g_real_fixture;
 const char *kRealFixture = "";
-
-bool read_file(const char *path, std::string &out) {
-	std::ifstream f(path, std::ios::binary);
-	if (!f) return false;
-	std::ostringstream ss;
-	ss << f.rdbuf();
-	out = ss.str();
-	return true;
-}
 
 std::string to_string(const std::vector<uint8_t> &bytes) {
 	return std::string(bytes.begin(), bytes.end());
@@ -71,14 +61,6 @@ std::vector<std::string> split_lines(const std::string &s) {
 	return lines;
 }
 
-int count_errors(const opennova::mns::Document &doc) {
-	int n = 0;
-	for (const auto &d : doc.diagnostics()) {
-		if (d.severity == opennova::mns::Severity::Error) ++n;
-	}
-	return n;
-}
-
 bool has_diagnostic(const opennova::mns::Document &doc, const std::string &code) {
 	for (const auto &d : doc.diagnostics()) {
 		if (d.code == code) return true;
@@ -90,7 +72,7 @@ bool has_diagnostic(const opennova::mns::Document &doc, const std::string &code)
 
 static int test_real_file_byte_roundtrip() {
 	std::string src;
-	TEST_EXPECT(read_file(kRealFixture, src));
+	TEST_EXPECT(test_io::read_file_text(kRealFixture, src));
 	TEST_EXPECT(src.size() == 3761);
 
 	opennova::mns::Document doc = opennova::mns::Document::parse(src);
@@ -107,7 +89,7 @@ static int test_real_file_byte_roundtrip() {
 
 static int test_real_file_flatten() {
 	std::string src;
-	TEST_EXPECT(read_file(kRealFixture, src));
+	TEST_EXPECT(test_io::read_file_text(kRealFixture, src));
 	opennova::mns::StyleSheet sheet = opennova::mns::Document::parse(src).flatten();
 
 	TEST_EXPECT(sheet.variables.size() == 12);
@@ -128,7 +110,7 @@ static int test_real_file_flatten() {
 
 static int test_real_file_entries() {
 	std::string src;
-	TEST_EXPECT(read_file(kRealFixture, src));
+	TEST_EXPECT(test_io::read_file_text(kRealFixture, src));
 	opennova::mns::Document doc = opennova::mns::Document::parse(src);
 	const auto entries = doc.entries();
 
@@ -358,7 +340,7 @@ static int test_invalid_name_diagnostic() {
 
 static int test_edit_stability_set_value() {
 	std::string src;
-	TEST_EXPECT(read_file(kRealFixture, src));
+	TEST_EXPECT(test_io::read_file_text(kRealFixture, src));
 	opennova::mns::Document doc = opennova::mns::Document::parse(src);
 
 	std::string error;
@@ -426,7 +408,7 @@ static int test_add_rename_remove_move() {
 	// Same shape on the real fixture (CRLF document EOL).
 	if (!g_real_fixture.empty()) {
 		std::string src;
-		TEST_EXPECT(read_file(kRealFixture, src));
+		TEST_EXPECT(test_io::read_file_text(kRealFixture, src));
 		opennova::mns::Document doc = opennova::mns::Document::parse(src);
 		TEST_EXPECT(doc.add_define("MY_COLOR", "FF102030", -1, "added by test", &error));
 		TEST_EXPECT(to_string(doc.serialize()) ==
@@ -544,7 +526,7 @@ static int test_source_text_get_set() {
 	// get -> set -> serialize is byte-faithful on the real file.
 	if (!g_real_fixture.empty()) {
 		std::string src;
-		TEST_EXPECT(read_file(kRealFixture, src));
+		TEST_EXPECT(test_io::read_file_text(kRealFixture, src));
 		opennova::mns::Document doc = opennova::mns::Document::parse(src);
 		doc.set_source_text(doc.source_text());
 		TEST_EXPECT(to_string(doc.serialize()) == src);

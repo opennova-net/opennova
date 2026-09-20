@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <base/io/le.h>
 #include <net/napi/tlv.h>
 
 namespace opennova {
@@ -82,10 +83,7 @@ std::string strip_nul(const uint8_t *data, size_t len) {
 
 uint32_t read_u32_le(const uint8_t *data, size_t len) {
 	if (len < 4) return 0;
-	return static_cast<uint32_t>(data[0]) |
-			(static_cast<uint32_t>(data[1]) << 8) |
-			(static_cast<uint32_t>(data[2]) << 16) |
-			(static_cast<uint32_t>(data[3]) << 24);
+	return io::read_u32_le(data);
 }
 
 } // namespace

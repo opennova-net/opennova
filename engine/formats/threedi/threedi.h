@@ -23,7 +23,6 @@ typedef struct ThreediFile {
     uint32_t version;          // e.g., 259 in legacy 3DI3 tooling.
     ThreediChunk *root;
     uint8_t *buffer;           // Owning buffer for the entire file.
-    size_t buffer_len;
 } ThreediFile;
 
 // Load a 3DI file from disk into a chunk tree. Returns 0 on success.

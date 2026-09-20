@@ -3,7 +3,6 @@
 // Split out of world.cpp by leg (the infantry_ladder.cpp precedent) so the
 // World tick TU stays under the size ratchet; the two share world.h only.
 #include <runtime/world/world.h>
-#include <base/io/perf_clock.h>
 
 #include <algorithm>
 #include <cmath>

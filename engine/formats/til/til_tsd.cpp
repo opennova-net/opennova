@@ -17,17 +17,6 @@ const char *const til_tsd_surface_names[TIL_TSD_SURFACE_NAME_COUNT] = {
 
 namespace {
 
-bool ieq_prefix(const char *s, const char *prefix, size_t n) {
-	for (size_t i = 0; i < n; ++i) {
-		char cs = s[i], cp = prefix[i];
-		if (cs == 0) return false;
-		if (cs >= 'a' && cs <= 'z') cs -= 32;
-		if (cp >= 'a' && cp <= 'z') cp -= 32;
-		if (cs != cp) return false;
-	}
-	return true;
-}
-
 // One tokenized line -> the Terrain_ParseTsdRow row apply. [orig: Terrain_ParseTsdRow @ 0x604c00]
 void apply_row(const char *key, const char *value, TilSurfaceTable &out) {
 	// token 2 vs the name table, case-insensitive; no match -> 0 (retail's
@@ -42,7 +31,7 @@ void apply_row(const char *key, const char *value, TilSurfaceTable &out) {
 	// "INDEX_" prefix, case-insensitive; the slot is atol of the suffix
 	// [orig: @ 0x604c46/@ 0x604c62]. Out-of-range slots are skipped where
 	// retail writes out of bounds (reimpl guard).
-	if (!ieq_prefix(key, "INDEX_", 6)) return;
+	if (!strutil::starts_with_icase(key, "INDEX_")) return;
 	const long slot = std::strtol(key + 6, nullptr, 10);
 	if (slot < 0 || slot > 255) return;
 	out.map[slot] = ordinal;

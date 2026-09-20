@@ -7,11 +7,10 @@
 
 #include <runtime/audio/oneshot_play.h>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/retail_paths.h"
 
-#include <fstream>
-#include <iterator>
 
 #include <string>
 #include <vector>
@@ -418,9 +417,8 @@ int test_retail_tank_sets_select_view_layers() {
         retail::skip_leg("OPENNOVA_JO_ASSETS/JOx01.LWF (tank fire/reload view layers)");
         return 0;
     }
-    std::ifstream input(path, std::ios::binary);
-    TEST_EXPECT(input.good());
-    const std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+    std::vector<uint8_t> bytes;
+    TEST_EXPECT(test_io::read_file(path, bytes));
     lwf::File bank;
     std::string error;
     TEST_EXPECT(lwf::parse_lwf_buffer(bytes.data(), bytes.size(), bank, error));

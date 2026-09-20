@@ -247,21 +247,10 @@ bool EnvironmentState::raining() const {
 
 // --- HHMM conversions ------------------------------------------------------
 
-double EnvironmentState::minute_of_day_to_hhmm(double minute_of_day) {
-	const double wrapped = fposmod(minute_of_day, kClockMinutesPerDay);
-	const double hour = std::floor(wrapped / kMinutesPerHour);
-	return hour * kHhmmHourScale + fposmod(wrapped, kMinutesPerHour);
-}
-
 double EnvironmentState::hhmm_to_minute_of_day(double hhmm) {
 	const double wrapped = fposmod(hhmm, kHhmmDay);
 	const double hour = std::floor(wrapped / kHhmmHourScale);
 	return hour * kMinutesPerHour + (wrapped - hour * kHhmmHourScale);
-}
-
-double EnvironmentState::fixed24_to_hhmm(int value) {
-	return hours_to_hhmm(
-			static_cast<double>(value) / static_cast<double>(kFixed24OneHour));
 }
 
 uint32_t EnvironmentState::hhmm_to_fixed24(double hhmm) {
@@ -276,12 +265,6 @@ void EnvironmentState::ensure_standalone_weather_seeded(int wind_scale) {
 		return;
 	}
 	reset_standalone_weather(wind_scale);
-}
-
-double EnvironmentState::hours_to_hhmm(double hours) {
-	const double wrapped = fposmod(hours, static_cast<double>(kHoursPerDay));
-	const double hour = std::floor(wrapped);
-	return hour * kHhmmHourScale + (wrapped - hour) * kMinutesPerHour;
 }
 
 // --- NVG -------------------------------------------------------------------

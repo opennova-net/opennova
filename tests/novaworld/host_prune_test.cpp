@@ -5,27 +5,11 @@
 #include <net/novaworld/host_repository.h>
 
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 #include <string>
 
 #include "common/test_expect.h"
 
 namespace {
-
-// Apply the real migrations so the schema (FKs, indexes, cascade) matches
-// production exactly.
-void apply_migrations(opennova::db::Database &db) {
-	const std::string dir = std::string(OPENNOVA_SOURCE_DIR) + "/backend/migrations";
-	for (const char *f : {"0001_initial.sql", "0002_active_hosts.sql",
-	                      "0003_novaworld_status_and_gsb.sql",
-	                      "0004_unknown_messages.sql"}) {
-		std::ifstream in(dir + "/" + f, std::ios::binary);
-		std::ostringstream os;
-		os << in.rdbuf();
-		db.exec_script(os.str());
-	}
-}
 
 void insert_host(opennova::db::Database &db, uint32_t rid,
                  const std::string &age_modifier) {
@@ -51,7 +35,9 @@ int64_t host_count(opennova::db::Database &db) {
 
 int main() {
 	opennova::db::Database db(":memory:");
-	apply_migrations(db);
+	// The real migrations, so the schema (FKs, indexes, cascade) matches
+	// production exactly.
+	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 
 	insert_host(db, 1, "-10 minutes"); // stale
 	insert_host(db, 2, "-2 seconds");  // fresh

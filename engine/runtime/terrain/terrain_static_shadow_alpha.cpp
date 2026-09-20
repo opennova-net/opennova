@@ -18,15 +18,6 @@ constexpr uint8_t kShadowStampDomain[] = {
 		'h', 'a', 'd', 'o', 'w', '-', 'a', 'l',
 		'p', 'h', 'a', '-', 'v', '1'};
 
-bool same_page(const TerrainTilePageKey &left,
-		const TerrainTilePageKey &right) noexcept {
-	return left.sector_origin_x == right.sector_origin_x &&
-			left.sector_origin_z == right.sector_origin_z &&
-			left.page_local_x == right.page_local_x &&
-			left.page_local_z == right.page_local_z &&
-			left.page_lod_level == right.page_lod_level;
-}
-
 bool pixel_count(uint32_t width, uint32_t height,
 		std::size_t &result) noexcept {
 	if (width == 0 || height == 0 ||

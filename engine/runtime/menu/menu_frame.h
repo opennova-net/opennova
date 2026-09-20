@@ -472,6 +472,11 @@ private:
 	// Shared row-height rule (authored MIN_ITEM_HEIGHT wins, else the "W"
 	// measure) for list rows / combo popup rows.
 	int row_height_(const WidgetNode &node) const;
+	// The shared row walk behind list_row_at (the widget rect, the embedded
+	// scrollbar) and combo_popup_row_at (the popup rect, the popup scrollbar).
+	int row_at_in_rect_(int index, const MenuFrameState &state,
+			const mnu::RectEdges &rect, ScrollbarKind kind, float mx, float my,
+			float sx, float sy) const;
 	void table_row_heights_(const WidgetNode &node, int *header_height,
 			int *body_row_height) const;
 	bool widget_shown_(int index, const MenuFrameState &state) const;

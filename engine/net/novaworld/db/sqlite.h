@@ -94,8 +94,6 @@ public:
 	void commit();
 	void rollback();
 
-	sqlite3 *raw() { return handle_; }
-
 private:
 	sqlite3 *handle_ = nullptr;
 };

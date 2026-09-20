@@ -209,10 +209,8 @@ uint8_t current_player_class(const NapiNPConnection &conn, const world::World *w
 // player+89820, rows walked off the player's own 780-slot weapon table, which a player that never
 // submitted a loadout has none of.]
 std::vector<uint8_t> build_current_loadout_reply(const std::vector<uint8_t> &retained,
-                                                 uint8_t player_class,
-                                                 const world::WeaponTable *armory) {
+                                                 uint8_t player_class) {
 	if (!retained.empty()) return retained;
-	(void)armory;
 	WeaponLoadout current;
 	current.avatar_class = player_class;
 	return encode_weapon_loadout(current);

@@ -14,6 +14,8 @@
 #include <runtime/world/system.h>
 #include <runtime/world/world.h>
 
+#include "death_clip_source.h"
+
 using namespace opennova::world;
 using namespace opennova::crt;
 
@@ -2482,22 +2484,7 @@ void test_item_callbacks_receive_geometric_section_on_both_peers() {
     }
 }
 
-// The clips a player body's org2 anim path asks for while these rigs tick it:
-// the idle pair plus the whole death family.
-struct DeathClipSource final : IRootMotionSource {
-    bool has_clip(int, int state_id) const override {
-        return state_id == anim_state::kIdle || state_id == anim_state::kIdle2 ||
-               (state_id >= anim_state::kDeathFire &&
-                state_id <= anim_state::kDeathBulletBase + 59);
-    }
-    int32_t clip_length_ticks(int, int, int) const override { return -1; }
-    bool advance(int, int state_id, int32_t &phase, RootMotionFrame &out) override {
-        if (!has_clip(0, state_id)) return false;
-        ++phase;
-        out = RootMotionFrame{};
-        return true;
-    }
-};
+using test_world::DeathClipSource;
 
 // A remote-peer PLAYER body the authority animates (so the org2 think cadence
 // runs over it) behind a posed 14-section collision model: section 13 is the

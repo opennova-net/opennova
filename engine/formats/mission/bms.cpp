@@ -2,6 +2,7 @@
 #include <formats/mission/bms.h>
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
+#include <base/io/strutil.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -13,13 +14,7 @@ namespace opennova::bms {
 
 namespace {
 
-std::string fixed_string(const char *data, size_t max_len) {
-    size_t len = 0;
-    while (len < max_len && data[len] != '\0') {
-        ++len;
-    }
-    return std::string(data, len);
-}
+using strutil::fixed_string;
 
 constexpr uint32_t kKnownBmsiAttributeMask =
     static_cast<uint32_t>(BmsiAttributeFlags::Blind) |

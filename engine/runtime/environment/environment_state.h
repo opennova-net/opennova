@@ -1,6 +1,6 @@
 // The runtime TOD environment state owner — the state half of the
-// witnessed environment cluster, ported verbatim from environment.gd
-// (2026-08-09 de-scripting). Engine equivalents (docs/env/env-tod-re.md):
+// witnessed environment cluster.
+// Engine equivalents (docs/env/env-tod-re.md):
 // - [orig: Environment_UpdateWeatherTick @ 0x57e9b0] advances time per tick.
 // - [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] interpolates
 //   keyframe colors and selects sun-vs-moon light by the hardcoded day-phase
@@ -196,11 +196,8 @@ public:
 
 	// --- HHMM conversion statics ------------------------------------------
 
-	static double minute_of_day_to_hhmm(double minute_of_day);
 	static double hhmm_to_minute_of_day(double hhmm);
-	static double fixed24_to_hhmm(int value);
 	static uint32_t hhmm_to_fixed24(double hhmm);
-	static double hours_to_hhmm(double hours);
 
 	// --- the weather-driven split -----------------------------------------
 

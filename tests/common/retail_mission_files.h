@@ -1,9 +1,9 @@
 // Retail path glue for the asset-gated world/mission ctests (ADR 0042 d3):
 // the engine's own mission::MissionKernel is the boot + state, the inmatch
 // roles (LocalRole / HostRole, ADR 0043 d3) are the ticks, and this pair keeps
-// only what a ctest needs on top — the mission's .cpt/.trn terrain documents
-// (the format-typed leg on the far side of the ADR 0020 seam) and the
-// listen/no-net role pick the Session-driven tests bank on.
+// only what a ctest needs on top — the listen/no-net role pick the
+// Session-driven tests bank on (the kernel boot loads the terrain field
+// through the mounted root itself).
 //
 // Gating is the caller's: open() (inherited from the kernel) takes the root
 // from retail::install() / retail::assets() and reports a missing file so the
@@ -42,12 +42,9 @@ inline int ticks_for_seconds(double seconds) {
 	return static_cast<int>(seconds / kTickSeconds + 0.5);
 }
 
-constexpr double kBamPerDeg = 4294967296.0 / 360.0;
-
 using opennova::io::bam_from_radians;
 
-// The kernel plus the ctest-side halves: retail terrain documents and the
-// two tick roles. Everything a test reads or
+// The kernel plus the ctest-side half: the two tick roles. Everything a test reads or
 // mutates — world, ai, input, weapon, loadout, the player/entity/terrain/
 // observation seams — is the kernel's own public surface.
 class RetailMissionRig : public mission::MissionKernel {

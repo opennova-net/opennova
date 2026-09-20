@@ -3,7 +3,6 @@
 // Foliage-def normalization and world->foliagemap helpers.
 // [orig: jodemo Foliage_BuildPatchData @0x5C0240 / Terrain_GetFoliageMapValue @0x5C65E0]
 // [orig: Foliage_SampleFoliageMapMask @0x606620; Foliage_GenerateModelTileInstances @0x600980; docs/foliage/foliage-re.md]
-// docs/engine_spec_foliage.md 2.3, 4.4.4, 8
 
 #include <algorithm>
 #include <cmath>

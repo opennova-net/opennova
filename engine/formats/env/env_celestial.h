@@ -9,7 +9,7 @@
 
 // Celestial-side render state math: sun glare, the celestial body alphas,
 // the star field, glare occlusion, and the sky-dome constants + mesh
-// builder. Split from the retired env_render.h umbrella (W3-7).
+// builder.
 
 namespace opennova::env {
 

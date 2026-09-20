@@ -320,7 +320,6 @@ HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const SessionReplyState &
 	const PreSpawnJoinerPose &pose = reply.pre_spawn_pose;
 	if (pose.valid) {
 		// The joiner already sent a C2S 0x0C — spawn it where it reported.
-		p.pos_valid = true;
 		p.entity_handle = pose.entity_handle;
 		p.item_type_id = pose.item_type_id != 0 ? pose.item_type_id : 0x14B9u;
 		p.pos_x = static_cast<int32_t>(pose.pos_x);
@@ -331,7 +330,6 @@ HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const SessionReplyState &
 	} else {
 		// No uplink yet — fall back to the host-advertised spawn from the session config.
 		const GameConfig &cfg = ctx.config;
-		p.pos_valid = false;
 		p.item_type_id = 0x14B9u;
 		p.pos_x = static_cast<int32_t>(cfg.spawn_x);
 		p.pos_y = static_cast<int32_t>(cfg.spawn_y);
@@ -398,7 +396,6 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 	if (ctx.world != nullptr && conn.link.owned_entity.valid()) {
 		if (const world::Entity *e = ctx.world->registry.get(conn.link.owned_entity)) {
 			HostJoinerPose p;
-			p.pos_valid = true;
 			p.entity_handle = e->handle.packed;
 			p.item_type_id = static_cast<uint16_t>(e->item_id);
 			p.pos_x = world::to_fixed(e->position.x);

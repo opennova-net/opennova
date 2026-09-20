@@ -121,16 +121,4 @@ inline bool check_parity(const std::string &name, const std::vector<uint8_t> &d)
   return true;
 }
 
-inline bool load_file(const std::string &path, std::vector<uint8_t> &out) {
-  std::FILE *f = std::fopen(path.c_str(), "rb");
-  if (!f) return false;
-  std::fseek(f, 0, SEEK_END);
-  long size = std::ftell(f);
-  std::fseek(f, 0, SEEK_SET);
-  out.resize(static_cast<size_t>(size));
-  size_t got = size > 0 ? std::fread(out.data(), 1, out.size(), f) : 0;
-  std::fclose(f);
-  return got == out.size();
-}
-
 }  // namespace rtxt_real

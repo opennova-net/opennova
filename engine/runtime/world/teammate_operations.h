@@ -36,7 +36,7 @@ public:
         std::array<int32_t, 3> goal{};
         int32_t heading = 0;
         State state = State::Finished;
-        int32_t assisting = 0, medic = 0, deadline = 0;
+        int32_t medic = 0, deadline = 0;
     };
 
     void reset(World &world);

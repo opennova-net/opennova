@@ -31,12 +31,7 @@ uint32_t key_fold(const std::string &key) {
 // NAPI envelope's CRC, just used here without the LSB-scatter wrapping.
 // [orig: NapiNP_ComputeCRC @ 0x618770 (retail) — CRC-32/MPEG-2, table dword_849938, no final xor]
 uint32_t crc32_be(const std::vector<uint8_t> &data) {
-	uint32_t crc = 0xFFFFFFFFu;
-	for (uint8_t byte : data) {
-		const uint32_t idx = ((crc >> 24) ^ byte) & 0xFFu;
-		crc = ((crc << 8) & 0xFFFFFFFFu) ^ CRC32_TABLE[idx];
-	}
-	return crc & 0xFFFFFFFFu;
+	return crc32_napi(data.data(), data.size());
 }
 
 // Phase 1 (encrypt) / Phase 4 (decrypt): 16-bit LCG step adds/subtracts

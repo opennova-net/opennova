@@ -266,7 +266,6 @@ struct Q3DrawCommand {
 };
 
 struct Q3FrameDebugCounters {
-	std::size_t input_submissions = 0;
 	std::size_t invisible_submissions = 0;
 	std::size_t emitted_submissions = 0;
 	std::size_t rejected_submissions = 0;

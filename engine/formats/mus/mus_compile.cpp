@@ -317,7 +317,6 @@ static int resolve_intrinsic_index(const char *obj, const char *method) {
 struct SectionDef {
     char     name[MUS_SECTION_NAME_SIZE];
     uint32_t code_offset;       /* bytecode-relative; populated when emitted */
-    int      defined;           /* 1 once 'section X { ... }' has been seen */
 };
 
 /* ---- Bytecode emit buffer + label patching ---- */
@@ -348,10 +347,6 @@ struct Emit {
             cap = new_cap;
         }
         bytes[used++] = b;
-    }
-    void u16le(uint16_t v) {
-        byte((uint8_t)(v & 0xFF));
-        byte((uint8_t)((v >> 8) & 0xFF));
     }
     void u32le(uint32_t v) {
         byte((uint8_t)(v & 0xFF));
@@ -491,7 +486,6 @@ struct Compiler {
         memset(&s, 0, sizeof(s));
         strncpy(s.name, name, sizeof(s.name) - 1);
         s.code_offset = 0;
-        s.defined = 0;
         return (int)(section_count - 1);
     }
 
@@ -810,7 +804,7 @@ int Compiler::parse_stmt(const char **err) {
             *err = "play target index out of range (max 255)";
             return -1;
         }
-        emit.byte(0x3E);
+        emit.byte((uint8_t)MUS_OP_PLAY);
         emit.byte((uint8_t)idx);
         lex.advance();
         return 0;
@@ -824,7 +818,7 @@ int Compiler::parse_stmt(const char **err) {
             return -1;
         }
         int sidx = section_find_or_create(lex.cur_text);
-        emit.byte(0x3B);             /* setstate -- decompiles same as 0x38 enter */
+        emit.byte((uint8_t)MUS_OP_SETSTATE);  /* decompiles same as 0x38 enter */
         emit.byte((uint8_t)sidx);
         lex.advance();
         return 0;
@@ -841,7 +835,7 @@ int Compiler::parse_stmt(const char **err) {
         char name[MUS_SECTION_NAME_SIZE];
         strncpy(name, lex.cur_text, sizeof(name) - 1);
         name[sizeof(name) - 1] = 0;
-        emit.byte(0x30);
+        emit.byte((uint8_t)MUS_OP_GOTO);
         uint32_t patch = emit.reserve_u32();
         emit.add_patch(patch, name);
         lex.advance();
@@ -883,7 +877,7 @@ int Compiler::parse_stmt(const char **err) {
     }
     if (lex.cur_kind == Tok::KwDone) {
         lex.advance();
-        emit.byte(0x3F);
+        emit.byte((uint8_t)MUS_OP_DONE);
         return 0;
     }
 
@@ -928,7 +922,7 @@ int Compiler::parse_stmt(const char **err) {
             }
             lex.advance();
             /* End-of-if jump */
-            emit.byte(0x30);
+            emit.byte((uint8_t)MUS_OP_GOTO);
             uint32_t end_patch = emit.reserve_u32();
             /* Patch brfalse target = current pos */
             emit.patch_u32(br_target_off, (uint32_t)emit.used);
@@ -966,9 +960,9 @@ int Compiler::parse_stmt(const char **err) {
         lex.advance();
         uint8_t inner_op = 0;
         int     entry_size = 2;
-        if      (lex.cur_kind == Tok::KwEnter) inner_op = 0x3B;
-        else if (lex.cur_kind == Tok::KwPlay)  inner_op = 0x3E;
-        else if (lex.cur_kind == Tok::KwGoto)  { inner_op = 0x30; entry_size = 5; }
+        if      (lex.cur_kind == Tok::KwEnter) inner_op = (uint8_t)MUS_OP_SETSTATE;
+        else if (lex.cur_kind == Tok::KwPlay)  inner_op = (uint8_t)MUS_OP_PLAY;
+        else if (lex.cur_kind == Tok::KwGoto)  { inner_op = (uint8_t)MUS_OP_GOTO; entry_size = 5; }
         else { *err = "expected enter/play/goto after 'on (...)'"; return -1; }
         lex.advance();
         /* Collect target identifiers. Names-aware decompiles can emit a play
@@ -1006,7 +1000,7 @@ int Compiler::parse_stmt(const char **err) {
             *err = "on(...) table too large to encode (reduce targets)";
             return -1;
         }
-        emit.byte(0x35);
+        emit.byte((uint8_t)MUS_OP_TABLEXEC);
         emit.byte((uint8_t)ntargets);
         emit.byte(inner_op);
         emit.byte((uint8_t)entry_size);
@@ -1015,7 +1009,7 @@ int Compiler::parse_stmt(const char **err) {
             emit.byte(inner_op);
             if (entry_size == 2) {
                 /* enter or play: entry[1] = section/sound idx (1 byte) */
-                if (inner_op == 0x3B) {
+                if (inner_op == MUS_OP_SETSTATE) {
                     int sidx = section_find_or_create(targets[t]);
                     if (sidx > 255) {
                         *err = "too many sections to index in on(...) table";
@@ -1113,7 +1107,7 @@ int Compiler::parse_section_body(const char **err, bool inside_section) {
     while (lex.cur_kind != Tok::Eof) {
         if (lex.cur_kind == Tok::RBrace && inside_section) {
             /* '}' closes a section: emit done and consume. */
-            emit.byte(0x3F);
+            emit.byte((uint8_t)MUS_OP_DONE);
             lex.advance();
             return 0;
         }
@@ -1195,7 +1189,6 @@ int Compiler::parse_top_decl(const char **err) {
         }
         int sidx = section_find_or_create(lex.cur_text);
         sections[sidx].code_offset = (uint32_t)emit.used;
-        sections[sidx].defined = 1;
         lex.advance();
         if (lex.cur_kind != Tok::LBrace) {
             *err = "expected '{' after section name";

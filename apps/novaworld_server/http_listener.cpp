@@ -3,7 +3,6 @@
 #include "auth.h"
 #include "catalog_repository.h"
 #include "github_client.h"
-#include "nw_udp_listener.h"
 #include "server_config.h"
 #include "session_store.h"
 #include "template_engine.h"
@@ -218,18 +217,6 @@ bool expansion_bits_compatible(const std::string &owned,
 	return owned == required;
 }
 
-// Synthesise a fake EPASK string. Retail's client only treats it as an
-// opaque cookie value (it carries the e/n/key triple it'll use to encrypt
-// the next form, which we then ignore — see Phase E.1 plan).
-std::string fake_epask() {
-	using namespace std::chrono;
-	const auto t = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-	char buf[64];
-	std::snprintf(buf, sizeof(buf), "12345:250997:%lld%06d",
-	              static_cast<long long>(t), static_cast<int>(t % 1000000));
-	return buf;
-}
-
 const char *content_type_for(const std::filesystem::path &p) {
 	const auto ext = p.extension().string();
 	if (ext == ".html") return "text/html";
@@ -281,23 +268,6 @@ const char *connection_state_name(ConnectionState s) {
 	return "unknown";
 }
 
-crow::json::wvalue value_to_json(const opennova::db::Value &v) {
-	if (std::holds_alternative<std::monostate>(v)) {
-		return crow::json::wvalue();
-	}
-	if (auto *p = std::get_if<int64_t>(&v)) {
-		return crow::json::wvalue(*p);
-	}
-	if (auto *p = std::get_if<double>(&v)) {
-		return crow::json::wvalue(*p);
-	}
-	if (auto *p = std::get_if<std::string>(&v)) {
-		return crow::json::wvalue(*p);
-	}
-	// BLOBs unsupported in JSON — encode as base64? for now, skip with empty.
-	return crow::json::wvalue();
-}
-
 // Lowercase hex of a byte buffer (for /api/unknowns sample_hex). Empty in,
 // empty out.
 std::string bytes_to_hex(const std::vector<uint8_t> &bytes) {
@@ -307,18 +277,6 @@ std::string bytes_to_hex(const std::vector<uint8_t> &bytes) {
 	for (uint8_t b : bytes) {
 		out.push_back(kHex[(b >> 4) & 0xf]);
 		out.push_back(kHex[b & 0xf]);
-	}
-	return out;
-}
-
-crow::json::wvalue rows_to_json(const std::vector<opennova::db::Row> &rows) {
-	crow::json::wvalue out = crow::json::wvalue::list();
-	for (size_t i = 0; i < rows.size(); ++i) {
-		crow::json::wvalue obj;
-		for (size_t c = 0; c < rows[i].columns.size(); ++c) {
-			obj[rows[i].columns[c]] = value_to_json(rows[i].values[c]);
-		}
-		out[i] = std::move(obj);
 	}
 	return out;
 }
@@ -343,9 +301,9 @@ struct HttpListener::Impl {
 };
 
 HttpListener::HttpListener(ConnectionManager &manager, db::Database &db,
-                           NwUdpListener &nw_udp, SessionStore &sessions)
+                           SessionStore &sessions)
 	: impl_(std::make_unique<Impl>()), manager_(manager), db_(db),
-	  nw_udp_(nw_udp), sessions_(sessions),
+	  sessions_(sessions),
 	  epask_params_(opennova::generate_epask()) {
 	std::printf("[http] EPASK params: e=%u n=%u key=%s\n",
 	            epask_params_.exponent, epask_params_.modulus,
@@ -1722,10 +1680,6 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		s.msgbase      = field_or("msgbase",     "jop_2_msg.htm");
 		s.success      = field_or("success",     "jop_2_main.htm");
 		s.failure      = field_or("failure",     "jop_2_main.htm");
-		s.pfid         = field_or("pfid",        "28");
-		s.nodb         = field_or("nodb",        "jop_2_nodb.htm");
-		s.needtoagree  = field_or("needtoagree", "jop_2_needtoagree.htm");
-		s.enterkey     = field_or("enterkey",    "jop_2_key.htm");
 
 		// Capture everything we need from `s` BEFORE moving it into the
 		// session map — use-after-move on s.relay was returning empty
@@ -2130,10 +2084,8 @@ void HttpListener::register_legacy_host_join_routes(
 			s.failure     = req.url_params.get("failure")    ? req.url_params.get("failure")    : "jop_2_main.htm";
 			s.relay       = req.url_params.get("relay")      ? req.url_params.get("relay")      : "jop_2_relay.htm";
 			s.msgbase     = req.url_params.get("msgbase")    ? req.url_params.get("msgbase")    : "jop_2_msg.htm";
-			s.nodb        = req.url_params.get("nodb")       ? req.url_params.get("nodb")       : "";
 			s.needexpkey  = req.url_params.get("needexpkey") ? req.url_params.get("needexpkey") : "";
 			s.pfid        = req.url_params.get("pfid")       ? req.url_params.get("pfid")       : "";
-			s.mode        = req.url_params.get("mode")       ? req.url_params.get("mode")       : "";
 			s.rid         = req.url_params.get("rid")        ? req.url_params.get("rid")        : "";
 			const std::string tag = s.session_tag;
 			const std::string relay_template = s.relay;
@@ -2453,11 +2405,7 @@ void HttpListener::register_legacy_host_join_routes(
 			}
 			s.host_key   = std::move(hk);
 			s.success    = field_or("success",    "jop_2_host2.htm");
-			s.failure    = field_or("failure",    "jop_2_main.htm");
 			s.relay      = field_or("relay",      "jop_2_relay.htm");
-			s.msgbase    = field_or("msgbase",    "jop_2_msg.htm");
-			s.nodb       = field_or("nodb",       "jop_2_nodb.htm");
-			s.needexpkey = field_or("needexpkey", "jop_2_key2err.htm");
 			s.pfid       = field_or("pfid",       "28");
 
 			const std::string new_tag    = s.session_tag;

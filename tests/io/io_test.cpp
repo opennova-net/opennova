@@ -122,19 +122,14 @@ static int test_byte_writer_roundtrip()
     return 0;
 }
 
-static int test_bit_stream_roundtrip()
+// The stream: fields of 3, 7 and 13 bits, a dword align, a 32-bit field, two
+// raw bytes, then a 5-bit field, packed LSB-first in a little-endian dword
+// stream.
+static int test_bit_stream_fields()
 {
-    io::BitWriter w;
-    w.write_field(3, 5);
-    w.write_field(7, 100);
-    w.write_field(13, 4095);
-    w.align_dword();
-    w.write_field(32, 0xDEADBEEFu);
-    const uint8_t raw[] = {0x12, 0x34};
-    w.write_bytes(raw, sizeof(raw));
-    w.write_field(5, 21);
-
-    io::BitReader r(w.data(), w.high_water());
+    static const uint8_t kStream[] = {0x25, 0xFF, 0x3F, 0x00, 0xEF, 0xBE, 0xAD, 0xDE,
+                                      0x12, 0x34, 0x15};
+    io::BitReader r(kStream, sizeof(kStream));
     TEST_EXPECT(r.read_bits(3) == 5);
     TEST_EXPECT(r.read_bits(7) == 100);
     TEST_EXPECT(r.read_bits(13) == 4095);
@@ -155,24 +150,12 @@ static int test_bit_stream_roundtrip()
 }
 
 // Golden bytes for fields landing at 1-, 2-, and 3-byte offsets inside the
-// dword. The writer used to store through a `uint32_t *` aimed at an arbitrary
-// byte offset — strict-aliasing and alignment UB that x86 tolerated and UBSan
-// flags. These are the exact bytes that store produced, so the byte-wise
-// little-endian replacement is pinned as bit-for-bit identical.
+// dword: 8 bits at byte 0, 16 at byte 1, 16 at byte 3 (crossing the dword), 12
+// at byte 5 (ending mid-byte) and 12 at byte 6 bit 4 (unaligned in both axes).
 static int test_bit_stream_unaligned_golden()
 {
-    io::BitWriter w;
-    w.write_field(8, 0xA1);       // byte 0, aligned
-    w.write_field(16, 0xBEEF);    // byte 1  -> 1-byte offset
-    w.write_field(16, 0x1234);    // byte 3  -> 3-byte offset (crosses the dword)
-    w.write_field(12, 0xABC);     // byte 5  -> 1-byte offset, ends mid-byte
-    w.write_field(12, 0xDEF);     // byte 6 bit 4 -> 2-byte offset, unaligned in both axes
-
-    static const uint8_t kGolden[] = {0xA1, 0xEF, 0xBE, 0x34, 0x12, 0xBC, 0xFA, 0xDE};
-    TEST_EXPECT(w.high_water() >= sizeof(kGolden));
-    TEST_EXPECT(std::memcmp(w.data(), kGolden, sizeof(kGolden)) == 0);
-
-    io::BitReader r(w.data(), w.high_water());
+    static const uint8_t kGolden[] = {0xA1, 0xEF, 0xBE, 0x34, 0x12, 0xBC, 0xFA, 0xDE, 0x00};
+    io::BitReader r(kGolden, sizeof(kGolden));
     TEST_EXPECT(r.read_bits(8) == 0xA1);
     TEST_EXPECT(r.read_bits(16) == 0xBEEF);
     TEST_EXPECT(r.read_bits(16) == 0x1234);
@@ -462,7 +445,7 @@ int main()
     if (test_fixed_point()) return 1;
     if (test_byte_reader_bounds()) return 1;
     if (test_byte_writer_roundtrip()) return 1;
-    if (test_bit_stream_roundtrip()) return 1;
+    if (test_bit_stream_fields()) return 1;
     if (test_bit_stream_unaligned_golden()) return 1;
     if (test_strutil()) return 1;
     if (test_append_writers()) return 1;

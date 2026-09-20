@@ -120,7 +120,6 @@ public:
 	bool start(const ServerConfig &config);
 	void stop();
 
-	bool running() const { return running_.load(); }
 	// Actual port selected by start(), including an OS-assigned port when the
 	// configured value is zero.
 	uint16_t bound_port() const { return bound_port_; }

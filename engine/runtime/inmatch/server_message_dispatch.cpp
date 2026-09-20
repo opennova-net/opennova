@@ -197,7 +197,7 @@ MissionMetadataBlob build_mission_metadata_blob(
 namespace {
 
 // ---------------------------------------------------------------------------
-// Byte helpers (relocated verbatim from the retired game_session.cpp reply builders). The §5.1
+// Byte helpers. The §5.1
 // identity bodies (0x7A PCID, 0x7B session info) are now FAITHFUL ports of the witnessed serializers
 // (NetPacket_WritePCID @0x5076e0, NapiNPMsg_0x7B_BuildPayload @0x507740; net-re §5.45, grilled
 // 2026-06-27). The remaining reply bodies (0x46 NetPacket_SerializePlayerSync0x46 @0x505e80 —
@@ -313,7 +313,7 @@ bool is_default_ash_session_config(const GameConfig &cfg) {
 }
 
 // ---------------------------------------------------------------------------
-// §5.1 reply bodies — handshake + server-info + mission-metadata (relocated from game_session.cpp).
+// §5.1 reply bodies — handshake + server-info + mission-metadata.
 // ---------------------------------------------------------------------------
 
 // tag=0x02 server push. [orig: NapiNPClientMsg_HandleJoinResponse @0x42E0F0 reads 12 B; D-NET-127 carried 512.]
@@ -933,12 +933,9 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 					world, target_zone, player->handle, selected))
 			world.vehicles.attach_to_seat(player->handle, selected);
 	}
-	const world::WeaponTable *armory = !world.tables.weapons.empty()
-			? &world.tables.weapons
-			: nullptr;
 	replies.push_back(make_protocol_message(
 			0x5A, build_current_loadout_reply(
-					conn.reply.last_loadout_reply, player->player_class, armory)));
+					conn.reply.last_loadout_reply, player->player_class)));
 	replies.push_back(make_protocol_message(
 			0x61, Server_RerollPlayerTickSeed(conn)));
 	const uint8_t frontier = world.zones.frontier_zone(player->team);
@@ -1449,7 +1446,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(make_protocol_message(
 							0x5A, build_current_loadout_reply(
 										  st.last_loadout_reply,
-										  current_player_class(conn, world), armory)));
+										  current_player_class(conn, world))));
 					break;
 				}
 				// The decoder owns the framing contract: header, whole 4-byte entries, and one
@@ -1469,7 +1466,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(make_protocol_message(
 							0x5A, build_current_loadout_reply(
 										  st.last_loadout_reply,
-										  current_player_class(conn, world), armory)));
+										  current_player_class(conn, world))));
 					break;
 				}
 				// The armory-reuse cooldown: a nonzero soldier type is accepted only while
@@ -1482,7 +1479,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(make_protocol_message(
 							0x5A, build_current_loadout_reply(
 										  st.last_loadout_reply,
-										  current_player_class(conn, world), armory)));
+										  current_player_class(conn, world))));
 					break;
 				}
 				const GrantedWeaponLoadout grant = conn.link.spectator

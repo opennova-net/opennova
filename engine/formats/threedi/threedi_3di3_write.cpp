@@ -1,7 +1,6 @@
 #include <formats/threedi/threedi_3di3.h>
 
-// Split out of threedi_3di3.cpp (quality campaign W3-3). Motion only — every body
-// is unchanged. The chunk layout this walks is witnessed at its declarations
+// The chunk layout this walks is witnessed at its declarations
 // [orig: see engine/formats/threedi/threedi_3di3.h's markers — the 3DI3 container as
 // ModSuperOed.exe / dfvas.exe write it, docs/threedi/3di-gp-format-re.md]; this file
 // carries no Jointops.exe address of its own.

@@ -9,6 +9,7 @@
 #include <net/novaworld/lobby_session.h>
 
 #include "../common/test_expect.h"
+#include "client_var_fixture.h"
 
 #include <cstdio>
 #include <string>
@@ -20,30 +21,9 @@ using opennova::LobbySession;
 using opennova::LobbyState;
 using opennova::NapiField;
 using opennova::NapiMessage;
+using test_novaworld::make_client_var_list;
 
 namespace {
-
-// Helpers to build the nested ClientVarList structures incoming messages
-// carry.
-
-NapiMessage make_client_var(const std::string &name, const std::string &value) {
-	NapiMessage v;
-	v.name = "ClientVar";
-	v.fields.push_back({"VarName",  std::vector<uint8_t>(name.begin(),  name.end())});
-	v.fields.push_back({"VarValue", std::vector<uint8_t>(value.begin(), value.end())});
-	return v;
-}
-
-NapiMessage make_client_var_list(const std::string &list_name,
-                                 const std::vector<std::pair<std::string, std::string>> &entries) {
-	NapiMessage l;
-	l.name = "ClientVarList";
-	l.fields.push_back({"VarList", std::vector<uint8_t>(list_name.begin(), list_name.end())});
-	for (const auto &[k, v] : entries) {
-		l.children.push_back(make_client_var(k, v));
-	}
-	return l;
-}
 
 const NapiField *find_field(const NapiMessage &m, const std::string &name) {
 	for (const auto &f : m.fields) if (f.name == name) return &f;

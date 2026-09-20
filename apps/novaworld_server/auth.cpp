@@ -144,7 +144,7 @@ std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id)
 	}
 }
 
-std::vector<UserRecord> list_dev_players(opennova::db::Database &db) {
+std::vector<UserRecord> list_users(opennova::db::Database &db) {
 	std::vector<UserRecord> out;
 	try {
 		auto rows = db.query(
@@ -155,16 +155,9 @@ std::vector<UserRecord> list_dev_players(opennova::db::Database &db) {
 			if (auto u = row_to_user(r)) out.push_back(*u);
 		}
 	} catch (const opennova::db::SqliteError &e) {
-		std::fprintf(stderr, "[auth] WARN list_dev_players failed: %s\n", e.what());
+		std::fprintf(stderr, "[auth] WARN list_users failed: %s\n", e.what());
 	}
 	return out;
-}
-
-std::vector<UserRecord> list_users(opennova::db::Database &db) {
-	// Same as list_dev_players today — splitting the API surface so
-	// "admin user listing" can grow independently (e.g. include
-	// last_login, created_at) without touching the round-robin path.
-	return list_dev_players(db);
 }
 
 std::optional<GameAccessRecord> get_game_access(opennova::db::Database &db,

@@ -87,6 +87,23 @@ inline bool ends_with_icase(std::string_view s, std::string_view suffix)
     return iequals(s.substr(s.size() - suffix.size()), suffix);
 }
 
+inline bool starts_with_icase(std::string_view s, std::string_view prefix)
+{
+    if (prefix.size() > s.size())
+        return false;
+    return iequals(s.substr(0, prefix.size()), prefix);
+}
+
+// The text held in a fixed-width, NUL-padded on-disk field: up to max_len
+// bytes, cut at the first NUL (a full-width field carries no terminator).
+inline std::string fixed_string(const char *data, size_t max_len)
+{
+    size_t len = 0;
+    while (len < max_len && data[len] != '\0')
+        ++len;
+    return std::string(data, len);
+}
+
 // Decode an even-length ASCII hex string (either case) into bytes; false on
 // an odd length or a non-hex digit. The .hexcap capture format and the
 // packet pretty-printer both read this shape.

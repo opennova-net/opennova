@@ -1,6 +1,6 @@
 // The serialized mission-dialog queue, the PlayWavList dialog-id resolution
 // and the WAC scripted-voice channel, pushed down from the Godot mission
-// audio (godot/src/audio/mission_audio, the former mission_audio.gd). The
+// audio (godot/src/audio/mission_audio). The
 // engine plays one dialog audio channel at a time (Dialog_Register queues,
 // Dialog_UpdatePlayback only loads the next clip once the active channel
 // frees -- the witnesses sit on the two DialogQueue legs in dialog_queue.cpp),

@@ -17,6 +17,8 @@
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/world.h>
 
+#include "common/boot_file_source.h"
+
 using namespace opennova;
 using namespace opennova::wac;
 using world::World;
@@ -37,17 +39,7 @@ void tick_n(World &w, int n) {
     for (int i = 0; i < n; ++i) w.run_logic_tick(/*is_authority=*/true);
 }
 
-mission::BootFileSource source_over(const std::map<std::string, std::string> *files) {
-    mission::BootFileSource s;
-    s.has_file = [files](const std::string &name) { return files->find(name) != files->end(); };
-    s.read_file = [files](const std::string &name, std::vector<uint8_t> &out) {
-        const auto it = files->find(name);
-        if (it == files->end()) return false;
-        out.assign(it->second.begin(), it->second.end());
-        return true;
-    };
-    return s;
-}
+using test_boot::source_over;
 
 } // namespace
 

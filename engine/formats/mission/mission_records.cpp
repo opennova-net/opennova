@@ -1,8 +1,5 @@
 #include "mission_records.h"
 
-// Split out of mission.cpp (quality campaign W3-1). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // bms:: structs <-> the typed records the editor edits (ADR 0017), plus the entity
 // vector plumbing they share.
 

@@ -1,5 +1,6 @@
 #include <net/npwire/protocol_message.h>
 
+#include <base/io/le.h>
 #include <net/novacrypto/nwu.h>
 
 #include <algorithm>
@@ -10,19 +11,8 @@ namespace opennova {
 
 namespace {
 
-inline uint32_t read_u32_le(const uint8_t *p) {
-	return static_cast<uint32_t>(p[0]) |
-			(static_cast<uint32_t>(p[1]) << 8) |
-			(static_cast<uint32_t>(p[2]) << 16) |
-			(static_cast<uint32_t>(p[3]) << 24);
-}
-
-void append_u32_le(std::vector<uint8_t> &out, uint32_t v) {
-	out.push_back(static_cast<uint8_t>(v & 0xFFu));
-	out.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
-	out.push_back(static_cast<uint8_t>((v >> 16) & 0xFFu));
-	out.push_back(static_cast<uint8_t>((v >> 24) & 0xFFu));
-}
+using io::append_u32_le;
+using io::read_u32_le;
 
 void prune_expired_session_messages(SessionSequencing &seq) {
 	for (auto packet = seq.retained_outbound.begin();

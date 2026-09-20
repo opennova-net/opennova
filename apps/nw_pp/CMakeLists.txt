@@ -20,7 +20,6 @@ target_link_libraries(nw_pp
         opennova_runtime
         opennova_net
         opennova_formats
-        opennova_base
-        opennova_app_common)
+        opennova_base)
 
 target_compile_features(nw_pp PRIVATE cxx_std_17)

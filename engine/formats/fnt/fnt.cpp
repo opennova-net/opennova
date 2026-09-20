@@ -1,5 +1,7 @@
 #include <formats/fnt/fnt.h>
 
+#include <base/io/le.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -7,39 +9,18 @@ namespace opennova::fnt {
 
 namespace {
 
-uint32_t read_u32_le(const uint8_t *p) {
-	return (uint32_t)p[0] |
-	       ((uint32_t)p[1] << 8) |
-	       ((uint32_t)p[2] << 16) |
-	       ((uint32_t)p[3] << 24);
-}
+// The byte primitives are the shared opennova::io ones.
+using io::read_f32_le;
+using io::read_u32_le;
+using io::write_f32_le;
+using io::write_u32_le;
 
 int32_t read_i32_le(const uint8_t *p) {
-	return (int32_t)read_u32_le(p);
-}
-
-float read_f32_le(const uint8_t *p) {
-	uint32_t bits = read_u32_le(p);
-	float result;
-	memcpy(&result, &bits, sizeof(float));
-	return result;
-}
-
-void write_u32_le(uint8_t *p, uint32_t value) {
-	p[0] = (uint8_t)(value & 0xFFu);
-	p[1] = (uint8_t)((value >> 8) & 0xFFu);
-	p[2] = (uint8_t)((value >> 16) & 0xFFu);
-	p[3] = (uint8_t)((value >> 24) & 0xFFu);
+	return io::read_s32_le(p);
 }
 
 void write_i32_le(uint8_t *p, int32_t value) {
 	write_u32_le(p, (uint32_t)value);
-}
-
-void write_f32_le(uint8_t *p, float value) {
-	uint32_t bits;
-	memcpy(&bits, &value, sizeof(float));
-	write_u32_le(p, bits);
 }
 
 } // namespace

@@ -669,27 +669,6 @@ bool test_window_types() {
   return true;
 }
 
-// Test hidden/disabled flags.
-bool test_flags() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="button" name="BTN1" HIDDEN DISABLE/>
-  <WINDOW type="button" name="BTN2"/>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  // Root window is empty, children are BTN1 and BTN2 (but in this format,
-  // they're siblings at root level, so we need to adjust). Actually the above
-  // creates root_window empty and children at screen level. Let me fix the XML.
-
-  return true;
-}
-
 // Test nested windows.
 bool test_nested_windows() {
   const std::string xml = R"(

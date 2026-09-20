@@ -4,7 +4,6 @@
 // [orig: Terrain_LoadTileInfoFile @0x60a740 ('til0' magic, entries at +16, count at +4; ex kong
 //  Terrain_LoadFoliageFile); PolyTrn_LoadTileData @0x6081d0 / serialize_terrain_tiles @0x6080f0 are
 //  the network form; the overlay render is PolyTrn_RenderTile @0x60df0d, docs/tiles/til-re.md]
-// docs/engine_spec_tiles.md 4.1, 5.1
 
 #include <base/io/le.h>
 
@@ -22,16 +21,10 @@ constexpr size_t TIL_ENTRY_SIZE = 12;
 using io::read_u16_le;
 using io::read_u32_le;
 using io::write_u16_le;
+using io::write_u32_le;
 
 int32_t read_i32_le(const uint8_t *data) {
 	return static_cast<int32_t>(read_u32_le(data));
-}
-
-void write_u32_le(uint8_t *dst, uint32_t value) {
-	dst[0] = static_cast<uint8_t>(value & 0xFFu);
-	dst[1] = static_cast<uint8_t>((value >> 8) & 0xFFu);
-	dst[2] = static_cast<uint8_t>((value >> 16) & 0xFFu);
-	dst[3] = static_cast<uint8_t>((value >> 24) & 0xFFu);
 }
 
 } // namespace

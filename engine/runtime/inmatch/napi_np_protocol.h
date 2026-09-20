@@ -35,9 +35,8 @@ namespace opennova::inmatch {
 
 // Joiner pose recovered when a peer reaches Spawned. Position is i32 16.16 world: the joiner's own
 // decoded C2S 0x0C uplink when one has arrived, else the host-advertised spawn from the session
-// config (pos_valid distinguishes). (Relocated from novaworld::HostJoinerPose, unchanged.)
+// config.
 struct HostJoinerPose {
-	bool     pos_valid = false;     // false => from config spawn, not a joiner uplink
 	uint16_t entity_handle = 0;     // joiner's claimed pool<<12|slot (informational)
 	uint16_t item_type_id = 0x14B9; // player infantry template type
 	int32_t  pos_x = 0, pos_y = 0, pos_z = 0;

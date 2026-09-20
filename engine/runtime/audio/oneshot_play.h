@@ -1,6 +1,6 @@
 // The loaded-bank sound-set index and the 3D one-shot fire decision, pushed
-// down from the Godot sound bank (godot/src/audio/sound_bank, the former
-// sound_bank.gd) so the engine core owns the law and the shell only decodes
+// down from the Godot sound bank (godot/src/audio/sound_bank) so the
+// engine core owns the law and the shell only decodes
 // waves and spawns voices.
 //
 // Resolution is NAME-keyed and case-insensitive, matching the engine

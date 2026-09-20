@@ -790,8 +790,8 @@ public:
 	// slots keep timer 0: they never draw on the feed, and always list in the
 	// Recent Messages window.
 	void push_chat_line(const std::string &text, uint32_t argb, int now_ticks);
-	// The two rings' live history for the message-log window: the newest
-	// `max_rows` lines, oldest first, NO expiry test [orig: HUD_DrawMessageLog
+	// The two rings' live history for the message-log window: every held
+	// line, oldest first, NO expiry test [orig: HUD_DrawMessageLog
 	// @0x5b9d70 walks slots 16..1 of both rings @0x5b9e8a..0x5b9f1a].
 	const std::vector<HudMessageLine> &chat_lines() const { return chat_lines_; }
 	void reset_runtime_state();
@@ -856,7 +856,7 @@ private:
 	float text_line_h() const;
 
 	void element_scope_details(const HudFrameState &state, float w, float h);
-	void element_frame(const HudFrameState &state, float w, float h);
+	void element_frame(float w, float h);
 	void element_health(const HudFrameState &state, float w, float h);
 	void element_stance(const HudFrameState &state, float w, float h);
 	void element_weapon_cluster(const HudFrameState &state, float w, float h);
@@ -865,8 +865,8 @@ private:
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_spinmap(const HudFrameState &state, float w, float h);
 	void element_objectives(const HudFrameState &state, float w, float h);
-	void element_attach_labels(const HudFrameState &state, float w, float h);
-	void element_friendly_tags(const HudFrameState &state, float w, float h);
+	void element_attach_labels(const HudFrameState &state);
+	void element_friendly_tags(const HudFrameState &state);
 	void element_objective_line(const HudFrameState &state, float w, float h);
 	void element_feed(const HudFrameState &state, float w, float h);
 	void element_message_log(const HudFrameState &state, float w, float h);

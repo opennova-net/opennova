@@ -21,7 +21,6 @@ namespace db { class Database; }
 namespace opennova::server {
 
 struct ServerConfig;
-class NwUdpListener;
 class SessionStore;
 
 // Crow-backed HTTP listener. start() registers six route families, each in
@@ -39,7 +38,7 @@ class SessionStore;
 class HttpListener {
 public:
 	HttpListener(ConnectionManager &manager, db::Database &db,
-	             NwUdpListener &nw_udp, SessionStore &sessions);
+	             SessionStore &sessions);
 	~HttpListener();
 
 	// Optional unknown-message tracker. When set, the catch-all 404 path
@@ -52,8 +51,6 @@ public:
 
 	bool start(const ServerConfig &config);
 	void stop();
-
-	bool running() const { return running_.load(); }
 
 private:
 	// Route-family registrars called once from start(), in registration
@@ -77,7 +74,6 @@ private:
 	std::unique_ptr<Impl> impl_;
 	ConnectionManager &manager_;
 	db::Database &db_;
-	NwUdpListener &nw_udp_;
 	SessionStore &sessions_;
 	std::thread worker_;
 	std::atomic<bool> running_{false};

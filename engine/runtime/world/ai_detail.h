@@ -1,7 +1,6 @@
 #pragma once
 
-// Internal to engine/runtime/world's AI TUs — not part of world/ai.h. Split out of ai.cpp
-// (quality campaign W3-3); the bodies are unchanged.
+// Internal to engine/runtime/world's AI TUs — not part of world/ai.h.
 //
 // The handful of free helpers the AI TUs share: the body-anim slot pick, the seat
 // anim lookup, and the BAM/distance/PRNG primitives the handlers and the waypoint

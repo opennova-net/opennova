@@ -381,9 +381,9 @@ static void decompile_block(Buf *out,
             if (!expr[0]) snprintf(expr, sizeof(expr), "condition");
 
             const char *target_type = "enter";
-            if (inner_op == 0x3D || inner_op == 0x3E) target_type = "play";
-            else if (inner_op == 0x30)                target_type = "goto";
-            else if (inner_op == 0x3B)                target_type = "enter";
+            if (inner_op == MUS_OP_PLAYW || inner_op == MUS_OP_PLAY) target_type = "play";
+            else if (inner_op == MUS_OP_GOTO)         target_type = "goto";
+            else if (inner_op == MUS_OP_SETSTATE)     target_type = "enter";
             else                                       target_type = "enter";
 
             char targets[1024];
@@ -393,20 +393,20 @@ static void decompile_block(Buf *out,
             for (int t = 0; t < count; ++t) {
                 const uint8_t *entry = inst->table_data + (size_t)t * es_size;
                 char tname[64];
-                if (inner_op == 0x3B && es_size >= 2) {
+                if (inner_op == MUS_OP_SETSTATE && es_size >= 2) {
                     /* entry[0] = inner opcode byte, entry[1] = section idx */
                     int sidx = entry[1];
                     const char *n = resolve_section_idx(sidx, script,
                                                         tname, sizeof(tname));
                     snprintf(tname, sizeof(tname), "%s", n);
-                } else if ((inner_op == 0x3D || inner_op == 0x3E) && es_size >= 2) {
+                } else if ((inner_op == MUS_OP_PLAYW || inner_op == MUS_OP_PLAY) && es_size >= 2) {
                     int sidx = entry[1];
-                    if (inner_op == 0x3D && es_size >= 3) sidx = entry[1] | (entry[2] << 8);
+                    if (inner_op == MUS_OP_PLAYW && es_size >= 3) sidx = entry[1] | (entry[2] << 8);
                     char raw[64];
                     resolve_play_name(sidx, sbf_names, sbf_name_count,
                                       raw, sizeof(raw));
                     format_play_token(raw, tname, sizeof(tname));
-                } else if (inner_op == 0x30 && es_size >= 5) {
+                } else if (inner_op == MUS_OP_GOTO && es_size >= 5) {
                     uint32_t addr = (uint32_t)entry[1]
                                   | ((uint32_t)entry[2] << 8)
                                   | ((uint32_t)entry[3] << 16)
@@ -521,7 +521,7 @@ static int decompile_into_buf(const MusScript *script,
             const char *combined = script->intrinsic_names[i];
             if (!combined[0] || combined[0] == '@') continue;
             char obj[16], mth[64];
-            split_method_name(combined, obj, sizeof(obj), mth, sizeof(mth));
+            split_method_name(combined, obj, mth, sizeof(mth));
             if (!first) buf_puts(&b, ", ");
             first = 0;
             if (obj[0]) buf_printf(&b, "%s.%s", obj, mth);

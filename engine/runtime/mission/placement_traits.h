@@ -1,6 +1,6 @@
 // Mission placement policy — the witnessed eligibility predicates deciding
-// how a placed entity renders, ported from mission_object_placer.gd
-// (2026-08-10 de-scripting). Pure bit policy over the items.def attribs
+// how a placed entity renders.
+// Pure bit policy over the items.def attribs
 // (engine/formats/def carries the attrib bit constants) and the mission
 // entity record; the shell applier owns every node/mesh build.
 #pragma once

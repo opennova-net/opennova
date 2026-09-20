@@ -179,9 +179,7 @@ int run(const std::string &dir, const Target *targets, size_t count, bool write_
 			}
 			// A checkout without LFS pulled leaves a pointer file — skip clean
 			// rather than fail a byte compare against the pointer text.
-			static const char kLfsSentinel[] = "version https://git-lfs";
-			if (committed.size() >= sizeof(kLfsSentinel) - 1 &&
-			    std::memcmp(committed.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0) {
+			if (test_io::is_lfs_pointer(committed)) {
 				std::printf("[skip] %s is an unpulled LFS pointer\n", t.name);
 				continue;
 			}

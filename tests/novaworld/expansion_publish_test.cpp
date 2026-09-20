@@ -10,13 +10,12 @@
 
 #include <net/novaworld/db/sqlite.h>
 
+#include "../common/file_io.h"
 #include "../common/test_expect.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <vector>
 
 #ifndef OPENNOVA_SOURCE_DIR
@@ -28,13 +27,6 @@ using opennova::db::run_migrations;
 namespace catalog = opennova::server::catalog;
 
 namespace {
-
-std::string read_file(const std::filesystem::path &p) {
-	std::ifstream in(p, std::ios::binary);
-	std::ostringstream os;
-	os << in.rdbuf();
-	return os.str();
-}
 
 // Fresh DB with migrations + seed applied (seed provides the revx02/onjo01/
 // ondx01 expansions the write methods operate on).
@@ -51,7 +43,7 @@ Database make_seeded_db() {
 		if (e.path().extension() == ".sql") seeds.push_back(e.path());
 	}
 	std::sort(seeds.begin(), seeds.end());
-	for (const auto &p : seeds) db.exec_script(read_file(p));
+	for (const auto &p : seeds) db.exec_script(test_io::read_file_text(p.string()));
 	return db;
 }
 

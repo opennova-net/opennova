@@ -16,13 +16,8 @@
 #include <base/io/log.h>
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
-#include <formats/cpt/cpt.h>
-#include <formats/cpt/cpt_io.h>
 #include <formats/mission/bms.h>
-#include <formats/pcx/pcx_io.h>
 #include <formats/rtxt/rtxt.h> // the gametext "Server" strings (STRSRV_MEDREQ)
-#include <formats/trn/trn.h>
-#include <formats/trn/trn_io.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/inmatch/host_session.h>
@@ -32,7 +27,6 @@
 #include <net/npwire/net_ports.h>
 #include <runtime/environment/weather_seed.h>
 #include <runtime/mission/mission_kernel.h>
-#include <runtime/terrain_query/terrain_field_build.h>
 #include <runtime/world/tick_accumulator.h>
 
 #include "net_datagram_socket.h" // net::Socket-backed opennova::IDatagramSocket adapter

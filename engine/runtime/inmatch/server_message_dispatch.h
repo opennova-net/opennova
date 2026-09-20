@@ -18,8 +18,7 @@ class World;
 struct EntityHandle;
 }
 
-// P8 — the reactive in-match gameplay-message reply path, ported off the retired
-// engine/net/novaworld/game_session.cpp (`GameSession`) + game_server_runtime.cpp (`GameServerRuntime`).
+// P8 — the reactive in-match gameplay-message reply path.
 // This is the faithful translation of the gameplay-layer C2S dispatch table [orig: g_np_msginfo_server
 // @0x82B5D8 → NapiNPServerMsg_0x0NN]: a 0x43 SESSION packet carries gameplay messages, each routed to
 // its server handler, which queues reactive replies via NapiNPServer_SendFiltered. It produces the
@@ -28,10 +27,9 @@ struct EntityHandle;
 //
 // What it does NOT do: the world-stream / spawn-gate burst. The original emits that ONE-SHOT on
 // player-add [orig: Server_OnPlayerJoin @0x51a680 → Server_SendInitialGameStateToPlayer @0x51bba0];
-// the inmatch equivalent is `Server_SendInitialGameStateToPlayer` over `conn.burst`. The retired
-// game_session.cpp grew an empirical per-tick phase machine (queue_mission_bootstrap /
-// queue_state4_loading_gate / the 0x10/0x0A/0x57 tick cadence) with no original-engine counterpart;
-// that machine is dropped (net-re §5.45 / D-NET-127). Reply BODIES are carried verbatim from the old
+// the inmatch equivalent is `Server_SendInitialGameStateToPlayer` over `conn.burst`. An empirical
+// per-tick phase machine (queue_mission_bootstrap / queue_state4_loading_gate / the
+// 0x10/0x0A/0x57 tick cadence) has no original-engine counterpart, so there is none here (net-re §5.45 / D-NET-127). Reply BODIES are carried verbatim from the old
 // builders (captured-from-observation fixtures, D-NET-127) pending the per-body grill wave.
 namespace opennova::inmatch {
 

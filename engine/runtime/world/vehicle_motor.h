@@ -294,8 +294,18 @@ void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
 // per-mover prologue stamps of +0x80..+0x94].
 void stamp_saved_live_pose(Entity &e);
 
-
-
-
+// The vehicle-template chase bucket: the interpolation step count by snapshot
+// distance, shared by the predicted mover and the joiner's replica rows
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480 (shared template) interp —
+// {6,8,10,15,20,25,30}].
+inline int16_t vehicle_chase_bucket(int32_t dist) {
+	if (dist < 0x2AAA) return 6;
+	if (dist < 0x4000) return 8;
+	if (dist < 0x5555) return 10;
+	if (dist < 0x8000) return 15;
+	if (dist < 0x10000) return 20;
+	if (dist < 0x20000) return 25;
+	return 30;
+}
 
 } // namespace opennova::world

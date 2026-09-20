@@ -1,14 +1,10 @@
-// Bit-level LSB-first stream reader/writer.
+// Bit-level LSB-first stream reader.
 //
-// The shape is lifted from engine/formats/cpt's CDEP bit codec (the proven consumer);
-// shipped here for NEW code.
-//
-// The READER is now shared: cpt consumes io::BitReader (its remaining_bits
-// bound moved here). The WRITERS remain separate and have DIVERGED: cpt's
-// writer has a normalizing set_position (a bit_offset > 8 folds into
-// byte+bit) and a write_to_file, so adopting this writer in cpt would be a
-// real migration byte-diffed against the CPT corpus (tests/cpt/cpt_roundtrip_test
-// plus the by-hand corpus byte diff), not a swap.
+// The shape is lifted from engine/formats/cpt's CDEP bit codec (the proven
+// consumer), and cpt consumes io::BitReader (its remaining_bits bound moved
+// here). The matching writer stays cpt's own (cpt_io.cpp): it carries a
+// normalizing set_position (a bit_offset > 8 folds into byte+bit) and a
+// write_to_file.
 //
 // Layout contract: values pack LSB-first within a little-endian dword stream;
 // align_dword() pads to the next 4-byte boundary (a partial byte first).
@@ -16,11 +12,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <vector>
-
-#include <base/io/le.h>
 
 namespace opennova {
 namespace io {
@@ -99,100 +93,6 @@ private:
     size_t size_;
     size_t byte_pos_ = 0;
     int bit_pos_ = 0;
-};
-
-class BitWriter {
-public:
-    explicit BitWriter(size_t initial_capacity = 0x4000) : buffer_(initial_capacity, 0) {}
-
-    void set_bit_width(int num_bits)
-    {
-        bit_width_ = static_cast<uint32_t>(num_bits);
-        bitmask_ = (num_bits >= 32) ? 0xFFFFFFFFu : ((1u << num_bits) - 1u);
-    }
-
-    void write_bits(uint32_t value)
-    {
-        ensure_capacity(byte_pos_ + 32u);
-        // Byte-wise little-endian read-modify-write. This was a dword store through a
-        // reinterpret_cast at an arbitrary byte offset: strict-aliasing and alignment
-        // UB that merely happened to work on x86, and that UBSan flags. io/le.h is
-        // also the layout contract — the stream packs LSB-first within a
-        // little-endian dword — so being explicit makes the codec correct rather
-        // than accidentally correct. Identical bytes on a little-endian host.
-        uint8_t *dst = buffer_.data() + byte_pos_;
-        const uint32_t cur = read_u32_le(dst);
-        const uint32_t mask = bitmask_ << bit_pos_;
-        write_u32_le(dst, ((value & bitmask_) << bit_pos_) | (cur & ~mask));
-
-        const uint32_t total_bits = bit_pos_ + bit_width_;
-        byte_pos_ += total_bits >> 3;
-        bit_pos_ = total_bits & 7u;
-        if (byte_pos_ + 1u > high_water_) {
-            high_water_ = byte_pos_ + 1u;
-        }
-    }
-
-    void write_field(int num_bits, uint32_t value)
-    {
-        set_bit_width(num_bits);
-        write_bits(value);
-    }
-
-    void write_bytes(const void *data, size_t size)
-    {
-        ensure_capacity(byte_pos_ + static_cast<uint32_t>(size) + 32u);
-        if (bit_pos_) {
-            bit_pos_ = 0;
-            ++byte_pos_;
-        }
-        std::memcpy(buffer_.data() + byte_pos_, data, size);
-        byte_pos_ += static_cast<uint32_t>(size);
-        if (byte_pos_ > high_water_) {
-            high_water_ = byte_pos_;
-        }
-    }
-
-    void advance_byte()
-    {
-        if (bit_pos_) {
-            bit_pos_ = 0;
-            ++byte_pos_;
-        }
-    }
-
-    void align_dword()
-    {
-        if (bit_pos_) {
-            bit_pos_ = 0;
-            ++byte_pos_;
-        }
-        if (byte_pos_ & 3u) {
-            byte_pos_ = (byte_pos_ + 3u) & ~3u;
-        }
-    }
-
-    const uint8_t *data() const { return buffer_.data(); }
-    // Bytes written, counting a trailing partial byte.
-    uint32_t high_water() const { return high_water_; }
-
-private:
-    void ensure_capacity(uint32_t needed)
-    {
-        if (buffer_.empty()) {
-            buffer_.resize(0x4000, 0);
-        }
-        while (needed >= buffer_.size()) {
-            buffer_.resize(buffer_.size() + 0x4000, 0);
-        }
-    }
-
-    std::vector<uint8_t> buffer_;
-    uint32_t bit_width_ = 0;
-    uint32_t byte_pos_ = 0;
-    uint32_t bit_pos_ = 0;
-    uint32_t bitmask_ = 0;
-    uint32_t high_water_ = 0;
 };
 
 } // namespace io

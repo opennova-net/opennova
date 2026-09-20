@@ -57,15 +57,6 @@ uint64_t mix_content(uint64_t content, uint64_t config) {
 	return io::fnv1a64_value(hash, config);
 }
 
-bool same_page(const TerrainTilePageKey &left,
-		const TerrainTilePageKey &right) {
-	return left.sector_origin_x == right.sector_origin_x &&
-			left.sector_origin_z == right.sector_origin_z &&
-			left.page_local_x == right.page_local_x &&
-			left.page_local_z == right.page_local_z &&
-			left.page_lod_level == right.page_lod_level;
-}
-
 // Order-sensitive stamp over every raster-affecting field of the incoming
 // snapshot. Records without geometry are skipped exactly as replace_casters
 // drops them; geometry participates by content key, never by pointer (callers

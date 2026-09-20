@@ -1,7 +1,5 @@
 // S13 (ADR 0028): the envs-marker resolution — see envs_markers.h for the
-// dispatch witnesses. Structural translation of the shell resolver it
-// replaces (mission_audio.gd _is_envs_item/_resolve_slot_sets, the
-// faithful STRATEGY_ITEM_SOUNDLOOP path).
+// dispatch witnesses (the faithful STRATEGY_ITEM_SOUNDLOOP path).
 #include <runtime/audio/envs_markers.h>
 
 #include <base/io/strutil.h>

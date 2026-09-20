@@ -11,9 +11,8 @@ namespace opennova {
 // engine/runtime/inmatch host/client per-frame loops) pumps, so the loop itself holds NO socket — libs
 // stay socket-free (engine/CLAUDE.md). The socket owners provide the adapter: apps/nw_server wraps
 // net::Socket (apps/common/net_datagram_socket.h), godot/src wraps UdpPump. This is the
-// ONE owner-loop implementation's only door to the wire — drift between the headless server and
-// the Godot layer (the host_owner_loop.h <-> simulation.cpp copy) is what promoting the loop
-// over this interface eliminates.
+// ONE owner-loop implementation's only door to the wire — promoting the loop over this
+// interface is what keeps the headless server and the Godot layer from drifting apart.
 //
 // Distinct from the in-process transports (Loopback/UdpSessionTransport): those move INNER
 // identity {tag,body} frames between endpoints; this moves WHOLE datagrams (NWU/CRC envelope

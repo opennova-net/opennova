@@ -1,7 +1,6 @@
 #include <runtime/inmatch/host_session.h>
 #include <runtime/devtools/tick_profile.h>
 #include <base/io/tick_rate.h>
-#include <base/io/perf_clock.h>
 
 #include <runtime/inmatch/server_session.h> // set_connection_mode / set_transport_mode / create_session / ...
 #include <runtime/inmatch/server_spawn.h>   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
@@ -218,8 +217,7 @@ void send_or_stage_established_datagram(
 
 } // namespace
 
-void admit_peer(HostOwner &owner, opennova::IDatagramSocket &sock, const PeerAddr &peer,
-                const HostAcceptEvent &ev) {
+void admit_peer(HostOwner &owner, const PeerAddr &peer) {
 	PeerLink &link = owner.peers[peer];
 
 	NapiNPConnection *conn = nullptr;
@@ -249,22 +247,19 @@ void admit_peer(HostOwner &owner, opennova::IDatagramSocket &sock, const PeerAdd
 	// order — NOT an early out-of-band 0x0C. The prior early send here was a duplicate that put a 0x0C on
 	// the wire right after the first static batch, diverging from retail's load order (load-sequence diff
 	// 2026-07-01). Latch announced so the pipeline proceeds; the in-phase stream is the single source.
-	(void)sock;
-	(void)ev;
 	link.announced = true;
 }
 
-void dispatch_event(HostOwner &owner, opennova::IDatagramSocket &sock, const PeerAddr &peer,
-	const HostAcceptEvent &ev) {
+void dispatch_event(HostOwner &owner, const PeerAddr &peer, const HostAcceptEvent &ev) {
 	switch (ev.kind) {
 	case HostAcceptEvent::Kind::PeerHandshakeAdvanced:
 		// Attach the semantic transport as soon as 0x42 establishes the
 		// remote, before the initial-state producer starts queuing records.
-		admit_peer(owner, sock, peer, ev);
+		admit_peer(owner, peer);
 		break;
 	case HostAcceptEvent::Kind::PeerEnteredWorldStreaming:
 	case HostAcceptEvent::Kind::PeerSpawned:
-		admit_peer(owner, sock, peer, ev);
+		admit_peer(owner, peer);
 		break;
 	case HostAcceptEvent::Kind::PeerC2SInMatch:
 		// STAGE the joiner's in-match 0x0C onto its transport; Server_TickUpdate is the single drain,
@@ -321,7 +316,7 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 			if (ev.kind != HostAcceptEvent::Kind::PeerGoodbye) continue;
 			pending_session_messages.erase(peer);
 			owner.pending_session_datagrams.erase(peer);
-			dispatch_event(owner, sock, peer, ev);
+			dispatch_event(owner, peer, ev);
 			if (event_observer != nullptr)
 				event_observer(event_observer_context, ev);
 		}
@@ -339,7 +334,7 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		}
 		for (const HostAcceptEvent &ev : r.events) {
 			if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye) continue;
-			dispatch_event(owner, sock, peer, ev);
+			dispatch_event(owner, peer, ev);
 			if (event_observer != nullptr)
 				event_observer(event_observer_context, ev);
 		}
@@ -379,7 +374,7 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 				pending_session_messages.erase(t.peer);
 				owner.pending_session_datagrams.erase(t.peer);
 			}
-			dispatch_event(owner, sock, t.peer, ev);
+			dispatch_event(owner, t.peer, ev);
 			if (event_observer != nullptr)
 				event_observer(event_observer_context, ev);
 		}

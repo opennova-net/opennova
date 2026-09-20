@@ -1,6 +1,5 @@
 #include <runtime/replication/connection_fan.h>
 #include <runtime/devtools/tick_profile.h>
-#include <base/io/perf_clock.h>
 
 #include <algorithm>
 #include <cmath>

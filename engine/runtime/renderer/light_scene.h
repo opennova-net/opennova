@@ -298,7 +298,6 @@ struct LightSceneReport {
 	size_t live = 0;
 	size_t high_water = 0;
 	size_t last_query = 0;
-	size_t last_selected = 0;
 };
 
 // One additive corona billboard quad, camera-facing at `center` with

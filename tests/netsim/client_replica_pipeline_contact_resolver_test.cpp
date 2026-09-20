@@ -91,8 +91,6 @@ nw::FrameUpdate player_frame(uint16_t handle, int32_t ax, int32_t ay, int32_t az
 struct ResolverCapture {
 	int calls = 0;
 	int32_t last_vel_z = 0;
-	int32_t last_pos_z = 0;
-	int32_t last_capsule_bottom = 0;
 	uint16_t last_type_id = 0;
 	int32_t last_source_bound = 0;
 	bool is_player = false;
@@ -125,8 +123,6 @@ int main() {
 			[&cap](ns::ClientReplicaPipeline::ReplicaContactQuery &q) -> int32_t {
 				++cap.calls;
 				cap.last_vel_z = q.vel_z;
-				cap.last_pos_z = q.pos[2];
-				cap.last_capsule_bottom = q.capsule_bottom;
 				cap.last_type_id = q.type_id;
 				cap.last_source_bound = q.source_bound_radius_q16;
 				cap.is_player = q.is_player_class;

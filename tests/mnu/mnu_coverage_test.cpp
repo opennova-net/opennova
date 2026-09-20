@@ -12,28 +12,18 @@
 
 #include <cctype>
 #include <cstdio>
-#include <fstream>
 #include <map>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include <formats/mnu/mnu.h>
 
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 
 static std::string upper(std::string s) {
   for (char &c : s) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
   return s;
-}
-
-static bool read_file(const char *path, std::string &out) {
-  std::ifstream f(path, std::ios::binary);
-  if (!f) return false;
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  out = ss.str();
-  return true;
 }
 
 using Occurrences = std::map<std::string, int>;
@@ -169,7 +159,7 @@ static Occurrences extract_occurrences(const std::string &c) {
 
 static int check_menu(const char *path) {
   std::string src;
-  if (!read_file(path, src)) {
+  if (!test_io::read_file_text(path, src)) {
     printf("  MISSING %s (required fixture)\n", path);
     return 0;
   }

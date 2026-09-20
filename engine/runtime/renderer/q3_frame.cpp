@@ -196,7 +196,6 @@ const Q3DrawList &Q3FrameCompiler::compile(const Q3FrameSnapshot &snapshot) {
 	draw_list_.transforms.clear();
 	draw_list_.rejected.clear();
 	draw_list_.debug = {};
-	draw_list_.debug.input_submissions = snapshot.submissions.size();
 
 	prepared_.clear();
 	prepared_.reserve(snapshot.submissions.size());

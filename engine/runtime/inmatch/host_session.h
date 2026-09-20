@@ -1,9 +1,7 @@
 #pragma once
 
-// The in-match HOST owner loop, promoted into engine/runtime/inmatch so there is exactly ONE
-// implementation. It was copy-pasted between apps/nw_server/host_owner_loop.h and
-// godot/src/simulation/simulation.cpp (host_pump/dispatch_event/admit_peer) and had begun
-// to drift; both now delegate here. The faithful reimpl of the original engine's per-frame host
+// The in-match HOST owner loop: exactly ONE implementation, which apps/nw_server and
+// godot/src/simulation both delegate to. The faithful reimpl of the original engine's per-frame host
 // pump [orig: CNapiNetwork_PumpManagerReceive @0x4c4d10 (recv, mgr flag 4, 250ms) +
 // CNapiNetwork_SendUDPPacket @0x4c4d30 (CNapiNPManager_SendTo) wrapped around Server_TickUpdate].
 //
@@ -74,16 +72,13 @@ struct HostOwner {
 };
 
 // Attach a UdpSessionTransport to `peer`'s connection (idempotent) and, ONCE the spawn pipeline has
-// bound owned_entity, stream the joiner's NAMED dcb-bearing S2C 0x0C organic-spawn so the joiner
-// matches the owner ID of its own player (ownerConnectionId == ServerAuth.MI) and learns its wire handle H (the
-// admitted entity's packed handle; D.0 / §5.23; the F3 dcb-timing contract). No-ops until the
-// automatic spawn pipeline binds owned_entity, then announces exactly once.
-void admit_peer(HostOwner &owner, opennova::IDatagramSocket &sock, const PeerAddr &peer,
-                const HostAcceptEvent &ev);
+// bound owned_entity, latch the peer announced exactly once. The joiner's NAMED dcb-bearing S2C 0x0C
+// organic-spawn (ownerConnectionId == ServerAuth.MI, its wire handle H; D.0 / §5.23; the F3
+// dcb-timing contract) ships IN-PHASE with the initial-state world stream, not from here.
+void admit_peer(HostOwner &owner, const PeerAddr &peer);
 
 // React to one HostAcceptEvent surfaced by handle_server_datagram / tick_connections.
-void dispatch_event(HostOwner &owner, opennova::IDatagramSocket &sock, const PeerAddr &peer,
-                    const HostAcceptEvent &ev);
+void dispatch_event(HostOwner &owner, const PeerAddr &peer, const HostAcceptEvent &ev);
 
 // One full owner iteration over `sock` (the §5.44 recv-before-send order):
 //   (1) recv-drain: recv_from -> handle_server_datagram -> ship replies + react to events

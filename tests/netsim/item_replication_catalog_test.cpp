@@ -132,8 +132,7 @@ bool run_items_def_catalog() {
 	if (!expect(mystery != nullptr &&
 	                    mystery->wire_path == ns::WireReplicationPath::Unresolved &&
 	                    mystery->compact_codec == ns::WireCompactCodec::Unresolved &&
-	                    mystery->motion_family == ns::MotionFamily::Person &&
-	                    catalog.wire_entity_class_for(1501) == EntityClass::Unknown,
+	                    mystery->motion_family == ns::MotionFamily::Person,
 	            "unknown callback fails closed despite known motion")) return false;
 	const std::optional<EntityClass> mystery_resolution =
 			catalog.resolve_wire_entity_class(1501);
@@ -150,10 +149,7 @@ bool run_items_def_catalog() {
 	if (!expect(wide != nullptr && !wide->wire_type_id.has_value(),
 	            "non-wire definition remains available by full id")) return false;
 	return expect(!catalog.resolve_wire_entity_class(0xFFFF).has_value() &&
-	                      catalog.by_wire_type(0xFFFF) == nullptr &&
-	                      catalog.compact_codec_for(0xFFFF) ==
-	                              ns::WireCompactCodec::Unresolved &&
-	                      catalog.wire_entity_class_for(0xFFFF) == EntityClass::Unknown,
+	                      catalog.by_wire_type(0xFFFF) == nullptr,
 	              "missing wire id fails closed");
 }
 
@@ -219,7 +215,7 @@ bool run_duplicate_ids_fail_closed() {
 			expect(catalog.by_definition_id(101000) == nullptr &&
 			                      catalog.by_wire_type(1000) == nullptr &&
 			                      catalog.resolve_wire_entity_class(1000).has_value() &&
-			                      catalog.wire_entity_class_for(1000) == EntityClass::Unknown,
+			                      *catalog.resolve_wire_entity_class(1000) == EntityClass::Unknown,
 			              "duplicate wire codec remains present and fails closed");
 }
 

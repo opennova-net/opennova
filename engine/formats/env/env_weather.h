@@ -10,7 +10,6 @@
 // fixed-point smoothing/oscillator/lightning/rain machinery behind
 // Environment_UpdateWeatherTick, the weather color blocks + modulator chain,
 // cloud scroll, derived render colors, iris auto-exposure, and terrain tint.
-// Split from the retired env_render.h umbrella (W3-7).
 
 namespace opennova::env {
 

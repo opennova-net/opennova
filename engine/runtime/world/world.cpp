@@ -114,11 +114,7 @@ World::World() : commands(*this), vehicles(*this), rotor_wash(*this), zones(*thi
 uint16_t World::next_prng16() noexcept {
     // [orig: PRNG_Next16 @0x6130a0 / @0x613140, both over
     // dword_31BFBB0] s = rol4(s + rol11(s)) ^ 1; return low word.
-    const uint32_t rol11 = (prng16_state << 11) | (prng16_state >> 21);
-    uint32_t next = prng16_state + rol11;
-    next = ((next << 4) | (next >> 28)) ^ 1u;
-    prng16_state = next;
-    return static_cast<uint16_t>(next);
+    return io::rotating_prng_next16(prng16_state);
 }
 
 // [orig: PRNG_Next16_B @ 0x6130F0]

@@ -4,12 +4,11 @@
 #include <net/novaworld/db/sqlite.h>
 #include <net/novaworld/unknown_tracker.h>
 
+#include "../common/file_io.h"
 #include "../common/test_expect.h"
 
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -23,19 +22,12 @@ using opennova::db::Database;
 
 namespace {
 
-std::string read_file(const std::filesystem::path &p) {
-	std::ifstream in(p, std::ios::binary);
-	std::ostringstream os;
-	os << in.rdbuf();
-	return os.str();
-}
-
 // Apply the real 0004 migration onto a fresh in-memory DB so the test
 // exercises the same schema the server ships.
 void apply_unknown_messages_schema(Database &db) {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto sql = source_dir / "backend" / "migrations" / "0004_unknown_messages.sql";
-	db.exec_script(read_file(sql));
+	db.exec_script(test_io::read_file_text(sql.string()));
 }
 
 const UnknownSighting *find(const std::vector<UnknownSighting> &v,

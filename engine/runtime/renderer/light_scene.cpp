@@ -400,7 +400,6 @@ size_t LightScene::select(const LightHandle *handles, size_t handle_count,
 		light.handle = handles[i];
 		++selected;
 	}
-	report_.last_selected = selected;
 	return selected;
 }
 

@@ -1,8 +1,5 @@
 #include <runtime/world/collision.h>
 
-// Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // The stateless target queries: point-vs-blink, the segment-vs-solid clip, the
 // projectile face and polygon raycasts, and the contact-force accumulation. Each
 // takes a CollisionTargetView and touches no world state.
@@ -216,7 +213,6 @@ bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ra
             lend[0] = cs[0]; lend[1] = cs[1]; lend[2] = cs[2];
             clipped_any = true;
             section_hit.section_index = static_cast<int32_t>(si);
-            section_hit.volume_index = sec.volume_start + vi;
             section_hit.normal_q16[0] = 0;
             section_hit.normal_q16[1] = 0;
             section_hit.normal_q16[2] = 0;

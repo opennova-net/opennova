@@ -1,6 +1,5 @@
 // The HUD frame compiler — the witnessed element walk over the hudpos layout,
-// structural translation of the ported shell draws (game_hud.gd + hud_*.gd
-// helpers, themselves cited ports) onto the typed draw list.
+// compiled onto the typed draw list.
 // [orig: HUD_RenderAllOverlays @ 0x5a8070 -> HUD_RenderOverlays @ 0x5a7bb0]
 
 #include <runtime/hud/hud_frame.h>
@@ -385,7 +384,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 		stance_.stamp = state.ticks;
 	}
 
-	element_frame(state, surface_w, surface_h);
+	element_frame(surface_w, surface_h);
 	element_health(state, surface_w, surface_h);
 	element_instruments(state, surface_w, surface_h);
 	element_optical_cues(state, surface_w, surface_h);
@@ -406,12 +405,12 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	element_lfp_panel(state, surface_w, surface_h);
 	element_spinmap(state, surface_w, surface_h);
 	element_objectives(state, surface_w, surface_h);
-	element_attach_labels(state, surface_w, surface_h);
+	element_attach_labels(state);
 	element_objective_line(state, surface_w, surface_h);
 	// Friendly tags draw after the overlay cluster and before the console
 	// messages, exactly the retail pass order [orig: HUD_DrawFriendlyTagsPass
 	// @ 0x5a87cc, then HUD_DrawConsoleMessages @ 0x5a87d1].
-	element_friendly_tags(state, surface_w, surface_h);
+	element_friendly_tags(state);
 	// The mounted-vehicle panel sits with the overlay cluster, BEFORE the feed
 	// and the Tab board -- both of those are held-open surfaces that should
 	// cover it, not the other way round.
@@ -622,9 +621,7 @@ void HudFrameCompiler::element_sights_card(const HudFrameState &state,
 	++draw_list_.elements_drawn;
 }
 
-void HudFrameCompiler::element_frame(const HudFrameState &state, float w,
-		float h) {
-	(void)state;
+void HudFrameCompiler::element_frame(float w, float h) {
 	if (!layout_.frame_texture_valid) {
 		return;
 	}
@@ -1221,12 +1218,9 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w,
 	++draw_list_.elements_drawn;
 }
 
-void HudFrameCompiler::element_attach_labels(const HudFrameState &state,
-		float w, float h) {
+void HudFrameCompiler::element_attach_labels(const HudFrameState &state) {
 	// [orig: draw_vehicle_seat_and_armory_labels @ 0x5a3290 — nearest at the
 	// full color, others ((rgb & 0xFEFEFE) | 0xFE000001) >> 1 @ 0x5a364e]
-	(void)w;
-	(void)h;
 	// Attach labels draw with the BOLD Arial label font at the slot scale
 	// [orig: fontObj @ 0x5a3680/@ 0x5a38a1 via HUD_MeasureTextWH @ 0x580ab0 /
 	// HUD_DrawTextCentered_HalfBright @ 0x580680 — both pass the slot scales].
@@ -1268,12 +1262,9 @@ void HudFrameCompiler::element_attach_labels(const HudFrameState &state,
 	++draw_list_.elements_drawn;
 }
 
-void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
-		float w, float h) {
+void HudFrameCompiler::element_friendly_tags(const HudFrameState &state) {
 	// D-HUD-20 [orig: HUD_DrawEntityLabel @ 0x5a39b0]. Screen-pixel anchors
 	// like the attach labels — the presenter projects, the compiler draws.
-	(void)w;
-	(void)h;
 	// Friendly tags draw with the NORMAL Arial label font at the slot scale
 	// [orig: g_hudLabelFont @ 0x5a3a0c; the spectated g_hudLabelFontLarge
 	// Impac22b leg @ 0x5a3a29 rides the unported death screen].

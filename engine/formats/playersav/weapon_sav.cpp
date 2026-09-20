@@ -1,4 +1,4 @@
-// weapon.sav reader/writer — see include/playersav/weapon_sav.h for the
+// weapon.sav reader/writer — see <formats/playersav/weapon_sav.h> for the
 // witnessed layout and the [orig:] citations.
 
 #include <formats/playersav/weapon_sav.h>

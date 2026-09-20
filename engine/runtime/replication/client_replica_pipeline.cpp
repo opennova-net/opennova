@@ -6,6 +6,7 @@
 #include <runtime/terrain_query/height_field.h>        // remote-person terrain settle
 #include <runtime/world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/infantry.h>            // IRootMotionSource + the anim flag/state tables
+#include <runtime/world/vehicle_motor.h>       // vehicle_chase_bucket (the vehicle-family interp bucket)
 #include <runtime/world/world.h>               // exact mission PRNG seed
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_message_id.h>
@@ -351,18 +352,6 @@ void row_deck_ride(ClientEntityState &es,
 			es.pitch_bam = io::bam_add(es.pitch_bam, pitch_d);
 		}
 	}
-}
-
-// The vehicle-family bucket [orig: Entity_UpdateWatercraftPhysics
-// @0x48D480 (shared template) — {6,8,10,15,20,25,30}].
-inline int16_t vehicle_bucket(int32_t dist) {
-	if (dist < 0x2AAA) return 6;
-	if (dist < 0x4000) return 8;
-	if (dist < 0x5555) return 10;
-	if (dist < 0x8000) return 15;
-	if (dist < 0x10000) return 20;
-	if (dist < 0x20000) return 25;
-	return 30;
 }
 
 // The AIR-family bucket [orig: Entity_UpdateAircraftPhysics @0x490310
@@ -1231,7 +1220,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 							20;
 				} else {
 					const int32_t n = air ? vehicle_air_bucket(dist)
-					                      : vehicle_bucket(dist);
+					                      : world::vehicle_chase_bucket(dist);
 					es.net_interp_steps = static_cast<int16_t>(n);
 					es.net_smooth_target[0] = chase_step(int32_t(dx), n);
 					es.net_smooth_target[1] = chase_step(int32_t(dy), n);

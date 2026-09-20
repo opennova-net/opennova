@@ -9,20 +9,6 @@
 
 namespace opennova::threedi {
 
-
-static int read_u32(FILE *f, uint32_t *out)
-{
-    unsigned char buf[4];
-    if (fread(buf, 1, 4, f) != 4) {
-        return -1;
-    }
-    *out = (uint32_t)buf[0]
-         | ((uint32_t)buf[1] << 8)
-         | ((uint32_t)buf[2] << 16)
-         | ((uint32_t)buf[3] << 24);
-    return 0;
-}
-
 static void free_chunk(ThreediChunk *chunk)
 {
     if (!chunk) {
@@ -117,13 +103,11 @@ static int parse_owned_buffer(uint8_t *buf, size_t len, ThreediFile *out_file)
 
     out_file->version = version;
     out_file->buffer = buf;
-    out_file->buffer_len = len;
     out_file->root = (ThreediChunk *)malloc(sizeof(ThreediChunk));
     if (!out_file->root) {
         free_chunk(&root);
         free(buf);
         out_file->buffer = NULL;
-        out_file->buffer_len = 0;
         return -1;
     }
     memcpy(out_file->root, &root, sizeof(ThreediChunk));
@@ -141,7 +125,6 @@ int threedi_read_file(const char *path, ThreediFile *out_file)
         return errno ? errno : -1;
     }
 
-    int rc = 0;
     if (fseek(f, 0, SEEK_END) != 0) {
         fclose(f);
         return -1;
@@ -195,7 +178,6 @@ void threedi_free_file(ThreediFile *file)
     file->root = NULL;
     free(file->buffer);
     file->buffer = NULL;
-    file->buffer_len = 0;
 }
 
 } // namespace opennova::threedi

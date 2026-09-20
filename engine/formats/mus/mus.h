@@ -22,8 +22,8 @@ inline constexpr int MUS_OPCODE_COUNT = 65;  /* opcodes 0x00..0x40 */
 inline constexpr int MUS_INTRINSIC_NAMES = 11;  /* full set; runtime may bind a subset */
 
 /* The bytecode opcodes referenced by NAME outside the decoder table itself
-   (mus_decode.h kOps stays the full-width authority): the flow ops the AST /
-   editor surfaces classify on. [orig: 65-entry dispatch table @ 0x84F220,
+   (mus_decode.h kOps stays the full-width authority): the flow ops the
+   compiler emits and the decompiler classifies on. [orig: 65-entry dispatch table @ 0x84F220,
    AudioVM_DispatchLoop @ 0x672720] */
 typedef enum MusOpcode {
     MUS_OP_GOTO     = 0x30,  /* unconditional branch */

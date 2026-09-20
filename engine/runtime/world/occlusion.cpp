@@ -222,7 +222,7 @@ void OcclusionWorld::init_mission(World &world, CollisionWorld &collision,
         register_exterior_faces(world, collision);
         weld_opposite_faces();
     }
-    stamp_building_flags(world, collision);
+    stamp_building_flags(collision);
 }
 
 // [orig: Terrain_RegisterExteriorPortalFaces @ 0x5c5b80 — walks the static
@@ -345,7 +345,7 @@ void OcclusionWorld::weld_opposite_faces() {
 // with occlusion records: zero +0x2CC..+0x2CF, then per record type==2 ->
 // +0x2CD, type==5 -> +0x2CE, type==1 -> +0x2CC. Runs AFTER the weld so type-5
 // rewrites are seen.]
-void OcclusionWorld::stamp_building_flags(World &world, CollisionWorld &collision) {
+void OcclusionWorld::stamp_building_flags(CollisionWorld &collision) {
     const int32_t buildings = collision.static_building_count();
     for (int32_t i = 0; i < buildings; ++i) {
         const CollisionWorld::StaticSlotView slot = collision.static_slot(i);
@@ -1103,8 +1103,7 @@ bool OcclusionWorld::sphere_in_plane_groups(const float pos[3], float radius,
 
 // [orig: test_sector_entity_occlusion @ 0x5c4610 — "render_TOC()"; TRUE =
 // occluded, and the batch entry is zeroed.]
-bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, BatchEntry &entry,
-                                  const OcclusionFrameCamera &cam) {
+bool OcclusionWorld::toc_occluded(World &world, CollisionWorld &collision, BatchEntry &entry) {
     const Entity *cand = world.registry.get(entry.entity);
     if (cand == nullptr) return false;
     const CollisionModel *cand_cm = collision.model_for(world, entry.entity);
@@ -1372,7 +1371,7 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
             if (is_hit) continue;
             const int32_t mi = b.entity.slot() & (kMaskSlots - 1);
             if ((masks_[mi] & 0xFFFFFFFu) != 0) continue;
-            if (toc_occluded(world, collision, b, cam)) continue;
+            if (toc_occluded(world, collision, b)) continue;
             if (b.open_flag) {
                 bank_open_building(world, b.entity, mi, cam); // [orig: @ 0x5c8a4e-0x5c8aab]
             } else {
@@ -1402,7 +1401,7 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
         for (BatchEntry &b : batch_) {
             if (!b.entity.valid()) continue;
             const int32_t mi = b.entity.slot() & (kMaskSlots - 1);
-            if (toc_occluded(world, collision, b, cam)) continue;
+            if (toc_occluded(world, collision, b)) continue;
             if ((masks_[mi] & 0x40000000u) != 0) continue;
             const Instance *inst = instance(b.entity);
             const bool windows = inst != nullptr && inst->has_windows; // [orig: +0x2CD @ 717]

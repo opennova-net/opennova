@@ -8,8 +8,10 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <ios>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -37,11 +39,37 @@ inline std::vector<uint8_t> read_file(const std::string &path) {
 	return data;
 }
 
+// The text forms: the whole file as a std::string, read in binary mode (no
+// newline translation). False when the file cannot be opened.
+inline bool read_file_text(const std::string &path, std::string &out) {
+	std::ifstream f(path, std::ios::binary);
+	if (!f) return false;
+	out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+	return true;
+}
+
+// The value-returning form: the text, or an empty string when the file is
+// missing.
+inline std::string read_file_text(const std::string &path) {
+	std::string text;
+	if (!read_file_text(path, text)) return {};
+	return text;
+}
+
 inline bool write_file(const std::string &path, const std::vector<uint8_t> &bytes) {
 	std::ofstream f(path, std::ios::binary | std::ios::trunc);
 	if (!f) return false;
 	if (!bytes.empty()) f.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 	return static_cast<bool>(f);
+}
+
+// True when `bytes` is an unpulled Git LFS pointer rather than the fixture
+// itself (a checkout without `git lfs pull`). The byte-compare guards report
+// such a file and skip it instead of failing the comparison.
+inline bool is_lfs_pointer(const std::vector<uint8_t> &bytes) {
+	static const char kLfsSentinel[] = "version https://git-lfs";
+	return bytes.size() >= sizeof(kLfsSentinel) - 1 &&
+	       std::memcmp(bytes.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0;
 }
 
 } // namespace test_io

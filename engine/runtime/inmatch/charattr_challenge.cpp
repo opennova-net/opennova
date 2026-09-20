@@ -56,11 +56,6 @@ constexpr std::array<Field, 13> kFields{{
 
 bool ascii_iequals(std::string_view a, std::string_view b) { return opennova::strutil::iequals(a, b); }
 
-bool ascii_istarts_with(std::string_view value, std::string_view prefix) {
-	return value.size() >= prefix.size() &&
-			ascii_iequals(value.substr(0, prefix.size()), prefix);
-}
-
 void write_u32(CharAttrChallengeRow &row, std::size_t offset, uint32_t value) {
 	row[offset + 0] = static_cast<uint8_t>(value);
 	row[offset + 1] = static_cast<uint8_t>(value >> 8);
@@ -132,7 +127,7 @@ int character_section_index(std::string_view line) {
 	if (line.size() < 3 || line.front() != '[' || line.back() != ']') return -1;
 	std::string_view name = opennova::strutil::trim_view(line.substr(1, line.size() - 2));
 	constexpr std::string_view prefix = "CHARACTER";
-	if (!ascii_istarts_with(name, prefix)) return -1;
+	if (!opennova::strutil::starts_with_icase(name, prefix)) return -1;
 	name.remove_prefix(prefix.size());
 	if (name.empty() || name.size() > 2) return -1;
 	unsigned value = 0;
@@ -183,7 +178,7 @@ bool parse_charattr_challenge_table(
 		}
 
 		line = opennova::strutil::trim_view(line);
-		if (line.empty() || ascii_istarts_with(line, "//")) continue;
+		if (line.empty() || opennova::strutil::starts_with_icase(line, "//")) continue;
 		if (line.front() == '[') {
 			const int index = character_section_index(line);
 			if (index < 0 || section_seen[static_cast<std::size_t>(index)]) {

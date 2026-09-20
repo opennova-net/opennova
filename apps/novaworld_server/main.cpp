@@ -204,7 +204,7 @@ int main() {
 
 #ifdef OPENNOVA_HTTP_ENABLED
 	SessionStore sessions;
-	HttpListener http(manager, *dbh, nwudp, sessions);
+	HttpListener http(manager, *dbh, sessions);
 	http.set_unknown_tracker(&unknown_tracker);
 	if (!http.start(config)) {
 		std::fprintf(stderr, "[boot] FATAL: HTTP listener start failed\n");

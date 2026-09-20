@@ -26,10 +26,6 @@ void expect(bool condition, const std::string &message) {
 	}
 }
 
-bool contains(const std::string &haystack, const char *needle) {
-	return haystack.find(needle) != std::string::npos;
-}
-
 } // namespace
 
 int main() {

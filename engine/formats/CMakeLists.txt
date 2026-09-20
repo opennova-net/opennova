@@ -51,8 +51,9 @@ add_library(opennova_formats STATIC
     # mission — .bms/.mis missions: document model, parsers/writers and edit
     # helpers. Standalone (no world/runtime dependency);
     # the runtime half — event runtime, promotion, boot — lives in
-    # engine/runtime/mission, both exposing <mission/...> with disjoint header
-    # sets (the ADR 0029 acyclicity fold; directory home since ADR 0030).
+    # engine/runtime/mission; the group in the include path keeps the two apart
+    # (<formats/mission/...> vs <runtime/mission/...>, ADR 0040; the ADR 0029
+    # acyclicity fold; directory home since ADR 0030).
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/authoring.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/bms.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/bms_edit.cpp         # the document's edit operations + typed views over bms::File
@@ -138,8 +139,8 @@ target_link_libraries(opennova_formats PUBLIC opennova_io opennova_crt)
 # link line, so nothing else needs to name it).
 target_link_libraries(opennova_formats PRIVATE opennova_miniz)
 
-# Link math library (needed for sin/cos/floorf in pure C builds; not needed on
-# Windows/MSVC) — carried over from the threedi lib.
+# Link the math library (sin/cos/floorf on the non-MSVC toolchains; not needed
+# on Windows/MSVC).
 if(NOT WIN32 OR MINGW)
     target_link_libraries(opennova_formats PUBLIC m)
 endif()

@@ -1,8 +1,5 @@
 #include "mission_mis.h"
 
-// Split out of mission.cpp (quality campaign W3-1). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // Reads the .mis text form back into a bms::File. Tokenizer and per-section parsers
 // are private here; mission_mis_writer.cpp is the inverse.
 
@@ -149,16 +146,6 @@ bool token_float(const MisLine &line, size_t index, float &out, std::string &err
 	return true;
 }
 
-void mis_copy_fixed(char *dest, size_t dest_size, const std::string &value) {
-	const size_t copy_len = std::min(dest_size, value.size());
-	if (copy_len > 0) {
-		std::memcpy(dest, value.data(), copy_len);
-	}
-	if (copy_len < dest_size) {
-		std::memset(dest + copy_len, 0, dest_size - copy_len);
-	}
-}
-
 void initialize_mis_file(bms::File &file) {
 	file = {};
 	file.header.magic[0] = 'B';
@@ -206,15 +193,15 @@ bool parse_mis_general_information(const std::vector<MisLine> &lines, size_t &po
 			if (!token_i32(line, 1, i32, error)) return false;
 			header.magic[3] = static_cast<char>(std::clamp<int32_t>(i32, 0, 255));
 		} else if (key == "name") {
-			if (t.size() > 1) mis_copy_fixed(header.mission_name, sizeof(header.mission_name), t[1]);
+			if (t.size() > 1) copy_fixed_field(header.mission_name, sizeof(header.mission_name), t[1]);
 		} else if (key == "designer") {
-			if (t.size() > 1) mis_copy_fixed(header.designer, sizeof(header.designer), t[1]);
+			if (t.size() > 1) copy_fixed_field(header.designer, sizeof(header.designer), t[1]);
 		} else if (key == "terrain") {
-			if (t.size() > 1) mis_copy_fixed(header.terrain, 16, t[1]);
+			if (t.size() > 1) copy_fixed_field(header.terrain, 16, t[1]);
 		} else if (key == "cnv_file") {
-			if (t.size() > 1) mis_copy_fixed(header.terrain + 16, 16, t[1]);
+			if (t.size() > 1) copy_fixed_field(header.terrain + 16, 16, t[1]);
 		} else if (key == "tt_file") {
-			if (t.size() > 1) mis_copy_fixed(header.terrain + 32, 16, t[1]);
+			if (t.size() > 1) copy_fixed_field(header.terrain + 32, 16, t[1]);
 		} else if (key == "terrain_color") {
 			if (!token_i32(line, 1, i32, error)) return false;
 			header.climate = static_cast<bms::ClimateType>(i32);
@@ -259,7 +246,7 @@ bool parse_mis_general_information(const std::vector<MisLine> &lines, size_t &po
 			if (!token_i32(line, 1, i32, error)) return false;
 			header.weather_type = static_cast<bms::WeatherType>(i32);
 		} else if (key == "sunset") {
-			if (t.size() > 1) mis_copy_fixed(header.environment, sizeof(header.environment), t[1]);
+			if (t.size() > 1) copy_fixed_field(header.environment, sizeof(header.environment), t[1]);
 		} else if (key == "start_time") {
 			if (!token_i32(line, 1, i32, error)) return false;
 			header.start_time = hhmm_to_header_time(i32);
@@ -267,7 +254,7 @@ bool parse_mis_general_information(const std::vector<MisLine> &lines, size_t &po
 			if (!token_i32(line, 1, i32, error)) return false;
 			header.minutes_per_day = static_cast<uint16_t>(i32);
 		} else if (key == "terrain_tile_tga") {
-			if (t.size() > 1) mis_copy_fixed(header.terrain_tile, sizeof(header.terrain_tile), t[1]);
+			if (t.size() > 1) copy_fixed_field(header.terrain_tile, sizeof(header.terrain_tile), t[1]);
 		} else if (key == "wind") {
 			if (!token_u32(line, 1, u32, error)) return false;
 			header.wind_speed = u32;
@@ -319,7 +306,7 @@ bool parse_mis_briefing(const std::vector<MisLine> &lines, size_t &pos, bms::Fil
 		const MisLine &line = lines[pos];
 		const std::vector<std::string> &t = line.tokens;
 		if (!t.empty() && t[0] == "endbriefing") {
-			mis_copy_fixed(file.header.mission_briefing, sizeof(file.header.mission_briefing), briefing);
+			copy_fixed_field(file.header.mission_briefing, sizeof(file.header.mission_briefing), briefing);
 			++pos;
 			return true;
 		}
@@ -413,7 +400,7 @@ bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 			return true;
 		}
 		if (t.size() >= 2 && t[0] == "description") {
-			mis_copy_fixed(record.name, sizeof(record.name), t[1]);
+			copy_fixed_field(record.name, sizeof(record.name), t[1]);
 		}
 	}
 	error = "MIS layer section is missing its end marker";
@@ -591,9 +578,9 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 			if (!token_i32(line, 1, v, error)) return false;
 			entity.type_id = v;
 		} else if (key == "iai_name") {
-			if (t.size() > 1) mis_copy_fixed(entity.name1, sizeof(entity.name1), t[1]);
+			if (t.size() > 1) copy_fixed_field(entity.name1, sizeof(entity.name1), t[1]);
 		} else if (key == "ai_textfile") {
-			if (t.size() > 1) mis_copy_fixed(entity.name2, sizeof(entity.name2), t[1]);
+			if (t.size() > 1) copy_fixed_field(entity.name2, sizeof(entity.name2), t[1]);
 		} else if (key == "id") {
 			if (!token_i32(line, 1, v, error)) return false;
 			entity.id = v;
@@ -724,7 +711,7 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 			entity.mis_height_lock = static_cast<uint8_t>(std::clamp<int32_t>(v, 0, 255));
 		} else if (key == "gen_string") {
 			if (t.size() > 1 && t[1] != "null") {
-				mis_copy_fixed(entity.gen_string, sizeof(entity.gen_string), t[1]);
+				copy_fixed_field(entity.gen_string, sizeof(entity.gen_string), t[1]);
 			}
 		}
 	}

@@ -1,7 +1,6 @@
 #pragma once
 
-// Internal to engine/runtime/mission — not part of the public interface. Split out of
-// mission.cpp (quality campaign W3-1); the bodies are unchanged.
+// Internal to engine/formats/mission — not part of the public interface.
 //
 // Display names for the BMS event-logic enums. Record conversions stamp them into
 // each typed record, so they live in one shared implementation.

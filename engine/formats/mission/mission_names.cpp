@@ -1,8 +1,5 @@
 #include "mission_names.h"
 
-// Split out of mission.cpp (quality campaign W3-1). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // Display names for the BMS event-logic enums. The three sub-tables are file-local:
 // each is reached only through the dispatcher above it.
 

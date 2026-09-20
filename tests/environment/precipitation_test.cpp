@@ -84,10 +84,8 @@ struct FloorProbe {
 	int32_t terrain = 3 << 16;
 	bool hit = false;
 	int32_t hit_z = 0;
-	int calls = 0;
 	static int32_t terrain_height(void *ctx, int32_t, int32_t) {
 		FloorProbe *p = static_cast<FloorProbe *>(ctx);
-		++p->calls;
 		return p->terrain;
 	}
 	static bool entity_hit(void *ctx, int32_t, int32_t, int32_t z_top, int32_t z_bottom, int32_t &hit_z) {
@@ -133,7 +131,6 @@ void test_update_wraps_into_the_camera_volume_and_refloors() {
 	field.update(cam_x, cam_y, cam_z, 0x10000, 0, sampler);
 	CHECK(field.slots[4].floor_z == (3 << 16));
 	// Only the active prefix walks: rain 48 -> 2 slots.
-	probe.calls = 0;
 	field.slots[5] = {95 << 16, 110 << 16, 15 << 16, 0};
 	field.update(cam_x, cam_y, cam_z, 48, 0, sampler);
 	CHECK(field.slots[5].x == (95 << 16));

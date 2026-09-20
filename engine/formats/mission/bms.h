@@ -519,7 +519,7 @@ inline int32_t to_fixed_16_16(float v) {
 //  (RAM 448B -> disk 172B); canonical field NAMES come from the .mis text writer Med_WriteMisFile @0x454630
 //  (literal keywords). Notes: yaw/pitch/roll stored % 360; w_accuracy1 clamped <= w_accuracy2; iai_name (name1)
 //  is from the graphic .def table (not per-entity); ai_textfile = name2; unk42b@166/unk43@168 are NEVER written
-//  (zero-filled) -> reserved/pad. write_mis_item in mission.cpp already uses the canonical names below; this is
+//  (zero-filled) -> reserved/pad. write_mis_items in mission_mis_writer.cpp already uses the canonical names below; this is
 //  validated against the original .mis writer. The full name table follows inline (2026-06-06 grill).
 //  Canonical names: perception2/perfectionist2/wp_distance/wp_adv_trigger/wp_number/w_accuracy1,2/obliqueness/
 //  alert_state/map_symbol/team_budget/color_override/max_attack_distance are CORRECT as-is. CORRECTIONS (raw

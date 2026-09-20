@@ -14,6 +14,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include <base/io/crc32_mpeg2.h>
 #include <base/io/strutil.h>
 
 using namespace opennova::pff;
@@ -723,22 +724,9 @@ int32_t vfs_version_crc(const uint8_t *data, size_t size) {
     // [orig: CRC_ComputeCustomTable @ 0x53c820 — crc = table[byte ^ HIBYTE(crc)]
     //  ^ (crc << 8), init -1]. The table is retail's 256-entry MSB-first
     // CRC-32 table for polynomial 0x04C11DB7 (@ 0x830780; entries [0]=0,
-    // [1]=0x04C11DB7, [2]=0x09823B6E, [31]=0x745E66CD verified) — generated
-    // here instead of carried as 1 KiB of literals.
-    static const uint32_t *table = [] {
-        static uint32_t t[256];
-        for (uint32_t i = 0; i < 256; ++i) {
-            uint32_t c = i << 24;
-            for (int bit = 0; bit < 8; ++bit)
-                c = (c & 0x80000000u) ? (c << 1) ^ 0x04C11DB7u : (c << 1);
-            t[i] = c;
-        }
-        return t;
-    }();
-    uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < size; ++i)
-        crc = table[(data[i] ^ (crc >> 24)) & 0xFFu] ^ (crc << 8);
-    return static_cast<int32_t>(crc);
+    // [1]=0x04C11DB7, [2]=0x09823B6E, [31]=0x745E66CD verified): the shared
+    // io::kCrc32Mpeg2Table, value-identical to the NAPI envelope's.
+    return static_cast<int32_t>(io::crc32_mpeg2(data, size));
 }
 
 int32_t vfs_expansion_version_checksum(const std::string &game_root,

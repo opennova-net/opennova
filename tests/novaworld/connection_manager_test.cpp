@@ -43,7 +43,7 @@ int test_logout_fires_lost_with_logout_reason() {
 	mgr.on_lost([&](const Connection &c, DropReason r) { lost.push_back({c.id, r}); });
 
 	mgr.notify_handshake(handshake(0x1, 0x7F000001u, 1, 1000));
-	mgr.notify_logout(0x1);
+	mgr.notify_logout_addr(PeerAddr{0x7F000001u, 1});
 
 	TEST_EXPECT(lost.size() == 1);
 	TEST_EXPECT(lost[0].first == 0x1);
@@ -66,7 +66,7 @@ int test_tick_drops_expired_with_timeout_reason() {
 	TEST_EXPECT(mgr.registry().size() == 2);
 
 	// Touch one peer at t=500 to keep it alive.
-	mgr.notify_seen(0xAAA, 500);
+	mgr.notify_seen_addr(PeerAddr{0x7F000001u, 1}, 500);
 
 	// At t=1500, BBB (last_seen=100, timeout=1000) expires; AAA (last_seen=500) survives.
 	dropped = mgr.tick(1500);
@@ -152,7 +152,7 @@ int test_shutdown_evicts_all_with_shutdown_reason() {
 int test_notify_active_promotes_state() {
 	ConnectionManager mgr;
 	mgr.notify_handshake(handshake(0x77, 0x7F000001u, 1, 100));
-	mgr.notify_active(0x77, "Taylor", "client_scrk_xxx", "server_scrk_yyy");
+	mgr.notify_active_addr(PeerAddr{0x7F000001u, 1}, "Taylor", "client_scrk_xxx", "server_scrk_yyy");
 
 	auto c = mgr.registry().find(0x77);
 	TEST_EXPECT(c.has_value());
