@@ -16,8 +16,6 @@ namespace OpenNova.Launcher;
 
 internal sealed class TrayApplicationContext : ApplicationContext
 {
-    private const string RedirectionOffMessage = "NovaWorld redirection is off. Turn it on in Preferences to play.";
-
     private readonly NotifyIcon _notifyIcon;
     private readonly ContextMenuStrip _contextMenu;
     private readonly ToolStripMenuItem _launchMenuItem;
@@ -37,7 +35,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly GameLauncher _gameLauncher = new();
     private IReadOnlyList<GameDefinition> _supportedGames = GameCatalog.SupportedGames;
     private LauncherSettings _settings = new();
-    private ServerEndpoint? _currentEndpoint;
     private HostsRedirectState _lastHostsState = HostsRedirectState.Disabled;
     private bool _disposed;
     private bool _deploymentInProgress;
@@ -96,8 +93,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
             SaveSettingsAsync);
 
         _launcherAutoUpdateService = new LauncherAutoUpdateService();
-        _launcherAutoUpdateService.UpdateReady += OnLauncherUpdateReady;
-        _launcherAutoUpdateService.NoUpdateAvailable += OnLauncherNoUpdateAvailable;
         _launcherAutoUpdateService.UpdateFailed += OnLauncherUpdateFailed;
 
         _expansionCoordinator = new ExpansionCoordinator(
@@ -178,7 +173,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
         var endpoint = await _endpointResolver.ResolveAsync(_settings.DevMode, CancellationToken.None);
         if (endpoint == null)
         {
-            _currentEndpoint = null;
             _lastHostsState = HostsRedirectState.Inaccessible;
             if (!silent)
             {
@@ -190,7 +184,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
             return false;
         }
 
-        _currentEndpoint = endpoint;
         var desired = BuildDesiredRedirects(endpoint);
         var state = _hostsFileService.GetState(desired);
 
@@ -630,17 +623,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void OnCheckForUpdatesRequested(object? sender, EventArgs e)
     {
-        _launcherAutoUpdateService.CheckForUpdates(notifyWhenUpToDate: true);
-    }
-
-    private void OnLauncherUpdateReady()
-    {
-        // AutoUpdater.NET will display its own UI when an update is available.
-    }
-
-    private void OnLauncherNoUpdateAvailable()
-    {
-        // Suppress informational balloons; errors are handled separately.
+        _launcherAutoUpdateService.CheckForUpdates();
     }
 
     private void OnLauncherUpdateFailed(string message)

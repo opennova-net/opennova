@@ -24,8 +24,9 @@ shared 1Password document and secrets come from the vault:
 ```
 
 (`deploy/bin/on-deploy` runs `terraform -chdir=infra/github` with its own
-`tfstate-github` 1Password document and injects `TF_VAR_github_token` /
-`TF_VAR_github_owner` / `shared_repository_secrets` from `deploy/env/github.tfvars.json.tpl`.)
+`tfstate-github` 1Password document. It renders `deploy/env/github.tfvars.json.tpl`
+(`github_token`, `github_owner`, `shared_repository_secrets`) from the vault and passes
+the result as `-var-file`.)
 
 ## One-time import of the existing repos
 
@@ -68,7 +69,7 @@ The pipeline, end to end:
 2. The tag push triggers the expansion repo's build workflow (lives in that
    repo — see `docs/net/expansion-publish-workflow.yml.example` for a template).
    It packages the content, computes `sha256` + size, and uploads to
-   `s3://$DOWNLOADS_BUCKET/expansions/<slug>/<repo_ref>.zip`.
+   `s3://$DOWNLOADS_BUCKET/expansion/<slug>/<slug>-<version>.zip`.
 3. The workflow calls back:
    `POST $NOVAWORLD_SERVER_URL/admin/internal/expansions/<slug>/publish`
    with `Authorization: Bearer $EXPANSION_PUBLISH_TOKEN` and JSON

@@ -78,9 +78,9 @@
 </template>
 
 <script setup lang="ts">
-import { isAxiosError } from 'axios';
 import { onMounted, reactive, ref } from 'vue';
 import { fetchServerStatus, updateServerStatus } from '../../api/admin';
+import { extractError } from '../../api/errors';
 
 const loading = ref(true);
 const saving = ref(false);
@@ -88,17 +88,6 @@ const message = ref<string | null>(null);
 const error = ref<string | null>(null);
 
 const form = reactive({ maintenance_enabled: false, message: '' });
-
-function extractError(err: unknown): string {
-  if (isAxiosError(err)) {
-    const data = err.response?.data as Record<string, any> | undefined;
-    if (typeof data?.message === 'string') return data.message;
-    if (typeof data?.error === 'string') return data.error;
-    return err.response?.statusText || 'Request failed';
-  }
-  if (err instanceof Error) return err.message;
-  return 'Unexpected error';
-}
 
 async function load() {
   loading.value = true;

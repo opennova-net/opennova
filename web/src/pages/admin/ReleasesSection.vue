@@ -168,9 +168,9 @@
 </template>
 
 <script setup lang="ts">
-import { isAxiosError } from 'axios';
 import { onMounted, reactive, ref } from 'vue';
 import { createExpansionRelease, fetchAdminExpansions, fetchAdminReleases } from '../../api/admin';
+import { extractError } from '../../api/errors';
 import type { AdminExpansion, AdminRelease } from '../../types/admin';
 
 const loading = ref(true);
@@ -193,25 +193,6 @@ function ensureFormState(expansion: AdminExpansion) {
   }
 }
 
-function extractError(err: unknown): string {
-  if (isAxiosError(err)) {
-    const data = err.response?.data as Record<string, any> | undefined;
-    if (data) {
-      if (typeof data.error === 'string') {
-        return data.error;
-      }
-      if (typeof data.message === 'string') {
-        return data.message;
-      }
-    }
-    return err.response?.statusText || 'Request failed';
-  }
-  if (err instanceof Error) {
-    return err.message;
-  }
-  return 'Unexpected error';
-}
-
 async function loadDashboard(showSpinner = true) {
   if (showSpinner) {
     loading.value = true;
@@ -231,7 +212,7 @@ async function loadDashboard(showSpinner = true) {
     resetNotesState(releaseData);
     error.value = null;
   } catch (err) {
-    error.value = extractError(err);
+    error.value = extractError(err, 'error');
   } finally {
     if (showSpinner) {
       loading.value = false;
@@ -323,7 +304,7 @@ async function submitRelease(slug: string) {
     formState[slug].version = response.release.version;
     formState[slug].notes = '';
   } catch (err) {
-    error.value = extractError(err);
+    error.value = extractError(err, 'error');
   } finally {
     submittingSlug.value = null;
   }

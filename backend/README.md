@@ -6,8 +6,11 @@ Contents:
 - `migrations/` — SQLite-flavored DDL applied idempotently on server boot via
   `opennova::db::run_migrations` (engine/net/novaworld/db/sqlite.h). Order is
   lexicographic: `0001_*.sql`, `0002_*.sql`, …
-- `seed/` — INSERT statements with `OR IGNORE` so they can be re-run safely.
-  The standalone server applies these after migrations during startup.
+- `seed/` — idempotent INSERT statements (`OR IGNORE`, or `ON CONFLICT ... DO
+  UPDATE` in the Terraform-generated `0002_expansions.generated.sql`) so they
+  can be re-run safely. The standalone server applies these after migrations
+  during startup; the dev-only `0002_dev_users.sql` is skipped unless
+  `SEED_DEV_USERS` is set.
 - `data/` — runtime DB files (SQLite). Gitignored. The default location is
   `backend/data/state.db`; override with the `DATABASE_PATH` env var.
 

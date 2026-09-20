@@ -29,8 +29,7 @@ module.exports = {
       borderRadius: {
         // Semantic radius scale matching the editor StyleBoxes.
         control: '2px', // buttons, inputs, chips, list items
-        panel: '4px', // cards, panels, tables, popups
-        window: '6px' // modal / dialog shells
+        panel: '4px' // cards, panels, tables, popups
       }
     }
   },

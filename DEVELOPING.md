@@ -138,9 +138,8 @@ Avoid rebuilding images to test changes:
 - **Server (C++):** the dockerized server is for "I just need the backend up." For active server work,
   run the local binary (below) and rebuild incrementally with `cmake --build build` (only the changed
   objects, seconds). To refresh just the server image in the stack: `docker compose ... up -d --build novaworld`.
-- **Ports at a glance:** `5173` = web UI (dev/HMR), `8080` = API/server, `8088` = nginx (only the
-  prod-parity build). Hitting `http://localhost:8080/` shows an "API server" note — that is expected;
-  the dev UI is at `:5173`.
+- **Ports at a glance:** `5173` = web UI (dev/HMR), `8080` = API/server. Hitting
+  `http://localhost:8080/` shows an "API server" note, which is expected; the dev UI is at `:5173`.
 
 **Without Docker**, build and run the server binary directly. It reads its config from
 env vars (`apps/novaworld_server/server_config.cpp`), and the defaults boot a fresh

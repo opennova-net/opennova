@@ -60,9 +60,9 @@
 </template>
 
 <script setup lang="ts">
-import { isAxiosError } from 'axios';
 import { onMounted, ref } from 'vue';
 import { fetchConnections } from '../../api/admin';
+import { extractError } from '../../api/errors';
 import type { AdminConnection } from '../../types/admin';
 
 const loading = ref(true);
@@ -70,17 +70,6 @@ const error = ref<string | null>(null);
 const connections = ref<AdminConnection[]>([]);
 const count = ref(0);
 const heartbeatTimeoutMs = ref(0);
-
-function extractError(err: unknown): string {
-  if (isAxiosError(err)) {
-    const data = err.response?.data as Record<string, any> | undefined;
-    if (typeof data?.message === 'string') return data.message;
-    if (typeof data?.error === 'string') return data.error;
-    return err.response?.statusText || 'Request failed';
-  }
-  if (err instanceof Error) return err.message;
-  return 'Unexpected error';
-}
 
 // Server timestamps are epoch milliseconds. Render them locally; 0/absent → dash.
 function formatMs(ms?: number): string {

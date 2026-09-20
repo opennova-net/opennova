@@ -8,10 +8,12 @@
 # Subcommands:
 #   secrets check                 dry-run every op:// reference
 #   infra plan|apply|destroy      terraform (AWS + Cloudflare)
+#   infra output|list [args...]   terraform output / state list
 #   github import|plan|apply      terraform (expansion repos + Actions secrets)
 #   aws <args...>                 run the AWS CLI with vault credentials
 #   app deploy [--tag SHA]        pull GHCR images + compose up on the target
 #   app status|logs [svc]|restart|down
+#   app sql <statement>           run SQL against the live sqlite DB
 #   backup now|list               trigger / list the sqlite backups
 #   state push|pull               terraform state <-> 1Password document
 #
@@ -211,7 +213,7 @@ cmd_app() {
     deploy)
       local tag="latest"
       [ "${1:-}" = "--tag" ] && { tag="$2"; shift 2; }
-      local owner repo
+      local owner
       owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
       export SERVER_IMAGE="ghcr.io/${owner}/novaworld-server:${tag}"
       export WEB_IMAGE="ghcr.io/${owner}/novaworld-web:${tag}"
@@ -282,7 +284,7 @@ cmd_state() {
 }
 
 usage() {
-  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {

@@ -33,8 +33,6 @@ public sealed class ExpansionCoordinator
         _buildInstallations = buildInstallations ?? throw new ArgumentNullException(nameof(buildInstallations));
     }
 
-    public IReadOnlyList<GameDefinition> Games => _games;
-
     public IReadOnlyList<ExpansionDescriptor> GetAvailableExpansions(string gameSlug)
     {
         if (string.IsNullOrWhiteSpace(gameSlug))

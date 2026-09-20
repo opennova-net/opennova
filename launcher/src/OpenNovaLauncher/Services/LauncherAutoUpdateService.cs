@@ -16,11 +16,8 @@ public sealed class LauncherAutoUpdateService : IDisposable
     private readonly Uri _manifestUri;
     private readonly SynchronizationContext _syncContext;
     private readonly object _stateLock = new();
-    private bool _notifyWhenUpToDate;
     private TaskCompletionSource<bool>? _updateCheckCompletion;
 
-    public event Action? UpdateReady;
-    public event Action? NoUpdateAvailable;
     public event Action<string>? UpdateFailed;
 
     public bool IsUpdateAvailable { get; private set; }
@@ -50,11 +47,10 @@ public sealed class LauncherAutoUpdateService : IDisposable
         AutoUpdater.CheckForUpdateEvent += AutoUpdaterOnCheckForUpdateEvent;
     }
 
-    public Task<bool> CheckForUpdatesAsync(bool notifyWhenUpToDate = false)
+    public Task<bool> CheckForUpdatesAsync()
     {
         lock (_stateLock)
         {
-            _notifyWhenUpToDate = notifyWhenUpToDate;
             _updateCheckCompletion = new TaskCompletionSource<bool>();
         }
 
@@ -63,9 +59,9 @@ public sealed class LauncherAutoUpdateService : IDisposable
         return _updateCheckCompletion.Task;
     }
 
-    public void CheckForUpdates(bool notifyWhenUpToDate = false)
+    public void CheckForUpdates()
     {
-        _ = CheckForUpdatesAsync(notifyWhenUpToDate);
+        _ = CheckForUpdatesAsync();
     }
 
     private void AutoUpdaterOnParseUpdateInfoEvent(ParseUpdateInfoEventArgs args)
@@ -134,34 +130,14 @@ public sealed class LauncherAutoUpdateService : IDisposable
 
         if (!args.IsUpdateAvailable)
         {
-            bool shouldNotify;
-            lock (_stateLock)
-            {
-                shouldNotify = _notifyWhenUpToDate;
-                _notifyWhenUpToDate = false;
-            }
-
-            if (shouldNotify)
-            {
-                RaiseNoUpdate();
-            }
-
             CompleteUpdateCheck(false);
             return;
         }
 
         IsUpdateAvailable = true;
 
-        lock (_stateLock)
-        {
-            _notifyWhenUpToDate = false;
-        }
-
-        Post(() =>
-        {
-            AutoUpdater.ShowUpdateForm(args);
-            UpdateReady?.Invoke();
-        });
+        // AutoUpdater.NET displays its own UI when an update is available.
+        Post(() => AutoUpdater.ShowUpdateForm(args));
 
         CompleteUpdateCheck(true);
     }
@@ -176,17 +152,6 @@ public sealed class LauncherAutoUpdateService : IDisposable
         }
 
         completion?.TrySetResult(updateAvailable);
-    }
-
-    private void RaiseNoUpdate()
-    {
-        var handler = NoUpdateAvailable;
-        if (handler == null)
-        {
-            return;
-        }
-
-        Post(handler);
     }
 
     private void RaiseFailure(string message)

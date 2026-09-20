@@ -43,7 +43,6 @@ NW_PP = os.path.join("build", "apps", "nw_pp", "Release", "nw_pp.exe")
 # --- line patterns (match nw_pp --stream 0x0A output) -----------------------
 RE_FRAME = re.compile(r"tag=0x0a\[per-frame-update\]")
 RE_HDR = re.compile(r"\[0x0A\].*flags1=(0x[0-9a-f]+)\s+flags2=(0x[0-9a-f]+)\s+sub=(\d+)")
-RE_SUBLINE = re.compile(r"^\s+(timer|env|aim|gametype):")
 RE_HEADER = re.compile(r"^\s+header:\s+(.*)$")
 RE_REC = re.compile(r"^\s+rec \d+ hdl=(0x[0-9a-f]+) p(\d)\([^)]*\)/s\d+ type=(0x[0-9a-f]+).*class=(\w+)")
 RE_BODY = re.compile(r"^\s+(player|vehicle|infantry|guided):\s+(.*)$")
