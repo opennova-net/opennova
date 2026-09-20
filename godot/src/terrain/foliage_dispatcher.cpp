@@ -160,8 +160,6 @@ void FoliageDispatcher::_bind_methods() {
       &FoliageDispatcher::configure_slots);
   ClassDB::bind_method(D_METHOD("set_terrain", "terrain"),
                        &FoliageDispatcher::set_terrain);
-  ClassDB::bind_method(D_METHOD("set_weather", "weather"),
-                       &FoliageDispatcher::set_weather);
   ClassDB::bind_method(D_METHOD("set_wind_clock_override_ms", "ms"),
                        &FoliageDispatcher::set_wind_clock_override_ms);
   ClassDB::bind_method(D_METHOD("set_terrain_data", "data"),
@@ -227,8 +225,6 @@ void FoliageDispatcher::_bind_methods() {
   ClassDB::bind_method(
       D_METHOD("resolve_slot_fd_textures", "resource_root", "defs"),
       &FoliageDispatcher::resolve_slot_fd_textures);
-  ClassDB::bind_method(D_METHOD("load_fd_texture", "resource_root", "graphic"),
-                       &FoliageDispatcher::load_fd_texture);
   ClassDB::bind_method(D_METHOD("load_mesh", "resource_root", "graphic"),
                        &FoliageDispatcher::load_mesh);
   ClassDB::bind_static_method("FoliageDispatcher",
@@ -604,7 +600,6 @@ FoliageDispatcher::list_graphics(const Ref<ResourceRoot> &p_resource_root,
     row.instantiate();
     row->set_basename(basename);
     row->set_model_path(model_ref);
-    row->set_scene_path(model_ref);
     out.push_back(row);
   }
   // Sorted by basename (the former sort_custom over `a.basename < b.basename`).

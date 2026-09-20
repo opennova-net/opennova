@@ -233,8 +233,6 @@ void MissionData::_bind_methods() {
 	BIND_CONSTANT(LOAD_STAGE_FINISH);
 	BIND_CONSTANT(LOAD_PROGRESS_WORLD_READY);
 	BIND_CONSTANT(LOAD_PROGRESS_COMPLETE);
-	ClassDB::bind_static_method("MissionData", D_METHOD("load_progress_percent", "stage"),
-			&MissionData::load_progress_percent);
 	BIND_CONSTANT(ATTRIB_ROTATE_MAP_180);
 	BIND_CONSTANT(ATTRIB_START_WITH_NVG_ON);
 	BIND_CONSTANT(ATTRIB_ADVANCE_AND_SECURE);

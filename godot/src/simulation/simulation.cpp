@@ -8,7 +8,6 @@
 #include "simulation/environment_snapshot.h" // the F3 Environment record as a typed read
 #include "simulation/hud_view_records.h" // RoundOutcome
 #include "simulation/present_event_records.h" // SoundEmitterRow (the bound emitter drain)
-#include "util/axes.h"
 
 #include "env/weather.h"
 #include <runtime/environment/environment_state.h>

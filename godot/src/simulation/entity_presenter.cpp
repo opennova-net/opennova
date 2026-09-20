@@ -149,8 +149,6 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::set_render_culled);
 	ClassDB::bind_method(D_METHOD("clear_render_culled"),
 			&EntityPresenter::clear_render_culled);
-	ClassDB::bind_method(D_METHOD("pending_spawn_count"),
-			&EntityPresenter::pending_spawn_count);
 	ClassDB::bind_method(D_METHOD("get_wire_stats_record"),
 			&EntityPresenter::get_wire_stats_record);
 	ClassDB::bind_method(D_METHOD("resolve_wire_handle", "wire_handle"),
@@ -186,13 +184,7 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::setup_passes);
 	ClassDB::bind_method(D_METHOD("set_listener_position", "position"),
 			&EntityPresenter::set_listener_position);
-	ClassDB::bind_method(D_METHOD("listener_position"),
-			&EntityPresenter::listener_position);
 	ClassDB::bind_method(D_METHOD("present_passes"), &EntityPresenter::present_passes);
-	ClassDB::bind_method(D_METHOD("profile_present_passes"),
-			&EntityPresenter::profile_present_passes);
-	ClassDB::bind_method(D_METHOD("sync_fixed_tick_effects"),
-			&EntityPresenter::sync_fixed_tick_effects);
 	ClassDB::bind_method(D_METHOD("get_fire_present_stats"),
 			&EntityPresenter::get_fire_present_stats);
 	ClassDB::bind_method(D_METHOD("get_destruction_present_stats"),
@@ -203,8 +195,6 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::get_scar_present_stats);
 	ClassDB::bind_method(D_METHOD("has_active_wreck_fire", "owner_key"),
 			&EntityPresenter::has_active_wreck_fire);
-	ClassDB::bind_method(D_METHOD("warm_fire_pipelines", "position"),
-			&EntityPresenter::warm_fire_pipelines);
 	ClassDB::bind_method(D_METHOD("fire_ribbon_mesh"), &EntityPresenter::fire_ribbon_mesh);
 	ClassDB::bind_method(D_METHOD("scar_presenter"), &EntityPresenter::scar_presenter);
 	ClassDB::bind_method(D_METHOD("present_fires", "events"),
@@ -246,8 +236,6 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("held_weapon_hand_frame_basis", "bone_model_to_world"),
 			&EntityPresenter::held_weapon_hand_frame_basis);
-	ClassDB::bind_static_method("EntityPresenter",
-			D_METHOD("find_skeleton", "root"), &EntityPresenter::find_skeleton);
 	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("held_weapon_attach_nudge"),
 			&EntityPresenter::held_weapon_attach_nudge);

@@ -116,7 +116,6 @@ void EnvLightState::publish(const Ref<EnvLightValues> &p_values,
 }
 
 void PanmClock::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("sample_frame"), &PanmClock::sample_frame);
 	ClassDB::bind_method(D_METHOD("sample", "value_ms", "frame"), &PanmClock::sample);
 	ClassDB::bind_method(D_METHOD("get_time_ms"), &PanmClock::get_time_ms);
 	ClassDB::bind_method(D_METHOD("set_time_ms_for_test", "value_ms"),
@@ -1888,12 +1887,6 @@ void ObjectModel::_bind_methods() {
 			D_METHOD("advance_awake_frame", "delta"),
 			&ObjectModel::advance_awake_frame);
 	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("profile_awake_frame", "delta"),
-			&ObjectModel::profile_awake_frame);
-	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("refresh_match_terrain_frame", "terrain"),
-			&ObjectModel::refresh_match_terrain_frame);
-	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("update_authored_lods",
 					"camera_transform", "vertical_fov",
 					"viewport_width", "viewport_height"),
@@ -1940,12 +1933,6 @@ void ObjectModel::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "entity_ref", PROPERTY_HINT_NONE, "",
 						 PROPERTY_USAGE_DEFAULT, "EntityRef"),
 			"set_entity_ref", "get_entity_ref");
-	ClassDB::bind_method(D_METHOD("set_match_terrain_enabled", "enabled"),
-			&ObjectModel::set_match_terrain_enabled);
-	ClassDB::bind_method(D_METHOD("set_viewmodel_pass", "enabled"),
-			&ObjectModel::set_viewmodel_pass);
-	ClassDB::bind_method(D_METHOD("set_presentation_layer", "layer"),
-			&ObjectModel::set_presentation_layer);
 	ClassDB::bind_method(D_METHOD("set_shadow_caster_enabled", "enabled"),
 			&ObjectModel::set_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_shadow_caster_enabled"),
@@ -1956,8 +1943,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::is_static_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("get_entity_uniform_scale_q16"),
 			&ObjectModel::get_entity_uniform_scale_q16);
-	ClassDB::bind_method(D_METHOD("compose_entity_transform", "basis", "origin"),
-			&ObjectModel::compose_entity_transform);
 	ClassDB::bind_method(D_METHOD("set_shadow_bound_radii", "model_sphere", "entity_bound"),
 			&ObjectModel::set_shadow_bound_radii);
 	ClassDB::bind_method(D_METHOD("set_slot_shadow_capture_with", "owner"),
@@ -1995,8 +1980,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_authored_lod_enabled);
 	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner", "exact"),
             &ObjectModel::set_authored_lod_owner, DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("set_authored_lod_projection_owner", "owner"),
-			&ObjectModel::set_authored_lod_projection_owner);
 	ClassDB::bind_method(D_METHOD("get_authored_lod_projection_owner"),
 			&ObjectModel::get_authored_lod_projection_owner);
     ClassDB::bind_method(D_METHOD("set_geometry_visible", "visible"), &ObjectModel::set_geometry_visible);
@@ -2020,17 +2003,11 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::advance_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_on_screen", "value"), &ObjectModel::set_on_screen);
 	ClassDB::bind_method(D_METHOD("is_on_screen"), &ObjectModel::is_on_screen);
-	ClassDB::bind_method(D_METHOD("set_present_visible", "visible"),
-			&ObjectModel::set_present_visible);
 	ClassDB::bind_method(D_METHOD("is_present_visible"),
 			&ObjectModel::is_present_visible);
 	ClassDB::bind_method(D_METHOD("set_occlusion_hidden", "hidden"),
 			&ObjectModel::set_occlusion_hidden);
-	ClassDB::bind_method(D_METHOD("is_occlusion_hidden"),
-			&ObjectModel::is_occlusion_hidden);
 
-	ClassDB::bind_method(D_METHOD("begin_ctrl_update"), &ObjectModel::begin_ctrl_update);
-	ClassDB::bind_method(D_METHOD("end_ctrl_update"), &ObjectModel::end_ctrl_update);
 	ClassDB::bind_method(D_METHOD("set_ctrl_value", "name", "value"),
 			&ObjectModel::set_ctrl_value);
 	ClassDB::bind_method(D_METHOD("clear_ctrl_value", "name"),
@@ -2039,8 +2016,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_ctrl_override);
 	ClassDB::bind_method(D_METHOD("clear_ctrl_override", "owner", "name"),
 			&ObjectModel::clear_ctrl_override);
-	ClassDB::bind_method(D_METHOD("clear_ctrl_overrides_owned", "owner"),
-			&ObjectModel::clear_ctrl_overrides_owned);
 	ClassDB::bind_method(D_METHOD("get_ctrl_values"), &ObjectModel::get_ctrl_values);
 
 	ClassDB::bind_method(D_METHOD("set_skeletal_anim", "skeletal"),
@@ -2078,8 +2053,6 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_active_body_clip"),
 			&ObjectModel::get_active_body_clip);
 	ClassDB::bind_method(D_METHOD("play_body_anim", "slot"), &ObjectModel::play_body_anim);
-	ClassDB::bind_method(D_METHOD("play_body_anim_at", "slot", "phase_ticks"),
-			&ObjectModel::play_body_anim_at);
 	ClassDB::bind_method(D_METHOD("get_animation_time_ms"),
 			&ObjectModel::get_animation_time_ms);
 	ClassDB::bind_method(D_METHOD("set_animation_time", "seconds"),

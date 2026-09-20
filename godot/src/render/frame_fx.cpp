@@ -1125,9 +1125,6 @@ void FrameFx::_bind_methods() {
 			D_METHOD("invalidate_q3_source", "source"),
 			&FrameFx::invalidate_q3_source);
 	ClassDB::bind_static_method("FrameFx",
-			D_METHOD("invalidate_q3_instances", "source"),
-			&FrameFx::invalidate_q3_instances);
-	ClassDB::bind_static_method("FrameFx",
 			D_METHOD("invalidate_q3_object_material", "material"),
 			&FrameFx::invalidate_q3_object_material);
 	BIND_CONSTANT(kBeautyCameraMask);

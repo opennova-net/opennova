@@ -312,8 +312,6 @@ void DebugArgSpec::_bind_methods() {
 	ClassDB::bind_static_method("DebugArgSpec", D_METHOD("marshal", "specs", "raw"),
 			&DebugArgSpec::marshal);
 	ClassDB::bind_method(D_METHOD("between", "lo", "hi"), &DebugArgSpec::between);
-	ClassDB::bind_method(D_METHOD("at_least", "lo"), &DebugArgSpec::at_least);
-	ClassDB::bind_method(D_METHOD("one_of", "values"), &DebugArgSpec::one_of);
 	ClassDB::bind_method(D_METHOD("optional", "default"), &DebugArgSpec::optional);
 	ClassDB::bind_method(D_METHOD("kind_name"), &DebugArgSpec::kind_name);
 	ClassDB::bind_method(D_METHOD("describe"), &DebugArgSpec::describe);

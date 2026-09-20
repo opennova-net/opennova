@@ -12,9 +12,6 @@ void ObjectData::_bind_methods() {
 			"include_in_network_challenge"), &ObjectData::open_from_resource_root,
 			DEFVAL(true));
 	ClassDB::bind_static_method("ObjectData",
-			D_METHOD("mark_cached_network_challenge_foliage_model", "name"),
-			&ObjectData::mark_cached_network_challenge_foliage_model);
-	ClassDB::bind_static_method("ObjectData",
 			D_METHOD("reset_network_challenge_model_registry"),
 			&ObjectData::reset_network_challenge_model_registry);
 	ClassDB::bind_static_method("ObjectData",
@@ -23,11 +20,7 @@ void ObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_source_path"), &ObjectData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &ObjectData::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_lod_count"), &ObjectData::get_lod_count);
-	ClassDB::bind_method(D_METHOD("find_material_array_index", "material_index"),
-			&ObjectData::find_material_array_index);
 	ClassDB::bind_method(D_METHOD("load_material_texture", "material_index", "texture_index"), &ObjectData::load_material_texture);
-	ClassDB::bind_method(D_METHOD("load_material_slot_texture", "array_index", "slot"),
-			&ObjectData::load_material_slot_texture);
 	ClassDB::bind_method(D_METHOD("get_control_registers"), &ObjectData::get_control_registers);
 	ClassDB::bind_method(D_METHOD("get_light_count"), &ObjectData::get_light_count);
 	ClassDB::bind_method(D_METHOD("get_light_info", "index"), &ObjectData::get_light_info);

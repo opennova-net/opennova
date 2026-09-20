@@ -638,11 +638,6 @@ void ItemEffectDirector::_bind_methods() {
 			&ItemEffectDirector::setup);
 	ClassDB::bind_method(D_METHOD("set_particles_hidden", "hidden"),
 			&ItemEffectDirector::set_particles_hidden);
-	ClassDB::bind_method(D_METHOD("particles_hidden"), &ItemEffectDirector::particles_hidden);
-	ClassDB::bind_method(D_METHOD("register_effect_anchor", "owner_key", "resolver"),
-			&ItemEffectDirector::register_effect_anchor);
-	ClassDB::bind_method(D_METHOD("unregister_effect_anchor", "owner_key"),
-			&ItemEffectDirector::unregister_effect_anchor);
 	ClassDB::bind_method(D_METHOD("has_effect_anchor", "owner_key"),
 			&ItemEffectDirector::has_effect_anchor);
 	ClassDB::bind_method(D_METHOD("get_stats"), &ItemEffectDirector::get_stats);
@@ -654,6 +649,4 @@ void ItemEffectDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reattach"), &ItemEffectDirector::reattach);
 	ClassDB::bind_method(D_METHOD("on_wire_node_spawned", "node", "kind", "item_id"),
 			&ItemEffectDirector::on_wire_node_spawned);
-	ClassDB::bind_method(D_METHOD("consume_control_effect", "effect"),
-			&ItemEffectDirector::consume_control_effect);
 }

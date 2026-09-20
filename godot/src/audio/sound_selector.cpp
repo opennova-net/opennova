@@ -11,9 +11,4 @@ void SoundSelector::_bind_methods() {
     BIND_CONSTANT(DEFAULT_CHANNEL_VOLUME);
 	ClassDB::bind_static_method("SoundSelector", D_METHOD("volume_db_from_255", "volume"),
 			&SoundSelector::volume_db_from_255);
-	ClassDB::bind_method(D_METHOD("reset"), &SoundSelector::reset);
-}
-
-void SoundSelector::reset() {
-	selector_.reset();
 }

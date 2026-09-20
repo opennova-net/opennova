@@ -1095,8 +1095,6 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("before_world_tick", "delta", "capture_mouse", "gameplay_input_active"),
 			&LocalPlayerPresenter::before_world_tick, DEFVAL(false), DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("after_world_tick"), &LocalPlayerPresenter::after_world_tick);
-	ClassDB::bind_method(D_METHOD("present_fixed_weapon_tick", "events"),
-			&LocalPlayerPresenter::present_fixed_weapon_tick);
 	ClassDB::bind_method(D_METHOD("fixed_weapon_batches_consumed"),
 			&LocalPlayerPresenter::fixed_weapon_batches_consumed);
 	ClassDB::bind_method(D_METHOD("handle_key_input", "event", "active"), &LocalPlayerPresenter::handle_key_input);
@@ -1104,9 +1102,6 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("handle_input", "event", "active"), &LocalPlayerPresenter::handle_input);
 	ClassDB::bind_method(D_METHOD("has_player"), &LocalPlayerPresenter::has_player);
 	ClassDB::bind_method(D_METHOD("is_local_spectator"), &LocalPlayerPresenter::is_local_spectator);
-	ClassDB::bind_method(D_METHOD("ensure_models"), &LocalPlayerPresenter::ensure_models);
-	ClassDB::bind_method(D_METHOD("clear_models"), &LocalPlayerPresenter::clear_models);
-	ClassDB::bind_method(D_METHOD("set_fly_camera_locked", "locked"), &LocalPlayerPresenter::set_fly_camera_locked);
 	ClassDB::bind_method(D_METHOD("aim_screen_point"), &LocalPlayerPresenter::aim_screen_point);
 	ClassDB::bind_method(D_METHOD("aim_range_units"), &LocalPlayerPresenter::aim_range_units);
 	ClassDB::bind_method(D_METHOD("avatar_root_world"), &LocalPlayerPresenter::avatar_root_world);

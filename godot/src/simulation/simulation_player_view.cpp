@@ -4,7 +4,6 @@
 // every witnessed gate live in <runtime/world/local_player_view.h>.
 #include "simulation/simulation_internal.h"
 #include "simulation/player_local_view.h"
-#include "util/axes.h"
 
 #include <net/npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
 #include <runtime/world/local_player_view.h>

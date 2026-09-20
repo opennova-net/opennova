@@ -1145,24 +1145,13 @@ int LightScene::death_flash_fade_mode() { return opennova::renderer::LightScene:
 int LightScene::death_flash_fade_ticks() { return opennova::renderer::LightScene::kDeathFlashFadeTicks; }
 
 void LightScene::_bind_methods() {
-	ClassDB::bind_static_method("LightScene", D_METHOD("muzzle_glow_radius"), &LightScene::muzzle_glow_radius);
-	ClassDB::bind_static_method("LightScene", D_METHOD("muzzle_glow_color"), &LightScene::muzzle_glow_color);
-	ClassDB::bind_static_method("LightScene", D_METHOD("muzzle_glow_fade_mode"), &LightScene::muzzle_glow_fade_mode);
-	ClassDB::bind_static_method("LightScene", D_METHOD("muzzle_glow_fade_ticks"), &LightScene::muzzle_glow_fade_ticks);
-	ClassDB::bind_static_method("LightScene", D_METHOD("death_flash_color"), &LightScene::death_flash_color);
-	ClassDB::bind_static_method("LightScene", D_METHOD("death_flash_fade_mode"), &LightScene::death_flash_fade_mode);
-	ClassDB::bind_static_method("LightScene", D_METHOD("death_flash_fade_ticks"), &LightScene::death_flash_fade_ticks);
 	ClassDB::bind_method(D_METHOD("spawn_model_light", "config"),
 			&LightScene::spawn_model_light);
 	ClassDB::bind_method(D_METHOD("spawn_glow", "config"),
 			&LightScene::spawn_glow);
 	ClassDB::bind_method(D_METHOD("despawn", "handle"), &LightScene::despawn);
-	ClassDB::bind_method(D_METHOD("set_light_position", "handle", "world"),
-			&LightScene::set_light_position);
 	ClassDB::bind_method(D_METHOD("set_light_fade", "handle", "mode", "duration"),
 			&LightScene::set_light_fade);
-	ClassDB::bind_method(D_METHOD("set_light_owner", "handle", "owner_entity",
-			"owner_section"), &LightScene::set_light_owner);
 	ClassDB::bind_method(D_METHOD("set_light_blend", "handle", "amount"),
 			&LightScene::set_light_blend);
 	ClassDB::bind_method(D_METHOD("is_alive", "handle"), &LightScene::is_alive);
@@ -1174,9 +1163,6 @@ void LightScene::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_frame", "camera_world",
 			"query_radius", "ambient_scale", "time_ms", "weather"),
 			&LightScene::render_frame);
-	ClassDB::bind_method(D_METHOD("census_frame", "camera_world",
-			"query_radius", "ambient_scale", "time_ms", "weather"),
-			&LightScene::census_frame);
 	ClassDB::bind_method(D_METHOD("render_model_frame", "models",
 			"owner_entities", "interior_owners", "interior_sections",
 			"robj_scoped", "ambient_scale", "time_ms", "weather",
@@ -1197,8 +1183,6 @@ void LightScene::_bind_methods() {
 			&LightScene::fill_corona_multimesh);
 	ClassDB::bind_method(D_METHOD("get_last_corona_buffer"),
 			&LightScene::get_last_corona_buffer);
-	ClassDB::bind_static_method("LightScene", D_METHOD("corona_texture_size"),
-			&LightScene::corona_texture_size);
 	ClassDB::bind_static_method("LightScene", D_METHOD("owner_id_for_wire", "wire_handle"),
 			&LightScene::owner_id_for_wire);
 	ClassDB::bind_static_method("LightScene", D_METHOD("owner_id_for_static_source", "source_index"),
@@ -1206,8 +1190,6 @@ void LightScene::_bind_methods() {
 	BIND_CONSTANT(WIRE_OWNER_TAG);
 	BIND_CONSTANT(STATIC_OWNER_TAG);
 	BIND_CONSTANT(WIRE_HANDLE_MASK);
-	ClassDB::bind_static_method("LightScene", D_METHOD("corona_texture_rgba8"),
-			&LightScene::corona_texture_rgba8);
 	ClassDB::bind_method(D_METHOD("collect_terrain_light_rows_for_bounds",
 			"world_aabbs", "ambient_scale", "time_ms", "weather",
 			"recip_packed"),

@@ -76,8 +76,6 @@ void Celestial::_bind_methods() {
 			&Celestial::get_diagnostics);
 	ClassDB::bind_method(D_METHOD("get_sun_veil_alpha"),
 			&Celestial::get_sun_veil_alpha);
-	ClassDB::bind_method(D_METHOD("get_sun_veil_stopdown"),
-			&Celestial::get_sun_veil_stopdown);
 }
 
 void Celestial::set_environment_path(const NodePath &p_path) {

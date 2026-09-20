@@ -43,7 +43,6 @@ void EffectGroupReport::_bind_methods() {
 			"set_owner_key", "get_owner_key");
 	ClassDB::bind_method(D_METHOD("get_emitters"), &EffectGroupReport::get_emitters);
 	ClassDB::bind_method(D_METHOD("set_emitters", "value"), &EffectGroupReport::set_emitters);
-	ClassDB::bind_method(D_METHOD("add_emitter", "row"), &EffectGroupReport::add_emitter);
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "emitters", PROPERTY_HINT_ARRAY_TYPE,
 						 "EffectEmitterReport"),
 			"set_emitters", "get_emitters");

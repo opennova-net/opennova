@@ -46,9 +46,6 @@ MissionRoot::~MissionRoot() = default;
 void MissionRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "mission", "container", "options"),
 			&MissionRoot::setup, DEFVAL(Ref<MissionSetupOptions>()));
-	ClassDB::bind_method(D_METHOD("get_setup_error"), &MissionRoot::get_setup_error);
-	ClassDB::bind_method(D_METHOD("entity_effect_transform_for_ssn", "ssn"),
-			&MissionRoot::entity_effect_transform_for_ssn);
 	ClassDB::bind_method(D_METHOD("has_current_present_effect_snapshot"),
 			&MissionRoot::has_current_present_effect_snapshot);
 	ClassDB::bind_method(D_METHOD("presented_entity_effect_transform", "entity_ref"),
@@ -56,9 +53,6 @@ void MissionRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mission_file"), &MissionRoot::get_mission_file);
 	ClassDB::bind_method(D_METHOD("get_mission_name"), &MissionRoot::get_mission_name);
 	ClassDB::bind_method(D_METHOD("has_player"), &MissionRoot::has_player);
-	ClassDB::bind_method(D_METHOD("local_player_aim_overlay"),
-			&MissionRoot::local_player_aim_overlay);
-	ClassDB::bind_method(D_METHOD("local_player_team"), &MissionRoot::local_player_team);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "board"), &MissionRoot::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("set_runtime_profiling_enabled", "enabled"),
 			&MissionRoot::set_runtime_profiling_enabled);
@@ -74,10 +68,6 @@ void MissionRoot::_bind_methods() {
 			&MissionRoot::get_destruction_present_stats);
 	ClassDB::bind_method(D_METHOD("get_wire_present_stats"),
 			&MissionRoot::get_wire_present_stats);
-	ClassDB::bind_method(D_METHOD("join_wire_present_pending"),
-			&MissionRoot::join_wire_present_pending);
-	ClassDB::bind_method(D_METHOD("warm_present_pipelines", "at_position"),
-			&MissionRoot::warm_present_pipelines);
 	ClassDB::bind_method(D_METHOD("get_throwable_present_stats"),
 			&MissionRoot::get_throwable_present_stats);
 	ClassDB::bind_method(D_METHOD("get_scar_present_stats"),
@@ -86,12 +76,9 @@ void MissionRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_presentation_time_ms", "value_ms"),
 			&MissionRoot::set_presentation_time_ms);
 	ClassDB::bind_method(D_METHOD("get_entity_index"), &MissionRoot::get_entity_index);
-	ClassDB::bind_method(D_METHOD("get_placer"), &MissionRoot::get_placer);
 	ClassDB::bind_method(D_METHOD("get_item_db"), &MissionRoot::get_item_db);
 	ClassDB::bind_method(D_METHOD("get_entity_presenter"),
 			&MissionRoot::get_entity_presenter);
-	ClassDB::bind_method(D_METHOD("rebind_placed_entities", "placer"),
-			&MissionRoot::rebind_placed_entities);
 	ClassDB::bind_method(D_METHOD("entity_count"), &MissionRoot::entity_count);
 	ClassDB::bind_method(D_METHOD("is_playing"), &MissionRoot::is_playing);
 	ClassDB::bind_method(D_METHOD("tick"), &MissionRoot::tick);
@@ -177,7 +164,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	// load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
 	// sole live runtime owner (ADR 0025). Isolated tests may instantiate this same
-	// seam, but ONED does not. A co-op LAN host additionally binds a real UDP
+	// seam. A co-op LAN host additionally binds a real UDP
 	// socket; a joiner is the non-authority client.
 	const bool playable = options->get_playable();
 	const Ref<JoinTarget> join_target = options->get_join_target();
@@ -289,7 +276,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			return 0;
 		}
 	} else {
-		// Standalone SP (or an isolated tooling/test preview): the in-process listen server. ONED live
+		// Standalone SP (or an isolated tooling/test preview): the in-process listen server. Live
 		// play reaches this branch only through GameWorld. The host player auto-spawns at bring-up.
 		sim_->enable_listen_server(true);
 	}

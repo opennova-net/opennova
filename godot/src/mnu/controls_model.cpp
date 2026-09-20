@@ -326,8 +326,6 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::pressed_key_for_token);
 	ClassDB::bind_method(D_METHOD("display_text_for_token", "token"),
 			&ControlsModel::display_text_for_token);
-	ClassDB::bind_static_method("ControlsModel", D_METHOD("weapon_category_tokens"),
-			&ControlsModel::weapon_category_tokens);
 	ClassDB::bind_static_method("ControlsModel",
 			D_METHOD("mouse_mask_from_godot_button", "button"),
 			&ControlsModel::mouse_mask_from_godot_button);

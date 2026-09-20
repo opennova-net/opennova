@@ -72,7 +72,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_rain_current);
 	ClassDB::bind_method(D_METHOD("get_overcast_blend"),
 			&MissionEnvironment::get_overcast_blend);
-	ClassDB::bind_method(D_METHOD("is_raining"), &MissionEnvironment::is_raining);
 
 	ClassDB::bind_method(D_METHOD("set_weather_driven", "driven"),
 			&MissionEnvironment::set_weather_driven);
@@ -80,16 +79,12 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::is_weather_driven);
 	ClassDB::bind_method(D_METHOD("set_nvg_view", "active", "gain"),
 			&MissionEnvironment::set_nvg_view);
-	ClassDB::bind_method(D_METHOD("set_thermal_view", "world", "terrain"),
-			&MissionEnvironment::set_thermal_view);
 	ClassDB::bind_method(D_METHOD("set_underwater_view", "underwater"),
 			&MissionEnvironment::set_underwater_view);
 	ClassDB::bind_method(D_METHOD("is_underwater_view"),
 			&MissionEnvironment::is_underwater_view);
 	ClassDB::bind_method(D_METHOD("set_underwater_overlay_view", "underwater"),
 			&MissionEnvironment::set_underwater_overlay_view);
-	ClassDB::bind_method(D_METHOD("apply_render_eye", "eye_y", "water_height",
-			"water_active"), &MissionEnvironment::apply_render_eye);
 	ClassDB::bind_method(D_METHOD("is_underwater_overlay_view"),
 			&MissionEnvironment::is_underwater_overlay_view);
 	ClassDB::bind_method(D_METHOD("get_underwater_overlay_color"),
@@ -136,10 +131,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_cloud_edge);
 	ClassDB::bind_method(D_METHOD("get_color_src_gain"),
 			&MissionEnvironment::get_color_src_gain);
-	ClassDB::bind_method(D_METHOD("get_particle_ambient_tint"),
-			&MissionEnvironment::get_particle_ambient_tint);
-	ClassDB::bind_method(D_METHOD("get_particle_modulator_tint"),
-			&MissionEnvironment::get_particle_modulator_tint);
 
 	ClassDB::bind_method(D_METHOD("get_fill_light_target"),
 			&MissionEnvironment::get_fill_light_target);

@@ -35,9 +35,6 @@ void SoundBank::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reset_oneshots", "parent"), &SoundBank::reset_oneshots);
 	ClassDB::bind_method(D_METHOD("describe_ambient", "name"), &SoundBank::describe_ambient);
 	ClassDB::bind_method(D_METHOD("resolve_ambient_stream", "layer"), &SoundBank::resolve_ambient_stream);
-	ClassDB::bind_static_method("SoundBank",
-			D_METHOD("configure_ambient_player", "player", "stream", "layer", "bus"),
-			&SoundBank::configure_ambient_player);
 	ClassDB::bind_method(D_METHOD("spawn_ambient", "parent", "world_pos", "name", "bus"),
 			&SoundBank::spawn_ambient);
 	ClassDB::bind_method(
@@ -47,8 +44,6 @@ void SoundBank::_bind_methods() {
 			DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("spawn_oneshot_2d", "parent", "name", "bus"),
 			&SoundBank::spawn_oneshot_2d);
-	ClassDB::bind_static_method("SoundBank", D_METHOD("effective_base_pitch", "base_pitch"),
-			&SoundBank::effective_base_pitch);
 	ClassDB::bind_static_method("SoundBank", D_METHOD("volume_db_from_255", "vol255"),
 			&SoundBank::volume_db_from_255);
 	ClassDB::bind_static_method("SoundBank",

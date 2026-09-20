@@ -2,10 +2,8 @@
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/simulation_internal.h"
-#include "util/color_convert.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/destruction_events.h"
-#include "util/axes.h"
 
 #include "simulation/entity_card.h" // the typed per-entity debug card (ADR 0042 d5)
 #include "simulation/entity_row.h"  // one typed entity-directory row

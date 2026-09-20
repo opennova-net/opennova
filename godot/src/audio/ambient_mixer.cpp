@@ -31,14 +31,9 @@ void AmbientMixer::_bind_methods() {
 			D_METHOD("update_emitter_source", "source_spawn_id", "pos",
 					"source_bms_id"),
 			&AmbientMixer::update_emitter_source);
-	ClassDB::bind_method(D_METHOD("set_time_of_day_hours", "hours"),
-			&AmbientMixer::set_time_of_day_hours);
 	ClassDB::bind_method(D_METHOD("advance_to_tick", "tick"),
 			&AmbientMixer::advance_to_tick);
-	ClassDB::bind_method(D_METHOD("advance_seconds", "dt"),
-			&AmbientMixer::advance_seconds);
 	ClassDB::bind_method(D_METHOD("mix", "listener"), &AmbientMixer::mix);
-	ClassDB::bind_method(D_METHOD("clock_tick"), &AmbientMixer::clock_tick);
 	ClassDB::bind_method(D_METHOD("marker_count"), &AmbientMixer::marker_count);
 	ClassDB::bind_static_method("AmbientMixer",
 			D_METHOD("calc_distance_volume", "dist_q16", "radius_q16", "vol255",
@@ -48,8 +43,6 @@ void AmbientMixer::_bind_methods() {
 			D_METHOD("emitter_layer_volume", "dist_q16", "falloff_u", "min_u",
 					"vol_byte", "member_vol", "clamp_vol"),
 			&AmbientMixer::emitter_layer_volume);
-	ClassDB::bind_static_method("AmbientMixer", D_METHOD("q16_to_float", "q16"),
-			&AmbientMixer::q16_to_float);
 }
 
 void AmbientMixer::clear() {

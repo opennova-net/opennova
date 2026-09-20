@@ -185,8 +185,6 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::set_environment_node);
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "terrain"),
 			&SlotShadow::set_terrain_data);
-	ClassDB::bind_method(D_METHOD("set_light_scene", "scene"),
-			&SlotShadow::set_light_scene);
 	ClassDB::bind_method(
 			D_METHOD("set_light_context", "gain", "time_ms", "weather"),
 			&SlotShadow::set_light_context);

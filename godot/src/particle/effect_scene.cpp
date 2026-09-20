@@ -172,8 +172,6 @@ void EffectScene::_bind_methods() {
 			&EffectScene::spawn);
 	ClassDB::bind_method(D_METHOD("detach", "group_id"),
 			&EffectScene::detach);
-	ClassDB::bind_method(D_METHOD("detach_slot", "slot_token"),
-			&EffectScene::detach_slot);
 	ClassDB::bind_method(D_METHOD("set_group_parameters", "group_id", "rate_control",
 					"offset_control"),
 			&EffectScene::set_group_parameters);
@@ -181,12 +179,6 @@ void EffectScene::_bind_methods() {
 			&EffectScene::reset_runtime_state);
 	ClassDB::bind_method(D_METHOD("advance_in_place", "delta_seconds"),
 			&EffectScene::advance_in_place);
-	ClassDB::bind_method(D_METHOD("set_global_wind", "wind"),
-			&EffectScene::set_global_wind);
-	ClassDB::bind_method(D_METHOD("set_view_frustum", "planes", "inside_probe"),
-			&EffectScene::set_view_frustum);
-	ClassDB::bind_method(D_METHOD("clear_view_frustum"),
-			&EffectScene::clear_view_frustum);
 
 	BIND_ENUM_CONSTANT(ADMISSION_ALWAYS);
 	BIND_ENUM_CONSTANT(ADMISSION_REPLACE_OWNED);
