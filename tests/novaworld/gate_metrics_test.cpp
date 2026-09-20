@@ -36,7 +36,7 @@ int main() {
 			if (!expect(!decode(text.substr(0, n), report), "truncated report rejected")) return 1;
 		if (!expect(!decode(text + '\0', report), "report has no trailing NUL")) return 1;
 	}
-	const auto gate = opennova::gate_probe_build();
+	const auto gate = opennova::gate_probe_build(opennova::GATE_PROBE_TAG_JOINTOPS);
 	if (!expect(!opennova::gate_metrics_decode(gate.data(), gate.size(), report),
 		"ordinary GATEAPI probe is not metrics")) return 1;
 	for (const char *row : {"LABEL \"x\"", "\tLABEL \"x", "\tGTZB -", "\tPID 12x"})

@@ -17,9 +17,10 @@ namespace opennova {
 // wraps every 0x41/0x42/0x43/0x46/0x81/0x82/0x83 opcode. The inner SCRK layer
 // (0x43 ProtocolMessage region) is handled by protocol_message.h, NOT here.
 
-// 61-char SCRK matching retail captures (ClientAuth/ServerAuth SCRK are both
-// 61 chars, alphabet = A-Z0-9). Random per session is sufficient — only the
-// length + alphabet are wire-significant.
+// The per-session SCRK: retail's 63-draw generator over the 31-char
+// vowel-free charset "0123456789BCDFGHJKLMNPQRSTVWXYZ", whose inclusive draw
+// range can pick the charset NUL (appending nothing), so the length varies
+// around 61 (never above 63). [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0]
 std::string make_dev_scrk();
 
 // 60-char lowercase-hex NWUID (retail format). Random per session.

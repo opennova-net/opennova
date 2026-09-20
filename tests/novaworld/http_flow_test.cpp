@@ -64,6 +64,28 @@ static bool test_url_builders() {
 	            "http_base: templated -> http://web_domain"))
 		std::fprintf(stderr, "  got: %s\n", f.http_base().c_str());
 
+	// Every token is matched case-insensitively and [PRODUCTCODE] fills "jop"
+	// [orig: Mission_DeobfuscateDescription @0x4cdaa0 via NapiUtil_ReplaceAllCaseInsensitive].
+	nw::LobbyHttpFlow fm;
+	nw::LobbyHttpContext cm;
+	cm.startup_url = "http://[DomainName]/[ver1]/[Ver2]/[cc]/[gt]/[ProductCode]/start";
+	cm.web_domain = "gs.novaworld.net:80";
+	cm.locale = "en_GB";
+	fm.set_context(cm);
+	const std::string sm = fm.resolve_startup_url();
+	if (!expect(sm == "http://gs.novaworld.net:80/3/2345/gb/jop:cus2/jop/start",
+	            "resolve_startup_url matches every token case-insensitively and fills [PRODUCTCODE]"))
+		std::fprintf(stderr, "  got: %s\n", sm.c_str());
+	if (!expect(fm.http_base() == "http://gs.novaworld.net:80",
+	            "http_base: a mixed-case template is still templated"))
+		std::fprintf(stderr, "  got: %s\n", fm.http_base().c_str());
+	nw::LobbyHttpFlow fp;
+	nw::LobbyHttpContext cp;
+	cp.startup_url = "http://static.example/[VER1]/start"; // no [DOMAINNAME]: still a template
+	fp.set_context(cp);
+	expect(fp.resolve_startup_url() == "http://static.example/3/start",
+	       "any of the six tokens triggers substitution, not only [domainname]");
+
 	// Concrete startup_url -> scheme://host[:port] stripped at the first path slash.
 	nw::LobbyHttpFlow f2;
 	f2.set_context(concrete_ctx());
@@ -211,6 +233,17 @@ static bool test_login_failures() {
 		nw::LoginResult r = f.on_login_response(true, 500, {}, {});
 		expect(r.kind == nw::LoginResult::Kind::Failed, "non-200 -> Failed");
 	}
+	// A malformed EPASK cookie (missing separator) or one whose params the
+	// modexp gate rejects fails the login before any POST is built.
+	// [orig: parse_colon_delimited_string @0x666710 -1; EPASK_ModexpEncrypt @0x66668a -1]
+	for (const char *bad : {"7", "0:0:k", "3:258:k"}) {
+		nw::LobbyHttpFlow f;
+		f.set_context(concrete_ctx());
+		f.login("p", "s");
+		nw::LoginResult r = f.on_login_response(true, 200, set_cookie(std::string("EPASK=") + bad), {});
+		expect(r.kind == nw::LoginResult::Kind::Failed, "rejected EPASK bundle -> Failed");
+		expect(!f.login_active(), "machine resets on a rejected EPASK bundle");
+	}
 	// POST with no LOGINSESSIONTAG (bad credentials).
 	{
 		nw::LobbyHttpFlow f;
@@ -311,10 +344,15 @@ static bool test_join_resolves() {
 	if (!expect(r.kind == nw::JoinResult::Kind::NeedRequest, "NWJoin FIRST -> SECOND")) return false;
 	expect(contains(r.request.url, "/NWJoin.dll?rid=777&tag=jtag"), "NWJoin second leg carries rid + tag");
 
-	// SECOND response: the .joi body resolves host:port (NI/NP fallback).
-	r = f.on_join_response(true, 200, {}, bytes("<TITLE>[NI=192.168.5.9&NP=17479]</TITLE>"));
+	// SECOND response: the .joi body resolves host:port (NI/NP fallback) and
+	// carries the proxy triple + lobby number verbatim for the transport.
+	r = f.on_join_response(true, 200, {},
+			bytes("<TITLE>[NI=192.168.5.9&NP=17479&BK=986119&LN=5&GS=x]</TITLE>"));
 	if (!expect(r.kind == nw::JoinResult::Kind::Resolved, "NWJoin SECOND -> resolved")) return false;
 	expect(r.host_ip == "192.168.5.9" && r.host_port == 17479, "join resolved host:port from the .joi");
+	expect(r.ni == "192.168.5.9" && r.np == "17479" && r.bk == "986119",
+	       "join carries the NI/NP/BK proxy triple verbatim");
+	expect(r.ln == 5, "join carries the .joi lobby number");
 	expect(!f.join_active(), "join machine resets on resolve");
 
 	// A .joi with no connection string fails.

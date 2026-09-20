@@ -92,6 +92,14 @@ struct JoiConnection {
 	std::string ni;  // host ip (plaintext)
 	std::string np;  // host port (plaintext)
 	std::string bk;
+	// LN: the lobby number (atol). When nonzero the retail transport dials the
+	// LAN-discovered endpoint instead of the NK relay pair and reports it as
+	// the session var "Lan"; 0 when absent. GS is copied but never read by
+	// any retail code. [orig: parse_connection_query_string @0x54dfb0 LN
+	//  @0x54e33e / GS @0x54e38a; CNapiGameSession_InitTransportConnection
+	//  @0x4c9e6c; CNapiGameSession_ConnectOrHost @0x4d5418]
+	int ln = 0;
+	std::string gs;
 	std::string host_ip;   // decoded NK head, fallback NI
 	std::string host_port; // decoded NK tail, fallback NP
 	// The game-session APPID join token: atol(decoded CK), re-serialized as retail
@@ -103,7 +111,7 @@ struct JoiConnection {
 };
 
 // Extract the bracketed connection string the join page carries in its <TITLE>:
-//   [NK=<enc>&CK=<enc>&NI=<ip>&NP=<port>&BK=986119&]
+//   [NK=<enc>&CK=<enc>&NI=<ip>&NP=<port>&BK=986119&LN=<n>&GS=<s>&]
 // This is exactly what retail's browser scrapes (parse_connection_query_string
 // @ 0x54dfb0). Splits the first `[...]` run on '&' into KEY=VALUE pairs. The
 // url_cipher-encoded NK/CK never contain '&', so the split is unambiguous (and

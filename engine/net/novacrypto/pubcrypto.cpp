@@ -16,15 +16,21 @@ inline uint16_t word_mul(uint32_t a, uint32_t b) {
 	return static_cast<uint16_t>((a & 0xFFFFu) * (b & 0xFFFFu));
 }
 
-// String → u32 hash (Python: `_key_fold`).
+// String → u32 hash: the same NapiNP_ComputeKeySeed the NWU cipher uses
+// (nwu.cpp keeps the canonical copy). Key bytes are SIGNED — the original
+// sign-extends before squaring (`movsx ecx, byte ptr [eax+edi]` @0x618460,
+// `imul ebx, ecx` @0x618466) — and an empty key is 0 + 0 + 50; 3252 is the
+// NULL-pointer arm only. Only the low byte and parity of the result reach
+// the transform, so a high-bit key byte never changed the ciphertext, but
+// the seed itself must match numerically.
+// [orig: NapiNP_ComputeKeySeed @0x618430]
 uint32_t key_fold(const std::string &key) {
-	if (key.empty()) return 3252;
-	uint64_t acc = 0;
+	int64_t acc = 0;
 	for (size_t i = 0; i < key.size(); ++i) {
-		const uint32_t c = static_cast<uint8_t>(key[i]);
-		acc += i + c * c;
+		const int c = static_cast<int>(static_cast<signed char>(key[i]));
+		acc += static_cast<int64_t>(i) + static_cast<int64_t>(c) * c;
 	}
-	return static_cast<uint32_t>((acc + key.size() + 50) & 0xFFFFFFFFu);
+	return static_cast<uint32_t>((acc + static_cast<int64_t>(key.size()) + 50) & 0xFFFFFFFFu);
 }
 
 // Big-endian CRC-32/MPEG-2 over plaintext. Same polynomial/table as the

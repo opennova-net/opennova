@@ -41,8 +41,13 @@ struct ClientHello {
 	std::string pv2;  // Protocol Version 2 (e.g. "1")
 	std::string pv3;  // Optional third version string
 	uint32_t ci = 0;  // Client/Connection Index
-	uint32_t pm = 0;  // transport player count
-	bool pm_present = false; // transport_info[37] == 0; permits an exposed zero count
+	uint32_t pm = 0;  // transport player count; a NONZERO PM is also the host-side
+	                  // identity bypass (see client_hello_admits)
+	bool pm_present = false; // parse-side marker only: the tag was on the wire. The
+	                         // writer never emits a zero PM — retail writes the tag
+	                         // only for a non-enumerator transport with a nonzero
+	                         // count [orig: NapiNPSession_SendAnnouncePacket
+	                         // @0x61fa00 gates @0x61fcca / @0x61fcda]
 	uint32_t eip = 0; // External IP (as uint32, big-endian wire form per inet)
 	uint32_t epn = 0; // External Port Number
 	uint32_t et = 0;  // optional extra parameter
@@ -59,32 +64,52 @@ inline constexpr char kServerHelloAppName[] = "OpenNova NWServer"; // 0x81 AP
 inline constexpr char kServerHelloServerName[] = "OpenNova";       // 0x81 SN
 inline constexpr char kNovaworldNameDefault[] = "NWServer";        // 0x82 CU "NovaworldName"
 
-// ServerHello, sent S2C as opcode 0x81 payload.
+// ServerHello, sent S2C as opcode 0x81 payload. The field set, order and
+// per-field gates are the retail writer's: CI, HK, SN and SF are written
+// unconditionally; every other string field only when non-empty, every other
+// numeric field only when nonzero, PG only when the GUID is non-null, and the
+// CN/LNG/TZB trio as one block behind its own enable. The receiver walks the
+// tags case-insensitively with zero defaults.
+// [orig: writer NapiNPProtocol_SendServerInfoPacket @0x6204b0 (CI @0x62057e ..
+//  ET @0x620c0c); reader Nwu_HandleServerHello @0x626d20 (CI @0x626f53 .. ET
+//  @0x6274f4, SUS3/SUS4 stored at session+1788/+2300 @0x627de8/@0x627e01)]
 struct ServerHello {
 	uint32_t ci = 0;
 	std::string co = "NovaLogic Inc, Calabasas CA U.S.A.";
 	std::string ap = kServerHelloAppName;
 	std::string bdat = "Jan  1 2026 00:00:00";
-	uint32_t ut = 0; // uptime / unix time
+	uint32_t de = 0; // proto->unk_0xD8, written only when nonzero @0x620647
+	uint32_t ut = 0; // uptime ms (GetTickCount - host_start_tick), nonzero-gated
 	std::string pn = "NOVAWORLDUDP";
-	std::array<uint8_t, 16> pg{};
+	std::array<uint8_t, 16> pg{}; // written only when non-null [orig: NapiGUID_IsNull @0x62ed40 gate @0x6206d5]
 	std::string pv1 = "0.0.0 2/10/2004 EM";
 	std::string pv2 = "1";
 	std::string pv3 = "1.6.4r opennova";
 	uint32_t hk = 0x0FE0E112u; // host key (opaque to the client beyond echo in ClientJoin)
 	std::string sn = kServerHelloServerName;
-	std::string pl = "WIN32";
-	uint32_t nc = 0; // node count
-	uint32_t rip = 0; // reflected IP (client's apparent IP)
-	uint32_t rpn = 0; // reflected port
-	uint32_t eip = 0; // external IP (echo of ClientHello.eip)
-	uint32_t epn = 0; // external port (echo of ClientHello.epn)
+	std::string pl = "WIN32";  // parse-side only: NEVER written (no PL tag exists in the
+	                           // retail builder); kept so a stray PL from a foreign capture
+	                           // still decodes
+	// The locale block: CN (country name), LNG (language) and TZB (time-zone
+	// bias) are written together, unconditionally, when the protocol object's
+	// enable at +0xD48 is set; the two strings ship their NUL even when empty.
+	// [orig: @0x6207e2 gate; CN @0x62081a, LNG (byte_7CA07C) @0x62084a, TZB @0x62086a]
+	bool locale_block = false;
+	std::string cn;
+	std::string lng;
+	uint32_t tzb = 0;
+	uint32_t nc = 0; // node count, nonzero-gated @0x620a59
+	uint32_t rip = 0; // reflected IP (client's apparent IP), nonzero-gated @0x620a81
+	uint32_t rpn = 0; // reflected port, nonzero-gated @0x620aa9
+	uint32_t eip = 0; // external IP (echo of ClientHello.eip), nonzero-gated @0x620baa
+	uint32_t epn = 0; // external port (echo of ClientHello.epn), nonzero-gated @0x620bd0
+	uint32_t et = 0;  // external type (echo of ClientHello.et), nonzero-gated @0x620bf6
 
 	// Game-server fields. The flat retail builder emits SF unconditionally and
 	// gates the remaining numeric/string fields individually; `is_game_server`
 	// is therefore a parse-side marker rather than an encoder switch. The
-	// SF/P1/P2/NP/MP fields appear between SN and NC, and SUS1/SUS2 appear
-	// between RPN and EIP. Witnessed in the retail capture
+	// SF/P1..P8/NP/MP/NPW fields appear between SN and NC, and SUS1..SUS4
+	// appear between RPN and EIP. Witnessed in the retail capture
 	// (docs/net/novaworld-net-re.md §5.9) — the host's
 	// ServerHello on the game-server UDP port carries these extra fields
 	// so the client knows the game type, current/max players, expansion,
@@ -95,14 +120,27 @@ struct ServerHello {
 	uint32_t sf = 0;          // server flags; retail observed = 0
 	uint32_t p1 = 0;          // gametype; supplied by the live host configuration
 	uint32_t p2 = 0;          // game-config; live CNapiServerConfig_BuildFlags snapshot
+	uint32_t p3 = 0;          // proto->p3_count .. p8_count, each nonzero-gated @0x6208fa..@0x6209bd
+	uint32_t p4 = 0;
+	uint32_t p5 = 0;
+	uint32_t p6 = 0;
+	uint32_t p7 = 0;
+	uint32_t p8 = 0;
 	uint32_t np = 0;          // current player count; supplied by the live host
 	uint32_t mp = 0;          // max players; supplied by the live host
+	uint32_t npw = 0;         // proto->npw_count, nonzero-gated @0x620a32
 	std::string sus1;         // unique session id (retail format: GSID-NN-XXXXXXXX-timestamp-hash)
 	std::string sus2;         // expansion-pack archive name, supplied by the live host configuration
+	std::string sus3;         // server user strings 3/4: written when non-empty @0x620b32/@0x620b68,
+	std::string sus4;         // stored by the receiver (512 B each); semantics unwitnessed
 };
 
 // Parse a ClientHello TLV payload (the bytes AFTER the 0x41 opcode and
-// AFTER NWU-decryption). Returns true on success. Ignores unknown tags.
+// AFTER NWU-decryption). Walks the tags case-insensitively with zero
+// defaults and stops at the first malformed field; no tag is required (a
+// PM-only announce is a valid hello — see client_hello_admits). Returns
+// false only for a null buffer. Ignores unknown tags.
+// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 TLV walk]
 bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out);
 
 // Serialize a ClientHello back to flat-TLV bytes (inverse of
@@ -268,10 +306,13 @@ std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key);
 std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const DisconnectEvent &event);
 
 // Parse a connection-description body (the inner message payload, already SCRK-decrypted). Unknown
-// names are skipped by their length and field order is not assumed, matching the retail walk.
-// Returns false when the body is not a well-formed flat-TLV run or carries none of the seven known
-// names — the narrow shape gate a dispatcher needs before treating a settings-flagged message as a
-// disconnect. [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0]
+// names are skipped by their length and field order is not assumed, matching the retail walk. The
+// walk stops at a malformed field or an empty name and KEEPS the fields gathered so far; it returns
+// true for every non-null body, because the retail receiver records the description and moves the
+// connection to state 6 no matter what the walk yielded — a body carrying none of the seven names,
+// or a valid run with a truncated tail, still disconnects. The dispatcher gates on the H:0x03 tag
+// alone. [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0 — walk exits on read failure
+//  @0x621b8c, terminal SetState(6) @0x621d59 unconditional on the parsed content]
 bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &out);
 
 // ---- ClientAuth character_id bit-pack (the CI0/CI1 join vars) ----------
@@ -294,6 +335,15 @@ ClientAuth make_jointoperations_client_auth(uint32_t client_index, uint32_t clie
 // retail handlers parse but do not compare them.
 bool matches_jointoperations_identity(const ClientHello &hello);
 bool matches_jointoperations_identity(const ClientAuth &auth);
+
+// The 0x41 admission a host applies before answering with a ServerHello: a
+// hello whose PM is nonzero is answered WITHOUT any identity validation (the
+// version block is only checked when PM == 0), so a retail host's unsolicited
+// announce — which carries its player count as PM — always draws a reply.
+// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 — `if (!protocol_version)`
+//  around the NVS/PN/PG/PV1 compares, jnz @0x6217c2 -> SendServerInfoPacket
+//  @0x6218fc]
+bool client_hello_admits(const ClientHello &hello);
 
 // ---- ClientAuth CU chunks (NW-S3) --------------------------------------
 //
@@ -335,10 +385,23 @@ struct CsField {
 	uint8_t field_index;
 	uint32_t value;
 };
-std::vector<CsField> default_client_cs_fields();          // NOVAWORLDUDP service
-std::vector<CsField> default_server_cs_fields();          // NOVAWORLDUDP service
-std::vector<CsField> jointoperations_client_cs_fields();  // the in-game session
-std::vector<CsField> jointoperations_server_cs_fields();  // the in-game session
+// Field 13 (the datagram ceiling) is the one configured entry: both templates derive it from the
+// game.cfg `mpmaxpacketsize` value — 0 -> 1300, below 100 -> 100, above the ceiling -> the
+// ceiling — and the ceiling differs per template: 0x4000 for the JOINTOPERATIONS game session,
+// 0x10000 for the NOVAWORLDUDP service. `max_packet_bytes` is that configured value; 0 (the
+// default, and the unconfigured game.cfg) yields the 1300 every existing caller relied on.
+// [orig: CNapiNetwork_Init @0x4ca4a0 clamp @0x4caa53..0x4caa76 (0x4000);
+//  CNapiGameSession_InitNPConnection @0x4d3be0 clamp @0x4d3df4..0x4d3e17 (0x10000);
+//  source g_GameConfigState.maxPacketSize_338, game.cfg key `mpmaxpacketsize`]
+inline constexpr uint32_t kCsMaxPacketDefault = 1300u;
+inline constexpr uint32_t kCsMaxPacketFloor = 100u;
+inline constexpr uint32_t kCsMaxPacketCeilingGame = 0x4000u;
+inline constexpr uint32_t kCsMaxPacketCeilingService = 0x10000u;
+uint32_t cs_max_packet_bytes(uint32_t configured, uint32_t ceiling);
+std::vector<CsField> default_client_cs_fields(uint32_t max_packet_bytes = 0);          // NOVAWORLDUDP service
+std::vector<CsField> default_server_cs_fields(uint32_t max_packet_bytes = 0);          // NOVAWORLDUDP service
+std::vector<CsField> jointoperations_client_cs_fields(uint32_t max_packet_bytes = 0);  // the in-game session
+std::vector<CsField> jointoperations_server_cs_fields(uint32_t max_packet_bytes = 0);  // the in-game session
 
 struct ServerAuth {
 	uint32_t ci = 0;      // echo client.ci
@@ -361,7 +424,7 @@ struct ServerAuth {
 	// `\x03 <name>\0 <LE16 value_len> <value>\0` inner shape.
 	std::vector<std::pair<std::string, std::string>> cu;
 
-	std::string scrk;     // Server-side Session CRypto Key (61 chars; retail capture)
+	std::string scrk;     // Server-side Session CRypto Key (up to 63 chars; see make_dev_scrk)
 	std::string na;       // echo client.na
 	uint32_t rip = 0;     // Reflected IP (client's remote IP)
 	uint32_t rpn = 0;     // Reflected Port Number
@@ -380,6 +443,10 @@ struct ServerAuth {
 // development; production would use a secure random).
 // Defaults per retail capture (docs/net/novaworld-net-re.md §7):
 //   novaworld_name = "NWServer" (was "OpenNova"; retail emits the literal "NWServer")
+//   novaworld_web_url = bare "host:port", NO scheme: the retail client builds
+//                    "http://%s" from this CU itself, so a scheme here yields
+//                    "http://http://..." on a stock client
+//                    [orig: CNapiGameSession_OnNovaWorldConnected @0x4d1570 sprintf @0x4d1627]
 //   nwuid          = 60-char ASCII hex ID; placeholder default is fine for dev, the
 //                    UDP listener overrides with a freshly-generated value per session.
 // [D-NET Wave 3] `include_novaworld_cu` gates the three NovaworldName/url/NWUID CU entries. The
@@ -392,8 +459,8 @@ ServerAuth build_server_auth(const ClientAuth &client,
                              uint32_t server_sk,
                              std::string_view server_scrk,
                              std::string_view novaworld_name = kNovaworldNameDefault,
-                             std::string_view novaworld_web_url = "http://127.0.0.1:8080",
-                             std::string_view nwuid = "0accd1b2cffac0e3f1efe6c80000000000000000000000000000000000000000",
+                             std::string_view novaworld_web_url = "127.0.0.1:8080",
+                             std::string_view nwuid = "0accd1b2cffac0e3f1efe6c8000000000000000000000000000000000000",
                              bool include_novaworld_cu = true);
 
 // Serialize a ServerAuth to flat-TLV bytes (ready to opcode-prefix +

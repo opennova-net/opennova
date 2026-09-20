@@ -419,7 +419,11 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                             SessionDeframeAdmission *admission_out = nullptr);
 
 // Applies retail fragment semantics and returns true when `payload_out`
-// contains a complete payload ready for higher-level dispatch.
+// contains a complete payload ready for higher-level dispatch. An
+// unfragmented record (no 0x06 bits) dispatches on its own and leaves a
+// pending fragment stream untouched; `was_fragmented` reports false for it.
+// [orig: CNapiNPConnection_DispatchMessage @0x622570, split-buffer gate
+//  `(msg_type & 6) != 0` @0x6225b1]
 bool reassemble_protocol_payload(ProtocolReassemblyState &state,
                                  const ProtocolMessage &msg,
                                  std::vector<uint8_t> &payload_out,

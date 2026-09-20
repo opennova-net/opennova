@@ -118,6 +118,9 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 			else if (key == "NI") out.ni = value;
 			else if (key == "NP") out.np = value;
 			else if (key == "BK") out.bk = value;
+			// [orig: LN `atol` @0x54e33e; GS copied @0x54e38a]
+			else if (key == "LN") out.ln = static_cast<int>(std::atol(value.c_str()));
+			else if (key == "GS") out.gs = value;
 		}
 		if (amp == std::string::npos) break;
 		pos = amp + 1;

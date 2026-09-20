@@ -33,6 +33,12 @@ namespace opennova {
 //   Field:     1 (0x04) + name.size() + 1 (name NUL) + 2 (len) + data.size()
 //              + 1 (trailing NUL after data) + 1 (0x05)
 //              == name.size() + data.size() + 6
+//
+// Bounds (both directions — the reader runs the same constructors, so a
+// stock peer rejects the whole statement stream on a violation): container
+// and field names are 1..63 bytes, field data is under 4096 bytes.
+// [orig: NapiStatement_Create @0x632990 @0x6329c3; NapiStatementParam_Create
+//  @0x632b30 @0x632b71 / @0x632b90; ParseFromBuffer -> Create -> -14]
 
 struct NapiField {
 	std::string name;

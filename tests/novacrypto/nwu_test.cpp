@@ -26,9 +26,20 @@ bool check_gateapi_seed() {
 	return true;
 }
 
-// Null/empty key returns the original's sentinel default 3252.
+// A non-null EMPTY key skips the loop and yields 0 + 0 + 50; the original's
+// 3252 sentinel is its NULL-pointer arm only (`test edi, edi` @0x618435).
+// [orig: NapiNP_ComputeKeySeed @0x618430, `lea eax, [esi+edx+32h]` @0x618475]
 bool check_empty_key_seed() {
-	if (!expect(opennova::nwu_compute_seed("") == 3252u, "empty key should return sentinel 3252")) return false;
+	if (!expect(opennova::nwu_compute_seed("") == 50u, "empty key seed is len + 50 == 50")) return false;
+	return true;
+}
+
+// Key bytes are signed: a high-bit byte squares as (int8)b, so 0xFF adds
+// 1, not 65025 (`movsx` @0x618460 before `imul` @0x618466).
+bool check_signed_key_bytes() {
+	const std::string high("\xFF", 1);
+	if (!expect(opennova::nwu_compute_seed(high) == 0u + 1u + 1u + 50u,
+	            "0xFF key byte squares as -1")) return false;
 	return true;
 }
 
@@ -100,6 +111,7 @@ bool check_reverse_order_roundtrip() {
 int main() {
 	if (!check_gateapi_seed()) return 1;
 	if (!check_empty_key_seed()) return 1;
+	if (!check_signed_key_bytes()) return 1;
 	if (!check_gateapi_roundtrip()) return 1;
 	if (!check_key_sensitivity()) return 1;
 	if (!check_small_sizes()) return 1;

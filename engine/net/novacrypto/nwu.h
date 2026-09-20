@@ -28,7 +28,7 @@ namespace opennova {
 //  NapiPRNG_Init @0x62e430; Crypto_AddWithKey @0x6182d0; NapiNP_ReverseBuffer @0x618210]:
 //   NapiNP_EncryptBuffer@0x6187b0   (ADD chain == our nwu_decrypt)
 //   NapiNP_DecryptBuffer@0x618880   (SUB chain == our nwu_encrypt)
-//   NapiNP_ComputeKeySeed@0x618430  (== nwu_compute_seed; null->3252, sum(i+key[i]^2)+len+50)
+//   NapiNP_ComputeKeySeed@0x618430  (== nwu_compute_seed; NULL ptr->3252, else sum(i+key[i]^2)+len+50, so ""->50)
 //   NapiPRNG_Init@0x62e430          (LCG mult 78665521; struct {state@0,mult@4,counter@8})
 //   Crypto_AddWithKey@0x6182d0      (buf[i] += key[i % klen])
 //   Crypto_AddProgressive@0x618250  (buf[i] += seed+i; seed += step)
@@ -48,7 +48,9 @@ inline constexpr const char *NWU_GATE_KEY = "GATEAPI";
 inline constexpr uint32_t NWU_LCG_MAGIC = 78665521u; // 0x04B05731
 
 // Seed-derivation step (Crypto_ComputeSeed): accumulate (i + key[i]^2) plus
-// len + 50. Returns 3252 when the key is null (original's sentinel default).
+// len + 50, key bytes taken as SIGNED chars. An empty key yields 50; the
+// original's 3252 sentinel is its NULL-pointer arm, which a string_view
+// cannot express.
 uint32_t nwu_compute_seed(std::string_view key);
 
 // Encrypt / decrypt in place. Returns the number of bytes processed (== len

@@ -15,7 +15,19 @@ constexpr uint8_t TAG_CONTAINER_END = 0x03;
 constexpr uint8_t TAG_FIELD_START = 0x04;
 constexpr uint8_t TAG_FIELD_END = 0x05;
 
-constexpr size_t MAX_FIELD_DATA = 0xFFFFu; // LE16 limit
+// Retail's statement constructors bound every name to 1..63 bytes and every
+// param payload to under 4096 bytes; a violation aborts the whole parse
+// (the reader calls the same constructors), so both directions enforce it.
+// [orig: NapiStatementParam_Create @0x632b30 — `strlen(name) - 1 > 0x3E`
+//  @0x632b71 (unsigned: rejects 0 and > 63), `dataSize >= 4096` @0x632b90;
+//  NapiStatement_Create @0x632990 — name 1..63 @0x6329c3;
+//  NapiStatementParam_ParseFromBuffer @0x632e30 -> Create -> -14 on null]
+constexpr size_t MAX_NAME_CHARS = 63;
+constexpr size_t MAX_FIELD_DATA = 4095;
+
+bool name_in_bounds(const std::string &name) {
+	return !name.empty() && name.size() <= MAX_NAME_CHARS;
+}
 
 size_t field_size(const NapiField &f) {
 	// [0x04][name][0x00][LE16 len][data][0x00][0x05]
@@ -42,7 +54,7 @@ void write_cstring(uint8_t *&cur, const std::string &s) {
 }
 
 bool encode_field(const NapiField &f, uint8_t *&cur, const uint8_t *end) {
-	if (f.data.size() > MAX_FIELD_DATA) {
+	if (!name_in_bounds(f.name) || f.data.size() > MAX_FIELD_DATA) {
 		return false;
 	}
 	const size_t need = field_size(f);
@@ -64,6 +76,9 @@ bool encode_field(const NapiField &f, uint8_t *&cur, const uint8_t *end) {
 }
 
 bool encode_message(const NapiMessage &msg, uint8_t *&cur, const uint8_t *end) {
+	if (!name_in_bounds(msg.name)) {
+		return false;
+	}
 	const size_t need = message_size_impl(msg);
 	if (static_cast<size_t>(end - cur) < need) {
 		return false;
@@ -107,7 +122,7 @@ bool decode_field(const uint8_t *&cur, const uint8_t *end, NapiField &out) {
 		return false;
 	}
 	++cur; // consume 0x04
-	if (!read_cstring(cur, end, out.name)) {
+	if (!read_cstring(cur, end, out.name) || !name_in_bounds(out.name)) {
 		return false;
 	}
 	if (static_cast<size_t>(end - cur) < 2) {
@@ -116,6 +131,9 @@ bool decode_field(const uint8_t *&cur, const uint8_t *end, NapiField &out) {
 	const uint16_t dlen = static_cast<uint16_t>(cur[0]) |
 			static_cast<uint16_t>(static_cast<uint16_t>(cur[1]) << 8);
 	cur += 2;
+	if (dlen > MAX_FIELD_DATA) {
+		return false;
+	}
 	if (static_cast<size_t>(end - cur) < static_cast<size_t>(dlen) + 2u) {
 		return false;
 	}
@@ -138,7 +156,7 @@ bool decode_message(const uint8_t *&cur, const uint8_t *end, NapiMessage &out) {
 		return false;
 	}
 	++cur; // consume 0x02
-	if (!read_cstring(cur, end, out.name)) {
+	if (!read_cstring(cur, end, out.name) || !name_in_bounds(out.name)) {
 		return false;
 	}
 	while (cur < end) {

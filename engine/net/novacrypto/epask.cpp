@@ -48,6 +48,19 @@ bool is_prime(uint64_t n) {
 	return true;
 }
 
+// The parameter gate every modexp pass runs before touching a byte: the
+// modulus must exceed 258 (so every byte+2 has a distinct residue) and the
+// exponent must be strictly positive. A bundle that fails it is rejected
+// outright — retail returns -1 and the form submit fails; it never reaches
+// modular_exponentiation, so a zero modulus can never divide.
+// [orig: EPASK_ModexpEncrypt @0x666600 — `*(__int64 *)this <= 258 ||
+//  exponent <= 0` -> -1 @0x66668a]
+void require_modexp_params(uint32_t exponent, uint32_t modulus) {
+	if (modulus <= 258u || exponent == 0u) {
+		throw std::runtime_error("EPASK params rejected: modulus must exceed 258 and exponent be positive");
+	}
+}
+
 // Brute-force modexp decrypt: for each 4-byte LE word in `data`, find
 // the byte value b in [0, 255] such that pow(b + 2, exp, mod) == word.
 // Returns the recovered byte stream (1/4 the input length). Used by
@@ -55,6 +68,7 @@ bool is_prime(uint64_t n) {
 // because mod < 300_000 means worst case is 256 modexp per byte.
 std::vector<uint8_t> modexp_decrypt_bf(const std::vector<uint8_t> &data,
                                        uint32_t exponent, uint32_t modulus) {
+	require_modexp_params(exponent, modulus);
 	if (data.size() % 4 != 0) {
 		throw std::runtime_error("EPASK modexp data length must be a multiple of 4");
 	}
@@ -84,6 +98,7 @@ std::vector<uint8_t> modexp_decrypt_bf(const std::vector<uint8_t> &data,
 //        @ 0x666470, stored as a 32-bit little-endian word. The "+2" is byte-confirmed.]
 std::vector<uint8_t> modexp_encrypt(const std::vector<uint8_t> &data,
                                     uint32_t exponent, uint32_t modulus) {
+	require_modexp_params(exponent, modulus);
 	std::vector<uint8_t> out;
 	out.reserve(data.size() * 4);
 	for (uint8_t byte : data) {
@@ -154,20 +169,26 @@ std::string epask_to_string(const EpaskParams &p) {
 	return std::to_string(p.exponent) + ":" + std::to_string(p.modulus) + ":" + p.key;
 }
 
-// [orig: parse_colon_delimited_string @ 0x666710 (retail) — splits 'exp:mod:key']
+// [orig: parse_colon_delimited_string @ 0x666710 (retail) — splits 'exp:mod:key'.
+//  Each numeric field is copied into a 512-byte temp and atoi64'd; the walk
+//  returns -1 when the first (@0x66679b) or second (@0x6667e3) ':' is missing
+//  or a numeric field reaches 512 bytes (@0x66678e / @0x6667d5). A missing
+//  separator is therefore a rejected bundle, not a zero field.]
 EpaskParams epask_from_string(const std::string &s) {
+	constexpr size_t kNumericFieldCap = 512;
 	const auto first = s.find(':');
-	EpaskParams p;
 	if (first == std::string::npos) {
-		p.exponent = atoi64_u32(s);
-		return p;
+		throw std::runtime_error("EPASK bundle rejected: missing first ':'");
 	}
 	const auto second = s.find(':', first + 1);
-	p.exponent = atoi64_u32(std::string_view{s}.substr(0, first));
 	if (second == std::string::npos) {
-		p.modulus = atoi64_u32(std::string_view{s}.substr(first + 1));
-		return p;
+		throw std::runtime_error("EPASK bundle rejected: missing second ':'");
 	}
+	if (first >= kNumericFieldCap || second - first - 1 >= kNumericFieldCap) {
+		throw std::runtime_error("EPASK bundle rejected: numeric field too long");
+	}
+	EpaskParams p;
+	p.exponent = atoi64_u32(std::string_view{s}.substr(0, first));
 	p.modulus = atoi64_u32(std::string_view{s}.substr(first + 1, second - first - 1));
 	p.key = s.substr(second + 1);
 	return p;

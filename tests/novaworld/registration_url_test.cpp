@@ -48,7 +48,7 @@ bool check_client_flow_roundtrip() {
 	const std::string enc_nk = url_cipher_encode(plain_nk, URL_CIPHER_KEY_NK);
 	const std::string enc_ck = url_cipher_encode(plain_ck, URL_CIPHER_KEY_CK);
 	const std::string url = "nw://host/path?NK=" + enc_nk + "&CK=" + enc_ck +
-			"&NI=AlphaServer&NP=Taylor&BK=BankXYZ";
+			"&NI=AlphaServer&NP=Taylor&BK=BankXYZ&LN=12&GS=GSID-7";
 
 	RegistrationUrl u;
 	if (!expect(registration_url_parse(url, u), "client flow parses")) return false;
@@ -59,6 +59,13 @@ bool check_client_flow_roundtrip() {
 	if (!expect(u.name_info == "AlphaServer", "NI plaintext")) return false;
 	if (!expect(u.player_name == "Taylor", "NP plaintext")) return false;
 	if (!expect(u.bank_key == "BankXYZ", "BK plaintext")) return false;
+	// [orig: LN `atol` @0x54e33e; GS copied @0x54e38a]
+	if (!expect(u.ln == 12, "LN parses as the lobby number")) return false;
+	if (!expect(u.gs == "GSID-7", "GS plaintext")) return false;
+
+	RegistrationUrl bare;
+	registration_url_parse("nw://h/?NK=" + enc_nk + "&", bare);
+	if (!expect(bare.ln == 0 && bare.gs.empty(), "LN/GS default to 0/empty when absent")) return false;
 	return true;
 }
 
