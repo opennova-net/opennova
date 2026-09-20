@@ -62,8 +62,22 @@ struct JoinResult {
 	enum class Kind { NeedRequest, Resolved, Failed };
 	Kind kind = Kind::Failed;
 	HttpRequestSpec request;  // when NeedRequest
-	std::string host_ip;      // when Resolved
+	std::string host_ip;      // when Resolved: the decoded-NK relay endpoint (fallback NI/NP)
 	uint16_t host_port = 0;   // when Resolved
+	// The .joi lobby number. Nonzero means the retail transport dials the
+	// LAN-discovered endpoint for this session instead of host_ip/host_port
+	// and reports the number as the session var "Lan". 0 when absent.
+	// [orig: CNapiGameSession_InitTransportConnection @0x4c9e6c; ConnectOrHost @0x4d5418]
+	int ln = 0;               // when Resolved
+	// The proxy-join triple, verbatim from the .joi: NI/NP are the proxy
+	// node's ip/port and BK its cookie. With all three present (plus the NK
+	// relay pair) retail installs the proxy config and sends the 48-byte
+	// rendezvous datagram every enumerator tick. Empty when the .joi carries
+	// none. [orig: InitTransportConnection @0x4ca051..0x4ca0c7 installs the
+	//  six proxy fields; CNapiNPConnection_SendPingPacket @0x61f8c0]
+	std::string ni;           // when Resolved
+	std::string np;           // when Resolved
+	std::string bk;           // when Resolved
 	// The game-session APPID join token (decimal) recovered from the .joi CK —
 	// the value the NovaWorld host validates (code 9). "0" for LAN / a bare .joi.
 	std::string app_id = "0"; // when Resolved
@@ -85,7 +99,9 @@ public:
 	// The derived base "http://host[:port]" for the lobby HTTP endpoint (empty until the gate replies).
 	// (see godot/src/network/novaworld_client.cpp http_base())
 	std::string http_base() const;
-	// The concrete login prepare URL with the [domainname]/[VER1]/[VER2]/[CC]/[GT] template filled.
+	// The concrete login prepare URL with the six gate-markup tokens filled, each matched
+	// case-insensitively: [DOMAINNAME] [VER1] [VER2] [CC] [GT] [PRODUCTCODE].
+	// [orig: Mission_DeobfuscateDescription @0x4cdaa0 (a misnomer: the URL token substituter)]
 	std::string resolve_startup_url() const;
 
 	// --- EPASK login chain ---

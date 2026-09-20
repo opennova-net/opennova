@@ -8,26 +8,34 @@
 
 namespace opennova {
 
-// 61-char SCRK matching retail captures (docs/net/novaworld-net-re.md §5.9:
-// ClientAuth and ServerAuth SCRK are both 61 chars; alphabet = A-Z0-9, 36
-// chars). We don't replicate the two-30-char-halves structure (random is
-// fine), only the length + alphabet. Retail's own generator
-// [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0 — 63 chars drawn from g_txkey_charset
-//  @0x849f10 via NapiPRNG_NextInRange @0x62e450 into conn+204] is the witness for the
-// key shape; this dev helper keeps the capture-observed length.
+// The SCRK generator. Retail makes 63 draws, each an INCLUSIVE
+// NapiPRNG_NextInRange(0, strlen(charset)) — `min + state % (max - min + 1)`
+// — over the 31-char vowel-free charset "0123456789BCDFGHJKLMNPQRSTVWXYZ".
+// Index 31 lands on the charset's NUL, and `sprintf("%c", 0)` appends nothing
+// while the draw counter still decrements, so the key is 63 minus the number
+// of NUL picks: 61.03 chars on average — the "61 chars" every retail capture
+// shows is that expectation, not a fixed length. The random source is the
+// only substitution (retail seeds its 16-bit LCG from the manager).
+// [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0 — `chars_remaining = 63`
+//  @0x61e040, NextInRange(0, g_txkey_charset_len) @0x61e05b, sprintf "%c"
+//  @0x61e075, Napi_CopyString(conn+204, key, 64) @0x61e0c9; charset
+//  g_txkey_charset @0x849f10 -> 0x7dfa10; NapiPRNG_NextInRange @0x62e450
+//  `min + state % (max - min + 1)` @0x62e460]
 namespace {
-constexpr int kDevScrkLength = 61;
+constexpr int kScrkDraws = 63;
+constexpr char kScrkCharset[] = "0123456789BCDFGHJKLMNPQRSTVWXYZ";
+constexpr int kScrkCharsetLen = static_cast<int>(sizeof(kScrkCharset) - 1); // 31
 } // namespace
 
 std::string make_dev_scrk() {
-	static constexpr char alphabet[] =
-		"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	static thread_local std::mt19937 gen{std::random_device{}()};
-	std::uniform_int_distribution<int> pick(0, 35);
+	std::uniform_int_distribution<int> pick(0, kScrkCharsetLen); // inclusive: 32 outcomes
 	std::string out;
-	out.reserve(kDevScrkLength);
-	for (int i = 0; i < kDevScrkLength; ++i) {
-		out.push_back(alphabet[pick(gen)]);
+	out.reserve(kScrkDraws);
+	for (int draw = 0; draw < kScrkDraws; ++draw) {
+		const int index = pick(gen);
+		if (index == kScrkCharsetLen) continue; // the NUL slot appends nothing
+		out.push_back(kScrkCharset[index]);
 	}
 	return out;
 }

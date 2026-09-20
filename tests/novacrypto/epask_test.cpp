@@ -72,11 +72,17 @@ bool serialize_round_trip() {
 	return true;
 }
 
-bool malformed_epask_string_is_atoi_tolerant() {
-	const auto missing = opennova::epask_from_string("not-a-number");
-	if (missing.exponent != 0 || missing.modulus != 0 || !missing.key.empty()) {
-		std::fprintf(stderr, "FAIL: malformed EPASK without colons should parse as zeros\n");
-		return false;
+// A bundle missing either ':' is rejected outright (retail's parser returns -1
+// @0x66679b / @0x6667e3); the numeric fields themselves stay atoi-tolerant.
+bool malformed_epask_string_is_rejected_or_atoi_tolerant() {
+	for (const char *bad : {"7", "not-a-number", "12345:234567", ""}) {
+		bool threw = false;
+		try { (void)opennova::epask_from_string(bad); }
+		catch (const std::exception &) { threw = true; }
+		if (!threw) {
+			std::fprintf(stderr, "FAIL: EPASK '%s' without both separators must be rejected\n", bad);
+			return false;
+		}
 	}
 	const auto partial = opennova::epask_from_string("123abc: 456xyz:key-tail");
 	if (partial.exponent != 123 || partial.modulus != 456 || partial.key != "key-tail") {
@@ -88,6 +94,54 @@ bool malformed_epask_string_is_atoi_tolerant() {
 		std::fprintf(stderr, "FAIL: empty/non-numeric EPASK fields should parse as zero\n");
 		return false;
 	}
+	const std::string long_field(512, '9');
+	bool threw = false;
+	try { (void)opennova::epask_from_string(long_field + ":1:k"); }
+	catch (const std::exception &) { threw = true; }
+	if (!threw) {
+		std::fprintf(stderr, "FAIL: a 512-byte numeric field must be rejected\n");
+		return false;
+	}
+	return true;
+}
+
+// The modexp parameter gate: modulus <= 258 or a zero exponent is refused
+// before any arithmetic (retail EPASK_ModexpEncrypt @0x66668a returns -1),
+// so a "0:0:k" bundle can never reach a divide by zero.
+bool rejected_params_never_reach_modexp() {
+	const auto zero = opennova::epask_from_string("0:0:k");
+	if (zero.exponent != 0 || zero.modulus != 0 || zero.key != "k") {
+		std::fprintf(stderr, "FAIL: '0:0:k' parses (both separators present)\n");
+		return false;
+	}
+	for (const opennova::EpaskParams &p : {
+	             opennova::EpaskParams{0, 0, "k"},
+	             opennova::EpaskParams{10001, 258, "k"},
+	             opennova::EpaskParams{0, 207887, "k"},
+	     }) {
+		bool threw = false;
+		try { (void)opennova::epask_encrypt("x", p); }
+		catch (const std::exception &) { threw = true; }
+		if (!threw) {
+			std::fprintf(stderr, "FAIL: encrypt with exp=%u mod=%u must be rejected\n",
+			             p.exponent, p.modulus);
+			return false;
+		}
+		threw = false;
+		try { (void)opennova::epask_decrypt("ABCDEFGH", p); }
+		catch (const std::exception &) { threw = true; }
+		if (!threw) {
+			std::fprintf(stderr, "FAIL: decrypt with exp=%u mod=%u must be rejected\n",
+			             p.exponent, p.modulus);
+			return false;
+		}
+	}
+	// 259 is the first modulus the gate admits. Exponent 1 keeps the per-byte
+	// power a permutation (259 = 7 * 37 is not an RSA modulus, so x^3 mod 259
+	// collides); the gate only checks the bounds, not the pair's validity.
+	const opennova::EpaskParams edge{1, 259, "k"};
+	const std::string back = opennova::epask_decrypt(opennova::epask_encrypt("hi", edge), edge);
+	if (!expect_eq(back, "hi", "modulus 259 passes the gate and round-trips")) return false;
 	return true;
 }
 
@@ -155,7 +209,8 @@ int main() {
 	bool ok = true;
 	ok = fixtures_match_python()      && ok;
 	ok = serialize_round_trip()       && ok;
-	ok = malformed_epask_string_is_atoi_tolerant() && ok;
+	ok = malformed_epask_string_is_rejected_or_atoi_tolerant() && ok;
+	ok = rejected_params_never_reach_modexp() && ok;
 	ok = encrypt_truncates_at_first_nul() && ok;
 	ok = generate_yields_valid_params() && ok;
 	ok = malformed_inputs_throw()     && ok;

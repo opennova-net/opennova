@@ -45,7 +45,7 @@ int main() {
 	// and all (the template wraps the bracket in newlines).
 	const std::string body =
 	    "<HTML><HEAD><TITLE>\n"
-	    "[NK=" + nk + "&CK=" + ck + "&NI=" + proxy_ip + "&NP=" + proxy_port + "&BK=986119&]\n"
+	    "[NK=" + nk + "&CK=" + ck + "&NI=" + proxy_ip + "&NP=" + proxy_port + "&BK=986119&LN=3&GS=sess-9&]\n"
 	    "</TITLE></HEAD><BODY>Joining DEV Joinable...</BODY></HTML>";
 
 	const JoiConnection conn = parse_joi_connection_string(body);
@@ -56,6 +56,9 @@ int main() {
 	check(conn.ni == proxy_ip, "NI plaintext proxy/display slot preserved");
 	check(conn.np == proxy_port, "NP plaintext proxy/display slot preserved");
 	check(conn.bk == "986119", "BK is the literal 986119");
+	// [orig: LN `atol` @0x54e33e; GS copied @0x54e38a]
+	check(conn.ln == 3, "LN parses as the lobby number");
+	check(conn.gs == "sess-9", "GS preserved verbatim");
 	check(conn.nk == nk, "NK token captured verbatim");
 	check(conn.ck == ck, "CK token captured verbatim");
 	// CK decodes to the decimal the retail client atol()s and sends as the
@@ -72,6 +75,7 @@ int main() {
 	// A body without a bracketed run yields ok == false (don't crash / misparse).
 	const JoiConnection empty = parse_joi_connection_string("<HTML>no title here</HTML>");
 	check(!empty.ok, "missing connection string -> ok == false");
+	check(empty.ln == 0 && empty.gs.empty(), "LN/GS default to 0/empty");
 
 	if (g_failures == 0) {
 		std::printf("joi_parse: all checks passed\n");

@@ -5,47 +5,55 @@
 
 namespace opennova {
 
-// Parsed registration URL emitted by the NovaLogic launcher and consumed
-// by Auth_ParseRegistrationURL@0x514c40 in jodemo.exe. Two mutually
-// exclusive shapes on the wire:
+// Parsed registration URL emitted by the NovaLogic launcher and consumed by
+// parse_connection_query_string @0x54dfb0 in retail Jointops.exe (jodemo:
+// Auth_ParseRegistrationURL @0x514c40). Two mutually exclusive shapes on
+// the wire:
 //
 //   1. Host flow:    nw://.../?HOSTKEY=<val>
 //      `has_host_key` is true; only `host_key` is populated.
 //
-//   2. Client flow:  nw://.../?NK=<cipher>&CK=<cipher>&NI=<plain>&NP=<plain>&BK=<plain>
-//      `has_host_key` is false; all six NK/CK/NI/NP/BK fields populated.
-//      Note: NK= after URL-cipher decrypt is actually an IP:port-like
-//      string in jodemo's usage (witnessed in CNapiGameSession_ConnectOrHost
-//      feeding NK into the "IpAddress" VarList entry and the post-':'
-//      suffix into "PortNumber"). The RegistrationUrl splits NK at the
-//      pszSet separator into `name_key` (head) and `name_key_suffix`
-//      (tail) to preserve that semantic.
+//   2. Client flow:  nw://.../?NK=<cipher>&CK=<cipher>&NI=<plain>&NP=<plain>&BK=<plain>&LN=<n>&GS=<plain>
+//      `has_host_key` is false; the client-flow fields are populated.
+//      NK= after URL-cipher decrypt is an "IpAddress:PortNumber" string
+//      (CNapiGameSession_ConnectOrHost feeds the head into the "IpAddress"
+//      VarList entry and the tail into "PortNumber"); the RegistrationUrl
+//      splits it at the witnessed ':' into `name_key` / `name_key_suffix`.
+//      LN is the lobby number: when nonzero the transport dials the
+//      LAN-discovered endpoint instead of the NK relay pair and reports the
+//      number as the session's "Lan" var. GS is copied by the parser but no
+//      retail code ever reads the buffer (a single xref: the parse call).
+//      [orig: LN `atol` @0x54e33e; GS `strcpy(gs_buf, ..)` @0x54e38a;
+//       consumers CNapiGameSession_InitTransportConnection @0x4c9e6c
+//       (`if (g_lobby_num)` selects byte_C8FE7C/byte_C8FEBC over nk_buf /
+//       nk_extra_buf) and CNapiGameSession_ConnectOrHost @0x4d5418 ("Lan")]
 //
 // Only the NK= and CK= values are cipher-obfuscated (novacrypto::
-// url_cipher_decode with the respective key literals). NI/NP/BK are
+// url_cipher_decode with the respective key literals). NI/NP/BK/LN/GS are
 // plaintext and terminated by '&'.
 
 struct RegistrationUrl {
 	bool has_host_key = false;
 
-	// When has_host_key: the HOSTKEY= value, trimmed of any trailing ']'.
+	// When has_host_key: the HOSTKEY= value, trimmed at '&' and then at ']'
+	// [orig: delimiters "&" @0x7d3f20 then "]" @0x7c18e4].
 	std::string host_key;
 
-	// When !has_host_key: the six client-flow fields.
+	// When !has_host_key: the client-flow fields.
 	std::string name_key;           // NK= after URL-cipher decode + split
-	std::string name_key_suffix;    // NK= tail after splitting at `pszSet`
+	std::string name_key_suffix;    // NK= tail after splitting at ':'
 	std::string cd_key;             // CK= after URL-cipher decode
 	std::string name_info;          // NI= plaintext
 	std::string player_name;        // NP= plaintext
 	std::string bank_key;           // BK= plaintext
+	int ln = 0;                     // LN= lobby number (atol); 0 when absent
+	std::string gs;                 // GS= plaintext; parsed, inert in retail
 };
 
-// NK-split separator. Witnessed only as a reference-by-address
-// (`(const char *)&pszSet`) in Auth_ParseRegistrationURL; its literal
-// content has not yet been pulled from the binary. We default to ":" —
-// the natural guess given NK= is consumed as "IpAddress:PortNumber" by
-// the session layer. Override at call-time if the eventual witness shows
-// a different string.
+// NK-split separator, witnessed: `strstr(nk_buf, delimiters)` with
+// delimiters @0x7c3b58 == ":", and the tail copied with a single-byte skip
+// (`sprintf(nk_extra_buf, "%s", ni_len + 1)`). Overridable at call-time
+// for synthetic tests only.
 inline constexpr const char *DEFAULT_NK_SEPARATOR = ":";
 
 // Parse a NovaLogic launcher registration URL. Returns true on success.

@@ -22,6 +22,34 @@ std::string replace_all(std::string s, const std::string &from, const std::strin
 	}
 	return s;
 }
+// ASCII case-insensitive find / replace-all, the shape of retail's
+// NapiUtil_ReplaceAllCaseInsensitive @0x617970 (every markup token is matched
+// through it).
+std::size_t find_icase(const std::string &s, const std::string &needle, std::size_t from = 0) {
+	if (needle.empty() || needle.size() > s.size()) return std::string::npos;
+	for (std::size_t i = from; i + needle.size() <= s.size(); ++i) {
+		if (opennova::strutil::iequals(std::string_view(s).substr(i, needle.size()), needle)) return i;
+	}
+	return std::string::npos;
+}
+std::string replace_all_icase(std::string s, const std::string &from, const std::string &to) {
+	std::size_t pos = 0;
+	while ((pos = find_icase(s, from, pos)) != std::string::npos) {
+		s.replace(pos, from.size(), to);
+		pos += to.size();
+	}
+	return s;
+}
+// The six tokens the retail substituter knows; a startup URL is "templated"
+// when it carries any of them.
+constexpr const char *kStartupUrlTokens[] = {
+		"[DOMAINNAME]", "[VER1]", "[VER2]", "[CC]", "[GT]", "[PRODUCTCODE]"};
+bool startup_url_is_templated(const std::string &su) {
+	for (const char *token : kStartupUrlTokens) {
+		if (find_icase(su, token) != std::string::npos) return true;
+	}
+	return false;
+}
 std::string strip_edges(const std::string &s) { return opennova::strutil::trim(s); }
 std::string to_string_body(const std::vector<uint8_t> &body) {
 	return body.empty() ? std::string() : std::string(reinterpret_cast<const char *>(body.data()), body.size());
@@ -133,7 +161,7 @@ void LobbyHttpFlow::reset() {
 
 // (see godot/src/network/novaworld_client.cpp http_base()) — three derivation tiers.
 std::string LobbyHttpFlow::http_base() const {
-	const bool templated = !ctx_.startup_url.empty() && ctx_.startup_url.find("[domainname]") != std::string::npos;
+	const bool templated = !ctx_.startup_url.empty() && startup_url_is_templated(ctx_.startup_url);
 	if (templated && !ctx_.web_domain.empty()) {
 		std::string d = ctx_.web_domain;
 		if (!begins_with(d, "http://") && !begins_with(d, "https://")) d = "http://" + d;
@@ -153,21 +181,29 @@ std::string LobbyHttpFlow::http_base() const {
 	return std::string();
 }
 
-// [orig: resolve_startup_url()] — fill the [domainname]/[VER1]/[VER2]/[CC]/[GT] template.
+// Fill the gate markup template. Retail substitutes exactly six tokens, each
+// matched case-insensitively, from: the gate-supplied domain, the literal
+// version pair "3"/"2345", the OS country code, the session's gate tag
+// ("jop:cus2") and the product code "jop".
+// [orig: Mission_DeobfuscateDescription @0x4cdaa0 — NapiUtil_ReplaceAllCaseInsensitive
+//  "[DOMAINNAME]" @0x4cdb88, "[VER1]" @0x4cdb9f, "[VER2]" @0x4cdbb6, "[CC]" @0x4cdbcd,
+//  "[GT]" @0x4cdbe4, "[PRODUCTCODE]" @0x4cdbfe; called from
+//  CNapiGameSession_OnNovaWorldConnected @0x4d1665]
 std::string LobbyHttpFlow::resolve_startup_url() const {
 	std::string su = ctx_.startup_url;
-	if (su.empty() || su.find("[domainname]") == std::string::npos) return su; // concrete (OpenNova) pass-through
-	su = replace_all(su, "[domainname]", ctx_.web_domain);
-	su = replace_all(su, "[VER1]", "3");
-	su = replace_all(su, "[VER2]", "2345");
+	if (su.empty() || !startup_url_is_templated(su)) return su; // concrete (OpenNova) pass-through
+	su = replace_all_icase(su, "[DOMAINNAME]", ctx_.web_domain);
+	su = replace_all_icase(su, "[VER1]", "3");
+	su = replace_all_icase(su, "[VER2]", "2345");
 	std::string cc = "us"; // [CC] = ISO country from the OS locale (injected)
 	const std::size_t us = ctx_.locale.find("_");
 	if (us != std::string::npos) {
 		const std::string region = to_lower(ctx_.locale.substr(us + 1));
 		if (!region.empty()) cc = region;
 	}
-	su = replace_all(su, "[CC]", cc);
-	su = replace_all(su, "[GT]", "jop:cus2");
+	su = replace_all_icase(su, "[CC]", cc);
+	su = replace_all_icase(su, "[GT]", "jop:cus2");
+	su = replace_all_icase(su, "[PRODUCTCODE]", "jop");
 	return su;
 }
 
@@ -283,9 +319,16 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				login_step_ = LoginStep::Idle;
 				return login_fail(std::string("bad EPASK bundle: ") + e.what());
 			}
+			// The modexp gate retail applies at the form submit (EPASK_ModexpEncrypt
+			// @0x66668a returns -1 for modulus <= 258 or a non-positive exponent):
+			// fail here rather than let build_login_post_body throw mid-POST.
+			if (epask_.modulus <= 258u || epask_.exponent == 0u) {
+				login_step_ = LoginStep::Idle;
+				return login_fail("bad EPASK bundle: params rejected (modulus <= 258 or exponent 0)");
+			}
 			seed_identity_cookies();
 			const bool templated =
-					!ctx_.startup_url.empty() && ctx_.startup_url.find("[domainname]") != std::string::npos;
+					!ctx_.startup_url.empty() && startup_url_is_templated(ctx_.startup_url);
 			if (templated) {
 				login_step_ = LoginStep::NwStart;
 				HttpRequestSpec req;
@@ -447,6 +490,10 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			r.kind = JoinResult::Kind::Resolved;
 			r.host_ip = conn.host_ip;
 			r.host_port = static_cast<uint16_t>(port);
+			r.ln = conn.ln;   // nonzero: dial the LAN-discovered endpoint, report "Lan"
+			r.ni = conn.ni;   // the proxy-join triple, verbatim
+			r.np = conn.np;
+			r.bk = conn.bk;
 			r.app_id = conn.app_id;  // the game-session APPID join token (decoded CK)
 			// The PUB* identity cookies the authenticated login/NWJoin set, packed
 			// as the CD blob the 0x00 JOIN relays (host code 23).

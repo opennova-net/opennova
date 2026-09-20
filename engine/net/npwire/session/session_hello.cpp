@@ -173,6 +173,14 @@ bool matches_jointoperations_identity(const ClientAuth &auth) {
 			str_case_equal(auth.pv1, expected.pv1);
 }
 
+// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 — the PM TLV lands in
+//  `protocol_version` @0x62172c; `cmp edi, ebx / jnz loc_6218B6` @0x6217bc..
+//  0x6217c2 jumps PAST the NVS/PN/PG/PV1 compares straight to the
+//  SendServerInfoPacket call @0x6218fc, so only a zero PM is validated]
+bool client_hello_admits(const ClientHello &hello) {
+	return hello.pm != 0 || matches_jointoperations_identity(hello);
+}
+
 bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
 	if (!data) return false;
 	out = ClientHello{};
@@ -183,7 +191,8 @@ bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
 		uint16_t size = 0;
 		const size_t next = read_tlv_field(data, len, pos, name, value, size);
 		if (next == static_cast<size_t>(-1)) {
-			// Tolerant: if we've parsed at least a few fields, accept partial.
+			// The retail walk exits on the first read failure and keeps what
+			// it gathered.
 			break;
 		}
 		if (str_case_equal(name, "NVS")) out.nvs = strip_nul(value, size);
@@ -209,7 +218,10 @@ bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
-	return !out.pn.empty();
+	// No tag is required: retail validates the version block only when PM is
+	// zero (client_hello_admits), so an empty PN is a parse result, not a
+	// parse failure.
+	return true;
 }
 
 std::vector<uint8_t> client_hello_to_bytes(const ClientHello &msg) {
@@ -229,7 +241,10 @@ std::vector<uint8_t> client_hello_to_bytes(const ClientHello &msg) {
 	if (!msg.pv2.empty()) append_string_field(buf, "PV2", msg.pv2);
 	if (!msg.pv3.empty()) append_string_field(buf, "PV3", msg.pv3);
 	if (msg.ci != 0) append_u32_field(buf, "CI", msg.ci);
-	if (msg.pm_present || msg.pm != 0) append_u32_field(buf, "PM", msg.pm);
+	// PM only for a nonzero count: retail's announce builder has no "present but
+	// zero" state [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 —
+	// `!transport_info[37]` @0x61fcca, then `if (count)` @0x61fcda].
+	if (msg.pm != 0) append_u32_field(buf, "PM", msg.pm);
 	if (msg.eip != 0) append_u32_field(buf, "EIP", msg.eip);
 	if (msg.epn != 0) append_u32_field(buf, "EPN", msg.epn);
 	if (msg.et != 0) append_u32_field(buf, "ET", msg.et);
@@ -249,8 +264,11 @@ ServerHello build_server_hello(const ClientHello &client,
 	s.pv2 = client.pv2.empty() ? s.pv2 : client.pv2;
 	s.rip = client_ip_net;
 	s.rpn = client_port;
+	// The external-address triple is the caller's echo of the hello
+	// [orig: SendServerInfoPacket(.., external_ip, external_port, external_type)].
 	s.eip = client.eip;
 	s.epn = client.epn;
+	s.et = client.et;
 	return s;
 }
 
@@ -268,28 +286,30 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		if (next == static_cast<size_t>(-1)) break;
 		// Identity block — the real server validates these in HandleClientJoin
 		// @ 0x62B750 (NVS/PN/PG/PV1 + PV2); parse them so the round-trip is
-		// exact and our own server records what the client claimed.
-		if      (name == "NVS")  out.nvs  = strip_nul(value, size);
-		else if (name == "CO")   out.co   = strip_nul(value, size);
-		else if (name == "AP")   out.ap   = strip_nul(value, size);
-		else if (name == "BDAT") out.bdat = strip_nul(value, size);
-		else if (name == "PN")   out.pn   = strip_nul(value, size);
-		else if (name == "PG" && size == 16) {
+		// exact and our own server records what the client claimed. Every tag
+		// compares case-insensitively, as the retail walk does
+		// [orig: Napi_StrCaseEqual(tag, "NVS") @0x62b915 .. "SCRK" @0x62bc30].
+		if      (str_case_equal(name, "NVS"))  out.nvs  = strip_nul(value, size);
+		else if (str_case_equal(name, "CO"))   out.co   = strip_nul(value, size);
+		else if (str_case_equal(name, "AP"))   out.ap   = strip_nul(value, size);
+		else if (str_case_equal(name, "BDAT")) out.bdat = strip_nul(value, size);
+		else if (str_case_equal(name, "PN"))   out.pn   = strip_nul(value, size);
+		else if (str_case_equal(name, "PG") && size == 16) {
 			std::memcpy(out.pg.data(), value, 16);
 			out.pg_present = true;
 		}
-		else if (name == "PV1")  out.pv1  = strip_nul(value, size);
-		else if (name == "PV2")  out.pv2  = strip_nul(value, size);
+		else if (str_case_equal(name, "PV1"))  out.pv1  = strip_nul(value, size);
+		else if (str_case_equal(name, "PV2"))  out.pv2  = strip_nul(value, size);
 		// Auth fields.
-		else if (name == "CI")   out.ci   = read_u32_le(value, size);
-		else if (name == "HK")   out.hk   = read_u32_le(value, size);
-		else if (name == "CK")   out.ck   = read_u32_le(value, size);
-		else if (name == "NA")   out.na   = strip_nul(value, size).substr(0, 63);
-		else if (str_case_equal(name, "PW")) out.pw = strip_nul(value, size).substr(0, 511);
-		else if (name == "SIP")  out.sip  = read_u32_le(value, size);
-		else if (name == "SPN")  out.spn  = read_u32_le(value, size);
-		else if (name == "SCRK") out.scrk = strip_nul(value, size);
-		else if (name == "CU")   out.cu.emplace_back(value, value + size);
+		else if (str_case_equal(name, "CI"))   out.ci   = read_u32_le(value, size);
+		else if (str_case_equal(name, "HK"))   out.hk   = read_u32_le(value, size);
+		else if (str_case_equal(name, "CK"))   out.ck   = read_u32_le(value, size);
+		else if (str_case_equal(name, "NA"))   out.na   = strip_nul(value, size).substr(0, 63);
+		else if (str_case_equal(name, "PW"))   out.pw   = strip_nul(value, size).substr(0, 511);
+		else if (str_case_equal(name, "SIP"))  out.sip  = read_u32_le(value, size);
+		else if (str_case_equal(name, "SPN"))  out.spn  = read_u32_le(value, size);
+		else if (str_case_equal(name, "SCRK")) out.scrk = strip_nul(value, size);
+		else if (str_case_equal(name, "CU"))   out.cu.emplace_back(value, value + size);
 		// Unknown tags (DE/PV3/NF/DCNT/RCNT/etc.) intentionally ignored.
 		pos = next;
 	}
@@ -382,13 +402,16 @@ std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const Disconnec
 // [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0]. The retail walk reads name-keyed
 // TLVs in whatever order they arrive, compares each name through Napi_StrCaseEqual, ignores names
 // it does not know (the cursor has already skipped their value by its length), and stops at an
-// empty name. DS is read off the wire and deliberately dropped: the receiver re-derives the role
-// from its own connection. A value shorter than its field's width reads as zero here; retail's
-// unguarded `*(_DWORD *)value` would read past it, and bounds safety is a platform primitive.
+// empty name or at the first field NapiNP_ReadTLV cannot read (@0x621b8c) — keeping every field
+// gathered before it. Nothing after the walk tests what was parsed: the description is recorded
+// with zero defaults and the connection moves to state 6 (@0x621d59), so an unknown-only or
+// truncated body disconnects exactly like a complete one. DS is read off the wire and
+// deliberately dropped: the receiver re-derives the role from its own connection. A value shorter
+// than its field's width reads as zero here; retail's unguarded `*(_DWORD *)value` would read past
+// it, and bounds safety is a platform primitive.
 bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &out) {
 	if (!data) return false;
 	out = DisconnectEvent{};
-	bool saw_known_field = false;
 	size_t pos = 0;
 	while (pos < len) {
 		// An empty name terminates the walk BEFORE its length is read @0x621b96.
@@ -397,7 +420,7 @@ bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &ou
 		const uint8_t *value = nullptr;
 		uint16_t size = 0;
 		const size_t next = read_tlv_field(data, len, pos, name, value, size);
-		if (next == static_cast<size_t>(-1)) return false;
+		if (next == static_cast<size_t>(-1)) break;
 		if (str_case_equal(name, "DS")) {
 			out.ds = read_u32_le(value, size);
 		} else if (str_case_equal(name, "DC")) {
@@ -412,14 +435,10 @@ bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &ou
 			out.dpc = read_u32_le(value, size);
 		} else if (str_case_equal(name, "DDSTR")) {
 			out.ddstr = strip_nul(value, size);
-		} else {
-			pos = next;
-			continue;
 		}
-		saw_known_field = true;
 		pos = next;
 	}
-	return saw_known_field;
+	return true;
 }
 
 std::vector<uint8_t> make_client_cu_chunk(uint8_t type, std::string_view name,
@@ -457,6 +476,21 @@ bool parse_client_cu_chunk(const uint8_t *data, size_t len, uint8_t &out_type,
 	return true;
 }
 
+// Field 13: the configured `mpmaxpacketsize` folded through the retail clamp
+// ladder. Both template builders run the same three compares against the
+// game.cfg value; only the ceiling differs.
+// [orig: CNapiNetwork_Init @0x4ca4a0 — `if (!v) v = 1300` @0x4caa53,
+//  `if (v < 100) v = 100` @0x4caa5f, `if (v > 0x4000) v = 0x4000` @0x4caa6a;
+//  CNapiGameSession_InitNPConnection @0x4d3be0 — the same ladder @0x4d3df4
+//  with 0x10000 @0x4d3e0b]
+uint32_t cs_max_packet_bytes(uint32_t configured, uint32_t ceiling) {
+	uint32_t v = configured;
+	if (v == 0) v = kCsMaxPacketDefault;
+	if (v < kCsMaxPacketFloor) v = kCsMaxPacketFloor;
+	if (v > ceiling) v = ceiling;
+	return v;
+}
+
 // Engine CS template, witnessed in IDA: CNapiGameSession_InitNPConnection writes
 // two IDENTICAL 15-entry [field_index]=timeout_ms blocks (dir1 @ proto+3652,
 // dir0 @ proto+3712); CNapiNPConnection_Create copies them into the connection and
@@ -466,17 +500,22 @@ bool parse_client_cu_chunk(const uint8_t *data, size_t len, uint8_t &out_type,
 // [orig: CNapiGameSession_InitNPConnection @ 0x4d3e1f / CNapiNPConnection_Create @ 0x62acb0 / CNapiNPConnection_SendSessionInit @ 0x620ef0]
 // (Prior values were onnet-derived guesses, wrong at idx 4/8/9/10/12/13 —
 //  docs/net/novaworld-net-re.md D-NET-1.)
-static std::vector<CsField> engine_cs_fields() {
+static std::vector<CsField> engine_cs_fields(uint32_t max_packet_bytes) {
 	return {
 		{0, 240000u}, {1, 4u}, {2, 0u}, {3, 0u},
 		{4, 60000u}, {5, 1000u}, {6, 0xFFFFFFFFu}, {7, 0u},
 		{8, 2048u}, {9, 128u}, {10, 100u}, {11, 500u},
-		{12, 1u}, {13, 1300u}, {14, 0xFFFFFFFFu},
+		{12, 1u}, {13, cs_max_packet_bytes(max_packet_bytes, kCsMaxPacketCeilingService)},
+		{14, 0xFFFFFFFFu},
 	};
 }
 
-std::vector<CsField> default_client_cs_fields() { return engine_cs_fields(); }
-std::vector<CsField> default_server_cs_fields() { return engine_cs_fields(); }
+std::vector<CsField> default_client_cs_fields(uint32_t max_packet_bytes) {
+	return engine_cs_fields(max_packet_bytes);
+}
+std::vector<CsField> default_server_cs_fields(uint32_t max_packet_bytes) {
+	return engine_cs_fields(max_packet_bytes);
+}
 
 // The JOINTOPERATIONS in-game template — what a retail GAME host's 0x82 carries.
 // CNapiNetwork_Init writes it into the game session's protocol object at
@@ -492,17 +531,22 @@ std::vector<CsField> default_server_cs_fields() { return engine_cs_fields(); }
 //  @0x4cab60, 30000 @0x4caab5/@0x4cab88, 10000 @0x4caac5/@0x4cab98, -1, 0, 512
 //  @0x4caaf0/@0x4cabc0, 256 @0x4cab00/@0x4cabd0, 100 @0x4cab10, 1200 (0x4B0)
 //  @0x4cab20, 1 @0x4cab2c, MTU @0x4cab3c, -1 @0x4cab48; dir 1 identical]
-static std::vector<CsField> jointoperations_cs_fields() {
+static std::vector<CsField> jointoperations_cs_fields(uint32_t max_packet_bytes) {
 	return {
 		{0, 120000u}, {1, 4u}, {2, 0u}, {3, 0u},
 		{4, 30000u}, {5, 10000u}, {6, 0xFFFFFFFFu}, {7, 0u},
 		{8, 512u}, {9, 256u}, {10, 100u}, {11, 1200u},
-		{12, 1u}, {13, 1300u}, {14, 0xFFFFFFFFu},
+		{12, 1u}, {13, cs_max_packet_bytes(max_packet_bytes, kCsMaxPacketCeilingGame)},
+		{14, 0xFFFFFFFFu},
 	};
 }
 
-std::vector<CsField> jointoperations_client_cs_fields() { return jointoperations_cs_fields(); }
-std::vector<CsField> jointoperations_server_cs_fields() { return jointoperations_cs_fields(); }
+std::vector<CsField> jointoperations_client_cs_fields(uint32_t max_packet_bytes) {
+	return jointoperations_cs_fields(max_packet_bytes);
+}
+std::vector<CsField> jointoperations_server_cs_fields(uint32_t max_packet_bytes) {
+	return jointoperations_cs_fields(max_packet_bytes);
+}
 
 ServerAuth build_server_auth(const ClientAuth &client,
                              uint32_t client_ip_net,
@@ -651,31 +695,33 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 		uint16_t size = 0;
 		const size_t next = read_tlv_field(data, len, pos, name, value, size);
 		if (next == static_cast<size_t>(-1)) break;
-		if      (name == "CI")  out.ci  = read_u32_le(value, size);
-		else if (name == "MI")  out.mi  = read_u32_le(value, size);
-		else if (name == "CK")  out.ck  = read_u32_le(value, size);
-		else if (name == "CR")  { out.cr  = read_u32_le(value, size); saw_cr = true; }
-		else if (name == "JFC") { out.jfc = read_u32_le(value, size); saw_rejection_detail = true; }
-		else if (name == "JFP") { out.jfp = read_u32_le(value, size); saw_rejection_detail = true; }
-		else if (name == "JFS") { out.jfs = strip_nul(value, size); saw_rejection_detail = true; }
-		else if (name == "SK")  out.sk  = read_u32_le(value, size);
-		else if (name == "CS" && size == 6) {
+		// Case-insensitive tag walk, as the retail 0x82 reader does
+		// [orig: NapiNP_HandleServerJoinResponse @0x629840 via Napi_StrCaseEqual @0x616e70].
+		if      (str_case_equal(name, "CI"))  out.ci  = read_u32_le(value, size);
+		else if (str_case_equal(name, "MI"))  out.mi  = read_u32_le(value, size);
+		else if (str_case_equal(name, "CK"))  out.ck  = read_u32_le(value, size);
+		else if (str_case_equal(name, "CR"))  { out.cr  = read_u32_le(value, size); saw_cr = true; }
+		else if (str_case_equal(name, "JFC")) { out.jfc = read_u32_le(value, size); saw_rejection_detail = true; }
+		else if (str_case_equal(name, "JFP")) { out.jfp = read_u32_le(value, size); saw_rejection_detail = true; }
+		else if (str_case_equal(name, "JFS")) { out.jfs = strip_nul(value, size); saw_rejection_detail = true; }
+		else if (str_case_equal(name, "SK"))  out.sk  = read_u32_le(value, size);
+		else if (str_case_equal(name, "CS") && size == 6) {
 			// [direction][field_index][LE uint32]. direction 1 = client, 0 = server.
 			const uint8_t direction = value[0];
 			CsField f{value[1], read_u32_le(value + 2, 4)};
 			if (direction == 1) out.client_cs.push_back(f);
 			else                out.server_cs.push_back(f);
 		}
-		else if (name == "CU") {
+		else if (str_case_equal(name, "CU")) {
 			std::string cu_name, cu_value;
 			if (parse_cu_inner(value, size, cu_name, cu_value)) {
 				out.cu.emplace_back(std::move(cu_name), std::move(cu_value));
 			}
 		}
-		else if (name == "SCRK") out.scrk = strip_nul(value, size);
-		else if (name == "NA")   out.na   = strip_nul(value, size);
-		else if (name == "RIP")  out.rip  = read_u32_le(value, size);
-		else if (name == "RPN")  out.rpn  = read_u32_le(value, size);
+		else if (str_case_equal(name, "SCRK")) out.scrk = strip_nul(value, size);
+		else if (str_case_equal(name, "NA"))   out.na   = strip_nul(value, size);
+		else if (str_case_equal(name, "RIP"))  out.rip  = read_u32_le(value, size);
+		else if (str_case_equal(name, "RPN"))  out.rpn  = read_u32_le(value, size);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
@@ -686,52 +732,85 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 
 // ---- ServerHello serializer (restored below) ---------------------------
 
+namespace {
+
+bool guid_is_null(const std::array<uint8_t, 16> &pg) {
+	for (const uint8_t b : pg) {
+		if (b != 0) return false;
+	}
+	return true;
+}
+
+} // namespace
+
+// The 0x81 reply to a 0x41 ClientHello — a flat, single-branch builder that
+// writes CI, HK, SN and SF unconditionally and gates everything else on the
+// field itself: strings on a non-empty first byte, dwords on nonzero, PG on
+// a non-null GUID, and the CN/LNG/TZB trio on its own enable. There is NO
+// "PL" tag (the earlier game-server-vs-matchmaking two-branch was a
+// fiction; the gate :64206 matchmaking hello is a separate sender). Field
+// meanings (cross-checked vs the retail-lan-host-join golden): SF =
+// `log_buffer[0] != 0`, P1 = gametype bitmask, P2 = build flags, NP =
+// current player count, MP = max players; SUS1 = the GSID the NovaWorld
+// host-verify reply handed the host, SUS2 = the expansion archive.
+// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204b0 — CI @0x62057e, CO
+//  @0x6205b1, AP @0x6205ea, BDAT @0x620620, DE @0x620647, UT @0x620683, PN
+//  @0x6206ba, PG (NapiGUID_IsNull gate) @0x6206e4, PV1 @0x62071a, PV2
+//  @0x620750, PV3 @0x62078a, HK @0x6207ad, SN @0x6207da, CN/LNG/TZB block
+//  @0x6207e2..0x62086a, SF @0x620898, P1..P8 @0x6208bf..0x6209d0, NP
+//  @0x6209f7, MP @0x620a1e, NPW @0x620a45, NC @0x620a6c, RIP @0x620a94, RPN
+//  @0x620abc, SUS1..SUS4 @0x620af2..0x620b9a, EIP @0x620bc0, EPN @0x620be6,
+//  ET @0x620c0c]
 std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg) {
 	std::vector<uint8_t> buf;
 	buf.reserve(256);
-	// Emit in the same order as onnet's to_dict so the on-wire ordering
-	// matches what clients tend to expect.
 	append_u32_field(buf, "CI", msg.ci);
-	append_string_field(buf, "CO", msg.co);
-	append_string_field(buf, "AP", msg.ap);
-	append_string_field(buf, "BDAT", msg.bdat);
-	// [orig: NapiNPProtocol_SendServerInfoPacket @ 0x6204b0]
+	if (!msg.co.empty())   append_string_field(buf, "CO", msg.co);
+	if (!msg.ap.empty())   append_string_field(buf, "AP", msg.ap);
+	if (!msg.bdat.empty()) append_string_field(buf, "BDAT", msg.bdat);
+	if (msg.de) append_u32_field(buf, "DE", msg.de);
 	if (msg.ut) append_u32_field(buf, "UT", msg.ut);
-	append_string_field(buf, "PN", msg.pn);
-	append_bytes_field(buf, "PG", msg.pg.data(), msg.pg.size());
-	append_string_field(buf, "PV1", msg.pv1);
-	append_string_field(buf, "PV2", msg.pv2);
-	append_string_field(buf, "PV3", msg.pv3);
+	if (!msg.pn.empty())   append_string_field(buf, "PN", msg.pn);
+	if (!guid_is_null(msg.pg)) append_bytes_field(buf, "PG", msg.pg.data(), msg.pg.size());
+	if (!msg.pv1.empty())  append_string_field(buf, "PV1", msg.pv1);
+	if (!msg.pv2.empty())  append_string_field(buf, "PV2", msg.pv2);
+	if (!msg.pv3.empty())  append_string_field(buf, "PV3", msg.pv3);
 	append_u32_field(buf, "HK", msg.hk);
 	append_string_field(buf, "SN", msg.sn);
-	// [D-NET-16/17/18] Flat single-branch builder, faithful to the witnessed
-	// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204b0] (the 0x81 reply to a 0x41 ClientHello):
-	//   - SF is emitted UNCONDITIONALLY (the original always writes it = `log_buffer[0] != 0`).
-	//   - P1 (server_flags) / P2 (build_flags) / NP (np_count) / MP (max_players) each ONLY when nonzero
-	//     (the original individually gates every count field; there is no all-or-nothing block).
-	//   - There is NO "PL" tag in this builder — the earlier game-server-vs-matchmaking two-branch was a
-	//     fiction (PL never appears on the 0x81 wire; the gate :64206 matchmaking hello is a SEPARATE
-	//     sender). The parser below stays lenient (it can still read a stray PL/SF from a foreign
-	//     capture) so decoders keep working; only the ENCODER is made faithful.
-	// Field meanings (cross-checked vs the retail-lan-host-join golden): P1 = gametype bitmask, P2 = game
-	// config, NP = current player count, MP = max-players/game-mode parameter.
+	if (msg.locale_block) {
+		// Inside the block the two strings are written unconditionally (an
+		// empty one ships its NUL) and TZB always follows.
+		append_string_field(buf, "CN", msg.cn);
+		append_string_field(buf, "LNG", msg.lng);
+		append_u32_field(buf, "TZB", msg.tzb);
+	}
 	append_u32_field(buf, "SF", msg.sf);
 	if (msg.p1) append_u32_field(buf, "P1", msg.p1);
 	if (msg.p2) append_u32_field(buf, "P2", msg.p2);
+	if (msg.p3) append_u32_field(buf, "P3", msg.p3);
+	if (msg.p4) append_u32_field(buf, "P4", msg.p4);
+	if (msg.p5) append_u32_field(buf, "P5", msg.p5);
+	if (msg.p6) append_u32_field(buf, "P6", msg.p6);
+	if (msg.p7) append_u32_field(buf, "P7", msg.p7);
+	if (msg.p8) append_u32_field(buf, "P8", msg.p8);
 	if (msg.np) append_u32_field(buf, "NP", msg.np);
 	if (msg.mp) append_u32_field(buf, "MP", msg.mp);
-	append_u32_field(buf, "NC", msg.nc);
-	append_u32_field(buf, "RIP", msg.rip);
-	append_u32_field(buf, "RPN", msg.rpn);
-	// SUS1 (unique session id GSID-NN-...) / SUS2 (expansion-pack archive, e.g. 'jox01' = Kendari) —
-	// the original gates each on a NON-EMPTY string, not on a game-server toggle (frame 62334).
+	if (msg.npw) append_u32_field(buf, "NPW", msg.npw);
+	if (msg.nc) append_u32_field(buf, "NC", msg.nc);
+	if (msg.rip) append_u32_field(buf, "RIP", msg.rip);
+	if (msg.rpn) append_u32_field(buf, "RPN", msg.rpn);
 	if (!msg.sus1.empty()) append_string_field(buf, "SUS1", msg.sus1);
 	if (!msg.sus2.empty()) append_string_field(buf, "SUS2", msg.sus2);
-	append_u32_field(buf, "EIP", msg.eip);
-	append_u32_field(buf, "EPN", msg.epn);
+	if (!msg.sus3.empty()) append_string_field(buf, "SUS3", msg.sus3);
+	if (!msg.sus4.empty()) append_string_field(buf, "SUS4", msg.sus4);
+	if (msg.eip) append_u32_field(buf, "EIP", msg.eip);
+	if (msg.epn) append_u32_field(buf, "EPN", msg.epn);
+	if (msg.et) append_u32_field(buf, "ET", msg.et);
 	return buf;
 }
 
+// [orig: Nwu_HandleServerHello @0x626d20 — every tag compared through
+//  Napi_StrCaseEqual, zero defaults, the walk stops at an empty name]
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 	if (!data) return false;
 	out = ServerHello{};
@@ -753,31 +832,46 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 		uint16_t size = 0;
 		const size_t next = read_tlv_field(data, len, pos, name, value, size);
 		if (next == static_cast<size_t>(-1)) break;
-		if      (name == "CI")   out.ci   = read_u32_le(value, size);
-		else if (name == "CO")   out.co   = strip_nul(value, size);
-		else if (name == "AP")   out.ap   = strip_nul(value, size);
-		else if (name == "BDAT") out.bdat = strip_nul(value, size);
-		else if (name == "UT")   out.ut   = read_u32_le(value, size);
-		else if (name == "PN")   out.pn   = strip_nul(value, size);
-		else if (name == "PG" && size == 16) std::memcpy(out.pg.data(), value, 16);
-		else if (name == "PV1")  out.pv1  = strip_nul(value, size);
-		else if (name == "PV2")  out.pv2  = strip_nul(value, size);
-		else if (name == "PV3")  out.pv3  = strip_nul(value, size);
-		else if (name == "HK") { out.hk = read_u32_le(value, size); saw_hk = true; }
-		else if (name == "SN")   out.sn   = strip_nul(value, size);
-		else if (name == "PL")   out.pl   = strip_nul(value, size);
-		else if (name == "SF") { out.sf = read_u32_le(value, size); out.is_game_server = true; }
-		else if (name == "P1")   out.p1   = read_u32_le(value, size);
-		else if (name == "P2")   out.p2   = read_u32_le(value, size);
-		else if (name == "NP")   out.np   = read_u32_le(value, size);
-		else if (name == "MP")   out.mp   = read_u32_le(value, size);
-		else if (name == "NC")   out.nc   = read_u32_le(value, size);
-		else if (name == "RIP")  out.rip  = read_u32_le(value, size);
-		else if (name == "RPN")  out.rpn  = read_u32_le(value, size);
-		else if (name == "SUS1") out.sus1 = strip_nul(value, size);
-		else if (name == "SUS2") out.sus2 = strip_nul(value, size);
-		else if (name == "EIP")  out.eip  = read_u32_le(value, size);
-		else if (name == "EPN")  out.epn  = read_u32_le(value, size);
+		if (name.empty()) break;
+		if      (str_case_equal(name, "CI"))   out.ci   = read_u32_le(value, size);
+		else if (str_case_equal(name, "CO"))   out.co   = strip_nul(value, size);
+		else if (str_case_equal(name, "AP"))   out.ap   = strip_nul(value, size);
+		else if (str_case_equal(name, "BDAT")) out.bdat = strip_nul(value, size);
+		else if (str_case_equal(name, "DE"))   out.de   = read_u32_le(value, size);
+		else if (str_case_equal(name, "UT"))   out.ut   = read_u32_le(value, size);
+		else if (str_case_equal(name, "PN"))   out.pn   = strip_nul(value, size);
+		else if (str_case_equal(name, "PG") && size == 16) std::memcpy(out.pg.data(), value, 16);
+		else if (str_case_equal(name, "PV1"))  out.pv1  = strip_nul(value, size);
+		else if (str_case_equal(name, "PV2"))  out.pv2  = strip_nul(value, size);
+		else if (str_case_equal(name, "PV3"))  out.pv3  = strip_nul(value, size);
+		else if (str_case_equal(name, "HK")) { out.hk = read_u32_le(value, size); saw_hk = true; }
+		else if (str_case_equal(name, "SN"))   out.sn   = strip_nul(value, size);
+		else if (str_case_equal(name, "PL"))   out.pl   = strip_nul(value, size);
+		else if (str_case_equal(name, "CN")) { out.cn = strip_nul(value, size); out.locale_block = true; }
+		else if (str_case_equal(name, "LNG")) { out.lng = strip_nul(value, size); out.locale_block = true; }
+		else if (str_case_equal(name, "TZB")) { out.tzb = read_u32_le(value, size); out.locale_block = true; }
+		else if (str_case_equal(name, "SF")) { out.sf = read_u32_le(value, size); out.is_game_server = true; }
+		else if (str_case_equal(name, "P1"))   out.p1   = read_u32_le(value, size);
+		else if (str_case_equal(name, "P2"))   out.p2   = read_u32_le(value, size);
+		else if (str_case_equal(name, "P3"))   out.p3   = read_u32_le(value, size);
+		else if (str_case_equal(name, "P4"))   out.p4   = read_u32_le(value, size);
+		else if (str_case_equal(name, "P5"))   out.p5   = read_u32_le(value, size);
+		else if (str_case_equal(name, "P6"))   out.p6   = read_u32_le(value, size);
+		else if (str_case_equal(name, "P7"))   out.p7   = read_u32_le(value, size);
+		else if (str_case_equal(name, "P8"))   out.p8   = read_u32_le(value, size);
+		else if (str_case_equal(name, "NP"))   out.np   = read_u32_le(value, size);
+		else if (str_case_equal(name, "MP"))   out.mp   = read_u32_le(value, size);
+		else if (str_case_equal(name, "NPW"))  out.npw  = read_u32_le(value, size);
+		else if (str_case_equal(name, "NC"))   out.nc   = read_u32_le(value, size);
+		else if (str_case_equal(name, "RIP"))  out.rip  = read_u32_le(value, size);
+		else if (str_case_equal(name, "RPN"))  out.rpn  = read_u32_le(value, size);
+		else if (str_case_equal(name, "SUS1")) out.sus1 = strip_nul(value, size);
+		else if (str_case_equal(name, "SUS2")) out.sus2 = strip_nul(value, size);
+		else if (str_case_equal(name, "SUS3")) out.sus3 = strip_nul(value, size);
+		else if (str_case_equal(name, "SUS4")) out.sus4 = strip_nul(value, size);
+		else if (str_case_equal(name, "EIP"))  out.eip  = read_u32_le(value, size);
+		else if (str_case_equal(name, "EPN"))  out.epn  = read_u32_le(value, size);
+		else if (str_case_equal(name, "ET"))   out.et   = read_u32_le(value, size);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
