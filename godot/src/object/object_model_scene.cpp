@@ -73,11 +73,9 @@ void ObjectModel::rebuild_scene() {
 	robj_dense_ = Array();
 	panm_applied_revision_ = 0;
 	if (object_data_.is_null() || !object_data_->has_document()) {
-		od_has_doc_ = false;
 		set_model_bounds(AABB());
 		return;
 	}
-	od_has_doc_ = true;
 
 	active_lod_ = clamp_lod_index(active_lod_);
 	const Threedi3di3 &native_model = object_data_->native_model();

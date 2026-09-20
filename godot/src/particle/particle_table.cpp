@@ -1,4 +1,5 @@
 #include "particle/particle_table.h"
+#include "util/string_convert.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -68,7 +69,7 @@ int ParticleTable::sample(float t) const {
 }
 
 void ParticleTable::copy_from_native(const opennova::particle::TableDef &table) {
-	id = String::utf8(table.id.c_str());
+	id = opennova::to_gd(table.id);
 	data.resize(TOTAL);
 	for (int i = 0; i < TOTAL; ++i) data[i] = 0;
 	const int rows_to_copy = std::min<int>(static_cast<int>(table.rows.size()), ROWS);

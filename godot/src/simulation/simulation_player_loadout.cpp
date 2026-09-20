@@ -6,12 +6,11 @@
 #include "simulation/player_inventory.h"
 #include "simulation/weapon_kit_entry.h"
 #include "simulation/weapon_profile_summary.h"
+#include "util/string_convert.h"
 
 #include <runtime/inmatch/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
-#include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 #include <runtime/mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
-#include <net/npwire/ingame_message_id.h>
 #include <runtime/renderer/fp_viewmodel_spec.h> // the FP viewmodel submit rule
 #include <runtime/replication/client_roster_tags.h> // the joiner's player walk of the tag pass
 #include <runtime/world/friendly_tags.h> // the D-HUD-20 tag gather
@@ -453,7 +452,7 @@ void Simulation::push_joiner_loadout_kit() {
 
 String Simulation::weapon_profile_relpath(const String &p_expansion_name) {
 	return String(opennova::playersav::weapon_sav_relpath(
-			std::string(p_expansion_name.utf8().get_data()))
+			opennova::to_std(p_expansion_name))
 					.c_str());
 }
 
@@ -537,7 +536,7 @@ Error Simulation::save_weapon_profile_selection(const String &p_path,
 			const String name = entry.get("name", String());
 			if (name.is_empty()) return ERR_INVALID_PARAMETER;
 			opennova::playersav::KitEntry out;
-			out.name = std::string(name.utf8().get_data());
+			out.name = opennova::to_std(name);
 			out.ammo_primary = int32_t(int(entry.get("ammo_primary", -1)));
 			out.ammo_secondary = int32_t(int(entry.get("ammo_secondary", -1)));
 			out.flags = int32_t(int(entry.get("flags", -1)));
@@ -587,9 +586,9 @@ Ref<FpViewmodelSpec> Simulation::fp_viewmodel_spec(bool p_has_def, const String 
 	Ref<FpViewmodelSpec> out;
 	out.instantiate();
 	out->assign(opennova::renderer::fp_viewmodel_spec(p_has_def,
-			std::string(p_gfx1.utf8().get_data()),
-			std::string(p_character_arms.utf8().get_data()),
-			std::string(p_animadm.utf8().get_data()),
+			opennova::to_std(p_gfx1),
+			opennova::to_std(p_character_arms),
+			opennova::to_std(p_animadm),
 			static_cast<uint32_t>(p_flags)));
 	return out;
 }
@@ -739,7 +738,7 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 		return index->read_file(name, out);
 	};
 	if (!kernel_->load_weapon_table(files, &p_resource_root->native_assets(),
-				std::string(file_name.utf8().get_data())))
+				opennova::to_std(file_name)))
 		return ERR_FILE_NOT_FOUND;
 	// In a live session the resident kit buffer is the assigned side's profile
 	// page, copied in the moment the catalog can resolve its names — retail's
@@ -778,7 +777,7 @@ Error Simulation::load_ammo_table(const Ref<ResourceRoot> &p_resource_root,
 	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
 		return index->read_file(name, out);
 	};
-	if (!kernel_->load_ammo_table(files, std::string(file_name.utf8().get_data())))
+	if (!kernel_->load_ammo_table(files, opennova::to_std(file_name)))
 		return ERR_FILE_NOT_FOUND;
 	return OK;
 }

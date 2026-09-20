@@ -22,15 +22,6 @@ void AmbientMixer::_bind_methods() {
 			D_METHOD("add_marker", "pos", "source_bms_id", "stagger_slot",
 					"lifetime_ticks", "slot_keys", "sets"),
 			&AmbientMixer::add_marker);
-	ClassDB::bind_method(
-			D_METHOD("register_emitter", "source_spawn_id", "lane", "pos",
-					"source_bms_id", "lifetime_ticks", "pitch_q16",
-					"volume_q8_8", "layers"),
-			&AmbientMixer::register_emitter);
-	ClassDB::bind_method(
-			D_METHOD("update_emitter_source", "source_spawn_id", "pos",
-					"source_bms_id"),
-			&AmbientMixer::update_emitter_source);
 	ClassDB::bind_method(D_METHOD("advance_to_tick", "tick"),
 			&AmbientMixer::advance_to_tick);
 	ClassDB::bind_method(D_METHOD("mix", "listener"), &AmbientMixer::mix);
@@ -173,10 +164,6 @@ PackedFloat32Array AmbientMixer::mix(const Vector3 &listener) {
 		*w++ = c.pos[2];
 	}
 	return rows;
-}
-
-int AmbientMixer::live_slot_count() const {
-	return mixer_.live_slot_count();
 }
 
 int64_t AmbientMixer::clock_tick() const {

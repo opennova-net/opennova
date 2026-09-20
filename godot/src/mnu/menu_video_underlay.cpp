@@ -1,5 +1,6 @@
 #include "mnu/menu_video_underlay.h"
 #include "util/data_format.h"
+#include "util/string_convert.h"
 #include <base/io/perf_clock.h>
 
 #include <godot_cpp/classes/image.hpp>
@@ -29,10 +30,10 @@ void MenuVideoUnderlay::set_source(
 	if (p_root_dir.is_empty()) {
 		return;
 	}
-	const std::string expansion(p_expansion.utf8().get_data());
+	const std::string expansion = opennova::to_std(p_expansion);
 	const auto exists = [&p_root_dir](const std::string &rel) {
 		return FileAccess::file_exists(
-				p_root_dir.path_join(String::utf8(rel.c_str())));
+				p_root_dir.path_join(opennova::to_gd(rel)));
 	};
 	const auto &specs = menu_video_slots();
 	for (int i = 0; i < static_cast<int>(specs.size()); ++i) {
@@ -41,7 +42,7 @@ void MenuVideoUnderlay::set_source(
 		if (chosen.empty()) {
 			continue;
 		}
-		const String relative = String::utf8(chosen.c_str());
+		const String relative = opennova::to_gd(chosen);
 		const String absolute = p_root_dir.path_join(relative);
 		Ref<FileAccess> file = FileAccess::open(absolute, FileAccess::READ);
 		if (file.is_null()) {
@@ -93,7 +94,7 @@ void MenuVideoUnderlay::set_source(
 
 void MenuVideoUnderlay::set_screen(const String &p_screen_name) {
 	startup_ = menu_video_startup_screen(
-			std::string(p_screen_name.utf8().get_data()));
+			opennova::to_std(p_screen_name));
 	queue_redraw();
 }
 

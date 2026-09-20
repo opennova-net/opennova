@@ -15,16 +15,6 @@
 using namespace godot;
 using opennova::to_gd;
 
-namespace {
-
-// Godot (x, y, z) -> mission (x, -z, y): the inverse of util/axes.h
-// mission_to_godot, for the test constructors that author Godot-space rows.
-opennova::world::Vec3 mission_from_godot(const Vector3 &v) {
-	return opennova::world::Vec3{v.x, -v.z, v.y};
-}
-
-} // namespace
-
 // --- ThrowableVisualRow ------------------------------------------------------
 
 Ref<ThrowableVisualRow> ThrowableVisualRow::make(int64_t p_key, int p_item_id, const Vector3 &p_pos,
@@ -32,7 +22,7 @@ Ref<ThrowableVisualRow> ThrowableVisualRow::make(int64_t p_key, int p_item_id, c
 	opennova::world::ThrowableVisualRow v;
 	v.key = p_key;
 	v.item_id = p_item_id;
-	v.pos = mission_from_godot(p_pos);
+	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
 	v.pitch_deg = p_rotation_deg.x;
 	v.yaw_deg = p_rotation_deg.y;
 	v.roll_deg = p_rotation_deg.z;
@@ -116,10 +106,10 @@ Ref<FirePresentationEvent> FirePresentationEvent::make(const Vector3 &p_origin, 
 		bool p_adm_arm, int p_adm_index, const String &p_effect, const String &p_action_effect,
 		const String &p_action_userpoint, int p_ammo_index) {
 	opennova::world::FirePresentationRow v;
-	v.origin = mission_from_godot(p_origin);
+	v.origin = godot_to_mission<opennova::world::Vec3>(p_origin);
 	v.adm_arm = p_adm_arm;
 	v.adm_index = p_adm_index;
-	v.forward = mission_from_godot(p_forward);
+	v.forward = godot_to_mission<opennova::world::Vec3>(p_forward);
 	v.shooter_handle = p_shooter_handle;
 	v.source_bms_id = p_source_bms_id;
 	v.is_local_player = p_is_local_player;
@@ -168,7 +158,7 @@ Ref<FireSoundRow> FireSoundRow::make(const String &p_soundset, const Vector3 &p_
 		int p_source_bms_id) {
 	opennova::world::ReadyFireSound v;
 	v.set_name = p_soundset.utf8().get_data();
-	v.pos = mission_from_godot(p_pos);
+	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
 	v.source_bms_id = p_source_bms_id;
 	Ref<FireSoundRow> out;
 	out.instantiate();
@@ -231,7 +221,7 @@ Ref<SoundEmitterRow> SoundEmitterRow::make(int64_t p_source_spawn_id, int p_hand
 	opennova::world::SoundEmitterEvent v;
 	v.source_spawn_id = static_cast<uint64_t>(p_source_spawn_id);
 	v.source_handle = static_cast<uint16_t>(p_handle);
-	v.pos = mission_from_godot(p_pos);
+	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
 	v.source_bms_id = p_source_bms_id;
 	v.emitted_tick = static_cast<uint32_t>(p_emitted_tick);
 	v.lane = static_cast<uint8_t>(p_lane);
@@ -323,7 +313,7 @@ Ref<DeathPieceRow> DeathPieceRow::make(int p_slot, int64_t p_generation, int p_t
 	v.section = p_section;
 	v.type_index = p_type_index;
 	v.scale = p_scale;
-	v.pos = mission_from_godot(p_pos);
+	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
 	v.heading = p_heading;
 	v.pitch = p_pitch;
 	v.settled = p_settled;
@@ -366,7 +356,7 @@ Ref<RoundGlowRow> RoundGlowRow::make(int64_t p_id, const Vector3 &p_pos, float p
 		const Color &p_color) {
 	opennova::world::RoundGlowRow v;
 	v.id = static_cast<uint64_t>(p_id);
-	v.pos = mission_from_godot(p_pos);
+	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
 	v.radius = p_radius;
 	v.color_rgb24 = opennova::argb_from_color_opaque(p_color) & 0x00FFFFFFu;
 	Ref<RoundGlowRow> out;

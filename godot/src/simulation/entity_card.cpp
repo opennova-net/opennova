@@ -2,6 +2,7 @@
 #include "util/axes.h"
 
 #include "simulation/simulation_internal.h" // mission_to_godot, the ONE axis map
+#include "util/string_convert.h"
 
 #include <godot_cpp/variant/array.hpp>
 
@@ -111,7 +112,7 @@ Dictionary ai_json(const AiDetail &d) {
 	}
 	out["infantry"] = d.infantry;
 	out["adm_id"] = d.adm_id;
-	out["adm_name"] = String::utf8(d.adm_name.c_str());
+	out["adm_name"] = opennova::to_gd(d.adm_name);
 	out["infantry_move_mode"] = d.infantry_move_mode;
 	out["root_dx"] = d.root_dx;
 	out["root_dy"] = d.root_dy;
@@ -307,7 +308,7 @@ String EntityCard::get_state_name() const {
 }
 
 String EntityCard::get_adm_name() const {
-	return String::utf8(value_.ai.adm_name.c_str());
+	return opennova::to_gd(value_.ai.adm_name);
 }
 
 String EntityCard::get_anim_key() const {

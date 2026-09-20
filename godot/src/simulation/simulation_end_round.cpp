@@ -9,6 +9,7 @@
 #include "simulation/end_round_state.h"
 
 #include "rtxt/rtxt_string_file.h"
+#include "util/string_convert.h"
 
 #include <runtime/hud/end_round_overlay.h>
 #include <runtime/hud/end_round_statistics.h>
@@ -29,7 +30,7 @@ namespace {
 opennova::hud::EndRoundTextLookup overlays_lookup(const Ref<RtxtStringFile> &gametext) {
 	return [gametext](const std::string &key, std::string &value) {
 		if (gametext.is_null()) return false;
-		const String k = String::utf8(key.c_str());
+		const String k = opennova::to_gd(key);
 		if (!gametext->has_string_in_section("Overlays", StringName(k))) return false;
 		value = gametext->get_string_in_section("Overlays", StringName(k)).utf8().get_data();
 		return true;
@@ -44,10 +45,10 @@ String resolve_column_header(const opennova::hud::EndRoundTextLookup &lookup,
 	std::string text = c.header_fallback;
 	if (!c.header_key.empty()) {
 		std::string value;
-		if (lookup(c.header_key, value) && !value.empty()) return String::utf8(value.c_str());
+		if (lookup(c.header_key, value) && !value.empty()) return opennova::to_gd(value);
 	}
 	if (!text.empty() && text[0] == '!') text.erase(0, 1);
-	return String::utf8(text.c_str());
+	return opennova::to_gd(text);
 }
 
 } // namespace
@@ -147,7 +148,7 @@ int Simulation::end_round_stat_screen_delay_msec() {
 }
 
 String Simulation::strip_inline_tags(const String &p_text) {
-	return String::utf8(opennova::hud::strip_inline_tags(p_text.utf8().get_data()).c_str());
+	return opennova::to_gd(opennova::hud::strip_inline_tags(p_text.utf8().get_data()));
 }
 
 TypedArray<EndRoundColumn> Simulation::get_end_round_columns(int p_table_width,

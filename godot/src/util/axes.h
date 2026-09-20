@@ -56,9 +56,12 @@ inline Vector3 mission_to_godot(const std::array<float, 3> &v) {
 	return Vector3(v[0], v[2], -v[1]);
 }
 
-inline opennova::env::Vec3 godot_to_mission(const Vector3 &v) {
-	return opennova::env::Vec3{static_cast<float>(v.x),
-			static_cast<float>(-v.z), static_cast<float>(v.y)};
+// The inverse, into any {x, y, z} float struct: env::Vec3 by default,
+// world::Vec3 for the record constructors that author Godot-space rows.
+template <typename V = opennova::env::Vec3>
+inline V godot_to_mission(const Vector3 &v) {
+	return V{static_cast<float>(v.x), static_cast<float>(-v.z),
+			static_cast<float>(v.y)};
 }
 
 // The one BMS rotation -> Godot basis wrapper over the engine's witnessed

@@ -3,6 +3,9 @@
 #include "render/q3_source_registry.h"
 #include "render/rd_fullscreen.h"
 #include "render/rd_timestamp_span.h"
+#include "render/rd_uniforms.h"
+#include "render/world_environment_lookup.h"
+#include "util/string_convert.h"
 
 #include <algorithm>
 #include <array>
@@ -158,46 +161,12 @@ void main() {
 }
 )GLSL";
 
-Ref<RDUniform> sampled_texture_uniform(int binding, const RID &sampler,
-		const RID &texture) {
-	Ref<RDUniform> uniform;
-	uniform.instantiate();
-	uniform->set_uniform_type(RenderingDevice::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE);
-	uniform->set_binding(binding);
-	uniform->add_id(sampler);
-	uniform->add_id(texture);
-	return uniform;
-}
-
-void write_u32(PackedByteArray &bytes, std::uint32_t offset,
-		std::uint32_t value) {
-	std::memcpy(bytes.ptrw() + offset, &value, sizeof(value));
-}
-
-void write_f32(PackedByteArray &bytes, std::uint32_t offset, float value) {
-	std::memcpy(bytes.ptrw() + offset, &value, sizeof(value));
-}
-
 // The kernel tap directions of the bloom passes (FrameFX_RenderBloomPass @0x582940 -
 // docs/render/render-order-re.md).
 std::array<float, 2> direction_for_degrees(float degrees, float radius) {
 	const float radians = degrees * (kPi / 180.0f);
 	// The retail builders store (sin(angle), cos(angle)) in texture space.
 	return {std::sin(radians) * radius, std::cos(radians) * radius};
-}
-
-WorldEnvironment *find_world_environment(Node *root) {
-	if (root == nullptr)
-		return nullptr;
-	if (WorldEnvironment *environment =
-				Object::cast_to<WorldEnvironment>(root))
-		return environment;
-	for (int i = 0; i < root->get_child_count(); ++i) {
-		if (WorldEnvironment *environment =
-					find_world_environment(root->get_child(i)))
-			return environment;
-	}
-	return nullptr;
 }
 
 WorldEnvironment *world_environment_from_id(const ObjectID &id) {
@@ -482,8 +451,8 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 			spirv->get_stage_bytecode(
 					RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
 		set_failure("FrameFX shader compilation failed: vertex=" +
-				std::string(vertex_error.utf8().get_data()) + "; fragment=" +
-				std::string(fragment_error.utf8().get_data()),
+				opennova::to_std(vertex_error) + "; fragment=" +
+				opennova::to_std(fragment_error),
 				"shader_compile_failed");
 		return false;
 	}
@@ -968,8 +937,8 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["terminal_transfer"] = "srgb_inverse_then_display_encode";
 	result["callback_seen"] = callback_seen;
 	result["rd_available"] = rd_available;
-	result["status"] = String::utf8(status.c_str());
-	result["failure"] = String::utf8(failure.c_str());
+	result["status"] = opennova::to_gd(status);
+	result["failure"] = opennova::to_gd(failure);
 	result["rendered_frames"] = static_cast<int64_t>(rendered_frames);
 	result["gpu_draw_calls"] = static_cast<int64_t>(gpu_draw_calls);
 	result["view_count"] = static_cast<int64_t>(view_count);
@@ -1117,8 +1086,6 @@ void FrameFx::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_frame"),
 			&FrameFx::advance_frame);
 	ClassDB::bind_method(D_METHOD("shutdown"), &FrameFx::shutdown);
-	ClassDB::bind_method(D_METHOD("set_gpu_timing_enabled", "enabled"),
-			&FrameFx::set_gpu_timing_enabled);
 	ClassDB::bind_method(D_METHOD("get_q3_target_image"),
 			&FrameFx::get_q3_target_image);
 	ClassDB::bind_static_method("FrameFx",

@@ -1,27 +1,7 @@
 #include "world/scar_draw_list.h"
+#include "util/variant_type_of.h"
 
 using namespace godot;
-
-namespace {
-
-template <typename T>
-constexpr Variant::Type variant_type_of();
-template <>
-constexpr Variant::Type variant_type_of<int>() { return Variant::INT; }
-template <>
-constexpr Variant::Type variant_type_of<PackedVector3Array>() { return Variant::PACKED_VECTOR3_ARRAY; }
-template <>
-constexpr Variant::Type variant_type_of<PackedVector2Array>() { return Variant::PACKED_VECTOR2_ARRAY; }
-template <>
-constexpr Variant::Type variant_type_of<PackedColorArray>() { return Variant::PACKED_COLOR_ARRAY; }
-template <>
-constexpr Variant::Type variant_type_of<PackedInt32Array>() { return Variant::PACKED_INT32_ARRAY; }
-template <>
-constexpr Variant::Type variant_type_of<PackedInt64Array>() { return Variant::PACKED_INT64_ARRAY; }
-template <>
-constexpr Variant::Type variant_type_of<PackedStringArray>() { return Variant::PACKED_STRING_ARRAY; }
-
-} // namespace
 
 void ScarDrawList::_bind_methods() {
 #define SCAR_DRAW_LIST_BIND(m_type, m_name)                                                     \

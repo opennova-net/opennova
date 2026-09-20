@@ -10,11 +10,11 @@
 #include "simulation/present_event_records.h" // SoundEmitterRow (the bound emitter drain)
 
 #include "env/weather.h"
+#include "util/string_convert.h"
 #include <runtime/environment/environment_state.h>
 #include <base/io/fixed.h>
 
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
-#include <runtime/inmatch/server_tick.h> // Server_RearmMinimapInitialScan (restart)
 #include <runtime/terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
 
@@ -226,7 +226,9 @@ void Simulation::reset_world() {
 	// The fresh world's collision/mounted-pose providers wire immediately (the
 	// old reset did this unconditionally): the kernel registers itself so a
 	// direct-loaded world resolves mounted poses before any boot step runs.
-	apply_collision_to_ai();
+	// The kernel is the ONE registered section-matrix/mounted-pose provider;
+	// wire_collision points the world/AI systems at its collision world.
+	kernel_->wire_collision();
 }
 
 opennova::world::WeatherState *Simulation::weather_state() {
@@ -622,7 +624,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	{
 		std::vector<uint8_t> text;
 		(void)ms::resolve_mission_text(files,
-				std::string(p_mission_file_basename.utf8().get_data()), text);
+				opennova::to_std(p_mission_file_basename), text);
 		PackedByteArray bytes;
 		bytes.resize(static_cast<int64_t>(text.size()));
 		if (!text.empty()) std::memcpy(bytes.ptrw(), text.data(), text.size());
@@ -645,7 +647,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	}
 	kernel_->wire_header_world = p_mission->is_wire_header_only();
 	kernel_->open_document(p_mission->native_file(),
-			std::string(p_mission_file_basename.utf8().get_data()), files);
+			opennova::to_std(p_mission_file_basename), files);
 	// Terrain fills the kernel store BEFORE boot (has_terrain gates on it),
 	// exactly the ctest embedder's order; the D-SND-15 .TSD tile table rides
 	// beside it.
@@ -675,13 +677,13 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	// after the environment seed. Running WAC here would lose weather writes
 	// when that boundary seeds the core, then refuse its already-run script.
 	options.defer_mission_start = true;
-	options.wac_basename = std::string(p_wac_basename.utf8().get_data());
+	options.wac_basename = opennova::to_std(p_wac_basename);
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	stamp_admission_limits(options, net_, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.infantry_adm = p_infantry_adm.is_empty()
 			? std::string(ms::kDefaultInfantryAdm)
-			: std::string(p_infantry_adm.utf8().get_data());
+			: opennova::to_std(p_infantry_adm);
 	options.people_name_resolver = [this](int32_t index) {
 		const auto it = net_.mission_people_names.find(index);
 		return it != net_.mission_people_names.end() ? it->second : std::string();
@@ -852,7 +854,6 @@ void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 	present_.last_snapshot_us = 0;
 	present_.last_occlusion_build_us = 0;
 	present_.last_occlusion_probe_us = 0;
-	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
 	if (kernel_ != nullptr) {

@@ -8,6 +8,7 @@
 #include "util/data_format.h"
 
 #include "terrain/terrain_data.h"
+#include "terrain/terrain_image_convert.h"
 #include "terrain/terrain_surface_inputs.h"
 #include "terrain/terrain_tile_info.h"
 
@@ -33,41 +34,6 @@ using opennova::TerrainTileCompositionDemandQueue;
 
 namespace {
 
-bool image_to_rgba8(const Ref<Image> &p_source,
-		opennova::terrain::Rgba8Image &r_output) {
-	r_output = {};
-	if (p_source.is_null() || p_source->is_empty()) {
-		return false;
-	}
-	Ref<Image> image = p_source->duplicate();
-	if (image.is_null() ||
-			(image->is_compressed() && image->decompress() != OK)) {
-		return false;
-	}
-	if (image->get_format() != Image::FORMAT_RGBA8) {
-		image->convert(Image::FORMAT_RGBA8);
-	}
-	const int width = image->get_width();
-	const int height = image->get_height();
-	if (width <= 0 || height <= 0) {
-		return false;
-	}
-	const size_t byte_count = static_cast<size_t>(width) * height * 4u;
-	const PackedByteArray bytes = image->get_data();
-	if (bytes.size() < static_cast<int64_t>(byte_count)) {
-		return false;
-	}
-	r_output.width = static_cast<uint32_t>(width);
-	r_output.height = static_cast<uint32_t>(height);
-	r_output.pixels.assign(bytes.ptr(), bytes.ptr() + byte_count);
-	return true;
-}
-
-bool texture_to_rgba8(const Ref<Texture2D> &p_texture,
-		opennova::terrain::Rgba8Image &r_output) {
-	return p_texture.is_valid() && image_to_rgba8(p_texture->get_image(), r_output);
-}
-
 Ref<Image> image_from_rgba8(const opennova::terrain::Rgba8Image &p_source) {
 	if (!p_source.is_valid()) {
 		return {};
@@ -82,15 +48,6 @@ uint8_t quantize_unorm(float p_value) {
 	return static_cast<uint8_t>(std::clamp(
 			static_cast<int>(std::lround(
 					std::clamp(p_value, 0.0f, 1.0f) * 255.0f)), 0, 255));
-}
-
-bool same_page_key(const opennova::TerrainTilePageKey &p_left,
-		const opennova::TerrainTilePageKey &p_right) {
-	return p_left.sector_origin_x == p_right.sector_origin_x &&
-			p_left.sector_origin_z == p_right.sector_origin_z &&
-			p_left.page_local_x == p_right.page_local_x &&
-			p_left.page_local_z == p_right.page_local_z &&
-			p_left.page_lod_level == p_right.page_lod_level;
 }
 
 // The page's resident-output identity: the page key plus its pixels. The
@@ -714,7 +671,7 @@ void TerrainTileCacheDevice::_invalidate_page(
 	cache_.invalidate(p_page);
 	for (std::size_t layer = 0; layer < ready_generations_.size(); ++layer) {
 		if (ready_generations_[layer] == 0 ||
-				!same_page_key(ready_page_keys_[layer], p_page)) {
+				!opennova::same_page(ready_page_keys_[layer], p_page)) {
 			continue;
 		}
 		ready_generations_[layer] = 0;

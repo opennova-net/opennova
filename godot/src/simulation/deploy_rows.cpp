@@ -1,11 +1,12 @@
 #include "simulation/deploy_rows.h"
 
 #include "util/record_bind.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
 String DeployZoneRow::get_name_key() const {
-	return String::utf8(value_.name_key.c_str());
+	return opennova::to_gd(value_.name_key);
 }
 
 void DeployZoneRow::_bind_methods() {
@@ -18,7 +19,7 @@ void DeployZoneRow::_bind_methods() {
 }
 
 String DeployListRow::get_text() const {
-	return String::utf8(value_.text.c_str());
+	return opennova::to_gd(value_.text);
 }
 
 void DeployListRow::_bind_methods() {

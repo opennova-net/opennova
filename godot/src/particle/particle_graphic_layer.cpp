@@ -1,4 +1,5 @@
 #include "particle/particle_graphic_layer.h"
+#include "util/string_convert.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -92,8 +93,8 @@ float ParticleGraphicLayer::get_scale_value() const { return scale_value; }
 void ParticleGraphicLayer::copy_from_native(const opennova::particle::GraphicLayer &layer) {
 	index = layer.index;
 	present = layer.present;
-	texture = String::utf8(layer.texture.c_str());
-	blend_mode_raw = String::utf8(layer.blend_mode_raw.c_str());
+	texture = opennova::to_gd(layer.texture);
+	blend_mode_raw = opennova::to_gd(layer.blend_mode_raw);
 	blend_mode = static_cast<int>(layer.blend_mode);
 	flip_frames = std::clamp(
 			layer.flip_frames, 1, opennova::particle::kMaxParticleFlipFrames);

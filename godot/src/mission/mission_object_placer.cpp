@@ -109,9 +109,6 @@ void MissionObjectPlacer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("place", "mission", "parent", "options"),
 			&MissionObjectPlacer::place, DEFVAL(Dictionary()));
 	ClassDB::bind_method(
-			D_METHOD("place_entities", "entities", "parent", "options"),
-			&MissionObjectPlacer::place_entities, DEFVAL(Dictionary()));
-	ClassDB::bind_method(
 			D_METHOD("update_static_lods", "camera_transform",
 					"vertical_fov_degrees", "viewport_width", "viewport_height"),
 			&MissionObjectPlacer::update_static_lods);
@@ -177,9 +174,6 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::register_static_instance, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("is_static_instance_hidden", "bms_id"),
 			&MissionObjectPlacer::is_static_instance_hidden);
-	ClassDB::bind_method(
-			D_METHOD("static_instance_casts_terrain_shadow", "bms_id"),
-			&MissionObjectPlacer::static_instance_casts_terrain_shadow);
 	ClassDB::bind_method(D_METHOD("hide_static_instance", "bms_id"),
 			&MissionObjectPlacer::hide_static_instance);
 	ClassDB::bind_method(D_METHOD("show_static_instance", "bms_id"),

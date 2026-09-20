@@ -172,7 +172,6 @@ public:
 	// --- the weather writeback seam ----------------------------------------
 	void set_fill_light(const Vector3 &p_value);
 	void set_sun_light(const Vector3 &p_value);
-	void set_fog_color_rt(const Vector3 &p_value);
 	void set_sky_ambient_rt(const Vector3 &p_value);
 	void set_color_src_gain(const Vector3 &p_value);
 	int64_t get_env_generation() const;

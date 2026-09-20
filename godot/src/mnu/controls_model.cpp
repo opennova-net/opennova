@@ -1,4 +1,5 @@
 #include "mnu/controls_model.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/classes/input.hpp>
@@ -62,9 +63,9 @@ TypedArray<PackedStringArray> ControlsModel::get_rows(int p_device) const {
 			bindings_.build_rows(device_of(p_device));
 	for (const opennova::controls::ControlRow &r : rows) {
 		PackedStringArray cells;
-		cells.push_back(String::utf8(r.cls.c_str()));
-		cells.push_back(String::utf8(r.action.c_str()));
-		cells.push_back(String::utf8(r.control.c_str()));
+		cells.push_back(opennova::to_gd(r.cls));
+		cells.push_back(opennova::to_gd(r.action));
+		cells.push_back(opennova::to_gd(r.control));
 		out.push_back(cells);
 	}
 	return out;
@@ -120,7 +121,7 @@ String ControlsModel::display_text_for_token(const String &p_token) const {
 	if (r == nullptr) {
 		return String();
 	}
-	return String::utf8(opennova::controls::format_display_string(*r).c_str());
+	return opennova::to_gd(opennova::controls::format_display_string(*r));
 }
 
 int ControlsModel::pressed_key_for_token(const String &p_token) const {

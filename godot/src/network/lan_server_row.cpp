@@ -1,19 +1,7 @@
 #include "network/lan_server_row.h"
+#include "util/variant_type_of.h"
 
 using namespace godot;
-
-namespace {
-
-template <typename T>
-constexpr Variant::Type variant_type_of();
-template <>
-constexpr Variant::Type variant_type_of<int>() { return Variant::INT; }
-template <>
-constexpr Variant::Type variant_type_of<int64_t>() { return Variant::INT; }
-template <>
-constexpr Variant::Type variant_type_of<String>() { return Variant::STRING; }
-
-} // namespace
 
 void LanServerRow::_bind_methods() {
 #define LAN_SERVER_ROW_BIND(m_type, m_name, m_default)                                              \

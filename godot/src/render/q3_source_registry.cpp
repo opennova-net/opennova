@@ -1,4 +1,5 @@
 #include "render/q3_source_registry.h"
+#include "render/material_params.h"
 
 #include <algorithm>
 #include <cmath>
@@ -47,59 +48,6 @@ std::uint64_t object_id(const Ref<RefCounted> &p_object) {
 
 Q3ResourceLease lease_for(const Ref<RefCounted> &p_object) {
 	return {object_id(p_object), 1};
-}
-
-RID server_rid(const Ref<Texture2D> &p_texture) {
-	return p_texture.is_valid() ? p_texture->get_rid() : RID();
-}
-
-Ref<Texture2D> texture_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name) {
-	const Variant value = p_material->get_shader_parameter(p_name);
-	if (value.get_type() != Variant::OBJECT)
-		return Ref<Texture2D>();
-	return value;
-}
-
-float float_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, float p_default) {
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::FLOAT || value.get_type() == Variant::INT
-			? static_cast<float>(value) : p_default;
-}
-
-bool bool_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, bool p_default) {
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::BOOL ? static_cast<bool>(value) : p_default;
-}
-
-Vector2 vector2_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, const Vector2 &p_default) {
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::VECTOR2 ? static_cast<Vector2>(value) : p_default;
-}
-
-Vector3 vector3_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, const Vector3 &p_default) {
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::VECTOR3 ? static_cast<Vector3>(value) : p_default;
-}
-
-Vector4 vector4_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, const Vector4 &p_default) {
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::VECTOR4 ? static_cast<Vector4>(value) : p_default;
-}
-
-Ref<Material> active_material(GeometryInstance3D *p_source,
-		const Ref<Mesh> &p_mesh, int p_surface) {
-	if (MeshInstance3D *mesh_instance = Object::cast_to<MeshInstance3D>(p_source))
-		return mesh_instance->get_active_material(p_surface);
-	Ref<Material> material = p_source->get_material_override();
-	if (material.is_null() && p_mesh.is_valid())
-		material = p_mesh->surface_get_material(p_surface);
-	return material;
 }
 
 Q3SourceRecord *find_record(std::uint64_t p_node_id) {

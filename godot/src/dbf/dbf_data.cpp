@@ -1,6 +1,7 @@
 #include "dbf/dbf_data.h"
 
 #include "resource_index/resource_root.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -89,7 +90,7 @@ PackedStringArray DbfData::resolve_dialog(const String &p_id) const {
 		return out;
 	}
 	for (const auto &line : group->lines) {
-		out.push_back(String::utf8(line.def_id_name.c_str()));
+		out.push_back(opennova::to_gd(line.def_id_name));
 	}
 	return out;
 }

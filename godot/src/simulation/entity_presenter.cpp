@@ -13,7 +13,6 @@
 #include <base/io/fixed.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
-#include <runtime/mission/placement_traits.h>
 #include <runtime/world/entity_pose.h>
 #include <runtime/world/entity.h>       // EntityKind: the organic-row gate of the DEATH leg
 #include <runtime/world/present_rows.h> // PF_DEATH_CTRL: the org0 skin DEATH register word
@@ -126,10 +125,6 @@ void EntityPresenter::_bind_methods() {
 			D_METHOD("present_snapshot", "snap", "stride", "layout_revision",
 					"door_phases"),
 			&EntityPresenter::present_snapshot, DEFVAL(PackedInt32Array()));
-	ClassDB::bind_method(
-			D_METHOD("profile_present_snapshot", "snap", "stride",
-					"layout_revision", "door_phases"),
-			&EntityPresenter::profile_present_snapshot, DEFVAL(PackedInt32Array()));
 	ClassDB::bind_method(D_METHOD("get_stats_record"),
 			&EntityPresenter::get_stats_record);
 	// --- the wire walk ---
@@ -1426,8 +1421,7 @@ void EntityPresenter::present_snapshot_impl(const PackedFloat32Array &snap,
 			stamp_section_mask(model, p, base, row.section_visibility_mask);
 			// Death is not disappearance (corpses and husks keep rendering until
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
-			// parent's own world model is presentation-suppressed. Semantics and
-			// witnesses recorded at the GDScript origin (mission_present_pass.gd)
+			// parent's own world model is presentation-suppressed.
 			// [orig: Entity_RenderVehicleModel @ 0x4407d0 cull/submit;
 			// Flags&4 husk pick @ 0x413086].
 			// Two-bit visibility ownership: this walk owns the model's

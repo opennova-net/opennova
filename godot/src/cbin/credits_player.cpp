@@ -228,7 +228,6 @@ void CreditsPlayer::_rebuild_content() {
 	_clear_content();
 	needs_rebuild_ = false;
 	entry_to_node_.clear();
-	entry_stream_y_.clear();
 	fade_overlays_.clear();
 	content_height_ = 0.0f;
 
@@ -288,7 +287,6 @@ void CreditsPlayer::_rebuild_content() {
 
 	for (int i = 0; i < entry_count; ++i) {
 		Ref<CbinEntry> entry = credits_resource_->get_entry(i);
-		entry_stream_y_.push_back(current_y);
 		if (!entry.is_valid()) continue;
 
 		Control *created_node = nullptr;

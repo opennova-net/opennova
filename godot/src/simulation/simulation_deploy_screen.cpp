@@ -9,9 +9,8 @@
 #include "simulation/deploy_rows.h" // the compiled SPAWNPOINTS_LIST row
 
 #include <runtime/inmatch/napi_np_server_ctx.h>
-#include <net/npwire/ingame_encode.h>
-#include <net/npwire/ingame_message_id.h>
 #include "rtxt/rtxt_string_file.h"
+#include "util/string_convert.h"
 
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/spawn_select.h>
@@ -109,7 +108,7 @@ Ref<DeployStatus> Simulation::get_deploy_status(const Ref<RtxtStringFile> &p_gam
 
     const auto text = [&p_gametext](const char *section, const char *key, const char *fallback) {
         if (p_gametext.is_valid() && p_gametext->has_string_in_section(section, key))
-            return std::string(p_gametext->get_string_in_section(section, key).utf8().get_data());
+            return opennova::to_std(p_gametext->get_string_in_section(section, key));
         return std::string(fallback);
     };
     opennova::world::DeployInstructionsInput instructions;
@@ -176,8 +175,8 @@ TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_defau
 	in.default_home = p_default_home.utf8().get_data();
 	in.zones = deploy_zone_rows();
 	in.zone_name = [&p_zone_names](const std::string &key) {
-		const String k = String::utf8(key.c_str());
-		if (p_zone_names.has(k)) return std::string(String(p_zone_names[k]).utf8().get_data());
+		const String k = opennova::to_gd(key);
+		if (p_zone_names.has(k)) return opennova::to_std(String(p_zone_names[k]));
 		return key;
 	};
 	for (const opennova::world::DeployListRow &row : opennova::world::build_deploy_rows(in)) {

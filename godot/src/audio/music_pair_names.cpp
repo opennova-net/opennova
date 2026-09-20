@@ -1,12 +1,13 @@
 #include "audio/music_pair_names.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
 void MusicPairNames::assign(const opennova::audio::MusicPairNames &p_names) {
-	stem_ = String::utf8(p_names.stem.c_str());
-	bank_file_ = String::utf8(p_names.bank_file.c_str());
-	script_file_ = String::utf8(p_names.script_file.c_str());
-	subdir_ = String::utf8(p_names.subdir.c_str());
+	stem_ = opennova::to_gd(p_names.stem);
+	bank_file_ = opennova::to_gd(p_names.bank_file);
+	script_file_ = opennova::to_gd(p_names.script_file);
+	subdir_ = opennova::to_gd(p_names.subdir);
 }
 
 void MusicPairNames::_bind_methods() {

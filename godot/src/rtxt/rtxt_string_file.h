@@ -70,7 +70,6 @@ public:
 
 	// --- Grouping invariant ---
 	bool is_grouped() const;
-	void normalize_grouping();
 
 	// --- Section CRUD ---
 	int add_section(const String &p_name);

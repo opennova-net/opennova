@@ -1,23 +1,7 @@
 #include "lights/effect_light_report.h"
+#include "util/variant_type_of.h"
 
 using namespace godot;
-
-namespace {
-
-template <typename T>
-constexpr Variant::Type variant_type_of();
-template <>
-constexpr Variant::Type variant_type_of<int>() { return Variant::INT; }
-template <>
-constexpr Variant::Type variant_type_of<float>() { return Variant::FLOAT; }
-template <>
-constexpr Variant::Type variant_type_of<String>() { return Variant::STRING; }
-template <>
-constexpr Variant::Type variant_type_of<Vector3>() { return Variant::VECTOR3; }
-template <>
-constexpr Variant::Type variant_type_of<Color>() { return Variant::COLOR; }
-
-} // namespace
 
 #define EFFECT_LIGHT_BIND_FIELD(m_type, m_name, m_default)                                         \
 	ClassDB::bind_method(D_METHOD("get_" #m_name), &self_type::get_##m_name);                      \

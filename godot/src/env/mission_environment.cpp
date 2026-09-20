@@ -1,5 +1,6 @@
 #include "env/mission_environment.h"
 
+#include "env/env_convert.h"
 #include "util/axes.h"
 
 #include <algorithm>
@@ -11,24 +12,6 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
-
-namespace {
-
-Vector3 to_vector3(const opennova::env::Rgb &rgb) {
-	return Vector3(rgb.r, rgb.g, rgb.b);
-}
-
-Vector3 to_vector3(const opennova::env::Vec3 &v) {
-	return Vector3(v.x, v.y, v.z);
-}
-
-opennova::env::Rgb to_rgb(const Vector3 &v) {
-	return opennova::env::Rgb{
-		static_cast<float>(v.x), static_cast<float>(v.y),
-		static_cast<float>(v.z)};
-}
-
-} // namespace
 
 MissionEnvironment::MissionEnvironment() {
 	light_state_.instantiate();
@@ -108,9 +91,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_skyfog_color);
 	ClassDB::bind_method(D_METHOD("get_frame_clear_color"),
 			&MissionEnvironment::get_frame_clear_color);
-	ClassDB::bind_method(
-			D_METHOD("frame_clear_color_for", "indoors", "above_water"),
-			&MissionEnvironment::frame_clear_color_for);
 	ClassDB::bind_method(D_METHOD("get_ceiling_color"),
 			&MissionEnvironment::get_ceiling_color);
 	ClassDB::bind_method(D_METHOD("get_cloud_tint"),
@@ -842,11 +822,6 @@ void MissionEnvironment::set_fill_light(const Vector3 &p_value) {
 
 void MissionEnvironment::set_sun_light(const Vector3 &p_value) {
 	state_.set_sun_light(to_rgb(p_value));
-	flush_publication();
-}
-
-void MissionEnvironment::set_fog_color_rt(const Vector3 &p_value) {
-	state_.set_fog_color_rt(to_rgb(p_value));
 	flush_publication();
 }
 

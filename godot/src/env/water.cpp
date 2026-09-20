@@ -540,7 +540,7 @@ void Water::build() {
 		// RTT by 64/255 before the water shader ever samples it. This
 		// viewport's canvas pass composites over its 3D scene, so a
 		// full-target multiply ColorRect is the same one-quad structural
-		// port (constant + witness map: env/water_mirror.h
+		// port (constant + witness map: runtime/environment/water_mirror.h
 		// kReflectionDimFactor; celestial-after-dim residual noted there).
 		CanvasLayer *dim_layer = memnew(CanvasLayer);
 		dim_layer->set_name("ReflectionDimLayer");

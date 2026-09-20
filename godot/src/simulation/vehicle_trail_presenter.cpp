@@ -4,6 +4,7 @@
 #include "particle/effect_world.h"
 #include "simulation/simulation.h"
 #include "world/item_effect_director.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -61,7 +62,7 @@ void VehicleTrailPresenter::sync_fixed_tick_effects() {
 			options.instantiate();
 			options->set_source_tick(effect.source_tick);
 			options->set_force_zone(effect.force_zone);
-			effect_world->spawn_effect_request(String::utf8(effect.effect.c_str()),
+			effect_world->spawn_effect_request(opennova::to_gd(effect.effect),
 					EffectWorld::forward_pose(pos, dir), options);
 		}
 	}
@@ -105,10 +106,10 @@ void VehicleTrailPresenter::apply_zone_group_event(EffectWorld *p_fx,
 			options.instantiate();
 			options->set_source_tick(p_event.source_tick);
 			const Ref<EffectSpawnReceipt> receipt =
-					p_fx->spawn_effect_request(String::utf8(p_event.effect.c_str()),
+					p_fx->spawn_effect_request(opennova::to_gd(p_event.effect),
 							EffectWorld::forward_pose(p_position, p_direction), options);
 			ZoneGroup created;
-			created.effect = String::utf8(p_event.effect.c_str());
+			created.effect = opennova::to_gd(p_event.effect);
 			created.group_id = receipt.is_valid() && receipt->get_spawned()
 					? receipt->get_group_id()
 					: 0;
@@ -136,7 +137,7 @@ void VehicleTrailPresenter::sync_visuals(
 		seen.insert(key);
 		const Vector3 pos(row.pos.x, row.pos.z, -row.pos.y);
 		const Vector3 dir(row.dir.x, row.dir.z, -row.dir.y);
-		present_group(key, String::utf8(row.effect.c_str()), EffectWorld::forward_pose(pos, dir),
+		present_group(key, opennova::to_gd(row.effect), EffectWorld::forward_pose(pos, dir),
 				float(row.magnitude_q16) / 65536.0f);
 	}
 	Vector<String> gone;

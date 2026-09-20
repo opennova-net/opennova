@@ -94,7 +94,7 @@ void MenuFrame::collect_font_names_(const void *p_window,
 		std::vector<String> &r_names) const {
 	const opennova::mnu::Window &w = *static_cast<const opennova::mnu::Window *>(p_window);
 	if (!w.font.name.empty()) {
-		const String name = String::utf8(w.font.name.c_str());
+		const String name = opennova::to_gd(w.font.name);
 		bool seen = false;
 		for (const String &existing : r_names) {
 			if (existing.nocasecmp_to(name) == 0) {
@@ -125,7 +125,6 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	state_ = opennova::menu::MenuFrameState{};
 	cursor_slot_ = -1;
 	press_claim_ = -1;
-	mouse_claim_ = -1;
 	unresolved_assets_ = 0;
 	if (document_.is_null()) {
 		queue_redraw();
@@ -134,7 +133,7 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	const opennova::mnu::Document &doc = document_->get_native();
 	const opennova::mnu::Screen *screen = p_screen_name.is_empty()
 			? doc.first_screen()
-			: doc.find_screen(to_std(p_screen_name));
+			: doc.find_screen(opennova::to_std(p_screen_name));
 	if (screen == nullptr) {
 		queue_redraw();
 		return false;
@@ -153,7 +152,7 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 		const Array keys = p_text_lookup.keys();
 		for (int64_t i = 0; i < keys.size(); ++i) {
 			const String key = keys[i];
-			text_table[to_std(key)] = to_std(String(p_text_lookup[keys[i]]));
+			text_table[opennova::to_std(key)] = opennova::to_std(String(p_text_lookup[keys[i]]));
 		}
 	}
 	compiler_.set_text_lookup(text_table);
@@ -170,7 +169,7 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	std::vector<String> font_names;
 	for (const String &raw : raw_font_names) {
 		const String resolved = String::utf8(
-				compiler_.resolve_style_var(to_std(raw)).c_str());
+				compiler_.resolve_style_var(opennova::to_std(raw)).c_str());
 		bool seen = false;
 		for (const String &existing : font_names) {
 			if (existing.nocasecmp_to(resolved) == 0) {
@@ -219,8 +218,8 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 				font->pages[page] = ImageTexture::create_from_image(image);
 			}
 		}
-		loaded[to_std(name.to_lower())] = font;
-		compiler_.register_font(to_std(name), &font->font);
+		loaded[opennova::to_std(name.to_lower())] = font;
+		compiler_.register_font(opennova::to_std(name), &font->font);
 		if (default_font == nullptr) {
 			default_font = font;
 		}
@@ -239,7 +238,7 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 			++unresolved_assets_;
 			continue;
 		}
-		const String name = String::utf8(tex_names[i].c_str());
+		const String name = opennova::to_gd(tex_names[i]);
 		const PackedByteArray bytes = root_->read_file(name.get_file());
 		if (bytes.is_empty()) {
 			++unresolved_assets_;
@@ -435,7 +434,7 @@ void MenuFrame::set_widget_caret(int p_index, int p_caret) {
 void MenuFrame::set_widget_text(int p_index, const String &p_text) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
 	ws.has_text = true;
-	ws.text = to_std(p_text);
+	ws.text = opennova::to_std(p_text);
 	queue_redraw();
 }
 
@@ -494,7 +493,7 @@ void MenuFrame::set_widget_items(int p_index,
 	ws.items.clear();
 	ws.items.reserve(static_cast<size_t>(p_items.size()));
 	for (int64_t i = 0; i < p_items.size(); ++i) {
-		ws.items.push_back(to_std(p_items[i]));
+		ws.items.push_back(opennova::to_std(p_items[i]));
 	}
 	queue_redraw();
 }
@@ -520,7 +519,7 @@ void MenuFrame::set_widget_table_rows(int p_index,
 		std::vector<std::string> cells;
 		cells.reserve(static_cast<size_t>(row.size()));
 		for (int64_t c = 0; c < row.size(); ++c) {
-			cells.push_back(to_std(row[c]));
+			cells.push_back(opennova::to_std(row[c]));
 		}
 		ws.table_rows.push_back(std::move(cells));
 	}
@@ -533,7 +532,7 @@ void MenuFrame::set_widget_marquee_lines(int p_index,
 	ws.marquee_lines.clear();
 	ws.marquee_lines.reserve(static_cast<size_t>(p_lines.size()));
 	for (int64_t i = 0; i < p_lines.size(); ++i) {
-		ws.marquee_lines.push_back(to_std(p_lines[i]));
+		ws.marquee_lines.push_back(opennova::to_std(p_lines[i]));
 	}
 	ws.marquee_reset = true; // fresh content restarts the roll
 	queue_redraw();
@@ -544,7 +543,7 @@ int MenuFrame::widget_count() const {
 }
 
 String MenuFrame::widget_name(int p_index) const {
-	return String::utf8(compiler_.widget_name(p_index).c_str());
+	return opennova::to_gd(compiler_.widget_name(p_index));
 }
 
 int MenuFrame::widget_kind(int p_index) const {
@@ -552,7 +551,7 @@ int MenuFrame::widget_kind(int p_index) const {
 }
 
 String MenuFrame::widget_authored_text(int p_index) const {
-	return String::utf8(compiler_.widget_authored_text(p_index).c_str());
+	return opennova::to_gd(compiler_.widget_authored_text(p_index));
 }
 
 bool MenuFrame::is_widget_disabled(int p_index) const {
@@ -580,10 +579,10 @@ int MenuFrame::item_count(int p_index) const {
 String MenuFrame::get_widget_text(int p_index) const {
 	for (const opennova::menu::MenuWidgetState &ws : state_.widgets) {
 		if (ws.index == p_index && ws.has_text) {
-			return String::utf8(ws.text.c_str());
+			return opennova::to_gd(ws.text);
 		}
 	}
-	return String::utf8(compiler_.widget_authored_text(p_index).c_str());
+	return opennova::to_gd(compiler_.widget_authored_text(p_index));
 }
 
 int MenuFrame::get_widget_caret(int p_index) const {
@@ -611,10 +610,6 @@ int MenuFrame::list_row_at(int p_index, const Vector2 &p_position) const {
 	const Vector2 scale = design_scale_();
 	return compiler_.list_row_at(p_index, state_, p_position.x, p_position.y,
 			scale.x, scale.y);
-}
-
-int MenuFrame::list_visible_rows(int p_index) const {
-	return compiler_.list_visible_rows(p_index, state_);
 }
 
 bool MenuFrame::combo_popup_contains(int p_index,
@@ -668,7 +663,7 @@ int MenuFrame::hotkey_widget(const String &p_key, bool p_virtual) const {
 	if (!configured_) {
 		return -1;
 	}
-	return compiler_.hotkey_widget(to_std(p_key), p_virtual, state_);
+	return compiler_.hotkey_widget(opennova::to_std(p_key), p_virtual, state_);
 }
 
 bool MenuFrame::edit_char(int p_index, int p_unicode) {
@@ -764,7 +759,6 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 		press_claim_ = -1;
 	}
 	mouse_button_down_ = p_button_down;
-	mouse_claim_ = claim.hovered;
 	if (claim.scroll_value_changed) {
 		emit_signal("scroll_value_changed", claim.scroll_index,
 				claim.scroll_value);

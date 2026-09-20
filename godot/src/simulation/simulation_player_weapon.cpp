@@ -9,6 +9,7 @@
 #include "simulation/player_weapon_event.h"
 #include "simulation/player_weapon_view.h"
 #include "object/weapon_def.h" // the typed weapon.def row the GUT install seams hand over
+#include "util/string_convert.h"
 
 #include <formats/def/def.h> // the weapon.def flag mirrors pinned below
 
@@ -100,7 +101,7 @@ String Simulation::get_weapon_third_person_model(int p_adm_index) const {
 	const opennova::world::WeaponTableEntry *entry =
 			kernel_->world.tables.weapons.by_index(static_cast<uint8_t>(p_adm_index));
 	if (entry == nullptr) return String();
-	return String::utf8(entry->third_person_model.c_str());
+	return opennova::to_gd(entry->third_person_model);
 }
 
 Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
@@ -190,7 +191,7 @@ opennova::world::WeaponInstallData Simulation::install_data_from_def(
 			lengths.push_back(static_cast<float>(double(v)));
 		}
 		data.clip_rings.emplace_back(
-				std::string(String(keys[i]).utf8().get_data()),
+				opennova::to_std(String(keys[i])),
 				std::move(lengths));
 	}
 	return data;
@@ -205,7 +206,7 @@ opennova::world::WeaponInstallData Simulation::install_data_from_def(
 bool Simulation::install_local_player_weapon_by_name(
 		const String &p_weapon_name, bool p_preserve_slot_state) {
 	return kernel_->install_weapon(
-			std::string(p_weapon_name.utf8().get_data()), p_preserve_slot_state);
+			opennova::to_std(p_weapon_name), p_preserve_slot_state);
 }
 
 void Simulation::rebake_local_player_weapon(const Ref<WeaponDef> &p_def,

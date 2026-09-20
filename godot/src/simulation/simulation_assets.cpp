@@ -2,6 +2,7 @@
 // item traits/weapons from the item database, collision instances + section
 // matrices from the .3di collision IR, and the mission item seat specs.
 #include "simulation/simulation_internal.h"
+#include "util/string_convert.h"
 
 #include <runtime/mission/item_traits.h>
 #include <runtime/world/mounted_pose.h>      // the native mounted-pose resolver (S4, ADR 0028)
@@ -22,7 +23,7 @@ int Simulation::set_infantry_anim_map(const Ref<ResourceRoot> &p_resource_root, 
 	// The kernel owns default/model map resolution. The joiner observes its
 	// animation revision and re-arms decoded rows when the registry changes.
 	return kernel_->install_infantry_anim(
-			std::string(p_adm_name.utf8().get_data()),
+			opennova::to_std(p_adm_name),
 			p_resource_root.is_valid() ? &p_resource_root->native_assets() : nullptr);
 }
 
@@ -168,12 +169,6 @@ int Simulation::set_character_avatar_database(
 	}
 	apply_character_traits_to_world();
 	return static_cast<int>(assets_.character_sex_rows.size());
-}
-
-void Simulation::apply_collision_to_ai() {
-	// The kernel is the ONE registered section-matrix/mounted-pose provider;
-	// wire_collision points the world/AI systems at its collision world.
-	kernel_->wire_collision();
 }
 
 int Simulation::get_mounted_graphic_source_count() const {

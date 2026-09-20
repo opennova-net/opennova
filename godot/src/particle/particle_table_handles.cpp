@@ -1,9 +1,10 @@
 #include "particle/particle_table_handles.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
 void ParticleTableHandles::copy_from_native(const opennova::particle::TableEditHandles &h) {
-	table_id = String::utf8(h.table_id.c_str());
+	table_id = opennova::to_gd(h.table_id);
 	handlecount = h.handlecount;
 	tightness = h.tightness;
 }

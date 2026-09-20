@@ -1,6 +1,8 @@
 #include "render/q3_frame_adapter.h"
 #include "render/q3_geometry_cache.h"
 #include "render/q3_source_registry.h"
+#include "render/q3_vertex_format.h"
+#include "render/rd_uniforms.h"
 
 #include <algorithm>
 #include <array>
@@ -41,6 +43,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include "env/mission_environment.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 using namespace opennova::renderer;
@@ -354,17 +357,6 @@ std::string q3_fragment_shader_source() {
 	splice_token(source, "@NV_LUMA_B@", glsl_float(kQ3WaterNvLumaWeights[2]));
 	splice_token(source, "@NV_BRIGHT_BIAS@", glsl_float(kQ3WaterNvBrightBias));
 	return source;
-}
-
-Ref<RDUniform> sampled_texture_uniform(int p_binding, const RID &p_sampler,
-		const RID &p_texture) {
-	Ref<RDUniform> uniform;
-	uniform.instantiate();
-	uniform->set_uniform_type(RenderingDevice::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE);
-	uniform->set_binding(p_binding);
-	uniform->add_id(p_sampler);
-	uniform->add_id(p_texture);
-	return uniform;
 }
 
 Q3Matrix4 q3_matrix(const Transform3D &p_transform) {
@@ -728,9 +720,9 @@ bool Q3FrameAdapter::Impl::initialize(RenderingDevice *p_rd) {
 	source.instantiate();
 	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(q3_vertex_shader_source().c_str()));
+			opennova::to_gd(q3_vertex_shader_source()));
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(q3_fragment_shader_source().c_str()));
+			opennova::to_gd(q3_fragment_shader_source()));
 	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
 	if (spirv.is_null() || !spirv->get_stage_compile_error(
 			RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
@@ -782,28 +774,7 @@ bool Q3FrameAdapter::Impl::initialize(RenderingDevice *p_rd) {
 		return false;
 	}
 
-	TypedArray<Ref<RDVertexAttribute>> attributes;
-	auto add_attribute = [&](std::uint32_t p_location,
-			RenderingDevice::DataFormat p_format, std::uint32_t p_offset) {
-		Ref<RDVertexAttribute> attribute;
-		attribute.instantiate();
-		attribute->set_location(p_location);
-		attribute->set_binding(0);
-		attribute->set_format(p_format);
-		attribute->set_offset(p_offset);
-		attribute->set_stride(kQ3VertexStride);
-		attribute->set_frequency(RenderingDevice::VERTEX_FREQUENCY_VERTEX);
-		attributes.push_back(attribute);
-	};
-	add_attribute(0, RenderingDevice::DATA_FORMAT_R32G32B32_SFLOAT, 0);
-	add_attribute(1, RenderingDevice::DATA_FORMAT_R32G32B32_SFLOAT, 12);
-	add_attribute(2, RenderingDevice::DATA_FORMAT_R32G32_SFLOAT, 24);
-	add_attribute(3, RenderingDevice::DATA_FORMAT_R32G32B32A32_SFLOAT, 32);
-	add_attribute(4, RenderingDevice::DATA_FORMAT_R32G32B32A32_SFLOAT, 48);
-	add_attribute(5, RenderingDevice::DATA_FORMAT_R32G32B32A32_SFLOAT, 64);
-	add_attribute(6, RenderingDevice::DATA_FORMAT_R32G32B32A32_SFLOAT, 80);
-	add_attribute(7, RenderingDevice::DATA_FORMAT_R32G32_SFLOAT, 96);
-	vertex_format = rd->vertex_format_create(attributes);
+	vertex_format = rd->vertex_format_create(q3_vertex_attributes());
 	vertex_buffers.resize(1);
 	vertex_offsets.resize(1);
 	if (vertex_format == RenderingDevice::INVALID_FORMAT_ID) {
@@ -1122,8 +1093,8 @@ Dictionary Q3FrameAdapter::Impl::report() const {
 	result["q3_far_band"] = Vector2(kQ3FarBandMinZ, kQ3FarBandMaxZ);
 	result["q3_auxiliary_view"] = false;
 	result["q3_camera_mask"] = false;
-	result["q3_status"] = String::utf8(status.c_str());
-	result["q3_failure"] = String::utf8(failure.c_str());
+	result["q3_status"] = opennova::to_gd(status);
+	result["q3_failure"] = opennova::to_gd(failure);
 	result["q3_submitted_frame_id"] = static_cast<int64_t>(submitted_frame_id);
 	result["q3_drawn_frame_id"] = static_cast<int64_t>(drawn_frame_id);
 	result["q3_submitted_commands"] = static_cast<int64_t>(submitted_commands);

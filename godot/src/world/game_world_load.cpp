@@ -516,7 +516,7 @@ void GameWorld::unload() {
 	// present intent — see OcclusionFrame.reset.
 	occlusion_->reset();
 	mission_forces_indoors_ = false;
-	set_local_player_nvg_view(false, 0);
+	player_visuals_->set_local_player_nvg_view(false, 0);
 	if (env_ != nullptr && env_->get_environment_data().is_valid()) {
 		env_->get_environment_data()->clear_mission_overrides();
 	}

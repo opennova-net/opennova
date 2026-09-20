@@ -13,6 +13,7 @@
 #include <runtime/renderer/render_order.h>
 
 #include "util/axes.h"
+#include "env/env_convert.h"
 #include "env/env_render_camera.h"
 #include "env/mission_environment.h"
 #include "object/object_data.h"
@@ -21,19 +22,6 @@
 namespace godot {
 
 namespace {
-
-Vector3 to_vector3(const opennova::env::Vec3 &v) {
-	return Vector3(v.x, v.y, v.z);
-}
-
-Vector3 to_vector3(const opennova::env::Rgb &rgb) {
-	return Vector3(rgb.r, rgb.g, rgb.b);
-}
-
-opennova::env::Vec3 to_vec3(const Vector3 &v) {
-	return opennova::env::Vec3{static_cast<float>(v.x),
-			static_cast<float>(v.y), static_cast<float>(v.z)};
-}
 
 } // namespace
 

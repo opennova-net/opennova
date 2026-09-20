@@ -1,4 +1,7 @@
 #include "particle/particle_compositor.h"
+#include "particle/particle_convert.h"
+#include "render/rd_fullscreen.h"
+#include "render/rd_uniforms.h"
 #include "util/string_convert.h"
 
 #include <algorithm>
@@ -192,16 +195,6 @@ void main() {
 }
 )GLSL";
 
-const char *kSceneSnapshotVertexShader = R"GLSL(#version 450
-void main() {
-	const vec2 positions[3] = vec2[3](
-			vec2(-1.0, -1.0),
-			vec2(3.0, -1.0),
-			vec2(-1.0, 3.0));
-	gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-}
-)GLSL";
-
 const char *kSceneSnapshotFragmentShader = R"GLSL(#version 450
 layout(set = 0, binding = 0) uniform sampler2D source_color;
 
@@ -220,32 +213,6 @@ std::uint32_t grow_capacity(std::uint32_t required) {
 		capacity *= 2u;
 	}
 	return capacity;
-}
-
-Ref<RDUniform> sampled_texture_uniform(int binding, const RID &sampler,
-		const RID &texture) {
-	Ref<RDUniform> uniform;
-	uniform.instantiate();
-	uniform->set_uniform_type(RenderingDevice::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE);
-	uniform->set_binding(binding);
-	uniform->add_id(sampler);
-	uniform->add_id(texture);
-	return uniform;
-}
-
-void write_u32(PackedByteArray &bytes, std::uint32_t offset,
-		std::uint32_t value) {
-	std::memcpy(bytes.ptrw() + offset, &value, sizeof(value));
-}
-
-void write_f32(PackedByteArray &bytes, std::uint32_t offset, float value) {
-	std::memcpy(bytes.ptrw() + offset, &value, sizeof(value));
-}
-
-int64_t godot_token(std::uint64_t value) {
-	int64_t result = 0;
-	std::memcpy(&result, &value, sizeof(result));
-	return result;
 }
 
 } // namespace
@@ -528,8 +495,8 @@ bool ParticleCompositorEffect::Impl::initialize_rd() {
 			spirv->get_stage_bytecode(RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
 			spirv->get_stage_bytecode(RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
 		set_failure("Particle shader compilation failed: vertex=" +
-				to_std(vertex_error) + "; fragment=" +
-				to_std(fragment_error), "shader_compile_failed");
+				opennova::to_std(vertex_error) + "; fragment=" +
+				opennova::to_std(fragment_error), "shader_compile_failed");
 		return false;
 	}
 	shader = rd->shader_create_from_spirv(spirv, "OpenNova particle compositor");
@@ -652,7 +619,7 @@ bool ParticleCompositorEffect::Impl::ensure_scene_snapshot_shader() {
 	source.instantiate();
 	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(kSceneSnapshotVertexShader));
+			String::utf8(kRdFullscreenVertexShader));
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
 			String::utf8(kSceneSnapshotFragmentShader));
 	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
@@ -673,8 +640,8 @@ bool ParticleCompositorEffect::Impl::ensure_scene_snapshot_shader() {
 					RenderingDevice::SHADER_STAGE_FRAGMENT).is_empty()) {
 		scene_snapshot_shader_initialization_failed = true;
 		set_failure("Scene-color snapshot shader compilation failed: vertex=" +
-				to_std(vertex_error) + "; fragment=" +
-				to_std(fragment_error),
+				opennova::to_std(vertex_error) + "; fragment=" +
+				opennova::to_std(fragment_error),
 				"scene_snapshot_shader_compile_failed");
 		return false;
 	}
@@ -1443,15 +1410,15 @@ Dictionary ParticleCompositorEffect::Impl::report() const {
 	result["scene_color_copy_without_distort"] = 0;
 	result["all_eight_blend_modes"] = true;
 	result["status"] = renderer_supported ?
-			String::utf8(diagnostics.status.c_str()) :
+			opennova::to_gd(diagnostics.status) :
 			String("compatibility_renderer_unsupported");
 	result["failure"] = renderer_supported ?
-			String::utf8(diagnostics.failure.c_str()) :
+			opennova::to_gd(diagnostics.failure) :
 			String("RenderingDevice is unavailable; use Forward+ or Mobile");
 	result["callback_seen"] = diagnostics.callback_seen;
 	result["rd_available"] = renderer_supported;
 	result["shutdown"] = shutdown_requested.load(std::memory_order_acquire);
-	result["submitted_frame_id"] = godot_token(diagnostics.submitted_frame_id);
+	result["submitted_frame_id"] = token_to_godot(diagnostics.submitted_frame_id);
 	result["submitted_camera_position"] = Vector3(
 			diagnostics.submitted_camera_position[0],
 			diagnostics.submitted_camera_position[1],
@@ -1460,7 +1427,7 @@ Dictionary ParticleCompositorEffect::Impl::report() const {
 			diagnostics.submitted_camera_forward[0],
 			diagnostics.submitted_camera_forward[1],
 			diagnostics.submitted_camera_forward[2]);
-	result["drawn_frame_id"] = godot_token(diagnostics.drawn_frame_id);
+	result["drawn_frame_id"] = token_to_godot(diagnostics.drawn_frame_id);
 	result["submitted_commands"] =
 			static_cast<int64_t>(diagnostics.submitted_commands);
 	result["drawn_commands"] = static_cast<int64_t>(diagnostics.drawn_commands);
@@ -1470,16 +1437,16 @@ Dictionary ParticleCompositorEffect::Impl::report() const {
 	result["distortion_commands_skipped"] =
 			static_cast<int64_t>(diagnostics.distortion_commands_skipped);
 	result["view_count"] = static_cast<int64_t>(diagnostics.view_count);
-	result["atlas_generation"] = godot_token(diagnostics.atlas_generation);
+	result["atlas_generation"] = token_to_godot(diagnostics.atlas_generation);
 	result["atlas_pages"] = static_cast<int64_t>(diagnostics.atlas_pages);
 	result["vertex_capacity_bytes"] =
 			static_cast<int64_t>(diagnostics.vertex_capacity_bytes);
 	result["vertex_capacity_growths"] =
-			godot_token(diagnostics.vertex_capacity_growths);
+			token_to_godot(diagnostics.vertex_capacity_growths);
 	result["pipeline_warm_requests"] =
-			godot_token(diagnostics.pipeline_warm_requests);
+			token_to_godot(diagnostics.pipeline_warm_requests);
 	result["pipeline_warm_requests_serviced"] =
-			godot_token(diagnostics.pipeline_warm_requests_serviced);
+			token_to_godot(diagnostics.pipeline_warm_requests_serviced);
 	result["warmed_pipeline_modes"] =
 			static_cast<int64_t>(diagnostics.warmed_pipeline_modes);
 	result["warmed_framebuffer_formats"] =

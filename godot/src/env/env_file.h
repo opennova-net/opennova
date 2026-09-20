@@ -189,11 +189,9 @@ public:
 	static Ref<EnvSunGlare> compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
 
 	// The mission time-of-day clock (env/tod_clock.h): the BMS Q8.8 start hour
-	// widened into the day-wrapped 8.24 accumulator (engine: formats/env/env.h), the
-	// exact per-tick increment with retail's 60-minute day floor
-	// (engine: formats/env/tod_clock.h), and the tick advance.
+	// widened into the day-wrapped 8.24 accumulator (engine: formats/env/env.h)
+	// and the tick advance (engine: formats/env/tod_clock.h).
 	static int tod_start_fixed24(int p_start_time_q8_8);
-	static int tod_advance_per_tick(int p_minutes_per_day);
 	static int tod_advance(int p_time_fixed24, int p_ticks, int p_advance_per_tick);
 
 	// The .til tile-overlay tint factor for a single-multiply shader:

@@ -11,6 +11,7 @@
 #include "simulation/present_event_records.h"
 #include "util/axes.h"
 #include "simulation/simulation.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/audio_effect.hpp>
 #include <godot_cpp/classes/audio_effect_reverb.hpp>
@@ -214,14 +215,14 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	// lives native (audio/bank_chain.h); missing files skip like retail's
 	// SoundBank_LoadIfExists (D-SND-2 closed).
 	const std::vector<std::string> global_chain = opennova::audio::global_bank_chain(
-			std::string(resource_root_->get_expansion().utf8().get_data()));
+			opennova::to_std(resource_root_->get_expansion()));
 	String global_chain_text;
 	for (const std::string &global_name : global_chain) {
 		if (!global_chain_text.is_empty()) {
 			global_chain_text += ", ";
 		}
-		global_chain_text += String::utf8(global_name.c_str());
-		_load_bank(String::utf8(global_name.c_str()));
+		global_chain_text += opennova::to_gd(global_name);
+		_load_bank(opennova::to_gd(global_name));
 	}
 
 	// The mission's co-named .DBF maps a PlayWavList dialog id (dlg001) to the LWF
@@ -463,9 +464,9 @@ void MissionAudio::play_script_sounds(
         const Transform3D &p_camera_xform) {
     for (const auto &event : p_events) {
         if (event.kind == opennova::world::ScriptSoundEvent::Kind::Interface)
-            ui_soundset(String::utf8(event.name.c_str()));
+            ui_soundset(opennova::to_gd(event.name));
         else
-            _play_listener_relative(String::utf8(event.name.c_str()), event.distance_q16,
+            _play_listener_relative(opennova::to_gd(event.name), event.distance_q16,
                     event.bearing, p_camera_xform);
     }
 }
@@ -550,7 +551,7 @@ bool MissionAudio::play_dialog(int p_wav_id) {
 
 String MissionAudio::resolve_dialog_set(int p_wav_id) {
 	const std::vector<std::string> sets = _resolve_dialog_sets(p_wav_id);
-	return sets.empty() ? String() : String::utf8(sets.front().c_str());
+	return sets.empty() ? String() : opennova::to_gd(sets.front());
 }
 
 std::vector<std::string> MissionAudio::_resolve_dialog_sets(int p_wav_id) const {
@@ -575,7 +576,7 @@ void MissionAudio::_pump_dialog_queue() {
 	}
 	std::string set_name;
 	while (dialog_queue_.take_next(set_name)) {
-		AudioStreamPlayer *voice = bank_->spawn_oneshot_2d(this, String::utf8(set_name.c_str()),
+		AudioStreamPlayer *voice = bank_->spawn_oneshot_2d(this, opennova::to_gd(set_name),
 				StringName(kVoiceBus));
 		if (voice != nullptr) {
 			dialog_voice_id_ = ObjectID(voice->get_instance_id());
@@ -1068,7 +1069,7 @@ void MissionAudio::_flush_sound_emitters(int64_t p_final_tick) {
 			continue;
 		}
 
-		const String set_name = String::utf8(event.set_name.c_str());
+		const String set_name = opennova::to_gd(event.set_name);
 		if (set_name.is_empty()) {
 			continue;
 		}

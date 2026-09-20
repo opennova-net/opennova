@@ -50,7 +50,7 @@ Ref<ShaderMaterial> ObjectModel::material_for_index(int p_material_array_index) 
 			: -1;
 	Ref<ShaderMaterial> postmultiply;
 	const Ref<ShaderMaterial> material =
-			create_material(array_index, p_material_array_index, postmultiply);
+			create_material(array_index, postmultiply);
 	material_cache_[cache_key] = material;
 	if (postmultiply.is_valid()) {
 		postmultiply_cache_[cache_key] = postmultiply;
@@ -65,7 +65,7 @@ Ref<ShaderMaterial> ObjectModel::postmultiply_material_for_index(
 	return cached != nullptr ? *cached : Ref<ShaderMaterial>();
 }
 
-Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index, int p_material_index,
+Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 		Ref<ShaderMaterial> &r_postmultiply) {
 	r_postmultiply = Ref<ShaderMaterial>();
 	Ref<ShaderMaterial> material;

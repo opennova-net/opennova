@@ -310,7 +310,6 @@ private:
 	bool skeletal_scene_ = false;
 	HashMap<int, Node3D *> robj_nodes_;
 	HashMap<int, Transform3D> robj_rest_transforms_;
-	bool od_has_doc_ = false;
 	// Last applied point-light selections (FNV over count + packed vectors).
 	// Per-render-object selection hashes. Retail re-scopes a building's owner
 	// group for every ROBJ draw; a single model-wide hash cannot represent that
@@ -561,7 +560,6 @@ private:
 	void advance_runtime_frame_profiled(double p_delta,
 			AwakeFrameProfile *p_profile);
 	bool apply_robj_transforms();
-	void on_object_changed();
 	void wake_runtime_frame();
 	void sleep_runtime_frame_if_idle();
 	bool needs_runtime_frame_work() const;
@@ -619,9 +617,8 @@ private:
 	Ref<ShaderMaterial> material_for_index(int p_material_array_index);
 	Ref<ShaderMaterial> postmultiply_material_for_index(int p_material_array_index) const;
 	// Builds the surface material for the MTRL row at `p_array_index` (-1 = no
-	// row: the FF_ST_OP defaults); `p_material_index` is the surface's own
-	// index, which keys the missing-diffuse hash colour.
-	Ref<ShaderMaterial> create_material(int p_array_index, int p_material_index,
+	// row: the FF_ST_OP defaults).
+	Ref<ShaderMaterial> create_material(int p_array_index,
 			Ref<ShaderMaterial> &r_postmultiply);
 	void collect_anim_frames(int p_material_index);
 	Ref<Texture2D> load_texture_name(const String &p_texture_name);

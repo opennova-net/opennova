@@ -13,6 +13,7 @@
 
 #include "cbin/cbin_asset_lookup.h"
 #include "util/data_format.h"
+#include "util/string_convert.h"
 
 #include <formats/cbin/cbin.h>
 
@@ -851,7 +852,7 @@ Error CbinCreditsResource::load_from_path(const String &p_path) {
 	std::unordered_map<std::string, Ref<Resource>> font_cache;
 	std::unordered_map<std::string, Ref<Resource>> texture_cache;
 	auto find_font = [&](const String &font_name) -> Ref<Resource> {
-		std::string key(font_name.to_lower().utf8().get_data());
+		std::string key = opennova::to_std(font_name.to_lower());
 		auto it = font_cache.find(key);
 		if (it != font_cache.end()) {
 			return it->second;
@@ -861,7 +862,7 @@ Error CbinCreditsResource::load_from_path(const String &p_path) {
 		return font;
 	};
 	auto find_texture = [&](const String &texture_name) -> Ref<Resource> {
-		std::string key(texture_name.to_lower().utf8().get_data());
+		std::string key = opennova::to_std(texture_name.to_lower());
 		auto it = texture_cache.find(key);
 		if (it != texture_cache.end()) {
 			return it->second;

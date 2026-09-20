@@ -139,7 +139,6 @@ public:
 	// the engine scales them like process_mouse does).
 	int hit_test(const Vector2 &p_position) const;
 	int list_row_at(int p_index, const Vector2 &p_position) const;
-	int list_visible_rows(int p_index) const;
 	bool combo_popup_contains(int p_index, const Vector2 &p_position) const;
 	int combo_popup_row_at(int p_index, const Vector2 &p_position) const;
 	int spin_arrow_at(int p_index, const Vector2 &p_position) const; // 0/1 up/2 down
@@ -234,7 +233,6 @@ private:
 	Vector2 design_scale_() const;
 
 	Ref<MnuDocument> document_;
-	int mouse_claim_ = -1;      // last pump claim (activation edge tracking)
 	int press_claim_ = -1;      // widget owning the current press, -1 = none
 	bool mouse_button_down_ = false;
 	int32_t cursor_slot_ = -1;  // last claim's cursor texture slot

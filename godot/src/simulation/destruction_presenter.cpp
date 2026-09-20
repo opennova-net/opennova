@@ -23,6 +23,7 @@
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
+#include "util/string_convert.h"
 
 namespace godot {
 
@@ -171,7 +172,7 @@ void DestructionPresenter::present_drained(const opennova::world::DestructionEve
 		apply_effect(eff);
 	}
 	for (const opennova::world::DestructionSoundEvent &sound : p_events.sounds) {
-		apply_sound(String::utf8(sound.sound.c_str()), mission_to_godot(sound.pos));
+		apply_sound(opennova::to_gd(sound.sound), mission_to_godot(sound.pos));
 	}
 	if (EffectLightDirector *light_director = lights()) {
 		for (const opennova::world::DeathLightEvent &light : p_events.death_lights) {
@@ -493,7 +494,7 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 	if (fx_world == nullptr) {
 		return;
 	}
-	const String effect = String::utf8(p_effect.effect.c_str());
+	const String effect = opennova::to_gd(p_effect.effect);
 	if (effect.is_empty() && !p_effect.release) {
 		return;
 	}

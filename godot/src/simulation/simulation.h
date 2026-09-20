@@ -31,13 +31,12 @@
 #include <runtime/mission/promote.h>
 #include <runtime/hud/end_round_overlay.h> // EndRoundOverlayInput (the end-round ladder feed)
 #include <runtime/hud/hud_frame.h> // HudVehiclePanelState / HudLfpZone (the panel feed seams)
-#include <runtime/world/deploy_screen_feed.h> // DeployZoneRow (the DEATH screen's zone feed)
+#include <runtime/world/deploy_screen_feed.h> // DeployZoneRow (the DEATH screen's zone feed), kDeployRefreshTicks
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout the snapshot carries
-#include <runtime/world/deploy_screen_feed.h> // kDeployRefreshTicks (the death deploy screen cadence)
 #include <runtime/world/present_drains.h> // the per-tick presentation drain rows (ADR 0043 d10)
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
-#include <runtime/world/vehicle_attach.h> // AttachLabel (the attach-label scan)
+#include <runtime/world/vehicle_attach.h> // AttachLabel (the attach-label scan), the attach-command ids + the seat mirror
 #include <runtime/world/destruction.h> // DestructionEvents (the destruction drain)
 #include <runtime/world/terrain_scorch_events.h> // TerrainScorchEvent (the scorch drain)
 #include <runtime/world/script_voice.h>
@@ -105,7 +104,6 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_view.h>
-#include <runtime/world/vehicle_attach.h> // the attach-command ids + the seat mirror
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/weapon_inventory.h>
@@ -524,7 +522,6 @@ private:
 	using PresentEffectPose = SimulationPresentState::PresentEffectPose;
 	using CharacterSexRow = SimulationAssetState::CharacterSexRow;
 	void _release_weather_owner();
-	void apply_collision_to_ai();
 	// Portable mission lifecycle and cadence. During one advance call the Godot
 	// adapter holds a single typed tick sink so presentation consumes every
 	// catch-up tick before the next simulation tick.
@@ -544,7 +541,6 @@ private:
 	// The C++ TickSink (simulation/tick_sink.h) the presentation owner
 	// installs around its own frame call (MissionRoot); null outside one.
 	TickSink *session_tick_sink_ = nullptr;
-	int64_t frame_net_us_ = 0;
 	int64_t frame_sim_us_ = 0;
 	int64_t frame_sink_us_ = 0;
 	// The dev tools' frame-stats board (ADR 0039): fold_frame_stats() lands the
@@ -554,6 +550,8 @@ private:
 	// inactive and no producer reads a clock.
 	Ref<FrameStats> frame_stats_;
 	void fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome);
+	opennova::inmatch::FrameInput begin_session_frame(
+			const Ref<MissionFrameInput> &p_input);
 	opennova::inmatch::Role &active_role();
 	// Install a freshly constructed role as the session's (the session's role
 	// switch is the gate: false while it is loaded/running, the role stays and

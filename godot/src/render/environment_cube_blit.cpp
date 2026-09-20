@@ -1,5 +1,7 @@
 #include "render/environment_cube_blit.h"
 #include "render/rd_fullscreen.h"
+#include "render/rd_uniforms.h"
+#include "util/string_convert.h"
 
 #include <cstring>
 
@@ -60,11 +62,6 @@ void main() {
 }
 )GLSL";
 
-void write_u32(PackedByteArray &bytes, std::uint32_t offset,
-		std::uint32_t value) {
-	std::memcpy(bytes.ptrw() + offset, &value, sizeof(value));
-}
-
 } // namespace
 
 void EnvironmentCubeBlit::set_request(const Request &p_request) {
@@ -73,7 +70,7 @@ void EnvironmentCubeBlit::set_request(const Request &p_request) {
 
 String EnvironmentCubeBlit::failure() const {
 	std::lock_guard<std::mutex> lock(failure_mutex_);
-	return String::utf8(failure_.c_str());
+	return opennova::to_gd(failure_);
 }
 
 void EnvironmentCubeBlit::set_failure(const std::string &reason) {
@@ -112,8 +109,8 @@ bool EnvironmentCubeBlit::ensure_shader(RenderingDevice *rd) {
 			RenderingDevice::SHADER_STAGE_FRAGMENT);
 	if (!vertex_error.is_empty() || !fragment_error.is_empty()) {
 		set_failure("environment cube blit shader compilation failed: vertex=" +
-				std::string(vertex_error.utf8().get_data()) + "; fragment=" +
-				std::string(fragment_error.utf8().get_data()));
+				opennova::to_std(vertex_error) + "; fragment=" +
+				opennova::to_std(fragment_error));
 		return false;
 	}
 	shader_ = rd->shader_create_from_spirv(spirv,

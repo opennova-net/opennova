@@ -39,7 +39,7 @@ bool MnsStyleSheet::has_variable(const String &p_name) const {
 // original expands %VAR% over the whole raw .mnu byte buffer BEFORE the XML parse;
 // the reimpl substitutes per-field, post-parse, on every consumed field the
 // engine's whole-buffer pass would cover -- colors, fonts, textures, and literal
-// text (see mnu_builder.cpp substitute_var). Matching for the shipped corpus;
+// text (engine: formats/mns/mns.h substitute). Matching for the shipped corpus;
 // the remaining gap is shell-supplied variables in non-themed fields (D-MNU-1,
 // ADR 0005).
 String MnsStyleSheet::substitute(const String &p_text) const {

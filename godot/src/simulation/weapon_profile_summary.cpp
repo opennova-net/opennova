@@ -1,6 +1,7 @@
 #include "simulation/weapon_profile_summary.h"
 
 #include "util/record_bind.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -8,7 +9,7 @@ PackedStringArray WeaponProfileSide::get_kit() const {
 	PackedStringArray names;
 	if (const opennova::playersav::KitPage *page = value_.selected_page()) {
 		for (const opennova::playersav::KitEntry &entry : page->entries)
-			names.push_back(String::utf8(entry.name.c_str()));
+			names.push_back(opennova::to_gd(entry.name));
 	}
 	return names;
 }

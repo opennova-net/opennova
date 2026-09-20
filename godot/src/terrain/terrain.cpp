@@ -8,7 +8,6 @@
 #include "render/visual_layers.h"
 #include "mission/mission_object_placer.h"
 
-#include <runtime/terrain_query/terrain_field_build.h>
 
 // Retail: PolyTrn_RenderTile @0x60da70 (docs/terrain/terrain-re.md, docs/tiles/til-re.md);
 // the sector traversal names below are jodemo-era (Terrain_RenderSectorTile @0x5CDAA0,

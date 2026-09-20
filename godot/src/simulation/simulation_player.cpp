@@ -9,7 +9,6 @@
 #include <runtime/world/music_vars.h>
 #include <runtime/world/player_view.h>
 
-#include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 
 using namespace sim_internal;
 

@@ -1,4 +1,5 @@
 #include "particle/particle_def.h"
+#include "util/string_convert.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -277,11 +278,11 @@ Array ParticleDef::get_unknown_keys() const {
 #undef TRIVIAL_SET_REF
 
 void ParticleDef::copy_from_native(const opennova::particle::ParticleDef &def) {
-	id = String::utf8(def.id.c_str());
-	child_id = String::utf8(def.child_id.c_str());
-	flags_raw = String::utf8(def.flags_raw.c_str());
+	id = opennova::to_gd(def.id);
+	child_id = opennova::to_gd(def.child_id);
+	flags_raw = opennova::to_gd(def.flags_raw);
 	flags = static_cast<int>(def.flags);
-	move_raw = String::utf8(def.move_raw.c_str());
+	move_raw = opennova::to_gd(def.move_raw);
 	move = static_cast<int>(def.move);
 	lod = def.lod;
 
@@ -345,7 +346,7 @@ void ParticleDef::copy_from_native(const opennova::particle::ParticleDef &def) {
 	collide_sounds.clear();
 	collide_sounds.resize(static_cast<int>(def.collide_sounds.size()));
 	for (int i = 0; i < static_cast<int>(def.collide_sounds.size()); ++i) {
-		collide_sounds[i] = String::utf8(def.collide_sounds[static_cast<size_t>(i)].c_str());
+		collide_sounds[i] = opennova::to_gd(def.collide_sounds[static_cast<size_t>(i)]);
 	}
 
 	graphics.clear();
@@ -359,15 +360,15 @@ void ParticleDef::copy_from_native(const opennova::particle::ParticleDef &def) {
 	unknown_keys.clear();
 	for (const auto &entry : def.unknown_keys) {
 		Dictionary item;
-		item["key"] = String::utf8(entry.first.c_str());
-		item["value"] = String::utf8(entry.second.c_str());
+		item["key"] = opennova::to_gd(entry.first);
+		item["value"] = opennova::to_gd(entry.second);
 		unknown_keys.push_back(item);
 	}
 	emit_changed();
 }
 
 String ParticleDef::format_particle_flags(int bits) {
-	return String::utf8(opennova::particle::format_particle_flags(static_cast<std::uint32_t>(bits)).c_str());
+	return opennova::to_gd(opennova::particle::format_particle_flags(static_cast<std::uint32_t>(bits)));
 }
 
 Ref<ParticleDef> ParticleDef::clone() const {

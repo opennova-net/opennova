@@ -10,6 +10,7 @@
 #include "simulation/player_local_view.h"
 #include "terrain/terrain_data.h"
 #include "util/axes.h"
+#include "util/string_convert.h"
 
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
 #include <base/gameprofile/game_type.h> // the conquest arm of the zone panel
@@ -960,9 +961,9 @@ void HudOverlay::set_end_round_statistics(bool p_shown, bool p_raised,
 	st.title = p_title.utf8().get_data();
 	for (int64_t i = 0; i < 4; ++i) {
 		st.labels[i] = i < p_labels.size()
-				? std::string(p_labels[i].utf8().get_data()) : std::string();
+				? opennova::to_std(p_labels[i]) : std::string();
 		st.values[i] = i < p_values.size()
-				? std::string(p_values[i].utf8().get_data()) : std::string();
+				? opennova::to_std(p_values[i]) : std::string();
 	}
 	queue_redraw();
 }
@@ -1132,7 +1133,7 @@ String attach_label_text(const Ref<RtxtStringFile> &p_gametext,
 				return overlay_text(p_gametext, "STROVER_USEGUN", "!UseGun");
 			}
 			// the witnessed empty-label quirk (parse-miss stores "")
-			return overlay_text(p_gametext, String::utf8(p_attach_text_key.c_str()), "");
+			return overlay_text(p_gametext, opennova::to_gd(p_attach_text_key), "");
 		case SeatType::ArmoryPoint: // armory [orig: dword_272386C]
 			return overlay_text(p_gametext, "STROVER_USEARMORY", "!UseArmory");
 		default:
@@ -1198,7 +1199,7 @@ String HudOverlay::get_attach_label_text(int p_index) const {
 	if (p_index < 0 || p_index >= static_cast<int>(state_.attach_labels.size())) {
 		return String();
 	}
-	return String::utf8(state_.attach_labels[static_cast<size_t>(p_index)].text.c_str());
+	return opennova::to_gd(state_.attach_labels[static_cast<size_t>(p_index)].text);
 }
 
 // [orig: HUD_DrawFriendlyTagsPass @0x5a4480 -> HUD_DrawEntityLabel @0x5a39b0 —

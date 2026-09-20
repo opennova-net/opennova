@@ -1,6 +1,7 @@
 #include "network/novaworld_client.h"
 
 #include "network/novaworld_identity.h"
+#include "util/data_format.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/classes/http_client.hpp>
@@ -33,14 +34,6 @@
 namespace godot {
 
 namespace {
-
-std::vector<uint8_t> from_pba(const PackedByteArray &pba) {
-	std::vector<uint8_t> out(pba.size());
-	if (!out.empty()) {
-		std::memcpy(out.data(), pba.ptr(), out.size());
-	}
-	return out;
-}
 
 // HTTPRequest delivers response headers as "Name: value" lines; the flow finds Set-Cookie itself.
 std::vector<std::string> pba_to_strvec(const PackedStringArray &arr) {
@@ -459,9 +452,9 @@ void NovaWorldClient::sync_flow_context() {
 		ctx.post_ip = server_info_->get_post_ip().utf8().get_data();
 		ctx.post_port = std::to_string(server_info_->get_post_port());
 	}
-	ctx.web_domain = std::string(nw_web_domain_.utf8().get_data());
+	ctx.web_domain = opennova::to_std(nw_web_domain_);
 	ctx.server_nwuid = lobby_.session() ? lobby_.session()->server_nwuid() : std::string();
-	ctx.locale = std::string(OS::get_singleton()->get_locale().utf8().get_data());
+	ctx.locale = opennova::to_std(OS::get_singleton()->get_locale());
 	ctx.identity_vars = identity_vars_;
 	flow_.set_context(std::move(ctx));
 }
@@ -617,7 +610,7 @@ void NovaWorldClient::login(const String &username, const String &password) {
 	}
 	sync_flow_context();
 	const opennova::LoginResult r = flow_.login(
-		std::string(username.utf8().get_data()), std::string(password.utf8().get_data()));
+		opennova::to_std(username), opennova::to_std(password));
 	switch (r.kind) {
 	case opennova::LoginResult::Kind::NeedRequest:
 		// Prepare GET: sets the EPASK cookie (the bundle credentials encrypt under).

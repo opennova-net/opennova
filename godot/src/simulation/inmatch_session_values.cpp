@@ -1,4 +1,5 @@
 #include "simulation/inmatch_session_values.h"
+#include "util/string_convert.h"
 
 #include <algorithm>
 
@@ -134,7 +135,7 @@ void MissionFrameOutcome::assign(const opennova::inmatch::FrameOutcome &p_value)
 	state_ = static_cast<int32_t>(p_value.state);
 	ticks_run_ = static_cast<int32_t>(p_value.ticks.size());
 	tick_us_ = p_value.perf.tick_us;
-	error_ = String::utf8(p_value.error.message.c_str());
+	error_ = opennova::to_gd(p_value.error.message);
 }
 
 } // namespace godot

@@ -22,6 +22,7 @@
 
 #include "env/mission_environment.h"
 #include "env/weather.h"
+#include "render/world_environment_lookup.h"
 #include "lights/light_scene.h"
 #include "object/object_model.h"
 #include "resource_index/resource_root.h"
@@ -41,21 +42,6 @@ namespace {
 // side draws frame N while the main thread compiles N + 1, so a target
 // published in frame N is free to release two main-thread frames later.
 constexpr uint32_t kTargetReleaseFrameLag = 2;
-
-WorldEnvironment *find_world_environment(Node *p_root) {
-	if (p_root == nullptr) {
-		return nullptr;
-	}
-	if (WorldEnvironment *environment = Object::cast_to<WorldEnvironment>(p_root)) {
-		return environment;
-	}
-	for (int i = 0; i < p_root->get_child_count(); ++i) {
-		if (WorldEnvironment *environment = find_world_environment(p_root->get_child(i))) {
-			return environment;
-		}
-	}
-	return nullptr;
-}
 
 RenderingDevice *main_rendering_device() {
 	RenderingServer *server = RenderingServer::get_singleton();
@@ -200,8 +186,6 @@ void SlotShadow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_local_player_prone", "prone"),
 			&SlotShadow::set_local_player_prone);
 	ClassDB::bind_method(D_METHOD("advance_frame"), &SlotShadow::advance_frame);
-	ClassDB::bind_method(D_METHOD("set_gpu_timing_enabled", "enabled"),
-			&SlotShadow::set_gpu_timing_enabled);
 	ClassDB::bind_method(D_METHOD("get_report"), &SlotShadow::get_report);
 	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_capture_count"),
 			&SlotShadow::get_capture_count);

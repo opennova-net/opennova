@@ -3,11 +3,11 @@
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
+#include "network/random_id.h"
+#include "util/data_format.h"
 #include "util/string_convert.h"
 
 #include <cstdint>
-#include <cstring>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -17,32 +17,18 @@ namespace {
 
 constexpr const char *DEFAULT_BROADCAST = "255.255.255.255";
 
-uint32_t pick_random_uint32() {
-	static thread_local std::mt19937 gen{std::random_device{}()};
-	return std::uniform_int_distribution<uint32_t>(1)(gen);
-}
-
-PackedByteArray to_packed_bytes(const std::vector<uint8_t> &bytes) {
-	PackedByteArray out;
-	out.resize(static_cast<int>(bytes.size()));
-	if (!bytes.empty()) {
-		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
-	}
-	return out;
-}
-
 Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row) {
 	// Retail hosts advertise the typed server name in the host's single-byte
 	// codepage (cp1252), never UTF-8.
 	Ref<LanServerRow> out = LanServerRow::make(
 			opennova::cp1252_to_gd(row.server.server_name),
-			String::utf8(row.host_ip.c_str()), static_cast<int>(row.port));
+			opennova::to_gd(row.host_ip), static_cast<int>(row.port));
 	out->set_players(static_cast<int>(row.server.current_players));
 	out->set_max_players(static_cast<int>(row.server.max_players));
 	out->set_gametype(static_cast<int64_t>(row.server.gametype));
 	out->set_server_flags(static_cast<int64_t>(row.server.server_flags));
-	out->set_session_id(String::utf8(row.server.session_id.c_str()));
-	out->set_expansion(String::utf8(row.server.expansion.c_str()));
+	out->set_session_id(opennova::to_gd(row.server.session_id));
+	out->set_expansion(opennova::to_gd(row.server.expansion));
 	return out;
 }
 
@@ -170,7 +156,7 @@ void LanSession::poll_replies() {
 	bool changed = false;
 	while (socket_.is_valid() && socket_->get_available_packet_count() > 0) {
 		const PackedByteArray packet = socket_->get_packet();
-		const std::string source_ip(socket_->get_packet_ip().utf8().get_data());
+		const std::string source_ip = opennova::to_std(socket_->get_packet_ip());
 		const int source_port = static_cast<int>(socket_->get_packet_port());
 		if (browser_.accept_reply(packet.ptr(), static_cast<size_t>(packet.size()),
 					source_ip, source_port) != opennova::LanRowChange::kNone)

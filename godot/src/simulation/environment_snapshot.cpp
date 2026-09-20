@@ -1,11 +1,12 @@
 #include "simulation/environment_snapshot.h"
 
 #include "util/record_bind.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
-String EnvironmentSnapshot::get_env_name() const { return String::utf8(value_.env_name.c_str()); }
-String EnvironmentSnapshot::get_trn_name() const { return String::utf8(value_.trn_name.c_str()); }
+String EnvironmentSnapshot::get_env_name() const { return opennova::to_gd(value_.env_name); }
+String EnvironmentSnapshot::get_trn_name() const { return opennova::to_gd(value_.trn_name); }
 
 void EnvironmentSnapshot::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(EnvironmentSnapshot, Variant::BOOL, valid)
