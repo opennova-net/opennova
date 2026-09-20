@@ -314,7 +314,7 @@ func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: i
 	rows.append(_menu_text("NONE", "None"))  # NONE at index 0 [orig: @ 0x560430]
 	defs.append(null)
 	for w: WeaponDef in _weapons.get_slot_weapons(slot, class_mask, team_mask):
-		rows.append(LoadoutLabels.weapon_label(w))
+		rows.append(_weapons.weapon_label(w.index, Strings.get_table(Strings.TABLE_GAMETEXT)))
 		defs.append(w)
 	_slot_rows[control] = defs
 	_set_combo_items(combo, rows)
@@ -386,10 +386,12 @@ func _populate_slot_ammo(control: String) -> void:
 		if has_ammo:
 			var maxclips := w.maxclips
 			var rows := PackedStringArray()
-			# Rows 1..maxclips: "%d - %s" = rounds + round label; row value = the
-			# clip count (retail keys rows by the def index; ours by position).
+			# Rows 1..maxclips: the engine's "<rounds> - <round label>" row; row
+			# value = the clip count (retail keys rows by the def index; ours by
+			# position).
 			for clips in range(1, maxclips + 1):
-				rows.append(LoadoutLabels.ammo_row_label(w, clips))
+				rows.append(_weapons.ammo_row_label(w.index, clips,
+						Strings.get_table(Strings.TABLE_GAMETEXT)))
 			_set_combo_items(ammo1, rows)
 			# Saved count selects its row; -1/absent = the maxclips row (full
 			# default) [orig: the `saved == i || (saved == -1 && i == maxclips)`
@@ -423,7 +425,8 @@ func _populate_slot_ammo(control: String) -> void:
 			var sub_max := sub.maxclips
 			var rows2 := PackedStringArray()
 			for clips in range(1, sub_max + 1):
-				rows2.append(LoadoutLabels.ammo_row_label(sub, clips))
+				rows2.append(_weapons.ammo_row_label(sub.index, clips,
+						Strings.get_table(Strings.TABLE_GAMETEXT)))
 			_set_combo_items(ammo2, rows2)
 			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
 			_driver.select_row(ammo2,
@@ -463,7 +466,8 @@ func _populate_grenades(class_mask: int, team_mask: int) -> void:
 		var maxclips := w.maxclips
 		var rows := PackedStringArray()
 		for clips in range(0, maxclips + 1):
-			rows.append(LoadoutLabels.ammo_row_label(w, clips))
+			rows.append(_weapons.ammo_row_label(w.index, clips,
+					Strings.get_table(Strings.TABLE_GAMETEXT)))
 		_set_combo_items(combo, rows)
 		var saved := int(_ammo_pri.get(w.index, -1))
 		_driver.select_row(combo,
@@ -582,19 +586,12 @@ func _update_weight() -> void:
 		var g := _grenade_rows[i]
 		var saved := int(_ammo_pri.get(g.index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
 		total += _weapons.extra_ammo_weight(g.index, saved)
-	var band := _weapons.encumbrance_class(total)
-	var encumbrance := Strings.menu_text("LIGHT_ENCUMBRANCE", "Light")
-	if band == WeaponDatabase.ENCUMBRANCE_HEAVY:
-		encumbrance = Strings.menu_text("HEAVY_ENCUMBRANCE", "Heavy")
-	elif band == WeaponDatabase.ENCUMBRANCE_NORMAL:
-		encumbrance = Strings.menu_text("NORMAL_ENCUMBRANCE", "Normal")
 	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
-		# [orig: update_player_info_weight_and_weapon_icons @ 0x55f480 —
-		#  sprintf "%s %.1f %s (%s)", keys TOTAL_WEIGHT / LBS / *_ENCUMBRANCE]
-		_driver.set_widget_text(label, "%s %.1f %s (%s)" % [
-			Strings.menu_text("TOTAL_WEIGHT", "Total Weight"), total,
-			Strings.menu_text("LBS", "lbs"), encumbrance])
+		# The readout's format, bands and menu tokens are the engine's
+		# (loadout_labels.h loadout_weight_line).
+		_driver.set_widget_text(label, WeaponDatabase.loadout_weight_line(total,
+				Strings.get_table(Strings.TABLE_MENUTXT), Strings.get_table(Strings.TABLE_GAMEUI)))
 
 
 # Texture the PRIMARY/SECONDARY/ACCESSORY_ICON windows from the selected def's

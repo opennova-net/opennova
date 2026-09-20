@@ -4,6 +4,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
@@ -16,6 +18,7 @@
 namespace godot {
 
 class ResourceRoot;
+class RtxtStringFile;
 
 // Thin GDExtension wrapper over engine/formats/def weapon.def parsing (def_parse_weapons), surfacing
 // the PLAYER_INFO loadout slice: per-slot weapon lists filtered by the selected class + team,
@@ -157,6 +160,18 @@ public:
 			const PackedInt32Array &p_grenade_indices,
 			const PackedInt32Array &p_grenade_ammo_primary,
 			const PackedInt32Array &p_grenade_ammo_secondary) const;
+	// The loadout screens' shared text compositions (one impl in
+	// engine/runtime/menu loadout_labels.h): the WepDes weapon label with its
+	// raw-id fallback, the "<rounds> - <round label>" ammo row (an index no row
+	// carries takes the null-def "<clips> - " form), the WEAPON screen's
+	// case-insensitive row order over display labels, and the weight readout
+	// with its encumbrance band token (the Menu-section fold: menutxt first,
+	// then gameui, then the fallback).
+	String weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const;
+	String ammo_row_label(int p_index, int p_clips, const Ref<RtxtStringFile> &p_gametext) const;
+	static PackedInt32Array armory_slot_order(const PackedStringArray &p_labels);
+	static String loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
+			const Ref<RtxtStringFile> &p_gameui);
 	// The armory screen's open-time class policy (one impl in
 	// engine/runtime/world player_loadout.h (engine: runtime/world/player_loadout.cpp)): the current class when the S2C 0x76 allow mask permits it,
 	// else scan up through 9, else gunner (7); and the class filter bit

@@ -8,7 +8,10 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 
+#include "rtxt/rtxt_string_file.h" // the string-table document + the game_text_lookup factory
+
 #include <formats/def/def.h>
+#include <runtime/menu/loadout_labels.h> // the loadout screens' labels, row order and weight line
 #include <runtime/menu/player_info_kit.h> // the PLAYER_INFO voice list + kit page order
 #include <runtime/world/player_loadout.h> // armory class policy (ADR 0016: one impl)
 
@@ -74,6 +77,15 @@ void WeaponDatabase::_bind_methods() {
 								 "slot_ammo_primary", "slot_ammo_secondary", "slot_flags",
 								 "grenade_indices", "grenade_ammo_primary", "grenade_ammo_secondary"),
 			&WeaponDatabase::player_info_kit_entries);
+	ClassDB::bind_method(D_METHOD("weapon_label", "index", "gametext"),
+			&WeaponDatabase::weapon_label);
+	ClassDB::bind_method(D_METHOD("ammo_row_label", "index", "clips", "gametext"),
+			&WeaponDatabase::ammo_row_label);
+	ClassDB::bind_static_method("WeaponDatabase", D_METHOD("armory_slot_order", "labels"),
+			&WeaponDatabase::armory_slot_order);
+	ClassDB::bind_static_method("WeaponDatabase",
+			D_METHOD("loadout_weight_line", "total", "menutxt", "gameui"),
+			&WeaponDatabase::loadout_weight_line);
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("armory_resolve_selected_class", "player_class", "class_allow_mask"),
 			&WeaponDatabase::armory_resolve_selected_class);
@@ -249,6 +261,41 @@ int WeaponDatabase::player_info_class_mask(int p_playerclass_value) {
 
 int WeaponDatabase::default_clip_row(int p_saved, int p_maxclips) {
 	return opennova::world::player_info_default_clip_row(p_saved, p_maxclips);
+}
+
+String WeaponDatabase::weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const {
+	const opennova::def::DefWeaponDef *w = row(p_index);
+	if (w == nullptr) return String();
+	return String::utf8(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)).c_str());
+}
+
+String WeaponDatabase::ammo_row_label(int p_index, int p_clips,
+		const Ref<RtxtStringFile> &p_gametext) const {
+	return String::utf8(opennova::menu::ammo_row_label(row(p_index), p_clips,
+			game_text_lookup(p_gametext)).c_str());
+}
+
+PackedInt32Array WeaponDatabase::armory_slot_order(const PackedStringArray &p_labels) {
+	std::vector<std::string> labels;
+	labels.reserve(static_cast<size_t>(p_labels.size()));
+	for (int i = 0; i < p_labels.size(); ++i) labels.push_back(p_labels[i].utf8().get_data());
+	PackedInt32Array out;
+	for (int index : opennova::menu::armory_slot_order(labels)) out.push_back(index);
+	return out;
+}
+
+String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
+		const Ref<RtxtStringFile> &p_gameui) {
+	// The menu-token fold: menutxt's Menu section, then gameui's, else the
+	// fallback [orig: TextResource_GetStringWithFallback(resource, "Menu", key)
+	// @0x562ee0 against the menu resource].
+	const opennova::hud::GameTextLookup menutxt = game_text_lookup(p_menutxt);
+	const opennova::hud::GameTextLookup gameui = game_text_lookup(p_gameui);
+	const opennova::hud::GameTextLookup menu_text =
+			[&menutxt, &gameui](const char *section, const char *key, const char *fallback) {
+				return menutxt(section, key, gameui(section, key, fallback).c_str());
+			};
+	return String::utf8(opennova::menu::loadout_weight_line(p_total, menu_text).c_str());
 }
 
 static_assert(godot::WeaponDatabase::DEFAULT_VOICE_VALUE == opennova::menu::kDefaultVoiceValue,

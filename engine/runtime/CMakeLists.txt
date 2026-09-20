@@ -52,6 +52,7 @@ add_library(opennova_runtime STATIC
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/player_info_kit.cpp # the PLAYER_INFO voice list + weapon.sav kit page order
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_labels.cpp # the loadout screens' labels, row order and weight readout
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # the boot policy, and the ONE mission kernel (boot + state + no-net tick,
     # ADR 0042 d3) evaluated against the shared runtime world

@@ -286,19 +286,18 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 	# The map availability term: banned (0) weapons never list; every nonzero value
 	# (allowed / armory-zone-only / mission-allowed) does
 	# [orig: the !g_armoryWeaponAvailability[i] skip @0x566e6b].
-	# Rows are sorted case-insensitively ascending by display label before NONE is
-	# prepended at row 0 [orig: ListWidget_SortRows -> cmp @0x6448a0 with (string, asc);
-	# NONE inserted at 0 @0x566f15].
-	var labeled: Array = []
+	# The rows take the engine's order (case-insensitive ascending by display
+	# label, loadout_labels.h armory_slot_order); NONE is prepended at row 0.
+	var gametext := Strings.get_table(Strings.TABLE_GAMETEXT)
+	var labels := PackedStringArray()
 	for w: WeaponDef in defs:
-		labeled.append([LoadoutLabels.weapon_label(w), w])
-	labeled.sort_custom(func(a, b): return String(a[0]).nocasecmp_to(String(b[0])) < 0)
+		labels.append(_weapons.weapon_label(w.index, gametext))
 	var rows := PackedStringArray()
 	rows.append(Strings.menu_text("NONE", "None"))
 	var sorted: Array[WeaponDef] = []
-	for pair in labeled:
-		rows.append(pair[0])
-		sorted.append(pair[1])
+	for i in WeaponDatabase.armory_slot_order(labels):
+		rows.append(labels[i])
+		sorted.append(defs[i])
 	_slot_rows[control] = sorted
 	_set_combo_items(combo, rows)
 	# Each slot re-selects its row from the canonical parent tuples [orig: UIList_SelectByValue @0x645240
@@ -341,7 +340,8 @@ func _populate_grenades(team_mask: int) -> void:
 		var maxclips := w.maxclips if allowed else 0
 		var rows := PackedStringArray()
 		for clips in range(0, maxclips + 1):
-			rows.append(LoadoutLabels.ammo_row_label(w, clips))
+			rows.append(_weapons.ammo_row_label(w.index if w != null else -1, clips,
+					Strings.get_table(Strings.TABLE_GAMETEXT)))
 		_set_combo_items(combo, rows)
 		if w != null:
 			_driver.select_row(combo, _current_grenade_clips(w.name, maxclips), false)
@@ -379,8 +379,8 @@ func _on_slot_selected(control: String) -> void:
 
 
 # Clip-count rows for the slot's ammo combo. Retail row 0 means one clip, shows
-# clipsize rounds, and serializes as 1; row maxclips-1 is the full load
-# [orig: @0x564c7d..0x564ce4, sprintf "%d - %s"].
+# clipsize rounds, and serializes as 1; row maxclips-1 is the full load (the
+# row label is the engine's, loadout_labels.h ammo_row_label).
 func _populate_ammo(control: String) -> void:
 	var combo := _id(control + "_AMMO1")
 	if combo < 0:
@@ -388,8 +388,9 @@ func _populate_ammo(control: String) -> void:
 	var w := selected_weapon(control)
 	var rows := PackedStringArray()
 	var maxclips := w.maxclips if w != null else 0
+	var gametext := Strings.get_table(Strings.TABLE_GAMETEXT)
 	for clips in range(1, maxclips + 1):
-		rows.append(LoadoutLabels.ammo_row_label(w, clips))
+		rows.append(_weapons.ammo_row_label(w.index, clips, gametext))
 	_set_combo_items(combo, rows)
 	if not rows.is_empty():
 		var clips := int(_current_parent_clips.get(control, -1))
@@ -440,14 +441,12 @@ func _selected_grenade_loadout() -> Array[Dictionary]:
 # Total loadout weight = weaponweight + clips * clipweight per selected slot (the
 # WEAPON screen weighs the selected ammo TYPE's own def — deferred with the type
 # combos) [orig: calculate_equipped_weapons_weight @0x565490 — adm[85]/65536 +
-# (row+1) * ammoDef[84]/65536]. Rendered into STATIC_TOTAL_WEIGHT as
-# "<TOTAL_WEIGHT> <w> <LBS> (<encumbrance>)" with the witnessed encumbrance bands
-# <33.3 LIGHT / <66.6 NORMAL / else HEAVY [orig: update_weapon_weight_display
-# @0x565640 — sprintf "%s %.1f %s (%s)"].
-# The parent-slot sum and the encumbrance bands ride the engine/formats/def port shared
-# with PLAYER_INFO (WeaponDatabase.loadout_weight/encumbrance_class —
-# [orig: calculate_loadout_weight @0x55f1f0 sibling]; ctest def_loadout_weight
-# pins the formula and the exact thresholds).
+# (row+1) * ammoDef[84]/65536]. The readout into STATIC_TOTAL_WEIGHT — the
+# format, the encumbrance bands and their menu tokens — is the engine's
+# (loadout_labels.h loadout_weight_line), as is the parent-slot sum shared with
+# PLAYER_INFO (WeaponDatabase.loadout_weight — [orig: calculate_loadout_weight
+# @0x55f1f0 sibling]; ctest def_loadout_weight pins the formula and the exact
+# thresholds).
 
 func _update_weight() -> void:
 	if _weapons == null:
@@ -471,17 +470,10 @@ func _update_weight() -> void:
 		# retail adds selected_row * adm[84] only [orig: @0x5655c9..0x56561c —
 		# the def_extra_ammo_weight term].
 		total += _weapons.extra_ammo_weight(_grenade_rows[i].index, clips)
-	var band := _weapons.encumbrance_class(total)
-	var encumbrance := Strings.menu_text("LIGHT_ENCUMBRANCE", "Light")
-	if band == WeaponDatabase.ENCUMBRANCE_HEAVY:
-		encumbrance = Strings.menu_text("HEAVY_ENCUMBRANCE", "Heavy")
-	elif band == WeaponDatabase.ENCUMBRANCE_NORMAL:
-		encumbrance = Strings.menu_text("NORMAL_ENCUMBRANCE", "Normal")
 	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
-		_driver.set_widget_text(label, "%s %.1f %s (%s)" % [
-			Strings.menu_text("TOTAL_WEIGHT", "Total Weight"), total,
-			Strings.menu_text("LBS", "lbs"), encumbrance])
+		_driver.set_widget_text(label, WeaponDatabase.loadout_weight_line(total,
+				Strings.get_table(Strings.TABLE_MENUTXT), Strings.get_table(Strings.TABLE_GAMEUI)))
 	_update_icons()
 
 

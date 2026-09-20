@@ -1141,6 +1141,13 @@ add_test(NAME script_remote_command COMMAND script_remote_command_test)
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the
 # per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
+# The loadout screens' shared text compositions (menu/loadout_labels.h): the WepDes
+# weapon label, the ammo row, the armory row order and the weight readout.
+add_executable(loadout_labels_test menu/loadout_labels_test.cpp)
+target_link_libraries(loadout_labels_test PRIVATE opennova_runtime)
+target_compile_features(loadout_labels_test PRIVATE cxx_std_17)
+add_test(NAME loadout_labels COMMAND loadout_labels_test)
+
 add_executable(player_info_kit_test menu/player_info_kit_test.cpp)
 target_link_libraries(player_info_kit_test PRIVATE opennova_runtime)
 target_compile_features(player_info_kit_test PRIVATE cxx_std_17)
