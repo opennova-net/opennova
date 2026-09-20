@@ -267,6 +267,16 @@ void test_index_and_frameless() {
 	CHECK(rt.index().node_count() == 20);
 	CHECK(rt.index().screen_ids() == (std::vector<int>{ 1, 17 }));
 	CHECK(rt.index().screen_root_id(17) == 18);
+	// The tree the document binding reads through: a screen container has no
+	// parent and one child (its root window); a root window's parent is its
+	// screen; children keep authored order; a window id is not a screen.
+	CHECK(rt.index().node(1)->parent_id == 0 && rt.index().node(1)->window == nullptr &&
+			rt.index().node(1)->child_ids == (std::vector<int>{ 2 }));
+	CHECK(rt.index().node(2)->parent_id == 1 && rt.index().node(3)->parent_id == 2 &&
+			rt.index().node(2)->child_ids.size() == 14 && rt.index().node(2)->child_ids[1] == 4);
+	CHECK(rt.index().screen(1) != nullptr && rt.index().screen(2) == nullptr &&
+			rt.index().screen_root_id(2) == -1 && rt.index().node(0) == nullptr &&
+			rt.index().node(21) == nullptr);
 	// The name seam: case-insensitive, first match in document order.
 	CHECK(rt.widget_id("play") == 3 && rt.widget_id("PLAY") == 3);
 	CHECK(rt.widget_id("missing") == -1);

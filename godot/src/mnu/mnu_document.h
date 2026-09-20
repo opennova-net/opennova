@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <formats/mnu/mnu.h>
+#include <runtime/menu/menu_runtime.h> // MenuDocIndex (the positional id tree)
 
 #include "mnu/mnu_rows.h"
 
@@ -26,8 +27,8 @@ namespace godot {
 // deleted 2026-09-02.
 //
 // Widgets are addressed by a positional integer id: screens and windows are
-// numbered in one pre-order walk at load (rebuild_ids), unique across both
-// screens and windows within one document instance.
+// numbered in one pre-order walk at load, unique across both within one
+// document instance — the engine's MenuDocIndex, shared with the menu runtime.
 class MnuDocument : public Resource {
 	GDCLASS(MnuDocument, Resource)
 
@@ -93,39 +94,14 @@ public:
 	};
 
 private:
-	// Parallel id tree, kept structurally identical to doc_ so a lockstep walk
-	// maps an id to its opennova::mnu::Window/Screen. One IdWindow mirrors one opennova::mnu::Window.
-	struct IdWindow {
-		int id = 0;
-		std::vector<IdWindow> children;
-	};
-	struct IdScreen {
-		int id = 0;
-		IdWindow root;
-	};
-
 	opennova::mnu::Document doc_;
-	std::vector<IdScreen> ids_;
-	int next_id_ = 1;
+	// The positional id tree (engine/runtime/menu MenuDocIndex): screens and
+	// windows numbered in one pre-order walk, the SAME numbering the menu
+	// runtime addresses widgets by. Rebuilt after every load; it points into
+	// doc_, which is never mutated in place.
+	opennova::menu::MenuDocIndex index_;
 
-	// Build a fresh id tree mirroring doc_ (used after load / structural rebuild).
 	void rebuild_ids();
-	IdWindow make_id_window(const opennova::mnu::Window &w);
-
-	// Locate an id. screen_index == -1 means "not found". is_screen marks a
-	// screen container; otherwise path is the child-index chain from the
-	// screen's root_window (empty path == the root_window itself).
-	struct Locator {
-		int screen_index = -1;
-		std::vector<int> path;
-		bool is_screen = false;
-		bool valid() const { return screen_index >= 0; }
-	};
-	Locator locate(int id) const;
-	static bool find_in_id_window(const IdWindow &node, int id, std::vector<int> &path);
-
-	opennova::mnu::Window *window_at(const Locator &loc);
-	const opennova::mnu::Window *window_at(const Locator &loc) const;
 
 	// The opennova::mnu::Appearance state string of a texture slot.
 	static const char *state_for_slot(int slot);
