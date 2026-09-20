@@ -11,14 +11,6 @@
 
 namespace opennova::menu {
 
-namespace {
-
-mnu::RectEdges offset_rect(const mnu::RectEdges &rect, int dx, int dy) {
-	return { rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy };
-}
-
-} // namespace
-
 bool MenuFrameCompiler::resolve_scrollbar_rect(
 		const WidgetNode &node, ScrollbarKind kind, const mnu::RectEdges &owner,
 		int fallback_top, int fallback_height, int fallback_width,

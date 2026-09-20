@@ -15,6 +15,7 @@
 // capture (5, 10, 20, ... 220). Unset, that half prints a skip line and passes.
 #include <formats/score/score.h>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -29,23 +30,12 @@ namespace {
 
 using namespace opennova;
 
-std::vector<uint8_t> read_file(const std::string &path) {
-	std::ifstream in(path, std::ios::binary | std::ios::ate);
-	if (!in.good()) return {};
-	const std::streamsize size = in.tellg();
-	in.seekg(0, std::ios::beg);
-	std::vector<uint8_t> data(static_cast<size_t>(size));
-	in.read(reinterpret_cast<char *>(data.data()), size);
-	if (!in.good()) return {};
-	return data;
-}
-
 } // namespace
 
 int main() {
 	const std::string fixture =
 			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/score/score_sample.ini";
-	const std::vector<uint8_t> bytes = read_file(fixture);
+	const std::vector<uint8_t> bytes = test_io::read_file(fixture);
 	TEST_EXPECT(!bytes.empty());
 
 	score::File file;
@@ -115,7 +105,7 @@ int main() {
 	if (retail_ini.empty() || !retail::file_exists(retail_ini)) {
 		retail::skip_leg("OPENNOVA_JO_DIR/score.ini (the retail score table beside the archives)");
 	} else {
-		const std::vector<uint8_t> rbytes = read_file(retail_ini.c_str());
+		const std::vector<uint8_t> rbytes = test_io::read_file(retail_ini.c_str());
 		TEST_EXPECT(!rbytes.empty());
 		{
 			score::File rfile;

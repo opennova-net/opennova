@@ -16,7 +16,6 @@
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_part_anim.h>
-#include <runtime/world/vehicle_sound.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>

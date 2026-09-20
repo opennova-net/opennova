@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 
 namespace opennova {
@@ -56,6 +57,11 @@ constexpr int32_t bam_abs(int32_t v)
 // constant and says so; everything else uses these.
 constexpr double kRadiansPerBam = 6.283185307179586 / 4294967296.0;
 constexpr double kBamPerRadian = 4294967296.0 / 6.283185307179586;
+
+// Radians to the nearest BAM32, wrapped to the signed 32-bit turn.
+inline int32_t bam_from_radians(double radians) {
+	return static_cast<int32_t>(static_cast<int64_t>(std::llround(radians * kBamPerRadian)));
+}
 
 // The plain angle constants every port aliases (the same one-home rule as the
 // BAM scales above): pi and the degree <-> radian scales.

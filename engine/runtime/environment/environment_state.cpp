@@ -209,10 +209,6 @@ int EnvironmentState::mission_time_fixed24() const {
 	return static_cast<int>(weather_->tod_fixed24);
 }
 
-double EnvironmentState::mission_start_time_hhmm(int start_time_q8_8) {
-	return fixed24_to_hhmm(tod_start_fixed24(start_time_q8_8));
-}
-
 // --- the weather-home reads --------------------------------------------------
 
 void EnvironmentState::sync_clock_from_weather() {

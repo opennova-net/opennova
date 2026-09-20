@@ -2,9 +2,9 @@
 
 // The mission document's edit operations and typed views as free functions
 // over the parsed bms::File (ADR 0043 slice E11: the MissionDocument facade
-// died -- the file IS the document; the one stateful consumer, the ONED
-// binding, keeps its own source path, last error and loaded/header-only
-// facts). Every witnessed rule the facade carried (the fixed-width slot
+// died -- the file IS the document; the one stateful consumer, the
+// MissionData binding, keeps its own source path, last error and
+// loaded/header-only facts). Every witnessed rule the facade carried (the fixed-width slot
 // copies, the clamps, the chain-index bookkeeping, the reference repairs)
 // lives here unchanged; each body keeps its citation.
 

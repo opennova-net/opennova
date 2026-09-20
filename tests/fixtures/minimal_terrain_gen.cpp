@@ -28,6 +28,7 @@
 #include <formats/trn/trn_io.h>
 #include <runtime/terrain_query/height_field.h>
 
+#include "common/file_io.h"
 #include "common/test_paths.h"
 
 #include <algorithm>
@@ -234,17 +235,6 @@ IndexedImage8 make_foliage_map() {
 	return image;
 }
 
-bool read_file(const std::string &path, std::vector<uint8_t> &out) {
-	std::ifstream f(path, std::ios::binary | std::ios::ate);
-	if (!f) return false;
-	const std::streamoff sz = f.tellg();
-	if (sz < 0) return false;
-	f.seekg(0);
-	out.resize(static_cast<size_t>(sz));
-	if (!out.empty()) f.read(reinterpret_cast<char *>(out.data()), static_cast<std::streamsize>(out.size()));
-	return true;
-}
-
 int guard(const std::string &path, const std::vector<uint8_t> &bytes, bool write_mode) {
 	if (write_mode) {
 		std::ofstream o(path, std::ios::binary);
@@ -253,7 +243,7 @@ int guard(const std::string &path, const std::vector<uint8_t> &bytes, bool write
 		return 0;
 	}
 	std::vector<uint8_t> committed;
-	if (!expect(read_file(path, committed), (path + " missing; run with --write").c_str())) return 1;
+	if (!expect(test_io::read_file(path, committed), (path + " missing; run with --write").c_str())) return 1;
 	static const char kLfsSentinel[] = "version https://git-lfs";
 	if (committed.size() >= sizeof(kLfsSentinel) - 1 &&
 	    std::memcmp(committed.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0) {
@@ -296,7 +286,7 @@ int main(int argc, char **argv) {
 	const std::string cpt_tmp = std::string(test_paths_temp_dir()) + "/minimal_terrain_gen_tmap.cpt";
 	cpt.write(cpt_tmp);
 	std::vector<uint8_t> cpt_bytes;
-	failures += !expect(read_file(cpt_tmp, cpt_bytes), "read the written Tmap.cpt");
+	failures += !expect(test_io::read_file(cpt_tmp, cpt_bytes), "read the written Tmap.cpt");
 	std::filesystem::remove(cpt_tmp);
 	CptFile parsed;
 	std::string cpt_err;

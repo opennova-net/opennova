@@ -24,6 +24,15 @@ struct Rgb {
 	float b = 0.0f;
 };
 
+// A packed 0xRRGGBB colour as 0..1 floats.
+inline Rgb packed_to_rgb01(uint32_t packed) {
+	Rgb c;
+	c.r = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
+	c.g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
+	c.b = static_cast<float>(packed & 0xFF) / 255.0f;
+	return c;
+}
+
 struct Vec3 {
 	float x = 0.0f;
 	float y = 0.0f;

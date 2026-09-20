@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 #include <formats/cbin/cbin.h>
 
@@ -21,16 +22,6 @@
 #endif
 
 namespace {
-
-bool load_file(const std::string &path, std::vector<uint8_t> &out) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return false;
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
-    out.resize(static_cast<size_t>(size));
-    file.read(reinterpret_cast<char *>(out.data()), size);
-    return file.good();
-}
 
 struct Expect {
     bool pin_env;  // the three ENV values below are asserted (the BHD title authors its own)
@@ -47,7 +38,7 @@ struct Expect {
 int check_list(const char *label, const std::string &path, const Expect &expect) {
     int failures = 0;
     std::vector<uint8_t> original;
-    if (!load_file(path, original)) {
+    if (!test_io::read_file(path, original)) {
         std::cerr << "FAIL: cannot load " << label << ": " << path << std::endl;
         return 1;
     }

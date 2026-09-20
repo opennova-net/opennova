@@ -9,23 +9,12 @@
 #include <string>
 #include <vector>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include <formats/lwf/lwf.h>
 
 namespace {
-
-std::vector<uint8_t> read_file(const std::string &path) {
-	std::ifstream file(path, std::ios::binary | std::ios::ate);
-	if (!file.good()) {
-		return {};
-	}
-	const std::streamsize size = file.tellg();
-	file.seekg(0, std::ios::beg);
-	std::vector<uint8_t> data(static_cast<size_t>(size));
-	file.read(reinterpret_cast<char *>(data.data()), size);
-	return file.good() ? data : std::vector<uint8_t>{};
-}
 
 std::string to_upper(std::string s) {
 	for (char &c : s) {
@@ -77,7 +66,7 @@ int main() {
 	const std::string root = test_paths_repo_root(__FILE__);
 	const std::string menu_lwf = root + "/fixtures/lwf/menu.lwf";
 
-	const std::vector<uint8_t> bytes = read_file(menu_lwf);
+	const std::vector<uint8_t> bytes = test_io::read_file(menu_lwf);
 	TEST_EXPECT(!bytes.empty());
 
 	opennova::lwf::File file;

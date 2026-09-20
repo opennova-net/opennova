@@ -4,6 +4,8 @@
 // contract, and a deterministic blank-font write/reload.
 #include <formats/fnt/fnt.h>
 
+#include "common/file_io.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -27,14 +29,9 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
-std::vector<uint8_t> read_file(const std::string &path) {
-	std::ifstream f(path, std::ios::binary);
-	return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-}
-
 bool parse_fixture(const char *name, uint32_t expected_pages) {
 	const std::string path = std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/fnt/" + name;
-	std::vector<uint8_t> bytes = read_file(path);
+	std::vector<uint8_t> bytes = test_io::read_file(path);
 	if (!expect(!bytes.empty(), "fixture should be readable")) return false;
 
 	uint32_t page_count = 0;
@@ -85,7 +82,7 @@ int main() {
 	// [orig: GameFont_LoadFromBlob @ 0x674740]. Our reader must match: accept + carry it.
 	{
 		std::vector<uint8_t> bytes =
-		    read_file(std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/fnt/synth_1page.fnt");
+		    test_io::read_file(std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/fnt/synth_1page.fnt");
 		if (!expect(!bytes.empty() && bytes.size() >= 8, "fixture readable for D-FNT-1")) return 1;
 		fnt_font_t f0;
 		if (!expect(fnt_parse(bytes.data(), bytes.size(), &f0) == FNT_OK, "800-design font parses")) return 1;

@@ -12,7 +12,6 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_mount.h>
 #include <runtime/world/vehicle_part_anim.h>
-#include <runtime/world/vehicle_sound.h>
 #include <runtime/world/vehicle_suspension.h>
 
 #include <cstdint>

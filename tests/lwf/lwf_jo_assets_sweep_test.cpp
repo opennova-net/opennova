@@ -14,19 +14,10 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 
 namespace {
-
-std::vector<uint8_t> read_file(const std::string &path) {
-	std::ifstream file(path, std::ios::binary | std::ios::ate);
-	if (!file.good()) return {};
-	const std::streamsize size = file.tellg();
-	file.seekg(0, std::ios::beg);
-	std::vector<uint8_t> data(static_cast<size_t>(size));
-	file.read(reinterpret_cast<char *>(data.data()), size);
-	return file.good() ? data : std::vector<uint8_t>{};
-}
 
 bool is_profile(const std::filesystem::path &path) {
 	std::string ext = path.extension().string();
@@ -36,7 +27,7 @@ bool is_profile(const std::filesystem::path &path) {
 
 int check(const std::filesystem::path &path) {
 	const std::string name = path.filename().string();
-	const std::vector<uint8_t> original = read_file(path.string());
+	const std::vector<uint8_t> original = test_io::read_file(path.string());
 	if (original.empty()) {
 		std::printf("FAIL: %s unreadable or empty\n", name.c_str());
 		return 1;
