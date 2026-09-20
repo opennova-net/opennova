@@ -9,7 +9,7 @@ session handshake, the browser/host/play container services, and the legacy
 
 | Listener | Port | Protocol |
 | --- | --- | --- |
-| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) |
+| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
 | `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> PN dispatch: NOVAWORLDUDP containers or JointOperations game runtime |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 
@@ -37,7 +37,7 @@ reasons (`ConnectionManager::DropReason`):
 | Reason | Trigger |
 | --- | --- |
 | `Logout` | `ClientGoodBye` (0x46) or `ClientStopHosting` |
-| `Timeout` | no heartbeat within `heartbeat_timeout_ms` (default 120 s) |
+| `Timeout` | receive silence strictly longer than the cs[0] timeout the 0x82 SessionInit advertises (240 s, `novaworldudp_session_timeout_ms()`; not configurable, so the reap can never disagree with the contract the peer was told) |
 | `Replaced` | a new `ClientHello` from the same address evicts the prior entry |
 | `Shutdown` | the server is stopping |
 
@@ -56,9 +56,15 @@ cascade. At boot the table is wiped entirely (previous-run cleanup).
 
 All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
 `ONNET_{GATE_UDP,NW_UDP,HTTP}_PORT`, `DATABASE_PATH`, `MIGRATIONS_DIR`, `SEED_DIR`,
-`TEMPLATES_DIR`, `STATIC_DIR`, `WEB_DIST_DIR`, `HEARTBEAT_TIMEOUT_MS`,
+`TEMPLATES_DIR`, `STATIC_DIR`, `WEB_DIST_DIR`,
 `TICK_INTERVAL_MS`, `HOST_SWEEP_INTERVAL_MS`, `HOST_STALE_WINDOW_MS`,
-`ADMIN_API_TOKEN`. Expansion-publish pipeline: `EXPANSION_GITHUB_TOKEN` (PAT the
+`ADMIN_API_TOKEN`. Gate extras (all optional): the MET endpoint
+`ONNET_MET_IP`, `ONNET_MET_PORT`, `ONNET_MET_LABEL`, `ONNET_MET_PING`,
+`ONNET_MET_EXT` (emitted as the METIPADDRESS family when `ONNET_MET_IP` is set)
+and the GLSVSS leg `ONNET_GLSVSS_REQUEST`, `ONNET_GLSVSS_RIMS`,
+`ONNET_GLSVSS_AGRMS` (the gate VARs) plus `ONNET_GLSVSS_RESULTS` (what
+`ClientGLSVSSRequest` is answered with). The gate response carries only the
+nineteen keys the retail parser recognises. Expansion-publish pipeline: `EXPANSION_GITHUB_TOKEN` (PAT the
 server tags the expansion repos with) and `EXPANSION_PUBLISH_TOKEN` (bearer the
 repos' CI presents to `/admin/internal/.../publish`); both empty by default.
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the

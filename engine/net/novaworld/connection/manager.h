@@ -19,25 +19,28 @@ enum class DropReason {
 
 const char *drop_reason_name(DropReason r);
 
+// The receive-silence window the service advertises to every NOVAWORLDUDP
+// peer: cs[0] (timeout_ms) of the service CS template the 0x82 SessionInit
+// carries, 240000 ms [orig: CNapiGameSession_InitNPConnection @0x4d3e1f].
+// The peer drops the connection only on silence strictly greater than that
+// value [orig: CNapiNPConnection_PumpStateMachine @0x6292e0 compares
+// GetTickCount deltas against cs_dir0.timeout_ms], and the service reaps on
+// the same contract — one value, sourced from the template, never a second
+// literal. (An earlier 120 s reap evicted idle browser clients two
+// keepalives early; that comment cited CNapiNetwork_RandomizeTimeout
+// @0x4c4d80 as its basis, but that routine draws the host's per-session
+// AppId, not a timeout.)
+uint64_t novaworldudp_session_timeout_ms();
+
 // Owns a ConnectionRegistry and delivers lifecycle events to the app
 // layer. Designed for a single tick thread to drive `tick(now_ms)` while
 // other threads call into the mutating verbs (added/touch/etc.).
-//
-// Default heartbeat timeout — 120s. Retail stops sending UDP
-// heartbeats while it's idle in the lobby browser (polling /jop_2.gsb
-// over HTTP instead). 15s was too aggressive for that — the
-// connection got evicted, and when retail resumed UDP after the user
-// clicked Host, the SESSION packets bounced as "before AUTH" forever.
-// Per-connection RandomizeTimeout window is still
-// (CNapiNetwork_RandomizeTimeout @ 0x4a6d50 jodemo / 0x4c4d80 retail → [1000, 9999]ms) but the
-// SERVER's grace can be much wider since we only enforce eventual
-// cleanup. Override via HEARTBEAT_TIMEOUT_MS env var if needed.
 class ConnectionManager {
 public:
 	using AddedHandler = std::function<void(const Connection &)>;
 	using LostHandler  = std::function<void(const Connection &, DropReason)>;
 
-	explicit ConnectionManager(uint64_t heartbeat_timeout_ms = 120000)
+	explicit ConnectionManager(uint64_t heartbeat_timeout_ms = novaworldudp_session_timeout_ms())
 		: heartbeat_timeout_ms_(heartbeat_timeout_ms) {}
 
 	ConnectionRegistry &registry() { return registry_; }
@@ -61,8 +64,8 @@ public:
 	void notify_logout_addr(const PeerAddr &addr);
 
 	// Tick from the server's main loop. Drops every connection whose
-	// last_seen_ms exceeded the heartbeat timeout, fires `on_lost(.., Timeout)`
-	// for each. Returns the number of connections dropped this tick.
+	// receive silence exceeds the timeout (strictly greater), fires
+	// `on_lost(.., Timeout)` for each. Returns the number dropped this tick.
 	std::size_t tick(uint64_t now_ms);
 
 	// Called once at server shutdown — fires `on_lost(.., Shutdown)` for

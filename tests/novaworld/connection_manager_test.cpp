@@ -161,6 +161,25 @@ int test_notify_active_promotes_state() {
 	return 0;
 }
 
+int test_default_timeout_is_the_advertised_cs0_and_reaps_strictly_after() {
+	// The reap equals cs[0] of the service SessionInit template (240000 ms)
+	// [orig: CNapiGameSession_InitNPConnection @0x4d3e1f] and fires only on
+	// silence strictly greater than it [orig: PumpStateMachine @0x6292e0].
+	TEST_EXPECT(opennova::novaworldudp_session_timeout_ms() == 240000u);
+	ConnectionManager mgr;
+	TEST_EXPECT(mgr.heartbeat_timeout_ms() == 240000u);
+	std::vector<DropReason> lost;
+	mgr.on_lost([&](const Connection &, DropReason r) { lost.push_back(r); });
+	mgr.notify_handshake(handshake(0x1, 0x7F000001u, 1, 1000));
+	// Silence of 150 s (the old 120 s reap) keeps the peer.
+	TEST_EXPECT(mgr.tick(1000 + 150000) == 0);
+	// Exactly the deadline still keeps it; one ms past drops it.
+	TEST_EXPECT(mgr.tick(1000 + 240000) == 0);
+	TEST_EXPECT(mgr.tick(1000 + 240001) == 1);
+	TEST_EXPECT(lost.size() == 1 && lost[0] == DropReason::Timeout);
+	return 0;
+}
+
 int test_drop_reason_name_is_stable() {
 	TEST_EXPECT(std::string(opennova::drop_reason_name(DropReason::Logout)) == "logout");
 	TEST_EXPECT(std::string(opennova::drop_reason_name(DropReason::Timeout)) == "timeout");
@@ -179,6 +198,7 @@ int main() {
 	if (test_repeated_hello_preserves_synthetic_identity_and_active_state() != 0) return 1;
 	if (test_shutdown_evicts_all_with_shutdown_reason() != 0) return 1;
 	if (test_notify_active_promotes_state() != 0) return 1;
+	if (test_default_timeout_is_the_advertised_cs0_and_reaps_strictly_after() != 0) return 1;
 	if (test_drop_reason_name_is_stable() != 0) return 1;
 	std::printf("OK: ConnectionManager handshake/logout/tick/replaced/shutdown\n");
 	return 0;

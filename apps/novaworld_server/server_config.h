@@ -1,5 +1,6 @@
 #pragma once
 
+#include <net/novaworld/connection/manager.h>
 #include <net/novaworld/gate_probe.h>
 #include <cstdint>
 #include <filesystem>
@@ -57,14 +58,34 @@ struct ServerConfig {
 	// Game-client static assets (.tga login backgrounds, etc.).
 	std::filesystem::path static_dir     = "apps/novaworld_server/static";
 
-	// Heartbeat timeout — clients last seen longer than this get dropped
-	// from the connection registry. Default lines up with the upper end
-	// of the witnessed RandomizeTimeout window plus slack (see
+	// Receive-silence reap for NOVAWORLDUDP peers. Not configurable: it is
+	// the cs[0] timeout the 0x82 SessionInit advertises to the peer (240 s),
+	// so the two can never disagree (see
 	// engine/net/novaworld/connection/manager.h).
-	uint64_t heartbeat_timeout_ms = 120000;
+	uint64_t heartbeat_timeout_ms = opennova::novaworldudp_session_timeout_ms();
 
 	// Tick interval for the connection manager's expire pass.
 	uint64_t tick_interval_ms = 500;
+
+	// MET (metrics) endpoint the gate response advertises
+	// (METIPADDRESS / METIPPORT / METLABEL / METPING / METEXT, all read by
+	// [orig: CNapiGateManager_ProcessResponse @0x4ced20]). Emitted only when
+	// met_ip is set; the client's metrics leg needs the label too.
+	std::string met_ip;                // ONNET_MET_IP
+	uint16_t    met_port = 0;          // ONNET_MET_PORT
+	std::string met_label;             // ONNET_MET_LABEL
+	int         met_ping = 0;          // ONNET_MET_PING
+	int         met_ext  = 0;          // ONNET_MET_EXT
+
+	// GLSVSS (the gate's character-data refresh leg): the gate advertises
+	// GLSVSSREQUEST / GLSVSSRIMS / GLSVSSAGRMS when glsvss_request is set, the
+	// client then periodically sends ClientGLSVSSRequest
+	// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4d44cb..0x4d4532] and
+	// the lobby answers ServerGLSVSSResults with glsvss_results.
+	std::string glsvss_request;        // ONNET_GLSVSS_REQUEST
+	int         glsvss_rims  = 0;      // ONNET_GLSVSS_RIMS
+	int         glsvss_agrms = 0;      // ONNET_GLSVSS_AGRMS
+	std::string glsvss_results;        // ONNET_GLSVSS_RESULTS
 
 	// policy: backstop sweep of crash-orphaned active_hosts rows. Cadence
 	// = how often the sweep runs; window = how stale (no ClientHostUpdate

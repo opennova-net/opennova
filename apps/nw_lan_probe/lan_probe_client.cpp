@@ -59,7 +59,7 @@ Result wait_for_server(const Options &options) {
 
 		opennova::LanDiscoveryServer server;
 		if (!opennova::parse_lan_discovery_reply(
-				bytes.data(), static_cast<size_t>(received), server)) {
+				bytes.data(), static_cast<size_t>(received), options.client_index, server)) {
 			continue;
 		}
 		if (!options.expected_server_name.empty() &&
