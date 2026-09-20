@@ -661,7 +661,7 @@ add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
 # The builder mints
 # fixtures/fnt/synth_{1,3}page.fnt, byte-compared every run (--write regenerates).
 add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
-target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_formats)
+target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_editor) # the art lives with the editor's blank factories
 target_include_directories(minimal_fnt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 
@@ -3081,6 +3081,16 @@ add_executable(editor_requirements_test editor/requirements_test.cpp)
 target_link_libraries(editor_requirements_test PRIVATE opennova_editor)
 target_include_directories(editor_requirements_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_requirements COMMAND editor_requirements_test)
+
+add_executable(editor_blank_factory_test editor/blank_factory_test.cpp)
+target_link_libraries(editor_blank_factory_test PRIVATE opennova_editor)
+target_include_directories(editor_blank_factory_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_blank_factory COMMAND editor_blank_factory_test)
+
+add_executable(editor_create_missing_test editor/create_missing_test.cpp)
+target_link_libraries(editor_create_missing_test PRIVATE opennova_editor)
+target_include_directories(editor_create_missing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_create_missing COMMAND editor_create_missing_test)
 
 add_executable(project_cli_test editor/project_cli_test.cpp)
 target_link_libraries(project_cli_test PRIVATE opennova_project_cli)

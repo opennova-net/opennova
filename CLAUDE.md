@@ -42,7 +42,7 @@ easier to relay than to rediscover.
   (`opennova-extract`: writes named entries out of a mounted game root through
   the engine's own resource index; replaced the dump probes, ADR 0041), `project/`
   (`opennova-project`: the editor's project core on the command line: `new`,
-  `status`, `validate`; ADR 0046 d4), `common/`
+  `status`, `validate`, `create-missing`; ADR 0046 d4), `common/`
   (shared socket helpers, deliberately app-layer; pcap I/O lives in
   `engine/base/pcapio`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `launcher/` — Windows tray app pointing a

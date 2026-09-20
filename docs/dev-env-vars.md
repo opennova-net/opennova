@@ -97,7 +97,7 @@ the normal map spawn selection.
 | `nw-server` | `--mission --env --resource-root --port --game-type --num-teams --capture-duration-seconds --capture-speed-setting --spawn-wave-time-base --spawn-wave-time-zone --default-spawn-requires-no-team-zone --log-debug` (`apps/nw_server/README.md`) |
 | `nw_pp` | `--hexcap-max <n>` |
 | `opennova-extract` | `--game <dir> [/exp <name>] [/game <code>] [/d] --out <dir> <name>...` |
-| `opennova-project` | `new <dir> [--title <text>] [--game <code>]`, `status <dir>`, `validate <dir>` (`apps/project/commands.h`) |
+| `opennova-project` | `new <dir> [--title <text>] [--game <code>]`, `status <dir>`, `validate <dir>`, `create-missing <dir> [--role <token>]` (`apps/project/commands.h`) |
 | `renderer_state_vectors_test`, `nw_codec_identity_test` | `--dump` (print the replacement vector table) |
 | `nw_self_capture_test` | `--write-fixture` (regenerate `fixtures/novaworld/self-capture-session.pcap`) |
 | `minimal_*_gen_test` | `--write` (regenerate that generator's minted fixtures) |

@@ -10,6 +10,15 @@ add_library(opennova_editor STATIC
     # assets — what a project file is to the engine
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
+    # blank — the from-scratch files behind Create / Create all missing
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_coo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_defs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_font.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_menu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_strings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_style.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/create_missing.cpp
     # project — project.opennova, the cache directory, machine-local settings, file plumbing
     ${CMAKE_CURRENT_SOURCE_DIR}/project/local_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_document.cpp

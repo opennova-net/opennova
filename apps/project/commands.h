@@ -6,10 +6,12 @@
 //   opennova-project new <dir> [--title <text>] [--game <code>]
 //   opennova-project status <dir>
 //   opennova-project validate <dir>
+//   opennova-project create-missing <dir> [--role <token>]
 //
-// Exit 0 on success (validate: no errors and no unmet required row), 1 when validate
-// found errors or unmet requirements, 2 on a usage error or a project that could not
-// be created or opened.
+// Exit 0 on success (validate: no errors and no unmet required row; create-missing:
+// every missing required file created), 1 when validate found errors or unmet
+// requirements or create-missing left a required file uncreated, 2 on a usage error
+// or a project that could not be created or opened.
 #include <cstdio>
 
 namespace opennova::project_cli {

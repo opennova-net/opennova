@@ -2,6 +2,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/blank/create_missing.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
@@ -23,9 +24,11 @@ int usage(std::FILE *err, const char *why) {
 	             "usage: opennova-project new <dir> [--title <text>] [--game <code>]\n"
 	             "       opennova-project status <dir>\n"
 	             "       opennova-project validate <dir>\n"
-	             "  new       create an empty project (project.opennova + .opennova/) in <dir>\n"
-	             "  status    the project's title, game, asset count and requirements summary\n"
-	             "  validate  list every finding; exit 1 when a required file is missing or wrong\n");
+	             "       opennova-project create-missing <dir> [--role <token>]\n"
+	             "  new             create an empty project (project.opennova + .opennova/) in <dir>\n"
+	             "  status          the project's title, game, asset count and requirements summary\n"
+	             "  validate        list every finding; exit 1 when a required file is missing or wrong\n"
+	             "  create-missing  create every missing required file from scratch (or one, by role)\n");
 	return 2;
 }
 
@@ -140,6 +143,35 @@ int command_validate(int argc, const char *const *argv, std::FILE *out, std::FIL
 	return errors == 0 ? 0 : 1;
 }
 
+int command_create_missing(int argc, const char *const *argv, std::FILE *out, std::FILE *err) {
+	std::string dir, role;
+	for (int i = 1; i < argc; ++i) {
+		const std::string arg = argv[i];
+		if (arg == "--role") {
+			if (i + 1 >= argc) return usage(err, "--role needs a token");
+			role = argv[++i];
+		} else if (!arg.empty() && arg[0] == '-') {
+			return usage(err, ("unknown option " + arg).c_str());
+		} else if (dir.empty()) {
+			dir = arg;
+		} else {
+			return usage(err, "create-missing takes one directory");
+		}
+	}
+	if (dir.empty()) return usage(err, "create-missing needs a directory");
+	OpenedProject project;
+	if (!open_for_report(dir, project, err)) return 2;
+	const CreateMissingResult result =
+	        create_missing_requirements(project.paths, project.doc, project.requirements, role);
+	for (const std::string &path : result.created) std::fprintf(out, "created %s\n", path.c_str());
+	for (const std::string &name : result.unavailable)
+		std::fprintf(out, "cannot create %s yet: no writer for this kind of file\n", name.c_str());
+	for (const Diagnostic &d : result.diagnostics) print_diagnostic(out, d);
+	const bool complete = result.unavailable.empty() && !diagnostics_have_errors(result.diagnostics);
+	std::fprintf(out, "%zu file(s) created%s\n", result.created.size(), complete ? "" : ", some requirements remain");
+	return complete ? 0 : 1;
+}
+
 } // namespace
 
 int run_project_command(int argc, const char *const *argv, std::FILE *out, std::FILE *err) {
@@ -148,6 +180,7 @@ int run_project_command(int argc, const char *const *argv, std::FILE *out, std::
 	if (command == "new") return command_new(argc, argv, out, err);
 	if (command == "status") return command_status(argc, argv, out, err);
 	if (command == "validate") return command_validate(argc, argv, out, err);
+	if (command == "create-missing") return command_create_missing(argc, argv, out, err);
 	if (command == "-h" || command == "--help" || command == "help") return usage(err, nullptr);
 	return usage(err, ("unknown command " + command).c_str());
 }

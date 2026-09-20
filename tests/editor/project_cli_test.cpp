@@ -46,9 +46,17 @@ static int test_new_status_validate() {
 	TEST_EXPECT(opennova::editor::open_project(root, doc, error));
 	TEST_EXPECT(doc.title == "CLI Game");
 
+	// Create all missing: the project then validates clean, and a second run is a no-op.
+	TEST_EXPECT(run({"create-missing", root, "--role"}) == 2);
+	TEST_EXPECT(run({"create-missing", root}) == 0);
+	TEST_EXPECT(run({"validate", root}) == 0);
+	TEST_EXPECT(run({"create-missing", root}) == 0);
+	TEST_EXPECT(run({"create-missing", root, "--role", "no_such_role"}) == 0); // nothing to do
+
 	// A file with the wrong content behind a required name is an error too.
-	TEST_EXPECT(editor_test::write_text(root + "/gametext.bin", "raw"));
+	TEST_EXPECT(editor_test::write_text(root + "/strings/gametext.bin", "raw"));
 	TEST_EXPECT(run({"validate", root}) == 1);
+	TEST_EXPECT(run({"create-missing", root}) == 1); // refused, never overwritten
 	return 0;
 }
 
