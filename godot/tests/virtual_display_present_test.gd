@@ -446,28 +446,46 @@ func test_installed_m1a1_driver_view_swaps_the_hull_for_its_cockpit() -> void:
 	# puts that point where the camera looks out from, so the driver sits
 	# INSIDE the cockpit that is drawn.
 	var data := display.get_object_data()
-	var eye_point := Vector3.INF
+	var eye_local := Vector3.INF
 	for i in range(data.get_user_point_count()):
 		var info := data.get_user_point_info(i)
 		if String(info.name).to_lower() == "camera":
-			eye_point = display.global_transform * info.position
-	assert_true(eye_point.is_finite(), "the installed display authors its camera userpoint")
-	# The eye rides the sim's fixed-point hull matrix while the drawn pose is
-	# the present row's degree triple: they agree to a couple of centimetres at
-	# the driver's eye (a wrong axis or frame would miss by metres).
-	assert_almost_eq(fixture.camera.global_position.distance_to(eye_point), 0.1875, 0.03,
+			eye_local = info.position
+	assert_true(eye_local.is_finite(), "the installed display authors its camera userpoint")
+	# The eye rides the sim's fixed-point hull matrix; the drawn cockpit rides
+	# the hull's present row, which carries the motor's BAM-precise pitch and
+	# roll, so both are the one attitude and only float32 rounding separates
+	# them: two world points some 840 units from the origin, where one float
+	# step is 0.00006. Measured on this hull: 0.00002 parked (pitch -0.5, roll
+	# -0.9 degrees) and at most 0.00004 over the drive below (pitch to -3.2).
+	# EYE_TOLERANCE is half a millimetre: room for that rounding on any map
+	# position, while a whole-degree attitude misses by centimetres (half a
+	# degree swings this 1.85-unit arm 0.016) and a wrong axis by metres.
+	const CAMERA_PULL_BACK := 0.1875
+	const EYE_TOLERANCE := 0.0005
+	assert_almost_eq(fixture.camera.global_position.distance_to(
+			display.global_transform * eye_local), CAMERA_PULL_BACK, EYE_TOLERANCE,
 			"the camera sits on the drawn cockpit's camera point (the 0.1875 pull-back away)")
 
 	# Driving: every frame the display lands on THAT frame's hull stamp (the
-	# local-view leg runs after the session leg's entity rows).
+	# local-view leg runs after the session leg's entity rows), and the eye
+	# stays on its camera point while the accelerating hull pitches and rolls.
 	var forward := PlayerMoveIntent.new()
 	forward.forward = true
 	_installed_presenter.set_input_override(forward)
 	var start := hull_node.global_transform
+	var steepest_tilt_deg := 0.0
 	for _i in range(40):
 		_frames(fixture, 1)
 		assert_eq(display.global_transform, hull_node.global_transform)
+		assert_almost_eq(fixture.camera.global_position.distance_to(
+				display.global_transform * eye_local), CAMERA_PULL_BACK, EYE_TOLERANCE,
+				"the eye keeps the drawn camera point on a pitched and rolled hull")
+		steepest_tilt_deg = maxf(steepest_tilt_deg, rad_to_deg(
+				hull_node.global_transform.basis.y.normalized().angle_to(Vector3.UP)))
 	_installed_presenter.set_input_override(PlayerMoveIntent.new())
+	assert_gt(steepest_tilt_deg, 1.5,
+			"the drive tilts the hull off level (a level hull would prove nothing about attitude)")
 	assert_ne(hull_node.global_transform, start, "the driven hull moved under the display")
 	assert_eq(entities.virtual_display_node(), display, "one model for the whole drive")
 

@@ -596,6 +596,7 @@ func test_runtime_renderer_release_is_explicit_and_idempotent() -> void:
 	for key in [
 		"world_far_backend", "world_camera_backend",
 		"reflection_far_backend", "reflection_camera_backend",
+		"second_scene_far_backend", "second_scene_camera_backend",
 	]:
 		assert_true(bool((report.get(key, {}) as Dictionary).get("shutdown", false)),
 				"%s is retired before EffectWorld leaves the tree" % key)

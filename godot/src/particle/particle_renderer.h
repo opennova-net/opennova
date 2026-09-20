@@ -26,9 +26,10 @@ class Camera3D;
 // Thin Godot adapter for the portable particle scene/frame modules. World
 // draw lists are immutable values consumed by the ordered compositor effects:
 // a water-far PRE_TRANSPARENT subset, a camera-side POST_TRANSPARENT subset,
-// and two consecutive POST_TRANSPARENT mirror subsets. Only the explicitly
-// diagnosed FirstPerson tool path uses ArrayMesh. Effects, emitters, and
-// particles remain values in EffectScene.
+// two consecutive POST_TRANSPARENT mirror subsets, and, while a second scene
+// camera is handed in, that view's own far/camera-side pair. Only the
+// explicitly diagnosed FirstPerson tool path uses ArrayMesh. Effects,
+// emitters, and particles remain values in EffectScene.
 class ParticleRenderer : public Node3D {
 	GDCLASS(ParticleRenderer, Node3D)
 
@@ -40,6 +41,7 @@ private:
 	String texture_dir_;
 	ObjectID environment_source_;
 	ObjectID reflection_camera_;
+	ObjectID second_scene_camera_;
 	float water_height_ = 0.0f;
 	bool hidden_ = false;
 	bool shutdown_ = false;
@@ -69,6 +71,14 @@ public:
 	// One exact render-plane handoff: the height partitions World emitters and
 	// the mirror camera receives its own camera-correct pair of submissions.
 	void set_water_plane(float p_height, Camera3D *p_reflection_camera);
+	// The camera of a second view of the same scene (the weapon Inset pass):
+	// the original re-renders the world through it with the very scene routine
+	// the main view runs, so that view draws the world's particles too, compiled
+	// for its own eye. Null retires the view: its submissions clear and its
+	// compositor pair detaches, so a frame without one pays nothing. Only the
+	// ObjectID is kept; a freed camera retires the view on the next render.
+	void set_second_scene_camera(Camera3D *p_camera);
+	Camera3D *get_second_scene_camera() const;
 
 	void set_hidden(bool p_hidden);
 	bool get_hidden() const;

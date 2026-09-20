@@ -8890,7 +8890,19 @@ by `mission/promote.cpp`) / `zone_control` / `is_capture_trigger` / `is_spawn_po
 (`npruntime/server_message_dispatch.cpp` — pick resolve, the zone control/team gate, the
 0xFFFE frontier auto-pick, dead-only deploy, per-team marker fallback, the computed 0x1E
 ev-0x3A frontier hint replacing the golden byte-blob); the per-recipient 0x0A phase-0
-owned-zone mask (`PlayerReplicationState::uniform_team_mask`, default the golden 0x8); and
+owned-zone mask, walked off the live chain for the recipient's team on EVERY frame
+`[orig: NetPacket_WritePlayerState @0x4FF996..0x4FF9BB -> ZoneSlotChain_GetOwnedZoneMask
+@0x4A2620; an empty chain returns 0]` (`replication::FrameHeaderState::owned_zone_mask` in
+the per-frame fan; the reply builders' `PlayerReplicationState::uniform_team_mask` takes the
+same walk). Until 2026-09-19 the fan built its frame from a default-constructed reply state
+and so sent the constant `0x8` (the ASH_I5A steady value, zone 3 wholly owned) on every
+host; the client keeps that word as `dword_A85BBC` `[orig: the one store
+NapiNPClientMsg_0x00A @0x430136]` and reads it for the nearest-FARP scan `[orig:
+HUD_BuildEntityInfo @0x4B895A]`, the map blips `[orig: draw_minimap_blip @0x597A46]` and
+the FARP prompt `[orig: HUD_DrawGameplayOverlays @0x5BE037]`, so the constant unlocked
+zone-3 stations and locked every other numbered one regardless of ownership (pinned by
+`netsim_two_peer_fanout`: 0 without a chain, 0x8 for a wholly owned zone 3, back to 0 when
+it changes hands, and the client fold keeps the word); and
 the per-team join placement (`Server_BuildPlayerInfoAndAdd` assigns the team BEFORE the
 §5.2c marker scan — previously both AS teams spawned at the first family type present, i.e.
 team 1's base). Pinned by `zone_chain_test` (the ASH_I5A shape: masks/frontier/latch,

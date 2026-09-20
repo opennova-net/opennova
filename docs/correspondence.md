@@ -15,6 +15,17 @@ into them.
 > real producer is the `hudcolor` action row (code 10, default F6,
 > retail-shadowed by `huddetail` — D-CTRL-4).
 
+## PR #655 review leftovers (2026-09-19)
+
+| Reimplementation surface | Original witness | Verdict and evidence |
+|---|---|---|
+| `HudFrameCompiler::emit_slot_text` callers: gear label, service prompts, Inset friendly name, impact distance | `hud_draw_target_entity_overlay @ 0x59A5D0` (slot push `@0x59A6F9`); `HUD_DrawGameplayOverlays @ 0x5BDE60` (`@0x5BDFD7` / `@0x5BE0AA` / `@0x5BE0F7`); `Render_RadarCompassOverlay @ 0x5C9740` (`@0x5CA0C0`); `HUD_RenderAllOverlays @ 0x5A8070` (`@0x5A897E..0x5A89D5`) | MATCHING slot per text (large / large / bold / hudpos drawn, bold measured); `hud_combat` pins the page namespace, anchor and scale of each. [hud-re](interface/hud-re.md#weapon--vehicle-combat-cues-font-slots-the-lollypop-head-the-death-gate-the-inset-scene-witnessed-2026-09-19). |
+| `element_optical_cues` LollyPop head | `draw_entity_marker @ 0x593140` type 0 (`@0x59322D..0x593283`); `draw_ring_overlay @ 0x5D4270` (x-scale `@0x5D4513`) | MATCHING 2:1 ellipse, stroke 2.0, stem `half = ftol(scale * 20)`; `hud_combat` pins the 84 x 42 extents and the centre. |
+| `HudCombatState::death_screen` and its consumers | `g_death_screen_active @ 0xA860EC`: `HUD_DrawCrosshair @0x592646`, `HUD_RenderOverlays @0x5A7BBC`, `HUD_RenderAllOverlays @0x5A850D`, `Render_ProcessMainSceneFrame @0x5CA26A`; ungated tail `@0x5A87EF..0x5A89DA`; preview `Player_UpdatePerFrame @0x4DE760..0x4DE79D` | MATCHING gate inventory: the latch alone for the crosshair / instrument / scope passes, no death test on the LollyPop, impact-distance and preview legs; `hud_combat` and `local_player_view`. |
+| `replication::FrameHeaderState::owned_zone_mask` (0x0A phase 0), `make_rep_state` (0x0F variant 0) | `NetPacket_WritePlayerState @ 0x4FF6B0` (`@0x4FF996..0x4FF9BB`); `ZoneSlotChain_GetOwnedZoneMask @ 0x4A2620`; client store `NapiNPClientMsg_0x00A @0x430136` | MATCHING per-recipient live walk, 0 for an empty chain; `netsim_two_peer_fanout`, `zone_chain`. [net-re §5.61](net/novaworld-net-re.md). |
+| `ParticleRenderer` second scene view group (`set_second_scene_camera`, the Inset camera handed in by `HudInsetScope` through `EffectWorld`) | `Render_RadarCompassOverlay @ 0x5C9740` -> `Terrain_RenderSceneWithReflection @ 0x5C93A0` (`@0x5C9DE9`): the particle passes `@0x5C95AC..0x5C95B5` / `@0x5C9687..0x5C9690`, weather trails `@0x5C96A6`; sun glow off (`@0x5C970E`), mirror subpasses off | MATCHING coverage: the aperture draws the world's particles compiled for its own eye, the first-person domain excluded; `particle_renderer_backend_test.gd`, `game_hud_presenter_declutter_test.gd`. The billboard basis lags the Inset pose by one display frame (the HUD tick hands the camera over after the world tick). |
+| `inmatch::pool_present_pitch_deg` / `pool_present_roll_deg` | the model matrix over the entity's 32-bit euler triple: `Math_BuildFixedPointMatrixFromEulerAngles @ 0x613F40` over entity `+0x10..+0x18` (e.g. `HUD_BuildEntityInfo @0x4B84C9`) | MATCHING precision: a motor-driven hull presents the motor's BAM pitch/roll, the frame `entity_placement_matrix` and the carrier-owned camera already read; `netsim_present_rows`. |
+
 ## AI and player motor follow-through (2026-09-18, PR #652)
 
 | Reimplementation surface | Original witness | Verdict and evidence |

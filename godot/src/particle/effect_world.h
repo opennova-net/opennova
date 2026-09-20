@@ -84,6 +84,12 @@ public:
 	// the cached basis) or null (the owner is gone: its groups detach).
 	void set_owner_position_provider(const Callable &p_provider);
 	void set_water_plane(float p_value, Camera3D *p_reflection_camera);
+	// The camera of a second view of this world's scene (the weapon Inset pass),
+	// or null while none renders: the renderer compiles the world's particles
+	// for it too (ParticleRenderer::set_second_scene_camera). The device owner
+	// of that view hands it in every frame; clear_world() drops it.
+	void set_second_scene_camera(Camera3D *p_camera);
+	Camera3D *get_second_scene_camera() const;
 
 	// Loads every mounted .ptl AND the active gore set in VFS order, then
 	// opens the catalog once. The gore set is a second extension carrying
@@ -257,6 +263,7 @@ private:
 	Callable owner_position_provider_;
 	float water_height_ = 0.0f;
 	ObjectID reflection_camera_id_;
+	ObjectID second_scene_camera_id_;
 	bool particles_disabled_ = false;
 
 	// Keys never become native tokens by hashing. A shared monotonic

@@ -475,6 +475,7 @@ func test_exit_tree_shutdown_is_undone_by_re_entry() -> void:
 	for key in [
 		"world_far_backend", "world_camera_backend",
 		"reflection_far_backend", "reflection_camera_backend",
+		"second_scene_far_backend", "second_scene_camera_backend",
 	]:
 		assert_false(bool((revived.get(key, {}) as Dictionary).get("shutdown", true)),
 				"%s is a fresh effect after re-entry" % key)
@@ -568,6 +569,375 @@ func test_reflection_camera_receives_two_ordered_camera_correct_submissions() ->
 			"the cutover leaves no ambiguous legacy draw-list key")
 	assert_false(report.has("world_backend"),
 			"the cutover leaves no single-pass backend alias")
+
+
+# --- The second scene view (the weapon Inset pass) ---
+#
+# The original renders the Inset aperture through the very scene routine the
+# main view runs, particle passes included, so that camera needs the world's
+# particles compiled for ITS eye. The device shape is HudInsetScope's: a
+# sibling SubViewport sharing the main World3D, one camera, no
+# WorldEnvironment of its own.
+
+func _main_view(size := Vector2i(64, 64)) -> SubViewport:
+	var viewport := SubViewport.new()
+	viewport.size = size
+	viewport.own_world_3d = true
+	add_child_autofree(viewport)
+	return viewport
+
+
+func _shared_world_camera(main_viewport: SubViewport) -> Camera3D:
+	var viewport := SubViewport.new()
+	viewport.size = main_viewport.size
+	viewport.world_3d = main_viewport.find_world_3d()
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.current = true
+	viewport.add_child(camera)
+	return camera
+
+
+# One Bump quad, world-oriented. A Bump graphic takes the vertex-lit colour
+# path: its DIFFUSE word is the light vector seen through the compiling view's
+# basis. YAWANDPITCH (0x100) orients the quad in the world instead of at the
+# camera, so its corners are the same for every view and the ONLY bytes that
+# differ between two views' compiles are that lit colour.
+func _live_lit_scene() -> EffectScene:
+	var particle := _overlap_definition("lit", 3)
+	particle.bump_scale = 1.0
+	particle.flags = 0x100
+	return _single_quad_scene(particle)
+
+
+# One live quad of `particle` at (0, 1, 0): the definition emits exactly one
+# particle (rate 10 over 0.1 s, burst 1) and keeps it for the whole test.
+func _single_quad_scene(particle: ParticleDef) -> EffectScene:
+	var effect := ParticleEffect.new()
+	effect.id = particle.id
+	effect.pdefs = PackedStringArray([particle.id])
+	var file := ParticleFile.new()
+	file.particles = [particle]
+	file.effects = [effect]
+	var scene := EffectScene.new()
+	scene.open([file])
+	_overlap_spawn(scene, particle.id, 0.0)
+	return scene
+
+
+func _slot(report: Dictionary, key: String) -> Dictionary:
+	return report.get(key, {}) as Dictionary
+
+
+func test_second_scene_camera_receives_its_own_pair_ahead_of_the_terminal() -> void:
+	var viewport := _main_view()
+	var environment := WorldEnvironment.new()
+	environment.environment = Environment.new()
+	viewport.add_child(environment)
+	var camera := Camera3D.new()
+	camera.current = true
+	viewport.add_child(camera)
+	var frame_renderer := FrameFx.new()
+	viewport.add_child(frame_renderer)
+	await get_tree().process_frame
+	var second_camera := _shared_world_camera(viewport)
+
+	var renderer := ParticleRenderer.new()
+	viewport.add_child(renderer)
+	renderer.render_now()
+	assert_null(renderer.get_second_scene_camera())
+	assert_null(second_camera.compositor,
+			"a renderer without a second scene camera leaves every other camera alone")
+	var idle := renderer.get_debug_draw_list_report()
+	assert_false(bool(idle.get("second_scene_compositor_attached", true)))
+	assert_true(_slot(idle, "second_scene_far_side").is_empty())
+	assert_true(_slot(idle, "second_scene_camera_side").is_empty())
+	var main_chain := camera.compositor.compositor_effects.duplicate()
+	assert_eq(main_chain.size(), 3)
+
+	renderer.set_second_scene_camera(second_camera)
+	assert_eq(renderer.get_second_scene_camera(), second_camera)
+	renderer.render_now()
+	assert_not_null(second_camera.compositor)
+	if second_camera.compositor == null:
+		return
+	var effects := second_camera.compositor.compositor_effects
+	assert_eq(effects.size(), 3,
+			"far particles + camera-side particles + the scenario's terminal")
+	assert_true(effects[0] is ParticleCompositorEffect)
+	assert_true(effects[1] is ParticleCompositorEffect)
+	assert_true(effects[2] is FrameFxCompositorEffect,
+			"FrameFX and the display transfer stay terminal in the second view too")
+	assert_eq(effects[0].effect_callback_type,
+			CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT,
+			"this view draws the water surface, so its far side precedes the transparent list")
+	assert_eq(effects[1].effect_callback_type,
+			CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT)
+	assert_eq(effects[2], main_chain[2],
+			"the terminal is the one the shared scenario already ran for this camera")
+	assert_false(main_chain.has(effects[0]), "the pair is this view's own, not the World pair")
+	assert_false(main_chain.has(effects[1]))
+	assert_eq(camera.compositor.compositor_effects, main_chain,
+			"the main camera's chain is untouched by the second view")
+	var report := renderer.get_debug_draw_list_report()
+	assert_true(bool(report.get("second_scene_compositor_attached", false)))
+	assert_true(bool(report.get("second_scene_compositor_inherited_effects", false)),
+			"a camera without a compositor inherits the shared scenario's chain")
+	assert_eq(int(_slot(report, "second_scene_far_backend").get("callback_type", -1)), 3)
+	assert_eq(int(_slot(report, "second_scene_camera_backend").get("callback_type", -1)), 4)
+
+	# Steady state composes once; clearing the camera retires the whole view.
+	var composed := second_camera.compositor
+	renderer.render_now()
+	assert_eq(second_camera.compositor, composed,
+			"steady-state renders do not clone the composed resource")
+	renderer.set_second_scene_camera(null)
+	renderer.render_now()
+	assert_null(second_camera.compositor,
+			"clearing the camera restores its inherited (null) compositor")
+	report = renderer.get_debug_draw_list_report()
+	assert_false(bool(report.get("second_scene_compositor_attached", true)))
+	assert_true(_slot(report, "second_scene_far_side").is_empty())
+	assert_true(_slot(report, "second_scene_camera_side").is_empty())
+	assert_eq(camera.compositor.compositor_effects, main_chain)
+	assert_engine_error_count(0)
+
+
+func test_second_scene_submission_is_compiled_for_its_own_eye() -> void:
+	var viewport := _main_view()
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 10.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	# Clearly not the main eye: below the water plane, elsewhere, turned and
+	# rolled, under a narrow field of view.
+	var second_camera := _shared_world_camera(viewport)
+	second_camera.position = Vector3(30.0, -10.0, -20.0)
+	second_camera.rotation_degrees = Vector3(15.0, 120.0, 40.0)
+	second_camera.fov = 5.0
+
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _live_world_scene_at_heights(PackedFloat32Array([-2.0, 0.0, 3.0]))
+	renderer.procedural_fallback_enabled = true
+	renderer.set_water_plane(0.0, null)
+	renderer.set_second_scene_camera(second_camera)
+	viewport.add_child(renderer)
+	renderer.render_now()
+
+	var report := renderer.get_debug_draw_list_report()
+	var world_far := _slot(report, "world_far_side")
+	var world_near := _slot(report, "world_camera_side")
+	var far := _slot(report, "second_scene_far_side")
+	var near := _slot(report, "second_scene_camera_side")
+	assert_eq(int(world_far.get("selected_emitters", -1)), 1)
+	assert_eq(int(world_near.get("selected_emitters", -1)), 2)
+	assert_eq(int(far.get("selected_emitters", -1)), 2,
+			"the far/camera-side bracket is this view's own: a below-water eye draws "
+			+ "the above/equal emitters first")
+	assert_eq(int(near.get("selected_emitters", -1)), 1)
+	assert_gt(int(far.get("rendered_quad_count", 0)), 0)
+	assert_gt(int(near.get("rendered_quad_count", 0)), 0)
+	assert_eq(int(far.get("frame_id", -1)), int(world_far.get("frame_id", -2)),
+			"every view compiles the one scene snapshot of this render")
+
+	var backend := _slot(report, "second_scene_camera_backend")
+	var world_backend := _slot(report, "world_camera_backend")
+	assert_gt(int(backend.get("submitted_commands", 0)), 0,
+			"the second view publishes a non-empty submission")
+	assert_gt(int(_slot(report, "second_scene_far_backend").get("submitted_commands", 0)), 0)
+	var eye: Vector3 = backend.get("submitted_camera_position", Vector3.ZERO)
+	var forward: Vector3 = backend.get("submitted_camera_forward", Vector3.ZERO)
+	assert_almost_eq(eye, second_camera.global_position, Vector3.ONE * 0.0001,
+			"the submission carries the second camera's eye, not the main one")
+	assert_almost_eq(forward, -second_camera.global_basis.z, Vector3.ONE * 0.0001)
+	assert_almost_eq(world_backend.get("submitted_camera_position", Vector3.ZERO) as Vector3,
+			camera.global_position, Vector3.ONE * 0.0001)
+	# Same two emitters' worth of quads would match a copied World list; the
+	# billboards are built on this camera's right/up, so the bytes differ.
+	assert_ne(int(far.get("vertex_checksum", 0)), int(world_near.get("vertex_checksum", 0)),
+			"the same emitters compile to different quads for a different eye")
+	# The renderer-level totals stay the main view's (a second view of the same
+	# emitters must not double them).
+	assert_eq(int(renderer.get_rendered_quad_count()),
+			int(world_far.get("rendered_quad_count", 0))
+			+ int(world_near.get("rendered_quad_count", 0))
+			+ int(_slot(report, "first_person").get("rendered_quad_count", 0)))
+
+
+func test_second_scene_backend_draws_the_particle_into_its_own_target() -> void:
+	var viewport := _main_view()
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	var background := WorldEnvironment.new()
+	background.environment = Environment.new()
+	background.environment.background_mode = Environment.BG_COLOR
+	background.environment.background_color = Color.BLACK
+	viewport.add_child(background)
+	# The main eye looks AWAY from the quad at (0, 1, 0); only the second eye
+	# faces it, so a lit centre pixel can only be the second view's draw.
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.rotation_degrees = Vector3(0.0, 180.0, 0.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var second_camera := _shared_world_camera(viewport)
+	var second_viewport := second_camera.get_viewport() as SubViewport
+	second_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	second_camera.position = Vector3(0.0, 1.0, -5.0)
+	second_camera.rotation_degrees = Vector3(0.0, 180.0, 0.0)
+
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _single_quad_scene(_overlap_definition("impact", 0))
+	renderer.texture_provider = _overlap_texture  # opaque red
+	renderer.set_water_plane(-100.0, null)
+	renderer.set_second_scene_camera(second_camera)
+	viewport.add_child(renderer)
+	renderer.render_now()
+	for _frame in 5:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+
+	var report := renderer.get_debug_draw_list_report()
+	var backend := _slot(report, "second_scene_camera_backend")
+	assert_gt(int(_slot(report, "second_scene_camera_side").get("rendered_quad_count", 0)), 0)
+	if not bool(backend.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_true(bool(backend.get("callback_seen", false)),
+			"the second view's post-transparent callback must execute")
+	assert_eq(String(backend.get("status", "")), "drawn",
+			String(backend.get("failure", "second scene submission failed")))
+	assert_eq(int(backend.get("drawn_commands", -1)), int(backend.get("submitted_commands", 0)))
+	var second_pixel := second_viewport.get_texture().get_image().get_pixel(32, 32)
+	var main_pixel := viewport.get_texture().get_image().get_pixel(32, 32)
+	assert_gt(second_pixel.r, 0.95,
+			"the world's particle reaches the second view's framebuffer; got %s" % second_pixel)
+	assert_lt(main_pixel.r, 0.05,
+			"the main eye faces away, so its own target stays background; got %s" % main_pixel)
+	assert_engine_error_count(0)
+
+
+func test_every_view_compiles_a_snapshot_lit_for_its_own_basis() -> void:
+	var viewport := _main_view()
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.rotation_degrees = Vector3(-10.0, 20.0, 0.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var mirror_camera := _shared_world_camera(viewport)
+	mirror_camera.position = Vector3(4.0, 2.0, -3.0)
+	mirror_camera.rotation_degrees = Vector3(25.0, 115.0, 0.0)
+	var second_camera := _shared_world_camera(viewport)
+
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _live_lit_scene()
+	renderer.procedural_fallback_enabled = true
+	renderer.set_water_plane(-100.0, mirror_camera)
+	viewport.add_child(renderer)
+
+	# The control render: no second view.
+	renderer.render_now()
+	var control := renderer.get_debug_draw_list_report()
+	var keys := ["world_far_side", "world_camera_side",
+			"reflection_far_side", "reflection_camera_side", "first_person"]
+	assert_eq(int(_slot(control, "world_camera_side").get("rendered_quad_count", 0)), 1)
+	assert_eq(int(_slot(control, "reflection_camera_side").get("rendered_quad_count", 0)), 1)
+	# The precondition that gives the equalities below their teeth: one
+	# view-independent quad, so these two lists differ in nothing but the lit
+	# colour, i.e. the mirror's relight really does rewrite the shared snapshot.
+	assert_ne(int(_slot(control, "world_camera_side").get("vertex_checksum", 0)),
+			int(_slot(control, "reflection_camera_side").get("vertex_checksum", 0)),
+			"two bases light the same world-oriented quad differently")
+	var mirror_chain := mirror_camera.compositor.compositor_effects.duplicate()
+	var main_chain := camera.compositor.compositor_effects.duplicate()
+
+	# The second view on the MAIN eye compiles after the mirror relit the shared
+	# snapshot for its own basis. Byte-equal to the World list means it was relit
+	# back for this basis; a missing relight leaves the mirror's light in it.
+	second_camera.global_transform = camera.global_transform
+	renderer.set_second_scene_camera(second_camera)
+	renderer.render_now()
+	var as_main := renderer.get_debug_draw_list_report()
+	assert_eq(int(_slot(as_main, "second_scene_camera_side").get("vertex_checksum", 0)),
+			int(_slot(as_main, "world_camera_side").get("vertex_checksum", 1)),
+			"the second view's lit quads are relit for its own basis")
+	assert_ne(int(_slot(as_main, "second_scene_camera_side").get("vertex_checksum", 0)),
+			int(_slot(as_main, "reflection_camera_side").get("vertex_checksum", 0)))
+
+	# On the MIRROR eye it must equal the mirror list instead.
+	second_camera.global_transform = mirror_camera.global_transform
+	renderer.render_now()
+	var as_mirror := renderer.get_debug_draw_list_report()
+	assert_eq(int(_slot(as_mirror, "second_scene_camera_side").get("vertex_checksum", 0)),
+			int(_slot(as_mirror, "reflection_camera_side").get("vertex_checksum", 1)))
+
+	# Neither the World nor the mirror group draws anything different for the
+	# second view's presence, wherever it looks.
+	for with_second: Dictionary in [as_main, as_mirror]:
+		for key: String in keys:
+			for field: String in ["vertex_checksum", "rendered_quad_count",
+					"draw_command_count", "selected_emitters"]:
+				assert_eq(int(_slot(with_second, key).get(field, -1)),
+						int(_slot(control, key).get(field, -2)),
+						"%s.%s is unchanged by the second scene view" % [key, field])
+	assert_eq(camera.compositor.compositor_effects, main_chain)
+	assert_eq(mirror_camera.compositor.compositor_effects, mirror_chain)
+
+
+func test_second_scene_view_follows_every_renderer_lifecycle_leg() -> void:
+	var viewport := _main_view()
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var second_camera := _shared_world_camera(viewport)
+	second_camera.position = Vector3(0.0, 0.0, 9.0)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _live_world_scene()
+	renderer.procedural_fallback_enabled = true
+	renderer.set_second_scene_camera(second_camera)
+	viewport.add_child(renderer)
+	renderer.render_now()
+	assert_not_null(second_camera.compositor)
+	assert_gt(int(_slot(renderer.get_debug_draw_list_report(),
+			"second_scene_camera_side").get("rendered_quad_count", 0)), 0)
+
+	# The master switch drops this view's submissions with the others.
+	renderer.hidden = true
+	var hidden := renderer.get_debug_draw_list_report()
+	assert_true(_slot(hidden, "second_scene_camera_side").is_empty())
+	assert_eq(int(_slot(hidden, "second_scene_camera_backend").get("submitted_commands", -1)), 0)
+	renderer.hidden = false
+	renderer.render_now()
+	assert_gt(int(_slot(renderer.get_debug_draw_list_report(),
+			"second_scene_camera_backend").get("submitted_commands", 0)), 0)
+
+	# EXIT_TREE retires and detaches the pair; re-entry renders it again.
+	viewport.remove_child(renderer)
+	var retired := renderer.get_debug_draw_list_report()
+	for key in ["second_scene_far_backend", "second_scene_camera_backend"]:
+		assert_true(bool(_slot(retired, key).get("shutdown", false)),
+				"%s is retired on exit" % key)
+	assert_false(bool(retired.get("second_scene_compositor_attached", true)))
+	assert_null(second_camera.compositor, "the departing renderer restores the second camera")
+	viewport.add_child(renderer)
+	renderer.render_now()
+	var revived := renderer.get_debug_draw_list_report()
+	for key in ["second_scene_far_backend", "second_scene_camera_backend"]:
+		assert_false(bool(_slot(revived, key).get("shutdown", true)),
+				"%s is a fresh effect after re-entry" % key)
+	assert_true(bool(revived.get("second_scene_compositor_attached", false)),
+			"the retained camera re-attaches on re-entry")
+	assert_eq(second_camera.compositor.get_compositor_effects().size(), 2)
+
+	# A camera freed while attached retires the view on the next render.
+	second_camera.free()
+	renderer.render_now()
+	var orphaned := renderer.get_debug_draw_list_report()
+	assert_false(bool(orphaned.get("second_scene_compositor_attached", true)))
+	assert_true(_slot(orphaned, "second_scene_camera_side").is_empty())
+	assert_null(renderer.get_second_scene_camera())
+	assert_engine_error_count(0)
 
 
 func _overlap_texture(name: String) -> Texture2D:

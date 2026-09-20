@@ -843,7 +843,7 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, const PlayerVie
     out.aim_range_q16 = w.aim_range_q16;
 	if (world)
 		fill_hud_combat_view(*world, w, out, t, optical_view);
-	out.hud_combat.state.dead = out.hud_combat.state.dead || v.death_screen_active;
+	out.hud_combat.state.death_screen = v.death_screen_active;
     out.tp_anchor[0] = v.tp_anchor[0];
     out.tp_anchor[1] = v.tp_anchor[1];
     out.tp_anchor[2] = v.tp_anchor[2];

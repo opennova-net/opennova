@@ -50,10 +50,10 @@ struct PlayerReplicationState {
 	std::vector<std::string> spawn_names;
 	// The 0x0F variant-0 / 0x0A phase-0 u32 owned-zone mask: bit (1 << zone_no) set iff every zone
 	// entity of that number belongs to this player's team — the deploy map's spawnable-zone
-	// advertising. Default 0x8 = the golden ASH_I5A steady value (zone 3 wholly owned), kept for
-	// World-less hosts; a zone-chain host computes it per recipient. [orig:
-	// ZoneSlotChain_GetOwnedZoneMask @0x4a2620 written @0x4ff9a3; net-re §5.61]
-	uint32_t uniform_team_mask = 0x8;
+	// advertising and the client's FARP unlock word. Every writer computes it per recipient
+	// from the live chain; an empty chain (and a World-less reply) is the walk's own 0.
+	// [orig: ZoneSlotChain_GetOwnedZoneMask @0x4a2620 written @0x4ff9a3; net-re §5.61]
+	uint32_t uniform_team_mask = 0;
 };
 
 // Mission entity data shared by all game-server frontends. The CLI can fill this from parsed .bms

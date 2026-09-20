@@ -56,6 +56,15 @@ using PoolPresentLifecycleMap = std::unordered_map<uint16_t, PoolPresentLifecycl
 double pool_present_yaw_deg(const world::Entity &e, const world::AiEntity *ae,
 		EntityClass cls);
 
+// The presented pitch / roll of one pool row. Retail draws entity+0x14 / +0x18,
+// 32-bit angles like the heading; once the vehicle motor has run the port keeps
+// that pair on VehicleMotorState (air_pitch_bam / air_roll_bam) and Entity::pitch
+// / roll are its whole-degree mirrors. Publishing the mirrors would tilt the drawn
+// hull up to half a degree off entity_placement_matrix, the frame every
+// simulation read (collision, userpoints, the carrier-owned camera) uses.
+double pool_present_pitch_deg(const world::Entity &e);
+double pool_present_roll_deg(const world::Entity &e);
+
 // The door phases of the rows that publish any: a flat int32 side table of
 // (row index, count, phase[count]) entries in row order, rebuilt beside the
 // rows on every build, so only door-bearing entities carry retail's ordinal

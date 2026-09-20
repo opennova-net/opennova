@@ -1390,9 +1390,110 @@ master-gated on `dword_840B18` and skipped while `layerIndex == 3`:
   `STROVER_FARP_RELOADING` "Reloading" (`!dword_A85B74`)
   `[orig: @0x5bdff8..0x5be10e]`.
 
-The received-state feed and all three draw legs are ported (2026-09-19).
+Every line is one call of the same shape: design anchor (0x200, 0x118) =
+(512, 280), the **large** overlay slot `g_hudLabelFontLarge @0xB4C3A0`
+(Impac22b), `g_hudColors.active`, draw mode 2 `[orig: the slot push @0x5BDFD7
+(armory / vehicle bay), @0x5BE0AA (FARP wait), @0x5BE0F7 (FARP reloading);
+HUD_DrawTextAtVirtualPos @0x5D3EC0 -> the mode dispatch @0x5D2EA0, mode 2 =
+HUD_DrawTextCentered_HalfBright @0x5D2ECE]`. The unlock word `dword_A85BBC`
+has ONE writer, the S2C 0x0A phase-0 store `[orig: NapiNPClientMsg_0x00A
+@0x430136]`, fed by the host's per-frame owned-zone walk (net-re §5.61): a
+host that sends a constant there unlocks or locks FARPs the chain never
+decided.
+
+The received-state feed and all three draw legs are ported (2026-09-19; the
+slot corrected the same day: the first port drew them in the hudpos font).
 D-HUD-14 retains active-menu suppression and the vehicle-bay/FARP service
 integration; drawing the timer does not implement the rearm service.
+
+### Weapon / vehicle combat cues: font slots, the LollyPop head, the death gate, the Inset scene (witnessed 2026-09-19)
+
+The #655 review's leftovers, each re-witnessed before it was changed. The mode
+matrix and the validation runs live in
+[weapon-vehicle-hud-validation.md](weapon-vehicle-hud-validation.md); this
+section owns the witnesses.
+
+**Which overlay slot each text rides.** The slot table is
+`g_hudLabelFont @0xB4C388` + 12 per slot (normal, bold `@0xB4C394`, large
+`@0xB4C3A0`, Impact38 `@0xB4C3AC`); the hudpos-named HUD font is its own slot
+`dword_2723C74`, loaded at scale 1.0 (`0x10000`) from the hudpos font name for
+the surface width tier, and a copy of the BOLD slot when hudpos names none
+`[orig: sub_591890 @0x591890 -- the load @0x5918B4, the fallback copy
+@0x5918D6..0x5918E1]`. It is the ammo/name drawer's font.
+
+| Text | Slot | Draw | Witness |
+| --- | --- | --- | --- |
+| Control-seat gear label (Low / Med / High) | large (Impac22b) | left-aligned at the scaled design anchor (`gear_x`, `gear_y - 50`), `g_hudColors.active`, flags 1 | `hud_draw_target_entity_overlay @0x59A5D0`: string select `@0x59A694..0x59A6BB` (byte 0 -> Med, 2 -> High, else Low; strings loaded `@0x5A4871..0x5A48CF`), anchor `@0x59A6C1..0x59A6E6`, slot push `@0x59A6F9`, `HUD_DrawTextLeft_HalfBright @0x59A6FE` |
+| Armory / vehicle-bay / FARP prompts | large (Impac22b) | centred on design (512, 280) | the Gameplay prompts section above |
+| Inset friendly name | bold (Arial bold) | centred on the aperture centre in SURFACE pixels, colour `0xFFFF0000` through the half-bright fold | `Render_RadarCompassOverlay`: slot push `@0x5CA0C0`, `HUD_DrawTextAligned_HalfBright @0x5D2F20` mode 2 `@0x5CA0CF` |
+| Mortar impact distance (`STROVER_DIST`) | drawn in the hudpos slot, MEASURED in the bold slot | design x = `impact_x - (width >> 1)` where width = the bold slot's unscaled extent x its scale, truncated; then the design pair scales to the surface and the line draws LEFT-aligned, flags 1, `g_hudFrameOverlayColor` | `HUD_RenderAllOverlays`: `GameFont_MeasureTextWidth @0x580A50` with slot `0xB4C394` `@0x5A897E..0x5A8984`, `sar 1` `@0x5A8995`, `Viewport_ScaleToVirtualCoords @0x5A89B0`, hudpos slot push `@0x5A89D0`, draw `@0x5A89D5` |
+
+`HUD_DrawTextLeft_HalfBright @0x5804C0` folds the colour to
+`(c >> 1) & 0x7F7F7F | 0xFF000000` `[orig: @0x5804D8..0x5804F0]` and passes the
+slot's scale pair into the draw `[orig: scaleY @0x58052B, scaleX @0x580539]`.
+Flag 0x100 forwards the font drawer's 0x100 option `[orig: @0x5804E1..0x5804E9]`
+and flag 2 adds its option 4 and swaps a constant 0.5 argument for a global
+`[orig: @0x5804F5..0x58050A]`; the literal 1 every caller here passes sets
+neither, so these are plain left-aligned runs.
+
+**The LollyPop head is a 2:1 ellipse.** `HUD_RenderAllOverlays` admits the
+marker on weapon flag 0x8000 alone `[orig: Entity_CheckWeaponSeatFlags
+@0x5A8805]`, colours it `0xFF0000` with alpha 0xFF when the terrain ray from
+the player (+2 units up) to the impact point (+2 up) is clear and 0x60 when it
+is blocked `[orig: @0x5A8865..0x5A88C3]`, scales it
+`clamp(1 / (distance_m * 0.005), 0.25, 2.0)` `[orig: @0x5A88CE..0x5A8910]` and
+calls `draw_entity_marker(position, type 0, scale, colour, 0, 0, 0, 0)
+@0x5A8924`. Type 0 draws a stem from the projected point up by
+`half = ftol(scale * 20.0)` `[orig: @0x5931E0..0x59321D]` and one
+`draw_ring_overlay @0x5D4270` record centred `2 * half` above the point
+`[orig: @0x59322D..0x593283]`. The ring record is eight dwords:
+`{x, y, z = 0.5, radius = half, stroke = 2.0, fan texture = 0, colour,
+x-scale = 2.0}`. The stroke and the x-scale are the same `2.0` constant stored
+twice `[orig: +0x1C @0x59327B, +0x10 @0x59327F]`. `draw_ring_overlay` multiplies
+ONLY the x term by record `+0x1C` `[orig: @0x5D4513]`, so the head is twice as
+wide as it is tall; its segment count keys on the unscaled radius
+(`clamp(ftol(radius * (1/3) * 4pi), 4, 95)`), and the four radial stops are
+`radius -+ (stroke/2 - 1)` with a 1-pixel transparent fringe either side. The
+Inset aperture ring is the same record with `+0x1C` = the viewport aspect
+factor `sub_58A910` and stroke 2.0 `[orig: @0x5C9E16..0x5C9E7F]`.
+
+**The HUD's death gate is `g_death_screen_active @0xA860EC`, alone.** Neither
+the local dead bit (`Flags & 2`) nor the death lerp camera (`g_camera_mode`
+4, which the main-scene arbiter selects from that bit `@0x5CA217..0x5CA24B`) is
+a HUD gate; between the death and the latch the passes below still run.
+
+| Pass | Gate | Witness |
+| --- | --- | --- |
+| Crosshair, tracked-target cursor, CustomAim, friendly brackets | `!g_death_screen_active` | `HUD_DrawCrosshair @0x592646` |
+| Weapon / vehicle silhouettes, gear label, ammo, stance, heat, parachute/armor/cargo, altitude ladder | `!g_death_screen_active` (the death-screen arm draws the spectated entity's health, the team line and the timer instead) | `HUD_RenderOverlays @0x5A7BBC` |
+| Scope overlay details (commander reticle) / binocular speedometer | `!g_death_screen_active` | `HUD_RenderAllOverlays @0x5A850D` |
+| Scope selection incl. the Inset scene | `!g_death_screen_active` | `Render_ProcessMainSceneFrame @0x5CA26A` |
+| Controller forward pip | none of the above; `!g_binocularsViewActive && g_camera_mode == 0` | `draw_weapon_sight_crosshair @0x59ECA0`, gate `@0x59ECE0` |
+| Turret lag pip | no death, camera or binocular test at its head; reached only with a parent whose `attrib2 & 0x1000` | `HUD_draw_crosshair @0x59EA20`, call site `@0x5A84DF` |
+| LollyPop marker, impact distance | **none**: the tail of the walk runs unconditionally after the takeover-status test | `HUD_RenderAllOverlays @0x5A87EF..0x5A89DA` |
+| The impact preview that feeds them (and the 2DImpact map slot) | **none**: weapon-flag admission only | `Player_UpdatePerFrame @0x4DE760..0x4DE79D`, the preview `@0x4DE80A..0x4DE929` |
+
+`Entity_CheckWeaponSeatFlags @0x540D00` is the only admission those last rows
+have: OnlyScoped (0x80000) on the local player's slot requires
+`g_weaponScopeActive`. Every stock weapon that authors the impact flags also
+authors OnlyScoped, so the missing death test is unobservable on stock data;
+the port keeps the structure rather than the accident.
+
+**The Inset scene is the whole world pass, particles included.**
+`Render_RadarCompassOverlay @0x5C9740` recomputes the view
+(`Camera_ComputeThirdPersonView @0x5C9841`, slot offsets `@0x5C98F7..0x5C9903`),
+draws the two depth-mask fans, then renders the scene with the SAME function
+the main view uses: `Terrain_RenderSceneWithReflection(view, 0, 0, 0)
+@0x5C9DE9`. Its arguments switch off only the sun glow (second argument,
+tested `@0x5C970E`) and the water-mirror subpasses (fourth argument); the
+sector models and entities, both `CEffectEmitterPool_RenderMainPass` +
+`EffectWorld_RenderParticlePass` pairs (far side `@0x5C95AC/@0x5C95B5`, camera
+side `@0x5C9687/@0x5C9690`), the projectile trails, the weather trail
+particles `@0x5C96A6`, the coronas and the scars all run. The first-person
+viewmodel is not part of that function (the main frame draws it in its own
+viewmodel-first step), so the aperture never shows the gun. Port: the Inset
+camera takes its own particle view group in `godot/src/particle/particle_renderer`
+beside the main and water-mirror groups.
 
 ## `hudpos.def` parser token → global map — `HUD_ParseHudposToken @0x59f370`
 
@@ -2842,6 +2943,15 @@ Applied 2026-09-16 (the scoped-view circle-mask grill; comments only, IDB saved)
 No renames were applied: `draw_minimap_crosshair_and_grid` keeps its name now
 that its minimap caller is witnessed, and the 2026-07-19 held proposals for
 `0x4dcd30` / `0x4dcce0` remain held.
+
+Applied 2026-09-19 (the #655 leftovers, comments only): the slot each combat
+text pushes (`0x59A6F9`, `0x5BDFD7`, `0x5CA0C0`, `0x5A897E`), the ring
+record's x-scale (`0x59327B`), the Inset scene call's pass coverage
+(`0x5C9DE9`) and the ungated tail of the overlay walk (`0x5A87EF`). The
+comment at `0x59A6F9` also records that the jo-c sync's name for the label
+font slot table, `g_NetQualityIndicators @0xB4C388`, is a misnomer: the table
+is normal `+0`, bold `+0xC`, large `+0x18`, Impact38 `+0x24`. It was not
+renamed back, since the sync would reapply it.
 
 ## Ledger de-table transplants (2026-08-06)
 
