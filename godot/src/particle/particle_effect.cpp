@@ -1,4 +1,5 @@
 #include "particle/particle_effect.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -25,11 +26,11 @@ void ParticleEffect::set_pdefs(const PackedStringArray &p_value) {
 PackedStringArray ParticleEffect::get_pdefs() const { return pdefs; }
 
 void ParticleEffect::copy_from_native(const opennova::particle::EffectDef &effect) {
-	id = String::utf8(effect.id.c_str());
+	id = opennova::to_gd(effect.id);
 	pdefs.clear();
 	pdefs.resize(static_cast<int>(effect.pdefs.size()));
 	for (int i = 0; i < static_cast<int>(effect.pdefs.size()); ++i) {
-		pdefs[i] = String::utf8(effect.pdefs[static_cast<size_t>(i)].c_str());
+		pdefs[i] = opennova::to_gd(effect.pdefs[static_cast<size_t>(i)]);
 	}
 }
 

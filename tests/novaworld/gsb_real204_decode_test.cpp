@@ -16,9 +16,10 @@
 
 #include <net/novaworld/gsb.h>
 
+#include "common/file_io.h"
+
 #include <cstdint>
 #include <cstdio>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -29,13 +30,11 @@ int main(int argc, char **argv) {
 	// freshly fetched live blob (`curl .../jop_2.gsb?a=1`) for A/B checks.
 	const std::string path = argc > 1 ? std::string(argv[1])
 	                                  : std::string(FIXTURE_DIR) + "/nw204_jop_2.gsb";
-	std::ifstream file(path, std::ios::binary);
-	if (!file) {
+	std::vector<uint8_t> blob;
+	if (!test_io::read_file(path, blob)) {
 		std::fprintf(stderr, "FAIL: cannot open fixture %s\n", path.c_str());
 		return 1;
 	}
-	std::vector<uint8_t> blob((std::istreambuf_iterator<char>(file)),
-	                          std::istreambuf_iterator<char>());
 	std::printf("blob: %zu bytes\n", blob.size());
 
 	GsbResponse r;

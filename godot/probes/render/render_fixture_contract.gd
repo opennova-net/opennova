@@ -955,14 +955,6 @@ static func read_json(path: String) -> Dictionary:
 	return parsed if parsed is Dictionary else {}
 
 
-static func sha256_bytes(bytes: PackedByteArray) -> String:
-	var hash := HashingContext.new()
-	if hash.start(HashingContext.HASH_SHA256) != OK:
-		return ""
-	hash.update(bytes)
-	return hash.finish().hex_encode()
-
-
 static func capture_source_state_contract_error(
 		bundle: Dictionary,
 		state: Dictionary,

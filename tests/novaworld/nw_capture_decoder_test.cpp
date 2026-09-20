@@ -45,11 +45,6 @@ int g_failures = 0;
 #define DEFAULT_PROBE3AGAIN_PCAP ""
 #endif
 
-void put_u16(std::vector<uint8_t> &b, uint16_t v) {
-	b.push_back(uint8_t(v));
-	b.push_back(uint8_t(v >> 8));
-}
-
 // Wrap a post-opcode plaintext body into the on-wire UDP payload: outer NWU
 // transform + opcode prefix + NAPI envelope (mirrors nw_replay_timeline_test).
 std::vector<uint8_t> nwu_outer_encode(uint8_t opcode, std::vector<uint8_t> body) {

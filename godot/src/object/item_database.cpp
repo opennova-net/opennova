@@ -7,7 +7,6 @@
 #include <runtime/assets/asset_store.h>
 
 #include "mission/mission_data.h"
-#include "resource_index/resource_root.h"
 #include "util/data_format.h"
 
 #include <runtime/audio/envs_markers.h>

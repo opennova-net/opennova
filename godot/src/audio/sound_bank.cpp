@@ -4,6 +4,7 @@
 #include "lwf/wav_loader.h"
 #include "resource_index/resource_root.h"
 #include "simulation/simulation.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/audio_server.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -89,7 +90,7 @@ bool SoundBank::has_set(const String &p_name) const {
 PackedStringArray SoundBank::get_set_names() const {
 	PackedStringArray out;
 	for (const std::string &name : index_.names()) {
-		out.push_back(String::utf8(name.c_str()));
+		out.push_back(opennova::to_gd(name));
 	}
 	return out;
 }
@@ -397,7 +398,7 @@ SoundBank::select_radio_set(const std::string &name, uint8_t listener_view_flags
 // --- Internals ---
 
 opennova::audio::SetLocation SoundBank::_find_set(const String &p_name) const {
-	return index_.find(std::string(p_name.utf8().get_data()));
+	return index_.find(opennova::to_std(p_name));
 }
 
 const opennova::lwf::File &SoundBank::_bank_at(const opennova::audio::SetLocation &p_loc) const {
@@ -412,7 +413,7 @@ String SoundBank::_member_wav_path(const opennova::lwf::File &p_bank,
 	if (p_member.single_index >= p_bank.singles.size()) {
 		return String();
 	}
-	return String::utf8(p_bank.singles[p_member.single_index].path.c_str());
+	return opennova::to_gd(p_bank.singles[p_member.single_index].path);
 }
 
 double SoundBank::_member_base_pitch(const opennova::lwf::Sndparm &p_member) {

@@ -1,4 +1,5 @@
 #include "lwf/wav_loader.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -22,7 +23,7 @@ Ref<AudioStreamWAV> WavLoader::from_bytes(const PackedByteArray &p_bytes) {
 	std::string error;
 	if (!opennova::lwf::wav_decode_pcm16(p_bytes.ptr(),
 				static_cast<size_t>(p_bytes.size()), decoded, error)) {
-		UtilityFunctions::push_warning("WavLoader: ", String::utf8(error.c_str()));
+		UtilityFunctions::push_warning("WavLoader: ", opennova::to_gd(error));
 		return Ref<AudioStreamWAV>();
 	}
 	return from_pcm(decoded);

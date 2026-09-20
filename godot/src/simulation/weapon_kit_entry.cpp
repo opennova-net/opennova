@@ -1,4 +1,5 @@
 #include "simulation/weapon_kit_entry.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -13,10 +14,10 @@ Ref<WeaponKitEntry> WeaponKitEntry::make(const String &p_name, int p_ammo_primar
 	return out;
 }
 
-String WeaponKitEntry::get_name() const { return String::utf8(value_.name.c_str()); }
+String WeaponKitEntry::get_name() const { return opennova::to_gd(value_.name); }
 
 void WeaponKitEntry::set_name(const String &p_name) {
-	value_.name = std::string(p_name.utf8().get_data());
+	value_.name = opennova::to_std(p_name);
 }
 
 void WeaponKitEntry::_bind_methods() {

@@ -26,27 +26,10 @@ const STAGED_FIXTURES := {
 
 
 func should_skip_script():
-	for rel in STAGED_FIXTURES:
-		if RetailData.fixture(rel).is_empty():
-			return RetailData.fixture_pending_text(rel)
-	return false
+	return RetailData.fixtures_skip(STAGED_FIXTURES.keys())
 
 const AI_TYPE := 0x14BF        # Generic Soldier (items.def id 105311)
 const SPAWN_ZONE_TYPE := 1359  # pool-1 fixture; ItemDef supplies SpawnPoint
-
-
-# The screen's narrow world view, faked over the loopback joiner sim and the
-# staged menu root (rule 11: a fake of the WorldView interface through its virtual hooks).
-class FakeWorldView:
-	extends WorldView
-	var root: ResourceRoot
-	var sim_value: Simulation
-
-	func _sim() -> Simulation:
-		return sim_value
-
-	func _resource_root() -> ResourceRoot:
-		return root
 
 
 var _overlay: Control = null
@@ -54,11 +37,7 @@ var _overlay: Control = null
 
 func before_each() -> void:
 	Strings.clear()
-	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	if not DirAccess.dir_exists_absolute(dir):
-		assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
-	for rel in STAGED_FIXTURES:
-		_copy_fixture(RetailData.fixture(rel), dir.path_join(STAGED_FIXTURES[rel]))
+	PresenterFixture.stage(self, TMP_DIR, STAGED_FIXTURES)
 
 
 func after_each() -> void:
@@ -67,37 +46,11 @@ func after_each() -> void:
 
 
 func after_all() -> void:
-	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	for name in STAGED_FIXTURES.values():
-		var path := dir.path_join(name)
-		if FileAccess.file_exists(path):
-			DirAccess.remove_absolute(path)
-	DirAccess.remove_absolute(dir)
+	PresenterFixture.unstage(TMP_DIR, STAGED_FIXTURES)
 	var zone_def := ProjectSettings.globalize_path(
 			"res://.godot/deploy_spawn_zone_items.def")
 	if FileAccess.file_exists(zone_def):
 		DirAccess.remove_absolute(zone_def)
-
-
-func _copy_fixture(source: String, target: String) -> void:
-	var output := FileAccess.open(target, FileAccess.WRITE)
-	assert_not_null(output, "temporary deploy-screen fixture opens for write")
-	if output != null:
-		output.store_buffer(FileAccess.get_file_as_bytes(source))
-		output.close()
-
-
-func _make_root() -> ResourceRoot:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(TMP_DIR)), OK)
-	return root
-
-
-func _anim_root() -> ResourceRoot:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/anim")), OK)
-	return root
 
 
 # The fixture items.def plus one deploy-selectable SpawnPoint row (the
@@ -167,7 +120,7 @@ func _join_pair_in_match() -> Dictionary:
 	assert_true(host.enable_host_listen(0), "host bound an OS-assigned UDP port")
 	assert_true(host.load_from_mission_data(mission))
 	assert_true(host.spawn_local_player(Vector3(5, 0, 5), 0.0, 1))
-	var host_anim := _anim_root()
+	var host_anim := PresenterFixture.anim_root(self)
 	assert_gt(host.set_infantry_anim_map(host_anim, "soldier.adm"), 0)
 	host.resolve_item_traits(item_db)
 	host.resolve_infantry_adm_ids(host_anim, item_db)
@@ -178,7 +131,7 @@ func _join_pair_in_match() -> Dictionary:
 	autofree(joiner)
 	assert_true(joiner.enable_join("127.0.0.1", port, "DeployJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
-	var joiner_anim := _anim_root()
+	var joiner_anim := PresenterFixture.anim_root(self)
 	assert_gt(joiner.set_infantry_anim_map(joiner_anim, "soldier.adm"), 0)
 	joiner.resolve_item_traits(item_db)
 	joiner.resolve_infantry_adm_ids(joiner_anim, item_db)
@@ -240,8 +193,8 @@ func _join_pair_with_pending_pick() -> Dictionary:
 
 
 func _make_presenter(sim: Simulation) -> DeployPresenter:
-	var view := FakeWorldView.new()
-	view.root = _make_root()
+	var view := PresenterFixture.FakeWorldView.new()
+	view.root = PresenterFixture.root_over(self, TMP_DIR)
 	view.sim_value = sim
 	_overlay = Control.new()
 	_overlay.size = Vector2(800, 600)

@@ -5,6 +5,7 @@
 #include "cbin/cbin_asset_lookup.h"
 #include "fnt/fnt_resource.h"
 #include "util/texture_path_resolver.h"
+#include "util/string_convert.h"
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/gameprofile/required_resources.h>
@@ -345,7 +346,7 @@ String ResourceRoot::resolve_file(const String &name) {
 		while (!entry.is_empty()) {
 			if (!dir->current_is_dir()) {
 				const String key_string = entry.to_lower();
-				const std::string key(key_string.utf8().get_data());
+				const std::string key = opennova::to_std(key_string);
 				auto it = resolve_memo_.find(key);
 				if (it != resolve_memo_.end()) {
 					// Case-variant duplicates poison the name: resolving it is an error.
@@ -361,7 +362,7 @@ String ResourceRoot::resolve_file(const String &name) {
 		resolve_memo_epoch_ = epoch;
 	}
 
-	const auto found = resolve_memo_.find(std::string(wanted.utf8().get_data()));
+	const auto found = resolve_memo_.find(opennova::to_std(wanted));
 	if (found == resolve_memo_.end()) {
 		return String();
 	}
@@ -426,13 +427,13 @@ bool ResourceRoot::has_file(const String &name, LookupPolicy policy) const {
 		// Retail receives the caller's complete relative query. In particular, a
 		// qualified loose query must not alias a flat archive entry (D-VFS-3).
 		return index_.has_file(
-				std::string(name.utf8().get_data()), to_vfs_lookup_policy(policy));
+				opennova::to_std(name), to_vfs_lookup_policy(policy));
 	}
 	const String clean = name.strip_edges();
 	if (clean.is_empty() || !is_flat_filename(clean)) {
 		return false;
 	}
-	return index_.has_file(std::string(lookup_name(name).utf8().get_data()));
+	return index_.has_file(opennova::to_std(lookup_name(name)));
 }
 
 PackedByteArray ResourceRoot::read_file(const String &name, LookupPolicy policy) const {
@@ -447,13 +448,13 @@ PackedByteArray ResourceRoot::read_file(const String &name, LookupPolicy policy)
 			return out;
 		}
 		found = index_.read_file(
-				std::string(name.utf8().get_data()), bytes, to_vfs_lookup_policy(policy));
+				opennova::to_std(name), bytes, to_vfs_lookup_policy(policy));
 	} else {
 		const String clean = name.strip_edges();
 		if (clean.is_empty() || !is_flat_filename(clean)) {
 			return out;
 		}
-		found = index_.read_file(std::string(lookup_name(name).utf8().get_data()), bytes);
+		found = index_.read_file(opennova::to_std(lookup_name(name)), bytes);
 	}
 	if (!found) {
 		return out;
@@ -479,7 +480,7 @@ Ref<Texture2D> ResourceRoot::load_texture(const String &name, LookupPolicy polic
 	// A prior archive/default decode must never poison a later forced-loose lookup (or vice versa).
 	const String cache_query = name.strip_edges().to_lower();
 	const std::string cache_key = std::to_string(static_cast<int>(policy)) + ":" +
-			std::string(cache_query.utf8().get_data());
+			opennova::to_std(cache_query);
 	const auto cached = texture_cache_.find(cache_key);
 	if (cached != texture_cache_.end()) {
 		return cached->second;
@@ -514,10 +515,10 @@ Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t typ
     if (type < 4 || type > 7)
         return opennova::prepare_material_texture(load_texture(name), name, type);
     const String dds = name.get_basename() + ".dds";
-    const std::string native_name(name.utf8().get_data());
+    const std::string native_name = opennova::to_std(name);
     const std::string selected = opennova::renderer::normal_material_filename(native_name,
             index_.prefers_loose_file(native_name), has_file(dds));
-    const String source_name = String::utf8(selected.c_str());
+    const String source_name = opennova::to_gd(selected);
     const std::string key = "normal-source:" + selected;
     const uint64_t epoch = opennova::cache_epoch();
     if (texture_cache_epoch_ != epoch) { texture_cache_.clear(); texture_cache_epoch_ = epoch; }

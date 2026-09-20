@@ -33,7 +33,7 @@ def fixture(path, content):
 U=65536
 roots={'pursuit':0,'steer':1,'stinger':2,'hellfire':3,'javelin':4,'stinger_init':5,'javelin_init':6}
 def signed(v): return (v+2**31)%2**32-2**31
-cases=[];lines=[];expected=[]
+cases=[]
 for root,category,v in oracle.cases():
  if root not in roots or v.get('fpcw',0x027f)!=0x027f:continue
  r=machine.run(root,v);e=bytes.fromhex(r['entity'])
@@ -47,11 +47,10 @@ for root,category,v in oracle.cases():
   inp[32]=1 if (v.get('ai_target',False) if v.get('owner_ai',False) else v.get('owner_lock',False)) else 65535
   inp[33:36]=v.get('camera_pose',(90*U,25*U,10*U))[:3]
   inp[36]=inp[32]!=65535
- # Signed dwords, except target/flags/phase and booleans (all below INT_MAX).
- lines.append(' '.join(str(signed(int(x))) for x in inp))
  target_out=1 if i(724)==oracle.TARGET else 65535
  exp=[i(16),i(20),i(24),i(152),i(156),i(160),i(700),i(704),i(708),i(740),i(744),i(748),short(696),short(698),target_out,i(728),i(736),i(752),*struct.unpack('<4i',bytes.fromhex(r['output']))]
- expected.append(exp);cases.append((root,category,v,inp,exp))
+ cases.append((root,category,v,inp,exp))
+# Signed dwords, except target/flags/phase and booleans (all below INT_MAX).
 fixture('tests/world/fixtures/guided_missile_vectors.inc',
     '// Original x86 PC53 vectors; regenerate with scripts/oracles/jo_c_parity.py.\n' +
     ''.join('{'+','.join(str(signed(int(x))) for x in row[3]+row[4])+'}, // '+row[0]+' '+row[1]+'\n' for row in cases))

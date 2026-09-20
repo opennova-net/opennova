@@ -1,11 +1,11 @@
 #include "particle/effect_world.h"
 
+#include "particle/particle_convert.h"
 #include "particle/particle_effect.h"
 #include "particle/particle_renderer.h"
 #include "resource_index/resource_root.h"
 #include "util/string_convert.h"
 
-#include <cstring>
 #include <vector>
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -22,34 +22,6 @@
 
 using namespace godot;
 using opennova::to_gd;
-
-namespace {
-
-int64_t token_to_godot(std::uint64_t value) noexcept {
-	int64_t result = 0;
-	std::memcpy(&result, &value, sizeof(result));
-	return result;
-}
-
-Vector3 godot_vector(const opennova::particle::Vec3 &value) noexcept {
-	return Vector3(value.x, value.y, value.z);
-}
-
-Transform3D godot_pose(const opennova::particle::EffectPose &value) noexcept {
-	Basis basis;
-	basis.set_column(0, godot_vector(value.right));
-	basis.set_column(1, godot_vector(value.up));
-	basis.set_column(2, godot_vector(value.forward));
-	return Transform3D(basis, godot_vector(value.position));
-}
-
-AABB godot_aabb(const opennova::renderer::ParticleAabb &bounds) {
-	const Vector3 minimum(bounds.min.x, bounds.min.y, bounds.min.z);
-	const Vector3 maximum(bounds.max.x, bounds.max.y, bounds.max.z);
-	return AABB(minimum, maximum - minimum);
-}
-
-} // namespace
 
 EffectWorld::EffectWorld() {
 	scene_.instantiate();

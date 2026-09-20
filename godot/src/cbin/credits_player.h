@@ -64,9 +64,6 @@ private:
 
 	// Maps entry index to the visual node created for it (if any).
 	HashMap<int, Control *> entry_to_node_;
-	// Logical scroll-stream Y for every entry. Fixed overlays render elsewhere,
-	// but editor sync still needs their position in the credits stream.
-	Vector<float> entry_stream_y_;
 	int highlighted_entry_ = -1;
 	Control *highlight_node_ = nullptr;
 	Color original_color_ = Color(1, 1, 1);

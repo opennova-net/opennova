@@ -9,9 +9,9 @@
 namespace opennova::server {
 
 // Per-tag in-memory state for the legacy NW*.dll login + join relay dance.
-// Mirrors onnet's `login_sessions` / `join_sessions` dicts in
-// onnw/controllers/nova_world/{login,join}.py — same fields, same key
-// scheme.
+// Follows onnet's `login_sessions` / `join_sessions` dicts in
+// onnw/controllers/nova_world/{login,join}.py — same key scheme, holding the
+// fields a later leg of the dance reads back.
 
 struct LoginSession {
 	std::string session_tag;
@@ -29,10 +29,6 @@ struct LoginSession {
 	std::string msgbase;         // e.g. "jop_2_msg.htm"
 	std::string success;         // e.g. "jop_2_main.htm"
 	std::string failure;         // e.g. "jop_2_main.htm"
-	std::string pfid;            // e.g. "28"
-	std::string nodb;
-	std::string needtoagree;
-	std::string enterkey;
 };
 
 struct JoinSession {
@@ -41,10 +37,8 @@ struct JoinSession {
 	std::string failure;
 	std::string relay;
 	std::string msgbase;
-	std::string nodb;
 	std::string needexpkey;
 	std::string pfid;
-	std::string mode;
 	std::string rid;             // RID of the host the client is joining
 };
 
@@ -52,11 +46,7 @@ struct HostSession {
 	std::string session_tag;
 	std::string host_key;        // 48-char A-P alphabet (24 random bytes nibble-encoded)
 	std::string success;         // e.g. jop_2_host2.htm
-	std::string failure;
 	std::string relay;
-	std::string msgbase;
-	std::string nodb;
-	std::string needexpkey;
 	std::string pfid;
 };
 
@@ -80,8 +70,6 @@ public:
 
 	void put_host(const std::string &tag, HostSession session);
 	std::optional<HostSession> get_host(const std::string &tag) const;
-
-	std::size_t host_count() const;
 
 	// Drop entries older than `max_age_ms`. Phase I.8 — keeps the maps
 	// bounded under server uptime + occasional bot probes that POST

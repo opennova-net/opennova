@@ -1,5 +1,6 @@
 #include "network/udp_pump.h"
 #include "network/udp_datagram.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/ip.hpp>
 #include <godot_cpp/core/error_macros.hpp>
@@ -78,7 +79,7 @@ int UdpPump::bind_listen(int port) {
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
 	capture_ = opennova::net::PcapUdpWriter::from_path(
-			std::string(capture_path_.utf8().get_data()));
+			opennova::to_std(capture_path_));
 	if (capture_ != nullptr) {
 		print_verbose(String("UdpPump: recording host traffic (port ") +
 				itos(local_port_) + ")");
@@ -104,7 +105,7 @@ int UdpPump::dial(const String &host, int port) {
 	dest_port_ = port;
 	socket_->set_dest_address(dest_ip_, port);
 	capture_ = opennova::net::PcapUdpWriter::from_path(
-			std::string(capture_path_.utf8().get_data()));
+			opennova::to_std(capture_path_));
 	if (capture_ != nullptr) {
 		print_verbose(String("UdpPump: recording joiner traffic to ") +
 				dest_ip_ + ":" + itos(dest_port_));

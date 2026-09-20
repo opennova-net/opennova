@@ -6,7 +6,7 @@
 //   - Audio_StreamNextChunk   @ 0x004ED7D0: per-tick chunk read + decode.
 //   - sbf_decode_chunk (libs): algebraically equivalent to the engine's
 //                              Audio_SubmitStereoSampleSplit @ 0x007BD205
-//                              at unity gain (see sbf_ida_witness.md).
+//                              at unity gain (see docs/audio/mus-sbf-re.md).
 //
 // Chunk data is read from SbfBank's decoded in-memory byte stream, so
 // SCR-wrapped loose banks and plaintext banks use the same playback path.
@@ -123,7 +123,7 @@ int32_t SbfAudioStreamPlayback::_mix_resampled(AudioFrame *p_buffer,
 		return 0;
 	}
 
-	// Per Phase A IDA witness (sbf_ida_witness.md), SBF audio is byte-paired
+	// Per the IDA witness (docs/audio/mus-sbf-re.md), SBF audio is byte-paired
 	// stereo: each chunk produces valid_samples int16 values, alternating
 	// L,R,L,R,... sbf_decode_chunk emits them already interleaved. One stereo
 	// frame = 2 int16 values.

@@ -5,7 +5,6 @@
 
 #include <formats/env/env_weather.h>
 #include <base/io/hash.h>
-#include <runtime/renderer/light_runtime.h>
 #include <runtime/renderer/material_eval.h>
 #include <formats/threedi/threedi_panm_pose.h> // liveness / noise / clock (one impl with the engine)
 #include <formats/threedi/threedi_panm_runtime.h>

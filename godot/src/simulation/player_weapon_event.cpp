@@ -1,4 +1,5 @@
 #include "simulation/player_weapon_event.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -14,20 +15,20 @@ Vector3 PlayerWeaponEvent::get_world_position() const {
 	return Vector3(value_.world_position.x, value_.world_position.z, -value_.world_position.y);
 }
 
-String PlayerWeaponEvent::get_anim_key() const { return String::utf8(value_.anim_key.c_str()); }
-String PlayerWeaponEvent::get_action_soundset() const { return String::utf8(value_.action_soundset.c_str()); }
-String PlayerWeaponEvent::get_action_particle() const { return String::utf8(value_.action_particle.c_str()); }
+String PlayerWeaponEvent::get_anim_key() const { return opennova::to_gd(value_.anim_key); }
+String PlayerWeaponEvent::get_action_soundset() const { return opennova::to_gd(value_.action_soundset); }
+String PlayerWeaponEvent::get_action_particle() const { return opennova::to_gd(value_.action_particle); }
 String PlayerWeaponEvent::get_action_particle_userpoint() const {
-	return String::utf8(value_.action_particle_userpoint.c_str());
+	return opennova::to_gd(value_.action_particle_userpoint);
 }
 String PlayerWeaponEvent::get_action_end_soundset() const {
-	return String::utf8(value_.action_end_soundset.c_str());
+	return opennova::to_gd(value_.action_end_soundset);
 }
-String PlayerWeaponEvent::get_effect_particle() const { return String::utf8(value_.effect_particle.c_str()); }
+String PlayerWeaponEvent::get_effect_particle() const { return opennova::to_gd(value_.effect_particle); }
 String PlayerWeaponEvent::get_effect_particle_userpoint() const {
-	return String::utf8(value_.effect_particle_userpoint.c_str());
+	return opennova::to_gd(value_.effect_particle_userpoint);
 }
-String PlayerWeaponEvent::get_switch_to_weapon() const { return String::utf8(value_.switch_to_weapon.c_str()); }
+String PlayerWeaponEvent::get_switch_to_weapon() const { return opennova::to_gd(value_.switch_to_weapon); }
 
 void PlayerWeaponEvent::_bind_methods() {
 #define PLAYER_WEAPON_EVENT_FIELD(m_variant, m_name)                                        \

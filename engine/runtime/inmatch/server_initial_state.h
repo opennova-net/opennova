@@ -11,8 +11,7 @@
 
 // P3 — [orig: Server_SendInitialGameStateToPlayer @0x51bba0]. The two-track initial-state burst
 // machine: it advances one connection's InitialStateBurst cursor and emits the §5.2a load sequence,
-// every body produced from real World + bms::File + host-config state (ADR 0003, no fixtures). Replaces
-// game_session.cpp's fixture-driven queue_mission_bootstrap / queue_state4_loading_gate. The player-sync
+// every body produced from real World + bms::File + host-config state (ADR 0003, no fixtures). The player-sync
 // serializers (0x2C server-name+map, 0x08 server-config, 0x2A table×6, 0x66 weapon-restrictions, 0x76
 // class-allow mask, 0x1A timestamp) are ported from the witnessed originals (§5.2a/§5.66). The
 // world-stream 0x45 terrain-delta + 0x7E briefing are emitted by the original ONLY when present and are

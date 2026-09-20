@@ -772,7 +772,6 @@ func test_play_body_clip_seeded_consumes_ticks_then_free_runs() -> void:
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
-	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_walk_forward")
 	var expected: float = model.get_skeletal_anim().get_clip_phase_seconds("anim_walk_forward", 5)
 
 	model.play_body_clip_seeded("anim_walk_forward", 5)
@@ -931,7 +930,6 @@ func test_remote_body_exit_gate_accepts_only_incoming_flag_one() -> void:
 	model.apply_remote_body_state(43, "anim_walk_forward", blocked_flags, 90)
 	assert_eq(model.get_active_body_clip(), "anim_idle",
 		"an incoming state without flag 0x1 queues behind an exit-gated clip")
-	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_run_forward")
 	var expected: float = model.get_skeletal_anim().get_clip_phase_seconds("anim_run_forward", 6)
 	model.apply_remote_body_state(1, "anim_run_forward", interrupt_flags, 6)
 	assert_eq(model.get_active_body_clip(), "anim_run_forward",

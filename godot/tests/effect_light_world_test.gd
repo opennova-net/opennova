@@ -1,6 +1,5 @@
 extends GutTest
 
-const ARMRY_3DI := "res://../fixtures/threedi/synth/armory.3di"
 # Authored light variants minted once from the retired edit surface
 # (fixtures/README.md); each test reads the authored record
 # back before probing the director.

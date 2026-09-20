@@ -303,7 +303,7 @@ void LocalPlayerVisuals::apply_local_player_spawn_loadout() {
 	}
 	TypedArray<WeaponKitEntry> kit;
 	for (const opennova::world::SpawnLoadoutKitRow &row : plan.kit) {
-		kit.push_back(WeaponKitEntry::make(String::utf8(row.name.c_str()), row.clips));
+		kit.push_back(WeaponKitEntry::make(opennova::to_gd(row.name), row.clips));
 	}
 	if (!spawn_sim->apply_local_player_loadout(kit, plan.player_class)) {
 		return;
@@ -511,7 +511,7 @@ Ref<PlayerViewmodelDef> LocalPlayerVisuals::local_player_viewmodel_def() {
 	// fixed default until first equip; NONE resolves nothing.
 	const String fallback = Simulation::viewmodel_bringup_fallback_weapon();
 	const opennova::world::ViewmodelDefPick pick = opennova::world::viewmodel_def_pick(
-			viewmodel_weapon_cleared_, to_std(viewmodel_weapon_override_), to_std(fallback).c_str());
+			viewmodel_weapon_cleared_, opennova::to_std(viewmodel_weapon_override_), opennova::to_std(fallback).c_str());
 	if (!pick.resolves) {
 		return Ref<PlayerViewmodelDef>();
 	}
@@ -519,8 +519,8 @@ Ref<PlayerViewmodelDef> LocalPlayerVisuals::local_player_viewmodel_def() {
 	if (weapon_db.is_null()) {
 		return Ref<PlayerViewmodelDef>();
 	}
-	const String weapon_name = String::utf8(pick.name.c_str());
-	if (opennova::world::viewmodel_def_memo_hit(pick.name, to_std(viewmodel_def_name_), viewmodel_def_.is_valid())) {
+	const String weapon_name = opennova::to_gd(pick.name);
+	if (opennova::world::viewmodel_def_memo_hit(pick.name, opennova::to_std(viewmodel_def_name_), viewmodel_def_.is_valid())) {
 		return viewmodel_def_;
 	}
 	const int index = weapon_db->find_weapon(weapon_name);
@@ -550,8 +550,6 @@ void LocalPlayerVisuals::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("local_player_first_person_arms_witness"),
 			&LocalPlayerVisuals::local_player_first_person_arms_witness);
 	ClassDB::bind_method(D_METHOD("local_player_weapon_name"), &LocalPlayerVisuals::local_player_weapon_name);
-	ClassDB::bind_method(D_METHOD("set_local_player_nvg_view", "active", "gain"),
-			&LocalPlayerVisuals::set_local_player_nvg_view);
 	ClassDB::bind_method(D_METHOD("local_player_view"), &LocalPlayerVisuals::local_player_view);
 	ClassDB::bind_method(D_METHOD("local_player_weapon_view"), &LocalPlayerVisuals::local_player_weapon_view);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"),

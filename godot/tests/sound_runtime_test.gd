@@ -35,26 +35,6 @@ func _real_root(files: Dictionary) -> ResourceRoot:
 	return root
 
 
-# Occlusion recorder driven through the bank's typed Callable override seam
-# (set_occlusion_override) — the live path is the Simulation provider; the value-only
-# stand-in pins what the bank does with the returned retail occlusion distance
-# without fabricating collision internals.
-class OcclusionRecorder:
-	extends RefCounted
-	var distance_q16 := -1
-	var calls := 0
-	var source_bms_ids: Array[int] = []
-
-	func _init(p_distance_q16: int = -1) -> void:
-		distance_q16 = p_distance_q16
-
-	func occlude(_listener_pos: Vector3, _source_pos: Vector3,
-			raw_distance_q16: int, source_bms_id: int) -> int:
-		calls += 1
-		source_bms_ids.append(source_bms_id)
-		return raw_distance_q16 if distance_q16 < 0 else distance_q16
-
-
 func _profile_with_set(set_name: String, wav: String) -> LwfData:
 	var d := LwfData.new()
 	d.create_empty()

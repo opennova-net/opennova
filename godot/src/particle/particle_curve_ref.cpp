@@ -1,4 +1,5 @@
 #include "particle/particle_curve_ref.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -21,7 +22,7 @@ void ParticleCurveRef::set_present(bool p_value) {
 bool ParticleCurveRef::get_present() const { return present; }
 
 void ParticleCurveRef::copy_from_native(const opennova::particle::CurveRef &ref) {
-	name = String::utf8(ref.name.c_str());
+	name = opennova::to_gd(ref.name);
 	reverse = ref.reverse;
 	inverse = ref.inverse;
 	present = ref.present;

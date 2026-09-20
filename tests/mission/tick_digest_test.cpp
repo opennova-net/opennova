@@ -24,6 +24,7 @@
 //                    tick_digest.py --record / --check. Float codegen differs
 //                    across compilers, so a retail digest is compared on one
 //                    machine and never committed.
+#include "common/boot_file_source.h"
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
@@ -164,17 +165,7 @@ bms::Entity item(int32_t type_id, int32_t x, int32_t y, int32_t z) {
 	return e;
 }
 
-ms::BootFileSource source_over(const std::map<std::string, std::string> *files) {
-	ms::BootFileSource s;
-	s.has_file = [files](const std::string &name) { return files->find(name) != files->end(); };
-	s.read_file = [files](const std::string &name, std::vector<uint8_t> &out) {
-		const auto it = files->find(name);
-		if (it == files->end()) return false;
-		out.assign(it->second.begin(), it->second.end());
-		return true;
-	};
-	return s;
-}
+using test_boot::source_over;
 
 // Two opposing squads plus a few items, and a WAC layer whose boot writes
 // are part of the chain. There are no humans, so later WAC passes are gated.

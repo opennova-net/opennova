@@ -83,7 +83,7 @@ func _boot() -> void:
 	_presenter.setup(_world, _camera, null, ControlsModel.new())
 	_presenter.set_input_override(PlayerMoveIntent.new())
 	await get_tree().process_frame
-	_frame(20)
+	WorldFixture.step_player_frames(_presenter, _world, _camera, 20)
 	assert_true(_world.get_sim().has_local_player())
 	assert_not_null(_presenter.viewmodel())
 	assert_eq(_presenter.vm_parts().size(), 2, "the normal builder produced gun and arms")
@@ -96,17 +96,6 @@ func after_each() -> void:
 	if _world != null:
 		_world.unload()
 	TestFs.remove_dir_recursive(_root)
-
-
-func _frame(count: int = 1, jump: bool = false) -> void:
-	var input := PlayerMoveIntent.new()
-	input.jump = jump
-	_presenter.set_input_override(input)
-	for tick in count:
-		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
-		_world.tick(_camera.global_position, _camera.global_transform,
-				Simulation.tick_dt(), frame_input)
-		_presenter.after_world_tick()
 
 
 func test_fp_models_query_the_player_even_after_camera_restamping() -> void:

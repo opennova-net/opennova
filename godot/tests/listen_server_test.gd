@@ -35,15 +35,6 @@ func _native_fixture_dir() -> String:
 	return dir
 
 
-func _write_fixture_text(dir: String, name: String, text: String) -> void:
-	var file := FileAccess.open(dir.path_join(name), FileAccess.WRITE)
-	assert_not_null(file)
-	if file == null:
-		return
-	file.store_string(text)
-	file.close()
-
-
 func _fixture_items_text() -> String:
 	return FileAccess.get_file_as_bytes(
 			"res://../fixtures/def/items.def").get_string_from_ascii()
@@ -53,7 +44,7 @@ func _fixture_items_text() -> String:
 # as the sim's asset root, and run the native seat-spec install for type_ids.
 func _install_native_seats(sim: Simulation, dir: String, items_text: String,
 		type_ids: PackedInt32Array) -> ItemDatabase:
-	_write_fixture_text(dir, "items.def", items_text)
+	TestFs.write_text(self, dir.path_join("items.def"), items_text)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(dir.path_join("items.def")), OK)
 	var seat_root := ResourceRoot.new()

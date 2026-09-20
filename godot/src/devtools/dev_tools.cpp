@@ -1,6 +1,7 @@
 #include "devtools/dev_tools.h"
 
 #include "simulation/simulation.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/sub_viewport.hpp>
 
@@ -97,7 +98,7 @@ Dictionary DevTools::engine_log_after(int64_t p_cursor) {
 	for (const opennova::io::LogRingEntry &entry : entries) {
 		sequences.append(static_cast<int64_t>(entry.sequence));
 		levels.append(String(opennova::io::log_level_name(entry.level)));
-		texts.append(String::utf8(entry.text.c_str()));
+		texts.append(opennova::to_gd(entry.text));
 	}
 	Dictionary out;
 	out["sequences"] = sequences;
@@ -493,7 +494,7 @@ Variant control_arg_to_variant(const opennova::devtools::ControlArg &p_arg) {
 		case Kind::Bool:
 			return Variant(p_arg.b);
 		case Kind::Text:
-			return Variant(String::utf8(p_arg.text.c_str()));
+			return Variant(opennova::to_gd(p_arg.text));
 		case Kind::Vec3:
 			return Variant(Vector3(p_arg.v[0], p_arg.v[1], p_arg.v[2]));
 	}

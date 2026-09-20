@@ -1,8 +1,12 @@
 #include "render/slot_capture_adapter.h"
 #include "object/post_multiply_draw.h"
 #include "render/q3_geometry_cache.h"
+#include "render/material_params.h"
 #include "render/q3_source_registry.h"
+#include "render/q3_vertex_format.h"
 #include "render/rd_timestamp_span.h"
+#include "render/rd_uniforms.h"
+#include "util/string_convert.h"
 
 #include <algorithm>
 #include <array>
@@ -216,58 +220,6 @@ struct DeviceFrame {
 	std::vector<Transform3D> bones;
 	std::vector<std::uint64_t> evicted_entries;
 };
-
-Ref<RDUniform> sampled_texture_uniform(int p_binding, const RID &p_sampler,
-		const RID &p_texture) {
-	Ref<RDUniform> uniform;
-	uniform.instantiate();
-	uniform->set_uniform_type(RenderingDevice::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE);
-	uniform->set_binding(p_binding);
-	uniform->add_id(p_sampler);
-	uniform->add_id(p_texture);
-	return uniform;
-}
-
-Ref<Texture2D> texture_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name) {
-	if (p_material.is_null())
-		return Ref<Texture2D>();
-	const Variant value = p_material->get_shader_parameter(p_name);
-	if (value.get_type() != Variant::OBJECT)
-		return Ref<Texture2D>();
-	return value;
-}
-
-float float_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, float p_default) {
-	if (p_material.is_null())
-		return p_default;
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::FLOAT || value.get_type() == Variant::INT
-			? static_cast<float>(value) : p_default;
-}
-
-Vector3 vector3_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, const Vector3 &p_default) {
-	if (p_material.is_null())
-		return p_default;
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::VECTOR3 ? static_cast<Vector3>(value) : p_default;
-}
-
-RID server_rid(const Ref<Texture2D> &p_texture) {
-	return p_texture.is_valid() ? p_texture->get_rid() : RID();
-}
-
-Ref<Material> active_material(GeometryInstance3D *p_source,
-		const Ref<Mesh> &p_mesh, int p_surface) {
-	if (MeshInstance3D *mesh_instance = Object::cast_to<MeshInstance3D>(p_source))
-		return mesh_instance->get_active_material(p_surface);
-	Ref<Material> material = p_source->get_material_override();
-	if (material.is_null() && p_mesh.is_valid())
-		material = p_mesh->surface_get_material(p_surface);
-	return material;
-}
 
 // The skeleton-space bone x bind palette of a skinned instance (the same
 // palette the Q3 adapter CPU-skins with); empty for an unskinned instance.
@@ -596,30 +548,8 @@ bool SlotCaptureAdapter::Impl::initialize(RenderingDevice *p_rd) {
 		return false;
 	}
 
-	// The Q3GeometryCache stream layout (q3_frame_adapter.cpp declares the
-	// same eight attributes).
-	TypedArray<Ref<RDVertexAttribute>> attributes;
-	auto add_attribute = [&](std::uint32_t p_location,
-			RenderingDevice::DataFormat p_format, std::uint32_t p_offset) {
-		Ref<RDVertexAttribute> attribute;
-		attribute.instantiate();
-		attribute->set_location(p_location);
-		attribute->set_binding(0);
-		attribute->set_format(p_format);
-		attribute->set_offset(p_offset);
-		attribute->set_stride(kQ3VertexStride);
-		attribute->set_frequency(RenderingDevice::VERTEX_FREQUENCY_VERTEX);
-		attributes.push_back(attribute);
-	};
-	add_attribute(0, RenderingDevice::DATA_FORMAT_R32G32B32_SFLOAT, 0);
-	add_attribute(1, RenderingDevice::DATA_FORMAT_R32G32B32_SFLOAT, 12);
-	add_attribute(2, RenderingDevice::DATA_FORMAT_R32G32_SFLOAT, 24);
-	add_attribute(3, RenderingDevice::DATA_FORMAT_R32G32B32A32_SFLOAT, 32);
-	add_attribute(4, RenderingDevice::DATA_FORMAT_R32G32B32A32_SFLOAT, 48);
-	add_attribute(5, RenderingDevice::DATA_FORMAT_R32G32B32A32_SFLOAT, 64);
-	add_attribute(6, RenderingDevice::DATA_FORMAT_R32G32B32A32_SFLOAT, 80);
-	add_attribute(7, RenderingDevice::DATA_FORMAT_R32G32_SFLOAT, 96);
-	vertex_format = rd->vertex_format_create(attributes);
+	// The Q3GeometryCache stream layout, shared with the focused Q3 adapter.
+	vertex_format = rd->vertex_format_create(q3_vertex_attributes());
 	vertex_buffers.resize(1);
 	vertex_offsets.resize(1);
 	if (vertex_format == RenderingDevice::INVALID_FORMAT_ID) {
@@ -929,8 +859,8 @@ Dictionary SlotCaptureAdapter::Impl::report() const {
 	result["slot_depth_compare"] = "greater_or_equal";
 	result["slot_depth_write"] = true;
 	result["slot_skinning"] = "gpu_bone_palette";
-	result["slot_status"] = String::utf8(status.c_str());
-	result["slot_failure"] = String::utf8(failure.c_str());
+	result["slot_status"] = opennova::to_gd(status);
+	result["slot_failure"] = opennova::to_gd(failure);
 	result["slot_submitted_frame_id"] = static_cast<int64_t>(submitted_frame_id);
 	result["slot_drawn_frame_id"] = static_cast<int64_t>(drawn_frame_id);
 	result["slot_captures_compiled"] = counters.captures_compiled;

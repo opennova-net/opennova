@@ -19,7 +19,6 @@ extends Node
 
 const MENU_FILE := "weapon.mnu"
 const MENU_SCREEN := "WEAPON"
-const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (MenuShell's default)
 
 # The ACCEPT hotkey: the WEAPON screen's on-show registers the USE-ITEM binding
 # row's runtime keys (retail default: the Shifts — the same row 177 the shells'
@@ -256,42 +255,17 @@ func _ensure_menu() -> bool:
 	var root: ResourceRoot = _view.resource_root()
 	if root == null:
 		return false
-	var bytes := root.read_file(MENU_FILE)
-	if bytes.is_empty():
-		push_warning("ArmoryPresenter: %s not found in the resource root" % MENU_FILE)
-		return false
-	var doc := MnuDocument.new()
-	if doc.load_from_bytes(bytes) != OK:
-		push_warning("ArmoryPresenter: %s did not parse" % MENU_FILE)
+	var doc := MenuFrameSurface.load_document(root, MENU_FILE, "ArmoryPresenter")
+	if doc == null:
 		return false
 	_register_text_tables(root)
-	# weapon.mnu shares the retail menu's fixed 800x600 design space and the
-	# independent X/Y fill used by every front-end screen; the frame scales that
-	# design space to its OWN size internally, so the fit just sizes the Control.
-	# [orig: CUIScene_SetScreenScale @0x639480]
-	_frame = MenuFrame.new()
-	_frame.name = "ArmoryMenu"
-	_frame.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	# Unlike MenuShell (a Control parent sampling for a full-rect child frame),
-	# the presenter overlays a foreign HUD parent, so the frame itself is the
-	# input surface: its gui_input forwards into the driver's pump.
-	_frame.mouse_filter = Control.MOUSE_FILTER_STOP
-	_frame.gui_input.connect(_on_frame_gui_input)
-	_ui_parent.add_child(_frame)
-	_recompute_fit()
-	# Widget <SOUND> triggers play through the MenuAudio device leg.
-	_audio = MenuAudio.new()
-	_audio.name = "ArmoryMenuAudio"
-	_audio.set_resource_root(root)
-	_ui_parent.add_child(_audio)
-	_driver = MenuDriver.new()
-	_driver.attach(_frame, _audio)
-	_driver.set_music_director(MusicService.director())
-	_driver.set_music_var_index(MusicDirector.MENU_MUSIC_VAR_SLOT)
-	var style := MenuFrameSurface.load_style(root, STYLESHEET_FILE)
-	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
-	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
-		push_warning("ArmoryPresenter: %s has no screens" % MENU_FILE)
+	var surface := MenuFrameSurface.build(root, _ui_parent, _layout_control,
+			"ArmoryMenu", _on_frame_gui_input)
+	_frame = surface.frame
+	_audio = surface.audio
+	_driver = surface.driver
+	if not MenuFrameSurface.open_document(_driver, doc, root, MENU_FILE, MENU_SCREEN,
+			"ArmoryPresenter"):
 		teardown()
 		return false
 	_menu_root = root
@@ -378,18 +352,11 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 # while direct/headless world owners may not — fill only the missing tables.
 # [orig: Game_InitSubsystems @0x4a6cd0 loads menutxt/gametext at boot]
 func _register_text_tables(root: ResourceRoot) -> void:
-	for spec in [["menutxt", "menutxt.BIN"], ["gametext", "gametext.bin"],
-			["gameui", "Game.bin"]]:
-		var bytes := root.read_file(spec[1])
-		var table: RtxtStringFile = null
-		if not bytes.is_empty():
-			var loaded := RtxtStringFile.new()
-			if loaded.load_from_byte_array(bytes) == OK:
-				table = loaded
-		Strings.register_table(spec[0], table)
+	for spec in [[Strings.TABLE_MENUTXT, "menutxt.BIN"], [Strings.TABLE_GAMETEXT, "gametext.bin"],
+			[Strings.TABLE_GAMEUI, "Game.bin"]]:
+		Strings.register_table(spec[0], Strings.load_rtxt(root, spec[1]))
 
 
-# The canonical menu stylesheet name the original engine looks for.
 func _recompute_fit() -> void:
 	# MenuFrameSurface.fit_frame (shared with the other presenters).
 	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)

@@ -4,6 +4,7 @@
 #include "env/mission_environment_overrides.h"
 #include "mission/mission_info.h"
 #include "mission/mission_records.h"
+#include "util/string_convert.h"
 
 #include <formats/env/env.h> // bms_env_overrides_from_header
 
@@ -298,7 +299,7 @@ Error MissionData::open_file(const String &path) {
 	loaded_ = false;
 	header_only_ = false;
 	const String ext = path.get_extension().to_lower();
-	const std::string native_path(path.utf8().get_data());
+	const std::string native_path = opennova::to_std(path);
 	std::string error;
 	bool ok = false;
 	if (ext == "mis") {
@@ -1065,7 +1066,7 @@ Error MissionData::save_as(const String &path) {
 	// write order, so they must not survive onto a later save after the document changed.
 	const PackedInt32Array staged_heights = mis_base_heights;
 	mis_base_heights = PackedInt32Array();
-	const std::string native_path(path.utf8().get_data());
+	const std::string native_path = opennova::to_std(path);
 	const String ext = path.get_extension().to_lower();
 	std::string error;
 	bool ok = false;

@@ -210,9 +210,6 @@ void FoliageDispatcher::_bind_methods() {
   ClassDB::bind_static_method("FoliageDispatcher",
                               D_METHOD("bake_fd_image", "image"),
                               &FoliageDispatcher::bake_fd_image);
-  ClassDB::bind_method(
-      D_METHOD("configure_slots_from_defs", "resource_root", "defs"),
-      &FoliageDispatcher::configure_slots_from_defs);
   ClassDB::bind_method(D_METHOD("clear_asset_cache"),
                        &FoliageDispatcher::clear_asset_cache);
   ClassDB::bind_method(D_METHOD("asset_cache_entry_count"),

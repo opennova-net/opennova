@@ -222,7 +222,7 @@ jobs:
   # PR build links). Master pushes and manual runs also build template_release,
   # in parallel, so the release flavour and release-mode packaging stay
   # continuously verified. sccache caches godot-cpp's objects across runs, so
-  # after one warm-up only changed engine/libs sources recompile. Windows must
+  # after one warm-up only changed engine/ sources recompile. Windows must
   # use Ninja: the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER.
   build-gdextension-windows:
     runs-on: windows-latest
@@ -406,7 +406,6 @@ jobs:
     needs: [build-gdextension-windows]
     outputs:
       game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
-      game_artifact_id: ${{ steps.upload_game.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1

@@ -9,6 +9,7 @@
 #include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 #include "object/character_join_profile.h" // the two-side character selection record
 #include "network/host_session_options.h" // the hosted-session request record
+#include "util/string_convert.h"
 
 #include <cmath>
 #include <cstring>
@@ -19,7 +20,6 @@
 #include <runtime/terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 #include <net/npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
-#include <net/npwire/ingame_message_id.h>
 #include <runtime/hud/feed_format.h> // the witnessed feed line/color policy
 #include <runtime/replication/client_scoreboard_view.h> // the Tab board's draw-time projection
 #include <runtime/world/wire_body_sound.h> // the wire-fed remote body's footstep/foley consume
@@ -213,7 +213,7 @@ void Simulation::set_mission_text_data(const PackedByteArray &p_rtxt_bytes) {
 	                           static_cast<std::size_t>(p_rtxt_bytes.size()),
 	                           table, error)) {
 		UtilityFunctions::push_warning(String("Simulation: mission text RTXT rejected: ") +
-		                               String::utf8(error.c_str()));
+		                               opennova::to_gd(error));
 		return;
 	}
 
@@ -394,15 +394,15 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	if (!p_options->get_game_root().is_empty()) {
 		config.expansion_version_checksum =
 				opennova::vfs_expansion_version_checksum(
-						std::string(p_options->get_game_root().utf8().get_data()),
+						opennova::to_std(p_options->get_game_root()),
 						config.expansion);
 	}
 	// The same install root feeds the host bring-up's loose _NSTMOUT.TXT
 	// session-timeout override (HostConfig::game_root).
-	host_game_root_ = std::string(p_options->get_game_root().utf8().get_data());
+	host_game_root_ = opennova::to_std(p_options->get_game_root());
 	{
 		const String requested = p_options->get_integrity_profile().strip_edges();
-		const std::string id(requested.utf8().get_data());
+		const std::string id = opennova::to_std(requested);
 		if (id.empty() ||
 				opennova::inmatch::find_integrity_challenge_profile(id) != nullptr) {
 			config.integrity_profile = id;
@@ -503,7 +503,7 @@ void Simulation::set_local_character_profile(const Ref<CharacterJoinProfile> &p_
 }
 
 bool Simulation::set_join_integrity_profile(const String &p_profile_id) {
-	const std::string id = std::string(p_profile_id.strip_edges().utf8().get_data());
+	const std::string id = opennova::to_std(p_profile_id.strip_edges());
 	if (id.empty()) {
 		net_.join_integrity_profile_id.clear();
 		install_join_integrity_profile();
@@ -523,7 +523,7 @@ void Simulation::set_app_id(const String &p_token) {
 	// The .joi-recovered game-session BT join token a NovaWorld host validates
 	// (reject code 9). Empty/"0" is the LAN default. Applied to the live joiner
 	// runtime immediately and re-applied on each (re)load via install_app_id.
-	net_.app_id = std::string(p_token.strip_edges().utf8().get_data());
+	net_.app_id = opennova::to_std(p_token.strip_edges());
 	if (net_.app_id.empty()) net_.app_id = "0";
 	install_app_id();
 }
@@ -539,7 +539,7 @@ void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 	// D-NET-166: the JOIN VERSIONCRCSTRING checksum source. The runtime CRCs
 	// the loose expansion/<SUS2>/version.txt under this root at JOIN-build
 	// time (see JoinerConnection::set_expansion_version_root).
-	net_.join_expansion_version_root = std::string(p_game_root.utf8().get_data());
+	net_.join_expansion_version_root = opennova::to_std(p_game_root);
 	install_expansion_version_root();
 }
 
@@ -570,13 +570,13 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
-	runtime_ = &joiner_role_->create_runtime(std::string(p_player_name.utf8().get_data()),
+	runtime_ = &joiner_role_->create_runtime(opennova::to_std(p_player_name),
 			p_join_role == static_cast<int>(opennova::inmatch::JoinRole::Spectator)
 					? opennova::inmatch::JoinRole::Spectator
 					: opennova::inmatch::JoinRole::Player,
-			std::string(p_spectator_password.utf8().get_data()),
-			std::string(p_server_password.utf8().get_data()),
-			std::string(p_join_password.utf8().get_data()));
+			opennova::to_std(p_spectator_password),
+			opennova::to_std(p_server_password),
+			opennova::to_std(p_join_password));
 	install_charattr_challenge_table();
 	install_character_join_vars();
 	install_join_integrity_profile();
@@ -705,15 +705,15 @@ bool Simulation::has_join_mission() const {
 // decode the same wire fields as UTF-8, and both presentations of one host's
 // metadata must agree byte-for-byte.
 String Simulation::get_join_server_name() const {
-	return (is_joiner() && runtime_) ? String::utf8(runtime_->server_name().c_str()) : String();
+	return (is_joiner() && runtime_) ? opennova::to_gd(runtime_->server_name()) : String();
 }
 
 String Simulation::get_join_mission_name() const {
-	return (is_joiner() && runtime_) ? String::utf8(runtime_->mission_name().c_str()) : String();
+	return (is_joiner() && runtime_) ? opennova::to_gd(runtime_->mission_name()) : String();
 }
 
 String Simulation::get_join_mission_file() const {
-	return (is_joiner() && runtime_) ? String::utf8(runtime_->map_file().c_str()) : String();
+	return (is_joiner() && runtime_) ? opennova::to_gd(runtime_->map_file()) : String();
 }
 
 PackedByteArray Simulation::get_join_mission_header() const {
@@ -750,7 +750,7 @@ PackedByteArray Simulation::get_join_terrain_til() const {
 }
 
 String Simulation::get_join_expansion() const {
-	return (is_joiner() && runtime_) ? String::utf8(runtime_->expansion().c_str()) : String();
+	return (is_joiner() && runtime_) ? opennova::to_gd(runtime_->expansion()) : String();
 }
 
 int64_t Simulation::get_join_game_type() const {
@@ -771,7 +771,7 @@ String Simulation::get_join_error() const {
 //  CNapiNetwork_OnDisconnectedFromServer @0x4c63d0]
 String Simulation::get_session_loss_reason() const {
 	if (!is_joiner() || !runtime_) return String();
-	return String::utf8(runtime_->session_loss_reason().c_str());
+	return opennova::to_gd(runtime_->session_loss_reason());
 }
 
 bool Simulation::is_session_lost() const {
@@ -835,7 +835,7 @@ Dictionary Simulation::get_joiner_network_diagnostics() const {
 			Dictionary r;
 			r["jfc"] = static_cast<int64_t>(reject.jfc);
 			r["jfp"] = static_cast<int64_t>(reject.jfp);
-			r["jfs"] = String::utf8(reject.jfs.c_str());
+			r["jfs"] = opennova::to_gd(reject.jfs);
 			out["last_reject"] = r;
 		}
 		if (runtime_->has_disconnect_event()) {
@@ -843,8 +843,8 @@ Dictionary Simulation::get_joiner_network_diagnostics() const {
 			Dictionary d;
 			d["dc"] = static_cast<int64_t>(event.dc);
 			d["dpc"] = static_cast<int64_t>(event.dpc);
-			d["ddstr"] = String::utf8(event.ddstr.c_str());
-			d["dstr"] = String::utf8(event.dstr.c_str());
+			d["ddstr"] = opennova::to_gd(event.ddstr);
+			d["dstr"] = opennova::to_gd(event.dstr);
 			out["last_disconnect"] = d;
 		}
 	}
@@ -1084,7 +1084,7 @@ void Simulation::retain_feed_announcement(const String &text, int64_t tick) {
 			text.utf8().get_data(), static_cast<uint32_t>(tick));
 }
 String Simulation::get_kill_announcement_text() const {
-	return runtime_ ? String::utf8(runtime_->state().kill_announcement.text.c_str()) : String();
+	return runtime_ ? opennova::to_gd(runtime_->state().kill_announcement.text) : String();
 }
 int64_t Simulation::get_kill_announcement_tick(int64_t now) {
 	if (!runtime_) return 0;

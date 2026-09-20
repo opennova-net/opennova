@@ -3,6 +3,7 @@
 
 #include "util/data_format.h"
 #include "util/pcx_texture_bridge.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -110,7 +111,7 @@ std::unordered_map<std::string, godot::String> build_lowercase_dir_index_uncache
 	godot::String entry = dir_access->get_next();
 	while (!entry.is_empty()) {
 		if (!dir_access->current_is_dir()) {
-			index.emplace(std::string(entry.to_lower().utf8().get_data()), entry);
+			index.emplace(to_std(entry.to_lower()), entry);
 		}
 		entry = dir_access->get_next();
 	}
@@ -122,7 +123,7 @@ std::unordered_map<std::string, godot::String> build_lowercase_dir_index_uncache
 // reuse for every subsequent probe (callers do in-memory hash lookups instead of
 // re-listing the directory). Returns a const reference to avoid copying the map.
 const std::unordered_map<std::string, godot::String> &get_lowercase_dir_index(const godot::String &dir) {
-	const std::string key(dir.utf8().get_data());
+	const std::string key = to_std(dir);
 	auto it = g_dir_index_cache.find(key);
 	if (it != g_dir_index_cache.end()) {
 		return it->second;
@@ -257,7 +258,7 @@ godot::String resolve_texture_path(const godot::String &dir, const godot::String
 		return godot::String();
 	}
 	for (const godot::String &file : candidates) {
-		auto it = index.find(std::string(file.to_lower().utf8().get_data()));
+		auto it = index.find(to_std(file.to_lower()));
 		if (it != index.end()) {
 			return dir.path_join(it->second);
 		}
@@ -300,10 +301,10 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 		return godot::Ref<godot::Texture2D>();
 	}
 	for (const godot::String &file : candidates) {
-		auto it = index.find(std::string(file.to_lower().utf8().get_data()));
+		auto it = index.find(to_std(file.to_lower()));
 		if (it != index.end()) {
 			const godot::String resolved = dir.path_join(it->second);
-			const std::string tex_key(resolved.utf8().get_data());
+			const std::string tex_key = to_std(resolved);
 			auto cached = g_texture_cache.find(tex_key);
 			godot::Ref<godot::Texture2D> tex;
 			if (cached != g_texture_cache.end()) {
@@ -439,7 +440,7 @@ godot::String resolve_file_in_dir(const godot::String &dir, const godot::String 
 		return godot::ResourceLoader::get_singleton()->exists(path) ? path : godot::String();
 	}
 	const std::unordered_map<std::string, godot::String> &index = get_lowercase_dir_index(dir);
-	auto it = index.find(std::string(name.to_lower().utf8().get_data()));
+	auto it = index.find(to_std(name.to_lower()));
 	return it != index.end() ? dir.path_join(it->second) : godot::String();
 }
 
@@ -493,10 +494,10 @@ godot::Ref<godot::Texture> load_material_texture_from_dir(
     const godot::String dds = name.get_basename() + ".dds";
     const std::string selected = renderer::normal_material_filename(name.utf8().get_data(),
             loose_tga, !resolve_file_in_dir(dir, dds).is_empty());
-    const godot::String path = resolve_file_in_dir(dir, godot::String::utf8(selected.c_str()));
+    const godot::String path = resolve_file_in_dir(dir, to_gd(selected));
     godot::Ref<godot::Texture2D> source;
     if (!path.is_empty()) {
-        const std::string key(path.utf8().get_data());
+        const std::string key = to_std(path);
         auto cached = g_texture_cache.find(key);
         if (cached == g_texture_cache.end()) {
             godot::Ref<godot::Texture2D> loaded = is_resource_dir(dir)

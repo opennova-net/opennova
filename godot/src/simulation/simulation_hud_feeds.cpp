@@ -10,7 +10,6 @@
 #include "simulation/hud_view_records.h"
 
 #include <formats/mission/mission.h> // runtime type -> authored item ID
-#include <runtime/hud/feed_format.h>
 #include <runtime/hud/score_fanfare.h> // the 0x81 tone ladder
 #include <runtime/replication/client_state.h>
 #include <runtime/world/entity.h>

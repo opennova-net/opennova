@@ -28,18 +28,6 @@ namespace {
 
 bool ieq(std::string_view a, const char *b) { return opennova::strutil::iequals(a, b); }
 
-bool starts_with_ci(const std::string &s, const char *prefix) {
-    size_t i = 0;
-    for (; prefix[i]; ++i) {
-        if (i >= s.size() ||
-            std::tolower(static_cast<unsigned char>(s[i])) !=
-                std::tolower(static_cast<unsigned char>(prefix[i]))) {
-            return false;
-        }
-    }
-    return true;
-}
-
 // The 24-row named-value table @0x82EEF0 (count 0x18 @0x82F130), walked with
 // stricmp by WacScript_ResolveParameter's third lookup leg.
 int builtin_id(const std::string &name) {
@@ -301,7 +289,7 @@ private:
 
         // [orig: WacScript_ResolveParameter @0x4F2940] Named WAC groups
         // never select entities by their BMS commandGroup field.
-        const bool group_prefix = bare && starts_with_ci(t, "G_");
+        const bool group_prefix = bare && opennova::strutil::starts_with_icase(t, "G_");
         if (group_prefix || type == ParamType::Group) {
             const std::string_view name = group_prefix ? std::string_view(t).substr(2) : t;
             int group = env_.registry ? env_.registry->script_group_index(name)
@@ -315,7 +303,7 @@ private:
         // [orig: WacScript_ResolveParameter @0x4F2940 -> @0x5F7310]
         // FX literals, including numeric-looking names, bind at compile time.
         // Variable operands were resolved above and carry the actual handle.
-        const bool fx_prefix = bare && starts_with_ci(t, "FX_");
+        const bool fx_prefix = bare && opennova::strutil::starts_with_icase(t, "FX_");
         if (fx_prefix || type == ParamType::Fx) {
             const std::string name = fx_prefix ? t.substr(3) : t;
             const particle::EffectHandle handle = env_.effects ? env_.effects->intern(name)
@@ -330,7 +318,7 @@ private:
         // carry already-resolved values; numeric-looking literals still name
         // expressions and report Unknown FACE.
         // [orig: WacScript_ResolveParameter @0x4F2920 -> AnimState_FindByName @0x5800B0]
-        const bool face_prefix = bare && starts_with_ci(t, "FACE_");
+        const bool face_prefix = bare && opennova::strutil::starts_with_icase(t, "FACE_");
         if (face_prefix || type == ParamType::Face) {
             const int index = world::facial_expression_index(face_prefix ? t.substr(5) : t);
             if (index < 0)
@@ -341,7 +329,7 @@ private:
         // [orig: WacScript_ResolveParameter @0x4F2940, expectedType 19]
         // SOUNDSET is an asset reference; variables carry the resolved handle,
         // and numeric literals name sets rather than bypassing resolution.
-        const bool sound_prefix = bare && starts_with_ci(t, "SS_");
+        const bool sound_prefix = bare && opennova::strutil::starts_with_icase(t, "SS_");
         if (sound_prefix || type == ParamType::SoundSet) {
             const std::string name = sound_prefix ? t.substr(3) : t;
             int32_t handle = 0;
@@ -358,7 +346,7 @@ private:
         // Text-tool tokens -> string pool. Retail stores the mission-text
         // pointer the key resolves to [orig: @0x4f2f9e]; the port keeps the
         // key and resolves the text at execution.
-        if ((bare && starts_with_ci(t, "TT_")) || type == ParamType::TextToken) {
+        if ((bare && opennova::strutil::starts_with_icase(t, "TT_")) || type == ParamType::TextToken) {
             int si = intern_string(t);
             return encode_operand(OperandKind::Pool, push_pool(si));
         }
@@ -366,7 +354,7 @@ private:
         // Animation symbols resolve to the retail numeric state table, even
         // when used as an ordinary value. They are not string-pool indices.
         // [orig: WacScript_ResolveParameter @0x4F2920 -> AnimMap_FindSlotByName]
-        const bool anim_prefix = bare && starts_with_ci(t, "ANIM_");
+        const bool anim_prefix = bare && opennova::strutil::starts_with_icase(t, "ANIM_");
         const bool numeric = bare && !t.empty() &&
                 (std::isdigit(static_cast<unsigned char>(t[0])) ||
                  t[0] == '-' || t[0] == '+' || t[0] == '.');
@@ -385,7 +373,7 @@ private:
         // retail [orig: @0x4f2c94..0x4f2ca4 precedes @0x4f2cc5]: an AMMO_
         // token in an Ssn slot is atol'd (0) and looked up, and an SSN_ token
         // in an Ammo slot is this leg's. A quoted token reads 0.
-        const bool ssn_prefix = bare && starts_with_ci(t, "SSN_");
+        const bool ssn_prefix = bare && opennova::strutil::starts_with_icase(t, "SSN_");
         if (ssn_prefix || type == ParamType::Ssn) {
             int32_t net = bare ? std::atoi(t.c_str() + (ssn_prefix ? 4 : 0)) : 0;
             return ssn_operand(net, line);
@@ -395,7 +383,7 @@ private:
         // AMMO_ is a type prefix. The value is the ammo.def table index,
         // including when stored in a variable before a later fire command.
         // The null row (index zero) is not a successful name resolution.
-        const bool ammo_prefix = bare && starts_with_ci(t, "AMMO_");
+        const bool ammo_prefix = bare && opennova::strutil::starts_with_icase(t, "AMMO_");
         if (ammo_prefix || type == ParamType::Ammo) {
             const std::string name = ammo_prefix ? t.substr(5) : t;
             int index = env_.ammo ? env_.ammo->index_of(name.c_str()) : -1;

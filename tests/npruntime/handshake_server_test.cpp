@@ -102,10 +102,6 @@ bool test_emplacement_is_released(
 	       !live->primary_occupant.valid();
 }
 
-uint16_t le16(const uint8_t *p) {
-	return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
-}
-
 uint32_t le32(const uint8_t *p) {
 	return static_cast<uint32_t>(p[0]) |
 	       (static_cast<uint32_t>(p[1]) << 8) |

@@ -19,14 +19,6 @@ using namespace godot;
 using namespace opennova::avatars;
 using namespace opennova::threedi;
 
-namespace {
-
-int dict_int(const Dictionary &d, const char *key, int def) {
-	return d.has(key) ? (int)d[key] : def;
-}
-
-} // namespace
-
 float AvatarDatabase::preview_zoom_damp_per_tick() {
 	return opennova::avatars::kPreviewZoomDampPerTick;
 }
@@ -377,10 +369,10 @@ Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile(
 			continue;
 		}
 		saved[side].present = true;
-		saved[side].nationality_index = dict_int(sd, "nationality", -1);
-		saved[side].division_index = dict_int(sd, "division", -1);
-		saved[side].combo_index = dict_int(sd, "combo", -1);
-		saved[side].player_class = dict_int(sd, "player_class",
+		saved[side].nationality_index = profile_dict_int(sd, "nationality", -1);
+		saved[side].division_index = profile_dict_int(sd, "division", -1);
+		saved[side].combo_index = profile_dict_int(sd, "combo", -1);
+		saved[side].player_class = profile_dict_int(sd, "player_class",
 				opennova::inmatch::kJoinDefaultPlayerClass);
 	}
 	Ref<CharacterJoinProfile> out;

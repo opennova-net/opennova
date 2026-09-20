@@ -9,7 +9,6 @@ namespace opennova {
 
 // [orig: jodemo Terrain_DrawTileOverlays2D @0x5C79C0, sub_5C42B0 @0x5C42B0, Terrain_RenderSectorTile @0x5CDAA0]
 // [orig: PolyTrn_RenderTile @0x60df0d -> render_water_quad @0x604700; docs/tiles/til-re.md]
-// docs/engine_spec_tiles.md 4.1-4.5
 
 constexpr uint32_t TIL_MAGIC = 0x74696C30u;
 

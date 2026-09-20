@@ -6,6 +6,7 @@
 
 #include "util/cp1252.h"
 #include "util/data_format.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/error_macros.hpp>
@@ -219,15 +220,6 @@ bool RtxtStringFile::is_grouped() const {
 	return file_.is_grouped();
 }
 
-void RtxtStringFile::normalize_grouping() {
-	if (file_.is_grouped()) {
-		return;
-	}
-	file_.normalize_grouping();
-	_refresh();
-	emit_signal("entries_structure_changed");
-}
-
 // --- Section CRUD ---
 
 int RtxtStringFile::add_section(const String &p_name) {
@@ -340,7 +332,7 @@ Ref<RtxtStringFile> RtxtStringFile::load_mission_table(const Ref<ResourceRoot> &
 	};
 	std::vector<uint8_t> bytes;
 	opennova::mission::resolve_mission_text(files,
-			std::string(mission_file_basename.utf8().get_data()), bytes);
+			opennova::to_std(mission_file_basename), bytes);
 	if (bytes.empty()) return Ref<RtxtStringFile>();
 	const PackedByteArray packed = to_packed_bytes(bytes);
 	Ref<RtxtStringFile> table;

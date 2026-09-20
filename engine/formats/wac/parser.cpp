@@ -235,18 +235,6 @@ private:
         return body;
     }
 
-    void skip_decl() {
-        advance(); // var/array
-        if (cur().kind == TokKind::Word) advance(); // name
-        // optional size / extras on the line — consume words/numbers until a
-        // keyword or end.
-        while (!at_end() && cur().kind == TokKind::Word) advance();
-    }
-    void skip_line_word() {
-        advance();
-        if (cur().kind == TokKind::Word) advance();
-    }
-
     // ---- calls ----
     Call parse_call() {
         Call c;

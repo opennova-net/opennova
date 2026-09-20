@@ -1,6 +1,6 @@
 // Portable .bad skeletal sampler in engine-native (Y-up) space. The world-accumulate ->
-// parent-local extraction mirrors the proven pre-repo Godot port (adm
-// adm_import_plugin.cpp) and the original engine's pose chain. See anim_sample.h.
+// parent-local extraction mirrors the original engine's pose chain. See
+// anim_sample.h.
 
 #include <runtime/anim/anim_sample.h>
 

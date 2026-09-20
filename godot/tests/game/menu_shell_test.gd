@@ -58,22 +58,12 @@ func before_each() -> void:
 func after_each() -> void:
 	# The music service is an autoload; leave no context behind for the next test.
 	MusicService.stop_context()
-	_restore_config(STATE_CONFIG_PATH, _had_state_config, _saved_state_config)
+	TestFs.restore_file(STATE_CONFIG_PATH, _had_state_config, _saved_state_config)
 	# The live binding model is a static shared with the whole run: restore the
 	# catalog defaults and the on-disk cfg even when a remap test fails early.
 	ControlsBindings.model().restore_defaults()
-	_restore_config(ControlsBindings.CONFIG_PATH, _had_controls_cfg,
+	TestFs.restore_file(ControlsBindings.CONFIG_PATH, _had_controls_cfg,
 			_saved_controls_cfg)
-
-
-func _restore_config(path: String, existed: bool, bytes: PackedByteArray) -> void:
-	if existed:
-		var file := FileAccess.open(path, FileAccess.WRITE)
-		if file != null:
-			file.store_buffer(bytes)
-			file.close()
-	elif FileAccess.file_exists(path):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -302,7 +292,7 @@ func test_startup_drives_music_var() -> void:
 	# at the engine home, audio/music_policy.h kMenuMusicVarSlot); at index 0
 	# the MUSICVAR was inert and the menu played the wrong section.
 	var idx: int = MusicDirector.MENU_MUSIC_VAR_SLOT
-	assert_eq(shell.get_music_director().get_var(idx), 1, "STARTUP MUSICVAR -> director var %d" % idx)
+	assert_eq(MusicService.director().get_var(idx), 1, "STARTUP MUSICVAR -> director var %d" % idx)
 	_cleanup(dir)
 
 
@@ -504,7 +494,7 @@ func test_crosshair_spinlist_uses_shared_options_and_persists_immediately() -> v
 	var shell = _make_runtime_shell(dir, options)
 	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
-		_rm_runtime_dir(dir)
+		TestFs.remove_dir_recursive(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
 	var spin: int = driver.widget_id("XHAIR_APPEARANCE")
@@ -521,7 +511,7 @@ func test_crosshair_spinlist_uses_shared_options_and_persists_immediately() -> v
 			"the selection persists through the shared owner")
 	assert_signal_emit_count(options, "changed", 1)
 	shell.get_resource_root().clear()
-	_rm_runtime_dir(dir)
+	TestFs.remove_dir_recursive(dir)
 
 
 func test_aspect_spinlist_restores_and_persists_the_selected_mode() -> void:
@@ -533,7 +523,7 @@ func test_aspect_spinlist_restores_and_persists_the_selected_mode() -> void:
 	var shell = _make_runtime_shell(dir, options)
 	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
-		_rm_runtime_dir(dir)
+		TestFs.remove_dir_recursive(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
 	var spin := driver.widget_id("16x9DISPLAY")
@@ -551,7 +541,7 @@ func test_aspect_spinlist_restores_and_persists_the_selected_mode() -> void:
 	assert_eq(sim.get_local_player_aspect_mode(), 0,
 			"the selected mode reaches camera and sights projection state")
 	shell.get_resource_root().clear()
-	_rm_runtime_dir(dir)
+	TestFs.remove_dir_recursive(dir)
 
 
 func test_fresh_profile_seeds_the_aspect_row_from_the_desktop_ratio() -> void:
@@ -574,7 +564,7 @@ func test_fresh_profile_seeds_the_aspect_row_from_the_desktop_ratio() -> void:
 	var shell = _make_runtime_shell(dir, options)
 	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
-		_rm_runtime_dir(dir)
+		TestFs.remove_dir_recursive(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
 	var spin := driver.widget_id("16x9DISPLAY")
@@ -589,7 +579,7 @@ func test_fresh_profile_seeds_the_aspect_row_from_the_desktop_ratio() -> void:
 	assert_eq(sim.get_local_player_aspect_mode(), seeded,
 			"the seeded mode reaches the projection without a saved profile")
 	shell.get_resource_root().clear()
-	_rm_runtime_dir(dir)
+	TestFs.remove_dir_recursive(dir)
 
 
 func test_crosshair_color_and_spread_use_shared_options_and_persist() -> void:
@@ -601,7 +591,7 @@ func test_crosshair_color_and_spread_use_shared_options_and_persist() -> void:
 	var shell = _make_runtime_shell(dir, options)
 	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
-		_rm_runtime_dir(dir)
+		TestFs.remove_dir_recursive(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
 	var color: int = driver.widget_id("XHAIR_COLOR")
@@ -637,7 +627,7 @@ func test_crosshair_color_and_spread_use_shared_options_and_persist() -> void:
 	assert_true(PlayerOptions.new().current().crosshair_spread,
 			"the spread toggle persists")
 	shell.get_resource_root().clear()
-	_rm_runtime_dir(dir)
+	TestFs.remove_dir_recursive(dir)
 
 
 func test_front_options_accept_keeps_immediate_changes_and_returns_to_main() -> void:
@@ -754,7 +744,7 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
 		ResourceDirSettings.set_expansion(saved)
-		_rm_runtime_dir(dir)
+		TestFs.remove_dir_recursive(dir)
 		return
 	assert_eq(MusicService.current_context(), "menu", "base MENU music starts with the shell")
 	assert_not_null(MusicService.current_script(), "base MENUMUS.BIN resolves")
@@ -797,7 +787,7 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 		"exp model", "expansion archive mounted over the base game")
 	shell.get_resource_root().clear()  # release PFF handles before deleting the temp archives
 	ResourceDirSettings.set_expansion(saved)
-	_rm_runtime_dir(dir)
+	TestFs.remove_dir_recursive(dir)
 
 
 # Options -> Mods OK (the ACCEPT button) must APPLY the highlighted expansion, not
@@ -812,7 +802,7 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
 		ResourceDirSettings.set_expansion(saved)
-		_rm_runtime_dir(dir)
+		TestFs.remove_dir_recursive(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
 	var avail: int = driver.widget_id("AVAIL_LIST")
@@ -828,7 +818,7 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 	assert_eq(ResourceDirSettings.get_expansion(), "jox01", "applied choice persisted")
 	shell.get_resource_root().clear()
 	ResourceDirSettings.set_expansion(saved)
-	_rm_runtime_dir(dir)
+	TestFs.remove_dir_recursive(dir)
 
 
 # A loose authoring root (the ONED --loose-root play-test mount, ADR 0025) has no
@@ -851,7 +841,7 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	_copy(SBF_FIXTURE, dir.path_join("menumus.sbf"))
 	# The expansion pair exists ON DISK (list_expansions scans the path), but the
 	# mounted root is a loose-only mount, which cannot layer it.
-	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "expmodel.3di", "bytes": "exp model"},
 	])
 	var root := ResourceRoot.new()
@@ -1024,7 +1014,7 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 	DirAccess.make_dir_recursive_absolute(dir)
 	var mns := "// test stylesheet\nDEF_FONTNAME_LG Gunpl27b.fnt\nDEF_TEXT_FG FFFFFFFF\n" \
 		+ "DEF_TEXT_MOUSEOVER_FG FFFF0000\nDEF_TEXT_SELECTED_FG FFFF0000\nDEF_TEXT_DISABLED_FG FF545252\n"
-	_write_pff(dir.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [
 		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menu_style.mns", "bytes": mns},
 	])
@@ -1071,7 +1061,7 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 	var sbf := FileAccess.get_file_as_bytes(SBF_FIXTURE)
 	var dir := OS.get_temp_dir().path_join("menu_shell_mus_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir)
-	_write_pff(dir.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [
 		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menumus.bin", "bytes": mus},
 		{"name": "gamemus.bin", "bytes": mus},
@@ -1084,7 +1074,7 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir) != OK:
 		pass_test("runtime resource root unavailable in this environment")
-		_rm_music_ctx_dir(dir)
+		TestFs.remove_dir_recursive(dir)
 		return
 	var shell = MenuShellScript.new()
 	shell.size = Vector2(800, 600)
@@ -1117,13 +1107,7 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 	assert_null(MusicService.director().get_bank(), "failed open retains no old bank")
 	assert_null(MusicService.director().get_mus_script(), "failed open retains no old script")
 	root.clear()
-	_rm_music_ctx_dir(dir)
-
-
-func _rm_music_ctx_dir(dir: String) -> void:
-	for sub in ["resource.pff", "menumus.sbf", "gamemus.sbf"]:
-		DirAccess.remove_absolute(dir.path_join(sub))
-	DirAccess.remove_absolute(dir)
+	TestFs.remove_dir_recursive(dir)
 
 
 # With an expansion mounted, retail selects M<n>/G<n> unconditionally. A
@@ -1134,12 +1118,12 @@ func test_music_resolution_keeps_incomplete_expansion_pair() -> void:
 	var mus := _fixture_bytes(MUS_FIXTURE)
 	var dir := OS.get_temp_dir().path_join("menu_shell_musx_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
-	_write_pff(dir.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [
 		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menumus.bin", "bytes": mus},
 		{"name": "gamemus.bin", "bytes": mus},
 	])
-	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "Mjox01.bin", "bytes": mus},
 		{"name": "Gjox01.bin", "bytes": mus},
 	])
@@ -1153,7 +1137,7 @@ func test_music_resolution_keeps_incomplete_expansion_pair() -> void:
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "jox01") != OK:
 		pass_test("runtime resource root unavailable in this environment")
-		_rm_music_exp_dir(dir)
+		TestFs.remove_dir_recursive(dir)
 		return
 	var shell = MenuShellScript.new()
 	shell.size = Vector2(800, 600)
@@ -1172,7 +1156,7 @@ func test_music_resolution_keeps_incomplete_expansion_pair() -> void:
 	assert_true(String(game_pair.bank).ends_with("Gjox01.sbf"),
 		"missing G<n>.sbf keeps the expansion bank path so open fails to silence")
 	root.clear()
-	_rm_music_exp_dir(dir)
+	TestFs.remove_dir_recursive(dir)
 
 
 # The converse incomplete pair also keeps the expansion stem. The bank opens,
@@ -1181,12 +1165,12 @@ func test_music_incomplete_expansion_bank_only_stays_expansion() -> void:
 	var mus := _fixture_bytes(MUS_FIXTURE)
 	var dir := OS.get_temp_dir().path_join("menu_shell_musk_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
-	_write_pff(dir.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [
 		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menumus.bin", "bytes": mus},
 		{"name": "gamemus.bin", "bytes": mus},
 	])
-	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "expmodel.3di", "bytes": "exp model"},
 	])
 	for stub_name in ["expansion/jox01/Gjox01.sbf", "gamemus.sbf"]:
@@ -1197,7 +1181,7 @@ func test_music_incomplete_expansion_bank_only_stays_expansion() -> void:
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "jox01") != OK:
 		pass_test("runtime resource root unavailable in this environment")
-		_rm_music_bank_only_dir(dir)
+		TestFs.remove_dir_recursive(dir)
 		return
 	var shell = MenuShellScript.new()
 	shell.size = Vector2(800, 600)
@@ -1209,14 +1193,7 @@ func test_music_incomplete_expansion_bank_only_stays_expansion() -> void:
 	assert_true(String(pair.bank).ends_with("Gjox01.sbf"),
 		"bank-only G stem keeps the expansion bank")
 	root.clear()
-	_rm_music_bank_only_dir(dir)
-
-
-func _rm_music_bank_only_dir(dir: String) -> void:
-	for sub in ["resource.pff", "expansion/jox01/jox01.pff", "expansion/jox01/Gjox01.sbf",
-			"gamemus.sbf", "expansion/jox01", "expansion"]:
-		DirAccess.remove_absolute(dir.path_join(sub))
-	DirAccess.remove_absolute(dir)
+	TestFs.remove_dir_recursive(dir)
 
 
 # A mounted expansion with no music is silent even when the base pair exists.
@@ -1224,12 +1201,12 @@ func test_musicless_expansion_does_not_reselect_base_pair() -> void:
 	var mus := _fixture_bytes(MUS_FIXTURE)
 	var dir := OS.get_temp_dir().path_join("menu_shell_musb_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
-	_write_pff(dir.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [
 		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menumus.bin", "bytes": mus},
 		{"name": "gamemus.bin", "bytes": mus},
 	])
-	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "expmodel.3di", "bytes": "exp model"},
 	])
 	var stub := FileAccess.open(dir.path_join("menumus.sbf"), FileAccess.WRITE)
@@ -1239,7 +1216,7 @@ func test_musicless_expansion_does_not_reselect_base_pair() -> void:
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "jox01") != OK:
 		pass_test("runtime resource root unavailable in this environment")
-		_rm_music_base_dir(dir)
+		TestFs.remove_dir_recursive(dir)
 		return
 	var shell = MenuShellScript.new()
 	shell.size = Vector2(800, 600)
@@ -1255,20 +1232,7 @@ func test_musicless_expansion_does_not_reselect_base_pair() -> void:
 	assert_eq(String(pair.script_name), "Mjox01.bin",
 		"musicless mounted expansion keeps the missing expansion script name")
 	root.clear()
-	_rm_music_base_dir(dir)
-
-
-func _rm_music_exp_dir(dir: String) -> void:
-	for sub in ["resource.pff", "expansion/jox01/jox01.pff", "expansion/jox01/Mjox01.sbf",
-			"expansion/jox01", "expansion"]:
-		DirAccess.remove_absolute(dir.path_join(sub))
-	DirAccess.remove_absolute(dir)
-
-
-func _rm_music_base_dir(dir: String) -> void:
-	for sub in ["resource.pff", "menumus.sbf", "expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
-		DirAccess.remove_absolute(dir.path_join(sub))
-	DirAccess.remove_absolute(dir)
+	TestFs.remove_dir_recursive(dir)
 
 
 func test_missing_assets_degrade_without_crashing() -> void:
@@ -1284,7 +1248,7 @@ func test_missing_assets_degrade_without_crashing() -> void:
 		DirAccess.remove_absolute(dir)
 		return
 	assert_eq(shell.get_current_menu_file(), "main.mnu", "menu still opens with no companion assets")
-	assert_not_null(shell.get_music_director(), "director created even without a music script")
+	assert_not_null(MusicService.director(), "director created even without a music script")
 	DirAccess.remove_absolute(dir.path_join("main.mnu"))
 	DirAccess.remove_absolute(dir)
 
@@ -1298,17 +1262,17 @@ func test_missing_assets_degrade_without_crashing() -> void:
 func _make_runtime_dir() -> String:
 	var dir := OS.get_temp_dir().path_join("menu_shell_mods_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
-	_write_pff(dir.path_join("resource.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [
 		{"name": "options.mnu", "bytes": _fixture_bytes(OPTIONS_FIXTURE)},
 		{"name": "menumus.bin", "bytes": _fixture_bytes(MUS_FIXTURE)},
 	])
-	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "expmodel.3di", "bytes": "exp model"},
 		{"name": "Mjox01.bin", "bytes": _fixture_bytes(MUS_FIXTURE)},
 	])
 	# The L archive carries the expansion's own name/description table, as the
 	# retail pair does (jox01.bin lives in jox01L.pff).
-	_write_pff(dir.path_join("expansion/jox01/jox01L.pff"), [
+	WorldFixture.write_pff(self, dir.path_join("expansion/jox01/jox01L.pff"), [
 		{"name": "jox01.bin", "bytes": _expansion_info_bin("Kendari",
 				"Kendari island: the JO expansion.")},
 	])
@@ -1333,14 +1297,6 @@ func _make_runtime_shell(dir: String, options: PlayerOptions = null):
 	return shell
 
 
-func _rm_runtime_dir(dir: String) -> void:
-	for sub in ["resource.pff", "menumus.sbf", "expansion/jox01/jox01.pff",
-			"expansion/jox01/jox01L.pff", "expansion/jox01/MJOX01.SBF",
-			"expansion/jox01", "expansion"]:
-		DirAccess.remove_absolute(dir.path_join(sub))
-	DirAccess.remove_absolute(dir)
-
-
 # An expansion's <n>.bin: the [exp_info] EXP_NAME / EXP_DESC pair retail's
 # scan reads [orig: Expansion_ScanAndRegister @0x4a4578 / @0x4a45ef], minted
 # through the string-table writer.
@@ -1350,11 +1306,6 @@ func _expansion_info_bin(exp_name: String, exp_desc: String) -> PackedByteArray:
 	table.add_entry("EXP_NAME", exp_name, section, Vector2i.ZERO)
 	table.add_entry("EXP_DESC", exp_desc, section, Vector2i.ZERO)
 	return table.to_byte_array()
-
-
-# The shared PFF3 fixture writer (TestPff.write), asserted here.
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
 
 
 # A throwaway companion: claims the menu (or not) and records whether it was driven.

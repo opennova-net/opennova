@@ -923,9 +923,7 @@ int main(int argc, char **argv) {
 		}
 		std::vector<uint8_t> committed;
 		if (!expect(read_file(path, committed), path + " missing; run with --write")) continue;
-		static const char kLfsSentinel[] = "version https://git-lfs";
-		if (committed.size() >= sizeof(kLfsSentinel) - 1 &&
-				std::memcmp(committed.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0) {
+		if (test_io::is_lfs_pointer(committed)) {
 			std::printf("[skip] %s is an unpulled LFS pointer\n", path.c_str());
 			continue;
 		}

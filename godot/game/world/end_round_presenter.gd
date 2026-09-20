@@ -26,9 +26,7 @@ extends Node
 
 const MENU_FILE := "stat.mnu"
 const MENU_SCREEN := "STAT"
-const STYLESHEET_FILE := "menu_style.mns"
 const RESULT_LIST := "RESULTLIST"
-const MUSIC_VAR_INDEX := MusicDirector.MENU_MUSIC_VAR_SLOT
 # The RESULTLIST's authored width (jo_stat.mnu: the STATS window spans 20..770)
 # when the compiled frame has not laid the table out yet — a device fallback
 # for a frame that has not measured its widget.
@@ -304,34 +302,17 @@ func _ensure_menu() -> bool:
 	var root: ResourceRoot = _view.resource_root()
 	if root == null:
 		return false
-	var bytes := root.read_file(MENU_FILE)
-	if bytes.is_empty():
-		push_warning("EndRoundPresenter: %s not found in the resource root" % MENU_FILE)
+	var doc := MenuFrameSurface.load_document(root, MENU_FILE, "EndRoundPresenter")
+	if doc == null:
 		return false
-	var doc := MnuDocument.new()
-	if doc.load_from_bytes(bytes) != OK:
-		push_warning("EndRoundPresenter: %s did not parse" % MENU_FILE)
-		return false
-	_frame = MenuFrame.new()
-	_frame.name = "EndRoundMenu"
-	_frame.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_frame.mouse_filter = Control.MOUSE_FILTER_STOP
-	_frame.gui_input.connect(_on_frame_gui_input)
-	_ui_parent.add_child(_frame)
-	_recompute_fit()
-	_audio = MenuAudio.new()
-	_audio.name = "EndRoundMenuAudio"
-	_audio.set_resource_root(root)
-	_ui_parent.add_child(_audio)
-	_driver = MenuDriver.new()
-	_driver.attach(_frame, _audio)
-	_driver.set_music_director(MusicService.director())
-	_driver.set_music_var_index(MUSIC_VAR_INDEX)
+	var surface := MenuFrameSurface.build(root, _ui_parent, _layout_control,
+			"EndRoundMenu", _on_frame_gui_input)
+	_frame = surface.frame
+	_audio = surface.audio
+	_driver = surface.driver
 	_driver.widget_activated.connect(_on_widget_activated)
-	var style := MenuFrameSurface.load_style(root, STYLESHEET_FILE)
-	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
-	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
-		push_warning("EndRoundPresenter: %s has no screens" % MENU_FILE)
+	if not MenuFrameSurface.open_document(_driver, doc, root, MENU_FILE, MENU_SCREEN,
+			"EndRoundPresenter"):
 		teardown()
 		return false
 	return true

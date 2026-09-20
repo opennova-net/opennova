@@ -72,28 +72,9 @@ func test_hidden_model_advances_commanded_part_anims() -> void:
 			"the 63rd retail tick strictly overshoots and clamps the sweep endpoint")
 
 
-# The per-entity lighting factors are stamped on the direct GeometryInstance3D
-# children of every ROBJ part node and of the model's own Skeleton3D (skinned
-# submeshes bind there instead of under a part).
-func _entity_light_instances(model: ObjectModel) -> Array[GeometryInstance3D]:
-	var parents: Array[Node] = []
-	var parts: Dictionary = model.get_render_part_nodes()
-	for key in parts.keys():
-		parents.append(parts[key] as Node3D)
-	if model.has_skeleton():
-		parents.append(model.get_skeleton())
-	var out: Array[GeometryInstance3D] = []
-	for parent in parents:
-		for child in parent.get_children():
-			var instance := child as GeometryInstance3D
-			if instance != null:
-				out.append(instance)
-	return out
-
-
 func _assert_entity_light(model: ObjectModel, expected: Vector4,
 		message: String) -> void:
-	var instances := _entity_light_instances(model)
+	var instances := PresentPassFixture.entity_light_instances(model)
 	assert_gt(instances.size(), 0, message + " (at least one surface instance)")
 	for instance in instances:
 		var actual: Variant = instance.get_instance_shader_parameter("u_entity_light")

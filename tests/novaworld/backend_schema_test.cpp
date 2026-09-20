@@ -5,13 +5,12 @@
 
 #include <net/novaworld/db/sqlite.h>
 
+#include "../common/file_io.h"
 #include "../common/test_expect.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <vector>
 
 #ifndef OPENNOVA_SOURCE_DIR
@@ -22,13 +21,6 @@ using opennova::db::Database;
 using opennova::db::run_migrations;
 
 namespace {
-
-std::string read_file(const std::filesystem::path &p) {
-	std::ifstream in(p, std::ios::binary);
-	std::ostringstream os;
-	os << in.rdbuf();
-	return os.str();
-}
 
 int test_migrations_create_expected_tables() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
@@ -80,7 +72,7 @@ int test_seed_populates_games_and_expansions() {
 	}
 	std::sort(seeds.begin(), seeds.end());
 	for (const auto &p : seeds) {
-		db.exec_script(read_file(p));
+		db.exec_script(test_io::read_file_text(p.string()));
 	}
 
 	auto games = db.query("SELECT slug, gate_tag FROM games ORDER BY slug;");
@@ -171,7 +163,7 @@ int test_seed_is_idempotent() {
 	// Run the seed twice; INSERT OR IGNORE should keep counts stable.
 	for (int pass = 0; pass < 2; ++pass) {
 		for (const auto &p : seeds) {
-			db.exec_script(read_file(p));
+			db.exec_script(test_io::read_file_text(p.string()));
 		}
 		if (pass == 0) {
 			db.exec(

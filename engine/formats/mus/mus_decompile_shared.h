@@ -52,8 +52,9 @@ static void resolve_method_into(char *out, size_t cap, int idx,
      G* -> ('', "*")  (GLOBAL is default, no prefix)
      F* -> ('F', "*")
      T* -> ('T', "*")
-     other -> ('', name) */
-static void split_method_name(const char *combined, char *obj, size_t obj_cap,
+     other -> ('', name)
+   `obj` needs room for two bytes. */
+static void split_method_name(const char *combined, char *obj,
                               char *method, size_t method_cap) {
     obj[0] = 0;
     method[0] = 0;
@@ -285,7 +286,7 @@ static void reconstruct_expression(const Instruction *insts, int start, int end_
             resolve_method_into(combined, sizeof(combined), idx,
                                 script->intrinsic_names, script->intrinsic_count);
             char obj[16], mth[64];
-            split_method_name(combined, obj, sizeof(obj), mth, sizeof(mth));
+            split_method_name(combined, obj, mth, sizeof(mth));
             char arg[256] = "";
             if (stk.top >= 1) {
                 snprintf(arg, sizeof(arg), "%s", stk_pop(&stk));

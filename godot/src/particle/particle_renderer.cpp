@@ -56,9 +56,12 @@
 #include <runtime/renderer/particle_frame.h>
 
 #include "particle/particle_compositor.h"
+#include "particle/particle_convert.h"
 #include "render/frame_fx.h"
 #include "render/visual_layers.h"
+#include "render/world_environment_lookup.h"
 #include "util/texture_path_resolver.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -100,7 +103,7 @@ std::string lower_ascii(std::string value) {
 
 Ref<Image> load_particle_image(const Callable &provider,
 		const String &texture_dir, const std::string &name) {
-	const String candidate = String::utf8(name.c_str());
+	const String candidate = opennova::to_gd(name);
 	Ref<Texture2D> texture;
 	if (provider.is_valid())
 		texture = provider.call(candidate);
@@ -282,18 +285,6 @@ void include_point(opennova::renderer::ParticleAabb &bounds,
 	bounds.max.z = std::max(bounds.max.z, maximum.z);
 }
 
-int64_t godot_token(std::uint64_t value) {
-	int64_t result = 0;
-	std::memcpy(&result, &value, sizeof(result));
-	return result;
-}
-
-AABB godot_aabb(const opennova::renderer::ParticleAabb &bounds) {
-	const Vector3 minimum(bounds.min.x, bounds.min.y, bounds.min.z);
-	const Vector3 maximum(bounds.max.x, bounds.max.y, bounds.max.z);
-	return AABB(minimum, maximum - minimum);
-}
-
 struct ParticleCameraFrame {
 	Vector3 position{};
 	Vector3 right{1.0f, 0.0f, 0.0f};
@@ -362,9 +353,9 @@ std::uint64_t vertex_checksum(
 Dictionary draw_list_report(const opennova::renderer::ParticleDrawList &draw_list) {
 	Dictionary result;
 	const opennova::renderer::ParticleFrameDebugCounters &debug = draw_list.debug;
-	result["frame_id"] = godot_token(draw_list.frame_id);
-	result["vertex_checksum"] = godot_token(vertex_checksum(draw_list.vertices));
-	result["compile_index"] = godot_token(debug.compile_index);
+	result["frame_id"] = token_to_godot(draw_list.frame_id);
+	result["vertex_checksum"] = token_to_godot(vertex_checksum(draw_list.vertices));
+	result["compile_index"] = token_to_godot(debug.compile_index);
 	result["input_emitters"] = static_cast<int64_t>(debug.input_emitters);
 	result["selected_emitters"] = static_cast<int64_t>(debug.selected_emitters);
 	result["input_particles"] = static_cast<int64_t>(debug.input_particles);
@@ -387,7 +378,7 @@ Dictionary draw_list_report(const opennova::renderer::ParticleDrawList &draw_lis
 	result["capacity_growths_this_compile"] =
 			static_cast<int64_t>(debug.capacity_growths_this_compile);
 	result["lifetime_capacity_growths"] =
-			godot_token(debug.lifetime_capacity_growths);
+			token_to_godot(debug.lifetime_capacity_growths);
 	result["vertex_capacity"] = static_cast<int64_t>(debug.vertex_capacity);
 	result["command_capacity"] = static_cast<int64_t>(debug.command_capacity);
 	result["emitter_bounds_capacity"] =
@@ -409,21 +400,6 @@ Dictionary draw_list_report(const opennova::renderer::ParticleDrawList &draw_lis
 	}
 	result["commands"] = commands;
 	return result;
-}
-
-WorldEnvironment *find_world_environment(Node *root) {
-	if (root == nullptr)
-		return nullptr;
-	if (WorldEnvironment *environment =
-				Object::cast_to<WorldEnvironment>(root))
-		return environment;
-	for (int child_index = 0; child_index < root->get_child_count();
-			++child_index) {
-		if (WorldEnvironment *environment =
-					find_world_environment(root->get_child(child_index)))
-			return environment;
-	}
-	return nullptr;
 }
 
 // A camera owns one composed resource regardless of how many independent
@@ -2009,7 +1985,7 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	for (std::size_t i = 0; i < impl_->entries.size(); ++i) {
 		const opennova::renderer::ParticleAtlasEntry &entry = impl_->entries[i];
 		Dictionary value;
-		value["name"] = String::utf8(entry.name.c_str());
+		value["name"] = opennova::to_gd(entry.name);
 		value["type"] = static_cast<int>(entry.type);
 		value["width"] = entry.width;
 		value["height"] = entry.height;
@@ -2045,7 +2021,7 @@ Array ParticleRenderer::get_debug_emitter_bounds() const {
 		for (const opennova::renderer::ParticleEmitterDrawBounds &bounds :
 				impl_->compilers[slot].draw_list().emitter_bounds) {
 			Dictionary value;
-			value["emitter_id"] = godot_token(bounds.emitter_id);
+			value["emitter_id"] = token_to_godot(bounds.emitter_id);
 			value["render_domain"] = slot == kFirstPerson ?
 					static_cast<int>(opennova::renderer::ParticleRenderDomain::FirstPerson) :
 					static_cast<int>(opennova::renderer::ParticleRenderDomain::World);
@@ -2084,6 +2060,6 @@ PackedStringArray ParticleRenderer::get_unresolved_texture_names() const {
 	result.resize(static_cast<int64_t>(impl_->unresolved_names.size()));
 	for (std::size_t i = 0; i < impl_->unresolved_names.size(); ++i)
 		result[static_cast<int64_t>(i)] =
-				String::utf8(impl_->unresolved_names[i].c_str());
+				opennova::to_gd(impl_->unresolved_names[i]);
 	return result;
 }

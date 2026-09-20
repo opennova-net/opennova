@@ -420,7 +420,6 @@ public:
 	TypedArray<ObjectModel> local_player_viewmodel_parts() const;
 	Ref<FirstPersonArmsWitness> local_player_first_person_arms_witness();
 	String local_player_weapon_name() const;
-	void set_local_player_nvg_view(bool p_active, int p_gain);
 	Ref<PlayerLocalView> local_player_view() const;
 	// The equipped weapon's HUD slice (error table, HUDCLIPGFX/HUDRNDGFX,
 	// clipsize, name), decoded from the resolved weapon.def row at this edge

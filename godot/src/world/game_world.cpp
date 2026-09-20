@@ -453,10 +453,6 @@ String GameWorld::local_player_weapon_name() const {
 	return player_visuals_->local_player_weapon_name();
 }
 
-void GameWorld::set_local_player_nvg_view(bool p_active, int p_gain) {
-	player_visuals_->set_local_player_nvg_view(p_active, p_gain);
-}
-
 Ref<PlayerLocalView> GameWorld::local_player_view() const {
 	return player_visuals_->local_player_view();
 }
@@ -713,8 +709,6 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("local_player_first_person_arms_witness"),
 			&GameWorld::local_player_first_person_arms_witness);
 	ClassDB::bind_method(D_METHOD("local_player_weapon_name"), &GameWorld::local_player_weapon_name);
-	ClassDB::bind_method(D_METHOD("set_local_player_nvg_view", "active", "gain"),
-			&GameWorld::set_local_player_nvg_view);
 	ClassDB::bind_method(D_METHOD("local_player_view"), &GameWorld::local_player_view);
 	ClassDB::bind_method(D_METHOD("local_player_hud_weapon_def"), &GameWorld::local_player_hud_weapon_def);
 	ClassDB::bind_method(D_METHOD("local_player_weapon_view"), &GameWorld::local_player_weapon_view);

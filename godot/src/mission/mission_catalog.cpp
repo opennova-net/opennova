@@ -4,6 +4,7 @@
 #include <base/gameprofile/game_type.h>
 
 #include "resource_index/resource_root.h"
+#include "util/string_convert.h"
 
 namespace godot {
 
@@ -69,9 +70,9 @@ TypedArray<MissionCatalogRow> MissionCatalog::rows(const Ref<ResourceRoot> &p_ro
 		// The session code-word stamp the retail table carries per row is
 		// game_type::for_mission_mode over the header's mode bit (the engine
 		// catalog stays below the net layer, so the stamp happens here).
-		out.push_back(MissionCatalogRow::create(String::utf8(row.file.c_str()),
-				String::utf8(row.title.c_str()),
-				String::utf8(row.briefing.c_str()),
+		out.push_back(MissionCatalogRow::create(opennova::to_gd(row.file),
+				opennova::to_gd(row.title),
+				opennova::to_gd(row.briefing),
 				static_cast<int64_t>(
 						opennova::game_type::for_mission_mode(row.game_mode)),
 				row.loose));
@@ -91,7 +92,7 @@ PackedStringArray MissionCatalog::mission_names(const Ref<ResourceRoot> &p_root)
 	}
 	for (const opennova::mission_catalog::Row &row :
 			opennova::mission_catalog::build(p_root->engine_index())) {
-		names.push_back(String::utf8(row.file.c_str()));
+		names.push_back(opennova::to_gd(row.file));
 	}
 	return names;
 }

@@ -1,25 +1,7 @@
 #include "object/model_light.h"
+#include "util/variant_type_of.h"
 
 using namespace godot;
-
-namespace {
-
-template <typename T>
-constexpr Variant::Type variant_type_of();
-template <>
-constexpr Variant::Type variant_type_of<bool>() { return Variant::BOOL; }
-template <>
-constexpr Variant::Type variant_type_of<int>() { return Variant::INT; }
-template <>
-constexpr Variant::Type variant_type_of<float>() { return Variant::FLOAT; }
-template <>
-constexpr Variant::Type variant_type_of<String>() { return Variant::STRING; }
-template <>
-constexpr Variant::Type variant_type_of<Vector3>() { return Variant::VECTOR3; }
-template <>
-constexpr Variant::Type variant_type_of<Color>() { return Variant::COLOR; }
-
-} // namespace
 
 void ModelLight::_bind_methods() {
 #define MODEL_LIGHT_BIND(m_type, m_name, m_default)                                          \

@@ -9,6 +9,8 @@
 // parse -> write byte-for-byte.
 #include "rtxt_real_util.h"
 
+#include "../common/file_io.h"
+
 int main() {
   const char *names[] = {
       "synth_game.bin", "synth_menu.bin", "synth_mission.bin", "synth_tiny.bin",
@@ -18,7 +20,7 @@ int main() {
   for (const char *name : names) {
     std::string path = std::string(RTXT_FIXTURE_DIR) + "/" + name;
     std::vector<uint8_t> bytes;
-    if (!rtxt_real::load_file(path, bytes)) {
+    if (!test_io::read_file(path, bytes)) {
       std::fprintf(stderr, "FAIL: cannot read fixture %s\n", path.c_str());
       ++failures;
       continue;

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <string>
 
+#include <base/io/le.h>
 #include <base/io/strutil.h>
 
 namespace opennova {
@@ -60,15 +61,11 @@ constexpr size_t GSB_FIELD_COUNT = sizeof(GSB_FIELD_NAMES) / sizeof(GSB_FIELD_NA
 
 // LE write helpers.
 void push_u16_le(std::vector<uint8_t> &buf, uint16_t v) {
-	buf.push_back(static_cast<uint8_t>(v & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
+	io::append_u16_le(buf, v);
 }
 
 void push_u32_le(std::vector<uint8_t> &buf, uint32_t v) {
-	buf.push_back(static_cast<uint8_t>(v & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((v >> 16) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((v >> 24) & 0xFFu));
+	io::append_u32_le(buf, v);
 }
 
 void push_ascii_cstr(std::vector<uint8_t> &buf, const std::string &s) {

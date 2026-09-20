@@ -1,6 +1,7 @@
 #include "lwf/lwf_data.h"
 
 #include "resource_index/resource_root.h"
+#include "util/string_convert.h"
 
 #include <runtime/audio/sound_selector.h>
 
@@ -163,7 +164,7 @@ bool LwfData::decode_into_tree(const PackedByteArray &bytes) {
 	Array sets;
 	for (const auto &multi : f.multis) {
 		Dictionary set;
-		set["name"] = String::utf8(multi.name.c_str());
+		set["name"] = opennova::to_gd(multi.name);
 		set["target_id"] = static_cast<int64_t>(multi.target_id);
 		set["pitch_base"] = static_cast<int64_t>(multi.pitch_base);
 		set["pitch_random_range"] = static_cast<int64_t>(multi.pitch_random_range);
@@ -203,8 +204,8 @@ bool LwfData::decode_into_tree(const PackedByteArray &bytes) {
 				int value_hi = 0;
 				if (sp.single_index < f.singles.size()) {
 					const auto &sg = f.singles[sp.single_index];
-					name = String::utf8(sg.name.c_str());
-					path = String::utf8(sg.path.c_str());
+					name = opennova::to_gd(sg.name);
+					path = opennova::to_gd(sg.path);
 					value_hi = static_cast<int>(sg.value_hi);
 				}
 				member["name"] = name;

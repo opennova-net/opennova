@@ -266,8 +266,8 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w,
 // on the next tick [orig: call sites @0x42c18e / @0x526786; promoter
 // @0x4de4f7; Camera_ComputeThirdPersonView @0x437D10; ThirdPersonCamera_Update
 // @0x437b70..76; the non-person bump @0x437e8f].
-void local_player_view_tick(World *world, const LocalPlayerWeapon &w,
-                            PlayerViewState &v, LocalPlayerViewTracker &t,
+void local_player_view_tick(World *world, PlayerViewState &v,
+                            LocalPlayerViewTracker &t,
                             const LocalViewSessionInputs &session);
 
 // The motor writes CameraOffset; every later consumer re-anchors it to the

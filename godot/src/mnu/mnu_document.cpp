@@ -402,7 +402,7 @@ int MnuDocument::find_item_row_by_value(int p_id, const String &p_value) const {
 	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
 	if (items == nullptr) return -1;
 	return opennova::menu::spinlist_row_for_value(
-			*items, std::string(p_value.utf8().get_data()));
+			*items, to_std(p_value));
 }
 
 String MnuDocument::get_item_text(int p_id, int p_index) const {

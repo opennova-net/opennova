@@ -86,7 +86,6 @@ uint8_t current_player_class(const NapiNPConnection &conn, const world::World *w
 // The tag=0x5A body for every re-send that grants NOTHING new: the retained granted body
 // when one exists, else the empty-table shape headed by the player's live class.
 std::vector<uint8_t> build_current_loadout_reply(const std::vector<uint8_t> &retained,
-                                                 uint8_t player_class,
-                                                 const world::WeaponTable *armory);
+                                                 uint8_t player_class);
 
 } // namespace opennova::inmatch

@@ -1683,6 +1683,13 @@ int MenuFrameCompiler::list_row_at(int index, const MenuFrameState &state,
 	if (!widget_rect(index, state, &rect)) {
 		return -1;
 	}
+	return row_at_in_rect_(index, state, rect, ScrollbarKind::Embedded, mx, my,
+			sx, sy);
+}
+
+int MenuFrameCompiler::row_at_in_rect_(int index, const MenuFrameState &state,
+		const mnu::RectEdges &rect, ScrollbarKind kind, float mx, float my,
+		float sx, float sy) const {
 	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
 	const int row_h = row_height_(node);
 	const int count = item_count(index, state);
@@ -1697,12 +1704,15 @@ int MenuFrameCompiler::list_row_at(int index, const MenuFrameState &state,
 	const int visible = std::max((rect.bottom - rect.top) / row_h, 0);
 	mnu::RectEdges scrollbar_rect;
 	if (count > visible &&
-			resolve_scrollbar_rect(node, ScrollbarKind::Embedded, rect, 0,
+			resolve_scrollbar_rect(node, kind, rect, 0,
 					rect.bottom - rect.top, 22, &scrollbar_rect) &&
 			mx >= emit_x(scrollbar_rect.left, sx) &&
 			mx < emit_x(scrollbar_rect.right, sx) &&
 			my >= emit_x(scrollbar_rect.top, sy) &&
 			my < emit_x(scrollbar_rect.bottom, sy)) {
+		// The original routes the child scrollbar before the list rows: the
+		// covered strip never selects a row (the popup's part interaction
+		// lives in pump_popup_mouse). [orig: CListWnd child walk @ 0x643f30]
 		return -1;
 	}
 	int y = rect.top;
@@ -1772,42 +1782,8 @@ int MenuFrameCompiler::combo_popup_row_at(int index,
 	if (!combo_popup_rect(index, state, &popup)) {
 		return -1;
 	}
-	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
-	const int row_h = row_height_(node);
-	const int count = item_count(index, state);
-	if (row_h <= 0 || count == 0) {
-		return -1;
-	}
-	if (mx < emit_x(popup.left, sx) || mx >= emit_x(popup.right, sx)) {
-		return -1;
-	}
-	const MenuWidgetState *ws = state_for(state, index);
-	const int first = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
-	const int visible = std::max((popup.bottom - popup.top) / row_h, 0);
-	mnu::RectEdges scrollbar_rect;
-	if (count > visible &&
-			resolve_scrollbar_rect(node, ScrollbarKind::Popup, popup, 0,
-					popup.bottom - popup.top, 22, &scrollbar_rect) &&
-			mx >= emit_x(scrollbar_rect.left, sx) &&
-			mx < emit_x(scrollbar_rect.right, sx) &&
-			my >= emit_x(scrollbar_rect.top, sy) &&
-			my < emit_x(scrollbar_rect.bottom, sy)) {
-		// The original routes the child scrollbar before the list rows: the
-		// covered strip never selects a row (part interaction lives in
-		// pump_popup_mouse). [orig: CListWnd child walk @ 0x643f30]
-		return -1;
-	}
-	int y = popup.top;
-	for (int i = first; i < count; ++i) {
-		if (y + row_h > popup.bottom) {
-			break;
-		}
-		if (my >= emit_x(y, sy) && my < emit_x(y + row_h, sy)) {
-			return i;
-		}
-		y += row_h;
-	}
-	return -1;
+	return row_at_in_rect_(index, state, popup, ScrollbarKind::Popup, mx, my, sx,
+			sy);
 }
 
 // Shared arrow hit over the widget's ABSOLUTE rect: 0 none, 1 up, 2 down —

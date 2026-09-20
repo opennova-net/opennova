@@ -558,9 +558,7 @@ func _show_end_screen() -> void:
 # [orig: g_mission_exit_reason = 1 (ESC / the epilog timeout) -> the main loop pushes
 # the "Post Menu" scene @0x526867 — our post-mission menu is the main menu.]
 func _on_end_screen_exit() -> void:
-	if _world_load_pending:
-		return
-	_teardown_world_to_menu()
+	_on_return_to_menu()
 
 
 func get_runtime() -> MissionRoot:
@@ -607,27 +605,14 @@ func _enter_menu(dir: String) -> bool:
 	# in setup(); keyhelp.bin (the "Keys" binding-label table) is registered
 	# here beside them, which installs it for the engine's binding formatters
 	# (Strings.TABLE_KEYHELP -> RtxtStringFile.install_key_strings).
-	Strings.register_table(Strings.TABLE_KEYHELP, _load_keyhelp_table(_root))
+	# keyhelp.bin off the mounted root; null when the root carries none or it
+	# does not parse (every binding label then renders its literal fallback).
+	Strings.register_table(Strings.TABLE_KEYHELP, Strings.load_rtxt(_root, "keyhelp.bin"))
 	if not _menu_shell.setup(_root):
 		push_warning("MainGame: no menu found in resource dir (looked for %s)"
 				% _menu_shell.main_menu_file)
 	_menu_shell.show_menu()
 	return true
-
-
-# keyhelp.bin off the mounted root as an RtxtStringFile; null when the root
-# carries none or it does not parse (every binding label then renders its
-# literal fallback).
-static func _load_keyhelp_table(root: ResourceRoot) -> RtxtStringFile:
-	if root == null:
-		return null
-	var bytes: PackedByteArray = root.read_file("keyhelp.bin")
-	if bytes.is_empty():
-		return null
-	var table := RtxtStringFile.new()
-	if table.load_from_byte_array(bytes) != OK:
-		return null
-	return table
 
 
 # The one-shot MenuShell wiring (every return to the menu re-enters _enter_menu):

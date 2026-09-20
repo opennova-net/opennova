@@ -1,8 +1,5 @@
 #include <runtime/world/ai.h>
 
-// Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // Waypoint targeting and movement (P1: GROUND_FOLLOWWP), plus the vehicle-physics
 // AI/parked input staging.
 

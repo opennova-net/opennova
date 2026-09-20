@@ -1007,7 +1007,7 @@ runs opposite world y (samplers negate y internally).
 - **`Terrain_RaycastLoResNoNormal @ 0x610860`** — the LoRes core with
   `hit = NULL` (pure boolean clear test). Callers:
   `render_skybox_sun_glow @ 0x5acd00`, `update_sun_glare @ 0x5ad130` — the
-  glare-occlusion path `celestial.gd::_glare_ray_clear` stands in for
+  glare-occlusion path `godot/src/env/celestial.cpp` `_glare_ray_clear` stands in for
   (env #14; the stand-in adopts the B1 port).
 - **`Terrain_RaycastHeightmapHiRes @ 0x60c760`** — a SIBLING full
   implementation, **witnessed 2026-07-16** (the occlusion slice) and ported as

@@ -46,12 +46,6 @@ func _data(res_path: String) -> ObjectData:
 	return data
 
 
-func _container() -> Node3D:
-	var container := Node3D.new()
-	add_child_autofree(container)
-	return container
-
-
 func _hull(container: Node3D) -> ObjectModel:
 	var hull := ObjectModel.new()
 	container.add_child(hull)
@@ -116,7 +110,7 @@ func _surfaces(model: ObjectModel) -> Array[Node]:
 # --- the synthetic cases ------------------------------------------------------
 
 func test_display_draws_in_the_suppressed_hulls_place_and_hides_when_the_frame_clears() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var hull := _hull(container)
 	var placer := _placer()
 	var presenter := _placed_pass(hull, placer)
@@ -155,7 +149,7 @@ func test_display_draws_in_the_suppressed_hulls_place_and_hides_when_the_frame_c
 
 
 func test_display_follows_the_hull_each_frame_and_builds_one_model_per_key() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var hull := _hull(container)
 	var presenter := _placed_pass(hull, _placer())
 	_present(presenter, _hull_row(Vector3(1, 0, 2), Vector3(0, 10, 0), true))
@@ -185,7 +179,7 @@ func test_display_follows_the_hull_each_frame_and_builds_one_model_per_key() -> 
 
 
 func test_display_is_an_ordinary_world_model_lit_as_its_carrier() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var hull := _hull(container)
 	var presenter := _placed_pass(hull, _placer())
 	hull.set_entity_lighting_context(0.5, false, 0.0)
@@ -220,7 +214,7 @@ func test_display_is_an_ordinary_world_model_lit_as_its_carrier() -> void:
 
 
 func test_no_authored_display_unknown_carrier_and_a_held_hull_draw_nothing() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var hull := _hull(container)
 	var presenter := _placed_pass(hull, _placer())
 	_present(presenter, _hull_row(Vector3(3, 0, 3), Vector3.ZERO, true))
@@ -253,7 +247,7 @@ func test_no_authored_display_unknown_carrier_and_a_held_hull_draw_nothing() -> 
 
 
 func test_a_new_key_and_the_runtime_reset_free_the_model() -> void:
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var hull := _hull(container)
 	var presenter := _placed_pass(hull, _placer())
 	_present(presenter, _hull_row(Vector3(7, 1, -7), Vector3(0, 90, 0), true))
@@ -287,7 +281,7 @@ func test_a_new_key_and_the_runtime_reset_free_the_model() -> void:
 
 func test_a_wire_hull_resolves_through_the_wire_registry() -> void:
 	# A joiner has no authored placed nodes: its hull is a wire body.
-	var container := _container()
+	var container := PresentPassFixture.container(self)
 	var hull := _hull(container)
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)

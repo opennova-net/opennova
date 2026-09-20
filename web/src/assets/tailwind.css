@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
   /* OpenNova's tactical palette — RGB channels so Tailwind alpha modifiers
      (e.g. bg-accent/22, border-border/50) keep working. Edit this block to

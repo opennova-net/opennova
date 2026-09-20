@@ -447,7 +447,6 @@ struct CollisionRay {
 // projectile query retains section identity for downstream impact policy.
 struct CollisionModelHit {
     int32_t section_index = -1;
-    int32_t volume_index = -1;
     int32_t normal_q16[3] = {};
 };
 
@@ -1600,6 +1599,9 @@ private:
     ProjectileHit trace_projectile_impl(const World &world,
                                         const ProjectileTrace &trace,
                                         bool person_faces_only, bool aim = false) const;
+    void record_trace_debug(const World &world, const ProjectileTrace &trace,
+                            const ProjectileHit &hit, RayDebugCategory category,
+                            bool knife) const;
 
     bool trace_profile_enabled_ = false;
     mutable TraceProfile trace_profile_;

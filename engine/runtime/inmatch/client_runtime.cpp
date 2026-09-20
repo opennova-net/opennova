@@ -1,6 +1,5 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/devtools/tick_profile.h>
-#include <base/io/perf_clock.h>
 
 #include <net/npwire/wire_handle.h>
 #include <net/npwire/ingame_encode.h>

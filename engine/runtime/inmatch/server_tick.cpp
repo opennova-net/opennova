@@ -2,7 +2,6 @@
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/end_round_protocol.h>
 #include <runtime/inmatch/server_message_dispatch.h> // build_player_list_message
-#include <base/io/perf_clock.h>
 
 #include <cstdint>
 #include <vector>

@@ -836,8 +836,8 @@ void NwUdpListener::run_loop() {
 			}
 			std::printf("[nwudp] GOODBYE from %s sk=0x%08x\n",
 			            client_label.c_str(), remote_key);
-			// Addr-keyed (G.7): two retail processes both ship ci=1, so
-			// notify_logout(ci) would drop the wrong connection.
+			// Addr-keyed (G.7): two retail processes both ship ci=1, so a
+			// ci-keyed logout would drop the wrong connection.
 			manager_.notify_logout_addr(peer);
 			// notify_logout_addr fires on_lost which calls
 			// erase_lobby_state via main.cpp's wiring (G.6).

@@ -92,7 +92,7 @@ internal partial class ExpansionManagerForm : Form
                 };
                 item.SubItems.Add(status.Descriptor.Version);
                 item.SubItems.Add(RenderState(status));
-                item.SubItems.Add(RenderDetails(status));
+                item.SubItems.Add(status.StatusMessage);
                 item.SubItems.Add(status.Descriptor.Summary ?? string.Empty);
                 listExpansions.Items.Add(item);
             }
@@ -120,9 +120,6 @@ internal partial class ExpansionManagerForm : Form
             _ => "Not installed",
         };
     }
-
-    private static string RenderDetails(ExpansionStatus status)
-        => status.StatusMessage;
 
     private GameExpansionStatus? GetSelectedGame()
     {
@@ -250,7 +247,7 @@ internal partial class ExpansionManagerForm : Form
                     CancellationToken.None);
         });
 
-        await RefreshStatusesAsync();
+        RefreshStatuses();
     }
 
     private async void buttonRemove_Click(object? sender, EventArgs e)
@@ -271,10 +268,10 @@ internal partial class ExpansionManagerForm : Form
                     CancellationToken.None);
         });
 
-        await RefreshStatusesAsync();
+        RefreshStatuses();
     }
 
-    private Task RefreshStatusesAsync()
+    private void RefreshStatuses()
     {
         var selectedGameSlug = GetSelectedGame()?.Game.Slug;
         var selectedExpansionSlug = GetSelectedExpansion()?.Descriptor.Slug;
@@ -311,8 +308,6 @@ internal partial class ExpansionManagerForm : Form
         }
 
         labelStatus.Text = "Ready.";
-
-        return Task.CompletedTask;
     }
 
     private void buttonClose_Click(object? sender, EventArgs e)

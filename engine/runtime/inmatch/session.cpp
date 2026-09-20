@@ -280,55 +280,46 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 }
 
 FrameOutcome Session::advance(const FrameInput &input) {
-	const int64_t frame_start = now_us();
 	FrameOutcome out;
 	out.state = state_;
 	if (state_ != State::Running) {
 		out.status = FrameStatus::NotRunning;
-		out.perf.frame_us = now_us() - frame_start;
 		last_perf_ = out.perf;
 		return out;
 	}
 	latch_input(input);
 	out = run_ticks(accumulator_.bank(input.delta_seconds), input);
-	out.perf.frame_us = now_us() - frame_start;
 	last_perf_ = out.perf;
 	return out;
 }
 
 FrameOutcome Session::step_once(const FrameInput &input) {
-	const int64_t frame_start = now_us();
 	FrameOutcome out;
 	out.state = state_;
 	if (state_ != State::Paused ||
 			kind_ != RoleKind::SinglePlayer) {
 		out.status = FrameStatus::NotRunning;
-		out.perf.frame_us = now_us() - frame_start;
 		last_perf_ = out.perf;
 		return out;
 	}
 	latch_input(input);
 	out = run_ticks(1, input);
-	out.perf.frame_us = now_us() - frame_start;
 	last_perf_ = out.perf;
 	return out;
 }
 
 FrameOutcome Session::drive_one(const FrameInput &input) {
-	const int64_t frame_start = now_us();
 	FrameOutcome out;
 	out.state = state_;
 	const bool local_paused = state_ == State::Paused &&
 			kind_ == RoleKind::SinglePlayer;
 	if (state_ != State::Running && !local_paused) {
 		out.status = FrameStatus::NotRunning;
-		out.perf.frame_us = now_us() - frame_start;
 		last_perf_ = out.perf;
 		return out;
 	}
 	latch_input(input);
 	out = run_ticks(1, input);
-	out.perf.frame_us = now_us() - frame_start;
 	last_perf_ = out.perf;
 	return out;
 }

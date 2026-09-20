@@ -336,7 +336,7 @@ private:
     // [orig: Terrain_WeldOppositePortalFaces @ 0x5c5910]
     void weld_opposite_faces();
     // [orig: the flag-stamp tail @ 0x5c5860]
-    void stamp_building_flags(World &world, CollisionWorld &collision);
+    void stamp_building_flags(CollisionWorld &collision);
 
     // [orig: collect_visible_sector_userpoints @ 0x5c6b60] — the building batch
     // + portal-slot collection (main scene: no def/entity flag filters).
@@ -364,8 +364,7 @@ private:
     void bank_open_building(World &world, EntityHandle entity, int32_t mask_index,
                             const OcclusionFrameCamera &cam);
     // [orig: test_sector_entity_occlusion @ 0x5c4610 — "render_TOC()"; TRUE = occluded]
-    bool toc_occluded(World &world, CollisionWorld &collision, BatchEntry &entry,
-                      const OcclusionFrameCamera &cam);
+    bool toc_occluded(World &world, CollisionWorld &collision, BatchEntry &entry);
     // [orig: Terrain_TestSphereInPlaneGroups @ 0x5c4580]
     bool sphere_in_plane_groups(const float pos[3], float radius,
                                 const std::vector<float> &plane_bank,

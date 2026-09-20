@@ -3,6 +3,7 @@
 // device think/detonate chain. Witness record: docs/world/world-wac-ai-re.md §27
 // (engine-research 2026-07-20, retail Jointops.exe kong IDB).
 #include <base/io/bam.h>
+#include <base/io/rotating_prng.h>
 #include <runtime/world/throwables.h>
 
 #include <cmath>
@@ -30,8 +31,6 @@ constexpr double kBamPerRad = io::kBamPerRadian;
 inline int32_t qmul(int64_t a, int64_t b) {
     return static_cast<int32_t>((a * b + 0x8000) >> 16);
 }
-
-inline int32_t q16(double v) { return to_fixed(v); }
 
 } // namespace
 
@@ -115,21 +114,11 @@ uint8_t power_throw_charge_from_hold(int32_t held_ticks) {
     return static_cast<uint8_t>(charge);
 }
 
-namespace {
 // One step of the engine rotate-LCG [orig: rol4(s + rol11(s), 4) ^ 1 — the
-// independent dword_31BFBB8 shrapnel-fan generator].
-inline uint32_t throwable_prng_step(uint32_t &s) {
-    const uint32_t rol11 = (s << 11) | (s >> 21);
-    uint32_t r = s + rol11;
-    r = ((r << 4) | (r >> 28)) ^ 1u;
-    s = r;
-    return r;
-}
-} // namespace
-
-// [orig: the inline fan stream on dword_31BFBB8 @ 0x4eb92e — same generator.]
+// independent dword_31BFBB8 shrapnel-fan generator; the inline fan stream
+// @ 0x4eb92e — same generator.]
 uint16_t ThrowableSim::fan_prng() {
-    return static_cast<uint16_t>(throwable_prng_step(fan_prng_state));
+    return io::rotating_prng_next16(fan_prng_state);
 }
 
 // ----------------------------------------------------------------------------

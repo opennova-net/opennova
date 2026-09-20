@@ -5,8 +5,6 @@
 #include <cstdlib>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -18,17 +16,11 @@
 #include <runtime/particle/effect_catalog_names.h>
 #include <base/resource_index/resource_index.h>
 #include <runtime/mission/runtime_boot.h>
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 
 namespace fs = std::filesystem;
 using namespace opennova::wac;
-
-static std::string read_file(const fs::path &p) {
-    std::ifstream f(p, std::ios::binary);
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    return ss.str();
-}
 
 static bool is_wac(const fs::path &p) {
     std::string ext = p.extension().string();
@@ -80,7 +72,7 @@ int main(int argc, char **argv) {
             if (ec) break;
             if (!it->is_regular_file(ec) || !is_wac(it->path())) continue;
             ++files;
-            std::string src = read_file(it->path());
+            std::string src = test_io::read_file_text(it->path().string());
             CompileEnv env;
             env.ammo = &ammo;
             env.effects = &effects;

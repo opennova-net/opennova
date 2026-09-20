@@ -1,9 +1,6 @@
 #include <runtime/world/ai.h>
 #include <base/io/fixed.h>
 
-// Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // P2 ground combat: target acquisition and the perception gates, engagement
 // relations, line of sight, ally alerting, AI fire, and command handling.
 

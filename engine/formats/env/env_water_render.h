@@ -6,8 +6,7 @@
 #include <vector>
 
 // Water-side render state math: the noise/DuDv texture tables and the
-// screen-space water strip tessellation. Split from the retired
-// env_render.h umbrella (W3-7).
+// screen-space water strip tessellation.
 
 namespace opennova::env {
 

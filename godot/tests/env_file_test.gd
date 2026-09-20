@@ -295,7 +295,7 @@ func test_light_direction_render_tuple_is_the_raw_getter_and_the_godot_vector_it
 	assert_almost_eq(raw.z, -0.6645, 0.002, "raw tuple z is the east component at 15:00")
 	var godot_axes := env_node.get_light_direction()
 	assert_true(godot_axes.is_equal_approx(Vector3(raw.z, raw.y, raw.x)),
-			"the Godot-axes light is the raw tuple's x/z swap (env_axes.h), nothing else")
+			"the Godot-axes light is the raw tuple's x/z swap (util/axes.h), nothing else")
 
 
 func test_environment_publishes_the_world_lighting_block_as_shader_globals() -> void:

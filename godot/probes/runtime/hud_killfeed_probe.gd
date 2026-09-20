@@ -27,7 +27,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var hud := await _wait_hud(ctx)
 	if hud == null:
 		return ProbeVerdict.failed("HudOverlay never appeared")
-	var table: RtxtStringFile = Strings.get_table("gametext")
+	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if table == null:
 		return ProbeVerdict.failed("gametext table unavailable")
 	# Let streaming and the frame rate settle before the capture.

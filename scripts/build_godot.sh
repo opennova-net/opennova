@@ -2,9 +2,9 @@
 # Builds the Godot GDExtension (godot/src/) into godot/bin/.
 #
 # This is what registers the engine's C++ classes (Terrain, RtxtStringFile,
-# ResourceRoot, ...) with the editor. scripts/build.sh builds the engine/ +
-# ctest suite but NOT this DLL, so the editor can run a stale extension and fail
-# to parse any GDScript that references a newly added class. Run this after
+# ResourceRoot, ...) with the editor. scripts/build.sh runs it after the engine/
+# build + ctest unless given --no-godot; an engine-only build leaves a stale
+# extension that fails to parse GDScript naming a new class. Run this after
 # adding/changing engine/ sources, then fully restart the editor — GDExtension
 # class registration does not reliably hot-reload (especially on Windows, where
 # the running editor holds the DLL lock and the swap is deferred to a ~temp).

@@ -164,7 +164,9 @@ ObjectModel::~ObjectModel() {
 }
 
 void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
-	const Callable changed = callable_mp(this, &ObjectModel::on_object_changed);
+	// ObjectData changes only when its immutable .3di content is replaced, so
+	// every observer takes the same full rebuild path.
+	const Callable changed = callable_mp(this, &ObjectModel::rebuild);
 	if (object_data_.is_valid() && object_data_->is_connected("object_changed", changed)) {
 		object_data_->disconnect("object_changed", changed);
 	}
@@ -955,12 +957,6 @@ void ObjectModel::mark_render_order_dirty_all() {
 		model->render_order_dirty_ = true;
 		model->wake_runtime_frame();
 	}
-}
-
-void ObjectModel::on_object_changed() {
-	// ObjectData changes only when its immutable .3di content is replaced, so
-	// every observer takes the same full rebuild path.
-	rebuild();
 }
 
 // The shared awake set: every model with live per-frame work. One driver

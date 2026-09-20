@@ -81,43 +81,23 @@ func _load_weapons_with_weight(weapon_name: String, weight: float) -> WeaponData
 
 # --- Driver harness (the compiled-menu seam) ----------------------------------
 
-func _doc_from_xml(xml: String) -> MnuDocument:
-	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(xml.to_utf8_buffer()), OK,
-			"the synthetic .mnu XML parses")
-	return doc
-
-
-func _wnd(type: String, name: String, top: int, inner := "", attrs := "") -> String:
-	return ('<WINDOW type="%s" name="%s"%s><POSITION><LEFT>10</LEFT><TOP>%d</TOP>'
-			+ '<RIGHT>250</RIGHT><BOTTOM>%d</BOTTOM></POSITION>%s</WINDOW>') % [
-			type, name, attrs, top, top + 20, inner]
-
-
-func _screen_xml(screen_name: String, body: String) -> String:
-	return ('<SCREEN><NAME>%s</NAME><WINDOW type="window" name="MAIN">'
-			+ '<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT>'
-			+ '<BOTTOM>600</BOTTOM></POSITION>%s</WINDOW></SCREEN>') % [
-			screen_name, body]
-
-
 # A synthetic WEAPON screen: the named controls the original registers, authored
 # as a small .mnu document (spinlist + combos + buttons + the weight static).
 func _make_weapon_driver(with_frame := false) -> MenuDriver:
-	var body := _wnd("spinlist", "PLAYER_CLASS", 10)
+	var body := MenuDriverFixture.wnd("spinlist", "PLAYER_CLASS", 10)
 	var y := 40
 	for n in ["PRIMARY", "SECONDARY", "ACCESSORY",
 			"PRIMARY_AMMO1", "SECONDARY_AMMO1", "ACCESSORY_AMMO1",
 			"GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]:
-		body += _wnd("combo", n, y)
+		body += MenuDriverFixture.wnd("combo", n, y)
 		y += 24
 	for n in ["PRIMARY_ICON", "SECONDARY_ICON", "ACCESSORY_ICON"]:
-		body += _wnd("window", n, y)
+		body += MenuDriverFixture.wnd("window", n, y)
 		y += 24
-	body += _wnd("button", "ACCEPT", y)
-	body += _wnd("button", "CANCEL", y + 24)
-	body += _wnd("static", "STATIC_TOTAL_WEIGHT", y + 48)
-	var doc := _doc_from_xml(_screen_xml("WEAPON", body))
+	body += MenuDriverFixture.wnd("button", "ACCEPT", y)
+	body += MenuDriverFixture.wnd("button", "CANCEL", y + 24)
+	body += MenuDriverFixture.wnd("static", "STATIC_TOTAL_WEIGHT", y + 48)
+	var doc := MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("WEAPON", body))
 	if not with_frame:
 		return MenuDriverFixture.driver_over(self, doc, "weapon.mnu")
 	var driver := MenuDriver.new()
@@ -177,8 +157,8 @@ func test_owns_menu_detects_weapon_screen() -> void:
 	assert_true(companion.owns_menu(_make_weapon_driver()),
 			"PLAYER_CLASS + PRIMARY_AMMO1 mark the WEAPON screen")
 	# player.mnu's screen (PLAYERCLASS combo, no ammo combos) is NOT claimed.
-	var player_info := MenuDriverFixture.driver_over(self, _doc_from_xml(_screen_xml("PLAYER_INFO",
-			_wnd("combo", "PLAYERCLASS", 10))), "player.mnu")
+	var player_info := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAYER_INFO",
+			MenuDriverFixture.wnd("combo", "PLAYERCLASS", 10))), "player.mnu")
 	assert_false(companion.owns_menu(player_info),
 			"the PLAYER_INFO screen stays with its own companion")
 

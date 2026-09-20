@@ -52,9 +52,7 @@ const NATIVE_MODEL_DIR := "res://.godot/native_3dp_coop_two_sim"
 
 
 func should_skip_script():
-	if RetailData.def_root().is_empty():
-		return RetailData.fixture_pending_text("def/weapon.def")
-	return false
+	return RetailData.def_root_skip()
 
 
 func before_all() -> void:
@@ -288,7 +286,7 @@ func _install_combat_tables(sim: Simulation) -> void:
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
 	# Current-motor eyes and collision capsules require the native clip map.
-	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
+	assert_gt(sim.set_infantry_anim_map(PresenterFixture.anim_root(self), "soldier.adm"), 0)
 
 
 func _retail_m4() -> WeaponDef:
@@ -383,13 +381,6 @@ func _drive_pair_to_match(host: Simulation, joiner: Simulation) -> bool:
 			return true
 		OS.delay_msec(2)
 	return false
-
-
-func _anim_root() -> ResourceRoot:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/anim")), OK)
-	return root
 
 
 func _two_organics() -> MissionData:
@@ -588,7 +579,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	# A co-op host is playable — it spawns its own pool-0 player (0x14B9), which the joiner must
 	# see over the wire. Without it the only player entity would be the joiner's own echo.
 	assert_true(host.spawn_local_player(Vector3(5, 0, 5), 0.0, 1), "host spawned its own player")
-	var host_anim_root := _anim_root()
+	var host_anim_root := PresenterFixture.anim_root(self)
 	assert_gt(host.set_infantry_anim_map(host_anim_root, "soldier.adm"), 0)
 	var host_item_db := _net_spawn_zone_item_db()
 	assert_not_null(host_item_db)
@@ -602,7 +593,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(joiner.is_joiner(), "joiner flag set before load")
 	assert_eq(joiner.get_joiner_phase(), 0, "joiner phase Idle before the first frame")
 	assert_true(joiner.load_from_mission_data(mission), "joiner promoted as a client")
-	var joiner_anim_root := _anim_root()
+	var joiner_anim_root := PresenterFixture.anim_root(self)
 	assert_gt(joiner.set_infantry_anim_map(joiner_anim_root, "soldier.adm"), 0)
 	var joiner_item_db := _net_spawn_zone_item_db()
 	assert_not_null(joiner_item_db)
@@ -2768,7 +2759,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	_install_combat_tables(host)
 	# The live game shell always installs the infantry anim registry; without it
 	# the joiner-side remote-motion movers never arm and the bug cannot show.
-	var host_anim_root := _anim_root()
+	var host_anim_root := PresenterFixture.anim_root(self)
 	assert_gt(host.set_infantry_anim_map(host_anim_root, "soldier.adm"), 0)
 	host.resolve_infantry_adm_ids(host_anim_root, fixture_item_db)
 	assert_true(host.spawn_local_player(Vector3(20, 0, 0), 120.0, 1))
@@ -2795,7 +2786,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_eq(wire_mission.open_wire_header(header), OK)
 	assert_true(joiner.load_from_mission_data(wire_mission))
 	_install_combat_tables(joiner)
-	var joiner_anim_root := _anim_root()
+	var joiner_anim_root := PresenterFixture.anim_root(self)
 	assert_gt(joiner.set_infantry_anim_map(joiner_anim_root, "soldier.adm"), 0)
 	joiner.resolve_infantry_adm_ids(joiner_anim_root, fixture_item_db)
 	# NOTE deliberately NO joiner seat-spec install (and no asset root): the

@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/core/object.hpp>
 
+#include "env/env_convert.h"
 #include "env/env_file.h"
 #include "env/mission_environment.h"
 #include "object/object_data.h"
@@ -12,14 +13,6 @@
 #include <runtime/environment/weather_seed.h>
 
 namespace godot {
-
-namespace {
-
-Vector3 to_vector3(const opennova::env::Rgb &rgb) {
-	return Vector3(rgb.r, rgb.g, rgb.b);
-}
-
-} // namespace
 
 void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_environment_path", "path"),

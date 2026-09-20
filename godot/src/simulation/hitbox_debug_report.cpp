@@ -1,27 +1,7 @@
 #include "simulation/hitbox_debug_report.h"
+#include "util/variant_type_of.h"
 
 using namespace godot;
-
-namespace {
-
-template <typename T>
-constexpr Variant::Type variant_type_of();
-template <>
-constexpr Variant::Type variant_type_of<bool>() { return Variant::BOOL; }
-template <>
-constexpr Variant::Type variant_type_of<int>() { return Variant::INT; }
-template <>
-constexpr Variant::Type variant_type_of<float>() { return Variant::FLOAT; }
-template <>
-constexpr Variant::Type variant_type_of<Vector3>() { return Variant::VECTOR3; }
-template <>
-constexpr Variant::Type variant_type_of<PackedVector3Array>() { return Variant::PACKED_VECTOR3_ARRAY; }
-template <>
-constexpr Variant::Type variant_type_of<PackedByteArray>() { return Variant::PACKED_BYTE_ARRAY; }
-template <>
-constexpr Variant::Type variant_type_of<PackedInt32Array>() { return Variant::PACKED_INT32_ARRAY; }
-
-} // namespace
 
 #define HITBOX_DEBUG_BIND_FIELD(m_type, m_name, m_default)                                         \
 	ClassDB::bind_method(D_METHOD("get_" #m_name), &self_type::get_##m_name);                      \

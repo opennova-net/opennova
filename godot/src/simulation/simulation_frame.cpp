@@ -218,10 +218,7 @@ void Simulation::after_tick() {
 bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
 	const bool profiling = runtime_profiling_enabled_;
 	last_net_tick_us_ = static_cast<uint64_t>(p_tick.net_us);
-	if (profiling) {
-		frame_sim_us_ += p_tick.tick_us;
-		frame_net_us_ += p_tick.net_us;
-	}
+	if (profiling) frame_sim_us_ += p_tick.tick_us;
 	if (session_tick_sink_ == nullptr) return true;
 	const int64_t sink_start =
 			profiling ? Time::get_singleton()->get_ticks_usec() : 0;
@@ -231,9 +228,10 @@ bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
 	return accepted;
 }
 
-Ref<MissionFrameOutcome> Simulation::advance_session_frame(
+// The shared head of a session frame: reset the frame's profile spans, take the
+// typed input, place the sound listener and stamp the viewport height.
+opennova::inmatch::FrameInput Simulation::begin_session_frame(
 		const Ref<MissionFrameInput> &p_input) {
-	frame_net_us_ = 0;
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
 	if (kernel_ != nullptr) kernel_->profile.reset();
@@ -244,25 +242,21 @@ Ref<MissionFrameOutcome> Simulation::advance_session_frame(
 				input.camera.position[1], input.camera.position[2]));
 	}
 	input.viewport_height = renderer_viewport_height();
-	const opennova::inmatch::FrameOutcome outcome = session_.advance(input);
+	return input;
+}
+
+Ref<MissionFrameOutcome> Simulation::advance_session_frame(
+		const Ref<MissionFrameInput> &p_input) {
+	const opennova::inmatch::FrameOutcome outcome =
+			session_.advance(begin_session_frame(p_input));
 	fold_frame_stats(outcome);
 	return godot_outcome(outcome);
 }
 
 Ref<MissionFrameOutcome> Simulation::step_session_frame(
 		const Ref<MissionFrameInput> &p_input) {
-	frame_net_us_ = 0;
-	frame_sim_us_ = 0;
-	frame_sink_us_ = 0;
-	if (kernel_ != nullptr) kernel_->profile.reset();
-	opennova::inmatch::FrameInput input;
-	if (p_input.is_valid()) input = p_input->native_value();
-	if (input.camera.listener_valid) {
-		set_sound_listener(Vector3(input.camera.position[0],
-				input.camera.position[1], input.camera.position[2]));
-	}
-	input.viewport_height = renderer_viewport_height();
-	const opennova::inmatch::FrameOutcome outcome = session_.step_once(input);
+	const opennova::inmatch::FrameOutcome outcome =
+			session_.step_once(begin_session_frame(p_input));
 	fold_frame_stats(outcome);
 	return godot_outcome(outcome);
 }

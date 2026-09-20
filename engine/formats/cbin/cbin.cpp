@@ -6,6 +6,8 @@
 //  (PAR-R5, D-CBIN), MATCHING.]
 #include <formats/cbin/cbin.h>
 
+#include <base/io/le.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -23,10 +25,7 @@ inline uint32_t rol32(uint32_t value, unsigned int count) {
 }
 
 uint32_t read_le_u32(const uint8_t* data) {
-    return static_cast<uint32_t>(data[0]) |
-           (static_cast<uint32_t>(data[1]) << 8) |
-           (static_cast<uint32_t>(data[2]) << 16) |
-           (static_cast<uint32_t>(data[3]) << 24);
+    return io::read_u32_le(data);
 }
 
 // Encode a buffer using ROL32 + XOR cipher [orig: cipher loop @ 0x75e348 —
@@ -467,10 +466,7 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
 
 // Helper to write a uint32_t to a buffer
 inline void write_u32(std::vector<uint8_t>& buf, uint32_t val) {
-    buf.push_back(static_cast<uint8_t>(val & 0xFF));
-    buf.push_back(static_cast<uint8_t>((val >> 8) & 0xFF));
-    buf.push_back(static_cast<uint8_t>((val >> 16) & 0xFF));
-    buf.push_back(static_cast<uint8_t>((val >> 24) & 0xFF));
+    io::append_u32_le(buf, val);
 }
 
 bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& error) {

@@ -49,8 +49,6 @@ static int test_universal_key_and_labels(void) {
         const GameProfile *p = gameprofile_at(i);
         CHECK(p != NULL, "profile not null");
         CHECK(p->container_key == 0x0312A4CEu, "container key is the universal 0x0312A4CE");
-        CHECK(p->bfc1_compress == 0, "no bfc1 compression");
-        CHECK(p->default_format == 0, "default format PFF3");
         CHECK(p->display_name != NULL && p->display_name[0] != '\0', "display name non-empty");
         CHECK(p->code != NULL && p->code[0] != '\0', "code non-empty");
     }

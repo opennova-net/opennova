@@ -21,24 +21,14 @@
 
 #include <cstdlib>
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include <base/vfs/vfs.h>
 #include <formats/mnu/mnu.h>
 
+#include "common/file_io.h"
 #include "common/retail_paths.h"
-
-static bool read_file(const char *path, std::string &out) {
-  std::ifstream f(path, std::ios::binary);
-  if (!f) return false;
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  out = ss.str();
-  return true;
-}
 
 static int count_windows(const opennova::mnu::Window &w) {
   int n = 1;
@@ -89,7 +79,7 @@ static int check_source(const char *path, const std::string &src) {
 /* Returns 1 = OK (or absent and not required), 0 = present-but-failed. */
 static int try_menu(const char *path, bool required) {
   std::string src;
-  if (!read_file(path, src)) {
+  if (!test_io::read_file_text(path, src)) {
     if (required) {
       printf("  MISSING %s (required fixture)\n", path);
       return 0;

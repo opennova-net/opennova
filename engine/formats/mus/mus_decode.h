@@ -118,7 +118,6 @@ struct Instruction {
     int         operand_count;
     /* Embedded tablexec entry data (count * entry_size bytes). */
     uint8_t    *table_data;
-    int         table_count;
     int         table_entry_size;
     uint32_t    size;       /* total bytes including operands and tablexec data */
 };
@@ -163,10 +162,9 @@ static void disassemble(const uint8_t *bytes, uint32_t size,
                 inst.operands[inst.operand_count++] = val;
             }
             /* tablexec (0x35): 4 immediates then count*entry_size embedded. */
-            if (inst.opcode == 0x35 && inst.operand_count >= 4) {
+            if (inst.opcode == MUS_OP_TABLEXEC && inst.operand_count >= 4) {
                 int count = inst.operands[0] & 0xFF;
                 int es    = inst.operands[2] & 0xFF;
-                inst.table_count = count;
                 inst.table_entry_size = es;
                 int total = count * es;
                 if (total > 0 && pos + (uint32_t)total <= size) {

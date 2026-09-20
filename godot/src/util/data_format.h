@@ -20,6 +20,11 @@ inline PackedByteArray to_packed_bytes(const std::vector<uint8_t> &p_bytes) {
 	return to_packed_bytes(p_bytes.data(), p_bytes.size());
 }
 
+// The reverse copy: a PackedByteArray the wire bindings hand to the engine.
+inline std::vector<uint8_t> from_pba(const PackedByteArray &p_bytes) {
+	return std::vector<uint8_t>(p_bytes.ptr(), p_bytes.ptr() + p_bytes.size());
+}
+
 bool decode_nova_payload_bytes(PackedByteArray &p_bytes);
 bool read_nova_payload_file(const String &p_path, PackedByteArray &r_bytes);
 

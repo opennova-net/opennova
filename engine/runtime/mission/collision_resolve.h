@@ -46,7 +46,6 @@ struct CollisionHuskPieceInfo {
 struct CollisionResolveState {
 	std::unordered_map<std::string, int32_t> model_by_graphic;
 	std::unordered_map<std::string, int32_t> occlusion_by_graphic;
-	std::unordered_map<std::string, float> radius_by_graphic;
 	// The same GHDR carrier without a float round-trip. This is the arithmetic
 	// source for Entity_InitFromModel scale/max/pad and every wire projection.
 	std::unordered_map<std::string, int32_t> radius_q16_by_graphic;

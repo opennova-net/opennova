@@ -21,7 +21,6 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "audio/music_director.h"
-#include "env/env_records.h"
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
 

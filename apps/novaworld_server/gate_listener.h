@@ -40,8 +40,6 @@ public:
 	// Signal stop and join the worker thread. Idempotent.
 	void stop();
 
-	bool running() const { return running_.load(); }
-
 private:
 	void run_loop();
 

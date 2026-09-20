@@ -29,7 +29,6 @@ build/
 godot/src/build/*
 !godot/src/build/.gdignore
 *.o
-*.os
 *.a
 *.so
 *.dll
@@ -46,8 +45,6 @@ godot/src/build/*
 *.swo
 *~
 
-# SCons
-.sconsign.dblite
 *.pyc
 __pycache__/
 

@@ -29,7 +29,6 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
-#include <iterator>
 #include <string>
 #include <vector>
 
@@ -39,6 +38,7 @@
 #include <sys/stat.h>
 #endif
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/retail_paths.h"
 #include "common/test_paths.h"
@@ -110,14 +110,8 @@ bool write_text(const std::string &path, const std::string &body) {
 }
 
 bool copy_bytes(const std::string &src, const std::string &dst) {
-    std::ifstream in(src, std::ios::binary);
-    if (!in) return false;
-    const std::vector<char> body((std::istreambuf_iterator<char>(in)),
-                                 std::istreambuf_iterator<char>());
-    std::ofstream out(dst, std::ios::binary);
-    if (!out) return false;
-    out.write(body.data(), static_cast<std::streamsize>(body.size()));
-    return static_cast<bool>(out);
+    std::vector<uint8_t> body;
+    return test_io::read_file(src, body) && test_io::write_file(dst, body);
 }
 
 } // namespace

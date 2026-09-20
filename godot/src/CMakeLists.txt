@@ -88,8 +88,6 @@ add_library(${TARGET_NAME} SHARED
     lights/effect_light_report.cpp
     lights/light_scene.cpp
     lights/light_spawn.cpp
-    lights/light_spawn.cpp
-    lights/light_spawn.cpp
     particle/effect_group_report.cpp
     particle/effect_load_report.cpp
     particle/effect_scene.cpp
@@ -257,9 +255,9 @@ target_include_directories(${TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# opennova_net PUBLIC-pulls the whole sim chain (runtime -> base -> formats ->
-# io); opennova_runtime is named for the direct sim/format consumption in the
-# bindings. The service target is deliberately absent (see the sqlite note
+# opennova_runtime carries the sim chain (runtime -> formats -> base -> io) the
+# bindings consume directly; opennova_net is the wire only and never links
+# runtime (ADR 0043 d4). The service target is deliberately absent (see the sqlite note
 # above); scripts/lint/link_graph_check.py enforces it.
 target_link_libraries(${TARGET_NAME} PRIVATE
     godot-cpp

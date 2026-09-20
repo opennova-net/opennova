@@ -29,6 +29,12 @@ namespace godot {
 	X(combo, -1)                    \
 	X(player_class, opennova::inmatch::kJoinDefaultPlayerClass)
 
+// One int read off a PLAYER_INFO profile Dictionary (a side selection's
+// nationality / division / combo / player_class), `def` when the key is absent.
+inline int profile_dict_int(const Dictionary &d, const char *key, int def) {
+	return d.has(key) ? (int)d[key] : def;
+}
+
 class PlayerSpawnLoadout : public RefCounted {
 	GDCLASS(PlayerSpawnLoadout, RefCounted)
 

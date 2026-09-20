@@ -8,11 +8,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
-#include <iterator>
 #include <string>
 #include <vector>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
 #include <formats/playersav/weapon_sav.h>
 #include "common/retail_paths.h"
@@ -459,13 +458,11 @@ int test_retail_file()
         return retail::skip_leg("OPENNOVA_JO_DIR carrying a retail weapon.sav (corpus leg)");
     const char *path = sav.c_str();
 
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
+    std::vector<uint8_t> bytes;
+    if (!test_io::read_file(path, bytes)) {
         std::fprintf(stderr, "retail weapon.sav found but unreadable: %s\n", path);
         return 1;
     }
-    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)),
-                                     std::istreambuf_iterator<char>());
 
     File f;
     TEST_EXPECT(read(bytes.data(), bytes.size(), f));

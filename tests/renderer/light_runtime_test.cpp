@@ -49,33 +49,6 @@ int main() {
                "point-light attenuation should preserve the trailing 1 term");
     }
 
-    {
-        expect_vector(build_depth_mask_plane(1.0f, 2.0f, 3.0f,
-                                             0.0f, 0.0f, 2.0f,
-                                             2.0f, 6.0f),
-                      std::array<float, 4>{0.0f, 0.0f, 0.25f, -1.25f},
-                      "depth-mask plane should normalize direction and attenuation span");
-        expect_vector(build_depth_mask_plane(1.0f, 2.0f, 3.0f,
-                                             0.0f, 0.0f, 0.0f,
-                                             2.0f, 6.0f),
-                      std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f},
-                      "zero-length light direction should fail closed");
-    }
-
-    {
-        std::array<float, 16> identity{};
-        identity[0] = identity[5] = identity[10] = identity[15] = 1.0f;
-        const auto shadow = build_shadow_sample_matrix(identity, 512);
-        expect(nearly_equal(shadow[0], 0.5f) && nearly_equal(shadow[5], 0.5f),
-               "shadow matrix should scale clip xy into texture space");
-        expect(nearly_equal(shadow[12], 0.5f + 0.5f / 512.0f),
-               "shadow matrix should add the witnessed positive half-texel x bias");
-        expect(nearly_equal(shadow[13], -(0.5f + 0.5f / 512.0f)),
-               "shadow matrix should add the witnessed inverted-y half-texel bias");
-        expect(nearly_equal(build_shadow_sample_matrix(identity, 0)[12], shadow[12]),
-               "zero shadow resolution should use the retail 512 fallback");
-    }
-
     expect_vector(unpack_modulator_scale(0x00804020u),
                   std::array<float, 3>{2.0f, 1.0f, 0.5f},
                   "modulator bytes should unpack with 64 as identity");

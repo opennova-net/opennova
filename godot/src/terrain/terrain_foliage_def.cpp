@@ -1,17 +1,10 @@
 #include "terrain/terrain_foliage_def.h"
 
+#include "terrain/terrain_clamp.h"
+
 #include <algorithm>
 
 using namespace godot;
-
-namespace {
-
-template <typename T>
-static T clamp_int(int value, int min_value, int max_value) {
-	return static_cast<T>(std::clamp(value, min_value, max_value));
-}
-
-} // namespace
 
 void TerrainFoliageDef::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_graphic", "value"), &TerrainFoliageDef::set_graphic);

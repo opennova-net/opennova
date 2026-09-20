@@ -1,23 +1,9 @@
 #include "player/player_viewmodel_def.h"
 
 #include "object/weapon_def.h"
+#include "util/variant_type_of.h"
 
 using namespace godot;
-
-namespace {
-
-template <typename T>
-constexpr Variant::Type variant_type_of();
-template <>
-constexpr Variant::Type variant_type_of<int>() { return Variant::INT; }
-template <>
-constexpr Variant::Type variant_type_of<float>() { return Variant::FLOAT; }
-template <>
-constexpr Variant::Type variant_type_of<String>() { return Variant::STRING; }
-template <>
-constexpr Variant::Type variant_type_of<Vector3>() { return Variant::VECTOR3; }
-
-} // namespace
 
 Ref<PlayerViewmodelDef> PlayerViewmodelDef::from_weapon_def(const Ref<WeaponDef> &p_def) {
 	if (p_def.is_null()) {

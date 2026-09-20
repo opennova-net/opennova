@@ -51,26 +51,6 @@ func _staged_avatars_root() -> ResourceRoot:
 
 # --- Driver harness (the compiled-menu seam) ----------------------------------
 
-func _doc_from_xml(xml: String) -> MnuDocument:
-	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(xml.to_utf8_buffer()), OK,
-			"the synthetic .mnu XML parses")
-	return doc
-
-
-func _wnd(type: String, name: String, top: int, inner := "", attrs := "") -> String:
-	return ('<WINDOW type="%s" name="%s"%s><POSITION><LEFT>10</LEFT><TOP>%d</TOP>'
-			+ '<RIGHT>250</RIGHT><BOTTOM>%d</BOTTOM></POSITION>%s</WINDOW>') % [
-			type, name, attrs, top, top + 20, inner]
-
-
-func _screen_xml(screen_name: String, body: String) -> String:
-	return ('<SCREEN><NAME>%s</NAME><WINDOW type="window" name="MAIN">'
-			+ '<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT>'
-			+ '<BOTTOM>600</BOTTOM></POSITION>%s</WINDOW></SCREEN>') % [
-			screen_name, body]
-
-
 # A synthetic PLAYER_INFO screen: the cascade combos, the team radios (SIDE_BLUE
 # ships CHECKED, both share the authored GROUP), the name edit and ACCEPT --
 # exactly the control names player.mnu authors.
@@ -78,22 +58,22 @@ func _avatar_screen_xml(include_preview := false) -> String:
 	var body := ""
 	var y := 10
 	for n in ["NATIONALITY", "DIVISION", "COMBO_LIST", "PLAYERVOICE"]:
-		body += _wnd("combo", n, y)
+		body += MenuDriverFixture.wnd("combo", n, y)
 		y += 24
-	body += _wnd("radio", "SIDE_BLUE", y, "<GROUP>1</GROUP>", " CHECKED")
-	body += _wnd("radio", "SIDE_RED", y + 24, "<GROUP>1</GROUP>")
-	body += _wnd("edit", "PLAYERNAME", y + 48)
-	body += _wnd("button", "ACCEPT", y + 72)
-	body += _wnd("button", "TESTPLAYERVOICE", y + 96)
+	body += MenuDriverFixture.wnd("radio", "SIDE_BLUE", y, "<GROUP>1</GROUP>", " CHECKED")
+	body += MenuDriverFixture.wnd("radio", "SIDE_RED", y + 24, "<GROUP>1</GROUP>")
+	body += MenuDriverFixture.wnd("edit", "PLAYERNAME", y + 48)
+	body += MenuDriverFixture.wnd("button", "ACCEPT", y + 72)
+	body += MenuDriverFixture.wnd("button", "TESTPLAYERVOICE", y + 96)
 	if include_preview:
 		body += ('<WINDOW type="window" name="PLAYER_PREVIEW">'
 				+ '<POSITION><LEFT>500</LEFT><TOP>100</TOP><RIGHT>700</RIGHT>'
 				+ '<BOTTOM>400</BOTTOM></POSITION></WINDOW>')
-	return _screen_xml("PLAYER_INFO", body)
+	return MenuDriverFixture.screen_xml("PLAYER_INFO", body)
 
 
 func _make_avatar_driver(include_preview := false) -> MenuDriver:
-	return MenuDriverFixture.driver_over(self, _doc_from_xml(_avatar_screen_xml(include_preview)), "player.mnu")
+	return MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(include_preview)), "player.mnu")
 
 
 func _character_ids(profile: CharacterJoinProfile) -> Array[int]:
@@ -185,8 +165,8 @@ func test_owns_menu_detects_player_info() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	assert_true(companion.owns_menu(_make_avatar_driver()),
 			"a menu carrying NATIONALITY + COMBO_LIST is the PLAYER_INFO screen")
-	var plain := MenuDriverFixture.driver_over(self, _doc_from_xml(_screen_xml("PLAIN",
-			_wnd("button", "OK", 10))), "plain.mnu")
+	var plain := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAIN",
+			MenuDriverFixture.wnd("button", "OK", 10))), "plain.mnu")
 	assert_false(companion.owns_menu(plain),
 			"a plain menu is left to the shell / other companions")
 
@@ -315,7 +295,7 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 	add_child_autofree(frame)
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
-	assert_true(driver.open_document(_doc_from_xml(_avatar_screen_xml(true)),
+	assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(true)),
 			null, null, null, "player.mnu"), "the preview document opens on the driver")
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
@@ -348,7 +328,7 @@ func test_preview_render_activity_follows_visibility() -> void:
 	add_child_autofree(frame)
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
-	assert_true(driver.open_document(_doc_from_xml(_avatar_screen_xml(true)),
+	assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(true)),
 			null, null, null, "player.mnu"), "the preview document opens on the driver")
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
@@ -382,7 +362,7 @@ func test_release_frees_the_preview_mount() -> void:
 	add_child_autofree(frame)
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
-	assert_true(driver.open_document(_doc_from_xml(_avatar_screen_xml(true)),
+	assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(true)),
 			null, null, null, "player.mnu"), "the preview document opens on the driver")
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
@@ -532,25 +512,25 @@ func _loadout_screen_xml() -> String:
 	var body := ""
 	var y := 10
 	for n in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		body += _wnd("combo", n, y)
-		body += _wnd("combo", n + "_AMMO1", y + 24)
-		body += _wnd("combo", n + "_AMMO2", y + 48)
-		body += _wnd("window", n + "_ICON", y + 72)
+		body += MenuDriverFixture.wnd("combo", n, y)
+		body += MenuDriverFixture.wnd("combo", n + "_AMMO1", y + 24)
+		body += MenuDriverFixture.wnd("combo", n + "_AMMO2", y + 48)
+		body += MenuDriverFixture.wnd("window", n + "_ICON", y + 72)
 		y += 100
 	for n in ["PRIMARY", "SECONDARY"]:
 		# player.mnu authors the TYPE statics (FMJ/AP/SP, values 0/1/2); the
 		# companion selects/locks them but never refills.
-		body += _wnd("combo", n + "_AMMO1_TYPE", y, type_items)
+		body += MenuDriverFixture.wnd("combo", n + "_AMMO1_TYPE", y, type_items)
 		y += 24
 	for n in ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]:
-		body += _wnd("combo", n, y)
+		body += MenuDriverFixture.wnd("combo", n, y)
 		y += 24
-	body += _wnd("static", "STATIC_TOTAL_WEIGHT", y)
+	body += MenuDriverFixture.wnd("static", "STATIC_TOTAL_WEIGHT", y)
 	var class_items := ""
 	for v in range(5, 10):  # Medic..Engineer = values 5..9
 		class_items += '<ITEM value="%d">class %d</ITEM>' % [v, v]
-	body += _wnd("combo", "PLAYERCLASS", y + 24, "<ITEMS>%s</ITEMS>" % class_items)
-	return _screen_xml("PLAYER_INFO", body)
+	body += MenuDriverFixture.wnd("combo", "PLAYERCLASS", y + 24, "<ITEMS>%s</ITEMS>" % class_items)
+	return MenuDriverFixture.screen_xml("PLAYER_INFO", body)
 
 
 var _ammo_driver: MenuDriver = null  # the driver behind the current _make_ammo_companion
@@ -564,7 +544,7 @@ func _make_loadout_driver(with_frame := false) -> MenuDriver:
 		frame.size = Vector2(800, 600)
 		add_child_autofree(frame)
 		driver.attach(frame, null)
-	assert_true(driver.open_document(_doc_from_xml(_loadout_screen_xml()),
+	assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _loadout_screen_xml()),
 			null, null, null, "player.mnu"), "the loadout document opens on the driver")
 	return driver
 

@@ -10,18 +10,6 @@
 
 namespace opennova {
 
-namespace {
-
-bool same_page(const TerrainTilePageKey &a, const TerrainTilePageKey &b) noexcept {
-	return a.sector_origin_x == b.sector_origin_x &&
-			a.sector_origin_z == b.sector_origin_z &&
-			a.page_local_x == b.page_local_x &&
-			a.page_local_z == b.page_local_z &&
-			a.page_lod_level == b.page_lod_level;
-}
-
-} // namespace
-
 TerrainTileCompositionDemandEnqueueResult
 TerrainTileCompositionDemandQueue::enqueue(
 		const TerrainTileCompositionDemand &demand,

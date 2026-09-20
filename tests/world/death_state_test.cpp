@@ -12,6 +12,8 @@
 #include <runtime/world/system.h>
 #include <runtime/world/world.h>
 
+#include "death_clip_source.h"
+
 using namespace opennova::world;
 
 static int failures = 0;
@@ -22,21 +24,7 @@ static int failures = 0;
 
 namespace {
 
-// The idle pair plus the whole death family, one phase step per tick.
-struct DeathClipSource final : IRootMotionSource {
-	bool has_clip(int, int state_id) const override {
-		return state_id == anim_state::kIdle || state_id == anim_state::kIdle2 ||
-		       (state_id >= anim_state::kDeathFire &&
-		        state_id <= anim_state::kDeathBulletBase + 59);
-	}
-	int32_t clip_length_ticks(int, int, int) const override { return -1; }
-	bool advance(int, int state_id, int32_t &phase, RootMotionFrame &out) override {
-		if (!has_clip(0, state_id)) return false;
-		++phase;
-		out = RootMotionFrame{};
-		return true;
-	}
-};
+using test_world::DeathClipSource;
 
 void run_ticks(World &world, uint32_t from, uint32_t to_excl) {
 	TickContext ctx;

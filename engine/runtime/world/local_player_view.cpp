@@ -482,7 +482,7 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
     return false;
 }
 
-void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerViewState &v,
+void local_player_view_tick(World *world, PlayerViewState &v,
                             LocalPlayerViewTracker &t, const LocalViewSessionInputs &s) {
 	t.hud_hit_feedback_frames = s.hud_hit_feedback_frames;
 	t.hud_service = s.hud_service;

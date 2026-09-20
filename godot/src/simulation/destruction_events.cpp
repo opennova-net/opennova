@@ -2,16 +2,9 @@
 
 #include "util/axes.h"
 #include "util/record_bind.h"
+#include "util/string_convert.h"
 
 using namespace godot;
-
-namespace {
-
-opennova::world::Vec3 mission_from_godot(const Vector3 &v) {
-	return opennova::world::Vec3{v.x, -v.z, v.y};
-}
-
-} // namespace
 
 // --- DestructionEffectEvent -------------------------------------------------
 
@@ -24,8 +17,8 @@ Ref<DestructionEffectEvent> DestructionEffectEvent::make(const String &p_effect,
 	v.release = p_release;
 	v.bank_slot = static_cast<uint8_t>(p_bank_slot);
 	v.attach_local_pos = { p_local_pos.z, -p_local_pos.x, p_local_pos.y };
-	v.pos = mission_from_godot(p_pos);
-	v.dir = mission_from_godot(p_dir);
+	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
+	v.dir = godot_to_mission<opennova::world::Vec3>(p_dir);
 	v.family = static_cast<uint8_t>(p_family);
 	v.attach_net_id = static_cast<uint16_t>(p_attach_net_id);
 	v.attach_bms_id = p_attach_bms_id;
@@ -37,7 +30,7 @@ Ref<DestructionEffectEvent> DestructionEffectEvent::make(const String &p_effect,
 	return out;
 }
 
-String DestructionEffectEvent::get_effect() const { return String::utf8(value_.effect.c_str()); }
+String DestructionEffectEvent::get_effect() const { return opennova::to_gd(value_.effect); }
 Vector3 DestructionEffectEvent::get_pos() const { return mission_to_godot(value_.pos); }
 Vector3 DestructionEffectEvent::get_dir() const { return mission_to_godot(value_.dir); }
 
@@ -126,7 +119,7 @@ Ref<DestructionDrain> DestructionDrain::make(const TypedArray<HuskSwapEvent> &p_
 	const int64_t lights = MIN(p_death_light_positions.size(), p_death_light_radii.size());
 	for (int64_t i = 0; i < lights; ++i) {
 		opennova::world::DeathLightEvent light;
-		light.pos = mission_from_godot(p_death_light_positions[i]);
+		light.pos = godot_to_mission<opennova::world::Vec3>(p_death_light_positions[i]);
 		light.radius = p_death_light_radii[i];
 		out->value_.death_lights.push_back(light);
 	}
@@ -139,7 +132,7 @@ Ref<DestructionDrain> DestructionDrain::make(const TypedArray<HuskSwapEvent> &p_
 PackedStringArray DestructionDrain::get_sound_names() const {
 	PackedStringArray out;
 	for (const opennova::world::DestructionSoundEvent &s : value_.sounds)
-		out.push_back(String::utf8(s.sound.c_str()));
+		out.push_back(opennova::to_gd(s.sound));
 	return out;
 }
 

@@ -41,11 +41,9 @@ function normalizeManifest(data: unknown): DownloadManifest {
     downloadUrl,
     sizeHuman: pickString(data.size_human) ?? pickString(data.sizeLabel),
     sizeBytes: typeof data.size === 'number' ? data.size : undefined,
-    releaseDate: pickString(data.release_date) ?? pickString(data.releaseDate),
     architecture: pickString(data.architecture) ?? pickString(data.arch),
     description: pickString(data.description),
     releaseNotes: pickString(data.release_notes) ?? pickString(data.releaseNotes),
-    heroImage: pickString(data.hero_image) ?? pickString(data.heroImage),
   };
 }
 

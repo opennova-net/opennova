@@ -1,31 +1,13 @@
 #include "network/nwu_lobby_session.h"
+#include "network/random_id.h"
 #include "util/data_format.h"
 
 #include <net/napi/envelope.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/lobby_vars.h> // parse_host_port + the CU/identity builders
 
-#include <cstring>
-#include <random>
 
 namespace godot {
-
-namespace {
-
-std::vector<uint8_t> from_pba(const PackedByteArray &pba) {
-	std::vector<uint8_t> out(pba.size());
-	if (!out.empty()) {
-		std::memcpy(out.data(), pba.ptr(), out.size());
-	}
-	return out;
-}
-
-uint32_t pick_random_uint32() {
-	static thread_local std::mt19937 gen{std::random_device{}()};
-	return std::uniform_int_distribution<uint32_t>(1)(gen);
-}
-
-} // namespace
 
 bool NwuLobbySession::open() {
 	client_index_ = pick_random_uint32();

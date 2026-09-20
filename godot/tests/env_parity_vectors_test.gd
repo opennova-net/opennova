@@ -526,7 +526,7 @@ func _collect_directions(floats: Dictionary) -> void:
 		floats["dir/t%04d" % t] = [sun.x, sun.y, sun.z, moon.x, moon.y, moon.z]
 
 
-func _collect_weather(bytes: Dictionary, floats: Dictionary) -> void:
+func _collect_weather(bytes: Dictionary) -> void:
 	# WA — still air: the sway spring settling from rest, colors snapped at
 	# noon and stable (target == smoothed after the writeback loop).
 	var env_a := _add_env_node(_make_cfg(0), "EnvWA")
@@ -799,7 +799,7 @@ func _collect_all() -> Array:
 	var floats := {}
 	_collect_env_grid(bytes, floats)
 	_collect_directions(floats)
-	_collect_weather(bytes, floats)
+	_collect_weather(bytes)
 	_collect_sky(bytes, floats)
 	_collect_water_mesh(bytes, floats)
 	_collect_celestial(bytes, floats)

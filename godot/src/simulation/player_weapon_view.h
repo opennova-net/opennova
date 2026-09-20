@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/ref.hpp>
+#include "util/string_convert.h"
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -11,7 +12,7 @@
 namespace godot {
 
 // The local player's equipped-weapon FSM view for one tick (world/weapon_fsm.h,
-// world/local_player_weapon.h), a value wrapper over the engine's
+// world/player_weapon.h), a value wrapper over the engine's
 // LocalPlayerWeaponView the sim fills (Simulation.get_local_player_weapon_state
 // carries the field witnesses; ADR 0043 d10). `active` false = no weapon FSM
 // installed (every other field reads its default). The one static make()
@@ -105,7 +106,7 @@ public:
 	static int forward(int32_t v) { return v; }
 	static bool forward(bool v) { return v; }
 	static float forward(float v) { return v; }
-	static String forward(const std::string &v) { return String::utf8(v.c_str()); }
+	static String forward(const std::string &v) { return opennova::to_gd(v); }
 
 #define PLAYER_WEAPON_VIEW_GETTER(m_type, m_name, m_variant) \
 	m_type get_##m_name() const { return forward(value_.m_name); }

@@ -2258,13 +2258,13 @@ int main(int argc, char *argv[]) {
 	if (!path || !*path) {
 		std::fprintf(stderr,
 		             "usage: nw_pp <capture-path> [--items <items.def>] [--stream] "
-		             "[--histogram] [--sequencing] [--parity-events] "
+		             "[--histogram] [--coverage] [--sequencing] [--parity-events] "
 		             "[--max-frames N] [--skip N] "
 		             "[0xNN ...]\n"
 		             "       path is a .pcap / .pcapng (parsed natively)\n"
 		             "       --histogram emits one machine-readable 'HIST <dir> "
 		             "0x<tag> count=.. bytes=.. name=..' line per (dir,tag) + a "
-		             "TOTAL line (for scripts/net/diff_vs_golden.ps1 + CI)\n"
+		             "TOTAL line\n"
 		             "       --coverage ranks the DECODE BACKLOG: tags present in "
 		             "the capture with no structured decoder yet, by volume\n"
 		             "       --sequencing emits one machine-readable 'PACKET "

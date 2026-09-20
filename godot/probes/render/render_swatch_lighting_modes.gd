@@ -165,17 +165,7 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 	RenderingServer.global_shader_parameter_set(
 			"opennova_static_point_light_rows", static_point_atlas)
 
-	var rows := int(ceil(float(entries.size()) / float(COLS)))
-	var grid_w := COLS * SPACING
-	var grid_h := rows * SPACING
-	var aspect := 1280.0 / 720.0
-	var camera := Camera3D.new()
-	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = maxf(grid_h, grid_w / aspect) + 0.6
-	camera.position = Vector3((COLS - 1) * SPACING * 0.5,
-			-(rows - 1) * SPACING * 0.5, 18.0)
-	camera.current = true
-	scene.add_child(camera)
+	var camera := RenderSwatchSupport.add_grid_camera(scene, entries.size(), COLS, SPACING)
 
 	var captures := {}
 	for state in ["direction_a", "direction_b", "hemi_sky", "hemi_ground",
@@ -401,17 +391,7 @@ func channel_mode(out_dir: String, prefix: String) -> void:
 			"coverage_mesh": coverage_mesh,
 		})
 
-	var rows := int(ceil(float(entries.size()) / float(COLS)))
-	var grid_w := COLS * SPACING
-	var grid_h := rows * SPACING
-	var aspect := 1280.0 / 720.0
-	var camera := Camera3D.new()
-	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = maxf(grid_h, grid_w / aspect) + 0.6
-	camera.position = Vector3((COLS - 1) * SPACING * 0.5,
-			-(rows - 1) * SPACING * 0.5, 18.0)
-	camera.current = true
-	scene.add_child(camera)
+	var camera := RenderSwatchSupport.add_grid_camera(scene, entries.size(), COLS, SPACING)
 
 	var captures := {}
 	var states := ["rgb_low", "rgb_high", "specular_alpha_low",

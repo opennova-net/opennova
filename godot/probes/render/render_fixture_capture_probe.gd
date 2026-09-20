@@ -381,8 +381,7 @@ func _capture(ctx: ProbeContext) -> void:
 				_fail("fixture %s: capture variant %s: %s" % [fixture_id,
 						String(variant.id), String(realization.error)])
 				return
-			var tile_cache_diagnostics: Dictionary = realization.diagnostics
-			var label := "%s-m%04d-%s" % [
+			var label :="%s-m%04d-%s" % [
 				fixture_id, int(minute_value), String(variant.id)]
 			var result: Variant = await adapter.capture_mcp_render_bundle({
 				"label": label,
@@ -621,8 +620,8 @@ func publish_bundle(bundle: Dictionary, output_abs: String, label: String) -> Di
 	var source_state_bytes := FileAccess.get_file_as_bytes(source_state)
 	if source_state_bytes.is_empty():
 		return {"error": "capture state is empty: %s" % source_state}
-	var png_sha256 := RenderFixtureContract.sha256_bytes(png_bytes)
-	var source_state_sha256 := RenderFixtureContract.sha256_bytes(source_state_bytes)
+	var png_sha256 := GameRenderCapture.sha256_hex(png_bytes)
+	var source_state_sha256 := GameRenderCapture.sha256_hex(source_state_bytes)
 	if png_sha256.is_empty() or source_state_sha256.is_empty():
 		return {"error": "could not hash captured bundle bytes"}
 	if String(artifact.get("sha256", "")).to_lower() != png_sha256:
@@ -680,7 +679,7 @@ func publish_bundle(bundle: Dictionary, output_abs: String, label: String) -> Di
 		"png_path": output_png.get_file(),
 		"state_path": output_state.get_file(),
 		"png_sha256": png_sha256,
-		"state_sha256": RenderFixtureContract.sha256_bytes(state_bytes),
+		"state_sha256": GameRenderCapture.sha256_hex(state_bytes),
 		"source_state_sha256": source_state_sha256,
 		"width": int(artifact.get("width", 0)),
 		"height": int(artifact.get("height", 0)),

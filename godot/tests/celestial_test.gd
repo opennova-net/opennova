@@ -161,7 +161,7 @@ func test_glare_keeps_occlusion_brightness_but_fades_from_each_pass_view() -> vo
 				assert_eq(material.get_shader_parameter("u_glare_direction"),
 						fixture.environment.get_sun_direction(),
 						"the glare direction and the getter both serve the "
-						+ "Godot-world vector (env_axes.h swap applied once)")
+						+ "Godot-world vector (util/axes.h swap applied once)")
 
 
 func test_settle_glare_occlusion_reaches_the_dead_band_hold() -> void:
@@ -218,7 +218,7 @@ func test_sun_veil_publishes_the_dot32_alpha_global_when_facing_the_sun() -> voi
 	var env: MissionEnvironment = fixture.environment
 	celestial.settle_glare_occlusion()
 
-	# The getter serves the GODOT-world sun (the env_axes.h swap applies at
+	# The getter serves the GODOT-world sun (the util/axes.h swap applies at
 	# the MissionEnvironment boundary).
 	var sun_dir: Vector3 = env.get_sun_direction()
 	# A near-vertical sun is colinear with the default look_at up vector.

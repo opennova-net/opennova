@@ -115,7 +115,7 @@ func set_weapon_sights(sights: Array[WeaponSightRow], root: ResourceRoot) -> voi
 			row.queue_free()
 	_rows.clear()
 	for e: WeaponSightRow in sights:
-		var tex := _load_texture(root, e.get_texture())
+		var tex := TgaTexture.load_from_root(root, String(e.get_texture()).get_file())
 		if tex == null:
 			continue
 		var row := SightRowControl.new()
@@ -206,13 +206,3 @@ static func _shader_material(code: String) -> ShaderMaterial:
 	return material
 
 
-static func _load_texture(root: ResourceRoot, name: String) -> Texture2D:
-	if root == null or name.is_empty():
-		return null
-	var bytes := root.read_file(name.get_file())
-	if bytes.is_empty():
-		return null
-	var img := Image.new()
-	if img.load_tga_from_buffer(bytes) != OK:
-		return null
-	return ImageTexture.create_from_image(img)

@@ -907,17 +907,6 @@ namespace {
 // axle fit); the exact-constant note rides with it.
 using detail::bam_of_atan2;
 
-// The vehicle-template chase bucket [orig: @0x48D480 interp — {6,8,10,15,20,25,30}].
-inline int16_t watercraft_chase_bucket(int32_t dist) {
-    if (dist < 0x2AAA) return 6;
-    if (dist < 0x4000) return 8;
-    if (dist < 0x5555) return 10;
-    if (dist < 0x8000) return 15;
-    if (dist < 0x10000) return 20;
-    if (dist < 0x20000) return 25;
-    return 30;
-}
-
 } // namespace
 
 namespace detail {
@@ -1015,7 +1004,7 @@ void vehicle_client_chase(Entity &veh) {
             m.net_smooth_heading = io::bam_add(
                     io::bam_sub(m.net_smooth_heading, m.yaw_bam), 10) / 20;
         } else {
-            const int32_t n = watercraft_chase_bucket(dist);
+            const int32_t n = vehicle_chase_bucket(dist);
             m.net_interp_steps = static_cast<int16_t>(n);
             m.net_smooth_target[0] =
                     (int32_t(dx) + (n >> 1)) / n;

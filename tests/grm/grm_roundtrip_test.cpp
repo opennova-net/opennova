@@ -2,11 +2,10 @@
 // written for these tests, with no retail bytes. Its layout follows the
 // witnessed writer @0x588320. Canonical roundtrip compares the complete bytes.
 #include <formats/grm/grm.h>
+#include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
-#include <fstream>
-#include <iterator>
 #include <string>
 #include <vector>
 
@@ -22,8 +21,7 @@ bool parse_text(const std::string &text, grm::File &file, std::string &error) {
 
 int main() {
 	const auto path = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/grm/person.grm";
-	std::ifstream input(path, std::ios::binary);
-	const std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), {}};
+	const std::vector<uint8_t> bytes = test_io::read_file(path);
 	TEST_EXPECT(!bytes.empty());
 	grm::File file;
 	std::string error;

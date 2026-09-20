@@ -102,9 +102,6 @@ public:
 	// the usual `server_list_updated` signal.
 	void refresh_servers();
 
-	// The GSB response's list-wide totals (network/novaworld_server_totals.h;
-	// the service-wide population line the retail browser shows). Zeros until
-	// the first list lands.
 	// The GSB response's list-wide totals: the service-wide server and
 	// player counts the retail browser shows as its population line (zeros
 	// until the first list lands).

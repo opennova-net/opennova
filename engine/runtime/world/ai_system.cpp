@@ -3,9 +3,6 @@
 #include <runtime/world/ai.h>
 #include <runtime/devtools/tick_profile.h>
 
-// Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // The AI event queue and the AiSystem core: registration, per-entity rows, and the
 // tick that drives every handler above.
 

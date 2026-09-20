@@ -13,56 +13,23 @@
 #include <net/novaworld/lobby_session.h>
 
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "client_var_fixture.h"
 #include "common/test_expect.h"
 
 using opennova::LobbySession;
 using opennova::LobbyState;
 using opennova::NapiMessage;
-
-namespace {
-
-// Apply the real migrations so the schema (FKs, indexes, cascade) matches
-// production exactly — same approach as host_prune_test.
-void apply_migrations(opennova::db::Database &db) {
-	const std::string dir = std::string(OPENNOVA_SOURCE_DIR) + "/backend/migrations";
-	for (const char *f : {"0001_initial.sql", "0002_active_hosts.sql",
-	                      "0003_novaworld_status_and_gsb.sql",
-	                      "0004_unknown_messages.sql"}) {
-		std::ifstream in(dir + "/" + f, std::ios::binary);
-		std::ostringstream os;
-		os << in.rdbuf();
-		db.exec_script(os.str());
-	}
-}
-
-NapiMessage make_client_var(const std::string &name, const std::string &value) {
-	NapiMessage v;
-	v.name = "ClientVar";
-	v.fields.push_back({"VarName",  std::vector<uint8_t>(name.begin(),  name.end())});
-	v.fields.push_back({"VarValue", std::vector<uint8_t>(value.begin(), value.end())});
-	return v;
-}
-
-NapiMessage make_client_var_list(const std::string &list_name,
-                                 const std::vector<std::pair<std::string, std::string>> &entries) {
-	NapiMessage l;
-	l.name = "ClientVarList";
-	l.fields.push_back({"VarList", std::vector<uint8_t>(list_name.begin(), list_name.end())});
-	for (const auto &[k, v] : entries) l.children.push_back(make_client_var(k, v));
-	return l;
-}
-
-} // namespace
+using test_novaworld::make_client_var_list;
 
 int main() {
 	opennova::db::Database db(":memory:");
-	apply_migrations(db);
+	// The real migrations, so the schema (FKs, indexes, cascade) matches
+	// production exactly.
+	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 
 	LobbySession sess;
 	sess.set_database(&db);

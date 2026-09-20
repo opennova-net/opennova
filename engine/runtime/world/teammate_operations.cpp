@@ -246,7 +246,6 @@ void TeammateOperations::update(World &world, Slot &slot) {
             slot.state = State::Finished; break;
         }
         animate_patient(world, patient);
-        slot.assisting = 1;
         orient();
         if (dead(*first)) slot.state = State::Treat;
         if (ftol_distance(world, *patient, *first) < 73728) {

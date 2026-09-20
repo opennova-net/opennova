@@ -34,12 +34,6 @@ void ConnectionManager::notify_handshake(Connection conn) {
 	}
 }
 
-void ConnectionManager::notify_active(uint32_t id, std::string identity,
-                                       std::string client_scrk, std::string server_scrk) {
-	registry_.mark_active(id, std::move(identity),
-	                      std::move(client_scrk), std::move(server_scrk));
-}
-
 void ConnectionManager::notify_active_addr(const PeerAddr &addr,
                                             std::string identity,
                                             std::string client_scrk,
@@ -48,19 +42,8 @@ void ConnectionManager::notify_active_addr(const PeerAddr &addr,
 	                              std::move(client_scrk), std::move(server_scrk));
 }
 
-void ConnectionManager::notify_seen(uint32_t id, uint64_t now_ms) {
-	registry_.touch(id, now_ms);
-}
-
 void ConnectionManager::notify_seen_addr(const PeerAddr &addr, uint64_t now_ms) {
 	registry_.touch_addr(addr, now_ms);
-}
-
-void ConnectionManager::notify_logout(uint32_t id) {
-	auto dropped = registry_.drop(id);
-	if (dropped && lost_handler_) {
-		lost_handler_(*dropped, DropReason::Logout);
-	}
 }
 
 void ConnectionManager::notify_logout_addr(const PeerAddr &addr) {

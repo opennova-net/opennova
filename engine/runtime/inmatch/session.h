@@ -135,7 +135,6 @@ enum class FrameStatus : uint8_t {
 };
 
 struct FramePerf {
-	int64_t frame_us = 0;
 	int64_t tick_us = 0;
 	int32_t ticks = 0;
 };

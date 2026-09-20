@@ -255,8 +255,7 @@ void infantry_attachment_select(AiEntity &e, World &world, const InfantryAttachm
         inf.path_state = 0;
         self->flags &= ~0x40000u;
         self->engine_flags &= ~0x40000u;
-        commit_body_state(inf, world.ai.infantry_resolve_state(inf.adm_id, 150),
-                          world.ai.root_motion);
+        commit_body_state(inf, world.ai.infantry_resolve_state(inf.adm_id, 150));
     } else {
         inf.move_mode = 6;
         inf.arrival_radius = 0x10000;

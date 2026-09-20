@@ -2,6 +2,7 @@
 // model registry fed by mounted model-definition loads. Inspection, geometry,
 // and runtime evaluation live in the sibling translation units.
 #include "object/object_data_internal.h"
+#include "util/string_convert.h"
 
 #include <cstring>
 #include <unordered_set>
@@ -32,7 +33,7 @@ NetworkChallengeModelRegistry &network_challenge_model_registry() {
 }
 
 std::string network_challenge_model_key(const String &name) {
-	return std::string(name.get_file().to_lower().utf8().get_data());
+	return opennova::to_std(name.get_file().to_lower());
 }
 
 void register_network_challenge_model(const String &name, bool include) {

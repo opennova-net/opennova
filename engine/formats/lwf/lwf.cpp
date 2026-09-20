@@ -1,5 +1,7 @@
 #include <formats/lwf/lwf.h>
 
+#include <base/io/strutil.h>
+
 #include <algorithm>
 #include <cstring>
 
@@ -76,13 +78,7 @@ bool read_struct(const std::vector<uint8_t> &buf, size_t offset, T &out) {
   return true;
 }
 
-std::string read_c_string(const char *data, size_t max_len) {
-  size_t len = 0;
-  while (len < max_len && data[len] != '\0') {
-    ++len;
-  }
-  return std::string(data, len);
-}
+using strutil::fixed_string;
 
 }  // namespace
 
@@ -220,7 +216,7 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     read_struct(buffer, singles_off + i * sizeof(DiskSingle), ds);
 
     Single s{};
-    s.name = read_c_string(ds.name, sizeof(ds.name));
+    s.name = fixed_string(ds.name, sizeof(ds.name));
     s.value_hi = ds.value_hi;
     s.path_offset = ds.path_offset;
     // Store raw bytes for byte-perfect round-trip.
@@ -244,7 +240,7 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     }
     const char *path_ptr = reinterpret_cast<const char *>(buffer.data() + path_abs);
     const size_t remaining = out.string_pool.size() - path_rel;
-    s.path = read_c_string(path_ptr, std::min<size_t>(remaining, 0x100));
+    s.path = fixed_string(path_ptr, std::min<size_t>(remaining, 0x100));
 
     out.singles.push_back(std::move(s));
   }
@@ -254,7 +250,7 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
   for (uint32_t i = 0; i < raw_multi_header.multi_count; ++i) {
     const DiskMulti &dm = disk_multis[i];
     Multi m{};
-    m.name = read_c_string(dm.name, sizeof(dm.name));
+    m.name = fixed_string(dm.name, sizeof(dm.name));
     m.pitch_base = dm.pitch_base;
     m.pitch_random_range = dm.pitch_random_range;
     m.target_id = dm.target_id;

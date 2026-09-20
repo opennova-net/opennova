@@ -465,8 +465,6 @@ add_test(NAME sbf_compat COMMAND sbf_compat_test
 add_executable(sbf_encode_test sbf/sbf_encode_test.cpp)
 target_link_libraries(sbf_encode_test PRIVATE opennova_formats)
 target_include_directories(sbf_encode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(sbf_encode_test PRIVATE
-    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
 if(NOT MSVC)
     target_link_libraries(sbf_encode_test PRIVATE m)
 endif()
@@ -1223,7 +1221,7 @@ add_test(NAME minimal_particle_gen COMMAND minimal_particle_gen_test)
 # docs/particles/ptl-format-re.md (CParticleDef_ParseFromConfigMap @ 0x5ed210,
 # Jointops.exe IDB).
 foreach(name smallest minimal_effect multi_section multi_layer table_handles
-        smoke_all_fixtures enum_parse writer_roundtrip curve_lut atlas
+        smoke_all_fixtures enum_parse writer_roundtrip curve_lut
         lenient_lines)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_formats)
@@ -2270,9 +2268,6 @@ target_include_directories(nw_host_register_e2e_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server
     ${CMAKE_SOURCE_DIR}/apps/common)
-if(WIN32)
-    target_link_libraries(nw_host_register_e2e_test PRIVATE ws2_32)
-endif()
 add_test(NAME nw_host_register_e2e COMMAND nw_host_register_e2e_test)
 # This is the only test that drives the complete listener lifecycle through
 # real UDP sockets. Its one-second negative/retry receive windows are protocol
@@ -2323,7 +2318,7 @@ add_test(NAME nw204_lobby_decode COMMAND nw204_lobby_decode_test)
 # fixtures, so it runs unconditionally in CI.
 add_executable(nw_pool_decode_unit_test novaworld/nw_pool_decode_unit_test.cpp)
 target_link_libraries(nw_pool_decode_unit_test
-    PRIVATE opennova_net opennova_app_common opennova_base)
+    PRIVATE opennova_net opennova_base)
 target_include_directories(nw_pool_decode_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_pool_decode_unit COMMAND nw_pool_decode_unit_test)
 
@@ -2333,7 +2328,7 @@ add_test(NAME nw_pool_decode_unit COMMAND nw_pool_decode_unit_test)
 # two-session capture.
 add_executable(nw_capture_decoder_test novaworld/nw_capture_decoder_test.cpp)
 target_link_libraries(nw_capture_decoder_test
-    PRIVATE opennova_net opennova_app_common opennova_base)
+    PRIVATE opennova_net opennova_base)
 target_include_directories(nw_capture_decoder_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_capture_decoder COMMAND nw_capture_decoder_test)
 
@@ -2341,12 +2336,12 @@ add_test(NAME nw_capture_decoder COMMAND nw_capture_decoder_test)
 # read_pcap_udp byte-for-byte and honor early-exit (so capture consumers can
 # stream multi-GB captures without loading them into RAM). No fixtures, CI.
 add_executable(nw_pcap_stream_test novaworld/nw_pcap_stream_test.cpp)
-target_link_libraries(nw_pcap_stream_test PRIVATE opennova_app_common opennova_base)
+target_link_libraries(nw_pcap_stream_test PRIVATE opennova_base)
 target_include_directories(nw_pcap_stream_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_pcap_stream COMMAND nw_pcap_stream_test)
 
 add_executable(nw_pcap_writer_test novaworld/nw_pcap_writer_test.cpp)
-target_link_libraries(nw_pcap_writer_test PRIVATE opennova_app_common opennova_base)
+target_link_libraries(nw_pcap_writer_test PRIVATE opennova_base)
 target_include_directories(nw_pcap_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_pcap_writer COMMAND nw_pcap_writer_test)
 
@@ -2390,7 +2385,7 @@ add_test(NAME nw_codec_identity COMMAND nw_codec_identity_test)
 # fixture fails. Regen: `nw_self_capture_test --write-fixture` (justify the delta in-commit).
 add_executable(nw_self_capture_test novaworld/nw_self_capture_test.cpp)
 target_link_libraries(nw_self_capture_test
-    PRIVATE opennova_net opennova_runtime opennova_app_common opennova_base)
+    PRIVATE opennova_net opennova_runtime opennova_base)
 target_include_directories(nw_self_capture_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_self_capture_test PRIVATE
     SELF_CAPTURE_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/novaworld/self-capture-session.pcap")
@@ -2843,13 +2838,15 @@ add_executable(npruntime_two_endpoint_socket_test npruntime/two_endpoint_socket_
 target_include_directories(npruntime_two_endpoint_socket_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(npruntime_two_endpoint_socket_test
     PRIVATE opennova_net opennova_runtime opennova_app_common opennova_base)
-if(WIN32)
-    target_link_libraries(npruntime_two_endpoint_socket_test PRIVATE ws2_32)
-endif()
 add_test(NAME npruntime_two_endpoint_socket COMMAND npruntime_two_endpoint_socket_test)
 
-# weapon.sav player-profile format tests (engine/formats/playersav).
-add_subdirectory(playersav)
+# weapon.sav player-profile parse/serialize tests (engine/formats/playersav).
+# The retail-corpus leg reads the install's weapon.sav (OPENNOVA_JO_DIR) and notes SKIP-LEG without it.
+add_executable(playersav_weapon_sav_test playersav/weapon_sav_test.cpp)
+target_link_libraries(playersav_weapon_sav_test PRIVATE opennova_formats)
+target_include_directories(playersav_weapon_sav_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(playersav_weapon_sav_test PRIVATE cxx_std_17)
+add_test(NAME playersav_weapon_sav COMMAND playersav_weapon_sav_test)
 
 # The in-engine dev tools (ADR 0039, engine/runtime/devtools). The frame-stats
 # board is unconditional; the ImGui pass and game-window test need

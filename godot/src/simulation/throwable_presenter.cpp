@@ -14,6 +14,7 @@
 #include "simulation/effect_owner_keys.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
+#include "util/string_convert.h"
 
 namespace godot {
 
@@ -159,7 +160,7 @@ void ThrowablePresenter::sync_move_effects(
 		// spawns a FRESH group on surfacing. The release is not latched.
 		// [orig: Projectile_UpdatePhysics @0x4ea019..0x4ea03e — the
 		//  ammoFlags & 0x20000000 release arm; the lazy spawn @0x4e9f58]
-		present_move_effect(key, String::utf8(entry.move_effect.c_str()), transform,
+		present_move_effect(key, opennova::to_gd(entry.move_effect), transform,
 				entry.move_effect_live);
 	}
 	Vector<int64_t> gone;

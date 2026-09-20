@@ -228,16 +228,6 @@ const ItemReplicationProfile *ItemReplicationCatalog::by_wire_type(
 	return it == wire_index_.end() ? nullptr : &profiles_[it->second];
 }
 
-WireCompactCodec ItemReplicationCatalog::compact_codec_for(
-		uint16_t wire_type_id) const noexcept {
-	const ItemReplicationProfile *profile = by_wire_type(wire_type_id);
-	return profile == nullptr ? WireCompactCodec::Unresolved : profile->compact_codec;
-}
-
-EntityClass ItemReplicationCatalog::wire_entity_class_for(uint16_t wire_type_id) const noexcept {
-	return resolve_wire_entity_class(wire_type_id).value_or(EntityClass::Unknown);
-}
-
 std::optional<EntityClass> ItemReplicationCatalog::resolve_wire_entity_class(
 		uint16_t wire_type_id) const noexcept {
 	const auto it = wire_class_resolutions_.find(wire_type_id);

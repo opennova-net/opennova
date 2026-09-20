@@ -1,8 +1,7 @@
 #pragma once
 
 // Quadtree LOD traversal for terrain rendering.
-// [orig: jodemo Terrain_TraverseQuadTreeNode @0x5C89C0, Terrain_CollectVisibleSectors @0x5C9120, Terrain_BuildHeightMipChain @0x5C5310]
-// docs/engine_spec_terrain.md 5.3, 7.1
+// [orig: jodemo Terrain_TraverseQuadTreeNode @0x5C89C0, Terrain_CollectVisibleSectors @0x5C9120, Terrain_BuildHeightMipChain @0x5C5310; docs/terrain/terrain-re.md]
 
 #include <cstdint>
 #include <vector>
@@ -77,7 +76,7 @@ struct Mipchain {
 	int level_count = 0;
 };
 
-Mipchain build_mipchain(const std::vector<uint16_t>& heightmap, int atlas_size);
+Mipchain build_mipchain(const std::vector<uint16_t>& heightmap);
 
 // ---------------------------------------------------------------------------
 // Quadtree nodes

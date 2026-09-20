@@ -1,4 +1,5 @@
 #include "mission/mission_info.h"
+#include "util/string_convert.h"
 
 #include <formats/mission/bms.h> // AttribFlags
 
@@ -9,11 +10,11 @@ void MissionInfo::assign(const opennova::mission::MissionInfo &p_value, int p_ga
 	game_mode_ = p_game_mode;
 }
 
-String MissionInfo::get_mission_name() const { return String::utf8(value_.mission_name.c_str()); }
-String MissionInfo::get_designer() const { return String::utf8(value_.designer.c_str()); }
-String MissionInfo::get_briefing() const { return String::utf8(value_.briefing.c_str()); }
-String MissionInfo::get_terrain() const { return String::utf8(value_.terrain.c_str()); }
-String MissionInfo::get_environment() const { return String::utf8(value_.environment.c_str()); }
+String MissionInfo::get_mission_name() const { return opennova::to_gd(value_.mission_name); }
+String MissionInfo::get_designer() const { return opennova::to_gd(value_.designer); }
+String MissionInfo::get_briefing() const { return opennova::to_gd(value_.briefing); }
+String MissionInfo::get_terrain() const { return opennova::to_gd(value_.terrain); }
+String MissionInfo::get_environment() const { return opennova::to_gd(value_.environment); }
 
 Color MissionInfo::get_fog_color() const {
 	return Color(value_.fog_color[0] / 255.0f, value_.fog_color[1] / 255.0f, value_.fog_color[2] / 255.0f);

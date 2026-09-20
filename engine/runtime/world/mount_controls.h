@@ -109,14 +109,6 @@ inline constexpr int32_t kEmplacedTurretSlewPerTick = 0x92CF34;
 inline constexpr int32_t kEmplacedLocalGunnerYawTether = 0x3FFFFFC0;
 inline constexpr int32_t kEmplacedNpcGunnerYawTether = 0x2D82D80;
 
-// Degrees -> BAM clamp bound. A half-arc of 180 or more is the full circle
-// (the "360" gun family) — no effective window; 0 tells callers to skip.
-inline int32_t turret_limit_bam(int16_t degrees) {
-	if (degrees <= 0 || degrees >= 180) return 0;
-	return static_cast<int32_t>(
-			bam_from_degrees_wrapped(static_cast<double>(degrees)));
-}
-
 // The turret-phase limit clamp, transliterated: the 0x1FFFF admission band,
 // second write wins. Retail runs this every entity update so a phase implied
 // beyond the gun's arc pins AT the arc edge — a "180 tripod" barrel can never

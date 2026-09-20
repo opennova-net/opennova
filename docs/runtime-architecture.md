@@ -170,7 +170,7 @@ ship. We do not add a generic renderer interface for a hypothetical backend.
 - terminal tick failure enters `Failed`;
 - idempotent close crosses `Stopping` and ends at `Unloaded`.
 
-`MainGame.State` is only shell/UI mode. `GameWorld._world_ready` is an
+`MainGame.State` is only shell/UI mode. `GameWorld::world_ready_` (behind `is_loaded()`) is an
 installation invariant for Godot render resources, not a competing play state.
 The old `Simulation.loaded_/playing_`, presentation play flag, self-process
 loops, and duck-typed legacy tick path are gone.

@@ -308,7 +308,7 @@ void test_binocular_sway_seeds_once_per_activation() {
         return local_player_binoculars_toggle(lw.w, player.weapon, v, t);
     };
     const auto tick = [&]() {
-        local_player_view_tick(&lw.w, player.weapon, v, t, {});
+        local_player_view_tick(&lw.w, v, t, {});
     };
     uint32_t expected = lw.w.prng16_state;
     CHECK(toggle());
@@ -417,12 +417,11 @@ void test_nvg_over_a_non_inset_scope_leaves_it_alone() {
 
 void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
     LocalWorld lw;
-    LocalPlayerWeapon w = scoped_weapon(0);
     PlayerViewState v;
     LocalPlayerViewTracker t;
     LocalViewSessionInputs s;
     lw.w.logic_tick = 100;
-    local_player_view_tick(&lw.w, w, v, t, s);
+    local_player_view_tick(&lw.w, v, t, s);
     CHECK(v.camera_mode == 0);
     CHECK(v.on_foot);
     CHECK(!v.in_session);
@@ -432,34 +431,33 @@ void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
     // camera computed on the mode-4 entry, both stable while dead.
     lw.w.logic_tick = 101;
     s.local_dead = true;
-    local_player_view_tick(&lw.w, w, v, t, s);
+    local_player_view_tick(&lw.w, v, t, s);
     CHECK(v.local_dead);
     CHECK(v.camera_mode == 4);
     CHECK(v.death_cam.start_tick == 101);
     lw.w.logic_tick = 102;
-    local_player_view_tick(&lw.w, w, v, t, s);
+    local_player_view_tick(&lw.w, v, t, s);
     CHECK(v.camera_mode == 4);
     CHECK(v.death_cam.start_tick == 101); // no re-stamp while dead
     // The movement delta sampler follows the entity between ticks.
     lw.entity().position.x += 2.0f;
-    local_player_view_tick(&lw.w, w, v, t, s);
+    local_player_view_tick(&lw.w, v, t, s);
     CHECK(t.tick_delta[0] == 2.0f);
     CHECK(t.tick_delta[1] == 0.0f);
 }
 
 void test_tick_without_a_player_resolves_first_person() {
     World w;
-    LocalPlayerWeapon weapon = scoped_weapon(0);
     PlayerViewState v;
     v.tp_anchor_valid = true;
     v.mount.control_seat = true;
     LocalPlayerViewTracker t;
     LocalViewSessionInputs s;
-    local_player_view_tick(&w, weapon, v, t, s);
+    local_player_view_tick(&w, v, t, s);
     CHECK(!v.mount.control_seat);
     CHECK(v.camera_mode == 0);
     CHECK(!v.tp_anchor_valid);
-    local_player_view_tick(nullptr, weapon, v, t, s);
+    local_player_view_tick(nullptr, v, t, s);
     CHECK(v.camera_mode == 0);
 }
 
@@ -1034,7 +1032,7 @@ void test_view_uses_current_motor_offset_and_live_position() {
     view.debug_third_person_on_foot = true;
     LocalPlayerViewTracker tracker;
     LocalViewSessionInputs session;
-    local_player_view_tick(&lw.w, w, view, tracker, session);
+    local_player_view_tick(&lw.w, view, tracker, session);
     CHECK(view.tp_anchor[0] == entity.position.x + 0.25f);
     CHECK(view.tp_anchor[1] == entity.position.y - 0.5f);
     CHECK(view.tp_anchor[2] == entity.position.z + 1.5f);

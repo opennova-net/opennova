@@ -18,11 +18,11 @@ const FOLIAGE_MATCH := 254
 
 
 func before_each() -> void:
-	_cleanup_dir(_fixture_root())
+	TestFs.remove_dir_recursive(_fixture_root())
 
 
 func after_each() -> void:
-	_cleanup_dir(_fixture_root())
+	TestFs.remove_dir_recursive(_fixture_root())
 
 
 func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
@@ -174,13 +174,3 @@ func _copy_file(source: String, destination: String) -> void:
 
 func _fixture_root() -> String:
 	return OS.get_cache_dir().path_join("opennova_foliage_game_world_test")
-
-
-func _cleanup_dir(path: String) -> void:
-	if not DirAccess.dir_exists_absolute(path):
-		return
-	for filename in DirAccess.get_files_at(path):
-		DirAccess.remove_absolute(path.path_join(filename))
-	for directory in DirAccess.get_directories_at(path):
-		_cleanup_dir(path.path_join(directory))
-	DirAccess.remove_absolute(path)

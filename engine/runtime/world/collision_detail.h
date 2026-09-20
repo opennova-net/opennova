@@ -1,7 +1,6 @@
 #pragma once
 
-// Internal to engine/runtime/world's collision TUs — not part of world/collision.h. Split
-// out of collision.cpp (quality campaign W3-2); the bodies are unchanged.
+// Internal to engine/runtime/world's collision TUs — not part of world/collision.h.
 //
 // The fixed-point math every collision TU shares: the retail sqrt/ftol chain, the
 // BAM conversion constants, and the two lookups the queries and the resolvers both

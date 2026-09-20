@@ -304,13 +304,13 @@ func _assemble_assets() -> void:
 	# own resource: options/menu + "Avatars" sections [orig: the menu boot @0x552510
 	# -> the menu resource @0x25510F8]).
 	if _text != null:
-		Strings.register_table("menutxt", _text)
+		Strings.register_table(Strings.TABLE_MENUTXT, _text)
 	var gametext := _load_text(game_text_file)
 	if gametext != null:
 		Strings.register_table(Strings.TABLE_GAMETEXT, gametext)
 	var gameui := _load_text(menu_ui_text_file)
 	if gameui != null:
-		Strings.register_table("gameui", gameui)
+		Strings.register_table(Strings.TABLE_GAMEUI, gameui)
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
 
@@ -914,13 +914,9 @@ func _load_doc(file: String) -> MnuDocument:
 
 
 func _load_text(file: String) -> RtxtStringFile:
-	if _root == null or file.is_empty():
+	if file.is_empty():
 		return null
-	var bytes := _root.read_file(file)
-	if bytes.is_empty():
-		return null
-	var t := RtxtStringFile.new()
-	return t if t.load_from_byte_array(bytes) == OK else null
+	return Strings.load_rtxt(_root, file)
 
 
 func _load_style(file: String) -> MnsStyleSheet:
@@ -989,10 +985,6 @@ func get_stylesheet() -> MnsStyleSheet:
 
 func get_resource_root() -> ResourceRoot:
 	return _root
-
-
-func get_music_director() -> MusicDirector:
-	return MusicService.director()
 
 
 func get_current_menu_file() -> String:

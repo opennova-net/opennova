@@ -14,14 +14,8 @@ internal static class GameCatalog
     };
 
     private static IReadOnlyList<GameDefinition> _supportedGames = Array.AsReadOnly(DefaultGames);
-    private static Dictionary<string, GameDefinition> _gamesBySlug = DefaultGames.ToDictionary(g => g.Slug, StringComparer.OrdinalIgnoreCase);
-    private static Dictionary<string, GameDefinition> _gamesByProcessName = DefaultGames.ToDictionary(g => g.ProcessName, StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<GameDefinition> SupportedGames => _supportedGames;
-
-    public static bool TryGetBySlug(string slug, out GameDefinition? definition) => _gamesBySlug.TryGetValue(slug, out definition);
-
-    public static bool TryGetByProcessName(string processName, out GameDefinition? definition) => _gamesByProcessName.TryGetValue(processName, out definition);
 
     public static void ReplaceGames(IEnumerable<GameDefinition> games)
     {
@@ -37,7 +31,5 @@ internal static class GameCatalog
         }
 
         _supportedGames = new ReadOnlyCollection<GameDefinition>(list);
-        _gamesBySlug = list.ToDictionary(g => g.Slug, StringComparer.OrdinalIgnoreCase);
-        _gamesByProcessName = list.ToDictionary(g => g.ProcessName, StringComparer.OrdinalIgnoreCase);
     }
 }

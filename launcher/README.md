@@ -42,7 +42,7 @@ Windows Defender flags some hosts-file edits as `SettingsModifier:Win32/HostsFil
 
 ## Settings
 
-Settings live in `%APPDATA%\OpenNovaLauncher\settings.json`. On first run, settings from the older OnLauncher (`%APPDATA%\OnLauncher\settings.json`) are copied over automatically.
+Settings live in `%APPDATA%\OpenNovaLauncher\settings.json`.
 
 Useful environment overrides:
 

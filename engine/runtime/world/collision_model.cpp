@@ -1,9 +1,6 @@
 #include <base/io/bam.h>
 #include <runtime/world/collision.h>
 
-// Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
-// unchanged, and each original-code citation moved with the code it annotates.
-//
 // CollisionModel bounds and the fixed-point matrix operations: the section AABB /
 // bound-sphere derivation plus the Q22 transform, inverse and pose builders.
 

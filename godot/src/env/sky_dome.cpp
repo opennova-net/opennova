@@ -8,24 +8,13 @@
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/shader.hpp>
 
+#include "env/env_convert.h"
 #include "env/env_file.h"
 #include "env/env_render_camera.h"
 #include "env/mission_environment.h"
 #include "env/weather.h"
 
 namespace godot {
-
-namespace {
-
-Vector3 to_vector3(const opennova::env::Rgb &rgb) {
-	return Vector3(rgb.r, rgb.g, rgb.b);
-}
-
-Vector3 to_vector3(const opennova::env::Vec3 &v) {
-	return Vector3(v.x, v.y, v.z);
-}
-
-} // namespace
 
 void SkyDome::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_environment_path", "path"),

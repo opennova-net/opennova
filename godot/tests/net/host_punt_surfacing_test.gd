@@ -54,20 +54,6 @@ var _temp_dir := ""
 var _shell: Node = null
 
 
-# The screen's narrow world view, faked over the loopback joiner sim and the
-# staged menu root (rule 11: a fake of the WorldView interface through its virtual hooks).
-class FakeWorldView:
-	extends WorldView
-	var root: ResourceRoot
-	var sim_value: Simulation
-
-	func _sim() -> Simulation:
-		return sim_value
-
-	func _resource_root() -> ResourceRoot:
-		return root
-
-
 func before_each() -> void:
 	Strings.clear()
 	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
@@ -76,18 +62,11 @@ func before_each() -> void:
 	# A shell booted here must see no launch flags: the GUT process carries none,
 	# and the override guards against a sibling test leaving one behind.
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	if not DirAccess.dir_exists_absolute(dir):
-		assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
-	for rel in STAGED_FIXTURES:
-		_copy_fixture(RetailData.fixture(rel), dir.path_join(STAGED_FIXTURES[rel]))
+	PresenterFixture.stage(self, TMP_DIR, STAGED_FIXTURES)
 
 
 func should_skip_script():
-	for rel in STAGED_FIXTURES:
-		if RetailData.fixture(rel).is_empty():
-			return RetailData.fixture_pending_text(rel)
-	return false
+	return RetailData.fixtures_skip(STAGED_FIXTURES.keys())
 
 
 func after_each() -> void:
@@ -112,47 +91,15 @@ func after_each() -> void:
 		TestFs.remove_dir_recursive(_temp_dir)
 		_temp_dir = ""
 	LaunchFlags.clear_args_override()
-	if _had_config:
-		var file := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
-		if file != null:
-			file.store_buffer(_saved_config)
-			file.close()
-	elif FileAccess.file_exists(STATE_CONFIG_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+	TestFs.restore_file(STATE_CONFIG_PATH, _had_config, _saved_config)
 
 
 func after_all() -> void:
-	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	for name in STAGED_FIXTURES.values():
-		var path := dir.path_join(name)
-		if FileAccess.file_exists(path):
-			DirAccess.remove_absolute(path)
-	DirAccess.remove_absolute(dir)
+	PresenterFixture.unstage(TMP_DIR, STAGED_FIXTURES)
 	var zone_def := ProjectSettings.globalize_path(
 			"res://.godot/host_punt_spawn_zone_items.def")
 	if FileAccess.file_exists(zone_def):
 		DirAccess.remove_absolute(zone_def)
-
-
-func _copy_fixture(source: String, target: String) -> void:
-	var output := FileAccess.open(target, FileAccess.WRITE)
-	assert_not_null(output, "temporary deploy-screen fixture opens for write")
-	if output != null:
-		output.store_buffer(FileAccess.get_file_as_bytes(source))
-		output.close()
-
-
-func _make_root() -> ResourceRoot:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(TMP_DIR)), OK)
-	return root
-
-
-func _anim_root() -> ResourceRoot:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/anim")), OK)
-	return root
 
 
 func _spawn_zone_item_db() -> ItemDatabase:
@@ -214,7 +161,7 @@ func _join_pair_with_pending_pick() -> Dictionary:
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	assert_true(host.spawn_local_player(Vector3(5, 0, 5), 0.0, 1))
-	var host_anim := _anim_root()
+	var host_anim := PresenterFixture.anim_root(self)
 	assert_gt(host.set_infantry_anim_map(host_anim, "soldier.adm"), 0)
 	host.resolve_item_traits(item_db)
 	host.resolve_infantry_adm_ids(host_anim, item_db)
@@ -224,7 +171,7 @@ func _join_pair_with_pending_pick() -> Dictionary:
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "PuntJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
-	var joiner_anim := _anim_root()
+	var joiner_anim := PresenterFixture.anim_root(self)
 	assert_gt(joiner.set_infantry_anim_map(joiner_anim, "soldier.adm"), 0)
 	joiner.resolve_item_traits(item_db)
 	joiner.resolve_infantry_adm_ids(joiner_anim, item_db)
@@ -283,8 +230,8 @@ func test_shell_returns_a_punted_deploy_screen_to_the_menu() -> void:
 	var deploy_host: DeployScreenPresenter = deploy_hosts[0]
 	var shell_world = _shell.get_node("World")
 	var pair := _join_pair_with_pending_pick()
-	var view := FakeWorldView.new()
-	view.root = _make_root()
+	var view := PresenterFixture.FakeWorldView.new()
+	view.root = PresenterFixture.root_over(self, TMP_DIR)
 	view.sim_value = pair.joiner
 	deploy_host.setup(view, _shell.get_node("HUD"))
 	assert_true(deploy_host.open(), "the shell's deploy screen opens over the join")
@@ -314,8 +261,8 @@ func _make_menu_shell():
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_host_punt_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
-	_write_pff(_temp_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
-	_write_pff(_temp_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
+	WorldFixture.write_pff(self, _temp_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
+	WorldFixture.write_pff(self, _temp_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _temp_dir]))
 	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game("jo")
@@ -338,7 +285,3 @@ func _fixture_entries(filenames: Array) -> Array:
 		assert_false(bytes.is_empty(), "%s is available in the committed fixture" % filename)
 		entries.append({"name": filename, "bytes": bytes})
 	return entries
-
-
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)

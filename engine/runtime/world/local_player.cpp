@@ -44,7 +44,6 @@ w::AiEntity *LocalPlayer::player_ai() {
 }
 
 w::Vec3 LocalPlayer::player_position() const {
-	const World &world = world_;
 	const w::Entity *e = player();
 	return e != nullptr ? e->position : w::Vec3{};
 }
@@ -58,7 +57,6 @@ std::string LocalPlayer::player_anim_key() const {
 }
 
 int32_t LocalPlayer::player_health() const {
-	const World &world = world_;
 	const w::Entity *e = player();
 	return e != nullptr ? e->health : 0;
 }
@@ -136,7 +134,6 @@ void LocalPlayer::set_view_keys(bool free_look, bool up, bool down, bool left, b
 }
 
 bool LocalPlayer::request_stance(int stance) {
-	World &world = world_;
 	if (stance < 0 || stance > 2) return false;
 	// ForceCrouch weapons refuse stance changes [orig: the case-169/170/172
 	// gate Entity_CheckWeaponSeatFlags(equipped, 0x40000) @0x4e0d8a].
@@ -193,7 +190,6 @@ void LocalPlayer::look(float dx_px, float dy_px) {
 }
 
 void LocalPlayer::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {
-	World &world = world_;
 	const double dx = target.x - eye.x, dy = target.y - eye.y, dz = target.z - eye.z;
 	const double horizontal = std::sqrt(dx * dx + dy * dy);
 	input.look_heading = io::bam_from_radians(std::atan2(dy, dx));
@@ -205,7 +201,6 @@ void LocalPlayer::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {
 }
 
 void LocalPlayer::teleport_local_player(const w::Vec3 &mission_pos, double yaw_deg, double pitch_deg) {
-	World &world = world_;
 	w::Entity *e = player();
 	w::AiEntity *p = player_ai();
 	if (e == nullptr || p == nullptr) return;
@@ -229,7 +224,6 @@ void LocalPlayer::teleport_local_player(const w::Vec3 &mission_pos, double yaw_d
 }
 
 void LocalPlayer::set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed) {
-	World &world = world_;
 	w::local_weapon_set_input(weapon, view, fire_held, fire_pressed, reload_pressed);
 }
 
@@ -347,13 +341,11 @@ bool LocalPlayer::local_player_dead() const {
 }
 
 void LocalPlayer::stamp_medic_request() {
-	World &world = world_;
 	medic_request_cooldown_ticks = kMedicRequestCooldownTicks;
 	++medic_request_serial;
 }
 
 void LocalPlayer::tick_medic_cooldown(bool local_dead) {
-	World &world = world_;
 	if (local_dead && !medic_dead_edge_seen_) medic_request_cooldown_ticks = 0;
 	medic_dead_edge_seen_ = local_dead;
 	if (medic_request_cooldown_ticks > 0) --medic_request_cooldown_ticks;
@@ -523,7 +515,7 @@ void LocalPlayer::run_local_player_post_tick() {
 
 void LocalPlayer::tick_view() {
 	World &world = world_;
-	w::local_player_view_tick(&world, weapon, view, view_tracker, view_session_inputs);
+	w::local_player_view_tick(&world, view, view_tracker, view_session_inputs);
     update_aim_target();
 }
 
@@ -578,7 +570,6 @@ void LocalPlayer::reset_local_player_input_to_player_facing() {
 }
 
 void LocalPlayer::reset_local_player_input(int32_t look_heading_bam) {
-	World &world = world_;
 	input = w::PlayerInput{};
 	stance_latch_ = 0;
 	look_accum_x_ = look_accum_y_ = 0.0f;

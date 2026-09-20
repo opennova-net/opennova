@@ -52,7 +52,6 @@ const char *glass_userpoint_for_graphic(const std::string &graphic) {
 void CollisionResolveState::clear() {
 	model_by_graphic.clear();
 	occlusion_by_graphic.clear();
-	radius_by_graphic.clear();
 	radius_q16_by_graphic.clear();
 	collision_block_by_graphic.clear();
 	half_xy_by_graphic.clear();
@@ -89,7 +88,6 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 	if (it != state.model_by_graphic.end()) return it->second;
 	int32_t model_id = -1;
 	int32_t occlusion_id = -1;
-	float bound_radius = 0.0f;
 	int32_t bound_radius_q16 = 0;
 	bool has_collision_block = false;
 	std::pair<float, float> half_xy{0.0f, 0.0f};
@@ -114,7 +112,6 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 			if (world::occlusion_model_from_3di(*m3, occ))
 				occlusion_id = deps.occlusion.add_model(std::move(occ));
 			bound_radius_q16 = world::model_bound_radius_q16_from_3di(*m3);
-			bound_radius = static_cast<float>(bound_radius_q16) / 65536.0f;
 			// The minimap blip-size source: the CMDL bound-block ground-axis
 			// half extents. [orig: draw_minimap_blip @0x5979a2..0x5979b8 —
 			//  model+176: half = (max - min) >> 1 per ground axis]
@@ -146,7 +143,6 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 	}
 	state.model_by_graphic.emplace(graphic_key, model_id);
 	state.occlusion_by_graphic.emplace(graphic_key, occlusion_id);
-	state.radius_by_graphic.emplace(graphic_key, bound_radius);
 	state.radius_q16_by_graphic.emplace(graphic_key, bound_radius_q16);
 	state.collision_block_by_graphic.emplace(graphic_key, has_collision_block);
 	state.half_xy_by_graphic.emplace(graphic_key, half_xy);
@@ -254,8 +250,6 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 			int32_t husk_bound_q16 = 0;
 			if (const Threedi3di3 *husk = deps.models.model(husk_key).get()) {
 				husk_bound_q16 = world::model_bound_radius_q16_from_3di(*husk);
-				state.radius_by_graphic.emplace(
-						husk_key, static_cast<float>(husk_bound_q16) / 65536.0f);
 			}
 			radius_it = state.radius_q16_by_graphic.emplace(
 					husk_key, husk_bound_q16).first;
@@ -784,9 +778,6 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 							world::model_bound_radius_q16_from_3di(*piece_m3);
 					state.radius_q16_by_graphic.emplace(
 							piece_key, piece_bound_q16);
-					state.radius_by_graphic.emplace(
-							piece_key,
-							static_cast<float>(piece_bound_q16) / 65536.0f);
 				}
 			}
 			if (world::ItemDeathTraits *t =

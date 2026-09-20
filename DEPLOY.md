@@ -230,8 +230,9 @@ Expansions appear in the web Expansions page and the launcher's Expansion Manage
 as soon as their catalogue row is seeded (the Terraform-generated
 `backend/seed/0002_expansions.generated.sql`) — but that's metadata only. The
 downloadable file is written by **cutting a release**, which is separate. Until
-you do, the launcher shows the expansion as "Not published yet" (Install disabled)
-and the web page omits its Download button.
+you do, the launcher shows the expansion as "Not published yet" (Install disabled).
+The web page lists the expansion either way: it never offers a direct download,
+installs go through the launcher.
 
 To publish one (e.g. the `onjo01` demo mod), with the admin token from the vault:
 

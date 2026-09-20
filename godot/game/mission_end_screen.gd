@@ -102,17 +102,11 @@ func _add_line(column: VBoxContainer, text: String, value: String, size: int) ->
 # plain dim, never a load failure.
 # [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
 func _add_backdrop(root: ResourceRoot, image_name: String) -> void:
-	if root == null:
-		return
-	var bytes: PackedByteArray = root.read_file(
-			image_name, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
-	if bytes.is_empty():
-		return
-	var img := Image.new()
-	if img.load_tga_from_buffer(bytes) != OK:
+	var backdrop := TgaTexture.load_from_root(root, image_name, true)
+	if backdrop == null:
 		return
 	var tex := TextureRect.new()
-	tex.texture = ImageTexture.create_from_image(img)
+	tex.texture = backdrop
 	tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	tex.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	tex.modulate.a = 0.85

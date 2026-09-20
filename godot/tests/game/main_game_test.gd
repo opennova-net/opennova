@@ -573,7 +573,7 @@ func _make_packed_shell(game_code: String):
 		"name": POLICY_FILE,
 		"bytes": _scr_wrap_default_key(POLICY_PLAIN.to_utf8_buffer(), 1),
 	})
-	_write_pff(_temp_dir.path_join("resource.pff"), entries)
+	WorldFixture.write_pff(self, _temp_dir.path_join("resource.pff"), entries)
 
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _temp_dir]))
 	ResourceDirSettings.set_expansion("")
@@ -615,8 +615,3 @@ func _scr_wrap_default_key(plain: PackedByteArray, version: int) -> PackedByteAr
 	for index in range(payload.size()):
 		out[4 + index] = payload[payload.size() - 1 - index]
 	return out
-
-
-# The shared PFF3 fixture writer (TestPff.write), asserted here.
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)

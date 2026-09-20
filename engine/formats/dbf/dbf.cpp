@@ -14,14 +14,7 @@ namespace dbf {
 
 namespace {
 
-std::string read_cstring(const char *data, size_t max_len) {
-	size_t len = 0;
-	while (len < max_len && data[len] != '\0') {
-		++len;
-	}
-	return std::string(data, len);
-}
-
+using opennova::strutil::fixed_string;
 using opennova::strutil::iequals;
 
 }  // namespace
@@ -73,7 +66,7 @@ bool parse_dbf_memory(const uint8_t *data, size_t size, File &out, std::string &
 		}
 
 		Group group;
-		group.group_name = read_cstring(raw_group.group_name, sizeof(raw_group.group_name));
+		group.group_name = fixed_string(raw_group.group_name, sizeof(raw_group.group_name));
 		group.idlist_count = raw_group.idlist_count;
 		group.def_id_indices.assign(raw_group.def_id_indices,
 				raw_group.def_id_indices + sizeof(raw_group.def_id_indices));
@@ -90,8 +83,8 @@ bool parse_dbf_memory(const uint8_t *data, size_t size, File &out, std::string &
 
 			Line line;
 			line.line_flags = raw_line.line_flags;
-			line.def_id_name = read_cstring(raw_line.def_id_name, sizeof(raw_line.def_id_name));
-			line.sequence = read_cstring(raw_line.sequence, sizeof(raw_line.sequence));
+			line.def_id_name = fixed_string(raw_line.def_id_name, sizeof(raw_line.def_id_name));
+			line.sequence = fixed_string(raw_line.sequence, sizeof(raw_line.sequence));
 			line.def_id_index = raw_line.def_id_index;
 			line.delay = raw_line.delay;
 			line.param = raw_line.param;

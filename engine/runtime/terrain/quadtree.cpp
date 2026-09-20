@@ -3,7 +3,6 @@
 #include <runtime/terrain/quadtree.h>
 
 // [orig: jodemo Terrain_TraverseQuadTreeNode @0x5C89C0, Terrain_CollectVisibleSectors @0x5C9120, Terrain_BuildHeightMipChain @0x5C5310; docs/terrain/terrain-re.md]
-// docs/engine_spec_terrain.md 5.3, 7.1
 
 #include <runtime/terrain/foliage_detail_collector.h>
 
@@ -171,7 +170,7 @@ NodeCull cull_node(const QuadNode& node, const TerrainViewCull& cull,
 // Mipchain — port of gobj_trn_build_heightmap_mipchain (0x10030C91)
 // ---------------------------------------------------------------------------
 
-Mipchain build_mipchain(const std::vector<uint16_t>& heightmap, int atlas_size) {
+Mipchain build_mipchain(const std::vector<uint16_t>& heightmap) {
 	Mipchain mc;
 	mc.data.resize(699052, 0);
 	uint8_t* write_ptr = mc.data.data();

@@ -54,6 +54,8 @@
 #include <runtime/renderer/material_descriptor.h>
 #include <formats/threedi/threedi_3di3.h>
 
+#include "common/file_io.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -593,15 +595,12 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	std::ifstream in(golden_path, std::ios::binary);
-	if (!in) {
+	std::string golden;
+	if (!test_io::read_file_text(golden_path, golden)) {
 		std::cerr << "FAIL: golden missing: " << golden_path << "\n"
 		          << "Initial dump: rerun with --dump.\n";
 		return 1;
 	}
-	std::stringstream buf;
-	buf << in.rdbuf();
-	const std::string golden = buf.str();
 
 	if (golden == generated) {
 		std::cerr << "renderer_state_vectors ok ("

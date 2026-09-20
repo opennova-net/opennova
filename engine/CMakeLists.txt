@@ -5,14 +5,14 @@
 #
 #   opennova_io                 INTERFACE  base/io (byte/bit IO, fixed-point, strutil)
 #   opennova_crt                STATIC     base/crt (retail-parity MSVC CRT rand stream)
-#   opennova_formats            STATIC     formats/* + the mission_format half of
-#                                          runtime/mission (see engine/formats/CMakeLists.txt)
+#   opennova_formats            STATIC     formats/*, including formats/mission (the
+#                                          mission document model; its runtime half
+#                                          is runtime/mission)
 #   opennova_base               STATIC     base/{vfs,resource_index,gameprofile,pcapio}
 #   opennova_net                STATIC     net/* — the wire: novacrypto, napi, npwire,
 #                                          the novaworld session/gate legs
-#   opennova_runtime            STATIC     runtime/* (minus the mission_format sources),
-#                                          including the in-match session and
-#                                          replication (ADR 0043 d4)
+#   opennova_runtime            STATIC     runtime/*, including the in-match session
+#                                          and replication (ADR 0043 d4)
 #   opennova_novaworld_service  STATIC     the novaworld service leg — the ONLY
 #                                          target that links opennova_sqlite
 #

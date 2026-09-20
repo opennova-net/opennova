@@ -17,6 +17,7 @@
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
+#include "util/string_convert.h"
 
 namespace godot {
 
@@ -191,7 +192,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 			Vector3 glow_pos = mission_to_godot(ev.origin);
 			if (ev.adm_arm) {
 				const Vector3 glow_anchor = owner_->muzzle_world_for(
-						ev.shooter_handle, String::utf8(ev.action_userpoint.c_str()));
+						ev.shooter_handle, opennova::to_gd(ev.action_userpoint));
 				if (glow_anchor.is_finite()) {
 					glow_pos = glow_anchor;
 				}
@@ -208,7 +209,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 		}
 		++stat_fires_;
 		Vector3 origin = mission_to_godot(ev.origin);
-		String effect = String::utf8(ev.effect.c_str());
+		String effect = opennova::to_gd(ev.effect);
 		// THE ARM SPLIT. Retail's round-event receive path has two mutually exclusive
 		// arms and only one of them is the ammo-def pair. The adm-indexed arm spawns
 		// no ammo-def effect: it executes the ADDRESSED def's FIRE action row
@@ -220,7 +221,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 		// [orig: arms @0x42f521 / @0x42f6ce; ammo effect @0x42f6c2;
 		//  the fire row @0x42f777 / @0x42f98f]
 		if (ev.adm_arm) {
-			effect = String::utf8(ev.action_effect.c_str());
+			effect = opennova::to_gd(ev.action_effect);
 			// The anchor: this shooter's held weapon, not the wire point — the
 			// rendered gun's own userpoint, which is what retail spawns at (the
 			// authority DECISION closing the S12a shadow seam: the rendered-node
@@ -230,7 +231,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 			// body-origin fallback — retail's deepest fallback is the entity
 			// origin [orig: @0x401867..0x401887].
 			const Vector3 anchored = owner_->muzzle_world_for(
-					ev.shooter_handle, String::utf8(ev.action_userpoint.c_str()));
+					ev.shooter_handle, opennova::to_gd(ev.action_userpoint));
 			if (anchored.is_finite()) {
 				origin = anchored;
 			}
@@ -260,8 +261,8 @@ void FirePresenter::present_fire_sounds(const std::vector<opennova::world::Ready
 		return;
 	}
 	for (const opennova::world::ReadyFireSound &row : p_sounds) {
-		if (row.interface_set) audio_node->ui_soundset(String::utf8(row.set_name.c_str()));
-		else audio_node->fire_soundset(String::utf8(row.set_name.c_str()), mission_to_godot(row.pos),
+		if (row.interface_set) audio_node->ui_soundset(opennova::to_gd(row.set_name));
+		else audio_node->fire_soundset(opennova::to_gd(row.set_name), mission_to_godot(row.pos),
 				row.source_bms_id, static_cast<int>(row.sound_id));
 		++stat_sounds_;
 	}

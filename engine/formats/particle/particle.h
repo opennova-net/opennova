@@ -319,43 +319,4 @@ void bake_particle_def_curves(ParticleDef &def,
 // Idempotent — calling it multiple times overwrites the same entries.
 void bake_graphic_uv_rects(GraphicLayer &layer) noexcept;
 
-// Per-layer source-texture dimensions used as input to `bake_atlas_layout`.
-// `width == 0 || height == 0` marks the layer as absent for atlas purposes
-// (texture missing or layer unused), in which case the layer's
-// `baked_uv_rects` are reset to the horizontal-strip default.
-struct AtlasInputSize {
-	int width = 0;
-	int height = 0;
-};
-
-struct AtlasBakeOptions {
-	int gutter_pixels = 0;
-};
-
-// Result of `bake_atlas_layout`. With default options, `atlas_width = sum of
-// present layer widths` and `atlas_height = max of present layer heights`.
-// `layer_x_offset[i]` is the pixel x-offset within the atlas where layer i's
-// content begins (0 if layer absent). When gutters are enabled, this offset
-// skips the leading gutter.
-struct AtlasLayout {
-	int atlas_width = 0;
-	int atlas_height = 0;
-	std::array<int, 4> layer_x_offset{};
-};
-
-// Compute atlas regions for each present graphic layer using a horizontal
-// shelf pack (layers laid left-to-right; atlas height = max layer height,
-// plus optional gutters).
-// Updates each present layer's `baked_uv_rects` to use atlas-relative
-// coordinates instead of full-texture (0..1)x(0..1). Layers with
-// `width == 0 || height == 0` are treated as absent and have their rects
-// reset to horizontal-strip defaults via `bake_graphic_uv_rects`.
-//
-// Engine ref: CParticleManager_BuildTextureAtlases @ 0x5e8db0 (semantic
-// mirror; the engine's exact pack layout is not decoded, but the resulting
-// atlas-coordinate UV rect data shape matches).
-AtlasLayout bake_atlas_layout(ParticleDef &def,
-		const std::array<AtlasInputSize, 4> &sizes,
-		AtlasBakeOptions options = {}) noexcept;
-
 } // namespace opennova::particle

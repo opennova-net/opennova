@@ -10,6 +10,8 @@
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/world.h>
 
+#include "common/file_io.h"
+
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -69,11 +71,7 @@ public:
 		};
 		source.read_file = [root](const std::string &name,
 									  std::vector<uint8_t> &out) {
-			std::ifstream input(root / name, std::ios::binary);
-			if (!input) return false;
-			out.assign(std::istreambuf_iterator<char>(input),
-					std::istreambuf_iterator<char>());
-			return true;
+			return test_io::read_file((root / name).string(), out);
 		};
 		return source;
 	}

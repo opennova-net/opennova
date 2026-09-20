@@ -140,9 +140,7 @@ int main(int argc, char **argv) {
 	}
 	std::vector<uint8_t> committed;
 	if (!expect(test_io::read_file(path, committed), "committed fixtures/sbf/synth_gamemus.sbf missing; run with --write")) return 1;
-	static const char kLfsSentinel[] = "version https://git-lfs";
-	if (committed.size() >= sizeof(kLfsSentinel) - 1 &&
-	    std::memcmp(committed.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0) {
+	if (test_io::is_lfs_pointer(committed)) {
 		std::printf("[skip] synth_gamemus.sbf is an unpulled LFS pointer\n");
 		return 0;
 	}

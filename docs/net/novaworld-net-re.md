@@ -405,7 +405,7 @@ sweep; blank = not yet characterized.
 | 0x52 | 0x428A80 | `_0x052` | **DEATH-CAMERA TARGET (decoded + PORTED 2026-08-22)** — exact 12-B `[i32 x][i32 y][i32 z]`; short reads zero-fill in retail. `GameEvent_PlayerDeath @0x516DD0` targets the victim only (mask 0x20) with the killer entity's fixed XYZ when present, otherwise the victim's. The client stores the triple in `dword_A860E0/E4/E8`; `Camera_ComputeThirdPersonPositions @0x438B80` consumes it — **consumer PORTED 2026-08-24** (`world/death_camera.h`, the §5.39 mode-4 addendum): the arbiter's mode 4 computes the FROM/TO poses from the player and this anchor and the view lerps between them over 128 ticks. Retail capture confirms `0x13 → 0x52 → 0x1E` ordering (§5.60) |
 | 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 curTeam][u8 capturingTeam→entity+547][u16 progress][u16 limit][u8 rate], ×62 s→ticks; the timed-capture channel — server emits from `Server_UpdateCaptureZones @0x53B8F0` ×4 (`NetPacket_WriteZoneTimerWindow @0x506D00`). Client map §5.49, producer §5.61 |
 | 0x54 | 0x429040 | `_0x054` | **PLAYER-DOWNED STATE (decoded + player-death route PORTED 2026-08-22)** — exact 3-B `[u16 entityHandle][u8 state]`; client resolves entity→player slot then `PlayerSlot_SetDownedState @0x4348D0` (was `PlayerSlot_SetTypeAndSubtype`; D-NET-216) splits `state&0x7F` into slot+16 (whole-second revive window) and `state>>7` into slot+44 (explicit medic-request latch); the window then counts down CLIENT-side at 1 Hz — `Client_ProcessNetworkFrame @0x42C27E..0x42C2DA`: `g_slotRefreshTimer @0xA85B80` +1 per frame, past 62 every active slot with an entity and `slot+16 > 0` gets `PlayerSlot_SetDownedState(slot+16 − 1, slot+44)`, timer reset (PORTED 2026-08-24 `ClientRuntime::tick_roster_revive_countdown`; consumer = the friendly tag's downed legs, hud-re.md D-HUD-20). Death arms 120 seconds only for a non-self killer and flags `&0xC00==0`; Auto Medic sends 120 to in-match (slot state 6/7 — no health/dead test, a dead medic stays a recipient) same-team Medic-class recipients, manual mode sends them 0 and the victim 120. Also emitted by revive/request paths (§5.60; D-NET-108) |
-| 0x56 | 0x431D10 | `_0x056` | END-OF-ROUND STAT BOARD, pulled in ≤200-byte chunks: `[u16 totalSize][u16 chunkOffset][chunk]` written into `g_scoreReassemblyStream @0xA82324` at the offset (offset 0 resets the stream `@0x431d79`); while `offset + len < total` the client asks for the next chunk with C2S 0x2B `[u16 offset + len]` `@0x431dc4`, and on completion parses the board (§5.68) and raises `g_scoreboardDirty @0xA81B28` `@0x4321be` — the stat.mnu trigger. READS `g_spawn_success_gate` as its gate `@0x431d33` (never writes it). Codec, host request service, client pull/fold, and multi-chunk continuation ported 2026-08-22; the stat.mnu surface PORTED 2026-08-24 (`npruntime/stat_screen_feed.h` per `populate_stat_results_list @0x562240`, `EndRoundPresenter` over the in-tree `fixtures/mnu/jo_stat.mnu`) — the toggled `HUD_DrawEndRoundStatistics @0x5b7600` Show Score panel (`g_showEndRoundStatistics @0x24C18AC`, action 422 = catalog row 99 `ShowScore`) is ported (`hud/end_round_statistics.h`) |
+| 0x56 | 0x431D10 | `_0x056` | END-OF-ROUND STAT BOARD, pulled in ≤200-byte chunks: `[u16 totalSize][u16 chunkOffset][chunk]` written into `g_scoreReassemblyStream @0xA82324` at the offset (offset 0 resets the stream `@0x431d79`); while `offset + len < total` the client asks for the next chunk with C2S 0x2B `[u16 offset + len]` `@0x431dc4`, and on completion parses the board (§5.68) and raises `g_scoreboardDirty @0xA81B28` `@0x4321be` — the stat.mnu trigger. READS `g_spawn_success_gate` as its gate `@0x431d33` (never writes it). Codec, host request service, client pull/fold, and multi-chunk continuation ported 2026-08-22; the stat.mnu surface PORTED 2026-08-24 (`engine/runtime/inmatch/stat_screen_feed.h` per `populate_stat_results_list @0x562240`, `EndRoundPresenter` over `mnu/jo_stat.mnu` from the reference fixture set, `OPENNOVA_JO_ASSETS/fixtures/`) — the toggled `HUD_DrawEndRoundStatistics @0x5b7600` Show Score panel (`g_showEndRoundStatistics @0x24C18AC`, action 422 = catalog row 99 `ShowScore`) is ported (`hud/end_round_statistics.h`) |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
 | 0x58 | 0x4228C0 | `_SessionStatus` | SESSION-STATUS block (NOT a texture loader — kong `TerrainTexDef_ParseFromBuffer` renamed `SessionStatus_ParseFromBuffer @0x530ED0`): server/mission names + up-time sync + the 39 STROVER_STATVAR scoring rules + kv pairs → g_session_status (end-game stats/loading screen/admin UP-TIME). Field map §5.48 (decoded) |
 | 0x59 | 0x4228E0 | `_0x059` | deployed-item / weapon-overlay spawn (32 B): item ids + owner + slot + parent + 3×i32 pos + 3×u16 ang (§5.36) |
@@ -693,7 +693,7 @@ unconditionally, so every ported consumer runs the MP arm in single player (`Net
 has no 0 value either). Not flipped in this pass: the consumers must be audited one by one
 against their SP arms first (the retail SP loop shape under `is_in_session = 0` is the
 open question for the "in-process listen server" reading above). Cross-check: the jo-c
-reconstruction observed the same six words live (`docs/native-frontend-278.md`).
+reconstruction observed the same six words live.
 
 Reimpl: `HostRole::bring_up_singleplayer` (`engine/runtime/inmatch/host_role.cpp`) builds the SP
 `GameConfig` with SINGLEPLAYERGAME / `mp_attributes = 0x3A06` / `max_players = 1`, mirrored by the
@@ -967,7 +967,7 @@ of each alignment and clears both explicit voice overrides; `apply_session_setti
 at `CI0=0x0200, CI1=0x8207, VCA=1, VCB=10`; the captured `VCB=4` is a saved profile voice override.
 
 **OpenNova mapping.** `LanSession` owns only UDP broadcast/receive and normalized endpoint rows;
-the socket-free probe/reply projection lives in `engine/runtime/inmatch/lan_discovery`. Selecting a row enters
+the socket-free probe/reply projection lives in `engine/net/npwire/lan_discovery`. Selecting a row enters
 the same `ClientRuntime` used by direct joins. The pre-load driver holds that runtime at its
 world-ready boundary until `0x7B` identifies an installed `.bms`, so discovery, authentication,
 mission load, and gameplay never require a reconnect or an invented metadata field.
@@ -8888,7 +8888,7 @@ by `mission/promote.cpp`) / `zone_control` / `is_capture_trigger` / `is_spawn_po
 `engine/formats/def`; stamped + chain built + latched in `Simulation::resolve_item_traits`);
 `resolve_spawn_target` / `find_spawn_zone_for_team` / the single deep
 `resolve_player_spawn_pose` operation (`world/spawn_select`); the full C2S 0x0E handler
-(`npruntime/server_message_dispatch.cpp` — pick resolve, the zone control/team gate, the
+(`engine/runtime/inmatch/server_message_dispatch.cpp` — pick resolve, the zone control/team gate, the
 0xFFFE frontier auto-pick, dead-only deploy, per-team marker fallback, the computed 0x1E
 ev-0x3A frontier hint replacing the golden byte-blob); the per-recipient 0x0A phase-0
 owned-zone mask, walked off the live chain for the recipient's team on EVERY frame
@@ -10849,7 +10849,7 @@ row colour team 1 `0xFF00BFFF` / team 2 `0xFFFF0000`, the local row selected; `S
 `RADIO_TAB_OVERALL/REDTEAM/BLUETEAM` for non-team modes and selects OVERALL otherwise;
 `stat_filter_tab_handler @0x562140`: tab 1 = team-2 rows, tab 2 = team-1 rows. Reimpl:
 `hud/end_round_overlay.{h,cpp}` (ladder + column layout, ctest `end_round_overlay`),
-`npruntime/stat_screen_feed.{h,cpp}` (ctest `stat_screen_feed`), `HudFrameCompiler::
+`engine/runtime/inmatch/stat_screen_feed.{h,cpp}` (ctest `stat_screen_feed`), `HudFrameCompiler::
 element_end_round_overlay` + the Impac38b slot, `Simulation::get_end_round_state/lines/columns/rows`
 (one `ClientEndRoundStats` for both roles), `godot/game/world/end_round_presenter.gd` +
 `MainGame.State.END_ROUND`. The round-cycle handoff is PORTED 2026-08-24 (closing
@@ -11121,7 +11121,7 @@ Server_CheckWinConditions @0x51B18B; Server_ProcessRoundEnd @0x5164F0]`
 **Ported (wire transaction completed 2026-08-22; exact contact producer
 completed 2026-08-23):** `engine/net/npwire` owns strict codecs for
 the 0x1D header, 0x2B request, 0x56 envelope, and reassembled board;
-`npruntime/end_round_protocol` translates only the immutable semantic result
+`engine/runtime/inmatch/end_round_protocol` translates only the immutable semantic result
 into the witnessed producer order. The default/`score.ini` field schema,
 default VAR score values, active-column filtering, field accessor, the
 `Player_ComputeScore` player ordering (points for a team type, the game-type

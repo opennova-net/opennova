@@ -1,7 +1,9 @@
 #include "terrain/terrain_surface_inputs.h"
 
 #include "terrain/terrain_data.h"
+#include "terrain/terrain_image_convert.h"
 #include "terrain/terrain_tile_info.h"
+#include "util/data_format.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -12,49 +14,11 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <vector>
 
 using namespace godot;
 
 namespace {
-
-bool image_to_rgba8(const Ref<Image> &p_source,
-		opennova::terrain::Rgba8Image &r_out) {
-	if (p_source.is_null() || p_source->is_empty()) {
-		return false;
-	}
-	Ref<Image> image = p_source->duplicate();
-	if (image.is_null()) {
-		return false;
-	}
-	if (image->is_compressed() && image->decompress() != OK) {
-		return false;
-	}
-	if (image->get_format() != Image::FORMAT_RGBA8) {
-		image->convert(Image::FORMAT_RGBA8);
-	}
-
-	const int width = image->get_width();
-	const int height = image->get_height();
-	if (width <= 0 || height <= 0) {
-		return false;
-	}
-	const size_t base_bytes = static_cast<size_t>(width) * height * 4;
-	const PackedByteArray bytes = image->get_data();
-	if (bytes.size() < static_cast<int64_t>(base_bytes)) {
-		return false;
-	}
-	r_out.width = static_cast<uint32_t>(width);
-	r_out.height = static_cast<uint32_t>(height);
-	r_out.pixels.assign(bytes.ptr(), bytes.ptr() + base_bytes);
-	return true;
-}
-
-bool texture_to_rgba8(const Ref<Texture2D> &p_texture,
-		opennova::terrain::Rgba8Image &r_out) {
-	return p_texture.is_valid() && image_to_rgba8(p_texture->get_image(), r_out);
-}
 
 Dictionary texture_diagnostics(const Ref<Texture2D> &p_texture) {
 	Dictionary result;
@@ -72,15 +36,6 @@ Dictionary texture_diagnostics(const Ref<Texture2D> &p_texture) {
 	result["mipmap_count"] = mipmap_count;
 	result["level_count"] = mipmap_count >= 0 ? mipmap_count + 1 : 0;
 	return result;
-}
-
-PackedByteArray to_packed_bytes(const std::vector<uint8_t> &p_bytes) {
-	PackedByteArray packed;
-	packed.resize(static_cast<int64_t>(p_bytes.size()));
-	if (!p_bytes.empty()) {
-		std::memcpy(packed.ptrw(), p_bytes.data(), p_bytes.size());
-	}
-	return packed;
 }
 
 Ref<Texture2D> texture_from_rgba8(

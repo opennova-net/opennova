@@ -14,6 +14,7 @@
 #include "util/axes.h"
 #include "util/color_convert.h"
 #include "particle/effect_scene.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -56,7 +57,7 @@ void GameWorld::route_script_effects() {
     if (events.empty()) return;
     // Compilation can register stock aliases before any FX command executes.
     // BMS's direct named lookup sees those definitions too.
-    for (const auto &name : sim->script_effect_names()) effects->intern_effect(String::utf8(name.c_str()));
+    for (const auto &name : sim->script_effect_names()) effects->intern_effect(opennova::to_gd(name));
     for (const auto &event : events) effects->spawn_script_effect(event, 0);
 }
 
@@ -79,13 +80,13 @@ void GameWorld::route_round_impacts() {
 		// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position convention.
 		const Vector3 pos = mission_to_godot(row.position);
 		if (effect_world != nullptr && !row.effect.empty()) {
-			effect_world->spawn_effect_transient(String::utf8(row.effect.c_str()), pos,
+			effect_world->spawn_effect_transient(opennova::to_gd(row.effect), pos,
 					mission_to_godot(row.direction), static_cast<int64_t>(row.age_ticks),
 					EffectScene::RENDER_DOMAIN_WORLD, static_cast<int64_t>(row.source_tick),
 					static_cast<int64_t>(row.source_order));
 		}
 		if (audio != nullptr && !row.sound.empty()) {
-			audio->fire_soundset(String::utf8(row.sound.c_str()), pos);
+			audio->fire_soundset(opennova::to_gd(row.sound), pos);
 		}
 		// The light_impact flash rides the effect leg's own gate (the row only
 		// carries light fields when the ammo authors it and the effect presents)

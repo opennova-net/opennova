@@ -60,7 +60,6 @@ var _current_parent_clips := {}
 # Availability lookup (name -> value); banned (0) weapons drop from the lists
 # [orig: the g_armoryWeaponAvailability term @0x566e6b]. Invalid = allow all.
 var _availability_lookup := Callable()
-var _populating := false
 # Selected weapon dicts per slot control name ("" row 0 = NONE).
 var _slot_rows := {}                 # control name -> Array[WeaponDef] (row-1 aligned)
 # The grenade definitions assigned to GRENADE_AMMO1..3 in weapon.def table order.
@@ -72,9 +71,6 @@ var _grenade_rows: Array[WeaponDef] = []
 # arms it [orig: g_weaponScreenOpenDebounce = 1 at the open @0x4e0b21; cleared by
 # Input_HandleMenuKeyRelease @0x4de2d0].
 var _accept_hotkey_armed := false
-# PRIMARY/SECONDARY/ACCESSORY -> TextureRect mounted over the blank authored
-# *_ICON window. The compiled frame owns no per-widget Control nodes.
-var _icon_mounts := {}
 
 signal loadout_accepted(loadout: Dictionary)
 signal armory_closed
@@ -495,30 +491,7 @@ func _update_weight() -> void:
 # update_weapon_weight_display @0x5657a8..0x5658a3]. TextureRects are mounted as
 # frame children because the compiled MenuFrame has no per-widget Control nodes.
 func _update_icons() -> void:
-	var frame := _driver.get_frame() if _driver != null else null
-	if frame == null:
-		return
-	for control in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		var holder := _id(control + "_ICON")
-		if holder < 0:
-			continue
-		var icon_rect: TextureRect = _icon_mounts.get(control)
-		if icon_rect == null or not is_instance_valid(icon_rect):
-			icon_rect = TextureRect.new()
-			icon_rect.name = control + "ArmoryIcon"
-			icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			icon_rect.stretch_mode = TextureRect.STRETCH_SCALE
-			icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			frame.add_child(icon_rect)
-			_icon_mounts[control] = icon_rect
-		_place_icon_mount(icon_rect, holder)
-		var selected := selected_weapon(control)
-		var icon_name := selected.icon if selected != null else ""
-		if icon_name.is_empty() or _root == null:
-			icon_rect.texture = null
-		else:
-			icon_rect.texture = _root.load_texture(
-					icon_name, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
+	_update_weapon_icons("ArmoryIcon", selected_weapon)
 
 
 ## The rendered weight line (public read seam for tests/diagnostics).
@@ -600,44 +573,9 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, _va
 			_update_weight()
 
 
-# --- Frame icon mounts ------------------------------------------------------------
-
-func _clear_icon_mounts() -> void:
-	for control in _icon_mounts:
-		var mount: TextureRect = _icon_mounts[control]
-		if mount != null and is_instance_valid(mount):
-			mount.queue_free()
-	_icon_mounts.clear()
-
-
-func _place_icon_mount(mount: Control, id: int) -> void:
-	var rect := _driver.widget_frame_rect(id)
-	mount.position = rect.position
-	mount.size = rect.size
-	mount.visible = rect.size.x > 0.0 and rect.size.y > 0.0
-
-
-func _reposition_icon_mounts() -> void:
-	if _driver == null:
-		return
-	for control in _icon_mounts:
-		var mount: TextureRect = _icon_mounts[control]
-		if mount == null or not is_instance_valid(mount):
-			continue
-		var holder := _id(String(control) + "_ICON")
-		if holder >= 0:
-			_place_icon_mount(mount, holder)
-
-
 func _on_screen_changed(_screen_name: String) -> void:
 	_reposition_icon_mounts()
 
 
 # --- Helpers -----------------------------------------------------------------------
 
-func _set_combo_items(combo: int, rows: PackedStringArray) -> void:
-	_populating = true
-	_driver.set_widget_items(combo, rows)
-	if rows.size() > 0:
-		_driver.select_row(combo, 0, false)
-	_populating = false

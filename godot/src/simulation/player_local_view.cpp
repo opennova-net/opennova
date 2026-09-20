@@ -1,6 +1,7 @@
 #include "simulation/player_local_view.h"
 
 #include "util/axes.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -37,7 +38,7 @@ int PlayerLocalView::get_virtual_display_carrier() const {
 }
 
 String PlayerLocalView::get_virtual_display_model() const {
-	return String::utf8(value_.virtual_display_model.c_str());
+	return opennova::to_gd(value_.virtual_display_model);
 }
 
 void PlayerLocalView::_bind_methods() {

@@ -40,7 +40,6 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import AdminGate from '../../components/AdminGate.vue';
 import { clearAdminToken } from '../../api/authToken';
@@ -48,13 +47,12 @@ import { clearAdminToken } from '../../api/authToken';
 interface AdminSection {
   to: string;
   label: string;
-  // Extra paths that should also mark this item active (e.g. the /admin and
-  // /admin/expansions aliases both map to the releases section).
-  match?: string[];
 }
 
+// /admin and /admin/expansions are pure redirects to /admin/releases, so the
+// route path is always one of the `to` values below.
 const sections: AdminSection[] = [
-  { to: '/admin/releases', label: 'Expansion Releases', match: ['/admin', '/admin/expansions'] },
+  { to: '/admin/releases', label: 'Expansion Releases' },
   { to: '/admin/users', label: 'Users' },
   { to: '/admin/server', label: 'Server Status' },
   { to: '/admin/connections', label: 'Connections' },
@@ -65,8 +63,7 @@ const route = useRoute();
 // Explicit active check — RouterLink's default active class would light up the
 // releases item on every child path since '/admin' is a prefix of them all.
 function isActive(item: AdminSection): boolean {
-  const paths = [item.to, ...(item.match ?? [])];
-  return paths.includes(route.path);
+  return route.path === item.to;
 }
 
 function signOut() {

@@ -49,9 +49,9 @@ func test_host_session_config_re_exports() -> void:
 
 
 func test_mission_mode_selection() -> void:
-	assert_eq(HostSessionConfig.game_type_for_mission_mode(MissionData.ATTRIB_COOP),
+	assert_eq(NetProtocol.game_type_for_mission_mode(MissionData.ATTRIB_COOP),
 			NetProtocol.GAME_TYPE_COOP,
 			"an ATTRIB_COOP mission derives the OBJECTIVE Co-op word")
-	assert_eq(HostSessionConfig.game_type_for_mission_mode(0),
+	assert_eq(NetProtocol.game_type_for_mission_mode(0),
 			NetProtocol.GAME_TYPE_TRAINING_COOP,
 			"no multiplayer attrib resolves to stock/training Co-op")

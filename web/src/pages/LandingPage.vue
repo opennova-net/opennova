@@ -56,16 +56,15 @@ import { fetchStats } from '../api/stats';
 import type { DownloadManifest } from '../types/downloads';
 
 type DownloadState = {
-  loading: boolean;
   error: string;
   manifest: DownloadManifest | null;
 };
 
-const launcherState = reactive<DownloadState>({ loading: true, error: '', manifest: null });
+const launcherState = reactive<DownloadState>({ error: '', manifest: null });
 
 const statsLoading = ref(true);
 const statsError = ref('');
-const stats = reactive({ games: 0, lobbies: 0, players: 0 });
+const stats = reactive({ lobbies: 0, players: 0 });
 
 const manifest = computed(() => launcherState.manifest);
 const hasDownload = computed(() => !!manifest.value?.downloadUrl);
@@ -102,7 +101,6 @@ onMounted(async () => {
   const statsController = new AbortController();
   try {
     const fetched = await fetchStats(statsController.signal);
-    stats.games = fetched.games;
     stats.lobbies = fetched.lobbies;
     stats.players = fetched.players;
   } catch (error) {
@@ -118,7 +116,6 @@ onUnmounted(() => {
 });
 
 async function loadLauncherManifest() {
-  launcherState.loading = true;
   launcherState.error = '';
   launcherController?.abort();
   launcherController = new AbortController();
@@ -127,8 +124,6 @@ async function loadLauncherManifest() {
   } catch (error) {
     console.error('Failed to fetch launcher manifest', error);
     launcherState.error = parseErrorMessage(error);
-  } finally {
-    launcherState.loading = false;
   }
 }
 

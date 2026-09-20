@@ -215,7 +215,7 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 		if (t.tile_size < leaf_size) leaf_size = t.tile_size;
 	}
 
-	scene.mipchain = build_mipchain(cpt.depth_buffer, hm_size);
+	scene.mipchain = build_mipchain(cpt.depth_buffer);
 
 	// The 1024 -> leaf subdivision the traversal walks
 	// [orig: Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe)].

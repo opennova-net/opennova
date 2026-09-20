@@ -111,7 +111,7 @@ func _boot(weapon_name: String = "WPN_M4AUTO") -> void:
 	_presenter.setup(_world, _camera, null, ControlsModel.new())
 	_presenter.set_input_override(PlayerMoveIntent.new())
 	await get_tree().process_frame
-	_frame(20)
+	WorldFixture.step_player_frames(_presenter, _world, _camera, 20)
 	assert_true(_world.get_sim().has_local_player())
 	assert_eq(_world.get_sim().get_local_player_weapon_name(), weapon_name,
 			"the normal spawn path installed the requested DEF")
@@ -126,17 +126,6 @@ func after_each() -> void:
 	if _world != null:
 		_world.unload()
 	TestFs.remove_dir_recursive(_root)
-
-
-func _frame(count: int = 1, jump: bool = false) -> void:
-	var input := PlayerMoveIntent.new()
-	input.jump = jump
-	_presenter.set_input_override(input)
-	for tick in count:
-		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
-		_world.tick(_camera.global_position, _camera.global_transform,
-				Simulation.tick_dt(), frame_input)
-		_presenter.after_world_tick()
 
 
 func _assert_rig(rotation_deg: Vector3, fraction: float, check_position: bool = true) -> void:
@@ -169,11 +158,11 @@ func test_authored_ads_rotation_reaches_real_rig_and_camera_restamp() -> void:
 	await _boot()
 	_assert_rig(HIP, 0.0)
 	assert_true(_world.get_sim().request_local_player_scope_toggle())
-	_frame()
+	WorldFixture.step_player_frames(_presenter, _world, _camera)
 	# Original BAM lanes: decreasing yaw advances by delta/15; increasing
 	# pitch and wrap-crossing roll snap immediately because velocity is unsigned.
 	_assert_rig(Vector3(21.75, 45.0, 22.5), 1.0 / 15.0)
-	_frame(16)
+	WorldFixture.step_player_frames(_presenter, _world, _camera, 16)
 	_assert_rig(ADS, 1.0)
 	_camera.global_transform = Transform3D(Basis.from_euler(Vector3(0.3, -0.5, 0.2)),
 			Vector3(30.0, 20.0, -40.0))
@@ -184,20 +173,20 @@ func test_authored_ads_rotation_reaches_real_rig_and_camera_restamp() -> void:
 func test_airborne_actual_rig_keeps_hip_cant_then_restores_current_ads_pose() -> void:
 	await _boot()
 	assert_true(_world.get_sim().request_local_player_scope_toggle())
-	_frame(3)
+	WorldFixture.step_player_frames(_presenter, _world, _camera, 3)
 	_assert_rig(Vector3(20.25, 45.0, 22.5), 3.0 / 15.0)
-	_frame(1, true)
+	WorldFixture.step_player_frames(_presenter, _world, _camera, 1, true)
 	assert_true(_world.local_player_view().suppress_view_bias, "jump suppresses actual bias")
 	_assert_rig(HIP, 0.0, false)
-	_frame(4)
+	WorldFixture.step_player_frames(_presenter, _world, _camera, 4)
 	assert_true(_world.local_player_view().suppress_view_bias, "the player remains airborne")
 	_assert_rig(HIP, 0.0, false)
 	for tick in range(120):
-		_frame()
+		WorldFixture.step_player_frames(_presenter, _world, _camera)
 		if not _world.local_player_view().suppress_view_bias:
 			break
 	assert_false(_world.local_player_view().suppress_view_bias, "the player landed")
-	_frame(20)
+	WorldFixture.step_player_frames(_presenter, _world, _camera, 20)
 	_assert_rig(ADS, 1.0)
 
 
@@ -212,5 +201,5 @@ func test_forced_scope_equip_reaches_actual_ads_rig_without_toggle() -> void:
 	# The normal spawn/install + presenter route must consume it without input.
 	_assert_rig(ADS, 1.0)
 	assert_false(_world.get_sim().request_local_player_scope_toggle(), "forced equip stays pinned")
-	_frame(3)
+	WorldFixture.step_player_frames(_presenter, _world, _camera, 3)
 	_assert_rig(ADS, 1.0)

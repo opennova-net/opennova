@@ -52,7 +52,7 @@ func test_background_prefers_mission_sidecar_then_falls_back() -> void:
 
 func test_background_decodes_sidecar_from_language_archive_without_loose_mode() -> void:
 	var dir := _make_temp_dir("loadscreen_language_pff")
-	_write_pff(dir.path_join("language.pff"), [{
+	WorldFixture.write_pff(self, dir.path_join("language.pff"), [{
 		"name": "00trg.pcx",
 		"bytes": _test_pcx_bytes(),
 	}])
@@ -67,8 +67,8 @@ func test_background_decodes_sidecar_from_language_archive_without_loose_mode() 
 
 func test_background_setup_forces_loose_image_over_archive_in_packed_mode() -> void:
 	var dir := _make_temp_dir("loadscreen_loose_first")
-	_write_bytes(dir.path_join("00trg.pcx"), _solid_test_pcx(Color.BLUE))
-	_write_pff(dir.path_join("language.pff"), [{
+	TestFs.write_bytes(self, dir.path_join("00trg.pcx"), _solid_test_pcx(Color.BLUE))
+	WorldFixture.write_pff(self, dir.path_join("language.pff"), [{
 		"name": "00trg.pcx",
 		"bytes": _solid_test_pcx(Color.RED),
 	}])
@@ -278,14 +278,6 @@ func _write_test_pcx(path: String) -> void:
 	f.close()
 
 
-func _write_bytes(path: String, bytes: PackedByteArray) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "the loading-art fixture is writable")
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
-
-
 func _test_pcx_bytes() -> PackedByteArray:
 	var bytes := PackedByteArray()
 	bytes.resize(128)
@@ -332,11 +324,6 @@ func _solid_test_pcx(color: Color) -> PackedByteArray:
 			bytes.append(0)
 			bytes.append(0)
 	return bytes
-
-
-# The shared PFF3 fixture writer (TestPff.write), asserted here.
-func _write_pff(path: String, entries: Array) -> void:
-	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
 
 
 # --- wrapped text block [orig: render_draw_wrapped_text_block_ex @ 0x580eb0] ---

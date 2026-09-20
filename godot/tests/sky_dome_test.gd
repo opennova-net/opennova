@@ -33,7 +33,7 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 	assert_eq(mat.get_shader_parameter("u_cloud_highlight"), ctx.env_node.get_cloud_highlight() * 2.0, "c27 cloudhighlight")
 	assert_eq(mat.get_shader_parameter("u_cloud_edge"), ctx.env_node.get_cloud_edge() * 2.0, "c26 cloudedge")
 	# The dome shader and the getters both serve GODOT-world vectors (the
-	# env_axes.h swap applies once at each device seam — 2026-08-20
+	# util/axes.h swap applies once at each device seam — 2026-08-20
 	# celestial-axis correction).
 	assert_eq(mat.get_shader_parameter("u_sun_dir"),
 		ctx.env_node.get_sun_direction(),

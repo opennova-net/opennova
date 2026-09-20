@@ -108,7 +108,7 @@ static func write_bundle(
 		return {"ok": false, "error": "Could not create render-capture directory: %s." % error_string(mkdir_error)}
 	var png_path := absolute_root.path_join(capture_id + ".png")
 	var state_path := absolute_root.path_join(capture_id + ".json")
-	var png_hash := _sha256(png)
+	var png_hash := sha256_hex(png)
 	var capture_state := {
 		"schema": SCHEMA,
 		"capture": {
@@ -145,7 +145,7 @@ static func write_bundle(
 				"mime": "image/png",
 				"bytes": png.size(),
 				"sha256": png_hash,
-				"state_sha256": _sha256(state_bytes),
+				"state_sha256": sha256_hex(state_bytes),
 			},
 			"diagnostics": diagnostics,
 		},
@@ -173,7 +173,7 @@ static func _write_atomic(path: String, bytes: PackedByteArray) -> Error:
 	return rename_error
 
 
-static func _sha256(bytes: PackedByteArray) -> String:
+static func sha256_hex(bytes: PackedByteArray) -> String:
 	var hash := HashingContext.new()
 	if hash.start(HashingContext.HASH_SHA256) != OK:
 		return ""

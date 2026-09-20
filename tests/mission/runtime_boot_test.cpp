@@ -7,6 +7,8 @@
 
 #include <formats/aip/aip.h>
 
+#include "../common/boot_file_source.h"
+
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -24,20 +26,7 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
-ms::BootFileSource source_over(
-		const std::map<std::string, std::string> *files) {
-	ms::BootFileSource s;
-	s.has_file = [files](const std::string &name) {
-		return files->find(name) != files->end();
-	};
-	s.read_file = [files](const std::string &name, std::vector<uint8_t> &out) {
-		const auto it = files->find(name);
-		if (it == files->end()) return false;
-		out.assign(it->second.begin(), it->second.end());
-		return true;
-	};
-	return s;
-}
+using test_boot::source_over;
 
 // <mission>.bin when present; medmssn.bin only when it does not exist.
 bool run_text_fallback() {

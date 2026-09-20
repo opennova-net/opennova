@@ -3,10 +3,11 @@
 // same slot/clamp validations the Dictionary ingest applied, so the emitted
 // typed table is the exact production composition.
 #include <runtime/mission/seat_spec_extract.h>
+#include <runtime/mission/collision_resolve.h> // find_item_def
 
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
-#include <runtime/world/mount_controls.h> // turret_limit_bam
+#include <runtime/world/turret_window.h> // turret_window_limit_bam
 #include <runtime/world/world.h>
 #include <formats/mission/mission.h> // kItemIdOffset (items.def id <-> wire type id)
 #include <formats/threedi/threedi_3di3.h>
@@ -81,15 +82,6 @@ bool item_has_runtime_metadata(const mission::ItemSeatSpec &spec) {
 	return spec.mount_config_valid || !spec.seats.empty() ||
 			!spec.armory_points.empty() || !spec.primary_weapon.empty() ||
 			!spec.emplacement_attachments.empty();
-}
-
-const DefItemDef *find_item(const DefItemsFile &items, int item_id) {
-	// Last-wins over duplicate definition ids — the same load-order overwrite
-	// the id-keyed item map exposed (see mission item_traits).
-	const DefItemDef *found = nullptr;
-	for (size_t i = 0; i < items.count; ++i)
-		if (items.entries[i].id == item_id) found = &items.entries[i];
-	return found;
 }
 
 // graphic -> "<basename>.3di" is assets::AssetStore's own name rule; the extractor
@@ -262,7 +254,7 @@ void extract_item_seat_specs(const DefItemsFile &items,
 		if (item_id == 0 || type_id <= 0 || seen_types.count(type_id) != 0)
 			continue;
 		seen_types.insert(type_id);
-		const DefItemDef *def = find_item(items, item_id);
+		const DefItemDef *def = find_item_def(items, item_id);
 		if (def == nullptr) continue; // item_not_found
 		mission::ItemSeatSpec spec;
 		spec.type_id = type_id;
@@ -319,11 +311,11 @@ void stamp_seat_spec_turret_limits(world::World &world,
 						: nullptr;
 		if (entry == nullptr) continue;
 		spec.turret_yaw_range_bam =
-				world::turret_limit_bam(entry->turret_yaw_range_deg);
+				world::turret_window_limit_bam(entry->turret_yaw_range_deg);
 		spec.turret_pitch_max_bam =
-				world::turret_limit_bam(entry->turret_pitch_max_deg);
+				world::turret_window_limit_bam(entry->turret_pitch_max_deg);
 		spec.turret_pitch_min_bam =
-				world::turret_limit_bam(entry->turret_pitch_min_deg);
+				world::turret_window_limit_bam(entry->turret_pitch_min_deg);
 	}
 }
 

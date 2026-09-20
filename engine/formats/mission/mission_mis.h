@@ -1,7 +1,6 @@
 #pragma once
 
-// Internal to engine/runtime/mission — not part of the public interface. Split out of
-// mission.cpp (quality campaign W3-1); the bodies are unchanged.
+// Internal to engine/formats/mission — not part of the public interface.
 //
 // The .mis text format, one TU per direction: mission_mis_writer.cpp emits it and
 // mission_mis_parser.cpp reads it. Only these two entry points cross a TU boundary;

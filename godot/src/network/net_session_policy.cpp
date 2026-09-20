@@ -13,26 +13,26 @@ int NetSessionPolicy::decide_expansion(const String &p_host_expansion,
 	std::vector<std::string> installed;
 	installed.reserve(static_cast<size_t>(p_installed.size()));
 	for (int i = 0; i < p_installed.size(); ++i) {
-		installed.push_back(to_std(p_installed[i]));
+		installed.push_back(opennova::to_std(p_installed[i]));
 	}
 	decision_ = opennova::inmatch::decide_join_expansion(
-			to_std(p_host_expansion), to_std(p_mounted_expansion), installed);
+			opennova::to_std(p_host_expansion), opennova::to_std(p_mounted_expansion), installed);
 	return static_cast<int>(decision_.action);
 }
 
 String NetSessionPolicy::decided_expansion() const {
-	return String::utf8(decision_.expansion.c_str());
+	return opennova::to_gd(decision_.expansion);
 }
 
 String NetSessionPolicy::decision_error() const {
-	return String::utf8(decision_.error.c_str());
+	return opennova::to_gd(decision_.error);
 }
 
 String NetSessionPolicy::describe_installed(const PackedStringArray &p_installed) {
 	std::vector<std::string> installed;
 	installed.reserve(static_cast<size_t>(p_installed.size()));
 	for (int i = 0; i < p_installed.size(); ++i) {
-		installed.push_back(to_std(p_installed[i]));
+		installed.push_back(opennova::to_std(p_installed[i]));
 	}
 	return String::utf8(
 			opennova::inmatch::describe_installed_expansions(installed).c_str());
@@ -48,15 +48,15 @@ void NetSessionPolicy::disarm_preload() {
 
 int NetSessionPolicy::preload_step(const String &p_join_error, int64_t p_now_ms) {
 	return static_cast<int>(policy_.preload_step(
-			to_std(p_join_error), static_cast<uint64_t>(p_now_ms)));
+			opennova::to_std(p_join_error), static_cast<uint64_t>(p_now_ms)));
 }
 
 bool NetSessionPolicy::validate_promote_mission_file(const String &p_mission_file) {
-	return policy_.validate_promote_mission_file(to_std(p_mission_file));
+	return policy_.validate_promote_mission_file(opennova::to_std(p_mission_file));
 }
 
 String NetSessionPolicy::promoted_mission_file() const {
-	return String::utf8(policy_.promoted_mission_file().c_str());
+	return opennova::to_gd(policy_.promoted_mission_file());
 }
 
 bool NetSessionPolicy::validate_promote_header(int64_t p_header_size) {
@@ -85,9 +85,9 @@ int NetSessionPolicy::begin_admission_frame(const String &p_session_loss_reason,
 		const String &p_join_error, const String &p_admission_stage,
 		int64_t p_now_ms) {
 	return static_cast<int>(policy_.begin_admission_frame(
-			to_std(p_session_loss_reason), p_deploy_pending,
-			p_initial_admission_complete, to_std(p_join_error),
-			to_std(p_admission_stage), static_cast<uint64_t>(p_now_ms)));
+			opennova::to_std(p_session_loss_reason), p_deploy_pending,
+			p_initial_admission_complete, opennova::to_std(p_join_error),
+			opennova::to_std(p_admission_stage), static_cast<uint64_t>(p_now_ms)));
 }
 
 int NetSessionPolicy::finish_admission_frame(bool p_settle_ok,
@@ -97,11 +97,11 @@ int NetSessionPolicy::finish_admission_frame(bool p_settle_ok,
 }
 
 String NetSessionPolicy::fail_reason() const {
-	return String::utf8(policy_.fail_reason().c_str());
+	return opennova::to_gd(policy_.fail_reason());
 }
 
 String NetSessionPolicy::session_loss_reason() const {
-	return String::utf8(policy_.session_loss_reason().c_str());
+	return opennova::to_gd(policy_.session_loss_reason());
 }
 
 void NetSessionPolicy::reset_for_join() {

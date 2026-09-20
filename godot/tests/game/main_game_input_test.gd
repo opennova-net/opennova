@@ -43,18 +43,8 @@ func after_each() -> void:
 		TestFs.remove_dir_recursive(_temp_dir)
 		_temp_dir = ""
 	LaunchFlags.clear_args_override()
-	_restore_file(STATE_CONFIG_PATH, _had_config, _saved_config)
-	_restore_file(HUD_CONFIG_PATH, _had_hud_config, _saved_hud_config)
-
-
-func _restore_file(path: String, existed: bool, bytes: PackedByteArray) -> void:
-	if existed:
-		var file := FileAccess.open(path, FileAccess.WRITE)
-		if file != null:
-			file.store_buffer(bytes)
-			file.close()
-	elif FileAccess.file_exists(path):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	TestFs.restore_file(STATE_CONFIG_PATH, _had_config, _saved_config)
+	TestFs.restore_file(HUD_CONFIG_PATH, _had_hud_config, _saved_hud_config)
 
 
 # The shell in the minimal mission with gameplay input live (null when the

@@ -8,21 +8,13 @@ extends GutTest
 # dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2]. The shader-side
 # math contract lives in terrain_shader_contract_test.gd.
 
-var _terrain_root := ""
-
-
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
-# assets it names; one root per test file, removed at the end.
-func _tmap_trn() -> String:
-	if _terrain_root.is_empty():
-		_terrain_root = TestFs.stage_terrain_root("underwater")
-	return _terrain_root.path_join(TestFs.TMAP_TRN)
+# assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
+const TMAP_STAGE := "underwater"
 
 
 func after_all() -> void:
-	if not _terrain_root.is_empty():
-		TestFs.remove_dir_recursive(_terrain_root)
-		_terrain_root = ""
+	TestFs.release_staged_tmap(TMAP_STAGE)
 
 
 const TICK := 1.0 / 62.0
@@ -34,7 +26,7 @@ func _make_fixture(water_height: float) -> Dictionary:
 	add_child_autofree(vp)
 
 	var data := TerrainData.new()
-	data.set_trn_path(_tmap_trn())
+	data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
 	assert_eq(data.load(), OK, "the Tmap fixture terrain must load")
 
 	var terrain: Terrain = Terrain.new()
@@ -52,21 +44,6 @@ func _make_fixture(water_height: float) -> Dictionary:
 	vp.add_child(cam)
 	cam.make_current()
 	return {"terrain": terrain, "water": water, "camera": cam}
-
-
-func _settle_tile_cache(terrain: Terrain) -> Dictionary:
-	var diagnostics: Dictionary = {}
-	for _attempt in range(512):
-		terrain.render_frame()
-		diagnostics = terrain.get_tile_cache_diagnostics()
-		if int(diagnostics.get("pending_jobs", -1)) == 0 \
-				and int(diagnostics.get("frame_requests", 0)) > 0 \
-				and int(diagnostics.get("frame_ready_hits", -1)) \
-						== int(diagnostics.get("frame_requests", 0)):
-			return diagnostics
-		await get_tree().process_frame
-	assert_true(false, "the bounded terrain compiler must settle visible pages")
-	return diagnostics
 
 
 func test_render_eye_height_flips_the_below_water_uniform() -> void:
@@ -155,7 +132,7 @@ func test_runtime_publishes_one_shared_retail_tile_page_array() -> void:
 	assert_true(bool(material.get_shader_parameter("u_has_tile_cache")))
 	var requested: Dictionary = terrain.get_tile_cache_diagnostics()
 	assert_gt(int(requested["pending_jobs"]), 0)
-	var first: Dictionary = await _settle_tile_cache(terrain)
+	var first: Dictionary = await TestFs.settle_tile_cache(self, terrain)
 	assert_gt(int(first["ready_pages"]), 0)
 	assert_gt(int(first["compose_jobs"]), 0)
 	assert_eq(int(first["frame_compose_jobs"]), 0)

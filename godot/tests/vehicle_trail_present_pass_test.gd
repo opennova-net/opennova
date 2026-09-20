@@ -34,14 +34,6 @@ func _catalog_file() -> ParticleFile:
 	return file
 
 
-func _make_fx(anchors: ItemEffectDirector) -> EffectWorld:
-	var fx := EffectWorld.new()
-	add_child_autofree(fx)
-	fx.load_particle_file(_catalog_file())
-	fx.set_owner_position_provider(anchors.resolve_owner_transform)
-	return fx
-
-
 func _make_presenter(fx: EffectWorld, anchors: ItemEffectDirector) -> EntityPresenter:
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
@@ -84,7 +76,7 @@ func _emitter(row: EffectGroupReport) -> EffectEmitterReport:
 
 func test_points_follow_sampled_pose_and_tune_without_respawn() -> void:
 	var anchors := ItemEffectDirector.new()
-	var fx := _make_fx(anchors)
+	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file())
 	var presenter := _make_presenter(fx, anchors)
 	var a_key := _owner_key(41, 0)
 	var b_key := _owner_key(41, 1)
@@ -143,7 +135,7 @@ func test_points_follow_sampled_pose_and_tune_without_respawn() -> void:
 
 func test_registry_generation_replaces_same_handle_ownership() -> void:
 	var anchors := ItemEffectDirector.new()
-	var fx := _make_fx(anchors)
+	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file())
 	var presenter := _make_presenter(fx, anchors)
 	var old_key := _owner_key(61, 0)
 	var next_key := _owner_key(62, 0)

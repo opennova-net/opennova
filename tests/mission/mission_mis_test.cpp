@@ -2,10 +2,10 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <string>
 #include <vector>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include <formats/mission/bms.h>
@@ -21,18 +21,10 @@ std::string temp_path(const char *name) {
 	return dir + "/" + name;
 }
 
-std::string read_text(const std::string &path) {
-	std::ifstream file(path, std::ios::binary);
-	if (!file.good()) {
-		return {};
-	}
-	return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-}
-
 // The .mis file legs the retired document facade carried: read the text, parse
 // it; write the text, save it.
 bool load_mis_file(const std::string &path, opennova::bms::File &out, std::string &error) {
-	const std::string text = read_text(path);
+	const std::string text = test_io::read_file_text(path);
 	if (text.empty()) {
 		error = "Cannot open MIS file: " + path;
 		return false;
@@ -120,7 +112,7 @@ int main() {
 
 	const std::string mis_path = temp_path("mission_mis_roundtrip.mis");
 	TEST_EXPECT(save_mis_file(authored, mis_path, error));
-	const std::string text = read_text(mis_path);
+	const std::string text = test_io::read_file_text(mis_path);
 	TEST_EXPECT(text.find("// mission metafile\r\n") == 0);
 	TEST_EXPECT(text.find("begin general_information\r\n") != std::string::npos);
 	TEST_EXPECT(text.find("begin event 0\r\n") != std::string::npos);
@@ -207,7 +199,7 @@ int main() {
 		const std::string baked_path = temp_path("mission_mis_baked_heights.mis");
 		const std::vector<int32_t> base_heights = {25 * 65536};
 		TEST_EXPECT(save_mis_file(authored, baked_path, error, &base_heights));
-		const std::string baked_text = read_text(baked_path);
+		const std::string baked_text = test_io::read_file_text(baked_path);
 		TEST_EXPECT(baked_text.find("  extra_bheight 1638400\r\n") != std::string::npos);
 		TEST_EXPECT(baked_text.find("  height_lock 1\r\n") != std::string::npos);
 		TEST_EXPECT(authored.items[0].mis_extra_bheight == 0);

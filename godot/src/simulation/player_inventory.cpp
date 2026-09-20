@@ -1,11 +1,12 @@
 #include "simulation/player_inventory.h"
 
 #include "util/record_bind.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
 String PlayerInventorySlot::get_name() const {
-	return String::utf8(value_.name.c_str());
+	return opennova::to_gd(value_.name);
 }
 
 void PlayerInventorySlot::_bind_methods() {
@@ -28,7 +29,7 @@ Ref<PlayerInventory> PlayerInventory::make(const String &p_equipped_name, bool p
 }
 
 String PlayerInventory::get_equipped_name() const {
-	return String::utf8(value_.equipped_name.c_str());
+	return opennova::to_gd(value_.equipped_name);
 }
 
 TypedArray<PlayerInventorySlot> PlayerInventory::get_slots() const {

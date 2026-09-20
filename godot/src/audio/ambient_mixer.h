@@ -78,7 +78,6 @@ public:
 	// transport).
 	const std::vector<opennova::audio::AmbientCandidate> &mix_rows(const Vector3 &listener);
 
-	int live_slot_count() const;
 	int64_t clock_tick() const;
 	int marker_count() const;
 

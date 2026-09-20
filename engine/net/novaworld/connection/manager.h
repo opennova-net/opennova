@@ -52,16 +52,12 @@ public:
 	// packet has been recognised. These wrap the registry and fire the
 	// appropriate lifecycle callback.
 	void notify_handshake(Connection conn);
-	void notify_active(uint32_t id, std::string identity,
-	                   std::string client_scrk, std::string server_scrk);
-	// Address-keyed variant — preferred for AUTH dispatch since two retail
-	// processes both ship ci=0x00000001 (G.7).
+	// The per-connection verbs are address-keyed: two retail processes both
+	// ship ci=0x00000001 (G.7), so the reported id cannot pick the connection
+	// for AUTH, keepalive or GOODBYE dispatch.
 	void notify_active_addr(const PeerAddr &addr, std::string identity,
 	                        std::string client_scrk, std::string server_scrk);
-	void notify_seen(uint32_t id, uint64_t now_ms);
 	void notify_seen_addr(const PeerAddr &addr, uint64_t now_ms);
-	void notify_logout(uint32_t id);
-	// Address-keyed variant — preferred for GOODBYE dispatch (CI collisions).
 	void notify_logout_addr(const PeerAddr &addr);
 
 	// Tick from the server's main loop. Drops every connection whose

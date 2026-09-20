@@ -243,6 +243,7 @@ bool build_golden(const std::vector<uint8_t> &game_bytes, std::string &golden, s
 	return true;
 }
 
+using test_io::is_lfs_pointer;
 using test_io::read_file;
 
 bool write_file(const std::string &path, const void *data, size_t size) {
@@ -250,12 +251,6 @@ bool write_file(const std::string &path, const void *data, size_t size) {
 	if (!o) return false;
 	o.write(static_cast<const char *>(data), static_cast<std::streamsize>(size));
 	return static_cast<bool>(o);
-}
-
-bool is_lfs_pointer(const std::vector<uint8_t> &bytes) {
-	static const char kLfsSentinel[] = "version https://git-lfs";
-	return bytes.size() >= sizeof(kLfsSentinel) - 1 &&
-	       std::memcmp(bytes.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0;
 }
 
 // Byte-compare one committed file against its generator output; an unpulled

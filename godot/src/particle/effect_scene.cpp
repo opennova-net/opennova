@@ -2,6 +2,7 @@
 #include <runtime/particle/script_effects.h>
 #include "particle/effect_load_report.h"
 #include "particle/effect_spawn_records.h"
+#include "particle/particle_convert.h"
 #include "util/string_convert.h"
 
 #include <algorithm>
@@ -37,12 +38,6 @@ std::uint64_t token_from_godot(int64_t value) noexcept {
 	return result;
 }
 
-int64_t token_to_godot(std::uint64_t value) noexcept {
-	int64_t result = 0;
-	std::memcpy(&result, &value, sizeof(result));
-	return result;
-}
-
 std::uint32_t handle_from_godot(int64_t value) noexcept {
 	if (value <= 0 ||
 			static_cast<std::uint64_t>(value) >
@@ -65,10 +60,6 @@ Vec3 native_vector(const Vector3 &value) noexcept {
 	return {value.x, value.y, value.z};
 }
 
-Vector3 godot_vector(Vec3 value) noexcept {
-	return Vector3(value.x, value.y, value.z);
-}
-
 EffectPose native_pose(const Transform3D &value) noexcept {
 	EffectPose result;
 	result.position = native_vector(value.origin);
@@ -76,14 +67,6 @@ EffectPose native_pose(const Transform3D &value) noexcept {
 	result.up = native_vector(value.basis.get_column(1));
 	result.forward = native_vector(value.basis.get_column(2));
 	return result;
-}
-
-Transform3D godot_pose(const EffectPose &value) noexcept {
-	Basis basis;
-	basis.set_column(0, godot_vector(value.right));
-	basis.set_column(1, godot_vector(value.up));
-	basis.set_column(2, godot_vector(value.forward));
-	return Transform3D(basis, godot_vector(value.position));
 }
 
 std::size_t capacity_from_option(const Dictionary &options,

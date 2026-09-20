@@ -316,7 +316,7 @@ uint16_t player_wire_flags(const world::Entity &e, world::EntityHandle recipient
 // *(u16)(entity+348)]. The REAL packing (witnessed in the packer @0x57ae47 and its decoder
 // MinimapSlot_FindByPackedId @0x57a270) is type(bits 0-4) | subtype(5-8) | index(9-14) |
 // side(15) over the 288-byte minimap slot array — bit 15 is the nationality ALIGNMENT, not a
-// liveness bit (net-re §5.59; game_world.gd's join packer writes it from the selected
+// liveness bit (net-re §5.59; the join packer writes it from the selected
 // nationality's alignment): golden 0x0200 = index 1 on side A, 0x8207 = type 7 + index 1 on
 // side B. It MUST be nonzero: a 0 net_id makes the JOINER's MinimapSlot_HasEntity(0)
 // match the first zero-initialized slot, so its handler SKIPS minimap allocation and the remote

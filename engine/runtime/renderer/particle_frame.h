@@ -222,8 +222,6 @@ struct ParticleFrameDebugCounters {
 	std::size_t vertex_capacity = 0;
 	std::size_t command_capacity = 0;
 	std::size_t emitter_bounds_capacity = 0;
-	std::size_t emitter_sort_capacity = 0;
-	std::size_t particle_sort_capacity = 0;
 	// Retained explicit-recursion stack shared by every quicksort of a compile.
 	std::size_t sort_stack_capacity = 0;
 };

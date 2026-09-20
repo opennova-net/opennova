@@ -7,14 +7,6 @@
 using namespace godot;
 using opennova::to_std;
 
-namespace {
-
-int dict_int(const Dictionary &d, const char *key, int def) {
-	return d.has(key) ? (int)d[key] : def;
-}
-
-} // namespace
-
 Ref<PlayerSpawnLoadout> PlayerSpawnLoadout::from_profile(const Dictionary &p_profile) {
 	Ref<PlayerSpawnLoadout> out;
 	out.instantiate();
@@ -43,10 +35,10 @@ Ref<PlayerSpawnLoadout> PlayerSpawnLoadout::from_profile(const Dictionary &p_pro
 		}
 		SideSelection &selection = out->sides_[side];
 		selection.present = true;
-		selection.nationality = dict_int(sd, "nationality", -1);
-		selection.division = dict_int(sd, "division", -1);
-		selection.combo = dict_int(sd, "combo", -1);
-		selection.player_class = dict_int(sd, "player_class",
+		selection.nationality = profile_dict_int(sd, "nationality", -1);
+		selection.division = profile_dict_int(sd, "division", -1);
+		selection.combo = profile_dict_int(sd, "combo", -1);
+		selection.player_class = profile_dict_int(sd, "player_class",
 				opennova::inmatch::kJoinDefaultPlayerClass);
 	}
 	return out;

@@ -26,36 +26,16 @@ static func _lan_row(server_name: String, players: int, max_players: int) -> Lan
 
 # --- Driver harness (the compiled-menu seam) ----------------------------------
 
-func _doc_from_xml(xml: String) -> MnuDocument:
-	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(xml.to_utf8_buffer()), OK,
-			"the synthetic .mnu XML parses")
-	return doc
-
-
-func _wnd(type: String, name: String, top: int, inner := "") -> String:
-	return ('<WINDOW type="%s" name="%s"><POSITION><LEFT>10</LEFT><TOP>%d</TOP>'
-			+ '<RIGHT>250</RIGHT><BOTTOM>%d</BOTTOM></POSITION>%s</WINDOW>') % [
-			type, name, top, top + 20, inner]
-
-
-func _screen_xml(screen_name: String, body: String) -> String:
-	return ('<SCREEN><NAME>%s</NAME><WINDOW type="window" name="MAIN">'
-			+ '<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT>'
-			+ '<BOTTOM>600</BOTTOM></POSITION>%s</WINDOW></SCREEN>') % [
-			screen_name, body]
-
-
 # A synthetic mp.mnu host-settings screen: the named controls as authored .mnu
 # markup (edits + mission list + the 3-column rotation table + buttons). The
 # with_spins variant adds the GAME_TYPE/SERVERTYPE spin lists with authored
 # `value=` items (the semantic attr distinct from the display label).
 func _host_screen_xml(with_spins := false) -> String:
-	var body := _wnd("edit", "GAME_NAME", 10)
-	body += _wnd("edit", "MAX_PLAYERS", 34)
-	body += _wnd("checkbox", "ALLOW_SPECTATORS", 330)
-	body += _wnd("edit", "SPECTATOR_PW", 354)
-	body += _wnd("list", "MISSION_LIST", 58)
+	var body := MenuDriverFixture.wnd("edit", "GAME_NAME", 10)
+	body += MenuDriverFixture.wnd("edit", "MAX_PLAYERS", 34)
+	body += MenuDriverFixture.wnd("checkbox", "ALLOW_SPECTATORS", 330)
+	body += MenuDriverFixture.wnd("edit", "SPECTATOR_PW", 354)
+	body += MenuDriverFixture.wnd("list", "MISSION_LIST", 58)
 	body += ('<WINDOW type="table" name="SELECTED_MISSIONS">'
 			+ '<POSITION><LEFT>300</LEFT><TOP>58</TOP><RIGHT>520</RIGHT><BOTTOM>200</BOTTOM></POSITION>'
 			+ '<COLUMN count="3">'
@@ -63,32 +43,32 @@ func _host_screen_xml(with_spins := false) -> String:
 			+ '<HEADER column="1" width="60" justify="LEFT">TYPE</HEADER>'
 			+ '<HEADER column="2" width="40" justify="LEFT">SWITCH</HEADER>'
 			+ '</COLUMN></WINDOW>')
-	body += _wnd("button", "ADD_MISSIONS", 210)
-	body += _wnd("button", "REMOVE_MISSIONS", 234)
-	body += _wnd("button", "START_GAME", 258)
+	body += MenuDriverFixture.wnd("button", "ADD_MISSIONS", 210)
+	body += MenuDriverFixture.wnd("button", "REMOVE_MISSIONS", 234)
+	body += MenuDriverFixture.wnd("button", "START_GAME", 258)
 	if with_spins:
 		# Synthetic value attrs: the test pins pass-through of the authored
 		# value=, not any specific retail number.
-		body += _wnd("spinlist", "GAME_TYPE", 282,
+		body += MenuDriverFixture.wnd("spinlist", "GAME_TYPE", 282,
 				'<ITEMS><ITEM value="3">HG_COOPERATIVE</ITEM><ITEM value="0">HG_DEATHMATCH</ITEM></ITEMS>')
-		body += _wnd("spinlist", "SERVERTYPE", 306,
+		body += MenuDriverFixture.wnd("spinlist", "SERVERTYPE", 306,
 				'<ITEMS><ITEM value="0">HG_SERVEPLAY</ITEM><ITEM value="1">HG_SERVEONLY</ITEM></ITEMS>')
-	return _screen_xml("MULTI_PLAYER_HOST", body)
+	return MenuDriverFixture.screen_xml("MULTI_PLAYER_HOST", body)
 
 
 func _lan_screen_xml() -> String:
-	var body := _wnd("list", "LAN_GAME_LIST", 10)
-	body += _wnd("button", "LAN_SEARCH", 200)
-	body += _wnd("button", "LAN_JOINGAME", 224)
-	return _screen_xml("LAN_MULTI_PLAYER", body)
+	var body := MenuDriverFixture.wnd("list", "LAN_GAME_LIST", 10)
+	body += MenuDriverFixture.wnd("button", "LAN_SEARCH", 200)
+	body += MenuDriverFixture.wnd("button", "LAN_JOINGAME", 224)
+	return MenuDriverFixture.screen_xml("LAN_MULTI_PLAYER", body)
 
 
 func _make_host_driver(with_spins := false) -> MenuDriver:
-	return MenuDriverFixture.driver_over(self, _doc_from_xml(_host_screen_xml(with_spins)), "jo_mp.mnu")
+	return MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, _host_screen_xml(with_spins)), "jo_mp.mnu")
 
 
 func _make_lan_driver() -> MenuDriver:
-	return MenuDriverFixture.driver_over(self, _doc_from_xml(_lan_screen_xml()), "jo_mp.mnu")
+	return MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, _lan_screen_xml()), "jo_mp.mnu")
 
 
 # Simulate a control press: the driver emits widget_activated(id, NAME) on the
@@ -121,8 +101,8 @@ func test_owns_menu_detects_mp_menu() -> void:
 	var mp := MpMenuCompanion.new()
 	assert_true(mp.owns_menu(_make_host_driver()),
 			"a menu carrying SELECTED_MISSIONS is the JO mp menu")
-	var plain := MenuDriverFixture.driver_over(self, _doc_from_xml(_screen_xml("PLAIN",
-			_wnd("button", "OK", 10))), "plain.mnu")
+	var plain := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAIN",
+			MenuDriverFixture.wnd("button", "OK", 10))), "plain.mnu")
 	assert_false(mp.owns_menu(plain), "a plain menu is left to the shell")
 
 
@@ -192,7 +172,7 @@ func test_start_game_emits_host_config() -> void:
 	# SERVERTYPE absent in this stand-in menu -> serve-and-play (dedicated=false). The real
 	# screen's SERVERTYPE spinlist (HG_SERVEONLY value=1) flips this; the value-attr read is
 	# pinned in test_servertype_value_attr_selects_dedicated_not_the_label below.
-	assert_eq(config.dedicated, false, "no SERVERTYPE control -> serve-and-play default")
+	assert_true(config.serve_and_play, "no SERVERTYPE control -> serve-and-play default")
 
 
 func test_start_game_defaults() -> void:
@@ -274,7 +254,7 @@ func test_servertype_value_attr_selects_dedicated_not_the_label() -> void:
 	_press(driver, "START_GAME")
 	assert_signal_emitted(mp, "lan_host_start_requested")
 	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
-	assert_true(config.dedicated, "SERVERTYPE value 1 hosts dedicated (no local player)")
+	assert_false(config.serve_and_play, "SERVERTYPE value 1 hosts dedicated (no local player)")
 	assert_eq(config.game_type_attr, "3",
 		"the GAME_TYPE spin relays its selected row's authored value attr")
 
@@ -364,7 +344,7 @@ func test_auto_game_type_matches_retail_mission_mode_table() -> void:
 		MissionData.ATTRIB_CONQUER_AND_CONTROL: 0x50010,
 	}
 	for mode in modes:
-		assert_eq(HostSessionConfig.game_type_for_mission_mode(int(mode)), int(modes[mode]),
+		assert_eq(NetProtocol.game_type_for_mission_mode(int(mode)), int(modes[mode]),
 			"mission mode 0x%08x uses retail's session game type" % int(mode))
 
 
@@ -416,16 +396,16 @@ func test_host_rule_controls_reach_native_session_configuration() -> void:
 			"KILL_LIMIT": "500", "MAX_SCORE": "500", "TAKEOVER_TIME": "20",
 			"MAX_PLAYERS": "99"}
 	for control in edits:
-		body += _wnd("edit", control, 10)
+		body += MenuDriverFixture.wnd("edit", control, 10)
 	for control in ["TEAM_FF", "FRIENDLY_TAG", "FF_WARNING", "TEAM_CHOOSE",
 			"CLAYMORE_PREF", "TRACERS", "LFP_TAKEOVER", "SERVERTYPE"]:
-		body += _wnd("spinlist", control, 40,
+		body += MenuDriverFixture.wnd("spinlist", control, 40,
 				'<ITEMS><ITEM value="0">ZERO</ITEM><ITEM value="1">ONE</ITEM></ITEMS>')
-	body += _wnd("spinlist", "GAME_LOCATION", 70,
+	body += MenuDriverFixture.wnd("spinlist", "GAME_LOCATION", 70,
 			'<ITEMS><ITEM value="32">US</ITEM></ITEMS>')
-	var screen := _host_screen_xml().replace(_wnd("edit", "MAX_PLAYERS", 34), "")
+	var screen := _host_screen_xml().replace(MenuDriverFixture.wnd("edit", "MAX_PLAYERS", 34), "")
 	screen = screen.replace("</WINDOW></SCREEN>", body + "</WINDOW></SCREEN>")
-	var driver := MenuDriverFixture.driver_over(self, _doc_from_xml(screen), "jo_mp.mnu")
+	var driver := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, screen), "jo_mp.mnu")
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
 	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)

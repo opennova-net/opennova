@@ -22,10 +22,7 @@ const STAGED_FIXTURES := {
 
 
 func should_skip_script():
-	for rel in STAGED_FIXTURES:
-		if RetailData.fixture(rel).is_empty():
-			return RetailData.fixture_pending_text(rel)
-	return false
+	return RetailData.fixtures_skip(STAGED_FIXTURES.keys())
 
 
 # The armory's world view, faked over a REAL spawned simulation and the staged
@@ -60,11 +57,7 @@ class FakeArmoryView:
 func before_each() -> void:
 	Strings.clear()
 	MusicService.set_var(2, 0)
-	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	if not DirAccess.dir_exists_absolute(dir):
-		assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
-	for rel in STAGED_FIXTURES:
-		_copy_fixture(RetailData.fixture(rel), dir.path_join(STAGED_FIXTURES[rel]))
+	PresenterFixture.stage(self, TMP_DIR, STAGED_FIXTURES)
 
 
 func after_each() -> void:
@@ -72,26 +65,7 @@ func after_each() -> void:
 
 
 func after_all() -> void:
-	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	for name in STAGED_FIXTURES.values():
-		var path := dir.path_join(name)
-		if FileAccess.file_exists(path):
-			DirAccess.remove_absolute(path)
-	DirAccess.remove_absolute(dir)
-
-
-func _copy_fixture(source: String, target: String) -> void:
-	var output := FileAccess.open(target, FileAccess.WRITE)
-	assert_not_null(output, "temporary armory fixture opens for write")
-	if output != null:
-		output.store_buffer(FileAccess.get_file_as_bytes(source))
-		output.close()
-
-
-func _make_root() -> ResourceRoot:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(TMP_DIR)), OK)
-	return root
+	PresenterFixture.unstage(TMP_DIR, STAGED_FIXTURES)
 
 
 func _make_weapons() -> WeaponDatabase:
@@ -112,13 +86,13 @@ func _real_sim(entity_team: int = 2) -> Simulation:
 	autofree(sim)
 	assert_true(sim.load_from_mission_data(mission))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, entity_team))
-	assert_eq(sim.load_weapon_table(_make_root(), "weapon.def"), OK)
+	assert_eq(sim.load_weapon_table(PresenterFixture.root_over(self, TMP_DIR), "weapon.def"), OK)
 	return sim
 
 
 func _make_world(sim: Simulation, weapons: WeaponDatabase) -> FakeArmoryView:
 	var view := FakeArmoryView.new()
-	view.root = _make_root()
+	view.root = PresenterFixture.root_over(self, TMP_DIR)
 	view.weapons = weapons
 	view.sim_value = sim
 	return view

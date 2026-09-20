@@ -33,6 +33,14 @@ bool near(float actual, float expected, float epsilon = 0.0001f) {
 	return std::fabs(actual - expected) <= epsilon;
 }
 
+// The 8.24 mission clock read as HHMM, computed independently of the code
+// under test (whole hours * 100 + the minute remainder).
+float fixed24_to_hhmm(int value) {
+	const double hours = static_cast<double>(value) / static_cast<double>(1 << 24);
+	const double hour = std::floor(hours);
+	return static_cast<float>(hour * 100.0 + (hours - hour) * 60.0);
+}
+
 bool rgb_near(const opennova::env::Rgb &actual,
 		const opennova::env::Rgb &expected, float epsilon = 0.0001f) {
 	return near(actual.r, expected.r, epsilon) &&
@@ -69,13 +77,8 @@ int main() {
 	bool ok = true;
 
 	// --- HHMM / minute / fixed24 clock views --------------------------------
-	ok &= expect(near(EnvironmentState::minute_of_day_to_hhmm(750.0f), 1230.0f),
-			"750 minutes reads 12:30");
 	ok &= expect(near(EnvironmentState::hhmm_to_minute_of_day(1230.0f), 750.0f),
 			"12:30 is minute 750");
-	ok &= expect(
-			near(EnvironmentState::fixed24_to_hhmm(12 << 24), 1200.0f),
-			"12h fixed24 reads 12:00");
 
 	// --- the mission clock lives in the weather home ---------------------------
 	{
@@ -98,7 +101,7 @@ int main() {
 		ok &= expect(weather.tod_fixed24 == (12u << 24) + 5u * per_tick,
 				"five ticks advance exactly five increments");
 		env.sync_clock_from_weather();
-		ok &= expect(near(env.time_of_day(), EnvironmentState::fixed24_to_hhmm(
+		ok &= expect(near(env.time_of_day(), fixed24_to_hhmm(
 										  static_cast<int>(weather.tod_fixed24)), 0.01f),
 				"the env clock follows the weather clock");
 		weather.command_time_of_day_minutes(750);
@@ -364,7 +367,7 @@ int main() {
 		ok &= expect(weather.state().cloud_scroll_rate_target ==
 						static_cast<uint32_t>(std::lround(cfg.sky_speed * 1024.0f)),
 				"cloud scroll rate packs sky_speed << 10");
-		ok &= expect(near(env.time_of_day(), EnvironmentState::fixed24_to_hhmm(
+		ok &= expect(near(env.time_of_day(), fixed24_to_hhmm(
 										  static_cast<int>(weather.state().tod_fixed24)), 0.01f),
 				"the env clock reads the exact integer clock");
 	}

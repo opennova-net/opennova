@@ -354,7 +354,7 @@ static int arbitrate_body_state(InfantryState &inf, int resolved) {
 // gated on the adm actually carrying the clip. The replication replica channel runs
 // the same insert through the shared pair map (D-NET-209 / D-INF-23).
 
-void commit_body_state(InfantryState &inf, int resolved, const IRootMotionSource *root_motion) {
+void commit_body_state(InfantryState &inf, int resolved) {
     if (resolved < 0) return; // no clips at all: hold the current state
     if (resolved == inf.anim_state) return;
     const int committed = arbitrate_body_state(inf, resolved);
@@ -428,7 +428,7 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
             if (self->mounted_config == 2 && root_motion->has_clip(inf.adm_id, 69))
                 emplaced = 69;
         }
-        commit_body_state(inf, infantry_resolve_state(inf.adm_id, emplaced), root_motion);
+        commit_body_state(inf, infantry_resolve_state(inf.adm_id, emplaced));
         return;
     }
     // The WALK-vs-RUN gate, ported 1:1 from the move-state selection:
@@ -442,8 +442,8 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
     //
     // RETRACTS the previous reading ("entity[190] || slot+136 || combat-reaction
     // byte +875"). Two of those three terms were wrong, and the first was inert:
-    // `alert_timer` (entity[190]) is READ HERE AND WRITTEN NOWHERE in the whole
-    // engine, so the term was always false. Retail's first term is damageTimer,
+    // `alert_timer` (entity[190]) was read here and is WRITTEN NOWHERE in the
+    // whole engine, so the term was always false. Retail's first term is damageTimer,
     // which IS live on both legs that raise it -- damage (+10, capped 25) and
     // SIGHT (+12, capped 15) -- so a soldier who merely sees an enemy runs. Ours
     // kept walking, which is why route followers covered a fraction of their
@@ -555,7 +555,7 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
     const int resolved = world.script.forced_animation != 0 &&
             target == world.script.forced_animation ? target :
             infantry_resolve_state(inf.adm_id, target);
-    commit_body_state(inf, resolved, root_motion);
+    commit_body_state(inf, resolved);
 }
 
 // The witnessed org2 player-body selection — see the ai.h declaration. One function
@@ -1357,7 +1357,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // The live burn branch reaches the common arbiter directly.
             // [orig: Entity_UpdateInfantryAI @0x4B9910, LABEL_754]
             const int target = combat_state > 0 ? combat_state : anim_state::kIdle;
-            commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion);
+            commit_body_state(inf, infantry_resolve_state(inf.adm_id, target));
         } else {
             // The debug/script override is after combat and before attachment and
             // gait selection. It bypasses the current animation's lock, preserving

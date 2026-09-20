@@ -6,22 +6,9 @@
 
 #include <runtime/world/entity.h> // kMoveOrderLean* (the wire move_input bits)
 #include <base/io/bam.h>
+#include <base/io/rotating_prng.h>
 
 namespace opennova::replication {
-
-namespace {
-// [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0] The low bit selects the
-// recoil-yaw sign; preserve the complete state because decoded rows share one
-// stream rather than owning one generator each. Other process-global retail
-// consumers remain outside this view's bounded call-history seam.
-inline int32_t prng_next16(uint32_t &state) {
-	const uint32_t rol11 = (state << 11) | (state >> 21);
-	uint32_t next = state + rol11;
-	next = ((next << 4) | (next >> 28)) ^ 1u;
-	state = next;
-	return static_cast<int32_t>(next);
-}
-} // namespace
 
 void ClientReplicaPipeline::tick_lean() {
 	for (ClientEntityState &es : state_.entities) {
@@ -60,7 +47,12 @@ void ClientReplicaPipeline::tick_recoil() {
 	for (ClientEntityState &es : state_.entities) {
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
 			continue;
-		const int32_t random16 = prng_next16(prng16_); // unconditional [orig: body updater]
+		// [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0] The low bit selects the
+		// recoil-yaw sign; prng16_ keeps the complete state because decoded rows
+		// share one stream rather than owning one generator each. Other
+		// process-global retail consumers remain outside this view's bounded
+		// call-history seam.
+		const int32_t random16 = io::rotating_prng_next16(prng16_); // unconditional [orig: body updater]
 		const int32_t step = io::bam_sar(io::bam_add(es.recoil_pitch, 4), 3);
 		const int32_t half = io::bam_sar(step, 1);
 		es.recoil_pitch = io::bam_sub(es.recoil_pitch, half);

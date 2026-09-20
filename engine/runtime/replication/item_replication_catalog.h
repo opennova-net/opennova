@@ -155,14 +155,12 @@ public:
 	const ItemReplicationProfile *by_definition_id(int32_t definition_id) const noexcept;
 	const ItemReplicationProfile *by_wire_type(uint16_t wire_type_id) const noexcept;
 
-	WireCompactCodec compact_codec_for(uint16_t wire_type_id) const noexcept;
 	// Presence-aware record-width resolution. A present Unknown is a known but
 	// unresolved/ambiguous items.def entry and is therefore terminal: callers
 	// must fail closed instead of consulting pool or heuristic fallbacks. nullopt
 	// means this catalog has no definition for the wire id.
 	std::optional<EntityClass> resolve_wire_entity_class(
 			uint16_t wire_type_id) const noexcept;
-	EntityClass wire_entity_class_for(uint16_t wire_type_id) const noexcept;
 
 	const std::vector<ItemReplicationProfile> &profiles() const noexcept { return profiles_; }
 	const std::vector<ItemCatalogIssue> &issues() const noexcept { return issues_; }
