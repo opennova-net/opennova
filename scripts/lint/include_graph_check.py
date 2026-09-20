@@ -14,6 +14,9 @@ in the path is what makes the layering visible, so this check reads it:
        engine/base/**                    include base, formats
        engine/net/**                     include base, formats, net
        engine/runtime/**                 include base, formats, net, runtime
+       engine/editor/**                  include base, formats, net, runtime, editor
+     (the editor is the OpenNova Editor's portable core, ADR 0046 d3; nothing
+     below it may include it)
   1b. NET-AGNOSTIC (ADR 0043 d4) — every engine/runtime lib except
      runtime/inmatch and runtime/replication stays free of net/,
      runtime/inmatch/ and runtime/replication/ includes: the world, the
@@ -53,7 +56,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 ENGINE = REPO / "engine"
-GROUPS = ("base", "formats", "runtime", "net")
+GROUPS = ("base", "formats", "runtime", "net", "editor")
 SCAN_ROOTS = ("engine", "apps", "tests", "godot/src")
 GODOT_FREE_ROOTS = ("engine", "apps", "tests")
 # ADR 0040: a quoted include names a same-directory sibling and nothing else; a
@@ -71,6 +74,8 @@ ALLOWED = {
     "base": {("base", None), ("formats", None)},
     "net": {("base", None), ("formats", None), ("net", None)},
     "runtime": {("base", None), ("formats", None), ("net", None), ("runtime", None)},
+    "editor": {("base", None), ("formats", None), ("net", None), ("runtime", None),
+               ("editor", None)},
 }
 
 # Rule 1b: the runtime libs that carry the wire (ADR 0043 d4). Every other
@@ -255,7 +260,8 @@ def main() -> int:
     if violations and args.enforce:
         print("[include-graph] FAIL: engine headers are included as <group/lib/file.h>; "
               "a tree includes only the groups below it (ADR 0029 d3, net below runtime "
-              "since ADR 0043 d4); every runtime lib but inmatch/replication is "
+              "since ADR 0043 d4, editor above runtime since ADR 0046 d3); every runtime "
+              "lib but inmatch/replication is "
               "net-agnostic; inmatch/replication/wac/mission/world reach terrain only "
               "through runtime/terrain_query's seam headers (ADR 0020); nothing under "
               "engine/, apps/ or tests/ includes godot; imgui headers stay under "

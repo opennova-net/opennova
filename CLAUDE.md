@@ -22,7 +22,10 @@ easier to relay than to rediscover.
   frame, the server/client state machines and frame loops, the transports) and
   `replication` (the world<->wire seam and the client replica state), ADR 0043 d4),
   `net/` (the wire only: novacrypto, napi, npwire, novaworld; it never includes
-  or links `runtime/`). `engine/` is the one public
+  or links `runtime/`), plus the fifth group `editor/` (the OpenNova Editor's
+  portable core, STATIC `opennova_editor` above runtime, ADR 0046: project,
+  assets, requirements, and the later slices; nothing below it may include or
+  link it). `engine/` is the one public
   include root: `#include <runtime/world/x.h>`, `<formats/pff/pff.h>` (ADR 0040).
   Native consumers link the engine groups directly.
   See `engine/CLAUDE.md`.
@@ -37,7 +40,9 @@ easier to relay than to rediscover.
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
   `nw_pp/` (NovaWorld in-game packet pretty-printer/decoder), `extract/`
   (`opennova-extract`: writes named entries out of a mounted game root through
-  the engine's own resource index; replaced the dump probes, ADR 0041), `common/`
+  the engine's own resource index; replaced the dump probes, ADR 0041), `project/`
+  (`opennova-project`: the editor's project core on the command line: `new`,
+  `status`, `validate`; ADR 0046 d4), `common/`
   (shared socket helpers, deliberately app-layer; pcap I/O lives in
   `engine/base/pcapio`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `launcher/` — Windows tray app pointing a

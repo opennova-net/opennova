@@ -85,6 +85,13 @@ int pff_extract_raw(const PffArchive *archive, const PffEntry *entry,
 /* Check if raw data starts with a valid PFF header. */
 int pff_is_pff(const uint8_t *data, size_t size);
 
+/* Normalize a PFF name into an uppercase, trailing-space-trimmed C string (the engine's
+   strupr + 0x20-trim used for sort/lookup; PFF_SortEntries @ 0x768280 / PFF_FindEntry
+   @ 0x7685d0). Reads up to raw_cap bytes or until a NUL; result capped to out_sz - 1 chars.
+   The reader's lookup, the writer's directory sort + duplicate detection and the editor's
+   asset registry (ADR 0046 d6: one flat identity per logical name) all key on it. */
+void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz);
+
 /* --- Write API --- */
 
 /* Container format selector for a written archive (legacy is read-only; not authored here). */

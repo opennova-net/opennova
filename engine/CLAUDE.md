@@ -34,6 +34,16 @@
     orders its own presentation/device pipeline. `world::Match` owns gameplay
     rules, scoring, clocks, winner evaluation, and the frozen result; wire
     code only serializes that result.
+  - `editor/` — the fifth group (ADR 0046 d3): the OpenNova Editor's portable core
+    (`project`, `assets`, `requirements`, then the blank factories, the build, the play
+    session, the documents, the graph, the importers and the ImGui windows as their
+    slices land). STATIC `opennova_editor`, PUBLIC-linking `opennova_runtime` so its
+    validators reuse the engine's own load paths; nothing under the four groups
+    below may include or link it (`include_graph_check.py`, `link_graph_check.py`),
+    and the game and the Play child never carry it. Tooling, not a port: its sources
+    sit in the citation allowlist by the `editor/` prefix. No directory under it may
+    start with `build` (the lints skip such directories; the build lib is
+    `project_build/`).
 - Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —
   headers and sources sit side by side in the lib dir (nested subdirs allowed, e.g.
   `npwire/wire/`), and `engine/` is the ONE public include root (ADR 0040): every
@@ -77,7 +87,10 @@
   `replication`), and `opennova_novaworld_service` (the service alone — the ONLY
   target linking `opennova_sqlite`; the Godot layer (`godot/src`) links
   `opennova_runtime`, which PUBLIC-links `opennova_net`, never the service).
-  `opennova_io` stays header-only INTERFACE. PUBLIC chain (ADR 0043 d4): formats
+  `opennova_io` stays header-only INTERFACE. Since ADR 0046 a sixth STATIC group
+  target, `opennova_editor` (`editor/`), links `opennova_runtime` and is linked only
+  by the editor-enabled GDExtension variant, `apps/project` and the tests. PUBLIC
+  chain (ADR 0043 d4): formats
   links io, base links formats (base deliberately sits ABOVE formats because vfs
   parses pff/scr/bfc1), net links base, runtime links net, the service links net;
   `link_graph_check.py` forbids `opennova_net -> opennova_runtime` and keeps the

@@ -8,7 +8,10 @@ ENG-6 engine-side manifest and for the repository's minimum game-data tree.
 The manifest is `engine/base/gameprofile/required_resources.h`: it instantiates
 this record (phase-major witnessed order, severity classes, per-row failure
 text + citation; the `required_resources` ctest pins the fatal set and
-completeness). `ResourceRoot.list_missing_boot_resources()` /
+completeness). Each row also carries a stable `role` token (`gametext`,
+`main_menu`, ...) that the OpenNova Editor's requirements checklist keys on
+(ADR 0046); the token is ours, not a witnessed fact, and the same ctest pins
+its uniqueness. `ResourceRoot.list_missing_boot_resources()` /
 `boot_resource_failure_text()` probe the individually-fatal file rows against
 the mounted root (the archive-table trio stays `mount_runtime`'s own gate), and
 the game shell raises honest missing-resource errors at mount (`main_game.gd`,

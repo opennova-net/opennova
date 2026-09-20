@@ -3057,3 +3057,32 @@ add_executable(hud_combat_test hud/hud_combat_test.cpp)
 target_link_libraries(hud_combat_test PRIVATE opennova_runtime)
 target_compile_features(hud_combat_test PRIVATE cxx_std_17)
 add_test(NAME hud_combat COMMAND hud_combat_test)
+
+# The strict JSON reader/writer behind the editor's project files (ADR 0046 d6).
+add_executable(json_test io/json_test.cpp)
+target_link_libraries(json_test PRIVATE opennova_io)
+target_compile_features(json_test PRIVATE cxx_std_17)
+target_include_directories(json_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME json COMMAND json_test)
+
+# The OpenNova Editor's core (ADR 0046): the project file, the asset registry, the
+# requirements checklist, and the opennova-project commands driven end to end.
+add_executable(editor_project_document_test editor/project_document_test.cpp)
+target_link_libraries(editor_project_document_test PRIVATE opennova_editor)
+target_include_directories(editor_project_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_project_document COMMAND editor_project_document_test)
+
+add_executable(editor_asset_registry_test editor/asset_registry_test.cpp)
+target_link_libraries(editor_asset_registry_test PRIVATE opennova_editor)
+target_include_directories(editor_asset_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_asset_registry COMMAND editor_asset_registry_test)
+
+add_executable(editor_requirements_test editor/requirements_test.cpp)
+target_link_libraries(editor_requirements_test PRIVATE opennova_editor)
+target_include_directories(editor_requirements_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_requirements COMMAND editor_requirements_test)
+
+add_executable(project_cli_test editor/project_cli_test.cpp)
+target_link_libraries(project_cli_test PRIVATE opennova_project_cli)
+target_include_directories(project_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME project_cli COMMAND project_cli_test)

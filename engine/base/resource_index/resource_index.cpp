@@ -1,14 +1,15 @@
 #include <base/resource_index/resource_index.h>
 
+#include <base/resource_index/resource_kind.h>
 #include <base/vfs/vfs.h>
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <system_error>
 
+#include <base/io/file_time.h>
 #include <base/io/strutil.h>
 
 namespace fs = std::filesystem;
@@ -18,112 +19,8 @@ namespace opennova {
 namespace {
 std::atomic<uint64_t> g_cache_epoch{1};
 
-// Last-write time of `path` as Unix seconds (UTC), or 0 when it can't be read.
-// fs::file_time_type has no portable epoch before C++20, so map it onto
-// system_clock via the now()-offset trick (precise enough for display).
-int64_t file_modified_unix_seconds(const fs::path &path) {
-	std::error_code ec;
-	const fs::file_time_type ftime = fs::last_write_time(path, ec);
-	if (ec) {
-		return 0;
-	}
-	const auto system_time = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-	        ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
-	return std::chrono::duration_cast<std::chrono::seconds>(system_time.time_since_epoch()).count();
-}
-
-bool has_magic(const std::vector<uint8_t> &bytes, const char (&want)[5]) {
-	return bytes.size() >= 4 &&
-	       bytes[0] == want[0] &&
-	       bytes[1] == want[1] &&
-	       bytes[2] == want[2] &&
-	       bytes[3] == want[3];
-}
-
-bool has_rtxt_magic(const std::vector<uint8_t> &bytes) {
-	return has_magic(bytes, "RTXT");
-}
-
-// MUS bytecode is stored in an .bin wrapper whose first four bytes are "SCR0"
-// (the music script loader's SCR container). This disambiguates a music .bin
-// from a localized-strings .bin (RTXT magic) and a raw .bin (neither).
-bool has_scr_magic(const std::vector<uint8_t> &bytes) {
-	return has_magic(bytes, "SCR0");
-}
-
-std::string extension_for_name(const std::string &name) {
-	return strutil::to_lower(fs::path(name).extension().string());
-}
-
-std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, bool is_scr_bin) {
-	const std::string extension = extension_for_name(name);
-	// Avatars.def is the singular player-character database. Matched by NAME, not
-	// extension: the .def extension is
-	// shared with weapon/items/ammo/hudpos.def, which the engine consumes by name at
-	// runtime and which stay unbrowsable (like .dbf). [orig: CAvatarDefs_Init @ 0x57b180
-	// opens "Avatars.def" by exact name]
-	if (strutil::to_lower(fs::path(name).filename().string()) == "avatars.def") {
-		return "avatar";
-	}
-	if (extension == ".bms" || extension == ".mis") {
-		return "mission";
-	}
-	if (extension == ".trn") {
-		return "terrain";
-	}
-	if (extension == ".env") {
-		return "environment";
-	}
-	if (extension == ".3di") {
-		return "object_model";
-	}
-	if (extension == ".kda") {
-		return "credits";
-	}
-	if (extension == ".fnt") {
-		return "font";
-	}
-	// The effect catalog is one grammar across three extensions. `.ptl` is the base
-	// set; `.ptu` and `.ptg` are the US and German gore sets, parsed by the SAME
-	// section callback and differing only in which one the runtime selects
-	// [orig: CEffectSystem_Init @ 0x5f6070 matches an archive entry against ".ptl"
-	// OR the selected extension @0x5f64f3 and parses both through
-	// CEffectWorld_ParseSectionCallback @ 0x5ecb40; the loose `.ptu` leg's
-	// CEffectWorld_LoadDefinitionFile @ 0x5ecf70 is a thin wrapper on the same
-	// File_ParseASCIIFile + callback]. The index carries all three so the browser
-	// and the loader can both see them; particle_extension() owns the SELECTION.
-	if (extension == ".ptl" || extension == ".ptu" || extension == ".ptg") {
-		return "particle";
-	}
-	if (extension == ".mnu") {
-		return "menu";
-	}
-	if (extension == ".mns") {
-		return "menu_style";
-	}
-	if (extension == ".sbf") {
-		return "sbf";
-	}
-	if (extension == ".lwf") {
-		return "sound";
-	}
-	// The .def family is name-keyed, not extension-keyed (items/weapon/ammo/avatars all share
-	// .def and are consumed at runtime by name). Only hudpos.def is a browsable kind, for the
-	// HUD layout catalog; the rest stay unclassified.
-	if (extension == ".def" && strutil::to_lower(fs::path(name).filename().string()) == "hudpos.def") {
-		return "hudpos";
-	}
-	// NOTE: .dbf (dialog bank) is intentionally NOT classified as a browsable kind.
-	// It is consumed at runtime by name (DbfData); classifying it as an LWF sound
-	// profile would conflate two unrelated formats.
-	if (extension == ".bin" && is_scr_bin) {
-		return "music_script";
-	}
-	if (extension == ".bin" && is_rtxt_bin) {
-		return "strings";
-	}
-	return "";
-}
+// The kind classifier (extension + the `.bin` magic peeks) lives in resource_kind.cpp so
+// the editor's asset registry shares it (ADR 0046 d9).
 
 std::string normalize_kind(const std::string &kind) {
 	const std::string key = strutil::to_lower(strutil::trim(kind));
@@ -229,7 +126,7 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 	impl_->root_dir = impl_->vfs.game_root();
 
 	for (const VfsFileLocation &loc : impl_->vfs.list_files()) {
-		const std::string ext = extension_for_name(loc.logical_name);
+		const std::string ext = resource_extension_for_name(loc.logical_name);
 		std::string kind;
 		if (ext == ".bin") {
 			// RTXT strings tables and SCR0 music scripts need a content peek; only
@@ -237,11 +134,11 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 			// loose/PFF payloads classify the same way as plaintext files.
 			std::vector<uint8_t> bytes;
 			const bool ok = impl_->vfs.read_file(loc.logical_name, bytes);
-			const bool rtxt = ok && has_rtxt_magic(bytes);
-			const bool scr = ok && has_scr_magic(bytes);
-			kind = kind_for_name_and_magic(loc.logical_name, rtxt, scr);
+			const bool rtxt = ok && resource_bin_has_rtxt_magic(bytes);
+			const bool scr = ok && resource_bin_has_scr_magic(bytes);
+			kind = resource_kind_for_name_and_magic(loc.logical_name, rtxt, scr);
 		} else {
-			kind = kind_for_name_and_magic(loc.logical_name, false, false);
+			kind = resource_kind_for_name_and_magic(loc.logical_name, false, false);
 		}
 		if (kind.empty()) {
 			continue;
@@ -265,7 +162,7 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 			if (!size_ec) {
 				entry.size_bytes = static_cast<uint64_t>(size);
 			}
-			entry.modified_time = file_modified_unix_seconds(loose_path);
+			entry.modified_time = io::file_modified_unix_seconds(loose_path);
 		} else {
 			entry.source_type = "pff";
 			entry.archive_path = loc.source_path;
