@@ -34,8 +34,6 @@ public:
 	// The "Avatars" RTXT string key of the display name.
 	String get_display_name() const;
 	String get_graphic() const;
-	String get_graphic_j() const;
-	String get_graphic_s() const;
 	// The authored `camo r g b` bytes: texture-variant selectors stored raw
 	// into TEX_CAMO1..3 (AvatarDatabase.apply_part_camo).
 	Vector3i get_camo() const;
@@ -72,8 +70,6 @@ public:
 	String get_raw_id() const;
 	int get_id() const { return value_.id; }
 	String get_head_name() const;
-	String get_body_name() const;
-	String get_arms_name() const;
 	Ref<AvatarPartRow> get_head() const { return head_; }
 	Ref<AvatarPartRow> get_body() const { return body_; }
 	// Null when the combo authors no arms.
@@ -98,7 +94,6 @@ class AvatarNationalityRow : public RefCounted {
 	String name_key_;
 	String flags_;
 	int alignment_ = 0;
-	bool has_alignment_ = false;
 	int division_count_ = 0;
 
 protected:
@@ -114,8 +109,6 @@ public:
 	String get_flags() const { return flags_; }
 	// AvatarDatabase.ALIGN_GOOD / ALIGN_EVIL.
 	int get_alignment() const { return alignment_; }
-	// Whether an `alignment` line was authored.
-	bool has_alignment() const { return has_alignment_; }
 	int get_division_count() const { return division_count_; }
 };
 

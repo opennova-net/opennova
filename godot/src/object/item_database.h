@@ -32,7 +32,7 @@ class ItemDatabase : public RefCounted {
 private:
 	// The retained items.def parse (ADR 0028): the ONE store. The sim's
 	// engine-side trait fold (mission::resolve_item_traits /
-	// resolve_ai_weapons) and the netsim replication catalog read DefItemDef
+	// resolve_ai_weapons) and the replication replication catalog read DefItemDef
 	// rows directly from here; every accessor below converts at the call.
 	// Freed at the top of every load attempt (the id index clears first) and
 	// in the destructor.
@@ -96,7 +96,7 @@ public:
 	// Load items.def by flat name through the mounted resource root (VFS), so the item
 	// database resolves from PFF archives at runtime. Mirrors the other *_from_resource_root.
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
-	// The retained parse the engine-side trait fold and the netsim replication
+	// The retained parse the engine-side trait fold and the replication replication
 	// catalog consume (empty — entries nullptr, count 0 — until a load succeeds).
 	const opennova::def::DefItemsFile &native_items() const noexcept { return items_file_; }
 	bool is_loaded() const;
@@ -127,11 +127,6 @@ public:
 	// Building-interior daylight fraction from items.def light_transfer
 	// (authored percent clamped to 0..100 at parse; 0.0 for unknown/absent).
 	float get_light_transfer(int id) const;
-	// items.def ItemDefAttrib & 0x100000 (AIData): true when the item def is AI-capable. The
-	// host's pool-1 0x0D stream gates the AI-trailer on this so the wire matches the stock
-	// decoder's own gate (itemDef.attrib & 0x100000 @0x433327). [docs/world/itemdef-re.md;
-	// docs/net/novaworld-net-re.md D-NET-97]
-	bool is_ai_capable(int id) const;
 	// The raw items.def ItemDefAttrib dword (itemDef+0x54); 0 for unknown ids. AS zone traits
 	// read 0x20000 "ChangeTeam" / 0x40000 "SpawnPoint". [net-re §5.61]
 	uint32_t get_attrib(int id) const;

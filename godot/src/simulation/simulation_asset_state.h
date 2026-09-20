@@ -8,7 +8,6 @@
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/object_id.hpp>
 
-#include <formats/score/score.h>                          // the retained score.ini parse
 #include <runtime/renderer/precipitation_frame.h>         // the precipitation drawer state + frame
 #include <runtime/replication/item_replication_catalog.h> // canonical items.def replication traits
 #include <runtime/terrain_query/surface_type_map.h>       // SurfaceTileEntry (the D-SND-15 placed tiles)
@@ -75,10 +74,6 @@ struct SimulationAssetState {
 		bool female = false;
 	};
 	std::vector<CharacterSexRow> character_sex_rows;
-	// Retained score.ini parse; the row is re-resolved whenever the mission's
-	// attrib flags change (either load order is legal).
-	opennova::score::File score_config;
-	bool score_config_loaded = false;
 	// The installed script program. Held as a shared_ptr so it survives
 	// reset_world(); each (re)load re-applies it onto the fresh kernel
 	// WacSystem when the kernel's own layered load installed none.

@@ -288,10 +288,6 @@ bool EntityCard::is_alive() const {
 	return value_.has_ai ? value_.ai.alive : value_.world.alive;
 }
 
-bool EntityCard::is_hidden() const {
-	return value_.has_ai ? value_.ai.hidden : value_.world.hidden;
-}
-
 int EntityCard::get_vehicle_family() const {
 	return value_.has_ai ? value_.ai.vehicle_family : value_.world.vehicle_family;
 }
@@ -385,13 +381,10 @@ Dictionary EntityCard::to_json_value() const {
 
 void EntityCard::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_facial_animation"), &EntityCard::has_facial_animation);
-	ClassDB::bind_method(D_METHOD("get_facial_expression"), &EntityCard::get_facial_expression);
 	ClassDB::bind_method(D_METHOD("get_facial_target"), &EntityCard::get_facial_target);
 	ClassDB::bind_method(D_METHOD("get_facial_override"), &EntityCard::get_facial_override);
-	ClassDB::bind_method(D_METHOD("get_facial_automatic"), &EntityCard::get_facial_automatic);
 	ClassDB::bind_method(D_METHOD("get_facial_override_timer"), &EntityCard::get_facial_override_timer);
 	ClassDB::bind_method(D_METHOD("get_facial_texture_priority"), &EntityCard::get_facial_texture_priority);
-	ClassDB::bind_method(D_METHOD("get_facial_blend"), &EntityCard::get_facial_blend);
 	ClassDB::bind_method(D_METHOD("get_facial_display_frame"), &EntityCard::get_facial_display_frame);
 	ClassDB::bind_method(D_METHOD("has_ai"), &EntityCard::has_ai);
 	ClassDB::bind_method(D_METHOD("has_world"), &EntityCard::has_world);
@@ -407,7 +400,6 @@ void EntityCard::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_pool"), &EntityCard::get_pool);
 	ClassDB::bind_method(D_METHOD("get_health"), &EntityCard::get_health);
 	ClassDB::bind_method(D_METHOD("is_alive"), &EntityCard::is_alive);
-	ClassDB::bind_method(D_METHOD("is_hidden"), &EntityCard::is_hidden);
 	ClassDB::bind_method(D_METHOD("get_vehicle_family"), &EntityCard::get_vehicle_family);
 	ClassDB::bind_method(D_METHOD("get_mission_position"), &EntityCard::get_mission_position);
 	ClassDB::bind_method(D_METHOD("get_position"), &EntityCard::get_position);

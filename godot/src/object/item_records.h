@@ -43,8 +43,6 @@ class ItemEmplacementAttachment : public RefCounted {
 	int angle_count_ = 0;
 	int down_limit_bam_ = 0;
 	int up_limit_bam_ = 0;
-	int right_limit_bam_ = 0;
-	int left_limit_bam_ = 0;
 	bool designated_g_ = false;
 	bool designated_c_ = false;
 
@@ -53,7 +51,7 @@ protected:
 
 public:
 	void assign(int p_kind, const String &p_userpoint, int p_item_id, int p_stored_slot,
-			int p_angle_count, int p_down, int p_up, int p_right, int p_left,
+			int p_angle_count, int p_down, int p_up,
 			bool p_designated_g, bool p_designated_c);
 
 	// ItemDatabase.EMPLACEMENT_ADDEWEAP / _G / _C.
@@ -61,14 +59,11 @@ public:
 	String get_userpoint() const { return userpoint_; }
 	int get_item_id() const { return item_id_; }
 	int get_stored_slot() const { return stored_slot_; }
-	int get_angle_count() const { return angle_count_; }
 	// Four authored limits (retail packs 0 or 4); explicit all-zero limits stay
 	// distinct from an omitted fallback.
 	bool has_explicit_limits() const { return angle_count_ == 4; }
 	int get_down_limit_bam() const { return down_limit_bam_; }
 	int get_up_limit_bam() const { return up_limit_bam_; }
-	int get_right_limit_bam() const { return right_limit_bam_; }
-	int get_left_limit_bam() const { return left_limit_bam_; }
 	bool is_designated_g() const { return designated_g_; }
 	bool is_designated_c() const { return designated_c_; }
 };
@@ -108,17 +103,13 @@ protected:
 public:
 	void assign(const opennova::mission::ItemEmplacementAttachmentSpec &p_value) { value_ = p_value; }
 
-	// The raw BMS type id and the full items.def id (type + 100000).
-	int get_child_type_id() const { return value_.child_type_id; }
+	// The full items.def id (the raw BMS type id + 100000).
 	int get_item_id() const;
 	// ItemDatabase.EMPLACEMENT_ADDEWEAP / _G / _C.
 	int get_kind() const { return static_cast<int>(value_.kind); }
 	int get_stored_slot() const { return value_.stored_slot; }
-	int get_angle_count() const { return value_.angle_count; }
 	int get_down_limit_bam() const { return value_.down_limit_bam; }
 	int get_up_limit_bam() const { return value_.up_limit_bam; }
-	int get_right_limit_bam() const { return value_.right_limit_bam; }
-	int get_left_limit_bam() const { return value_.left_limit_bam; }
 };
 
 // The static mount analysis of ONE item (ItemDatabase.extract_seat_specs_for_item):

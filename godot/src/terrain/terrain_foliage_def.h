@@ -54,9 +54,6 @@ public:
 	void set_shadow(bool enabled);
 	bool get_shadow() const;
 
-	bool get_force_on() const;
-
-
 	void copy_from_native(const opennova::FoliageDef &def);
 	opennova::FoliageDef to_native() const;
 };

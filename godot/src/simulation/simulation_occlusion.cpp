@@ -166,29 +166,6 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 		present_.last_occlusion_probe_us = opennova::io::perf_now_us() - occl_probe_start;
 }
 
-PackedInt64Array Simulation::get_building_visibility() const {
-	PackedInt64Array out;
-	if (!kernel_) return out;
-	// Pairs [bms_id, visible<<32 | mask] for every building with an OCCLUSION
-	// instance, plus collision-backed de-batched buildings that still entered
-	// the retail building batch. OOBJ instances apply their section mask.
-	// Without OOBJ there is no safe reimpl part-to-section map, so those buildings
-	// keep all render parts while still receiving batch/frustum/TOC visibility.
-	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
-		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
-		const bool has_occlusion = kernel_->occlusion.has_instance(e.handle);
-		if (!has_occlusion &&
-				kernel_->collision.model_for(kernel_->world, e.handle) == nullptr)
-			return;
-		const bool visible = kernel_->occlusion.building_visible(e.handle);
-		const uint32_t mask =
-		    has_occlusion ? kernel_->occlusion.section_mask(e.handle) : 0xFFFFFFFFu;
-		out.push_back(e.bms_id);
-		out.push_back(opennova::world::pack_building_visibility(mask, visible));
-	});
-	return out;
-}
-
 int64_t Simulation::building_visibility_mask(int64_t p_packed) {
 	return static_cast<int64_t>(opennova::world::building_visibility_mask(p_packed));
 }
@@ -197,19 +174,18 @@ bool Simulation::building_visibility_visible(int64_t p_packed) {
 	return opennova::world::building_visibility_visible(p_packed);
 }
 
-PackedInt32Array Simulation::get_render_culled_bms_ids() const {
-	PackedInt32Array out;
-	for (const int32_t id : present_.occlusion_culled_bms) out.push_back(id);
-	return out;
-}
-
-// Same verdict walk as get_building_visibility(), emitting only pairs whose
-// packed visible<<32|mask changed since the last call. The GDScript apply
-// walks changes instead of the whole building set, so a steady frame does no
-// per-building node work at all.
+// The building verdict walk, emitting only pairs whose packed
+// visible<<32|mask changed since the last call. The apply walks changes
+// instead of the whole building set, so a steady frame does no per-building
+// node work at all.
 PackedInt64Array Simulation::get_building_visibility_changes() {
 	PackedInt64Array out;
 	if (!kernel_) return out;
+	// Pairs [bms_id, visible<<32 | mask] for every building with an OCCLUSION
+	// instance, plus collision-backed de-batched buildings that still entered
+	// the retail building batch. OOBJ instances apply their section mask.
+	// Without OOBJ there is no safe reimpl part-to-section map, so those buildings
+	// keep all render parts while still receiving batch/frustum/TOC visibility.
 	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
 		const bool has_occlusion = kernel_->occlusion.has_instance(e.handle);

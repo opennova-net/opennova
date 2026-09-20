@@ -102,7 +102,7 @@ struct SimulationPresentState {
 
 	// --- the occlusion frame ----------------------------------------------------
 	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by
-	// run_occlusion_frame; consumed via get_render_culled_bms_ids.
+	// run_occlusion_frame; consumed via get_render_culled_changes.
 	std::vector<int32_t> occlusion_culled_bms;
 	// The same render gate over the decoded rows the EntityPresenter wire walk draws (no
 	// placed identity): culled wire handles this frame, the applied baseline,

@@ -95,7 +95,6 @@ void ObjectModel::resolve_muzzle_userpoint() {
 		return;
 	}
 	muzzle_bone_ = bone;
-	muzzle_model_pos_ = info2->get_position();
 }
 
 // Play a main-body clip by ADM key. Missing semantic keys use this ADM's
@@ -312,7 +311,7 @@ bool ObjectModel::apply_remote_body_state(int p_state_id, const String &p_key,
 	}
 	// The queue gate is the shared native rule (world/infantry.h
 	// remote_body_state_defers, [orig: @0x4c1169..0x4c1190 / @0x4c060a..
-	// 0x4c0633]) — the same predicate the netsim record fold applies.
+	// 0x4c0633]) — the same predicate the replication record fold applies.
 	if (opennova::world::remote_body_state_defers(
 				static_cast<uint32_t>(remote_flags_), static_cast<uint32_t>(p_flags))) {
 		queue_remote_body_state(p_state_id, p_key, p_flags);
@@ -351,7 +350,7 @@ void ObjectModel::queue_remote_body_state(int p_state_id, const String &p_key,
 	remote_pending_state_ = p_state_id;
 	remote_pending_key_ = p_key;
 	remote_pending_flags_ = p_flags;
-	// Completion-boundary arming: the seconds-domain sibling of netsim's
+	// Completion-boundary arming: the seconds-domain sibling of replication's
 	// tick-domain arm — same three cases, units differ because this FSM owns
 	// clip TIME. A hold clip whose length cannot resolve completes IMMEDIATELY
 	// (the D-NET-209 hold-wedge safety).

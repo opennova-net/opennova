@@ -65,7 +65,6 @@ public:
 	void set_texture_provider(const Callable &p_provider);
 	Callable get_texture_provider() const;
 	void set_texture_dir(const String &p_texture_dir);
-	String get_texture_dir() const;
 	void set_environment_source(Node *p_source);
 	Node *get_environment_source() const;
 	// One exact render-plane handoff: the height partitions World emitters and

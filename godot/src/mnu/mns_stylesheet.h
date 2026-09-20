@@ -88,9 +88,7 @@ public:
 	Error load_from_path(const String &p_path);
 	Error save_to_path(const String &p_path) const;
 
-	// Native access. The flat-sheet setter rebuilds a canonical document from
-	// the map (documented lossy); the document accessors are the lossless path.
-	void set_native(const opennova::mns::StyleSheet &p_sheet);
+	// Native access.
 	const opennova::mns::StyleSheet &get_native() const { return sheet_; }
 };
 

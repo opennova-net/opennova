@@ -115,7 +115,6 @@ public:
 	static bool has_key_strings();
 
 	// Native access for the loader/saver.
-	void set_native(const opennova::rtxt::File &p_file);
 	const opennova::rtxt::File &get_native() const { return file_; }
 };
 

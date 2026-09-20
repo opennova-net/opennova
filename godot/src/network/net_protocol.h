@@ -60,7 +60,7 @@ public:
 		RETAIL_LAN_PORT_MAX = opennova::kRetailLanPortMax,
 		DEFAULT_GATE_PORT = opennova::kNovaWorldGatePort,
 
-		// The lobby player-cap ceiling (npruntime game_config.h) and the wire
+		// The lobby player-cap ceiling (inmatch game_config.h) and the wire
 		// callsign cap (Name[16] cstring; npwire game_type.h).
 		MAX_PLAYERS_CAP = opennova::inmatch::kMaxPlayersCap,
 		MAX_CALLSIGN_LENGTH = opennova::game_rules::kMaxCallsignLength,

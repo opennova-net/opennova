@@ -53,7 +53,6 @@ public:
   void set_basename(const String &p_value) { basename_ = p_value; }
   String get_model_path() const { return model_path_; }
   void set_model_path(const String &p_value) { model_path_ = p_value; }
-  String get_scene_path() const { return scene_path_; }
   void set_scene_path(const String &p_value) { scene_path_ = p_value; }
 
 protected:

@@ -485,8 +485,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("occlusion_water_visible"),
 	                     &Simulation::occlusion_water_visible);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
-	ClassDB::bind_method(
-			D_METHOD("get_vehicle_trail_visuals"), &Simulation::get_vehicle_trail_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);
 	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),
@@ -573,15 +571,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("player_aim_project_range"),
 			&Simulation::player_aim_project_range);
-	ClassDB::bind_static_method("Simulation",
-			D_METHOD("hit_zone_damage_multiplier", "section"),
-			&Simulation::hit_zone_damage_multiplier);
-	ClassDB::bind_static_method("Simulation",
-			D_METHOD("seat_hit_bone_damage_multiplier", "bone"),
-			&Simulation::seat_hit_bone_damage_multiplier);
-	ClassDB::bind_static_method("Simulation",
-			D_METHOD("portal_slot_collect_radius"),
-			&Simulation::portal_slot_collect_radius);
 	ClassDB::bind_static_method("Simulation", D_METHOD("mission_coord_min"),
 			&Simulation::mission_coord_min);
 	ClassDB::bind_static_method("Simulation", D_METHOD("mission_coord_max"),
@@ -617,8 +606,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_ammo_table", "resource_root", "name"),
 	                     &Simulation::load_ammo_table, DEFVAL(String("ammo.def")));
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &Simulation::get_infantry_clip_count);
-	ClassDB::bind_method(D_METHOD("set_loco_scale", "scale"), &Simulation::set_loco_scale);
-	ClassDB::bind_method(D_METHOD("get_loco_scale"), &Simulation::get_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_spawned_count"), &Simulation::get_spawned_count);
 	ClassDB::bind_method(D_METHOD("get_brain_count"), &Simulation::get_brain_count);
 
@@ -805,6 +792,4 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(ROLE_LISTEN_HOST);
 	BIND_ENUM_CONSTANT(ROLE_JOINER);
 	BIND_ENUM_CONSTANT(ROLE_DEDICATED_HOST);
-
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "loco_scale"), "set_loco_scale", "get_loco_scale");
 }

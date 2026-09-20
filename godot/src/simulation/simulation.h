@@ -106,12 +106,10 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/vehicle_attach.h> // the attach-command ids + the seat mirror
-#include <runtime/world/round_sim.h> // the hit-zone damage tables (re-exported statics)
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
-#include <formats/score/score.h> // the retained score.ini parse (assets_.score_config)
 
 #include "mission/mission_data.h"
 #include <runtime/mission/mission_kernel.h>
@@ -610,7 +608,7 @@ private:
 
 	// --- in-match net runtime (P7, ADR 0009/0011): the SP / LAN host in-process listen server. OFF
 	// by default, so an explicit non-network fixture uses the direct AI-pool present. When
-	// enabled (before load), the host role's bring-up stands up the npruntime ctx + loopback +
+	// enabled (before load), the host role's bring-up stands up the inmatch ctx + loopback +
 	// HostClient runtime (the role's ListenHostState) and the present pass reads the client-decoded ClientState
 	// (ADR 0011 Decision 1) instead of the AI pool. Server_TickUpdate owns the per-frame tick.
 	bool listen_server_ = false;
@@ -788,7 +786,7 @@ private:
 	// --- P7: the in-match runtime as a THIN ADAPTER over engine/runtime/inmatch ----------------
 	// One in-match runtime funnels every live path: the host/SP game is the §5.0 mode-3
 	// listen server (the host role's NapiNPServerCtx + its own loopback client, driven by
-	// the npruntime owner loop = Server_TickUpdate + tick_connections + handle_server_datagram);
+	// the inmatch owner loop = Server_TickUpdate + tick_connections + handle_server_datagram);
 	// the joiner is a non-authority inmatch::ClientRuntime. The Godot net bindings stay PURE socket
 	// pumps — all protocol/crypto/framing lives in libs (ADR 0009-0012, .agents/network.md).
 	// The SP/LAN listen session's net state (inmatch::ListenHostState) lives on the host
@@ -845,9 +843,6 @@ private:
 	void apply_terrain_to_ai();
 	void apply_sound_state_to_world();
 	void apply_character_traits_to_world();
-	// Resolve the session's score row from the mission's game-mode bit
-	// (either load order is legal).
-	void refresh_score_rules();
 	// The shared install tail (both install orders): sort for the per-frame
 	// binary search, stamp turret clamps, refresh live pool-1 rows, and re-sync
 	// the header-only materializer image.
@@ -977,7 +972,7 @@ public:
 	// Turn the sim into an SP in-process listen server (ADR 0011): the host serializes
 	// real entity state onto an in-process loopback (Server_TickUpdate's per-connection S2C
 	// fan), the local client decodes it, and the present pass reads that decoded state. Call
-	// BEFORE loading a mission — the next load stands up the npruntime host runtime. Disabling
+	// BEFORE loading a mission — the next load stands up the inmatch host runtime. Disabling
 	// reverts to the direct AI-pool present used by explicit non-network fixtures.
 	void enable_listen_server(bool p_enable);
 	bool is_listen_server() const { return listen_server_; }
@@ -1247,7 +1242,7 @@ public:
 	// The end-of-round presentation feed (net-re §5.68; simulation_end_round.cpp):
 	// the 0x1D header edge + the 0x56 board through the ONE ClientEndRoundStats
 	// every role's view folds; the overlay text ladder (hud/end_round_overlay.h)
-	// and the stat.mnu RESULTLIST columns/rows (npruntime/stat_screen_feed.h).
+	// and the stat.mnu RESULTLIST columns/rows (runtime/inmatch/stat_screen_feed.h).
 	Ref<EndRoundState> get_end_round_state() const;
 	// The retail is_in_session fact for the shell's round-cycle and HUD
 	// arms: the world's mp_session bit (the 0x1D header form).
@@ -1560,19 +1555,19 @@ public:
 	void retain_feed_announcement(const String &text, int64_t tick);
 	String get_kill_announcement_text() const;
 	int64_t get_kill_announcement_tick(int64_t now);
-	// The folded Tab board's HEADER (netsim ClientScoreboard counts + the
+	// The folded Tab board's HEADER (replication ClientScoreboard counts + the
 	// session strings): known/team_mode/timed, the witnessed players count
 	// (accepted rows minus the spectator trailer, replication::scoreboard_header),
 	// in_game/spectators, game_type, server and mission names. The rows no
 	// longer round-trip through script — HudOverlay pulls them natively via fill_scoreboard_rows.
 	Ref<ScoreboardHeader> get_scoreboard() const;
 	// The native Tab-board row handoff: fills the drawer's entries via the
-	// netsim projection (replication::project_scoreboard — wire order, the server
+	// replication projection (replication::project_scoreboard — wire order, the server
 	// sorts and the client never re-sorts). NOT ClassDB-bound; HudOverlay
 	// calls it through this typed seam. Returns false (rows cleared) when no runtime exists.
 	bool fill_scoreboard_rows(
 			std::vector<opennova::hud::ScoreboardEntry> &r_rows) const;
-	// The folded board's team-table count (netsim ClientScoreboard::team_count,
+	// The folded board's team-table count (replication ClientScoreboard::team_count,
 	// the host's configured side count as the 0x16 carries it); 0 without a
 	// runtime. NOT ClassDB-bound; HudOverlay reads it beside the rows.
 	int scoreboard_team_count() const;
@@ -1679,20 +1674,6 @@ public:
 	static double player_non_person_eye_bump();
 	static int player_head_bone_index();
 	static double player_aim_project_range();
-	// The witnessed person hit-zone -> damage-multiplier table and the
-	// Landable seat-branch bone leg (world/round_sim.h carries the witness;
-	// the engine 6.0 seat leg is the truth the debug views mirror).
-	static double hit_zone_damage_multiplier(int p_section) {
-		return opennova::world::hit_zone_damage_multiplier(p_section);
-	}
-	static double seat_hit_bone_damage_multiplier(int p_bone) {
-		return opennova::world::seat_hit_bone_damage_multiplier(p_bone);
-	}
-	// The per-axis portal-slot collection range, world units
-	// (world/occlusion.h kPortalSlotCollectRadius).
-	static double portal_slot_collect_radius() {
-		return opennova::world::kPortalSlotCollectRadius;
-	}
 	// The mission coordinate domain in world units (world/geom.h — the signed
 	// 16.16 carrier span the debug/edit fields clamp to).
 	static double mission_coord_min() {
@@ -1721,15 +1702,12 @@ public:
 	TypedArray<WeaponKitEntry> get_local_player_loadout() const;
 
 	// --- WAC scripts ------------------------------------------------------
-	// Install a compiled program on the script VM (WacProgram, C++-only since
-	// the ADR 0043 d10 sweep). Applied now if loaded and re-applied on every
-	// (re)load. Pass null to uninstall.
-	void set_wac_program(std::shared_ptr<WacProgram> p_program);
 	// Compile `sources` against the LIVE promoted world (symbolic group/area names
 	// resolve through the registry) and install on success. False (program not
 	// installed) when compilation has errors; the retained WacProgram holder
-	// carries the diagnostics. (C++-only; the compile surface and the installed
-	// program's execution are pinned by the wac_program_surface ctest.)
+	// carries the diagnostics and is re-applied on every (re)load. (The engine's
+	// compile surface and the installed program's execution are pinned by the
+	// wac_program_surface ctest.)
 	bool compile_and_set_wac(const PackedStringArray &p_sources);
 	// Last-frame microsecond counters for the runtime hot path. Allocates only when queried.
 	Dictionary get_runtime_perf_counters() const;
@@ -1749,7 +1727,6 @@ public:
 	Vector2i get_last_projectile_trace_faces() const;
 	// Allocation-free int forms of the same last-frame counters, for per-frame
 	// sampling by the F3 frame-stats board (a Dictionary per frame would churn).
-	int64_t get_last_net_tick_us() const { return static_cast<int64_t>(last_net_tick_us_); }
 	int64_t get_last_present_snapshot_us() const {
 		return static_cast<int64_t>(present_.last_snapshot_us);
 	}
@@ -2074,10 +2051,6 @@ public:
 			const Ref<class ItemDatabase> &p_item_db,
 			const PackedInt32Array &p_type_ids);
 
-	// The AI-speed -> world-units locomotion factor (see AiSystem::loco_scale).
-	void set_loco_scale(int p_scale);
-	int get_loco_scale() const;
-
 	// Install the default infantry root-motion map (e.g. "E_STAND.adm") through
 	// the shell's resource root. Returns its number of states with usable clips
 	// (0 if unavailable); model-specific maps resolve independently. Clip sets
@@ -2140,26 +2113,22 @@ public:
 	                         double p_aspect, double p_near, double p_fog_dist_units,
 	                         double p_water_z_units, bool p_force_indoors);
 
-	// Frame results: [bms_id, packed] pairs for every building the occlusion
+	// Frame results: [bms_id, packed] pairs for the buildings the occlusion
 	// frame touched; the packed word is world/occlusion_feed.h's
 	// pack_building_visibility (section mask low, visible flag at bit 32),
-	// read back through the two static decoders below. C++-only (the frame
-	// consumes the delta form; the full form stays for native callers).
-	PackedInt64Array get_building_visibility() const;
+	// read back through the two static decoders below. The frame consumes
+	// the delta form (get_building_visibility_changes).
 	// The section mask of a packed building verdict (bit N = COBJ section /
 	// render part N; bit 0 = exterior; forced-visible def bits merged).
 	static int64_t building_visibility_mask(int64_t p_packed);
 	// The batch/frustum visible flag of a packed building verdict.
 	static bool building_visibility_visible(int64_t p_packed);
-	// bms_ids of non-building entities the collector gates culled this frame
-	// (C++-only, like get_building_visibility).
-	PackedInt32Array get_render_culled_bms_ids() const;
-	// Delta form of get_building_visibility(): only pairs whose packed value
-	// changed since the last call, so the shell applies changes instead of
-	// re-walking the whole building set every frame.
+	// Only the building pairs whose packed value changed since the last
+	// call, so the shell applies changes instead of re-walking the whole
+	// building set every frame.
 	PackedInt64Array get_building_visibility_changes();
-	// Delta form of get_render_culled_bms_ids():
-	// [n_added, ids..., n_removed, ids...] since the last call.
+	// bms_ids of non-building entities the collector gates culled this frame,
+	// as a delta: [n_added, ids..., n_removed, ids...] since the last call.
 	PackedInt32Array get_render_culled_changes();
 	// The same delta over the decoded rows the EntityPresenter wire walk
 	// draws (culled wire handles this frame against the applied baseline).
@@ -2228,7 +2197,6 @@ public:
 	const opennova::particle::ParticleForceField *particle_force_field() const;
 	void fill_vehicle_trail_visual_rows(
 			std::vector<opennova::world::VehicleTrailVisualRow> &r_rows) const;
-	TypedArray<VehicleTrailVisualRow> get_vehicle_trail_visuals() const;
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's
@@ -2377,18 +2345,6 @@ public:
 	// right after AnimDef_InitAll @0x5254b3]. Idempotent; call after load.
 	Error load_weapon_table(const Ref<class ResourceRoot> &p_resource_root,
 	                        const String &p_name = "weapon.def");
-
-	// Parse score.ini and install this session's scoring awards (world::World::score_rules).
-	// Retail builds 12 x 452-byte gametype rows with hardcoded defaults and then OVERLAYS
-	// the file onto them, writing the file out when it is absent
-	// (engine: runtime/inmatch/game_config.h).
-	// DECLARED GAP: the built-in defaults are NOT ported, so a missing score.ini leaves
-	// score_rules !valid (every award a no-op) where retail would still score from its
-	// defaults. The shipped file is the retail-parity path.
-	// Order-independent with the mission load: whichever of the two lands second
-	// re-resolves the row (see refresh_score_rules).
-	Error load_score_config(const Ref<class ResourceRoot> &p_resource_root,
-	                        const String &p_name = "score.ini");
 
 	// Parse ammo.def and install the ballistics/damage table (world::World::ammo), then
 	// resolve every armory entry's round_type to its ammo index — the authoritative round

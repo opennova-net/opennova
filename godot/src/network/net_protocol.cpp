@@ -50,7 +50,7 @@ static_assert(NetProtocol::DEFAULT_GATE_PORT == opennova::kNovaWorldGatePort,
 		"DEFAULT_GATE_PORT drifted from npwire net_ports.h");
 
 static_assert(NetProtocol::MAX_PLAYERS_CAP == opennova::inmatch::kMaxPlayersCap,
-		"MAX_PLAYERS_CAP drifted from npruntime game_config.h");
+		"MAX_PLAYERS_CAP drifted from inmatch game_config.h");
 static_assert(NetProtocol::MAX_CALLSIGN_LENGTH == opennova::game_rules::kMaxCallsignLength,
 		"MAX_CALLSIGN_LENGTH drifted from npwire game_type.h");
 

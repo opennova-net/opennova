@@ -191,7 +191,7 @@ void Simulation::close_session() {
 // tree's root; the simulation is a RefCounted the runtime owns, not a node
 // in that tree). A headless DisplayServer has no
 // renderer (the dedicated-host analogue); a missing/non-drawable viewport
-// hands the host role 0 and npruntime suppresses 0x68 instead of inventing
+// hands the host role 0 and inmatch suppresses 0x68 instead of inventing
 // a screen size (D-NET-206).
 int32_t Simulation::renderer_viewport_height() const {
 	Viewport *viewport = nullptr;

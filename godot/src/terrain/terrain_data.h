@@ -126,7 +126,6 @@ public:
 	~TerrainData();
 
 	void set_trn_path(const String &p_path);
-	String get_trn_path() const;
 
 	void set_terrain_name(const String &p_name);
 	String get_terrain_name() const;
@@ -176,10 +175,6 @@ public:
 	int get_origin_y() const;
 	void set_water_height(int p_val);
 	int get_water_height() const;
-	void set_wrap_x(bool p_val);
-	bool get_wrap_x() const;
-	void set_wrap_y(bool p_val);
-	bool get_wrap_y() const;
 	PackedInt32Array get_quadrant_locks() const;
 	void set_horizon(double p_val);
 	double get_horizon() const;
@@ -233,7 +228,6 @@ public:
 	PackedInt32Array get_sector_grid() const;
 	Ref<TerrainFoliageMap> get_foliage_map() const;
 	Array get_foliage_defs() const;
-	void set_foliage_defs(const Array &p_defs);
 	void set_tileinfo_filename(const String &filename);
 	String get_tileinfo_filename() const;
 	// Lazy-load the .til referenced by trn.tileinfo, resolved relative to

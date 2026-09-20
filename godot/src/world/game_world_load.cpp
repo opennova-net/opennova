@@ -1274,7 +1274,7 @@ void GameWorld::start_effect_world() {
 	// The present passes' typed collaborators (ADR 0043 d9): the mission audio
 	// (the stage before this one), this effect world, the light director, the
 	// environment node and the owner-anchor registry (GameWorld's
-	// register_effect_anchor delegates to the same ItemEffectDirector). Bound
+	// ItemEffectDirector). Bound
 	// once here, inside the load and before the first session frame presents;
 	// the fire/destruction sound legs and the effect legs gate on the objects
 	// themselves (a dedicated serve binds no camera listener).

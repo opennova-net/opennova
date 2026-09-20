@@ -1519,10 +1519,6 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::set_texture_provider);
 	ClassDB::bind_method(D_METHOD("get_texture_provider"),
 			&ParticleRenderer::get_texture_provider);
-	ClassDB::bind_method(D_METHOD("set_texture_dir", "texture_dir"),
-			&ParticleRenderer::set_texture_dir);
-	ClassDB::bind_method(D_METHOD("get_texture_dir"),
-			&ParticleRenderer::get_texture_dir);
 	ClassDB::bind_method(D_METHOD("set_environment_source", "source"),
 			&ParticleRenderer::set_environment_source);
 	ClassDB::bind_method(D_METHOD("get_environment_source"),
@@ -1559,8 +1555,6 @@ void ParticleRenderer::_bind_methods() {
 			"set_scene", "get_scene");
 	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "texture_provider"),
 			"set_texture_provider", "get_texture_provider");
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "texture_dir", PROPERTY_HINT_DIR),
-			"set_texture_dir", "get_texture_dir");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "environment_source",
 			PROPERTY_HINT_NODE_TYPE, "Node"),
 			"set_environment_source", "get_environment_source");
@@ -1635,10 +1629,6 @@ void ParticleRenderer::set_texture_dir(const String &p_texture_dir) {
 		return;
 	texture_dir_ = p_texture_dir;
 	_invalidate_catalog();
-}
-
-String ParticleRenderer::get_texture_dir() const {
-	return texture_dir_;
 }
 
 void ParticleRenderer::set_environment_source(Node *p_source) {

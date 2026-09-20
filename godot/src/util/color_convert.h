@@ -56,9 +56,4 @@ inline env::Rgb env_rgb_from_color(const godot::Color &c) {
 	return env::Rgb{static_cast<float>(c.r), static_cast<float>(c.g), static_cast<float>(c.b)};
 }
 
-// 0xAARRGGBB -> the env float triple (alpha dropped).
-inline env::Rgb env_rgb_from_argb(uint32_t argb) {
-	return env_rgb_from_color(color_from_argb(argb));
-}
-
 } // namespace opennova

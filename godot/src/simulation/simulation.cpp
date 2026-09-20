@@ -529,7 +529,7 @@ TypedArray<SoundEmitterRow> Simulation::drain_sound_emitters() {
 // The binding legs every kernel boot shares, run AFTER kernel_->boot():
 // session-header capture for the LAN 0x0B burst, the HUD map zoom seed, the
 // score-row re-resolve, and the held-WacProgram re-apply (a program installed
-// through set_wac_program survives reloads; the kernel's own layered load
+// through compile_and_set_wac survives reloads; the kernel's own layered load
 // wins whenever the mission authored .wac files).
 void Simulation::finish_kernel_boot() {
 	world_installed_ = true;
@@ -538,15 +538,12 @@ void Simulation::finish_kernel_boot() {
 	// (witness at hud::HudMapControl::set_mission_map_zoom — the
 	// Player_InitPlayer derivation off the BMS header float).
 	kernel_->local.hud_map_control.set_mission_map_zoom(kernel_->mission.header.map_zoom);
-	// The score row keys off the mission's game-mode bit, so re-resolve it now
-	// that the flags are known (the config may load before OR after the boot).
-	refresh_score_rules();
 	if (!kernel_->wac_loaded && assets_.wac_program && assets_.wac_program->is_ok())
 		kernel_->wac.set_program(assets_.wac_program->native_program(), kernel_->world);
 }
 
 // The kernel boot's bringup_net_session hook: the active role's own bring-up
-// (the listen host stands its npruntime session up between the world wiring
+// (the listen host stands its inmatch session up between the world wiring
 // and the system registration [orig: SinglePlayer_StartMission @0x561af0];
 // a joiner (re)builds its non-authority ClientRuntime at the same point; the
 // bare no-net world installs nothing), then the binding's tail: the live
@@ -699,7 +696,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	finish_kernel_boot();
 	// The binding-side resolver inputs (the joiner's decoded rows read the
 	// anim root/item db Refs) and the net-typed re-stamps the kernel's
-	// net-free boot cannot make: the wire entity classes from the netsim
+	// net-free boot cannot make: the wire entity classes from the replication
 	// ItemReplicationCatalog, then the collision Ref retention.
 	if (p_resource_root.is_valid() && p_item_db.is_valid()) {
 		assets_.infantry_adm_resource_root = p_resource_root;
@@ -709,15 +706,6 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		resolve_item_traits(p_item_db);
 		assets_.collision_item_db = p_item_db;
 	}
-	// score.ini rides the boot's session-data step. DIVERGENCE (placement):
-	// retail loads it far earlier, when it builds the default gametype settings
-	// [orig: GameType_CreateDefaultSettings @0x52DD00], not at mission boot.
-	// The observable behaviour is the same because refresh_score_rules
-	// re-resolves the row from the mission's game-mode bit in either order.
-	if (p_resource_root.is_valid() &&
-			load_score_config(p_resource_root, "score.ini") != OK)
-		UtilityFunctions::push_warning(
-				"MissionRoot: score.ini not loaded — kill scoring inert (no 0x81)");
 	// In a live session the resident kit buffer is the assigned side's profile
 	// page (retail's Game_StartMission copy into restrictionData
 	// [orig: @0x525813]); the kernel's table load built the pool from the
@@ -824,18 +812,6 @@ void Simulation::restore_world_baseline() {
 	// The restored world can share a tick number with a previously cached view.
 	// Force the next FollowOwner query to rebuild against the post-restart epoch.
 	invalidate_present_effect_pose_cache();
-}
-
-void Simulation::set_wac_program(std::shared_ptr<WacProgram> p_program) {
-	assets_.wac_program = std::move(p_program);
-	if (!world_installed_) {
-		return; // the next kernel boot applies it (finish_kernel_boot)
-	}
-	if (assets_.wac_program && assets_.wac_program->is_ok()) {
-		kernel_->wac.set_program(assets_.wac_program->native_program(), kernel_->world);
-	} else {
-		kernel_->wac.set_program(opennova::wac::Program(), kernel_->world);
-	}
 }
 
 bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
@@ -1223,12 +1199,4 @@ PackedByteArray Simulation::get_fired_events_snapshot() const {
 		w[i] = kernel_->events.event_fired(i) ? 1 : 0;
 	}
 	return out;
-}
-
-void Simulation::set_loco_scale(int p_scale) {
-	if (kernel_) kernel_->world.ai.loco_scale = p_scale;
-}
-
-int Simulation::get_loco_scale() const {
-	return kernel_ ? kernel_->world.ai.loco_scale : 0;
 }

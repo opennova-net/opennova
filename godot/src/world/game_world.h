@@ -145,17 +145,15 @@ public:
 
 	// --- the exported boot options ------------------------------------------
 	// A mission (.bms) to boot into. When set, the mission's header selects the
-	// terrain + environment (terrain_file/env_file below are ignored) and its
+	// terrain + environment (terrain_file below is ignored) and its
 	// placed objects are populated into the world. Empty = load bare terrain +
 	// environment.
 	void set_mission_file(const String &p_value) { mission_file_ = p_value; }
 	String get_mission_file() const { return mission_file_; }
-	// The terrain + environment loaded, by name, from the resource directory.
-	// Used only when mission_file is empty.
+	// The terrain loaded, by name, from the resource directory (beside the
+	// fixed default environment, env_file_). Used only when mission_file is empty.
 	void set_terrain_file(const String &p_value) { terrain_file_ = p_value; }
 	String get_terrain_file() const { return terrain_file_; }
-	void set_env_file(const String &p_value) { env_file_ = p_value; }
-	String get_env_file() const { return env_file_; }
 
 	// --- the injection seams ---------------------------------------------------
 	// Inject the resource root the next load resolves through. Runtime hosts
@@ -399,8 +397,6 @@ public:
 	// the runtime's placer, the resource root and the environment through
 	// this node's public surface).
 	Ref<LocalPlayerVisuals> local_player_visuals() const { return player_visuals_; }
-	ObjectModel *build_local_player_held_weapon(const String &p_graphic);
-	ObjectModel *build_local_player_avatar();
 	// The packed character id the authority stamped on the local player (the
 	// host's own spawn from its installed profile, a joiner's named 0x0C
 	// record) -- the one word its third-person body/head and first-person arms
@@ -486,15 +482,6 @@ public:
 	// sky, celestial, water) itself instead of their own _process.
 	bool drives_environment_presenters() const { return env_presenters_world_driven_; }
 	WorldEnvironment *get_clear_color_node() const { return clear_color_; }
-	// A caller registers a live pose resolver for an owner-bound effect group
-	// it spawned (e.g. the local muzzle flash riding the viewmodel userpoint).
-	// The resolver is polled by the effect world's owner-pose sync while any
-	// group bound to owner_key is alive; re-registering the same key
-	// overwrites. One-line delegates into the item-effect director: the names
-	// stay on GameWorld -- LocalPlayerPresenter and the present passes
-	// register through the world.
-	void register_effect_anchor(const Variant &p_owner_key, const Callable &p_resolver);
-	void unregister_effect_anchor(const Variant &p_owner_key);
 	MissionAudio *get_mission_audio() const;
 
 	// --- Godot ---------------------------------------------------------------------

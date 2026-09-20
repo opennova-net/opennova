@@ -37,7 +37,6 @@
 #include <runtime/inmatch/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table + round_type resolve (§5.60)
 #include <runtime/world/weapon_table_build.h> // build_weapon_table (weapon.def -> world armory, D-NET-141)
-#include <runtime/world/score_rules_build.h> // build_score_rules (score.ini -> world.tables.score_rules)
 #include <base/gameprofile/game_type.h>              // game_type::for_mission_mode
 
 #include <formats/def/def.h> // def_parse_weapons_memory / def_free_weapons
@@ -78,7 +77,7 @@ inline constexpr double kFixed16 = 65536.0;
 // Canonical definition lives in engine/runtime/mission placement_traits.h
 // (the presentation visual-item policy home).
 inline constexpr int kPlayerVisualItemId = opennova::mission::kPlayerVisualItemId;
-// Canonical definition lives in engine/runtime/world/player_spawn.h (shared with the npruntime host).
+// Canonical definition lives in engine/runtime/world/player_spawn.h (shared with the inmatch host).
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = opennova::world::kRetailPlayerMinEntitySlot;
 
 inline uint64_t present_effect_origin_key(int kind, int index) {
@@ -133,13 +132,8 @@ using opennova::world::emplaced_weapon_controls_for;
 using opennova::inmatch::emplaced_weapon_controls_for_client;
 using opennova::inmatch::write_present_emplaced_controls;
 
-inline double bam_to_radians(int32_t value) {
-	return static_cast<double>(value) *
-			(6.28318530717958647692 / 4294967296.0);
-}
-
 // Godot-type packer over the engine euler composition (the math lives in
-// npruntime client_replica_present.h).
+// inmatch client_replica_present.h).
 inline Vector3 mission_euler_from_overlay(
 		const opennova::anim::AimOverlayAngles &angles) {
 	const opennova::inmatch::MissionEulerDeg e =
@@ -149,12 +143,6 @@ inline Vector3 mission_euler_from_overlay(
 
 using opennova::inmatch::write_present_held_weapon;
 using opennova::inmatch::write_present_overlay;
-
-inline std::string dictionary_string(const Dictionary &d, const char *key, const std::string &fallback) {
-	if (!d.has(key)) return fallback;
-	const String value = d.get(key, String());
-	return std::string(value.utf8().get_data());
-}
 
 // The collision/occlusion/bound-radius builders and the model predicates
 // moved to the engine (ADR 0028): engine/runtime/world. The using

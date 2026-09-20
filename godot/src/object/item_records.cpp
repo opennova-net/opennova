@@ -12,7 +12,7 @@ using namespace godot;
 // --- ItemEmplacementAttachment ---------------------------------------------------
 
 void ItemEmplacementAttachment::assign(int p_kind, const String &p_userpoint, int p_item_id,
-		int p_stored_slot, int p_angle_count, int p_down, int p_up, int p_right, int p_left,
+		int p_stored_slot, int p_angle_count, int p_down, int p_up,
 		bool p_designated_g, bool p_designated_c) {
 	kind_ = p_kind;
 	userpoint_ = p_userpoint;
@@ -21,8 +21,6 @@ void ItemEmplacementAttachment::assign(int p_kind, const String &p_userpoint, in
 	angle_count_ = p_angle_count;
 	down_limit_bam_ = p_down;
 	up_limit_bam_ = p_up;
-	right_limit_bam_ = p_right;
-	left_limit_bam_ = p_left;
 	designated_g_ = p_designated_g;
 	designated_c_ = p_designated_c;
 }
@@ -32,23 +30,17 @@ void ItemEmplacementAttachment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_userpoint"), &ItemEmplacementAttachment::get_userpoint);
 	ClassDB::bind_method(D_METHOD("get_item_id"), &ItemEmplacementAttachment::get_item_id);
 	ClassDB::bind_method(D_METHOD("get_stored_slot"), &ItemEmplacementAttachment::get_stored_slot);
-	ClassDB::bind_method(D_METHOD("get_angle_count"), &ItemEmplacementAttachment::get_angle_count);
 	ClassDB::bind_method(D_METHOD("has_explicit_limits"), &ItemEmplacementAttachment::has_explicit_limits);
 	ClassDB::bind_method(D_METHOD("get_down_limit_bam"), &ItemEmplacementAttachment::get_down_limit_bam);
 	ClassDB::bind_method(D_METHOD("get_up_limit_bam"), &ItemEmplacementAttachment::get_up_limit_bam);
-	ClassDB::bind_method(D_METHOD("get_right_limit_bam"), &ItemEmplacementAttachment::get_right_limit_bam);
-	ClassDB::bind_method(D_METHOD("get_left_limit_bam"), &ItemEmplacementAttachment::get_left_limit_bam);
 	ClassDB::bind_method(D_METHOD("is_designated_g"), &ItemEmplacementAttachment::is_designated_g);
 	ClassDB::bind_method(D_METHOD("is_designated_c"), &ItemEmplacementAttachment::is_designated_c);
 	ITEM_RECORD_READ_ONLY(Variant::INT, "kind", "get_kind");
 	ITEM_RECORD_READ_ONLY(Variant::STRING, "userpoint", "get_userpoint");
 	ITEM_RECORD_READ_ONLY(Variant::INT, "item_id", "get_item_id");
 	ITEM_RECORD_READ_ONLY(Variant::INT, "stored_slot", "get_stored_slot");
-	ITEM_RECORD_READ_ONLY(Variant::INT, "angle_count", "get_angle_count");
 	ITEM_RECORD_READ_ONLY(Variant::INT, "down_limit_bam", "get_down_limit_bam");
 	ITEM_RECORD_READ_ONLY(Variant::INT, "up_limit_bam", "get_up_limit_bam");
-	ITEM_RECORD_READ_ONLY(Variant::INT, "right_limit_bam", "get_right_limit_bam");
-	ITEM_RECORD_READ_ONLY(Variant::INT, "left_limit_bam", "get_left_limit_bam");
 }
 
 // --- EnvsMarkerRow ---------------------------------------------------------------
@@ -78,20 +70,14 @@ int ItemSeatAttachmentRow::get_item_id() const {
 }
 
 void ItemSeatAttachmentRow::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_child_type_id"), &ItemSeatAttachmentRow::get_child_type_id);
 	ClassDB::bind_method(D_METHOD("get_item_id"), &ItemSeatAttachmentRow::get_item_id);
 	ClassDB::bind_method(D_METHOD("get_kind"), &ItemSeatAttachmentRow::get_kind);
 	ClassDB::bind_method(D_METHOD("get_stored_slot"), &ItemSeatAttachmentRow::get_stored_slot);
-	ClassDB::bind_method(D_METHOD("get_angle_count"), &ItemSeatAttachmentRow::get_angle_count);
 	ClassDB::bind_method(D_METHOD("get_down_limit_bam"), &ItemSeatAttachmentRow::get_down_limit_bam);
 	ClassDB::bind_method(D_METHOD("get_up_limit_bam"), &ItemSeatAttachmentRow::get_up_limit_bam);
-	ClassDB::bind_method(D_METHOD("get_right_limit_bam"), &ItemSeatAttachmentRow::get_right_limit_bam);
-	ClassDB::bind_method(D_METHOD("get_left_limit_bam"), &ItemSeatAttachmentRow::get_left_limit_bam);
-	ITEM_RECORD_READ_ONLY(Variant::INT, "child_type_id", "get_child_type_id");
 	ITEM_RECORD_READ_ONLY(Variant::INT, "item_id", "get_item_id");
 	ITEM_RECORD_READ_ONLY(Variant::INT, "kind", "get_kind");
 	ITEM_RECORD_READ_ONLY(Variant::INT, "stored_slot", "get_stored_slot");
-	ITEM_RECORD_READ_ONLY(Variant::INT, "angle_count", "get_angle_count");
 }
 
 // --- ItemSeatCard --------------------------------------------------------------------

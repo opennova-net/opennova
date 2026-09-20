@@ -254,7 +254,7 @@ bool Simulation::fill_friendly_tags(std::vector<opennova::world::FriendlyTagSour
 	opennova::world::collect_friendly_tags(kernel_->world, *player, tags, ctx);
 	if (is_joiner() && runtime_ && !ctx.rules_no_friendly_tags) {
 		// A joiner's players are decoded rows, not World twins: the roster walk
-		// over ClientState supplies them (netsim/client_roster_tags.h).
+		// over ClientState supplies them (runtime/replication/client_roster_tags.h).
 		const int32_t player_hp = kernel_->world.tables.player.item_hp;
 		opennova::replication::collect_roster_tags(runtime_->state(),
 				runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFFu,
@@ -714,52 +714,6 @@ TypedArray<WeaponKitEntry> Simulation::get_local_player_loadout() const {
 		out.push_back(row);
 	}
 	return out;
-}
-
-// score.ini -> this session's scoring awards (world::score_rules).
-// Retail overlays the file onto 12 hardcoded 452-byte gametype rows
-// [orig: GameType_CreateDefaultSettings @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0];
-// the defaults are not ported, so an absent file leaves the rules !valid (every award
-// a no-op) rather than guessing values.
-Error Simulation::load_score_config(const Ref<ResourceRoot> &p_resource_root,
-                                    const String &p_name) {
-	if (!kernel_) return ERR_UNCONFIGURED;
-	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty())
-		return ERR_INVALID_PARAMETER;
-	const String file_name = p_name.get_file();
-	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
-	// LOOSE-FIRST on purpose: retail gates the load on File_IsSingleFile("score.ini")
-	// [orig: @0x436ED0], which is a FindFirstFileA check on disk — score.ini is a loose
-	// file next to the executable, not an archive member (unlike weapon.def/ammo.def,
-	// which live in localres.pff). An archive-preferring lookup finds nothing here.
-	const PackedByteArray bytes =
-			p_resource_root->read_file(file_name, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);
-	if (bytes.is_empty()) return ERR_FILE_NOT_FOUND;
-
-	opennova::score::File parsed;
-	std::string error;
-	if (!opennova::score::parse(bytes.ptr(), static_cast<size_t>(bytes.size()), parsed, error))
-		return ERR_PARSE_ERROR;
-	assets_.score_config = std::move(parsed);
-	assets_.score_config_loaded = true;
-	refresh_score_rules();
-	return OK;
-}
-
-// Resolve the session's score row from the mission's game-mode bit. Called from BOTH
-// load sites so either order works: the config landing after the mission, or before it.
-// The mode bit -> g_GameType code word is the already-ported ladder
-// [orig: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360].
-void Simulation::refresh_score_rules() {
-	if (!kernel_) return;
-	if (!assets_.score_config_loaded) {
-		kernel_->world.tables.score_rules = opennova::world::ScoreRules{};
-		return;
-	}
-	const uint32_t mode = opennova::bms::selected_game_mode(
-			static_cast<opennova::bms::AttribFlags>(kernel_->world.tables.mission_attrib_flags));
-	kernel_->world.tables.score_rules = opennova::world::build_score_rules(
-			assets_.score_config, opennova::game_type::for_mission_mode(mode));
 }
 
 // weapon.def -> the sim world's armory table. Mirrors the retail load site (Game_StartMission

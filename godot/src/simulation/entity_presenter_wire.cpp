@@ -935,7 +935,7 @@ void EntityPresenter::present_wire_row_body_sounds(WireRow &row,
 		const PackedFloat32Array &snap) {
 	const float *p = snap.ptr();
 	const int base = row.base;
-	// The netsim seeds a retargeted clip at phase 0 and advances once per
+	// The replication seeds a retargeted clip at phase 0 and advances once per
 	// tick, so a fresh clip's first observed playhead is a few ticks in at
 	// most; anything past this is a mid-clip landing.
 	constexpr int32_t kFreshClipTicks = 3;

@@ -183,19 +183,6 @@ void Simulation::fill_vehicle_trail_visual_rows(
 	});
 }
 
-TypedArray<VehicleTrailVisualRow> Simulation::get_vehicle_trail_visuals() const {
-	TypedArray<VehicleTrailVisualRow> out;
-	std::vector<opennova::world::VehicleTrailVisualRow> rows;
-	fill_vehicle_trail_visual_rows(rows);
-	for (const opennova::world::VehicleTrailVisualRow &row : rows) {
-		Ref<VehicleTrailVisualRow> wrapped;
-		wrapped.instantiate();
-		wrapped->assign(row);
-		out.push_back(wrapped);
-	}
-	return out;
-}
-
 Ref<WaypointHudView> Simulation::get_waypoint_hud_view() const {
 	// The current-waypoint slice of the per-frame HUD info rebuild, plus the
 	// mission-scripted show gate. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914
@@ -697,7 +684,7 @@ void Simulation::fill_round_glows(std::vector<opennova::world::RoundGlowRow> &r_
 // The typed entity inspection API (ADR 0042 d5): the directory join and the
 // per-entity card are engine facts (world/inspect.h); this binding forwards
 // and converts into the typed records. The joiner's decoded replica section
-// is the npruntime card (runtime/inmatch/client_replica_card.h).
+// is the inmatch card (runtime/inmatch/client_replica_card.h).
 TypedArray<EntityRow> Simulation::entity_directory() const {
 	TypedArray<EntityRow> out;
 	if (!kernel_) return out;

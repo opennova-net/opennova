@@ -4917,7 +4917,7 @@ serializer GUARANTEES `0x0800` for any AI-capable item def. The crash window is 
 `edx==0` → access violation; SYSDUMP confirmed 2026-06-25, last packet `#13`=`0x0D`). **Fix (landed):**
 `build_pool1_spawn_batch` now emits the `0x0800` AI-trailer **iff the entity is AI-capable**
 (`Entity::is_ai_capable`), which is resolved from `items.def ItemDefAttrib & 0x100000` (the `AIData` token) —
-parsed into `DefItemDef.attrib` (`engine/formats/def`), surfaced as `ItemDatabase::is_ai_capable`, and stamped onto
+parsed into `DefItemDef.attrib` (`engine/formats/def`), folded by the engine's `mission::resolve_item_traits`, and stamped onto
 every live entity by the host's `Simulation::resolve_item_traits` post-load pass (called from
 `MissionRoot` alongside `resolve_infantry_adm_ids`). Because our emit gate is now the SAME predicate as the
 decoder's own gate (`attrib & 0x100000`), an AI-capable record ALWAYS carries the `0x0800` flag + a valid
@@ -9692,7 +9692,7 @@ update gated on `g_ParticlesDisabled`), and released underwater (`pos.Z <= water
 2026-07-15]: the port spawned the local flash `BINDING_WORLD` at the spawn-time
 userpoint — while strafing/turning the flash trailed the muzzle. Fixed: the host spawns
 owner-bound (`BINDING_FOLLOW_OWNER`) and registers a live anchor resolver
-(`GameWorld.register_effect_anchor` → the spawning action's userpoint through the
+(`ItemEffectDirector.register_effect_anchor` → the spawning action's userpoint through the
 current viewmodel pose) polled by the effect world's owner-pose sync; anchors drop on
 viewmodel-generation turnover. (4) **THE HEAT WINDOW + OVERHEAT GLOW LEG** (new witness):
 `MountSlot+0x14` (ex-"muzzleFlashEndTick" → `heatWindowEndTick`, stamped by the recoil

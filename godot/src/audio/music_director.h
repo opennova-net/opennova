@@ -88,7 +88,6 @@ public:
 	int get_var(int p_var_index) const;
 	void set_var(int p_var_index, int p_value);
 	int vm_state() const;
-	String last_error() const;
 	// The loaded script's MessageHandler restart frame (engine mus_vm_signal:
 	// the step MusicCtx_SelectEndTrack runs at once): the SP round-end tail
 	// hands the end track here (1 win / 2 lose; retail gamemus.bin dispatches

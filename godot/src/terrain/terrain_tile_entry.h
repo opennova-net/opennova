@@ -28,7 +28,6 @@ public:
 	int get_z_fixed() const;
 
 	void set_tile_index(int value);
-	int get_tile_index() const;
 
 	void set_flags(int value);
 	int get_flags() const;

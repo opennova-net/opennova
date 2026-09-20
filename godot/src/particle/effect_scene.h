@@ -124,7 +124,6 @@ public:
 	// following groups. The non-in-place form also refreshes the snapshot.
 	void apply_owner_poses_in_place(const EffectOwnerPoseBatch &p_batch);
 	void apply_owner_poses(const EffectOwnerPoseBatch &p_batch);
-	PackedInt64Array get_active_owner_tokens() const;
 	void detach(int64_t p_group_id);
 	void detach_slot(int64_t p_slot_token);
 	bool set_group_parameters(int64_t p_group_id, float p_rate_control,

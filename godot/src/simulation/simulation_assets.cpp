@@ -43,7 +43,7 @@ void Simulation::resolve_infantry_adm_ids(const Ref<ResourceRoot> &p_resource_ro
 // The items.def trait sweep: the engine-side fold (mission::resolve_item_traits,
 // ADR 0028) reads the database's retained DefItemsFile rows directly — the trait
 // semantics, ID-space offset, and [orig] witnesses live there now. This binding
-// contributes the ONE wire-class source — the netsim ItemReplicationCatalog
+// contributes the ONE wire-class source — the replication ItemReplicationCatalog
 // (ADR 0026) — as an injected supplier so mission code stays net-free. Idempotent;
 // called after load and again after spawning the local player.
 void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {

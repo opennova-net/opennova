@@ -106,7 +106,7 @@ public:
 	String get_tone() const;
 };
 
-// The Tab-board header (Simulation::get_scoreboard): the netsim projection's
+// The Tab-board header (Simulation::get_scoreboard): the replication projection's
 // counts plus the session game type and names. The rows never round-trip
 // through script (HudOverlay pulls them natively).
 class ScoreboardHeader : public RefCounted {

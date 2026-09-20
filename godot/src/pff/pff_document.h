@@ -116,9 +116,6 @@ public:
 	// The games the tool can target: [{id:int, name:String}, ...] from the gameprofile table.
 	static Array list_games();
 
-	// The runtime boot archive table.
-	static PackedStringArray boot_archive_names();
-
 	Error open(const String &path);
 	String get_source_path() const;
 	String get_last_error() const;

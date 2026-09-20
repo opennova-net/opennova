@@ -130,9 +130,6 @@ int HudOverlay::next_showhud_flags(int p_flags) {
 	return static_cast<int>(opennova::hud::next_showhud_flags(static_cast<uint32_t>(p_flags)));
 }
 int HudOverlay::sight_scale_index_default() { return opennova::hud::kSightScaleIndexDefault; }
-int HudOverlay::next_sight_scale_index(int p_index) {
-	return opennova::hud::next_sight_scale_index(p_index);
-}
 HudOverlay::FriendlyTagMode HudOverlay::friendly_tag_mode_default() {
 	return static_cast<FriendlyTagMode>(opennova::hud::kFriendlyTagModeDefault);
 }
@@ -140,7 +137,6 @@ HudOverlay::FriendlyTagMode HudOverlay::next_friendly_tag_mode(FriendlyTagMode p
 	return static_cast<FriendlyTagMode>(opennova::hud::next_friendly_tag_mode(
 			static_cast<opennova::hud::FriendlyTagMode>(p_mode)));
 }
-float HudOverlay::friendly_tag_lift() { return opennova::hud::kFriendlyTagLiftUnits; }
 
 void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_combat_state", "view", "camera", "projection", "has_camera",
@@ -162,10 +158,8 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("showhud_flags_default"), &HudOverlay::showhud_flags_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_showhud_flags", "flags"), &HudOverlay::next_showhud_flags);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("sight_scale_index_default"), &HudOverlay::sight_scale_index_default);
-	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_sight_scale_index", "index"), &HudOverlay::next_sight_scale_index);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("friendly_tag_mode_default"), &HudOverlay::friendly_tag_mode_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_friendly_tag_mode", "mode"), &HudOverlay::next_friendly_tag_mode);
-	ClassDB::bind_static_method("HudOverlay", D_METHOD("friendly_tag_lift"), &HudOverlay::friendly_tag_lift);
 	ClassDB::bind_method(D_METHOD("configure", "hudpos", "root"), &HudOverlay::configure);
 	ClassDB::bind_method(D_METHOD("is_configured"), &HudOverlay::is_configured);
 	ClassDB::bind_method(D_METHOD("set_crosshair_style", "style"), &HudOverlay::set_crosshair_style);
@@ -928,7 +922,7 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_c
 	sb.players_line = String(p_strings.get("players", "")).utf8().get_data();
 	sb.spectators_line = String(p_strings.get("spectators", "")).utf8().get_data();
 	sb.footer = String(p_strings.get("footer", "")).utf8().get_data();
-	// Rows come straight from the netsim projection — no script-side
+	// Rows come straight from the replication projection — no script-side
 	// Dictionary round-trip to drop fields or lose the score sign.
 	if (p_shown && p_sim.is_valid()) {
 		p_sim->fill_scoreboard_rows(sb.rows);

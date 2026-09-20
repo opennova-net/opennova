@@ -27,12 +27,8 @@ public:
 	void set_icon(const String &p_value);
 	String get_interface_texture() const;
 	void set_interface_texture(const String &p_value);
-	String get_static_texture() const;
-	void set_static_texture(const String &p_value);
 	Vector2i get_driver() const;
 	void set_driver(const Vector2i &p_value);
-	int get_emplace_count() const { return block_.emplace_count; }
-	int get_seat_count() const { return block_.seat_count; }
 
 protected:
 	static void _bind_methods();

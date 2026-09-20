@@ -39,7 +39,6 @@ public:
 	int get_health() const { return value_.health; }
 	int get_team() const { return value_.team; }
 	bool is_alive() const { return value_.alive; }
-	bool is_hidden() const { return value_.hidden; }
 	// The engine axis map: mission (x, y, z) -> presentation (x, z, -y).
 	Vector3 get_world_position() const;
 	Vector3 get_mission_position() const;

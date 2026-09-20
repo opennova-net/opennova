@@ -52,16 +52,6 @@ Ref<PlayerSpawnLoadout> PlayerSpawnLoadout::from_profile(const Dictionary &p_pro
 	return out;
 }
 
-bool PlayerSpawnLoadout::side_present(int p_side) const {
-	return valid_side(p_side) && sides_[p_side].present;
-}
-
-void PlayerSpawnLoadout::set_side_present(int p_side, bool p_present) {
-	if (valid_side(p_side)) {
-		sides_[p_side].present = p_present;
-	}
-}
-
 #define PLAYER_SPAWN_SIDE_IMPL(m_name, m_default)                                     \
 	int PlayerSpawnLoadout::side_##m_name(int p_side) const {                          \
 		return valid_side(p_side) ? sides_[p_side].m_name : (m_default);               \
@@ -123,10 +113,6 @@ void PlayerSpawnLoadout::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_player_class", "player_class"),
 			&PlayerSpawnLoadout::set_player_class);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "player_class"), "set_player_class", "get_player_class");
-	ClassDB::bind_method(D_METHOD("has_player_class"), &PlayerSpawnLoadout::has_player_class);
-	ClassDB::bind_method(D_METHOD("side_present", "side"), &PlayerSpawnLoadout::side_present);
-	ClassDB::bind_method(D_METHOD("set_side_present", "side", "present"),
-			&PlayerSpawnLoadout::set_side_present);
 #define PLAYER_SPAWN_SIDE_BIND(m_name, m_default)                                                  \
 	ClassDB::bind_method(D_METHOD("side_" #m_name, "side"), &PlayerSpawnLoadout::side_##m_name);  \
 	ClassDB::bind_method(D_METHOD("set_side_" #m_name, "side", "value"),                           \

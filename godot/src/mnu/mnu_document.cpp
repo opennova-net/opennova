@@ -230,10 +230,6 @@ bool MnuDocument::is_screen(int p_id) const {
 	return loc.valid() && loc.is_screen;
 }
 
-bool MnuDocument::widget_exists(int p_id) const {
-	return locate(p_id).valid();
-}
-
 int MnuDocument::get_parent_id(int p_id) const {
 	const Locator loc = locate(p_id);
 	if (!loc.valid() || loc.is_screen) {
@@ -503,11 +499,6 @@ int MnuDocument::get_widget_group(int p_id) const {
 
 // --- Structural mutation ---
 
-void MnuDocument::set_native(const opennova::mnu::Document &p_doc) {
-	doc_ = p_doc;
-	rebuild_ids();
-}
-
 // --- Bindings ---
 
 void MnuDocument::_bind_methods() {
@@ -521,7 +512,6 @@ void MnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_screen_ids"), &MnuDocument::get_screen_ids);
 	ClassDB::bind_method(D_METHOD("get_screen_root_id", "screen_id"), &MnuDocument::get_screen_root_id);
 	ClassDB::bind_method(D_METHOD("is_screen", "id"), &MnuDocument::is_screen);
-	ClassDB::bind_method(D_METHOD("widget_exists", "id"), &MnuDocument::widget_exists);
 	ClassDB::bind_method(D_METHOD("get_parent_id", "id"), &MnuDocument::get_parent_id);
 	ClassDB::bind_method(D_METHOD("get_child_ids", "id"), &MnuDocument::get_child_ids);
 	ClassDB::bind_method(D_METHOD("get_widget_type", "id"), &MnuDocument::get_widget_type);

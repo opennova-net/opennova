@@ -53,7 +53,6 @@ void MnuActionRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_source"), &MnuActionRow::get_source);
 	ClassDB::bind_method(D_METHOD("get_field"), &MnuActionRow::get_field);
 	ClassDB::bind_method(D_METHOD("get_test"), &MnuActionRow::get_test);
-	ClassDB::bind_method(D_METHOD("has_target_form"), &MnuActionRow::has_target_form);
 	ClassDB::bind_method(D_METHOD("get_target_form"), &MnuActionRow::get_target_form);
 	ClassDB::bind_method(D_METHOD("is_toggle"), &MnuActionRow::is_toggle);
 	ClassDB::bind_method(D_METHOD("is_external_browser"), &MnuActionRow::is_external_browser);

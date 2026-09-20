@@ -21,10 +21,6 @@ void MissionFrameInput::_bind_methods() {
 			&MissionFrameInput::set_movement);
     ClassDB::bind_method(D_METHOD("set_view_keys", "free_look", "up", "down", "left", "right"),
             &MissionFrameInput::set_view_keys);
-	ClassDB::bind_method(D_METHOD("set_look_delta", "delta"),
-			&MissionFrameInput::set_look_delta);
-	ClassDB::bind_method(D_METHOD("get_look_delta"),
-			&MissionFrameInput::get_look_delta);
 	ClassDB::bind_method(D_METHOD("set_weapon_input", "fire_held", "fire_pressed",
 			"reload_pressed", "medic_pressed"), &MissionFrameInput::set_weapon_input,
 			DEFVAL(false));
@@ -35,8 +31,6 @@ void MissionFrameInput::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "delta_seconds"),
 			"set_delta_seconds", "get_delta_seconds");
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "look_delta"),
-			"set_look_delta", "get_look_delta");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sequence"),
 			"set_sequence", "get_sequence");
 }
@@ -94,10 +88,6 @@ void MissionFrameInput::set_view_keys(bool p_free_look, bool p_up, bool p_down,
 void MissionFrameInput::set_look_delta(const Vector2 &p_delta) {
 	value_.player.look_delta_x = p_delta.x;
 	value_.player.look_delta_y = p_delta.y;
-}
-
-Vector2 MissionFrameInput::get_look_delta() const {
-	return Vector2(value_.player.look_delta_x, value_.player.look_delta_y);
 }
 
 void MissionFrameInput::set_weapon_input(bool p_fire_held,

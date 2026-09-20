@@ -1,14 +1,12 @@
 #include "network/host_session_options.h"
+
+#include "util/string_convert.h"
+
 #include <runtime/inmatch/host_settings.h>
 
 using namespace godot;
-
-namespace {
-
-String to_gd(const std::string &s) { return String::utf8(s.c_str()); }
-std::string to_std(const String &s) { return std::string(s.utf8().get_data()); }
-
-} // namespace
+using opennova::to_gd;
+using opennova::to_std;
 
 #define HOST_SESSION_TEXT_IMPL(m_name)                                                 \
 	String HostSessionOptions::get_##m_name() const { return to_gd(config_.m_name); }   \

@@ -177,8 +177,6 @@ public:
 	Ref<MissionObjectPlacer> get_placer() const { return registry_placer_; }
 	// The item database the passes graft husk/round graphics from.
 	Ref<ItemDatabase> get_item_db() const { return item_db_; }
-	// The mission document the sim booted from.
-	Ref<MissionData> get_mission_data() const { return mission_; }
 	// The entity presenter (the "Entities" child): the render-occlusion
 	// frame's wire render gates + lighting contexts, the wire-handle resolver
 	// the destruction/scar passes read, the `wire_node_spawned` signal the

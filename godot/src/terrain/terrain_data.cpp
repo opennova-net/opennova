@@ -42,49 +42,6 @@ static Ref<TerrainFoliageDef> foliage_def_to_object(const opennova::FoliageDef &
 	return object;
 }
 
-static bool foliage_def_from_variant(const Variant &value, opennova::FoliageDef &out_def) {
-	if (value.get_type() == Variant::OBJECT) {
-		Object *object = value;
-		if (const TerrainFoliageDef *def = Object::cast_to<TerrainFoliageDef>(object)) {
-			out_def = def->to_native();
-			return true;
-		}
-	}
-
-	if (value.get_type() == Variant::DICTIONARY) {
-		const Dictionary dict = value;
-		out_def.graphic = String(dict.get("graphic", "")).utf8().get_data();
-		out_def.color_lower = static_cast<int>(dict.get("color_lower", static_cast<int>(opennova::FoliageColorMode::MatchGround)));
-		out_def.color_upper = static_cast<int>(dict.get("color_upper", static_cast<int>(opennova::FoliageColorMode::MatchGround)));
-		// "match" is the authored code list (PackedInt32Array or Array); a
-		// bare int is one code.
-		const Variant match_value = dict.get("match", Variant());
-		out_def.match.fill(opennova::FOLIAGE_MATCH_UNSET);
-		if (match_value.get_type() == Variant::INT) {
-			out_def.match[0] = static_cast<int>(match_value);
-		} else if (match_value.get_type() == Variant::PACKED_INT32_ARRAY ||
-				match_value.get_type() == Variant::ARRAY) {
-			const Array codes = match_value;
-			const int count = std::min<int>(codes.size(), opennova::FOLIAGE_MATCH_CODES);
-			for (int i = 0; i < count; ++i) {
-				out_def.match[static_cast<size_t>(i)] = static_cast<int>(codes[i]);
-			}
-		}
-		int attrib_flags = static_cast<int>(dict.get("attrib_flags", 0));
-		if (static_cast<bool>(dict.get("shadow", false))) {
-			attrib_flags |= opennova::FOLIAGE_ATTRIB_SHADOW;
-		}
-		if (static_cast<bool>(dict.get("force_on", false))) {
-			attrib_flags |= opennova::FOLIAGE_ATTRIB_FORCE_ON;
-		}
-		out_def.attrib_flags = static_cast<uint8_t>(std::clamp(attrib_flags, 0, 255));
-		out_def = opennova::foliage_normalize_def(out_def);
-		return true;
-	}
-
-	return false;
-}
-
 static opennova::FoliageMap foliage_map_from_slot_data(const std::vector<uint8_t> &indices,
                                                        const uint8_t palette[256][3],
                                                        int width,
@@ -319,8 +276,6 @@ opennova::terrain::TerrainRaycastSample raycast_sample_bilinear(void *ctx, int32
 
 void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_trn_path", "path"), &TerrainData::set_trn_path);
-	ClassDB::bind_method(D_METHOD("get_trn_path"), &TerrainData::get_trn_path);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "trn_path", PROPERTY_HINT_FILE, "*.trn"), "set_trn_path", "get_trn_path");
 
 	ClassDB::bind_method(D_METHOD("load"), &TerrainData::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &TerrainData::load_from_resource_root);
@@ -341,7 +296,6 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sector_grid"), &TerrainData::get_sector_grid);
 	ClassDB::bind_method(D_METHOD("get_foliage_map"), &TerrainData::get_foliage_map);
 	ClassDB::bind_method(D_METHOD("get_foliage_defs"), &TerrainData::get_foliage_defs);
-	ClassDB::bind_method(D_METHOD("set_foliage_defs", "value"), &TerrainData::set_foliage_defs);
 	ClassDB::bind_method(D_METHOD("set_tileinfo_filename", "filename"), &TerrainData::set_tileinfo_filename);
 	ClassDB::bind_method(D_METHOD("get_tileinfo_filename"), &TerrainData::get_tileinfo_filename);
 	ClassDB::bind_method(D_METHOD("get_tileinfo_resource"), &TerrainData::get_tileinfo_resource);
@@ -392,12 +346,6 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_origin_y", "value"), &TerrainData::set_origin_y);
 	ClassDB::bind_method(D_METHOD("get_origin_y"), &TerrainData::get_origin_y);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "origin_y"), "set_origin_y", "get_origin_y");
-	ClassDB::bind_method(D_METHOD("set_wrap_x", "value"), &TerrainData::set_wrap_x);
-	ClassDB::bind_method(D_METHOD("get_wrap_x"), &TerrainData::get_wrap_x);
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "wrap_x"), "set_wrap_x", "get_wrap_x");
-	ClassDB::bind_method(D_METHOD("set_wrap_y", "value"), &TerrainData::set_wrap_y);
-	ClassDB::bind_method(D_METHOD("get_wrap_y"), &TerrainData::get_wrap_y);
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "wrap_y"), "set_wrap_y", "get_wrap_y");
 
 	// Environment
 	ADD_GROUP("Environment", "");
@@ -407,12 +355,6 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_horizon", "value"), &TerrainData::set_horizon);
 	ClassDB::bind_method(D_METHOD("get_horizon"), &TerrainData::get_horizon);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "horizon"), "set_horizon", "get_horizon");
-
-	// Foliage
-	ADD_GROUP("Foliage", "");
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "foliage_defs", PROPERTY_HINT_ARRAY_TYPE, "TerrainFoliageDef"),
-	             "set_foliage_defs",
-	             "get_foliage_defs");
 
 	// Sector/atlas layout constants (single-sourced from engine/runtime/terrain_query
 	// terrain_query/coords.h; see the header declarations).
@@ -504,7 +446,6 @@ Error TerrainData::_import_pcx_slot_bytes(const String &slot_id, const String &f
 // ---------------------------------------------------------------------------
 
 void TerrainData::set_trn_path(const String &p_path) { trn_path = p_path; }
-String TerrainData::get_trn_path() const { return trn_path; }
 
 void TerrainData::set_terrain_name(const String &p_name) { terrain_name = p_name; _notify_terrain_changed(); }
 String TerrainData::get_terrain_name() const { return terrain_name; }
@@ -543,10 +484,6 @@ void TerrainData::set_origin_y(int p_val) { origin_y = p_val; _notify_terrain_ch
 int TerrainData::get_origin_y() const { return origin_y; }
 void TerrainData::set_water_height(int p_val) { water_height = p_val; _notify_terrain_changed(); }
 int TerrainData::get_water_height() const { return water_height; }
-void TerrainData::set_wrap_x(bool p_val) { wrap_x = p_val; _notify_terrain_changed(); }
-bool TerrainData::get_wrap_x() const { return wrap_x; }
-void TerrainData::set_wrap_y(bool p_val) { wrap_y = p_val; _notify_terrain_changed(); }
-bool TerrainData::get_wrap_y() const { return wrap_y; }
 PackedInt32Array TerrainData::get_quadrant_locks() const {
 	PackedInt32Array locks;
 	locks.resize(8);
@@ -1204,19 +1141,6 @@ Array TerrainData::get_foliage_defs() const {
 		arr.push_back(foliage_def_to_object(def));
 	}
 	return arr;
-}
-
-void TerrainData::set_foliage_defs(const Array &p_defs) {
-	trn.foliage_defs.clear();
-	int count = p_defs.size();
-	if (count > opennova::FOLIAGE_MAX_DEFS) count = opennova::FOLIAGE_MAX_DEFS;
-	for (int i = 0; i < count; i++) {
-		opennova::FoliageDef def;
-		if (foliage_def_from_variant(p_defs[i], def)) {
-			trn.foliage_defs.push_back(opennova::foliage_normalize_def(def));
-		}
-	}
-	_notify_terrain_changed();
 }
 
 void TerrainData::set_tileinfo_filename(const String &filename) {

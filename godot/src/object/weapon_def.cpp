@@ -92,8 +92,6 @@ void WeaponSightRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_y2"), &WeaponSightRow::get_y2);
 	ClassDB::bind_method(D_METHOD("get_blend"), &WeaponSightRow::get_blend);
 	ClassDB::bind_method(D_METHOD("is_scale"), &WeaponSightRow::is_scale);
-	ClassDB::bind_method(D_METHOD("is_slide"), &WeaponSightRow::is_slide);
-	ClassDB::bind_method(D_METHOD("get_slide_frames"), &WeaponSightRow::get_slide_frames);
 	ClassDB::bind_method(D_METHOD("evaluate_rect", "sight_scale_index", "slide_multiplier"),
 			&WeaponSightRow::evaluate_rect);
 	ClassDB::bind_static_method("WeaponSightRow",
@@ -281,17 +279,6 @@ TypedArray<WeaponSightRow> WeaponDef::get_sights() const {
 	return out;
 }
 
-TypedArray<WeaponActionRow> WeaponDef::get_actions() const {
-	TypedArray<WeaponActionRow> out;
-	for (const DefWeaponAction &action : actions_) {
-		Ref<WeaponActionRow> row;
-		row.instantiate();
-		row->assign(action);
-		out.push_back(row);
-	}
-	return out;
-}
-
 void WeaponDef::set_actions(const TypedArray<WeaponActionRow> &p_rows) {
 	actions_.clear();
 	actions_.reserve(static_cast<size_t>(p_rows.size()));
@@ -305,7 +292,6 @@ void WeaponDef::set_actions(const TypedArray<WeaponActionRow> &p_rows) {
 void WeaponDef::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("copy"), &WeaponDef::copy);
 	ClassDB::bind_method(D_METHOD("get_sights"), &WeaponDef::get_sights);
-	ClassDB::bind_method(D_METHOD("get_actions"), &WeaponDef::get_actions);
 	ClassDB::bind_method(D_METHOD("set_actions", "rows"), &WeaponDef::set_actions);
 #define WEAPON_DEF_PROP(m_type, m_name)                                                     \
 	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &WeaponDef::set_##m_name);       \
