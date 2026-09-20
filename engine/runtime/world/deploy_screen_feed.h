@@ -11,6 +11,8 @@
 //  STATIC_MEDIC_MSG1 / STATIC_CALLMEDIC_MSG @0x553e10..0x553f60]
 // Witness record: docs/interface/hud-re.md (D-HUD-19).
 
+#include <runtime/hud/game_text_lookup.h>
+
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -161,10 +163,9 @@ struct DeployInstructions {
     std::string round_text;
     std::string remaining_players_text;
 };
-using DeployTextLookup = std::function<std::string(
-        const char *section, const char *key, const char *fallback)>;
+// The text seam is the engine's one game-text lookup (hud/game_text_lookup.h).
 DeployInstructions build_deploy_instructions(
-        const DeployInstructionsInput &in, const DeployTextLookup &lookup);
+        const DeployInstructionsInput &in, const hud::GameTextLookup &lookup);
 
 // The DEATH screen's STATIC facts for one client as one value the embedder
 // fills (its Godot record wraps it by value, ADR 0043 d10): the sub-block-0

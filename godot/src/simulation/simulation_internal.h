@@ -61,7 +61,11 @@
 #include "object/object_data.h" // resolve_collision_instances: the .3di collision IR source
 #include "object/skeletal_anim.h"
 #include "resource_index/resource_root.h"
+#include "rtxt/rtxt_string_file.h" // the string-table document the game-text seam binds over
 #include "terrain/terrain_data.h"
+#include "util/string_convert.h"
+
+#include <runtime/hud/game_text_lookup.h> // the engine's ONE game-text seam
 
 using namespace godot;
 
@@ -155,6 +159,17 @@ using opennova::world::model_bound_radius_from_3di;
 inline Vector3 godot_from_fixed3(const int32_t p[3]) {
 	return Vector3(static_cast<float>(p[0] / 65536.0), static_cast<float>(p[2] / 65536.0),
 	               static_cast<float>(-p[1] / 65536.0));
+}
+
+// The engine's game-text seam (hud/game_text_lookup.h) bound over a string
+// table: a present key answers its value, an absent key (or no table) the
+// fallback. The one factory every feed builder's text argument comes from.
+inline opennova::hud::GameTextLookup game_text_lookup(const Ref<RtxtStringFile> &table) {
+	return [table](const char *section, const char *key, const char *fallback) {
+		if (table.is_valid() && table->has_string_in_section(section, key))
+			return opennova::to_std(table->get_string_in_section(section, key));
+		return std::string(fallback);
+	};
 }
 
 } // namespace sim_internal

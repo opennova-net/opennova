@@ -30,6 +30,7 @@
 #include <runtime/renderer/tracer_frame.h> // the styled tracer-ribbon compile
 #include <runtime/world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/present_drains.h> // the present-pass row fills (ADR 0040 ladder E0)
+#include <runtime/world/objectives_feed.h> // the SP objectives panel's row walk (ADR 0040 ladder E0)
 
 using namespace sim_internal;
 
@@ -216,32 +217,9 @@ PackedInt32Array Simulation::get_hud_minimap_footprints() const {
 
 void Simulation::fill_objectives(const Ref<RtxtStringFile> &p_mission_text,
 		std::vector<opennova::hud::HudObjectiveRow> &r_rows) const {
-	// The SP objectives panel's row walk: slots 1..8 until a 0/255 win id.
-	// [orig: HUD_DrawWinConditions @0x5ba9e0 — byte_A7628B[slot] 0/255 break;
-	//  row gate = show-win bit @0x5ba9ff; checkmark = won bit @0x5bab35]
-	// The panel's resolved rows: the shown win-condition slots with their
-	// mission-text lines and completed state (an empty row set hides the
-	// panel — the retail toggle's off state). [orig: HUD_DrawWinConditions
-	// @0x5ba940 — rows from the header table walk, text = mission
-	// WinConditions/STRWINCOND%03i]
 	r_rows.clear();
 	if (!kernel_) return;
-	const auto &sg = kernel_->world.script.subgoals;
-	for (int slot = 1; slot <= 8; ++slot) {
-		const uint8_t id = sg.win_text_ids[slot];
-		if (id == 0 || id == 255) break;
-		if ((sg.show_win & (1u << slot)) == 0) continue;
-		opennova::hud::HudObjectiveRow row;
-		const String key = vformat("STRWINCOND%03d", static_cast<int>(id));
-		if (p_mission_text.is_valid() &&
-				p_mission_text->has_string_in_section("WinConditions", StringName(key))) {
-			row.text = p_mission_text->get_string_in_section("WinConditions", StringName(key))
-							   .utf8()
-							   .get_data();
-		}
-		row.done = (sg.won & (1u << slot)) != 0;
-		r_rows.push_back(std::move(row));
-	}
+	opennova::world::fill_objective_rows(kernel_->world, game_text_lookup(p_mission_text), r_rows);
 }
 // Drain the round impacts the flight sim resolved since the last call, each row already
 // resolved through the ammo effects_table (canonical tag -> {effect, sound}) and its

@@ -160,7 +160,7 @@ void test_status_text() {
 
 
 void test_instruction_branches() {
-    const DeployTextLookup keys = [](const char *, const char *key, const char *fallback) {
+    const opennova::hud::GameTextLookup keys = [](const char *, const char *key, const char *fallback) {
         return *fallback ? std::string(fallback) : std::string(key);
     };
     DeployInstructionsInput in;

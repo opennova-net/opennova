@@ -1691,6 +1691,12 @@ target_include_directories(deploy_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_features(deploy_screen_feed_test PRIVATE cxx_std_17)
 add_test(NAME deploy_screen_feed COMMAND deploy_screen_feed_test)
 
+# The SP objectives panel's row walk (world/objectives_feed.h).
+add_executable(objectives_feed_test world/objectives_feed_test.cpp)
+target_link_libraries(objectives_feed_test PRIVATE opennova_runtime)
+target_compile_features(objectives_feed_test PRIVATE cxx_std_17)
+add_test(NAME objectives_feed COMMAND objectives_feed_test)
+
 # The mode-4 death lerp camera (world/death_camera.h): FROM/TO, probe, lerp.
 add_executable(death_camera_test world/death_camera_test.cpp)
 target_link_libraries(death_camera_test PRIVATE opennova_runtime)

@@ -135,7 +135,7 @@ DeployStaticsVisibility deploy_statics_visibility(const DeployStaticsInput &in) 
 
 
 DeployInstructions build_deploy_instructions(
-        const DeployInstructionsInput &in, const DeployTextLookup &lookup) {
+        const DeployInstructionsInput &in, const hud::GameTextLookup &lookup) {
     // [orig: UI_UpdateDeathScreenContent @ 0x5536A0]
     const auto text = [&lookup](const char *key, const char *fallback = "") {
         return lookup ? lookup("Overlays", key, fallback) : std::string(fallback);

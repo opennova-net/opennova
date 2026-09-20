@@ -106,11 +106,7 @@ Ref<DeployStatus> Simulation::get_deploy_status(const Ref<RtxtStringFile> &p_gam
 	v.medic_cooldown_ticks = kernel_ ? static_cast<int>(kernel_->local.medic_request_cooldown_ticks) : 0;
 	v.medic_request_serial = kernel_ ? static_cast<int>(kernel_->local.medic_request_serial) : 0;
 
-    const auto text = [&p_gametext](const char *section, const char *key, const char *fallback) {
-        if (p_gametext.is_valid() && p_gametext->has_string_in_section(section, key))
-            return opennova::to_std(p_gametext->get_string_in_section(section, key));
-        return std::string(fallback);
-    };
+    const opennova::hud::GameTextLookup text = sim_internal::game_text_lookup(p_gametext);
     opennova::world::DeployInstructionsInput instructions;
     instructions.dead = local_player_dead();
     const auto *player = kernel_ ? kernel_->local.player() : nullptr;
