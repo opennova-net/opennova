@@ -230,6 +230,13 @@ WeaponCycleRoute local_player_weapon_cycle_route(World &world, LocalPlayerWeapon
 bool local_player_in_vehicle_loadout_zone(const World &world);
 bool local_player_vehicle_zone_team_matches(const World &world);
 
+// The local player's health pair as the HUD bar, the F3/MCP card and the
+// gamemus var pump all read it: the entity's current health (0 without a
+// local player) and the body's authored max (100 without a body or an
+// authored value). One home so the readers cannot drift (ADR 0042 d2).
+int local_player_health(const World &world);
+int local_player_max_health(const World &world);
+
 // Action 26: toggle the persistent binocular request. Refused while a
 // PowerThrow charge is live (the raised view would suppress the held weapon
 // input and turn the charge into an unintended release) and while a scope is

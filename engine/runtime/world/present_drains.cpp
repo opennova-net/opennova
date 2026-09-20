@@ -114,6 +114,12 @@ void fill_vehicle_trail_visual_rows(const World &world, std::vector<VehicleTrail
 	});
 }
 
+// Drain the round impacts the flight sim resolved since the last call, each row already
+// resolved through the ammo effects_table (canonical tag -> {effect, sound}) and its
+// per-leg presentation mask; rows with no enabled authored leg are dropped, matching
+// the original impact presenter [orig: AmmoDef_ProcessImpactEffect @ 0x40a170;
+// the physical handlers that call it are listed on world/round_sim.h RoundImpact,
+// with the selection witness].
 void drain_round_impact_rows(World &world, std::vector<RoundImpactPresentation> &r_rows) {
 	r_rows.clear();
 	const uint32_t now = world.logic_tick;
@@ -152,6 +158,10 @@ void drain_round_impact_rows(World &world, std::vector<RoundImpactPresentation> 
 	world.round_sim.impacts.clear();
 }
 
+// The fire-presentation drain. Direction math mirrors the round spawn's
+// mission-frame forward (cos yaw * cp, sin yaw * cp, sin pitch)
+// [orig: RoundData_SpawnRound @0x4ec5e9]; the rows cross in the mission frame
+// and the consumer axis-maps mission -> its device frame.
 void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow> &r_rows) {
 	r_rows.clear();
 	constexpr double kRadPerBam = (2.0 * 3.14159265358979323846) / 4294967296.0;
@@ -213,6 +223,8 @@ void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow>
 	world.round_sim.fired.clear();
 }
 
+// The live death-piece pool snapshot — the present pass renders each piece as
+// its single husk-model section [orig: the piece render mask piece[31]; §24].
 void fill_death_pieces(const World &world, std::vector<DeathPieceRow> &r_pieces) {
 	r_pieces.clear();
 	for (size_t slot = 0; slot < world.death_pieces.pieces.size(); ++slot) {

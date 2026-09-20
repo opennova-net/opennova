@@ -1364,7 +1364,6 @@ public:
 	int get_local_player_health() const;
 	int get_local_player_max_health() const;
 	// The gamemus Var7 projection (world/music_vars.h carries the witness).
-	int get_local_player_health_percent() const;
 	int get_local_player_team() const;
 	// The gamemus var pump's writes for this frame (unbound; the world node
 	// relays them through its music_var_changed signal).

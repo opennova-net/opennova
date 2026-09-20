@@ -979,4 +979,17 @@ void local_player_viewmodel_bias(World *world, const LocalPlayerWeapon &w,
         out[2] -= static_cast<float>(kFpNarrowAspectDropQ16) / 65536.0f;
 }
 
+int local_player_health(const World &world) {
+    if (!world.cached.local_player.valid()) return 0;
+    const Entity *e = world.registry.get(world.cached.local_player);
+    return e ? e->health : 0;
+}
+
+int local_player_max_health(const World &world) {
+    if (!world.cached.local_player.valid()) return 100;
+    const AiEntity *p = world.ai.for_handle(world.cached.local_player);
+    if (!p || p->inf.max_health <= 0) return 100;
+    return p->inf.max_health;
+}
+
 } // namespace opennova::world

@@ -30,6 +30,7 @@ static int test_by_id(void) {
     const GameProfile *bhd = gameprofile_by_id(GAME_BHD);
     CHECK(jo != NULL, "JO profile exists");
     CHECK(jo->id == GAME_JO, "JO id");
+    CHECK(strcmp(jo->display_name, "Joint Operations") == 0, "JO display name is the shipping label");
     CHECK(bhd != NULL && bhd->id == GAME_BHD, "BHD profile exists");
     CHECK(gameprofile_by_id(-1) == NULL, "unknown id -> NULL");
     CHECK(gameprofile_by_id(GAME_COUNT) == NULL, "out-of-range id -> NULL");

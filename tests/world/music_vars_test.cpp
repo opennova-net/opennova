@@ -9,6 +9,7 @@
 #include <runtime/audio/music_policy.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/local_player_view.h>
 #include <runtime/world/world.h>
 
 #include <cstdio>
@@ -23,7 +24,9 @@ static int failures = 0;
 
 int main() {
 	World w;
-	// No local player: both vars pump their zero.
+	// No local player: the shared health pair reads 0 / 100, both vars pump zero.
+	CHECK(local_player_health(w) == 0);
+	CHECK(local_player_max_health(w) == 100);
 	{
 		const auto writes = game_music_var_writes(w);
 		CHECK(writes[0].slot == opennova::audio::kGameMusicHealthPctVarSlot);
@@ -48,6 +51,8 @@ int main() {
 	// The body's authored max drives the percent; a non-positive max falls back.
 	w.ai.attach(local);
 	w.ai.for_handle(local)->inf.max_health = 200;
+	CHECK(local_player_health(w) == 50);
+	CHECK(local_player_max_health(w) == 200);
 	CHECK(game_music_var_writes(w)[0].value == 25);
 	w.ai.for_handle(local)->inf.max_health = 0;
 	CHECK(game_music_var_writes(w)[0].value == 50);

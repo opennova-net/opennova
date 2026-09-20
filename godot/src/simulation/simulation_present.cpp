@@ -221,12 +221,7 @@ void Simulation::fill_objectives(const Ref<RtxtStringFile> &p_mission_text,
 	if (!kernel_) return;
 	opennova::world::fill_objective_rows(kernel_->world, game_text_lookup(p_mission_text), r_rows);
 }
-// Drain the round impacts the flight sim resolved since the last call, each row already
-// resolved through the ammo effects_table (canonical tag -> {effect, sound}) and its
-// per-leg presentation mask; rows with no enabled authored leg are dropped, matching
-// the original impact presenter [orig: AmmoDef_ProcessImpactEffect @ 0x40a170;
-// the physical handlers that call it are listed on world/round_sim.h RoundImpact,
-// with the selection witness].
+// The round-impact drain (world/present_drains.h drain_round_impact_rows).
 void Simulation::drain_round_impact_rows(
 		std::vector<opennova::world::RoundImpactPresentation> &r_rows) {
 	r_rows.clear();
@@ -288,10 +283,8 @@ TypedArray<MissionEffect> Simulation::drain_effects() {
 	return out;
 }
 
-// The shell fire-presentation drain — see the header note. Direction math mirrors
-// the round spawn's mission-frame forward (cos yaw * cp, sin yaw * cp, sin pitch)
-// [orig: RoundData_SpawnRound @0x4ec5e9]; the rows cross in the mission frame
-// and the consumer axis-maps mission -> godot (x, z, -y).
+// The fire-presentation drain (world/present_drains.h drain_fire_presentation_rows);
+// the rows cross in the mission frame and the consumer axis-maps mission -> godot.
 void Simulation::drain_fire_presentation_rows(
 		std::vector<opennova::world::FirePresentationRow> &r_rows) {
 	r_rows.clear();
@@ -376,8 +369,7 @@ void Simulation::drain_destruction_events(opennova::world::DestructionEvents &r_
 	ev.clear();
 }
 
-// The live death-piece pool snapshot — the present pass renders each piece as
-// its single husk-model section [orig: the piece render mask piece[31]; §24].
+// The live death-piece pool snapshot (world/present_drains.h fill_death_pieces).
 void Simulation::fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const {
 	r_pieces.clear();
 	if (!world_installed_) return;
