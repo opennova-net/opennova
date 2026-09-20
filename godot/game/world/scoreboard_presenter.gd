@@ -1,12 +1,12 @@
 extends RefCounted
 
-## The Tab player list lane of GameHudPresenter. Like every other HUD key this
-## is an EDGE: the playerlist action TOGGLES the panel-visible flag — retail
-## keeps the board up until the next press (or a respawn init clears it)
-## [orig: Scoreboard_TogglePlayerList @0x4244c0 from the action dispatch case
-## @0x49bb68; the respawn clear @0x4993ae; the drawer gate
-## HUD_DrawKillListIfVisible @0x424300]. The binding already ships in the
-## controls catalog as "playerlist_alt" (vk 0x09), so nothing new is bound.
+## The Tab player list lane of GameHudPresenter. The playerlist action's edge
+## and the toggled panel-visible flag are the engine's (hud/hud_toggles.h,
+## through the presenter's HudToggles: retail keeps the board up until the
+## next press, and a respawn init clears it [orig: Scoreboard_TogglePlayerList
+## @0x4244c0 from the action dispatch case @0x49bb68; the respawn clear
+## @0x4993ae; the drawer gate HUD_DrawKillListIfVisible @0x424300]). This
+## lane shows or hides the board for that flag.
 ##
 ## The shell owns the strings because it owns the string tables: the title
 ## from gametext Overlays (with retail's literal fallback), the game-type
@@ -14,28 +14,17 @@ extends RefCounted
 ## Client, and the paging hint from Text. Server name and mission title ride
 ## the session decode through get_scoreboard.
 
-var _open := false        # the toggled panel-visible flag [orig: g_scoreboardPanelVisible]
-var _was_down := false    # the toggle's down-edge latch
 var _pushed := false      # so the board clears exactly once on close
 
 
-## The board flag clears with the mission, as retail's respawn/mission init
-## clears its global [orig: @0x4993ae].
 func reset() -> void:
-	_open = false
-	_was_down = false
 	_pushed = false
 
 
-func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool,
-		frame_counter: int) -> void:
+func update(hud: HudOverlay, world: GameWorld, open: bool, frame_counter: int) -> void:
 	if hud == null or world == null:
 		return
-	var down := ControlsBindings.pressed("playerlist_alt")
-	if down and not _was_down and active and not chorded:
-		_open = not _open
-	_was_down = down
-	if not _open:
+	if not open:
 		if _pushed:
 			hud.set_scoreboard(false, 0, 0, {}, null)
 			_pushed = false

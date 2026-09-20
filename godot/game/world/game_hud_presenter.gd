@@ -73,23 +73,11 @@ class PendingHudMessage:
 # MISSION FAILED screen can compose it. [orig: g_banner_text @0x28E3DA0, written by
 # GameMsg_SetBannerText @0x5ba200, cleared by the round-start HUD reset @0x5b71b0]
 var _endround_banner := ""
-# The objectives-panel toggle (the shell's objectives key flips it; retail toggles
-# an alpha byte 0<->255). [orig: input action case @0x49b68b — dword_24C18CC ^= 0xFF
-# in co-op; the binding row itself is the unported input-binding layer]
-var _objectives_visible := false
-# The friendly-tags mode, held here so it survives the per-mission HUD rebuild
-# like retail's process-lifetime global (the default and the other token
-# policies are the engine's, hud/hud_config_tokens.h via HudOverlay).
-var _friendly_tag_mode := HudOverlay.friendly_tag_mode_default()
-# The HUD color-scheme index, persisted like retail's config token (read at
+# The HUD color-scheme index is persisted like retail's config token (read at
 # boot, written back on cycle); the cfg store is this presenter's device work.
 const HUD_COLOR_CONFIG_PATH := "user://settings.cfg"
 const HUD_COLOR_SECTION := "hud"
 const HUD_COLOR_CONFIG_KEY := "hud_color_index"
-var _hud_color_index: int = HudOverlay.clamp_hud_color_index(
-		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
-				HUD_COLOR_CONFIG_KEY, HudOverlay.hud_color_index_default())))
-var _hud_color_was_down := false
 var _score_fanfare := ScoreFanfarePresenter.new()  # the S2C 0x81 hit-confirm lane
 # The HUD declutter level is TWO states in retail (hud-re.md, "HUD declutter"):
 # the persisted config value `hud_detail` (the game.cfg token, read at boot and
@@ -102,30 +90,25 @@ const HUD_DETAIL_CONFIG_KEY := "hud_detail"
 # wraps it (docs/interface/hud-re.md, the declutter section).
 var _hud_detail_config: int = int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
 		HUD_DETAIL_CONFIG_KEY, HudOverlay.hud_detail_level_default()))
-var _hud_detail_level: int = _hud_detail_config
-var _hud_detail_was_down := false
+# The key-driven HUD toggles and cycles (HudToggles over the engine's
+# hud/hud_toggles.h): the color index, the LIVE declutter level, the showhud
+# flags, the friendly-tags mode, the objectives panel and the three overlay
+# windows with their edge latches -- process-lifetime like retail's globals, so
+# they survive the per-mission HUD rebuild. Seeded from the persisted tokens
+# at boot; this presenter samples the keys and applies the device side effects
+# the poll's events name.
+var _toggles: HudToggles = _seed_toggles(
+		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
+				HUD_COLOR_CONFIG_KEY, HudOverlay.hud_color_index_default())),
+		_hud_detail_config)
 # Render-comparison declutter is a reversible runtime transaction over the
 # live level; it saves and restores the exact level around the capture.
 var _hud_hidden_capture_active := false
 var _hud_hidden_saved_detail_level := 0
-# The showhud 2-bit FP-view flags, session state like retail's process-lifetime
-# global (bit 0 = the FP gun, bit 1 = the corner spinmap block).
-var _showhud_flags := HudOverlay.showhud_flags_default()
-var _showhud_was_down := false
-# The dotsize row's down latch (catalog row 38, default O): the sight-scale
-# index itself lives on the overlay (per HUD build, like the per-mission
-# player init) and the SIGHTS card draws its `scale` rows from it.
-var _dotsize_was_down := false
 # The SIGHTS card's `slide` multiplier for the equipped weapon at its default
 # zero (PlayerHudWeaponDef.sight_slide_multiplier, the engine evaluator over
 # the def's scope_max_zero table); re-resolved on weapon change.
 var _sight_slide_multiplier := 0
-# The Goals row's down latch (catalog row 55, default G): the objectives toggle.
-var _goals_was_down := false
-# The view-action rows' down latches (view1st / viewwithgun / viewchase).
-var _view1st_was_down := false
-var _viewwithgun_was_down := false
-var _viewchase_was_down := false
 # Whether the map grid origin (the type-2043 marker) has been resolved onto
 # the HUD. A joiner's origin entity decodes from the world stream AFTER the
 # HUD builds, so tick() keeps querying until it appears.
@@ -198,7 +181,8 @@ func teardown() -> void:
 	_hud_weapon_name = ""
 	_hud_objective = ""
 	_endround_banner = ""
-	_objectives_visible = false
+	_toggles.reset_mission()
+	_toggles.set_objectives_visible(false)
 	_scoreboard.reset()
 	_vehicle_panel.reset()
 	_message_log.reset()
@@ -366,14 +350,13 @@ func ensure_game_hud() -> void:
 				t.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"))
 	# The presenter-held friendly-tags mode survives the per-mission rebuild
 	# like retail's process-lifetime global [orig: g_friendlyTagsMode @0x24C18C4].
-	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
-	_game_hud.set_hud_color_index(_hud_color_index)
+	_game_hud.set_friendly_tag_mode(_toggles.get_friendly_tag_mode())
+	_game_hud.set_hud_color_index(_toggles.get_hud_color_index())
 	# The HUD build stamps the LIVE declutter level, mirroring the round-init
 	# HUD reset re-applying the layer global. [orig: the re-apply
 	# @0x59DD75 from Game_InitNewRound / HUD_InitOverlaySystem]
-	_game_hud.set_hud_detail_level(_hud_detail_level)
-	_game_hud.set_showhud_flags(_showhud_flags)
-	_apply_fp_gun_visible()
+	_game_hud.set_hud_detail_level(_toggles.get_hud_detail_level())
+	_push_showhud_flags()
 
 
 # The shared F3 frame-stats board (null outside the game shell): while its
@@ -549,20 +532,17 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# rides Shift+F6).
 	# [orig: the key scan's fire @0x49d42f (the modifier pass) and @0x49d488
 	#  (the fallback); huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
+	# The key sampling is this presenter's; the edge latches, the cycles, the
+	# window toggles and the shared-key shadowing are the engine's poll.
 	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_ALT)
-	poll_hud_keys(ControlsBindings.pressed("huddetail"),
-			ControlsBindings.pressed("hudcolor"), hud_keys_chorded,
-			gameplay_input_active)
-	poll_showhud_edge(ControlsBindings.pressed("showhud"), hud_keys_chorded,
-			gameplay_input_active)
-	poll_dotsize_edge(ControlsBindings.pressed("dotsize"), hud_keys_chorded,
-			gameplay_input_active)
-	poll_goals_edge(ControlsBindings.pressed("Goals"), hud_keys_chorded,
-			gameplay_input_active)
-	poll_view_action_edges(ControlsBindings.pressed("view1st"),
-			ControlsBindings.pressed("viewwithgun"),
-			ControlsBindings.pressed("viewchase"), hud_keys_chorded,
-			gameplay_input_active)
+	_apply_toggle_events(_toggles.poll(
+			ControlsBindings.pressed("huddetail"), ControlsBindings.pressed("hudcolor"),
+			_hud_rows_share_key(), ControlsBindings.pressed("showhud"),
+			ControlsBindings.pressed("dotsize"), ControlsBindings.pressed("Goals"),
+			ControlsBindings.pressed("view1st"), ControlsBindings.pressed("viewwithgun"),
+			ControlsBindings.pressed("viewchase"), ControlsBindings.pressed("playerlist_alt"),
+			ControlsBindings.pressed("OldMessages"), ControlsBindings.pressed("ShowScore"),
+			hud_keys_chorded, gameplay_input_active, sim.is_mp_session()))
 	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
 	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
 	# foot [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780,
@@ -645,20 +625,12 @@ func tick(gameplay_input_active: bool = false) -> void:
 	_flush_feed_events()
 	_game_hud.set_kill_announcement(sim.get_kill_announcement_text(), sim.get_kill_announcement_tick(_hud_ticks()))
 	_score_fanfare.update(sim, _world)
-	_message_log.update(_game_hud, sim, ControlsBindings.pressed("OldMessages"),
-			hud_keys_chorded, gameplay_input_active)
-	# The ShowScore toggle is SP-only [orig: the !is_in_session gate @0x49bd29];
-	# its flip runs the respawn-init wrapper, closing the other overlay windows
-	# the shell owns [orig: Game_InitRespawnStateKeepingToggle @0x4993c0 -> Game_InitRespawnState] — the
-	# sim-owned toggles (map overlay, emote/radio menus) clear through the
-	# sim's own respawn init.
-	_end_round_stats.update(_game_hud, sim, ControlsBindings.pressed("ShowScore"),
-			hud_keys_chorded, gameplay_input_active,
-			not sim.is_mp_session(),
-			func() -> void: _message_log.close(_game_hud))
+	# The three overlay windows follow the engine's toggle flags (the ShowScore
+	# gate, the sibling close and the respawn clears are its rules).
+	_message_log.update(_game_hud, sim, _toggles.is_message_log_open())
+	_end_round_stats.update(_game_hud, sim, _toggles.is_end_round_stats_open())
 	_lfp_panel.update(_game_hud, sim, _hud_ticks())
-	_scoreboard.update(_game_hud, _world, hud_keys_chorded, gameplay_input_active,
-			_hud_ticks())
+	_scoreboard.update(_game_hud, _world, _toggles.is_scoreboard_open(), _hud_ticks())
 	if stats_on:
 		var probe_t5 := Time.get_ticks_usec()
 		_frame_stats.add(FrameStats.HUD_SCALARS, probe_t1 - probe_t0)
@@ -857,75 +829,79 @@ func endround_banner_line() -> String:
 	return _endround_banner
 
 
-## The objectives-panel toggle, flipped by the shell's objectives key.
-## [orig: the co-op action toggle @0x49b68b]
+## The objectives-panel toggle, flipped by the shell's objectives key
+## (the engine's rule; applied by _apply_objectives each tick).
 func toggle_objectives() -> void:
-	_objectives_visible = not _objectives_visible
+	_toggles.toggle_objectives()
 
 
-# The retail toast keys, indexed by the mode they announce.
-# [orig: @0x49b596/@0x49b5c1/@0x49b5d0/@0x49b5da]
-const FRIENDLY_TAG_TOAST_KEYS: Array[String] = ["STRMISC_FRIENDLYTAGS_OFF",
-		"STRMISC_FRIENDLYTAGS_FARBRIEF", "STRMISC_FRIENDLYTAGS_FULL",
-		"STRMISC_FRIENDLYTAGS_BRIEF"]
-
-
-## The friendly-tags mode cycle 0->1->2->3->0 with the retail toast through the
-## message feed. [orig: Input_HandleActionBinding case 30 @0x49b573 ->
-##  GameText("Misc", STRMISC_FRIENDLYTAGS_*) -> Chat_AddDebugMessage @0x49bc60]
+## The friendly-tags mode cycle with the retail toast through the message
+## feed: the cycle and the toast key are the engine's, the table lookup and
+## the push are this presenter's.
 func cycle_friendly_tags() -> void:
-	_friendly_tag_mode = HudOverlay.next_friendly_tag_mode(_friendly_tag_mode)
+	var key := _toggles.cycle_friendly_tags()
 	if _game_hud == null:
 		return
-	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
+	_game_hud.set_friendly_tag_mode(_toggles.get_friendly_tag_mode())
 	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	var key := FRIENDLY_TAG_TOAST_KEYS[_friendly_tag_mode]
 	if t != null and t.has_string_in_section("Misc", key):
 		_game_hud.push_message(t.get_string_in_section("Misc", key))
 
 
-## The HUD color-scheme cycle 0..5 with wrap, written back to the config like
-## retail's token round trip. Deliberately NO toast — the retail case only
-## cycles and restamps the color. [orig: the `hudcolor` action, dispatch code
-## 10 @0x49afc7 — idx+1, >5 wraps to 0, g_hudActiveColor = table[idx]]
+## Seed the toggles from the persisted config tokens (the color index clamps
+## like retail's read-back; the declutter level is stored verbatim).
+static func _seed_toggles(color_index: int, detail_level: int) -> HudToggles:
+	var toggles := HudToggles.new()
+	toggles.set_hud_color_index(HudOverlay.clamp_hud_color_index(color_index))
+	toggles.set_hud_detail_level(detail_level)
+	return toggles
+
+
+## Apply the device side effects of one poll's events: the overlay restamps,
+## the hudcolor config write (retail's token round trip; deliberately no
+## toast), the SIGHTS card's scale cycle, the FP gun bit and the camera
+## preference the view actions select.
+func _apply_toggle_events(events: int) -> void:
+	if events & HudToggles.EVENT_HUD_DETAIL_CYCLED:
+		_push_hud_detail_level()
+	if events & HudToggles.EVENT_HUD_COLOR_CYCLED:
+		ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
+				HUD_COLOR_CONFIG_KEY, _toggles.get_hud_color_index())
+		if _game_hud != null:
+			_game_hud.set_hud_color_index(_toggles.get_hud_color_index())
+	if events & (HudToggles.EVENT_SHOWHUD_CYCLED | HudToggles.EVENT_GUN_BIT_CHANGED):
+		_push_showhud_flags()
+	if events & HudToggles.EVENT_DOTSIZE_CYCLED:
+		cycle_sight_scale()
+	if events & HudToggles.EVENT_FIRST_PERSON_SELECTED:
+		_select_third_person(false)
+	if events & HudToggles.EVENT_THIRD_PERSON_SELECTED:
+		_select_third_person(true)
+
+
 ## One hudcolor poll step over pre-sampled device state (the seam the tests
-## drive). Two reimpl guards: (1) the edge latches from the UNGATED key state,
-## so a press held across an armory/F3 window cannot re-fire when the gate
-## reopens; (2) a Shift/Alt-chorded press (our debug picks ride Shift+F6)
-## never cycles; Ctrl is the row's own modifier (hudcolor defaults to Ctrl+F6)
-## and the binding sampler already resolved it.
-## [orig: first-match key scan @0x49d42f; cycle @0x49afc7]
+## drive); every other row idle.
 func poll_hud_color_edge(color_down: bool, chorded: bool, active: bool) -> void:
-	if color_down and not _hud_color_was_down and active and not chorded:
-		cycle_hud_color()
-	_hud_color_was_down = color_down
+	_apply_toggle_events(_toggles.poll(false, color_down, false, false, false, false,
+			false, false, false, false, false, false, chorded, active, false))
 
 
 func cycle_hud_color() -> void:
-	_hud_color_index = HudOverlay.next_hud_color_index(_hud_color_index)
-	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
-			HUD_COLOR_CONFIG_KEY, _hud_color_index)
-	if _game_hud != null:
-		_game_hud.set_hud_color_index(_hud_color_index)
+	_toggles.cycle_hud_color()
+	_apply_toggle_events(HudToggles.EVENT_HUD_COLOR_CYCLED)
 
 
-## One poll step over the pre-sampled huddetail + hudcolor key states — the
-## seam the tests drive. Retail's key scan is FIRST-MATCH-WINS by catalog row:
-## huddetail (row 50) precedes hudcolor (row 76), so when both rows resolve to
-## the same physical key (both default F6) the huddetail row consumes the edge
-## and hudcolor ships dormant on it; distinct keys leave both rows live — the
-## D-CTRL-4 adjudication keeps hudcolor a reachable row while modeling the
-## retail order. [orig: the first-match key scan @0x49d42f; rows 50 < 76]
+## One poll step over the pre-sampled huddetail + hudcolor key states with the
+## live shared-key shadowing (D-CTRL-4) -- the seam the tests drive.
 func poll_hud_keys(detail_down: bool, color_down: bool, chorded: bool,
 		active: bool) -> void:
-	poll_hud_detail_edge(detail_down, chorded, active)
-	if detail_down and color_down and _hud_rows_share_key():
-		color_down = false
-	poll_hud_color_edge(color_down, chorded, active)
+	_apply_toggle_events(_toggles.poll(detail_down, color_down, _hud_rows_share_key(),
+			false, false, false, false, false, false, false, false, false, chorded, active,
+			false))
 
 
 # Whether the huddetail and hudcolor rows currently resolve to a common bound
-# key (the shadowing predicate above; both default F6).
+# key (the D-CTRL-4 shadowing predicate the engine poll applies; both default F6).
 func _hud_rows_share_key() -> bool:
 	var detail_keys: PackedInt32Array = \
 			ControlsBindings.model().godot_keys_for_token("huddetail")
@@ -935,20 +911,15 @@ func _hud_rows_share_key() -> bool:
 	return false
 
 
-## The huddetail edge poll: same latch/gate/chord rules as the hudcolor poll
-## (the edge latches from the UNGATED key state; a chorded press never fires —
-## our debug picks ride Shift+F6).
+## One huddetail poll step (the seam the tests drive); every other row idle.
 func poll_hud_detail_edge(detail_down: bool, chorded: bool, active: bool) -> void:
-	if detail_down and not _hud_detail_was_down and active and not chorded:
-		cycle_hud_detail()
-	_hud_detail_was_down = detail_down
+	_apply_toggle_events(_toggles.poll(detail_down, false, false, false, false, false,
+			false, false, false, false, false, false, chorded, active, false))
 
 
-## The huddetail cycle: level + 1, wrapping past 3 to 0, stored to the
-## persisted global, visibility rebuilt. [orig: Input_HandleActionBinding_0
-## @0x4E0601..0x4E0624 -> CRenderState_SetLayerVisibility @0x59B0F0]
 func cycle_hud_detail() -> void:
-	set_hud_detail_level(HudOverlay.next_hud_detail_level(_hud_detail_level))
+	_toggles.cycle_hud_detail()
+	_push_hud_detail_level()
 
 
 ## The one LIVE declutter-level write seam: the cycle, the death-screen force
@@ -956,9 +927,13 @@ func cycle_hud_detail() -> void:
 ## never touches the persisted config value (retail's cycle and death force
 ## write the layer level only; game.cfg carries the config value).
 func set_hud_detail_level(level: int) -> void:
-	_hud_detail_level = level
+	_toggles.set_hud_detail_level(level)
+	_push_hud_detail_level()
+
+
+func _push_hud_detail_level() -> void:
 	if _game_hud != null:
-		_game_hud.set_hud_detail_level(_hud_detail_level)
+		_game_hud.set_hud_detail_level(_toggles.get_hud_detail_level())
 
 
 ## The mission-start apply: the live level re-seeded from the persisted config
@@ -969,7 +944,7 @@ func reapply_persisted_hud_detail() -> void:
 
 
 func hud_detail_level() -> int:
-	return _hud_detail_level
+	return _toggles.get_hud_detail_level()
 
 
 ## The persisted config value (read at boot; the settings path owns writes).
@@ -979,12 +954,12 @@ func hud_detail_config() -> int:
 
 ## The persisted HUD color-scheme index (the token cycle_hud_color writes).
 func hud_color_index() -> int:
-	return _hud_color_index
+	return _toggles.get_hud_color_index()
 
 
 ## The process-lifetime friendly-tags mode (cycle_friendly_tags advances it).
 func friendly_tag_mode() -> int:
-	return _friendly_tag_mode
+	return _toggles.get_friendly_tag_mode()
 
 
 ## Temporarily apply retail's blank HUD declutter level around a capture. The
@@ -998,10 +973,10 @@ func begin_hud_hidden_capture() -> Error:
 			or _view_effects == null or not is_instance_valid(_view_effects) \
 			or _sights_card == null or not is_instance_valid(_sights_card):
 		return ERR_UNCONFIGURED
-	_hud_hidden_saved_detail_level = _hud_detail_level
+	_hud_hidden_saved_detail_level = _toggles.get_hud_detail_level()
 	_hud_hidden_capture_active = true
-	_hud_detail_level = HudOverlay.hud_detail_level_blank()
-	_game_hud.set_hud_detail_level(_hud_detail_level)
+	_toggles.set_hud_detail_level(HudOverlay.hud_detail_level_blank())
+	_game_hud.set_hud_detail_level(_toggles.get_hud_detail_level())
 	return OK
 
 
@@ -1011,9 +986,9 @@ func finish_hud_hidden_capture() -> void:
 	if not _hud_hidden_capture_active:
 		return
 	_hud_hidden_capture_active = false
-	_hud_detail_level = _hud_hidden_saved_detail_level
+	_toggles.set_hud_detail_level(_hud_hidden_saved_detail_level)
 	if _game_hud != null and is_instance_valid(_game_hud):
-		_game_hud.set_hud_detail_level(_hud_detail_level)
+		_game_hud.set_hud_detail_level(_toggles.get_hud_detail_level())
 
 
 ## Semantic presentation witness for a HUD-hidden capture. This compiles the
@@ -1046,39 +1021,35 @@ func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
 
 
 ## The death-screen edge forces the declutter level to max through the same
-## seam the cycle uses, writing the persisted global like retail.
-## [orig: NapiNPClientMsg_0x00F @0x42E410..0x42E41C — level = 3 written to the
-##  global, then the visibility rebuild]
+## seam the cycle uses (the engine's rule; restamped like every live write).
 func apply_death_screen_hud_detail() -> void:
-	set_hud_detail_level(3)
+	_toggles.force_death_screen_hud_detail()
+	_push_hud_detail_level()
 
 
-## The showhud edge poll (catalog row 27, unbound by default), same
-## latch/gate/chord rules as the other HUD rows.
+## The showhud edge poll (the seam the tests drive); every other row idle.
 func poll_showhud_edge(showhud_down: bool, chorded: bool, active: bool) -> void:
-	if showhud_down and not _showhud_was_down and active and not chorded:
-		cycle_showhud()
-	_showhud_was_down = showhud_down
+	_apply_toggle_events(_toggles.poll(false, false, false, showhud_down, false, false,
+			false, false, false, false, false, false, chorded, active, false))
 
 
-## The showhud cycle: flags = (flags + 1) & 3. Bit 1 feeds the overlay (the
-## corner spinmap block); bit 0 feeds the FP viewmodel rig through the player
-## presenter. States: 0 = no gun + no spinmap, 1 = gun only, 2 = spinmap only,
-## 3 = both; the rest of the HUD is untouched. [orig: g_FpWeaponViewFlags
-## cycle @0x4E0561; bit0 @0x4DEDEA; bit1 @0x5A8635]
+## The showhud cycle (the engine's flags rule): bit 1 feeds the overlay's
+## corner spinmap block, bit 0 the FP viewmodel rig through the player presenter.
 func cycle_showhud() -> void:
-	_showhud_flags = HudOverlay.next_showhud_flags(_showhud_flags)
+	_toggles.cycle_showhud()
+	_push_showhud_flags()
+
+
+func _push_showhud_flags() -> void:
 	if _game_hud != null:
-		_game_hud.set_showhud_flags(_showhud_flags)
+		_game_hud.set_showhud_flags(_toggles.get_showhud_flags())
 	_apply_fp_gun_visible()
 
 
-## The dotsize edge poll (catalog row 38 "Sights Dot Size", default O): the
-## same latch/gate/chord rules as the showhud poll.
+## The dotsize edge poll (the seam the tests drive); every other row idle.
 func poll_dotsize_edge(dotsize_down: bool, chorded: bool, active: bool) -> void:
-	if dotsize_down and not _dotsize_was_down and active and not chorded:
-		cycle_sight_scale()
-	_dotsize_was_down = dotsize_down
+	_apply_toggle_events(_toggles.poll(false, false, false, false, dotsize_down, false,
+			false, false, false, false, false, false, chorded, active, false))
 
 
 ## The dotsize cycle: the overlay advances its per-player sight-scale index
@@ -1099,49 +1070,19 @@ func _push_sight_state() -> void:
 			_sight_slide_multiplier)
 
 
-## The Goals edge poll (catalog row 55 "Goals", default G): the objectives
-## panel toggle, same latch/gate/chord rules as the other HUD rows.
+## The Goals edge poll (the seam the tests drive); every other row idle.
 func poll_goals_edge(goals_down: bool, chorded: bool, active: bool) -> void:
-	if goals_down and not _goals_was_down and active and not chorded:
-		toggle_objectives()
-	_goals_was_down = goals_down
+	_apply_toggle_events(_toggles.poll(false, false, false, false, false, goals_down,
+			false, false, false, false, false, false, chorded, active, false))
 
 
-## The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,
-## viewchase F4): first person clears the FP-gun bit, gun view sets it, and
-## both select first person; chase selects the chase preference. None of them
-## moves the camera by itself — the sim's arbiter resolves the mode from the
-## preference and the seat, so on foot they only touch the gun bit and the
-## preference (stock JO has no on-foot third person). The 412 cycle and the
-## 405-410 orbit actions have no catalog row and are unreachable from a key.
-## [orig: Input_HandleActionBinding cases 400 @0x49c073, 401 @0x49c0d9,
-##  402 @0x49c0f6; the records @0x8186CC / @0x818738 / @0x8187A4 (keys F2/F3/F4)
-##  — their row flag gates (0x1 / 0x40 / 0x400 / 0x8000000) ride the unported
-##  binding layer, D-CTRL-3]
+## The view-action rows (view1st / viewwithgun / viewchase) poll over
+## pre-sampled state (the seam the tests drive); every other row idle.
 func poll_view_action_edges(view1st_down: bool, viewwithgun_down: bool,
 		viewchase_down: bool, chorded: bool, active: bool) -> void:
-	var gate := active and not chorded
-	if view1st_down and not _view1st_was_down and gate:
-		_set_showhud_gun_bit(false)
-		_select_third_person(false)
-	_view1st_was_down = view1st_down
-	if viewwithgun_down and not _viewwithgun_was_down and gate:
-		_set_showhud_gun_bit(true)
-		_select_third_person(false)
-	_viewwithgun_was_down = viewwithgun_down
-	if viewchase_down and not _viewchase_was_down and gate:
-		_select_third_person(true)
-	_viewchase_was_down = viewchase_down
-
-
-# g_FpWeaponViewFlags bit 0, the view actions' write [orig: @0x49c073 clears,
-# @0x49c0d9 sets].
-func _set_showhud_gun_bit(gun_visible: bool) -> void:
-	_showhud_flags = (_showhud_flags | HudOverlay.SHOWHUD_FLAG_GUN) if gun_visible \
-			else (_showhud_flags & ~HudOverlay.SHOWHUD_FLAG_GUN)
-	if _game_hud != null:
-		_game_hud.set_showhud_flags(_showhud_flags)
-	_apply_fp_gun_visible()
+	_apply_toggle_events(_toggles.poll(false, false, false, false, false, false,
+			view1st_down, viewwithgun_down, viewchase_down, false, false, false, chorded,
+			active, false))
 
 
 func _select_third_person(selected: bool) -> void:
@@ -1152,7 +1093,7 @@ func _select_third_person(selected: bool) -> void:
 func _apply_fp_gun_visible() -> void:
 	if _player_presenter != null:
 		_player_presenter.set_fp_gun_visible(
-				(_showhud_flags & HudOverlay.SHOWHUD_FLAG_GUN) != 0)
+				(_toggles.get_showhud_flags() & HudOverlay.SHOWHUD_FLAG_GUN) != 0)
 
 
 # The objectives panel: the sim's shown win-condition rows resolved through
@@ -1162,7 +1103,8 @@ func _apply_objectives() -> void:
 	if _game_hud == null:
 		return
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	_game_hud.set_objectives(_objectives_visible, Strings.get_table(Strings.TABLE_MISSION), sim)
+	_game_hud.set_objectives(_toggles.is_objectives_visible(),
+			Strings.get_table(Strings.TABLE_MISSION), sim)
 
 
 ## Number of player-facing messages waiting for the lazy HUD to mount.

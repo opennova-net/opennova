@@ -927,6 +927,11 @@ add_test(NAME hud_config_tokens COMMAND hud_config_tokens_test)
 
 # The loading screen spec (hud/loading_screen.h): the sidecar name rule, the
 # present-due rule and the composited resource names.
+add_executable(hud_toggles_test hud/hud_toggles_test.cpp)
+target_link_libraries(hud_toggles_test PRIVATE opennova_runtime)
+target_compile_features(hud_toggles_test PRIVATE cxx_std_17)
+add_test(NAME hud_toggles COMMAND hud_toggles_test)
+
 add_executable(hud_loading_screen_test hud/loading_screen_test.cpp)
 target_link_libraries(hud_loading_screen_test PRIVATE opennova_runtime)
 add_test(NAME hud_loading_screen COMMAND hud_loading_screen_test)
