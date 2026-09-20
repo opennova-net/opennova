@@ -162,7 +162,6 @@
 #include "audio/music_script.h"
 #include "audio/music_director.h"
 #include "audio/music_pair_names.h"
-#include "pff/pff_document.h"
 #include "mnu/mnu_document.h"
 #include "mnu/mnu_rows.h"
 #include "mnu/mns_stylesheet.h"
@@ -432,7 +431,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MusicScript);
 	GDREGISTER_CLASS(MusicPairNames);
 	GDREGISTER_CLASS(MusicDirector);
-	GDREGISTER_CLASS(PffDocument);
 	GDREGISTER_CLASS(MnuDocument);
 	GDREGISTER_CLASS(MnuSoundRow);
 	GDREGISTER_CLASS(MnuActionRow);

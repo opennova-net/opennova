@@ -42,8 +42,8 @@ reproduce even if we wanted to.
 
 ## Decision
 
-Our writer (`libs/pff/src/pff_writer.cpp`, driven by the Archive Tool in
-`godot/engine/pff/pff_document.cpp`) emits:
+Our writer (`engine/formats/pff/pff_writer.cpp`; the ONED archive tool that drove it
+left with ADR 0037, so its drivers today are the test fixtures) emits:
 
 - **New entries**: `timestamp = 0`, `checksum = 0`. No checksum is computed — there is nothing
   to reproduce, and the loader ignores both fields.

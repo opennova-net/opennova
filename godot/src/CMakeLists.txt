@@ -223,7 +223,6 @@ add_library(${TARGET_NAME} SHARED
     util/texture_path_resolver.cpp
     resource_index/resource_root.cpp
     resource_index/launch_flags.cpp
-    pff/pff_document.cpp
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp
     audio/sbf_audio_stream.cpp
