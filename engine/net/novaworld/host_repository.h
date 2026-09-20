@@ -1,7 +1,9 @@
 #pragma once
 
 #include <net/novaworld/db/sqlite.h>
-#include <net/novaworld/lobby_session.h>      // LobbyState
+#include <net/novaworld/gsb.h>
+#include <net/novaworld/lobby_session.h>      // LobbyState, HostRosterSlot
+#include <net/novaworld/lobby_update.h>       // LobbyStatusBlob
 
 #include <cstdint>
 #include <optional>
@@ -10,17 +12,18 @@
 
 namespace opennova {
 
-// Thin SQL wrapper around the `active_hosts` + `host_players` tables.
-// All methods take a Database& and call into the same prepared-statement
-// path as the rest of engine/net/novaworld — single-threaded ownership of the
-// handle is the caller's responsibility (the standalone server's UDP
-// thread + Crow worker threads share a single Database, so all of
-// host_repository.* sits behind the listener-side mutex that wraps the
-// sqlite handle).
+// Thin SQL wrapper around the `active_hosts`, `host_players` and
+// `host_roster` tables. All methods take a Database& and call into the same
+// prepared-statement path as the rest of engine/net/novaworld —
+// single-threaded ownership of the handle is the caller's responsibility
+// (the standalone server's UDP thread + Crow worker threads share a single
+// Database, so all of host_repository.* sits behind the listener-side mutex
+// that wraps the sqlite handle).
 //
-// Lifecycle (mirrors onnw/onnw/hosts.py + the lobby-session dispatch):
-//   ClientHostRequest  -> upsert_host() (INSERT OR REPLACE)
-//   ClientHostUpdate   -> update_host() (refresh ClientHostUpdate fields)
+// Lifecycle (the lobby-session dispatch):
+//   ClientHostRequest  -> upsert_host() (INSERT OR REPLACE) + replace_roster()
+//   ClientHostUpdate   -> update_host() (refresh the Host columns) + replace_roster()
+//   POST status blob   -> apply_status_blob() (the Host columns, keyed by HostKey)
 //   GOODBYE / timeout  -> remove_host_by_rid() (lobby_session's teardown)
 //   ClientHostPlayerAdded   -> add_player()
 //   ClientHostPlayerRemoved -> remove_player_by_peer() (a peer can leave
@@ -52,6 +55,18 @@ struct HostRow {
 	std::string exp_bits;
 	std::string ver1;
 	std::string joicon2;
+	// The remaining retail Host columns (see LobbyState).
+	std::string time_left;
+	std::string time_of_day;
+	std::string msg;
+	std::string mod;
+	std::string age;
+	std::string pb_server;
+	std::string level_range;
+	std::string bb_mode;
+	std::string skins;
+	std::string tracers;
+	std::string pix;
 	std::optional<int64_t> host_user_id;
 	std::string peer_ip;
 	int         peer_port = 0;
@@ -79,12 +94,25 @@ int prune_stale_hosts(db::Database &db, int64_t window_seconds);
 void add_player(db::Database &db, const PlayerRow &row);
 void remove_player_by_peer(db::Database &db, const std::string &peer_ip, int peer_port);
 
+// The host-reported PlayerList (one row per slot). Replaced wholesale on
+// every ClientHostRequest / ClientHostUpdate; cascades with the host row.
+void replace_roster(db::Database &db, uint32_t host_rid,
+                    const std::vector<HostRosterSlot> &roster);
+std::vector<HostRosterSlot> list_roster(db::Database &db, uint32_t host_rid);
+
+// Fold a parsed POST status blob (the plaintext Lobby_UpdateServerInfo
+// heartbeat) into the host row that owns its HostKey. Returns false when no
+// active host carries that key (the blob is then ignored). The blob's values
+// are lobby-sanitized on the wire (' ', '?', '@', '=' -> '+', empty -> "---")
+// and are stored as received.
+bool apply_status_blob(db::Database &db, const LobbyStatusBlob &blob);
+
 std::vector<HostRow>   list_hosts(db::Database &db);
-// Hosts for one game slug (active_hosts.game == game). Mirrors onnet's
-// per-game GSB query (onnw/hosts.py::fetch_hosts_by_game) so /jop_2.gsb and
+// Hosts for one game slug (active_hosts.game == game) so /jop_2.gsb and
 // /dfx2_0.gsb don't cross-contaminate. Uses idx_active_hosts_game.
 std::vector<HostRow>   list_hosts_by_game(db::Database &db, const std::string &game);
 std::optional<HostRow> find_host_by_rid(db::Database &db, uint32_t rid);
+std::optional<HostRow> find_host_by_key(db::Database &db, const std::string &host_key);
 std::vector<PlayerRow> list_players(db::Database &db, uint32_t host_rid);
 
 // Aggregates used by /api/stats and /api/lobbies.
@@ -102,6 +130,14 @@ LobbyAggregate aggregate(db::Database &db);
 HostRow row_from_lobby(const LobbyState &lobby,
                        const std::string &peer_ip, int peer_port,
                        std::optional<int64_t> host_user_id = std::nullopt);
+
+// Project one stored host (plus its roster) onto the GSB browser row the
+// retail IB3 browser reads: every FLDS column carries the host-reported
+// value, and the row tail carries the roster's PlayerName list, whose u16
+// count the browser adds to its player total
+// [orig: NapiGameList_ProcessEncryptedResponse @0x63dafc..0x63db96].
+GsbServerEntry gsb_entry_from_host(const HostRow &host,
+                                   const std::vector<HostRosterSlot> &roster);
 
 } // namespace hostdb
 

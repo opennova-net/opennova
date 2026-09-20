@@ -1,10 +1,10 @@
-// Phase D — LobbySession dispatch tests.
+// LobbySession dispatch tests.
 //
-// Validates the five lobby message handlers ported from
-// onnet/onnw/novaworldudp.py against the same input/output expectations.
-// Uses NapiMessage directly (= onnet's Container) so we exercise the same
-// wire structure the standalone server's nw_udp_listener will see after
-// decode_protocol_packet.
+// Validates the lobby message handlers against the container shapes the
+// standalone server's nw_udp_listener sees after napi_stream_decode: the
+// retail ClientHostRequest / ClientHostUpdate var lists
+// [orig: CNapiGameSession_SendHostRequest @0x4d37b4..0x4d37f6], the indexed
+// PlayerList [orig: Server_PlayerAdd @0x51d441..0x51d4aa] and the GLSVSS leg.
 
 #include <net/novaworld/lobby_session.h>
 
@@ -21,7 +21,11 @@ using opennova::LobbySession;
 using opennova::LobbyState;
 using opennova::NapiField;
 using opennova::NapiMessage;
+using opennova::var_has;
+using opennova::var_value;
 using test_novaworld::make_client_var_list;
+using test_novaworld::make_indexed_var_list;
+using test_novaworld::player_slot_vars;
 
 namespace {
 
@@ -42,7 +46,72 @@ const NapiMessage *find_child(const NapiMessage &m, const std::string &name) {
 	return nullptr;
 }
 
-int test_extract_var_lists() {
+// A ClientHostRequest in the retail shape: Cookie (the login cookie jar +
+// locale, no NWUID), HostSetup, Host, PlayerList, CurrentlyHosting=0.
+NapiMessage make_retail_host_request(const std::string &app_id,
+                                     const std::vector<test_novaworld::IndexedVar> &players = {}) {
+	NapiMessage in;
+	in.name = "ClientHostRequest";
+	in.fields.push_back({"CurrentlyHosting", std::vector<uint8_t>{'0'}});
+	in.fields.push_back({"VarCheck", std::vector<uint8_t>{'1'}});
+	in.children.push_back(make_client_var_list("Cookie", {
+		{"NWHANDLE", "Host"}, {"PCID", "00000002"}, {"NWH", "1"},
+		{"CountryName", "United States"}, {"Language", "English"}, {"TimeZoneBias", "300"},
+	}));
+	in.children.push_back(make_client_var_list("HostSetup", {
+		{"LobbyName", "jop_2_consumer"},
+		{"ServerName", "MyServer"},
+		{"Msg", "hello"},
+		{"MaxPlayers", "16"},
+		{"Password", "0"},
+		{"Dedicated", "1"},
+		{"AppId", app_id},
+		{"AccessCodeList", ""},
+		{"PLoad", ""},
+		{"Exp", ""},
+		{"LAN", "0"},
+	}));
+	in.children.push_back(make_client_var_list("Host", {
+		{"LobbyName", "jop_2_consumer"},
+		{"HostKey", "HK-" + app_id},
+		{"ServerName", "MyServer"},
+		{"GameType", "TDM"},
+		{"MissionName", "ASH_G11A"},
+		{"Region", "North America"},
+		{"Players", "3"},
+		{"MaxPlayers", "16"},
+		{"MI1", "0"}, {"MI2", "0"}, {"MI3", "0"},
+		{"Dedicated", "Yes"},
+		{"Locked", "No"},
+		{"Skins", "Yes"},
+		{"TimeLeft", "45"},
+		{"Password", "No"},
+		{"Tracers", "Yes"},
+		{"Mod", " "},
+		{"Country", "US"},
+		{"Msg", "hello"},
+		{"Port", "-1"},
+		{"AllowPing", "y"},
+		{"Age", "0 00:12:34"},
+		{"TimeOfDay", "Dawn"},
+		{"AppID", app_id},
+		{"PCIDKey", "16777216"},
+		{"GameServerBaffleKey", "0"},
+		{"Stat", "N"},
+		{"LevelRange", " "},
+		{"BBMode", "0"},
+		{"GCC", ""},
+		{"GV", "1.7.5.7"},
+		{"Version", "1.7.5.7"},
+		{"Ver1", "3"},
+		{"Ver2", "2345"},
+		{"PBServer", "0"},
+	}));
+	in.children.push_back(make_indexed_var_list("PlayerList", players));
+	return in;
+}
+
+int test_extract_var_lists_keeps_indexed_entries() {
 	NapiMessage outer;
 	outer.name = "ClientHostRequest";
 	outer.children.push_back(make_client_var_list("HostSetup", {
@@ -50,17 +119,25 @@ int test_extract_var_lists() {
 		{"LobbyName", "jop_2_consumer"},
 		{"MaxPlayers", "16"},
 	}));
-	outer.children.push_back(make_client_var_list("Host", {
-		{"ServerName", "MyServer"},
-		{"Players", "3"},
-		{"Region", "us"},
-	}));
+	std::vector<test_novaworld::IndexedVar> players;
+	for (const auto &v : player_slot_vars(0, "alice", "10.0.0.2:32768", "00000002", "1", "0")) players.push_back(v);
+	for (const auto &v : player_slot_vars(1, "bob",   "10.0.0.3:32768", "00000003", "2", "0")) players.push_back(v);
+	outer.children.push_back(make_indexed_var_list("PlayerList", players));
 	auto vl = extract_var_lists(outer);
 	TEST_EXPECT(vl.size() == 2);
-	TEST_EXPECT(vl["HostSetup"]["AppId"] == "1234");
-	TEST_EXPECT(vl["HostSetup"]["LobbyName"] == "jop_2_consumer");
-	TEST_EXPECT(vl["Host"]["ServerName"] == "MyServer");
-	TEST_EXPECT(vl["Host"]["Players"] == "3");
+	TEST_EXPECT(var_value(vl["HostSetup"], "AppId") == "1234");
+	TEST_EXPECT(var_value(vl["HostSetup"], "appid") == "1234"); // case-insensitive
+	TEST_EXPECT(var_value(vl["HostSetup"], "LobbyName") == "jop_2_consumer");
+	// Two players keep two (fnum, PlayerName) entries instead of collapsing.
+	TEST_EXPECT(vl["PlayerList"].size() == 10);
+	TEST_EXPECT(var_value(vl["PlayerList"], "PlayerName", 0) == "alice");
+	TEST_EXPECT(var_value(vl["PlayerList"], "PlayerName", 1) == "bob");
+	TEST_EXPECT(var_value(vl["PlayerList"], "PlayerPCID", 1) == "00000003");
+	TEST_EXPECT(!var_has(vl["PlayerList"], "PlayerName", 2));
+	auto roster = opennova::roster_from_player_list(vl["PlayerList"]);
+	TEST_EXPECT(roster.size() == 2);
+	TEST_EXPECT(roster[0].slot == 0 && roster[0].player_name == "alice" && roster[0].team == "1");
+	TEST_EXPECT(roster[1].slot == 1 && roster[1].player_name == "bob" && roster[1].ip_and_port == "10.0.0.3:32768");
 	return 0;
 }
 
@@ -102,28 +179,18 @@ int test_client_request_verify_result_returns_server_verify_result() {
 	return 0;
 }
 
-int test_client_host_request_returns_server_host_result_with_gsid() {
+int test_retail_host_request_returns_server_host_result_with_gsid() {
 	LobbySession sess;
 	sess.set_gsid_generator([](const std::string &app) {
 		return std::string("GSID-10-") + app + "-FIXED";
 	});
-	sess.set_rid_generator([](const std::string &) { return uint32_t{0x0A001234u}; });
+	sess.set_rid_generator([] { return uint32_t{0x0A001234u}; });
 
 	LobbyState state;
-	NapiMessage in;
-	in.name = "ClientHostRequest";
-	in.children.push_back(make_client_var_list("HostSetup", {
-		{"AppId", "1234"},
-		{"LobbyName", "jop_2_consumer"},
-		{"MaxPlayers", "16"},
-	}));
-	in.children.push_back(make_client_var_list("Host", {
-		{"ServerName", "MyServer"},
-		{"ServerIP", "192.168.1.42"},
-		{"ServerPortNumber", "17475"},
-		{"Players", "3"},
-		{"Region", "us"},
-	}));
+	std::vector<test_novaworld::IndexedVar> players;
+	for (const auto &v : player_slot_vars(0, "Host", "10.0.0.1:32768", "00000002", "1", "0")) players.push_back(v);
+	for (const auto &v : player_slot_vars(3, "carol", "10.0.0.9:32768", "00000009", "2", "0")) players.push_back(v);
+	auto in = make_retail_host_request("1234", players);
 
 	auto r = sess.dispatch(in, state, "10.0.0.1", 32768);
 	TEST_EXPECT(r.label == "ClientHostRequest");
@@ -152,40 +219,148 @@ int test_client_host_request_returns_server_host_result_with_gsid() {
 	TEST_EXPECT(state.rid == 0x0A001234u);
 	TEST_EXPECT(state.game == "jop_2_consumer");
 	TEST_EXPECT(state.app_id == "1234");
-	TEST_EXPECT(state.host_ip == "192.168.1.42");
-	TEST_EXPECT(state.host_port == 17475);
+	// Port = "-1": the joinable endpoint is the observed UDP source.
+	TEST_EXPECT(state.host_ip == "10.0.0.1");
+	TEST_EXPECT(state.host_port == 32768);
 	TEST_EXPECT(state.server_name == "MyServer");
 	TEST_EXPECT(state.player_count == 3);
 	TEST_EXPECT(state.max_players == 16);
-	TEST_EXPECT(state.region == "us");
+	TEST_EXPECT(state.region == "North America");
+	// The host's keys ride the request's Host list, not only the update.
+	TEST_EXPECT(state.host_key == "HK-1234");
+	TEST_EXPECT(state.pcid_key == "16777216");
+	// The browser columns.
+	TEST_EXPECT(state.game_type == "TDM");
+	TEST_EXPECT(state.mission_name == "ASH_G11A");
+	TEST_EXPECT(state.time_left == "45");
+	TEST_EXPECT(state.time_of_day == "Dawn");
+	TEST_EXPECT(state.msg == "hello");
+	TEST_EXPECT(state.age == "0 00:12:34");
+	TEST_EXPECT(state.pb_server == "0");
+	TEST_EXPECT(state.dedicated == "Yes");   // the localized token is stored as sent
+	TEST_EXPECT(state.skins == "Yes");
+	TEST_EXPECT(state.level_range == " ");
+	// The roster keeps one slot per VarFNum.
+	TEST_EXPECT(state.roster.size() == 2);
+	TEST_EXPECT(state.roster[0].slot == 0 && state.roster[0].player_name == "Host");
+	TEST_EXPECT(state.roster[1].slot == 3 && state.roster[1].player_name == "carol");
 	return 0;
 }
 
-int test_client_host_request_falls_back_to_remote_addr_for_host_ip() {
+int test_host_port_override_when_positive() {
 	LobbySession sess;
 	sess.set_gsid_generator([](const std::string &) { return std::string("FIXED"); });
-	sess.set_rid_generator([](const std::string &) { return uint32_t{0x0A000001u}; });
 	LobbyState state;
-	NapiMessage in;
-	in.name = "ClientHostRequest";
-	in.children.push_back(make_client_var_list("HostSetup", {
-		{"AppId", "999"},
-		{"LobbyName", "jop_2_consumer"},
-	}));
-	in.children.push_back(make_client_var_list("Host", {
-		// ServerIP/ServerPortNumber omitted.
-	}));
+	auto in = make_retail_host_request("999");
+	// Replace Port = -1 with a positive value: it overrides the observed port.
+	for (auto &child : in.children) {
+		if (field_str(find_field(child, "VarList")) != "Host") continue;
+		for (auto &var : child.children) {
+			if (field_str(find_field(var, "VarName")) == "Port") {
+				var.fields.clear();
+				var.fields.push_back({"VarFNum", std::vector<uint8_t>{'0'}});
+				var.fields.push_back({"VarName", std::vector<uint8_t>{'P','o','r','t'}});
+				var.fields.push_back({"VarValue", std::vector<uint8_t>{'1','7','4','7','5'}});
+			}
+		}
+	}
 	auto r = sess.dispatch(in, state, "10.0.0.1", 64500);
 	TEST_EXPECT(r.reply_containers.size() == 1);
 	TEST_EXPECT(state.host_ip == "10.0.0.1");
-	TEST_EXPECT(state.host_port == 64500);
+	TEST_EXPECT(state.host_port == 17475);
 	return 0;
 }
 
-int test_client_host_request_extracts_gsb_fields() {
+// Retail's Host list carries no address (Port = "-1"); the host player's own
+// slot-0 PlayerIpAndPort is the game endpoint [orig: Server_PlayerAdd
+// @0x51d45c]. Service policy: slot 0 first, then a positive Port, then the
+// observed source; an empty ip half (an OpenNova host with no advertised
+// address) takes the observed source address.
+int test_slot0_ip_and_port_selects_game_endpoint() {
 	LobbySession sess;
 	sess.set_gsid_generator([](const std::string &) { return std::string("FIXED"); });
-	sess.set_rid_generator([](const std::string &) { return uint32_t{0x0A000002u}; });
+	{
+		LobbyState state;
+		std::vector<test_novaworld::IndexedVar> players;
+		for (const auto &v : player_slot_vars(0, "Host", "10.0.0.5:32780", "", "1", "0")) players.push_back(v);
+		for (const auto &v : player_slot_vars(1, "bob",  "10.0.0.6:32768", "", "2", "0")) players.push_back(v);
+		auto r = sess.dispatch(make_retail_host_request("777", players), state, "10.0.0.1", 64500);
+		TEST_EXPECT(r.reply_containers.size() == 1);
+		TEST_EXPECT(state.host_ip == "10.0.0.5");
+		TEST_EXPECT(state.host_port == 32780);
+	}
+	{
+		// No advertised address: ":port" keeps the observed source address.
+		LobbyState state;
+		std::vector<test_novaworld::IndexedVar> players;
+		for (const auto &v : player_slot_vars(0, "Host", ":32780", "", "1", "0")) players.push_back(v);
+		auto r = sess.dispatch(make_retail_host_request("778", players), state, "10.0.0.1", 64500);
+		TEST_EXPECT(r.reply_containers.size() == 1);
+		TEST_EXPECT(state.host_ip == "10.0.0.1");
+		TEST_EXPECT(state.host_port == 32780);
+	}
+	{
+		// A registration without a roster (the pre-mission ClientHostRequest)
+		// falls back to the observed source; the host's own ClientHostPlayerAdded
+		// for slot 0 then resolves the endpoint and the roster follows the deltas.
+		LobbyState state;
+		auto r = sess.dispatch(make_retail_host_request("779"), state, "10.0.0.1", 64500);
+		TEST_EXPECT(r.reply_containers.size() == 1);
+		TEST_EXPECT(state.host_port == 64500);
+		NapiMessage added;
+		added.name = "ClientHostPlayerAdded";
+		auto put = [&added](const char *k, const std::string &v) {
+			added.fields.push_back({k, std::vector<uint8_t>(v.begin(), v.end())});
+		};
+		put("PlayerNumber", "0"); put("PlayerName", "Host"); put("PlayerIpAndPort", "10.0.0.5:32780");
+		put("PlayerPCID", ""); put("PlayerTeam", "1"); put("PlayerType", "0");
+		auto ra = sess.dispatch(added, state, "10.0.0.1", 64500);
+		TEST_EXPECT(ra.label == "ClientHostPlayerAdded" && ra.reply_containers.empty());
+		TEST_EXPECT(state.host_ip == "10.0.0.5" && state.host_port == 32780);
+		TEST_EXPECT(state.roster.size() == 1 && state.player_count == 1);
+		added.fields.clear();
+		put("PlayerNumber", "1"); put("PlayerName", "carol"); put("PlayerIpAndPort", "10.0.0.7:32768");
+		put("PlayerPCID", ""); put("PlayerTeam", "2"); put("PlayerType", "0");
+		sess.dispatch(added, state, "10.0.0.1", 64500);
+		TEST_EXPECT(state.roster.size() == 2 && state.player_count == 2);
+		TEST_EXPECT(state.roster[1].slot == 1 && state.roster[1].player_name == "carol");
+		NapiMessage removed;
+		removed.name = "ClientHostPlayerRemoved";
+		removed.fields.push_back({"PlayerNumber", std::vector<uint8_t>{'1'}});
+		auto rr = sess.dispatch(removed, state, "10.0.0.1", 64500);
+		TEST_EXPECT(rr.label == "ClientHostPlayerRemoved");
+		TEST_EXPECT(state.roster.size() == 1 && state.player_count == 1);
+		// The host endpoint survives a joiner leaving.
+		TEST_EXPECT(state.host_ip == "10.0.0.5" && state.host_port == 32780);
+	}
+	return 0;
+}
+
+int test_two_hosts_with_colliding_app_ids_get_distinct_rids() {
+	// Retail AppId is a per-session random in [1000, 9999]
+	// [orig: CNapiNetwork_RandomizeTimeout @0x4c4d9a]: 1000 and 5096 share
+	// their low twelve bits, so the RID must not be derived from it.
+	LobbySession sess;
+	LobbyState a, b;
+	auto ra = sess.dispatch(make_retail_host_request("1000"), a, "10.0.0.1", 32768);
+	auto rb = sess.dispatch(make_retail_host_request("5096"), b, "10.0.0.2", 32768);
+	TEST_EXPECT(ra.reply_containers.size() == 1 && rb.reply_containers.size() == 1);
+	TEST_EXPECT(a.rid != 0 && b.rid != 0);
+	TEST_EXPECT(a.rid != b.rid);
+	TEST_EXPECT((a.rid & 0xFF000000u) == 0x0A000000u);
+	TEST_EXPECT((b.rid & 0xFF000000u) == 0x0A000000u);
+	// A re-sent request keeps the rid it was given.
+	auto ra2 = sess.dispatch(make_retail_host_request("1000"), a, "10.0.0.1", 32768);
+	TEST_EXPECT(field_str(find_field(ra2.reply_containers[0], "Rid")) == std::to_string(a.rid));
+	return 0;
+}
+
+int test_legacy_host_request_extracts_gsb_fields() {
+	// The pre-retail-shape OpenNova host request (alternate spellings) still
+	// registers.
+	LobbySession sess;
+	sess.set_gsid_generator([](const std::string &) { return std::string("FIXED"); });
+	sess.set_rid_generator([] { return uint32_t{0x0A000002u}; });
 	LobbyState state;
 	NapiMessage in;
 	in.name = "ClientHostRequest";
@@ -211,6 +386,8 @@ int test_client_host_request_extracts_gsb_fields() {
 
 	auto r = sess.dispatch(in, state, "10.0.0.1", 64500);
 	TEST_EXPECT(r.reply_containers.size() == 1);
+	TEST_EXPECT(state.host_ip == "10.0.0.1");
+	TEST_EXPECT(state.host_port == 64500);
 	TEST_EXPECT(state.game_type == "COOP");
 	TEST_EXPECT(state.mission_name == "ASH_G11A");
 	TEST_EXPECT(state.country == "US");
@@ -228,31 +405,43 @@ int test_client_host_request_extracts_gsb_fields() {
 int test_client_host_update_silent_with_state_refresh() {
 	LobbySession sess;
 	LobbyState state;
-	state.host_port = 0;
+	state.rid = 0x0A000005u;
+	state.host_ip = "10.10.10.10";
+	state.host_port = 17500;
+	state.pcid_key = "16777216";
 	NapiMessage in;
 	in.name = "ClientHostUpdate";
 	in.children.push_back(make_client_var_list("Host", {
 		{"HostKey", "ABC123"},
-		{"PCIDKey", "PC456"},
-		{"ServerIP", "10.10.10.10"},
-		{"ServerPortNumber", "17500"},
+		{"PCIDKey", "16777217"},   // rotated since the request
 		{"ServerName", "Renamed"},
 		{"Players", "5"},
 		{"MaxPlayers", "32"},
 		{"Region", "eu"},
+		{"TimeLeft", "12"},
+		{"TimeOfDay", "Night"},
+		{"Port", "-1"},
 	}));
+	std::vector<test_novaworld::IndexedVar> players;
+	for (const auto &v : player_slot_vars(2, "dave", "10.0.0.4:32768", "00000004", "1", "0")) players.push_back(v);
+	in.children.push_back(make_indexed_var_list("PlayerList", players));
 	auto r = sess.dispatch(in, state, "1.2.3.4", 99);
 	TEST_EXPECT(r.label == "ClientHostUpdate");
 	TEST_EXPECT(r.reply_containers.empty()); // silent
 	TEST_EXPECT(state.host_key == "ABC123");
-	TEST_EXPECT(state.pcid_key == "PC456");
+	TEST_EXPECT(state.pcid_key == "16777217");
+	// Port = -1 leaves the stored endpoint alone.
 	TEST_EXPECT(state.host_ip == "10.10.10.10");
 	TEST_EXPECT(state.host_port == 17500);
 	TEST_EXPECT(state.server_name == "Renamed");
 	TEST_EXPECT(state.player_count == 5);
 	TEST_EXPECT(state.max_players == 32);
 	TEST_EXPECT(state.region == "eu");
-	TEST_EXPECT(state.last_host_update["Host"]["HostKey"] == "ABC123");
+	TEST_EXPECT(state.time_left == "12");
+	TEST_EXPECT(state.time_of_day == "Night");
+	TEST_EXPECT(var_value(state.last_host_update["Host"], "HostKey") == "ABC123");
+	TEST_EXPECT(state.roster.size() == 1);
+	TEST_EXPECT(state.roster[0].slot == 2 && state.roster[0].player_name == "dave");
 	return 0;
 }
 
@@ -297,7 +486,7 @@ int test_stop_hosting_and_stop_playing_are_silent_lifecycle_messages() {
 	TEST_EXPECT(!state.hosting);
 	TEST_EXPECT(state.player_count == 0);
 
-	state.play_state["PlaySetup"]["GSID"] = "fixed";
+	state.play_state["PlaySetup"].push_back({0, "GSID", "fixed"});
 	NapiMessage stop_playing;
 	stop_playing.name = "ClientStopPlaying";
 	auto r2 = sess.dispatch(stop_playing, state, "127.0.0.1", 32768);
@@ -326,7 +515,41 @@ int test_client_play_request_returns_server_play_result() {
 	const auto *cmds = find_child(reply, "ServerVarList");
 	TEST_EXPECT(cmds != nullptr);
 	TEST_EXPECT(field_str(find_field(*cmds, "VarList")) == "PlayCommands");
-	TEST_EXPECT(state.play_state["PlaySetup"]["GSID"] == "fixed-gsid");
+	TEST_EXPECT(var_value(state.play_state["PlaySetup"], "GSID") == "fixed-gsid");
+	return 0;
+}
+
+int test_glsvss_request_answers_with_results_only_when_configured() {
+	// [orig: CNapiGameSession_SendGLSVSSRequest @0x4d3a70 / HandleGLSVSSResults @0x4d33be]
+	LobbySession sess;
+	LobbyState state;
+	NapiMessage in;
+	in.name = "ClientGLSVSSRequest";
+	in.fields.push_back({"GLSVSSRequest", std::vector<uint8_t>{'a','b','c'}});
+	in.children.push_back(make_client_var_list("Cookie", {{"NWHANDLE", "Host"}}));
+
+	auto r = sess.dispatch(in, state, "127.0.0.1", 32768);
+	TEST_EXPECT(r.label == "ClientGLSVSSRequest");
+	TEST_EXPECT(r.reply_containers.size() == 1);
+	TEST_EXPECT(r.reply_containers[0].name == "ServerGLSVSSResults");
+	// Nothing configured: the param the consumer keys on is absent (no-op).
+	TEST_EXPECT(find_field(r.reply_containers[0], "GLSVSSResults") == nullptr);
+
+	sess.set_glsvss_results("CHARDATA=1");
+	auto r2 = sess.dispatch(in, state, "127.0.0.1", 32768);
+	TEST_EXPECT(r2.reply_containers.size() == 1);
+	TEST_EXPECT(field_str(find_field(r2.reply_containers[0], "GLSVSSResults")) == "CHARDATA=1");
+	return 0;
+}
+
+int test_update_vars_is_accepted_without_reply() {
+	LobbySession sess;
+	LobbyState state;
+	NapiMessage in;
+	in.name = "ClientUpdateVars";
+	auto r = sess.dispatch(in, state, "127.0.0.1", 32768);
+	TEST_EXPECT(r.label == "ClientUpdateVars");
+	TEST_EXPECT(r.reply_containers.empty());
 	return 0;
 }
 
@@ -344,17 +567,21 @@ int test_unknown_message_returns_no_reply_with_label() {
 } // namespace
 
 int main() {
-	if (test_extract_var_lists() != 0) return 1;
+	if (test_extract_var_lists_keeps_indexed_entries() != 0) return 1;
 	if (test_client_connected_returns_server_start_verify() != 0) return 1;
 	if (test_client_request_verify_result_returns_server_verify_result() != 0) return 1;
-	if (test_client_host_request_returns_server_host_result_with_gsid() != 0) return 1;
-	if (test_client_host_request_falls_back_to_remote_addr_for_host_ip() != 0) return 1;
-	if (test_client_host_request_extracts_gsb_fields() != 0) return 1;
+	if (test_retail_host_request_returns_server_host_result_with_gsid() != 0) return 1;
+	if (test_host_port_override_when_positive() != 0) return 1;
+	if (test_slot0_ip_and_port_selects_game_endpoint() != 0) return 1;
+	if (test_two_hosts_with_colliding_app_ids_get_distinct_rids() != 0) return 1;
+	if (test_legacy_host_request_extracts_gsb_fields() != 0) return 1;
 	if (test_client_host_update_silent_with_state_refresh() != 0) return 1;
 	if (test_client_player_enter_request_returns_result() != 0) return 1;
 	if (test_stop_hosting_and_stop_playing_are_silent_lifecycle_messages() != 0) return 1;
 	if (test_client_play_request_returns_server_play_result() != 0) return 1;
+	if (test_glsvss_request_answers_with_results_only_when_configured() != 0) return 1;
+	if (test_update_vars_is_accepted_without_reply() != 0) return 1;
 	if (test_unknown_message_returns_no_reply_with_label() != 0) return 1;
-	std::printf("OK: LobbySession dispatch (lifecycle, GSB fields, extract_var_lists)\n");
+	std::printf("OK: LobbySession dispatch (lifecycle, retail Host/PlayerList lists, RID minting, GLSVSS)\n");
 	return 0;
 }

@@ -156,6 +156,9 @@ private:
 	std::atomic<bool> running_{false};
 	std::atomic<bool> stop_requested_{false};
 	uint16_t bound_port_ = 0;
+	// public_host:http_port, the NovaworldWebDomainNameAndPortNumber CU value
+	// (no scheme — the client adds "http://").
+	std::string web_domain_;
 
 	// Layer-4 lobby state. The dispatcher is stateless; per-connection
 	// state lives in the map (keyed by PeerAddr — see erase_lobby_state

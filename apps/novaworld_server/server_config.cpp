@@ -32,6 +32,16 @@ uint64_t getenv_u64(const char *name, uint64_t fallback) {
 	}
 }
 
+int getenv_int(const char *name, int fallback) {
+	const char *v = getenv_safe(name);
+	if (!v) return fallback;
+	try {
+		return std::stoi(v);
+	} catch (...) {
+		return fallback;
+	}
+}
+
 bool getenv_bool(const char *name, bool fallback) {
 	const char *v = getenv_safe(name);
 	if (!v) return fallback;
@@ -56,7 +66,7 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("TEMPLATES_DIR"))       c.templates_dir = v;
 	if (auto v = getenv_safe("STATIC_DIR"))          c.static_dir = v;
 
-	c.heartbeat_timeout_ms = getenv_u64("HEARTBEAT_TIMEOUT_MS", c.heartbeat_timeout_ms);
+	// heartbeat_timeout_ms has no env knob: it is the advertised cs[0].
 	c.tick_interval_ms     = getenv_u64("TICK_INTERVAL_MS",     c.tick_interval_ms);
 	c.host_sweep_interval_ms = getenv_u64("HOST_SWEEP_INTERVAL_MS", c.host_sweep_interval_ms);
 	c.host_stale_window_ms   = getenv_u64("HOST_STALE_WINDOW_MS",   c.host_stale_window_ms);
@@ -68,6 +78,17 @@ ServerConfig ServerConfig::from_env() {
 	// from the expansions.github_repo column (Terraform-managed catalogue).
 	if (auto v = getenv_safe("EXPANSION_GITHUB_TOKEN"))  c.expansion_github_token = v;
 	if (auto v = getenv_safe("EXPANSION_PUBLISH_TOKEN")) c.expansion_publish_token = v;
+
+	if (auto v = getenv_safe("ONNET_MET_IP"))    c.met_ip = v;
+	c.met_port = getenv_u16("ONNET_MET_PORT", c.met_port);
+	if (auto v = getenv_safe("ONNET_MET_LABEL")) c.met_label = v;
+	c.met_ping = getenv_int("ONNET_MET_PING", c.met_ping);
+	c.met_ext  = getenv_int("ONNET_MET_EXT",  c.met_ext);
+
+	if (auto v = getenv_safe("ONNET_GLSVSS_REQUEST")) c.glsvss_request = v;
+	c.glsvss_rims  = getenv_int("ONNET_GLSVSS_RIMS",  c.glsvss_rims);
+	c.glsvss_agrms = getenv_int("ONNET_GLSVSS_AGRMS", c.glsvss_agrms);
+	if (auto v = getenv_safe("ONNET_GLSVSS_RESULTS")) c.glsvss_results = v;
 
 	if (auto v = getenv_safe("ONNET_CLIENT_REFLECT_IP")) c.client_reflect_ip = v;
 	c.client_reflect_gate_port      = getenv_u16("ONNET_CLIENT_REFLECT_GATE_PORT",      c.client_reflect_gate_port);
