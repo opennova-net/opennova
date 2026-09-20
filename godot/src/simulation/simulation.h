@@ -1227,7 +1227,10 @@ public:
 			const String &p_default_home, const Dictionary &p_zone_names);
 	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
 	// wave line, the psp/medic show gates, and the medic-call cooldown.
-	Ref<DeployStatus> get_deploy_status(const Ref<RtxtStringFile> &p_gametext);
+	// `medic_key_label` is the MedicReq binding's display string the
+	// STROVER_CALLMEDIC static takes (the controls model resolves it).
+	Ref<DeployStatus> get_deploy_status(const Ref<RtxtStringFile> &p_gametext,
+			const String &p_medic_key_label);
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
 	// (engine: runtime/inmatch/client_runtime.h)

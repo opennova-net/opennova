@@ -140,6 +140,33 @@ void test_statics() {
 	CHECK(!deploy_statics_visibility(in).medic);
 }
 
+// The three statics' texts [orig: @0x553e10..0x553f60]: the Overlays labels
+// with the retail fallbacks, the key slot of STROVER_CALLMEDIC.
+void test_statics_text() {
+	DeployStaticsInput in;
+	in.hold_seconds = 8;
+	in.revive_seconds = 42;
+	const opennova::hud::GameTextLookup none;
+	DeployStaticsText t = deploy_statics_text(in, "M", none);
+	CHECK(t.psp_respawn == "Spawn point available in  <cFF4040>8");
+	CHECK(t.medic_timer == "Medic time remaining  <cFF4040>42");
+	CHECK(t.call_medic == "Press M to call a medic");
+	const opennova::hud::GameTextLookup table = [](const char *section, const char *key,
+														const char *fallback) {
+		if (std::string(section) != "Overlays") return std::string(fallback);
+		const std::string k = key;
+		if (k == "STROVER_PSPRESPAWN") return std::string("Spawnpunkt in");
+		if (k == "STROVER_MEDICTIMER") return std::string("Sanitaeter");
+		if (k == "STROVER_CALLMEDIC") return std::string("Sanitaeter rufen");
+		return std::string(fallback);
+	};
+	t = deploy_statics_text(in, "M", table);
+	CHECK(t.psp_respawn == "Spawnpunkt in  <cFF4040>8");
+	CHECK(t.medic_timer == "Sanitaeter  <cFF4040>42");
+	// A format without the key slot draws as authored.
+	CHECK(t.call_medic == "Sanitaeter rufen");
+}
+
 // The STATIC_RESPAWN_MSG1 text arms [orig: @0x5538e7..0x553a7b].
 void test_status_text() {
 	DeployStatusLine line;
@@ -243,6 +270,7 @@ int main() {
 	test_unsecured_zone_occupants_land_after_row_zero();
 	test_status_line();
 	test_statics();
+	test_statics_text();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

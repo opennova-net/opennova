@@ -50,7 +50,8 @@ void Simulation::set_server_text(const String &p_medic_request_format) {
 		opennova::inmatch::set_server_text(*ctx, std::move(text));
 }
 
-Ref<DeployStatus> Simulation::get_deploy_status(const Ref<RtxtStringFile> &p_gametext) {
+Ref<DeployStatus> Simulation::get_deploy_status(const Ref<RtxtStringFile> &p_gametext,
+		const String &p_medic_key_label) {
 	// The DEATH screen's STATIC facts for THIS client [orig: the client
 	// globals UI_UpdateDeathScreenContent @0x5536a0 reads — dword_A85B5C /
 	// A85B60 / A85B68 from the 0x0A sub-block 0, word_A85BC0 + entity+538/548
@@ -146,6 +147,8 @@ Ref<DeployStatus> Simulation::get_deploy_status(const Ref<RtxtStringFile> &p_gam
         }
     }
     v.instructions = opennova::world::build_deploy_instructions(instructions, text);
+    v.statics_text = opennova::world::deploy_statics_text(statics_in,
+            opennova::to_std(p_medic_key_label), text);
     char zone_key[32];
     std::snprintf(zone_key, sizeof zone_key, "STRWPNAME%03d", line.zone_index + 1);
     v.respawn_text = opennova::world::deploy_status_text(line,

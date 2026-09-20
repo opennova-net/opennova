@@ -277,6 +277,10 @@ public:
 	bool get_queued_numbered() const { return value_.line.numbered; }
 	bool get_show_psp_respawn() const { return value_.statics.psp_respawn; }
 	bool get_show_medic() const { return value_.statics.medic; }
+	// The three statics' texts (world/deploy_screen_feed.h deploy_statics_text).
+	String get_psp_respawn_text() const { return opennova::to_gd(value_.statics_text.psp_respawn); }
+	String get_medic_timer_text() const { return opennova::to_gd(value_.statics_text.medic_timer); }
+	String get_call_medic_text() const { return opennova::to_gd(value_.statics_text.call_medic); }
 	int get_medic_cooldown_ticks() const { return value_.medic_cooldown_ticks; }
 	int get_medic_request_serial() const { return value_.medic_request_serial; }
 };

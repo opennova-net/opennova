@@ -133,6 +133,34 @@ DeployStaticsVisibility deploy_statics_visibility(const DeployStaticsInput &in) 
     return v;
 }
 
+DeployStaticsText deploy_statics_text(const DeployStaticsInput &in,
+                                      const std::string &medic_key_label,
+                                      const hud::GameTextLookup &lookup) {
+    const auto text = [&lookup](const char *key, const char *fallback) {
+        return lookup ? lookup("Overlays", key, fallback) : std::string(fallback);
+    };
+    DeployStaticsText out;
+    char buf[256];
+    // [orig: sprintf("%s  <cFF4040>%d", STROVER_PSPRESPAWN, dword_A85B68) @0x553e10]
+    std::snprintf(buf, sizeof buf, "%s  <cFF4040>%d",
+                  text("STROVER_PSPRESPAWN", "Spawn point available in").c_str(),
+                  in.hold_seconds);
+    out.psp_respawn = buf;
+    // [orig: sprintf("%s  <cFF4040>%d", STROVER_MEDICTIMER, dword_A85B60) @0x553e74]
+    std::snprintf(buf, sizeof buf, "%s  <cFF4040>%d",
+                  text("STROVER_MEDICTIMER", "Medic time remaining").c_str(),
+                  in.revive_seconds);
+    out.medic_timer = buf;
+    // [orig: sprintf(STROVER_CALLMEDIC, KeyBinding_FormatDisplayString(MedicReq))
+    //  @0x553f60]; a format without the key slot draws as authored.
+    const std::string call_format = text("STROVER_CALLMEDIC", "Press %s to call a medic");
+    const size_t slot = call_format.find("%s");
+    out.call_medic = slot == std::string::npos
+            ? call_format
+            : call_format.substr(0, slot) + medic_key_label + call_format.substr(slot + 2);
+    return out;
+}
+
 
 DeployInstructions build_deploy_instructions(
         const DeployInstructionsInput &in, const hud::GameTextLookup &lookup) {

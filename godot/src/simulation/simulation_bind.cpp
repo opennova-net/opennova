@@ -146,7 +146,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::send_deployment_pick);
 	ClassDB::bind_method(D_METHOD("get_deploy_list_rows", "default_key", "default_home", "zone_names"),
 	                     &Simulation::get_deploy_list_rows);
-	ClassDB::bind_method(D_METHOD("get_deploy_status", "gametext"), &Simulation::get_deploy_status);
+	ClassDB::bind_method(D_METHOD("get_deploy_status", "gametext", "medic_key_label"),
+			&Simulation::get_deploy_status);
 	ClassDB::bind_method(D_METHOD("request_local_player_medic"),
 	                     &Simulation::request_local_player_medic);
 	ClassDB::bind_method(D_METHOD("local_medic_request_cooldown_ticks"),

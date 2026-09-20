@@ -462,7 +462,7 @@ func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
 	# lists the player (no status line, no hold), while the other-player kill
 	# opened the 120-second revive window -> the MEDIC pair shows, the
 	# RESPAWN/PSPRESPAWN pair stays hidden, the list title shows.
-	var status: DeployStatus = pair.joiner.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT))
+	var status: DeployStatus = pair.joiner.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT), "")
 	assert_eq(status.queued_kind, 0, "no penalty or wave line")
 	assert_true(status.show_medic,
 			"the open revive window shows the medic pair")
@@ -544,7 +544,7 @@ func test_instruction_widgets_follow_retained_death_text() -> void:
 	assert_gte(first, 0)
 	assert_gte(second, 0)
 	assert_false(driver.is_widget_shown(first), "AAS hides the first instruction")
-	var status: DeployStatus = pair.joiner.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT))
+	var status: DeployStatus = pair.joiner.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT), "")
 	assert_eq(driver.is_widget_shown(second), status.show_instruction2)
 	assert_eq(driver.get_widget_text(second), Strings.get_table(Strings.TABLE_GAMETEXT)
 			.get_string_in_section("Overlays", "STROVER_RESPAWN1"),

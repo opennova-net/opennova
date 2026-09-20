@@ -212,6 +212,9 @@ void DeployStatus::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, queued_numbered)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, show_psp_respawn)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, show_medic)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::STRING, psp_respawn_text)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::STRING, medic_timer_text)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::STRING, call_medic_text)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::INT, medic_cooldown_ticks)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::INT, medic_request_serial)
 }

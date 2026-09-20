@@ -131,6 +131,22 @@ struct DeployStaticsVisibility {
 };
 DeployStaticsVisibility deploy_statics_visibility(const DeployStaticsInput &in);
 
+// The three statics' texts [orig: @0x553e10..0x553f60]: STATIC_PSPRESPAWN_MSG1
+// is "<STROVER_PSPRESPAWN>  <cFF4040><hold>", STATIC_MEDIC_MSG1
+// "<STROVER_MEDICTIMER>  <cFF4040><revive>", and STATIC_CALLMEDIC_MSG the
+// STROVER_CALLMEDIC format with its `%s` taking the MedicReq binding's display
+// string (KeyBinding_FormatDisplayString — the embedder resolves the label); a
+// format without `%s` shows as it is. The Overlays keys resolve through the
+// game-text seam with the retail English fallbacks.
+struct DeployStaticsText {
+    std::string psp_respawn;
+    std::string medic_timer;
+    std::string call_medic;
+};
+DeployStaticsText deploy_statics_text(const DeployStaticsInput &in,
+                                      const std::string &medic_key_label,
+                                      const hud::GameTextLookup &lookup);
+
 
 
 // Both instruction widgets and the permanent-death status pair. A secured
@@ -178,6 +194,7 @@ struct DeployScreenStatus {
     int hold_seconds = 0;
     DeployStatusLine line;
     DeployStaticsVisibility statics;
+    DeployStaticsText statics_text;
     DeployInstructions instructions;
     std::string respawn_text;
     int medic_cooldown_ticks = 0;
