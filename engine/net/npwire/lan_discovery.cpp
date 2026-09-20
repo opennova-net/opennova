@@ -1,5 +1,6 @@
 #include <net/npwire/lan_discovery.h>
 
+#include <base/io/strutil.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -17,7 +18,8 @@ std::vector<uint8_t> build_lan_discovery_probe(uint32_t client_index) {
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
 
-bool parse_lan_discovery_reply(const uint8_t *data, size_t size, LanDiscoveryServer &out) {
+bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client_index,
+                               LanDiscoveryServer &out) {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	if (!data || !nw_decode_inbound(data, size, opcode, body) ||
@@ -29,17 +31,27 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, LanDiscoverySer
 	if (!parse_server_hello(body.data(), body.size(), hello)) return false;
 
 	// A browse socket can receive unrelated UDP while its 30-second window is
-	// open. Accept only a game-server 0x81 carrying the retail JO protocol
-	// identity. CI is deliberately NOT used to filter here: the solicited 0x81 does
-	// echo the enumerator's CI (`NapiNPProtocol_HandleClientHello @0x6213b0` reads
-	// the inbound CI TLV and hands it to `NapiNPProtocol_SendServerInfoPacket
-	// @0x6204b0`, which writes it back at @0x620563), but a browse window also
-	// collects UNSOLICITED announces from `NapiNPSession_SendAnnouncePacket
-	// @0x61fa00`, whose CI is the announcing session's own field and is omitted
-	// entirely when zero. Correlating would drop those rows.
+	// open. The solicited 0x81 echoes the enumerator's CI (the host reads the
+	// inbound CI TLV and writes it back), and retail resolves that CI against
+	// the enumerator that issued it, returning on a miss; an absent CI TLV
+	// resolves as id 0, which no live enumerator carries. Only 0x81 replies
+	// reach this parser — the unsolicited 0x41 announces a retail host
+	// broadcasts never do (the announce builder writes packet_header_byte =
+	// 0x41), so the CI filter drops nothing a retail browser would list.
+	// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 ->
+	//  NapiNPProtocol_SendServerInfoPacket @0x6204b0 (the CI echo @0x620563);
+	//  Nwu_HandleServerHello @0x626d20 — sub_6227F0(connection, server_id)
+	//  @0x627533, `if (!entry) return` @0x627541;
+	//  NapiNPSession_SendAnnouncePacket @0x61fa00 @0x61fac4 (0x41)]
+	if (client_index == 0 || hello.ci != client_index) return false;
+
+	// The admission identity: PN and PV1 compared case-insensitively, PG
+	// bytewise; PV2 is parsed and stored but is not a discovery gate (it is the
+	// host's 0x42-time check, not the browser's). [orig: Nwu_HandleServerHello
+	//  @0x626d20 — PN @0x62758b, PG @0x627591..0x627620, PV1 @0x627639]
 	const ClientHello retail = make_jointoperations_client_hello(0);
-	if (!hello.is_game_server || hello.pn != retail.pn || hello.pg != retail.pg ||
-	    hello.pv1 != retail.pv1 || hello.pv2 != retail.pv2) {
+	if (!hello.is_game_server || !strutil::iequals(hello.pn, retail.pn) ||
+	    hello.pg != retail.pg || !strutil::iequals(hello.pv1, retail.pv1)) {
 		return false;
 	}
 
@@ -70,13 +82,14 @@ std::string endpoint_key(const std::string &address, int port) {
 } // namespace
 
 bool LanDiscoveryBrowser::begin(uint32_t client_index, int port_min, int port_max) {
-	if (port_min < 1 || port_max > 65535 || port_min > port_max) return false;
+	if (client_index == 0 || port_min < 1 || port_max > 65535 || port_min > port_max) return false;
 	stop();
 	servers_.clear();
 	index_by_endpoint_.clear();
 	// One identity per browse window: retail keeps its connection identity
 	// across the enumerator's re-announce pumps, so every burst repeats the
 	// same probe bytes.
+	client_index_ = client_index;
 	probe_ = build_lan_discovery_probe(client_index);
 	port_min_ = port_min;
 	port_max_ = port_max;
@@ -97,13 +110,16 @@ bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
 	if (!browsing_) return false;
 	browse_elapsed_s_ += delta_seconds;
 	announce_elapsed_s_ += delta_seconds;
-	if (browse_elapsed_s_ >= kLanBrowseWindowSeconds) {
+	// Strictly greater: `GetTickCount() - search_start > 0x7530` @0x55933a.
+	if (browse_elapsed_s_ > kLanBrowseWindowSeconds) {
 		stop();
 		return false;
 	}
 	// A cold host that binds its port mid-window is only discoverable because
-	// the enumerator keeps announcing.
-	if (announce_elapsed_s_ >= kLanAnnounceIntervalSeconds) {
+	// the enumerator keeps announcing. The re-announce is due strictly after
+	// the interval [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 —
+	// `tick_count - last_send_tick > interval`].
+	if (announce_elapsed_s_ > kLanAnnounceIntervalSeconds) {
 		announce_elapsed_s_ = 0.0;
 		announce_due = true;
 	}
@@ -117,19 +133,13 @@ LanRowChange LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size,
 	    source_port > port_max_ || !usable_address(source_ip))
 		return LanRowChange::kNone;
 	LanDiscoveryServer server;
-	if (!parse_lan_discovery_reply(data, size, server)) return LanRowChange::kNone;
+	if (!parse_lan_discovery_reply(data, size, client_index_, server)) return LanRowChange::kNone;
 	const std::string key = endpoint_key(source_ip, source_port);
-	const auto it = index_by_endpoint_.find(key);
-	if (it != index_by_endpoint_.end()) {
-		// The host re-announces every browse interval and its row data is live
-		// state (player count, mission rotation) — refresh the stored row in
-		// place and report a change only when something actually changed, so a
-		// stale first-seen row does not survive the whole browse window.
-		LanDiscoveryRow &row = servers_[it->second];
-		if (row.server == server) return LanRowChange::kNone;
-		row.server = std::move(server);
-		return LanRowChange::kUpdated;
-	}
+	// A listed host re-announcing: the row table hit adds and updates nothing
+	// (the row text was built at first sighting) @0x5593c4..0x5593e3.
+	if (index_by_endpoint_.count(key) != 0) return LanRowChange::kNone;
+	// The per-pump walk stops at 32 examined sessions @0x5593b5.
+	if (servers_.size() >= kLanBrowseMaxSessions) return LanRowChange::kNone;
 	index_by_endpoint_.emplace(key, servers_.size());
 	LanDiscoveryRow row;
 	row.host_ip = source_ip;
