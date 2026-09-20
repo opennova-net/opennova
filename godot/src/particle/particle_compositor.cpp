@@ -257,6 +257,9 @@ public:
 		std::string failure;
 		std::uint64_t submitted_frame_id = 0;
 		std::uint64_t drawn_frame_id = 0;
+		// The eye the latest submission was compiled for (also its fog origin).
+		std::array<float, 3> submitted_camera_position{};
+		std::array<float, 3> submitted_camera_forward{0.0f, 0.0f, 1.0f};
 		std::size_t submitted_commands = 0;
 		std::size_t drawn_commands = 0;
 		std::size_t gpu_draw_calls = 0;
@@ -356,6 +359,13 @@ public:
 		std::lock_guard<std::mutex> lock(diagnostics_mutex);
 		diagnostics.submitted_frame_id = submission ? submission->frame_id : 0;
 		diagnostics.submitted_commands = submission ? submission->commands.size() : 0;
+		if (submission) {
+			diagnostics.submitted_camera_position = submission->camera_position;
+			diagnostics.submitted_camera_forward = submission->camera_forward;
+		} else {
+			diagnostics.submitted_camera_position = {};
+			diagnostics.submitted_camera_forward = {0.0f, 0.0f, 1.0f};
+		}
 		if (!submission) {
 			diagnostics.status = "waiting_for_submission";
 			diagnostics.failure.clear();
@@ -1442,6 +1452,14 @@ Dictionary ParticleCompositorEffect::Impl::report() const {
 	result["rd_available"] = renderer_supported;
 	result["shutdown"] = shutdown_requested.load(std::memory_order_acquire);
 	result["submitted_frame_id"] = godot_token(diagnostics.submitted_frame_id);
+	result["submitted_camera_position"] = Vector3(
+			diagnostics.submitted_camera_position[0],
+			diagnostics.submitted_camera_position[1],
+			diagnostics.submitted_camera_position[2]);
+	result["submitted_camera_forward"] = Vector3(
+			diagnostics.submitted_camera_forward[0],
+			diagnostics.submitted_camera_forward[1],
+			diagnostics.submitted_camera_forward[2]);
 	result["drawn_frame_id"] = godot_token(diagnostics.drawn_frame_id);
 	result["submitted_commands"] =
 			static_cast<int64_t>(diagnostics.submitted_commands);

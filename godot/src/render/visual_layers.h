@@ -9,8 +9,9 @@ namespace godot {
 // the environment-cube capture (env/environment_cube_capture), the placed
 // object layers (mission/mission_object_placer), the terrain foliage blanket
 // (terrain/foliage_dispatcher), the terrain flat fallback (terrain/terrain),
-// the water mirror (env/water) and the weapon Inset scene camera
-// (hud/hud_inset_scope). The witness
+// the water mirror (env/water), the weapon Inset scene camera
+// (hud/hud_inset_scope) and the FirstPerson particle batch, which rides the
+// viewmodel bit (particle/particle_renderer). The witness
 // for the mirror's population lives with the mirror view
 // (engine/runtime/environment/water_mirror.h, env #30).
 namespace visual_layers {

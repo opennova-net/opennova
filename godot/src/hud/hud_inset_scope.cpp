@@ -13,7 +13,16 @@ void HudInsetScope::_bind_methods() {
 			D_METHOD("update_view", "view", "source", "aspect_mode"), &HudInsetScope::update_view);
 	ClassDB::bind_method(D_METHOD("is_scope_active"), &HudInsetScope::is_scope_active);
 	ClassDB::bind_method(D_METHOD("get_render_viewport"), &HudInsetScope::get_render_viewport);
+	ClassDB::bind_method(
+			D_METHOD("get_active_render_camera"), &HudInsetScope::get_active_render_camera);
 	ClassDB::bind_method(D_METHOD("get_render_bounds"), &HudInsetScope::get_render_bounds);
+}
+Camera3D *HudInsetScope::get_active_render_camera() const {
+	// update_view and the visibility notification keep the target's update mode
+	// equal to "this pass renders", so it is the one predicate to read.
+	const bool rendering =
+			active_ && target_ && target_->get_update_mode() == SubViewport::UPDATE_ALWAYS;
+	return rendering ? camera_ : nullptr;
 }
 Rect2 HudInsetScope::get_render_bounds() const {
 	return Rect2(geometry_.left, geometry_.top, geometry_.right - geometry_.left + 1,

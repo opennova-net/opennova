@@ -346,6 +346,13 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 	var hud := presenter.get_game_hud()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	hud.size = Vector2(1024, 768)
+	# The world's particle renderer draws the aperture's particles: it is handed
+	# the Inset camera for exactly as long as that pass renders.
+	var effects := world.get_effect_world()
+	assert_not_null(effects, "the booted world runs its effect world")
+	if effects == null:
+		return
+	assert_null(effects.get_second_scene_camera())
 	# Settling the body on the fixture terrain keeps the airborne ADS refusal
 	# out of this test, which is about the rendered reticle selection.
 	for _i in range(90):
@@ -370,6 +377,10 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 				"switching the equipped weapon updates the aimed crosshair immediately")
 		var inset_view := hud.get_node("InsetScope") as HudInsetScope
 		assert_eq(inset_view.is_scope_active(), name == "WPN_HUD_INSET")
+		if not inset_view.is_scope_active():
+			assert_null(inset_view.get_active_render_camera())
+			assert_null(effects.get_second_scene_camera(),
+					"a scoped weapon without the Inset flag hands the renderer no second view")
 		if inset_view.is_scope_active():
 			assert_eq(inset_view.get_render_bounds(), Rect2(639, 223, 323, 323))
 			assert_eq(inset_view.get_render_viewport().size, Vector2i(323, 323))
@@ -386,6 +397,28 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 					"the source camera of this fixture admits every excluded layer")
 			assert_eq(inset_camera.cull_mask, camera.cull_mask & ~second_view_excluded,
 					"the Inset camera takes the source mask without the viewmodel/body/caster layers")
+			# While the pass renders, the particle renderer holds its camera and
+			# compiles the world's particles for it as a view group of its own.
+			assert_eq(inset_view.get_active_render_camera(), inset_camera)
+			assert_eq(effects.get_second_scene_camera(), inset_camera,
+					"the renderer holds the Inset camera while the scope is up")
+			effects.render_frame()
+			var particles := effects.get_debug_draw_list_report()
+			assert_true(bool(particles.get("second_scene_compositor_attached", false)),
+					"the Inset camera owns a particle compositor pair while it renders")
+			assert_not_null(inset_camera.compositor)
+			assert_true((particles.get("second_scene_camera_side", {}) as Dictionary).has(
+					"compile_index"), "the second view's draw list compiles with the World lists")
+			# The first-person particle domain never reaches the aperture: its one
+			# batch rides the viewmodel layer this camera masks out.
+			var fp_batch := effects.find_child("ParticleFirstPersonBatch", true, false) \
+					as MeshInstance3D
+			assert_not_null(fp_batch)
+			if fp_batch != null:
+				assert_eq(fp_batch.layers & inset_camera.cull_mask, 0,
+						"the Inset camera admits no layer of the first-person particle batch")
+				assert_ne(fp_batch.layers & camera.cull_mask, 0,
+						"...which the gameplay camera of this fixture does draw")
 			if RenderingServer.get_rendering_device() != null:
 				await get_tree().process_frame
 				await get_tree().process_frame
@@ -406,3 +439,45 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 		presenter.tick()
 		assert_false(inset_view.is_scope_active())
 		assert_eq(hud.get_draw_list_stats().tris, 14, "lowering the optic restores the hip reticle")
+		assert_null(effects.get_second_scene_camera(),
+				"lowering the optic takes the Inset camera back from the renderer")
+		effects.render_frame()
+		assert_false(bool(effects.get_debug_draw_list_report().get(
+				"second_scene_compositor_attached", true)),
+				"an unscoped frame carries no second particle view")
+		if inset_view.get_render_viewport() != null:
+			assert_null(inset_view.get_render_viewport().get_camera_3d().compositor,
+					"the retired view restores the Inset camera's own compositor")
+
+	# Switching weapons with the optic still raised drops the view as well: the
+	# Inset belongs to the equipped weapon.
+	var scope := hud.get_node("InsetScope") as HudInsetScope
+	assert_true(sim.request_local_player_scope_toggle())
+	for _i in range(30):
+		sim.step()
+	presenter.tick()
+	assert_true(scope.is_scope_active(), "the Inset weapon raises its optic again")
+	assert_not_null(effects.get_second_scene_camera())
+	assert_true(world.set_local_player_weapon_by_name("WPN_HUD_PLAIN"))
+	for _i in range(30):
+		sim.step()
+	presenter.tick()
+	assert_false(scope.is_scope_active())
+	assert_null(effects.get_second_scene_camera(),
+			"a weapon switch takes the Inset camera back from the renderer")
+
+	# Tearing the HUD down while the pass renders clears it too.
+	assert_true(world.set_local_player_weapon_by_name("WPN_HUD_INSET"))
+	for _i in range(30):
+		sim.step()
+	presenter.tick()
+	if not scope.is_scope_active():
+		assert_true(sim.request_local_player_scope_toggle())
+		for _i in range(30):
+			sim.step()
+		presenter.tick()
+	assert_not_null(effects.get_second_scene_camera(),
+			"the Inset pass renders again before the teardown")
+	presenter.teardown()
+	assert_null(effects.get_second_scene_camera(),
+			"HUD teardown leaves the renderer no camera of a freed overlay")

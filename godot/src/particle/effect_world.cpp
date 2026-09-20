@@ -90,6 +90,7 @@ ParticleRenderer *EffectWorld::_ensure_renderer() {
 	renderer->set_texture_dir(texture_dir_);
 	renderer->set_environment_source(_environment_source());
 	renderer->set_water_plane(water_height_, _reflection_camera());
+	renderer->set_second_scene_camera(get_second_scene_camera());
 	renderer->set_hidden(particles_disabled_);
 	return renderer;
 }
@@ -161,6 +162,21 @@ void EffectWorld::set_water_plane(float p_value, Camera3D *p_reflection_camera) 
 	_ensure_renderer()->set_water_plane(p_value, p_reflection_camera);
 }
 
+void EffectWorld::set_second_scene_camera(Camera3D *p_camera) {
+	const ObjectID next = p_camera != nullptr
+			? ObjectID(p_camera->get_instance_id())
+			: ObjectID();
+	if (second_scene_camera_id_ == next) {
+		return; // the per-frame hand-in of an unchanged view costs nothing
+	}
+	second_scene_camera_id_ = next;
+	_ensure_renderer()->set_second_scene_camera(p_camera);
+}
+
+Camera3D *EffectWorld::get_second_scene_camera() const {
+	return Object::cast_to<Camera3D>(ObjectDB::get_instance(second_scene_camera_id_));
+}
+
 int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
 	clear_world();
 	if (p_root.is_null()) {
@@ -227,8 +243,10 @@ void EffectWorld::clear_world() {
 	owner_position_provider_ = Callable();
 	water_height_ = 0.0f;
 	reflection_camera_id_ = ObjectID();
+	second_scene_camera_id_ = ObjectID();
 	if (ParticleRenderer *renderer = _renderer()) {
 		renderer->set_water_plane(0.0f, nullptr);
+		renderer->set_second_scene_camera(nullptr);
 	}
 	scene_.instantiate();
 	load_report_ = scene_->open(TypedArray<ParticleFile>());
@@ -767,6 +785,10 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::set_owner_position_provider);
 	ClassDB::bind_method(D_METHOD("set_water_plane", "value", "reflection_camera"),
 			&EffectWorld::set_water_plane);
+	ClassDB::bind_method(D_METHOD("set_second_scene_camera", "camera"),
+			&EffectWorld::set_second_scene_camera);
+	ClassDB::bind_method(D_METHOD("get_second_scene_camera"),
+			&EffectWorld::get_second_scene_camera);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "root"),
 			&EffectWorld::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("load_particle_file", "file"), &EffectWorld::load_particle_file);

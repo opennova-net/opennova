@@ -33,6 +33,7 @@
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/core/object_id.hpp>
@@ -56,6 +57,7 @@
 
 #include "particle/particle_compositor.h"
 #include "render/frame_fx.h"
+#include "render/visual_layers.h"
 #include "util/texture_path_resolver.h"
 
 using namespace godot;
@@ -63,7 +65,11 @@ using namespace godot;
 namespace {
 
 constexpr int kGraphicLayerCount = 4;
-constexpr std::uint32_t kFirstPersonVisibilityMask = 1u << 11;
+// The FirstPerson batch rides the viewmodel layer, so every view that masks the
+// viewmodel out (the water mirror, the second scene view) drops it as well.
+constexpr std::uint32_t kFirstPersonVisibilityMask = visual_layers::VIEWMODEL;
+static_assert((visual_layers::SECOND_SCENE_VIEW_EXCLUDED & kFirstPersonVisibilityMask) != 0,
+		"a second scene view must never draw the FirstPerson particle batch");
 constexpr std::size_t kMissingEntry = std::numeric_limits<std::size_t>::max();
 
 enum ParticleDrawSlot : std::size_t {
@@ -71,8 +77,10 @@ enum ParticleDrawSlot : std::size_t {
 	kWorldCameraSide = 1,
 	kReflectionFarSide = 2,
 	kReflectionCameraSide = 3,
-	kFirstPerson = 4,
-	kParticleDrawSlotCount = 5,
+	kSecondSceneFarSide = 4,
+	kSecondSceneCameraSide = 5,
+	kFirstPerson = 6,
+	kParticleDrawSlotCount = 7,
 };
 
 using ParticleEffectPair = std::array<Ref<ParticleCompositorEffect>, 2>;
@@ -329,6 +337,24 @@ ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 	return result;
 }
 
+// One comparable value for "what this slot draws": FNV-1a over the compiled
+// vertex bytes (position, both colour words, UV; the 28-byte vertex has no
+// padding). Two slots, or two renders of one slot, draw the same quads exactly
+// when it matches. Computed only when a report is asked for.
+std::uint64_t vertex_checksum(
+		const std::vector<opennova::renderer::ParticleVertex> &vertices) {
+	std::uint64_t hash = 14695981039346656037ull;
+	const unsigned char *bytes =
+			reinterpret_cast<const unsigned char *>(vertices.data());
+	const std::size_t size =
+			vertices.size() * sizeof(opennova::renderer::ParticleVertex);
+	for (std::size_t index = 0; index < size; ++index) {
+		hash ^= bytes[index];
+		hash *= 1099511628211ull;
+	}
+	return hash;
+}
+
 // Diagnostics read each compiler's retained draw list in place: it stays
 // valid until that slot compiles again and nothing on the render thread
 // references it (World submissions are immutable copies), so no per-frame
@@ -337,6 +363,7 @@ Dictionary draw_list_report(const opennova::renderer::ParticleDrawList &draw_lis
 	Dictionary result;
 	const opennova::renderer::ParticleFrameDebugCounters &debug = draw_list.debug;
 	result["frame_id"] = godot_token(draw_list.frame_id);
+	result["vertex_checksum"] = godot_token(vertex_checksum(draw_list.vertices));
 	result["compile_index"] = godot_token(debug.compile_index);
 	result["input_emitters"] = static_cast<int64_t>(debug.input_emitters);
 	result["selected_emitters"] = static_cast<int64_t>(debug.selected_emitters);
@@ -427,6 +454,21 @@ Ref<Compositor> world_compositor_for(Viewport *viewport) {
 	WorldEnvironment *environment = find_world_environment(viewport);
 	return environment != nullptr ? environment->get_compositor() :
 			Ref<Compositor>();
+}
+
+// The viewport whose WorldEnvironment a second scene camera inherits. That
+// camera renders the main view's World3D from a sibling SubViewport holding no
+// WorldEnvironment of its own, and a camera without a compositor resolves the
+// scenario's, so the chain to recompose around its particle pair (FrameFX and
+// the display transfer last) is the main view's. A camera in a world of its
+// own keeps its own viewport.
+Viewport *second_scene_base_viewport(Camera3D *camera, Viewport *main_viewport) {
+	Viewport *own_viewport = camera->get_viewport();
+	if (own_viewport == nullptr || main_viewport == nullptr ||
+			own_viewport == main_viewport)
+		return own_viewport;
+	return own_viewport->find_world_3d() == main_viewport->find_world_3d() ?
+			main_viewport : own_viewport;
 }
 
 std::vector<std::uint64_t> non_particle_effect_ids(
@@ -550,9 +592,9 @@ void rebuild_camera_compositor(ParticleCameraCompositorState &state,
 	camera->set_compositor(state.installed);
 }
 
-// A Bump/Bumpadd quad's DIFFUSE channel depends on the view basis, so the
-// mirror camera relights these quads in place instead of rebuilding the
-// whole snapshot.
+// A Bump/Bumpadd quad's DIFFUSE channel depends on the view basis, so every
+// secondary view (the mirror, the second scene view) relights these quads in
+// place instead of rebuilding the whole snapshot.
 struct LitQuadInput {
 	std::size_t particle_index = 0;
 	float bump_scale = 0.0f;
@@ -596,10 +638,13 @@ public:
 	std::size_t rejected_atlas_entries = 0;
 	ParticleEffectPair world_effects;
 	ParticleEffectPair reflection_effects;
+	ParticleEffectPair second_scene_effects;
 	ObjectID attached_world_camera;
 	ObjectID attached_reflection_camera;
+	ObjectID attached_second_scene_camera;
 	bool inherited_world_compositor = false;
 	bool inherited_reflection_compositor = false;
+	bool inherited_second_scene_compositor = false;
 	bool catalog_dirty = true;
 	ObjectID cached_environment_source;
 	std::int64_t cached_environment_generation =
@@ -621,16 +666,32 @@ public:
 		create_effects();
 	}
 
+	// Every compositor effect this renderer owns, whichever view it serves, so
+	// no lifecycle path (hide, warm, shutdown, re-entry) can skip a view.
+	template <typename Visitor>
+	void for_each_effect(Visitor &&visit) {
+		for (ParticleEffectPair *pair :
+				{&world_effects, &reflection_effects, &second_scene_effects}) {
+			for (Ref<ParticleCompositorEffect> &effect : *pair)
+				visit(effect);
+		}
+	}
+
 	// A fresh compositor set: the constructor's, and the replacement a
 	// re-entering renderer needs. release_device_resources() retires an
 	// effect for good (its render callback never runs again), so a renderer
 	// that left the tree can only render again through new effects.
 	void create_effects() {
-		for (Ref<ParticleCompositorEffect> &effect : world_effects)
+		for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 			effect.instantiate();
-		for (Ref<ParticleCompositorEffect> &effect : reflection_effects)
-			effect.instantiate();
+		});
+		// The far side of the water plane precedes the transparent list in the
+		// two views that draw the water surface: the main view and the second
+		// scene view. The mirror admits no water surface, so its pair stays two
+		// consecutive POST_TRANSPARENT passes.
 		world_effects[0]->set_effect_callback_type(
+				CompositorEffect::EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT);
+		second_scene_effects[0]->set_effect_callback_type(
 				CompositorEffect::EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT);
 	}
 
@@ -742,6 +803,8 @@ public:
 				inherited_world_compositor);
 		detach_compositor_group(attached_reflection_camera, reflection_effects,
 				inherited_reflection_compositor);
+		detach_compositor_group(attached_second_scene_camera, second_scene_effects,
+				inherited_second_scene_compositor);
 	}
 
 	void attach_compositor_group(Camera3D *camera, Viewport *viewport,
@@ -813,10 +876,9 @@ public:
 	}
 
 	void clear_draws() {
-		for (Ref<ParticleCompositorEffect> &effect : world_effects)
+		for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 			effect->clear_submission();
-		for (Ref<ParticleCompositorEffect> &effect : reflection_effects)
-			effect->clear_submission();
+		});
 		if (first_person_mesh.is_valid())
 			first_person_mesh->clear_surfaces();
 		slot_present.fill(false);
@@ -1027,13 +1089,27 @@ public:
 				lit.alpha);
 	}
 
-	// Re-derives only the view-dependent Bump/Bumpadd DIFFUSE channel for a
-	// second camera; every other quad input is view-independent.
+	// Re-derives the view-dependent Bump/Bumpadd DIFFUSE channel for a second
+	// camera (the one other basis-dependent input, a camera-facing TOPALIGN
+	// quad's roll, keeps the main view's value). Each colour is recomputed from
+	// the retained LitQuadInput row and never from the value it replaces, so a
+	// relight leaves the snapshot lit for exactly this basis no matter which
+	// view compiled (and relit) before it.
 	void relight_render_snapshot(const Basis &view_basis) {
 		for (const LitQuadInput &lit : lit_quads) {
 			render_snapshot.particles[lit.particle_index].primary_color =
 					lit_primary_color(lit, view_basis);
 		}
+	}
+
+	// A view without its camera this render: nothing published, nothing
+	// reported, and (its group already detached) nothing drawn.
+	void retire_view_pair(ParticleEffectPair &effects, ParticleDrawSlot far_slot,
+			ParticleDrawSlot camera_slot) {
+		for (Ref<ParticleCompositorEffect> &effect : effects)
+			effect->clear_submission();
+		slot_present[far_slot] = false;
+		slot_present[camera_slot] = false;
 	}
 
 	// Refills the retained flat snapshot (emitters + one particle run each)
@@ -1453,6 +1529,10 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::get_environment_source);
 	ClassDB::bind_method(D_METHOD("set_water_plane", "height", "reflection_camera"),
 			&ParticleRenderer::set_water_plane);
+	ClassDB::bind_method(D_METHOD("set_second_scene_camera", "camera"),
+			&ParticleRenderer::set_second_scene_camera);
+	ClassDB::bind_method(D_METHOD("get_second_scene_camera"),
+			&ParticleRenderer::get_second_scene_camera);
 	ClassDB::bind_method(D_METHOD("set_hidden", "hidden"),
 			&ParticleRenderer::set_hidden);
 	ClassDB::bind_method(D_METHOD("get_hidden"),
@@ -1517,10 +1597,10 @@ void ParticleRenderer::_restore_device_state() {
 	if (!impl_)
 		return;
 	impl_->create_effects();
-	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
-		effect->set_particles_hidden(hidden_);
-	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
-		effect->set_particles_hidden(hidden_);
+	const bool hidden = hidden_;
+	impl_->for_each_effect([hidden](Ref<ParticleCompositorEffect> &effect) {
+		effect->set_particles_hidden(hidden);
+	});
 }
 
 void ParticleRenderer::_invalidate_catalog() {
@@ -1585,14 +1665,25 @@ void ParticleRenderer::set_water_plane(float p_height,
 			ObjectID(p_reflection_camera->get_instance_id()) : ObjectID();
 }
 
+void ParticleRenderer::set_second_scene_camera(Camera3D *p_camera) {
+	second_scene_camera_ = p_camera != nullptr ?
+			ObjectID(p_camera->get_instance_id()) : ObjectID();
+}
+
+Camera3D *ParticleRenderer::get_second_scene_camera() const {
+	if (!second_scene_camera_.is_valid())
+		return nullptr;
+	return Object::cast_to<Camera3D>(ObjectDB::get_instance(
+			static_cast<std::uint64_t>(second_scene_camera_)));
+}
+
 void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 	clear_warm_pipelines();
 	if (!impl_)
 		return;
-	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+	impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 		effect->request_pipeline_warm();
-	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
-		effect->request_pipeline_warm();
+	});
 	Ref<QuadMesh> quad;
 	quad.instantiate();
 	quad->set_size(Vector2(0.01f, 0.01f));
@@ -1617,10 +1708,9 @@ void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 
 void ParticleRenderer::clear_warm_pipelines() {
 	if (impl_) {
-		for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+		impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 			effect->cancel_pipeline_warm();
-		for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
-			effect->cancel_pipeline_warm();
+		});
 	}
 	for (Node *node : warm_nodes_) {
 		if (node != nullptr)
@@ -1638,10 +1728,9 @@ void ParticleRenderer::shutdown() {
 		return;
 
 	impl_->clear_draws();
-	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+	impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 		effect->set_enabled(false);
-	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
-		effect->set_enabled(false);
+	});
 	impl_->detach_compositors();
 
 	// Detaching affects the next render setup. Drain a callback already queued
@@ -1649,10 +1738,9 @@ void ParticleRenderer::shutdown() {
 	RenderingServer *server = RenderingServer::get_singleton();
 	if (server != nullptr && server->get_rendering_device() != nullptr)
 		server->force_sync();
-	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+	impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 		effect->release_device_resources();
-	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
-		effect->release_device_resources();
+	});
 }
 
 void ParticleRenderer::set_hidden(bool p_hidden) {
@@ -1661,10 +1749,9 @@ void ParticleRenderer::set_hidden(bool p_hidden) {
 	hidden_ = p_hidden;
 	if (!impl_)
 		return;
-	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
-		effect->set_particles_hidden(hidden_);
-	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
-		effect->set_particles_hidden(hidden_);
+	impl_->for_each_effect([p_hidden](Ref<ParticleCompositorEffect> &effect) {
+		effect->set_particles_hidden(p_hidden);
+	});
 	if (hidden_) {
 		// The master switch is also a CPU switch: drop retained submissions once
 		// and let the next visible process rebuild from the latest scene frame.
@@ -1705,6 +1792,13 @@ void ParticleRenderer::render_now() {
 					static_cast<std::uint64_t>(reflection_camera_))) : nullptr;
 	if (reflection_camera == camera)
 		reflection_camera = nullptr;
+	// A camera that already owns the World or the mirror pair keeps that one,
+	// and a camera outside the tree renders nothing (and has no transform).
+	Camera3D *second_scene_camera = get_second_scene_camera();
+	if (second_scene_camera != nullptr && (second_scene_camera == camera ||
+			second_scene_camera == reflection_camera ||
+			!second_scene_camera->is_inside_tree()))
+		second_scene_camera = nullptr;
 	impl_->attach_compositor_group(camera, viewport,
 			impl_->attached_world_camera, impl_->world_effects,
 			impl_->inherited_world_compositor);
@@ -1712,6 +1806,11 @@ void ParticleRenderer::render_now() {
 			reflection_camera != nullptr ? reflection_camera->get_viewport() : nullptr,
 			impl_->attached_reflection_camera, impl_->reflection_effects,
 			impl_->inherited_reflection_compositor);
+	impl_->attach_compositor_group(second_scene_camera,
+			second_scene_camera != nullptr ?
+					second_scene_base_viewport(second_scene_camera, viewport) : nullptr,
+			impl_->attached_second_scene_camera, impl_->second_scene_effects,
+			impl_->inherited_second_scene_compositor);
 	if (scene_.is_null()) {
 		impl_->clear_draws();
 		return;
@@ -1776,27 +1875,48 @@ void ParticleRenderer::render_now() {
 	impl_->slot_present[kFirstPerson] = true;
 	impl_->upload_first_person_draw_list(first_person_draw, hidden_);
 
+	// A secondary view compiles the same snapshot for its own eye. LitColor/Bump
+	// channels transform through the active view basis, so only those quads are
+	// relit for this view before its two consecutive compiles. The World and
+	// FirstPerson draw lists above already hold their own vertex copies, and a
+	// relight never reads the colour it replaces, so no view can change what
+	// another draws, whichever of them compiles first.
+	auto compile_secondary_pair = [&](const ParticleCameraFrame &view_camera,
+			bool above_water, ParticleDrawSlot far_slot,
+			ParticleDrawSlot camera_slot, const ParticleEffectPair &effects) {
+		impl_->relight_render_snapshot(view_camera.view_basis);
+		compile_world(far_slot,
+				opennova::renderer::particle_water_subset_for_side(above_water, false),
+				view_camera, effects[0]);
+		compile_world(camera_slot,
+				opennova::renderer::particle_water_subset_for_side(above_water, true),
+				view_camera, effects[1]);
+	};
+
 	if (reflection_camera != nullptr) {
-		const ParticleCameraFrame mirror_camera =
-				particle_camera_frame(reflection_camera);
-		// LitColor/Bump channels transform through the active view basis while
-		// the water selector remains the emitter's main-camera side. Relight
-		// only those quads for the mirror before its two consecutive passes;
-		// the World draw lists above already hold their own vertex copies.
-		impl_->relight_render_snapshot(mirror_camera.view_basis);
-		compile_world(kReflectionFarSide,
-				opennova::renderer::particle_water_subset_for_side(
-						camera_above_water, false),
-				mirror_camera, impl_->reflection_effects[0]);
-		compile_world(kReflectionCameraSide,
-				opennova::renderer::particle_water_subset_for_side(
-						camera_above_water, true),
-				mirror_camera, impl_->reflection_effects[1]);
+		// The mirror eye sits across the plane by construction, so its water
+		// selector remains the emitter's main-camera side.
+		compile_secondary_pair(particle_camera_frame(reflection_camera),
+				camera_above_water, kReflectionFarSide, kReflectionCameraSide,
+				impl_->reflection_effects);
 	} else {
-		impl_->reflection_effects[0]->clear_submission();
-		impl_->reflection_effects[1]->clear_submission();
-		impl_->slot_present[kReflectionFarSide] = false;
-		impl_->slot_present[kReflectionCameraSide] = false;
+		impl_->retire_view_pair(impl_->reflection_effects, kReflectionFarSide,
+				kReflectionCameraSide);
+	}
+
+	if (second_scene_camera != nullptr) {
+		// The original runs its one scene routine again for this camera, so the
+		// far/camera-side bracket belongs to this view's own eye. The Inset eye
+		// is the main eye, so the two agree today; keying on the view's own
+		// frame keeps the bracket right for a second view placed anywhere else.
+		const ParticleCameraFrame second_camera =
+				particle_camera_frame(second_scene_camera);
+		compile_secondary_pair(second_camera,
+				second_camera.position.y >= water_height_, kSecondSceneFarSide,
+				kSecondSceneCameraSide, impl_->second_scene_effects);
+	} else {
+		impl_->retire_view_pair(impl_->second_scene_effects, kSecondSceneFarSide,
+				kSecondSceneCameraSide);
 	}
 }
 
@@ -1837,6 +1957,8 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	result["world_camera_side"] = slot_report(kWorldCameraSide);
 	result["reflection_far_side"] = slot_report(kReflectionFarSide);
 	result["reflection_camera_side"] = slot_report(kReflectionCameraSide);
+	result["second_scene_far_side"] = slot_report(kSecondSceneFarSide);
+	result["second_scene_camera_side"] = slot_report(kSecondSceneCameraSide);
 	result["first_person"] = slot_report(kFirstPerson);
 	result["world_far_backend"] =
 			impl_->world_effects[0]->get_backend_report();
@@ -1846,15 +1968,23 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 			impl_->reflection_effects[0]->get_backend_report();
 	result["reflection_camera_backend"] =
 			impl_->reflection_effects[1]->get_backend_report();
+	result["second_scene_far_backend"] =
+			impl_->second_scene_effects[0]->get_backend_report();
+	result["second_scene_camera_backend"] =
+			impl_->second_scene_effects[1]->get_backend_report();
 	result["first_person_backend"] = "array_mesh_fallback_tool_only";
 	result["world_compositor_attached"] =
 			impl_->attached_world_camera.is_valid();
 	result["reflection_compositor_attached"] =
 			impl_->attached_reflection_camera.is_valid();
+	result["second_scene_compositor_attached"] =
+			impl_->attached_second_scene_camera.is_valid();
 	result["world_compositor_inherited_effects"] =
 			impl_->inherited_world_compositor;
 	result["reflection_compositor_inherited_effects"] =
 			impl_->inherited_reflection_compositor;
+	result["second_scene_compositor_inherited_effects"] =
+			impl_->inherited_second_scene_compositor;
 	result["world_mesh_instance"] = false;
 	result["shutdown"] = shutdown_;
 	result["water_height"] = water_height_;
