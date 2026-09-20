@@ -25,7 +25,6 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	const int def_index = world.tables.weapons.index_of(weapon.def_name.c_str());
 	const WeaponTableEntry *def =
 			def_index >= 0 ? world.tables.weapons.by_index(uint8_t(def_index)) : nullptr;
-	s.dead = view.camera_mode == 4 || (player->flags & kEntityFlagDead) != 0;
 	s.inset = view.inset_scope_active;
 	s.inset_fov_over_zoom = view.inset_fov_over_zoom;
 	s.hit_feedback = tracker.hud_hit_feedback_frames != 0;
@@ -75,10 +74,12 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 								player->mount_type == SeatType::Driver));
 	}
 	// OnlyScoped is the admission gate for the impact flags, independently
-	// of the ordinary CanFire/Sighted/Scoped reticle predicates.
-	// [orig: Entity_CheckWeaponSeatFlags @0x540D00]
+	// of the ordinary CanFire/Sighted/Scoped reticle predicates. Neither the
+	// preview nor its two cues tests the dead bit or the death screen.
+	// [orig: Entity_CheckWeaponSeatFlags @0x540D00; the preview admission
+	//  Player_UpdatePerFrame @0x4DE760..0x4DE79D]
 	const bool impact_admitted =
-			weapon.active && !s.dead && (!(weapon.def.flags & 0x80000u) || view.scope_settled);
+			weapon.active && (!(weapon.def.flags & 0x80000u) || view.scope_settled);
 	if (impact_admitted && (weapon.def.flags & (0x8000u | 0x100000u))) {
 		const int stance = (can_fire || (player->net_stance_bits & 1))
 				? 0

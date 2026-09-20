@@ -976,10 +976,10 @@ bool Simulation::cache_present_effect_pose(
 	pose.position = Vector3(p_entity.position.x, p_entity.position.z,
 			-p_entity.position.y);
 	pose.rotation_deg = Vector3(
-			static_cast<float>(p_entity.pitch),
+			static_cast<float>(opennova::inmatch::pool_present_pitch_deg(p_entity)),
 			static_cast<float>(opennova::inmatch::pool_present_yaw_deg(
 					p_entity, ae, opennova::replication::entity_class_of(p_entity))),
-			static_cast<float>(p_entity.roll));
+			static_cast<float>(opennova::inmatch::pool_present_roll_deg(p_entity)));
 	present_.effect_poses_by_handle[handle] = pose;
 	present_.effect_missing_handles.erase(handle);
 	if (p_entity.bms_id > 0) {

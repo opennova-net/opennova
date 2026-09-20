@@ -612,10 +612,10 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 			}
 		}
 	}
-	// The recipient's deploy-map owned-zone mask (0x0F variant-0 u32) from the live chain; a
-	// chain-less world keeps the golden ASH_I5A default 0x8. [orig: ZoneSlotChain_GetOwnedZoneMask
-	// @0x4a2620 per recipient team @0x4ff9a3; net-re §5.61]
-	if (world != nullptr && !world->zones.chain.empty())
+	// The recipient's deploy-map owned-zone mask (0x0F variant-0 u32) from the live chain: the
+	// walk runs unconditionally, so a chain-less world sends its 0.
+	// [orig: ZoneSlotChain_GetOwnedZoneMask @0x4a2620 per recipient team @0x4ff9a3; net-re §5.61]
+	if (world != nullptr)
 		ctx.uniform_team_mask =
 				world->zones.owned_zone_mask(ctx.team);
 	return ctx;

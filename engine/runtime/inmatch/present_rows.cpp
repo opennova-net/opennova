@@ -231,6 +231,19 @@ double pool_present_yaw_deg(const Entity &e, const AiEntity *ae, EntityClass cls
 	return static_cast<double>(e.yaw);
 }
 
+// [orig: the model matrix is built over the entity's 32-bit euler triple --
+//  Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 over entity+0x10..0x18,
+//  e.g. HUD_BuildEntityInfo @0x4B84C9]
+double pool_present_pitch_deg(const Entity &e) {
+	return e.veh.yaw_seeded ? static_cast<double>(e.veh.air_pitch_bam) * kDegreesPerBam
+							: static_cast<double>(e.pitch);
+}
+
+double pool_present_roll_deg(const Entity &e) {
+	return e.veh.yaw_seeded ? static_cast<double>(e.veh.air_roll_bam) * kDegreesPerBam
+							: static_cast<double>(e.roll);
+}
+
 // One pool row from the authoritative record: the body every host/SP world
 // row and the joiner's appended fragment rows share (defined below the two
 // collectors).
@@ -311,8 +324,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_BMS_ID] = static_cast<float>(ent->bms_id);
 			r[PF_NET_ID] = static_cast<float>(ent->net_id);
 			r[PF_BODY_ANIM_SLOT] = static_cast<float>(ent->body_anim_slot);
-			r[PF_PITCH_DEG] = static_cast<float>(ent->pitch);
-			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
+			r[PF_PITCH_DEG] = static_cast<float>(pool_present_pitch_deg(*ent));
+			r[PF_ROLL_DEG] = static_cast<float>(pool_present_roll_deg(*ent));
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
 			r[PF_HUSK] = (ent->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
@@ -638,9 +651,9 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_POS_X] = render_position.x;
 	r[PF_POS_Y] = render_position.z;
 	r[PF_POS_Z] = -render_position.y;
-	r[PF_PITCH_DEG] = static_cast<float>(e.pitch);
+	r[PF_PITCH_DEG] = static_cast<float>(pool_present_pitch_deg(e));
 	r[PF_YAW_DEG] = static_cast<float>(pool_present_yaw_deg(e, ae, cls));
-	r[PF_ROLL_DEG] = static_cast<float>(e.roll);
+	r[PF_ROLL_DEG] = static_cast<float>(pool_present_roll_deg(e));
 	// The decoded fold bumps a row's respawn revision on every dead->alive
 	// edge of its wire state byte (organic bit 1; vehicle wrecks flag 4).
 	// Mirror that edge from the authoritative flags so WirePresentPass

@@ -94,7 +94,7 @@ static void geometry_and_draw() {
 	CHECK(compiler.compile(s, 1024, 768).tris.empty());
 	CHECK(sprites(compiler.last_draw_list(), kHudTexVehicleLag) == 0);
 	s.binoculars_view_active = false;
-	s.combat.dead = true;
+	s.combat.death_screen = true;
 	CHECK(compiler.compile(s, 1024, 768).tris.empty());
 	CHECK(sprites(compiler.last_draw_list(), kHudTexCommander) == 0);
 	layout.combat.agl_left = 20;
@@ -132,8 +132,114 @@ static void mortar_map_and_world_cues() {
 	CHECK(!designator.tris.empty());
 	CHECK(std::any_of(designator.lines.begin(), designator.lines.end(),
 			[](const auto &l) { return l.color == 0x60FF0000u; }));
+	// The LollyPop head is a 2:1 ellipse: radius 20 with the 2.0 stroke spans
+	// +-21 vertically and twice that horizontally around (512, 384 - 40).
+	// [orig: draw_entity_marker ring record +0x1C = 2.0 @0x59327B]
+	float min_x = 1e9f, max_x = -1e9f, min_y = 1e9f, max_y = -1e9f;
+	for (const auto &t : designator.tris)
+		for (const auto *v : { &t.a, &t.b, &t.c }) {
+			min_x = std::min(min_x, v->x);
+			max_x = std::max(max_x, v->x);
+			min_y = std::min(min_y, v->y);
+			max_y = std::max(max_y, v->y);
+		}
+	CHECK(std::abs((max_y - min_y) - 42) < 0.5f && std::abs((max_x - min_x) - 84) < 0.5f);
+	CHECK(std::abs((min_x + max_x) / 2 - 512) < 0.5f && std::abs((min_y + max_y) / 2 - 344) < 0.5f);
+	// Neither cue tests the death screen: the overlay walk's tail is ungated.
+	// [orig: HUD_RenderAllOverlays @0x5A87EF..0x5A89DA]
+	state.combat.death_screen = true;
+	CHECK(!compiler.compile(state, 1024, 768).tris.empty());
+	state.combat.death_screen = false;
 	state.combat.impact_point.clip = 16;
 	CHECK(compiler.compile(state, 1024, 768).tris.empty());
+}
+
+// A synthetic 1-page font: every glyph 8x16 px, spacing 2, design width 800.
+static fnt::fnt_font_t make_font() {
+	fnt::fnt_font_t font{};
+	fnt::fnt_init_blank(&font, 1, 2);
+	font.design_width = 800;
+	for (uint32_t i = 0; i < fnt::FNT_GLYPH_COUNT; ++i) {
+		font.glyphs[i].page = 0;
+		font.glyphs[i].uv.u0 = 0.0f;
+		font.glyphs[i].uv.v0 = 0.0f;
+		font.glyphs[i].uv.u1 = 8.0f / 256.0f;
+		font.glyphs[i].uv.v1 = 16.0f / 256.0f;
+	}
+	return font;
+}
+
+// Which overlay font slot each combat text rides.
+// [orig: gear label slot 0xB4C3A0 @0x59A6F9; service prompts slot 0xB4C3A0
+//  @0x5BDFD7 / @0x5BE0AA / @0x5BE0F7; Inset friendly name slot 0xB4C394
+//  @0x5CA0C0; impact distance measured in slot 0xB4C394 @0x5A897E and drawn in
+//  the hudpos slot 0x2723C74 @0x5A89D0]
+static void combat_text_font_slots() {
+	const fnt::fnt_font_t font = make_font();
+	HudLayout layout;
+	layout.alpha_fade_seconds = 1;
+	layout.combat.gear_x = 100;
+	layout.combat.gear_y = 150;
+	layout.combat.impact_x = 512;
+	layout.combat.impact_y = 600;
+	HudFrameCompiler compiler;
+	compiler.configure(layout, &font);
+	compiler.configure_label_fonts(&font, &font, &font, 2.0f, 3.0f);
+	const auto pages = [&](const HudDrawList &d, int slot) {
+		return std::count_if(d.glyphs.begin(), d.glyphs.end(), [&](const auto &g) {
+			return g.page == uint32_t(slot) * fnt::FNT_MAX_PAGES;
+		});
+	};
+	HudFrameState s;
+	s.combat.vehicle_controls = true;
+	s.combat.gear = 1;
+	s.combat.gear_text = { "Med", "Low", "High" };
+	const auto &gear = compiler.compile(s, 1024, 768);
+	CHECK(pages(gear, kHudFontSlotLabelLarge) == 3 && pages(gear, kHudFontSlotHud) == 0);
+	// Left-aligned at the scaled design anchor, in the slot's own scale (3x).
+	CHECK(!gear.glyphs.empty() && near(gear.glyphs[0].x_top_left, 99.5f) &&
+			near(gear.glyphs[0].y_top, 99.5f));
+	CHECK(!gear.glyphs.empty() &&
+			near(gear.glyphs[0].x_bottom_right - gear.glyphs[0].x_top_left, 24));
+
+	s = {};
+	s.combat.service_prompt = 3;
+	s.combat.service_text = "Wait";
+	const auto &prompt = compiler.compile(s, 1024, 768);
+	CHECK(pages(prompt, kHudFontSlotLabelLarge) == 4 && pages(prompt, kHudFontSlotHud) == 0);
+	float left = 1e9f, right = -1e9f;
+	for (const auto &g : prompt.glyphs) {
+		left = std::min(left, g.x_top_left);
+		right = std::max(right, g.x_bottom_right);
+	}
+	CHECK(std::abs((left + right) / 2 - 512) < 4);
+
+	s = {};
+	s.weapon.active = true;
+	s.combat.inset = true;
+	s.combat.inset_fov_over_zoom = 80;
+	s.combat.inset_friendly = true;
+	s.combat.target_name = "Ally";
+	const auto &inset = compiler.compile(s, 1024, 768);
+	CHECK(pages(inset, kHudFontSlotLabelBold) == 4 && pages(inset, kHudFontSlotHud) == 0);
+	CHECK(std::all_of(inset.glyphs.begin(), inset.glyphs.end(),
+			[](const auto &g) { return g.color == 0xFF7F0000u; }));
+
+	// "89 m" measures 4 * (8 + 1) - 1 = 35 in the font, 70 at the bold slot's
+	// 2x: the hudpos-font line starts at design 512 - 35 and runs left to right.
+	s = {};
+	s.combat.impact_distance = true;
+	s.combat.impact_distance_m = 89;
+	const auto &distance = compiler.compile(s, 1024, 768);
+	CHECK(pages(distance, kHudFontSlotHud) == 4 && pages(distance, kHudFontSlotLabelBold) == 0);
+	CHECK(!distance.glyphs.empty() && near(distance.glyphs[0].x_top_left, 476.5f));
+
+	// A slot whose file is absent falls back to the hudpos font at scale 1.
+	compiler.configure_label_fonts(nullptr, nullptr, nullptr, 1.0f, 1.0f);
+	s = {};
+	s.combat.service_prompt = 3;
+	s.combat.service_text = "Wait";
+	CHECK(pages(compiler.compile(s, 1024, 768), kHudFontSlotHud) == 4);
 }
 
 static void mortar_map_callbacks() {
@@ -325,6 +431,17 @@ static void world_feeds() {
 	tracker.hud_designations.clear();
 	read(true);
 	CHECK(frame.hud_combat.state.impact_radius_q16 == 3 << 16);
+	// The dead bit and the death lerp camera gate neither the preview nor its
+	// cues, and neither is the HUD's death-screen flag.
+	// [orig: Player_UpdatePerFrame @0x4DE760..0x4DE79D]
+	world.registry.get(player)->flags |= kEntityFlagDead;
+	frame = {};
+	frame.scope_settled = true;
+	frame.camera_mode = 4;
+	fill_hud_combat_view(world, weapon, frame, tracker, true);
+	CHECK(frame.hud_combat.state.impact_distance && frame.hud_combat.state.designator);
+	CHECK(!frame.hud_combat.state.death_screen);
+	world.registry.get(player)->flags &= ~uint32_t(kEntityFlagDead);
 	ammo.max_age_ticks = 1; // Miss after a successful preview.
 	read(true);
 	CHECK(!frame.hud_combat.state.impact_map);
@@ -418,6 +535,7 @@ int main() {
 	geometry_and_draw();
 	mortar_map_callbacks();
 	mortar_map_and_world_cues();
+	combat_text_font_slots();
 	world_feeds();
 	parser_and_received_feedback();
 	sent_feedback();

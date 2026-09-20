@@ -19,7 +19,7 @@ int hud_silhouette_alpha(int elapsed, int ramp, int base, int maximum) {
 void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float h) {
 	const auto &c = s.combat;
 	const auto &l = layout_.combat;
-	if (c.dead || s.binoculars_view_active || w <= 0 || h <= 0)
+	if (c.death_screen || s.binoculars_view_active || w <= 0 || h <= 0)
 		return;
 	// [orig: palette[5], palette[3], auxiliaryColors[2] initialized @0x51F240]
 	constexpr uint32_t warning = uint32_t(-44976), aim_color = uint32_t(-8347393);
@@ -133,7 +133,7 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, float h) {
 	const auto &c = s.combat;
 	const auto &l = layout_.combat;
-	if (c.dead)
+	if (c.death_screen)
 		return;
 	auto sprite = [&](const HudSprite &r, int x, int y, int tex, uint32_t color) {
 		if (!r.valid)
@@ -158,8 +158,13 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 			silhouette_stamp_ = s.ticks;
 		}
 		sprite(l.vehicle, l.icon_x, l.icon_y, kHudTexVehicleStatus, tint());
-		emit_text(c.gear_text[std::clamp(c.gear, 0, 2)].c_str(), float(l.gear_x),
-				float(l.gear_y - 50), w, h, half_bright_argb(active_color(s)), 0);
+		// The gear label rides the LARGE slot (Impac22b), left-aligned at the
+		// scaled design anchor.
+		// [orig: hud_draw_target_entity_overlay -- anchor @0x59A6C1..0x59A6E6,
+		//  slot 0xB4C3A0 @0x59A6F9, HUD_DrawTextLeft_HalfBright @0x59A6FE]
+		emit_slot_text(label_font_large_, label_large_scale_,
+				c.gear_text[std::clamp(c.gear, 0, 2)].c_str(), sx(float(l.gear_x), w),
+				sy(float(l.gear_y - 50), h), half_bright_argb(active_color(s)), 0);
 	}
 	if (ramp > 0 && s.weapon.active && hud_weapon_group_visible(s)) {
 		if (silhouette_weapon_ != c.weapon_identity) {
