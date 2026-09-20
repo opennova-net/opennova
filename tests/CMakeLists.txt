@@ -1722,6 +1722,11 @@ target_include_directories(local_player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_features(local_player_view_test PRIVATE cxx_std_17)
 add_test(NAME local_player_view COMMAND local_player_view_test)
 
+add_executable(player_weapon_view_test world/player_weapon_view_test.cpp)
+target_link_libraries(player_weapon_view_test PRIVATE opennova_runtime)
+target_compile_features(player_weapon_view_test PRIVATE cxx_std_17)
+add_test(NAME player_weapon_view COMMAND player_weapon_view_test)
+
 add_executable(present_drains_test world/present_drains_test.cpp)
 target_link_libraries(present_drains_test PRIVATE opennova_runtime)
 target_compile_features(present_drains_test PRIVATE cxx_std_17)

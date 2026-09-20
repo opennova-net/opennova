@@ -210,6 +210,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/hud_impact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/hud_vehicle_sights.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_view.cpp  # the per-tick equipped-weapon snapshot
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_events.cpp
