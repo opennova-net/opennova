@@ -31,6 +31,11 @@ observed before their corresponding fixes.
 
 ## Remaining fidelity work
 
+- **2026-09-20 (net-parity slice):** the C2S 0x0D / 0x3D / 0x42 / 0x4C / 0x51 host
+  handlers, the outer 0x45/0x85 ping, the S2C 0x0F pose/waypoint application and
+  the periodic S2C 0x46 quality resend are ported (net-re §8 D-NET-218 lists
+  them with their witnesses); C2S 0x40 has its gates but spawns through an
+  embedder seam.
 - **D-NET-174:** authority-local fire still needs the same admission predicate.
   Retail calls it from the authority arm at `@0x42BE3A`; pure joiner prediction
   intentionally has no equivalent gate. Remote C2S admission is covered here.
