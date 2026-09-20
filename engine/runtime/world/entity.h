@@ -792,6 +792,11 @@ struct Entity {
 	uint8_t vehicle_spawn_priority = 0; // marker+539 [orig: @0x529B40]
 	// Resolved pcvehicle_spawnlist mask -> full items.def IDs (+100000).
 	std::vector<int32_t> vehicle_spawn_ids;
+	// The mask bit (the shared g_ItemGroups slot) each entry above resolved
+	// from, parallel to vehicle_spawn_ids: the C2S 0x40 spawn pick names the
+	// group by that bit [orig: NapiNPServerMsg_HandleVehicleSpawnRequest
+	// @0x51C5C0 `(1 << typeIndex) & def+2772`, then g_ItemGroups[typeIndex]].
+	std::vector<uint8_t> vehicle_spawn_groups;
 
 	// --- Advance & Secure zone fields (net-re §5.61) ---
 	// entity+538 <- BMS record byte 155 (.mis "lfp_group") — the authored AS zone number;
@@ -990,6 +995,13 @@ struct Entity {
     // [orig: entity+0x350, HeliLift_UpdateSlotState @0x451730]
     EntityHandle dragger;
     uint64_t dragger_spawn_id = 0;
+    // The "a medic is reviving me" latch (entity+0x1E0): set by the host's
+    // revive transaction on the victim (and on a client by S2C 0x3A), read by
+    // the medic interaction to refuse a second reviver and by the deploy
+    // statics; cleared by the spawn-state reset.
+    // [orig: GameEvent_RevivePlayer @0x517D4F; GameEvent_HandleMedicInteraction
+    //  @0x4E67C4; Game_InitNewRound @0x422740]
+    bool medic_reviving = false;
 
     // The mover-entry pose stamp riders consume — retail savedLivePose
     // (+0x80..+0x88) and the body* attitude triple (+0x8C..+0x94), stamped at

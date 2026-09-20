@@ -100,6 +100,21 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// The trigger falling is what clears the open latch
 			// [orig: the close-on-clear leg @0x5cac8e -> @0x54b954].
 			if (!state_.deploy_overlay_active) state_.deploy_overlay_open_latch = false;
+			// The authoritative local-player pose and (waypoint gametype only)
+			// the route list, retained for the joiner frame's once-per-revision
+			// landing on L — retail writes them onto g_local_player_entity and
+			// g_waypointList from this handler [orig: Pitch @0x42E3E9 / Roll
+			// @0x42E3F2 (`raw << 16`); the waypoint walk @0x42E47F..0x42E4A3].
+			ClientWorldStateLoad &ws = state_.world_state;
+			ws.pos_x = wsl.pos_x;
+			ws.pos_y = wsl.pos_y;
+			ws.pos_z = wsl.pos_z;
+			ws.yaw_bam = static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint16_t>(wsl.yaw)) << 16);
+			ws.pitch_bam = static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint16_t>(wsl.pitch)) << 16);
+			ws.roll_bam = static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint16_t>(wsl.roll)) << 16);
+			ws.waypoints_set = game_type::is_waypoint_family(game_type_);
+			ws.waypoints = wsl.waypoints;
+			++ws.revision;
 			state_.mark_changed();
 		} else {
 			++malformed_bodies_;

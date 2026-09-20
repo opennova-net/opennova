@@ -8,12 +8,19 @@
 #include <net/npwire/nw_session_framing.h> // make_random_session_u32 (the per-player tick seed)
 #include <runtime/inmatch/server_spawn.h> // Server_ReservePlayerTeam (0x04/spawn identity)
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
+#include <runtime/inmatch/server_chat.h>         // the C2S 0x0D fan-out
+#include <runtime/inmatch/server_net_quality.h>  // the 0x2C return leg / 0x4C store
+#include <runtime/inmatch/server_vehicle_spawn.h> // the 0x40 / 0x42 handlers
+#include <runtime/inmatch/napi_np_server_ctx.h>  // ServerDispatchInputs::server_ctx
 #include <runtime/inmatch/session_status.h>
 #include <runtime/world/weapon_table_build.h> // loadout_entry_permitted / resolve_loadout_ammo (D-NET-141)
 
+#include <runtime/replication/connection_fan.h>     // apply_connection_uplink — the in-order 0x0C read-apply
 #include <runtime/replication/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
 #include <base/gameprofile/game_type.h>       // is_waypoint_family / is_stock_coop (§5.32, D-NET-203/205)
+#include <base/io/strutil.h>                  // iequals (the JOIN body's CD field)
+#include <net/npwire/flat_tlv.h>        // the C2S 0x00 JOIN body walk (the CD identity blob)
 #include <net/npwire/wire_handle.h>     // is_batch_end_sentinel / kInvalid (the wire handle home)
 #include <net/npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <net/npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
@@ -360,8 +367,49 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
 	return payload;
 }
 
+// The chunk header + at most 200 bytes of the stream from `offset`, shared by the
+// 0x60 (server-info VarList) and 0x64 (mission block) transfers. Header dword 0 is
+// the LIVE transfer identity, dword 1 the total length and dword 2 the clamped
+// offset; an offset past the end yields an empty chunk. The client re-requests
+// with [id][nextOffset] (C2S 0x33/0x37) and a mismatched id restarts at 0.
+// [orig: NetPacket_WriteReplayDataBlock @0x5071F0 — copyLen clamp 200 @0x507255,
+//  header @0x50727D..0x5072A0; NetPacket_WriteFixed180Block @0x507300 (180-byte
+//  block, same 200 clamp); NapiNPServerMsg_HandleReplayRequest @0x515230 token
+//  compare @0x51528B; NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0 @0x51533B]
+constexpr uint32_t kTransferChunkBytes = 200;
+
+std::vector<uint8_t> build_transfer_chunk(uint32_t transfer_id, const uint8_t *stream,
+                                          uint32_t total, uint32_t offset) {
+	const uint32_t clamped_offset = std::min(offset, total);
+	const uint32_t copy_len = std::min(total - clamped_offset, kTransferChunkBytes);
+	std::vector<uint8_t> reply(12, 0);
+	write_u32_le(reply, 0, transfer_id);
+	write_u32_le(reply, 4, total);
+	write_u32_le(reply, 8, clamped_offset);
+	reply.insert(reply.end(), stream + clamped_offset, stream + clamped_offset + copy_len);
+	return reply;
+}
+
+// The [u32 id][u32 offset] body of a C2S 0x33/0x37 re-request. The retail
+// handlers read both dwords and reset the offset to 0 when the token is not
+// the live transfer id; a short body reads as {0, 0} (the first request is
+// eight zero bytes). [orig: @0x515230 / @0x5152E0]
+uint32_t chunk_request_offset(const std::vector<uint8_t> &payload, uint32_t live_transfer_id) {
+	if (payload.size() < 8) return 0;
+	const uint32_t token = static_cast<uint32_t>(payload[0]) |
+			(static_cast<uint32_t>(payload[1]) << 8) |
+			(static_cast<uint32_t>(payload[2]) << 16) |
+			(static_cast<uint32_t>(payload[3]) << 24);
+	const uint32_t offset = static_cast<uint32_t>(payload[4]) |
+			(static_cast<uint32_t>(payload[5]) << 8) |
+			(static_cast<uint32_t>(payload[6]) << 16) |
+			(static_cast<uint32_t>(payload[7]) << 24);
+	return token == live_transfer_id ? offset : 0u;
+}
+
 // tag=0x60 chunked server-info KV transfer. [orig: NapiNPClientMsg_HandleFileTransferChunk @0x432350]
-std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg) {
+std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg, uint32_t transfer_id,
+                                             uint32_t offset) {
 	std::vector<uint8_t> info_body;
 	append_string_kv(info_body, "SERVERNAME", cfg.server_name);
 	// Retail's serialize_mission_info_to_datastream @0x523620 substitutes the
@@ -381,29 +429,29 @@ std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg) {
 	append_kv(info_body, "GAMETYPE", gametype_le, 4);
 	append_string_kv(info_body, "CUSTOMTEXT", cfg.custom_text);
 	append_string_kv(info_body, "MISSIONFILENAME", cfg.mission_file);
-	const uint8_t exp_fanfare[] = {0, 0};
+	// score.ini's EXP_FANFARE lo/hi thresholds: the joiner arms its kill /
+	// headshot score tones only when the lo byte is nonzero and lo < hi, so a
+	// {0,0} silences every tone [orig: serialize_mission_info_to_datastream
+	// @0x523620 writes word_24C1170; NapiNPClientMsg_ScoreDeltaSound @0x42A0B0].
+	const uint8_t exp_fanfare[] = {
+			static_cast<uint8_t>(cfg.exp_fanfare & 0xFFu),
+			static_cast<uint8_t>((cfg.exp_fanfare >> 8) & 0xFFu)};
 	append_kv(info_body, "EXP_FANFARE", exp_fanfare, 2);
-
-	std::vector<uint8_t> reply(12, 0);
-	reply[0] = 0x01; // offset=1.
-	write_u32_le(reply, 4, static_cast<uint32_t>(info_body.size()));
-	reply.insert(reply.end(), info_body.begin(), info_body.end());
-	return reply;
+	return build_transfer_chunk(transfer_id, info_body.data(),
+	                            static_cast<uint32_t>(info_body.size()), offset);
 }
 
 // tag=0x64 chunked mission-metadata transfer. [orig: NapiNPClientMsg_HandleMissionDataChunk (0x64) @0x432410]
 std::vector<uint8_t> build_tag64_mission_metadata(
-		const GameConfig &cfg, const MissionMetadataBlob *session_blob) {
+		const GameConfig &cfg, const MissionMetadataBlob *session_blob,
+		uint32_t transfer_id, uint32_t offset) {
 	MissionMetadataBlob fallback{};
 	if (session_blob == nullptr) {
 		fallback = build_mission_metadata_blob(cfg, true);
 		session_blob = &fallback;
 	}
-	std::vector<uint8_t> reply(12 + session_blob->size(), 0);
-	reply[0] = 0x01;
-	write_u32_le(reply, 4, static_cast<uint32_t>(session_blob->size()));
-	std::memcpy(reply.data() + 12, session_blob->data(), session_blob->size());
-	return reply;
+	return build_transfer_chunk(transfer_id, session_blob->data(),
+	                            static_cast<uint32_t>(session_blob->size()), offset);
 }
 
 // tag=0x57 RTT pong. [orig: NapiNPServerMsg_HandlePingResponse @0x515070 -> NetPacket_WriteInt32AndByte_0
@@ -595,6 +643,7 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		ctx.player_name = conn.reply.player_name;
 		ctx.player_slot = conn.reply.player_slot;
 		ctx.entity_handle = conn.link.owned_entity.packed;
+		ctx.quality = conn.reply.client_quality;
 		if (world != nullptr) {
 			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) {
 				ctx.team = e->team;
@@ -623,12 +672,16 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 
 // tag=0x04 join/slot-assignment body (24 B) [orig: NetPacket_WriteSlotAssignment @0x502b30, sent from
 // CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]: [4x u32 netPlayer+60..72 stat dwords (0 on a fresh
-// join)][u8 g_mode dword_24D2110][u8 player_slot (slot+20)][u8 slot capacity @0x24c0ca4][u32 0]
-// [u8 team (slot+416)]. Every fixture byte is now witnessed field-for-field (grill 2026-07-01).
-std::vector<uint8_t> build_tag04_slot_assignment(uint8_t player_slot, uint8_t slot_capacity,
-                                                 uint8_t team) {
+// join)][u8 g_difficulty dword_24D2110][u8 player_slot (slot+20)][u8 slot capacity @0x24c0ca4][u32 0]
+// [u8 team (slot+416)]. The retail reader skips the four leading dwords and the
+// pad and stores bytes 16/17/18/23; byte 16 lands in the joiner's own
+// dword_24D2110, the difficulty word its max-health and score tallies read.
+// [orig: NapiNPClientMsg_SessionSlotConfig @0x425410 (@0x4254A8 byte 16);
+//  Entity_GetMaxHealthWithDifficulty @0x43B8A0; Score_TallyKillByLocalPlayer @0x4FD160]
+std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t player_slot,
+                                                 uint8_t slot_capacity, uint8_t team) {
 	std::vector<uint8_t> payload(24, 0);
-	payload[16] = 0;             // g_mode byte [orig dword_24D2110 low byte] — 0 on the golden host
+	payload[16] = difficulty;    // [orig dword_24D2110 low byte @0x502B96]
 	payload[17] = player_slot;   // the joiner's assigned slot index [orig slot+20]
 	payload[18] = slot_capacity; // player-slot array capacity [orig `capacity` @0x24c0ca4]
 	payload[23] = team;          // [orig slot+416]
@@ -754,6 +807,35 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 	}
 }
 
+// The C2S 0x00 JOIN body's CD identity blob: the flat-TLV run is walked for
+// the "CD" field, whose value packs [name\0][value\0] pairs back to back (the
+// NovaWorld NAMEINFO / PCID / SQUADINFO / JOINTICKET cookies). A LAN join
+// carries no CD and yields no pairs. [orig: NapiNPServer_HandlePlayerJoinMessage
+//  @0x512AA0 "CD" -> the cookie buffer; KeyValueBuffer_FindValue @0x4C2A30]
+std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
+		const std::vector<uint8_t> &payload) {
+	std::vector<std::pair<std::string, std::string>> pairs;
+	size_t pos = 0;
+	while (pos < payload.size()) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(payload.data(), payload.size(), pos, field);
+		if (next == kFlatTlvEnd || field.name.empty()) break;
+		pos = next;
+		if (!strutil::iequals(field.name, "CD")) continue;
+		const uint8_t *cursor = field.value;
+		const uint8_t *end = field.value + field.size;
+		while (cursor < end) {
+			const uint8_t *name_end = std::find(cursor, end, uint8_t{0});
+			if (name_end == end) break;
+			const uint8_t *value_end = std::find(name_end + 1, end, uint8_t{0});
+			if (value_end == end) break;
+			pairs.emplace_back(std::string(cursor, name_end), std::string(name_end + 1, value_end));
+			cursor = value_end + 1;
+		}
+	}
+	return pairs;
+}
+
 } // namespace
 
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
@@ -783,8 +865,11 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 	messages.push_back(make_protocol_message(s2c::SYNC_TICK, {0x00}));
 	append_connection_settings(config, messages);
 	messages.push_back(make_protocol_message(s2c::GAME_START_SIGNAL, {0x01}));
+	// config_bytes[6] is the session's dword_24D2110 low byte (the S2C 0x08
+	// record's seventh byte) — the same word the 0x04 hands the joiner.
 	messages.push_back(make_protocol_message(
-			0x04, build_tag04_slot_assignment(*player_slot, capacity, team)));
+			0x04, build_tag04_slot_assignment(
+					config.config_bytes[6], *player_slot, capacity, team)));
 	messages.push_back(make_protocol_message(
 			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(config, conn)));
 	return messages;
@@ -857,7 +942,21 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	world::SpawnPointResult pose = world::resolve_player_spawn_pose(
 			world, player->handle, target_zone, conn.reply.player_slot,
 			player->team, config.game_type, slot_state);
-	if (pose.found) {
+	// A medic revive lands the player on the pose the revive transaction
+	// saved (its death position raised 0x4000) instead of a marker, and the
+	// revive latch (+89932) skips the 620-tick spawn protection.
+	// [orig: GameEvent_RevivePlayer @0x517DCD..0x517E09 saves; the deploy leg
+	//  reads the latch @0x51791C]
+	const bool revive_deploy = conn.reply.revive_pose_valid;
+	if (revive_deploy) {
+		player->position.x = static_cast<float>(conn.reply.revive_pos[0]) / 65536.0f;
+		player->position.y = static_cast<float>(conn.reply.revive_pos[1]) / 65536.0f;
+		player->position.z = static_cast<float>(conn.reply.revive_pos[2]) / 65536.0f;
+		player->yaw = conn.reply.revive_yaw;
+		player->pitch = conn.reply.revive_pitch;
+		player->roll = conn.reply.revive_roll;
+		conn.reply.revive_pose_valid = false;
+	} else if (pose.found) {
 		player->position = pose.position;
 		player->yaw = pose.yaw;
 		player->pitch = pose.pitch;
@@ -890,7 +989,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// roster feature to reach them here.
 	// [orig: Server_ProcessPlayerDeath @0x517740 — 620 @0x517937/@0x517952/
 	//  @0x517960; 0 @0x51790a (bot) / @0x51791c (revive)]
-	player->damage_state = 620;
+	player->damage_state = revive_deploy ? 0 : 620;
 	if (world::AiEntity *motor =
 			world.ai.for_handle(player->handle);
 			motor != nullptr && motor->inf.active) {
@@ -963,26 +1062,6 @@ bool is_medic_recipient(const NapiNPConnection &candidate,
 			world.tables.class_has_attribute(medic->player_class,
 					world::MissionTables::kCharAttrMedic);
 }
-
-namespace {
-
-// The retail handler runs `sprintf(msg_buffer[128], format, name)`; the
-// shipped STRSRV_MEDREQ carries one `%s`. Substitute it here (the CRT call is a
-// platform primitive) and keep retail's 127-character buffer bound.
-std::string format_medic_request(const std::string &format,
-		const std::string &name) {
-	std::string out;
-	const size_t marker = format.find("%s");
-	if (marker == std::string::npos) {
-		out = format;
-	} else {
-		out = format.substr(0, marker) + name + format.substr(marker + 2);
-	}
-	if (out.size() > 127) out.resize(127);
-	return out;
-}
-
-} // namespace
 
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
@@ -1099,6 +1178,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 
 		switch (msg.tag) {
 			case c2s::JOIN: // JOIN ack [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0]
+				conn.join_identity_pairs = parse_join_identity_pairs(msg.payload);
 				replies.push_back(make_protocol_message(s2c::INIT, {}));
 				break;
 			case c2s::AUTO_MEDIC_PREFERENCE: {
@@ -1116,117 +1196,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						preference, consumed) || preference.enabled;
 				break;
 			}
-			case c2s::MEDIC_REQUEST: {
-				// A downed player's manual medic call. The body is never read:
-				// the requester is the connection's own player. In order: the
-				// null GameText lookup no-ops the whole handler; the slot must
-				// be a live-roster player with an armed revive window
-				// (`!slot+100567 && slot+368 > 0`); the requester leaves its
-				// spawn-wave group; the message is formatted from the slot name;
-				// a manual-preference, not-yet-latched requester publishes the
-				// live window (no bit 7) to the 0x580 medic set; the chat goes
-				// reliably to that set minus the requester, then to the
-				// requester alone (the chat is NOT preference-gated); the
-				// once-only latch closes; and the MEDIC_REQUEST composite sound
-				// fans to alive players. The listen host's own player runs
-				// this handler too (no loopback early-out).
-				// [orig: Server_BroadcastMedicRequest @0x515390 — the GameText
-				// lookup @0x5153C9, gates @0x515406, SpawnWaveList_RemovePlayer
-				// @0x515412, sprintf @0x515421, 0x54 @0x515432..0x515484,
-				// 0x14 @0x5154AC..0x51550B, latch @0x515510, sound
-				// @0x515519..0x51552F]
-				if (inputs.medic_request_format == nullptr ||
-						inputs.medic_request_format->empty())
-					break;
-				if (world == nullptr || !conn.burst.spawned ||
-						!conn.link.owned_entity.valid())
-					break;
-				const world::Entity *requester =
-						world->registry.get(conn.link.owned_entity);
-				if (requester == nullptr || conn.link.downed_revive_seconds == 0u)
-					break;
-				world->zones.spawn_waves.remove_player(conn.link.owned_entity);
-				const std::string message = format_medic_request(
-						*inputs.medic_request_format, requester->name);
-				if (!conn.link.auto_medic_enabled &&
-						!conn.link.medic_request_active) {
-					PlayerDownedState state;
-					state.entity_handle = conn.link.owned_entity.packed;
-					state.revive_seconds = static_cast<uint8_t>(
-							conn.link.downed_revive_seconds);
-					state.medic_request_active = false; // the raw slot+368 byte
-					const std::vector<uint8_t> downed =
-							encode_player_downed_state(state);
-					for (NapiNPConnection &candidate : roster) {
-						if (!is_medic_recipient(candidate, *world, requester->team))
-							continue;
-						candidate.link.transport->host_send(
-								s2c::PLAYER_DOWNED_STATE, downed);
-					}
-				}
-				ChatBroadcast chat;
-				chat.channel = 2;
-				chat.sender_slot = conn.reply.player_slot;
-				chat.text = message;
-				const std::vector<uint8_t> chat_body = encode_chat_broadcast(chat);
-				for (NapiNPConnection &candidate : roster) {
-					if (&candidate == &conn ||
-							!is_medic_recipient(candidate, *world, requester->team))
-						continue;
-					candidate.link.transport->host_send(
-							s2c::CHAT_BROADCAST, chat_body, true, 0, false, 310);
-				}
-				// [orig: Server_BroadcastMedicRequest @0x5154AC..0x51550B]
-				ProtocolMessage own_chat = make_protocol_message(s2c::CHAT_BROADCAST, chat_body);
-				own_chat.retention_flushes = 310;
-				replies.push_back(std::move(own_chat));
-				conn.link.medic_request_active = true;
-				// The help call: the requester's body-model composite
-				// "<prefix>_MEDIC_REQUEST", positioned at the requester, to
-				// every alive player (mask 128). The listen host's own copy
-				// rides the local slot-sound route the death scream uses.
-				// [orig: SoundProfile_FindByEntityAndType(entity, 1)
-				// @0x515526 -> Server_SendOverlayActionToAlive @0x50A1B0]
-				{
-					char set_name[24] = {};
-					audio::compose_entity_sound_set(requester->anim_slot,
-							audio::kEntitySoundMedicRequest, set_name,
-							sizeof(set_name));
-					PlaySoundCommand cmd;
-					cmd.flag = 1;
-					cmd.sound_name = set_name;
-					cmd.has_pos = true;
-					cmd.pos_x = static_cast<int16_t>(
-							world::to_fixed(requester->position.x) >> 16);
-					cmd.pos_y = static_cast<int16_t>(
-							world::to_fixed(requester->position.y) >> 16);
-					cmd.pos_z = static_cast<int16_t>(
-							world::to_fixed(requester->position.z) >> 16);
-					const std::vector<uint8_t> sound_body = encode_play_sound(cmd);
-					for (NapiNPConnection &candidate : roster) {
-						if (!is_in_match(candidate) ||
-								candidate.link.transport == nullptr ||
-								!candidate.link.owned_entity.valid())
-							continue;
-						const world::Entity *listener =
-								world->registry.get(candidate.link.owned_entity);
-						if (listener == nullptr || listener->health <= 0)
-							continue; // the mask-128 alive filter
-						if (candidate.link.mode == replication::TransportMode::Loopback) {
-							world::SoundSlotEvent local;
-							local.source_handle = conn.link.owned_entity.packed;
-							local.pos[0] = world::to_fixed(requester->position.x);
-							local.pos[1] = world::to_fixed(requester->position.y);
-							local.pos[2] = world::to_fixed(requester->position.z);
-							local.slot = 0;
-							std::memcpy(local.set_name, set_name, sizeof(set_name));
-							world->out.slot_sounds.push_back(local);
-							continue;
-						}
-						candidate.link.transport->host_send(
-								s2c::PLAY_SOUND, sound_body, /*reliable=*/false);
-					}
-				}
+			case c2s::MEDIC_REQUEST: { // [orig: Server_BroadcastMedicRequest @0x515390]
+				std::vector<ProtocolMessage> own = Server_HandleMedicRequest(
+						inputs.medic_request_format, conn, roster, world);
+				for (ProtocolMessage &m : own) replies.push_back(std::move(m));
 				break;
 			}
 			case c2s::CHARATTR_CRC_REPLY:
@@ -1399,12 +1372,19 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						build_tag75_player_state(conn, world)));
 				break;
 			case c2s::FILE_CHUNK_REQUEST: // server-info request -> 0x60 chunk [orig: NapiNPServerMsg_HandleReplayRequest (0x33) @0x515230]
-				replies.push_back(make_protocol_message(s2c::FILE_TRANSFER_CHUNK, build_tag60_server_info(config)));
+				replies.push_back(make_protocol_message(
+						s2c::FILE_TRANSFER_CHUNK,
+						build_tag60_server_info(
+								config, inputs.server_info_transfer_id,
+								chunk_request_offset(msg.payload, inputs.server_info_transfer_id))));
 				break;
 			case c2s::MISSION_CHUNK_REQUEST: // mission-file request -> 0x64 chunk only [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]
 				replies.push_back(make_protocol_message(
 						s2c::MISSION_DATA_CHUNK,
-						build_tag64_mission_metadata(config, inputs.mission_metadata_blob)));
+						build_tag64_mission_metadata(
+								config, inputs.mission_metadata_blob,
+								inputs.mission_metadata_transfer_id,
+								chunk_request_offset(msg.payload, inputs.mission_metadata_transfer_id))));
 				// The retail 00TRg join tail shares one send boundary:
 				// queued 0x75, this 0x64, then the initial 0x16. Publishing the
 				// roster on the preceding host tick makes the client request an
@@ -1694,8 +1674,18 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				               std::make_move_iterator(deployment.end()));
 				break;
 			}
-			case c2s::ENTITY_UPLINK: // C2S player-input uplink — cache the pre-spawn pose
+			case c2s::ENTITY_UPLINK:
+				// C2S player-input uplink. Pre-spawn it only caches the joiner's pose for
+				// the spawn; once the connection owns a player it is read-applied HERE, in
+				// wire order with the other gameplay messages of this datagram — retail's
+				// handler resolves the owner ctx and invokes the entity's read-apply
+				// callback inside the dispatch walk, so a `[0x0C pose][0x26 attach]`
+				// datagram attaches against the new pose, never a tick-old one.
+				// [orig: NapiNPServerMsg_0x00C @0x501C30 -> dispatch_entity_packet_callback
+				//  @0x4D6A80 (mode-4 read-apply, owner gate @0x4D6B08)]
 				cache_client_pose(msg.payload, st);
+				if (world != nullptr && conn.burst.spawned)
+					replication::apply_connection_uplink(*world, conn.link, msg.payload);
 				break;
 			case c2s::MOUNTED_WEAPON_SLOT_SELECT: {
 				// Action 6 on a designated-G attached EWeap selects which live
@@ -1824,17 +1814,94 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			}
 			case c2s::RTT_CONSUMED: { // RTT probe [orig: NapiNPServerMsg_HandlePingResponse @0x515070]
 				// [u32 timestamp][u8 echo_flag]. echo_flag != 0 -> bounce S2C 0x57 [u32 ts][u8 0]; the
-				// echo_flag == 0 return leg is server-internal RTT stat + min/max-ping kick (no reply).
+				// echo_flag == 0 return leg measures `now - ts` into the slot's ring and
+				// runs the min/max-ping strike policy (no reply). Both legs read the
+				// timestamp with a short read of 0; the flag byte's absence selects the
+				// return leg [orig: @0x5150BE..0x5150CF].
+				const uint32_t ts = msg.payload.size() >= 4
+						? (static_cast<uint32_t>(msg.payload[0]) |
+						   (static_cast<uint32_t>(msg.payload[1]) << 8) |
+						   (static_cast<uint32_t>(msg.payload[2]) << 16) |
+						   (static_cast<uint32_t>(msg.payload[3]) << 24))
+						: 0u;
 				if (msg.payload.size() >= 5 && msg.payload[4] != 0) {
-					const uint32_t ts = static_cast<uint32_t>(msg.payload[0]) |
-					                    (static_cast<uint32_t>(msg.payload[1]) << 8) |
-					                    (static_cast<uint32_t>(msg.payload[2]) << 16) |
-					                    (static_cast<uint32_t>(msg.payload[3]) << 24);
 					ProtocolMessage pong = make_protocol_message(
 							s2c::RTT_ECHO, build_tag57_pong(ts));
 					pong.reliable = false; // SendFiltered @0x51510C userParam=1
 					replies.push_back(std::move(pong));
+				} else if (conn.link.owned_entity.valid()) {
+					Server_RecordPingSample(config, conn, ts,
+							host_milliseconds_for_logic_tick(now_tick),
+							inputs.server_ctx != nullptr && inputs.server_ctx->is_in_session != 0);
 				}
+				break;
+			}
+			case c2s::CLIENT_QUALITY: { // [orig: NapiNPServerMsg_0x04C @0x5111B0]
+				// [u8 level] (a short read is 0), clamped to 4, stored on the slot,
+				// dirtied on change for the 1 Hz 0x46 resend.
+				if (!conn.link.owned_entity.valid()) break;
+				Server_StoreClientQuality(conn, msg.payload.empty() ? uint8_t{0} : msg.payload[0]);
+				break;
+			}
+			case c2s::CHAT_MESSAGE: { // [orig: NapiNPServer_HandleChatMessage @0x513760]
+				if (world == nullptr || inputs.server_ctx == nullptr) break;
+				ChatUplink uplink;
+				// The channel byte and text both short-read (0 / ""), then the
+				// text is stripped and fanned per channel.
+				if (!msg.payload.empty()) uplink.channel = msg.payload[0];
+				if (msg.payload.size() > 1) {
+					const auto begin = msg.payload.begin() + 1;
+					const auto nul = std::find(begin, msg.payload.end(), uint8_t{0});
+					uplink.text.assign(begin, nul);
+				}
+				std::vector<ProtocolMessage> chat = Server_HandleChatMessage(
+						*inputs.server_ctx, conn, uplink,
+						host_milliseconds_for_logic_tick(now_tick), *world);
+				for (ProtocolMessage &m : chat) replies.push_back(std::move(m));
+				break;
+			}
+			case c2s::LOADED_MODEL_PAGE_REPLY: { // [orig: NapiNPServerMsg_0x03D @0x500EC0]
+				// Authority-gated; the body is never read: the handler stamps the
+				// host frame clock onto the player slot (+97560 = dword_A87060).
+				if (!conn.link.owned_entity.valid()) break;
+				st.loaded_model_reply_frame = now_tick;
+				break;
+			}
+			case c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST: { // [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930]
+				// No fields read; the reply is the requester's team availability
+				// (mask 32, reliable).
+				if (world == nullptr || inputs.server_ctx == nullptr ||
+						!conn.link.owned_entity.valid())
+					break;
+				const world::Entity *requester = world->registry.get(conn.link.owned_entity);
+				if (requester == nullptr) break;
+				replies.push_back(make_protocol_message(
+						s2c::VEHICLE_SPAWN_AVAILABILITY,
+						Server_BuildVehicleSpawnAvailability(*inputs.server_ctx, *world,
+								requester->team)));
+				break;
+			}
+			case c2s::VEHICLE_SPAWN_REQUEST: { // [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0]
+				if (world == nullptr || inputs.server_ctx == nullptr) break;
+				VehicleSpawnRequest request;
+				size_t consumed = 0;
+				(void)decode_vehicle_spawn_request(msg.payload.data(), msg.payload.size(),
+						request, consumed); // short fields read 0, as retail
+				(void)Server_HandleVehicleSpawnRequest(*inputs.server_ctx, conn, request, *world);
+				break;
+			}
+			case c2s::SPECTATOR_RESPAWN: { // [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
+				// Gates in order: no spawn gate, authority, permanent death on, a
+				// spectator capacity, a player, not already a spectator; then
+				// Server_KillPlayerAndNotify(player, packet i16, 1). The conversion
+				// needs the owning context, so it is staged for the host tick.
+				if (inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority) break;
+				if (!config.permanent_death || config.spectator_slots == 0) break;
+				if (!conn.link.owned_entity.valid() || conn.link.spectator) break;
+				st.spectator_convert_killer = msg.payload.size() >= 2
+						? static_cast<int16_t>(msg.payload[0] | (msg.payload[1] << 8))
+						: int16_t{0};
+				st.spectator_convert_pending = true;
 				break;
 			}
 			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]

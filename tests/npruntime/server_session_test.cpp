@@ -47,6 +47,15 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
+// A host that has been up for five CNetQuality sample periods: the healthy-LAN
+// steady state the captures witness (frame-pressure floor 1 in all five send
+// samples, so S2C 0x79 carries 1). A host younger than that reports 0 — five
+// zeroed samples average below the floor.
+// [orig: CNetQuality_UpdateMetrics @0x4C52C0 — sums / 5 @0x4C5555..0x4C557B]
+void prime_steady_host_quality(opennova::inmatch::NapiNPServerCtx &ctx) {
+	for (int32_t &sample : ctx.host_quality_window.bandwidth) sample = 1;
+}
+
 bool check_scoreboard_message_is_transient() {
 	opennova::inmatch::GameConfig config;
 	const opennova::ProtocolMessage message =
@@ -1213,6 +1222,7 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 		            "frame-envelope fixture vehicle spawned")) return false;
 	}
 	owner.ctx.world = &world;
+	prime_steady_host_quality(owner.ctx);
 	opennova::replication::set_entity_send_budget(1600);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33120};
@@ -1533,6 +1543,7 @@ bool check_host_loopback_does_not_inherit_udp_envelope() {
 		            "loopback envelope fixture vehicle spawned")) return false;
 	}
 	ctx.world = &world;
+	prime_steady_host_quality(ctx);
 	opennova::replication::set_entity_send_budget(1600);
 	opennova::inmatch::Server_TickUpdate(ctx);
 	opennova::replication::Datagram quality;
@@ -2408,6 +2419,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 
 	// Server_InitNewRoundState clears the one global retail countdown. The next
 	// server boundary therefore broadcasts 0x79 immediately and reloads 0x136.
+	prime_steady_host_quality(ctx);
 	opennova::inmatch::Server_TickUpdate(ctx);
 	const std::vector<Emitted> initial = drain();
 	if (!expect(find(initial, opennova::s2c::ENTITY_CHECKSUM_REQ) == nullptr &&
@@ -3288,10 +3300,25 @@ bool check_score_ini_drives_session_status_values() {
 			"FIELD \"NUMLFPTAKEOVERS\" 1\n"
 			"VAR \"FIRE\" 7\n"
 			"VAR \"ENEMYKILL\" 5\n"
-			"VAR \"VATTACHKILL\" -3\n";
+			"VAR \"VATTACHKILL\" -3\n"
+			"EXP_FANFARE 5 20\n";
 	if (!expect(opennova::inmatch::load_session_score_config(config, score_ini),
 	            "score.ini VERSION 40 loads for the current game type"))
 		return false;
+	// EXP_FANFARE lo hi lands lo in the low byte; a reversed or zero pair is
+	// dropped [orig: ScoreConfig_LoadFile @0x52DC8E..0x52DC9F].
+	if (!expect(config.exp_fanfare == 0x1405u,
+	            "score.ini EXP_FANFARE 5 20 arms the 0x60 VarList word as lo=5 hi=20"))
+		return false;
+	{
+		opennova::inmatch::GameConfig reversed;
+		reversed.game_type = 0x10020u;
+		if (!expect(opennova::inmatch::load_session_score_config(reversed,
+		                    "VERSION 40\nEXP_FANFARE 20 5\nGAMETYPE \"COOP\"\n") &&
+		                    reversed.exp_fanfare == 0,
+		            "a reversed EXP_FANFARE pair is rejected exactly as retail's hi > lo gate"))
+			return false;
+	}
 	if (!expect(config.session_status_stat_values.has_value() &&
 	                    (*config.session_status_stat_values)[0] == 7 &&
 	                    (*config.session_status_stat_values)[3] == 5 &&

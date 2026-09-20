@@ -291,11 +291,15 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	devtools::ProfileLap lap(profile);
 	const uint32_t now = owner.now_tick;
 	// S2C 0x58 reports elapsed session milliseconds, while gameplay producers
-	// consume a 62 Hz logical tick. Keep those clock domains explicit: retail
+	// consume a 62.5 Hz logical tick. Keep those clock domains explicit: retail
 	// computes GetTickCount - host_start_tick; this deterministic host derives
-	// equivalent elapsed time from its fixed simulation clock.
+	// equivalent elapsed time from its fixed simulation clock. The tick is the
+	// 16 ms drain quantum, so the clock advances exactly 1000 ms per real second
+	// (dividing by the integer 62 ran it 0.8 % fast and fired the 360 s
+	// deploy-idle punt at ~357 s). [orig: Game_MainLoop @0x52B630 16 ms quantum;
+	// Server_TickUpdate @0x51E109 GetTickCount delta vs 0x57E40]
 	owner.ctx.np_protocol.host_run_duration_ms = static_cast<uint32_t>(
-			(static_cast<uint64_t>(now) * 1000u) / uint64_t(io::kTicksPerSecondInt));
+			static_cast<uint64_t>(now) * uint64_t(io::kTickMs));
 	auto &pending_session_messages = owner.pending_session_messages;
 
 	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the socket owner.

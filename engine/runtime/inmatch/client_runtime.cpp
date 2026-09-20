@@ -7,6 +7,7 @@
 
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 #include <cmath>
@@ -14,6 +15,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova::inmatch {
@@ -52,6 +54,26 @@ std::vector<uint8_t> le32(uint32_t v) {
 const std::string &empty_runtime_string() {
 	static const std::string empty;
 	return empty;
+}
+
+// Chat_StripHtmlTags @0x4983F0: copy every character outside a `<...>` run;
+// a `<` with no closing `>` swallows the rest of the line.
+std::string chat_strip_tags(std::string_view src) {
+	std::string out;
+	out.reserve(src.size());
+	size_t i = 0;
+	while (i < src.size()) {
+		const char ch = src[i];
+		if (ch == '<') {
+			while (i < src.size() && src[i] != '>') ++i;
+			if (i >= src.size()) break;
+			++i; // past the '>'
+		} else {
+			out.push_back(ch);
+			++i;
+		}
+	}
+	return out;
 }
 
 } // namespace
@@ -458,6 +480,90 @@ bool ClientRuntime::queue_medic_request() {
 	return true;
 }
 
+// [orig: Chat_CheckFloodControl @0x498F60] The 16-entry table of recent lines
+// `[u32 time][char[64] text]`: a line longer than 59 characters is cut to 59
+// first (`message[59] = 0`); an unseen line shifts the table down and lands
+// in the newest slot; a seen line within 0x500 ms of its entry is refused; an
+// older repeat is moved to the newest slot (the entries after it shift down).
+bool ClientRuntime::chat_flood_control(std::string &text) {
+	if (text.size() > 0x3B) text.resize(59);
+	const uint32_t now_ms = joiner_->monotonic_milliseconds32();
+	size_t index = 0;
+	while (index < chat_flood_.size() && chat_flood_[index].text != text) ++index;
+	if (index >= chat_flood_.size()) {
+		for (size_t i = 0; i + 1 < chat_flood_.size(); ++i) chat_flood_[i] = chat_flood_[i + 1];
+		chat_flood_.back() = ChatFloodEntry{now_ms, text};
+		return true;
+	}
+	if (now_ms - chat_flood_[index].time_ms <= 0x500u) return false;
+	for (size_t i = index; i + 1 < chat_flood_.size(); ++i) chat_flood_[i] = chat_flood_[i + 1];
+	chat_flood_.back() = ChatFloodEntry{now_ms, text};
+	return true;
+}
+
+bool ClientRuntime::queue_chat_message(uint8_t channel, const std::string &text) {
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session() || text.empty())
+		return false;
+	// The `all` (4) and non-peer `team` (5) senders queue nothing on a session
+	// peer [orig: Chat_SendAllMessage @0x49AC70 / sub_49ABA0 @0x49ABA0 —
+	//  `if (!is_mp_session_peer)`]; a joiner is always the peer.
+	if (channel == 4 || channel == 5) return false;
+	// `(!g_death_screen_active || g_spawn_success_gate)`; the admin key tests
+	// `!g_death_screen_active` alone [orig: @0x49A6B0 / @0x49A780 first tests].
+	// authoritative_spawn_released_ models the spawn-success gate's clear.
+	const bool death_screen = view_.state().death_screen_active;
+	if (channel == 11 ? death_screen : (death_screen && authoritative_spawn_released_))
+		return false;
+	std::string line = text;
+	if (!chat_flood_control(line)) return false;
+	const std::string stripped = chat_strip_tags(line);
+	// NetPacket_WriteByteAndString: [u8 channel][cstr].
+	std::vector<uint8_t> body;
+	body.reserve(stripped.size() + 2);
+	body.push_back(channel);
+	body.insert(body.end(), stripped.begin(), stripped.end());
+	body.push_back(0);
+	ProtocolMessage chat = make_protocol_message(c2s::CHAT_MESSAGE, std::move(body));
+	// QueueReliableMessage(0xD, 1, 310): the same 310-flush finite lifetime
+	// the 0x4C report and the medic call carry; the senders run outside the
+	// client net frame, so the line rides the held one-shot queue.
+	chat.retention_flushes = 310;
+	pre_send_queue_.push_back(std::move(chat));
+	return true;
+}
+
+// [orig: Game_ProcessMainFrame — `if (--dword_24D1DDC <= 0) { dword_24D1DDC =
+//  62; if (is_in_session) { CNetQuality_UpdateMetrics(); CNetQuality_SetLevel
+//  (&g_netQuality, level); } }`, ahead of the client net frame]. The peer
+// (RECEIVE) half of CNetQuality_UpdateMetrics @0x4C52C0: cleared while any of
+// g_net_spawn_suspended / dword_81474C / g_spawn_success_gate /
+// g_preround_delay_timer holds the peer, else one sample of frame pressure,
+// the ping ring's mean and the loss counter; the combined scalar is
+// max(host, client) and the host window never runs on a non-authority, so it
+// folds as 0. The loss counter (stru_A86920.aimPoint.Y) is read-and-zeroed
+// here and NOTHING in the binary increments it: the term is the floor 1.
+void ClientRuntime::update_net_quality() {
+	if (--quality_update_countdown_ > 0) return;
+	quality_update_countdown_ = 62;
+	if (joiner_ == nullptr || !joiner_->in_session()) return;
+	const bool held = !deployed_ || !authoritative_spawn_released_ ||
+			view_.state().preround_delay_seconds != 0;
+	if (held) {
+		replication::net_quality_window_clear(client_quality_window_);
+	} else {
+		replication::net_quality_window_push(client_quality_window_,
+				replication::net_quality_bandwidth_metric(observed_frame_rate_),
+				replication::net_quality_client_ping_metric(joiner_->client_average_ping_ms()),
+				replication::net_quality_loss_metric(0.0));
+	}
+	const int32_t combined = std::max(0, client_quality_window_.quality);
+	net_quality_ = static_cast<uint8_t>(replication::net_quality_level(combined));
+	replication::ClientNetQuality &net = view_.state().net;
+	net.level = net_quality_;
+	net.ping_ms = joiner_->client_ping_ms();
+	net.average_ping_ms = joiner_->client_average_ping_ms();
+}
+
 bool ClientRuntime::queue_mounted_weapon_slot_selection(bool use_parent_slot) {
 	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
 	    !is_deployed() || !joiner_->has_self_handle())
@@ -596,6 +702,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		pending_deployment_pick_set_ = false;
 		return outbound;
 	}
+
+	// The main frame's 62-frame quality fold runs ahead of the client net frame
+	// (the level it stores is what the 0x4C leg below reports).
+	if (role_ == Role::Joiner) update_net_quality();
 
 	// Per-frame tick bump — SKIPPED entirely while the clock is unseeded. The client's
 	// network-role tick is anchored by the host's S2C 0x61 seed, never free-run from zero:
@@ -810,8 +920,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// Entity_UpdateAllEntities body is skipped while the phase-0 mirror is
 	// nonzero. These portable movers are that entity body, not network work.
 	// [orig: network pump @0x526692; entity gate @0x52672C]
-	if (!preround_active)
-
 	// The remote lean integrator runs once per client frame regardless of role —
 	// the body tick that owns it in retail. [orig: decay @0x4b5c97, then the ramp
 	// @0x4b7dbf/@0x4b7dd6]

@@ -184,9 +184,10 @@ struct Connection {
 	//  @0x51e333]
 	bool death_cause_revivable = false;
 	bool auto_medic_enabled = true;     // inverse playerSlot+372
-	// playerSlot+89856. No host producer yet: the C2S medic-request message
-	// (Server_BroadcastMedicRequest @0x515390) is unported (D-NET-108), so the
-	// 0x54 / 0x46-0x0008 bit-7 encoders only ever fold in false.
+	// playerSlot+89856. Set by the C2S 0x2E medic-request handler (the
+	// Server_BroadcastMedicRequest @0x515390 port in
+	// server_message_dispatch.cpp), cleared by the deploy and the death
+	// transaction; read by the 0x54 / 0x46-0x0008 bit-7 encoders.
 	bool medic_request_active = false;
 
 	// Number of 32-host-tick samples for which the player's eye

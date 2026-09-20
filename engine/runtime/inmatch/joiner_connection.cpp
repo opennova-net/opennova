@@ -353,7 +353,10 @@ std::vector<uint8_t> JoinerConnection::start() {
 	session_ack_pending_ = false;
 	pending_spawn_menu_request_ = false;
 	spawn_ack_timestamp_ = 0;
-	world_state_completion_sent_ = false;
+	rtt_ring_.fill(0);
+	rtt_ring_index_ = 0;
+	rtt_current_ms_ = 0;
+	session_rtt_ms_ = 0;
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
 	player_list_seen_ = false;
@@ -720,6 +723,14 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 		// [orig: g_np_opcode_handlers @0x849D90 entry 12 -> Nwu_HandleServerGoodbye @0x624310
 		//  -> Nwu_HandleDisconnect(type 2) @0x623CE0, the active gate @0x623df2]
 		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_goodbye(body, out);
+		break;
+	case SESSION_OPCODE_SERVER_PING:
+		// The outer connection ping rides the same active-connection gate as
+		// the goodbye (retail resolves the type-2 connection and drops the
+		// datagram unless conn_flag0 is set) [orig: g_np_opcode_handlers
+		// @0x849D90 entry 11 -> Nwu_HandleServerPing @0x6242E0 ->
+		// Nwu_HandlePing @0x623A70, the FindConnection + conn_flag0 gate].
+		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_ping(body, out);
 		break;
 	default:
 		break; // server-only / unexpected opcodes are non-fatal
@@ -1626,14 +1637,18 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				decode_u32_scalar(m.payload.data(), m.payload.size(),
 						spawn_ack_timestamp_, consumed);
 			}
-		} else if (m.tag == s2c::WORLD_STATE_LOAD && !world_state_completion_sent_) {
-			// Retail's exact post-world completion burst. C2S 0x28 is
+		} else if (m.tag == s2c::WORLD_STATE_LOAD) {
+			// Retail's exact post-world completion burst, queued at the tail of
+			// EVERY 0x0F handler run with no latch: a host normally sends one
+			// 0x0F per admission (NetPacket_WriteWorldStateLoad0x0F's only
+			// caller is Server_OnPlayerJoin), but a round-boundary re-join
+			// re-runs that leg and expects the burst again. C2S 0x28 is
 			// [S19 timestamp][S0F session tick][u16 0]; the remaining bodies and
 			// order are fixed. Besides requesting the 0x5D empty-slot sweep, the
 			// 0x22/0x23 legs make the host return the full player rows used to bind
 			// the newly admitted local player.
 			// [orig: NapiNPClientMsg_0x00F @0x42e5af..0x42e6ab; queues exact order
-			//  0x28,0x29,0x2D,0x32,0x22,0x23]
+			//  0x28,0x29,0x2D,0x32,0x22,0x23; the one caller @0x51a84c]
 			// The reducer folds the 0x0F's retained client globals (the
 			// deploy-map overlay arm) in this same wire position
 			// [orig: g_deploy_screen_active @0x42e2d8/@0x42e2f8].
@@ -1657,7 +1672,6 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					c2s::PLAYER_SYNC_REQUEST, {0x00, 0xF7, 0x5C}));
 			periodic_replies.push_back(make_protocol_message(
 					c2s::VISIBLE_PLAYERS_REQUEST, {}));
-			world_state_completion_sent_ = true;
 		} else if (m.tag == s2c::WAIT_FOR_GAME_START_ACK &&
 		           post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd) {
 			// The world-stream terminator releases retail's loadout/status submission: the SAME
@@ -1685,16 +1699,31 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			std::size_t consumed = 0;
 			if (decode_rtt_sample(
 					m.payload.data(), m.payload.size(), sample, consumed) &&
-			    consumed == m.payload.size() && sample.echo_flag != 0) {
-				std::vector<uint8_t> pong = le32_value(sample.timestamp);
-				pong.push_back(0);
-				ProtocolMessage reply =
-						make_protocol_message(c2s::RTT_CONSUMED, std::move(pong));
-				// The reactive pong uses the same one-send queue parameter as the
-				// per-frame RTT producer: userParam=1, not retained reliability.
-				// [orig: NapiNPClientMsg_0x057_RTT @0x432210, queue @0x43226D]
-				reply.reliable = false;
-				periodic_replies.push_back(std::move(reply));
+			    consumed == m.payload.size()) {
+				if (sample.echo_flag != 0) {
+					std::vector<uint8_t> pong = le32_value(sample.timestamp);
+					pong.push_back(0);
+					ProtocolMessage reply =
+							make_protocol_message(c2s::RTT_CONSUMED, std::move(pong));
+					// The reactive pong uses the same one-send queue parameter as the
+					// per-frame RTT producer: userParam=1, not retained reliability.
+					// [orig: NapiNPClientMsg_0x057_RTT @0x432210, queue @0x43226D]
+					reply.reliable = false;
+					periodic_replies.push_back(std::move(reply));
+				} else {
+					// The pong of our own C2S 0x2C ping: the completed round trip
+					// lands in the ten-entry ring and the current-ping word (the
+					// quality metric's ping term). Retail measures against
+					// GetTickCount; our 0x2C stamps monotonic milliseconds, so
+					// the same clock closes the loop.
+					// [orig: @0x432280 `rtt = GetTickCount() - ts`,
+					//  ring[index] = rtt @0x432282, dword_A860D4 = rtt,
+					//  `++index >= 10 -> 0`]
+					const uint32_t rtt_ms = monotonic_milliseconds32() - sample.timestamp;
+					rtt_ring_[rtt_ring_index_] = rtt_ms;
+					rtt_current_ms_ = rtt_ms;
+					if (++rtt_ring_index_ >= rtt_ring_.size()) rtt_ring_index_ = 0;
+				}
 			}
 		} else if (m.tag == s2c::CHARATTR_PROPERTY_CLEAR) {
 			// Session-option mutation of the boot charattr table. A short body

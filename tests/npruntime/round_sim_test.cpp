@@ -1109,6 +1109,15 @@ int main() {
 			victim_rep, kPlayerSyncHasTeamByte | kPlayerSyncHasDownedState);
 	client_b_view.apply(s2c::PLAYER_SYNC, victim_sync);
 	client_c_view.apply(s2c::PLAYER_SYNC, victim_sync);
+	// ...and the join-time spawn stream's rows for the three players: a compact
+	// 0x0A never creates one [orig: NapiNPClientMsg_0x00A @0x42FEC0 — the
+	// pre-apply check @0x4307B1..0x4307FA queues C2S 0x0F on a miss].
+	for (ns::ClientReplicaPipeline *view : {&client_b_view, &client_c_view}) {
+		for (const w::EntityHandle h : {ha, hb, hc}) {
+			view->state().upsert(h.packed).type_id =
+					static_cast<uint16_t>(world.registry.get(h)->item_id);
+		}
+	}
 	{
 		// A short 0x03 body stores 0 = automatic rather than leaving the slot
 		// untouched [orig: NapiNPServerMsg_AutoMedicPreference @0x501C16].
@@ -1262,6 +1271,11 @@ int main() {
 		for (int i = 0; i < 4; ++i) inmatch::Server_TickUpdate(ctx);
 	}
 	if (!expect(world.registry.get(hc)->health == 0, "victim dead at 0 hp (clamped)")) return 1;
+	// The 0x0A is a PRE-motor snapshot, so the death-family animation the motor
+	// selected on the last tick above rides the NEXT tick's frame.
+	// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate's 0x0A
+	//  @0x51E3D6..0x51E450 precedes Entity_UpdateAllEntities @0x52674B]
+	inmatch::Server_TickUpdate(ctx);
 	const Drained after_kill_b = drain_all(udp_b);
 	const Drained after_kill_c = drain_all(udp_c);
 	const Drained after_kill_host = drain_all(loop);

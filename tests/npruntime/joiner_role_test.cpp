@@ -40,6 +40,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -380,6 +381,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	row.compact_revision = 1;
 	auto &self = h.role.runtime->state().upsert(self_handle);
 	self.cls = EntityClass::Player;
+	self.type_id = w::kPlayerInfantryTypeId; // the spawn stream's identity: a compact never types a row
 	self.carrier_handle = vh.packed;
 	self.mount_bone = occupancy == 4 ? 4 : 1;
 	self.state_flags = w::kEntityFlagMounted;
@@ -1079,6 +1081,136 @@ bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowe
 			"rules stamp: auto_scope_zero follows mpattrib bit 0x10000");
 }
 
+// The frame input packs onto L BEFORE the client net frame builds the C2S
+// 0x0C: a key held this frame rides THIS frame's uplink, not the next one
+// [orig: Client_ProcessNetworkFrame @0x42C180 — Player_PackInputStateToEntity
+//  @0x42C3E9 precedes Player_BuildTag0CInputBody @0x42C46F].
+bool run_uplink_carries_same_frame_input() {
+	Harness h;
+	h.kernel->world.add_system(&h.kernel->world.ai);
+	h.kernel->world.load_systems();
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input); // the spawn frame: L exists, no key held
+	if (!expect(h.role.local_spawned(), "same-frame input: L spawned")) return false;
+	h.kernel->local.set_movement_keys(true, false, false, false, false, false, false);
+	h.role.run_tick(h.input);
+	ProtocolMessage movement;
+	EntityPacketSubHeader sub;
+	PlayerExtendedUplink uplink;
+	size_t header_bytes = 0, body_bytes = 0;
+	if (!expect(h.socket.last_message(0x0C, movement) &&
+					decode_entity_packet_sub_header(movement.payload.data(),
+							movement.payload.size(), sub, header_bytes) &&
+					decode_player_extended_uplink(movement.payload.data() + header_bytes,
+							movement.payload.size() - header_bytes, uplink, body_bytes),
+			"same-frame input: the frame shipped a decodable 0x0C"))
+		return false;
+	return expect((uplink.move_input_byte & w::Entity::kMoveOrderMoving) != 0,
+			"the forward key held THIS frame rides this frame's uplink");
+}
+
+// S2C 0x0F re-snaps L to the authoritative pose it carries (position, yaw,
+// pitch, roll and the look yaw) once per decoded 0x0F, and the un-hide runs
+// while no death screen is up [orig: NapiNPClientMsg_0x00F @0x42E200 — the
+//  pose stores (Pitch @0x42E3E9, Roll @0x42E3F2), `Flags &= ~1`].
+bool run_world_state_load_resnaps_local_pose() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr, "0x0F re-snap: L spawned")) return false;
+	local->hidden = true;
+	// 23-byte header [u32 tick][i32 x][i32 y][i32 z][i16 yaw][i16 pitch][i16 roll][u8 flags],
+	// the 128 pool dwords, zero waypoint/location counts.
+	std::vector<uint8_t> body(23 + kWorldStateAmmoPoolCount * 4 + 4, 0);
+	const auto put_i32 = [&body](size_t at, int32_t v) {
+		body[at] = uint8_t(v);
+		body[at + 1] = uint8_t(v >> 8);
+		body[at + 2] = uint8_t(v >> 16);
+		body[at + 3] = uint8_t(v >> 24);
+	};
+	put_i32(4, 100 << 16);
+	put_i32(8, 200 << 16);
+	put_i32(12, 10 << 16);
+	body[16] = 0x00; body[17] = 0x40; // yaw high word 0x4000 -> BAM 0x40000000
+	body[18] = 0x00; body[19] = 0x08; // pitch 0x0800 -> 0x08000000
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::WORLD_STATE_LOAD, body)}, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input);
+	local = h.kernel->local.player();
+	const w::AiEntity *local_ai = h.kernel->local.player_ai();
+	if (!expect(local != nullptr && local_ai != nullptr, "0x0F re-snap: L still resolvable"))
+		return false;
+	const bool posed = std::fabs(local->position.x - 100.0f) < 0.01f &&
+			std::fabs(local->position.y - 200.0f) < 0.01f &&
+			std::fabs(local->position.z - 10.0f) < 0.01f;
+	if (!expect(posed, "0x0F re-snap: L sits at the wire position")) return false;
+	if (!expect(local_ai->heading == 0x40000000 && local_ai->pitch == 0x08000000 &&
+					h.kernel->local.input.look_heading == 0x40000000,
+			"0x0F re-snap: the body heading, pitch and the look yaw follow the wire"))
+		return false;
+	return expect(!local->hidden, "0x0F re-snap: the un-hide ran with no death screen up");
+}
+
+// The socket seam that also records where each datagram went.
+class TargetSocket final : public opennova::IDatagramSocket {
+public:
+	std::vector<std::pair<PeerAddr, std::vector<uint8_t>>> sent;
+	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
+	void send_to(const PeerAddr &to, const uint8_t *data, std::size_t size) override {
+		sent.emplace_back(to, std::vector<uint8_t>(data, data + size));
+	}
+};
+
+// The proxy-assisted join: with all six proxy fields installed the enumerator
+// pump ships the 48-byte rendezvous to the game node ahead of the hello, once
+// per 3000 ms, and only while the hello is outstanding.
+bool run_proxy_rendezvous_pump() {
+	Harness h;
+	TargetSocket socket;
+	h.role.set_socket(&socket, PeerAddr{0x0A00A8C0u, 32768});
+	inmatch::JoinerRole::JoinProxyOptions proxy;
+	proxy.proxy_node_ip = "10.1.2.3";
+	proxy.proxy_node_port = 4000;
+	proxy.proxy_cookie = 77;
+	proxy.proxy_relay_ip = "192.168.0.9";
+	proxy.proxy_relay_port = 32768;
+	h.role.set_join_proxy(proxy);
+	h.role.poll_preload();
+	h.role.poll_preload();
+	if (!expect(socket.sent.size() == 2, "proxy: one rendezvous and one hello across two preload frames"))
+		return false;
+	const PeerAddr node = peer_addr_from_octets({10, 1, 2, 3}, 4000);
+	const std::vector<uint8_t> &rendezvous = socket.sent[0].second;
+	if (!expect(socket.sent[0].first == node && rendezvous.size() == 48, "proxy: the rendezvous goes to the node first"))
+		return false;
+	const bool layout = rendezvous[0] == 0 && rendezvous[4] == '@' && rendezvous[5] == 0 &&
+			rendezvous[6] == 0x00 && rendezvous[7] == 0x80 &&
+			rendezvous[8] == 192 && rendezvous[9] == 168 && rendezvous[10] == 0 && rendezvous[11] == 9 &&
+			rendezvous[12] == 77 && rendezvous[13] == 0 && rendezvous[14] == 0 && rendezvous[15] == 0 &&
+			rendezvous[47] == 0;
+	if (!expect(layout, "proxy: '@' at 4, the relay port at 6, the relay addr at 8, the cookie at 12"))
+		return false;
+	if (!expect(socket.sent[1].first == PeerAddr{0x0A00A8C0u, 32768}, "proxy: the hello still dials the host"))
+		return false;
+	// A missing field disables the whole install.
+	Harness g;
+	TargetSocket quiet;
+	g.role.set_socket(&quiet, PeerAddr{});
+	proxy.proxy_cookie = 0;
+	g.role.set_join_proxy(proxy);
+	g.role.poll_preload();
+	return expect(quiet.sent.size() == 1, "proxy: no rendezvous without all six fields");
+}
+
 } // namespace
 
 int main() {
@@ -1104,6 +1236,9 @@ int main() {
 	ok &= run_guided_fire_preserves_selected_target();
 	ok &= run_rules_stamp_from_mp_attributes(0x10000u, true);
 	ok &= run_rules_stamp_from_mp_attributes(0x3A02u, false);
+	ok &= run_uplink_carries_same_frame_input();
+	ok &= run_world_state_load_resnaps_local_pose();
+	ok &= run_proxy_rendezvous_pump();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

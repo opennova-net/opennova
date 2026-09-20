@@ -479,13 +479,22 @@ int main(int argc, char **argv) {
 		net::shutdown();
 		return 1;
 	}
+	// The session banks the MEASURED wall clock, exactly as Game_MainLoop banks
+	// GetTickCount deltas: a hitch lands as one long frame that the accumulator
+	// clamps and smooths, not as a run of synthetic one-tick frames.
+	auto last_frame = clock::now();
 	for (uint64_t frame = 0; !g_shutdown.load(); ++frame) {
+		const auto now = clock::now();
 		inmatch::FrameInput input;
-		input.delta_seconds = world::TickAccumulator::kTickDt;
+		input.delta_seconds = std::chrono::duration<double>(now - last_frame).count();
+		last_frame = now;
 		const inmatch::FrameOutcome outcome = session.advance(input);
 		if (outcome.terminal()) {
-			std::fprintf(stderr, "nw-server: mission session failed: %s\n",
-					outcome.error.message.c_str());
+			if (outcome.error.code == inmatch::SessionErrorCode::RoundEnded)
+				std::fprintf(stderr, "nw-server: %s\n", outcome.error.message.c_str());
+			else
+				std::fprintf(stderr, "nw-server: mission session failed: %s\n",
+						outcome.error.message.c_str());
 			break;
 		}
 		std::this_thread::sleep_until(

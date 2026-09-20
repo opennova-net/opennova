@@ -687,6 +687,39 @@ struct ClientDeathCameraTarget {
 	uint32_t updates = 0;
 };
 
+// S2C 0x0F's authoritative local-player landing, retained by the reducer for
+// the joiner frame to apply once per revision: the pose the host serialized
+// right after Server_PositionPlayerForSpawn, and — for a waypoint gametype
+// only, the off-wire hint the decoder is given — the host-filtered route the
+// waypoint track walks. Retail writes both straight from the handler onto
+// g_local_player_entity / g_waypointList; our reducer keeps no entity, so the
+// role lands them [orig: NapiNPClientMsg_0x00F @0x42E200 — the pose stores
+//  (Position, Yaw, g_LocalPlayerLookYaw, Pitch @0x42E3E9, Roll @0x42E3F2);
+//  the g_waypointList rebuild (slot @0x42E47F, name id @0x42E492, the skipped
+//  byte @0x42E49F, Pool_GetEntryUnchecked(3, slot) @0x42E4A3)].
+struct ClientWorldStateLoad {
+	std::uint32_t revision = 0; // advances once per decoded 0x0F
+	int32_t pos_x = 0, pos_y = 0, pos_z = 0; // i32 16.16 world
+	int32_t yaw_bam = 0;   // the wire i16 high word << 16 (BAM32)
+	int32_t pitch_bam = 0;
+	int32_t roll_bam = 0;
+	// The waypoint-gametype hint was set when this landed: `waypoints` is the
+	// authoritative route (empty = the host sent none). Off the hint the wire
+	// carries no records and the local track is left alone.
+	bool waypoints_set = false;
+	std::vector<WorldStateWaypoint> waypoints;
+};
+
+// The connection quality the client itself measures: the last completed S2C
+// 0x57 round trip, the ten-entry ring's mean, and the bucketed 0..4 level the
+// C2S 0x4C report carries [orig: dword_A860D4 / CNetStats_GetAveragePing
+//  @0x4C2750 / g_netQuality @0x82BF88 via CNetQuality_SetLevel @0x4C3060].
+struct ClientNetQuality {
+	std::uint32_t ping_ms = 0;
+	std::uint32_t average_ping_ms = 0;
+	std::uint8_t level = 0;
+};
+
 struct ClientState {
 	// Monotonic decoded-state edges. topology_revision changes only when the
 	// ordered (handle,type) row layout changes; revision also covers field updates.
@@ -803,6 +836,8 @@ struct ClientState {
 	ClientEnvironmentState environment;
 	ClientMountedAmmoState mounted_ammo;
 	ClientMinimapState minimap;
+	ClientWorldStateLoad world_state;
+	ClientNetQuality net;
 
 	// The Tab board's two folded lanes: the 0x16 scoreboard and the 0x46
 	// connection-slot roster it joins names from.

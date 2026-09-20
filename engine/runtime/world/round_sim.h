@@ -351,6 +351,16 @@ struct RoundDeath {
     uint32_t event_flags = 0;
 };
 
+// A medic-kit hit on a downed teammate the kill-zone pass admitted this tick —
+// drained by the host session, which owns the revive transaction's wire
+// (0x54 / 0x3A / 0x61 / 0x1E ev 38) [orig: Projectile_ProcessExplosionQueue
+// @0x4EADFC routes a kz type 3 with the Medic charattr to
+// GameEvent_HandleMedicInteraction @0x4E6790 -> GameEvent_RevivePlayer @0x517CD0].
+struct MedicRevive {
+    EntityHandle victim;
+    EntityHandle healer;
+};
+
 // A round impact the flight pass resolved this tick — the IMPACT-EFFECT seam. The host
 // drains these and presents the enabled legs of the ammo effects_table row for the tag.
 // Retail ballistic rounds select and spawn both legs from the physical impact handlers
@@ -474,6 +484,9 @@ public:
     // Deaths detected by the damage pass, in tick order. The host session drains this
     // every tick (inmatch server tick) and stages the death broadcasts.
     std::vector<RoundDeath> deaths;
+    // Medic revives the kill-zone pass admitted this tick, in tick order; the host
+    // drains them after the deaths (the revive sender is a host transaction).
+    std::vector<MedicRevive> medic_revives;
 
     // Impacts resolved this tick, in tick order — drained by the presenting host
     // every frame (the sim stays render-free). Bounded: a headless server never

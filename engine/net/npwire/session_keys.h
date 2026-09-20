@@ -9,7 +9,7 @@ namespace opennova {
 // The session channel differs from the gate channel in two ways:
 //   1. The first byte of the CRC-stripped payload is an opcode (not
 //      encrypted); the NWU cipher is applied only to bytes [1..].
-//   2. The NWU key is a 50-character hardcoded literal, not "GATEAPI".
+//   2. The NWU key is a 46-character hardcoded literal, not "GATEAPI".
 //
 // Key literal witnessed at `.rdata:0x75b7a4`, referenced from
 // `NapiNPSession_SendDescription@0x5e9840` via
@@ -56,5 +56,14 @@ inline constexpr uint8_t SESSION_OPCODE_SERVER_RESEND_LIST = 0x84;
 //  @0x624310; writer opcode select CNapiNPConnection_SendDisconnectPacket
 //  @0x61f367 (0x86 when is_server, 0x46 @0x61f37b when is_client)]
 inline constexpr uint8_t SESSION_OPCODE_SERVER_GOODBYE = 0x86;
+// The outer-namespace ping pair: the receiver-local key dword, then the WR (u8
+// wants-reply) and MS (u32 sender ms) flat TLVs; a WR reply echoes MS with WR
+// clear and the receiver stores `now - MS` as the session RTT.
+// [orig: g_np_opcode_handlers @0x849D90 entry 4 {0x45 -> Nwu_HandleClientPing
+//  @0x624220} and entry 11 {0x85 -> Nwu_HandleServerPing @0x6242E0}, both thin
+//  wrappers over Nwu_HandlePing @0x623A70; writer CNapiNPConnection_SendPing
+//  @0x61F080 selects 0x85 when is_server @0x61F131, 0x45 for a client @0x61F145]
+inline constexpr uint8_t SESSION_OPCODE_CLIENT_PING = 0x45;
+inline constexpr uint8_t SESSION_OPCODE_SERVER_PING = 0x85;
 
 } // namespace opennova

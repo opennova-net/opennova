@@ -45,6 +45,12 @@ struct PlayerReplicationState {
 	// latch. This is not the soldier class; class arrives through the entity/loadout
 	// streams. [orig: NetPacket_SerializePlayerSync0x46 @0x505E80]
 	uint8_t downed_state = 0;
+	// The player slot's connection-quality LEVEL (slot+418, 0..4): the C2S 0x4C
+	// report the host clamps and stores, serialized by field bit 0x0400. A fresh
+	// slot advertises 1 (the witnessed join-broadcast value) until the client's
+	// first report. [orig: sub_5006E0 @0x5006E0 store; NetPacket_SerializePlayerSync0x46
+	//  @0x506213 read]
+	uint8_t quality = 1;
 	// Spawn-point/menu labels for tag=0x0F. Empty preserves the retail ASH_I5A witness tail; configured
 	// sessions set this from their selected mission so a non-ASH host does not advertise the ASH names.
 	std::vector<std::string> spawn_names;

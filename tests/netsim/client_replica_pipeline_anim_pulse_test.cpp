@@ -69,6 +69,7 @@ std::vector<uint8_t> player_frame(uint8_t anim_state, uint8_t ratio) {
 int main() {
 	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver(&classify);
+	view.state().upsert(kPlayerHandle).type_id = kPlayerType; // the spawn stream's row
 
 	bool ok = true;
 

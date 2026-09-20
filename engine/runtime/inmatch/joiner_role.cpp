@@ -104,6 +104,48 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 	socket_->send_to(host_addr_, dg.data(), dg.size());
 }
 
+// The install: node = inet_addr(NI) / atol(NP), cookie = atol(BK), relay =
+// inet_addr(NK host) / the NK port. A dotted quad that does not parse is
+// retail's INADDR_NONE (0) and leaves the proxy disabled.
+// [orig: CNapiGameSession_InitTransportConnection @0x4ca051..0x4ca0c7]
+void JoinerRole::set_join_proxy(const JoinProxyOptions &options) {
+	proxy_ = ProxyRendezvousConfig{};
+	proxy_.node_addr = proxy_inet_addr(options.proxy_node_ip);
+	proxy_.node_port = options.proxy_node_port;
+	proxy_.cookie = options.proxy_cookie;
+	proxy_.relay_addr = proxy_inet_addr(options.proxy_relay_ip);
+	proxy_.relay_port = options.proxy_relay_port;
+	// PeerAddr packs octets exactly like the inet_addr dword (first octet in the
+	// low byte), so the node address is the same word.
+	proxy_node_addr_ = PeerAddr{};
+	proxy_node_addr_.ip = proxy_.node_addr;
+	proxy_node_addr_.port = static_cast<uint16_t>(proxy_.node_port & 0xFFFFu);
+	proxy_last_send_ms_ = 0;
+}
+
+// The enumerator pump's rendezvous leg: while the announce is outstanding (the
+// hello not yet answered) and every proxy field is installed, one 48-byte
+// datagram goes to the game node on the 3000 ms announce interval, ahead of
+// the announce itself. The first pump sends at once (no last-send tick); the
+// enumerator stops once a session answered, so a later phase sends nothing.
+// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 — the interval
+//  @0x6290ed (3000 for a dialing host), the `!last_send || elapsed > interval`
+//  arm @0x629119, the all-six gate + SendPingPacket @0x62914f..0x629159, then
+//  NapiNPSession_SendAnnouncePacket @0x629170; the enumerator's active flag
+//  enum_info+44 is read as "the hello is still being announced" here]
+void JoinerRole::pump_proxy_rendezvous() {
+	if (socket_ == nullptr || !runtime || !proxy_.enabled()) return;
+	if (started_ && runtime->phase() != JoinerConnection::Phase::Hello) return;
+	const uint64_t now_ms = io::perf_now_us() / 1000u;
+	if (proxy_last_send_ms_ != 0 &&
+			now_ms - proxy_last_send_ms_ <= kProxyRendezvousIntervalMs)
+		return;
+	proxy_last_send_ms_ = now_ms == 0 ? 1 : now_ms;
+	const std::array<uint8_t, kProxyRendezvousDatagramSize> packet =
+			build_proxy_rendezvous_datagram(proxy_);
+	socket_->send_to(proxy_node_addr_, packet.data(), packet.size());
+}
+
 // Drain every datagram pending on the socket into the runtime's recv fold
 // (the witnessed poll-before-logic order [orig: Game_ProcessMainFrame
 // @0x5263f0]).
@@ -120,6 +162,7 @@ void JoinerRole::deposit_inbound() {
 
 void JoinerRole::poll_preload() {
 	if (!runtime) return;
+	pump_proxy_rendezvous();
 	send_hello_once();
 	deposit_inbound();
 	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_))
@@ -560,8 +603,21 @@ void JoinerRole::pump() {
 	devtools::ProfileLap lap(world.profile);
 	wire_frame_providers();
 	resolve_row_adm_ids();
+	pump_proxy_rendezvous();
 	send_hello_once();
 	deposit_inbound();
+	// The frame input packs onto L's body BEFORE the client net frame builds
+	// this frame's C2S 0x0C from that body: retail's Player_PackInputStateToEntity
+	// immediately precedes Player_BuildTag0CInputBody in the send block, the
+	// same order the host frame keeps (host_role.cpp: pack, then pump). Packing
+	// after the net frame shipped the PREVIOUS frame's move byte, stance/scope
+	// flags, analog triplet and heading one tick late. The input latches stay
+	// live through the pre-round phase.
+	// [orig: Client_ProcessNetworkFrame @0x42C180 — Player_PackInputStateToEntity
+	//  @0x42C3E9, then Player_BuildTag0CInputBody @0x42C46F..0x42C4A3]
+	lap.restart();
+	lp.apply_player_input_pre_tick();
+	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
 	const FrameSignals decoded = run_client_net_frame();
 	// Phase 0 of the authoritative 0x0A is the client's one pre-round
 	// predicate. Mirror it onto World before any local entity/system work.
@@ -570,6 +626,7 @@ void JoinerRole::pump() {
 	lap.restart(); // the wire leg has its own rows
 	materialize_replica_world();
 	spawn_and_arm_local_player();
+	apply_world_state_load();
 	if (decoded.health) apply_authoritative_health();
 	// The S2C 0x3A revive tint. Retail arms the word inside the message handler;
 	// our replica state keeps the recipient's retained +0x1E0 "a medic is
@@ -597,8 +654,6 @@ void JoinerRole::pump() {
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 
 	const bool preround_active = world.preround_delay_seconds != 0;
-	lp.apply_player_input_pre_tick(); // input latches stay live through the phase
-	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
     world.rules.cease_fire = rt.state().cease_fire;
     // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_rules_flags
     // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
@@ -1267,6 +1322,106 @@ void JoinerRole::apply_authoritative_health() {
 	}
 }
 
+// The S2C 0x0F world-state landing on L, once per decoded 0x0F. Retail writes
+// the pose straight onto g_local_player_entity from the handler — Position,
+// Yaw (+ g_LocalPlayerLookYaw), Pitch, Roll — and clears its hidden bit unless
+// the death screen is up; the host sends it right after Server_PositionPlayer-
+// ForSpawn, so it is the authoritative admission pose (a later 0x0F re-snaps a
+// pose the 0x0C spawn record no longer matches). With no local entity the pose
+// is skipped, exactly the handler's null test. For a waypoint gametype the
+// route list is rebuilt from the wire's pool-3 slots (the host's team-1
+// filtered blue route, <= 128) with the host's name ids, keeping the locally
+// promoted marker facts (radius, linked event, chain-back) of a re-listed node.
+// [orig: NapiNPClientMsg_0x00F @0x42E200 — `if (!g_local_player_entity)` skip,
+//  the pose stores (Pitch @0x42E3E9, Roll @0x42E3F2), `Flags &= ~1` when
+//  !g_death_screen_active; the g_waypointList rebuild @0x42E47F..0x42E4A3
+//  (Pool_GetEntryUnchecked(3, slot), STRWPNAME%03i name); Server_OnPlayerJoin
+//  positions @0x51A786 then serializes 0x0F @0x51A864]
+void JoinerRole::apply_world_state_load() {
+	mission::MissionKernel &kernel = *kernel_;
+	world::World &world = kernel.world;
+	world::LocalPlayer &lp = kernel.local;
+	ClientRuntime &rt = *runtime;
+	const replication::ClientWorldStateLoad &ws = rt.state().world_state;
+	if (ws.revision == world_state_revision_seen_) return;
+	world_state_revision_seen_ = ws.revision;
+	if (local_spawned_ && world.cached.local_player.valid()) {
+		world::Entity *local = world.registry.get(world.cached.local_player);
+		world::AiEntity *local_ai = world.ai.for_handle(world.cached.local_player);
+		if (local != nullptr && local_ai != nullptr) {
+			local->position = {
+					static_cast<float>(static_cast<double>(ws.pos_x) / kFixed16),
+					static_cast<float>(static_cast<double>(ws.pos_y) / kFixed16),
+					static_cast<float>(static_cast<double>(ws.pos_z) / kFixed16),
+			};
+			local->yaw = static_cast<int16_t>(std::lround(
+					world::mission_yaw_deg_from_bam_heading(ws.yaw_bam)));
+			local->pitch = static_cast<int16_t>(std::lround(
+					static_cast<double>(ws.pitch_bam) * world::kDegreesPerBam));
+			local->roll = static_cast<int16_t>(std::lround(
+					static_cast<double>(ws.roll_bam) * world::kDegreesPerBam));
+			local_ai->pos[0] = ws.pos_x;
+			local_ai->pos[1] = ws.pos_y;
+			local_ai->pos[2] = ws.pos_z;
+			local_ai->heading = ws.yaw_bam;
+			local_ai->pitch = ws.pitch_bam;
+			local_ai->roll = ws.roll_bam;
+			// The body's look target follows the entity yaw (the next pack
+			// mirrors target_heading back onto heading) and the staged
+			// reconciliation target moves with the snap so the own-player
+			// chase does not drag L back toward the pre-snap pose.
+			local_ai->inf.target_heading = ws.yaw_bam;
+			local_ai->inf.look_pitch = ws.pitch_bam;
+			local_ai->net_smooth_target[0] = ws.pos_x;
+			local_ai->net_smooth_target[1] = ws.pos_y;
+			local_ai->net_smooth_target[2] = ws.pos_z;
+			local_ai->net_smooth_heading = ws.yaw_bam;
+			local_ai->net_smooth_pitch = ws.pitch_bam;
+			local_ai->net_interp_progress = 0;
+			local_ai->net_interp_steps = 0;
+			// g_LocalPlayerLookYaw = the wire yaw.
+			lp.input.look_heading = ws.yaw_bam;
+			lp.input.look_pitch = ws.pitch_bam;
+			if (!rt.state().death_screen_active) {
+				local->hidden = false;
+				local->flags &= ~world::kEntityFlagCarried;
+			}
+		}
+	}
+	if (ws.waypoints_set) {
+		world::WaypointTrack &track = world.script.waypoints;
+		std::vector<world::WaypointEntry> rebuilt;
+		rebuilt.reserve(ws.waypoints.size());
+		for (const WorldStateWaypoint &wp : ws.waypoints) {
+			world::WaypointEntry entry;
+			for (const world::WaypointEntry &old : track.entries) {
+				if (old.node == static_cast<int32_t>(wp.slot_id)) {
+					entry = old;
+					break;
+				}
+			}
+			entry.node = wp.slot_id;
+			entry.name_id = wp.name_id;
+			// The marker's own position: the registry's pool-3 entity (a
+			// full-BMS joiner promoted it), else the decoded pool-3 row (a
+			// wire-header joiner streamed it), else whatever the old entry held.
+			const world::EntityHandle marker_h = world::EntityHandle::make(3, wp.slot_id);
+			if (const world::Entity *marker = world.registry.get(marker_h)) {
+				entry.x = world::to_fixed(marker->position.x);
+				entry.y = world::to_fixed(marker->position.y);
+				entry.z = world::to_fixed(marker->position.z);
+			} else if (const replication::ClientEntityState *row =
+							   rt.state().find(marker_h.packed)) {
+				entry.x = row->x;
+				entry.y = row->y;
+				entry.z = row->z;
+			}
+			rebuilt.push_back(entry);
+		}
+		track.entries = std::move(rebuilt);
+	}
+}
+
 // Project the requester-local decoded 0x0A mount relationship onto L only
 // after the host confirms C2S 0x26/0x27.
 // [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180]
@@ -1828,6 +1983,7 @@ void JoinerRole::reset_for_join() {
 	// phase-2 cursor must not swallow the first sample of a rejoin.
 	weather_revision_seen_ = 0;
 	weapon_availability_revision_seen_ = 0;
+	world_state_revision_seen_ = 0;
 	// The verbatim enable_join latch reset. self_team_revision_seen_ is
 	// deliberately absent — the shipped binding never reset it on a fresh
 	// join, and this move preserves behavior exactly (S10b owns any

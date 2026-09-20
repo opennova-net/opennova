@@ -69,6 +69,17 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
+// The pending-player spawn pump rides the shared one-second service, not every
+// tick: drive the match to its next periodic boundary so the following
+// tick_connections admits. [orig: CNapiServer_ProcessPendingPlayerSpawns
+//  @0x4C8DC0, called from Server_TickUpdate @0x51DBFD inside the reload-62
+//  block @0x51DB93]
+void advance_to_periodic_second(world::World &world) {
+	do {
+		world.match.advance_tick(world);
+	} while (!world.match.periodic_second());
+}
+
 bool mount_on_test_emplacement(
 		world::World &world, world::EntityHandle player,
 		world::EntityHandle &emplacement_out) {
@@ -399,7 +410,8 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	            "LAN discovery 0x41 does not register the scanner")) return false;
 
 	opennova::LanDiscoveryServer found;
-	if (!expect(opennova::parse_lan_discovery_reply(first.outbound[0].data(), first.outbound[0].size(), found),
+	if (!expect(opennova::parse_lan_discovery_reply(first.outbound[0].data(), first.outbound[0].size(),
+	                                               0x11223344u, found),
 	            "LAN discovery parser accepts the host 0x81")) return false;
 	if (!expect(found.server_name == config.server_name, "0x81 SN reflects server_name")) return false;
 	if (!expect(found.gametype == config.game_type, "0x81 P1 reflects gametype")) return false;
@@ -428,7 +440,7 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(foreign));
 	opennova::LanDiscoveryServer ignored;
 	if (!expect(!opennova::parse_lan_discovery_reply(
-	                    foreign_reply.data(), foreign_reply.size(), ignored),
+	                    foreign_reply.data(), foreign_reply.size(), 0x11223344u, ignored),
 	            "LAN discovery rejects a non-JO 0x81")) return false;
 
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
@@ -442,7 +454,8 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	auto second = inmatch::handle_server_datagram(ctx, scanner, probe.data(), probe.size(), 3);
 	opennova::LanDiscoveryServer refreshed;
 	if (!expect(second.outbound.size() == 1 &&
-	            opennova::parse_lan_discovery_reply(second.outbound[0].data(), second.outbound[0].size(), refreshed),
+	            opennova::parse_lan_discovery_reply(second.outbound[0].data(), second.outbound[0].size(),
+	                                               0x11223344u, refreshed),
 	            "repeated LAN discovery receives a parseable 0x81")) return false;
 	if (!expect(refreshed.current_players == 2, "0x81 NP updates after admission")) return false;
 	if (!expect(inmatch::connection_count(ctx) == before_scan + 1,
@@ -466,7 +479,7 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	opennova::LanDiscoveryServer empty;
 	if (!expect(empty_reply.outbound.size() == 1 &&
 	            opennova::parse_lan_discovery_reply(empty_reply.outbound[0].data(),
-	                                          empty_reply.outbound[0].size(), empty),
+	                                          empty_reply.outbound[0].size(), 0x11223344u, empty),
 	            "empty dedicated host returns a parseable 0x81")) return false;
 	if (!expect(empty.current_players == 0 && empty.gametype == 0 && empty.expansion.empty(),
 	            "omitted NP/P1/SUS2 fields parse as live zero/empty values")) return false;
@@ -601,14 +614,108 @@ bool run_mission_transfers_match_retail_lan_contract() {
 			blob + 148, blob + 180, [](uint8_t b) { return b != 0; });
 	if (!expect(prefix_nonzero && le32(blob + 32) != 0 && suffix_nonzero,
 	            "0x64 carries generated per-session seed/id/token fields")) return false;
-	return expect(
+	if (!expect(
 			le32(blob + 36) == config.max_players &&
 			le32(blob + 40) == config.game_type &&
 			le32(blob + 44) == config.mp_attributes && le32(blob + 48) == 1 &&
 			fixed_string(52) == config.server_name &&
 			fixed_string(84) == config.mission_file &&
 			fixed_string(116) == config.mission_file,
-			"0x64 live fields and strings match the retail LAN session");
+			"0x64 live fields and strings match the retail LAN session"))
+		return false;
+
+	// A re-request names [u32 id][u32 offset]: the live id continues from the
+	// offset (clamped to the stream, at most 200 bytes), a foreign id restarts
+	// at 0. [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0 @0x51533B;
+	//  NetPacket_WriteFixed180Block @0x507300]
+	auto request_body = [&](uint8_t tag, std::vector<uint8_t> payload, uint32_t now,
+	                        ProtocolMessage &out) -> bool {
+		const std::vector<uint8_t> dg = craft_session(
+				client_scrk, server_sk, seq++, {make_protocol_message(tag, std::move(payload))});
+		const auto result = inmatch::handle_server_datagram(
+				ctx, peer, dg.data(), dg.size(), now);
+		if (result.outbound.empty()) return false;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_s2c(result.outbound.back(), server_scrk, header, messages))
+			return false;
+		const ProtocolMessage *found = find_reply(
+				messages, tag == 0x33 ? uint8_t(0x60) : uint8_t(0x64));
+		if (found == nullptr) return false;
+		out = *found;
+		return true;
+	};
+	ProtocolMessage resumed;
+	FileTransferChunk resumed_chunk;
+	if (!expect(request_body(0x37, {1, 0, 0, 0, 100, 0, 0, 0}, 122, resumed) &&
+	                    decode_file_transfer_chunk(resumed.payload.data(),
+	                            resumed.payload.size(), resumed_chunk) &&
+	                    resumed_chunk.transfer_id == 1 && resumed_chunk.total_size == 180 &&
+	                    resumed_chunk.chunk_offset == 100 && resumed_chunk.chunk_size == 80 &&
+	                    resumed_chunk.is_final() &&
+	                    std::equal(resumed_chunk.chunk_data, resumed_chunk.chunk_data + 80,
+	                            blob + 100),
+	            "a live-id 0x37 re-request resumes the 180-byte block at its offset")) return false;
+	ProtocolMessage foreign;
+	FileTransferChunk foreign_chunk;
+	if (!expect(request_body(0x37, {9, 0, 0, 0, 100, 0, 0, 0}, 123, foreign) &&
+	                    decode_file_transfer_chunk(foreign.payload.data(),
+	                            foreign.payload.size(), foreign_chunk) &&
+	                    foreign_chunk.transfer_id == 1 && foreign_chunk.chunk_offset == 0 &&
+	                    foreign_chunk.chunk_size == 180,
+	            "a foreign-id 0x37 re-request restarts the transfer at offset 0")) return false;
+	ProtocolMessage past_end;
+	FileTransferChunk past_end_chunk;
+	if (!expect(request_body(0x37, {1, 0, 0, 0, 0xFF, 0, 0, 0}, 124, past_end) &&
+	                    decode_file_transfer_chunk(past_end.payload.data(),
+	                            past_end.payload.size(), past_end_chunk) &&
+	                    past_end_chunk.chunk_offset == 180 && past_end_chunk.chunk_size == 0,
+	            "an offset past the block clamps to its end and carries no bytes")) return false;
+
+	// The outer-namespace 0x45 ping: keyed by OUR SK, WR set asks for a 0x85
+	// keyed by the client's CK echoing MS; WR clear stores the round trip.
+	// [orig: Nwu_HandlePing @0x623A70; CNapiNPConnection_SendPing @0x61F080]
+	auto ping_body = [&](uint32_t key, uint8_t wr, uint32_t ms) {
+		std::vector<uint8_t> body;
+		for (unsigned shift = 0; shift < 32; shift += 8)
+			body.push_back(static_cast<uint8_t>(key >> shift));
+		body.insert(body.end(), {'W', 'R', 0, 1, 0, wr});
+		body.insert(body.end(), {'M', 'S', 0, 4, 0});
+		for (unsigned shift = 0; shift < 32; shift += 8)
+			body.push_back(static_cast<uint8_t>(ms >> shift));
+		return body;
+	};
+	{
+		const std::vector<uint8_t> ping = craft(0x45, ping_body(server_sk, 1, 0x12345678u));
+		const auto result = inmatch::handle_server_datagram(ctx, peer, ping.data(), ping.size(), 125);
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (!expect(result.outbound.size() == 1 &&
+		                    nw_decode_inbound(result.outbound[0].data(),
+		                            result.outbound[0].size(), opcode, body) &&
+		                    opcode == 0x85 && body.size() == 4 + 6 + 9 &&
+		                    le32(body.data()) == 0x40306400u &&
+		                    body[4] == 'W' && body[9] == 0 &&
+		                    body[10] == 'M' && le32(body.data() + 15) == 0x12345678u,
+		            "a WR ping is answered with a 0x85 keyed by the client's CK echoing MS")) return false;
+	}
+	{
+		const std::vector<uint8_t> wrong_key = craft(0x45, ping_body(server_sk ^ 1u, 1, 7));
+		const auto result = inmatch::handle_server_datagram(ctx, peer, wrong_key.data(), wrong_key.size(), 126);
+		if (!expect(result.outbound.empty(), "a ping keyed by a foreign SK is dropped")) return false;
+	}
+	{
+		const uint32_t host_ms = ctx.np_protocol.host_run_duration_ms;
+		const std::vector<uint8_t> pong = craft(0x45, ping_body(server_sk, 0, host_ms - 25u));
+		const auto result = inmatch::handle_server_datagram(ctx, peer, pong.data(), pong.size(), 127);
+		const inmatch::NapiNPConnection *conn = nullptr;
+		for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
+			if (c.peer == peer) conn = &c;
+		if (!expect(result.outbound.empty() && conn != nullptr &&
+		                    conn->session_ping_rtt_ms == 25u && conn->receive_inactive_ms == 0,
+		            "a WR-clear ping stores the round trip and refreshes the reap clock")) return false;
+	}
+	return true;
 }
 
 bool decode_tag60_mission_strings(const ProtocolMessage &message,
@@ -1576,6 +1683,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 					"valid 0x02 echo completes admission and emits post-handshake metadata")) {
 			return false;
 		}
+		advance_to_periodic_second(w);
 		inmatch::tick_connections(ctx, 16, 103);
 		if (!expect(
 					ctx.np_protocol.connection_list.front().link.owned_entity.valid() &&
@@ -1893,6 +2001,7 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 		return false;
 	}
 
+	advance_to_periodic_second(world);
 	const std::vector<inmatch::TickOut> spawn_out =
 			inmatch::tick_connections(ctx, 16, 6);
 	auto slot_message_for = [&](const PeerAddr &peer, std::string_view server_scrk,
@@ -2061,6 +2170,7 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 	};
 
 	std::vector<ProtocolMessage> spawn_pump;
+	advance_to_periodic_second(world);
 	if (!expect(
 			messages_for_peer(inmatch::tick_connections(ctx, 16, 6), spawn_pump) &&
 			spawn_pump.size() == 6 && spawn_pump[0].tag == 0x03 &&

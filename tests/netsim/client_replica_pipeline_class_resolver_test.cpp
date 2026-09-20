@@ -119,6 +119,10 @@ bool run_items_table_sizes_mixed_frame() {
 	const int32_t ax = 300 << 16, ay = -40 << 16, az = 7 << 16;
 	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver(&items_table_classify);
+	// The spawn stream's rows (a compact never creates one); the no-callback
+	// scenery row is deliberately absent so its header-only record lands nowhere.
+	view.state().upsert(kVehicleHandle).type_id = kVehicleType;
+	view.state().upsert(kInfantryHandle).type_id = kInfantryType;
 	view.apply(0x0A, build_mixed_frame(ax, ay, az));
 
 	if (!expect(view.frames_applied() == 1, "frame applied")) return false;
@@ -161,6 +165,7 @@ bool run_items_table_outranks_pool_blanket() {
 	const int32_t ax = 100 << 16, ay = 0, az = -5 << 16;
 	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver(&items_table_classify);
+	view.state().upsert(kVehicleHandle).type_id = kVehicleType; // the spawn stream's row
 
 	// A load-time 0x0D pool-1 spawn for the no-callback type: the blanket learner
 	// brands it Vehicle (pool 1 = the vehicle pool). The items.def table must win —

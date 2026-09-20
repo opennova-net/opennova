@@ -30,7 +30,9 @@ struct FrameHeaderState {
 	// (slot+100567), bit1 = RESPAWN-PENDING (slot+89912 & 0x10) — re-asserted
 	// EVERY frame; the client's deploy screen is g_deploy_screen_active = (flags1 & 2) != 0 each frame,
 	// so one bit1=0 frame closes it [orig: NapiNPClientMsg_0x00A @0x42ff82]. bit2 = the
-	// one-shot load hint (entity+44 & 0x1000 — unmodeled). (D-NET-156)
+	// owned entity's hit-feedback latch (entity+44 & 0x1000, consumed once per
+	// recipient under the hitFeedback option — modeled in emit_connection_s2c)
+	// [orig: NetPacket_WritePlayerState @0x4FF7C5..0x4FF7D9]. (D-NET-156)
 	uint8_t flags1 = 0;
 	// The live fall-damage tolerance the sub-block-1 timer state carries
 	// (World::wac_values.fallmps, dword_C6EAE4) [orig: NetPacket_WritePlayerState @0x4ffa14].
@@ -56,6 +58,16 @@ struct FrameHeaderState {
 	uint8_t respawn_delay_seconds = 0;
 	uint8_t downed_revive_seconds = 0;
 	uint8_t spawn_target_hold_seconds = 0;
+	// playerSlot+356 (the armory-reuse cooldown) and playerSlot+460 (the
+	// underwater breath sample count), both crossing as raw low bytes
+	// [orig: NetPacket_WritePlayerState @0x4FF8BB / @0x4FF8D5].
+	uint8_t armory_reuse_seconds = 0;
+	uint8_t breath_samples = 0;
+	// The mounted-weapon rearm ladder byte [orig: @0x4FF8F0..0x4FF992]: while the
+	// recipient's entity+360 mount state is 2 or 5, farpReuseTime - (tick -
+	// station+1108)/62, 0xFE-capped, 0xFF for an expired belt-fed station and
+	// 0 once expired otherwise; 0 when not mounted on a rearming station.
+	uint8_t reload_seconds = 0;
 	// The recipient team's owned-zone mask off the live chain; an empty chain
 	// walks to 0. [orig: ZoneSlotChain_GetOwnedZoneMask(playerSlot+0x1A0)
 	// @0x4FF996..0x4FF9BB]
@@ -93,9 +105,8 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	switch (flags2 & 0x03) {
 	case 0:
 		// Weapon/ammo/uniform block [orig: @0x4ff81b phase-0: preround timer + weapon slots 360/368/
-		// 364/356/460 + ammo + ZoneSlotChain_GetOwnedZoneMask]. Our host does not model the
-		// recipient's +356/+460 weapon-slot state yet; +360/+368/+364 are the live
-		// respawn/downed counters from its player slot. The uniform
+		// 364/356/460 + the rearm ladder + ZoneSlotChain_GetOwnedZoneMask]. +360/+368/+364/+356/+460
+		// are the live counters from the recipient's player slot. The uniform
 		// mask is the recipient's OWNED-ZONE mask walked off the live zone chain every frame
 		// (net-re §5.61): the client keeps it as its FARP unlock word, so a constant here would
 		// unlock or lock stations the chain never decided. (Renamed from the FrameAimBlock
@@ -108,6 +119,9 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		fu.weapon.slot_state360 = hdr.respawn_delay_seconds;
 		fu.weapon.slot_state368 = hdr.downed_revive_seconds;
 		fu.weapon.slot_state364 = hdr.spawn_target_hold_seconds;
+		fu.weapon.slot_state356 = hdr.armory_reuse_seconds;
+		fu.weapon.slot_state460 = hdr.breath_samples;
+		fu.weapon.reload_seconds = hdr.reload_seconds;
 		fu.weapon.uniform_team_mask = static_cast<int32_t>(hdr.owned_zone_mask);
 		break;
 	case 1:
@@ -120,10 +134,17 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// landing check @0x4b7cf4-0x4b7d2d; NapiNPClientMsg_0x00A phase-1 read @0x4301a1-0x4301bc;
 		// defaults @0x4f638b C6EAE0=20/C6EAE4=13; grill 2026-06-28.]
 		fu.timer.present = true;
-		fu.timer.state0 = 20;        // dword_C6EAE0 (retail default)
+		// dword_C6EAE0 is the breath-seconds global (20 from WacScript_FreeAll
+		// @0x4F6381, no other writer in the image), clamped to the byte
+		// [orig: @0x4FF9EA]; the host's tick_player_breath keeps it as the same
+		// invariant.
+		fu.timer.state0 = 20;
 		fu.timer.state1 = hdr.fallmps; // dword_C6EAE4 = fallmps, the fall-damage tolerance (0 => constant fall dmg)
-		fu.timer.state2 = 62;        // g_serverFps (cosmetic netgraph)
-		fu.timer.state3 = 0;         // g_serverCpuPct (cosmetic netgraph)
+		// g_serverFps / g_serverCpuPct are the host's measured frame statistics
+		// [orig: @0x4FFA62/@0x4FFA7C]; this headless host runs a fixed 62.5 Hz
+		// tick and carries no CPU measurement, so it reports its nominal rate.
+		fu.timer.state2 = 62;
+		fu.timer.state3 = 0;
 		// The round clock's wire projection: whole seconds (ticks / 62) only
 		// while no pre-round countdown runs and time remains; else -1.
 		// [orig: NetPacket_WritePlayerState @0x4ffa81..0x4ffaca —
@@ -925,69 +946,74 @@ std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type,
 // Drain + read-apply the queued C2S 0x0C player uplinks on one connection's transport. Takes the
 // whole Connection (not a bare transport) so it can enforce the per-connection owner gate and
 // null-checks the transport internally — symmetric with emit_connection_s2c.
+bool apply_connection_uplink(world::World &world, Connection &conn,
+                             const std::vector<uint8_t> &body) {
+	// 5-byte sub-header [u16 handle][u16 itemTypeId][u8 sub_op], then the 43-B body.
+	std::size_t consumed = 0;
+	EntityPacketSubHeader hdr;
+	if (!decode_entity_packet_sub_header(body.data(), body.size(), hdr, consumed))
+		return false;
+	if (hdr.sub_op != ENTITY_SUB_OP_EXTENDED) return false; // compact (type 11) = later
+
+	// [D-NET-119] Owner gate: a connection may only SNAP its OWN entity. The original resolves
+	// the wire handle (pool<<12|slot) to an entity and verifies `entity == *owner_ctx` (the
+	// connection's authorized entity) before invoking the +356 read-apply callback; a handle
+	// naming any other entity is silently ignored — no apply, rejection, or disconnect (returns
+	// 0 @0x4d6b7e). An invalid owner (the host's own loopback, or a pre-spawn joiner) matches
+	// nothing, mirroring the original's `owner_ctx != null` guard @0x4d6ad3. [orig:
+	// dispatch_entity_packet_callback @0x4D6A80 `entity == *owner_ctx` @0x4d6b08; owner_ctx <-
+	// NapiNPServerMsg_0x00C @0x501c30 connCtx+0x160 -> +0xC0 -> *.]
+	if (world::EntityHandle{hdr.handle} != conn.owned_entity) return false;
+
+	PlayerExtendedUplink up;
+	std::size_t body_consumed = 0;
+	if (!decode_player_extended_uplink(body.data() + consumed, body.size() - consumed,
+	                                   up, body_consumed))
+		return false;
+	// The receive queue remains live during the countdown, but the player
+	// state callback does not apply its remote pose/state until the shared
+	// pre-round timer clears.
+	// [orig: NetPacket_SerializePlayerState @0x4C2010..0x4C2028]
+	if (world.preround_delay_seconds != 0) return false;
+
+	PlayerIntent intent;
+	intent.entity_handle = hdr.handle;
+	intent.item_type_id = hdr.item_type_id;
+	intent.carrier_handle = up.carrier_handle; // ground entity — pos/heading are
+	                                           // carrier-local when set (D-NET-151)
+	intent.pos_x = up.pos_x;
+	intent.pos_y = up.pos_y;
+	intent.pos_z = up.pos_z;
+	intent.heading = up.heading;
+	intent.pitch = up.pitch;
+	intent.move_input = up.move_input_byte; // entity+0x12C — echoed in the 0x0A off-12
+	intent.state_flags = up.state_flags_byte; // raw entity+0x24 low byte; bits 2-4 replace
+	                                          // ours [orig: @0x4c1e4d] (crouch/prone family)
+	intent.equipped_adm_index = up.equipped_adm_index; // entity+0x2B0 — echoed at 0x0A off-16
+	                                                   // [orig: @0x4C20A3] (D-NET-143)
+	intent.analog_x = static_cast<int8_t>(up.analog_x); // entity+0x130.. control axes —
+	intent.analog_y = static_cast<int8_t>(up.analog_y); // the vehicle motor reads the
+	intent.analog_z = static_cast<int8_t>(up.analog_z); // controller's axes [orig: @0x48b783]
+	intent.buttons = 0; // extended uplink carries state/anim bytes, not a buttons word
+	apply_player_intent(world, intent);
+
+	// Store the sender's 4 requested-interest pairs for the 0x0A priority
+	// build's tracked-handle floor [orig: the 0x0C read-apply stores at
+	// playerState+94346/+94356 @0x4c09c0 — owner-gated like the intent].
+	conn.tracked_handle = {up.priority_handle_0, up.priority_handle_1,
+	                       up.priority_handle_2, up.priority_handle_3};
+	conn.tracked_score = {int32_t(up.priority_score_0), int32_t(up.priority_score_1),
+	                      int32_t(up.priority_score_2), int32_t(up.priority_score_3)};
+	return true;
+}
+
 void drain_connection_c2s(world::World &world, Connection &conn) {
 	if (conn.transport == nullptr) return;
 	Datagram dg;
 	while (conn.transport->host_recv(dg)) {
 		// §5.10 player-input uplink only this increment (other in-match C2S tags TBD).
 		if (dg.tag != c2s::ENTITY_UPLINK) continue;
-
-		// 5-byte sub-header [u16 handle][u16 itemTypeId][u8 sub_op], then the 43-B body.
-		std::size_t consumed = 0;
-		EntityPacketSubHeader hdr;
-		if (!decode_entity_packet_sub_header(dg.body.data(), dg.body.size(), hdr, consumed))
-			continue;
-		if (hdr.sub_op != ENTITY_SUB_OP_EXTENDED) continue; // compact (type 11) = later
-
-		// [D-NET-119] Owner gate: a connection may only SNAP its OWN entity. The original resolves
-		// the wire handle (pool<<12|slot) to an entity and verifies `entity == *owner_ctx` (the
-		// connection's authorized entity) before invoking the +356 read-apply callback; a handle
-		// naming any other entity is silently ignored — no apply, rejection, or disconnect (returns
-		// 0 @0x4d6b7e). An invalid owner (the host's own loopback, or a pre-spawn joiner) matches
-		// nothing, mirroring the original's `owner_ctx != null` guard @0x4d6ad3. [orig:
-		// dispatch_entity_packet_callback @0x4D6A80 `entity == *owner_ctx` @0x4d6b08; owner_ctx <-
-		// NapiNPServerMsg_0x00C @0x501c30 connCtx+0x160 -> +0xC0 -> *.]
-		if (world::EntityHandle{hdr.handle} != conn.owned_entity) continue;
-
-		PlayerExtendedUplink up;
-		std::size_t body_consumed = 0;
-		if (!decode_player_extended_uplink(dg.body.data() + consumed, dg.body.size() - consumed,
-		                                   up, body_consumed))
-			continue;
-		// The receive queue remains live during the countdown, but the player
-		// state callback does not apply its remote pose/state until the shared
-		// pre-round timer clears.
-		// [orig: NetPacket_SerializePlayerState @0x4C2010..0x4C2028]
-		if (world.preround_delay_seconds != 0) continue;
-
-		PlayerIntent intent;
-		intent.entity_handle = hdr.handle;
-		intent.item_type_id = hdr.item_type_id;
-		intent.carrier_handle = up.carrier_handle; // ground entity — pos/heading are
-		                                           // carrier-local when set (D-NET-151)
-		intent.pos_x = up.pos_x;
-		intent.pos_y = up.pos_y;
-		intent.pos_z = up.pos_z;
-		intent.heading = up.heading;
-		intent.pitch = up.pitch;
-		intent.move_input = up.move_input_byte; // entity+0x12C — echoed in the 0x0A off-12
-		intent.state_flags = up.state_flags_byte; // raw entity+0x24 low byte; bits 2-4 replace
-		                                          // ours [orig: @0x4c1e4d] (crouch/prone family)
-		intent.equipped_adm_index = up.equipped_adm_index; // entity+0x2B0 — echoed at 0x0A off-16
-		                                                   // [orig: @0x4C20A3] (D-NET-143)
-		intent.analog_x = static_cast<int8_t>(up.analog_x); // entity+0x130.. control axes —
-		intent.analog_y = static_cast<int8_t>(up.analog_y); // the vehicle motor reads the
-		intent.analog_z = static_cast<int8_t>(up.analog_z); // controller's axes [orig: @0x48b783]
-		intent.buttons = 0; // extended uplink carries state/anim bytes, not a buttons word
-		apply_player_intent(world, intent);
-
-		// Store the sender's 4 requested-interest pairs for the 0x0A priority
-		// build's tracked-handle floor [orig: the 0x0C read-apply stores at
-		// playerState+94346/+94356 @0x4c09c0 — owner-gated like the intent].
-		conn.tracked_handle = {up.priority_handle_0, up.priority_handle_1,
-		                       up.priority_handle_2, up.priority_handle_3};
-		conn.tracked_score = {int32_t(up.priority_score_0), int32_t(up.priority_score_1),
-		                      int32_t(up.priority_score_2), int32_t(up.priority_score_3)};
+		(void)apply_connection_uplink(world, conn, dg.body);
 	}
 }
 
@@ -1022,6 +1048,21 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type,
                          std::size_t max_frame_body_bytes) {
+	std::vector<uint8_t> frame;
+	if (!build_connection_s2c(w, conn, ents, frame, game_type, max_frame_body_bytes))
+		return false;
+	devtools::ProfileLap lap(w.profile);
+	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
+	                          /*reliable=*/false);
+	lap.mark(devtools::Slot::SIM_REPLICATION_ENQUEUE);
+	return true;
+}
+
+bool build_connection_s2c(const world::World &w, Connection &conn,
+                          const std::vector<GameEntitySnapshot> &ents,
+                          std::vector<uint8_t> &frame_out,
+                          uint32_t game_type,
+                          std::size_t max_frame_body_bytes) {
 	devtools::ProfileLap lap(w.profile);
 	if (conn.transport == nullptr) return false;
 	const world::Entity *owned = owned_entity_for_emit(w, conn);
@@ -1100,6 +1141,15 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 					: uint8_t{0};
 			hs.spawn_target_hold_seconds =
 					static_cast<uint8_t>(conn.spawn_target_hold_seconds);
+			// +356 / +460 cross as the dword's low byte, exactly as the
+			// three slot counters above [orig: @0x4FF8BB / @0x4FF8D5].
+			hs.armory_reuse_seconds = static_cast<uint8_t>(conn.armory_reuse_seconds);
+			hs.breath_samples = static_cast<uint8_t>(conn.underwater_breath_samples);
+			// The rearm ladder reads the ridden station's rearm stamp
+			// (entity+1108) under mount state 2/5; this runtime models neither
+			// the station stamp nor those mount-state codes, so the byte stays at
+			// the not-rearming arm's 0 [orig: @0x4FF901 / @0x4FF90F].
+			hs.reload_seconds = 0;
 			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);
 			if (own->mounted && own->mount_target.valid()) {
 				hs.tail_mount_handle = own->mount_target.packed;
@@ -1127,13 +1177,10 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	const bool local_recipient = w.cached.local_player.valid() &&
 			conn.owned_entity == w.cached.local_player;
 	if (local_recipient) {
-		std::vector<uint8_t> frame = build_0a_frame(
+		frame_out = build_0a_frame(
 				anchor, {}, flags2, hs, game_type, w.script.subgoals, {},
 				/*authority_recipient=*/true);
 		lap.mark(devtools::Slot::SIM_REPLICATION_ENCODE);
-		conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
-		                          /*reliable=*/false);
-		lap.mark(devtools::Slot::SIM_REPLICATION_ENQUEUE);
 		if (w.rules.hit_feedback)
 			conn.hud_hit_feedback_serial = owned->hud_hit_feedback_serial;
 		return true;
@@ -1172,13 +1219,10 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 					max_frame_body_bytes, frame_budget);
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITIES);
 
-	std::vector<uint8_t> frame = build_0a_frame(
+	frame_out = build_0a_frame(
 			anchor, selected, flags2, hs, game_type, w.script.subgoals,
 			std::move(rounds));
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENCODE);
-	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
-	                          /*reliable=*/false);
-	lap.mark(devtools::Slot::SIM_REPLICATION_ENQUEUE);
 	if (w.rules.hit_feedback)
 		conn.hud_hit_feedback_serial = owned->hud_hit_feedback_serial;
 	return true;
