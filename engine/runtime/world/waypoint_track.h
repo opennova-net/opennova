@@ -90,14 +90,18 @@ public:
 
 
 // The current-waypoint slice of the per-frame HUD info rebuild plus the
-// scripted show gate, as one value the embedder fills from the track (the
-// fill carries the HUD_BuildEntityInfo witness). `current` -1 = no
-// selection yet; `entry` is the current entry (valid while current >= 0).
+// scripted show gate, as one value (its Godot record wraps it by value).
+// `current` -1 = no selection yet; `entry` is the current entry (valid while
+// current >= 0).
 struct WaypointHudView {
     bool show = false;
     int32_t count = 0;
     int32_t current = -1;
     WaypointEntry entry;
 };
+
+// The fill, from the live track. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914
+// (hudInfo+373 number, +400/404/408 position) + g_showWaypoints @ 0x27238BC]
+WaypointHudView waypoint_hud_view(const WaypointTrack &track);
 
 } // namespace opennova::world

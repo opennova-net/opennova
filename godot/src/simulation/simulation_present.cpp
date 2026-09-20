@@ -87,21 +87,13 @@ void Simulation::fill_vehicle_trail_visual_rows(
 }
 
 Ref<WaypointHudView> Simulation::get_waypoint_hud_view() const {
-	// The current-waypoint slice of the per-frame HUD info rebuild, plus the
-	// mission-scripted show gate. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914
-	// (hudInfo+373 number, +400/404/408 position) + g_showWaypoints @ 0x27238BC]
-	opennova::world::WaypointHudView v;
-	const opennova::world::WaypointTrack *track = kernel_ ? &kernel_->world.script.waypoints : nullptr;
-	v.show = track != nullptr && track->show;
-	v.count = track ? static_cast<int>(track->entries.size()) : 0;
-	const opennova::world::WaypointEntry *cur = track ? track->current_entry() : nullptr;
-	v.current = cur ? static_cast<int>(track->current) : -1;
 	// The record converts the entry's fixed 16.16 mission (x,y,z) to Godot
-	// (x, z, -y), like every entity read.
-	if (cur != nullptr) v.entry = *cur;
+	// (x, z, -y), like every entity read; no track (no kernel) reads as the
+	// default view.
 	Ref<WaypointHudView> out;
 	out.instantiate();
-	out->assign(v);
+	out->assign(kernel_ ? opennova::world::waypoint_hud_view(kernel_->world.script.waypoints)
+					   : opennova::world::WaypointHudView{});
 	return out;
 }
 

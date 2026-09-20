@@ -170,6 +170,30 @@ int main() {
         CHECK(t.current_entry() == nullptr);
     }
 
+    // --- the HUD view fill [orig: HUD_BuildEntityInfo @0x4b88b7..0x4b8914] ---
+    {
+        WaypointTrack t;
+        WaypointHudView v = waypoint_hud_view(t);
+        CHECK(v.show); // the init-1 gate, no entries, no selection
+        CHECK(v.count == 0);
+        CHECK(v.current == -1);
+        t.entries = {wp(1, 2, 4), wp(30, 40, 4)};
+        t.entries[1].name_id = 7;
+        v = waypoint_hud_view(t);
+        CHECK(v.count == 2);
+        CHECK(v.current == -1); // a populated track before any selection
+        t.current = 1;
+        t.show = false;
+        v = waypoint_hud_view(t);
+        CHECK(!v.show);
+        CHECK(v.current == 1);
+        CHECK(v.entry.x == (30 << 16) && v.entry.y == (40 << 16));
+        CHECK(v.entry.name_id == 7);
+        t.current = 5; // out of range reads as no selection
+        v = waypoint_hud_view(t);
+        CHECK(v.current == -1);
+    }
+
     if (failures == 0) std::printf("waypoint_track_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
