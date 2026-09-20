@@ -40,11 +40,6 @@ double v3_dot(const V3 &a, const V3 &b) {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-V3 v3_cross(const V3 &a, const V3 &b) {
-	return V3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z,
-			a.x * b.y - a.y * b.x};
-}
-
 double v3_length_sq(const V3 &v) { return v3_dot(v, v); }
 
 bool v3_normalize(V3 &v) {

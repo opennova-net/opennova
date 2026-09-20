@@ -9,29 +9,19 @@ extends HostSessionOptions
 ## (socketless) listen server. The runtime projects it to the sim's HostSessionOptions
 ## record via to_session_options() for Simulation.configure_host_session.
 
-## The g_GameType code words, re-exported from the NetProtocol binding so host
-## producers keep the HostSessionConfig.* spelling. The canonical home (and every
-## witness, including [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0 ->
-## Game_StartMission @ 0x524360] for the Co-op derivation) lives at
-## engine/net/npwire game_type.h; the GUT pin test holds the re-export chain to
-## the witnessed hex. Code words are opaque beyond the objective bit — never
+## The g_GameType code words host producers name, re-exported from the
+## NetProtocol binding (every other mode is spelled NetProtocol.GAME_TYPE_*).
+## The canonical home (and every witness, including
+## [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0 -> Game_StartMission @ 0x524360]
+## for the Co-op derivation) lives at engine/base/gameprofile/game_type.h; the
+## GUT pin test holds the re-export chain to the witnessed hex. Code words are opaque beyond the objective bit — never
 ## decompose them. GAME_TYPE_TRAINING_COOP is what a mission without a
 ## multiplayer attrib (the retail training mission case) resolves to when
 ## launched by LAN automation.
 const GAME_TYPE_COOP := NetProtocol.GAME_TYPE_COOP                           # LTGT_COOP (objective)
 const GAME_TYPE_TRAINING_COOP := NetProtocol.GAME_TYPE_TRAINING_COOP         # LTGT_COOP (stock)
-const GAME_TYPE_DEATHMATCH := NetProtocol.GAME_TYPE_DEATHMATCH               # LTGT_DM
-const GAME_TYPE_KING_OF_THE_HILL := NetProtocol.GAME_TYPE_KING_OF_THE_HILL   # LTGT_KOTH
 const GAME_TYPE_FLAG_ME := NetProtocol.GAME_TYPE_FLAG_ME                     # LTGT_FM
-const GAME_TYPE_TEAM_DEATHMATCH := NetProtocol.GAME_TYPE_TEAM_DEATHMATCH     # LTGT_TDM
-const GAME_TYPE_TEAM_KING_OF_THE_HILL := NetProtocol.GAME_TYPE_TEAM_KING_OF_THE_HILL # LTGT_TKOTH
-const GAME_TYPE_ATTACK_AND_DEFEND := NetProtocol.GAME_TYPE_ATTACK_AND_DEFEND # LTGT_AD
-const GAME_TYPE_CAPTURE_THE_FLAG := NetProtocol.GAME_TYPE_CAPTURE_THE_FLAG   # LTGT_CTF
-const GAME_TYPE_FLAGBALL := NetProtocol.GAME_TYPE_FLAGBALL                   # LTGT_FB
-const GAME_TYPE_ADVANCE_AND_SECURE := NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE # LTGT_AAS
-const GAME_TYPE_SEARCH_AND_DESTROY := NetProtocol.GAME_TYPE_SEARCH_AND_DESTROY # LTGT_SD
-const GAME_TYPE_CONQUER_AND_CONTROL := NetProtocol.GAME_TYPE_CONQUER_AND_CONTROL # LTGT_CAC
-## The 0x0A sub-block-3 gate bit (npwire game_type::kObjectiveBit):
+## The 0x0A sub-block-3 gate bit (gameprofile game_type::kObjectiveBit):
 ## GAME_TYPE_COOP == GAME_TYPE_TRAINING_COOP | GAME_TYPE_OBJECTIVE_BIT.
 const GAME_TYPE_OBJECTIVE_BIT := NetProtocol.GAME_TYPE_OBJECTIVE_BIT
 ## First port of the retail LAN host range — the witness
@@ -108,7 +98,7 @@ func _init() -> void:
 
 
 ## Retail's mission-attrib -> g_GameType table — the engine home is
-## engine/net/npwire game_type.h for_mission_mode (MissionData.ATTRIB_* values
+## engine/base/gameprofile/game_type.h for_mission_mode (MissionData.ATTRIB_* values
 ## are pinned to the engine's bms::AttribFlags by static_assert). The zero-mode
 ## case is important: 00TRg has no authored multiplayer mode, yet direct LAN
 ## hosting selects the stock/training Co-op word.

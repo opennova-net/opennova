@@ -9,8 +9,6 @@ extends GameProbe
 ## It never searches foliage-painted cells, teleports the camera, or
 ## synthesizes input. Needs a window: the capture is the play viewport.
 
-const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-
 const DEFAULT_MISSION := "00TRe.bms"
 const DEFAULT_EXPANSION := "revx02"
 const PLAY_SETTLE_FRAMES := 132

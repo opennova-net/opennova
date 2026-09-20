@@ -15,7 +15,7 @@ using namespace sim_internal;
 
 bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {
 	if (!world_installed_) return false;
-	// P7: the npruntime listen server auto-spawns the host's own player at bring-up (the faithful §5.0
+	// P7: the inmatch listen server auto-spawns the host's own player at bring-up (the faithful §5.0
 	// mode-3 path), so an explicit spawn is a no-op success there. The legacy LAN host + any non-listen
 	// caller (no auto-spawn) still spawn at the requested pose below.
 	if (has_local_player()) return true;
@@ -38,7 +38,7 @@ uint32_t Simulation::mission_game_type() const {
 
 int Simulation::spawn_local_player_at_start() {
 	if (!world_installed_) return -1;
-	// The npruntime listen server auto-spawns the host's own player at
+	// The inmatch listen server auto-spawns the host's own player at
 	// bring-up via the SAME retail spawn-pose operation
 	// (Server_BuildPlayerInfoAndAdd), so when a player already exists this is
 	// a no-op success. The bare path runs the kernel's marker-select spawn

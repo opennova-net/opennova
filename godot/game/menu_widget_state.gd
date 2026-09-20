@@ -27,8 +27,6 @@ var scroll_row := 0
 var scroll_range: MenuScrollRange = null
 var has_selected_set := false
 var selected_set := PackedInt32Array()
-var has_marquee_lines := false
-var marquee_lines := PackedStringArray()
 ## TABLE rows seeded by companions (menu_table_state.gd owns the shapes).
 var has_table_rows := false
 var table_rows: Array[PackedStringArray] = []
@@ -39,4 +37,4 @@ var table_selected := PackedInt32Array()
 func is_empty() -> bool:
 	return not (has_shown or has_disabled or has_checked or has_text or has_items \
 			or has_selected_item or has_scroll_row or scroll_range != null \
-			or has_selected_set or has_marquee_lines or has_table_rows)
+			or has_selected_set or has_table_rows)

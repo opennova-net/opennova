@@ -329,11 +329,6 @@ bool RtxtStringFile::has_key_strings() {
 	return opennova::controls::has_key_strings();
 }
 
-void RtxtStringFile::set_native(const opennova::rtxt::File &p_file) {
-	file_ = p_file;
-	file_.build_lookup();
-}
-
 Ref<RtxtStringFile> RtxtStringFile::load_mission_table(const Ref<ResourceRoot> &root,
 		const String &mission_file_basename) {
 	if (root.is_null()) return Ref<RtxtStringFile>();

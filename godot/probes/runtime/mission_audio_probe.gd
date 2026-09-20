@@ -11,11 +11,8 @@ extends GameProbe
 
 const MISSION_CAP := 12
 
-var _ctx: ProbeContext
-
 
 func run(ctx: ProbeContext) -> ProbeVerdict:
-	_ctx = ctx
 	var root := ctx.resource_root()
 	if root == null:
 		return ProbeVerdict.failed("the shell has no mounted resource root")

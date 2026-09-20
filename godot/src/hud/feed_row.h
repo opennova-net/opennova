@@ -35,8 +35,6 @@ public:
 	bool is_announcement() const { return value_.announce; }
 	String format_line(const String &tmpl, const String &unknown,
 			const String &bonus, const String &wpname) const;
-	String get_attacker() const;
-	String get_victim() const;
 	// The bonus-credited aux actor's name, only when that is the local player
 	// (drives the STRCND48 re-compose).
 	String get_extra() const;

@@ -3,7 +3,7 @@
 // The friendly-tag drawer's SELECTION gates, shared by every walk that feeds
 // the HUD element (D-HUD-20): the authority's World walks in
 // world/friendly_tags.cpp and the joiner's roster walk in
-// netsim/client_roster_tags.cpp. One implementation so the two walks cannot
+// runtime/replication/client_roster_tags.cpp. One implementation so the two walks cannot
 // drift — the roster copy had lost the item-def bail.
 // [orig: HUD_DrawEntityLabel entry bails @0x5a39df..0x5a39fb and the
 //  HUD_DrawFriendlyTagsPass gates @0x5a44c7..0x5a44f8 / @0x5a4552..0x5a457d]

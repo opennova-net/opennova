@@ -502,7 +502,7 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.serve_and_play = cfg.serve_and_play; // the pump's step-5 loopback handling reads this
 	owner.pending_session_messages.clear();
 	owner.pending_session_datagrams.clear();
-	// Apply the configured 0x0A byte cap to the netsim global (the retail
+	// Apply the configured 0x0A byte cap to the replication global (the retail
 	// BANDWIDTH command's target [orig: g_entity_send_budget @0xC8FC50]).
 	replication::set_entity_send_budget(
 			static_cast<int>(cfg.config.entity_send_budget));

@@ -493,7 +493,7 @@ struct ClientEntityState {
 	bool net_world_mover = false;
 	// Air-family rows use the AIR chase constant set (snap 0xA0000, deadband
 	// 0x2AAA, buckets {8,10,15,20,25,32}) when no world mover predicts them.
-	// Stamped by the embedding sim from the resolved vehicle family — netsim
+	// Stamped by the embedding sim from the resolved vehicle family — replication
 	// itself resolves only the wire class, never the motion family.
 	bool net_air_family = false;
 	// Bumped once per folded compact record for this row — the sim's staging

@@ -59,12 +59,6 @@ void StaticTerrainShadowSourceRow::_bind_methods() {
 	STATIC_SOURCE_BIND_INT(StaticTerrainShadowSourceRow, m_name, m_default)
 	STATIC_TERRAIN_SHADOW_SOURCE_INT_FIELDS(STATIC_TERRAIN_SHADOW_SOURCE_BIND)
 #undef STATIC_TERRAIN_SHADOW_SOURCE_BIND
-	ClassDB::bind_method(D_METHOD("get_entity_attrib"),
-			&StaticTerrainShadowSourceRow::get_entity_attrib);
-	ClassDB::bind_method(D_METHOD("set_entity_attrib", "value"),
-			&StaticTerrainShadowSourceRow::set_entity_attrib);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "entity_attrib"), "set_entity_attrib",
-			"get_entity_attrib");
 	ClassDB::bind_method(D_METHOD("get_item_attrib"),
 			&StaticTerrainShadowSourceRow::get_item_attrib);
 	ClassDB::bind_method(D_METHOD("set_item_attrib", "value"),

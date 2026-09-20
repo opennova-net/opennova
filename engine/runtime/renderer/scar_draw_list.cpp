@@ -3,6 +3,8 @@
 
 #include <runtime/renderer/scar_draw_list.h>
 
+#include <base/io/fixed.h>
+
 #include <cmath>
 
 namespace opennova::renderer {
@@ -12,7 +14,7 @@ namespace {
 using opennova::world::ScarRing;
 using opennova::world::ScarSlot;
 
-constexpr float kQ16 = 65536.0f;
+constexpr float kQ16 = io::kFp16One;
 
 // The half-axis products: `(r * axis + 0x8000) >> 16` per component
 // [orig: the radius * axis products @0x5CD830 before Math_FixedPointToFloat3].

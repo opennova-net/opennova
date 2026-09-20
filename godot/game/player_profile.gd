@@ -12,7 +12,7 @@ const CONFIG_PATH := "user://player_profile.cfg"
 const SECTION := "player"
 # The organic-spawn record's entity name is a Name[16] cstring (net-re §5.23) — keep the
 # callsign inside what the wire echo can carry so the name-match sees an exact string.
-# The cap's engine home is engine/net/npwire game_type.h kMaxCallsignLength.
+# The cap's engine home is engine/base/gameprofile/game_type.h kMaxCallsignLength.
 const MAX_CALLSIGN_LENGTH := NetProtocol.MAX_CALLSIGN_LENGTH
 
 

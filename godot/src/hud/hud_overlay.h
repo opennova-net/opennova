@@ -290,12 +290,10 @@ public:
 	static int showhud_flags_default();
 	static int next_showhud_flags(int p_flags);
 	// The sight-scale index policy (engine/runtime/hud/sight_overlay.h): the
-	// player-init default and the dotsize cycle.
+	// player-init default.
 	static int sight_scale_index_default();
-	static int next_sight_scale_index(int p_index);
 	static FriendlyTagMode friendly_tag_mode_default();
 	static FriendlyTagMode next_friendly_tag_mode(FriendlyTagMode p_mode);
-	static float friendly_tag_lift();
 
 protected:
 	static void _bind_methods();

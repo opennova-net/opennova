@@ -56,11 +56,6 @@ std::optional<JoinSession> SessionStore::get_join(const std::string &tag) const 
 	return it->second.s;
 }
 
-void SessionStore::erase_join(const std::string &tag) {
-	std::lock_guard<std::mutex> lk(mu_);
-	join_.erase(tag);
-}
-
 void SessionStore::put_host(const std::string &tag, HostSession session) {
 	std::lock_guard<std::mutex> lk(mu_);
 	host_[tag] = HostEntry{std::move(session), now_ms()};
@@ -71,21 +66,6 @@ std::optional<HostSession> SessionStore::get_host(const std::string &tag) const 
 	auto it = host_.find(tag);
 	if (it == host_.end()) return std::nullopt;
 	return it->second.s;
-}
-
-void SessionStore::erase_host(const std::string &tag) {
-	std::lock_guard<std::mutex> lk(mu_);
-	host_.erase(tag);
-}
-
-std::size_t SessionStore::login_count() const {
-	std::lock_guard<std::mutex> lk(mu_);
-	return login_.size();
-}
-
-std::size_t SessionStore::join_count() const {
-	std::lock_guard<std::mutex> lk(mu_);
-	return join_.size();
 }
 
 std::size_t SessionStore::host_count() const {

@@ -56,7 +56,6 @@ void MusicDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_var", "var_index"), &MusicDirector::get_var);
 	ClassDB::bind_method(D_METHOD("set_var", "var_index", "value"), &MusicDirector::set_var);
 	ClassDB::bind_method(D_METHOD("vm_state"), &MusicDirector::vm_state);
-	ClassDB::bind_method(D_METHOD("last_error"), &MusicDirector::last_error);
 	ClassDB::bind_method(D_METHOD("signal_end_track", "value"), &MusicDirector::signal_end_track);
 
 	// Witnessed music-driving policy (engine audio/music_policy.h re-exports).
@@ -316,14 +315,6 @@ int MusicDirector::vm_state() const {
 		return (int)MUS_VM_STOPPED;
 	}
 	return (int)mus_vm_state(_vm);
-}
-
-String MusicDirector::last_error() const {
-	if (_vm == nullptr) {
-		return String();
-	}
-	const char *s = mus_vm_last_error(_vm);
-	return String(s ? s : "");
 }
 
 // --- Hook trampolines --------------------------------------------------

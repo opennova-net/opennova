@@ -2,6 +2,7 @@
 
 #include <base/crt/crt_rng.h>
 #include <base/io/bam.h>
+#include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
@@ -122,7 +123,6 @@ void FacialSystem::configure(World &world, const ResourceIndex *index,
 		index_ = index;
 		models_.clear();
 		slots_.clear();
-		load_errors_.clear();
 		display_frame_ = 0;
 		world.registry.for_each([&](const Entity &old) {
 			Entity *e = world.registry.get(old.handle);
@@ -171,9 +171,7 @@ void FacialSystem::initialize_entity(World &world, Entity &entity) {
 		auto parsed = std::make_shared<grm::File>();
 		std::string error;
 		if (!grm::parse(bytes.data(), bytes.size(), *parsed, error)) {
-			const std::string message = binding->second + ": " + error;
-			if (std::find(load_errors_.begin(), load_errors_.end(), message) == load_errors_.end())
-				load_errors_.push_back(message);
+			io::logf(io::LogLevel::kWarn, "facial: %s: %s", binding->second.c_str(), error.c_str());
 			return;
 		}
 		model = std::move(parsed);

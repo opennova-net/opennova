@@ -2,7 +2,7 @@
 // mission kernel (ADR 0042 d3). It mounts the resource root, boots the loose
 // mission through mission::MissionKernel (terrain, item/weapon/ammo tables,
 // collision, infantry .adm — the same boot every embedder drives), stands the
-// npruntime runtime up as a HostOnly session through inmatch::HostRole,
+// inmatch runtime up as a HostOnly session through inmatch::HostRole,
 // opens a real UDP socket, and asks inmatch::Session to drive the listen frame
 // at the original fixed cadence so retail-wire-compatible clients (opennova
 // or, as a follow-up, stock retail) can join -> spawn -> play. All protocol,

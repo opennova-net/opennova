@@ -5,10 +5,8 @@
 #include <base/io/fixed.h> // kFp16One
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <runtime/audio/bank_chain.h>
 #include "simulation/simulation.h"
 
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -50,24 +48,8 @@ void AmbientMixer::_bind_methods() {
 			D_METHOD("emitter_layer_volume", "dist_q16", "falloff_u", "min_u",
 					"vol_byte", "member_vol", "clamp_vol"),
 			&AmbientMixer::emitter_layer_volume);
-	ClassDB::bind_static_method("AmbientMixer",
-			D_METHOD("oneshot_layer_volume", "dist_q16", "min_q16",
-					"falloff_q16", "member_vol", "clamp_vol"),
-			&AmbientMixer::oneshot_layer_volume);
 	ClassDB::bind_static_method("AmbientMixer", D_METHOD("q16_to_float", "q16"),
 			&AmbientMixer::q16_to_float);
-	ClassDB::bind_static_method("AmbientMixer",
-			D_METHOD("global_bank_chain", "expansion_name"),
-			&AmbientMixer::global_bank_chain);
-}
-
-PackedStringArray AmbientMixer::global_bank_chain(
-		const String &expansion_name) {
-	PackedStringArray out;
-	for (const std::string &name : opennova::audio::global_bank_chain(
-			std::string(expansion_name.utf8().get_data())))
-		out.append(String(name.c_str()));
-	return out;
 }
 
 void AmbientMixer::clear() {
@@ -221,12 +203,6 @@ int AmbientMixer::calc_distance_volume(int64_t dist_q16, int64_t radius_q16,
 int AmbientMixer::emitter_layer_volume(int64_t dist_q16, int falloff_u,
 		int min_u, int vol_byte, int member_vol, int clamp_vol) {
 	return opennova::audio::emitter_layer_volume(dist_q16, falloff_u, min_u, vol_byte,
-			member_vol, clamp_vol);
-}
-
-int AmbientMixer::oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,
-		int64_t falloff_q16, int member_vol, int clamp_vol) {
-	return opennova::audio::oneshot_layer_volume(dist_q16, min_q16, falloff_q16,
 			member_vol, clamp_vol);
 }
 

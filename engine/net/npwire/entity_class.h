@@ -1,5 +1,5 @@
 // The §5.10b per-item replication class, split out of ingame_decode.h so the
-// light consumers (netsim state/views, replication_model, the Godot net
+// light consumers (replication state/views, replication_model, the Godot net
 // client) stop pulling the full 1,700-line decode surface for one enum.
 // ingame_decode.h re-includes this header, so full-surface consumers see no
 // change.

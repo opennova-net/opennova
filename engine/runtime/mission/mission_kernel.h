@@ -190,7 +190,7 @@ public:
 	// the tables must exist before the register pass walks the building prefix].
 	void occlusion_init_mission();
 	// The .adm registry id a decoded Player/Infantry row of `type_id` grounds
-	// on (items.def anim_def through the infantry adm index) — the netsim twin
+	// on (items.def anim_def through the infantry adm index) — the replication twin
 	// of resolve_new_infantry_adm_ids (AnimMap_RegisterEntity's spawn half
 	// [orig: @0x40bb60]); -1 = neither a model map nor the configured default
 	// is available (the row stays chase-only). Cached per type so late-joining

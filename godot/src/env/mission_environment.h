@@ -54,14 +54,10 @@ public:
 	// DEFAULT_MINUTES_PER_DAY constant binds from it).
 	static constexpr int DEFAULT_MINUTES_PER_DAY = 1440;
 	void configure_mission_clock(int p_start_time_q8_8, int p_minutes_per_day);
-	static double mission_start_time_hhmm(int p_start_time_q8_8);
 	void advance_mission_clock(int p_ticks);
 	Error debug_set_mission_minute_of_day(double p_minute_of_day);
 	double get_mission_minute_of_day() const;
 	int get_mission_time_fixed24() const;
-
-	static double minute_of_day_to_hhmm(double p_minute_of_day);
-	static double hhmm_to_minute_of_day(double p_hhmm);
 
 	// --- the weather-home reads --------------------------------------------
 	// Env_QuakeTicks, Env_RainPctCurrent / 65536, Env_OvercastBlend / 65536,
@@ -74,7 +70,6 @@ public:
 	// The overcast table (.trn + overcast.def keyframes) the overcast blend
 	// cross-fades the .env colors against; null clears it.
 	void set_overcast_data(const Ref<EnvFile> &p_data);
-	Ref<EnvFile> get_overcast_data() const { return overcast_data_; }
 
 	// --- the weather-driven split -------------------------------------------
 	void set_weather_driven(bool p_driven);
@@ -179,12 +174,6 @@ public:
 	void set_sun_light(const Vector3 &p_value);
 	void set_fog_color_rt(const Vector3 &p_value);
 	void set_sky_ambient_rt(const Vector3 &p_value);
-	void set_static_colors_rt(const Vector3 &p_ceiling, const Vector3 &p_cloud,
-			const Vector3 &p_floor_color);
-	void set_sky_colors_rt(const Vector3 &p_skyfog, const Vector3 &p_sky_base,
-			const Vector3 &p_sky_bright, const Vector3 &p_sky_highlight,
-			const Vector3 &p_cloud_base, const Vector3 &p_cloud_highlight,
-			const Vector3 &p_cloud_edge);
 	void set_color_src_gain(const Vector3 &p_value);
 	int64_t get_env_generation() const;
 	int64_t get_scene_generation() const {

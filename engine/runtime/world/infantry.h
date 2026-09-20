@@ -207,7 +207,7 @@ uint32_t infantry_anim_flags(int state);
 // [orig: the queue classes @0x4c1169..0x4c1190 / @0x4c060a..0x4c0633]: a
 // hold-class current (flags 0x4), or a 0x20-class current whose replacement
 // lacks the 0x1 bit, defers the arrival to the current clip's completion
-// boundary; anything else commits directly. Shared by the netsim record fold
+// boundary; anything else commits directly. Shared by the replication record fold
 // and the presenter's body-state FSM so the rule cannot drift between them.
 inline bool remote_body_state_defers(uint32_t current_flags,
                                      uint32_t next_flags) {
@@ -219,7 +219,7 @@ inline bool remote_body_state_defers(uint32_t current_flags,
 // @0x40b662..0x40b737]: a forward gait retargeting to its crouch/prone walk
 // first plays the matching 169-172 transition clip and defers the real target
 // to the clip's completion boundary. Returns the transition state id, or -1
-// when the pair is not one of the four witnessed inserts. Shared by the netsim
+// when the pair is not one of the four witnessed inserts. Shared by the replication
 // replica channel and the authority InfantryState channel so the map cannot
 // drift between them (D-NET-209 / D-INF-23).
 inline int gait_stance_transition_clip(int current, int target) {

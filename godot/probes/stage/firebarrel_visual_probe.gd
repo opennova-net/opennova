@@ -10,14 +10,12 @@ const STAGE_SIZE := Vector2i(960, 540)
 const TICK_DT := 1.0 / 62.0
 const CAPTURE_TIMES := [1.0, 2.0, 3.0, 4.0]
 
-var _ctx: ProbeContext
 var _stage: ProbeStage
 var _effect_world: EffectWorld
 var _out_dir := ""
 
 
 func run(ctx: ProbeContext) -> ProbeVerdict:
-	_ctx = ctx
 	_out_dir = ProbeOutput.resolve(ctx, String(ctx.args.get("output_dir", "")))
 	var res_root := ctx.resource_root()
 	if res_root == null:

@@ -18,10 +18,6 @@ constexpr uint32_t kMaxMaterialTextures = 24;
 
 } // namespace
 
-int ObjectData::get_material_count() const {
-	return source_model_ ? static_cast<int>(native_model().material_count) : 0;
-}
-
 int ObjectData::find_material_array_index(int p_material_index) const {
 	if (!source_model_) {
 		return -1;
@@ -208,25 +204,6 @@ Array ObjectData::get_control_registers() const {
 		result.push_back(item);
 	}
 	return result;
-}
-
-String ObjectData::resolve_material_texture_path(int p_material_index, int p_texture_index) const {
-	if (!source_model_ || p_material_index < 0 || static_cast<size_t>(p_material_index) >= native_model().material_count ||
-			p_texture_index < 0 || p_texture_index >= static_cast<int>(kMaxMaterialTextures)) {
-		return String();
-	}
-
-	const ThreediMaterial &material = native_model().materials[p_material_index];
-	if (static_cast<uint32_t>(p_texture_index) >= material.texture_count) {
-		return String();
-	}
-
-	const String texture_name = from_native(material.textures[p_texture_index].name);
-	if (resource_root.is_valid()) {
-		const String resolved = resource_root->resolve_file(texture_name);
-		return resolved.is_empty() && resource_root->load_texture(texture_name).is_valid() ? texture_name : resolved;
-	}
-	return opennova::resolve_texture_path(source_dir, texture_name);
 }
 
 Ref<Texture> ObjectData::load_material_texture(int p_material_index, int p_texture_index) const {

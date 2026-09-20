@@ -56,9 +56,6 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("configure_mission_clock", "start_time_q8_8", "minutes_per_day"),
 			&MissionEnvironment::configure_mission_clock);
-	ClassDB::bind_static_method("MissionEnvironment",
-			D_METHOD("mission_start_time_hhmm", "start_time_q8_8"),
-			&MissionEnvironment::mission_start_time_hhmm);
 	ClassDB::bind_method(D_METHOD("advance_mission_clock", "ticks"),
 			&MissionEnvironment::advance_mission_clock);
 	ClassDB::bind_method(
@@ -68,12 +65,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_mission_minute_of_day);
 	ClassDB::bind_method(D_METHOD("get_mission_time_fixed24"),
 			&MissionEnvironment::get_mission_time_fixed24);
-	ClassDB::bind_static_method("MissionEnvironment",
-			D_METHOD("minute_of_day_to_hhmm", "minute_of_day"),
-			&MissionEnvironment::minute_of_day_to_hhmm);
-	ClassDB::bind_static_method("MissionEnvironment",
-			D_METHOD("hhmm_to_minute_of_day", "hhmm"),
-			&MissionEnvironment::hhmm_to_minute_of_day);
 
 	ClassDB::bind_method(D_METHOD("get_quake_ticks"),
 			&MissionEnvironment::get_quake_ticks);
@@ -82,12 +73,6 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_overcast_blend"),
 			&MissionEnvironment::get_overcast_blend);
 	ClassDB::bind_method(D_METHOD("is_raining"), &MissionEnvironment::is_raining);
-	ClassDB::bind_method(D_METHOD("set_overcast_data", "data"),
-			&MissionEnvironment::set_overcast_data);
-	ClassDB::bind_method(D_METHOD("get_overcast_data"),
-			&MissionEnvironment::get_overcast_data);
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "overcast_data", PROPERTY_HINT_RESOURCE_TYPE, "EnvFile"),
-			"set_overcast_data", "get_overcast_data");
 
 	ClassDB::bind_method(D_METHOD("set_weather_driven", "driven"),
 			&MissionEnvironment::set_weather_driven);
@@ -210,13 +195,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::set_sun_light);
 	ClassDB::bind_method(D_METHOD("set_sky_ambient_rt", "value"),
 			&MissionEnvironment::set_sky_ambient_rt);
-	ClassDB::bind_method(
-			D_METHOD("set_static_colors_rt", "ceiling", "cloud", "floor_color"),
-			&MissionEnvironment::set_static_colors_rt);
-	ClassDB::bind_method(
-			D_METHOD("set_sky_colors_rt", "skyfog", "sky_base", "sky_bright",
-					"sky_highlight", "cloud_base", "cloud_highlight", "cloud_edge"),
-			&MissionEnvironment::set_sky_colors_rt);
 	ClassDB::bind_method(D_METHOD("set_color_src_gain", "value"),
 			&MissionEnvironment::set_color_src_gain);
 	ClassDB::bind_method(D_METHOD("get_env_generation"),
@@ -494,11 +472,6 @@ void MissionEnvironment::configure_mission_clock(int p_start_time_q8_8,
 	}
 }
 
-double MissionEnvironment::mission_start_time_hhmm(int p_start_time_q8_8) {
-	return opennova::env::EnvironmentState::mission_start_time_hhmm(
-			p_start_time_q8_8);
-}
-
 void MissionEnvironment::advance_mission_clock(int p_ticks) {
 	state_.advance_mission_clock(p_ticks);
 	if (p_ticks > 0 && state_.is_loaded()) {
@@ -523,15 +496,6 @@ double MissionEnvironment::get_mission_minute_of_day() const {
 
 int MissionEnvironment::get_mission_time_fixed24() const {
 	return state_.mission_time_fixed24();
-}
-
-double MissionEnvironment::minute_of_day_to_hhmm(double p_minute_of_day) {
-	return opennova::env::EnvironmentState::minute_of_day_to_hhmm(
-			p_minute_of_day);
-}
-
-double MissionEnvironment::hhmm_to_minute_of_day(double p_hhmm) {
-	return opennova::env::EnvironmentState::hhmm_to_minute_of_day(p_hhmm);
 }
 
 // --- network phase-2 --------------------------------------------------------
@@ -900,23 +864,6 @@ void MissionEnvironment::set_sky_ambient_rt(const Vector3 &p_value) {
 	flush_publication();
 }
 
-void MissionEnvironment::set_static_colors_rt(const Vector3 &p_ceiling,
-		const Vector3 &p_cloud, const Vector3 &p_floor_color) {
-	state_.set_static_colors_rt(to_rgb(p_ceiling), to_rgb(p_cloud),
-			to_rgb(p_floor_color));
-	flush_publication();
-}
-
-void MissionEnvironment::set_sky_colors_rt(const Vector3 &p_skyfog,
-		const Vector3 &p_sky_base, const Vector3 &p_sky_bright,
-		const Vector3 &p_sky_highlight, const Vector3 &p_cloud_base,
-		const Vector3 &p_cloud_highlight, const Vector3 &p_cloud_edge) {
-	state_.set_sky_colors_rt(to_rgb(p_skyfog), to_rgb(p_sky_base),
-			to_rgb(p_sky_bright), to_rgb(p_sky_highlight), to_rgb(p_cloud_base),
-			to_rgb(p_cloud_highlight), to_rgb(p_cloud_edge));
-	flush_publication();
-}
-
 void MissionEnvironment::set_color_src_gain(const Vector3 &p_value) {
 	state_.set_color_src_gain(to_rgb(p_value));
 	flush_publication();
@@ -929,7 +876,7 @@ int64_t MissionEnvironment::get_env_generation() const {
 // --- env #27 scalars --------------------------------------------------------
 
 float MissionEnvironment::get_fog_distance() const {
-	return state_.fog_distance();
+	return state_.fog_level();
 }
 
 float MissionEnvironment::get_fog_level() const {

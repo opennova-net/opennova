@@ -274,7 +274,6 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
                        TraversalStats& stats, bool zero_height,
                        std::vector<VisiblePatch>* out_foliage_handoffs) {
 	if (node_idx < 0 || node_idx >= (int)quad_nodes.size()) return;
-	stats.nodes_visited++;
 	const QuadNode& node = quad_nodes[node_idx];
 
 	// World-space AABB
@@ -310,8 +309,6 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 	if (view_cull.force_subdivide) {
 		force_subdiv_partial = 1;
 		stats.partial_subdiv_count++;
-		if (node.lod_level >= 0 && node.lod_level < 5)
-			stats.partial_subdiv_per_level[node.lod_level]++;
 	}
 
 	// Distance: X/Z clamped to the world box, Y against the cull center.
@@ -370,7 +367,6 @@ void traverse_quadtree(const std::vector<QuadNode>& quad_nodes,
 				out_foliage_handoffs->push_back(patch);
 			if (out_patches.size() < 224) {
 				out_patches.push_back(patch);
-				if (node.is_leaf) stats.leaf_emits++; else stats.nonleaf_emits++;
 				if (dist < stats.dist_min) stats.dist_min = dist;
 				if (dist > stats.dist_max) stats.dist_max = dist;
 			} else {

@@ -23,7 +23,7 @@ All commands are Git Bash, from the repo root.
    submodule, but building the GDExtension needs godot-cpp too.)
 3. Addons installed: `bash scripts/bootstrap_godot.sh` — it copies GUT into
    `godot/addons/gut/` AND runs `scripts/bootstrap_imgui_godot.sh` for the
-   imgui-godot addon the `DevTools`/`OnedUi` nodes draw through (ADR 0039).
+   imgui-godot addon the `DevTools` node draws through (ADR 0039).
    `scripts/build.sh` and `scripts/test_godot.sh` call it; `scripts/build_godot.sh`
    does NOT, so a build-only path leaves both addons missing.
 4. GDExtension built: fresh worktrees have no DLL in `godot/bin/` →

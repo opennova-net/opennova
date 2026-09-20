@@ -28,7 +28,7 @@ struct EntityHandle;
 //
 // What it does NOT do: the world-stream / spawn-gate burst. The original emits that ONE-SHOT on
 // player-add [orig: Server_OnPlayerJoin @0x51a680 → Server_SendInitialGameStateToPlayer @0x51bba0];
-// the npruntime equivalent is `Server_SendInitialGameStateToPlayer` over `conn.burst`. The retired
+// the inmatch equivalent is `Server_SendInitialGameStateToPlayer` over `conn.burst`. The retired
 // game_session.cpp grew an empirical per-tick phase machine (queue_mission_bootstrap /
 // queue_state4_loading_gate / the 0x10/0x0A/0x57 tick cadence) with no original-engine counterpart;
 // that machine is dropped (net-re §5.45 / D-NET-127). Reply BODIES are carried verbatim from the old

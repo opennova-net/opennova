@@ -68,7 +68,6 @@ void EntityRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_health"), &EntityRow::get_health);
 	ClassDB::bind_method(D_METHOD("get_team"), &EntityRow::get_team);
 	ClassDB::bind_method(D_METHOD("is_alive"), &EntityRow::is_alive);
-	ClassDB::bind_method(D_METHOD("is_hidden"), &EntityRow::is_hidden);
 	ClassDB::bind_method(D_METHOD("get_mission_position"), &EntityRow::get_mission_position);
 	ClassDB::bind_method(D_METHOD("get_world_position"), &EntityRow::get_world_position);
 	ClassDB::bind_method(D_METHOD("to_json_value"), &EntityRow::to_json_value);

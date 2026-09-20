@@ -88,7 +88,6 @@ void MissionRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_index"), &MissionRoot::get_entity_index);
 	ClassDB::bind_method(D_METHOD("get_placer"), &MissionRoot::get_placer);
 	ClassDB::bind_method(D_METHOD("get_item_db"), &MissionRoot::get_item_db);
-	ClassDB::bind_method(D_METHOD("get_mission_data"), &MissionRoot::get_mission_data);
 	ClassDB::bind_method(D_METHOD("get_entity_presenter"),
 			&MissionRoot::get_entity_presenter);
 	ClassDB::bind_method(D_METHOD("rebind_placed_entities", "placer"),
@@ -269,7 +268,9 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		// Retail builds the active game-type score table, then overlays the loose
 		// VERSION 40 score.ini before answering C2S 0x2D with S2C 0x58. This
 		// caller is explicitly loose-first even in a packed runtime: retail opens
-		// score.ini from the game directory rather than resolving it from a PFF.
+		// score.ini from the game directory rather than resolving it from a PFF
+		// [orig: the load is gated on File_IsSingleFile("score.ini") @0x436ED0, a
+		// FindFirstFileA check on disk].
 		if (options->get_resource_root().is_valid()) {
 			const PackedByteArray score_ini_bytes = options->get_resource_root()->read_file(
 					"score.ini", ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);

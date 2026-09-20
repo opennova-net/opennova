@@ -261,14 +261,6 @@ float ItemDatabase::get_light_transfer(int id) const {
 	return row == nullptr ? 0.0f : row->light_transfer;
 }
 
-// items.def ItemDefAttrib & 0x100000 (AIData). Mirrors the stock 0x0D decoder's own gate
-// (itemDef.attrib & 0x100000 @0x433327) so the host emits the AI-trailer iff the item is
-// AI-capable. [docs/world/itemdef-re.md; docs/net/novaworld-net-re.md D-NET-97]
-bool ItemDatabase::is_ai_capable(int id) const {
-	const opennova::def::DefItemDef *row = row_(id);
-	return row != nullptr && (static_cast<uint32_t>(row->attrib) & 0x100000u) != 0;
-}
-
 // The raw items.def ItemDefAttrib dword (itemDef+0x54); 0 for unknown ids. The AS zone
 // traits read bits 0x20000 "ChangeTeam" (capture trigger) and 0x40000 "SpawnPoint"
 // (deploy-selectable). [docs/world/itemdef-re.md; net-re §5.61]
@@ -348,8 +340,7 @@ TypedArray<ItemEmplacementAttachment> ItemDatabase::get_emplacement_attachments(
 		record.instantiate();
 		record->assign(attachment.kind, String(attachment.userpoint), attachment.item_id,
 				stored_slot, attachment.angle_count, attachment.down_angle,
-				attachment.up_angle, attachment.right_angle, attachment.left_angle,
-				stored_slot == row->emplacement_g_slot,
+				attachment.up_angle, stored_slot == row->emplacement_g_slot,
 				stored_slot == row->emplacement_c_slot);
 		out.push_back(record);
 	}

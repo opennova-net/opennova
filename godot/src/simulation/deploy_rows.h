@@ -39,9 +39,6 @@ public:
 	// The queued wave members: the roster name and the local-player marker
 	// the builder renders as "<b><cFF4040>** name **".
 	int get_occupant_count() const { return static_cast<int>(value_.occupants.size()); }
-	int get_occupant_handle(int p_index) const;
-	String get_occupant_name(int p_index) const;
-	bool is_occupant_self(int p_index) const;
 };
 
 // One compiled SPAWNPOINTS_LIST row: the tagged text and the pick value

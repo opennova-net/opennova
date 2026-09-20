@@ -204,8 +204,6 @@ public:
 
 	void set_lod_quality(float p_quality);
 	float get_lod_quality() const;
-	void set_polygon_detail(int p_detail);
-	int get_polygon_detail() const;
 
 	void set_tile_overlay_enabled(bool p_enabled);
 	bool get_tile_overlay_enabled() const;

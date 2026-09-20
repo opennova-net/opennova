@@ -24,10 +24,7 @@ String trail_group_key(const opennova::world::VehicleTrailVisualRow &row) {
 
 } // namespace
 
-void VehicleTrailPresenter::_bind_methods() {
-	ClassDB::bind_method(
-			D_METHOD("resolve_trail_anchor", "key"), &VehicleTrailPresenter::resolve_trail_anchor);
-}
+void VehicleTrailPresenter::_bind_methods() {}
 
 void VehicleTrailPresenter::setup(
 		Simulation *p_sim, EffectWorld *p_fx, const Ref<ItemEffectDirector> &p_anchors) {

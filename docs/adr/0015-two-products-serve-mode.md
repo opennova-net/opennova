@@ -3,6 +3,9 @@
 > **Updated by [ADR 0037](0037-oned-runs-game-data.md).** The two-Godot-product
 > decision and serve-mode rule remain. ONED now runs game data and no longer
 > produces or edits it.
+>
+> **Updated by [ADR 0045](0045-cli-game-data-runtime-only.md).** ONED is removed, so one
+> Godot product remains (the runtime game); the serve-mode rule stands.
 
 OpenNova's shared Godot project exports exactly two applications per platform:
 

@@ -1,12 +1,10 @@
 #include "simulation/hud_view_records.h"
 
 #include "util/record_bind.h"
+#include "util/string_convert.h"
 
 using namespace godot;
-
-namespace {
-String gd(const std::string &s) { return String::utf8(s.c_str()); }
-} // namespace
+using opennova::to_gd;
 
 // --- WaypointHudView --------------------------------------------------------
 
@@ -61,8 +59,8 @@ void ScoreFeedback::_bind_methods() {
 
 // --- ScoreboardHeader -------------------------------------------------------
 
-String ScoreboardHeader::get_server() const { return gd(value_.server_name); }
-String ScoreboardHeader::get_mission() const { return gd(value_.mission_name); }
+String ScoreboardHeader::get_server() const { return to_gd(value_.server_name); }
+String ScoreboardHeader::get_mission() const { return to_gd(value_.mission_name); }
 
 void ScoreboardHeader::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(ScoreboardHeader, Variant::BOOL, known)
@@ -80,7 +78,7 @@ void ScoreboardHeader::_bind_methods() {
 
 PackedStringArray EndRoundOverlay::get_texts() const {
 	PackedStringArray out;
-	for (const opennova::hud::EndRoundResolvedLine &l : value_.lines) out.push_back(gd(l.text));
+	for (const opennova::hud::EndRoundResolvedLine &l : value_.lines) out.push_back(to_gd(l.text));
 	return out;
 }
 
@@ -108,7 +106,7 @@ PackedStringArray EndRoundStatistics::get_label_keys() const {
 
 PackedStringArray EndRoundStatistics::get_values() const {
 	PackedStringArray out;
-	for (const opennova::hud::EndRoundStatisticsRow &row : value_.rows) out.push_back(gd(row.value));
+	for (const opennova::hud::EndRoundStatisticsRow &row : value_.rows) out.push_back(to_gd(row.value));
 	return out;
 }
 
@@ -157,10 +155,10 @@ void RoundOutcome::_bind_methods() {
 
 // --- EndRoundColumn ---------------------------------------------------------
 
-String EndRoundColumn::get_header() const { return gd(value_.header); }
-String EndRoundColumn::get_header_key() const { return gd(value_.header_key); }
-String EndRoundColumn::get_header_fallback() const { return gd(value_.header_fallback); }
-String EndRoundColumn::get_literal() const { return gd(value_.literal); }
+String EndRoundColumn::get_header() const { return to_gd(value_.header); }
+String EndRoundColumn::get_header_key() const { return to_gd(value_.header_key); }
+String EndRoundColumn::get_header_fallback() const { return to_gd(value_.header_fallback); }
+String EndRoundColumn::get_literal() const { return to_gd(value_.literal); }
 
 void EndRoundColumn::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(EndRoundColumn, Variant::STRING, header)
@@ -173,11 +171,11 @@ void EndRoundColumn::_bind_methods() {
 
 // --- EndRoundRow ------------------------------------------------------------
 
-String EndRoundRow::get_name() const { return gd(value_.name); }
-String EndRoundRow::get_squad() const { return gd(value_.squad); }
+String EndRoundRow::get_name() const { return to_gd(value_.name); }
+String EndRoundRow::get_squad() const { return to_gd(value_.squad); }
 PackedStringArray EndRoundRow::get_cells() const {
 	PackedStringArray out;
-	for (const std::string &c : value_.cells) out.push_back(gd(c));
+	for (const std::string &c : value_.cells) out.push_back(to_gd(c));
 	return out;
 }
 

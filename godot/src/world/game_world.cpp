@@ -368,7 +368,7 @@ void GameWorld::on_frame_stats_capture_changed(bool p_active) {
 
 void GameWorld::set_perf_probe_enabled(bool p_enabled) {
 	perf_probe_enabled_ = p_enabled;
-	// The frame shares the probe's timing gate (see OcclusionFrame.probe_timing).
+	// The frame shares the probe's timing gate (see OcclusionFrame::set_probe_timing).
 	occlusion_->set_probe_timing(p_enabled);
 	if (!p_enabled) {
 		perf_probe_skip_occl_ = false;
@@ -415,14 +415,6 @@ Ref<ScarPresentStats> GameWorld::get_scar_present_stats() const {
 }
 
 // --- local-player visuals ---------------------------------------------------
-
-ObjectModel *GameWorld::build_local_player_held_weapon(const String &p_graphic) {
-	return player_visuals_->build_local_player_held_weapon(p_graphic);
-}
-
-ObjectModel *GameWorld::build_local_player_avatar() {
-	return player_visuals_->build_local_player_avatar();
-}
 
 int GameWorld::local_player_character_id() const {
 	return player_visuals_->local_player_character_id();
@@ -544,14 +536,6 @@ Error GameWorld::debug_set_mission_minute_of_day(double p_minute_of_day) {
 	return OK;
 }
 
-void GameWorld::register_effect_anchor(const Variant &p_owner_key, const Callable &p_resolver) {
-	item_fx_->register_effect_anchor(p_owner_key, p_resolver);
-}
-
-void GameWorld::unregister_effect_anchor(const Variant &p_owner_key) {
-	item_fx_->unregister_effect_anchor(p_owner_key);
-}
-
 MissionAudio *GameWorld::get_mission_audio() const {
 	return Object::cast_to<MissionAudio>(ObjectDB::get_instance(mission_audio_id_));
 }
@@ -625,11 +609,8 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mission_file"), &GameWorld::get_mission_file);
 	ClassDB::bind_method(D_METHOD("set_terrain_file", "value"), &GameWorld::set_terrain_file);
 	ClassDB::bind_method(D_METHOD("get_terrain_file"), &GameWorld::get_terrain_file);
-	ClassDB::bind_method(D_METHOD("set_env_file", "value"), &GameWorld::set_env_file);
-	ClassDB::bind_method(D_METHOD("get_env_file"), &GameWorld::get_env_file);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "mission_file"), "set_mission_file", "get_mission_file");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "terrain_file"), "set_terrain_file", "get_terrain_file");
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "env_file"), "set_env_file", "get_env_file");
 
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &GameWorld::set_resource_root);
 	ClassDB::bind_method(D_METHOD("set_resource_root_resolver", "resolver"),
@@ -717,36 +698,12 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_fire_present_stats"), &GameWorld::get_fire_present_stats);
 	ClassDB::bind_method(D_METHOD("get_scar_present_stats"), &GameWorld::get_scar_present_stats);
 
-	ClassDB::bind_method(D_METHOD("present_local_view_frame"), &GameWorld::present_local_view_frame);
-	ClassDB::bind_method(D_METHOD("apply_scene_environment_frame"),
-			&GameWorld::apply_scene_environment_frame);
 	ClassDB::bind_method(D_METHOD("render_environment_nodes_frame"),
 			&GameWorld::render_environment_nodes_frame);
-	ClassDB::bind_method(D_METHOD("render_terrain_frame"), &GameWorld::render_terrain_frame);
-	ClassDB::bind_method(D_METHOD("render_water_frame"), &GameWorld::render_water_frame);
-	ClassDB::bind_method(D_METHOD("render_foliage_frame"), &GameWorld::render_foliage_frame);
-	ClassDB::bind_method(D_METHOD("drive_network_frame"), &GameWorld::drive_network_frame);
-	ClassDB::bind_method(D_METHOD("apply_blink_frame"), &GameWorld::apply_blink_frame);
-	ClassDB::bind_method(D_METHOD("apply_occlusion_frame"), &GameWorld::apply_occlusion_frame);
-	ClassDB::bind_method(D_METHOD("sample_iris_frame"), &GameWorld::sample_iris_frame);
-	ClassDB::bind_method(D_METHOD("render_sun_veil_frame"), &GameWorld::render_sun_veil_frame);
 	ClassDB::bind_method(D_METHOD("render_light_frame"), &GameWorld::render_light_frame);
-	ClassDB::bind_method(D_METHOD("render_material_frame"), &GameWorld::render_material_frame);
-	ClassDB::bind_method(D_METHOD("sync_framefx_frame"), &GameWorld::sync_framefx_frame);
-	ClassDB::bind_method(D_METHOD("render_slot_shadow_frame"), &GameWorld::render_slot_shadow_frame);
 	ClassDB::bind_method(D_METHOD("render_particle_frame"), &GameWorld::render_particle_frame);
-	ClassDB::bind_method(D_METHOD("render_precipitation_frame"),
-			&GameWorld::render_precipitation_frame);
-	ClassDB::bind_method(D_METHOD("mix_audio_frame", "ticks_run"), &GameWorld::mix_audio_frame);
-	ClassDB::bind_method(D_METHOD("update_clear_frame"), &GameWorld::update_clear_frame);
-	ClassDB::bind_method(D_METHOD("render_environment_cube_frame"),
-			&GameWorld::render_environment_cube_frame);
-	ClassDB::bind_method(D_METHOD("finish_device_frame"), &GameWorld::finish_device_frame);
 
 	ClassDB::bind_method(D_METHOD("local_player_visuals"), &GameWorld::local_player_visuals);
-	ClassDB::bind_method(D_METHOD("build_local_player_held_weapon", "graphic"),
-			&GameWorld::build_local_player_held_weapon);
-	ClassDB::bind_method(D_METHOD("build_local_player_avatar"), &GameWorld::build_local_player_avatar);
 	ClassDB::bind_method(D_METHOD("local_player_character_id"), &GameWorld::local_player_character_id);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon_by_name", "weapon_name", "preserve_slot_state"),
 			&GameWorld::set_local_player_weapon_by_name, DEFVAL(false));
@@ -792,20 +749,8 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drives_environment_presenters"),
 			&GameWorld::drives_environment_presenters);
 	ClassDB::bind_method(D_METHOD("get_clear_color_node"), &GameWorld::get_clear_color_node);
-	ClassDB::bind_method(D_METHOD("register_effect_anchor", "owner_key", "resolver"),
-			&GameWorld::register_effect_anchor);
-	ClassDB::bind_method(D_METHOD("unregister_effect_anchor", "owner_key"),
-			&GameWorld::unregister_effect_anchor);
 	ClassDB::bind_method(D_METHOD("get_mission_audio"), &GameWorld::get_mission_audio);
 
-	ClassDB::bind_method(D_METHOD("on_runtime_effects", "effects"), &GameWorld::on_runtime_effects);
-	ClassDB::bind_method(D_METHOD("on_runtime_fixed_tick", "logic_tick"), &GameWorld::on_runtime_fixed_tick);
-	ClassDB::bind_method(D_METHOD("on_runtime_simulation_restarted"),
-			&GameWorld::on_runtime_simulation_restarted);
 	ClassDB::bind_method(D_METHOD("on_wire_node_spawned", "node", "kind", "item_id"),
 			&GameWorld::on_wire_node_spawned);
-	ClassDB::bind_method(D_METHOD("on_frame_stats_capture_changed", "active"),
-			&GameWorld::on_frame_stats_capture_changed);
-	ClassDB::bind_method(D_METHOD("on_nw_host_registered"), &GameWorld::on_nw_host_registered);
-	ClassDB::bind_method(D_METHOD("on_nw_host_error", "message"), &GameWorld::on_nw_host_error);
 }

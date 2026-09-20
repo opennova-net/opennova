@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <base/io/fixed.h>
 #include <formats/env/env.h> // Vec3
 
 // Celestial-side render state math: sun glare, the celestial body alphas,
@@ -137,7 +138,7 @@ inline float star_billboard_world_size(const StarInstance &star) {
 // @ 0x611210] — the one home for the fixed->render conversion, so shells
 // never restate the axis order or the 16.16 scale.
 inline void star_offset_render_float3(const StarInstance &star, float out[3]) {
-	constexpr float kInvFixed = 1.0f / 65536.0f;
+	constexpr float kInvFixed = io::kInvFp16One;
 	out[0] = -static_cast<float>(star.offset_fp[1]) * kInvFixed;
 	out[1] = static_cast<float>(star.offset_fp[2]) * kInvFixed;
 	out[2] = static_cast<float>(star.offset_fp[0]) * kInvFixed;

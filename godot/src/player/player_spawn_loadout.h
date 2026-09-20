@@ -64,11 +64,8 @@ public:
 		player_class_ = p_class;
 		has_player_class_ = true;
 	}
-	bool has_player_class() const { return has_player_class_; }
 
 	// The two character selections (SIDE_BLUE / SIDE_RED).
-	bool side_present(int p_side) const;
-	void set_side_present(int p_side, bool p_present);
 #define PLAYER_SPAWN_SIDE_ACCESSORS(m_name, m_default)     \
 	int side_##m_name(int p_side) const;                    \
 	void set_side_##m_name(int p_side, int p_value);

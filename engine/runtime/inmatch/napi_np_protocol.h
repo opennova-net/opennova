@@ -12,7 +12,7 @@
 #include <vector>
 
 // P2 — Per-connection handshake. The proven server legs of novaworld::HostSessionAccept, promoted
-// onto npruntime free functions over NapiNPServerCtx / NapiNPProtocol.connection_list (the legs
+// onto inmatch free functions over NapiNPServerCtx / NapiNPProtocol.connection_list (the legs
 // the original walks as NapiNPProtocol methods over its NapiListHead of NapiNPConnection nodes).
 // Socket-free and Godot-agnostic: the owner (apps/nw_server or the Godot binding) does socket I/O
 // and pumps raw datagrams through here.

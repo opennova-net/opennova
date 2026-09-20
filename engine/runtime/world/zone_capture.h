@@ -7,7 +7,7 @@
 // proximity -> secure pass (0x6F + 0x1E 0x3B/0x3C) -> team enforcement -> the
 // timed-capture engine's queue drain (instant numbered flips + GameEvent_FlagCapture).
 //
-// The world side PRODUCES events; the host (npruntime Server_TickUpdate) encodes them
+// The world side PRODUCES events; the host (inmatch Server_TickUpdate) encodes them
 // onto the wire (0x6F / 0x50 / 0x53 / 0x6C / 0x1E). [orig: Server_UpdateCaptureZoneProximity
 // @0x5086A0; Server_UpdateCaptureZoneEntities @0x519690;
 // calculate_capture_zone_control_delta @0x501120; Server_UpdateCaptureZones @0x53B8F0;

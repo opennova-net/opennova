@@ -77,14 +77,10 @@ public:
 
 	void put_join(const std::string &tag, JoinSession session);
 	std::optional<JoinSession> get_join(const std::string &tag) const;
-	void erase_join(const std::string &tag);
 
 	void put_host(const std::string &tag, HostSession session);
 	std::optional<HostSession> get_host(const std::string &tag) const;
-	void erase_host(const std::string &tag);
 
-	std::size_t login_count() const;
-	std::size_t join_count() const;
 	std::size_t host_count() const;
 
 	// Drop entries older than `max_age_ms`. Phase I.8 — keeps the maps

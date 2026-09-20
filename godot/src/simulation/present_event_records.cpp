@@ -3,6 +3,7 @@
 #include "util/axes.h"
 #include "util/color_convert.h"
 #include "util/record_bind.h"
+#include "util/string_convert.h"
 
 #include <runtime/hud/feed_format.h> // chat_channel_color / chat_channel_sink
 #include <runtime/world/destruction.h> // death_piece_trail_effect
@@ -12,6 +13,7 @@
 #include <cstring>
 
 using namespace godot;
+using opennova::to_gd;
 
 namespace {
 
@@ -19,10 +21,6 @@ namespace {
 // mission_to_godot, for the test constructors that author Godot-space rows.
 opennova::world::Vec3 mission_from_godot(const Vector3 &v) {
 	return opennova::world::Vec3{v.x, -v.z, v.y};
-}
-
-String gd(const std::string &s) {
-	return String::utf8(s.c_str());
 }
 
 } // namespace
@@ -50,7 +48,7 @@ Vector3 ThrowableVisualRow::get_pos() const { return mission_to_godot(value_.pos
 Vector3 ThrowableVisualRow::get_rotation_deg() const {
 	return Vector3(value_.pitch_deg, value_.yaw_deg, value_.roll_deg);
 }
-String ThrowableVisualRow::get_move_effect() const { return gd(value_.move_effect); }
+String ThrowableVisualRow::get_move_effect() const { return to_gd(value_.move_effect); }
 
 void ThrowableVisualRow::_bind_methods() {
 	ClassDB::bind_static_method("ThrowableVisualRow",
@@ -91,7 +89,7 @@ Vector3 VehicleTrailVisualRow::get_dir() const {
 	return mission_to_godot(value_.dir);
 }
 String VehicleTrailVisualRow::get_effect() const {
-	return gd(value_.effect);
+	return to_gd(value_.effect);
 }
 float VehicleTrailVisualRow::get_magnitude() const {
 	return float(value_.magnitude_q16) / 65536.0f;
@@ -138,9 +136,9 @@ Ref<FirePresentationEvent> FirePresentationEvent::make(const Vector3 &p_origin, 
 
 Vector3 FirePresentationEvent::get_origin() const { return mission_to_godot(value_.origin); }
 Vector3 FirePresentationEvent::get_forward() const { return mission_to_godot(value_.forward); }
-String FirePresentationEvent::get_effect() const { return gd(value_.effect); }
-String FirePresentationEvent::get_action_effect() const { return gd(value_.action_effect); }
-String FirePresentationEvent::get_action_userpoint() const { return gd(value_.action_userpoint); }
+String FirePresentationEvent::get_effect() const { return to_gd(value_.effect); }
+String FirePresentationEvent::get_action_effect() const { return to_gd(value_.action_effect); }
+String FirePresentationEvent::get_action_userpoint() const { return to_gd(value_.action_userpoint); }
 
 void FirePresentationEvent::_bind_methods() {
 	ClassDB::bind_static_method("FirePresentationEvent",
@@ -178,7 +176,7 @@ Ref<FireSoundRow> FireSoundRow::make(const String &p_soundset, const Vector3 &p_
 	return out;
 }
 
-String FireSoundRow::get_soundset() const { return gd(value_.set_name); }
+String FireSoundRow::get_soundset() const { return to_gd(value_.set_name); }
 Vector3 FireSoundRow::get_pos() const { return mission_to_godot(value_.pos); }
 
 void FireSoundRow::_bind_methods() {
@@ -250,7 +248,7 @@ Ref<SoundEmitterRow> SoundEmitterRow::make(int64_t p_source_spawn_id, int p_hand
 }
 
 Vector3 SoundEmitterRow::get_pos() const { return mission_to_godot(value_.pos); }
-String SoundEmitterRow::get_soundset() const { return gd(value_.set_name); }
+String SoundEmitterRow::get_soundset() const { return to_gd(value_.set_name); }
 
 void SoundEmitterRow::_bind_methods() {
 	ClassDB::bind_static_method("SoundEmitterRow",
@@ -276,8 +274,8 @@ void SoundEmitterRow::_bind_methods() {
 
 Vector3 RoundImpactRow::get_position() const { return mission_to_godot(value_.position); }
 Vector3 RoundImpactRow::get_direction() const { return mission_to_godot(value_.direction); }
-String RoundImpactRow::get_effect() const { return gd(value_.effect); }
-String RoundImpactRow::get_sound() const { return gd(value_.sound); }
+String RoundImpactRow::get_effect() const { return to_gd(value_.effect); }
+String RoundImpactRow::get_sound() const { return to_gd(value_.sound); }
 Color RoundImpactRow::get_light_color() const {
 	return opennova::color_from_rgb24(value_.light_color_rgb24);
 }
@@ -298,7 +296,7 @@ void RoundImpactRow::_bind_methods() {
 
 // --- ChatLineRow ------------------------------------------------------------
 
-String ChatLineRow::get_text() const { return gd(value_.text); }
+String ChatLineRow::get_text() const { return to_gd(value_.text); }
 int64_t ChatLineRow::get_argb() const {
 	return static_cast<int64_t>(opennova::hud::chat_channel_color(value_.channel));
 }
@@ -406,8 +404,8 @@ Ref<MissionEffect> MissionEffect::make(const String &p_kind, int p_a, int p_b, i
 	return out;
 }
 
-String MissionEffect::get_kind() const { return gd(value_.kind); }
-String MissionEffect::get_text() const { return gd(value_.str); }
+String MissionEffect::get_kind() const { return to_gd(value_.kind); }
+String MissionEffect::get_text() const { return to_gd(value_.str); }
 
 void MissionEffect::_bind_methods() {
 	ClassDB::bind_static_method("MissionEffect",

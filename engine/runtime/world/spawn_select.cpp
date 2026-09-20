@@ -11,6 +11,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h> // Entity
 #include <base/gameprofile/game_type.h>
+#include <base/io/fixed.h>
 #include <runtime/world/world.h>  // World, EntityRegistry registry
 #include <runtime/world/zone_chain.h>
 
@@ -47,7 +48,7 @@ SpawnPointResult marker_pose(const World &world, const Entity &marker) {
         to_fixed(marker.position.z)};
     int32_t transformed[3] = {};
     parent_pose.transform_point(local, transformed);
-    constexpr float kFromFixed = 1.0f / 65536.0f;
+    constexpr float kFromFixed = io::kInvFp16One;
     out.position = {transformed[0] * kFromFixed,
                     transformed[1] * kFromFixed,
                     transformed[2] * kFromFixed};

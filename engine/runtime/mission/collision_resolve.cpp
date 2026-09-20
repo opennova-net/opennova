@@ -10,9 +10,7 @@
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
 
 #include <algorithm>
-#include <climits>
 #include <cmath>
-#include <cstring>
 
 using namespace opennova::def;
 using namespace opennova::threedi;

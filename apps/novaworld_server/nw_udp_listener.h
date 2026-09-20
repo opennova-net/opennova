@@ -91,7 +91,7 @@ struct ServerConfig;
 //
 // PN dispatch happens at HELLO time. "NOVAWORLDUDP" peers use the lobby
 // container path; "JointOperations"/"JOINTOPERATIONS" peers use the shared
-// authoritative npruntime host lifecycle on the same retail UDP session port.
+// authoritative inmatch host lifecycle on the same retail UDP session port.
 class NwUdpListener {
 public:
 	explicit NwUdpListener(ConnectionManager &manager);

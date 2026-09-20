@@ -776,7 +776,7 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 			[HuskSwapEvent.make(0, BUGGY_ITEM_ID, spawn_origin)],
 			[DestructionEffectEvent.make(
 					'Effect_VehExplode', Vector3(100, 100, 100),
-					2, Vector3.ZERO, 91, 0, WireHandle.INVALID, spawn_origin)])
+					2, Vector3.ZERO, 91, 0, NetProtocol.WIRE_HANDLE_INVALID, spawn_origin)])
 	var presenter := _make_presenter(sim, container, _index_of([]), placer, _item_db, anchors, fx)
 
 	presenter.present_destruction_drained(events, [])

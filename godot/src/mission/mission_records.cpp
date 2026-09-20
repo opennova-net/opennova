@@ -1,14 +1,12 @@
 #include "mission/mission_records.h"
 
 #include "util/record_bind.h"
+#include "util/string_convert.h"
 
 #include <formats/mission/bms_edit.h> // entity_item_id / entity_transform / entity_name1 / entity_name2
 
 using namespace godot;
-
-namespace {
-String gd(const std::string &s) { return String::utf8(s.c_str()); }
-} // namespace
+using opennova::to_gd;
 
 // --- MissionEntityRecord ----------------------------------------------------
 
@@ -140,10 +138,10 @@ Ref<MissionWeaponLoadoutEntry> MissionWeaponLoadoutEntry::make(const String &p_n
 	return out;
 }
 
-String MissionWeaponLoadoutEntry::get_name() const { return gd(value_.name); }
-String MissionWeaponLoadoutEntry::get_ammo_primary() const { return gd(value_.ammo_primary); }
-String MissionWeaponLoadoutEntry::get_ammo_secondary() const { return gd(value_.ammo_secondary); }
-String MissionWeaponLoadoutEntry::get_flags() const { return gd(value_.flags); }
+String MissionWeaponLoadoutEntry::get_name() const { return to_gd(value_.name); }
+String MissionWeaponLoadoutEntry::get_ammo_primary() const { return to_gd(value_.ammo_primary); }
+String MissionWeaponLoadoutEntry::get_ammo_secondary() const { return to_gd(value_.ammo_secondary); }
+String MissionWeaponLoadoutEntry::get_flags() const { return to_gd(value_.flags); }
 
 void MissionWeaponLoadoutEntry::_bind_methods() {
 	ClassDB::bind_static_method("MissionWeaponLoadoutEntry",
@@ -202,9 +200,9 @@ Ref<MissionEventTrigger> MissionEventTrigger::make(int p_main_type, int p_sub_ty
 	return out;
 }
 
-String MissionEventTrigger::get_main_type_name() const { return gd(value_.main_type_name); }
-String MissionEventTrigger::get_sub_type_name() const { return gd(value_.sub_type_name); }
-String MissionEventTrigger::get_logic_operator() const { return gd(value_.logic_operator); }
+String MissionEventTrigger::get_main_type_name() const { return to_gd(value_.main_type_name); }
+String MissionEventTrigger::get_sub_type_name() const { return to_gd(value_.sub_type_name); }
+String MissionEventTrigger::get_logic_operator() const { return to_gd(value_.logic_operator); }
 
 void MissionEventTrigger::_bind_methods() {
 	ClassDB::bind_static_method("MissionEventTrigger",
@@ -246,9 +244,9 @@ Ref<MissionEventAction> MissionEventAction::make(int p_action_type, int p_action
 	return out;
 }
 
-String MissionEventAction::get_action_type_name() const { return gd(value_.action_type_name); }
+String MissionEventAction::get_action_type_name() const { return to_gd(value_.action_type_name); }
 String MissionEventAction::get_action_sub_type_name() const {
-	return gd(value_.action_sub_type_name);
+	return to_gd(value_.action_sub_type_name);
 }
 
 void MissionEventAction::_bind_methods() {
@@ -271,9 +269,9 @@ void MissionEventAction::_bind_methods() {
 
 // --- MissionLogicReference / MissionLogicDiagnostic -------------------------
 
-String MissionLogicReference::get_source_kind() const { return gd(value_.source_kind); }
-String MissionLogicReference::get_target_kind() const { return gd(value_.target_kind); }
-String MissionLogicReference::get_label() const { return gd(value_.label); }
+String MissionLogicReference::get_source_kind() const { return to_gd(value_.source_kind); }
+String MissionLogicReference::get_target_kind() const { return to_gd(value_.target_kind); }
+String MissionLogicReference::get_label() const { return to_gd(value_.label); }
 
 void MissionLogicReference::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(MissionLogicReference, Variant::STRING, source_kind)
@@ -286,10 +284,10 @@ void MissionLogicReference::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(MissionLogicReference, Variant::BOOL, valid)
 }
 
-String MissionLogicDiagnostic::get_severity() const { return gd(value_.severity); }
-String MissionLogicDiagnostic::get_code() const { return gd(value_.code); }
-String MissionLogicDiagnostic::get_message() const { return gd(value_.message); }
-String MissionLogicDiagnostic::get_subject_kind() const { return gd(value_.subject_kind); }
+String MissionLogicDiagnostic::get_severity() const { return to_gd(value_.severity); }
+String MissionLogicDiagnostic::get_code() const { return to_gd(value_.code); }
+String MissionLogicDiagnostic::get_message() const { return to_gd(value_.message); }
+String MissionLogicDiagnostic::get_subject_kind() const { return to_gd(value_.subject_kind); }
 
 void MissionLogicDiagnostic::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(MissionLogicDiagnostic, Variant::STRING, severity)

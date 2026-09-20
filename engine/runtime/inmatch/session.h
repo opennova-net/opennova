@@ -176,7 +176,6 @@ public:
 	virtual ~Role() = default;
 	virtual RoleKind kind() const = 0;
 	virtual void bind(mission::MissionKernel &kernel) { kernel_ = &kernel; }
-	void unbind() { kernel_ = nullptr; }
 	mission::MissionKernel *kernel() const { return kernel_; }
 	// A spectating joiner drives no body: movement, look and fire are dropped.
 	virtual bool spectator() const { return false; }

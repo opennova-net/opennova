@@ -225,50 +225,6 @@ struct WacNamedValues {
     int32_t random_result = 0; // RND @0xC6B23C, written by random and named-variable stores
 };
 
-// End-of-round outcome state. `ended` is the double-run latch every round-end
-// consumer keys on; `winner_team` is the winning-team value the WAC outcome
-// builtins and the presentation layer derive from (0 = none/green, 1 = blue,
-// 2 = red, 3/4 = the extra MP teams). It stays 0 until the round ends, exactly
-// like the original's scoreboard winner dword (memset 0 at mission start).
-// [orig: g_spawn_success_gate @0x24c1928 (latched by Server_ProcessRoundEnd
-// @0x5168e4, cleared by Game_StartMission @0x524a1f), g_round_winning_team
-// @0x24c1924, the scoreboard winner @0x24c1970 (= S2C 0x1D payload byte 0).]
-// The scoring awards for the session's game type, resolved from score.ini's row
-// for that type. Retail keeps the whole 452-byte row and indexes it as
-// `scoringTable[74 + slot]`; we carry only the awards the ported legs read, each
-// looked up BY NAME through engine/formats/score (the row-image layout is not
-// witnessed — see that lib's header). Slot numbers below are from the shipped
-// name table [orig: off_830348 @ 0x830348, read out of Jointops.exe: 38
-// {name, slot} pairs, slots 0..37].
-struct ScoreRules {
-    bool valid = false;      // false until the host resolves a row; every award is then 0
-    int32_t enemy_kill = 0;  // VAR "ENEMYKILL"    slot 3 -> scoringTable[77]
-    int32_t friendly_kill = 0; // VAR "FRIENDLYKILL" slot 2 -> scoringTable[76]
-    int32_t suicide = 0;     // VAR "SUICIDE"     slot 4 -> scoringTable[78]
-    int32_t death = 0;       // VAR "DEATH"       slot 5 -> scoringTable[79]
-};
-
-struct RoundEndState {
-    bool ended = false;
-    int32_t winner_team = 0;
-    // The two team totals the S2C 0x1D scoreboard header carries, and the draw
-    // flag derived from them. For every WAYPOINT-FAMILY game type (stock and
-    // objective Co-op — the `(fieldId & 0xFFFDFFFF) == 0x10020` arm, which is
-    // exactly game_type::is_waypoint_family) retail reads dword field 29 of the
-    // two per-team stats objects `dword_C87CA8` / `dword_C87DFC`
-    // [orig: Server_BuildEndOfRoundScoreboard @0x508f30 -> ScoreRules_GetPrimaryScoreField (ex sub_52C850) @0x52c850];
-    // the draw flag is the plain equality, taken on the team arm because
-    // Co-op's g_GameType 0x30020 has bit 0x10000 set
-    // [orig: @0x508f30 draw leg, kong 213715-213730].
-    //
-    // UNPORTED SOURCE (ledger D2): retail's per-slot/per-team SCORE accounting
-    // (GameEvent_ProcessScoring @0x52f550) is not ported, so nothing writes
-    // these yet and the header ships them as 0. That is a DECLARED unported
-    // field, not a witnessed value — D2 lands the accounting and fills them.
-    int32_t team_scores[2] = {0, 0};
-    bool draw = false;
-};
-
 // The epilog/debrief exit timeout: both end screens (WIN score epilog and the
 // LOSE debrief) force g_mission_exit_reason = 1 after 18600 ticks (~297.6 s at
 // the 62.5 Hz tick) when the player never presses ESC.
@@ -499,10 +455,6 @@ struct MissionTables {
     // Simulation::load_ammo_table, beside the weapon table). [orig: g_ammoDefTable
     // @0xA2ECE8, AmmoDef_LoadAll @0x40b0b0; §5.60]
     AmmoTable ammo;
-    // Scoring awards for this session's game type (score.ini row). Populated by the
-    // host from the parsed config; zero/!valid until then, which makes every award
-    // a no-op rather than a guess.
-    ScoreRules score_rules;
     // items.def display names per item type (the def row's `name`), filled by
     // the item-traits sweep once per distinct id so the inspection records can
     // name an entity by its item, not only by its BMS label. Tooling only.
@@ -661,7 +613,7 @@ struct WorldOutbox {
     std::vector<EntityNetworkEvent> entity_events;
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
-    // netsim emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
+    // replication emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
     RoundRing rounds;
 	std::vector<RoundSpawnParams> source_fires; // local source fire awaiting C2S emission
 	// Water-surface crossings recorded this tick; the host fan drains them

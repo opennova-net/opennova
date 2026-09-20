@@ -1,7 +1,5 @@
 extends RefCounted
 
-const MenuScrollRange := preload("res://game/menu_scroll_range.gd")
-
 # Replays MenuDriver's document-id state onto the current MenuFrame index map.
 # Keeping the frame-setter knowledge here makes screen recompilation a single
 # operation for the driver and keeps every saved-state default in one place.
@@ -34,5 +32,3 @@ static func apply(frame: MenuFrame, index_of_id: Dictionary,
 			frame.set_widget_selected_set(index, state.selected_set)
 		if state.has_table_rows:
 			frame.set_widget_table_rows(index, state.table_rows)
-		if state.has_marquee_lines:
-			frame.set_widget_marquee_lines(index, state.marquee_lines)

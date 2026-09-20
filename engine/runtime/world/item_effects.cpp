@@ -1,7 +1,6 @@
 #include <runtime/world/item_effects.h>
 
 #include <cstdio>
-#include <cmath>
 #include <base/io/bam.h>
 #include <runtime/world/world.h>
 #include <runtime/world/collision.h>

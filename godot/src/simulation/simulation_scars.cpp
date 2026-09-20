@@ -42,7 +42,7 @@ bool Simulation::scar_owner_visible(uint16_t p_owner_packed) const {
 	}
 	if (owner->kind == opennova::world::EntityKind::Building) {
 		// No occlusion instance = no verdict: the building draws (the same
-		// all-visible fold get_building_visibility applies).
+		// all-visible fold get_building_visibility_changes applies).
 		if (!kernel_->occlusion.has_instance(handle)) {
 			return true;
 		}

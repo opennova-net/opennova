@@ -170,8 +170,6 @@ void EffectScene::_bind_methods() {
 			&EffectScene::effect_name);
 	ClassDB::bind_method(D_METHOD("spawn", "request"),
 			&EffectScene::spawn);
-	ClassDB::bind_method(D_METHOD("get_active_owner_tokens"),
-			&EffectScene::get_active_owner_tokens);
 	ClassDB::bind_method(D_METHOD("detach", "group_id"),
 			&EffectScene::detach);
 	ClassDB::bind_method(D_METHOD("detach_slot", "slot_token"),
@@ -336,17 +334,6 @@ void EffectScene::apply_owner_poses_in_place(const EffectOwnerPoseBatch &p_batch
 void EffectScene::apply_owner_poses(const EffectOwnerPoseBatch &p_batch) {
 	apply_owner_poses_in_place(p_batch);
 	advance_in_place(0.0);
-}
-
-PackedInt64Array EffectScene::get_active_owner_tokens() const {
-	const std::vector<opennova::particle::EffectOwnerToken> tokens =
-			scene_->active_owner_tokens();
-	PackedInt64Array result;
-	result.resize(static_cast<int64_t>(tokens.size()));
-	for (std::size_t i = 0; i < tokens.size(); ++i) {
-		result[static_cast<int64_t>(i)] = token_to_godot(tokens[i].value);
-	}
-	return result;
 }
 
 void EffectScene::detach(int64_t p_group_id) {

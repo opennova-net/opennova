@@ -19,7 +19,6 @@ void TerrainTileEntry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_z_fixed", "value"), &TerrainTileEntry::set_z_fixed);
 	ClassDB::bind_method(D_METHOD("get_z_fixed"), &TerrainTileEntry::get_z_fixed);
 	ClassDB::bind_method(D_METHOD("set_tile_index", "value"), &TerrainTileEntry::set_tile_index);
-	ClassDB::bind_method(D_METHOD("get_tile_index"), &TerrainTileEntry::get_tile_index);
 	ClassDB::bind_method(D_METHOD("set_flags", "value"), &TerrainTileEntry::set_flags);
 	ClassDB::bind_method(D_METHOD("get_flags"), &TerrainTileEntry::get_flags);
 	ClassDB::bind_method(D_METHOD("set_cell_x", "value"), &TerrainTileEntry::set_cell_x);
@@ -30,7 +29,6 @@ void TerrainTileEntry::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "x_fixed"), "set_x_fixed", "get_x_fixed");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "z_fixed"), "set_z_fixed", "get_z_fixed");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "tile_index"), "set_tile_index", "get_tile_index");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "flags"), "set_flags", "get_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cell_x"), "set_cell_x", "get_cell_x");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cell_z"), "set_cell_z", "get_cell_z");
@@ -54,10 +52,6 @@ int TerrainTileEntry::get_z_fixed() const {
 
 void TerrainTileEntry::set_tile_index(int value) {
 	tile_index = std::clamp(value, 0, 255);
-}
-
-int TerrainTileEntry::get_tile_index() const {
-	return tile_index;
 }
 
 void TerrainTileEntry::set_flags(int value) {

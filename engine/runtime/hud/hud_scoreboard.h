@@ -9,7 +9,7 @@ namespace opennova::hud {
 // THE TAB PLAYER LIST — retail's in-match scoreboard
 // [orig: rows HUD_DrawKillList @0x423A30; the header block @0x423060].
 // This is NOT the post-round STAT screen (`stat.mnu`, @0x5b8600), which is a
-// separate menu-driven surface — npruntime/stat_screen_feed.h feeds it, and
+// separate menu-driven surface — runtime/inmatch/stat_screen_feed.h feeds it, and
 // the end-round overlay that precedes it is hud/end_round_overlay.h.
 //
 // Every constant below is a RAW RETAIL NUMBER in the 1024x768 design space:

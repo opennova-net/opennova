@@ -189,6 +189,7 @@ private:
 	int64_t last_environment_push_ms_ = -1;
 	int64_t last_ai_push_ms_ = -1;
 	int64_t last_rays_push_ms_ = -1;
+	bool rays_recording_ = false;
 	int64_t last_physics_push_ms_ = -1;
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;

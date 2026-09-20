@@ -111,7 +111,6 @@ public:
 #define STATIC_TERRAIN_SHADOW_SOURCE_ACCESSOR(m_name, m_default) STATIC_SOURCE_INT_ACCESSORS(m_name)
 	STATIC_TERRAIN_SHADOW_SOURCE_INT_FIELDS(STATIC_TERRAIN_SHADOW_SOURCE_ACCESSOR)
 #undef STATIC_TERRAIN_SHADOW_SOURCE_ACCESSOR
-	int64_t get_entity_attrib() const { return entity_attrib_; }
 	void set_entity_attrib(int64_t p_value) { entity_attrib_ = p_value; }
 	int64_t get_item_attrib() const { return item_attrib_; }
 	void set_item_attrib(int64_t p_value) { item_attrib_ = p_value; }

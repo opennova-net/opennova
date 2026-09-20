@@ -193,19 +193,7 @@ PffDocument::~PffDocument() {
 // Bindings
 // ---------------------------------------------------------------------------
 
-namespace {
-template <typename T>
-PackedStringArray strings_of(const T &names) {
-	PackedStringArray out;
-	for (const char *name : names) out.push_back(String(name));
-	return out;
-}
-} // namespace
-
-PackedStringArray PffDocument::boot_archive_names() { return strings_of(opennova::kBootArchiveTable); }
-
 void PffDocument::_bind_methods() {
-	ClassDB::bind_static_method("PffDocument", D_METHOD("boot_archive_names"), &PffDocument::boot_archive_names);
 	ClassDB::bind_static_method("PffDocument", D_METHOD("list_games"), &PffDocument::list_games);
 	ClassDB::bind_method(D_METHOD("open", "path"), &PffDocument::open);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &PffDocument::get_source_path);

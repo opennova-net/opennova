@@ -2194,7 +2194,7 @@ bool run_roundtrip() {
 		return false;
 	if (!expect(client.view().game_type() == host_config.game_type,
 	            "joiner learned authoritative g_GameType before live 0x0A frames")) return false;
-	if (!expect(client.deployed(), "client is deployed after owner-ID match plus the applicable 0x5A release")) return false;
+	if (!expect(client.is_deployed(), "client is deployed after owner-ID match plus the applicable 0x5A release")) return false;
 
 	// --- 4) In-match per-frame loop: client 0x0C -> apply_in_match_c2s -> Server_TickUpdate -> 0x0A fold ---
 	PlayerExtendedUplink up;
@@ -2299,7 +2299,7 @@ bool run_roundtrip() {
 	            "partial frame remains available to the lenient view fold")) return false;
 	if (!expect(client.state().local_health == health_before_short_frame,
 	            "a frame without a decoded recipient tail preserves local health")) return false;
-	if (!expect(client.deployed(),
+	if (!expect(client.is_deployed(),
 	            "a frame without a decoded recipient tail cannot close the deploy gate")) return false;
 
 	// The 0x0A tail is recipient-specific: once the authoritative owned entity reaches zero health,
@@ -2336,7 +2336,7 @@ bool run_roundtrip() {
 	            "client folded the fresh authoritative death frame")) return false;
 	if (!expect(client.state().local_health == 0,
 	            "client stores zero from its recipient-specific 0x0A health tail")) return false;
-	if (!expect(!client.deployed(), "authoritative death closes the deployed uplink gate")) return false;
+	if (!expect(!client.is_deployed(), "authoritative death closes the deployed uplink gate")) return false;
 	if (!expect(client.deployment_pick_pending(),
 	            "authoritative death re-enters the deployment FSM so the player can respawn"))
 		return false;
@@ -4201,7 +4201,7 @@ bool run_split_batch_keeps_deployment_pick_ack_causal() {
 		return false;
 	const std::vector<std::vector<uint8_t>> outbound =
 			client.Client_ProcessNetworkFrame(1);
-	if (!expect(outbound.size() >= 2 && !client.deployed(),
+	if (!expect(outbound.size() >= 2 && !client.is_deployed(),
 			"challenge replies force a split while the deploy release remains pending"))
 		return false;
 
@@ -4235,7 +4235,7 @@ bool run_split_batch_keeps_deployment_pick_ack_causal() {
 			{make_protocol_message(0x5A, {0x08, 0xFF})});
 	client.receive(release.data(), release.size());
 	(void)client.Client_ProcessNetworkFrame(2);
-	return expect(client.deployed(),
+	return expect(client.is_deployed(),
 			"0x5A covering the pick's actual packet releases redeployment");
 }
 
@@ -4258,7 +4258,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 	client.receive(death_datagram.data(), death_datagram.size());
 	(void)client.Client_ProcessNetworkFrame(1);
 	if (!expect(client.gameplay_gate_open() &&
-				!client.authoritative_spawn_released() && !client.deployed() &&
+				!client.authoritative_spawn_released() && !client.is_deployed() &&
 				client.deployment_pick_pending(),
 			"death closes only authoritative spawn and re-enters the picker"))
 		return false;
@@ -4279,7 +4279,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 	client.receive(unrelated_grant.data(), unrelated_grant.size());
 	(void)client.Client_ProcessNetworkFrame(2);
 	if (!expect(client.gameplay_gate_open() &&
-				!client.authoritative_spawn_released() && !client.deployed() &&
+				!client.authoritative_spawn_released() && !client.is_deployed() &&
 				client.state().local_health == 100 &&
 				client.deployment_release_revision() == 0 &&
 				client.authoritative_spawn_release_revision() == 0,
@@ -4936,7 +4936,7 @@ bool run_start_resets_reusable_runtime_state() {
 	if (!expect(client.authoritative_loadout_revision() == 0 &&
 	                    client.zone_states().empty() &&
 	                    client.send_holdoff_countdown() == 0 &&
-	                    !client.deployed(),
+	                    !client.is_deployed(),
 			"start clears prior authoritative, cadence, and deploy state"))
 		return false;
 	if (!expect(client.state().anchor_x == 0 &&

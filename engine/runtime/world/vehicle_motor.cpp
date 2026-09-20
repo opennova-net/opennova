@@ -1647,7 +1647,7 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
 	detail::vehicle_trail_water_transition(veh, traits, trail_was_water);
 }
 
-// The npruntime headless host boots World without the shell's model-box
+// The inmatch headless host boots World without the shell's model-box
 // resolution (VehicleTraits.box_z_* is stamped only by the binding's
 // simulation_assets resolve), so its watercraft have no platform
 // geometry and the solver cannot produce an afloat latch. This water-plane

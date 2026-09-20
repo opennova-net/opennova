@@ -74,7 +74,6 @@ public:
 	int get_pool() const;
 	int get_health() const;
 	bool is_alive() const;
-	bool is_hidden() const;
 	int get_vehicle_family() const;
 	Vector3 get_mission_position() const;
 	// The engine axis map: mission (x, y, z) -> presentation (x, z, -y).
@@ -91,13 +90,10 @@ public:
 	int get_character_anim_slot() const { return value_.ai.character_anim_slot; }
 	int get_minimap_net_id() const { return value_.ai.minimap_net_id; }
     bool has_facial_animation() const { return value_.facial.available; }
-    int get_facial_expression() const { return value_.facial.current; }
     int get_facial_target() const { return value_.facial.next; }
     int get_facial_override() const { return value_.facial.expression_override; }
-    int get_facial_automatic() const { return value_.facial.automatic; }
     int get_facial_override_timer() const { return value_.facial.override_timer; }
     int get_facial_texture_priority() const { return value_.facial.texture_priority; }
-    double get_facial_blend() const { return value_.facial.blend; }
     int64_t get_facial_display_frame() const { return value_.facial.display_frame; }
 	bool is_infantry() const { return value_.ai.infantry; }
 	String get_adm_name() const;

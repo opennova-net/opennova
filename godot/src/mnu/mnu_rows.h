@@ -52,7 +52,6 @@ public:
 	String get_source() const;
 	String get_field() const;
 	String get_test() const;
-	bool has_target_form() const { return value_.has_target_form; }
 	int get_target_form() const { return value_.target_form; }
 	bool is_toggle() const { return value_.toggle; }
 	bool is_external_browser() const { return value_.external_browser; }

@@ -81,7 +81,7 @@
     X(SIM_NET, "native wire leg of step: joiner recv/uplink pump, or the") \
     /* host's local ClientState decode/fold */ \
     X(SIM_HOST_PREP, "viewport/input/request setup before the portable host pump") \
-    X(SIM_HOST_PUMP, "complete npruntime host owner iteration") \
+    X(SIM_HOST_PUMP, "complete inmatch host owner iteration") \
     X(SIM_HOST_RECEIVE, "recv drain + missing-sequence service") \
     X(SIM_HOST_CONNECTIONS, "connection/spawn service") \
     X(SIM_HOST_ADAPTER, "binding callback at the pre-server registration seam") \

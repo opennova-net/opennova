@@ -3610,8 +3610,8 @@ a labeled death/join/disconnect timeline.
 
 **Limits.** `PDAT` is *decoded* state, so it validates VALUES, not wire byte-framing/encryption.
 Only pool-0 (the two human players) is recorded — the AI/mission entities (pool-1/3, the §5.11/5.12
-spawn batches) are not; the authored-mission cross-validation (§5.24,
-`fixtures/novaworld/dvxi5_manifest.txt` + `nw_pool_groundtruth_test`) covers those. Sampling is 8-tick
+spawn batches) are not; the authored-mission cross-validation (§5.24) covered those until its
+capture-gated `nw_pool_groundtruth_test` and manifest were retired with the capture root. Sampling is 8-tick
 (~7.75 Hz). Tooling: `apps/nw_pp` remains the live `.sph` reader
 (suffix-dispatched); the decoder is `engine/net/npwire/serverlog_decode.h` +
 `engine/net/npwire/replay/serverlog_decode.cpp`. Its controlled-knowns ctest
@@ -3679,7 +3679,8 @@ host (retail `Jointops.exe`) serialized the *known* `mission.bms` onto the wire,
 spawn records can be checked field-for-field against the authored facts — the sibling of
 D-NET-61 for pools 1/2/3.
 
-Tooling (this commit): the authored `.bms` is reduced to `fixtures/novaworld/dvxi5_manifest.txt`
+Tooling (historical; the manifest and `nw_pool_groundtruth_test` were retired with the capture
+root): the authored `.bms` was reduced to `fixtures/novaworld/dvxi5_manifest.txt`
 (via `opennova_mission_save_mis_path` → the engine/formats/mission `.mis` writer); nw_pp's native pcap
 reader is factored into the shared `apps/common/pcap_reader.{h,cpp}` (buffer-core + file wrapper
 + `build_pcap_udp` in-memory builder); `tests/novaworld/nw_pool_groundtruth_test` decodes the
@@ -4916,7 +4917,7 @@ serializer GUARANTEES `0x0800` for any AI-capable item def. The crash window is 
 `edx==0` → access violation; SYSDUMP confirmed 2026-06-25, last packet `#13`=`0x0D`). **Fix (landed):**
 `build_pool1_spawn_batch` now emits the `0x0800` AI-trailer **iff the entity is AI-capable**
 (`Entity::is_ai_capable`), which is resolved from `items.def ItemDefAttrib & 0x100000` (the `AIData` token) —
-parsed into `DefItemDef.attrib` (`engine/formats/def`), surfaced as `ItemDatabase::is_ai_capable`, and stamped onto
+parsed into `DefItemDef.attrib` (`engine/formats/def`), folded by the engine's `mission::resolve_item_traits`, and stamped onto
 every live entity by the host's `Simulation::resolve_item_traits` post-load pass (called from
 `MissionRoot` alongside `resolve_infantry_adm_ids`). Because our emit gate is now the SAME predicate as the
 decoder's own gate (`attrib & 0x100000`), an AI-capable record ALWAYS carries the `0x0800` flag + a valid
@@ -9691,7 +9692,7 @@ update gated on `g_ParticlesDisabled`), and released underwater (`pos.Z <= water
 2026-07-15]: the port spawned the local flash `BINDING_WORLD` at the spawn-time
 userpoint — while strafing/turning the flash trailed the muzzle. Fixed: the host spawns
 owner-bound (`BINDING_FOLLOW_OWNER`) and registers a live anchor resolver
-(`GameWorld.register_effect_anchor` → the spawning action's userpoint through the
+(`ItemEffectDirector.register_effect_anchor` → the spawning action's userpoint through the
 current viewmodel pose) polled by the effect world's owner-pose sync; anchors drop on
 viewmodel-generation turnover. (4) **THE HEAT WINDOW + OVERHEAT GLOW LEG** (new witness):
 `MountSlot+0x14` (ex-"muzzleFlashEndTick" → `heatWindowEndTick`, stamped by the recoil

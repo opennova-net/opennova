@@ -6,7 +6,6 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
-#include <godot_cpp/variant/packed_string_array.hpp>
 
 #include <vector>
 
@@ -87,18 +86,11 @@ public:
 	// map); statics so the GUT pins over the curve keep a bound home.
 	static int calc_distance_volume(int64_t dist_q16, int64_t radius_q16, int vol255,
 			int clamp_vol);
-	static int oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,
-			int64_t falloff_q16, int member_vol, int clamp_vol);
 	static int emitter_layer_volume(int64_t dist_q16, int falloff_u, int min_u,
 			int vol_byte, int member_vol, int clamp_vol);
 	// A 16.16 word (the mix rows' pitch_q16, the emitter registrations) as a
 	// float factor (io/fixed.h kFp16One).
 	static float q16_to_float(int q16);
-	// The global sound-bank load chain in the engine's slot order
-	// (audio/bank_chain.h): the expansion pair when one is active, then the
-	// four static banks. The shell iterates this instead of re-minting the
-	// witnessed table.
-	static PackedStringArray global_bank_chain(const String &expansion_name);
 };
 
 } // namespace godot

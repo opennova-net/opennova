@@ -4,7 +4,7 @@
 // This is the FOUNDATION pass: the data structures + control skeleton reproduced
 // faithfully from the binary, with the heavy per-state behavior handlers ported
 // incrementally (unported ones route to a visible `not_yet_ported` stub so
-// coverage is explicit). See notes/world/ai_movement.md for the full RE map.
+// coverage is explicit). See docs/world/world-wac-ai-re.md for the full RE map.
 //
 // IDA anchors (Jointops.exe, imagebase 0x400000):
 //   EntityAI_ProcessInfantryStateMachine @0x4581b0   (the dispatcher)

@@ -282,7 +282,7 @@ bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
         if (!std::isfinite(pose[i])) return false;
 
     constexpr float kInvQ22 = 1.0f / 4194304.0f;
-    constexpr float kInv16 = 1.0f / 65536.0f;
+    constexpr float kInv16 = io::kInvFp16One;
     // Fixed mission matrix -> row-vector render float, including the
     // (-mission-y, mission-z, mission-x) axis map.
     // [orig: Math_FixedPointToFloatMatrix4x4_Swizzled @ 0x611080]
@@ -337,7 +337,7 @@ bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
         if (!std::isfinite(v)) return false;
 
     constexpr double kQ22 = io::kQ22One;
-    constexpr double kFixed16 = 65536.0;
+    constexpr double kFixed16 = io::kFp16OneD;
     const auto ftol_checked = [](double v, int32_t &dst) {
         if (!std::isfinite(v) ||
             v < static_cast<double>(INT32_MIN) ||

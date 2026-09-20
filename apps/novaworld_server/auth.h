@@ -78,7 +78,6 @@ MutationResult update_server_status(opennova::db::Database &db,
                                     bool maintenance_enabled,
                                     const std::string &message);
 
-bool has_active_user_session(opennova::db::Database &db, int64_t user_id);
 void register_active_user_session(opennova::db::Database &db, int64_t user_id,
                                   const std::string &username,
                                   const std::string &session_tag,

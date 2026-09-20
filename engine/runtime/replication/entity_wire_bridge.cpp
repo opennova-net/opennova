@@ -16,7 +16,7 @@ namespace opennova::replication {
 
 // npwire's wire_handle packing and world's EntityHandle are the same witnessed
 // layout [orig: EntityPool_FindByNetId @ 0x4f0a20]; world stays net-agnostic and
-// npwire sim-agnostic, so netsim — the one lib that sees both — pins them here.
+// npwire sim-agnostic, so replication — the one lib that sees both — pins them here.
 static_assert(wire_handle::kInvalid == world::EntityHandle::kInvalid);
 static_assert(wire_handle::kPoolCount == world::kEntityPoolCount);
 static_assert(wire_handle::make(3, 5) == world::EntityHandle::make(3, 5).packed);

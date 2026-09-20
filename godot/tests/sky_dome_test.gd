@@ -138,10 +138,6 @@ func _shader_color_units(material: ShaderMaterial, parameter: StringName) -> Arr
 	return [roundi(value.x * 255.0), roundi(value.y * 255.0), roundi(value.z * 255.0)]
 
 
-func _color_units(value: Color) -> Array[int]:
-	return [roundi(value.r * 255.0), roundi(value.g * 255.0), roundi(value.b * 255.0)]
-
-
 func test_flat_pass_does_not_stuff_keyframed_uniforms() -> void:
 	var ctx := _make()
 	ctx.sky.advance_frame(0.016)

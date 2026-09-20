@@ -171,9 +171,8 @@ public:
 	static Vector3 default_hemi_ground_color() { return Vector3(49.0f / 255.0f, 55.0f / 255.0f, 46.0f / 255.0f); }
 
 
-	// Visual-layer bits, mirrored from the authoritative GDScript table in
-	// adapter/environment/water.gd (the water/mirror pass owns the layer
-	// scheme; keep the two in lockstep).
+	// Visual-layer bits, mirrored from the renderer's one layer allocation
+	// (render/visual_layers.h owns the scheme; keep the two in lockstep).
 	enum {
 		LAYER_WORLD = 1 << 0,
 		LAYER_VIEWMODEL = 1 << 11,
@@ -472,7 +471,6 @@ private:
 	Skeleton3D *skeleton_ = nullptr;
 	Ref<Skin> skeleton_skin_;
 	int muzzle_bone_ = -1;
-	Vector3 muzzle_model_pos_;
 	// The def-AUTHORED launch userpoint name (items.def launchups_closeattack,
 	// pushed by the placer); empty = this model has no AI muzzle.
 	String muzzle_point_name_;

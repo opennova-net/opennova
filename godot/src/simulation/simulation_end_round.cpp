@@ -3,7 +3,7 @@
 // one ClientEndRoundStats the replica pipeline folds (the listen host's own
 // loopback view folds the same messages), turned into the overlay text ladder
 // (hud/end_round_overlay.h) and the stat.mnu RESULTLIST feed
-// (npruntime/stat_screen_feed.h).
+// (runtime/inmatch/stat_screen_feed.h).
 #include "simulation/simulation_internal.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/end_round_state.h"

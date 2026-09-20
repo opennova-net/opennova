@@ -67,9 +67,8 @@ private:
 // entity-attached / static / controller-gated item emitters, the
 // owner-registered effect-anchor resolvers, and the retail master particle
 // switch. Owned by GameWorld as _item_fx, constructed in the world's _init
-// and wired once through setup(). GameWorld keeps one-line public delegates
-// (set_particles_hidden, register_effect_anchor/unregister_effect_anchor) so
-// the owner-facing names never moved.
+// and wired once through setup(). GameWorld keeps a one-line public delegate
+// (set_particles_hidden) so the owner-facing name never moved.
 //
 // The law — the pool/attrib gates, the identity aliases and the
 // matched-userpoint / origin-fallback attach plan — is the engine's

@@ -32,9 +32,8 @@ in the private `opennova-net/opennova-reference-assets` repository.
   plain-text file (`.def`, `.mnu`, `.ptl`, the manifests, ...) is a plain git blob
   that diffs and reviews normally (the per-extension carve-outs there; the lint
   judges by content, so a new text format gets its extension carved out in the
-  same change). No tracked file under `fixtures/` or `assets/` exceeds 2 MiB; the
-  three oversize `assets/mnml*` files carry a reason in the allowlist's
-  `size_exceptions`.
+  same change). No tracked file under `fixtures/` exceeds 2 MiB (the allowlist's
+  `size_exceptions` is empty).
 - CI runs the lint with `--require-pulled`: every LFS fixture must be materialized
   in the checkout the tests read (the scoped `git lfs pull` in `ci.yml`).
 
@@ -121,8 +120,7 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 
 ## Other minted sets
 
-- `terrain/tmap` — `tests/fixtures/minimal_terrain_gen.cpp` (the second map beside
-  `assets/mnml`).
+- `terrain/tmap` — `tests/fixtures/minimal_terrain_gen.cpp`.
 - `fnt/synth_*.fnt`, `cbin/synth_nlist*.kda`, `cbin/credits_image.png`,
   `cbin/particle_dot.tga` — `tests/fixtures/minimal_fnt_gen.cpp`,
   `minimal_cbin_gen.cpp`: the credits lists in their JO, JOX01 and BHD shapes

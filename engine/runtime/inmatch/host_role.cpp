@@ -219,7 +219,7 @@ void HostRole::run_tick(const TickInput &input) {
 			state.client_runtime.get(), /*joiner=*/false, kernel.local.local_player_dead());
 	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor wraps against
 	// the renderer viewport height [orig: Server_SendRandomSeedSync @0x511360];
-	// a missing viewport leaves the seam unset and npruntime suppresses 0x68
+	// a missing viewport leaves the seam unset and inmatch suppresses 0x68
 	// instead of inventing a screen size (D-NET-206).
 	state.host_owner.ctx.loaded_model_viewport_height =
 			input.viewport_height > 0 ? static_cast<uint32_t>(input.viewport_height) : 0u;

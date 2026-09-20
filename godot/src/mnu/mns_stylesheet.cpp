@@ -7,7 +7,6 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <algorithm>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -274,23 +273,6 @@ Error MnsStyleSheet::save_to_path(const String &p_path) const {
 	file->store_buffer(packed);
 	file->close();
 	return OK;
-}
-
-void MnsStyleSheet::set_native(const opennova::mns::StyleSheet &p_sheet) {
-	doc_ = opennova::mns::Document();
-	// Sorted for determinism (unordered_map iteration order is arbitrary),
-	// matching the legacy opennova::mns::write canonical dump.
-	std::vector<std::string> keys;
-	keys.reserve(p_sheet.variables.size());
-	for (const auto &kv : p_sheet.variables) {
-		keys.push_back(kv.first);
-	}
-	std::sort(keys.begin(), keys.end());
-	for (const std::string &key : keys) {
-		std::string error;
-		doc_.add_define(key, p_sheet.variables.at(key), -1, std::string(), &error);
-	}
-	_refresh();
 }
 
 void MnsStyleSheet::_bind_methods() {

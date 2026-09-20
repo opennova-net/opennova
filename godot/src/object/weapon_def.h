@@ -40,8 +40,6 @@ public:
 	// DefSightBlendMode transport value.
 	int get_blend() const { return value_.blend; }
 	bool is_scale() const { return value_.scale != 0; }
-	bool is_slide() const { return value_.slide != 0; }
-	int get_slide_frames() const { return value_.slide_frames; }
 	// The row's draw rectangle in the 1024x768 design space for a sight-scale
 	// index and a scope-zero slide multiplier: plain, scaled about its centre,
 	// or slid (the engine's sight_row_rect, <runtime/hud/sight_overlay.h>,
@@ -199,7 +197,6 @@ public:
 	void set_hudrndgfx_layout(const Vector3i &p_value);
 	TypedArray<WeaponSightRow> get_sights() const;
 	// The ACTION ladder the weapon FSM bakes (weapon_fsm.h).
-	TypedArray<WeaponActionRow> get_actions() const;
 	void set_actions(const TypedArray<WeaponActionRow> &p_rows);
 };
 

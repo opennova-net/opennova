@@ -23,7 +23,7 @@ namespace godot {
 //
 // `flags` and `move` are stored as both uint32 bitfields (engine-faithful)
 // and raw strings (round-trip preservation). Helper getters in
-// `engine/runtime/particle/particle.h` (`particle_flag::*`, `move_flag::*`) document
+// `engine/formats/particle/particle.h` (`particle_flag::*`, `move_flag::*`) document
 // the bit assignments.
 class ParticleDef : public Resource {
 	GDCLASS(ParticleDef, Resource)

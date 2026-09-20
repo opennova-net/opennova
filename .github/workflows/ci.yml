@@ -211,11 +211,11 @@ jobs:
           path: web/dist
 
   # Compile the GDExtension (godot/src + engine/ + the pinned third_party/godot-cpp)
-  # once per flavour; godot-tests and the two Windows package jobs download the
+  # once per flavour; godot-tests and the Windows package job download the
   # DLLs instead of recompiling. Flavours are godot-cpp targets and name the DLL:
   #   template_debug   -> what the Godot EDITOR loads (godot-tests, and the export
   #                       step's script scan) and what a --export-debug exe loads.
-  #   template_release -> what a --export-release exe loads (the release zips).
+  #   template_release -> what a --export-release exe loads (the release zip).
   # A pull request builds only template_debug and packages in debug export mode
   # (~4.7 min per flavour on a warm cache, mostly MSVC preprocessing on sccache
   # hits — halving the legs halves the wall-clock in front of godot-tests and the
@@ -435,8 +435,6 @@ jobs:
           pattern: gdext_windows_*
           merge-multiple: true
           path: godot/bin
-
-      # The packager installs ImGui for debug exports and excludes GUT.
 
       # PRs export in debug mode (debug export template + the template_debug DLL,
       # the development flavour); master/manual runs export in

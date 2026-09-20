@@ -4,7 +4,6 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib> // std::stoi
-#include <stdexcept>
 #include <string>
 
 namespace opennova {

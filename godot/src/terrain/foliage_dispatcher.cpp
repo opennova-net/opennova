@@ -534,16 +534,10 @@ void VegGraphicRow::_bind_methods() {
                        &VegGraphicRow::get_model_path);
   ClassDB::bind_method(D_METHOD("set_model_path", "value"),
                        &VegGraphicRow::set_model_path);
-  ClassDB::bind_method(D_METHOD("get_scene_path"),
-                       &VegGraphicRow::get_scene_path);
-  ClassDB::bind_method(D_METHOD("set_scene_path", "value"),
-                       &VegGraphicRow::set_scene_path);
   ADD_PROPERTY(PropertyInfo(Variant::STRING, "basename"), "set_basename",
                "get_basename");
   ADD_PROPERTY(PropertyInfo(Variant::STRING, "model_path"), "set_model_path",
                "get_model_path");
-  ADD_PROPERTY(PropertyInfo(Variant::STRING, "scene_path"), "set_scene_path",
-               "get_scene_path");
 }
 
 void FoliageDispatcher::configure_slots_from_defs(

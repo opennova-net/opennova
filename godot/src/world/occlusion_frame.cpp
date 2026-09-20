@@ -55,10 +55,7 @@ void OcclusionFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("rebind_placed_nodes"), &OcclusionFrame::rebind_placed_nodes);
 	ClassDB::bind_method(D_METHOD("reset"), &OcclusionFrame::reset);
 	ClassDB::bind_method(D_METHOD("is_blink_indoors"), &OcclusionFrame::is_blink_indoors);
-	ClassDB::bind_method(D_METHOD("set_probe_timing", "enabled"), &OcclusionFrame::set_probe_timing);
-	ClassDB::bind_method(D_METHOD("is_probe_timing"), &OcclusionFrame::is_probe_timing);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "blink_indoors"), "", "is_blink_indoors");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "probe_timing"), "set_probe_timing", "is_probe_timing");
 }
 
 void OcclusionFrame::setup(Terrain *p_terrain, SkyDome *p_sky, Celestial *p_celestial,

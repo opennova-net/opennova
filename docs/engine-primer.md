@@ -241,9 +241,7 @@ Order of operations when you need an engine truth:
      frame-stats board and the Entities window over
      `world::inspect::entity_directory` (records in, typed requests out, ADR
      0042 d6), further inspection/control windows as they are wanted (`engine/runtime/devtools/README.md` is the recipe). Debug builds
-     only. ONED's Run OpenNova loose action launches that same standalone game
-     against the selected data directory; ONED has no embedded preview or dev
-     tools (its own run surface is an engine ImGui window on the same pass).
+     only.
    - `Simulation` introspection: `get_present_snapshot()`, the typed
      `entity_directory()` / `entity_card(handle)` records (`world::inspect`,
      ADR 0042 d5), `get_fired_events_snapshot()`,

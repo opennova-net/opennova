@@ -212,9 +212,3 @@ static func definitions() -> Array[McpToolDef]:
 			}, ["op"], false, PROBE_TIMEOUT_MS),
 	]
 
-
-static func definition(name: String) -> McpToolDef:
-	for def in definitions():
-		if def.name == name:
-			return def
-	return null

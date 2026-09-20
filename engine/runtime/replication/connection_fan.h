@@ -17,10 +17,10 @@ namespace opennova::replication {
 // direction-scoped constants in npwire/ingame_message_id.h (s2c::PER_FRAME_UPDATE etc.).
 
 // The per-connection in-match replication primitives. A host owns a CONNECTION TABLE (the reimpl of
-// the original's per-connection fan); both the legacy listen-server binding and npruntime's
-// Server_TickUpdate own that table elsewhere (npruntime: NapiNPProtocol.connection_list, each node's
+// the original's per-connection fan); both the legacy listen-server binding and inmatch's
+// Server_TickUpdate own that table elsewhere (inmatch: NapiNPProtocol.connection_list, each node's
 // embedded replication::Connection `link`) and call these two functions per node, so there is ONE
-// drain/emit implementation (ADR 0011 / npruntime ROADMAP P4). Faithful frame order
+// drain/emit implementation (ADR 0011 / inmatch ROADMAP P4). Faithful frame order
 // [orig: Game_ProcessMainFrame @ 0x5263f0]:
 //
 //   input -> drain_connection_c2s (C2S) -> World::run_logic_tick (WAC/BMS/AI)

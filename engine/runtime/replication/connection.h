@@ -24,7 +24,7 @@ enum class TransportMode : uint8_t {
 // SendToConn @0x4c4f20 per node]. The transport is NON-OWNING: the Godot binding (or a test
 // harness) owns the LoopbackChannel / UdpSessionTransport; the per-connection drain/fan
 // primitives (connection_fan.h) only fan the per-frame world reference over it and drain its
-// C2S queue. The connection TABLE is owned by the host driver — npruntime's Server_TickUpdate
+// C2S queue. The connection TABLE is owned by the host driver — inmatch's Server_TickUpdate
 // over NapiNPProtocol.connection_list (each node embeds a Connection `link`).
 struct Connection {
 	// The byte transport for this peer (host's own client = a LoopbackChannel; a remote peer =

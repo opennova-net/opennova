@@ -78,10 +78,6 @@ bool TerrainFoliageDef::get_shadow() const {
 	return (attrib_flags & ATTRIB_SHADOW) != 0;
 }
 
-bool TerrainFoliageDef::get_force_on() const {
-	return (attrib_flags & ATTRIB_FORCE_ON) != 0;
-}
-
 void TerrainFoliageDef::copy_from_native(const opennova::FoliageDef &def) {
 	const opennova::FoliageDef normalized = opennova::foliage_normalize_def(def);
 	graphic = String(normalized.graphic.c_str());

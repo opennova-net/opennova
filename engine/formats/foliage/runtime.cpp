@@ -1,5 +1,7 @@
 #include <formats/foliage/runtime.h>
 
+#include <base/io/fixed.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -32,7 +34,7 @@ constexpr float kDetailPassSwitch = 33.0f;
 // fade; this runtime models the main scene.
 constexpr float kDetailLimit = 42.0f;
 constexpr float kSilhouetteDepth = 38.0f;
-constexpr int32_t kFixedOne = 0x10000;
+constexpr int32_t kFixedOne = io::kFp16OneInt;
 constexpr int32_t kAnchorRadiusFixed = 0x40000;
 constexpr int32_t kQuadrantOffsetFixed = 0x80000;
 constexpr int32_t kTileSizeFixed = 0x100000;

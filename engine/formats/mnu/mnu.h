@@ -149,10 +149,6 @@ struct Items {
   std::string selection_color;  // Selected item highlight color
   std::vector<Item> items;
 
-  const Appearance *find_appearance(const std::string &state,
-                                    const std::string &type) const;
-  Appearance *find_appearance(const std::string &state,
-                              const std::string &type);
   void set_appearance_value(const std::string &state,
                             const std::string &type,
                             const std::string &value);

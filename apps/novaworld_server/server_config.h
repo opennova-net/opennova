@@ -28,7 +28,7 @@ struct ServerConfig {
 	// clients (PN dispatch — see README.md "Listeners").
 	uint16_t nw_udp_port = 64206;
 
-	// HTTP — Drogon binds here. Serves /api/* + falls back to web/dist/
+	// HTTP — Crow binds here. Serves /api/* + falls back to web/dist/
 	// for the static SPA.
 	uint16_t http_port = 8080;
 

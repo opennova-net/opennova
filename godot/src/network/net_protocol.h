@@ -33,7 +33,7 @@ protected:
 
 public:
 	enum {
-		// The witnessed g_GameType code words (npwire game_type.h; opaque
+		// The witnessed g_GameType code words (base/gameprofile game_type.h; opaque
 		// beyond the objective bit — never decompose them).
 		GAME_TYPE_DEATHMATCH = opennova::game_type::kDeathmatch,
 		GAME_TYPE_KING_OF_THE_HILL = opennova::game_type::kKingOfTheHill,
@@ -60,12 +60,12 @@ public:
 		RETAIL_LAN_PORT_MAX = opennova::kRetailLanPortMax,
 		DEFAULT_GATE_PORT = opennova::kNovaWorldGatePort,
 
-		// The lobby player-cap ceiling (npruntime game_config.h) and the wire
-		// callsign cap (Name[16] cstring; npwire game_type.h).
+		// The lobby player-cap ceiling (inmatch game_config.h) and the wire
+		// callsign cap (Name[16] cstring; base/gameprofile game_type.h).
 		MAX_PLAYERS_CAP = opennova::inmatch::kMaxPlayersCap,
 		MAX_CALLSIGN_LENGTH = opennova::game_rules::kMaxCallsignLength,
 
-		// The Config_SetDefaults session-rule baseline (npwire game_type.h).
+		// The Config_SetDefaults session-rule baseline (base/gameprofile game_type.h).
 		DEFAULT_RESPAWN_TIME = opennova::game_rules::kDefaultRespawnTime,
 		DEFAULT_TIME_LIMIT_MINUTES = opennova::game_rules::kDefaultTimeLimitMinutes,
 		DEFAULT_REPLAY_ENABLED = opennova::game_rules::kDefaultReplayEnabled,
@@ -96,17 +96,17 @@ public:
 
 	// Retail's mission-attrib -> g_GameType selection: the mission header's
 	// single-select game-mode bit picks the session code word; 0 / unknown
-	// resolves to GAME_TYPE_TRAINING_COOP (npwire game_type::for_mission_mode).
+	// resolves to GAME_TYPE_TRAINING_COOP (gameprofile game_type::for_mission_mode).
 	static int game_type_for_mission_mode(int p_attrib_mode);
 	// The MULTI_PLAYER_HOST dialog's witnessed game-type rules (D-MNU-17);
-	// the logic lives in engine/net/npwire game_type.h.
+	// the logic lives in engine/base/gameprofile/game_type.h.
 	static bool game_type_host_list_visible(int p_game_type);
 	static int game_type_host_filter_category(int p_game_type);
 	static String game_type_host_abbreviation_key(int p_game_type);
 	static bool game_type_host_rotation_default(int p_game_type);
 	// The Tab board header's game-type rung — the Overlays gametext key
 	// [orig: HUD_GetGameTypeOverlayLabel @0x5b8680; the map lives in
-	// npwire game_type.h overlay_label_key]. "" = blank rung.
+	// base/gameprofile game_type.h overlay_label_key]. "" = blank rung.
 	static String game_type_overlay_label_key(int p_game_type);
 
 	// The retail host's custom-message default (npwire game_rules::kCustomTextDefault).

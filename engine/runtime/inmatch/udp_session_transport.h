@@ -38,7 +38,7 @@ public:
 
 	explicit UdpSessionTransport(Role role) : role_(role) {}
 
-	// --- ISessionTransport: the netsim core uses ONLY these four ---
+	// --- ISessionTransport: the replication core uses ONLY these four ---
 	void host_send(uint8_t tag, std::vector<uint8_t> body,
 			bool reliable = true,
 			uint8_t protocol_flags_raw = 0,

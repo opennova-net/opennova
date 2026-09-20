@@ -1,5 +1,5 @@
 # Copy to terraform.tfvars and fill in locally (do NOT commit), or — preferred —
-# let the deploy toolbox inject these from 1Password (deploy/env/github.env.tpl).
+# let the deploy toolbox inject these from 1Password (deploy/env/github.tfvars.json.tpl).
 #
 # github_token = "ghp_your_repo_admin_token"   # prefer TF_VAR_github_token
 # github_owner = "opennova-net"

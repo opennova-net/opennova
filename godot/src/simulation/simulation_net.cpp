@@ -182,7 +182,7 @@ void Simulation::print_joiner_net_diagnostic_sample() {
 
 void Simulation::enable_listen_server(bool p_enable) {
 	listen_server_ = p_enable;
-	// P7: the SP listen server rides the npruntime in-match runtime on the host role (its
+	// P7: the SP listen server rides the inmatch in-match runtime on the host role (its
 	// ListenHostState), stood up per-load by the role's bring-up — there is no net ISystem and
 	// no legacy loopback seam here. The role installs now when the session can switch, else at
 	// the next load (a sim is SP listen XOR LAN host XOR joiner).
@@ -334,7 +334,7 @@ bool Simulation::enable_host_listen(int p_port) {
 	// role install; a pending role takes the socket when it is installed.
 	net_.pump_socket = std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr());
 	if (installed) host_role_->set_socket(net_.pump_socket.get());
-	// P7: the LAN host rides the npruntime runtime (ctx over a real UDP socket), stood up per-load in
+	// P7: the LAN host rides the inmatch runtime (ctx over a real UDP socket), stood up per-load in
 	// bringup_host_runtime with SocketMode::Lan. UdpPump owns the socket; all protocol/crypto/
 	// framing stays in libs (ADR 0010). net_.host_session_config keeps the GDScript-facing session options
 	// (the Dictionary getter + the §5.1 reactive-reply config consumed by create_session).
@@ -349,7 +349,7 @@ int Simulation::get_host_listen_port() const {
 }
 
 int Simulation::get_host_peer_count() const {
-	// Count the type-1 (remote-joiner) connections in the npruntime table. The host's own type-2
+	// Count the type-1 (remote-joiner) connections in the inmatch table. The host's own type-2
 	// loopback is excluded; a pre-Hello garbage datagram registers no node (handle_server_datagram
 	// drops bad envelopes), so it stays 0 until a real JointOperations peer handshakes.
 	int n = 0;
@@ -671,7 +671,7 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 	// [orig: @0x42d950; the per-entry store @0x42d9f0, the 0x32 cap @0x42da7d].
 	// The complete writer/xref audit for this binary found no surviving writer to
 	// the source field after model resolution, so each included definition
-	// contributes one zero dword. Keep the npruntime seam value-based so a future
+	// contributes one zero dword. Keep the inmatch seam value-based so a future
 	// witnessed writer can supply its actual row without changing paging.
 	runtime_->set_loaded_model_challenge_snapshot(
 			std::vector<uint32_t>(static_cast<std::size_t>(count), 0u));
@@ -1154,7 +1154,7 @@ void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 
 // The Tab board's header as the shell needs it. Row data no longer rides a
 // script Dictionary: HudOverlay pulls the drawn rows natively through
-// fill_scoreboard_rows, and the counts here come from the same netsim
+// fill_scoreboard_rows, and the counts here come from the same replication
 // projection (replication::scoreboard_header — the accepted-rows-minus-spectators
 // players count is the witnessed header arithmetic, retail @0x4231dd).
 Ref<ScoreboardHeader> Simulation::get_scoreboard() const {

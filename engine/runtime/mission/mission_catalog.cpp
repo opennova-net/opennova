@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstring>
 
+#include <base/io/strutil.h>
 #include <formats/mission/bms.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/rtxt/rtxt.h>
@@ -28,17 +29,6 @@ bool file_less(const Row &a, const Row &b) {
 			std::tolower(static_cast<unsigned char>(*pb));
 }
 
-bool ends_with_ci(const std::string &name, const char *suffix) {
-	const size_t n = std::strlen(suffix);
-	if (name.size() < n) return false;
-	for (size_t i = 0; i < n; ++i) {
-		if (std::tolower(static_cast<unsigned char>(name[name.size() - n + i])) !=
-				std::tolower(static_cast<unsigned char>(suffix[i])))
-			return false;
-	}
-	return true;
-}
-
 std::string bin_sibling_name(const std::string &file) {
 	// [orig: Path_ReplaceOrAppendExtension(entry+527, "bin") @ 0x563170]
 	const size_t dot = file.find_last_of('.');
@@ -55,7 +45,7 @@ std::string header_cstr(const char *field, size_t cap) {
 std::vector<Row> build(const ResourceIndex &index) {
 	std::vector<Row> rows;
 	for (const ResourceFileEntry &entry : index.resource_files("*")) {
-		if (!ends_with_ci(entry.logical_name, ".bms")) continue;
+		if (!strutil::ends_with_icase(entry.logical_name, ".bms")) continue;
 		Row row;
 		row.file = entry.logical_name;
 		// Loose flag: retail's directory-scan pass stamps 1, the archive pass 0

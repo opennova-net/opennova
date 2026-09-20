@@ -66,7 +66,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.health_max = hp; // the §5.10 field-17 tier denominator (D-NET-144)
     seed.equipped_adm_index = spawn.equipped_adm_index; // entity+0x2B0 spawn default (D-NET-143)
     // entity+0x374 character selector + entity+0x15C wire NetId, picked per assigned team from
-    // the joiner's 0x42 join vars by the npruntime add. [orig: Server_PlayerAdd @0x51cbc0
+    // the joiner's 0x42 join vars by the inmatch add. [orig: Server_PlayerAdd @0x51cbc0
     // @0x51d0b1 / slot+440; D-NET-146]
     seed.anim_slot = spawn.anim_slot;
     seed.minimap_net_id = spawn.minimap_net_id;

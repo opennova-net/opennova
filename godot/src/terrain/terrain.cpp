@@ -13,7 +13,6 @@
 // Retail: PolyTrn_RenderTile @0x60da70 (docs/terrain/terrain-re.md, docs/tiles/til-re.md);
 // the sector traversal names below are jodemo-era (Terrain_RenderSectorTile @0x5CDAA0,
 // Terrain_TraverseQuadTreeNode @0x5C89C0, Terrain_CollectVisibleSectors @0x5C9120).
-// docs/engine_spec_terrain.md 7.1-7.2
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -48,10 +47,6 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_lod_quality"), &Terrain::get_lod_quality);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_quality", PROPERTY_HINT_RANGE, "0.1,4.0,0.1"),
 		"set_lod_quality", "get_lod_quality");
-	ClassDB::bind_method(D_METHOD("set_polygon_detail", "detail"), &Terrain::set_polygon_detail);
-	ClassDB::bind_method(D_METHOD("get_polygon_detail"), &Terrain::get_polygon_detail);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "polygon_detail", PROPERTY_HINT_RANGE, "0,3,1"),
-		"set_polygon_detail", "get_polygon_detail");
 
 	ClassDB::bind_method(D_METHOD("set_tile_overlay_enabled", "enabled"), &Terrain::set_tile_overlay_enabled);
 	ClassDB::bind_method(D_METHOD("get_tile_overlay_enabled"), &Terrain::get_tile_overlay_enabled);
@@ -299,16 +294,6 @@ void Terrain::set_lod_quality(float p_quality) {
 
 float Terrain::get_lod_quality() const {
 	return lod_quality;
-}
-
-void Terrain::set_polygon_detail(int p_detail) {
-	polygon_detail = p_detail < 0 ? 0
-			: p_detail > opennova::kTerrainMaxPolygonDetail ? opennova::kTerrainMaxPolygonDetail
-			: p_detail;
-}
-
-int Terrain::get_polygon_detail() const {
-	return polygon_detail;
 }
 
 void Terrain::set_tile_overlay_enabled(bool p_enabled) {

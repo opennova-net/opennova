@@ -32,8 +32,8 @@ namespace {
 //
 // Falls back to plain-string compare for stored_hash values that don't
 // look like a bcrypt hash — covers the dev seed where 'test'/'foo' are
-// stored as plaintext until you regenerate the seed (`tools/gen-bcrypt`
-// or via the admin POST /api/admin/users path). This path is logged so
+// stored as plaintext until you regenerate the seed (via the admin
+// POST /api/admin/users path). This path is logged so
 // it's obvious when plaintext credentials are still in use.
 bool verify_password(const std::string &plain, const std::string &stored) {
 	if (stored.size() >= 4 && stored[0] == '$' && stored[1] == '2' &&
@@ -239,19 +239,6 @@ MutationResult update_server_status(opennova::db::Database &db,
 		return m;
 	} catch (const opennova::db::SqliteError &e) {
 		return err("db_error", e.what());
-	}
-}
-
-bool has_active_user_session(opennova::db::Database &db, int64_t user_id) {
-	if (user_id == 0) return false;
-	try {
-		auto rows = db.query(
-			"SELECT 1 FROM active_user_sessions WHERE user_id = ? LIMIT 1;",
-			{opennova::db::BindValue(user_id)});
-		return !rows.empty();
-	} catch (const opennova::db::SqliteError &e) {
-		std::fprintf(stderr, "[auth] WARN active session lookup failed: %s\n", e.what());
-		return false;
 	}
 }
 

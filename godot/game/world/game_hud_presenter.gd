@@ -376,17 +376,6 @@ func ensure_game_hud() -> void:
 	_apply_fp_gun_visible()
 
 
-# The string tables the HUD resolves against: the current root's gametext table
-# (weapon Strings.SECTION_WEPDES names), and the per-mission text table (<mission>.bin, falling
-# back to medmssn.bin) for WAC/BMS triggered text.
-# [orig: Game_InitSubsystems @0x4a6cd0 (gametext.bin);
-#  TextResource_LoadMissionTextBin @0x51ed90 (per mission start + medmssn fallback)]
-## Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
-## original rebuilding its HUD info struct each frame. Call once per frame while the
-## player is in-world (the shells gate on their own state).
-## [orig: HUD_BuildEntityInfo @0x4b8440]
-var _perf_probe_enabled := false
-
 # The shared F3 frame-stats board (null outside the game shell): while its
 # Stats tab captures, the tick's phase spans land there as HUD_* slots.
 var _frame_stats: FrameStats = null
@@ -397,16 +386,12 @@ func set_frame_stats(board: FrameStats) -> void:
 	_frame_stats = board
 
 
-## Enables the intentionally costly per-phase clock sampling used by the manual
-## fire probe.
-func set_perf_probe_enabled(enabled: bool) -> void:
-	_perf_probe_enabled = enabled
-
-
+## Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
+## original rebuilding its HUD info struct each frame. Call once per frame while the
+## player is in-world (the shells gate on their own state).
+## [orig: HUD_BuildEntityInfo @0x4b8440]
 func tick(gameplay_input_active: bool = false) -> void:
-	var probe_enabled := _perf_probe_enabled
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
-	var timing := probe_enabled or stats_on
 	if _world == null or not _world.is_loaded():
 		return
 	var sim: Simulation = _world.get_sim()
@@ -473,7 +458,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 		# [orig: HUD_BuildEntityInfo @0x4b85ef — hudInfo+52 += clip when def+88 == 1]
 		reserve = HudPos.folded_reserve(clip, wv.reserve,
 				weapon.clipsize if weapon != null else -1)
-	var probe_t0 := Time.get_ticks_usec() if timing else 0
+	var probe_t0 := Time.get_ticks_usec() if stats_on else 0
 	var scope_card := false
 	var fov_deg := 80.0
 	var binoculars_view_active := false
@@ -508,12 +493,12 @@ func tick(gameplay_input_active: bool = false) -> void:
 		flash_revive_channel = lv.screen_flash_revive_channel
 		hud_overlays_suppressed = lv.hud_overlays_suppressed
 
-	var probe_t1 := Time.get_ticks_usec() if timing else 0
+	var probe_t1 := Time.get_ticks_usec() if stats_on else 0
 	_apply_attach_labels()
 	_apply_friendly_tags()
-	var probe_t2 := Time.get_ticks_usec() if timing else 0
+	var probe_t2 := Time.get_ticks_usec() if stats_on else 0
 	var waypoint := _build_waypoint_entry()
-	var probe_t3 := Time.get_ticks_usec() if timing else 0
+	var probe_t3 := Time.get_ticks_usec() if stats_on else 0
 	# The typed per-frame state feed — the shell's mirror of the original
 	# rebuilding its 576-byte HUD info struct each frame.
 	# [orig: HUD_BuildEntityInfo @0x4b8440]
@@ -653,7 +638,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# The addressed witness lives in docs/interface/hud-re.md.
 	_game_hud.self_modulate = Color(1.0, 1.0, 1.0, 0.0) if hud_overlays_suppressed \
 			else Color.WHITE
-	var probe_t4 := Time.get_ticks_usec() if timing else 0
+	var probe_t4 := Time.get_ticks_usec() if stats_on else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
@@ -674,14 +659,13 @@ func tick(gameplay_input_active: bool = false) -> void:
 	_lfp_panel.update(_game_hud, sim, _hud_ticks())
 	_scoreboard.update(_game_hud, _world, hud_keys_chorded, gameplay_input_active,
 			_hud_ticks())
-	if timing:
+	if stats_on:
 		var probe_t5 := Time.get_ticks_usec()
-		if stats_on:
-			_frame_stats.add(FrameStats.HUD_SCALARS, probe_t1 - probe_t0)
-			_frame_stats.add(FrameStats.HUD_ATTACH, probe_t2 - probe_t1)
-			_frame_stats.add(FrameStats.HUD_WAYPOINT, probe_t3 - probe_t2)
-			_frame_stats.add(FrameStats.HUD_INFO, probe_t4 - probe_t3)
-			_frame_stats.add(FrameStats.HUD_FLUSH, probe_t5 - probe_t4)
+		_frame_stats.add(FrameStats.HUD_SCALARS, probe_t1 - probe_t0)
+		_frame_stats.add(FrameStats.HUD_ATTACH, probe_t2 - probe_t1)
+		_frame_stats.add(FrameStats.HUD_WAYPOINT, probe_t3 - probe_t2)
+		_frame_stats.add(FrameStats.HUD_INFO, probe_t4 - probe_t3)
+		_frame_stats.add(FrameStats.HUD_FLUSH, probe_t5 - probe_t4)
 
 
 # The HUD's presentation clock driving the fade/message timers — the engine's
@@ -1124,13 +1108,6 @@ func poll_goals_edge(goals_down: bool, chorded: bool, active: bool) -> void:
 	if goals_down and not _goals_was_down and active and not chorded:
 		toggle_objectives()
 	_goals_was_down = goals_down
-
-
-## The live per-player sight-scale index (the engine default without a HUD).
-func sight_scale_index() -> int:
-	if _game_hud == null:
-		return HudOverlay.sight_scale_index_default()
-	return _game_hud.get_sight_scale_index()
 
 
 ## The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,

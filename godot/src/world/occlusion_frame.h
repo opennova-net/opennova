@@ -170,7 +170,6 @@ public:
 	// toggle edge (set_perf_probe_enabled): the manual A/B probe shares
 	// apply_frame's clock reads with the F3 Stats capture.
 	void set_probe_timing(bool p_enabled) { probe_timing_ = p_enabled; }
-	bool is_probe_timing() const { return probe_timing_; }
 
 protected:
 	static void _bind_methods();

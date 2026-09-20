@@ -5,30 +5,19 @@
 fixtures/** filter=lfs diff=lfs merge=lfs -text -eol
 screenshots/** filter=lfs diff=lfs merge=lfs -text -eol
 
-# Windows-style text configs that need CRLF preserved.
-*.env text eol=crlf whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
-*.ENV text eol=crlf whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
-
-# Binary game assets — must come AFTER any *.ext text rules above so the
-# subtree exception wins (gitattributes uses last-match precedence).
+# Binary game assets.
 apps/novaworld_server/static/** -text -eol
 
-# Deploy env files are read inside Linux containers — keep them LF, not the
-# CRLF the *.env rule above would impose. Last-match precedence wins.
-deploy/env/*.env text eol=lf
-
-# Tracked Markdown docs + .gitignore under fixtures/ are plain text, not LFS
-# binaries — last-match precedence pulls them back out of the fixtures/** LFS
-# rule above (git must read .gitignore as text).
+# Tracked Markdown docs under fixtures/ are plain text, not LFS binaries —
+# last-match precedence pulls them back out of the fixtures/** LFS rule above.
 fixtures/**/*.md text eol=lf filter= diff= merge=
-fixtures/**/.gitignore text eol=lf filter= diff= merge=
 
 # Plain-text fixtures are plain git blobs so they diff and review normally;
 # only binary fixtures ride LFS (scripts/lint/fixture_lint.py judges by
 # content). They keep `-text -eol`, never eol=lf: the retail parsers are not
 # LF-tolerant and the minted files are
 # byte-guarded by their generators, so git must not normalise them in either
-# direction. Last-match precedence: these must follow fixtures/** and *.env.
+# direction. Last-match precedence: these must follow fixtures/**.
 fixtures/**/*.adm -text -eol filter= diff= merge=
 fixtures/**/*.def -text -eol filter= diff= merge=
 fixtures/**/*.env -text -eol filter= diff= merge=
@@ -42,7 +31,6 @@ fixtures/**/*.ptl -text -eol filter= diff= merge=
 fixtures/**/*.ptu -text -eol filter= diff= merge=
 fixtures/**/*.trn -text -eol filter= diff= merge=
 fixtures/**/*.txt -text -eol filter= diff= merge=
-fixtures/**/*.wac -text -eol filter= diff= merge=
 
 # The render-evidence manifests and READMEs under screenshots/ are plain text
 # the docs link into — same exception as fixtures/ above, or GitHub renders

@@ -14,7 +14,7 @@ using namespace opennova::def;
 namespace opennova::world {
 
 // engine/runtime/world mirrors these DEF_* bits beside their consumers (world stays
-// def-parser-free). npruntime legally sees both headers, so this TU pins every
+// def-parser-free). inmatch legally sees both headers, so this TU pins every
 // mirror to the canonical def.h value; renumbering either side breaks the build.
 static_assert(static_cast<uint32_t>(world::weapon_flag::kScoped) == DEF_WEAPON_FLAG_SCOPED);
 static_assert(static_cast<uint32_t>(world::weapon_flag::kSighted) == DEF_WEAPON_FLAG_SIGHTED);

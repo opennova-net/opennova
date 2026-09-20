@@ -8,7 +8,6 @@ const CARRIER_GRAPHIC := "Dblkhwk1"
 const CHILD_TYPE_ID := 1871
 const ANCHOR_NAMES := ["ewep01", "ewep02"]
 const DBUGGY_ITEM_ID := 101291
-const DBUGGY_TYPE_ID := 1291
 const DBUGGY_GRAPHIC := "Dbuggy1"
 const MRK5_ITEM_ID := 101299
 const MRK5_TYPE_ID := 1299

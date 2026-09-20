@@ -22,7 +22,6 @@ public:
 	void set_name(const String &p_name) { name_ = p_name; }
 	int get_depth() const { return depth_; }
 	void set_depth(int p_depth) { depth_ = p_depth; }
-	int64_t get_start_us() const { return start_us_; }
 	void set_start_us(int64_t p_value) { start_us_ = p_value; }
 	int64_t get_end_us() const { return end_us_; }
 	void set_end_us(int64_t p_value) { end_us_ = p_value; }

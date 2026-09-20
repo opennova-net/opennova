@@ -1172,10 +1172,9 @@ target_link_libraries(trn_config_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(trn_config_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME trn_config_roundtrip COMMAND trn_config_roundtrip_test)
 
-# Terrain world->source coordinate transform kernel (engine/runtime/terrain/coords).
-# Characterizes the runtime resolve_world_sample formula plus the editor-mode
-# guard divergences (bounds-reject, id-clamp, local-clamp) ported from
-# Shared runtime and bounds-checked terrain coordinate transforms.
+# Terrain world->source coordinate transform kernel
+# (engine/runtime/terrain_query/coords.h): the shared runtime and bounds-checked
+# terrain coordinate transforms.
 add_executable(coords_test terrain/coords_test.cpp)
 target_link_libraries(coords_test PRIVATE opennova_runtime)
 target_include_directories(coords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1218,7 +1217,7 @@ target_link_libraries(minimal_particle_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_particle_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_particle_gen COMMAND minimal_particle_gen_test)
 
-# Particle (.ptl) tests. Format half (engine/formats/ptl: model/parser/writer/
+# Particle (.ptl) tests. Format half (engine/formats/particle: model/parser/writer/
 # tables) links opennova_formats; sim half (engine/runtime/particle: emitter +
 # effect scene) links opennova_runtime. Witness matrix:
 # docs/particles/ptl-format-re.md (CParticleDef_ParseFromConfigMap @ 0x5ed210,

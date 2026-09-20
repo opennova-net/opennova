@@ -445,6 +445,7 @@ void DevTools::set_simulation(const Ref<Simulation> &p_simulation) {
 	last_environment_push_ms_ = -1;
 	last_ai_push_ms_ = -1;
 	last_rays_push_ms_ = -1;
+	rays_recording_ = false; // a fresh world starts with the capture off
 	last_physics_push_ms_ = -1;
 	// A packed handle names a slot, not an entity: the selection never crosses
 	// from one world to the next.
@@ -861,10 +862,16 @@ void DevTools::apply_rays_requests() {
 
 // Push the ray-capture record while the Rays window shows, on its 0.25 s
 // cadence: counts + filter state through Simulation::native_rays_snapshot —
-// no Variant round-trip (ADR 0042 d6).
+// no Variant round-trip (ADR 0042 d6). Recording follows the window, so the
+// capture costs nothing while it is hidden.
 void DevTools::push_rays_snapshot() {
 	Simulation *simulation_ = simulation();
-	if (simulation_ == nullptr || !tools_->needs_rays_snapshot()) {
+	const bool shown = simulation_ != nullptr && tools_->needs_rays_snapshot();
+	if (simulation_ != nullptr && shown != rays_recording_) {
+		simulation_->set_ray_debug_recording(shown);
+		rays_recording_ = shown;
+	}
+	if (!shown) {
 		last_rays_push_ms_ = -1;
 		return;
 	}

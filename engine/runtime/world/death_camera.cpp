@@ -2,7 +2,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <base/io/fixed.h>
 #include <base/io/bam.h>
 

@@ -1,10 +1,10 @@
 #include <runtime/devtools/weapon_window.h>
+#include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 
 #include <imgui.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -82,16 +82,6 @@ bool action_button(const char *label, const char *block) {
 // Case-insensitive ASCII compare. The clip-variant rings key on a LOWERCASED
 // name while an ACTION row authors whatever case it likes, so the picker's
 // resolve check has to match the way the runtime itself looks a clip up.
-bool iequals_ascii(const std::string &a, const std::string &b) {
-	if (a.size() != b.size()) return false;
-	for (size_t i = 0; i < a.size(); ++i) {
-		const unsigned char ca = static_cast<unsigned char>(a[i]);
-		const unsigned char cb = static_cast<unsigned char>(b[i]);
-		if (std::tolower(ca) != std::tolower(cb)) return false;
-	}
-	return true;
-}
-
 // The coarsest label step that still leaves at least ~72 px between labels.
 double ruler_step(float ppt) {
 	static const double kSteps[] = {1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000};
@@ -1161,7 +1151,7 @@ void WeaponWindow::draw_properties() {
 			ImGui::SameLine();
 			if (ImGui::BeginCombo("##pick", "", ImGuiComboFlags_NoPreview)) {
 				for (const std::string &name : *catalog) {
-					if (ImGui::Selectable(name.c_str(), iequals_ascii(name, current))) {
+					if (ImGui::Selectable(name.c_str(), strutil::iequals(name, current))) {
 						queue_text(id, field, name.c_str());
 					}
 				}
@@ -1172,7 +1162,7 @@ void WeaponWindow::draw_properties() {
 			ImGui::SameLine();
 			bool known = false;
 			for (const std::string &name : *catalog) {
-				if (iequals_ascii(name, current)) {
+				if (strutil::iequals(name, current)) {
 					known = true;
 					break;
 				}

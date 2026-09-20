@@ -7664,10 +7664,8 @@ round and move-group retirement. Those two fields are an **expansion
 override**: base JO's `ammo.def` authors `max_age 30` / `velocity 30`, and
 `revx02`'s `AMMO.DEF` re-authors them to `40` / `20`, so which pair a session
 sees is a property of the mount order (`TrcrID 1875` and the five-second
-`arm_age` are identical in both). `fixtures/def/ammo.def` stays a byte-exact
-copy of the base JO file and its regression pins the base pair; the expansion
-pair is witnessed here rather than by editing the retail extract
-(docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
+`arm_age` are identical in both). The retail `ammo.def` is no longer a tracked
+fixture (it moved to the reference-assets mount); both pairs are witnessed here.
 
 Ammo pairs intern by name in `WeaponDef_ResolveAllReferences @ 0x540270`:
 `g_ammo_satchel/satchelboom/claymore/claymoreshrapnel/claymorekillzone/AV_Mine/

@@ -74,7 +74,7 @@ inline void write_f32_le(uint8_t *p, float f)
 // Append-to-vector writers. The pointer writers above need the caller to have
 // already sized the buffer; every streaming encoder instead grows a
 // std::vector as it goes, which is why the same push_back chain kept being
-// re-rolled per lib (npwire's Writer, npruntime's put_u16/put_u32, ...).
+// re-rolled per lib (npwire's Writer, inmatch's put_u16/put_u32, ...).
 inline void append_u8(std::vector<uint8_t> &out, uint8_t v)
 {
     out.push_back(v);

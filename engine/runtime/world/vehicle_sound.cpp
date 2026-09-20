@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 
+#include <base/io/fixed.h>
 #include <runtime/audio/sound_profile.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/geom.h>
@@ -22,7 +23,7 @@ constexpr uint8_t kIdleLane = 0;
 constexpr uint8_t kForwardLane = 10;
 constexpr uint8_t kReverseLane = 20;
 constexpr uint16_t kEmitterLifetimeTicks = 30;
-constexpr int32_t kUnityQ16 = 0x10000;
+constexpr int32_t kUnityQ16 = io::kFp16OneInt;
 constexpr uint16_t kFullVolumeQ8_8 = 0xFFFF;
 
 int64_t magnitude_i32(int32_t value) {

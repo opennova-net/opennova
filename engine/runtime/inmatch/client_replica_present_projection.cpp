@@ -1,5 +1,6 @@
 #include <runtime/inmatch/client_replica_present_projection.h>
 
+#include <base/io/fixed.h>
 #include <runtime/inmatch/client_replica_present.h>
 #include <runtime/world/entity.h>
 
@@ -8,7 +9,7 @@
 namespace opennova::inmatch {
 
 namespace {
-constexpr double kFixed16 = 65536.0;
+constexpr double kFixed16 = io::kFp16OneD;
 } // namespace
 
 void initialize_client_replica_present_row(float *row) {

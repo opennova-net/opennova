@@ -4,7 +4,6 @@
 #include <runtime/inmatch/server_message_dispatch.h> // build_player_list_message
 #include <base/io/perf_clock.h>
 
-#include <cmath>
 #include <cstdint>
 #include <vector>
 

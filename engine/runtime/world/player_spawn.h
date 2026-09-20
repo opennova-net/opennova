@@ -1,5 +1,5 @@
 // The host's own-player spawn — a faithful subset of the §5.2b host player-spawn machine
-// (docs/net/novaworld-net-re.md §5.2b/§5.38), in engine/runtime/world so the netsim/Phase-2 listen
+// (docs/net/novaworld-net-re.md §5.2b/§5.38), in engine/runtime/world so the runtime/replication/Phase-2 listen
 // server can spawn the player without a engine/runtime/mission dependency. The player is an
 // authoritative pool-0 World entity (ADR 0012), indistinguishable from any other simulated
 // entity, driven by the SAME infantry motor as an NPC but ordered from input, not AI think.
@@ -20,7 +20,7 @@ inline constexpr int32_t kPlayerInfantryTypeId = 0x14B9;
 // slots — a same-map retail↔retail ASH_I5A capture (2026-07-01) shows the listen host's own player at
 // slot 0 and the joiner at slot 1 (roster slot N -> entity slot N when the mission has no pool-0 AI).
 // The prior value 4 (a mistaken "low slots reserved" assumption) offset every player by +4 vs retail.
-// Canonical home for both the npruntime host (inmatch::kRetailPlayerMinEntitySlot re-exports this) and the
+// Canonical home for both the inmatch host (inmatch::kRetailPlayerMinEntitySlot re-exports this) and the
 // Godot listen host (simulation.cpp). [orig: §5.2b spawn placement; Server_PlayerAdd @0x51cbc0]
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = 0;
 
@@ -47,7 +47,7 @@ struct PlayerSpawn {
     // The spawn seed MUST carry it, or the World entity keeps player_class 0 (which build_pool0 masks to 8
     // on the wire, but the host's own logic then reads 0). [net-re §5.2b; host-diag 2026-07-01]
     uint8_t player_class = 8;
-    // Equipped-weapon AdmDef index (entity+0x2B0) — the 0x0A off-16 echo default. The npruntime
+    // Equipped-weapon AdmDef index (entity+0x2B0) — the 0x0A off-16 echo default. The inmatch
     // spawn resolves the WPN_M4AUTO table index when the armory is fed [orig: PlayerClass_InitEntity
     // @0x4B1116 resolves by name]; 0xFF = none (table-less hosts). (D-NET-143)
     uint8_t equipped_adm_index = 0xFF;
@@ -74,7 +74,7 @@ EntityHandle spawn_player(World &world, const PlayerSpawn &spawn);
 // as spawn_player, EXCEPT it is NOT the host's own player: inf.is_local_player stays false and
 // World::cached.local_player is NOT republished (the host keeps its own player as the local
 // one). The peer is a full pool-0 0x14B9 entity the host SNAPs from the joiner's C2S 0x0C
-// uplinks (netsim EntityWireBridge::apply_player_intent) and the motor skips once the entity is
+// uplinks (replication EntityWireBridge::apply_player_intent) and the motor skips once the entity is
 // net-snapped. Pass a distinct net_id per joiner (the default 0xFFF0 is the host's own player).
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0 registers a
 // joined player's entity without assigning g_local_player_entity; net-re §5.2a/§5.2b.]

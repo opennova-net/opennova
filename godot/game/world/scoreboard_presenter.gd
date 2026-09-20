@@ -60,7 +60,7 @@ func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool,
 	if table != null:
 		if table.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_KILLLIST"):
 			strings["title"] = table.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_KILLLIST")
-		# The key map is retail's own, engine-owned (npwire game_type.h
+		# The key map is retail's own, engine-owned (base/gameprofile game_type.h
 		# overlay_label_key via NetProtocol) — this lane only looks it up.
 		var label_key := NetProtocol.game_type_overlay_label_key(game_type)
 		if label_key != "" and table.has_string_in_section(Strings.SECTION_OVERLAYS, label_key):

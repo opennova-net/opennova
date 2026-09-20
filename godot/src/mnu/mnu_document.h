@@ -147,7 +147,6 @@ public:
 	PackedInt32Array get_screen_ids() const;
 	int get_screen_root_id(int p_screen_id) const;
 	bool is_screen(int p_id) const;
-	bool widget_exists(int p_id) const;
 	int get_parent_id(int p_id) const;
 	PackedInt32Array get_child_ids(int p_id) const;
 	int get_widget_type(int p_id) const; // WidgetType, or -1 for a screen
@@ -210,7 +209,6 @@ public:
 	int get_widget_group(int p_id) const;
 
 	// Native access for the loader/saver.
-	void set_native(const opennova::mnu::Document &p_doc);
 	const opennova::mnu::Document &get_native() const { return doc_; }
 };
 

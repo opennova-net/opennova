@@ -119,8 +119,8 @@ from `CUIElement_ParseXMLDefinition @ 0x648ada`) — menu-slice grill scope.
 `MissionAudio` loads one merged chain instead: co-named bank first (it carries the dialog
 voices), then the global slots in the engine's order. The slot table itself is native — 
 `audio::global_bank_chain` (engine/runtime/audio bank_chain.h, S13 close-out 2026-08-08)
-returns the ordered names with the expansion pair folded in when one is mounted; the shell
-iterates it via `AmbientMixer.global_bank_chain` (ctest `audio_bank_chain` pins the
+returns the ordered names with the expansion pair folded in when one is mounted;
+`MissionAudio` iterates it directly (ctest `audio_bank_chain` pins the
 order both ways). Divergences from the original, accepted and documented:
 
 - **D-SND-1 (bank scope; PERMANENT 2026-08-29, ADR 0022 register):** the engine scopes the co-named bank to dialog playback; we keep it
