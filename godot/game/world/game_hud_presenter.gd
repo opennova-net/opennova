@@ -191,6 +191,7 @@ func teardown() -> void:
 		_game_hud.queue_free()
 		_game_hud = null
 	_inset_scope = null
+	_sync_second_scene_camera()
 	_sights_card = null
 	_scope_circle_mask = null
 	_view_effects = null
@@ -220,6 +221,19 @@ func _on_minimap_water_changed(mask: ImageTexture) -> void:
 		return
 	_game_hud.set_minimap_terrain(
 			_world.get_terrain_data() if _world != null else null, mask)
+
+
+## Hand the world's particle renderer the weapon Inset pass's camera, or null
+## while that pass is not rendering (scope down, HUD torn down): the original
+## renders the aperture through its one scene routine, particle passes
+## included, so the second view needs the world's particles compiled for its
+## own eye. A world that unloaded has no effect world left to tell.
+func _sync_second_scene_camera() -> void:
+	var effects: EffectWorld = _world.get_effect_world() if _world != null else null
+	if effects == null:
+		return
+	effects.set_second_scene_camera(
+			_inset_scope.get_active_render_camera() if _inset_scope != null else null)
 
 
 ## The USER crosshair options; cache each even before the lazy HUD exists,
@@ -590,6 +604,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var combat_camera := _game_hud.get_viewport().get_camera_3d()
 	if _inset_scope != null:
 		_inset_scope.update_view(lv, combat_camera, _aspect_mode)
+	_sync_second_scene_camera()
 	_game_hud.set_combat_state(lv,
 			combat_camera.global_transform if combat_camera != null else Transform3D.IDENTITY,
 			hud_view_projection(combat_camera) if combat_camera != null else Projection.IDENTITY,

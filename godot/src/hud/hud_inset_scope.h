@@ -22,6 +22,10 @@ public:
 	void update_view(const Ref<PlayerLocalView> &view, Camera3D *source, int aspect_mode);
 	bool is_scope_active() const { return active_; }
 	SubViewport *get_render_viewport() const { return target_; }
+	// The second scene pass's camera while that pass renders, null otherwise
+	// (scope down, no valid ring geometry, or hidden in tree): the view the
+	// world's particle renderer compiles its second scene pair for.
+	Camera3D *get_active_render_camera() const;
 	Rect2 get_render_bounds() const;
 	void _draw() override;
 };

@@ -102,17 +102,23 @@ listen-host queue, including repeated return switches and distinct depleted
 cannon/coax ammunition. The prior preservation check now uses a movement packet,
 which actually belongs to the later decoder. It failed before the fix.
 
-`godot/tests/tank_weapon_switch_test.gd` loads JOTAC's `07TR.bms`, boards the
-M1A1 gunner seat, and drives three action-6 switches through the real simulation
-and `LocalPlayerPresenter`. It checks the selected weapon, independent ammo,
-HUD definition and authored sight card after switching. Its T80 case places
-an unoccupied installed T80 nearby because the mission's original T80 targets
-have enemy crews. Both cases pass headless and with D3D12 (65 assertions per run). The D3D12
-run injects real right-button press/release events through the default binding
-and input router; the headless run uses the action-6 request seam. No retail assets are stored
-in the repository.
+`godot/tests/mounted_weapon_switch_test.gd` loads the installed `07TR.bms`,
+places each candidate carrier that authors a designated-G child (`addeweapG`)
+unoccupied beside the authored M1A1, boards the seat that borrows that child
+and drives three action-6 switches through the real simulation and
+`LocalPlayerPresenter`. It checks the selected weapon, independent ammo, HUD
+definition and authored sight card after each switch, reading both weapon
+names from the installed definitions. Stock JO:CA/Escalation authors the
+attachment on the Apache and the Ka-52 (the chin gun against the helicopter's
+own rockets), so the CI data runs the whole scenario (76 assertions, headless
+and D3D12); JOTAC adds its M1A1 and T80 (the cannon against the coaxial gun,
+151 assertions). The D3D12 run injects real right-button press/release events
+through the default binding and input router; the headless run uses the
+action-6 request seam, since headless Godot cannot capture the mouse. An
+install that authors no such carrier fails the test rather than pending; only
+a missing `OPENNOVA_JO_DIR` pends. The carriers sit 40 units north of the
+authored tank: the lake twelve units east of it drowns a placed helicopter
+the moment it is claimed. No retail assets are stored in the repository.
 
-This installed test requires an authored G attachment. JOTAC supplies it;
-the stock JO:CA/Escalation tanks do not, so those optional cases pend on stock
-assets. The native `host_role` regression always runs. The original scope
-fallback and the data's ordinary roof-gun seats are unchanged.
+The native `host_role` regression always runs. The original scope fallback and
+the data's ordinary roof-gun seats are unchanged.
